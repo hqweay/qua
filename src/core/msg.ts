@@ -265,6 +265,7 @@ export const MSG = {
   'ui.todo.toggle': '点击切换完成',
   'ui.atom.unknown': '未知原子',
   'ui.atom.pageTitle': '引用：{label}（点击看信息）',
+  'ui.atom.tagTitle': '标签：#{label}（点击看信息）',
   'ui.atom.imageTitle': '图片：{label}（点击看资产信息）',
   'ui.virt.placeholder': '⋯ 窗口外 {count} 行（虚拟化，未挂 DOM）',
 
@@ -341,6 +342,9 @@ export const MSG = {
   'ui.toast.virtOn': '虚拟化 on（窗口半径 {radius} 行）：DOM 节点数会小于块数',
   'ui.toast.virtOff': '虚拟化 off：全部块都挂 DOM',
   'ui.toast.atomsLost': '行内原子失效：{labels}（引用目标被删掉了）',
+  'ui.toast.tagAdded': '已打标签 #{tag}',
+  'ui.toast.tagCreated': '新建标签 #{tag} 并打上',
+  'ui.toast.tagEmpty': '标签名是空的',
 
   /* ------------------------------------------------------ 演示数据的小文案（假数据） */
   'ui.arg.defaultTag': '标签',

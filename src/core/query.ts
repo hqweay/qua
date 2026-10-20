@@ -12,6 +12,7 @@
 import type { Block } from './model.ts'
 import type { Atom } from './annotations.ts'
 import { findPath } from './tree.ts'
+import { findTagByName, tagMemberIds } from './tags.ts'
 
 /* ------------------------------------------------------------ 条件形状 */
 
@@ -87,25 +88,24 @@ export function refSourceIds(atoms: readonly Atom[], targetId: string): Set<stri
 }
 
 /**
- * 标签：demo 里 `#tag` 还是文本（71.4 承认这是债），所以按**词边界**匹配 `#tag`。
- * ⚠️ 规范化只有这一处（71.4 边界：大小写/空白只允许一个定义点）：比较前统一 `toLowerCase`。
+ * 标签条件：**按边判定**，不扫文本。
+ *
+ * ⚠️ 以前这里是正则扫 `b.text`（`#tag` 当作文本匹配）—— 那是 71.4 承认的「第二套解析」：
+ *    「看起来是标签的文本」与「真的是一条标签边」成了两件事，改名也不同步。
+ *    现在标签＝指向标签块的边，判定只在 `core/tags.ts` 里发生。
+ *
+ * ⚠️ 名字→标签块只解析一次（`collectTags`），不在 `matches` 里逐个块查，
+ *    否则一次查询会退化成 O(块数 × 条件数) 次森林遍历。
  */
-export function hasTag(text: string, tag: string): boolean {
-  const want = tag.replace(/^#/, '').toLowerCase()
-  if (!want) return false
-  const re = new RegExp(`#${want.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i')
-  return re.test(text)
-}
-
-function matches(node: QueryNode, b: Block, refs: ReadonlySet<string>): boolean {
+function matches(node: QueryNode, b: Block, refs: ReadonlySet<string>, tags: ReadonlySet<string>): boolean {
   // ⚠️ `journal` **优先判**：它是「范围」不是「谓词」。若别的键也在同一个对象上（形状写歪了），
   //    先看 `all` 会让范围条件被当成空组合（恒真）——那种退化是静默的，测试也未必抓得住。
   if ('journal' in node) return true
-  if ('all' in node) return node.all.every((n) => matches(n, b, refs))
-  if ('any' in node) return node.any.some((n) => matches(n, b, refs))
-  if ('not' in node) return !matches(node.not, b, refs)
+  if ('all' in node) return node.all.every((n) => matches(n, b, refs, tags))
+  if ('any' in node) return node.any.some((n) => matches(n, b, refs, tags))
+  if ('not' in node) return !matches(node.not, b, refs, tags)
   if ('ref' in node) return refs.has(b.id)
-  if ('tag' in node) return hasTag(b.text, node.tag)
+  if ('tag' in node) return tags.has(b.id)
   if ('text' in node) return b.text.includes(node.text)
   const cur = b.todo ?? 'none'
   return node.todo === cur
@@ -126,6 +126,7 @@ export function findJournal(blocks: readonly Block[], date: string): Block | und
  */
 export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
   const refs = collectRefs(spec.where, input.atoms)
+  const tags = collectTags(spec.where, input.blocks, input.atoms)
   /** 范围：`subtree` ⇒ 只收 anchor 之下（含 anchor 自己）；`all` ⇒ 整片森林 */
   let roots: readonly Block[] = input.blocks
   const anchor = spec.scope !== 'all' && input.anchorId ? findById(input.blocks, input.anchorId) : undefined
@@ -141,7 +142,7 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
   const hits: QueryHit[] = []
   walk(roots, (b, ancestors) => {
     if (journalDate && b.role === 'journal') return
-    if (!matches(spec.where, b, refs)) return
+    if (!matches(spec.where, b, refs, tags)) return
     if (spec.todo && (b.todo ?? 'none') !== spec.todo) return
     hits.push({ blockId: b.id, path: ancestors.map((a) => a.id) })
   })
@@ -156,6 +157,27 @@ function collectRefs(node: QueryNode, atoms: readonly Atom[]): Set<string> {
     else if ('any' in n) n.any.forEach(visit)
     else if ('not' in n) visit(n.not)
     else if ('ref' in n) for (const id of refSourceIds(atoms, n.ref)) out.add(id)
+  }
+  visit(node)
+  return out
+}
+
+/**
+ * 满足 `tag` 条件的**块 id** 集合（一次性算出，理由同 `collectRefs`）。
+ *
+ * ⚠️ 标签名先解析成标签块 id，再按边查：认 id 不认名字（71.3）⇒ 标签改名不影响查询语义。
+ *    名字解析不到 ⇒ **空集**（那个标签还不存在，自然没有块带它）—— 不是「当文本搜」。
+ */
+function collectTags(node: QueryNode, forest: readonly Block[], atoms: readonly Atom[]): Set<string> {
+  const out = new Set<string>()
+  const visit = (n: QueryNode): void => {
+    if ('all' in n) n.all.forEach(visit)
+    else if ('any' in n) n.any.forEach(visit)
+    else if ('not' in n) visit(n.not)
+    else if ('tag' in n) {
+      const tag = findTagByName(forest, n.tag)
+      if (tag) for (const id of tagMemberIds(tag.id, atoms)) out.add(id)
+    }
   }
   visit(node)
   return out

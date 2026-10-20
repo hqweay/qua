@@ -83,6 +83,14 @@ export interface App {
   /** 把焦点交给页名（**UI 归装配层**：命令只说「要改名」，不碰 `document` — 59 ） */
   focusTitle(): void
   showRefPicker(): void
+  /**
+   * **打标签**＝插一条指向「标签块」的边（`ensureTag` 找不到就先建那个块）。
+   *
+   * ⚠️ 为什么整个动作要一门面方法、而不是 handler 里「建块 ＋ insertAtom」两步：
+   *    「找到或创建标签块」要**写森林**，而森林由装配层持有；handler 拿它不到（59 ）。
+   *    拆成两步又会让「建了标签但没插上边」这种半截状态成为可能。
+   */
+  insertTag(tag: string): void
   /* 日记（日期只读、一天一个、物化幂等） */
   /** 回到今日（`date` 省略＝本地今天）；没有就**幂等物化**一个 */
   journalToday(date?: string): void

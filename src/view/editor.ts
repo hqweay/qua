@@ -37,7 +37,7 @@ import {
   normalizeMarks,
   outdentBlock,
   pruneToText,
-  refSourceIds,
+  edgeSourceIds,
   remapAnchors,
   removeMarkRange,
   selToTextRanges,
@@ -946,7 +946,9 @@ export class BlockEditor {
    */
   private renderRefSources(id: string): void {
     const mine = new Set(flatten(this.doc).map((b) => b.id))
-    for (const srcId of refSourceIds(this.atoms, id)) {
+    // ⚠️ 用 `edgeSourceIds` 而不是 `refSourceIds`：标签也是指向边，
+    //    改标签块的名字 ⇒ 显示 `#旧名` 的那些块同样要重画。
+    for (const srcId of edgeSourceIds(this.atoms, id)) {
       if (!mine.has(srcId) || srcId === id) continue
       if (this.blockEl(srcId)) this.renderBlock(srcId)
     }
@@ -1359,7 +1361,16 @@ export class BlockEditor {
       const ch = { from: a.start, to: a.end, insert: '' }
       loc.block.text = loc.block.text.slice(0, a.start) + loc.block.text.slice(a.end)
       this.marks = mapMarks(this.marks, a.blockId, ch)
-      this.atoms = mapAtoms(this.atoms, a.blockId, ch).kept
+      /**
+       * ⚠️ 必须**显式丢掉这个原子**，不能只交给 `mapAtoms(...).kept`。
+       *
+       * 原因：原子恒占 1 格，删掉它占的那一格后，通用粘性映射（两端各有 bias）
+       * 会把它的区间压到一个长度仍为 1 的位置上 ⇒ **文本里已经没有占位符了，
+       * 原子记录却还活着**。表现是「引用框没了，但那条边还在」—— 对标签来说就是
+       * 「删了 `#标签`，成员列表里却还有它」（本轮 T40 实测抓到）。
+       * ⇒ 「占位符没了」与「原子没了」必须一起发生，不能有中间态。
+       */
+      this.atoms = mapAtoms(this.atoms, a.blockId, ch).kept.filter((x) => x.id !== atomId)
     }
     this.undo.record(before, 'delete', Date.now())
     this.renderAll()

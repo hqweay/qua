@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { ensureFirstBlock, ensureTodayJournal, favoritesContainers, findInForest, findPath, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, isJournal, isQueryBlock, journalDate, journalFeedDays, prop, resolveRef, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { ensureFirstBlock, ensureTodayJournal, favoritesContainers, findInForest, findPath, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, isJournal, isQueryBlock, journalDate, journalFeedDays, prop, resolveRef, tagMemberIds, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
@@ -234,7 +234,7 @@ function warnSaveFailed(error: unknown): void {
 
 /**
  * **提交一次**（异步、批次）：经过 `StoragePort`，失败如实返回。
- * 上层只认「这批改动落盘了没有」——不认「整份库写进去了没有」（承 71.5 第 3 条）。
+ * 上层只认「这批改动落盘了没有」——不认「整份库写进去了没有」。
  */
 function persist(changes: Change[]) {
   if (readOnly) return Promise.resolve({ ok: true as const })
@@ -536,6 +536,8 @@ function firstEditableRoot(first: Block | undefined): Block | null {
  */
 const pageDeps: PageDeps = {
   blocks: () => ws.blocks,
+  // ⚠️ 每次取**当前**活动编辑器（正文 vs 反链 footer 会切换）⇒ 标签打在用户正在编辑的那一行
+  insertAtom: (kind, opts) => ed.insertAtom(kind, opts),
   activeId: () => ws.activeId,
   setActiveId: (id) => {
     ws.activeId = id
@@ -870,7 +872,7 @@ function renderQueryView(): void {
  * ⚠️ 入口按钮原先在 `index.html` 里带 `hidden` 且**没有任何代码取消它** ⇒ 是个死入口。
  *    现在让它默认可见，否则这些开关搬进来也点不到。
  * ⚠️ 命令仍然经 `registry.invoke`（不是直改 `prefs()`）：主题是真命令，
- * 走命令面才能撤销/审计/被机器接口调到（承 59 ／60 B）。
+ * 走命令面才能撤销/审计/被机器接口调到（命令是唯一写入口，UI 只是它的一个调用者）。
  * ⚠️ **皮肤三行已删**：内建只有一种样式，`core.view/set-skin` 整条命令撤掉。
  */
 stateMenuBtn.addEventListener('click', () => {
@@ -932,7 +934,7 @@ function paintStaticCopy(): void {
 }
 
 /**
- * 两条侧槽：**第 1 期右槽没有内容**（承 32 「不加空侧栏」——右槽默认不渲染）。
+ * 两条侧槽：**第 1 期右槽没有内容**（不加空侧栏 ⇒ 右槽默认不渲染）。
  * 左槽装的是「收藏容器块」，内容由 `renderDocks()` 填。
  */
 const dockLeft = mountDockSlot($('dock-left'), {
@@ -1050,6 +1052,21 @@ const api = {
   },
   text() {
     return flatten(mainEd.doc).map((b) => b.text)
+  },
+  /**
+   * **整片森林**（区别于 `blocks()`：那个只给当前视图装载的子树）。
+   * 标签块挂在森林根上、不在当前页里 ⇒ 查「标签存不存在」必须用这个。
+   */
+  allBlocks() {
+    return ws.blocks.map((b) => ({ id: b.id, text: b.text, role: b.role ?? null }))
+  },
+  /** 打了某个标签的块 id（标签的成员列表＝标签块的入向边） */
+  tagMembers(tagId: string) {
+    return [...tagMemberIds(tagId, mainEd.atoms)]
+  },
+  /** 删掉一个行内原子（**连同它占的那一格** ⇒ 那条边就没了） */
+  removeAtom(atomId: string) {
+    mainEd.removeAtom(atomId)
   },
   blocks() {
     return flatten(mainEd.doc).map((b) => ({

@@ -101,13 +101,11 @@ export const HANDLERS: Record<string, Handler> = {
     return true
   },
   'core.editor/insert-tag': (a, app) => {
-    const id = curBlock(app)
-    if (!id) return false
+    if (!curBlock(app)) return false
     const tag = S(a.tag, t('ui.arg.defaultTag'))
-    const off = app.ed.caretOffset()
-    const b = app.ed.doc
-    void b
-    app.ed.editBlock(id, off, off, `#${tag} `)
+    // 整件事在门面里一次做完：ensureTag（可能写森林）＋ insertAtom（写正文）。
+    // 以前这里是 `editBlock(..., '#tag ')` —— 往正文里写**文本**，那不是一条边。
+    app.insertTag(tag)
     return true
   },
   'core.editor/copy-ref': (_a, app) => {

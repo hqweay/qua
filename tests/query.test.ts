@@ -12,7 +12,11 @@ import type { Atom, Block } from '../src/core/index.ts'
 import {
   canonicalSpec,
   findJournal,
-  hasTag,
+  findTagByName,
+  hasTagEdge,
+  mkTagBlock,
+  normalizeTag,
+  tagMemberIds,
   readResult,
   readSpec,
   refreshSpec,
@@ -29,33 +33,74 @@ const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({
   ...extra,
 })
 
-/** #TODO 甲 / #TODO 乙 / 完成 / 无关（前两条带 `#todo` 标签） */
+/**
+ * 甲／乙／丁的子孙／另一个／也 —— 这五块带 `#todo` 标签；丙与「今天的记录」不带。
+ *
+ * ⚠️ 标签现在是**边**（`kind: 'tag'` 的原子），不再是正文里的文本：
+ *    正文里写 `#todo` 只是普通文本，成不了边 —— 这正是本轮要消灭的「第二套解析」。
+ *    ⇒ 所以 fixture 里块的 text 不带 `#todo`，边单独建在 `atoms` 里。
+ */
 function fixture() {
-  const blocks: Block[] = [
+  const todo = mkTagBlock('todo')
+  const forest: Block[] = [
     b('p1', '页面一', {
       role: 'page',
       children: [
-        b('a', '甲 #todo', { todo: 'todo' }),
-        b('b', '乙 #todo', { todo: 'done' }),
+        b('a', '甲', { todo: 'todo' }),
+        b('b', '乙', { todo: 'done' }),
         b('c', '丙没标签'),
-        b('d', '提到丙的块', { children: [b('d1', '甲的子孙 #todo', { todo: 'todo' })] }),
+        b('d', '提到丙的块', { children: [b('d1', '甲的子孙', { todo: 'todo' })] }),
       ],
     }),
-    b('p2', '页面二', { role: 'page', children: [b('e', '另一个 #todo', { todo: 'todo' })] }),
-    b('j1', '', { role: 'journal', props: { _date: '2026-10-20' }, children: [b('j1a', '今天的记录'), b('j1b', '也 #todo')] }),
+    b('p2', '页面二', { role: 'page', children: [b('e', '另一个', { todo: 'todo' })] }),
+    // ⚠️ `j1b` 只有标签、**没有**待办状态：`all[tag, todo]` 那条断言靠它来区分「有标签」与「是待办」
+    b('j1', '', { role: 'journal', props: { _date: '2026-10-20' }, children: [b('j1a', '今天的记录'), b('j1b', '也')] }),
   ]
-  const atoms: Atom[] = [
-    { id: 'at1', kind: 'page', blockId: 'd', start: 2, end: 3, label: '丙', target: { kind: 'page', id: 'c' }, state: 'resolved' } as Atom,
-  ]
-  return { blocks, atoms }
+  const tagged = ['a', 'b', 'd1', 'e', 'j1b']
+  const atoms: Atom[] = tagged.map(
+    (blockId, i) =>
+      ({
+        id: `tg${i}`,
+        kind: 'tag',
+        blockId,
+        start: 0,
+        end: 1,
+        label: 'todo',
+        target: { kind: 'page', id: todo.id },
+      }) as Atom,
+  )
+  atoms.push({
+    id: 'at1',
+    kind: 'page',
+    blockId: 'd',
+    start: 2,
+    end: 3,
+    label: '丙',
+    target: { kind: 'page', id: 'c' },
+  } as Atom)
+  return { blocks: [...forest, todo], atoms, todo }
 }
 
-test('hasTag：按词边界匹配，不误伤前缀相同的标签', () => {
-  assert.equal(hasTag('甲 #todo', 'todo'), true)
-  assert.equal(hasTag('甲 #Todo', 'todo'), true, '大小写只有一个规范化点')
-  assert.equal(hasTag('甲 #todos', 'todo'), false, '#todos 不是 #todo')
-  assert.equal(hasTag('甲 #todo-x', 'todo'), false)
-  assert.equal(hasTag('甲', 'todo'), false)
+test('标签按**边**判定（不再是正则扫文本）：正文里写 #todo 不成边', () => {
+  const { blocks, atoms, todo } = fixture()
+  assert.equal(hasTagEdge('a', todo.id, atoms), true)
+  assert.equal(hasTagEdge('c', todo.id, atoms), false, '丙没打标签')
+  // 正文里那几个字还在（`#todo` 现在只是普通文本），但不产生边
+  const c = blocks.flatMap(function flat(x) { return [x, ...x.children.flatMap(flat)] }).find((x) => x.id === 'c')
+  assert.equal(c?.text.includes('标签'), true)
+  assert.equal(hasTagEdge('c', todo.id, atoms), false)
+})
+
+test('normalizeTag：大小写与空白只有一处口径', () => {
+  assert.equal(normalizeTag('  TODO '), 'todo')
+  assert.equal(normalizeTag('设计'), '设计')
+})
+
+test('findTagByName / tagMemberIds：标签的成员＝指向它的 tag 边', () => {
+  const { blocks, atoms, todo } = fixture()
+  assert.equal(findTagByName(blocks, 'TODO')?.id, todo.id, '按规范化后的名字找')
+  assert.deepEqual([...tagMemberIds(todo.id, atoms)].sort(), ['a', 'b', 'd1', 'e', 'j1b'])
+  assert.equal(findTagByName(blocks, '不存在的标签'), undefined)
 })
 
 test('runQuery：标签条件只命中带标签的块', () => {
@@ -127,8 +172,13 @@ test('refreshSpec：把条件与结果写回块上；丢掉的不再匹配的块
   assert.deepEqual(readSpec(q), spec, '条件要写进 _query')
 
   // 摘掉一个标签后刷新：它应当从结果里消失，并被报成 dropped
-  blocks[0]!.children[0]!.text = '甲（标签没了）'
-  const second = refreshSpec(q, spec, { blocks, atoms })
+  //
+  // ⚠️ 标签现在是**边**，所以「摘掉标签」＝**删掉那条 tag 原子**（不是改正文里的字）。
+  //    这正是本轮改动的落点：以前改文本就能让标签"消失"，那是文本与边不一致的根源。
+  // ⚠️ 必须从**同一份** fixture 里删边：再调一次 `fixture()` 会造出一个新的标签块（新 id），
+  //    于是所有边都指向一个不在 `blocks` 里的标签 ⇒ 全部被判成 dropped（看着像全丢了）。
+  const withoutA = atoms.filter((a) => a.blockId !== 'a')
+  const second = refreshSpec(q, spec, { blocks, atoms: withoutA })
   assert.deepEqual(second.dropped, ['a'])
   assert.ok(!second.hits.some((h) => h.blockId === 'a'))
 })

@@ -60,6 +60,8 @@ export function resolveRef(find: FindBlock, a: Pick<Atom, 'label' | 'target'>): 
   if (!target) return { label: a.label, state: 'dangling' }
   const b = find(target.id)
   if (!b) return { label: a.label, state: 'dangling' }
+  // 标签的显示名＝**不带 `#` 的正文**；`#` 是呈现时加的装饰（`makeAtomEl`），不进正文，
+  // 否则「标签块的正文」与「它在引用里显示的字」就成了两个需要同步的东西。
   return { label: refTitle(b), state: 'resolved' }
 }
 

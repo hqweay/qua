@@ -16,13 +16,15 @@ export type TodoState = 'todo' | 'done'
  * 注册表是**封闭种类 × 开放条目**：这里只列 core 已用到的，插件可注册自有角色。
  */
 /**
- * `page` 页｜`journal` 日记｜`backref` 反链项（右槽默认内容）｜`favorites` 收藏容器块
+ * `page` 页｜`journal` 日记｜`backref` 反链项（右槽默认内容）｜`favorites` 收藏容器块｜`tag` 标签
  *
  * ⚠️ `backref` 是**角色**而不是类型：反链项没有专属渲染行为，只是「一条指向我的引用」。
  * ⚠️ `favorites` 也只是**角色**：容器就是一个普通块（名字 = 正文，内部存一列有序引用边），
  * 没有新实体、没有新数组。
+ * ⚠️ `tag` 同理：标签＝一个带 `tag` 角色的普通块，**任意块皆可当标签**，
+ *    它只是指向边的另一端；不因为叫这个名字就多出一个实体。
  */
-export type Role = 'page' | 'journal' | 'backref' | 'favorites' | 'query'
+export type Role = 'page' | 'journal' | 'backref' | 'favorites' | 'query' | 'tag'
 
 /**
  * 系统属性 id。
