@@ -1,0 +1,508 @@
+/* ---------------------------------------------------------- 块 */
+
+.blk {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ui-gap-4);
+  /* 字号阶梯：根块 lg、子块 md（原型 v5）；行高统一 relaxed */
+  font-size: var(--ui-fs-md);
+  line-height: var(--ui-lh-relaxed);
+  /*
+   * ⚠️ **通用块样式里不许有 padding-block / margin**（S2／：间距所有权归容器）。
+   *    块的垂直留白只来自「渲染器的 inset」与容器的 gap ——
+   *    这里曾经写 `padding: var(--ui-blk-pad-y) 0`，甲皮那 1px 会把每块撑高 2px，
+   *    让「同容器间距全等」看起来对、实际每行的可点区与文本基线都在漂（2026-10-20 断言 A2 抓到）。
+   *    （`--ui-blk-pad-y` 已随三皮肤一起删除）
+   */
+  padding-block: 0;
+  margin-block: 0;
+  min-height: var(--ui-line-h);
+  /* 缩进：扁平 ＋ padding（66 ：不用 DOM 层级） */
+  padding-left: calc(var(--ui-blk-gutter) + var(--depth) * var(--ui-indent));
+  position: relative;
+}
+.blk[data-depth='0'] {
+  font-size: var(--ui-fs-lg);
+}
+.blk .left {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  height: var(--ui-line-h);
+  user-select: none;
+  /* 折叠三角的定位锚：三角要贴**这一行自己的块标**，不能贴整行的最左 */
+  position: relative;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   **可点导轨**（承 66 的扁平 DOM）
+
+   没有 children 容器可挂 `border-left`（那是嵌套 DOM 的写法）⇒ 改成
+   **每行给「活着的祖先」各画一段**，段天然拼成整条线；点哪段就折叠哪层祖先。
+
+   · `.rails` 绝对定位、`pointer-events:none`，只有 `.rail` 自己 `auto`
+     —— 否则这一层会挡住整行的文本选择；
+   · 命中宽 `--ui-rail-hit`（8px）比视觉线（1px）宽 ⇒ 好点，且**不与三角打架**
+     （三角起于 `26 + 24k`，导轨命中结束于 `26 + 24k`，几何上刚好相邻）；
+   · `.ph` 占位不画假线（它没有 `.rails` 子节点，天然满足）。
+   ══════════════════════════════════════════════════════════════════ */
+.blk .rails {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.blk .rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* x = 块标中心 − 命中宽/2（块标中心 = gutter + k*indent + marker-slot/2） */
+  left: calc(
+    var(--ui-blk-gutter) + var(--rail-depth) * var(--ui-indent) + var(--ui-marker-slot) / 2 - var(--ui-rail-hit) / 2
+  );
+  width: var(--ui-rail-hit);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.blk .rail::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-0.5px);
+  background: var(--ui-rail);
+  transition: width 120ms ease, background-color 120ms ease;
+}
+/* 悬停/活动：加粗 ＋ 染色（线宽 1→3px） */
+.blk .rail:hover::before,
+.blk .rail.hot::before {
+  width: 2px;
+  background: var(--ui-rail-hot);
+}
+@media (prefers-reduced-motion: reduce) {
+  .blk .rail::before {
+    transition: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   gutter 三件：**一个主件 ＋ 两个临时件**
+   ══════════════════════════════════════════════════════════════════ */
+
+/*
+ * 折叠三角：**绝对定位、不占位**。
+ * 旧形状里它常驻 12px 槽 ＋ 0.45 透明度，正文因此右移 —— 这是「丑」的结构性原因之一。
+ * 现在静止态完全看不到（`opacity:0`），行悬停才淡入；折叠态靠**块标的环**自明。
+ *
+ * ⚠️ **定位锚是 `.left`，不是 `.blk`**（2026-10-20 用户：折叠图标都在最左侧不优雅）。
+ *    锚在 `.blk` 上时，`left: -caret-out` 相对的是「整行的左缘」⇒ 所有深度的三角都挤在
+ *    最左边那一列，与它自己的块标离得老远、还会压到祖先的导轨。
+ *    锚在 `.left` 上时，`.left` 本身已经落在 `gutter + depth × indent`（块标所在列）
+ *    ⇒ 三角恒在**自己那颗块标**左侧 10px，几何上正好接在导轨命中区的右缘（不打架）。
+ */
+.blk .fold {
+  position: absolute;
+  left: calc(-1 * var(--ui-caret-out));
+  width: var(--ui-caret-size);
+  height: var(--ui-line-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  z-index: 1;
+}
+.blk:hover .fold {
+  opacity: 0.9;
+}
+@media (prefers-reduced-motion: reduce) {
+  .blk .fold {
+    transition: none;
+  }
+}
+/* 折叠三角始终是 `chevron-down`，收起时旋转 90°（省一个图标名，也留出过渡） */
+.blk .fold .ico {
+  transition: transform 120ms ease;
+}
+.blk[data-collapsed='1'] .fold .ico {
+  transform: rotate(-90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .blk .fold .ico {
+    transition: none;
+  }
+}
+
+/*
+ * **块标 ＝ 把手**（D4）：`.marker` 是唯一参与 flex 布局的 gutter 件，
+ * 同时带着旧契约 class `.bullet`／`.handle`（主题与插件的选择器继续有效）。
+ *
+ * · 静止：5px 点，tertiary 60%；
+ * · 悬停：点换成 grip，并浮一个 18px 圆底；
+ * · **已折叠**：点外加一圈 2px 实心环—— 折叠态不能只靠箭头，
+ *   箭头是悬停件——常驻箭头是反例，占位又会与块标抢空间。
+ */
+.blk .marker {
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--ui-marker-slot);
+  height: var(--ui-line-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: var(--ui-radius-pill);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.blk .marker::before {
+  content: '';
+  display: block;
+  width: var(--ui-bullet-size);
+  height: var(--ui-bullet-size);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-text-tertiary);
+  opacity: 0.6;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+/* 悬停：抓手替换点（`.grip` 默认隐藏，见下） */
+.blk .marker:hover::before {
+  opacity: 0;
+}
+.blk .marker .grip {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ui-text-secondary);
+  opacity: 0;
+  transition: opacity 120ms ease;
+  cursor: grab;
+}
+.blk .marker:hover .grip {
+  opacity: 0.85;
+}
+@media (prefers-reduced-motion: reduce) {
+  .blk .marker::before,
+  .blk .marker .grip {
+    transition: none;
+  }
+}
+/* 已折叠：**明显的环**（2px 实心 tertiary，13px 外径） */
+.blk[data-collapsed='1'] .marker::after {
+  content: '';
+  position: absolute;
+  width: var(--ui-marker-ring-size);
+  height: var(--ui-marker-ring-size);
+  border-radius: var(--ui-radius-pill);
+  border: var(--ui-marker-ring) solid var(--ui-text-tertiary);
+}
+/* 折叠态的环也要能被看见：点不因悬停消失（环才是「这里折叠了」的信号） */
+.blk[data-collapsed='1'] .marker:hover::before {
+  opacity: 0.6;
+}
+/* 拖动中：整行变淡（`editor.ts` 加 `.drag-src`） */
+.blk.drag-src {
+  opacity: 0.35;
+}
+#editor.dragging .blk .handle {
+  opacity: 0.5;
+}
+/* 待办行的方框：它也是把手（D4），尺寸与块标同槽 */
+.blk .marker.todo-box {
+  color: var(--ui-text-secondary);
+}
+.blk .marker.todo-box .ico {
+  width: var(--ui-icon-sm);
+  height: var(--ui-icon-sm);
+}
+.blk[data-todo='done'] .tx {
+  color: var(--ui-text-tertiary);
+  text-decoration: line-through;
+  text-decoration-color: var(--ui-text-tertiary);
+}
+.blk .tx {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  outline: none;
+}
+/* 空块的幽灵占位：CSS 生成内容不进 DOM 文本，所以 readText() 读不到它 */
+.blk .tx[data-ph]::before {
+  content: attr(data-ph);
+  color: var(--ui-text-tertiary);
+  opacity: 0.75;
+  pointer-events: none;
+}
+/*
+  光标所在行**不显示占位符**（2026-10-20 用户：光标落在「空块」二字后面不合适）。
+  原因：占位符是 `::before` 生成内容，浏览器把光标放在它**之后** ⇒ 看起来像在编辑「空块」两字。
+  藏掉之后，空行就是一条干净的空行 ＋ 光标。
+  ⚠️ 判据是「这一行有光标」（`data-caret`，由 `view/editor.ts` 的 `markCaret()` 打），
+     不是「编辑器有焦点」——整片容器共用一个焦点，CSS 分不出是哪一行。
+*/
+.blk[data-caret='1'] .tx[data-ph]::before {
+  content: none;
+}
+/*
+  只读投影的占位（journal 的日期）：它是 `_date` 的投影，不是可写正文
+  ⇒ 比普通占位更「实」一点，让人看出它不是提示语而是内容。
+*/
+.blk .tx[data-ph-readonly]::before {
+  color: var(--ui-text-secondary);
+  opacity: 1;
+}
+/*
+  **只读行**（journal 的日期）：不可编辑、不可落光标。
+  它是 `_date` 的投影，不是正文 —— 光标停在那里只会诱导用户去「改日期」。
+*/
+.blk .tx[data-readonly] {
+  cursor: default;
+  user-select: none;
+}
+/* 页 / 日记 / 被聚焦块作为**正文第一行**时，字号略大一档（它是这一屏的「身份」，但不叫标题） */
+.blk[data-depth='0'][data-role='page'] .tx,
+.blk[data-depth='0'][data-role='journal'] .tx {
+  font-size: var(--ui-fs-lg);
+  font-weight: 600;
+}
+/*
+  日记流：多天同屏时，每一天是一段，日期行是段头。
+  只用 border-top（不写 padding/margin）——不破坏 「间距所有权归容器」。
+*/
+.blk[data-depth='0'][data-role='journal']:not(:first-child) {
+  border-top: 1px solid var(--ui-border-subtle);
+}
+.blk.drag-src {
+  opacity: 0.35;
+}
+.blk[data-drop='before'] {
+  box-shadow: inset 0 2px 0 0 var(--ui-accent);
+}
+.blk[data-drop='after'] {
+  box-shadow: inset 0 -2px 0 0 var(--ui-accent);
+}
+.blk[data-drop='inside'] {
+  outline: 1px dashed var(--ui-accent);
+  outline-offset: 1px;
+  border-radius: var(--ui-radius-sm);
+}
+#editor.dragging .blk .handle {
+  opacity: 0.5;
+}
+#editor.drop-end {
+  box-shadow: inset 0 -2px 0 0 var(--ui-accent);
+}
+/* ---------------------------------------------------------- 反链 footer（下一层）
+   view block 的 placement；header 是 chrome，列表是共享 store 的活块（可原地编辑）。
+   只用 border-top 分家，不写块级 padding/margin。 */
+.backlinks {
+  margin-top: var(--ui-gap-6);
+  padding-top: var(--ui-gap-3);
+  border-top: 1px solid var(--ui-border-subtle);
+}
+.backlinks[hidden] {
+  display: none;
+}
+.backlinks-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-3);
+  margin-bottom: var(--ui-gap-2);
+  font-size: var(--ui-fs-sm);
+  color: var(--ui-text-secondary);
+}
+.backlinks-title {
+  font-weight: 600;
+  color: var(--ui-text-primary);
+}
+.backlinks-count {
+  color: var(--ui-text-tertiary);
+}
+.backlinks-refresh {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.backlinks-refresh:hover {
+  color: var(--ui-text-primary);
+}
+.backlinks-editor {
+  min-height: var(--ui-line-h);
+  outline: none;
+}
+
+/* ---------------------------------------------------------- 查询视图（–D6）
+   view block 的 placement：抬头（标题/条数/刷新）是 chrome，列表是共享 store 的活块。
+   与反链 footer 同一套分家方式（border-top + gap），不写块级 padding/margin。 */
+.queryview {
+  margin-top: var(--ui-gap-6);
+  padding-top: var(--ui-gap-3);
+  border-top: 1px solid var(--ui-border-subtle);
+}
+.queryview[hidden] {
+  display: none;
+}
+.queryview-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-3);
+  margin-bottom: var(--ui-gap-2);
+  font-size: var(--ui-fs-sm);
+  color: var(--ui-text-secondary);
+}
+.queryview-title {
+  font-weight: 600;
+  color: var(--ui-text-primary);
+}
+.queryview-count {
+  color: var(--ui-text-tertiary);
+}
+/* 「结果可能已过期」（待定-日记流 #1）：只是提示，不拦编辑、不改变排版 */
+.queryview-stale {
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+.queryview-stale[hidden] {
+  display: none;
+}
+.queryview-refresh {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.queryview-refresh:hover {
+  color: var(--ui-text-primary);
+}
+.queryview-refresh:disabled {
+  cursor: default;
+  color: var(--ui-text-tertiary);
+}
+.queryview-editor {
+  min-height: var(--ui-line-h);
+  outline: none;
+}
+/* 空结果：状态不是错误（保留抬头与刷新按钮），给一句实话而不是空白 */
+.queryview-editor[data-empty]::before {
+  content: attr(data-empty-text);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-sm);
+}
+
+.ph {
+  margin: var(--ui-gap-3) 0;
+  border: 1px dashed var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+  font-family: var(--ui-font-mono);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 区间锚点的四种渲染（**不是 run 属性**：DOM 元素只是锚点的表现） */
+.mk-bold {
+  font-weight: 700;
+}
+.mk-italic {
+  font-style: italic;
+}
+.mk-highlight {
+  background: var(--ui-hl);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.mk-code {
+  font-family: var(--ui-font-mono);
+  font-size: 0.92em;
+  background: var(--ui-code-bg);
+  border-radius: var(--ui-radius-sm);
+  padding: 0 4px;
+}
+.tag {
+  color: var(--ui-accent);
+  background: var(--ui-accent-soft);
+  border-radius: var(--ui-radius-sm);
+  padding: 0 4px;
+}
+
+/* 行内原子：引用 chip / 图片 */
+.atom {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  margin: 0 2px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent);
+  font-size: 0.93em;
+  line-height: 1.5;
+  cursor: pointer;
+  user-select: none;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+.atom:hover {
+  filter: var(--atom-hover);
+}
+.atom .atom-ico {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: -0.14em;
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+.atom-image {
+  padding: 0 8px 0 3px;
+}
+.asset-thumb {
+  display: block;
+  height: 1.35em;
+  width: auto;
+  border-radius: 3px;
+}
+.atom.dangling {
+  background: transparent;
+  border: 1px dashed var(--ui-accent);
+  opacity: 0.85;
+}
+.atom.missing {
+  background: var(--ui-danger);
+  color: var(--ui-danger);
+}
+.atom.missing .asset-thumb {
+  filter: grayscale(1) contrast(0.6);
+  opacity: 0.5;
+}
+
+/* ：块选区（跨块拖拽/全选块）。
+   颜色只用语义 token（--ui-*），不直接引 --c-*（arch 19）。
+   拖选期间禁掉原生文本选择，避免蓝字与蓝块并存。 */
+.blk[data-blocksel='1'] {
+  background: var(--ui-accent-soft);
+  border-radius: var(--ui-radius-sm, 4px);
+}
+.blocksel-drag,
+.blocksel-drag .tx {
+  user-select: none;
+}

@@ -1,0 +1,22 @@
+# 固定 store 到本目录，避免污染仓根
+storeDir: .pnpm-store
+
+# vite 依赖 esbuild 的原生二进制；pnpm 11 默认拦截 postinstall ⇒ 显式放行
+# electron 的 postinstall 才是**真正下载 Electron 二进制**（数百 MB）的那一步：
+# 不放行就会得到一个「装上了但一跑就报 Electron failed to install correctly」的空壳。
+# electron-winstaller 只在 Windows 的 Squirrel 目标下用得到，macOS 上明确**不放行**（pnpm 11 会替你写这行，写死它免得每次 install 都被问）。
+allowBuilds:
+  esbuild: true
+  electron: true
+  electron-winstaller: false
+
+# ⚠️ electron-builder 26.15.3 的打包 bug（不是我们的配置问题）：
+# app-builder-lib 的 package.json 声明 `@electron/get: ^3.0.0`，代码里却用了**只有 v5 才有的**
+# `ElectronDownloadCacheMode` ⇒ 打包阶段必炸：
+#   ⨯ Cannot read properties of undefined (reading 'ReadWrite')
+#     at resolveCacheMode (.../app-builder-lib/out/util/electronGet.js:69)
+# （v3 的导出只有 getHostArch / initializeProxy / downloadArtifact / download）
+# 处理：**只给 app-builder-lib 这一个包**把 @electron/get 抬到 v5（electron 自己本来就依赖 v5）。
+# 将来 electron-builder 修好了就该删掉这条。
+overrides:
+  'app-builder-lib>@electron/get': '^5.1.0'

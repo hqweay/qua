@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      CSP：本地应用只需要自己的脚本、样式与 data: 缩略图。
+      · style-src 的 'unsafe-inline' 用于首屏 color-scheme 兜底与 Vite 注入的样式；
+      · connect-src 的 ws 仅给 dev server 的 HMR 用（端口固定 5180）。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws://127.0.0.1:5180; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <!--
+      首屏兜底：在 styles.css / main.ts 到位**之前**就按系统外观定色，冷启动不闪。
+      最小内联 `color-scheme` —— 零颜色字面量、零脚本；真正的三档主题由 styles.css 的
+      `color-scheme` ＋ `light-dark()` 接过去（跟随系统 / 亮 / 暗）。
+    -->
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+    </style>
+    <link rel="icon" href="data:," />
+    <!-- 文案为空壳：一切用户可见文案由 src/msg.ts 在启动时灌入 -->
+    <title></title>
+  </head>
+  <body>
+    <!-- 启动级持久告警（数据只读 / 保存失败）；默认隐藏，文案由 msg.ts 灌入 -->
+    <div id="boot-notice" class="boot-notice" role="status" hidden></div>
+    <div id="app">
+      <!--
+        三槽并排（2026-10-19 晚修订：**入口条已作废**）
+          `槽(left) ｜ 槽(center) ｜ 槽(right)`
+        · 三槽**同一种材质**，只靠一条分隔线分家（不是「侧栏灰 + 正文白」）
+        · 槽的开关与「这一槽放什么」都归槽自己（抬头上的左右箭头，⌘⌥1 / ⌘⌥2）
+        · 每个槽的内容 = **一列块**；这里只放空壳，块由 dock.ts 渲染
+        · 中心槽没有「页标题」这个概念
+      -->
+      <section class="dock" id="dock-left" data-dock="left">
+        <div class="dock-head">
+          <span class="dock-title" id="dock-left-title"></span>
+          <span class="dock-sp"></span>
+          <button class="dock-btn" id="dock-left-collapse" type="button"></button>
+        </div>
+        <div class="dock-stack" id="dock-left-stack"></div>
+      </section>
+
+      <!--
+        中心槽（2026-10-20 修订）：**没有顶栏**。
+          · 甲乙丙／明暗切换是调试开关，已挪进调试菜单（`window.__demo` 与 `#state-menu-btn`）
+            —— 正式软件不需要它们常驻；
+          · 格式类命令改由划选气泡承载（见 `bindings.ts` 的 `selection` 段），不再常驻；
+          · 于是顶栏里什么都不剩了 ⇒ **整个 `#topbar` 撤掉**，不为没有内容的容器留高度。
+          · **文档头只剩面包屑**：`#crumbs`（页图标＋页名）
+            整个撤掉 —— 它此前兼任「标题」，既与「中心槽没有页标题」冲突，又让那个位置**不可编辑**。
+            页 / 日记 / 被 zoom 的块，一律是**正文第一行**（`rootsFor()` 装进编辑器）。
+      -->
+      <main class="dock" id="dock-center" data-dock="center">
+        <div id="scroll">
+          <div id="doc">
+            <!-- 面包屑：顶层时 hidden（不占高度）；点一格＝聚焦到该祖先（＝退回） -->
+            <div id="crumbs-trail" hidden></div>
+            <div id="editor" spellcheck="false"></div>
+            <div id="empty-hint" hidden></div>
+            <!-- 查询视图（–D6）：紧跟查询块的一段外源渲染；结果集冻结、按钮刷新 -->
+            <section class="queryview" id="queryview" data-queryview hidden>
+              <div class="queryview-head">
+                <span class="queryview-title" id="queryview-title"></span>
+                <span class="queryview-count" id="queryview-count"></span>
+                <span class="queryview-stale" id="queryview-stale" hidden></span>
+                <button class="queryview-refresh" id="queryview-refresh" type="button"></button>
+              </div>
+              <div class="queryview-editor" id="queryview-editor" spellcheck="false"></div>
+            </section>
+            <section class="backlinks" id="backlinks" data-backlinks hidden>
+              <div class="backlinks-head">
+                <span class="backlinks-title" id="backlinks-title"></span>
+                <span class="backlinks-count" id="backlinks-count"></span>
+                <button class="backlinks-refresh" id="backlinks-refresh" type="button"></button>
+              </div>
+              <div class="backlinks-editor" id="backlinks-editor" spellcheck="false"></div>
+            </section>
+          </div>
+        </div>
+      </main>
+
+      <section class="dock" id="dock-right" data-dock="right">
+        <div class="dock-head">
+          <span class="dock-title" id="dock-right-title"></span>
+          <span class="dock-sp"></span>
+          <button class="dock-btn" id="dock-right-collapse" type="button"></button>
+        </div>
+        <div class="dock-stack" id="dock-right-stack"></div>
+      </section>
+    </div>
+
+    <!-- 浮层 -->
+    <div id="overlay" hidden></div>
+    <div id="popover" hidden></div>
+
+    <!-- 右下角状态角标 -->
+    <div id="badge"></div>
+    <div id="badge-panel" hidden></div>
+
+    <!-- 演示状态菜单的锚点（原来在左栏页脚，入口条作废后移到这里） -->
+    <button id="state-menu-btn" class="ghost" hidden type="button"></button>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

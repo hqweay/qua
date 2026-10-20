@@ -1,0 +1,136 @@
+/* ============================================================ 外壳 */
+
+* {
+  box-sizing: border-box;
+}
+[hidden] {
+  display: none !important;
+}
+html,
+body {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  font: var(--ui-fs-md) / var(--ui-lh-normal) var(--ui-font-body);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+::selection {
+  background: var(--ui-accent-soft);
+}
+button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+/*
+ * 图标（`view/icons.ts` 的内联 SVG）：**颜色继承文字**，尺寸只走 token。
+ * 三档尺寸由 `data-size` 选，调用点不写 px —— 间距/尺寸纪律与别处同源。
+ */
+.ico {
+  display: block;
+  flex: 0 0 auto;
+  inline-size: var(--ui-icon-md);
+  block-size: var(--ui-icon-md);
+}
+.ico[data-size='sm'] {
+  inline-size: var(--ui-icon-sm);
+  block-size: var(--ui-icon-sm);
+}
+.ico[data-size='lg'] {
+  inline-size: var(--ui-icon-lg);
+  block-size: var(--ui-icon-lg);
+}
+button.ghost {
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-secondary);
+}
+button.ghost:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+input {
+  font: inherit;
+  color: inherit;
+}
+
+/*
+  三槽并排（2026-10-19 晚：**入口条作废**）。
+  · 三槽**同一种材质**（都是 --bg），只靠一条分隔线分家
+  · 宽度：左 236 / 右 320，两侧下限 180，中心槽保底 480（窗口 < 840 时解除）
+  · ⚠️ 槽关闭**不许用 `display:none`**：网格里它会把整列塌成 0 宽、
+       连中心槽一起压没（原型实测踩过）。这里用列宽归零 + visibility。
+*/
+#app {
+  display: grid;
+  /*
+   * 三列：左槽 / 中心槽 / 右槽。（2026-10-19 回扫后的口径）：
+   * · 侧槽 `minmax(下限, 默认宽)` —— **侧槽先缩**，中心槽保住 480。
+   *   只给中心槽写 `minmax(480px,1fr)`、侧槽写死宽，会在窄窗产生横向溢出（上一轮踩的坑）。
+   * · 窗口 < 840（= 480 + 180×2）时，两侧已到下限，中心槽**解除 480 保底**继续缩，
+   * 正文靠块自身降级。「右槽转覆盖」已标后置，见  / 。
+   * · 槽关闭用列宽 0 + visibility（**不用 display:none**：网格里它会把整列塌掉）。
+   *   关闭必须**连同下限一起归零**，否则 `minmax(180px, 0)` 会把列撑回 180。
+   */
+  --dock-left-min: var(--ui-dock-min);
+  --dock-right-min: var(--ui-dock-min);
+  --dock-left-w: var(--ui-dock-w-left);
+  --dock-right-w: var(--ui-dock-w-right);
+  --dock-center-min: var(--ui-center-min);
+  grid-template-columns:
+    minmax(var(--dock-left-min), var(--dock-left-w))
+    minmax(var(--dock-center-min), 1fr)
+    minmax(var(--dock-right-min), var(--dock-right-w));
+  height: 100vh;
+  overflow: hidden;
+  background: var(--ui-surface);
+}
+body[data-dock-left='closed'] #app {
+  --dock-left-min: 0px;
+  --dock-left-w: 0px;
+}
+body[data-dock-right='closed'] #app {
+  --dock-right-min: 0px;
+  --dock-right-w: 0px;
+}
+/* 压缩区间：两侧已在下限，中心槽不再保底；侧槽也锁在下限（不回弹到默认宽） */
+@media (max-width: 839px) {
+  #app {
+    --dock-center-min: 0px;
+    --dock-left-w: var(--ui-dock-min);
+    --dock-right-w: var(--ui-dock-min);
+  }
+}
+body[data-dock-left='closed'] #dock-left,
+body[data-dock-right='closed'] #dock-right {
+  visibility: hidden;
+  overflow: hidden;
+  /* 列宽已归零，边框必须一起去掉：`.dock + .dock` 的 1px 左边线会溢出 1px（E7 会抓到） */
+  border-left-width: 0;
+}
+
+/* 启动级持久告警（数据只读 / 保存失败）：固定在中上，不参与三槽布局 */
+.boot-notice {
+  position: fixed;
+  inset-block-start: var(--ui-gap-4);
+  inset-inline: 0;
+  z-index: 60;
+  margin-inline: auto;
+  inline-size: fit-content;
+  max-inline-size: min(680px, calc(100vw - var(--ui-gap-6)));
+  padding: var(--ui-gap-3) var(--ui-gap-4);
+  border: 1px solid var(--ui-warn);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface-raised);
+  color: var(--ui-text);
+  font-family: var(--ui-font-body);
+  font-size: var(--ui-fs-sm);
+  line-height: var(--ui-lh-normal);
+  box-shadow: var(--ui-shadow-mid);
+}

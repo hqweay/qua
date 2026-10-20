@@ -1,0 +1,15 @@
+# 统一换行：仓库里一律 LF。Windows 贡献者 checkout 时自动转 CRLF，提交时转回 LF。
+* text=auto eol=lf
+
+# 明确按二进制处理：不要让 git 去 diff 或做换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.woff2 binary
+
+# pnpm lockfile 不要参与语言统计，也便于 review 时折叠
+pnpm-lock.yaml linguist-generated=true

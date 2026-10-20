@@ -1,0 +1,112 @@
+/* ---------------------------------------------------------- 中心槽 */
+
+/*
+  中心槽（2026-10-20 修订）：**没有顶栏**。
+  顶栏原先只装甲乙丙／明暗两个开关；那两个是调试开关，已挪进调试菜单
+  ⇒ 顶栏里什么都不剩了，整个撤掉，不留空容器。
+*/
+/*
+  文档头 = **只有面包屑**（去掉「标题」这个概念之后）。
+
+  ⚠️ 这里原先有 `#crumbs`（页图标＋页名）和 `#page-name` —— 它们被撤掉了：
+     · 页 / 日记 / 被 zoom 的块 **一律是正文第一行**（`rootsFor()` 装进编辑器）；
+     · 所以本仓**不存在**「标题」这个位置，也就不需要一个不可编辑的大字号投影。
+*/
+/*
+  面包屑。
+  · **只在有祖先时出现**（顶层 `hidden`，不占高度）
+  · 层级靠**字重与颜色**，不靠边框/底色（承 00「不靠画框表达层级」）
+  · 每一格是按钮：点它＝聚焦到该祖先（与 zoom in 同一个命令）
+*/
+#crumbs-trail {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ui-gap-2);
+  margin: calc(var(--ui-gap-3) * -1) 0 var(--ui-gap-4) var(--ui-blk-gutter);
+  font-size: var(--ui-fs-sm);
+  line-height: var(--ui-lh-tight);
+  color: var(--ui-text-tertiary);
+}
+#crumbs-trail[hidden] {
+  display: none;
+}
+.crumb {
+  max-width: 24em;
+  padding: var(--ui-gap-1) var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.crumb:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+.crumb-sep {
+  color: var(--ui-text-tertiary);
+  user-select: none;
+}
+#scroll {
+  flex: 1;
+  overflow: auto;
+  /* 上留白交给文档头（它自带 gap），底部留出「还能往下写」的气口 */
+  padding: 0 0 var(--ui-gap-7);
+}
+/*
+  文档栏：**面包屑 ＋ 正文共用一条 measure**。
+  宽度只在这里算一次，`#editor`／`#empty-hint` 直接撑满 ⇒ 左边缘必然对齐
+  （承 03「间距所有权在容器」）。
+*/
+#doc {
+  width: min(var(--ui-editor-w), 100% - var(--ui-doc-pad) * 2);
+  margin: 0 auto;
+  padding-top: var(--ui-gap-6);
+}
+#editor,
+#empty-hint {
+  width: 100%;
+}
+#editor {
+  outline: none;
+}
+/*
+  **空白处建块的可发现性**。
+  行为在 `view/editor-events.ts`：点「最后一行底边之下」的空白 ⇒ 建一个顶层空块。
+
+  ⚠️ 这里是**编辑器内**最后一块之后的气口：它天然属于 `#editor`，
+     点它就是「在最后一行底下」，正好满足行为层的 `clientY` 判据。
+  ⚠️ 不把 `#editor` 撑满视口（曾试过 `min-height: calc(100vh - …)`，探针实测
+     空态会多出一条滚动条：scrollH 757 > clientH 720）⇒ 空白由 `#scroll` 承担，
+     监听面也放在 `#scroll` 上，不需要改布局高度。
+  ⚠️ 不画常驻 `+` 图标（那是可发现性成本）：悬停浮现一条极弱的线即可。
+*/
+#editor::after {
+  content: '';
+  display: block;
+  min-height: var(--ui-gap-7);
+  border-bottom: 1px solid transparent;
+  transition: border-color 120ms ease;
+}
+#editor:hover::after {
+  border-bottom-color: var(--ui-border);
+}
+@media (prefers-reduced-motion: reduce) {
+  #editor::after {
+    transition: none;
+  }
+}
+#empty-hint {
+  margin-top: var(--ui-gap-5);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-sm);
+  text-align: center;
+}
+#empty-hint kbd {
+  font-family: var(--ui-font-mono);
+  padding: 1px 5px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  font-size: var(--ui-fs-xs);
+}

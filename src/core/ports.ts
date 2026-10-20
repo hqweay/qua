@@ -1,0 +1,124 @@
+/**
+ * 端口声明（**只有类型，零运行时代码**）。
+ *
+ * 为什么单独一个文件：`App` 是「命令 ↔ 装配层」之间的**唯一契约**，但它原先住在 `commands.ts` 里，
+ * 于是 `commands.ts` 必须 `import type { BlockEditor } from '../view/editor.ts'` —— 一条 **core → view** 的
+ * 层级反向边，只能靠 `arch-check [13]` 的白名单放行。
+ *
+ * 把契约提到这里之后：
+ *   · `commands.ts` 只依赖本文件（core 层）
+ *   · `main.ts`（装配层）实现它
+ *   · **那条白名单可以删掉**，层级断言回到「不设例外」
+ *
+ * 本体能用什么，命令就能用什么；命令**只经这里**改状态。
+ * 承 59 ：命令不知道 UI ——这里不许出现任何 DOM 类型（`HTMLElement`／`KeyboardEvent` …）；
+ * 唯一放行的是 `DOMRect`，因为「菜单挂在哪个矩形旁边」是**命令参数的形状**，不是 DOM 操作。
+ */
+import type { BlockEditor } from '../view/editor.ts'
+import type { BindingKind } from './bindings.ts'
+import type { CtxKeys } from './index.ts'
+
+export type Capability = 'read' | 'write' | 'admin' | 'plugin'
+export type DemoState = 'seed' | 'empty' | 'sparse' | 'degraded'
+export type PanelKind = 'context' | 'bindings' | 'shortcuts' | 'model'
+
+/** 命令声明（纯语义）：**没有 `key`／`context`／`host`**（59 ） */
+export interface CommandDecl {
+  /** 命名空间名（`core/*` 保留，承 13／20 R2） */
+  name: string
+  /** 人话标签（菜单 / 命令面板默认显示名） */
+  title: string
+  capability: Capability
+  undoable: boolean
+  version: string
+  /** 命令面板里的分组（纯展示） */
+  category: string
+  /** 搜索别名（demo：让「加粗 / bold」都能搜到） */
+  keywords?: string[]
+  /** `args` 的单一来源（demo 里写成最小 JSONSchema 形状） */
+  args?: Record<string, unknown>
+  /** 不进命令面板（编辑器内部键位） */
+  hidden?: boolean
+  expose?: { http?: { description: string }; cli?: { aliases: string[] } }
+}
+
+/** 菜单行（结构上与 `ui/layers.ts` 的 `Row` 一致；这里只声明命令侧需要的字段） */
+export interface MenuRow {
+  id: string
+  label: string
+  hint?: string
+  icon?: string
+  group?: string
+  command?: string
+  args?: unknown
+  keyHint?: string
+  disabled?: boolean
+}
+
+export interface MenuRequest {
+  kind: BindingKind
+  anchor: DOMRect | null
+  title?: string
+  prefix?: string
+  query?: string
+  ctx?: CtxKeys
+  /** 每一项点击前先跑（例如斜杠菜单要先抹掉 `/查询词`） */
+  before?: () => void
+  /** 覆盖默认行为（演示状态菜单等） */
+  onPick?: (row: MenuRow, decl: CommandDecl | undefined) => void
+  /** 关掉时回调（斜杠菜单用来复位内部状态） */
+  onClose?: () => void
+}
+
+/** 命令处理器拿到的「受管门面」 */
+export interface App {
+  ed: BlockEditor
+  /* 页面 */
+  listPages(): { id: string; title: string; icon: string; blocks: number }[]
+  activePageId(): string
+  newPage(): void
+  openPage(id: string): void
+  deletePage(id: string): void
+  renamePage(id: string, title: string): void
+  /** 把焦点交给页名（**UI 归装配层**：命令只说「要改名」，不碰 `document` — 59 ） */
+  focusTitle(): void
+  showRefPicker(): void
+  /* 日记（日期只读、一天一个、物化幂等） */
+  /** 回到今日（`date` 省略＝本地今天）；没有就**幂等物化**一个 */
+  journalToday(date?: string): void
+  /** 相对当前日期前后翻（`days` 可正可负）；同样幂等物化 */
+  journalShift(days: number): void
+  /* zoom（块可任意 zoom in；zoom 是视图配置，不是新对象） */
+  /** 聚焦到此块：中心槽以 `source=block-ref` ＋ `scope:"subtree"` 渲染它 */
+  zoomTo(id: string): void
+  /** 退回该容器所在的顶层块（面包屑的「根」） */
+  zoomOut(): void
+  /* 收藏容器块（容器 ＝ 普通块 ＋ 一列有序块引用） */
+  /** 把块加进收藏；`containerId` 省略＝加进第一个容器（没有就建一个） */
+  addFavorite(blockId: string, containerId?: string): void
+  /** 从某个容器里移出一条收藏 */
+  removeFavorite(containerId: string, blockId: string): void
+  /** 调整收藏在容器里的顺序位 */
+  moveFavorite(containerId: string, blockId: string, delta: number): void
+  /** 新建一个收藏容器块（命名容器块） */
+  newFavoriteContainer(title?: string): void
+  /* 视图 */
+  /** 三档直选（菜单用；`toggleTheme` 是给键位/常驻按钮的循环） */
+  setTheme(mode: string): void
+  toggleTheme(): void
+  /** 开/关一个槽（槽的开关归槽自己；`side` 只有左右，中心槽常驻） */
+  toggleDock(side: 'left' | 'right'): void
+  /* 浮层 / 提示 */
+  toast(text: string, kind?: 'ok' | 'warn' | 'info'): void
+  showMenu(req: MenuRequest): void
+  showPopover(render: (host: HTMLElement) => void, anchor: DOMRect | null): void
+  closeLayers(): void
+  showPanel(kind: PanelKind): void
+  copy(text: string, label?: string): void
+  /* 演示与诊断 */
+  loadState(state: DemoState): void
+  setVirtualize(on: boolean, radius?: number): void
+  runImeProbe(): { fired: number; seq: string[] }
+}
+
+export type Handler = (args: Record<string, unknown>, app: App) => boolean | void

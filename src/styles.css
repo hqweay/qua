@@ -1,0 +1,22 @@
+/**
+ * demo v0 样式 —— **真 token 的最小集**：间距 / 字号 / 行高 / 圆角 / 两色主题。
+ *
+ * **只有一种内建样式**：
+ *   甲／乙／丙三套内建皮肤整体删除，`body[data-skin]` 分支与调试开关一并撤掉。
+ *   理由：三者的差异「只是样式」，而它们让每个组件规则都要写三遍、每加一个 token 都要问
+ *   「要不要按皮肤分叉」。收敛后调观感只改 token，不改 DOM。
+ *   外部主题的可验证性改由「一个最小主题包换 token」来证明。
+ *
+ * 亮/暗是**同一套 token 的两次取值**（`body[data-theme]` ＋ `light-dark()`）。
+ */
+
+/* 样式入口：**只做装配，不写规则**。顺序＝级联顺序，改顺序等于改视觉。
+   分片按职责：token 定义 / 外壳 / 槽 / 中心槽 / 块 / 浮层 / 诊断角标。 */
+
+@import './styles/tokens.css';
+@import './styles/shell.css';
+@import './styles/slots.css';
+@import './styles/center.css';
+@import './styles/blocks.css';
+@import './styles/overlays.css';
+@import './styles/badge.css';

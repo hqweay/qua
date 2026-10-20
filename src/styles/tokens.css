@@ -1,0 +1,163 @@
+/* ============================================================ token */
+
+/* @token:begin */
+/* ↑ **全仓唯一允许出现颜色/间距字面量的地方**（/§4）。
+   `scripts/arch-check.mjs` 按这对标记切段：段内豁免，段外只许引用 var(--…)；
+   门禁 12 的「颜色/间距字面量」就是拿它判的。 */
+
+:root {
+  /* ══════ ① 基础色（core 私有；**组件不得直接引用**，门禁 18） ══════ */
+  --c-n-0: light-dark(#ffffff, #1b1d22);
+  --c-n-50: light-dark(#fbfbfc, #1f2228);
+  --c-n-100: light-dark(#f4f5f6, #17191d);
+  --c-n-200: light-dark(#e9eaec, #101216);
+  --c-n-300: light-dark(#dcdee1, #2a2d33);
+  --c-n-400: light-dark(#c3c6cb, #3b4048);
+  --c-n-600: light-dark(#6b7078, #8b929c);
+  --c-n-700: light-dark(#4d525a, #b6bcc6);
+  --c-n-900: light-dark(#1d1f23, #e7e9ed);
+  --c-accent: light-dark(#6b5bd2, #a394ff);
+  --c-accent-soft: light-dark(#6b5bd214, #a394ff24);
+  --c-danger: light-dark(#c4544b, #ef9d99);
+  --c-warn: light-dark(#b8742a, #e0a45a);
+  --c-ok: light-dark(#2f855a, #5cc98c);
+  --c-hl: light-dark(#ffe58a, #6b5a1e);
+  --c-code: light-dark(#0000000d, #ffffff12);
+
+  /* ══════ ② 语义槽 --ui-*（★ 主题插件只填这一层） ══════ */
+  /* 表面：三档底色 ＋ 窗口底 */
+  --ui-surface: var(--c-n-0);
+  --ui-surface-raised: var(--c-n-0);
+  --ui-surface-sunken: var(--c-n-100);
+  --ui-canvas: var(--c-n-200);
+  /* 文字：三级 */
+  --ui-text: var(--c-n-900);
+  --ui-text-secondary: var(--c-n-700);
+  --ui-text-tertiary: var(--c-n-600);
+  /* 线 */
+  --ui-border: var(--c-n-300);
+  --ui-border-subtle: var(--c-n-200);
+  --ui-sep: 1px;
+  /* 强调与语义色 */
+  --ui-accent: var(--c-accent);
+  --ui-accent-soft: var(--c-accent-soft);
+  --ui-danger: var(--c-danger);
+  --ui-warn: var(--c-warn);
+  --ui-ok: var(--c-ok);
+  --ui-hl: var(--c-hl);
+  --ui-code-bg: var(--c-code);
+  /* 圆角：三级对比（容器 / 卡片 / 行内） */
+  --ui-radius-lg: 10px;
+  --ui-radius-md: 6px;
+  --ui-radius-sm: 4px;
+  --ui-radius-pill: 999px;
+  /* 阴影：极淡（原型 v5 的口径） */
+  --ui-shadow-low: 0 1px 2px light-dark(rgba(20, 22, 26, 0.06), rgba(0, 0, 0, 0.45)),
+    0 0 0 0.5px light-dark(rgba(20, 22, 26, 0.04), rgba(255, 255, 255, 0.04));
+  --ui-shadow-mid: 0 4px 14px light-dark(rgba(20, 22, 26, 0.08), rgba(0, 0, 0, 0.55));
+  --ui-shadow-pop: 0 12px 36px light-dark(rgba(20, 22, 26, 0.14), rgba(0, 0, 0, 0.5));
+  /* 字号：7 档阶梯 */
+  --ui-fs-2xs: 10.5px;
+  --ui-fs-xs: 11.5px;
+  --ui-fs-sm: 12.5px;
+  --ui-fs-md: 13.5px;
+  --ui-fs-lg: 15.5px;
+  --ui-fs-xl: 19px;
+  --ui-fs-2xl: 24px;
+  /* 行高 */
+  --ui-lh-tight: 1.4;
+  --ui-lh-normal: 1.65;
+  --ui-lh-relaxed: 1.85;
+  /* 间距 */
+  --ui-gap-1: 2px;
+  --ui-gap-2: 4px;
+  --ui-gap-3: 6px;
+  --ui-gap-4: 10px;
+  --ui-gap-5: 16px;
+  --ui-gap-6: 24px;
+  --ui-gap-7: 36px;
+  /* 密度（舒适为默认；紧凑档只改这一组） */
+  --ui-row-h: 28px;
+  --ui-pane-pad: 16px;
+  --ui-doc-pad: 40px;
+  --ui-doc-measure: 660px;
+  --ui-gutter: 22px;
+  /* 三槽宽度 */
+  --ui-dock-w-left: 236px;
+  --ui-dock-w-right: 320px;
+  --ui-dock-min: 180px;
+  --ui-center-min: 480px;
+  /* 编辑器结构旋钮（**单一内建样式**，：不再有甲/乙/丙分叉） */
+  /* 块标那一列的**起始槽宽**：`.blk` 的 padding-left 与文档头的面包屑共用它，
+     两者必须同源 —— 否则「页名比正文左移 6px」这种偏差只能靠手工微调（承 03）。
+     12px 同时给「三角留出块外空间」：三角绝对定位在块标左侧 10px，不占布局。 */
+  --ui-blk-gutter: 12px;
+  --ui-line-h: 28px;
+  --ui-editor-w: 760px;
+  /* 每级缩进：24px */
+  --ui-indent: 24px;
+  /* 块标 ＋ 抓手的**唯一槽**（D4 合并后的主件宽） */
+  --ui-marker-slot: 20px;
+  --ui-bullet-size: 5px;
+  /* 折叠三角：11px 实心 caret，绝对定位不占位 */
+  --ui-caret-size: 11px;
+  /*
+    三角相对**自己那颗块标**的左移量：caret 11px ＋ 与块标留 2px 缝。
+    ⚠️ 锚点是 `.left`（块标所在列），不是 `.blk`（整行左缘）——见 blocks.css 的说明。
+    ⚠️ 取值要让三角**不与块标槽重叠**（11+2=13 ⇒ 三角右缘恰好落在块标左缘左侧 2px），
+       否则那块 1px 的重叠区会同时是「点三角折叠」与「点块标 zoom」的命中区。
+  */
+  /*
+   * 折叠三角左移量（相对 `.left` 的左缘）。
+   * ⚠️ **与 `--ui-rail-hit` 是一对**：三角右缘必须**不压到**最内层导轨段的命中区。
+   *    曾把它从 10 改成 13（三角贴自己块标），但「刚好相邻」的口径是按 10 算的
+   *    ⇒ 实测重叠 3px。现在取 **11px**（与 rail-hit 6px 配对后两处重叠都归零）。
+   *    改这个值必须复跑 smoke 的「三角 × 段 不重叠」断言（R9）。
+   */
+  --ui-caret-out: 11px;
+  /* 可点导轨：命中宽 8px（比视觉线宽得多，好点）、视觉线 1px */
+  /* 导轨命中宽（> 视觉线 1px，好点）；与 `--ui-caret-out` 配对，见上 */
+  --ui-rail-hit: 6px;
+  --ui-rail: var(--ui-border-subtle);
+  --ui-rail-hot: var(--ui-text-tertiary);
+  /* 折叠态块标的环：2px 实心环（折叠态不能只靠悬停件自明） */
+  --ui-marker-ring: 2px;
+  --ui-marker-ring-size: 13px;
+  --ui-font-body: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  --ui-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  /* 图标尺寸（view/icons.ts 的内联 SVG 只认这三档；颜色一律 currentColor） */
+  --ui-icon-sm: 12px;
+  --ui-icon-md: 15px;
+  --ui-icon-lg: 18px;
+}
+
+/* 紧凑密度：**只改 token**，组件规则一行不动（原型 v5 的实证） */
+body[data-density='compact'] {
+  --ui-row-h: 22px;
+  --ui-fs-md: 13px;
+  --ui-fs-lg: 14.5px;
+  --ui-pane-pad: 12px;
+  --ui-gap-5: 12px;
+}
+
+/* 主题三档：**跟随系统 / 亮 / 暗**。
+   · 颜色只写一遍：`light-dark(亮, 暗)`，取哪一支由 `color-scheme` 决定 ⇒ 没有两份调色板；
+   · `data-theme` 只管 `color-scheme`（双轨里的第二轨），**不切类、不改 DOM 形状**；
+   · 首屏兜底在 index.html 的最小内联 `color-scheme`，所以冷启动不闪。 */
+body {
+  color-scheme: light dark;
+  --atom-hover: brightness(0.96);
+}
+body[data-theme='light'] {
+  color-scheme: light;
+}
+body[data-theme='dark'] {
+  color-scheme: dark;
+  --atom-hover: brightness(1.2);
+}
+@media (prefers-color-scheme: dark) {
+  body:not([data-theme='light']) {
+    --atom-hover: brightness(1.2);
+  }
+}
+/* @token:end */

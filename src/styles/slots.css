@@ -1,0 +1,187 @@
+/* ---------------------------------------------------------- 槽 */
+
+/*
+ * 三槽：**同一种材质的分层**（原型 v5 的口径）。
+ *   侧槽用 sunken、中心槽用 surface —— 层级靠**底色差**，槽与槽之间只留一条极淡的线。
+ *   `--ui-sep: 0` 可以让一条线都不画（主题可调）。
+ */
+.dock {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--ui-surface);
+}
+.dock[data-dock='left'],
+.dock[data-dock='right'] {
+  background: var(--ui-surface-sunken);
+}
+.dock + .dock {
+  border-left: var(--ui-sep) solid var(--ui-border-subtle);
+}
+/* 槽抬头：只有标题与一个动作，**没有工具栏**（入口条已作废） */
+.dock-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-3);
+  height: 42px;
+  padding: 0 var(--ui-gap-3) 0 var(--ui-gap-5);
+  flex: 0 0 auto;
+}
+.dock-title {
+  font-size: var(--ui-fs-sm);
+  font-weight: 600;
+  color: var(--ui-text-secondary);
+  letter-spacing: 0.02em;
+}
+.dock-sp {
+  flex: 1;
+}
+.dock-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-md);
+  line-height: 1;
+}
+.dock-btn:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+/*
+ * 块卡：用**极淡阴影 + 明亮底色**从侧槽里浮起来（承 00「深度 ≥2 不再出现 border/shadow」——
+ * 这一层是深度 1，允许一层"面"）。
+ */
+.dock-stack {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden; /* 槽内禁横向 */
+}
+
+.dock-card {
+  background: var(--ui-surface-raised);
+  border-radius: var(--ui-radius-md);
+  box-shadow: var(--ui-shadow-low);
+  margin: var(--ui-gap-3) var(--ui-gap-3) 0;
+  overflow: hidden;
+}
+.dock-card:last-child {
+  margin-bottom: var(--ui-gap-3);
+}
+/*
+ * 块卡头：卡片**自己的 chrome**，不是「块」——块在 body 里由 `block-renderers` 画。
+ */
+.dock-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-3);
+  padding: var(--ui-gap-3) var(--ui-gap-3) var(--ui-gap-2) var(--ui-gap-4);
+  font-size: var(--ui-fs-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ui-text-tertiary);
+  font-weight: 600;
+}
+.dock-card-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dock-card-body {
+  padding: 0 var(--ui-gap-2) var(--ui-gap-3);
+}
+/* 一列块：**没有额外容器语义**，只是排一列 */
+.block-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/*
+  收藏行：**一行引用 + 一个「移出」动作**。
+  引用本身仍由块渲染器画（一源多视）；这里只负责把「移出」摆到行尾、hover 才出现。
+*/
+.favorite-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  min-width: 0;
+}
+.favorite-row > .page-item,
+.favorite-row > .journal-item {
+  flex: 1;
+  min-width: 0;
+}
+.favorite-remove {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-tertiary);
+  opacity: 0;
+  line-height: 1;
+}
+.favorite-row:hover .favorite-remove,
+.favorite-remove:focus-visible {
+  opacity: 1;
+}
+.favorite-remove:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+
+/* 页块的一行：由 `ui/block-renderers.ts` 产出（`.page-item` 是对外契约，不许改名） */.page-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-3);
+  height: var(--ui-row-h);
+  padding: 0 var(--ui-gap-3);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-sm);
+  text-align: left;
+  min-width: 0;
+  width: 100%;
+}
+.page-item:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+.page-item[data-active='1'] {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+  font-weight: 600;
+}
+.page-item .p-ico {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 固定图标槽宽：emoji/字面文本与 SVG 混用时页名仍然对齐 */
+  width: 18px;
+}
+.page-item .p-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.page-item .p-count {
+  flex: 0 0 auto;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+  font-family: var(--ui-font-mono);
+}
+button.ghost.wide {
+  width: 100%;
+  text-align: left;
+}

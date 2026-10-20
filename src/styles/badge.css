@@ -1,0 +1,99 @@
+/* ============================================================ 角标（诊断面） */
+
+/*
+  调试入口：**与角标同一个诊断面**（2026-10-20）。
+  甲乙丙／明暗撤出顶栏后落在这里 —— 正式软件不暴露，所以它们与「块数/DOM/composing」
+  这些诊断信息摆在一起，而不是混进产品界面。
+  ⚠️ 它原来在 index.html 里带 `hidden` 且没人取消 ⇒ 是死入口；现在由 `main.ts` 的
+     `paintStaticCopy()` 显式打开。
+*/
+#state-menu-btn {
+  position: fixed;
+  right: var(--ui-gap-4);
+  bottom: calc(var(--ui-gap-4) + 30px);
+  z-index: 55;
+  padding: var(--ui-gap-2) var(--ui-gap-4);
+  background: var(--ui-surface-raised);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-pill);
+  box-shadow: var(--ui-shadow-pop);
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-secondary);
+}
+#state-menu-btn:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+
+#badge {
+  position: fixed;
+  right: var(--ui-gap-4);
+  bottom: var(--ui-gap-4);
+  z-index: 55;
+  display: flex;
+  gap: var(--ui-gap-3);
+  align-items: center;
+  padding: var(--ui-gap-2) var(--ui-gap-4);
+  background: var(--ui-surface-raised);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-pill);
+  box-shadow: var(--ui-shadow-pop);
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+#badge b {
+  color: var(--ui-text);
+  font-weight: 600;
+}
+#badge .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-text-tertiary);
+}
+#badge[data-composing='1'] .dot {
+  background: var(--ui-warn);
+  box-shadow: 0 0 0 4px var(--ui-accent-soft);
+}
+#badge[data-composing='0'] .dot {
+  background: var(--ui-ok);
+}
+#badge-panel {
+  position: fixed;
+  right: var(--ui-gap-4);
+  bottom: 44px;
+  z-index: 56;
+  width: min(460px, calc(100vw - 24px));
+  max-height: 62vh;
+  overflow: auto;
+  background: var(--ui-surface-raised);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  box-shadow: var(--ui-shadow-pop);
+  padding: var(--ui-gap-5);
+  font-size: var(--ui-fs-xs);
+}
+#badge-panel .kv {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: var(--ui-gap-1) var(--ui-gap-3);
+  font-family: var(--ui-font-mono);
+}
+#badge-panel .kv .k {
+  color: var(--ui-accent);
+}
+#badge-panel h5 {
+  margin: var(--ui-gap-4) 0 var(--ui-gap-2);
+  color: var(--ui-text-tertiary);
+  letter-spacing: 0.06em;
+}
+#badge-panel .hit {
+  font-family: var(--ui-font-mono);
+  color: var(--ui-text-secondary);
+  border-left: 2px solid var(--ui-accent);
+  padding-left: var(--ui-gap-3);
+  margin-bottom: var(--ui-gap-2);
+  overflow-wrap: anywhere;
+}

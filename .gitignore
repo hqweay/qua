@@ -1,0 +1,16 @@
+node_modules
+.DS_Store
+dist
+# electron 主进程/preload 的 esbuild 产物（`pnpm build:electron` 生成）
+dist-electron
+# electron-builder 的 .app 输出（`pnpm build:mac` 生成）
+release
+# 本仓库沙箱把 $HOME/Library/Caches 判为不可写 ⇒ 下载缓存必须落在仓内（见 ELECTRON-备忘.md）
+.cache
+.pnpm-store
+# 截图产物不入库；**README 头图例外**（它必须随仓库走，否则 README 在 GitHub 上是破图）
+shots/*.png
+!shots/readme-hero.png
+
+# 并行开发车道（`git worktree add .worktrees/<lane>`）：子树里是另一份检出，不入本仓
+.worktrees/
