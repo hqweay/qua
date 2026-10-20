@@ -481,8 +481,10 @@ const panelDeps: PanelDeps = {
   roots: () => mainEd.doc.roots,
   marks: () => mainEd.marks,
   atoms: () => mainEd.atoms,
-  findBlock: (id) => ws.blocks.find((p) => p.id === id),
-  openPage: (id) => void registry.invoke('core.page/open', { pageId: id }, 'menu'),
+  // ⚠️ 必须查**整片森林**：引用的目标可能是嵌套块，只查顶层会让「打开目标」凭空消失
+  findBlock: (id) => findInForest(ws.blocks, id),
+  // 引用目标可以是任意深度的块 ⇒ 走 zoom 那条命令，而不是只认顶层页的 `core.page/open`
+  openBlock: (id) => void registry.invoke('core.block/focus-block', { blockId: id }, 'popover'),
   removeAtom: (id) => void registry.invoke('core.editor/remove-atom', { atomId: id }, 'popover'),
   closePopover: () => layers.closePopover(),
   openPopover: (render, anchor) => layers.openPopover(render, anchor),
@@ -490,6 +492,25 @@ const panelDeps: PanelDeps = {
 }
 
 const showAtomPopover = (a: Atom, rect: DOMRect): void => panelPopover(panelDeps, a, rect)
+
+/**
+ * 行内原子的**唯一**点击口径（正文 / 反链 footer / 查询结果共用）。
+ *
+ * · 左键点 `page` 引用且目标在森林里 ⇒ 直接打开目标块（`focus-block`，嵌套块也能进）；
+ * · `⌥` 点击 ⇒ 弹原来的详情浮层（诊断信息、删除引用都还在那里）；
+ * · 图片原子 / dangling / 目标缺失 ⇒ 只弹浮层，**不静默失败**。
+ *
+ * ⚠️ 判断「目标可解析」用 `findInForest`，不是看 `a.state`：状态是快照，
+ *    目标可能在这之后被删掉。
+ */
+const handleAtomClick = (a: Atom, el: HTMLElement, mods: { altKey: boolean }): void => {
+  const targetId = a.kind === 'page' ? a.target?.id : undefined
+  if (!mods.altKey && targetId && findInForest(ws.blocks, targetId)) {
+    void registry.invoke('core.block/focus-block', { blockId: targetId }, 'editor')
+    return
+  }
+  showAtomPopover(a, el.getBoundingClientRect())
+}
 const openDrawerFor = (kind: PanelKind): void => panelDrawer(panelDeps, kind)
 
 /* ------------------------------------------------------------ 键位派发（接线） */
@@ -751,7 +772,7 @@ ed.events = {
     }
     showMenu({ kind: 'slash', anchor: rect, query: q })
   },
-  atomClick: (a, el) => showAtomPopover(a, el.getBoundingClientRect()),
+  atomClick: (a, el, mods) => handleAtomClick(a, el, mods),
   // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
   // 所以「点块标进去」与「点面包屑出来」共用一套语义，没有第二种入口。
   focusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, 'editor'),
@@ -791,6 +812,8 @@ backlinksView = new BacklinksView(
     onFocus: () => {
       if (backlinksView) ed = backlinksView.editor
     },
+    onFocusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, 'backlinks'),
+    onAtomClick: (a, el, mods) => handleAtomClick(a, el, mods),
     onAtomsLost: (labels) => app.toast(t('ui.toast.atomsLost', { labels: labels.join('、') }), 'warn'),
   },
 )
@@ -831,6 +854,8 @@ queryView = new QueryView(
     onFocus: () => {
       if (queryView) ed = queryView.editor
     },
+    onFocusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, 'query'),
+    onAtomClick: (a, el, mods) => handleAtomClick(a, el, mods),
     toast: (text, kind) => app.toast(text, kind),
   },
 )
@@ -1066,7 +1091,8 @@ const api = {
     return mainEd.marks.map((m) => ({ type: m.type, blockId: m.blockId, start: m.start, end: m.end }))
   },
   atoms() {
-    return mainEd.atoms.map((a) => ({ kind: a.kind, label: a.label, blockId: a.blockId, start: a.start, end: a.end, state: a.state ?? null, target: a.target ?? null }))
+    // `id` 也要给：DOM 上的 `data-atom-id` 是它，诊断面没有 id 就只能靠位置猜
+    return mainEd.atoms.map((a) => ({ id: a.id, kind: a.kind, label: a.label, blockId: a.blockId, start: a.start, end: a.end, state: a.state ?? null, target: a.target ?? null }))
   },
   shortId: (id: string) => shortId(id),
   ctxKeys: () => uiCtx(),

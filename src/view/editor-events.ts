@@ -16,6 +16,16 @@
 import type { Atom } from '../core/index.ts'
 
 /**
+ * 行内原子被点时按下了哪些修饰键。
+ *
+ * ⚠️ 只传**判据**（修饰键），不传 `MouseEvent`：事件层不是 DOM 类型的分发处，
+ *    再往上的消费者（装配层、UI 组件）不该为了读一个 `altKey` 拿到整个原生事件。
+ */
+export interface AtomClickMods {
+  altKey: boolean
+}
+
+/**
  * 编辑器暴露给事件层的动作面。
  * ⚠️ 全是方法而不是状态：事件层不该知道 `doc`／`marks`／`sel` 长什么样。
  */
@@ -61,8 +71,8 @@ export interface EditorBridge {
   noteComposition: (step: 'start' | 'update' | 'end') => void
   /** 该块有没有子块（拖到 inside 要判）*/
   hasChildren: (id: string) => boolean
-  /** 行内原子被点 */
-  onAtomClick: (atomId: string, el: HTMLElement) => Atom | undefined
+  /** 行内原子被点（`mods` 带修饰键：左键默认打开，⌥ 才看详情） */
+  onAtomClick: (atomId: string, el: HTMLElement, mods: AtomClickMods) => Atom | undefined
   /** 打开块菜单（悬停把手/圆点或右键）*/
   onBlockMenu: (blockId: string, rect: DOMRect) => void
   /**
@@ -234,16 +244,27 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     const path = e.composedPath()
     const inBlock = path.some((n) => n instanceof HTMLElement && n.classList.contains('blk'))
     const inCrumb = path.some((n) => n instanceof HTMLElement && n.id === 'crumbs-trail')
-    // 反链 footer 有自己的编辑器；点它/它的留白不能触发正文的「点空白建块」
-    const inBacklinks = path.some(
-      (n) => n instanceof HTMLElement && (n.id === 'backlinks' || n.classList.contains('backlinks') || n.id === 'backlinks-editor'),
+    /**
+     * 反链 footer / 查询结果都有自己的编辑器实例，而它们的 DOM 落在正文的
+     * `blankArea`（`#scroll`）里面 ⇒ 点它们时事件也会冒到**正文**的这套监听上。
+     * 判据是「路径里有没有**本实例**的 container」：别的视图的点击交还给它自己那份绑定，
+     * **本实例**的点击（含它自己的块标/原子）必须继续往下走，否则 footer 点块标永远没反应。
+     */
+    const inOwnEditor = path.includes(br.container)
+    const inNestedView = path.some(
+      (n) =>
+        n instanceof HTMLElement &&
+        (n.classList.contains('backlinks') ||
+          n.classList.contains('backlinks-editor') ||
+          n.classList.contains('queryview') ||
+          n.classList.contains('queryview-editor')),
     )
-    if (inBacklinks) return
+    if (!inOwnEditor && inNestedView) return
 
     // 行内原子：交给原子那一条（同样用快照路径，防原子被重渲染摘掉）
     const atomEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('atom'))
     if (atomEl?.dataset.atomId) {
-      const a = br.onAtomClick(atomEl.dataset.atomId, atomEl)
+      const a = br.onAtomClick(atomEl.dataset.atomId, atomEl, { altKey: e.altKey })
       if (a) e.preventDefault()
       return
     }

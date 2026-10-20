@@ -221,6 +221,15 @@
 .blk .marker.todo-box {
   color: var(--ui-text-secondary);
 }
+/*
+ * **方框就是这一行的块标**：`.marker::before` 的小圆点不能再生成。
+ * 两者占的是同一个 20px 槽，同时画出来就是「复选框压着一个圆点」。
+ * 关的是 `content` 而不是各状态的 `opacity`——悬停/折叠规则只改可见度，
+ * 只有这里把生成内容去掉，任何状态下都不会再冒出来。
+ */
+.blk .marker.todo-box::before {
+  content: none;
+}
 .blk .marker.todo-box .ico {
   width: var(--ui-icon-sm);
   height: var(--ui-icon-sm);

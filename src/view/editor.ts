@@ -64,7 +64,7 @@ import {
 import { t } from '../core/msg.ts'
 import { LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl } from './block-dom.ts'
 import { blockIdOf, offsetIn, readBlockText } from './dom-text.ts'
-import { bindEditorEvents } from './editor-events.ts'
+import { bindEditorEvents, type AtomClickMods } from './editor-events.ts'
 
 export interface Probe {
   isComposing: boolean
@@ -107,8 +107,8 @@ export interface ViewEvents {
   atomsLost?: (atoms: Atom[]) => void
   /** 输入 `/` 且光标在查询词尾部 */
   slashQuery?: (q: string | null, rect: DOMRect) => void
-  /** 点行内原子 */
-  atomClick?: (atom: Atom, el: HTMLElement) => void
+  /** 点行内原子（`mods` 是修饰键：左键打开目标，⌥ 才看详情） */
+  atomClick?: (atom: Atom, el: HTMLElement, mods: AtomClickMods) => void
   /** 悬停把手/圆点或右键 → 块菜单 */
   blockMenu?: (blockId: string, rect: DOMRect) => void
   /**
@@ -195,6 +195,14 @@ export class BlockEditor {
     this.allowBlankCreate = o.allowBlankCreate !== false
     this.allowRootRemove = o.allowRootRemove !== false
     this.doc = o.doc
+    /**
+     * **冷启动也必须有 root id**。
+     *
+     * 冷启动走的是构造参数（`doc: { roots: bootRoots }`），不经过 `loadPage()`；
+     * 空 id 列表会让第一次 `reloadFromStore()`（undo 或别的视图 `touch`）把
+     * `doc.roots` 重载成空 ——正文看起来被清空了，而块其实还在 store 里。
+     */
+    this.viewRootIds = o.doc.roots.map((b) => b.id)
     this.store = o.store ?? new BlockStore(o.doc.roots, o.marks ?? [], o.atoms ?? [])
     this.store.subscribe((source?: unknown) => {
       // 发起编辑的视图自己已经渲染过；其他视图按 root id 从 store 重取（共享对象，不拷贝块数据）
@@ -1517,9 +1525,9 @@ export class BlockEditor {
         if (step === 'end') this.probe.isComposing = false
         this.probe.compositionSeq.push(step)
       },
-      onAtomClick: (atomId, el) => {
+      onAtomClick: (atomId, el, mods) => {
         const a = this.atoms.find((x) => x.id === atomId)
-        if (a) this.events.atomClick?.(a, el)
+        if (a) this.events.atomClick?.(a, el, mods)
         return a
       },
       onBlockMenu: (id, rect) => this.events.blockMenu?.(id, rect),

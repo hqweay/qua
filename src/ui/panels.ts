@@ -24,8 +24,19 @@ export interface PanelDeps {
   roots: () => Block[]
   marks: () => unknown[]
   atoms: () => unknown[]
+  /**
+   * 按 id 在**整片森林**里找块。
+   *
+   * ⚠️ 不能只看顶层：页面引用的目标可能是任意深度的块，只查 `ws.blocks` 会让
+   *    「打开目标」在嵌套目标上整颗按钮消失（看起来像引用失效）。
+   */
   findBlock: (id: string) => Block | undefined
-  openPage: (id: string) => void
+  /**
+   * 打开目标块（走 `core.block/focus-block`）。
+   *
+   * ⚠️ 与 `core.page/open` 的区别：后者只认顶层页，而引用可以指向嵌套块。
+   */
+  openBlock: (id: string) => void
   removeAtom: (id: string) => void
   closePopover: () => void
   openPopover: (render: (host: HTMLElement) => void, anchor: DOMRect | null) => void
@@ -85,7 +96,7 @@ export function showAtomPopover(deps: PanelDeps, a: Atom, rect: DOMRect): void {
         open.textContent = t('ui.popover.openPage')
         open.addEventListener('click', () => {
           deps.closePopover()
-          deps.openPage(target.id)
+          deps.openBlock(target.id)
         })
         row.appendChild(open)
       }

@@ -319,7 +319,8 @@ await check('T5 行内原子：引用 chip 与图片占位各占 1 格，随文�
   }))
   assert(domAtoms.page >= 3 && domAtoms.image >= 1, `假数据 + 新插入的原子数不对：${JSON.stringify(domAtoms)}`)
   assert(domAtoms.missing >= 1, '缺失资产应有 .missing 表现（状态不是错误）')
-  await page.locator('.atom-page').first().click()
+  // ⌥ 点击才弹信息（左键默认是「打开目标」，见 T43）
+  await page.locator('.atom-page').first().click({ modifiers: ['Alt'] })
   const popText = await page.locator('.popover').innerText()
   assert(popText.includes('引文快照') || popText.includes('状态'), `引用信息气泡没内容：${popText}`)
   await page.keyboard.press('Escape')
@@ -1662,6 +1663,267 @@ await check('T34 反链 footer 可原地编辑；同一源块在正文与反链�
 
   await ctx.close()
   return 'footer 反链：原地编辑 + 正文同步 + 全局 undo'
+})
+
+await check('T39 反链 footer 的块标能聚焦：点一下中心槽切到该源块（嵌套块也进得去），不误建空块', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const targetPage = await page.evaluate(() => window.__demo.pages()[0].id)
+  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), targetPage)
+
+  // 源块挑**深度 ≥ 2** 的：只在顶层里找目标的实现会在这条路径上失败
+  const src = await page.evaluate((target) => {
+    const ed = window.__demo.__editor
+    const walk = (b, d) => {
+      if (d >= 2 && b.text.length > 2) return b
+      for (const c of b.children) {
+        const hit = walk(c, d + 1)
+        if (hit) return hit
+      }
+      return null
+    }
+    const b = walk(ed.doc.roots[0], 0)
+    window.__demo.focusBlock(b.id, b.text.length)
+    window.__demo.invoke('core.editor/insert-page-ref', { pageId: target })
+    // 读的是插入**之后**的文本（含原子占位符），它同时也是 zoom 之后的页名
+    return { id: b.id, text: b.text }
+  }, targetPage)
+  await page.waitForTimeout(350) // footer 的 200ms 查询去抖
+
+  const marker = `#backlinks-editor .blk[data-block-id="${src.id}"] > .left > .marker`
+  assert((await page.locator(marker).count()) === 1, `footer 里应有该源块的块标：${src.id}`)
+  const before = await snap(page)
+  await page.locator(marker).click()
+  await page.waitForTimeout(200)
+
+  const after = await page.evaluate(() => ({
+    active: window.__demo.snapshot().activePage,
+    total: window.__demo.snapshot().totalBlocks,
+    firstId: document.querySelector('#editor .blk')?.dataset.blockId ?? '',
+    rows: document.querySelectorAll('#editor .blk').length,
+  }))
+  assert(after.active === src.text, `中心槽应切到该源块（页名 = 源块正文）：${JSON.stringify({ want: src.text, got: after.active })}`)
+  assert(after.firstId === src.id, `正文首行应是源块 ${src.id}，实际 ${after.firstId}`)
+  assert(after.rows > 0, '聚焦后正文不该没有行')
+  // 点块标还会冒泡到「点空白建块」那一支 ⇒ 块数必须一条不差
+  assert(after.total === before.totalBlocks, `点块标不该建块：${before.totalBlocks} → ${after.total}`)
+
+  await ctx.close()
+  return `点嵌套源块 ${src.id.slice(-6)} 的块标 ⇒ 正文首行切到它（块数仍 ${after.total}）`
+})
+
+await check('T40 冷启动直接打字后 ⌘Z：撤销只回滚文字，不把整片正文清空（未经 openPage）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+
+  /**
+   * ⚠️ 冷启动走的是 `new BlockEditor({ doc })`，**没有** `loadPage()`。
+   *    root id 若只在 `loadPage()` 里登记，第一次 undo 的 `reloadFromStore()` 就会
+   *    按空列表重载 ⇒ 正文（`doc.roots`）被清空，而 store 里的块其实还在。
+   *    所以这里**不调用** openPage，直接从冷启动状态打字。
+   */
+  const before = await page.evaluate(() => {
+    const bs = window.__demo.blocks()
+    const b = bs.find((x) => x.role !== 'journal')
+    window.__demo.focusBlock(b.id, 0)
+    const s = window.__demo.snapshot()
+    return { id: b.id, text: b.text, texts: window.__demo.text(), total: s.totalBlocks, dom: s.domBlocks }
+  })
+  await page.keyboard.type('Z')
+  await page.waitForTimeout(80)
+  const typed = await page.evaluate((id) => window.__demo.blocks().find((b) => b.id === id)?.text ?? '', before.id)
+  assert(typed.startsWith('Z'), `冷启动后应能直接敲进第一行：${JSON.stringify(typed.slice(0, 8))}`)
+
+  await page.keyboard.press('Meta+z')
+  await page.waitForTimeout(150)
+  const after = await page.evaluate(() => {
+    const s = window.__demo.snapshot()
+    return { texts: window.__demo.text(), total: s.totalBlocks, dom: s.domBlocks, rows: document.querySelectorAll('#editor .blk').length }
+  })
+  assert(after.rows > 0, '撤销后正文一行都不剩（DOM 被清空）')
+  assert(after.texts.length === before.texts.length, `撤销后正文行数应复原：${before.texts.length} → ${after.texts.length}`)
+  assert(JSON.stringify(after.texts) === JSON.stringify(before.texts), `撤销应把文字回到原样：${JSON.stringify({ before: before.texts.slice(0, 2), after: after.texts.slice(0, 2) })}`)
+  assert(after.total === before.total && after.dom === before.dom, `撤销不该改块数/DOM 行数：${JSON.stringify({ before, after })}`)
+
+  await ctx.close()
+  return `冷启动敲 1 字 → ⌘Z：${before.texts.length} 行原样回来（DOM ${after.dom} 行，块数 ${after.total}）`
+})
+
+await check('T41 冷启动后在反链 footer 编辑，不会把正文重载成空（共享 store 首次 touch）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const ids = await page.evaluate(() => {
+    const bs = window.__demo.blocks()
+    const j = bs.find((b) => b.role === 'journal')
+    const src = bs.find((b) => b.role !== 'journal' && b.text.length > 2)
+    window.__demo.focusBlock(src.id, src.text.length)
+    /**
+     * `[[ ]]` 的引用目标只解析 `page` 角色（journal 的正文是空的，日期在 `_date` 里），
+     * 所以「让今日 journal 有反链」只能直接在编辑器上放一个原子里。这里要紧的是
+     * **冷启动**这条路径（没有 openPage），不是用户从哪个菜单插的。
+     */
+    const atomId = window.__demo.__editor.insertAtom('page', { label: '今日', target: { kind: 'page', id: j.id } })
+    return { journal: j.id, src: src.id, atomId }
+  })
+  assert(ids.atomId, '冷启动下应能往正文插一个指向今日 journal 的原子')
+  await page.waitForTimeout(350)
+
+  assert(await page.evaluate(() => !document.querySelector('#backlinks')?.hidden), '冷启动的当前对象（今日 journal）应出现反链 footer')
+  const before = await page.evaluate(() => ({
+    texts: window.__demo.text(),
+    rows: document.querySelectorAll('#editor .blk').length,
+    firstId: document.querySelector('#editor .blk')?.dataset.blockId ?? '',
+  }))
+  assert(before.rows > 0, '冷启动正文应有行')
+
+  /**
+   * 点 `.tx` 的左侧文字区：这一行末尾就是刚插入的原子，点正中会命中原子（＝打开引用），
+   * 这里要的是「在 footer 里改文字」。
+   */
+  await page.locator(`#backlinks-editor .blk[data-block-id="${ids.src}"] > .tx`).first().click({ position: { x: 6, y: 6 } })
+  await page.keyboard.press('End')
+  await page.keyboard.type('Y')
+  await page.waitForTimeout(150)
+
+  const after = await page.evaluate((id) => ({
+    rows: document.querySelectorAll('#editor .blk').length,
+    texts: window.__demo.text(),
+    firstId: document.querySelector('#editor .blk')?.dataset.blockId ?? '',
+    footer: document.querySelector(`#backlinks-editor .blk[data-block-id="${id}"] > .tx`)?.textContent ?? '',
+  }), ids.src)
+  assert(after.rows > 0, `footer 编辑后正文被清空了：${before.rows} 行 → ${after.rows} 行`)
+  // 点击 footer 会把 #scroll 带到底部，日记流可能追加更早的天 ⇒ 只许变多，不许变少
+  assert(after.texts.length >= before.texts.length, `正文不该被重载成更少：${before.texts.length} → ${after.texts.length}`)
+  assert(after.firstId === before.firstId, `正文首行不该被换掉：${before.firstId} → ${after.firstId}`)
+  assert(after.footer.includes('Y'), 'footer 里的编辑没生效')
+  assert(after.texts.some((t) => t.includes('Y')), '正文里的同一块应同步（共享 store）')
+
+  await ctx.close()
+  return `冷启动 footer 编辑：正文 ${before.rows} 行仍在，两处同步到 Y`
+})
+
+await check('T42 待办行的方框独占块标槽：不叠圆点（todo / done / 深缩进 / hover）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  // 深缩进：把一个第 3 层的块标成待办
+  const deep = await page.evaluate(() => {
+    const ed = window.__demo.__editor
+    const walk = (b, d) => {
+      if (d >= 2 && b.text.length > 2) return b
+      for (const c of b.children) {
+        const hit = walk(c, d + 1)
+        if (hit) return hit
+      }
+      return null
+    }
+    const b = walk(ed.doc.roots[0], 0)
+    window.__demo.focusBlock(b.id, 0)
+    window.__demo.invoke('core.editor/toggle-todo')
+    return b.id
+  })
+
+  const readRow = (id) =>
+    page.evaluate((blockId) => {
+      const row = document.querySelector(`#editor .blk[data-block-id="${blockId}"]`)
+      const m = row?.querySelector(':scope > .left > .marker')
+      const before = m ? getComputedStyle(m, '::before') : null
+      return {
+        todo: row?.dataset.todo ?? '',
+        depth: Number(row?.dataset.depth ?? -1),
+        classes: m ? [...m.classList].sort().join(' ') : '',
+        before: before?.content ?? '',
+        beforeW: before?.width ?? '',
+        boxW: m?.querySelector('.ico') ? getComputedStyle(m.querySelector('.ico')).width : '',
+      }
+    }, id)
+
+  const deepRow = await readRow(deep)
+  assert(deepRow.todo !== '' && deepRow.depth >= 2, `深缩进待办没建成：${JSON.stringify(deepRow)}`)
+  assert(deepRow.classes.includes('todo-box') && deepRow.classes.includes('marker'), `方框应仍是块标（同一元素）：${deepRow.classes}`)
+  assert(deepRow.before === 'none', `待办行不该再生成圆点（::before content=${deepRow.before}）`)
+  assert(deepRow.boxW === '12px', `方框应正常画出来：${deepRow.boxW}`)
+
+  // 假数据里已有的 todo / done 两态都只有方框
+  const all = await page.evaluate(() =>
+    [...document.querySelectorAll('#editor .blk[data-todo]')].map((row) => {
+      const m = row.querySelector(':scope > .left > .marker')
+      return {
+        todo: row.dataset.todo,
+        classes: m ? [...m.classList].sort().join(' ') : '',
+        before: m ? getComputedStyle(m, '::before').content : '',
+        boxW: m?.querySelector('.ico') ? getComputedStyle(m.querySelector('.ico')).width : '',
+      }
+    }),
+  )
+  assert(all.some((r) => r.todo === 'todo') && all.some((r) => r.todo === 'done'), `应同时看到 todo 与 done：${JSON.stringify(all)}`)
+  for (const r of all) {
+    assert(r.before === 'none', `待办（${r.todo}）不该生成圆点：${JSON.stringify(r)}`)
+    assert(r.classes.includes('todo-box') && r.boxW === '12px', `待办（${r.todo}）的方框应在：${JSON.stringify(r)}`)
+  }
+
+  // hover 只改可见度，不能把圆点露出来
+  await page.locator(`#editor .blk[data-block-id="${deep}"] > .left > .marker`).hover()
+  const hovered = await readRow(deep)
+  assert(hovered.before === 'none', `hover 时不该露出圆点：${hovered.before}`)
+
+  await ctx.close()
+  return `todo/done/深缩进（depth ${deepRow.depth}）三种都只有方框（.ico ${deepRow.boxW}，::before none）`
+})
+
+await check('T43 左键点引用直接打开目标；⌥ 才弹详情；dangling / 图片仍弹详情', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  const r = await page.evaluate(() => {
+    const el = document.querySelector('#editor .atom-page:not(.dangling)')
+    const a = window.__demo.atoms().find((x) => x.id === el?.dataset.atomId)
+    const target = window.__demo.pages().find((p) => p.id === a?.target?.id)
+    return {
+      atomId: el?.dataset.atomId ?? '',
+      title: el?.title ?? '',
+      targetTitle: target?.title ?? '',
+      total: window.__demo.snapshot().totalBlocks,
+    }
+  })
+  assert(r.atomId && r.targetTitle, `应能找到一条可解析的页面引用：${JSON.stringify(r)}`)
+  assert(r.title.includes('左键打开') && r.title.includes('⌥'), `原子 title 应说明「左键打开、⌥ 详情」：${r.title}`)
+
+  // 左键：直接打开目标块（页面），不弹详情、不建块
+  await page.locator(`#editor .atom-page[data-atom-id="${r.atomId}"]`).click()
+  await page.waitForTimeout(200)
+  const opened = await page.evaluate(() => {
+    const s = window.__demo.snapshot()
+    return { active: s.activePage, total: s.totalBlocks, popover: document.querySelectorAll('.popover').length }
+  })
+  assert(opened.active === r.targetTitle, `左键应打开目标：${JSON.stringify({ want: r.targetTitle, got: opened.active })}`)
+  assert(opened.popover === 0, '左键不该弹详情浮层')
+  assert(opened.total === r.total, `打开引用不该建块：${r.total} → ${opened.total}`)
+
+  // ⌥：仍弹原来的详情（含删除引用）
+  await openFirstPage(page)
+  await page.waitForTimeout(100)
+  await page.locator(`#editor .atom-page[data-atom-id="${r.atomId}"]`).click({ modifiers: ['Alt'] })
+  const pop = await page.locator('.popover').innerText()
+  assert(pop.includes('删除这个引用'), `⌥ 点击应弹详情浮层：${pop.slice(0, 60)}`)
+  await page.keyboard.press('Escape')
+
+  // dangling：左键也只能弹详情（不静默失败）
+  const dangling = await page.evaluate(() => {
+    const el = document.querySelector('#editor .atom-page.dangling')
+    return { atomId: el?.dataset.atomId ?? '', title: el?.title ?? '' }
+  })
+  assert(dangling.atomId, '假数据里应有 dangling 引用')
+  assert(dangling.title.includes('目标不存在'), `dangling 的 title 该说实话：${dangling.title}`)
+  await page.locator('#editor .atom-page.dangling').first().click()
+  const dPop = await page.locator('.popover').innerText()
+  assert(dPop.includes('dangling') || dPop.includes('目标不存在'), `dangling 该弹详情并说明状态：${dPop.slice(0, 80)}`)
+  await page.keyboard.press('Escape')
+
+  // 图片原子：行为不变（点开资产信息）
+  await page.locator('#editor .atom-image').first().click()
+  const iPop = await page.locator('.popover').innerText()
+  assert(iPop.includes('删除这个图片原子'), `图片原子仍应弹资产信息：${iPop.slice(0, 60)}`)
+
+  await ctx.close()
+  return `左键打开「${r.targetTitle}」；⌥/dangling/图片仍弹详情；块数仍 ${opened.total}`
 })
 
 await check('T15 角标：块数 / DOM 节点数 / 主题 / composing 都在', async () => {  const { ctx, page } = await freshPage(browser, base)

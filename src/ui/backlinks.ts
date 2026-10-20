@@ -13,6 +13,7 @@
 import {
   backrefBlocks,
   findPath,
+  type Atom,
   type Block,
   type BlockStore,
 } from '../core/index.ts'
@@ -28,6 +29,18 @@ export interface BacklinksViewDeps {
   onChange: (kind: string) => void
   /** footer 编辑器获得焦点：装配层把「活动编辑器」切到它 */
   onFocus: () => void
+  /**
+   * **点源块的块标**：聚焦/zoom 到它（中心槽换内容）。
+   *
+   * ⚠️ 由装配层注入而不是在这里调 registry：UI 组件不该认识命令与全局对象，
+   *    而且「点了之后中心槽怎么变」是装配层的决定。
+   */
+  onFocusBlock: (blockId: string) => void
+  /**
+   * 点行内原子：与正文**同一条**逻辑（左键打开目标、⌥ 看详情、解析不到仍弹详情）。
+   * 不在本文件实现，是因为详情浮层与命令面都归装配层。
+   */
+  onAtomClick?: (atom: Atom, el: HTMLElement, mods: { altKey: boolean }) => void
   onAtomsLost?: (labels: string[]) => void
 }
 
@@ -66,6 +79,8 @@ export class BacklinksView {
       change: (kind) => {
         if (kind !== 'load') this.deps.onChange(kind)
       },
+      focusBlock: (blockId) => this.deps.onFocusBlock(blockId),
+      atomClick: (atom, el, mods) => this.deps.onAtomClick?.(atom, el, mods),
       atomsLost: (atoms) => this.deps.onAtomsLost?.(atoms.map((a) => a.label)),
     }
 

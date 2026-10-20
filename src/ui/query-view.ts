@@ -15,7 +15,7 @@
  * ⚠️ 它不是「可编辑视图 / 实时视图」二选一：它**可编辑**，稳定性靠冻结而不是靠只读。
  * ⚠️ 视图状态（滚动、折叠展开态）不进库；滚动位置由外层编辑器自己保。
  */
-import { resolveFrozen, readResult, refreshSpec, readSpec, type Block, type BlockStore } from '../core/index.ts'
+import { resolveFrozen, readResult, refreshSpec, readSpec, type Atom, type Block, type BlockStore } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor } from '../view/editor.ts'
 
@@ -29,6 +29,10 @@ export interface QueryViewDeps {
   onChange: () => void
   /** 获得焦点时装配层把「活动编辑器」切过来 */
   onFocus: () => void
+  /** 点结果块的块标：聚焦/zoom 到它（中心槽换内容）；由装配层注入 */
+  onFocusBlock: (blockId: string) => void
+  /** 点行内原子：与正文同一条逻辑（左键打开、⌥ 详情、解析不到仍弹详情） */
+  onAtomClick?: (atom: Atom, el: HTMLElement, mods: { altKey: boolean }) => void
   /** 提示（刷新失败、丢了几条） */
   toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
@@ -83,6 +87,8 @@ export class QueryView {
         // 视图内编辑：内容立即生效（D5），但要落盘；成员不动（D4）
         this.deps.onChange()
       },
+      focusBlock: (blockId) => this.deps.onFocusBlock(blockId),
+      atomClick: (atom, el, mods) => this.deps.onAtomClick?.(atom, el, mods),
     }
 
     // ⚠️ 这里**只**点亮 stale，不重排列表（D4 的「不自动重算」）。

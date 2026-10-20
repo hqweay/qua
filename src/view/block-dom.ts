@@ -72,7 +72,7 @@ export function makeAtomEl(a: Atom): HTMLElement {
   el.dataset.atomId = a.id
   el.title =
     a.kind === 'page'
-      ? t('ui.atom.pageTitle', { label: a.label })
+      ? t(a.state === 'dangling' ? 'ui.atom.pageDanglingTitle' : 'ui.atom.pageTitle', { label: a.label })
       : t('ui.atom.imageTitle', { label: a.label })
   if (a.kind === 'image') {
     const img = document.createElement('img')
