@@ -15,6 +15,7 @@ import { UndoStack, type Snap, type UndoKind } from './undo.ts'
 import type { Atom, Mark } from './annotations.ts'
 import type { Block } from './model.ts'
 import type { Sel } from './selection.ts'
+import { lookupBlock, rebuild, type Index } from './index-port.ts'
 
 /**
  * 订阅者收到的信号。
@@ -31,6 +32,15 @@ export class BlockStore {
   atoms: Atom[]
   undoStack = new UndoStack()
   private subs = new Set<StoreSubscriber>()
+  /**
+   * **派生索引**（懒重建）：`null` ＝ 已失效，下次访问时从当前 `blocks`/`atoms` 重算一遍。
+   *
+   * 为什么挂在 store 上：它是**共享数据**的唯一持有者，多个视图读同一份；
+   * 索引挂在别处就会出现「两个视图拿着不同代的索引」。
+   * 为什么是懒的：一次渲染里会问很多次「这个 id 是哪块」，重建一次摊到所有查询上；
+   * 每次改动都立刻重建则把成本提前到了**输入路径**上（打字时卡）。
+   */
+  private idx: Index | null = null
 
   constructor(blocks: Block[], marks: Mark[] = [], atoms: Atom[] = []) {
     this.blocks = blocks
@@ -48,20 +58,39 @@ export class BlockStore {
    * `ids` ＝ 这次动过的块（可选；见 `StoreSubscriber` 的说明）。
    */
   touch(source?: unknown, ids?: readonly string[]): void {
+    // 一切模型变化都会走到这里（编辑器的 `emitChange` 是唯一出口）⇒ 索引在这里失效最省事，
+    // 也最不容易漏：让「改数据」与「索引可能过期」这一对事实**绑在同一个调用上**。
+    this.invalidateIndex()
     for (const fn of this.subs) fn(source, ids)
   }
 
-  /** 按 id 找块（整片森林；zoom 后当前对象可能在任意深度） */
+  /**
+   * 索引（**懒重建**）。任何改动之后第一次访问会重算一次，之后所有查询共用。
+   *
+   * ⚠️ 索引存的是块的**活引用**：`find` 拿到的就是 store 里那一块，改名/改字立刻可见；
+   *    但**名字表**（标签名→id、日期→id）是快照 ⇒ 改名后必须让索引失效（见 `invalidate`）。
+   */
+  get index(): Index {
+    this.idx ??= rebuild(this.blocks, this.atoms)
+    return this.idx
+  }
+
+  /**
+   * 让索引失效（下次访问时重建）。
+   *
+   * ⚠️ **改了 `blocks` 就必须调它**。`touch()` 已经带了（那是编辑器的写入出口），
+   *    但还有一条旁路：**命令直接把森林改了**（新建页 / 删页 / 往森林根 push 标签块），
+   *    然后调 `loadPage` 换视图 —— 那条路不发 `touch`，索引就会停在旧库上。
+   *    实测代价：删掉一页后，引用它的 chip 仍然显示 resolved（T39 抓到）。
+   *    接 Tx/Changes 之后，「所有写入经一个入口」会让这条规则自动成立。
+   */
+  invalidateIndex(): void {
+    this.idx = null
+  }
+
+  /** 按 id 找块（整片森林；zoom 后当前对象可能在任意深度）—— 走索引，O(1) */
   find(id: string): Block | undefined {
-    const walk = (list: readonly Block[]): Block | undefined => {
-      for (const b of list) {
-        if (b.id === id) return b
-        const inner = walk(b.children)
-        if (inner) return inner
-      }
-      return undefined
-    }
-    return walk(this.blocks)
+    return lookupBlock(this.index, id)
   }
 
   /** 整片森林 + 库级 anchors + 发起者的选区；这是 undo 的快照单位 */

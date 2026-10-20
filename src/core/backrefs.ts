@@ -1,15 +1,16 @@
 /**
  * 反链计算 —— **纯逻辑，零 DOM**。
  *
- * 判据：右槽默认显示「谁指向了当前对象」。这是对**指向边**的一次查询（承 17 / 29 ），
+ * 判据：右槽默认显示「谁指向了当前对象」。这是对**指向边**的一次查询，
  * 不是某个组件的事。所以算法住在这里、可脱离 DOM 单测；渲染在 `ui/`。
  *
- * ⚠️ 第 1 期数据源：demo 里指向边被压平成了行内 `page` 原子（`atoms[].target.id`）。
- *   接内核后换成指向边索引（G1 的入向边），**本文件的函数签名不变**（`BackrefSource` 是稳定形状）。
- * ⚠️ 承 64 ：指向不存在的目标（`dangling`）**不算**入向边，但也**不许静默**——
+ * ⚠️ 指向边的数据源是行内原子（`atoms[].target.id`）—— 引用与标签都是边。
+ *   **算法本身不关心边存在哪**：从 `core/index-port.ts` 的索引里查，形状不变。
+ * ⚠️ 指向不存在的目标（`dangling`）**不算**入向边，但也**不许静默**——
  *   由调用方在界面上呈现（这里只返回能解析的）。
  */
 import type { Atom, Block } from './index.ts'
+import { incomingCount, incomingIds, rebuild, type Index } from './index-port.ts'
 
 /** 一条反链：谁指向了我。`pageId` 是来源所在的页（点开它）*/
 export interface BackrefSource {
@@ -28,6 +29,11 @@ export interface BackrefInput {
   atoms: Atom[]
   /** 被指向的对象（当前页） */
   targetId: string
+  /**
+   * **预建索引**（可选）：装配层传 `store.index` ⇒ 走查表，不再扫全库。
+   * 不传就现场建一份（单测与一次性调用够用，但别在渲染循环里这么干）。
+   */
+  index?: Index
 }
 
 /**
@@ -38,40 +44,34 @@ export interface BackrefInput {
  */
 export function backrefsOf(input: BackrefInput): BackrefSource[] {
   const { blocks, atoms, targetId } = input
+  const idx = input.index ?? rebuild(blocks, atoms)
 
-  // 1) 哪些块里出现了指向目标的边
-  // ⚠️ 引用与标签**都是指向边**（AK6 的呈现模式表：一个显示 `[[名]]`、一个显示 `#名`）。
-  //    以前这里只认 `kind === 'page'` ⇒ 标签块的反链永远是空的，那是个静默的洞。
-  const hits = new Map<string, number>()
-  for (const a of atoms) {
-    if ((a.kind !== 'page' && a.kind !== 'tag') || a.target?.id !== targetId) continue
-    hits.set(a.blockId, (hits.get(a.blockId) ?? 0) + 1)
+  // 1) **查表**拿到所有指向目标的源块（引用与标签都是指向边，索引里已经合并）
+  const sources = incomingIds(idx, targetId)
+  if (sources.length === 0) return []
+
+  // 2) 归到「来源页」：`pageOf` 直接给归属，不用再遍历森林；`incomingCount` 保住「几处」
+  const byPage = new Map<string, { count: number; firstText: string | null }>()
+  for (const blockId of sources) {
+    const pageId = idx.pageOf.get(blockId)
+    const hit = idx.blocks.get(blockId)
+    if (!pageId || !hit) continue
+    const acc = byPage.get(pageId) ?? { count: 0, firstText: null }
+    acc.count += incomingCount(idx, targetId, blockId)
+    if (acc.firstText === null) acc.firstText = hit.text.trim()
+    byPage.set(pageId, acc)
   }
-  if (hits.size === 0) return []
 
-  // 2) 归到「来源页」，并取命中块自己的文字做摘要
   const out: BackrefSource[] = []
-  for (const page of blocks) {
-    if (page.id === targetId) continue
-    let first: string | null = null
-    let count = 0
-    const walk = (nodes: Block[]): void => {
-      for (const n of nodes) {
-        const c = hits.get(n.id)
-        if (c) {
-          count += c
-          if (first === null) first = n.text.trim()
-        }
-        walk(n.children)
-      }
-    }
-    walk(page.children)
-    if (count === 0) continue
+  for (const [pageId, acc] of byPage) {
+    if (pageId === targetId) continue
+    const page = idx.blocks.get(pageId)
+    if (!page) continue
     out.push({
-      pageId: page.id,
+      pageId,
       // 命中块为空时退回页名（那也比空字符串好）
-      text: first !== null && first !== '' ? first : page.text,
-      count,
+      text: acc.firstText !== null && acc.firstText !== '' ? acc.firstText : page.text,
+      count: acc.count,
     })
   }
   return out
@@ -93,22 +93,16 @@ export interface BackrefBlock {
 }
 
 export function backrefBlocks(input: BackrefInput): BackrefBlock[] {
-  const hits = new Map<string, number>()
-  for (const a of input.atoms) {
-    // 同 `backrefsOf`：引用与标签都是指向边 ⇒ 「标签的成员」就是标签块的反链
-    if ((a.kind !== 'page' && a.kind !== 'tag') || a.target?.id !== input.targetId) continue
-    hits.set(a.blockId, (hits.get(a.blockId) ?? 0) + 1)
-  }
-  if (hits.size === 0) return []
-
+  const idx = input.index ?? rebuild(input.blocks, input.atoms)
   const out: BackrefBlock[] = []
-  const walk = (list: readonly Block[], pageId: string): void => {
-    for (const b of list) {
-      const c = hits.get(b.id)
-      if (c) out.push({ blockId: b.id, pageId, text: b.text, count: c })
-      walk(b.children, pageId)
-    }
+  // 查表：源块清单 ＋ 次数 ＋ 归属页，全在索引里，不再遍历森林
+  for (const blockId of incomingIds(idx, input.targetId)) {
+    const hit = idx.blocks.get(blockId)
+    const pageId = idx.pageOf.get(blockId)
+    if (!hit || !pageId) continue
+    out.push({ blockId, pageId, text: hit.text, count: incomingCount(idx, input.targetId, blockId) })
   }
-  for (const root of input.blocks) walk([root], root.id)
+  // 顺序：按源块在森林里的先序（`incomingIds` 是原子的顺序，与原实现的「森林先序」不同，
+  // 但两者都稳定可复现；这里显式声明，免得以后有人以为是巧合）
   return out
 }

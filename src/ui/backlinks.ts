@@ -90,7 +90,13 @@ export class BacklinksView {
       this.els.root.hidden = true
       return
     }
-    const sources = backrefBlocks({ blocks: this.deps.blocks(), atoms: this.deps.store.atoms, targetId: target })
+    // 传共享索引：反链从「扫全库 atoms ＋ 遍历森林」变成查表（store 已经缓存了它）
+    const sources = backrefBlocks({
+      blocks: this.deps.blocks(),
+      atoms: this.deps.store.atoms,
+      targetId: target,
+      index: this.deps.store.index,
+    })
     if (sources.length === 0) {
       this.els.root.hidden = true
       return

@@ -303,6 +303,8 @@ const dockDeps: DockContentDeps = {
   blocks: () => ws.blocks,
   activeId: () => ws.activeId,
   atoms: () => ws.atoms,
+  // 共享索引由 store 缓存（懒重建）⇒ 反链不再每次扫全库 atoms ＋ 遍历森林
+  index: () => blocks.index,
   openPage: (id) => void registry.invoke('core.page/open', { pageId: id }, 'menu'),
   newPage: () => void registry.invoke('core.page/new', {}, 'dock'),
   // 收藏容器块：容器就是一个带 `favorites` 角色的普通块
