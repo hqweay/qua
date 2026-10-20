@@ -892,6 +892,135 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
   return `1 条 → 改字实时更新（成员不变）→ 不匹配仍保留 → 刷新后 ${refreshed.count}；结果集入 KB 且未 re-parent`
 })
 
+await check('T39 引用解析：改页名 ⇒ chip 跟着变；目标被删 ⇒ dangling（不静默错指）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  // 打开「产品设计 · 决策日志」：seed 里那一页有指向别处的 `[[..]]`
+  // ⚠️ 把它的 id 记下来，之后**全程按 id 导航**：⑤ 会把「当前页」改名，
+  //    再按标题去找它就找不到了（这是本轮真踩到的坑，不是理论问题）。
+  const homeId = await page.evaluate(() => {
+    const p = window.__demo.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    if (!p) throw new Error(`前置：找不到「产品设计」页，现有 ${JSON.stringify(window.__demo.pages().map((x) => x.title))}`)
+    window.__demo.invoke('core.page/open', { pageId: p.id })
+    return p.id
+  })
+  await page.waitForTimeout(200)
+
+  // ① 前置：找一个**能解析到**的引用，且它所在的行**就在当前打开的这一页里**。
+  //    ⚠️ `atoms()` 是**库级**的（所有页的原子都在里面），而 `blocks()` 只给**当前视图**
+  //    ⇒ 必须按「原子所在块是否在这一页」筛，否则会挑到一个没挂 DOM 的引用（chip 量为 0）。
+  const target = await page.evaluate(() => {
+    const mounted = new Set(window.__demo.blocks().map((x) => x.id))
+    const a = window.__demo
+      .atoms()
+      .find((x) => x.kind === 'page' && x.state === 'resolved' && x.target && mounted.has(x.blockId))
+    if (!a) return null
+    const b = window.__demo.blocks().find((x) => x.id === a.blockId)
+    return { atomId: a.id, label: a.label, targetId: a.target.id, srcBlockId: a.blockId, srcText: b?.text ?? '' }
+  })
+  assert(target, '前置：这一页里应有一个 resolved 且已挂载的引用')
+
+  // ② **显示名来自目标当前正文**：chip 上的字 === 目标页的正文（不看 atom.label 快照）
+  const chipLabel = () =>
+    page.evaluate((id) => document.querySelector(`.atom[data-atom-id="${id}"] .atom-label`)?.textContent ?? '', target.atomId)
+  const before = await chipLabel()
+  assert(before === `[[${target.label}]]`, `chip 应显示目标当前正文：${JSON.stringify(before)} vs ${JSON.stringify(target.label)}`)
+
+  // ③ **改名传播**：改目标页正文 ⇒ 同一个 chip 立刻换字（原子本身不动）
+  //
+  // ⚠️ 「改页名」在本 app 里就是**在页块正文上打字**（页名＝块的 text，没有独立输入框）；
+  //    `core.page/rename` 只是把焦点交给首行，它本身不改名。
+  const NEW = '改名后的新名字'
+  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), target.targetId)
+  await page.waitForTimeout(150)
+  await page.evaluate(() => {
+    // 页块首行＝页名；清空再敲新的（原生按键，走 syncFromDom 那条真实路径）
+    const first = window.__demo.blocks()[0]
+    window.__demo.focusBlock(first.id, first.text.length)
+  })
+  for (let i = 0; i < 60; i++) await page.keyboard.press('Backspace')
+  await page.keyboard.type(NEW)
+  await page.waitForTimeout(200)
+  // 回到引用所在的那一页，看 chip（按 id 导航）
+  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), homeId)
+  await page.waitForTimeout(200)
+  const renamed = await chipLabel()
+  assert(renamed === `[[${NEW}]]`, `改页名后 chip 应跟着换字：${JSON.stringify(renamed)}（旧值 ${JSON.stringify(before)}）`)
+
+  // ④ **原子没被回写**：改名靠解析传播，不是批量改 label
+  const rawLabel = await page.evaluate(
+    (id) => window.__demo.atoms().find((x) => x.id === id)?.rawLabel ?? '',
+    target.atomId,
+  )
+  assert(
+    rawLabel !== NEW,
+    `落盘的 label 不该被改名回写（应仍是插入时的快照）：${JSON.stringify(rawLabel)}`,
+  )
+
+  // ⑤ **同视图内即时传播**（这条才是 `renderRefSources` 的验收）：
+  //    目标页的名字行**就在当前这一页里**时，改它 ⇒ chip **当场**换字，不用重开页面。
+  //    ⚠️ ③④ 走的是「重开页面 ⇒ 重新挂载」，那条路径即使没有即时传播也会绿；
+  //       只有这一格能证明「派生显示名在数据没变时也会刷新」。
+  //
+  //    ⚠️ 上面 ①② 找到的引用**指向当前视图之外**（`[[输入面笔记]]` 在产品设计页里），
+  //       改它的目标靠的是「重开页面 ⇒ 重新挂载」，即使没有即时传播也会绿。
+  //    ⇒ 这里**自己造一组同视图的引用**：往当前页的一个子块里插一条指向**当前页页块**的引用。
+  //      页块自己就是 `doc.roots[0]`（首行即当前对象）⇒ 「目标的名字行」与「显示它的 chip」
+  //      在同一个视图里，改名必须当场生效。
+  //    ⚠️ 副作用：这一格把当前页改成了 LIVE ⇒ 后面一律按 `homeId` 导航，别再按标题找。
+  const live = await page.evaluate(() => {
+    const ed = window.__demo.__editor
+    const root = ed.doc.roots[0]
+    if (!root) return { skipped: '当前视图没有根块' }
+    // 插到第一块**子块**里（不能插页名行：页名是身份，往里塞占位符＝静默改名）
+    const host = root.children[0]
+    if (!host) return { skipped: '当前页没有子块可插' }
+    window.__demo.focusBlock(host.id, 0)
+    window.__demo.invoke('core.editor/insert-page-ref', { pageId: root.id })
+    const atom = window.__demo.atoms().find((a) => a.blockId === host.id && a.target?.id === root.id)
+    if (!atom) return { skipped: '引用没插进去' }
+
+    const chipLabel = () => document.querySelector(`.atom[data-atom-id="${atom.id}"] .atom-label`)?.textContent ?? ''
+    const LIVE = '当场改的新名字'
+    // 走真实路径：**改 DOM 再 syncFromDom**（等价于「在页名行上敲字」），
+    // 而不是直接改模型——直接改模型绕过了「没有任何数据变更信号」这个前提，测不到传播。
+    const el = ed.blockEl(root.id)
+    el.querySelector('.tx').textContent = LIVE
+    ed.syncFromDom(root.id, true)
+    return { label: chipLabel(), want: `[[${LIVE}]]`, atomId: atom.id }
+  })
+  assert(!live.skipped, `前置：造不出「目标与引用同视图」的组合：${live.skipped}`)
+  assert(
+    live.label === live.want,
+    `同视图内改目标名字，引用它的 chip 应**当场**跟着变（renderRefSources）：${JSON.stringify(live)}`,
+  )
+
+  // ⑥ **目标被删 ⇒ dangling**：不静默错指，chip 上带 .dangling
+  // ⚠️ `core.page/delete` 删的是**当前对象**（不收 pageId 参数）⇒ 先打开它再删
+  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), target.targetId)
+  await page.waitForTimeout(150)
+  await page.evaluate(() => window.__demo.invoke('core.page/delete'))
+  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), homeId)
+  await page.waitForTimeout(200)
+  const dead = await page.evaluate((id) => {
+    const el = document.querySelector(`.atom[data-atom-id="${id}"]`)
+    const a = window.__demo.atoms().find((x) => x.id === id)
+    return { dangling: el?.classList.contains('dangling') ?? false, label: el?.querySelector('.atom-label')?.textContent ?? '', state: a?.state }
+  }, target.atomId)
+  assert(dead.state === 'dangling', `目标被删后状态应是 dangling：${JSON.stringify(dead)}`)
+  assert(dead.dangling, 'dangling 要有可见的表现（class 挂在 chip 上，不是只改内部数据）')
+  /**
+   * ⚠️ **fallback 是「插入时的快照」，不是「用户最后见过的名字」** —— 这是一条刻意的取舍，不是漏：
+   *    要让 fallback 跟着改名走，就得在**渲染时回写 `atom.label`**，而那会让渲染产生副作用
+   *    （脏快照、连带落盘）。改名传播靠解析（不回写原子）是本条的前提，两者不可兼得。
+   *    ⇒ 这里断言的是「dangling 时有一个**非空且合理**的兜底名」，不是「最后见过的名字」。
+   */
+  assert(dead.label.length > 4, `dangling 时要有非空的兜底名：${JSON.stringify(dead.label)}`)
+  assert(dead.label !== `[[${NEW}]]`, `fallback 是插入时的快照，不该是改名后的字：${JSON.stringify(dead.label)}`)
+
+  await ctx.close()
+  return `「${before}」→ 改名后「${renamed}」（label 快照未回写）→ 删除后 dangling，兜底名「${dead.label}」`
+})
+
 await check('T37 演示状态下打字要落盘（已知风险 3）：切到稀疏态 → 打字 → 关页重开还在', async () => {
   const { ctx, page } = await freshPage(browser, base)
   // ① 切到稀疏态（这条路径原先把 `children` 装成 roots，与 openPage 的 `rootsFor(p)` 分叉）
@@ -1715,7 +1844,7 @@ await check('T34 反链 footer 可原地编辑；同一源块在正文与反链�
   return 'footer 反链：原地编辑 + 正文同步 + 全局 undo'
 })
 
-await check('T39 反链 footer 的块标能聚焦：点一下中心槽切到该源块（嵌套块也进得去），不误建空块', async () => {
+await check('T40 反链 footer 的块标能聚焦：点一下中心槽切到该源块（嵌套块也进得去），不误建空块', async () => {
   const { ctx, page } = await freshPage(browser, base)
   const targetPage = await page.evaluate(() => window.__demo.pages()[0].id)
   await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), targetPage)
@@ -1761,7 +1890,7 @@ await check('T39 反链 footer 的块标能聚焦：点一下中心槽切到该�
   return `点嵌套源块 ${src.id.slice(-6)} 的块标 ⇒ 正文首行切到它（块数仍 ${after.total}）`
 })
 
-await check('T40 冷启动直接打字后 ⌘Z：撤销只回滚文字，不把整片正文清空（未经 openPage）', async () => {
+await check('T41 冷启动直接打字后 ⌘Z：撤销只回滚文字，不把整片正文清空（未经 openPage）', async () => {
   const { ctx, page } = await freshPage(browser, base)
 
   /**
@@ -1797,7 +1926,7 @@ await check('T40 冷启动直接打字后 ⌘Z：撤销只回滚文字，不把�
   return `冷启动敲 1 字 → ⌘Z：${before.texts.length} 行原样回来（DOM ${after.dom} 行，块数 ${after.total}）`
 })
 
-await check('T41 冷启动后在反链 footer 编辑，不会把正文重载成空（共享 store 首次 touch）', async () => {
+await check('T42 冷启动后在反链 footer 编辑，不会把正文重载成空（共享 store 首次 touch）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   const ids = await page.evaluate(() => {
     const bs = window.__demo.blocks()
@@ -1849,7 +1978,7 @@ await check('T41 冷启动后在反链 footer 编辑，不会把正文重载成�
   return `冷启动 footer 编辑：正文 ${before.rows} 行仍在，两处同步到 Y`
 })
 
-await check('T42 待办行的方框独占块标槽：不叠圆点（todo / done / 深缩进 / hover）', async () => {
+await check('T43 待办行的方框独占块标槽：不叠圆点（todo / done / 深缩进 / hover）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
 
@@ -1918,7 +2047,7 @@ await check('T42 待办行的方框独占块标槽：不叠圆点（todo / done 
   return `todo/done/深缩进（depth ${deepRow.depth}）三种都只有方框（.ico ${deepRow.boxW}，::before none）`
 })
 
-await check('T43 左键点引用直接打开目标；⌥ 才弹详情；dangling / 图片仍弹详情', async () => {
+await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling / 图片仍弹详情', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
 
@@ -2353,7 +2482,7 @@ await check('T20 过新 / 损坏的库不被覆盖：进入只读演示态并持
 
 /* ------------------------------------------------------------ 侧槽 */
 
-await check('T44 Shift+点块标 ⇒ 右槽自动打开并钉住该块；再点一次取消；待办方框同样走这条而不勾选', async () => {
+await check('T45 Shift+点块标 ⇒ 右槽自动打开并钉住该块；再点一次取消；待办方框同样走这条而不勾选', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__demo.quiet(true))
   await openFirstPage(page)
@@ -2404,7 +2533,7 @@ await check('T44 Shift+点块标 ⇒ 右槽自动打开并钉住该块；再点�
   return `关闭态被叫回；普通块与待办块都按 id 进出（待办状态保持 ${todo.todo}）`
 })
 
-await check('T45 从正文块标拖进左槽 ⇒ 钉住并渲染；在槽里编辑，正文同一个块同步（共享 store）', async () => {
+await check('T46 从正文块标拖进左槽 ⇒ 钉住并渲染；在槽里编辑，正文同一个块同步（共享 store）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__demo.quiet(true))
   await openFirstPage(page)
@@ -2447,7 +2576,7 @@ await check('T45 从正文块标拖进左槽 ⇒ 钉住并渲染；在槽里编�
   return `同块两处：槽内打字 ⇒ 正文含「槽内附加」；正文打字 ⇒ 槽内同步（${mirror.slice(0, 12)}…）`
 })
 
-await check('T46 槽内连续输入不被整槽重画打断；⌘Z 在槽里回滚的是**全局共享**的那一份', async () => {
+await check('T47 槽内连续输入不被整槽重画打断；⌘Z 在槽里回滚的是**全局共享**的那一份', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__demo.quiet(true))
   await openFirstPage(page)
@@ -2482,7 +2611,7 @@ await check('T46 槽内连续输入不被整槽重画打断；⌘Z 在槽里回�
   return `逐键输入保持连续；⌘Z 后正文与槽同时回滚`
 })
 
-await check('T47 祖先也被钉住 ⇒ 只渲染祖先（不重复）；钉住清单随 prefs 落盘，重开后仍在', async () => {
+await check('T48 祖先也被钉住 ⇒ 只渲染祖先（不重复）；钉住清单随 prefs 落盘，重开后仍在', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__demo.quiet(true))
   await openFirstPage(page)
@@ -2532,7 +2661,7 @@ await check('T47 祖先也被钉住 ⇒ 只渲染祖先（不重复）；钉住�
   return `清单 ${saved.pref.left.pins.length}+${saved.pref.right.pins.length} 项落盘；右槽只画祖先 ${nested.parent.slice(-6)}`
 })
 
-await check('T48 钉住行有移除入口：移出槽但不删块；左槽移除后清单与 DOM 同时清干净', async () => {
+await check('T49 钉住行有移除入口：移出槽但不删块；左槽移除后清单与 DOM 同时清干净', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__demo.quiet(true))
   await openFirstPage(page)

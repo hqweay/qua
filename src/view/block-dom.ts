@@ -20,11 +20,14 @@ import {
   mkAtom,
   type Atom,
   type Block,
+  type FindBlock,
   type Mark,
   type MarkType,
+  type RefView,
   type VisibleRow,
 } from '../core/index.ts'
 import { t } from '../core/msg.ts'
+import { danglingView, resolveRefs } from '../core/ref.ts'
 import { createIcon } from './icons.ts'
 
 /** 行高：与 CSS 的 `--ui-line-h` 必须一致（虚拟化算占位高度要用） */
@@ -62,18 +65,28 @@ export function tagForMark(t: MarkType): string {
   }
 }
 
-/** 行内原子 → inline 元素（**占 1 格**，不可编辑，可点开） */
-export function makeAtomEl(a: Atom): HTMLElement {
+/**
+ * 行内原子 → inline 元素（**占 1 格**，不可编辑，可点开）。
+ *
+ * `view` 是**解析结果**（`core/ref.ts`），不是 `atom.label`：
+ * 目标改名后 `label` 是过期的字，显示的必须是 `view.label`。
+ * ⚠️ 图片原子不走解析（它的显示名是资产名，不指向块）⇒ `view` 可选。
+ */
+export function makeAtomEl(a: Atom, view?: RefView): HTMLElement {
+  const label = view?.label ?? a.label
   const el = document.createElement('span')
   el.className = `atom atom-${a.kind}`
-  if (a.state === 'dangling') el.classList.add('dangling')
+  if (view?.state === 'dangling') el.classList.add('dangling')
   if (a.asset?.state === 'missing') el.classList.add('missing')
   el.contentEditable = 'false'
   el.dataset.atomId = a.id
+  // ⚠️ 解析后的显示名**另存一份到 `data-ref-label`**：`.atom-label` 里带 `[[ ]]` 装饰，
+  //    而落盘值 `atom.label` 是过期的快照 —— 给探针一个「此刻真的在显示什么」的读点。
+  if (a.kind === 'page') el.dataset.refLabel = label
   el.title =
     a.kind === 'page'
-      ? t(a.state === 'dangling' ? 'ui.atom.pageDanglingTitle' : 'ui.atom.pageTitle', { label: a.label })
-      : t('ui.atom.imageTitle', { label: a.label })
+      ? t(view?.state === 'dangling' ? 'ui.atom.pageDanglingTitle' : 'ui.atom.pageTitle', { label })
+      : t('ui.atom.imageTitle', { label })
   if (a.kind === 'image') {
     const img = document.createElement('img')
     img.className = 'asset-thumb'
@@ -81,16 +94,16 @@ export function makeAtomEl(a: Atom): HTMLElement {
     img.src = thumbUri(a.asset?.hash ?? a.id)
     const name = document.createElement('span')
     name.className = 'asset-name'
-    name.textContent = a.label
+    name.textContent = label
     el.append(img, name)
   } else {
     const ico = document.createElement('span')
     ico.className = 'atom-ico'
     ico.appendChild(createIcon('arrow-up-right', 'sm'))
-    const label = document.createElement('span')
-    label.className = 'atom-label'
-    label.textContent = `[[${a.label}]]`
-    el.append(ico, label)
+    const text = document.createElement('span')
+    text.className = 'atom-label'
+    text.textContent = `[[${label}]]`
+    el.append(ico, text)
   }
   return el
 }
@@ -117,11 +130,22 @@ export function isReadonlyBlock(b: Block): boolean {
  *   会把输入落到上一个文本节点（实测：Enter 拆出空块后紧接着打字会跑进前一块）。
  *   与 ProseMirror 的 trailing `<br>` 同一招——只在空块出现，一有文本就被重渲染掉。
  */
-export function fillBlockText(tx: HTMLElement, b: Block, marks: Mark[], atoms: Atom[]): void {
+export function fillBlockText(
+  tx: HTMLElement,
+  b: Block,
+  marks: Mark[],
+  atoms: Atom[],
+  /**
+   * **引用解析**（可选）：传了 ⇒ 行内引用显示**目标当前的名字**。
+   * 不传 ⇒ 退回 `atom.label` 快照（那是过期的字，只在拿不到森林的场合容忍）。
+   */
+  find?: FindBlock,
+): void {
   tx.textContent = ''
   const text = b.text
   const myMarks = marks.filter((m) => m.blockId === b.id)
   const myAtoms = atoms.filter((a) => a.blockId === b.id)
+  const views = find ? resolveRefs(find, myAtoms) : undefined
 
   const cuts = new Set<number>([0, text.length])
   const clamp = (n: number): number => Math.max(0, Math.min(n, text.length))
@@ -150,7 +174,8 @@ export function fillBlockText(tx: HTMLElement, b: Block, marks: Mark[], atoms: A
     // 占位符 ⇒ 原子元素（找不到对应原子就画成 dangling，**不静默吞掉**，承 64 ）
     if (seg === ATOM_PLACEHOLDER) {
       const a = myAtoms.find((x) => x.start === s)
-      tx.appendChild(makeAtomEl(a ?? mkAtom('page', b.id, s, t('ui.atom.unknown'), { state: 'dangling' })))
+      if (a) tx.appendChild(makeAtomEl(a, views?.get(a.id)))
+      else tx.appendChild(makeAtomEl(mkAtom('page', b.id, s, t('ui.atom.unknown')), danglingView(t('ui.atom.unknown'))))
       continue
     }
 

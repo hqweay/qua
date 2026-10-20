@@ -39,12 +39,20 @@ export interface Atom {
   blockId: string
   start: number
   end: number
+  /**
+   * **fallback**：只有解析不到目标时才显示它（**插入时的快照**，不是「最后见过的名字」——
+   * 见 `core/ref.ts` 的取舍说明）。
+   * ⚠️ 显示什么一律以 `core/ref.ts` 的 `resolveRef` 为准 —— 目标改名后 `label` 就是过期的字。
+   */
   label: string
   target?: { kind: 'page' | 'block'; id: string }
   quote?: { exact: string; prefix: string; suffix: string }
   asset?: { hash: string; name: string; bytes: number; mime: string; state: 'ready' | 'missing'; w?: number; h?: number }
-  /** 引用是否还能解析到实体（状态机的 demo 版：resolved | dangling） */
-  state?: 'resolved' | 'dangling'
+  /**
+   * ⚠️ 这里**没有** `state` 字段：能不能解析到由「此刻森林里有没有那块」决定，
+   *    是**派生**的（`core/ref.ts`）。存一份落盘只会得到一个可能与事实不符的第二份真相
+   *    —— 目标被删又恢复后，落盘那份 `dangling` 没人去改它。
+   */
 }
 
 export function mkAtom(kind: AtomKind, blockId: string, start: number, label: string, extra: Partial<Atom> = {}): Atom {
