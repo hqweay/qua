@@ -55,6 +55,9 @@ export const COMMANDS: CommandDecl[] = [
   /* ---- 历史 ---- */
   { name: 'core.history/undo', title: t('cmd.history.undo'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.history') },
   { name: 'core.history/redo', title: t('cmd.history.redo'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.history') },
+  // 导航历史（中心槽走到哪）；与上面的模型快照栈是两件事
+  { name: 'core.history/back', title: t('cmd.history.back'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.history'), keywords: ['back', 'history', 'navigate'] },
+  { name: 'core.history/forward', title: t('cmd.history.forward'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.history'), keywords: ['forward', 'history', 'navigate'] },
 
   /* ---- 页面 ---- */
   { name: 'core.page/new', title: t('cmd.page.new'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.page') },

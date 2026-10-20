@@ -52,6 +52,8 @@ export const MSG = {
   'cmd.anno.clear-marks': '清除格式',
   'cmd.history.undo': '撤销',
   'cmd.history.redo': '重做',
+  'cmd.history.back': '后退（回到上一个落点）',
+  'cmd.history.forward': '前进（回到后退前的落点）',
   'cmd.page.new': '新建页面',
   'cmd.page.open': '打开页面',
   'cmd.page.next': '下一页',

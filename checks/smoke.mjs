@@ -2690,6 +2690,60 @@ await check('T49 钉住行有移除入口：移出槽但不删块；左槽移除
   return `移出 ${picked.text.slice(0, 10)}…：清单/行清空，块仍在（块数 ${after.topBlocks}）`
 })
 
+await check('T50 导航历史：⌘[ 后退 / ⌘] 前进跨页可走；新导航会清掉前进栈', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__demo.quiet(true))
+  const info = await page.evaluate(() => ({
+    pages: window.__demo.pages().slice(0, 2),
+    bootId: window.__demo.snapshot().activeId,
+  }))
+  assert(info.pages.length >= 2, `至少要有两页才能测跨页历史：${JSON.stringify(info.pages)}`)
+  const [a, b] = info.pages
+
+  // 两次真实导航：boot(今日) → A → B
+  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), a.id)
+  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), b.id)
+  const atB = await page.evaluate(() => ({ id: window.__demo.snapshot().activeId, nav: window.__demo.snapshot().nav }))
+  assert(atB.id === b.id, `当前应在 B：${JSON.stringify(atB)}`)
+  assert(atB.nav.canGoBack && !atB.nav.canGoForward, `两次导航后应能后退、不能前进：${JSON.stringify(atB.nav)}`)
+
+  await page.keyboard.press('Meta+BracketLeft')
+  await page.waitForTimeout(120)
+  const backA = await page.evaluate(() => ({
+    id: window.__demo.snapshot().activeId,
+    nav: window.__demo.snapshot().nav,
+    log: window.__demo.commandLog().slice(-3),
+  }))
+  assert(backA.id === a.id, `⌘[ 应回到 A：${JSON.stringify(backA)}`)
+  assert(backA.log.includes('core.history/back'), `应走 core.history/back 命令：${JSON.stringify(backA.log)}`)
+
+  // 再退一步回到 boot 落点（今日 journal）
+  await page.keyboard.press('Meta+BracketLeft')
+  await page.waitForTimeout(120)
+  const backBoot = await page.evaluate(() => window.__demo.snapshot().activeId)
+  assert(backBoot === info.bootId, `第二次后退应回到冷启动落点：${backBoot} ≠ ${info.bootId}`)
+
+  await page.keyboard.press('Meta+BracketRight')
+  await page.keyboard.press('Meta+BracketRight')
+  await page.waitForTimeout(150)
+  const fwd = await page.evaluate(() => ({
+    id: window.__demo.snapshot().activeId,
+    nav: window.__demo.snapshot().nav,
+  }))
+  assert(fwd.id === b.id, `⌘] 两次应前进回 B：${JSON.stringify(fwd)}`)
+  assert(!fwd.nav.canGoForward, `走到栈顶后不该还能前进：${JSON.stringify(fwd.nav)}`)
+
+  // 后退之后开新页 ⇒ 前进栈作废（浏览器同口径）
+  await page.keyboard.press('Meta+BracketLeft')
+  await page.waitForTimeout(120)
+  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), b.id)
+  const afterNewNav = await page.evaluate(() => window.__demo.snapshot().nav)
+  assert(!afterNewNav.canGoForward, `后退后开新页应清掉前进栈：${JSON.stringify(afterNewNav)}`)
+
+  await ctx.close()
+  return `今日→A→B；⌘[ 退两步、⌘] 进两步；新导航清前进栈`
+})
+
 /* ---------------------------------------------------------------- 汇总 */
 
 await browser.close()

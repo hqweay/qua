@@ -135,6 +135,16 @@ let lastSlashQuery = ''
 /** 截图/自检时静音 toast（产品行为不变，只是不弹提示） */
 let quiet = false
 
+/**
+ * **导航历史**（中心槽的「当前对象」先后）。与 undo/redo 是两套：
+ *   · undo 管**数据**（块树/锚点/原子的快照）；
+ *   · 这里管**走到哪**（打开页、点链接、zoom、面包屑都算一次导航）。
+ *
+ * 左右槽显式钉住、不跟随导航，所以历史只记中心槽的 `activeId`。
+ * `lock` 用来区分「用户导航」与「历史本身在回放」——后者不能再入栈。
+ */
+const nav = { back: [] as string[], forward: [] as string[], lock: false }
+
 const isMac = (): boolean => /Mac|iPhone|iPad/.test(navigator.platform)
 /** 短 id：uuidv7 前 12 位是时间戳（同一毫秒创建的块会撞），所以要短就取**尾部随机段** */
 const shortId = (id: string): string => id.slice(-6)
@@ -202,6 +212,9 @@ function uiCtx(): CtxKeys {
     // 日记：`journalView` 是**真上下文键**（不是 if），`journalDate` 供前后翻日用
     journalView: activeBlock().role === 'journal',
     journalDate: activeBlock().role === 'journal' ? (prop<string>(activeBlock(), '_date') ?? '') : '',
+    // 导航历史是否可走：键位表的 `when` 与命令面板的可用态都读这两个键
+    canGoBack: nav.back.length > 0,
+    canGoForward: nav.forward.length > 0,
     isMac: isMac(),
   }
   return ctx
@@ -645,6 +658,14 @@ const pageDeps: PageDeps = {
   blocks: () => ws.blocks,
   activeId: () => ws.activeId,
   setActiveId: (id) => {
+    /**
+     * **记录导航历史**：只有「真的换了落点」且旧落点还在森林里才记。
+     * 历史回放期间 `nav.lock` 为真 ⇒ 不再入栈，否则前进/后退会自己套自己。
+     */
+    if (!nav.lock && id !== ws.activeId && findInForest(ws.blocks, ws.activeId)) {
+      nav.back.push(ws.activeId)
+      nav.forward = []
+    }
     ws.activeId = id
   },
   loadPage: (roots, marks, atoms) => {
@@ -699,6 +720,33 @@ const pageDeps: PageDeps = {
 /* ------------------------------------------------------------ App */
 
 /**
+ * 前进 / 后退：从栈里取一个**仍然存在**的落点，再用「聚焦到此块」那条命令换当前对象。
+ *
+ * 为什么走命令而不是直接 `setActiveId`：zoom、面包屑、链接点击、历史回放必须是
+ * **同一条**换落点路径（刷新列表/标题/面包屑/落盘都在里面）；再写一份就分叉了。
+ * ⚠️ 回放期间 `nav.lock` 必须为真，否则 `setActiveId` 会把这次回放又记成一条新历史。
+ */
+function historyGo(dir: 'back' | 'forward'): boolean {
+  const from = dir === 'back' ? nav.back : nav.forward
+  const to = dir === 'back' ? nav.forward : nav.back
+  while (from.length > 0) {
+    const id = from.pop()!
+    if (id === ws.activeId) continue
+    if (!findInForest(ws.blocks, id)) continue // 目标在历史里被删了：跳过，别把人送到空处
+    to.push(ws.activeId)
+    nav.lock = true
+    try {
+      void registry.invoke('core.block/focus-block', { blockId: id }, 'history')
+    } finally {
+      nav.lock = false
+    }
+    scheduleBadge()
+    return true
+  }
+  return false
+}
+
+/**
  * `App` 门面：**四个工厂拼装**（页／日记／视图／演示），加上浮层与提示这几件装配层专有的能力。
  *
  * ⚠️ 这里仍然是**唯一**拼装点：本文件持有 `ws`／`ed`／`registry`，工厂只拿到「能做什么」。
@@ -714,6 +762,10 @@ const app: App = {
   ...zoomCommands(pageDeps),
   ...favoritesCommands(pageDeps),
 
+  // 导航历史（中心槽走到哪）；与 undo/redo 的模型快照栈无关
+  historyBack: () => historyGo('back'),
+  historyForward: () => historyGo('forward'),
+
   ...viewCommands({
     prefs: () => prefs(),
     applyChrome,
@@ -726,6 +778,9 @@ const app: App = {
   ...demoCommands({
     replaceWorkspace: (next) => {
       ws = next
+      // 换库 ⇒ 旧落点全部失效；历史留着只会把用户送到「上一份演示数据」的 id
+      nav.back = []
+      nav.forward = []
       const p = activeBlock()
       // ⚠️ 先解析 `p` 再 `blocks.reset`：`activeBlock()` 读的是**森林**（`ws.activeId`），
       //    重置之后再算就只剩「`ws.blocks[0]`」这条兜底，`sparse` 的 activeId 一旦不是首块就取错。
@@ -1204,6 +1259,8 @@ const api = {
       composing: mainEd.probe.isComposing,
       virtualize: mainEd.virtualize,
       activePage: pageTitle(activeBlock()),
+      // 导航历史断言要认「当前对象」本身（页名可能重复/为空）
+      activeId: ws.activeId,
       // ⚠️ 「页数」＝ `page` 角色的块数（journal 不算页）；顶层块总数另给 `topBlocks`
       pageCount: ws.blocks.filter((b) => b.role === 'page').length,
       topBlocks: ws.blocks.length,
@@ -1227,6 +1284,8 @@ const api = {
         left: { open: prefs().dock.left.open, width: prefs().dock.left.width, pins: [...prefs().dock.left.pins] },
         right: { open: prefs().dock.right.open, width: prefs().dock.right.width, pins: [...prefs().dock.right.pins] },
       },
+      // 导航历史（不是 undo 栈）：给断言看「能退到哪 / 能进到哪」
+      nav: { back: [...nav.back], forward: [...nav.forward], canGoBack: nav.back.length > 0, canGoForward: nav.forward.length > 0 },
     }
   },
   text() {

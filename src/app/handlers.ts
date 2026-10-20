@@ -214,6 +214,8 @@ export const HANDLERS: Record<string, Handler> = {
     app.ed.redoStep()
     return true
   },
+  'core.history/back': (_a, app) => app.historyBack(),
+  'core.history/forward': (_a, app) => app.historyForward(),
 
   /* ---- 页面 ---- */
   'core.page/new': (_a, app) => {

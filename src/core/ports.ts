@@ -93,6 +93,14 @@ export interface App {
   zoomTo(id: string): void
   /** 退回该容器所在的顶层块（面包屑的「根」） */
   zoomOut(): void
+  /**
+   * **导航历史**：中心槽「当前对象」的先后（不是 undo/redo 的模型快照栈）。
+   *
+   * 链接点击、页/日记打开、zoom、面包屑都会记一条；左右槽显式钉住、不跟随导航。
+   * 历史里指向的块可能已被删除 ⇒ 跳过继续找，不把用户卡在一个不存在的落点。
+   */
+  historyBack(): boolean
+  historyForward(): boolean
   /* 收藏容器块（容器 ＝ 普通块 ＋ 一列有序块引用） */
   /** 把块加进收藏；`containerId` 省略＝加进第一个容器（没有就建一个） */
   addFavorite(blockId: string, containerId?: string): void

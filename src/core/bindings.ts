@@ -65,6 +65,9 @@ export const BINDINGS: Binding[] = [
   { command: 'core.history/undo', kind: 'keymap', key: 'mod+z', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.history/redo', kind: 'keymap', key: 'mod+shift+z', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.history/redo', kind: 'keymap', key: 'mod+y', when: 'editorTextFocus', layer: 'core' },
+  // 导航前进/后退（中心槽走到哪）：与 undo/redo 的模型快照栈是两套，键也不同
+  { command: 'core.history/back', kind: 'keymap', key: 'mod+[', when: 'canGoBack', layer: 'core' },
+  { command: 'core.history/forward', kind: 'keymap', key: 'mod+]', when: 'canGoForward', layer: 'core' },
   // `when` 为空 ⇒ 总是可用：命令面板是键盘可达性的兜底
   { command: 'core.command-palette/show', kind: 'keymap', key: 'mod+p', when: '', layer: 'core' },
   { command: 'core.command-palette/show', kind: 'keymap', key: 'mod+shift+p', when: '', layer: 'core' },
