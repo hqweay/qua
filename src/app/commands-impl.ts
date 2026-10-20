@@ -13,6 +13,7 @@
  */
 import {
   addFavorite,
+  ensureTag,
   ensureFirstBlock,
   favoritesContainers,
   findInForest,
@@ -30,6 +31,7 @@ import {
   removeFavorite,
   shiftISO,
   todayISO,
+  type AtomKind,
   type Block,
 } from '../core/index.ts'
 
@@ -88,6 +90,14 @@ export function makePageBlock(): Block {
 export interface PageDeps {
   /** 读块森林（**返回的是活引用**，push/splice 直接生效） */
   blocks: () => Block[]
+  /**
+   * 插行内原子（打标签用）。
+   *
+   * ⚠️ 为什么注入的是**一个函数**而不是 `editor` 对象本身：活动编辑器是会变的
+   *    （正文 vs 反链 footer），注入对象会在切换后指向旧实例；注入函数每次取当前的。
+   * ⚠️ 它必须落到**共享 store**，否则别的视图（反链/查询）看不到这条边。
+   */
+  insertAtom: (kind: AtomKind, opts: Parameters<App['ed']['insertAtom']>[1]) => string | null
   activeId: () => string
   setActiveId: (id: string) => void
   /** 把某页的子树装进编辑器（marks/atoms 是库级平铺） */
@@ -113,7 +123,15 @@ export interface PageDeps {
 /** 页命令（页名＝块正文，所以「改名」就是改块） */
 export function pageCommands(d: PageDeps): Pick<
   App,
-  'listPages' | 'activePageId' | 'newPage' | 'openPage' | 'deletePage' | 'renamePage' | 'focusTitle' | 'showRefPicker'
+  | 'listPages'
+  | 'activePageId'
+  | 'newPage'
+  | 'openPage'
+  | 'deletePage'
+  | 'renamePage'
+  | 'focusTitle'
+  | 'showRefPicker'
+  | 'insertTag'
 > {
   const count = (p: Block): number => flatten({ roots: p.children }).length
 
@@ -189,6 +207,31 @@ export function pageCommands(d: PageDeps): Pick<
 
     /** ：没有页标题输入框 ⇒ 焦点交给页块正文的首块 */
     focusTitle: () => d.focusFirstBlock(),
+
+    /**
+     * **打标签**＝插一条指向标签块的边。
+     *
+     * 两步一次做完（「找到或创建标签块」＋「插原子」），中间不留半截状态：
+     * 只建块没插边 ⇒ 库里多一个没人引用的标签；只插边没建块 ⇒ 边指着不存在的目标。
+     *
+     * ⚠️ 空名字直接拒绝（不建无名标签）：没有名字的标签没有身份，建了就是孤儿。
+     * ⚠️ 建了新标签要 `refreshList` ＋ `scheduleSave`：森林变了，且这是要落盘的内容。
+     */
+    insertTag: (tag) => {
+      const { block, created } = ensureTag(d.blocks(), tag)
+      if (!block) {
+        d.toast(t('ui.toast.tagEmpty'), 'warn')
+        return
+      }
+      if (!d.insertAtom('tag', { label: block.text, target: { kind: 'page', id: block.id } })) return
+      if (created) {
+        d.refreshList()
+        d.toast(t('ui.toast.tagCreated', { tag: block.text }))
+      } else {
+        d.toast(t('ui.toast.tagAdded', { tag: block.text }))
+      }
+      d.scheduleSave()
+    },
 
     showRefPicker: () => {
       const rows: Row[] = d.blocks().map((p) => ({

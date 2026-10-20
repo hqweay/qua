@@ -272,11 +272,14 @@ export const MSG = {
   'ui.atom.unknown': '未知原子',
   'ui.atom.pageTitle': '引用：{label}（左键打开，⌥ 点击看信息）',
   'ui.atom.pageDanglingTitle': '引用：{label}（目标不存在，点击看信息）',
+  'ui.atom.tagTitle': '标签：#{label}（左键打开，⌥ 点击看信息）',
+  'ui.atom.tagDanglingTitle': '标签：#{label}（目标不存在，点击看信息）',
   'ui.atom.imageTitle': '图片：{label}（点击看资产信息）',
   'ui.virt.placeholder': '⋯ 窗口外 {count} 行（虚拟化，未挂 DOM）',
 
   /* ---------------------------------------------------------------- 信息气泡 */
   'ui.popover.refTitle': '行内引用 · {label}',
+  'ui.popover.tagTitle': '标签 · {label}',
   'ui.popover.imageTitle': '图片原子 · {label}',
   'ui.popover.atomId': '原子 id',
   'ui.popover.target': '目标实体',
@@ -286,8 +289,10 @@ export const MSG = {
   'ui.popover.quote': '引文快照',
   'ui.popover.danglingNote': '目标不存在：状态是 dangling，不是静默错指。',
   'ui.popover.refNote': '引用指向实体 id，编辑只改锚点区间。',
-  'ui.popover.openPage': '打开页面',
+  // 引用与标签共用：目标可以是任意块（不只是顶层页）
+  'ui.popover.openPage': '打开目标',
   'ui.popover.deleteRef': '删除这个引用',
+  'ui.popover.deleteTag': '删除这个标签',
   'ui.popover.assetHash': '资产 hash（内容寻址）',
   'ui.popover.size': '尺寸',
   'ui.popover.mimeBytes': 'mime / 字节',
@@ -348,6 +353,9 @@ export const MSG = {
   'ui.toast.virtOn': '虚拟化 on（窗口半径 {radius} 行）：DOM 节点数会小于块数',
   'ui.toast.virtOff': '虚拟化 off：全部块都挂 DOM',
   'ui.toast.atomsLost': '行内原子失效：{labels}（引用目标被删掉了）',
+  'ui.toast.tagAdded': '已打标签 #{tag}',
+  'ui.toast.tagCreated': '新建标签 #{tag} 并打上',
+  'ui.toast.tagEmpty': '标签名是空的',
 
   /* ------------------------------------------------------ 演示数据的小文案（假数据） */
   'ui.arg.defaultTag': '标签',

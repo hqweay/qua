@@ -25,11 +25,18 @@ export interface Mark {
 
 /* ------------------------------------------------------ 行内原子（atoms） */
 
-export type AtomKind = 'page' | 'image'
+/**
+ * `page` 页面引用（`[[名]]`）｜`tag` 标签（`#名`）｜`image` 图片（`![[名]]`）
+ *
+ * ⚠️ `page` 与 `tag` **都是指向边**，区别只在**呈现模式**（AK6：呈现模式与边 role 是两张表）：
+ *    一个显示成 `[[名]]`、一个显示成 `#名`。数据同构 ⇒ 扫描时应当一起算（见 `core/tags.ts`
+ *    的 `edgeSourceIds`），不该各写一套。
+ */
+export type AtomKind = 'page' | 'tag' | 'image'
 
 /**
  * 行内原子：**一个只占 1 个字符位置的区间锚点**（`end = start + 1`，文本里那一格是 U+FFFC）。
- * - 引用：`target` 指向**实体 id**，不指向裸坐标 ⇒ 目标改名/移动不影响；
+ * - 引用／标签：`target` 指向**实体 id**，不指向裸坐标 ⇒ 目标改名/移动不影响；
  * - 引文快照：`quote` C `TextQuoteSelector`；demo 里已随原子一起存；
  * - 图片：`asset` 是资产引用（hash 命名），`state: 'missing'` 演示「资产不可用是状态不是错误」。
  */

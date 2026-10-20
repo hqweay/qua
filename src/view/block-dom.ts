@@ -80,13 +80,15 @@ export function makeAtomEl(a: Atom, view?: RefView): HTMLElement {
   if (a.asset?.state === 'missing') el.classList.add('missing')
   el.contentEditable = 'false'
   el.dataset.atomId = a.id
-  // ⚠️ 解析后的显示名**另存一份到 `data-ref-label`**：`.atom-label` 里带 `[[ ]]` 装饰，
+  // ⚠️ 解析后的显示名**另存一份到 `data-ref-label`**：`.atom-label` 里带 `[[ ]]` / `#` 装饰，
   //    而落盘值 `atom.label` 是过期的快照 —— 给探针一个「此刻真的在显示什么」的读点。
-  if (a.kind === 'page') el.dataset.refLabel = label
+  if (a.kind === 'page' || a.kind === 'tag') el.dataset.refLabel = label
   el.title =
     a.kind === 'page'
       ? t(view?.state === 'dangling' ? 'ui.atom.pageDanglingTitle' : 'ui.atom.pageTitle', { label })
-      : t('ui.atom.imageTitle', { label })
+      : a.kind === 'tag'
+        ? t(view?.state === 'dangling' ? 'ui.atom.tagDanglingTitle' : 'ui.atom.tagTitle', { label })
+        : t('ui.atom.imageTitle', { label })
   if (a.kind === 'image') {
     const img = document.createElement('img')
     img.className = 'asset-thumb'
@@ -97,12 +99,17 @@ export function makeAtomEl(a: Atom, view?: RefView): HTMLElement {
     name.textContent = label
     el.append(img, name)
   } else {
+    /**
+     * 引用与标签**只有装饰不同**（`[[名]]` vs `#名`）—— 两者是同一种指向边。
+     * ⚠️ `#` 与 `[[ ]]` 都不进正文：正文里那一格只有 U+FFFC，
+     *    否则「标签块的正文本身」与「它在引用处显示的字」会变成两个要同步的东西。
+     */
     const ico = document.createElement('span')
     ico.className = 'atom-ico'
-    ico.appendChild(createIcon('arrow-up-right', 'sm'))
+    ico.appendChild(createIcon(a.kind === 'tag' ? 'hash' : 'arrow-up-right', 'sm'))
     const text = document.createElement('span')
     text.className = 'atom-label'
-    text.textContent = `[[${label}]]`
+    text.textContent = a.kind === 'tag' ? `#${label}` : `[[${label}]]`
     el.append(ico, text)
   }
   return el
@@ -179,25 +186,22 @@ export function fillBlockText(
       continue
     }
 
+    /**
+     * ⚠️ 这里**不再认 `#标签`**：那曾是「第二套正则解析」（71.4 承认的债）——
+     *    `insert-tag` 写文本、`hasTag` 正则扫文本、渲染再正则包一层 span，三处各认一次，
+     *    于是「看起来是标签」与「真的是一条边」是两件事。
+     *    现在标签＝一条指向边（`tag` 原子），由上面的占位符分支统一渲染。
+     *    ⇒ 正文里的 `#设计` 现在就是普通文本（原型阶段，存量 seed 不再假装是标签）。
+     */
     const covering = myMarks.filter((m) => m.start <= s && m.end >= e)
-    // `#标签` 是**纯展示样式**：既不是锚点也不是原子，文本仍然是文本（承 43）
-    for (const part of seg.split(/(#[^\s#]{1,32})/g)) {
-      if (!part) continue
-      let node: Node = document.createTextNode(part)
-      if (/^#[^\s#]{1,32}$/.test(part)) {
-        const tag = document.createElement('span')
-        tag.className = 'tag'
-        tag.appendChild(node)
-        node = tag
-      }
-      for (const m of covering) {
-        const wrap = document.createElement(tagForMark(m.type))
-        wrap.className = `mk mk-${m.type}`
-        wrap.appendChild(node)
-        node = wrap
-      }
-      tx.appendChild(node)
+    let node: Node = document.createTextNode(seg)
+    for (const m of covering) {
+      const wrap = document.createElement(tagForMark(m.type))
+      wrap.className = `mk mk-${m.type}`
+      wrap.appendChild(node)
+      node = wrap
     }
+    tx.appendChild(node)
   }
 
   if (tx.childNodes.length === 0) tx.appendChild(document.createElement('br'))

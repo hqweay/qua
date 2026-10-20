@@ -39,10 +39,12 @@ export interface BackrefInput {
 export function backrefsOf(input: BackrefInput): BackrefSource[] {
   const { blocks, atoms, targetId } = input
 
-  // 1) 哪些块里出现了指向目标的引用
+  // 1) 哪些块里出现了指向目标的边
+  // ⚠️ 引用与标签**都是指向边**（AK6 的呈现模式表：一个显示 `[[名]]`、一个显示 `#名`）。
+  //    以前这里只认 `kind === 'page'` ⇒ 标签块的反链永远是空的，那是个静默的洞。
   const hits = new Map<string, number>()
   for (const a of atoms) {
-    if (a.kind !== 'page' || a.target?.id !== targetId) continue
+    if ((a.kind !== 'page' && a.kind !== 'tag') || a.target?.id !== targetId) continue
     hits.set(a.blockId, (hits.get(a.blockId) ?? 0) + 1)
   }
   if (hits.size === 0) return []
@@ -93,7 +95,8 @@ export interface BackrefBlock {
 export function backrefBlocks(input: BackrefInput): BackrefBlock[] {
   const hits = new Map<string, number>()
   for (const a of input.atoms) {
-    if (a.kind !== 'page' || a.target?.id !== input.targetId) continue
+    // 同 `backrefsOf`：引用与标签都是指向边 ⇒ 「标签的成员」就是标签块的反链
+    if ((a.kind !== 'page' && a.kind !== 'tag') || a.target?.id !== input.targetId) continue
     hits.set(a.blockId, (hits.get(a.blockId) ?? 0) + 1)
   }
   if (hits.size === 0) return []
