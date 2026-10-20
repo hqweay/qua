@@ -98,6 +98,13 @@ export interface ViewOpts {
   allowBlankCreate?: boolean
   /** 是否允许删除 section 根；反链视图设为 false（删源块走命令面） */
   allowRootRemove?: boolean
+  /**
+   * 是否跟随共享 store **自动重载**（默认 true）。
+   *
+   * 槽里的钉住块要自己控制节奏：外部每次 store 变化都重画会让侧槽跟着正文每个按键抖动，
+   * 所以那一类实例关掉自动重载，改由承载它的组件防抖后显式 `reloadFromStore()`。
+   */
+  autoReload?: boolean
 }
 
 export interface ViewEvents {
@@ -116,6 +123,13 @@ export interface ViewEvents {
    * 装配层把它接到 `core.block/focus-block`（面包屑那一格是同一个命令）。
    */
   focusBlock?: (blockId: string) => void
+  /**
+   * **Shift+左键点块标**：把这个块钉到右槽（已钉住则取消）。
+   *
+   * 单独一个回调而不是在事件层看 `shiftKey` 调 `focusBlock`：事件层不该知道
+   * 「右槽」与「钉住」这层语义，它只负责把修饰键翻译成另一个动作。
+   */
+  openInDock?: (blockId: string) => void
   /**
    * 模型选区变了（**划选气泡的驱动**，2026-10-19）。
    * 只有这里知道「选区到底变了没有」——气泡不能靠猜，否则每次按键都会重建 DOM。
@@ -188,6 +202,9 @@ export class BlockEditor {
   blankArea: HTMLElement
   private allowBlankCreate: boolean
   private allowRootRemove: boolean
+  /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
+  private readonly offStore: () => void
+  private readonly unbind: () => void
 
   constructor(o: ViewOpts) {
     this.container = o.container
@@ -204,14 +221,23 @@ export class BlockEditor {
      */
     this.viewRootIds = o.doc.roots.map((b) => b.id)
     this.store = o.store ?? new BlockStore(o.doc.roots, o.marks ?? [], o.atoms ?? [])
-    this.store.subscribe((source?: unknown) => {
-      // 发起编辑的视图自己已经渲染过；其他视图按 root id 从 store 重取（共享对象，不拷贝块数据）
-      if (source !== this) this.reloadFromStore()
-    })
+    this.offStore =
+      o.autoReload === false
+        ? () => {}
+        : this.store.subscribe((source?: unknown) => {
+            // 发起编辑的视图自己已经渲染过；其他视图按 root id 从 store 重取（共享对象，不拷贝块数据）
+            if (source !== this) this.reloadFromStore()
+          })
     this.container.setAttribute('contenteditable', 'true')
     this.container.setAttribute('spellcheck', 'false')
-    this.bind()
+    this.unbind = this.bind()
     this.renderAll()
+  }
+
+  /** 从文档里摘掉这个视图：退订 store、卸掉事件（否则游离容器还会继续被重画） */
+  dispose(): void {
+    this.offStore()
+    this.unbind()
   }
 
   /* ------------------------------------------------------------ 快照 */
@@ -1454,8 +1480,8 @@ export class BlockEditor {
    * 事件接线：**全部委托给 `view/editor-events`**。
    * 这里只把编辑器的能力面递过去——事件逻辑不需要认识 `doc`／`undo`／`marks`。
    */
-  private bind(): void {
-    bindEditorEvents({
+  private bind(): () => void {
+    return bindEditorEvents({
       container: this.container,
       blockOf: (n) => this.blockOf(n),
       syncSel: () => this.syncSel(),
@@ -1533,6 +1559,8 @@ export class BlockEditor {
       onBlockMenu: (id, rect) => this.events.blockMenu?.(id, rect),
       // 左键点块标 ＝ 聚焦/zoom
       focusBlock: (id) => this.events.focusBlock?.(id),
+      // Shift+左键点块标 ＝ 在右槽钉住；没有接这个事件的视图（如反链 footer）退化成聚焦
+      openInDock: (id) => (this.events.openInDock ? this.events.openInDock(id) : this.events.focusBlock?.(id)),
       toggleCollapse: (id) => this.toggleCollapse(id),
       toggleChildrenCollapse: (id) => this.toggleChildrenCollapse(id),
       toggleTodo: (id) => this.toggleTodo(id),

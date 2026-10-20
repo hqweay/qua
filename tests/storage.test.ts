@@ -27,7 +27,7 @@ function lib(patch: Partial<Workspace> = {}): Workspace {
     version: WORKSPACE_VERSION,
     blocks: [{ id: 'b1', text: 'hello', children: [] }],
     activeId: 'b1',
-    prefs: { theme: 'system', dock: { left: { open: true, width: null }, right: { open: true, width: null } }, virtualize: false, radius: 12, badgeOpen: false },
+    prefs: { theme: 'system', dock: { left: { open: true, width: null, pins: [] }, right: { open: true, width: null, pins: [] } }, virtualize: false, radius: 12, badgeOpen: false },
     savedAt: 0,
     marks: [],
     atoms: [],

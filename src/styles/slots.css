@@ -11,6 +11,8 @@
   min-width: 0;
   min-height: 0;
   background: var(--ui-surface);
+  /* 宽度手柄绝对定位在槽的内侧边缘 ⇒ 槽是它的定位锚 */
+  position: relative;
 }
 .dock[data-dock='left'],
 .dock[data-dock='right'] {
@@ -138,8 +140,94 @@
   color: var(--ui-text);
 }
 
-/* 页块的一行：由 `ui/block-renderers.ts` 产出（`.page-item` 是对外契约，不许改名） */.page-item {
+/* ---------------------------------------------------------- 钉住的块 */
+
+/*
+ * 钉住的块：**真实块的编辑器**，不是一份摘要。
+ * 它是一张常驻卡片（重画槽时原地不动），行与行之间只留极小的缝。
+ */
+.pin-list {
   display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+}
+.pin-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ui-gap-2);
+  min-width: 0;
+}
+.pin-editor {
+  flex: 1;
+  min-width: 0;
+}
+.pin-remove {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-tertiary);
+  opacity: 0;
+  line-height: 1;
+}
+.pin-row:hover .pin-remove,
+.pin-remove:focus-visible {
+  opacity: 1;
+}
+.pin-remove:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+
+/* ---------------------------------------------------------- 宽度手柄 */
+
+/*
+ * 内侧边缘的拖拽条：左槽在右缘、右槽在左缘（位置由 `data-resize-side` 决定）。
+ * 命中区比视觉线宽得多（好点），视觉上只有 hover/拖动时才出现。
+ * ⚠️ 关闭的槽、压缩区间（< 840）都不给手柄：那两种情况宽度由 CSS 决定，拖了也不会生效。
+ */
+.dock-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--ui-gap-3);
+  z-index: 4;
+  cursor: col-resize;
+  touch-action: none;
+}
+.dock-resize[data-resize-side='left'] {
+  right: 0;
+}
+.dock-resize[data-resize-side='right'] {
+  left: 0;
+}
+.dock-resize:hover,
+body[data-dock-resizing='1'] .dock-resize {
+  background: var(--ui-accent-soft);
+}
+body[data-dock-left='closed'] #dock-left .dock-resize,
+body[data-dock-right='closed'] #dock-right .dock-resize {
+  display: none;
+}
+@media (max-width: 839px) {
+  .dock-resize {
+    display: none;
+  }
+}
+/* 拖动期间不许选中文本、整页给同一种 cursor（避免经过正文时闪成 I 形） */
+body[data-dock-resizing='1'],
+body[data-dock-resizing='1'] * {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* 拖拽经过槽：整槽内描边，说明「松手会钉到这里」 */
+.dock[data-drop-pin='1'] .dock-stack {
+  box-shadow: inset 0 0 0 2px var(--ui-accent);
+}
+
+/* 页块的一行：由 `ui/block-renderers.ts` 产出（`.page-item` 是对外契约，不许改名） */.page-item {  display: flex;
   align-items: center;
   gap: var(--ui-gap-3);
   height: var(--ui-row-h);

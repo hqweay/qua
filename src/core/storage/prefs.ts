@@ -27,11 +27,18 @@ export interface Prefs {
   railOpen?: boolean
 }
 
-/** 单个槽的本地状态（宽度与开关都是设备状态，不入 KB） */
+/** 单个槽的本地状态（宽度、开关、钉住的块都是设备状态，不入 KB） */
 export interface DockSlotPrefs {
   open: boolean
   /** 用户拖过的宽度；`null` ＝ 没拖过，用 token 里的默认值 */
   width: number | null
+  /**
+   * 钉在这个槽里的块 id（**有序**，按钉入的先后）。
+   *
+   * 它只是**视图状态**：块仍然只有森林里那一份，这里存的是「要看哪几个」。
+   * 于是删块/撤销都不会被这份清单污染 —— 渲染时按 id 去森林里找，找不到就不画。
+   */
+  pins: string[]
 }
 
 export interface DockPrefs {
@@ -47,8 +54,8 @@ export interface DockPrefs {
  * 宽度 `null` ⇒ 用 token 的默认值（`--ui-dock-w-left`／`--ui-dock-w-right`）。
  */
 export const DEFAULT_DOCK: DockPrefs = {
-  left: { open: true, width: null },
-  right: { open: true, width: null },
+  left: { open: true, width: null, pins: [] },
+  right: { open: true, width: null, pins: [] },
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -68,6 +75,10 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
   const pick = (slot: DockSlotPrefs | undefined, fallback: DockSlotPrefs): DockSlotPrefs => ({
     open: typeof slot?.open === 'boolean' ? slot.open : fallback.open,
     width: typeof slot?.width === 'number' && Number.isFinite(slot.width) ? slot.width : null,
+    // 形状兜底：缺字段 ⇒ 空；非字符串与重复值一律丢掉（重复会让同一个块在槽里出现两次）
+    pins: Array.isArray(slot?.pins)
+      ? [...new Set(slot.pins.filter((id): id is string => typeof id === 'string' && id !== ''))]
+      : [],
   })
   return {
     ...DEFAULT_PREFS,

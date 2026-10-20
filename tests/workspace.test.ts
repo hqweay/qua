@@ -31,7 +31,27 @@ test('parseWorkspace: 合法库 ⇒ ok，并补默认 prefs', () => {
   if (r.status !== 'ok') return
   assert.equal(r.ws.blocks.length, 1)
   assert.equal(r.ws.prefs.theme, 'system')
-  assert.deepEqual(r.ws.prefs.dock, { left: { open: true, width: null }, right: { open: true, width: null } })
+  assert.deepEqual(r.ws.prefs.dock, {
+    left: { open: true, width: null, pins: [] },
+    right: { open: true, width: null, pins: [] },
+  })
+})
+
+test('parseWorkspace: 钉住清单只做形状兜底（缺字段 ⇒ 空；非字符串/重复值丢掉）', () => {
+  const r = parseWorkspace(
+    valid({
+      prefs: {
+        dock: {
+          left: { open: true, width: 300, pins: ['a', 7, null, 'a', '', 'b'] },
+          right: { open: false, width: null },
+        },
+      },
+    }),
+  )
+  assert.equal(r.status, 'ok')
+  if (r.status !== 'ok') return
+  assert.deepEqual(r.ws.prefs.dock.left, { open: true, width: 300, pins: ['a', 'b'] })
+  assert.deepEqual(r.ws.prefs.dock.right, { open: false, width: null, pins: [] })
 })
 
 test('parseWorkspace: 比当前新的版本 ⇒ too-new（绝不 seed 覆盖）', () => {

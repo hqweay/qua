@@ -29,6 +29,17 @@ export interface DockContentDeps {
   removeFavorite: (containerId: string, blockId: string) => void
 }
 
+/** 额外内容：常驻卡片（活编辑器）与调用方准备的卡片 */
+export interface DockExtra {
+  /** 排在内建卡片之前的卡片（由调用方决定内容） */
+  cards?: DockCard[]
+  /**
+   * **常驻节点**：不在每次重画里重建（例如承载 `BlockEditor` 的钉住卡片）。
+   * 它们挂在堆叠最上面，重画其余卡片时原地不动 —— 移动会打断 contenteditable 的光标。
+   */
+  persistent?: HTMLElement[]
+}
+
 /**
  * 左槽：**今日**（journal 块）＋ **收藏容器块**。
  *
@@ -37,7 +48,7 @@ export interface DockContentDeps {
  *    现在：容器块自己是一条记录（名字 = 它的正文），内容 = 它 `_favorites` 里的引用，
  *    按顺序渲染；悬空引用**不静默丢弃**（`liveFavorites` 过滤，`pruneFavorites` 显式清）。
  */
-export function renderFavoritesInto(deps: DockContentDeps, slot: DockSlotEls): void {
+export function renderFavoritesInto(deps: DockContentDeps, slot: DockSlotEls, extra: DockExtra = {}): void {
   const ctx: BlockRenderCtx = {
     isActive: (id) => id === deps.activeId(),
     onActivate: (b) => deps.openPage(b.id),
@@ -102,7 +113,7 @@ export function renderFavoritesInto(deps: DockContentDeps, slot: DockSlotEls): v
     })
   }
 
-  renderDockStack(slot.stack, cards, t('ui.dock.empty'))
+  renderDockStack(slot.stack, [...(extra.cards ?? []), ...cards], t('ui.dock.empty'), extra.persistent)
 }
 
 /** 把一段节点包成一个 body 容器（`DockCard.body` 要的是元素） */
@@ -114,7 +125,7 @@ function wrap(el: HTMLElement): HTMLElement {
 }
 
 /** 右槽：反链面板 */
-export function renderBackrefsInto(deps: DockContentDeps, slot: DockSlotEls): void {
+export function renderBackrefsInto(deps: DockContentDeps, slot: DockSlotEls, extra: DockExtra = {}): void {
   const target = deps.activeId()
   const sources = backrefsOf({ blocks: deps.blocks(), atoms: deps.atoms(), targetId: target })
 
@@ -139,5 +150,5 @@ export function renderBackrefsInto(deps: DockContentDeps, slot: DockSlotEls): vo
   }
 
   const cards: DockCard[] = [{ id: 'backrefs', title: t('ui.dock.backRefs'), body: list }]
-  renderDockStack(slot.stack, cards, t('ui.dock.empty'))
+  renderDockStack(slot.stack, [...(extra.cards ?? []), ...cards], t('ui.dock.empty'), extra.persistent)
 }

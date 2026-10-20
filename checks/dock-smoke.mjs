@@ -119,6 +119,107 @@ await check('A14 非压缩区间：开关一槽，另一槽宽度不变；中心
   return `左 ${before.left.w}→${noRight.left.w}（关右）/ 右 ${before.right.w}→${noLeft.right.w}（关左），中心 ${before.center.w}→${noRight.center.w}`
 })
 
+/* ---------------------------------------------------------------- A15 */
+
+await check('A15 宽度手柄：拖动改宽并落盘、clamp 保证中心槽可用；双击恢复默认；关闭/压缩区间不给手柄', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__demo.quiet(true))
+
+  const read = () =>
+    page.evaluate(() => {
+      const w = (side) => document.getElementById(`dock-${side}`).getBoundingClientRect().width
+      const display = (side) => getComputedStyle(document.querySelector(`#dock-${side} .dock-resize`)).display
+      return {
+        widths: { left: w('left'), center: w('center'), right: w('right') },
+        handles: { left: display('left'), right: display('right') },
+        dock: window.__demo.snapshot().dock,
+        inner: window.innerWidth,
+        over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      }
+    })
+
+  /** 用真鼠标从手柄中点拖 dx（左槽向右为正；右槽向左为正） */
+  const drag = async (side, dx) => {
+    const box = await page.locator(`#dock-${side} .dock-resize`).boundingBox()
+    assert(box, `${side} 槽手柄应有可拖区域`)
+    const x = box.x + box.width / 2
+    const y = box.y + Math.min(120, box.height / 2)
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    await page.mouse.move(x + dx, y, { steps: 8 })
+    await page.mouse.up()
+    await page.waitForTimeout(120)
+  }
+
+  const start = await read()
+  assert(start.dock.left.width === null && Math.abs(start.widths.left - 236) <= 1, `初始应是 token 默认宽：${JSON.stringify(start)}`)
+  assert(start.handles.left !== 'none' && start.handles.right !== 'none', `开着的槽应显示手柄：${JSON.stringify(start.handles)}`)
+
+  // 左槽向右拖 120：宽度跟着变、写进 prefs、中心槽仍有可用空间
+  await drag('left', 120)
+  const wide = await read()
+  assert(Math.abs(wide.widths.left - (start.widths.left + 120)) <= 2, `左槽应跟着拖宽：${start.widths.left} → ${wide.widths.left}`)
+  assert(wide.dock.left.width === Math.round(wide.widths.left), `prefs 里应写入实测宽度：${JSON.stringify(wide.dock.left)}`)
+  assert(wide.widths.center >= 480, `中心槽不该被挤到 480 以下：${wide.widths.center}`)
+  assert(!wide.over, `拖宽不该横向溢出：${JSON.stringify(wide.widths)}`)
+
+  // 关掉再打开：宽度从 prefs 写回（冷启动 / 切槽走的是同一条 applyChrome）
+  await page.evaluate(() => window.__demo.invoke('core.dock/toggle-left'))
+  await page.waitForTimeout(120)
+  const hidden = await read()
+  assert(hidden.widths.left <= 0.5, `关掉的左槽应把列宽收成 0：${hidden.widths.left}`)
+  await page.evaluate(() => window.__demo.invoke('core.dock/toggle-left'))
+  await page.waitForTimeout(120)
+  const reopened = await read()
+  assert(
+    Math.abs(reopened.widths.left - wide.widths.left) <= 1 && reopened.dock.left.width === wide.dock.left.width,
+    `重新打开应从 prefs 写回宽度：${JSON.stringify(reopened.dock.left)} / ${reopened.widths.left}`,
+  )
+
+  // 拖到远超上限：宽度停在 clamp（视口 − 另一侧 − 中心保底）上，中心槽仍在
+  await drag('left', 2000)
+  const capped = await read()
+  const max = capped.inner - start.widths.right - 480
+  assert(Math.abs(capped.widths.left - max) <= 2, `宽度应被 clamp 到 ${max}：${capped.widths.left}`)
+  assert(capped.widths.center >= 480 - 1 && !capped.over, `clamp 后中心槽仍应可用：${JSON.stringify(capped.widths)}`)
+
+  // 双击手柄 ⇒ 交回 token 默认
+  await page.locator('#dock-left .dock-resize').dblclick()
+  await page.waitForTimeout(120)
+  const reset = await read()
+  assert(reset.dock.left.width === null, `双击后 prefs.width 应为 null：${JSON.stringify(reset.dock.left)}`)
+  assert(Math.abs(reset.widths.left - 236) <= 1, `双击后应回到默认宽：${reset.widths.left}`)
+
+  // 右槽：向左拖 100 ⇒ 变宽（左右手柄方向相反）
+  const rightBefore = reset.widths.right
+  await drag('right', -100)
+  const rightAfter = await read()
+  assert(Math.abs(rightAfter.widths.right - (rightBefore + 100)) <= 2, `右槽应向左拖变宽：${rightBefore} → ${rightAfter.widths.right}`)
+  assert(rightAfter.dock.right.width === Math.round(rightAfter.widths.right), `右槽宽度应落盘：${JSON.stringify(rightAfter.dock.right)}`)
+  await page.locator('#dock-right .dock-resize').dblclick()
+  await page.waitForTimeout(120)
+  const rightReset = await read()
+  assert(rightReset.dock.right.width === null && Math.abs(rightReset.widths.right - 320) <= 1, `右槽双击恢复默认：${JSON.stringify(rightReset.dock.right)} / ${rightReset.widths.right}`)
+
+  // 关闭的槽不可拖（手柄不可见）
+  await setOpen(page, true, false)
+  await page.waitForTimeout(120)
+  const closed = await read()
+  assert(closed.handles.right === 'none', `关掉的右槽不该露出手柄：${JSON.stringify(closed.handles)}`)
+  await setOpen(page, true, true)
+
+  // 压缩区间（< 840）：手柄收起，宽度回落到下限，且不横向溢出
+  await page.setViewportSize({ width: 800, height: 900 })
+  await page.waitForTimeout(120)
+  const compact = await read()
+  assert(compact.handles.left === 'none' && compact.handles.right === 'none', `压缩区间应收起手柄：${JSON.stringify(compact.handles)}`)
+  assert(Math.abs(compact.widths.left - 180) <= 1 && Math.abs(compact.widths.right - 180) <= 1, `压缩区间两侧应锁在下限：${JSON.stringify(compact.widths)}`)
+  assert(!compact.over, `压缩区间不该横向溢出：${JSON.stringify(compact.widths)}`)
+
+  await ctx.close()
+  return `左 236→${Math.round(wide.widths.left)}（clamp ${max}）→双击 236；右 320→${Math.round(rightAfter.widths.right)}；关闭/800px 均无手柄`
+})
+
 /* ---------------------------------------------------------------- 保底 */
 
 await check('中心槽保底 480：840 以上守住；840 以下解除且**无横向溢出**', async () => {

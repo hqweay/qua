@@ -37,6 +37,56 @@ const texts = (page) => page.evaluate(() => window.__demo.text())
 const openFirstPage = (page) =>
   page.evaluate(() => window.__demo.invoke('core.page/open', { pageId: window.__demo.pages()[0].id }))
 
+/* ------------------------------------------------------- 侧槽的钉住区工具 */
+
+/** Shift+点某个块的块标（待办行的方框也是块标）；mousedown 与 click 都发，覆盖两条分支 */
+const shiftClickMarker = (page, blockId) =>
+  page.evaluate((id) => {
+    const marker = document.querySelector(`.blk[data-block-id="${id}"] .marker`)
+    if (!marker) return false
+    for (const type of ['mousedown', 'click']) {
+      marker.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, shiftKey: true }))
+    }
+    return true
+  }, blockId)
+
+/** 真的走一遍 HTML5 DnD：块标 dragstart（`text/plain` = 块 id）→ 槽 dragover → drop */
+const dragBlockToDock = (page, blockId, side) =>
+  page.evaluate(
+    ({ id, side }) => {
+      const marker = document.querySelector(`.blk[data-block-id="${id}"] .marker`)
+      const root = document.getElementById(`dock-${side}`)
+      if (!marker || !root) return null
+      const dt = new DataTransfer()
+      const ev = (type) => new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt })
+      marker.dispatchEvent(ev('dragstart'))
+      root.dispatchEvent(ev('dragover'))
+      const hot = root.dataset.dropPin === '1'
+      root.dispatchEvent(ev('drop'))
+      marker.dispatchEvent(ev('dragend'))
+      return { hot, carried: dt.getData('text/plain') }
+    },
+    { id: blockId, side },
+  )
+
+/** 槽当前状态：prefs 里的清单 + 真正渲染出来的行（按 nav 顺序） */
+const dockState = (page) =>
+  page.evaluate(() => {
+    const rows = (side) =>
+      [...document.querySelectorAll(`#dock-${side} .pin-row`)].map((r) => r.dataset.blockId)
+    return { pref: window.__demo.snapshot().dock, rows: { left: rows('left'), right: rows('right') } }
+  })
+
+/** 钉住行里**那一块自己的**正文（行内还有它的子树，不能取行内第一个/全部 `.tx`） */
+const pinRootText = (page, side, blockId) =>
+  page.evaluate(
+    ({ side, id }) =>
+      document.querySelector(
+        `#dock-${side} .pin-row[data-block-id="${id}"] > .pin-editor > .blk[data-depth="0"] > .tx`,
+      )?.textContent ?? '',
+    { side, id: blockId },
+  )
+
 /* ---------------------------------------------------------------- 敲字 */
 
 await check('T1 打开就能敲：光标落在第一个**可编辑**块；journal 的日期行不被写入', async () => {
@@ -2299,6 +2349,216 @@ await check('T20 过新 / 损坏的库不被覆盖：进入只读演示态并持
   assert(b.after === corrupt, `损坏的库被覆盖了：${String(b.after).slice(0, 80)}`)
 
   return `过新 v99 原样保留；损坏 JSON 原样保留；告警「${a.text.slice(0, 24)}…」`
+})
+
+/* ------------------------------------------------------------ 侧槽 */
+
+await check('T44 Shift+点块标 ⇒ 右槽自动打开并钉住该块；再点一次取消；待办方框同样走这条而不勾选', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__demo.quiet(true))
+  await openFirstPage(page)
+  // 先关掉右槽：Shift+点击必须能把它叫回来（否则「打开了但看不见」）
+  await page.evaluate(() => window.__demo.invoke('core.dock/toggle-right'))
+  await page.waitForTimeout(80)
+  const closed = (await dockState(page)).pref.right
+  assert(closed.open === false, `右槽应先关着：${JSON.stringify(closed)}`)
+
+  const picked = await page.evaluate(() => {
+    const b = window.__demo.blocks().find((x) => !x.role && !x.todo && x.text.length > 2)
+    return b?.id ?? ''
+  })
+  assert(picked, '假数据里应有一个普通内容块')
+  assert(await shiftClickMarker(page, picked), '应点得到该块的块标')
+  await page.waitForTimeout(120)
+  const pinned = await dockState(page)
+  assert(pinned.pref.right.open === true, `Shift+点击应把右槽打开：${JSON.stringify(pinned.pref.right)}`)
+  assert(pinned.pref.right.pins.includes(picked), `应钉住被点的块：${JSON.stringify(pinned.pref.right.pins)}`)
+  assert(pinned.rows.right.includes(picked), `右槽应渲染出该块：${JSON.stringify(pinned.rows.right)}`)
+
+  assert(await shiftClickMarker(page, picked), '第二次 Shift+点击')
+  await page.waitForTimeout(120)
+  const unpinned = await dockState(page)
+  assert(!unpinned.pref.right.pins.includes(picked), `再按一次应取消钉住：${JSON.stringify(unpinned.pref.right.pins)}`)
+  assert(!unpinned.rows.right.includes(picked), `取消后右槽不该再渲染它：${JSON.stringify(unpinned.rows.right)}`)
+
+  // 待办行的方框＝块标：Shift+点击是「在右槽打开」，不是勾选
+  await page.evaluate(() => window.__demo.invoke('core.dock/toggle-right'))
+  await page.waitForTimeout(80)
+  const todo = await page.evaluate(() => {
+    const b = window.__demo.blocks().find((x) => x.todo)
+    return b ? { id: b.id, todo: b.todo } : null
+  })
+  assert(todo, '假数据里应有待办块')
+  await shiftClickMarker(page, todo.id)
+  await page.waitForTimeout(120)
+  const afterTodo = await page.evaluate((id) => ({
+    todo: window.__demo.blocks().find((b) => b.id === id)?.todo ?? null,
+    dock: window.__demo.snapshot().dock,
+    rows: [...document.querySelectorAll('#dock-right .pin-row')].map((r) => r.dataset.blockId),
+  }), todo.id)
+  assert(afterTodo.dock.right.open === true, `待办方框的 Shift+点击也应打开右槽：${JSON.stringify(afterTodo.dock.right)}`)
+  assert(afterTodo.dock.right.pins.includes(todo.id), `待办块应被钉住：${JSON.stringify(afterTodo.dock.right.pins)}`)
+  assert(afterTodo.todo === todo.todo, `Shift+点击方框不该切换待办：${todo.todo} → ${afterTodo.todo}`)
+  assert(afterTodo.rows.includes(todo.id), `待办块也应渲染在右槽：${JSON.stringify(afterTodo.rows)}`)
+  await ctx.close()
+  return `关闭态被叫回；普通块与待办块都按 id 进出（待办状态保持 ${todo.todo}）`
+})
+
+await check('T45 从正文块标拖进左槽 ⇒ 钉住并渲染；在槽里编辑，正文同一个块同步（共享 store）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__demo.quiet(true))
+  await openFirstPage(page)
+  const id = await page.evaluate(() => window.__demo.blocks().find((x) => !x.role && !x.todo && x.text.length > 2)?.id ?? '')
+  assert(id, '应有一个可拖的普通块')
+
+  const drag = await dragBlockToDock(page, id, 'left')
+  assert(drag, '拖拽事件应能派发到块标与左槽')
+  assert(drag.carried === id, `dragover 时 dataTransfer 里应带着块 id：${JSON.stringify(drag)}`)
+  assert(drag.hot, '拖拽经过槽时应给出高亮（data-drop-pin）')
+  await page.waitForTimeout(140)
+  const afterDrag = await dockState(page)
+  assert(afterDrag.pref.left.pins.includes(id), `左槽应钉住拖入的块：${JSON.stringify(afterDrag.pref.left.pins)}`)
+  assert(afterDrag.rows.left.includes(id), `左槽应渲染该块：${JSON.stringify(afterDrag.rows.left)}`)
+
+  // 在槽里（它的第一个实例）打字 ⇒ 正文同一个块（同一 store 对象）应同步
+  const sel = `#dock-left .pin-row[data-block-id="${id}"] > .pin-editor > .blk[data-depth="0"] > .tx`
+  await page.locator(sel).click()
+  await page.keyboard.press('End')
+  await page.keyboard.type('槽内附加')
+  await page.waitForTimeout(200)
+  const fromSlot = await page.evaluate((id) => ({
+    main: window.__demo.blocks().find((b) => b.id === id)?.text ?? '',
+    dom: document.querySelector(`#editor .blk[data-block-id="${id}"] > .tx`)?.textContent ?? '',
+  }), id)
+  const pinText = await pinRootText(page, 'left', id)
+  assert(fromSlot.main.includes('槽内附加'), `槽内编辑应写进共享 store：${JSON.stringify(fromSlot.main)}`)
+  assert(fromSlot.dom.includes('槽内附加'), `正文 DOM 应同步：${JSON.stringify(fromSlot.dom)}`)
+  assert(pinText.includes('槽内附加'), `槽里那一行自己也应显示：${JSON.stringify(pinText)}`)
+
+  // 反向：正文改 ⇒ 槽里的行跟着变（防抖窗口之后）
+  await page.evaluate((id) => window.__demo.focusBlock(id, 0), id)
+  await page.keyboard.type('正文附加')
+  await page.waitForTimeout(220)
+  const fromMain = await page.evaluate((id) => window.__demo.blocks().find((b) => b.id === id)?.text ?? '', id)
+  const mirror = await pinRootText(page, 'left', id)
+  assert(fromMain.startsWith('正文附加'), `正文应拿到新文本：${JSON.stringify(fromMain.slice(0, 20))}`)
+  assert(mirror.startsWith('正文附加'), `槽里的同一块应跟着更新：${JSON.stringify(mirror.slice(0, 20))}`)
+  await ctx.close()
+  return `同块两处：槽内打字 ⇒ 正文含「槽内附加」；正文打字 ⇒ 槽内同步（${mirror.slice(0, 12)}…）`
+})
+
+await check('T46 槽内连续输入不被整槽重画打断；⌘Z 在槽里回滚的是**全局共享**的那一份', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__demo.quiet(true))
+  await openFirstPage(page)
+  const id = await page.evaluate(() => window.__demo.blocks().find((x) => !x.role && !x.todo && x.text.length > 2)?.id ?? '')
+  const drag = await dragBlockToDock(page, id, 'left')
+  assert(drag?.hot, '拖进左槽应给出高亮')
+  await page.waitForTimeout(140)
+
+  const sel = `#dock-left .pin-row[data-block-id="${id}"] > .pin-editor > .blk[data-depth="0"] > .tx`
+  await page.locator(sel).click()
+  await page.keyboard.press('End')
+  // 逐键输入：若每键都整槽重画，光标会被重置，最终文本不会是一段连续的串
+  await page.keyboard.type('ABC连续')
+  await page.waitForTimeout(120)
+  const typed = await pinRootText(page, 'left', id)
+  assert(typed.includes('ABC连续'), `连续输入应完整落在同一处（整槽重画会打断光标）：${JSON.stringify(typed)}`)
+  const focusOk = await page.evaluate((id) => {
+    const row = document.querySelector(`#dock-left .pin-row[data-block-id="${id}"]`)
+    return Boolean(row && row.contains(document.activeElement))
+  }, id)
+  assert(focusOk, '输入过程中焦点应仍在槽内那一行')
+
+  await page.keyboard.press('Meta+z')
+  await page.waitForTimeout(200)
+  const afterUndo = await page.evaluate((id) => ({
+    main: window.__demo.blocks().find((b) => b.id === id)?.text ?? '',
+  }), id)
+  const pinAfter = await pinRootText(page, 'left', id)
+  assert(!afterUndo.main.includes('ABC连续'), `槽里的 ⌘Z 应回滚共享 store：${JSON.stringify(afterUndo.main)}`)
+  assert(!pinAfter.includes('ABC连续'), `槽里的行也必须跟着回滚：${JSON.stringify(pinAfter)}`)
+  await ctx.close()
+  return `逐键输入保持连续；⌘Z 后正文与槽同时回滚`
+})
+
+await check('T47 祖先也被钉住 ⇒ 只渲染祖先（不重复）；钉住清单随 prefs 落盘，重开后仍在', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__demo.quiet(true))
+  await openFirstPage(page)
+  const nested = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#editor .blk')]
+    for (let i = 1; i < rows.length; i++) {
+      if (Number(rows[i].dataset.depth) === 1 && Number(rows[i - 1].dataset.depth) === 0) {
+        return { child: rows[i].dataset.blockId, parent: rows[i - 1].dataset.blockId }
+      }
+    }
+    return null
+  })
+  assert(nested, '应能找到一对父子块')
+  await shiftClickMarker(page, nested.child)
+  await shiftClickMarker(page, nested.parent)
+  await page.waitForTimeout(140)
+  const nestedState = await dockState(page)
+  assert(nestedState.pref.right.pins.length === 2, `两块都应记在清单里：${JSON.stringify(nestedState.pref.right.pins)}`)
+  assert(
+    nestedState.rows.right.length === 1 && nestedState.rows.right[0] === nested.parent,
+    `祖先也在清单里时只渲染祖先：${JSON.stringify(nestedState.rows.right)}（父 ${nested.parent}）`,
+  )
+
+  const leftId = await page.evaluate(() => window.__demo.blocks().find((x) => !x.role && !x.todo && x.text.length > 2)?.id ?? '')
+  await dragBlockToDock(page, leftId, 'left')
+  await page.waitForTimeout(400)
+  const saved = await dockState(page)
+  const reopened = await reopenPage(browser, ctx, base, page)
+  await reopened.page.waitForTimeout(220)
+  const restored = await reopened.page.evaluate(() => ({
+    dock: window.__demo.snapshot().dock,
+    left: [...document.querySelectorAll('#dock-left .pin-row')].map((r) => r.dataset.blockId),
+    right: [...document.querySelectorAll('#dock-right .pin-row')].map((r) => r.dataset.blockId),
+  }))
+  await reopened.ctx.close()
+  assert(
+    JSON.stringify(restored.dock.left.pins) === JSON.stringify(saved.pref.left.pins) &&
+      JSON.stringify(restored.dock.right.pins) === JSON.stringify(saved.pref.right.pins),
+    `重开后清单应原样回来：\n  before ${JSON.stringify(saved.pref)}\n  after  ${JSON.stringify(restored.dock)}`,
+  )
+  assert(restored.left.includes(leftId), `重开后左槽应仍渲染钉住的块：${JSON.stringify(restored.left)}`)
+  assert(
+    restored.right.length === 1 && restored.right[0] === nested.parent,
+    `重开后右槽仍只渲染祖先：${JSON.stringify(restored.right)}`,
+  )
+  await ctx.close()
+  return `清单 ${saved.pref.left.pins.length}+${saved.pref.right.pins.length} 项落盘；右槽只画祖先 ${nested.parent.slice(-6)}`
+})
+
+await check('T48 钉住行有移除入口：移出槽但不删块；左槽移除后清单与 DOM 同时清干净', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__demo.quiet(true))
+  await openFirstPage(page)
+  const picked = await page.evaluate(() => {
+    const b = window.__demo.blocks().find((x) => !x.role && !x.todo && x.text.length > 2)
+    return b ? { id: b.id, text: b.text } : null
+  })
+  assert(picked, '应有一个可拖的块')
+  await dragBlockToDock(page, picked.id, 'left')
+  await page.waitForTimeout(140)
+  const before = await page.evaluate(() => window.__demo.snapshot().topBlocks)
+  await page.locator(`#dock-left .pin-row[data-block-id="${picked.id}"] .pin-remove`).click()
+  await page.waitForTimeout(140)
+  const after = await page.evaluate((id) => ({
+    dock: window.__demo.snapshot().dock,
+    rows: [...document.querySelectorAll('#dock-left .pin-row')].map((r) => r.dataset.blockId),
+    block: window.__demo.blocks().find((b) => b.id === id) ?? null,
+    topBlocks: window.__demo.snapshot().topBlocks,
+  }), picked.id)
+  assert(!after.dock.left.pins.includes(picked.id), `移除后清单里不该还有它：${JSON.stringify(after.dock.left.pins)}`)
+  assert(!after.rows.includes(picked.id), `移除后 DOM 里不该还有这一行：${JSON.stringify(after.rows)}`)
+  assert(after.block && after.block.text === picked.text, `移除只影响视图，不该删块：${JSON.stringify(after.block)}`)
+  assert(after.topBlocks === before, `块数应不变：${before} → ${after.topBlocks}`)
+  assert(after.dock.left.open === true, '移除最后一项不该顺手关掉左槽')
+  await ctx.close()
+  return `移出 ${picked.text.slice(0, 10)}…：清单/行清空，块仍在（块数 ${after.topBlocks}）`
 })
 
 /* ---------------------------------------------------------------- 汇总 */

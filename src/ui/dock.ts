@@ -30,6 +30,14 @@ export interface DockSlotEls {
   head: HTMLElement
   titleEl: HTMLElement
   stack: HTMLElement
+  /**
+   * 内侧边缘的宽度手柄（左槽在右缘、右槽在左缘）。
+   *
+   * 它是槽的**骨架**的一部分：由 `mountDockSlot` 与抬头/堆叠一起建，
+   * 于是左右两槽的 DOM 形状天然对称（布局断言按直接子元素比对）。
+   * 拖动行为由 `ui/dock-resize` 接线，槽在这里只负责「有这个节点」。
+   */
+  resizeEl: HTMLElement
 }
 
 /** 取一个槽的三块 DOM（抬头／标题／堆叠），并做一次存在性断言 */
@@ -37,20 +45,25 @@ export function dockSlotEls(root: HTMLElement): DockSlotEls {
   const head = root.querySelector<HTMLElement>(':scope > .dock-head')
   const titleEl = head?.querySelector<HTMLElement>('.dock-title')
   const stack = root.querySelector<HTMLElement>(':scope > .dock-stack')
-  if (!head || !titleEl || !stack) // 开发者可见的骨架断言（不是用户文案）：与 console.* 同一口径，用英文
-  throw new Error('dock: incomplete slot skeleton (need .dock-head / .dock-title / .dock-stack)')
-  return { root, head, titleEl, stack }
+  const resizeEl = root.querySelector<HTMLElement>(':scope > .dock-resize')
+  if (!head || !titleEl || !stack || !resizeEl) // 开发者可见的骨架断言（不是用户文案）：与 console.* 同一口径，用英文
+  throw new Error('dock: incomplete slot skeleton (need .dock-head / .dock-title / .dock-stack / .dock-resize)')
+  return { root, head, titleEl, stack, resizeEl }
 }
 
 /**
- * 渲染一个槽的内容：清空堆叠、按顺序放块卡。
+ * 渲染一个槽的内容：清掉本次不保留的节点、按顺序放块卡。
  *
  * 每次整槽重画（第 1 期）。将来接入事务流后改为**按卡片局部更新**，
  * 但入口形状不变——调用方仍然只给它「这一槽现在有哪几块」。
  *
- * ⚠️ **常驻节点（`persistent`）必须先摘出文档再清空**：`stack.textContent = ''` 会把子节点
- * 一并从文档里摘掉，之后再往该节点里 append，写的是一棵**游离树**（DOM 里看着是空的）。
- * 这是真踩过的 bug —— 页面列表就是这样整槽消失的。
+ * ⚠️ **常驻节点（`persistent`）不移动、只保留**：
+ *    · `stack.textContent = ''` 会把子节点一并从文档里摘掉，之后再往该节点里 append，
+ *      写的是一棵**游离树**（DOM 里看着是空的）。这是真踩过的 bug —— 页面列表就是这样整槽消失的。
+ *    · 但**重新 append 到别的位置同样是破坏**：常驻节点里可能是 contenteditable，
+ *      移动一个正在编辑的元素会丢焦点与光标（每敲一个字就跳一次）。
+ *    ⇒ 常驻节点原地不动，新卡片**插到它们之后**（`insertBefore(anchor.nextSibling)`）。
+ *      于是「钉住的块」这类活内容留在堆叠最上面，重画其余卡片不会打断输入。
  */
 export function renderDockStack(
   stack: HTMLElement,
@@ -59,16 +72,27 @@ export function renderDockStack(
   persistent: HTMLElement[] = [],
 ): void {
   const keep = new Set<Node>(persistent)
-  for (const n of keep) n.parentNode?.removeChild(n)
-  stack.textContent = ''
-  if (cards.length === 0) {
+  for (const n of Array.from(stack.childNodes)) if (!keep.has(n)) stack.removeChild(n)
+
+  if (cards.length === 0 && persistent.length === 0) {
     const empty = document.createElement('p')
     empty.className = 'dock-empty'
     empty.textContent = emptyText
     stack.appendChild(empty)
     return
   }
-  for (const card of cards) stack.appendChild(buildCard(card))
+
+  let anchor: ChildNode | null = null
+  for (const n of persistent) if (n.parentNode === stack) anchor = n
+  for (const card of cards) {
+    const el = buildCard(card)
+    if (anchor) {
+      stack.insertBefore(el, anchor.nextSibling)
+      anchor = el
+    } else {
+      stack.appendChild(el)
+    }
+  }
 }
 
 function buildCard(card: DockCard): HTMLElement {
@@ -109,7 +133,7 @@ function buildCard(card: DockCard): HTMLElement {
  */
 export function mountDockSlot(
   root: HTMLElement,
-  opts: { title: string; collapseLabel: string; icon: string; onCollapse: () => void },
+  opts: { side: 'left' | 'right'; title: string; collapseLabel: string; resizeLabel: string; icon: string; onCollapse: () => void },
 ): DockSlotEls {
   const els = dockSlotEls(root)
   els.titleEl.textContent = opts.title
@@ -119,6 +143,11 @@ export function mountDockSlot(
     btn.setAttribute('aria-label', opts.collapseLabel)
     btn.addEventListener('click', opts.onCollapse)
   }
+  // 手柄的**位置**（哪条边）由 side 决定，不在装配层写内联样式
+  els.resizeEl.dataset.resizeSide = opts.side
+  els.resizeEl.setAttribute('role', 'separator')
+  els.resizeEl.setAttribute('aria-orientation', 'vertical')
+  els.resizeEl.title = opts.resizeLabel
   return els
 }
 
@@ -126,4 +155,30 @@ export function mountDockSlot(
 export function applyDockVisibility(open: { left: boolean; right: boolean }): void {
   document.body.dataset.dockLeft = open.left ? 'open' : 'closed'
   document.body.dataset.dockRight = open.right ? 'open' : 'closed'
+}
+
+/** 压缩区间起点：CSS 的 `@media (max-width: 839px)` 必须与它一致 */
+export const DOCK_COMPACT_WIDTH = 840
+
+/**
+ * 把用户拖过的宽度写进 `#app` 的 inline 变量。
+ *
+ * 为什么不是无条件写：CSS 里槽宽已经有三个来源（token 默认 / 关闭归零 / 压缩区间锁下限）。
+ * inline 变量的优先级高于全部三条，一旦常驻就会让「关槽不塌列」和「窄窗压缩」失效。
+ * ⇒ 只在**开着且不在压缩区间**时写，其余情况 `removeProperty` 把决定权交回 CSS。
+ *
+ * ⚠️ 宽度数值走 `CSS.px()` 转字符串：TS 里直接拼 `'px'` 字面量会被门禁拦下。
+ */
+export function applyDockWidth(
+  root: HTMLElement,
+  side: 'left' | 'right',
+  width: number | null,
+  open: boolean,
+): void {
+  const prop = `--dock-${side}-w`
+  if (!open || width === null || window.innerWidth < DOCK_COMPACT_WIDTH) {
+    root.style.removeProperty(prop)
+    return
+  }
+  root.style.setProperty(prop, CSS.px(width).toString())
 }

@@ -90,6 +90,8 @@ export interface EditorBridge {
    *    把两者合成一个入口就永远只能实现其中一种。
    */
   focusBlock: (blockId: string) => void
+  /** Shift+左键点块标（待办行的方框也是块标）＝ 在右槽钉住 / 取消钉住 */
+  openInDock: (blockId: string) => void
   /**
    * 折叠 / 展开某块（点三角）*/
   toggleCollapse: (blockId: string) => void
@@ -291,7 +293,15 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      *    所以这里不再有「左键也开菜单」的分支。
      */
     const marker = path.find((n): n is HTMLElement => n instanceof HTMLElement && 'focusFor' in n.dataset)
-    if (marker?.dataset.focusFor) br.focusBlock(marker.dataset.focusFor)
+    if (marker?.dataset.focusFor) {
+      // Shift+左键 ⇒ 钉到右槽（同一个入口可逆：已钉住则取消）
+      if (e.shiftKey) {
+        e.preventDefault()
+        br.openInDock(marker.dataset.focusFor)
+      } else {
+        br.focusBlock(marker.dataset.focusFor)
+      }
+    }
   })
 
   on(c, 'contextmenu', (e: MouseEvent) => {
@@ -341,7 +351,9 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     const todo = target.closest<HTMLElement>('[data-todo-for]')
     if (todo?.dataset.todoFor) {
       e.preventDefault()
-      br.toggleTodo(todo.dataset.todoFor)
+      // Shift+点击方框 = 「在右槽打开」，**不勾选**（方框就是块标，修饰键改变的是动作）
+      if (e.shiftKey) br.openInDock(todo.dataset.todoFor)
+      else br.toggleTodo(todo.dataset.todoFor)
     }
   })
 

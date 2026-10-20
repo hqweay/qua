@@ -23,7 +23,9 @@ import {
 } from './core/commands/index.ts'
 import { Layers, paletteRows, rowsFromBindings, type Row } from './ui/layers.ts'
 import { dispatchKey, installKeydown, type DispatchEnv } from './core/dispatch.ts'
-import { applyDockVisibility, mountDockSlot } from './ui/dock.ts'
+import { applyDockVisibility, applyDockWidth, mountDockSlot } from './ui/dock.ts'
+import { DockBlocks } from './ui/dock-blocks.ts'
+import { bindDockResize } from './ui/dock-resize.ts'
 import { renderBackrefsInto, renderFavoritesInto, type DockContentDeps } from './ui/dock-content.ts'
 import { BacklinksView } from './ui/backlinks.ts'
 import { QueryView } from './ui/query-view.ts'
@@ -291,7 +293,50 @@ function applyChrome(): void {
   document.body.dataset.theme = prefs().theme
   document.body.dataset.themeMode = prefs().theme
   applyDockVisibility({ left: prefs().dock.left.open, right: prefs().dock.right.open })
+  const appEl = $('app')
+  applyDockWidth(appEl, 'left', prefs().dock.left.width, prefs().dock.left.open)
+  applyDockWidth(appEl, 'right', prefs().dock.right.width, prefs().dock.right.open)
 }
+
+/**
+ * 读一个 CSS 长度 token（`180px` → 180）。
+ *
+ * 回退值是**数字**而不是 `'180px'` 字面量（TS 里拼 px 会被门禁拦）；
+ * 它只在样式没加载到（测试夹具/首帧）时兜底，正常路径永远读 token。
+ */
+function cssLength(name: string, fallback: number): number {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  const n = Number.parseFloat(raw)
+  return Number.isFinite(n) ? n : fallback
+}
+
+/** 槽宽下限：token `--ui-dock-min` */
+const dockMinWidth = (): number => cssLength('--ui-dock-min', 180)
+
+/** 没拖过时的默认宽（与 CSS 的 `--ui-dock-w-*` 同源） */
+const dockDefaultWidth = (side: 'left' | 'right'): number =>
+  cssLength(`--ui-dock-w-${side}`, side === 'left' ? 236 : 320)
+
+/**
+ * 另一侧**当前占的宽度**：关着的槽不占列（与 CSS 的列宽归零一致）。
+ * 拖这一侧时要把它扣掉，否则两边都拖宽会把中心槽挤到 0。
+ */
+function dockOtherWidth(side: 'left' | 'right'): number {
+  const other = side === 'left' ? 'right' : 'left'
+  const p = prefs().dock[other]
+  if (!p.open) return 0
+  return typeof p.width === 'number' ? p.width : dockDefaultWidth(other)
+}
+
+/** 槽宽上限：中心槽至少留 `--ui-center-min`。 */
+function dockMaxWidth(side: 'left' | 'right'): number {
+  const min = dockMinWidth()
+  const center = cssLength('--ui-center-min', 480)
+  return Math.max(min, window.innerWidth - dockOtherWidth(side) - center)
+}
+
+// 视口跨过压缩区（839/840）时，inline 宽度要跟着交回 CSS / 重新写回
+window.addEventListener('resize', () => applyChrome())
 
 /* ------------------------------------------------------------ 槽内容 */
 
@@ -313,8 +358,49 @@ const dockDeps: DockContentDeps = {
 
 /** 重画两个侧槽（页列表变了、切换了当前页、或反链变了） */
 function renderDocks(): void {
-  renderFavoritesInto(dockDeps, dockLeft)
-  renderBackrefsInto(dockDeps, dockRight)
+  // 先让钉住区处理「清单变了没有」：它只在增删时动 DOM，重画其余卡片不会碰它
+  dockPins?.left.render()
+  dockPins?.right.render()
+  renderFavoritesInto(dockDeps, dockLeft, dockPins ? { persistent: [dockPins.left.card] } : {})
+  renderBackrefsInto(dockDeps, dockRight, dockPins ? { persistent: [dockPins.right.card] } : {})
+}
+
+/** 钉住区的实例（在槽挂载之后创建；`renderDocks` 早于它就跳过） */
+let dockPins: { left: DockBlocks; right: DockBlocks } | null = null
+
+/* ------------------------------------------------------------ 钉住的块 */
+
+/**
+ * 钉住的清单是**视图状态**：它只记「要看哪几个块 id」，块本身仍在森林里那一份。
+ * 所以撤销/删除块都不需要动这份清单 —— 渲染时按 id 找不到就不画，块回来时它自己回来。
+ */
+function addPin(side: 'left' | 'right', blockId: string): void {
+  if (!findInForest(ws.blocks, blockId)) return
+  const slot = prefs().dock[side]
+  if (!slot.pins.includes(blockId)) slot.pins.push(blockId)
+  if (!slot.open) {
+    slot.open = true
+    applyChrome()
+  }
+  renderDocks()
+  scheduleSave()
+  scheduleBadge()
+}
+
+function unpinBlock(side: 'left' | 'right', blockId: string): void {
+  const slot = prefs().dock[side]
+  const i = slot.pins.indexOf(blockId)
+  if (i < 0) return
+  slot.pins.splice(i, 1)
+  renderDocks()
+  scheduleSave()
+  scheduleBadge()
+}
+
+/** 同一个入口进 / 出（Shift+点块标走它：已钉住则取消） */
+function togglePin(side: 'left' | 'right', blockId: string): void {
+  if (prefs().dock[side].pins.includes(blockId)) unpinBlock(side, blockId)
+  else addPin(side, blockId)
 }
 
 /* ------------------------------------------------------------ chrome 组件 */
@@ -776,6 +862,8 @@ ed.events = {
   // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
   // 所以「点块标进去」与「点面包屑出来」共用一套语义，没有第二种入口。
   focusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, 'editor'),
+  // Shift+点块标 ⇒ 钉到右槽（同一个入口可逆：已钉住则取消）
+  openInDock: (blockId) => togglePin('right', blockId),
   blockMenu: (blockId, rect) => {
     // 命中**已选中的块**（且多块）⇒ 多块菜单；否则清块选区，走原单块菜单
     if (ed.inBlockSelection(blockId) && ed.blockSelectionCount() > 1) {
@@ -961,17 +1049,77 @@ function paintStaticCopy(): void {
  * 左槽装的是「收藏容器块」，内容由 `renderDocks()` 填。
  */
 const dockLeft = mountDockSlot($('dock-left'), {
+  side: 'left',
   title: t('ui.dock.leftTitle'),
   collapseLabel: t('ui.dock.collapseLeft'),
+  resizeLabel: t('ui.dock.resize'),
   icon: 'lucide:chevron-left',
   onCollapse: () => registry.invoke('core.dock/toggle-left', {}, 'dock'),
 })
 const dockRight = mountDockSlot($('dock-right'), {
+  side: 'right',
   title: t('ui.dock.rightTitle'),
   collapseLabel: t('ui.dock.collapseRight'),
+  resizeLabel: t('ui.dock.resize'),
   icon: 'lucide:chevron-right',
   onCollapse: () => registry.invoke('core.dock/toggle-right', {}, 'dock'),
 })
+
+/**
+ * 钉住区：每个侧槽一个实例，里面是**真实块**的编辑器（共享 store）。
+ *
+ * 依赖一律是读函数（库会被整体替换，传值会拿到过期快照）。
+ */
+const dockBlocksDeps = (side: 'left' | 'right', slot: typeof dockLeft): ConstructorParameters<typeof DockBlocks>[0] => ({
+  side,
+  slot,
+  store: blocks,
+  blocks: () => ws.blocks,
+  pins: () => prefs().dock[side].pins,
+  pin: (blockId) => addPin(side, blockId),
+  unpin: (blockId) => unpinBlock(side, blockId),
+  onFocus: (editor) => {
+    ed = editor
+    scheduleBadge()
+  },
+  // 槽内编辑：只落盘与刷角标，**不重画槽**（重画会打断这一行的输入）
+  onChange: () => {
+    syncSections()
+    scheduleSave()
+    scheduleBadge()
+  },
+  onFocusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, 'dock'),
+  onOpenInDock: (blockId) => togglePin('right', blockId),
+  onAtomsLost: (labels) => app.toast(t('ui.toast.atomsLost', { labels: labels.join('、') }), 'warn'),
+})
+
+dockPins = {
+  left: new DockBlocks(dockBlocksDeps('left', dockLeft)),
+  right: new DockBlocks(dockBlocksDeps('right', dockRight)),
+}
+
+/** 手柄宽度：起拖取**当前渲染宽度**（存的是 null 时也不能让槽先跳一下） */
+const bindResize = (side: 'left' | 'right', slot: typeof dockLeft): void => {
+  bindDockResize({
+    side,
+    handle: slot.resizeEl,
+    width: () => slot.root.getBoundingClientRect().width,
+    min: dockMinWidth,
+    max: () => dockMaxWidth(side),
+    onResize: (width) => {
+      prefs().dock[side].width = width
+      applyChrome()
+      scheduleSave()
+    },
+    onReset: () => {
+      prefs().dock[side].width = null
+      applyChrome()
+      scheduleSave()
+    },
+  })
+}
+bindResize('left', dockLeft)
+bindResize('right', dockRight)
 
 paintStaticCopy()
 applyChrome()
@@ -1071,6 +1219,14 @@ const api = {
       readOnly,
       bootNotice,
       storageKind: store.kind,
+      /**
+       * 三槽的设备状态（**诊断面**）：钉住清单与宽度都在 prefs 里，
+       * 断言要能区分「落盘了没有」与「页面里渲染了没有」。
+       */
+      dock: {
+        left: { open: prefs().dock.left.open, width: prefs().dock.left.width, pins: [...prefs().dock.left.pins] },
+        right: { open: prefs().dock.right.open, width: prefs().dock.right.width, pins: [...prefs().dock.right.pins] },
+      },
     }
   },
   text() {
