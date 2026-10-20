@@ -8,6 +8,7 @@
  * ⚠️ 分层：本文件在 `ui` 层，只依赖 core 的类型与函数，**不 import view/装配层**。
  */
 import type { Atom, Block, CtxKeys } from '../core/index.ts'
+import { resolveRef } from '../core/ref.ts'
 import { COMMANDS } from '../core/commands/index.ts'
 import { BINDINGS, keyLabel, keymapRows, referencedKeys } from '../core/bindings.ts'
 import { t } from '../core/msg.ts'
@@ -48,18 +49,21 @@ export function showAtomPopover(deps: PanelDeps, a: Atom, rect: DOMRect): void {
   deps.openPopover((host) => {
     if (a.kind === 'page') {
       const target = deps.findBlock(a.target?.id ?? '')
+      // 显示名与状态**现算**（`core/ref.ts`）：`atom.label` 只是 fallback，
+      // popover 上写旧名字等于给用户一份过期的真相。
+      const view = resolveRef((id) => deps.findBlock(id), a)
       const h = document.createElement('h4')
-      h.textContent = t('ui.popover.refTitle', { label: a.label })
+      h.textContent = t('ui.popover.refTitle', { label: view.label })
       const dl = document.createElement('dl')
       const rows: [string, string][] = [
         [t('ui.popover.atomId'), a.id],
         [
           t('ui.popover.target'),
           a.target
-            ? `${a.target.kind}:${a.target.id === `missing:${a.label}` ? t('ui.popover.targetMissing') : a.target.id}`
+            ? `${a.target.kind}:${target ? a.target.id : `${a.target.id} ${t('ui.popover.targetMissing')}`}`
             : t('ui.common.none'),
         ],
-        [t('ui.popover.state'), a.state ?? 'resolved'],
+        [t('ui.popover.state'), view.state],
         [t('ui.popover.position'), `${deps.shortId(a.blockId)} @ [${a.start}, ${a.end})`],
         [t('ui.popover.quote'), a.quote ? `exact=${JSON.stringify(a.quote.exact)}` : t('ui.common.none')],
       ]
@@ -76,7 +80,7 @@ export function showAtomPopover(deps: PanelDeps, a: Atom, rect: DOMRect): void {
       const note = document.createElement('div')
       // 间距/颜色走类与 token（原来这里是两条内联 style，字面量散在 TS 里）
       note.className = 'popover-note'
-      note.textContent = a.state === 'dangling' ? t('ui.popover.danglingNote') : t('ui.popover.refNote')
+      note.textContent = view.state === 'dangling' ? t('ui.popover.danglingNote') : t('ui.popover.refNote')
       const row = document.createElement('div')
       row.className = 'row'
       if (target) {

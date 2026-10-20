@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { ensureFirstBlock, ensureTodayJournal, favoritesContainers, findInForest, findPath, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, isJournal, isQueryBlock, journalDate, journalFeedDays, prop, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { ensureFirstBlock, ensureTodayJournal, favoritesContainers, findInForest, findPath, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, isJournal, isQueryBlock, journalDate, journalFeedDays, prop, resolveRef, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
@@ -1065,8 +1065,15 @@ const api = {
   marks() {
     return mainEd.marks.map((m) => ({ type: m.type, blockId: m.blockId, start: m.start, end: m.end }))
   },
+  /**
+   * ⚠️ `label` 与 `state` 这里给的是**解析后的**结果（不是落盘的快照）：
+   *   探针要能回答「现在显示的是什么」，否则断言就只是在复读过期的 `atom.label`。
+   */
   atoms() {
-    return mainEd.atoms.map((a) => ({ kind: a.kind, label: a.label, blockId: a.blockId, start: a.start, end: a.end, state: a.state ?? null, target: a.target ?? null }))
+    return mainEd.atoms.map((a) => {
+      const v = resolveRef((id) => mainEd.store.find(id), a)
+      return { id: a.id, kind: a.kind, label: v.label, rawLabel: a.label, blockId: a.blockId, start: a.start, end: a.end, state: v.state, target: a.target ?? null }
+    })
   },
   shortId: (id: string) => shortId(id),
   ctxKeys: () => uiCtx(),

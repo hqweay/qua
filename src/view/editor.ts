@@ -37,6 +37,7 @@ import {
   normalizeMarks,
   outdentBlock,
   pruneToText,
+  refSourceIds,
   remapAnchors,
   removeMarkRange,
   selToTextRanges,
@@ -308,7 +309,9 @@ export class BlockEditor {
   }
 
   private makeBlockEl(r: VisibleRow): HTMLElement {
-    const el = makeBlockEl(r, (tx) => fillBlockText(tx, r.block, this.marks, this.atoms), {
+    // 引用解析走**共享 store** 的森林：引用目标可能在当前视图之外（另一页／另一天），
+    // 只有整片森林能回答「它还在不在、现在叫什么」。
+    const el = makeBlockEl(r, (tx) => fillBlockText(tx, r.block, this.marks, this.atoms, (id) => this.store.find(id)), {
       single: flatten(this.doc).length === 1,
       ancestors: this.ancestors.get(r.block.id) ?? [],
     })
@@ -923,10 +926,30 @@ export class BlockEditor {
       const caret = this.sel ? this.sel.aOff : null
       this.renderBlock(id)
       if (caret !== null) this.placeCaret(id, Math.min(caret, loc.block.text.length))
+      // **改名传播**：这一块可能是别处引用的目标 ⇒ 引用它的那些块也要重画（显示名现算）。
+      // 改动只影响「指向它的原子所在的块」，不是全视图重渲染。
+      this.renderRefSources(id)
     }
     if (r.lost.length) this.events.atomsLost?.(r.lost)
     // 文本改了哪一块是已知的：带上 id，查询视图据此判断「结果里的内容变没变」
     this.emitChange('text', [id])
+  }
+
+  /**
+   * **重画「引用了 `id` 这一块」的那些块**。
+   *
+   * 为什么需要显式做：引用显示的是**目标当前的名字**（`core/ref.ts`），是派生的；
+   * 目标改名后，`atom`/`block` 本身一个字节都没变 ⇒ 没有任何「数据变了」的信号能触发重渲染。
+   *
+   * ⚠️ 只重画**本视图内**的块：别的页里也有指向它的引用，但那些 DOM 不在 `doc` 里，
+   *    由它们自己所在的视图在装载/刷新时解析（共享 store 只保证数据一致，不替别人画 DOM）。
+   */
+  private renderRefSources(id: string): void {
+    const mine = new Set(flatten(this.doc).map((b) => b.id))
+    for (const srcId of refSourceIds(this.atoms, id)) {
+      if (!mine.has(srcId) || srcId === id) continue
+      if (this.blockEl(srcId)) this.renderBlock(srcId)
+    }
   }
 
   /* --------------------------------------------------------- 结构操作 */
@@ -1317,7 +1340,6 @@ export class BlockEditor {
       ...(opts.target ? { target: opts.target } : {}),
       ...(opts.asset ? { asset: opts.asset } : {}),
       ...(opts.quote ? { quote: opts.quote } : {}),
-      ...(opts.target ? { state: 'resolved' as const } : {}),
     })
     this.atoms = [...mapAtoms(this.atoms, id, shift).kept, a]
     this.undo.record(before, 'other', Date.now())

@@ -196,22 +196,22 @@ function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
   return { page: block, refs: acc.refs, marks: acc.marks, atoms: acc.atoms }
 }
 
-/** 把引用解析到真实页面 id；解析不到 ⇒ `dangling`（不静默错指） */
+/**
+ * 把 `[[..]]` 解析到真实页面 id。
+ *
+ * ⚠️ 解析不到 ⇒ **不写 `target`**：「指不到东西」就是**没有目标**，
+ *    不是「指向一个叫 `missing:xxx` 的实体」（那会让 `dangling` 变成一个能被引用的假目标）。
+ *    显示名仍走 `atom.label`（fallback），`dangling` 由渲染层**现算**（`core/ref.ts`）。
+ * ⚠️ 只有 `page` 角色才当引用目标：journal 的 text 是空的（日期在 `_date` 里），
+ *    混进来会把 `[[ ]]` 解析到日记块上。
+ */
 function resolveRefs(pages: Block[], built: BuiltPage[]): void {
-  // ⚠️ 只有 `page` 角色才当引用目标：journal 的 text 是空的（日期在 `_date` 里），
-  //    混进来会把 `[[ ]]` 解析到日记块上。
   const byTitle = new Map(pages.filter((p) => p.role === 'page').map((p) => [p.text, p]))
   for (const bp of built) {
     for (const r of bp.refs) {
       const target = byTitle.get(r.label)
       const atom = bp.atoms.find((a) => a.id === r.atomId)!
-      if (target) {
-        atom.target = { kind: 'page', id: target.id }
-        atom.state = 'resolved'
-      } else {
-        atom.target = { kind: 'page', id: `missing:${r.label}` }
-        atom.state = 'dangling'
-      }
+      if (target) atom.target = { kind: 'page', id: target.id }
     }
   }
 }
