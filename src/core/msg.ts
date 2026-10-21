@@ -119,6 +119,12 @@ export const MSG = {
   'ui.props.kind.select': '单选',
   'ui.props.kind.ref': '引用',
   'ui.props.kind.url': '链接',
+  'ui.props.pickRef': '选择一个块',
+  'ui.props.refEmpty': '库里还没有别的块',
+  'ui.props.refIsPage': '页',
+  'ui.props.refIsBlock': '块',
+  'ui.props.refMissing': '已删除（{id}）',
+  'ui.props.refCurrent': '当前',
   /* 标签层级（属于 / 包含 / 成员） */
   'ui.tagpanel.belongsTo': '属于',
   'ui.tagpanel.contains': '包含',
