@@ -775,11 +775,11 @@ function writeProps(blockId: string | undefined, mutate: () => void): void {
   scheduleBadge()
 }
 
-/** 同一标签在本会话里已经答过「保留」⇒ 不再追问（避免提示疲劳） */
+/** 同一标签在本次运行期间已经答过「保留」⇒ 不再追问（避免提示疲劳） */
 const cleanupAlwaysKeep = new Set<string>()
 
 /**
- * 摘标签「要不要清理它带来的值」的提示（D20）。
+ * 摘标签「要不要清理它带来的值」的提示。
  *
  * `removeEdge`：
  *   · 非空 ＝ 边还没删（显式删除命令）⇒ 删边与清值共用**一次撤销**；
@@ -831,7 +831,7 @@ function promptCleanup(
 }
 
 /**
- * 删一个行内原子；**摘标签时**若它带来的字段在块上有值，先问一次「保留 / 清理」（D20）。
+ * 删一个行内原子；**摘标签时**若它带来的字段在块上有值，先问一次「保留 / 清理」。
  *
  * R1–R4：
  *   · 只在**真有值**时问（字段全空 ⇒ 静默摘掉，绝大多数「打错了」不该被打扰）；
@@ -1044,7 +1044,7 @@ ed.events = {
   },
   atomsLost: (atoms) => {
     app.toast(t('ui.toast.atomsLost', { labels: atoms.map((a) => a.label).join('、') }), 'warn')
-    // 正文里退格删掉 `#标签` 也是「摘标签」：边已经没了，但有值时仍要问一次清理（D20）
+    // 正文里退格删掉 `#标签` 也是「摘标签」：边已经没了，但有值时仍要问一次清理
     const tagAtom = atoms.find((a) => a.kind === 'tag' && a.target)
     if (!tagAtom?.target) return
     const host = findInForest(ws.blocks, tagAtom.blockId)
@@ -1131,14 +1131,14 @@ function renderBacklinks(): void {
 
 renderBacklinks()
 
-/* ------------------------------------------------------------ 属性区（AA6） */
+/* ------------------------------------------------------------ 属性区 */
 
 /**
  * 属性区画在**当前对象**上（页 / 日记 / 标签 / 被 zoom 的块）。
  *
  * ⚠️ 不跟光标走：跟光标会让面板随点击忽隐忽现（布局跳），而「属性属于你正在看的那个东西」
  *    是更稳定的心智模型。要看一个内容块自己的属性 ⇒ 点它的块标 zoom 进来（此时它＝当前对象）。
- * AA6：任何块都能直接有属性 —— 不要求先打标签；标签只让「可用字段」多出来。
+ * 任何块都能直接有属性 —— 不要求先打标签；标签只让「可用字段」多出来。
  */
 const propertiesPanel = new PropertiesPanel(
   {

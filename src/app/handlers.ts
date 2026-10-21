@@ -179,7 +179,7 @@ export const HANDLERS: Record<string, Handler> = {
   'core.editor/remove-atom': (a, app) => {
     const id = S(a.atomId)
     if (!id) return false
-    // 摘标签可能要提示「清理它带来的值」（D20）⇒ 走门面，而不是直接调编辑器
+    // 摘标签可能要提示「清理它带来的值」⇒ 走门面，而不是直接调编辑器
     app.removeAtom(id)
     return true
   },

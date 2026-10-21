@@ -58,7 +58,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.tags/remove-parent', title: t('cmd.tags.remove-parent'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' }, parentId: { type: 'string' } } },
   { name: 'core.tags/prune-parents', title: t('cmd.tags.prune-parents'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' } } },
 
-  /* ---- 属性（AA6：属性是块第一公民；值在块上 props[propId]） ---- */
+  /* ---- 属性（属性是块第一公民；值在块上 props[propId]） ---- */
   { name: 'core.props/set-value', title: t('cmd.props.set-value'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' }, value: {} } },
   { name: 'core.props/clear-value', title: t('cmd.props.clear-value'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' } } },
   { name: 'core.props/create-def', title: t('cmd.props.create-def'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, label: { type: 'string' }, kind: { type: 'string' } } },
