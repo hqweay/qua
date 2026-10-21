@@ -310,9 +310,26 @@ await check('E4 窗口尺寸/位置记忆：改了尺寸 → 关窗 → 重开�
   })
   log(`      workArea=${JSON.stringify(env.workArea)} displays=${env.displays} 建窗时=${JSON.stringify(env.before)}`)
 
-  await first.app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0].setBounds({ x: 140, y: 110, width: 1000, height: 700 })
+  /**
+   * 挑一个**屏幕装得下**的矩形再设。
+   *
+   * ⚠️ 写死 `{x:140, y:110, w:1000, h:700}` 在窄屏上会被系统钳内
+   *    （CI 的 runner 只有 1024×677 ⇒ 位置被推到 24、高度被压到 677），
+   *    于是测的变成「这台机器屏幕够不够大」，而不是「记不记得住」。
+   * ⇒ 从工作区里算一个能放下的矩形：位置**不贴边**（这样钳位不会发生），
+   *    尺寸留出余量。任何屏幕尺寸下都成立。
+   */
+  const want = await first.app.evaluate(({ screen }) => {
+    const wa = screen.getPrimaryDisplay().workArea
+    const width = Math.min(900, Math.max(760, wa.width - 260))
+    const height = Math.min(640, Math.max(520, wa.height - 200))
+    // 留 100px 边距，保证「不在边界上」⇒ 系统没有理由挪它
+    return { x: wa.x + 100, y: wa.y + 100, width, height, wa }
   })
+  log(`      目标 bounds=${JSON.stringify({ x: want.x, y: want.y, width: want.width, height: want.height })}`)
+  await first.app.evaluate(({ BrowserWindow }, b) => {
+    BrowserWindow.getAllWindows()[0].setBounds(b)
+  }, { x: want.x, y: want.y, width: want.width, height: want.height })
   await new Promise((r) => setTimeout(r, 900)) // 等落盘的 400ms 防抖
   const bounds1 = await first.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getNormalBounds())
   await first.app.close()
