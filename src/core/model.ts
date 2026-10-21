@@ -36,7 +36,20 @@ export type Role = 'page' | 'journal' | 'backref' | 'favorites' | 'query' | 'tag
  * ⚠️ **`_` 前缀 ＝ 保留区**：用户与插件不得定义，core 定义且不随插件卸载消失。
  * 这里只列当前用到的。
  */
-export type SystemPropId = '_type' | '_icon' | '_date' | '_tags' | '_alias' | '_query' | '_queryResult'
+export type SystemPropId =
+  | '_type'
+  | '_icon'
+  | '_date'
+  | '_tags'
+  | '_alias'
+  | '_query'
+  | '_queryResult'
+  // 字段定义（prop-def）：kind / 选项目录 / 声明列表
+  | '_kind'
+  | '_choices'
+  | '_fieldDefs'
+  // 包含（算作）：子标签 → 父标签的有序 ref 列表
+  | '_parentTags'
 
 export interface Block {
   id: string
