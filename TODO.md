@@ -14,7 +14,7 @@
 - **日期**：2026-10-22
 - **现象**：聚焦根块时，块标菜单里仍有「删除块」。点击后块在当前会话里当场消失，但刷新（重载 workspace）后又重新出现——根块实际上不应被删除，删除操作没有真正生效，只是 UI 层面的临时隐藏。
 - **复现**：1) 聚焦一个根块（forest 顶层块）；2) 打开块标菜单；3) 点「删除块」；4) 块从视图消失；5) 刷新应用 → 该块又回来。
-- **状态**：open（已定位根因，待修）
+- **状态**：**fixed**（`227f864`）；断言 **T56**（聚焦根块时菜单无删除项、直接 invoke 也被拒）
 - **根因分析**（已查代码，未改）：
   - 菜单项 `core.editor/delete-block` 的可见条件是 `when: 'blockFocused'`（`src/core/bindings.ts:103`），根块聚焦时该条件仍为 true，所以**菜单项照常出现**——缺一个「且不是根块」的 `when`。
   - 主编辑器 `mainEd`（`src/main.ts:1135`）构造时**没有**传 `allowRootRemove`，按 `src/view/editor.ts:214` 默认 `= true`。
@@ -32,7 +32,7 @@
 - **日期**：2026-10-22
 - **现象**：前进/后退（历史导航）没有跟踪每次跳转。例如：在 dailynotes（日记流）里聚焦（zoom）一个块，再点「返回」时，没有回到 dailynotes 视图，而是落在别的地方 / 没反应。
 - **复现**：1) 在日记流页面（Daily note 入口，多天 feed）；2) 对某块执行「聚焦到此块」(focus-block / zoom)；3) 打开历史「返回」；4) 预期回到 dailynotes 那棵多天树，实际回到的是某一天 / 某个孤立块，feed 消失。
-- **状态**：open（已定位根因，待修）
+- **状态**：**fixed**（`227f864`）；断言 **T57**（日记流 zoom 后再后退仍回到 feed）
 - **根因分析**（已查代码，未改）：
   - dailynotes 是一个**多根视图**：`rootsForMany(feed)` 装「今日＋更早存在的天」（`src/main.ts:1062-1064`、`src/app/commands-impl.ts:196-201` 的 `openPage`）。但 `ws.activeId` 只存**一个**块 id（`journalId(today)`），历史栈 `nav.back` 记录/回放的也是**单个块 id**（`src/main.ts:679-681`）。
   - 历史回放走 `historyGo`（`src/main.ts:745`）→ `core.block/focus-block` → `zoomTo` → `open(id)`（`src/app/commands-impl.ts:398`）。`open()` 里只有 `loadPage(rootsFor(b), …)`（单块/单天），**没有**「若 activeId 是今天的 journal 则展开成多天 feed」的分支。
