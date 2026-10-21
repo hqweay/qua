@@ -325,3 +325,111 @@ test('store.reset：换库后索引整体失效（不是拿旧库的块表凑）
   assert.equal(store.find('only')?.text, '唯一一页')
   assert.equal(store.find('p1'), undefined, '旧库的块不该还查得到')
 })
+
+/* ------------------------------------------------------------ 按块粒度（Tx/Changes） */
+
+/**
+ * 这一步的意义：`Change.id` 从「整类」细化到「具体 id」。
+ *
+ * ⚠️ 最危险的失败不是崩，而是**修补得不全**——界面上偶尔少一条反链、偶尔查得到已删的块。
+ *   所以每条断言都拿**全量重建**当基准，要求逐字节一致。
+ */
+test('按块粒度：改一块 ⇒ 增量与全量逐字节一致（含删块后边一起收掉）', async () => {
+  const core = await import('../src/core/index.ts')
+  const { forest, atoms } = fixture()
+  const idx = core.rebuild(forest, atoms)
+
+  // ① 改一块的正文（标签块改名 ⇒ 名字表要跟着换）
+  const renamed = JSON.parse(JSON.stringify(forest)) as Block[]
+  renamed.find((x) => x.id === 't1')!.text = '待办'
+  const next = core.applyChanges(idx, [{ kind: 'blocks', id: 't1' }], renamed, atoms)
+  assert.equal(core.fingerprint(next), core.fingerprint(core.rebuild(renamed, atoms)), '改名后索引要跟上')
+  assert.equal(core.tagIdByName(next, '待办'), 't1')
+  assert.equal(core.tagIdByName(next, 'todo'), undefined, '旧名字不该残留')
+
+  // ② 删掉一块（连它的边一起消失）
+  const pruned = JSON.parse(JSON.stringify(forest)) as Block[]
+  pruned.find((x) => x.id === 'p1')!.children = []
+  const atomsAfter = atoms.filter((a) => a.blockId !== 'a' && a.blockId !== 'b1')
+  const afterDelete = core.applyChanges(next, [{ kind: 'blocks', id: 'a' }, { kind: 'blocks', id: 'b1' }], pruned, atomsAfter)
+  assert.equal(core.fingerprint(afterDelete), core.fingerprint(core.rebuild(pruned, atomsAfter)), '删块后边要一起收掉')
+  assert.equal(core.lookupBlock(afterDelete, 'a'), undefined)
+  assert.equal(core.lookupBlock(afterDelete, 'b1'), undefined, '跟着子树一起没的块不该还在')
+})
+
+test('按块粒度：`*` 仍然触发全量（保守声明不能被当成「没变」）', async () => {
+  const core = await import('../src/core/index.ts')
+  const { forest, atoms } = fixture()
+  const idx = core.rebuild(forest, atoms)
+  const mutated = JSON.parse(JSON.stringify(forest)) as Block[]
+  mutated.push(b('extra', '后来加的页', { roles: ['page'] }))
+  const next = core.applyChanges(idx, [{ kind: 'blocks', id: '*' }], mutated, atoms)
+  assert.equal(core.fingerprint(next), core.fingerprint(core.rebuild(mutated, atoms)), '整类声明 ⇒ 全量重建')
+  assert.equal(core.lookupBlock(next, 'extra')?.text, '后来加的页')
+})
+
+test('按块粒度：只有 atoms 变化 ⇒ 块表保留（不重建名字表）', async () => {
+  const core = await import('../src/core/index.ts')
+  const { forest, atoms } = fixture()
+  const idx = core.rebuild(forest, atoms)
+  const added = [...atoms, edge('e7', 'tag', 'a', 't2')]
+  const next = core.applyChanges(idx, [{ kind: 'atoms', id: 'e7' }], forest, added)
+  assert.equal(core.fingerprint(next), core.fingerprint(core.rebuild(forest, added)))
+  assert.deepEqual(core.incomingIds(next, 't2').sort(), ['a', 'j1a'], '新边要算进来')
+  // 块表是同一张（活引用没动）
+  assert.equal(next.blocks, idx.blocks, '只有边变了 ⇒ 块表原样保留')
+})
+
+/**
+ * 真实收益所在：**只改原子**时（打标签 / 删边）不重建块表与名字表。
+ *
+ * 打字改的是文本 ⇒ 报 `blocks` ⇒ 走全量（见上面「为什么不按块修补」）；
+ * 但挂/摘一条边只动 `atoms` ⇒ 那三张表完全不该被碰。
+ */
+test('按块粒度：只有 atoms 变化 ⇒ 块表/名字表/父页表**同一个引用**（真的没被重建）', async () => {
+  const core = await import('../src/core/index.ts')
+  const { forest, atoms } = fixture()
+  const idx = core.rebuild(forest, atoms)
+  const added = [...atoms, edge('e7', 'tag', 'a', 't2')]
+  const next = core.applyChanges(idx, [{ kind: 'atoms', id: 'e7' }], forest, added)
+
+  assert.equal(next.blocks, idx.blocks, '块表原样保留（活引用不换）')
+  assert.equal(next.tags, idx.tags, '名字表原样保留')
+  assert.equal(next.pageOf, idx.pageOf, '父页表原样保留')
+  // 但边表是新的，且内容正确
+  assert.notEqual(next.incoming, idx.incoming, '边表必须重算')
+  assert.deepEqual(core.incomingIds(next, 't2').sort(), ['a', 'j1a'], '新边要算进来')
+  assert.equal(core.fingerprint(next), core.fingerprint(core.rebuild(forest, added)), '结果仍与全量一致')
+})
+
+test('按块粒度：一次报多块（跨两棵子树）⇒ 两边都重算，且与全量一致', async () => {
+  const core = await import('../src/core/index.ts')
+  const { forest, atoms } = fixture()
+  const idx = core.rebuild(forest, atoms)
+
+  const mutated = JSON.parse(JSON.stringify(forest)) as Block[]
+  const p2 = mutated.find((x) => x.id === 'p2')!
+  const c = p2.children.find((x) => x.id === 'c')!
+  c.text = '丙改过了'
+  mutated.find((x) => x.id === 't2')!.text = '设计改过了'
+
+  const next = core.applyChanges(idx, [{ kind: 'blocks', id: 'c' }, { kind: 'blocks', id: 't2' }], mutated, atoms)
+  assert.equal(core.fingerprint(next), core.fingerprint(core.rebuild(mutated, atoms)))
+  assert.equal(core.lookupBlock(next, 'c')?.text, '丙改过了')
+  assert.equal(core.tagIdByName(next, '设计改过了'), 't2')
+})
+
+test('按块粒度：报了一个已经不存在的 id ⇒ 退化为全量（不留半新的索引）', async () => {
+  const core = await import('../src/core/index.ts')
+  const { forest, atoms } = fixture()
+  const idx = core.rebuild(forest, atoms)
+
+  // 块真的被删了，但改动只点名了它 ⇒ 找不到路径 ⇒ 必须全量
+  const pruned = JSON.parse(JSON.stringify(forest)) as Block[]
+  const p1 = pruned.find((x) => x.id === 'p1')!
+  p1.children = p1.children.filter((x) => x.id !== 'b')
+
+  const next = core.applyChanges(idx, [{ kind: 'blocks', id: 'b' }], pruned, atoms)
+  assert.equal(core.fingerprint(next), core.fingerprint(core.rebuild(pruned, atoms)))
+  assert.equal(core.lookupBlock(next, 'b1'), undefined, '跟着子树一起没的块不该还在')
+})

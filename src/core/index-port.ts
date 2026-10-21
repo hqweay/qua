@@ -74,23 +74,8 @@ function emptyIndex(): Index {
 export function rebuild(forest: readonly Block[], atoms: readonly Atom[]): Index {
   const idx = emptyIndex()
 
-  // ① 块表 / 标签表 / 日记表 / 父页表（一次先序遍历）
-  const walk = (b: Block, rootId: string): void => {
-    idx.blocks.set(b.id, b)
-    idx.pageOf.set(b.id, rootId)
-    if (hasRole(b, TAG_ROLE)) {
-      // 名字＝**地址**（`_alias` 优先，否则正文），规范化与 `findByAlias` 同一处
-      const name = addressOf(b)
-      // 同名标签以**先序第一个**为准（`ensureTag` 也是这个口径，两处必须一致）
-      if (name !== '' && !idx.tags.has(name)) idx.tags.set(name, b.id)
-    }
-    if (isJournal(b)) {
-      const d = journalDate(b)
-      if (d !== '') idx.journals.set(d, b.id)
-    }
-    for (const c of b.children) walk(c, rootId)
-  }
-  for (const b of forest) walk(b, b.id)
+  // ① 块表 / 标签表 / 日记表 / 父页表（一次先序遍历；与增量修补同一口径）
+  for (const b of forest) indexSubtree(idx, b)
 
   // ② 指向边（引用与标签都算）
   addEdges(idx, atoms)
@@ -118,12 +103,19 @@ function addEdges(idx: Index, atoms: readonly Atom[]): void {
 /**
  * **增量应用**（`Change[]`）。
  *
- * ⚠️ 现在的粒度是**类级**的：`Change.id === '*'` ＝「这一类对象都动过」（落盘适配器序列化整份库，
- *    它确实只知道这么多）。所以本函数只能做到「没动的那一类不重建」，做不到「只重算这一块」。
- *    真正按块粒度要等 **Tx/Changes** 产出具体 id —— 那时这里不用改形状。
+ * ⚠️ **块一类只要出现就一律全量重建**，不管报的是 `'*'` 还是具体 id。
  *
- * ⚠️ **块变了就必须全量重建**：块的增删会让「边的另一端还在不在」「标签名是什么」「住哪一页」
- *    一起失效，只重算边会得到一份自相矛盾的索引。
+ * 为什么不做「按块修补」：修补的正确性依赖一个前提——**先摘掉旧条目、再改森林**。
+ * 现在的调用链却正好相反（编辑器 `emitChange`、命令直接改块，都是「先改了再通知」），
+ * 通知到达时**旧名字／旧位置已经读不到了** ⇒ 无法可靠地摘掉旧条目。
+ * 实测代价就是「一个标签两个名字」：把 `t1` 从 `todo` 改成 `待办` 后，
+ * `tags` 里同时留下 `todo` 和 `待办` 指向同一块 —— 索引不崩，只是**静默地错**。
+ *
+ * ⇒ 在 **Tx/Changes 落地之前**宁可全量重建。等真正的事务层把「改了什么」
+ *   连同 `op` 一起报出来，这里再换成按块修补，**对外形状不变**
+ *   （`Change` 已经预留了精确到 id 的语义）。
+ *
+ * 只有**原子**变化时才是真增量：块表／名字表／日记表／父页表完全不动，只重算两张边表。
  */
 export function applyChanges(
   index: Index,
@@ -134,10 +126,10 @@ export function applyChanges(
   const kinds = new Set(changes.map((c) => c.kind))
   // `marks` 不进索引（区间锚点不参与「谁指向谁」）
   if (kinds.size === 0 || (kinds.size === 1 && kinds.has('marks'))) return index
-  // 块动过 ⇒ 一切作废（「宁可全量，不要自相矛盾」的那一侧）
+  // 块动过 ⇒ 一切作废（见上面的「为什么不按块修补」）
   if (kinds.has('blocks')) return rebuild(forest, atoms)
 
-  // 只有原子动过 ⇒ 块表/标签表/日记表/父页表仍然有效，只重算两张边表
+  // 只剩原子变化：块表／名字表／日记表／父页表完全不动，只重算两张边表
   const next: Index = {
     blocks: index.blocks,
     incoming: new Map(),
@@ -148,6 +140,24 @@ export function applyChanges(
   }
   addEdges(next, atoms)
   return next
+}
+
+/** 把一棵子树写进索引（与 `rebuild` 的 `walk` 同一口径） */
+function indexSubtree(index: Index, root: Block): void {
+  const walk = (b: Block, rootId: string): void => {
+    index.blocks.set(b.id, b)
+    index.pageOf.set(b.id, rootId)
+    if (hasRole(b, TAG_ROLE)) {
+      const name = addressOf(b)
+      if (name !== '' && !index.tags.has(name)) index.tags.set(name, b.id)
+    }
+    if (isJournal(b)) {
+      const d = journalDate(b)
+      if (d !== '') index.journals.set(d, b.id)
+    }
+    for (const c of b.children) walk(c, rootId)
+  }
+  walk(root, root.id)
 }
 
 /* ------------------------------------------------------------ 查询 */
