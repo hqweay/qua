@@ -1403,20 +1403,37 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
   assert(nOut2 === nOut1 + 1, `顶层空块 Enter 应建同级：${nOut1} → ${nOut2}`)
 
   // ④ 点「最后一行下方」空白 ⇒ 建**当前对象的子块**（D2 修订），且落光标
-  const blank = await page.evaluate(() => {
-    const all = [...document.querySelectorAll('#editor .blk')]
-    const last = all[all.length - 1].getBoundingClientRect()
-    /**
-     * ⚠️ 横坐标**不能写死**：正文栏宽度随视口与字体度量变化，
-     *    换了系统字体（行更宽 / 更窄）之后定值会落到栏外，点空白就静默失效。
-     * ⇒ 取最后一行的水平中心。
-     */
-    return { x: last.left + last.width / 2, y: last.bottom + 18 }
-  })
   const n0 = (await rows()).length
-  await page.mouse.click(blank.x, blank.y)
+  /**
+   * ⚠️ 落点必须在**视口内**：内容比视口长时，最后一行的 `bottom + 18` 会跑到屏幕外，
+   *    `mouse.click` 静默点空（CI 的 Linux 上就是这样：字体更高 ⇒ 行更多）。
+   * ⇒ 先把最后一行滚进视口，再取它下方那一小段空白。
+   */
+  const hit = await page.evaluate(() => {
+    const all = [...document.querySelectorAll('#editor .blk')]
+    const last = all[all.length - 1]
+    last.scrollIntoView({ block: 'end' })
+    const r = last.getBoundingClientRect()
+    /**
+     * ⚠️ 不能固定 `bottom + 18`：滚到底之后最后一行下方只剩几个像素，
+     *    `y` 会落到视口外（实测 905 > 900）⇒ 鼠标点什么都没发生。
+     * ⇒ 取「行底 → 视口底」这段空白的**中点**；太窄就再滚一点，把气口露出来。
+     */
+    const scroller = document.getElementById('scroll') ?? document.scrollingElement
+    const gapTop = r.bottom
+    const gapBottom = window.innerHeight
+    let y = gapTop + (gapBottom - gapTop) / 2
+    if (gapBottom - gapTop < 24 && scroller) {
+      scroller.scrollTop -= 60
+      const r2 = last.getBoundingClientRect()
+      y = r2.bottom + (window.innerHeight - r2.bottom) / 2
+    }
+    return { x: r.left + r.width / 2, y, vh: window.innerHeight, bottom: r.bottom }
+  })
+  assert(hit.y < hit.vh - 2, `前置：落点必须在视口内（y=${hit.y.toFixed(0)}, vh=${hit.vh}, 行底=${hit.bottom.toFixed(0)}）`)
+  await page.mouse.click(hit.x, hit.y)
   const t3 = await rows()
-  assert(t3.length === n0 + 1, `点空白应建一块：${n0} → ${t3.length}`)
+  assert(t3.length === n0 + 1, `点空白应建一块：${n0} → ${t3.length}（落点 x=${hit.x.toFixed(0)}, y=${hit.y.toFixed(0)}）`)
   assert(t3[t3.length - 1].depth === 1, `点空白建的应是当前对象的**子块**（depth 1），实际 ${t3[t3.length - 1].depth}`)
   assert(t3[t3.length - 1].text === '', '新块应是空的')
   const focused = await page.evaluate(() => window.__demo.snapshot().selection)
@@ -2304,16 +2321,41 @@ await check('T34 反链 footer 可原地编辑；同一源块在正文与反链�
 
   // 在 footer 里原地编辑；正文里的同一块（同一 store 对象）应同步
   /**
-   * ⚠️ 点完 `.tx` 再按 `End` 不够稳：行里有行内原子（引用 chip）时，
-   *    「行尾」在不同字体度量下可能落到 chip 之前（CI 上实测：`Y` 打进了引用前面）。
-   * ⇒ 点**栏右侧空白处**（`.tx` 里远离文本的 x）再 `End`，落点与字体无关。
+   * 落点要**真的在可编辑文本里**：
+   *   · 点 `.tx` 最右侧的空白不一定落在内容区（`.tx` 比文字宽，右缘可能只是 padding，
+   *     Chrome 那边不落光标 ⇒ 后面的打字全丢，CI 上实测 `Y` 一个字都没进去）；
+   *   · 只点一次再 `End`，行里有行内原子时「行尾」还会因字体度量落到原子之前。
+   * ⇒ 点 `.tx` 的**左内侧**（一定在文本行上），再连按两次 `End` 确保到行尾。
    */
   const clickSpot = await page.evaluate((id) => {
     const tx = document.querySelector(`#backlinks-editor .blk[data-block-id="${id}"] .tx`)
+    /**
+     * ⚠️ **先滚到视口中间再点**：这一行常常贴在视口最底部（实测 top=870 / vh=900），
+     *    点上去会被下面的元素接管，焦点落到容器 `.backlinks-editor` 而不是 `.tx`
+     *    ⇒ 之后打的字全部丢掉（CI 上就是这样，`Y` 一个字没进去）。
+     */
+    tx.scrollIntoView({ block: 'center' })
     const r = tx.getBoundingClientRect()
-    return { x: r.right - 4, y: r.top + r.height / 2 }
+    // 落点取**文本里**的位置：`left + 3` 在行首 padding 上也会落空
+    return { x: r.left + 24, y: r.top + r.height / 2 }
   }, blockId)
   await page.mouse.click(clickSpot.x, clickSpot.y)
+  /**
+   * ⚠️ 判据**不是** `activeElement.className`：`.tx` 的 `contenteditable` 是 `inherit`，
+   *    真正可编辑的是祖先宿主 ⇒ 浏览器把焦点报在容器上是正常的。
+   *    该验的是「光标是不是落进了这一行」。
+   */
+  const caretIn = await page.evaluate((id) => {
+    const tx = document.querySelector(`#backlinks-editor .blk[data-block-id="${id}"] .tx`)
+    const sel = document.getSelection()
+    const node = sel?.anchorNode ?? null
+    return {
+      inside: Boolean(node && tx.contains(node)),
+      block: window.__demo.snapshot().selection?.aBlock ?? '',
+      id,
+    }
+  }, blockId)
+  assert(caretIn.inside, `前置：点完光标应落在这一行里：${JSON.stringify(caretIn)}`)
   await page.keyboard.press('End')
   await page.keyboard.type('Y')
   await page.waitForTimeout(120)
