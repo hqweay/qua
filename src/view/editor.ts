@@ -1503,8 +1503,15 @@ export class BlockEditor {
 
     const before = this.snap()
     root.collapsed = false
-    const child = mkBlock('')
-    root.children.push(child)
+    /**
+     * **复用末尾空块，不无中生有**：点底部若最后一段末尾已有一个空块（既无文字也无子块），
+     * 直接聚焦它，避免「点一次多一个空块」越点越多。只有末尾没有空块时才新建。
+     * 判据收紧到「空文本且空子树」——空标题但带子块的块不当作可复用空块。
+     */
+    const lastChild = root.children[root.children.length - 1]
+    const emptyTail = lastChild && lastChild.text === '' && lastChild.children.length === 0 ? lastChild : null
+    const child = emptyTail ?? mkBlock('')
+    if (!emptyTail) root.children.push(child)
     this.undo.record(before, 'structural', Date.now())
     this.renderAll()
     this.placeCaret(child.id, 0)
