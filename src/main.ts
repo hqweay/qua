@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { allPropDefs, allTags, cleanableValues, clearValue, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, favoritesContainers, fieldRows, findInForest, findPath, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, isJournal, isQueryBlock, journalDate, journalFeedDays, prop, propKindOf, propLabel, resolveRef, tagMemberIds, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { allPropDefs, allTags, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, favoritesContainers, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, parentTags, prop, propKindOf, propLabel, resolveRef, tagMemberIds, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
@@ -29,13 +29,14 @@ import { bindDockResize } from './ui/dock-resize.ts'
 import { renderBackrefsInto, renderFavoritesInto, type DockContentDeps } from './ui/dock-content.ts'
 import { BacklinksView } from './ui/backlinks.ts'
 import { PropertiesPanel } from './ui/properties.ts'
+import { TagPanel } from './ui/tag-panel.ts'
 import { QueryView } from './ui/query-view.ts'
 import { createChrome } from './ui/chrome.ts'
 import { isReadonlyBlock } from './view/block-dom.ts'
 import { createIcon } from './view/icons.ts'
 import { createBadge, type BadgeSnapshot } from './ui/badge.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type PanelDeps } from './ui/panels.ts'
-import { demoCommands, favoritesCommands, journalCommands, pageCommands, propsCommands, rootsFor, rootsForMany, viewCommands, zoomCommands, type PageDeps } from './app/commands-impl.ts'
+import { demoCommands, favoritesCommands, journalCommands, pageCommands, propsCommands, rootsFor, rootsForMany, tagTreeCommands, viewCommands, zoomCommands, type PageDeps } from './app/commands-impl.ts'
 import { HANDLERS } from './app/handlers.ts'
 import { darkQuery, resolveTheme } from './core/theme.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
@@ -680,6 +681,7 @@ const pageDeps: PageDeps = {
     renderBacklinks()
     renderQueryView()
     renderProperties()
+    renderTagPanel()
   },
   marks: () => ws.marks,
   atoms: () => ws.atoms,
@@ -868,7 +870,50 @@ const app: App = {
     write: writeProps,
     toast: (text, kind) => app.toast(text, kind),
   }),
+  ...tagTreeCommands({
+    blocks: () => ws.blocks,
+    write: writeProps,
+    toast: (text, kind) => app.toast(text, kind),
+    shortId: (id) => shortId(id),
+  }),
   removeAtom: (atomId) => removeAtomWithCleanup(atomId),
+
+  /**
+   * 标签选择器：**显示层级**（`#演员 · 属于 #人物、#艺术家`）。
+   *
+   * 这是「`#` 补全」当前的产品形态：从列表选一个已有标签插边（正文里敲 `#` 自动成边仍未做）。
+   * 层级只帮人认位置，不参与消歧（地址唯一）。
+   */
+  showTagPicker: () => {
+    const tags = allTags(ws.blocks)
+      .slice()
+      .sort((a, b) => a.text.localeCompare(b.text))
+    if (tags.length === 0) {
+      app.toast(t('ui.toast.tagEmpty'), 'warn')
+      return
+    }
+    layers.openMenu({
+      rows: tags.map((tag) => {
+        const parents = parentTags(tag, ws.blocks)
+        return {
+          id: `tagpick/${tag.id}`,
+          label: `#${tag.text}`,
+          hint: parents.length > 0 ? t('ui.tagPicker.hierarchy', { parents: parents.map((p) => `#${p.text}`).join('、') }) : '',
+          icon: 'lucide:hash',
+          group: 'tagpick/1',
+        }
+      }),
+      anchor: ed.caretRect(),
+      title: t('ui.tagPicker.title'),
+      searchable: true,
+      focusSearch: true,
+      emptyText: t('ui.toast.tagEmpty'),
+      onPick: (row) => {
+        const tag = tags.find((x) => `tagpick/${x.id}` === row.id)
+        if (tag) void registry.invoke('core.editor/insert-tag', { tag: tag.text }, 'menu', uiCtx())
+      },
+    })
+  },
 
   // 导航历史（中心槽走到哪）；与 undo/redo 的模型快照栈无关
   historyBack: () => historyGo('back'),
@@ -1132,6 +1177,61 @@ function scheduleProperties(): void {
 }
 blocks.subscribe(() => scheduleProperties())
 renderProperties()
+
+/* ------------------------------------------------------------ 标签页 footer（属于 / 包含 / 成员） */
+
+const tagPanel = new TagPanel(
+  {
+    root: chrome.tagPanelEl,
+    title: chrome.tagPanelTitleEl,
+    relations: chrome.tagPanelRelationsEl,
+    membersTitle: chrome.tagPanelMembersTitleEl,
+    membersCount: chrome.tagPanelMembersCountEl,
+    membersEmpty: chrome.tagPanelMembersEmptyEl,
+    membersEditor: chrome.tagPanelMembersEditorEl,
+  },
+  {
+    store: blocks,
+    blocks: () => ws.blocks,
+    tag: () => {
+      const b = activeBlock()
+      return hasRole(b, 'tag') ? b : undefined
+    },
+    parents: (t) => parentTags(t, ws.blocks),
+    dangling: (t) => danglingParentIds(t, ws.blocks),
+    children: (t) => childTags(t, ws.blocks),
+    members: (t) => memberBlocks(t.id, ws.blocks, blocks.atoms),
+    shortId: (id) => shortId(id),
+    addParent: (tagId, name) => {
+      const parent = findByAlias(ws.blocks, name, (b) => hasRole(b, 'tag'))
+      if (!parent) {
+        app.toast(t('ui.tagpanel.notFound', { name }), 'warn')
+        return
+      }
+      void registry.invoke('core.tags/add-parent', { childId: tagId, parentId: parent.id }, 'ui')
+    },
+    removeParent: (tagId, parentId) =>
+      void registry.invoke('core.tags/remove-parent', { childId: tagId, parentId }, 'ui'),
+    pruneParents: (tagId) => void registry.invoke('core.tags/prune-parents', { childId: tagId }, 'ui'),
+    onChange: () => {
+      scheduleSave()
+      scheduleBadge()
+      scheduleProperties()
+    },
+    onFocus: () => {
+      ed = tagPanel.editor
+      scheduleProperties()
+    },
+    onFocusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, 'tagpanel'),
+    onAtomClick: (a, el, mods) => handleAtomClick(a, el, mods),
+    onAtomsLost: (labels) => app.toast(t('ui.toast.atomsLost', { labels: labels.join('、') }), 'warn'),
+  },
+)
+
+function renderTagPanel(): void {
+  tagPanel.render()
+}
+renderTagPanel()
 
 /**
  * **查询视图**（–D6）：挂在「当前正文里那个查询块」下面。
@@ -1485,6 +1585,23 @@ const api = {
       filled: r.filled,
       sources: r.sources.map((s) => s.id),
     }))
+  },
+  /** 标签的直接父/子/失效父（诊断面；同一条边两个读法） */
+  tagParents(tagId: string) {
+    const b = findInForest(ws.blocks, tagId)
+    return b ? parentTags(b, ws.blocks).map((x) => x.id) : []
+  },
+  tagChildren(tagId: string) {
+    const b = findInForest(ws.blocks, tagId)
+    return b ? childTags(b, ws.blocks).map((x) => x.id) : []
+  },
+  tagDanglingParents(tagId: string) {
+    const b = findInForest(ws.blocks, tagId)
+    return b ? danglingParentIds(b, ws.blocks) : []
+  },
+  /** 成员（**含算作**：自己的成员 ∪ 后代标签的成员） */
+  tagMembersDeep(tagId: string) {
+    return [...membersOf(tagId, ws.blocks, blocks.atoms)]
   },
   /** 打了某个标签的块 id（标签的成员列表＝标签块的入向边） */
   tagMembers(tagId: string) {

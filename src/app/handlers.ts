@@ -220,6 +220,31 @@ export const HANDLERS: Record<string, Handler> = {
     return true
   },
 
+  /* ---- 标签层级 ---- */
+  'core.tags/add-parent': (a, app) => {
+    const childId = S(a.childId)
+    const parentId = S(a.parentId)
+    if (!childId || !parentId) return false
+    return app.addTagParent(childId, parentId)
+  },
+  'core.tags/remove-parent': (a, app) => {
+    const childId = S(a.childId)
+    const parentId = S(a.parentId)
+    if (!childId || !parentId) return false
+    app.removeTagParent(childId, parentId)
+    return true
+  },
+  'core.tags/prune-parents': (a, app) => {
+    const childId = S(a.childId)
+    if (!childId) return false
+    app.pruneTagParents(childId)
+    return true
+  },
+  'core.editor/pick-tag': (_a, app) => {
+    app.showTagPicker()
+    return true
+  },
+
   'core.anno/toggle-bold': (_a, app) => {
     app.ed.toggleMark('bold')
     return true

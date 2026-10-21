@@ -30,6 +30,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.editor/insert-block', title: t('cmd.editor.insert-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { type: { type: 'string' }, text: { type: 'string' } }, keywords: ['insert', 'new block'] },
   { name: 'core.editor/clear-block', title: t('cmd.editor.clear-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor') },
   { name: 'core.editor/insert-tag', title: t('cmd.editor.insert-tag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { tag: { type: 'string' } }, keywords: ['tag', t('menu.kw.tag')] },
+  { name: 'core.editor/pick-tag', title: t('cmd.editor.pick-tag'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.inline'), keywords: ['tag', 'autocomplete', t('menu.kw.tag')] },
   { name: 'core.editor/copy-ref', title: t('cmd.editor.copy-ref'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), keywords: ['ref', 'quote', t('menu.kw.ref')] },
   { name: 'core.editor/delete-selected-blocks', title: t('cmd.editor.delete-selected-blocks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/copy-selected-blocks', title: t('cmd.editor.copy-selected-blocks'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true },
@@ -51,6 +52,11 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.anno/toggle-highlight', title: t('cmd.anno.toggle-highlight'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['highlight', 'mark', t('menu.kw.background')] },
   { name: 'core.anno/toggle-code', title: t('cmd.anno.toggle-code'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['code', 'mono'] },
   { name: 'core.anno/clear-marks', title: t('cmd.anno.clear-marks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['clear', 'plain'] },
+
+  /* ---- 标签层级（属于 / 包含：一条边，两个读法） ---- */
+  { name: 'core.tags/add-parent', title: t('cmd.tags.add-parent'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' }, parentId: { type: 'string' } } },
+  { name: 'core.tags/remove-parent', title: t('cmd.tags.remove-parent'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' }, parentId: { type: 'string' } } },
+  { name: 'core.tags/prune-parents', title: t('cmd.tags.prune-parents'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' } } },
 
   /* ---- 属性（AA6：属性是块第一公民；值在块上 props[propId]） ---- */
   { name: 'core.props/set-value', title: t('cmd.props.set-value'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' }, value: {} } },

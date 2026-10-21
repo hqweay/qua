@@ -430,6 +430,101 @@
   font-size: var(--ui-fs-xs);
 }
 
+/* ---------------------------------------------------------- 标签页 footer（属于 / 包含 / 成员）
+   与反链 footer 同一套分家方式（border-top + gap）；成员列表是共享 store 的活块。 */
+.tagpanel {
+  margin-top: var(--ui-gap-6);
+  padding-top: var(--ui-gap-3);
+  border-top: 1px solid var(--ui-border-subtle);
+}
+.tagpanel[hidden] {
+  display: none;
+}
+.tagpanel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-3);
+  margin-bottom: var(--ui-gap-2);
+  font-size: var(--ui-fs-sm);
+}
+.tagpanel-title {
+  font-weight: 600;
+  color: var(--ui-text);
+}
+.tagpanel-count {
+  margin-left: auto;
+  color: var(--ui-text-tertiary);
+}
+.tagpanel-relations {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+  margin-bottom: var(--ui-gap-3);
+  font-size: var(--ui-fs-sm);
+}
+.tagpanel-relation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-2);
+}
+.tagpanel-relation-title {
+  min-width: 3em;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+.tagpanel-relation-empty {
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+.tagpanel-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  padding: 0 var(--ui-gap-2);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-pill);
+  color: var(--ui-text);
+  font-size: var(--ui-fs-xs);
+}
+.tagpanel-chip-x {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.tagpanel-chip-x:hover {
+  color: var(--ui-text);
+}
+.tagpanel-action {
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+}
+.tagpanel-add {
+  display: flex;
+  gap: var(--ui-gap-2);
+  align-items: center;
+}
+.tagpanel-add .prop-input {
+  max-width: 14em;
+}
+.tagpanel-add button {
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+}
+.tagpanel-members-title {
+  margin: var(--ui-gap-3) 0 var(--ui-gap-1);
+  font-size: var(--ui-fs-sm);
+  font-weight: 600;
+  color: var(--ui-text);
+}
+.tagpanel-members-editor {
+  min-height: var(--ui-line-h);
+  outline: none;
+}
+
 /* ---------------------------------------------------------- 反链 footer（下一层）
    view block 的 placement；header 是 chrome，列表是共享 store 的活块（可原地编辑）。
    只用 border-top 分家，不写块级 padding/margin。 */

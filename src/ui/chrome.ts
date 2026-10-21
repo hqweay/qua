@@ -57,6 +57,14 @@ export interface Chrome {
   propertiesTitleEl: HTMLElement
   propertiesBodyEl: HTMLElement
   propertiesAddEl: HTMLButtonElement
+  /** 标签页 footer（属于 / 包含 / 成员） */
+  tagPanelEl: HTMLElement
+  tagPanelTitleEl: HTMLElement
+  tagPanelRelationsEl: HTMLElement
+  tagPanelMembersTitleEl: HTMLElement
+  tagPanelMembersCountEl: HTMLElement
+  tagPanelMembersEmptyEl: HTMLElement
+  tagPanelMembersEditorEl: HTMLElement
   /** 反链 view block 的容器（footer； 下一层） */
   backlinksEl: HTMLElement
   backlinksEditorEl: HTMLElement
@@ -89,6 +97,13 @@ export function createChrome(onCrumb?: (blockId: string) => void): Chrome {
   const editorEl = must('editor')
   const emptyHintEl = must('empty-hint')
   const noticeEl = must('boot-notice')
+  const tagPanelEl = must('tagpanel')
+  const tagPanelTitleEl = must('tagpanel-title')
+  const tagPanelRelationsEl = must('tagpanel-relations')
+  const tagPanelMembersTitleEl = must('tagpanel-members-title')
+  const tagPanelMembersCountEl = must('tagpanel-members-count')
+  const tagPanelMembersEmptyEl = must('tagpanel-members-empty')
+  const tagPanelMembersEditorEl = must('tagpanel-members-editor')
   const propertiesEl = must('properties')
   const propertiesTitleEl = must('properties-title')
   const propertiesBodyEl = must('properties-body')
@@ -188,6 +203,13 @@ export function createChrome(onCrumb?: (blockId: string) => void): Chrome {
     propertiesTitleEl,
     propertiesBodyEl,
     propertiesAddEl,
+    tagPanelEl,
+    tagPanelTitleEl,
+    tagPanelRelationsEl,
+    tagPanelMembersTitleEl,
+    tagPanelMembersCountEl,
+    tagPanelMembersEmptyEl,
+    tagPanelMembersEditorEl,
     backlinksEl,
     backlinksEditorEl,
     backlinksTitleEl,

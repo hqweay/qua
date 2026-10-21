@@ -2951,6 +2951,92 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   return `定义 ${defs[0].id.slice(-6)} 被 #任务 声明；成员值「已完成」；摘标签清理可撤销；空字段不提示`
 })
 
+/* ------------------------------------------------- 标签层级（属于 / 包含 / 成员） */
+
+await check('T52 标签层级：属于/包含双面板、成员含算作、禁环、删父留悬空可见', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  // 两个内容块：A 打 #人物 + #演员；B 只打 #演员（用来证明「算作」）
+  const ids = await page.evaluate(() => {
+    const bs = window.__demo.blocks().filter((b) => b.roles.length === 0 && b.children === 0 && b.text.length > 2)
+    const a = bs[0].id
+    const b = bs[1].id
+    window.__demo.focusBlock(a, 0)
+    window.__demo.invoke('core.editor/insert-tag', { tag: '人物' })
+    window.__demo.invoke('core.editor/insert-tag', { tag: '演员' })
+    window.__demo.focusBlock(b, 0)
+    window.__demo.invoke('core.editor/insert-tag', { tag: '演员' })
+    return { a, b }
+  })
+  const tags = await page.evaluate(() => {
+    const all = window.__demo.allBlocks().filter((x) => x.roles.includes('tag'))
+    return Object.fromEntries(all.map((x) => [x.text, x.id]))
+  })
+  assert(tags['人物'] && tags['演员'], `应有两个标签块：${JSON.stringify(tags)}`)
+
+  // #演员 属于 #人物（子侧写 _parentTags）
+  await page.evaluate(
+    ({ child, parent }) => window.__demo.invoke('core.tags/add-parent', { childId: child, parentId: parent }),
+    { child: tags['演员'], parent: tags['人物'] },
+  )
+  const rel = await page.evaluate(
+    (id) => ({ parents: window.__demo.tagParents(id), children: window.__demo.tagChildren(id) }),
+    tags['人物'],
+  )
+  assert(rel.children.includes(tags['演员']), `#人物 的「包含」应含 #演员：${JSON.stringify(rel)}`)
+
+  // 算作：查 #人物 的成员要含只打 #演员 的 B
+  const deep = await page.evaluate((id) => window.__demo.tagMembersDeep(id), tags['人物'])
+  assert(deep.includes(ids.b), `#人物 的成员应含只打 #演员 的块（算作）：${JSON.stringify(deep)}`)
+  assert(deep.includes(ids.a), '#人物 也应含双打的块')
+
+  // 打开 #人物 页：双面板 ＋ 成员 footer
+  await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), tags['人物'])
+  await page.waitForTimeout(200)
+  const ui = await page.evaluate(() => ({
+    visible: !document.getElementById('tagpanel').hidden,
+    relations: document.getElementById('tagpanel-relations').textContent ?? '',
+    members: document.querySelectorAll('#tagpanel-members-editor .blk').length,
+  }))
+  assert(ui.visible, '打开标签页应显示 footer')
+  assert(ui.relations.includes('包含') && ui.relations.includes('#演员'), `「包含」面板应列 #演员：${ui.relations}`)
+  assert(ui.relations.includes('属于'), '「属于」面板也在（两个方向同一块页上并列）')
+  assert(ui.members >= 2, `成员 footer 应渲染出成员块（含算作）：${ui.members}`)
+
+  // 禁环：#人物 属于 #演员 ⇒ 拒绝，且不留下半截状态
+  await page.evaluate(
+    ({ child, parent }) => window.__demo.invoke('core.tags/add-parent', { childId: child, parentId: parent }),
+    { child: tags['人物'], parent: tags['演员'] },
+  )
+  const afterCycle = await page.evaluate(
+    (id) => ({ parents: window.__demo.tagParents(id), children: window.__demo.tagChildren(id) }),
+    tags['人物'],
+  )
+  assert(!afterCycle.parents.includes(tags['演员']), `成环写入应被拒绝：${JSON.stringify(afterCycle)}`)
+  assert(afterCycle.children.includes(tags['演员']), '原有那条边不能被拒绝的写入改掉')
+
+  // 删父（模拟：直接从森林移除）⇒ 子标签的 ref 留着、面板显示「已删除」、可清理
+  const dangling = await page.evaluate((parentId) => {
+    const forest = window.__demo.__editor.store.blocks
+    const i = forest.findIndex((b) => b.id === parentId)
+    if (i < 0) return null
+    forest.splice(i, 1)
+    window.__demo.__editor.store.invalidateIndex()
+    window.__demo.__editor.store.touch()
+    window.__demo.invoke('core.block/focus-block', { blockId: window.__demo.allBlocks().find((b) => b.text === '演员')?.id ?? '' })
+    return { parents: window.__demo.tagParents(window.__demo.allBlocks().find((b) => b.text === '演员')?.id ?? ''), danglingIds: window.__demo.tagDanglingParents(window.__demo.allBlocks().find((b) => b.text === '演员')?.id ?? '') }
+  }, tags['人物'])
+  assert(dangling && dangling.danglingIds.length === 1, `删父应留下悬空 ref：${JSON.stringify(dangling)}`)
+  await page.waitForTimeout(250)
+  const danglingUi = await page.evaluate(() => document.getElementById('tagpanel-relations').textContent ?? '')
+  assert(danglingUi.includes('已删除'), `悬空归属应可见：${danglingUi}`)
+  assert(danglingUi.includes('清理'), '悬空归属应可清理')
+
+  await ctx.close()
+  return `#演员 属于 #人物；#人物 成员含只打 #演员 的块；成环被拒；删父留可见悬空`
+})
+
 /* ---------------------------------------------------------------- 汇总 */
 
 await browser.close()

@@ -73,6 +73,17 @@
               <div class="properties-body" id="properties-body"></div>
             </section>
             <div id="editor" spellcheck="false"></div>
+            <!-- 标签页 footer：属于 / 包含 / 成员（属于＝可写，包含＝派生；成员可原地编辑） -->
+            <section class="tagpanel" id="tagpanel" data-tagpanel hidden>
+              <div class="tagpanel-head">
+                <span class="tagpanel-title" id="tagpanel-title"></span>
+                <span class="tagpanel-count" id="tagpanel-members-count"></span>
+              </div>
+              <div class="tagpanel-relations" id="tagpanel-relations"></div>
+              <div class="tagpanel-members-title" id="tagpanel-members-title"></div>
+              <p class="props-empty" id="tagpanel-members-empty" hidden></p>
+              <div class="tagpanel-members-editor" id="tagpanel-members-editor" spellcheck="false"></div>
+            </section>
             <div id="empty-hint" hidden></div>
             <!-- 查询视图（–D6）：紧跟查询块的一段外源渲染；结果集冻结、按钮刷新 -->
             <section class="queryview" id="queryview" data-queryview hidden>

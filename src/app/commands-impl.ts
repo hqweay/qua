@@ -13,9 +13,13 @@
  */
 import {
   addFavorite,
+  addParentTag,
   allPropDefs,
   allTags,
+  checkAddParent,
   clearValue,
+  cyclePathLabels,
+  danglingParentIds,
   declareField,
   declaredFieldIds,
   ensureTag,
@@ -36,8 +40,11 @@ import {
   mkPropDef,
   moveFavorite,
   normalizeAlias,
+  parentTagIds,
   propKindOf,
   propLabel,
+  pruneParentTags,
+  removeParentTag,
   setValue,
   undeclareField,
   pruneFavorites,
@@ -636,6 +643,65 @@ export function propsCommands(
       const b = find(blockId)
       if (!b) return
       d.write(blockId, () => undeclareField(b, propId))
+    },
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════ 标签层级 */
+
+/** 标签归属写入的宿主能力 */
+export interface TagTreeDeps {
+  blocks: () => Block[]
+  write: (blockId: string | undefined, mutate: () => void) => void
+  toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
+  shortId: (id: string) => string
+}
+
+export function tagTreeCommands(
+  d: TagTreeDeps,
+): Pick<App, 'addTagParent' | 'removeTagParent' | 'pruneTagParents'> {
+  const find = (id: string): Block | undefined => findInForest(d.blocks(), id)
+
+  return {
+    /**
+     * 加一条「child 属于 parent」。
+     *
+     * 两个入口（子标签的「属于」、父标签的「包含」）**写的是同一处**：
+     * `child._parentTags`。成环在写入前拒绝，并给出循环路径。
+     */
+    addTagParent: (childId, parentId) => {
+      const child = find(childId)
+      const parent = find(parentId)
+      if (!child || !parent) return false
+      const check = checkAddParent(child, parent, d.blocks())
+      if (!check.ok) {
+        if (check.reason === 'cycle') {
+          const path = cyclePathLabels(check.path ?? [], d.blocks(), d.shortId).join(' → ')
+          d.toast(t('ui.tagpanel.cycle', { path }), 'warn')
+        } else if (check.reason === 'self') d.toast(t('ui.tagpanel.self'), 'warn')
+        else if (check.reason === 'duplicate') d.toast(t('ui.tagpanel.duplicate'), 'info')
+        return false
+      }
+      d.write(childId, () => addParentTag(child, parent, d.blocks()))
+      d.toast(t('ui.tagpanel.added', { child: child.text, parent: parent.text }))
+      return true
+    },
+
+    removeTagParent: (childId, parentId) => {
+      const child = find(childId)
+      if (!child || !parentTagIds(child).includes(parentId)) return
+      d.write(childId, () => removeParentTag(child, parentId))
+    },
+
+    pruneTagParents: (childId) => {
+      const child = find(childId)
+      if (!child || danglingParentIds(child, d.blocks()).length === 0) return
+      let n = 0
+      d.write(childId, () => {
+        n = pruneParentTags(child, d.blocks())
+      })
+      if (n > 0) d.toast(t('ui.tagpanel.pruned', { count: n }))
     },
   }
 }
