@@ -639,7 +639,7 @@ await check('T9 块菜单与斜杠菜单**都是绑定表的渲染结果**（同
   })
   assert(viaClick.length >= 8, `块菜单项太少：${JSON.stringify(viaClick)}`)
   assert(viaClick.some((t) => t.includes('复制块')), `块菜单应含「复制块」：${JSON.stringify(viaClick)}`)
-  // D1/B1：叶子块也给「聚焦到此块」（修订的附注）
+  // 叶子块也给「聚焦到此块」（聚焦含块自身，不是只看子树）
   assert(viaClick.some((t) => t.includes('聚焦到此块')), `块菜单应含 zoom 入口（叶子也給）：${JSON.stringify(viaClick)}`)
   const grouped = await page.locator('.layer-group').allInnerTexts()
   assert(grouped.length >= 3, `块菜单应分组渲染：${JSON.stringify(grouped)}`)
@@ -1757,6 +1757,83 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
   return `单块内拖=文本；A→C=3 块；右键多块菜单删除 + 一次撤销；Shift+拖=跨块文本；Mod+Shift+A 全选块；Enter 清选区；Shift+↓ 边界规则；⌘A 两次升级`
 })
 
+await check('T54 聚焦日记块后日期仍可见：它自己是 depth 0 的只读日期行，子块缩进挂在下面、仍可聚焦', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__demo.quiet(true))
+
+  const today = await page.evaluate(() => {
+    const j = window.__demo.allBlocks().find((b) => b.roles?.includes('journal'))
+    window.__demo.invoke('core.block/focus-block', { blockId: j.id })
+    return { id: j.id, date: window.__demo.snapshot().journalDate }
+  })
+  await page.waitForTimeout(250)
+  const view = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#editor > .blk')]
+    const head = rows[0]
+    return {
+      roots: rows.length,
+      headId: head?.dataset.blockId ?? '',
+      headRole: head?.dataset.role ?? '',
+      headDepth: head?.dataset.depth ?? '',
+      headDate: head?.querySelector('.tx')?.dataset.ph ?? '',
+      headEditable: head?.querySelector('.tx')?.contentEditable ?? '',
+      childDepth: rows[1]?.dataset.depth ?? '',
+      crumbs: [...document.querySelectorAll('#crumbs-trail .crumb')].map((c) => c.textContent),
+      active: window.__demo.snapshot().journalDate,
+      total: window.__demo.snapshot().totalBlocks,
+    }
+  })
+  assert(view.roots > 1, `聚焦日记后应装载它的子树（不只是子块）：${JSON.stringify(view)}`)
+  assert(view.headId === today.id && view.headRole.includes('journal'), `第一行应是**日记块自己**：${JSON.stringify(view)}`)
+  assert(view.headDepth === '0', `日记块应是 depth 0 的那一行：${JSON.stringify(view)}`)
+  assert(view.headDate.length > 0 && !/^\d{4}-\d{2}-\d{2}$/.test(view.headDate), `聚焦后日期行仍要显示可读日期：${JSON.stringify(view)}`)
+  assert(view.headEditable === 'false', `日期行仍只读：${JSON.stringify(view)}`)
+  assert(view.childDepth === '1', `子块应缩进挂在日期行下面：${JSON.stringify(view)}`)
+  assert(view.active === today.date, `当前对象仍是日记块自己（不是它的子块）：${JSON.stringify(view)}`)
+
+  // 回今日 / 冷启动同一条规则：流里每一段的日期行都在，focus 不改变这一点
+  await page.evaluate(() => window.__demo.invoke('core.journal/today'))
+  await page.waitForTimeout(200)
+  const feed = await page.evaluate(() => ({
+    heads: [...document.querySelectorAll('#editor > .blk[data-depth="0"]')].map((el) => el.dataset.role ?? ''),
+    dates: [...document.querySelectorAll('#editor > .blk[data-depth="0"]')].map((el) => el.querySelector('.tx')?.dataset.ph ?? ''),
+  }))
+  assert(feed.heads.every((r) => r.includes('journal')), `流里每段段头都是日记块：${JSON.stringify(feed)}`)
+  assert(feed.dates.every((d) => d.length > 0), `流里每段都显示日期：${JSON.stringify(feed)}`)
+
+  await ctx.close()
+  return `聚焦后首行＝日记块自己（「${view.headDate}」只读、depth 0）＋ ${view.roots - 1} 行子块；当前对象不变`
+})
+
+await check('T55 载入假数据：落点是日记就装日记流（今日在顶＋更早的天），光标落在第一个可编辑行、日期行照常可见', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__demo.quiet(true))
+
+  // 先切到页再载入 ⇒ 库自己的 activeId 可能是任何东西；这里测的是「载入后落点＝日记」那条
+  await page.evaluate(() => window.__demo.loadState('seed'))
+  await page.waitForTimeout(300)
+  const after = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#editor > .blk')]
+    const heads = rows.filter((el) => el.dataset.depth === '0')
+    return {
+      journalView: window.__demo.ctxKeys().journalView,
+      heads: heads.map((el) => ({ role: el.dataset.role ?? '', date: el.querySelector('.tx')?.dataset.ph ?? '', ro: el.querySelector('.tx')?.contentEditable ?? '' })),
+      caret: window.__demo.snapshot().selection?.aBlock ?? '',
+      firstHead: heads[0]?.dataset.blockId ?? '',
+      firstEditable: rows.find((el) => el.querySelector('.tx')?.contentEditable !== 'false')?.dataset.blockId ?? '',
+    }
+  })
+  assert(after.journalView === true, `载入假数据后落点应是日记：${JSON.stringify(after)}`)
+  assert(after.heads.length >= 2, `落点是日记 ⇒ 应装**日记流**（不是只有今天一段）：${JSON.stringify(after.heads)}`)
+  assert(after.heads.every((h) => h.role.includes('journal') && h.date.length > 0), `每段段头都要显示日期：${JSON.stringify(after.heads)}`)
+  assert(after.heads.every((h) => h.ro === 'false'), `日期行仍只读：${JSON.stringify(after.heads)}`)
+  assert(after.caret && after.caret !== after.firstHead, `光标不该停在只读日期行：${JSON.stringify(after)}`)
+  assert(after.caret === after.firstEditable, `光标应落在第一个可编辑行：${JSON.stringify(after)}`)
+
+  await ctx.close()
+  return `载入 seed：${after.heads.length} 段（「${after.heads[0].date}」…）；光标在首段第一个可编辑行`
+})
+
 await check('T27 光标行隐藏占位、journal 日期不可聚焦、折叠图标贴自己的块标', async () => {
   const { ctx, page } = await freshPage(browser, base)
 
@@ -2321,7 +2398,7 @@ await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑�
   assert(back.firstRow === top.firstRow, `退回后首行应复原为顶层块：${JSON.stringify({ want: top.firstRow, got: back.firstRow })}`)
 
   /**
-   * ④ **叶子块也给 zoom**（B1，修订的附注）。
+   * ④ **叶子块也给 zoom**（聚焦含块自身，不是只看子树）。
    *    旧口径「没有子树可聚焦就不给」会让点击行为**时 zoom 时不 zoom**；
    *    行为是「点块标＝聚焦」，叶子上就是「只看这一块」。
    *    ⇒ 现在 zoom 到叶子：编辑器只剩它一行，面包屑仍是它自己的祖先链。
@@ -2336,7 +2413,7 @@ await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑�
     await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), leaf.id)
     await new Promise((r) => setTimeout(r, 250))
     leafView = await st()
-    assert(leafView.trailShown, `叶子块也应能 zoom（D1/B1）：${JSON.stringify(leafView)}`)
+    assert(leafView.trailShown, `叶子块也应能 zoom：${JSON.stringify(leafView)}`)
     assert(leafView.here === 1, `zoom 到叶子后编辑器应只剩它一行，实际 ${leafView.here} 块`)
     assert(leafView.firstRow === leaf.text.trim(), `那一行应是叶子自己：${JSON.stringify({ want: leaf.text, got: leafView.firstRow })}`)
   }
@@ -2803,7 +2880,7 @@ await check('T50 导航历史：⌘[ 后退 / ⌘] 前进跨页可走；新导�
   assert(atB.nav.canGoBack && !atB.nav.canGoForward, `两次导航后应能后退、不能前进：${JSON.stringify(atB.nav)}`)
 
   await page.keyboard.press('Meta+BracketLeft')
-  await page.waitForTimeout(120)
+  await page.waitForTimeout(150)
   const backA = await page.evaluate(() => ({
     id: window.__demo.snapshot().activeId,
     nav: window.__demo.snapshot().nav,
@@ -2812,11 +2889,16 @@ await check('T50 导航历史：⌘[ 后退 / ⌘] 前进跨页可走；新导�
   assert(backA.id === a.id, `⌘[ 应回到 A：${JSON.stringify(backA)}`)
   assert(backA.log.includes('core.history/back'), `应走 core.history/back 命令：${JSON.stringify(backA.log)}`)
 
-  // 再退一步回到 boot 落点（今日 journal）
+  // 再退一步回到 boot 落点（今日日记）：当前对象应是**日记块自己**，不是它的子块
   await page.keyboard.press('Meta+BracketLeft')
-  await page.waitForTimeout(120)
-  const backBoot = await page.evaluate(() => window.__demo.snapshot().activeId)
-  assert(backBoot === info.bootId, `第二次后退应回到冷启动落点：${backBoot} ≠ ${info.bootId}`)
+  await page.waitForTimeout(200)
+  const backBoot = await page.evaluate(() => ({
+    id: window.__demo.snapshot().activeId,
+    date: window.__demo.snapshot().journalDate,
+    head: document.querySelector('#editor > .blk[data-depth="0"]')?.dataset.blockId ?? '',
+  }))
+  assert(backBoot.id === info.bootId, `第二次后退应回到冷启动落点：${JSON.stringify({ backBoot, boot: info.bootId })}`)
+  assert(backBoot.date !== '' && backBoot.head === backBoot.id, `退回的应是今日日记本身（首行＝它自己）：${JSON.stringify(backBoot)}`)
 
   await page.keyboard.press('Meta+BracketRight')
   await page.keyboard.press('Meta+BracketRight')

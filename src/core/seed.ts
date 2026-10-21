@@ -8,7 +8,7 @@
  * `![[图.png]]`，由 `parseInline` 解析成**区间锚点与行内原子**——这正是 demo 要展示的模型形状
  * （锚点带 blockId、原子占 1 格），而不是把富文本塞进 DOM。
  */
-import { ATOM_PLACEHOLDER, findByAlias, journalId, mkBlock, shiftISO, todayISO, uuidv7Hex, type Atom, type Block, type BlockProps, type Mark, type MarkType, type Role } from './index.ts'
+import { ATOM_PLACEHOLDER, FEED_INITIAL, findByAlias, journalId, mkBlock, shiftISO, todayISO, uuidv7Hex, type Atom, type Block, type BlockProps, type Mark, type MarkType, type Role } from './index.ts'
 import { DEFAULT_PREFS, WORKSPACE_VERSION, type PageBlock, type Workspace } from './workspace.ts'
 
 /* ------------------------------------------------------------- 迷你 DSL */
@@ -478,7 +478,28 @@ export function degradedWorkspace(): Workspace {
   return forest(blocks, built)
 }
 
-export function demoState(name: 'seed' | 'empty' | 'sparse' | 'degraded'): Workspace {
+/**
+ * **冷启动态**：与「第一次打开 app」看到的那屏一致 —— 今日 journal 在顶、只有最近几天，
+ * 落点＝今日（`activeId` 由 `forest()` 取 `blocks[0]`）。
+ *
+ * ⚠️ 区别于「假数据库」：那是**全量种子**（6 页 + 全部历史天）；冷启动只装
+ *    `journalFeedDays(…, FEED_INITIAL)` 段。调试时要看「首屏到底是什么样」用它，
+ *    不用去清 localStorage 再刷新。
+ */
+export function bootWorkspace(): Workspace {
+  const days = [
+    mkJournal(todayISO(), [{ text: '打开就在今天：这个日期是只读的，一天只有一个。' }]),
+    mkJournal(shiftISO(todayISO(), -1), [{ text: '昨天留下的第一行。' }]),
+    mkJournal(shiftISO(todayISO(), -2), [{ text: '前天的第一行。' }]),
+  ]
+  // 冷启动的装载是 `journalFeedDays` ⇒ 这里按同一条规则剪到 `FEED_INITIAL` 段
+  const feed = days.slice(0, FEED_INITIAL)
+  const blocks = feed.map((d) => d.page)
+  resolveRefs(blocks, feed)
+  return forest(blocks, feed)
+}
+
+export function demoState(name: 'seed' | 'empty' | 'sparse' | 'degraded' | 'boot'): Workspace {
   const ws =
     name === 'empty'
       ? emptyWorkspace()
@@ -486,7 +507,9 @@ export function demoState(name: 'seed' | 'empty' | 'sparse' | 'degraded'): Works
         ? sparseWorkspace()
         : name === 'degraded'
           ? degradedWorkspace()
-          : seedWorkspace()
+          : name === 'boot'
+            ? bootWorkspace()
+            : seedWorkspace()
   return ws
 }
 

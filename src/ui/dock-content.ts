@@ -60,7 +60,7 @@ export function renderFavoritesInto(deps: DockContentDeps, slot: DockSlotEls, ex
   const cards: DockCard[] = []
   const forest = deps.blocks()
 
-  // 今日：在库里找今天的 journal 块（冷启动时它一定已经物化，见 seed／装配层）
+  // Daily note：在库里找今天的 journal 块（冷启动时它一定已经物化，见 seed／装配层）
   const today = forest.find((b) => hasRole(b, 'journal') && journalDate(b) === todayISO())
   if (today) {
     const body = document.createElement('div')
