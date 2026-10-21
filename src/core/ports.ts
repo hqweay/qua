@@ -91,7 +91,7 @@ export interface App {
    *    拆成两步又会让「建了标签但没插上边」这种半截状态成为可能。
    */
   insertTag(tag: string): void
-  /* 属性（AA6：属性是块第一公民；值在块上 `props[propId]`，一块一槽） */
+  /* 属性（属性是块第一公民；值在块上 `props[propId]`，一块一槽） */
   setPropValue(blockId: string, propId: string, value: unknown): void
   clearPropValue(blockId: string, propId: string): void
   /** 新建字段定义（可同时声明到该块）；返回 `propId`（空串＝没建） */
@@ -110,7 +110,7 @@ export interface App {
   /**
    * 删一个行内原子（引用 / 标签）。
    *
-   * ⚠️ 摘标签可能触发「要不要清理它带来的值」的提示（D20）—— 所以删除入口在门面，
+   * ⚠️ 摘标签可能触发「要不要清理它带来的值」的提示 —— 所以删除入口在门面，
    *    不是组件直接调编辑器（编辑器不知道属性与提示）。
    */
   removeAtom(atomId: string): void

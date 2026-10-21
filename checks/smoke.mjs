@@ -3004,7 +3004,7 @@ await check('T52 标签层级：属于/包含双面板、成员含算作、禁�
   assert(ui.relations.includes('属于'), '「属于」面板也在（两个方向同一块页上并列）')
   assert(ui.members >= 2, `成员 footer 应渲染出成员块（含算作）：${ui.members}`)
 
-  // D21：给 #人物 声明一个字段；只打 #演员 的 B **不获得**它（算作 ≠ 拥有字段）
+  // 算作 ≠ 拥有字段：给 #人物 声明一个字段，只打 #演员 的 B 不获得它
   await page.evaluate(
     (id) => window.__demo.invoke('core.props/create-def', { blockId: id, label: '姓名', kind: 'text' }),
     tags['人物'],

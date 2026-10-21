@@ -248,7 +248,7 @@ export function pageCommands(d: PageDeps): Pick<
         d.refreshList()
         d.toast(t('ui.toast.tagCreated', { tag: block.text }))
       } else if (reused) {
-        // D10：同名块已存在 ⇒ 复用它并加 tag 角色。**必须让用户看见**，否则这是一次静默的模型改动
+        // 同名块已存在 ⇒ 复用它并加 tag 角色。**必须让用户看见**，否则这是一次静默的模型改动
         d.refreshList()
         d.toast(t('ui.toast.tagReused', { tag: block.text }), 'info')
       } else {
@@ -581,7 +581,7 @@ export function propsCommands(
   const addProp = (blockId: string, propId: string): void => {
     const b = find(blockId)
     if (!b) return
-    // 页/标签声明它（字段可用）；普通块只有值：先放一个空槽，让它出现在属性区（AA6）
+    // 页/标签声明它（字段可用）；普通块只有值：先放一个空槽，让它出现在属性区
     if (hasRole(b, 'page') || hasRole(b, 'tag')) d.write(blockId, () => declareField(b, propId))
     else d.write(blockId, () => setValue(b, propId, ''))
   }
@@ -602,7 +602,7 @@ export function propsCommands(
     /**
      * 新建字段定义。
      *
-     * **默认复用**（D19-a）：已有**同名同 kind** 的定义 ⇒ 指向同一个 `propId`，
+     * **默认复用**：已有**同名同 kind** 的定义 ⇒ 指向同一个 `propId`，
      * 并显示来源（「已有同名定义（来自 #书）」）；kind 不同或显式新建 ⇒ 新定义。
      * 误复用可改回、误分槽要迁数据 ⇒ 默认选「错了好改」的那一边。
      */
