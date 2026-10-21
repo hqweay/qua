@@ -139,6 +139,35 @@ export function hasTagName(blockId: string, name: string, forest: readonly Block
 }
 
 /**
+ * **从一段正文里切出「刚敲完的那个 `#名字`」**。纯函数，零 DOM。
+ *
+ * 判据：`#名字` 后面必须**真的跟了分隔符**（空格／中英文标点）。
+ *
+ * ⚠️ **行尾不算闭合**。这是踩出来的：每敲一个字符都会同步一次，
+ *    若把行尾当闭合，`#自` 就会在最边缘的时刻成边 ⇒ 标签变成「自」，
+ *    后面接着敲的「动边」留在正文里。必须等用户敲下那个分隔符。
+ *
+ * ⚠️ `#` 后面必须有至少一个非空白、非 `#` 的字符 —— 光一个 `#` 不成边。
+ *
+ * @returns 命中则给出名字与区间（区间**不含**分隔符）；否则 `null`
+ */
+export function trailingHashTag(text: string): { name: string; from: number; to: number } | null {
+  /** 分隔类字符：`#名字` 后面跟了它 ⇒ 说明这个名字敲完了 */
+  const SEP = /[\s.,;:!?)\]}。，、；：！？）】]/
+  const hash = text.lastIndexOf('#')
+  if (hash < 0) return null
+  const rest = text.slice(hash + 1)
+  // `#` 之后不能有空白或再一个 `#`
+  if (rest.length === 0 || /^[\s#]/.test(rest)) return null
+  const cut = rest.search(SEP)
+  // 没有分隔符 ⇒ **还在敲**（哪怕已经在行尾）⇒ 不成边
+  if (cut < 0) return null
+  const name = rest.slice(0, cut)
+  if (name.length === 0) return null
+  return { name, from: hash, to: hash + 1 + name.length }
+}
+
+/**
  * 打了某个标签的**块 id** 集合（标签的「成员列表」）。
  *
  * 这就是「标签页的反链」：反链＝指向它的入向边，标签成员＝指向标签块的 tag 边。

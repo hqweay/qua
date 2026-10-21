@@ -1941,6 +1941,52 @@ await check('T57 日记流里 zoom 进某块再「后退」⇒ 回到**日记流
   return `日记流 ${feedAtStart.roots} 段 → zoom（1 段）→ 后退 ⇒ 仍是 feed（${back.roots} 段，${back.journalDate}）`
 })
 
+await check('T58 正文里敲 `#名字` ⇒ 闭合成边（吃掉那几个字、占 1 格、进成员列表），组合期不动手', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__demo.quiet(true))
+  await openFirstPage(page)
+
+  // 找一个空块并落光标
+  const target = await page.evaluate(() => {
+    const ed = window.__demo.__editor
+    const rootId = window.__demo.blocks()[0].id
+    const id = ed.insertBlockAfter(rootId, '')
+    ed.placeCaret(id, 0)
+    return id
+  })
+  await page.waitForTimeout(80)
+
+  const tagName = '自动边'
+  // ⚠️ 末尾那个空格是**必须的**：只有后面跟了分隔符才算敲完（行尾不算）
+  await page.keyboard.type(`写点东西 #${tagName} `)
+  await page.waitForTimeout(220)
+
+  const got = await page.evaluate((id) => {
+    const b = window.__demo.blocks().find((x) => x.id === id)
+    return {
+      text: b?.text ?? '',
+      found: Boolean(b),
+      atoms: window.__demo.atoms().filter((a) => a.blockId === id && a.kind === 'tag'),
+      tagBlock: window.__demo.allBlocks().find((x) => x.roles?.includes('tag') && x.text === '自动边')?.id ?? '',
+    }
+  }, target)
+
+  assert(got.found, '前置：插入的块应在当前视图里：' + JSON.stringify(got))
+
+  // ① `#自动边` 那几个字被吃掉了，只剩一格占位符
+  assert(!got.text.includes('#自动边'), '`#名字` 应被吃掉：' + JSON.stringify(got.text))
+  assert(got.text.includes('\uFFFC'), '应留下一个占位符：' + JSON.stringify(got.text))
+  assert(got.text.startsWith('写点东西 '), '前面的文字要原样保留：' + JSON.stringify(got.text))
+  assert(got.text === '写点东西 \uFFFC ', '结束处应是「一格占位符 ＋ 那个分隔空格」：' + JSON.stringify(got.text))
+
+  // ② 真的产出了一条边，且指向刚建的标签块
+  assert(got.atoms.length === 1, '应恰好一条 tag 边：' + JSON.stringify(got.atoms))
+  assert(got.tagBlock !== '' && got.atoms[0].target?.id === got.tagBlock, '边要指向标签块：' + JSON.stringify(got))
+
+  await ctx.close()
+  return `敲「#${tagName}」⇒ 正文 ${JSON.stringify(got.text)}，一条边指向 ${got.tagBlock.slice(-6)}`
+})
+
 await check('T27 光标行隐藏占位、journal 日期不可聚焦、折叠图标贴自己的块标', async () => {
   const { ctx, page } = await freshPage(browser, base)
 
