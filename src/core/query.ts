@@ -9,7 +9,7 @@
  * ⚠️ 这里零 DOM、零持久化：求值只吃「森林 ＋ atoms」，所以能直接单测。
  * ⚠️ 接内核后本文件的签名不变：`runQuery` 以后由 `IndexPort.query()` 实现，`QuerySpec` 仍是那个 canonical JSON。
  */
-import type { Block } from './model.ts'
+import { hasRole, type Block } from './model.ts'
 import type { Atom } from './annotations.ts'
 import { findPath } from './tree.ts'
 import { findTagByName, tagMemberIds } from './tags.ts'
@@ -111,11 +111,11 @@ function matches(node: QueryNode, b: Block, refs: ReadonlySet<string>, tags: Rea
   return node.todo === cur
 }
 
-/** 某天的日记块（`role: journal` ＋ `_date`，承 68 ） */
+/** 某天的日记块（`journal` 角色 ＋ `_date`，承 68 ） */
 export function findJournal(blocks: readonly Block[], date: string): Block | undefined {
   let found: Block | undefined
   walk(blocks, (b) => {
-    if (!found && b.role === 'journal' && b.props?._date === date) found = b
+    if (!found && hasRole(b, 'journal') && b.props?._date === date) found = b
   })
   return found
 }
@@ -141,7 +141,7 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
 
   const hits: QueryHit[] = []
   walk(roots, (b, ancestors) => {
-    if (journalDate && b.role === 'journal') return
+    if (journalDate && hasRole(b, 'journal')) return
     if (!matches(spec.where, b, refs, tags)) return
     if (spec.todo && (b.todo ?? 'none') !== spec.todo) return
     hits.push({ blockId: b.id, path: ancestors.map((a) => a.id) })

@@ -17,7 +17,7 @@
  * 且读取时按「还活着的」过滤（承 64 ：错指要看得见，不能假装存在）。
  */
 import { findInForest, findPath } from './tree.ts'
-import { prop, type Block, type BlockProps } from './model.ts'
+import { hasRole, prop, type Block, type BlockProps } from './model.ts'
 
 /** 收藏容器块上的系统属性：有序的块 id 列表 */
 export const FAVORITES_PROP = '_favorites'
@@ -114,7 +114,7 @@ export function findContainer(forest: readonly Block[], containerId: string): Bl
  *   （用户刚建、还没收藏东西），否则它会「看不见也删不掉」。
  */
 export function favoritesContainers(forest: readonly Block[]): Block[] {
-  return forest.filter((b) => b.role === 'favorites')
+  return forest.filter((b) => hasRole(b, 'favorites'))
 }
 
 /**

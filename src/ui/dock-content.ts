@@ -5,9 +5,9 @@
  * 属于 UI 组件的知识；装配层只需要说「现在有哪几页、当前是哪一页、点了怎么开」。
  *
  * ⚠️ 这里**不认 `ws`／`ed`／`registry`**，只认下面这个 `DockContentDeps`。
- * ⚠️ 渲染一律走 `renderBlock`（29 「一源多视」）：槽只排一列，块由角色决定长相。
+ * ⚠️ 渲染一律走 `renderBlock`（29 「一源多视」）：槽只排一列，块由类型决定长相（角色只叠 chrome）。
  */
-import { journalDate, todayISO, liveFavorites, containerTitle, type Atom, type Block, type Index } from '../core/index.ts'
+import { hasRole, journalDate, todayISO, liveFavorites, containerTitle, type Atom, type Block, type Index } from '../core/index.ts'
 import { backrefsOf } from '../core/backrefs.ts'
 import { t } from '../core/msg.ts'
 import { renderBlock, type BlockRenderCtx } from './block-renderers.ts'
@@ -61,7 +61,7 @@ export function renderFavoritesInto(deps: DockContentDeps, slot: DockSlotEls, ex
   const forest = deps.blocks()
 
   // 今日：在库里找今天的 journal 块（冷启动时它一定已经物化，见 seed／装配层）
-  const today = forest.find((b) => b.role === 'journal' && journalDate(b) === todayISO())
+  const today = forest.find((b) => hasRole(b, 'journal') && journalDate(b) === todayISO())
   if (today) {
     const body = document.createElement('div')
     body.id = 'journal-today'
@@ -147,7 +147,7 @@ export function renderBackrefsInto(deps: DockContentDeps, slot: DockSlotEls, ext
   }
   // 反链项**不是库里的块**，是查询结果：用 `backref` 角色渲染（没有专属布局，只是带箭头的一行）
   for (const s of sources) {
-    const row: Block = { id: s.pageId, text: s.text, children: [], role: 'backref' }
+    const row: Block = { id: s.pageId, text: s.text, children: [], roles: ['backref'] }
     list.appendChild(renderBlock(row, ctx))
   }
 

@@ -35,7 +35,8 @@
 
 ### 1.2 「是不是某种东西」用**角色**，「有什么数据」用**属性**
 
-- 角色（`role`）是块上的一等声明：`page`／`journal`／`backref`…
+- 角色（`roles: Role[]`）是块上的一等声明：`page`／`journal`／`backref`／`tag`／`schema`…
+- **可兼位**（一个块可同时是标签、又是页）；判定只走 `hasRole`，**数组顺序无语义**（禁 `b.role ===`，`arch-check [21]` 会拦）
 - 属性（`props`）：系统属性 **`_` 开头**（`_type`／`_icon`／`_date`／`_tags`…）
 - ⇒ **`_role` 不存在。`props.role` 也是错的。**
 
@@ -47,7 +48,7 @@
 ### 1.4 交付层：槽里只有块
 
 - ❌ 页面列表组件、页面容器、"我的库"导航、入口条
-- ✅ `renderBlock(block, ctx)` **按角色分派**，槽只负责排一列
+- ✅ `renderBlock(block, ctx)` **外观按类型、chrome 按角色**，槽只负责排一列
 - **堆叠归槽，tab 归块**——不要在槽层再加 tab
 
 ### 1.5 分层（`arch-check [13]` 硬约束，按目录判层）

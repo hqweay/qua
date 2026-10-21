@@ -1024,7 +1024,7 @@ export class BlockEditor {
     const sel = this.sel
     if (
       !isSectionRoot &&
-      loc.block.role === undefined &&
+      (loc.block.roles?.length ?? 0) === 0 &&
       sel &&
       sel.aBlock === id &&
       sel.hBlock === id &&
@@ -1051,7 +1051,7 @@ export class BlockEditor {
        *   · **有角色的根**（页/日记/收藏）或块首 / 空块 / 块尾
        *     ⇒ 插一个**空的首个子块**（根文本是名字/投影，不拆，避免静默改名）。
        */
-      const canSplitRoot = loc.block.role === undefined
+      const canSplitRoot = (loc.block.roles?.length ?? 0) === 0
       if (canSplitRoot && offset > 0 && offset < loc.block.text.length) {
         const r = splitBlockIntoFirstChild(this.doc, id, offset)
         if (r) {

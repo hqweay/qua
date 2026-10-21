@@ -19,11 +19,11 @@
  *    即可，与命令路径共用同一个函数，不会分叉成第二条解析。
  */
 import { uuidv7Hex } from './ids.ts'
-import type { Block } from './model.ts'
+import { hasRole, type Block, type Role } from './model.ts'
 import type { Atom } from './annotations.ts'
 
 /** 标签块的角色：标签 ＝ 一个带 `tag` 角色的普通块（**任意块皆可当标签**，它只是指向边的另一端） */
-export const TAG_ROLE = 'tag'
+export const TAG_ROLE: Role = 'tag'
 
 /**
  * 标签名的规范化 —— **唯一定义点**。
@@ -41,7 +41,7 @@ export function mkTagBlock(name: string): Block {
     id: uuidv7Hex(),
     text: name,
     children: [],
-    role: TAG_ROLE,
+    roles: [TAG_ROLE],
     props: { _icon: 'lucide:hash' },
   }
 }
@@ -59,7 +59,7 @@ export function findTagByName(forest: readonly Block[], name: string): Block | u
 /** 在森林里找一个标签块（先序；只认 `tag` 角色，按规范化后的名字比） */
 function findTag(forest: readonly Block[], want: string): Block | undefined {
   const walk = (b: Block): Block | undefined => {
-    if (b.role === TAG_ROLE && normalizeTag(b.text) === want) return b
+    if (hasRole(b, TAG_ROLE) && normalizeTag(b.text) === want) return b
     for (const c of b.children) {
       const hit = walk(c)
       if (hit) return hit
@@ -96,7 +96,7 @@ export function ensureTag(forest: Block[], name: string): { block: Block | null;
 export function allTags(forest: readonly Block[]): Block[] {
   const out: Block[] = []
   const walk = (b: Block): void => {
-    if (b.role === TAG_ROLE) out.push(b)
+    if (hasRole(b, TAG_ROLE)) out.push(b)
     for (const c of b.children) walk(c)
   }
   for (const b of forest) walk(b)

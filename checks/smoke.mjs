@@ -95,7 +95,7 @@ await check('T1 打开就能敲：光标落在第一个**可编辑**块；journa
   const at = await page.evaluate(() => {
     // journal 首行是只读日期 ⇒ 光标应落在它的第一个子块，而不是日期行
     const b = window.__demo.blocks()
-    const editable = b.find((x) => x.role !== 'journal')
+    const editable = b.find((x) => !x.roles?.includes('journal'))
     return { id: editable?.id ?? '', sel: window.__demo.snapshot().selection }
   })
   assert(at.id && at.sel?.aBlock === at.id, `冷启动光标应落在第一个可编辑块：${JSON.stringify(at)}`)
@@ -113,7 +113,7 @@ await check('T1 打开就能敲：光标落在第一个**可编辑**块；journa
   })
   assert(got.includes('真正敲进去的六个字'), `光标所在块没拿到文本：${JSON.stringify(got)}｜全量=${JSON.stringify(t)}`)
   // 日期行仍是空的：日期是 `_date` 的只读投影，打进去的字不许落在它上面
-  const journalText = await page.evaluate(() => window.__demo.blocks().find((b) => b.role === 'journal')?.text)
+  const journalText = await page.evaluate(() => window.__demo.blocks().find((b) => b.roles?.includes('journal'))?.text)
   assert(journalText === '', `journal 行不该被写入：${JSON.stringify(journalText)}`)
   await ctx.close()
   return `块数 ${after.blocks}，DOM 节点 ${after.domNodes}；日期行仍为空`
@@ -675,7 +675,7 @@ await check('T10 localStorage：关掉重开内容还在（含锚点与原子）
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => {
     // journal 首行是只读日期 ⇒ 往第一个**可编辑**块里写
-    const b = window.__demo.blocks().find((x) => x.role !== 'journal')
+    const b = window.__demo.blocks().find((x) => !x.roles?.includes('journal'))
     window.__demo.focusBlock(b.id, 0)
   })
   await page.keyboard.type('持久化标记 ')
@@ -710,7 +710,7 @@ await check('T36 StoragePort：关页前不等防抖也能落盘；旧裸库显�
   {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => {
-      const b = window.__demo.blocks().find((x) => x.role !== 'journal')
+      const b = window.__demo.blocks().find((x) => !x.roles?.includes('journal'))
       window.__demo.focusBlock(b.id, 0)
     })
     await page.keyboard.type('页隐藏标记 ')
@@ -881,7 +881,7 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
   const frozen = await page.evaluate(() => {
     const raw = localStorage.getItem(localStorage.key(0))
     const data = JSON.parse(raw).data
-    const q = data.blocks.flatMap(function flat(b) { return [b, ...b.children.flatMap(flat)] }).find((b) => b.role === 'query')
+    const q = data.blocks.flatMap(function flat(b) { return [b, ...b.children.flatMap(flat)] }).find((b) => b.roles?.includes('query'))
     return { hasQuery: Boolean(q?.props?._query), result: q?.props?._queryResult, children: q?.children?.length ?? -1 }
   })
   assert(frozen.hasQuery, '条件要落在 _query 上（AF5：查询块＝数据侧）')
@@ -1034,7 +1034,7 @@ await check('T40 标签＝指向边：打标签 ⇒ 标签块出现在森林里�
      *      ⇒ ④ 再打一次会打在**同一块**上，导致 ⑤ 删一条边后还剩另一条（本轮真踩到）。
      */
     const root = window.__demo.__editor.doc.roots[0]
-    const b = window.__demo.blocks().find((x) => x.id !== root.id && x.role !== 'journal' && x.text.length > 2)
+    const b = window.__demo.blocks().find((x) => x.id !== root.id && !x.roles?.includes('journal') && x.text.length > 2)
     window.__demo.focusBlock(b.id, b.text.length)
     window.__demo.invoke('core.editor/insert-tag', { tag: '设计' })
     const a = window.__demo.atoms().find((x) => x.kind === 'tag' && x.blockId === b.id)
@@ -1045,14 +1045,14 @@ await check('T40 标签＝指向边：打标签 ⇒ 标签块出现在森林里�
     return {
       blockId: b.id,
       atom: a ? { id: a.id, kind: a.kind, target: a.target, label: a.label } : null,
-      tag: tag ? { id: tag.id, text: tag.text, role: tag.role } : null,
+      tag: tag ? { id: tag.id, text: tag.text, roles: tag.roles } : null,
       text: window.__demo.blocks().find((x) => x.id === b.id)?.text ?? '',
     }
   })
   assert(it.atom, `insert-tag 应产出一条标签边：${JSON.stringify(it)}`)
   assert(it.atom.kind === 'tag', `标签边的 kind 应是 tag：${JSON.stringify(it.atom)}`)
   assert(it.tag, `标签边应指向一个真实存在的标签块：${JSON.stringify(it)}`)
-  assert(it.tag.role === 'tag', `标签应是一个带 tag 角色的**块**（不是字符串、也不是新实体）：${JSON.stringify(it.tag)}`)
+  assert(it.tag.roles?.includes('tag'), `标签应是一个带 tag 角色的**块**（不是字符串、也不是新实体）：${JSON.stringify(it.tag)}`)
   assert(it.tag.text === '设计', `标签名字就是它的正文，且不带 #：${JSON.stringify(it.tag)}`)
   assert(it.text.includes('\uFFFC'), `正文里那一格应是占位符（边在正文里）：${JSON.stringify(it.text)}`)
 
@@ -1072,15 +1072,15 @@ await check('T40 标签＝指向边：打标签 ⇒ 标签块出现在森林里�
 
   // ④ 幂等：再打一次同名标签 ⇒ 不建第二个块（`#设计` 与 `#设计 ` 是同一个）
   const again = await page.evaluate((hostId) => {
-    const before = window.__demo.allBlocks().filter((x) => x.role === 'tag').length
+    const before = window.__demo.allBlocks().filter((x) => x.roles?.includes('tag')).length
     // 打在**另一块**上：否则 ⑤ 删掉一条边后，同一块上还留着另一条 ⇒ 断言会假失败
-    const b = window.__demo.blocks().find((x) => x.id !== hostId && x.role !== 'journal' && x.text.length > 2)
+    const b = window.__demo.blocks().find((x) => x.id !== hostId && !x.roles?.includes('journal') && x.text.length > 2)
     window.__demo.focusBlock(b.id, b.text.length)
     window.__demo.invoke('core.editor/insert-tag', { tag: ' 设计 ' })
     // 确认**真的插进去了**（`insertAtom` 走当前 sel；落点不对的话这里会先炸，
     // 而不是让后面的成员断言给出一条看不懂的失败信息）
     const inserted = window.__demo.atoms().some((x) => x.kind === 'tag' && x.blockId === b.id)
-    return { before, after: window.__demo.allBlocks().filter((x) => x.role === 'tag').length, other: b.id, inserted }
+    return { before, after: window.__demo.allBlocks().filter((x) => x.roles?.includes('tag')).length, other: b.id, inserted }
   }, it.blockId)
   assert(again.inserted, `第二次打标签应插到另一块（${again.other}）上`)
   assert(again.after === again.before, `同名标签不该建出第二块：${JSON.stringify(again)}`)
@@ -1119,7 +1119,7 @@ await check('T37 演示状态下打字要落盘（已知风险 3）：切到稀�
   // ① 切到稀疏态（这条路径原先把 `children` 装成 roots，与 openPage 的 `rootsFor(p)` 分叉）
   await page.evaluate(() => window.__demo.loadState('sparse'))
   const target = await page.evaluate(() => {
-    const b = window.__demo.blocks().find((x) => x.role !== 'journal')
+    const b = window.__demo.blocks().find((x) => !x.roles?.includes('journal'))
     window.__demo.focusBlock(b.id, 0)
     return b.id
   })
@@ -1242,7 +1242,7 @@ await check('T17 今日 journal：冷启动落在它、一天一个（幂等）�
   const n1 = await page.evaluate(() => window.__demo.snapshot().topBlocks)
   assert(n1 === n0, `回今日应幂等（块数不增）：${n0} → ${n1}`)
   const dupes = await page.evaluate(() => {
-    const ids = window.__demo.blocks().filter((b) => b.role === 'journal').map((b) => b.id)
+    const ids = window.__demo.blocks().filter((b) => b.roles?.includes('journal')).map((b) => b.id)
     return { count: ids.length, unique: new Set(ids).size }
   })
   assert(dupes.count === dupes.unique, `同一天不得有两个 journal 块：${JSON.stringify(dupes)}`)
@@ -1994,7 +1994,7 @@ await check('T41 冷启动直接打字后 ⌘Z：撤销只回滚文字，不把�
    */
   const before = await page.evaluate(() => {
     const bs = window.__demo.blocks()
-    const b = bs.find((x) => x.role !== 'journal')
+    const b = bs.find((x) => !x.roles?.includes('journal'))
     window.__demo.focusBlock(b.id, 0)
     const s = window.__demo.snapshot()
     return { id: b.id, text: b.text, texts: window.__demo.text(), total: s.totalBlocks, dom: s.domBlocks }
@@ -2023,8 +2023,8 @@ await check('T42 冷启动后在反链 footer 编辑，不会把正文重载成�
   const { ctx, page } = await freshPage(browser, base)
   const ids = await page.evaluate(() => {
     const bs = window.__demo.blocks()
-    const j = bs.find((b) => b.role === 'journal')
-    const src = bs.find((b) => b.role !== 'journal' && b.text.length > 2)
+    const j = bs.find((b) => b.roles?.includes('journal'))
+    const src = bs.find((b) => !b.roles?.includes('journal') && b.text.length > 2)
     window.__demo.focusBlock(src.id, src.text.length)
     /**
      * `[[ ]]` 的引用目标只解析 `page` 角色（journal 的正文是空的，日期在 `_date` 里），
@@ -2586,7 +2586,7 @@ await check('T45 Shift+点块标 ⇒ 右槽自动打开并钉住该块；再点�
   assert(closed.open === false, `右槽应先关着：${JSON.stringify(closed)}`)
 
   const picked = await page.evaluate(() => {
-    const b = window.__demo.blocks().find((x) => !x.role && !x.todo && x.text.length > 2)
+    const b = window.__demo.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)
     return b?.id ?? ''
   })
   assert(picked, '假数据里应有一个普通内容块')
@@ -2630,7 +2630,7 @@ await check('T46 从正文块标拖进左槽 ⇒ 钉住并渲染；在槽里编�
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__demo.quiet(true))
   await openFirstPage(page)
-  const id = await page.evaluate(() => window.__demo.blocks().find((x) => !x.role && !x.todo && x.text.length > 2)?.id ?? '')
+  const id = await page.evaluate(() => window.__demo.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
   assert(id, '应有一个可拖的普通块')
 
   const drag = await dragBlockToDock(page, id, 'left')
@@ -2673,7 +2673,7 @@ await check('T47 槽内连续输入不被整槽重画打断；⌘Z 在槽里回�
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__demo.quiet(true))
   await openFirstPage(page)
-  const id = await page.evaluate(() => window.__demo.blocks().find((x) => !x.role && !x.todo && x.text.length > 2)?.id ?? '')
+  const id = await page.evaluate(() => window.__demo.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
   const drag = await dragBlockToDock(page, id, 'left')
   assert(drag?.hot, '拖进左槽应给出高亮')
   await page.waitForTimeout(140)
@@ -2728,7 +2728,7 @@ await check('T48 祖先也被钉住 ⇒ 只渲染祖先（不重复）；钉住�
     `祖先也在清单里时只渲染祖先：${JSON.stringify(nestedState.rows.right)}（父 ${nested.parent}）`,
   )
 
-  const leftId = await page.evaluate(() => window.__demo.blocks().find((x) => !x.role && !x.todo && x.text.length > 2)?.id ?? '')
+  const leftId = await page.evaluate(() => window.__demo.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
   await dragBlockToDock(page, leftId, 'left')
   await page.waitForTimeout(400)
   const saved = await dockState(page)
@@ -2759,7 +2759,7 @@ await check('T49 钉住行有移除入口：移出槽但不删块；左槽移除
   await page.evaluate(() => window.__demo.quiet(true))
   await openFirstPage(page)
   const picked = await page.evaluate(() => {
-    const b = window.__demo.blocks().find((x) => !x.role && !x.todo && x.text.length > 2)
+    const b = window.__demo.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)
     return b ? { id: b.id, text: b.text } : null
   })
   assert(picked, '应有一个可拖的块')

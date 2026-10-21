@@ -16,15 +16,20 @@ export type TodoState = 'todo' | 'done'
  * 注册表是**封闭种类 × 开放条目**：这里只列 core 已用到的，插件可注册自有角色。
  */
 /**
- * `page` 页｜`journal` 日记｜`backref` 反链项（右槽默认内容）｜`favorites` 收藏容器块｜`tag` 标签
+ * `page` 页｜`journal` 日记｜`backref` 反链项（右槽默认内容）｜`favorites` 收藏容器块｜
+ * `query` 查询视图｜`tag` 标签｜`schema` 字段定义
  *
  * ⚠️ `backref` 是**角色**而不是类型：反链项没有专属渲染行为，只是「一条指向我的引用」。
  * ⚠️ `favorites` 也只是**角色**：容器就是一个普通块（名字 = 正文，内部存一列有序引用边），
  * 没有新实体、没有新数组。
  * ⚠️ `tag` 同理：标签＝一个带 `tag` 角色的普通块，**任意块皆可当标签**，
  *    它只是指向边的另一端；不因为叫这个名字就多出一个实体。
+ * ⚠️ `schema` 同理：字段定义也是一个块（正文 = 显示名），不是新表、不是新容器。
+ *
+ * **兼位**：同一个块可以同时担任多个角色（例：既是标签、又能当页打开）。
+ * ⇒ 判定一律走 `hasRole`，**不要**读单个字段做 `===` 比较。
  */
-export type Role = 'page' | 'journal' | 'backref' | 'favorites' | 'query' | 'tag'
+export type Role = 'page' | 'journal' | 'backref' | 'favorites' | 'query' | 'tag' | 'schema'
 
 /**
  * 系统属性 id。
@@ -44,14 +49,41 @@ export interface Block {
   /**
    * **属性**（承 28 「属性是块第一公民」）：任何块可直接有属性，不需标签即可赋值。
    * 键是属性 id —— **系统属性以 `_` 开头**，插件属性走 `ns/name`。
-   * ⚠️ 与 `role`／`collapsed`／`todo` 的分工：那三个不是属性。
+   * ⚠️ 与 `roles`／`collapsed`／`todo` 的分工：那三个不是属性。
    */
   props?: BlockProps
   /**
-   * **角色**（28 ）：语义机制位，不是属性。一块可以同时兼多个机制位（如 journal 也可当页）。
-   * ⚠️ 这是**实现载体**：语义上角色来自角色注册表，接内核后由 `_tags` 之外的独立声明承载。
+   * **角色**（28 ）：语义机制位，不是属性。一个块可以同时兼多个机制位
+   * （例：既是标签、又能当页打开）。
+   *
+   * ⚠️ **顺序不承载语义** —— 它只是集合的存储形状，不是优先级。
+   *    判定一律 `hasRole`；不要按位置取「主角色」，那会变成一条隐式规则。
+   * ⚠️ 这是**实现载体**：语义上角色来自角色注册表，接内核后由独立声明承载。
    */
-  role?: Role
+  roles?: Role[]
+}
+
+/**
+ * 这块有没有某个角色。
+ *
+ * ⚠️ 唯一判定入口：`roles` 改多值之后，任何 `b.role === 'x'` 都会静默失效
+ *    （字段不存在 ⇒ 永远 false），所以那类直接比较由 `arch-check` 拦住。
+ */
+export function hasRole(b: Block | undefined, role: Role): boolean {
+  return b?.roles?.includes(role) ?? false
+}
+
+/**
+ * **块类型**：决定「长什么样」（判据：改外观 → 类型；只换机制位 → 角色）。
+ *
+ * 首期只有默认类型 `outline`：块是大纲里的一行（图标 ＋ 正文/名字）。
+ * 角色不参与这里的判定 —— 兼位不该改变外观，只往上叠 chrome。
+ * `_type` 是系统属性；未声明时就是默认类型。
+ */
+export const DEFAULT_BLOCK_TYPE = 'outline'
+
+export function blockTypeOf(b: Block): string {
+  return prop<string>(b, '_type') ?? DEFAULT_BLOCK_TYPE
 }
 
 /** 属性袋：键 = 属性 id（系统属性 `_lowerCamelCase`，插件属性 `ns/kebab-name`） */

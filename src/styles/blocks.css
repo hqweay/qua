@@ -280,8 +280,8 @@
   user-select: none;
 }
 /* 页 / 日记 / 被聚焦块作为**正文第一行**时，字号略大一档（它是这一屏的「身份」，但不叫标题） */
-.blk[data-depth='0'][data-role='page'] .tx,
-.blk[data-depth='0'][data-role='journal'] .tx {
+.blk[data-depth='0'][data-role~='page'] .tx,
+.blk[data-depth='0'][data-role~='journal'] .tx {
   font-size: var(--ui-fs-lg);
   font-weight: 600;
 }
@@ -289,7 +289,7 @@
   日记流：多天同屏时，每一天是一段，日期行是段头。
   只用 border-top（不写 padding/margin）——不破坏 「间距所有权归容器」。
 */
-.blk[data-depth='0'][data-role='journal']:not(:first-child) {
+.blk[data-depth='0'][data-role~='journal']:not(:first-child) {
   border-top: 1px solid var(--ui-border-subtle);
 }
 .blk.drag-src {

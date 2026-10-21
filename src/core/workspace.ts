@@ -45,5 +45,5 @@ export const STORAGE_KEY = 'qua.workspace'
  * 「页」不再是独立实体，只是**块森林里的一个块 + 一个角色**（承 1／5：没有页实体）。
  */
 export interface PageBlock extends Block {
-  role: 'page'
+  roles: ['page']
 }

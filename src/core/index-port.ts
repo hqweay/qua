@@ -11,7 +11,7 @@
  * ⚠️ 本文件零 DOM、零持久化：它只吃「森林 ＋ 原子」，所以能直接单测。
  */
 import type { Atom } from './annotations.ts'
-import type { Block } from './model.ts'
+import { hasRole, type Block } from './model.ts'
 import { journalDate, isJournal } from './journal.ts'
 import { normalizeTag, TAG_ROLE } from './tags.ts'
 import type { Change } from './storage/port.ts'
@@ -77,7 +77,7 @@ export function rebuild(forest: readonly Block[], atoms: readonly Atom[]): Index
   const walk = (b: Block, rootId: string): void => {
     idx.blocks.set(b.id, b)
     idx.pageOf.set(b.id, rootId)
-    if (b.role === TAG_ROLE) {
+    if (hasRole(b, TAG_ROLE)) {
       const name = normalizeTag(b.text)
       // 同名标签以**先序第一个**为准（`ensureTag` 也是这个口径，两处必须一致）
       if (name !== '' && !idx.tags.has(name)) idx.tags.set(name, b.id)

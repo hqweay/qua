@@ -35,7 +35,7 @@ test('① ensureTag：找到或创建，幂等（第二次不新建）', () => {
   const first = ensureTag(forest, '设计')
   assert.equal(first.created, true)
   assert.equal(forest.length, 1)
-  assert.equal(forest[0]!.role, 'tag', '标签是一个带 tag 角色的块')
+  assert.deepEqual(forest[0]!.roles, ['tag'], '标签是一个带 tag 角色的块')
 
   const second = ensureTag(forest, '设计')
   assert.equal(second.created, false)
@@ -56,7 +56,7 @@ test('② 边在正文里 ⇒ 删掉那个原子，边随之消失（不留孤�
 })
 
 test('③ 只认 tag 角色：同名页块不会因为同名就变成标签', () => {
-  const forest: Block[] = [b('p', '设计', { role: 'page' })]
+  const forest: Block[] = [b('p', '设计', { roles: ['page'] })]
   const found = ensureTag(forest, '设计')
   assert.equal(found.created, true, '页块不是标签 ⇒ 应当新建一个标签块')
   assert.notEqual(found.block?.id, 'p')
@@ -137,6 +137,6 @@ test('⑥b tagsOf：返回标签块本身（活引用），顺序按正文里出
 test('mkTagBlock：名字就是正文，不带 #（# 是呈现时加的装饰）', () => {
   const t = mkTagBlock('设计')
   assert.equal(t.text, '设计')
-  assert.equal(t.role, 'tag')
+  assert.deepEqual(t.roles, ['tag'])
   assert.equal(t.props?._icon, 'lucide:hash')
 })

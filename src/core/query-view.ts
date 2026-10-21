@@ -1,7 +1,7 @@
 /**
  * **查询视图实例**：把「条件」变成「冻结的结果集」，并负责**内容不冻**（/D5/D8/D10）。
  *
- * 一个 `role: 'query'` 的块上挂着两份数据，分工必须分清：
+ * 一个带 `query` 角色的块上挂着两份数据，分工必须分清：
  *
  * | 存哪 | 是什么 | 何时变 |
  * |---|---|---|
@@ -13,7 +13,7 @@
  *    「这个查询选了哪些块」是**内容**，多设备打开必须一致；滚动位置、折叠、宽度才是外挂状态。
  * ⚠️ 这层零 DOM：`refreshSpec` 是「决定下一次结果集」的纯函数，好让「冻结」这件事能被单测。
  */
-import type { Block } from './model.ts'
+import { hasRole, type Block } from './model.ts'
 import { findPath } from './tree.ts'
 import { runQuery, type QueryHit, type QuerySpec } from './query.ts'
 import type { Atom } from './annotations.ts'
@@ -26,7 +26,7 @@ export interface FrozenHit {
 }
 
 export function isQueryBlock(b: Block): boolean {
-  return b.role === 'query'
+  return hasRole(b, 'query')
 }
 
 /** 读出条件；`_query` 不是合法形状时返回 `null`（不猜、不修，交给调用方提示） */

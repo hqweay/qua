@@ -695,6 +695,59 @@ function commandDecls() {
 }
 
 /* ═══════════════════════════════════════════════════════╗
+   ║ 21 · 角色判定只能走 hasRole（禁 `.role` 读取）           ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  // 来由：角色从单值 `role` 改成可兼位的 `roles: Role[]` 之后，
+  // 任何残留的 `b.role === 'x'` 都**不会报错**——字段不存在，比较恒为 false，
+  // 表现是「页不再是页」「日记不再是日记」，而且类型检查也抓不到（属性访问在 any 上合法）。
+  // ⇒ 把「读单值 role」这件事本身禁掉：判定只有 `hasRole` 一个入口。
+  const hits = []
+  for (const f of srcFiles) {
+    const r = rel(f)
+    const { sf } = tsFile(f)
+    const push = (n, what) => {
+      const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
+      hits.push(`${r}:${line}  ${what}  ${n.getText(sf).slice(0, 60)}`)
+    }
+    const visit = (n) => {
+      // ① `x.role`
+      if (ts.isPropertyAccessExpression(n) && n.name.text === 'role') {
+        // DOM 的 `el.dataset.role` 是对外 CSS 契约（`[data-role~='journal']`），不是块角色判定
+        const isDataset = ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'dataset'
+        if (!isDataset) push(n, '读了单值 `.role`')
+      }
+      // ② `x['role']`
+      if (
+        ts.isElementAccessExpression(n) &&
+        n.argumentExpression &&
+        ts.isStringLiteral(n.argumentExpression) &&
+        n.argumentExpression.text === 'role'
+      ) {
+        push(n, '读了单值 `["role"]`')
+      }
+      // ③ `const { role } = b`
+      if (ts.isBindingElement(n) && !n.propertyName && ts.isIdentifier(n.name) && n.name.text === 'role') {
+        push(n, '解构出单值 `role`')
+      }
+      ts.forEachChild(n, visit)
+    }
+    visit(sf)
+  }
+  add({
+    id: 21,
+    title: '角色判定只走 `hasRole`（禁读单值 `.role`）',
+    method: 'AST 扫 src/**/*.ts 的 `x.role` 属性访问、`x["role"]` 元素访问、`const { role } = …` 解构；`el.dataset.role` 豁免（DOM 属性，不是块的角色判定）',
+    scope: `src/**/*.ts（${srcFiles.length} 个文件）`,
+    whitelist: '`el.dataset.role`（写入 DOM 供 CSS 选择，承的是角色**外观**契约）· 角色**写入**用 `roles: [...]`，不在此列',
+    hits: hits.length,
+    detail: hits,
+    note: '为什么必须机检：`roles` 改多值后，`b.role === "x"` 静默恒假（字段不存在），表现是「页/日记突然不认了」，类型检查也看不出来',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
    ║ 额外 · 主题双轨静态面                       ║
    ╚═══════════════════════════════════════════════════════ */
 

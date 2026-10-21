@@ -4,7 +4,7 @@
  */
 
 import { uuidv7Hex } from './ids.ts'
-import { mkBlock, type Block, type Doc, type Located } from './model.ts'
+import { hasRole, mkBlock, type Block, type Doc, type Located } from './model.ts'
 export function locate(doc: Doc, id: string): Located | null {
   const walk = (list: Block[], parent: Block | null): Located | null => {
     for (let i = 0; i < list.length; i++) {
@@ -135,7 +135,7 @@ export function writeBackRoots(forest: Block[], roots: readonly Block[]): void {
   for (const root of roots) {
     const p = findInForest(forest, root.id)
     if (!p) continue
-    if (p.role !== 'journal') p.text = root.text
+    if (!hasRole(p, 'journal')) p.text = root.text
     p.todo = root.todo
     p.collapsed = root.collapsed
     p.children = root.children
@@ -243,7 +243,7 @@ export function splitBlockBefore(doc: Doc, id: string, offset: number): { kept: 
  *   · 本函数 —— 没有父块：左半留根、右半成**首个子块**。
  *
  * ⚠️ 调用方只对**无角色的内容根**（focus/zoom 的普通块）启用；页/日记/收藏的 `text`
- *    是名字/投影，拆它等于静默改名（由 `editor.split` 的 `role === undefined` 判据拦住）。
+ *    是名字/投影，拆它等于静默改名（由 `editor.split` 的「无角色」判据拦住）。
  * ⚠️ `offset <= 0` 返回 null：那会把根文本清空、把整条内容搬进子块。调用方（editor）
  *    在块首/空块仍走「插一个空首子块」，不调用本函数。
  */

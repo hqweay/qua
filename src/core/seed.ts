@@ -8,7 +8,7 @@
  * `![[图.png]]`，由 `parseInline` 解析成**区间锚点与行内原子**——这正是 demo 要展示的模型形状
  * （锚点带 blockId、原子占 1 格），而不是把富文本塞进 DOM。
  */
-import { ATOM_PLACEHOLDER, journalId, mkBlock, shiftISO, todayISO, uuidv7Hex, type Atom, type Block, type BlockProps, type Mark, type MarkType, type Role } from './index.ts'
+import { ATOM_PLACEHOLDER, hasRole, journalId, mkBlock, shiftISO, todayISO, uuidv7Hex, type Atom, type Block, type BlockProps, type Mark, type MarkType, type Role } from './index.ts'
 import { DEFAULT_PREFS, WORKSPACE_VERSION, type PageBlock, type Workspace } from './workspace.ts'
 
 /* ------------------------------------------------------------- 迷你 DSL */
@@ -17,8 +17,8 @@ interface SeedBlock {
   text: string
   todo?: 'todo' | 'done'
   collapsed?: boolean
-  /** 角色（28 ）：demo 里只用于造一个 `query` 块，其余块不带角色 */
-  role?: Role
+  /** 角色：demo 里只用于造一个 `query` 块，其余块不带角色 */
+  roles?: Role[]
   /** 系统属性：查询块的 `_query` 条件就落在这里 */
   props?: BlockProps
   children?: SeedBlock[]
@@ -128,7 +128,7 @@ function buildTree(seeds: SeedBlock[], out: { marks: Mark[]; atoms: Atom[]; refs
     const { text, marks, atoms } = parseInline(s.text)
     const b = mkBlock(text, s.todo ? { todo: s.todo } : {})
     if (s.collapsed) b.collapsed = true
-    if (s.role) b.role = s.role
+    if (s.roles) b.roles = [...s.roles]
     if (s.props) b.props = { ...s.props }
     for (const m of marks) out.marks.push({ id: uuidv7Hex(), type: m.type, blockId: b.id, start: m.start, end: m.end })
     for (const a of atoms) {
@@ -173,7 +173,7 @@ function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uuidv7Hex(
     id,
     text: title,
     children,
-    role: 'page',
+    roles: ['page'],
     props: { _icon: icon },
   }
   return { page, refs: acc.refs, marks: acc.marks, atoms: acc.atoms }
@@ -190,7 +190,7 @@ function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
     id: journalId(date),
     text: '',
     children,
-    role: 'journal',
+    roles: ['journal'],
     props: { _date: date, _icon: 'lucide:calendar' },
   }
   return { page: block, refs: acc.refs, marks: acc.marks, atoms: acc.atoms }
@@ -206,7 +206,7 @@ function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
  *    混进来会把 `[[ ]]` 解析到日记块上。
  */
 function resolveRefs(pages: Block[], built: BuiltPage[]): void {
-  const byTitle = new Map(pages.filter((p) => p.role === 'page').map((p) => [p.text, p]))
+  const byTitle = new Map(pages.filter((p) => hasRole(p, 'page')).map((p) => [p.text, p]))
   for (const bp of built) {
     for (const r of bp.refs) {
       const target = byTitle.get(r.label)
@@ -295,7 +295,7 @@ export function seedWorkspace(): Workspace {
      */
     {
       text: '本页的待办',
-      role: 'query',
+      roles: ['query'],
       // 条件只用「待办状态」：这张页里没有同时带 `#todo` 标签的块，加标签条件会得到 0 条
       props: { _icon: 'lucide:list-filter', _query: { where: { todo: 'todo' } } },
     },
@@ -422,7 +422,7 @@ export function seedWorkspace(): Workspace {
   const blocks = built.map((b) => b.page)
   // 默认的收藏容器块：**命名容器块 + 一列有序块引用**，左槽据此渲染「收藏」
   // ⚠️ core 层不能 import app 层 ⇒ 这里就地建（`makeFavoriteContainer` 在 app 层是同一形状的工厂）
-  const favorites: Block = { id: uuidv7Hex(), text: '常用', children: [], role: 'favorites', props: { _icon: 'lucide:star', _favorites: [p1.page.id, p2.page.id] } }
+  const favorites: Block = { id: uuidv7Hex(), text: '常用', children: [], roles: ['favorites'], props: { _icon: 'lucide:star', _favorites: [p1.page.id, p2.page.id] } }
   blocks.push(favorites)
   resolveRefs(blocks, built)
 

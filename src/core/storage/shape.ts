@@ -21,8 +21,9 @@ export { DEFAULT_DOCK, DEFAULT_PREFS, normalizePrefs } from './prefs.ts'
  * v1 → v2：`_icon` 值域改为 `lucide:<name>`（2026-10-20）
  * v2 → v3：三皮肤删除
  * v3 → v4：`localStorage` 落盘值套上**信封**（`storage/local-storage.ts`），旧值是裸 JSON ⇒ 作废
+ * v4 → v5：`role` 改多值 `roles: Role[]`（旧库的 `role` 无法被新代码识别 ⇒ 作废，不写迁移）
  */
-export const WORKSPACE_VERSION = 4
+export const WORKSPACE_VERSION = 5
 
 /** 示例库：一片块森林 ＋ 行内锚点/原子 */
 export interface Workspace {
@@ -57,7 +58,10 @@ export type ParseResult =
 function isBlock(x: unknown): x is Block {
   if (!x || typeof x !== 'object') return false
   const b = x as Block
-  return typeof b.id === 'string' && typeof b.text === 'string' && Array.isArray(b.children)
+  if (typeof b.id !== 'string' || typeof b.text !== 'string' || !Array.isArray(b.children)) return false
+  // 角色是可兼位的数组；形状不对就是「这坨字节打不开」，不猜、不修
+  if (b.roles !== undefined && (!Array.isArray(b.roles) || !b.roles.every((r) => typeof r === 'string'))) return false
+  return true
 }
 
 /** 深度校验一棵子树（属性袋只检查「是对象」，不校验每个 key —— 那是 schema 层的事） */

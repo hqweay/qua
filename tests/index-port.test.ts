@@ -30,14 +30,14 @@ const edge = (id: string, kind: 'page' | 'tag', blockId: string, targetId: strin
 
 /** 一份小而全的库：页 / 子块 / 标签块 / journal 都在 */
 function fixture() {
-  const todo = b('t1', 'todo', { role: 'tag', props: { _icon: 'lucide:hash' } })
-  const design = b('t2', '设计', { role: 'tag' })
-  const journal = b('j1', '', { role: 'journal', props: { _date: '2026-10-21' }, children: [b('j1a', '今天')] })
+  const todo = b('t1', 'todo', { roles: ['tag'], props: { _icon: 'lucide:hash' } })
+  const design = b('t2', '设计', { roles: ['tag'] })
+  const journal = b('j1', '', { roles: ['journal'], props: { _date: '2026-10-21' }, children: [b('j1a', '今天')] })
   const p1 = b('p1', '页面一', {
-    role: 'page',
+    roles: ['page'],
     children: [b('a', '甲'), b('b', '乙', { children: [b('b1', '乙的子块')] })],
   })
-  const p2 = b('p2', '页面二', { role: 'page', children: [b('c', '丙')] })
+  const p2 = b('p2', '页面二', { roles: ['page'], children: [b('c', '丙')] })
   const forest = [journal, p1, p2, todo, design]
   const atoms: Atom[] = [
     edge('e1', 'tag', 'a', 't1'), // 甲 打了 #todo
@@ -78,13 +78,13 @@ test('rebuild：四张表都建起来（块 / 入向边 / 标签成员 / 名字�
 })
 
 test('rebuild：标签名按规范化取先序第一个（与 ensureTag 同口径）', () => {
-  const forest = [b('t1', 'Todo', { role: 'tag' }), b('t2', 'todo', { role: 'tag' })]
+  const forest = [b('t1', 'Todo', { roles: ['tag'] }), b('t2', 'todo', { roles: ['tag'] })]
   const idx = rebuild(forest, [])
   assert.equal(tagIdByName(idx, 'todo'), 't1', '同名标签取先序第一个，不随机')
 })
 
 test('rebuild：`[[标签块]]` 的**引用**不算标签成员（两张表不能合并）', () => {
-  const forest = [b('t1', 'todo', { role: 'tag' }), b('p', '页面', { role: 'page', children: [b('a', '甲')] })]
+  const forest = [b('t1', 'todo', { roles: ['tag'] }), b('p', '页面', { roles: ['page'], children: [b('a', '甲')] })]
   const atoms = [edge('e1', 'page', 'a', 't1')] // 引用，不是打标签
   const idx = rebuild(forest, atoms)
   assert.deepEqual(incomingIds(idx, 't1'), ['a'], '入向边算它')
@@ -162,7 +162,7 @@ test('等式：一串交替变化（原子 / 块 / marks 混着来）累积到�
   s2Forest.find((x) => x.id === 't1')!.text = 'TODO'
   const s3Atoms = s1Atoms.filter((a) => a.id !== 'e3')
   const s4Forest = JSON.parse(JSON.stringify(s2Forest)) as Block[]
-  s4Forest.push(b('p3', '页面三', { role: 'page' }))
+  s4Forest.push(b('p3', '页面三', { roles: ['page'] }))
 
   const got = incremental([
     { changes: [], forest, atoms },
@@ -201,8 +201,8 @@ test('applyChanges：空 changes ⇒ 原样返回（不是「重建一遍」）'
 })
 
 test('fingerprint：与插入顺序无关（否则会假报不一致）', () => {
-  const a = b('x', 'X', { role: 'page', children: [b('y', 'Y')] })
-  const c = b('z', 'Z', { role: 'page' })
+  const a = b('x', 'X', { roles: ['page'], children: [b('y', 'Y')] })
+  const c = b('z', 'Z', { roles: ['page'] })
   const fwd = rebuild([a, c], [edge('e1', 'page', 'y', 'x'), edge('e2', 'page', 'y', 'z')])
   const rev = rebuild([c, a], [edge('e2', 'page', 'y', 'z'), edge('e1', 'page', 'y', 'x')])
   assert.equal(fingerprint(fwd), fingerprint(rev))
@@ -265,8 +265,8 @@ test('store.index：块是**活引用**（改名不用重建就可见），但�
 
 test('backrefsOf：count 是**边数**（同一块引用两次算两条），不是块数', async () => {
   const { backrefsOf } = await import('../src/core/index.ts')
-  const p1 = b('p1', '页面一', { role: 'page', children: [b('a', '甲'), b('a2', '甲2')] })
-  const p2 = b('p2', '页面二', { role: 'page', children: [b('c', '丙')] })
+  const p1 = b('p1', '页面一', { roles: ['page'], children: [b('a', '甲'), b('a2', '甲2')] })
+  const p2 = b('p2', '页面二', { roles: ['page'], children: [b('c', '丙')] })
   const forest = [p1, p2]
   // `a` 里引用 p2 **两次**，`a2` 里引用一次 ⇒ p1 这一页共 3 处
   const atoms = [
@@ -283,8 +283,8 @@ test('backrefsOf：count 是**边数**（同一块引用两次算两条），不
 test('backrefsOf：标签边也是入向边（标签块的反链不空）', async () => {
   const { backrefsOf } = await import('../src/core/index.ts')
   const forest = [
-    b('p1', '页面一', { role: 'page', children: [b('a', '甲')] }),
-    b('t1', 'todo', { role: 'tag' }),
+    b('p1', '页面一', { roles: ['page'], children: [b('a', '甲')] }),
+    b('t1', 'todo', { roles: ['tag'] }),
   ]
   const atoms = [edge('e1', 'tag', 'a', 't1')]
   const out = backrefsOf({ blocks: forest, atoms, targetId: 't1' })
@@ -295,7 +295,7 @@ test('backrefsOf：标签边也是入向边（标签块的反链不空）', asyn
 
 test('backrefBlocks：给可编辑 footer 用 —— 返回**块**级来源，带归属页与次数', async () => {
   const { backrefBlocks } = await import('../src/core/index.ts')
-  const forest = [b('p1', '页面一', { role: 'page', children: [b('a', '甲'), b('a2', '甲2')] })]
+  const forest = [b('p1', '页面一', { roles: ['page'], children: [b('a', '甲'), b('a2', '甲2')] })]
   const atoms = [edge('e1', 'page', 'a2', 'p1', 0), edge('e2', 'page', 'a2', 'p1', 2)]
   const out = backrefBlocks({ blocks: forest, atoms, targetId: 'p1' })
   assert.equal(out.length, 1)
@@ -321,7 +321,7 @@ test('store.reset：换库后索引整体失效（不是拿旧库的块表凑）
   const store = new BlockStore(JSON.parse(JSON.stringify(forest)), [], JSON.parse(JSON.stringify(atoms)))
   assert.equal(store.find('p1')?.text, '页面一')
 
-  store.reset([b('only', '唯一一页', { role: 'page' })], [], [])
+  store.reset([b('only', '唯一一页', { roles: ['page'] })], [], [])
   assert.equal(store.find('only')?.text, '唯一一页')
   assert.equal(store.find('p1'), undefined, '旧库的块不该还查得到')
 })

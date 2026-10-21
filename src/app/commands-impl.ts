@@ -20,6 +20,7 @@ import {
   findPath,
   flatten,
   FEED_INITIAL,
+  hasRole,
   isJournal,
   journalDate,
   journalFeedDays,
@@ -59,7 +60,7 @@ import {
  * ⚠️ 只对 journal 生效：page 的第一行是**页名本身**，空则给空块也只是重复。
  */
 export function rootsFor(block: Block): Block[] {
-  if (block.role === 'journal') return ensureFirstBlock(block.children)
+  if (hasRole(block, 'journal')) return ensureFirstBlock(block.children)
   return [block]
 }
 
@@ -82,7 +83,7 @@ import type { Row } from '../ui/layers.ts'
 /** 一个空页块：正文为空、图标是系统属性 `_icon` */
 export function makePageBlock(): Block {
   const b = mkBlock('')
-  b.role = 'page'
+  b.roles = ['page']
   b.props = { _icon: 'lucide:file' }
   return b
 }
@@ -140,7 +141,7 @@ export function pageCommands(d: PageDeps): Pick<
     //    混进来会让「页数」「下一页」这类语义变成说不清的数。
     listPages: () =>
       d.blocks()
-        .filter((p) => p.role === 'page')
+        .filter((p) => hasRole(p, 'page'))
         .map((p) => ({ id: p.id, title: d.pageTitle(p), icon: d.pageIcon(p), blocks: count(p) })),
     activePageId: () => d.activeId(),
 
@@ -171,7 +172,7 @@ export function pageCommands(d: PageDeps): Pick<
     deletePage: (id) => {
       const all = d.blocks()
       // 「至少留一页」只数**页**（journal 不是页，删掉它不违反这条）
-      if (all.filter((p) => p.role === 'page').length <= 1) {
+      if (all.filter((p) => hasRole(p, 'page')).length <= 1) {
         d.toast(t('ui.toast.keepOnePage'), 'warn')
         return
       }
@@ -179,7 +180,7 @@ export function pageCommands(d: PageDeps): Pick<
       if (i < 0) return
       all.splice(i, 1)
       // 落点必须是**页**（删的可能是 journal，邻位也可能是 journal）
-      const rest = all.filter((p) => p.role === 'page')
+      const rest = all.filter((p) => hasRole(p, 'page'))
       const p = rest[Math.min(i, rest.length - 1)] ?? rest[0]
       if (p) {
         d.setActiveId(p.id)
@@ -433,7 +434,7 @@ export function favoritesCommands(d: PageDeps): Pick<
 /** 建一个收藏容器块（**普通块 + 角色**，没有新类型） */
 export function makeFavoriteContainer(title: string): Block {
   const b = mkBlock(title)
-  b.role = 'favorites'
+  b.roles = ['favorites']
   // 图标走 `lucide:<name>`；空列表不写 `_favorites`
   b.props = { _icon: 'lucide:star' }
   return b

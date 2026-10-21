@@ -3,7 +3,7 @@
  * 日期**不进 text**；模型层没有写 `_date` 的路径。
  */
 
-import { prop, type Block } from './model.ts'
+import { hasRole, prop, type Block } from './model.ts'
 export function todayISO(now: Date = new Date()): string {
   const y = now.getFullYear()
   const m = String(now.getMonth() + 1).padStart(2, '0')
@@ -38,7 +38,7 @@ export function journalDate(b: Block): string {
  * （`Block` 减 `Block`），于是「非 journal」那条路一行都写不出来。
  */
 export function isJournal(b: Block | undefined): boolean {
-  return b?.role === 'journal'
+  return hasRole(b, 'journal')
 }
 
 /**
@@ -62,7 +62,7 @@ export const FEED_MAX = 30
 
 /** 一个还没进库的日记块（`blocks` 里没有时才造它） */
 export function mkJournalBlock(date: string): Block {
-  return { id: journalId(date), text: '', children: [], role: 'journal', props: { _date: date, _icon: 'lucide:calendar' } }
+  return { id: journalId(date), text: '', children: [], roles: ['journal'], props: { _date: date, _icon: 'lucide:calendar' } }
 }
 
 /**
