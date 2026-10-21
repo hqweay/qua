@@ -285,6 +285,17 @@ await check('E3b 菜单 role 与它背后的窗口动作（外加一条 Electron
 await check('E4 窗口尺寸/位置记忆：改了尺寸 → 关窗 → 重开还是那个尺寸', async () => {
   const dir = join(CACHE, '04-bounds')
   const first = await launch('bounds', { userData: dir })
+  /**
+   * ⚠️ **不要用硬编码的 1000×700 当期望**。
+   *
+   * 系统会把窗口钳到屏幕可用区域内：在矮屏（CI 的 macOS runner 就是）上
+   * `setBounds({y:110, height:700})` 回读到的是 `{y:31, height:677}`。
+   * 那时断言「必须是 700」测的不是「记忆功能」，而是「这台机器屏幕够不够高」——
+   * 一条与产品无关的红。
+   *
+   * ⇒ 期望值取**实际设进去之后立刻读到的**那一份：要保的不变量是
+   *   「关掉再开，还是刚才那一份」，而不是某一组魔数。
+   */
   await first.app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0].setBounds({ x: 140, y: 110, width: 1000, height: 700 })
   })
@@ -294,18 +305,22 @@ await check('E4 窗口尺寸/位置记忆：改了尺寸 → 关窗 → 重开�
 
   const persisted = JSON.parse(readFileSync(join(dir, 'window-state.json'), 'utf8'))
   log(`      window-state.json = ${JSON.stringify(persisted)}`)
+  log(`      关机前 getNormalBounds=${JSON.stringify(bounds1)}`)
 
   const second = await launch('bounds', { userData: dir })
   const bounds2 = await second.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getNormalBounds())
   await second.app.close()
-  log(`      第一次 getNormalBounds=${JSON.stringify(bounds1)}`)
   log(`      重开 getNormalBounds=${JSON.stringify(bounds2)}`)
+
   assert(
-    bounds2.width === 1000 && bounds2.height === 700,
-    `重开后尺寸应保持 1000×700，实际 ${bounds2.width}×${bounds2.height}`,
+    bounds2.width === bounds1.width && bounds2.height === bounds1.height,
+    `重开后尺寸应等于关掉前那一份（${bounds1.width}×${bounds1.height}），实际 ${bounds2.width}×${bounds2.height}`,
   )
-  assert(bounds2.x === 140 && bounds2.y === 110, `重开后位置应保持 (140,110)，实际 (${bounds2.x},${bounds2.y})`)
-  return `1000×700 @ (140,110) 跨进程重启保持；落盘文件 ${join(dir, 'window-state.json')}`
+  assert(
+    bounds2.x === bounds1.x && bounds2.y === bounds1.y,
+    `重开后位置应等于关掉前那一份（${bounds1.x},${bounds1.y}），实际 (${bounds2.x},${bounds2.y})`,
+  )
+  return `${bounds1.width}×${bounds1.height} @ (${bounds1.x},${bounds1.y}) 跨进程重启原样保持；落盘文件 ${join(dir, 'window-state.json')}`
 })
 
 /* ═══════════════════════════════════════════════════ E5 真按键：⌘A / ⌘F */
