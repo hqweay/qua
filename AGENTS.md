@@ -77,6 +77,8 @@ core ← view ← ui ← app ← host
 - 组件（非 token 定义段）只引语义槽 `--ui-*`（`src/styles/tokens.css`）。
 - **不得**直接 `var(--c-*)`：主题机制靠「主题只填 `--ui-*`」生效，直连基础色会让它改不动。
 - 唯一合法例外是 `tokens.css` 里 `/* @token:begin */ … /* @token:end */` 段。
+- 运行时确实要写长度值（拖拽宽度、动态 inline style）时用 `CSS.px(n).toString()`；
+  TS 字符串里拼 `'px'` 会被 `arch-check [12]` 拦下。
 
 ### 1.9 组件自持 DOM
 
