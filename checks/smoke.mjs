@@ -3004,6 +3004,20 @@ await check('T52 标签层级：属于/包含双面板、成员含算作、禁�
   assert(ui.relations.includes('属于'), '「属于」面板也在（两个方向同一块页上并列）')
   assert(ui.members >= 2, `成员 footer 应渲染出成员块（含算作）：${ui.members}`)
 
+  // D21：给 #人物 声明一个字段；只打 #演员 的 B **不获得**它（算作 ≠ 拥有字段）
+  await page.evaluate(
+    (id) => window.__demo.invoke('core.props/create-def', { blockId: id, label: '姓名', kind: 'text' }),
+    tags['人物'],
+  )
+  await page.waitForTimeout(150)
+  await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), ids.b)
+  await page.waitForTimeout(150)
+  const bPanel = await page.evaluate(() => ({
+    labels: [...document.querySelectorAll('.prop-row[data-prop-id] .prop-name')].map((e) => e.textContent),
+    fields: window.__demo.fields(window.__demo.__editor.doc.roots[0].id).map((f) => f.label),
+  }))
+  assert(!bPanel.labels.includes('姓名') && !bPanel.fields.includes('姓名'), `只打 #演员 的块不该有 #人物 的字段：${JSON.stringify(bPanel)}`)
+
   // 禁环：#人物 属于 #演员 ⇒ 拒绝，且不留下半截状态
   await page.evaluate(
     ({ child, parent }) => window.__demo.invoke('core.tags/add-parent', { childId: child, parentId: parent }),
