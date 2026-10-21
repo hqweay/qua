@@ -26,7 +26,8 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.electron.json",
     "arch:check": "node scripts/arch-check.mjs",
     "test:core": "node --test tests/*.test.ts",
-    "gate": "pnpm typecheck && pnpm test:core && pnpm build && pnpm build:electron && pnpm arch:check && pnpm check && pnpm check:dock && pnpm check:electron",
+    "gate:web": "pnpm typecheck && pnpm test:core && pnpm build && pnpm arch:check && pnpm check && pnpm check:dock",
+    "gate": "pnpm gate:web && pnpm build:electron && pnpm check:electron",
     "gate:bundle": "pnpm gate && pnpm check:bundle"
   },
   "devDependencies": {
