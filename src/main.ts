@@ -945,12 +945,16 @@ const app: App = {
       chrome.renderTitle(activeBlock(), activeTrail())
       // 演示状态**不强制跳今日**（那是冷启动的行为）：用这个库自己的 activeId，
       // 否则切到「空态 / 稀疏态 / 降级态」时会看不到那几个状态本身。
-      // ⚠️ 装载口径必须与 `openPage` 同一条规则（`rootsFor(p)`，见 commands-impl）。
-      //    原来写的是 `ensureFirstBlock(p.children)`：普通页把子块装成 roots ⇒ 编辑落在
-      //    「不是任何块的孩子」的数组里，写不回森林（已知风险 3）；空态页没有子块 ⇒ 编辑器空着。
-      //    journal 需要「至少一个可编辑行」时由 `rootsFor` 自己补，这里不再分叉。
-      const roots = rootsFor(p)
-      mainEd.loadPage({ roots }, ws.marks, ws.atoms, { blockId: roots[0]?.id ?? '', off: 0 })
+      // ⚠️ 装载口径必须与**冷启动**同一条规则（那里是 `bootDays ? rootsForMany(bootDays) : rootsFor(bootActive)`）：
+      //    落点是日记 ⇒ 装**日记流**（今日在顶＋存在的更早的天），别的块 ⇒ 只装它自己。
+      //    原来这里只有 `rootsFor(p)`，于是「载入假数据」后日记流消失、只剩今天一段。
+      const feed = hasRole(p, 'journal') ? journalFeedDays(ws.blocks, todayISO(), FEED_INITIAL) : []
+      for (const day of feed) ensureFirstBlock(day.children)
+      const roots = feed.length > 0 ? rootsForMany(feed) : rootsFor(p)
+      // ⚠️ 光标必须落在**第一个可编辑的行**上（日记流的第一段是只读日期行）。
+      //    原来固定 `roots[0]`，于是载入假数据后光标停在日期行、第一行看着「没有名字」。
+      const caret = firstEditableRoot(roots[0])
+      mainEd.loadPage({ roots }, ws.marks, ws.atoms, { blockId: caret?.id ?? '', off: 0 })
       renderBacklinks()
       renderQueryView()
       chrome.renderEmptyHint(activeBlock().children)
@@ -1319,6 +1323,8 @@ stateMenuBtn.addEventListener('click', () => {
     { id: 'theme-dark', label: t('ui.theme.mode.dark'), hint: '', icon: pick(th === 'dark', 'lucide:moon'), group: 'dbg/1-theme', command: 'core.view/set-theme', args: { mode: 'dark' } },
     // 演示状态
     { id: 'seed', label: t('ui.stateMenu.seed'), hint: t('ui.stateMenu.seedHint'), icon: 'lucide:book-open', group: 'dbg/2-state', command: 'core.demo/load-state', args: { state: 'seed' } },
+    // 冷启动：看「第一次打开 app」那一屏到底长什么样（不用清 localStorage 再刷新）
+    { id: 'boot', label: t('ui.stateMenu.boot'), hint: t('ui.stateMenu.bootHint'), icon: 'lucide:sunrise', group: 'dbg/2-state', command: 'core.demo/load-state', args: { state: 'boot' } },
     { id: 'degraded', label: t('ui.state.degraded'), hint: t('ui.stateMenu.degradedHint'), icon: 'lucide:triangle-alert', group: 'dbg/2-state', command: 'core.demo/load-state', args: { state: 'degraded' } },
     { id: 'sparse', label: t('ui.state.sparse'), hint: t('ui.stateMenu.sparseHint'), icon: 'lucide:square-dashed', group: 'dbg/2-state', command: 'core.demo/load-state', args: { state: 'sparse' } },
     { id: 'empty', label: t('ui.state.empty'), hint: t('ui.stateMenu.emptyHint'), icon: 'lucide:square', group: 'dbg/2-state', command: 'core.demo/load-state', args: { state: 'empty' } },

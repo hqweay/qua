@@ -74,12 +74,15 @@ import {
 /**
  * 落点归一到「**装哪个根**」：`rootsFor(p)` 是唯一规则（块自己就是根，不再拷子树）。
  *
- * 唯一的例外在 journal：日期行**只读**，而「今日」可能还没有子块 ——
- * 那种情况下光标无处可落，等于「打得开却打不了字」。所以 journal 空容器补一个可编辑行。
- * ⚠️ 只对 journal 生效：page 的第一行是**页名本身**，空则给空块也只是重复。
+ * ⚠️ 早先 journal 单独走「只装子块」：日期行只读、光标无处可落，于是直接把日期行丢掉。
+ *    代价是**日记块自己不在 DOM 里**——它作为当前对象时 `data-depth=0`，没有日期就
+ *    等于「一屏不知道是哪一天」，聚焦之后也一样（`rootsFor` 是打开页与聚焦共用的同一条规则）。
+ *    现在与页同口径：**块自己是第一行**（journal 渲染成只读日期行），子块缩进挂在下面；
+ *    「打得开却打不了字」由 `ensureFirstBlock` 管——空 journal 补一个可编辑子块，
+ *    光标的落点由 `focusFirstBlock` 跳过只读行。
  */
 export function rootsFor(block: Block): Block[] {
-  if (hasRole(block, 'journal')) return ensureFirstBlock(block.children)
+  if (hasRole(block, 'journal')) ensureFirstBlock(block.children)
   return [block]
 }
 
@@ -177,10 +180,28 @@ export function pageCommands(d: PageDeps): Pick<
     },
 
     openPage: (id) => {
-      if (!d.blocks().some((p) => p.id === id)) return
+      const p = d.blocks().find((x) => x.id === id)
+      if (!p) return
       d.flush()
+      /**
+       * **今天**是一个「入口」，不是一个普通的块：从左槽点它 = **回今日日记流**，
+       * 与冷启动 / 「回今日」同一条规则（今日在顶，更早存在的天往下）。
+       * 只装这一天会把日记流收成一段 —— 用户点的明明是「Daily note」这个入口。
+       * ⚠️ 历史里的其它日记天仍走单日（左槽只有「今天」这一个入口）。
+       */
+      if (isJournal(p) && journalDate(p) === todayISO()) {
+        const today = todayISO()
+        const days = journalFeedDays(d.blocks(), today, FEED_INITIAL)
+        for (const day of days) ensureFirstBlock(day.children)
+        d.setActiveId(journalId(today))
+        d.loadPage(rootsForMany(days), d.marks(), d.atoms())
+        d.refreshList()
+        d.refreshTitle()
+        d.saveNow()
+        d.focusFirstBlock()
+        return
+      }
       d.setActiveId(id)
-      const p = d.blocks().find((x) => x.id === id)!
       // 同一个归一：任何容器（页或 journal）在**被打开**时都保证有落光标的地方
       d.loadPage(rootsFor(p), d.marks(), d.atoms())
       d.refreshList()
@@ -297,11 +318,16 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
   /** 打开一个块（与 `openPage` 同一套动作；`openPage` 不接受 journal 之外的语义） */
   const openBlock = (id: string): void => {
     d.flush()
-    d.setActiveId(id)
     const b = d.blocks().find((x) => x.id === id)
     // 全新的一天还没有任何子块 ⇒ 先归一：journal 的首行是**只读日期**，
     // 没有子块就**没有任何地方可以落光标**（打不了字）
     if (b) ensureFirstBlock(b.children)
+    /**
+     * ⚠️ 「哪一天是当前对象」由**日期**决定，不由装载顺序决定：
+     *    日期块自己的 `id` 就是它的身份，`setActiveId` 必须拿它的 id
+     *    （按「流的第一段」去设在库里留着更早的未打开天时会把人送到那一天）。
+     */
+    d.setActiveId(id)
     d.loadPage(b ? rootsFor(b) : [], d.marks(), d.atoms())
     d.refreshList()
     d.refreshTitle()
@@ -322,7 +348,12 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
     const anchorId = ensure(date)
     const days = journalFeedDays(d.blocks(), date, FEED_INITIAL)
     for (const day of days) ensureFirstBlock(day.children)
-    d.setActiveId(days[0]?.id ?? anchorId)
+    /**
+     * ⚠️ 「回今日」把**今天**设成当前对象，而不是流的**第一段**：库里若留着更早的
+     *    未打开的一天（它不是今天），按下「回今日」人却停在昨天，是很怪的落点。
+     *    装载顺序不变（`days` 已按日期降序），只是当前对象归今天。
+     */
+    d.setActiveId(anchorId)
     d.loadPage(rootsForMany(days), d.marks(), d.atoms())
     d.refreshList()
     d.refreshTitle()
@@ -333,7 +364,9 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
   return {
     journalToday: (date) => {
       const ok = typeof date === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)
-      openFeed(ok ? (date as string) : todayISO())
+      // 「去某一天」＝只打开那一天（选日期是落点，不是筛选）；「回今日」＝今天在顶的日记流
+      if (ok) openBlock(ensure(date as string))
+      else openFeed(todayISO())
     },
     journalShift: (days) => {
       const b = d.blocks().find((x) => x.id === d.activeId())
@@ -374,12 +407,8 @@ export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut'> {
       const b = findInForest(d.blocks(), id)
       if (!b) return
       /**
-       * **叶子块也能 zoom**（B1，2026-10-20）。
-       *
-       * 附注「没有子树可聚焦就不给」：块标左键 = 聚焦/zoom 是一贯的行为
-       * （点块标就是「只看这一块」）。若叶子不给 zoom，点击行为会**时 zoom 时不 zoom**——
-       * 用户没法预测一次点击的结果。口径改为：`scope: subtree` **含块自身**，
-       * 叶子就是「只看这一块」。
+       * 叶子块也能 zoom：`scope: subtree` **含块自身**，叶子就是「只看这一块」——
+       * 若叶子不给 zoom，点击行为会**时 zoom 时不 zoom**，用户没法预测一次点击的结果。
        */
       open(id)
     },
@@ -534,6 +563,7 @@ const STATE_LABEL: Record<DemoState, MsgId> = {
   empty: 'ui.state.empty',
   sparse: 'ui.state.sparse',
   degraded: 'ui.state.degraded',
+  boot: 'ui.state.boot',
 }
 
 export function demoCommands(d: DemoDeps): Pick<App, 'loadState' | 'setVirtualize' | 'runImeProbe'> {

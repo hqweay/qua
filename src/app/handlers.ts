@@ -441,7 +441,7 @@ export const HANDLERS: Record<string, Handler> = {
   /* ---- 演示 ---- */
   'core.demo/load-state': (a, app) => {
     const s = S(a.state, 'seed')
-    if (s !== 'seed' && s !== 'empty' && s !== 'sparse' && s !== 'degraded') return false
+    if (s !== 'seed' && s !== 'empty' && s !== 'sparse' && s !== 'degraded' && s !== 'boot') return false
     app.loadState(s)
     return true
   },
