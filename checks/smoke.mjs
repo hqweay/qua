@@ -1406,7 +1406,12 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
   const blank = await page.evaluate(() => {
     const all = [...document.querySelectorAll('#editor .blk')]
     const last = all[all.length - 1].getBoundingClientRect()
-    return { x: 640, y: last.bottom + 18 }
+    /**
+     * ⚠️ 横坐标**不能写死**：正文栏宽度随视口与字体度量变化，
+     *    换了系统字体（行更宽 / 更窄）之后定值会落到栏外，点空白就静默失效。
+     * ⇒ 取最后一行的水平中心。
+     */
+    return { x: last.left + last.width / 2, y: last.bottom + 18 }
   })
   const n0 = (await rows()).length
   await page.mouse.click(blank.x, blank.y)
@@ -2298,7 +2303,17 @@ await check('T34 反链 footer 可原地编辑；同一源块在正文与反链�
   assert(footer.visible, `footer 反链应出现：${JSON.stringify(footer)}`)
 
   // 在 footer 里原地编辑；正文里的同一块（同一 store 对象）应同步
-  await page.locator(`#backlinks-editor .blk[data-block-id="${blockId}"] .tx`).click()
+  /**
+   * ⚠️ 点完 `.tx` 再按 `End` 不够稳：行里有行内原子（引用 chip）时，
+   *    「行尾」在不同字体度量下可能落到 chip 之前（CI 上实测：`Y` 打进了引用前面）。
+   * ⇒ 点**栏右侧空白处**（`.tx` 里远离文本的 x）再 `End`，落点与字体无关。
+   */
+  const clickSpot = await page.evaluate((id) => {
+    const tx = document.querySelector(`#backlinks-editor .blk[data-block-id="${id}"] .tx`)
+    const r = tx.getBoundingClientRect()
+    return { x: r.right - 4, y: r.top + r.height / 2 }
+  }, blockId)
+  await page.mouse.click(clickSpot.x, clickSpot.y)
   await page.keyboard.press('End')
   await page.keyboard.type('Y')
   await page.waitForTimeout(120)
