@@ -7,7 +7,7 @@
  * ⚠️ 这里**不认 `ws`／`ed`／`registry`**，只认下面这个 `DockContentDeps`。
  * ⚠️ 渲染一律走 `renderBlock`（29 「一源多视」）：槽只排一列，块由角色决定长相。
  */
-import { journalDate, todayISO, liveFavorites, containerTitle, type Atom, type Block } from '../core/index.ts'
+import { journalDate, todayISO, liveFavorites, containerTitle, type Atom, type Block, type Index } from '../core/index.ts'
 import { backrefsOf } from '../core/backrefs.ts'
 import { t } from '../core/msg.ts'
 import { renderBlock, type BlockRenderCtx } from './block-renderers.ts'
@@ -22,6 +22,8 @@ export interface DockContentDeps {
   newPage: () => void
   /** 库级行内原子（反链的数据源） */
   atoms: () => Atom[]
+  /** 共享索引（反链走查表，不再扫全库；由 store 缓存） */
+  index: () => Index
   /* ---- 收藏容器块（收藏 ＝ 命名容器块 ＋ 一列块引用） ---- */
   /** 库里的收藏容器块（可能不止一个，顺序各自独立） */
   favoriteContainers: () => Block[]
@@ -127,7 +129,7 @@ function wrap(el: HTMLElement): HTMLElement {
 /** 右槽：反链面板 */
 export function renderBackrefsInto(deps: DockContentDeps, slot: DockSlotEls, extra: DockExtra = {}): void {
   const target = deps.activeId()
-  const sources = backrefsOf({ blocks: deps.blocks(), atoms: deps.atoms(), targetId: target })
+  const sources = backrefsOf({ blocks: deps.blocks(), atoms: deps.atoms(), targetId: target, index: deps.index() })
 
   const ctx: BlockRenderCtx = {
     isActive: (id) => id === deps.activeId(),

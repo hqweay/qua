@@ -1677,6 +1677,14 @@ export class BlockEditor {
   /* ------------------------------------------------------ 页面装载 */
 
   loadPage(doc: Doc, marks: Mark[], atoms: Atom[], caret?: { blockId: string; off: number }): void {
+    /**
+     * ⚠️ **换视图前先让索引失效**。
+     *
+     * `loadPage` 是「命令改完森林之后」的收尾动作（新建页 / 删页 / 换当前对象），
+     * 而那条路径**不发 `store.touch()`**（`kind === 'load'` 刻意跳过，避免把加载当成编辑）。
+     * 索引缓存住的是「库长什么样」，所以这里必须显式作废 —— 否则删掉的一页还能被 `find` 到。
+     */
+    this.store.invalidateIndex()
     this.doc = doc
     this.blockSel = null
     this.mouseSel = null
