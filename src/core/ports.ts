@@ -90,7 +90,7 @@ export interface App {
    *    「找到或创建标签块」要**写森林**，而森林由装配层持有；handler 拿它不到（59 ）。
    *    拆成两步又会让「建了标签但没插上边」这种半截状态成为可能。
    */
-  insertTag(tag: string): void
+  insertTag(tag: string, replace?: { blockId: string; from: number; to: number }): void
   /* 属性（属性是块第一公民；值在块上 `props[propId]`，一块一槽） */
   setPropValue(blockId: string, propId: string, value: unknown): void
   clearPropValue(blockId: string, propId: string): void

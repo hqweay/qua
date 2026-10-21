@@ -60,6 +60,7 @@ import {
   type TodoState,
   type UndoKind,
   type VisibleRow,
+  trailingHashTag,
 } from '../core/index.ts'
 // 用户可见文案一律走 t
 import { t } from '../core/msg.ts'
@@ -106,6 +107,14 @@ export interface ViewOpts {
    * 所以那一类实例关掉自动重载，改由承载它的组件防抖后显式 `reloadFromStore()`。
    */
   autoReload?: boolean
+  /**
+   * **正文里敲出 `#名字`** 时的成边出口（装配层注入）。
+   *
+   * 为什么是注入而不是编辑器自己建标签块：`ensureTag` 会**写森林**，而森林由装配层持有
+   *   —— 编辑器不该知道它存在（承「命令不碰模型持有者」那条纪律）。
+   * 注入后与 `insert-tag` 命令共用同一个函数 ⇒ 不产生第二套 `#` 解析。
+   */
+  onHashTag?: (name: string, blockId: string, from: number, to: number) => void
 }
 
 export interface ViewEvents {
@@ -203,6 +212,8 @@ export class BlockEditor {
   blankArea: HTMLElement
   private allowBlankCreate: boolean
   private allowRootRemove: boolean
+  /** 敲出 `#名字` 的成边出口（装配层注入 ⇒ 编辑器不碰森林） */
+  private readonly onHashTag?: (name: string, blockId: string, from: number, to: number) => void
   /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
   private readonly offStore: () => void
   private readonly unbind: () => void
@@ -212,6 +223,7 @@ export class BlockEditor {
     this.blankArea = o.blankArea ?? o.container
     this.allowBlankCreate = o.allowBlankCreate !== false
     this.allowRootRemove = o.allowRootRemove !== false
+    this.onHashTag = o.onHashTag
     this.doc = o.doc
     /**
      * **冷启动也必须有 root id**。
@@ -942,7 +954,12 @@ export class BlockEditor {
     this.emitChange('text')
   }
 
-  /** 从 DOM 输入事件同步模型（真实键入路径） */
+  /**
+   * 从 DOM 输入事件同步模型（真实键入路径）。
+   *
+   * 顺序：**先把文本同步进模型，再把 `#名字` 转成边**。
+   * 反过来的话，占位符会被当成普通文本参与 diff，粘性映射就乱了。
+   */
   syncFromDom(id: string, reRender: boolean): void {
     const loc = locate(this.doc, id)
     if (!loc) return
@@ -956,7 +973,9 @@ export class BlockEditor {
     this.atoms = r.kept
     const kind = change.to === change.from ? 'insert' : 'delete'
     this.undo.record(before, kind, Date.now())
-    if (reRender) {
+    // 刚敲完的 `#名字` 已经闭合 ⇒ 落成一条边（接缝见 `linkHashTags`）
+    const linked = this.linkHashTags(id)
+    if (reRender || linked) {
       const caret = this.sel ? this.sel.aOff : null
       this.renderBlock(id)
       if (caret !== null) this.placeCaret(id, Math.min(caret, loc.block.text.length))
@@ -967,6 +986,36 @@ export class BlockEditor {
     if (r.lost.length) this.events.atomsLost?.(r.lost)
     // 文本改了哪一块是已知的：带上 id，查询视图据此判断「结果里的内容变没变」
     this.emitChange('text', [id])
+  }
+
+  /**
+   * **把刚敲完的 `#名字` 落成一条指向标签块的边**。
+   *
+   * 触发时机：**标签闭合之后**（后面跟了分隔符，或已经到行尾）。
+   * 一边敲一边成边的话，`#` 刚落下就弹出一个 chip，手感会被破坏。
+   *
+   * ⚠️ **组合期绝不动手**：IME 预编辑期间的文本是临时的，
+   *    此刻成边会把半截拼音变成标签（且直接打断输入）。
+   *
+   * ⚠️ 与 `insert-tag` 命令共用 `ensureTag` ⇒ 只有一处认 `#名字`，不会分叉成两套解析。
+   *
+   * @returns 有没有成边（true ⇒ 调用方要重画这一块）
+   */
+  private linkHashTags(id: string): boolean {
+    if (this.probe.isComposing || !this.onHashTag) return false
+    const loc = locate(this.doc, id)
+    if (!loc) return false
+    /**
+     * 只认**行尾**那个已闭合的 `#名字`。
+     *
+     * 为什么不扫全行、把 `#xxx` 一次性全转掉：那会把「用户想写字面量 `#1`」
+ *    变成一次不可撤销的模型改动；退格回去再打一遍还会重复触发。
+ *    ⇒ 只在**刚写完的那一个**上成边：行为可预测，撤销也干净。
+     */
+    const hit = trailingHashTag(loc.block.text)
+    if (!hit) return false
+    this.onHashTag(hit.name, id, hit.from, hit.to)
+    return true
   }
 
   /**
@@ -1394,6 +1443,36 @@ export class BlockEditor {
     this.undo.record(before, 'other', Date.now())
     this.renderBlock(id)
     this.placeCaret(id, off + 1)
+    this.emitChange('atom')
+    return a.id
+  }
+
+  /**
+   * **把 `[from, to)` 这段正文替换成一条指向标签块的边**（占 1 格）。
+   *
+   * 与 `insertAtom` 的区别：那个是「在光标处**插入**一格」，
+   * 这个是「把已经写好的几个字**换成**一格」——敲 `#名字` 走的是后者：
+   * 用户先打出了 `#名字`，成边时那三个字要被吃掉，而不是在旁边再插一个。
+   *
+   * ⚠️ 文本与锚点必须用**同一次** `mapMarks` 映射：先换文本再算映射，
+   *    区间长度信息就丢了（`#名字` 变 1 格，长度差要算准）。
+   */
+  linkTagRange(blockId: string, from: number, to: number, label: string, targetId: string): string | null {
+    const loc = locate(this.doc, blockId)
+    if (!loc) return null
+    if (from < 0 || to > loc.block.text.length || from >= to) return null
+    const before = this.snap()
+    const old = loc.block.text
+    // 一次替换：`#名字`（N 格）→ 占位符（1 格）
+    loc.block.text = old.slice(0, from) + ATOM_PLACEHOLDER + old.slice(to)
+    const change = { from, to, insert: ATOM_PLACEHOLDER }
+    this.marks = mapMarks(this.marks, blockId, change)
+    const a = mkAtom('tag', blockId, from, label, { target: { kind: 'page', id: targetId } })
+    this.atoms = [...mapAtoms(this.atoms, blockId, change).kept, a]
+    this.undo.record(before, 'other', Date.now())
+    this.renderBlock(blockId)
+    // 光标落到那一格**之后**（否则再打卡在原子后面）
+    this.placeCaret(blockId, from + 1)
     this.emitChange('atom')
     return a.id
   }

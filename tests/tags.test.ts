@@ -23,6 +23,7 @@ import {
   normalizeTag,
   tagMemberIds,
   tagsOf,
+  trailingHashTag,
 } from '../src/core/index.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, text, children: [], ...extra })
@@ -142,4 +143,46 @@ test('mkTagBlock：名字就是正文，不带 #（# 是呈现时加的装饰）
   assert.equal(t.text, '设计')
   assert.deepEqual(t.roles, ['tag'])
   assert.equal(t.props?._icon, 'lucide:hash')
+})
+
+/* ------------------------------------------------------------ 正文里敲 # */
+
+/**
+ * **敲 `#名字` 成边的识别规则**（纯函数，零 DOM）。
+ *
+ * 判据是「只认**已闭合**的那个」：一边敲一边成边会让手感崩掉，
+ * 而扫全行又会让「想写字面量 #1」变成一次不可撤销的模型改动。
+ */
+test('trailingHashTag：`#名字` **后面跟了分隔符**才成边（行尾不算）', () => {
+  // 空格：区间**不含**那个空格
+  assert.deepEqual(trailingHashTag('#设计 后面'), { name: '设计', from: 0, to: 3 })
+  assert.deepEqual(trailingHashTag('前面 #设计 '), { name: '设计', from: 3, to: 6 })
+  assert.deepEqual(trailingHashTag('#设计，后面'), { name: '设计', from: 0, to: 3 }, '中文标点也是分隔符')
+  assert.deepEqual(trailingHashTag('a #b,c'), { name: 'b', from: 2, to: 4 }, '英文逗号同样分隔')
+})
+
+/**
+ * **行尾不算闭合**——这条是踩出来的，不是想出来的。
+ *
+ * 每敲一个字符都会同步一次，若把行尾当闭合，`#自` 就会在最边缘那一刻成边：
+ * 标签被建成「自」，接着敲的「动边」留在正文里（实测 `写点东西 ￼动边`）。
+ * ⇒ 必须等用户敲下那个分隔符。
+ */
+test('trailingHashTag：还在敲（行尾没有分隔符）⇒ 不成边', () => {
+  assert.equal(trailingHashTag('#设计'), null, '刚敲完名字、还没打分隔符 ⇒ 继续等')
+  assert.equal(trailingHashTag('价格 #1'), null, '同上')
+})
+
+test('trailingHashTag：没闭合 / 空名字 / 没有 # ⇒ 不认', () => {
+  assert.equal(trailingHashTag('没有井号'), null)
+  assert.equal(trailingHashTag('#'), null, '光一个 # 不成边（否则打井号要先打空格）')
+  assert.equal(trailingHashTag('# 设计'), null, '# 之后直接空白 ⇒ 没有名字')
+  // 数字也是合法的标签名：`价格 #1 `（后面有空格）就成边。
+  // 要不要允许由产品决定，但**识别层不该替它猜**——「是不是数字」是另一层的事。
+  assert.deepEqual(trailingHashTag('价格 #1 '), { name: '1', from: 3, to: 5 })
+})
+
+test('trailingHashTag：只取**最后一个**（刚写完的那个）', () => {
+  const got = trailingHashTag('#甲 #乙 ')
+  assert.deepEqual(got, { name: '乙', from: 3, to: 5 }, '先写的那个不该被重复处理')
 })

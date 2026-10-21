@@ -142,6 +142,13 @@ export interface PageDeps {
    * ⚠️ 它必须落到**共享 store**，否则别的视图（反链/查询）看不到这条边。
    */
   insertAtom: (kind: AtomKind, opts: Parameters<App['ed']['insertAtom']>[1]) => string | null
+  /**
+   * 把正文里的一段区间换成一条标签边（敲 `#名字` 的成边路径）。
+   *
+   * 与 `insertAtom` 分开注入，是因为两者是**不同的动作**：
+   * 一个在光标处插入一格，一个把已经写好的字换成那一格。
+   */
+  linkTagRange: (blockId: string, from: number, to: number, label: string, targetId: string) => string | null
   activeId: () => string
   setActiveId: (id: string) => void
   /** 把某页的子树装进编辑器（marks/atoms 是库级平铺） */
@@ -271,16 +278,24 @@ export function pageCommands(d: PageDeps): Pick<
      * 两步一次做完（「找到或创建标签块」＋「插原子」），中间不留半截状态：
      * 只建块没插边 ⇒ 库里多一个没人引用的标签；只插边没建块 ⇒ 边指着不存在的目标。
      *
+     * **两种入口，同一条实现**：
+     *   · 命令 / 选择器：在**光标处插入**一格（`replace` 省略）；
+     *   · 正文里敲出 `#名字`：把**已经写好的那几个字**换成那一格（传 `replace`）。
+     *
      * ⚠️ 空名字直接拒绝（不建无名标签）：没有名字的标签没有身份，建了就是孤儿。
      * ⚠️ 建了新标签要 `refreshList` ＋ `scheduleSave`：森林变了，且这是要落盘的内容。
      */
-    insertTag: (tag) => {
+    insertTag: (tag, replace) => {
       const { block, created, reused } = ensureTag(d.blocks(), tag)
       if (!block) {
         d.toast(t('ui.toast.tagEmpty'), 'warn')
         return
       }
-      if (!d.insertAtom('tag', { label: block.text, target: { kind: 'page', id: block.id } })) return
+      const target = { kind: 'page' as const, id: block.id }
+      const ok = replace
+        ? d.linkTagRange(replace.blockId, replace.from, replace.to, block.text, block.id)
+        : d.insertAtom('tag', { label: block.text, target })
+      if (!ok) return
       if (created) {
         d.refreshList()
         d.toast(t('ui.toast.tagCreated', { tag: block.text }))

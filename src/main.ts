@@ -670,6 +670,8 @@ const pageDeps: PageDeps = {
   blocks: () => ws.blocks,
   // ⚠️ 每次取**当前**活动编辑器（正文 vs 反链 footer 会切换）⇒ 标签打在用户正在编辑的那一行
   insertAtom: (kind, opts) => ed.insertAtom(kind, opts),
+  // 敲 `#名字` 的成边路径：把那段文字换成边（与上面「光标处插入」是两个动作）
+  linkTagRange: (blockId, from, to, label, targetId) => ed.linkTagRange(blockId, from, to, label, targetId),
   activeId: () => ws.activeId,
   setActiveId: (id) => {
     /**
@@ -1141,6 +1143,14 @@ ed = new BlockEditor({
   doc: { roots: bootRoots },
   marks: ws.marks,
   atoms: ws.atoms,
+  /**
+   * 敲出 `#名字` ⇒ 落成一条边（**84.7 点名要补的那条接缝**）。
+   *
+   * ⚠️ 必须走命令面而不是直接 `ensureTag`：`ensureTag` 会写森林，
+   *    命令面负责「写森林 ＋ 插原子 ＋ 刷新列表 ＋ 落盘」这一整串，
+   *    绕过它就会出现「标签块建了但左槽没显示」这类半截状态。
+   */
+  onHashTag: (name, blockId, from, to) => void app.insertTag(name, { blockId, from, to }),
 })
 mainEd = ed
 renderQueryView()
