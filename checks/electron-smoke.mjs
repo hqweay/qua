@@ -296,6 +296,20 @@ await check('E4 窗口尺寸/位置记忆：改了尺寸 → 关窗 → 重开�
    * ⇒ 期望值取**实际设进去之后立刻读到的**那一份：要保的不变量是
    *   「关掉再开，还是刚才那一份」，而不是某一组魔数。
    */
+  /**
+   * 先把屏幕工作区打出来：窗口被钳到屏幕内时，红的原因在**环境**，
+   * 而这条日志让人一眼看出来，不必再猜。
+   */
+  const env = await first.app.evaluate(({ screen, BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows()[0]
+    return {
+      workArea: screen.getPrimaryDisplay().workArea,
+      displays: screen.getAllDisplays().length,
+      before: w.getNormalBounds(),
+    }
+  })
+  log(`      workArea=${JSON.stringify(env.workArea)} displays=${env.displays} 建窗时=${JSON.stringify(env.before)}`)
+
   await first.app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0].setBounds({ x: 140, y: 110, width: 1000, height: 700 })
   })
