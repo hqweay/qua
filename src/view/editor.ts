@@ -27,6 +27,7 @@ import {
   insertSiblingAfter,
   enterKind,
   locate,
+  deleteBlockSpan,
   mapAtoms,
   mapMarks,
   mergeIntoPrev,
@@ -828,6 +829,33 @@ export class BlockEditor {
    * 「再点一次取消加粗」就做不到了，划选气泡也会立刻消失（它靠选区存在才在）。
    * ⚠️ 只支持同一块内（跨块的 Range 要跨 `.tx` 节点，第 1 期不做）。
    */
+  /**
+   * **设置模型选区**（并尽量同步到 DOM）。
+   *
+   * 为什么要有公开入口：`⌘A` 是从 DOM 反推模型的，而**跨块删除**要从模型发起
+   * （用户在块选区上按删除键时，DOM 选区已经被浏览器动过了）。
+   * 给一个显式的设置点，测试与命令面都不用去手搓 Range。
+   *
+   * ⚠️ 跨块时 DOM 只画到**末块的光标**（原生跨块 Range 会跨 `.tx` 节点，
+   *    与「块内 Range」的假设冲突）；模型里的 `sel` 才是权威。
+   */
+  setSel(s: Sel | null): void {
+    this.clearBlockSelection()
+    if (!s) {
+      this.sel = null
+      return
+    }
+    if (s.aBlock === s.hBlock) {
+      // 同上：`placeRange` 也会改写 `this.sel` ⇒ 先摆 DOM，再写回模型
+      this.placeRange({ ...s, aBlock: s.hBlock, aOff: s.hOff })
+      this.sel = s
+      return
+    }
+    // 跨块：先把 DOM 光标放到末块（`placeCaret` 会改写 `this.sel`），再写回模型选区
+    this.placeCaret(s.hBlock, s.hOff)
+    this.sel = s
+  }
+
   private placeRange(s: Sel): void {
     if (s.aBlock !== s.hBlock) {
       this.placeCaret(s.hBlock, s.hOff)
@@ -952,6 +980,35 @@ export class BlockEditor {
     this.renderBlock(id)
     if (r.lost.length) this.events.atomsLost?.(r.lost)
     this.emitChange('text')
+  }
+
+  /**
+   * **收掉一个跨块选区**：把首块前半 ＋ 末块后半拼成一块。
+   *
+   * 为什么要单独一步：`syncFromDom` 只同步「光标所在的那一块」。
+   * 跨块选区上按删除/打字时，浏览器会把整段内容一起删掉，
+   * 但模型里那些块**一个都没少** ⇒ 重渲染后它们又全回来了（看着像删除没生效）。
+   *
+   * @returns 收拢之后光标应落到的块 id；`null` ＝ 这不是一个该在模型里收的选区
+   */
+  collapseSelection(): string | null {
+    const s = this.sel
+    if (!s) return null
+    const r = normSel(this.doc, s)
+    if (r.startBlock === r.endBlock) return null
+    const before = this.snap()
+    const caretId = deleteBlockSpan(this.doc, r.startBlock, r.startOff, r.endBlock, r.endOff)
+    if (!caretId) return null
+    // 被删掉的块带着自己的子树一起走 ⇒ 它们的锚点要一起回收
+    const prevIds = this.ownerIds()
+    this.syncAnchors(prevIds)
+    this.undo.record(before, 'delete', Date.now())
+    const loc = locate(this.doc, caretId)
+    this.sel = loc ? { aBlock: caretId, aOff: r.startOff, hBlock: caretId, hOff: r.startOff } : null
+    this.renderAll()
+    this.placeCaret(caretId, Math.min(r.startOff, loc?.block.text.length ?? 0))
+    this.emitChange('struct')
+    return caretId
   }
 
   /**
@@ -1622,6 +1679,7 @@ export class BlockEditor {
       container: this.container,
       blockOf: (n) => this.blockOf(n),
       syncSel: () => this.syncSel(),
+      collapseSelection: () => this.collapseSelection(),
       syncFromDom: (id, re) => this.syncFromDom(id, re),
       beginMouseSelect: (id, x, y, shift) => this.beginMouseSelect(id, x, y, shift),
       updateMouseSelect: (x, y) => this.updateMouseSelect(x, y),

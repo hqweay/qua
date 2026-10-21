@@ -379,6 +379,62 @@ export function replaceBlockRange(doc: Doc, fromId: string, toId: string, lines:
   return kept.map((b) => b.id)
 }
 
+/**
+ * **删掉一个跨块选区覆盖的内容**（`⌘A` 之后按删除、或在选中处打字）。
+ *
+ * 语义与文本编辑器一致：选区从「首块 off0」到「末块 off1」，
+ * 中间的整块连同子树一起没掉，剩下的**首尾拼成一块**（保首块的 id）。
+ *
+ * ```
+ *   [AAAA]          ← 从第 2 个字起选
+ *   [BBBB]          ← 整个没掉（连子树）
+ *   [CCCC]          ← 选到第 2 个字
+ *   ⇒ [AA + CC]     ← 一块，id ＝ 首块的 id
+ * ```
+ *
+ * ⚠️ **首尾是同一块时不在这里处理**：那是普通块内删除，走 `editBlock`。
+ * ⚠️ **段根不删**（`roots` 里的块）：它是视图装载单位，删它只是让视图看不见
+ *    （库里还在，刷新就回来）。遇到就停在前一个可删的位置。
+ * ⚠️ 返回值是**光标的落点块 id**；`null` ＝ 这一处不该被当作跨块删除处理。
+ */
+export function deleteBlockSpan(doc: Doc, startId: string, startOff: number, endId: string, endOff: number): string | null {
+  const all = flatten(doc)
+  const i = all.findIndex((b) => b.id === startId)
+  const j = all.findIndex((b) => b.id === endId)
+  if (i < 0 || j < 0 || j < i) return null
+  // 同一块 ⇒ 不是跨块删除（调用方自己做块内删除）
+  if (i === j) return null
+
+  const head = all[i]!
+  const tail = all[j]!
+  const headLoc = locate(doc, head.id)!
+  const tailLoc = locate(doc, tail.id)!
+
+  /**
+   * ⚠️ **只处理同一层的兄弟**：范围跨到不同父块时（比如从某块选到它叔块），
+   *    拼接语义就不成立了（拼给谁？拼完挂在哪？）。
+   *    那种情况留给「块选区删除」（`deleteSelectedBlocks`），它不动兄弟结构。
+   */
+  if (headLoc.parent !== tailLoc.parent) return null
+
+  const list = siblingsOf(doc, headLoc.parent)
+  const from = headLoc.index
+  const to = tailLoc.index
+  if (to <= from) return null
+
+  /**
+   * **段根不删**：它是视图的装载单位（页／天／查询记录），删它只是让视图看不见，
+   * 库里那块还在（刷新就回来）。判据是**角色**，不是「位置在第一个」——
+   * 后者会把一整页的普通首块也挡掉。
+   */
+  if (headLoc.parent === null && (head.roles?.length ?? 0) > 0) return null
+
+  head.text = head.text.slice(0, startOff) + tail.text.slice(endOff)
+  // 首块的子树保留（选区不含它们）；被删掉的那些块连子树一起消失
+  list.splice(from + 1, to - from)
+  return head.id
+}
+
 /** 缩进：变前兄弟的最后一个孩子（tab） */
 export function indentBlock(doc: Doc, id: string): boolean {
   const loc = locate(doc, id)
