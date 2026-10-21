@@ -1283,6 +1283,50 @@ const propertiesPanel = new PropertiesPanel(
     addField: (b, propId) => void registry.invoke('core.props/add-field', { blockId: b.id, propId }, 'ui'),
     undeclare: (b, propId) => void registry.invoke('core.props/undeclare', { blockId: b.id, propId }, 'ui'),
     createDef: (b, label, kind) => void registry.invoke('core.props/create-def', { blockId: b.id, label, kind }, 'ui'),
+    /**
+     * **`ref` 值的选择器**：从整片森林里挑一块。
+     *
+     * 复用 `layers.openMenu`（与命令面板 / 标签选择器同一个浮层），
+     * 所以键盘、搜索、空态的行为不用再写一份。
+     * 列表给「页 → 它的块」两级，页名与块正文都能搜到。
+     */
+    pickRef: (owner, _propId, current, onPick) => {
+      const rows: Row[] = []
+      for (const b of flatten({ roots: ws.blocks })) {
+        // 自己不能指向自己：那会造出一个立刻成环的引用
+        if (b.id === owner.id) continue
+        const title = b.text.trim()
+        rows.push({
+          id: `ref/${b.id}`,
+          label: title === '' ? t('ui.page.untitled') : title,
+          hint: hasRole(b, 'page') ? t('ui.props.refIsPage') : t('ui.props.refIsBlock'),
+          icon: hasRole(b, 'page') ? 'lucide:file' : 'lucide:square',
+          group: hasRole(b, 'page') ? 'ref/1-page' : 'ref/2-block',
+          // 当前值做个标记：不然选过一次之后看不出来「现在是哪个」
+          keyHint: b.id === current ? t('ui.props.refCurrent') : undefined,
+        })
+      }
+      layers.openMenu({
+        rows,
+        anchor: ed.caretRect(),
+        title: t('ui.props.pickRef'),
+        searchable: true,
+        focusSearch: true,
+        emptyText: t('ui.props.refEmpty'),
+        onPick: (row) => {
+          const id = String(row.id).slice('ref/'.length)
+          onPick(id)
+          // 选择器关掉之后属性区要立刻显示新值（不等下一次 store 通知）
+          scheduleProperties()
+        },
+      })
+    },
+    refLabel: (targetId) => {
+      const b = findInForest(ws.blocks, targetId)
+      if (!b) return t('ui.props.refMissing', { id: shortId(targetId) })
+      const s = b.text.trim()
+      return s === '' ? shortId(b.id) : s
+    },
     toast: (text, kind) => app.toast(text, kind),
   },
 )

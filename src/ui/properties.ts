@@ -34,6 +34,16 @@ export interface PropertiesDeps {
   undeclare: (b: Block, propId: string) => void
   /** 新建定义（可同时声明/加槽） */
   createDef: (b: Block, label: string, kind: PropKind) => void
+  /**
+   * **给 `ref` 类型的值选一个目标块**（装配层弹出选择器，选中后回调写值）。
+   *
+   * 为什么必须走注入：选择器要读**整片森林**（页、标签、任意块），
+   * 而属性区只认识「当前这一块」——它也拿不到 DOM 之外的浮层。
+   * 不注入的话，`ref` 只能让用户手打 32 位 id，那等于没有这个类型。
+   */
+  pickRef: (b: Block, propId: string, current: string, onPick: (targetId: string) => void) => void
+  /** 把一个块 id 变成人能读的名字（`ref` 值的显示） */
+  refLabel: (targetId: string) => string
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
@@ -44,8 +54,18 @@ export interface PropertiesEls {
   add: HTMLButtonElement
 }
 
-/** 一行值的编辑器（按 kind）。返回控件元素 */
-function valueEditor(row: FieldRow, commit: (v: unknown) => void): HTMLElement {
+/**
+ * 一行值的编辑器（按 kind）。返回控件元素。
+ *
+ * `ref` 与其它类型不同：它不是「输入一个值」，而是**选一个块**。
+ * 所以它需要 deps（弹选择器、解析显示名），不能只靠 `commit`。
+ */
+function valueEditor(
+  row: FieldRow,
+  commit: (v: unknown) => void,
+  deps?: Pick<PropertiesDeps, 'pickRef' | 'refLabel'>,
+  owner?: Block,
+): HTMLElement {
   const kind = row.kind
   if (kind === 'checkbox') {
     const box = document.createElement('input')
@@ -54,6 +74,24 @@ function valueEditor(row: FieldRow, commit: (v: unknown) => void): HTMLElement {
     box.checked = row.value === true
     box.addEventListener('change', () => commit(box.checked))
     return box
+  }
+  /**
+   * `ref`：显示目标的名字，点一下换目标。
+   *
+   * ⚠️ **不提供手打 id 的输入框**：32 位 hex 没人记得住，让它可编辑等于让人拼手速。
+   *    值的形状仍然是「一个块 id」（模型层不变），只是入口换成了选择器。
+   */
+  if (kind === 'ref' && deps && owner) {
+    const current = row.value === undefined || row.value === null ? '' : String(row.value)
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'prop-input prop-ref'
+    btn.dataset.refId = current
+    btn.textContent = current === '' ? t('ui.props.pending') : deps.refLabel(current)
+    btn.addEventListener('click', () => {
+      deps.pickRef(owner, row.propId, current, (targetId) => commit(targetId === '' ? undefined : targetId))
+    })
+    return btn
   }
   if (kind === 'select') {
     const sel = document.createElement('select')
@@ -153,10 +191,15 @@ export class PropertiesPanel {
       const value = document.createElement('span')
       value.className = 'prop-value'
       value.appendChild(
-        valueEditor(row, (v) => {
-          if (v === undefined) this.deps.clearValue(target, row.propId)
-          else this.deps.setValue(target, row.propId, v)
-        }),
+        valueEditor(
+          row,
+          (v) => {
+            if (v === undefined) this.deps.clearValue(target, row.propId)
+            else this.deps.setValue(target, row.propId, v)
+          },
+          this.deps,
+          target,
+        ),
       )
 
       const clear = document.createElement('button')

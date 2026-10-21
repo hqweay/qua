@@ -1987,6 +1987,88 @@ await check('T58 正文里敲 `#名字` ⇒ 闭合成边（吃掉那几个字、
   return `敲「#${tagName}」⇒ 正文 ${JSON.stringify(got.text)}，一条边指向 ${got.tagBlock.slice(-6)}`
 })
 
+await check('T59 `ref` 类型的值走选择器：显示目标**名字**、能换目标、不让人手打 id', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__demo.quiet(true))
+  await openFirstPage(page)
+
+  /**
+   * ⚠️ 属性区跟**当前对象**走（不是光标所在块）：内容块要先 zoom 进去，
+   *    它的属性才是面板画的那一份。直接 focusBlock 只会把光标放上去。
+   */
+  const setup = await page.evaluate(() => {
+    const bs = window.__demo.blocks()
+    const host = bs.find((b) => !(b.roles?.length) && b.text.length > 2)
+    const ed = window.__demo.__editor
+    const a = ed.insertBlockAfter(host.id, '候选人甲')
+    window.__demo.invoke('core.block/focus-block', { blockId: host.id })
+    return { host: host.id, a }
+  })
+  await page.waitForTimeout(220)
+
+  const defId = await page.evaluate((host) => {
+    window.__demo.invoke('core.props/create-def', { blockId: host, label: '负责人', kind: 'ref' })
+    return window.__demo.propDefs().find((d) => d.label === '负责人')?.id ?? ''
+  }, setup.host)
+  assert(defId, '前置：应建出「负责人」字段定义')
+  await page.waitForTimeout(260)
+
+  // ① 值是选择器按钮（.prop-ref），不是裸 input
+  const cell = await page.evaluate((pid) => {
+    const row = document.querySelector('.prop-row[data-prop-id="' + pid + '"]')
+    const ctl = row?.querySelector('.prop-value > *')
+    return { tag: ctl?.tagName ?? '', isRef: ctl?.classList.contains('prop-ref') ?? false, text: ctl?.textContent ?? '' }
+  }, defId)
+  assert(cell.isRef === true, 'ref 值应渲染成选择器按钮（.prop-ref），不是普通输入框：' + JSON.stringify(cell))
+  assert(cell.tag === 'BUTTON', '应是一个按钮：' + JSON.stringify(cell))
+
+  // ② 点开 ⇒ 弹出选择器，列出可指向的块
+  await page.evaluate((pid) => {
+    document.querySelector('.prop-row[data-prop-id="' + pid + '"] .prop-ref')?.click()
+  }, defId)
+  await page.waitForTimeout(200)
+  const menu = await page.evaluate(() => ({
+    open: Boolean(document.querySelector('.layer')),
+    title: document.querySelector('.layer-head')?.textContent ?? '',
+    labels: [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? ''),
+  }))
+  assert(menu.open, '点 ref 值应弹出选择器：' + JSON.stringify(menu))
+  assert(menu.labels.some((x) => x.includes('候选人甲')), '选择器里应有候选块：' + JSON.stringify(menu.labels))
+
+  // ③ 选中 ⇒ 值写成目标 id，**显示**的是目标名字
+  await page.evaluate(() => {
+    // ⚠️ 菜单选中走 **mousedown**（不是 click）：mousedown 里 preventDefault 保住焦点
+    const item = [...document.querySelectorAll('.layer-item')].find((e) => e.textContent?.includes('候选人甲'))
+    item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForTimeout(300)
+  const after = await page.evaluate(({ pid, host }) => {
+    /**
+     * ⚠️ `blocks()` 给的是**精简投影**（没有 props），读值要走编辑器手里的活块。
+     *    写成 `blocks()[0].props` 会永远是 undefined —— 那种断言会假绿。
+     */
+    const store = window.__demo.__editor.store
+    const find = (id, list) => {
+      for (const b of list) {
+        if (b.id === id) return b
+        const inner = find(id, b.children ?? [])
+        if (inner) return inner
+      }
+      return null
+    }
+    const live = find(host, store.blocks)
+    const ctl = document.querySelector('.prop-row[data-prop-id="' + pid + '"] .prop-ref')
+    return { stored: live?.props?.[pid] ?? '', shown: ctl?.textContent ?? '', refId: ctl?.dataset.refId ?? '' }
+  }, { pid: defId, host: setup.host })
+
+  assert(after.stored === setup.a, '选中的块 id 应写进 props[propId]：' + JSON.stringify(after))
+  assert(after.shown === '候选人甲', '显示应是目标的名字，不是 id：' + JSON.stringify(after))
+  assert(after.refId === setup.a, '按钮上应带 target id（供重开校验）')
+
+  await ctx.close()
+  return `ref 值：按钮选择器 → 选中「候选人甲」⇒ props=${after.stored.slice(-6)}、显示「${after.shown}」`
+})
+
 await check('T27 光标行隐藏占位、journal 日期不可聚焦、折叠图标贴自己的块标', async () => {
   const { ctx, page } = await freshPage(browser, base)
 
