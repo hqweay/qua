@@ -24,15 +24,36 @@ export type ChangeKind = 'blocks' | 'marks' | 'atoms'
 /**
  * 一条改动。
  *
- * ⚠️ **不带 payload**：目前只有「整份库字节变了」这一种事实（demo 的适配器不知道哪块改了）。
- *    接 Tx/Changes 之后这里会扩成 `{ kind, id, op: 'upsert' | 'delete', value }`，
- *    但**对外形状不变**——适配器照样只承诺「这批改动落盘了」。
- *    现在就按 `Change[]` 收，是为了逼上层别再把「整库 save」当契约用。
+ * ⚠️ **不带 payload**：契约只说「这类对象里的这一条动过」，不说动成了什么
+ *    （落盘字节由 `CommitBatch.payload` 承载）。将来接内核时这里会扩成
+ *    `{ kind, id, op: 'upsert' | 'delete', value }`，但**对外形状不变**——
+ *    适配器照样只承诺「这批改动落盘了」。
+ *
+ * `id` 两种取值，消费者必须都处理：
+ *   · 具体 id —— 精确到块/锚点/原子，索引可只重算它；
+ *   · `'*'`  —— 「这一类都可能动过」，拿不到精确 id 时的**保守**声明。
+ *
+ * ⚠️ `'*'` 不是「没实现」的兜底，而是「确实不知道」的如实表达
+ *    （例如换库、批量导入、结构性重排）。宁可多重建一次，也不要自相矛盾的索引。
  */
 export interface Change {
   kind: ChangeKind
-  /** `'*'` ＝ 整类对象都动过（demo 适配器只能这么报，因为它序列化的是整份库） */
+  /** 对象 id（块／锚点／原子），或 `'*'` ＝ 整类对象都动过 */
   id: string
+}
+
+export const WHOLE_CLASS = '*'
+
+/** 这批改动里，`kind` 这一类是不是「整类都动过」 */
+export function isWholeClass(changes: readonly Change[], kind: ChangeKind): boolean {
+  return changes.some((c) => c.kind === kind && c.id === WHOLE_CLASS)
+}
+
+/** 这批改动里 `kind` 这一类点到的具体 id（**不含** `'*'`） */
+export function idsOfKind(changes: readonly Change[], kind: ChangeKind): string[] {
+  const out = new Set<string>()
+  for (const c of changes) if (c.kind === kind && c.id !== WHOLE_CLASS) out.add(c.id)
+  return [...out]
 }
 
 /** 一次提交的内容：这批改了什么 ＋ 落盘时用的整份库（demo 实现细节） */
