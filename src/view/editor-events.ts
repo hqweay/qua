@@ -46,6 +46,14 @@ export interface EditorBridge {
   blockOf: (node: Node | null) => string | null
   /** 从 DOM 选区刷新模型选区 */
   syncSel: () => void
+  /**
+   * 收掉跨块选区（首尾拼成一块）。
+   *
+   * 返回光标应落到的块 id；`null` ＝ 当前不是一个跨块选区。
+   * 事件层在 `input` 里先调它，否则「选中多块再打字」只会删掉 DOM 里的字，
+   * 模型里那些块一块都没少。
+   */
+  collapseSelection: () => string | null
   /** 把某个块的 DOM 文本同步回模型；`reRender` 为 false 时不重渲染（组合期专用）*/
   syncFromDom: (id: string, reRender: boolean) => void
   /** 光标在 `/查询词` 尾部时上报（由装配层决定弹不弹斜杠菜单）*/
@@ -198,6 +206,13 @@ export function bindEditorEvents(br: EditorBridge): () => void {
 
   /* ── 输入与组合（**不打断 IME**）────────────────────── */
   on(c, 'input', () => {
+    /**
+     * ⚠️ **先收跨块选区**：浏览器会把整段内容删掉，但模型里那些块一块都没少
+     *    ⇒ 不收的话重渲染时它们又全回来了（看起来像「删除没生效」）。
+     * 收拢之后光标落在拼接块里，下面照常同步这一块的文本。
+     */
+    const collapsed = br.collapseSelection()
+    if (collapsed) br.syncFromDom(collapsed, true)
     const id = br.blockOf(document.getSelection()?.anchorNode ?? null)
     if (!id) return
     br.syncSel()

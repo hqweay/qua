@@ -2069,6 +2069,77 @@ await check('T59 `ref` 类型的值走选择器：显示目标**名字**、能�
   return `ref 值：按钮选择器 → 选中「候选人甲」⇒ props=${after.stored.slice(-6)}、显示「${after.shown}」`
 })
 
+/**
+ * **跨块选区上的删除要落到模型里**（不只是改了 DOM）。
+ *
+ * 失败方式很讨厌：浏览器把字删了、模型里块一块没少，重渲染一画就全回来。
+ *
+ * ⚠️ 这里在**同一个 evaluate 里**完成「设选区 → 收拢」：中间不给
+ *    `selectionchange` 一次机会——它会从 DOM 反推选区，把模型里那个跨块选区冲掉。
+ */
+await check('T60 跨块选区收拢 ⇒ 首尾拼成一块、中间块（连子树）真从模型里消失，一次撤销复原', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__demo.quiet(true))
+  await openFirstPage(page)
+
+  const before = await page.evaluate(() => {
+    const ed = window.__demo.__editor
+    const host = window.__demo.blocks().find((b) => !(b.roles?.length) && b.text.length > 2)
+    const a = ed.insertBlockAfter(host.id, 'AAAA')
+    const b = ed.insertBlockAfter(a, 'BBBB')
+    const c = ed.insertBlockAfter(b, 'CCCC')
+    /**
+     * 给 BBBB 挂一个**真正的子块**（`insertBlockAfter` 只在「首行特例」下建子块，
+     * 所以这里直接改模型），它必须随 BBBB 一起没掉。
+     */
+    const find = (id, list) => {
+      for (const x of list) {
+        if (x.id === id) return x
+        const inner = find(id, x.children ?? [])
+        if (inner) return inner
+      }
+      return null
+    }
+    find(b, ed.doc.roots)?.children.push({ id: 'kid-' + b, text: '子块不该留', children: [] })
+    ed.renderAll()
+    return { a, b, c, total: window.__demo.snapshot().totalBlocks }
+  })
+  await page.waitForTimeout(120)
+
+  // 同一口锅里：设选区 → 立刻收拢
+  const after = await page.evaluate(({ a, b }) => {
+    const ed = window.__demo.__editor
+    ed.setSel({ aBlock: a, aOff: 2, hBlock: b, hOff: 2 })
+    const caret = ed.collapseSelection()
+    return {
+      caret,
+      total: window.__demo.snapshot().totalBlocks,
+      texts: window.__demo.blocks().map((x) => x.text),
+    }
+  }, before)
+  await page.waitForTimeout(200)
+
+  assert(after.caret === before.a, '光标应落在首块（保它的 id）：' + JSON.stringify(after))
+  assert(after.total === before.total - 2, '应少 2 块（BBBB 与它的子块）：' + JSON.stringify({ before, after }))
+  assert(!after.texts.includes('子块不该留'), '被删块的子树不能留在模型里：' + JSON.stringify(after.texts))
+  assert(!after.texts.includes('BBBB'), 'BBBB 应已并掉：' + JSON.stringify(after.texts))
+  // 首尾拼成一块：AAAA 前 2 字 ＋ BBBB 后 2 字（BBBB 从第 2 位起选 ⇒ 剩「BB」）
+  assert(after.texts.includes('AABB'), '首尾应拼成「AABB」：' + JSON.stringify(after.texts))
+
+  // 一次撤销全部复原（含被删块的子树）
+  await page.evaluate(() => window.__demo.invoke('core.history/undo'))
+  await page.waitForTimeout(200)
+  const back = await page.evaluate(() => ({
+    total: window.__demo.snapshot().totalBlocks,
+    texts: window.__demo.blocks().map((x) => x.text),
+  }))
+  assert(back.total === before.total, '一次撤销应复原块数：' + JSON.stringify({ before, back }))
+  assert(back.texts.includes('AAAA') && back.texts.includes('子块不该留'), '撤销后文字与子树都应回来：' + JSON.stringify(back.texts))
+
+  await ctx.close()
+  return `跨块收拢：块数 ${before.total}→${after.total}、拼成「AABB」，一次撤销连子树一起复原`
+})
+
 await check('T27 光标行隐藏占位、journal 日期不可聚焦、折叠图标贴自己的块标', async () => {
   const { ctx, page } = await freshPage(browser, base)
 
