@@ -10,7 +10,21 @@ import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
 
-export const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+/**
+ * 用哪个 Chrome 跑冒烟。
+ *
+ * 为什么不写死一个路径：门禁（`pnpm gate`）不该只在这台机器上跑得起来。
+ *   ⇒ 平台默认值 ＋ `QUA_CHROME` 覆盖（谁的机器上都能指到自己那份浏览器）。
+ *   ⇒ CI 在 Linux 上跑，那里的 Chrome 由 runner 预装；macOS 上才是 `.app` 里那一份。
+ */
+function chromePath() {
+  if (process.env.QUA_CHROME) return process.env.QUA_CHROME
+  return process.platform === 'darwin'
+    ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+    : process.env.CHROME_BIN ?? '/usr/bin/google-chrome'
+}
+
+export const CHROME = chromePath()
 const DIST = fileURLToPath(new URL('../dist/', import.meta.url))
 const MIME = {
   '.html': 'text/html',
@@ -82,6 +96,37 @@ export async function resolveBase() {
   const server = await startStatic(DIST, 0)
   const port = server.address().port
   return { base: `http://127.0.0.1:${port}/`, mode: `dist(:${port} 静态)`, server }
+}
+
+/**
+ * 「⌘」在按键字符串里怎么写。
+ *
+ * 为什么不能写死 `Meta+`：`mod` 在本项目里是**按平台解析**的（`bindings.ts` 的 `eventKeyId`）
+ *   —— macOS 上 `mod` ＝ ⌘（Meta），其它平台上是 Ctrl。
+ * ⇒ 冒烟若写死 `Meta+`，在 Linux CI 上就会敲出**没有绑定**的组合键，表现为一整片
+ *   「命令没生效」的假失败（看着像功能坏了，其实是敲错了键）。
+ */
+export const MOD = process.platform === 'darwin' ? 'Meta' : 'Control'
+
+/**
+ * 把 `'mod+shift+a'` 这样的**绑定表写法**翻成 Playwright 认的按键串。
+ *
+ * 为什么要多此一举：绑定表（`bindings.ts`）里的键位是**应用口径**
+ * （`mod` 按平台解析、修饰键小写），而 `page.keyboard.press` 吃的是
+ * **Playwright 口径**（`Meta`/`Control`/`Shift`/`Alt` 首字母大写、没有 `mod`）。
+ * 两边各写一份就会分叉 —— 将来在 Linux CI 上改了平台默认值，
+ * 冒烟里那二十来处写死的 `Meta+` 不会跟着变（那是**假绿**的温床）。
+ */
+const PW_MOD = { shift: 'Shift', alt: 'Alt', ctrl: 'Control', meta: 'Meta' }
+
+export function key(k) {
+  return k
+    .split('+')
+    .map((part) => {
+      if (part === 'mod') return MOD
+      return PW_MOD[part.toLowerCase()] ?? part
+    })
+    .join('+')
 }
 
 export async function launch() {

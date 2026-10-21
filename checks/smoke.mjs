@@ -6,7 +6,7 @@
  */
 import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { assert, freshPage, launch, openPage, reopenPage, resolveBase } from '../scripts/harness.mjs'
+import { assert, freshPage, key as kbd, launch, openPage, reopenPage, resolveBase } from '../scripts/harness.mjs'
 
 const SHOTS = fileURLToPath(new URL('../shots/', import.meta.url))
 const results = []
@@ -172,14 +172,14 @@ await check('T3 四种区间格式走**区间锚点**（⌘B/⌘I/⌘E/⌘`）�
     window.__demo.focusBlock(id, 0)
   })
   const keys = [
-    ['Meta+b', 'bold'],
-    ['Meta+i', 'italic'],
-    ['Meta+e', 'highlight'],
-    ['Meta+`', 'code'],
+    ['mod+b', 'bold'],
+    ['mod+i', 'italic'],
+    ['mod+e', 'highlight'],
+    ['mod+`', 'code'],
   ]
   for (const [k] of keys) {
     await page.keyboard.press('Shift+ArrowRight')
-    await page.keyboard.press(k)
+    await page.keyboard.press(kbd(k))
   }
   const marks = await page.evaluate(() => window.__demo.marks())
   const types = new Set(marks.map((m) => m.type))
@@ -321,7 +321,7 @@ await check('T4 锚点的粘性映射：在区间起点插入不撑大、终点�
   })
   await page.keyboard.press('Shift+ArrowRight')
   await page.keyboard.press('Shift+ArrowRight')
-  await page.keyboard.press('Meta+b')
+  await page.keyboard.press(kbd('mod+b'))
   const m0 = (await page.evaluate(() => window.__demo.marks()))[0]
   assert(m0.start === 0 && m0.end === 2, `初始锚点应为 [0,2)：${JSON.stringify(m0)}`)
   // 光标停到区间起点（offset 0）再插入 ⇒ 起点右移（不撑大）
@@ -608,7 +608,7 @@ await check('T7 拖拽重排：把第 2 块拖到第 1 块上方（真实 DnD �
 await check('T8 命令面板 ⌘P：列出全部命令、可搜、**无绑定也能执行**', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__demo.focus())
-  await page.keyboard.press('Meta+p')
+  await page.keyboard.press(kbd('mod+p'))
   const rows = await page.locator('.layer-item').count()
   assert(rows > 30, `命令面板应列出全部命令，实际 ${rows} 行`)
   const noKey = await page.evaluate(() => {
@@ -680,7 +680,7 @@ await check('T10 localStorage：关掉重开内容还在（含锚点与原子）
   })
   await page.keyboard.type('持久化标记 ')
   await page.keyboard.press('Shift+ArrowRight')
-  await page.keyboard.press('Meta+b')
+  await page.keyboard.press(kbd('mod+b'))
   await page.waitForTimeout(450)
   const before = await page.evaluate(() => ({
     marks: window.__demo.marks().length,
@@ -731,11 +731,11 @@ await check('T36 StoragePort：关页前不等防抖也能落盘；旧裸库显�
     await page.waitForFunction(() => localStorage.length > 0)
     await page.evaluate(() => {
       // 先拿到当前信封的形状，再把它拆成「升级前的裸库」（v3、没有信封）
-      const key = localStorage.key(0)
-      const legacy = JSON.parse(localStorage.getItem(key))
+      const storageKey = localStorage.key(0)
+      const legacy = JSON.parse(localStorage.getItem(storageKey))
       legacy.data.version = 3
       legacy.data.blocks = [{ ...legacy.data.blocks[0], text: '旧库里的字不该被当成 v4 打开' }]
-      localStorage.setItem(key, JSON.stringify(legacy.data))
+      localStorage.setItem(storageKey, JSON.stringify(legacy.data))
     })
     const reopened = await reopenPage(browser, ctx, base, page)
     const snap = await reopened.page.evaluate(() => ({ ...window.__demo.snapshot(), text: window.__demo.text().join('|') }))
@@ -1588,10 +1588,10 @@ await check('T33 同块选区 + Enter ⇒ 先删选区、再在起点拆（一�
   })
   const n0 = await page.evaluate(() => window.__demo.snapshot().totalBlocks)
 
-  const select = async (from, key, times) => {
+  const select = async (from, arrowKey, times) => {
     await page.evaluate(({ id, from }) => window.__demo.focusBlock(id, from), { id, from })
     await page.keyboard.down('Shift')
-    for (let i = 0; i < times; i++) await page.keyboard.press(key)
+    for (let i = 0; i < times; i++) await page.keyboard.press(arrowKey)
     await page.keyboard.up('Shift')
     const sel = await page.evaluate(() => window.__demo.snapshot().selection)
     assert(sel.aOff === 2 && sel.hOff === 6, `选区应是 [2,6)：${JSON.stringify(sel)}`)
@@ -1618,7 +1618,7 @@ await check('T33 同块选区 + Enter ⇒ 先删选区、再在起点拆（一�
   assert(fwd.n === n0 + 1, `应只多一块：${n0} → ${fwd.n}`)
 
   // ② 一次撤销复原（删除 + 拆分是一笔）
-  await page.keyboard.press('Meta+z')
+  await page.keyboard.press(kbd('mod+z'))
   const undone = await read()
   assert(undone.text === 'abcdefghij' && undone.n === n0, `撤销应一步复原：${JSON.stringify(undone)}`)
 
@@ -1699,7 +1699,7 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
   await page.mouse.click(del.x, del.y)
   const gone = await state()
   assert(!gone.texts.includes('AAAA') && !gone.texts.includes('BBBB') && !gone.texts.includes('CCCC'), `删除后三块应消失：${JSON.stringify(gone.texts)}`)
-  await page.keyboard.press('Meta+z')
+  await page.keyboard.press(kbd('mod+z'))
   await page.waitForTimeout(80)
   const back = await state()
   assert(back.texts.includes('AAAA') && back.texts.includes('BBBB') && back.texts.includes('CCCC'), `一次撤销应复原三块：${JSON.stringify(back.texts)}`)
@@ -1714,7 +1714,7 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
 
   // ⑥ Mod+Shift+A 全选块；Enter 清选区并落到首块 0 位
   await page.evaluate((id) => window.__demo.focusBlock(id, 0), ids.a)
-  await page.keyboard.press('Meta+Shift+A')
+  await page.keyboard.press(kbd('mod+shift+a'))
   const all = await state()
   assert(all.count > 0, `Mod+Shift+A 应选块：${JSON.stringify(all)}`)
   await page.keyboard.press('Enter')
@@ -1743,13 +1743,13 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
   // ⑧ ⌘A 两次：第一次文本全选；已全选时再按升级为全选块
   await page.keyboard.press('Escape')
   await page.evaluate((id) => window.__demo.focusBlock(id, 0), ids.a)
-  await page.keyboard.press('Meta+a')
+  await page.keyboard.press(kbd('mod+a'))
   const textAll = await page.evaluate(() => ({
     count: window.__demo.snapshot().blockSelectionCount,
     sel: window.__demo.snapshot().selection,
   }))
   assert(textAll.count === 0, `第一次 ⌘A 应是文本全选：${JSON.stringify(textAll)}`)
-  await page.keyboard.press('Meta+a')
+  await page.keyboard.press(kbd('mod+a'))
   const blockAll = await state()
   assert(blockAll.count > 0, `第二次 ⌘A 应升级为块选区：${JSON.stringify(blockAll)}`)
 
@@ -2004,7 +2004,7 @@ await check('T34 反链 footer 可原地编辑；同一源块在正文与反链�
   assert(both.main.includes('Y'), `正文里的同一块应同步（共享 store）：${JSON.stringify(both)}`)
 
   // 全局 undo：焦点在 footer，Meta+Z 回滚 store，正文与 footer 一起复原
-  await page.keyboard.press('Meta+z')
+  await page.keyboard.press(kbd('mod+z'))
   await page.waitForTimeout(120)
   const undone = await page.evaluate((id) => ({
     main: window.__demo.blocks().find((b) => b.id === id)?.text ?? '',
@@ -2083,7 +2083,7 @@ await check('T41 冷启动直接打字后 ⌘Z：撤销只回滚文字，不把�
   const typed = await page.evaluate((id) => window.__demo.blocks().find((b) => b.id === id)?.text ?? '', before.id)
   assert(typed.startsWith('Z'), `冷启动后应能直接敲进第一行：${JSON.stringify(typed.slice(0, 8))}`)
 
-  await page.keyboard.press('Meta+z')
+  await page.keyboard.press(kbd('mod+z'))
   await page.waitForTimeout(150)
   const after = await page.evaluate(() => {
     const s = window.__demo.snapshot()
@@ -2771,7 +2771,7 @@ await check('T47 槽内连续输入不被整槽重画打断；⌘Z 在槽里回�
   }, id)
   assert(focusOk, '输入过程中焦点应仍在槽内那一行')
 
-  await page.keyboard.press('Meta+z')
+  await page.keyboard.press(kbd('mod+z'))
   await page.waitForTimeout(200)
   const afterUndo = await page.evaluate((id) => ({
     main: window.__demo.blocks().find((b) => b.id === id)?.text ?? '',
@@ -2879,7 +2879,7 @@ await check('T50 导航历史：⌘[ 后退 / ⌘] 前进跨页可走；新导�
   assert(atB.id === b.id, `当前应在 B：${JSON.stringify(atB)}`)
   assert(atB.nav.canGoBack && !atB.nav.canGoForward, `两次导航后应能后退、不能前进：${JSON.stringify(atB.nav)}`)
 
-  await page.keyboard.press('Meta+BracketLeft')
+  await page.keyboard.press(kbd('mod+BracketLeft'))
   await page.waitForTimeout(150)
   const backA = await page.evaluate(() => ({
     id: window.__demo.snapshot().activeId,
@@ -2890,7 +2890,7 @@ await check('T50 导航历史：⌘[ 后退 / ⌘] 前进跨页可走；新导�
   assert(backA.log.includes('core.history/back'), `应走 core.history/back 命令：${JSON.stringify(backA.log)}`)
 
   // 再退一步回到 boot 落点（今日日记）：当前对象应是**日记块自己**，不是它的子块
-  await page.keyboard.press('Meta+BracketLeft')
+  await page.keyboard.press(kbd('mod+BracketLeft'))
   await page.waitForTimeout(200)
   const backBoot = await page.evaluate(() => ({
     id: window.__demo.snapshot().activeId,
@@ -2900,8 +2900,8 @@ await check('T50 导航历史：⌘[ 后退 / ⌘] 前进跨页可走；新导�
   assert(backBoot.id === info.bootId, `第二次后退应回到冷启动落点：${JSON.stringify({ backBoot, boot: info.bootId })}`)
   assert(backBoot.date !== '' && backBoot.head === backBoot.id, `退回的应是今日日记本身（首行＝它自己）：${JSON.stringify(backBoot)}`)
 
-  await page.keyboard.press('Meta+BracketRight')
-  await page.keyboard.press('Meta+BracketRight')
+  await page.keyboard.press(kbd('mod+BracketRight'))
+  await page.keyboard.press(kbd('mod+BracketRight'))
   await page.waitForTimeout(150)
   const fwd = await page.evaluate(() => ({
     id: window.__demo.snapshot().activeId,
@@ -2911,7 +2911,7 @@ await check('T50 导航历史：⌘[ 后退 / ⌘] 前进跨页可走；新导�
   assert(!fwd.nav.canGoForward, `走到栈顶后不该还能前进：${JSON.stringify(fwd.nav)}`)
 
   // 后退之后开新页 ⇒ 前进栈作废（浏览器同口径）
-  await page.keyboard.press('Meta+BracketLeft')
+  await page.keyboard.press(kbd('mod+BracketLeft'))
   await page.waitForTimeout(120)
   await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), b.id)
   const afterNewNav = await page.evaluate(() => window.__demo.snapshot().nav)

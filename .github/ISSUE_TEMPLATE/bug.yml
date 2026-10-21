@@ -1,0 +1,54 @@
+name: 缺陷
+description: 行为与预期不符，且能量化
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先确认两件事，能省掉一轮来回：
+
+        - **刷新后还在吗？** 不在 ⇒ 多半是视图层；还在 ⇒ 多半落盘了。
+        - 涉及数据安全（库坏 / 丢内容 / 只读态）请在标题里写明，优先处理。
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 现象
+      description: 实际发生了什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现
+      description: 可执行的步骤——哪条命令、点了什么、敲了什么
+      placeholder: |
+        1. pnpm dev
+        2. 打开「设计」页
+        3. 在第二块中间按 Enter
+    validations:
+      required: true
+
+  - type: textarea
+    id: expect
+    attributes:
+      label: 预期
+    validations:
+      required: true
+
+  - type: input
+    id: head
+    attributes:
+      label: 版本
+      description: 输出贴进来
+      placeholder: git rev-parse --short HEAD ／ node -v ／ 系统版本
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: 日志
+      description: `.cache/` 下的冒烟日志或控制台输出
+      render: shell

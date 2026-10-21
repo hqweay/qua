@@ -1,0 +1,78 @@
+# 门禁 CI —— 让「协作者的 PR 有没有跑过 `pnpm gate`」这件事
+# 由机器回答，而不是靠贴结论。
+#
+# 为什么分两个 job：
+#   · 浏览器断言（typecheck / 单测 / build / arch / check / check:dock）
+#     在 Linux 上跑得起来也快 ⇒ 每次都跑。
+#   · Electron 断言（`check:electron`）验的是**真壳**（窗口、原生菜单、
+#     nativeTheme），那些行为本来就是平台相关的 ⇒ **只在 macOS 上跑**。
+#     放在 Linux 上跑需要 xvfb，而跑出来的是「Linux 上 Electron 的行为」，
+#     不是我们要发货的那个平台 —— 那是一条**假绿**。
+name: gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一个 PR 再推一次就丢掉上一次的：门禁跑的是最新那份代码
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # ⚠️ 强制冒烟走 `dist/`，别去连 5180：CI 上没有 dev server，
+  #    而连上别人那台 dev server 会测到**别人的代码**（真踩过）。
+  QUA_NO_DEV: '1'
+
+jobs:
+  web:
+    name: 门禁（浏览器断言）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 版本由 `.node-version` 钉住，与 `engines`、`packageManager` 同一口径
+          node-version-file: '.node-version'
+          cache: pnpm
+
+      - run: pnpm i --frozen-lockfile
+
+      - name: pnpm gate:web
+        run: pnpm gate:web
+
+  electron:
+    name: 门禁（真 Electron）
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
+          cache: pnpm
+
+      # Electron 二进制是 npm postinstall 下的；`pnpm-workspace.yaml` 里已经放行了
+      - run: pnpm i --frozen-lockfile
+
+      # ⚠️ 只跑 Electron 那一环（其余在 `web` job 里已经跑过）。
+      #    这里需要的 `dist/` 由 `check:electron` 的前置 `pnpm build` 产出。
+      - run: pnpm build && pnpm build:electron && pnpm check:electron
+
+      - name: Electron 冒烟日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-smoke-log
+          path: .cache/etest/electron-smoke.log
+          if-no-files-found: ignore
