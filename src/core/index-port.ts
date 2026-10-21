@@ -12,6 +12,7 @@
  */
 import type { Atom } from './annotations.ts'
 import { hasRole, type Block } from './model.ts'
+import { addressOf } from './alias.ts'
 import { journalDate, isJournal } from './journal.ts'
 import { normalizeTag, TAG_ROLE } from './tags.ts'
 import type { Change } from './storage/port.ts'
@@ -78,7 +79,8 @@ export function rebuild(forest: readonly Block[], atoms: readonly Atom[]): Index
     idx.blocks.set(b.id, b)
     idx.pageOf.set(b.id, rootId)
     if (hasRole(b, TAG_ROLE)) {
-      const name = normalizeTag(b.text)
+      // 名字＝**地址**（`_alias` 优先，否则正文），规范化与 `findByAlias` 同一处
+      const name = addressOf(b)
       // 同名标签以**先序第一个**为准（`ensureTag` 也是这个口径，两处必须一致）
       if (name !== '' && !idx.tags.has(name)) idx.tags.set(name, b.id)
     }

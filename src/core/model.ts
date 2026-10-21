@@ -36,7 +36,7 @@ export type Role = 'page' | 'journal' | 'backref' | 'favorites' | 'query' | 'tag
  * ⚠️ **`_` 前缀 ＝ 保留区**：用户与插件不得定义，core 定义且不随插件卸载消失。
  * 这里只列当前用到的。
  */
-export type SystemPropId = '_type' | '_icon' | '_date' | '_tags' | '_query' | '_queryResult'
+export type SystemPropId = '_type' | '_icon' | '_date' | '_tags' | '_alias' | '_query' | '_queryResult'
 
 export interface Block {
   id: string

@@ -20,20 +20,19 @@
  */
 import { uuidv7Hex } from './ids.ts'
 import { hasRole, type Block, type Role } from './model.ts'
+import { findByAlias, isAddressable, normalizeAlias } from './alias.ts'
 import type { Atom } from './annotations.ts'
 
 /** 标签块的角色：标签 ＝ 一个带 `tag` 角色的普通块（**任意块皆可当标签**，它只是指向边的另一端） */
 export const TAG_ROLE: Role = 'tag'
 
 /**
- * 标签名的规范化 —— **唯一定义点**。
+ * 标签名的规范化。
  *
- * 承 71.4 的边界：「标签名的大小写/空白/CJK 规范化只允许有**一处**定义」。
- * 以前 `hasTag` 里 `toLowerCase` 一处、渲染的正则里又一处，两处口径必然分叉。
+ * ⚠️ 定义在 `core/alias.ts`（页名与标签名共用同一个名字空间）；
+ *    这里保留导出只是为了调用方读得通 —— **不要另写一份 trim/lower**。
  */
-export function normalizeTag(name: string): string {
-  return name.trim().toLowerCase()
-}
+export const normalizeTag = normalizeAlias
 
 /** 造一个标签块（名字就是正文；图标走系统属性，70.2） */
 export function mkTagBlock(name: string): Block {
@@ -53,43 +52,42 @@ export function mkTagBlock(name: string): Block {
  *    查询条件与 `ensureTag` 共用它，口径不会分叉。
  */
 export function findTagByName(forest: readonly Block[], name: string): Block | undefined {
-  return findTag(forest, normalizeTag(name))
+  return findByAlias(forest, name, (b) => hasRole(b, TAG_ROLE))
 }
 
-/** 在森林里找一个标签块（先序；只认 `tag` 角色，按规范化后的名字比） */
-function findTag(forest: readonly Block[], want: string): Block | undefined {
-  const walk = (b: Block): Block | undefined => {
-    if (hasRole(b, TAG_ROLE) && normalizeTag(b.text) === want) return b
-    for (const c of b.children) {
-      const hit = walk(c)
-      if (hit) return hit
-    }
-    return undefined
-  }
-  for (const b of forest) {
-    const hit = walk(b)
-    if (hit) return hit
-  }
-  return undefined
+/** 在森林里找一个标签块（先序；只认 `tag` 角色，比较走地址规范化） */
+function findTag(forest: readonly Block[], name: string): Block | undefined {
+  return findByAlias(forest, name, (b) => hasRole(b, TAG_ROLE))
 }
 
 /**
  * **找到或创建**标签块（幂等，与 journal「一天一个」同一口径）。
  *
- * 返回 `created` 是因为「新建了一个标签」与「引用已有标签」在界面上是两件事
- * —— 后者不该给用户「我又建了一个」的错觉。
+ * 返回 `created` / `reused` 是因为三种情况在界面上是三件事：
+ *   · 引用已有标签；
+ *   · 新建了一个标签；
+ *   · **同名块已经存在（页 / 兼位块）⇒ 复用它，只给它加 `tag` 角色**。
+ *     这一种必须给用户**可见反馈**（否则他不知道自己刚把一个页变成了标签）。
  *
- * ⚠️ 只认 `tag` 角色的块：普通页块不因为同名就变成标签（角色不可省 —— 名字相同不等于身份相同）。
  * ⚠️ 空名字**不建块**，返回 `null`：没有名字的标签没有身份，建了就是个孤儿。
+ * ⚠️ 地址比较只走 `findByAlias`（规范化只有一处）：`# 设计 ` 与 `#设计` 是同一个标签。
  */
-export function ensureTag(forest: Block[], name: string): { block: Block | null; created: boolean } {
-  const want = normalizeTag(name)
-  if (want === '') return { block: null, created: false }
-  const found = findTag(forest, want)
-  if (found) return { block: found, created: false }
+export function ensureTag(
+  forest: Block[],
+  name: string,
+): { block: Block | null; created: boolean; reused: boolean } {
+  if (normalizeTag(name) === '') return { block: null, created: false, reused: false }
+  const found = findTag(forest, name)
+  if (found) return { block: found, created: false, reused: false }
+  // 同名块已存在（能当地址用、但还不是标签）⇒ 复用并加角色，不建第二个同名的块
+  const existing = findByAlias(forest, name, (b) => isAddressable(b) && !hasRole(b, TAG_ROLE))
+  if (existing) {
+    existing.roles = [...(existing.roles ?? []), TAG_ROLE]
+    return { block: existing, created: false, reused: true }
+  }
   const block = mkTagBlock(name.trim())
   forest.push(block)
-  return { block, created: true }
+  return { block, created: true, reused: false }
 }
 
 /** 库里现有的全部标签块（先序） */

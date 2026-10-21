@@ -355,6 +355,7 @@ export const MSG = {
   'ui.toast.atomsLost': '行内原子失效：{labels}（引用目标被删掉了）',
   'ui.toast.tagAdded': '已打标签 #{tag}',
   'ui.toast.tagCreated': '新建标签 #{tag} 并打上',
+  'ui.toast.tagReused': '这个块本来就是「{tag}」——已给它加上标签角色',
   'ui.toast.tagEmpty': '标签名是空的',
 
   /* ------------------------------------------------------ 演示数据的小文案（假数据） */

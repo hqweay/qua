@@ -21,6 +21,7 @@ import {
   flatten,
   FEED_INITIAL,
   hasRole,
+  renameBlock,
   isJournal,
   journalDate,
   journalFeedDays,
@@ -200,7 +201,7 @@ export function pageCommands(d: PageDeps): Pick<
         d.toast(t('ui.toast.journalReadonly'), 'warn')
         return
       }
-      p.text = title
+      renameBlock(p, title)
       if (p.id === d.activeId()) d.refreshTitle()
       d.refreshList()
       d.scheduleSave()
@@ -219,7 +220,7 @@ export function pageCommands(d: PageDeps): Pick<
      * ⚠️ 建了新标签要 `refreshList` ＋ `scheduleSave`：森林变了，且这是要落盘的内容。
      */
     insertTag: (tag) => {
-      const { block, created } = ensureTag(d.blocks(), tag)
+      const { block, created, reused } = ensureTag(d.blocks(), tag)
       if (!block) {
         d.toast(t('ui.toast.tagEmpty'), 'warn')
         return
@@ -228,6 +229,10 @@ export function pageCommands(d: PageDeps): Pick<
       if (created) {
         d.refreshList()
         d.toast(t('ui.toast.tagCreated', { tag: block.text }))
+      } else if (reused) {
+        // D10：同名块已存在 ⇒ 复用它并加 tag 角色。**必须让用户看见**，否则这是一次静默的模型改动
+        d.refreshList()
+        d.toast(t('ui.toast.tagReused', { tag: block.text }), 'info')
       } else {
         d.toast(t('ui.toast.tagAdded', { tag: block.text }))
       }

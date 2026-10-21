@@ -5,6 +5,7 @@
 
 import { uuidv7Hex } from './ids.ts'
 import { hasRole, mkBlock, type Block, type Doc, type Located } from './model.ts'
+import { renameBlock } from './alias.ts'
 export function locate(doc: Doc, id: string): Located | null {
   const walk = (list: Block[], parent: Block | null): Located | null => {
     for (let i = 0; i < list.length; i++) {
@@ -135,7 +136,7 @@ export function writeBackRoots(forest: Block[], roots: readonly Block[]): void {
   for (const root of roots) {
     const p = findInForest(forest, root.id)
     if (!p) continue
-    if (!hasRole(p, 'journal')) p.text = root.text
+    if (!hasRole(p, 'journal')) renameBlock(p, root.text)
     p.todo = root.todo
     p.collapsed = root.collapsed
     p.children = root.children

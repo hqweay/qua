@@ -17,6 +17,7 @@ import {
   edgeSourceIds,
   ensureTag,
   findTagByName,
+  hasRole,
   hasTagEdge,
   mkTagBlock,
   normalizeTag,
@@ -55,16 +56,18 @@ test('② 边在正文里 ⇒ 删掉那个原子，边随之消失（不留孤�
   assert.equal(tagMemberIds(todo.id, atoms).size, 0, '成员列表也要跟着空，不留悬空记录')
 })
 
-test('③ 只认 tag 角色：同名页块不会因为同名就变成标签', () => {
+test('③ 同名页块 ⇒ 复用它并加 tag 角色（D10：名字空间合并，同名必同一块）', () => {
   const forest: Block[] = [b('p', '设计', { roles: ['page'] })]
   const found = ensureTag(forest, '设计')
-  assert.equal(found.created, true, '页块不是标签 ⇒ 应当新建一个标签块')
-  assert.notEqual(found.block?.id, 'p')
-  assert.equal(forest.length, 2)
+  assert.equal(found.created, false, '已有同名块 ⇒ 不建第二个块')
+  assert.equal(found.reused, true, '这一种是「复用并加角色」，要给用户可见反馈')
+  assert.equal(found.block?.id, 'p')
+  assert.equal(forest.length, 1)
+  assert.ok(hasRole(found.block!, 'tag'), '复用后它真的成了标签')
   assert.deepEqual(
     allTags(forest).map((t) => t.id),
-    [found.block!.id],
-    'allTags 只列 tag 角色',
+    ['p'],
+    'allTags 按角色判定，不看名字',
   )
 })
 

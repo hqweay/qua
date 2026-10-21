@@ -5,6 +5,7 @@
  */
 export * from './ids.ts'
 export * from './model.ts'
+export * from './alias.ts'
 export * from './journal.ts'
 export * from './tree.ts'
 export * from './favorites.ts'

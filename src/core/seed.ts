@@ -8,7 +8,7 @@
  * `![[图.png]]`，由 `parseInline` 解析成**区间锚点与行内原子**——这正是 demo 要展示的模型形状
  * （锚点带 blockId、原子占 1 格），而不是把富文本塞进 DOM。
  */
-import { ATOM_PLACEHOLDER, hasRole, journalId, mkBlock, shiftISO, todayISO, uuidv7Hex, type Atom, type Block, type BlockProps, type Mark, type MarkType, type Role } from './index.ts'
+import { ATOM_PLACEHOLDER, findByAlias, journalId, mkBlock, shiftISO, todayISO, uuidv7Hex, type Atom, type Block, type BlockProps, type Mark, type MarkType, type Role } from './index.ts'
 import { DEFAULT_PREFS, WORKSPACE_VERSION, type PageBlock, type Workspace } from './workspace.ts'
 
 /* ------------------------------------------------------------- 迷你 DSL */
@@ -197,19 +197,19 @@ function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
 }
 
 /**
- * 把 `[[..]]` 解析到真实页面 id。
+ * 把 `[[..]]` 解析到真实地址（页与标签共用同一个名字空间）。
  *
  * ⚠️ 解析不到 ⇒ **不写 `target`**：「指不到东西」就是**没有目标**，
  *    不是「指向一个叫 `missing:xxx` 的实体」（那会让 `dangling` 变成一个能被引用的假目标）。
  *    显示名仍走 `atom.label`（fallback），`dangling` 由渲染层**现算**（`core/ref.ts`）。
- * ⚠️ 只有 `page` 角色才当引用目标：journal 的 text 是空的（日期在 `_date` 里），
- *    混进来会把 `[[ ]]` 解析到日记块上。
+ * ⚠️ 只有**能当地址**的块才被解析到（页 / 标签）：journal 的 text 是空的（日期在 `_date` 里），
+ *    混进来会把 `[[ ]]` 解析到日记块上；schema 的正文是字段名（允许重名），也不进地址空间。
+ * ⚠️ 比较走 `core/alias.ts` 的规范化（`[[ 设计 ]]` 与 `#设计` 是同一个块）。
  */
 function resolveRefs(pages: Block[], built: BuiltPage[]): void {
-  const byTitle = new Map(pages.filter((p) => hasRole(p, 'page')).map((p) => [p.text, p]))
   for (const bp of built) {
     for (const r of bp.refs) {
-      const target = byTitle.get(r.label)
+      const target = findByAlias(pages, r.label)
       const atom = bp.atoms.find((a) => a.id === r.atomId)!
       if (target) atom.target = { kind: 'page', id: target.id }
     }
