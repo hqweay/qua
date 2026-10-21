@@ -1206,9 +1206,22 @@ export class BlockEditor {
   remove(id: string): void {
     const loc = locate(this.doc, id)
     if (!loc) return
-    // 段根（N>1 时的页/天/查询记录）不从编辑器里删：它不是一个「内容块」，
-    // 删天/删页要走命令面（否则写回跳过它、库里还在，刷新又回来）。
-    if (loc.parent === null && (!this.allowRootRemove || this.doc.roots.length > 1)) return
+    /**
+     * **有角色的根块不许从编辑器删**（QB-001）。
+     *
+     * 为什么按角色而不是按「是不是根」判：正文的根既可能是
+     *   · 一个**有角色的容器**（页／日记／收藏／反链／查询记录）—— 它是视图的装载单位，
+     *     `doc.roots[0]` 就是森林里那块本身；splice 掉它只是让这个视图看不见，
+     *     库里那块还在 ⇒ 刷新就回来（用户看到「删了又复活」，比报错更糟）。删它要走命令面
+     *     （`core.page/delete` 那一路，带确认与落盘）。
+     *   · 也可能是一个**普通内容块**（zoom 进来的某一块）—— 它没有身份语义，
+     *     删掉它就是删掉这块内容，应当放行。
+     *
+     * ⚠️ `allowRootRemove: false` 是另一条更严的线：反链／查询列表的根是**别的页的块**，
+     *    在这里删源块不合适（那类删除走命令面），所以那一类实例整体关掉。
+     */
+    if (loc.parent === null && (loc.block.roles?.length ?? 0) > 0) return
+    if (loc.parent === null && !this.allowRootRemove) return
     const before = this.snap()
     const prevIds = this.ownerIds()
     const idx = flatten(this.doc).findIndex((b) => b.id === id)
@@ -1745,7 +1758,8 @@ export class BlockEditor {
   ctxKeys(): CtxKeys {
     const s = this.sel
     const id = s?.aBlock ?? null
-    const b = id ? locate(this.doc, id)?.block : undefined
+    const at = id ? locate(this.doc, id) : null
+    const b = at?.block
     return {
       focus: 'editor',
       editorTextFocus: document.activeElement === this.container || this.container.contains(document.activeElement),
@@ -1753,6 +1767,15 @@ export class BlockEditor {
       selectionCount: s && !(s.aBlock === s.hBlock && s.aOff === s.hOff) ? (s.aBlock === s.hBlock ? 1 : 2) : 0,
       blockFocused: Boolean(id),
       blockId: id ?? '',
+      /**
+       * 当前块是不是**视图的根**（`locate` 找不到父块）。
+       *
+       * 为什么需要它：根块不是一个「内容块」—— 删页／删天要走命令面
+       * （`core.page/delete`），从编辑器里 splice 掉它只会让视图看不见，
+       * 库里那块还在（刷新就回来，看起来像「删了又复活」）。
+       * ⇒ 菜单靠这个键把自己藏起来，而不是点了再静默失败。
+       */
+      blockIsRoot: at !== null && at.parent === null,
       blockSelection: this.blockSel !== null,
       blockSelectionCount: this.blockSel?.ids.length ?? 0,
       blockType: b?.todo ? 'todo' : 'paragraph',
