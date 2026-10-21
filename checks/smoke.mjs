@@ -1834,6 +1834,113 @@ await check('T55 载入假数据：落点是日记就装日记流（今日在顶
   return `载入 seed：${after.heads.length} 段（「${after.heads[0].date}」…）；光标在首段第一个可编辑行`
 })
 
+/**
+ * **根块不该能从编辑器里删掉**。
+ *
+ * 为什么值得一条断言：根是**视图的装载单位**（页／天／查询记录），
+ * `doc.roots[0]` 就是森林里那块本身。从 `doc.roots` 里 splice 掉它，
+ * 库里那块还在 ⇒ 刷新就回来。用户看到的是「删了又复活」，
+ * 而且**没有报错**——这类静默不一致只能靠断言钉住。
+ */
+await check('T56 聚焦根块时块菜单**没有**「删除块」，命令被直接调用也拒绝（不静默丢块）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__demo.quiet(true))
+  await openFirstPage(page)
+
+  // ① 聚焦**根块**（页自己）⇒ 上下文键应报「是根」
+  const rootKeys = await page.evaluate(() => {
+    const rootId = window.__demo.blocks()[0].id
+    window.__demo.focusBlock(rootId, 0)
+    const k = window.__demo.ctxKeys()
+    return { blockIsRoot: Boolean(k.blockIsRoot), blockFocused: Boolean(k.blockFocused) }
+  })
+  assert(rootKeys.blockFocused === true, `前置：根块应处于聚焦态：${JSON.stringify(rootKeys)}`)
+  assert(rootKeys.blockIsRoot === true, `根块的 blockIsRoot 应为 true：${JSON.stringify(rootKeys)}`)
+
+  // ② 菜单里不该出现删除项
+  const items = await page.evaluate(() => {
+    const ed = window.__demo.__editor
+    const rootId = window.__demo.blocks()[0].id
+    ed.events.blockMenu?.(rootId, document.querySelector(`.blk[data-block-id="${rootId}"]`).getBoundingClientRect())
+    return [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? '')
+  })
+  assert(
+    !items.some((x) => x.includes('删除块') || x.includes('删除选中的块')),
+    `根块菜单不该有删除项：${JSON.stringify(items)}`,
+  )
+
+  // ③ 兜底：就算绕开 `when` 直接 invoke，也不许删（块数与活动 id 都不变）
+  const before = await page.evaluate(() => ({
+    total: window.__demo.snapshot().totalBlocks,
+    activeId: window.__demo.snapshot().activeId,
+  }))
+  await page.evaluate(() => window.__demo.invoke('core.editor/delete-block'))
+  await page.waitForTimeout(150)
+  const after = await page.evaluate(() => ({
+    total: window.__demo.snapshot().totalBlocks,
+    activeId: window.__demo.snapshot().activeId,
+  }))
+  assert(after.total === before.total, `删根块被拒 ⇒ 块数不该变：${JSON.stringify({ before, after })}`)
+  assert(after.activeId === before.activeId, `落点不该被改：${JSON.stringify({ before, after })}`)
+
+  await ctx.close()
+  return `根块：blockIsRoot=true、菜单无删除项、直接 invoke 也被拒（块数不变 ${before.total}）`
+})
+
+/**
+ * **日记流里 zoom 之后按「后退」，要回到 feed，而不是落到孤立的一天**。
+ *
+ * 历史栈以「块 id」为粒度，但日记流的「当前对象」不是一块而是**一棵 feed 树**
+ * （由 activeId 的角色 + 今天这个入口推导出来的）。回放若裸走 zoom 路径，
+ * 就只装单块 ⇒ feed 消失（**QB-002**）。
+ *
+ * 修法是让装载规则归一：`rootsForTarget` 是打开页／聚焦／回放共用的唯一入口。
+ */
+await check('T57 日记流里 zoom 进某块再「后退」⇒ 回到**日记流**（不是孤立的一天）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__demo.loadState('seed'))
+  await page.waitForTimeout(260)
+
+  const feedAtStart = await page.evaluate(() => ({
+    roots: [...document.querySelectorAll('#editor > .blk')].filter((el) => el.dataset.depth === '0').length,
+    journalView: window.__demo.ctxKeys().journalView,
+  }))
+  assert(feedAtStart.journalView === true, `前置：落点应是日记：${JSON.stringify(feedAtStart)}`)
+  assert(feedAtStart.roots >= 2, `前置：应是日记流（多段）：${JSON.stringify(feedAtStart)}`)
+
+  // zoom 进一个子块 ⇒ 视图只剩它自己这一棵
+  const zoomed = await page.evaluate(() => {
+    const bs = window.__demo.blocks()
+    const kid = bs.find((b) => !(b.roles?.length) && b.text.length > 2)
+    window.__demo.invoke('core.block/focus-block', { blockId: kid.id })
+    return { id: kid.id, depth: kid.children.length }
+  })
+  await page.waitForTimeout(200)
+  const afterZoom = await page.evaluate(() => ({
+    roots: [...document.querySelectorAll('#editor > .blk')].filter((el) => el.dataset.depth === '0').length,
+  }))
+  assert(afterZoom.roots === 1, `zoom 后视图应只剩一块：${JSON.stringify(afterZoom)}`)
+
+  // 后退 ⇒ 应回到 feed（多段），而不是一个孤立的天
+  await page.evaluate(() => window.__demo.invoke('core.history/back'))
+  await page.waitForTimeout(240)
+  const back = await page.evaluate(() => ({
+    roots: [...document.querySelectorAll('#editor > .blk')].filter((el) => el.dataset.depth === '0').length,
+    journalView: window.__demo.ctxKeys().journalView,
+    journalDate: window.__demo.ctxKeys().journalDate,
+  }))
+  assert(back.journalView === true, `后退后落点应是日记：${JSON.stringify(back)}`)
+  assert(
+    back.roots >= 2,
+    `后退后应是**日记流**（今日在顶＋更早存在的天），实际只有 ${back.roots} 段：${JSON.stringify(back)}`,
+  )
+  assert(back.journalDate.length === 10, `后退后应看得出是哪一天：${JSON.stringify(back)}`)
+
+  await ctx.close()
+  return `日记流 ${feedAtStart.roots} 段 → zoom（1 段）→ 后退 ⇒ 仍是 feed（${back.roots} 段，${back.journalDate}）`
+})
+
 await check('T27 光标行隐藏占位、journal 日期不可聚焦、折叠图标贴自己的块标', async () => {
   const { ctx, page } = await freshPage(browser, base)
 

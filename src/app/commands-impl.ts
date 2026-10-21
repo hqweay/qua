@@ -94,6 +94,26 @@ export function rootsFor(block: Block): Block[] {
 export function rootsForMany(blocks: readonly Block[]): Block[] {
   return blocks.slice()
 }
+
+/**
+ * **打开一个落点时该装哪些根** —— 打开页／聚焦块／历史回放**共用这一条**。
+ *
+ * 判据：落点是**今天的 journal** ⇒ 装**日记流**（今日在顶 ＋ 更早存在的天）；
+ *       否则就是「这块自己 ＋ 它的子树」。
+ *
+ * 为什么非得抽出来：这条规则**曾经只在「打开页」里有**。历史回放走的是另一条路
+ * （`historyGo` → `zoomTo` → `open()`），那里只 `rootsFor` 装单块 ⇒ 在日记流里
+ * zoom 进某一天、再按「后退」，回到的不是 feed 而是一个孤立的天（**QB-002**）。
+ * 两条路各写一份，改了一边就会漏另一边 —— 这类分叉必须收成一处。
+ *
+ * ⚠️ **今天是一个「入口」，不是一个普通的块**：左槽里的「Daily note」、
+ * 冷启动、「回今日」，指的都是同一件事。
+ * ⚠️ 历史里的**其它**日记天仍走单日（左槽只有「今天」这一个入口）。
+ */
+export function rootsForTarget(target: Block, blocks: readonly Block[]): Block[] {
+  const feed = isJournal(target) && journalDate(target) === todayISO() ? journalFeedDays(blocks, todayISO(), FEED_INITIAL) : null
+  return feed ? rootsForMany(feed) : rootsFor(target)
+}
 import { demoState } from '../core/seed.ts'
 import { DEFAULT_PREFS, type ThemeMode, type Workspace } from '../core/workspace.ts'
 import { t, type MsgId } from '../core/msg.ts'
@@ -193,21 +213,13 @@ export function pageCommands(d: PageDeps): Pick<
        * 只装这一天会把日记流收成一段 —— 用户点的明明是「Daily note」这个入口。
        * ⚠️ 历史里的其它日记天仍走单日（左槽只有「今天」这一个入口）。
        */
-      if (isJournal(p) && journalDate(p) === todayISO()) {
-        const today = todayISO()
-        const days = journalFeedDays(d.blocks(), today, FEED_INITIAL)
-        for (const day of days) ensureFirstBlock(day.children)
-        d.setActiveId(journalId(today))
-        d.loadPage(rootsForMany(days), d.marks(), d.atoms())
-        d.refreshList()
-        d.refreshTitle()
-        d.saveNow()
-        d.focusFirstBlock()
-        return
-      }
-      d.setActiveId(id)
-      // 同一个归一：任何容器（页或 journal）在**被打开**时都保证有落光标的地方
-      d.loadPage(rootsFor(p), d.marks(), d.atoms())
+      /**
+       * ⚠️ 落到**今天** ⇒ 当前对象是**今天这一块**（不是流的第一段）。
+       *    库里若留着更早的未打开的一天（它不是今天），「回今日」却停在昨天，落点很怪。
+       *    装载顺序由 `rootsForTarget` 负责（今日在顶 ＋ 存在的更早的天）。
+       */
+      d.setActiveId(isJournal(p) && journalDate(p) === todayISO() ? journalId(todayISO()) : id)
+      d.loadPage(rootsForTarget(p, d.blocks()), d.marks(), d.atoms())
       d.refreshList()
       d.refreshTitle()
       d.saveNow()
@@ -319,7 +331,7 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
     return id
   }
 
-  /** 打开一个块（与 `openPage` 同一套动作；`openPage` 不接受 journal 之外的语义） */
+  /** 打开一个块（与 `openPage` **同一条**装载规则：落到今天 ⇒ 日记流） */
   const openBlock = (id: string): void => {
     d.flush()
     const b = d.blocks().find((x) => x.id === id)
@@ -332,7 +344,7 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
      *    （按「流的第一段」去设在库里留着更早的未打开天时会把人送到那一天）。
      */
     d.setActiveId(id)
-    d.loadPage(b ? rootsFor(b) : [], d.marks(), d.atoms())
+    d.loadPage(b ? rootsForTarget(b, d.blocks()) : [], d.marks(), d.atoms())
     d.refreshList()
     d.refreshTitle()
     d.saveNow()
@@ -399,7 +411,12 @@ export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut'> {
     d.flush()
     d.setActiveId(id)
     const b = findInForest(d.blocks(), id)
-    d.loadPage(b ? rootsFor(b) : [], d.marks(), d.atoms())
+    /**
+     * ⚠️ 装载规则与「打开页」**同一条**（`rootsForTarget`）：
+     *    落到今天 ⇒ 装日记流；否则装这一块自己。
+     *    少了这层，历史回放会把「日记流」收成一个孤立的天（**QB-002**）。
+     */
+    d.loadPage(b ? rootsForTarget(b, d.blocks()) : [], d.marks(), d.atoms())
     d.refreshList()
     d.refreshTitle()
     d.saveNow()
