@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { allPropDefs, allTags, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, favoritesContainers, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, parentTags, prop, propKindOf, propLabel, resolveRef, tagMemberIds, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { addRole, aliasOf, allPropDefs, allTags, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, favoritesContainers, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, resolveRef, tagMemberIds, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
@@ -201,6 +201,9 @@ function keyHints(): Map<string, string> {
 
 /** 编辑器上下文键 ＋ 界面上下文键（同一张 when 用的键空间，：开放、可扩展） */
 function uiCtx(): CtxKeys {
+  const focusId = ed.sel?.aBlock ?? ed.caretBlock()
+  const focusBlock = focusId ? findInForest(ws.blocks, focusId) : undefined
+  const focusName = focusBlock ? aliasOf(focusBlock).trim() : ''
   const ctx: CtxKeys = {
     ...ed.ctxKeys(),
     blockSelection: ed.hasBlockSelection(),
@@ -209,8 +212,12 @@ function uiCtx(): CtxKeys {
     drawerOpen: layers.drawerOpen(),
     popoverOpen: layers.popoverOpen(),
     // ⚠️ 「页数」只数 `page` 角色（journal 也是一块，但它不是页 —— ）
-    pageCount: ws.blocks.filter((b) => hasRole(b, 'page')).length,
+    pageCount: flatten({ roots: ws.blocks }).filter((b) => hasRole(b, 'page')).length,
     pageTitleEmpty: pageTitle(activeBlock()).trim() === '',
+    // 块菜单里的角色开关（只看**当前聚焦块**；顺序无语义，只有「有没有」）
+    blockHasPageRole: hasRole(focusBlock, 'page'),
+    blockHasTagRole: hasRole(focusBlock, 'tag'),
+    blockHasName: focusName !== '',
     // 日记：`journalView` 是**真上下文键**（不是 if），`journalDate` 供前后翻日用
     journalView: hasRole(activeBlock(), 'journal'),
     journalDate: hasRole(activeBlock(), 'journal') ? (prop<string>(activeBlock(), '_date') ?? '') : '',
@@ -775,6 +782,76 @@ function writeProps(blockId: string | undefined, mutate: () => void): void {
   scheduleBadge()
 }
 
+/** 显示名：正文（空则短 id） */
+function blockName(b: Block): string {
+  const s = b.text.trim()
+  return s === '' ? shortId(b.id) : s
+}
+
+/**
+ * 加一个角色（页 / 标签）。
+ *
+ * 判据：角色是**加/减一个机制位**，不是「在两种东西之间转换」——所以这里只 append，
+ * 不抹任何数据。页与标签可兼位：同一个块可以既是页、又能被 `#` 指向。
+ */
+function addBlockRole(blockId: string, role: 'page' | 'tag'): boolean {
+  const b = findInForest(ws.blocks, blockId)
+  if (!b || hasRole(b, role)) return false
+  // 标签靠地址被找到 ⇒ 没有名字就没有身份（页允许未命名）
+  if (role === 'tag' && aliasOf(b).trim() === '') {
+    app.toast(t('ui.toast.roleNeedName'), 'warn')
+    return false
+  }
+  writeProps(blockId, () => addRole(b, role))
+  app.toast(t(role === 'page' ? 'ui.toast.pageRoleAdded' : 'ui.toast.tagRoleAdded', { name: blockName(b) }))
+  return true
+}
+
+/**
+ * 减一个角色。
+ *
+ * 摘 `tag` 时**提示不阻止**（与删标签同一套形状）：成员与声明会失效，但**值一个字节不动**
+ * （落回「本块自有」），打回 tag 角色后声明与成员关系自动恢复。
+ */
+function removeBlockRole(blockId: string, role: 'page' | 'tag'): boolean {
+  const b = findInForest(ws.blocks, blockId)
+  if (!b || !hasRole(b, role)) return false
+  const drop = (): void => {
+    writeProps(blockId, () => removeRole(b, role))
+    app.toast(
+      t(role === 'page' ? 'ui.toast.pageRoleRemoved' : 'ui.toast.tagRoleRemoved', { name: blockName(b) }),
+      'info',
+    )
+  }
+  if (role === 'tag') {
+    const members = tagMemberIds(b.id, blocks.atoms).size
+    const declarations = declaredFieldIds(b).length
+    if (members > 0 || declarations > 0) {
+      layers.openMenu({
+        title: t('ui.role.removeTagTitle', { tag: blockName(b), members }),
+        rows: [
+          {
+            id: 'role/remove',
+            label: t('ui.role.removeTagContinue'),
+            hint: declarations > 0 ? t('ui.role.declarations', { count: declarations }) : '',
+            group: 'role/1',
+          },
+          { id: 'role/cancel', label: t('ui.role.cancel'), group: 'role/2' },
+        ],
+        anchor: ed.caretRect(),
+        searchable: false,
+        focusSearch: false,
+        onPick: (row) => {
+          if (row.id === 'role/remove') drop()
+        },
+      })
+      return true
+    }
+  }
+  drop()
+  return true
+}
+
 /** 同一标签在本次运行期间已经答过「保留」⇒ 不再追问（避免提示疲劳） */
 const cleanupAlwaysKeep = new Set<string>()
 
@@ -888,32 +965,66 @@ const app: App = {
     const tags = allTags(ws.blocks)
       .slice()
       .sort((a, b) => a.text.localeCompare(b.text))
-    if (tags.length === 0) {
-      app.toast(t('ui.toast.tagEmpty'), 'warn')
-      return
+    let query = ''
+    /**
+     * 列表随输入重建：没有完全同名的标签时，第一行是**新建**。
+     * 名字命中一个已有页（还没有 tag 角色）时，文案会说明「复用它」——
+     * 这就是「让一个页兼作标签」的入口（同名必同一块）。
+     */
+    const buildRows = (): Row[] => {
+      const q = query.trim()
+      const want = normalizeAlias(q)
+      const rows: Row[] = tags
+        .filter((tag) => want === '' || normalizeAlias(tag.text).includes(want))
+        .map((tag) => {
+          const parents = parentTags(tag, ws.blocks)
+          return {
+            id: `tagpick/${tag.id}`,
+            label: `#${tag.text}`,
+            hint:
+              parents.length > 0
+                ? t('ui.tagPicker.hierarchy', { parents: parents.map((p) => `#${p.text}`).join('、') })
+                : '',
+            icon: 'lucide:hash',
+            group: 'tagpick/1',
+          }
+        })
+      if (q !== '' && !tags.some((tag) => normalizeAlias(tag.text) === want)) {
+        const page = findByAlias(ws.blocks, q, (b) => hasRole(b, 'page') && !hasRole(b, 'tag'))
+        rows.unshift({
+          id: 'tagpick/new',
+          label: page ? t('ui.tagPicker.reusePage', { name: q }) : t('ui.tagPicker.create', { name: q }),
+          hint: page ? t('ui.tagPicker.reuseHint') : '',
+          icon: 'lucide:hash',
+          group: 'tagpick/0',
+        })
+      }
+      return rows
     }
     layers.openMenu({
-      rows: tags.map((tag) => {
-        const parents = parentTags(tag, ws.blocks)
-        return {
-          id: `tagpick/${tag.id}`,
-          label: `#${tag.text}`,
-          hint: parents.length > 0 ? t('ui.tagPicker.hierarchy', { parents: parents.map((p) => `#${p.text}`).join('、') }) : '',
-          icon: 'lucide:hash',
-          group: 'tagpick/1',
-        }
-      }),
+      rows: buildRows(),
       anchor: ed.caretRect(),
       title: t('ui.tagPicker.title'),
       searchable: true,
       focusSearch: true,
-      emptyText: t('ui.toast.tagEmpty'),
+      emptyText: t('ui.tagPicker.typeToCreate'),
+      onQuery: (q) => {
+        query = q
+        layers.setRows(buildRows())
+      },
       onPick: (row) => {
+        if (row.id === 'tagpick/new') {
+          app.insertTag(query.trim())
+          return
+        }
         const tag = tags.find((x) => `tagpick/${x.id}` === row.id)
         if (tag) void registry.invoke('core.editor/insert-tag', { tag: tag.text }, 'menu', uiCtx())
       },
     })
   },
+
+  addBlockRole: (blockId, role) => addBlockRole(blockId, role),
+  removeBlockRole: (blockId, role) => removeBlockRole(blockId, role),
 
   // 导航历史（中心槽走到哪）；与 undo/redo 的模型快照栈无关
   historyBack: () => historyGo('back'),
@@ -1188,6 +1299,7 @@ const tagPanel = new TagPanel(
   {
     root: chrome.tagPanelEl,
     title: chrome.tagPanelTitleEl,
+    pageToggle: chrome.tagPanelPageEl,
     relations: chrome.tagPanelRelationsEl,
     membersTitle: chrome.tagPanelMembersTitleEl,
     membersCount: chrome.tagPanelMembersCountEl,
@@ -1205,6 +1317,12 @@ const tagPanel = new TagPanel(
     dangling: (t) => danglingParentIds(t, ws.blocks),
     children: (t) => childTags(t, ws.blocks),
     members: (t) => memberBlocks(t.id, ws.blocks, blocks.atoms),
+    isPage: (t) => hasRole(t, 'page'),
+    togglePage: (tagId) => {
+      const b = findInForest(ws.blocks, tagId)
+      if (!b) return
+      void registry.invoke(hasRole(b, 'page') ? 'core.block/unpage' : 'core.block/as-page', { blockId: tagId }, 'tagpanel')
+    },
     shortId: (id) => shortId(id),
     addParent: (tagId, name) => {
       const parent = findByAlias(ws.blocks, name, (b) => hasRole(b, 'tag'))
@@ -1534,7 +1652,7 @@ const api = {
       // 导航历史断言要认「当前对象」本身（页名可能重复/为空）
       activeId: ws.activeId,
       // ⚠️ 「页数」＝ `page` 角色的块数（journal 不算页）；顶层块总数另给 `topBlocks`
-      pageCount: ws.blocks.filter((b) => hasRole(b, 'page')).length,
+      pageCount: flatten({ roots: ws.blocks }).filter((b) => hasRole(b, 'page')).length,
       topBlocks: ws.blocks.length,
       totalBlocks: flatten({ roots: ws.blocks }).length,
       journalDate: isJournal(activeBlock()) ? journalDate(activeBlock()) : '',

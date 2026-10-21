@@ -24,6 +24,9 @@ export interface TagPanelDeps {
   dangling: (tag: Block) => string[]
   children: (tag: Block) => Block[]
   members: (tag: Block) => Block[]
+  /** 这个标签是否**同时作为页**（页角色只决定是否进页列表） */
+  isPage: (tag: Block) => boolean
+  togglePage: (tagId: string) => void
   shortId: (id: string) => string
   /** 加一条归属（按名字找父标签；找不到就提示） */
   addParent: (tagId: string, name: string) => void
@@ -42,6 +45,7 @@ export interface TagPanelDeps {
 export interface TagPanelEls {
   root: HTMLElement
   title: HTMLElement
+  pageToggle: HTMLButtonElement
   relations: HTMLElement
   membersTitle: HTMLElement
   membersCount: HTMLElement
@@ -59,6 +63,10 @@ export class TagPanel {
     this.els = els
     this.deps = deps
     this.els.membersTitle.textContent = t('ui.tagpanel.members')
+    this.els.pageToggle.addEventListener('click', () => {
+      const tag = this.deps.tag()
+      if (tag) this.deps.togglePage(tag.id)
+    })
     this.els.membersEmpty.textContent = t('ui.tagpanel.emptyMembers')
     this.els.membersEditor.addEventListener('focusin', () => this.deps.onFocus())
     this.editor = new BlockEditor({
@@ -97,6 +105,7 @@ export class TagPanel {
     }
     this.els.root.hidden = false
     this.els.title.textContent = `#${tag.text.trim() === '' ? this.deps.shortId(tag.id) : tag.text}`
+    this.els.pageToggle.textContent = this.deps.isPage(tag) ? t('ui.tagpanel.unPage') : t('ui.tagpanel.asPage')
     this.renderRelations(tag)
     this.renderMembers(tag)
   }

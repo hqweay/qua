@@ -220,6 +220,24 @@ export const HANDLERS: Record<string, Handler> = {
     return true
   },
 
+  /* ---- 角色 ---- */
+  'core.block/as-page': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    return id ? app.addBlockRole(id, 'page') : false
+  },
+  'core.block/unpage': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    return id ? app.removeBlockRole(id, 'page') : false
+  },
+  'core.block/as-tag': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    return id ? app.addBlockRole(id, 'tag') : false
+  },
+  'core.block/untag': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    return id ? app.removeBlockRole(id, 'tag') : false
+  },
+
   /* ---- 标签层级 ---- */
   'core.tags/add-parent': (a, app) => {
     const childId = S(a.childId)

@@ -107,6 +107,9 @@ export interface App {
   pruneTagParents(childId: string): void
   /** 打开标签选择器（显示层级；选中＝在当前块插一条 tag 边） */
   showTagPicker(): void
+  /* 角色：加/减一个机制位（非破坏性；页/标签可兼位） */
+  addBlockRole(blockId: string, role: 'page' | 'tag'): boolean
+  removeBlockRole(blockId: string, role: 'page' | 'tag'): boolean
   /**
    * 删一个行内原子（引用 / 标签）。
    *

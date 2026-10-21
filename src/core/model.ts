@@ -87,6 +87,27 @@ export function hasRole(b: Block | undefined, role: Role): boolean {
 }
 
 /**
+ * 加一个角色（幂等；**追加位置不承载语义**）。
+ *
+ * 判据：角色是「加/减一个机制位」，不是「在两种东西之间转换」——
+ * 所以没有破坏性的「转角色」操作（那会顺手抹掉声明、断层级、改写别人的正文）。
+ */
+export function addRole(b: Block, role: Role): boolean {
+  if (hasRole(b, role)) return false
+  b.roles = [...(b.roles ?? []), role]
+  return true
+}
+
+/** 减一个角色（幂等；只动这一个角色，不碰别的角色与数据） */
+export function removeRole(b: Block, role: Role): boolean {
+  if (!hasRole(b, role)) return false
+  const next = (b.roles ?? []).filter((r) => r !== role)
+  if (next.length === 0) delete b.roles
+  else b.roles = next
+  return true
+}
+
+/**
  * **块类型**：决定「长什么样」（判据：改外观 → 类型；只换机制位 → 角色）。
  *
  * 首期只有默认类型 `outline`：块是大纲里的一行（图标 ＋ 正文/名字）。

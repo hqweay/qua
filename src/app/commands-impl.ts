@@ -48,6 +48,7 @@ import {
   setValue,
   undeclareField,
   pruneFavorites,
+  removeBlock,
   removeFavorite,
   shiftISO,
   todayISO,
@@ -157,14 +158,16 @@ export function pageCommands(d: PageDeps): Pick<
   | 'insertTag'
 > {
   const count = (p: Block): number => flatten({ roots: p.children }).length
+  /**
+   * 「页」＝任何带 `page` 角色的块（**不要求顶层**）：角色是机制位，不是容器位置。
+   * journal 也是一块，但它不是页（「一天一个」）⇒ 混进来会让页数/上一页下一页说不清。
+   */
+  const pages = (): Block[] => flatten({ roots: d.blocks() }).filter((p) => hasRole(p, 'page'))
 
   return {
     // ⚠️ **只列 `page` 角色**：journal 也是一块，但它不是「页」的不变量是「一天一个」），
     //    混进来会让「页数」「下一页」这类语义变成说不清的数。
-    listPages: () =>
-      d.blocks()
-        .filter((p) => hasRole(p, 'page'))
-        .map((p) => ({ id: p.id, title: d.pageTitle(p), icon: d.pageIcon(p), blocks: count(p) })),
+    listPages: () => pages().map((p) => ({ id: p.id, title: d.pageTitle(p), icon: d.pageIcon(p), blocks: count(p) })),
     activePageId: () => d.activeId(),
 
     newPage: () => {
@@ -180,7 +183,8 @@ export function pageCommands(d: PageDeps): Pick<
     },
 
     openPage: (id) => {
-      const p = d.blocks().find((x) => x.id === id)
+      // 页可以嵌在别的块下面（角色不要求顶层）⇒ 整片森林里找，不只看顶层
+      const p = findInForest(d.blocks(), id)
       if (!p) return
       d.flush()
       /**
@@ -210,17 +214,17 @@ export function pageCommands(d: PageDeps): Pick<
     },
 
     deletePage: (id) => {
-      const all = d.blocks()
+      const before = pages()
       // 「至少留一页」只数**页**（journal 不是页，删掉它不违反这条）
-      if (all.filter((p) => hasRole(p, 'page')).length <= 1) {
+      if (before.length <= 1) {
         d.toast(t('ui.toast.keepOnePage'), 'warn')
         return
       }
-      const i = all.findIndex((p) => p.id === id)
+      const i = before.findIndex((p) => p.id === id)
       if (i < 0) return
-      all.splice(i, 1)
+      removeBlock({ roots: d.blocks() }, id)
       // 落点必须是**页**（删的可能是 journal，邻位也可能是 journal）
-      const rest = all.filter((p) => hasRole(p, 'page'))
+      const rest = pages()
       const p = rest[Math.min(i, rest.length - 1)] ?? rest[0]
       if (p) {
         d.setActiveId(p.id)
@@ -233,7 +237,7 @@ export function pageCommands(d: PageDeps): Pick<
     },
 
     renamePage: (id, title) => {
-      const p = d.blocks().find((x) => x.id === id)
+      const p = findInForest(d.blocks(), id)
       if (!p) return
       // ：journal 的「标题」是日期的只读投影（来自 `_date`），改不了
       if (isJournal(p)) {

@@ -89,6 +89,12 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.block/focus-block', title: t('cmd.block.focus-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' } }, keywords: ['zoom', 'focus', t('menu.kw.zoom')] },
   { name: 'core.block/zoom-out', title: t('cmd.block.zoom-out'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['zoom', 'out', 'back'] },
 
+  /* ---- 角色（加/减一个机制位，不是破坏性转换） ---- */
+  { name: 'core.block/as-page', title: t('cmd.block.as-page'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.page'), args: { blockId: { type: 'string' } }, keywords: ['page', 'role'] },
+  { name: 'core.block/unpage', title: t('cmd.block.unpage'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.page'), args: { blockId: { type: 'string' } }, keywords: ['page', 'role', 'remove'] },
+  { name: 'core.block/as-tag', title: t('cmd.block.as-tag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'role'] },
+  { name: 'core.block/untag', title: t('cmd.block.untag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'role', 'remove'] },
+
   /* ---- 收藏容器块（收藏 ＝ 命名容器块 ＋ 一列块引用） ---- */
   { name: 'core.favorites/add', title: t('cmd.favorites.add'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, containerId: { type: 'string' } }, keywords: ['favorite', 'pin', 'bookmark', t('menu.kw.favorite')] },
   { name: 'core.favorites/remove', title: t('cmd.favorites.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, containerId: { type: 'string' } }, keywords: ['favorite', 'remove'] },

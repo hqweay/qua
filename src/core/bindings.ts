@@ -107,6 +107,11 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/outdent-block', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 40, layer: 'core' },
   { command: 'core.editor/toggle-todo', kind: 'menu', when: 'blockFocused', group: 'block/3-kind', order: 10, layer: 'core' },
   { command: 'core.editor/toggle-collapse', kind: 'menu', when: 'blockFocused && blockHasChildren', group: 'block/3-kind', order: 20, layer: 'core', label: t('menu.label.toggleCollapse') },
+  // 角色：加/减一个机制位（页/标签可兼位；顺序无语义）
+  { command: 'core.block/as-page', kind: 'menu', when: 'blockFocused && !blockHasPageRole', group: 'block/3-role', order: 10, layer: 'core' },
+  { command: 'core.block/unpage', kind: 'menu', when: 'blockFocused && blockHasPageRole', group: 'block/3-role', order: 11, layer: 'core' },
+  { command: 'core.block/as-tag', kind: 'menu', when: 'blockFocused && !blockHasTagRole && blockHasName', group: 'block/3-role', order: 20, layer: 'core' },
+  { command: 'core.block/untag', kind: 'menu', when: 'blockFocused && blockHasTagRole', group: 'block/3-role', order: 21, layer: 'core' },
   // zoom：进子树的入口挂在块菜单。**叶子块也给**（修订：
   // 块标左键＝聚焦是一贯行为：若叶子不给，点击结果会时 zoom 时不 zoom）
   { command: 'core.block/focus-block', kind: 'menu', when: 'blockFocused', group: 'block/3-kind', order: 30, layer: 'core', keywords: ['zoom', t('menu.kw.zoom')] },

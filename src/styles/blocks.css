@@ -451,8 +451,22 @@
   font-weight: 600;
   color: var(--ui-text);
 }
-.tagpanel-count {
+.tagpanel-page {
   margin-left: auto;
+  background: none;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  padding: 0 var(--ui-gap-2);
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.tagpanel-page:hover {
+  color: var(--ui-text);
+  border-color: var(--ui-border);
+}
+.tagpanel-count {
   color: var(--ui-text-tertiary);
 }
 .tagpanel-relations {
