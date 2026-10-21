@@ -218,6 +218,12 @@ function createWindow(): BrowserWindow {
   const st = readState()
 
   const w = new BrowserWindow({
+    /**
+     * ⚠️ **`width/height` 是内容区尺寸，而 `getNormalBounds()` 返回整窗尺寸**（含标题栏）。
+     *    落盘用的是后者、建窗给的是前者 ⇒ 每重启一次高度就少一条标题栏
+     *    （macOS 上是 23px，看起来像「窗口记不住大小」）。
+     * ⇒ 建完窗立刻用 `setBounds` 校正成**整窗**口径，读与写从此说的是同一件事。
+     */
     x: st.x,
     y: st.y,
     width: st.width,
@@ -238,6 +244,21 @@ function createWindow(): BrowserWindow {
       webSecurity: true,
       spellcheck: true,
     },
+  })
+
+  /**
+   * **把尺寸校正成整窗口径**（与 `getNormalBounds()` 同一套坐标）。
+   *
+   * 构造参数里的 `width/height` 是**内容区**，而 `getNormalBounds()` 是**整窗** ——
+   * 不校正的话就是「写下去 700、读回来 677」，每重启少一条标题栏（macOS 上 23px）。
+   * ⚠️ `setBounds` 是整体替换：位置也要一起给，否则会被重置。
+   */
+  const b0 = w.getBounds()
+  w.setBounds({
+    x: typeof st.x === 'number' ? st.x : b0.x,
+    y: typeof st.y === 'number' ? st.y : b0.y,
+    width: st.width,
+    height: st.height,
   })
 
   if (DEV_URL) {

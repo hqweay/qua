@@ -212,7 +212,11 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      * 收拢之后光标落在拼接块里，下面照常同步这一块的文本。
      */
     const collapsed = br.collapseSelection()
-    if (collapsed) br.syncFromDom(collapsed, true)
+    if (collapsed) {
+      br.syncFromDom(collapsed, true)
+      if (!br.composing()) br.emitSlashQuery(collapsed)
+      return
+    }
     const id = br.blockOf(document.getSelection()?.anchorNode ?? null)
     if (!id) return
     br.syncSel()
