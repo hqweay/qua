@@ -52,6 +52,13 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.anno/toggle-code', title: t('cmd.anno.toggle-code'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['code', 'mono'] },
   { name: 'core.anno/clear-marks', title: t('cmd.anno.clear-marks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['clear', 'plain'] },
 
+  /* ---- 属性（AA6：属性是块第一公民；值在块上 props[propId]） ---- */
+  { name: 'core.props/set-value', title: t('cmd.props.set-value'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' }, value: {} } },
+  { name: 'core.props/clear-value', title: t('cmd.props.clear-value'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' } } },
+  { name: 'core.props/create-def', title: t('cmd.props.create-def'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, label: { type: 'string' }, kind: { type: 'string' } } },
+  { name: 'core.props/add-field', title: t('cmd.props.add-field'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' } } },
+  { name: 'core.props/undeclare', title: t('cmd.props.undeclare'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' } } },
+
   /* ---- 历史 ---- */
   { name: 'core.history/undo', title: t('cmd.history.undo'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.history') },
   { name: 'core.history/redo', title: t('cmd.history.redo'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.history') },

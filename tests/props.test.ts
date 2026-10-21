@@ -162,3 +162,21 @@ test('ensureTag 返回的块可以立刻声明字段（标签是普通块）', (
   assert.ok(block)
   assert.equal(declareField(block!, def.id), true)
 })
+
+test('④ 顺序只影响呈现：字段集合与标签先后无关；行序按正文里标签出现顺序', () => {
+  const a1 = mkPropDef('甲一')
+  const a2 = mkPropDef('甲二')
+  const b1 = mkPropDef('乙一')
+  const A = mkTagBlock('A')
+  const B = mkTagBlock('B')
+  declareField(A, a1.id)
+  declareField(A, a2.id)
+  declareField(B, b1.id)
+  const target: Block = { id: 'b', text: '一块', children: [] }
+  const forest = [a1, a2, b1, A, B, target]
+  const ab = fieldRows(target, forest, [tagEdge('e1', 'b', A.id), tagEdge('e2', 'b', B.id)]).map((r) => r.label)
+  const ba = fieldRows(target, forest, [tagEdge('e1', 'b', B.id), tagEdge('e2', 'b', A.id)]).map((r) => r.label)
+  assert.deepEqual(ab, ['甲一', '甲二', '乙一'])
+  assert.deepEqual(ba, ['乙一', '甲一', '甲二'])
+  assert.deepEqual([...ab].sort(), [...ba].sort(), '集合相同：顺序只影响行序')
+})

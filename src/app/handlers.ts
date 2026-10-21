@@ -179,9 +179,47 @@ export const HANDLERS: Record<string, Handler> = {
   'core.editor/remove-atom': (a, app) => {
     const id = S(a.atomId)
     if (!id) return false
-    app.ed.removeAtom(id)
+    // 摘标签可能要提示「清理它带来的值」（D20）⇒ 走门面，而不是直接调编辑器
+    app.removeAtom(id)
     return true
   },
+  /* ---- 属性 ---- */
+  'core.props/set-value': (a, app) => {
+    const blockId = S(a.blockId)
+    const propId = S(a.propId)
+    if (!blockId || !propId) return false
+    app.setPropValue(blockId, propId, a.value)
+    return true
+  },
+  'core.props/clear-value': (a, app) => {
+    const blockId = S(a.blockId)
+    const propId = S(a.propId)
+    if (!blockId || !propId) return false
+    app.clearPropValue(blockId, propId)
+    return true
+  },
+  'core.props/create-def': (a, app) => {
+    const blockId = S(a.blockId)
+    const label = S(a.label)
+    const kind = S(a.kind, 'text')
+    if (!label) return false
+    return app.createPropDef(blockId, label, kind) !== ''
+  },
+  'core.props/add-field': (a, app) => {
+    const blockId = S(a.blockId)
+    const propId = S(a.propId)
+    if (!blockId || !propId) return false
+    app.addProp(blockId, propId)
+    return true
+  },
+  'core.props/undeclare': (a, app) => {
+    const blockId = S(a.blockId)
+    const propId = S(a.propId)
+    if (!blockId || !propId) return false
+    app.undeclareProp(blockId, propId)
+    return true
+  },
+
   'core.anno/toggle-bold': (_a, app) => {
     app.ed.toggleMark('bold')
     return true

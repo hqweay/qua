@@ -312,6 +312,124 @@
 #editor.drop-end {
   box-shadow: inset 0 -2px 0 0 var(--ui-accent);
 }
+/* ---------------------------------------------------------- 属性区（AA6）
+   一个平铺列表：同一 propId 只出现一次、来源并列；声明未填的显示「待填」。
+   分家靠 border-top + gap（与反链 footer 同一套），不写块级 padding/margin。 */
+.properties {
+  margin-bottom: var(--ui-gap-4);
+  padding-bottom: var(--ui-gap-3);
+  border-bottom: 1px solid var(--ui-border-subtle);
+}
+.properties[hidden] {
+  display: none;
+}
+.properties-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-3);
+  margin-bottom: var(--ui-gap-2);
+  font-size: var(--ui-fs-sm);
+  color: var(--ui-text-secondary);
+}
+.properties-title {
+  font-weight: 600;
+  color: var(--ui-text);
+}
+.properties-add {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  padding: 0 var(--ui-gap-2);
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.properties-add:hover {
+  color: var(--ui-text);
+  border-color: var(--ui-border);
+}
+.properties-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+}
+.props-empty {
+  margin: 0;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+.prop-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-3);
+  font-size: var(--ui-fs-sm);
+}
+.prop-label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ui-gap-2);
+  min-width: 0;
+  flex: 1 1 40%;
+  color: var(--ui-text);
+}
+.prop-source {
+  font-size: var(--ui-fs-2xs);
+  color: var(--ui-text-tertiary);
+  white-space: nowrap;
+}
+.prop-row[data-pending='1'] .prop-name {
+  color: var(--ui-text-secondary);
+}
+.prop-value {
+  flex: 1 1 50%;
+  display: flex;
+}
+.prop-input {
+  width: 100%;
+  font: inherit;
+  font-size: var(--ui-fs-sm);
+  color: var(--ui-text);
+  background: var(--ui-surface-sunken);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  padding: 0 var(--ui-gap-2);
+}
+.prop-input:focus {
+  outline: none;
+  border-color: var(--ui-accent);
+}
+.prop-check {
+  accent-color: var(--ui-accent);
+}
+.prop-clear {
+  background: none;
+  border: 0;
+  padding: 0 var(--ui-gap-1);
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.prop-clear:hover {
+  color: var(--ui-text);
+}
+.props-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  padding-top: var(--ui-gap-2);
+  border-top: 1px dashed var(--ui-border-subtle);
+}
+.props-form .props-pick {
+  flex: 1 1 40%;
+}
+.props-form button {
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+}
+
 /* ---------------------------------------------------------- 反链 footer（下一层）
    view block 的 placement；header 是 chrome，列表是共享 store 的活块（可原地编辑）。
    只用 border-top 分家，不写块级 padding/margin。 */
@@ -333,7 +451,7 @@
 }
 .backlinks-title {
   font-weight: 600;
-  color: var(--ui-text-primary);
+  color: var(--ui-text);
 }
 .backlinks-count {
   color: var(--ui-text-tertiary);
@@ -348,7 +466,7 @@
   cursor: pointer;
 }
 .backlinks-refresh:hover {
-  color: var(--ui-text-primary);
+  color: var(--ui-text);
 }
 .backlinks-editor {
   min-height: var(--ui-line-h);
@@ -376,7 +494,7 @@
 }
 .queryview-title {
   font-weight: 600;
-  color: var(--ui-text-primary);
+  color: var(--ui-text);
 }
 .queryview-count {
   color: var(--ui-text-tertiary);
@@ -399,7 +517,7 @@
   cursor: pointer;
 }
 .queryview-refresh:hover {
-  color: var(--ui-text-primary);
+  color: var(--ui-text);
 }
 .queryview-refresh:disabled {
   cursor: default;

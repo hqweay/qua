@@ -1418,12 +1418,14 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
   assert(focused?.aBlock && focused.aOff === 0, `点空白后光标应落在新块：${JSON.stringify(focused)}`)
 
   // ⑤ 点与正文同高的**左侧留白** ⇒ 不该建块（clientY 判据）
-  const sideY = await page.evaluate(() => {
+  const side = await page.evaluate(() => {
     const tx = document.querySelector('#editor .blk .tx').getBoundingClientRect()
-    return tx.top + tx.height / 2
+    // 「左侧留白」必须是**编辑器自己的**左缘（再往左是左槽，点那里测的是槽）
+    const editor = document.getElementById('editor').getBoundingClientRect()
+    return { x: editor.left + 4, y: tx.top + tx.height / 2 }
   })
   const n1 = (await rows()).length
-  await page.mouse.click(120, sideY)
+  await page.mouse.click(side.x, side.y)
   assert((await rows()).length === n1, '点与正文同高的左侧留白不该建块')
 
   // ⑥ `/` 建块落在根行（section 根）时，必须插成**它的子块**，不能新增根
@@ -2835,6 +2837,118 @@ await check('T50 导航历史：⌘[ 后退 / ⌘] 前进跨页可走；新导�
 
   await ctx.close()
   return `今日→A→B；⌘[ 退两步、⌘] 进两步；新导航清前进栈`
+})
+
+/* ------------------------------------------------- 属性区（平铺 ＋ 来源 ＋ 摘标签提示） */
+
+await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 摘标签清理提示', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  // ① 在一个内容块上打 #任务（标签块是普通块，住森林顶层）
+  const hostId = await page.evaluate(() => {
+    const b = window.__demo.blocks().find((x) => x.roles.length === 0 && x.children === 0 && x.text.length > 2)
+    window.__demo.focusBlock(b.id, 0)
+    window.__demo.invoke('core.editor/insert-tag', { tag: ' 任务 ' })
+    return b.id
+  })
+  const tag = await page.evaluate(() => {
+    const tag = window.__demo.allBlocks().find((b) => b.roles.includes('tag') && b.text === '任务')
+    const atom = window.__demo.atoms().find((a) => a.kind === 'tag' && a.target?.id === tag?.id)
+    return { tagId: tag?.id, atomId: atom?.id }
+  })
+  assert(tag.tagId && tag.atomId, `打标签应产出一个真实标签块与一条边：${JSON.stringify(tag)}`)
+
+  // ② 打开标签页，新建字段（定义是森林顶层的 schema 块，propId ＝ 块 id）
+  await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), tag.tagId)
+  await page.waitForTimeout(100)
+  await page.evaluate(
+    (tagId) => window.__demo.invoke('core.props/create-def', { blockId: tagId, label: '状态', kind: 'text' }),
+    tag.tagId,
+  )
+  await page.waitForTimeout(200)
+  const defs = await page.evaluate(() => window.__demo.propDefs())
+  assert(defs.length === 1, `应只有一个字段定义：${JSON.stringify(defs)}`)
+  assert(defs[0].label === '状态' && defs[0].kind === 'text', JSON.stringify(defs[0]))
+  assert(defs[0].declaredBy.includes(tag.tagId), '定义应被 #任务 声明')
+  const schemaTop = await page.evaluate((id) => window.__demo.allBlocks().some((b) => b.id === id && b.roles.includes('schema')), defs[0].id)
+  assert(schemaTop, '定义是森林顶层的 schema 块（不是标签的子块）')
+
+  // 标签页的属性区显示「声明字段」，但没有给标签块自己设值的输入
+  const declared = await page.evaluate(() => ({
+    visible: !document.getElementById('properties').hidden,
+    labels: [...document.querySelectorAll('.props-declared .prop-name')].map((e) => e.textContent),
+    valueInputs: document.querySelectorAll('.props-declared .prop-input').length,
+  }))
+  assert(declared.visible, '标签页应显示属性区')
+  assert(declared.labels.includes('状态'), `声明字段里应有「状态」：${JSON.stringify(declared)}`)
+  assert(declared.valueInputs === 0, '声明节没有值输入（值在成员块上）')
+
+  // ③ 成员块上写值：一块一槽 props[propId]
+  await page.evaluate(
+    ({ blockId, propId }) => window.__demo.invoke('core.props/set-value', { blockId, propId, value: '已完成' }),
+    { blockId: hostId, propId: defs[0].id },
+  )
+  const fields = await page.evaluate((id) => window.__demo.fields(id), hostId)
+  assert(fields.length === 1 && fields[0].value === '已完成', `成员块应有值：${JSON.stringify(fields)}`)
+  assert(fields[0].sources.includes(tag.tagId), `来源应是 #任务：${JSON.stringify(fields[0])}`)
+
+  // ④ 打开成员块：属性区平铺一行、来源写「来自 #任务」
+  await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), hostId)
+  await page.waitForTimeout(120)
+  const panel = await page.evaluate(() => {
+    const row = document.querySelector(`.prop-row[data-prop-id]`)
+    return {
+      label: row?.querySelector('.prop-name')?.textContent ?? '',
+      source: row?.querySelector('.prop-source')?.textContent ?? '',
+      value: row?.querySelector('.prop-input')?.value ?? '',
+      rows: document.querySelectorAll('.prop-row[data-prop-id]').length,
+    }
+  })
+  assert(panel.rows === 1, `同一 propId 只显示一行：${JSON.stringify(panel)}`)
+  assert(panel.label === '状态' && panel.value === '已完成', JSON.stringify(panel))
+  assert(panel.source.includes('#任务'), `来源应标出标签：${JSON.stringify(panel)}`)
+
+  // ⑤ 摘标签：有值 ⇒ 弹一次提示，默认「保留」；选「清理」⇒ 值与边一起没（一次撤销复原）
+  await page.evaluate((atomId) => window.__demo.invoke('core.editor/remove-atom', { atomId }), tag.atomId)
+  await page.waitForSelector('.layer-head')
+  const head = await page.textContent('.layer-head')
+  assert(head.includes('任务') && head.includes('还有值'), `摘标签应提示有值字段：${head}`)
+  await page.locator('.layer-item', { hasText: '清理这些值' }).click()
+  await page.waitForTimeout(120)
+  const afterClean = await page.evaluate(
+    ({ hostId, atomId }) => ({
+      fields: window.__demo.fields(hostId),
+      atom: window.__demo.atoms().some((a) => a.id === atomId),
+    }),
+    { hostId, atomId: tag.atomId },
+  )
+  assert(afterClean.fields.length === 0, `清理后值应没了：${JSON.stringify(afterClean.fields)}`)
+  assert(!afterClean.atom, '边也应没了')
+
+  await page.evaluate(() => window.__demo.invoke('core.history/undo'))
+  await page.waitForTimeout(150)
+  const afterUndo = await page.evaluate(
+    ({ hostId, atomId }) => ({
+      fields: window.__demo.fields(hostId),
+      atom: window.__demo.atoms().some((a) => a.id === atomId),
+    }),
+    { hostId, atomId: tag.atomId },
+  )
+  assert(afterUndo.fields[0]?.value === '已完成' && afterUndo.atom, `⌘Z 应把值与边一起复原：${JSON.stringify(afterUndo)}`)
+
+  // ⑥ 字段全空时摘标签 ⇒ 不弹提示（防提示疲劳）
+  await page.evaluate(
+    ({ blockId, propId }) => window.__demo.invoke('core.props/clear-value', { blockId, propId }),
+    { blockId: hostId, propId: defs[0].id },
+  )
+  await page.evaluate((atomId) => window.__demo.invoke('core.editor/remove-atom', { atomId }), tag.atomId)
+  await page.waitForTimeout(150)
+  const prompt = await page.evaluate(() => Boolean(document.querySelector('.layer-head')))
+  assert(!prompt, '字段全空时摘标签不该弹提示')
+
+  await ctx.close()
+  return `定义 ${defs[0].id.slice(-6)} 被 #任务 声明；成员值「已完成」；摘标签清理可撤销；空字段不提示`
 })
 
 /* ---------------------------------------------------------------- 汇总 */

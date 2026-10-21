@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { ensureFirstBlock, ensureTodayJournal, favoritesContainers, findInForest, findPath, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, isJournal, isQueryBlock, journalDate, journalFeedDays, prop, resolveRef, tagMemberIds, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { allPropDefs, allTags, cleanableValues, clearValue, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, favoritesContainers, fieldRows, findInForest, findPath, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, isJournal, isQueryBlock, journalDate, journalFeedDays, prop, propKindOf, propLabel, resolveRef, tagMemberIds, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
@@ -28,13 +28,14 @@ import { DockBlocks } from './ui/dock-blocks.ts'
 import { bindDockResize } from './ui/dock-resize.ts'
 import { renderBackrefsInto, renderFavoritesInto, type DockContentDeps } from './ui/dock-content.ts'
 import { BacklinksView } from './ui/backlinks.ts'
+import { PropertiesPanel } from './ui/properties.ts'
 import { QueryView } from './ui/query-view.ts'
 import { createChrome } from './ui/chrome.ts'
 import { isReadonlyBlock } from './view/block-dom.ts'
 import { createIcon } from './view/icons.ts'
 import { createBadge, type BadgeSnapshot } from './ui/badge.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type PanelDeps } from './ui/panels.ts'
-import { demoCommands, favoritesCommands, journalCommands, pageCommands, rootsFor, rootsForMany, viewCommands, zoomCommands, type PageDeps } from './app/commands-impl.ts'
+import { demoCommands, favoritesCommands, journalCommands, pageCommands, propsCommands, rootsFor, rootsForMany, viewCommands, zoomCommands, type PageDeps } from './app/commands-impl.ts'
 import { HANDLERS } from './app/handlers.ts'
 import { darkQuery, resolveTheme } from './core/theme.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
@@ -678,6 +679,7 @@ const pageDeps: PageDeps = {
     mainEd.loadPage({ roots }, marks as never, atoms as never)
     renderBacklinks()
     renderQueryView()
+    renderProperties()
   },
   marks: () => ws.marks,
   atoms: () => ws.atoms,
@@ -751,6 +753,101 @@ function historyGo(dir: 'back' | 'forward'): boolean {
   return false
 }
 
+/* ------------------------------------------------------------ 属性写入 / 摘标签提示 */
+
+/**
+ * 一次属性写入：模型改动 ＋ **一个**撤销快照 ＋ 落盘/重画。
+ *
+ * ⚠️ `touch(mainEd)` 不会重载正文（属性不改变文字）；其他视图照常收到通知。
+ * ⚠️ 新建定义（`blockId === undefined`）改了森林结构 ⇒ 列表也要重画。
+ */
+function writeProps(blockId: string | undefined, mutate: () => void): void {
+  const before = blocks.snap(ed.sel)
+  mutate()
+  blocks.record(before, 'other', Date.now())
+  blocks.invalidateIndex()
+  blocks.touch(mainEd, blockId ? [blockId] : undefined)
+  scheduleProperties()
+  if (!blockId) renderDocks()
+  scheduleSave()
+  scheduleBadge()
+}
+
+/** 同一标签在本会话里已经答过「保留」⇒ 不再追问（避免提示疲劳） */
+const cleanupAlwaysKeep = new Set<string>()
+
+/**
+ * 摘标签「要不要清理它带来的值」的提示（D20）。
+ *
+ * `removeEdge`：
+ *   · 非空 ＝ 边还没删（显式删除命令）⇒ 删边与清值共用**一次撤销**；
+ *   · `null` ＝ 边已经被删掉了（正文里退格删掉了 `#标签`）⇒ 只清值，删边那一步已在撤销栈里。
+ */
+function promptCleanup(
+  host: Block,
+  tag: Block,
+  cleanable: string[],
+  removeEdge: ((beforeRemove?: () => void) => void) | null,
+  anchorId?: string,
+): void {
+  const labels = cleanable
+    .map((pid) => {
+      const def = findPropDef(ws.blocks, pid)
+      return def ? propLabel(def) : shortId(pid)
+    })
+    .join('、')
+  const anchorEl = anchorId ? document.querySelector(`.atom[data-atom-id="${anchorId}"]`) : null
+  const anchor = anchorEl instanceof HTMLElement ? anchorEl.getBoundingClientRect() : null
+  layers.openMenu({
+    rows: [
+      { id: 'cleanup/keep', label: t('ui.tagCleanup.keep'), hint: t('ui.tagCleanup.keepHint'), group: 'cleanup/1' },
+      { id: 'cleanup/clean', label: t('ui.tagCleanup.clean'), hint: t('ui.tagCleanup.cleanHint', { fields: labels }), group: 'cleanup/2' },
+      { id: 'cleanup/always', label: t('ui.tagCleanup.alwaysKeep'), group: 'cleanup/3' },
+    ],
+    anchor,
+    title: t('ui.tagCleanup.title', { tag: tag.text }),
+    searchable: false,
+    focusSearch: false,
+    onPick: (row) => {
+      if (row.id === 'cleanup/always') {
+        cleanupAlwaysKeep.add(tag.id)
+        removeEdge?.()
+        return
+      }
+      if (row.id === 'cleanup/clean') {
+        const drop = (): void => {
+          for (const pid of cleanable) clearValue(host, pid)
+        }
+        // 回调在快照之后、改模型之前 ⇒ 「删边 ＋ 清值」⌘Z 一次复原
+        if (removeEdge) removeEdge(drop)
+        else writeProps(host.id, drop)
+        return
+      }
+      removeEdge?.()
+    },
+  })
+}
+
+/**
+ * 删一个行内原子；**摘标签时**若它带来的字段在块上有值，先问一次「保留 / 清理」（D20）。
+ *
+ * R1–R4：
+ *   · 只在**真有值**时问（字段全空 ⇒ 静默摘掉，绝大多数「打错了」不该被打扰）；
+ *   · 默认**保留**（值落到「本块自有」）；
+ *   · 清理只清「该标签声明 ∩ 块上有值 ∩ 剩余标签都不声明」，且与删边共用**一次撤销**。
+ */
+function removeAtomWithCleanup(atomId: string): void {
+  const atom = blocks.atoms.find((a) => a.id === atomId)
+  const host = atom ? findInForest(ws.blocks, atom.blockId) : undefined
+  const tag = atom?.kind === 'tag' && atom.target ? findInForest(ws.blocks, atom.target.id) : undefined
+  const cleanable = host && tag ? cleanableValues(host, tag, ws.blocks, blocks.atoms) : []
+  if (!host || !tag || cleanable.length === 0 || cleanupAlwaysKeep.has(tag.id)) {
+    ed.removeAtom(atomId)
+    return
+  }
+  promptCleanup(host, tag, cleanable, (beforeRemove) => ed.removeAtom(atomId, beforeRemove), atomId)
+}
+
 /**
  * `App` 门面：**四个工厂拼装**（页／日记／视图／演示），加上浮层与提示这几件装配层专有的能力。
  *
@@ -766,6 +863,12 @@ const app: App = {
   ...journalCommands(pageDeps),
   ...zoomCommands(pageDeps),
   ...favoritesCommands(pageDeps),
+  ...propsCommands({
+    blocks: () => ws.blocks,
+    write: writeProps,
+    toast: (text, kind) => app.toast(text, kind),
+  }),
+  removeAtom: (atomId) => removeAtomWithCleanup(atomId),
 
   // 导航历史（中心槽走到哪）；与 undo/redo 的模型快照栈无关
   historyBack: () => historyGo('back'),
@@ -896,6 +999,15 @@ ed.events = {
   },
   atomsLost: (atoms) => {
     app.toast(t('ui.toast.atomsLost', { labels: atoms.map((a) => a.label).join('、') }), 'warn')
+    // 正文里退格删掉 `#标签` 也是「摘标签」：边已经没了，但有值时仍要问一次清理（D20）
+    const tagAtom = atoms.find((a) => a.kind === 'tag' && a.target)
+    if (!tagAtom?.target) return
+    const host = findInForest(ws.blocks, tagAtom.blockId)
+    const tag = findInForest(ws.blocks, tagAtom.target.id)
+    const cleanable = host && tag ? cleanableValues(host, tag, ws.blocks, blocks.atoms) : []
+    if (host && tag && cleanable.length > 0 && !cleanupAlwaysKeep.has(tag.id)) {
+      promptCleanup(host, tag, cleanable, null)
+    }
   },
   // 划选气泡（顶部工具栏作废后的落点）：选区一变就重算「该不该在、装哪几颗」
   selChange: () => {
@@ -959,6 +1071,7 @@ backlinksView = new BacklinksView(
     },
     onFocus: () => {
       if (backlinksView) ed = backlinksView.editor
+      scheduleProperties()
     },
     onFocusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, 'backlinks'),
     onAtomClick: (a, el, mods) => handleAtomClick(a, el, mods),
@@ -972,6 +1085,53 @@ function renderBacklinks(): void {
 }
 
 renderBacklinks()
+
+/* ------------------------------------------------------------ 属性区（AA6） */
+
+/**
+ * 属性区画在**当前对象**上（页 / 日记 / 标签 / 被 zoom 的块）。
+ *
+ * ⚠️ 不跟光标走：跟光标会让面板随点击忽隐忽现（布局跳），而「属性属于你正在看的那个东西」
+ *    是更稳定的心智模型。要看一个内容块自己的属性 ⇒ 点它的块标 zoom 进来（此时它＝当前对象）。
+ * AA6：任何块都能直接有属性 —— 不要求先打标签；标签只让「可用字段」多出来。
+ */
+const propertiesPanel = new PropertiesPanel(
+  {
+    root: chrome.propertiesEl,
+    title: chrome.propertiesTitleEl,
+    body: chrome.propertiesBodyEl,
+    add: chrome.propertiesAddEl,
+  },
+  {
+    target: () => activeBlock(),
+    rows: (b) => fieldRows(b, ws.blocks, blocks.atoms),
+    defs: () => allPropDefs(ws.blocks),
+    declared: (b) => declaredFields(b, ws.blocks),
+    shortId: (id) => shortId(id),
+    setValue: (b, propId, value) => void registry.invoke('core.props/set-value', { blockId: b.id, propId, value }, 'ui'),
+    clearValue: (b, propId) => void registry.invoke('core.props/clear-value', { blockId: b.id, propId }, 'ui'),
+    addField: (b, propId) => void registry.invoke('core.props/add-field', { blockId: b.id, propId }, 'ui'),
+    undeclare: (b, propId) => void registry.invoke('core.props/undeclare', { blockId: b.id, propId }, 'ui'),
+    createDef: (b, label, kind) => void registry.invoke('core.props/create-def', { blockId: b.id, label, kind }, 'ui'),
+    toast: (text, kind) => app.toast(text, kind),
+  },
+)
+
+function renderProperties(): void {
+  propertiesPanel.render()
+}
+
+/** 属性区跟着选块走；合并短时间内的多次改动（打字时不必每键重画面板） */
+let propertyTimer: number | null = null
+function scheduleProperties(): void {
+  if (propertyTimer !== null) window.clearTimeout(propertyTimer)
+  propertyTimer = window.setTimeout(() => {
+    propertyTimer = null
+    renderProperties()
+  }, 60)
+}
+blocks.subscribe(() => scheduleProperties())
+renderProperties()
 
 /**
  * **查询视图**（–D6）：挂在「当前正文里那个查询块」下面。
@@ -1001,6 +1161,7 @@ queryView = new QueryView(
     },
     onFocus: () => {
       if (queryView) ed = queryView.editor
+      scheduleProperties()
     },
     onFocusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, 'query'),
     onAtomClick: (a, el, mods) => handleAtomClick(a, el, mods),
@@ -1302,6 +1463,28 @@ const api = {
    */
   allBlocks() {
     return ws.blocks.map((b) => ({ id: b.id, text: b.text, roles: b.roles ?? [] }))
+  },
+  /** 字段定义（诊断面）：id ＝ propId、正文 ＝ label、谁声明了它 */
+  propDefs() {
+    return allPropDefs(ws.blocks).map((d) => ({
+      id: d.id,
+      label: d.text,
+      kind: propKindOf(d),
+      declaredBy: allTags(ws.blocks).filter((t) => declaredFieldIds(t).includes(d.id)).map((t) => t.id),
+    }))
+  },
+  /** 一个块的属性区（**派生**：声明 ∪ 自有；同一 propId 只一行） */
+  fields(blockId: string) {
+    const b = findInForest(ws.blocks, blockId)
+    if (!b) return []
+    return fieldRows(b, ws.blocks, blocks.atoms).map((r) => ({
+      propId: r.propId,
+      label: r.label,
+      kind: r.kind,
+      value: r.value ?? null,
+      filled: r.filled,
+      sources: r.sources.map((s) => s.id),
+    }))
   },
   /** 打了某个标签的块 id（标签的成员列表＝标签块的入向边） */
   tagMembers(tagId: string) {

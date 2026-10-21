@@ -91,6 +91,22 @@ export interface App {
    *    拆成两步又会让「建了标签但没插上边」这种半截状态成为可能。
    */
   insertTag(tag: string): void
+  /* 属性（AA6：属性是块第一公民；值在块上 `props[propId]`，一块一槽） */
+  setPropValue(blockId: string, propId: string, value: unknown): void
+  clearPropValue(blockId: string, propId: string): void
+  /** 新建字段定义（可同时声明到该块）；返回 `propId`（空串＝没建） */
+  createPropDef(blockId: string, label: string, kind: string): string
+  /** 把已有定义加到块上：页/标签＝声明，普通块＝加一个空值槽 */
+  addProp(blockId: string, propId: string): void
+  /** 解除声明（**定义块与成员块上的值都不动**） */
+  undeclareProp(blockId: string, propId: string): void
+  /**
+   * 删一个行内原子（引用 / 标签）。
+   *
+   * ⚠️ 摘标签可能触发「要不要清理它带来的值」的提示（D20）—— 所以删除入口在门面，
+   *    不是组件直接调编辑器（编辑器不知道属性与提示）。
+   */
+  removeAtom(atomId: string): void
   /* 日记（日期只读、一天一个、物化幂等） */
   /** 回到今日（`date` 省略＝本地今天）；没有就**幂等物化**一个 */
   journalToday(date?: string): void

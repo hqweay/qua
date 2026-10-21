@@ -52,6 +52,11 @@ export interface Chrome {
    *    底边之下才算，否则左右留白也会误触。
    */
   blankAreaEl: HTMLElement
+  /** 属性区（当前块声明的字段 ∪ 块自有属性） */
+  propertiesEl: HTMLElement
+  propertiesTitleEl: HTMLElement
+  propertiesBodyEl: HTMLElement
+  propertiesAddEl: HTMLButtonElement
   /** 反链 view block 的容器（footer； 下一层） */
   backlinksEl: HTMLElement
   backlinksEditorEl: HTMLElement
@@ -84,6 +89,10 @@ export function createChrome(onCrumb?: (blockId: string) => void): Chrome {
   const editorEl = must('editor')
   const emptyHintEl = must('empty-hint')
   const noticeEl = must('boot-notice')
+  const propertiesEl = must('properties')
+  const propertiesTitleEl = must('properties-title')
+  const propertiesBodyEl = must('properties-body')
+  const propertiesAddEl = must<HTMLButtonElement>('properties-add')
   const backlinksEl = must('backlinks')
   const backlinksEditorEl = must('backlinks-editor')
   const backlinksTitleEl = must('backlinks-title')
@@ -175,6 +184,10 @@ export function createChrome(onCrumb?: (blockId: string) => void): Chrome {
     editorEl,
     scrollEl,
     blankAreaEl: scrollEl,
+    propertiesEl,
+    propertiesTitleEl,
+    propertiesBodyEl,
+    propertiesAddEl,
     backlinksEl,
     backlinksEditorEl,
     backlinksTitleEl,

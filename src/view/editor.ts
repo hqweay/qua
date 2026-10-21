@@ -1386,11 +1386,16 @@ export class BlockEditor {
   }
 
   /** 删掉一个行内原子（连同它占的那一格） */
-  removeAtom(atomId: string): void {
+  removeAtom(atomId: string, beforeRemove?: () => void): void {
     const a = this.atoms.find((x) => x.id === atomId)
     if (!a) return
     const loc = locate(this.doc, a.blockId)
     const before = this.snap()
+    /**
+     * 摘标签时可能要顺带清理它带来的值（D20）。
+     * 回调放在**快照之后、改模型之前** ⇒ 「删边 ＋ 清值」是**一次撤销**能一起复原的。
+     */
+    beforeRemove?.()
     if (loc) {
       const ch = { from: a.start, to: a.end, insert: '' }
       loc.block.text = loc.block.text.slice(0, a.start) + loc.block.text.slice(a.end)

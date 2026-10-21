@@ -64,6 +64,14 @@
           <div id="doc">
             <!-- 面包屑：顶层时 hidden（不占高度）；点一格＝聚焦到该祖先（＝退回） -->
             <div id="crumbs-trail" hidden></div>
+            <!-- 属性区（AA6）：当前块声明的字段 ∪ 块自有属性；平铺 ＋ 来源标注 -->
+            <section class="properties" id="properties" data-properties hidden>
+              <div class="properties-head">
+                <span class="properties-title" id="properties-title"></span>
+                <button class="properties-add" id="properties-add" type="button"></button>
+              </div>
+              <div class="properties-body" id="properties-body"></div>
+            </section>
             <div id="editor" spellcheck="false"></div>
             <div id="empty-hint" hidden></div>
             <!-- 查询视图（–D6）：紧跟查询块的一段外源渲染；结果集冻结、按钮刷新 -->
