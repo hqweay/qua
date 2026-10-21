@@ -60,6 +60,7 @@ export interface Chrome {
   /** 标签页 footer（属于 / 包含 / 成员） */
   tagPanelEl: HTMLElement
   tagPanelTitleEl: HTMLElement
+  tagPanelPageEl: HTMLButtonElement
   tagPanelRelationsEl: HTMLElement
   tagPanelMembersTitleEl: HTMLElement
   tagPanelMembersCountEl: HTMLElement
@@ -99,6 +100,7 @@ export function createChrome(onCrumb?: (blockId: string) => void): Chrome {
   const noticeEl = must('boot-notice')
   const tagPanelEl = must('tagpanel')
   const tagPanelTitleEl = must('tagpanel-title')
+  const tagPanelPageEl = must<HTMLButtonElement>('tagpanel-page')
   const tagPanelRelationsEl = must('tagpanel-relations')
   const tagPanelMembersTitleEl = must('tagpanel-members-title')
   const tagPanelMembersCountEl = must('tagpanel-members-count')
@@ -205,6 +207,7 @@ export function createChrome(onCrumb?: (blockId: string) => void): Chrome {
     propertiesAddEl,
     tagPanelEl,
     tagPanelTitleEl,
+    tagPanelPageEl,
     tagPanelRelationsEl,
     tagPanelMembersTitleEl,
     tagPanelMembersCountEl,

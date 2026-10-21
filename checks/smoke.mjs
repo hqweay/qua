@@ -3133,6 +3133,92 @@ await check('T52 标签层级：属于/包含双面板、成员含算作、禁�
   return `#演员 属于 #人物；#人物 成员含只打 #演员 的块；成环被拒；删父留可见悬空`
 })
 
+/* ------------------------------------------------- UI：让一个块成为页 / 标签 */
+
+await check('T53 角色开关：输入名字建标签、同名页兼作标签、标签也作为页、摘标签有提示', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  // ① 选择器里输入新名字 ⇒ 第一行就是「新建标签」（不再只有固定 demo 词）
+  const hostId = await page.evaluate(() => {
+    const b = window.__demo.blocks().find((x) => x.roles.length === 0 && x.children === 0 && x.text.length > 2)
+    window.__demo.focusBlock(b.id, 0)
+    window.__demo.invoke('core.editor/pick-tag')
+    return b.id
+  })
+  await page.waitForSelector('.layer-input')
+  await page.fill('.layer-input', '人物')
+  await page.waitForTimeout(120)
+  const createLabel = await page.textContent('.layer-item[data-index="0"] .layer-label')
+  assert(createLabel.includes('新建标签'), `输入新名字时第一行应是新建：${createLabel}`)
+  await page.press('.layer-input', 'Enter')
+  await page.waitForTimeout(200)
+  const tagPeople = await page.evaluate(() =>
+    window.__demo.allBlocks().find((b) => b.roles.includes('tag') && b.text === '人物'),
+  )
+  assert(tagPeople, '回车后应真的建出标签 #人物 并打上')
+
+  // ② 新页「设计」⇒ 在它的子块上打同名标签 ⇒ 复用这个页、加上 tag 角色
+  await page.evaluate(() => window.__demo.invoke('core.page/new'))
+  const pageId = await page.evaluate(() => window.__demo.snapshot().activeId)
+  await page.evaluate((id) => window.__demo.__editor.setText(id, '设计'), pageId)
+  const childId = await page.evaluate((id) => window.__demo.__editor.insertBlockAfter(id, '内容'), pageId)
+  await page.evaluate((id) => window.__demo.focusBlock(id, 0), childId)
+  await page.evaluate(() => window.__demo.invoke('core.editor/pick-tag'))
+  await page.waitForSelector('.layer-input')
+  await page.fill('.layer-input', '设计')
+  await page.waitForTimeout(120)
+  const reuseLabel = await page.textContent('.layer-item[data-index="0"] .layer-label')
+  assert(reuseLabel.includes('同名页'), `同名页应提示复用而不是新建：${reuseLabel}`)
+  await page.press('.layer-input', 'Enter')
+  await page.waitForTimeout(200)
+  const dual = await page.evaluate((id) => window.__demo.allBlocks().find((b) => b.id === id), pageId)
+  assert(dual.roles.includes('page') && dual.roles.includes('tag'), `页应兼作标签：${JSON.stringify(dual)}`)
+  const sameName = await page.evaluate(() => window.__demo.allBlocks().filter((b) => b.text === '设计'))
+  assert(sameName.length === 1, `同名必同一块：${JSON.stringify(sameName)}`)
+
+  // ③ 纯标签「临时」⇒ 打开它，在 footer 点「也作为页」⇒ 真的进页列表
+  await page.evaluate((id) => window.__demo.focusBlock(id, 0), childId)
+  await page.evaluate(() => window.__demo.invoke('core.editor/pick-tag'))
+  await page.waitForSelector('.layer-input')
+  await page.fill('.layer-input', '临时')
+  await page.press('.layer-input', 'Enter')
+  await page.waitForTimeout(200)
+  const tagTemp = await page.evaluate(() =>
+    window.__demo.allBlocks().find((b) => b.roles.includes('tag') && b.text === '临时'),
+  )
+  assert(tagTemp, '应建出纯标签 #临时')
+  await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), tagTemp.id)
+  await page.waitForTimeout(200)
+  const beforePage = await page.evaluate((id) => window.__demo.allBlocks().find((b) => b.id === id).roles, tagTemp.id)
+  assert(!beforePage.includes('page'), '纯标签一开始不是页')
+  await page.click('#tagpanel-page')
+  await page.waitForTimeout(200)
+  const afterPage = await page.evaluate((id) => ({
+    roles: window.__demo.allBlocks().find((b) => b.id === id).roles,
+    pages: window.__demo.pages().map((p) => p.title),
+  }), tagTemp.id)
+  assert(afterPage.roles.includes('page'), `点「也作为页」后应加 page 角色：${JSON.stringify(afterPage)}`)
+  assert(afterPage.pages.includes('临时'), `应进页列表：${JSON.stringify(afterPage.pages)}`)
+
+  // ④ 摘标签角色：有成员 ⇒ 先提示；继续后角色没了，⌘Z 能恢复
+  await page.evaluate((id) => window.__demo.invoke('core.block/untag', { blockId: id }), tagTemp.id)
+  await page.waitForSelector('.layer-head')
+  const rolePrompt = await page.textContent('.layer-head')
+  assert(rolePrompt.includes('临时') && rolePrompt.includes('1 个块'), `摘标签应提示成员：${rolePrompt}`)
+  await page.locator('.layer-item', { hasText: '继续' }).click()
+  await page.waitForTimeout(200)
+  const removed = await page.evaluate((id) => window.__demo.allBlocks().find((b) => b.id === id).roles, tagTemp.id)
+  assert(!removed.includes('tag'), `继续后应不再是标签：${JSON.stringify(removed)}`)
+  await page.evaluate(() => window.__demo.invoke('core.history/undo'))
+  await page.waitForTimeout(200)
+  const restored = await page.evaluate((id) => window.__demo.allBlocks().find((b) => b.id === id).roles, tagTemp.id)
+  assert(restored.includes('tag'), `⌘Z 应把 tag 角色恢复：${JSON.stringify(restored)}`)
+
+  await ctx.close()
+  return `新建 #人物；页「设计」兼作标签（同名同一块）；#临时 加 page 角色进页列表；摘 tag 有提示且可撤销`
+})
+
 /* ---------------------------------------------------------------- 汇总 */
 
 await browser.close()

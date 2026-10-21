@@ -19,7 +19,7 @@
  *    即可，与命令路径共用同一个函数，不会分叉成第二条解析。
  */
 import { uuidv7Hex } from './ids.ts'
-import { hasRole, type Block, type Role } from './model.ts'
+import { addRole, hasRole, type Block, type Role } from './model.ts'
 import { findByAlias, isAddressable, normalizeAlias } from './alias.ts'
 import type { Atom } from './annotations.ts'
 
@@ -82,7 +82,7 @@ export function ensureTag(
   // 同名块已存在（能当地址用、但还不是标签）⇒ 复用并加角色，不建第二个同名的块
   const existing = findByAlias(forest, name, (b) => isAddressable(b) && !hasRole(b, TAG_ROLE))
   if (existing) {
-    existing.roles = [...(existing.roles ?? []), TAG_ROLE]
+    addRole(existing, TAG_ROLE)
     return { block: existing, created: false, reused: true }
   }
   const block = mkTagBlock(name.trim())
