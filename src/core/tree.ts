@@ -4,7 +4,7 @@
  */
 
 import { uuidv7Hex } from './ids.ts'
-import { hasAnyRole, hasRole, canWriteText, mkBlock, writeBlockText, type Block, type Doc, type Located } from './model.ts'
+import { hasIdentity, isJournalBlock, canWriteText, mkBlock, writeBlockText, type Block, type Doc, type Located } from './model.ts'
 import { walkForest } from './walk.ts'
 import { renameBlock } from './alias.ts'
 export function locate(doc: Doc, id: string): Located | null {
@@ -118,7 +118,7 @@ export function writeBackRoots(forest: Block[], roots: readonly Block[]): void {
   for (const root of roots) {
     const p = findInForest(forest, root.id)
     if (!p) continue
-    if (!hasRole(p, 'journal')) renameBlock(p, root.text)
+    if (!isJournalBlock(p)) renameBlock(p, root.text)
     p.todo = root.todo
     p.collapsed = root.collapsed
     p.children = root.children
@@ -421,7 +421,7 @@ export function deleteBlockSpan(doc: Doc, startId: string, startOff: number, end
    * 库里那块还在（刷新就回来）。判据是**角色**，不是「位置在第一个」——
    * 后者会把一整页的普通首块也挡掉。
    */
-  if (headLoc.parent === null && hasAnyRole(head)) return null
+  if (headLoc.parent === null && hasIdentity(head)) return null
 
   writeBlockText(head, head.text.slice(0, startOff) + tail.text.slice(endOff))
   // 首块的子树保留（选区不含它们）；被删掉的那些块连子树一起消失

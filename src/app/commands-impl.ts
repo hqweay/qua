@@ -79,7 +79,7 @@ import {
  *    光标的落点由 `focusFirstBlock` 跳过只读行。
  */
 export function rootsFor(block: Block): Block[] {
-  if (hasRole(block, 'journal')) ensureFirstBlock(block.children)
+  if (isJournal(block)) ensureFirstBlock(block.children)
   return [block]
 }
 

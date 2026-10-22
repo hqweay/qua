@@ -22,7 +22,7 @@ import {
   depthOf,
   diffText,
   flatten,
-  hasAnyRole,
+  hasIdentity,
   indentBlock,
   insertFirstChild,
   insertSiblingAfter,
@@ -1131,7 +1131,7 @@ export class BlockEditor {
     const sel = this.sel
     if (
       !isSectionRoot &&
-      !hasAnyRole(loc.block) &&
+      !hasIdentity(loc.block) &&
       sel &&
       sel.aBlock === id &&
       sel.hBlock === id &&
@@ -1158,7 +1158,7 @@ export class BlockEditor {
        *   · **有角色的根**（页/日记）或块首 / 空块 / 块尾
        *     ⇒ 插一个**空的首个子块**（根文本是名字/投影，不拆，避免静默改名）。
        */
-      const canSplitRoot = !hasAnyRole(loc.block)
+      const canSplitRoot = !hasIdentity(loc.block)
       if (canSplitRoot && offset > 0 && offset < loc.block.text.length) {
         const r = splitBlockIntoFirstChild(this.doc, id, offset)
         if (r) {
@@ -1327,7 +1327,7 @@ export class BlockEditor {
      * ⚠️ `allowRootRemove: false` 是另一条更严的线：反链／查询列表的根是**别的页的块**，
      *    在这里删源块不合适（那类删除走命令面），所以那一类实例整体关掉。
      */
-    if (loc.parent === null && hasAnyRole(loc.block)) return
+    if (loc.parent === null && hasIdentity(loc.block)) return
     if (loc.parent === null && !this.allowRootRemove) return
     const before = this.snap()
     const prevIds = this.ownerIds()

@@ -3,7 +3,7 @@
  *
  * 根不变量：**字段的身份是全局 `propId`，不是它的名字。**
  *   · `propId` ＝ prop-def 块的 **id**（不另造 id 空间）；
- *   · 定义是一个普通块（`role:'schema'`，正文＝显示名），住在森林顶层 ——
+ *   · 定义是一个普通块（正文＝显示名，`_kind` 是它的种类），住在森林顶层 ——
  *     不能住在任何一个使用者的子树里，否则删掉那个标签会带走别人的定义；
  *   · 标签/页用 `_fieldDefs`（有序 ref 列表）**声明**它可用的字段；
  *   · 值永远在**块上** `props[propId]`（一块一槽），声明只提供「可用性」。
@@ -13,14 +13,11 @@
  * ⚠️ `_fieldDefs` 里存的是 **ref（id）**，不是名字：改名零迁移，重名不撞车。
  * ⚠️ 本文件零 DOM：属性面板只消费这里的派生结果，写入通过命令。
  */
-import { hasRole, prop, type Block, type BlockProps } from './model.ts'
+import { hasRole, isPropDefBlock, prop, type Block, type BlockProps } from './model.ts'
 import { walkForest } from './walk.ts'
 import { uuidv7Hex } from './ids.ts'
 import type { Atom } from './annotations.ts'
 import { tagsOf } from './tags.ts'
-
-/** 字段定义块的角色 */
-export const SCHEMA_ROLE = 'schema'
 
 /** 声明列表的系统属性（有序 ref 列表；pos ＝ 数组下标） */
 export const FIELD_DEFS_PROP = '_fieldDefs'
@@ -41,13 +38,13 @@ export function mkPropDef(label: string, kind: PropKind = 'text', extra: BlockPr
     id: uuidv7Hex(),
     text: label,
     children: [],
-    props: { _roles: [SCHEMA_ROLE], _kind: kind, ...extra },
+    props: { _kind: kind, ...extra },
   }
 }
 
-/** 是不是字段定义块（角色判定，不看名字） */
+/** 是不是字段定义块（**看数据 `_kind`**，不看名字、也没有额外的角色值） */
 export function isPropDef(b: Block): boolean {
-  return hasRole(b, SCHEMA_ROLE)
+  return isPropDefBlock(b)
 }
 
 /** 定义块上的显示名（**正文即 label**，不存第二份） */

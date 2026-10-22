@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addRole, aliasOf, allPropDefs, allTags, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, rolesOf, resolveRef, tagMemberIds, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { addRole, aliasOf, allPropDefs, allTags, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, resolveRef, tagMemberIds, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
@@ -112,7 +112,7 @@ if (boot.status !== 'ok' || !activeStillExists) ws.activeId = todayId
  * ⚠️ 这里就地找落点、不走 `activeBlock()`：后者是后文才声明的（装配阶段的时序）。
  */
 const bootActive = findInForest(ws.blocks, ws.activeId) ?? ws.blocks[0]
-const bootDays = bootActive && hasRole(bootActive, 'journal') ? journalFeedDays(ws.blocks, todayISO(), FEED_INITIAL) : []
+const bootDays = bootActive && isJournal(bootActive) ? journalFeedDays(ws.blocks, todayISO(), FEED_INITIAL) : []
 for (const day of bootDays) ensureFirstBlock(day.children)
 const bootRoots: Block[] = bootDays.length > 0 ? rootsForMany(bootDays) : bootActive ? rootsFor(bootActive) : []
 
@@ -219,8 +219,8 @@ function uiCtx(): CtxKeys {
     blockHasTagRole: hasRole(focusBlock, 'tag'),
     blockHasName: focusName !== '',
     // 日记：`journalView` 是**真上下文键**（不是 if），`journalDate` 供前后翻日用
-    journalView: hasRole(activeBlock(), 'journal'),
-    journalDate: hasRole(activeBlock(), 'journal') ? (prop<string>(activeBlock(), '_date') ?? '') : '',
+    journalView: isJournal(activeBlock()),
+    journalDate: isJournal(activeBlock()) ? (prop<string>(activeBlock(), '_date') ?? '') : '',
     // 导航历史是否可走：键位表的 `when` 与命令面板的可用态都读这两个键
     canGoBack: nav.back.length > 0,
     canGoForward: nav.forward.length > 0,
@@ -1056,7 +1056,7 @@ const app: App = {
       // ⚠️ 装载口径必须与**冷启动**同一条规则（那里是 `bootDays ? rootsForMany(bootDays) : rootsFor(bootActive)`）：
       //    落点是日记 ⇒ 装**日记流**（今日在顶＋存在的更早的天），别的块 ⇒ 只装它自己。
       //    原来这里只有 `rootsFor(p)`，于是「载入假数据」后日记流消失、只剩今天一段。
-      const feed = hasRole(p, 'journal') ? journalFeedDays(ws.blocks, todayISO(), FEED_INITIAL) : []
+      const feed = isJournal(p) ? journalFeedDays(ws.blocks, todayISO(), FEED_INITIAL) : []
       for (const day of feed) ensureFirstBlock(day.children)
       const roots = feed.length > 0 ? rootsForMany(feed) : rootsFor(p)
       // ⚠️ 光标必须落在**第一个可编辑的行**上（日记流的第一段是只读日期行）。
@@ -1635,7 +1635,7 @@ badge.update()
  */
 function appendMoreFeed(): boolean {
   const roots = mainEd.doc.roots
-  if (roots.length <= 1 || !roots.every((r) => hasRole(r, 'journal'))) return false
+  if (roots.length <= 1 || !roots.every((r) => isJournal(r))) return false
   const active = activeBlock()
   if (!isJournal(active)) return false
   if (roots.length >= FEED_MAX) return false
@@ -1734,7 +1734,7 @@ const api = {
    * 标签块挂在森林根上、不在当前页里 ⇒ 查「标签存不存在」必须用这个。
    */
   allBlocks() {
-    return ws.blocks.map((b) => ({ id: b.id, text: b.text, roles: rolesOf(b) }))
+    return ws.blocks.map((b) => ({ id: b.id, text: b.text, roles: identityTags(b) }))
   },
   /** 字段定义（诊断面）：id ＝ propId、正文 ＝ label、谁声明了它 */
   propDefs() {
@@ -1791,7 +1791,7 @@ const api = {
       collapsed: b.collapsed ?? false,
       children: b.children.length,
       // 角色进诊断面（journal 行是只读日期，测试要能把它挑出来）
-      roles: rolesOf(b),
+      roles: identityTags(b),
     }))
   },
   marks() {

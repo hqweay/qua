@@ -707,7 +707,7 @@ function commandDecls() {
   // 载体换到属性袋（`props._roles`）之后，同一条理由对 `.roles` 也成立，而且更凶：
   // 裸读拿到的是 `undefined`，`(b.roles?.length ?? 0) === 0` 这种写法会静默恒真
   // ⇒ **所有块都成了「无角色」**，页/标签/日记的每一条身份判据同时翻转，一个红灯都没有。
-  // ⇒ `.roles` 只许出现在模型实现里（唯一实现），别处一律走 `hasRole`／`hasAnyRole`／`rolesOf`。
+  // ⇒ `.roles` 只许出现在模型实现里（唯一实现），别处一律走 `hasRole`／`rolesOf`／`identityTags`。
   const ROLES_IMPL = 'src/core/model.ts'
   const hits = []
   for (const f of srcFiles) {
@@ -726,7 +726,7 @@ function commandDecls() {
       }
       // ①b `x.roles`（唯一允许的读点在模型实现里）
       if (ts.isPropertyAccessExpression(n) && n.name.text === 'roles' && r !== ROLES_IMPL) {
-        push(n, '读了裸 `.roles`（走 hasRole／hasAnyRole／rolesOf）')
+        push(n, '读了裸 `.roles`（走 hasRole／rolesOf／identityTags）')
       }
       // ② `x['role']`
       if (

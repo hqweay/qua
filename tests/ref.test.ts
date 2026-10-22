@@ -77,7 +77,7 @@ test('③b 没有 target 的原子 ⇒ dangling（seed 的悬空样本就是这�
 })
 
 test('④ journal 的正文是空的 ⇒ 显示日期投影，不是「无标题」', () => {
-  const forest = [b('j1', '', { props: { _roles: ['journal'], _date: '2026-10-20' } })]
+  const forest = [b('j1', '', { props: { _date: '2026-10-20' } })]
   const v = resolveRef(finder(forest), atom({ label: '某天', target: { kind: 'page', id: 'j1' } }))
   assert.equal(v.state, 'resolved')
   assert.ok(/\d{4}/.test(v.label), `应显示日期投影：${v.label}`)
@@ -93,7 +93,7 @@ test('④b 空正文的普通页 ⇒ 兜底「无标题」（不是空字符串�
 test('refTitle：正文前后空白不算名字；journal 空日期退回正文', () => {
   assert.equal(refTitle(b('p', '  甲  ')), '甲')
   // `_date` 为空时没有可显示的投影 ⇒ 退回正文（此时为空 ⇒ 兜底文案）
-  assert.equal(refTitle(b('j', '', { props: { _roles: ['journal'], _date: '' } })), '无标题')
+  assert.equal(refTitle(b('j', '', { props: { _date: '' } })), '无标题')
 })
 
 test('resolveRefs：按 atomId 返回（不是按位置，顺序变了也不会张冠李戴）', () => {
