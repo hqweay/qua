@@ -33,7 +33,7 @@ export interface PropertiesDeps {
   shortId: (id: string) => string
   setValue: (b: Block, propId: string, value: unknown) => void
   clearValue: (b: Block, propId: string) => void
-  /** 把已有属性声明到 owner（页/标签），成为它的标签属性；普通块则给它加一个空值槽 */
+  /** 把已有属性声明到 owner（页/标签），成为它的标签属性；普通块则登记一条自有属性槽 */
   addField: (b: Block, propId: string) => void
   undeclare: (b: Block, propId: string) => void
   /** 新建定义（可同时声明成标签属性/加块属性槽） */
@@ -156,15 +156,17 @@ export class PropertiesPanel {
      *    那份行派生是共享的，gutter 要用**同一份**（`gutterFieldsOf` 就是它的一个视图）。
      */
     const rows = this.deps.rows(target).filter((r) => uiPositionOf(r.def) !== 'block-left')
-    // 没有任何行、也没有「能声明属性」的角色 ⇒ 不占高度（普通内容块很常见）
-    const canDeclare = hasRole(target, 'page') || hasRole(target, 'tag')
-    if (rows.length === 0 && !canDeclare && !this.formOpen) {
-      this.els.root.hidden = true
-      return
-    }
+    /**
+     * **有当前对象就显示**，不因为「没有行」而收起。
+     *
+     * ⚠️ 判据是入口而不是内容：一个块总能加属性，而「＋ 添加块属性」就在这一区的抬头上。
+     *    按行数收起过一次，结果普通块在加第一条属性之前面板根本不出现 —— 那个加号也就
+     *    没了，于是「给一个空块加第一个属性」这条路径根本走不通。
+     */
     this.els.root.hidden = false
     this.els.body.replaceChildren()
 
+    const canDeclare = hasRole(target, 'page') || hasRole(target, 'tag')
     if (rows.length === 0) {
       const empty = document.createElement('p')
       empty.className = 'props-empty'

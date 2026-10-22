@@ -21,6 +21,7 @@ import {
   cyclePathLabels,
   danglingParentIds,
   declareField,
+  declareOwnProp,
   declaredFieldIds,
   ensureTag,
   ensureFirstBlock,
@@ -598,9 +599,9 @@ export function propsCommands(
   const addProp = (blockId: string, propId: string): void => {
     const b = find(blockId)
     if (!b) return
-    // 页/标签声明它（字段可用）；普通块只有值：先放一个空槽，让它出现在属性区
+    // 页/标签声明它（成员／子块可用）；普通块没有消费者，只登记「这一块有它」
     if (hasRole(b, 'page') || hasRole(b, 'tag')) d.write(blockId, () => declareField(b, propId))
-    else d.write(blockId, () => setValue(b, propId, ''))
+    else d.write(blockId, () => declareOwnProp(b, propId))
   }
 
   return {
