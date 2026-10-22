@@ -29,8 +29,11 @@ export { DEFAULT_DOCK, DEFAULT_PREFS, normalizePrefs } from './prefs.ts'
  * v7 → v8：角色只剩 `page`／`tag`；日记／字段定义／查询视图的身份改由 `_date`／`_kind`／`_query`
  *           推导。旧库带着已不存在的角色值 ⇒ 作废重 seed
  * v8 → v9：折叠从块上移到 `workspace.folded`（块上的 `collapsed` 不再被读 ⇒ 旧库作废重 seed）
+ * v9 → v10：日记块的 id 由「时间戳＋日期数字」改成名字哈希派生。旧库里的日记 id 与新代码
+ *            算出的对不上 ⇒ 「今天」会被判定为不存在而**新建一个空日记**，旧内容留在原地
+ *            但日记流看不见（内容没丢，是「看不见」这种更糟的形态）⇒ 必须作废重 seed
  */
-export const WORKSPACE_VERSION = 9
+export const WORKSPACE_VERSION = 10
 
 /** 示例库：一片块森林 ＋ 行内锚点/原子 */
 export interface Workspace {
