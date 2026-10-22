@@ -130,8 +130,10 @@ export interface Block {
  * ⚠️ 存储位不等于语义：读它请走 `hasRole`／`rolesOf`／`identityTags`，
  *    写它请走 `addRole`／`removeRole`。裸读恒 `undefined`（见 `arch-check` 第 21 条）。
  * ⚠️ 顺序不承载语义，它只是集合的存储形状。
+ * ⚠️ 键名导出只为**一处地图**：整份浅拷属性袋的那条路径（复制子树）必须显式跳过它，
+ *    而这个键名若在两处各写一遍字符串，改名时就会漏掉一处，漏掉的表现是「副本仍是标签」。
  */
-const ROLES_PROP = '_roles' as const
+export const ROLES_PROP = '_roles' as const
 
 /**
  * 这块有没有某个角色。

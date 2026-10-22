@@ -72,19 +72,20 @@ test('合并：前一块是普通内容块 ⇒ 照旧合并（回归）', () => 
   assert.deepEqual(doc.roots.map((b) => b.id), [prev.id])
 })
 
-test('复制子树：角色与属性一起带走，且每一块都发新 id', () => {
+test('复制子树：属性值带走、身份不带走，且每一块都发新 id', () => {
   const kid = mkBlock('子块')
   kid.props = { _icon: 'lucide:star' }
   const page = mkBlock('某页')
   addRole(page, 'page')
-  page.props = { ...page.props, _icon: 'lucide:file' }
+  page.props = { ...page.props, _icon: 'lucide:file', _alias: '另一个名字' }
   page.children = [kid]
 
   const { block, idMap } = cloneSubtree(page)
 
   assert.notEqual(block.id, page.id)
-  assert.deepEqual(block.props?._roles, ['page'], '角色要一起带走，否则复制出来的页只是「长得像」')
-  assert.equal(block.props?._icon, 'lucide:file', '属性要一起带走（图标、日期、字段值）')
+  assert.equal(block.props?._roles, undefined, '副本不带角色：两个块共用一个地址，名字就只能指到其中一个')
+  assert.equal(block.props?._alias, undefined, '副本不带地址：地址属于原件')
+  assert.equal(block.props?._icon, 'lucide:file', '属性值要一起带走（图标、日期、字段值）')
   assert.notEqual(block.props, page.props, '属性袋是副本，不是同一个对象')
   assert.equal(block.text, '某页')
 

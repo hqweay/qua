@@ -4,10 +4,10 @@
  */
 
 import { uuidv7Hex } from './ids.ts'
-import { DELETED_AT_PROP, hasIdentity, isJournalBlock, mkBlock, writeBlockText, type Block, type Doc, type Located } from './model.ts'
+import { DELETED_AT_PROP, ROLES_PROP, hasIdentity, isJournalBlock, mkBlock, writeBlockText, type Block, type BlockProps, type Doc, type Located } from './model.ts'
 import { canWriteText, typeDeclOf } from './types.ts'
 import { walkForest } from './walk.ts'
-import { aliasOf, renameBlock, setAlias } from './alias.ts'
+import { ALIAS_PROP, aliasOf, renameBlock, setAlias } from './alias.ts'
 export function locate(doc: Doc, id: string): Located | null {
   let found: Located | null = null
   walkForest(doc.roots, (b, ctx) => {
@@ -178,10 +178,30 @@ export function hasDescendant(doc: Doc, ancestorId: string, maybeChildId: string
 }
 
 /**
+ * 副本要带走的属性：属性值照带，**身份位（`_alias`／`_roles`）剔除**。
+ *
+ * 判据：复制的是**内容**，不是**身份**。身份（地址、角色）指向的是「这一个」——
+ * 两个块共用一个地址，`[[名字]]` 永远只能指到其中一个，另一个再也引用不到。
+ * ⇒ 副本不带地址与角色；其余属性值照带（那些是这块自己的数据）。
+ *
+ * ⚠️ 代价：复制一个页，副本**失去 `page` 角色**，于是它不再出现在页列表里，
+ *    只是一棵长得像页的普通子树；复制一个标签同理，副本不再被 `#` 补全找到。
+ *    这是有意的：身份不可复制，副本只能是内容。
+ */
+function contentProps(props: BlockProps): BlockProps | undefined {
+  const out = { ...props }
+  delete out[ALIAS_PROP]
+  delete out[ROLES_PROP]
+  // 属性袋不留空壳：一块只有角色的块复制后不该留下 `{}`，否则「有没有属性」会有两份答案
+  return Object.keys(out).length === 0 ? undefined : out
+}
+
+/**
  * 深拷贝子树，**所有块发新 id**；原子/mark 的 blockId 由调用方按 id 映射重建。
  *
- * ⚠️ **角色与属性要一起带走**：漏掉它们，复制一个页／标签／查询块会得到一个
- *    「长得像、但不是」的普通内容块 —— 图标、日期、全部属性值与角色静默消失。
+ * ⚠️ **属性值要一起带走**：漏掉它们，复制一个查询块／带图标的块会得到一个
+ *    「长得像、但不是」的普通内容块 —— 图标、日期、全部属性值静默消失。
+ * ⚠️ **身份不带走**（见 `contentProps`）：地址与角色属于原件，副本只是内容。
  * ⚠️ 属性袋是**浅拷**：属性值由各自的写入口整份替换（没有原地改列表的路径），
  *    所以浅拷不会让原件与副本共享可变值。
  */
@@ -195,9 +215,7 @@ export function cloneSubtree(b: Block): { block: Block; idMap: Map<string, strin
       text: x.text,
       children: x.children.map(cp),
       // ⚠️ 折叠态**不随副本走**：那是「这一行此刻收着」，不是这块的内容。
-      // 角色与属性值都跟着 `props` 走：浅拷一份就把身份与全部值带上了。
-      // 反过来（角色是独立字段）就得在这里多搬一行，漏掉时复制出的页只是一块长得像页的普通块。
-      ...(x.props ? { props: { ...x.props } } : {}),
+      ...(x.props ? { props: contentProps(x.props) } : {}),
     }
   }
   return { block: cp(b), idMap }
