@@ -239,10 +239,18 @@ export interface ResolveOpts {
  */
 export function resolveBindings(kind: BindingKind, ctx: CtxKeys, opts: ResolveOpts = {}): Binding[] {
   const cands = BINDINGS.filter((b) => b.kind === kind)
-  // 层次序 user > plugin > core：同 (kind, command, group) 只留最高层
+  /**
+   * 层次序 user > plugin > core：同一条绑定只留最高层。
+   *
+   * ⚠️ **「同一条」要把 `args` 算进去**：一条命令可以有多条绑定，差别全在参数上 ——
+   *    `insert-block` 就是「正文块／待办／分割线」三个不同的动作，它们共用同一条命令、
+   *    同一个分组。只按 `command|group` 去重会把它们折叠成一条，用户菜单里就只剩第一个。
+   *    按 `args` 展开之后，覆盖一条具体动作（而不是覆盖整条命令）才是准确语义。
+   */
+  const keyOf = (b: Binding): string => `${b.command}|${b.group ?? ''}|${JSON.stringify(b.args ?? null)}`
   const byKey = new Map<string, Binding>()
   for (const b of cands) {
-    const k = `${b.command}|${b.group ?? ''}`
+    const k = keyOf(b)
     const cur = byKey.get(k)
     if (!cur || layerWeight(b.layer) > layerWeight(cur.layer)) byKey.set(k, b)
   }
