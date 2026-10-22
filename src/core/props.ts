@@ -185,9 +185,47 @@ export function declaredFields(owner: Block, forest: readonly Block[]): Block[] 
 
 /* ----------------------------------------------------- 标签属性与块属性 */
 
-/** 块上**自有**的属性 id（`props` 里非系统属性；有值就必然出现在这里） */
+/** 自有属性槽的系统属性（有序 ref 列表；pos ＝ 数组下标） */
+export const OWN_PROPS_PROP = '_ownProps'
+
+/** 这一块自己登记了哪些属性（**有没有**，与**有没有值**是两个问题） */
+export function ownPropIds(block: Block): string[] {
+  const raw = prop<unknown>(block, OWN_PROPS_PROP)
+  if (!Array.isArray(raw)) return []
+  return raw.filter((x): x is string => typeof x === 'string')
+}
+
+/**
+ * 给**普通块**加一条自有属性（幂等；追加到末尾 ＝ 显示顺序）。
+ *
+ * 为什么要一个槽位，而不是写个空值占位：`props[propId] = ''` 会让「键在不在」与
+ * 「值空不空」变成同一个问题的两个答案，而 `hasValue` 判的是后者 —— 于是行显示「待填」，
+ * 值却已经写进库了。槽位是**声明**，值仍旧只在 `props[propId]` 里，两者各答各的问题。
+ *
+ * 与标签的 `_fieldDefs` 同构：标签说「我的成员有这些属性」，块说「我自己有这些属性」。
+ * 判据也一致：都存有序 id 列表、都不写假值。
+ */
+export function declareOwnProp(block: Block, propId: string): boolean {
+  const ids = ownPropIds(block)
+  if (ids.includes(propId)) return false
+  block.props = { ...(block.props ?? {}), [OWN_PROPS_PROP]: [...ids, propId] }
+  return true
+}
+
+/**
+ * 块上**自有**的属性 id（有序）：登记过的槽位在前，其后是有值但没登记的
+ * （值先于声明写入的路径、以及手工写进去的数据），系统属性不算。
+ *
+ * ⚠️ 「这块有没有这条属性」只走这一个读法：槽位算、有值也算。只认值会让
+ *    刚加还没填的行从面板里消失；只认槽位则会让任何写进来的值因为没有登记而不可见。
+ */
 export function ownFieldIds(block: Block): string[] {
-  return Object.keys(block.props ?? {}).filter((k) => !k.startsWith('_'))
+  const out = ownPropIds(block)
+  for (const k of Object.keys(block.props ?? {})) {
+    if (k.startsWith('_') || out.includes(k)) continue
+    out.push(k)
+  }
+  return out
 }
 
 export function valueOf(block: Block, propId: string): unknown {
@@ -226,7 +264,7 @@ export interface FieldRow {
  *    「算作」只影响成员列表（`core/tag-tree.ts` 的 `membersOf`），不影响这里。
  * ⚠️ 顺序：标签按正文顺序、标签内按 `_fieldDefs` 顺序；同一 `propId` 取**最早那次**声明，
  *    因此多标签声明同一属性时行序不会随标签集合抖动（只随正文里标签先后变）。
- * ⚠️ 块属性排在标签属性之后（两类性质不同：前者必有值，后者可能「待填」）。
+ * ⚠️ 块属性排在标签属性之后：顺序由写入路径决定（先声明后显示），性质上两类现在都可能「待填」。
  */
 export function fieldRows(block: Block, forest: readonly Block[], atoms: readonly Atom[]): FieldRow[] {
   const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
@@ -387,12 +425,26 @@ export function setValue(block: Block, propId: string, value: unknown): void {
   block.props = { ...(block.props ?? {}), [propId]: value }
 }
 
-/** 删一个值（只删这一槽；声明与定义都不动） */
+/**
+ * 删一个值（只删这一槽；标签的声明与定义都不动）。
+ *
+ * ⚠️ **自有属性槽跟着一起删**：对普通块来说「这条属性」是用户手动加进来的，清空值
+ *    是这个动作唯一的退路 —— 留下一个永远「待填」的行，用户就再也没法把它去掉。
+ *    标签声明的属性正相反：声明在标签上，值清空后行仍在（那才是「待填」的意义）。
+ */
 export function clearValue(block: Block, propId: string): void {
-  if (!block.props || !(propId in block.props)) return
-  const next = { ...block.props }
+  const hadSlot = ownPropIds(block).includes(propId)
+  if ((!block.props || !(propId in block.props)) && !hadSlot) return
+  const next = { ...(block.props ?? {}) }
   delete next[propId]
-  block.props = next
+  if (hadSlot) {
+    const slots = ownPropIds(block).filter((id) => id !== propId)
+    if (slots.length === 0) delete next[OWN_PROPS_PROP]
+    else next[OWN_PROPS_PROP] = slots
+  }
+  // 属性袋不留空壳：`{}` 与「没有属性」在快照比较里是两种东西
+  if (Object.keys(next).length === 0) delete block.props
+  else block.props = next
 }
 
 /* ------------------------------------------------------------ 摘标签后的清理 */

@@ -79,6 +79,8 @@ export type SystemPropId =
   | '_kind'
   | '_choices'
   | '_fieldDefs'
+  // 自有属性槽：这一块自己登记了哪些属性（见 `core/props.ts` 的 `ownPropIds`）
+  | '_ownProps'
   // 字段定义的**编辑位置**（见 `core/props.ts` 的 `uiPositionOf`）
   | '_uiPosition'
   // 包含（算作）：子标签 → 父标签的有序 ref 列表

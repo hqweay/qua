@@ -184,6 +184,10 @@ export function hasDescendant(doc: Doc, ancestorId: string, maybeChildId: string
  * 两个块共用一个地址，`[[名字]]` 永远只能指到其中一个，另一个再也引用不到。
  * ⇒ 副本不带地址与角色；其余属性值照带（那些是这块自己的数据）。
  *
+ * ⚠️ `_parentTags` 也剔除：它是「这个标签算作谁的子标签」，而那条关系属于原件。
+ *    留着就是一个潜伏值 —— 副本此刻没有 `tag` 角色，用不上它；一旦副本被打回
+ *    标签角色，它就会生效，而它指向的父标签关系是原件的。
+ *
  * ⚠️ 代价：复制一个页，副本**失去 `page` 角色**，于是它不再出现在页列表里，
  *    只是一棵长得像页的普通子树；复制一个标签同理，副本不再被 `#` 补全找到。
  *    这是有意的：身份不可复制，副本只能是内容。
@@ -192,6 +196,7 @@ function contentProps(props: BlockProps): BlockProps | undefined {
   const out = { ...props }
   delete out[ALIAS_PROP]
   delete out[ROLES_PROP]
+  delete out['_parentTags']
   // 属性袋不留空壳：一块只有角色的块复制后不该留下 `{}`，否则「有没有属性」会有两份答案
   return Object.keys(out).length === 0 ? undefined : out
 }
