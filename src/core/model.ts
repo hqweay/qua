@@ -19,12 +19,9 @@ export type TodoState = 'todo' | 'done'
  *    日记流找 `journal`、标签成员找 `tag`、页导航找 `page`。只是为了给渲染层挑一个专用
  *    渲染器而存在的角色不合格：那是「怎么画」的问题（归类型与 `props`），不是「是什么」。
  *
- * `page` 页｜`journal` 日记｜`favorites` 收藏容器块｜
- * `query` 查询视图｜`tag` 标签｜`schema` 字段定义
+ * `page` 页｜`journal` 日记｜`query` 查询视图｜`tag` 标签｜`schema` 字段定义
  *
- * ⚠️ `favorites` 也只是**角色**：容器就是一个普通块（名字 = 正文，内部存一列有序引用边），
- * 没有新实体、没有新数组。
- * ⚠️ `tag` 同理：标签＝一个带 `tag` 角色的普通块，**它不占据树上的位置**（必须在顶层），
+ * ⚠️ `tag` 是**角色**而非类型：标签＝一个带 `tag` 角色的普通块，**它不占据树上的位置**（必须在顶层），
  *    因为它只是指向边的另一端；位置属于内容，名字属于身份。
  * ⚠️ `schema` 同理：字段定义也是一个块（正文 = 显示名），不是新表、不是新容器。
  * ⚠️ **`tag`／`schema`／`journal` 与 `page` 不是同一条规则**：前三个**不参与组织**（必须在顶层），
@@ -33,7 +30,7 @@ export type TodoState = 'todo' | 'done'
  * **兼位**：同一个块可以同时担任多个角色（例：既是标签、又能当页打开）。
  * ⇒ 判定一律走 `hasRole`，**不要**读单个字段做 `===` 比较。
  */
-export type Role = 'page' | 'journal' | 'favorites' | 'query' | 'tag' | 'schema'
+export type Role = 'page' | 'journal' | 'query' | 'tag' | 'schema'
 
 /**
  * 系统属性 id。

@@ -135,15 +135,6 @@ export interface App {
    */
   historyBack(): boolean
   historyForward(): boolean
-  /* 收藏容器块（容器 ＝ 普通块 ＋ 一列有序块引用） */
-  /** 把块加进收藏；`containerId` 省略＝加进第一个容器（没有就建一个） */
-  addFavorite(blockId: string, containerId?: string): void
-  /** 从某个容器里移出一条收藏 */
-  removeFavorite(containerId: string, blockId: string): void
-  /** 调整收藏在容器里的顺序位 */
-  moveFavorite(containerId: string, blockId: string, delta: number): void
-  /** 新建一个收藏容器块（命名容器块） */
-  newFavoriteContainer(title?: string): void
   /* 视图 */
   /** 三档直选（菜单用；`toggleTheme` 是给键位/常驻按钮的循环） */
   setTheme(mode: string): void

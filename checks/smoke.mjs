@@ -1162,8 +1162,8 @@ await check('T12 空态 / 稀疏态 / 降级态都能看（超长块与全英文
   assert(deg.overflowX <= 1, `页面不该横向溢出：${deg.overflowX}px`)
   assert(!deg.editorOverflow, '超长/全英文块不该横向溢出容器')
 
-  // 页名的兜底与截断：**页名现在只出现在引用选择器里**（左槽已改为「收藏容器块」，
-  // 不再列出全部页 —— ）。所以到那个真正的落点去验。
+  // 页名的兜底与截断：**页名现在只出现在引用选择器里**（左槽只放今日、不列全部页），
+  // 所以到那个真正的落点去验。
   await page.evaluate(() => window.__demo.invoke('core.editor/insert-page-ref'))
   await page.waitForTimeout(150)
   const titles = await page.evaluate(() =>
@@ -2838,65 +2838,6 @@ await check('T25 块标左键 = 聚焦/zoom：点一下进子树，右键才开�
 
   await ctx.close()
   return `左键点 ${target.id.slice(-6)} → zoom 收窄到 ${zoomed.here} 块（面包屑「${zoomed.trail.join(' › ')}」，无菜单）；右键 → 块菜单 ${menuLabels.length} 项`
-})
-
-await check('T21 收藏 ＝ 命名容器块 ＋ 一列块引用（不是「全部页」）', async () => {
-  const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
-
-  const view = () =>
-    page.evaluate(() => ({
-      containers: [...document.querySelectorAll('#dock-left .dock-card')].map((c) => ({
-        title: c.querySelector('.dock-card-title')?.textContent?.trim() ?? '',
-        rows: [...c.querySelectorAll('.favorite-row')].map((r) => r.querySelector('.p-title')?.textContent?.trim() ?? ''),
-      })),
-    }))
-
-  // ① 左槽只列**收藏容器里的引用**，不是全部页（假数据 6 页，收藏 2 条）
-  const boot = await view()
-  const fav = boot.containers.find((c) => c.title === '常用')
-  assert(fav, `左槽应有「常用」这个收藏容器：${JSON.stringify(boot.containers)}`)
-  assert(fav.rows.length === 2, `收藏里应有 2 条引用，实际 ${fav.rows.length}：${JSON.stringify(fav.rows)}`)
-  const pageCount = await page.evaluate(() => window.__demo.pages().length)
-  assert(pageCount > fav.rows.length, `收藏不该等于全部页（页 ${pageCount} / 收藏 ${fav.rows.length}）`)
-
-  // ② 收藏顺序＝容器里的顺序位；同一块不会因为被收藏而在自己身上留标记
-  const order0 = await page.evaluate(() => {
-    const c = window.__demo.snapshot().topBlocks
-    return { top: c }
-  })
-  assert(order0.top >= 1, '森林里应有收藏容器块')
-
-  // ③ 把当前页加进收藏（块菜单那条命令）→ 左槽多一行
-  const before = (await view()).containers.find((c) => c.title === '常用').rows.length
-  const added = await page.evaluate(() => {
-    const id = window.__demo.pages()[2].id
-    window.__demo.invoke('core.favorites/add', { blockId: id })
-    return id
-  })
-  await page.waitForTimeout(200)
-  const after = (await view()).containers.find((c) => c.title === '常用').rows.length
-  assert(after === before + 1, `加入收藏后应多一行：${before} → ${after}`)
-
-  // ④ 幂等：再加一次不多
-  await page.evaluate((id) => window.__demo.invoke('core.favorites/add', { blockId: id }), added)
-  await page.waitForTimeout(200)
-  assert((await view()).containers.find((c) => c.title === '常用').rows.length === after, '重复收藏不该多一行')
-
-  // ⑤ 移出：点行尾的 ×
-  await page.locator('#dock-left .favorite-row').first().locator('.favorite-remove').click({ force: true })
-  await page.waitForTimeout(200)
-  const afterRemove = (await view()).containers.find((c) => c.title === '常用').rows.length
-  assert(afterRemove === after - 1, `移出后应少一行：${after} → ${afterRemove}`)
-
-  // ⑥ **删掉容器块，被收藏的数据不受影响**的解耦判据）
-  //    端到端这里不做：demo 没有「删除顶层容器块」的命令面入口；
-  //    该判据已在 `tests/favorites.test.ts` 用模型层严格验证（删容器后页仍在）。
-  const pagesNow = await page.evaluate(() => window.__demo.pages().length)
-  assert(pagesNow === pageCount, `收藏操作不该改变页数：${pageCount} → ${pagesNow}`)
-
-  await ctx.close()
-  return `收藏「常用」2 条（共 ${pageCount} 页）→ 加 1 → 幂等不变 → 移出 1；全程页数不变`
 })
 
 await check('T22 首行即当前对象：页名可编辑、在首行按 Enter 不自环', async () => {

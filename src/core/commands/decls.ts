@@ -95,12 +95,6 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.block/as-tag', title: t('cmd.block.as-tag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'role'] },
   { name: 'core.block/untag', title: t('cmd.block.untag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'role', 'remove'] },
 
-  /* ---- 收藏容器块（收藏 ＝ 命名容器块 ＋ 一列块引用） ---- */
-  { name: 'core.favorites/add', title: t('cmd.favorites.add'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, containerId: { type: 'string' } }, keywords: ['favorite', 'pin', 'bookmark', t('menu.kw.favorite')] },
-  { name: 'core.favorites/remove', title: t('cmd.favorites.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, containerId: { type: 'string' } }, keywords: ['favorite', 'remove'] },
-  { name: 'core.favorites/move', title: t('cmd.favorites.move'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, containerId: { type: 'string' }, delta: { type: 'integer' } } },
-  { name: 'core.favorites/new-container', title: t('cmd.favorites.new-container'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { title: { type: 'string' } }, keywords: ['favorite', 'group', 'container'] },
-
   /* ---- 视图 ---- */
   { name: 'core.view/toggle-theme', title: t('cmd.view.toggle-theme'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dark', 'light', 'theme'] },
   { name: 'core.view/set-theme', title: t('cmd.view.set-theme'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { mode: { type: 'string', enum: ['system', 'light', 'dark'] } }, keywords: ['dark', 'light', 'theme'] },

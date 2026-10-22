@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addRole, aliasOf, allPropDefs, allTags, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, favoritesContainers, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, resolveRef, tagMemberIds, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { addRole, aliasOf, allPropDefs, allTags, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, resolveRef, tagMemberIds, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
@@ -26,7 +26,7 @@ import { dispatchKey, installKeydown, type DispatchEnv } from './core/dispatch.t
 import { applyDockVisibility, applyDockWidth, mountDockSlot } from './ui/dock.ts'
 import { DockBlocks } from './ui/dock-blocks.ts'
 import { bindDockResize } from './ui/dock-resize.ts'
-import { renderBackrefsInto, renderFavoritesInto, type DockContentDeps } from './ui/dock-content.ts'
+import { renderBackrefsInto, renderTodayInto, type DockContentDeps } from './ui/dock-content.ts'
 import { BacklinksView } from './ui/backlinks.ts'
 import { PropertiesPanel } from './ui/properties.ts'
 import { TagPanel } from './ui/tag-panel.ts'
@@ -36,7 +36,7 @@ import { isReadonlyBlock } from './view/block-dom.ts'
 import { createIcon } from './view/icons.ts'
 import { createBadge, type BadgeSnapshot } from './ui/badge.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type PanelDeps } from './ui/panels.ts'
-import { demoCommands, favoritesCommands, journalCommands, pageCommands, propsCommands, rootsFor, rootsForMany, tagTreeCommands, viewCommands, zoomCommands, type PageDeps } from './app/commands-impl.ts'
+import { demoCommands, journalCommands, pageCommands, propsCommands, rootsFor, rootsForMany, tagTreeCommands, viewCommands, zoomCommands, type PageDeps } from './app/commands-impl.ts'
 import { HANDLERS } from './app/handlers.ts'
 import { darkQuery, resolveTheme } from './core/theme.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
@@ -374,10 +374,6 @@ const dockDeps: DockContentDeps = {
   index: () => blocks.index,
   openPage: (id) => void registry.invoke('core.page/open', { pageId: id }, 'menu'),
   newPage: () => void registry.invoke('core.page/new', {}, 'dock'),
-  // 收藏容器块：容器就是一个带 `favorites` 角色的普通块
-  favoriteContainers: () => favoritesContainers(ws.blocks),
-  removeFavorite: (containerId, blockId) =>
-    void registry.invoke('core.favorites/remove', { containerId, blockId }, 'dock'),
 }
 
 /** 重画两个侧槽（页列表变了、切换了当前页、或反链变了） */
@@ -385,7 +381,7 @@ function renderDocks(): void {
   // 先让钉住区处理「清单变了没有」：它只在增删时动 DOM，重画其余卡片不会碰它
   dockPins?.left.render()
   dockPins?.right.render()
-  renderFavoritesInto(dockDeps, dockLeft, dockPins ? { persistent: [dockPins.left.card] } : {})
+  renderTodayInto(dockDeps, dockLeft, dockPins ? { persistent: [dockPins.left.card] } : {})
   renderBackrefsInto(dockDeps, dockRight, dockPins ? { persistent: [dockPins.right.card] } : {})
 }
 
@@ -943,7 +939,6 @@ const app: App = {
   // 日记与页共用同一份依赖（今日是落点，不是特例代码路径）
   ...journalCommands(pageDeps),
   ...zoomCommands(pageDeps),
-  ...favoritesCommands(pageDeps),
   ...propsCommands({
     blocks: () => ws.blocks,
     write: writeProps,
@@ -1544,8 +1539,7 @@ function paintStaticCopy(): void {
 }
 
 /**
- * 两条侧槽：**第 1 期右槽没有内容**（不加空侧栏 ⇒ 右槽默认不渲染）。
- * 左槽装的是「收藏容器块」，内容由 `renderDocks()` 填。
+ * 两条侧槽：左槽放今日与钉住的块，右槽放反链；内容由 `renderDocks()` 填。
  */
 const dockLeft = mountDockSlot($('dock-left'), {
   side: 'left',

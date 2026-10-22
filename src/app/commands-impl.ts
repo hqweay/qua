@@ -12,7 +12,6 @@
  *   一律走注入的能力。
  */
 import {
-  addFavorite,
   addParentTag,
   allPropDefs,
   allTags,
@@ -24,7 +23,6 @@ import {
   declaredFieldIds,
   ensureTag,
   ensureFirstBlock,
-  favoritesContainers,
   findInForest,
   findPath,
   flatten,
@@ -38,7 +36,6 @@ import {
   mkBlock,
   mkJournalBlock,
   mkPropDef,
-  moveFavorite,
   normalizeAlias,
   parentTagIds,
   propKindOf,
@@ -47,9 +44,7 @@ import {
   removeParentTag,
   setValue,
   undeclareField,
-  pruneFavorites,
   removeBlock,
-  removeFavorite,
   shiftISO,
   todayISO,
   type AtomKind,
@@ -455,77 +450,6 @@ export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut'> {
       open(path[0]!.id)
     },
   }
-}
-
-/* ═══════════════════════════════════════════════════════ 收藏容器块 */
-
-/**
- * 收藏：**命名容器块 ＋ 容器内一列有序块引用**。
- *
- * · **不新增实体**：容器就是一个普通块（`favorites` 角色）；引用边 = 它 `_favorites` 上的有序 id 列表。
- * · **不依赖被收藏块的状态**：块上不打任何标记。
- * · **删掉容器，被收藏的数据不受影响**：容器只存 id，从不持有块。
- * · **代价登记**：同一块可被多个容器收藏、顺序各自独立；反查只能扫边（`containersHolding`）。
- */
-export function favoritesCommands(d: PageDeps): Pick<
-  App,
-  'addFavorite' | 'removeFavorite' | 'moveFavorite' | 'newFavoriteContainer'
-> {
-  const containers = () => favoritesContainers(d.blocks())
-
-  /** 没有容器时建一个（懒创建：库是新的、或用户全删过） */
-  const ensureContainer = (): Block => {
-    const list = containers()
-    if (list.length > 0) return list[0]!
-    const c = makeFavoriteContainer(t('ui.favorites.defaultName'))
-    d.blocks().push(c)
-    return c
-  }
-
-  const after = (): void => {
-    d.refreshList()
-    d.scheduleSave()
-  }
-
-  return {
-    addFavorite: (blockId, containerId) => {
-      const forest = d.blocks()
-      if (!findInForest(forest, blockId)) return
-      const target = containerId ? findInForest(forest, containerId) : ensureContainer()
-      if (!target) return
-      // 清掉悬空引用再判断「是否已收藏」，否则死 id 会让幂等判断失真
-      pruneFavorites(forest, target)
-      const added = addFavorite(target, blockId)
-      if (added) d.toast(t('ui.toast.favorited'), 'ok')
-      else d.toast(t('ui.toast.alreadyFavorited'), 'info')
-      after()
-    },
-    removeFavorite: (containerId, blockId) => {
-      const c = findInForest(d.blocks(), containerId)
-      if (!c) return
-      if (removeFavorite(c, blockId)) after()
-    },
-    moveFavorite: (containerId, blockId, delta) => {
-      const c = findInForest(d.blocks(), containerId)
-      if (!c) return
-      if (moveFavorite(c, blockId, delta)) after()
-    },
-    newFavoriteContainer: (title) => {
-      const c = makeFavoriteContainer(title ?? '')
-      d.blocks().push(c)
-      d.refreshList()
-      d.saveNow()
-    },
-  }
-}
-
-/** 建一个收藏容器块（**普通块 + 角色**，没有新类型） */
-export function makeFavoriteContainer(title: string): Block {
-  const b = mkBlock(title)
-  b.roles = ['favorites']
-  // 图标走 `lucide:<name>`；空列表不写 `_favorites`
-  b.props = { _icon: 'lucide:star' }
-  return b
 }
 
 /* ═══════════════════════════════════════════════════════ 视图 */
