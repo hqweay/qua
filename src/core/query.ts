@@ -144,7 +144,7 @@ function matches(node: QueryNode, b: Block, refs: ReadonlySet<string>, tags: Rea
  */
 export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
   const refs = collectRefs(spec.where, input.atoms)
-  const tags = collectTags(spec.where, input.blocks, input.atoms)
+  const tags = collectTags(spec.where, input.blocks)
   /** 范围：`subtree` ⇒ 只收 anchor 之下（含 anchor 自己）；`all` ⇒ 整片森林 */
   let roots: readonly Block[] = input.blocks
   const anchor = spec.scope !== 'all' && input.anchorId ? findById(input.blocks, input.anchorId) : undefined
@@ -183,10 +183,10 @@ function collectRefs(node: QueryNode, atoms: readonly Atom[]): Set<string> {
 /**
  * 满足 `tag` 条件的**块 id** 集合（一次性算出，理由同 `collectRefs`）。
  *
- * ⚠️ 标签名先解析成标签块 id，再按边查：认 id 不认名字（71.3）⇒ 标签改名不影响查询语义。
+ * ⚠️ 标签名先解析成标签块 id，再按归属查：认 id 不认名字 ⇒ 标签改名不影响查询语义。
  *    名字解析不到 ⇒ **空集**（那个标签还不存在，自然没有块带它）—— 不是「当文本搜」。
  */
-function collectTags(node: QueryNode, forest: readonly Block[], atoms: readonly Atom[]): Set<string> {
+function collectTags(node: QueryNode, forest: readonly Block[]): Set<string> {
   const out = new Set<string>()
   const visit = (n: QueryNode): void => {
     if ('all' in n) n.all.forEach(visit)
@@ -194,7 +194,7 @@ function collectTags(node: QueryNode, forest: readonly Block[], atoms: readonly 
     else if ('not' in n) visit(n.not)
     else if ('tag' in n) {
       const tag = findTagByName(forest, n.tag)
-      if (tag) for (const id of tagMemberIds(tag.id, atoms)) out.add(id)
+      if (tag) for (const id of tagMemberIds(tag.id, forest)) out.add(id)
     }
   }
   visit(node)

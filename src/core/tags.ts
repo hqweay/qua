@@ -1,25 +1,22 @@
 /**
- * **标签 ＝ 一条指向边**（71.4 选 A：不留第二套正则解析）。
+ * **标签 ＝ 块上的一格分类字段**（`props._tags`，有序的标签块 id 列表）。
  *
- * 形状：**标签不是一个特殊实体**
- *   · **标签**是一个**块**（`tag` 角色），名字就是它的正文 —— 不是字符串，也不是新实体；
- *   · **打标签**＝插一个 `tag` 行内原子，它的 `target` 指向那个标签块。
- *     ⇒ 边在**正文里**（占位符 U+FFFC）⇒ 删掉那几个字，边随之消失，不留孤儿。
+ * 判据：标签标的是**整个块**，不是正文里的某一个位置。
+ * 句子内要指某个东西，用引用（`[[ ]]`）；标签只做整块分类。
+ * 所以它不该占正文的一格 —— 那一格会被当成「这里」的意思，而它本来没有位置语义。
  *
- * 为什么必须是边而不是文本：
- *   ① 改名传播 —— 标签块改名，所有 `#旧名` 跟着变（复用 `core/ref.ts` 的解析）；
- *   ② 反链免费 —— 「哪些块打了这个标签」＝ 标签块的入向边，不写第二套扫描；
- *   ③ 只有一处认 `#tag` —— 以前 `insert-tag` 写文本、`hasTag` 正则扫文本、渲染再正则包
- *      一层 span，三处各认一次。现在只有本文件认。
+ * 这个判据推出的三件事：
+ *   ① 删字不会顺手删掉标签，摘标签是一次**显式**动作（没有「边藏在正文里」这种半截状态）；
+ *   ② 顺序＝用户打的先后，存在数组里；正文里没有位点需要维护，锚点映射也不必管它；
+ *   ③ 「哪些块打了这个标签」是**派生**的：`tagMemberIds` 扫一遍森林，
+ *      或查 `IndexPort` 的 `tagMembers` 表（调用方优先用后者，扫描是 O(n)）。
  *
- * ⚠️ 不做字段声明（`_schema`）与标签继承（`_is`）—— 两者都不改数据形状，
- *    属于「标签能声明哪些字段」那一层，明确后置。
- * ⚠️ 「在正文里敲 `#foo` 自动成边」**当前不做**（只走 `insert-tag` 命令）。
- *    将来要加，接缝在 `view/editor.ts` 的 `syncFromDom`：在那里扫一次文本并调用 `ensureTag`
- *    即可，与命令路径共用同一个函数，不会分叉成第二条解析。
+ * 标签本身仍是**块**（`tag` 角色）：名字住在它的正文里，归属存 id ⇒ 改名自动传播。
+ * ⚠️ 「在正文里敲 `#foo` 变成标签」当前不做，接缝在 `view/editor.ts` 的输入同步路径：
+ *    在那里把闭合的名字交给 `ensureTag` ＋ `addTagId`，与命令路径共用同一对函数。
  */
 import { uuidv7Hex } from './ids.ts'
-import { addRole, hasRole, type Block, type Role } from './model.ts'
+import { addRole, hasRole, prop, type Block, type Role } from './model.ts'
 import { walkForest } from './walk.ts'
 import { findByAlias, isAddressable, normalizeAlias } from './alias.ts'
 import type { Atom } from './annotations.ts'
@@ -27,11 +24,13 @@ import type { Atom } from './annotations.ts'
 /**
  * 标签块的角色：标签 ＝ 一个带 `tag` 角色的普通块。
  *
- * ⚠️ 它**不占据树上的位置**（必须在顶层）——因为它只是指向边的另一端。
- *    位置属于内容，名字属于身份：所有读路径都按 id 找标签（不按位置），
+ * ⚠️ 它**不占据树上的位置**（必须在顶层）——所有读路径都按 id 找标签（不按位置），
  *    而所有树操作（缩进／拖拽／删除）都会把一个"住在子树里的标签"当货物搬走。
  */
 export const TAG_ROLE: Role = 'tag'
+
+/** 「这块带着哪些标签」的系统属性（有序 id 列表，pos ＝ 数组下标） */
+export const TAGS_PROP = '_tags'
 
 /**
  * 标签名的规范化。
@@ -41,7 +40,7 @@ export const TAG_ROLE: Role = 'tag'
  */
 export const normalizeTag = normalizeAlias
 
-/** 造一个标签块（名字就是正文；图标走系统属性，70.2） */
+/** 造一个标签块（名字就是正文；图标走系统属性） */
 export function mkTagBlock(name: string): Block {
   return {
     id: uuidv7Hex(),
@@ -54,7 +53,7 @@ export function mkTagBlock(name: string): Block {
 /**
  * 按名字找标签块（先序；只认 `tag` 角色）。
  *
- * ⚠️ 名字比较**必须**走 `normalizeTag`：这是「标签名规范化只有一处定义」的落点（71.4 边界），
+ * ⚠️ 名字比较**必须**走 `normalizeTag`：这是「标签名规范化只有一处定义」的落点，
  *    查询条件与 `ensureTag` 共用它，口径不会分叉。
  */
 export function findTagByName(forest: readonly Block[], name: string): Block | undefined {
@@ -105,41 +104,90 @@ export function allTags(forest: readonly Block[]): Block[] {
   return out
 }
 
+/** 标签块 id → 块（**一次扫描**：整屏渲染别按块调 `tagsOf`，那会退化成 O(n²)） */
+export function tagsById(forest: readonly Block[]): Map<string, Block> {
+  return new Map(allTags(forest).map((t) => [t.id, t]))
+}
+
 /**
- * 一个块当前带着哪些标签块（**按边判定**，不是扫文本）。
+ * 这块带着哪些标签 id（**有序**：就是用户打的先后；重复 id 只算一次）。
  *
- * ⚠️ 返回**标签块本身**（活引用），不是名字 —— 要 id 取 `.id`，要显示名走 `refTitle`（会跟着改名）。
- * ⚠️ 同一标签打多次只算一条；顺序按**正文里出现的先后**（边是有位点的）。
+ * ⚠️ 只读一个字段。不扫正文、不解析文本 —— 标签没有位点。
  */
-export function tagsOf(blockId: string, forest: readonly Block[], atoms: readonly Atom[]): Block[] {
-  const byId = new Map<string, Block>()
-  for (const t of allTags(forest)) byId.set(t.id, t)
+export function tagIdsOf(block: Block): string[] {
+  const raw = prop<unknown>(block, TAGS_PROP)
+  if (!Array.isArray(raw)) return []
+  return raw.filter((x): x is string => typeof x === 'string')
+}
+
+/**
+ * 给块加一个标签（**幂等**；追加到末尾 ＝ 顺序就是用户打的先后）。
+ *
+ * @returns 真的写进去了才 `true`；已经有这个标签 ⇒ `false` 且一个字节不动
+ *          （调用方据此决定要不要记一次撤销、要不要弹提示）。
+ */
+export function addTagId(block: Block, tagId: string): boolean {
+  const ids = tagIdsOf(block)
+  if (ids.includes(tagId)) return false
+  block.props = { ...(block.props ?? {}), [TAGS_PROP]: [...ids, tagId] }
+  return true
+}
+
+/** 摘掉一个标签（幂等）；最后一个摘掉时连槽位一起删，不留空壳 */
+export function removeTagId(block: Block, tagId: string): boolean {
+  const ids = tagIdsOf(block)
+  if (!ids.includes(tagId)) return false
+  const next = ids.filter((id) => id !== tagId)
+  const props = { ...(block.props ?? {}) }
+  if (next.length === 0) delete props[TAGS_PROP]
+  else props[TAGS_PROP] = next
+  // 属性袋不留空壳：`{}` 与「没有属性」在快照比较里是两种东西
+  if (Object.keys(props).length === 0) delete block.props
+  else block.props = props
+  return true
+}
+
+/**
+ * 一个块当前带着哪些标签块（**活引用**，顺序＝打的先后）。
+ *
+ * ⚠️ 返回标签块本身，不是名字 —— 要 id 取 `.id`，要显示名走 `refTitle`（会跟着改名）。
+ * ⚠️ 目标块不在了（标签块被删）⇒ 那一格跳过：悬空归属由 tag 面板的清理入口处理，
+ *    这里不替它造一个假目标。
+ * ⚠️ 逐块调用要扫一遍森林找标签块；整屏渲染先用 `tagsById` 建一次表，
+ *    再按 `tagIdsOf` 取。
+ */
+export function tagsOf(block: Block, forest: readonly Block[]): Block[] {
+  const byId = tagsById(forest)
+  return resolveTagIds(block, byId)
+}
+
+/** `tagsOf` 的批量版：标签表已经建好时用它，省掉「每块扫一遍全库」 */
+export function resolveTagIds(block: Block, byId: ReadonlyMap<string, Block>): Block[] {
   const out: Block[] = []
   const seen = new Set<string>()
-  for (const a of atoms) {
-    if (a.kind !== 'tag' || a.blockId !== blockId || !a.target) continue
-    const t = byId.get(a.target.id)
-    if (!t || seen.has(t.id)) continue
-    seen.add(t.id)
+  for (const id of tagIdsOf(block)) {
+    if (seen.has(id)) continue
+    const t = byId.get(id)
+    if (!t) continue
+    seen.add(id)
     out.push(t)
   }
   return out
 }
 
 /**
- * 一个块带不带某个标签（`hasTag` 的新实现：**查边**）。
- * @param tagId 标签块的 id —— **认 id 不认名字**（71.3），改名不影响边的判定。
+ * 一个块带不带某个标签。
+ * @param tagId 标签块的 id —— **认 id 不认名字**，改名不影响归属的判定。
  */
-export function hasTagEdge(blockId: string, tagId: string, atoms: readonly Atom[]): boolean {
-  return atoms.some((a) => a.kind === 'tag' && a.blockId === blockId && a.target?.id === tagId)
+export function hasTag(block: Block, tagId: string): boolean {
+  return tagIdsOf(block).includes(tagId)
 }
 
-/** 按名字判断（给查询条件用；内部解析成 id 再查边） */
-export function hasTagName(blockId: string, name: string, forest: readonly Block[], atoms: readonly Atom[]): boolean {
-  const want = normalizeTag(name)
-  const tag = findTag(forest, want)
+/** 按名字判断（给查询条件用；内部解析成 id 再查归属） */
+export function hasTagName(block: Block, name: string, forest: readonly Block[]): boolean {
+  const tag = findTag(forest, name)
   if (!tag) return false
-  return hasTagEdge(blockId, tag.id, atoms)
+  return hasTag(block, tag.id)
 }
 
 /**
@@ -174,27 +222,27 @@ export function trailingHashTag(text: string): { name: string; from: number; to:
 /**
  * 打了某个标签的**块 id** 集合（标签的「成员列表」）。
  *
- * 这就是「标签页的反链」：反链＝指向它的入向边，标签成员＝指向标签块的 tag 边。
- * 两者**数据上同构**，区别只在呈现（`[[名]]` vs `#名`）—— 见 AK6 的边 role 表。
+ * ⚠️ 这是**全库扫描**（O(n)）：归属住在块上，没有反向指针，这是派生索引该做的事。
+ *    `IndexPort` 已经有一张 `tagMembers` 表，渲染循环与查询里请优先查表。
  */
-export function tagMemberIds(tagId: string, atoms: readonly Atom[]): Set<string> {
+export function tagMemberIds(tagId: string, forest: readonly Block[]): Set<string> {
   const out = new Set<string>()
-  for (const a of atoms) {
-    if (a.kind === 'tag' && a.target?.id === tagId) out.add(a.blockId)
-  }
+  walkForest(forest, (b) => {
+    if (hasTag(b, tagId)) out.add(b.id)
+  })
   return out
 }
 
 /**
- * **指向边**的源块集合：引用与标签都算（供反链与「改名传播」共用）。
+ * **指向边**的源块集合：引用（`[[ ]]`）的源块（供反链与「改名传播」共用）。
  *
- * 为什么需要它：`backrefsOf` 原先只认 `kind === 'page'` ⇒ 标签边不是入向边
- * ⇒ 「标签块的反链」永远是空的。两类边同构，不该在扫描时分别对待。
+ * ⚠️ 标签**不在**这里：标签是块级归属，不是一个位点上的边 —— 它没有「另一端在正文哪儿」，
+ *    所以改名传播与反链要单独问 `tagIdsOf`（见 `view/editor.ts` 的重画路径）。
  */
 export function edgeSourceIds(atoms: readonly Atom[], targetId: string): Set<string> {
   const out = new Set<string>()
   for (const a of atoms) {
-    if ((a.kind === 'page' || a.kind === 'tag') && a.target?.id === targetId) out.add(a.blockId)
+    if (a.kind === 'page' && a.target?.id === targetId) out.add(a.blockId)
   }
   return out
 }

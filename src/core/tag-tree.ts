@@ -15,7 +15,6 @@
  */
 import { hasRole, prop, type Block } from './model.ts'
 import { walkForest } from './walk.ts'
-import type { Atom } from './annotations.ts'
 import { findInForest } from './tree.ts'
 import { allTags, tagMemberIds } from './tags.ts'
 
@@ -81,21 +80,23 @@ export function descendantTagIds(tagId: string, forest: readonly Block[]): Set<s
 }
 
 /**
- * 成员（**含算作**）：自己 ∪ 后代标签的 tag 边源块。
+ * 成员（**含算作**）：自己 ∪ 后代标签的成员。
  *
  * ⚠️ 与 `core/props.ts` 的 `fieldsOf` 解耦：这里多出来的块**不获得**祖先标签的字段。
+ * ⚠️ 每个标签各扫一遍森林（`tagMemberIds` 是 O(n)）⇒ 标签很多时这里会变成 O(n·标签数)。
+ *    调用方若是逐行渲染，先自己扫一遍建「块 → 标签」表，别在循环里调这个。
  */
-export function membersOf(tagId: string, forest: readonly Block[], atoms: readonly Atom[]): Set<string> {
+export function membersOf(tagId: string, forest: readonly Block[]): Set<string> {
   const out = new Set<string>()
   for (const id of descendantTagIds(tagId, forest)) {
-    for (const member of tagMemberIds(id, atoms)) out.add(member)
+    for (const member of tagMemberIds(id, forest)) out.add(member)
   }
   return out
 }
 
 /** 成员块（按森林先序；用于 footer 渲染） */
-export function memberBlocks(tagId: string, forest: readonly Block[], atoms: readonly Atom[]): Block[] {
-  const ids = membersOf(tagId, forest, atoms)
+export function memberBlocks(tagId: string, forest: readonly Block[]): Block[] {
+  const ids = membersOf(tagId, forest)
   const out: Block[] = []
   walkForest(forest, (b) => {
     if (ids.has(b.id)) out.push(b)

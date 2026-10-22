@@ -104,8 +104,8 @@ export const HANDLERS: Record<string, Handler> = {
   'core.editor/insert-tag': (a, app) => {
     if (!curBlock(app)) return false
     const tag = S(a.tag, t('ui.arg.defaultTag'))
-    // 整件事在门面里一次做完：ensureTag（可能写森林）＋ insertAtom（写正文）。
-    // 以前这里是 `editBlock(..., '#tag ')` —— 往正文里写**文本**，那不是一条边。
+    // 整件事在门面里一次做完：ensureTag（可能写森林）＋ 写当前块的归属。
+    // 标签标的是**整个块**，所以落点是当前块，与光标在块内哪儿无关。
     app.insertTag(tag)
     return true
   },

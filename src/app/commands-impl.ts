@@ -14,6 +14,7 @@
 import {
   addParentTag,
   addRole,
+  addTagId,
   allPropDefs,
   allTags,
   checkAddParent,
@@ -30,6 +31,7 @@ import {
   flatten,
   FEED_INITIAL,
   hasRole,
+  hasTag,
   renameBlock,
   isJournal,
   journalDate,
@@ -49,7 +51,6 @@ import {
   removeBlock,
   shiftISO,
   todayISO,
-  type AtomKind,
   type Block,
 } from '../core/index.ts'
 
@@ -149,20 +150,18 @@ export interface PageDeps {
   /** 读回收站（同样是活引用）：删页是「摘进回收站」，不是抹掉 */
   trash: () => Block[]
   /**
-   * 插行内原子（打标签用）。
+   * 打标签的落点：**当前光标所在的块**（没有活动块时回退到首行）。
    *
    * ⚠️ 为什么注入的是**一个函数**而不是 `editor` 对象本身：活动编辑器是会变的
    *    （正文 vs 反链 footer），注入对象会在切换后指向旧实例；注入函数每次取当前的。
-   * ⚠️ 它必须落到**共享 store**，否则别的视图（反链/查询）看不到这条边。
    */
-  insertAtom: (kind: AtomKind, opts: Parameters<App['ed']['insertAtom']>[1]) => string | null
+  caretBlockId: () => string | null
   /**
-   * 把正文里的一段区间换成一条标签边（敲 `#名字` 的成边路径）。
+   * 一次块写入（属性）：装配层负责撤销快照、索引失效、重画当前行与落盘。
    *
-   * 与 `insertAtom` 分开注入，是因为两者是**不同的动作**：
-   * 一个在光标处插入一格，一个把已经写好的字换成那一格。
+   * ⚠️ 必须落到**共享 store**，否则别的视图（反链/查询）看不到这次改动。
    */
-  linkTagRange: (blockId: string, from: number, to: number, label: string, targetId: string) => string | null
+  write: (blockId: string, mutate: () => void) => void
   activeId: () => string
   setActiveId: (id: string) => void
   /** 把某页的子树装进编辑器（marks/atoms 是库级平铺） */
@@ -296,29 +295,32 @@ export function pageCommands(d: PageDeps): Pick<
     focusTitle: () => d.focusFirstBlock(),
 
     /**
-     * **打标签**＝插一条指向标签块的边。
+     * **打标签＝给这一块加一格分类**（`props._tags`）。
      *
-     * 两步一次做完（「找到或创建标签块」＋「插原子」），中间不留半截状态：
-     * 只建块没插边 ⇒ 库里多一个没人引用的标签；只插边没建块 ⇒ 边指着不存在的目标。
+     * 两步一次做完（「找到或创建标签块」＋「写进块的归属」），中间不留半截状态：
+     * 只建块没写归属 ⇒ 库里多一个没人用的标签；只写归属没建块 ⇒ 归属指向不存在的 id。
      *
-     * **两种入口，同一条实现**：
-     *   · 命令 / 选择器：在**光标处插入**一格（`replace` 省略）；
-     *   · 正文里敲出 `#名字`：把**已经写好的那几个字**换成那一格（传 `replace`）。
-     *
+     * ⚠️ 标签标的是**整个块**，不是光标处那一格 —— 所以落点是「当前块」，
+     *    与光标在块内的哪个位置无关。要在句子里指某个东西，用引用（`[[ ]]`）。
      * ⚠️ 空名字直接拒绝（不建无名标签）：没有名字的标签没有身份，建了就是孤儿。
-     * ⚠️ 建了新标签要 `refreshList` ＋ `scheduleSave`：森林变了，且这是要落盘的内容。
+     * ⚠️ 建了新标签要 `refreshList`：森林变了，左槽的标签清单要跟着更新。
      */
-    insertTag: (tag, replace) => {
+    insertTag: (tag) => {
+      const hostId = d.caretBlockId()
+      const host = hostId ? findInForest(d.blocks(), hostId) : undefined
+      if (!host) return
       const { block, created, reused } = ensureTag(d.blocks(), tag)
       if (!block) {
         d.toast(t('ui.toast.tagEmpty'), 'warn')
         return
       }
-      const target = { kind: 'page' as const, id: block.id }
-      const ok = replace
-        ? d.linkTagRange(replace.blockId, replace.from, replace.to, block.text, block.id)
-        : d.insertAtom('tag', { label: block.text, target })
-      if (!ok) return
+      if (hasTag(host, block.id)) {
+        d.toast(t('ui.toast.tagAlready', { tag: block.text }), 'info')
+        return
+      }
+      d.write(host.id, () => {
+        addTagId(host, block.id)
+      })
       if (created) {
         d.refreshList()
         d.toast(t('ui.toast.tagCreated', { tag: block.text }))
@@ -329,7 +331,6 @@ export function pageCommands(d: PageDeps): Pick<
       } else {
         d.toast(t('ui.toast.tagAdded', { tag: block.text }))
       }
-      d.scheduleSave()
     },
 
     showRefPicker: () => {

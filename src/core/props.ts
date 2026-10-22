@@ -20,8 +20,7 @@
 import { hasRole, isPropDefBlock, prop, type Block, type BlockProps, type TodoState } from './model.ts'
 import { walkForest } from './walk.ts'
 import { derivedId, uuidv7Hex } from './ids.ts'
-import type { Atom } from './annotations.ts'
-import { allTags, tagsOf } from './tags.ts'
+import { resolveTagIds, tagsById } from './tags.ts'
 
 /** 声明列表的系统属性（有序 ref 列表；pos ＝ 数组下标） */
 export const FIELD_DEFS_PROP = '_fieldDefs'
@@ -262,16 +261,16 @@ export interface FieldRow {
  *
  * ⚠️ **只算直接标签**：`#演员` 的成员不会因为 `#人物` 声明了属性就冒出那些属性。
  *    「算作」只影响成员列表（`core/tag-tree.ts` 的 `membersOf`），不影响这里。
- * ⚠️ 顺序：标签按正文顺序、标签内按 `_fieldDefs` 顺序；同一 `propId` 取**最早那次**声明，
- *    因此多标签声明同一属性时行序不会随标签集合抖动（只随正文里标签先后变）。
+ * ⚠️ 顺序：标签按打的先后、标签内按 `_fieldDefs` 顺序；同一 `propId` 取**最早那次**声明，
+ *    因此多标签声明同一属性时行序不会随标签集合抖动（只随标签顺序变）。
  * ⚠️ 块属性排在标签属性之后：顺序由写入路径决定（先声明后显示），性质上两类现在都可能「待填」。
  */
-export function fieldRows(block: Block, forest: readonly Block[], atoms: readonly Atom[]): FieldRow[] {
+export function fieldRows(block: Block, forest: readonly Block[]): FieldRow[] {
   const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
   const rows = new Map<string, FieldRow>()
   let order = 0
 
-  for (const tag of tagsOf(block.id, forest, atoms)) {
+  for (const tag of resolveTagIds(block, tagsById(forest))) {
     for (const propId of declaredFieldIds(tag)) {
       const existing = rows.get(propId)
       if (existing) {
@@ -311,8 +310,8 @@ export function fieldRows(block: Block, forest: readonly Block[], atoms: readonl
 }
 
 /** 属性 id 集合（模型口径的 `fieldsOf`：标签属性 ∪ 块属性） */
-export function fieldIdsOf(block: Block, forest: readonly Block[], atoms: readonly Atom[]): string[] {
-  return fieldRows(block, forest, atoms).map((r) => r.propId)
+export function fieldIdsOf(block: Block, forest: readonly Block[]): string[] {
+  return fieldRows(block, forest).map((r) => r.propId)
 }
 
 /** gutter 上的一件（派生，不落库） */
@@ -342,20 +341,16 @@ export interface GutterField {
  *    ⇒ 未填的行照样返回，`filled` 交给渲染方决定怎么画（空心／不画／灰掉）。
  *
  * ⚠️ 调用方是**那一列的局部渲染**（只认一个块），不是整片森林的装饰层。
- *    整屏渲染请用批量的 `gutterFieldsFor`：本函数每调一次都要重扫定义块与标签边，
+ *    整屏渲染请用批量的 `gutterFieldsFor`：本函数每调一次都要重扫定义块与标签块，
  *    逐行调就是 O(n²)。
  * ⚠️ 右侧面板用的是**同一份行派生**再按位置过滤（见 `ui/properties.ts`），
  *    所以两个编辑面不会对同一条属性给出不同答案。
  */
-export function gutterFieldsOf(
-  block: Block,
-  forest: readonly Block[],
-  atoms: readonly Atom[],
-): GutterField[] {
+export function gutterFieldsOf(block: Block, forest: readonly Block[]): GutterField[] {
   // 口径必须与批量的 `gutterFieldsFor` 一致：它吃的是同一份 `fieldRows`（声明 ∪ 自有、同 id 一行），
   // 只是「扫库」在行级重复做了一遍 —— 所以单块用它、整屏用批量。
   const out: GutterField[] = []
-  for (const row of fieldRows(block, forest, atoms)) {
+  for (const row of fieldRows(block, forest)) {
     if (!row.def) continue
     if (uiPositionOf(row.def) !== 'block-left') continue
     out.push({ propId: row.propId, def: row.def, kind: row.kind, value: row.value, filled: row.filled })
@@ -366,33 +361,22 @@ export function gutterFieldsOf(
 /**
  * 一次渲染批里所有该在 gutter 编辑的属性：**一次扫库，逐行分发**。
  *
- * 为什么不复用 `gutterFieldsOf` 逐行算：它每次调用都要重新扫一遍定义块与标签边，
+ * 为什么不复用 `gutterFieldsOf` 逐行算：它每次调用都要重新扫一遍定义块与标签块，
  * 于是整屏渲染从 O(n) 变成 O(n²)。这里把「扫库」提到批级，行级只做查表。
  *
  * 返回 `Map<blockId, GutterField[]>`；没有 gutter 属性的块**不出现在 map 里**
  * （空数组与缺席同义，少一次存在性判断）。
  *
- * 行的口径与 `fieldRows` 一致：**标签属性在前（按正文里标签先后、标签内按声明顺序），
+ * 行的口径与 `fieldRows` 一致：**标签属性在前（按标签的先后、标签内按声明顺序），
  * 块属性在后**，同一 `propId` 只出现一次。
  */
 export function gutterFieldsFor(
   blocks: readonly Block[],
   forest: readonly Block[],
-  atoms: readonly Atom[],
 ): Map<string, GutterField[]> {
   // 定义块与标签块各扫**一次**：行级只查表
   const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
-  const tagById = new Map(allTags(forest).map((t) => [t.id, t]))
-  /** 块 → 它带着的标签（按正文里的先后；同一标签打多次只算一条，与 `tagsOf` 同口径） */
-  const tagsByBlock = new Map<string, Block[]>()
-  for (const a of atoms) {
-    if (a.kind !== 'tag' || !a.target) continue
-    const tag = tagById.get(a.target.id)
-    if (!tag) continue
-    const list = tagsByBlock.get(a.blockId)
-    if (!list) tagsByBlock.set(a.blockId, [tag])
-    else if (!list.some((t) => t.id === tag.id)) list.push(tag)
-  }
+  const tagById = tagsById(forest)
 
   const out = new Map<string, GutterField[]>()
   for (const block of blocks) {
@@ -411,7 +395,7 @@ export function gutterFieldsFor(
         filled: hasValue(block, propId),
       })
     }
-    for (const tag of tagsByBlock.get(block.id) ?? []) for (const propId of declaredFieldIds(tag)) take(propId)
+    for (const tag of resolveTagIds(block, tagById)) for (const propId of declaredFieldIds(tag)) take(propId)
     for (const propId of ownFieldIds(block)) take(propId)
     if (fields.size > 0) out.set(block.id, [...fields.values()])
   }
@@ -456,10 +440,10 @@ export function clearValue(block: Block, propId: string): void {
  *   · 该标签声明了它；② 块上有值；③ **剩余标签都不声明它**（被别处声明 ⇒ 不是这一节的值）。
  * 摘标签**默认不清理**（值留存）—— 本函数只回答「清理的话会清哪些」，由用户决定。
  */
-export function cleanableValues(block: Block, removedTag: Block, forest: readonly Block[], atoms: readonly Atom[]): string[] {
+export function cleanableValues(block: Block, removedTag: Block, forest: readonly Block[]): string[] {
   const declared = declaredFieldIds(removedTag)
   if (declared.length === 0) return []
-  const remaining = tagsOf(block.id, forest, atoms).filter((t) => t.id !== removedTag.id)
+  const remaining = resolveTagIds(block, tagsById(forest)).filter((t) => t.id !== removedTag.id)
   const stillDeclared = new Set(remaining.flatMap((t) => declaredFieldIds(t)))
   return declared.filter((pid) => hasValue(block, pid) && !stillDeclared.has(pid))
 }

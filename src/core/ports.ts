@@ -84,13 +84,13 @@ export interface App {
   focusTitle(): void
   showRefPicker(): void
   /**
-   * **打标签**＝插一条指向「标签块」的边（`ensureTag` 找不到就先建那个块）。
+   * **打标签**＝给当前块加一格分类（`props._tags`；`ensureTag` 找不到标签块就先建）。
    *
-   * ⚠️ 为什么整个动作要一门面方法、而不是 handler 里「建块 ＋ insertAtom」两步：
-   *    「找到或创建标签块」要**写森林**，而森林由装配层持有；handler 拿它不到（59 ）。
-   *    拆成两步又会让「建了标签但没插上边」这种半截状态成为可能。
+   * ⚠️ 为什么整个动作要一门面方法、而不是 handler 里「建块 ＋ 写属性」两步：
+   *    「找到或创建标签块」要**写森林**，而森林由装配层持有；handler 拿它不到。
+   *    拆成两步又会让「建了标签但没写上归属」这种半截状态成为可能。
    */
-  insertTag(tag: string, replace?: { blockId: string; from: number; to: number }): void
+  insertTag(tag: string): void
   /* 属性（属性是块第一公民；值在块上 `props[propId]`，一块一槽） */
   setPropValue(blockId: string, propId: string, value: unknown): void
   clearPropValue(blockId: string, propId: string): void

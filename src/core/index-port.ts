@@ -15,7 +15,7 @@ import { hasRole, type Block } from './model.ts'
 import { walkForest } from './walk.ts'
 import { addressOf } from './alias.ts'
 import { journalDate, isJournal } from './journal.ts'
-import { normalizeTag, TAG_ROLE } from './tags.ts'
+import { normalizeTag, tagIdsOf, TAG_ROLE } from './tags.ts'
 import type { Change } from './storage/port.ts'
 
 /**
@@ -24,8 +24,8 @@ import type { Change } from './storage/port.ts'
  * | 表 | 答什么 | 谁在用 |
  * |---|---|---|
  * | `blocks` | 这个 id 现在是哪一块、叫什么 | 引用解析（`resolveRef`） |
- * | `incoming` | 谁指向它、指向了几次（引用 ＋ 标签都算） | 反链 |
- * | `tagMembers` | 谁打了这个标签（**只有 tag 边**，同块多次只算一次） | 标签成员 |
+ * | `incoming` | 谁引用它、引用了几次 | 反链 |
+ * | `tagMembers` | 谁打了这个标签（**从块上的 `_tags` 建**，同块多次只算一次） | 标签成员 |
  * | `tags` / `journals` | 按名字/日期找块 | 标签解析、日记条件 |
  * | `pageOf` | 这块住哪一页 | 反链按来源页聚合 |
  */
@@ -33,8 +33,10 @@ export interface Index {
   /** 块 id → 块（**活引用**） */
   blocks: Map<string, Block>
   /**
-   * 入向边：targetId → (源块 id → **边数**)。
+   * 入向边：targetId → (源块 id → **引用数**)。
    *
+   * ⚠️ 只算**引用**（`[[名]]`）：标签是块级归属，不进这张表（它没有位点，也就没有边数）。
+   *    标签的成员关系在 `tagMembers`，两张表不要合并。
    * ⚠️ 值是**计数**不是集合：反链要显示「这一页共有几处指向我」，
    *    同一块里引用两次就是两条边。用 `Set` 会把它压成 1（行为会悄悄变）。
    */
@@ -45,6 +47,7 @@ export interface Index {
    * ⚠️ 与 `incoming` 分开存，是因为语义不同：一个 `[[标签块]]` 的**引用**不是「打了这个标签」。
    *    合并成一张表会让「引用到标签块」凭空变成一条成员关系。
    * ⚠️ 这里是**集合**：同一块打两次同一标签只算一个成员（成员关系不是次数）。
+   * ⚠️ 数据源是**块上的 `_tags`**（不是原子）：所以只有块变化才需要重算这张表。
    */
   tagMembers: Map<string, Set<string>>
   /** 规范化标签名 → 标签块 id */
@@ -78,27 +81,36 @@ export function rebuild(forest: readonly Block[], atoms: readonly Atom[]): Index
   // ① 块表 / 标签表 / 日记表 / 父页表（一次先序遍历；与增量修补同一口径）
   for (const b of forest) indexSubtree(idx, b)
 
-  // ② 指向边（引用与标签都算）
+  // ② 入向边（只有引用：标签是块级归属，不占正方位点）
   addEdges(idx, atoms)
+
+  // ③ 标签成员（数据源是块上的 `_tags`）
+  addTagMembers(idx, forest)
 
   return idx
 }
 
-/** 把原子的指向边累加进 `incoming` / `tagMembers` */
+/** 把原子的引用累加进 `incoming` */
 function addEdges(idx: Index, atoms: readonly Atom[]): void {
   for (const a of atoms) {
     const target = a.target?.id
     if (!target) continue
-    if (a.kind !== 'page' && a.kind !== 'tag') continue
+    if (a.kind !== 'page') continue
     const perSource = idx.incoming.get(target)
     if (perSource) perSource.set(a.blockId, (perSource.get(a.blockId) ?? 0) + 1)
     else idx.incoming.set(target, new Map([[a.blockId, 1]]))
-    if (a.kind === 'tag') {
-      const members = idx.tagMembers.get(target)
-      if (members) members.add(a.blockId)
-      else idx.tagMembers.set(target, new Set([a.blockId]))
-    }
   }
+}
+
+/** 把块上的标签归属累加进 `tagMembers`（一次先序遍历） */
+function addTagMembers(idx: Index, forest: readonly Block[]): void {
+  walkForest(forest, (b) => {
+    for (const tagId of tagIdsOf(b)) {
+      const members = idx.tagMembers.get(tagId)
+      if (members) members.add(b.id)
+      else idx.tagMembers.set(tagId, new Set([b.id]))
+    }
+  })
 }
 
 /**
@@ -116,7 +128,8 @@ function addEdges(idx: Index, atoms: readonly Atom[]): void {
  *   连同 `op` 一起报出来，这里再换成按块修补，**对外形状不变**
  *   （`Change` 已经预留了精确到 id 的语义）。
  *
- * 只有**原子**变化时才是真增量：块表／名字表／日记表／父页表完全不动，只重算两张边表。
+ * 只有**原子**变化时才是真增量：块表／名字表／日记表／父页表完全不动，只重算入向边
+ * （`tagMembers` 的数据源在块上 ⇒ 块没动就不用碰它）。
  */
 export function applyChanges(
   index: Index,
@@ -130,11 +143,12 @@ export function applyChanges(
   // 块动过 ⇒ 一切作废（见上面的「为什么不按块修补」）
   if (kinds.has('blocks')) return rebuild(forest, atoms)
 
-  // 只剩原子变化：块表／名字表／日记表／父页表完全不动，只重算两张边表
+  // 只剩原子变化：块表／名字表／日记表／父页表完全不动，只重算入向边
+  // （`tagMembers` 来自块上的 `_tags` ⇒ 块没动，那张表原样带过去）
   const next: Index = {
     blocks: index.blocks,
     incoming: new Map(),
-    tagMembers: new Map(),
+    tagMembers: index.tagMembers,
     tags: index.tags,
     journals: index.journals,
     pageOf: index.pageOf,
@@ -192,7 +206,7 @@ export function lookupBlock(index: Index, id: string): Block | undefined {
   return index.blocks.get(id)
 }
 
-/** 谁指向它（引用 ＋ 标签）—— 反链的源块清单 */
+/** 谁引用它（`[[名]]`）—— 反链的源块清单（标签成员见 `tagMemberIdsOf`） */
 export function incomingIds(index: Index, targetId: string): string[] {
   return [...(index.incoming.get(targetId)?.keys() ?? [])]
 }

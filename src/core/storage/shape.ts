@@ -37,8 +37,10 @@ export { DEFAULT_DOCK, DEFAULT_PREFS, normalizePrefs } from './prefs.ts'
  * v11 → v12：新增库级 `trash`（删除改成「摘出到回收站」）。
  *            旧库没有这一格读出来就是 `[]`，本不必作废；加一版是为了让**写路径**只面对一种形状
  *            （落盘的每份库都带 `trash`），免得「有没有这一格」在下游变成两条分支。
+ * v12 → v13：标签从「正文里占一格的原子」改成块级归属 `props._tags`。
+ *            旧库的 `kind:'tag'` 原子不再被任何读路径认（标签会静默消失）⇒ 作废重 seed。
  */
-export const WORKSPACE_VERSION = 12
+export const WORKSPACE_VERSION = 13
 
 /** 示例库：一片块森林 ＋ 行内锚点/原子 */
 export interface Workspace {
