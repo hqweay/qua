@@ -47,9 +47,9 @@ export const MSG = {
   'cmd.editor.remove-atom': '删除行内原子',
   'cmd.props.set-value': '设置属性值',
   'cmd.props.clear-value': '删除属性值',
-  'cmd.props.create-def': '新建字段定义',
-  'cmd.props.add-field': '添加属性到块',
-  'cmd.props.undeclare': '解除字段声明',
+  'cmd.props.create-def': '新建属性',
+  'cmd.props.add-field': '添加块属性',
+  'cmd.props.undeclare': '解除标签属性',
   'cmd.tags.add-parent': '设为某标签的下级',
   'cmd.tags.remove-parent': '移除一条归属',
   'cmd.tags.prune-parents': '清理失效归属',
@@ -90,26 +90,34 @@ export const MSG = {
   'ui.dock.collapseRight': '收起右槽',
   'ui.dock.empty': '这个槽里还没有块',
   /* ---------------------------------------------------------------- 属性区 */
-  'ui.props.title': '属性',
-  'ui.props.add': '添加属性',
+  /*
+   * 三个词分工，别混：
+   *   · 属性 —— 那个全局定义（有名字、有 kind、可被多处引用）；
+   *   · 标签属性 —— 某个标签声明了哪些属性；
+   *   · 块属性 —— 这个块自己有哪些属性的值。
+   */
+  'ui.props.title': '块属性',
+  'ui.props.add': '添加块属性',
   'ui.props.addShort': '＋ 属性',
-  'ui.props.empty': '还没有属性',
+  'ui.props.empty': '还没有块属性',
   'ui.props.own': '本块自有',
   'ui.props.source': '来自 {tags}',
   'ui.props.pending': '待填',
   'ui.props.unknown': '未知属性 {id}',
   'ui.props.pick': '选择已有属性…',
   'ui.props.use': '用这个',
-  'ui.props.newLabel': '新字段名',
+  'ui.props.newLabel': '属性名',
   'ui.props.create': '新建',
   'ui.props.cancel': '取消',
   'ui.props.clear': '删除这个值',
-  'ui.props.needLabel': '字段名不能为空',
-  'ui.props.declaredTitle': '声明字段（成员可用）',
-  'ui.props.declaredEmpty': '还没有声明字段',
-  'ui.props.undeclare': '解除声明（定义与值都保留）',
-  'ui.props.reused': '已有同名定义（{source}）——已复用它',
-  'ui.props.created': '新建字段「{label}」',
+  'ui.props.needLabel': '属性名不能为空',
+  /* ⚠️ 「标签属性」＝ 这个标签声明了哪些属性；它**不向下继承**——没打这个标签的块一个都没有。
+     所以文案里不能写「被继承」 */
+  'ui.props.declaredTitle': '标签属性',
+  'ui.props.declaredEmpty': '还没有标签属性',
+  'ui.props.undeclare': '解除标签属性（属性本身与值都保留）',
+  'ui.props.reused': '已有同名属性（{source}）——已复用它',
+  'ui.props.created': '新建属性「{label}」',
   'ui.props.kind.text': '文本',
   'ui.props.kind.number': '数字',
   'ui.props.kind.date': '日期',
