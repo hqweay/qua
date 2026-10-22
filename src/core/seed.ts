@@ -186,7 +186,7 @@ function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
     id: journalId(date),
     text: '',
     children,
-    props: { _roles: ['journal'], _date: date, _icon: 'lucide:calendar' },
+    props: { _date: date, _icon: 'lucide:calendar' },
   }
   return { page: block, refs: acc.refs, marks: acc.marks, atoms: acc.atoms }
 }
@@ -291,7 +291,7 @@ export function seedWorkspace(): Workspace {
     {
       text: '本页的待办',
       // 条件只用「待办状态」：这张页里没有同时带 `#todo` 标签的块，加标签条件会得到 0 条
-      props: { _roles: ['query'], _icon: 'lucide:list-filter', _query: { where: { todo: 'todo' } } },
+      props: { _icon: 'lucide:list-filter', _query: { where: { todo: 'todo' } } },
     },
   ])
 

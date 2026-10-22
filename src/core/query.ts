@@ -9,7 +9,7 @@
  * ⚠️ 这里零 DOM、零持久化：求值只吃「森林 ＋ atoms」，所以能直接单测。
  * ⚠️ 接内核后本文件的签名不变：`runQuery` 以后由 `IndexPort.query()` 实现，`QuerySpec` 仍是那个 canonical JSON。
  */
-import { hasRole, type Block } from './model.ts'
+import { isJournalBlock, type Block } from './model.ts'
 import { walkForest } from './walk.ts'
 import type { Atom } from './annotations.ts'
 import { findPath } from './tree.ts'
@@ -135,7 +135,7 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
 
   const hits: QueryHit[] = []
   walk(roots, (b, ancestors) => {
-    if (journalDate && hasRole(b, 'journal')) return
+    if (journalDate && isJournalBlock(b)) return
     if (!matches(spec.where, b, refs, tags)) return
     if (spec.todo && (b.todo ?? 'none') !== spec.todo) return
     hits.push({ blockId: b.id, path: ancestors.map((a) => a.id) })

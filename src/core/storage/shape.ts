@@ -26,8 +26,10 @@ export { DEFAULT_DOCK, DEFAULT_PREFS, normalizePrefs } from './prefs.ts'
  *           角色值会跟着 seed 与旧库一起落盘，旧库带着已不存在的角色就与角色表对不上 ⇒ 作废重 seed
  * v6 → v7：角色从顶层 `roles` 挪进 `props._roles`。旧库的角色字段新代码不读 ⇒
  *           页/标签会静默失去身份，所以必须作废重 seed（不写迁移）
+ * v7 → v8：角色只剩 `page`／`tag`；日记／字段定义／查询视图的身份改由 `_date`／`_kind`／`_query`
+ *           推导。旧库带着已不存在的角色值 ⇒ 作废重 seed
  */
-export const WORKSPACE_VERSION = 7
+export const WORKSPACE_VERSION = 8
 
 /** 示例库：一片块森林 ＋ 行内锚点/原子 */
 export interface Workspace {

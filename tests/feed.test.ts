@@ -15,7 +15,7 @@ const j = (date: string, children: Block[] = []): Block => ({
   id: `j-${date}`,
   text: '',
   children,
-  props: { _roles: ['journal'], _date: date },
+  props: { _date: date },
 })
 const p = (id: string, text: string, children: Block[] = []): Block => ({ id, text, children })
 const dates = (days: Block[]): string[] => days.map((b) => String(b.props?._date))

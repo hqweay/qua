@@ -881,7 +881,7 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
   const frozen = await page.evaluate(() => {
     const raw = localStorage.getItem(localStorage.key(0))
     const data = JSON.parse(raw).data
-    const q = data.blocks.flatMap(function flat(b) { return [b, ...b.children.flatMap(flat)] }).find((b) => b.props?._roles?.includes('query'))
+    const q = data.blocks.flatMap(function flat(b) { return [b, ...b.children.flatMap(flat)] }).find((b) => Boolean(b.props?._query?.where))
     return { hasQuery: Boolean(q?.props?._query), result: q?.props?._queryResult, children: q?.children?.length ?? -1 }
   })
   assert(frozen.hasQuery, '条件要落在 _query 上（AF5：查询块＝数据侧）')

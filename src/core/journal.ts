@@ -1,9 +1,12 @@
 /**
- * 日记：角色 `journal` + 只读日期 `_date` + 一天一个的确定性 id。
+ * 日记：只读日期 `_date` + 一天一个的确定性 id。
  * 日期**不进 text**；模型层没有写 `_date` 的路径。
+ *
+ * ⚠️ 它**不是角色**：「是不是日记」由 `_date` 在不在决定（`isJournalBlock`）。
+ *    再存一个角色值就是同一件事的第二份答案，而两份可以不一致。
  */
 
-import { hasRole, prop, type Block } from './model.ts'
+import { isJournalBlock, prop, type Block } from './model.ts'
 import { walkForest } from './walk.ts'
 export function todayISO(now: Date = new Date()): string {
   const y = now.getFullYear()
@@ -39,7 +42,7 @@ export function journalDate(b: Block): string {
  * （`Block` 减 `Block`），于是「非 journal」那条路一行都写不出来。
  */
 export function isJournal(b: Block | undefined): boolean {
-  return hasRole(b, 'journal')
+  return isJournalBlock(b)
 }
 
 /**
@@ -88,7 +91,7 @@ export const FEED_MAX = 30
 
 /** 一个还没进库的日记块（`blocks` 里没有时才造它） */
 export function mkJournalBlock(date: string): Block {
-  return { id: journalId(date), text: '', children: [], props: { _roles: ['journal'], _date: date, _icon: 'lucide:calendar' } }
+  return { id: journalId(date), text: '', children: [], props: { _date: date, _icon: 'lucide:calendar' } }
 }
 
 /**

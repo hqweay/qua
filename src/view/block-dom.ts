@@ -15,11 +15,11 @@
  */
 import {
   ATOM_PLACEHOLDER,
-  hasRole,
+  identityTags,
+  isJournal,
   journalDate,
   journalDateLabel,
   mkAtom,
-  rolesOf,
   type Atom,
   type Block,
   type FindBlock,
@@ -128,7 +128,7 @@ export function makeAtomEl(a: Atom, view?: RefView): HTMLElement {
  *   分开写会立刻分叉（2026-10-20 实际踩过：只读行让 ⌘A 的原生全选退化成空选区）。
  */
 export function isReadonlyBlock(b: Block): boolean {
-  return hasRole(b, 'journal')
+  return isJournal(b)
 }
 
 /**
@@ -243,7 +243,7 @@ export function makeBlockEl(
   // 兼位块把**全部角色**写进同一个属性（空格分隔，选择器用 `~=`）——
   // 只写一个会等于按数组顺序裁决，而角色的顺序不承载语义。
   // ⚠️ 这只是**外观**差异，语义上它仍是一块（2026-10-20 去掉「标题」概念后的口径）
-  const roles = rolesOf(b)
+  const roles = identityTags(b)
   if (roles.length) el.dataset.role = roles.join(' ')
   el.style.setProperty('--depth', String(r.depth))
 

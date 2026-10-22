@@ -18,21 +18,32 @@ export type TodoState = 'todo' | 'done'
  * 注册表是**封闭种类 × 开放条目**：这里只列 core 已用到的，插件可注册自有角色。
  *
  * ⚠️ **准入门槛：角色是「读路径的入口」。** 每一种角色都得有代码按它把块**找出来**——
- *    日记流找 `journal`、标签成员找 `tag`、页导航找 `page`。只是为了给渲染层挑一个专用
- *    渲染器而存在的角色不合格：那是「怎么画」的问题（归类型与 `props`），不是「是什么」。
+ *    标签成员找 `tag`、页导航找 `page`。只是为了给渲染层挑一个专用渲染器而存在的角色不合格：
+ *    那是「怎么画」的问题（归类型与 `props`），不是「是什么」。
  *
- * `page` 页｜`journal` 日记｜`query` 查询视图｜`tag` 标签｜`schema` 字段定义
+ * **只有两个角色：`page` 页｜`tag` 标签。**
+ *
+ * 判据：**同一件事只有一个答案。** 一个块是不是日记、是不是字段定义、是不是查询视图，
+ * 已经**完全由它身上的数据决定**（有 `_date`／有 `_kind`／`_query` 是合法条件）。
+ * 再为它们各存一个角色值，就是同一件事的第二份答案 —— 而两份答案可以不一致：
+ * 「带角色但没有数据」时，日记流、索引、渲染会各答一半。改成派生之后，
+ * 那种状态**结构上不存在**。
+ *
+ * 反过来，`page` 与 `tag` 是**纯标记**：没有任何别处的数据能推出它们
+ * （有别名 ≠ 是页，实测过；标签是边的一端，边在别处）。
  *
  * ⚠️ `tag` 是**角色**而非类型：标签＝一个带 `tag` 角色的普通块，**它不占据树上的位置**（必须在顶层），
  *    因为它只是指向边的另一端；位置属于内容，名字属于身份。
- * ⚠️ `schema` 同理：字段定义也是一个块（正文 = 显示名），不是新表、不是新容器。
- * ⚠️ **`tag`／`schema`／`journal` 与 `page` 不是同一条规则**：前三个**不参与组织**（必须在顶层），
+ * ⚠️ **`tag` 与 `page` 不是同一条规则**：`tag` 不参与组织（必须在顶层），
  *    `page` 是容器、可以被组织（将来 namespace 就是页嵌页）。
  *
  * **兼位**：同一个块可以同时担任多个角色（例：既是标签、又能当页打开）。
  * ⇒ 判定一律走 `hasRole`，**不要**读单个字段做 `===` 比较。
+ *
+ * 「这一行有没有身份」用 `hasIdentity`（角色 ∪ 由数据派生的身份），
+ * 别拿「角色集合非空」当判据 —— 日记／定义／查询块的角色集合现在是空的。
  */
-export type Role = 'page' | 'journal' | 'query' | 'tag' | 'schema'
+export type Role = 'page' | 'tag'
 
 /**
  * 系统属性 id。
@@ -90,7 +101,7 @@ export interface Block {
  * 复制出来的页只是一块长得像页的普通块，而且**不报错**。
  * 放进 `props` 之后，浅拷贝 `props` 就把角色一起带走了。
  *
- * ⚠️ 存储位不等于语义：读它请走 `hasRole`／`hasAnyRole`／`rolesOf`，
+ * ⚠️ 存储位不等于语义：读它请走 `hasRole`／`rolesOf`／`identityTags`，
  *    写它请走 `addRole`／`removeRole`。裸读恒 `undefined`（见 `arch-check` 第 21 条）。
  * ⚠️ 顺序不承载语义，它只是集合的存储形状。
  */
@@ -106,14 +117,74 @@ export function hasRole(b: Block | undefined, role: Role): boolean {
   return storedRoles(b)?.includes(role) ?? false
 }
 
+/* ------------------------------------------------- 由数据派生的身份 */
+
 /**
- * 这块身上有没有**任何**角色（不关心是哪一个）。
+ * **日记块**：有非空的 `_date`。
  *
- * 存在的理由：「至少有一个角色」这个判断散在拆块、合并、删根几处，
- * 每处都得自己写一遍「空数组也算没有」；写成名字之后，「有没有身份」只有一处定义。
+ * 判据是数据，不是角色：日期就是它的全部内容，`_date` 在不在是唯一事实。
+ * 单独存一个角色会让「有角色、没日期」这种状态存在，而它没有任何合理读法。
+ *
+ * ⚠️ 住在 `model.ts`（零依赖叶子）而不是 `journal.ts`：`canWriteText`／`hasIdentity`
+ *    要用它，反向 import 会成环。
  */
-export function hasAnyRole(b: Block | undefined): boolean {
-  return (storedRoles(b)?.length ?? 0) > 0
+export function isJournalBlock(b: Block | undefined): boolean {
+  if (!b) return false
+  const d = prop<string>(b, '_date')
+  return typeof d === 'string' && d !== ''
+}
+
+/** **字段定义块**：有 `_kind`。定义的种类是它自己的数据，不需要第二份声明 */
+export function isPropDefBlock(b: Block | undefined): boolean {
+  return b?.props?._kind !== undefined
+}
+
+/**
+ * **查询视图块**：`_query` 是一个带 `where` 的条件对象。
+ *
+ * 判据与读条件的那一处（`query-view.ts` 的 `readSpec`）必须是**同一个**：
+ * 「能读出条件」和「是不是查询块」若各有一套判据，就会出现读不出条件的查询块。
+ */
+export function isQueryBlock(b: Block | undefined): boolean {
+  if (!b) return false
+  const raw = prop<unknown>(b, '_query')
+  if (!raw || typeof raw !== 'object') return false
+  const where = (raw as { where?: unknown }).where
+  return !!where && typeof where === 'object'
+}
+
+/**
+ * **这一块的正文是名字或投影，不是内容** —— 身份块的总判据。
+ *
+ * 身份有两个来源，缺一不可：显式角色（页／标签），以及由数据派生的身份
+ * （日记／字段定义／查询视图）。只看角色集合会漏掉后三个 ——
+ * 它们的角色集合现在是空的，而那正是「日记日期行被拆块改写」这类静默回归的形状。
+ *
+ * 判据落成一句话：**这一行的正文是名字或投影，不是内容**。
+ */
+export function hasIdentity(b: Block | undefined): boolean {
+  return (
+    hasRole(b, 'page') || hasRole(b, 'tag') || isJournalBlock(b) || isPropDefBlock(b) || isQueryBlock(b)
+  )
+}
+
+/**
+ * **身份标记**（给外观与诊断面）：显式角色 ∪ 由数据派生的身份名。
+ *
+ * 为什么需要它，而不是直接用 `rolesOf`：角色的种类收窄到两个之后，
+ * 「日记」「定义」「查询」不再有角色值，但**外面还在按这些名字认它们** ——
+ * 样式表按 `data-role` 挑行、诊断面按 `roles` 挑块。让这些读点跟着改判据，
+ * 等于把「怎么认一块的身份」这条口径复制到每个消费方；这里一次性把它们转成名字。
+ *
+ * ⚠️ 这不是「把身份写回块」：标记是**每次现算**的，不落盘、也读不回来。
+ * ⚠️ 顺序不承载语义；调用方只该按集合用（`includes`／`~=`）。
+ */
+export function identityTags(b: Block | undefined): string[] {
+  const tags: string[] = [...(storedRoles(b) ?? [])]
+  if (isJournalBlock(b)) tags.push('journal')
+  if (isPropDefBlock(b)) tags.push('schema')
+  if (isQueryBlock(b)) tags.push('query')
+  return tags
 }
 
 /**
@@ -218,7 +289,7 @@ export function writeBlockText(b: Block, text: string): void {
  * ⚠️ **改名不走这条判据**：改名本来就是要写名字，它走 `renameBlock`。
  */
 export function canWriteText(b: Block): boolean {
-  return !hasRole(b, 'tag') && !hasRole(b, 'schema') && !hasRole(b, 'journal')
+  return !hasRole(b, 'tag') && !isJournalBlock(b) && !isPropDefBlock(b)
 }
 
 /* ---------------------------------------------------------------- props */
@@ -255,8 +326,8 @@ export function ensureFirstBlock(children: Block[]): Block[] {
 /* ---------------------------------------------------------------- journal */
 
 /**
- * 日记块（32 ）：
- *   · **角色 ＝ `journal`**；**内容是日期，由 `_date` 派生显示**（日期**不进 `text`**）
+ * 日记块：
+ *   · **身份 ＝ 有 `_date`**（不存角色值）；**内容是日期，由 `_date` 派生显示**（日期**不进 `text`**）
  *   · **日期完全只读**：模型层没有任何写 `_date` 的路径
  *   · **一天一个**：id 由 (本地日) **确定性派生** ⇒ 并发/多设备打开同一天拿到同一个 id，天然幂等
  */

@@ -18,7 +18,7 @@
  * ⚠️ 这不是「视图类型系统」（29 那套要独立布局状态才升格）。它只是**最小的渲染分派**，
  * 目的是让「槽里是块、块由渲染器画」这个形状现在就在，而不是等视图系统落地才做。
  */
-import { blockTypeOf, DEFAULT_BLOCK_TYPE, hasRole, journalDate, journalDateLabel, prop, type Block, type Role } from '../core/index.ts'
+import { blockTypeOf, DEFAULT_BLOCK_TYPE, isJournal, journalDate, journalDateLabel, prop, type Block } from '../core/index.ts'
 import { renderIcon } from '../view/icons.ts'
 
 /** 渲染一个块时能拿到的东西（后续会加：上下文键、命令执行、订阅） */
@@ -77,7 +77,7 @@ const outlineRenderer: BlockRenderer = {
  *    也就没有「担任什么机制位」可言 —— 箭头只是那一行的 `props._icon`，不是一个角色。
  */
 const journalRenderer: BlockRenderer = {
-  match: (b) => hasRole(b, 'journal'),
+  match: (b) => isJournal(b),
   render: (b, ctx) => {
     const row = document.createElement('button')
     row.type = 'button'
@@ -129,12 +129,6 @@ const RENDERERS: BlockRenderer[] = [...CHROME_RENDERERS, outlineRenderer, fallba
 /** 按类型＋chrome 挑渲染器（导出给测试用） */
 export function rendererFor(b: Block): BlockRenderer {
   return RENDERERS.find((r) => r.match(b)) ?? fallbackRenderer
-}
-
-/** 这组角色有没有专属 chrome（兜底与默认类型都不算「专属」） */
-export function hasDedicatedRenderer(roles: Role[] | undefined): boolean {
-  if (!roles?.length) return false
-  return CHROME_RENDERERS.some((r) => r.match({ id: '', text: '', children: [], props: { _roles: roles } }))
 }
 
 /** 画一个块 */

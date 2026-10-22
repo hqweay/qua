@@ -6,7 +6,8 @@
  * （日记更糟：往只读的日期投影里塞了字），或者复制出来的块悄悄少了图标、日期、属性与角色。
  *
  * 规则：
- *   · 合并（块首退格）的目标是 tag／schema／journal ⇒ **不成立**（返回 null，两边都不动）；
+ *   · 合并（块首退格）的目标是标签／字段定义／日记 ⇒ **不成立**（返回 null，两边都不动）；
+ *     这三个身份有两个来源：显式角色（标签）与数据（`_kind`／`_date`），判据收在 `hasIdentity`；
  *   · 目标是普通内容块（含页，页的行本来就允许直接编辑）⇒ 照旧合并；
  *   · 复制子树 ⇒ 角色与属性一起带走，且每一块都发新 id。
  */
@@ -18,14 +19,14 @@ const j = (date: string, children: Block[] = []): Block => ({
   id: `j-${date}`,
   text: '',
   children,
-  props: { _roles: ['journal'], _date: date },
+  props: { _date: date },
 })
 
 test('canWriteText：标签/字段定义/日记的正文是名字；页与普通块是内容', () => {
   const tag = mkBlock('设计')
   addRole(tag, 'tag')
   const schema = mkBlock('截止日')
-  addRole(schema, 'schema')
+  schema.props = { _kind: 'date' }
   const page = mkBlock('某一页')
   addRole(page, 'page')
 

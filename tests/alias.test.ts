@@ -69,7 +69,7 @@ test('findByAlias / findTagByName 都走同一个规范化（[[ 设计 ]] 与 #�
 })
 
 test('地址空间只收页与标签：schema（字段定义）与普通块没有地址', () => {
-  const schema = b('d', '设计', { props: { _roles: ['schema'] } })
+  const schema = b('d', '设计', { props: { _kind: 'text' } })
   const plain = b('n', '设计')
   assert.equal(isAddressable(schema), false)
   assert.equal(isAddressable(plain), false)
