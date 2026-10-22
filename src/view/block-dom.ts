@@ -23,6 +23,8 @@ import {
   journalDate,
   journalDateLabel,
   mkAtom,
+  refTitle,
+  tagIdsOf,
   typeDeclOf,
   type Atom,
   type Block,
@@ -88,15 +90,13 @@ export function makeAtomEl(a: Atom, view?: RefView): HTMLElement {
   if (a.asset?.state === 'missing') el.classList.add('missing')
   el.contentEditable = 'false'
   el.dataset.atomId = a.id
-  // ⚠️ 解析后的显示名**另存一份到 `data-ref-label`**：`.atom-label` 里带 `[[ ]]` / `#` 装饰，
+  // ⚠️ 解析后的显示名**另存一份到 `data-ref-label`**：`.atom-label` 里带 `[[ ]]` 装饰，
   //    而落盘值 `atom.label` 是过期的快照 —— 给探针一个「此刻真的在显示什么」的读点。
-  if (a.kind === 'page' || a.kind === 'tag') el.dataset.refLabel = label
+  if (a.kind === 'page') el.dataset.refLabel = label
   el.title =
     a.kind === 'page'
       ? t(view?.state === 'dangling' ? 'ui.atom.pageDanglingTitle' : 'ui.atom.pageTitle', { label })
-      : a.kind === 'tag'
-        ? t(view?.state === 'dangling' ? 'ui.atom.tagDanglingTitle' : 'ui.atom.tagTitle', { label })
-        : t('ui.atom.imageTitle', { label })
+      : t('ui.atom.imageTitle', { label })
   if (a.kind === 'image') {
     const img = document.createElement('img')
     img.className = 'asset-thumb'
@@ -108,18 +108,36 @@ export function makeAtomEl(a: Atom, view?: RefView): HTMLElement {
     el.append(img, name)
   } else {
     /**
-     * 引用与标签**只有装饰不同**（`[[名]]` vs `#名`）—— 两者是同一种指向边。
-     * ⚠️ `#` 与 `[[ ]]` 都不进正文：正文里那一格只有 U+FFFC，
-     *    否则「标签块的正文本身」与「它在引用处显示的字」会变成两个要同步的东西。
+     * ⚠️ `[[ ]]` 不进正文：正文里那一格只有 U+FFFC，
+     *    否则「引用目标的正文」与「它在引用处显示的字」会变成两个要同步的东西。
      */
     const ico = document.createElement('span')
     ico.className = 'atom-ico'
-    ico.appendChild(createIcon(a.kind === 'tag' ? 'hash' : 'arrow-up-right', 'sm'))
+    ico.appendChild(createIcon('arrow-up-right', 'sm'))
     const text = document.createElement('span')
     text.className = 'atom-label'
-    text.textContent = a.kind === 'tag' ? `#${label}` : `[[${label}]]`
+    text.textContent = `[[${label}]]`
     el.append(ico, text)
   }
+  return el
+}
+
+/**
+ * 标签 chip：**标签的归属在块上，这枚 chip 只是把它显示出来**。
+ *
+ * 形状（`tag-chip` ＋ `data-tag-id`）是渲染契约：主题按它上色，探针按它找标签。
+ *
+ * ⚠️ 它住在 `.tx` 里（视觉上就是正文的一部分，跟在文字后面），
+ *    但**不参与读数**：`view/dom-text.ts` 的三条路径（`readBlockText`／`offsetIn`／`nodeLen`）
+ *    遇到 `data-tag-id` 一律跳过。于是「正文显示」与「正文读回」不再逐字相同 ——
+ *    这是有意的：标签不属于内容，它没有位点，正文里也不该多出几个字。
+ */
+export function makeTagChipEl(tagId: string, name: string): HTMLElement {
+  const el = document.createElement('span')
+  el.className = 'tag-chip'
+  el.dataset.tagId = tagId
+  el.contentEditable = 'false'
+  el.textContent = `#${name}`
   return el
 }
 
@@ -200,11 +218,9 @@ export function fillBlockText(
     }
 
     /**
-     * ⚠️ 这里**不再认 `#标签`**：那曾是「第二套正则解析」（71.4 承认的债）——
-     *    `insert-tag` 写文本、`hasTag` 正则扫文本、渲染再正则包一层 span，三处各认一次，
-     *    于是「看起来是标签」与「真的是一条边」是两件事。
-     *    现在标签＝一条指向边（`tag` 原子），由上面的占位符分支统一渲染。
-     *    ⇒ 正文里的 `#设计` 现在就是普通文本（原型阶段，存量 seed 不再假装是标签）。
+     * ⚠️ 这里**不认 `#标签`**：标签是**块级字段**，没有位点，正文里也不该多出几个字。
+     *    它由 `fillBlockText` 末尾统一拼成 chip（见 `makeTagChipEl`），
+     *    所以正文里的 `#设计` 就只是普通文本。
      */
     const covering = myMarks.filter((m) => m.start <= s && m.end >= e)
     let node: Node = document.createTextNode(seg)
@@ -218,6 +234,21 @@ export function fillBlockText(
   }
 
   if (tx.childNodes.length === 0) tx.appendChild(document.createElement('br'))
+
+  /**
+   * **标签 chip 拼在正文末尾**：标签是整块的分类，显示上跟在文字后面，
+   * 但不在正文里（见 `makeTagChipEl` 的说明）。
+   *
+   * ⚠️ 名字走 `refTitle`（现算）：标签块改名后 chip 上的字要跟着变，
+   *    所以这里不存名字、只认 id。目标块不在 ⇒ 这条归属没有可显示的名字，跳过。
+   * ⚠️ `<br>` 先于 chip 挂上去：空块也必须有一个能落光标的位置在 chip **之前**。
+   */
+  if (find) {
+    for (const tagId of tagIdsOf(b)) {
+      const tag = find(tagId)
+      if (tag) tx.appendChild(makeTagChipEl(tagId, refTitle(tag)))
+    }
+  }
 }
 
 /**

@@ -776,6 +776,29 @@
   opacity: 0.5;
 }
 
+/*
+  **标签 chip**：标签是块级的分类字段，这枚 chip 只是把归属显示出来
+  —— 视觉上跟在正文后面，但它不是正文（读回模型时跳过 `data-tag-id`）。
+  比引用 chip 淡一点：引用是一个可以点开的位置，标签只是一个分类。
+  颜色只用语义槽（主题换肤才改得动）。
+*/
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-inline-start: 6px;
+  padding: 0 5px;
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent);
+  opacity: 0.8;
+  font-size: 0.93em;
+  line-height: 1.5;
+  vertical-align: baseline;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 /* ：块选区（跨块拖拽/全选块）。
    颜色只用语义 token（--ui-*），不直接引 --c-*（arch 19）。
    拖选期间禁掉原生文本选择，避免蓝字与蓝块并存。 */
