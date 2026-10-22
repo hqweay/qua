@@ -76,7 +76,7 @@ test('deleteBlockSpan：范围跨到不同父块 ⇒ null（不猜拼接语义�
  */
 test('deleteBlockSpan：首块是**有角色的段根** ⇒ null（不删装载单位）', () => {
   // 端根判据是「有角色」，不是「排在第一个」：无角色的普通首块照删
-  const doc = { roots: [{ ...mk('p', '页名'), roles: ['page'] as const } as Block, mk('b', 'BBBB'), mk('c', 'CCCC')] }
+  const doc = { roots: [{ ...mk('p', '页名'), props: { _roles: ['page'] } } as Block, mk('b', 'BBBB'), mk('c', 'CCCC')] }
   assert.equal(deleteBlockSpan(doc, 'p', 0, 'c', 2), null)
   assert.deepEqual(texts(doc), ['页名', 'BBBB', 'CCCC'], '什么都没动')
 })

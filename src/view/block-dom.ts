@@ -19,6 +19,7 @@ import {
   journalDate,
   journalDateLabel,
   mkAtom,
+  rolesOf,
   type Atom,
   type Block,
   type FindBlock,
@@ -238,11 +239,12 @@ export function makeBlockEl(
   if (b.collapsed) el.dataset.collapsed = '1'
   if (b.todo) el.dataset.todo = b.todo
   if (r.hasChildren) el.dataset.hasChildren = '1'
-  // 角色进 DOM（承 28 ）：页 / 日记作为**正文第一行**时靠它取样式。
+  // 角色进 DOM：页 / 日记作为**正文第一行**时靠它取样式。
   // 兼位块把**全部角色**写进同一个属性（空格分隔，选择器用 `~=`）——
-  // 只写一个会等于按数组顺序裁决，而 `roles` 的顺序不承载语义。
+  // 只写一个会等于按数组顺序裁决，而角色的顺序不承载语义。
   // ⚠️ 这只是**外观**差异，语义上它仍是一块（2026-10-20 去掉「标题」概念后的口径）
-  if (b.roles?.length) el.dataset.role = b.roles.join(' ')
+  const roles = rolesOf(b)
+  if (roles.length) el.dataset.role = roles.join(' ')
   el.style.setProperty('--depth', String(r.depth))
 
   /**

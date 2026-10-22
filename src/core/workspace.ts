@@ -43,7 +43,8 @@ export const STORAGE_KEY = 'qua.workspace'
  *   · 子块 ＝ 块的 `children`（层级就是真实父子，承 15 E1）
  *
  * 「页」不再是独立实体，只是**块森林里的一个块 + 一个角色**（承 1／5：没有页实体）。
+ *
+ * ⚠️ 形状上它与普通块**没有区别**（角色是 `props._roles` 里的一个值，不是独立字段），
+ *    这个别名只用来给「这里必须是页」的那些位置一个可读的类型名。
  */
-export interface PageBlock extends Block {
-  roles: ['page']
-}
+export type PageBlock = Block

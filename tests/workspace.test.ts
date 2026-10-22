@@ -82,6 +82,14 @@ test('parseWorkspace: 缺 version ⇒ corrupt(shape)，不当作旧库', () => {
   assert.deepEqual(parseWorkspace(JSON.stringify({ blocks: [] })), { status: 'corrupt', reason: 'shape' })
 })
 
+test('parseWorkspace: 角色集合形状不对（`props._roles` 不是字符串数组）⇒ corrupt(shape)', () => {
+  // 角色住在属性袋里；坏形状不猜、不修——「这坨字节打不开」比「猜一个角色出来」安全
+  const notArray = valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _roles: 'page' } }] })
+  assert.deepEqual(parseWorkspace(notArray), { status: 'corrupt', reason: 'shape' })
+  const notString = valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _roles: [1 as unknown as string] } }] })
+  assert.deepEqual(parseWorkspace(notString), { status: 'corrupt', reason: 'shape' })
+})
+
 test('parseWorkspace: v3 的裸 JSON（写信封之前）⇒ expired，不会被当成当前版本打开', () => {
   // 2026-10-20：v3 → v4（落盘套信封）。旧库必须走**显式作废**，不能静默当成 v4 读进来。
   assert.deepEqual(parseWorkspace(valid({ version: 3 })), { status: 'expired', version: 3 })

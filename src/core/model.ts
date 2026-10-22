@@ -7,11 +7,13 @@ import { uuidv7Hex } from './ids.ts'
 export type TodoState = 'todo' | 'done'
 
 /**
- * **角色**：表达「这块在系统里担任什么机制位」，**不是属性**。
+ * **角色**：表达「这块在系统里担任什么机制位」，与「有什么数据」是两套语义。
  *
  * ⚠️ 判据：**「是不是某种东西」用角色，「有什么数据」用属性**。
- *   所以「这页是页」不是 `_role` 属性 —— 曾经的 `_page` 标记属性已经改成角色 `_page` → 角色 `page`。
- *   角色是块上的**一等声明**；属性表里不存在 `_role`。
+ *   所以「这页是页」不是可以由定义块声明的普通字段 —— 它是系统结构位，
+ *   载体是属性袋里的 `props._roles`（`_` 前缀 ＝ 保留区，形状由模型代码解释）。
+ *   ⚠️ 判断依据是**谁解释它**，不是它存在哪个袋子里：`_roles` 由模型代码解释、
+ *   没有定义块、不进属性面板；普通字段的值由 schema 解释。
  *
  * 注册表是**封闭种类 × 开放条目**：这里只列 core 已用到的，插件可注册自有角色。
  *
@@ -45,6 +47,8 @@ export type SystemPropId =
   | '_alias'
   | '_query'
   | '_queryResult'
+  // 角色集合（语义见文件顶部的「角色」说明；存储位在这里）
+  | '_roles'
   // 字段定义（prop-def）：kind / 选项目录 / 声明列表
   | '_kind'
   | '_choices'
@@ -65,34 +69,67 @@ export interface Block {
    *
    * ⚠️ **键是「字段定义块的块 id」，不是名字**。定义块自己承载显示名（正文＝label）⇒
    *    改显示名不动任何值、两个插件撞名也天然不冲突（id 空间本来就唯一）。
-   * ⚠️ **系统结构位用 `_lowerCamelCase`**（`_type`／`_icon`／`_date`…）：它们没有定义块，
-   *    形状由模型代码解释，也不进属性面板（`ownFieldIds` 按这个前缀过滤）。
+   * ⚠️ **系统结构位用 `_lowerCamelCase`**（`_type`／`_icon`／`_date`／`_roles`…）：它们没有
+   *    定义块，形状由模型代码解释，也不进属性面板（`ownFieldIds` 按这个前缀过滤）。
    * ⚠️ **命名空间（`ns/name`）在属性上还没有载体**。要落时它属于**定义块的别名**，
    *    不是键——「字段地址」与「内容地址」必须是两张索引：字段显示名允许重名、
    *    不进内容地址空间（`isAddressable` 只认页与标签）。
    *    ⇒ 别把 `ns/name` 当键直接写：键已经是 id，混用会让同一字段有两份值。
-   * ⚠️ 与 `roles`／`collapsed`／`todo` 的分工：那三个不是属性。
+   *
+   * ⚠️ `collapsed`／`todo` 不是属性：它们描述**这一次怎么显示**，不是这块有什么数据。
    */
   props?: BlockProps
-  /**
-   * **角色**（28 ）：语义机制位，不是属性。一个块可以同时兼多个机制位
-   * （例：既是标签、又能当页打开）。
-   *
-   * ⚠️ **顺序不承载语义** —— 它只是集合的存储形状，不是优先级。
-   *    判定一律 `hasRole`；不要按位置取「主角色」，那会变成一条隐式规则。
-   * ⚠️ 这是**实现载体**：语义上角色来自角色注册表，接内核后由独立声明承载。
-   */
-  roles?: Role[]
 }
+
+/**
+ * 角色集合的存储位（`props._roles`）。
+ *
+ * 为什么它住在属性袋里，而不是块上的又一个顶层字段：块的内容槽只有四个
+ * （`id`／`text`／`children`／`props`；`collapsed`／`todo` 是视图状态，终将外挂）。
+ * 多一个顶层字段，每个「整份拷贝一个块」的树操作都会漏掉它一次 ——
+ * 复制出来的页只是一块长得像页的普通块，而且**不报错**。
+ * 放进 `props` 之后，浅拷贝 `props` 就把角色一起带走了。
+ *
+ * ⚠️ 存储位不等于语义：读它请走 `hasRole`／`hasAnyRole`／`rolesOf`，
+ *    写它请走 `addRole`／`removeRole`。裸读恒 `undefined`（见 `arch-check` 第 21 条）。
+ * ⚠️ 顺序不承载语义，它只是集合的存储形状。
+ */
+const ROLES_PROP = '_roles' as const
 
 /**
  * 这块有没有某个角色。
  *
- * ⚠️ 唯一判定入口：`roles` 改多值之后，任何 `b.role === 'x'` 都会静默失效
- *    （字段不存在 ⇒ 永远 false），所以那类直接比较由 `arch-check` 拦住。
+ * ⚠️ 唯一判定入口：角色是集合而不该被读成单值，任何 `b.role === 'x'`
+ *    或裸读 `b.roles` 都会静默失效（载体变了就恒假），所以那类直接读由 `arch-check` 拦住。
  */
 export function hasRole(b: Block | undefined, role: Role): boolean {
-  return b?.roles?.includes(role) ?? false
+  return storedRoles(b)?.includes(role) ?? false
+}
+
+/**
+ * 这块身上有没有**任何**角色（不关心是哪一个）。
+ *
+ * 存在的理由：「至少有一个角色」这个判断散在拆块、合并、删根几处，
+ * 每处都得自己写一遍「空数组也算没有」；写成名字之后，「有没有身份」只有一处定义。
+ */
+export function hasAnyRole(b: Block | undefined): boolean {
+  return (storedRoles(b)?.length ?? 0) > 0
+}
+
+/**
+ * 这块的全部角色（**副本**）。
+ *
+ * 返回副本而不是内部数组：调用方（渲染、诊断面）拿到的是一份可随便改的列表，
+ * 改它不会悄悄改到库里的块。
+ */
+export function rolesOf(b: Block | undefined): Role[] {
+  return [...(storedRoles(b) ?? [])]
+}
+
+/** 存储里的那份数组（**内部用，不外传**：外传就会被调用方拿去改） */
+function storedRoles(b: Block | undefined): Role[] | undefined {
+  const raw = b?.props?.[ROLES_PROP]
+  return Array.isArray(raw) ? (raw as Role[]) : undefined
 }
 
 /**
@@ -103,16 +140,21 @@ export function hasRole(b: Block | undefined, role: Role): boolean {
  */
 export function addRole(b: Block, role: Role): boolean {
   if (hasRole(b, role)) return false
-  b.roles = [...(b.roles ?? []), role]
+  b.props = { ...(b.props ?? {}), [ROLES_PROP]: [...rolesOf(b), role] }
   return true
 }
 
 /** 减一个角色（幂等；只动这一个角色，不碰别的角色与数据） */
 export function removeRole(b: Block, role: Role): boolean {
   if (!hasRole(b, role)) return false
-  const next = (b.roles ?? []).filter((r) => r !== role)
-  if (next.length === 0) delete b.roles
-  else b.roles = next
+  const next = rolesOf(b).filter((r) => r !== role)
+  const props = { ...(b.props ?? {}) }
+  // 不留空数组：空数组会让「有没有角色」有两份答案（空 vs 没有）
+  if (next.length === 0) delete props[ROLES_PROP]
+  else props[ROLES_PROP] = next
+  // 属性袋也不留空壳：`{}` 与「没有属性」在快照比较里是两种东西
+  if (Object.keys(props).length === 0) delete b.props
+  else b.props = props
   return true
 }
 

@@ -4,7 +4,7 @@
  */
 
 import { uuidv7Hex } from './ids.ts'
-import { hasRole, canWriteText, mkBlock, writeBlockText, type Block, type Doc, type Located } from './model.ts'
+import { hasAnyRole, hasRole, canWriteText, mkBlock, writeBlockText, type Block, type Doc, type Located } from './model.ts'
 import { walkForest } from './walk.ts'
 import { renameBlock } from './alias.ts'
 export function locate(doc: Doc, id: string): Located | null {
@@ -182,7 +182,8 @@ export function cloneSubtree(b: Block): { block: Block; idMap: Map<string, strin
       children: x.children.map(cp),
       ...(x.collapsed ? { collapsed: true } : {}),
       ...(x.todo ? { todo: x.todo } : {}),
-      ...(x.roles?.length ? { roles: [...x.roles] } : {}),
+      // 角色跟着 `props` 走：它住在属性袋里，浅拷一份就把身份带上了。
+      // 反过来（角色是独立字段）就得在这里多搬一行，漏掉时复制出的页只是一块长得像页的普通块。
       ...(x.props ? { props: { ...x.props } } : {}),
     }
   }
@@ -420,7 +421,7 @@ export function deleteBlockSpan(doc: Doc, startId: string, startOff: number, end
    * 库里那块还在（刷新就回来）。判据是**角色**，不是「位置在第一个」——
    * 后者会把一整页的普通首块也挡掉。
    */
-  if (headLoc.parent === null && (head.roles?.length ?? 0) > 0) return null
+  if (headLoc.parent === null && hasAnyRole(head)) return null
 
   writeBlockText(head, head.text.slice(0, startOff) + tail.text.slice(endOff))
   // 首块的子树保留（选区不含它们）；被删掉的那些块连子树一起消失

@@ -69,7 +69,7 @@ test('只有页/标签能声明字段（D4）；普通块只能有值', () => {
   const def = mkPropDef('评分')
   const plain: Block = { id: 'p', text: '普通块', children: [] }
   assert.equal(declareField(plain, def.id), false)
-  const page: Block = { id: 'pg', text: '页', children: [], roles: ['page'] }
+  const page: Block = { id: 'pg', text: '页', children: [], props: { _roles: ['page'] } }
   assert.equal(declareField(page, def.id), true)
 })
 
