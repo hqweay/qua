@@ -49,6 +49,7 @@ import {
   toggleMark as coreToggleMark,
   visibleRows,
   mkAtom,
+  writeBlockText,
   type Atom,
   type AtomKind,
   type Block,
@@ -972,7 +973,7 @@ export class BlockEditor {
     if (!loc) return
     const before = this.snap()
     const old = loc.block.text
-    loc.block.text = old.slice(0, from) + insert + old.slice(to)
+    writeBlockText(loc.block, old.slice(0, from) + insert + old.slice(to))
     this.marks = mapMarks(this.marks, id, { from, to, insert })
     const r = mapAtoms(this.atoms, id, { from, to, insert })
     this.atoms = r.kept
@@ -1024,7 +1025,7 @@ export class BlockEditor {
     if (next === loc.block.text) return
     const before = this.snap()
     const change = diffText(loc.block.text, next)
-    loc.block.text = next
+    writeBlockText(loc.block, next)
     this.marks = mapMarks(this.marks, id, change)
     const r = mapAtoms(this.atoms, id, change)
     this.atoms = r.kept
@@ -1139,7 +1140,7 @@ export class BlockEditor {
       const from = Math.min(sel.aOff, sel.hOff)
       const to = Math.max(sel.aOff, sel.hOff)
       const old = loc.block.text
-      loc.block.text = old.slice(0, from) + old.slice(to)
+      writeBlockText(loc.block, old.slice(0, from) + old.slice(to))
       const change = { from, to, insert: '' }
       this.marks = mapMarks(this.marks, id, change)
       const r = mapAtoms(this.atoms, id, change)
@@ -1392,7 +1393,7 @@ export class BlockEditor {
     if (!loc) return
     const before = this.snap()
     const change = diffText(loc.block.text, text)
-    loc.block.text = text
+    writeBlockText(loc.block, text)
     this.marks = mapMarks(this.marks, id, change)
     this.atoms = mapAtoms(this.atoms, id, change).kept
     this.undo.record(before, 'insert', Date.now())
@@ -1488,7 +1489,7 @@ export class BlockEditor {
     if (!loc) return null
     const before = this.snap()
     const old = loc.block.text
-    loc.block.text = old.slice(0, off) + ATOM_PLACEHOLDER + old.slice(off)
+    writeBlockText(loc.block, old.slice(0, off) + ATOM_PLACEHOLDER + old.slice(off))
     const shift = { from: off, to: off, insert: ATOM_PLACEHOLDER }
     this.marks = mapMarks(this.marks, id, shift)
     const a = mkAtom(kind, id, off, opts.label, {
@@ -1521,7 +1522,7 @@ export class BlockEditor {
     const before = this.snap()
     const old = loc.block.text
     // 一次替换：`#名字`（N 格）→ 占位符（1 格）
-    loc.block.text = old.slice(0, from) + ATOM_PLACEHOLDER + old.slice(to)
+    writeBlockText(loc.block, old.slice(0, from) + ATOM_PLACEHOLDER + old.slice(to))
     const change = { from, to, insert: ATOM_PLACEHOLDER }
     this.marks = mapMarks(this.marks, blockId, change)
     const a = mkAtom('tag', blockId, from, label, { target: { kind: 'page', id: targetId } })
@@ -1547,7 +1548,7 @@ export class BlockEditor {
     beforeRemove?.()
     if (loc) {
       const ch = { from: a.start, to: a.end, insert: '' }
-      loc.block.text = loc.block.text.slice(0, a.start) + loc.block.text.slice(a.end)
+      writeBlockText(loc.block, loc.block.text.slice(0, a.start) + loc.block.text.slice(a.end))
       this.marks = mapMarks(this.marks, a.blockId, ch)
       /**
        * ⚠️ 必须**显式丢掉这个原子**，不能只交给 `mapAtoms(...).kept`。
@@ -1815,18 +1816,20 @@ export class BlockEditor {
     const before = this.snap()
     if (lines.length === 1) {
       const old = loc.block.text
-      loc.block.text = old.slice(0, offset) + lines[0]! + old.slice(offset)
+      writeBlockText(loc.block, old.slice(0, offset) + lines[0]! + old.slice(offset))
       this.marks = mapMarks(this.marks, id, { from: offset, to: offset, insert: lines[0]! })
       this.atoms = mapAtoms(this.atoms, id, { from: offset, to: offset, insert: lines[0]! }).kept
     } else {
       const old = loc.block.text
       const tail = old.slice(offset)
-      loc.block.text = old.slice(0, offset) + lines[0]!
+      writeBlockText(loc.block, old.slice(0, offset) + lines[0]!)
       const list = loc.parent ? loc.parent.children : this.doc.roots
       const at = list.indexOf(loc.block)
       const created: Block[] = []
       for (let i = 1; i < lines.length; i++) created.push(mkBlock(lines[i]!))
       const last = created[created.length - 1]!
+      // 这是**刚造出来、还没进树**的新块（上面 `mkBlock` 那批）⇒ 不走正文写入入口，
+      // 它的正文随构造一次给定；那里管的是「改写一个已经存在的地址」
       last.text = last.text + tail
       list.splice(at + 1, 0, ...created)
     }

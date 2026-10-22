@@ -151,6 +151,19 @@ export function mkBlock(text = '', extra: Partial<Pick<Block, 'collapsed' | 'tod
   return { id: uuidv7Hex(), text, children: [], ...extra }
 }
 
+/**
+ * **写块正文的唯一入口。**
+ *
+ * 正文有两重身份：内容块的正文是**内容**，带身份块的正文是**名字**。把写入收在一处，
+ * 是为了让「这次写的是内容还是名字」的判断只有一个落点 —— 否则每加一条写路径都要
+ * 各自记得它，漏一条就是一次静默改写（块首退格把子块并进前块时改掉标签名，就是这样发生的）。
+ *
+ * ⚠️ **新建块不走这里**：`mkBlock` 造出来的块还没有身份，正文随构造一次给定。
+ */
+export function writeBlockText(b: Block, text: string): void {
+  b.text = text
+}
+
 /* ---------------------------------------------------------------- props */
 
 /** 读一条属性（没有就是 `undefined`，**不返回默认值**——默认值属派生层，承 41/38） */

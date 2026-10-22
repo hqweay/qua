@@ -10,7 +10,7 @@
  * ⚠️ 派生地址（`aliasOf`）在没写 `_alias` 时回落到正文 —— 首版一个块一个名字，
  *    `_alias` 是留给「地址与正文不同」的显式声明，不是第二份必须同步的真相。
  */
-import { hasRole, prop, type Block } from './model.ts'
+import { hasRole, prop, writeBlockText, type Block } from './model.ts'
 
 /** 地址属性（系统属性；用户不可见） */
 export const ALIAS_PROP = '_alias'
@@ -78,7 +78,7 @@ export function setAlias(b: Block, name: string): void {
 
 /** 改地址时同步正文（页/标签的显示名就是正文；两处一起改，避免出现「名字变了地址没变」） */
 export function renameBlock(b: Block, name: string): void {
-  b.text = name
+  writeBlockText(b, name)
   const raw = prop<unknown>(b, ALIAS_PROP)
   if (typeof raw === 'string' && raw.trim() !== '') setAlias(b, name)
 }
