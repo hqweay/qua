@@ -217,6 +217,42 @@ test('resolveFrozen：块被删了就不出；祖先也在结果里时只保留�
   assert.deepEqual(resolveFrozen(readResult(q)!, without), [])
 })
 
+test('runQuery：属性条件按 propId 取值、Object.is 比较（未填与 false 分得开）', () => {
+  const props = {
+    a: { task: true },
+    b: { task: false },
+    c: {},
+  }
+  const forest: Block[] = Object.entries(props).map(([id, p]) => b(id, id, { props: p }))
+  const atoms: Atom[] = []
+  assert.deepEqual(
+    runQuery({ where: { prop: { id: 'task', eq: true } }, scope: 'all' }, { blocks: forest, atoms }).map((h) => h.blockId),
+    ['a'],
+  )
+  assert.deepEqual(
+    runQuery({ where: { prop: { id: 'task', eq: false } }, scope: 'all' }, { blocks: forest, atoms }).map((h) => h.blockId),
+    ['b'],
+    '属性不存在（c）不许被当成 false',
+  )
+  // `eq: undefined` 也匹配不到任何块：`c` 根本没有这一槽（不存在 ≠ 等于 undefined）
+  assert.deepEqual(
+    runQuery({ where: { prop: { id: 'task', eq: undefined } }, scope: 'all' }, { blocks: forest, atoms }).map((h) => h.blockId),
+    [],
+  )
+})
+
+test('canonicalSpec：属性条件要能存活下来（否则存进 _query 就被丢掉）', () => {
+  const spec: QuerySpec = { where: { prop: { id: 'p1', eq: 'x' } }, scope: 'all' }
+  assert.deepEqual(canonicalSpec(spec), { where: { prop: { id: 'p1', eq: 'x' } }, scope: 'all' })
+  // 嵌套也要带上：属性条件常与标签条件组合
+  const nested: QuerySpec = { where: { all: [{ tag: '任务' }, { not: { prop: { id: 'p1', eq: true } } }] } }
+  assert.deepEqual(canonicalSpec(nested), { where: { all: [{ tag: '任务' }, { not: { prop: { id: 'p1', eq: true } } }] } })
+
+  const q = b('q', 'q')
+  refreshSpec(q, spec, fixture())
+  assert.equal(specChanged(q, spec), false, '同一条件刷新后不该自认「变了」')
+})
+
 test('canonicalSpec：键序固定 ⇒ 同一条件的不同写法判为「没变」', () => {
   const a: QuerySpec = { where: { all: [{ tag: 'x' }, { todo: 'todo' }] }, scope: 'all' }
   const b2: QuerySpec = { scope: 'all', where: { all: [{ tag: 'x' }, { todo: 'todo' }] } } as QuerySpec
