@@ -10,6 +10,7 @@
  * ⚠️ 接内核后本文件的签名不变：`runQuery` 以后由 `IndexPort.query()` 实现，`QuerySpec` 仍是那个 canonical JSON。
  */
 import { hasRole, type Block } from './model.ts'
+import { walkForest } from './walk.ts'
 import type { Atom } from './annotations.ts'
 import { findPath } from './tree.ts'
 import { findTagByName, tagMemberIds } from './tags.ts'
@@ -72,11 +73,10 @@ export interface QueryHit {
   path: string[]
 }
 
-function walk(blocks: readonly Block[], fn: (b: Block, ancestors: Block[]) => void, ancestors: Block[] = []): void {
-  for (const b of blocks) {
-    fn(b, ancestors)
-    walk(b.children, fn, [...ancestors, b])
-  }
+function walk(blocks: readonly Block[], fn: (b: Block, ancestors: Block[]) => void): void {
+  walkForest(blocks, (b, ctx) => {
+    fn(b, ctx.path.slice(0, -1))
+  })
 }
 
 /** 指向 `targetId` 的原子所在的块 id 集合（**一条指向边的另一端**，与渲染无关） */

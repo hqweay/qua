@@ -4,6 +4,7 @@
  */
 
 import { hasRole, prop, type Block } from './model.ts'
+import { walkForest } from './walk.ts'
 export function todayISO(now: Date = new Date()): string {
   const y = now.getFullYear()
   const m = String(now.getMonth() + 1).padStart(2, '0')
@@ -54,14 +55,10 @@ export function isJournal(b: Block | undefined): boolean {
  */
 export function journalDays(blocks: readonly Block[]): Block[] {
   const byDate = new Map<string, Block>()
-  const walk = (list: readonly Block[]): void => {
-    for (const b of list) {
-      const d = isJournal(b) ? journalDate(b) : ''
-      if (d !== '' && !byDate.has(d)) byDate.set(d, b)
-      walk(b.children)
-    }
-  }
-  walk(blocks)
+  walkForest(blocks, (b) => {
+    const d = isJournal(b) ? journalDate(b) : ''
+    if (d !== '' && !byDate.has(d)) byDate.set(d, b)
+  })
   return [...byDate.values()]
 }
 

@@ -142,6 +142,7 @@ pnpm gate:bundle    # gate ＋ 打包产物冒烟（慢，单列）
 | `view` 想用 UI 组件 | 从 `ui` 层拿，不反向 import | `view` import `ui` |
 | 全局状态/选区 | 进 `core`（模型持有选区） | 散在 `view` 的局部变量 |
 | 改落盘口径 | `WORKSPACE_VERSION` 加一、旧库作废 | 写迁移/兼容分支 |
+| 想走一遍块树 | 用 `src/core/walk.ts` 的 `walkForest`（先序，带 `path`／`hidden`，返回 `false` 即停） | 自己写递归走 `children`（`arch-check [22]` 会拦） |
 | 注释 | 写**为什么** | 写「改了什么」或挂一个本仓没有的编号 |
 | 提交信息 | 同注释边界（也是公开历史） | 写「为什么」、不挂读者打不开的引用 |
 

@@ -14,8 +14,10 @@
  * ⚠️ 删父标签**不自动摘边**：子标签上那条 ref 留着（悬空可见、可清理、撤销免费）。
  */
 import { hasRole, prop, type Block } from './model.ts'
+import { walkForest } from './walk.ts'
 import type { Atom } from './annotations.ts'
-import { tagMemberIds } from './tags.ts'
+import { findInForest } from './tree.ts'
+import { allTags, tagMemberIds } from './tags.ts'
 
 /** 子标签 → 父标签的有序 ref 列表 */
 export const PARENT_TAGS_PROP = '_parentTags'
@@ -31,42 +33,15 @@ export function parentTagIds(tag: Block): string[] {
 export function parentTags(tag: Block, forest: readonly Block[]): Block[] {
   const out: Block[] = []
   for (const id of parentTagIds(tag)) {
-    const b = findIn(forest, id)
+    const b = findInForest(forest, id)
     if (b) out.push(b)
   }
   return out
 }
 
-function findIn(forest: readonly Block[], id: string): Block | undefined {
-  const walk = (b: Block): Block | undefined => {
-    if (b.id === id) return b
-    for (const c of b.children) {
-      const hit = walk(c)
-      if (hit) return hit
-    }
-    return undefined
-  }
-  for (const b of forest) {
-    const hit = walk(b)
-    if (hit) return hit
-  }
-  return undefined
-}
-
-/** 森林里全部标签块（先序） */
-export function allTagBlocks(forest: readonly Block[]): Block[] {
-  const out: Block[] = []
-  const walk = (b: Block): void => {
-    if (hasRole(b, 'tag')) out.push(b)
-    for (const c of b.children) walk(c)
-  }
-  for (const b of forest) walk(b)
-  return out
-}
-
 /** 直接子标签（反向读同一条边；先序，稳定） */
 export function childTags(tag: Block, forest: readonly Block[]): Block[] {
-  return allTagBlocks(forest).filter((t) => parentTagIds(t).includes(tag.id))
+  return allTags(forest).filter((t) => parentTagIds(t).includes(tag.id))
 }
 
 /**
@@ -76,7 +51,7 @@ export function childTags(tag: Block, forest: readonly Block[]): Block[] {
  * 环：读时用 visited 兜底防死循环，但写入路径已经拒绝成环（见 `addParentTag`）。
  */
 export function ancestorIds(tagId: string, forest: readonly Block[]): Set<string> {
-  const byId = new Map(allTagBlocks(forest).map((t) => [t.id, t]))
+  const byId = new Map(allTags(forest).map((t) => [t.id, t]))
   const out = new Set<string>()
   const self = byId.get(tagId)
   if (!self) return out
@@ -99,7 +74,7 @@ export function ancestorIds(tagId: string, forest: readonly Block[]): Set<string
  */
 export function descendantTagIds(tagId: string, forest: readonly Block[]): Set<string> {
   const out = new Set<string>([tagId])
-  for (const t of allTagBlocks(forest)) {
+  for (const t of allTags(forest)) {
     if (t.id !== tagId && ancestorIds(t.id, forest).has(tagId)) out.add(t.id)
   }
   return out
@@ -122,11 +97,9 @@ export function membersOf(tagId: string, forest: readonly Block[], atoms: readon
 export function memberBlocks(tagId: string, forest: readonly Block[], atoms: readonly Atom[]): Block[] {
   const ids = membersOf(tagId, forest, atoms)
   const out: Block[] = []
-  const walk = (b: Block): void => {
+  walkForest(forest, (b) => {
     if (ids.has(b.id)) out.push(b)
-    for (const c of b.children) walk(c)
-  }
-  for (const b of forest) walk(b)
+  })
   return out
 }
 
@@ -177,13 +150,13 @@ export function removeParentTag(child: Block, parentId: string): boolean {
 
 /** 悬空父引用：ref 指向的块已经不在森林里（状态派生，不落盘） */
 export function danglingParentIds(tag: Block, forest: readonly Block[]): string[] {
-  return parentTagIds(tag).filter((id) => !findIn(forest, id))
+  return parentTagIds(tag).filter((id) => !findInForest(forest, id))
 }
 
 /** 清掉悬空归属（**只清不可解析的那些**；正常归属一条不动） */
 export function pruneParentTags(tag: Block, forest: readonly Block[]): number {
   const ids = parentTagIds(tag)
-  const alive = ids.filter((id) => findIn(forest, id))
+  const alive = ids.filter((id) => findInForest(forest, id))
   if (alive.length === ids.length) return 0
   tag.props = { ...(tag.props ?? {}), [PARENT_TAGS_PROP]: alive }
   return ids.length - alive.length
@@ -191,6 +164,6 @@ export function pruneParentTags(tag: Block, forest: readonly Block[]): number {
 
 /** 环路径的显示文本（用标签名；缺失的退回短 id） */
 export function cyclePathLabels(path: readonly string[], forest: readonly Block[], shortId: (id: string) => string): string[] {
-  const byId = new Map(allTagBlocks(forest).map((t) => [t.id, t]))
+  const byId = new Map(allTags(forest).map((t) => [t.id, t]))
   return path.map((id) => `#${byId.get(id)?.text ?? shortId(id)}`)
 }
