@@ -10,6 +10,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Atom, Block } from '../src/core/index.ts'
+import { hasRole } from '../src/core/index.ts'
+import { seedWorkspace } from '../src/core/seed.ts'
 import {
   cleanableValues,
   declareField,
@@ -18,11 +20,15 @@ import {
   ensureTag,
   fieldIdsOf,
   fieldRows,
+  gutterFieldsOf,
   hasValue,
   isPropDef,
   mkPropDef,
   mkTagBlock,
+  TASK_STATUS_PROP_ID,
   undeclareField,
+  UI_POSITION_PROP,
+  uiPositionOf,
 } from '../src/core/index.ts'
 
 const tagEdge = (id: string, blockId: string, tagId: string): Atom =>
@@ -179,4 +185,40 @@ test('④ 顺序只影响呈现：字段集合与标签先后无关；行序按�
   assert.deepEqual(ab, ['甲一', '甲二', '乙一'])
   assert.deepEqual(ba, ['乙一', '甲一', '甲二'])
   assert.deepEqual([...ab].sort(), [...ba].sort(), '集合相同：顺序只影响行序')
+})
+
+test('_uiPosition：缺省是 panel；只有声明 block-left 的定义归 gutter', () => {
+  const task = mkPropDef('任务状态', 'checkbox', { [UI_POSITION_PROP]: 'block-left' })
+  const score = mkPropDef('评分', 'number')
+  assert.equal(uiPositionOf(task), 'block-left')
+  assert.equal(uiPositionOf(score), 'panel', '没写就是 panel')
+  assert.equal(uiPositionOf(undefined), 'panel', '定义缺失也不得让面板整段消失')
+})
+
+test('gutterFieldsOf：只收「定义归 gutter 且有值」的那些', () => {
+  const task = mkPropDef('任务状态', 'checkbox', { [UI_POSITION_PROP]: 'block-left' })
+  const score = mkPropDef('评分', 'number')
+  const host: Block = { id: 'b', text: '一块', children: [], props: { [task.id]: true, [score.id]: 9 } }
+  const forest = [task, score, host]
+  const rows = gutterFieldsOf(host, forest, [])
+  assert.deepEqual(rows.map((r) => r.propId), [task.id], '评分在面板里，不归 gutter')
+  assert.equal(rows[0]!.value, true)
+  assert.equal(rows[0]!.def, task)
+
+  // 没值 ⇒ 不在 gutter 上（空白开关没有意义，它该在面板里以「待填」出现）
+  const empty: Block = { id: 'c', text: '空', children: [] }
+  assert.deepEqual(gutterFieldsOf(empty, [task, score, empty], []), [])
+})
+
+test('种子库自带核心词汇：任务状态定义（顶层、归 gutter）＋ #任务 声明它', () => {
+  const ws = seedWorkspace()
+  const def = ws.blocks.find((b) => b.id === TASK_STATUS_PROP_ID)
+  assert.ok(def, '定义块应在森林顶层（不在任何页的子树里）')
+  assert.equal(def!.text, '任务状态')
+  assert.equal(def!.props?._kind, 'checkbox')
+  assert.equal(uiPositionOf(def), 'block-left')
+
+  const task = ws.blocks.find((b) => hasRole(b, 'tag') && b.text === '任务')
+  assert.ok(task, '标签块应在森林顶层')
+  assert.deepEqual(declaredFieldIds(task!), [TASK_STATUS_PROP_ID])
 })

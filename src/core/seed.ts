@@ -8,7 +8,7 @@
  * `![[图.png]]`，由 `parseInline` 解析成**区间锚点与行内原子**——这正是 demo 要展示的模型形状
  * （锚点带 blockId、原子占 1 格），而不是把富文本塞进 DOM。
  */
-import { ATOM_PLACEHOLDER, FEED_INITIAL, findByAlias, journalId, mkBlock, shiftISO, todayISO, uuidv7Hex, type Atom, type Block, type BlockProps, type FoldState, type Mark, type MarkType } from './index.ts'
+import { ATOM_PLACEHOLDER, declareField, FEED_INITIAL, findByAlias, journalId, mkBlock, mkPropDef, mkTagBlock, shiftISO, TASK_STATUS_PROP_ID, todayISO, UI_POSITION_PROP, uuidv7Hex, type Atom, type Block, type BlockProps, type FoldState, type Mark, type MarkType } from './index.ts'
 import { DEFAULT_PREFS, WORKSPACE_VERSION, type PageBlock, type Workspace } from './workspace.ts'
 
 /* ------------------------------------------------------------- 迷你 DSL */
@@ -420,8 +420,36 @@ export function seedWorkspace(): Workspace {
   const built = [journal, yesterday, dayBefore, day3, day4, day5, p1, p2, p3, p4, p5]
   const blocks = built.map((b) => b.page)
   resolveRefs(blocks, built)
+  blocks.push(...coreVocabulary())
 
   return forest(blocks, built)
+}
+
+/**
+ * **核心词汇**：种子库里必须存在的字段定义与标签。
+ *
+ * 它们住在**森林顶层** —— 身份不参与组织（`schema` 与 `tag` 的位置不承载任何信息，
+ * 所有读路径都按 id 找它们）。所以这里不挂在任何页的子树下：挂在谁下面，
+ * 谁被删掉就会带走它们。
+ *
+ * 顺序：定义块在前、标签块在后 —— 标签要声明那个字段，读一遍就知道它声明的是谁。
+ *
+ * 「任务」不是一个新概念，是两样东西的组合：**值**（做完了没有）＝ 一个全局属性，
+ * **分类**（这块属于任务）＝ 一个标签。值走属性是因为它的语义是用户词汇、
+ * 要能进查询/导出/属性面板；而「这块是不是任务」是分类，分类是标签的事。
+ *
+ * ⚠️ 这两个名字是**数据**（定义块/标签块的正文），不是界面文案：它们会进库、
+ *    会跟着导出、用户也能改。所以它们与其它种子内容住在一起，而不是进 `msg.ts`。
+ */
+export const TASK_STATUS_LABEL = '任务状态'
+export const TASK_TAG_LABEL = '任务'
+
+function coreVocabulary(): Block[] {
+  const taskStatus = mkPropDef(TASK_STATUS_LABEL, 'checkbox', { [UI_POSITION_PROP]: 'block-left' }, TASK_STATUS_PROP_ID)
+  const task = mkTagBlock(TASK_TAG_LABEL)
+  task.props = { ...(task.props ?? {}), _icon: 'lucide:check-square' }
+  declareField(task, TASK_STATUS_PROP_ID)
+  return [taskStatus, task]
 }
 
 /* --------------------------------------------------------- 三个演示状态 */

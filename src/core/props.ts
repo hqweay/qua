@@ -15,12 +15,47 @@
  */
 import { hasRole, isPropDefBlock, prop, type Block, type BlockProps } from './model.ts'
 import { walkForest } from './walk.ts'
-import { uuidv7Hex } from './ids.ts'
+import { derivedId, uuidv7Hex } from './ids.ts'
 import type { Atom } from './annotations.ts'
 import { tagsOf } from './tags.ts'
 
 /** 声明列表的系统属性（有序 ref 列表；pos ＝ 数组下标） */
 export const FIELD_DEFS_PROP = '_fieldDefs'
+
+/**
+ * **一个字段在哪儿被编辑**（定义块上的系统属性）。
+ *
+ * 两个值，互斥：
+ *   · `block-left` —— 编辑入口在**块左侧的 gutter**。给「一次点击就能改」的高频二元开关用；
+ *   · `panel`（缺省）—— 在右侧属性面板里，需要展开、填值。
+ *
+ * ⚠️ **同一个属性不会同时出现在两处**：否则同一个值有两个编辑面，必然出现
+ *    「面板里改了、gutter 没跟上」这类分叉。位置是**定义的一部分**，不是视图偏好。
+ */
+export type UiPosition = 'block-left' | 'panel'
+
+export const UI_POSITION_PROP = '_uiPosition'
+
+/** 定义块声明的编辑位置（缺省 `panel`：没写就是「要展开填」的那一类） */
+export function uiPositionOf(def: Block | undefined): UiPosition {
+  return def && prop<string>(def, UI_POSITION_PROP) === 'block-left' ? 'block-left' : 'panel'
+}
+
+/* ------------------------------------------------------------ 核心词汇 */
+
+/**
+ * **「任务状态」**：这件事做完了没有。
+ *
+ * 它是**全局属性**，不是块上的裸字段、也不是 `_` 结构槽 —— 判据：值域与语义是**用户词汇**
+ * （「做完了」是什么意思，是给人看的），而且要能进查询、进导出、进属性面板。
+ * 凡是「有定义块承载值域」的都走 prop-def，所以这里有定义块、有一个稳定 propId。
+ *
+ * ⚠️ id 由名字确定性派生：代码在重开之后要靠它找到这个定义，而名字是可改的
+ *    （改显示名不动任何值，这是属性设计的前提）。
+ * ⚠️ 定义块的正文（显示名）与标签名是**数据**，住在 `seed.ts` —— 它们会成为库里的内容，
+ *    不是界面文案；界面语言变了，已存在的块名不会跟着变。
+ */
+export const TASK_STATUS_PROP_ID = derivedId('prop', 'core/task-status')
 
 export type PropKind = 'text' | 'number' | 'date' | 'checkbox' | 'select' | 'ref' | 'url'
 
@@ -218,6 +253,35 @@ export function fieldRows(block: Block, forest: readonly Block[], atoms: readonl
 /** 字段 id 集合（模型口径的 `fieldsOf`：声明的 ∪ 自有的） */
 export function fieldIdsOf(block: Block, forest: readonly Block[], atoms: readonly Atom[]): string[] {
   return fieldRows(block, forest, atoms).map((r) => r.propId)
+}
+
+/**
+ * 这个块上**该在 gutter 编辑**的属性。
+ *
+ * 为什么和 `fieldRows` 分开而写在 core：gutter 与右侧面板吃的是**同一份行派生**
+ * （声明 ∪ 自有、同一 propId 只一行），差别只有「哪些行归我」。若各写一套过滤，
+ * 两个编辑面迟早会对同一个字段给出不同答案（一边有值、一边说待填）。
+ *
+ * 判据：定义声明了 `_uiPosition: 'block-left'` **且有值** —— 没有值的开关在 gutter 上
+ * 只是一块空白，它该在面板里以「待填」出现（这也是标签声明的意义）。
+ *
+ * ⚠️ 本轮只被单测用到：gutter 的渲染下一轮才接。调用方将是**那一列的局部渲染**，
+ *    不是整片森林的装饰层 —— 它只认一个块。
+ * ⚠️ 右侧面板用的是**同一份行派生**再按位置过滤（见 `ui/properties.ts`），
+ *    所以两个编辑面不会对同一个字段给出不同答案。
+ */
+export function gutterFieldsOf(
+  block: Block,
+  forest: readonly Block[],
+  atoms: readonly Atom[],
+): { propId: string; def: Block; value: unknown }[] {
+  const out: { propId: string; def: Block; value: unknown }[] = []
+  for (const row of fieldRows(block, forest, atoms)) {
+    if (!row.filled || !row.def) continue
+    if (uiPositionOf(row.def) !== 'block-left') continue
+    out.push({ propId: row.propId, def: row.def, value: row.value })
+  }
+  return out
 }
 
 /* ------------------------------------------------------------ 写值 */
