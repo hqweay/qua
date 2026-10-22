@@ -242,6 +242,12 @@ function uiCtx(): CtxKeys {
 function syncSections(): void {
   ws.marks = blocks.marks
   ws.atoms = blocks.atoms
+  /**
+   * 折叠态是**库的视图状态**，所以它和 marks/atoms 一样从视图写回库：
+   * 编辑器持的是 `doc.folded`（视图那份），落盘要的是 `ws.folded`（库那份）。
+   * ⚠️ 编辑器还没装配时（读盘后的首次落盘）没有可写回的来源，保留 `ws.folded` 原值。
+   */
+  if (mainEd) ws.folded = mainEd.doc.folded ?? {}
 }
 
 let saveFailureShown = false
@@ -682,7 +688,8 @@ const pageDeps: PageDeps = {
   },
   loadPage: (roots, marks, atoms) => {
     ed = mainEd
-    mainEd.loadPage({ roots }, marks as never, atoms as never)
+    // 正文视图的折叠态是**库级**那份；取当前视图持有的那一份（`ws.folded` 只在落盘时同步，可能落后一步）
+    mainEd.loadPage({ roots, folded: mainEd.doc.folded }, marks as never, atoms as never)
     renderBacklinks()
     renderQueryView()
     renderProperties()
@@ -1062,7 +1069,7 @@ const app: App = {
       // ⚠️ 光标必须落在**第一个可编辑的行**上（日记流的第一段是只读日期行）。
       //    原来固定 `roots[0]`，于是载入假数据后光标停在日期行、第一行看着「没有名字」。
       const caret = firstEditableRoot(roots[0])
-      mainEd.loadPage({ roots }, ws.marks, ws.atoms, { blockId: caret?.id ?? '', off: 0 })
+      mainEd.loadPage({ roots, folded: ws.folded }, ws.marks, ws.atoms, { blockId: caret?.id ?? '', off: 0 })
       renderBacklinks()
       renderQueryView()
       chrome.renderEmptyHint(activeBlock().children)
@@ -1135,7 +1142,7 @@ ed = new BlockEditor({
   blankArea: chrome.blankAreaEl,
   // 共享 store：块是活引用；marks/atoms/undo 也是共享的
   store: blocks,
-  doc: { roots: bootRoots },
+  doc: { roots: bootRoots, folded: ws.folded },
   marks: ws.marks,
   atoms: ws.atoms,
   /**
@@ -1788,7 +1795,8 @@ const api = {
       id: b.id,
       text: b.text,
       todo: b.todo ?? null,
-      collapsed: b.collapsed ?? false,
+      // 诊断面的字段名保持 `collapsed`（冒烟按它断言）；值现在来自折叠表
+      collapsed: mainEd.doc.folded?.[b.id] === true,
       children: b.children.length,
       // 角色进诊断面（journal 行是只读日期，测试要能把它挑出来）
       roles: identityTags(b),

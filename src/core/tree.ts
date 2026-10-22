@@ -44,9 +44,13 @@ export interface VisibleRow {
  */
 export function visibleRows(doc: Doc): VisibleRow[] {
   const out: VisibleRow[] = []
-  walkForest(doc.roots, (b, ctx) => {
-    out.push({ block: b, depth: ctx.path.length - 1, hidden: ctx.hidden, hasChildren: b.children.length > 0 })
-  })
+  walkForest(
+    doc.roots,
+    (b, ctx) => {
+      out.push({ block: b, depth: ctx.path.length - 1, hidden: ctx.hidden, hasChildren: b.children.length > 0 })
+    },
+    doc.folded,
+  )
   return out
 }
 
@@ -120,7 +124,6 @@ export function writeBackRoots(forest: Block[], roots: readonly Block[]): void {
     if (!p) continue
     if (!isJournalBlock(p)) renameBlock(p, root.text)
     p.todo = root.todo
-    p.collapsed = root.collapsed
     p.children = root.children
   }
 }
@@ -180,7 +183,7 @@ export function cloneSubtree(b: Block): { block: Block; idMap: Map<string, strin
       id,
       text: x.text,
       children: x.children.map(cp),
-      ...(x.collapsed ? { collapsed: true } : {}),
+      // ⚠️ 折叠态**不随副本走**：那是「这一行此刻收着」，不是这块的内容。
       ...(x.todo ? { todo: x.todo } : {}),
       // 角色跟着 `props` 走：它住在属性袋里，浅拷一份就把身份带上了。
       // 反过来（角色是独立字段）就得在这里多搬一行，漏掉时复制出的页只是一块长得像页的普通块。
@@ -241,7 +244,7 @@ export function splitBlockIntoFirstChild(doc: Doc, id: string, offset: number): 
   if (off <= 0) return null
   const b = mkBlock(loc.block.text.slice(off))
   writeBlockText(loc.block, loc.block.text.slice(0, off))
-  loc.block.collapsed = false
+  unfoldBlock(doc, loc.block.id)
   loc.block.children.unshift(b)
   return { kept: loc.block.id, inserted: b.id }
 }
@@ -278,7 +281,7 @@ export function enterKind(doc: Doc, id: string, offset: number): 'split' | 'chil
   if (!loc) return 'sibling'
   if (loc.block.text.length === 0 && canOutdent(doc, loc.parent)) return 'outdent'
   if (offset < loc.block.text.length) return 'split'
-  const expandedWithChildren = loc.block.children.length > 0 && !loc.block.collapsed
+  const expandedWithChildren = loc.block.children.length > 0 && !isFolded(doc, id)
   return expandedWithChildren ? 'child' : 'sibling'
 }
 
@@ -318,7 +321,7 @@ export function insertFirstChild(doc: Doc, id: string): Block | null {
   const loc = locate(doc, id)
   if (!loc) return null
   const b = mkBlock('')
-  loc.block.collapsed = false
+  unfoldBlock(doc, loc.block.id)
   loc.block.children.unshift(b)
   return b
 }
@@ -337,6 +340,11 @@ export function insertFirstChild(doc: Doc, id: string): Block | null {
    */
   if (!canWriteText(prev)) return null
   const at = prev.text.length
+  /**
+   * ⚠️ **折叠态不跟着搬**：被并掉的块曾收着还是开着，是「那一行当时怎么显示」，
+   * 不是它的内容。把它写到前一块上，等于按一次退格就顺手改掉了另一行的显示。
+   * 折叠表里那条残留键读不到（块 id 已经不在树里），也不需要清。
+   */
   prev.children.push(...loc.block.children)
   writeBlockText(prev, prev.text + loc.block.text)
   const list = siblingsOf(doc, loc.parent)
@@ -437,7 +445,8 @@ export function indentBlock(doc: Doc, id: string): boolean {
   const prev = list[loc.index - 1]!
   list.splice(loc.index, 1)
   prev.children.push(loc.block)
-  prev.collapsed = false
+  // 刚缩进进去的那一块必须看得见，否则用户以为它被吞了
+  unfoldBlock(doc, prev.id)
   return true
 }
 
@@ -494,7 +503,7 @@ export function moveBlockTo(doc: Doc, id: string, targetId: string, pos: 'before
   const tgt2 = locate(doc, targetId)!
   if (pos === 'inside') {
     tgt2.block.children.push(loc.block)
-    tgt2.block.collapsed = false
+    unfoldBlock(doc, tgt2.block.id)
   } else {
     const list = siblingsOf(doc, tgt2.parent)
     const at = pos === 'before' ? locate(doc, targetId)!.index : locate(doc, targetId)!.index + 1
@@ -503,17 +512,39 @@ export function moveBlockTo(doc: Doc, id: string, targetId: string, pos: 'before
   return true
 }
 
+/**
+ * 折叠态的读写都在 `doc.folded` 上（**折叠表属于文档，不属于块**）。
+ *
+ * 只记「收起的」：`true` 在表里、展开就是从表里删掉。这样默认态（全展开）不需要任何存储，
+ * 而「块被删掉后残留的 id」只是一条没人读的键，不会让树显示错误。
+ */
+export function isFolded(doc: Doc, id: string): boolean {
+  return doc.folded?.[id] === true
+}
+
+function writeFold(doc: Doc, id: string, v: boolean): void {
+  const folded = { ...(doc.folded ?? {}) }
+  if (v) folded[id] = true
+  else delete folded[id]
+  doc.folded = folded
+}
+
+/** 展开一块（结构操作「顺手展开」的统一入口：拆块／插入子块／缩进／拖进去都要它） */
+export function unfoldBlock(doc: Doc, id: string): void {
+  if (isFolded(doc, id)) writeFold(doc, id, false)
+}
+
 export function setCollapsed(doc: Doc, id: string, v: boolean): boolean {
   const loc = locate(doc, id)
   if (!loc) return false
-  loc.block.collapsed = v
+  writeFold(doc, id, v)
   return true
 }
 
 export function toggleCollapsed(doc: Doc, id: string): boolean {
   const loc = locate(doc, id)
   if (!loc) return false
-  loc.block.collapsed = !loc.block.collapsed
+  writeFold(doc, id, !isFolded(doc, id))
   return true
 }
 
@@ -538,8 +569,8 @@ export function toggleCollapsed(doc: Doc, id: string): boolean {
 export function toggleChildrenCollapsed(doc: Doc, id: string): boolean | null {
   const loc = locate(doc, id)
   if (!loc || loc.block.children.length === 0) return null
-  const anyOpen = loc.block.children.some((c) => c.collapsed !== true)
-  for (const c of loc.block.children) c.collapsed = anyOpen
+  const anyOpen = loc.block.children.some((c) => !isFolded(doc, c.id))
+  for (const c of loc.block.children) writeFold(doc, c.id, anyOpen)
   return anyOpen
 }
 

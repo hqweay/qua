@@ -75,7 +75,8 @@ export class TagPanel {
       allowBlankCreate: false,
       allowRootRemove: false,
       store: deps.store,
-      doc: { roots: [] },
+      // 折叠态是视图私有的（理由同反链）
+      doc: { roots: [], folded: {} },
     })
     this.editor.events = {
       change: (kind) => {
@@ -168,7 +169,8 @@ export class TagPanel {
     this.els.membersEmpty.hidden = members.length > 0
     this.els.membersEditor.hidden = members.length === 0
     if (members.length === 0) {
-      this.editor.loadPage({ roots: [] }, this.deps.store.marks, this.deps.store.atoms)
+      // 空结果也保留本视图的折叠态：它记的是「哪些行收着」，不是「这次有几行」
+      this.editor.loadPage({ roots: [], folded: this.editor.doc.folded }, this.deps.store.marks, this.deps.store.atoms)
       return
     }
 
@@ -181,7 +183,11 @@ export class TagPanel {
       const live = this.deps.store.find(b.id)
       if (live) roots.push(live)
     }
-    this.editor.loadPage({ roots }, this.deps.store.marks, this.deps.store.atoms)
+    this.editor.loadPage(
+      { roots, folded: this.editor.doc.folded },
+      this.deps.store.marks,
+      this.deps.store.atoms,
+    )
   }
 
   private schedule(): void {

@@ -47,7 +47,7 @@ const mk = (id: string, text = '', children: Block[] = [], extra: Partial<Block>
 function fixture(): Block[] {
   const a11 = mk('a11', 'a11')
   const a1 = mk('a1', 'a1', [a11])
-  const a2 = mk('a2', 'a2', [mk('a21', 'a21')], { collapsed: true })
+  const a2 = mk('a2', 'a2', [mk('a21', 'a21')])
   const a = mk('a', 'a', [a1, a2])
   const b1 = mk('b1', '', [], { props: { _date: '2026-10-22' } })
   const t1 = mk('t1', '设计', [], { props: { _roles: ['tag'] } })
@@ -59,7 +59,8 @@ const ids = (bs: readonly Block[]): string[] => bs.map((b) => b.id)
 
 test('一个入口：flatten／locate／pathTo／findPath／findInForest／descendants 互相一致', () => {
   const forest = fixture()
-  const doc: Doc = { roots: forest }
+  // a2 收起（折叠态在文档上，不在块上）
+  const doc: Doc = { roots: forest, folded: { a2: true } }
 
   // 文档序就是先序
   assert.deepEqual(ids(flatten(doc)), ['a', 'a1', 'a11', 'a2', 'a21', 'b', 'b1', 't1'])
@@ -106,7 +107,7 @@ test('path 是活数组：要留用必须自己拷一份', () => {
 })
 
 test('折叠只改 hidden，不改「走不走得到」', () => {
-  const doc: Doc = { roots: fixture() }
+  const doc: Doc = { roots: fixture(), folded: { a2: true } }
   const rows = visibleRows(doc)
   const by = new Map(rows.map((r) => [r.block.id, r]))
 

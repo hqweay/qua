@@ -18,12 +18,7 @@ import assert from 'node:assert/strict'
 import { enterKind, flatten, insertFirstChild, insertSiblingAfter, locate, outdentBlock, splitBlockBefore, splitBlockIntoFirstChild } from '../src/core/tree.ts'
 import type { Block, Doc } from '../src/core/model.ts'
 
-const mk = (id: string, text = '', children: Block[] = [], collapsed?: boolean): Block => ({
-  id,
-  text,
-  children,
-  ...(collapsed ? { collapsed } : {}),
-})
+const mk = (id: string, text = '', children: Block[] = []): Block => ({ id, text, children })
 
 /** `a` → `a1` → `a11`；`b` 是 `a` 的兄弟 */
 function fixture(): Doc {
@@ -53,7 +48,7 @@ test('Enter 块尾 + 无子块 ⇒ sibling（同级）', () => {
 
 test('Enter 块尾 + **折叠** ⇒ sibling（子树看不见时不许往里塞）', () => {
   const doc = fixture()
-  doc.roots[0]!.collapsed = true
+  doc.folded = { a: true }
   assert.equal(enterKind(doc, 'a', 3), 'sibling', '折叠态必须建同级，否则新块插进不可见的层')
 })
 

@@ -66,12 +66,23 @@ export type SystemPropId =
   // 包含（算作）：子标签 → 父标签的有序 ref 列表
   | '_parentTags'
 
+/**
+ * **视图状态：块 id → 收起**。只记「收起的」，展开就是不在表里。
+ *
+ * 为什么不挂在块上：这一行此刻展开还是收起，**不是这块有什么数据**。
+ * 挂在块上的实际代价有三条，都不是理论：
+ *   · 它会被树操作当货物搬走（合并时把被并掉的块的折叠态写到前块、复制子树时复制给副本）；
+ *   · 它进了撤销栈 ⇒ 折一下再撤销会把折叠撤回去，而用户想撤销的是内容；
+ *   · 它随块一起被导出/快照 ⇒ 导出的内容带上了「我上次把哪行收起来了」。
+ *
+ * 判据与「视图状态外挂、不入内容」同一条：内容按块 id 现读，折叠按块 id 现查。
+ */
+export type FoldState = Record<string, true>
+
 export interface Block {
   id: string
   text: string
   children: Block[]
-  /** 大纲折叠：折叠后子树不挂 DOM（**折叠态随模型快照/持久化**） */
-  collapsed?: boolean
   /** 待办（demo 加的一点「产品感」，不引入新抽象） */
   todo?: TodoState
   /**
@@ -86,7 +97,8 @@ export interface Block {
    *    不进内容地址空间（`isAddressable` 只认页与标签）。
    *    ⇒ 别把 `ns/name` 当键直接写：键已经是 id，混用会让同一字段有两份值。
    *
-   * ⚠️ `collapsed`／`todo` 不是属性：它们描述**这一次怎么显示**，不是这块有什么数据。
+   * ⚠️ `todo` 不是属性：它描述**这一次怎么显示**，不是这块有什么数据。
+   *    （折叠态已经不在块上了，见 `FoldState` —— 它是文档级的视图状态。）
    */
   props?: BlockProps
 }
@@ -95,7 +107,7 @@ export interface Block {
  * 角色集合的存储位（`props._roles`）。
  *
  * 为什么它住在属性袋里，而不是块上的又一个顶层字段：块的内容槽只有四个
- * （`id`／`text`／`children`／`props`；`collapsed`／`todo` 是视图状态，终将外挂）。
+ * （`id`／`text`／`children`／`props`；`todo` 是视图状态，终将外挂）。
  * 多一个顶层字段，每个「整份拷贝一个块」的树操作都会漏掉它一次 ——
  * 复制出来的页只是一块长得像页的普通块，而且**不报错**。
  * 放进 `props` 之后，浅拷贝 `props` 就把角色一起带走了。
@@ -250,6 +262,13 @@ export type BlockProps = Record<string, unknown>
 
 export interface Doc {
   roots: Block[]
+  /**
+   * 这份文档的折叠态。**装在 `Doc` 上而不是到处多传一个参数**：`Doc` 是
+   * 「编辑器装载的那份东西」的完整描述（roots ＋ 折叠态），各视图各带一份，互不干扰。
+   *
+   * ⚠️ 它不参与撤销：折叠不是内容改动。
+   */
+  folded?: FoldState
 }
 
 export interface Located {
@@ -258,7 +277,7 @@ export interface Located {
   block: Block
 }
 
-export function mkBlock(text = '', extra: Partial<Pick<Block, 'collapsed' | 'todo'>> = {}): Block {
+export function mkBlock(text = '', extra: Partial<Pick<Block, 'todo'>> = {}): Block {
   return { id: uuidv7Hex(), text, children: [], ...extra }
 }
 

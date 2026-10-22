@@ -67,7 +67,6 @@ test('75 writeBackRoots：按 root id 逐项写回；journal 不写 text', () =>
   roots[0]!.children = [p('page-child', 'x')]
   roots[1]!.text = '不该写进 journal 的正文'
   roots[1]!.children = [p('journal-child', 'y')]
-  roots[1]!.collapsed = true
 
   writeBackRoots(forest, roots)
 
@@ -75,7 +74,6 @@ test('75 writeBackRoots：按 root id 逐项写回；journal 不写 text', () =>
   assert.equal(page.children[0]!.id, 'page-child')
   assert.equal(journal.text, '') // `_date` 的只读投影，不写 text
   assert.equal(journal.children[0]!.id, 'journal-child')
-  assert.equal(journal.collapsed, true)
 })
 
 test('75 writeBackRoots：找不到的 root 静默跳过（命令层解释「为什么少了」）', () => {
