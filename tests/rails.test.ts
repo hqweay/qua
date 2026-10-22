@@ -49,7 +49,7 @@ test('ancestorsByBlockId: 深度 d 的行恰好有 d 个祖先，且 index = 层
 
 test('ancestorsByBlockId: 折叠后子树不产生可见行 ⇒ 段天然消失', () => {
   const doc = fixture()
-  doc.roots[0]!.children[0]!.collapsed = true // 折叠 a1
+  doc.folded = { a1: true } // 折叠 a1
   const anc = ancestorsByBlockId(rowsOf(doc))
   assert.deepEqual(anc.get('a11'), undefined)
   assert.deepEqual(anc.get('a12'), undefined)

@@ -8,7 +8,7 @@
  * `![[图.png]]`，由 `parseInline` 解析成**区间锚点与行内原子**——这正是 demo 要展示的模型形状
  * （锚点带 blockId、原子占 1 格），而不是把富文本塞进 DOM。
  */
-import { ATOM_PLACEHOLDER, FEED_INITIAL, findByAlias, journalId, mkBlock, shiftISO, todayISO, uuidv7Hex, type Atom, type Block, type BlockProps, type Mark, type MarkType } from './index.ts'
+import { ATOM_PLACEHOLDER, FEED_INITIAL, findByAlias, journalId, mkBlock, shiftISO, todayISO, uuidv7Hex, type Atom, type Block, type BlockProps, type FoldState, type Mark, type MarkType } from './index.ts'
 import { DEFAULT_PREFS, WORKSPACE_VERSION, type PageBlock, type Workspace } from './workspace.ts'
 
 /* ------------------------------------------------------------- 迷你 DSL */
@@ -16,7 +16,8 @@ import { DEFAULT_PREFS, WORKSPACE_VERSION, type PageBlock, type Workspace } from
 interface SeedBlock {
   text: string
   todo?: 'todo' | 'done'
-  collapsed?: boolean
+  /** 种子里的初始折叠态：**进库级的折叠表**，不进块（见 `FoldState`） */
+  folded?: boolean
   /** 系统属性：查询块的 `_query` 条件就落在这里 */
   props?: BlockProps
   children?: SeedBlock[]
@@ -119,13 +120,18 @@ interface BuiltPage {
   /** 这一页自己的锚点与原子（最后上提到库级，demo 平铺存放） */
   marks: Mark[]
   atoms: Atom[]
+  /** 这一页里初始被收起的块 id（最后合并成库级折叠表） */
+  folded: FoldState
 }
 
-function buildTree(seeds: SeedBlock[], out: { marks: Mark[]; atoms: Atom[]; refs: BuiltPage['refs'] }): Block[] {
+function buildTree(
+  seeds: SeedBlock[],
+  out: { marks: Mark[]; atoms: Atom[]; refs: BuiltPage['refs']; folded: FoldState },
+): Block[] {
   return seeds.map((s) => {
     const { text, marks, atoms } = parseInline(s.text)
     const b = mkBlock(text, s.todo ? { todo: s.todo } : {})
-    if (s.collapsed) b.collapsed = true
+    if (s.folded) out.folded[b.id] = true
     if (s.props) b.props = { ...(b.props ?? {}), ...s.props }
     for (const m of marks) out.marks.push({ id: uuidv7Hex(), type: m.type, blockId: b.id, start: m.start, end: m.end })
     for (const a of atoms) {
@@ -164,7 +170,7 @@ function buildTree(seeds: SeedBlock[], out: { marks: Mark[]; atoms: Atom[]; refs
  * 原来的「页的 roots」就是页块的 `children` —— 一个页恰好是一个块。
  */
 function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uuidv7Hex()): BuiltPage {
-  const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'] }
+  const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'], folded: {} as FoldState }
   const children = buildTree(seeds, acc)
   const page: PageBlock = {
     id,
@@ -172,7 +178,7 @@ function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uuidv7Hex(
     children,
     props: { _roles: ['page'], _icon: icon },
   }
-  return { page, refs: acc.refs, marks: acc.marks, atoms: acc.atoms }
+  return { page, refs: acc.refs, marks: acc.marks, atoms: acc.atoms, folded: acc.folded }
 }
 
 /**
@@ -180,7 +186,7 @@ function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uuidv7Hex(
  * 它和页复用同一个 `BuiltPage` 形状（子树 / 锚点 / 原子），只是换一个角色。
  */
 function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
-  const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'] }
+  const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'], folded: {} as FoldState }
   const children = buildTree(seeds, acc)
   const block: Block = {
     id: journalId(date),
@@ -188,7 +194,7 @@ function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
     children,
     props: { _date: date, _icon: 'lucide:calendar' },
   }
-  return { page: block, refs: acc.refs, marks: acc.marks, atoms: acc.atoms }
+  return { page: block, refs: acc.refs, marks: acc.marks, atoms: acc.atoms, folded: acc.folded }
 }
 
 /**
@@ -270,7 +276,6 @@ export function seedWorkspace(): Workspace {
     },
     {
       text: '输入面：正文用块级 DOM ＋ 自研锚点',
-      collapsed: false,
       children: [
         { text: '与 [[输入面笔记]] 同源；多行块（代码 / SQL）留给独立的编辑器实例' },
         { text: '行内原子在这里：**图片** ![[编辑器分层草图.png]] 就是一个原子 ＋ 资产引用' },
@@ -329,7 +334,7 @@ export function seedWorkspace(): Workspace {
         { text: '见 [[下季度规划]]（还没写）' },
       ],
     },
-    { text: '踩过的坑', collapsed: true, children: [{ text: 'rollup 原生模块在 node v24 下 dlopen 失败 ⇒ 固定用系统 node v26.7.0' }] },
+    { text: '踩过的坑', folded: true, children: [{ text: 'rollup 原生模块在 node v24 下 dlopen 失败 ⇒ 固定用系统 node v26.7.0' }] },
   ])
 
   const p4 = mkPage(
@@ -426,6 +431,7 @@ function forest(blocks: Block[], built: BuiltPage[]): Workspace {
   return {
     version: WORKSPACE_VERSION,
     blocks,
+    folded: Object.assign({}, ...built.map((b) => b.folded)),
     activeId: blocks[0]?.id ?? '',
     prefs: { ...DEFAULT_PREFS },
     savedAt: Date.now(),

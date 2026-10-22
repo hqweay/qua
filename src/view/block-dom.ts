@@ -23,6 +23,7 @@ import {
   type Atom,
   type Block,
   type FindBlock,
+  type FoldState,
   type Mark,
   type MarkType,
   type RefView,
@@ -229,14 +230,19 @@ export function fillBlockText(
 export function makeBlockEl(
   r: VisibleRow,
   fill: (tx: HTMLElement) => void,
-  opts: { single: boolean; ancestors?: readonly string[] },
+  /**
+   * `folded` 由调用方给：DOM 层**不持有折叠态**，它只画「这一行现在收没收起」。
+   * 省略 ＝ 当作全展开（槽里的静态卡片不需要折叠）。
+   */
+  opts: { single: boolean; ancestors?: readonly string[]; folded?: FoldState },
 ): HTMLElement {
   const b = r.block
+  const folded = opts.folded?.[b.id] === true
   const el = document.createElement('div')
   el.className = 'blk'
   el.dataset.blockId = b.id
   el.dataset.depth = String(r.depth)
-  if (b.collapsed) el.dataset.collapsed = '1'
+  if (folded) el.dataset.collapsed = '1'
   if (b.todo) el.dataset.todo = b.todo
   if (r.hasChildren) el.dataset.hasChildren = '1'
   // 角色进 DOM：页 / 日记作为**正文第一行**时靠它取样式。
@@ -291,7 +297,7 @@ export function makeBlockEl(
     fold.dataset.foldFor = b.id
     // 始终画 `chevron-down`：收起态由 CSS 旋转（`.blk[data-collapsed] .fold .ico`）
     fold.appendChild(createIcon('chevron-down', 'sm'))
-    fold.title = b.collapsed ? t('ui.block.foldExpand') : t('ui.block.foldCollapse')
+    fold.title = folded ? t('ui.block.foldExpand') : t('ui.block.foldCollapse')
     left.appendChild(fold)
   }
 

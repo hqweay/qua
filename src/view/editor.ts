@@ -8,7 +8,7 @@
  *
  * demo 新增（都建立在**同一套区间锚点**上，没有引入 run 属性）：
  *  - 行内原子（引用 chip／图片占位）＝ 长度 1 的区间锚点，随文本编辑走 `mapAtoms`；
- *  - 折叠（`collapsed` 子树不挂 DOM）、待办复选框、悬停左侧 gutter（折叠箭头／圆点／拖拽把手）；
+ *  - 折叠（收起的子树不挂 DOM；折叠态是**文档级视图状态**）、待办复选框、悬停左侧 gutter（折叠箭头／圆点／拖拽把手）；
  *  - 拖拽重排（HTML5 DnD，before/after/inside 三区）；
  *  - 键盘**一个都不在这里处理**——全部交给绑定表。
  */
@@ -45,8 +45,10 @@ import {
   selToTextRanges,
   splitBlockBefore,
   splitBlockIntoFirstChild,
+  isFolded,
   toggleChildrenCollapsed,
   toggleCollapsed,
+  unfoldBlock,
   toggleMark as coreToggleMark,
   visibleRows,
   mkAtom,
@@ -283,7 +285,8 @@ export class BlockEditor {
     const roots = this.viewRootIds
       .map((id) => this.store.find(id))
       .filter((b): b is Block => Boolean(b))
-    this.doc = { roots }
+    // 折叠表属于**这一份文档**（视图各带各的），换 roots 时原样保留
+    this.doc = { roots, folded: this.doc.folded }
     const focused = this.container.contains(document.activeElement)
     this.renderAll()
     if (restoreSelection && focused) this.restoreSel()
@@ -361,10 +364,15 @@ export class BlockEditor {
   private makeBlockEl(r: VisibleRow): HTMLElement {
     // 引用解析走**共享 store** 的森林：引用目标可能在当前视图之外（另一页／另一天），
     // 只有整片森林能回答「它还在不在、现在叫什么」。
-    const el = makeBlockEl(r, (tx) => fillBlockText(tx, r.block, this.marks, this.atoms, (id) => this.store.find(id)), {
-      single: flatten(this.doc).length === 1,
-      ancestors: this.ancestors.get(r.block.id) ?? [],
-    })
+    const el = makeBlockEl(
+      r,
+      (tx) => fillBlockText(tx, r.block, this.marks, this.atoms, (id) => this.store.find(id)),
+      {
+        single: flatten(this.doc).length === 1,
+        ancestors: this.ancestors.get(r.block.id) ?? [],
+        folded: this.doc.folded,
+      },
+    )
     this.mounted.add(r.block.id)
     return el
   }
@@ -1345,10 +1353,15 @@ export class BlockEditor {
     this.emitChange('struct')
   }
 
+  /**
+   * 折 / 展一块（点三角、`mod+.`）。
+   *
+   * ⚠️ **不进撤销栈**：折叠是「这一行此刻怎么显示」，不是内容改动。
+   *    记快照会让 `⌘Z` 把折叠撤回去 —— 用户想撤销的是刚才那几个字，不是「我折了一行」。
+   *    代价明写：展开/收起之后按 `⌘Z` 撤的是**上一次内容改动**（与折叠无关）。
+   */
   toggleCollapse(id: string): void {
-    const before = this.snap()
     if (!toggleCollapsed(this.doc, id)) return
-    this.undo.record(before, 'structural', Date.now())
     this.renderAll()
     this.emitChange('struct')
   }
@@ -1361,12 +1374,11 @@ export class BlockEditor {
    *
    * ⚠️ 必须 `renderAll()`（不是 `renderBlock`）：折子块会改变**可见行集合**
    *    ⇒ 祖先表与整棵 DOM 都要重建（与 `toggleCollapse` 同形）。
-   * ⚠️ 无子块 ⇒ 核心函数返回 `null` ⇒ 这里直接返回，**不记 undo**（空操作不该占撤销栈）。
+   * ⚠️ 无子块 ⇒ 核心函数返回 `null` ⇒ 这里直接返回。
+   * ⚠️ **不进撤销栈**：与 `toggleCollapse` 同一条理由 —— 折叠不是内容。
    */
   toggleChildrenCollapse(id: string): void {
-    const before = this.snap()
     if (toggleChildrenCollapsed(this.doc, id) === null) return
-    this.undo.record(before, 'structural', Date.now())
     this.renderAll()
     this.emitChange('struct')
   }
@@ -1415,7 +1427,7 @@ export class BlockEditor {
     const b = mkBlock(text, todo ? { todo } : {})
     const isSectionRoot = loc.parent === null
     if (isSectionRoot) {
-      loc.block.collapsed = false
+      unfoldBlock(this.doc, loc.block.id)
       loc.block.children.unshift(b)
     } else {
       const list = loc.parent ? loc.parent.children : this.doc.roots
@@ -1652,7 +1664,7 @@ export class BlockEditor {
     if (lastEl && clientY < lastEl.getBoundingClientRect().bottom) return false
 
     const before = this.snap()
-    root.collapsed = false
+    unfoldBlock(this.doc, root.id)
     /**
      * **复用末尾空块，不无中生有**：点底部若最后一段末尾已有一个空块（既无文字也无子块），
      * 直接聚焦它，避免「点一次多一个空块」越点越多。只有末尾没有空块时才新建。
@@ -1920,7 +1932,7 @@ export class BlockEditor {
       blockSelectionCount: this.blockSel?.ids.length ?? 0,
       blockType: b?.todo ? 'todo' : 'paragraph',
       blockHasChildren: Boolean(b?.children.length),
-      blockCollapsed: Boolean(b?.collapsed),
+      blockCollapsed: Boolean(b && isFolded(this.doc, b.id)),
       blockDone: b?.todo === 'done',
       marking: b ? this.marksAtSel().map((m) => m.type).join('+') : '',
       inTrash: false,
