@@ -279,6 +279,17 @@
   cursor: default;
   user-select: none;
 }
+/*
+  **分割线**：整条线就是这一块的内容，所以它住在 `.tx` 里（`.tx` 是块的正文槽契约）。
+  用 margin-block 让线落在行高正中；高度 ＋ 上下留白刚好等于一行高，
+  所以它不会把这一行撑高，也不破坏「块的垂直留白归容器」。
+*/
+.blk .tx .divider-rule {
+  display: block;
+  height: var(--ui-sep);
+  margin-block: calc((var(--ui-line-h) - var(--ui-sep)) / 2);
+  background: var(--ui-border);
+}
 /* 页 / 日记 / 被聚焦块作为**正文第一行**时，字号略大一档（它是这一屏的「身份」，但不叫标题） */
 .blk[data-depth='0'][data-role~='page'] .tx,
 .blk[data-depth='0'][data-role~='journal'] .tx {

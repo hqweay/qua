@@ -18,7 +18,7 @@
  * ⚠️ 这不是「视图类型系统」（29 那套要独立布局状态才升格）。它只是**最小的渲染分派**，
  * 目的是让「槽里是块、块由渲染器画」这个形状现在就在，而不是等视图系统落地才做。
  */
-import { blockTypeOf, DEFAULT_BLOCK_TYPE, isJournal, journalDate, journalDateLabel, prop, type Block } from '../core/index.ts'
+import { blockTypeOf, DEFAULT_BLOCK_TYPE, DIVIDER_TYPE, isJournal, journalDate, journalDateLabel, prop, type Block } from '../core/index.ts'
 import { renderIcon } from '../view/icons.ts'
 
 /** 渲染一个块时能拿到的东西（后续会加：上下文键、命令执行、订阅） */
@@ -95,7 +95,30 @@ const journalRenderer: BlockRenderer = {
   },
 }
 
-/** 兜底：任何块都能画一行纯文本（保证「不认识的块」不会消失） */const fallbackRenderer: BlockRenderer = {
+/**
+ * 分割线：一条横线，没有图标也没有正文。
+ *
+ * 仍返回 `.page-item` 这层壳（槽里一行的对外契约），只是里面只放线 —— 换掉壳
+ * 会让主题与冒烟按 `.page-item` 找这一行时落空。
+ */
+const dividerRenderer: BlockRenderer = {
+  match: (b) => blockTypeOf(b) === DIVIDER_TYPE,
+  render: (b, ctx) => {
+    const row = document.createElement('button')
+    row.type = 'button'
+    row.className = 'page-item'
+    if (ctx.isActive(b.id)) row.dataset.active = '1'
+    const rule = document.createElement('span')
+    rule.className = 'divider-rule'
+    rule.setAttribute('aria-hidden', 'true')
+    row.appendChild(rule)
+    row.addEventListener('click', () => ctx.onActivate(b))
+    return row
+  },
+}
+
+/** 兜底：任何块都能画一行纯文本（保证「不认识的块」不会消失） */
+const fallbackRenderer: BlockRenderer = {
   match: () => true,
   render: (b, ctx) => {
     const row = document.createElement('button')
@@ -126,6 +149,7 @@ const CHROME_RENDERERS: BlockRenderer[] = [journalRenderer]
  */
 const TYPE_RENDERERS: Record<string, BlockRenderer> = {
   [DEFAULT_BLOCK_TYPE]: outlineRenderer,
+  [DIVIDER_TYPE]: dividerRenderer,
 }
 
 /**

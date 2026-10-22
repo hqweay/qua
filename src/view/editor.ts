@@ -21,6 +21,7 @@ import {
   cloneSubtree,
   depthOf,
   diffText,
+  DIVIDER_TYPE,
   flatten,
   hasIdentity,
   indentBlock,
@@ -59,12 +60,14 @@ import {
   setValue,
   todoOf,
   TASK_STATUS_PROP_ID,
+  typeDeclOf,
   type Atom,
   type AtomKind,
   type Block,
   type CtxKeys,
   type Doc,
   type GutterField,
+  type Located,
   type Mark,
   type MarkType,
   type Sel,
@@ -1465,19 +1468,55 @@ export class BlockEditor {
     const b = mkBlock(text)
     // 待办不是块的字段，是**任务状态属性**的一个值：这里落值，不落「块的种类」
     if (todo) b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: todo === 'done' }
-    const isSectionRoot = loc.parent === null
-    if (isSectionRoot) {
-      unfoldBlock(this.doc, loc.block.id)
-      loc.block.children.unshift(b)
-    } else {
-      const list = loc.parent ? loc.parent.children : this.doc.roots
-      list.splice(loc.index + 1, 0, b)
-    }
+    if (!this.insertNear(loc, b)) return null
     this.undo.record(before, 'structural', Date.now())
     this.renderAll()
     this.placeCaret(b.id, 0)
     this.emitChange('struct')
     return b.id
+  }
+
+  /**
+   * 插入一个**分割线**块，并在它下面留一个空块给光标。
+   *
+   * 为什么不能只插线：分割线没有正文，光标没有地方可落 —— 用户看到的是
+   * 「插了一条线，然后光标消失了」。下面那个空块是落点，不是内容。
+   *
+   * 两个块共用**一**个撤销快照：用户按的是一次「插入分割线」，
+   * 撤销一次就该回到按下之前，而不是先撤掉光标再撤掉线。
+   */
+  insertDividerAfter(id: string): boolean {
+    const loc = locate(this.doc, id)
+    if (!loc) return false
+    const before = this.snap()
+    const divider = mkBlock('')
+    divider.props = { ...(divider.props ?? {}), _type: DIVIDER_TYPE }
+    if (!this.insertNear(loc, divider)) return false
+    const empty = mkBlock('')
+    const at = locate(this.doc, divider.id)
+    if (at) this.insertNear(at, empty)
+    this.undo.record(before, 'structural', Date.now())
+    this.renderAll()
+    this.placeCaret(empty.id, 0)
+    this.emitChange('struct')
+    return true
+  }
+
+  /**
+   * 把 `b` 插到 `loc` 的位置上：section 根**没有兄弟位**（写回按 root id 走），
+   * 只能成为它的首个子块；其余块插在它后面的同级位。
+   *
+   * 返回 `false` ＝ 这个位置容纳不了一个块（根的类型声明不许有子块）。
+   */
+  private insertNear(loc: Located, b: Block): boolean {
+    if (loc.parent === null) {
+      if (typeDeclOf(loc.block).children === 'none') return false
+      unfoldBlock(this.doc, loc.block.id)
+      loc.block.children.unshift(b)
+      return true
+    }
+    loc.parent.children.splice(loc.index + 1, 0, b)
+    return true
   }
 
   /* ------------------------------------------------------- 区间格式 */
@@ -1776,7 +1815,8 @@ export class BlockEditor {
           // 落在空白处：放进**最后一段**（日记流里是最早的一天），不推到 doc.roots。
           // （旧实现 push 到 roots 会造出一个不属于任何 section 的根；N=1 时也是死区。）
           const root = this.doc.roots[this.doc.roots.length - 1]
-          if (root) {
+          // 根的类型声明不许有子块（占位型块作根）⇒ 空白处也放不进去
+          if (root && typeDeclOf(root).children !== 'none') {
             const list = loc.parent ? loc.parent.children : this.doc.roots
             list.splice(loc.index, 1)
             root.children.push(loc.block)
