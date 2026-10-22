@@ -390,7 +390,17 @@ export function mergePrevShallow(doc: Doc, id: string): string | null {
   return r ? r.kept : null
 }
 
-/** 跨行替换：把 [fromId..toId]（文档序闭区间）替换为 lines；**替换区首块继承首块 id** */
+/**
+ * 跨行替换：把 [fromId..toId]（文档序闭区间）替换为 lines；**替换区首块继承首块 id**。
+ *
+ * ⚠️ **首块必须能承载正文**。替换的语义是「把这一段换成这些行」，第一行要落进一个块里；
+ *    如果首块是**没有正文的块**（类型声明 `text: 'readonly'`，例如分割线），
+ *    写进去的字永远显示不出来 —— 线还是线，字在模型里却看不见。
+ *    ⇒ 那种情况下不拿首块当容器，改为**新造一块**：用户想替换的是这一段，
+ *      不该因为段首恰好是一条线而被拒绝，也不该得到「替换了但看不见」。
+ *    ⚠️ 首块是身份块（页／标签／日记／定义／查询）时**照旧不换**：它的 id 承载身份，
+ *      换掉等于造出一个新身份，那是另一件事（由调用方在更上层拦住）。
+ */
 export function replaceBlockRange(doc: Doc, fromId: string, toId: string, lines: string[]): string[] {
   const all = flatten(doc)
   const i = all.findIndex((b) => b.id === fromId)
@@ -405,7 +415,9 @@ export function replaceBlockRange(doc: Doc, fromId: string, toId: string, lines:
     const loc = locate(doc, all[k]!.id)
     if (loc && siblingsOf(doc, loc.parent) === list) removed.add(loc.block)
   }
-  const kept = lines.map((t, n) => (n === 0 ? (writeBlockText(first, t), first) : mkBlock(t)))
+  // 不可写的首块不承载正文：另造一块，首块随这一整段一起被替换掉
+  const sink = canWriteText(first) ? first : mkBlock('')
+  const kept = lines.map((t, n) => (n === 0 ? (writeBlockText(sink, t), sink) : mkBlock(t)))
   list.splice(idx, removed.size || j - i + 1, ...kept)
   return kept.map((b) => b.id)
 }
@@ -459,6 +471,16 @@ export function deleteBlockSpan(doc: Doc, startId: string, startOff: number, end
    * 后者会把一整页的普通首块也挡掉。
    */
   if (headLoc.parent === null && hasIdentity(head)) return null
+
+  /**
+   * **首块或末块不可写时，不能拿它当拼接的一端**。
+   *
+   * 拼接是「首块前半 ＋ 末块后半」；没有正文的块（类型声明 `text: 'readonly'`，
+   * 例如分割线）两头都是空的，拼出来的结果就是把尾块的字塞进一条线里 —— 看不见。
+   * ⇒ 这种选区不当作跨块删除处理，交给调用方按「块选区删除」整块删掉：
+   *   用户选中的那一段本来就是要没掉的，不需要拼。
+   */
+  if (!canWriteText(head) || !canWriteText(tail)) return null
 
   writeBlockText(head, head.text.slice(0, startOff) + tail.text.slice(endOff))
   // 首块的子树保留（选区不含它们）；被删掉的那些块连子树一起消失
