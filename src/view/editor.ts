@@ -18,7 +18,7 @@ import {
   BlockStore,
   CommandLog,
   UndoStack,
-  aliasConflict,
+  claimAddress,
   ancestorsByBlockId,
   clearValue,
   cloneSubtree,
@@ -1108,7 +1108,7 @@ export class BlockEditor {
    * 另一个再也引用不到 —— 而用户以为自己只是改了个名字。
    *
    * 非地址块（不是页/标签）⇒ 直接放行：它们不在地址空间里，正文里出现某个页名
-   * 只是一句话碰巧长得像页名。这条与 `aliasConflict` 的收窄范围是**同一个判据**
+   * 只是一句话碰巧长得像页名。这条与 `claimAddress` 的收窄范围是**同一个判据**
    * （只认页与标签），两处不能各有一套，否则「编辑时拒绝、写入时允许」会自相矛盾。
    *
    * 代价明写：**编辑窗口内地址与正文短暂不一致**（带显式 `_alias` 的块尤其如此）。
@@ -1133,8 +1133,8 @@ export class BlockEditor {
       return { ok: true }
     }
 
-    const conflict = aliasConflict(this.store.blocks, b, b.text)
-    if (!conflict) {
+    const claim = claimAddress(this.store.blocks, b, b.text)
+    if (claim.ok) {
       // 有显式地址的块：正文改了，地址要跟着走（否则显示的名字与能被找到的名字分叉）
       if (base.explicitAlias) setAlias(b, b.text)
       this.rebase(b)
@@ -1157,8 +1157,8 @@ export class BlockEditor {
     if (this.blockEl(id)) this.renderBlock(id)
     if (caret !== null) this.placeCaret(id, Math.min(caret, b.text.length))
     this.emitChange('text', [id])
-    this.events.editRejected?.(attempted, conflict)
-    return { ok: false, conflict }
+    this.events.editRejected?.(attempted, claim.conflict)
+    return claim
   }
 
   /** 换一个编辑期：先把上一块交出去（换块就是上一次编辑的结束），再记下这一块此刻的样子 */
