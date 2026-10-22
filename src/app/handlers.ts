@@ -95,8 +95,7 @@ export const HANDLERS: Record<string, Handler> = {
     const todo = type === 'todo' ? ('todo' as const) : undefined
     app.ed.insertBlockAfter(id, text, todo)
     return true
-  },
-  'core.editor/clear-block': (_a, app) => {
+  },  'core.editor/clear-block': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false
     app.ed.setText(id, '')
