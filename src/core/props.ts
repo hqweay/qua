@@ -32,10 +32,16 @@ export function isPropKind(v: unknown): v is PropKind {
 
 /* ------------------------------------------------------------ 定义块 */
 
-/** 造一个字段定义块（**森林顶层**，正文＝显示名；`propId` 就是它的 id） */
-export function mkPropDef(label: string, kind: PropKind = 'text', extra: BlockProps = {}): Block {
+/**
+ * 造一个字段定义块（**森林顶层**，正文＝显示名；`propId` 就是它的 id）。
+ *
+ * `id` 只给**核心词汇**用：它们的 id 必须跨重开稳定（名字 → id 走 `derivedId`），
+ * 而普通用户新建的定义仍拿到随机 id —— 那条路不需要、也不该承诺稳定性。
+ * 参数放在最后，现有调用点（`label`／`kind`／`extra`）不受影响。
+ */
+export function mkPropDef(label: string, kind: PropKind = 'text', extra: BlockProps = {}, id?: string): Block {
   return {
-    id: uuidv7Hex(),
+    id: id ?? uuidv7Hex(),
     text: label,
     children: [],
     props: { _kind: kind, ...extra },
