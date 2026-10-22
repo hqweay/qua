@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addRole, aliasOf, allPropDefs, allTags, blockTypeOf, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { addRole, aliasConflict, aliasOf, allPropDefs, allTags, blockTypeOf, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
@@ -802,6 +802,11 @@ function blockName(b: Block): string {
  *
  * 判据：角色是**加/减一个机制位**，不是「在两种东西之间转换」——所以这里只 append，
  * 不抹任何数据。页与标签可兼位：同一个块可以既是页、又能被 `#` 指向。
+ *
+ * ⚠️ **加角色就是占地址**，所以先查重：页与标签共用同一个地址空间，
+ *    两个块共用一个地址 ⇒ 永远只能找到一个，另一个再也引用不到（用户以为自己只是
+ *    给一块正文标了个身份，实际是把它变成了永不可达的第二块）。
+ *    撞车时**拒绝，一个字节都不写**——与改名同一套口径，只是入口不同。
  */
 function addBlockRole(blockId: string, role: 'page' | 'tag'): boolean {
   const b = findInForest(ws.blocks, blockId)
@@ -809,6 +814,12 @@ function addBlockRole(blockId: string, role: 'page' | 'tag'): boolean {
   // 标签靠地址被找到 ⇒ 没有名字就没有身份（页允许未命名）
   if (role === 'tag' && aliasOf(b).trim() === '') {
     app.toast(t('ui.toast.roleNeedName'), 'warn')
+    return false
+  }
+  // 页也查：没名字的页不占地址（`aliasConflict` 对空地址直接放行），有名字的页与标签同空间
+  const conflict = aliasConflict(ws.blocks, b, aliasOf(b))
+  if (conflict) {
+    app.toast(t('ui.toast.nameTaken', { name: blockName(b), where: takenWhere(conflict) }), 'warn')
     return false
   }
   writeProps(blockId, () => addRole(b, role))
