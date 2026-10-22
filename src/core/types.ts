@@ -100,3 +100,24 @@ export function canWriteText(b: Block): boolean {
     typeDeclOf(b).text !== 'readonly'
   )
 }
+
+/**
+ * 写一个块的类型（幂等，返回是否真的改了）。
+ *
+ * ⚠️ **不认识的值不拒绝**：降级是**读侧**的事（`typeDeclOf` 会把未知类型当默认类型画）。
+ *    写侧不该假装认识所有类型 —— 插件或更新版本写进来的 id 在这一层被挡住，
+ *    用户看到的会是「设了却没生效」，而原因在另一层。
+ * ⚠️ **换类型不处理参数**：类型声明的参数是同一骨架里的取值，换骨架时旧参数会失去意义。
+ *    现在还没有任何带参数的类型，等有第一个时再定规则 —— 这是**登记**，不是待办。
+ */
+export function setBlockType(b: Block, typeId: string): boolean {
+  if (blockTypeOf(b) === typeId) return false
+  const props = { ...(b.props ?? {}) }
+  // 默认类型不落 `_type`：没有这个键就是默认类型，多存一份等于同一件事有两个答案
+  if (typeId === DEFAULT_BLOCK_TYPE) delete props._type
+  else props._type = typeId
+  // 属性袋也不留空壳：`{}` 与「没有属性」在快照比较里是两种东西
+  if (Object.keys(props).length === 0) delete b.props
+  else b.props = props
+  return true
+}

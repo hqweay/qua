@@ -239,6 +239,12 @@ export const HANDLERS: Record<string, Handler> = {
     const id = S(a.blockId) || curBlock(app)
     return id ? app.removeBlockRole(id, 'tag') : false
   },
+  'core.block/set-type': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    const type = S(a.type)
+    if (!id || !type) return false
+    return app.setBlockType(id, type)
+  },
 
   /* ---- 标签层级 ---- */
   'core.tags/add-parent': (a, app) => {

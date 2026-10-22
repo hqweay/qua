@@ -55,6 +55,7 @@ export const MSG = {
   'cmd.tags.prune-parents': '清理失效归属',
   'cmd.editor.pick-tag': '插入标签（从列表选）',
   'cmd.block.as-page': '也作为页（进页列表）',
+  'cmd.block.set-type': '设置块类型',
   'cmd.block.unpage': '不再是页',
   'cmd.block.as-tag': '作为标签',
   'cmd.block.untag': '不再是标签',
