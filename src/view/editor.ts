@@ -13,11 +13,14 @@
  *  - 键盘**一个都不在这里处理**——全部交给绑定表。
  */
 import {
+  ALIAS_PROP,
   ATOM_PLACEHOLDER,
   BlockStore,
   CommandLog,
   UndoStack,
+  aliasConflict,
   ancestorsByBlockId,
+  clearValue,
   cloneSubtree,
   depthOf,
   diffText,
@@ -27,6 +30,7 @@ import {
   indentBlock,
   insertFirstChild,
   insertSiblingAfter,
+  isAddressable,
   enterKind,
   locate,
   deleteBlockSpan,
@@ -41,11 +45,13 @@ import {
   normalizeMarks,
   outdentBlock,
   pruneToText,
+  prop,
   edgeSourceIds,
   remapAnchors,
   removeMarkRange,
   selToTextRanges,
   setBlockType,
+  setAlias,
   splitBlockBefore,
   splitBlockIntoFirstChild,
   isFolded,
@@ -165,6 +171,29 @@ export interface ViewEvents {
   selChange?: () => void
   /** 重新挂载窗口后（虚拟化） */
   mounted?: () => void
+  /**
+   * **一次改名被拒**（编辑边界上撞到已有地址，正文已回滚）。
+   *
+   * 为什么从编辑器里报、而不是让每个调用方看返回值：三个边界入口都可能撞名，
+   * 各处自己弹提示就会漏一处或重复弹一次；提交是同一个函数，拒绝也就只有一个出口。
+   * `name` 是**用户敲的那个名字**（回滚前取），`conflict` 是已经占用它的块。
+   */
+  editRejected?: (name: string, conflict: Block) => void
+}
+
+/**
+ * 一次编辑期开始前的快照（**只记能回滚地址的那两样**：正文与显式地址）。
+ *
+ * 为什么连 `_alias` 一起记：带显式地址的块，正文与地址是两个字段。只回滚正文的话，
+ * 显示的名字回到旧值、能被找到的名字却还是新值 —— 两块同地址的根因原样留着。
+ */
+interface EditBase {
+  id: string
+  text: string
+  /** 显式地址的原文（`explicitAlias` 为假时无意义） */
+  alias: string
+  /** 这一块有没有显式 `_alias`：没有 ⇒ 正文就是地址，不需要额外写 */
+  explicitAlias: boolean
 }
 
 export class BlockEditor {
@@ -226,6 +255,15 @@ export class BlockEditor {
   private blockSel: { ids: string[]; anchor: string } | null = null
   /** 鼠标拖选的临时状态：pending 时还没跨块，仍是原生文本选择 */
   private mouseSel: { startId: string; active: boolean } | null = null
+  /**
+   * **进入这次编辑时**那一行是什么（正文 ＋ 地址）。
+   *
+   * 为什么要有它：校验放在编辑边界，而离开那一刻正文已经被敲进去了 —— 要回滚就得知道
+   * 「改名前」是什么。记在**第一次把 DOM 同步进模型之前**（`syncFromDom` 的第一笔），
+   * 而不是聚焦那一刻：聚焦之后、第一次敲键之前，别处命令也可能合法地改过这一块，
+   * 那不属于「这次编辑」，不该被回滚带走。
+   */
+  private editBase: EditBase | null = null
   /** 「点空白建块」的监听面：比 container 大一圈，见 `ViewOpts.blankArea` */
   blankArea: HTMLElement
   private allowBlankCreate: boolean
@@ -279,6 +317,8 @@ export class BlockEditor {
   }
 
   restore(s: Snap): void {
+    // 整片森林被换掉 ⇒ 「改名前」已经无处可指，这个编辑期作废
+    this.editBase = null
     // store 原地恢复并通知其他视图；发起者自己重取 roots/选区
     const sel = this.store.restore(s, this)
     this.sel = sel
@@ -990,6 +1030,7 @@ export class BlockEditor {
   }
 
   undoStep(): void {
+    this.editBase = null
     const s = this.store.undo(this, this.sel)
     if (!s) return
     this.sel = JSON.parse(s.sel) as Sel | null
@@ -999,6 +1040,7 @@ export class BlockEditor {
   }
 
   redoStep(): void {
+    this.editBase = null
     const s = this.store.redo(this, this.sel)
     if (!s) return
     this.sel = JSON.parse(s.sel) as Sel | null
@@ -1052,6 +1094,90 @@ export class BlockEditor {
     return caretId
   }
 
+  /* --------------------------------------------------------- 编辑边界 */
+
+  /**
+   * **编辑边界**：把「这次编辑的正文」当作一次改名提交。
+   *
+   * 只在离开这一行时调（失焦 / Enter 拆块 / 聚焦换块），**不在 input 里调**：
+   * 逐字符校验会打死输入法 —— 打「设计」的中间态「设」可能撞上别的标签，
+   * 于是每敲一个字就被回滚一次。校验只在边界上做一次。
+   *
+   * 冲突 ⇒ **拒绝并回滚**：把正文与地址都恢复成改名前那个值，并把冲突块报给调用方。
+   * 判据：同名必同一块。造出两个同地址的块之后，`[[名字]]` 永远只能指到其中一个，
+   * 另一个再也引用不到 —— 而用户以为自己只是改了个名字。
+   *
+   * 非地址块（不是页/标签）⇒ 直接放行：它们不在地址空间里，正文里出现某个页名
+   * 只是一句话碰巧长得像页名。这条与 `aliasConflict` 的收窄范围是**同一个判据**
+   * （只认页与标签），两处不能各有一套，否则「编辑时拒绝、写入时允许」会自相矛盾。
+   *
+   * 代价明写：**编辑窗口内地址与正文短暂不一致**（带显式 `_alias` 的块尤其如此）。
+   * 那不是 bug，是「地址滞后」的定义 —— 它只存在于一个块的编辑期，且不参与地址解析：
+   * 编辑期间的地址仍是改名前那个，引用照旧解析到这一块。
+   *
+   * 幂等：同一块、地址没变过就返回 ok 并且什么都不做 —— 三个边界入口可能对同一块
+   * 各调一次（失焦之后紧接着 Enter、再接着点块标），重复提交必须无害。
+   */
+  commitEdit(id: string): { ok: true } | { ok: false; conflict: Block } {
+    const base = this.editBase
+    if (!base || base.id !== id) return { ok: true }
+    const b = this.store.find(id)
+    if (!b) {
+      this.editBase = null
+      return { ok: true }
+    }
+    // 组合期不提交：IME 的预编辑还不是一次改名（此刻回滚会直接打断输入法）
+    if (this.probe.isComposing) return { ok: true }
+    if (!isAddressable(b) || b.text === base.text) {
+      this.rebase(b)
+      return { ok: true }
+    }
+
+    const conflict = aliasConflict(this.store.blocks, b, b.text)
+    if (!conflict) {
+      // 有显式地址的块：正文改了，地址要跟着走（否则显示的名字与能被找到的名字分叉）
+      if (base.explicitAlias) setAlias(b, b.text)
+      this.rebase(b)
+      return { ok: true }
+    }
+
+    /**
+     * 拒绝：正文与地址**一起**回到改名前。
+     *
+     * ⚠️ 不记撤销条目：这次回滚就是「这次改名没发生」。记一条会让 `⌘Z` 把刚被拒绝的
+     *    名字又请回来，而那条路径照样没人查重（撤销栈是整片森林的快照）。
+     */
+    const attempted = b.text
+    writeBlockText(b, base.text)
+    if (base.explicitAlias) setAlias(b, base.alias)
+    else clearValue(b, ALIAS_PROP)
+    const caret = this.sel?.aBlock === id ? this.sel.aOff : null
+    this.rebase(b)
+    // DOM 里还是敲进去的那个名字 ⇒ 这一行必须重画（否则库已回滚、屏上还留着旧显示）
+    if (this.blockEl(id)) this.renderBlock(id)
+    if (caret !== null) this.placeCaret(id, Math.min(caret, b.text.length))
+    this.emitChange('text', [id])
+    this.events.editRejected?.(attempted, conflict)
+    return { ok: false, conflict }
+  }
+
+  /** 换一个编辑期：先把上一块交出去（换块就是上一次编辑的结束），再记下这一块此刻的样子 */
+  private beginEdit(b: Block): void {
+    const prev = this.editBase
+    if (prev && prev.id !== b.id) this.commitEdit(prev.id)
+    this.rebase(b)
+  }
+
+  private rebase(b: Block): void {
+    const raw = prop<unknown>(b, ALIAS_PROP)
+    this.editBase = {
+      id: b.id,
+      text: b.text,
+      alias: typeof raw === 'string' ? raw : '',
+      explicitAlias: typeof raw === 'string' && raw.trim() !== '',
+    }
+  }
+
   /**
    * 从 DOM 输入事件同步模型（真实键入路径）。
    *
@@ -1061,6 +1187,8 @@ export class BlockEditor {
   syncFromDom(id: string, reRender: boolean): void {
     const loc = locate(this.doc, id)
     if (!loc) return
+    // 这一块的第一笔输入 ＝ 一次编辑期的开始（此刻模型里还是改名前那个值）
+    if (this.editBase?.id !== id) this.beginEdit(loc.block)
     const next = this.readText(id)
     if (next === loc.block.text) return
     const before = this.snap()
@@ -1153,9 +1281,15 @@ export class BlockEditor {
    *      （根文本是名字/投影，不拆，避免静默改名）。
    */
   split(id: string, offset: number): void {
+    /**
+     * **编辑边界**：Enter 就是离开这一行 ⇒ 先把这次正文改动当改名交出去。
+     * 拒绝时正文已回滚，拆点要收回到新正文长度之内（否则会按旧长度切开一行短文本）。
+     */
+    this.commitEdit(id)
     const before = this.snap()
     const loc = locate(this.doc, id)
     if (!loc) return
+    offset = Math.min(offset, loc.block.text.length)
 
     // 段根 = `doc.roots` 里的一项（loc.parent 为 null）；不是「只有 roots[0]」。
     const isSectionRoot = loc.parent === null
@@ -1848,6 +1982,10 @@ export class BlockEditor {
       container: this.container,
       blockOf: (n) => this.blockOf(n),
       syncSel: () => this.syncSel(),
+      caretBlock: () => this.caretBlock(),
+      commitEdit: (id) => {
+        this.commitEdit(id)
+      },
       collapseSelection: () => this.collapseSelection(),
       syncFromDom: (id, re) => this.syncFromDom(id, re),
       beginMouseSelect: (id, x, y, shift) => this.beginMouseSelect(id, x, y, shift),
@@ -1922,8 +2060,13 @@ export class BlockEditor {
         return a
       },
       onBlockMenu: (id, rect) => this.events.blockMenu?.(id, rect),
-      // 左键点块标 ＝ 聚焦/zoom
-      focusBlock: (id) => this.events.focusBlock?.(id),
+      // 左键点块标 ＝ 聚焦/zoom。这也是**离开这一行**：先把当前行的编辑交出去
+      // （判据是「上一个块 ≠ 这个块」；点自己那一行的块标不算离开）
+      focusBlock: (id) => {
+        const from = this.caretBlock() ?? this.editBase?.id ?? null
+        if (from && from !== id) this.commitEdit(from)
+        this.events.focusBlock?.(id)
+      },
       // Shift+左键点块标 ＝ 在右槽钉住；没有接这个事件的视图（如反链 footer）退化成聚焦
       openInDock: (id) => (this.events.openInDock ? this.events.openInDock(id) : this.events.focusBlock?.(id)),
       toggleCollapse: (id) => this.toggleCollapse(id),
@@ -2020,6 +2163,8 @@ export class BlockEditor {
      */
     this.store.invalidateIndex()
     this.doc = doc
+    // 换视图 ＝ 换了一份装载单位：上一行那个编辑期在这里结束，不能带到新页上
+    this.editBase = null
     this.blockSel = null
     this.mouseSel = null
     this.container.classList.remove('blocksel-drag')

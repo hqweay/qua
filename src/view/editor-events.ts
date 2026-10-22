@@ -46,6 +46,13 @@ export interface EditorBridge {
   blockOf: (node: Node | null) => string | null
   /** 从 DOM 选区刷新模型选区 */
   syncSel: () => void
+  /** 光标当前落在哪个块（没有就是 null）。`focusout` 靠它判断「离开的是哪一行」 */
+  caretBlock: () => string | null
+  /**
+   * **编辑边界**：把这一行的正文当作一次改名提交（撞名则回滚并报给装配层）。
+   * 只在「离开这一行」时调 —— 逐字符校验会打死输入法。
+   */
+  commitEdit: (id: string) => void
   /**
    * 收掉跨块选区（首尾拼成一块）。
    *
@@ -202,6 +209,21 @@ export function bindEditorEvents(br: EditorBridge): () => void {
   on(c, 'focus', () => {
     br.syncSel()
     br.onChange()
+  })
+  /**
+   * **失焦 ＝ 编辑边界**：离开一行时把它的正文当作一次改名提交。
+   *
+   * ⚠️ 判据不是「有没有 focusout」：整片编辑区共用**一个**焦点，块与块之间移动也会走这里
+   *    （`focusout` 的 target 是容器本身，看不出离开的是哪一行）。
+   *    所以判据是「离开的块 id 变了没有」——移动到同一块内（或 relatedTarget 仍在本块）
+   *    不算离开，否则在块中间点一下就把编辑提前结了。
+   */
+  on(c, 'focusout', (e: FocusEvent) => {
+    const from = br.caretBlock()
+    if (!from) return
+    const to = e.relatedTarget instanceof Node ? br.blockOf(e.relatedTarget) : null
+    if (to === from) return
+    br.commitEdit(from)
   })
 
   /* ── 输入与组合（**不打断 IME**）────────────────────── */

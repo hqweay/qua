@@ -132,8 +132,11 @@ export function makePageBlock(): Block {
  *
  * 只到「页／标签」这一层，不做面包屑：`[[ ]]` 打出去的名字撞的是**名字空间**里
  * 的那个块，用户要判断的是「我是不是想引用那个页」，知道它是页还是标签就够了。
+ *
+ * 导出给装配层：编辑器在编辑边界上拒绝一次改名时，提示要说清「撞的是哪种块」——
+ * 同一句话两处拼，措辞就会分叉。
  */
-function takenWhere(b: Block): string {
+export function takenWhere(b: Block): string {
   if (hasRole(b, 'page')) return t('ui.where.page')
   if (hasRole(b, 'tag')) return t('ui.where.tag')
   return t('ui.where.block')
