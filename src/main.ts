@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addRole, aliasConflict, aliasOf, allPropDefs, allTags, blockTypeOf, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { addRole, aliasOf, allPropDefs, allTags, blockTypeOf, childTags, claimAddress, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
@@ -816,10 +816,11 @@ function addBlockRole(blockId: string, role: 'page' | 'tag'): boolean {
     app.toast(t('ui.toast.roleNeedName'), 'warn')
     return false
   }
-  // 页也查：没名字的页不占地址（`aliasConflict` 对空地址直接放行），有名字的页与标签同空间
-  const conflict = aliasConflict(ws.blocks, b, aliasOf(b))
-  if (conflict) {
-    app.toast(t('ui.toast.nameTaken', { name: blockName(b), where: takenWhere(conflict) }), 'warn')
+  // 页也查：没名字的页不占地址（空地址直接放行），有名字的页与标签同空间。
+  // 此刻它还不是页/标签（角色还没加），而这次问的正是「加完之后能不能占」，所以要告知。
+  const claim = claimAddress(ws.blocks, b, aliasOf(b), true)
+  if (!claim.ok) {
+    app.toast(t('ui.toast.nameTaken', { name: blockName(b), where: takenWhere(claim.conflict) }), 'warn')
     return false
   }
   writeProps(blockId, () => addRole(b, role))

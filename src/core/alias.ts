@@ -160,6 +160,35 @@ export function setAlias(b: Block, name: string): void {
 }
 
 /**
+ * **给这个块一个名字**：冲突就拒绝。
+ *
+ * 为什么要有它，而不是让每处自己调 `aliasConflict`：地址唯一性是「写入侧」的约束，
+ * 而写入地址的路径会随功能增长（改名、加角色、打字提交、将来的重命名对话框…）。
+ * 每加一条路径就复制一遍「查重 ⇒ 拒绝」，漏一条就静默造出两个同地址的块 ——
+ * 而那两个块里的第二个**再也引用不到**，用户以为自己只是改了个名字。
+ *
+ * 它**不写任何东西**，只回答「能不能占」：这样「先问、再决定写什么」的调用方
+ * 可以拿同一个答案去走各自的失败处理（提示、回滚、询问用户），而判据只有这一份。
+ *
+ * ⚠️ 只有**占地址的块**才查：内容块不在地址空间里，拿它跟页名比会让
+ *    「正文恰好等于某个页名」的普通块再也写不进正文。
+ * ⚠️ 「占不占地址」按 `它现在是否已经占着`（`isAddressable`）回答。有一条路径是在
+ *    **加角色之前**问的（此刻它还不是页/标签，但这次提问问的正是「加完之后能不能占」），
+ *    那种情况要由调用方显式告知 —— 否则加角色就跳过了查重。
+ * ⚠️ 回收站里的同名块不算冲突：那是「复活还是新建」的问题，由调用方问用户。
+ */
+export function claimAddress(
+  forest: readonly Block[],
+  b: Block,
+  name: string,
+  occupiesAddress: boolean = isAddressable(b),
+): { ok: true } | { ok: false; conflict: Block } {
+  if (!occupiesAddress) return { ok: true }
+  const conflict = aliasConflict(forest, b, name)
+  return conflict ? { ok: false, conflict } : { ok: true }
+}
+
+/**
  * 改地址 ＋ 同步正文。
  *
  * 撞车（森林里已有别的块用这个地址）⇒ **拒绝**，一个字节都不写，返回冲突块。
@@ -177,10 +206,8 @@ export function renameBlock(
   b: Block,
   name: string,
 ): { ok: true } | { ok: false; conflict: Block } {
-  if (isAddressable(b)) {
-    const conflict = aliasConflict(forest, b, name)
-    if (conflict) return { ok: false, conflict }
-  }
+  const claim = claimAddress(forest, b, name)
+  if (!claim.ok) return claim
   writeBlockText(b, name)
   const raw = prop<unknown>(b, ALIAS_PROP)
   if (typeof raw === 'string' && raw.trim() !== '') setAlias(b, name)
