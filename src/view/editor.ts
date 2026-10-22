@@ -33,6 +33,7 @@ import {
   mapAtoms,
   mapMarks,
   mergeIntoPrev,
+  removePrevPlaceholder,
   mkBlock,
   moveBlockTo,
   moveSibling,
@@ -1285,6 +1286,19 @@ export class BlockEditor {
     const i = all.findIndex((b) => b.id === id)
     if (i <= 0) return
     const before = this.snap()
+    /**
+     * 先问「前一块是不是一条没有正文的占位线」：那种情况下这次退格的含义是
+     * **删掉它**，而不是「把字并进去」（它没有字可并）。
+     * 两支互斥，所以顺序不影响别的块：合并路径只在两边都有正文时成立。
+     */
+    const placeholder = removePrevPlaceholder(this.doc, id)
+    if (placeholder) {
+      this.undo.record(before, 'structural', Date.now())
+      this.renderAll()
+      this.placeCaret(id, 0)
+      this.emitChange('struct')
+      return
+    }
     const r = mergeIntoPrev(this.doc, id)
     if (!r) return
     const shift = r.at

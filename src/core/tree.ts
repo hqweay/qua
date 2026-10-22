@@ -354,6 +354,34 @@ export function insertFirstChild(doc: Doc, id: string): Block | null {
 }
 
 /**
+ * Backspace 在**没有正文的占位块**后面：删掉前一块，而不是什么都不发生。
+ *
+ * 场景：用户插了一条分割线，光标落在它下面的空块里，按退格想删掉那条线。
+ * 上面那条合并不成立（前一块没有可写的正文），于是什么都不发生 —— 而用户的意图
+ * 明确得不能再明确：删掉刚插进来的那条线。
+ *
+ * 判据是**两块都空**：
+ *   · 前一块的正文真的是空的（不是「正文在别处」）；
+ *   · 当前块也是空的（非空时删前一块会把用户的字一起带走）。
+ *
+ * ⚠️ **日记的日期行不在这一支**：它的正文恒空，但「内容」是 `_date` 的投影 ——
+ *    那是「正文在别处」，不是「没有正文」。退格在日期行上仍然什么都不发生。
+ *    区分两者的正是 `isJournalBlock`：它的只读来自投影，而占位型块的只读来自类型声明。
+ */
+export function removePrevPlaceholder(doc: Doc, id: string): { removed: string } | null {
+  const loc = locate(doc, id)
+  if (!loc || loc.block.text !== '') return null
+  const prev = prevBlock(doc, id)
+  if (!prev) return null
+  if (prev.text !== '' || isJournalBlock(prev) || canWriteText(prev)) return null
+  const list = siblingsOf(doc, loc.parent)
+  const at = list.indexOf(prev)
+  if (at < 0) return null
+  list.splice(at, 1)
+  return { removed: prev.id }
+}
+
+/**
  * Backspace 的另一种分支：块尾删到空 → 变普通块；已经是普通空块且非首块 → 合并。
  * 返回被删的块（`removed`），调用方据此决定光标落点。
  */
