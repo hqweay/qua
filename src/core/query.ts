@@ -33,8 +33,22 @@ export type QueryNode =
   | { tag: string }
   /** 正文包含某串 */
   | { text: string }
-  /** 待办状态 */
+  /**
+   * 待办状态。
+   *
+   * ⚠️ **这是通用属性条件（`prop`）的临时替身**，因为它写死了「有一个叫 `todo` 的专用字段」。
+   *    等 `todo` 搬成一个真实属性之后，这一支就会被删掉——那时「按任务状态筛」只是
+   *    `{ prop: { id, eq } }` 的一个普通实例，不需要专用分支。
+   */
   | { todo: TodoFilter }
+  /**
+   * 某属性等于某值（`eq` 用 `Object.is` 比较；属性不存在 ⇒ 不匹配）。
+   *
+   * 属性条件是**通用路径**：键是定义块的 id（不是名字），所以改显示名不影响查询语义。
+   * `Object.is` 让 `false` 与 `undefined`（未填）严格区分开 —— 按 `===` 也满足，
+   * 但 `Object.is` 把 `NaN` 与 `-0` 也说清楚了，不必再讨论它们。
+   */
+  | { prop: { id: string; eq: unknown } }
   /** 某天（`YYYY-MM-DD`）的日记块**下面的块** */
   | { journal: string }
   | { all: QueryNode[] }
@@ -108,6 +122,13 @@ function matches(node: QueryNode, b: Block, refs: ReadonlySet<string>, tags: Rea
   if ('ref' in node) return refs.has(b.id)
   if ('tag' in node) return tags.has(b.id)
   if ('text' in node) return b.text.includes(node.text)
+  if ('prop' in node) {
+    // 属性不存在 ⇒ 不匹配（而不是「等于 undefined」）：先问「有没有这一槽」，再比值。
+    // 这样 `eq: false` 与「没填」是两件事，`eq: undefined` 也不会误命中所有块。
+    const props = b.props
+    if (!props || !(node.prop.id in props)) return false
+    return Object.is(props[node.prop.id], node.prop.eq)
+  }
   const cur = b.todo ?? 'none'
   return node.todo === cur
 }

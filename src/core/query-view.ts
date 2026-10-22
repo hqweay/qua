@@ -110,6 +110,10 @@ export function resolveFrozen(
  *
  * 为什么要它：`_query` 要进 KB、要能比较「条件变没变」（D4 里「查询定义变化 ⇒ 重算」的判据就是它）。
  * `JSON.stringify` 的键序跟对象字面量写法绑定，改一次写的顺序就会假装「条件变了」。
+ *
+ * ⚠️ **每一种 `QueryNode` 都要在这里有一支**，否则存进 `_query` 时会被静默丢掉。
+ *    丢掉的后果不是报错，而是「条件看起来没变、结果却对不上」——所以这一支必须与
+ *    `query.ts` 的联合类型逐条对齐，加一个新原子时两边一起加。
  */
 export function canonicalSpec(spec: QuerySpec): QuerySpec {
   const node = (n: QuerySpec['where']): QuerySpec['where'] => {
@@ -119,6 +123,7 @@ export function canonicalSpec(spec: QuerySpec): QuerySpec {
     if ('ref' in n) return { ref: n.ref }
     if ('tag' in n) return { tag: n.tag }
     if ('text' in n) return { text: n.text }
+    if ('prop' in n) return { prop: { id: n.prop.id, eq: n.prop.eq } }
     if ('todo' in n) return { todo: n.todo }
     return { journal: n.journal }
   }
