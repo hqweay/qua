@@ -63,6 +63,7 @@ import {
   todoOf,
   TASK_STATUS_PROP_ID,
   typeDeclOf,
+  canWriteText,
   type Atom,
   type AtomKind,
   type Block,
@@ -1500,10 +1501,37 @@ export class BlockEditor {
    * 两个块共用**一**个撤销快照：用户按的是一次「插入分割线」，
    * 撤销一次就该回到按下之前，而不是先撤掉光标再撤掉线。
    */
+  /**
+   * 插入一个**分割线**块。
+   *
+   * 分两支，判据是**插入点本身是不是一个空块**：
+   *   · 空块 ⇒ 它**变成**分割线（原地改类型，不新建）—— 用户在一行空白里
+   *     要一条线，得到的就是那一行变成线，而不是线 + 多出来的空行；
+   *   · 有内容 ⇒ 在它下面**新建**分割线，再留一个空块给光标 ——
+   *     否则那条线会盖住用户已经写好的字。
+   *
+   * ⚠️ 改类型那一支**不新建块**，所以撤销一次就回到「那行还是空白」。
+   * ⚠️ 新建那一支**两个块共用一个撤销快照**：用户按的是一次「插入分割线」，
+   *    撤销一次该回到按下之前，而不是先撤光标再撤线。
+   */
   insertDividerAfter(id: string): boolean {
     const loc = locate(this.doc, id)
     if (!loc) return false
     const before = this.snap()
+
+    /**
+     * 空块 ⇒ 原地变成分割线。
+     * 判据要**两块都空**：正文为空、且没有子块。有子块的块不能变线 ——
+     * 那会把子树藏进一条线后面（线没有正文，子块看不见）。
+     */
+    if (loc.block.text === '' && loc.block.children.length === 0 && canWriteText(loc.block)) {
+      setBlockType(loc.block, DIVIDER_TYPE)
+      this.undo.record(before, 'structural', Date.now())
+      this.renderAll()
+      this.emitChange('struct', [loc.block.id])
+      return true
+    }
+
     const divider = mkBlock('')
     setBlockType(divider, DIVIDER_TYPE)
     if (!this.insertNear(loc, divider)) return false

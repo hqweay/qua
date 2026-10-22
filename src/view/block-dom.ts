@@ -15,6 +15,7 @@
  */
 import {
   ATOM_PLACEHOLDER,
+  DEFAULT_BLOCK_TYPE,
   DIVIDER_TYPE,
   blockTypeOf,
   identityTags,
@@ -261,6 +262,13 @@ export function makeBlockEl(
   el.className = 'blk'
   el.dataset.blockId = b.id
   el.dataset.depth = String(r.depth)
+  /**
+   * **类型进 DOM**（不是角色）：主题与插件要按「这一行是什么类型的块」改外观时，
+   * 需要看得到它 —— 分割线要把块标藏起来，靠的就是这一格。
+   * 只写非默认类型：默认类型是绝大多数，写上去只是给每个块多一个属性。
+   */
+  const typeId = blockTypeOf(b)
+  if (typeId !== DEFAULT_BLOCK_TYPE) el.dataset.type = typeId
   if (folded) el.dataset.collapsed = '1'
   if (todo) el.dataset.todo = todo
   if (r.hasChildren) el.dataset.hasChildren = '1'

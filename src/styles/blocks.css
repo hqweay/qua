@@ -290,6 +290,20 @@
   margin-block: calc((var(--ui-line-h) - var(--ui-sep)) / 2);
   background: var(--ui-border);
 }
+/*
+ * **分割线的块标默认完全不可见**：线本身就是这一行的全部，旁边再挂一个点会让人
+ * 以为那是两条东西。悬停时仍给出拖拽把手 —— 它还得能被拖动、能被右键叫出块菜单，
+ * 所以只是**视觉上隐藏**，元素与命中区都还在（不是 `display:none`）。
+ */
+.blk[data-type='core/divider'] .marker::before {
+  opacity: 0;
+}
+.blk[data-type='core/divider'] .marker .grip {
+  opacity: 0;
+}
+.blk[data-type='core/divider'] .marker:hover .grip {
+  opacity: 0.85;
+}
 /* 页 / 日记 / 被聚焦块作为**正文第一行**时，字号略大一档（它是这一屏的「身份」，但不叫标题） */
 .blk[data-depth='0'][data-role~='page'] .tx,
 .blk[data-depth='0'][data-role~='journal'] .tx {
