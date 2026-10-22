@@ -50,6 +50,7 @@ import {
   visibleRows,
   mkAtom,
   writeBlockText,
+  walkForest,
   type Atom,
   type AtomKind,
   type Block,
@@ -789,11 +790,9 @@ export class BlockEditor {
     const roots = this.blockSelRoots()
     if (roots.length === 0) return ''
     const lines: string[] = []
-    const walk = (b: Block, depth: number): void => {
-      lines.push(`${'  '.repeat(depth)}${b.text}`)
-      for (const c of b.children) walk(c, depth + 1)
-    }
-    for (const r of roots) walk(r, 0)
+    walkForest(roots, (b, ctx) => {
+      lines.push(`${'  '.repeat(ctx.path.length - 1)}${b.text}`)
+    })
     return lines.join('\n')
   }
 

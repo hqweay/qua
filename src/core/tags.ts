@@ -20,6 +20,7 @@
  */
 import { uuidv7Hex } from './ids.ts'
 import { addRole, hasRole, type Block, type Role } from './model.ts'
+import { walkForest } from './walk.ts'
 import { findByAlias, isAddressable, normalizeAlias } from './alias.ts'
 import type { Atom } from './annotations.ts'
 
@@ -99,11 +100,9 @@ export function ensureTag(
 /** 库里现有的全部标签块（先序） */
 export function allTags(forest: readonly Block[]): Block[] {
   const out: Block[] = []
-  const walk = (b: Block): void => {
+  walkForest(forest, (b) => {
     if (hasRole(b, TAG_ROLE)) out.push(b)
-    for (const c of b.children) walk(c)
-  }
-  for (const b of forest) walk(b)
+  })
   return out
 }
 

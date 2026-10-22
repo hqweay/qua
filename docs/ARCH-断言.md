@@ -101,7 +101,7 @@ demo 扩展（**加字段不改口径**）：
 | 16 | 换外观不得改 DOM 类名/形状（亮/暗 `data-depth` 一致） | `arch-check` `[16]`（静态确认断言还在）＋ smoke T11 真跑 | **跑** |
 | 17 | 组件不得直改 KB 状态（只经命令） | `arch-check` `[17]` | **跑（只能查一半，见下）** |
 
-额外的六条（不在 17 条清单里，但都是真在跑的硬约束）：
+额外的七条（不在 17 条清单里，但都是真在跑的硬约束）：
 
 | # | 断言 | 落地 | 状态 |
 |---|---|---|---|
@@ -111,8 +111,9 @@ demo 扩展（**加字段不改口径**）：
 | `[19]` | 组件不得直接引用基础色 `--c-*`（只能用语义槽 `--ui-*`） | `arch-check` `[19]` | **跑** |
 | `[20]` | 持久化收口：`localStorage` 只出现在一个适配器文件里；上层不再 import 同步 save/load | `arch-check` `[20]` | **跑** |
 | `[21]` | 角色判定只走 `hasRole`（禁读单值 `.role`） | `arch-check` `[21]`（反证过：放一行 `b.role === 'page'` 会红） | **跑** |
+| `[22]` | **块树遍历只有一个入口**（禁自写递归走 `children`） | `arch-check` `[22]`（反证过：放两种自写递归的写法都会红）＋ `tests/traversal.test.ts` | **跑** |
 
-**当前基线**：`pnpm arch:check` 硬断言 **15/15 过**（`[12b]` 是如实记账、不拦门的欠账；
+**当前基线**：`pnpm arch:check` 硬断言 **16/16 过**（`[12b]` 是如实记账、不拦门的欠账；
 另有 6 条「等内核」，见 §4）。
 
 ---
@@ -235,6 +236,27 @@ AST 遍历 `electron/**/*.ts`：禁止 `workspace` / `seed` / `core/` / `command
 `color-scheme` 兜底；JS 里没有「按主题切 class」。**「跟随系统真的变色」是渲染行为**，
 静态查不了 ⇒ 由 smoke T11 用 Playwright 的 `emulateMedia({ colorScheme })` 真跑
 （真 Chrome 里 `data-theme` 恒为 `system`、底色从亮变暗）。
+
+### `[22]` 块树遍历只有一个入口
+
+- **检查方式**：AST 扫 `src/**/*.ts` 的**函数**（`function f()` 与 `const f = () => …` 两种写法），
+  命中条件是「这个函数自己递归走 `children`」：① 自调用且实参里出现 `.children`（`walk(b.children)`），
+  或 ② `for (const x of ….children)` 且同一个函数里调用了自己（`for (const c of b.children) walk(c)`）。
+  两种写法都覆盖：前者是「把子树传下去」，后者是「循环 children 再逐个子树递归」。
+- **为什么必须机检**：多写一处递归**不报错、类型也过得去**，只是让「哪些块算活着、按什么顺序走」
+  多一份答案；分歧那天没人知道，直到某处功能静默失效。实测过一次：日记流只看顶层、索引走整片森林
+  ⇒ 同一天两个答案。
+- **白名单与理由**：
+  - **`src/core/walk.ts`** —— 唯一入口 `walkForest` 本身（它就是那处递归）。
+  - **DOM 遍历不算**：它们走 `childNodes`（`for (const c of Array.from(n.childNodes))`），
+    表达式里没有 `.children`，天然不命中。
+  - **`cloneSubtree` 的 `cp` 不算**：它用 `x.children.map(cp)` —— 那是**造树**不是**走树**
+    （自调用是作为回调传进 `map` 的，不是「自己调自己」），天然不命中。
+  - **`seed.ts` 的 `buildTree` 是造树**：它 `b.children = buildTree(s.children, out)` —— 造**新**节点。
+    判据落在 AST 上：自调用的结果若是 `children:` 属性或 `X.children =` 的右值，就不算「走树」。
+- **反证**：把两种写法各放一处（临时文件）⇒ 立刻两条命中、门禁红；删掉即回绿。
+- **行为那一半由单测钉**：`tests/traversal.test.ts` 断言派生出来的读路径**互相一致**
+  （同一片森林、同一个先序）、早退真的立刻停、折叠只改 `hidden` 不改「走不走得到」。
 
 ---
 

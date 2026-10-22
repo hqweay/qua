@@ -5,18 +5,16 @@
 
 import { uuidv7Hex } from './ids.ts'
 import { hasRole, canWriteText, mkBlock, writeBlockText, type Block, type Doc, type Located } from './model.ts'
+import { walkForest } from './walk.ts'
 import { renameBlock } from './alias.ts'
 export function locate(doc: Doc, id: string): Located | null {
-  const walk = (list: Block[], parent: Block | null): Located | null => {
-    for (let i = 0; i < list.length; i++) {
-      const b = list[i]!
-      if (b.id === id) return { parent, index: i, block: b }
-      const inner = walk(b.children, b)
-      if (inner) return inner
-    }
-    return null
-  }
-  return walk(doc.roots, null)
+  let found: Located | null = null
+  walkForest(doc.roots, (b, ctx) => {
+    if (b.id !== id) return
+    found = { parent: ctx.parent, index: ctx.index, block: b }
+    return false
+  })
+  return found
 }
 
 export function siblingsOf(doc: Doc, parent: Block | null): Block[] {
@@ -26,13 +24,9 @@ export function siblingsOf(doc: Doc, parent: Block | null): Block[] {
 /** 文档序（深度优先，**含折叠隐藏的块**） */
 export function flatten(doc: Doc): Block[] {
   const out: Block[] = []
-  const walk = (list: Block[]) => {
-    for (const b of list) {
-      out.push(b)
-      walk(b.children)
-    }
-  }
-  walk(doc.roots)
+  walkForest(doc.roots, (b) => {
+    out.push(b)
+  })
   return out
 }
 
@@ -50,13 +44,9 @@ export interface VisibleRow {
  */
 export function visibleRows(doc: Doc): VisibleRow[] {
   const out: VisibleRow[] = []
-  const walk = (list: Block[], depth: number, hidden: boolean) => {
-    for (const b of list) {
-      out.push({ block: b, depth, hidden, hasChildren: b.children.length > 0 })
-      walk(b.children, depth + 1, hidden || b.collapsed === true)
-    }
-  }
-  walk(doc.roots, 0, false)
+  walkForest(doc.roots, (b, ctx) => {
+    out.push({ block: b, depth: ctx.path.length - 1, hidden: ctx.hidden, hasChildren: b.children.length > 0 })
+  })
   return out
 }
 
@@ -91,18 +81,9 @@ export function ancestorsByBlockId(rows: readonly VisibleRow[]): Map<string, str
   return out
 }
 
-/** 从根到该块（含自身）的路径 */
+/** 从根到该块（含自身）的路径；`doc` 只是一个装载窗口，按它的 roots 走 */
 export function pathTo(doc: Doc, id: string): Block[] | null {
-  const walk = (list: Block[], acc: Block[]): Block[] | null => {
-    for (const b of list) {
-      const next = [...acc, b]
-      if (b.id === id) return next
-      const inner = walk(b.children, next)
-      if (inner) return inner
-    }
-    return null
-  }
-  return walk(doc.roots, [])
+  return findPath(doc.roots, id)
 }
 
 /**
@@ -113,12 +94,13 @@ export function pathTo(doc: Doc, id: string): Block[] | null {
  *   zoom 之后 `ed.doc` 只是子树，而「当前对象」要按森林解析。
  */
 export function findInForest(forest: readonly Block[], id: string): Block | undefined {
-  for (const b of forest) {
-    if (b.id === id) return b
-    const inner = findInForest(b.children, id)
-    if (inner) return inner
-  }
-  return undefined
+  let found: Block | undefined
+  walkForest(forest, (b) => {
+    if (b.id !== id) return
+    found = b
+    return false
+  })
+  return found
 }
 
 /**
@@ -150,16 +132,13 @@ export function writeBackRoots(forest: Block[], roots: readonly Block[]): void {
  *   层级本来就来自 `parent` 链（15 E1），不需要再存一份「焦点栈」）。
  */
 export function findPath(forest: readonly Block[], id: string): Block[] | null {
-  const walk = (list: readonly Block[], acc: Block[]): Block[] | null => {
-    for (const b of list) {
-      const next = [...acc, b]
-      if (b.id === id) return next
-      const inner = walk(b.children, next)
-      if (inner) return inner
-    }
-    return null
-  }
-  return walk(forest, [])
+  let found: Block[] | null = null
+  walkForest(forest, (b, ctx) => {
+    if (b.id !== id) return
+    found = ctx.path.slice()
+    return false
+  })
+  return found
 }
 
 /** 上一块（文档序）；返回 null 表示是首块 */
@@ -169,15 +148,12 @@ export function prevBlock(doc: Doc, id: string): Block | null {
   return i > 0 ? all[i - 1]! : null
 }
 
+/** 子树里全部后代（先序，不含自己） */
 export function descendants(b: Block): Block[] {
   const out: Block[] = []
-  const walk = (list: Block[]) => {
-    for (const x of list) {
-      out.push(x)
-      walk(x.children)
-    }
-  }
-  walk(b.children)
+  walkForest(b.children, (x) => {
+    out.push(x)
+  })
   return out
 }
 

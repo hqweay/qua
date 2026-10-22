@@ -12,6 +12,7 @@
  */
 import type { Atom } from './annotations.ts'
 import { hasRole, type Block } from './model.ts'
+import { walkForest } from './walk.ts'
 import { addressOf } from './alias.ts'
 import { journalDate, isJournal } from './journal.ts'
 import { normalizeTag, TAG_ROLE } from './tags.ts'
@@ -142,9 +143,10 @@ export function applyChanges(
   return next
 }
 
-/** 把一棵子树写进索引（与 `rebuild` 的 `walk` 同一口径） */
+/** 把一棵子树写进索引（与 `rebuild` 同一口径：先序、`pageOf` ＝ 顶层那个根） */
 function indexSubtree(index: Index, root: Block): void {
-  const walk = (b: Block, rootId: string): void => {
+  walkForest([root], (b, ctx) => {
+    const rootId = ctx.path[0]!.id
     index.blocks.set(b.id, b)
     index.pageOf.set(b.id, rootId)
     if (hasRole(b, TAG_ROLE)) {
@@ -155,9 +157,7 @@ function indexSubtree(index: Index, root: Block): void {
       const d = journalDate(b)
       if (d !== '') index.journals.set(d, b.id)
     }
-    for (const c of b.children) walk(c, rootId)
-  }
-  walk(root, root.id)
+  })
 }
 
 /* ------------------------------------------------------------ 查询 */

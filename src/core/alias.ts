@@ -11,6 +11,7 @@
  *    `_alias` 是留给「地址与正文不同」的显式声明，不是第二份必须同步的真相。
  */
 import { hasRole, prop, writeBlockText, type Block } from './model.ts'
+import { walkForest } from './walk.ts'
 
 /** 地址属性（系统属性；用户不可见） */
 export const ALIAS_PROP = '_alias'
@@ -54,15 +55,11 @@ export function findByAlias(
   const want = normalizeAlias(name)
   if (want === '') return undefined
   let found: Block | undefined
-  const walk = (b: Block): boolean => {
-    if (accept(b) && addressOf(b) === want) {
-      found = b
-      return true
-    }
-    for (const c of b.children) if (walk(c)) return true
+  walkForest(forest, (b) => {
+    if (!accept(b) || addressOf(b) !== want) return
+    found = b
     return false
-  }
-  for (const b of forest) if (walk(b)) break
+  })
   return found
 }
 

@@ -748,6 +748,84 @@ function commandDecls() {
 }
 
 /* ═══════════════════════════════════════════════════════╗
+   ║ 22 · 块树遍历只有一个入口（禁自写递归）                   ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  // 来由：全仓十几条读路径都要「把块走一遍」—— 找一个块、列全部块、算路径、算层级、
+  // 算可见行、找子树、建索引、按角色筛块……各自写一遍递归时，
+  // 「哪些块算活着、按什么顺序走」就有了十几份答案。任何一处改变走法（回收站、软删、
+  // 可见性、顺序）都要同时改十几处，漏一处就是**静默的**「有的地方找得到、有的地方找不到」。
+  // 实测过一次：日记流只看顶层、索引走整片森林 ⇒ 同一天两个答案。
+  // ⇒ 递归只许出现在 `core/walk.ts` 的 `walkForest` 里，其余读路径由它派生。
+  const ONLY = 'src/core/walk.ts'
+  const hits = []
+  for (const f of srcFiles) {
+    const r = rel(f)
+    if (r === ONLY) continue
+    const { sf } = tsFile(f)
+    /** **造树**不是**走树**：`children: f(x.children)` / `b.children = f(x.children)` 是在造新节点 */
+    const isConstruction = (call) => {
+      const p = call.parent
+      if (!p) return false
+      if (ts.isPropertyAssignment(p) && p.name.getText(sf) === 'children') return true
+      return (
+        ts.isBinaryExpression(p) &&
+        p.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        /\.children$/.test(p.left.getText(sf))
+      )
+    }
+    /** 一个函数是不是「自己递归走 children」 */
+    const checkFn = (name, body) => {
+      let recursesOverChildren = false
+      let callsSelf = false
+      let iteratesChildren = false
+      const visit = (n) => {
+        if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === name) {
+          callsSelf = true
+          // `walk(b.children)` —— 直接把 children 递归下去（造树的那支不算）
+          if (!isConstruction(n) && n.arguments.some((a) => /\.children\b/.test(a.getText(sf)))) {
+            recursesOverChildren = true
+          }
+        }
+        // `for (const c of b.children) walk(c)` —— children 出现在循环上
+        if (ts.isForOfStatement(n) && /\.children\b/.test(n.expression.getText(sf))) iteratesChildren = true
+        ts.forEachChild(n, visit)
+      }
+      visit(body)
+      if (!recursesOverChildren && !(iteratesChildren && callsSelf)) return
+      const line = sf.getLineAndCharacterOfPosition(body.getStart(sf)).line + 1
+      hits.push(`${r}:${line}  \`${name}\` 自己递归走 \`children\``)
+    }
+    const top = (n) => {
+      if (ts.isFunctionDeclaration(n) && n.name && n.body) checkFn(n.name.text, n.body)
+      if (
+        ts.isVariableDeclaration(n) &&
+        ts.isIdentifier(n.name) &&
+        n.initializer &&
+        (ts.isArrowFunction(n.initializer) || ts.isFunctionExpression(n.initializer))
+      ) {
+        checkFn(n.name.text, n.initializer.body)
+      }
+      ts.forEachChild(n, top)
+    }
+    top(sf)
+  }
+  add({
+    id: 22,
+    title: '块树遍历只有一个入口（禁自写递归）',
+    method:
+      'AST 扫 src/**/*.ts 的函数（声明与 `const f = () => …`），命中条件是「自己递归走 children」：' +
+      '① 自调用 `f(… .children …)`，或 ② `for (const x of ….children)` 且同函数里调用了自己',
+    scope: `src/**/*.ts（${srcFiles.length} 个文件）`,
+    whitelist: '`src/core/walk.ts`（唯一入口 `walkForest`）· DOM 遍历（走 `childNodes`，不是块树）· `cloneSubtree` 的 `cp`（那是**造树**不是**走树**，且用的是 `.map` 不是循环）',
+    hits: hits.length,
+    detail: hits,
+    note: '为什么必须机检：多写一处递归**不会报错**，只会让「哪些块算活着」多一份答案；分歧那天没人知道，直到某处功能静默失效（日记流与索引对同一天给出两个答案就是这么来的）',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
    ║ 额外 · 主题双轨静态面                       ║
    ╚═══════════════════════════════════════════════════════ */
 

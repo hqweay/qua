@@ -14,6 +14,7 @@
  * ⚠️ 本文件零 DOM：属性面板只消费这里的派生结果，写入通过命令。
  */
 import { hasRole, prop, type Block, type BlockProps } from './model.ts'
+import { walkForest } from './walk.ts'
 import { uuidv7Hex } from './ids.ts'
 import type { Atom } from './annotations.ts'
 import { tagsOf } from './tags.ts'
@@ -70,11 +71,9 @@ export function propChoices(def: Block): string[] {
 /** 森林里全部字段定义（先序） */
 export function allPropDefs(forest: readonly Block[]): Block[] {
   const out: Block[] = []
-  const walk = (b: Block): void => {
+  walkForest(forest, (b) => {
     if (isPropDef(b)) out.push(b)
-    for (const c of b.children) walk(c)
-  }
-  for (const b of forest) walk(b)
+  })
   return out
 }
 
