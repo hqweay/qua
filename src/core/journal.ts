@@ -7,6 +7,7 @@
  */
 
 import { isJournalBlock, prop, type Block } from './model.ts'
+import { derivedId } from './ids.ts'
 import { walkForest } from './walk.ts'
 export function todayISO(now: Date = new Date()): string {
   const y = now.getFullYear()
@@ -22,15 +23,19 @@ export function shiftISO(date: string, days: number): string {
 }
 
 /**
- * `(本地日) → id`：32-hex、版本位 `7`，与 `isUuidV7` 的形状一致。
- * 前 12 位是**本地零点**的毫秒时间戳（日历上同一天 ⇒ 同一 id），尾部塞进日期数字。
- * ⚠️ 这是「一天一个」的实现载体，不是新实体（承 1／5：仍然只是块）。
+ * `(本地日) → id`：**确定性派生**（`derivedId('journal', date)`）。
+ *
+ * ⚠️ 取舍：以前这个 id 的**前 12 位是本地零点的毫秒时间戳**、尾部塞日期数字 ——
+ *    看上去像「能在 id 里读出日期」。那条可读性不是任何代码依赖的东西（日期的事实源是
+ *    `_date`），换来的是「id 的形状与其它 id 不一致」。改成名字哈希之后，
+ *    「同一天同一个 id」这条不变量改由 `derivedId` 的纯函数性保证（同样不依赖时钟），
+ *    而 id 与其它块 id 是同一类形状，落库/导出/调试看到的东西一致。
+ *    旧的 id 形状不迁移：落盘版本一换，旧库重新 seed（原型不做兼容）。
+ *
+ * ⚠️ 这是「一天一个」的实现载体，不是新实体（仍然只是块）。
  */
 export function journalId(date: string): string {
-  const ms = Date.parse(`${date}T00:00:00`) || 0
-  const ts = Math.max(0, ms).toString(16).padStart(12, '0').slice(-12)
-  const digits = date.replace(/-/g, '') // 8 位十进制数字，恰好也是合法 hex 字符
-  return `${ts}7000` + `8${digits}` + '0000000'
+  return derivedId('journal', date)
 }
 
 export function journalDate(b: Block): string {
