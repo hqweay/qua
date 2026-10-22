@@ -145,9 +145,10 @@ export function renderBackrefsInto(deps: DockContentDeps, slot: DockSlotEls, ext
     empty.textContent = t('ui.dock.noBackRefs')
     list.appendChild(empty)
   }
-  // 反链项**不是库里的块**，是查询结果：用 `backref` 角色渲染（没有专属布局，只是带箭头的一行）
+  // 反链项**不是库里的块**，是查询结果：现造一行出来，靠 `props._icon` 拿箭头（大纲行已经读它）。
+  // 不给它挂角色 —— 角色说的是「这块在系统里担任什么机制位」，而它没有库身份，从不落盘。
   for (const s of sources) {
-    const row: Block = { id: s.pageId, text: s.text, children: [], roles: ['backref'] }
+    const row: Block = { id: s.pageId, text: s.text, children: [], props: { _icon: 'lucide:corner-up-left' } }
     list.appendChild(renderBlock(row, ctx))
   }
 

@@ -14,12 +14,14 @@ export type TodoState = 'todo' | 'done'
  *   角色是块上的**一等声明**；属性表里不存在 `_role`。
  *
  * 注册表是**封闭种类 × 开放条目**：这里只列 core 已用到的，插件可注册自有角色。
- */
-/**
- * `page` 页｜`journal` 日记｜`backref` 反链项（右槽默认内容）｜`favorites` 收藏容器块｜
+ *
+ * ⚠️ **准入门槛：角色是「读路径的入口」。** 每一种角色都得有代码按它把块**找出来**——
+ *    日记流找 `journal`、标签成员找 `tag`、页导航找 `page`。只是为了给渲染层挑一个专用
+ *    渲染器而存在的角色不合格：那是「怎么画」的问题（归类型与 `props`），不是「是什么」。
+ *
+ * `page` 页｜`journal` 日记｜`favorites` 收藏容器块｜
  * `query` 查询视图｜`tag` 标签｜`schema` 字段定义
  *
- * ⚠️ `backref` 是**角色**而不是类型：反链项没有专属渲染行为，只是「一条指向我的引用」。
  * ⚠️ `favorites` 也只是**角色**：容器就是一个普通块（名字 = 正文，内部存一列有序引用边），
  * 没有新实体、没有新数组。
  * ⚠️ `tag` 同理：标签＝一个带 `tag` 角色的普通块，**它不占据树上的位置**（必须在顶层），
@@ -31,7 +33,7 @@ export type TodoState = 'todo' | 'done'
  * **兼位**：同一个块可以同时担任多个角色（例：既是标签、又能当页打开）。
  * ⇒ 判定一律走 `hasRole`，**不要**读单个字段做 `===` 比较。
  */
-export type Role = 'page' | 'journal' | 'backref' | 'favorites' | 'query' | 'tag' | 'schema'
+export type Role = 'page' | 'journal' | 'favorites' | 'query' | 'tag' | 'schema'
 
 /**
  * 系统属性 id。
