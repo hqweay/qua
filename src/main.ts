@@ -36,7 +36,7 @@ import { isReadonlyBlock } from './view/block-dom.ts'
 import { createIcon } from './view/icons.ts'
 import { createBadge, type BadgeSnapshot } from './ui/badge.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type PanelDeps } from './ui/panels.ts'
-import { demoCommands, journalCommands, pageCommands, propsCommands, rootsFor, rootsForMany, tagTreeCommands, viewCommands, zoomCommands, type PageDeps } from './app/commands-impl.ts'
+import { demoCommands, journalCommands, pageCommands, propsCommands, rootsFor, rootsForMany, tagTreeCommands, takenWhere, viewCommands, zoomCommands, type PageDeps } from './app/commands-impl.ts'
 import { HANDLERS } from './app/handlers.ts'
 import { darkQuery, resolveTheme } from './core/theme.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
@@ -1186,6 +1186,13 @@ ed.events = {
     chrome.renderEmptyHint(activeBlock().children)
     renderDocks() // 块数变了要更新
     scheduleBadge()
+  },
+  /**
+   * **编辑边界上撞名**：正文已经被编辑器回滚成改名前那个值，这里只负责说一句为什么。
+   * 拒绝发生在用户离开这一行的那一刻，途中没有可以放确认框的位置 —— 提示是唯一的出口。
+   */
+  editRejected: (name, conflict) => {
+    app.toast(t('ui.toast.nameTaken', { name, where: takenWhere(conflict) }), 'warn')
   },
   atomsLost: (atoms) => {
     app.toast(t('ui.toast.atomsLost', { labels: atoms.map((a) => a.label).join('、') }), 'warn')
