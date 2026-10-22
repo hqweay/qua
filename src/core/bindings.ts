@@ -115,8 +115,6 @@ export const BINDINGS: Binding[] = [
   // zoom：进子树的入口挂在块菜单。**叶子块也给**（修订：
   // 块标左键＝聚焦是一贯行为：若叶子不给，点击结果会时 zoom 时不 zoom）
   { command: 'core.block/focus-block', kind: 'menu', when: 'blockFocused', group: 'block/3-kind', order: 30, layer: 'core', keywords: ['zoom', t('menu.kw.zoom')] },
-  // 收藏：加进收藏容器块 —— **不是**在块上打标记，容器里存的是引用边
-  { command: 'core.favorites/add', kind: 'menu', when: 'blockFocused', group: 'block/3-kind', order: 40, layer: 'core', keywords: ['favorite', 'pin', 'bookmark', t('menu.kw.favorite')] },
   { command: 'core.editor/pick-tag', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 5, layer: 'core' },
   { command: 'core.editor/insert-page-ref', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 10, layer: 'core' },
   { command: 'core.editor/insert-image', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 20, layer: 'core' },

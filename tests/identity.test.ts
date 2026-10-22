@@ -74,7 +74,7 @@ test('合并：前一块是普通内容块 ⇒ 照旧合并（回归）', () => 
 
 test('复制子树：角色与属性一起带走，且每一块都发新 id', () => {
   const kid = mkBlock('子块')
-  kid.props = { _favorites: ['x'] }
+  kid.props = { _icon: 'lucide:star' }
   const page = mkBlock('某页')
   page.roles = ['page']
   page.props = { _icon: 'lucide:file' }
@@ -90,7 +90,7 @@ test('复制子树：角色与属性一起带走，且每一块都发新 id', ()
 
   const kidCopy = block.children[0]!
   assert.notEqual(kidCopy.id, kid.id, '子树里每一块都发新 id')
-  assert.deepEqual(kidCopy.props?._favorites, ['x'])
+  assert.equal(kidCopy.props?._icon, 'lucide:star', '子块的属性也要带走（这一层最容易漏）')
   assert.equal(idMap.get(page.id), block.id)
   assert.equal(idMap.get(kid.id), kidCopy.id)
 })

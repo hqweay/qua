@@ -35,7 +35,7 @@
 
 ### 1.2 「是不是某种东西」用**角色**，「有什么数据」用**属性**
 
-- 角色（`roles: Role[]`）是块上的一等声明：`page`／`journal`／`tag`／`schema`…
+- 角色（`roles: Role[]`）是块上的一等声明：`page`／`journal`／`query`／`tag`／`schema`…
 - **可兼位**（一个块可同时是标签、又是页）；判定只走 `hasRole`，**数组顺序无语义**（禁 `b.role ===`，`arch-check [21]` 会拦）
 - 属性（`props`）：系统属性 **`_` 开头**（`_type`／`_icon`／`_date`／`_tags`…）
 - ⇒ **`_role` 不存在。`props.role` 也是错的。**

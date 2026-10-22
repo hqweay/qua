@@ -361,34 +361,6 @@ export const HANDLERS: Record<string, Handler> = {
     return true
   },
 
-  /* ---- 收藏容器块 ---- */
-  'core.favorites/add': (a, app) => {
-    const blockId = typeof a.blockId === 'string' && a.blockId !== '' ? a.blockId : app.ed.caretBlock()
-    if (!blockId) return false
-    const containerId = typeof a.containerId === 'string' ? a.containerId : undefined
-    app.addFavorite(blockId, containerId)
-    return true
-  },
-  'core.favorites/remove': (a, app) => {
-    const blockId = typeof a.blockId === 'string' && a.blockId !== '' ? a.blockId : app.ed.caretBlock()
-    const containerId = typeof a.containerId === 'string' ? a.containerId : undefined
-    if (!blockId || !containerId) return false
-    app.removeFavorite(containerId, blockId)
-    return true
-  },
-  'core.favorites/move': (a, app) => {
-    const blockId = typeof a.blockId === 'string' ? a.blockId : ''
-    const containerId = typeof a.containerId === 'string' ? a.containerId : ''
-    const delta = typeof a.delta === 'number' ? a.delta : 0
-    if (!blockId || !containerId || delta === 0) return false
-    app.moveFavorite(containerId, blockId, delta)
-    return true
-  },
-  'core.favorites/new-container': (a, app) => {
-    app.newFavoriteContainer(typeof a.title === 'string' ? a.title : undefined)
-    return true
-  },
-
   /* ---- 视图 ---- */
   'core.view/toggle-theme': (_a, app) => {
     app.toggleTheme()

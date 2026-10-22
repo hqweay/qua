@@ -228,7 +228,7 @@ export function splitBlockBefore(doc: Doc, id: string, offset: number): { kept: 
  *   · `splitBlockBefore` —— 有父块：左半成**上方同级新块**；
  *   · 本函数 —— 没有父块：左半留根、右半成**首个子块**。
  *
- * ⚠️ 调用方只对**无角色的内容根**（focus/zoom 的普通块）启用；页/日记/收藏的 `text`
+ * ⚠️ 调用方只对**无角色的内容根**（focus/zoom 的普通块）启用；页/日记的 `text`
  *    是名字/投影，拆它等于静默改名（由 `editor.split` 的「无角色」判据拦住）。
  * ⚠️ `offset <= 0` 返回 null：那会把根文本清空、把整条内容搬进子块。调用方（editor）
  *    在块首/空块仍走「插一个空首子块」，不调用本函数。

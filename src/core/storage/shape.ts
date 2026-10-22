@@ -22,8 +22,10 @@ export { DEFAULT_DOCK, DEFAULT_PREFS, normalizePrefs } from './prefs.ts'
  * v2 → v3：三皮肤删除
  * v3 → v4：`localStorage` 落盘值套上**信封**（`storage/local-storage.ts`），旧值是裸 JSON ⇒ 作废
  * v4 → v5：`role` 改多值 `roles: Role[]`（旧库的 `role` 无法被新代码识别 ⇒ 作废，不写迁移）
+ * v5 → v6：删掉 `favorites` 角色，`backref` 同时从角色表移除（它只活在渲染期的合成行里，从不落盘）。
+ *           角色值会跟着 seed 与旧库一起落盘，旧库带着已不存在的角色就与角色表对不上 ⇒ 作废重 seed
  */
-export const WORKSPACE_VERSION = 5
+export const WORKSPACE_VERSION = 6
 
 /** 示例库：一片块森林 ＋ 行内锚点/原子 */
 export interface Workspace {

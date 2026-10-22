@@ -420,10 +420,6 @@ export function seedWorkspace(): Workspace {
 
   const built = [journal, yesterday, dayBefore, day3, day4, day5, p1, p2, p3, p4, p5]
   const blocks = built.map((b) => b.page)
-  // 默认的收藏容器块：**命名容器块 + 一列有序块引用**，左槽据此渲染「收藏」
-  // ⚠️ core 层不能 import app 层 ⇒ 这里就地建（`makeFavoriteContainer` 在 app 层是同一形状的工厂）
-  const favorites: Block = { id: uuidv7Hex(), text: '常用', children: [], roles: ['favorites'], props: { _icon: 'lucide:star', _favorites: [p1.page.id, p2.page.id] } }
-  blocks.push(favorites)
   resolveRefs(blocks, built)
 
   return forest(blocks, built)

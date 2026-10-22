@@ -106,40 +106,6 @@
   gap: 1px;
 }
 
-/*
-  收藏行：**一行引用 + 一个「移出」动作**。
-  引用本身仍由块渲染器画（一源多视）；这里只负责把「移出」摆到行尾、hover 才出现。
-*/
-.favorite-row {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-gap-2);
-  min-width: 0;
-}
-.favorite-row > .page-item,
-.favorite-row > .journal-item {
-  flex: 1;
-  min-width: 0;
-}
-.favorite-remove {
-  flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border-radius: var(--ui-radius-sm);
-  color: var(--ui-text-tertiary);
-  opacity: 0;
-  line-height: 1;
-}
-.favorite-row:hover .favorite-remove,
-.favorite-remove:focus-visible {
-  opacity: 1;
-}
-.favorite-remove:hover {
-  background: var(--ui-accent-soft);
-  color: var(--ui-text);
-}
-
 /* ---------------------------------------------------------- 钉住的块 */
 
 /*
