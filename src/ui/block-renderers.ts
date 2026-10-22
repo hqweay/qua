@@ -118,17 +118,27 @@ const journalRenderer: BlockRenderer = {
 const CHROME_RENDERERS: BlockRenderer[] = [journalRenderer]
 
 /**
- * 注册表：**先匹配先赢**，兜底永远在最后。
+ * **类型 → 渲染器**：声明在 core（纯数据），绑定在这里（函数）。
  *
- * 顺序的判据不是角色优先级：**chrome 先于类型**。
- * 类型渲染器（`outline`）对默认类型恒匹配，所以必须排在 chrome 之后；
- * 兼位块先叠 chrome，再由类型画那一行的骨架。
+ * 用查表而不是让每个渲染器自己 `match`：类型是一张**封闭注册表**，
+ * 「哪个类型由谁画」应该是一个可枚举的对照关系，而不是一列靠顺序裁决的谓词 ——
+ * 谓词串里每加一个类型都要重新推一遍顺序，而表里加一行不需要。
  */
-const RENDERERS: BlockRenderer[] = [...CHROME_RENDERERS, outlineRenderer, fallbackRenderer]
+const TYPE_RENDERERS: Record<string, BlockRenderer> = {
+  [DEFAULT_BLOCK_TYPE]: outlineRenderer,
+}
 
-/** 按类型＋chrome 挑渲染器（导出给测试用） */
+/**
+ * 挑渲染器：**先 chrome，再类型，最后兜底**。
+ *
+ * 顺序的判据不是角色优先级：chrome 是「在这一行的骨架上叠一件」（日记把标题换成日期），
+ * 类型是「画骨架本身」。反过来先问类型，chrome 就永远轮不到 —— 默认类型对所有块
+ * 都成立，它会把整张表变成「只有一条」。
+ */
 export function rendererFor(b: Block): BlockRenderer {
-  return RENDERERS.find((r) => r.match(b)) ?? fallbackRenderer
+  const chrome = CHROME_RENDERERS.find((r) => r.match(b))
+  if (chrome) return chrome
+  return TYPE_RENDERERS[blockTypeOf(b)] ?? fallbackRenderer
 }
 
 /** 画一个块 */

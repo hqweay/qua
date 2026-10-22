@@ -5,6 +5,7 @@
  */
 export * from './ids.ts'
 export * from './model.ts'
+export * from './types.ts'
 export * from './walk.ts'
 export * from './alias.ts'
 export * from './journal.ts'
