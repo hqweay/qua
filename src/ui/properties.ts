@@ -13,7 +13,7 @@
  */
 import type { Block } from '../core/index.ts'
 import type { FieldRow, PropKind } from '../core/index.ts'
-import { PROP_KINDS, propKindOf } from '../core/index.ts'
+import { hasRole, PROP_KINDS, propKindOf } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 
 export interface PropertiesDeps {
@@ -148,7 +148,7 @@ export class PropertiesPanel {
     }
     const rows = this.deps.rows(target)
     // 没有任何行、也没有「能声明字段」的角色 ⇒ 不占高度（普通内容块很常见）
-    const canDeclare = target.roles?.includes('page') || target.roles?.includes('tag')
+    const canDeclare = hasRole(target, 'page') || hasRole(target, 'tag')
     if (rows.length === 0 && !canDeclare && !this.formOpen) {
       this.els.root.hidden = true
       return

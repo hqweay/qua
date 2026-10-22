@@ -695,14 +695,20 @@ function commandDecls() {
 }
 
 /* ═══════════════════════════════════════════════════════╗
-   ║ 21 · 角色判定只能走 hasRole（禁 `.role` 读取）           ║
+   ║ 21 · 角色判定只能走 hasRole（禁读 `.role` / `.roles`）    ║
    ╚═══════════════════════════════════════════════════════ */
 
 {
-  // 来由：角色从单值 `role` 改成可兼位的 `roles: Role[]` 之后，
+  // 来由：角色从单值 `role` 改成可兼位的集合之后，
   // 任何残留的 `b.role === 'x'` 都**不会报错**——字段不存在，比较恒为 false，
   // 表现是「页不再是页」「日记不再是日记」，而且类型检查也抓不到（属性访问在 any 上合法）。
-  // ⇒ 把「读单值 role」这件事本身禁掉：判定只有 `hasRole` 一个入口。
+  // ⇒ 把「读单个角色字段」这件事本身禁掉：判定只有 `hasRole` 一个入口。
+  //
+  // 载体换到属性袋（`props._roles`）之后，同一条理由对 `.roles` 也成立，而且更凶：
+  // 裸读拿到的是 `undefined`，`(b.roles?.length ?? 0) === 0` 这种写法会静默恒真
+  // ⇒ **所有块都成了「无角色」**，页/标签/日记的每一条身份判据同时翻转，一个红灯都没有。
+  // ⇒ `.roles` 只许出现在模型实现里（唯一实现），别处一律走 `hasRole`／`hasAnyRole`／`rolesOf`。
+  const ROLES_IMPL = 'src/core/model.ts'
   const hits = []
   for (const f of srcFiles) {
     const r = rel(f)
@@ -717,6 +723,10 @@ function commandDecls() {
         // DOM 的 `el.dataset.role` 是对外 CSS 契约（`[data-role~='journal']`），不是块角色判定
         const isDataset = ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'dataset'
         if (!isDataset) push(n, '读了单值 `.role`')
+      }
+      // ①b `x.roles`（唯一允许的读点在模型实现里）
+      if (ts.isPropertyAccessExpression(n) && n.name.text === 'roles' && r !== ROLES_IMPL) {
+        push(n, '读了裸 `.roles`（走 hasRole／hasAnyRole／rolesOf）')
       }
       // ② `x['role']`
       if (
@@ -737,13 +747,13 @@ function commandDecls() {
   }
   add({
     id: 21,
-    title: '角色判定只走 `hasRole`（禁读单值 `.role`）',
-    method: 'AST 扫 src/**/*.ts 的 `x.role` 属性访问、`x["role"]` 元素访问、`const { role } = …` 解构；`el.dataset.role` 豁免（DOM 属性，不是块的角色判定）',
+    title: '角色判定只走 `hasRole`（禁读单值 `.role` 与裸 `.roles`）',
+    method: `AST 扫 src/**/*.ts 的 \`x.role\`／\`x.roles\` 属性访问、\`x["role"]\` 元素访问、\`const { role } = …\` 解构；\`el.dataset.role\` 豁免（DOM 属性，不是块的角色判定）`,
     scope: `src/**/*.ts（${srcFiles.length} 个文件）`,
-    whitelist: '`el.dataset.role`（写入 DOM 供 CSS 选择，承的是角色**外观**契约）· 角色**写入**用 `roles: [...]`，不在此列',
+    whitelist: `\`el.dataset.role\`（写入 DOM 供 CSS 选择，承的是角色**外观**契约）· \`${ROLES_IMPL}\`（角色集合的唯一实现处）· 角色**写入**请走 \`addRole\`／\`removeRole\``,
     hits: hits.length,
     detail: hits,
-    note: '为什么必须机检：`roles` 改多值后，`b.role === "x"` 静默恒假（字段不存在），表现是「页/日记突然不认了」，类型检查也看不出来',
+    note: '为什么必须机检：角色住进属性袋之后，裸读 `.roles` 恒 `undefined`，表现是「所有块都成了无角色」——页、标签、日记的身份判据同时翻转，类型检查也看不出来',
   })
 }
 

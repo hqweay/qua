@@ -24,14 +24,14 @@ const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id
 test('规范化只有一处：去空白 + 大小写折叠，且不改写正文', () => {
   assert.equal(normalizeAlias('  设计 '), '设计')
   assert.equal(normalizeAlias('Design'), 'design')
-  const x = b('x', ' Design ', { roles: ['page'] })
+  const x = b('x', ' Design ', { props: { _roles: ['page'] } })
   assert.equal(addressOf(x), 'design')
   assert.equal(x.text, ' Design ', '规范化只用于比较，不写回正文')
 })
 
 test('地址＝显式 _alias 优先，否则回落到正文', () => {
-  assert.equal(aliasOf(b('x', '正文', { roles: ['page'] })), '正文')
-  const withAlias = b('y', '正文', { roles: ['page'], props: { _alias: '地址' } })
+  assert.equal(aliasOf(b('x', '正文', { props: { _roles: ['page'] } })), '正文')
+  const withAlias = b('y', '正文', { props: { _roles: ['page'], _alias: '地址' } })
   assert.equal(aliasOf(withAlias), '地址')
   assert.equal(addressOf(withAlias), '地址')
 })
@@ -51,7 +51,7 @@ test('页与标签共用地址空间：# 设计 与 #设计 是同一个标签',
 })
 
 test('同名页块已存在 ⇒ 复用它并加 tag 角色（D10：不建第二个同名块）', () => {
-  const page = b('p', '设计', { roles: ['page'] })
+  const page = b('p', '设计', { props: { _roles: ['page'] } })
   const forest = [page]
   const r = ensureTag(forest, ' 设计 ')
   assert.equal(r.reused, true)
@@ -62,14 +62,14 @@ test('同名页块已存在 ⇒ 复用它并加 tag 角色（D10：不建第二�
 })
 
 test('findByAlias / findTagByName 都走同一个规范化（[[ 设计 ]] 与 #设计 命中同一块）', () => {
-  const forest: Block[] = [b('p', '设计', { roles: ['page'] })]
+  const forest: Block[] = [b('p', '设计', { props: { _roles: ['page'] } })]
   const tag = ensureTag(forest, '设计').block!
   assert.equal(findByAlias(forest, ' 设计 ')!.id, tag.id)
   assert.equal(findTagByName(forest, ' 设计 ')!.id, tag.id, '标签查找也只认这一处规范化')
 })
 
 test('地址空间只收页与标签：schema（字段定义）与普通块没有地址', () => {
-  const schema = b('d', '设计', { roles: ['schema'] })
+  const schema = b('d', '设计', { props: { _roles: ['schema'] } })
   const plain = b('n', '设计')
   assert.equal(isAddressable(schema), false)
   assert.equal(isAddressable(plain), false)

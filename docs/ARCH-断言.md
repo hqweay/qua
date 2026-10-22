@@ -110,7 +110,7 @@ demo 扩展（**加字段不改口径**）：
 | `[18]` | **命令 handler 不得碰 DOM**（`document`／`window`） | `arch-check` `[18]`（反证过：把违规行放回去会红） | **跑** |
 | `[19]` | 组件不得直接引用基础色 `--c-*`（只能用语义槽 `--ui-*`） | `arch-check` `[19]` | **跑** |
 | `[20]` | 持久化收口：`localStorage` 只出现在一个适配器文件里；上层不再 import 同步 save/load | `arch-check` `[20]` | **跑** |
-| `[21]` | 角色判定只走 `hasRole`（禁读单值 `.role`） | `arch-check` `[21]`（反证过：放一行 `b.role === 'page'` 会红） | **跑** |
+| `[21]` | 角色判定只走 `hasRole`（禁读单值 `.role` 与裸 `.roles`） | `arch-check` `[21]`（反证过：放一行 `b.role === 'page'` 会红；裸读 `.roles` 在换载体后会静默恒假，同样拦） | **跑** |
 | `[22]` | **块树遍历只有一个入口**（禁自写递归走 `children`） | `arch-check` `[22]`（反证过：放两种自写递归的写法都会红）＋ `tests/traversal.test.ts` | **跑** |
 
 **当前基线**：`pnpm arch:check` 硬断言 **16/16 过**（`[12b]` 是如实记账、不拦门的欠账；

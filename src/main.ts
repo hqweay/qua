@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addRole, aliasOf, allPropDefs, allTags, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, resolveRef, tagMemberIds, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { addRole, aliasOf, allPropDefs, allTags, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, rolesOf, resolveRef, tagMemberIds, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
@@ -1734,7 +1734,7 @@ const api = {
    * 标签块挂在森林根上、不在当前页里 ⇒ 查「标签存不存在」必须用这个。
    */
   allBlocks() {
-    return ws.blocks.map((b) => ({ id: b.id, text: b.text, roles: b.roles ?? [] }))
+    return ws.blocks.map((b) => ({ id: b.id, text: b.text, roles: rolesOf(b) }))
   },
   /** 字段定义（诊断面）：id ＝ propId、正文 ＝ label、谁声明了它 */
   propDefs() {
@@ -1791,7 +1791,7 @@ const api = {
       collapsed: b.collapsed ?? false,
       children: b.children.length,
       // 角色进诊断面（journal 行是只读日期，测试要能把它挑出来）
-      roles: b.roles ?? [],
+      roles: rolesOf(b),
     }))
   },
   marks() {

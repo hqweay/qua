@@ -37,7 +37,7 @@ test('① ensureTag：找到或创建，幂等（第二次不新建）', () => {
   const first = ensureTag(forest, '设计')
   assert.equal(first.created, true)
   assert.equal(forest.length, 1)
-  assert.deepEqual(forest[0]!.roles, ['tag'], '标签是一个带 tag 角色的块')
+  assert.deepEqual(forest[0]!.props?._roles, ['tag'], '标签是一个带 tag 角色的块')
 
   const second = ensureTag(forest, '设计')
   assert.equal(second.created, false)
@@ -58,7 +58,7 @@ test('② 边在正文里 ⇒ 删掉那个原子，边随之消失（不留孤�
 })
 
 test('③ 同名页块 ⇒ 复用它并加 tag 角色（D10：名字空间合并，同名必同一块）', () => {
-  const forest: Block[] = [b('p', '设计', { roles: ['page'] })]
+  const forest: Block[] = [b('p', '设计', { props: { _roles: ['page'] } })]
   const found = ensureTag(forest, '设计')
   assert.equal(found.created, false, '已有同名块 ⇒ 不建第二个块')
   assert.equal(found.reused, true, '这一种是「复用并加角色」，要给用户可见反馈')
@@ -141,7 +141,7 @@ test('⑥b tagsOf：返回标签块本身（活引用），顺序按正文里出
 test('mkTagBlock：名字就是正文，不带 #（# 是呈现时加的装饰）', () => {
   const t = mkTagBlock('设计')
   assert.equal(t.text, '设计')
-  assert.deepEqual(t.roles, ['tag'])
+  assert.deepEqual(t.props?._roles, ['tag'])
   assert.equal(t.props?._icon, 'lucide:hash')
 })
 

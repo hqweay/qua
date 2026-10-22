@@ -12,23 +12,22 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { canWriteText, cloneSubtree, mergeIntoPrev, mkBlock, type Block, type Doc } from '../src/core/index.ts'
+import { addRole, canWriteText, cloneSubtree, mergeIntoPrev, mkBlock, type Block, type Doc } from '../src/core/index.ts'
 
 const j = (date: string, children: Block[] = []): Block => ({
   id: `j-${date}`,
   text: '',
   children,
-  roles: ['journal'],
-  props: { _date: date },
+  props: { _roles: ['journal'], _date: date },
 })
 
 test('canWriteText：标签/字段定义/日记的正文是名字；页与普通块是内容', () => {
   const tag = mkBlock('设计')
-  tag.roles = ['tag']
+  addRole(tag, 'tag')
   const schema = mkBlock('截止日')
-  schema.roles = ['schema']
+  addRole(schema, 'schema')
   const page = mkBlock('某一页')
-  page.roles = ['page']
+  addRole(page, 'page')
 
   assert.equal(canWriteText(tag), false)
   assert.equal(canWriteText(schema), false)
@@ -40,7 +39,7 @@ test('canWriteText：标签/字段定义/日记的正文是名字；页与普通
 
 test('合并：前一块是标签 ⇒ 不成立，标签名与两边正文都不动', () => {
   const tag = mkBlock('设计')
-  tag.roles = ['tag']
+  addRole(tag, 'tag')
   const child = mkBlock('一行内容')
   const doc: Doc = { roots: [tag, child] }
 
@@ -76,14 +75,14 @@ test('复制子树：角色与属性一起带走，且每一块都发新 id', ()
   const kid = mkBlock('子块')
   kid.props = { _icon: 'lucide:star' }
   const page = mkBlock('某页')
-  page.roles = ['page']
-  page.props = { _icon: 'lucide:file' }
+  addRole(page, 'page')
+  page.props = { ...page.props, _icon: 'lucide:file' }
   page.children = [kid]
 
   const { block, idMap } = cloneSubtree(page)
 
   assert.notEqual(block.id, page.id)
-  assert.deepEqual(block.roles, ['page'], '角色要一起带走，否则复制出来的页只是「长得像」')
+  assert.deepEqual(block.props?._roles, ['page'], '角色要一起带走，否则复制出来的页只是「长得像」')
   assert.equal(block.props?._icon, 'lucide:file', '属性要一起带走（图标、日期、字段值）')
   assert.notEqual(block.props, page.props, '属性袋是副本，不是同一个对象')
   assert.equal(block.text, '某页')
@@ -98,6 +97,5 @@ test('复制子树：角色与属性一起带走，且每一块都发新 id', ()
 test('复制子树：原件没有的角色/属性，副本也不凭空多出来', () => {
   const plain = mkBlock('光块')
   const { block } = cloneSubtree(plain)
-  assert.equal(block.roles, undefined, '不留空数组')
-  assert.equal(block.props, undefined)
+  assert.equal(block.props, undefined, '不留空数组、也不留空属性袋')
 })

@@ -41,8 +41,7 @@ export function mkPropDef(label: string, kind: PropKind = 'text', extra: BlockPr
     id: uuidv7Hex(),
     text: label,
     children: [],
-    roles: [SCHEMA_ROLE],
-    props: { _kind: kind, ...extra },
+    props: { _roles: [SCHEMA_ROLE], _kind: kind, ...extra },
   }
 }
 

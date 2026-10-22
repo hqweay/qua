@@ -35,10 +35,13 @@
 
 ### 1.2 「是不是某种东西」用**角色**，「有什么数据」用**属性**
 
-- 角色（`roles: Role[]`）是块上的一等声明：`page`／`journal`／`query`／`tag`／`schema`…
-- **可兼位**（一个块可同时是标签、又是页）；判定只走 `hasRole`，**数组顺序无语义**（禁 `b.role ===`，`arch-check [21]` 会拦）
-- 属性（`props`）：系统属性 **`_` 开头**（`_type`／`_icon`／`_date`／`_tags`…）
-- ⇒ **`_role` 不存在。`props.role` 也是错的。**
+- 角色：`page`／`journal`／`query`／`tag`／`schema`…，载体是属性袋里的 **`props._roles`**
+- **可兼位**（一个块可同时是标签、又是页）；**顺序无语义**；判定与读写只走
+  `hasRole`／`hasAnyRole`／`rolesOf`／`addRole`／`removeRole`（裸读 `.role`／`.roles` 会被 `arch-check [21]` 拦）
+- 属性（`props`）：系统属性 **`_` 开头**（`_type`／`_icon`／`_date`／`_tags`／`_roles`…）
+- ⇒ **块上没有 `role`／`roles` 字段。`props.role` 也是错的。**
+- 角色住属性袋不是「角色是普通属性」：它没有定义块、由模型代码解释、不进属性面板；
+  放在那里的收益是**整块拷贝只需浅拷 `props`**，复制页/标签不会再漏搬身份。
 
 ### 1.3 数据层只回答「是什么」；「怎么显示」归**查询**或**视图配置**
 

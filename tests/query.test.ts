@@ -44,7 +44,7 @@ function fixture() {
   const todo = mkTagBlock('todo')
   const forest: Block[] = [
     b('p1', '页面一', {
-      roles: ['page'],
+      props: { _roles: ['page'] },
       children: [
         b('a', '甲', { todo: 'todo' }),
         b('b', '乙', { todo: 'done' }),
@@ -52,9 +52,9 @@ function fixture() {
         b('d', '提到丙的块', { children: [b('d1', '甲的子孙', { todo: 'todo' })] }),
       ],
     }),
-    b('p2', '页面二', { roles: ['page'], children: [b('e', '另一个', { todo: 'todo' })] }),
+    b('p2', '页面二', { props: { _roles: ['page'] }, children: [b('e', '另一个', { todo: 'todo' })] }),
     // ⚠️ `j1b` 只有标签、**没有**待办状态：`all[tag, todo]` 那条断言靠它来区分「有标签」与「是待办」
-    b('j1', '', { roles: ['journal'], props: { _date: '2026-10-20' }, children: [b('j1a', '今天的记录'), b('j1b', '也')] }),
+    b('j1', '', { props: { _roles: ['journal'], _date: '2026-10-20' }, children: [b('j1a', '今天的记录'), b('j1b', '也')] }),
   ]
   const tagged = ['a', 'b', 'd1', 'e', 'j1b']
   const atoms: Atom[] = tagged.map(
@@ -164,7 +164,7 @@ test('runQuery：limit 截断；结果顺序＝森林先序（可复现）', () 
 
 test('refreshSpec：把条件与结果写回块上；丢掉的不再匹配的块要能报出来', () => {
   const { blocks, atoms } = fixture()
-  const q = b('q', '查询：带 todo 的', { roles: ['query'] })
+  const q = b('q', '查询：带 todo 的', { props: { _roles: ['query'] } })
   const spec: QuerySpec = { where: { tag: 'todo' }, scope: 'all' }
   const first = refreshSpec(q, spec, { blocks, atoms })
   assert.equal(first.hits.length, 5)
@@ -186,7 +186,7 @@ test('refreshSpec：把条件与结果写回块上；丢掉的不再匹配的块
 test('refreshSpec：subtree 的锚点是查询块所在的容器，不是查询块自己（它是叶子）', () => {
   // 实测踩到：查询块只存条件、不吃结果（A）⇒ 拿它当锚点的话 subtree 里只有它自己，永远 0 条
   const { blocks, atoms } = fixture()
-  const q = b('q', '本页的待办', { roles: ['query'], props: { _query: { where: { todo: 'todo' } } } })
+  const q = b('q', '本页的待办', { props: { _roles: ['query'], _query: { where: { todo: 'todo' } } } })
   blocks[0]!.children.push(q)
   const { hits } = refreshSpec(q, { where: { todo: 'todo' } }, { blocks, atoms })
   assert.deepEqual(hits.map((h) => h.blockId), ['a', 'd1'], '只看 p1 这一页里的待办')
@@ -194,7 +194,7 @@ test('refreshSpec：subtree 的锚点是查询块所在的容器，不是查询�
 
 test('resolveFrozen：内容按 id 现读（冻的是成员，不是文字）', () => {
   const { blocks, atoms } = fixture()
-  const q = b('q', 'q', { roles: ['query'] })
+  const q = b('q', 'q', { props: { _roles: ['query'] } })
   refreshSpec(q, { where: { tag: 'todo' }, scope: 'all' }, { blocks, atoms })
 
   // 改文字：冻结结果不变，但**读出来的是新文字**
@@ -206,7 +206,7 @@ test('resolveFrozen：内容按 id 现读（冻的是成员，不是文字）', 
 
 test('resolveFrozen：块被删了就不出；祖先也在结果里时只保留祖先', () => {
   const { blocks, atoms } = fixture()
-  const q = b('q', 'q', { roles: ['query'] })
+  const q = b('q', 'q', { props: { _roles: ['query'] } })
   // d 与 d1 都命中标签吗？d 不含标签 ⇒ 用 text 条件让父子同时命中
   refreshSpec(q, { where: { text: '提到' }, scope: 'all' }, { blocks, atoms })
   const rows = resolveFrozen(readResult(q)!, blocks)
@@ -222,7 +222,7 @@ test('canonicalSpec：键序固定 ⇒ 同一条件的不同写法判为「没�
   const b2: QuerySpec = { scope: 'all', where: { all: [{ tag: 'x' }, { todo: 'todo' }] } } as QuerySpec
   assert.equal(JSON.stringify(canonicalSpec(a)), JSON.stringify(canonicalSpec(b2)))
 
-  const q = b('q', 'q', { roles: ['query'] })
+  const q = b('q', 'q', { props: { _roles: ['query'] } })
   refreshSpec(q, a, fixture())
   assert.equal(specChanged(q, b2), false, '写法不同但语义相同 ⇒ 不该触发重算')
   assert.equal(specChanged(q, { where: { tag: 'y' }, scope: 'all' }), true)

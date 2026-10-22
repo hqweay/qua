@@ -24,8 +24,10 @@ export { DEFAULT_DOCK, DEFAULT_PREFS, normalizePrefs } from './prefs.ts'
  * v4 → v5：`role` 改多值 `roles: Role[]`（旧库的 `role` 无法被新代码识别 ⇒ 作废，不写迁移）
  * v5 → v6：删掉 `favorites` 角色，`backref` 同时从角色表移除（它只活在渲染期的合成行里，从不落盘）。
  *           角色值会跟着 seed 与旧库一起落盘，旧库带着已不存在的角色就与角色表对不上 ⇒ 作废重 seed
+ * v6 → v7：角色从顶层 `roles` 挪进 `props._roles`。旧库的角色字段新代码不读 ⇒
+ *           页/标签会静默失去身份，所以必须作废重 seed（不写迁移）
  */
-export const WORKSPACE_VERSION = 6
+export const WORKSPACE_VERSION = 7
 
 /** 示例库：一片块森林 ＋ 行内锚点/原子 */
 export interface Workspace {
@@ -61,8 +63,9 @@ function isBlock(x: unknown): x is Block {
   if (!x || typeof x !== 'object') return false
   const b = x as Block
   if (typeof b.id !== 'string' || typeof b.text !== 'string' || !Array.isArray(b.children)) return false
-  // 角色是可兼位的数组；形状不对就是「这坨字节打不开」，不猜、不修
-  if (b.roles !== undefined && (!Array.isArray(b.roles) || !b.roles.every((r) => typeof r === 'string'))) return false
+  // 角色是可兼位的数组（住在属性袋的 `_roles`）；形状不对就是「这坨字节打不开」，不猜、不修
+  const roles = b.props?.['_roles']
+  if (roles !== undefined && (!Array.isArray(roles) || !roles.every((r) => typeof r === 'string'))) return false
   return true
 }
 

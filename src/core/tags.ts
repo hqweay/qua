@@ -47,8 +47,7 @@ export function mkTagBlock(name: string): Block {
     id: uuidv7Hex(),
     text: name,
     children: [],
-    roles: [TAG_ROLE],
-    props: { _icon: 'lucide:hash' },
+    props: { _roles: [TAG_ROLE], _icon: 'lucide:hash' },
   }
 }
 

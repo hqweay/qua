@@ -134,7 +134,7 @@ export function rendererFor(b: Block): BlockRenderer {
 /** 这组角色有没有专属 chrome（兜底与默认类型都不算「专属」） */
 export function hasDedicatedRenderer(roles: Role[] | undefined): boolean {
   if (!roles?.length) return false
-  return CHROME_RENDERERS.some((r) => r.match({ id: '', text: '', children: [], roles }))
+  return CHROME_RENDERERS.some((r) => r.match({ id: '', text: '', children: [], props: { _roles: roles } }))
 }
 
 /** 画一个块 */

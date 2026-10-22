@@ -38,7 +38,7 @@ const atom = (extra: Partial<Atom> = {}): Atom => ({
 })
 
 test('① 目标存在 ⇒ 显示目标当前正文，不是插入时的 label 快照', () => {
-  const forest = [b('p1', '真正的名字', { roles: ['page'] })]
+  const forest = [b('p1', '真正的名字', { props: { _roles: ['page'] } })]
   const a = atom({ label: '旧名字', target: { kind: 'page', id: 'p1' } })
   const v = resolveRef(finder(forest), a)
   assert.equal(v.label, '真正的名字')
@@ -46,7 +46,7 @@ test('① 目标存在 ⇒ 显示目标当前正文，不是插入时的 label �
 })
 
 test('② 改名传播：改目标正文 ⇒ 解析结果跟着变，原子本身一个字节都没动', () => {
-  const target = b('p1', '甲', { roles: ['page'] })
+  const target = b('p1', '甲', { props: { _roles: ['page'] } })
   const forest = [target]
   const a = atom({ label: '甲', target: { kind: 'page', id: 'p1' } })
   const before = JSON.stringify(a)
@@ -60,7 +60,7 @@ test('② 改名传播：改目标正文 ⇒ 解析结果跟着变，原子本�
 })
 
 test('③ 目标被删 ⇒ dangling ＋ 沿用 label（错指要看得见，不假装解析成功）', () => {
-  const forest = [b('p1', '甲', { roles: ['page'] })]
+  const forest = [b('p1', '甲', { props: { _roles: ['page'] } })]
   const a = atom({ label: '甲', target: { kind: 'page', id: 'p1' } })
   assert.equal(resolveRef(finder(forest), a).state, 'resolved')
 
@@ -77,7 +77,7 @@ test('③b 没有 target 的原子 ⇒ dangling（seed 的悬空样本就是这�
 })
 
 test('④ journal 的正文是空的 ⇒ 显示日期投影，不是「无标题」', () => {
-  const forest = [b('j1', '', { roles: ['journal'], props: { _date: '2026-10-20' } })]
+  const forest = [b('j1', '', { props: { _roles: ['journal'], _date: '2026-10-20' } })]
   const v = resolveRef(finder(forest), atom({ label: '某天', target: { kind: 'page', id: 'j1' } }))
   assert.equal(v.state, 'resolved')
   assert.ok(/\d{4}/.test(v.label), `应显示日期投影：${v.label}`)
@@ -85,7 +85,7 @@ test('④ journal 的正文是空的 ⇒ 显示日期投影，不是「无标题
 })
 
 test('④b 空正文的普通页 ⇒ 兜底「无标题」（不是空字符串）', () => {
-  const forest = [b('p1', '   ', { roles: ['page'] })]
+  const forest = [b('p1', '   ', { props: { _roles: ['page'] } })]
   const v = resolveRef(finder(forest), atom({ label: 'x', target: { kind: 'page', id: 'p1' } }))
   assert.equal(v.label, '无标题')
 })
@@ -93,11 +93,11 @@ test('④b 空正文的普通页 ⇒ 兜底「无标题」（不是空字符串�
 test('refTitle：正文前后空白不算名字；journal 空日期退回正文', () => {
   assert.equal(refTitle(b('p', '  甲  ')), '甲')
   // `_date` 为空时没有可显示的投影 ⇒ 退回正文（此时为空 ⇒ 兜底文案）
-  assert.equal(refTitle(b('j', '', { roles: ['journal'], props: { _date: '' } })), '无标题')
+  assert.equal(refTitle(b('j', '', { props: { _roles: ['journal'], _date: '' } })), '无标题')
 })
 
 test('resolveRefs：按 atomId 返回（不是按位置，顺序变了也不会张冠李戴）', () => {
-  const forest = [b('p1', '甲', { roles: ['page'] }), b('p2', '乙', { roles: ['page'] })]
+  const forest = [b('p1', '甲', { props: { _roles: ['page'] } }), b('p2', '乙', { props: { _roles: ['page'] } })]
   const find = finder(forest)
   const atoms: Atom[] = [
     { id: 'x', kind: 'page', blockId: 's', start: 0, end: 1, label: '旧甲', target: { kind: 'page', id: 'p1' } },

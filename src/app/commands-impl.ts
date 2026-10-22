@@ -13,6 +13,7 @@
  */
 import {
   addParentTag,
+  addRole,
   allPropDefs,
   allTags,
   checkAddParent,
@@ -121,8 +122,8 @@ import type { Row } from '../ui/layers.ts'
 /** 一个空页块：正文为空、图标是系统属性 `_icon` */
 export function makePageBlock(): Block {
   const b = mkBlock('')
-  b.roles = ['page']
-  b.props = { _icon: 'lucide:file' }
+  addRole(b, 'page')
+  b.props = { ...(b.props ?? {}), _icon: 'lucide:file' }
   return b
 }
 
