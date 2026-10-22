@@ -158,7 +158,7 @@ export const MSG = {
   'ui.tagpanel.unPage': '不再是页',
   'ui.role.removeTagTitle': '「{tag}」还被 {members} 个块打着',
   'ui.role.removeTagContinue': '继续（值不会丢，会变成「本块自有」）',
-  'ui.role.declarations': '{count} 个字段声明会失效；打回 tag 角色后自动恢复',
+  'ui.role.declarations': '{count} 个标签属性会失效；打回 tag 角色后自动恢复',
   'ui.role.cancel': '取消',
   'ui.toast.pageRoleAdded': '已作为页：{name}',
   'ui.toast.pageRoleRemoved': '不再是页：{name}（仍可打开、仍可被引用）',
@@ -166,7 +166,7 @@ export const MSG = {
   'ui.toast.tagRoleRemoved': '不再是标签：{name}（值都还在）',
   'ui.toast.roleNeedName': '先给它起个名字，再作为标签',
   /* 摘标签时的清理提示（默认「保留」，只在真有值时才问） */
-  'ui.tagCleanup.title': '「{tag}」带来的字段还有值',
+  'ui.tagCleanup.title': '「{tag}」带来的标签属性还有值',
   'ui.tagCleanup.body': '清理这些值吗？默认保留（值会落到「本块自有」）。',
   'ui.tagCleanup.keep': '保留',
   'ui.tagCleanup.keepHint': '值留在块上，变成「本块自有」',
