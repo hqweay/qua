@@ -1477,10 +1477,44 @@ export class BlockEditor {
    * 视图层没有「根级同级」这个真实位置，插进去的块没有家。
    *    视觉上二者也等价：根行是这一段的第一个可编辑/标题行，它「之后」就是第一个子块。
    */
+  /**
+   * 在当前块后面插入一个块（`/` 菜单的「正文块」「待办」）。
+   *
+   * **插入点本身是空块时，改它，而不是在它下面再造一个**：
+   * 用户在一行空白里打 `/` 选「待办」，想要的是「这一行变成待办」，
+   * 而不是「多出一个待办、原来那个空行还留在上面」。
+   *
+   * ⚠️ 「空块」的判据是**正文为空且没有子块**：有子块的块不能被改掉类型/值 ——
+   *    那会让子树挂在一个用户没打算改的块下面。
+   * ⚠️ 待办这一支还要看**已经有值没有**：已经有任务状态的空块（`false` ＝
+   *    是任务但没做完）不该被「/待办」翻回未完成 —— 那是改值，不是插入。
+   *    这一条与 `toggleTodo` 分工：那个是**切换**，这个是**插入**。
+   */
   insertBlockAfter(id: string, text: string, todo?: TodoState): string | null {
     const loc = locate(this.doc, id)
     if (!loc) return null
     const before = this.snap()
+    const blank = loc.block.text === '' && loc.block.children.length === 0 && canWriteText(loc.block)
+    if (blank && text === '') {
+      /**
+       * 空块 ＋ 无正文：
+       *   · 「正文块」⇒ 这一行**本来就是**一个正文块，意图已经满足：不动模型、
+       *     不记撤销，把光标落回它自己（返回它的 id，而不是 `null` ——
+       *     `null` 的意思是「这里放不下一个块」，与「已经就是这样」是两件事）。
+       *   · 「待办」⇒ 原地变成任务（但已有任务状态值时不覆盖，见上）。
+       */
+      if (!todo) {
+        this.placeCaret(loc.block.id, 0)
+        return loc.block.id
+      }
+      if (todoOf(loc.block) !== undefined) return null
+      setValue(loc.block, TASK_STATUS_PROP_ID, todo === 'done')
+      this.undo.record(before, 'structural', Date.now())
+      this.renderAll()
+      this.placeCaret(loc.block.id, 0)
+      this.emitChange('struct', [loc.block.id])
+      return loc.block.id
+    }
     const b = mkBlock(text)
     // 待办不是块的字段，是**任务状态属性**的一个值：这里落值，不落「块的种类」
     if (todo) b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: todo === 'done' }
