@@ -127,6 +127,18 @@ export function makePageBlock(): Block {
   return b
 }
 
+/**
+ * 冲突块在提示里怎么称呼。
+ *
+ * 只到「页／标签」这一层，不做面包屑：`[[ ]]` 打出去的名字撞的是**名字空间**里
+ * 的那个块，用户要判断的是「我是不是想引用那个页」，知道它是页还是标签就够了。
+ */
+function takenWhere(b: Block): string {
+  if (hasRole(b, 'page')) return t('ui.where.page')
+  if (hasRole(b, 'tag')) return t('ui.where.tag')
+  return t('ui.where.block')
+}
+
 export interface PageDeps {
   /** 读块森林（**返回的是活引用**，push/splice 直接生效） */
   blocks: () => Block[]
@@ -261,7 +273,16 @@ export function pageCommands(d: PageDeps): Pick<
         d.toast(t('ui.toast.journalReadonly'), 'warn')
         return
       }
-      renameBlock(p, title)
+      // 撞名就**停在原地**：地址是引用能落到哪儿的唯一依据，两个块同地址等于
+      // 其中一个从此引用不到。拒绝之后列表与标题都按库里的旧名字重画，
+      // 让界面立刻回到「这次没改成功」的样子，而不是留着一个假装改了的标题。
+      const r = renameBlock(d.blocks(), p, title)
+      if (!r.ok) {
+        d.toast(t('ui.toast.nameTaken', { name: title, where: takenWhere(r.conflict) }), 'warn')
+        if (p.id === d.activeId()) d.refreshTitle()
+        d.refreshList()
+        return
+      }
       if (p.id === d.activeId()) d.refreshTitle()
       d.refreshList()
       d.scheduleSave()
