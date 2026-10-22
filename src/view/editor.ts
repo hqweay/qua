@@ -44,6 +44,7 @@ import {
   remapAnchors,
   removeMarkRange,
   selToTextRanges,
+  setBlockType,
   splitBlockBefore,
   splitBlockIntoFirstChild,
   isFolded,
@@ -1490,7 +1491,7 @@ export class BlockEditor {
     if (!loc) return false
     const before = this.snap()
     const divider = mkBlock('')
-    divider.props = { ...(divider.props ?? {}), _type: DIVIDER_TYPE }
+    setBlockType(divider, DIVIDER_TYPE)
     if (!this.insertNear(loc, divider)) return false
     const empty = mkBlock('')
     const at = locate(this.doc, divider.id)

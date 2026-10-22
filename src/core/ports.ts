@@ -111,6 +111,13 @@ export interface App {
   addBlockRole(blockId: string, role: 'page' | 'tag'): boolean
   removeBlockRole(blockId: string, role: 'page' | 'tag'): boolean
   /**
+   * 写块的类型（`_type`）。
+   *
+   * ⚠️ 类型 id **不由这里校验**：不认识的值照写，降级是读侧的事 ——
+   *    否则插件或更新版本写的类型会在这一层被抹掉。
+   */
+  setBlockType(blockId: string, typeId: string): boolean
+  /**
    * 删一个行内原子（引用 / 标签）。
    *
    * ⚠️ 摘标签可能触发「要不要清理它带来的值」的提示 —— 所以删除入口在门面，

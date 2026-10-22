@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addRole, aliasOf, allPropDefs, allTags, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, resolveRef, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { addRole, aliasOf, allPropDefs, allTags, blockTypeOf, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
@@ -857,6 +857,19 @@ function removeBlockRole(blockId: string, role: 'page' | 'tag'): boolean {
   return true
 }
 
+/**
+ * 写块的类型（`_type`）。
+ *
+ * 一次属性写入就够：类型值住在块的属性袋里，撤销、落盘、重画都走同一条路。
+ * 幂等检查放在写之前 —— 否则「设成它已经是的东西」也会占掉一格撤销。
+ */
+function applyBlockType(blockId: string, typeId: string): boolean {
+  const b = findInForest(ws.blocks, blockId)
+  if (!b || blockTypeOf(b) === typeId) return false
+  writeProps(blockId, () => setBlockType(b, typeId))
+  return true
+}
+
 /** 同一标签在本次运行期间已经答过「保留」⇒ 不再追问（避免提示疲劳） */
 const cleanupAlwaysKeep = new Set<string>()
 
@@ -1029,6 +1042,7 @@ const app: App = {
 
   addBlockRole: (blockId, role) => addBlockRole(blockId, role),
   removeBlockRole: (blockId, role) => removeBlockRole(blockId, role),
+  setBlockType: (blockId, typeId) => applyBlockType(blockId, typeId),
 
   // 导航历史（中心槽走到哪）；与 undo/redo 的模型快照栈无关
   historyBack: () => historyGo('back'),
