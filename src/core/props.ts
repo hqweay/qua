@@ -1,14 +1,18 @@
 /**
- * **属性定义（prop-def）与字段集合**。
+ * **属性（property）、标签属性（tag properties）、块属性（block properties）**。
  *
- * 根不变量：**字段的身份是全局 `propId`，不是它的名字。**
- *   · `propId` ＝ prop-def 块的 **id**（不另造 id 空间）；
- *   · 定义是一个普通块（正文＝显示名，`_kind` 是它的种类），住在森林顶层 ——
- *     不能住在任何一个使用者的子树里，否则删掉那个标签会带走别人的定义；
- *   · 标签/页用 `_fieldDefs`（有序 ref 列表）**声明**它可用的字段；
- *   · 值永远在**块上** `props[propId]`（一块一槽），声明只提供「可用性」。
+ * 三个词指的是三样东西，别混：
+ *   · **属性** —— 那个全局定义：一个住在森林顶层的普通块，正文＝显示名、`_kind`＝种类；
+ *   · **标签属性** —— 某个标签（或页）**声明**了哪些属性可用（`_fieldDefs`）；
+ *   · **块属性** —— 某个块自己有哪些属性的**值**（`props[propId]`）。
  *
- * 字段继承**不做**：`fieldsOf` 只算**块实际打着的标签**，没有祖先闭包。
+ * 根不变量：**属性的身份是全局 `propId`，不是它的名字。**
+ *   · `propId` ＝ 定义块的 **id**（不另造 id 空间）；
+ *   · 定义块不能住在任何一个使用者的子树里，否则删掉那个标签会带走别人的定义；
+ *   · 声明只提供「可用性」，值永远在**块上**（一块一槽）。
+ *
+ * 标签属性**不向成员继承**：`fieldRows` 只算**块实际打着的标签**，没有祖先闭包。
+ * ⇒ 叫「标签属性」说的是「这个标签名下的属性清单」，不是「所有成员都有的属性」。
  *
  * ⚠️ `_fieldDefs` 里存的是 **ref（id）**，不是名字：改名零迁移，重名不撞车。
  * ⚠️ 本文件零 DOM：属性面板只消费这里的派生结果，写入通过命令。
@@ -23,7 +27,7 @@ import { allTags, tagsOf } from './tags.ts'
 export const FIELD_DEFS_PROP = '_fieldDefs'
 
 /**
- * **一个字段在哪儿被编辑**（定义块上的系统属性）。
+ * **一个属性在哪儿被编辑**（定义块上的系统属性）。
  *
  * 两个值，互斥：
  *   · `block-left` —— 编辑入口在**块左侧的 gutter**。给「一次点击就能改」的高频二元开关用；
@@ -86,7 +90,7 @@ export function isPropKind(v: unknown): v is PropKind {
 /* ------------------------------------------------------------ 定义块 */
 
 /**
- * 造一个字段定义块（**森林顶层**，正文＝显示名；`propId` 就是它的 id）。
+ * 造一个属性定义块（**森林顶层**，正文＝显示名；`propId` 就是它的 id）。
  *
  * `id` 只给**核心词汇**用：它们的 id 必须跨重开稳定（名字 → id 走 `derivedId`），
  * 而普通用户新建的定义仍拿到随机 id —— 那条路不需要、也不该承诺稳定性。
@@ -101,7 +105,7 @@ export function mkPropDef(label: string, kind: PropKind = 'text', extra: BlockPr
   }
 }
 
-/** 是不是字段定义块（**看数据 `_kind`**，不看名字、也没有额外的角色值） */
+/** 是不是属性定义块（**看数据 `_kind`**，不看名字、也没有额外的角色值） */
 export function isPropDef(b: Block): boolean {
   return isPropDefBlock(b)
 }
@@ -123,7 +127,7 @@ export function propChoices(def: Block): string[] {
   return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string') : []
 }
 
-/** 森林里全部字段定义（先序） */
+/** 森林里全部属性定义（先序） */
 export function allPropDefs(forest: readonly Block[]): Block[] {
   const out: Block[] = []
   walkForest(forest, (b) => {
@@ -139,7 +143,7 @@ export function findPropDef(forest: readonly Block[], propId: string): Block | u
 
 /* ------------------------------------------------------------ 声明 */
 
-/** 一个标签/页声明了哪些字段（有序 ref 列表；悬空 ref 不静默补，交给解析方跳过） */
+/** 一个标签/页声明了哪些属性 —— 即它的标签属性清单（有序 ref 列表；悬空 ref 不静默补，交给解析方跳过） */
 export function declaredFieldIds(owner: Block): string[] {
   const raw = prop<unknown>(owner, FIELD_DEFS_PROP)
   if (!Array.isArray(raw)) return []
@@ -147,9 +151,9 @@ export function declaredFieldIds(owner: Block): string[] {
 }
 
 /**
- * 在标签/页上声明一个字段（幂等；追加到末尾 ＝ 显示顺序）。
+ * 把一条属性声明到标签/页上，从此成为它的标签属性（幂等；追加到末尾 ＝ 显示顺序）。
  *
- * **只有页与标签能声明字段**：声明必须有自动获得方（标签的成员、页的子块），
+ * **只有页与标签能声明属性**：声明必须有自动获得方（标签的成员、页的子块），
  * 普通块没有 ⇒ 无消费方的声明是噪音。返回值说明有没有真的改动。
  */
 export function declareField(owner: Block, propId: string): boolean {
@@ -168,7 +172,7 @@ export function undeclareField(owner: Block, propId: string): boolean {
   return true
 }
 
-/** 一个标签/页声明的字段定义（按声明顺序；解析不到的定义跳过 —— 悬空 ref 是状态） */
+/** 一个标签/页声明的属性定义（按声明顺序；解析不到的定义跳过 —— 悬空 ref 是状态） */
 export function declaredFields(owner: Block, forest: readonly Block[]): Block[] {
   const byId = new Map(allPropDefs(forest).map((d) => [d.id, d]))
   const out: Block[] = []
@@ -179,7 +183,7 @@ export function declaredFields(owner: Block, forest: readonly Block[]): Block[] 
   return out
 }
 
-/* ------------------------------------------------------------ 字段集合 */
+/* ----------------------------------------------------- 标签属性与块属性 */
 
 /** 块上**自有**的属性 id（`props` 里非系统属性；有值就必然出现在这里） */
 export function ownFieldIds(block: Block): string[] {
@@ -209,20 +213,20 @@ export interface FieldRow {
   filled: boolean
   /** 定义块（缺失＝悬空定义，仍显示值） */
   def?: Block
-  /** 直接标签里**声明了这个字段**的那些（按正文字段顺序）；空＝本块自有 */
+  /** 直接标签里**声明了这条属性**的那些（按正文顺序）；空＝本块自有 */
   sources: Block[]
   /** 稳定排序键（声明的先后；同 propId 取最早那次） */
   order: number
 }
 
 /**
- * 属性区的全部行：**声明的字段 ∪ 块自有字段**，同一个 `propId` 只出现一次。
+ * 块属性的全部行：**标签属性 ∪ 块属性**，同一个 `propId` 只出现一次。
  *
- * ⚠️ **只算直接标签**：`#演员` 的成员不会因为 `#人物` 声明了字段就冒出那些字段。
+ * ⚠️ **只算直接标签**：`#演员` 的成员不会因为 `#人物` 声明了属性就冒出那些属性。
  *    「算作」只影响成员列表（`core/tag-tree.ts` 的 `membersOf`），不影响这里。
  * ⚠️ 顺序：标签按正文顺序、标签内按 `_fieldDefs` 顺序；同一 `propId` 取**最早那次**声明，
- *    因此多标签声明同一字段时行序不会随标签集合抖动（只随正文里标签先后变）。
- * ⚠️ 块自有字段排在声明字段之后（两类性质不同：前者必有值，后者可能「待填」）。
+ *    因此多标签声明同一属性时行序不会随标签集合抖动（只随正文里标签先后变）。
+ * ⚠️ 块属性排在标签属性之后（两类性质不同：前者必有值，后者可能「待填」）。
  */
 export function fieldRows(block: Block, forest: readonly Block[], atoms: readonly Atom[]): FieldRow[] {
   const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
@@ -268,7 +272,7 @@ export function fieldRows(block: Block, forest: readonly Block[], atoms: readonl
   return [...rows.values()].sort((a, b) => a.order - b.order)
 }
 
-/** 字段 id 集合（模型口径的 `fieldsOf`：声明的 ∪ 自有的） */
+/** 属性 id 集合（模型口径的 `fieldsOf`：标签属性 ∪ 块属性） */
 export function fieldIdsOf(block: Block, forest: readonly Block[], atoms: readonly Atom[]): string[] {
   return fieldRows(block, forest, atoms).map((r) => r.propId)
 }
@@ -289,13 +293,13 @@ export interface GutterField {
  *
  * 为什么和 `fieldRows` 分开而写在 core：gutter 与右侧面板吃的是**同一份行派生**
  * （声明 ∪ 自有、同一 propId 只一行），差别只有「哪些行归我」。若各写一套过滤，
- * 两个编辑面迟早会对同一个字段给出不同答案（一边有值、一边说待填）。
+ * 两个编辑面迟早会对同一条属性给出不同答案（一边有值、一边说待填）。
  *
  * 判据：定义声明了 `_uiPosition: 'block-left'` ⇒ 归 gutter，**不管有没有值**。
  *
  * ⚠️ 「有值」不是准入条件，这是这条规则的全部要点：gutter 上要出现的是
- *    **这个块有这个字段**，不是「这个字段有值」。前者是**入口**，后者是**状态**。
- *    要求有值就变成「第一个值必须先在别处填」——而这类字段存在的理由正是
+ *    **这个块有这条属性**，不是「这条属性有值」。前者是**入口**，后者是**状态**。
+ *    要求有值就变成「第一个值必须先在别处填」——而这类属性存在的理由正是
  *    「一次点击就能改」的高频二元开关，没有第一下就没有第二下。
  *    ⇒ 未填的行照样返回，`filled` 交给渲染方决定怎么画（空心／不画／灰掉）。
  *
@@ -303,7 +307,7 @@ export interface GutterField {
  *    整屏渲染请用批量的 `gutterFieldsFor`：本函数每调一次都要重扫定义块与标签边，
  *    逐行调就是 O(n²)。
  * ⚠️ 右侧面板用的是**同一份行派生**再按位置过滤（见 `ui/properties.ts`），
- *    所以两个编辑面不会对同一个字段给出不同答案。
+ *    所以两个编辑面不会对同一条属性给出不同答案。
  */
 export function gutterFieldsOf(
   block: Block,
@@ -322,16 +326,16 @@ export function gutterFieldsOf(
 }
 
 /**
- * 一次渲染批里所有行的 gutter 字段：**一次扫库，逐行分发**。
+ * 一次渲染批里所有该在 gutter 编辑的属性：**一次扫库，逐行分发**。
  *
  * 为什么不复用 `gutterFieldsOf` 逐行算：它每次调用都要重新扫一遍定义块与标签边，
  * 于是整屏渲染从 O(n) 变成 O(n²)。这里把「扫库」提到批级，行级只做查表。
  *
- * 返回 `Map<blockId, GutterField[]>`；没有 gutter 字段的块**不出现在 map 里**
+ * 返回 `Map<blockId, GutterField[]>`；没有 gutter 属性的块**不出现在 map 里**
  * （空数组与缺席同义，少一次存在性判断）。
  *
- * 行的口径与 `fieldRows` 一致：**标签声明字段在前（按正文里标签先后、标签内按声明顺序），
- * 块自有字段在后**，同一 `propId` 只出现一次。
+ * 行的口径与 `fieldRows` 一致：**标签属性在前（按正文里标签先后、标签内按声明顺序），
+ * 块属性在后**，同一 `propId` 只出现一次。
  */
 export function gutterFieldsFor(
   blocks: readonly Block[],

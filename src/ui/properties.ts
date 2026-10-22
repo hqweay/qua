@@ -1,13 +1,17 @@
 /**
- * **属性区**：属性是块的第一公民。
+ * **块属性区**：块属性是块的第一公民。
+ *
+ * 三词分工（定义在 `core/props.ts` 顶部）：**属性**是全局定义，**标签属性**是
+ * 某个标签声明了哪些属性，**块属性**是这个块自己有哪些属性的值。
+ * 本组件画的是「这个块有哪些属性的值」，顺带把「标签属性」的清单也画出来。
  *
  * 形状是**一个平铺列表**，不是按标签分节：
- *   · 同一 `propId` 只出现一次（被多个标签声明时**来源并列**）；
+ *   · 同一 `propId` 只出现一次（被多个标签声明属性时**来源并列**）；
  *   · 每行标来源：`来自 #A、#B`，没有标签声明就标「本块自有」；
- *   · 声明了但没填 ⇒ 仍在列表里，显示「待填」占位（这正是标签声明的意义）；
+ *   · 声明了但没填 ⇒ 仍在列表里，显示「待填」占位（这正是标签属性的意义）；
  *   · 顺序由数据层给（标签正文顺序 × `_fieldDefs` 顺序），本组件不重排。
  *
- * ⚠️ 为什么不分节：同一字段出现在两节里会重复；只放一节又会让来源随标签顺序变化。
+ * ⚠️ 为什么不分节：同一条属性出现在两节里会重复；只放一节又会让来源随标签顺序变化。
  *    平铺 ＋ 多来源标注两个问题都没有（顺序只影响行序）。
  * ⚠️ 组件不写模型：所有写入经注入的回调（由装配层转成命令）。
  */
@@ -19,20 +23,20 @@ import { t } from '../core/msg.ts'
 export interface PropertiesDeps {
   /** 当前属性区画在哪个块上（光标所在块；没有就退回当前对象） */
   target: () => Block | undefined
-  /** 派生行（core 算好：声明 ∪ 自有，同一 propId 只一行） */
+  /** 派生行（core 算好：标签属性 ∪ 块属性，同一 propId 只一行） */
   rows: (b: Block) => FieldRow[]
   /** 森林里全部定义（「添加已有属性」用） */
   defs: () => Block[]
-  /** 这个页/标签**声明**了哪些字段（不是值；值区在下面） */
+  /** 这个页/标签的**标签属性**清单（不是值；值区在下面） */
   declared: (b: Block) => Block[]
   /** 短 id（未知属性的显示） */
   shortId: (id: string) => string
   setValue: (b: Block, propId: string, value: unknown) => void
   clearValue: (b: Block, propId: string) => void
-  /** 把已有定义声明到 owner（页/标签）；普通块则给它加一个空值槽 */
+  /** 把已有属性声明到 owner（页/标签），成为它的标签属性；普通块则给它加一个空值槽 */
   addField: (b: Block, propId: string) => void
   undeclare: (b: Block, propId: string) => void
-  /** 新建定义（可同时声明/加槽） */
+  /** 新建定义（可同时声明成标签属性/加块属性槽） */
   createDef: (b: Block, label: string, kind: PropKind) => void
   /**
    * **给 `ref` 类型的值选一个目标块**（装配层弹出选择器，选中后回调写值）。
@@ -147,12 +151,12 @@ export class PropertiesPanel {
       return
     }
     /**
-     * ⚠️ **归 gutter 的字段不出现在这里**：同一个值不能有两个编辑面
+     * ⚠️ **归 gutter 的属性不出现在这里**：同一个值不能有两个编辑面
      *    （面板改了、gutter 没跟上）。过滤放在这里而不是 `fieldRows` 里：
      *    那份行派生是共享的，gutter 要用**同一份**（`gutterFieldsOf` 就是它的一个视图）。
      */
     const rows = this.deps.rows(target).filter((r) => uiPositionOf(r.def) !== 'block-left')
-    // 没有任何行、也没有「能声明字段」的角色 ⇒ 不占高度（普通内容块很常见）
+    // 没有任何行、也没有「能声明属性」的角色 ⇒ 不占高度（普通内容块很常见）
     const canDeclare = hasRole(target, 'page') || hasRole(target, 'tag')
     if (rows.length === 0 && !canDeclare && !this.formOpen) {
       this.els.root.hidden = true
@@ -223,10 +227,11 @@ export class PropertiesPanel {
   }
 
   /**
-   * 页/标签**声明的字段**（成员可用）。
+   * 页/标签的**标签属性**清单（成员可用）。
    *
    * ⚠️ 这一节是**声明**，没有值输入：值在成员块上（一块一槽）。
    *    给标签块本身设一个值不会成为「默认值」——默认值只属于定义（避免两处真相）。
+   * ⚠️ 它**不向成员继承**：只列出这个标签声明了哪些属性，没打这个标签的块一个都没有。
    */
   private buildDeclared(target: Block): HTMLElement {
     const box = document.createElement('div')
@@ -268,7 +273,7 @@ export class PropertiesPanel {
     return box
   }
 
-  /** 添加字段：选已有定义（默认复用）或新建一个。 */
+  /** 添加块属性：选已有定义（默认复用）或新建一个。 */
   private buildForm(target: Block): HTMLElement {
     const form = document.createElement('form')
     form.className = 'props-form'
