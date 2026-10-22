@@ -10,7 +10,7 @@
  * ⚠️ 派生地址（`aliasOf`）在没写 `_alias` 时回落到正文 —— 首版一个块一个名字，
  *    `_alias` 是留给「地址与正文不同」的显式声明，不是第二份必须同步的真相。
  */
-import { hasRole, prop, writeBlockText, type Block } from './model.ts'
+import { DELETED_AT_PROP, hasRole, prop, writeBlockText, type Block } from './model.ts'
 import { walkForest } from './walk.ts'
 
 /** 地址属性（系统属性；用户不可见） */
@@ -43,6 +43,28 @@ export function isAddressable(b: Block): boolean {
 }
 
 /**
+ * 先序第一个地址命中的块 —— **比较口径的唯一落点**。
+ *
+ * 活森林与回收站都走这里：两个名字空间用的是同一套地址（同名必同一块），
+ * 判据分叉就会出现「活着找不到、删了却找得到」这种自相矛盾。
+ */
+function firstByAddress(
+  forest: readonly Block[],
+  name: string,
+  accept: (b: Block) => boolean,
+): Block | undefined {
+  const want = normalizeAlias(name)
+  if (want === '') return undefined
+  let found: Block | undefined
+  walkForest(forest, (b) => {
+    if (!accept(b) || addressOf(b) !== want) return
+    found = b
+    return false
+  })
+  return found
+}
+
+/**
  * 按地址找块（先序第一个命中）。
  *
  * `accept` 让调用方收窄范围（例如「只找带 tag 角色的」），但**比较永远走同一个规范化**。
@@ -52,12 +74,76 @@ export function findByAlias(
   name: string,
   accept: (b: Block) => boolean = isAddressable,
 ): Block | undefined {
+  return firstByAddress(forest, name, accept)
+}
+
+/**
+ * 在回收站里按地址找（复活前的查询）。
+ *
+ * 与 `findByAlias` 的差别只有**搜哪儿**：地址不会因为块被删掉就属于别人。
+ * 这正是「再打同名标签时该问一句『要不要复活那块』」的依据。
+ */
+export function findInTrash(trash: readonly Block[], name: string): Block | undefined {
+  return firstByAddress(trash, name, isAddressable)
+}
+
+/**
+ * 回收站里同地址的块（给「再打同名标签」时的询问用）。
+ *
+ * 与 `findInTrash` 是同一个查询的两个叫法：一个是复活前自己找、一个是拿去给人看
+ * 「有这个已删除的同名块」。两个名字必须同判据，所以这里直接委托，不另写一遍比较。
+ */
+export function trashByAddress(trash: readonly Block[], name: string): Block | undefined {
+  return findInTrash(trash, name)
+}
+
+/** 清掉删除标记（复活时用）：属性袋不留空壳，否则「有没有属性」会有两份答案 */
+function clearDeletedAt(b: Block): void {
+  if (b.props === undefined || !(DELETED_AT_PROP in b.props)) return
+  const props = { ...b.props }
+  delete props[DELETED_AT_PROP]
+  if (Object.keys(props).length === 0) delete b.props
+  else b.props = props
+}
+
+/**
+ * 从回收站复活一个块（连同子树）：接回森林顶层，清掉删除标记。返回是否成功。
+ *
+ * ⚠️ 接回的是**森林顶层**，不是原来的父块：原父块可能已经不存在了，而「复活」要保证
+ *    至少回到能看见、能再拖回去的地方。这是诚实的降级 —— 位置可以再摆，身份丢了接不回来。
+ *    （身份块本来就要求住在顶层，这一条对它们没有任何损失。）
+ * ⚠️ 森林里已经有这个 id 时**不再挂第二份**：撤销可能已经把同一棵子树接回去了，
+ *    同一个块出现两次会让「改一处、另一处也变了」变成难查的 bug。
+ */
+export function reviveFromTrash(forest: Block[], trash: Block[], blockId: string): boolean {
+  const i = trash.findIndex((b) => b.id === blockId)
+  if (i < 0) return false
+  const [b] = trash.splice(i, 1)
+  clearDeletedAt(b!)
+  let alive = false
+  walkForest(forest, (x) => {
+    if (x.id !== b!.id) return
+    alive = true
+    return false
+  })
+  if (!alive) forest.push(b!)
+  return true
+}
+
+/**
+ * 改地址前的查重。命中已有地址（森林里的**活块**，不含自己）⇒ 返回冲突块。
+ *
+ * ⚠️ 回收站里的同名块**不算冲突**：那是「复活还是新建」的问题，由调用方决定。
+ *    把两者混在一起，用户删掉一个标签之后就再也不能建同名的了。
+ */
+export function aliasConflict(forest: readonly Block[], b: Block, name: string): Block | undefined {
   const want = normalizeAlias(name)
   if (want === '') return undefined
   let found: Block | undefined
-  walkForest(forest, (b) => {
-    if (!accept(b) || addressOf(b) !== want) return
-    found = b
+  walkForest(forest, (x) => {
+    if (!isAddressable(x) || addressOf(x) !== want) return
+    if (x.id === b.id) return
+    found = x
     return false
   })
   return found
