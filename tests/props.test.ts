@@ -209,9 +209,16 @@ test('gutterFieldsOf：收「定义归 gutter」的那些，**有没有值都收
   assert.equal(rows[0]!.filled, true)
   assert.equal(rows[0]!.def, task)
 
-  // 没值 ⇒ **仍然在 gutter 上**：那里是入口（第一次点击就在这一格），不是状态
+  // 打了标签但**还没填值** ⇒ 入口照样在（这才是 gutter 存在的意义）
+  //
+  // ⚠️ 必须是「打了标签」而不是「任何块」：字段来自「声明 ∪ 自有」，
+  //    一个既没有标签、也没有属性值的块本来就没有任何字段。若这里断言
+  //    「任意空块也显示该字段」，等于说「所有块都显示所有字段」—— 那是另一套设计。
+  const tag = mkTagBlock('任务')
+  declareField(tag, task.id)
   const empty: Block = { id: 'c', text: '空', children: [] }
-  const emptyRows = gutterFieldsOf(empty, [task, score, empty], [])
+  const edge = { id: 'e1', kind: 'tag' as const, blockId: empty.id, start: 0, end: 1, label: '任务', target: { kind: 'page' as const, id: tag.id } }
+  const emptyRows = gutterFieldsOf(empty, [task, score, tag, empty], [edge])
   assert.deepEqual(emptyRows.map((r) => r.propId), [task.id], '声明来的字段没有值，入口照样在')
   assert.equal(emptyRows[0]!.filled, false)
   assert.equal(emptyRows[0]!.value, undefined)
