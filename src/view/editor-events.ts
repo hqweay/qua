@@ -388,11 +388,16 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       return
     }
 
-    // ③ 待办方框：它**同时**是块标与把手（D4 合并），所以也走 preventDefault
+    /**
+     * ③ 待办方框：**一块独立的命中区**，挂在块标的身份后缀上（不是块标本身）。
+     *    它也走 preventDefault —— 勾选不该顺便把光标挪走。
+     *    ⚠️ 它和上面「点块标＝聚焦」互不遮挡：块标上只有 `data-focus-for`，
+     *       方框上只有 `data-todo-for`，一次点击只可能命中其中一个。
+     */
     const todo = target.closest<HTMLElement>('[data-todo-for]')
     if (todo?.dataset.todoFor) {
       e.preventDefault()
-      // Shift+点击方框 = 「在右槽打开」，**不勾选**（方框就是块标，修饰键改变的是动作）
+      // Shift+点击方框 = 「在右槽打开」，**不勾选**（修饰键改变的是动作）
       if (e.shiftKey) br.openInDock(todo.dataset.todoFor)
       else br.toggleTodo(todo.dataset.todoFor)
     }

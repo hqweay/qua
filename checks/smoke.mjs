@@ -2513,7 +2513,7 @@ await check('T42 冷启动后在反链 footer 编辑，不会把正文重载成�
   return `冷启动 footer 编辑：正文 ${before.rows} 行仍在，两处同步到 Y`
 })
 
-await check('T43 待办行的方框独占块标槽：不叠圆点（todo / done / 深缩进 / hover）', async () => {
+await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍可聚焦', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
 
@@ -2538,48 +2538,57 @@ await check('T43 待办行的方框独占块标槽：不叠圆点（todo / done 
     page.evaluate((blockId) => {
       const row = document.querySelector(`#editor .blk[data-block-id="${blockId}"]`)
       const m = row?.querySelector(':scope > .left > .marker')
+      const box = row?.querySelector(':scope > .left > .todo-box')
       const before = m ? getComputedStyle(m, '::before') : null
       return {
         todo: row?.dataset.todo ?? '',
         depth: Number(row?.dataset.depth ?? -1),
         classes: m ? [...m.classList].sort().join(' ') : '',
+        focusFor: m?.dataset.focusFor ?? '',
+        boxClasses: box ? [...box.classList].sort().join(' ') : '',
         before: before?.content ?? '',
-        beforeW: before?.width ?? '',
-        boxW: m?.querySelector('.ico') ? getComputedStyle(m.querySelector('.ico')).width : '',
+        boxW: box?.querySelector('.ico') ? getComputedStyle(box.querySelector('.ico')).width : '',
       }
     }, id)
 
   const deepRow = await readRow(deep)
   assert(deepRow.todo !== '' && deepRow.depth >= 2, `深缩进待办没建成：${JSON.stringify(deepRow)}`)
-  assert(deepRow.classes.includes('todo-box') && deepRow.classes.includes('marker'), `方框应仍是块标（同一元素）：${deepRow.classes}`)
-  assert(deepRow.before === 'none', `待办行不该再生成圆点（::before content=${deepRow.before}）`)
+  // 块标对任何身份都一样：圆点 ＋ 聚焦入口（身份只是挂在它后面的后缀）
+  assert(deepRow.classes === 'bullet handle marker', `待办行的块标仍是块标：${deepRow.classes}`)
+  assert(deepRow.focusFor === deep, `待办行的块标仍要点＝聚焦：${deepRow.focusFor}`)
+  assert(deepRow.before !== 'none', `待办行的块标仍应画圆点（::before content=${deepRow.before}）`)
+  assert(deepRow.boxClasses.includes('todo-box'), `方框应在身份图标上：${deepRow.boxClasses}`)
   assert(deepRow.boxW === '12px', `方框应正常画出来：${deepRow.boxW}`)
 
-  // 假数据里已有的 todo / done 两态都只有方框
+  // 假数据里已有的 todo / done 两态都带身份图标，且块标不因此换形状
   const all = await page.evaluate(() =>
     [...document.querySelectorAll('#editor .blk[data-todo]')].map((row) => {
       const m = row.querySelector(':scope > .left > .marker')
+      const box = row.querySelector(':scope > .left > .todo-box')
       return {
         todo: row.dataset.todo,
         classes: m ? [...m.classList].sort().join(' ') : '',
-        before: m ? getComputedStyle(m, '::before').content : '',
-        boxW: m?.querySelector('.ico') ? getComputedStyle(m.querySelector('.ico')).width : '',
+        boxClasses: box ? [...box.classList].sort().join(' ') : '',
+        boxW: box?.querySelector('.ico') ? getComputedStyle(box.querySelector('.ico')).width : '',
       }
     }),
   )
   assert(all.some((r) => r.todo === 'todo') && all.some((r) => r.todo === 'done'), `应同时看到 todo 与 done：${JSON.stringify(all)}`)
   for (const r of all) {
-    assert(r.before === 'none', `待办（${r.todo}）不该生成圆点：${JSON.stringify(r)}`)
-    assert(r.classes.includes('todo-box') && r.boxW === '12px', `待办（${r.todo}）的方框应在：${JSON.stringify(r)}`)
+    assert(r.classes === 'bullet handle marker', `待办（${r.todo}）的块标不该换形状：${JSON.stringify(r)}`)
+    assert(r.boxClasses.includes('todo-box') && r.boxW === '12px', `待办（${r.todo}）的方框应在：${JSON.stringify(r)}`)
   }
 
-  // hover 只改可见度，不能把圆点露出来
+  // hover 只改块标的可见度（点换 grip），身份图标不该跟着动
   await page.locator(`#editor .blk[data-block-id="${deep}"] > .left > .marker`).hover()
   const hovered = await readRow(deep)
-  assert(hovered.before === 'none', `hover 时不该露出圆点：${hovered.before}`)
+  assert(
+    hovered.boxW === '12px' && hovered.focusFor === deep,
+    `悬停块标不该动身份图标：${JSON.stringify(hovered)}`,
+  )
 
   await ctx.close()
-  return `todo/done/深缩进（depth ${deepRow.depth}）三种都只有方框（.ico ${deepRow.boxW}，::before none）`
+  return `todo/done/深缩进（depth ${deepRow.depth}）三种：块标恒为圆点＋可聚焦，方框在身份图标上（.ico ${deepRow.boxW}）`
 })
 
 await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling / 图片仍弹详情', async () => {

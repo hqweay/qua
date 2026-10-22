@@ -365,6 +365,7 @@ export const MSG = {
   'ui.block.placeholderFirst': '写点什么…（按 / 呼出命令）',
   'ui.block.placeholderEmpty': '空块',
   'ui.todo.toggle': '点击切换完成 · Shift+点击在右槽打开',
+  'ui.tag.mark': '标签',
   'ui.atom.unknown': '未知原子',
   'ui.atom.pageTitle': '引用：{label}（左键打开，⌥ 点击看信息）',
   'ui.atom.pageDanglingTitle': '引用：{label}（目标不存在，点击看信息）',
