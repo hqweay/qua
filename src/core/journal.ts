@@ -42,6 +42,35 @@ export function isJournal(b: Block | undefined): boolean {
 }
 
 /**
+ * **库里有哪些天、各自是哪一块**（唯一口径）。
+ *
+ * 两件事必须只在**这一处**定义：
+ *   · **走整片森林**，不是只看顶层。索引与引用解析都是整片森林口径；只看顶层，
+ *     一个被嵌进子树的 journal 就会「索引认得它、日记流看不见」——同一天两个答案。
+ *   · **同一天有多个块时取先序第一个**（与日期索引一致）。「一天一个」是口径，
+ *     多出来的那些是坏数据，不该让两条读路径各答一半。
+ *
+ * ⚠️ 与「journal 必须在顶层」不冲突：那条是入口守卫，落地后这里只剩一个候选。
+ */
+export function journalDays(blocks: readonly Block[]): Block[] {
+  const byDate = new Map<string, Block>()
+  const walk = (list: readonly Block[]): void => {
+    for (const b of list) {
+      const d = isJournal(b) ? journalDate(b) : ''
+      if (d !== '' && !byDate.has(d)) byDate.set(d, b)
+      walk(b.children)
+    }
+  }
+  walk(blocks)
+  return [...byDate.values()]
+}
+
+/** 某一天的 journal 块（**唯一口径**：与 `journalDays` 同一片森林、同一个「先序第一个」） */
+export function findJournalDay(blocks: readonly Block[], date: string): Block | undefined {
+  return journalDays(blocks).find((b) => journalDate(b) === date)
+}
+
+/**
  * 日记流（32 ）：从 `anchor`（含）向过去取**存在的** journal 块，
  * 按 `_date` **降序**（今日在顶、越往下越早），最多 `limit` 天。
  *
@@ -50,7 +79,7 @@ export function isJournal(b: Block | undefined): boolean {
  * ⚠️ 只做选择，不做视图：调用方负责 `ensureFirstBlock` 与浅拷贝成 roots。
  */
 export function journalFeedDays(blocks: readonly Block[], anchor: string, limit = 14): Block[] {
-  const days = blocks.filter((b) => isJournal(b) && journalDate(b) !== '' && journalDate(b) <= anchor)
+  const days = journalDays(blocks).filter((b) => journalDate(b) <= anchor)
   days.sort((a, b) => journalDate(b).localeCompare(journalDate(a)))
   return days.slice(0, Math.max(0, limit))
 }

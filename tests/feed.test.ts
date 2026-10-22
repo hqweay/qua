@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { journalFeedDays } from '../src/core/journal.ts'
+import { journalFeedDays, findJournalDay } from '../src/core/journal.ts'
 import { writeBackRoots } from '../src/core/tree.ts'
 import type { Block } from '../src/core/model.ts'
 
@@ -38,6 +38,23 @@ test('75 日记流：limit 生效；非 journal 不混入', () => {
   const blocks = [j('2026-10-20'), j('2026-10-19'), j('2026-10-18'), p('p1', 'page')]
   assert.deepEqual(dates(journalFeedDays(blocks, '2026-10-20', 2)), ['2026-10-20', '2026-10-19'])
   assert.deepEqual(journalFeedDays(blocks, '2026-10-20', 0), [])
+})
+
+test('75 日记流：走整片森林 —— 嵌在子树里的 journal 也进流（与日期索引同口径）', () => {
+  // 「索引认得它、日记流看不见」曾让同一天有两个答案：索引与引用解析走整片森林，
+  // 流只看顶层。两条路必须同口径，直到「身份块必须在顶层」在入口处被拦住。
+  const nested = j('2026-10-19')
+  const blocks = [j('2026-10-20'), p('p1', 'page', [nested])]
+  assert.deepEqual(dates(journalFeedDays(blocks, '2026-10-20')), ['2026-10-20', '2026-10-19'])
+  assert.equal(findJournalDay(blocks, '2026-10-19')?.id, 'j-2026-10-19')
+})
+
+test('75 日记流：同一天有多个块 ⇒ 取先序第一个（与日期索引一致）', () => {
+  const first = j('2026-10-20')
+  const dup = { ...j('2026-10-20'), id: 'j-dup' }
+  const blocks = [p('p1', 'page'), first, dup]
+  assert.deepEqual(dates(journalFeedDays(blocks, '2026-10-20')), ['2026-10-20'])
+  assert.equal(findJournalDay(blocks, '2026-10-20')?.id, 'j-2026-10-20')
 })
 
 test('75 writeBackRoots：按 root id 逐项写回；journal 不写 text', () => {

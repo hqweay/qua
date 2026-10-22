@@ -11,7 +11,7 @@ import assert from 'node:assert/strict'
 import type { Atom, Block } from '../src/core/index.ts'
 import {
   canonicalSpec,
-  findJournal,
+  findJournalDay,
   findTagByName,
   hasTagEdge,
   mkTagBlock,
@@ -136,7 +136,7 @@ test('runQuery：ref 条件＝指向边（只认 atom 的 target id）', () => {
 
 test('runQuery：journal 条件取那天的**子块**，不含只读日期行本身', () => {
   const { blocks, atoms } = fixture()
-  assert.ok(findJournal(blocks, '2026-10-20'))
+  assert.ok(findJournalDay(blocks, '2026-10-20'))
   // ⚠️ 一个 node 只能是一种形态：写成 `{ journal, all: [] }` 会被 `'all' in node` 先命中（恒真）
   const hits = runQuery({ where: { journal: '2026-10-20' }, scope: 'all' }, { blocks, atoms })
   assert.deepEqual(hits.map((h) => h.blockId), ['j1a', 'j1b'], '日期行 j1 不该在结果里')
