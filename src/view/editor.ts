@@ -47,6 +47,7 @@ import {
   pruneToText,
   prop,
   edgeSourceIds,
+  tagIdsOf,
   remapAnchors,
   removeMarkRange,
   selToTextRanges,
@@ -84,12 +85,11 @@ import {
   type TodoState,
   type UndoKind,
   type VisibleRow,
-  trailingHashTag,
 } from '../core/index.ts'
 // 用户可见文案一律走 t
 import { t } from '../core/msg.ts'
 import { LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl } from './block-dom.ts'
-import { blockIdOf, offsetIn, readBlockText } from './dom-text.ts'
+import { blockIdOf, isTagChip, offsetIn, readBlockText, textEndOff } from './dom-text.ts'
 import { bindEditorEvents, type AtomClickMods } from './editor-events.ts'
 
 export interface Probe {
@@ -131,14 +131,6 @@ export interface ViewOpts {
    * 所以那一类实例关掉自动重载，改由承载它的组件防抖后显式 `reloadFromStore()`。
    */
   autoReload?: boolean
-  /**
-   * **正文里敲出 `#名字`** 时的成边出口（装配层注入）。
-   *
-   * 为什么是注入而不是编辑器自己建标签块：`ensureTag` 会**写森林**，而森林由装配层持有
-   *   —— 编辑器不该知道它存在（承「命令不碰模型持有者」那条纪律）。
-   * 注入后与 `insert-tag` 命令共用同一个函数 ⇒ 不产生第二套 `#` 解析。
-   */
-  onHashTag?: (name: string, blockId: string, from: number, to: number) => void
 }
 
 export interface ViewEvents {
@@ -268,8 +260,6 @@ export class BlockEditor {
   blankArea: HTMLElement
   private allowBlankCreate: boolean
   private allowRootRemove: boolean
-  /** 敲出 `#名字` 的成边出口（装配层注入 ⇒ 编辑器不碰森林） */
-  private readonly onHashTag?: (name: string, blockId: string, from: number, to: number) => void
   /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
   private readonly offStore: () => void
   private readonly unbind: () => void
@@ -279,7 +269,6 @@ export class BlockEditor {
     this.blankArea = o.blankArea ?? o.container
     this.allowBlankCreate = o.allowBlankCreate !== false
     this.allowRootRemove = o.allowRootRemove !== false
-    this.onHashTag = o.onHashTag
     this.doc = o.doc
     /**
      * **冷启动也必须有 root id**。
@@ -393,7 +382,6 @@ export class BlockEditor {
     const gutters = gutterFieldsFor(
       rows.map((r) => r.block),
       this.store.blocks,
-      this.atoms,
     )
     for (const r of rows) this.container.appendChild(this.makeBlockEl(r, gutters.get(r.block.id)))
   }
@@ -421,7 +409,7 @@ export class BlockEditor {
       hasChildren: loc.block.children.length > 0,
     }
     // 单行重画只有一行，直接按这一个块算 —— 不必为了一行去扫整批
-    el.replaceWith(this.makeBlockEl(row, gutterFieldsOf(row.block, this.store.blocks, this.atoms)))
+    el.replaceWith(this.makeBlockEl(row, gutterFieldsOf(row.block, this.store.blocks)))
     // 被换掉的那个元素带着 `data-caret` ⇒ 缓存与标记都要重来
     this.caretMarks = ''
     this.markCaret()
@@ -567,7 +555,7 @@ export class BlockEditor {
     let acc = 0
     let done = false
     const walk = (n: Node): void => {
-      if (done) return
+      if (done || isTagChip(n)) return
       if (n.nodeType === Node.TEXT_NODE) {
         const len = (n.textContent ?? '').length
         if (acc + len >= offset) {
@@ -594,7 +582,7 @@ export class BlockEditor {
     walk(tx)
     if (!done) {
       target.node = tx
-      target.off = tx.childNodes.length
+      target.off = textEndOff(tx)
     }
     return target
   }
@@ -948,7 +936,7 @@ export class BlockEditor {
       let acc = 0
       const target = { node: tx as Node, off: 0 }
       const walk = (n: Node): void => {
-        if (target.node !== tx) return
+        if (target.node !== tx || isTagChip(n)) return
         if (n.nodeType === Node.TEXT_NODE) {
           const len = (n.textContent ?? '').length
           if (acc + len >= offset) {
@@ -962,7 +950,7 @@ export class BlockEditor {
         for (const c of Array.from(n.childNodes)) walk(c)
       }
       walk(tx)
-      if (target.node === tx) target.off = tx.childNodes.length
+      if (target.node === tx) target.off = textEndOff(tx)
       return target
     }
     const a = at(s.aOff)
@@ -1199,9 +1187,15 @@ export class BlockEditor {
     this.atoms = r.kept
     const kind = change.to === change.from ? 'insert' : 'delete'
     this.undo.record(before, kind, Date.now())
-    // 刚敲完的 `#名字` 已经闭合 ⇒ 落成一条边（接缝见 `linkHashTags`）
-    const linked = this.linkHashTags(id)
-    if (reRender || linked) {
+    /**
+     * 带标签的块每次改字都重画一次（组合期除外）。
+     *
+     * 为什么：标签 chip 在正文**之后**、但不占正文位置 ⇒ 光标可以落在 chip 之后，
+     * 那时新敲的字会在 DOM 里排在 chip 后面，而模型里它是正文的末尾。
+     * 重画一次就把「显示顺序」与「正文顺序」重新对齐（光标按模型偏移贴回，落在 chip 之前）。
+     */
+    const tagged = tagIdsOf(loc.block).length > 0 && !this.probe.isComposing
+    if (reRender || tagged) {
       const caret = this.sel ? this.sel.aOff : null
       this.renderBlock(id)
       if (caret !== null) this.placeCaret(id, Math.min(caret, loc.block.text.length))
@@ -1215,51 +1209,28 @@ export class BlockEditor {
   }
 
   /**
-   * **把刚敲完的 `#名字` 落成一条指向标签块的边**。
-   *
-   * 触发时机：**标签闭合之后**（后面跟了分隔符，或已经到行尾）。
-   * 一边敲一边成边的话，`#` 刚落下就弹出一个 chip，手感会被破坏。
-   *
-   * ⚠️ **组合期绝不动手**：IME 预编辑期间的文本是临时的，
-   *    此刻成边会把半截拼音变成标签（且直接打断输入）。
-   *
-   * ⚠️ 与 `insert-tag` 命令共用 `ensureTag` ⇒ 只有一处认 `#名字`，不会分叉成两套解析。
-   *
-   * @returns 有没有成边（true ⇒ 调用方要重画这一块）
-   */
-  private linkHashTags(id: string): boolean {
-    if (this.probe.isComposing || !this.onHashTag) return false
-    const loc = locate(this.doc, id)
-    if (!loc) return false
-    /**
-     * 只认**行尾**那个已闭合的 `#名字`。
-     *
-     * 为什么不扫全行、把 `#xxx` 一次性全转掉：那会把「用户想写字面量 `#1`」
- *    变成一次不可撤销的模型改动；退格回去再打一遍还会重复触发。
- *    ⇒ 只在**刚写完的那一个**上成边：行为可预测，撤销也干净。
-     */
-    const hit = trailingHashTag(loc.block.text)
-    if (!hit) return false
-    this.onHashTag(hit.name, id, hit.from, hit.to)
-    return true
-  }
-
-  /**
    * **重画「引用了 `id` 这一块」的那些块**。
    *
    * 为什么需要显式做：引用显示的是**目标当前的名字**（`core/ref.ts`），是派生的；
    * 目标改名后，`atom`/`block` 本身一个字节都没变 ⇒ 没有任何「数据变了」的信号能触发重渲染。
+   *
+   * 两条来源，因为两种归属的存法不同：
+   *   · 引用 —— 在原子表里（`edgeSourceIds`）；
+   *   · 标签 —— 在**块自己的 `_tags`** 里：改名后 chip 上显示的 `#旧名` 同样是过期的字，
+   *     所以带这个标签的块也要重画（这是一次本视图内的扫描，不是全库索引）。
    *
    * ⚠️ 只重画**本视图内**的块：别的页里也有指向它的引用，但那些 DOM 不在 `doc` 里，
    *    由它们自己所在的视图在装载/刷新时解析（共享 store 只保证数据一致，不替别人画 DOM）。
    */
   private renderRefSources(id: string): void {
     const mine = new Set(flatten(this.doc).map((b) => b.id))
-    // ⚠️ 用 `edgeSourceIds` 而不是 `refSourceIds`：标签也是指向边，
-    //    改标签块的名字 ⇒ 显示 `#旧名` 的那些块同样要重画。
     for (const srcId of edgeSourceIds(this.atoms, id)) {
       if (!mine.has(srcId) || srcId === id) continue
       if (this.blockEl(srcId)) this.renderBlock(srcId)
+    }
+    for (const b of flatten(this.doc)) {
+      if (b.id === id || !tagIdsOf(b).includes(id)) continue
+      if (this.blockEl(b.id)) this.renderBlock(b.id)
     }
   }
 
@@ -1580,7 +1551,7 @@ export class BlockEditor {
   toggleTodo(id: string): void {
     const loc = locate(this.doc, id)
     if (!loc) return
-    const fields = gutterFieldsOf(loc.block, this.store.blocks, this.atoms)
+    const fields = gutterFieldsOf(loc.block, this.store.blocks)
     const field =
       fields.find((f) => f.kind === 'checkbox' && f.propId === TASK_STATUS_PROP_ID) ??
       fields.find((f) => f.kind === 'checkbox')
@@ -1807,47 +1778,12 @@ export class BlockEditor {
     return a.id
   }
 
-  /**
-   * **把 `[from, to)` 这段正文替换成一条指向标签块的边**（占 1 格）。
-   *
-   * 与 `insertAtom` 的区别：那个是「在光标处**插入**一格」，
-   * 这个是「把已经写好的几个字**换成**一格」——敲 `#名字` 走的是后者：
-   * 用户先打出了 `#名字`，成边时那三个字要被吃掉，而不是在旁边再插一个。
-   *
-   * ⚠️ 文本与锚点必须用**同一次** `mapMarks` 映射：先换文本再算映射，
-   *    区间长度信息就丢了（`#名字` 变 1 格，长度差要算准）。
-   */
-  linkTagRange(blockId: string, from: number, to: number, label: string, targetId: string): string | null {
-    const loc = locate(this.doc, blockId)
-    if (!loc) return null
-    if (from < 0 || to > loc.block.text.length || from >= to) return null
-    const before = this.snap()
-    const old = loc.block.text
-    // 一次替换：`#名字`（N 格）→ 占位符（1 格）
-    writeBlockText(loc.block, old.slice(0, from) + ATOM_PLACEHOLDER + old.slice(to))
-    const change = { from, to, insert: ATOM_PLACEHOLDER }
-    this.marks = mapMarks(this.marks, blockId, change)
-    const a = mkAtom('tag', blockId, from, label, { target: { kind: 'page', id: targetId } })
-    this.atoms = [...mapAtoms(this.atoms, blockId, change).kept, a]
-    this.undo.record(before, 'other', Date.now())
-    this.renderBlock(blockId)
-    // 光标落到那一格**之后**（否则再打卡在原子后面）
-    this.placeCaret(blockId, from + 1)
-    this.emitChange('atom')
-    return a.id
-  }
-
   /** 删掉一个行内原子（连同它占的那一格） */
-  removeAtom(atomId: string, beforeRemove?: () => void): void {
+  removeAtom(atomId: string): void {
     const a = this.atoms.find((x) => x.id === atomId)
     if (!a) return
     const loc = locate(this.doc, a.blockId)
     const before = this.snap()
-    /**
-     * 摘标签时可能要顺带清理它带来的值（D20）。
-     * 回调放在**快照之后、改模型之前** ⇒ 「删边 ＋ 清值」是**一次撤销**能一起复原的。
-     */
-    beforeRemove?.()
     if (loc) {
       const ch = { from: a.start, to: a.end, insert: '' }
       writeBlockText(loc.block, loc.block.text.slice(0, a.start) + loc.block.text.slice(a.end))
@@ -1857,8 +1793,7 @@ export class BlockEditor {
        *
        * 原因：原子恒占 1 格，删掉它占的那一格后，通用粘性映射（两端各有 bias）
        * 会把它的区间压到一个长度仍为 1 的位置上 ⇒ **文本里已经没有占位符了，
-       * 原子记录却还活着**。表现是「引用框没了，但那条边还在」—— 对标签来说就是
-       * 「删了 `#标签`，成员列表里却还有它」（本轮 T40 实测抓到）。
+       * 原子记录却还活着**。表现是「引用框没了，但那条边还在」。
        * ⇒ 「占位符没了」与「原子没了」必须一起发生，不能有中间态。
        */
       this.atoms = mapAtoms(this.atoms, a.blockId, ch).kept.filter((x) => x.id !== atomId)
