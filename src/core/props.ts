@@ -13,7 +13,7 @@
  * ⚠️ `_fieldDefs` 里存的是 **ref（id）**，不是名字：改名零迁移，重名不撞车。
  * ⚠️ 本文件零 DOM：属性面板只消费这里的派生结果，写入通过命令。
  */
-import { hasRole, isPropDefBlock, prop, type Block, type BlockProps } from './model.ts'
+import { hasRole, isPropDefBlock, prop, type Block, type BlockProps, type TodoState } from './model.ts'
 import { walkForest } from './walk.ts'
 import { derivedId, uuidv7Hex } from './ids.ts'
 import type { Atom } from './annotations.ts'
@@ -56,6 +56,24 @@ export function uiPositionOf(def: Block | undefined): UiPosition {
  *    不是界面文案；界面语言变了，已存在的块名不会跟着变。
  */
 export const TASK_STATUS_PROP_ID = derivedId('prop', 'core/task-status')
+
+/**
+ * 「任务状态」的派生读法：**值就是属性槽**，没有第二份块字段。
+ *
+ * 三态与旧的 `'todo' | 'done' | 无` 对得上：
+ *   · `true` ⇒ `'done'`（做完了）；
+ *   · `false` ⇒ `'todo'`（**是任务、还没做完** —— 它是有值的，不是缺失）；
+ *   · 缺失 ⇒ `undefined`（这块压根没有任务状态）。
+ *
+ * 为什么 `false` 不能并进缺失：那样「还没做完」与「不是任务」会变成同一个状态，
+ * 而「按任务筛选」要的正是它们分开。查询层的 `TodoFilter` 因此一行都不用改。
+ */
+export function todoOf(block: Block): TodoState | undefined {
+  const v = valueOf(block, TASK_STATUS_PROP_ID)
+  if (v === true) return 'done'
+  if (v === false) return 'todo'
+  return undefined
+}
 
 export type PropKind = 'text' | 'number' | 'date' | 'checkbox' | 'select' | 'ref' | 'url'
 
@@ -255,6 +273,17 @@ export function fieldIdsOf(block: Block, forest: readonly Block[], atoms: readon
   return fieldRows(block, forest, atoms).map((r) => r.propId)
 }
 
+/** gutter 上的一件（派生，不落库） */
+export interface GutterField {
+  propId: string
+  /** 定义块（必在：没有定义的行不进 gutter —— 没有 kind 就不知道该画成什么） */
+  def: Block
+  kind: PropKind
+  value: unknown
+  /** 有没有值。渲染方用它区分「未填」与「已填」，**不是**准入条件 */
+  filled: boolean
+}
+
 /**
  * 这个块上**该在 gutter 编辑**的属性。
  *
@@ -262,11 +291,15 @@ export function fieldIdsOf(block: Block, forest: readonly Block[], atoms: readon
  * （声明 ∪ 自有、同一 propId 只一行），差别只有「哪些行归我」。若各写一套过滤，
  * 两个编辑面迟早会对同一个字段给出不同答案（一边有值、一边说待填）。
  *
- * 判据：定义声明了 `_uiPosition: 'block-left'` **且有值** —— 没有值的开关在 gutter 上
- * 只是一块空白，它该在面板里以「待填」出现（这也是标签声明的意义）。
+ * 判据：定义声明了 `_uiPosition: 'block-left'` ⇒ 归 gutter，**不管有没有值**。
  *
- * ⚠️ 本轮只被单测用到：gutter 的渲染下一轮才接。调用方将是**那一列的局部渲染**，
- *    不是整片森林的装饰层 —— 它只认一个块。
+ * ⚠️ 「有值」不是准入条件，这是这条规则的全部要点：gutter 上要出现的是
+ *    **这个块有这个字段**，不是「这个字段有值」。前者是**入口**，后者是**状态**。
+ *    要求有值就变成「第一个值必须先在别处填」——而这类字段存在的理由正是
+ *    「一次点击就能改」的高频二元开关，没有第一下就没有第二下。
+ *    ⇒ 未填的行照样返回，`filled` 交给渲染方决定怎么画（空心／不画／灰掉）。
+ *
+ * ⚠️ 调用方是**那一列的局部渲染**（只认一个块），不是整片森林的装饰层。
  * ⚠️ 右侧面板用的是**同一份行派生**再按位置过滤（见 `ui/properties.ts`），
  *    所以两个编辑面不会对同一个字段给出不同答案。
  */
@@ -274,12 +307,12 @@ export function gutterFieldsOf(
   block: Block,
   forest: readonly Block[],
   atoms: readonly Atom[],
-): { propId: string; def: Block; value: unknown }[] {
-  const out: { propId: string; def: Block; value: unknown }[] = []
+): GutterField[] {
+  const out: GutterField[] = []
   for (const row of fieldRows(block, forest, atoms)) {
-    if (!row.filled || !row.def) continue
+    if (!row.def) continue
     if (uiPositionOf(row.def) !== 'block-left') continue
-    out.push({ propId: row.propId, def: row.def, value: row.value })
+    out.push({ propId: row.propId, def: row.def, kind: row.kind, value: row.value, filled: row.filled })
   }
   return out
 }

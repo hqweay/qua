@@ -4,6 +4,13 @@
  */
 
 import { uuidv7Hex } from './ids.ts'
+
+/**
+ * 「任务做完了没有」的**读法**（不是落盘形状）。
+ *
+ * 落盘的是一个真实的属性槽（见 `core/props.ts` 的 `todoOf`），这里只是它的
+ * 三态投影：查询条件、诊断面、菜单上下文键都按这三个值说话。
+ */
 export type TodoState = 'todo' | 'done'
 
 /**
@@ -85,8 +92,6 @@ export interface Block {
   id: string
   text: string
   children: Block[]
-  /** 待办（demo 加的一点「产品感」，不引入新抽象） */
-  todo?: TodoState
   /**
    * **属性**（属性是块第一公民）：任何块可直接有属性，不需标签即可赋值。
    *
@@ -98,9 +103,6 @@ export interface Block {
    *    不是键——「字段地址」与「内容地址」必须是两张索引：字段显示名允许重名、
    *    不进内容地址空间（`isAddressable` 只认页与标签）。
    *    ⇒ 别把 `ns/name` 当键直接写：键已经是 id，混用会让同一字段有两份值。
-   *
-   * ⚠️ `todo` 不是属性：它描述**这一次怎么显示**，不是这块有什么数据。
-   *    （折叠态已经不在块上了，见 `FoldState` —— 它是文档级的视图状态。）
    */
   props?: BlockProps
 }
@@ -279,7 +281,7 @@ export interface Located {
   block: Block
 }
 
-export function mkBlock(text = '', extra: Partial<Pick<Block, 'todo'>> = {}): Block {
+export function mkBlock(text = '', extra: Partial<Pick<Block, 'props'>> = {}): Block {
   return { id: uuidv7Hex(), text, children: [], ...extra }
 }
 
