@@ -13,7 +13,7 @@
  */
 import type { Block } from '../core/index.ts'
 import type { FieldRow, PropKind } from '../core/index.ts'
-import { hasRole, PROP_KINDS, propKindOf } from '../core/index.ts'
+import { hasRole, PROP_KINDS, propKindOf, uiPositionOf } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 
 export interface PropertiesDeps {
@@ -146,7 +146,12 @@ export class PropertiesPanel {
       this.els.root.hidden = true
       return
     }
-    const rows = this.deps.rows(target)
+    /**
+     * ⚠️ **归 gutter 的字段不出现在这里**：同一个值不能有两个编辑面
+     *    （面板改了、gutter 没跟上）。过滤放在这里而不是 `fieldRows` 里：
+     *    那份行派生是共享的，gutter 要用**同一份**（`gutterFieldsOf` 就是它的一个视图）。
+     */
+    const rows = this.deps.rows(target).filter((r) => uiPositionOf(r.def) !== 'block-left')
     // 没有任何行、也没有「能声明字段」的角色 ⇒ 不占高度（普通内容块很常见）
     const canDeclare = hasRole(target, 'page') || hasRole(target, 'tag')
     if (rows.length === 0 && !canDeclare && !this.formOpen) {

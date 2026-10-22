@@ -3253,11 +3253,13 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
     tag.tagId,
   )
   await page.waitForTimeout(200)
+  // 库里自带核心词汇（「任务状态」定义），所以这里按 label 挑出**刚建的那个**
   const defs = await page.evaluate(() => window.__demo.propDefs())
-  assert(defs.length === 1, `应只有一个字段定义：${JSON.stringify(defs)}`)
-  assert(defs[0].label === '状态' && defs[0].kind === 'text', JSON.stringify(defs[0]))
-  assert(defs[0].declaredBy.includes(tag.tagId), '定义应被 #任务 声明')
-  const schemaTop = await page.evaluate((id) => window.__demo.allBlocks().some((b) => b.id === id && b.roles.includes('schema')), defs[0].id)
+  const own = defs.filter((d) => d.label === '状态')
+  assert(own.length === 1, `应只有一个「状态」定义：${JSON.stringify(defs)}`)
+  assert(own[0]!.kind === 'text', JSON.stringify(own[0]))
+  assert(own[0]!.declaredBy.includes(tag.tagId), '定义应被 #任务 声明')
+  const schemaTop = await page.evaluate((id) => window.__demo.allBlocks().some((b) => b.id === id && b.roles.includes('schema')), own[0]!.id)
   assert(schemaTop, '定义是森林顶层的 schema 块（不是标签的子块）')
 
   // 标签页的属性区显示「声明字段」，但没有给标签块自己设值的输入
@@ -3271,15 +3273,22 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   assert(declared.valueInputs === 0, '声明节没有值输入（值在成员块上）')
 
   // ③ 成员块上写值：一块一槽 props[propId]
+  //
+  // ⚠️ `#任务` 还声明了库自带的核心字段「任务状态」，所以这一块的行**不止一行**。
+  //    断言一律按 propId 取，而不是按下标 —— 行序随声明顺序变，不是契约。
   await page.evaluate(
     ({ blockId, propId }) => window.__demo.invoke('core.props/set-value', { blockId, propId, value: '已完成' }),
-    { blockId: hostId, propId: defs[0].id },
+    { blockId: hostId, propId: own[0]!.id },
   )
   const fields = await page.evaluate((id) => window.__demo.fields(id), hostId)
-  assert(fields.length === 1 && fields[0].value === '已完成', `成员块应有值：${JSON.stringify(fields)}`)
-  assert(fields[0].sources.includes(tag.tagId), `来源应是 #任务：${JSON.stringify(fields[0])}`)
+  const ownField = fields.find((f) => f.propId === own[0]!.id)
+  assert(ownField?.value === '已完成', `成员块应有值：${JSON.stringify(fields)}`)
+  assert(ownField!.sources.includes(tag.tagId), `来源应是 #任务：${JSON.stringify(ownField)}`)
 
   // ④ 打开成员块：属性区平铺一行、来源写「来自 #任务」
+  //
+  // ⚠️ 「任务状态」归 gutter（`_uiPosition: 'block-left'`）⇒ **不进右侧面板**：
+  //    同一个值不能有两个编辑面。所以这里看得到的仍只有「状态」那一行。
   await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), hostId)
   await page.waitForTimeout(120)
   const panel = await page.evaluate(() => {
@@ -3291,7 +3300,7 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
       rows: document.querySelectorAll('.prop-row[data-prop-id]').length,
     }
   })
-  assert(panel.rows === 1, `同一 propId 只显示一行：${JSON.stringify(panel)}`)
+  assert(panel.rows === 1, `同一 propId 只显示一行，且归 gutter 的不在面板里：${JSON.stringify(panel)}`)
   assert(panel.label === '状态' && panel.value === '已完成', JSON.stringify(panel))
   assert(panel.source.includes('#任务'), `来源应标出标签：${JSON.stringify(panel)}`)
 
@@ -3321,12 +3330,15 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
     }),
     { hostId, atomId: tag.atomId },
   )
-  assert(afterUndo.fields[0]?.value === '已完成' && afterUndo.atom, `⌘Z 应把值与边一起复原：${JSON.stringify(afterUndo)}`)
+  assert(
+    afterUndo.fields.find((f) => f.propId === own[0]!.id)?.value === '已完成' && afterUndo.atom,
+    `⌘Z 应把值与边一起复原：${JSON.stringify(afterUndo)}`,
+  )
 
   // ⑥ 字段全空时摘标签 ⇒ 不弹提示（防提示疲劳）
   await page.evaluate(
     ({ blockId, propId }) => window.__demo.invoke('core.props/clear-value', { blockId, propId }),
-    { blockId: hostId, propId: defs[0].id },
+    { blockId: hostId, propId: own[0]!.id },
   )
   await page.evaluate((atomId) => window.__demo.invoke('core.editor/remove-atom', { atomId }), tag.atomId)
   await page.waitForTimeout(150)
