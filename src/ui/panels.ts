@@ -58,14 +58,13 @@ function fmtVal(shortId: (id: string) => string, k: string, v: unknown): string 
 
 export function showAtomPopover(deps: PanelDeps, a: Atom, rect: DOMRect): void {
   deps.openPopover((host) => {
-    // 引用与标签是**同一种指向边**，详情浮层只差表面文案
-    if (a.kind === 'page' || a.kind === 'tag') {
+    if (a.kind === 'page') {
       const target = deps.findBlock(a.target?.id ?? '')
       // 显示名与状态**现算**（`core/ref.ts`）：`atom.label` 只是 fallback，
       // popover 上写旧名字等于给用户一份过期的真相。
       const view = resolveRef((id) => deps.findBlock(id), a)
       const h = document.createElement('h4')
-      h.textContent = t(a.kind === 'tag' ? 'ui.popover.tagTitle' : 'ui.popover.refTitle', { label: view.label })
+      h.textContent = t('ui.popover.refTitle', { label: view.label })
       const dl = document.createElement('dl')
       const rows: [string, string][] = [
         [t('ui.popover.atomId'), a.id],
@@ -107,7 +106,7 @@ export function showAtomPopover(deps: PanelDeps, a: Atom, rect: DOMRect): void {
       }
       const del = document.createElement('button')
       del.type = 'button'
-      del.textContent = t(a.kind === 'tag' ? 'ui.popover.deleteTag' : 'ui.popover.deleteRef')
+      del.textContent = t('ui.popover.deleteRef')
       del.addEventListener('click', () => {
         deps.closePopover()
         deps.removeAtom(a.id)

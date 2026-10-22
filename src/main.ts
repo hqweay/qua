@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addRole, aliasOf, allPropDefs, allTags, blockTypeOf, childTags, claimAddress, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { addRole, aliasOf, allPropDefs, allTags, blockTypeOf, tagIdsOf, childTags, claimAddress, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, removeRole, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
@@ -619,8 +619,7 @@ const showAtomPopover = (a: Atom, rect: DOMRect): void => panelPopover(panelDeps
  *    目标可能在这之后被删掉。
  */
 const handleAtomClick = (a: Atom, el: HTMLElement, mods: { altKey: boolean }): void => {
-  // 引用与标签是**同一种指向边**：左键都直接打开目标，⌥ 才看详情
-  const targetId = a.kind === 'page' || a.kind === 'tag' ? a.target?.id : undefined
+  const targetId = a.kind === 'page' ? a.target?.id : undefined
   if (!mods.altKey && targetId && findInForest(ws.blocks, targetId)) {
     void registry.invoke('core.block/focus-block', { blockId: targetId }, 'editor')
     return
@@ -674,10 +673,20 @@ function firstEditableRoot(first: Block | undefined): Block | null {
 const pageDeps: PageDeps = {
   blocks: () => ws.blocks,
   trash: () => blocks.trash,
-  // ⚠️ 每次取**当前**活动编辑器（正文 vs 反链 footer 会切换）⇒ 标签打在用户正在编辑的那一行
-  insertAtom: (kind, opts) => ed.insertAtom(kind, opts),
-  // 敲 `#名字` 的成边路径：把那段文字换成边（与上面「光标处插入」是两个动作）
-  linkTagRange: (blockId, from, to, label, targetId) => ed.linkTagRange(blockId, from, to, label, targetId),
+  // 打标签的落点：**当前光标那一块**（正文 vs 反链 footer 会切换 ⇒ 每次现取活动编辑器）
+  caretBlockId: () => ed.caretBlock() ?? ed.rows()[0]?.block.id ?? null,
+  /**
+   * 写块属性走装配层这一条路：撤销快照、索引失效、通知其他视图、落盘都在这里。
+   *
+   * ⚠️ 写完还要**重画这一行**：属性写入默认不碰正文（属性不改文字），
+   *    但标签归属的呈现就在正文里（行尾 chip）⇒ 少了这一步，chip 要等下一次重渲染才出现。
+   */
+  write: (blockId, mutate) => {
+    writeProps(blockId, mutate)
+    mainEd.renderBlock(blockId)
+    // 活动编辑器可能是反链 footer（另一个实例）⇒ 那一份也要重画
+    if (ed !== mainEd) ed.renderBlock(blockId)
+  },
   activeId: () => ws.activeId,
   setActiveId: (id) => {
     /**
@@ -845,7 +854,7 @@ function removeBlockRole(blockId: string, role: 'page' | 'tag'): boolean {
     )
   }
   if (role === 'tag') {
-    const members = tagMemberIds(b.id, blocks.atoms).size
+    const members = tagMemberIds(b.id, ws.blocks).size
     const declarations = declaredFieldIds(b).length
     if (members > 0 || declarations > 0) {
       layers.openMenu({
@@ -886,81 +895,6 @@ function applyBlockType(blockId: string, typeId: string): boolean {
   return true
 }
 
-/** 同一标签在本次运行期间已经答过「保留」⇒ 不再追问（避免提示疲劳） */
-const cleanupAlwaysKeep = new Set<string>()
-
-/**
- * 摘标签「要不要清理它带来的值」的提示。
- *
- * `removeEdge`：
- *   · 非空 ＝ 边还没删（显式删除命令）⇒ 删边与清值共用**一次撤销**；
- *   · `null` ＝ 边已经被删掉了（正文里退格删掉了 `#标签`）⇒ 只清值，删边那一步已在撤销栈里。
- */
-function promptCleanup(
-  host: Block,
-  tag: Block,
-  cleanable: string[],
-  removeEdge: ((beforeRemove?: () => void) => void) | null,
-  anchorId?: string,
-): void {
-  const labels = cleanable
-    .map((pid) => {
-      const def = findPropDef(ws.blocks, pid)
-      return def ? propLabel(def) : shortId(pid)
-    })
-    .join('、')
-  const anchorEl = anchorId ? document.querySelector(`.atom[data-atom-id="${anchorId}"]`) : null
-  const anchor = anchorEl instanceof HTMLElement ? anchorEl.getBoundingClientRect() : null
-  layers.openMenu({
-    rows: [
-      { id: 'cleanup/keep', label: t('ui.tagCleanup.keep'), hint: t('ui.tagCleanup.keepHint'), group: 'cleanup/1' },
-      { id: 'cleanup/clean', label: t('ui.tagCleanup.clean'), hint: t('ui.tagCleanup.cleanHint', { fields: labels }), group: 'cleanup/2' },
-      { id: 'cleanup/always', label: t('ui.tagCleanup.alwaysKeep'), group: 'cleanup/3' },
-    ],
-    anchor,
-    title: t('ui.tagCleanup.title', { tag: tag.text }),
-    searchable: false,
-    focusSearch: false,
-    onPick: (row) => {
-      if (row.id === 'cleanup/always') {
-        cleanupAlwaysKeep.add(tag.id)
-        removeEdge?.()
-        return
-      }
-      if (row.id === 'cleanup/clean') {
-        const drop = (): void => {
-          for (const pid of cleanable) clearValue(host, pid)
-        }
-        // 回调在快照之后、改模型之前 ⇒ 「删边 ＋ 清值」⌘Z 一次复原
-        if (removeEdge) removeEdge(drop)
-        else writeProps(host.id, drop)
-        return
-      }
-      removeEdge?.()
-    },
-  })
-}
-
-/**
- * 删一个行内原子；**摘标签时**若它带来的字段在块上有值，先问一次「保留 / 清理」。
- *
- * R1–R4：
- *   · 只在**真有值**时问（字段全空 ⇒ 静默摘掉，绝大多数「打错了」不该被打扰）；
- *   · 默认**保留**（值落到「本块自有」）；
- *   · 清理只清「该标签声明 ∩ 块上有值 ∩ 剩余标签都不声明」，且与删边共用**一次撤销**。
- */
-function removeAtomWithCleanup(atomId: string): void {
-  const atom = blocks.atoms.find((a) => a.id === atomId)
-  const host = atom ? findInForest(ws.blocks, atom.blockId) : undefined
-  const tag = atom?.kind === 'tag' && atom.target ? findInForest(ws.blocks, atom.target.id) : undefined
-  const cleanable = host && tag ? cleanableValues(host, tag, ws.blocks, blocks.atoms) : []
-  if (!host || !tag || cleanable.length === 0 || cleanupAlwaysKeep.has(tag.id)) {
-    ed.removeAtom(atomId)
-    return
-  }
-  promptCleanup(host, tag, cleanable, (beforeRemove) => ed.removeAtom(atomId, beforeRemove), atomId)
-}
-
 /**
  * `App` 门面：**四个工厂拼装**（页／日记／视图／演示），加上浮层与提示这几件装配层专有的能力。
  *
@@ -986,7 +920,7 @@ const app: App = {
     toast: (text, kind) => app.toast(text, kind),
     shortId: (id) => shortId(id),
   }),
-  removeAtom: (atomId) => removeAtomWithCleanup(atomId),
+  removeAtom: (atomId) => ed.removeAtom(atomId),
 
   /**
    * 标签选择器：**显示层级**（`#演员 · 属于 #人物、#艺术家`）。
@@ -1175,14 +1109,6 @@ ed = new BlockEditor({
   doc: { roots: bootRoots, folded: ws.folded, trash: blocks.trash },
   marks: ws.marks,
   atoms: ws.atoms,
-  /**
-   * 敲出 `#名字` ⇒ 落成一条边（**84.7 点名要补的那条接缝**）。
-   *
-   * ⚠️ 必须走命令面而不是直接 `ensureTag`：`ensureTag` 会写森林，
-   *    命令面负责「写森林 ＋ 插原子 ＋ 刷新列表 ＋ 落盘」这一整串，
-   *    绕过它就会出现「标签块建了但左槽没显示」这类半截状态。
-   */
-  onHashTag: (name, blockId, from, to) => void app.insertTag(name, { blockId, from, to }),
 })
 mainEd = ed
 renderQueryView()
@@ -1208,15 +1134,6 @@ ed.events = {
   },
   atomsLost: (atoms) => {
     app.toast(t('ui.toast.atomsLost', { labels: atoms.map((a) => a.label).join('、') }), 'warn')
-    // 正文里退格删掉 `#标签` 也是「摘标签」：边已经没了，但有值时仍要问一次清理
-    const tagAtom = atoms.find((a) => a.kind === 'tag' && a.target)
-    if (!tagAtom?.target) return
-    const host = findInForest(ws.blocks, tagAtom.blockId)
-    const tag = findInForest(ws.blocks, tagAtom.target.id)
-    const cleanable = host && tag ? cleanableValues(host, tag, ws.blocks, blocks.atoms) : []
-    if (host && tag && cleanable.length > 0 && !cleanupAlwaysKeep.has(tag.id)) {
-      promptCleanup(host, tag, cleanable, null)
-    }
   },
   // 划选气泡（顶部工具栏作废后的落点）：选区一变就重算「该不该在、装哪几颗」
   selChange: () => {
@@ -1313,7 +1230,7 @@ const propertiesPanel = new PropertiesPanel(
   },
   {
     target: () => activeBlock(),
-    rows: (b) => fieldRows(b, ws.blocks, blocks.atoms),
+    rows: (b) => fieldRows(b, ws.blocks),
     defs: () => allPropDefs(ws.blocks),
     declared: (b) => declaredFields(b, ws.blocks),
     shortId: (id) => shortId(id),
@@ -1409,7 +1326,7 @@ const tagPanel = new TagPanel(
     parents: (t) => parentTags(t, ws.blocks),
     dangling: (t) => danglingParentIds(t, ws.blocks),
     children: (t) => childTags(t, ws.blocks),
-    members: (t) => memberBlocks(t.id, ws.blocks, blocks.atoms),
+    members: (t) => memberBlocks(t.id, ws.blocks),
     isPage: (t) => hasRole(t, 'page'),
     togglePage: (tagId) => {
       const b = findInForest(ws.blocks, tagId)
@@ -1793,7 +1710,7 @@ const api = {
   fields(blockId: string) {
     const b = findInForest(ws.blocks, blockId)
     if (!b) return []
-    return fieldRows(b, ws.blocks, blocks.atoms).map((r) => ({
+    return fieldRows(b, ws.blocks).map((r) => ({
       propId: r.propId,
       label: r.label,
       kind: r.kind,
@@ -1817,11 +1734,11 @@ const api = {
   },
   /** 成员（**含算作**：自己的成员 ∪ 后代标签的成员） */
   tagMembersDeep(tagId: string) {
-    return [...membersOf(tagId, ws.blocks, blocks.atoms)]
+    return [...membersOf(tagId, ws.blocks)]
   },
   /** 打了某个标签的块 id（标签的成员列表＝标签块的入向边） */
   tagMembers(tagId: string) {
-    return [...tagMemberIds(tagId, mainEd.atoms)]
+    return [...tagMemberIds(tagId, ws.blocks)]
   },
   /** 删掉一个行内原子（**连同它占的那一格** ⇒ 那条边就没了） */
   removeAtom(atomId: string) {
@@ -1837,6 +1754,8 @@ const api = {
       children: b.children.length,
       // 角色进诊断面（journal 行是只读日期，测试要能把它挑出来）
       roles: identityTags(b),
+      // 标签归属也进诊断面：它是块级字段，DOM 里只剩渲染出来的 chip
+      tags: tagIdsOf(b),
     }))
   },
   marks() {

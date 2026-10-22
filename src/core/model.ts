@@ -85,6 +85,14 @@ export type SystemPropId =
   | '_uiPosition'
   // 包含（算作）：子标签 → 父标签的有序 ref 列表
   | '_parentTags'
+  /**
+   * 这块带着哪些标签：**有序的标签块 id 列表**（见 `core/tags.ts` 的 `tagIdsOf`）。
+   *
+   * 存 id 不存名字：标签块能改名，归属不该跟着失效。
+   * 曾经有一个同名槽位用来存「超级标签」的**定义**（没有任何读写路径，已移除）；
+   * 现在这一格是**归属**：块上有哪些标签，与「标签能声明哪些字段」是两件事。
+   */
+  | '_tags'
   // 删除时间戳（有它 ＝ 这块在回收站里，见 `DELETED_AT_PROP`）
   | typeof DELETED_AT_PROP
 
