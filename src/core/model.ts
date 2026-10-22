@@ -53,6 +53,15 @@ export type TodoState = 'todo' | 'done'
 export type Role = 'page' | 'tag'
 
 /**
+ * 删除时间戳（毫秒）。有它 ＝ 这个块在回收站里。
+ *
+ * 它不是「删没删」的开关：树里没有它、回收站里有它，就是删掉了 —— 一份状态只有一个落点。
+ * 属性而不是独立的回收站记录，是为了让「一块连同子树」原样搬动：回收站存的就是同一棵子树，
+ * 复活时不需要把内容从另一份形状里重新装配一遍。
+ */
+export const DELETED_AT_PROP = '_deletedAt' as const
+
+/**
  * 系统属性 id。
  * ⚠️ **`_` 前缀 ＝ 保留区**：用户与插件不得定义，core 定义且不随插件卸载消失。
  * 这里只列当前用到的。
@@ -74,6 +83,8 @@ export type SystemPropId =
   | '_uiPosition'
   // 包含（算作）：子标签 → 父标签的有序 ref 列表
   | '_parentTags'
+  // 删除时间戳（有它 ＝ 这块在回收站里，见 `DELETED_AT_PROP`）
+  | typeof DELETED_AT_PROP
 
 /**
  * **视图状态：块 id → 收起**。只记「收起的」，展开就是不在表里。
@@ -273,6 +284,12 @@ export interface Doc {
    * ⚠️ 它不参与撤销：折叠不是内容改动。
    */
   folded?: FoldState
+  /**
+   * **回收站**（被删掉的根块，子树完整）。`Doc` 只**共享引用**，不复制：
+   * 回收站是库级的，而 `Doc` 是一次装载的形状 —— 与 `roots` 共享森林是同一个道理。
+   * 复制一份就会出现「正文视图删的块进这个视图的回收站，别处看不见」。
+   */
+  trash?: Block[]
 }
 
 export interface Located {

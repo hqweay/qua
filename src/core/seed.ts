@@ -491,6 +491,8 @@ function forest(blocks: Block[], built: BuiltPage[]): Workspace {
     savedAt: Date.now(),
     marks: built.flatMap((b) => b.marks),
     atoms: built.flatMap((b) => b.atoms),
+    // 种子库没有删过东西；回收站是**新增的库级一格**，缺席会让落盘形状少一块
+    trash: [],
   }
 }
 

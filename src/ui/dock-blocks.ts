@@ -175,7 +175,7 @@ export class DockBlocks {
       // 重载节奏归本组件（防抖 + 聚焦冻结）
       autoReload: false,
       store: this.deps.store,
-      doc: { roots: [block] },
+      doc: { roots: [block], trash: this.deps.store.trash },
     })
     editor.events = {
       change: (kind) => {

@@ -4,7 +4,7 @@
  */
 
 import { uuidv7Hex } from './ids.ts'
-import { hasIdentity, isJournalBlock, mkBlock, writeBlockText, type Block, type Doc, type Located } from './model.ts'
+import { DELETED_AT_PROP, hasIdentity, isJournalBlock, mkBlock, writeBlockText, type Block, type Doc, type Located } from './model.ts'
 import { canWriteText, typeDeclOf } from './types.ts'
 import { walkForest } from './walk.ts'
 import { renameBlock } from './alias.ts'
@@ -540,11 +540,26 @@ export function duplicateBlock(doc: Doc, id: string): string | null {
   return block.id
 }
 
-/** 删除块（含子树） */
+/**
+ * 删除块（含子树）—— 其实是**摘出**：整棵子树从树上摘下来，写 `_deletedAt`，放进回收站。
+ *
+ * 为什么不再「删了就没了」：地址（页名／标签名）是可以被别处指向的，删掉一个被引用的块
+ * 会让那些边全部悬空，而且**没有任何办法**把同一个 id 找回来。留着整棵子树，复活时边就自己接上了。
+ * 对树上的读者，行为没有变化：这块就是不见了。
+ *
+ * ⚠️ 回收站挂在 `doc` 上而不是一个额外参数，理由与折叠态相同：`Doc` 是一次装载的完整形状，
+ *    少传一个参数就会有一条路径悄悄把块丢进「没有家的地方」。
+ * ⚠️ 没有接回收站的 `Doc`（临时构造的只读装载）退化成**这份装载自己的**回收站：
+ *    仍然丢不掉内容，只是别处看不见它。真实编辑器都接库级那份。
+ */
 export function removeBlock(doc: Doc, id: string): boolean {
   const loc = locate(doc, id)
   if (!loc) return false
-  siblingsOf(doc, loc.parent).splice(loc.index, 1)
+  const list = siblingsOf(doc, loc.parent)
+  list.splice(loc.index, 1)
+  const b = loc.block
+  b.props = { ...(b.props ?? {}), [DELETED_AT_PROP]: Date.now() }
+  ;(doc.trash ??= []).push(b)
   return true
 }
 

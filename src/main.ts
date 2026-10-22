@@ -120,7 +120,7 @@ const bootRoots: Block[] = bootDays.length > 0 ? rootsForMany(bootDays) : bootAc
  * **共享 block store**（下一层）：块/anchors/undo 只有一份；
  * 正文、反链、查询视图都是它的投影。多个 `BlockEditor` 读同一份活块。
  */
-const blocks = new BlockStore(ws.blocks, ws.marks, ws.atoms)
+const blocks = new BlockStore(ws.blocks, ws.marks, ws.atoms, ws.trash)
 
 const layers = new Layers(() => isMac())
 let ed: BlockEditor
@@ -242,6 +242,9 @@ function uiCtx(): CtxKeys {
 function syncSections(): void {
   ws.marks = blocks.marks
   ws.atoms = blocks.atoms
+  // 回收站也是库级的共享数组：换库/复位后落盘要写的是 store 那一份，
+  // 否则删掉的块只活在内存里，重开就真没了
+  ws.trash = blocks.trash
   /**
    * 折叠态是**库的视图状态**，所以它和 marks/atoms 一样从视图写回库：
    * 编辑器持的是 `doc.folded`（视图那份），落盘要的是 `ws.folded`（库那份）。
@@ -670,6 +673,7 @@ function firstEditableRoot(first: Block | undefined): Block | null {
  */
 const pageDeps: PageDeps = {
   blocks: () => ws.blocks,
+  trash: () => blocks.trash,
   // ⚠️ 每次取**当前**活动编辑器（正文 vs 反链 footer 会切换）⇒ 标签打在用户正在编辑的那一行
   insertAtom: (kind, opts) => ed.insertAtom(kind, opts),
   // 敲 `#名字` 的成边路径：把那段文字换成边（与上面「光标处插入」是两个动作）
@@ -689,7 +693,7 @@ const pageDeps: PageDeps = {
   loadPage: (roots, marks, atoms) => {
     ed = mainEd
     // 正文视图的折叠态是**库级**那份；取当前视图持有的那一份（`ws.folded` 只在落盘时同步，可能落后一步）
-    mainEd.loadPage({ roots, folded: mainEd.doc.folded }, marks as never, atoms as never)
+    mainEd.loadPage({ roots, folded: mainEd.doc.folded, trash: blocks.trash }, marks as never, atoms as never)
     renderBacklinks()
     renderQueryView()
     renderProperties()
@@ -1066,7 +1070,7 @@ const app: App = {
       const p = activeBlock()
       // ⚠️ 先解析 `p` 再 `blocks.reset`：`activeBlock()` 读的是**森林**（`ws.activeId`），
       //    重置之后再算就只剩「`ws.blocks[0]`」这条兜底，`sparse` 的 activeId 一旦不是首块就取错。
-      blocks.reset(next.blocks, next.marks, next.atoms)
+      blocks.reset(next.blocks, next.marks, next.atoms, next.trash)
       ed = mainEd
       applyChrome()
       chrome.renderDebugState()
@@ -1083,7 +1087,7 @@ const app: App = {
       // ⚠️ 光标必须落在**第一个可编辑的行**上（日记流的第一段是只读日期行）。
       //    原来固定 `roots[0]`，于是载入假数据后光标停在日期行、第一行看着「没有名字」。
       const caret = firstEditableRoot(roots[0])
-      mainEd.loadPage({ roots, folded: ws.folded }, ws.marks, ws.atoms, { blockId: caret?.id ?? '', off: 0 })
+      mainEd.loadPage({ roots, folded: ws.folded, trash: blocks.trash }, ws.marks, ws.atoms, { blockId: caret?.id ?? '', off: 0 })
       renderBacklinks()
       renderQueryView()
       chrome.renderEmptyHint(activeBlock().children)
@@ -1156,7 +1160,7 @@ ed = new BlockEditor({
   blankArea: chrome.blankAreaEl,
   // 共享 store：块是活引用；marks/atoms/undo 也是共享的
   store: blocks,
-  doc: { roots: bootRoots, folded: ws.folded },
+  doc: { roots: bootRoots, folded: ws.folded, trash: blocks.trash },
   marks: ws.marks,
   atoms: ws.atoms,
   /**

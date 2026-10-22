@@ -34,8 +34,11 @@ export { DEFAULT_DOCK, DEFAULT_PREFS, normalizePrefs } from './prefs.ts'
  *            但日记流看不见（内容没丢，是「看不见」这种更糟的形态）⇒ 必须作废重 seed
  * v10 → v11：待办状态从块字段改成任务状态属性（`_todo` 与 `todo` 字段都不再被读）。
  *            旧库的待办状态会静默消失（勾选与删除线一起没了），所以作废重 seed
+ * v11 → v12：新增库级 `trash`（删除改成「摘出到回收站」）。
+ *            旧库没有这一格读出来就是 `[]`，本不必作废；加一版是为了让**写路径**只面对一种形状
+ *            （落盘的每份库都带 `trash`），免得「有没有这一格」在下游变成两条分支。
  */
-export const WORKSPACE_VERSION = 11
+export const WORKSPACE_VERSION = 12
 
 /** 示例库：一片块森林 ＋ 行内锚点/原子 */
 export interface Workspace {
@@ -51,6 +54,14 @@ export interface Workspace {
   activeId: string
   prefs: Prefs
   savedAt: number
+  /**
+   * **回收站**：被删掉的**根**块（子树完整）。每项带着 `_deletedAt`。
+   *
+   * 为什么不只是「删掉就不再存在」：地址（页名／标签名）是块 id 之外的第二个身份，
+   * 删掉一个标签块会让所有指向它的边同时悬空，再打同名又造出一个新 id 的块 —— 旧边一条都不认。
+   * 留住整棵子树，同一地址复活时才接得上。
+   */
+  trash: Block[]
   /** 行内锚点与原子按块 id 索引（demo 平铺存放；接内核后进表） */
   marks: Mark[]
   atoms: Atom[]
@@ -117,9 +128,18 @@ export function parseWorkspace(raw: string | null): ParseResult {
     return { status: 'corrupt', reason: 'shape' }
   }
   if (!isFoldState(ws.folded)) return { status: 'corrupt', reason: 'shape' }
+  // 回收站缺省成空数组：这是**新增**的一格，旧库没有它不代表字节坏了；
+  // 但既然有，形状就必须对（「有但读不懂」与「没有」是两件事）。
+  if (ws.trash !== undefined && (!Array.isArray(ws.trash) || !ws.trash.every(isBlockTree))) {
+    return { status: 'corrupt', reason: 'shape' }
+  }
   return {
     status: 'ok',
-    ws: { ...(ws as Workspace), prefs: normalizePrefs(ws.prefs as Partial<Prefs> | undefined) },
+    ws: {
+      ...(ws as Workspace),
+      trash: ws.trash ?? [],
+      prefs: normalizePrefs(ws.prefs as Partial<Prefs> | undefined),
+    },
   }
 }
 
