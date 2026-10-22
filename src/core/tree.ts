@@ -4,7 +4,7 @@
  */
 
 import { uuidv7Hex } from './ids.ts'
-import { hasRole, mkBlock, type Block, type Doc, type Located } from './model.ts'
+import { hasRole, mkBlock, writeBlockText, type Block, type Doc, type Located } from './model.ts'
 import { renameBlock } from './alias.ts'
 export function locate(doc: Doc, id: string): Located | null {
   const walk = (list: Block[], parent: Block | null): Located | null => {
@@ -227,7 +227,7 @@ export function splitBlockBefore(doc: Doc, id: string, offset: number): { kept: 
   if (!loc) return null
   const off = Math.max(0, Math.min(offset, loc.block.text.length))
   const b = mkBlock(loc.block.text.slice(0, off))
-  loc.block.text = loc.block.text.slice(off)
+  writeBlockText(loc.block, loc.block.text.slice(off))
   const list = siblingsOf(doc, loc.parent)
   list.splice(loc.index, 0, b)
   return { kept: loc.block.id, inserted: b.id }
@@ -254,7 +254,7 @@ export function splitBlockIntoFirstChild(doc: Doc, id: string, offset: number): 
   const off = Math.max(0, Math.min(offset, loc.block.text.length))
   if (off <= 0) return null
   const b = mkBlock(loc.block.text.slice(off))
-  loc.block.text = loc.block.text.slice(0, off)
+  writeBlockText(loc.block, loc.block.text.slice(0, off))
   loc.block.collapsed = false
   loc.block.children.unshift(b)
   return { kept: loc.block.id, inserted: b.id }
@@ -344,7 +344,7 @@ export function insertFirstChild(doc: Doc, id: string): Block | null {
   if (!prev) return null
   const at = prev.text.length
   prev.children.push(...loc.block.children)
-  prev.text = prev.text + loc.block.text
+  writeBlockText(prev, prev.text + loc.block.text)
   const list = siblingsOf(doc, loc.parent)
   list.splice(loc.index, 1)
   return { kept: prev.id, removed: id, at }
@@ -374,7 +374,7 @@ export function replaceBlockRange(doc: Doc, fromId: string, toId: string, lines:
     const loc = locate(doc, all[k]!.id)
     if (loc && siblingsOf(doc, loc.parent) === list) removed.add(loc.block)
   }
-  const kept = lines.map((t, n) => (n === 0 ? ((first.text = t), first) : mkBlock(t)))
+  const kept = lines.map((t, n) => (n === 0 ? (writeBlockText(first, t), first) : mkBlock(t)))
   list.splice(idx, removed.size || j - i + 1, ...kept)
   return kept.map((b) => b.id)
 }
@@ -429,7 +429,7 @@ export function deleteBlockSpan(doc: Doc, startId: string, startOff: number, end
    */
   if (headLoc.parent === null && (head.roles?.length ?? 0) > 0) return null
 
-  head.text = head.text.slice(0, startOff) + tail.text.slice(endOff)
+  writeBlockText(head, head.text.slice(0, startOff) + tail.text.slice(endOff))
   // 首块的子树保留（选区不含它们）；被删掉的那些块连子树一起消失
   list.splice(from + 1, to - from)
   return head.id
