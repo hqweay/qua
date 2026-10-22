@@ -224,13 +224,14 @@ export function fillBlockText(
  * 一个可见行 → `.blk` 元素。
  *
  * **DOM 契约就在这里**（承 66）：`data-block-id`／`data-depth`／`data-has-children`／
- * `data-collapsed`／`data-todo`／`--depth`，以及 `.left` 里的 `.marker`／`.fold`／`.todo-box`。
+ * `data-collapsed`／`data-todo`／`--depth`，以及 `.left` 里的 `.marker`／`.fold`／`.identity`／`.todo-box`。
  * 主题与插件都按这些选择器选，**改名等于破坏契约**。
  *
  * gutter 的形状：
  *   · **一个主件**：`.marker` 同时是**块标与拖拽把手**（D4）。旧契约
  *     `class="bullet handle"` 两个选择器**都保留在同一个元素上**，主题与插件不会失效；
  *   · **两个临时件**：`.fold`（悬停才现）与 `.marker` 上的 grip（悬停才现）；
+ *   · **后缀**：`.identity`（这块是任务 / 是标签），一块可以同时挂两枚；
  *   · `.fold` **无子块不生成**（不是 `visibility:hidden`，DOM 里就没有这个节点）；
  *   · 折叠态**不靠箭头表达**：块标自己变成环（D2），箭头只表示方向。
  *
@@ -336,32 +337,55 @@ export function makeBlockEl(
    * 正文左缘的缩进问题一并解决。
    *
    * 行为：**左键 ＝ 聚焦/zoom**、右键 ＝ 块菜单、拖动 ＝ 移动。
+   *
+   * ⚠️ 这三条行为**不随身份变化**。让待办方框顶替块标，等于让「这块是任务」
+   *    这一条属性吃掉「点它聚焦」这件事：同样是块标，点下去的结果却取决于块的属性，
+   *    而这区别不写在任何地方。身份因此只作为**后缀**出现，见下面 `.identity`。
    */
   const marker = document.createElement('span')
-  if (box) {
-    /**
-     * gutter 上的二元开关：方块就是**这一行的块标**（同一元素两个契约 class）。
-     * 未填（`false` 或没有这一槽）画空心，`true` 画勾选 —— 差别只在图标与 `data-todo`，
-     * 元素形状不变，所以「点一下填上」不会让这一行的 DOM 结构换掉。
-     */
-    marker.className = 'marker todo-box handle'
-    marker.dataset.todoFor = b.id
-    marker.dataset.propId = box.propId
-    marker.appendChild(createIcon(todo === 'done' ? 'square-check' : 'square', 'sm'))
-    marker.title = t('ui.todo.toggle')
-  } else {
-    marker.className = 'marker bullet handle'
-    marker.dataset.focusFor = b.id
-    // 抓手图标：**悬停才现**（块标 hover 时把点换成 grip）
-    const grip = document.createElement('span')
-    grip.className = 'grip'
-    grip.appendChild(createIcon('grip-vertical', 'sm'))
-    marker.appendChild(grip)
-    marker.title = t('ui.block.focusHint')
-  }
+  marker.className = 'marker bullet handle'
+  marker.dataset.focusFor = b.id
+  // 抓手图标：**悬停才现**（块标 hover 时把点换成 grip）
+  const grip = document.createElement('span')
+  grip.className = 'grip'
+  grip.appendChild(createIcon('grip-vertical', 'sm'))
+  marker.appendChild(grip)
+  marker.title = t('ui.block.focusHint')
   marker.draggable = true
   marker.dataset.dragFor = b.id
   left.appendChild(marker)
+
+  /**
+   * **身份图标**：挂在块标**之后**的附加信息，不占用块标本身。
+   *
+   * 顺序是**先标签后待办**：标签说的是「这块是什么」，待办只是某个属性的取值；
+   * 越本质、越少变的信息越靠左，读起来才稳。两者可以同时存在。
+   *
+   * ⚠️ 「方框」这个身份图标同时是待办的点击入口（`data-todo-for`）——
+   *    它自己 `cursor:pointer`，与块标各占一块命中区，互不遮挡。
+   */
+  if (roles.includes('tag')) {
+    const tagMark = document.createElement('span')
+    tagMark.className = 'identity tag-mark'
+    tagMark.appendChild(createIcon('hash', 'sm'))
+    tagMark.title = t('ui.tag.mark')
+    left.appendChild(tagMark)
+  }
+  if (box) {
+    /**
+     * 待办：`true` 画勾选、`false` 画空心 —— 差别只在图标与 `.blk` 上的 `data-todo`，
+     * 身份元素本身不增删（「点一下填上」不该让 DOM 结构换掉）。
+     * ⚠️ `.todo-box` 这个类名与 `data-todo` 都是样式/门禁的契约，留在原来的名字上，
+     *    只是宿主从块标换成了这枚身份图标。
+     */
+    const todoMark = document.createElement('span')
+    todoMark.className = 'identity todo-box todo-mark'
+    todoMark.dataset.todoFor = b.id
+    todoMark.dataset.propId = box.propId
+    todoMark.appendChild(createIcon(todo === 'done' ? 'square-check' : 'square', 'sm'))
+    todoMark.title = t('ui.todo.toggle')
+    left.appendChild(todoMark)
+  }
   const tx = document.createElement('span')
   tx.className = 'tx'
   if (todo === 'done') tx.classList.add('done')

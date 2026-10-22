@@ -92,7 +92,9 @@
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   gutter 三件：**一个主件 ＋ 两个临时件**
+   gutter：**一个主件 ＋ 两个临时件 ＋ 身份后缀**
+   主件＝块标（同时是把手）；临时件＝折叠三角与抓手（悬停才现）；
+   身份图标挂在块标之后，见本节末尾。
    ══════════════════════════════════════════════════════════════════ */
 
 /*
@@ -217,22 +219,40 @@
 #editor.dragging .blk .handle {
   opacity: 0.5;
 }
-/* 待办行的方框：它也是把手（D4），尺寸与块标同槽 */
-.blk .marker.todo-box {
+/*
+ * **身份图标**：块标**之后**的一枚附加信息（这块是标签 / 是任务）。
+ *
+ * 它不替换块标 —— 块标槽的语义「点＝聚焦、拖＝移动」对任何一块都不变，
+ * 身份只是补充。所以这里只要「一枚图标那么宽」，不撑开、不挤压别的东西。
+ *
+ * · 与块标同高、同色（tertiary），静止时不抢眼；两枚图标之间的 1px 缝由
+ *   `.left` 的 `gap` 给，**不在这里再加 margin**（缝宽只能有一个出处）；
+ * · 待办可点（勾选就是它的动作）⇒ 它与块标各占一块命中区，互不遮挡；
+ * · 标签只是说明，不可点 ⇒ 没有 pointer，也没有悬停反馈。
+ */
+.blk .identity {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--ui-line-h);
+  color: var(--ui-text-tertiary);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.blk .identity .ico {
+  inline-size: var(--ui-icon-sm);
+  block-size: var(--ui-icon-sm);
+}
+.blk .identity.todo-box {
+  cursor: pointer;
+}
+.blk .identity.todo-box:hover {
   color: var(--ui-text-secondary);
 }
-/*
- * **方框就是这一行的块标**：`.marker::before` 的小圆点不能再生成。
- * 两者占的是同一个 20px 槽，同时画出来就是「复选框压着一个圆点」。
- * 关的是 `content` 而不是各状态的 `opacity`——悬停/折叠规则只改可见度，
- * 只有这里把生成内容去掉，任何状态下都不会再冒出来。
- */
-.blk .marker.todo-box::before {
-  content: none;
-}
-.blk .marker.todo-box .ico {
-  width: var(--ui-icon-sm);
-  height: var(--ui-icon-sm);
+.blk .identity.tag-mark {
+  opacity: 0.8;
+  cursor: default;
 }
 .blk[data-todo='done'] .tx {
   color: var(--ui-text-tertiary);
