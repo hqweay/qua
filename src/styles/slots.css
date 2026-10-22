@@ -229,6 +229,12 @@ body[data-dock-resizing='1'] * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 分割线在槽里的一行：壳仍是 `.page-item`，线自己撑满剩余宽度 */
+.page-item .divider-rule {
+  flex: 1;
+  height: var(--ui-sep);
+  background: var(--ui-border);
+}
 .page-item .p-count {
   flex: 0 0 auto;
   color: var(--ui-text-tertiary);

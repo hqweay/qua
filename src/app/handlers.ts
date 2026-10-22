@@ -90,6 +90,8 @@ export const HANDLERS: Record<string, Handler> = {
     if (!id) return false
     const text = S(a.text, '')
     const type = S(a.type, 'paragraph')
+    // 分割线没有正文可落光标：插入动作自己负责在它下面留一个落点
+    if (type === 'divider') return app.ed.insertDividerAfter(id)
     const todo = type === 'todo' ? ('todo' as const) : undefined
     app.ed.insertBlockAfter(id, text, todo)
     return true

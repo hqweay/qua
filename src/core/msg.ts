@@ -224,6 +224,7 @@ export const MSG = {
   'menu.label.toggleCollapse': '折叠 / 展开',
   'menu.label.paragraph': '正文块',
   'menu.label.todo': '待办',
+  'menu.label.divider': '分割线',
   'menu.label.pageRef': '引用页面（行内原子）',
   'menu.label.image': '图片（资产占位）',
   'menu.label.tag': '标签',
@@ -250,6 +251,7 @@ export const MSG = {
   'menu.kw.background': '背景',
   'menu.kw.command': '命令',
   'menu.kw.paragraph': '正文',
+  'menu.kw.divider': '分隔',
 
   /* ---------------------------------------------------------------- 浮层标题 */
   'menu.title.palette': '命令面板 · 一切命令可搜、可无绑定执行',

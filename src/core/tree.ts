@@ -4,7 +4,8 @@
  */
 
 import { uuidv7Hex } from './ids.ts'
-import { hasIdentity, isJournalBlock, canWriteText, mkBlock, writeBlockText, type Block, type Doc, type Located } from './model.ts'
+import { hasIdentity, isJournalBlock, mkBlock, writeBlockText, type Block, type Doc, type Located } from './model.ts'
+import { canWriteText, typeDeclOf } from './types.ts'
 import { walkForest } from './walk.ts'
 import { renameBlock } from './alias.ts'
 export function locate(doc: Doc, id: string): Located | null {
@@ -443,6 +444,11 @@ export function indentBlock(doc: Doc, id: string): boolean {
   if (!loc || loc.index === 0) return false
   const list = siblingsOf(doc, loc.parent)
   const prev = list[loc.index - 1]!
+  /**
+   * 前一块**声明不许有子块**（占位型块）⇒ 这次缩进不成立。
+   * 判据落在写路径入口：只把 UI 上的「缩进」灰掉挡不住命令面板与拖拽的另一条路。
+   */
+  if (typeDeclOf(prev).children === 'none') return false
   list.splice(loc.index, 1)
   prev.children.push(loc.block)
   // 刚缩进进去的那一块必须看得见，否则用户以为它被吞了
@@ -499,6 +505,11 @@ export function moveBlockTo(doc: Doc, id: string, targetId: string, pos: 'before
   const loc = locate(doc, id)
   const tgt = locate(doc, targetId)
   if (!loc || !tgt) return false
+  /**
+   * 目标是**声明不许有子块**的类型（占位型块）⇒ 落进它里面不成立。
+   * before/after 仍允许：那只是插在它旁边，不需要它容纳任何东西。
+   */
+  if (pos === 'inside' && typeDeclOf(tgt.block).children === 'none') return false
   siblingsOf(doc, loc.parent).splice(loc.index, 1)
   const tgt2 = locate(doc, targetId)!
   if (pos === 'inside') {

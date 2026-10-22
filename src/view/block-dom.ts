@@ -15,11 +15,14 @@
  */
 import {
   ATOM_PLACEHOLDER,
+  DIVIDER_TYPE,
+  blockTypeOf,
   identityTags,
   isJournal,
   journalDate,
   journalDateLabel,
   mkAtom,
+  typeDeclOf,
   type Atom,
   type Block,
   type FindBlock,
@@ -120,8 +123,13 @@ export function makeAtomEl(a: Atom, view?: RefView): HTMLElement {
 }
 
 /**
- * **这一行是不是只读的**：journal 的行是 `_date` 的只读投影，
- * 不是块的正文 ⇒ 不给编辑、不给落光标。
+ * **这一行是不是只读的**：不给编辑、不给落光标。
+ *
+ * 只读有**两个来源**，但出口只有一个：
+ *   · journal 的行是 `_date` 的只读投影，日期不是块的正文；
+ *   · 类型声明 `text: 'readonly'` 的块（分割线这类）**没有可编辑的正文**。
+ * 两者的理由不同（一个是「正文在别处」，一个是「没有正文」），后果相同：
+ * 这一行不接受输入。
  *
  * ⚠️ 这条判据有**三个**消费者，必须只有一处定义：
  *   ① `makeBlockEl`（`contenteditable=false` ＋ `data-readonly`）；
@@ -130,7 +138,7 @@ export function makeAtomEl(a: Atom, view?: RefView): HTMLElement {
  *   分开写会立刻分叉（2026-10-20 实际踩过：只读行让 ⌘A 的原生全选退化成空选区）。
  */
 export function isReadonlyBlock(b: Block): boolean {
-  return isJournal(b)
+  return isJournal(b) || typeDeclOf(b).text === 'readonly'
 }
 
 /**
@@ -349,7 +357,19 @@ export function makeBlockEl(
   const tx = document.createElement('span')
   tx.className = 'tx'
   if (todo === 'done') tx.classList.add('done')
-  fill(tx)
+  /**
+   * **分割线**：线放在 `.tx` **里面**，不另换一个元素替代 `.tx`。
+   * 编辑器里有一批路径按 `.tx` 认块（取文本、落光标、标 caret），换掉 `.tx`
+   * 等于让这一行在那些路径里「不存在」——静默失效，不报错。
+   */
+  if (blockTypeOf(b) === DIVIDER_TYPE) {
+    const rule = document.createElement('span')
+    rule.className = 'divider-rule'
+    rule.setAttribute('aria-hidden', 'true')
+    tx.appendChild(rule)
+  } else {
+    fill(tx)
+  }
   /*
    * journal 的**日期**：它是 `_date` 的只读投影，不是块的正文。
    * 2026-10-20 去掉「标题」之后，日期失去了落点（原来显示在文档头的页名位）
@@ -365,12 +385,17 @@ export function makeBlockEl(
   if (isReadonlyBlock(b)) {
     tx.contentEditable = 'false'
     tx.dataset.readonly = '1'
-    if (b.text === '') {
-      tx.dataset.ph = journalDateLabel(journalDate(b))
-      tx.dataset.phReadonly = '1'
-    } else {
+    /**
+     * 占位文案只属于 **journal**：它的「正文」是 `_date` 的投影，投影要看得见。
+     * 类型不可写的块没有可显示的内容（分割线的线本身就是全部），不挂占位——
+     * 否则会在一条线旁边多出一行日期。
+     */
+    if (b.text !== '') {
       // 兜底：万一旧数据里 journal 有正文（不该发生），仍要能看见它
       tx.dataset.ph = b.text
+      tx.dataset.phReadonly = '1'
+    } else if (isJournal(b)) {
+      tx.dataset.ph = journalDateLabel(journalDate(b))
       tx.dataset.phReadonly = '1'
     }
   } else if (b.text === '') {

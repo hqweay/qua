@@ -13,7 +13,15 @@
  * ⚠️ 依赖方向：本模块 → `model.ts`，单向。`model.ts` 是零依赖叶子，
  *    反过来 import 会成环（`blockTypeOf` 与 `DEFAULT_BLOCK_TYPE` 留在那里）。
  */
-import { DEFAULT_BLOCK_TYPE, blockTypeOf, type Block } from './model.ts'
+import {
+  DEFAULT_BLOCK_TYPE,
+  blockTypeOf,
+  hasRole,
+  isJournalBlock,
+  isPropDefBlock,
+  isQueryBlock,
+  type Block,
+} from './model.ts'
 
 /**
  * 一个类型的**声明**：纯数据、可序列化、无函数。
@@ -66,4 +74,29 @@ export const TYPE_DECLS: Record<string, TypeDecl> = {
  */
 export function typeDeclOf(b: Block): TypeDecl {
   return TYPE_DECLS[blockTypeOf(b)] ?? TYPE_DECLS[DEFAULT_BLOCK_TYPE]!
+}
+
+/**
+ * **这一块的正文是不是「内容」** —— 内容写路径（合并、拆块、区间替换）只许写内容。
+ *
+ * 有一类块的正文是**名字或投影**，不是内容：标签名、字段定义的名字、日记的日期投影；
+ * 还有一类块**根本没有正文**（类型声明说 `text: 'readonly'`，例如分割线）。
+ * 把别的块的正文并进它们，用户只按了一次退格，换来的是一次**静默改名**
+ * （更糟的是往只读的日期行里塞字，而日期行的正文恒空是一条不变量）。
+ * 所以要有一道判据挡在所有内容写路径前面 —— **一条**判据，不是每个调用点各判一次。
+ *
+ * ⚠️ 住在类型模块而不是 `model.ts`：这条判据现在要看类型声明，而 `model.ts` 是
+ *    零依赖叶子（依赖只能从这边指向它）。放在声明旁边也更顺：它本来就是声明里的一格。
+ * ⚠️ **`page` 不在这条里**：页的正文也是名字，但页是**容器**、它的行本来就允许直接编辑
+ *    （在页名上打字就是改名）⇒ 不在这里拦。
+ * ⚠️ **改名不走这条判据**：改名本来就是要写名字，它走 `renameBlock`。
+ */
+export function canWriteText(b: Block): boolean {
+  return (
+    !hasRole(b, 'tag') &&
+    !isJournalBlock(b) &&
+    !isPropDefBlock(b) &&
+    !isQueryBlock(b) &&
+    typeDeclOf(b).text !== 'readonly'
+  )
 }
