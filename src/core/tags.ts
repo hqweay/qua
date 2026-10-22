@@ -23,7 +23,13 @@ import { addRole, hasRole, type Block, type Role } from './model.ts'
 import { findByAlias, isAddressable, normalizeAlias } from './alias.ts'
 import type { Atom } from './annotations.ts'
 
-/** 标签块的角色：标签 ＝ 一个带 `tag` 角色的普通块（**任意块皆可当标签**，它只是指向边的另一端） */
+/**
+ * 标签块的角色：标签 ＝ 一个带 `tag` 角色的普通块。
+ *
+ * ⚠️ 它**不占据树上的位置**（必须在顶层）——因为它只是指向边的另一端。
+ *    位置属于内容，名字属于身份：所有读路径都按 id 找标签（不按位置），
+ *    而所有树操作（缩进／拖拽／删除）都会把一个"住在子树里的标签"当货物搬走。
+ */
 export const TAG_ROLE: Role = 'tag'
 
 /**
