@@ -307,7 +307,7 @@ export function writeBlockText(b: Block, text: string): void {
  * ⚠️ **改名不走这条判据**：改名本来就是要写名字，它走 `renameBlock`。
  */
 export function canWriteText(b: Block): boolean {
-  return !hasRole(b, 'tag') && !isJournalBlock(b) && !isPropDefBlock(b)
+  return !hasRole(b, 'tag') && !isJournalBlock(b) && !isPropDefBlock(b) && !isQueryBlock(b)
 }
 
 /* ---------------------------------------------------------------- props */
