@@ -13,6 +13,7 @@ import { hasRole, type Block } from './model.ts'
 import type { Atom } from './annotations.ts'
 import { findPath } from './tree.ts'
 import { findTagByName, tagMemberIds } from './tags.ts'
+import { findJournalDay } from './journal.ts'
 
 /* ------------------------------------------------------------ 条件形状 */
 
@@ -111,18 +112,11 @@ function matches(node: QueryNode, b: Block, refs: ReadonlySet<string>, tags: Rea
   return node.todo === cur
 }
 
-/** 某天的日记块（`journal` 角色 ＋ `_date`，承 68 ） */
-export function findJournal(blocks: readonly Block[], date: string): Block | undefined {
-  let found: Block | undefined
-  walk(blocks, (b) => {
-    if (!found && hasRole(b, 'journal') && b.props?._date === date) found = b
-  })
-  return found
-}
-
 /**
  * 求值一次。**纯函数**：同样的输入永远同样的输出顺序（按森林的先序），
  * 这样「冻结」只要保存输出的 `blockId[]` 就够了（D4：冻结成员与顺序）。
+ *
+ * ⚠️ `journal` 条件的「这一天是哪一块」不在本文件定义 —— 走 `journal.ts` 的 `findJournalDay`。
  */
 export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
   const refs = collectRefs(spec.where, input.atoms)
@@ -135,7 +129,7 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
   /** `journal` 条件把范围再收一层：只取那天块里的**子块**（日期行是只读标题，不该出现在结果里） */
   const journalDate = firstJournal(spec.where)
   if (journalDate) {
-    const day = findJournal(input.blocks, journalDate)
+    const day = findJournalDay(input.blocks, journalDate)
     roots = day ? day.children : []
   }
 

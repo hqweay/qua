@@ -212,7 +212,12 @@ export function tagIdByName(index: Index, name: string): string | undefined {
   return index.tags.get(normalizeTag(name))
 }
 
-/** 某天的 journal 块 id */
+/**
+ * 某天的 journal 块 id。
+ *
+ * ⚠️ **口径与 `journal.ts` 的 `journalDays` 同源**（`isJournal` ＋ `journalDate`，整片森林、
+ *    同一天取先序第一个）—— 两条路必须给同一个答案，否则「这一天是哪一块」会有两说。
+ */
 export function journalIdByDate(index: Index, date: string): string | undefined {
   return index.journals.get(date)
 }

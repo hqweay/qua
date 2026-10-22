@@ -4,7 +4,7 @@
  */
 
 import { uuidv7Hex } from './ids.ts'
-import { hasRole, mkBlock, writeBlockText, type Block, type Doc, type Located } from './model.ts'
+import { hasRole, canWriteText, mkBlock, writeBlockText, type Block, type Doc, type Located } from './model.ts'
 import { renameBlock } from './alias.ts'
 export function locate(doc: Doc, id: string): Located | null {
   const walk = (list: Block[], parent: Block | null): Located | null => {
@@ -187,7 +187,14 @@ export function hasDescendant(doc: Doc, ancestorId: string, maybeChildId: string
   return descendants(a.block).some((b) => b.id === maybeChildId)
 }
 
-/** 深拷贝子树，**所有块发新 id**；原子/mark 的 blockId 由调用方按 id 映射重建 */
+/**
+ * 深拷贝子树，**所有块发新 id**；原子/mark 的 blockId 由调用方按 id 映射重建。
+ *
+ * ⚠️ **角色与属性要一起带走**：漏掉它们，复制一个页／标签／查询块会得到一个
+ *    「长得像、但不是」的普通内容块 —— 图标、日期、全部属性值与角色静默消失。
+ * ⚠️ 属性袋是**浅拷**：属性值由各自的写入口整份替换（没有原地改列表的路径），
+ *    所以浅拷不会让原件与副本共享可变值。
+ */
 export function cloneSubtree(b: Block): { block: Block; idMap: Map<string, string> } {
   const idMap = new Map<string, string>()
   const cp = (x: Block): Block => {
@@ -199,6 +206,8 @@ export function cloneSubtree(b: Block): { block: Block; idMap: Map<string, strin
       children: x.children.map(cp),
       ...(x.collapsed ? { collapsed: true } : {}),
       ...(x.todo ? { todo: x.todo } : {}),
+      ...(x.roles?.length ? { roles: [...x.roles] } : {}),
+      ...(x.props ? { props: { ...x.props } } : {}),
     }
   }
   return { block: cp(b), idMap }
@@ -342,6 +351,14 @@ export function insertFirstChild(doc: Doc, id: string): Block | null {
   if (!loc) return null
   const prev = prevBlock(doc, id)
   if (!prev) return null
+  /**
+   * 前一块的正文不是内容（标签名／字段名／日期投影）⇒ **这次合并不成立**。
+   *
+   * 合并的语义是「把这块的正文接到前一块的正文后面」；前一块没有可写的正文，
+   * 这块的正文就无处可去 —— 继续做只会静默丢掉它，或往只读的日期行里塞字。
+   * 退格在这个位置因此是「什么都不发生」，与「不能并进一行抬头」一致。
+   */
+  if (!canWriteText(prev)) return null
   const at = prev.text.length
   prev.children.push(...loc.block.children)
   writeBlockText(prev, prev.text + loc.block.text)

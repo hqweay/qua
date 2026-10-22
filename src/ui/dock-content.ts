@@ -7,7 +7,7 @@
  * ⚠️ 这里**不认 `ws`／`ed`／`registry`**，只认下面这个 `DockContentDeps`。
  * ⚠️ 渲染一律走 `renderBlock`（29 「一源多视」）：槽只排一列，块由类型决定长相（角色只叠 chrome）。
  */
-import { hasRole, journalDate, todayISO, liveFavorites, containerTitle, type Atom, type Block, type Index } from '../core/index.ts'
+import { findJournalDay, todayISO, liveFavorites, containerTitle, type Atom, type Block, type Index } from '../core/index.ts'
 import { backrefsOf } from '../core/backrefs.ts'
 import { t } from '../core/msg.ts'
 import { renderBlock, type BlockRenderCtx } from './block-renderers.ts'
@@ -61,7 +61,7 @@ export function renderFavoritesInto(deps: DockContentDeps, slot: DockSlotEls, ex
   const forest = deps.blocks()
 
   // Daily note：在库里找今天的 journal 块（冷启动时它一定已经物化，见 seed／装配层）
-  const today = forest.find((b) => hasRole(b, 'journal') && journalDate(b) === todayISO())
+  const today = findJournalDay(forest, todayISO())
   if (today) {
     const body = document.createElement('div')
     body.id = 'journal-today'

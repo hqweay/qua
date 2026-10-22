@@ -15,6 +15,7 @@ import type { Change } from '../src/core/storage/port.ts'
 import {
   applyChanges,
   fingerprint,
+  findJournalDay,
   incomingIds,
   journalIdByDate,
   lookupBlock,
@@ -81,6 +82,15 @@ test('rebuild：标签名按规范化取先序第一个（与 ensureTag 同口�
   const forest = [b('t1', 'Todo', { roles: ['tag'] }), b('t2', 'todo', { roles: ['tag'] })]
   const idx = rebuild(forest, [])
   assert.equal(tagIdByName(idx, 'todo'), 't1', '同名标签取先序第一个，不随机')
+})
+
+test('日期索引与 journalDays 同口径：嵌在子树里的一天，两条路给同一个答案', () => {
+  // 「索引认得它、日记流看不见」曾是同一个 bug 的两面。这里把两条路摆在一起：
+  // 索引（`journalIdByDate`）与扫描（`findJournalDay`）必须同口径 —— 整片森林、先序第一个。
+  const forest = [b('p1', '页面', { roles: ['page'], children: [b('j1', '', { roles: ['journal'], props: { _date: '2026-10-19' } })] })]
+  const idx = rebuild(forest, [])
+  assert.equal(journalIdByDate(idx, '2026-10-19'), 'j1')
+  assert.equal(findJournalDay(forest, '2026-10-19')?.id, 'j1')
 })
 
 test('rebuild：`[[标签块]]` 的**引用**不算标签成员（两张表不能合并）', () => {
