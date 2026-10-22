@@ -15,6 +15,7 @@ import type { Atom } from './annotations.ts'
 import { findPath } from './tree.ts'
 import { findTagByName, tagMemberIds } from './tags.ts'
 import { findJournalDay } from './journal.ts'
+import { todoOf } from './props.ts'
 
 /* ------------------------------------------------------------ 条件形状 */
 
@@ -34,11 +35,13 @@ export type QueryNode =
   /** 正文包含某串 */
   | { text: string }
   /**
-   * 待办状态。
+   * 待办状态（三态：未做完／做完／不是任务）。
    *
-   * ⚠️ **这是通用属性条件（`prop`）的临时替身**，因为它写死了「有一个叫 `todo` 的专用字段」。
-   *    等 `todo` 搬成一个真实属性之后，这一支就会被删掉——那时「按任务状态筛」只是
-   *    `{ prop: { id, eq } }` 的一个普通实例，不需要专用分支。
+   * ⚠️ 值本身已经是**真实属性**（`core/props.ts` 的「任务状态」），这里保留专用条件键
+   *    是因为它表达的「三态」不是 `{ prop: { id, eq } }` 能直接写出来的：
+   *    `false`（是任务、没做完）与「没有这一槽」必须分开，而后者在所有属性条件里
+   *    都统一表示「不匹配」。要让用户说清「没有这个字段」，得给属性条件加一个
+   *    「不存在」的形态——没做之前，这一支留着更诚实。
    */
   | { todo: TodoFilter }
   /**
@@ -129,7 +132,7 @@ function matches(node: QueryNode, b: Block, refs: ReadonlySet<string>, tags: Rea
     if (!props || !(node.prop.id in props)) return false
     return Object.is(props[node.prop.id], node.prop.eq)
   }
-  const cur = b.todo ?? 'none'
+  const cur = todoOf(b) ?? 'none'
   return node.todo === cur
 }
 
@@ -158,7 +161,7 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
   walk(roots, (b, ancestors) => {
     if (journalDate && isJournalBlock(b)) return
     if (!matches(spec.where, b, refs, tags)) return
-    if (spec.todo && (b.todo ?? 'none') !== spec.todo) return
+    if (spec.todo && (todoOf(b) ?? 'none') !== spec.todo) return
     hits.push({ blockId: b.id, path: ancestors.map((a) => a.id) })
   })
   return typeof spec.limit === 'number' ? hits.slice(0, Math.max(0, spec.limit)) : hits

@@ -32,8 +32,10 @@ export { DEFAULT_DOCK, DEFAULT_PREFS, normalizePrefs } from './prefs.ts'
  * v9 → v10：日记块的 id 由「时间戳＋日期数字」改成名字哈希派生。旧库里的日记 id 与新代码
  *            算出的对不上 ⇒ 「今天」会被判定为不存在而**新建一个空日记**，旧内容留在原地
  *            但日记流看不见（内容没丢，是「看不见」这种更糟的形态）⇒ 必须作废重 seed
+ * v10 → v11：待办状态从块字段改成任务状态属性（`_todo` 与 `todo` 字段都不再被读）。
+ *            旧库的待办状态会静默消失（勾选与删除线一起没了），所以作废重 seed
  */
-export const WORKSPACE_VERSION = 10
+export const WORKSPACE_VERSION = 11
 
 /** 示例库：一片块森林 ＋ 行内锚点/原子 */
 export interface Workspace {

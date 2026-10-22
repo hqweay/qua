@@ -122,7 +122,7 @@ test('Enter（第三次修订）split：offset=0 退化成「在上方插空块�
 
 test('Enter（第三次修订）split：只给新块发 id，原块 id/props 不变', () => {
   const doc = fixture()
-  doc.roots[0]!.todo = 'todo'
+  doc.roots[0]!.props = { 'p-task': false }
   const before = new Set(flatten(doc).map((b) => b.id))
   const r = splitBlockBefore(doc, 'a', 2)!
   const after = flatten(doc).map((b) => b.id)
@@ -131,7 +131,7 @@ test('Enter（第三次修订）split：只给新块发 id，原块 id/props 不
     after.filter((x) => !before.has(x)),
     [r.inserted],
   )
-  assert.equal(locate(doc, 'a')!.block.todo, 'todo', 'todo 跟着原块')
+  assert.deepEqual(locate(doc, 'a')!.block.props, { 'p-task': false }, '属性值跟着原块')
 })
 
 test('Enter（第四次修订）空块 + 缩进 ≥ 2 层 ⇒ outdent（Enter 反缩进，不建块）', () => {

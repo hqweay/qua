@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addRole, aliasOf, allPropDefs, allTags, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, resolveRef, tagMemberIds, todayISO, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { addRole, aliasOf, allPropDefs, allTags, childTags, cleanableValues, clearValue, danglingParentIds, declaredFieldIds, declaredFields, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, findPropDef, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasRole, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, prop, propKindOf, propLabel, removeRole, resolveRef, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
@@ -1794,7 +1794,7 @@ const api = {
     return flatten(mainEd.doc).map((b) => ({
       id: b.id,
       text: b.text,
-      todo: b.todo ?? null,
+      todo: todoOf(b) ?? null,
       // 诊断面的字段名保持 `collapsed`（冒烟按它断言）；值现在来自折叠表
       collapsed: mainEd.doc.folded?.[b.id] === true,
       children: b.children.length,

@@ -54,6 +54,10 @@ import {
   mkAtom,
   writeBlockText,
   walkForest,
+  gutterFieldsOf,
+  setValue,
+  todoOf,
+  TASK_STATUS_PROP_ID,
   type Atom,
   type AtomKind,
   type Block,
@@ -371,6 +375,11 @@ export class BlockEditor {
         single: flatten(this.doc).length === 1,
         ancestors: this.ancestors.get(r.block.id) ?? [],
         folded: this.doc.folded,
+        /**
+         * gutter 的字段在**调用方**算：`block-dom` 是渲染层，没有森林；
+         * 让它自己去扫一遍全库就等于「每画一行扫一次」。
+         */
+        gutter: gutterFieldsOf(r.block, this.store.blocks, this.atoms),
       },
     )
     this.mounted.add(r.block.id)
@@ -1383,21 +1392,33 @@ export class BlockEditor {
     this.emitChange('struct')
   }
 
-  setTodo(id: string, state: TodoState | null): void {
-    const loc = locate(this.doc, id)
-    if (!loc) return
-    const before = this.snap()
-    if (state) loc.block.todo = state
-    else delete loc.block.todo
-    this.undo.record(before, 'structural', Date.now())
-    this.renderAll()
-    this.emitChange('struct')
-  }
-
+  /**
+   * **勾 / 取消勾选**这一行 gutter 上的那个二元开关。
+   *
+   * 写的是**属性值**，不是块字段：任务状态是一个真实字段（有定义块、能进查询、能导出），
+   * 所以这里走 `setValue`。`gutterFieldsOf` 是唯一的「这一行有哪些 gutter 字段」来源，
+   * 点方框与菜单命令共用它 ⇒ 两条入口不会对同一行给出不同答案。
+   *
+   * 「未填」与「`false`」在这里都算**没勾**：一次点击就是打上勾，再点一次取消
+   * （`!current`，所以从「没有这一槽」点一下直接变已勾，不需要先填一个中间态）。
+   *
+   * ⚠️ 这一行**一个 gutter 字段都没有**时（例如从菜单对普通块按「切换待办」）：
+   *    落 `false` 而不是 `true`。落下去之后它就成了这一块的**自有字段**，
+   *    gutter 上随即出现方框 —— 于是「先成为一个没做完的任务，再点才勾上」，
+   *    与原来「第一次切换 ＝ 变成待办」的手感一致。
+   */
   toggleTodo(id: string): void {
     const loc = locate(this.doc, id)
     if (!loc) return
-    this.setTodo(id, !loc.block.todo ? 'todo' : loc.block.todo === 'todo' ? 'done' : 'todo')
+    const fields = gutterFieldsOf(loc.block, this.store.blocks, this.atoms)
+    const field =
+      fields.find((f) => f.kind === 'checkbox' && f.propId === TASK_STATUS_PROP_ID) ??
+      fields.find((f) => f.kind === 'checkbox')
+    const before = this.snap()
+    setValue(loc.block, field?.propId ?? TASK_STATUS_PROP_ID, field ? field.value !== true : false)
+    this.undo.record(before, 'structural', Date.now())
+    this.renderAll()
+    this.emitChange('struct', [id])
   }
 
   setText(id: string, text: string): void {
@@ -1424,7 +1445,9 @@ export class BlockEditor {
     const loc = locate(this.doc, id)
     if (!loc) return null
     const before = this.snap()
-    const b = mkBlock(text, todo ? { todo } : {})
+    const b = mkBlock(text)
+    // 待办不是块的字段，是**任务状态属性**的一个值：这里落值，不落「块的种类」
+    if (todo) b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: todo === 'done' }
     const isSectionRoot = loc.parent === null
     if (isSectionRoot) {
       unfoldBlock(this.doc, loc.block.id)
@@ -1930,10 +1953,10 @@ export class BlockEditor {
       blockIsRoot: at !== null && at.parent === null,
       blockSelection: this.blockSel !== null,
       blockSelectionCount: this.blockSel?.ids.length ?? 0,
-      blockType: b?.todo ? 'todo' : 'paragraph',
+      blockType: b && todoOf(b) ? 'todo' : 'paragraph',
       blockHasChildren: Boolean(b?.children.length),
       blockCollapsed: Boolean(b && isFolded(this.doc, b.id)),
-      blockDone: b?.todo === 'done',
+      blockDone: b ? todoOf(b) === 'done' : false,
       marking: b ? this.marksAtSel().map((m) => m.type).join('+') : '',
       inTrash: false,
       composing: this.probe.isComposing,

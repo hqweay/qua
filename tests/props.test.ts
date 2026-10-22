@@ -21,11 +21,13 @@ import {
   fieldIdsOf,
   fieldRows,
   gutterFieldsOf,
+  hasTagEdge,
   hasValue,
   isPropDef,
   mkPropDef,
   mkTagBlock,
   TASK_STATUS_PROP_ID,
+  todoOf,
   undeclareField,
   UI_POSITION_PROP,
   uiPositionOf,
@@ -195,7 +197,7 @@ test('_uiPosition：缺省是 panel；只有声明 block-left 的定义归 gutte
   assert.equal(uiPositionOf(undefined), 'panel', '定义缺失也不得让面板整段消失')
 })
 
-test('gutterFieldsOf：只收「定义归 gutter 且有值」的那些', () => {
+test('gutterFieldsOf：收「定义归 gutter」的那些，**有没有值都收**', () => {
   const task = mkPropDef('任务状态', 'checkbox', { [UI_POSITION_PROP]: 'block-left' })
   const score = mkPropDef('评分', 'number')
   const host: Block = { id: 'b', text: '一块', children: [], props: { [task.id]: true, [score.id]: 9 } }
@@ -203,11 +205,15 @@ test('gutterFieldsOf：只收「定义归 gutter 且有值」的那些', () => {
   const rows = gutterFieldsOf(host, forest, [])
   assert.deepEqual(rows.map((r) => r.propId), [task.id], '评分在面板里，不归 gutter')
   assert.equal(rows[0]!.value, true)
+  assert.equal(rows[0]!.filled, true)
   assert.equal(rows[0]!.def, task)
 
-  // 没值 ⇒ 不在 gutter 上（空白开关没有意义，它该在面板里以「待填」出现）
+  // 没值 ⇒ **仍然在 gutter 上**：那里是入口（第一次点击就在这一格），不是状态
   const empty: Block = { id: 'c', text: '空', children: [] }
-  assert.deepEqual(gutterFieldsOf(empty, [task, score, empty], []), [])
+  const emptyRows = gutterFieldsOf(empty, [task, score, empty], [])
+  assert.deepEqual(emptyRows.map((r) => r.propId), [task.id], '声明来的字段没有值，入口照样在')
+  assert.equal(emptyRows[0]!.filled, false)
+  assert.equal(emptyRows[0]!.value, undefined)
 })
 
 test('种子库自带核心词汇：任务状态定义（顶层、归 gutter）＋ #任务 声明它', () => {
@@ -221,4 +227,25 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter）�
   const task = ws.blocks.find((b) => hasRole(b, 'tag') && b.text === '任务')
   assert.ok(task, '标签块应在森林顶层')
   assert.deepEqual(declaredFieldIds(task!), [TASK_STATUS_PROP_ID])
+
+  // 样本块必须**真的打上 #任务**（边）并写了值，否则 gutter 上什么都看不到：
+  // 「有标签」与「有值」是两件事，缺一个就只剩一个看不见的开关。
+  const hosts = ws.blocks.flatMap(function flat(b) {
+    return [b, ...b.children.flatMap(flat)]
+  })
+  const withValue = hosts.filter((b) => b.props?.[TASK_STATUS_PROP_ID] !== undefined)
+  assert.equal(withValue.length, 4, '假数据里应有 4 个带任务状态的块')
+  for (const b of withValue) {
+    assert.equal(hasTagEdge(b.id, task!.id, ws.atoms), true, `样本块应带 #任务 边：${b.text}`)
+  }
+  assert.equal(withValue.filter((b) => todoOf(b) === 'done').length, 2, '完成与未完成各两条')
+})
+
+test('todoOf：true ⇒ done，false ⇒ todo（有值），缺失 ⇒ undefined', () => {
+  const done: Block = { id: 'd', text: '', children: [], props: { [TASK_STATUS_PROP_ID]: true } }
+  const open: Block = { id: 'o', text: '', children: [], props: { [TASK_STATUS_PROP_ID]: false } }
+  const none: Block = { id: 'n', text: '', children: [] }
+  assert.equal(todoOf(done), 'done')
+  assert.equal(todoOf(open), 'todo', '「是任务、没做完」是**有值**的，不能并进缺失')
+  assert.equal(todoOf(none), undefined)
 })

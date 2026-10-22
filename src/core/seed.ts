@@ -15,7 +15,16 @@ import { DEFAULT_PREFS, WORKSPACE_VERSION, type PageBlock, type Workspace } from
 
 interface SeedBlock {
   text: string
-  todo?: 'todo' | 'done'
+  /**
+   * 任务状态（**值是属性**，落进 `props[TASK_STATUS_PROP_ID]`）：
+   * `true` ＝ 做完了，`false` ＝ 是任务、还没做完。
+   *
+   * 与正文里的 `#任务` 是两件事（值 ＋ 分类），本字段只管值；
+   * 它们必须成对出现才有 entry：gutter 上那个方框由**标签声明**的字段决定。
+   */
+  task?: boolean
+  /** 打哪些标签（按名字；先建边，森林凑齐后再解析目标） */
+  tags?: string[]
   /** 种子里的初始折叠态：**进库级的折叠表**，不进块（见 `FoldState`） */
   folded?: boolean
   /** 系统属性：查询块的 `_query` 条件就落在这里 */
@@ -24,7 +33,7 @@ interface SeedBlock {
 }
 
 interface RawAtom {
-  kind: 'page' | 'image'
+  kind: 'page' | 'tag' | 'image'
   start: number
   label: string
   missing?: boolean
@@ -129,12 +138,26 @@ function buildTree(
   out: { marks: Mark[]; atoms: Atom[]; refs: BuiltPage['refs']; folded: FoldState },
 ): Block[] {
   return seeds.map((s) => {
-    const { text, marks, atoms } = parseInline(s.text)
-    const b = mkBlock(text, s.todo ? { todo: s.todo } : {})
+    const parsed = parseInline(s.text)
+    let text = parsed.text
+    /**
+     * **打标签 ＝ 在正文里插一格占位符**（边在正文里，删掉那块字边就没了）。
+     * 追加在末尾而不是开头：标签是这块的**分类**，不该把内容挤到后面去。
+     * ⚠️ 目标在 `resolveRefs` 里统一解析 —— 标签块住在森林顶层、比内容块晚建，
+     *    这里拿不到它，写一个假 target 只会得到「指向不存在的东西」。
+     */
+    const tags: RawAtom[] = []
+    for (const name of s.tags ?? []) {
+      tags.push({ kind: 'tag', start: text.length, label: name })
+      text += ATOM_PLACEHOLDER
+    }
+    const b = mkBlock(text)
     if (s.folded) out.folded[b.id] = true
+    // 任务状态是**真实属性**：它的键是定义块的 id，值与标签声明无关（声明只提供入口）
+    if (s.task !== undefined) b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: s.task }
     if (s.props) b.props = { ...(b.props ?? {}), ...s.props }
-    for (const m of marks) out.marks.push({ id: uuidv7Hex(), type: m.type, blockId: b.id, start: m.start, end: m.end })
-    for (const a of atoms) {
+    for (const m of parsed.marks) out.marks.push({ id: uuidv7Hex(), type: m.type, blockId: b.id, start: m.start, end: m.end })
+    for (const a of [...parsed.atoms, ...tags]) {
       const id = uuidv7Hex()
       const atom: Atom = {
         id,
@@ -144,7 +167,8 @@ function buildTree(
         end: a.start + 1,
         label: a.label,
       }
-      if (a.kind === 'page') out.refs.push({ atomId: id, label: a.label })
+      // 引用与标签都是**指向边**，解析目标的口径相同；图片不走这条路（它指资产）
+      if (a.kind === 'page' || a.kind === 'tag') out.refs.push({ atomId: id, label: a.label })
       else {
         atom.asset = {
           hash: uuidv7Hex().slice(0, 32),
@@ -283,8 +307,8 @@ export function seedWorkspace(): Workspace {
         { text: '标签写法 #设计 #输入面' },
       ],
     },
-    { text: '把「引用某段」的 UI 补上', todo: 'todo' },
-    { text: '锚点边界断言复跑通过 #证据', todo: 'done' },
+    { text: '把「引用某段」的 UI 补上', tags: ['任务'], task: false },
+    { text: '锚点边界断言复跑通过 #证据', tags: ['任务'], task: true },
     /**
      * **查询块**（–D6）的演示样本：条件＝「本页之下、带 #todo 的块」。
      *
@@ -377,7 +401,7 @@ export function seedWorkspace(): Workspace {
   // ⚠️ 流只取**存在的** journal 块，不按日历生造空天。
   const yesterday = mkJournal(shiftISO(todayISO(), -1), [
     { text: '把查询视图的结论试了一遍——**冻结结果集 ＋ 手动刷新**比实时刷新稳。' },
-    { text: 'TODO：把「最近日记」列表接进左槽', todo: 'todo' },
+    { text: '把「最近日记」列表接进左槽', tags: ['任务'], task: false },
     { text: '灵感', children: [{ text: '日记流是单列时间流，不是瀑布流' }] },
     ...filler([
       '试了实时刷新：打字时整行会往下跳，体验很糟。',
@@ -392,7 +416,7 @@ export function seedWorkspace(): Workspace {
   ])
   const dayBefore = mkJournal(shiftISO(todayISO(), -2), [
     { text: '读了两种查询实现：实时刷新会让行在打字时跳走。' },
-    { text: '完成：刷新按钮的行为对齐（冻结结果集 + 手动刷新）', todo: 'done' },
+    { text: '刷新按钮的行为对齐（冻结结果集 + 手动刷新）', tags: ['任务'], task: true },
     ...filler([
       '对照了两种查询实现，差别主要在「结果集什么时候变」。',
       '冻结成员与顺序，内容按块 id 现读——这条路更稳。',
@@ -419,8 +443,10 @@ export function seedWorkspace(): Workspace {
 
   const built = [journal, yesterday, dayBefore, day3, day4, day5, p1, p2, p3, p4, p5]
   const blocks = built.map((b) => b.page)
-  resolveRefs(blocks, built)
+  // 标签块也在森林顶层 ⇒ **必须在解析指向边之前**把它们放进去，否则内容里的 `#任务`
+  // 会解析不到（变成悬空边），gutter 上那个入口也就不会出现。
   blocks.push(...coreVocabulary())
+  resolveRefs(blocks, built)
 
   return forest(blocks, built)
 }

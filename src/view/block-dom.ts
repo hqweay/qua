@@ -24,6 +24,7 @@ import {
   type Block,
   type FindBlock,
   type FoldState,
+  type GutterField,
   type Mark,
   type MarkType,
   type RefView,
@@ -233,17 +234,27 @@ export function makeBlockEl(
   /**
    * `folded` 由调用方给：DOM 层**不持有折叠态**，它只画「这一行现在收没收起」。
    * 省略 ＝ 当作全展开（槽里的静态卡片不需要折叠）。
+   *
+   * `gutter` 同样是**已经算好的**（由调用方按森林 ＋ atoms 派生）：本文件是渲染层，
+   * 不知道森林在哪；在这里现算就会变成「每画一行都扫一遍全库」。
    */
-  opts: { single: boolean; ancestors?: readonly string[]; folded?: FoldState },
+  opts: { single: boolean; ancestors?: readonly string[]; folded?: FoldState; gutter?: readonly GutterField[] },
 ): HTMLElement {
   const b = r.block
   const folded = opts.folded?.[b.id] === true
+  /** gutter 上那个**二元开关**（本轮只认 checkbox；别的 kind 还没定怎么画） */
+  const box = opts.gutter?.find((f) => f.kind === 'checkbox')
+  /**
+   * 待办三态：`true` ⇒ 做完了、`false` ⇒ 是任务但没做完、没有这一槽 ⇒ 不是任务。
+   * ⚠️ `data-todo` 是 **CSS 与冒烟的契约**（删除线按它选），所以这里不换成属性名。
+   */
+  const todo: 'todo' | 'done' | undefined = box ? (box.value === true ? 'done' : box.value === false ? 'todo' : undefined) : undefined
   const el = document.createElement('div')
   el.className = 'blk'
   el.dataset.blockId = b.id
   el.dataset.depth = String(r.depth)
   if (folded) el.dataset.collapsed = '1'
-  if (b.todo) el.dataset.todo = b.todo
+  if (todo) el.dataset.todo = todo
   if (r.hasChildren) el.dataset.hasChildren = '1'
   // 角色进 DOM：页 / 日记作为**正文第一行**时靠它取样式。
   // 兼位块把**全部角色**写进同一个属性（空格分隔，选择器用 `~=`）——
@@ -311,11 +322,16 @@ export function makeBlockEl(
    * 行为：**左键 ＝ 聚焦/zoom**、右键 ＝ 块菜单、拖动 ＝ 移动。
    */
   const marker = document.createElement('span')
-  if (b.todo) {
-    // 待办行的主件是方框：它**也是**把手（同一元素两个契约 class）
+  if (box) {
+    /**
+     * gutter 上的二元开关：方块就是**这一行的块标**（同一元素两个契约 class）。
+     * 未填（`false` 或没有这一槽）画空心，`true` 画勾选 —— 差别只在图标与 `data-todo`，
+     * 元素形状不变，所以「点一下填上」不会让这一行的 DOM 结构换掉。
+     */
     marker.className = 'marker todo-box handle'
     marker.dataset.todoFor = b.id
-    marker.appendChild(createIcon(b.todo === 'done' ? 'square-check' : 'square', 'sm'))
+    marker.dataset.propId = box.propId
+    marker.appendChild(createIcon(todo === 'done' ? 'square-check' : 'square', 'sm'))
     marker.title = t('ui.todo.toggle')
   } else {
     marker.className = 'marker bullet handle'
@@ -332,7 +348,7 @@ export function makeBlockEl(
   left.appendChild(marker)
   const tx = document.createElement('span')
   tx.className = 'tx'
-  if (b.todo === 'done') tx.classList.add('done')
+  if (todo === 'done') tx.classList.add('done')
   fill(tx)
   /*
    * journal 的**日期**：它是 `_date` 的只读投影，不是块的正文。

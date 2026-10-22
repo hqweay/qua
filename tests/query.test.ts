@@ -23,6 +23,7 @@ import {
   resolveFrozen,
   runQuery,
   specChanged,
+  TASK_STATUS_PROP_ID,
   type QuerySpec,
 } from '../src/core/index.ts'
 
@@ -32,6 +33,12 @@ const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({
   children: [],
   ...extra,
 })
+
+/**
+ * 任务状态落在**属性槽**里，键是字段定义块的 id。
+ * `true` ＝ 做完了，`false` ＝ 是任务、还没做完；缺失 ＝ 不是任务。
+ */
+const task = (done: boolean): Pick<Block, 'props'> => ({ props: { [TASK_STATUS_PROP_ID]: done } })
 
 /**
  * 甲／乙／丁的子孙／另一个／也 —— 这五块带 `#todo` 标签；丙与「今天的记录」不带。
@@ -46,13 +53,13 @@ function fixture() {
     b('p1', '页面一', {
       props: { _roles: ['page'] },
       children: [
-        b('a', '甲', { todo: 'todo' }),
-        b('b', '乙', { todo: 'done' }),
+        b('a', '甲', task(false)),
+        b('b', '乙', task(true)),
         b('c', '丙没标签'),
-        b('d', '提到丙的块', { children: [b('d1', '甲的子孙', { todo: 'todo' })] }),
+        b('d', '提到丙的块', { children: [b('d1', '甲的子孙', task(false))] }),
       ],
     }),
-    b('p2', '页面二', { props: { _roles: ['page'] }, children: [b('e', '另一个', { todo: 'todo' })] }),
+    b('p2', '页面二', { props: { _roles: ['page'] }, children: [b('e', '另一个', task(false))] }),
     // ⚠️ `j1b` 只有标签、**没有**待办状态：`all[tag, todo]` 那条断言靠它来区分「有标签」与「是待办」
     b('j1', '', { props: { _date: '2026-10-20' }, children: [b('j1a', '今天的记录'), b('j1b', '也')] }),
   ]

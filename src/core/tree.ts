@@ -116,6 +116,8 @@ export function findInForest(forest: readonly Block[], id: string): Block | unde
  * ⚠️ journal 的 `text` 是 `_date` 的只读投影⇒ **不写 text**。
  * ⚠️ `children` 在编辑器里通常就是同一个数组（共享引用）；这里仍显式赋值，
  *    因为结构操作可能替换 roots 里的 children 数组（如拆块/插入）。
+ * ⚠️ **不搬 `props`**：属性值由属性写路径直接写在那块上（同一份活引用），
+ *    这里再搬一遍等于给同一件事写第二份真相。
  * ⚠️ 找不到的 root（例如已被删除）静默跳过；命令层负责解释「为什么少了」。
  */
 export function writeBackRoots(forest: Block[], roots: readonly Block[]): void {
@@ -123,7 +125,6 @@ export function writeBackRoots(forest: Block[], roots: readonly Block[]): void {
     const p = findInForest(forest, root.id)
     if (!p) continue
     if (!isJournalBlock(p)) renameBlock(p, root.text)
-    p.todo = root.todo
     p.children = root.children
   }
 }
@@ -184,8 +185,7 @@ export function cloneSubtree(b: Block): { block: Block; idMap: Map<string, strin
       text: x.text,
       children: x.children.map(cp),
       // ⚠️ 折叠态**不随副本走**：那是「这一行此刻收着」，不是这块的内容。
-      ...(x.todo ? { todo: x.todo } : {}),
-      // 角色跟着 `props` 走：它住在属性袋里，浅拷一份就把身份带上了。
+      // 角色与属性值都跟着 `props` 走：浅拷一份就把身份与全部值带上了。
       // 反过来（角色是独立字段）就得在这里多搬一行，漏掉时复制出的页只是一块长得像页的普通块。
       ...(x.props ? { props: { ...x.props } } : {}),
     }
