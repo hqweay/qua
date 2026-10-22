@@ -80,7 +80,7 @@ export class QueryView {
       allowRootRemove: false,
       store: deps.store,
       // 折叠态是视图私有的（理由同反链）
-      doc: { roots: [], folded: {} },
+      doc: { roots: [], folded: {}, trash: deps.store.trash },
     })
     this.editor.events = {
       change: (kind) => {
@@ -186,14 +186,14 @@ export class QueryView {
       // 空结果是**状态**不是错误：保留抬头（含刷新按钮），正文给一句实话
       this.els.editor.replaceChildren()
       // 空结果也保留本视图的折叠态：它记的是「哪些行收着」，不是「这次有几行」
-      this.editor.loadPage({ roots: [], folded: this.editor.doc.folded }, this.deps.store.marks, this.deps.store.atoms)
+      this.editor.loadPage({ roots: [], folded: this.editor.doc.folded, trash: this.deps.store.trash }, this.deps.store.marks, this.deps.store.atoms)
       this.els.editor.dataset.empty = '1'
       return
     }
     delete this.els.editor.dataset.empty
     // 只装「最外层命中」：子树由编辑器自己展开（D8：带 breadcrumb 的上下文在行首另行标注）
     this.editor.loadPage(
-      { roots: rows.map((r) => r.block), folded: this.editor.doc.folded },
+      { roots: rows.map((r) => r.block), folded: this.editor.doc.folded, trash: this.deps.store.trash },
       this.deps.store.marks,
       this.deps.store.atoms,
     )

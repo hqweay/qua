@@ -130,6 +130,8 @@ export function makePageBlock(): Block {
 export interface PageDeps {
   /** 读块森林（**返回的是活引用**，push/splice 直接生效） */
   blocks: () => Block[]
+  /** 读回收站（同样是活引用）：删页是「摘进回收站」，不是抹掉 */
+  trash: () => Block[]
   /**
    * 插行内原子（打标签用）。
    *
@@ -237,7 +239,7 @@ export function pageCommands(d: PageDeps): Pick<
       }
       const i = before.findIndex((p) => p.id === id)
       if (i < 0) return
-      removeBlock({ roots: d.blocks() }, id)
+      removeBlock({ roots: d.blocks(), trash: d.trash() }, id)
       // 落点必须是**页**（删的可能是 journal，邻位也可能是 journal）
       const rest = pages()
       const p = rest[Math.min(i, rest.length - 1)] ?? rest[0]
