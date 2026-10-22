@@ -54,7 +54,6 @@ export type SystemPropId =
   | '_type'
   | '_icon'
   | '_date'
-  | '_tags'
   | '_alias'
   | '_query'
   | '_queryResult'
