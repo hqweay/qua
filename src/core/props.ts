@@ -17,7 +17,7 @@ import { hasRole, isPropDefBlock, prop, type Block, type BlockProps, type TodoSt
 import { walkForest } from './walk.ts'
 import { derivedId, uuidv7Hex } from './ids.ts'
 import type { Atom } from './annotations.ts'
-import { tagsOf } from './tags.ts'
+import { allTags, tagsOf } from './tags.ts'
 
 /** 声明列表的系统属性（有序 ref 列表；pos ＝ 数组下标） */
 export const FIELD_DEFS_PROP = '_fieldDefs'
@@ -300,6 +300,8 @@ export interface GutterField {
  *    ⇒ 未填的行照样返回，`filled` 交给渲染方决定怎么画（空心／不画／灰掉）。
  *
  * ⚠️ 调用方是**那一列的局部渲染**（只认一个块），不是整片森林的装饰层。
+ *    整屏渲染请用批量的 `gutterFieldsFor`：本函数每调一次都要重扫定义块与标签边，
+ *    逐行调就是 O(n²)。
  * ⚠️ 右侧面板用的是**同一份行派生**再按位置过滤（见 `ui/properties.ts`），
  *    所以两个编辑面不会对同一个字段给出不同答案。
  */
@@ -308,11 +310,68 @@ export function gutterFieldsOf(
   forest: readonly Block[],
   atoms: readonly Atom[],
 ): GutterField[] {
+  // 口径必须与批量的 `gutterFieldsFor` 一致：它吃的是同一份 `fieldRows`（声明 ∪ 自有、同 id 一行），
+  // 只是「扫库」在行级重复做了一遍 —— 所以单块用它、整屏用批量。
   const out: GutterField[] = []
   for (const row of fieldRows(block, forest, atoms)) {
     if (!row.def) continue
     if (uiPositionOf(row.def) !== 'block-left') continue
     out.push({ propId: row.propId, def: row.def, kind: row.kind, value: row.value, filled: row.filled })
+  }
+  return out
+}
+
+/**
+ * 一次渲染批里所有行的 gutter 字段：**一次扫库，逐行分发**。
+ *
+ * 为什么不复用 `gutterFieldsOf` 逐行算：它每次调用都要重新扫一遍定义块与标签边，
+ * 于是整屏渲染从 O(n) 变成 O(n²)。这里把「扫库」提到批级，行级只做查表。
+ *
+ * 返回 `Map<blockId, GutterField[]>`；没有 gutter 字段的块**不出现在 map 里**
+ * （空数组与缺席同义，少一次存在性判断）。
+ *
+ * 行的口径与 `fieldRows` 一致：**标签声明字段在前（按正文里标签先后、标签内按声明顺序），
+ * 块自有字段在后**，同一 `propId` 只出现一次。
+ */
+export function gutterFieldsFor(
+  blocks: readonly Block[],
+  forest: readonly Block[],
+  atoms: readonly Atom[],
+): Map<string, GutterField[]> {
+  // 定义块与标签块各扫**一次**：行级只查表
+  const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
+  const tagById = new Map(allTags(forest).map((t) => [t.id, t]))
+  /** 块 → 它带着的标签（按正文里的先后；同一标签打多次只算一条，与 `tagsOf` 同口径） */
+  const tagsByBlock = new Map<string, Block[]>()
+  for (const a of atoms) {
+    if (a.kind !== 'tag' || !a.target) continue
+    const tag = tagById.get(a.target.id)
+    if (!tag) continue
+    const list = tagsByBlock.get(a.blockId)
+    if (!list) tagsByBlock.set(a.blockId, [tag])
+    else if (!list.some((t) => t.id === tag.id)) list.push(tag)
+  }
+
+  const out = new Map<string, GutterField[]>()
+  for (const block of blocks) {
+    const fields = new Map<string, GutterField>()
+    const take = (propId: string): void => {
+      if (fields.has(propId)) return
+      const def = defs.get(propId)
+      // 没有定义就不知道该画成什么，不进 gutter（与 `fieldRows` 跳过悬空定义同因）
+      if (!def) return
+      if (uiPositionOf(def) !== 'block-left') return
+      fields.set(propId, {
+        propId,
+        def,
+        kind: propKindOf(def),
+        value: valueOf(block, propId),
+        filled: hasValue(block, propId),
+      })
+    }
+    for (const tag of tagsByBlock.get(block.id) ?? []) for (const propId of declaredFieldIds(tag)) take(propId)
+    for (const propId of ownFieldIds(block)) take(propId)
+    if (fields.size > 0) out.set(block.id, [...fields.values()])
   }
   return out
 }

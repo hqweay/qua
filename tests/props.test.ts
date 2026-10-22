@@ -20,6 +20,7 @@ import {
   ensureTag,
   fieldIdsOf,
   fieldRows,
+  gutterFieldsFor,
   gutterFieldsOf,
   hasTagEdge,
   hasValue,
@@ -248,4 +249,41 @@ test('todoOf：true ⇒ done，false ⇒ todo（有值），缺失 ⇒ undefined
   assert.equal(todoOf(done), 'done')
   assert.equal(todoOf(open), 'todo', '「是任务、没做完」是**有值**的，不能并进缺失')
   assert.equal(todoOf(none), undefined)
+})
+
+test('批量 gutter 与逐行算**逐块等价**：批级只扫一次库，结果不许和单块路径分叉', () => {
+  const ws = seedWorkspace()
+  const hosts = ws.blocks.flatMap(function flat(b) {
+    return [b, ...b.children.flatMap(flat)]
+  })
+  const batch = gutterFieldsFor(hosts, ws.blocks, ws.atoms)
+  for (const b of hosts) {
+    assert.deepEqual(
+      batch.get(b.id) ?? [],
+      gutterFieldsOf(b, ws.blocks, ws.atoms),
+      `批量与逐行对不上：${b.text}`,
+    )
+  }
+  // 没有 gutter 字段的块**不出现在 map 里**（空数组与缺席同义）
+  const none = hosts.find((b) => gutterFieldsOf(b, ws.blocks, ws.atoms).length === 0)
+  assert.ok(none, '种子库里应有不带 gutter 字段的块')
+  assert.equal(batch.has(none!.id), false)
+})
+
+test('批量 gutter 的**行序与去重**与逐行一致：两个标签声明同一字段、自有字段排在后', () => {
+  const shown = mkPropDef('开关', 'checkbox', { [UI_POSITION_PROP]: 'block-left' })
+  const other = mkPropDef('评分', 'number')
+  const a = mkTagBlock('甲')
+  const z = mkTagBlock('乙')
+  declareField(a, other.id)
+  declareField(a, shown.id)
+  declareField(z, shown.id)
+  const target: Block = { id: 't', text: '块', children: [], props: { [shown.id]: true } }
+  const forest = [shown, other, a, z, target]
+  // 同一个标签打两次（重复边）不该让它出现两遍
+  const atoms = [tagEdge('e1', 't', a.id), tagEdge('e2', 't', z.id), tagEdge('e3', 't', a.id)]
+
+  const batch = gutterFieldsFor([target], forest, atoms).get('t') ?? []
+  assert.deepEqual(batch, gutterFieldsOf(target, forest, atoms))
+  assert.deepEqual(batch.map((f) => f.propId), [shown.id], '只有归 gutter 的那个字段；同一字段只一行')
 })

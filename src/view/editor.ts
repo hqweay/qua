@@ -55,6 +55,7 @@ import {
   writeBlockText,
   walkForest,
   gutterFieldsOf,
+  gutterFieldsFor,
   setValue,
   todoOf,
   TASK_STATUS_PROP_ID,
@@ -63,6 +64,7 @@ import {
   type Block,
   type CtxKeys,
   type Doc,
+  type GutterField,
   type Mark,
   type MarkType,
   type Sel,
@@ -325,15 +327,29 @@ export class BlockEditor {
     this.rebuildAncestors()
     // DOM 重建 ⇒ `data-caret` 全丢，缓存也失效（否则 `markCaret` 会因为「id 没变」而跳过）
     this.caretMarks = ''
-    if (!this.virtualize) {
-      for (const r of this.rows()) this.container.appendChild(this.makeBlockEl(r))
-    } else {
+    if (this.virtualize) {
       this.applyWindow()
       return
     }
+    this.renderRows(this.rows())
     this.markCaret()
     this.paintBlockSel()
     this.events.mounted?.()
+  }
+
+  /**
+   * 挂一列可见行。
+   *
+   * gutter 字段在**循环外**按整批算一次：每行各自扫库会让整屏渲染退化成 O(n²)，
+   * 而这种退化不报错、只是越用越慢。
+   */
+  private renderRows(rows: readonly VisibleRow[]): void {
+    const gutters = gutterFieldsFor(
+      rows.map((r) => r.block),
+      this.store.blocks,
+      this.atoms,
+    )
+    for (const r of rows) this.container.appendChild(this.makeBlockEl(r, gutters.get(r.block.id)))
   }
 
   /** 所有模型变化统一出口：通知其他视图（共享 store），再通知装配层持久化/刷新 */
@@ -358,14 +374,19 @@ export class BlockEditor {
       hidden: false,
       hasChildren: loc.block.children.length > 0,
     }
-    el.replaceWith(this.makeBlockEl(row))
+    // 单行重画只有一行，直接按这一个块算 —— 不必为了一行去扫整批
+    el.replaceWith(this.makeBlockEl(row, gutterFieldsOf(row.block, this.store.blocks, this.atoms)))
     // 被换掉的那个元素带着 `data-caret` ⇒ 缓存与标记都要重来
     this.caretMarks = ''
     this.markCaret()
     this.paintBlockSel()
   }
 
-  private makeBlockEl(r: VisibleRow): HTMLElement {
+  /**
+   * @param gutter 这一行的 gutter 字段，**由调用方算好**：`block-dom` 是渲染层，没有森林；
+   *               让它自己去扫一遍全库就等于「每画一行扫一次」。批量路径只扫一次库。
+   */
+  private makeBlockEl(r: VisibleRow, gutter: readonly GutterField[] | undefined): HTMLElement {
     // 引用解析走**共享 store** 的森林：引用目标可能在当前视图之外（另一页／另一天），
     // 只有整片森林能回答「它还在不在、现在叫什么」。
     const el = makeBlockEl(
@@ -375,11 +396,7 @@ export class BlockEditor {
         single: flatten(this.doc).length === 1,
         ancestors: this.ancestors.get(r.block.id) ?? [],
         folded: this.doc.folded,
-        /**
-         * gutter 的字段在**调用方**算：`block-dom` 是渲染层，没有森林；
-         * 让它自己去扫一遍全库就等于「每画一行扫一次」。
-         */
-        gutter: gutterFieldsOf(r.block, this.store.blocks, this.atoms),
+        gutter,
       },
     )
     this.mounted.add(r.block.id)
@@ -1641,7 +1658,7 @@ export class BlockEditor {
     //    不对下面 slice 重建 —— 否则窗口第一行的祖先全丢。
     this.rebuildAncestors()
     if (from > 0) this.container.appendChild(this.placeholder(from, 'head'))
-    for (const r of rows.slice(from, to)) this.container.appendChild(this.makeBlockEl(r))
+    this.renderRows(rows.slice(from, to))
     if (to < rows.length) this.container.appendChild(this.placeholder(rows.length - to, 'tail'))
     this.caretMarks = ''
     this.markCaret()
