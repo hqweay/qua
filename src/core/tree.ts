@@ -7,7 +7,7 @@ import { uuidv7Hex } from './ids.ts'
 import { DELETED_AT_PROP, hasIdentity, isJournalBlock, mkBlock, writeBlockText, type Block, type Doc, type Located } from './model.ts'
 import { canWriteText, typeDeclOf } from './types.ts'
 import { walkForest } from './walk.ts'
-import { renameBlock } from './alias.ts'
+import { aliasOf, renameBlock, setAlias } from './alias.ts'
 export function locate(doc: Doc, id: string): Located | null {
   let found: Located | null = null
   walkForest(doc.roots, (b, ctx) => {
@@ -125,7 +125,16 @@ export function writeBackRoots(forest: Block[], roots: readonly Block[]): void {
   for (const root of roots) {
     const p = findInForest(forest, root.id)
     if (!p) continue
-    if (!isJournalBlock(p)) renameBlock(p, root.text)
+    if (!isJournalBlock(p)) {
+      // 撞名时不写地址，但**用户敲的正文不能吞**：把地址钉回改名前那个值，
+      // 于是「显示的名字」先走、「能被引用的名字」滞后 —— 这就是地址滞后。
+      // 吞掉正文会让重开页面时刚打的字凭空消失，那是丢数据，不是滞后。
+      // 这里不提示：core 不认识 UI，而「改名失败」要由主动改名的那条路去说。
+      if (!renameBlock(forest, p, root.text).ok) {
+        setAlias(p, aliasOf(p))
+        writeBlockText(p, root.text)
+      }
+    }
     p.children = root.children
   }
 }

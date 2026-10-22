@@ -159,9 +159,30 @@ export function setAlias(b: Block, name: string): void {
   b.props = { ...(b.props ?? {}), [ALIAS_PROP]: name }
 }
 
-/** 改地址时同步正文（页/标签的显示名就是正文；两处一起改，避免出现「名字变了地址没变」） */
-export function renameBlock(b: Block, name: string): void {
+/**
+ * 改地址 ＋ 同步正文。
+ *
+ * 撞车（森林里已有别的块用这个地址）⇒ **拒绝**，一个字节都不写，返回冲突块。
+ * 判据：同名必同一块。造出两个同地址的块，`[[名字]]` 就永远只能指到其中一个，
+ * 另一个再也引用不到 —— 而用户以为自己只是改了个名字。
+ *
+ * ⚠️ 拒绝时**不改正文**：正文与地址是一起的，只改正文会让「显示的名字」
+ *    与「能被找到的名字」分叉。
+ * ⚠️ **回收站里的同名块不算冲突**：那是「复活还是新建」的问题，由调用方问用户。
+ * ⚠️ 只有**占地址的块**（页／标签）才查重：内容块本来就不在地址空间里，
+ *    拿它去跟页名比会让「正文恰好等于某个页名」的普通块再也写不进正文。
+ */
+export function renameBlock(
+  forest: readonly Block[],
+  b: Block,
+  name: string,
+): { ok: true } | { ok: false; conflict: Block } {
+  if (isAddressable(b)) {
+    const conflict = aliasConflict(forest, b, name)
+    if (conflict) return { ok: false, conflict }
+  }
   writeBlockText(b, name)
   const raw = prop<unknown>(b, ALIAS_PROP)
   if (typeof raw === 'string' && raw.trim() !== '') setAlias(b, name)
+  return { ok: true }
 }

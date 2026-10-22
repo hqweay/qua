@@ -456,6 +456,10 @@ export const MSG = {
   'ui.toast.tagCreated': '新建标签 #{tag} 并打上',
   'ui.toast.tagReused': '这个块本来就是「{tag}」——已给它加上标签角色',
   'ui.toast.tagEmpty': '标签名是空的',
+  'ui.toast.nameTaken': '「{name}」已被占用（{where}）',
+  'ui.where.page': '页',
+  'ui.where.tag': '标签',
+  'ui.where.block': '块',
 
   /* ------------------------------------------------------ 演示数据的小文案（假数据） */
   'ui.arg.defaultTag': '标签',
