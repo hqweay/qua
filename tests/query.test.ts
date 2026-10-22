@@ -13,7 +13,7 @@ import {
   canonicalSpec,
   findJournalDay,
   findTagByName,
-  hasTagEdge,
+  hasTag,
   mkTagBlock,
   normalizeTag,
   tagMemberIds,
@@ -43,12 +43,13 @@ const task = (done: boolean): Pick<Block, 'props'> => ({ props: { [TASK_STATUS_P
 /**
  * 甲／乙／丁的子孙／另一个／也 —— 这五块带 `#todo` 标签；丙与「今天的记录」不带。
  *
- * ⚠️ 标签现在是**边**（`kind: 'tag'` 的原子），不再是正文里的文本：
- *    正文里写 `#todo` 只是普通文本，成不了边 —— 这正是本轮要消灭的「第二套解析」。
- *    ⇒ 所以 fixture 里块的 text 不带 `#todo`，边单独建在 `atoms` 里。
+ * ⚠️ 标签是**块级归属**（`props._tags`），不是正文里的文本、也不占正方位点：
+ *    正文里写 `#todo` 只是普通文本，成不了归属。
+ *    ⇒ fixture 里块的 text 不带 `#todo`，归属单独写在块上。
  */
 function fixture() {
   const todo = mkTagBlock('todo')
+  const tagged = new Set(['a', 'b', 'd1', 'e', 'j1b'])
   const forest: Block[] = [
     b('p1', '页面一', {
       props: { _roles: ['page'] },
@@ -63,39 +64,32 @@ function fixture() {
     // ⚠️ `j1b` 只有标签、**没有**待办状态：`all[tag, todo]` 那条断言靠它来区分「有标签」与「是待办」
     b('j1', '', { props: { _date: '2026-10-20' }, children: [b('j1a', '今天的记录'), b('j1b', '也')] }),
   ]
-  const tagged = ['a', 'b', 'd1', 'e', 'j1b']
-  const atoms: Atom[] = tagged.map(
-    (blockId, i) =>
-      ({
-        id: `tg${i}`,
-        kind: 'tag',
-        blockId,
-        start: 0,
-        end: 1,
-        label: 'todo',
-        target: { kind: 'page', id: todo.id },
-      }) as Atom,
-  )
-  atoms.push({
-    id: 'at1',
-    kind: 'page',
-    blockId: 'd',
-    start: 2,
-    end: 3,
-    label: '丙',
-    target: { kind: 'page', id: 'c' },
-  } as Atom)
+  for (const root of forest) {
+    for (const block of [root, ...root.children, ...root.children.flatMap((c) => c.children)]) {
+      if (tagged.has(block.id)) block.props = { ...(block.props ?? {}), _tags: [todo.id] }
+    }
+  }
+  const atoms: Atom[] = [
+    {
+      id: 'at1',
+      kind: 'page',
+      blockId: 'd',
+      start: 2,
+      end: 3,
+      label: '丙',
+      target: { kind: 'page', id: 'c' },
+    } as Atom,
+  ]
   return { blocks: [...forest, todo], atoms, todo }
 }
 
-test('标签按**边**判定（不再是正则扫文本）：正文里写 #todo 不成边', () => {
-  const { blocks, atoms, todo } = fixture()
-  assert.equal(hasTagEdge('a', todo.id, atoms), true)
-  assert.equal(hasTagEdge('c', todo.id, atoms), false, '丙没打标签')
-  // 正文里那几个字还在（`#todo` 现在只是普通文本），但不产生边
-  const c = blocks.flatMap(function flat(x) { return [x, ...x.children.flatMap(flat)] }).find((x) => x.id === 'c')
-  assert.equal(c?.text.includes('标签'), true)
-  assert.equal(hasTagEdge('c', todo.id, atoms), false)
+test('标签按**归属**判定（不扫文本）：正文里写 #todo 不成标签', () => {
+  const { blocks, todo } = fixture()
+  const flat = blocks.flatMap(function walk(x: Block): Block[] { return [x, ...x.children.flatMap(walk)] })
+  assert.equal(hasTag(flat.find((x) => x.id === 'a')!, todo.id), true)
+  assert.equal(hasTag(flat.find((x) => x.id === 'c')!, todo.id), false, '丙没打标签')
+  // 正文里那几个字还在（`#todo` 只是普通文本），但不产生归属
+  assert.equal(flat.find((x) => x.id === 'c')?.text.includes('标签'), true)
 })
 
 test('normalizeTag：大小写与空白只有一处口径', () => {
@@ -103,10 +97,10 @@ test('normalizeTag：大小写与空白只有一处口径', () => {
   assert.equal(normalizeTag('设计'), '设计')
 })
 
-test('findTagByName / tagMemberIds：标签的成员＝指向它的 tag 边', () => {
-  const { blocks, atoms, todo } = fixture()
+test('findTagByName / tagMemberIds：标签的成员＝块上的归属', () => {
+  const { blocks, todo } = fixture()
   assert.equal(findTagByName(blocks, 'TODO')?.id, todo.id, '按规范化后的名字找')
-  assert.deepEqual([...tagMemberIds(todo.id, atoms)].sort(), ['a', 'b', 'd1', 'e', 'j1b'])
+  assert.deepEqual([...tagMemberIds(todo.id, blocks)].sort(), ['a', 'b', 'd1', 'e', 'j1b'])
   assert.equal(findTagByName(blocks, '不存在的标签'), undefined)
 })
 
@@ -180,12 +174,13 @@ test('refreshSpec：把条件与结果写回块上；丢掉的不再匹配的块
 
   // 摘掉一个标签后刷新：它应当从结果里消失，并被报成 dropped
   //
-  // ⚠️ 标签现在是**边**，所以「摘掉标签」＝**删掉那条 tag 原子**（不是改正文里的字）。
-  //    这正是本轮改动的落点：以前改文本就能让标签"消失"，那是文本与边不一致的根源。
-  // ⚠️ 必须从**同一份** fixture 里删边：再调一次 `fixture()` 会造出一个新的标签块（新 id），
-  //    于是所有边都指向一个不在 `blocks` 里的标签 ⇒ 全部被判成 dropped（看着像全丢了）。
-  const withoutA = atoms.filter((a) => a.blockId !== 'a')
-  const second = refreshSpec(q, spec, { blocks, atoms: withoutA })
+  // ⚠️ 标签是**块级归属**，所以「摘掉标签」＝删掉那一块上的 `_tags`
+  //    （不是改正文里的字 —— 改字本来就不该改变归属）。
+  // ⚠️ 必须从**同一份** fixture 里改块：再调一次 `fixture()` 会造出一个新的标签块（新 id），
+  //    于是所有归属都指向一个不在 `blocks` 里的标签 ⇒ 全部被判成 dropped（看着像全丢了）。
+  const flat = (list: Block[]): Block[] => list.flatMap(function walk(x) { return [x, ...x.children.flatMap(walk)] })
+  delete flat(blocks).find((x) => x.id === 'a')!.props!._tags
+  const second = refreshSpec(q, spec, { blocks, atoms })
   assert.deepEqual(second.dropped, ['a'])
   assert.ok(!second.hits.some((h) => h.blockId === 'a'))
 })

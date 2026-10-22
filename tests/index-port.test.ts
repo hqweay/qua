@@ -2,11 +2,14 @@
  * **索引**的测试：核心是那条等式 —— `rebuild(all) === incremental(changes)`。
  *
  * 为什么这条等式值得单独写一整个文件：
- *   增量更新最容易出的错不是「崩了」，而是**漏了一种失效点**（比如删块时忘了收掉它的边），
+ *   增量更新最容易出的错不是「崩了」，而是**漏了一种失效点**（比如删块时忘了收掉它的标签归属），
  *   表现是界面上偶尔少一条反链。那种错不会报错、不会崩，只会让数据慢慢对不上。
  *   ⇒ 用「全量重建」当唯一基准，逼增量路径与它逐字节相等。
  *
- * 覆盖 71.6 点名的四个增量失效点：文本编辑、原子增删、目标删除、块移动。
+ * ⚠️ 两类关系的数据源不同，失效点也不同：
+ *   · `incoming`（引用）来自**原子** ⇒ 只有原子变化才重算；
+ *   · `tagMembers`（标签成员）来自**块上的 `_tags`** ⇒ 只有块变化才重算。
+ *   把两者混在一起，就会得到「改一个标签归属却重建了名字表」这类看不出错、只是慢的路径。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -26,25 +29,26 @@ import {
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, text, children: [], ...extra })
 
-const edge = (id: string, kind: 'page' | 'tag', blockId: string, targetId: string, start = 0): Atom =>
-  ({ id, kind, blockId, start, end: start + 1, label: 'x', target: { kind: 'page', id: targetId } }) as Atom
+const edge = (id: string, blockId: string, targetId: string, start = 0): Atom =>
+  ({ id, kind: 'page', blockId, start, end: start + 1, label: 'x', target: { kind: 'page', id: targetId } }) as Atom
 
-/** 一份小而全的库：页 / 子块 / 标签块 / journal 都在 */
+/** 一份小而全的库：页 / 子块 / 标签块 / journal 都在；标签走块上的 `_tags` */
 function fixture() {
   const todo = b('t1', 'todo', { props: { _roles: ['tag'], _icon: 'lucide:hash' } })
   const design = b('t2', '设计', { props: { _roles: ['tag'] } })
-  const journal = b('j1', '', { props: { _date: '2026-10-21' }, children: [b('j1a', '今天')] })
+  const journal = b('j1', '', { props: { _date: '2026-10-21' }, children: [b('j1a', '今天', { props: { _tags: ['t2'] } })] })
   const p1 = b('p1', '页面一', {
     props: { _roles: ['page'] },
-    children: [b('a', '甲'), b('b', '乙', { children: [b('b1', '乙的子块')] })],
+    children: [
+      b('a', '甲', { props: { _tags: ['t1'] } }),
+      b('b', '乙', { children: [b('b1', '乙的子块', { props: { _tags: ['t1'] } })] }),
+    ],
   })
   const p2 = b('p2', '页面二', { props: { _roles: ['page'] }, children: [b('c', '丙')] })
   const forest = [journal, p1, p2, todo, design]
   const atoms: Atom[] = [
-    edge('e1', 'tag', 'a', 't1'), // 甲 打了 #todo
-    edge('e2', 'tag', 'b1', 't1'), // 乙的子块 也打了 #todo
-    edge('e3', 'page', 'c', 'p1'), // 丙 引用 页面一
-    edge('e4', 'tag', 'j1a', 't2'), // 今天 打了 #设计
+    edge('e1', 'c', 'p1'), // 丙 引用 页面一
+    edge('e2', 'a', 'p2'), // 甲 也引用 页面二
   ]
   return { forest, atoms }
 }
@@ -65,17 +69,32 @@ const blocksOnly: Change[] = [{ kind: 'blocks', id: '*' }]
 
 /* ------------------------------------------------------------ 基本形状 */
 
-test('rebuild：四张表都建起来（块 / 入向边 / 标签成员 / 名字与日期）', () => {
+test('rebuild：五张表都建起来（块 / 入向边 / 标签成员 / 名字与日期）', () => {
   const { forest, atoms } = fixture()
   const idx = rebuild(forest, atoms)
 
   assert.equal(lookupBlock(idx, 'b1')?.text, '乙的子块')
-  assert.deepEqual(incomingIds(idx, 't1').sort(), ['a', 'b1'], '标签的入向边')
   assert.deepEqual(incomingIds(idx, 'p1').sort(), ['c'], '引用的入向边')
-  assert.deepEqual(tagMemberIdsOf(idx, 't1').sort(), ['a', 'b1'])
+  assert.deepEqual(tagMemberIdsOf(idx, 't1').sort(), ['a', 'b1'], '标签成员来自块上的 `_tags`')
+  assert.deepEqual(tagMemberIdsOf(idx, 't2').sort(), ['j1a'])
   assert.equal(tagIdByName(idx, 'todo'), 't1')
   assert.equal(tagIdByName(idx, ' TODO '), 't1', '名字规范化只有一个口径')
   assert.equal(journalIdByDate(idx, '2026-10-21'), 'j1')
+})
+
+test('rebuild：`[[标签块]]` 的**引用**不算标签成员（两张表不能合并）', () => {
+  const forest = [b('t1', 'todo', { props: { _roles: ['tag'] } }), b('p', '页面', { props: { _roles: ['page'] }, children: [b('a', '甲')] })]
+  const atoms = [edge('e1', 'a', 't1')] // 引用，不是打标签
+  const idx = rebuild(forest, atoms)
+  assert.deepEqual(incomingIds(idx, 't1'), ['a'], '入向边算它')
+  assert.deepEqual(tagMemberIdsOf(idx, 't1'), [], '但成员列表里不该有它')
+})
+
+test('rebuild：标签归属不进 `incoming`（它没有边数，只有成员关系）', () => {
+  const { forest, atoms } = fixture()
+  const idx = rebuild(forest, atoms)
+  assert.deepEqual(incomingIds(idx, 't1'), [], '没人用 `[[todo]]` 引用它 ⇒ 入向边为空')
+  assert.deepEqual(tagMemberIdsOf(idx, 't1').sort(), ['a', 'b1'], '但成员列表非空')
 })
 
 test('rebuild：标签名按规范化取先序第一个（与 ensureTag 同口径）', () => {
@@ -93,20 +112,12 @@ test('日期索引与 journalDays 同口径：嵌在子树里的一天，两条�
   assert.equal(findJournalDay(forest, '2026-10-19')?.id, 'j1')
 })
 
-test('rebuild：`[[标签块]]` 的**引用**不算标签成员（两张表不能合并）', () => {
-  const forest = [b('t1', 'todo', { props: { _roles: ['tag'] } }), b('p', '页面', { props: { _roles: ['page'] }, children: [b('a', '甲')] })]
-  const atoms = [edge('e1', 'page', 'a', 't1')] // 引用，不是打标签
-  const idx = rebuild(forest, atoms)
-  assert.deepEqual(incomingIds(idx, 't1'), ['a'], '入向边算它')
-  assert.deepEqual(tagMemberIdsOf(idx, 't1'), [], '但成员列表里不该有它')
-})
-
 /* ------------------------------------------------------------ 那条等式 */
 
-test('等式：纯原子变化（打标签 / 删边）⇒ 增量与全量逐字节一致', () => {
+test('等式：纯原子变化（引用增删）⇒ 增量与全量逐字节一致', () => {
   const { forest, atoms } = fixture()
-  // 第 1 步：打一个新标签边；第 2 步：删掉一条旧边
-  const added = [...atoms, edge('e5', 'tag', 'c', 't2')]
+  // 第 1 步：多一处引用；第 2 步：删掉一条旧引用
+  const added = [...atoms, edge('e5', 'c', 't2')]
   const removed = added.filter((a) => a.id !== 'e1')
   assert.equal(
     incremental([
@@ -118,10 +129,10 @@ test('等式：纯原子变化（打标签 / 删边）⇒ 增量与全量逐字�
   )
 })
 
-test('等式：块变化（移动 / 删块 / 改名）⇒ 增量与全量逐字节一致', () => {
+test('等式：块变化（移动 / 删块 / 改名 / 改标签归属）⇒ 增量与全量逐字节一致', () => {
   const { forest, atoms } = fixture()
 
-  // ① 移动：把 `b` 整棵子树从 p1 挪到 p2（边不受影响，但块表要跟着）
+  // ① 移动：把 `b` 整棵子树从 p1 挪到 p2（归属跟着块走，块表要跟着）
   const moved = JSON.parse(JSON.stringify(forest)) as Block[]
   const p1 = moved.find((x) => x.id === 'p1')!
   const p2 = moved.find((x) => x.id === 'p2')!
@@ -138,18 +149,16 @@ test('等式：块变化（移动 / 删块 / 改名）⇒ 增量与全量逐字�
     '块移动后增量应与全量一致',
   )
 
-  // ② 删块：删掉 `b1`（它带着一条 tag 边）⇒ 那条边必须一起消失
+  // ② 删块：删掉 `b1`（它带着一个标签归属）⇒ 成员表必须一起收掉
   const pruned = JSON.parse(JSON.stringify(moved)) as Block[]
   const bb = pruned.find((x) => x.id === 'p2')!.children.find((x) => x.id === 'b')!
   bb.children = []
-  const atomsAfterDelete = atoms.filter((a) => a.blockId !== 'b1')
-
   assert.equal(
     incremental([
       { changes: [], forest, atoms },
-      { changes: blocksOnly, forest: pruned, atoms: atomsAfterDelete },
+      { changes: blocksOnly, forest: pruned, atoms },
     ]),
-    full(pruned, atomsAfterDelete),
+    full(pruned, atoms),
   )
 
   // ③ 改名：标签块从 `todo` 改成 `待办` ⇒ 名字表跟着变
@@ -162,15 +171,28 @@ test('等式：块变化（移动 / 删块 / 改名）⇒ 增量与全量逐字�
     ]),
     full(renamed, atoms),
   )
+
+  // ④ 改归属：把 `#todo` 从 `a` 挪到 `c` ⇒ 成员表跟着变
+  const retagged = JSON.parse(JSON.stringify(forest)) as Block[]
+  const host = retagged.find((x) => x.id === 'p1')!.children.find((x) => x.id === 'a')!
+  delete host.props!._tags
+  retagged.find((x) => x.id === 'p2')!.children.find((x) => x.id === 'c')!.props = { _tags: ['t1'] }
+  assert.equal(
+    incremental([
+      { changes: [], forest, atoms },
+      { changes: blocksOnly, forest: retagged, atoms },
+    ]),
+    full(retagged, atoms),
+  )
 })
 
 test('等式：一串交替变化（原子 / 块 / marks 混着来）累积到最后＝全量', () => {
   const { forest, atoms } = fixture()
 
-  const s1Atoms = [...atoms, edge('e9', 'tag', 'c', 't1')]
+  const s1Atoms = [...atoms, edge('e9', 'c', 't1')]
   const s2Forest = JSON.parse(JSON.stringify(forest)) as Block[]
   s2Forest.find((x) => x.id === 't1')!.text = 'TODO'
-  const s3Atoms = s1Atoms.filter((a) => a.id !== 'e3')
+  const s3Atoms = s1Atoms.filter((a) => a.id !== 'e1')
   const s4Forest = JSON.parse(JSON.stringify(s2Forest)) as Block[]
   s4Forest.push(b('p3', '页面三', { props: { _roles: ['page'] } }))
 
@@ -213,8 +235,8 @@ test('applyChanges：空 changes ⇒ 原样返回（不是「重建一遍」）'
 test('fingerprint：与插入顺序无关（否则会假报不一致）', () => {
   const a = b('x', 'X', { props: { _roles: ['page'] }, children: [b('y', 'Y')] })
   const c = b('z', 'Z', { props: { _roles: ['page'] } })
-  const fwd = rebuild([a, c], [edge('e1', 'page', 'y', 'x'), edge('e2', 'page', 'y', 'z')])
-  const rev = rebuild([c, a], [edge('e2', 'page', 'y', 'z'), edge('e1', 'page', 'y', 'x')])
+  const fwd = rebuild([a, c], [edge('e1', 'y', 'x'), edge('e2', 'y', 'z')])
+  const rev = rebuild([c, a], [edge('e2', 'y', 'z'), edge('e1', 'y', 'x')])
   assert.equal(fingerprint(fwd), fingerprint(rev))
 })
 
@@ -279,34 +301,27 @@ test('backrefsOf：count 是**边数**（同一块引用两次算两条），不
   const p2 = b('p2', '页面二', { props: { _roles: ['page'] }, children: [b('c', '丙')] })
   const forest = [p1, p2]
   // `a` 里引用 p2 **两次**，`a2` 里引用一次 ⇒ p1 这一页共 3 处
-  const atoms = [
-    edge('e1', 'page', 'a', 'p2', 0),
-    edge('e2', 'page', 'a', 'p2', 2),
-    edge('e3', 'page', 'a2', 'p2', 0),
-  ]
+  const atoms = [edge('e1', 'a', 'p2', 0), edge('e2', 'a', 'p2', 2), edge('e3', 'a2', 'p2', 0)]
   const out = backrefsOf({ blocks: forest, atoms, targetId: 'p2' })
   assert.equal(out.length, 1, '同一页聚合成一条')
   assert.equal(out[0]!.pageId, 'p1')
   assert.equal(out[0]!.count, 3, '三处引用 ⇒ count 3（用 Set 会压成 2）')
 })
 
-test('backrefsOf：标签边也是入向边（标签块的反链不空）', async () => {
+test('backrefsOf：标签归属**不是**入向边（标签的成员走自己的读法）', async () => {
   const { backrefsOf } = await import('../src/core/index.ts')
   const forest = [
-    b('p1', '页面一', { props: { _roles: ['page'] }, children: [b('a', '甲')] }),
+    b('p1', '页面一', { props: { _roles: ['page'] }, children: [b('a', '甲', { props: { _tags: ['t1'] } })] }),
     b('t1', 'todo', { props: { _roles: ['tag'] } }),
   ]
-  const atoms = [edge('e1', 'tag', 'a', 't1')]
-  const out = backrefsOf({ blocks: forest, atoms, targetId: 't1' })
-  assert.equal(out.length, 1)
-  assert.equal(out[0]!.pageId, 'p1', '归到**来源页** p1，不是标签块自己')
-  assert.equal(out[0]!.text, '甲')
+  const out = backrefsOf({ blocks: forest, atoms: [], targetId: 't1' })
+  assert.deepEqual(out, [], '没有 `[[todo]]` 引用 ⇒ 反链为空；成员列表在 tag 面板里')
 })
 
 test('backrefBlocks：给可编辑 footer 用 —— 返回**块**级来源，带归属页与次数', async () => {
   const { backrefBlocks } = await import('../src/core/index.ts')
   const forest = [b('p1', '页面一', { props: { _roles: ['page'] }, children: [b('a', '甲'), b('a2', '甲2')] })]
-  const atoms = [edge('e1', 'page', 'a2', 'p1', 0), edge('e2', 'page', 'a2', 'p1', 2)]
+  const atoms = [edge('e1', 'a2', 'p1', 0), edge('e2', 'a2', 'p1', 2)]
   const out = backrefBlocks({ blocks: forest, atoms, targetId: 'p1' })
   assert.equal(out.length, 1)
   assert.equal(out[0]!.blockId, 'a2', '返回源**块**，不是页')
@@ -319,10 +334,10 @@ test('backrefsOf/backrefBlocks：传了 index 就不依赖 blocks/atoms 参数�
   const { forest, atoms } = fixture()
   const idx = rebuild(forest, atoms)
   // 故意传空数组：只要 index 有效，结果就必须与全量一致（证明真的在查表）
-  const a = backrefsOf({ blocks: [], atoms: [], targetId: 't1', index: idx })
-  assert.deepEqual(a.map((x) => x.count), [2], '#todo 有两条边（a 与 b1）')
-  const bl = backrefBlocks({ blocks: [], atoms: [], targetId: 't1', index: idx })
-  assert.deepEqual(bl.map((x) => x.blockId).sort(), ['a', 'b1'])
+  const a = backrefsOf({ blocks: [], atoms: [], targetId: 'p2', index: idx })
+  assert.deepEqual(a.map((x) => x.count), [1], 'p2 被引用一次')
+  const bl = backrefBlocks({ blocks: [], atoms: [], targetId: 'p2', index: idx })
+  assert.deepEqual(bl.map((x) => x.blockId), ['a'])
 })
 
 test('store.reset：换库后索引整体失效（不是拿旧库的块表凑）', async () => {
@@ -344,7 +359,7 @@ test('store.reset：换库后索引整体失效（不是拿旧库的块表凑）
  * ⚠️ 最危险的失败不是崩，而是**修补得不全**——界面上偶尔少一条反链、偶尔查得到已删的块。
  *   所以每条断言都拿**全量重建**当基准，要求逐字节一致。
  */
-test('按块粒度：改一块 ⇒ 增量与全量逐字节一致（含删块后边一起收掉）', async () => {
+test('按块粒度：改一块 ⇒ 增量与全量逐字节一致（含删块后归属一起收掉）', async () => {
   const core = await import('../src/core/index.ts')
   const { forest, atoms } = fixture()
   const idx = core.rebuild(forest, atoms)
@@ -357,12 +372,11 @@ test('按块粒度：改一块 ⇒ 增量与全量逐字节一致（含删块后
   assert.equal(core.tagIdByName(next, '待办'), 't1')
   assert.equal(core.tagIdByName(next, 'todo'), undefined, '旧名字不该残留')
 
-  // ② 删掉一块（连它的边一起消失）
+  // ② 删掉一块（连它的标签归属一起消失）
   const pruned = JSON.parse(JSON.stringify(forest)) as Block[]
   pruned.find((x) => x.id === 'p1')!.children = []
-  const atomsAfter = atoms.filter((a) => a.blockId !== 'a' && a.blockId !== 'b1')
-  const afterDelete = core.applyChanges(next, [{ kind: 'blocks', id: 'a' }, { kind: 'blocks', id: 'b1' }], pruned, atomsAfter)
-  assert.equal(core.fingerprint(afterDelete), core.fingerprint(core.rebuild(pruned, atomsAfter)), '删块后边要一起收掉')
+  const afterDelete = core.applyChanges(next, [{ kind: 'blocks', id: 'a' }, { kind: 'blocks', id: 'b1' }], pruned, atoms)
+  assert.equal(core.fingerprint(afterDelete), core.fingerprint(core.rebuild(pruned, atoms)), '删块后归属要一起收掉')
   assert.equal(core.lookupBlock(afterDelete, 'a'), undefined)
   assert.equal(core.lookupBlock(afterDelete, 'b1'), undefined, '跟着子树一起没的块不该还在')
 })
@@ -378,37 +392,27 @@ test('按块粒度：`*` 仍然触发全量（保守声明不能被当成「没�
   assert.equal(core.lookupBlock(next, 'extra')?.text, '后来加的页')
 })
 
-test('按块粒度：只有 atoms 变化 ⇒ 块表保留（不重建名字表）', async () => {
-  const core = await import('../src/core/index.ts')
-  const { forest, atoms } = fixture()
-  const idx = core.rebuild(forest, atoms)
-  const added = [...atoms, edge('e7', 'tag', 'a', 't2')]
-  const next = core.applyChanges(idx, [{ kind: 'atoms', id: 'e7' }], forest, added)
-  assert.equal(core.fingerprint(next), core.fingerprint(core.rebuild(forest, added)))
-  assert.deepEqual(core.incomingIds(next, 't2').sort(), ['a', 'j1a'], '新边要算进来')
-  // 块表是同一张（活引用没动）
-  assert.equal(next.blocks, idx.blocks, '只有边变了 ⇒ 块表原样保留')
-})
-
 /**
- * 真实收益所在：**只改原子**时（打标签 / 删边）不重建块表与名字表。
+ * 真实收益所在：**只改原子**时（多一处引用 / 删一处引用）不重建块表与名字表。
  *
  * 打字改的是文本 ⇒ 报 `blocks` ⇒ 走全量（见上面「为什么不按块修补」）；
- * 但挂/摘一条边只动 `atoms` ⇒ 那三张表完全不该被碰。
+ * 但挂/摘一处引用只动 `atoms` ⇒ 那三张表完全不该被碰，
+ * 而 `tagMembers` 的数据源在块上 ⇒ 同样原样带过去。
  */
-test('按块粒度：只有 atoms 变化 ⇒ 块表/名字表/父页表**同一个引用**（真的没被重建）', async () => {
+test('按块粒度：只有 atoms 变化 ⇒ 块表/名字表/父页表/成员表**同一个引用**（真的没被重建）', async () => {
   const core = await import('../src/core/index.ts')
   const { forest, atoms } = fixture()
   const idx = core.rebuild(forest, atoms)
-  const added = [...atoms, edge('e7', 'tag', 'a', 't2')]
+  const added = [...atoms, edge('e7', 'c', 't2')]
   const next = core.applyChanges(idx, [{ kind: 'atoms', id: 'e7' }], forest, added)
 
   assert.equal(next.blocks, idx.blocks, '块表原样保留（活引用不换）')
   assert.equal(next.tags, idx.tags, '名字表原样保留')
   assert.equal(next.pageOf, idx.pageOf, '父页表原样保留')
-  // 但边表是新的，且内容正确
-  assert.notEqual(next.incoming, idx.incoming, '边表必须重算')
-  assert.deepEqual(core.incomingIds(next, 't2').sort(), ['a', 'j1a'], '新边要算进来')
+  assert.equal(next.tagMembers, idx.tagMembers, '标签成员来自块 ⇒ 原子变了不用重算')
+  // 但入向边是新的，且内容正确
+  assert.notEqual(next.incoming, idx.incoming, '入向边必须重算')
+  assert.deepEqual(core.incomingIds(next, 't2'), ['c'], '新边要算进来')
   assert.equal(core.fingerprint(next), core.fingerprint(core.rebuild(forest, added)), '结果仍与全量一致')
 })
 

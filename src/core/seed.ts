@@ -8,7 +8,7 @@
  * `![[图.png]]`，由 `parseInline` 解析成**区间锚点与行内原子**——这正是 demo 要展示的模型形状
  * （锚点带 blockId、原子占 1 格），而不是把富文本塞进 DOM。
  */
-import { ATOM_PLACEHOLDER, declareField, FEED_INITIAL, findByAlias, journalId, mkBlock, mkPropDef, mkTagBlock, shiftISO, TASK_STATUS_PROP_ID, todayISO, UI_POSITION_PROP, uuidv7Hex, type Atom, type Block, type BlockProps, type FoldState, type Mark, type MarkType } from './index.ts'
+import { addTagId, ATOM_PLACEHOLDER, declareField, ensureTag, FEED_INITIAL, findByAlias, journalId, mkBlock, mkPropDef, mkTagBlock, shiftISO, TASK_STATUS_PROP_ID, todayISO, UI_POSITION_PROP, uuidv7Hex, type Atom, type Block, type BlockProps, type FoldState, type Mark, type MarkType } from './index.ts'
 import { DEFAULT_PREFS, WORKSPACE_VERSION, type PageBlock, type Workspace } from './workspace.ts'
 
 /* ------------------------------------------------------------- 迷你 DSL */
@@ -23,7 +23,12 @@ interface SeedBlock {
    * 它们必须成对出现才有 entry：gutter 上那个方框由**标签声明**的字段决定。
    */
   task?: boolean
-  /** 打哪些标签（按名字；先建边，森林凑齐后再解析目标） */
+  /**
+   * 打哪些标签（按名字）。
+   *
+   * 标签标的是**整个块**，所以它不占正文的一格：解析成标签块 id 后写进 `props._tags`。
+   * 名字到 id 的解析与「敲 `#名字`」共用 `ensureTag` ⇒ 同名块不会被建出两份。
+   */
   tags?: string[]
   /** 种子里的初始折叠态：**进库级的折叠表**，不进块（见 `FoldState`） */
   folded?: boolean
@@ -33,7 +38,7 @@ interface SeedBlock {
 }
 
 interface RawAtom {
-  kind: 'page' | 'tag' | 'image'
+  kind: 'page' | 'image'
   start: number
   label: string
   missing?: boolean
@@ -129,35 +134,32 @@ interface BuiltPage {
   /** 这一页自己的锚点与原子（最后上提到库级，demo 平铺存放） */
   marks: Mark[]
   atoms: Atom[]
+  /** 还没解析成 id 的标签归属（森林凑齐、标签块建好之后再落进 `_tags`） */
+  pendingTags: { block: Block; name: string }[]
   /** 这一页里初始被收起的块 id（最后合并成库级折叠表） */
   folded: FoldState
 }
 
 function buildTree(
   seeds: SeedBlock[],
-  out: { marks: Mark[]; atoms: Atom[]; refs: BuiltPage['refs']; folded: FoldState },
+  out: { marks: Mark[]; atoms: Atom[]; refs: BuiltPage['refs']; folded: FoldState; pendingTags: BuiltPage['pendingTags'] },
 ): Block[] {
   return seeds.map((s) => {
     const parsed = parseInline(s.text)
-    let text = parsed.text
+    const text = parsed.text
     /**
-     * **打标签 ＝ 在正文里插一格占位符**（边在正文里，删掉那块字边就没了）。
-     * 追加在末尾而不是开头：标签是这块的**分类**，不该把内容挤到后面去。
-     * ⚠️ 目标在 `resolveRefs` 里统一解析 —— 标签块住在森林顶层、比内容块晚建，
-     *    这里拿不到它，写一个假 target 只会得到「指向不存在的东西」。
+     * **标签不往正文里插任何东西**：归属是块级字段，正文保持作者写下的那几个字。
+     * ⚠️ 名字到 id 的解析推迟到森林凑齐之后 —— 标签块住在森林顶层、比内容块晚建，
+     *    这里拿不到它，写一个假 id 只会得到「指向不存在的东西」。
      */
-    const tags: RawAtom[] = []
-    for (const name of s.tags ?? []) {
-      tags.push({ kind: 'tag', start: text.length, label: name })
-      text += ATOM_PLACEHOLDER
-    }
     const b = mkBlock(text)
+    for (const name of s.tags ?? []) out.pendingTags.push({ block: b, name })
     if (s.folded) out.folded[b.id] = true
     // 任务状态是**真实属性**：它的键是定义块的 id，值与标签声明无关（声明只提供入口）
     if (s.task !== undefined) b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: s.task }
     if (s.props) b.props = { ...(b.props ?? {}), ...s.props }
     for (const m of parsed.marks) out.marks.push({ id: uuidv7Hex(), type: m.type, blockId: b.id, start: m.start, end: m.end })
-    for (const a of [...parsed.atoms, ...tags]) {
+    for (const a of parsed.atoms) {
       const id = uuidv7Hex()
       const atom: Atom = {
         id,
@@ -167,8 +169,8 @@ function buildTree(
         end: a.start + 1,
         label: a.label,
       }
-      // 引用与标签都是**指向边**，解析目标的口径相同；图片不走这条路（它指资产）
-      if (a.kind === 'page' || a.kind === 'tag') out.refs.push({ atomId: id, label: a.label })
+      // 引用要解析目标块；图片不走这条路（它指资产）
+      if (a.kind === 'page') out.refs.push({ atomId: id, label: a.label })
       else {
         atom.asset = {
           hash: uuidv7Hex().slice(0, 32),
@@ -194,7 +196,7 @@ function buildTree(
  * 原来的「页的 roots」就是页块的 `children` —— 一个页恰好是一个块。
  */
 function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uuidv7Hex()): BuiltPage {
-  const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'], folded: {} as FoldState }
+  const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'], folded: {} as FoldState, pendingTags: [] as BuiltPage['pendingTags'] }
   const children = buildTree(seeds, acc)
   const page: PageBlock = {
     id,
@@ -202,7 +204,7 @@ function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uuidv7Hex(
     children,
     props: { _roles: ['page'], _icon: icon },
   }
-  return { page, refs: acc.refs, marks: acc.marks, atoms: acc.atoms, folded: acc.folded }
+  return { page, refs: acc.refs, marks: acc.marks, atoms: acc.atoms, folded: acc.folded, pendingTags: acc.pendingTags }
 }
 
 /**
@@ -210,7 +212,7 @@ function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uuidv7Hex(
  * 它和页复用同一个 `BuiltPage` 形状（子树 / 锚点 / 原子），只是换一个角色。
  */
 function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
-  const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'], folded: {} as FoldState }
+  const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'], folded: {} as FoldState, pendingTags: [] as BuiltPage['pendingTags'] }
   const children = buildTree(seeds, acc)
   const block: Block = {
     id: journalId(date),
@@ -218,7 +220,22 @@ function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
     children,
     props: { _date: date, _icon: 'lucide:calendar' },
   }
-  return { page: block, refs: acc.refs, marks: acc.marks, atoms: acc.atoms, folded: acc.folded }
+  return { page: block, refs: acc.refs, marks: acc.marks, atoms: acc.atoms, folded: acc.folded, pendingTags: acc.pendingTags }
+}
+
+/**
+ * 把种子里写的标签名落成**块级归属**（`props._tags`）。
+ *
+ * ⚠️ 必须在**引用解析之前**跑：`ensureTag` 会把新标签块 append 到森林顶层，
+ *    而 `resolveRefs` 要在这片森林里按名字找目标 —— 晚一步，指向标签的引用就会变成悬空。
+ * ⚠️ 用 `ensureTag` 而不是自己建块：页与标签共用同一个名字空间，
+ *    「同名必同一块」这条口径与命令路径是同一个函数，种子不该另写一份。
+ */
+function resolveSeedTags(forest: Block[], pending: readonly { block: Block; name: string }[]): void {
+  for (const { block, name } of pending) {
+    const tag = ensureTag(forest, name).block
+    if (tag) addTagId(block, tag.id)
+  }
 }
 
 /**
@@ -289,7 +306,7 @@ export function seedWorkspace(): Workspace {
             {
               text: '层次序 user > plugin > core',
               children: [
-                { text: '用户永远能盖过插件与核心 #纪律' },
+                { text: '用户永远能盖过插件与核心', tags: ['纪律'] },
                 { text: '`mod+shift+t` 就是一条 user 层键位' },
               ],
             },
@@ -304,11 +321,11 @@ export function seedWorkspace(): Workspace {
         { text: '与 [[输入面笔记]] 同源；多行块（代码 / SQL）留给独立的编辑器实例' },
         { text: '行内原子在这里：**图片** ![[编辑器分层草图.png]] 就是一个原子 ＋ 资产引用' },
         { text: '悬空的引用也要看得见：见 [[这份页面还没写]] —— 状态是 `dangling`，不是静默错指' },
-        { text: '标签写法 #设计 #输入面' },
+        { text: '标签写法', tags: ['设计', '输入面'] },
       ],
     },
     { text: '把「引用某段」的 UI 补上', tags: ['任务'], task: false },
-    { text: '锚点边界断言复跑通过 #证据', tags: ['任务'], task: true },
+    { text: '锚点边界断言复跑通过', tags: ['任务', '证据'], task: true },
     /**
      * **查询块**（–D6）的演示样本：条件＝「本页之下、带 #todo 的块」。
      *
@@ -443,9 +460,11 @@ export function seedWorkspace(): Workspace {
 
   const built = [journal, yesterday, dayBefore, day3, day4, day5, p1, p2, p3, p4, p5]
   const blocks = built.map((b) => b.page)
-  // 标签块也在森林顶层 ⇒ **必须在解析指向边之前**把它们放进去，否则内容里的 `#任务`
-  // 会解析不到（变成悬空边），gutter 上那个入口也就不会出现。
+  // 核心词汇（定义块 ＋ 标签块）先在森林顶层就位：`ensureTag` 要能找到 `任务` 并复用，
+  // 否则种子会建出第二个同名标签；`[[ ]]` 的解析也要在这之后（标签同样占地址）。
   blocks.push(...coreVocabulary())
+  // 标签归属先落成 id（新标签块会在这时进森林），再解析 `[[ ]]`
+  resolveSeedTags(blocks, built.flatMap((b) => b.pendingTags))
   resolveRefs(blocks, built)
 
   return forest(blocks, built)

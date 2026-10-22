@@ -1021,97 +1021,83 @@ await check('T39 引用解析：改页名 ⇒ chip 跟着变；目标被删 ⇒ 
   return `「${before}」→ 改名后「${renamed}」（label 快照未回写）→ 删除后 dangling，兜底名「${dead.label}」`
 })
 
-await check('T40 标签＝指向边：打标签 ⇒ 标签块出现在森林里、成员可见；删掉那条边 ⇒ 不留孤儿', async () => {
+await check('T40 标签＝块级归属：写进块上、渲染成行尾 chip、成员可见', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
 
-  // ① 打标签：产出的是**边**（tag 原子），不是正文里的文本
+  /**
+   * ① 打标签：写的是**块上的归属**（`props._tags`），正文一个字节都不动。
+   *
+   * ⚠️ 挑一个**普通子块**，不挑页名行：这一条要验证的正是「正文不动」，
+   *    拿页名做样本会让失败信息里同时混进改名的问题。
+   */
   const it = await page.evaluate(() => {
-    /**
-     * ⚠️ 挑一个**普通子块**打标签，不要挑页名行：
-     *   ① 页名是身份，往里塞占位符等于「静默改名」（74 的判据）；
-     *   ② 页名行是 `roots[0]`，`find(text.length > 2)` 每次都会先命中它
-     *      ⇒ ④ 再打一次会打在**同一块**上，导致 ⑤ 删一条边后还剩另一条（本轮真踩到）。
-     */
     const root = window.__demo.__editor.doc.roots[0]
     const b = window.__demo.blocks().find((x) => x.id !== root.id && !x.roles?.includes('journal') && x.text.length > 2)
     window.__demo.focusBlock(b.id, b.text.length)
     window.__demo.invoke('core.editor/insert-tag', { tag: '设计' })
-    const a = window.__demo.atoms().find((x) => x.kind === 'tag' && x.blockId === b.id)
-    const tagBlock = a ? window.__demo.blocks().find((x) => x.id === a.target?.id) : undefined
-    // 标签块挂在森林根上 ⇒ 它不在当前视图里，要从**库级**找
-    const tag = a ? window.__demo.allBlocks().find((x) => x.id === a.target?.id) : undefined
-    void tagBlock
+    const after = window.__demo.blocks().find((x) => x.id === b.id)
+    const tagId = after?.tags?.[0] ?? ''
+    const tag = window.__demo.allBlocks().find((x) => x.id === tagId)
     return {
       blockId: b.id,
-      atom: a ? { id: a.id, kind: a.kind, target: a.target, label: a.label } : null,
+      text: after?.text ?? '',
+      tags: after?.tags ?? [],
       tag: tag ? { id: tag.id, text: tag.text, roles: tag.roles } : null,
-      text: window.__demo.blocks().find((x) => x.id === b.id)?.text ?? '',
     }
   })
-  assert(it.atom, `insert-tag 应产出一条标签边：${JSON.stringify(it)}`)
-  assert(it.atom.kind === 'tag', `标签边的 kind 应是 tag：${JSON.stringify(it.atom)}`)
-  assert(it.tag, `标签边应指向一个真实存在的标签块：${JSON.stringify(it)}`)
+  assert(it.tags.length === 1, `标签应写进块上的归属：${JSON.stringify(it)}`)
+  assert(it.tag, `归属应指向一个真实存在的标签块：${JSON.stringify(it)}`)
   assert(it.tag.roles?.includes('tag'), `标签应是一个带 tag 角色的**块**（不是字符串、也不是新实体）：${JSON.stringify(it.tag)}`)
   assert(it.tag.text === '设计', `标签名字就是它的正文，且不带 #：${JSON.stringify(it.tag)}`)
-  assert(it.text.includes('\uFFFC'), `正文里那一格应是占位符（边在正文里）：${JSON.stringify(it.text)}`)
+  assert(!it.text.includes('\uFFFC'), `正文里不该为标签多出一格占位符：${JSON.stringify(it.text)}`)
 
-  // ② 呈现：渲染成 `#设计`，不是 `[[设计]]`
+  // ② 呈现：行尾拼一枚 `#设计` chip，但**它不参与读数**
   const shown = await page.evaluate(
-    (id) => document.querySelector(`.atom[data-atom-id="${id}"] .atom-label`)?.textContent ?? '',
-    it.atom.id,
+    ({ blockId, tagId }) => {
+      const chip = document.querySelector(`.blk[data-block-id="${blockId}"] .tx .tag-chip[data-tag-id="${tagId}"]`)
+      return { chip: chip?.textContent ?? '', read: window.__demo.__editor.readText(blockId) }
+    },
+    { blockId: it.blockId, tagId: it.tag.id },
   )
-  assert(shown === '#设计', `标签应显示成 #名（引用才是 [[名]]）：${JSON.stringify(shown)}`)
+  assert(shown.chip === '#设计', `标签应显示成 #名（引用才是 [[名]]）：${JSON.stringify(shown)}`)
+  assert(shown.read === it.text, `chip 拼在正文里但不属于正文：读数应仍是原正文 —— ${JSON.stringify(shown)}`)
 
-  // ③ **打标签 ⇒ 产生反链**：标签块的成员里出现这个块（这就是「标签页的反链」）
+  // ③ **打标签 ⇒ 成员里出现这个块**（成员从块上的归属派生）
   const members = await page.evaluate((tagId) => window.__demo.tagMembers(tagId), it.tag.id)
   assert(
     members.includes(it.blockId),
     `打了标签的块应出现在标签的成员里：${JSON.stringify(members)}（期望含 ${it.blockId}）`,
   )
 
-  // ④ 幂等：再打一次同名标签 ⇒ 不建第二个块（`#设计` 与 `#设计 ` 是同一个）
-  const again = await page.evaluate((hostId) => {
-    const before = window.__demo.allBlocks().filter((x) => x.roles?.includes('tag')).length
-    // 打在**另一块**上：否则 ⑤ 删掉一条边后，同一块上还留着另一条 ⇒ 断言会假失败
-    const b = window.__demo.blocks().find((x) => x.id !== hostId && !x.roles?.includes('journal') && x.text.length > 2)
-    window.__demo.focusBlock(b.id, b.text.length)
-    window.__demo.invoke('core.editor/insert-tag', { tag: ' 设计 ' })
-    // 确认**真的插进去了**（`insertAtom` 走当前 sel；落点不对的话这里会先炸，
-    // 而不是让后面的成员断言给出一条看不懂的失败信息）
-    const inserted = window.__demo.atoms().some((x) => x.kind === 'tag' && x.blockId === b.id)
-    return { before, after: window.__demo.allBlocks().filter((x) => x.roles?.includes('tag')).length, other: b.id, inserted }
-  }, it.blockId)
-  assert(again.inserted, `第二次打标签应插到另一块（${again.other}）上`)
+  // ④ 幂等：再打一次同名标签 ⇒ 不建第二个块（`#设计` 与 `#设计 ` 是同一个名字）
+  const again = await page.evaluate(
+    (hostId) => {
+      const before = window.__demo.allBlocks().filter((x) => x.roles?.includes('tag')).length
+      const b = window.__demo.blocks().find((x) => x.id !== hostId && !x.roles?.includes('journal') && x.text.length > 2)
+      window.__demo.focusBlock(b.id, b.text.length)
+      window.__demo.invoke('core.editor/insert-tag', { tag: ' 设计 ' })
+      const after = window.__demo.blocks().find((x) => x.id === b.id)
+      return {
+        before,
+        after: window.__demo.allBlocks().filter((x) => x.roles?.includes('tag')).length,
+        other: b.id,
+        tagged: (after?.tags ?? []).length === 1,
+      }
+    },
+    it.blockId,
+  )
+  assert(again.tagged, `第二次打标签应写进另一块（${again.other}）`)
   assert(again.after === again.before, `同名标签不该建出第二块：${JSON.stringify(again)}`)
 
-  // ④b 幂等的另一半：**两块**都在成员里（边是真的，不是只建了个块）
-  //    ⚠️ 必须在 ⑤ 删边**之前**取：删完再取只能看到剩下的那一条。
-  const before = await page.evaluate((tagId) => window.__demo.tagMembers(tagId), it.tag.id)
-  assert(before.includes(it.blockId), `第一块应在成员里：${JSON.stringify(before)}`)
-  assert(before.includes(again.other), `第二块也应在成员里：${JSON.stringify(before)}`)
-  assert(before.length === 2, `两块各一条边 ⇒ 成员应是 2 块：${JSON.stringify(before)}`)
-
-  // ⑤ **删掉那条边 ⇒ 不留孤儿**：只掉**那一条**，另一条还在
-  const dropped = await page.evaluate((a) => {
-    window.__demo.removeAtom(a.atomId)
-    return {
-      members: window.__demo.tagMembers(a.tagId),
-      atomGone: !window.__demo.atoms().some((x) => x.id === a.atomId),
-    }
-  }, { atomId: it.atom.id, tagId: it.tag.id })
-  assert(dropped.atomGone, '删掉占位符 ⇒ 原子应当一起没了')
-  assert(
-    !dropped.members.includes(it.blockId),
-    `边删掉后不该还留在成员里（不留孤儿）：${JSON.stringify(dropped.members)}`,
-  )
-  assert(
-    dropped.members.includes(again.other),
-    `只删那一条边 ⇒ 另一块的成员关系应当还在：${JSON.stringify(dropped.members)}`,
-  )
+  // ④b 两块都在成员里（归属是真的，不是只建了个块）
+  const both = await page.evaluate((tagId) => window.__demo.tagMembers(tagId), it.tag.id)
+  assert(both.includes(it.blockId), `第一块应在成员里：${JSON.stringify(both)}`)
+  assert(both.includes(again.other), `第二块也应在成员里：${JSON.stringify(both)}`)
+  assert(both.length === 2, `两块各一条归属 ⇒ 成员应是 2 块：${JSON.stringify(both)}`)
 
   await ctx.close()
-  return `标签块「${it.tag.text}」(role=tag)；成员 ${before.length} 块 → 幂等（${again.before}→${again.after}）→ 删一条边后剩 ${dropped.members.length} 块`
+  return `标签块「${it.tag.text}」(role=tag)；chip ${JSON.stringify(shown.chip)} 不进读数；成员 ${both.length} 块（幂等 ${again.before}→${again.after}）`
 })
 
 await check('T37 演示状态下打字要落盘（已知风险 3）：切到稀疏态 → 打字 → 关页重开还在', async () => {
@@ -1963,7 +1949,7 @@ await check('T57 日记流里 zoom 进某块再「后退」⇒ 回到**日记流
   return `日记流 ${feedAtStart.roots} 段 → zoom（1 段）→ 后退 ⇒ 仍是 feed（${back.roots} 段，${back.journalDate}）`
 })
 
-await check('T58 正文里敲 `#名字` ⇒ 闭合成边（吃掉那几个字、占 1 格、进成员列表），组合期不动手', async () => {
+await check('T58 正文里敲 `#名字` 暂不落成归属（只做数据形状，输入路径还没接）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__demo.quiet(true))
   await openFirstPage(page)
@@ -1978,35 +1964,38 @@ await check('T58 正文里敲 `#名字` ⇒ 闭合成边（吃掉那几个字、
   })
   await page.waitForTimeout(80)
 
-  const tagName = '自动边'
-  // ⚠️ 末尾那个空格是**必须的**：只有后面跟了分隔符才算敲完（行尾不算）
+  const tagName = '自动归属'
   await page.keyboard.type(`写点东西 #${tagName} `)
   await page.waitForTimeout(220)
 
   const got = await page.evaluate((id) => {
     const b = window.__demo.blocks().find((x) => x.id === id)
+    const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
     return {
       text: b?.text ?? '',
       found: Boolean(b),
-      atoms: window.__demo.atoms().filter((a) => a.blockId === id && a.kind === 'tag'),
-      tagBlock: window.__demo.allBlocks().find((x) => x.roles?.includes('tag') && x.text === '自动边')?.id ?? '',
+      tags: b?.tags ?? [],
+      atoms: window.__demo.atoms().filter((a) => a.blockId === id),
+      chips: tx ? tx.querySelectorAll('.tag-chip').length : -1,
+      tagBlock: window.__demo.allBlocks().find((x) => x.roles?.includes('tag') && x.text === tagName)?.id ?? '',
     }
   }, target)
 
   assert(got.found, '前置：插入的块应在当前视图里：' + JSON.stringify(got))
 
-  // ① `#自动边` 那几个字被吃掉了，只剩一格占位符
-  assert(!got.text.includes('#自动边'), '`#名字` 应被吃掉：' + JSON.stringify(got.text))
-  assert(got.text.includes('\uFFFC'), '应留下一个占位符：' + JSON.stringify(got.text))
-  assert(got.text.startsWith('写点东西 '), '前面的文字要原样保留：' + JSON.stringify(got.text))
-  assert(got.text === '写点东西 \uFFFC ', '结束处应是「一格占位符 ＋ 那个分隔空格」：' + JSON.stringify(got.text))
-
-  // ② 真的产出了一条边，且指向刚建的标签块
-  assert(got.atoms.length === 1, '应恰好一条 tag 边：' + JSON.stringify(got.atoms))
-  assert(got.tagBlock !== '' && got.atoms[0].target?.id === got.tagBlock, '边要指向标签块：' + JSON.stringify(got))
+  /**
+   * 目前**没有**输入交互：`#名字` 就是普通文本。
+   * 这条断言的意义是把「还没做」钉成显式状态 —— 下一轮接上输入路径时它必须被改掉，
+   * 而不是等到某天有人发现「标签有时候会自己出现」。
+   */
+  assert(got.text === `写点东西 #${tagName} `, '`#名字` 应原样留在正文里：' + JSON.stringify(got.text))
+  assert(got.tags.length === 0, '敲字不该写块上的归属：' + JSON.stringify(got.tags))
+  assert(got.atoms.length === 0, '敲字也不该产出原子：' + JSON.stringify(got.atoms))
+  assert(got.chips === 0, '没有归属 ⇒ 不该渲染 chip：' + got.chips)
+  assert(got.tagBlock === '', '没敲完不该建标签块：' + got.tagBlock)
 
   await ctx.close()
-  return `敲「#${tagName}」⇒ 正文 ${JSON.stringify(got.text)}，一条边指向 ${got.tagBlock.slice(-6)}`
+  return `敲「#${tagName}」⇒ 正文原样 ${JSON.stringify(got.text)}，无归属 / 无原子 / 无 chip`
 })
 
 await check('T59 `ref` 类型的值走选择器：显示目标**名字**、能换目标、不让人手打 id', async () => {
@@ -3234,25 +3223,25 @@ await check('T50 导航历史：⌘[ 后退 / ⌘] 前进跨页可走；新导�
   return `今日→A→B；⌘[ 退两步、⌘] 进两步；新导航清前进栈`
 })
 
-/* ------------------------------------------------- 属性区（平铺 ＋ 来源 ＋ 摘标签提示） */
+/* ------------------------------------------------- 属性区（平铺 ＋ 来源 ＋ 行尾 chip） */
 
-await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 摘标签清理提示', async () => {
+await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 成员块行尾 chip', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
 
-  // ① 在一个内容块上打 #任务（标签块是普通块，住森林顶层）
+  // ① 在一个内容块上打 #任务（标签块是普通块，住森林顶层；归属写在块上）
   const hostId = await page.evaluate(() => {
     const b = window.__demo.blocks().find((x) => x.roles.length === 0 && x.children === 0 && x.text.length > 2)
     window.__demo.focusBlock(b.id, 0)
     window.__demo.invoke('core.editor/insert-tag', { tag: ' 任务 ' })
     return b.id
   })
-  const tag = await page.evaluate(() => {
+  const tag = await page.evaluate((hostId) => {
     const tag = window.__demo.allBlocks().find((b) => b.roles.includes('tag') && b.text === '任务')
-    const atom = window.__demo.atoms().find((a) => a.kind === 'tag' && a.target?.id === tag?.id)
-    return { tagId: tag?.id, atomId: atom?.id }
-  })
-  assert(tag.tagId && tag.atomId, `打标签应产出一个真实标签块与一条边：${JSON.stringify(tag)}`)
+    const host = window.__demo.blocks().find((x) => x.id === hostId)
+    return { tagId: tag?.id, tagged: (host?.tags ?? []).includes(tag?.id) }
+  }, hostId)
+  assert(tag.tagId && tag.tagged, `打标签应产出一个真实标签块、并写进块的归属：${JSON.stringify(tag)}`)
 
   // ② 打开标签页，新建字段（定义是森林顶层的 schema 块，propId ＝ 块 id）
   await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), tag.tagId)
@@ -3266,9 +3255,9 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   const defs = await page.evaluate(() => window.__demo.propDefs())
   const own = defs.filter((d) => d.label === '状态')
   assert(own.length === 1, `应只有一个「状态」定义：${JSON.stringify(defs)}`)
-  assert(own[0]!.kind === 'text', JSON.stringify(own[0]))
-  assert(own[0]!.declaredBy.includes(tag.tagId), '定义应被 #任务 声明')
-  const schemaTop = await page.evaluate((id) => window.__demo.allBlocks().some((b) => b.id === id && b.roles.includes('schema')), own[0]!.id)
+  assert(own[0].kind === 'text', JSON.stringify(own[0]))
+  assert(own[0].declaredBy.includes(tag.tagId), '定义应被 #任务 声明')
+  const schemaTop = await page.evaluate((id) => window.__demo.allBlocks().some((b) => b.id === id && b.roles.includes('schema')), own[0].id)
   assert(schemaTop, '定义是森林顶层的 schema 块（不是标签的子块）')
 
   // 标签页的属性区显示「声明字段」，但没有给标签块自己设值的输入
@@ -3287,12 +3276,12 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   //    断言一律按 propId 取，而不是按下标 —— 行序随声明顺序变，不是契约。
   await page.evaluate(
     ({ blockId, propId }) => window.__demo.invoke('core.props/set-value', { blockId, propId, value: '已完成' }),
-    { blockId: hostId, propId: own[0]!.id },
+    { blockId: hostId, propId: own[0].id },
   )
   const fields = await page.evaluate((id) => window.__demo.fields(id), hostId)
-  const ownField = fields.find((f) => f.propId === own[0]!.id)
+  const ownField = fields.find((f) => f.propId === own[0].id)
   assert(ownField?.value === '已完成', `成员块应有值：${JSON.stringify(fields)}`)
-  assert(ownField!.sources.includes(tag.tagId), `来源应是 #任务：${JSON.stringify(ownField)}`)
+  assert(ownField.sources.includes(tag.tagId), `来源应是 #任务：${JSON.stringify(ownField)}`)
 
   // ④ 打开成员块：属性区平铺一行、来源写「来自 #任务」
   //
@@ -3313,49 +3302,26 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   assert(panel.label === '状态' && panel.value === '已完成', JSON.stringify(panel))
   assert(panel.source.includes('#任务'), `来源应标出标签：${JSON.stringify(panel)}`)
 
-  // ⑤ 摘标签：有值 ⇒ 弹一次提示，默认「保留」；选「清理」⇒ 值与边一起没（一次撤销复原）
-  await page.evaluate((atomId) => window.__demo.invoke('core.editor/remove-atom', { atomId }), tag.atomId)
-  await page.waitForSelector('.layer-head')
-  const head = await page.textContent('.layer-head')
-  assert(head.includes('任务') && head.includes('还有值'), `摘标签应提示有值字段：${head}`)
-  await page.locator('.layer-item', { hasText: '清理这些值' }).click()
-  await page.waitForTimeout(120)
-  const afterClean = await page.evaluate(
-    ({ hostId, atomId }) => ({
-      fields: window.__demo.fields(hostId),
-      atom: window.__demo.atoms().some((a) => a.id === atomId),
-    }),
-    { hostId, atomId: tag.atomId },
+  /**
+   * ⑤ **摘标签的入口暂时不在**（归属的摘除交互还没接），
+   *    所以「摘标签时的清理提示」这段断言跟着入口一起暂时退场 ——
+   *    退场的是**测试**，不是能力：`cleanableValues` 仍在（有单测），
+   *    等摘除入口落地时，提示与撤销的断言要原样回来。
+   *
+   * 这一轮真正要钉住的是形状：归属在块上，渲染成**行尾 chip**，且 chip 不进正文读数。
+   */
+  const chip = await page.evaluate(
+    ({ blockId, tagId }) => {
+      const el = document.querySelector(`.blk[data-block-id="${blockId}"] .tx .tag-chip[data-tag-id="${tagId}"]`)
+      return { text: el?.textContent ?? '', read: window.__demo.__editor.readText(blockId) }
+    },
+    { blockId: hostId, tagId: tag.tagId },
   )
-  assert(afterClean.fields.length === 0, `清理后值应没了：${JSON.stringify(afterClean.fields)}`)
-  assert(!afterClean.atom, '边也应没了')
-
-  await page.evaluate(() => window.__demo.invoke('core.history/undo'))
-  await page.waitForTimeout(150)
-  const afterUndo = await page.evaluate(
-    ({ hostId, atomId }) => ({
-      fields: window.__demo.fields(hostId),
-      atom: window.__demo.atoms().some((a) => a.id === atomId),
-    }),
-    { hostId, atomId: tag.atomId },
-  )
-  assert(
-    afterUndo.fields.find((f) => f.propId === own[0]!.id)?.value === '已完成' && afterUndo.atom,
-    `⌘Z 应把值与边一起复原：${JSON.stringify(afterUndo)}`,
-  )
-
-  // ⑥ 字段全空时摘标签 ⇒ 不弹提示（防提示疲劳）
-  await page.evaluate(
-    ({ blockId, propId }) => window.__demo.invoke('core.props/clear-value', { blockId, propId }),
-    { blockId: hostId, propId: own[0]!.id },
-  )
-  await page.evaluate((atomId) => window.__demo.invoke('core.editor/remove-atom', { atomId }), tag.atomId)
-  await page.waitForTimeout(150)
-  const prompt = await page.evaluate(() => Boolean(document.querySelector('.layer-head')))
-  assert(!prompt, '字段全空时摘标签不该弹提示')
+  assert(chip.text === '#任务', `成员块行尾应有一枚 #任务 chip：${JSON.stringify(chip)}`)
+  assert(!chip.read.includes('#任务'), `chip 不该进正文读数：${JSON.stringify(chip)}`)
 
   await ctx.close()
-  return `定义 ${defs[0].id.slice(-6)} 被 #任务 声明；成员值「已完成」；摘标签清理可撤销；空字段不提示`
+  return `定义 ${defs[0].id.slice(-6)} 被 #任务 声明；成员值「已完成」；行尾 chip ${JSON.stringify(chip.text)} 不进读数`
 })
 
 /* ------------------------------------------------- 标签层级（属于 / 包含 / 成员） */

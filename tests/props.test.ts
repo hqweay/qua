@@ -9,7 +9,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { Atom, Block } from '../src/core/index.ts'
+import type { Block } from '../src/core/index.ts'
 import { hasRole } from '../src/core/index.ts'
 import { seedWorkspace } from '../src/core/seed.ts'
 import {
@@ -22,7 +22,7 @@ import {
   fieldRows,
   gutterFieldsFor,
   gutterFieldsOf,
-  hasTagEdge,
+  hasTag,
   hasValue,
   isPropDef,
   mkPropDef,
@@ -34,16 +34,11 @@ import {
   uiPositionOf,
 } from '../src/core/index.ts'
 
-const tagEdge = (id: string, blockId: string, tagId: string): Atom =>
-  ({
-    id,
-    kind: 'tag',
-    blockId,
-    start: 0,
-    end: 1,
-    label: 'x',
-    target: { kind: 'page', id: tagId },
-  }) as Atom
+/** 给块打上这些标签（归属在块上：`props._tags`，顺序＝打的先后） */
+const tag = (block: Block, ...tagIds: string[]): Block => {
+  block.props = { ...(block.props ?? {}), _tags: [...((block.props?._tags as string[] | undefined) ?? []), ...tagIds] }
+  return block
+}
 
 test('③ 定义是独立块：森林顶层、schema 角色、正文＝label、propId＝块 id', () => {
   const def = mkPropDef('评分', 'number')
@@ -88,11 +83,10 @@ test('④ 同一 propId 被两标签声明 ⇒ 只出现一行、来源完整', 
   const film = mkTagBlock('电影')
   declareField(book, def.id)
   declareField(film, def.id)
-  const target: Block = { id: 'b', text: '西游记', children: [], props: { [def.id]: 9 } }
+  const target: Block = tag({ id: 'b', text: '西游记', children: [], props: { [def.id]: 9 } }, book.id, film.id)
   const forest: Block[] = [def, book, film, target]
-  const atoms = [tagEdge('e1', 'b', book.id), tagEdge('e2', 'b', film.id)]
 
-  const rows = fieldRows(target, forest, atoms)
+  const rows = fieldRows(target, forest)
   const scored = rows.filter((r) => r.propId === def.id)
   assert.equal(scored.length, 1, '同一个字段只显示一次')
   assert.deepEqual(scored[0]!.sources.map((s) => s.text), ['书', '电影'], '来源按正文里标签的先后')
@@ -104,7 +98,7 @@ test('④ 块自有属性是正常来源：没有标签声明时标「本块自�
   const def = mkPropDef('状态')
   const target: Block = { id: 'b', text: '一块', children: [], props: { [def.id]: '已完成' } }
   const forest: Block[] = [def, target]
-  const rows = fieldRows(target, forest, [])
+  const rows = fieldRows(target, forest)
   assert.equal(rows.length, 1)
   assert.deepEqual(rows[0]!.sources, [])
   assert.equal(rows[0]!.label, '状态')
@@ -115,8 +109,8 @@ test('声明了但没填 ⇒ 行还在（「待填」），filled=false', () => 
   const def = mkPropDef('评分')
   const task = mkTagBlock('任务')
   declareField(task, def.id)
-  const target: Block = { id: 'b', text: '一块', children: [] }
-  const rows = fieldRows(target, [def, task, target], [tagEdge('e', 'b', task.id)])
+  const target: Block = tag({ id: 'b', text: '一块', children: [] }, task.id)
+  const rows = fieldRows(target, [def, task, target])
   assert.equal(rows.length, 1)
   assert.equal(rows[0]!.filled, false)
   assert.equal(hasValue(target, def.id), false)
@@ -127,10 +121,9 @@ test('⑥ fieldsOf 只算直接标签：只打 #演员 不含 #人物 的字段'
   const people = mkTagBlock('人物')
   const actor = mkTagBlock('演员') // 包含关系（_parentTags）在 tag-tree 里；这里只证明「字段不跟祖先走」
   declareField(people, name.id)
-  const target: Block = { id: 'b', text: '某人', children: [] }
+  const target: Block = tag({ id: 'b', text: '某人', children: [] }, actor.id)
   const forest: Block[] = [name, people, actor, target]
-  const atoms = [tagEdge('e', 'b', actor.id)]
-  assert.deepEqual(fieldIdsOf(target, forest, atoms), [], '#演员 没声明字段 ⇒ 属性区没有它')
+  assert.deepEqual(fieldIdsOf(target, forest), [], '#演员 没声明字段 ⇒ 属性区没有它')
 })
 
 test('摘标签清理：只算「有值 ∩ 被摘标签声明 ∩ 剩余标签都不声明」', () => {
@@ -141,15 +134,18 @@ test('摘标签清理：只算「有值 ∩ 被摘标签声明 ∩ 剩余标签�
   declareField(book, shared.id)
   declareField(book, onlyBook.id)
   declareField(film, shared.id)
-  const target: Block = {
-    id: 'b',
-    text: '一块',
-    children: [],
-    props: { [shared.id]: 9, [onlyBook.id]: 300 },
-  }
+  const target: Block = tag(
+    {
+      id: 'b',
+      text: '一块',
+      children: [],
+      props: { [shared.id]: 9, [onlyBook.id]: 300 },
+    },
+    book.id,
+    film.id,
+  )
   const forest: Block[] = [shared, onlyBook, book, film, target]
-  const atoms = [tagEdge('e1', 'b', book.id), tagEdge('e2', 'b', film.id)]
-  assert.deepEqual(cleanableValues(target, book, forest, atoms), [onlyBook.id], '评分还被 #电影 声明 ⇒ 不清')
+  assert.deepEqual(cleanableValues(target, book, forest), [onlyBook.id], '评分还被 #电影 声明 ⇒ 不清')
 })
 
 test('解除声明只动这一条，值留在块上（值留存）', () => {
@@ -160,7 +156,7 @@ test('解除声明只动这一条，值留在块上（值留存）', () => {
   const forest: Block[] = [def, book, target]
   assert.equal(undeclareField(book, def.id), true)
   assert.equal(target.props![def.id], 5)
-  assert.deepEqual(fieldRows(target, forest, []).map((r) => r.propId), [def.id], '值落到「本块自有」')
+  assert.deepEqual(fieldRows(target, forest).map((r) => r.propId), [def.id], '值落到「本块自有」')
 })
 
 test('ensureTag 返回的块可以立刻声明字段（标签是普通块）', () => {
@@ -181,10 +177,11 @@ test('④ 顺序只影响呈现：字段集合与标签先后无关；行序按�
   declareField(A, a1.id)
   declareField(A, a2.id)
   declareField(B, b1.id)
-  const target: Block = { id: 'b', text: '一块', children: [] }
-  const forest = [a1, a2, b1, A, B, target]
-  const ab = fieldRows(target, forest, [tagEdge('e1', 'b', A.id), tagEdge('e2', 'b', B.id)]).map((r) => r.label)
-  const ba = fieldRows(target, forest, [tagEdge('e1', 'b', B.id), tagEdge('e2', 'b', A.id)]).map((r) => r.label)
+  const abBlock: Block = tag({ id: 'b', text: '一块', children: [] }, A.id, B.id)
+  const baBlock: Block = tag({ id: 'b', text: '一块', children: [] }, B.id, A.id)
+  const forest = [a1, a2, b1, A, B]
+  const ab = fieldRows(abBlock, [...forest, abBlock]).map((r) => r.label)
+  const ba = fieldRows(baBlock, [...forest, baBlock]).map((r) => r.label)
   assert.deepEqual(ab, ['甲一', '甲二', '乙一'])
   assert.deepEqual(ba, ['乙一', '甲一', '甲二'])
   assert.deepEqual([...ab].sort(), [...ba].sort(), '集合相同：顺序只影响行序')
@@ -203,7 +200,7 @@ test('gutterFieldsOf：收「定义归 gutter」的那些，**有没有值都收
   const score = mkPropDef('评分', 'number')
   const host: Block = { id: 'b', text: '一块', children: [], props: { [task.id]: true, [score.id]: 9 } }
   const forest = [task, score, host]
-  const rows = gutterFieldsOf(host, forest, [])
+  const rows = gutterFieldsOf(host, forest)
   assert.deepEqual(rows.map((r) => r.propId), [task.id], '评分在面板里，不归 gutter')
   assert.equal(rows[0]!.value, true)
   assert.equal(rows[0]!.filled, true)
@@ -214,11 +211,10 @@ test('gutterFieldsOf：收「定义归 gutter」的那些，**有没有值都收
   // ⚠️ 必须是「打了标签」而不是「任何块」：字段来自「声明 ∪ 自有」，
   //    一个既没有标签、也没有属性值的块本来就没有任何字段。若这里断言
   //    「任意空块也显示该字段」，等于说「所有块都显示所有字段」—— 那是另一套设计。
-  const tag = mkTagBlock('任务')
-  declareField(tag, task.id)
-  const empty: Block = { id: 'c', text: '空', children: [] }
-  const edge = { id: 'e1', kind: 'tag' as const, blockId: empty.id, start: 0, end: 1, label: '任务', target: { kind: 'page' as const, id: tag.id } }
-  const emptyRows = gutterFieldsOf(empty, [task, score, tag, empty], [edge])
+  const taskTag = mkTagBlock('任务')
+  declareField(taskTag, task.id)
+  const empty: Block = tag({ id: 'c', text: '空', children: [] }, taskTag.id)
+  const emptyRows = gutterFieldsOf(empty, [task, score, taskTag, empty])
   assert.deepEqual(emptyRows.map((r) => r.propId), [task.id], '声明来的字段没有值，入口照样在')
   assert.equal(emptyRows[0]!.filled, false)
   assert.equal(emptyRows[0]!.value, undefined)
@@ -244,7 +240,7 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter）�
   const withValue = hosts.filter((b) => b.props?.[TASK_STATUS_PROP_ID] !== undefined)
   assert.equal(withValue.length, 4, '假数据里应有 4 个带任务状态的块')
   for (const b of withValue) {
-    assert.equal(hasTagEdge(b.id, task!.id, ws.atoms), true, `样本块应带 #任务 边：${b.text}`)
+    assert.equal(hasTag(b, task!.id), true, `样本块应带 #任务 归属：${b.text}`)
   }
   assert.equal(withValue.filter((b) => todoOf(b) === 'done').length, 2, '完成与未完成各两条')
 })
@@ -263,16 +259,16 @@ test('批量 gutter 与逐行算**逐块等价**：批级只扫一次库，结�
   const hosts = ws.blocks.flatMap(function flat(b) {
     return [b, ...b.children.flatMap(flat)]
   })
-  const batch = gutterFieldsFor(hosts, ws.blocks, ws.atoms)
+  const batch = gutterFieldsFor(hosts, ws.blocks)
   for (const b of hosts) {
     assert.deepEqual(
       batch.get(b.id) ?? [],
-      gutterFieldsOf(b, ws.blocks, ws.atoms),
+      gutterFieldsOf(b, ws.blocks),
       `批量与逐行对不上：${b.text}`,
     )
   }
   // 没有 gutter 字段的块**不出现在 map 里**（空数组与缺席同义）
-  const none = hosts.find((b) => gutterFieldsOf(b, ws.blocks, ws.atoms).length === 0)
+  const none = hosts.find((b) => gutterFieldsOf(b, ws.blocks).length === 0)
   assert.ok(none, '种子库里应有不带 gutter 字段的块')
   assert.equal(batch.has(none!.id), false)
 })
@@ -285,12 +281,10 @@ test('批量 gutter 的**行序与去重**与逐行一致：两个标签声明�
   declareField(a, other.id)
   declareField(a, shown.id)
   declareField(z, shown.id)
-  const target: Block = { id: 't', text: '块', children: [], props: { [shown.id]: true } }
+  const target: Block = tag({ id: 't', text: '块', children: [], props: { [shown.id]: true } }, a.id, z.id, a.id)
   const forest = [shown, other, a, z, target]
-  // 同一个标签打两次（重复边）不该让它出现两遍
-  const atoms = [tagEdge('e1', 't', a.id), tagEdge('e2', 't', z.id), tagEdge('e3', 't', a.id)]
 
-  const batch = gutterFieldsFor([target], forest, atoms).get('t') ?? []
-  assert.deepEqual(batch, gutterFieldsOf(target, forest, atoms))
+  const batch = gutterFieldsFor([target], forest).get('t') ?? []
+  assert.deepEqual(batch, gutterFieldsOf(target, forest))
   assert.deepEqual(batch.map((f) => f.propId), [shown.id], '只有归 gutter 的那个字段；同一字段只一行')
 })

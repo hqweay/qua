@@ -6,7 +6,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { Atom, Block } from '../src/core/index.ts'
+import type { Block } from '../src/core/index.ts'
 import {
   addParentTag,
   ancestorIds,
@@ -23,16 +23,10 @@ import {
   removeParentTag,
 } from '../src/core/index.ts'
 
-const tagEdge = (id: string, blockId: string, tagId: string): Atom =>
-  ({
-    id,
-    kind: 'tag',
-    blockId,
-    start: 0,
-    end: 1,
-    label: 'x',
-    target: { kind: 'page', id: tagId },
-  }) as Atom
+/** 给块打一个标签（归属在块上：`props._tags`） */
+const tagBlock = (block: Block, tagId: string): void => {
+  block.props = { ...(block.props ?? {}), _tags: [tagId] }
+}
 
 function tag(id: string, text: string): Block {
   const t = mkTagBlock(text)
@@ -58,12 +52,14 @@ test('① 多父：成员按每个父都能查到；兄弟方向不串味', () =
   const y: Block = { id: 'y', text: '只属于艺术家', children: [] }
   const z: Block = { id: 'z', text: '直接打人物', children: [] }
   forest.push(x, y, z)
-  const atoms = [tagEdge('e1', 'x', actor.id), tagEdge('e2', 'y', artist.id), tagEdge('e3', 'z', people.id)]
-  assert.ok(membersOf(people.id, forest, atoms).has('x'), '#人物 含 #演员 的成员（算作）')
-  assert.ok(membersOf(artist.id, forest, atoms).has('x'), '#艺术家 也含它（多父）')
-  assert.ok(membersOf(people.id, forest, atoms).has('z'), '直接打父标签的块也在')
-  assert.ok(!membersOf(people.id, forest, atoms).has('y'), '不串味：只属于 #艺术家（兄弟）的块不进 #人物')
-  assert.ok(!membersOf(director.id, forest, atoms).has('x'), '不串味：只属于 #演员 的块不该进 #导演')
+  tagBlock(x, actor.id)
+  tagBlock(y, artist.id)
+  tagBlock(z, people.id)
+  assert.ok(membersOf(people.id, forest).has('x'), '#人物 含 #演员 的成员（算作）')
+  assert.ok(membersOf(artist.id, forest).has('x'), '#艺术家 也含它（多父）')
+  assert.ok(membersOf(people.id, forest).has('z'), '直接打父标签的块也在')
+  assert.ok(!membersOf(people.id, forest).has('y'), '不串味：只属于 #艺术家（兄弟）的块不进 #人物')
+  assert.ok(!membersOf(director.id, forest).has('x'), '不串味：只属于 #演员 的块不该进 #导演')
 })
 
 test('② 多子：#人物 同时含 #演员、#导演 的成员', () => {
@@ -71,8 +67,9 @@ test('② 多子：#人物 同时含 #演员、#导演 的成员', () => {
   const a: Block = { id: 'a', text: '演员甲', children: [] }
   const d: Block = { id: 'd', text: '导演甲', children: [] }
   forest.push(a, d)
-  const atoms = [tagEdge('e1', 'a', actor.id), tagEdge('e2', 'd', director.id)]
-  const members = membersOf(people.id, forest, atoms)
+  tagBlock(a, actor.id)
+  tagBlock(d, director.id)
+  const members = membersOf(people.id, forest)
   assert.ok(members.has('a') && members.has('d'))
 })
 
@@ -154,8 +151,8 @@ test('D21：算作做、字段继承不做 —— 成员进去，字段不跟', 
   addParentTag(actor, people, forest)
   const x: Block = { id: 'x', text: '某人', children: [] }
   forest.push(x)
-  const atoms = [tagEdge('e', 'x', actor.id)]
+  tagBlock(x, actor.id)
 
-  assert.ok(membersOf(people.id, forest, atoms).has('x'), '算作：查 #人物 能看到只打 #演员 的块')
-  assert.deepEqual(fieldIdsOf(x, forest, atoms), [], '继承不做：它的属性区不出现 #人物 的字段')
+  assert.ok(membersOf(people.id, forest).has('x'), '算作：查 #人物 能看到只打 #演员 的块')
+  assert.deepEqual(fieldIdsOf(x, forest), [], '继承不做：它的属性区不出现 #人物 的字段')
 })
