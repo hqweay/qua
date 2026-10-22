@@ -69,38 +69,12 @@ const outlineRenderer: BlockRenderer = {
 }
 
 /**
- * 反链块（右槽的默认内容）。**渲染的是「谁指向了我」这一列引用**，
- * 不是「一个叫作反链的组件」——这层区分就是说的「槽里是一列块」。
- *
- * 数据从 `backRefs` 来（demo 里由装配层算好传进来；接内核后走指向边索引 G1）。
- *
- * ⚠️ 这个渲染器只负责**这一行的 chrome**（箭头 ＋ 文本）；它不改变「反链项是块」这件事。
- */
-const backRefRenderer: BlockRenderer = {
-  match: (b) => hasRole(b, 'backref'),
-  render: (b, ctx) => {
-    const row = document.createElement('button')
-    row.type = 'button'
-    row.className = 'page-item backref-item'
-    if (ctx.isActive(b.id)) row.dataset.active = '1'
-    const arrow = document.createElement('span')
-    arrow.className = 'p-ico'
-    renderIcon(arrow, 'lucide:corner-up-left', 'corner-up-left')
-    const title = document.createElement('span')
-    title.className = 'p-title'
-    title.textContent = b.text.trim() === '' ? ctx.untitledLabel : b.text
-    row.append(arrow, title)
-    row.addEventListener('click', () => ctx.onActivate(b))
-    return row
-  },
-}
-
-/**
  * 日记块：**日期只读**——它来自 `_date` 属性，不是块的正文，
  * 所以这一行没有输入框、也改不了日期；点它＝打开今天。
  *
- * ⚠️ 与反链同理：这里只叠**chrome**（标题换成日期、图标换成日历），
- *    「块长什么样」这个决定仍归类型（`outline`）。
+ * ⚠️ 这里只叠**chrome**（标题换成日期、图标换成日历）：「块长什么样」仍归类型（`outline`）。
+ * ⚠️ 反链项**没有**这样的渲染器。它是每次渲染时现造、从不落盘的合成行，没有库身份，
+ *    也就没有「担任什么机制位」可言 —— 箭头只是那一行的 `props._icon`，不是一个角色。
  */
 const journalRenderer: BlockRenderer = {
   match: (b) => hasRole(b, 'journal'),
@@ -139,9 +113,9 @@ const journalRenderer: BlockRenderer = {
 
 /**
  * **chrome 渲染器**（按角色匹配）：它们只改这一行「头上那一小块」——
- * 反链项的箭头、日记行的日期标题。角色的职责到此为止。
+ * 目前只有日记行（标题换成日期、图标换成日历）。角色的职责到此为止。
  */
-const CHROME_RENDERERS: BlockRenderer[] = [journalRenderer, backRefRenderer]
+const CHROME_RENDERERS: BlockRenderer[] = [journalRenderer]
 
 /**
  * 注册表：**先匹配先赢**，兜底永远在最后。
