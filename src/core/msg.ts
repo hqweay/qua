@@ -507,8 +507,8 @@ export const MSG = {
   /* ------------------------------------------------------ 演示数据的小文案（假数据） */
   'ui.arg.defaultTag': '标签',
   'ui.arg.demoTag': '灵感',
-  'ui.demo.assetMissingName': '丢失的截图.png',
-  'ui.demo.assetReadyName': '架构草图.png',
+  'ui.sample.assetMissingName': '丢失的截图.png',
+  'ui.sample.assetReadyName': '架构草图.png',
 
   /* ---------------------------------------------------------------- Electron 菜单（menu.*） */
   'menu.bar.file': '文件',

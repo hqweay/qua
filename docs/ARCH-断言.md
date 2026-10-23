@@ -316,7 +316,7 @@ AST 遍历 `electron/**/*.ts`：禁止 `workspace` / `seed` / `core/` / `command
 9. **`index.html` 空壳化的代价**：`<title>`、`#badge` 的静态 `title`、`#page-title` 的
    `placeholder` 都变成启动时灌入。JS 起来之前那一小段窗口里没有 tooltip/占位文案
    （视觉上只是空着，不影响使用）；将来若要做静态截图/SSR 需要重新考虑。
-10. **字典里有 3 条「假数据」文案**（`ui.arg.*` / `ui.demo.asset*Name`）：严格说它们该进
+10. **字典里有 3 条「假数据」文案**（`ui.arg.*` / `ui.sample.asset*Name`）：严格说它们该进
     `seed.ts`，本轮为了不动 `commands.ts` 的 import 图先留在字典里。下次清理时一起挪。
 11. **`pnpm gate` 会重复跑 tsc 与 vite**（`build` 一次、`check` 里再一次）。是刻意保留的：
     `check` 单独跑也得是自洽的。嫌慢就把 gate 改成 `… && node checks/smoke.mjs && …`。
