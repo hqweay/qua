@@ -1774,7 +1774,14 @@ export class BlockEditor {
         return loc.block.id
       }
       if (todoOf(loc.block) !== undefined) return null
-      setValue(loc.block, TASK_STATUS_PROP_ID, todo === 'done')
+      // 只落一个属性值、不动结构 ⇒ 一笔事务里正好 1 条 `prop.set`
+      if (this.write) {
+        this.write((tx) => {
+          tx.patch(loc.block.id, (b) => setValue(b, TASK_STATUS_PROP_ID, todo === 'done'))
+        })
+      } else {
+        setValue(loc.block, TASK_STATUS_PROP_ID, todo === 'done')
+      }
       this.undo.record(before, 'structural', Date.now())
       this.renderAll()
       this.placeCaret(loc.block.id, 0)
@@ -1784,7 +1791,35 @@ export class BlockEditor {
     const b = mkBlock(text)
     // 待办不是块的字段，是**任务状态属性**的一个值：这里落值，不落「块的种类」
     if (todo) b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: todo === 'done' }
-    if (!this.insertNear(loc, b)) return null
+    /**
+     * **落点只由 `tx.insert` 算**（它按整片森林取兄弟列表）。
+     * 这里不能再顺手 `splice`/`unshift` 一下：那样同一件事就有两个计算者，
+     * 而树的身份只有一份 —— 谁先算、谁后算，读者无从判断。
+     *
+     * section 根（页／天／查询记录）没有兄弟位，插成它的**首个子块**：
+     * 视觉上「根行之后」就是第一个子块，写回也按 root id 走。
+     *
+     * 事务里**只**开结构那一笔：`b` 自带的待办值不另发属性 op ——
+     * `insert` 已经为每个新块报了 `{parent,index}`，属性会随整块落库，
+     * 再补一条 `prop.set` 就是同一件事记两遍。
+     *
+     * 声明「不许有子块」的根在这里容纳不下一个新块：直接返回 `false`，
+     * 事务里什么都没写 ⇒ 没有任何 op。
+     */
+    if (this.write) {
+      const ok = this.write((tx) => {
+        if (loc.parent === null) {
+          if (typeDeclOf(loc.block).children === 'none') return false
+          tx.insert(b, loc.block.id, 0)
+          return true
+        }
+        tx.insert(b, loc.parent.id, loc.index + 1)
+        return true
+      })
+      if (!ok) return null
+    } else if (!this.insertNear(loc, b)) {
+      return null
+    }
     this.undo.record(before, 'structural', Date.now())
     this.renderAll()
     this.placeCaret(b.id, 0)
