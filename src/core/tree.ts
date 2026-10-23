@@ -178,11 +178,21 @@ export function hasDescendant(doc: Doc, ancestorId: string, maybeChildId: string
 }
 
 /**
- * 副本要带走的属性：属性值照带，**身份位（`_alias`／`_roles`）剔除**。
+ * 副本要带走的属性：属性值照带，**身份位全部剔除**。
  *
- * 判据：复制的是**内容**，不是**身份**。身份（地址、角色）指向的是「这一个」——
+ * 判据：复制的是**内容**，不是**身份**。身份指向的是「这一个」——
  * 两个块共用一个地址，`[[名字]]` 永远只能指到其中一个，另一个再也引用不到。
- * ⇒ 副本不带地址与角色；其余属性值照带（那些是这块自己的数据）。
+ * ⇒ 副本不带任何身份位；其余属性值照带（那些是这块自己的数据）。
+ *
+ * ⚠️ **派生身份的载体也要剔除**（`_date`／`_kind`／`_query`）：它们与角色是同一件事的
+ *    两种写法（角色收窄成两个之后，日记／定义／查询的身份**由数据派生**）。
+ *    只剔 `_roles` 会漏掉这三条 ⇒ 复制日记得到第二个「同一天」，
+ *    而 `journalDays` 按「先序第一个」去重 ⇒ 那个副本对日记流／索引／引用解析
+ *    **完全不可见**：不报错、不崩，只是静静地多出一个引用不到的块。
+ *    判据一句话：**凡是 `hasIdentity` 会认的，副本都不能是。**
+ *
+ * ⚠️ `_queryResult` 跟着 `_query` 一起剔：它是那次查询的冻结结果，副本没有条件可依，
+ *    留着就是一个指向别处 block id 的死列表（刷新时会重新求值，不需要旧值）。
  *
  * ⚠️ `_parentTags` 也剔除：它是「这个标签算作谁的子标签」，而那条关系属于原件。
  *    留着就是一个潜伏值 —— 副本此刻没有 `tag` 角色，用不上它；一旦副本被打回
@@ -192,11 +202,19 @@ export function hasDescendant(doc: Doc, ancestorId: string, maybeChildId: string
  *    只是一棵长得像页的普通子树；复制一个标签同理，副本不再被 `#` 补全找到。
  *    这是有意的：身份不可复制，副本只能是内容。
  */
+const IDENTITY_PROPS: readonly string[] = [
+  ALIAS_PROP,
+  ROLES_PROP,
+  '_parentTags',
+  '_date',
+  '_kind',
+  '_query',
+  '_queryResult',
+]
+
 function contentProps(props: BlockProps): BlockProps | undefined {
   const out = { ...props }
-  delete out[ALIAS_PROP]
-  delete out[ROLES_PROP]
-  delete out['_parentTags']
+  for (const k of IDENTITY_PROPS) delete out[k]
   // 属性袋不留空壳：一块只有角色的块复制后不该留下 `{}`，否则「有没有属性」会有两份答案
   return Object.keys(out).length === 0 ? undefined : out
 }
