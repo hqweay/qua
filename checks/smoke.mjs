@@ -1084,6 +1084,7 @@ await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器
   // ⑥ **同视图内即时传播**：目标页的名字行**就在当前这一页里**时，改主名 ⇒ chip **当场**换字。
   //    ⚠️ ⑤ 走的是「重开页面 ⇒ 重新挂载」，那条路径即使没有即时传播也会绿；这一格才证明派生显示名会刷新。
   const rootId = await page.evaluate(() => window.__qua.__editor.doc.roots[0]?.id ?? '')
+  if (!rootId) throw new Error('前置：当前页应有一个根块')
   const live = await page.evaluate((id) => {
     const ed = window.__qua.__editor
     const root = ed.doc.roots[0]
@@ -1576,10 +1577,19 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
     const rootId = ed.doc.roots[0].id
     const before = window.__qua.blocks().length
     const beforeRoots = ed.doc.roots.length
+    // 虚拟化开启时根行可能不在挂载窗口里 ⇒ 以根行为中心重挂一次（只影响挂哪些行，不改模型）
+    if (!document.querySelector(`.blk[data-block-id="${rootId}"]`)) ed.applyWindow(rootId)
+    // 根行的子树可能处于**收起**态：收起的子树不挂 DOM，新块也就无从量 depth。
+    // 这一格量的是「插进来的块挂在哪一层」，前提是那一层此刻画得出来。
+    const rootEl = document.querySelector(`.blk[data-block-id="${rootId}"]`)
+    if (rootEl?.dataset.collapsed === '1') ed.toggleCollapse(rootId)
     const id = ed.insertBlockAfter(rootId, '斜杠块')
     const rows = window.__qua.blocks()
-    return { id, before, after: rows.length, roots: ed.doc.roots.length, beforeRoots, depth: Number(document.querySelector(`.blk[data-block-id="${id}"]`)?.dataset.depth ?? -1) }
+    const el = document.querySelector(`.blk[data-block-id="${id}"]`)
+    if (!el) return { skipped: '插入的块没挂上 DOM' }
+    return { id, before, after: rows.length, roots: ed.doc.roots.length, beforeRoots, depth: Number(el.dataset.depth) }
   })
+  assert(selfInsert.skipped === undefined, `前置：根行应当在本视图里可观测：${selfInsert.skipped}`)
   assert(selfInsert.roots === selfInsert.beforeRoots, `根行插块不该新增根：${selfInsert.beforeRoots} → ${selfInsert.roots}`)
   assert(selfInsert.depth === 1, `根行插块应是它的子块（depth 1）：${selfInsert.depth}`)
   assert(selfInsert.after === selfInsert.before + 1, '根行插块应块数 +1')
@@ -4100,6 +4110,177 @@ await check(
 
     await ctx.close()
     return `真实键入 1 个字 ⇒ ops=[block.upsert{text}]（1 条，0 条 anno）；DOM 与模型一致；⌘Z 回原文`
+  },
+)
+
+await check(
+  'T65 `insertBlockAfter` 走一笔事务：插一块只发 1 条 upsert{parent,index}（落点由事务算，不是 splice 出来再报）；空块 + 待办只发 1 条 prop.set；一次撤销回得去',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 取一个**非根**的内容块：根是 section（页），插到它「之后」按设计落成它的首个子块，
+     * 走的是另一支；这里要验的是「同级位」那一支。兄弟列表与它在其中的下标都从**模型**读
+     * （`parent.children`），不从 DOM 读 —— 断言要比对的就是「事务算出的落点」。
+     */
+    const target = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const count = () => {
+        let n = 0
+        const walk = (list) => {
+          for (const b of list) {
+            n++
+            walk(b.children)
+          }
+        }
+        walk(ed.store.blocks)
+        return n
+      }
+      // 父块与下标都从模型的**活块**读：`doc` 是装载窗口，`locate` 的 parent/index 就是按它算的
+      const parentOf = (id) => {
+        let hit = null
+        const walk = (list, parent) => {
+          for (const b of list) {
+            if (b.id === id) hit = parent
+            walk(b.children, b)
+          }
+        }
+        walk(ed.store.blocks, null)
+        return hit
+      }
+      const b = ed
+        .rows()
+        .map((r) => r.block)
+        .find((x) => x.text !== '' && !(x.roles?.length) && parentOf(x.id) !== null)
+      const parent = b ? parentOf(b.id) : null
+      return {
+        id: b?.id ?? '',
+        parentId: parent?.id ?? '',
+        index: parent ? parent.children.findIndex((k) => k.id === b.id) : -1,
+        before: count(),
+      }
+    })
+    assert(target.id !== '', '第一页里应有非根的内容块')
+    assert(target.parentId !== '' && target.index >= 0, `前置：应能读出它的父块与下标：${JSON.stringify(target)}`)
+    await page.waitForTimeout(120)
+
+    const after = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const count = () => {
+        let n = 0
+        const walk = (list) => {
+          for (const b of list) {
+            n++
+            walk(b.children)
+          }
+        }
+        walk(ed.store.blocks)
+        return n
+      }
+      const newId = ed.insertBlockAfter(t.id, '插一块')
+      const ops = window.__qua.lastOps()
+      // 模型读数走 store（整片森林）：诊断面的 `blocks()` 只给**当前视图**那一段
+      let inModel = false
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === newId && b.text === '插一块') inModel = true
+          walk(b.children)
+        }
+      }
+      walk(ed.store.blocks)
+      return {
+        newId,
+        ops: ops.map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, value: o.value })),
+        inModel,
+        total: count(),
+      }
+    }, target)
+    await page.waitForTimeout(120)
+
+    assert(after.newId !== null && after.newId !== '', 'insertBlockAfter 应返回新块的 id')
+    assert(after.ops.length === 1, `插一块只该产 1 条 op：${JSON.stringify(after.ops)}`)
+    const upsert = after.ops[0]
+    assert(upsert.e === 'block' && upsert.op === 'upsert', `那一条应是 block.upsert：${JSON.stringify(upsert)}`)
+    assert(upsert.id === after.newId, 'op 应指向新块')
+    assert(
+      upsert.value?.parent === target.parentId,
+      `落点应由事务按整片森林算：父应是「${target.parentId}」，实际「${upsert.value?.parent}」`,
+    )
+    assert(upsert.value?.index === target.index + 1, `下标应是原块之后：${JSON.stringify(upsert.value)}（期望 ${target.index + 1}）`)
+    assert(after.inModel, '新块应真的在模型里（不是只算出一条 op）')
+    assert(after.total === target.before + 1, `块数应 +1：${target.before} → ${after.total}`)
+
+    // 一次撤销回得去：新块从模型里消失，块数回原样
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(200)
+    const back = await page.evaluate((newId) => {
+      const ed = window.__qua.__editor
+      let gone = true
+      let total = 0
+      const walk = (list) => {
+        for (const b of list) {
+          total++
+          if (b.id === newId) gone = false
+          walk(b.children)
+        }
+      }
+      walk(ed.store.blocks)
+      return { gone, total }
+    }, after.newId)
+    assert(back.gone, '一次撤销后新块应不在模型里')
+    assert(back.total === target.before, `一次撤销块数应回原样：${target.before}，实际 ${back.total}`)
+
+    /**
+     * **空块 ＋ `/待办`**：这一支不新建块，只把一个属性值落到块上 ⇒
+     * 一笔事务里**恰好 1 条** `prop.set`，没有任何结构 op（多一条就会在撤销里多一步）。
+     * 用 `/` 命令真实的入口（`invoke` 走的是「当前块」），而不是直调编辑器 —— 顺便钉住接线。
+     */
+    const todo = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const canEdit = (e, x) => {
+        if (x.roles?.length) return false
+        return Boolean(e.blockEl(x.id)?.querySelector('.tx'))
+      }
+      /**
+       * 本页的空块不一定现成有：**自己造一个**（在本页第一个可编辑行下插一个空块）
+       * ——「/待办 落在空块上」这一支必须有可落点的空块。
+       * 只挑现成的会让这一格在假数据一改就静默跳过，而它验的正是「1 条 prop.set」。
+       */
+      let host = ed.rows().map((r) => r.block).find((x) => x.text === '' && !(x.roles?.length) && !(x.children.length))
+      if (!host) {
+        const anchor = ed.rows().map((r) => r.block).find((x) => canEdit(ed, x))
+        if (!anchor) return { skipped: true }
+        const id = ed.insertBlockAfter(anchor.id, '')
+        host = id ? ed.store.find(id) : undefined
+        if (!host) return { skipped: true }
+      }
+      window.__qua.focusBlock(host.id, 0)
+      window.__qua.invoke('core.editor/insert-block', { type: 'todo' })
+      const ops = window.__qua.lastOps()
+      // 属性读数走 store 的活块（诊断面的 `blocks()` 只给当前视图那一段）
+      const live = ed.store.find(host.id)
+      return {
+        skipped: false,
+        ops: ops.map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, value: o.value })),
+        // 任务状态是一个属性槽；只验「槽建出来了、值是布尔」，不绑死属性键名
+        bools: Object.values(live?.props ?? {}).filter((v) => typeof v === 'boolean'),
+      }
+    })
+    if (!todo.skipped) {
+      const propSets = todo.ops.filter((o) => o.e === 'prop' && o.op === 'set')
+      const structOps = todo.ops.filter((o) => o.e === 'block')
+      assert(todo.ops.length === 1, `空块 + 待办只该产 1 条 op：${JSON.stringify(todo.ops)}`)
+      assert(propSets.length === 1, `那一条应是 prop.set：${JSON.stringify(todo.ops)}`)
+      assert(structOps.length === 0, `空块 + 待办不该发结构 op：${JSON.stringify(structOps)}`)
+      assert(todo.bools.length === 1 && todo.bools[0] === false, `块上应落一个「未完成」的任务状态值：${JSON.stringify(todo.bools)}`)
+    }
+
+    await ctx.close()
+    return todo.skipped
+      ? 'insertBlockAfter ⇒ ops=[block.upsert{parent,index}]（1 条，落点＝原块之后）；⌘Z 回原样。空块+待办分支本页没有空块，跳过'
+      : 'insertBlockAfter ⇒ ops=[block.upsert{parent,index}]（1 条，落点＝原块之后）；⌘Z 回原样；空块 + /待办 ⇒ ops=[prop.set]（1 条，0 条结构 op）'
   },
 )
 
