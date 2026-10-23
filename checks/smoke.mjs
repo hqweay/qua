@@ -3,6 +3,10 @@
  * 断言口径尽量贴任务书：能敲字 / Enter 拆块 / Backspace 合并 / Tab 缩进 / 折叠 / 拖拽重排 /
  * 四种区间格式 / 两种行内原子 / 命令面板（无绑定也能执行）/ 菜单由绑定表渲染 /
  * localStorage 持久化 / 三风格 × 亮暗 / 空态·稀疏态·降级态 / 虚拟化与 composing 角标。
+ *
+ * ⚠️ **每条用例必须 `await check(...)`**：`check` 是 async，漏掉 await 的用例会和文件末尾的
+ *    `browser.close()` 并发，报 `browserContext.newPage: Target page, context or browser has been closed`
+ *    —— 看起来像浏览器挂了，其实是用例没进队列。
  */
 import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
