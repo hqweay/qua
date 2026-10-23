@@ -154,8 +154,20 @@ let quiet = false
  *
  * 左右槽显式钉住、不跟随导航，所以历史只记中心槽的 `activeId`。
  * `lock` 用来区分「用户导航」与「历史本身在回放」——后者不能再入栈。
+ *
+ * ⚠️ **同一个 id 可以有两种形态**：今天的 journal 既可能以「日记流入口」打开，
+ *    也可能以「只看这一天」聚焦。历史只存 id 会把两者压成一种（回退后 feed 消失），
+ *    所以每一项都带 `feed` 这个视图形态。
  */
-const nav = { back: [] as string[], forward: [] as string[], lock: false }
+type NavPoint = { id: string; feed: boolean }
+const nav = { back: [] as NavPoint[], forward: [] as NavPoint[], lock: false }
+
+/** 当前中心视图是不是「日记流入口」（多段且全是 journal） */
+function isFeedView(): boolean {
+  if (!mainEd) return false
+  const roots = mainEd.doc.roots
+  return roots.length > 1 && roots.every((b) => isJournal(b))
+}
 
 const isMac = (): boolean => /Mac|iPhone|iPad/.test(navigator.platform)
 /** 短 id：uuidv7 前 12 位是时间戳（同一毫秒创建的块会撞），所以要短就取**尾部随机段** */
@@ -695,17 +707,20 @@ const pageDeps: PageDeps = {
     writeBlockProps(blockId, mutate)
   },
   activeId: () => ws.activeId,
-  setActiveId: (id) => {
+  setActiveId: (id, view) => {
     /**
-     * **记录导航历史**：只有「真的换了落点」且旧落点还在森林里才记。
+     * **记录导航历史**：只有「真的换了落点（或视图形态）」且旧落点还在森林里才记。
      * 历史回放期间 `nav.lock` 为真 ⇒ 不再入栈，否则前进/后退会自己套自己。
      */
-    if (!nav.lock && id !== ws.activeId && findInForest(ws.blocks, ws.activeId)) {
-      nav.back.push(ws.activeId)
+    const feed = view?.feed === true
+    const sameView = feed === isFeedView()
+    if (!nav.lock && (id !== ws.activeId || !sameView) && findInForest(ws.blocks, ws.activeId)) {
+      nav.back.push({ id: ws.activeId, feed: isFeedView() })
       nav.forward = []
     }
     ws.activeId = id
   },
+  rootIds: () => mainEd.doc.roots.map((b) => b.id),
   loadPage: (roots, marks, atoms) => {
     // 换页/换焦点对象：上一条「聚焦块」不再成立，等 focusFirstBlock 重新设上
     propsBlockId = null
@@ -773,13 +788,15 @@ function historyGo(dir: 'back' | 'forward'): boolean {
   const from = dir === 'back' ? nav.back : nav.forward
   const to = dir === 'back' ? nav.forward : nav.back
   while (from.length > 0) {
-    const id = from.pop()!
-    if (id === ws.activeId) continue
-    if (!findInForest(ws.blocks, id)) continue // 目标在历史里被删了：跳过，别把人送到空处
-    to.push(ws.activeId)
+    const point = from.pop()!
+    const feed = isFeedView()
+    // 同 id 但形态不同（feed ↔ 单日）也是一次真实导航，不能跳过
+    if (point.id === ws.activeId && point.feed === feed) continue
+    if (!findInForest(ws.blocks, point.id)) continue // 目标在历史里被删了：跳过，别把人送到空处
+    to.push({ id: ws.activeId, feed })
     nav.lock = true
     try {
-      void registry.invoke('core.block/focus-block', { blockId: id }, 'history')
+      void registry.invoke('core.block/focus-block', { blockId: point.id, feed: point.feed }, 'history')
     } finally {
       nav.lock = false
     }
@@ -1881,7 +1898,7 @@ const api = {
         right: { open: prefs().dock.right.open, width: prefs().dock.right.width, pins: [...prefs().dock.right.pins] },
       },
       // 导航历史（不是 undo 栈）：给断言看「能退到哪 / 能进到哪」
-      nav: { back: [...nav.back], forward: [...nav.forward], canGoBack: nav.back.length > 0, canGoForward: nav.forward.length > 0 },
+      nav: { back: nav.back.map((p) => p.id), forward: nav.forward.map((p) => p.id), canGoBack: nav.back.length > 0, canGoForward: nav.forward.length > 0 },
     }
   },
   text() {

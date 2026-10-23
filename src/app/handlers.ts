@@ -390,7 +390,8 @@ export const HANDLERS: Record<string, Handler> = {
     // 缺省目标是**光标所在块**（块菜单就是这么调的：它不传 args）
     const id = typeof a.blockId === 'string' && a.blockId !== '' ? a.blockId : app.ed.caretBlock()
     if (!id) return false
-    app.zoomTo(id)
+    // `feed` 只来自历史回放：普通块标/面包屑/引用点击不带它，一律单块聚焦
+    app.zoomTo(id, a.feed === true)
     return true
   },
   'core.block/zoom-out': (_a, app) => {

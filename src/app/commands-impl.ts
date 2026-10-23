@@ -97,23 +97,29 @@ export function rootsForMany(blocks: readonly Block[]): Block[] {
 }
 
 /**
- * **打开一个落点时该装哪些根** —— 打开页／聚焦块／历史回放**共用这一条**。
+ * **日记流入口装哪些根**：从 `target` 的日期起，今日在顶、更早存在的天往下。
  *
- * 判据：落点是**今天的 journal** ⇒ 装**日记流**（今日在顶 ＋ 更早存在的天）；
+ * feed 与「单块聚焦」是两种形态：同一个 journal id 可以走这里（入口），
+ * 也可以只走 `rootsFor`（只看这一天）。判据不能是「是不是今天」。
+ */
+export function rootsForFeed(target: Block, blocks: readonly Block[]): Block[] {
+  const days = journalFeedDays(blocks, journalDate(target), FEED_INITIAL)
+  // 日期行只读；没有子块就没有可落光标的地方（feed 里的每一天都要能直接打字）
+  for (const day of days) ensureFirstBlock(day.children)
+  return rootsForMany(days)
+}
+
+/**
+ * **左槽「打开」一个落点时该装哪些根**。
+ *
+ * 判据：落点是**今天的 journal** ⇒ 这一下是「进入 Daily note 入口」，装**日记流**；
  *       否则就是「这块自己 ＋ 它的子树」。
  *
- * 为什么非得抽出来：这条规则**曾经只在「打开页」里有**。历史回放走的是另一条路
- * （`historyGo` → `zoomTo` → `open()`），那里只 `rootsFor` 装单块 ⇒ 在日记流里
- * zoom 进某一天、再按「后退」，回到的不是 feed 而是一个孤立的天（**QB-002**）。
- * 两条路各写一份，改了一边就会漏另一边 —— 这类分叉必须收成一处。
- *
- * ⚠️ **今天是一个「入口」，不是一个普通的块**：左槽里的「Daily note」、
- * 冷启动、「回今日」，指的都是同一件事。
- * ⚠️ 历史里的**其它**日记天仍走单日（左槽只有「今天」这一个入口）。
+ * ⚠️ **聚焦不走这里**：点块标是「只看这一块」，即使目标是今天也只装单日。
+ *    历史回放要还原当时的形态，所以那条信息随落点一起入栈。
  */
 export function rootsForTarget(target: Block, blocks: readonly Block[]): Block[] {
-  const feed = isJournal(target) && journalDate(target) === todayISO() ? journalFeedDays(blocks, todayISO(), FEED_INITIAL) : null
-  return feed ? rootsForMany(feed) : rootsFor(target)
+  return isJournal(target) && journalDate(target) === todayISO() ? rootsForFeed(target, blocks) : rootsFor(target)
 }
 import { demoState } from '../core/seed.ts'
 import { DEFAULT_PREFS, type ThemeMode, type Workspace } from '../core/workspace.ts'
@@ -174,7 +180,20 @@ export interface PageDeps {
    */
   write: (blockId: string, mutate: () => void) => void
   activeId: () => string
-  setActiveId: (id: string) => void
+  /**
+   * 换「当前对象」。
+   *
+   * `view.feed` 说的是**这次要装的形态**（日记流入口 / 单块），不是数据属性：
+   * 同一个 journal id 既可以从左槽以「今日日记流」打开，也可以从块标以「只看这一天」聚焦。
+   * 历史回放要记住的是「当时是哪一种」，所以它得跟着落点一起入栈。
+   */
+  setActiveId: (id: string, view?: { feed?: boolean }) => void
+  /**
+   * 中心编辑器**此刻装载的根 id**。
+   * 单块聚焦时恰好是一个、且等于当前对象；日记流时是多段。
+   * 用于「同一块再点一次块标 ⇒ 不重装」的判据。
+   */
+  rootIds: () => readonly string[]
   /** 把某页的子树装进编辑器（marks/atoms 是库级平铺） */
   loadPage: (roots: Block[], marks: unknown[], atoms: unknown[]) => void
   marks: () => unknown[]
@@ -249,7 +268,8 @@ export function pageCommands(d: PageDeps): Pick<
        *    库里若留着更早的未打开的一天（它不是今天），「回今日」却停在昨天，落点很怪。
        *    装载顺序由 `rootsForTarget` 负责（今日在顶 ＋ 存在的更早的天）。
        */
-      d.setActiveId(isJournal(p) && journalDate(p) === todayISO() ? journalId(todayISO()) : id)
+      const isTodayEntry = isJournal(p) && journalDate(p) === todayISO()
+      d.setActiveId(isTodayEntry ? journalId(todayISO()) : id, { feed: isTodayEntry })
       d.loadPage(rootsForTarget(p, d.blocks()), d.marks(), d.atoms())
       d.refreshList()
       d.refreshTitle()
@@ -365,8 +385,9 @@ export function pageCommands(d: PageDeps): Pick<
  * 日记（日记流）。
  *
  * 两种形态，共用「先幂等物化，再打开」：
- *   · **日记流**（`journalToday`／冷启动）：`date` 在顶，更早的「存在的天」按 `_date` 降序往下；
- *   · **单日**（`journalShift`／左槽打开某天）：只装那一天。
+ *   · **日记流**（`journalToday` 不带日期／冷启动／左槽 Daily note 入口）：
+ *     `date` 在顶，更早的「存在的天」按 `_date` 降序往下；
+ *   · **单日**（`journalShift`／`journalToday` 指定日期／聚焦这一块）：只装那一天。
  *
  * · **幂等**：id 由 `(本地日)` 确定性派生（`journalId`）⇒ 「一天一个」是结构保证，
  *   不靠扫描去重；并发/多设备打开同一天会拿到同一个 id。
@@ -381,7 +402,12 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
     return id
   }
 
-  /** 打开一个块（与 `openPage` **同一条**装载规则：落到今天 ⇒ 日记流） */
+  /**
+   * 打开**单日**：只装这一天自己（不是日记流）。
+   *
+   * ⚠️ 与左槽「Daily note」入口不同：入口是**流**，聚焦/翻日是**这一天**。
+   *    两者都落在同一个 journal id 上，但装的根数量不同 —— 形态由调用方决定。
+   */
   const openBlock = (id: string): void => {
     d.flush()
     const b = d.blocks().find((x) => x.id === id)
@@ -393,8 +419,8 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
      *    日期块自己的 `id` 就是它的身份，`setActiveId` 必须拿它的 id
      *    （按「流的第一段」去设在库里留着更早的未打开天时会把人送到那一天）。
      */
-    d.setActiveId(id)
-    d.loadPage(b ? rootsForTarget(b, d.blocks()) : [], d.marks(), d.atoms())
+    d.setActiveId(id, { feed: false })
+    d.loadPage(b ? rootsFor(b) : [], d.marks(), d.atoms())
     d.refreshList()
     d.refreshTitle()
     d.saveNow()
@@ -412,15 +438,14 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
   const openFeed = (date: string): void => {
     d.flush()
     const anchorId = ensure(date)
-    const days = journalFeedDays(d.blocks(), date, FEED_INITIAL)
-    for (const day of days) ensureFirstBlock(day.children)
+    const anchor = d.blocks().find((b) => b.id === anchorId)
     /**
      * ⚠️ 「回今日」把**今天**设成当前对象，而不是流的**第一段**：库里若留着更早的
      *    未打开的一天（它不是今天），按下「回今日」人却停在昨天，是很怪的落点。
-     *    装载顺序不变（`days` 已按日期降序），只是当前对象归今天。
+     *    装载顺序不变（按日期降序），只是当前对象归今天。
      */
-    d.setActiveId(anchorId)
-    d.loadPage(rootsForMany(days), d.marks(), d.atoms())
+    d.setActiveId(anchorId, { feed: true })
+    d.loadPage(anchor ? rootsForFeed(anchor, d.blocks()) : [], d.marks(), d.atoms())
     d.refreshList()
     d.refreshTitle()
     d.saveNow()
@@ -456,17 +481,29 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
  * ⚠️ zoom **不跟随**左右槽（它们的内容显式钉住）。
  */
 export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut'> {
-  /** 把中心槽指向任意块（在**整片森林**里找，不只是顶层） */
-  const open = (id: string): void => {
-    d.flush()
-    d.setActiveId(id)
+  /**
+   * 把中心槽指向任意块（在**整片森林**里找，不只是顶层）。
+   *
+   * `feed` 只给**历史回放**用：它要还原「当时看的是日记流」这件事，而单看 id 分不出来。
+   * 普通聚焦（块标 / 面包屑 / 引用）永远是 `feed = false`：**只装这一块**。
+   */
+  const open = (id: string, feed = false): void => {
     const b = findInForest(d.blocks(), id)
+    if (!b) return
     /**
-     * ⚠️ 装载规则与「打开页」**同一条**（`rootsForTarget`）：
-     *    落到今天 ⇒ 装日记流；否则装这一块自己。
-     *    少了这层，历史回放会把「日记流」收成一个孤立的天（**QB-002**）。
+     * **已经在「单块聚焦」这一块上 ⇒ 不再重装。**
+     *
+     * 重装会 `loadPage` + `focusFirstBlock`：DOM 整片换掉，屏幕上会闪一下，
+     * 而落点、根集合、内容都没有任何变化 —— 用户再点一次块标时不该付这个代价。
+     * 判据必须是「根只有一个且就是它」，不能用 activeId：日记流的 activeId
+     * 也是今天那一块，但它是多段 feed，点块标正是要收成单日。
      */
-    d.loadPage(b ? rootsForTarget(b, d.blocks()) : [], d.marks(), d.atoms())
+    const roots = d.rootIds()
+    if (!feed && roots.length === 1 && roots[0] === id) return
+
+    d.flush()
+    d.setActiveId(id, { feed })
+    d.loadPage(feed && isJournal(b) ? rootsForFeed(b, d.blocks()) : rootsFor(b), d.marks(), d.atoms())
     d.refreshList()
     d.refreshTitle()
     d.saveNow()
@@ -474,14 +511,12 @@ export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut'> {
   }
 
   return {
-    zoomTo: (id) => {
-      const b = findInForest(d.blocks(), id)
-      if (!b) return
+    zoomTo: (id, feed) => {
       /**
        * 叶子块也能 zoom：`scope: subtree` **含块自身**，叶子就是「只看这一块」——
        * 若叶子不给 zoom，点击行为会**时 zoom 时不 zoom**，用户没法预测一次点击的结果。
        */
-      open(id)
+      open(id, feed === true)
     },
     zoomOut: () => {
       const path = findPath(d.blocks(), d.activeId())
