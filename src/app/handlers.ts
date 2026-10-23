@@ -467,18 +467,18 @@ export const HANDLERS: Record<string, Handler> = {
   },
 
   /* ---- 演示 ---- */
-  'core.demo/load-state': (a, app) => {
+  'dev.fixture/load': (a, app) => {
     const s = S(a.state, 'seed')
     if (s !== 'seed' && s !== 'empty' && s !== 'sparse' && s !== 'degraded' && s !== 'boot') return false
     app.loadState(s)
     return true
   },
-  'core.demo/simulate-ime': (_a, app) => {
+  'dev.ime/simulate': (_a, app) => {
     const r = app.runImeProbe()
     app.toast(t('ui.toast.imeProbe', { fired: r.fired, seq: r.seq.join('→') }), r.fired === 0 ? 'ok' : 'warn')
     return true
   },
-  'core.demo/reset-all': (_a, app) => {
+  'dev.workspace/reset': (_a, app) => {
     app.loadState('seed')
     app.toast(t('ui.toast.resetAll'))
     return true

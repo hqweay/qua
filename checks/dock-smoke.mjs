@@ -52,7 +52,7 @@ const setOpen = (page, left, right) =>
 
 /** 打开一页并等排版稳定 */
 async function openFirstPage(page) {
-  await page.evaluate(() => window.__demo.invoke('core.page/open', { pageId: window.__demo.pages()[0].id }))
+  await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
   await page.waitForTimeout(200)
 }
 
@@ -60,7 +60,7 @@ async function openFirstPage(page) {
 
 await check('A13 左右槽是对称实例：同一容器类型、同一 class 前缀，差异只在 data-dock', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   /**
    * ⚠️ A13 的口径是「**两栏是对称实例**」，不是「两栏内容一样」。
    * 槽里装的是**块**，左右槽装的块本来就不同（左＝今日，右＝反链）
@@ -99,7 +99,7 @@ await check('A13 左右槽是对称实例：同一容器类型、同一 class �
 
 await check('A14 非压缩区间：开关一槽，另一槽宽度不变；中心槽吃掉差值', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   const before = await page.evaluate(dockBox)
   assert(before.left.visible && before.right.visible, `默认两槽应都开：${JSON.stringify(before)}`)
 
@@ -123,7 +123,7 @@ await check('A14 非压缩区间：开关一槽，另一槽宽度不变；中心
 
 await check('A15 宽度手柄：拖动改宽并落盘、clamp 保证中心槽可用；双击恢复默认；关闭/压缩区间不给手柄', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
 
   const read = () =>
     page.evaluate(() => {
@@ -132,7 +132,7 @@ await check('A15 宽度手柄：拖动改宽并落盘、clamp 保证中心槽可
       return {
         widths: { left: w('left'), center: w('center'), right: w('right') },
         handles: { left: display('left'), right: display('right') },
-        dock: window.__demo.snapshot().dock,
+        dock: window.__qua.snapshot().dock,
         inner: window.innerWidth,
         over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
       }
@@ -164,11 +164,11 @@ await check('A15 宽度手柄：拖动改宽并落盘、clamp 保证中心槽可
   assert(!wide.over, `拖宽不该横向溢出：${JSON.stringify(wide.widths)}`)
 
   // 关掉再打开：宽度从 prefs 写回（冷启动 / 切槽走的是同一条 applyChrome）
-  await page.evaluate(() => window.__demo.invoke('core.dock/toggle-left'))
+  await page.evaluate(() => window.__qua.invoke('core.dock/toggle-left'))
   await page.waitForTimeout(120)
   const hidden = await read()
   assert(hidden.widths.left <= 0.5, `关掉的左槽应把列宽收成 0：${hidden.widths.left}`)
-  await page.evaluate(() => window.__demo.invoke('core.dock/toggle-left'))
+  await page.evaluate(() => window.__qua.invoke('core.dock/toggle-left'))
   await page.waitForTimeout(120)
   const reopened = await read()
   assert(
@@ -224,7 +224,7 @@ await check('A15 宽度手柄：拖动改宽并落盘、clamp 保证中心槽可
 
 await check('中心槽保底 480：840 以上守住；840 以下解除且**无横向溢出**', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   const rows = []
   for (const w of [1440, 1100, 1036, 1000, 900, 840, 839, 800, 760, 720]) {
     await page.setViewportSize({ width: w, height: 900 })
@@ -257,7 +257,7 @@ await check('中心槽保底 480：840 以上守住；840 以下解除且**无�
 
 await check('A1 同容器相邻块间距全等（offset 差值集合大小 = 1）', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
   // 取同一层（data-depth 相同且相邻）的块，量「上一块底 → 本块顶」的间距
   const gaps = await page.evaluate(() => {
@@ -283,7 +283,7 @@ await check('A1 同容器相邻块间距全等（offset 差值集合大小 = 1�
 
 await check('A2 通用块样式 padding-block / margin 为 0（S2：豁免只有渲染器 inset）', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
 
   /**
@@ -319,7 +319,7 @@ await check('A2 通用块样式 padding-block / margin 为 0（S2：豁免只有
 
 await check('A3 嵌套深度 ≥1 的块不带 border / box-shadow（层级不靠画框）', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
   const bad = await page.evaluate(() => {
     const out = []
@@ -340,7 +340,7 @@ await check('A3 嵌套深度 ≥1 的块不带 border / box-shadow（层级不�
 
 await check('A7 正文行宽不超过 measure，且不窄于可读下限', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
   const m = await page.evaluate(() => {
     const doc = document.getElementById('doc')
@@ -362,7 +362,7 @@ await check('A7 正文行宽不超过 measure，且不窄于可读下限', async
 
 await check('A8 View 态没有缩放手柄；拖拽把手已并进块标，静止态不可见', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
   const r = await page.evaluate(() => {
     const visible = (el) => {

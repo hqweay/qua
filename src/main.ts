@@ -17,7 +17,7 @@ import {
 import {
   Registry,
   type App,
-  type DemoState,
+  type FixtureName,
   type MenuRequest,
   type PanelKind,
 } from './core/commands/index.ts'
@@ -38,7 +38,7 @@ import { createBadge, type BadgeSnapshot } from './ui/badge.ts'
 import { renderAliasEditor } from './ui/alias-editor.ts'
 import { renderFieldsEditor } from './ui/fields-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type PanelDeps } from './ui/panels.ts'
-import { demoCommands, journalCommands, pageCommands, propsCommands, rootsFor, rootsForMany, tagTreeCommands, takenWhere, viewCommands, zoomCommands, type PageDeps } from './app/commands-impl.ts'
+import { devCommands, journalCommands, pageCommands, propsCommands, rootsFor, rootsForMany, tagTreeCommands, takenWhere, viewCommands, zoomCommands, type PageDeps } from './app/commands-impl.ts'
 import { HANDLERS } from './app/handlers.ts'
 import { darkQuery, resolveTheme } from './core/theme.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
@@ -1076,7 +1076,7 @@ const app: App = {
     toast: (text, kind) => app.toast(text, kind),
   }),
 
-  ...demoCommands({
+  ...devCommands({
     replaceWorkspace: (next) => {
       ws = next
       // 换库 ⇒ 旧落点全部失效；历史留着只会把用户送到「上一份演示数据」的 id
@@ -1643,12 +1643,12 @@ stateMenuBtn.addEventListener('click', () => {
     { id: 'theme-light', label: t('ui.theme.mode.light'), hint: '', icon: pick(th === 'light', 'lucide:sun'), group: 'dbg/1-theme', command: 'core.view/set-theme', args: { mode: 'light' } },
     { id: 'theme-dark', label: t('ui.theme.mode.dark'), hint: '', icon: pick(th === 'dark', 'lucide:moon'), group: 'dbg/1-theme', command: 'core.view/set-theme', args: { mode: 'dark' } },
     // 演示状态
-    { id: 'seed', label: t('ui.stateMenu.seed'), hint: t('ui.stateMenu.seedHint'), icon: 'lucide:book-open', group: 'dbg/2-state', command: 'core.demo/load-state', args: { state: 'seed' } },
+    { id: 'seed', label: t('ui.stateMenu.seed'), hint: t('ui.stateMenu.seedHint'), icon: 'lucide:book-open', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'seed' } },
     // 冷启动：看「第一次打开 app」那一屏到底长什么样（不用清 localStorage 再刷新）
-    { id: 'boot', label: t('ui.stateMenu.boot'), hint: t('ui.stateMenu.bootHint'), icon: 'lucide:sunrise', group: 'dbg/2-state', command: 'core.demo/load-state', args: { state: 'boot' } },
-    { id: 'degraded', label: t('ui.state.degraded'), hint: t('ui.stateMenu.degradedHint'), icon: 'lucide:triangle-alert', group: 'dbg/2-state', command: 'core.demo/load-state', args: { state: 'degraded' } },
-    { id: 'sparse', label: t('ui.state.sparse'), hint: t('ui.stateMenu.sparseHint'), icon: 'lucide:square-dashed', group: 'dbg/2-state', command: 'core.demo/load-state', args: { state: 'sparse' } },
-    { id: 'empty', label: t('ui.state.empty'), hint: t('ui.stateMenu.emptyHint'), icon: 'lucide:square', group: 'dbg/2-state', command: 'core.demo/load-state', args: { state: 'empty' } },
+    { id: 'boot', label: t('ui.stateMenu.boot'), hint: t('ui.stateMenu.bootHint'), icon: 'lucide:sunrise', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'boot' } },
+    { id: 'degraded', label: t('ui.state.degraded'), hint: t('ui.stateMenu.degradedHint'), icon: 'lucide:triangle-alert', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'degraded' } },
+    { id: 'sparse', label: t('ui.state.sparse'), hint: t('ui.stateMenu.sparseHint'), icon: 'lucide:square-dashed', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'sparse' } },
+    { id: 'empty', label: t('ui.state.empty'), hint: t('ui.stateMenu.emptyHint'), icon: 'lucide:square', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'empty' } },
   ]
   layers.openMenu({
     rows,
@@ -2009,7 +2009,7 @@ const api = {
     scheduleSave()
     scheduleBadge()
   },
-  loadState: (s: DemoState) => registry.invoke('core.demo/load-state', { state: s }, 'api'),
+  loadState: (s: FixtureName) => registry.invoke('dev.fixture/load', { state: s }, 'api'),
   focusBlock: (blockId: string, off = 0) => {
     ed = mainEd
     editorEl.focus()
@@ -2058,7 +2058,7 @@ const api = {
 
 declare global {
   interface Window {
-    __demo: typeof api
+    __qua: typeof api
   }
 }
-window.__demo = api
+window.__qua = api

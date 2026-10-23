@@ -19,10 +19,10 @@ const written = []
 async function scene(name, fn, opts = {}) {
   const { ctx, page, errors } = await freshPage(browser, base, { viewport: VIEW })
   try {
-    await page.evaluate(() => window.__demo.quiet(true))
-    if (opts.state) await page.evaluate((s) => window.__demo.loadState(s), opts.state)
-    if (opts.theme) await page.evaluate((t) => window.__demo.setTheme(t), opts.theme)
-    if (opts.page !== undefined) await page.evaluate((i) => window.__demo.invoke('core.page/open', { pageId: window.__demo.pages()[i].id }), opts.page)
+    await page.evaluate(() => window.__qua.quiet(true))
+    if (opts.state) await page.evaluate((s) => window.__qua.loadState(s), opts.state)
+    if (opts.theme) await page.evaluate((t) => window.__qua.setTheme(t), opts.theme)
+    if (opts.page !== undefined) await page.evaluate((i) => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[i].id }), opts.page)
     await fn(page)
     await page.waitForTimeout(160)
     const file = `${SHOTS}${name}.png`
@@ -38,7 +38,7 @@ console.log(`\n截图：${base}（${mode}）\n`)
 
 /* ---- 唯一样式（同一份内容、同一个视口） ---- */
 await scene('默认-亮', async (p) => {
-  await p.evaluate(() => window.__demo.focus())
+  await p.evaluate(() => window.__qua.focus())
 }, { theme: 'light' })
 
 /* ---- 亮/暗 ---- */
@@ -46,7 +46,7 @@ await scene('默认-暗', async () => {}, { theme: 'dark' })
 
 /* ---- 浮层四件套 ---- */
 await scene('overlay-命令面板', async (p) => {
-  await p.evaluate(() => window.__demo.focus())
+  await p.evaluate(() => window.__qua.focus())
   await p.keyboard.press('Meta+p')
   await p.locator('.layer-input').fill('块')
 })
@@ -61,8 +61,8 @@ await scene('overlay-块菜单', async (p) => {
 
 await scene('overlay-斜杠菜单', async (p) => {
   await p.evaluate(() => {
-    const bs = window.__demo.blocks()
-    window.__demo.focusBlock(bs[bs.length - 1].id, 0)
+    const bs = window.__qua.blocks()
+    window.__qua.focusBlock(bs[bs.length - 1].id, 0)
   })
   await p.keyboard.press('End')
   await p.keyboard.press('Enter')
@@ -77,15 +77,15 @@ await scene('overlay-引用信息气泡', async (p) => {
 })
 
 await scene('badge-状态角标展开', async (p) => {
-  await p.evaluate(() => window.__demo.badgePanel(true))
+  await p.evaluate(() => window.__qua.badgePanel(true))
 })
 
 await scene('panel-绑定表', async (p) => {
-  await p.evaluate(() => window.__demo.openPanel('bindings'))
+  await p.evaluate(() => window.__qua.openPanel('bindings'))
 })
 
 await scene('panel-上下文键', async (p) => {
-  await p.evaluate(() => window.__demo.openPanel('context'))
+  await p.evaluate(() => window.__qua.openPanel('context'))
 })
 
 /* ---- 三个演示状态 ---- */
@@ -98,7 +98,7 @@ await scene('proof-真实编辑', async (p) => {
   await p.evaluate(() => {
     const rows = [...document.querySelectorAll('.blk')]
     const pick = rows.find((r) => Number(r.dataset.depth) === 2) ?? rows[3]
-    window.__demo.focusBlock(pick.dataset.blockId, 2)
+    window.__qua.focusBlock(pick.dataset.blockId, 2)
   })
   await p.keyboard.press('Enter')
   await p.keyboard.type('现场敲出来的一个新块，然后 ⌘B 加粗')
@@ -108,17 +108,17 @@ await scene('proof-真实编辑', async (p) => {
 
 /* ---- 虚拟化对比 ---- */
 await scene('state-虚拟化-on', async (p) => {
-  await p.evaluate(() => window.__demo.setVirtualize(true, 3))
-  await p.evaluate(() => window.__demo.badgePanel(true))
+  await p.evaluate(() => window.__qua.setVirtualize(true, 3))
+  await p.evaluate(() => window.__qua.badgePanel(true))
 })
 
 /* ---- README 头图：一张「有内容」的页（查询块 ＋ 引用 ＋ 待办 ＋ 四种区间格式） ---- */
 await scene('readme-hero', async (p) => {
   await p.evaluate(() => {
-    const pages = window.__demo.pages()
+    const pages = window.__qua.pages()
     const i = pages.findIndex((x) => (x.title ?? '').includes('产品设计'))
-    window.__demo.invoke('core.page/open', { pageId: pages[i].id })
-    window.__demo.focusBlock(window.__demo.blocks()[0].id, 0)
+    window.__qua.invoke('core.page/open', { pageId: pages[i].id })
+    window.__qua.focusBlock(window.__qua.blocks()[0].id, 0)
   })
 }, { theme: 'light' })
 

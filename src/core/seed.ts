@@ -576,7 +576,7 @@ export function bootWorkspace(): Workspace {
   return forest(blocks, feed)
 }
 
-export function demoState(name: 'seed' | 'empty' | 'sparse' | 'degraded' | 'boot'): Workspace {
+export function fixtureWorkspace(name: 'seed' | 'empty' | 'sparse' | 'degraded' | 'boot'): Workspace {
   const ws =
     name === 'empty'
       ? emptyWorkspace()

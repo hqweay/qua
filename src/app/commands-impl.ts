@@ -121,11 +121,11 @@ export function rootsForFeed(target: Block, blocks: readonly Block[]): Block[] {
 export function rootsForTarget(target: Block, blocks: readonly Block[]): Block[] {
   return isJournal(target) && journalDate(target) === todayISO() ? rootsForFeed(target, blocks) : rootsFor(target)
 }
-import { demoState } from '../core/seed.ts'
+import { fixtureWorkspace } from '../core/seed.ts'
 import { DEFAULT_PREFS, type ThemeMode, type Workspace } from '../core/workspace.ts'
 import { t, type MsgId } from '../core/msg.ts'
 import { nextTheme } from '../core/theme.ts'
-import type { App, DemoState } from '../core/ports.ts'
+import type { App, FixtureName } from '../core/ports.ts'
 import type { Row } from '../ui/layers.ts'
 
 /* ═══════════════════════════════════════════════════════ 页 */
@@ -577,7 +577,7 @@ export function viewCommands(d: ViewDeps): Pick<App, 'setTheme' | 'toggleTheme' 
 
 /* ═══════════════════════════════════════════════════════ 演示与诊断 */
 
-export interface DemoDeps {
+export interface DevDeps {
   /**
    * 换掉整个库。⚠️ 这里是**整体替换**（demo 专用）：新库由装配层接管，
    * 所以用回调而不是返回对象——库的唯一持有者仍是装配层（门禁 17）。
@@ -593,7 +593,7 @@ export interface DemoDeps {
   compositionSeq: () => string[]
 }
 
-const STATE_LABEL: Record<DemoState, MsgId> = {
+const STATE_LABEL: Record<FixtureName, MsgId> = {
   seed: 'ui.state.seed',
   empty: 'ui.state.empty',
   sparse: 'ui.state.sparse',
@@ -601,10 +601,10 @@ const STATE_LABEL: Record<DemoState, MsgId> = {
   boot: 'ui.state.boot',
 }
 
-export function demoCommands(d: DemoDeps): Pick<App, 'loadState' | 'setVirtualize' | 'runImeProbe'> {
+export function devCommands(d: DevDeps): Pick<App, 'loadState' | 'setVirtualize' | 'runImeProbe'> {
   return {
     loadState: (state) => {
-      const fresh = demoState(state)
+      const fresh = fixtureWorkspace(state)
       // 换的是内容，不是外观：保留用户当前的主题档位
       fresh.prefs = { ...DEFAULT_PREFS, ...fresh.prefs, theme: d.prefs().theme }
       d.replaceWorkspace(fresh)
