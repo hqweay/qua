@@ -274,13 +274,10 @@ export class BlockEditor {
   /**
    * 写入事务入口（装配层注入，见 `Run`）。
    *
-   * 此刻**没有任何写方法调它**：管道先铺好，方法逐个接过来，接一个有断言一个，
-   * 免得「一次改全线」把行为变化的来源和管道本身混在一起。
-   *
-   * 存成公开只读字段而不是 `private`：私有字段在没有读者时会被「声明了没用」判成噪音，
-   * 而它恰恰是这一轮的交付物 —— 形状就是「装配层交得进来、下一个方法拿得到」。
+   * 目前由 `setText`／`editBlock`／`syncFromDom` 的主路径使用；还有一批写方法在直改活块，
+   * 逐个接过来、接一个有断言一个，免得「一次改全线」把行为变化的来源和管道本身混在一起。
    */
-  readonly write: Run | undefined
+  write: Run | undefined
   /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
   private readonly offStore: () => void
   private readonly unbind: () => void
@@ -1280,16 +1277,42 @@ export class BlockEditor {
     if (this.editBase?.id !== id) this.beginEdit(loc.block)
     const next = this.readText(id)
     if (next === loc.block.text) return
-    const before = this.snap()
     const change = diffText(loc.block.text, next)
-    writeBlockText(loc.block, next)
-    this.marks = mapMarks(this.marks, id, change)
+    const mm = mapMarks(this.marks, id, change)
     const r = mapAtoms(this.atoms, id, change)
-    this.atoms = r.kept
+    /**
+     * **这一笔会不会顺手成标签**：`convertHashTag` 的判据是「**模型里**的正文刚敲完一个
+     * `#名字`」，所以它必须在正文落进模型之前算出来 —— 落进去之后就再也问不出「刚才那一下
+     * 是不是敲了分隔符」（`trailingHashTag` 是纯函数，问的就是 `next` 这段字）。
+     *
+     * 为什么它决定走哪条管线：成标签那一笔要**建标签块 + 写归属**，而这两个写口都还在直写，
+     * 混进事务里只会得到「正文进了 op、归属没进」的半批。这半批比慢更贵，所以这一笔整体让给直写。
+     */
+    const willTag = !this.probe.isComposing && canWriteText(loc.block) && trailingHashTag(next) !== null
+    const before = this.snap()
+    if (this.write && !willTag) {
+      // 与 `setText` 同一笔：正文对不上敲进来的字，锚点也不可能对得上，所以两者同事务
+      // （锚点只喂这一块的，理由见 `setText`）
+      this.write((tx) => {
+        tx.patch(id, (b) => writeBlockText(b, next))
+        tx.setAnnotations(
+          id,
+          mm.filter((m) => m.blockId === id),
+          r.kept.filter((a) => a.blockId === id),
+        )
+      })
+    } else {
+      writeBlockText(loc.block, next)
+      this.marks = mm
+      this.atoms = r.kept
+    }
     /**
      * **行内标签**：敲下分隔符那一刻，`#名字` 换成「1 格原子 ＋ 一条归属」。
      * 组合期不做（输入法中间态里的 `#` 不是标签语法）。
      * 放在 `undo.record(before)` 之前 ⇒ 删字、插原子、写归属是**同一笔撤销**。
+     *
+     * 上面已经按 `willTag` 分了流（为真的那一笔走的是直写）⇒ 这里只在直写之后才可能命中；
+     * 留着它是因为「正文已落、标签还没认」这一瞬间**仍在直写里**，去掉它就是把识别一起删了。
      */
     const conv = this.probe.isComposing ? null : this.convertHashTag(id)
     let caret = this.sel ? this.sel.aOff : null

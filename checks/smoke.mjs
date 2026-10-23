@@ -391,21 +391,30 @@ await check('T4 锚点的粘性映射：在区间起点插入不撑大、终点�
     window.__qua.focusBlock(id, 0)
     return id
   })
+  /**
+   * ⚠️ 读回的是**这一次刚加上的那条**（`[0,2)`），不是 `marks()[0]`：种子里本来就有一条
+   *    `bold`，两者同型时按数组下标取会随写入顺序漂移（实测取到另一块上的那条，报 `[5,21)`）。
+   */
+  const bold0 = () =>
+    page.evaluate(
+      (id) => window.__qua.marks().find((m) => m.blockId === id && m.type === 'bold' && m.start < 2) ?? null,
+      r,
+    )
   await page.keyboard.press('Shift+ArrowRight')
   await page.keyboard.press('Shift+ArrowRight')
   await page.keyboard.press(kbd('mod+b'))
-  const m0 = (await page.evaluate(() => window.__qua.marks()))[0]
-  assert(m0.start === 0 && m0.end === 2, `初始锚点应为 [0,2)：${JSON.stringify(m0)}`)
+  const m0 = await bold0()
+  assert(m0 && m0.start === 0 && m0.end === 2, `初始锚点应为 [0,2)：${JSON.stringify(m0)}`)
   // 光标停到区间起点（offset 0）再插入 ⇒ 起点右移（不撑大）
   await page.evaluate((id) => window.__qua.focusBlock(id, 0), r)
   await page.keyboard.type('X')
-  const m1 = (await page.evaluate(() => window.__qua.marks()))[0]
-  assert(m1.start === 1 && m1.end === 3, `起点插入后应整体右移到 [1,3)：${JSON.stringify(m1)}`)
+  const m1 = await bold0()
+  assert(m1 && m1.start === 1 && m1.end === 3, `起点插入后应整体右移到 [1,3)：${JSON.stringify(m1)}`)
   // 光标停到区间终点再插入 ⇒ 终点不动
   await page.evaluate((id) => window.__qua.focusBlock(id, 3), r)
   await page.keyboard.type('Y')
-  const m2 = (await page.evaluate(() => window.__qua.marks()))[0]
-  assert(m2.start === 1 && m2.end === 3, `终点插入后应保持 [1,3)：${JSON.stringify(m2)}`)
+  const m2 = await bold0()
+  assert(m2 && m2.start === 1 && m2.end === 3, `终点插入后应保持 [1,3)：${JSON.stringify(m2)}`)
   await ctx.close()
   return `[0,2) →起点插→ [1,3) →终点插→ [1,3)（两端口径与既有实现一致）`
 })
@@ -4005,6 +4014,92 @@ await check(
 
     await ctx.close()
     return `setText ⇒ ops=[block.upsert{text}]（1 条，0 条 anno）；正文/DOM 同步改；⌘Z 回原文`
+  },
+)
+
+await check(
+  'T64 真实键入也走一笔事务：打一个普通字只发 1 条 upsert{text}（无锚点变化 ⇒ 0 条 anno），一次撤销回得去',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    /**
+     * ⚠️ **不 quiet**：`quiet(true)` 只掐 toast，落盘还是照走 —— 这里要留着，
+     * 因为「这次改动到底被当成整库提交还是按 op 提交」只有在真提交一次之后才看得到。
+     */
+    await openFirstPage(page)
+
+    const target = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      /**
+       * **现行里挑一个可编辑的内容块**：没有角色（不是页/日记/标签这些身份块，正文归它自己）、
+       * 没有子块、也没有标签 chip（chip 挂在正文后面、不进读数，混进来就要额外拆一次正文）。
+       *
+       * ⚠️ 必须取**现行**而不是根块的直接子块：有些页打开时聚焦的是 `[[引用]]`（zoom 进子块），
+       *    那时根的子块并不在本视图里 —— 往不在视图里的块打字，落点会跑掉（真踩过）。
+       */
+      const b = ed
+        .rows()
+        .map((r) => r.block)
+        .find((x) => !(x.roles?.length) && !x.children.length && !(x.props?._tags?.length))
+      return { id: b?.id ?? '', text: b?.text ?? '' }
+    })
+    assert(target.id !== '', '第一页里应有可编辑的内容块')
+    await page.waitForTimeout(120)
+    // 落盘证据直接读 storage（诊断面没有 `changes` 出口）：提交前的那一份应当**不含刚敲的字**
+    const storedBefore = await page.evaluate(() => localStorage.getItem('qua.workspace') ?? '')
+
+    // 真实键盘（走 `input` → `syncFromDom`，与 T63 的 `setText` 是两条管线）
+    await page.evaluate((id) => window.__qua.focusBlock(id, 9999), target.id)
+    await page.keyboard.type('Z')
+    await page.waitForTimeout(120)
+
+    const after = await page.evaluate((id) => {
+      const b = window.__qua.blocks().find((x) => x.id === id)
+      const ed = window.__qua.__editor
+      return {
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, text: o.value?.text })),
+        text: b?.text ?? '',
+        // 读数与模型同一口径（`readText` 跳过 chip）；另留一份 DOM 原样，便于失败时看出差在哪
+        measured: ed.readText(id),
+        domText: ed.txEl(id)?.textContent ?? '',
+      }
+    }, target.id)
+    await page.waitForTimeout(450)
+
+    /**
+     * **这批 op 真的被交给落盘**（不是只算出来给诊断面看）：防抖 250ms 之后盘上就该带上新字。
+     * 断言的是「盘里出现了这个字」——`persist` 拿空 op 时会整库提交，那也照样能写进去，
+     * 所以这条只管「写进去了」，「按 op 写」由上面那条 ops 断言负责。
+     */
+    const storedAfter = await page.evaluate(() => localStorage.getItem('qua.workspace') ?? '')
+    assert(!storedBefore.includes(`${target.text}Z`), '前置：动手前盘上不该已经有这个字')
+    assert(storedAfter.includes(`${target.text}Z`), '这批 op 应真的落进盘里（不是只算给诊断面）')
+
+    const upserts = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert')
+    const annos = after.ops.filter((o) => o.e === 'anno')
+    assert(after.text.endsWith('Z'), `模型里正文应已带上刚敲的字：${JSON.stringify(after.text)}`)
+    assert(after.ops.length === 1, `真实键入 1 个字只该产 1 条 op：${JSON.stringify(after.ops)}`)
+    assert(upserts.length === 1 && upserts[0].text === after.text, `那一条应是 block.upsert{text}：${JSON.stringify(upserts)}`)
+    assert(upserts[0].id === target.id, 'op 应指向被敲的那一块')
+    assert(annos.length === 0, `无锚点变化 ⇒ 0 条 anno：${JSON.stringify(annos)}`)
+    assert(after.measured === after.text, `DOM 读数应与模型一致（不是只改了 DOM）：${JSON.stringify([after.measured, after.domText])}`)
+
+    // 一次撤销回得去：正文回到敲之前，块数不变
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(200)
+    const back = await page.evaluate((id) => {
+      const ed = window.__qua.__editor
+      const live = ed.store.find(id)
+      return {
+        text: live?.text ?? null,
+        // 撤销后这一块可能已经不在**本视图**（装载窗口）里了 ⇒ 读数走 store，并留一句给人看
+        inView: ed.doc.roots.flatMap((r) => [r, ...r.children]).some((b) => b.id === id),
+        roots: ed.doc.roots.length,
+      }
+    }, target.id)
+    assert(back.text === target.text, `一次撤销应回到原文「${target.text}」：${JSON.stringify(back)}`)
+
+    await ctx.close()
+    return `真实键入 1 个字 ⇒ ops=[block.upsert{text}]（1 条，0 条 anno）；DOM 与模型一致；⌘Z 回原文`
   },
 )
 
