@@ -1,24 +1,24 @@
 /**
- * **身份块的正文是名字，不是内容。**
+ * **身份块的正文是名字或投影；名字不在正文里。**
  *
  * 这里钉的是「内容写路径不许改身份块正文」与「复制必须带走身份」两件事，
- * 失败方式都是静默的：不报错、不崩，只是用户按了一次退格，标签名被拼上了一行正文
- * （日记更糟：往只读的日期投影里塞了字），或者复制出来的块悄悄少了图标、日期、属性与角色。
+ * 失败方式都是静默的：不报错、不崩，只是用户按了一次退格，标签的描述被拼上了一行内容
+ * （日记更糟：往只读的日期投影里塞了字），或者复制出来的块悄悄少了图标、日期、属性与身份。
  *
  * 规则：
- *   · 合并（块首退格）的目标是标签／字段定义／日记 ⇒ **不成立**（返回 null，两边都不动）；
- *     这三个身份有两个来源：显式角色（标签）与数据（`_kind`／`_date`），判据收在 `hasIdentity`；
- *   · 目标是普通内容块（含页，页的行本来就允许直接编辑）⇒ 照旧合并；
- *   · 复制子树 ⇒ **属性值带走、身份不带走**，且每一块都发新 id。
+ *   · 合并（块首退格）的目标是字段定义／日记／查询 ⇒ **不成立**（返回 null，两边都不动）；
+ *   · 目标是普通内容块、页或标签 ⇒ 照旧合并：它们的正文是**描述**（名字在 `_aliases`）；
+ *   · 复制子树 ⇒ **属性值带走、身份不带走**（`_aliases`／`_lists`／`_display` 与派生载体），
+ *     且每一块都发新 id。
  *
- * ⚠️ 「属性值带走、身份不带走」不是两件事，是一条判据的两半：身份（地址／角色／派生载体）
- *    指向的是「这一个」，副本只能是内容。只看角色会漏掉派生身份 —— 那正是本文件最后一条
+ * ⚠️ 「属性值带走、身份不带走」不是两件事，是一条判据的两半：身份（地址／列表／派生载体）
+ *    指向的是「这一个」，副本只能是内容。只看地址会漏掉派生身份 —— 那正是本文件最后一条
  *    测试钉的（复制日记造出第二个「同一天」，而它引用不到）。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  addRole,
+  addList,
   canWriteText,
   cloneSubtree,
   hasIdentity,
@@ -38,30 +38,32 @@ const j = (date: string, children: Block[] = []): Block => ({
   props: { _date: date },
 })
 
-test('canWriteText：标签/字段定义/日记的正文是名字；页与普通块是内容', () => {
+test('canWriteText：字段定义／日记／查询的正文只读；页、标签、普通块的正文是描述', () => {
   const tag = mkBlock('设计')
-  addRole(tag, 'tag')
+  addList(tag, 'tag')
   const schema = mkBlock('截止日')
   schema.props = { _kind: 'date' }
   const page = mkBlock('某一页')
-  addRole(page, 'page')
+  addList(page, 'page')
+  const query = mkBlock('我的查询')
+  query.props = { _query: { where: { todo: 'todo' } } }
 
-  assert.equal(canWriteText(tag), false)
+  assert.equal(canWriteText(tag), true, '标签的正文是描述，名字在 `_aliases`')
   assert.equal(canWriteText(schema), false)
   assert.equal(canWriteText(j('2026-10-22')), false)
-  // 页是容器，它的行本来就允许直接编辑（在页名上打字就是改名）⇒ 不在这条判据里
+  assert.equal(canWriteText(query), false, '查询的条件是它的身份，正文只是名字')
   assert.equal(canWriteText(page), true)
   assert.equal(canWriteText(mkBlock('一行内容')), true)
 })
 
-test('合并：前一块是标签 ⇒ 不成立，标签名与两边正文都不动', () => {
-  const tag = mkBlock('设计')
-  addRole(tag, 'tag')
+test('合并：前一块是字段定义 ⇒ 不成立，名字与两边正文都不动', () => {
+  const schema = mkBlock('截止日')
+  schema.props = { _kind: 'date' }
   const child = mkBlock('一行内容')
-  const doc: Doc = { roots: [tag, child] }
+  const doc: Doc = { roots: [schema, child] }
 
   assert.equal(mergeIntoPrev(doc, child.id), null)
-  assert.equal(tag.text, '设计', '标签名是身份，不该被并进来的正文改写')
+  assert.equal(schema.text, '截止日', '定义的名字是身份，不该被并进来的正文改写')
   assert.equal(child.text, '一行内容', '合并不成立 ⇒ 被并的块也不能丢正文')
   assert.equal(doc.roots.length, 2, '两个块都还在')
 })
@@ -74,6 +76,18 @@ test('合并：前一块是日记 ⇒ 不成立，日期投影恒空', () => {
   assert.equal(mergeIntoPrev(doc, child.id), null)
   assert.equal(day.text, '', '日期行的正文是 `_date` 的只读投影，恒空')
   assert.equal(day.children.length, 1, '子块没被摘走')
+})
+
+test('合并：前一块是标签 ⇒ 照旧合并；名字（别名）不受影响（回归）', () => {
+  const tag = mkBlock('设计')
+  tag.props = { _aliases: ['设计'], _lists: ['tag'], _display: 'alias' }
+  const child = mkBlock('后面那段')
+  const doc: Doc = { roots: [tag, child] }
+
+  const r = mergeIntoPrev(doc, child.id)
+  assert.ok(r, '标签正文是描述 ⇒ 内容写路径不再拦它')
+  assert.equal(tag.text, '设计后面那段', '描述拼接')
+  assert.deepEqual(tag.props?._aliases, ['设计'], '地址一个字节不动')
 })
 
 test('合并：前一块是普通内容块 ⇒ 照旧合并（回归）', () => {
@@ -92,15 +106,20 @@ test('复制子树：属性值带走、身份不带走，且每一块都发新 i
   const kid = mkBlock('子块')
   kid.props = { _icon: 'lucide:star' }
   const page = mkBlock('某页')
-  addRole(page, 'page')
-  page.props = { ...page.props, _icon: 'lucide:file', _alias: '另一个名字' }
+  page.props = {
+    _aliases: ['某页', '另一个名字'],
+    _lists: ['page', 'tag'],
+    _display: 'alias',
+    _icon: 'lucide:file',
+  }
   page.children = [kid]
 
   const { block, idMap } = cloneSubtree(page)
 
   assert.notEqual(block.id, page.id)
-  assert.equal(block.props?._roles, undefined, '副本不带角色：两个块共用一个地址，名字就只能指到其中一个')
-  assert.equal(block.props?._alias, undefined, '副本不带地址：地址属于原件')
+  assert.equal(block.props?._aliases, undefined, '副本不带地址：地址属于原件')
+  assert.equal(block.props?._lists, undefined, '副本不带列表：副本只是内容，不是页/标签')
+  assert.equal(block.props?._display, undefined, '副本不带显示模式：那是身份的一部分')
   assert.equal(block.props?._icon, 'lucide:file', '属性值要一起带走（图标、日期、字段值）')
   assert.notEqual(block.props, page.props, '属性袋是副本，不是同一个对象')
   assert.equal(block.text, '某页')
@@ -112,7 +131,7 @@ test('复制子树：属性值带走、身份不带走，且每一块都发新 i
   assert.equal(idMap.get(kid.id), kidCopy.id)
 })
 
-test('复制子树：原件没有的角色/属性，副本也不凭空多出来', () => {
+test('复制子树：原件没有的身份/属性，副本也不凭空多出来', () => {
   const plain = mkBlock('光块')
   const { block } = cloneSubtree(plain)
   assert.equal(block.props, undefined, '不留空数组、也不留空属性袋')
@@ -120,8 +139,8 @@ test('复制子树：原件没有的角色/属性，副本也不凭空多出来'
 
 test('复制子树：派生身份也不带走——副本不能是日记／定义／查询', () => {
   // 判据：凡是 `hasIdentity` 会认的，副本都不能是。
-  // 角色收窄成两个之后，日记／定义／查询的身份**由数据派生**（`_date`／`_kind`／`_query`），
-  // 只剔 `_roles` 会漏掉这三条 ⇒ 复制日记造出第二个「同一天」，而它引用不到。
+  // 只剔 `_aliases`/`_lists` 会漏掉 `_date`／`_kind`／`_query` 这三条 ⇒
+  // 复制日记会造出第二个「同一天」，而它引用不到。
   const journal = mkBlock('')
   journal.props = { _date: '2026-10-23' }
   const jc = cloneSubtree(journal).block

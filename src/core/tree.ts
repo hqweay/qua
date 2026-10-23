@@ -4,10 +4,22 @@
  */
 
 import { uuidv7Hex } from './ids.ts'
-import { DELETED_AT_PROP, ROLES_PROP, hasIdentity, isJournalBlock, mkBlock, writeBlockText, type Block, type BlockProps, type Doc, type Located } from './model.ts'
+import {
+  ALIASES_PROP,
+  DELETED_AT_PROP,
+  DISPLAY_PROP,
+  LISTS_PROP,
+  hasIdentity,
+  isJournalBlock,
+  mkBlock,
+  writeBlockText,
+  type Block,
+  type BlockProps,
+  type Doc,
+  type Located,
+} from './model.ts'
 import { canWriteText, typeDeclOf } from './types.ts'
 import { walkForest } from './walk.ts'
-import { ALIAS_PROP, aliasOf, renameBlock, setAlias } from './alias.ts'
 export function locate(doc: Doc, id: string): Located | null {
   let found: Located | null = null
   walkForest(doc.roots, (b, ctx) => {
@@ -114,6 +126,10 @@ export function findInForest(forest: readonly Block[], id: string): Block | unde
  * 每个 root 都是一个**真实容器**：按 `root.id` 找森林里的活块，写回正文/子树。
  * 与旧的 `syncActivePage`（只认 `roots[0]`）相比，这是「N=1 是特例」收回成通例的那一步。
  *
+ * ⚠️ **只写正文，不碰地址**：`text` 是描述，名字住在 `_aliases`。
+ *    旧实现在这里顺手 `renameBlock(root.text)`，于是「每敲一个字都写回」等于
+ *    每敲一个字都重命名一次 —— 撞名时还会把地址钉回旧值、让显示名滞后。
+ *    地址的改名只有一条路：显式改名（`renameAlias`／`setPrimaryAlias`）。
  * ⚠️ journal 的 `text` 是 `_date` 的只读投影⇒ **不写 text**。
  * ⚠️ `children` 在编辑器里通常就是同一个数组（共享引用）；这里仍显式赋值，
  *    因为结构操作可能替换 roots 里的 children 数组（如拆块/插入）。
@@ -125,16 +141,7 @@ export function writeBackRoots(forest: Block[], roots: readonly Block[]): void {
   for (const root of roots) {
     const p = findInForest(forest, root.id)
     if (!p) continue
-    if (!isJournalBlock(p)) {
-      // 撞名时不写地址，但**用户敲的正文不能吞**：把地址钉回改名前那个值，
-      // 于是「显示的名字」先走、「能被引用的名字」滞后 —— 这就是地址滞后。
-      // 吞掉正文会让重开页面时刚打的字凭空消失，那是丢数据，不是滞后。
-      // 这里不提示：core 不认识 UI，而「改名失败」要由主动改名的那条路去说。
-      if (!renameBlock(forest, p, root.text).ok) {
-        setAlias(p, aliasOf(p))
-        writeBlockText(p, root.text)
-      }
-    }
+    if (!isJournalBlock(p)) writeBlockText(p, root.text)
     p.children = root.children
   }
 }
@@ -184,9 +191,13 @@ export function hasDescendant(doc: Doc, ancestorId: string, maybeChildId: string
  * 两个块共用一个地址，`[[名字]]` 永远只能指到其中一个，另一个再也引用不到。
  * ⇒ 副本不带任何身份位；其余属性值照带（那些是这块自己的数据）。
  *
- * ⚠️ **派生身份的载体也要剔除**（`_date`／`_kind`／`_query`）：它们与角色是同一件事的
- *    两种写法（角色收窄成两个之后，日记／定义／查询的身份**由数据派生**）。
- *    只剔 `_roles` 会漏掉这三条 ⇒ 复制日记得到第二个「同一天」，
+ * ⚠️ **地址、列表、显示模式三者一起剔**：它们是同一份身份的三种写法。
+ *    只剔 `_aliases` 会留下「在页列表里、却没有名字」的副本；
+ *    留下 `_display` 则是一个还没身份就先决定行头怎么显示的怪状态。
+ *
+ * ⚠️ **派生身份的载体也要剔除**（`_date`／`_kind`／`_query`）：它们与列表是同一件事的
+ *    两种写法（列表收窄成两个「露面」之后，日记／定义／查询的身份**由数据派生**）。
+ *    只剔 `_lists` 会漏掉这三条 ⇒ 复制日记得到第二个「同一天」，
  *    而 `journalDays` 按「先序第一个」去重 ⇒ 那个副本对日记流／索引／引用解析
  *    **完全不可见**：不报错、不崩，只是静静地多出一个引用不到的块。
  *    判据一句话：**凡是 `hasIdentity` 会认的，副本都不能是。**
@@ -195,16 +206,17 @@ export function hasDescendant(doc: Doc, ancestorId: string, maybeChildId: string
  *    留着就是一个指向别处 block id 的死列表（刷新时会重新求值，不需要旧值）。
  *
  * ⚠️ `_parentTags` 也剔除：它是「这个标签算作谁的子标签」，而那条关系属于原件。
- *    留着就是一个潜伏值 —— 副本此刻没有 `tag` 角色，用不上它；一旦副本被打回
- *    标签角色，它就会生效，而它指向的父标签关系是原件的。
+ *    留着就是一个潜伏值 —— 副本此刻没有 `tag` 列表，用不上它；一旦副本被加进
+ *    标签列表，它就会生效，而它指向的父标签关系是原件的。
  *
- * ⚠️ 代价：复制一个页，副本**失去 `page` 角色**，于是它不再出现在页列表里，
+ * ⚠️ 代价：复制一个页，副本**失去 `page` 列表与全部名字**，于是它不再出现在页列表里，
  *    只是一棵长得像页的普通子树；复制一个标签同理，副本不再被 `#` 补全找到。
  *    这是有意的：身份不可复制，副本只能是内容。
  */
 const IDENTITY_PROPS: readonly string[] = [
-  ALIAS_PROP,
-  ROLES_PROP,
+  ALIASES_PROP,
+  LISTS_PROP,
+  DISPLAY_PROP,
   '_parentTags',
   '_date',
   '_kind',
@@ -215,7 +227,7 @@ const IDENTITY_PROPS: readonly string[] = [
 function contentProps(props: BlockProps): BlockProps | undefined {
   const out = { ...props }
   for (const k of IDENTITY_PROPS) delete out[k]
-  // 属性袋不留空壳：一块只有角色的块复制后不该留下 `{}`，否则「有没有属性」会有两份答案
+  // 属性袋不留空壳：一块只有身份的块复制后不该留下 `{}`，否则「有没有属性」会有两份答案
   return Object.keys(out).length === 0 ? undefined : out
 }
 
@@ -224,7 +236,7 @@ function contentProps(props: BlockProps): BlockProps | undefined {
  *
  * ⚠️ **属性值要一起带走**：漏掉它们，复制一个查询块／带图标的块会得到一个
  *    「长得像、但不是」的普通内容块 —— 图标、日期、全部属性值静默消失。
- * ⚠️ **身份不带走**（见 `contentProps`）：地址与角色属于原件，副本只是内容。
+ * ⚠️ **身份不带走**（见 `contentProps`）：地址与列表属于原件，副本只是内容。
  * ⚠️ 属性袋是**浅拷**：属性值由各自的写入口整份替换（没有原地改列表的路径），
  *    所以浅拷不会让原件与副本共享可变值。
  */
@@ -283,8 +295,8 @@ export function splitBlockBefore(doc: Doc, id: string, offset: number): { kept: 
  *   · `splitBlockBefore` —— 有父块：左半成**上方同级新块**；
  *   · 本函数 —— 没有父块：左半留根、右半成**首个子块**。
  *
- * ⚠️ 调用方只对**无角色的内容根**（focus/zoom 的普通块）启用；页/日记的 `text`
- *    是名字/投影，拆它等于静默改名（由 `editor.split` 的「无角色」判据拦住）。
+ * ⚠️ 调用方只对**无身份的内容根**（focus/zoom 的普通块）启用；页/日记的正文
+ *    是描述/投影，拆它会把容器拆没（由 `editor.split` 的 `hasIdentity` 判据拦住）。
  * ⚠️ `offset <= 0` 返回 null：那会把根文本清空、把整条内容搬进子块。调用方（editor）
  *    在块首/空块仍走「插一个空首子块」，不调用本函数。
  */
@@ -314,7 +326,7 @@ export function splitBlockIntoFirstChild(doc: Doc, id: string, offset: number): 
  *   · **块尾 ＋ 无子块 / 折叠** ⇒ `sibling`（同级空块）
  *
  * ⚠️ **section 根不走本函数**（`editor.split` 先判 `loc.parent === null`）：
- *    无角色的内容根中间拆成首子块；有角色的根仍插空首子块。本函数只判非根块。
+ *    无身份的内容根中间拆成首子块；有身份的根仍插空首子块。本函数只判非根块。
  *
  * `outdent` 的判据：文本**长度 0**（空格不算）＋ **父块不是 section 根**
  * （即 `loc.parent` 自己还有父块）。顶层内容块（父 = 页/天根）不能反缩进，仍走 `sibling`/`child`。
@@ -517,7 +529,7 @@ export function deleteBlockSpan(doc: Doc, startId: string, startOff: number, end
 
   /**
    * **段根不删**：它是视图的装载单位（页／天／查询记录），删它只是让视图看不见，
-   * 库里那块还在（刷新就回来）。判据是**角色**，不是「位置在第一个」——
+   * 库里那块还在（刷新就回来）。判据是**身份**（`hasIdentity`），不是「位置在第一个」——
    * 后者会把一整页的普通首块也挡掉。
    */
   if (headLoc.parent === null && hasIdentity(head)) return null

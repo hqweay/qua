@@ -112,6 +112,9 @@ export const BINDINGS: Binding[] = [
   { command: 'core.block/unpage', kind: 'menu', when: 'blockFocused && blockHasPageRole', group: 'block/3-role', order: 11, layer: 'core' },
   { command: 'core.block/as-tag', kind: 'menu', when: 'blockFocused && !blockHasTagRole && blockHasName', group: 'block/3-role', order: 20, layer: 'core' },
   { command: 'core.block/untag', kind: 'menu', when: 'blockFocused && blockHasTagRole', group: 'block/3-role', order: 21, layer: 'core' },
+  // 别名/字段是「名字层」的配置，不属于任何具体列表：任何聚焦块都能打开
+  { command: 'core.block/edit-aliases', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 30, layer: 'core' },
+  { command: 'core.block/edit-fields', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 31, layer: 'core' },
   // zoom：进子树的入口挂在块菜单。**叶子块也给**（修订：
   // 块标左键＝聚焦是一贯行为：若叶子不给，点击结果会时 zoom 时不 zoom）
   { command: 'core.block/focus-block', kind: 'menu', when: 'blockFocused', group: 'block/3-kind', order: 30, layer: 'core', keywords: ['zoom', t('menu.kw.zoom')] },

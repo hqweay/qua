@@ -52,7 +52,7 @@ function fixture() {
   const tagged = new Set(['a', 'b', 'd1', 'e', 'j1b'])
   const forest: Block[] = [
     b('p1', '页面一', {
-      props: { _roles: ['page'] },
+      props: { _aliases: ['页面一'], _lists: ['page'] },
       children: [
         b('a', '甲', task(false)),
         b('b', '乙', task(true)),
@@ -60,7 +60,7 @@ function fixture() {
         b('d', '提到丙的块', { children: [b('d1', '甲的子孙', task(false))] }),
       ],
     }),
-    b('p2', '页面二', { props: { _roles: ['page'] }, children: [b('e', '另一个', task(false))] }),
+    b('p2', '页面二', { props: { _aliases: ['页面二'], _lists: ['page'] }, children: [b('e', '另一个', task(false))] }),
     // ⚠️ `j1b` 只有标签、**没有**待办状态：`all[tag, todo]` 那条断言靠它来区分「有标签」与「是待办」
     b('j1', '', { props: { _date: '2026-10-20' }, children: [b('j1a', '今天的记录'), b('j1b', '也')] }),
   ]

@@ -10,7 +10,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
-import { hasRole } from '../src/core/index.ts'
+import { hasList } from '../src/core/index.ts'
 import { seedWorkspace } from '../src/core/seed.ts'
 import {
   cleanableValues,
@@ -40,7 +40,7 @@ const tag = (block: Block, ...tagIds: string[]): Block => {
   return block
 }
 
-test('③ 定义是独立块：森林顶层、schema 角色、正文＝label、propId＝块 id', () => {
+test('③ 定义是独立块：森林顶层、`_kind` 是身份、正文＝label、propId＝块 id', () => {
   const def = mkPropDef('评分', 'number')
   const forest: Block[] = [def]
   assert.equal(forest[0], def, '直接住森林顶层 —— 不是任何标签的子块')
@@ -73,7 +73,7 @@ test('只有页/标签能声明字段（D4）；普通块只能有值', () => {
   const def = mkPropDef('评分')
   const plain: Block = { id: 'p', text: '普通块', children: [] }
   assert.equal(declareField(plain, def.id), false)
-  const page: Block = { id: 'pg', text: '页', children: [], props: { _roles: ['page'] } }
+  const page: Block = { id: 'pg', text: '页', children: [], props: { _aliases: ['页'], _lists: ['page'] } }
   assert.equal(declareField(page, def.id), true)
 })
 
@@ -228,7 +228,7 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter）�
   assert.equal(def!.props?._kind, 'checkbox')
   assert.equal(uiPositionOf(def), 'block-left')
 
-  const task = ws.blocks.find((b) => hasRole(b, 'tag') && b.text === '任务')
+  const task = ws.blocks.find((b) => hasList(b, 'tag') && b.text === '任务')
   assert.ok(task, '标签块应在森林顶层')
   assert.deepEqual(declaredFieldIds(task!), [TASK_STATUS_PROP_ID])
 

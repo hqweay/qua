@@ -11,7 +11,7 @@
  * ⚠️ 成员是**算作**进来的（`membersOf`）：`#人物` 的成员含只打 `#演员` 的块，
  *    但这些块**不获得** `#人物` 的字段（字段只看直接标签，见 `core/props.ts`）。
  */
-import { findPath, type Atom, type Block, type BlockStore } from '../core/index.ts'
+import { displayNameOf, findPath, type Atom, type Block, type BlockStore } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor } from '../view/editor.ts'
 
@@ -105,7 +105,8 @@ export class TagPanel {
       return
     }
     this.els.root.hidden = false
-    this.els.title.textContent = `#${tag.text.trim() === '' ? this.deps.shortId(tag.id) : tag.text}`
+    const name = displayNameOf(tag).trim()
+    this.els.title.textContent = `#${name === '' ? this.deps.shortId(tag.id) : name}`
     this.els.pageToggle.textContent = this.deps.isPage(tag) ? t('ui.tagpanel.unPage') : t('ui.tagpanel.asPage')
     this.renderRelations(tag)
     this.renderMembers(tag)
@@ -123,7 +124,10 @@ export class TagPanel {
       relationRow(
         t('ui.tagpanel.belongsTo'),
         [
-          ...parents.map((p) => ({ label: `#${p.text || this.deps.shortId(p.id)}`, onRemove: () => this.deps.removeParent(tag.id, p.id) })),
+          ...parents.map((p) => {
+            const name = displayNameOf(p).trim()
+            return { label: `#${name === '' ? this.deps.shortId(p.id) : name}`, onRemove: () => this.deps.removeParent(tag.id, p.id) }
+          }),
           ...dangling.map((id) => ({
             label: `#${this.deps.shortId(id)}${t('ui.tagpanel.deleted')}`,
             onRemove: () => this.deps.removeParent(tag.id, id),
@@ -138,7 +142,10 @@ export class TagPanel {
     box.appendChild(
       relationRow(
         t('ui.tagpanel.contains'),
-        children.map((c) => ({ label: `#${c.text || this.deps.shortId(c.id)}` })),
+        children.map((c) => {
+          const name = displayNameOf(c).trim()
+          return { label: `#${name === '' ? this.deps.shortId(c.id) : name}` }
+        }),
         null,
       ),
     )

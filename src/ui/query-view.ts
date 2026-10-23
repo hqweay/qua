@@ -15,7 +15,7 @@
  * ⚠️ 它不是「可编辑视图 / 实时视图」二选一：它**可编辑**，稳定性靠冻结而不是靠只读。
  * ⚠️ 视图状态（滚动、折叠展开态）不进库；滚动位置由外层编辑器自己保。
  */
-import { resolveFrozen, readResult, refreshSpec, readSpec, type Atom, type Block, type BlockStore } from '../core/index.ts'
+import { displayNameOf, resolveFrozen, readResult, refreshSpec, readSpec, type Atom, type Block, type BlockStore } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor } from '../view/editor.ts'
 
@@ -180,7 +180,8 @@ export class QueryView {
     }
     const rows = resolveFrozen(frozen, this.deps.blocks())
     this.els.root.hidden = false
-    this.els.title.textContent = b.text || t('ui.query.untitled')
+    const name = displayNameOf(b).trim()
+    this.els.title.textContent = name === '' ? t('ui.query.untitled') : name
     this.els.count.textContent = t('ui.query.count', { count: rows.length })
     if (rows.length === 0) {
       // 空结果是**状态**不是错误：保留抬头（含刷新按钮），正文给一句实话

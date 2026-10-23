@@ -258,8 +258,10 @@ await check('T3b 顶部无工具栏／无顶栏：格式在划选气泡，皮肤
   assert(after.barStill, '选区还在，气泡就该还在')
 
   // ④ 选区一塌，气泡自己消失
-  await page.evaluate(() => document.getSelection()?.removeAllRanges())
-  await page.keyboard.press('End')
+  // ⚠️ 用**真实按键**把选区收成光标（ArrowRight）。旧写法是 `removeAllRanges()` 再按 End，
+  //    那在「一行里有一个 contenteditable=false 的别名头」时不会重建插入点（浏览器行为），
+  //    于是测到的其实是「DOM 没有光标」而不是「用户收起了选区」。
+  await page.keyboard.press('ArrowRight')
   await page.waitForFunction(() => document.querySelectorAll('.selbar').length === 0, null, { timeout: 2000 })
 
   await ctx.close()
@@ -892,11 +894,10 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
   return `1 条 → 改字实时更新（成员不变）→ 不匹配仍保留 → 刷新后 ${refreshed.count}；结果集入 KB 且未 re-parent`
 })
 
-await check('T39 引用解析：改页名 ⇒ chip 跟着变；目标被删 ⇒ dangling（不静默错指）', async () => {
+await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器改主名 ⇒ chip 跟着变；删除 ⇒ dangling', async () => {
   const { ctx, page } = await freshPage(browser, base)
   // 打开「产品设计 · 决策日志」：seed 里那一页有指向别处的 `[[..]]`
-  // ⚠️ 把它的 id 记下来，之后**全程按 id 导航**：⑤ 会把「当前页」改名，
-  //    再按标题去找它就找不到了（这是本轮真踩到的坑，不是理论问题）。
+  // ⚠️ 把它的 id 记下来，之后**全程按 id 导航**：改名之后按标题找它可能就找不到了。
   const homeId = await page.evaluate(() => {
     const p = window.__demo.pages().find((x) => (x.title ?? '').includes('产品设计'))
     if (!p) throw new Error(`前置：找不到「产品设计」页，现有 ${JSON.stringify(window.__demo.pages().map((x) => x.title))}`)
@@ -915,86 +916,120 @@ await check('T39 引用解析：改页名 ⇒ chip 跟着变；目标被删 ⇒ 
       .find((x) => x.kind === 'page' && x.state === 'resolved' && x.target && mounted.has(x.blockId))
     if (!a) return null
     const b = window.__demo.blocks().find((x) => x.id === a.blockId)
-    return { atomId: a.id, label: a.label, targetId: a.target.id, srcBlockId: a.blockId, srcText: b?.text ?? '' }
+    const t = window.__demo.allBlocks().find((x) => x.id === a.target.id)
+    return {
+      atomId: a.id,
+      label: a.label,
+      targetId: a.target.id,
+      srcBlockId: a.blockId,
+      srcText: b?.text ?? '',
+      primary: t?.aliases?.[0] ?? '',
+    }
   })
   assert(target, '前置：这一页里应有一个 resolved 且已挂载的引用')
+  assert(target.primary === target.label, `引用显示名应是主别名叶子：${JSON.stringify(target)}`)
 
-  // ② **显示名来自目标当前正文**：chip 上的字 === 目标页的正文（不看 atom.label 快照）
+  // ② **显示名来自目标当前的主别名**：chip 上的字 === 目标的主名（不看 atom.label 快照）
   const chipLabel = () =>
     page.evaluate((id) => document.querySelector(`.atom[data-atom-id="${id}"] .atom-label`)?.textContent ?? '', target.atomId)
   const before = await chipLabel()
-  assert(before === `[[${target.label}]]`, `chip 应显示目标当前正文：${JSON.stringify(before)} vs ${JSON.stringify(target.label)}`)
+  assert(before === `[[${target.label}]]`, `chip 应显示目标当前的主名：${JSON.stringify(before)} vs ${JSON.stringify(target.label)}`)
 
-  // ③ **改名传播**：改目标页正文 ⇒ 同一个 chip 立刻换字（原子本身不动）
-  //
-  // ⚠️ 「改页名」在本 app 里就是**在页块正文上打字**（页名＝块的 text，没有独立输入框）；
-  //    `core.page/rename` 只是把焦点交给首行，它本身不改名。
-  const NEW = '改名后的新名字'
+  // ③ **改正文 ＝ 改描述**：页名住在 `_aliases`，页块正文只是描述。
+  //    在首行打字必须改到描述，主别名与页列表标题一个字节都不动。
+  const DESC = '改名后的新描述'
   await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), target.targetId)
   await page.waitForTimeout(150)
   await page.evaluate(() => {
-    // 页块首行＝页名；清空再敲新的（原生按键，走 syncFromDom 那条真实路径）
     const first = window.__demo.blocks()[0]
     window.__demo.focusBlock(first.id, first.text.length)
   })
   for (let i = 0; i < 60; i++) await page.keyboard.press('Backspace')
-  await page.keyboard.type(NEW)
+  await page.keyboard.type(DESC)
   await page.waitForTimeout(200)
-  // 回到引用所在的那一页，看 chip（按 id 导航）
+  const described = await page.evaluate((id) => {
+    const b = window.__demo.allBlocks().find((x) => x.id === id)
+    const p = window.__demo.pages().find((x) => x.id === id)
+    return { text: b?.text ?? '', primary: b?.aliases?.[0] ?? '', title: p?.title ?? '(gone)' }
+  }, target.targetId)
+  assert(described.text === DESC, `改正文应改到描述：${JSON.stringify(described)}`)
+  assert(described.primary === target.primary, `改正文不该改主别名：${JSON.stringify(described)}`)
+  assert(described.title === target.label, `页列表标题应继续显示主名：${JSON.stringify(described)}`)
+  // 别名头住在 `.tx` 外：读回正文必须只有描述，不能把行头的名字也读进模型
+  const readback = await page.evaluate((id) => window.__demo.__editor.readText(id), target.targetId)
+  assert(readback === DESC, `别名头不该进正文读回：${JSON.stringify({ readback })}`)
+  // 回到引用所在的那一页，看 chip：描述变了，引用名不该变
   await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), homeId)
   await page.waitForTimeout(200)
-  const renamed = await chipLabel()
-  assert(renamed === `[[${NEW}]]`, `改页名后 chip 应跟着换字：${JSON.stringify(renamed)}（旧值 ${JSON.stringify(before)}）`)
+  const unchanged = await chipLabel()
+  assert(unchanged === `[[${target.label}]]`, `改描述后 chip 应保持主名：${JSON.stringify(unchanged)}`)
 
   // ④ **原子没被回写**：改名靠解析传播，不是批量改 label
   const rawLabel = await page.evaluate(
     (id) => window.__demo.atoms().find((x) => x.id === id)?.rawLabel ?? '',
     target.atomId,
   )
-  assert(
-    rawLabel !== NEW,
-    `落盘的 label 不该被改名回写（应仍是插入时的快照）：${JSON.stringify(rawLabel)}`,
-  )
+  assert(rawLabel !== DESC, `落盘的 label 不该被描述回写（应仍是插入时的快照）：${JSON.stringify(rawLabel)}`)
 
-  // ⑤ **同视图内即时传播**（这条才是 `renderRefSources` 的验收）：
-  //    目标页的名字行**就在当前这一页里**时，改它 ⇒ chip **当场**换字，不用重开页面。
-  //    ⚠️ ③④ 走的是「重开页面 ⇒ 重新挂载」，那条路径即使没有即时传播也会绿；
-  //       只有这一格能证明「派生显示名在数据没变时也会刷新」。
-  //
-  //    ⚠️ 上面 ①② 找到的引用**指向当前视图之外**（`[[输入面笔记]]` 在产品设计页里），
-  //       改它的目标靠的是「重开页面 ⇒ 重新挂载」，即使没有即时传播也会绿。
-  //    ⇒ 这里**自己造一组同视图的引用**：往当前页的一个子块里插一条指向**当前页页块**的引用。
-  //      页块自己就是 `doc.roots[0]`（首行即当前对象）⇒ 「目标的名字行」与「显示它的 chip」
-  //      在同一个视图里，改名必须当场生效。
-  //    ⚠️ 副作用：这一格把当前页改成了 LIVE ⇒ 后面一律按 `homeId` 导航，别再按标题找。
-  const live = await page.evaluate(() => {
+  // ⑤ **页名走别名编辑器**：加一个名字 → 设成主名 ⇒ 引用 chip 跟着换字。
+  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), target.targetId)
+  await page.waitForTimeout(150)
+  const NEW = '别名编辑器改的新名字'
+  await page.locator(`.blk[data-block-id="${target.targetId}"] .blk-alias-name`).click()
+  await page.waitForSelector('.alias-editor')
+  await page.fill('.alias-editor .alias-input', NEW)
+  await page.press('.alias-editor .alias-input', 'Enter')
+  await page.waitForTimeout(150)
+  assert(await page.locator(`.alias-row[data-alias-name="${NEW}"]`).count() === 1, `新别名应出现在别名列表里：${NEW}`)
+  // 点星标把它设成主名（不新增、只移动）——真实点击，顺带验证「点浮层内部不会被外面的 mousedown 关掉」
+  await page.locator(`.alias-row[data-alias-name="${NEW}"] .alias-primary`).click()
+  await page.waitForTimeout(150)
+  const renamed = await page.evaluate((id) => {
+    const b = window.__demo.allBlocks().find((x) => x.id === id)
+    const p = window.__demo.pages().find((x) => x.id === id)
+    return { primary: b?.aliases?.[0] ?? '', aliases: b?.aliases ?? [], title: p?.title ?? '(gone)' }
+  }, target.targetId)
+  assert(renamed.primary === NEW, `点星标应把该别名设成主名：${JSON.stringify(renamed)}`)
+  assert(renamed.title === NEW, `页列表标题应跟着主名走：${JSON.stringify(renamed)}`)
+  await page.evaluate(() => window.__demo.__layers.closePopover())
+  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), homeId)
+  await page.waitForTimeout(200)
+  const propagated = await chipLabel()
+  assert(propagated === `[[${NEW}]]`, `改主名后 chip 应跟着换字：${JSON.stringify(propagated)}（旧值 ${JSON.stringify(before)}）`)
+
+  // ⑥ **同视图内即时传播**：目标页的名字行**就在当前这一页里**时，改主名 ⇒ chip **当场**换字。
+  //    ⚠️ ⑤ 走的是「重开页面 ⇒ 重新挂载」，那条路径即使没有即时传播也会绿；这一格才证明派生显示名会刷新。
+  const rootId = await page.evaluate(() => window.__demo.__editor.doc.roots[0]?.id ?? '')
+  const live = await page.evaluate((id) => {
     const ed = window.__demo.__editor
     const root = ed.doc.roots[0]
-    if (!root) return { skipped: '当前视图没有根块' }
-    // 插到第一块**子块**里（不能插页名行：页名是身份，往里塞占位符＝静默改名）
-    const host = root.children[0]
-    if (!host) return { skipped: '当前页没有子块可插' }
+    const host = root?.children[0]
+    if (!root || !host) return { skipped: '当前页没有子块可插' }
     window.__demo.focusBlock(host.id, 0)
-    window.__demo.invoke('core.editor/insert-page-ref', { pageId: root.id })
-    const atom = window.__demo.atoms().find((a) => a.blockId === host.id && a.target?.id === root.id)
-    if (!atom) return { skipped: '引用没插进去' }
-
-    const chipLabel = () => document.querySelector(`.atom[data-atom-id="${atom.id}"] .atom-label`)?.textContent ?? ''
-    const LIVE = '当场改的新名字'
-    // 走真实路径：**改 DOM 再 syncFromDom**（等价于「在页名行上敲字」），
-    // 而不是直接改模型——直接改模型绕过了「没有任何数据变更信号」这个前提，测不到传播。
-    const el = ed.blockEl(root.id)
-    el.querySelector('.tx').textContent = LIVE
-    ed.syncFromDom(root.id, true)
-    return { label: chipLabel(), want: `[[${LIVE}]]`, atomId: atom.id }
-  })
+    window.__demo.invoke('core.editor/insert-page-ref', { pageId: id })
+    const atom = window.__demo.atoms().find((a) => a.blockId === host.id && a.target?.id === id)
+    return atom ? { atomId: atom.id } : { skipped: '引用没插进去' }
+  }, rootId)
   assert(!live.skipped, `前置：造不出「目标与引用同视图」的组合：${live.skipped}`)
-  assert(
-    live.label === live.want,
-    `同视图内改目标名字，引用它的 chip 应**当场**跟着变（renderRefSources）：${JSON.stringify(live)}`,
+  const LIVE = '当场改的新名字'
+  await page.locator(`.blk[data-block-id="${rootId}"] .blk-alias-name`).click()
+  await page.waitForSelector('.alias-editor')
+  await page.fill('.alias-editor .alias-input', LIVE)
+  await page.press('.alias-editor .alias-input', 'Enter')
+  await page.waitForTimeout(150)
+  await page.evaluate((name) => {
+    const row = [...document.querySelectorAll('.alias-row')].find((r) => r.dataset.aliasName === name)
+    row?.querySelector('.alias-primary')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  }, LIVE)
+  await page.waitForTimeout(150)
+  const liveLabel = await page.evaluate(
+    (id) => document.querySelector(`.atom[data-atom-id="${id}"] .atom-label`)?.textContent ?? '',
+    live.atomId,
   )
+  assert(liveLabel === `[[${LIVE}]]`, `同视图内改主名，引用它的 chip 应**当场**跟着变：${JSON.stringify({ liveLabel })}`)
+  await page.evaluate(() => window.__demo.__layers.closePopover())
 
-  // ⑥ **目标被删 ⇒ dangling**：不静默错指，chip 上带 .dangling
+  // ⑦ **目标被删 ⇒ dangling**：不静默错指，chip 上带 .dangling
   // ⚠️ `core.page/delete` 删的是**当前对象**（不收 pageId 参数）⇒ 先打开它再删
   await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), target.targetId)
   await page.waitForTimeout(150)
@@ -1012,13 +1047,12 @@ await check('T39 引用解析：改页名 ⇒ chip 跟着变；目标被删 ⇒ 
    * ⚠️ **fallback 是「插入时的快照」，不是「用户最后见过的名字」** —— 这是一条刻意的取舍，不是漏：
    *    要让 fallback 跟着改名走，就得在**渲染时回写 `atom.label`**，而那会让渲染产生副作用
    *    （脏快照、连带落盘）。改名传播靠解析（不回写原子）是本条的前提，两者不可兼得。
-   *    ⇒ 这里断言的是「dangling 时有一个**非空且合理**的兜底名」，不是「最后见过的名字」。
    */
   assert(dead.label.length > 4, `dangling 时要有非空的兜底名：${JSON.stringify(dead.label)}`)
   assert(dead.label !== `[[${NEW}]]`, `fallback 是插入时的快照，不该是改名后的字：${JSON.stringify(dead.label)}`)
 
   await ctx.close()
-  return `「${before}」→ 改名后「${renamed}」（label 快照未回写）→ 删除后 dangling，兜底名「${dead.label}」`
+  return `「${before}」→ 改描述不改名 → 别名编辑器设主名后「${propagated}」→ 同视图当场「${liveLabel}」→ 删除后 dangling，兜底名「${dead.label}」`
 })
 
 await check('T40 标签＝块级归属：写进块上、渲染成行尾 chip、成员可见', async () => {
@@ -1035,7 +1069,7 @@ await check('T40 标签＝块级归属：写进块上、渲染成行尾 chip、�
     const root = window.__demo.__editor.doc.roots[0]
     const b = window.__demo.blocks().find((x) => x.id !== root.id && !x.roles?.includes('journal') && x.text.length > 2)
     window.__demo.focusBlock(b.id, b.text.length)
-    window.__demo.invoke('core.editor/insert-tag', { tag: '设计' })
+    window.__demo.invoke('core.editor/insert-tag', { tag: '回归标签' })
     const after = window.__demo.blocks().find((x) => x.id === b.id)
     const tagId = after?.tags?.[0] ?? ''
     const tag = window.__demo.allBlocks().find((x) => x.id === tagId)
@@ -1049,10 +1083,10 @@ await check('T40 标签＝块级归属：写进块上、渲染成行尾 chip、�
   assert(it.tags.length === 1, `标签应写进块上的归属：${JSON.stringify(it)}`)
   assert(it.tag, `归属应指向一个真实存在的标签块：${JSON.stringify(it)}`)
   assert(it.tag.roles?.includes('tag'), `标签应是一个带 tag 角色的**块**（不是字符串、也不是新实体）：${JSON.stringify(it.tag)}`)
-  assert(it.tag.text === '设计', `标签名字就是它的正文，且不带 #：${JSON.stringify(it.tag)}`)
+  assert(it.tag.text === '回归标签', `标签名字就是它的正文，且不带 #：${JSON.stringify(it.tag)}`)
   assert(!it.text.includes('\uFFFC'), `正文里不该为标签多出一格占位符：${JSON.stringify(it.text)}`)
 
-  // ② 呈现：行尾拼一枚 `#设计` chip，但**它不参与读数**
+  // ② 呈现：行尾拼一枚 `#名` chip，但**它不参与读数**
   const shown = await page.evaluate(
     ({ blockId, tagId }) => {
       const chip = document.querySelector(`.blk[data-block-id="${blockId}"] .tx .tag-chip[data-tag-id="${tagId}"]`)
@@ -1060,7 +1094,7 @@ await check('T40 标签＝块级归属：写进块上、渲染成行尾 chip、�
     },
     { blockId: it.blockId, tagId: it.tag.id },
   )
-  assert(shown.chip === '#设计', `标签应显示成 #名（引用才是 [[名]]）：${JSON.stringify(shown)}`)
+  assert(shown.chip === '#回归标签', `标签应显示成 #名（引用才是 [[名]]）：${JSON.stringify(shown)}`)
   assert(shown.read === it.text, `chip 拼在正文里但不属于正文：读数应仍是原正文 —— ${JSON.stringify(shown)}`)
 
   // ③ **打标签 ⇒ 成员里出现这个块**（成员从块上的归属派生）
@@ -1070,13 +1104,13 @@ await check('T40 标签＝块级归属：写进块上、渲染成行尾 chip、�
     `打了标签的块应出现在标签的成员里：${JSON.stringify(members)}（期望含 ${it.blockId}）`,
   )
 
-  // ④ 幂等：再打一次同名标签 ⇒ 不建第二个块（`#设计` 与 `#设计 ` 是同一个名字）
+  // ④ 幂等：再打一次同名标签 ⇒ 不建第二个块（`#名` 与 `#名 ` 是同一个名字）
   const again = await page.evaluate(
     (hostId) => {
       const before = window.__demo.allBlocks().filter((x) => x.roles?.includes('tag')).length
       const b = window.__demo.blocks().find((x) => x.id !== hostId && !x.roles?.includes('journal') && x.text.length > 2)
       window.__demo.focusBlock(b.id, b.text.length)
-      window.__demo.invoke('core.editor/insert-tag', { tag: ' 设计 ' })
+      window.__demo.invoke('core.editor/insert-tag', { tag: ' 回归标签 ' })
       const after = window.__demo.blocks().find((x) => x.id === b.id)
       return {
         before,
@@ -1150,12 +1184,14 @@ await check('T12 空态 / 稀疏态 / 降级态都能看（超长块与全英文
 
   // 页名的兜底与截断：**页名现在只出现在引用选择器里**（左槽只放今日、不列全部页），
   // 所以到那个真正的落点去验。
+  // ⚠️ 有地址的块永远有可显示的名字：空标题页在进页列表时拿到了 `未命名-<短id>`
+  //    ⇒ 这里验的是「有一个稳定、非空的兜底名」，不再是旧口径里的「无标题」四个字。
   await page.evaluate(() => window.__demo.invoke('core.editor/insert-page-ref'))
   await page.waitForTimeout(150)
   const titles = await page.evaluate(() =>
     [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent?.trim() ?? ''),
   )
-  assert(titles.includes('无标题'), `无标题页要有兜底：${JSON.stringify(titles)}`)
+  assert(titles.some((x) => x.includes('未命名-')), `无标题页要有稳定兜底名：${JSON.stringify(titles)}`)
   const longestTitle = titles.reduce((a, b) => (a.length >= b.length ? a : b), '')
   assert(longestTitle.length > 40, `超长页名应原样存在（截断交给 CSS，不是砍字符串）：${longestTitle.slice(0, 60)}`)
   const noOverflow = await page.evaluate(() => {
@@ -1275,7 +1311,9 @@ await check('T17 今日 journal：冷启动落在它、一天一个（幂等）�
 })
 
 await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/块尾同级）、点空白建子块、只读行不落光标、折叠图标贴自己的块标', async () => {
-  const { ctx, page } = await freshPage(browser, base)
+  // ④ 要「最后一行下方的空白」是**真空白**：内容高度一旦顶满视口就没有可点的地方。
+  // 给高一点的视口（与产品行为无关，只为让这条几何前置成立）。
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 1200 } })
   // ：冷启动是长日记流；本用例测的是单容器里的 Enter/空白语义 ⇒ 先打开第一页。
   await openFirstPage(page)
   const rows = () =>
@@ -1949,7 +1987,7 @@ await check('T57 日记流里 zoom 进某块再「后退」⇒ 回到**日记流
   return `日记流 ${feedAtStart.roots} 段 → zoom（1 段）→ 后退 ⇒ 仍是 feed（${back.roots} 段，${back.journalDate}）`
 })
 
-await check('T58 正文里敲 `#名字` 暂不落成归属（只做数据形状，输入路径还没接）', async () => {
+await check('T58 行内标签：敲完分隔符 ⇒ 正文 1 格原子 ＋ 块上的归属，chip 不重复', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__demo.quiet(true))
   await openFirstPage(page)
@@ -1968,34 +2006,111 @@ await check('T58 正文里敲 `#名字` 暂不落成归属（只做数据形状�
   await page.keyboard.type(`写点东西 #${tagName} `)
   await page.waitForTimeout(220)
 
-  const got = await page.evaluate((id) => {
+  const got = await page.evaluate(({ id, name }) => {
     const b = window.__demo.blocks().find((x) => x.id === id)
     const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
+    const atomEl = tx?.querySelector('.atom-tag')
     return {
       text: b?.text ?? '',
       found: Boolean(b),
       tags: b?.tags ?? [],
       atoms: window.__demo.atoms().filter((a) => a.blockId === id),
       chips: tx ? tx.querySelectorAll('.tag-chip').length : -1,
-      tagBlock: window.__demo.allBlocks().find((x) => x.roles?.includes('tag') && x.text === tagName)?.id ?? '',
+      inline: atomEl?.textContent ?? '',
+      inlineLabel: atomEl?.dataset.refLabel ?? '',
+      tagBlock: window.__demo.allBlocks().find((x) => x.roles?.includes('tag') && x.text === name)?.id ?? '',
+      caret: window.__demo.__editor.sel,
     }
-  }, target)
+  }, { id: target, name: tagName })
 
   assert(got.found, '前置：插入的块应在当前视图里：' + JSON.stringify(got))
 
   /**
-   * 目前**没有**输入交互：`#名字` 就是普通文本。
-   * 这条断言的意义是把「还没做」钉成显式状态 —— 下一轮接上输入路径时它必须被改掉，
-   * 而不是等到某天有人发现「标签有时候会自己出现」。
+   * **行内标签的判据**：
+   *   `#名` 不是「正文里的几个字」，而是**正文里的一格**（原子）＋ 块上的一条归属。
+   *   两处必须同时成立；只做一半就是「查询里有、正文里看不到」或反过来。
    */
-  assert(got.text === `写点东西 #${tagName} `, '`#名字` 应原样留在正文里：' + JSON.stringify(got.text))
-  assert(got.tags.length === 0, '敲字不该写块上的归属：' + JSON.stringify(got.tags))
-  assert(got.atoms.length === 0, '敲字也不该产出原子：' + JSON.stringify(got.atoms))
-  assert(got.chips === 0, '没有归属 ⇒ 不该渲染 chip：' + got.chips)
-  assert(got.tagBlock === '', '没敲完不该建标签块：' + got.tagBlock)
+  assert(got.text === '写点东西 \uFFFC ', '正文里应把 `#名` 换成 1 格占位符（分隔符留着）：' + JSON.stringify(got.text))
+  assert(got.atoms.length === 1 && got.atoms[0].kind === 'tag', '应产出 1 枚 tag 原子：' + JSON.stringify(got.atoms))
+  assert(got.tagBlock !== '', '敲完就该建出标签块：' + JSON.stringify(got.tagBlock))
+  assert(got.tags.length === 1 && got.tags[0] === got.tagBlock, '归属应指向那个标签块：' + JSON.stringify({ tags: got.tags, tag: got.tagBlock }))
+  assert(got.inline === `#${tagName}`, '正文里应显示成 `#名`：' + JSON.stringify(got.inline))
+  assert(got.inlineLabel === tagName, '显示名应是解析出来的（不带 #）：' + JSON.stringify(got.inlineLabel))
+  assert(got.chips === 0, '已经在正文里露面 ⇒ 不该再出一个 chip（否则一个标签显示两次）')
+  assert(got.caret?.aOff === 7, '光标应停在标签之后（`写点东西 ` 5 字 ＋ 1 格 ＋ 1 空格）：' + JSON.stringify(got.caret))
+
+  // 删字不摘标签：光标停在标签之后按 Backspace ⇒ 那一格没了，归属还在，落回 chip
+  await page.evaluate((id) => window.__demo.__editor.placeCaret(id, 6), target)
+  await page.keyboard.press('Backspace')
+  await page.waitForTimeout(200)
+  const afterDel = await page.evaluate((id) => {
+    const b = window.__demo.blocks().find((x) => x.id === id)
+    const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
+    return {
+      tags: b?.tags ?? [],
+      atoms: window.__demo.atoms().filter((a) => a.blockId === id).length,
+      chips: tx ? tx.querySelectorAll('.tag-chip').length : -1,
+      inline: tx ? tx.querySelectorAll('.atom-tag').length : -1,
+    }
+  }, target)
+  assert(afterDel.atoms === 0, '删掉那一格 ⇒ 原子跟着没了（不留孤儿）：' + JSON.stringify(afterDel))
+  assert(afterDel.tags.length === 1, '⚠️ 删字**不摘标签**：归属仍在「这块属于它」：' + JSON.stringify(afterDel))
+  assert(afterDel.chips === 1 && afterDel.inline === 0, '不在正文里露面了 ⇒ 归属落回 chip（只一个显示位置）')
 
   await ctx.close()
-  return `敲「#${tagName}」⇒ 正文原样 ${JSON.stringify(got.text)}，无归属 / 无原子 / 无 chip`
+  return `敲「#${tagName}」⇒ 1 格原子 ＋ 归属；删字 ⇒ 原子消失、归属落回 chip`
+})
+
+await check('T58b 属性面板挂/摘块标签：只写归属，正文不动', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__demo.quiet(true))
+  await openFirstPage(page)
+
+  // 属性区的 target 是**当前对象**（`activeId`）⇒ 用命令聚焦到一个内容块，而不是只看光标
+  const pageId = await page.evaluate(() => {
+    const b = window.__demo.blocks().find((x) => x.roles.length === 0 && x.children === 0 && x.text.length > 2)
+    window.__demo.invoke('core.block/focus-block', { blockId: b.id })
+    return b.id
+  })
+  await page.waitForTimeout(150)
+  await page.waitForSelector('.props-tag-input', { timeout: 4000 })
+
+  await page.fill('.props-tag-input', '项目')
+  await page.press('.props-tag-input', 'Enter')
+  await page.waitForTimeout(250)
+
+  const added = await page.evaluate((id) => {
+    const b = window.__demo.blocks().find((x) => x.id === id)
+    const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
+    return {
+      text: b?.text ?? '',
+      tags: b?.tags ?? [],
+      chips: tx ? [...tx.querySelectorAll('.tag-chip')].map((e) => e.textContent) : [],
+      panel: [...document.querySelectorAll('.props-tag')].map((e) => e.textContent),
+    }
+  }, pageId)
+  assert(added.tags.length === 1, '面板挂标签应写进块上的归属：' + JSON.stringify(added))
+  assert(added.chips.length === 1 && added.chips[0] === '#项目', '块级标签应渲染成正文之后的 chip：' + JSON.stringify(added.chips))
+  assert(added.panel.some((s) => s.includes('#项目')), '面板这一行应显示刚挂上的标签：' + JSON.stringify(added.panel))
+  assert(!added.text.includes('项目'), '属性面板入口**不碰正文**：' + JSON.stringify(added.text))
+
+  await page.click('.props-tag .props-tag-x')
+  await page.waitForTimeout(250)
+  const removed = await page.evaluate((id) => {
+    const b = window.__demo.blocks().find((x) => x.id === id)
+    const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
+    return {
+      tags: b?.tags ?? [],
+      chips: tx ? tx.querySelectorAll('.tag-chip').length : -1,
+      panel: document.querySelectorAll('.props-tag').length,
+    }
+  }, pageId)
+  assert(removed.tags.length === 0, '摘标签应清掉归属：' + JSON.stringify(removed))
+  assert(removed.chips === 0, '摘掉后不该留着 chip：' + JSON.stringify(removed))
+  assert(removed.panel === 0, '面板那一行也应跟着消失：' + JSON.stringify(removed))
+
+  await ctx.close()
+  return `面板挂 #项目 ⇒ 归属＋chip（正文不动）；点 × ⇒ 归属与 chip 一起没了`
 })
 
 await check('T59 `ref` 类型的值走选择器：显示目标**名字**、能换目标、不让人手打 id', async () => {
@@ -2838,7 +2953,7 @@ await check('T25 块标左键 = 聚焦/zoom：点一下进子树，右键才开�
   return `左键点 ${target.id.slice(-6)} → zoom 收窄到 ${zoomed.here} 块（面包屑「${zoomed.trail.join(' › ')}」，无菜单）；右键 → 块菜单 ${menuLabels.length} 项`
 })
 
-await check('T22 首行即当前对象：页名可编辑、在首行按 Enter 不自环', async () => {
+await check('T22 首行即当前对象：页块正文（描述）可编辑、在首行按 Enter 不自环', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__demo.quiet(true))
   await openFirstPage(page)
@@ -2850,14 +2965,17 @@ await check('T22 首行即当前对象：页名可编辑、在首行按 Enter �
   })
   assert(first.text === '产品设计 · 决策日志', `首行应是页块正文：${JSON.stringify(first)}`)
 
-  // ② 在首行末尾敲字 ⇒ 改的是**页块正文**（旧形状里改不了）
+  // ② 在首行末尾敲字 ⇒ 改的是**页块的描述**（`text`），不是页名（主别名）
   await page.evaluate((id) => window.__demo.focusBlock(id, 999), first.id)
   await page.keyboard.type('！')
-  const renamed = await page.evaluate((id) => {
+  const edited = await page.evaluate((id) => {
+    const b = window.__demo.allBlocks().find((x) => x.id === id)
     const p = window.__demo.pages().find((x) => x.id === id)
-    return p ? p.title : '(gone)'
+    return { text: b?.text ?? '', primary: b?.aliases?.[0] ?? '', title: p?.title ?? '(gone)' }
   }, first.id)
-  assert(renamed.endsWith('！'), `在首行敲字应改到页块正文：${JSON.stringify(renamed)}`)
+  assert(edited.text.endsWith('！'), `在首行敲字应改到页块的正文（描述）：${JSON.stringify(edited)}`)
+  assert(edited.primary === '产品设计 · 决策日志', `改正文不该改地址（主别名）：${JSON.stringify(edited)}`)
+  assert(edited.title === '产品设计 · 决策日志', `页列表标题应显示主名，不跟正文走：${JSON.stringify(edited)}`)
   await page.keyboard.press('Backspace')
 
   // ③ 首行按 Enter：**不自环**（拆块的 children 转移会让「对象变成自己的子块」）
@@ -3426,7 +3544,7 @@ await check('T52 标签层级：属于/包含双面板、成员含算作、禁�
 
 /* ------------------------------------------------- UI：让一个块成为页 / 标签 */
 
-await check('T53 角色开关：输入名字建标签、同名页兼作标签、标签也作为页、摘标签有提示', async () => {
+await check('T53 列表露面：输入名字建标签、同名页兼作标签、标签也作为页、摘标签只摘露面', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
 
@@ -3444,28 +3562,61 @@ await check('T53 角色开关：输入名字建标签、同名页兼作标签、
   assert(createLabel.includes('新建标签'), `输入新名字时第一行应是新建：${createLabel}`)
   await page.press('.layer-input', 'Enter')
   await page.waitForTimeout(200)
-  const tagPeople = await page.evaluate(() =>
-    window.__demo.allBlocks().find((b) => b.roles.includes('tag') && b.text === '人物'),
-  )
+  const tagPeople = await page.evaluate(() => {
+    const b = window.__demo.allBlocks().find((x) => x.lists.includes('tag') && x.aliases.includes('人物'))
+    return b ? { id: b.id, text: b.text, aliases: b.aliases, lists: b.lists, roles: b.roles } : null
+  })
   assert(tagPeople, '回车后应真的建出标签 #人物 并打上')
+  assert(tagPeople.aliases.length > 0 && tagPeople.aliases[0] === '人物', `标签必须有地址（主名）：${JSON.stringify(tagPeople)}`)
+  assert(tagPeople.lists.includes('tag'), `标签的身份应落在 _lists：${JSON.stringify(tagPeople)}`)
 
-  // ② 新页「设计」⇒ 在它的子块上打同名标签 ⇒ 复用这个页、加上 tag 角色
+  // ② 新页：地址是 `未命名-<短id>`；改正文只改描述，页名走别名编辑器。
+  const reuseName = '复用页名'
   await page.evaluate(() => window.__demo.invoke('core.page/new'))
   const pageId = await page.evaluate(() => window.__demo.snapshot().activeId)
-  await page.evaluate((id) => window.__demo.__editor.setText(id, '设计'), pageId)
+  const created = await page.evaluate((id) => {
+    const b = window.__demo.allBlocks().find((x) => x.id === id)
+    const p = window.__demo.pages().find((x) => x.id === id)
+    return { aliases: b?.aliases ?? [], lists: b?.lists ?? [], text: b?.text ?? '', title: p?.title ?? '(gone)' }
+  }, pageId)
+  assert(created.aliases.length === 1 && created.aliases[0].startsWith('未命名-'), `新页地址应是「未命名-xxx」：${JSON.stringify(created)}`)
+  assert(created.lists.includes('page'), `新页应进页列表：${JSON.stringify(created)}`)
+  assert(created.title === created.aliases[0], `页列表标题应显示这个地址（不是空串）：${JSON.stringify(created)}`)
+
+  // 改正文 ＝ 改描述：地址与页列表标题都不动
+  await page.evaluate((id) => window.__demo.__editor.setText(id, '页的描述'), pageId)
+  const described = await page.evaluate((id) => {
+    const b = window.__demo.allBlocks().find((x) => x.id === id)
+    const p = window.__demo.pages().find((x) => x.id === id)
+    return { text: b?.text ?? '', aliases: b?.aliases ?? [], title: p?.title ?? '(gone)' }
+  }, pageId)
+  assert(described.text === '页的描述', `正文应被改成描述：${JSON.stringify(described)}`)
+  assert(described.aliases[0] === created.aliases[0], `改描述不该改地址：${JSON.stringify(described)}`)
+  assert(described.title === created.title, `改描述不该改页列表标题：${JSON.stringify(described)}`)
+
+  // 页名走别名编辑器：加一个名字，它同时也是 `#复用页名` 的地址
+  await page.locator(`.blk[data-block-id="${pageId}"] .blk-alias-name`).click()
+  await page.waitForSelector('.alias-editor')
+  await page.fill('.alias-editor .alias-input', reuseName)
+  await page.press('.alias-editor .alias-input', 'Enter')
+  await page.waitForTimeout(150)
+  await page.evaluate(() => window.__demo.__layers.closePopover())
+
+  // 在它的子块上打同名标签 ⇒ 同名必同一块：复用这个页、加上 tag 露面
   const childId = await page.evaluate((id) => window.__demo.__editor.insertBlockAfter(id, '内容'), pageId)
   await page.evaluate((id) => window.__demo.focusBlock(id, 0), childId)
   await page.evaluate(() => window.__demo.invoke('core.editor/pick-tag'))
   await page.waitForSelector('.layer-input')
-  await page.fill('.layer-input', '设计')
+  await page.fill('.layer-input', reuseName)
   await page.waitForTimeout(120)
   const reuseLabel = await page.textContent('.layer-item[data-index="0"] .layer-label')
   assert(reuseLabel.includes('同名页'), `同名页应提示复用而不是新建：${reuseLabel}`)
   await page.press('.layer-input', 'Enter')
   await page.waitForTimeout(200)
   const dual = await page.evaluate((id) => window.__demo.allBlocks().find((b) => b.id === id), pageId)
-  assert(dual.roles.includes('page') && dual.roles.includes('tag'), `页应兼作标签：${JSON.stringify(dual)}`)
-  const sameName = await page.evaluate(() => window.__demo.allBlocks().filter((b) => b.text === '设计'))
+  assert(dual.lists.includes('page') && dual.lists.includes('tag'), `页应兼作标签（两个露面都有）：${JSON.stringify(dual)}`)
+  assert(dual.aliases.includes(reuseName), `复用页时名字应仍在它的地址里：${JSON.stringify(dual)}`)
+  const sameName = await page.evaluate((n) => window.__demo.allBlocks().filter((b) => b.aliases.includes(n)), reuseName)
   assert(sameName.length === 1, `同名必同一块：${JSON.stringify(sameName)}`)
 
   // ③ 纯标签「临时」⇒ 打开它，在 footer 点「也作为页」⇒ 真的进页列表
@@ -3475,39 +3626,45 @@ await check('T53 角色开关：输入名字建标签、同名页兼作标签、
   await page.fill('.layer-input', '临时')
   await page.press('.layer-input', 'Enter')
   await page.waitForTimeout(200)
-  const tagTemp = await page.evaluate(() =>
-    window.__demo.allBlocks().find((b) => b.roles.includes('tag') && b.text === '临时'),
-  )
+  const tagTemp = await page.evaluate(() => {
+    const b = window.__demo.allBlocks().find((x) => x.lists.includes('tag') && x.aliases.includes('临时'))
+    return b ? { id: b.id, aliases: b.aliases, lists: b.lists } : null
+  })
   assert(tagTemp, '应建出纯标签 #临时')
   await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), tagTemp.id)
   await page.waitForTimeout(200)
-  const beforePage = await page.evaluate((id) => window.__demo.allBlocks().find((b) => b.id === id).roles, tagTemp.id)
-  assert(!beforePage.includes('page'), '纯标签一开始不是页')
+  const beforePage = await page.evaluate((id) => window.__demo.allBlocks().find((b) => b.id === id).lists, tagTemp.id)
+  assert(!beforePage.includes('page'), '纯标签一开始不进页列表')
   await page.click('#tagpanel-page')
   await page.waitForTimeout(200)
-  const afterPage = await page.evaluate((id) => ({
-    roles: window.__demo.allBlocks().find((b) => b.id === id).roles,
-    pages: window.__demo.pages().map((p) => p.title),
-  }), tagTemp.id)
-  assert(afterPage.roles.includes('page'), `点「也作为页」后应加 page 角色：${JSON.stringify(afterPage)}`)
-  assert(afterPage.pages.includes('临时'), `应进页列表：${JSON.stringify(afterPage.pages)}`)
+  const afterPage = await page.evaluate((id) => {
+    const b = window.__demo.allBlocks().find((x) => x.id === id)
+    return { roles: b.roles, lists: b.lists, aliases: b.aliases, pages: window.__demo.pages().map((p) => p.title) }
+  }, tagTemp.id)
+  assert(afterPage.lists.includes('page'), `点「也作为页」后应进页列表：${JSON.stringify(afterPage)}`)
+  assert(afterPage.pages.includes('临时'), `页列表应显示它的主名：${JSON.stringify(afterPage)}`)
 
-  // ④ 摘标签角色：有成员 ⇒ 先提示；继续后角色没了，⌘Z 能恢复
+  // ④ 摘标签露面：有成员 ⇒ 先提示；继续后只摘 `_lists` 里的 tag，名字还在；⌘Z 能恢复
   await page.evaluate((id) => window.__demo.invoke('core.block/untag', { blockId: id }), tagTemp.id)
   await page.waitForSelector('.layer-head')
   const rolePrompt = await page.textContent('.layer-head')
   assert(rolePrompt.includes('临时') && rolePrompt.includes('1 个块'), `摘标签应提示成员：${rolePrompt}`)
   await page.locator('.layer-item', { hasText: '继续' }).click()
   await page.waitForTimeout(200)
-  const removed = await page.evaluate((id) => window.__demo.allBlocks().find((b) => b.id === id).roles, tagTemp.id)
-  assert(!removed.includes('tag'), `继续后应不再是标签：${JSON.stringify(removed)}`)
+  const removed = await page.evaluate((id) => {
+    const b = window.__demo.allBlocks().find((x) => x.id === id)
+    return { lists: b.lists, aliases: b.aliases }
+  }, tagTemp.id)
+  assert(!removed.lists.includes('tag'), `继续后应不再是标签（tag 露面没了）：${JSON.stringify(removed)}`)
+  assert(removed.lists.includes('page'), `摘 tag 不该顺手摘掉 page 露面：${JSON.stringify(removed)}`)
+  assert(removed.aliases.includes('临时'), `摘露面不删名字：${JSON.stringify(removed)}`)
   await page.evaluate(() => window.__demo.invoke('core.history/undo'))
   await page.waitForTimeout(200)
-  const restored = await page.evaluate((id) => window.__demo.allBlocks().find((b) => b.id === id).roles, tagTemp.id)
-  assert(restored.includes('tag'), `⌘Z 应把 tag 角色恢复：${JSON.stringify(restored)}`)
+  const restored = await page.evaluate((id) => window.__demo.allBlocks().find((b) => b.id === id).lists, tagTemp.id)
+  assert(restored.includes('tag'), `⌘Z 应把 tag 露面恢复：${JSON.stringify(restored)}`)
 
   await ctx.close()
-  return `新建 #人物；页「设计」兼作标签（同名同一块）；#临时 加 page 角色进页列表；摘 tag 有提示且可撤销`
+  return `新建 #人物（别名＋tag 露面）；页「${reuseName}」兼作标签；#临时 加 page 露面进页列表；摘 tag 只摘露面、名字还在且可撤销`
 })
 
 await check(

@@ -18,7 +18,7 @@
  * ⚠️ 这不是「视图类型系统」（29 那套要独立布局状态才升格）。它只是**最小的渲染分派**，
  * 目的是让「槽里是块、块由渲染器画」这个形状现在就在，而不是等视图系统落地才做。
  */
-import { blockTypeOf, DEFAULT_BLOCK_TYPE, DIVIDER_TYPE, isJournal, journalDate, journalDateLabel, prop, type Block } from '../core/index.ts'
+import { blockTypeOf, DEFAULT_BLOCK_TYPE, DIVIDER_TYPE, displayNameOf, isJournal, journalDate, journalDateLabel, prop, type Block } from '../core/index.ts'
 import { renderIcon } from '../view/icons.ts'
 
 /** 渲染一个块时能拿到的东西（后续会加：上下文键、命令执行、订阅） */
@@ -58,7 +58,7 @@ const outlineRenderer: BlockRenderer = {
 
     const title = document.createElement('span')
     title.className = 'p-title'
-    const name = b.text.trim()
+    const name = displayNameOf(b).trim()
     title.textContent = name === '' ? ctx.untitledLabel : name
     title.title = name
 
@@ -127,7 +127,8 @@ const fallbackRenderer: BlockRenderer = {
     if (ctx.isActive(b.id)) row.dataset.active = '1'
     const title = document.createElement('span')
     title.className = 'p-title'
-    title.textContent = b.text.trim() === '' ? ctx.untitledLabel : b.text
+    const name = displayNameOf(b).trim()
+    title.textContent = name === '' ? ctx.untitledLabel : name
     row.append(title)
     row.addEventListener('click', () => ctx.onActivate(b))
     return row

@@ -1,13 +1,15 @@
 /**
  * **标签＝块级分类字段**的纯逻辑测试。
  *
- * 这里钉的是「标签没有位点」这件事的六个后果：
- *   ① 打标签写的是块上的 `props._tags`，正文一个字节不动；
+ * 归属只有一份（`props._tags`），但可以有**两种露面**：块级 chip 与正文里的 `#名`（原子）。
+ * 这里钉的是这件事的七个后果：
+ *   ① 打标签写的是块上的 `props._tags`；块级入口**正文一个字节不动**；
  *   ② 摘掉归属 ⇒ 成员列表随之变空，不留孤儿；
  *   ③ 标签是一个 `tag` 角色的**块**，同名页块不会因为同名就变成标签；
  *   ④ 标签改名 ⇒ 显示名跟着变（复用 ref 解析），且**不改变归属的判定**；
  *   ⑤ 规范化只有一处（`#设计` 与 `#设计 ` 是同一个标签）；
- *   ⑥ 「谁带这个标签」是派生扫描（`tagMemberIds`），顺序＝用户打的先后。
+ *   ⑥ 「谁带这个标签」是派生扫描（`tagMemberIds`），顺序＝用户打的先后；
+ *   ⑦ 行内露面是「位置」，归属仍是「分类」：识别只在分隔符/编辑边界发生。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -18,11 +20,13 @@ import {
   edgeSourceIds,
   ensureTag,
   findTagByName,
-  hasRole,
+  hasList,
   hasTag,
+  inlineTagIdsOf,
   mkTagBlock,
   normalizeTag,
   removeTagId,
+  renameAlias,
   tagIdsOf,
   tagMemberIds,
   tagsOf,
@@ -36,7 +40,9 @@ test('① ensureTag：找到或创建，幂等（第二次不新建）', () => {
   const first = ensureTag(forest, '设计')
   assert.equal(first.created, true)
   assert.equal(forest.length, 1)
-  assert.deepEqual(forest[0]!.props?._roles, ['tag'], '标签是一个带 tag 角色的块')
+  assert.deepEqual(forest[0]!.props?._aliases, ['设计'], '标签的名字进 `_aliases`')
+  assert.deepEqual(forest[0]!.props?._lists, ['tag'], '标签是 `_lists` 里的一个露面')
+  assert.equal(forest[0]!.props?._display, 'alias')
 
   const second = ensureTag(forest, '设计')
   assert.equal(second.created, false)
@@ -79,18 +85,19 @@ test('② 摘掉归属 ⇒ 成员列表空出来（不留悬空记录）', () =>
   assert.equal(tagMemberIds(todo.id, forest).size, 0, '成员列表也要跟着空，不留悬空记录')
 })
 
-test('③ 同名页块 ⇒ 复用它并加 tag 角色（名字空间合并，同名必同一块）', () => {
-  const forest: Block[] = [b('p', '设计', { props: { _roles: ['page'] } })]
+test('③ 同名页块 ⇒ 复用它并加 tag 露面（名字空间合并，同名必同一块）', () => {
+  const forest: Block[] = [b('p', '设计', { props: { _aliases: ['设计'], _lists: ['page'], _display: 'alias' } })]
   const found = ensureTag(forest, '设计')
   assert.equal(found.created, false, '已有同名块 ⇒ 不建第二个块')
   assert.equal(found.reused, true, '这一种是「复用并加角色」，要给用户可见反馈')
   assert.equal(found.block?.id, 'p')
   assert.equal(forest.length, 1)
-  assert.ok(hasRole(found.block!, 'tag'), '复用后它真的成了标签')
+  assert.ok(hasList(found.block!, 'tag'), '复用后它真的成了标签')
+  assert.ok(hasList(found.block!, 'page'), '原来的页露面不丢（兼位）')
   assert.deepEqual(
     allTags(forest).map((t) => t.id),
     ['p'],
-    'allTags 按角色判定，不看名字',
+    'allTags 按 _lists 判定，不看正文',
   )
 })
 
@@ -102,7 +109,12 @@ test('④ 标签改名 ⇒ 显示名跟着变，但归属的判定不变（认 i
   addTagId(a, todo.id)
 
   const before = findTagByName(forest, 'todo')?.id
-  todo.text = '待办' // 改名
+  // 名字在 `_aliases` 里；写正文（描述）**不该**改地址
+  todo.text = '待办'
+  assert.equal(findTagByName(forest, '待办'), undefined, '正文不是地址 ⇒ 改正文不改名字')
+  assert.equal(findTagByName(forest, 'todo')?.id, before, '地址仍是 todo')
+
+  renameAlias(forest, todo, 'todo', '待办')
   const after = findTagByName(forest, '待办')?.id
 
   assert.equal(after, before, '改名后同一块仍在（id 没变）')
@@ -170,19 +182,34 @@ test('⑥c tagsOf：归属指向的块不在了 ⇒ 那一格跳过（不造假�
   assert.deepEqual(tagsOf(a, [a]), [])
 })
 
-test('⑥d edgeSourceIds：只剩引用（标签不再是正文里的边）', () => {
+test('⑥d edgeSourceIds：引用与**行内标签**都算指向边（改名要重画它们）', () => {
   const atoms = [
     { id: 'e1', kind: 'page' as const, blockId: 'a', start: 0, end: 1, label: 'x', target: { kind: 'page' as const, id: 't1' } },
     { id: 'e2', kind: 'image' as const, blockId: 'b', start: 0, end: 1, label: 'p.png' },
+    { id: 'e3', kind: 'tag' as const, blockId: 'c', start: 2, end: 3, label: '设计', target: { kind: 'block' as const, id: 't2' } },
   ]
   assert.deepEqual([...edgeSourceIds(atoms, 't1')], ['a'])
+  assert.deepEqual([...edgeSourceIds(atoms, 't2')], ['c'], '行内标签的显示名也是解析出来的 ⇒ 改名要重画')
   assert.deepEqual([...edgeSourceIds(atoms, 'p.png')], [], '图片不指块，天然不是指向边')
 })
 
-test('mkTagBlock：名字就是正文，不带 #（# 是呈现时加的装饰）', () => {
-  const t = mkTagBlock('设计')
-  assert.equal(t.text, '设计')
-  assert.deepEqual(t.props?._roles, ['tag'])
+test('⑥e inlineTagIdsOf：按出现位置排序、同块去重、只认 tag 原子', () => {
+  const atoms = [
+    { id: 't1', kind: 'tag' as const, blockId: 'b', start: 8, end: 9, label: '乙', target: { kind: 'block' as const, id: 'tag-b' } },
+    { id: 't2', kind: 'tag' as const, blockId: 'b', start: 2, end: 3, label: '甲', target: { kind: 'block' as const, id: 'tag-a' } },
+    { id: 't3', kind: 'tag' as const, blockId: 'b', start: 14, end: 15, label: '甲', target: { kind: 'block' as const, id: 'tag-a' } },
+    { id: 't4', kind: 'page' as const, blockId: 'b', start: 0, end: 1, label: '页', target: { kind: 'page' as const, id: 'p' } },
+    { id: 't5', kind: 'tag' as const, blockId: 'other', start: 0, end: 1, label: '丙', target: { kind: 'block' as const, id: 'tag-c' } },
+  ]
+  assert.deepEqual(inlineTagIdsOf('b', atoms), ['tag-a', 'tag-b'], '按位置排；同名的第二枚不重复；别的块不算')
+})
+
+test('mkTagBlock：名字进 `_aliases`（不带 #），正文是描述，露面是 tag', () => {
+  const t = mkTagBlock(' 设计 ')
+  assert.equal(t.text, '设计', '描述的初值可以等于名字')
+  assert.deepEqual(t.props?._aliases, ['设计'])
+  assert.deepEqual(t.props?._lists, ['tag'])
+  assert.equal(t.props?._display, 'alias')
   assert.equal(t.props?._icon, 'lucide:hash')
 })
 
@@ -195,7 +222,7 @@ test('mkTagBlock：名字就是正文，不带 #（# 是呈现时加的装饰）
  * 而扫全行又会让「想写字面量 #1」变成一次不可撤销的模型改动。
  *
  * ⚠️ 识别与「落成归属」是两件事：这个函数只回答「这段正文里有没有一个刚闭合的名字」，
- *    写成 `_tags` 的路径在装配层（输入路径还没接）。
+ *    删字、插原子、写 `_tags` 由编辑器在同一笔撤销里做完。
  */
 test('trailingHashTag：`#名字` **后面跟了分隔符**才成边（行尾不算）', () => {
   // 空格：区间**不含**那个空格
@@ -229,4 +256,23 @@ test('trailingHashTag：没闭合 / 空名字 / 没有 # ⇒ 不认', () => {
 test('trailingHashTag：只取**最后一个**（刚写完的那个）', () => {
   const got = trailingHashTag('#甲 #乙 ')
   assert.deepEqual(got, { name: '乙', from: 3, to: 5 }, '先写的那个不该被重复处理')
+})
+
+/**
+ * `#` 前面必须是行首或空白：`a#b` 与 URL 的 `#fragment` 不是标签。
+ *
+ * 判据是「用户敲的是标签语法，还是一段字」——两者在正文里长得一样，
+ * 只有边界能分开；不判边界的代价是打一个 `a#b` 就静默改一次模型。
+ */
+test('trailingHashTag：`#` 紧跟在字后面 ⇒ 不认（URL、`a#b`、`中文#设计` 不是标签）', () => {
+  assert.equal(trailingHashTag('a#b '), null)
+  assert.equal(trailingHashTag('中文#设计 '), null)
+  assert.equal(trailingHashTag('https://x.dev/#anchor '), null, 'URL 的 fragment 不是标签')
+  assert.deepEqual(trailingHashTag('（#设计）').name, '设计', '标点之后算数：中文里不空一格也常见')
+})
+
+test('trailingHashTag：编辑边界（`allowEnd`）⇒ 行尾也算敲完', () => {
+  assert.equal(trailingHashTag('#设计'), null, '输入途中：继续等分隔符')
+  assert.deepEqual(trailingHashTag('#设计', { allowEnd: true }), { name: '设计', from: 0, to: 3 })
+  assert.deepEqual(trailingHashTag('前面 #设计', { allowEnd: true }), { name: '设计', from: 3, to: 6 })
 })

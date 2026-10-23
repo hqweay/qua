@@ -50,7 +50,7 @@ function fixture(): Block[] {
   const a2 = mk('a2', 'a2', [mk('a21', 'a21')])
   const a = mk('a', 'a', [a1, a2])
   const b1 = mk('b1', '', [], { props: { _date: '2026-10-22' } })
-  const t1 = mk('t1', '设计', [], { props: { _roles: ['tag'] } })
+  const t1 = mk('t1', '设计', [], { props: { _aliases: ['设计'], _lists: ['tag'] } })
   const b = mk('b', 'b', [b1, t1])
   return [a, b]
 }

@@ -11,11 +11,11 @@
  * ⚠️ 本文件零 DOM、零持久化：它只吃「森林 ＋ 原子」，所以能直接单测。
  */
 import type { Atom } from './annotations.ts'
-import { hasRole, type Block } from './model.ts'
+import { aliasesOf, hasList, type Block } from './model.ts'
 import { walkForest } from './walk.ts'
-import { addressOf } from './alias.ts'
+import { normalizeAlias } from './alias.ts'
 import { journalDate, isJournal } from './journal.ts'
-import { normalizeTag, tagIdsOf, TAG_ROLE } from './tags.ts'
+import { tagIdsOf } from './tags.ts'
 import type { Change } from './storage/port.ts'
 
 /**
@@ -50,7 +50,12 @@ export interface Index {
    * ⚠️ 数据源是**块上的 `_tags`**（不是原子）：所以只有块变化才需要重算这张表。
    */
   tagMembers: Map<string, Set<string>>
-  /** 规范化标签名 → 标签块 id */
+  /**
+   * 标签名表：规范化标签名 → 标签块 id。
+   *
+   * ⚠️ 一个标签有多个别名时，**每一个**都进这张表（都指向同一块）；
+   *    重名时先序第一个赢。这里与 `findByAlias` 同口径，不另写一套比较。
+   */
   tags: Map<string, string>
   /** 日期（`YYYY-MM-DD`）→ journal 块 id */
   journals: Map<string, string>
@@ -163,9 +168,15 @@ function indexSubtree(index: Index, root: Block): void {
     const rootId = ctx.path[0]!.id
     index.blocks.set(b.id, b)
     index.pageOf.set(b.id, rootId)
-    if (hasRole(b, TAG_ROLE)) {
-      const name = addressOf(b)
-      if (name !== '' && !index.tags.has(name)) index.tags.set(name, b.id)
+    /**
+     * 标签名表：一个标签块有多个别名时，**每一个**都是它的地址。
+     * 重复时先序第一个赢（与「先序第一个命中」同一个口径，不随机覆盖）。
+     */
+    if (hasList(b, 'tag')) {
+      for (const alias of aliasesOf(b)) {
+        const name = normalizeAlias(alias)
+        if (name !== '' && !index.tags.has(name)) index.tags.set(name, b.id)
+      }
     }
     if (isJournal(b)) {
       const d = journalDate(b)
@@ -223,7 +234,7 @@ export function tagMemberIdsOf(index: Index, tagId: string): string[] {
 
 /** 按规范化名字找标签块 id */
 export function tagIdByName(index: Index, name: string): string | undefined {
-  return index.tags.get(normalizeTag(name))
+  return index.tags.get(normalizeAlias(name))
 }
 
 /**

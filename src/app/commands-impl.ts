@@ -13,8 +13,8 @@
  */
 import {
   addParentTag,
-  addRole,
   addTagId,
+  ALIASES_PROP,
   allPropDefs,
   allTags,
   checkAddParent,
@@ -24,19 +24,22 @@ import {
   declareField,
   declareOwnProp,
   declaredFieldIds,
+  DISPLAY_PROP,
+  displayNameOf,
   ensureTag,
   ensureFirstBlock,
   findInForest,
   findPath,
   flatten,
   FEED_INITIAL,
-  hasRole,
+  hasList,
   hasTag,
   renameBlock,
   isJournal,
   journalDate,
   journalFeedDays,
   journalId,
+  LISTS_PROP,
   mkBlock,
   mkJournalBlock,
   mkPropDef,
@@ -121,12 +124,20 @@ import type { Row } from '../ui/layers.ts'
 
 /* ═══════════════════════════════════════════════════════ 页 */
 
-/** 一个空页块：正文为空、图标是系统属性 `_icon` */
+/**
+ * 一个空页块：正文空（描述）、名字进 `_aliases`、身份是 `_lists:['page']`。
+ *
+ * ⚠️ 空标题也必须有一个地址：不变量是「在页列表里 ⇒ 至少有一个名字」。
+ *    生成 `未命名-<短 id>` 而不是留空，是让「新建页」立刻可被引用、可被改名，
+ *    且不会在落盘校验里变成非法形状。
+ */
 export function makePageBlock(): Block {
   const b = mkBlock('')
-  addRole(b, 'page')
-  b.props = { ...(b.props ?? {}), _icon: 'lucide:file' }
-  return b
+  const name = t('ui.page.untitledAlias', { id: b.id.slice(-6) })
+  return {
+    ...b,
+    props: { [ALIASES_PROP]: [name], [LISTS_PROP]: ['page'], [DISPLAY_PROP]: 'alias', _icon: 'lucide:file' },
+  }
 }
 
 /**
@@ -139,8 +150,8 @@ export function makePageBlock(): Block {
  * 同一句话两处拼，措辞就会分叉。
  */
 export function takenWhere(b: Block): string {
-  if (hasRole(b, 'page')) return t('ui.where.page')
-  if (hasRole(b, 'tag')) return t('ui.where.tag')
+  if (hasList(b, 'page')) return t('ui.where.page')
+  if (hasList(b, 'tag')) return t('ui.where.tag')
   return t('ui.where.block')
 }
 
@@ -202,7 +213,7 @@ export function pageCommands(d: PageDeps): Pick<
    * 「页」＝任何带 `page` 角色的块（**不要求顶层**）：角色是机制位，不是容器位置。
    * journal 也是一块，但它不是页（「一天一个」）⇒ 混进来会让页数/上一页下一页说不清。
    */
-  const pages = (): Block[] => flatten({ roots: d.blocks() }).filter((p) => hasRole(p, 'page'))
+  const pages = (): Block[] => flatten({ roots: d.blocks() }).filter((p) => hasList(p, 'page'))
 
   return {
     // ⚠️ **只列 `page` 角色**：journal 也是一块，但它不是「页」的不变量是「一天一个」），
@@ -315,7 +326,7 @@ export function pageCommands(d: PageDeps): Pick<
         return
       }
       if (hasTag(host, block.id)) {
-        d.toast(t('ui.toast.tagAlready', { tag: block.text }), 'info')
+        d.toast(t('ui.toast.tagAlready', { tag: displayNameOf(block) }), 'info')
         return
       }
       d.write(host.id, () => {
@@ -323,13 +334,13 @@ export function pageCommands(d: PageDeps): Pick<
       })
       if (created) {
         d.refreshList()
-        d.toast(t('ui.toast.tagCreated', { tag: block.text }))
+        d.toast(t('ui.toast.tagCreated', { tag: displayNameOf(block) }))
       } else if (reused) {
-        // 同名块已存在 ⇒ 复用它并加 tag 角色。**必须让用户看见**，否则这是一次静默的模型改动
+        // 同名块已存在 ⇒ 复用它并加 tag 露面。**必须让用户看见**，否则这是一次静默的模型改动
         d.refreshList()
-        d.toast(t('ui.toast.tagReused', { tag: block.text }), 'info')
+        d.toast(t('ui.toast.tagReused', { tag: displayNameOf(block) }), 'info')
       } else {
-        d.toast(t('ui.toast.tagAdded', { tag: block.text }))
+        d.toast(t('ui.toast.tagAdded', { tag: displayNameOf(block) }))
       }
     },
 
@@ -601,7 +612,7 @@ export function propsCommands(
     const b = find(blockId)
     if (!b) return
     // 页/标签声明它（成员／子块可用）；普通块没有消费者，只登记「这一块有它」
-    if (hasRole(b, 'page') || hasRole(b, 'tag')) d.write(blockId, () => declareField(b, propId))
+    if (hasList(b, 'page') || hasList(b, 'tag')) d.write(blockId, () => declareField(b, propId))
     else d.write(blockId, () => declareOwnProp(b, propId))
   }
 
@@ -640,7 +651,7 @@ export function propsCommands(
         propId = existing.id
         const from = allTags(d.blocks())
           .filter((tag) => declaredFieldIds(tag).includes(propId))
-          .map((tag) => `#${tag.text}`)
+          .map((tag) => `#${displayNameOf(tag)}`)
           .join('、')
         d.toast(t('ui.props.reused', { source: from === '' ? t('ui.props.own') : from }), 'info')
       } else {
@@ -703,7 +714,7 @@ export function tagTreeCommands(
         return false
       }
       d.write(childId, () => addParentTag(child, parent, d.blocks()))
-      d.toast(t('ui.tagpanel.added', { child: child.text, parent: parent.text }))
+      d.toast(t('ui.tagpanel.added', { child: displayNameOf(child), parent: displayNameOf(parent) }))
       return true
     },
 
