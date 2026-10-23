@@ -17,7 +17,7 @@
  */
 import { findInForest, findPath, flatten, type Block, type BlockStore } from '../core/index.ts'
 import { t } from '../core/msg.ts'
-import { BlockEditor } from '../view/editor.ts'
+import { BlockEditor, type Run } from '../view/editor.ts'
 import type { DockSlotEls } from './dock.ts'
 
 /** 外部变化到侧槽重画的防抖窗口（比正文落盘的 250ms 短，读起来才像「实时」） */
@@ -29,6 +29,8 @@ export interface DockBlocksDeps {
   store: BlockStore
   /** 整片森林（活引用） */
   blocks: () => Block[]
+  /** 写入事务入口：执行者在装配层，这里只原样转给每个槽内编辑器（见 `Run`） */
+  write?: Run
   /** 这一槽钉住的块 id（有序） */
   pins: () => readonly string[]
   /** 拖进来一个新块 */
@@ -175,6 +177,7 @@ export class DockBlocks {
       // 重载节奏归本组件（防抖 + 聚焦冻结）
       autoReload: false,
       store: this.deps.store,
+      write: this.deps.write,
       doc: { roots: [block], trash: this.deps.store.trash },
     })
     editor.events = {

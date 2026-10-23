@@ -9,7 +9,7 @@ import './styles.css'
 import { addAlias, addList, addressesOf, aliasesOf, allPropDefs, allTags, blockTypeOf, DISPLAY_PROP, listsOf, tagIdsOf, childTags, claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, primaryAliasOf, prop, propKindOf, removeList, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
-import type { Op } from './core/kb/types.ts'
+import type { Op, Tx } from './core/kb/types.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
   BINDINGS,
@@ -174,6 +174,13 @@ let saveTimer: number | null = null
  * ⚠️ 非空 ⇒ 库与盘上不再一致，所以**换库前必须清空**（旧库的 op 落到新库就是脏写）。
  */
 let pendingOps: Op[] = []
+/**
+ * **最近一次事务的 op**（诊断用，只给 dev 面看）。
+ *
+ * 为什么要单独留一份：「一次用户动作 = 一个 tx」这条口径，唯一能当场证伪的方式是
+ * 「按一下键，数一数 op」。`pendingOps` 在落盘时被清空，代不了这件事。
+ */
+let lastOps: Op[] = []
 let slashOpen = false
 let lastSlashQuery = ''
 /** 截图/自检时静音 toast（产品行为不变，只是不弹提示） */
@@ -882,6 +889,27 @@ function historyGo(dir: 'back' | 'forward'): boolean {
 /* ------------------------------------------------------------ 属性写入 / 摘标签提示 */
 
 /**
+ * **开一次事务**：跑完 `fn`，把产出的 op 攒进待落盘队列，并留一份给诊断面。
+ *
+ * 失败时把 `pendingOps` 截回进门时的长度：`kb.tx` 会把模型整批回滚，
+ * 已经攒进去的 op 却不会自己消失 —— 不清掉就等于「内存退回去了、盘上却多了一批」。
+ *
+ * 返回 `fn` 的返回值：调用方要拿它去放光标、拿新块的 id。
+ */
+function run<R>(fn: (tx: Tx) => R, source?: unknown): R {
+  const n = pendingOps.length
+  try {
+    const r = kb.tx(fn, { source })
+    pendingOps.push(...r.ops)
+    lastOps = r.ops
+    return r.result
+  } catch (e) {
+    pendingOps.length = n
+    throw e
+  }
+}
+
+/**
  * 一次属性写入：模型改动（**经 `tx`**）＋ **一个**撤销快照 ＋ 落盘/重画。
  *
  * 写模型不再自己 `touch`/`invalidateIndex`：`kb.tx` 已经做了这两件事，而且带着
@@ -899,8 +927,7 @@ function writeProps(blockId: string | undefined, mutate: () => void): void {
     blocks.invalidateIndex()
     blocks.touch(mainEd)
   } else {
-    const r = kb.tx((tx) => tx.patch(blockId, mutate), { source: mainEd })
-    pendingOps.push(...r.ops)
+    run((tx) => tx.patch(blockId, mutate), mainEd)
   }
   blocks.record(before, 'other', Date.now())
   scheduleProperties()
@@ -1312,6 +1339,11 @@ ed = new BlockEditor({
   doc: { roots: bootRoots, folded: ws.folded, trash: blocks.trash },
   marks: ws.marks,
   atoms: ws.atoms,
+  /**
+   * 写入事务入口。`mainEd` 是 `let`（焦点切到别的编辑器时它会变），所以这里
+   * **现取**当前实例当 source，而不是把此刻的值焊进闭包。
+   */
+  write: (fn) => run(fn, mainEd),
 })
 mainEd = ed
 renderQueryView()
@@ -1393,6 +1425,7 @@ backlinksView = new BacklinksView(
   },
   {
     store: blocks,
+    write: (fn) => run(fn, backlinksView?.editor),
     blocks: () => ws.blocks,
     targetId: () => ws.activeId,
     onChange: () => {
@@ -1593,7 +1626,7 @@ window.addEventListener('blur', () => {
 
 /* ------------------------------------------------------------ 标签页 footer（属于 / 包含 / 成员） */
 
-const tagPanel = new TagPanel(
+const tagPanel: TagPanel = new TagPanel(
   {
     root: chrome.tagPanelEl,
     title: chrome.tagPanelTitleEl,
@@ -1606,6 +1639,8 @@ const tagPanel = new TagPanel(
   },
   {
     store: blocks,
+    // `tagPanel` 在这一行之前就已声明（`const`），闭包调用时它已经就绪
+    write: (fn) => run(fn, tagPanel.editor),
     blocks: () => ws.blocks,
     tag: () => {
       const b = activeBlock()
@@ -1672,6 +1707,7 @@ queryView = new QueryView(
   },
   {
     store: blocks,
+    write: (fn) => run(fn, queryView?.editor),
     blocks: () => ws.blocks,
     block: () => queryBlock ?? activeBlock(),
     onChange: () => {
@@ -1850,6 +1886,13 @@ const dockBlocksDeps = (side: 'left' | 'right', slot: typeof dockLeft): Construc
   side,
   slot,
   store: blocks,
+  /**
+   * 槽里的编辑器按**块**各一个实例，组件不把它们吐出来；但点进槽里编辑时
+   * `onFocus` 会把 `ed` 切到那一个（`DockBlocks` 的焦点负责这件事）。
+   * 所以取「当前活动编辑器」，只有在「焦点不在任何槽内编辑器」时才会落到别处 ——
+   * 而那种情况下槽里也不会有人正在写。
+   */
+  write: (fn) => run(fn, ed),
   blocks: () => ws.blocks,
   pins: () => prefs().dock[side].pins,
   pin: (blockId) => addPin(side, blockId),
@@ -2160,6 +2203,11 @@ const api = {
    * 「先清后写」在异步批次下会多一次无谓的写序（曾是同步全量 save 时代的口径）。
    */
   clearStorage: () => void store.clear(),
+  /**
+   * 自检用：**最近一次事务**产出的 op（诊断面板不用它，只为「一次动作几条 op」留证据）。
+   * 只读副本：调用方改数组不该影响这里记着的那一份。
+   */
+  lastOps: () => lastOps.slice(),
   __editor: mainEd,
   __registry: registry,
   __layers: layers,

@@ -18,10 +18,12 @@ import {
   type BlockStore,
 } from '../core/index.ts'
 import { t } from '../core/msg.ts'
-import { BlockEditor } from '../view/editor.ts'
+import { BlockEditor, type Run } from '../view/editor.ts'
 
 export interface BacklinksViewDeps {
   store: BlockStore
+  /** 写入事务入口：执行者在装配层，这里只原样转给编辑器（见 `Run`） */
+  write?: Run
   /** 整片森林（活引用） */
   blocks: () => Block[]
   targetId: () => string
@@ -73,6 +75,7 @@ export class BacklinksView {
       allowBlankCreate: false,
       allowRootRemove: false,
       store: deps.store,
+      write: deps.write,
       // 折叠态是视图私有的（反链里收起一行，不该让正文里那一块也收起来）；
       // 空表起步，之后一直沿用 `this.editor.doc.folded` 那一份
       doc: { roots: [], folded: {}, trash: deps.store.trash },

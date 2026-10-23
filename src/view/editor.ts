@@ -85,6 +85,8 @@ import {
   type UndoKind,
   type VisibleRow,
 } from '../core/index.ts'
+// 只取**类型**：`view` 拿不到实现，写入的落地方式归装配层（见 `Run`）
+import type { Tx } from '../core/kb/types.ts'
 // 用户可见文案一律走 t
 import { t } from '../core/msg.ts'
 import { LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl, visibleRowHeight } from './block-dom.ts'
@@ -101,8 +103,21 @@ export interface Probe {
   traced: boolean
 }
 
+/**
+ * **开一个事务**：`view` 只知道「有这么个函数」，不知道它是 `kb.tx`。
+ *
+ * 为什么是函数形状而不是一个 `kb` 句柄：写入必须是**同步**的（模型改完就返回结果，
+ * 方法内要拿新块的 id 去放光标），而「怎么开事务、失败怎么回滚、op 交给谁攒」
+ * 都是装配层的决定。`view` 只 import **类型**，不 import 实现 —— 层向内，`core ← view` 成立。
+ *
+ * 省略 ⇒ 编辑器照旧直改活块（迁移期的兜底，不是终点）。
+ */
+export type Run = <R>(fn: (tx: Tx) => R) => R
+
 export interface ViewOpts {
   container: HTMLElement
+  /** 写入事务入口，见 `Run`。装配层注入；省略时编辑器直改（迁移期） */
+  write?: Run
   /**
    * **「点空白建块」的监听面**——通常比 `container` 大一圈
    * （编辑器 ＋ 它下方那段「还能往下写」的气口）。
@@ -255,6 +270,16 @@ export class BlockEditor {
   blankArea: HTMLElement
   private allowBlankCreate: boolean
   private allowRootRemove: boolean
+  /**
+   * 写入事务入口（装配层注入，见 `Run`）。
+   *
+   * 此刻**没有任何写方法调它**：管道先铺好，方法逐个接过来，接一个有断言一个，
+   * 免得「一次改全线」把行为变化的来源和管道本身混在一起。
+   *
+   * 存成公开只读字段而不是 `private`：私有字段在没有读者时会被「声明了没用」判成噪音，
+   * 而它恰恰是这一轮的交付物 —— 形状就是「装配层交得进来、下一个方法拿得到」。
+   */
+  readonly write: Run | undefined
   /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
   private readonly offStore: () => void
   private readonly unbind: () => void
@@ -264,6 +289,7 @@ export class BlockEditor {
     this.blankArea = o.blankArea ?? o.container
     this.allowBlankCreate = o.allowBlankCreate !== false
     this.allowRootRemove = o.allowRootRemove !== false
+    this.write = o.write
     this.doc = o.doc
     /**
      * **冷启动也必须有 root id**。

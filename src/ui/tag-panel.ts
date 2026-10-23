@@ -13,10 +13,12 @@
  */
 import { displayNameOf, findPath, type Atom, type Block, type BlockStore } from '../core/index.ts'
 import { t } from '../core/msg.ts'
-import { BlockEditor } from '../view/editor.ts'
+import { BlockEditor, type Run } from '../view/editor.ts'
 
 export interface TagPanelDeps {
   store: BlockStore
+  /** 写入事务入口：执行者在装配层，这里只原样转给成员编辑器（见 `Run`） */
+  write?: Run
   blocks: () => Block[]
   /** 当前对象；不是标签 ⇒ 整段隐藏 */
   tag: () => Block | undefined
@@ -75,6 +77,7 @@ export class TagPanel {
       allowBlankCreate: false,
       allowRootRemove: false,
       store: deps.store,
+      write: deps.write,
       // 折叠态是视图私有的（理由同反链）
       doc: { roots: [], folded: {}, trash: deps.store.trash },
     })
