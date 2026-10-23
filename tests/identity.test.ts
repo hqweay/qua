@@ -9,11 +9,27 @@
  *   · 合并（块首退格）的目标是标签／字段定义／日记 ⇒ **不成立**（返回 null，两边都不动）；
  *     这三个身份有两个来源：显式角色（标签）与数据（`_kind`／`_date`），判据收在 `hasIdentity`；
  *   · 目标是普通内容块（含页，页的行本来就允许直接编辑）⇒ 照旧合并；
- *   · 复制子树 ⇒ 角色与属性一起带走，且每一块都发新 id。
+ *   · 复制子树 ⇒ **属性值带走、身份不带走**，且每一块都发新 id。
+ *
+ * ⚠️ 「属性值带走、身份不带走」不是两件事，是一条判据的两半：身份（地址／角色／派生载体）
+ *    指向的是「这一个」，副本只能是内容。只看角色会漏掉派生身份 —— 那正是本文件最后一条
+ *    测试钉的（复制日记造出第二个「同一天」，而它引用不到）。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { addRole, canWriteText, cloneSubtree, mergeIntoPrev, mkBlock, type Block, type Doc } from '../src/core/index.ts'
+import {
+  addRole,
+  canWriteText,
+  cloneSubtree,
+  hasIdentity,
+  isJournalBlock,
+  isPropDefBlock,
+  isQueryBlock,
+  mergeIntoPrev,
+  mkBlock,
+  type Block,
+  type Doc,
+} from '../src/core/index.ts'
 
 const j = (date: string, children: Block[] = []): Block => ({
   id: `j-${date}`,
@@ -100,4 +116,33 @@ test('复制子树：原件没有的角色/属性，副本也不凭空多出来'
   const plain = mkBlock('光块')
   const { block } = cloneSubtree(plain)
   assert.equal(block.props, undefined, '不留空数组、也不留空属性袋')
+})
+
+test('复制子树：派生身份也不带走——副本不能是日记／定义／查询', () => {
+  // 判据：凡是 `hasIdentity` 会认的，副本都不能是。
+  // 角色收窄成两个之后，日记／定义／查询的身份**由数据派生**（`_date`／`_kind`／`_query`），
+  // 只剔 `_roles` 会漏掉这三条 ⇒ 复制日记造出第二个「同一天」，而它引用不到。
+  const journal = mkBlock('')
+  journal.props = { _date: '2026-10-23' }
+  const jc = cloneSubtree(journal).block
+  assert.equal(jc.props?._date, undefined, '副本不带 `_date`：否则库里有两个「同一天」')
+  assert.equal(isJournalBlock(jc), false, '副本不是日记')
+  assert.equal(hasIdentity(jc), false, '副本没有任何身份')
+
+  const def = mkBlock('截止日')
+  def.props = { _kind: 'date' }
+  const dc = cloneSubtree(def).block
+  assert.equal(dc.props?._kind, undefined, '副本不带 `_kind`：否则它是一个没有声明的字段定义')
+  assert.equal(isPropDefBlock(dc), false, '副本不是字段定义')
+
+  const q = mkBlock('我的查询')
+  q.props = { _query: { where: { kind: 'tag' } }, _queryResult: [{ blockId: 'x', path: [] }] }
+  const qc = cloneSubtree(q).block
+  assert.equal(qc.props?._query, undefined, '副本不带 `_query`')
+  assert.equal(
+    qc.props?._queryResult,
+    undefined,
+    '副本不带 `_queryResult`：那次冻结的结果属于原件，留着就是指向别处 id 的死列表',
+  )
+  assert.equal(isQueryBlock(qc), false, '副本不是查询视图')
 })
