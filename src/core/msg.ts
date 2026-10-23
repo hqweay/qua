@@ -113,6 +113,12 @@ export const MSG = {
   'ui.props.unknown': '未知属性 {id}',
   'ui.props.pick': '选择已有属性…',
   'ui.props.use': '用这个',
+  /* 定义已经在本块上（标签声明／页声明／已有值）：留在下拉里但不可选，
+     否则小库的下拉会变成空的，用户分不清「库里没有」与「本块已经有」 */
+  'ui.props.alreadyOn': '已在块上',
+  'ui.props.declaredOn': '已声明',
+  /* 归 gutter 的属性不在这一面板编辑，但要让用户知道它在哪儿 */
+  'ui.props.gutterOnly': '在块左侧编辑：{names}',
   'ui.props.newOption': '＋ 新建属性…',
   'ui.props.newLabel': '属性名',
   'ui.props.create': '新建',

@@ -3773,6 +3773,46 @@ await check(
   },
 )
 
+await check(
+  'T62 已在块上的属性留在 picker 里（灰掉而不是消失），归 gutter 的属性在面板里说清它在哪',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+
+    // 核心词汇：`任务状态` 是勾选属性，`#任务` 声明它，所以种子里打了标签的块都已有这条属性
+    const target = await page.evaluate(() => {
+      const def = window.__demo.propDefs().find((d) => d.label === '任务状态')
+      const tag = window.__demo.allBlocks().find((b) => b.lists.includes('tag') && b.aliases.includes('任务'))
+      const id = tag ? window.__demo.tagMembers(tag.id)[0] : ''
+      if (id) window.__demo.invoke('core.block/focus-block', { blockId: id }, 'keymap')
+      return { defId: def?.id ?? '', blockId: id ?? '' }
+    })
+    assert(target.defId !== '', '种子里应有「任务状态」定义')
+    assert(target.blockId !== '', '种子里应有打了 #任务 的块')
+    await page.waitForTimeout(150)
+
+    const panel = await page.evaluate((propId) => ({
+      rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
+      note: [...document.querySelectorAll('.props-empty')].map((x) => x.textContent),
+    }), target.defId)
+    assert(!panel.rows.includes(target.defId), `归 gutter 的属性不在这里出第二个编辑面：${JSON.stringify(panel)}`)
+    assert(panel.note.some((x) => x.includes('任务状态')), `面板要说明它在块左侧：${JSON.stringify(panel)}`)
+    assert(!panel.note.some((x) => x.includes('还没有块属性')), `已有属性时不能同时说「还没有块属性」：${JSON.stringify(panel)}`)
+
+    await page.click('#properties-add')
+    await page.waitForSelector('.props-form')
+    const option = await page.evaluate((propId) => {
+      const o = [...document.querySelectorAll('.props-form .props-pick option')].find((x) => x.value === propId)
+      return o ? { text: o.textContent, disabled: o.disabled } : null
+    }, target.defId)
+    assert(option !== null, '已在块上的属性不该从 picker 里消失（那会让小库的下拉变空）')
+    assert(option.disabled === true, `已在块上的属性应不可选：${JSON.stringify(option)}`)
+    assert(option.text.includes('已在块上'), `要写明为什么不可选：${JSON.stringify(option)}`)
+
+    await ctx.close()
+    return `picker 保留「任务状态 · 勾选（已在块上）」且 disabled；面板写明「在块左侧编辑」`
+  },
+)
+
 /* ---------------------------------------------------------------- 汇总 */
 
 await browser.close()
