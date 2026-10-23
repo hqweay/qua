@@ -151,6 +151,11 @@ export interface KbClient {
   gutterFieldsOf(ids: readonly string[]): Map<string, GutterField[]>
   tagsOf(id: string): readonly Block[]
 
+  /** 库里全部属性定义（面板的「添加已有属性」用；顺序就是先序） */
+  propDefs(): readonly Block[]
+  /** 这个页/标签**声明**的字段（不是值）——声明解析不到的定义跳过 */
+  declaredFieldsOf(id: string): readonly Block[]
+
   annotationsOf(id: string): { marks: readonly Mark[]; atoms: readonly Atom[] }
 
   query(spec: QuerySpec, opts?: { scopeId?: string }): QueryHit[]

@@ -23,7 +23,16 @@ import { findByAlias } from '../alias.ts'
 import { findPath, findInForest } from '../tree.ts'
 import { walkForest } from '../walk.ts'
 import { tagsOf as tagsOfBlock, tagIdsOf } from '../tags.ts'
-import { fieldRows, gutterFieldsFor, type FieldRow, type GutterField, setValue, clearValue } from '../props.ts'
+import {
+  allPropDefs,
+  declaredFields,
+  fieldRows,
+  gutterFieldsFor,
+  type FieldRow,
+  type GutterField,
+  setValue,
+  clearValue,
+} from '../props.ts'
 import { runQuery, type QueryHit, type QuerySpec } from '../query.ts'
 import type { BlockStore } from '../store.ts'
 import type { Change, KbClient, Op, PathEntry, Tx, TxResult } from './types.ts'
@@ -133,6 +142,15 @@ export class MemoryKb implements KbClient {
   tagsOf(id: string): readonly Block[] {
     const b = this.get(id)
     return b ? tagsOfBlock(b, this.store.blocks) : []
+  }
+
+  propDefs(): readonly Block[] {
+    return allPropDefs(this.store.blocks)
+  }
+
+  declaredFieldsOf(id: string): readonly Block[] {
+    const b = this.get(id)
+    return b ? declaredFields(b, this.store.blocks) : []
   }
 
   annotationsOf(id: string): { marks: readonly Mark[]; atoms: readonly Atom[] } {
