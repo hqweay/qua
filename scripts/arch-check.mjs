@@ -875,40 +875,51 @@ function commandDecls() {
   // 来由：底座轮报的「`core.page/rename` 的 handler 里 `document.getElementById('page-title')`」
   // ——命令面是机器接口（HTTP／MCP／CLI 都会走到它），碰 DOM 会让这些传输在非渲染环境里直接炸。
   // 判据：`COMMANDS` 的 handler 只许经 `app.*` 改状态；DOM 焦点/选区归装配层（`src/main.ts`）。
-  const { sf } = tsFile(join(ROOT, 'src/app/handlers.ts'))
+  //
+  // 2026-10-23：handlers 拆到 `src/app/handlers/*.ts` 后，旧的「只扫 handlers.ts」会数到 0
+  // 却仍然报过 —— 断言空转比红更危险。现在扫合并面 + 各域文件（排除 shared.ts 的小工具）。
+  const files = [
+    join(ROOT, 'src/app/handlers.ts'),
+    ...walk(join(ROOT, 'src/app/handlers'), ['.ts']).filter((p) => !p.endsWith('/shared.ts')),
+  ]
   const hits = []
   const has = new Map()
-  for (const b of sf.statements) {
-    // 形如 `'core.x/y': (a, app) => {...}` 的对象字面量属性
-    if (!ts.isVariableStatement(b)) continue
-    for (const d of b.declarationList.declarations) {
-      if (!d.initializer || !ts.isObjectLiteralExpression(d.initializer)) continue
-      for (const p of d.initializer.properties) {
-        if (!ts.isPropertyAssignment(p) || !ts.isStringLiteral(p.name)) continue
-        const name = p.name.text
-        if (!name.includes('/')) continue // 只挑 `core.*/*` 形状的 handler（跳过 tooltip 之类的杂项）
-        has.set(name, true)
-        const walk = (n) => {
-          if (ts.isIdentifier(n) && (n.text === 'document' || n.text === 'window')) {
-            const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
-            hits.push(`src/app/handlers.ts:${line} \`${name}\` 的 handler 用了 \`${n.text}\``)
-            return
+  for (const file of files) {
+    const { sf } = tsFile(file)
+    const path = rel(file)
+    for (const b of sf.statements) {
+      // 形如 `'core.x/y': (a, app) => {...}` 的对象字面量属性
+      if (!ts.isVariableStatement(b)) continue
+      for (const d of b.declarationList.declarations) {
+        if (!d.initializer || !ts.isObjectLiteralExpression(d.initializer)) continue
+        for (const p of d.initializer.properties) {
+          if (!ts.isPropertyAssignment(p) || !ts.isStringLiteral(p.name)) continue
+          const name = p.name.text
+          if (!name.includes('/')) continue // 只挑 `core.*/*` 形状的 handler（跳过 tooltip 之类的杂项）
+          has.set(name, true)
+          const walkNode = (n) => {
+            if (ts.isIdentifier(n) && (n.text === 'document' || n.text === 'window')) {
+              const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
+              hits.push(`${path}:${line} \`${name}\` 的 handler 用了 \`${n.text}\``)
+              return
+            }
+            ts.forEachChild(n, walkNode)
           }
-          ts.forEachChild(n, walk)
+          walkNode(p.initializer)
         }
-        walk(p.initializer)
       }
     }
   }
   add({
     id: 18,
     title: '命令 handler 不得碰 DOM（`document` / `window`）',
-    method: 'AST 定位 `src/app/handlers.ts` 里形如 `\'core.*/x\': (args, app) => …` 的属性，遍历其函数体查 `document` / `window` 标识符（注释与字符串不计）',
-    scope: `src/app/handlers.ts（${has.size} 个 handler）`,
+    method:
+      'AST 定位 `src/app/handlers.ts` ＋ `src/app/handlers/*.ts`（排除 `shared.ts`）里形如 `\'core.*/x\': (args, app) => …` 的属性，遍历其函数体查 `document` / `window` 标识符（注释与字符串不计）',
+    scope: `src/app/handlers.ts ＋ src/app/handlers/*.ts（${has.size} 个 handler）`,
     whitelist: '无 —— 焦点/选区/滚动一律走 `App` 门面（例：`app.focusTitle()`）',
     hits: hits.length,
     detail: hits,
-    note: '只查这两个全局：`navigator`/`localStorage` 在 demo 里偶尔有正当用途，先不拦；内核到位后升级成「handler 只能调 app.*」',
+    note: '只查这两个全局：`navigator`/`localStorage` 在原型里偶尔有正当用途，先不拦；内核到位后升级成「handler 只能调 app.*」',
   })
 }
 

@@ -1,0 +1,89 @@
+/**
+ * 角色与标签层级 handler。
+ *
+ * 「这块是什么」用角色（`as-page` / `as-tag`），「标签之间有层级」用归属边
+ * （`add-parent` / `remove-parent` / `prune-parents`）——两件事，两个区段。
+ */
+import type { Handler } from '../../core/ports.ts'
+import { curBlock, S } from './shared.ts'
+
+export const TAGS_HANDLERS: Record<string, Handler> = {
+  /* ---- 角色 ---- */
+  'core.block/as-page': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    return id ? app.addBlockRole(id, 'page') : false
+  },
+  'core.block/unpage': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    return id ? app.removeBlockRole(id, 'page') : false
+  },
+  'core.block/as-tag': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    return id ? app.addBlockRole(id, 'tag') : false
+  },
+  'core.block/untag': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    return id ? app.removeBlockRole(id, 'tag') : false
+  },
+  'core.block/edit-aliases': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    if (!id) return false
+    app.openAliasEditor(id)
+    return true
+  },
+  'core.block/edit-fields': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    if (!id) return false
+    app.openFieldsEditor(id)
+    return true
+  },
+  'core.block/set-type': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    const type = S(a.type)
+    if (!id || !type) return false
+    return app.setBlockType(id, type)
+  },
+  /**
+   * **块级标签的两个入口**（属性面板用）。
+   *
+   * 与「在正文里敲 `#名`」写的是同一份 `_tags`；区别只在**露面位置**（chip vs 行内）。
+   * 撤销由编辑器记（一次挂/摘＝一笔撤销），所以这里不再包一层事务。
+   */
+  'core.tags/add': (a, app) => {
+    const blockId = S(a.blockId, '')
+    const name = S(a.name, '').trim()
+    if (blockId === '' || name === '') return false
+    return app.ed.addTag(blockId, name)
+  },
+  'core.tags/remove': (a, app) => {
+    const blockId = S(a.blockId, '')
+    const tagId = S(a.tagId, '')
+    if (blockId === '' || tagId === '') return false
+    return app.ed.removeTag(blockId, tagId)
+  },
+
+  /* ---- 标签层级 ---- */
+  'core.tags/add-parent': (a, app) => {
+    const childId = S(a.childId)
+    const parentId = S(a.parentId)
+    if (!childId || !parentId) return false
+    return app.addTagParent(childId, parentId)
+  },
+  'core.tags/remove-parent': (a, app) => {
+    const childId = S(a.childId)
+    const parentId = S(a.parentId)
+    if (!childId || !parentId) return false
+    app.removeTagParent(childId, parentId)
+    return true
+  },
+  'core.tags/prune-parents': (a, app) => {
+    const childId = S(a.childId)
+    if (!childId) return false
+    app.pruneTagParents(childId)
+    return true
+  },
+  'core.editor/pick-tag': (_a, app) => {
+    app.showTagPicker()
+    return true
+  },
+}
