@@ -6,7 +6,7 @@
  * 一次视口变更波及后面所有用例。
  *
  * ⚠️ **只断言能测的**：A5／A6／A9／A10／A11 依赖「视图块系统 / 布局型块 / 编辑态 / 深度上限 /
- * minW 类型声明」——这些在 demo 里**还不存在**，本文件把它们显式标成 SKIP 并写明理由，
+ * minW 类型声明」——这些在当前实现里**还不存在**，本文件把它们显式标成 SKIP 并写明理由，
  * 不假装通过（宁可少一条绿，不要一条假绿）。
  */
 import { assert, freshPage, launch, resolveBase } from '../scripts/harness.mjs'
@@ -386,10 +386,10 @@ await check('A8 View 态没有缩放手柄；拖拽把手已并进块标，静�
 
 /* ---------------------------------------------------------------- 不适用项 */
 
-skip('A5／A6 布局型块的列数降级与右栏转覆盖', 'demo 还没有「布局型块（表格/看板/白板）」与 minW 类型声明；右栏转覆盖按宽度口径回扫后标为后置')
-skip('A9 进/出 Edit 态所有块 rect 不变（±0.5px）', 'demo 没有独立的「布局编辑双态」（View/Edit 切换按钮）；当前是「失焦＝View」，无切换动作可测')
+skip('A5／A6 布局型块的列数降级与右栏转覆盖', '当前实现还没有「布局型块（表格/看板/白板）」与 minW 类型声明；右栏转覆盖按宽度口径回扫后标为后置')
+skip('A9 进/出 Edit 态所有块 rect 不变（±0.5px）', '当前实现没有独立的「布局编辑双态」（View/Edit 切换按钮）；当前是「失焦＝View」，无切换动作可测')
 skip('A10 深度 ≥3 的节点不存在（插第 4 层被拒）', '`indentBlock` 目前无深度上限（这条要等「深度上限」的口径定下来再断言）')
-skip('A11 容器内 cols ≤ floor(宽/minW(type))', '依赖类型声明里的 `minW`，demo 尚无布局型块')
+skip('A11 容器内 cols ≤ floor(宽/minW(type))', '依赖类型声明里的 `minW`，当前实现尚无布局型块')
 skip('A12 单一内建样式下 A1–A11 全绿', 'A1–A3／A7／A8 已在唯一内建样式下断言（三皮肤已删）；跨外观矩阵等 A5/A6/A9/A10/A11 可行后一起跑')
 
 /* ---------------------------------------------------------------- 汇总 */
@@ -406,5 +406,5 @@ for (const r of results) {
   if (!r.ok) fail++
 }
 const ran = results.filter((r) => !r.skip).length
-console.log(`\n${ran - fail}/${ran} 通过　·　${results.length - ran} 条 SKIP（demo 尚无对应机制）\n`)
+console.log(`\n${ran - fail}/${ran} 通过　·　${results.length - ran} 条 SKIP（当前实现尚无对应机制）\n`)
 process.exit(fail === 0 ? 0 : 1)
