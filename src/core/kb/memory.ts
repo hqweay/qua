@@ -35,7 +35,7 @@ import {
 } from '../props.ts'
 import { runQuery, type QueryHit, type QuerySpec } from '../query.ts'
 import type { BlockStore } from '../store.ts'
-import type { Change, KbClient, Op, PathEntry, Tx, TxResult } from './types.ts'
+import type { Change, KbClient, Op, PathEntry, Tx, TxOpts, TxResult } from './types.ts'
 
 /** 一层的兄弟列表；`null` 父 ⇒ 森林顶层 */
 function siblings(store: BlockStore, parentId: string | null): Block[] | undefined {
@@ -176,7 +176,7 @@ export class MemoryKb implements KbClient {
    * 快照是整片森林 ＋ 锚点 ＋ 回收站：阶段 1 的工作集就是整库，
    * 所以「回滚」与撤销是同一种机制 —— 它们本来回答的就是同一个问题。
    */
-  tx<R>(fn: (tx: Tx) => R): TxResult & { result: R } {
+  tx<R>(fn: (tx: Tx) => R, opts: TxOpts = {}): TxResult & { result: R } {
     const snap = {
       blocks: JSON.stringify(this.store.blocks),
       marks: JSON.stringify(this.store.marks),
@@ -191,7 +191,7 @@ export class MemoryKb implements KbClient {
       // 失效与广播只在成功之后：失败路径恢复的是同一份快照，索引没有理由重算，
       // 而 `touch` 会把「改过」推给每个订阅者 —— 回滚后再推一次等于让他们白渲染两次。
       this.store.invalidateIndex()
-      this.store.touch(undefined, sink.ids())
+      this.store.touch(opts.source, sink.ids())
       return { ops, changes, result }
     } catch (err) {
       this.restore(snap)

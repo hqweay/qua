@@ -80,6 +80,11 @@ export interface Change {
   id: string
 }
 
+/** `tx` 的调用选项：目前只有「谁发起的」（见 `KbClient.tx`） */
+export interface TxOpts {
+  source?: unknown
+}
+
 /** 一次事务的产出。失败时**什么都不返回**（没有「半批」这种形状） */
 export interface TxResult {
   ops: Op[]
@@ -161,6 +166,12 @@ export interface KbClient {
   query(spec: QuerySpec, opts?: { scopeId?: string }): QueryHit[]
   backlinksOf(id: string): readonly BackrefSource[]
 
-  /** 写入口：成功返回 `{ ops, changes }`；抛错 ⇒ 整批回滚并重抛（不返回半批） */
-  tx<R>(fn: (tx: Tx) => R): { ops: Op[]; changes: Change[]; result: R }
+  /**
+   * 写入口：成功返回 `{ ops, changes }`；抛错 ⇒ 整批回滚并重抛（不返回半批）。
+   *
+   * `opts.source` 是**发起这次写入的视图**，原样转给 `store.touch`（订阅者靠它跳过自己）。
+   * 让调用方在事务里声明「我是谁」，比让每个调用点自己再 `touch` 一次安全：
+   * 两次 `touch` 会让别的视图白渲染一遍，漏掉一次就让它们停在旧数据上。
+   */
+  tx<R>(fn: (tx: Tx) => R, opts?: TxOpts): { ops: Op[]; changes: Change[]; result: R }
 }
