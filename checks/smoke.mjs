@@ -798,8 +798,10 @@ await check('T36 StoragePort：关页前不等防抖也能落盘；旧裸库显�
   //    但那是**下一轮装配**才知道的事，不放进这里的断言。
   {
     const { ctx, page } = await freshPage(browser, base)
+    // 冷启动不抢光标 ⇒ 没有初始落盘。先制造一次真实编辑，键位上才会出现 v4 信封。
+    await page.evaluate(() => window.__qua.focus())
+    await page.keyboard.type('种子 ')
     const before = await page.evaluate(() => window.__qua.text())
-    // 先等首屏那次提交落盘（异步批次）：此刻键位上才有一份 v4 信封
     await page.waitForFunction(() => localStorage.length > 0)
     await page.evaluate(() => {
       // 先拿到当前信封的形状，再把它拆成「升级前的裸库」（v3、没有信封）
@@ -823,6 +825,9 @@ await check('T36 StoragePort：关页前不等防抖也能落盘；旧裸库显�
   //    直接喂一份陌生字节，这才是「换后端之后第一次打开」的真实入口。
   {
     const seed = await freshPage(browser, base)
+    // 冷启动不抢光标 ⇒ 没有初始落盘；先制造一次真实编辑再取信封
+    await seed.page.evaluate(() => window.__qua.focus())
+    await seed.page.keyboard.type('种子 ')
     await seed.page.waitForFunction(() => localStorage.length > 0)
     await seed.page.evaluate(() => {
       localStorage.setItem(localStorage.key(0), JSON.stringify({ some: 'other-backend' }))
@@ -1507,27 +1512,38 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
     const all = [...document.querySelectorAll('#editor .blk')]
     const last = all[all.length - 1]
     last.scrollIntoView({ block: 'end' })
-    const r = last.getBoundingClientRect()
+    const editor = document.getElementById('editor').getBoundingClientRect()
+    const x = editor.left + 4
     /**
-     * ⚠️ 不能固定 `bottom + 18`：滚到底之后最后一行下方只剩几个像素，
-     *    `y` 会落到视口外（实测 905 > 900）⇒ 鼠标点什么都没发生。
-     * ⇒ 取「行底 → 视口底」这段空白的**中点**；太窄就再滚一点，把气口露出来。
+     * ⚠️ 不能取「行底 → 视口底」的中点：正文下面还可能有**反链 footer / 查询结果**，
+     *    中点会落进它们的 `.tx`（实测点到了 `SPAN.tx`），而空白建块只认正文自己的气口。
+     * ⇒ 贴着最后一行下方 8/16/24px 找第一个**不在块/嵌套视图/固定条**里的点。
      */
-    const scroller = document.getElementById('scroll') ?? document.scrollingElement
-    const gapTop = r.bottom
-    const gapBottom = window.innerHeight
-    let y = gapTop + (gapBottom - gapTop) / 2
-    if (gapBottom - gapTop < 24 && scroller) {
-      scroller.scrollTop -= 60
-      const r2 = last.getBoundingClientRect()
-      y = r2.bottom + (window.innerHeight - r2.bottom) / 2
+    for (const dy of [8, 16, 24, 40]) {
+      const r = last.getBoundingClientRect()
+      const y = r.bottom + dy
+      if (y > window.innerHeight - 4) continue
+      const el = document.elementFromPoint(x, y)
+      if (!el) continue
+      if (el.closest('.blk, .backlinks, .queryview, #badge')) continue
+      return { x, y, vh: window.innerHeight, bottom: r.bottom }
     }
-    return { x: r.left + r.width / 2, y, vh: window.innerHeight, bottom: r.bottom }
+    const r = last.getBoundingClientRect()
+    return { x, y: Math.min(r.bottom + 8, window.innerHeight - 4), vh: window.innerHeight, bottom: r.bottom }
   })
   assert(hit.y < hit.vh - 2, `前置：落点必须在视口内（y=${hit.y.toFixed(0)}, vh=${hit.vh}, 行底=${hit.bottom.toFixed(0)}）`)
   await page.mouse.click(hit.x, hit.y)
   const t3 = await rows()
-  assert(t3.length === n0 + 1, `点空白应建一块：${n0} → ${t3.length}（落点 x=${hit.x.toFixed(0)}, y=${hit.y.toFixed(0)}）`)
+  const probe = await page.evaluate(({ x, y }) => {
+    const el = document.elementFromPoint(x, y)
+    const ed = window.__qua.__editor
+    return {
+      at: el ? { tag: el.tagName, id: el.id, cls: String(el.className).slice(0, 60) } : null,
+      allow: ed.allowBlankCreate,
+      editorRows: ed.rows?.().length ?? -1,
+    }
+  }, hit)
+  assert(t3.length === n0 + 1, `点空白应建一块：${n0} → ${t3.length}（落点 x=${hit.x.toFixed(0)}, y=${hit.y.toFixed(0)}）${JSON.stringify(probe)}`)
   assert(t3[t3.length - 1].depth === 1, `点空白建的应是当前对象的**子块**（depth 1），实际 ${t3[t3.length - 1].depth}`)
   assert(t3[t3.length - 1].text === '', '新块应是空的')
   const focused = await page.evaluate(() => window.__qua.snapshot().selection)
@@ -1822,7 +1838,9 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
 
   // ⑤ Shift+拖拽 = 跨块**文本**（我们的增量；块选区不激活）
   await page.evaluate((id) => window.__qua.focusBlock(id, 0), ids.a)
-  await drag(ra, rc, true)
+  // 删除/撤销之后 DOM 已重排 ⇒ 落点必须重算，不能复用删除前的 rect
+  const [ra5, rc5] = await Promise.all([rect(ids.a), rect(ids.c)])
+  await drag(ra5, rc5, true)
   const text = await state()
   assert(text.count === 0, `Shift+拖拽不应选块：${JSON.stringify(text)}`)
   assert(text.textSel.includes('AAAA') && text.textSel.includes('BBBB'), `Shift+拖拽应选到跨块文本：${JSON.stringify(text.textSel)}`)
