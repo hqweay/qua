@@ -19,7 +19,7 @@ import type { BindingKind } from './bindings.ts'
 import type { CtxKeys } from './index.ts'
 
 export type Capability = 'read' | 'write' | 'admin' | 'plugin'
-export type DemoState = 'seed' | 'empty' | 'sparse' | 'degraded' | 'boot'
+export type FixtureName = 'seed' | 'empty' | 'sparse' | 'degraded' | 'boot'
 export type PanelKind = 'context' | 'bindings' | 'shortcuts' | 'model'
 
 /** 命令声明（纯语义）：**没有 `key`／`context`／`host`**（59 ） */
@@ -165,7 +165,7 @@ export interface App {
   showPanel(kind: PanelKind): void
   copy(text: string, label?: string): void
   /* 演示与诊断 */
-  loadState(state: DemoState): void
+  loadState(state: FixtureName): void
   setVirtualize(on: boolean, radius?: number): void
   runImeProbe(): { fired: number; seq: string[] }
 }

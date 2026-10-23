@@ -121,9 +121,9 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core/debug/dump-model', title: t('cmd.debug.dump-model'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.diag') },
 
   /* ---- 演示（demo 专用，不在真实产品里） ---- */
-  { name: 'core.demo/load-state', title: t('cmd.demo.load-state'), capability: 'admin', undoable: false, version: '0.1', category: t('menu.cat.demo'), args: { state: { type: 'string', enum: ['seed', 'empty', 'sparse', 'degraded'] } } },
-  { name: 'core.demo/simulate-ime', title: t('cmd.demo.simulate-ime'), capability: 'read', undoable: false, version: '0.1', category: t('menu.cat.demo') },
-  { name: 'core.demo/reset-all', title: t('cmd.demo.reset-all'), capability: 'admin', undoable: false, version: '0.1', category: t('menu.cat.demo') },
+  { name: 'dev.fixture/load', title: t('cmd.dev.load-state'), capability: 'admin', undoable: false, version: '0.1', category: t('menu.cat.dev'), args: { state: { type: 'string', enum: ['seed', 'empty', 'sparse', 'degraded'] } } },
+  { name: 'dev.ime/simulate', title: t('cmd.dev.simulate-ime'), capability: 'read', undoable: false, version: '0.1', category: t('menu.cat.dev') },
+  { name: 'dev.workspace/reset', title: t('cmd.dev.reset-all'), capability: 'admin', undoable: false, version: '0.1', category: t('menu.cat.dev') },
 ]
 
 export const DECL_BY_NAME: Map<string, CommandDecl> = new Map(COMMANDS.map((c) => [c.name, c]))

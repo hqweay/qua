@@ -307,7 +307,7 @@ AST 遍历 `electron/**/*.ts`：禁止 `workspace` / `seed` / `core/` / `command
 6. **`body[data-theme]` 的语义变了**：它现在记的是**档位**（`system|light|dark`），不是解析后的
    亮暗。任何依赖 `data-theme='dark'` 的样式/脚本，在「跟随系统 + 系统是暗」时不会命中。
    本轮把唯一一处（`.atom:hover` 的增亮）改成 token `--atom-hover`；以后别再拿 `data-theme` 当
-   「当前是暗色」用 —— 要解析值请用 `window.__demo.resolvedTheme()`。
+   「当前是暗色」用 —— 要解析值请用 `window.__qua.resolvedTheme()`。
 7. **主题档位存在 workspace blob 里**（同一个 `localStorage` 键）。它其实该是**设备状态**、
    不进 KB；demo 里没有 KB 所以暂时无碍，但接内核时应该把 `prefs` 拆到独立的 UI 状态存储。
    ⚠️ 拆键要迁移（不能直接换键名）。

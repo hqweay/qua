@@ -155,7 +155,7 @@ export async function openPage(browser, ctx, base) {
   })
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
   await page.goto(base, { waitUntil: 'load' })
-  await page.waitForFunction(() => Boolean(window.__demo))
+  await page.waitForFunction(() => Boolean(window.__qua))
   return { browser, ctx, page, errors }
 }
 

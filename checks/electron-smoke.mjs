@@ -71,7 +71,7 @@ async function launch(label, { userData } = {}) {
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(`console: ${m.text()}`)
   })
-  await page.waitForFunction(() => Boolean(window.__demo))
+  await page.waitForFunction(() => Boolean(window.__qua))
   // ⚠️ 当前环境里 `ready-to-show` 不触发、窗口靠 2s 兜底才 show；不等到可见，
   // 后面测 `role=minimize` 会失败（**不可见的窗口在 macOS 上最小化是空操作**）。
   const vis = await app.evaluate(async ({ BrowserWindow }) => {
@@ -125,7 +125,7 @@ await check('E1 启动：加载 dist 产物、preload 面在位、无页面报�
     nodeRequire: typeof window.require,
     nodeProcess: typeof window.process,
     // 壳安全：页面里必须看不到 Node
-    demo: typeof window.__demo,
+    qua: typeof window.__qua,
   }))
   const userDataHonored = page ? await app.evaluate(({ app: a }) => a.getPath('userData')) : ''
   await app.close()
@@ -138,7 +138,7 @@ await check('E1 启动：加载 dist 产物、preload 面在位、无页面报�
   assert(url.startsWith('file://') && url.endsWith('/dist/index.html'), `prod 应加载 dist/index.html，实际 ${url}`)
   assert(surfaces.kb === 'object' && surfaces.kernelAttach === 'function', 'preload 没暴露 kb.kernel.attach')
   assert(surfaces.nodeRequire === 'undefined' && surfaces.nodeProcess === 'undefined', '页面里看得到 Node ⇒ contextIsolation/nodeIntegration 配错了')
-  assert(surfaces.demo === 'object', 'window.__demo 不在（renderer 没起来）')
+  assert(surfaces.qua === 'object', 'window.__qua 不在（renderer 没起来）')
   assert(!errors.length, `页面报错：${errors.join(' | ')}`)
   assert(vis.visible === true, '窗口始终不可见（show() 没生效）')
   assert(info.electron?.startsWith('44.'), `electron 版本异常：${info.electron}`)
@@ -358,26 +358,26 @@ await check('E4 窗口尺寸/位置记忆：改了尺寸 → 关窗 → 重开�
 
 await check('E5 ⌘A 与 ⌘F 的当前行为（①② 的 Electron 现状）', async () => {
   const { app, page } = await launch('hotkeys')
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   const snapBefore = await page.evaluate(() => ({
-    ...window.__demo.snapshot(),
-    blocks: window.__demo.blocks().length,
-    log: window.__demo.commandLog().length,
+    ...window.__qua.snapshot(),
+    blocks: window.__qua.blocks().length,
+    log: window.__qua.commandLog().length,
   }))
 
   // ⌘F
-  await page.evaluate(() => window.__demo.focus())
-  const logBeforeF = await page.evaluate(() => window.__demo.commandLog().length)
+  await page.evaluate(() => window.__qua.focus())
+  const logBeforeF = await page.evaluate(() => window.__qua.commandLog().length)
   await page.keyboard.press('Meta+f')
   await new Promise((r) => setTimeout(r, 250))
   const afterF = await page.evaluate(() => ({
-    logDelta: window.__demo.commandLog().length,
+    logDelta: window.__qua.commandLog().length,
     anyFindUI: Boolean(document.querySelector('input[type=search], .find-bar, [class*=find]')),
     domSel: String(document.getSelection()?.toString() ?? ''),
   }))
 
   // ⌘A
-  await page.evaluate(() => window.__demo.focus())
+  await page.evaluate(() => window.__qua.focus())
   await page.keyboard.press('Meta+a')
   await new Promise((r) => setTimeout(r, 250))
   const afterA = await page.evaluate(() => {
@@ -389,12 +389,12 @@ await check('E5 ⌘A 与 ⌘F 的当前行为（①② 的 Electron 现状）', 
       domTextLen: s?.toString().length ?? 0,
       anchorInEditor: Boolean(document.getElementById('editor')?.contains(s?.anchorNode ?? null)),
       // 模型自己持有的选区（块集合选区由模型持有）
-      modelSel: window.__demo.snapshot().selection,
+      modelSel: window.__qua.snapshot().selection,
       modelStillOneBlock: (() => {
-        const m = window.__demo.snapshot().selection
+        const m = window.__qua.snapshot().selection
         return m.aBlock === m.hBlock
       })(),
-      logDelta: window.__demo.commandLog().length,
+      logDelta: window.__qua.commandLog().length,
     }
   })
 
@@ -405,27 +405,27 @@ await check('E5 ⌘A 与 ⌘F 的当前行为（①② 的 Electron 现状）', 
 
   // 在**独立的干净实例**里看「⌘A 之后直接打字」会发生什么（这是真正要回答的问题）
   const { app: app2, page: page2 } = await launch('select-all-type')
-  await page2.evaluate(() => window.__demo.quiet(true))
-  const n0 = await page2.evaluate(() => window.__demo.blocks().length)
-  await page2.evaluate(() => window.__demo.focus())
+  await page2.evaluate(() => window.__qua.quiet(true))
+  const n0 = await page2.evaluate(() => window.__qua.blocks().length)
+  await page2.evaluate(() => window.__qua.focus())
   await page2.keyboard.press('Meta+a')
   await page2.keyboard.type('X')
   await new Promise((r) => setTimeout(r, 300))
   const destroyed = await page2.evaluate(() => ({
-    blocks: window.__demo.blocks().length,
-    firstTexts: window.__demo.text().slice(0, 3),
-    hasStorage: window.__demo.snapshot().hasLocalStorage,
+    blocks: window.__qua.blocks().length,
+    firstTexts: window.__qua.text().slice(0, 3),
+    hasStorage: window.__qua.snapshot().hasLocalStorage,
   }))
   // 再来一次：⌘A 之后直接按 **Backspace**（「全选删除」——里最该回答的那个操作）
-  await page2.evaluate(() => window.__demo.loadState('seed'))
-  const n1 = await page2.evaluate(() => window.__demo.blocks().length)
-  await page2.evaluate(() => window.__demo.focus())
+  await page2.evaluate(() => window.__qua.loadState('seed'))
+  const n1 = await page2.evaluate(() => window.__qua.blocks().length)
+  await page2.evaluate(() => window.__qua.focus())
   await page2.keyboard.press('Meta+a')
   await page2.keyboard.press('Backspace')
   await new Promise((r) => setTimeout(r, 300))
   const deleted = await page2.evaluate(() => ({
-    blocks: window.__demo.blocks().length,
-    texts: window.__demo.text(),
+    blocks: window.__qua.blocks().length,
+    texts: window.__qua.text(),
     domBlocks: document.querySelectorAll('.blk').length,
   }))
   await app2.close()
@@ -451,15 +451,15 @@ await check('E5 ⌘A 与 ⌘F 的当前行为（①② 的 Electron 现状）', 
 await check('E6 中文 IME：行内原子两侧组合输入、候选取消、提交后原子只漂 1 格不丢', async () => {
   const { app, page } = await launch('ime')
   const cdp = await page.context().newCDPSession(page)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
 
   // ⚠️ `atoms()` 是**库级**的，`blocks()` 是**当前页子树**：
   // 冷启动落在今日 journal，而假数据的原子长在第一页 ⇒ 先显式打开那一页。
-  await page.evaluate(() => window.__demo.invoke('core.page/open', { pageId: window.__demo.pages()[0].id }))
-  const atom = await page.evaluate(() => window.__demo.atoms()[0])
+  await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
+  const atom = await page.evaluate(() => window.__qua.atoms()[0])
   assert(atom, '假数据里应能找到行内原子')
   const blockId = atom.blockId
-  const text0 = await page.evaluate((id) => window.__demo.blocks().find((b) => b.id === id)?.text, blockId)
+  const text0 = await page.evaluate((id) => window.__qua.blocks().find((b) => b.id === id)?.text, blockId)
   assert(typeof text0 === 'string', `原子所属块应已装进编辑器：${blockId}`)
   log(`      目标块 ${blockId.slice(-6)}：初始文本="${text0}"`)
   log(`      原子 kind=${atom.kind} 初始锚点=[${atom.start},${atom.end})`)
@@ -470,12 +470,12 @@ await check('E6 中文 IME：行内原子两侧组合输入、候选取消、提
    */
   async function composeAt(side) {
     const before = await page.evaluate((id) => {
-      const a = window.__demo.atoms().find((x) => x.blockId === id)
-      const b = window.__demo.blocks().find((x) => x.id === id)
-      return { atomStart: a.start, atomEnd: a.end, atomCount: window.__demo.atoms().length, text: b.text }
+      const a = window.__qua.atoms().find((x) => x.blockId === id)
+      const b = window.__qua.blocks().find((x) => x.id === id)
+      return { atomStart: a.start, atomEnd: a.end, atomCount: window.__qua.atoms().length, text: b.text }
     }, blockId)
     const off = side === 'left' ? before.atomStart : before.atomEnd
-    await page.evaluate(({ id, o }) => window.__demo.focusBlock(id, o), { id: blockId, o: off })
+    await page.evaluate(({ id, o }) => window.__qua.focusBlock(id, o), { id: blockId, o: off })
     const caret = await page.evaluate(() => {
       const s = document.getSelection()
       const tx = s?.anchorNode?.parentElement?.closest?.('.tx')
@@ -486,27 +486,27 @@ await check('E6 中文 IME：行内原子两侧组合输入、候选取消、提
     await cdp.send('Input.imeSetComposition', { text: 'zhongwen', selectionStart: 8, selectionEnd: 8 })
     await new Promise((r) => setTimeout(r, 200))
     const composing = await page.evaluate((id) => ({
-      isComposing: window.__demo.snapshot().composing,
-      seq: window.__demo.__editor.probe.compositionSeq.slice(-2).join(','),
+      isComposing: window.__qua.snapshot().composing,
+      seq: window.__qua.__editor.probe.compositionSeq.slice(-2).join(','),
       // 组合期的预编辑串**已经进了模型**（这是「两段式」要处理的现实）
-      modelHasPreedit: window.__demo.blocks().some((b) => b.text.includes('zhongwen')),
+      modelHasPreedit: window.__qua.blocks().some((b) => b.text.includes('zhongwen')),
       domHasPreedit: (document.querySelector(`.blk[data-block-id="${id}"] .tx`)?.textContent ?? '').includes('zhongwen'),
-      atoms: window.__demo.atoms().length,
+      atoms: window.__qua.atoms().length,
     }), blockId)
 
     // ② 候选**取消**（Esc 的语义：清空预编辑，什么都不该落进模型）
     await cdp.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0 })
     await new Promise((r) => setTimeout(r, 200))
     const cancelled = await page.evaluate((id) => {
-      const a = window.__demo.atoms().find((x) => x.blockId === id)
-      const b = window.__demo.blocks().find((x) => x.id === id)
+      const a = window.__qua.atoms().find((x) => x.blockId === id)
+      const b = window.__qua.blocks().find((x) => x.id === id)
       return {
-        isComposing: window.__demo.snapshot().composing,
-        textHasPreeditAnywhere: window.__demo.blocks().some((b2) => b2.text.includes('zhongwen')),
+        isComposing: window.__qua.snapshot().composing,
+        textHasPreeditAnywhere: window.__qua.blocks().some((b2) => b2.text.includes('zhongwen')),
         blockText: b.text,
         atomStart: a.start,
         atomEnd: a.end,
-        atomCount: window.__demo.atoms().length,
+        atomCount: window.__qua.atoms().length,
       }
     }, blockId)
 
@@ -514,14 +514,14 @@ await check('E6 中文 IME：行内原子两侧组合输入、候选取消、提
     await cdp.send('Input.insertText', { text: '中文' })
     await new Promise((r) => setTimeout(r, 250))
     const committed = await page.evaluate((id) => {
-      const a = window.__demo.atoms().find((x) => x.blockId === id)
-      const b = window.__demo.blocks().find((x) => x.id === id)
+      const a = window.__qua.atoms().find((x) => x.blockId === id)
+      const b = window.__qua.blocks().find((x) => x.id === id)
       return {
         blockText: b.text,
         atomStart: a.start,
         atomEnd: a.end,
-        atomCount: window.__demo.atoms().length,
-        isComposing: window.__demo.snapshot().composing,
+        atomCount: window.__qua.atoms().length,
+        isComposing: window.__qua.snapshot().composing,
         // ⚠️ DOM 里**根本没有** U+FFFC 这个字符：行内原子被渲染成
         //   `<span class="atom" contenteditable="false">`（占 1 格的是那个 span，不是占位字符）。
         //   U+FFFC 只活在**模型文本**里。所以度量 DOM 侧要看 `.atom` 元素的个数。
@@ -539,7 +539,7 @@ await check('E6 中文 IME：行内原子两侧组合输入、候选取消、提
 
   const left = await composeAt('left')
   const right = await composeAt('right')
-  const finalText = await page.evaluate((id) => window.__demo.blocks().find((b) => b.id === id).text, blockId)
+  const finalText = await page.evaluate((id) => window.__qua.blocks().find((b) => b.id === id).text, blockId)
   await app.close()
 
   assert(left.composing.seq.includes('start'), `没有 compositionstart（seq=${left.composing.seq}）`)
@@ -588,7 +588,7 @@ await check('E7 窗口缩放：改窗口尺寸，renderer 的布局跟着变（�
   const small = await setSize(760, 560)
   const big = await setSize(1400, 900)
   const zoom = await page.evaluate(() => {
-    const web = window.__demo.__registry ? null : null
+    const web = window.__qua.__registry ? null : null
     return { dpr: window.devicePixelRatio }
   })
   // ⌘+ / ⌘- 缩放（Chromium 的 zoomFactor）——Electron 里由「视图」菜单的 role 管
@@ -667,23 +667,23 @@ await check('E8 深色模式：三档主题的代码事实（并提供当前环�
 
 await check('E9 虚拟化下选区投影与组合期两段式的 Electron 现状', async () => {
   const { app, page } = await launch('bl3')
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   // 造足够多的块，好让虚拟化真的卸载东西
   await page.evaluate(() => {
-    const ed = window.__demo.__editor
-    const first = window.__demo.blocks()[0].id
-    window.__demo.focusBlock(first, 0)
-    for (let i = 0; i < 40; i++) window.__demo.invoke('core.editor/split-block')
+    const ed = window.__qua.__editor
+    const first = window.__qua.blocks()[0].id
+    window.__qua.focusBlock(first, 0)
+    for (let i = 0; i < 40; i++) window.__qua.invoke('core.editor/split-block')
   })
-  const n = await page.evaluate(() => window.__demo.blocks().length)
-  await page.evaluate(() => window.__demo.setVirtualize(true, 8))
+  const n = await page.evaluate(() => window.__qua.blocks().length)
+  await page.evaluate(() => window.__qua.setVirtualize(true, 8))
   await new Promise((r) => setTimeout(r, 300))
-  const virt = await page.evaluate(() => window.__demo.snapshot())
+  const virt = await page.evaluate(() => window.__qua.snapshot())
 
   // ③ 跨块 DOM 选区 ⇒ 滚走 ⇒ 节点被卸载 ⇒ 选区投影还在不在？
   await page.evaluate(() => {
-    const ids = window.__demo.blocks().map((b) => b.id)
-    window.__demo.focusBlock(ids[0], 0)
+    const ids = window.__qua.blocks().map((b) => b.id)
+    window.__qua.focusBlock(ids[0], 0)
   })
   await page.evaluate(() => {
     const blks = document.querySelectorAll('.blk')
@@ -723,8 +723,8 @@ await check('E9 虚拟化下选区投影与组合期两段式的 Electron 现状
       stillMounted,
       anchorConnected: s.anchorNode ? document.contains(s.anchorNode) : null,
       anchorElBlock: s.anchorNode?.parentElement?.closest?.('.blk')?.dataset.blockId ?? null,
-      mounted: window.__demo.snapshot().mounted,
-      totalBlocks: window.__demo.blocks().length,
+      mounted: window.__qua.snapshot().mounted,
+      totalBlocks: window.__qua.blocks().length,
       mountedIds: [...document.querySelectorAll('.blk')].map((el) => el.dataset.blockId),
     }
   }, selInfo0.spannedIds)
@@ -736,13 +736,13 @@ await check('E9 虚拟化下选区投影与组合期两段式的 Electron 现状
     sc.scrollTop = 0
   })
   await new Promise((r) => setTimeout(r, 300))
-  const targetId = await page.evaluate(() => window.__demo.blocks()[0].id)
-  await page.evaluate((id) => window.__demo.focusBlock(id, 0), targetId)
+  const targetId = await page.evaluate(() => window.__qua.blocks()[0].id)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), targetId)
   await cdp.send('Input.imeSetComposition', { text: 'zhongwen', selectionStart: 8, selectionEnd: 8 })
   await new Promise((r) => setTimeout(r, 250))
   const midCompose = await page.evaluate(() => ({
-    isComposing: window.__demo.snapshot().composing,
-    seq: window.__demo.__editor.probe.compositionSeq.join(','),
+    isComposing: window.__qua.snapshot().composing,
+    seq: window.__qua.__editor.probe.compositionSeq.join(','),
   }))
   // 组合中把它滚出窗口 ⇒ 该块应被卸载（DOM 节点连同预编辑串一起没了）
   await page.evaluate(() => {
@@ -754,20 +754,20 @@ await check('E9 虚拟化下选区投影与组合期两段式的 Electron 现状
     const el = document.querySelector(`.blk[data-block-id="${id}"]`)
     return {
       stillMounted: Boolean(el),
-      mountedCount: window.__demo.snapshot().mounted,
-      isComposing: window.__demo.snapshot().composing,
-      blocksWithPreedit: window.__demo.text().filter((t) => t.includes('zhongwen')).length,
+      mountedCount: window.__qua.snapshot().mounted,
+      isComposing: window.__qua.snapshot().composing,
+      blocksWithPreedit: window.__qua.text().filter((t) => t.includes('zhongwen')).length,
     }
   }, targetId)
   await cdp.send('Input.insertText', { text: '中文' })
   await new Promise((r) => setTimeout(r, 400))
   const afterCommit = await page.evaluate(
     ({ id, preedit }) => {
-      const b = window.__demo.blocks().find((x) => x.id === id)
-      const all = window.__demo.blocks()
+      const b = window.__qua.blocks().find((x) => x.id === id)
+      const all = window.__qua.blocks()
       const hit = all.filter((x) => x.text.includes('中文'))
       return {
-        isComposing: window.__demo.snapshot().composing,
+        isComposing: window.__qua.snapshot().composing,
         targetText: b?.text ?? '(块没了)',
         targetSurvived: Boolean(b),
         committedCount: hit.length,
@@ -775,7 +775,7 @@ await check('E9 虚拟化下选区投影与组合期两段式的 Electron 现状
         // 预编辑串（zhongwen）有没有留在模型里 ——这是「两段式」的那条回头账
         preeditLeft: all.filter((x) => x.text.includes(preedit)).map((x) => ({ id: x.id.slice(-6), text: x.text.slice(0, 24) })),
         totalBlocks: all.length,
-        composingSeq: window.__demo.__editor.probe.compositionSeq.join(','),
+        composingSeq: window.__qua.__editor.probe.compositionSeq.join(','),
       }
     },
     { id: targetId, preedit: 'zhongwen' },

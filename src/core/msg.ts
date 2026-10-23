@@ -241,9 +241,9 @@ export const MSG = {
   'cmd.bindings.list': '列出绑定表',
   'cmd.help.shortcuts': '键盘速查',
   'cmd.debug.dump-model': '导出当前页模型 JSON',
-  'cmd.demo.load-state': '载入演示状态',
-  'cmd.demo.simulate-ime': '模拟 IME 组合期按键（守卫自检）',
-  'cmd.demo.reset-all': '清空 localStorage 并还原假数据',
+  'cmd.dev.load-state': '载入演示状态',
+  'cmd.dev.simulate-ime': '模拟 IME 组合期按键（守卫自检）',
+  'cmd.dev.reset-all': '清空 localStorage 并还原假数据',
 
   /* -------------------------------------------------- 命令分组 category（menu.*） */
   'menu.cat.editor': '编辑器',
@@ -255,7 +255,7 @@ export const MSG = {
   'menu.cat.view': '视图',
   'menu.cat.layer': '浮层',
   'menu.cat.diag': '诊断',
-  'menu.cat.demo': '演示',
+  'menu.cat.dev': '演示',
   'menu.cat.props': '属性',
 
   /* --------------------------------------- 菜单 / 斜杠 / 划选气泡 分组标题 */

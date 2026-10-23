@@ -307,7 +307,7 @@ FATAL:content/browser/gpu/gpu_data_manager_impl_private.cc:417] GPU process isn'
 
 - 绑定表里**没有** `mod+a`（`grep` 过），所以 `⌘A` 落给 Chromium 的原生全选：
   - **DOM 侧**：`rangeCount=1`，选区**跨 16 个 `.blk`**（全部挂载的块），DOM 文本 503 字，锚点在 `#editor` 内 ✅
-  - **模型侧**：`__demo.snapshot().selection` **仍是单块**（`aBlock/hBlock` 是同一块），命令日志增量 **0**
+  - **模型侧**：`__qua.snapshot().selection` **仍是单块**（`aBlock/hBlock` 是同一块），命令日志增量 **0**
   ⇒ **DOM 全选了，模型没有**。这正是「块集合选区由模型持有」与浏览器原生之间的缝。
 - **接下去打字会发生什么**（`⌘A` → 打 `X`）：16 块 → **16 块**，第 1 块变成 `X`，其余 15 块**文本一个没少**。
   ⇒ 用户以为「全选替换」，实际只替换了锚点所在那一块；**其余 15 块的 DOM 删除被模型丢弃了**。

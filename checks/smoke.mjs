@@ -29,9 +29,9 @@ const browser = await launch()
 console.log(`\n冒烟：${base}（${mode}）\n`)
 await mkdir(SHOTS, { recursive: true })
 
-const snap = (page) => page.evaluate(() => window.__demo.snapshot())
-const blocks = (page) => page.evaluate(() => window.__demo.blocks())
-const texts = (page) => page.evaluate(() => window.__demo.text())
+const snap = (page) => page.evaluate(() => window.__qua.snapshot())
+const blocks = (page) => page.evaluate(() => window.__qua.blocks())
+const texts = (page) => page.evaluate(() => window.__qua.text())
 
 /**
  * 冷启动落在**今日 journal**，而 `blocks`/`text` 读的是**当前页的子树**
@@ -39,7 +39,7 @@ const texts = (page) => page.evaluate(() => window.__demo.text())
  * （journal 是一块，但不是页：`pages()` 只列 `page` 角色，所以 `pages()[0]` 就是假数据第 1 页。）
  */
 const openFirstPage = (page) =>
-  page.evaluate(() => window.__demo.invoke('core.page/open', { pageId: window.__demo.pages()[0].id }))
+  page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
 
 /* ------------------------------------------------------- 侧槽的钉住区工具 */
 
@@ -78,7 +78,7 @@ const dockState = (page) =>
   page.evaluate(() => {
     const rows = (side) =>
       [...document.querySelectorAll(`#dock-${side} .pin-row`)].map((r) => r.dataset.blockId)
-    return { pref: window.__demo.snapshot().dock, rows: { left: rows('left'), right: rows('right') } }
+    return { pref: window.__qua.snapshot().dock, rows: { left: rows('left'), right: rows('right') } }
   })
 
 /** 钉住行里**那一块自己的**正文（行内还有它的子树，不能取行内第一个/全部 `.tx`） */
@@ -98,13 +98,13 @@ await check('T1 冷启动不抢光标；点块才聚焦，块属性只在聚焦�
   const before = await snap(page)
   const cold = await page.evaluate(() => {
     // journal 首行是只读日期 ⇒ 第一个可编辑块是它的子块
-    const b = window.__demo.blocks()
+    const b = window.__qua.blocks()
     const editable = b.find((x) => !x.roles?.includes('journal'))
     const editor = document.getElementById('editor')
     return {
       id: editable?.id ?? '',
       focused: editor?.contains(document.activeElement) ?? false,
-      sel: window.__demo.snapshot().selection ?? null,
+      sel: window.__qua.snapshot().selection ?? null,
       propsHidden: document.getElementById('properties')?.hidden ?? null,
     }
   })
@@ -121,7 +121,7 @@ await check('T1 冷启动不抢光标；点块才聚焦，块属性只在聚焦�
     const props = document.getElementById('properties')
     return {
       focused: editor?.contains(document.activeElement) ?? false,
-      sel: window.__demo.snapshot().selection ?? null,
+      sel: window.__qua.snapshot().selection ?? null,
       propsHidden: props?.hidden ?? null,
       propsTarget: props?.dataset.targetBlockId ?? '',
     }
@@ -139,12 +139,12 @@ await check('T1 冷启动不抢光标；点块才聚焦，块属性只在聚焦�
   assert(after.blocks === before.blocks, `块数应不变：${before.blocks} → ${after.blocks}`)
   // 打进**光标所在块**（不是 flatten 的第 0 条——那是只读的日期行）
   const got = await page.evaluate(() => {
-    const sel = window.__demo.snapshot().selection
-    return window.__demo.blocks().find((x) => x.id === sel?.aBlock)?.text ?? ''
+    const sel = window.__qua.snapshot().selection
+    return window.__qua.blocks().find((x) => x.id === sel?.aBlock)?.text ?? ''
   })
   assert(got.includes('真正敲进去的六个字'), `光标所在块没拿到文本：${JSON.stringify(got)}｜全量=${JSON.stringify(t)}`)
   // 日期行仍是空的：日期是 `_date` 的只读投影，打进去的字不许落在它上面
-  const journalText = await page.evaluate(() => window.__demo.blocks().find((b) => b.roles?.includes('journal'))?.text)
+  const journalText = await page.evaluate(() => window.__qua.blocks().find((b) => b.roles?.includes('journal'))?.text)
   assert(journalText === '', `journal 行不该被写入：${JSON.stringify(journalText)}`)
   await ctx.close()
   return `冷启动无焦点、无选区、属性区收起；点击后落点 ${cold.id.slice(-6)}；块数 ${after.blocks}，DOM 节点 ${after.domNodes}`
@@ -153,7 +153,7 @@ await check('T1 冷启动不抢光标；点块才聚焦，块属性只在聚焦�
 await check('T1b 属性目标随聚焦块变化；点到编辑区外收起；再点块恢复', async () => {
   const { ctx, page } = await freshPage(browser, base)
   const ids = await page.evaluate(() =>
-    window.__demo
+    window.__qua
       .blocks()
       .filter((b) => !b.roles?.includes('journal'))
       .map((b) => b.id),
@@ -193,8 +193,8 @@ await check('T2 Enter 拆块 ／ Backspace 合并 ／ Tab 缩进 ／ Shift+Tab �
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page) // 冷启动在 journal 上，本用例测的是假数据第一页
   await page.evaluate(() => {
-    const id = window.__demo.blocks()[0].id
-    window.__demo.focusBlock(id, 4)
+    const id = window.__qua.blocks()[0].id
+    window.__qua.focusBlock(id, 4)
   })
   const n0 = (await blocks(page)).length
   await page.keyboard.press('Enter')
@@ -202,9 +202,9 @@ await check('T2 Enter 拆块 ／ Backspace 合并 ／ Tab 缩进 ／ Shift+Tab �
   const split = await blocks(page)
   assert(split.length === n0 + 1, `拆块后应多一块：${n0} → ${split.length}`)
   assert(split[1].text.startsWith('新块'), `新块文本不对：${JSON.stringify(split[1].text)}`)
-  const focused = await page.evaluate(() => window.__demo.snapshot().selection.aBlock)
+  const focused = await page.evaluate(() => window.__qua.snapshot().selection.aBlock)
   // 移到块首再退格 ⇒ 合并到前一块（**内容接到前一块末尾**，前一块保留 id）
-  await page.evaluate((id) => window.__demo.focusBlock(id, 0), focused)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), focused)
   await page.keyboard.press('Backspace')
   const merged = await blocks(page)
   assert(merged.length === n0, `合并后应回到 ${n0} 块，实际 ${merged.length}`)
@@ -221,7 +221,7 @@ await check('T2 Enter 拆块 ／ Backspace 合并 ／ Tab 缩进 ／ Shift+Tab �
     return null
   })
   assert(pick, '假数据里应能找到「有前一个兄弟」的块')
-  await page.evaluate((p) => window.__demo.focusBlock(p.id, p.off), pick)
+  await page.evaluate((p) => window.__qua.focusBlock(p.id, p.off), pick)
   await page.keyboard.press('Tab')
   const d1 = await page.evaluate((id) => Number(document.querySelector(`.blk[data-block-id="${id}"]`).dataset.depth), pick.id)
   assert(d1 === pick.depth + 1, `Tab 应缩进一级：${pick.depth} → ${d1}`)
@@ -238,8 +238,8 @@ await check('T3 四种区间格式走**区间锚点**（⌘B/⌘I/⌘E/⌘`）�
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   await page.evaluate(() => {
-    const id = window.__demo.blocks()[0].id
-    window.__demo.focusBlock(id, 0)
+    const id = window.__qua.blocks()[0].id
+    window.__qua.focusBlock(id, 0)
   })
   const keys = [
     ['mod+b', 'bold'],
@@ -251,7 +251,7 @@ await check('T3 四种区间格式走**区间锚点**（⌘B/⌘I/⌘E/⌘`）�
     await page.keyboard.press('Shift+ArrowRight')
     await page.keyboard.press(kbd(k))
   }
-  const marks = await page.evaluate(() => window.__demo.marks())
+  const marks = await page.evaluate(() => window.__qua.marks())
   const types = new Set(marks.map((m) => m.type))
   for (const [, t] of keys) assert(types.has(t), `缺少 ${t} 锚点：${JSON.stringify(marks)}`)
   for (const m of marks) assert(m.end > m.start && m.blockId.length === 32, `锚点形状不对：${JSON.stringify(m)}`)
@@ -290,7 +290,7 @@ await check('T3b 顶部无工具栏／无顶栏：格式在划选气泡，皮肤
   assert(chrome.trail, '面包屑的容器 #crumbs-trail 应仍在（顶层时 hidden，但 DOM 常驻）')
 
   // ② 光标态：没有气泡
-  await page.evaluate(() => window.__demo.focus())
+  await page.evaluate(() => window.__qua.focus())
   await page.keyboard.press('End')
   const idle = await page.evaluate(() => document.querySelectorAll('.selbar').length)
   assert(idle === 0, '光标态不该有划选气泡')
@@ -300,7 +300,7 @@ await check('T3b 顶部无工具栏／无顶栏：格式在划选气泡，皮肤
   await page.evaluate(() => {
     const rows = [...document.querySelectorAll('#editor .blk')]
     const target = rows.find((el) => (el.querySelector('.tx')?.textContent ?? '').length >= 2)
-    if (target) window.__demo.focusBlock(target.dataset.blockId, target.querySelector('.tx').textContent.length)
+    if (target) window.__qua.focusBlock(target.dataset.blockId, target.querySelector('.tx').textContent.length)
   })
   await page.keyboard.press('Shift+ArrowLeft')
   await page.keyboard.press('Shift+ArrowLeft')
@@ -309,18 +309,18 @@ await check('T3b 顶部无工具栏／无顶栏：格式在划选气泡，皮肤
   assert(btns.includes('core.anno/toggle-bold'), `气泡里应有加粗：${JSON.stringify(btns)}`)
   assert(btns.includes('core.editor/copy-ref'), `气泡里应有「复制带引文的引用」：${JSON.stringify(btns)}`)
 
-  const before = await page.evaluate(() => window.__demo.marks().length)
+  const before = await page.evaluate(() => window.__qua.marks().length)
   await page.evaluate(() => {
     const b = document.querySelector('.selbar .sel-btn[data-command="core.anno/toggle-bold"]')
     b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
   })
   await page.waitForFunction(
-    (n) => document.querySelectorAll('.mk-bold').length > 0 || window.__demo.marks().length !== n,
+    (n) => document.querySelectorAll('.mk-bold').length > 0 || window.__qua.marks().length !== n,
     before,
     { timeout: 2000 },
   )
   const after = await page.evaluate(() => ({
-    marks: window.__demo.marks().length,
+    marks: window.__qua.marks().length,
     barStill: Boolean(document.querySelector('.selbar')),
     selText: document.getSelection()?.toString() ?? '',
   }))
@@ -387,24 +387,24 @@ await check('T4 锚点的粘性映射：在区间起点插入不撑大、终点�
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const r = await page.evaluate(() => {
-    const id = window.__demo.blocks()[0].id
-    window.__demo.focusBlock(id, 0)
+    const id = window.__qua.blocks()[0].id
+    window.__qua.focusBlock(id, 0)
     return id
   })
   await page.keyboard.press('Shift+ArrowRight')
   await page.keyboard.press('Shift+ArrowRight')
   await page.keyboard.press(kbd('mod+b'))
-  const m0 = (await page.evaluate(() => window.__demo.marks()))[0]
+  const m0 = (await page.evaluate(() => window.__qua.marks()))[0]
   assert(m0.start === 0 && m0.end === 2, `初始锚点应为 [0,2)：${JSON.stringify(m0)}`)
   // 光标停到区间起点（offset 0）再插入 ⇒ 起点右移（不撑大）
-  await page.evaluate((id) => window.__demo.focusBlock(id, 0), r)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), r)
   await page.keyboard.type('X')
-  const m1 = (await page.evaluate(() => window.__demo.marks()))[0]
+  const m1 = (await page.evaluate(() => window.__qua.marks()))[0]
   assert(m1.start === 1 && m1.end === 3, `起点插入后应整体右移到 [1,3)：${JSON.stringify(m1)}`)
   // 光标停到区间终点再插入 ⇒ 终点不动
-  await page.evaluate((id) => window.__demo.focusBlock(id, 3), r)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 3), r)
   await page.keyboard.type('Y')
-  const m2 = (await page.evaluate(() => window.__demo.marks()))[0]
+  const m2 = (await page.evaluate(() => window.__qua.marks()))[0]
   assert(m2.start === 1 && m2.end === 3, `终点插入后应保持 [1,3)：${JSON.stringify(m2)}`)
   await ctx.close()
   return `[0,2) →起点插→ [1,3) →终点插→ [1,3)（两端口径与既有实现一致）`
@@ -416,23 +416,23 @@ await check('T5 行内原子：引用 chip 与图片占位各占 1 格，随文�
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const r = await page.evaluate(() => {
-    const blk = window.__demo.blocks()[0]
-    window.__demo.focusBlock(blk.id, 0)
-    const target = window.__demo.pages()[1].id
-    window.__demo.invoke('core.editor/insert-page-ref', { pageId: target })
-    const atom = window.__demo.atoms().find((a) => a.blockId === blk.id)
-    return { atom, text: window.__demo.blocks()[0].text, id: blk.id, total: window.__demo.atoms().length }
+    const blk = window.__qua.blocks()[0]
+    window.__qua.focusBlock(blk.id, 0)
+    const target = window.__qua.pages()[1].id
+    window.__qua.invoke('core.editor/insert-page-ref', { pageId: target })
+    const atom = window.__qua.atoms().find((a) => a.blockId === blk.id)
+    return { atom, text: window.__qua.blocks()[0].text, id: blk.id, total: window.__qua.atoms().length }
   })
   assert(r.atom, `引用原子没插进去：${JSON.stringify(r)}`)
   const a = r.atom
   assert(a.end - a.start === 1, `原子应恒占 1 格：${JSON.stringify(a)}`)
   assert(r.text[a.start] === '\uFFFC', `文本里那一格应是占位符 U+FFFC：${JSON.stringify(r.text.slice(0, 6))}`)
-  await page.evaluate((id) => window.__demo.focusBlock(id, 0), r.id)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), r.id)
   await page.keyboard.type('前')
-  const shifted = (await page.evaluate(() => window.__demo.atoms())).find((x) => x.blockId === r.id)
+  const shifted = (await page.evaluate(() => window.__qua.atoms())).find((x) => x.blockId === r.id)
   assert(shifted.start === a.start + 1, `在原子前插入应右移 1：${a.start} → ${shifted.start}`)
-  await page.evaluate(() => window.__demo.invoke('core.editor/insert-image', { preset: 'missing' }))
-  const atoms = await page.evaluate(() => window.__demo.atoms())
+  await page.evaluate(() => window.__qua.invoke('core.editor/insert-image', { preset: 'missing' }))
+  const atoms = await page.evaluate(() => window.__qua.atoms())
   assert(atoms.some((x) => x.kind === 'image'), '图片原子没插进去')
   const domAtoms = await page.evaluate(() => ({
     page: document.querySelectorAll('.atom-page').length,
@@ -538,7 +538,7 @@ await check('T24 可点导轨：深度 d 行有 d 段、点第 k 段折该祖先
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   // 假数据里已有 depth 2 的块（嵌套 4 层的种子树）⇒ 直接用它，不靠按键造树
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
 
   const geo = await page.evaluate(() => {
     const rows = [...document.querySelectorAll('#editor .blk')]
@@ -574,7 +574,7 @@ await check('T24 可点导轨：深度 d 行有 d 段、点第 k 段折该祖先
   // R6：点导轨段 ⇒ 折**那一层祖先的直接子块**，**不折那个祖先自己**；
   //   再点同一段 ⇒ 展开，且段仍在、命中同一目标。
   const res = await page.evaluate((ids) => {
-    const byId = (id) => window.__demo.blocks().find((b) => b.id === id)
+    const byId = (id) => window.__qua.blocks().find((b) => b.id === id)
     const visibleIds = () => [...document.querySelectorAll('#editor .blk')].map((el) => el.dataset.blockId)
     const click = (id) => {
       const rail = document.querySelector(`#editor .blk .rail[data-fold-line-for="${id}"]`)
@@ -648,7 +648,7 @@ await check('T7 拖拽重排：把第 2 块拖到第 1 块上方（真实 DnD �
   // 本用例测的是「内容块之间的拖拽」⇒ 先打开一个单容器页与等同一前置）。
   await openFirstPage(page)
   const moved = await page.evaluate(() => {
-    const bs = window.__demo.blocks()
+    const bs = window.__qua.blocks()
     // bs[0] 是页根（section 根）：它不参与「内容块之间」的拖拽。
     // 取两个内容块：把 bs[2] 拖到 bs[1] 上方。
     const src = bs[2]
@@ -665,7 +665,7 @@ await check('T7 拖拽重排：把第 2 块拖到第 1 块上方（真实 DnD �
     tgtEl.dispatchEvent(mk('dragover'))
     tgtEl.dispatchEvent(mk('drop'))
     handle.dispatchEvent(mk('dragend'))
-    const after = window.__demo.blocks()
+    const after = window.__qua.blocks()
     const si = after.findIndex((b) => b.id === src.id)
     const ti = after.findIndex((b) => b.id === tgt.id)
     return { ok: si >= 0 && ti >= 0 && si < ti, src: src.text.slice(0, 8), order: after.map((b) => b.text.slice(0, 8)) }
@@ -679,12 +679,12 @@ await check('T7 拖拽重排：把第 2 块拖到第 1 块上方（真实 DnD �
 
 await check('T8 命令面板 ⌘P：列出全部命令、可搜、**无绑定也能执行**', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.focus())
+  await page.evaluate(() => window.__qua.focus())
   await page.keyboard.press(kbd('mod+p'))
   const rows = await page.locator('.layer-item').count()
   assert(rows > 30, `命令面板应列出全部命令，实际 ${rows} 行`)
   const noKey = await page.evaluate(() => {
-    const log = window.__demo.__registry.list()
+    const log = window.__qua.__registry.list()
     return log.filter((d) => !d.hidden).length
   })
   await page.locator('.layer-input').fill('bold')
@@ -719,9 +719,9 @@ await check('T9 块菜单与斜杠菜单**都是绑定表的渲染结果**（同
   assert((await page.locator('.layer').count()) === 0, 'Esc 应关掉块菜单')
   // 斜杠：在空块里键入 `/`，菜单应弹出并随打字过滤
   await page.evaluate(() => {
-    const bs = window.__demo.blocks()
+    const bs = window.__qua.blocks()
     const id = bs[bs.length - 1].id
-    window.__demo.focusBlock(id, 0)
+    window.__qua.focusBlock(id, 0)
   })
   await page.keyboard.press('End')
   await page.keyboard.press('Enter')
@@ -731,9 +731,9 @@ await check('T9 块菜单与斜杠菜单**都是绑定表的渲染结果**（同
   await page.keyboard.type('图')
   const filteredRows = await page.locator('.layer-item').count()
   assert(filteredRows >= 1 && filteredRows <= slashRows, `斜杠应随打字过滤：${slashRows} → ${filteredRows}`)
-  const beforeAtoms = (await page.evaluate(() => window.__demo.atoms())).length
+  const beforeAtoms = (await page.evaluate(() => window.__qua.atoms())).length
   await page.keyboard.press('Enter')
-  const afterAtoms = (await page.evaluate(() => window.__demo.atoms())).length
+  const afterAtoms = (await page.evaluate(() => window.__qua.atoms())).length
   assert(afterAtoms === beforeAtoms + 1, '斜杠菜单选「图片」应插入一个原子')
   const t = await texts(page)
   assert(!t.some((x) => x.includes('/图')), `` + `斜杠查询词应从文本里抹掉：${JSON.stringify(t.slice(-2))}`)
@@ -747,27 +747,27 @@ await check('T10 localStorage：关掉重开内容还在（含锚点与原子）
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => {
     // journal 首行是只读日期 ⇒ 往第一个**可编辑**块里写
-    const b = window.__demo.blocks().find((x) => !x.roles?.includes('journal'))
-    window.__demo.focusBlock(b.id, 0)
+    const b = window.__qua.blocks().find((x) => !x.roles?.includes('journal'))
+    window.__qua.focusBlock(b.id, 0)
   })
   await page.keyboard.type('持久化标记 ')
   await page.keyboard.press('Shift+ArrowRight')
   await page.keyboard.press(kbd('mod+b'))
   await page.waitForTimeout(450)
   const before = await page.evaluate(() => ({
-    marks: window.__demo.marks().length,
-    atoms: window.__demo.atoms().length,
-    saved: window.__demo.snapshot().hasLocalStorage,
+    marks: window.__qua.marks().length,
+    atoms: window.__qua.atoms().length,
+    saved: window.__qua.snapshot().hasLocalStorage,
   }))
   assert(before.saved, 'localStorage 里应有快照')
   // ⚠️ 2026-10-20：原来这里是 `page.reload()`。reload 不算「关掉重开」，
   //    所以改成真正的「关页 → 从关页后的存储复原 → 重开」（见 harness 的 `reopenPage`）。
   const reopened = await reopenPage(browser, ctx, base, page)
   const after = await reopened.page.evaluate(() => ({
-    text: window.__demo.text().join('|'),
-    marks: window.__demo.marks().length,
-    atoms: window.__demo.atoms().length,
-    pages: window.__demo.snapshot().pageCount,
+    text: window.__qua.text().join('|'),
+    marks: window.__qua.marks().length,
+    atoms: window.__qua.atoms().length,
+    pages: window.__qua.snapshot().pageCount,
   }))
   await reopened.ctx.close()
   assert(after.text.includes('持久化标记'), `重开后文本丢了：${JSON.stringify(after.text.slice(0, 40))}`)
@@ -782,12 +782,12 @@ await check('T36 StoragePort：关页前不等防抖也能落盘；旧裸库显�
   {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => {
-      const b = window.__demo.blocks().find((x) => !x.roles?.includes('journal'))
-      window.__demo.focusBlock(b.id, 0)
+      const b = window.__qua.blocks().find((x) => !x.roles?.includes('journal'))
+      window.__qua.focusBlock(b.id, 0)
     })
     await page.keyboard.type('页隐藏标记 ')
     const reopened = await reopenPage(browser, ctx, base, page)
-    const text = await reopened.page.evaluate(() => window.__demo.text().join('|'))
+    const text = await reopened.page.evaluate(() => window.__qua.text().join('|'))
     await reopened.ctx.close()
     assert(text.includes('页隐藏标记'), `关页前那批没落盘：${text.slice(0, 40)}`)
   }
@@ -798,7 +798,7 @@ await check('T36 StoragePort：关页前不等防抖也能落盘；旧裸库显�
   //    但那是**下一轮装配**才知道的事，不放进这里的断言。
   {
     const { ctx, page } = await freshPage(browser, base)
-    const before = await page.evaluate(() => window.__demo.text())
+    const before = await page.evaluate(() => window.__qua.text())
     // 先等首屏那次提交落盘（异步批次）：此刻键位上才有一份 v4 信封
     await page.waitForFunction(() => localStorage.length > 0)
     await page.evaluate(() => {
@@ -810,7 +810,7 @@ await check('T36 StoragePort：关页前不等防抖也能落盘；旧裸库显�
       localStorage.setItem(storageKey, JSON.stringify(legacy.data))
     })
     const reopened = await reopenPage(browser, ctx, base, page)
-    const snap = await reopened.page.evaluate(() => ({ ...window.__demo.snapshot(), text: window.__demo.text().join('|') }))
+    const snap = await reopened.page.evaluate(() => ({ ...window.__qua.snapshot(), text: window.__qua.text().join('|') }))
     await reopened.ctx.close()
     assert(before.length > 0, '前置：首屏应有内容')
     assert(!snap.readOnly, '旧版本的库应当被显式作废重 seed（不是进只读态）')
@@ -832,7 +832,7 @@ await check('T36 StoragePort：关页前不等防抖也能落盘；旧裸库显�
     const ctx2 = await browser.newContext({ storageState: state })
     const { page: page2 } = await openPage(browser, ctx2, base)
     const snap = await page2.evaluate(() => ({
-      readOnly: window.__demo.snapshot().readOnly,
+      readOnly: window.__qua.snapshot().readOnly,
       raw: localStorage.getItem(localStorage.key(0)),
     }))
     await ctx2.close()
@@ -860,9 +860,9 @@ await check('T11 主题三档 = 真 token 切换（DOM 形状不变；皮肤已�
     }))
   const a = await sig()
   assert(!a.hasSkin, 'body 上不该有 data-skin（D3：甲/乙/丙三皮肤已删）')
-  await page.evaluate(() => window.__demo.setTheme('light'))
+  await page.evaluate(() => window.__qua.setTheme('light'))
   const light = await sig()
-  await page.evaluate(() => window.__demo.setTheme('dark'))
+  await page.evaluate(() => window.__qua.setTheme('dark'))
   const dark = await sig()
   assert(a.domShape === light.domShape && light.domShape === dark.domShape, '换主题不该改 DOM 形状（只换 token）')
   assert(a.bg !== dark.bg, `亮/暗配色应有区分：${a.bg} / ${dark.bg}`)
@@ -874,12 +874,12 @@ await check('T11 主题三档 = 真 token 切换（DOM 形状不变；皮肤已�
   // ——三档里的「跟随系统」的缺口）：**不做 JS 切类**，颜色由 CSS 的
   //    `prefers-color-scheme` ＋ `light-dark()` 决定。用 Playwright 真改媒体查询（真 Chrome）断言：
   //    `data-theme` 记的是**档位**（system 不动），底色必须跟着系统变。
-  await page.evaluate(() => window.__demo.setTheme('system'))
+  await page.evaluate(() => window.__qua.setTheme('system'))
   const sysLight = await sig()
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.waitForTimeout(80)
   const sysDark = await sig()
-  const sysDarkResolved = await page.evaluate(() => window.__demo.resolvedTheme())
+  const sysDarkResolved = await page.evaluate(() => window.__qua.resolvedTheme())
   await page.emulateMedia({ colorScheme: 'light' })
   assert(
     sysLight.theme === 'system' && sysDark.theme === 'system',
@@ -898,8 +898,8 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
   const { ctx, page } = await freshPage(browser, base)
   // 打开「产品设计 · 决策日志」：seed 里那一页带一个查询块（条件＝本页的待办）
   await page.evaluate(() => {
-    const p = window.__demo.pages().find((x) => (x.title ?? '').includes('产品设计'))
-    window.__demo.invoke('core.page/open', { pageId: p.id })
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
   })
   await page.waitForTimeout(300)
 
@@ -920,12 +920,12 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
   assert(!first.stale, '刚冻结完不该显示「可能已过期」')
 
   const targetId = await page.evaluate(() =>
-    window.__demo.blocks().find((x) => x.text.includes('引用某段'))?.id ?? '',
+    window.__qua.blocks().find((x) => x.text.includes('引用某段'))?.id ?? '',
   )
   assert(targetId, '前置：应能找到那条待办')
 
   // ① 内容不冻（D5）：在正文里改字 ⇒ 查询视图**立即**显示新文字
-  await page.evaluate((id) => window.__demo.focusBlock(id, 0), targetId)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), targetId)
   await page.keyboard.type('改字 ')
   await page.waitForTimeout(200)
   const edited = await view()
@@ -934,7 +934,7 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
   assert(edited.stale, '结果里的块变了 ⇒ 应当提示「可能已过期」')
 
   // ② 成员不冻（D4）：把它改成已完成 ⇒ 不再匹配，但**列表仍应留着**，等刷新再移除
-  await page.evaluate(() => window.__demo.invoke('core.editor/toggle-todo'))
+  await page.evaluate(() => window.__qua.invoke('core.editor/toggle-todo'))
   await page.waitForTimeout(200)
   const stillThere = await view()
   assert(stillThere.rows.length === 1, `去掉匹配后不许自动重排（D4）：${JSON.stringify(stillThere.rows)}`)
@@ -969,9 +969,9 @@ await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器
   // 打开「产品设计 · 决策日志」：seed 里那一页有指向别处的 `[[..]]`
   // ⚠️ 把它的 id 记下来，之后**全程按 id 导航**：改名之后按标题找它可能就找不到了。
   const homeId = await page.evaluate(() => {
-    const p = window.__demo.pages().find((x) => (x.title ?? '').includes('产品设计'))
-    if (!p) throw new Error(`前置：找不到「产品设计」页，现有 ${JSON.stringify(window.__demo.pages().map((x) => x.title))}`)
-    window.__demo.invoke('core.page/open', { pageId: p.id })
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    if (!p) throw new Error(`前置：找不到「产品设计」页，现有 ${JSON.stringify(window.__qua.pages().map((x) => x.title))}`)
+    window.__qua.invoke('core.page/open', { pageId: p.id })
     return p.id
   })
   await page.waitForTimeout(200)
@@ -980,13 +980,13 @@ await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器
   //    ⚠️ `atoms()` 是**库级**的（所有页的原子都在里面），而 `blocks()` 只给**当前视图**
   //    ⇒ 必须按「原子所在块是否在这一页」筛，否则会挑到一个没挂 DOM 的引用（chip 量为 0）。
   const target = await page.evaluate(() => {
-    const mounted = new Set(window.__demo.blocks().map((x) => x.id))
-    const a = window.__demo
+    const mounted = new Set(window.__qua.blocks().map((x) => x.id))
+    const a = window.__qua
       .atoms()
       .find((x) => x.kind === 'page' && x.state === 'resolved' && x.target && mounted.has(x.blockId))
     if (!a) return null
-    const b = window.__demo.blocks().find((x) => x.id === a.blockId)
-    const t = window.__demo.allBlocks().find((x) => x.id === a.target.id)
+    const b = window.__qua.blocks().find((x) => x.id === a.blockId)
+    const t = window.__qua.allBlocks().find((x) => x.id === a.target.id)
     return {
       atomId: a.id,
       label: a.label,
@@ -1008,41 +1008,41 @@ await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器
   // ③ **改正文 ＝ 改描述**：页名住在 `_aliases`，页块正文只是描述。
   //    在首行打字必须改到描述，主别名与页列表标题一个字节都不动。
   const DESC = '改名后的新描述'
-  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), target.targetId)
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), target.targetId)
   await page.waitForTimeout(150)
   await page.evaluate(() => {
-    const first = window.__demo.blocks()[0]
-    window.__demo.focusBlock(first.id, first.text.length)
+    const first = window.__qua.blocks()[0]
+    window.__qua.focusBlock(first.id, first.text.length)
   })
   for (let i = 0; i < 60; i++) await page.keyboard.press('Backspace')
   await page.keyboard.type(DESC)
   await page.waitForTimeout(200)
   const described = await page.evaluate((id) => {
-    const b = window.__demo.allBlocks().find((x) => x.id === id)
-    const p = window.__demo.pages().find((x) => x.id === id)
+    const b = window.__qua.allBlocks().find((x) => x.id === id)
+    const p = window.__qua.pages().find((x) => x.id === id)
     return { text: b?.text ?? '', primary: b?.aliases?.[0] ?? '', title: p?.title ?? '(gone)' }
   }, target.targetId)
   assert(described.text === DESC, `改正文应改到描述：${JSON.stringify(described)}`)
   assert(described.primary === target.primary, `改正文不该改主别名：${JSON.stringify(described)}`)
   assert(described.title === target.label, `页列表标题应继续显示主名：${JSON.stringify(described)}`)
   // 别名头住在 `.tx` 外：读回正文必须只有描述，不能把行头的名字也读进模型
-  const readback = await page.evaluate((id) => window.__demo.__editor.readText(id), target.targetId)
+  const readback = await page.evaluate((id) => window.__qua.__editor.readText(id), target.targetId)
   assert(readback === DESC, `别名头不该进正文读回：${JSON.stringify({ readback })}`)
   // 回到引用所在的那一页，看 chip：描述变了，引用名不该变
-  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), homeId)
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), homeId)
   await page.waitForTimeout(200)
   const unchanged = await chipLabel()
   assert(unchanged === `[[${target.label}]]`, `改描述后 chip 应保持主名：${JSON.stringify(unchanged)}`)
 
   // ④ **原子没被回写**：改名靠解析传播，不是批量改 label
   const rawLabel = await page.evaluate(
-    (id) => window.__demo.atoms().find((x) => x.id === id)?.rawLabel ?? '',
+    (id) => window.__qua.atoms().find((x) => x.id === id)?.rawLabel ?? '',
     target.atomId,
   )
   assert(rawLabel !== DESC, `落盘的 label 不该被描述回写（应仍是插入时的快照）：${JSON.stringify(rawLabel)}`)
 
   // ⑤ **页名走别名编辑器**：加一个名字 → 设成主名 ⇒ 引用 chip 跟着换字。
-  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), target.targetId)
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), target.targetId)
   await page.waitForTimeout(150)
   const NEW = '别名编辑器改的新名字'
   await page.locator(`.blk[data-block-id="${target.targetId}"] .blk-alias-name`).click()
@@ -1055,29 +1055,29 @@ await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器
   await page.locator(`.alias-row[data-alias-name="${NEW}"] .alias-primary`).click()
   await page.waitForTimeout(150)
   const renamed = await page.evaluate((id) => {
-    const b = window.__demo.allBlocks().find((x) => x.id === id)
-    const p = window.__demo.pages().find((x) => x.id === id)
+    const b = window.__qua.allBlocks().find((x) => x.id === id)
+    const p = window.__qua.pages().find((x) => x.id === id)
     return { primary: b?.aliases?.[0] ?? '', aliases: b?.aliases ?? [], title: p?.title ?? '(gone)' }
   }, target.targetId)
   assert(renamed.primary === NEW, `点星标应把该别名设成主名：${JSON.stringify(renamed)}`)
   assert(renamed.title === NEW, `页列表标题应跟着主名走：${JSON.stringify(renamed)}`)
-  await page.evaluate(() => window.__demo.__layers.closePopover())
-  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), homeId)
+  await page.evaluate(() => window.__qua.__layers.closePopover())
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), homeId)
   await page.waitForTimeout(200)
   const propagated = await chipLabel()
   assert(propagated === `[[${NEW}]]`, `改主名后 chip 应跟着换字：${JSON.stringify(propagated)}（旧值 ${JSON.stringify(before)}）`)
 
   // ⑥ **同视图内即时传播**：目标页的名字行**就在当前这一页里**时，改主名 ⇒ chip **当场**换字。
   //    ⚠️ ⑤ 走的是「重开页面 ⇒ 重新挂载」，那条路径即使没有即时传播也会绿；这一格才证明派生显示名会刷新。
-  const rootId = await page.evaluate(() => window.__demo.__editor.doc.roots[0]?.id ?? '')
+  const rootId = await page.evaluate(() => window.__qua.__editor.doc.roots[0]?.id ?? '')
   const live = await page.evaluate((id) => {
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     const root = ed.doc.roots[0]
     const host = root?.children[0]
     if (!root || !host) return { skipped: '当前页没有子块可插' }
-    window.__demo.focusBlock(host.id, 0)
-    window.__demo.invoke('core.editor/insert-page-ref', { pageId: id })
-    const atom = window.__demo.atoms().find((a) => a.blockId === host.id && a.target?.id === id)
+    window.__qua.focusBlock(host.id, 0)
+    window.__qua.invoke('core.editor/insert-page-ref', { pageId: id })
+    const atom = window.__qua.atoms().find((a) => a.blockId === host.id && a.target?.id === id)
     return atom ? { atomId: atom.id } : { skipped: '引用没插进去' }
   }, rootId)
   assert(!live.skipped, `前置：造不出「目标与引用同视图」的组合：${live.skipped}`)
@@ -1097,18 +1097,18 @@ await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器
     live.atomId,
   )
   assert(liveLabel === `[[${LIVE}]]`, `同视图内改主名，引用它的 chip 应**当场**跟着变：${JSON.stringify({ liveLabel })}`)
-  await page.evaluate(() => window.__demo.__layers.closePopover())
+  await page.evaluate(() => window.__qua.__layers.closePopover())
 
   // ⑦ **目标被删 ⇒ dangling**：不静默错指，chip 上带 .dangling
   // ⚠️ `core.page/delete` 删的是**当前对象**（不收 pageId 参数）⇒ 先打开它再删
-  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), target.targetId)
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), target.targetId)
   await page.waitForTimeout(150)
-  await page.evaluate(() => window.__demo.invoke('core.page/delete'))
-  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), homeId)
+  await page.evaluate(() => window.__qua.invoke('core.page/delete'))
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), homeId)
   await page.waitForTimeout(200)
   const dead = await page.evaluate((id) => {
     const el = document.querySelector(`.atom[data-atom-id="${id}"]`)
-    const a = window.__demo.atoms().find((x) => x.id === id)
+    const a = window.__qua.atoms().find((x) => x.id === id)
     return { dangling: el?.classList.contains('dangling') ?? false, label: el?.querySelector('.atom-label')?.textContent ?? '', state: a?.state }
   }, target.atomId)
   assert(dead.state === 'dangling', `目标被删后状态应是 dangling：${JSON.stringify(dead)}`)
@@ -1136,13 +1136,13 @@ await check('T40 标签＝块级归属：写进块上、渲染成行尾 chip、�
    *    拿页名做样本会让失败信息里同时混进改名的问题。
    */
   const it = await page.evaluate(() => {
-    const root = window.__demo.__editor.doc.roots[0]
-    const b = window.__demo.blocks().find((x) => x.id !== root.id && !x.roles?.includes('journal') && x.text.length > 2)
-    window.__demo.focusBlock(b.id, b.text.length)
-    window.__demo.invoke('core.editor/insert-tag', { tag: '回归标签' })
-    const after = window.__demo.blocks().find((x) => x.id === b.id)
+    const root = window.__qua.__editor.doc.roots[0]
+    const b = window.__qua.blocks().find((x) => x.id !== root.id && !x.roles?.includes('journal') && x.text.length > 2)
+    window.__qua.focusBlock(b.id, b.text.length)
+    window.__qua.invoke('core.editor/insert-tag', { tag: '回归标签' })
+    const after = window.__qua.blocks().find((x) => x.id === b.id)
     const tagId = after?.tags?.[0] ?? ''
-    const tag = window.__demo.allBlocks().find((x) => x.id === tagId)
+    const tag = window.__qua.allBlocks().find((x) => x.id === tagId)
     return {
       blockId: b.id,
       text: after?.text ?? '',
@@ -1160,7 +1160,7 @@ await check('T40 标签＝块级归属：写进块上、渲染成行尾 chip、�
   const shown = await page.evaluate(
     ({ blockId, tagId }) => {
       const chip = document.querySelector(`.blk[data-block-id="${blockId}"] .tx .tag-chip[data-tag-id="${tagId}"]`)
-      return { chip: chip?.textContent ?? '', read: window.__demo.__editor.readText(blockId) }
+      return { chip: chip?.textContent ?? '', read: window.__qua.__editor.readText(blockId) }
     },
     { blockId: it.blockId, tagId: it.tag.id },
   )
@@ -1168,7 +1168,7 @@ await check('T40 标签＝块级归属：写进块上、渲染成行尾 chip、�
   assert(shown.read === it.text, `chip 拼在正文里但不属于正文：读数应仍是原正文 —— ${JSON.stringify(shown)}`)
 
   // ③ **打标签 ⇒ 成员里出现这个块**（成员从块上的归属派生）
-  const members = await page.evaluate((tagId) => window.__demo.tagMembers(tagId), it.tag.id)
+  const members = await page.evaluate((tagId) => window.__qua.tagMembers(tagId), it.tag.id)
   assert(
     members.includes(it.blockId),
     `打了标签的块应出现在标签的成员里：${JSON.stringify(members)}（期望含 ${it.blockId}）`,
@@ -1177,14 +1177,14 @@ await check('T40 标签＝块级归属：写进块上、渲染成行尾 chip、�
   // ④ 幂等：再打一次同名标签 ⇒ 不建第二个块（`#名` 与 `#名 ` 是同一个名字）
   const again = await page.evaluate(
     (hostId) => {
-      const before = window.__demo.allBlocks().filter((x) => x.roles?.includes('tag')).length
-      const b = window.__demo.blocks().find((x) => x.id !== hostId && !x.roles?.includes('journal') && x.text.length > 2)
-      window.__demo.focusBlock(b.id, b.text.length)
-      window.__demo.invoke('core.editor/insert-tag', { tag: ' 回归标签 ' })
-      const after = window.__demo.blocks().find((x) => x.id === b.id)
+      const before = window.__qua.allBlocks().filter((x) => x.roles?.includes('tag')).length
+      const b = window.__qua.blocks().find((x) => x.id !== hostId && !x.roles?.includes('journal') && x.text.length > 2)
+      window.__qua.focusBlock(b.id, b.text.length)
+      window.__qua.invoke('core.editor/insert-tag', { tag: ' 回归标签 ' })
+      const after = window.__qua.blocks().find((x) => x.id === b.id)
       return {
         before,
-        after: window.__demo.allBlocks().filter((x) => x.roles?.includes('tag')).length,
+        after: window.__qua.allBlocks().filter((x) => x.roles?.includes('tag')).length,
         other: b.id,
         tagged: (after?.tags ?? []).length === 1,
       }
@@ -1195,7 +1195,7 @@ await check('T40 标签＝块级归属：写进块上、渲染成行尾 chip、�
   assert(again.after === again.before, `同名标签不该建出第二块：${JSON.stringify(again)}`)
 
   // ④b 两块都在成员里（归属是真的，不是只建了个块）
-  const both = await page.evaluate((tagId) => window.__demo.tagMembers(tagId), it.tag.id)
+  const both = await page.evaluate((tagId) => window.__qua.tagMembers(tagId), it.tag.id)
   assert(both.includes(it.blockId), `第一块应在成员里：${JSON.stringify(both)}`)
   assert(both.includes(again.other), `第二块也应在成员里：${JSON.stringify(both)}`)
   assert(both.length === 2, `两块各一条归属 ⇒ 成员应是 2 块：${JSON.stringify(both)}`)
@@ -1207,10 +1207,10 @@ await check('T40 标签＝块级归属：写进块上、渲染成行尾 chip、�
 await check('T37 演示状态下打字要落盘（已知风险 3）：切到稀疏态 → 打字 → 关页重开还在', async () => {
   const { ctx, page } = await freshPage(browser, base)
   // ① 切到稀疏态（这条路径原先把 `children` 装成 roots，与 openPage 的 `rootsFor(p)` 分叉）
-  await page.evaluate(() => window.__demo.loadState('sparse'))
+  await page.evaluate(() => window.__qua.loadState('sparse'))
   const target = await page.evaluate(() => {
-    const b = window.__demo.blocks().find((x) => !x.roles?.includes('journal'))
-    window.__demo.focusBlock(b.id, 0)
+    const b = window.__qua.blocks().find((x) => !x.roles?.includes('journal'))
+    window.__qua.focusBlock(b.id, 0)
     return b.id
   })
   await page.keyboard.type('稀疏态里打的字 ')
@@ -1219,7 +1219,7 @@ await check('T37 演示状态下打字要落盘（已知风险 3）：切到稀�
   // ② 关页重开：字必须还在（且落在**同一个块**上，不是被 seed 覆盖后凭空出现）
   const reopened = await reopenPage(browser, ctx, base, page)
   const after = await reopened.page.evaluate(
-    (id) => ({ blocks: window.__demo.blocks(), text: window.__demo.text().join('|') }),
+    (id) => ({ blocks: window.__qua.blocks(), text: window.__qua.text().join('|') }),
     target,
   )
   await reopened.ctx.close()
@@ -1231,19 +1231,19 @@ await check('T37 演示状态下打字要落盘（已知风险 3）：切到稀�
 
 await check('T12 空态 / 稀疏态 / 降级态都能看（超长块与全英文不横向溢出）', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.loadState('empty'))
+  await page.evaluate(() => window.__qua.loadState('empty'))
   const empty = await snap(page)
   assert(empty.blocks === 1, `空态应是「一个空块」：${empty.blocks}`)
   assert(await page.locator('#empty-hint:visible').count() === 1, '空态应给提示')
-  await page.evaluate(() => window.__demo.loadState('sparse'))
+  await page.evaluate(() => window.__qua.loadState('sparse'))
   const sparse = await snap(page)
   // ⚠️ 稀疏态的形状**两种都合法**（2026-10-20）：装载口径修好后，页块自己也是根 ⇒ 渲染「页名 ＋ 一个子块」＝ 2 行。
   //    旧口径把 `children` 当 roots ⇒ 1 行。这里只钉「这个库里只有一页、内容不超过这两行」，不再钉死行数。
   assert(sparse.pageCount === 1 && sparse.blocks <= 2 && sparse.blocks >= 1, `稀疏态：1 页 不超过 2 行，实际 ${JSON.stringify(sparse)}`)
   assert(await page.locator('#empty-hint:visible').count() === 0, '稀疏态不该再显示空态提示')
-  await page.evaluate(() => window.__demo.loadState('degraded'))
+  await page.evaluate(() => window.__qua.loadState('degraded'))
   const deg = await page.evaluate(() => ({
-    blocks: window.__demo.blocks(),
+    blocks: window.__qua.blocks(),
     overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     editorOverflow: Array.from(document.querySelectorAll('.blk .tx')).some((e) => e.scrollWidth > e.clientWidth + 1),
   }))
@@ -1256,7 +1256,7 @@ await check('T12 空态 / 稀疏态 / 降级态都能看（超长块与全英文
   // 所以到那个真正的落点去验。
   // ⚠️ 有地址的块永远有可显示的名字：空标题页在进页列表时拿到了 `未命名-<短id>`
   //    ⇒ 这里验的是「有一个稳定、非空的兜底名」，不再是旧口径里的「无标题」四个字。
-  await page.evaluate(() => window.__demo.invoke('core.editor/insert-page-ref'))
+  await page.evaluate(() => window.__qua.invoke('core.editor/insert-page-ref'))
   await page.waitForTimeout(150)
   const titles = await page.evaluate(() =>
     [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent?.trim() ?? ''),
@@ -1276,13 +1276,13 @@ await check('T12 空态 / 稀疏态 / 降级态都能看（超长块与全英文
 await check('T13 虚拟化：窗口外的块不挂 DOM（角标能看到 DOM 节点数 < 块数）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
-  await page.evaluate(() => window.__demo.setVirtualize(true, 3))
+  await page.evaluate(() => window.__qua.setVirtualize(true, 3))
   const v = await snap(page)
   assert(v.domBlocks < v.blocks, `虚拟化下 DOM 块应少于块数：${v.domBlocks} / ${v.blocks}`)
   assert(v.domBlocks <= 7, `半径 3 大约只挂 7 行：${v.domBlocks}`)
   const placeholders = await page.locator('.ph').count()
   assert(placeholders >= 1, '窗口外应该有占位 div')
-  await page.evaluate(() => window.__demo.setVirtualize(false))
+  await page.evaluate(() => window.__qua.setVirtualize(false))
   const off = await snap(page)
   assert(off.domBlocks === off.blocks, `关掉虚拟化应全挂：${off.domBlocks} / ${off.blocks}`)
   await ctx.close()
@@ -1292,17 +1292,17 @@ await check('T13 虚拟化：窗口外的块不挂 DOM（角标能看到 DOM 节
 await check('T14 composing 守卫：组合期键位绑定自动不命中（命令零触发）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   const r = await page.evaluate(() => {
-    const before = window.__demo.commandLog().length
-    window.__demo.invoke('core.demo/simulate-ime')
-    return { fired: window.__demo.commandLog().length - before, toast: document.querySelector('.toast')?.textContent ?? '' }
+    const before = window.__qua.commandLog().length
+    window.__qua.invoke('dev.ime/simulate')
+    return { fired: window.__qua.commandLog().length - before, toast: document.querySelector('.toast')?.textContent ?? '' }
   })
   // simulate-ime 自己会记 1 条日志（命令本身），组合期不应再触发任何键位命令
   assert(r.fired === 1, `组合期只应有「模拟 IME」这一条命令，实际新增 ${r.fired}`)
   assert(r.toast.includes('0 次'), `toast 应报告零触发：${r.toast}`)
   const composing = await page.evaluate(() => {
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     ed.probe.isComposing = true
-    const hit = window.__demo.__registry.invoke('core.editor/split-block', {}, 'keymap', ed.ctxKeys()).handled
+    const hit = window.__qua.__registry.invoke('core.editor/split-block', {}, 'keymap', ed.ctxKeys()).handled
     ed.probe.isComposing = false
     return hit
   })
@@ -1316,9 +1316,9 @@ await check('T17 今日 journal：冷启动落在它、一天一个（幂等）�
 
   // ① 冷启动＝今日：中心槽的当前对象就是今天的 journal 块
   const boot = await page.evaluate(() => {
-    const s = window.__demo.snapshot()
+    const s = window.__qua.snapshot()
     return {
-      role: window.__demo.ctxKeys().journalView,
+      role: window.__qua.ctxKeys().journalView,
       date: s.journalDate,
       // ：没有「标题」了 ⇒ 日期的落点是**首行的只读占位**（.tx[data-ph]）
       title: document.querySelector('#editor .blk[data-role="journal"] .tx')?.dataset.ph ?? '',
@@ -1329,49 +1329,49 @@ await check('T17 今日 journal：冷启动落在它、一天一个（幂等）�
   assert(boot.title.length > 0 && !/^\d{4}-\d{2}-\d{2}$/.test(boot.title), `journal 首行的只读占位应是日期的可读投影，不是裸 ISO：${boot.title}`)
 
   // ② 「一天一个」＝结构保证：反复调用同一天，块数不增（id 由日期确定性派生）
-  const n0 = await page.evaluate(() => window.__demo.snapshot().topBlocks)
-  for (let i = 0; i < 3; i++) await page.evaluate(() => window.__demo.invoke('core.journal/today'))
-  const n1 = await page.evaluate(() => window.__demo.snapshot().topBlocks)
+  const n0 = await page.evaluate(() => window.__qua.snapshot().topBlocks)
+  for (let i = 0; i < 3; i++) await page.evaluate(() => window.__qua.invoke('core.journal/today'))
+  const n1 = await page.evaluate(() => window.__qua.snapshot().topBlocks)
   assert(n1 === n0, `回今日应幂等（块数不增）：${n0} → ${n1}`)
   const dupes = await page.evaluate(() => {
-    const ids = window.__demo.blocks().filter((b) => b.roles?.includes('journal')).map((b) => b.id)
+    const ids = window.__qua.blocks().filter((b) => b.roles?.includes('journal')).map((b) => b.id)
     return { count: ids.length, unique: new Set(ids).size }
   })
   assert(dupes.count === dupes.unique, `同一天不得有两个 journal 块：${JSON.stringify(dupes)}`)
 
   // ③ 翻日：前一天 → 已存在的天复用（种子给了昨天）；**不存在的天** → 物化一块，再开不增
   const prev = await page.evaluate(() => {
-    window.__demo.invoke('core.journal/prev')
-    return { date: window.__demo.snapshot().journalDate, n: window.__demo.snapshot().topBlocks }
+    window.__qua.invoke('core.journal/prev')
+    return { date: window.__qua.snapshot().journalDate, n: window.__qua.snapshot().topBlocks }
   })
   assert(prev.date < boot.date, `前一天应早于今天：${boot.date} → ${prev.date}`)
   const far = await page.evaluate(() => {
     const d = new Date()
     d.setDate(d.getDate() - 10)
     const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    const n0 = window.__demo.snapshot().topBlocks
-    window.__demo.invoke('core.journal/today', { date: iso })
-    const n1 = window.__demo.snapshot().topBlocks
-    window.__demo.invoke('core.journal/today', { date: iso })
-    const n2 = window.__demo.snapshot().topBlocks
-    return { iso, n0, n1, n2, shown: window.__demo.snapshot().journalDate }
+    const n0 = window.__qua.snapshot().topBlocks
+    window.__qua.invoke('core.journal/today', { date: iso })
+    const n1 = window.__qua.snapshot().topBlocks
+    window.__qua.invoke('core.journal/today', { date: iso })
+    const n2 = window.__qua.snapshot().topBlocks
+    return { iso, n0, n1, n2, shown: window.__qua.snapshot().journalDate }
   })
   assert(far.n1 === far.n0 + 1, `翻到不存在的天应物化一块：${JSON.stringify(far)}`)
   assert(far.n2 === far.n1, `再次打开同一天应幂等（块数不增）：${JSON.stringify(far)}`)
   assert(far.shown === far.iso, `打开远处某天应落在它：${JSON.stringify(far)}`)
   const back = await page.evaluate(() => {
-    window.__demo.invoke('core.journal/today')
-    return { date: window.__demo.snapshot().journalDate, n: window.__demo.snapshot().topBlocks }
+    window.__qua.invoke('core.journal/today')
+    return { date: window.__qua.snapshot().journalDate, n: window.__qua.snapshot().topBlocks }
   })
   assert(back.date === boot.date && back.n >= prev.n, `回今日应复用已物化的块：${JSON.stringify(back)}`)
 
   // ④ 日期只读：改名、反复回今日、翻日回来 —— 日期都不动
   const ro = await page.evaluate(() => {
-    const before = window.__demo.snapshot().journalDate
-    window.__demo.invoke('core.page/rename')
-    window.__demo.invoke('core.page/rename')
-    window.__demo.invoke('core.journal/today', { date: before })
-    return { before, after: window.__demo.snapshot().journalDate, title: document.querySelector('#editor .blk[data-role="journal"] .tx')?.dataset.ph ?? '' }
+    const before = window.__qua.snapshot().journalDate
+    window.__qua.invoke('core.page/rename')
+    window.__qua.invoke('core.page/rename')
+    window.__qua.invoke('core.journal/today', { date: before })
+    return { before, after: window.__qua.snapshot().journalDate, title: document.querySelector('#editor .blk[data-role="journal"] .tx')?.dataset.ph ?? '' }
   })
   assert(ro.after === ro.before, `日期不得被改：${JSON.stringify(ro)}`)
   assert(ro.title.length > 0, `只读占位仍要显示日期：${JSON.stringify(ro)}`)
@@ -1388,7 +1388,7 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
   await openFirstPage(page)
   const rows = () =>
     page.evaluate(() =>
-      window.__demo.blocks().map((b) => ({
+      window.__qua.blocks().map((b) => ({
         text: b.text,
         depth: Number(document.querySelector(`.blk[data-block-id="${b.id}"]`)?.dataset.depth ?? -1),
         kids: b.children,
@@ -1397,9 +1397,9 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
 
   // ① 造一个「有子块」的块：取一个**正文非空的内容块** p（排除页根，否则 p 没有前兄弟可缩进）
   const pid = await page.evaluate(() => {
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
-    const p = window.__demo.blocks().find((b) => b.id !== rootId && b.children === 0 && b.text !== '' && b.text.length > 4)
+    const p = window.__qua.blocks().find((b) => b.id !== rootId && b.children === 0 && b.text !== '' && b.text.length > 4)
     const c = ed.insertBlockAfter(p.id, '子块甲')
     ed.indent(c)
     return p.id
@@ -1407,13 +1407,13 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
   const t0 = await rows()
   const parentDepth = t0.find((r) => r.text === '子块甲').depth - 1
   const pre = await page.evaluate((id) => {
-    const b = window.__demo.blocks().find((x) => x.id === id)
-    return { children: b?.children, text: b?.text?.slice(0, 30), roots: window.__demo.__editor.doc.roots.length }
+    const b = window.__qua.blocks().find((x) => x.id === id)
+    return { children: b?.children, text: b?.text?.slice(0, 30), roots: window.__qua.__editor.doc.roots.length }
   }, pid)
   assert(pre.children === 1, `前置：父块应带 1 个子块：${JSON.stringify(pre)}`)
 
   // ② 带子块的块尾 Enter ⇒ **子块**（插成首个），子树不丢
-  await page.evaluate((id) => window.__demo.focusBlock(id, 9999), pid)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 9999), pid)
   await page.keyboard.press('End')
   await page.keyboard.press('Enter')
   await page.keyboard.type('新子块')
@@ -1421,12 +1421,12 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
   const child = t1.find((r) => r.text === '新子块')
   assert(child, `块尾 Enter 后应有新块：${JSON.stringify(t1.map((r) => r.text))}`)
   assert(child.depth === parentDepth + 1, `有子块时块尾 Enter 应建**子块**：父 ${parentDepth}，新块 ${child.depth}`)
-  assert((await page.evaluate((id) => window.__demo.blocks().find((b) => b.id === id)?.children, pid)) === 2, '既有子块不该丢')
+  assert((await page.evaluate((id) => window.__qua.blocks().find((b) => b.id === id)?.children, pid)) === 2, '既有子块不该丢')
 
   // ③ 无子块的块尾 Enter ⇒ **同级**（Leaf 分支；取任意叶子）
-  const leafId = await page.evaluate(() => window.__demo.blocks().find((b) => b.children === 0 && b.text.length > 3).id)
+  const leafId = await page.evaluate(() => window.__qua.blocks().find((b) => b.children === 0 && b.text.length > 3).id)
   const leafDepth = (await rows()).find((r, i, all) => true) && (await page.evaluate((id) => Number(document.querySelector(`.blk[data-block-id="${id}"]`).dataset.depth), leafId))
-  await page.evaluate((id) => window.__demo.focusBlock(id, 9999), leafId)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 9999), leafId)
   await page.keyboard.press('End')
   await page.keyboard.press('Enter')
   await page.keyboard.type('叶子后')
@@ -1437,9 +1437,9 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
   // ⑤ 块中 Enter ⇒ **同级拆**：
   //    左半进**上方新块**；原块保 id/右半/子树；光标留原块 0 位
   const splitCase = await page.evaluate(() => {
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
-    const base = window.__demo.blocks().find((b) => b.id !== rootId && b.text.length > 3)
+    const base = window.__qua.blocks().find((b) => b.id !== rootId && b.text.length > 3)
     const sid = ed.insertBlockAfter(base.id, '甲乙丙')
     const kid = ed.insertBlockAfter(sid, '子')
     ed.indent(kid)
@@ -1449,12 +1449,12 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
     (id) => Number(document.querySelector(`.blk[data-block-id="${id}"]`).dataset.depth),
     splitCase.sid,
   )
-  await page.evaluate((id) => window.__demo.focusBlock(id, 1), splitCase.sid)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 1), splitCase.sid)
   await page.keyboard.press('Enter')
   const t4 = await rows()
   const keptRow = await page.evaluate((id) => {
-    const b = window.__demo.blocks().find((x) => x.id === id)
-    return { text: b.text, kids: b.children, sel: window.__demo.snapshot().selection }
+    const b = window.__qua.blocks().find((x) => x.id === id)
+    return { text: b.text, kids: b.children, sel: window.__qua.snapshot().selection }
   }, splitCase.sid)
   assert(keptRow.text === '乙丙', `块中 Enter 应让原块保留右半：${JSON.stringify(keptRow.text)}`)
   assert(keptRow.kids === 1, `子树应留在原块：本地块数 ${keptRow.kids}`)
@@ -1463,13 +1463,13 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
   assert(leftRow.depth === sidDepth, `新块应与原块**同级**：原 ${sidDepth}，新 ${leftRow.depth}`)
   assert(keptRow.sel.aBlock === splitCase.sid && keptRow.sel.aOff === 0, `光标应留在原块 0 位：${JSON.stringify(keptRow.sel)}`)
   await page.keyboard.type('X')
-  const keptText = await page.evaluate((id) => window.__demo.blocks().find((b) => b.id === id).text, splitCase.sid)
+  const keptText = await page.evaluate((id) => window.__qua.blocks().find((b) => b.id === id).text, splitCase.sid)
   assert(keptText === 'X乙丙', `打字应落回原块（不是新块）：${JSON.stringify(keptText)}`)
 
   // ⑥ 空块（缩进 ≥ 2 层）Enter ⇒ **反缩进**（退化成反缩进，不建新块）：
   //    不建块，只升一层；到顶层后再 Enter 才建同级
   const outCase = await page.evaluate(() => {
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
     const p = ed.insertBlockAfter(rootId, '反缩进父')
     const c = ed.insertBlockAfter(p, '')
@@ -1481,7 +1481,7 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
     outCase.c,
   )
   const nOut0 = (await rows()).length
-  await page.evaluate((id) => window.__demo.focusBlock(id, 0), outCase.c)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), outCase.c)
   await page.keyboard.press('Enter')
   const outDepth1 = await page.evaluate(
     (id) => Number(document.querySelector(`.blk[data-block-id="${id}"]`).dataset.depth),
@@ -1490,7 +1490,7 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
   const nOut1 = (await rows()).length
   assert(nOut1 === nOut0, `空块 Enter 反缩进不该建块：${nOut0} → ${nOut1}`)
   assert(outDepth1 === outDepth0 - 1, `空块 Enter 应升一层：${outDepth0} → ${outDepth1}`)
-  const outSel = await page.evaluate(() => window.__demo.snapshot().selection)
+  const outSel = await page.evaluate(() => window.__qua.snapshot().selection)
   assert(outSel.aBlock === outCase.c && outSel.aOff === 0, `反缩进后光标应留在原块：${JSON.stringify(outSel)}`)
   await page.keyboard.press('Enter')
   const nOut2 = (await rows()).length
@@ -1530,7 +1530,7 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
   assert(t3.length === n0 + 1, `点空白应建一块：${n0} → ${t3.length}（落点 x=${hit.x.toFixed(0)}, y=${hit.y.toFixed(0)}）`)
   assert(t3[t3.length - 1].depth === 1, `点空白建的应是当前对象的**子块**（depth 1），实际 ${t3[t3.length - 1].depth}`)
   assert(t3[t3.length - 1].text === '', '新块应是空的')
-  const focused = await page.evaluate(() => window.__demo.snapshot().selection)
+  const focused = await page.evaluate(() => window.__qua.snapshot().selection)
   assert(focused?.aBlock && focused.aOff === 0, `点空白后光标应落在新块：${JSON.stringify(focused)}`)
 
   // ⑤ 点与正文同高的**左侧留白** ⇒ 不该建块（clientY 判据）
@@ -1547,12 +1547,12 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
   // ⑥ `/` 建块落在根行（section 根）时，必须插成**它的子块**，不能新增根
   // （N 个 section 是正常形状；不变量从「roots 只有 1」改成「根行插块不新增根」）
   const selfInsert = await page.evaluate(() => {
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
-    const before = window.__demo.blocks().length
+    const before = window.__qua.blocks().length
     const beforeRoots = ed.doc.roots.length
     const id = ed.insertBlockAfter(rootId, '斜杠块')
-    const rows = window.__demo.blocks()
+    const rows = window.__qua.blocks()
     return { id, before, after: rows.length, roots: ed.doc.roots.length, beforeRoots, depth: Number(document.querySelector(`.blk[data-block-id="${id}"]`)?.dataset.depth ?? -1) }
   })
   assert(selfInsert.roots === selfInsert.beforeRoots, `根行插块不该新增根：${selfInsert.beforeRoots} → ${selfInsert.roots}`)
@@ -1565,9 +1565,9 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
     const r = m.getBoundingClientRect()
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
   })
-  const n2 = await page.evaluate(() => window.__demo.snapshot().totalBlocks)
+  const n2 = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
   await page.mouse.click(marker.x, marker.y)
-  const n3 = await page.evaluate(() => window.__demo.snapshot().totalBlocks)
+  const n3 = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
   assert(n3 === n2, `点块标（zoom）不该建块：${n2} → ${n3}`)
 
   await ctx.close()
@@ -1578,27 +1578,27 @@ await check('T30 聚焦块（section 根）文本中间 Enter ⇒ 左半留根�
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const ids = await page.evaluate(() => {
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
     const id = ed.insertBlockAfter(rootId, '聚焦甲乙丙')
     const kid = ed.insertBlockAfter(id, '聚焦子')
     ed.indent(kid)
-    window.__demo.invoke('core.block/focus-block', { blockId: id })
+    window.__qua.invoke('core.block/focus-block', { blockId: id })
     return { id, kid }
   })
-  const roots = await page.evaluate(() => window.__demo.__editor.doc.roots.map((b) => b.id))
+  const roots = await page.evaluate(() => window.__qua.__editor.doc.roots.map((b) => b.id))
   assert(roots.length === 1 && roots[0] === ids.id, `zoom 后 doc.roots 应只有聚焦块：${JSON.stringify(roots)}`)
-  const n0 = await page.evaluate(() => window.__demo.snapshot().totalBlocks)
-  await page.evaluate((id) => window.__demo.focusBlock(id, 2), ids.id)
+  const n0 = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 2), ids.id)
   await page.keyboard.press('Enter')
   const st = await page.evaluate(() => {
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     const root = ed.doc.roots[0]
     return {
       roots: ed.doc.roots.length,
       rootText: root.text,
       kids: root.children.map((b) => ({ id: b.id, text: b.text })),
-      sel: window.__demo.snapshot().selection,
+      sel: window.__qua.snapshot().selection,
     }
   })
   assert(st.roots === 1, `拆块不应新增根：${st.roots}`)
@@ -1607,10 +1607,10 @@ await check('T30 聚焦块（section 根）文本中间 Enter ⇒ 左半留根�
   assert(st.kids[0].text === '甲乙丙', `右半应成为首个子块：${JSON.stringify(st.kids[0])}`)
   assert(st.kids[1].id === ids.kid, `既有子块应保留：${JSON.stringify(st.kids)}`)
   assert(st.sel.aBlock === st.kids[0].id && st.sel.aOff === 0, `光标应落在右半子块 0 位：${JSON.stringify(st.sel)}`)
-  const n1 = await page.evaluate(() => window.__demo.snapshot().totalBlocks)
+  const n1 = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
   assert(n1 === n0 + 1, `拆块应只多一块：${n0} → ${n1}`)
   await page.keyboard.type('X')
-  const first = await page.evaluate((id) => window.__demo.blocks().find((b) => b.id === id)?.text, st.kids[0].id)
+  const first = await page.evaluate((id) => window.__qua.blocks().find((b) => b.id === id)?.text, st.kids[0].id)
   assert(first === 'X甲乙丙', `打字应落在右半子块：${JSON.stringify(first)}`)
   await ctx.close()
   return `聚焦块「${st.rootText}」；首子块「${st.kids[0].text}」＋既有子块；光标在首子块`
@@ -1620,7 +1620,7 @@ await check('T31 普通块块首 Enter ⇒ 上方插空块并把光标放进去�
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const ids = await page.evaluate(() => {
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
     const id = ed.insertBlockAfter(rootId, '块首甲乙')
     return { id }
@@ -1629,13 +1629,13 @@ await check('T31 普通块块首 Enter ⇒ 上方插空块并把光标放进去�
     (id) => Number(document.querySelector(`.blk[data-block-id="${id}"]`).dataset.depth),
     ids.id,
   )
-  const n0 = await page.evaluate(() => window.__demo.snapshot().totalBlocks)
-  await page.evaluate((id) => window.__demo.focusBlock(id, 0), ids.id)
+  const n0 = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), ids.id)
   await page.keyboard.press('Enter')
   const st = await page.evaluate((id) => {
-    const ed = window.__demo.__editor
-    const loc = window.__demo.blocks().find((b) => b.id === id)
-    const sel = window.__demo.snapshot().selection
+    const ed = window.__qua.__editor
+    const loc = window.__qua.blocks().find((b) => b.id === id)
+    const sel = window.__qua.snapshot().selection
     const selEl = sel?.aBlock ? document.querySelector(`.blk[data-block-id="${sel.aBlock}"]`) : null
     return {
       text: loc?.text,
@@ -1649,10 +1649,10 @@ await check('T31 普通块块首 Enter ⇒ 上方插空块并把光标放进去�
   assert(st.sel.aOff === 0, `光标应在新区块 0 位：${JSON.stringify(st.sel)}`)
   assert(st.selDepth === depth, `新块应与原块同级：${depth} → ${st.selDepth}`)
   assert(st.selIsEmpty, '光标所在的新块应是空的')
-  const n1 = await page.evaluate(() => window.__demo.snapshot().totalBlocks)
+  const n1 = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
   assert(n1 === n0 + 1, `块首 Enter 应只多一块：${n0} → ${n1}`)
   await page.keyboard.type('X')
-  const typed = await page.evaluate((id) => window.__demo.blocks().find((b) => b.id === id)?.text, st.sel.aBlock)
+  const typed = await page.evaluate((id) => window.__qua.blocks().find((b) => b.id === id)?.text, st.sel.aBlock)
   assert(typed === 'X', `打字应落在上方新块：${JSON.stringify(typed)}`)
   await ctx.close()
   return `原块「${st.text}」不变；上方新块获得光标（depth ${st.selDepth}）`
@@ -1662,7 +1662,7 @@ await check('T32 Shift+Enter 刻意等同 Enter（v1 不做软换行）', async 
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const ids = await page.evaluate(() => {
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
     return { id: ed.insertBlockAfter(rootId, '软换甲乙丙') }
   })
@@ -1670,21 +1670,21 @@ await check('T32 Shift+Enter 刻意等同 Enter（v1 不做软换行）', async 
     (id) => Number(document.querySelector(`.blk[data-block-id="${id}"]`).dataset.depth),
     ids.id,
   )
-  const n0 = await page.evaluate(() => window.__demo.snapshot().totalBlocks)
-  await page.evaluate((id) => window.__demo.focusBlock(id, 2), ids.id)
+  const n0 = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 2), ids.id)
   await page.keyboard.press('Shift+Enter')
   const st = await page.evaluate((id) => {
-    const ed = window.__demo.__editor
-    const b = window.__demo.blocks().find((x) => x.id === id)
-    const sel = window.__demo.snapshot().selection
-    const rows = window.__demo.blocks()
+    const ed = window.__qua.__editor
+    const b = window.__qua.blocks().find((x) => x.id === id)
+    const sel = window.__qua.snapshot().selection
+    const rows = window.__qua.blocks()
     return { text: b?.text, sel, rows: rows.map((r) => r.text) }
   }, ids.id)
   assert(st.text === '甲乙丙', `Shift+Enter 应像 Enter 一样保留右半：${JSON.stringify(st.text)}`)
   assert(st.rows.includes('软换'), `左半应在上方新块：${JSON.stringify(st.rows)}`)
   assert(!st.rows.some((t) => t.includes('\n')), `不应插入软换行：${JSON.stringify(st.rows)}`)
   assert(st.sel.aBlock === ids.id && st.sel.aOff === 0, `光标应留原块 0 位：${JSON.stringify(st.sel)}`)
-  const n1 = await page.evaluate(() => window.__demo.snapshot().totalBlocks)
+  const n1 = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
   assert(n1 === n0 + 1, `应拆出一块：${n0} → ${n1}`)
   const selDepth = await page.evaluate(
     (id) => Number(document.querySelector(`.blk[data-block-id="${id}"]`).dataset.depth),
@@ -1699,27 +1699,27 @@ await check('T33 同块选区 + Enter ⇒ 先删选区、再在起点拆（一�
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const id = await page.evaluate(() => {
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     return ed.insertBlockAfter(ed.doc.roots[0].id, 'abcdefghij')
   })
-  const n0 = await page.evaluate(() => window.__demo.snapshot().totalBlocks)
+  const n0 = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
 
   const select = async (from, arrowKey, times) => {
-    await page.evaluate(({ id, from }) => window.__demo.focusBlock(id, from), { id, from })
+    await page.evaluate(({ id, from }) => window.__qua.focusBlock(id, from), { id, from })
     await page.keyboard.down('Shift')
     for (let i = 0; i < times; i++) await page.keyboard.press(arrowKey)
     await page.keyboard.up('Shift')
-    const sel = await page.evaluate(() => window.__demo.snapshot().selection)
+    const sel = await page.evaluate(() => window.__qua.snapshot().selection)
     assert(sel.aOff === 2 && sel.hOff === 6, `选区应是 [2,6)：${JSON.stringify(sel)}`)
   }
   const read = () =>
     page.evaluate((id) => {
-      const b = window.__demo.blocks().find((x) => x.id === id)
+      const b = window.__qua.blocks().find((x) => x.id === id)
       return {
         text: b?.text,
-        rows: window.__demo.blocks().map((r) => r.text),
-        sel: window.__demo.snapshot().selection,
-        n: window.__demo.snapshot().totalBlocks,
+        rows: window.__qua.blocks().map((r) => r.text),
+        sel: window.__qua.snapshot().selection,
+        n: window.__qua.snapshot().totalBlocks,
       }
     }, id)
 
@@ -1753,7 +1753,7 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const ids = await page.evaluate(() => {
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
     const a = ed.insertBlockAfter(rootId, 'AAAA')
     const b = ed.insertBlockAfter(a, 'BBBB')
@@ -1769,10 +1769,10 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
   const [ra, rb, rc] = await Promise.all([rect(ids.a), rect(ids.b), rect(ids.c)])
   const state = () =>
     page.evaluate(() => ({
-      count: window.__demo.snapshot().blockSelectionCount,
+      count: window.__qua.snapshot().blockSelectionCount,
       painted: document.querySelectorAll('.blk[data-blocksel="1"]').length,
       textSel: document.getSelection()?.toString() ?? '',
-      texts: window.__demo.blocks().map((b) => b.text),
+      texts: window.__qua.blocks().map((b) => b.text),
     }))
   const drag = async (from, to, shift = false) => {
     await page.mouse.move(from.x, from.y)
@@ -1821,7 +1821,7 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
   assert(back.texts.includes('AAAA') && back.texts.includes('BBBB') && back.texts.includes('CCCC'), `一次撤销应复原三块：${JSON.stringify(back.texts)}`)
 
   // ⑤ Shift+拖拽 = 跨块**文本**（我们的增量；块选区不激活）
-  await page.evaluate((id) => window.__demo.focusBlock(id, 0), ids.a)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), ids.a)
   await drag(ra, rc, true)
   const text = await state()
   assert(text.count === 0, `Shift+拖拽不应选块：${JSON.stringify(text)}`)
@@ -1829,20 +1829,20 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
   await page.keyboard.press('Escape')
 
   // ⑥ Mod+Shift+A 全选块；Enter 清选区并落到首块 0 位
-  await page.evaluate((id) => window.__demo.focusBlock(id, 0), ids.a)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), ids.a)
   await page.keyboard.press(kbd('mod+shift+a'))
   const all = await state()
   assert(all.count > 0, `Mod+Shift+A 应选块：${JSON.stringify(all)}`)
   await page.keyboard.press('Enter')
   const afterEnter = await page.evaluate(() => ({
-    count: window.__demo.snapshot().blockSelectionCount,
-    sel: window.__demo.snapshot().selection,
+    count: window.__qua.snapshot().blockSelectionCount,
+    sel: window.__qua.snapshot().selection,
   }))
   assert(afterEnter.count === 0, `Enter 应清块选区：${JSON.stringify(afterEnter)}`)
   assert(afterEnter.sel?.aOff === 0, `Enter 后光标应在首块 0 位：${JSON.stringify(afterEnter.sel)}`)
 
   // ⑦ Shift+↓ 的边界规则：块尾起块选区并可扩展；文本内部仍是原生文本选区
-  await page.evaluate((id) => window.__demo.focusBlock(id, 9999), ids.a)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 9999), ids.a)
   await page.keyboard.press('Shift+ArrowDown')
   const edge1 = await state()
   assert(edge1.count === 1, `块尾 Shift+↓ 应起块选区（1 块）：${JSON.stringify(edge1)}`)
@@ -1850,7 +1850,7 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
   const edge2 = await state()
   assert(edge2.count === 2, `再按 Shift+↓ 应扩到 2 块：${JSON.stringify(edge2)}`)
   await page.keyboard.press('Escape')
-  await page.evaluate((id) => window.__demo.focusBlock(id, 1), ids.a)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 1), ids.a)
   await page.keyboard.press('Shift+ArrowDown')
   const inner = await state()
   assert(inner.count === 0, `文本内部 Shift+↓ 不应起块选区：${JSON.stringify(inner)}`)
@@ -1858,11 +1858,11 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
 
   // ⑧ ⌘A 两次：第一次文本全选；已全选时再按升级为全选块
   await page.keyboard.press('Escape')
-  await page.evaluate((id) => window.__demo.focusBlock(id, 0), ids.a)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), ids.a)
   await page.keyboard.press(kbd('mod+a'))
   const textAll = await page.evaluate(() => ({
-    count: window.__demo.snapshot().blockSelectionCount,
-    sel: window.__demo.snapshot().selection,
+    count: window.__qua.snapshot().blockSelectionCount,
+    sel: window.__qua.snapshot().selection,
   }))
   assert(textAll.count === 0, `第一次 ⌘A 应是文本全选：${JSON.stringify(textAll)}`)
   await page.keyboard.press(kbd('mod+a'))
@@ -1875,12 +1875,12 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
 
 await check('T54 聚焦日记块后日期仍可见：它自己是 depth 0 的只读日期行，子块缩进挂在下面、仍可聚焦', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
 
   const today = await page.evaluate(() => {
-    const j = window.__demo.allBlocks().find((b) => b.roles?.includes('journal'))
-    window.__demo.invoke('core.block/focus-block', { blockId: j.id })
-    return { id: j.id, date: window.__demo.snapshot().journalDate }
+    const j = window.__qua.allBlocks().find((b) => b.roles?.includes('journal'))
+    window.__qua.invoke('core.block/focus-block', { blockId: j.id })
+    return { id: j.id, date: window.__qua.snapshot().journalDate }
   })
   await page.waitForTimeout(250)
   const view = await page.evaluate(() => {
@@ -1895,8 +1895,8 @@ await check('T54 聚焦日记块后日期仍可见：它自己是 depth 0 的只
       headEditable: head?.querySelector('.tx')?.contentEditable ?? '',
       childDepth: rows[1]?.dataset.depth ?? '',
       crumbs: [...document.querySelectorAll('#crumbs-trail .crumb')].map((c) => c.textContent),
-      active: window.__demo.snapshot().journalDate,
-      total: window.__demo.snapshot().totalBlocks,
+      active: window.__qua.snapshot().journalDate,
+      total: window.__qua.snapshot().totalBlocks,
     }
   })
   assert(view.roots > 1, `聚焦日记后应装载它的子树（不只是子块）：${JSON.stringify(view)}`)
@@ -1908,7 +1908,7 @@ await check('T54 聚焦日记块后日期仍可见：它自己是 depth 0 的只
   assert(view.active === today.date, `当前对象仍是日记块自己（不是它的子块）：${JSON.stringify(view)}`)
 
   // 回今日 / 冷启动同一条规则：流里每一段的日期行都在，focus 不改变这一点
-  await page.evaluate(() => window.__demo.invoke('core.journal/today'))
+  await page.evaluate(() => window.__qua.invoke('core.journal/today'))
   await page.waitForTimeout(200)
   const feed = await page.evaluate(() => ({
     heads: [...document.querySelectorAll('#editor > .blk[data-depth="0"]')].map((el) => el.dataset.role ?? ''),
@@ -1923,18 +1923,18 @@ await check('T54 聚焦日记块后日期仍可见：它自己是 depth 0 的只
 
 await check('T55 载入假数据：落点是日记就装日记流（今日在顶＋更早的天），光标落在第一个可编辑行、日期行照常可见', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
 
   // 先切到页再载入 ⇒ 库自己的 activeId 可能是任何东西；这里测的是「载入后落点＝日记」那条
-  await page.evaluate(() => window.__demo.loadState('seed'))
+  await page.evaluate(() => window.__qua.loadState('seed'))
   await page.waitForTimeout(300)
   const after = await page.evaluate(() => {
     const rows = [...document.querySelectorAll('#editor > .blk')]
     const heads = rows.filter((el) => el.dataset.depth === '0')
     return {
-      journalView: window.__demo.ctxKeys().journalView,
+      journalView: window.__qua.ctxKeys().journalView,
       heads: heads.map((el) => ({ role: el.dataset.role ?? '', date: el.querySelector('.tx')?.dataset.ph ?? '', ro: el.querySelector('.tx')?.contentEditable ?? '' })),
-      caret: window.__demo.snapshot().selection?.aBlock ?? '',
+      caret: window.__qua.snapshot().selection?.aBlock ?? '',
       firstHead: heads[0]?.dataset.blockId ?? '',
       firstEditable: rows.find((el) => el.querySelector('.tx')?.contentEditable !== 'false')?.dataset.blockId ?? '',
     }
@@ -1960,14 +1960,14 @@ await check('T55 载入假数据：落点是日记就装日记流（今日在顶
  */
 await check('T56 聚焦根块时块菜单**没有**「删除块」，命令被直接调用也拒绝（不静默丢块）', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
 
   // ① 聚焦**根块**（页自己）⇒ 上下文键应报「是根」
   const rootKeys = await page.evaluate(() => {
-    const rootId = window.__demo.blocks()[0].id
-    window.__demo.focusBlock(rootId, 0)
-    const k = window.__demo.ctxKeys()
+    const rootId = window.__qua.blocks()[0].id
+    window.__qua.focusBlock(rootId, 0)
+    const k = window.__qua.ctxKeys()
     return { blockIsRoot: Boolean(k.blockIsRoot), blockFocused: Boolean(k.blockFocused) }
   })
   assert(rootKeys.blockFocused === true, `前置：根块应处于聚焦态：${JSON.stringify(rootKeys)}`)
@@ -1975,8 +1975,8 @@ await check('T56 聚焦根块时块菜单**没有**「删除块」，命令被�
 
   // ② 菜单里不该出现删除项
   const items = await page.evaluate(() => {
-    const ed = window.__demo.__editor
-    const rootId = window.__demo.blocks()[0].id
+    const ed = window.__qua.__editor
+    const rootId = window.__qua.blocks()[0].id
     ed.events.blockMenu?.(rootId, document.querySelector(`.blk[data-block-id="${rootId}"]`).getBoundingClientRect())
     return [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? '')
   })
@@ -1987,14 +1987,14 @@ await check('T56 聚焦根块时块菜单**没有**「删除块」，命令被�
 
   // ③ 兜底：就算绕开 `when` 直接 invoke，也不许删（块数与活动 id 都不变）
   const before = await page.evaluate(() => ({
-    total: window.__demo.snapshot().totalBlocks,
-    activeId: window.__demo.snapshot().activeId,
+    total: window.__qua.snapshot().totalBlocks,
+    activeId: window.__qua.snapshot().activeId,
   }))
-  await page.evaluate(() => window.__demo.invoke('core.editor/delete-block'))
+  await page.evaluate(() => window.__qua.invoke('core.editor/delete-block'))
   await page.waitForTimeout(150)
   const after = await page.evaluate(() => ({
-    total: window.__demo.snapshot().totalBlocks,
-    activeId: window.__demo.snapshot().activeId,
+    total: window.__qua.snapshot().totalBlocks,
+    activeId: window.__qua.snapshot().activeId,
   }))
   assert(after.total === before.total, `删根块被拒 ⇒ 块数不该变：${JSON.stringify({ before, after })}`)
   assert(after.activeId === before.activeId, `落点不该被改：${JSON.stringify({ before, after })}`)
@@ -2011,22 +2011,22 @@ await check('T56 聚焦根块时块菜单**没有**「删除块」，命令被�
  */
 await check('T57 日记流里 zoom 进某块再「后退」⇒ 回到**日记流**（不是孤立的一天）', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
-  await page.evaluate(() => window.__demo.loadState('seed'))
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.evaluate(() => window.__qua.loadState('seed'))
   await page.waitForTimeout(260)
 
   const feedAtStart = await page.evaluate(() => ({
     roots: [...document.querySelectorAll('#editor > .blk')].filter((el) => el.dataset.depth === '0').length,
-    journalView: window.__demo.ctxKeys().journalView,
+    journalView: window.__qua.ctxKeys().journalView,
   }))
   assert(feedAtStart.journalView === true, `前置：落点应是日记：${JSON.stringify(feedAtStart)}`)
   assert(feedAtStart.roots >= 2, `前置：应是日记流（多段）：${JSON.stringify(feedAtStart)}`)
 
   // zoom 进一个子块 ⇒ 视图只剩它自己这一棵
   const zoomed = await page.evaluate(() => {
-    const bs = window.__demo.blocks()
+    const bs = window.__qua.blocks()
     const kid = bs.find((b) => !(b.roles?.length) && b.text.length > 2)
-    window.__demo.invoke('core.block/focus-block', { blockId: kid.id })
+    window.__qua.invoke('core.block/focus-block', { blockId: kid.id })
     return { id: kid.id, depth: kid.children.length }
   })
   await page.waitForTimeout(200)
@@ -2036,12 +2036,12 @@ await check('T57 日记流里 zoom 进某块再「后退」⇒ 回到**日记流
   assert(afterZoom.roots === 1, `zoom 后视图应只剩一块：${JSON.stringify(afterZoom)}`)
 
   // 后退 ⇒ 应回到 feed（多段），而不是一个孤立的天
-  await page.evaluate(() => window.__demo.invoke('core.history/back'))
+  await page.evaluate(() => window.__qua.invoke('core.history/back'))
   await page.waitForTimeout(240)
   const back = await page.evaluate(() => ({
     roots: [...document.querySelectorAll('#editor > .blk')].filter((el) => el.dataset.depth === '0').length,
-    journalView: window.__demo.ctxKeys().journalView,
-    journalDate: window.__demo.ctxKeys().journalDate,
+    journalView: window.__qua.ctxKeys().journalView,
+    journalDate: window.__qua.ctxKeys().journalDate,
   }))
   assert(back.journalView === true, `后退后落点应是日记：${JSON.stringify(back)}`)
   assert(
@@ -2056,18 +2056,18 @@ await check('T57 日记流里 zoom 进某块再「后退」⇒ 回到**日记流
 
 await check('T57b 聚焦今天的 journal 块 ⇒ 只装单日；后退回 feed；再点根块标不重装', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
 
   const roots = () =>
     page.evaluate(() =>
       [...document.querySelectorAll('#editor > .blk[data-depth="0"]')].map((el) => el.dataset.blockId),
     )
   const before = await roots()
-  const dayId = await page.evaluate(() => window.__demo.snapshot().activeId)
+  const dayId = await page.evaluate(() => window.__qua.snapshot().activeId)
   assert(before.length >= 2, `前置：冷启动应是日记流（多段）：${JSON.stringify(before)}`)
 
   // 聚焦「今天」这一块：activeId 不变，但视图要从 feed 收成单日
-  await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), dayId)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), dayId)
   await page.waitForTimeout(180)
   const focused = await roots()
   assert(
@@ -2090,7 +2090,7 @@ await check('T57b 聚焦今天的 journal 块 ⇒ 只装单日；后退回 feed�
   assert(noop.sameNode, `已在单块聚焦时再点根块标不该重装 DOM：${JSON.stringify(noop)}`)
 
   // 同一 id、不同形态也进历史 ⇒ 后退应回到 feed
-  await page.evaluate(() => window.__demo.invoke('core.history/back'))
+  await page.evaluate(() => window.__qua.invoke('core.history/back'))
   await page.waitForTimeout(220)
   const back = await roots()
   assert(back.length >= 2, `单日聚焦后退应回到多段日记流：${JSON.stringify(back)}`)
@@ -2101,15 +2101,15 @@ await check('T57b 聚焦今天的 journal 块 ⇒ 只装单日；后退回 feed�
 
 await check('T58 行内标签：敲完分隔符 ⇒ 正文 1 格原子 ＋ 块上的归属，chip 不重复', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
 
   // 找一个空块并落光标（focusBlock 同时把 DOM 焦点交进去；冷启动不再自动聚焦）
   const target = await page.evaluate(() => {
-    const ed = window.__demo.__editor
-    const rootId = window.__demo.blocks()[0].id
+    const ed = window.__qua.__editor
+    const rootId = window.__qua.blocks()[0].id
     const id = ed.insertBlockAfter(rootId, '')
-    window.__demo.focusBlock(id, 0)
+    window.__qua.focusBlock(id, 0)
     return id
   })
   await page.waitForTimeout(80)
@@ -2119,19 +2119,19 @@ await check('T58 行内标签：敲完分隔符 ⇒ 正文 1 格原子 ＋ 块�
   await page.waitForTimeout(220)
 
   const got = await page.evaluate(({ id, name }) => {
-    const b = window.__demo.blocks().find((x) => x.id === id)
+    const b = window.__qua.blocks().find((x) => x.id === id)
     const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
     const atomEl = tx?.querySelector('.atom-tag')
     return {
       text: b?.text ?? '',
       found: Boolean(b),
       tags: b?.tags ?? [],
-      atoms: window.__demo.atoms().filter((a) => a.blockId === id),
+      atoms: window.__qua.atoms().filter((a) => a.blockId === id),
       chips: tx ? tx.querySelectorAll('.tag-chip').length : -1,
       inline: atomEl?.textContent ?? '',
       inlineLabel: atomEl?.dataset.refLabel ?? '',
-      tagBlock: window.__demo.allBlocks().find((x) => x.roles?.includes('tag') && x.text === name)?.id ?? '',
-      caret: window.__demo.__editor.sel,
+      tagBlock: window.__qua.allBlocks().find((x) => x.roles?.includes('tag') && x.text === name)?.id ?? '',
+      caret: window.__qua.__editor.sel,
     }
   }, { id: target, name: tagName })
 
@@ -2152,15 +2152,15 @@ await check('T58 行内标签：敲完分隔符 ⇒ 正文 1 格原子 ＋ 块�
   assert(got.caret?.aOff === 7, '光标应停在标签之后（`写点东西 ` 5 字 ＋ 1 格 ＋ 1 空格）：' + JSON.stringify(got.caret))
 
   // 删字不摘标签：光标停在标签之后按 Backspace ⇒ 那一格没了，归属还在，落回 chip
-  await page.evaluate((id) => window.__demo.__editor.placeCaret(id, 6), target)
+  await page.evaluate((id) => window.__qua.__editor.placeCaret(id, 6), target)
   await page.keyboard.press('Backspace')
   await page.waitForTimeout(200)
   const afterDel = await page.evaluate((id) => {
-    const b = window.__demo.blocks().find((x) => x.id === id)
+    const b = window.__qua.blocks().find((x) => x.id === id)
     const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
     return {
       tags: b?.tags ?? [],
-      atoms: window.__demo.atoms().filter((a) => a.blockId === id).length,
+      atoms: window.__qua.atoms().filter((a) => a.blockId === id).length,
       chips: tx ? tx.querySelectorAll('.tag-chip').length : -1,
       inline: tx ? tx.querySelectorAll('.atom-tag').length : -1,
     }
@@ -2175,13 +2175,13 @@ await check('T58 行内标签：敲完分隔符 ⇒ 正文 1 格原子 ＋ 块�
 
 await check('T58b 属性面板挂/摘块标签：只写归属，正文不动', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
 
   // 属性区的 target 是**聚焦块**（光标所在块）⇒ 用命令把光标落到一个内容块上
   const pageId = await page.evaluate(() => {
-    const b = window.__demo.blocks().find((x) => x.roles.length === 0 && x.children === 0 && x.text.length > 2)
-    window.__demo.invoke('core.block/focus-block', { blockId: b.id })
+    const b = window.__qua.blocks().find((x) => x.roles.length === 0 && x.children === 0 && x.text.length > 2)
+    window.__qua.invoke('core.block/focus-block', { blockId: b.id })
     return b.id
   })
   await page.waitForTimeout(150)
@@ -2192,7 +2192,7 @@ await check('T58b 属性面板挂/摘块标签：只写归属，正文不动', a
   await page.waitForTimeout(250)
 
   const added = await page.evaluate((id) => {
-    const b = window.__demo.blocks().find((x) => x.id === id)
+    const b = window.__qua.blocks().find((x) => x.id === id)
     const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
     return {
       text: b?.text ?? '',
@@ -2209,7 +2209,7 @@ await check('T58b 属性面板挂/摘块标签：只写归属，正文不动', a
   await page.click('.props-tag .props-tag-x')
   await page.waitForTimeout(250)
   const removed = await page.evaluate((id) => {
-    const b = window.__demo.blocks().find((x) => x.id === id)
+    const b = window.__qua.blocks().find((x) => x.id === id)
     const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
     return {
       tags: b?.tags ?? [],
@@ -2227,7 +2227,7 @@ await check('T58b 属性面板挂/摘块标签：只写归属，正文不动', a
 
 await check('T59 `ref` 类型的值走选择器：显示目标**名字**、能换目标、不让人手打 id', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
 
   /**
@@ -2235,18 +2235,18 @@ await check('T59 `ref` 类型的值走选择器：显示目标**名字**、能�
    *    于是面板画的就是这一块的属性。
    */
   const setup = await page.evaluate(() => {
-    const bs = window.__demo.blocks()
+    const bs = window.__qua.blocks()
     const host = bs.find((b) => !(b.roles?.length) && b.text.length > 2)
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     const a = ed.insertBlockAfter(host.id, '候选人甲')
-    window.__demo.invoke('core.block/focus-block', { blockId: host.id })
+    window.__qua.invoke('core.block/focus-block', { blockId: host.id })
     return { host: host.id, a }
   })
   await page.waitForTimeout(220)
 
   const defId = await page.evaluate((host) => {
-    window.__demo.invoke('core.props/create-def', { blockId: host, label: '负责人', kind: 'ref' })
-    return window.__demo.propDefs().find((d) => d.label === '负责人')?.id ?? ''
+    window.__qua.invoke('core.props/create-def', { blockId: host, label: '负责人', kind: 'ref' })
+    return window.__qua.propDefs().find((d) => d.label === '负责人')?.id ?? ''
   }, setup.host)
   assert(defId, '前置：应建出「负责人」字段定义')
   await page.waitForTimeout(260)
@@ -2285,7 +2285,7 @@ await check('T59 `ref` 类型的值走选择器：显示目标**名字**、能�
      * ⚠️ `blocks()` 给的是**精简投影**（没有 props），读值要走编辑器手里的活块。
      *    写成 `blocks()[0].props` 会永远是 undefined —— 那种断言会假绿。
      */
-    const store = window.__demo.__editor.store
+    const store = window.__qua.__editor.store
     const find = (id, list) => {
       for (const b of list) {
         if (b.id === id) return b
@@ -2317,12 +2317,12 @@ await check('T59 `ref` 类型的值走选择器：显示目标**名字**、能�
  */
 await check('T60 跨块选区收拢 ⇒ 首尾拼成一块、中间块（连子树）真从模型里消失，一次撤销复原', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
 
   const before = await page.evaluate(() => {
-    const ed = window.__demo.__editor
-    const host = window.__demo.blocks().find((b) => !(b.roles?.length) && b.text.length > 2)
+    const ed = window.__qua.__editor
+    const host = window.__qua.blocks().find((b) => !(b.roles?.length) && b.text.length > 2)
     const a = ed.insertBlockAfter(host.id, 'AAAA')
     const b = ed.insertBlockAfter(a, 'BBBB')
     const c = ed.insertBlockAfter(b, 'CCCC')
@@ -2340,19 +2340,19 @@ await check('T60 跨块选区收拢 ⇒ 首尾拼成一块、中间块（连子�
     }
     find(b, ed.doc.roots)?.children.push({ id: 'kid-' + b, text: '子块不该留', children: [] })
     ed.renderAll()
-    return { a, b, c, total: window.__demo.snapshot().totalBlocks }
+    return { a, b, c, total: window.__qua.snapshot().totalBlocks }
   })
   await page.waitForTimeout(120)
 
   // 同一口锅里：设选区 → 立刻收拢
   const after = await page.evaluate(({ a, b }) => {
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     ed.setSel({ aBlock: a, aOff: 2, hBlock: b, hOff: 2 })
     const caret = ed.collapseSelection()
     return {
       caret,
-      total: window.__demo.snapshot().totalBlocks,
-      texts: window.__demo.blocks().map((x) => x.text),
+      total: window.__qua.snapshot().totalBlocks,
+      texts: window.__qua.blocks().map((x) => x.text),
     }
   }, before)
   await page.waitForTimeout(200)
@@ -2365,11 +2365,11 @@ await check('T60 跨块选区收拢 ⇒ 首尾拼成一块、中间块（连子�
   assert(after.texts.includes('AABB'), '首尾应拼成「AABB」：' + JSON.stringify(after.texts))
 
   // 一次撤销全部复原（含被删块的子树）
-  await page.evaluate(() => window.__demo.invoke('core.history/undo'))
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
   await page.waitForTimeout(200)
   const back = await page.evaluate(() => ({
-    total: window.__demo.snapshot().totalBlocks,
-    texts: window.__demo.blocks().map((x) => x.text),
+    total: window.__qua.snapshot().totalBlocks,
+    texts: window.__qua.blocks().map((x) => x.text),
   }))
   assert(back.total === before.total, '一次撤销应复原块数：' + JSON.stringify({ before, back }))
   assert(back.texts.includes('AAAA') && back.texts.includes('子块不该留'), '撤销后文字与子树都应回来：' + JSON.stringify(back.texts))
@@ -2383,13 +2383,13 @@ await check('T27 光标行隐藏占位、journal 日期不可聚焦、折叠图�
 
   // ① 光标所在行**不显示**占位符（否则光标落在「空块」二字后面）
   const ph = await page.evaluate(() => {
-    const ed = window.__demo.__editor
-    const id = ed.insertBlockAfter(window.__demo.blocks()[0].id, '')
+    const ed = window.__qua.__editor
+    const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
     ed.placeCaret(id, 0)
     const el = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
     const before = getComputedStyle(el, '::before').content
     // 把光标挪到别的块 ⇒ 占位应回来
-    ed.placeCaret(window.__demo.blocks()[0].id, 0)
+    ed.placeCaret(window.__qua.blocks()[0].id, 0)
     const after = getComputedStyle(el, '::before').content
     return { withCaret: before, withoutCaret: after, hasDataPh: Boolean(el.dataset.ph) }
   })
@@ -2409,9 +2409,9 @@ await check('T27 光标行隐藏占位、journal 日期不可聚焦、折叠图�
     const r = tx.getBoundingClientRect()
     return { x: r.left + 8, y: r.top + r.height / 2 }
   })
-  const selBefore = await page.evaluate(() => window.__demo.snapshot().selection)
+  const selBefore = await page.evaluate(() => window.__qua.snapshot().selection)
   await page.mouse.click(jpos.x, jpos.y)
-  const selAfter = await page.evaluate(() => window.__demo.snapshot().selection)
+  const selAfter = await page.evaluate(() => window.__qua.snapshot().selection)
   assert(JSON.stringify(selBefore) === JSON.stringify(selAfter), `点日期行不该移动光标：${JSON.stringify(selBefore)} → ${JSON.stringify(selAfter)}`)
 
   // ③ 折叠三角贴**自己那颗块标**（xdepth 递增），不是整行最左
@@ -2452,7 +2452,7 @@ await check('T28 日记流＝今日在顶＋存在的历史天；历史天可编
       depths: roots.map((el) => Number(el.dataset.depth)),
       readonly: roots.map((el) => el.querySelector('.tx')?.contentEditable ?? ''),
       firstChildDepth: roots[0]?.nextElementSibling?.dataset.depth ?? null,
-      active: window.__demo.snapshot().journalDate,
+      active: window.__qua.snapshot().journalDate,
     }
   })
   assert(feed.roots === 3, `冷启动应恰好 3 天（今天 + 2 天种子，不生造空天）：${JSON.stringify(feed)}`)
@@ -2469,20 +2469,20 @@ await check('T28 日记流＝今日在顶＋存在的历史天；历史天可编
     return last?.nextElementSibling?.dataset.blockId ?? ''
   })
   assert(oldestChild, '最早的一段应有一个可编辑子块')
-  await page.evaluate((id) => window.__demo.focusBlock(id, 9999), oldestChild)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 9999), oldestChild)
   await page.keyboard.type('历史编辑')
   const edited = await page.evaluate(() => ({
-    hasText: window.__demo.blocks().some((b) => b.text.includes('历史编辑')),
+    hasText: window.__qua.blocks().some((b) => b.text.includes('历史编辑')),
     rootTexts: [...document.querySelectorAll('#editor > .blk[data-role="journal"]')].map((el) => el.querySelector('.tx')?.textContent ?? ''),
   }))
   assert(edited.hasText, '历史天的子块应能编辑')
   assert(edited.rootTexts.every((t) => t === ''), `journal 段头的正文应保持为空：${JSON.stringify(edited.rootTexts)}`)
 
   // ③ 切到页再回日记流：历史天的编辑必须**写回**且重新装载后还在
-  await page.evaluate(() => window.__demo.invoke('core.page/open', { pageId: window.__demo.pages()[0].id }))
-  await page.evaluate(() => window.__demo.invoke('core.journal/today'))
+  await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
+  await page.evaluate(() => window.__qua.invoke('core.journal/today'))
   const persisted = await page.evaluate(() => ({
-    hasText: window.__demo.blocks().some((b) => b.text.includes('历史编辑')),
+    hasText: window.__qua.blocks().some((b) => b.text.includes('历史编辑')),
     roots: document.querySelectorAll('#editor > .blk[data-role="journal"]').length,
   }))
   assert(persisted.hasText, '切页再回来，历史天的编辑应还在（syncSections 按 root id 写回）')
@@ -2516,15 +2516,15 @@ await check('T29 滚到底加载更早的日记（只加载存在的天）', asy
 
 await check('T34 反链 footer 可原地编辑；同一源块在正文与反链两个实例同步（共享 store）', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  const targetPage = await page.evaluate(() => window.__demo.pages()[0].id)
-  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), targetPage)
+  const targetPage = await page.evaluate(() => window.__qua.pages()[0].id)
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), targetPage)
 
   // 在目标页里造一个「引用目标页自己」的块 ⇒ 它既在正文，也出现在 footer 反链里
   const blockId = await page.evaluate((target) => {
-    const bs = window.__demo.blocks()
+    const bs = window.__qua.blocks()
     const b = bs.find((x) => x.id !== target && x.text.length > 2)
-    window.__demo.focusBlock(b.id, b.text.length)
-    window.__demo.invoke('core.editor/insert-page-ref', { pageId: target })
+    window.__qua.focusBlock(b.id, b.text.length)
+    window.__qua.invoke('core.editor/insert-page-ref', { pageId: target })
     return b.id
   }, targetPage)
   await page.waitForTimeout(350) // footer 的 200ms 查询去抖
@@ -2567,7 +2567,7 @@ await check('T34 反链 footer 可原地编辑；同一源块在正文与反链�
     const node = sel?.anchorNode ?? null
     return {
       inside: Boolean(node && tx.contains(node)),
-      block: window.__demo.snapshot().selection?.aBlock ?? '',
+      block: window.__qua.snapshot().selection?.aBlock ?? '',
       id,
     }
   }, blockId)
@@ -2576,7 +2576,7 @@ await check('T34 反链 footer 可原地编辑；同一源块在正文与反链�
   await page.keyboard.type('Y')
   await page.waitForTimeout(120)
   const both = await page.evaluate((id) => ({
-    main: window.__demo.blocks().find((b) => b.id === id)?.text ?? '',
+    main: window.__qua.blocks().find((b) => b.id === id)?.text ?? '',
     footer: document.querySelector(`#backlinks-editor .blk[data-block-id="${id}"] .tx`)?.textContent ?? '',
   }), blockId)
   assert(both.footer.includes('Y'), `footer 应可原地编辑：${JSON.stringify(both)}`)
@@ -2586,7 +2586,7 @@ await check('T34 反链 footer 可原地编辑；同一源块在正文与反链�
   await page.keyboard.press(kbd('mod+z'))
   await page.waitForTimeout(120)
   const undone = await page.evaluate((id) => ({
-    main: window.__demo.blocks().find((b) => b.id === id)?.text ?? '',
+    main: window.__qua.blocks().find((b) => b.id === id)?.text ?? '',
     footer: document.querySelector(`#backlinks-editor .blk[data-block-id="${id}"] .tx`)?.textContent ?? '',
   }), blockId)
   assert(!undone.footer.includes('Y') && !undone.main.includes('Y'), `footer 里的 undo 应回滚两个实例：${JSON.stringify(undone)}`)
@@ -2597,12 +2597,12 @@ await check('T34 反链 footer 可原地编辑；同一源块在正文与反链�
 
 await check('T40 反链 footer 的块标能聚焦：点一下中心槽切到该源块（嵌套块也进得去），不误建空块', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  const targetPage = await page.evaluate(() => window.__demo.pages()[0].id)
-  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), targetPage)
+  const targetPage = await page.evaluate(() => window.__qua.pages()[0].id)
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), targetPage)
 
   // 源块挑**深度 ≥ 2** 的：只在顶层里找目标的实现会在这条路径上失败
   const src = await page.evaluate((target) => {
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     const walk = (b, d) => {
       if (d >= 2 && b.text.length > 2) return b
       for (const c of b.children) {
@@ -2612,8 +2612,8 @@ await check('T40 反链 footer 的块标能聚焦：点一下中心槽切到该�
       return null
     }
     const b = walk(ed.doc.roots[0], 0)
-    window.__demo.focusBlock(b.id, b.text.length)
-    window.__demo.invoke('core.editor/insert-page-ref', { pageId: target })
+    window.__qua.focusBlock(b.id, b.text.length)
+    window.__qua.invoke('core.editor/insert-page-ref', { pageId: target })
     // 读的是插入**之后**的文本（含原子占位符），它同时也是 zoom 之后的页名
     return { id: b.id, text: b.text }
   }, targetPage)
@@ -2626,8 +2626,8 @@ await check('T40 反链 footer 的块标能聚焦：点一下中心槽切到该�
   await page.waitForTimeout(200)
 
   const after = await page.evaluate(() => ({
-    active: window.__demo.snapshot().activePage,
-    total: window.__demo.snapshot().totalBlocks,
+    active: window.__qua.snapshot().activePage,
+    total: window.__qua.snapshot().totalBlocks,
     firstId: document.querySelector('#editor .blk')?.dataset.blockId ?? '',
     rows: document.querySelectorAll('#editor .blk').length,
   }))
@@ -2651,22 +2651,22 @@ await check('T41 冷启动直接打字后 ⌘Z：撤销只回滚文字，不把�
    *    所以这里**不调用** openPage，直接从冷启动状态打字。
    */
   const before = await page.evaluate(() => {
-    const bs = window.__demo.blocks()
+    const bs = window.__qua.blocks()
     const b = bs.find((x) => !x.roles?.includes('journal'))
-    window.__demo.focusBlock(b.id, 0)
-    const s = window.__demo.snapshot()
-    return { id: b.id, text: b.text, texts: window.__demo.text(), total: s.totalBlocks, dom: s.domBlocks }
+    window.__qua.focusBlock(b.id, 0)
+    const s = window.__qua.snapshot()
+    return { id: b.id, text: b.text, texts: window.__qua.text(), total: s.totalBlocks, dom: s.domBlocks }
   })
   await page.keyboard.type('Z')
   await page.waitForTimeout(80)
-  const typed = await page.evaluate((id) => window.__demo.blocks().find((b) => b.id === id)?.text ?? '', before.id)
+  const typed = await page.evaluate((id) => window.__qua.blocks().find((b) => b.id === id)?.text ?? '', before.id)
   assert(typed.startsWith('Z'), `冷启动后应能直接敲进第一行：${JSON.stringify(typed.slice(0, 8))}`)
 
   await page.keyboard.press(kbd('mod+z'))
   await page.waitForTimeout(150)
   const after = await page.evaluate(() => {
-    const s = window.__demo.snapshot()
-    return { texts: window.__demo.text(), total: s.totalBlocks, dom: s.domBlocks, rows: document.querySelectorAll('#editor .blk').length }
+    const s = window.__qua.snapshot()
+    return { texts: window.__qua.text(), total: s.totalBlocks, dom: s.domBlocks, rows: document.querySelectorAll('#editor .blk').length }
   })
   assert(after.rows > 0, '撤销后正文一行都不剩（DOM 被清空）')
   assert(after.texts.length === before.texts.length, `撤销后正文行数应复原：${before.texts.length} → ${after.texts.length}`)
@@ -2680,16 +2680,16 @@ await check('T41 冷启动直接打字后 ⌘Z：撤销只回滚文字，不把�
 await check('T42 冷启动后在反链 footer 编辑，不会把正文重载成空（共享 store 首次 touch）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   const ids = await page.evaluate(() => {
-    const bs = window.__demo.blocks()
+    const bs = window.__qua.blocks()
     const j = bs.find((b) => b.roles?.includes('journal'))
     const src = bs.find((b) => !b.roles?.includes('journal') && b.text.length > 2)
-    window.__demo.focusBlock(src.id, src.text.length)
+    window.__qua.focusBlock(src.id, src.text.length)
     /**
      * `[[ ]]` 的引用目标只解析 `page` 角色（journal 的正文是空的，日期在 `_date` 里），
      * 所以「让今日 journal 有反链」只能直接在编辑器上放一个原子里。这里要紧的是
      * **冷启动**这条路径（没有 openPage），不是用户从哪个菜单插的。
      */
-    const atomId = window.__demo.__editor.insertAtom('page', { label: '今日', target: { kind: 'page', id: j.id } })
+    const atomId = window.__qua.__editor.insertAtom('page', { label: '今日', target: { kind: 'page', id: j.id } })
     return { journal: j.id, src: src.id, atomId }
   })
   assert(ids.atomId, '冷启动下应能往正文插一个指向今日 journal 的原子')
@@ -2697,7 +2697,7 @@ await check('T42 冷启动后在反链 footer 编辑，不会把正文重载成�
 
   assert(await page.evaluate(() => !document.querySelector('#backlinks')?.hidden), '冷启动的当前对象（今日 journal）应出现反链 footer')
   const before = await page.evaluate(() => ({
-    texts: window.__demo.text(),
+    texts: window.__qua.text(),
     rows: document.querySelectorAll('#editor .blk').length,
     firstId: document.querySelector('#editor .blk')?.dataset.blockId ?? '',
   }))
@@ -2714,7 +2714,7 @@ await check('T42 冷启动后在反链 footer 编辑，不会把正文重载成�
 
   const after = await page.evaluate((id) => ({
     rows: document.querySelectorAll('#editor .blk').length,
-    texts: window.__demo.text(),
+    texts: window.__qua.text(),
     firstId: document.querySelector('#editor .blk')?.dataset.blockId ?? '',
     footer: document.querySelector(`#backlinks-editor .blk[data-block-id="${id}"] > .tx`)?.textContent ?? '',
   }), ids.src)
@@ -2735,7 +2735,7 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
 
   // 深缩进：把一个第 3 层的块标成待办
   const deep = await page.evaluate(() => {
-    const ed = window.__demo.__editor
+    const ed = window.__qua.__editor
     const walk = (b, d) => {
       if (d >= 2 && b.text.length > 2) return b
       for (const c of b.children) {
@@ -2745,8 +2745,8 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
       return null
     }
     const b = walk(ed.doc.roots[0], 0)
-    window.__demo.focusBlock(b.id, 0)
-    window.__demo.invoke('core.editor/toggle-todo')
+    window.__qua.focusBlock(b.id, 0)
+    window.__qua.invoke('core.editor/toggle-todo')
     return b.id
   })
 
@@ -2813,13 +2813,13 @@ await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling
 
   const r = await page.evaluate(() => {
     const el = document.querySelector('#editor .atom-page:not(.dangling)')
-    const a = window.__demo.atoms().find((x) => x.id === el?.dataset.atomId)
-    const target = window.__demo.pages().find((p) => p.id === a?.target?.id)
+    const a = window.__qua.atoms().find((x) => x.id === el?.dataset.atomId)
+    const target = window.__qua.pages().find((p) => p.id === a?.target?.id)
     return {
       atomId: el?.dataset.atomId ?? '',
       title: el?.title ?? '',
       targetTitle: target?.title ?? '',
-      total: window.__demo.snapshot().totalBlocks,
+      total: window.__qua.snapshot().totalBlocks,
     }
   })
   assert(r.atomId && r.targetTitle, `应能找到一条可解析的页面引用：${JSON.stringify(r)}`)
@@ -2829,7 +2829,7 @@ await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling
   await page.locator(`#editor .atom-page[data-atom-id="${r.atomId}"]`).click()
   await page.waitForTimeout(200)
   const opened = await page.evaluate(() => {
-    const s = window.__demo.snapshot()
+    const s = window.__qua.snapshot()
     return { active: s.activePage, total: s.totalBlocks, popover: document.querySelectorAll('.popover').length }
   })
   assert(opened.active === r.targetTitle, `左键应打开目标：${JSON.stringify({ want: r.targetTitle, got: opened.active })}`)
@@ -2872,7 +2872,7 @@ await check('T15 角标：块数 / DOM 节点数 / 主题 / composing 都在', a
   assert(badge.includes(String(s.domNodes)), `角标应含 DOM 节点数 ${s.domNodes}：${badge}`)
   assert(/主题/.test(badge), `角标应含主题：${badge}`)
   assert(badge.includes('composing'), `角标应含 composing：${badge}`)
-  await page.evaluate(() => window.__demo.badgePanel(true))
+  await page.evaluate(() => window.__qua.badgePanel(true))
   const panel = await page.locator('#badge-panel').innerText()
   assert(panel.includes('上下文键') && panel.includes('按键命中追踪'), `角标面板应含诊断两件套：${panel.slice(0, 80)}`)
   await ctx.close()
@@ -2881,7 +2881,7 @@ await check('T15 角标：块数 / DOM 节点数 / 主题 / composing 都在', a
 
 await check('T18 跨页锚点不被误删：在当前容器里删块，只回收**这一块**的锚点', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
 
   /**
    * ⚠️ 这条是 2026-10-20 修掉的一个**真实数据丢失**的回归断言：
@@ -2892,40 +2892,40 @@ await check('T18 跨页锚点不被误删：在当前容器里删块，只回收
    */
   const before = await page.evaluate(() => {
     // 先打开一个有锚点的页，把它自己那几块的锚点 id 记下来做对照
-    window.__demo.invoke('core.page/open', { pageId: window.__demo.pages()[0].id })
-    const own = new Set(window.__demo.blocks().map((b) => b.id))
+    window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id })
+    const own = new Set(window.__qua.blocks().map((b) => b.id))
     return {
-      marks: window.__demo.marks().length,
-      atoms: window.__demo.atoms().length,
+      marks: window.__qua.marks().length,
+      atoms: window.__qua.atoms().length,
       own: [...own],
     }
   })
   // 回到别的容器（今日 journal），删掉一块
-  await page.evaluate(() => window.__demo.invoke('core.journal/today'))
+  await page.evaluate(() => window.__qua.invoke('core.journal/today'))
   await new Promise((r) => setTimeout(r, 150))
   const target = await page.evaluate(() => {
-    const bs = window.__demo.blocks()
+    const bs = window.__qua.blocks()
     const id = bs[bs.length - 1].id
-    window.__demo.focusBlock(id, 0)
+    window.__qua.focusBlock(id, 0)
     return id
   })
   const mid = await page.evaluate((id) => ({
-    marks: window.__demo.marks().length,
-    atoms: window.__demo.atoms().length,
+    marks: window.__qua.marks().length,
+    atoms: window.__qua.atoms().length,
     // 被删那一块自己带几条锚点 ⇒ 允许的掉幅度**恰好**等于这个数
-    onTarget: window.__demo.marks().filter((m) => m.blockId === id).length,
+    onTarget: window.__qua.marks().filter((m) => m.blockId === id).length,
   }), target)
-  await page.evaluate(() => window.__demo.invoke('core.editor/delete-block'))
+  await page.evaluate(() => window.__qua.invoke('core.editor/delete-block'))
   await new Promise((r) => setTimeout(r, 250))
-  const after = await page.evaluate(() => ({ marks: window.__demo.marks().length, atoms: window.__demo.atoms().length }))
+  const after = await page.evaluate(() => ({ marks: window.__qua.marks().length, atoms: window.__qua.atoms().length }))
 
   // 判据：掉的数量**恰好**＝被删块自带的锚点数，不能多一条
   assert(after.marks === mid.marks - mid.onTarget, `只该回收被删块自己的锚点（应少 ${mid.onTarget} 条）：${JSON.stringify({ mid, after })}`)
   assert(after.atoms <= mid.atoms, `原子不该变多：${JSON.stringify({ mid, after })}`)
   // 回到第一页：它自己的锚点必须还在（这是 bug 最直观的证据）
-  await page.evaluate(() => window.__demo.invoke('core.page/open', { pageId: window.__demo.pages()[0].id }))
+  await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
   await new Promise((r) => setTimeout(r, 250))
-  const back = await page.evaluate(() => ({ marks: window.__demo.marks().length, atoms: window.__demo.atoms().length }))
+  const back = await page.evaluate(() => ({ marks: window.__qua.marks().length, atoms: window.__qua.atoms().length }))
   assert(back.marks >= before.marks - 3, `第一页的锚点不该被别的容器删掉：${JSON.stringify({ before, back })}`)
   assert(back.atoms >= before.atoms, `第一页的原子不该被删：${JSON.stringify({ before, back })}`)
 
@@ -2935,7 +2935,7 @@ await check('T18 跨页锚点不被误删：在当前容器里删块，只回收
 
 await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑隐藏、锚点不走丢', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
 
   const st = () =>
     page.evaluate(() => ({
@@ -2949,13 +2949,13 @@ await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑�
         return Boolean(e && !e.hidden)
       })(),
       trail: [...document.querySelectorAll('#crumbs-trail .crumb')].map((c) => c.textContent),
-      here: window.__demo.blocks().length,
-      marks: window.__demo.marks().length,
-      atoms: window.__demo.atoms().length,
+      here: window.__qua.blocks().length,
+      marks: window.__qua.marks().length,
+      atoms: window.__qua.atoms().length,
     }))
 
   // ① 顶层：面包屑不出现（现状观感不被改变）
-  await page.evaluate(() => window.__demo.invoke('core.page/open', { pageId: window.__demo.pages()[0].id }))
+  await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
   await new Promise((r) => setTimeout(r, 200))
   const top = await st()
   assert(!top.trailShown, `顶层不该显示面包屑：${JSON.stringify(top)}`)
@@ -2964,11 +2964,11 @@ await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑�
   const target = await page.evaluate(() => {
     // ⚠️ 排除**首行**（= 顶层页块自己）：zoom 到顶层等于没 zoom，面包屑必然为空
     const ids = new Set([...document.querySelectorAll('#editor .blk[data-depth="0"]')].map((el) => el.dataset.blockId))
-    const b = window.__demo.blocks().find((x) => x.children > 0 && !ids.has(x.id))
+    const b = window.__qua.blocks().find((x) => x.children > 0 && !ids.has(x.id))
     return b ? { id: b.id, text: b.text } : null
   })
   assert(target, '假数据里应有带子块的非顶层块')
-  await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), target.id)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), target.id)
   await new Promise((r) => setTimeout(r, 250))
   const zoomed = await st()
   assert(zoomed.trailShown, `zoom 后应出现面包屑：${JSON.stringify(zoomed)}`)
@@ -2993,12 +2993,12 @@ await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑�
    */
   const leaf = await page.evaluate(() => {
     const ids = new Set([...document.querySelectorAll('#editor .blk[data-depth="0"]')].map((el) => el.dataset.blockId))
-    const b = window.__demo.blocks().find((x) => x.children === 0 && !ids.has(x.id))
+    const b = window.__qua.blocks().find((x) => x.children === 0 && !ids.has(x.id))
     return b ? { id: b.id, text: b.text } : null
   })
   let leafView = null
   if (leaf) {
-    await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), leaf.id)
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), leaf.id)
     await new Promise((r) => setTimeout(r, 250))
     leafView = await st()
     assert(leafView.trailShown, `叶子块也应能 zoom：${JSON.stringify(leafView)}`)
@@ -3012,14 +3012,14 @@ await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑�
 
 await check('T25 块标左键 = 聚焦/zoom：点一下进子树，右键才开菜单', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
-  await page.evaluate(() => window.__demo.invoke('core.page/open', { pageId: window.__demo.pages()[0].id }))
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
   await new Promise((r) => setTimeout(r, 200))
 
   const target = await page.evaluate(() => {
     const ids = new Set([...document.querySelectorAll('#editor .blk[data-depth="0"]')].map((el) => el.dataset.blockId))
-    const b = window.__demo.blocks().find((x) => x.children > 0 && !ids.has(x.id))
-    // ⚠️ `__demo.blocks()` 把 children 拍平成**计数**；子树规模用「可见行数」口径：
+    const b = window.__qua.blocks().find((x) => x.children > 0 && !ids.has(x.id))
+    // ⚠️ `__qua.blocks()` 把 children 拍平成**计数**；子树规模用「可见行数」口径：
     //    zoom 后编辑器装载的就是这棵树，`blocks()` 的长度就是子树块数。
     return b ? { id: b.id, text: b.text.trim(), kids: b.children } : null
   })
@@ -3032,7 +3032,7 @@ await check('T25 块标左键 = 聚焦/zoom：点一下进子树，右键才开�
   await new Promise((r) => setTimeout(r, 250))
   const zoomed = await page.evaluate(() => ({
     trail: [...document.querySelectorAll('#crumbs-trail .crumb')].map((c) => c.textContent),
-    here: window.__demo.blocks().length,
+    here: window.__qua.blocks().length,
     firstRow: document.querySelector('#editor .blk .tx')?.textContent ?? '',
     menuOpen: document.querySelectorAll('.layer').length,
   }))
@@ -3053,10 +3053,10 @@ await check('T25 块标左键 = 聚焦/zoom：点一下进子树，右键才开�
 
   // ③ 点顶层自己（depth 0）的块标 ⇒ 仍是 zoom 语义（Breadcrumb 空 ⇒ 视图不变，但不开菜单）
   const selfClick = await page.evaluate(() => {
-    const before = window.__demo.blocks().length
+    const before = window.__qua.blocks().length
     const marker = document.querySelector('#editor .blk[data-depth="0"] .marker')
     marker.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-    return { before, after: window.__demo.blocks().length, menu: document.querySelectorAll('.layer').length }
+    return { before, after: window.__qua.blocks().length, menu: document.querySelectorAll('.layer').length }
   })
   assert(selfClick.menu === 0, '点顶层块标也不该开菜单')
   assert(selfClick.after === selfClick.before, `点顶层块标（＝zoom 到自己）不该改变装载：${JSON.stringify(selfClick)}`)
@@ -3067,7 +3067,7 @@ await check('T25 块标左键 = 聚焦/zoom：点一下进子树，右键才开�
 
 await check('T22 首行即当前对象：页块正文（描述）可编辑、在首行按 Enter 不自环', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
 
   // ① 首行是**页块自己**，且**可编辑**（旧形状里它是只读的「标题」）
@@ -3078,11 +3078,11 @@ await check('T22 首行即当前对象：页块正文（描述）可编辑、在
   assert(first.text === '产品设计 · 决策日志', `首行应是页块正文：${JSON.stringify(first)}`)
 
   // ② 在首行末尾敲字 ⇒ 改的是**页块的描述**（`text`），不是页名（主别名）
-  await page.evaluate((id) => window.__demo.focusBlock(id, 999), first.id)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 999), first.id)
   await page.keyboard.type('！')
   const edited = await page.evaluate((id) => {
-    const b = window.__demo.allBlocks().find((x) => x.id === id)
-    const p = window.__demo.pages().find((x) => x.id === id)
+    const b = window.__qua.allBlocks().find((x) => x.id === id)
+    const p = window.__qua.pages().find((x) => x.id === id)
     return { text: b?.text ?? '', primary: b?.aliases?.[0] ?? '', title: p?.title ?? '(gone)' }
   }, first.id)
   assert(edited.text.endsWith('！'), `在首行敲字应改到页块的正文（描述）：${JSON.stringify(edited)}`)
@@ -3091,18 +3091,18 @@ await check('T22 首行即当前对象：页块正文（描述）可编辑、在
   await page.keyboard.press('Backspace')
 
   // ③ 首行按 Enter：**不自环**（拆块的 children 转移会让「对象变成自己的子块」）
-  const n0 = await page.evaluate(() => window.__demo.snapshot().topBlocks)
-  await page.evaluate((id) => window.__demo.focusBlock(id, 2), first.id)
+  const n0 = await page.evaluate(() => window.__qua.snapshot().topBlocks)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 2), first.id)
   await page.keyboard.press('Enter')
   await page.waitForTimeout(200)
   const r = await page.evaluate(() => ({
-    top: window.__demo.snapshot().topBlocks,
+    top: window.__qua.snapshot().topBlocks,
     firstRow: document.querySelector('#editor .blk[data-depth="0"] .tx')?.textContent?.trim() ?? '',
     // 自环的证据：首行的 children 里出现了自己的 id
     selfChild: (() => {
       const firstEl = document.querySelector('#editor .blk[data-depth="0"]')
       const id = firstEl?.dataset.blockId
-      return id ? window.__demo.blocks().some((b) => b.id === id && b.children > 0 && false) : null
+      return id ? window.__qua.blocks().some((b) => b.id === id && b.children > 0 && false) : null
     })(),
     // 编辑器里应**多出一行**（Enter 另起一行），且首行文本不变
     rows: document.querySelectorAll('#editor .blk').length,
@@ -3119,14 +3119,14 @@ await check('T22 首行即当前对象：页块正文（描述）可编辑、在
 await check('T16 每一页的锚点与 DOM 表现逐条对得上（标记顺序不串位）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   const samples = []
-  const pageCount = await page.evaluate(() => window.__demo.pages().length)
+  const pageCount = await page.evaluate(() => window.__qua.pages().length)
   for (let i = 0; i < pageCount; i++) {
-    await page.evaluate((n) => window.__demo.invoke('core.page/open', { pageId: window.__demo.pages()[n].id }), i)
+    await page.evaluate((n) => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[n].id }), i)
     const r = await page.evaluate(() => {
-      const blocks = window.__demo.blocks()
+      const blocks = window.__qua.blocks()
       // 锚点是**库级平铺**的：只取落在当前页可见块上的那些（其余属于别的页）
       const visible = new Map(blocks.map((b) => [b.id, b]))
-      const model = window.__demo
+      const model = window.__qua
         .marks()
         .filter((m) => visible.has(m.blockId))
         .map((m) => `${m.type}::${visible.get(m.blockId).text.slice(m.start, m.end)}`)
@@ -3153,8 +3153,8 @@ await check('T20 过新 / 损坏的库不被覆盖：进入只读演示态并持
     const page = await ctx.newPage()
     await page.addInitScript(([k, v]) => localStorage.setItem(k, v), [KEY, raw])
     await page.goto(base, { waitUntil: 'load' })
-    await page.waitForFunction(() => Boolean(window.__demo))
-    const snap = await page.evaluate(() => window.__demo.snapshot())
+    await page.waitForFunction(() => Boolean(window.__qua))
+    const snap = await page.evaluate(() => window.__qua.snapshot())
     const after = await page.evaluate((k) => localStorage.getItem(k), KEY)
     const notice = await page.locator('#boot-notice')
     const result = { snap, after, visible: await notice.isVisible(), text: (await notice.textContent()) ?? '' }
@@ -3188,16 +3188,16 @@ await check('T20 过新 / 损坏的库不被覆盖：进入只读演示态并持
 
 await check('T45 Shift+点块标 ⇒ 右槽自动打开并钉住该块；再点一次取消；待办方框同样走这条而不勾选', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
   // 先关掉右槽：Shift+点击必须能把它叫回来（否则「打开了但看不见」）
-  await page.evaluate(() => window.__demo.invoke('core.dock/toggle-right'))
+  await page.evaluate(() => window.__qua.invoke('core.dock/toggle-right'))
   await page.waitForTimeout(80)
   const closed = (await dockState(page)).pref.right
   assert(closed.open === false, `右槽应先关着：${JSON.stringify(closed)}`)
 
   const picked = await page.evaluate(() => {
-    const b = window.__demo.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)
+    const b = window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)
     return b?.id ?? ''
   })
   assert(picked, '假数据里应有一个普通内容块')
@@ -3215,18 +3215,18 @@ await check('T45 Shift+点块标 ⇒ 右槽自动打开并钉住该块；再点�
   assert(!unpinned.rows.right.includes(picked), `取消后右槽不该再渲染它：${JSON.stringify(unpinned.rows.right)}`)
 
   // 待办行的方框＝块标：Shift+点击是「在右槽打开」，不是勾选
-  await page.evaluate(() => window.__demo.invoke('core.dock/toggle-right'))
+  await page.evaluate(() => window.__qua.invoke('core.dock/toggle-right'))
   await page.waitForTimeout(80)
   const todo = await page.evaluate(() => {
-    const b = window.__demo.blocks().find((x) => x.todo)
+    const b = window.__qua.blocks().find((x) => x.todo)
     return b ? { id: b.id, todo: b.todo } : null
   })
   assert(todo, '假数据里应有待办块')
   await shiftClickMarker(page, todo.id)
   await page.waitForTimeout(120)
   const afterTodo = await page.evaluate((id) => ({
-    todo: window.__demo.blocks().find((b) => b.id === id)?.todo ?? null,
-    dock: window.__demo.snapshot().dock,
+    todo: window.__qua.blocks().find((b) => b.id === id)?.todo ?? null,
+    dock: window.__qua.snapshot().dock,
     rows: [...document.querySelectorAll('#dock-right .pin-row')].map((r) => r.dataset.blockId),
   }), todo.id)
   assert(afterTodo.dock.right.open === true, `待办方框的 Shift+点击也应打开右槽：${JSON.stringify(afterTodo.dock.right)}`)
@@ -3239,9 +3239,9 @@ await check('T45 Shift+点块标 ⇒ 右槽自动打开并钉住该块；再点�
 
 await check('T46 从正文块标拖进左槽 ⇒ 钉住并渲染；在槽里编辑，正文同一个块同步（共享 store）', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
-  const id = await page.evaluate(() => window.__demo.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
+  const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
   assert(id, '应有一个可拖的普通块')
 
   const drag = await dragBlockToDock(page, id, 'left')
@@ -3260,7 +3260,7 @@ await check('T46 从正文块标拖进左槽 ⇒ 钉住并渲染；在槽里编�
   await page.keyboard.type('槽内附加')
   await page.waitForTimeout(200)
   const fromSlot = await page.evaluate((id) => ({
-    main: window.__demo.blocks().find((b) => b.id === id)?.text ?? '',
+    main: window.__qua.blocks().find((b) => b.id === id)?.text ?? '',
     dom: document.querySelector(`#editor .blk[data-block-id="${id}"] > .tx`)?.textContent ?? '',
   }), id)
   const pinText = await pinRootText(page, 'left', id)
@@ -3269,10 +3269,10 @@ await check('T46 从正文块标拖进左槽 ⇒ 钉住并渲染；在槽里编�
   assert(pinText.includes('槽内附加'), `槽里那一行自己也应显示：${JSON.stringify(pinText)}`)
 
   // 反向：正文改 ⇒ 槽里的行跟着变（防抖窗口之后）
-  await page.evaluate((id) => window.__demo.focusBlock(id, 0), id)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), id)
   await page.keyboard.type('正文附加')
   await page.waitForTimeout(220)
-  const fromMain = await page.evaluate((id) => window.__demo.blocks().find((b) => b.id === id)?.text ?? '', id)
+  const fromMain = await page.evaluate((id) => window.__qua.blocks().find((b) => b.id === id)?.text ?? '', id)
   const mirror = await pinRootText(page, 'left', id)
   assert(fromMain.startsWith('正文附加'), `正文应拿到新文本：${JSON.stringify(fromMain.slice(0, 20))}`)
   assert(mirror.startsWith('正文附加'), `槽里的同一块应跟着更新：${JSON.stringify(mirror.slice(0, 20))}`)
@@ -3282,9 +3282,9 @@ await check('T46 从正文块标拖进左槽 ⇒ 钉住并渲染；在槽里编�
 
 await check('T47 槽内连续输入不被整槽重画打断；⌘Z 在槽里回滚的是**全局共享**的那一份', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
-  const id = await page.evaluate(() => window.__demo.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
+  const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
   const drag = await dragBlockToDock(page, id, 'left')
   assert(drag?.hot, '拖进左槽应给出高亮')
   await page.waitForTimeout(140)
@@ -3306,7 +3306,7 @@ await check('T47 槽内连续输入不被整槽重画打断；⌘Z 在槽里回�
   await page.keyboard.press(kbd('mod+z'))
   await page.waitForTimeout(200)
   const afterUndo = await page.evaluate((id) => ({
-    main: window.__demo.blocks().find((b) => b.id === id)?.text ?? '',
+    main: window.__qua.blocks().find((b) => b.id === id)?.text ?? '',
   }), id)
   const pinAfter = await pinRootText(page, 'left', id)
   assert(!afterUndo.main.includes('ABC连续'), `槽里的 ⌘Z 应回滚共享 store：${JSON.stringify(afterUndo.main)}`)
@@ -3317,7 +3317,7 @@ await check('T47 槽内连续输入不被整槽重画打断；⌘Z 在槽里回�
 
 await check('T48 祖先也被钉住 ⇒ 只渲染祖先（不重复）；钉住清单随 prefs 落盘，重开后仍在', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
   const nested = await page.evaluate(() => {
     const rows = [...document.querySelectorAll('#editor .blk')]
@@ -3339,14 +3339,14 @@ await check('T48 祖先也被钉住 ⇒ 只渲染祖先（不重复）；钉住�
     `祖先也在清单里时只渲染祖先：${JSON.stringify(nestedState.rows.right)}（父 ${nested.parent}）`,
   )
 
-  const leftId = await page.evaluate(() => window.__demo.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
+  const leftId = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
   await dragBlockToDock(page, leftId, 'left')
   await page.waitForTimeout(400)
   const saved = await dockState(page)
   const reopened = await reopenPage(browser, ctx, base, page)
   await reopened.page.waitForTimeout(220)
   const restored = await reopened.page.evaluate(() => ({
-    dock: window.__demo.snapshot().dock,
+    dock: window.__qua.snapshot().dock,
     left: [...document.querySelectorAll('#dock-left .pin-row')].map((r) => r.dataset.blockId),
     right: [...document.querySelectorAll('#dock-right .pin-row')].map((r) => r.dataset.blockId),
   }))
@@ -3367,23 +3367,23 @@ await check('T48 祖先也被钉住 ⇒ 只渲染祖先（不重复）；钉住�
 
 await check('T49 钉住行有移除入口：移出槽但不删块；左槽移除后清单与 DOM 同时清干净', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
   const picked = await page.evaluate(() => {
-    const b = window.__demo.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)
+    const b = window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)
     return b ? { id: b.id, text: b.text } : null
   })
   assert(picked, '应有一个可拖的块')
   await dragBlockToDock(page, picked.id, 'left')
   await page.waitForTimeout(140)
-  const before = await page.evaluate(() => window.__demo.snapshot().topBlocks)
+  const before = await page.evaluate(() => window.__qua.snapshot().topBlocks)
   await page.locator(`#dock-left .pin-row[data-block-id="${picked.id}"] .pin-remove`).click()
   await page.waitForTimeout(140)
   const after = await page.evaluate((id) => ({
-    dock: window.__demo.snapshot().dock,
+    dock: window.__qua.snapshot().dock,
     rows: [...document.querySelectorAll('#dock-left .pin-row')].map((r) => r.dataset.blockId),
-    block: window.__demo.blocks().find((b) => b.id === id) ?? null,
-    topBlocks: window.__demo.snapshot().topBlocks,
+    block: window.__qua.blocks().find((b) => b.id === id) ?? null,
+    topBlocks: window.__qua.snapshot().topBlocks,
   }), picked.id)
   assert(!after.dock.left.pins.includes(picked.id), `移除后清单里不该还有它：${JSON.stringify(after.dock.left.pins)}`)
   assert(!after.rows.includes(picked.id), `移除后 DOM 里不该还有这一行：${JSON.stringify(after.rows)}`)
@@ -3396,27 +3396,27 @@ await check('T49 钉住行有移除入口：移出槽但不删块；左槽移除
 
 await check('T50 导航历史：⌘[ 后退 / ⌘] 前进跨页可走；新导航会清掉前进栈', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__demo.quiet(true))
+  await page.evaluate(() => window.__qua.quiet(true))
   const info = await page.evaluate(() => ({
-    pages: window.__demo.pages().slice(0, 2),
-    bootId: window.__demo.snapshot().activeId,
+    pages: window.__qua.pages().slice(0, 2),
+    bootId: window.__qua.snapshot().activeId,
   }))
   assert(info.pages.length >= 2, `至少要有两页才能测跨页历史：${JSON.stringify(info.pages)}`)
   const [a, b] = info.pages
 
   // 两次真实导航：boot(今日) → A → B
-  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), a.id)
-  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), b.id)
-  const atB = await page.evaluate(() => ({ id: window.__demo.snapshot().activeId, nav: window.__demo.snapshot().nav }))
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), a.id)
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), b.id)
+  const atB = await page.evaluate(() => ({ id: window.__qua.snapshot().activeId, nav: window.__qua.snapshot().nav }))
   assert(atB.id === b.id, `当前应在 B：${JSON.stringify(atB)}`)
   assert(atB.nav.canGoBack && !atB.nav.canGoForward, `两次导航后应能后退、不能前进：${JSON.stringify(atB.nav)}`)
 
   await page.keyboard.press(kbd('mod+BracketLeft'))
   await page.waitForTimeout(150)
   const backA = await page.evaluate(() => ({
-    id: window.__demo.snapshot().activeId,
-    nav: window.__demo.snapshot().nav,
-    log: window.__demo.commandLog().slice(-3),
+    id: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
+    log: window.__qua.commandLog().slice(-3),
   }))
   assert(backA.id === a.id, `⌘[ 应回到 A：${JSON.stringify(backA)}`)
   assert(backA.log.includes('core.history/back'), `应走 core.history/back 命令：${JSON.stringify(backA.log)}`)
@@ -3425,8 +3425,8 @@ await check('T50 导航历史：⌘[ 后退 / ⌘] 前进跨页可走；新导�
   await page.keyboard.press(kbd('mod+BracketLeft'))
   await page.waitForTimeout(200)
   const backBoot = await page.evaluate(() => ({
-    id: window.__demo.snapshot().activeId,
-    date: window.__demo.snapshot().journalDate,
+    id: window.__qua.snapshot().activeId,
+    date: window.__qua.snapshot().journalDate,
     head: document.querySelector('#editor > .blk[data-depth="0"]')?.dataset.blockId ?? '',
   }))
   assert(backBoot.id === info.bootId, `第二次后退应回到冷启动落点：${JSON.stringify({ backBoot, boot: info.bootId })}`)
@@ -3436,8 +3436,8 @@ await check('T50 导航历史：⌘[ 后退 / ⌘] 前进跨页可走；新导�
   await page.keyboard.press(kbd('mod+BracketRight'))
   await page.waitForTimeout(150)
   const fwd = await page.evaluate(() => ({
-    id: window.__demo.snapshot().activeId,
-    nav: window.__demo.snapshot().nav,
+    id: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
   }))
   assert(fwd.id === b.id, `⌘] 两次应前进回 B：${JSON.stringify(fwd)}`)
   assert(!fwd.nav.canGoForward, `走到栈顶后不该还能前进：${JSON.stringify(fwd.nav)}`)
@@ -3445,8 +3445,8 @@ await check('T50 导航历史：⌘[ 后退 / ⌘] 前进跨页可走；新导�
   // 后退之后开新页 ⇒ 前进栈作废（浏览器同口径）
   await page.keyboard.press(kbd('mod+BracketLeft'))
   await page.waitForTimeout(120)
-  await page.evaluate((id) => window.__demo.invoke('core.page/open', { pageId: id }), b.id)
-  const afterNewNav = await page.evaluate(() => window.__demo.snapshot().nav)
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), b.id)
+  const afterNewNav = await page.evaluate(() => window.__qua.snapshot().nav)
   assert(!afterNewNav.canGoForward, `后退后开新页应清掉前进栈：${JSON.stringify(afterNewNav)}`)
 
   await ctx.close()
@@ -3461,33 +3461,33 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
 
   // ① 在一个内容块上打 #任务（标签块是普通块，住森林顶层；归属写在块上）
   const hostId = await page.evaluate(() => {
-    const b = window.__demo.blocks().find((x) => x.roles.length === 0 && x.children === 0 && x.text.length > 2)
-    window.__demo.focusBlock(b.id, 0)
-    window.__demo.invoke('core.editor/insert-tag', { tag: ' 任务 ' })
+    const b = window.__qua.blocks().find((x) => x.roles.length === 0 && x.children === 0 && x.text.length > 2)
+    window.__qua.focusBlock(b.id, 0)
+    window.__qua.invoke('core.editor/insert-tag', { tag: ' 任务 ' })
     return b.id
   })
   const tag = await page.evaluate((hostId) => {
-    const tag = window.__demo.allBlocks().find((b) => b.roles.includes('tag') && b.text === '任务')
-    const host = window.__demo.blocks().find((x) => x.id === hostId)
+    const tag = window.__qua.allBlocks().find((b) => b.roles.includes('tag') && b.text === '任务')
+    const host = window.__qua.blocks().find((x) => x.id === hostId)
     return { tagId: tag?.id, tagged: (host?.tags ?? []).includes(tag?.id) }
   }, hostId)
   assert(tag.tagId && tag.tagged, `打标签应产出一个真实标签块、并写进块的归属：${JSON.stringify(tag)}`)
 
   // ② 打开标签页，新建字段（定义是森林顶层的 schema 块，propId ＝ 块 id）
-  await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), tag.tagId)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), tag.tagId)
   await page.waitForTimeout(100)
   await page.evaluate(
-    (tagId) => window.__demo.invoke('core.props/create-def', { blockId: tagId, label: '状态', kind: 'text' }),
+    (tagId) => window.__qua.invoke('core.props/create-def', { blockId: tagId, label: '状态', kind: 'text' }),
     tag.tagId,
   )
   await page.waitForTimeout(200)
   // 库里自带核心词汇（「任务状态」定义），所以这里按 label 挑出**刚建的那个**
-  const defs = await page.evaluate(() => window.__demo.propDefs())
+  const defs = await page.evaluate(() => window.__qua.propDefs())
   const own = defs.filter((d) => d.label === '状态')
   assert(own.length === 1, `应只有一个「状态」定义：${JSON.stringify(defs)}`)
   assert(own[0].kind === 'text', JSON.stringify(own[0]))
   assert(own[0].declaredBy.includes(tag.tagId), '定义应被 #任务 声明')
-  const schemaTop = await page.evaluate((id) => window.__demo.allBlocks().some((b) => b.id === id && b.roles.includes('schema')), own[0].id)
+  const schemaTop = await page.evaluate((id) => window.__qua.allBlocks().some((b) => b.id === id && b.roles.includes('schema')), own[0].id)
   assert(schemaTop, '定义是森林顶层的 schema 块（不是标签的子块）')
 
   // 标签页的属性区显示「声明字段」，但没有给标签块自己设值的输入
@@ -3505,10 +3505,10 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   // ⚠️ `#任务` 还声明了库自带的核心字段「任务状态」，所以这一块的行**不止一行**。
   //    断言一律按 propId 取，而不是按下标 —— 行序随声明顺序变，不是契约。
   await page.evaluate(
-    ({ blockId, propId }) => window.__demo.invoke('core.props/set-value', { blockId, propId, value: '已完成' }),
+    ({ blockId, propId }) => window.__qua.invoke('core.props/set-value', { blockId, propId, value: '已完成' }),
     { blockId: hostId, propId: own[0].id },
   )
-  const fields = await page.evaluate((id) => window.__demo.fields(id), hostId)
+  const fields = await page.evaluate((id) => window.__qua.fields(id), hostId)
   const ownField = fields.find((f) => f.propId === own[0].id)
   assert(ownField?.value === '已完成', `成员块应有值：${JSON.stringify(fields)}`)
   assert(ownField.sources.includes(tag.tagId), `来源应是 #任务：${JSON.stringify(ownField)}`)
@@ -3517,7 +3517,7 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   //
   // ⚠️ 「任务状态」归 gutter（`_uiPosition: 'block-left'`）⇒ **不进右侧面板**：
   //    同一个值不能有两个编辑面。所以这里看得到的仍只有「状态」那一行。
-  await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), hostId)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), hostId)
   await page.waitForTimeout(120)
   const panel = await page.evaluate(() => {
     const row = document.querySelector(`.prop-row[data-prop-id]`)
@@ -3543,7 +3543,7 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   const chip = await page.evaluate(
     ({ blockId, tagId }) => {
       const el = document.querySelector(`.blk[data-block-id="${blockId}"] .tx .tag-chip[data-tag-id="${tagId}"]`)
-      return { text: el?.textContent ?? '', read: window.__demo.__editor.readText(blockId) }
+      return { text: el?.textContent ?? '', read: window.__qua.__editor.readText(blockId) }
     },
     { blockId: hostId, tagId: tag.tagId },
   )
@@ -3562,40 +3562,40 @@ await check('T52 标签层级：属于/包含双面板、成员含算作、禁�
 
   // 两个内容块：A 打 #人物 + #演员；B 只打 #演员（用来证明「算作」）
   const ids = await page.evaluate(() => {
-    const bs = window.__demo.blocks().filter((b) => b.roles.length === 0 && b.children === 0 && b.text.length > 2)
+    const bs = window.__qua.blocks().filter((b) => b.roles.length === 0 && b.children === 0 && b.text.length > 2)
     const a = bs[0].id
     const b = bs[1].id
-    window.__demo.focusBlock(a, 0)
-    window.__demo.invoke('core.editor/insert-tag', { tag: '人物' })
-    window.__demo.invoke('core.editor/insert-tag', { tag: '演员' })
-    window.__demo.focusBlock(b, 0)
-    window.__demo.invoke('core.editor/insert-tag', { tag: '演员' })
+    window.__qua.focusBlock(a, 0)
+    window.__qua.invoke('core.editor/insert-tag', { tag: '人物' })
+    window.__qua.invoke('core.editor/insert-tag', { tag: '演员' })
+    window.__qua.focusBlock(b, 0)
+    window.__qua.invoke('core.editor/insert-tag', { tag: '演员' })
     return { a, b }
   })
   const tags = await page.evaluate(() => {
-    const all = window.__demo.allBlocks().filter((x) => x.roles.includes('tag'))
+    const all = window.__qua.allBlocks().filter((x) => x.roles.includes('tag'))
     return Object.fromEntries(all.map((x) => [x.text, x.id]))
   })
   assert(tags['人物'] && tags['演员'], `应有两个标签块：${JSON.stringify(tags)}`)
 
   // #演员 属于 #人物（子侧写 _parentTags）
   await page.evaluate(
-    ({ child, parent }) => window.__demo.invoke('core.tags/add-parent', { childId: child, parentId: parent }),
+    ({ child, parent }) => window.__qua.invoke('core.tags/add-parent', { childId: child, parentId: parent }),
     { child: tags['演员'], parent: tags['人物'] },
   )
   const rel = await page.evaluate(
-    (id) => ({ parents: window.__demo.tagParents(id), children: window.__demo.tagChildren(id) }),
+    (id) => ({ parents: window.__qua.tagParents(id), children: window.__qua.tagChildren(id) }),
     tags['人物'],
   )
   assert(rel.children.includes(tags['演员']), `#人物 的「包含」应含 #演员：${JSON.stringify(rel)}`)
 
   // 算作：查 #人物 的成员要含只打 #演员 的 B
-  const deep = await page.evaluate((id) => window.__demo.tagMembersDeep(id), tags['人物'])
+  const deep = await page.evaluate((id) => window.__qua.tagMembersDeep(id), tags['人物'])
   assert(deep.includes(ids.b), `#人物 的成员应含只打 #演员 的块（算作）：${JSON.stringify(deep)}`)
   assert(deep.includes(ids.a), '#人物 也应含双打的块')
 
   // 打开 #人物 页：双面板 ＋ 成员 footer
-  await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), tags['人物'])
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), tags['人物'])
   await page.waitForTimeout(200)
   const ui = await page.evaluate(() => ({
     visible: !document.getElementById('tagpanel').hidden,
@@ -3609,25 +3609,25 @@ await check('T52 标签层级：属于/包含双面板、成员含算作、禁�
 
   // 算作 ≠ 拥有字段：给 #人物 声明一个字段，只打 #演员 的 B 不获得它
   await page.evaluate(
-    (id) => window.__demo.invoke('core.props/create-def', { blockId: id, label: '姓名', kind: 'text' }),
+    (id) => window.__qua.invoke('core.props/create-def', { blockId: id, label: '姓名', kind: 'text' }),
     tags['人物'],
   )
   await page.waitForTimeout(150)
-  await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), ids.b)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), ids.b)
   await page.waitForTimeout(150)
   const bPanel = await page.evaluate(() => ({
     labels: [...document.querySelectorAll('.prop-row[data-prop-id] .prop-name')].map((e) => e.textContent),
-    fields: window.__demo.fields(window.__demo.__editor.doc.roots[0].id).map((f) => f.label),
+    fields: window.__qua.fields(window.__qua.__editor.doc.roots[0].id).map((f) => f.label),
   }))
   assert(!bPanel.labels.includes('姓名') && !bPanel.fields.includes('姓名'), `只打 #演员 的块不该有 #人物 的字段：${JSON.stringify(bPanel)}`)
 
   // 禁环：#人物 属于 #演员 ⇒ 拒绝，且不留下半截状态
   await page.evaluate(
-    ({ child, parent }) => window.__demo.invoke('core.tags/add-parent', { childId: child, parentId: parent }),
+    ({ child, parent }) => window.__qua.invoke('core.tags/add-parent', { childId: child, parentId: parent }),
     { child: tags['人物'], parent: tags['演员'] },
   )
   const afterCycle = await page.evaluate(
-    (id) => ({ parents: window.__demo.tagParents(id), children: window.__demo.tagChildren(id) }),
+    (id) => ({ parents: window.__qua.tagParents(id), children: window.__qua.tagChildren(id) }),
     tags['人物'],
   )
   assert(!afterCycle.parents.includes(tags['演员']), `成环写入应被拒绝：${JSON.stringify(afterCycle)}`)
@@ -3635,14 +3635,14 @@ await check('T52 标签层级：属于/包含双面板、成员含算作、禁�
 
   // 删父（模拟：直接从森林移除）⇒ 子标签的 ref 留着、面板显示「已删除」、可清理
   const dangling = await page.evaluate((parentId) => {
-    const forest = window.__demo.__editor.store.blocks
+    const forest = window.__qua.__editor.store.blocks
     const i = forest.findIndex((b) => b.id === parentId)
     if (i < 0) return null
     forest.splice(i, 1)
-    window.__demo.__editor.store.invalidateIndex()
-    window.__demo.__editor.store.touch()
-    window.__demo.invoke('core.block/focus-block', { blockId: window.__demo.allBlocks().find((b) => b.text === '演员')?.id ?? '' })
-    return { parents: window.__demo.tagParents(window.__demo.allBlocks().find((b) => b.text === '演员')?.id ?? ''), danglingIds: window.__demo.tagDanglingParents(window.__demo.allBlocks().find((b) => b.text === '演员')?.id ?? '') }
+    window.__qua.__editor.store.invalidateIndex()
+    window.__qua.__editor.store.touch()
+    window.__qua.invoke('core.block/focus-block', { blockId: window.__qua.allBlocks().find((b) => b.text === '演员')?.id ?? '' })
+    return { parents: window.__qua.tagParents(window.__qua.allBlocks().find((b) => b.text === '演员')?.id ?? ''), danglingIds: window.__qua.tagDanglingParents(window.__qua.allBlocks().find((b) => b.text === '演员')?.id ?? '') }
   }, tags['人物'])
   assert(dangling && dangling.danglingIds.length === 1, `删父应留下悬空 ref：${JSON.stringify(dangling)}`)
   await page.waitForTimeout(250)
@@ -3662,9 +3662,9 @@ await check('T53 列表露面：输入名字建标签、同名页兼作标签、
 
   // ① 选择器里输入新名字 ⇒ 第一行就是「新建标签」（不再只有固定 demo 词）
   const hostId = await page.evaluate(() => {
-    const b = window.__demo.blocks().find((x) => x.roles.length === 0 && x.children === 0 && x.text.length > 2)
-    window.__demo.focusBlock(b.id, 0)
-    window.__demo.invoke('core.editor/pick-tag')
+    const b = window.__qua.blocks().find((x) => x.roles.length === 0 && x.children === 0 && x.text.length > 2)
+    window.__qua.focusBlock(b.id, 0)
+    window.__qua.invoke('core.editor/pick-tag')
     return b.id
   })
   await page.waitForSelector('.layer-input')
@@ -3675,7 +3675,7 @@ await check('T53 列表露面：输入名字建标签、同名页兼作标签、
   await page.press('.layer-input', 'Enter')
   await page.waitForTimeout(200)
   const tagPeople = await page.evaluate(() => {
-    const b = window.__demo.allBlocks().find((x) => x.lists.includes('tag') && x.aliases.includes('人物'))
+    const b = window.__qua.allBlocks().find((x) => x.lists.includes('tag') && x.aliases.includes('人物'))
     return b ? { id: b.id, text: b.text, aliases: b.aliases, lists: b.lists, roles: b.roles } : null
   })
   assert(tagPeople, '回车后应真的建出标签 #人物 并打上')
@@ -3684,11 +3684,11 @@ await check('T53 列表露面：输入名字建标签、同名页兼作标签、
 
   // ② 新页：地址是 `未命名-<短id>`；改正文只改描述，页名走别名编辑器。
   const reuseName = '复用页名'
-  await page.evaluate(() => window.__demo.invoke('core.page/new'))
-  const pageId = await page.evaluate(() => window.__demo.snapshot().activeId)
+  await page.evaluate(() => window.__qua.invoke('core.page/new'))
+  const pageId = await page.evaluate(() => window.__qua.snapshot().activeId)
   const created = await page.evaluate((id) => {
-    const b = window.__demo.allBlocks().find((x) => x.id === id)
-    const p = window.__demo.pages().find((x) => x.id === id)
+    const b = window.__qua.allBlocks().find((x) => x.id === id)
+    const p = window.__qua.pages().find((x) => x.id === id)
     return { aliases: b?.aliases ?? [], lists: b?.lists ?? [], text: b?.text ?? '', title: p?.title ?? '(gone)' }
   }, pageId)
   assert(created.aliases.length === 1 && created.aliases[0].startsWith('未命名-'), `新页地址应是「未命名-xxx」：${JSON.stringify(created)}`)
@@ -3696,10 +3696,10 @@ await check('T53 列表露面：输入名字建标签、同名页兼作标签、
   assert(created.title === created.aliases[0], `页列表标题应显示这个地址（不是空串）：${JSON.stringify(created)}`)
 
   // 改正文 ＝ 改描述：地址与页列表标题都不动
-  await page.evaluate((id) => window.__demo.__editor.setText(id, '页的描述'), pageId)
+  await page.evaluate((id) => window.__qua.__editor.setText(id, '页的描述'), pageId)
   const described = await page.evaluate((id) => {
-    const b = window.__demo.allBlocks().find((x) => x.id === id)
-    const p = window.__demo.pages().find((x) => x.id === id)
+    const b = window.__qua.allBlocks().find((x) => x.id === id)
+    const p = window.__qua.pages().find((x) => x.id === id)
     return { text: b?.text ?? '', aliases: b?.aliases ?? [], title: p?.title ?? '(gone)' }
   }, pageId)
   assert(described.text === '页的描述', `正文应被改成描述：${JSON.stringify(described)}`)
@@ -3712,12 +3712,12 @@ await check('T53 列表露面：输入名字建标签、同名页兼作标签、
   await page.fill('.alias-editor .alias-input', reuseName)
   await page.press('.alias-editor .alias-input', 'Enter')
   await page.waitForTimeout(150)
-  await page.evaluate(() => window.__demo.__layers.closePopover())
+  await page.evaluate(() => window.__qua.__layers.closePopover())
 
   // 在它的子块上打同名标签 ⇒ 同名必同一块：复用这个页、加上 tag 露面
-  const childId = await page.evaluate((id) => window.__demo.__editor.insertBlockAfter(id, '内容'), pageId)
-  await page.evaluate((id) => window.__demo.focusBlock(id, 0), childId)
-  await page.evaluate(() => window.__demo.invoke('core.editor/pick-tag'))
+  const childId = await page.evaluate((id) => window.__qua.__editor.insertBlockAfter(id, '内容'), pageId)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), childId)
+  await page.evaluate(() => window.__qua.invoke('core.editor/pick-tag'))
   await page.waitForSelector('.layer-input')
   await page.fill('.layer-input', reuseName)
   await page.waitForTimeout(120)
@@ -3725,54 +3725,54 @@ await check('T53 列表露面：输入名字建标签、同名页兼作标签、
   assert(reuseLabel.includes('同名页'), `同名页应提示复用而不是新建：${reuseLabel}`)
   await page.press('.layer-input', 'Enter')
   await page.waitForTimeout(200)
-  const dual = await page.evaluate((id) => window.__demo.allBlocks().find((b) => b.id === id), pageId)
+  const dual = await page.evaluate((id) => window.__qua.allBlocks().find((b) => b.id === id), pageId)
   assert(dual.lists.includes('page') && dual.lists.includes('tag'), `页应兼作标签（两个露面都有）：${JSON.stringify(dual)}`)
   assert(dual.aliases.includes(reuseName), `复用页时名字应仍在它的地址里：${JSON.stringify(dual)}`)
-  const sameName = await page.evaluate((n) => window.__demo.allBlocks().filter((b) => b.aliases.includes(n)), reuseName)
+  const sameName = await page.evaluate((n) => window.__qua.allBlocks().filter((b) => b.aliases.includes(n)), reuseName)
   assert(sameName.length === 1, `同名必同一块：${JSON.stringify(sameName)}`)
 
   // ③ 纯标签「临时」⇒ 打开它，在 footer 点「也作为页」⇒ 真的进页列表
-  await page.evaluate((id) => window.__demo.focusBlock(id, 0), childId)
-  await page.evaluate(() => window.__demo.invoke('core.editor/pick-tag'))
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), childId)
+  await page.evaluate(() => window.__qua.invoke('core.editor/pick-tag'))
   await page.waitForSelector('.layer-input')
   await page.fill('.layer-input', '临时')
   await page.press('.layer-input', 'Enter')
   await page.waitForTimeout(200)
   const tagTemp = await page.evaluate(() => {
-    const b = window.__demo.allBlocks().find((x) => x.lists.includes('tag') && x.aliases.includes('临时'))
+    const b = window.__qua.allBlocks().find((x) => x.lists.includes('tag') && x.aliases.includes('临时'))
     return b ? { id: b.id, aliases: b.aliases, lists: b.lists } : null
   })
   assert(tagTemp, '应建出纯标签 #临时')
-  await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), tagTemp.id)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), tagTemp.id)
   await page.waitForTimeout(200)
-  const beforePage = await page.evaluate((id) => window.__demo.allBlocks().find((b) => b.id === id).lists, tagTemp.id)
+  const beforePage = await page.evaluate((id) => window.__qua.allBlocks().find((b) => b.id === id).lists, tagTemp.id)
   assert(!beforePage.includes('page'), '纯标签一开始不进页列表')
   await page.click('#tagpanel-page')
   await page.waitForTimeout(200)
   const afterPage = await page.evaluate((id) => {
-    const b = window.__demo.allBlocks().find((x) => x.id === id)
-    return { roles: b.roles, lists: b.lists, aliases: b.aliases, pages: window.__demo.pages().map((p) => p.title) }
+    const b = window.__qua.allBlocks().find((x) => x.id === id)
+    return { roles: b.roles, lists: b.lists, aliases: b.aliases, pages: window.__qua.pages().map((p) => p.title) }
   }, tagTemp.id)
   assert(afterPage.lists.includes('page'), `点「也作为页」后应进页列表：${JSON.stringify(afterPage)}`)
   assert(afterPage.pages.includes('临时'), `页列表应显示它的主名：${JSON.stringify(afterPage)}`)
 
   // ④ 摘标签露面：有成员 ⇒ 先提示；继续后只摘 `_lists` 里的 tag，名字还在；⌘Z 能恢复
-  await page.evaluate((id) => window.__demo.invoke('core.block/untag', { blockId: id }), tagTemp.id)
+  await page.evaluate((id) => window.__qua.invoke('core.block/untag', { blockId: id }), tagTemp.id)
   await page.waitForSelector('.layer-head')
   const rolePrompt = await page.textContent('.layer-head')
   assert(rolePrompt.includes('临时') && rolePrompt.includes('1 个块'), `摘标签应提示成员：${rolePrompt}`)
   await page.locator('.layer-item', { hasText: '继续' }).click()
   await page.waitForTimeout(200)
   const removed = await page.evaluate((id) => {
-    const b = window.__demo.allBlocks().find((x) => x.id === id)
+    const b = window.__qua.allBlocks().find((x) => x.id === id)
     return { lists: b.lists, aliases: b.aliases }
   }, tagTemp.id)
   assert(!removed.lists.includes('tag'), `继续后应不再是标签（tag 露面没了）：${JSON.stringify(removed)}`)
   assert(removed.lists.includes('page'), `摘 tag 不该顺手摘掉 page 露面：${JSON.stringify(removed)}`)
   assert(removed.aliases.includes('临时'), `摘露面不删名字：${JSON.stringify(removed)}`)
-  await page.evaluate(() => window.__demo.invoke('core.history/undo'))
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
   await page.waitForTimeout(200)
-  const restored = await page.evaluate((id) => window.__demo.allBlocks().find((b) => b.id === id).lists, tagTemp.id)
+  const restored = await page.evaluate((id) => window.__qua.allBlocks().find((b) => b.id === id).lists, tagTemp.id)
   assert(restored.includes('tag'), `⌘Z 应把 tag 露面恢复：${JSON.stringify(restored)}`)
 
   await ctx.close()
@@ -3787,15 +3787,15 @@ await check(
 
     // 造一个**不挂到当前块**的定义：类型属于定义本身，不属于「给这一块加一条属性」
     const defId = await page.evaluate(() => {
-      window.__demo.invoke('core.props/create-def', { blockId: '', label: '评分', kind: 'number' })
-      const def = window.__demo.propDefs().find((d) => d.label === '评分')
+      window.__qua.invoke('core.props/create-def', { blockId: '', label: '评分', kind: 'number' })
+      const def = window.__qua.propDefs().find((d) => d.label === '评分')
       return def?.id ?? ''
     })
     assert(defId !== '', '应能建出一个不挂块的「评分」定义')
 
     const hostId = await page.evaluate(() => {
-      const b = window.__demo.blocks().find((x) => x.roles.length === 0 && x.text.length > 2)
-      if (b) window.__demo.invoke('core.block/focus-block', { blockId: b.id })
+      const b = window.__qua.blocks().find((x) => x.roles.length === 0 && x.text.length > 2)
+      if (b) window.__qua.invoke('core.block/focus-block', { blockId: b.id })
       return b?.id ?? ''
     })
     assert(hostId !== '', '应能找到一个内容块当属性区的目标')
@@ -3849,7 +3849,7 @@ await check(
     await page.evaluate(() => document.querySelector('.props-use')?.click())
     await page.waitForTimeout(150)
     // 点按钮后焦点在面板里；把光标放回刚才那块，面板目标仍是它
-    await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), hostId)
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), hostId)
     await page.waitForTimeout(150)
     const used = await page.evaluate((id) => ({
       form: Boolean(document.querySelector('.props-form')),
@@ -3859,7 +3859,7 @@ await check(
     assert(used.row, `面板里应出现「评分」这一行：${JSON.stringify(used)}`)
 
     // ③ 选哨兵「＋ 新建属性…」⇒ 第二行整组露出来（名字输入 ＋ 7 种类型）
-    await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), hostId)
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), hostId)
     await page.waitForTimeout(100)
     await open()
     await page.evaluate(() => {
@@ -3892,10 +3892,10 @@ await check(
 
     // 核心词汇：`任务状态` 是勾选属性，`#任务` 声明它，所以种子里打了标签的块都已有这条属性
     const target = await page.evaluate(() => {
-      const def = window.__demo.propDefs().find((d) => d.label === '任务状态')
-      const tag = window.__demo.allBlocks().find((b) => b.lists.includes('tag') && b.aliases.includes('任务'))
-      const id = tag ? window.__demo.tagMembers(tag.id)[0] : ''
-      if (id) window.__demo.invoke('core.block/focus-block', { blockId: id }, 'keymap')
+      const def = window.__qua.propDefs().find((d) => d.label === '任务状态')
+      const tag = window.__qua.allBlocks().find((b) => b.lists.includes('tag') && b.aliases.includes('任务'))
+      const id = tag ? window.__qua.tagMembers(tag.id)[0] : ''
+      if (id) window.__qua.invoke('core.block/focus-block', { blockId: id }, 'keymap')
       return { defId: def?.id ?? '', blockId: id ?? '' }
     })
     assert(target.defId !== '', '种子里应有「任务状态」定义')

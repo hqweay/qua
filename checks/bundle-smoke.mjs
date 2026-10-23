@@ -69,7 +69,7 @@ page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
 page.on('console', (m) => {
   if (m.type() === 'error') errors.push(`console: ${m.text()}`)
 })
-await page.waitForFunction(() => Boolean(window.__demo))
+await page.waitForFunction(() => Boolean(window.__qua))
 
 await check('B1 打包产物能启动、加载 asar 里的页面、无报错', async () => {
   const url = page.url()

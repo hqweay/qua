@@ -4,4 +4,4 @@
  */
 export * from './decls.ts'
 export * from './registry.ts'
-export type { App, Capability, CommandDecl, DemoState, Handler, MenuRow, MenuRequest, PanelKind } from '../ports.ts'
+export type { App, Capability, CommandDecl, FixtureName, Handler, MenuRow, MenuRequest, PanelKind } from '../ports.ts'
