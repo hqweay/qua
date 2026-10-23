@@ -15,6 +15,7 @@ import {
   resolveBindings,
 } from './core/bindings.ts'
 import {
+  COMMANDS,
   Registry,
   type App,
   type FixtureName,
@@ -56,6 +57,20 @@ import {
 } from './core/workspace.ts'
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
+
+/**
+ * **测试面开不开**：dev server 恒开；构建产物只在显式带 `VITE_QUA_TEST=1` 时开。
+ *
+ * 判据是「这一份构建是给谁用的」，不是「现在能不能调试」：
+ *   · 用户手上那份（`pnpm build` / `build:mac`）里不该存在能**清库**的入口 ——
+ *     接上真库之后，一条 `dev.workspace/reset` 就是一次数据事故；
+ *   · 验收（`check` / `check:dock` / `check:electron` / `shots`）读的是 `window.__qua`
+ *     与夹具命令，所以它们跑的那份构建要带 flag。
+ */
+const DEV_SURFACE = import.meta.env.DEV || __QUA_TEST__
+
+/** 开发命令的前缀：声明表里只有这几条是「只在测试面存在」的 */
+const DEV_COMMAND_PREFIX = 'dev.'
 
 /** 页名：**只读投影**（中间没有页标题，页名就是那个块的正文） */
 const stateMenuBtn = $('state-menu-btn')
@@ -1642,14 +1657,22 @@ stateMenuBtn.addEventListener('click', () => {
     { id: 'theme-system', label: t('ui.theme.mode.system'), hint: '', icon: pick(th === 'system', 'lucide:monitor'), group: 'dbg/1-theme', command: 'core.view/set-theme', args: { mode: 'system' } },
     { id: 'theme-light', label: t('ui.theme.mode.light'), hint: '', icon: pick(th === 'light', 'lucide:sun'), group: 'dbg/1-theme', command: 'core.view/set-theme', args: { mode: 'light' } },
     { id: 'theme-dark', label: t('ui.theme.mode.dark'), hint: '', icon: pick(th === 'dark', 'lucide:moon'), group: 'dbg/1-theme', command: 'core.view/set-theme', args: { mode: 'dark' } },
-    // 演示状态
-    { id: 'seed', label: t('ui.stateMenu.seed'), hint: t('ui.stateMenu.seedHint'), icon: 'lucide:book-open', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'seed' } },
-    // 冷启动：看「第一次打开 app」那一屏到底长什么样（不用清 localStorage 再刷新）
-    { id: 'boot', label: t('ui.stateMenu.boot'), hint: t('ui.stateMenu.bootHint'), icon: 'lucide:sunrise', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'boot' } },
-    { id: 'degraded', label: t('ui.state.degraded'), hint: t('ui.stateMenu.degradedHint'), icon: 'lucide:triangle-alert', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'degraded' } },
-    { id: 'sparse', label: t('ui.state.sparse'), hint: t('ui.stateMenu.sparseHint'), icon: 'lucide:square-dashed', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'sparse' } },
-    { id: 'empty', label: t('ui.state.empty'), hint: t('ui.stateMenu.emptyHint'), icon: 'lucide:square', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'empty' } },
   ]
+  /**
+   * 演示状态那几行**只在测试面存在**：它们换的是整份库（并立刻落盘）。
+   * 产品构建里那一行根本没注册，摆出来点下去只会得到「命令未注册」—— 不如不摆。
+   */
+  if (DEV_SURFACE) {
+    rows.push(
+      // 演示状态
+      { id: 'seed', label: t('ui.stateMenu.seed'), hint: t('ui.stateMenu.seedHint'), icon: 'lucide:book-open', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'seed' } },
+      // 冷启动：看「第一次打开 app」那一屏到底长什么样（不用清 localStorage 再刷新）
+      { id: 'boot', label: t('ui.stateMenu.boot'), hint: t('ui.stateMenu.bootHint'), icon: 'lucide:sunrise', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'boot' } },
+      { id: 'degraded', label: t('ui.state.degraded'), hint: t('ui.stateMenu.degradedHint'), icon: 'lucide:triangle-alert', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'degraded' } },
+      { id: 'sparse', label: t('ui.state.sparse'), hint: t('ui.stateMenu.sparseHint'), icon: 'lucide:square-dashed', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'sparse' } },
+      { id: 'empty', label: t('ui.state.empty'), hint: t('ui.stateMenu.emptyHint'), icon: 'lucide:square', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'empty' } },
+    )
+  }
   layers.openMenu({
     rows,
     anchor: stateMenuBtn.getBoundingClientRect(),
@@ -1693,7 +1716,13 @@ window.addEventListener('beforeunload', () => saveNow())
 
 /* ------------------------------------------------------------ 启动 */
 
-registry = new Registry(app, HANDLERS)
+registry = new Registry(
+  app,
+  HANDLERS,
+  // 产品构建只去掉 `dev.` 开头那几条**声明**；处理器表原样注入 ——
+  // 没有声明的命令从命令面板、斜杠菜单里就看不见，`invoke` 也仍是唯一入口。
+  DEV_SURFACE ? COMMANDS : COMMANDS.filter((d) => !d.name.startsWith(DEV_COMMAND_PREFIX)),
+)
 
 // 让「块菜单」这类命令也能从面板/键盘走到
 ed.events.mounted = () => scheduleBadge()
@@ -2058,7 +2087,10 @@ const api = {
 
 declare global {
   interface Window {
+    /** 只在测试面存在（`DEV_SURFACE`）；产品构建里这个键根本不会被赋值 */
     __qua: typeof api
   }
 }
-window.__qua = api
+// ⚠️ 只在测试面挂上去：诊断口能直接调 `invoke`（含换库、清存储），
+//    接上真库之后留在产品构建里＝把「一键清掉真实数据」放在用户的 F12 里。
+if (DEV_SURFACE) window.__qua = api
