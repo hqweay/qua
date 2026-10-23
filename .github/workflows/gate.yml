@@ -66,8 +66,9 @@ jobs:
       - run: pnpm i --frozen-lockfile
 
       # ⚠️ 只跑 Electron 那一环（其余在 `web` job 里已经跑过）。
-      #    这里需要的 `dist/` 由 `check:electron` 的前置 `pnpm build` 产出。
-      - run: pnpm build && pnpm build:electron && pnpm check:electron
+      #    这里需要的 `dist/` 由 `check:electron` 的前置构建产出；它读 `window.__qua`，
+      #    所以要带 `VITE_QUA_TEST=1`（那正是 `pnpm check` 用的那份构建）。
+      - run: VITE_QUA_TEST=1 pnpm build && pnpm build:electron && pnpm check:electron
 
       - name: Electron 冒烟日志
         if: always()

@@ -124,6 +124,10 @@ typecheck → test:core → build → build:electron → arch:check → check �
 | `check:dock` | 真量尺寸的布局断言 | 断言的量值与实际值 |
 | `check:electron` | 真 Electron 里的同一批账 | `.cache/etest/electron-smoke.log` |
 
+> ⚠️ **单独跑** `check:dock` / `check:electron` / `check:bundle` / `shots` 前，先 `pnpm build:test`。
+> 生产 `pnpm build` 不含 `window.__qua` 与 `dev.*` 命令（测试面在打包时就不存在），这些脚本会等不到诊断口。
+> `pnpm gate` 内部已经用带测试面的构建，无需手动加。
+
 > **不要跳过 `electron` 那步。** 浏览器里过的，在 Electron 里可能不过（IME、系统按键、窗口尺寸都见过差异）。
 
 ### 偶发失败怎么办

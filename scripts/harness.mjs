@@ -155,7 +155,13 @@ export async function openPage(browser, ctx, base) {
   })
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
   await page.goto(base, { waitUntil: 'load' })
-  await page.waitForFunction(() => Boolean(window.__qua))
+  try {
+    await page.waitForFunction(() => Boolean(window.__qua), undefined, { timeout: 15_000 })
+  } catch {
+    throw new Error(
+      'window.__qua 不存在：这份构建没有带测试面。先跑 `pnpm build:test`（VITE_QUA_TEST=1）再跑 check:electron / check:dock / check:bundle / shots；`pnpm gate` 内部已带。',
+    )
+  }
   return { browser, ctx, page, errors }
 }
 

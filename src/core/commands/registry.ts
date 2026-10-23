@@ -23,12 +23,18 @@ export class Registry {
   last: { name: string; via: string; at: number; handled: boolean } | null = null
   log: { name: string; via: string; at: number }[] = []
 
-  /** handlers 由装配层注入：**core 不认识 app 实现**，只认识 `Handler` 这个端口。 */
+  /**
+   * handlers 由装配层注入：**core 不认识 app 实现**，只认识 `Handler` 这个端口。
+   *
+   * `decls` 缺省是整张声明表；装配层可以传一份**被裁过的**表（例如产品构建剔掉
+   * 开发命令）—— 这样「不注册」发生在唯一一张表里，而不是在每个调用点各判一次。
+   */
   constructor(
     private app: App,
     handlers: Record<string, Handler>,
+    decls: readonly CommandDecl[] = COMMANDS,
   ) {
-    for (const d of COMMANDS) this.decls.set(d.name, d)
+    for (const d of decls) this.decls.set(d.name, d)
     for (const [n, h] of Object.entries(handlers)) this.handlers.set(n, h)
   }
 
@@ -45,7 +51,9 @@ export class Registry {
    */
   invoke(name: string, args: Record<string, unknown> = {}, via = 'api', ctx?: CtxKeys): InvokeResult {
     const h = this.handlers.get(name)
-    if (!h) return { ok: false, handled: false, error: t('err.cmd.notRegistered', { name }) }
+    // **没有声明也算没注册**：产品构建会裁掉 `dev.*` 声明；处理器表仍注入，
+    // 但调用面必须以声明表为准，否则「只从菜单里藏起来」会被一次 invoke 绕过。
+    if (!h || !this.decls.has(name)) return { ok: false, handled: false, error: t('err.cmd.notRegistered', { name }) }
     if (via === 'keymap' && ctx?.composing) {
       this.log.push({ name, via: 'keymap(blocked:composing)', at: Date.now() })
       this.app.ed.probe.compositionSeq.push('blocked')
