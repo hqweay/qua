@@ -60,7 +60,7 @@ pnpm check:electron     # node checks/electron-smoke.mjs（10/10，跑 dist/ + d
 `mapMarks` / `locate` / `flatten` / `splitBlockBefore` / `mergeIntoPrev` / `replaceBlockRange` /
 `normSel` / `blockIdsOf` / `fromBlockSet` / `selToTextRanges` / `UndoStack`（1200ms 合并窗口）/ `CommandLog`。
 
-demo 扩展（**加字段不改口径**）：
+原型扩展（**加字段不改口径**）：
 
 1. `MarkType` 扩到 4 种（bold / italic / highlight / code）——仍然是**带 `blockId` 的区间锚点**；
 2. `Atom`：行内原子 ＝ **恒占 1 格的区间锚点**（文本里那一格是 U+FFFC），
@@ -220,7 +220,7 @@ AST 遍历 `electron/**/*.ts`：禁止 `workspace` / `seed` / `core/` / `command
 **能查的**（静态）：`src/ui/**` 与 `src/view/**` 不得 import `workspace.ts` / `seed.ts`、
 源码里不得出现 `localStorage` / `saveWorkspace` / `clearWorkspace` / `loadWorkspace`。现状 0 命中。
 
-**查不了的**（写清理由）：「经命令 vs 直改」在 demo 里**分不开**——`view.ts` 就是内存文档的持有者，
+**查不了的**（写清理由）：「经命令 vs 直改」在当前实现里**分不开**——`view.ts` 就是内存文档的持有者，
 命令最终也落到它的 `tx()` 上，两者在静态上都是「调一个方法改一个对象」。真正的判据是
 「写路径只有 `DbClient` 事务」——**等内核**。`src/main.ts` 是**装配层**（不是组件），
 它是唯一允许持有 workspace / seed 的地方。
@@ -309,7 +309,7 @@ AST 遍历 `electron/**/*.ts`：禁止 `workspace` / `seed` / `core/` / `command
    本轮把唯一一处（`.atom:hover` 的增亮）改成 token `--atom-hover`；以后别再拿 `data-theme` 当
    「当前是暗色」用 —— 要解析值请用 `window.__qua.resolvedTheme()`。
 7. **主题档位存在 workspace blob 里**（同一个 `localStorage` 键）。它其实该是**设备状态**、
-   不进 KB；demo 里没有 KB 所以暂时无碍，但接内核时应该把 `prefs` 拆到独立的 UI 状态存储。
+   不进 KB；当前实现没有 KB 所以暂时无碍，但接内核时应该把 `prefs` 拆到独立的 UI 状态存储。
    ⚠️ 拆键要迁移（不能直接换键名）。
 8. **`sample()` 从 `core.ts` 搬到了 `seed.ts`**（零引用夹具，为了「中文只许出现在字典/种子」
    这条白名单不是假话）。`core.ts` 的导出面因此少了一个符号 —— 全仓零引用，已核对。

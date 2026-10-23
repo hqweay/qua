@@ -328,7 +328,7 @@ FATAL:content/browser/gpu/gpu_data_manager_impl_private.cc:417] GPU process isn'
 - 所以 ② 的现状比四件账原文更尴尬：不是「原生查找查不到未挂载内容」，而是**连原生查找都没有**。
   要做的不是「适配」，是**从零自研**；而原型本来就还没有查找功能（`README` 的「还不做什么」里已列出）。
 
-### ③ 自绘选区高亮层：**本实现下没能复现，因为 demo 的虚拟化还没有滚动联动**
+### ③ 自绘选区高亮层：**本实现下没能复现，因为当前实现的虚拟化还没有滚动联动**
 
 - 设计好的实验：跨 4 块做 DOM 选区 → 滚到底 → 看被选中的块有没有被卸载。
 - 实测结果：滚到底后 **那 4 块仍然挂在 DOM 里**（`stillMounted=[true,true,true,true]`），
@@ -351,7 +351,7 @@ FATAL:content/browser/gpu/gpu_data_manager_impl_private.cc:417] GPU process isn'
 - ⇒ **现状**：组合期被卸载 ⇒ 提交落点漂移（落到别的块）；预编辑串本身没留残渣，但**用户敲的字去了不该去的地方**。
   这就是四件账④说的「两段式」必须存在的理由：**预编辑/已提交必须分两个状态**，
   卸载时要么把预编辑挂起、要么禁止卸载正在组合的块。
-  现在 demo 只做到了 `compositionend` 后补渲染（`src/view/editor.ts`），**没有处理「组合中块被卸载」**。
+  当前实现只做到了 `compositionend` 后补渲染（`src/view/editor.ts`），**没有处理「组合中块被卸载」**。
 
 ---
 
