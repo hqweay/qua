@@ -9,6 +9,7 @@ import './styles.css'
 import { addAlias, addList, addressesOf, aliasesOf, allPropDefs, allTags, blockTypeOf, DISPLAY_PROP, listsOf, tagIdsOf, childTags, claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, primaryAliasOf, prop, propKindOf, removeList, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
+import type { Op } from './core/kb/types.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
   BINDINGS,
@@ -165,6 +166,14 @@ let queryBlock: Block | null = null
 let propsBlockId: string | null = null
 let registry: Registry
 let saveTimer: number | null = null
+/**
+ * **还没落盘的 op**（`tx` 攒出来的，`saveNow` 消费一次就清空）。
+ *
+ * 为什么在装配层攒而不是让 `tx` 自己提交：防抖窗口里一次打字会开好几个事务，
+ * 每事务各提交一次就把「批次」变回「逐条写」；攒到这里，落盘的那一下才是**一批**。
+ * ⚠️ 非空 ⇒ 库与盘上不再一致，所以**换库前必须清空**（旧库的 op 落到新库就是脏写）。
+ */
+let pendingOps: Op[] = []
 let slashOpen = false
 let lastSlashQuery = ''
 /** 截图/自检时静音 toast（产品行为不变，只是不弹提示） */
@@ -311,14 +320,50 @@ function warnSaveFailed(error: unknown): void {
 }
 
 /**
+ * 一批 op ⇒ 这批 op 让**哪几类对象**失效。
+ *
+ * `StoragePort` 的契约只收 `Change[]`（「这类对象里这一条动过」），所以这里是 op 到
+ * `Change` 的**最小投影**：属性/别名/露面/标签都落在块的骨架上 ⇒ `blocks`；
+ * 锚点要分 marks/atoms，而 `anno` 的 value 恰好带着它是哪种（有 `kind` 字段的是原子）。
+ *
+ * ⚠️ 同 kind ＋ 同 id 去重：一次打字可能对一块报好几条 op，订阅者只需要重渲染一次。
+ */
+function changesOf(ops: readonly Op[]): Change[] {
+  const out: Change[] = []
+  const seen = new Set<string>()
+  const add = (kind: Change['kind'], id: string): void => {
+    const key = `${kind}\u0000${id}`
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push({ kind, id })
+  }
+  for (const o of ops) {
+    if (o.e === 'anno') {
+      // value 只在 set 上带；delete 时拿不到形状 ⇒ 两类都报（多报一类只是多渲染一次）
+      const ann = o.value
+      const set = ann !== undefined
+      const isAtom = set && typeof ann === 'object' && 'kind' in ann
+      if (!set || !isAtom) add('marks', o.block)
+      if (!set || isAtom) add('atoms', o.block)
+      continue
+    }
+    add('blocks', o.e === 'block' ? o.id : o.block)
+  }
+  return out
+}
+
+/**
  * **提交一次**（异步、批次）：经过 `StoragePort`，失败如实返回。
  * 上层只认「这批改动落盘了没有」——不认「整份库写进去了没有」。
+ *
+ * 传进来的 op 为空 ⇒ 这批**不是**由事务产生的（编辑器的正文/结构直写仍是直改内存），
+ * 只能按整类提交；这是迁移期的真相，不是兜底。
  */
-function persist(changes: Change[]) {
+function persist(ops: readonly Op[]) {
   if (readOnly) return Promise.resolve({ ok: true as const })
   syncSections()
   ws.savedAt = Date.now()
-  return store.commit(ws, changes)
+  return store.commit(ws, ops.length === 0 ? WHOLE_LIBRARY_CHANGES : changesOf(ops))
 }
 
 /** 编辑期落盘的防抖窗口：连打时只提交最后一批（批次语义见 `StoragePort`） */
@@ -330,7 +375,12 @@ function saveNow(): void {
     window.clearTimeout(saveTimer)
     saveTimer = null
   }
-  void persist(WHOLE_LIBRARY_CHANGES).then((saved) => {
+  // 取出并清空：这批 op 只该落一次。提前清空是**对的**——提交失败时盘上是旧的，
+  // 而那份旧的本来就是「上一次成功提交」；留着它们等下次重提，只会浮在一份已经改过的
+  // 模型上（那时的 op 已经说不清自己相对哪份盘上数据）。
+  const ops = pendingOps
+  pendingOps = []
+  void persist(ops).then((saved) => {
     if (!saved.ok) warnSaveFailed(saved.error)
   })
 }
@@ -832,17 +882,27 @@ function historyGo(dir: 'back' | 'forward'): boolean {
 /* ------------------------------------------------------------ 属性写入 / 摘标签提示 */
 
 /**
- * 一次属性写入：模型改动 ＋ **一个**撤销快照 ＋ 落盘/重画。
+ * 一次属性写入：模型改动（**经 `tx`**）＋ **一个**撤销快照 ＋ 落盘/重画。
  *
- * ⚠️ `touch(mainEd)` 不会重载正文（属性不改变文字）；其他视图照常收到通知。
- * ⚠️ 新建定义（`blockId === undefined`）改了森林结构 ⇒ 列表也要重画。
+ * 写模型不再自己 `touch`/`invalidateIndex`：`kb.tx` 已经做了这两件事，而且带着
+ * `source: mainEd` 一起做——发起者收不到自己的通知，别的视图收得到。
+ * 这里只负责 tx 管不到的两件装配层的事：**撤销快照**与**攒 op 等落盘**。
+ *
+ * ⚠️ 新建定义／根数组写（`blockId === undefined`）仍走原路径：那些改动**改的是森林结构**
+ *    （往根上 push 一个新块），`patch` 按契约拒绝结构变化。这是迁移期的例外，
+ *    它们**不产生 op** ⇒ 那次落盘仍按整类提交（见 `persist`）。
  */
 function writeProps(blockId: string | undefined, mutate: () => void): void {
   const before = blocks.snap(ed.sel)
-  mutate()
+  if (blockId === undefined) {
+    mutate()
+    blocks.invalidateIndex()
+    blocks.touch(mainEd)
+  } else {
+    const r = kb.tx((tx) => tx.patch(blockId, mutate), { source: mainEd })
+    pendingOps.push(...r.ops)
+  }
   blocks.record(before, 'other', Date.now())
-  blocks.invalidateIndex()
-  blocks.touch(mainEd, blockId ? [blockId] : undefined)
   scheduleProperties()
   if (!blockId) renderDocks()
   scheduleSave()
@@ -1105,6 +1165,11 @@ const app: App = {
       // 换库 ⇒ 旧落点全部失效；历史留着只会把用户送到「上一份演示数据」的 id
       nav.back = []
       nav.forward = []
+      /**
+       * **旧库的 op 不能落到新库**：它们说的是「旧库里那块长这样」，带过河就是脏写。
+       * 换库本来就是「整体换一份」，落盘会按整类提交（新库的 op 从零开始攒）。
+       */
+      pendingOps = []
       /**
        * ⚠️ 换库的次序：**先换 store，再换读入口，最后才取 `p`**。
        *

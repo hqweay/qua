@@ -395,3 +395,15 @@ test('tx 成功会 touch 订阅者并带上动过的块 id', () => {
   kb.tx((tx) => tx.setTags('c1', ['t1']))
   assert.deepEqual(seen, [['c1']])
 })
+
+test('tx 的 opts.source 原样转给订阅者（发起者据此跳过自己的重渲染）', () => {
+  const { kb, store } = fixture()
+  const me = { name: 'main-editor' }
+  const seen: unknown[] = []
+  store.subscribe((source) => seen.push(source))
+  kb.tx((tx) => tx.setTags('c1', ['t1']), { source: me })
+  assert.deepEqual(seen, [me], '不传 source 时是 undefined —— 传了就必须是**同一个**对象')
+  // 不传 ≠ 传 undefined：两条路径都要能被订阅者区分出来（默认仍是「没发起者」）
+  kb.tx((tx) => tx.setTags('c1', []))
+  assert.deepEqual(seen, [me, undefined])
+})
