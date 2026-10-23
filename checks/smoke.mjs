@@ -3943,6 +3943,71 @@ await check(
   },
 )
 
+await check(
+  'T63 `setText` 走一笔事务：正文改掉只发 1 条 upsert{text}（无锚点变化 ⇒ 0 条 anno），一次撤销回得去',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const target = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      // 挑一个可编辑的内容块（没角色 ⇒ 不是页/日记/标签这些身份块，正文归它自己）
+      const b = ed.doc.roots.flatMap((r) => [r, ...r.children]).find((x) => !(x.roles?.length) && !x.children.length)
+      return { id: b?.id ?? '', text: b?.text ?? '', marks: window.__qua.marks().length, atoms: window.__qua.atoms().length }
+    })
+    assert(target.id !== '', '第一页里应有可编辑的内容块')
+    await page.waitForTimeout(120)
+
+    /**
+     * 直接调 `setText`，不走键盘：键盘打的是 `syncFromDom`，那是另一条管线，
+     * 这里要断言的是「一个写方法 = 一笔事务 = 一组 op」。
+     */
+    const after = await page.evaluate((id) => {
+      window.__qua.__editor.setText(id, '改过的字')
+      const ops = window.__qua.lastOps()
+      const atoms = window.__qua.atoms().map((a) => a.id)
+      return {
+        ops: ops.map((o) => ({ e: o.e, id: o.id, op: o.op, text: o.value?.text })),
+        text: window.__qua.blocks().find((b) => b.id === id)?.text ?? '',
+        // 只取正文：带标签的块在正文之后还有 chip，`textContent` 会把 `#名` 也读进来
+        dom:
+          [...(document.querySelector(`.blk[data-block-id="${id}"] .tx`)?.childNodes ?? [])]
+            .filter((n) => !(n instanceof Element && n.classList.contains('tag-chip')))
+            .map((n) => n.textContent)
+            .join('') || '',
+        marks: window.__qua.marks().length,
+        atoms: atoms.length,
+        dupAtoms: atoms.length - new Set(atoms).size,
+      }
+    }, target.id)
+    await page.waitForTimeout(120)
+
+    const upserts = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert')
+    const annos = after.ops.filter((o) => o.e === 'anno')
+    assert(after.ops.length === 1, `一次 setText 只该产 1 条 op：${JSON.stringify(after.ops)}`)
+    assert(upserts.length === 1 && upserts[0].text === '改过的字', `那一条应是 block.upsert{text}：${JSON.stringify(upserts)}`)
+    assert(upserts[0].id === target.id, 'op 应指向被改的那一块')
+    assert(annos.length === 0, `无锚点变化 ⇒ 0 条 anno：${JSON.stringify(annos)}`)
+    assert(after.marks === target.marks && after.atoms === target.atoms, '锚点数不该变（这笔没有锚点变化）')
+    assert(after.dupAtoms === 0, `锚点不该出现重复 id（按块拼接写错就会翻倍）：${after.dupAtoms} 条重复`)
+    assert(after.text === '改过的字', `模型里正文应已改：${JSON.stringify(after.text)}`)
+    assert(after.dom === '改过的字', `DOM 应同步重渲染（不是只改模型）：${JSON.stringify(after.dom)}`)
+
+    // 一次撤销回得去：正文必回原文，块数不变
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(200)
+    const back = await page.evaluate(() => ({
+      text: window.__qua.__editor.doc.roots.flatMap((r) => [r, ...r.children]).map((b) => b.text),
+    }))
+    assert(back.text.includes(target.text), `一次撤销应回到原文「${target.text}」：${JSON.stringify(back.text)}`)
+    assert(!back.text.includes('改过的字'), `撤销后不该还留着新正文：${JSON.stringify(back.text)}`)
+
+    await ctx.close()
+    return `setText ⇒ ops=[block.upsert{text}]（1 条，0 条 anno）；正文/DOM 同步改；⌘Z 回原文`
+  },
+)
+
 /* ---------------------------------------------------------------- 汇总 */
 
 await browser.close()

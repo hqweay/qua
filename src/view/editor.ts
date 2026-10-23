@@ -81,6 +81,7 @@ import {
   type MarkType,
   type Sel,
   type Snap,
+  type TextChange,
   type TodoState,
   type UndoKind,
   type VisibleRow,
@@ -1075,10 +1076,25 @@ export class BlockEditor {
     if (!loc) return
     const before = this.snap()
     const old = loc.block.text
-    writeBlockText(loc.block, old.slice(0, from) + insert + old.slice(to))
-    this.marks = mapMarks(this.marks, id, { from, to, insert })
-    const r = mapAtoms(this.atoms, id, { from, to, insert })
-    this.atoms = r.kept
+    const change: TextChange = { from, to, insert }
+    const mm = mapMarks(this.marks, id, change)
+    const r = mapAtoms(this.atoms, id, change)
+    if (this.write) {
+      // 与 `setText` 同一笔：正文 ＋ 锚点要么一起落，要么一起回滚
+      // （锚点只喂这一块的，理由见 `setText`）
+      this.write((tx) => {
+        tx.patch(id, (b) => writeBlockText(b, old.slice(0, from) + insert + old.slice(to)))
+        tx.setAnnotations(
+          id,
+          mm.filter((m) => m.blockId === id),
+          r.kept.filter((a) => a.blockId === id),
+        )
+      })
+    } else {
+      writeBlockText(loc.block, old.slice(0, from) + insert + old.slice(to))
+      this.marks = mm
+      this.atoms = r.kept
+    }
     this.undo.record(before, kind, Date.now())
     this.renderBlock(id)
     this.reportLost(r.lost)
@@ -1669,9 +1685,29 @@ export class BlockEditor {
     if (!loc) return
     const before = this.snap()
     const change = diffText(loc.block.text, text)
-    writeBlockText(loc.block, text)
-    this.marks = mapMarks(this.marks, id, change)
-    this.atoms = mapAtoms(this.atoms, id, change).kept
+    const mm = mapMarks(this.marks, id, change)
+    const kept = mapAtoms(this.atoms, id, change).kept
+    if (this.write) {
+      /**
+       * 正文 ＋ 锚点同一笔事务（拆开落盘会留下「字在、粗体没了」的窗口）。
+       *
+       * ⚠️ 交给 `tx` 的锚点必须**只含这一块**：`setAnnotations` 按块拼接
+       *    （别的块的 + 这次的），把整组喂进去会让这一块的锚点翻倍。
+       *    而 `mapMarks`/`mapAtoms` 吃的是整组、吐的也是整组 —— 过滤这一步不能省。
+       */
+      this.write((tx) => {
+        tx.patch(id, (b) => writeBlockText(b, text))
+        tx.setAnnotations(
+          id,
+          mm.filter((m) => m.blockId === id),
+          kept.filter((a) => a.blockId === id),
+        )
+      })
+    } else {
+      writeBlockText(loc.block, text)
+      this.marks = mm
+      this.atoms = kept
+    }
     this.undo.record(before, 'insert', Date.now())
     this.renderBlock(id)
     this.emitChange('text')
