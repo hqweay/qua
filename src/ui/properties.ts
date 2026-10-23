@@ -275,11 +275,20 @@ export class PropertiesPanel {
     return box
   }
 
-  /** 添加块属性：选已有定义（默认复用）或新建一个。 */
+  /**
+   * 添加块属性：选已有定义（默认复用）或新建一个。
+   *
+   * ⚠️ **类型只属于「新建定义」，不属于「给这一块加一条属性」**：`_kind` 住在定义块上、
+   *    全库一份，而 `addField` 只吃一个 `propId`——选已有属性能配类型是假的。
+   *    所以两件事分两行画：第一行选/复用，第二行（只在「新建」时出现）才是名字＋类型。
+   */
   private buildForm(target: Block): HTMLElement {
     const form = document.createElement('form')
     form.className = 'props-form'
     form.addEventListener('submit', (e) => e.preventDefault())
+
+    /** 「新建定义」的哨兵值：它不是任何真实定义的 id，只用来把下拉切到第二行 */
+    const NEW_OPTION = '__new__'
 
     const pick = document.createElement('select')
     pick.className = 'prop-input props-pick'
@@ -288,18 +297,26 @@ export class PropertiesPanel {
     placeholder.textContent = t('ui.props.pick')
     pick.appendChild(placeholder)
     const used = new Set(this.deps.rows(target).map((r) => r.propId))
+    let reuse = 0
     for (const def of this.deps.defs()) {
       if (used.has(def.id)) continue
       const o = document.createElement('option')
       o.value = def.id
-      o.textContent = `${def.text.trim() || def.id} · ${String(def.props?._kind ?? 'text')}`
+      o.textContent = `${def.text.trim() || def.id} · ${t(`ui.props.kind.${propKindOf(def)}`)}`
       pick.appendChild(o)
+      reuse++
     }
+    const newOption = document.createElement('option')
+    newOption.value = NEW_OPTION
+    newOption.textContent = t('ui.props.newOption')
+    pick.appendChild(newOption)
+
     const pickBtn = document.createElement('button')
     pickBtn.type = 'button'
+    pickBtn.className = 'props-use'
     pickBtn.textContent = t('ui.props.use')
     pickBtn.addEventListener('click', () => {
-      if (!pick.value) return
+      if (!pick.value || pick.value === NEW_OPTION) return
       this.deps.addField(target, pick.value)
       this.formOpen = false
       this.render()
@@ -318,6 +335,7 @@ export class PropertiesPanel {
     }
     const create = document.createElement('button')
     create.type = 'submit'
+    create.className = 'props-create'
     create.textContent = t('ui.props.create')
     create.addEventListener('click', () => {
       const name = label.value.trim()
@@ -330,6 +348,20 @@ export class PropertiesPanel {
       this.render()
     })
 
+    // 新建组整块占一行：它的三个控件只一起出现，不能和第一行的「用这个」混排
+    const newGroup = document.createElement('div')
+    newGroup.className = 'props-new-group'
+    newGroup.hidden = true
+    newGroup.append(label, kind, create)
+
+    /** 形态跟着下拉走：占位空值两者都藏，选哨兵露新建组，选真实定义露「用这个」 */
+    const syncShape = (): void => {
+      const isNew = pick.value === NEW_OPTION
+      newGroup.hidden = !isNew
+      pickBtn.hidden = !pick.value || isNew
+    }
+    pick.addEventListener('change', syncShape)
+
     const cancel = document.createElement('button')
     cancel.type = 'button'
     cancel.className = 'ghost'
@@ -339,7 +371,11 @@ export class PropertiesPanel {
       this.render()
     })
 
-    for (const el of [pick, pickBtn, label, kind, create, cancel]) form.appendChild(el)
+    // 一条可复用的定义都没有时，空下拉是死路：直接切到「新建」并展开第二行
+    if (reuse === 0) pick.value = NEW_OPTION
+    syncShape()
+
+    for (const el of [pick, pickBtn, cancel, newGroup]) form.appendChild(el)
     return form
   }
 }

@@ -106,6 +106,7 @@ export const MSG = {
   'ui.props.unknown': '未知属性 {id}',
   'ui.props.pick': '选择已有属性…',
   'ui.props.use': '用这个',
+  'ui.props.newOption': '＋ 新建属性…',
   'ui.props.newLabel': '属性名',
   'ui.props.create': '新建',
   'ui.props.cancel': '取消',
