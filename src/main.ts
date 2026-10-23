@@ -132,6 +132,14 @@ let backlinksView: BacklinksView | null = null
 let queryView: QueryView | null = null
 /** 当前正文里那个查询块（没有 ⇒ `null`，视图整段隐藏） */
 let queryBlock: Block | null = null
+/**
+ * **属性区最近一次画过的聚焦块**。
+ *
+ * 焦点落到面板自己的输入框、ref 选择浮层，或面板重绘让焦点暂时回到 body 时，
+ * 活动编辑器已经不再「有光标」；没有记住的 id，面板就会在改到一半时消失。
+ * 只有真的点到编辑区之外（pointerdown / 窗口失焦 / 换页）才清空。
+ */
+let propsBlockId: string | null = null
 let registry: Registry
 let saveTimer: number | null = null
 let slashOpen = false
@@ -699,6 +707,8 @@ const pageDeps: PageDeps = {
     ws.activeId = id
   },
   loadPage: (roots, marks, atoms) => {
+    // 换页/换焦点对象：上一条「聚焦块」不再成立，等 focusFirstBlock 重新设上
+    propsBlockId = null
     ed = mainEd
     // 正文视图的折叠态是**库级**那份；取当前视图持有的那一份（`ws.folded` 只在落盘时同步，可能落后一步）
     mainEd.loadPage({ roots, folded: mainEd.doc.folded, trash: blocks.trash }, marks as never, atoms as never)
@@ -1196,6 +1206,7 @@ renderQueryView()
 // 焦点在正文 → 活动编辑器＝正文；焦点在反链 footer 时由 BacklinksView 切过去
 editorEl.addEventListener('focusin', () => {
   ed = mainEd
+  scheduleProperties()
 })
 
 ed.events = {
@@ -1219,6 +1230,7 @@ ed.events = {
   // 划选气泡（顶部工具栏作废后的落点）：选区一变就重算「该不该在、装哪几颗」
   selChange: () => {
     refreshSelectionBar()
+    scheduleProperties()
   },
   slashQuery: (q, rect) => {
     if (q === null) {
@@ -1296,12 +1308,36 @@ renderBacklinks()
 /* ------------------------------------------------------------ 属性区 */
 
 /**
- * 属性区画在**当前对象**上（页 / 日记 / 标签 / 被 zoom 的块）。
+ * 属性区画在**当前聚焦块**上（活动编辑器里光标所在的那一块）。
  *
- * ⚠️ 不跟光标走：跟光标会让面板随点击忽隐忽现（布局跳），而「属性属于你正在看的那个东西」
- *    是更稳定的心智模型。要看一个内容块自己的属性 ⇒ 点它的块标 zoom 进来（此时它＝当前对象）。
- * 任何块都能直接有属性 —— 不要求先打标签；标签只让「可用字段」多出来。
+ * 为什么不跟「当前对象」：看一个内容块自己的属性不必先 zoom 进来；点哪一块就改哪一块，
+ * 移开焦点（点到编辑区之外、窗口失焦）就收起。焦点落在本区自己的控件或 ref 选择浮层里时
+ * 继续用记住的那一块 —— 否则改到一半面板会自己消失。
+ *
+ * ⚠️ 冷启动不抢焦点：没有任何块处于聚焦态时本区保持 `hidden`，不留一条空白。
  */
+function lastFocusedBlock(): Block | null {
+  // 窗口已经不在前台 ⇒ 没有「聚焦块」可言；否则失焦前的 activeElement 还会让我们假装有焦点
+  if (!document.hasFocus()) return null
+  const active = document.activeElement
+  if (active && ed.container.contains(active)) {
+    const caret = ed.caretBlock()
+    if (!caret) return null
+    const live = findInForest(ws.blocks, caret)
+    if (!live) return null
+    propsBlockId = live.id
+    return live
+  }
+  // 焦点在别的**可聚焦控件**上（Tab 到槽按钮、调试开关…）⇒ 已经没有聚焦块。
+  // `body` 不算：面板重绘会把焦点暂时交回 body，那不是用户离开。
+  if (active && active !== document.body && active !== document.documentElement) {
+    const kept = chrome.propertiesEl.contains(active) || layers.contains(active)
+    if (!kept) return null
+  }
+  // 焦点在面板/浮层/重绘后的 body：沿用上一次编辑器里真正落过的块
+  return propsBlockId ? (findInForest(ws.blocks, propsBlockId) ?? null) : null
+}
+
 const propertiesPanel = new PropertiesPanel(
   {
     root: chrome.propertiesEl,
@@ -1310,7 +1346,7 @@ const propertiesPanel = new PropertiesPanel(
     add: chrome.propertiesAddEl,
   },
   {
-    target: () => activeBlock(),
+    target: () => lastFocusedBlock(),
     rows: (b) => fieldRows(b, ws.blocks),
     // 标签（分类归属）与标签属性（字段声明）是两件事：这一行走 `props._tags`
     tags: (b) => tagsOf(b, ws.blocks),
@@ -1398,6 +1434,50 @@ function scheduleProperties(): void {
 }
 blocks.subscribe(() => scheduleProperties())
 renderProperties()
+
+/**
+ * **面板跟着「聚焦块」重算**，三条触发各自对应一种「焦点去哪了」：
+ *   · `selectionchange`：在编辑器里点/敲/方向键移动光标；
+ *   · `focusin`：点进编辑器（还没形成选区的那一刻）；
+ *   · `pointerdown`（捕获）：点到了编辑区之外 ⇒ 收起。
+ *
+ * ⚠️ `selectionchange` 只在活动编辑器里处理：属性区自己的输入框也会产生选区变化，
+ *    跟着重绘会把正在输入的控件整块换掉。
+ * ⚠️ 点面板自己或浮层里（含 ref 选择器）不算「出去了」——否则点开选择器的那一下就把面板关了。
+ */
+document.addEventListener('selectionchange', () => {
+  if (ed.container.contains(document.activeElement)) scheduleProperties()
+})
+document.addEventListener('focusin', (e) => {
+  if (e.target instanceof Node && ed.container.contains(e.target)) scheduleProperties()
+})
+document.addEventListener('focusout', (e) => {
+  const next = e.relatedTarget
+  if (next instanceof Node) {
+    if (ed.container.contains(next)) return
+    if (chrome.propertiesEl.contains(next) || layers.contains(next)) return
+  }
+  // 焦点落到 body（面板重绘）时下面那条会沿用记住的块；落到别的控件则会收起
+  scheduleProperties()
+})
+document.addEventListener(
+  'pointerdown',
+  (e) => {
+    const node = e.target as Node | null
+    if (!node) return
+    if (ed.container.contains(node)) return
+    if (chrome.propertiesEl.contains(node)) return
+    if ((node as HTMLElement).closest?.('.blk')) return
+    if (layers.contains(node)) return
+    propsBlockId = null
+    scheduleProperties()
+  },
+  true,
+)
+window.addEventListener('blur', () => {
+  propsBlockId = null
+  scheduleProperties()
+})
 
 /* ------------------------------------------------------------ 标签页 footer（属于 / 包含 / 成员） */
 
@@ -1651,6 +1731,7 @@ const dockBlocksDeps = (side: 'left' | 'right', slot: typeof dockLeft): Construc
   onFocus: (editor) => {
     ed = editor
     scheduleBadge()
+    scheduleProperties()
   },
   // 槽内编辑：只落盘与刷角标，**不重画槽**（重画会打断这一行的输入）
   onChange: () => {
@@ -1918,16 +1999,23 @@ const api = {
     mainEd.placeCaret(blockId, off)
   },
   /**
-   * 只把焦点给编辑器，**不动光标**。
-   * ⚠️ 先 focus 再还原模型选区：`focus()` 在「此前没有焦点」时会把光标重置到容器开头
-   *    （Contenteditable 默认行为）——boot 之后光标原本在正文首块，一 focus 就跳回只读的
-   *    日期行，连带把 ⌘A 的全选范围也缩到那一行（2026-10-20 electron E5 实测）。
+   * 把焦点给编辑器：有模型选区就还原它，没有就落到第一个可编辑行。
+   *
+   * ⚠️ **先 focus 再 placeCaret**：`focus()` 在「此前没有焦点」时会把光标重置到容器开头
+   *    （Contenteditable 默认行为）——不补一次 placeCaret，光标会停在只读的日期行上，
+   *    连带把 ⌘A 的全选范围也缩到那一行。
+   * ⚠️ 冷启动**不**走这里：打开 app 时没有任何块处于聚焦态；这是一个显式动作的入口。
    */
   focus: () => {
     ed = mainEd
     const keep = mainEd.sel
     editorEl.focus()
-    if (keep) mainEd.placeCaret(keep.aBlock, keep.aOff)
+    if (keep) {
+      mainEd.placeCaret(keep.aBlock, keep.aOff)
+      return
+    }
+    const target = firstEditableRoot(mainEd.doc.roots[0])
+    if (target) mainEd.placeCaret(target.id, 0)
   },
   openPalette: () => registry.invoke('core.command-palette/show', {}, 'api'),
   openBlockMenu: (blockId: string) => {
@@ -1957,9 +2045,3 @@ declare global {
   }
 }
 window.__demo = api
-
-// 首屏把光标放进**第一个可编辑的行**：打开就能敲（journal 首行是只读日期 ⇒ 跳过它）
-{
-  const target = firstEditableRoot(mainEd.doc.roots[0])
-  if (target) mainEd.placeCaret(target.id, 0)
-}

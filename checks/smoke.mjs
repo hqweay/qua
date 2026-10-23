@@ -93,17 +93,44 @@ const pinRootText = (page, side, blockId) =>
 
 /* ---------------------------------------------------------------- 敲字 */
 
-await check('T1 打开就能敲：光标落在第一个**可编辑**块；journal 的日期行不被写入', async () => {
+await check('T1 冷启动不抢光标；点块才聚焦，块属性只在聚焦块时出现；journal 的日期行不被写入', async () => {
   const { ctx, page, errors } = await freshPage(browser, base)
   const before = await snap(page)
-  const at = await page.evaluate(() => {
-    // journal 首行是只读日期 ⇒ 光标应落在它的第一个子块，而不是日期行
+  const cold = await page.evaluate(() => {
+    // journal 首行是只读日期 ⇒ 第一个可编辑块是它的子块
     const b = window.__demo.blocks()
     const editable = b.find((x) => !x.roles?.includes('journal'))
-    return { id: editable?.id ?? '', sel: window.__demo.snapshot().selection }
+    const editor = document.getElementById('editor')
+    return {
+      id: editable?.id ?? '',
+      focused: editor?.contains(document.activeElement) ?? false,
+      sel: window.__demo.snapshot().selection ?? null,
+      propsHidden: document.getElementById('properties')?.hidden ?? null,
+    }
   })
-  assert(at.id && at.sel?.aBlock === at.id, `冷启动光标应落在第一个可编辑块：${JSON.stringify(at)}`)
-  await page.evaluate(() => window.__demo.focus())
+  assert(cold.id, `冷启动应能找到第一个可编辑块：${JSON.stringify(cold)}`)
+  assert(!cold.focused, `冷启动不该把焦点抢进编辑器：${JSON.stringify(cold)}`)
+  assert(!cold.sel, `冷启动不该有模型选区：${JSON.stringify(cold)}`)
+  assert(cold.propsHidden === true, `冷启动没有聚焦块 ⇒ 属性区应收起：${JSON.stringify(cold)}`)
+
+  // 真点一下那一行：这才是「用户让某一块聚焦」的动作
+  await page.locator(`.blk[data-block-id="${cold.id}"] > .tx`).click()
+  await page.waitForTimeout(120)
+  const clicked = await page.evaluate(() => {
+    const editor = document.getElementById('editor')
+    const props = document.getElementById('properties')
+    return {
+      focused: editor?.contains(document.activeElement) ?? false,
+      sel: window.__demo.snapshot().selection ?? null,
+      propsHidden: props?.hidden ?? null,
+      propsTarget: props?.dataset.targetBlockId ?? '',
+    }
+  })
+  assert(clicked.focused, `点击块后编辑器应获得焦点：${JSON.stringify(clicked)}`)
+  assert(clicked.sel?.aBlock === cold.id, `点击后选区应落在被点的块上：${JSON.stringify(clicked)}`)
+  assert(clicked.propsHidden === false, `有聚焦块 ⇒ 属性区应显示：${JSON.stringify(clicked)}`)
+  assert(clicked.propsTarget === cold.id, `属性区应画在聚焦块上：${JSON.stringify(clicked)}`)
+
   await page.keyboard.type('真正敲进去的六个字')
   await page.keyboard.press('End')
   const after = await snap(page)
@@ -120,7 +147,46 @@ await check('T1 打开就能敲：光标落在第一个**可编辑**块；journa
   const journalText = await page.evaluate(() => window.__demo.blocks().find((b) => b.roles?.includes('journal'))?.text)
   assert(journalText === '', `journal 行不该被写入：${JSON.stringify(journalText)}`)
   await ctx.close()
-  return `块数 ${after.blocks}，DOM 节点 ${after.domNodes}；日期行仍为空`
+  return `冷启动无焦点、无选区、属性区收起；点击后落点 ${cold.id.slice(-6)}；块数 ${after.blocks}，DOM 节点 ${after.domNodes}`
+})
+
+await check('T1b 属性目标随聚焦块变化；点到编辑区外收起；再点块恢复', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const ids = await page.evaluate(() =>
+    window.__demo
+      .blocks()
+      .filter((b) => !b.roles?.includes('journal'))
+      .map((b) => b.id),
+  )
+  assert(ids.length >= 2, `至少需要两个可编辑块才能测「换目标」：${JSON.stringify(ids)}`)
+  const [a, b] = ids
+  const state = () =>
+    page.evaluate(() => {
+      const props = document.getElementById('properties')
+      return { hidden: props?.hidden ?? null, target: props?.dataset.targetBlockId ?? '' }
+    })
+
+  await page.locator(`.blk[data-block-id="${a}"] > .tx`).click()
+  await page.waitForTimeout(120)
+  assert((await state()).target === a, `焦点在块 A ⇒ 属性目标应是 A：${JSON.stringify(await state())}`)
+
+  await page.locator(`.blk[data-block-id="${b}"] > .tx`).click()
+  await page.waitForTimeout(120)
+  assert((await state()).target === b, `焦点换到块 B ⇒ 属性目标应跟着换：${JSON.stringify(await state())}`)
+
+  // 右上角（三槽外侧的边距/槽头）不是编辑区、也不是属性区 ⇒ 面板收起
+  await page.mouse.click(8, 8)
+  await page.waitForTimeout(120)
+  const outside = await state()
+  assert(outside.hidden === true, `点到编辑区外 ⇒ 属性区应收起：${JSON.stringify(outside)}`)
+
+  await page.locator(`.blk[data-block-id="${a}"] > .tx`).click()
+  await page.waitForTimeout(120)
+  const back = await state()
+  assert(back.hidden === false && back.target === a, `再点块 ⇒ 属性区恢复并画在该块上：${JSON.stringify(back)}`)
+
+  await ctx.close()
+  return `A→B 跟随、外侧点击收起、再点 A 恢复（${a.slice(-6)} / ${b.slice(-6)}）`
 })
 
 await check('T2 Enter 拆块 ／ Backspace 合并 ／ Tab 缩进 ／ Shift+Tab 还原', async () => {
@@ -1996,12 +2062,12 @@ await check('T58 行内标签：敲完分隔符 ⇒ 正文 1 格原子 ＋ 块�
   await page.evaluate(() => window.__demo.quiet(true))
   await openFirstPage(page)
 
-  // 找一个空块并落光标
+  // 找一个空块并落光标（focusBlock 同时把 DOM 焦点交进去；冷启动不再自动聚焦）
   const target = await page.evaluate(() => {
     const ed = window.__demo.__editor
     const rootId = window.__demo.blocks()[0].id
     const id = ed.insertBlockAfter(rootId, '')
-    ed.placeCaret(id, 0)
+    window.__demo.focusBlock(id, 0)
     return id
   })
   await page.waitForTimeout(80)
@@ -2070,7 +2136,7 @@ await check('T58b 属性面板挂/摘块标签：只写归属，正文不动', a
   await page.evaluate(() => window.__demo.quiet(true))
   await openFirstPage(page)
 
-  // 属性区的 target 是**当前对象**（`activeId`）⇒ 用命令聚焦到一个内容块，而不是只看光标
+  // 属性区的 target 是**聚焦块**（光标所在块）⇒ 用命令把光标落到一个内容块上
   const pageId = await page.evaluate(() => {
     const b = window.__demo.blocks().find((x) => x.roles.length === 0 && x.children === 0 && x.text.length > 2)
     window.__demo.invoke('core.block/focus-block', { blockId: b.id })
@@ -2123,8 +2189,8 @@ await check('T59 `ref` 类型的值走选择器：显示目标**名字**、能�
   await openFirstPage(page)
 
   /**
-   * ⚠️ 属性区跟**当前对象**走（不是光标所在块）：内容块要先 zoom 进去，
-   *    它的属性才是面板画的那一份。直接 focusBlock 只会把光标放上去。
+   * 属性区画在**聚焦块**上：`focus-block` 会把光标落到目标块，
+   *    于是面板画的就是这一块的属性。
    */
   const setup = await page.evaluate(() => {
     const bs = window.__demo.blocks()
@@ -3740,7 +3806,7 @@ await check(
     // 直接派发 DOM click：面板会随焦点变化重建，Playwright 的「等元素稳定」会撞上那次重建
     await page.evaluate(() => document.querySelector('.props-use')?.click())
     await page.waitForTimeout(150)
-    // 点按钮会把焦点从编辑器挪走 ⇒ 面板目标退回当前对象；把光标放回刚才那块再看行
+    // 点按钮后焦点在面板里；把光标放回刚才那块，面板目标仍是它
     await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), hostId)
     await page.waitForTimeout(150)
     const used = await page.evaluate((id) => ({
