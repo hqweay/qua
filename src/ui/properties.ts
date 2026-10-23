@@ -21,8 +21,8 @@ import { displayNameOf, declaredFieldIds, hasList, PROP_KINDS, propKindOf, uiPos
 import { t } from '../core/msg.ts'
 
 export interface PropertiesDeps {
-  /** 当前属性区画在哪个块上（光标所在块；没有就退回当前对象） */
-  target: () => Block | undefined
+  /** 属性区画在哪个**聚焦块**上（活动编辑器里光标所在的那一块；没有聚焦块就收起） */
+  target: () => Block | null | undefined
   /** 派生行（core 算好：标签属性 ∪ 块属性，同一 propId 只一行） */
   rows: (b: Block) => FieldRow[]
   /**
@@ -159,6 +159,7 @@ export class PropertiesPanel {
     const target = this.deps.target()
     if (!target) {
       this.els.root.hidden = true
+      delete this.els.root.dataset.targetBlockId
       return
     }
     /**
@@ -177,6 +178,8 @@ export class PropertiesPanel {
      *    没了，于是「给一个空块加第一个属性」这条路径根本走不通。
      */
     this.els.root.hidden = false
+    // 诊断/冒烟面：面板现在画在哪一块上（收起时删掉，避免读到上一次的目标）
+    this.els.root.dataset.targetBlockId = target.id
     this.els.body.replaceChildren()
 
     // 标签在第一行：它是**分类**，比「有哪些字段」更先决定这一块是什么
