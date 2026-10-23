@@ -134,8 +134,13 @@ export interface App {
   /** 相对当前日期前后翻（`days` 可正可负）；同样幂等物化 */
   journalShift(days: number): void
   /* zoom（块可任意 zoom in；zoom 是视图配置，不是新对象） */
-  /** 聚焦到此块：中心槽以 `source=block-ref` ＋ `scope:"subtree"` 渲染它 */
-  zoomTo(id: string): void
+  /**
+   * 聚焦到此块：中心槽以 `source=block-ref` ＋ `scope:"subtree"` 渲染它。
+   *
+   * `feed` 只由历史回放使用：还原「当时看的是日记流」这一形态；
+   * 普通聚焦永远只装目标块自己。
+   */
+  zoomTo(id: string, feed?: boolean): void
   /** 退回该容器所在的顶层块（面包屑的「根」） */
   zoomOut(): void
   /**

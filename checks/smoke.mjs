@@ -2004,13 +2004,10 @@ await check('T56 聚焦根块时块菜单**没有**「删除块」，命令被�
 })
 
 /**
- * **日记流里 zoom 之后按「后退」，要回到 feed，而不是落到孤立的一天**。
+ * **日记流的「当前对象」不是一块，而是一棵多段 feed**。
  *
- * 历史栈以「块 id」为粒度，但日记流的「当前对象」不是一块而是**一棵 feed 树**
- * （由 activeId 的角色 + 今天这个入口推导出来的）。回放若裸走 zoom 路径，
- * 就只装单块 ⇒ feed 消失（**QB-002**）。
- *
- * 修法是让装载规则归一：`rootsForTarget` 是打开页／聚焦／回放共用的唯一入口。
+ * 历史栈如果只记块 id，就分不出「今天这一块作为 feed 入口」和「只看今天」——
+ * 回放会把 feed 收成孤立的一天（**QB-002**）。所以每个导航项都带视图形态 `feed`。
  */
 await check('T57 日记流里 zoom 进某块再「后退」⇒ 回到**日记流**（不是孤立的一天）', async () => {
   const { ctx, page } = await freshPage(browser, base)
@@ -2055,6 +2052,51 @@ await check('T57 日记流里 zoom 进某块再「后退」⇒ 回到**日记流
 
   await ctx.close()
   return `日记流 ${feedAtStart.roots} 段 → zoom（1 段）→ 后退 ⇒ 仍是 feed（${back.roots} 段，${back.journalDate}）`
+})
+
+await check('T57b 聚焦今天的 journal 块 ⇒ 只装单日；后退回 feed；再点根块标不重装', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__demo.quiet(true))
+
+  const roots = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('#editor > .blk[data-depth="0"]')].map((el) => el.dataset.blockId),
+    )
+  const before = await roots()
+  const dayId = await page.evaluate(() => window.__demo.snapshot().activeId)
+  assert(before.length >= 2, `前置：冷启动应是日记流（多段）：${JSON.stringify(before)}`)
+
+  // 聚焦「今天」这一块：activeId 不变，但视图要从 feed 收成单日
+  await page.evaluate((id) => window.__demo.invoke('core.block/focus-block', { blockId: id }), dayId)
+  await page.waitForTimeout(180)
+  const focused = await roots()
+  assert(
+    focused.length === 1 && focused[0] === dayId,
+    `聚焦今天的 journal 块应只装这一天，不该仍是 feed：${JSON.stringify(focused)}`,
+  )
+
+  // 已经在单块聚焦里，再点一次根块标 ⇒ 不许整片重装（DOM 节点保持同一个）
+  await page.evaluate((id) => {
+    window.__probeRoot = document.querySelector(`.blk[data-block-id="${id}"]`)
+    document
+      .querySelector(`.blk[data-block-id="${id}"] .marker`)
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+  }, dayId)
+  await page.waitForTimeout(120)
+  const noop = await page.evaluate(
+    (id) => ({ sameNode: window.__probeRoot === document.querySelector(`.blk[data-block-id="${id}"]`) }),
+    dayId,
+  )
+  assert(noop.sameNode, `已在单块聚焦时再点根块标不该重装 DOM：${JSON.stringify(noop)}`)
+
+  // 同一 id、不同形态也进历史 ⇒ 后退应回到 feed
+  await page.evaluate(() => window.__demo.invoke('core.history/back'))
+  await page.waitForTimeout(220)
+  const back = await roots()
+  assert(back.length >= 2, `单日聚焦后退应回到多段日记流：${JSON.stringify(back)}`)
+
+  await ctx.close()
+  return `feed ${before.length} 段 → 聚焦单日（1 段）→ 再点不重装 → 后退回 feed（${back.length} 段）`
 })
 
 await check('T58 行内标签：敲完分隔符 ⇒ 正文 1 格原子 ＋ 块上的归属，chip 不重复', async () => {
