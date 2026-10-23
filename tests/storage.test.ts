@@ -100,6 +100,16 @@ test('load: 升级前的裸库 JSON ⇒ 原样交给上层判版本（不能当�
   assert.equal(JSON.parse(r.raw).version, 3)
 })
 
+test('load: 版本号高于当前 ⇒ too-new（拒绝打开，不是 corrupt，且不写回）', async () => {
+  resetMemoryLocalStorage()
+  const raw = JSON.stringify({ ...lib(), version: WORKSPACE_VERSION + 1 } as unknown as Workspace)
+  globalThis.localStorage.setItem(KEY, raw)
+  const store = createWorkspaceStore(createLocalStorageAdapter(KEY))
+  const r = await store.load()
+  assert.deepEqual(r, { status: 'too-new', version: WORKSPACE_VERSION + 1 })
+  assert.equal(globalThis.localStorage.getItem(KEY), raw, 'too-new 时不许改写字节')
+})
+
 test('门面：empty / 旧库 / 坏字节 各有自己的分支', async () => {
   resetMemoryLocalStorage()
   const store = createWorkspaceStore(createLocalStorageAdapter(KEY))
