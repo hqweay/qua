@@ -420,6 +420,11 @@ export class Layers {
     return this.popEl !== null
   }
 
+  /** 这个节点是不是在当前信息气泡里（点气泡内的按钮不该被「点外面关闭」吞掉） */
+  popoverContains(node: Node | null): boolean {
+    return node !== null && (this.popEl?.contains(node) ?? false)
+  }
+
   /* ------------------------------------------------------------ 抽屉面板 */
 
   openDrawer(title: string, render: (host: HTMLElement) => void): void {

@@ -54,6 +54,8 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.anno/clear-marks', title: t('cmd.anno.clear-marks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['clear', 'plain'] },
 
   /* ---- 标签层级（属于 / 包含：一条边，两个读法） ---- */
+  { name: 'core.tags/add', title: t('cmd.tags.add'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, name: { type: 'string' } }, keywords: ['tag', t('menu.kw.tag')] },
+  { name: 'core.tags/remove', title: t('cmd.tags.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, tagId: { type: 'string' } }, keywords: ['tag', t('menu.kw.tag'), 'remove'] },
   { name: 'core.tags/add-parent', title: t('cmd.tags.add-parent'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' }, parentId: { type: 'string' } } },
   { name: 'core.tags/remove-parent', title: t('cmd.tags.remove-parent'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' }, parentId: { type: 'string' } } },
   { name: 'core.tags/prune-parents', title: t('cmd.tags.prune-parents'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' } } },
@@ -94,6 +96,8 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.block/unpage', title: t('cmd.block.unpage'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.page'), args: { blockId: { type: 'string' } }, keywords: ['page', 'role', 'remove'] },
   { name: 'core.block/as-tag', title: t('cmd.block.as-tag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'role'] },
   { name: 'core.block/untag', title: t('cmd.block.untag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'role', 'remove'] },
+  { name: 'core.block/edit-aliases', title: t('cmd.block.edit-aliases'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['alias', 'name', 'list'] },
+  { name: 'core.block/edit-fields', title: t('cmd.block.edit-fields'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['field', 'schema', 'declared'] },
   { name: 'core.block/set-type', title: t('cmd.block.set-type'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, type: { type: 'string' } }, keywords: ['type', 'convert'] },
 
   /* ---- 视图 ---- */

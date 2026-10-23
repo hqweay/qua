@@ -17,7 +17,7 @@
  */
 import type { Block } from '../core/index.ts'
 import type { FieldRow, PropKind } from '../core/index.ts'
-import { hasRole, PROP_KINDS, propKindOf, uiPositionOf } from '../core/index.ts'
+import { displayNameOf, hasList, PROP_KINDS, propKindOf, uiPositionOf } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 
 export interface PropertiesDeps {
@@ -25,6 +25,17 @@ export interface PropertiesDeps {
   target: () => Block | undefined
   /** 派生行（core 算好：标签属性 ∪ 块属性，同一 propId 只一行） */
   rows: (b: Block) => FieldRow[]
+  /**
+   * 这块带着哪些标签（`props._tags` 的活块）。
+   *
+   * ⚠️ 与「标签属性」不是一回事：标签是**分类归属**，标签属性是那个标签声明了哪些字段。
+   *    同一个标签可以只当分类（没有字段）。
+   */
+  tags: (b: Block) => Block[]
+  /** 挂一个标签（只写归属；行内露面由「正文里敲 `#名`」产生） */
+  addTag: (b: Block, name: string) => void
+  /** 摘掉一个标签（连带收掉它在正文里的露面） */
+  removeTag: (b: Block, tagId: string) => void
   /** 森林里全部定义（「添加已有属性」用） */
   defs: () => Block[]
   /** 这个页/标签的**标签属性**清单（不是值；值区在下面） */
@@ -166,7 +177,10 @@ export class PropertiesPanel {
     this.els.root.hidden = false
     this.els.body.replaceChildren()
 
-    const canDeclare = hasRole(target, 'page') || hasRole(target, 'tag')
+    // 标签在第一行：它是**分类**，比「有哪些字段」更先决定这一块是什么
+    this.els.body.appendChild(this.buildTags(target))
+
+    const canDeclare = hasList(target, 'page') || hasList(target, 'tag')
     if (rows.length === 0) {
       const empty = document.createElement('p')
       empty.className = 'props-empty'
@@ -189,10 +203,10 @@ export class PropertiesPanel {
       const name = document.createElement('span')
       name.className = 'prop-name'
       const source = row.sources.length
-        ? t('ui.props.source', { tags: row.sources.map((s) => `#${s.text}`).join('、') })
+        ? t('ui.props.source', { tags: row.sources.map((s) => `#${displayNameOf(s)}`).join('、') })
         : t('ui.props.own')
       const duplicated = (labelCount.get(row.label) ?? 0) > 1
-      const disambiguated = duplicated ? `${row.label}（${row.sources[0]?.text ?? t('ui.props.own')}）` : row.label
+      const disambiguated = duplicated ? `${row.label}（${row.sources[0] ? displayNameOf(row.sources[0]) : t('ui.props.own')}）` : row.label
       name.textContent = row.def ? disambiguated : t('ui.props.unknown', { id: this.deps.shortId(row.propId) })
       const src = document.createElement('span')
       src.className = 'prop-source'
@@ -226,6 +240,59 @@ export class PropertiesPanel {
 
     if (canDeclare) this.els.body.appendChild(this.buildDeclared(target))
     if (this.formOpen) this.els.body.appendChild(this.buildForm(target))
+  }
+
+  /**
+   * **这块的标签**（块级归属）。
+   *
+   * 两个入口写同一份 `_tags`：这里（块级，显示成正文之后的 chip）与正文里敲 `#名`
+   * （行内，停在敲下的那一格）。所以这一行是「我有哪些分类」，不是「它显示在哪」。
+   *
+   * ⚠️ 摘标签不只删这一行：正文里那枚 `#名` 也要收掉（`deps.removeTag` 负责），
+   *    否则查询里已经没有这个标签、正文里还挂着一个看起来像标签的东西。
+   */
+  private buildTags(target: Block): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'prop-row prop-tags'
+    const label = document.createElement('label')
+    label.className = 'prop-label'
+    const name = document.createElement('span')
+    name.className = 'prop-name'
+    name.textContent = t('ui.props.tagsTitle')
+    label.append(name)
+
+    const value = document.createElement('span')
+    value.className = 'prop-value props-tag-value'
+    for (const tag of this.deps.tags(target)) {
+      const chip = document.createElement('span')
+      chip.className = 'props-tag'
+      chip.dataset.panelTagId = tag.id
+      const text = document.createElement('span')
+      text.textContent = `#${displayNameOf(tag)}`
+      const del = document.createElement('button')
+      del.type = 'button'
+      del.className = 'props-tag-x'
+      del.title = t('ui.props.tagRemove')
+      del.textContent = '×'
+      del.addEventListener('click', () => this.deps.removeTag(target, tag.id))
+      chip.append(text, del)
+      value.appendChild(chip)
+    }
+    const input = document.createElement('input')
+    input.className = 'prop-input props-tag-input'
+    input.placeholder = t('ui.props.tagPlaceholder')
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return
+      e.preventDefault()
+      const tagName = input.value.trim()
+      if (tagName === '') return
+      this.deps.addTag(target, tagName)
+      input.value = ''
+    })
+    value.appendChild(input)
+
+    row.append(label, value)
+    return row
   }
 
   /**

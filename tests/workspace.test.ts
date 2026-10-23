@@ -92,12 +92,49 @@ test('parseWorkspace: 缺 version ⇒ corrupt(shape)，不当作旧库', () => {
   assert.deepEqual(parseWorkspace(JSON.stringify({ blocks: [] })), { status: 'corrupt', reason: 'shape' })
 })
 
-test('parseWorkspace: 角色集合形状不对（`props._roles` 不是字符串数组）⇒ corrupt(shape)', () => {
-  // 角色住在属性袋里；坏形状不猜、不修——「这坨字节打不开」比「猜一个角色出来」安全
-  const notArray = valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _roles: 'page' } }] })
-  assert.deepEqual(parseWorkspace(notArray), { status: 'corrupt', reason: 'shape' })
-  const notString = valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _roles: [1 as unknown as string] } }] })
-  assert.deepEqual(parseWorkspace(notString), { status: 'corrupt', reason: 'shape' })
+test('parseWorkspace: `_lists` 形状不对（非数组 / 坏值 / 重复）⇒ corrupt(shape)', () => {
+  const bad = (lists: unknown): unknown =>
+    valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _lists: lists } }] })
+  assert.equal(parseWorkspace(bad('page')).status, 'corrupt')
+  assert.equal(parseWorkspace(bad(['page', 'other'])).status, 'corrupt')
+  assert.equal(parseWorkspace(bad(['page', 'page'])).status, 'corrupt', '无序集合：重复没有第二种语义')
+  assert.equal(parseWorkspace(bad([])).status, 'ok', '空列表合法（不在任何列表里）')
+})
+
+test('parseWorkspace: 在列表里 ⇒ 必须有至少一个别名', () => {
+  const withPageNoName = valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _lists: ['page'] } }] })
+  assert.deepEqual(parseWorkspace(withPageNoName), { status: 'corrupt', reason: 'shape' })
+  const withPageName = valid({
+    blocks: [{ id: 'b1', text: 'x', children: [], props: { _lists: ['page'], _aliases: ['页名'] } }],
+  })
+  assert.equal(parseWorkspace(withPageName).status, 'ok')
+})
+
+test('parseWorkspace: `_aliases` 形状不对（空数组 / 空串 / 规范化重复）⇒ corrupt(shape)', () => {
+  const bad = (aliases: unknown): unknown =>
+    valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _aliases: aliases } }] })
+  assert.equal(parseWorkspace(bad('名字')).status, 'corrupt')
+  assert.equal(parseWorkspace(bad([])).status, 'corrupt', '空数组与「没有这一格」是两种写法')
+  assert.equal(parseWorkspace(bad(['  '])).status, 'corrupt', '空串不是地址')
+  assert.equal(parseWorkspace(bad([1 as unknown as string])).status, 'corrupt')
+  assert.equal(parseWorkspace(bad(['A/B', 'a/b'])).status, 'corrupt', '块内别名规范后必须不相交')
+  assert.equal(parseWorkspace(bad(['A/B', 'C/B'])).status, 'ok', '不同全名可共存（叶子相同不算冲突）')
+})
+
+test('parseWorkspace: `_display` 只认 `alias` / `text` ⇒ 别的值判 corrupt', () => {
+  const bad = (display: unknown): unknown =>
+    valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _aliases: ['x'], _display: display } }] })
+  assert.equal(parseWorkspace(bad('alias')).status, 'ok')
+  assert.equal(parseWorkspace(bad('text')).status, 'ok')
+  assert.equal(parseWorkspace(bad('both')).status, 'corrupt')
+  assert.equal(parseWorkspace(bad(1)).status, 'corrupt')
+})
+
+test('parseWorkspace: 旧键 `_roles` / `_alias` 一律判 corrupt（不静默读旧形状）', () => {
+  const roles = valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _roles: ['page'] } }] })
+  assert.deepEqual(parseWorkspace(roles), { status: 'corrupt', reason: 'shape' })
+  const alias = valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _alias: '名字' } }] })
+  assert.deepEqual(parseWorkspace(alias), { status: 'corrupt', reason: 'shape' })
 })
 
 test('parseWorkspace: v3 的裸 JSON（写信封之前）⇒ expired，不会被当成当前版本打开', () => {

@@ -17,7 +17,7 @@
  * ⚠️ `_fieldDefs` 里存的是 **ref（id）**，不是名字：改名零迁移，重名不撞车。
  * ⚠️ 本文件零 DOM：属性面板只消费这里的派生结果，写入通过命令。
  */
-import { hasRole, isPropDefBlock, prop, type Block, type BlockProps, type TodoState } from './model.ts'
+import { hasList, isPropDefBlock, prop, type Block, type BlockProps, type TodoState } from './model.ts'
 import { walkForest } from './walk.ts'
 import { derivedId, uuidv7Hex } from './ids.ts'
 import { resolveTagIds, tagsById } from './tags.ts'
@@ -104,7 +104,7 @@ export function mkPropDef(label: string, kind: PropKind = 'text', extra: BlockPr
   }
 }
 
-/** 是不是属性定义块（**看数据 `_kind`**，不看名字、也没有额外的角色值） */
+/** 是不是属性定义块（**看数据 `_kind`**，不看名字、也没有额外的标记） */
 export function isPropDef(b: Block): boolean {
   return isPropDefBlock(b)
 }
@@ -154,9 +154,11 @@ export function declaredFieldIds(owner: Block): string[] {
  *
  * **只有页与标签能声明属性**：声明必须有自动获得方（标签的成员、页的子块），
  * 普通块没有 ⇒ 无消费方的声明是噪音。返回值说明有没有真的改动。
+ * ⚠️ 判据是**露面**（`hasList`），不是「有名字」：一个有名内容块不该凭空获得
+ *    「成员自动继承这些字段」的语义。
  */
 export function declareField(owner: Block, propId: string): boolean {
-  if (!hasRole(owner, 'page') && !hasRole(owner, 'tag')) return false
+  if (!hasList(owner, 'page') && !hasList(owner, 'tag')) return false
   const ids = declaredFieldIds(owner)
   if (ids.includes(propId)) return false
   owner.props = { ...(owner.props ?? {}), [FIELD_DEFS_PROP]: [...ids, propId] }

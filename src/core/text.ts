@@ -3,6 +3,7 @@
  */
 
 import type { Block } from './model.ts'
+import { displayNameOf } from './alias.ts'
 export interface TextChange {
   from: number
   to: number
@@ -39,8 +40,13 @@ export function mapOffset(p: number, c: TextChange, bias: 1 | -1): number {
 
 /** 把一次块内文本变更应用到该块的区间锚点上 */
 
+/**
+ * 一块在**被叫出名字**时的文本：主名叶子 > 正文。
+ *
+ * ⚠️ 别名不进正文：`contenteditable` 仍然编辑 `b.text`，这里是只读派生。
+ */
 export function blockDisplayText(b: Block): string {
-  return b.text
+  return displayNameOf(b)
 }
 
 /* ---------------------------------------------------- 区间锚点（marks） */

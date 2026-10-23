@@ -9,7 +9,8 @@
  * 「这些字节是不是一份能打开的库」归这里。
  */
 import type { Atom, Mark } from '../annotations.ts'
-import type { Block, Doc, FoldState } from '../model.ts'
+import { ALIASES_PROP, DISPLAY_PROP, LISTS_PROP, type Block, type Doc, type FoldState } from '../model.ts'
+import { LEGACY_ALIAS_PROP, normalizeAlias } from '../alias.ts'
 import { normalizePrefs, type Prefs } from './prefs.ts'
 
 export type { DockPrefs, DockSlotPrefs, Prefs, ThemeMode } from './prefs.ts'
@@ -39,8 +40,11 @@ export { DEFAULT_DOCK, DEFAULT_PREFS, normalizePrefs } from './prefs.ts'
  *            （落盘的每份库都带 `trash`），免得「有没有这一格」在下游变成两条分支。
  * v12 → v13：标签从「正文里占一格的原子」改成块级归属 `props._tags`。
  *            旧库的 `kind:'tag'` 原子不再被任何读路径认（标签会静默消失）⇒ 作废重 seed。
+ * v13 → v14：地址与露面分家——`props._alias`（单数）改成 `props._aliases`（0..N），
+ *            角色 `props._roles` 改成列表 `props._lists`，新增 `props._display`。
+ *            旧键新代码**不读**（`isBlock` 直接判 corrupt）⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 13
+export const WORKSPACE_VERSION = 14
 
 /** 示例库：一片块森林 ＋ 行内锚点/原子 */
 export interface Workspace {
@@ -85,13 +89,50 @@ export type ParseResult =
   /** JSON 坏了或形状不对：进入只读错误态，留给用户自行备份/抢救 */
   | { status: 'corrupt'; reason: 'parse' | 'shape' }
 
+/** 旧落盘键：`_roles` 只用来**判 corrupt**，不提供任何读路径（不静默升级旧库） */
+const LEGACY_ROLES_PROP = '_roles'
+
+/**
+ * 一个块的形状是否**能被新代码读**。
+ *
+ * 判据：只校验「形状」，不校验语义不变量（例如「列表非空 ⇒ 有名字」由写入路径维护，
+ * 不在这里补）；但**旧键一律判 corrupt**——静默读旧形状会让「地址」与「角色」
+ * 变成两份互相矛盾的真相，而用户看到的是「有些页莫名其妙不见了」。
+ */
 function isBlock(x: unknown): x is Block {
   if (!x || typeof x !== 'object') return false
   const b = x as Block
   if (typeof b.id !== 'string' || typeof b.text !== 'string' || !Array.isArray(b.children)) return false
-  // 角色是可兼位的数组（住在属性袋的 `_roles`）；形状不对就是「这坨字节打不开」，不猜、不修
-  const roles = b.props?.['_roles']
-  if (roles !== undefined && (!Array.isArray(roles) || !roles.every((r) => typeof r === 'string'))) return false
+  if (b.props === undefined) return true
+  if (!b.props || typeof b.props !== 'object' || Array.isArray(b.props)) return false
+  // 旧形状不静默读：v13 的 `_roles` / `_alias` 在新模型里没有对应物
+  if (LEGACY_ROLES_PROP in b.props || LEGACY_ALIAS_PROP in b.props) return false
+
+  const aliases = b.props[ALIASES_PROP]
+  if (aliases !== undefined) {
+    // 空数组与「没有这一格」是两种写法，留着就会让「有没有名字」有两份答案
+    if (!Array.isArray(aliases) || aliases.length === 0) return false
+    if (!aliases.every((a) => typeof a === 'string' && a.trim() !== '')) return false
+    // 块内别名必须两两不相交（规范化后）：否则同一块有两个相同的地址
+    const seen = new Set<string>()
+    for (const a of aliases as string[]) {
+      const n = normalizeAlias(a)
+      if (n === '' || seen.has(n)) return false
+      seen.add(n)
+    }
+  }
+
+  const lists = b.props[LISTS_PROP]
+  if (lists !== undefined) {
+    if (!Array.isArray(lists) || !lists.every((l) => l === 'page' || l === 'tag')) return false
+    if (new Set(lists).size !== lists.length) return false
+  }
+
+  const display = b.props[DISPLAY_PROP]
+  if (display !== undefined && display !== 'alias' && display !== 'text') return false
+  // 不变量：在列表里 ⇒ 至少有一个名字（不能出现在页/标签列表里却没有任何地址）。
+  // 这里只拦「有列表、完全没有 _aliases」；别名数组本身的空/空串已在上面判 corrupt。
+  if (Array.isArray(lists) && lists.length > 0 && !Array.isArray(aliases)) return false
   return true
 }
 

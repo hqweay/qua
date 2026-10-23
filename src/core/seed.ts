@@ -8,7 +8,7 @@
  * `![[图.png]]`，由 `parseInline` 解析成**区间锚点与行内原子**——这正是 demo 要展示的模型形状
  * （锚点带 blockId、原子占 1 格），而不是把富文本塞进 DOM。
  */
-import { addTagId, ATOM_PLACEHOLDER, declareField, ensureTag, FEED_INITIAL, findByAlias, journalId, mkBlock, mkPropDef, mkTagBlock, shiftISO, TASK_STATUS_PROP_ID, todayISO, UI_POSITION_PROP, uuidv7Hex, type Atom, type Block, type BlockProps, type FoldState, type Mark, type MarkType } from './index.ts'
+import { addTagId, ALIASES_PROP, ATOM_PLACEHOLDER, declareField, DISPLAY_PROP, ensureTag, FEED_INITIAL, findByAlias, journalId, LISTS_PROP, mkBlock, mkPropDef, mkTagBlock, shiftISO, TASK_STATUS_PROP_ID, todayISO, UI_POSITION_PROP, uuidv7Hex, type Atom, type Block, type BlockProps, type FoldState, type Mark, type MarkType } from './index.ts'
 import { DEFAULT_PREFS, WORKSPACE_VERSION, type PageBlock, type Workspace } from './workspace.ts'
 
 /* ------------------------------------------------------------- 迷你 DSL */
@@ -127,7 +127,7 @@ export function parseInline(src: string): { text: string; marks: InlineMark[]; a
 /* --------------------------------------------------------------- 构建 */
 
 interface BuiltPage {
-  /** 页 ＝ 一个带 `page` 角色的块；页名就是它的正文（journal 也复用这个形状） */
+  /** 页 ＝ `_lists` 里有 `page` 的块；名字在 `_aliases`（journal 也复用这个形状） */
   page: Block
   /** 页面标题 → id 的解析表（延后处理引用目标） */
   refs: { atomId: string; label: string }[]
@@ -192,24 +192,30 @@ function buildTree(
 /**
  * 造一个页：**页块 ＋ 它的子树**。
  *
- * 判据：页名就是页块自己的正文；图标是系统属性 `_icon`；
+ * 判据：页名 ＝ 主别名（`_aliases[0]`），正文是**描述**（初值可以等于名字）；
+ * 页的身份是 `_lists: ['page']`；图标是系统属性 `_icon`；
  * 原来的「页的 roots」就是页块的 `children` —— 一个页恰好是一个块。
+ *
+ * ⚠️ 空标题也要有一个地址：不变量是「在页列表里 ⇒ 至少有一个名字」。
+ *    给它 `未命名-<短 id>`，正文仍留空 ⇒ 呈现层的兜底文案照样生效
+ *    （引用/反链走主名，列表标题仍可回落到正文，见 `displayNameOf` 的优先级）。
  */
 function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uuidv7Hex()): BuiltPage {
   const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'], folded: {} as FoldState, pendingTags: [] as BuiltPage['pendingTags'] }
   const children = buildTree(seeds, acc)
+  const name = title.trim() !== '' ? title.trim() : `未命名-${id.slice(-6)}`
   const page: PageBlock = {
     id,
     text: title,
     children,
-    props: { _roles: ['page'], _icon: icon },
+    props: { [ALIASES_PROP]: [name], [LISTS_PROP]: ['page'], [DISPLAY_PROP]: 'alias', _icon: icon },
   }
   return { page, refs: acc.refs, marks: acc.marks, atoms: acc.atoms, folded: acc.folded, pendingTags: acc.pendingTags }
 }
 
 /**
- * 造一个日记块：**角色 `journal` ＋ `_date`**，日期不进 `text`。
- * 它和页复用同一个 `BuiltPage` 形状（子树 / 锚点 / 原子），只是换一个角色。
+ * 造一个日记块：**身份 ＝ `_date`**，日期不进 `text`。
+ * 它和页复用同一个 `BuiltPage` 形状（子树 / 锚点 / 原子），只是身份来源不同。
  */
 function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
   const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'], folded: {} as FoldState, pendingTags: [] as BuiltPage['pendingTags'] }

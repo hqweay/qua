@@ -2,8 +2,8 @@
  * 日记：只读日期 `_date` + 一天一个的确定性 id。
  * 日期**不进 text**；模型层没有写 `_date` 的路径。
  *
- * ⚠️ 它**不是角色**：「是不是日记」由 `_date` 在不在决定（`isJournalBlock`）。
- *    再存一个角色值就是同一件事的第二份答案，而两份可以不一致。
+ * ⚠️ 它**不是列表值**：「是不是日记」由 `_date` 在不在决定（`isJournalBlock`）。
+ *    再存一个标记就是同一件事的第二份答案，而两份可以不一致。
  */
 
 import { isJournalBlock, prop, type Block } from './model.ts'

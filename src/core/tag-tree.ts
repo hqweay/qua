@@ -13,10 +13,11 @@
  *    不串味（只向**后代**收集）、菱形去重（Set）、禁环（写入时拒绝，不靠读时兜底）。
  * ⚠️ 删父标签**不自动摘边**：子标签上那条 ref 留着（悬空可见、可清理、撤销免费）。
  */
-import { hasRole, prop, type Block } from './model.ts'
+import { hasList, prop, type Block } from './model.ts'
 import { walkForest } from './walk.ts'
 import { findInForest } from './tree.ts'
 import { allTags, tagMemberIds } from './tags.ts'
+import { displayNameOf } from './alias.ts'
 
 /** 子标签 → 父标签的有序 ref 列表 */
 export const PARENT_TAGS_PROP = '_parentTags'
@@ -117,7 +118,7 @@ export type AddParentResult =
  */
 export function checkAddParent(child: Block, parent: Block, forest: readonly Block[]): AddParentResult {
   if (child.id === parent.id) return { ok: false, reason: 'self' }
-  if (!hasRole(parent, 'tag')) return { ok: false, reason: 'not-tag' }
+  if (!hasList(parent, 'tag')) return { ok: false, reason: 'not-tag' }
   if (parentTagIds(child).includes(parent.id)) return { ok: false, reason: 'duplicate' }
   // 把 parent 的祖先闭包算出来：里面若有 child ⇒ 添这条边会成环
   const anc = ancestorIds(parent.id, forest)
@@ -166,5 +167,9 @@ export function pruneParentTags(tag: Block, forest: readonly Block[]): number {
 /** 环路径的显示文本（用标签名；缺失的退回短 id） */
 export function cyclePathLabels(path: readonly string[], forest: readonly Block[], shortId: (id: string) => string): string[] {
   const byId = new Map(allTags(forest).map((t) => [t.id, t]))
-  return path.map((id) => `#${byId.get(id)?.text ?? shortId(id)}`)
+  return path.map((id) => {
+    const b = byId.get(id)
+    // 显示名走主名叶子：标签的正文是描述，名字在 `_aliases` 里
+    return `#${b ? displayNameOf(b) || shortId(id) : shortId(id)}`
+  })
 }

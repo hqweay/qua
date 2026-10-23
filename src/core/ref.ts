@@ -13,6 +13,7 @@
  *    —— 编辑器、popover、测试各自把「怎么找块」递进来，解析逻辑只有一份。
  */
 import type { Atom } from './annotations.ts'
+import { displayNameOf } from './alias.ts'
 import { journalDate, journalDateLabel, isJournal } from './journal.ts'
 import type { Block } from './model.ts'
 import { t } from './msg.ts'
@@ -29,16 +30,19 @@ export type FindBlock = (id: string) => Block | undefined
 /**
  * 一个块**被引用时**的显示名。
  *
- * ⚠️ 与「页名」是同一件事的两处用法，但有一条特例：journal 的 `text` 恒为空
- *    （日期在 `_date` 里）⇒ 直接取正文会得到「无标题」。日期是它的可读投影，
- *    引用到某一天就该显示那一天（这也是「日期可引用」的第一个落点）。
+ * 判据：**主名叶子 > 正文**（见 `displayNameOf`）——引用要叫「它的名字」，
+ * 而不是「它的描述」。`_display` 不参与：那只是这一行自己的头怎么显示。
+ *
+ * ⚠️ 有一条特例：journal 的 `text` 恒为空（日期在 `_date` 里）⇒ 直接取名字会得到
+ *    「无标题」。日期是它的可读投影，引用到某一天就该显示那一天
+ *    （这也是「日期可引用」的第一个落点）。
  */
 export function refTitle(b: Block): string {
   if (isJournal(b)) {
     const d = journalDate(b)
     if (d !== '') return journalDateLabel(d)
   }
-  const s = b.text.trim()
+  const s = displayNameOf(b).trim()
   return s === '' ? t('ui.page.untitled') : s
 }
 

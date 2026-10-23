@@ -1,33 +1,38 @@
 /**
  * **标签 ＝ 块上的一格分类字段**（`props._tags`，有序的标签块 id 列表）。
  *
- * 判据：标签标的是**整个块**，不是正文里的某一个位置。
- * 句子内要指某个东西，用引用（`[[ ]]`）；标签只做整块分类。
- * 所以它不该占正文的一格 —— 那一格会被当成「这里」的意思，而它本来没有位置语义。
+ * 判据：标签标的是**整个块**，不是正文里的某一个位置 ⇒ **归属只有这一份**。
+ * 「在句子里指某个东西」是引用（`[[ ]]`）的事，不是标签的事。
  *
- * 这个判据推出的三件事：
- *   ① 删字不会顺手删掉标签，摘标签是一次**显式**动作（没有「边藏在正文里」这种半截状态）；
- *   ② 顺序＝用户打的先后，存在数组里；正文里没有位点需要维护，锚点映射也不必管它；
+ * 但归属可以有**两种露面**（同一条归属，显示位置不同）：
+ *   · **块级**（默认）：正文之后的 chip。没有位点，排在正文后；
+ *   · **行内**（`#名`）：正文里的一枚 `tag` 原子（占 1 格，见 `core/annotations.ts`）。
+ *     chip 与它**不重复画**：有行内原子的标签不再出 chip。
+ *
+ * 这个判据推出的四件事：
+ *   ① 删字不会顺手摘标签：删掉行内原子只是「这个标签不在正文里露面了」，
+ *      归属仍在 ⇒ 下一次渲染它会落回 chip。摘标签是一次**显式**动作（面板 ×／命令）。
+ *   ② 顺序＝用户打的先后，存在数组里；行内位置只影响**显示在哪**，不影响顺序。
  *   ③ 「哪些块打了这个标签」是**派生**的：`tagMemberIds` 扫一遍森林，
  *      或查 `IndexPort` 的 `tagMembers` 表（调用方优先用后者，扫描是 O(n)）。
+ *   ④ 归属与行内露面必须**一起写**：只加原子不写 `_tags` ⇒ 查询看不见；
+ *      只写 `_tags` 不插原子 ⇒ 用户敲的字还在正文里、又多出一个 chip。
  *
- * 标签本身仍是**块**（`tag` 角色）：名字住在它的正文里，归属存 id ⇒ 改名自动传播。
- * ⚠️ 「在正文里敲 `#foo` 变成标签」当前不做，接缝在 `view/editor.ts` 的输入同步路径：
- *    在那里把闭合的名字交给 `ensureTag` ＋ `addTagId`，与命令路径共用同一对函数。
+ * 标签本身仍是**块**：名字住在 `_aliases`（`_lists` 里有 `tag`），归属存 id ⇒ 改名自动传播。
  */
 import { uuidv7Hex } from './ids.ts'
-import { addRole, hasRole, prop, type Block, type Role } from './model.ts'
+import {
+  ALIASES_PROP,
+  DISPLAY_PROP,
+  LISTS_PROP,
+  addList,
+  hasList,
+  prop,
+  type Block,
+} from './model.ts'
 import { walkForest } from './walk.ts'
-import { findByAlias, isAddressable, normalizeAlias } from './alias.ts'
+import { findByAlias, normalizeAlias } from './alias.ts'
 import type { Atom } from './annotations.ts'
-
-/**
- * 标签块的角色：标签 ＝ 一个带 `tag` 角色的普通块。
- *
- * ⚠️ 它**不占据树上的位置**（必须在顶层）——所有读路径都按 id 找标签（不按位置），
- *    而所有树操作（缩进／拖拽／删除）都会把一个"住在子树里的标签"当货物搬走。
- */
-export const TAG_ROLE: Role = 'tag'
 
 /** 「这块带着哪些标签」的系统属性（有序 id 列表，pos ＝ 数组下标） */
 export const TAGS_PROP = '_tags'
@@ -40,29 +45,36 @@ export const TAGS_PROP = '_tags'
  */
 export const normalizeTag = normalizeAlias
 
-/** 造一个标签块（名字就是正文；图标走系统属性） */
+/**
+ * 造一个标签块：名字进 `_aliases`，正文只作**描述**（初值可以等于名字）。
+ *
+ * ⚠️ `_display:'alias'`：新建的标签行头显示名字（叶子），描述仍可在正文里写。
+ * ⚠️ 标签块**不占据树上位置**（调用方 append 到森林顶层）：所有读路径都按 id 找它，
+ *    位置对身份不承载信息，而所有树操作都会把「住在子树里的标签」当货物搬走。
+ */
 export function mkTagBlock(name: string): Block {
+  const title = name.trim()
   return {
     id: uuidv7Hex(),
-    text: name,
+    text: title,
     children: [],
-    props: { _roles: [TAG_ROLE], _icon: 'lucide:hash' },
+    props: { [ALIASES_PROP]: [title], [LISTS_PROP]: ['tag'], [DISPLAY_PROP]: 'alias', _icon: 'lucide:hash' },
   }
 }
 
 /**
- * 按名字找标签块（先序；只认 `tag` 角色）。
+ * 按名字找标签块（先序；只认 `_lists` 里有 `tag` 的块）。
  *
  * ⚠️ 名字比较**必须**走 `normalizeTag`：这是「标签名规范化只有一处定义」的落点，
  *    查询条件与 `ensureTag` 共用它，口径不会分叉。
  */
 export function findTagByName(forest: readonly Block[], name: string): Block | undefined {
-  return findByAlias(forest, name, (b) => hasRole(b, TAG_ROLE))
+  return findByAlias(forest, name, (b) => hasList(b, 'tag'))
 }
 
-/** 在森林里找一个标签块（先序；只认 `tag` 角色，比较走地址规范化） */
+/** 在森林里找一个标签块（先序；只认 `tag` 列表，比较走地址规范化） */
 function findTag(forest: readonly Block[], name: string): Block | undefined {
-  return findByAlias(forest, name, (b) => hasRole(b, TAG_ROLE))
+  return findByAlias(forest, name, (b) => hasList(b, 'tag'))
 }
 
 /**
@@ -71,7 +83,7 @@ function findTag(forest: readonly Block[], name: string): Block | undefined {
  * 返回 `created` / `reused` 是因为三种情况在界面上是三件事：
  *   · 引用已有标签；
  *   · 新建了一个标签；
- *   · **同名块已经存在（页 / 兼位块）⇒ 复用它，只给它加 `tag` 角色**。
+ *   · **同名块已经存在（页 / 兼位块）⇒ 复用它，只给它加 `tag` 列表**。
  *     这一种必须给用户**可见反馈**（否则他不知道自己刚把一个页变成了标签）。
  *
  * ⚠️ 空名字**不建块**，返回 `null`：没有名字的标签没有身份，建了就是个孤儿。
@@ -84,10 +96,14 @@ export function ensureTag(
   if (normalizeTag(name) === '') return { block: null, created: false, reused: false }
   const found = findTag(forest, name)
   if (found) return { block: found, created: false, reused: false }
-  // 同名块已存在（能当地址用、但还不是标签）⇒ 复用并加角色，不建第二个同名的块
-  const existing = findByAlias(forest, name, (b) => isAddressable(b) && !hasRole(b, TAG_ROLE))
+  // 同名块已存在（有地址、但还没有 tag 列表）⇒ 复用它，不建第二个同名的块
+  const existing = findByAlias(forest, name)
   if (existing) {
-    addRole(existing, TAG_ROLE)
+    addList(existing, 'tag')
+    // 第一次成为标签 ⇒ 行头默认显示名字（叶子）；已有显式显示模式的不动
+    if (prop(existing, DISPLAY_PROP) === undefined) {
+      existing.props = { ...(existing.props ?? {}), [DISPLAY_PROP]: 'alias' }
+    }
     return { block: existing, created: false, reused: true }
   }
   const block = mkTagBlock(name.trim())
@@ -99,7 +115,7 @@ export function ensureTag(
 export function allTags(forest: readonly Block[]): Block[] {
   const out: Block[] = []
   walkForest(forest, (b) => {
-    if (hasRole(b, TAG_ROLE)) out.push(b)
+    if (hasList(b, 'tag')) out.push(b)
   })
   return out
 }
@@ -198,25 +214,61 @@ export function hasTagName(block: Block, name: string, forest: readonly Block[])
  * ⚠️ **行尾不算闭合**。这是踩出来的：每敲一个字符都会同步一次，
  *    若把行尾当闭合，`#自` 就会在最边缘的时刻成边 ⇒ 标签变成「自」，
  *    后面接着敲的「动边」留在正文里。必须等用户敲下那个分隔符。
+ *    （唯一的例外是**编辑边界**：回车/离开这一行时 `allowEnd: true`——
+ *     那时「还在敲」的可能性已经归零，行尾就是敲完了。）
+ *
+ * ⚠️ `#` **紧跟在字后面**（字母／数字／汉字）就不算：`a#b`、`中文#名`；
+ *    URL 的 `#fragment` 也不算。标点／空白之后算数（中文里「（#名）」很常见）。
  *
  * ⚠️ `#` 后面必须有至少一个非空白、非 `#` 的字符 —— 光一个 `#` 不成边。
  *
  * @returns 命中则给出名字与区间（区间**不含**分隔符）；否则 `null`
  */
-export function trailingHashTag(text: string): { name: string; from: number; to: number } | null {
+export function trailingHashTag(
+  text: string,
+  opts: { allowEnd?: boolean } = {},
+): { name: string; from: number; to: number } | null {
   /** 分隔类字符：`#名字` 后面跟了它 ⇒ 说明这个名字敲完了 */
   const SEP = /[\s.,;:!?)\]}。，、；：！？）】]/
   const hash = text.lastIndexOf('#')
   if (hash < 0) return null
+  /**
+   * `#` 前面不能是**字**（字母/数字/汉字）：`a#b`、`中文#设计`、URL 的 `#fragment`
+   * 都不是标签语法。反过来，标点/空白之后算数 —— 中文里「（#设计）」不空一格也很常见。
+   */
+  if (hash > 0 && /[\p{L}\p{N}_]/u.test(text[hash - 1]!)) return null
+  // URL 的 `#fragment`（`https://x.dev/#anchor`）：`#` 前面是 `/`，但整串是个链接
+  if (/[a-z][a-z0-9+.-]*:\/\/\S*$/i.test(text.slice(0, hash))) return null
   const rest = text.slice(hash + 1)
   // `#` 之后不能有空白或再一个 `#`
   if (rest.length === 0 || /^[\s#]/.test(rest)) return null
   const cut = rest.search(SEP)
-  // 没有分隔符 ⇒ **还在敲**（哪怕已经在行尾）⇒ 不成边
-  if (cut < 0) return null
+  if (cut < 0) {
+    // 没有分隔符 ⇒ **还在敲**（哪怕已经在行尾）⇒ 不成边；编辑边界除外
+    if (!opts.allowEnd) return null
+    return { name: rest, from: hash, to: text.length }
+  }
   const name = rest.slice(0, cut)
   if (name.length === 0) return null
   return { name, from: hash, to: hash + 1 + name.length }
+}
+
+/**
+ * 这一块**在正文里露面**了哪些标签 id（按出现位置排序，去重）。
+ *
+ * ⚠️ 这是**显示**用的，不是归属：归属看 `tagIdsOf`（`props._tags`）。
+ *    两者不一致时的口径见文件头 ①：原子可以比归属先少（删字不摘标签）。
+ */
+export function inlineTagIdsOf(blockId: string, atoms: readonly Atom[]): string[] {
+  const hits = atoms
+    .filter((a) => a.blockId === blockId && a.kind === 'tag' && a.target)
+    .sort((x, y) => x.start - y.start)
+  const out: string[] = []
+  for (const a of hits) {
+    const id = a.target!.id
+    if (!out.includes(id)) out.push(id)
+  }
+  return out
 }
 
 /**
@@ -236,13 +288,14 @@ export function tagMemberIds(tagId: string, forest: readonly Block[]): Set<strin
 /**
  * **指向边**的源块集合：引用（`[[ ]]`）的源块（供反链与「改名传播」共用）。
  *
- * ⚠️ 标签**不在**这里：标签是块级归属，不是一个位点上的边 —— 它没有「另一端在正文哪儿」，
- *    所以改名传播与反链要单独问 `tagIdsOf`（见 `view/editor.ts` 的重画路径）。
+ * ⚠️ 标签的**归属**不在这里（它在 `_tags` 里，见上方 ①）；
+ *    但标签的**行内露面**在这里 —— 那是一枚 `tag` 原子，名字是渲染时解析的，
+ *    改名后也要重画。所以本函数同时收 `page` 与 `tag` 两种原子。
  */
 export function edgeSourceIds(atoms: readonly Atom[], targetId: string): Set<string> {
   const out = new Set<string>()
   for (const a of atoms) {
-    if (a.kind === 'page' && a.target?.id === targetId) out.add(a.blockId)
+    if ((a.kind === 'page' || a.kind === 'tag') && a.target?.id === targetId) out.add(a.blockId)
   }
   return out
 }

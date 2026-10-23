@@ -109,6 +109,24 @@ export const HANDLERS: Record<string, Handler> = {
     app.insertTag(tag)
     return true
   },
+  /**
+   * **块级标签的两个入口**（属性面板用）。
+   *
+   * 与「在正文里敲 `#名`」写的是同一份 `_tags`；区别只在**露面位置**（chip vs 行内）。
+   * 撤销由编辑器记（一次挂/摘＝一笔撤销），所以这里不再包一层事务。
+   */
+  'core.tags/add': (a, app) => {
+    const blockId = S(a.blockId, '')
+    const name = S(a.name, '').trim()
+    if (blockId === '' || name === '') return false
+    return app.ed.addTag(blockId, name)
+  },
+  'core.tags/remove': (a, app) => {
+    const blockId = S(a.blockId, '')
+    const tagId = S(a.tagId, '')
+    if (blockId === '' || tagId === '') return false
+    return app.ed.removeTag(blockId, tagId)
+  },
   'core.editor/copy-ref': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false
@@ -237,6 +255,18 @@ export const HANDLERS: Record<string, Handler> = {
   'core.block/untag': (a, app) => {
     const id = S(a.blockId) || curBlock(app)
     return id ? app.removeBlockRole(id, 'tag') : false
+  },
+  'core.block/edit-aliases': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    if (!id) return false
+    app.openAliasEditor(id)
+    return true
+  },
+  'core.block/edit-fields': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    if (!id) return false
+    app.openFieldsEditor(id)
+    return true
   },
   'core.block/set-type': (a, app) => {
     const id = S(a.blockId) || curBlock(app)

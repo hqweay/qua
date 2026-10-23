@@ -24,6 +24,52 @@
 .blk[data-depth='0'] {
   font-size: var(--ui-fs-lg);
 }
+/*
+ * **别名头**（有名字且这一行选择「显示别名」时）。
+ * 头独占一行：`.blk` 变成可换行，头拿 100% 的 flex 基准，`.left`/`.tx` 留在下一行。
+ * ⚠️ 头在 `.tx` 外 —— 编辑器只从 `.tx` 读回正文，名字进正文就会「改描述＝改名」。
+ */
+.blk[data-alias='1'] {
+  flex-wrap: wrap;
+  row-gap: var(--ui-gap-1);
+}
+.blk-alias {
+  flex: 0 0 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  min-width: 0;
+  font-size: var(--ui-fs-xs);
+  line-height: var(--ui-lh-tight);
+  color: var(--ui-text-secondary);
+}
+.blk-alias-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-text);
+  font-weight: 600;
+  cursor: pointer;
+}
+.blk-alias-name:hover {
+  color: var(--ui-accent);
+}
+.blk-alias-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--ui-gap-1);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-tertiary);
+  opacity: 0.55;
+}
+.blk-alias-btn:hover,
+.blk-alias-btn:focus-visible {
+  color: var(--ui-text);
+  background: var(--ui-accent-soft);
+  opacity: 1;
+}
 .blk .left {
   flex: 0 0 auto;
   display: flex;
@@ -445,6 +491,39 @@
   outline: none;
   border-color: var(--ui-accent);
 }
+/* 属性面板里的标签行：与正文 chip 同一种东西的两个入口（这里是块级入口） */
+.props-tag-value {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-1);
+}
+.props-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent);
+  font-size: var(--ui-fs-xs);
+  white-space: nowrap;
+}
+.props-tag-x {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.props-tag-x:hover {
+  opacity: 1;
+}
+.props-tag-input {
+  flex: 1 1 60%;
+  min-width: 6em;
+}
 .prop-check {
   accent-color: var(--ui-accent);
 }
@@ -766,6 +845,16 @@
 }
 .atom-image {
   padding: 0 8px 0 3px;
+}
+/* 行内标签：`#名` 停在正文里，**不加底色** —— 它是正文的一部分，不是贴上去的 chip */
+.atom-tag {
+  padding: 0 2px;
+  margin: 0;
+  background: transparent;
+  border-radius: var(--ui-radius-sm);
+}
+.atom-tag:hover {
+  background: var(--ui-accent-soft);
 }
 .asset-thumb {
   display: block;

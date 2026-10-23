@@ -13,14 +13,11 @@
  *  - 键盘**一个都不在这里处理**——全部交给绑定表。
  */
 import {
-  ALIAS_PROP,
   ATOM_PLACEHOLDER,
   BlockStore,
   CommandLog,
   UndoStack,
-  claimAddress,
   ancestorsByBlockId,
-  clearValue,
   cloneSubtree,
   depthOf,
   diffText,
@@ -30,7 +27,6 @@ import {
   indentBlock,
   insertFirstChild,
   insertSiblingAfter,
-  isAddressable,
   enterKind,
   locate,
   deleteBlockSpan,
@@ -38,6 +34,11 @@ import {
   mapMarks,
   mergeIntoPrev,
   removePrevPlaceholder,
+  addTagId,
+  ensureTag,
+  hasTag,
+  removeTagId,
+  trailingHashTag,
   mkBlock,
   moveBlockTo,
   moveSibling,
@@ -45,14 +46,12 @@ import {
   normalizeMarks,
   outdentBlock,
   pruneToText,
-  prop,
   edgeSourceIds,
   tagIdsOf,
   remapAnchors,
   removeMarkRange,
   selToTextRanges,
   setBlockType,
-  setAlias,
   splitBlockBefore,
   splitBlockIntoFirstChild,
   isFolded,
@@ -88,7 +87,7 @@ import {
 } from '../core/index.ts'
 // 用户可见文案一律走 t
 import { t } from '../core/msg.ts'
-import { LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl } from './block-dom.ts'
+import { LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl, visibleRowHeight } from './block-dom.ts'
 import { blockIdOf, isTagChip, offsetIn, readBlockText, textEndOff } from './dom-text.ts'
 import { bindEditorEvents, type AtomClickMods } from './editor-events.ts'
 
@@ -174,18 +173,14 @@ export interface ViewEvents {
 }
 
 /**
- * 一次编辑期开始前的快照（**只记能回滚地址的那两样**：正文与显式地址）。
+ * 一次编辑期开始前的快照（**只记正文**）。
  *
- * 为什么连 `_alias` 一起记：带显式地址的块，正文与地址是两个字段。只回滚正文的话，
- * 显示的名字回到旧值、能被找到的名字却还是新值 —— 两块同地址的根因原样留着。
+ * 地址不在这里：正文是描述，写它不改地址；地址只有「显式改名」一条写路径。
+ * 旧实现连 `_alias` 一起记、在提交时改地址，于是每敲一次字都可能重命名一次。
  */
 interface EditBase {
   id: string
   text: string
-  /** 显式地址的原文（`explicitAlias` 为假时无意义） */
-  alias: string
-  /** 这一块有没有显式 `_alias`：没有 ⇒ 正文就是地址，不需要额外写 */
-  explicitAlias: boolean
 }
 
 export class BlockEditor {
@@ -396,6 +391,17 @@ export class BlockEditor {
   private emitChange(kind: 'text' | 'struct' | 'mark' | 'atom' | 'load', ids?: readonly string[]): void {
     if (kind !== 'load') this.store.touch(this, ids)
     this.events.change?.(kind)
+  }
+
+  /**
+   * 被吃掉的原子要不要报「失效」。
+   *
+   * ⚠️ **`tag` 原子不报**：删掉正文里那个 `#名` 只是不再露面，归属还在
+   *    （下一次渲染它会落回 chip），它不是一条失效的引用。
+   */
+  private reportLost(atoms: readonly Atom[]): void {
+    const lost = atoms.filter((a) => a.kind !== 'tag')
+    if (lost.length) this.events.atomsLost?.(lost)
   }
 
   renderBlock(id: string): void {
@@ -1049,7 +1055,7 @@ export class BlockEditor {
     this.atoms = r.kept
     this.undo.record(before, kind, Date.now())
     this.renderBlock(id)
-    if (r.lost.length) this.events.atomsLost?.(r.lost)
+    this.reportLost(r.lost)
     this.emitChange('text')
   }
 
@@ -1085,26 +1091,15 @@ export class BlockEditor {
   /* --------------------------------------------------------- 编辑边界 */
 
   /**
-   * **编辑边界**：把「这次编辑的正文」当作一次改名提交。
+   * **编辑边界**：这次编辑结束（失焦 / Enter 拆块 / 聚焦换块），把快照挪到当前正文。
    *
-   * 只在离开这一行时调（失焦 / Enter 拆块 / 聚焦换块），**不在 input 里调**：
-   * 逐字符校验会打死输入法 —— 打「设计」的中间态「设」可能撞上别的标签，
-   * 于是每敲一个字就被回滚一次。校验只在边界上做一次。
+   * ⚠️ **只认正文，不碰地址**：正文是描述。名字住在 `_aliases`，改名只有
+   *    `renameAlias`／`setPrimaryAlias` 一条路；在这里「按正文改地址」会让
+   *    写回正文的每一次边界都顺手重命名一次（旧实现就是这样，撞名时还会
+   *    把地址钉回旧值，表现为「显示名先走、引用名滞后」）。
    *
-   * 冲突 ⇒ **拒绝并回滚**：把正文与地址都恢复成改名前那个值，并把冲突块报给调用方。
-   * 判据：同名必同一块。造出两个同地址的块之后，`[[名字]]` 永远只能指到其中一个，
-   * 另一个再也引用不到 —— 而用户以为自己只是改了个名字。
-   *
-   * 非地址块（不是页/标签）⇒ 直接放行：它们不在地址空间里，正文里出现某个页名
-   * 只是一句话碰巧长得像页名。这条与 `claimAddress` 的收窄范围是**同一个判据**
-   * （只认页与标签），两处不能各有一套，否则「编辑时拒绝、写入时允许」会自相矛盾。
-   *
-   * 代价明写：**编辑窗口内地址与正文短暂不一致**（带显式 `_alias` 的块尤其如此）。
-   * 那不是 bug，是「地址滞后」的定义 —— 它只存在于一个块的编辑期，且不参与地址解析：
-   * 编辑期间的地址仍是改名前那个，引用照旧解析到这一块。
-   *
-   * 幂等：同一块、地址没变过就返回 ok 并且什么都不做 —— 三个边界入口可能对同一块
-   * 各调一次（失焦之后紧接着 Enter、再接着点块标），重复提交必须无害。
+   * 幂等：同一块可以在一串边界上各调一次（失焦之后紧接着 Enter、再点块标），
+   * 重复提交必须无害。
    */
   commitEdit(id: string): { ok: true } | { ok: false; conflict: Block } {
     const base = this.editBase
@@ -1114,39 +1109,10 @@ export class BlockEditor {
       this.editBase = null
       return { ok: true }
     }
-    // 组合期不提交：IME 的预编辑还不是一次改名（此刻回滚会直接打断输入法）
+    // 组合期不提交：IME 的预编辑还不是这次编辑的结束
     if (this.probe.isComposing) return { ok: true }
-    if (!isAddressable(b) || b.text === base.text) {
-      this.rebase(b)
-      return { ok: true }
-    }
-
-    const claim = claimAddress(this.store.blocks, b, b.text)
-    if (claim.ok) {
-      // 有显式地址的块：正文改了，地址要跟着走（否则显示的名字与能被找到的名字分叉）
-      if (base.explicitAlias) setAlias(b, b.text)
-      this.rebase(b)
-      return { ok: true }
-    }
-
-    /**
-     * 拒绝：正文与地址**一起**回到改名前。
-     *
-     * ⚠️ 不记撤销条目：这次回滚就是「这次改名没发生」。记一条会让 `⌘Z` 把刚被拒绝的
-     *    名字又请回来，而那条路径照样没人查重（撤销栈是整片森林的快照）。
-     */
-    const attempted = b.text
-    writeBlockText(b, base.text)
-    if (base.explicitAlias) setAlias(b, base.alias)
-    else clearValue(b, ALIAS_PROP)
-    const caret = this.sel?.aBlock === id ? this.sel.aOff : null
     this.rebase(b)
-    // DOM 里还是敲进去的那个名字 ⇒ 这一行必须重画（否则库已回滚、屏上还留着旧显示）
-    if (this.blockEl(id)) this.renderBlock(id)
-    if (caret !== null) this.placeCaret(id, Math.min(caret, b.text.length))
-    this.emitChange('text', [id])
-    this.events.editRejected?.(attempted, claim.conflict)
-    return claim
+    return { ok: true }
   }
 
   /** 换一个编辑期：先把上一块交出去（换块就是上一次编辑的结束），再记下这一块此刻的样子 */
@@ -1157,19 +1123,112 @@ export class BlockEditor {
   }
 
   private rebase(b: Block): void {
-    const raw = prop<unknown>(b, ALIAS_PROP)
-    this.editBase = {
-      id: b.id,
-      text: b.text,
-      alias: typeof raw === 'string' ? raw : '',
-      explicitAlias: typeof raw === 'string' && raw.trim() !== '',
+    this.editBase = { id: b.id, text: b.text }
+  }
+
+  /**
+   * **把刚敲完的 `#名字` 换成行内标签**：正文里留 1 格原子，归属写进 `_tags`。
+   *
+   * 三件事必须一起发生（否则各留一个半截状态，都难修）：
+   *   ① 名字那几个字从正文里删掉；② 原位插一枚 `tag` 原子；③ `addTagId` 写归属。
+   * 调用方负责把它们包进**同一笔撤销**（`snap()` 在调用前取）。
+   *
+   * ⚠️ 归属写的是**标签块 id**：标签改名后正文里那枚原子照样显示新名字（解析走 id）。
+   * ⚠️ `allowEnd`：只在**编辑边界**（回车/离开这一行）为真 —— 那时「还在敲」的可能已归零，
+   *    行尾也算敲完。输入过程中必须等分隔符，否则 `#自` 会在半路变成标签「自」。
+   */
+  private convertHashTag(
+    id: string,
+    opts: { allowEnd?: boolean } = {},
+  ): { name: string; from: number; to: number; tagId: string } | null {
+    const loc = locate(this.doc, id)
+    if (!loc) return null
+    if (!canWriteText(loc.block)) return null
+    const hit = trailingHashTag(loc.block.text, opts)
+    if (!hit) return null
+    /**
+     * 建标签块要动整片森林 —— `store.blocks` 就是它（所有视图共享同一个数组），
+     * 所以这里不需要再注入一个「谁来建」的回调：森林只有一份，读者也是这一份。
+     */
+    const tagId = ensureTag(this.store.blocks, hit.name).block?.id ?? null
+    if (!tagId) return null
+    /**
+     * ⚠️ 新建的标签块**还没进派生索引**（索引是快照，下一次 `touch` 才失效重建）。
+     *    紧接着的这次重画要用 `find(tagId)` 去找它 ⇒ 先把索引失效掉，
+     *    否则正文里那枚原子会画不出来（表现为「敲完标签什么都没出现」，真踩过）。
+     */
+    this.store.invalidateIndex()
+    const ch = { from: hit.from, to: hit.to, insert: ATOM_PLACEHOLDER }
+    writeBlockText(loc.block, loc.block.text.slice(0, hit.from) + ATOM_PLACEHOLDER + loc.block.text.slice(hit.to))
+    this.marks = mapMarks(this.marks, id, ch)
+    this.atoms = [
+      ...mapAtoms(this.atoms, id, ch).kept,
+      mkAtom('tag', id, hit.from, hit.name, { target: { kind: 'block', id: tagId } }),
+    ]
+    addTagId(loc.block, tagId)
+    return { ...hit, tagId }
+  }
+
+  /**
+   * **给一个块挂标签**（块级露面：正文之后出 chip）。
+   *
+   * 与行内标签共用 `_tags`：这里只写归属、不碰正文 —— 面板/命令路径的入口。
+   * @returns 真的加上了才 `true`（已经有、名字为空 ⇒ `false`）
+   */
+  addTag(blockId: string, name: string): boolean {
+    const b = this.store.find(blockId)
+    if (!b) return false
+    // 快照取在 `ensureTag` **之前**：撤销这次挂标签时，顺手建出的标签块也该一起回滚
+    const before = this.snap()
+    const tagId = ensureTag(this.store.blocks, name).block?.id
+    if (!tagId || hasTag(b, tagId)) return false
+    // 同 `convertHashTag`：刚建的块不在索引里，紧接着的重画要靠它
+    this.store.invalidateIndex()
+    addTagId(b, tagId)
+    this.undo.record(before, 'other', Date.now())
+    if (locate(this.doc, blockId)) this.renderBlock(blockId)
+    this.emitChange('text', [blockId])
+    return true
+  }
+
+  /**
+   * **摘掉一个标签的归属**（连带收掉它在正文里的露面）。
+   *
+   * ⚠️ 为什么连原子一起收：不知道「归属没了、正文里还留着一枚 `#名`」该怎么显示 ——
+   *    画成标签是撒谎（查询已经找不到它），画成文字又要多一条渲染分支。
+   *    收掉最干净；同一笔撤销能把它恢复回来。
+   */
+  removeTag(blockId: string, tagId: string): boolean {
+    const loc = locate(this.doc, blockId)
+    const b = loc?.block ?? this.store.find(blockId)
+    if (!b) return false
+    const hits = this.atoms
+      .filter((a) => a.blockId === blockId && a.kind === 'tag' && a.target?.id === tagId)
+      .sort((x, y) => y.start - x.start)
+    if (hits.length === 0 && !hasTag(b, tagId)) return false
+    const before = this.snap()
+    /**
+     * ⚠️ 原子是**库级**的（`store.atoms`），正文写的是块自己 —— 与「这一块此刻画没画在屏上」
+     *    无关。所以不按 `locate` 决定收不收：目标块不在本视图里时也要把正文那几格收掉，
+     *    否则换个视图打开它，会看到一枚「属于标签、但归属里已经没有它」的僵尸原子。
+     */
+    for (const a of hits) {
+      const ch = { from: a.start, to: a.end, insert: '' }
+      writeBlockText(b, b.text.slice(0, a.start) + b.text.slice(a.end))
+      this.marks = mapMarks(this.marks, blockId, ch)
+      this.atoms = mapAtoms(this.atoms, blockId, ch).kept.filter((x) => x.id !== a.id)
     }
+    removeTagId(b, tagId)
+    this.undo.record(before, 'delete', Date.now())
+    if (loc) this.renderAll()
+    this.emitChange('text', [blockId])
+    return true
   }
 
   /**
    * 从 DOM 输入事件同步模型（真实键入路径）。
    *
-   * 顺序：**先把文本同步进模型，再把 `#名字` 转成边**。
+   * 顺序：**先把文本同步进模型，再认 `#名字`**。
    * 反过来的话，占位符会被当成普通文本参与 diff，粘性映射就乱了。
    */
   syncFromDom(id: string, reRender: boolean): void {
@@ -1185,6 +1244,15 @@ export class BlockEditor {
     this.marks = mapMarks(this.marks, id, change)
     const r = mapAtoms(this.atoms, id, change)
     this.atoms = r.kept
+    /**
+     * **行内标签**：敲下分隔符那一刻，`#名字` 换成「1 格原子 ＋ 一条归属」。
+     * 组合期不做（输入法中间态里的 `#` 不是标签语法）。
+     * 放在 `undo.record(before)` 之前 ⇒ 删字、插原子、写归属是**同一笔撤销**。
+     */
+    const conv = this.probe.isComposing ? null : this.convertHashTag(id)
+    let caret = this.sel ? this.sel.aOff : null
+    // 正文短了「`#名字` 的字数 − 1 格原子」⇒ 光标跟着左移；敲完分隔符时光标在 `to` 之后
+    if (conv && caret !== null && caret >= conv.to) caret = caret - (conv.to - conv.from) + 1
     const kind = change.to === change.from ? 'insert' : 'delete'
     this.undo.record(before, kind, Date.now())
     /**
@@ -1195,21 +1263,23 @@ export class BlockEditor {
      * 重画一次就把「显示顺序」与「正文顺序」重新对齐（光标按模型偏移贴回，落在 chip 之前）。
      */
     const tagged = tagIdsOf(loc.block).length > 0 && !this.probe.isComposing
-    if (reRender || tagged) {
-      const caret = this.sel ? this.sel.aOff : null
+    if (reRender || tagged || conv) {
       this.renderBlock(id)
       if (caret !== null) this.placeCaret(id, Math.min(caret, loc.block.text.length))
       // **改名传播**：这一块可能是别处引用的目标 ⇒ 引用它的那些块也要重画（显示名现算）。
       // 改动只影响「指向它的原子所在的块」，不是全视图重渲染。
       this.renderRefSources(id)
     }
-    if (r.lost.length) this.events.atomsLost?.(r.lost)
+    this.reportLost(r.lost)
     // 文本改了哪一块是已知的：带上 id，查询视图据此判断「结果里的内容变没变」
     this.emitChange('text', [id])
   }
 
   /**
    * **重画「引用了 `id` 这一块」的那些块**。
+   *
+   * 装配层在「改名 / 换显示模式 / 改露面」这类**属性写入**后也调它：
+   * 那些写入不走 `syncFromDom`，没有别的「名字变了」信号能触发传播。
    *
    * 为什么需要显式做：引用显示的是**目标当前的名字**（`core/ref.ts`），是派生的；
    * 目标改名后，`atom`/`block` 本身一个字节都没变 ⇒ 没有任何「数据变了」的信号能触发重渲染。
@@ -1222,7 +1292,7 @@ export class BlockEditor {
    * ⚠️ 只重画**本视图内**的块：别的页里也有指向它的引用，但那些 DOM 不在 `doc` 里，
    *    由它们自己所在的视图在装载/刷新时解析（共享 store 只保证数据一致，不替别人画 DOM）。
    */
-  private renderRefSources(id: string): void {
+  renderRefSources(id: string): void {
     const mine = new Set(flatten(this.doc).map((b) => b.id))
     for (const srcId of edgeSourceIds(this.atoms, id)) {
       if (!mine.has(srcId) || srcId === id) continue
@@ -1260,6 +1330,12 @@ export class BlockEditor {
     const before = this.snap()
     const loc = locate(this.doc, id)
     if (!loc) return
+    /**
+     * **回车是编辑边界**：行尾那个 `#名字` 到这一刻算敲完（输入中必须等分隔符）。
+     * `before` 已在上面取过 ⇒ 转换与拆分是**同一笔撤销**。
+     */
+    const conv = this.convertHashTag(id, { allowEnd: true })
+    if (conv && offset >= conv.to) offset = offset - (conv.to - conv.from) + 1
     offset = Math.min(offset, loc.block.text.length)
 
     // 段根 = `doc.roots` 里的一项（loc.parent 为 null）；不是「只有 roots[0]」。
@@ -1290,7 +1366,7 @@ export class BlockEditor {
       this.marks = mapMarks(this.marks, id, change)
       const r = mapAtoms(this.atoms, id, change)
       this.atoms = r.kept
-      if (r.lost.length) this.events.atomsLost?.(r.lost)
+      this.reportLost(r.lost)
       offset = from
       forcedSplit = true
     }
@@ -1842,22 +1918,30 @@ export class BlockEditor {
     // ⚠️ 祖先表对**全量** rows 算（上面已经拿到的就是全量可见行），
     //    不对下面 slice 重建 —— 否则窗口第一行的祖先全丢。
     this.rebuildAncestors()
-    if (from > 0) this.container.appendChild(this.placeholder(from, 'head'))
+    // 占位高度按**实际行高**累加：带别名头的行是两行，按 LINE_H 算会让长文档的
+    // 滚动条与落点系统性偏小（越靠后偏得越多）。
+    if (from > 0) {
+      const headH = rows.slice(0, from).reduce((n, r) => n + visibleRowHeight(r.block), 0)
+      this.container.appendChild(this.placeholder(from, 'head', headH))
+    }
     this.renderRows(rows.slice(from, to))
-    if (to < rows.length) this.container.appendChild(this.placeholder(rows.length - to, 'tail'))
+    if (to < rows.length) {
+      const tailH = rows.slice(to).reduce((n, r) => n + visibleRowHeight(r.block), 0)
+      this.container.appendChild(this.placeholder(rows.length - to, 'tail', tailH))
+    }
     this.caretMarks = ''
     this.markCaret()
     this.paintBlockSel()
     this.events.mounted?.()
   }
 
-  private placeholder(count: number, which: string): HTMLElement {
+  private placeholder(count: number, which: string, height = count * LINE_H): HTMLElement {
     const d = document.createElement('div')
     d.className = 'ph'
     d.dataset.ph = which
     d.dataset.count = String(count)
     d.contentEditable = 'false'
-    d.style.height = `${count * LINE_H}px`
+    d.style.height = `${height}px`
     d.textContent = t('ui.virt.placeholder', { count })
     return d
   }

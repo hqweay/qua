@@ -16,7 +16,7 @@
  * ⇒ 于是这个组件**不再需要任何宿主能力**（没有按钮要 invoke、没有档位要读），
  *   构造参数也随之为空。
  */
-import { isJournal, journalDate, journalDateLabel, type Block } from '../core/index.ts'
+import { displayNameOf, isJournal, journalDate, journalDateLabel, type Block } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 
 export interface Chrome {
@@ -164,13 +164,13 @@ export function createChrome(onCrumb?: (blockId: string) => void): Chrome {
     el.type = 'button'
     el.className = 'crumb'
     el.dataset.blockId = b.id
-    // journal 的「名字」是日期的只读投影；其余用块正文（空则兜底）
-    el.textContent =
-      isJournal(b)
-        ? journalDateLabel(journalDate(b))
-        : b.text.trim() === ''
-          ? t('ui.page.untitled')
-          : b.text.trim()
+    // journal 的「名字」是日期的只读投影；其余走显示名（主名叶子 > 正文，空则兜底）
+    const name = displayNameOf(b).trim()
+    el.textContent = isJournal(b)
+      ? journalDateLabel(journalDate(b))
+      : name === ''
+        ? t('ui.page.untitled')
+        : name
     el.addEventListener('click', () => onCrumb?.(b.id))
     return el
   }

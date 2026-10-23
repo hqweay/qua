@@ -17,12 +17,18 @@ import {
   ATOM_PLACEHOLDER,
   DEFAULT_BLOCK_TYPE,
   DIVIDER_TYPE,
+  DISPLAY_PROP,
+  aliasesOf,
   blockTypeOf,
+  displayNameOf,
   identityTags,
+  inlineTagIdsOf,
   isJournal,
   journalDate,
   journalDateLabel,
   mkAtom,
+  primaryAliasOf,
+  prop,
   refTitle,
   tagIdsOf,
   typeDeclOf,
@@ -42,6 +48,20 @@ import { createIcon } from './icons.ts'
 
 /** 行高：与 CSS 的 `--ui-line-h` 必须一致（虚拟化算占位高度要用） */
 export const LINE_H = 30
+
+/**
+ * 别名头额外占的高度（近似值，只给虚拟化的占位滚动条用）。
+ *
+ * 别名头是 `.tx` 之外的一行：`--ui-fs-xs` × `--ui-lh-tight` ＋ `.blk` 的 row-gap。
+ * 这里不读 computed style，是因为占位是在**没有挂 DOM**的行上算的；数值略大一点
+ * 比略小好（滚动条高估只会多留白，低估会让最后几行跳一下）。
+ */
+export const ALIAS_HEAD_H = 18
+
+/** 这一行在虚拟化里占多高：有别名头（且不是显示文本）就是两行 */
+export function visibleRowHeight(b: Block): number {
+  return aliasesOf(b).length > 0 && prop<string>(b, DISPLAY_PROP) !== 'text' ? LINE_H + ALIAS_HEAD_H : LINE_H
+}
 
 /**
  * 图片占位的缩略图：**内联 SVG，零网络**。
@@ -90,14 +110,28 @@ export function makeAtomEl(a: Atom, view?: RefView): HTMLElement {
   if (a.asset?.state === 'missing') el.classList.add('missing')
   el.contentEditable = 'false'
   el.dataset.atomId = a.id
-  // ⚠️ 解析后的显示名**另存一份到 `data-ref-label`**：`.atom-label` 里带 `[[ ]]` 装饰，
+  // ⚠️ 解析后的显示名**另存一份到 `data-ref-label`**：`.atom-label` 里带 `[[ ]]`／`#` 装饰，
   //    而落盘值 `atom.label` 是过期的快照 —— 给探针一个「此刻真的在显示什么」的读点。
-  if (a.kind === 'page') el.dataset.refLabel = label
+  if (a.kind === 'page' || a.kind === 'tag') el.dataset.refLabel = label
   el.title =
     a.kind === 'page'
       ? t(view?.state === 'dangling' ? 'ui.atom.pageDanglingTitle' : 'ui.atom.pageTitle', { label })
-      : t('ui.atom.imageTitle', { label })
-  if (a.kind === 'image') {
+      : a.kind === 'tag'
+        ? t(view?.state === 'dangling' ? 'ui.atom.tagDanglingTitle' : 'ui.atom.tagTitle', { label })
+        : t('ui.atom.imageTitle', { label })
+  if (a.kind === 'tag') {
+    /**
+     * 行内标签：**`#名字` 停在敲下的那一格**。
+     *
+     * ⚠️ 它占正文 1 格（`data-atom-id`），但**不是** chip（不设 `data-tag-id`）：
+     *    chip 的读数规则是「跳过、长度为 0」，而这一枚必须被读成 1 格，
+     *    否则正文、光标、区间锚点会整体错位。
+     */
+    const text = document.createElement('span')
+    text.className = 'atom-label'
+    text.textContent = `#${label}`
+    el.append(text)
+  } else if (a.kind === 'image') {
     const img = document.createElement('img')
     img.className = 'asset-thumb'
     img.alt = ''
@@ -218,9 +252,9 @@ export function fillBlockText(
     }
 
     /**
-     * ⚠️ 这里**不认 `#标签`**：标签是**块级字段**，没有位点，正文里也不该多出几个字。
-     *    它由 `fillBlockText` 末尾统一拼成 chip（见 `makeTagChipEl`），
-     *    所以正文里的 `#设计` 就只是普通文本。
+     * ⚠️ 这里**不扫 `#标签`**：正文里的标签是一枚 `tag` 原子（上一支），不是靠正则认出来的字。
+     *    靠正则认会得到第二套解析（改名不跟、删字不摘、和归属对不上——都真踩过）。
+     *    所以走到这里的 `#设计` 就只是普通文本（用户还没敲分隔符 / 不是标签语法）。
      */
     const covering = myMarks.filter((m) => m.start <= s && m.end >= e)
     let node: Node = document.createTextNode(seg)
@@ -239,12 +273,17 @@ export function fillBlockText(
    * **标签 chip 拼在正文末尾**：标签是整块的分类，显示上跟在文字后面，
    * 但不在正文里（见 `makeTagChipEl` 的说明）。
    *
+   * ⚠️ **已经在正文里露面的标签不再出 chip**：同一格归属只占一个显示位置。
+   *    行内那枚是 1 格原子（在正文里），chip 是追加的 0 格装饰 —— 两个都画，
+   *    用户会看到两个 `#名`，而且删掉正文里那个，chip 还留着一个「幽灵」。
    * ⚠️ 名字走 `refTitle`（现算）：标签块改名后 chip 上的字要跟着变，
    *    所以这里不存名字、只认 id。目标块不在 ⇒ 这条归属没有可显示的名字，跳过。
    * ⚠️ `<br>` 先于 chip 挂上去：空块也必须有一个能落光标的位置在 chip **之前**。
    */
   if (find) {
+    const inline = new Set(inlineTagIdsOf(b.id, atoms))
     for (const tagId of tagIdsOf(b)) {
+      if (inline.has(tagId)) continue
       const tag = find(tagId)
       if (tag) tx.appendChild(makeTagChipEl(tagId, refTitle(tag)))
     }
@@ -311,6 +350,50 @@ export function makeBlockEl(
   const roles = identityTags(b)
   if (roles.length) el.dataset.role = roles.join(' ')
   el.style.setProperty('--depth', String(r.depth))
+
+  /**
+   * **别名头**：这一行显示的名字（主别名叶子），以及两个入口（别名与露面 / 字段声明）。
+   *
+   * ⚠️ 它住在 `.blk` 里、**`.tx` 外**：编辑器把 `.tx` 的文字读回模型（`readText`），
+   *    名字一旦进了 `.tx`，改描述就会变成改名 —— 地址与描述必须各在自己的槽里。
+   * ⚠️ `_display === 'text'` 时**完全不生成这个节点**（不是隐藏）：用户选了「显示文本」，
+   *    这一行就不该多出一块不可编辑的头。
+   * ⚠️ 按钮只是**标记**（`data-alias-action`），点击由装配层的事件委托处理：
+   *    view 层不认识浮层，也不该向上调用 app。
+   */
+  const aliasNames = aliasesOf(b)
+  if (aliasNames.length > 0 && prop<string>(b, DISPLAY_PROP) !== 'text') {
+    el.dataset.alias = '1'
+    const head = document.createElement('div')
+    head.className = 'blk-alias'
+    head.contentEditable = 'false'
+    head.dataset.aliasFor = b.id
+
+    const name = document.createElement('span')
+    name.className = 'blk-alias-name'
+    name.dataset.aliasAction = 'config'
+    // 显示叶子（`A/B` ⇒ `B`）；全名放进 title，路径语义不挤占行宽
+    name.textContent = displayNameOf(b)
+    name.title = t('ui.alias.fullName', { name: primaryAliasOf(b) })
+    head.appendChild(name)
+
+    const config = document.createElement('button')
+    config.type = 'button'
+    config.className = 'blk-alias-btn'
+    config.dataset.aliasAction = 'config'
+    config.title = t('ui.alias.configTitle')
+    config.appendChild(createIcon('sliders-horizontal', 'sm'))
+    head.appendChild(config)
+
+    const fields = document.createElement('button')
+    fields.type = 'button'
+    fields.className = 'blk-alias-btn'
+    fields.dataset.aliasAction = 'fields'
+    fields.title = t('ui.alias.fields')
+    fields.appendChild(createIcon('list-tree', 'sm'))
+    head.appendChild(fields)
+    el.appendChild(head)
+  }
 
   /**
    * **可点导轨**：每个活着的祖先画 1 段。

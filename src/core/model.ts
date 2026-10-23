@@ -1,5 +1,5 @@
 /**
- * 模型最小面：块、文档、属性、角色。
+ * 模型最小面：块、文档、属性、列表（露面）与地址。
  * **零依赖叶子** — 其它 core 模块只从这里取类型与构造器，反向不允许。
  */
 
@@ -14,43 +14,37 @@ import { uuidv7Hex } from './ids.ts'
 export type TodoState = 'todo' | 'done'
 
 /**
- * **角色**：表达「这块在系统里担任什么机制位」，与「有什么数据」是两套语义。
+ * **列表**：这一块以哪个身份**露面**（页列表 / 标签列表），与「有什么数据」是两套语义。
  *
- * ⚠️ 判据：**「是不是某种东西」用角色，「有什么数据」用属性**。
- *   所以「这页是页」不是可以由定义块声明的普通字段 —— 它是系统结构位，
- *   载体是属性袋里的 `props._roles`（`_` 前缀 ＝ 保留区，形状由模型代码解释）。
- *   ⚠️ 判断依据是**谁解释它**，不是它存在哪个袋子里：`_roles` 由模型代码解释、
- *   没有定义块、不进属性面板；普通字段的值由 schema 解释。
+ * 判据：**地址回答「它是谁」，列表回答「它在哪个列表里出现」。**
+ *   · 名字住在 `_aliases`（0..N，首个是主名，全局唯一）；
+ *   · 页／标签是**露面**（`_lists`），一个块可以同时进两个列表（兼位），也可以一个都不进。
+ *   ⇒ 「有名字」与「是页／标签」因此是两件独立的事：可以有名却不出现在任何列表里，
+ *     而页列表与标签列表按 `hasList` 过滤 —— 不再读一个叫 `_roles` 的第二份声明。
  *
- * 注册表是**封闭种类 × 开放条目**：这里只列 core 已用到的，插件可注册自有角色。
+ * 为什么「日记／字段定义／查询视图」没有对应的列表值：它们的身份**完全由数据决定**
+ * （有 `_date`／有 `_kind`／`_query` 是合法条件）。再存一个标记就是同一件事的第二份答案，
+ * 而两份答案可以不一致 —— 派生之后那种状态**结构上不存在**。
  *
- * ⚠️ **准入门槛：角色是「读路径的入口」。** 每一种角色都得有代码按它把块**找出来**——
- *    标签成员找 `tag`、页导航找 `page`。只是为了给渲染层挑一个专用渲染器而存在的角色不合格：
- *    那是「怎么画」的问题（归类型与 `props`），不是「是什么」。
- *
- * **只有两个角色：`page` 页｜`tag` 标签。**
- *
- * 判据：**同一件事只有一个答案。** 一个块是不是日记、是不是字段定义、是不是查询视图，
- * 已经**完全由它身上的数据决定**（有 `_date`／有 `_kind`／`_query` 是合法条件）。
- * 再为它们各存一个角色值，就是同一件事的第二份答案 —— 而两份答案可以不一致：
- * 「带角色但没有数据」时，日记流、索引、渲染会各答一半。改成派生之后，
- * 那种状态**结构上不存在**。
- *
- * 反过来，`page` 与 `tag` 是**纯标记**：没有任何别处的数据能推出它们
- * （有别名 ≠ 是页，实测过；标签是边的一端，边在别处）。
- *
- * ⚠️ `tag` 是**角色**而非类型：标签＝一个带 `tag` 角色的普通块，**它不占据树上的位置**（必须在顶层），
- *    因为它只是指向边的另一端；位置属于内容，名字属于身份。
- * ⚠️ **`tag` 与 `page` 不是同一条规则**：`tag` 不参与组织（必须在顶层），
- *    `page` 是容器、可以被组织（将来 namespace 就是页嵌页）。
- *
- * **兼位**：同一个块可以同时担任多个角色（例：既是标签、又能当页打开）。
- * ⇒ 判定一律走 `hasRole`，**不要**读单个字段做 `===` 比较。
- *
- * 「这一行有没有身份」用 `hasIdentity`（角色 ∪ 由数据派生的身份），
- * 别拿「角色集合非空」当判据 —— 日记／定义／查询块的角色集合现在是空的。
+ * 「这一行有没有身份」用 `hasIdentity`（名字 ∪ 列表 ∪ 由数据派生的身份），
+ * 别拿「列表非空」当判据 —— 日记／定义／查询块的列表集合是空的。
  */
-export type Role = 'page' | 'tag'
+export type BlockList = 'page' | 'tag'
+
+/** 这一块以哪些身份露面（`props._lists`）。无序集合；重复不承载语义。 */
+export const LISTS_PROP = '_lists' as const
+
+/** 这一块的地址（`props._aliases`）。有序：**首个是主名**，全局唯一，允许 `/` 分段。 */
+export const ALIASES_PROP = '_aliases' as const
+
+/**
+ * 这一行自己的头显示什么：主别名叶子（`alias`）还是正文（`text`）。
+ *
+ * ⚠️ 它**只影响这一行自己的头**：引用／反链永远叫主名叶子，不跟这个开关走
+ *    （否则同一块在别处会有两个名字，而地址只有一个）。
+ */
+export const DISPLAY_PROP = '_display' as const
+export type DisplayMode = 'alias' | 'text'
 
 /**
  * 删除时间戳（毫秒）。有它 ＝ 这个块在回收站里。
@@ -70,11 +64,12 @@ export type SystemPropId =
   | '_type'
   | '_icon'
   | '_date'
-  | '_alias'
+  // 地址与露面（语义见文件顶部的「列表」说明；存储位在这里）
+  | typeof ALIASES_PROP
+  | typeof LISTS_PROP
+  | typeof DISPLAY_PROP
   | '_query'
   | '_queryResult'
-  // 角色集合（语义见文件顶部的「角色」说明；存储位在这里）
-  | '_roles'
   // 字段定义（prop-def）：kind / 选项目录 / 声明列表
   | '_kind'
   | '_choices'
@@ -118,41 +113,92 @@ export interface Block {
    *
    * ⚠️ **键是「字段定义块的块 id」，不是名字**。定义块自己承载显示名（正文＝label）⇒
    *    改显示名不动任何值、两个插件撞名也天然不冲突（id 空间本来就唯一）。
-   * ⚠️ **系统结构位用 `_lowerCamelCase`**（`_type`／`_icon`／`_date`／`_roles`…）：它们没有
+   * ⚠️ **系统结构位用 `_lowerCamelCase`**（`_type`／`_icon`／`_date`／`_aliases`…）：它们没有
    *    定义块，形状由模型代码解释，也不进属性面板（`ownFieldIds` 按这个前缀过滤）。
    * ⚠️ **命名空间（`ns/name`）在属性上还没有载体**。要落时它属于**定义块的别名**，
    *    不是键——「字段地址」与「内容地址」必须是两张索引：字段显示名允许重名、
-   *    不进内容地址空间（`isAddressable` 只认页与标签）。
+   *    不进内容地址空间（`isAddressable` 只看 `_aliases`）。
    *    ⇒ 别把 `ns/name` 当键直接写：键已经是 id，混用会让同一字段有两份值。
    */
   props?: BlockProps
 }
 
 /**
- * 角色集合的存储位（`props._roles`）。
+ * 这一块以哪些身份露面（`props._lists` 的副本）。
  *
  * 为什么它住在属性袋里，而不是块上的又一个顶层字段：块的内容槽只有四个
  * （`id`／`text`／`children`／`props`）。
  * 多一个顶层字段，每个「整份拷贝一个块」的树操作都会漏掉它一次 ——
  * 复制出来的页只是一块长得像页的普通块，而且**不报错**。
- * 放进 `props` 之后，浅拷贝 `props` 就把角色一起带走了。
+ * 放进 `props` 之后，浅拷贝 `props` 就把列表一起带走了（复制子树那条路另有判据：
+ * 身份不随副本走，见 `tree.ts` 的 `IDENTITY_PROPS`）。
  *
- * ⚠️ 存储位不等于语义：读它请走 `hasRole`／`rolesOf`／`identityTags`，
- *    写它请走 `addRole`／`removeRole`。裸读恒 `undefined`（见 `arch-check` 第 21 条）。
- * ⚠️ 顺序不承载语义，它只是集合的存储形状。
- * ⚠️ 键名导出只为**一处地图**：整份浅拷属性袋的那条路径（复制子树）必须显式跳过它，
- *    而这个键名若在两处各写一遍字符串，改名时就会漏掉一处，漏掉的表现是「副本仍是标签」。
+ * ⚠️ 顺序不承载语义，它只是集合的存储形状；判定只走 `hasList`。
+ * ⚠️ 键名导出只为**一处地图**：整份浅拷属性袋的那条路径必须显式跳过它，
+ *    而这个键名若在两处各写一遍字符串，改名时就会漏掉一处。
  */
-export const ROLES_PROP = '_roles' as const
+export function listsOf(b: Block | undefined): BlockList[] {
+  const raw = b?.props?.[LISTS_PROP]
+  if (!Array.isArray(raw)) return []
+  return raw.filter((x): x is BlockList => x === 'page' || x === 'tag')
+}
 
 /**
- * 这块有没有某个角色。
+ * 这块以某个身份露面吗。
  *
- * ⚠️ 唯一判定入口：角色是集合而不该被读成单值，任何 `b.role === 'x'`
- *    或裸读 `b.roles` 都会静默失效（载体变了就恒假），所以那类直接读由 `arch-check` 拦住。
+ * ⚠️ 唯一判定入口：列表是集合而不该被读成单值；裸读 `_lists` 会漏掉
+ *    「兼位」与「值没写进数组」两种形状。
  */
-export function hasRole(b: Block | undefined, role: Role): boolean {
-  return storedRoles(b)?.includes(role) ?? false
+export function hasList(b: Block | undefined, list: BlockList): boolean {
+  return listsOf(b).includes(list)
+}
+
+/**
+ * 加一个列表（幂等；**追加位置不承载语义**）。
+ *
+ * 判据：列表是「加/减一个露面位」，不是「在两种东西之间转换」——
+ * 所以没有破坏性的「转列表」操作（那会顺手抹掉声明、断层级、改写别人的正文）。
+ * ⚠️ 加列表不会自动给地址：调用方必须先写主别名（不变量：列表非空 ⇒ 别名非空）。
+ */
+export function addList(b: Block, list: BlockList): boolean {
+  if (hasList(b, list)) return false
+  b.props = { ...(b.props ?? {}), [LISTS_PROP]: [...listsOf(b), list] }
+  return true
+}
+
+/** 减一个列表（幂等；只动这一格，不碰别的列表与数据） */
+export function removeList(b: Block, list: BlockList): boolean {
+  if (!hasList(b, list)) return false
+  const next = listsOf(b).filter((x) => x !== list)
+  const props = { ...(b.props ?? {}) }
+  // 不留空数组：空数组会让「在不在列表里」有两份答案（空 vs 没有）
+  if (next.length === 0) delete props[LISTS_PROP]
+  else props[LISTS_PROP] = next
+  // 属性袋也不留空壳：`{}` 与「没有属性」在快照比较里是两种东西
+  if (Object.keys(props).length === 0) delete b.props
+  else b.props = props
+  return true
+}
+
+/**
+ * 这一块的地址（**原始字符串副本**，顺序即优先级：首个是主名）。
+ *
+ * 过滤空串：空地址不是地址，留在数组里会让「有没有名字」有两份答案。
+ */
+export function aliasesOf(b: Block | undefined): string[] {
+  const raw = b?.props?.[ALIASES_PROP]
+  if (!Array.isArray(raw)) return []
+  return raw.filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+}
+
+/**
+ * 主名（原始字符串；没有则空串）。
+ *
+ * ⚠️ 显示与比较是两件事：显示走 `aliasLeaf`／`displayNameOf`（`core/alias.ts`），
+ *    比较走 `normalizeAlias`。这里只回答「第一个是哪个」，不做任何归一化。
+ */
+export function primaryAliasOf(b: Block | undefined): string {
+  return aliasesOf(b)[0] ?? ''
 }
 
 /* ------------------------------------------------- 由数据派生的身份 */
@@ -160,8 +206,8 @@ export function hasRole(b: Block | undefined, role: Role): boolean {
 /**
  * **日记块**：有非空的 `_date`。
  *
- * 判据是数据，不是角色：日期就是它的全部内容，`_date` 在不在是唯一事实。
- * 单独存一个角色会让「有角色、没日期」这种状态存在，而它没有任何合理读法。
+ * 判据是数据，不是标记：日期就是它的全部内容，`_date` 在不在是唯一事实。
+ * 单独存一个标记会让「有标记、没日期」这种状态存在，而它没有任何合理读法。
  *
  * ⚠️ 住在 `model.ts`（零依赖叶子）而不是 `journal.ts`：`canWriteText`／`hasIdentity`
  *    要用它，反向 import 会成环。
@@ -194,31 +240,39 @@ export function isQueryBlock(b: Block | undefined): boolean {
 /**
  * **这一块的正文是名字或投影，不是内容** —— 身份块的总判据。
  *
- * 身份有两个来源，缺一不可：显式角色（页／标签），以及由数据派生的身份
- * （日记／字段定义／查询视图）。只看角色集合会漏掉后三个 ——
- * 它们的角色集合现在是空的，而那正是「日记日期行被拆块改写」这类静默回归的形状。
+ * 身份有两个来源，缺一不可：地址（`_aliases`）／露面（`_lists`），以及由数据派生的身份
+ * （日记／字段定义／查询视图）。只看列表会漏掉「有名内容块」与后三个 ——
+ * 那正是「日记日期行被拆块改写」这类静默回归的形状。
  *
  * 判据落成一句话：**这一行的正文是名字或投影，不是内容**。
+ * ⚠️ 页／标签的正文现在**是**可写的描述（见 `canWriteText`），但它们仍有名字，
+ *    所以仍算身份块：拆块／合并不能把它们的正文当内容搬走。
  */
 export function hasIdentity(b: Block | undefined): boolean {
   return (
-    hasRole(b, 'page') || hasRole(b, 'tag') || isJournalBlock(b) || isPropDefBlock(b) || isQueryBlock(b)
+    aliasesOf(b).length > 0 ||
+    listsOf(b).length > 0 ||
+    isJournalBlock(b) ||
+    isPropDefBlock(b) ||
+    isQueryBlock(b)
   )
 }
 
 /**
- * **身份标记**（给外观与诊断面）：显式角色 ∪ 由数据派生的身份名。
+ * **身份标记**（给外观与诊断面）：列表 ∪ 由数据派生的身份名。
  *
- * 为什么需要它，而不是直接用 `rolesOf`：角色的种类收窄到两个之后，
- * 「日记」「定义」「查询」不再有角色值，但**外面还在按这些名字认它们** ——
- * 样式表按 `data-role` 挑行、诊断面按 `roles` 挑块。让这些读点跟着改判据，
- * 等于把「怎么认一块的身份」这条口径复制到每个消费方；这里一次性把它们转成名字。
+ * 为什么需要它，而不是直接用 `listsOf`：「日记」「定义」「查询」没有列表值，
+ * 但**外面还在按这些名字认它们** —— 样式表按 `data-role` 挑行、诊断面按 `roles` 挑块。
+ * 让这些读点跟着改判据，等于把「怎么认一块的身份」这条口径复制到每个消费方；
+ * 这里一次性把它们转成名字。
  *
  * ⚠️ 这不是「把身份写回块」：标记是**每次现算**的，不落盘、也读不回来。
  * ⚠️ 顺序不承载语义；调用方只该按集合用（`includes`／`~=`）。
+ * ⚠️ 别名**不进**这里：地址是「它叫什么」，不是外观要认的身份种类；把它塞进来
+ *    会让每个有名内容块都长出一行 `data-role`，样式与冒烟都跟着被污染。
  */
 export function identityTags(b: Block | undefined): string[] {
-  const tags: string[] = [...(storedRoles(b) ?? [])]
+  const tags: string[] = [...listsOf(b)]
   if (isJournalBlock(b)) tags.push('journal')
   if (isPropDefBlock(b)) tags.push('schema')
   if (isQueryBlock(b)) tags.push('query')
@@ -226,52 +280,10 @@ export function identityTags(b: Block | undefined): string[] {
 }
 
 /**
- * 这块的全部角色（**副本**）。
- *
- * 返回副本而不是内部数组：调用方（渲染、诊断面）拿到的是一份可随便改的列表，
- * 改它不会悄悄改到库里的块。
- */
-export function rolesOf(b: Block | undefined): Role[] {
-  return [...(storedRoles(b) ?? [])]
-}
-
-/** 存储里的那份数组（**内部用，不外传**：外传就会被调用方拿去改） */
-function storedRoles(b: Block | undefined): Role[] | undefined {
-  const raw = b?.props?.[ROLES_PROP]
-  return Array.isArray(raw) ? (raw as Role[]) : undefined
-}
-
-/**
- * 加一个角色（幂等；**追加位置不承载语义**）。
- *
- * 判据：角色是「加/减一个机制位」，不是「在两种东西之间转换」——
- * 所以没有破坏性的「转角色」操作（那会顺手抹掉声明、断层级、改写别人的正文）。
- */
-export function addRole(b: Block, role: Role): boolean {
-  if (hasRole(b, role)) return false
-  b.props = { ...(b.props ?? {}), [ROLES_PROP]: [...rolesOf(b), role] }
-  return true
-}
-
-/** 减一个角色（幂等；只动这一个角色，不碰别的角色与数据） */
-export function removeRole(b: Block, role: Role): boolean {
-  if (!hasRole(b, role)) return false
-  const next = rolesOf(b).filter((r) => r !== role)
-  const props = { ...(b.props ?? {}) }
-  // 不留空数组：空数组会让「有没有角色」有两份答案（空 vs 没有）
-  if (next.length === 0) delete props[ROLES_PROP]
-  else props[ROLES_PROP] = next
-  // 属性袋也不留空壳：`{}` 与「没有属性」在快照比较里是两种东西
-  if (Object.keys(props).length === 0) delete b.props
-  else b.props = props
-  return true
-}
-
-/**
- * **块类型**：决定「长什么样」（判据：改外观 → 类型；只换机制位 → 角色）。
+ * **块类型**：决定「长什么样」（判据：改外观 → 类型；换露面 → 列表）。
  *
  * 首期只有默认类型 `outline`：块是大纲里的一行（图标 ＋ 正文/名字）。
- * 角色不参与这里的判定 —— 兼位不该改变外观，只往上叠 chrome。
+ * 列表不参与这里的判定 —— 兼位不该改变外观，只往上叠 chrome。
  * `_type` 是系统属性；未声明时就是默认类型。
  */
 export const DEFAULT_BLOCK_TYPE = 'outline'
@@ -362,7 +374,7 @@ export function ensureFirstBlock(children: Block[]): Block[] {
 
 /**
  * 日记块：
- *   · **身份 ＝ 有 `_date`**（不存角色值）；**内容是日期，由 `_date` 派生显示**（日期**不进 `text`**）
+ *   · **身份 ＝ 有 `_date`**（不存标记）；**内容是日期，由 `_date` 派生显示**（日期**不进 `text`**）
  *   · **日期完全只读**：模型层没有任何写 `_date` 的路径
  *   · **一天一个**：id 由 (本地日) **确定性派生** ⇒ 并发/多设备打开同一天拿到同一个 id，天然幂等
  */
