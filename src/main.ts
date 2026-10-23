@@ -105,7 +105,7 @@ else if (boot.status === 'corrupt') bootNotice = t('ui.boot.corrupt')
 else if (boot.status === 'storage-error') bootNotice = t('ui.boot.storageError')
 else if (boot.status === 'expired') bootNotice = t('ui.boot.expired', { version: boot.version })
 // 开发者日志（英文，不走 msg 字典）：排查「为什么是只读态」时这是唯一的第一手线索
-if (readOnly) console.warn('[boot] read-only demo state:', boot.status)
+if (readOnly) console.warn('[boot] read-only prototype state:', boot.status)
 
 /**
  * 冷启动的**落点**：从没存过 / 旧库作废 ⇒ 进**今日**。

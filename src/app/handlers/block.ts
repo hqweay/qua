@@ -154,10 +154,10 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     const preset = S(a.preset, 'ready')
     const missing = preset === 'missing'
     app.ed.insertAtom('image', {
-      label: missing ? t('ui.demo.assetMissingName') : t('ui.demo.assetReadyName'),
+      label: missing ? t('ui.sample.assetMissingName') : t('ui.sample.assetReadyName'),
       asset: {
         hash: 'b7d4' + '1f0a'.repeat(4),
-        name: missing ? t('ui.demo.assetMissingName') : t('ui.demo.assetReadyName'),
+        name: missing ? t('ui.sample.assetMissingName') : t('ui.sample.assetReadyName'),
         bytes: missing ? 0 : 348_160,
         mime: 'image/png',
         state: missing ? 'missing' : 'ready',

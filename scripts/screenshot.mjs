@@ -1,5 +1,5 @@
 /**
- * `pnpm shots` —— 用 **playwright-core ＋ 系统 Chrome** 给 demo 拍图，存 `demo/shots/`。
+ * `pnpm shots` —— 用 **playwright-core ＋ 系统 Chrome** 给原型拍图，存 `shots/`。
  *
  * ⚠️ 2026-10-20：**三皮肤已删**，原先的「三套风格各一张」改为
  *    「唯一样式 × 亮/暗各一张」。外观的其余差异由外部主题包验证。
