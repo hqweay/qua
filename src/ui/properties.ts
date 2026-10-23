@@ -17,7 +17,7 @@
  */
 import type { Block } from '../core/index.ts'
 import type { FieldRow, PropKind } from '../core/index.ts'
-import { displayNameOf, hasList, PROP_KINDS, propKindOf, uiPositionOf } from '../core/index.ts'
+import { displayNameOf, declaredFieldIds, hasList, PROP_KINDS, propKindOf, uiPositionOf } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 
 export interface PropertiesDeps {
@@ -166,7 +166,9 @@ export class PropertiesPanel {
      *    （面板改了、gutter 没跟上）。过滤放在这里而不是 `fieldRows` 里：
      *    那份行派生是共享的，gutter 要用**同一份**（`gutterFieldsOf` 就是它的一个视图）。
      */
-    const rows = this.deps.rows(target).filter((r) => uiPositionOf(r.def) !== 'block-left')
+    const allRows = this.deps.rows(target)
+    const rows = allRows.filter((r) => uiPositionOf(r.def) !== 'block-left')
+    const elsewhere = allRows.filter((r) => uiPositionOf(r.def) === 'block-left')
     /**
      * **有当前对象就显示**，不因为「没有行」而收起。
      *
@@ -181,7 +183,7 @@ export class PropertiesPanel {
     this.els.body.appendChild(this.buildTags(target))
 
     const canDeclare = hasList(target, 'page') || hasList(target, 'tag')
-    if (rows.length === 0) {
+    if (rows.length === 0 && elsewhere.length === 0) {
       const empty = document.createElement('p')
       empty.className = 'props-empty'
       empty.textContent = t('ui.props.empty')
@@ -236,6 +238,18 @@ export class PropertiesPanel {
 
       el.append(label, value, clear)
       this.els.body.appendChild(el)
+    }
+
+    /**
+     * 归 gutter 的属性**不在这里编辑**，但必须在这里**可见**：
+     * 否则面板说「还没有块属性」、添加表单说「都已在块上」，两句话互相矛盾，
+     * 用户会以为那条系统属性不见了。这一行只说它在哪儿，不给第二个编辑面。
+     */
+    if (elsewhere.length > 0) {
+      const note = document.createElement('p')
+      note.className = 'props-empty props-elsewhere'
+      note.textContent = t('ui.props.gutterOnly', { names: elsewhere.map((r) => r.label).join('、') })
+      this.els.body.appendChild(note)
     }
 
     if (canDeclare) this.els.body.appendChild(this.buildDeclared(target))
@@ -363,15 +377,29 @@ export class PropertiesPanel {
     placeholder.value = ''
     placeholder.textContent = t('ui.props.pick')
     pick.appendChild(placeholder)
+    /**
+     * **「已有」＝ 这一块已经有这条属性**，而它的入口不一定在这个面板：
+     * 标签声明的、块上已有值的都算；页/标签自己**声明过**的也算 ——
+     * 否则选它只会再声明一次（`declareField` 幂等），点了像没反应。
+     *
+     * 这些项**留在列表里但不可选**，而不是从列表里删掉：
+     * 删掉之后，一个只有两三条定义的小库会得到空下拉 ——
+     * 用户分不清「库里没有这条属性」与「本块已经有了」。
+     */
+    const defs = this.deps.defs()
     const used = new Set(this.deps.rows(target).map((r) => r.propId))
-    let reuse = 0
-    for (const def of this.deps.defs()) {
-      if (used.has(def.id)) continue
+    const declared = hasList(target, 'page') || hasList(target, 'tag') ? new Set(declaredFieldIds(target)) : new Set<string>()
+    for (const def of defs) {
+      const mark = used.has(def.id)
+        ? t('ui.props.alreadyOn')
+        : declared.has(def.id)
+          ? t('ui.props.declaredOn')
+          : ''
       const o = document.createElement('option')
       o.value = def.id
-      o.textContent = `${def.text.trim() || def.id} · ${t(`ui.props.kind.${propKindOf(def)}`)}`
+      o.textContent = `${def.text.trim() || def.id} · ${t(`ui.props.kind.${propKindOf(def)}`)}${mark ? `（${mark}）` : ''}`
+      o.disabled = mark !== ''
       pick.appendChild(o)
-      reuse++
     }
     const newOption = document.createElement('option')
     newOption.value = NEW_OPTION
@@ -438,8 +466,10 @@ export class PropertiesPanel {
       this.render()
     })
 
-    // 一条可复用的定义都没有时，空下拉是死路：直接切到「新建」并展开第二行
-    if (reuse === 0) pick.value = NEW_OPTION
+    // 库里一条定义都没有时，空下拉是死路：直接切到「新建」并展开第二行。
+    // ⚠️ 只有「没有定义」才算死路；「定义都在本块上」不是 —— 下拉里那些灰掉的项
+    //    正是用户要的答案（本块已经有它，只是入口不在这个面板）。
+    if (defs.length === 0) pick.value = NEW_OPTION
     syncShape()
 
     for (const el of [pick, pickBtn, cancel, newGroup]) form.appendChild(el)
