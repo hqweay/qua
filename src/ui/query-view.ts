@@ -17,12 +17,14 @@
  */
 import { displayNameOf, resolveFrozen, readResult, refreshSpec, readSpec, type Atom, type Block, type BlockStore } from '../core/index.ts'
 import { t } from '../core/msg.ts'
-import { BlockEditor } from '../view/editor.ts'
+import { BlockEditor, type Run } from '../view/editor.ts'
 
 export interface QueryViewDeps {
   store: BlockStore
   /** 整片森林（活引用） */
   blocks: () => Block[]
+  /** 写入事务入口：执行者在装配层，这里只原样转给编辑器（见 `Run`） */
+  write?: Run
   /** 查询块本身（活引用）：读 `_query`／写 `_queryResult` */
   block: () => Block
   /** 刷新后要落盘（结果集入 KB） */
@@ -79,6 +81,7 @@ export class QueryView {
       allowBlankCreate: false,
       allowRootRemove: false,
       store: deps.store,
+      write: deps.write,
       // 折叠态是视图私有的（理由同反链）
       doc: { roots: [], folded: {}, trash: deps.store.trash },
     })
