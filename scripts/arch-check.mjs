@@ -157,7 +157,11 @@ const INDEX_HTML = join(ROOT, 'index.html')
    ╚═══════════════════════════════════════════════════════ */
 
 {
-  const WL_FILES = new Set(['src/core/msg.ts', 'src/core/seed.ts'])
+  // 假数据按**目录前缀**豁免：种子内容拆到 `fixtures/` 下的多个文件之后，逐文件登记会
+  // 在下一次拆分时静默失效（新文件立刻变成裸中文命中）。`bootstrap.ts` 是首屏那几行内容，
+  // 不属于夹具目录，所以单列。
+  const WL_FILES = new Set(['src/core/msg.ts', 'src/core/bootstrap.ts'])
+  const WL_PREFIXES = ['src/core/fixtures/']
   const hits = []
   let whitelisted = 0
   for (const f of codeFiles) {
@@ -166,7 +170,7 @@ const INDEX_HTML = join(ROOT, 'index.html')
     const consolePos = consoleArgPositions(sf)
     for (const lit of literalsOf(sf)) {
       if (!CJK.test(lit.text)) continue
-      if (WL_FILES.has(r)) continue
+      if (WL_FILES.has(r) || WL_PREFIXES.some((p) => r.startsWith(p))) continue
       if (consolePos.has(lit.node.getStart(sf))) {
         whitelisted++
         continue
@@ -193,7 +197,7 @@ const INDEX_HTML = join(ROOT, 'index.html')
     title: '不得有裸中文字符串字面量（文案一律走 msg.ts）',
     method: 'TypeScript AST 遍历 StringLiteral / 模板片段（注释不进 AST）；CSS 与 index.html 去注释后逐行扫',
     scope: 'src/**/*.ts · src/**/*.css · electron/**/*.ts · index.html',
-    whitelist: `注释 · src/core/msg.ts（字典本身）· src/core/seed.ts（假数据）· console.* 日志实参（本仓命中 ${whitelisted} 处，开发者日志不是用户文案）· checks/** + scripts/**（测试与脚本，不在扫描范围）`,
+    whitelist: `注释 · src/core/msg.ts（字典本身）· src/core/fixtures/** ＋ src/core/bootstrap.ts（假数据与首屏内容）· console.* 日志实参（本仓命中 ${whitelisted} 处，开发者日志不是用户文案）· checks/** + scripts/**（测试与脚本，不在扫描范围）`,
     hits: hits.length,
     detail: hits,
   })
@@ -486,14 +490,15 @@ function commandDecls() {
 
 {
   // ① TS/组件代码：颜色 + 长度都不许有
-  const TS_WL_FILES = new Set(['src/core/msg.ts', 'src/core/seed.ts'])
+  const TS_WL_FILES = new Set(['src/core/msg.ts', 'src/core/bootstrap.ts'])
+  const TS_WL_PREFIXES = ['src/core/fixtures/']
   // 内联 SVG 数据 URI 的取色：data URI 里的 SVG 看不见页面 CSS 变量（不是"懒得抽"）
   const SVG_URI_WL = /hsl\(|rgba\(/
   const hits = []
   const wl = []
   for (const f of codeFiles) {
     const r = rel(f)
-    if (TS_WL_FILES.has(r)) continue
+    if (TS_WL_FILES.has(r) || TS_WL_PREFIXES.some((p) => r.startsWith(p))) continue
     const { sf, src } = tsFile(f)
     const lines = src.split('\n')
     for (const lit of literalsOf(sf)) {
@@ -547,7 +552,7 @@ function commandDecls() {
     title: '禁颜色 / 间距字面量（TS 组件代码里一个都不许有；styles/tokens.css 的 token 段是唯一允许处）',
     method: `①AST 扫 TS 字符串与模板片段里的 #hex／rgb()/hsl() 与 px/rem/em/pt/vh/vw；②styles/tokens.css 按 /* @token:begin */…/* @token:end */ 切段，其它分片整份扫，段外只查颜色字面量（门禁 4 的口径）`,
     scope: `src/**/*.ts · electron/**/*.ts（${codeFiles.length} 个文件）· src/**/*.css 的非 token 段（token 段 ${tokenLines} 行，仅 styles/tokens.css）`,
-    whitelist: `src/core/msg.ts · src/core/seed.ts（假数据口袋里没有样式）· view/editor.ts 的 \`thumbUri\` 内联 SVG 数据 URI 取色（${wl.filter((x) => x.startsWith('src/view/editor.ts')).length} 处：data URI 里的 SVG 读不到页面 CSS 变量，颜色又是按内容 hash **算**出来的，不是设计 token）· electron/main.ts 的 \`BrowserWindow.backgroundColor\`（${wl.filter((x) => x.startsWith('electron/')).length} 处：主进程没有 CSS，首帧前的窗口底色只能由 shell 给）`,
+    whitelist: `src/core/msg.ts · src/core/fixtures/** ＋ src/core/bootstrap.ts（假数据口袋里没有样式）· view/editor.ts 的 \`thumbUri\` 内联 SVG 数据 URI 取色（${wl.filter((x) => x.startsWith('src/view/editor.ts')).length} 处：data URI 里的 SVG 读不到页面 CSS 变量，颜色又是按内容 hash **算**出来的，不是设计 token）· electron/main.ts 的 \`BrowserWindow.backgroundColor\`（${wl.filter((x) => x.startsWith('electron/')).length} 处：主进程没有 CSS，首帧前的窗口底色只能由 shell 给）`,
     hits: hits.length + cssHits.length,
     detail: [...hits, ...cssHits],
     note: wl.length ? `白名单明细：${wl.join('｜')}` : '',
