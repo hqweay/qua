@@ -6,8 +6,9 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf, aliasesOf, allPropDefs, allTags, blockTypeOf, DISPLAY_PROP, listsOf, tagIdsOf, tagsOf, childTags, claimAlias, danglingParentIds, declaredFieldIds, declaredFields, displayNameOf, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, primaryAliasOf, prop, propKindOf, removeList, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { addAlias, addList, addressesOf, aliasesOf, allPropDefs, allTags, blockTypeOf, DISPLAY_PROP, listsOf, tagIdsOf, childTags, claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, primaryAliasOf, prop, propKindOf, removeList, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
+import { MemoryKb } from './core/kb/memory.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
   BINDINGS,
@@ -138,6 +139,13 @@ const bootRoots: Block[] = bootDays.length > 0 ? rootsForMany(bootDays) : bootAc
  * 正文、反链、查询视图都是它的投影。多个 `BlockEditor` 读同一份活块。
  */
 const blocks = new BlockStore(ws.blocks, ws.marks, ws.atoms, ws.trash)
+/**
+ * **读入口**：渲染侧的读都该经它取，而不是自己去 `ws.blocks` 里找。
+ *
+ * 装配层先接上读面，写面（`tx`）仍走原来的写路径；这样换掉「整库在内存」
+ * 的实现时，改的是这一个构造参数，而不是每个调用方。
+ */
+let kb = new MemoryKb(blocks)
 
 const layers = new Layers(() => isMac())
 let ed: BlockEditor
@@ -194,7 +202,7 @@ const prefs = (): Prefs => ws.prefs
  * ⚠️ 它**不只是页**：`journal` 也是中心槽的默认内容；zoom 之后还能是
  *   **任意深度的块**⇒ 必须在**整片森林**里找，不能只看顶层。
  */
-const activeBlock = (): Block => findInForest(ws.blocks, ws.activeId) ?? ws.blocks[0]!
+const activeBlock = (): Block => kb.get(ws.activeId) ?? kb.roots()[0]!
 
 /**
  * zoom 的面包屑：**派生**，不入库、不物化（不引入焦点栈）。
@@ -1097,10 +1105,17 @@ const app: App = {
       // 换库 ⇒ 旧落点全部失效；历史留着只会把用户送到「上一份演示数据」的 id
       nav.back = []
       nav.forward = []
-      const p = activeBlock()
-      // ⚠️ 先解析 `p` 再 `blocks.reset`：`activeBlock()` 读的是**森林**（`ws.activeId`），
-      //    重置之后再算就只剩「`ws.blocks[0]`」这条兜底，`sparse` 的 activeId 一旦不是首块就取错。
+      /**
+       * ⚠️ 换库的次序：**先换 store，再换读入口，最后才取 `p`**。
+       *
+       * `kb` 读的是 store 里那片森林；此刻 store 里仍是上一份库。只换 `ws` 不换这两样，
+       * `activeBlock()` 就会在**旧库**里找新库的 `activeId`：找不到便落到 `kb.roots()[0]`
+       * 这条兜底上，拿回**旧库首块**再装进新库的视图（表现为「重开后字丢了」）。
+       * 反过来，`p` 也不能早于这两步 —— 换了库却还拿旧落点，等于把旧块装进新库。
+       */
       blocks.reset(next.blocks, next.marks, next.atoms, next.trash)
+      kb = new MemoryKb(blocks)
+      const p = activeBlock()
       ed = mainEd
       applyChrome()
       chrome.renderDebugState()
@@ -1355,7 +1370,7 @@ function lastFocusedBlock(): Block | null {
   if (active && ed.container.contains(active)) {
     const caret = ed.caretBlock()
     if (!caret) return null
-    const live = findInForest(ws.blocks, caret)
+    const live = kb.get(caret)
     if (!live) return null
     propsBlockId = live.id
     return live
@@ -1367,7 +1382,7 @@ function lastFocusedBlock(): Block | null {
     if (!kept) return null
   }
   // 焦点在面板/浮层/重绘后的 body：沿用上一次编辑器里真正落过的块
-  return propsBlockId ? (findInForest(ws.blocks, propsBlockId) ?? null) : null
+  return propsBlockId ? (kb.get(propsBlockId) ?? null) : null
 }
 
 const propertiesPanel = new PropertiesPanel(
@@ -1379,9 +1394,9 @@ const propertiesPanel = new PropertiesPanel(
   },
   {
     target: () => lastFocusedBlock(),
-    rows: (b) => fieldRows(b, ws.blocks),
+    rows: (b) => [...kb.fieldsOf(b.id)],
     // 标签（分类归属）与标签属性（字段声明）是两件事：这一行走 `props._tags`
-    tags: (b) => tagsOf(b, ws.blocks),
+    tags: (b) => [...kb.tagsOf(b.id)],
     // 挂/摘之后**面板自己重画**：这一行显示的就是刚改的那份 `_tags`，
     // 等下一次选区变化才刷会让「加完没反应」
     addTag: (b, name) => {
@@ -1392,8 +1407,8 @@ const propertiesPanel = new PropertiesPanel(
       void registry.invoke('core.tags/remove', { blockId: b.id, tagId }, 'ui')
       propertiesPanel.render()
     },
-    defs: () => allPropDefs(ws.blocks),
-    declared: (b) => declaredFields(b, ws.blocks),
+    defs: () => [...kb.propDefs()],
+    declared: (b) => [...kb.declaredFieldsOf(b.id)],
     shortId: (id) => shortId(id),
     setValue: (b, propId, value) => void registry.invoke('core.props/set-value', { blockId: b.id, propId, value }, 'ui'),
     clearValue: (b, propId) => void registry.invoke('core.props/clear-value', { blockId: b.id, propId }, 'ui'),
@@ -1412,7 +1427,7 @@ const propertiesPanel = new PropertiesPanel(
      */
     pickRef: (owner, _propId, current, onPick) => {
       const rows: Row[] = []
-      for (const b of flatten({ roots: ws.blocks })) {
+      for (const b of flatten({ roots: [...kb.roots()] })) {
         // 自己不能指向自己：那会造出一个立刻成环的引用
         if (b.id === owner.id) continue
         const title = displayNameOf(b).trim()
@@ -1442,7 +1457,7 @@ const propertiesPanel = new PropertiesPanel(
       })
     },
     refLabel: (targetId) => {
-      const b = findInForest(ws.blocks, targetId)
+      const b = kb.get(targetId)
       if (!b) return t('ui.props.refMissing', { id: shortId(targetId) })
       const name = displayNameOf(b).trim()
       return name === '' ? shortId(b.id) : name

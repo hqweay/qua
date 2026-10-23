@@ -10,7 +10,8 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { Atom, Block, Mark, Op } from '../src/core/index.ts'
+import type { Atom, Block, Mark } from '../src/core/index.ts'
+import type { Op } from '../src/core/kb/types.ts'
 import { BlockStore, mkBlock, mkPropDef, mkTagBlock } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { seedWorkspace } from '../src/core/seed.ts'
@@ -90,6 +91,29 @@ test('读面：tagsOf 返回标签块活引用（删了标签块 ⇒ 那一格�
   const { kb } = fixture()
   assert.deepEqual(kb.tagsOf('c2').map((t) => t.id), ['t1'])
   assert.deepEqual(kb.tagsOf('c1'), [])
+})
+
+test('读面：propDefs 给全库定义（含嵌在子树里的），顺序是先序', () => {
+  const def1 = mkPropDef('评分', 'number')
+  const def2 = mkPropDef('作者', 'text')
+  // 定义块嵌在页的子块里：它仍然是全库定义（先序），不能因为位置而漏掉
+  const page = b('pg', '页', { props: { _aliases: ['页'], _lists: ['page'] }, children: [def1] })
+  const store = new BlockStore([page, def2])
+  const kb = new MemoryKb(store)
+  assert.deepEqual(kb.propDefs().map((d) => d.id), [def1.id, def2.id])
+  assert.equal(kb.propDefs()[0], def1, '给的是库里那一块本身，不是拷贝')
+})
+
+test('读面：declaredFieldsOf 按声明顺序解析、悬空 ref 跳过、没声明就是空', () => {
+  const def1 = mkPropDef('评分', 'number')
+  const def2 = mkPropDef('作者', 'text')
+  const page = b('pg', '页', { props: { _aliases: ['页'], _lists: ['page'], _fieldDefs: [def2.id, 'dangling', def1.id] } })
+  const store = new BlockStore([page, def1, def2])
+  const kb = new MemoryKb(store)
+  // 解析不到的定义**跳过**而不是占位：悬空 ref 是状态，面板不该画一行空定义
+  assert.deepEqual(kb.declaredFieldsOf('pg').map((d) => d.id), [def2.id, def1.id])
+  assert.deepEqual(kb.declaredFieldsOf(def1.id), [], '自己没声明就是空，不是「全库定义」')
+  assert.deepEqual(kb.declaredFieldsOf('不存在'), [], '未知块不是「全库定义」，也不该抛')
 })
 
 test('读面：annotationsOf 只给这一块的 mark/atom', () => {
