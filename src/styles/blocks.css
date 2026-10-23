@@ -474,6 +474,17 @@
   font: inherit;
   font-size: var(--ui-fs-xs);
 }
+/* 「新建定义」独占一行：名字与类型只跟新建一起出现，和第一行的「用这个」不能混排 */
+.props-new-group {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+}
+/* 作者样式会覆盖 UA 的 [hidden]，所以收起必须显式写 */
+.props-new-group[hidden] {
+  display: none;
+}
 
 /* ---------------------------------------------------------- 标签页 footer（属于 / 包含 / 成员）
    与反链 footer 同一套分家方式（border-top + gap）；成员列表是共享 store 的活块。 */
