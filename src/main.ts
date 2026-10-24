@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf, aliasesOf, allPropDefs, allTags, blockTypeOf, checkAddParent, cyclePathLabels, DISPLAY_PROP, listsOf, tagIdsOf, childTags, claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList, identityTags, isJournal, journalDate, journalFeedDays, membersOf, mkBlock, normalizeAlias, parentTags, primaryAliasOf, prop, propKindOf, pruneParentTags, removeList, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { addAlias, addList, addressesOf, aliasesOf, allPropDefs, allTags, blockTypeOf, checkAddParent, cyclePathLabels, DISPLAY_PROP, listsOf, tagIdsOf, childTags, claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList, identityTags, isJournal, journalDate, journalFeedDays, membersOf, normalizeAlias, parentTags, primaryAliasOf, prop, propKindOf, pruneParentTags, removeList, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
 import { BlockEditor } from './view/editor.ts'
@@ -27,17 +27,17 @@ import { Layers, paletteRows, rowsFromBindings, type Row } from './ui/layers.ts'
 import { dispatchKey, installKeydown, type DispatchEnv } from './core/dispatch.ts'
 import { DockBlocks } from './ui/dock-blocks.ts'
 import { bindDockResize } from './ui/dock-resize.ts'
-import { isReadonlyBlock } from './view/block-dom.ts'
 import { mountDockSlot } from './ui/dock.ts'
 import { createIcon } from './view/icons.ts'
 import { renderAliasEditor } from './ui/alias-editor.ts'
 import { renderFieldsEditor } from './ui/fields-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type PanelDeps } from './ui/panels.ts'
-import { devCommands, journalCommands, pageCommands, propsCommands, rootsFor, rootsForMany, tagTreeCommands, takenWhere, viewCommands, zoomCommands, type PageDeps } from './app/commands-impl.ts'
+import { devCommands, journalCommands, pageCommands, propsCommands, rootsFor, rootsForMany, tagTreeCommands, takenWhere, viewCommands, zoomCommands } from './app/commands-impl.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupDocks } from './app/wiring/docks.ts'
 import { setupPanels } from './app/wiring/panels.ts'
 import { setupChrome } from './app/wiring/chrome.ts'
+import { setupPages } from './app/wiring/pages.ts'
 import { HANDLERS } from './app/handlers.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
 import { t } from './core/msg.ts'
@@ -167,28 +167,6 @@ let lastSlashQuery = ''
 /** 截图/自检时静音 toast（产品行为不变，只是不弹提示） */
 let quiet = false
 
-/**
- * **导航历史**（中心槽的「当前对象」先后）。与 undo/redo 是两套：
- *   · undo 管**数据**（块树/锚点/原子的快照）；
- *   · 这里管**走到哪**（打开页、点链接、zoom、面包屑都算一次导航）。
- *
- * 左右槽显式钉住、不跟随导航，所以历史只记中心槽的 `activeId`。
- * `lock` 用来区分「用户导航」与「历史本身在回放」——后者不能再入栈。
- *
- * ⚠️ **同一个 id 可以有两种形态**：今天的 journal 既可能以「日记流入口」打开，
- *    也可能以「只看这一天」聚焦。历史只存 id 会把两者压成一种（回退后 feed 消失），
- *    所以每一项都带 `feed` 这个视图形态。
- */
-type NavPoint = { id: string; feed: boolean }
-const nav = { back: [] as NavPoint[], forward: [] as NavPoint[], lock: false }
-
-/** 当前中心视图是不是「日记流入口」（多段且全是 journal） */
-function isFeedView(): boolean {
-  if (!mainEd) return false
-  const roots = mainEd.doc.roots
-  return roots.length > 1 && roots.every((b) => isJournal(b))
-}
-
 const isMac = (): boolean => /Mac|iPhone|iPad/.test(navigator.platform)
 /** 短 id：uuidv7 前 12 位是时间戳（同一毫秒创建的块会撞），所以要短就取**尾部随机段** */
 const shortId = (id: string): string => id.slice(-6)
@@ -197,26 +175,6 @@ const shortId = (id: string): string => id.slice(-6)
  * 调用点仍按「拿到一份可改的偏好对象」用它 —— 改完由 `scheduleDeviceSave()` 落盘。
  */
 const prefs = (): Prefs => device.prefs
-/**
- * 「当前对象」＝ 中心槽持有的那个块（只有中心槽有这个概念）。
- *
- * ⚠️ 它**不只是页**：`journal` 也是中心槽的默认内容；zoom 之后还能是
- *   **任意深度的块**⇒ 必须在**整片森林**里找，不能只看顶层。
- */
-const activeBlock = (): Block => kb.get(ws.activeId) ?? kb.roots()[0]!
-
-/**
- * zoom 的面包屑：**派生**，不入库、不物化（不引入焦点栈）。
- * 路径含「当前对象」自己 ⇒ 去掉末尾就是祖先链。
- */
-const activeTrail = (): Block[] => {
-  const path = findPath(ws.blocks, ws.activeId)
-  return path ? path.slice(0, -1) : []
-}
-/** 页名 ＝ 主别名叶子（没有名字才回落到描述）；空则交给调用方做兜底文案 */
-const pageTitle = (p: Block): string => displayNameOf(p)
-/** 页图标 ＝ 系统属性 `_icon`；空值用 `file`，与 `view/icons.ts` 的角色默认一致 */
-const pageIcon = (p: Block): string => prop<string>(p, '_icon') ?? 'lucide:file'
 
 /* ------------------------------------------------------------ 键位提示 */
 
@@ -279,8 +237,8 @@ const { chrome, editorEl, applyChrome, resolvedTheme, dockMinWidth, dockMaxWidth
   bootNotice,
   shortId,
   uiCtx,
-  activeBlock,
-  pageTitle,
+  getActiveBlock: () => activeBlock(),
+  getPageTitle: (p) => pageTitle(p),
   $,
   getWs: () => ws,
   getMainEd: () => mainEd,
@@ -484,180 +442,32 @@ const dispatchEnv: DispatchEnv = {
 
 installKeydown(dispatchEnv, { editorEl })
 
-/* ------------------------------------------------------------ App 的工厂依赖 */
-
-/**
- * **第一个可编辑的行**：journal 的首行是**只读日期**（`contenteditable=false`），
- * 不能接光标 ⇒ 取它的第一个子块。页 / 被 zoom 的块没这个问题：那一行就是页名／正文本身。
- *
- * ⚠️ 为什么抽成一处：冷启动落点、回今日、翻日、zoom 用的是**同一条**规则；
- *    写两份就会立刻分叉（2026-10-20 实际发生过：末尾的「首屏落光标」那段还在指首行，
- *    把 `focusFirstBlock` 设好的光标又覆盖回只读日期行）。
- */
-function firstEditableRoot(first: Block | undefined): Block | null {
-  if (!first) return null
-  return isReadonlyBlock(first) ? (first.children[0] ?? null) : first
-}
-
-/**
- * **装载边界的可编辑保证**：被装进中心编辑器的 journal 天至少要有一个子块——
- * 日期行只读，没有子块就没有可落光标的地方（「打得开却打不了字」）。
- *
- * 这是**写库**，不是渲染兜底：渲染兜底会让「看到的块」与「库里的块」分叉，
- * 补的块经事务真的进库（一条 `insert`，op 里报它自己的落点）。
- * 所有装载入口共用这一个落点（`loadPage`／日记流增量／演示换库）；
- * 「新建」一类造数据的路径不走这里——它们在创建时就该把子块带上（同一笔插入）。
- * 冷启动在仓库构建之前、走不了事务，仍由模型层归一（`ensureFirstBlock`）。
- */
-function materializeEditableRoots(roots: readonly Block[]): void {
-  for (const r of roots) {
-    if (isJournal(r) && r.children.length === 0) run((tx) => tx.insert(mkBlock(''), r.id, 0), mainEd)
-  }
-}
-
-/**
- * 页与日记**共用同一份依赖**（`PageDeps`）：两者都是「一块 ＋ 一棵子树」，
- * 只是角色不同 ——各给一套依赖就会立刻出现两条分叉的实现路径（要消灭的正是这个）。
- *
- * ⚠️ 依赖一律是**读函数**而不是值：库会被 `loadState` 整体替换，传值会拿到过期快照。
- */
-const pageDeps: PageDeps = {
+const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEditableRoot, materializeEditableRoots } = setupPages({
   kb,
-  // 命令层开事务：装配层补撤销快照（零 op 的事务不记——没写东西就没有可撤销的），
-  // 并重画这批改动碰到的行（标签 chip／别名头住在一行自己的 DOM 里，等整页重渲染就晚了）
-  run: (fn) => {
-    const before = blocks.snap(ed.sel)
-    const r = txRun(fn, mainEd)
-    if (r.ops.length > 0) blocks.record(before, 'other', Date.now())
-    for (const id of new Set(r.changes.filter((c) => c.kind === 'blocks').map((c) => c.id))) repaintBlock(id)
-    scheduleSave()
-    scheduleBadge()
-    return r
-  },
-  removeBlock: (id) => {
-    // 删页：整棵子树原位标记（软删）。走 `run` 是为了产出 op —— 命令层只声明「删这块」，
-    // 打标记由事务那一份实现负责（一条 op，只落操作根）。
-    run((tx) => tx.remove(id), mainEd)
-  },
-  insertBlock: (block, parentId, index) => {
-    // 与 `removeBlock` 对称的结构写入口：插一棵子树（含自带的首子块），
-    // op 由事务产出——每个后代报它们自己的 parent/index，换库后行行有落点。
-    run((tx) => tx.insert(block, parentId, index), mainEd)
-  },
-  // 打标签的落点：**当前光标那一块**（正文 vs 反链 footer 会切换 ⇒ 每次现取活动编辑器）
-  caretBlockId: () => ed.caretBlock() ?? ed.rows()[0]?.block.id ?? null,
-  /**
-   * 写块属性走装配层这一条路：撤销快照、索引失效、通知其他视图、落盘都在这里。
-   *
-   * ⚠️ 写完还要**重画这一行**：属性写入默认不碰正文（属性不改文字），
-   *    但标签归属的呈现就在正文里（行尾 chip）⇒ 少了这一步，chip 要等下一次重渲染才出现。
-   */
-  write: (blockId, mutate) => {
-    writeBlockProps(blockId, mutate)
-  },
-  activeId: () => ws.activeId,
-  setActiveId: (id, view) => {
-    /**
-     * **记录导航历史**：只有「真的换了落点（或视图形态）」且旧落点还在森林里才记。
-     * 历史回放期间 `nav.lock` 为真 ⇒ 不再入栈，否则前进/后退会自己套自己。
-     */
-    const feed = view?.feed === true
-    const sameView = feed === isFeedView()
-    if (!nav.lock && (id !== ws.activeId || !sameView) && findInForest(ws.blocks, ws.activeId)) {
-      nav.back.push({ id: ws.activeId, feed: isFeedView() })
-      nav.forward = []
-    }
-    ws.activeId = id
-  },
-  rootIds: () => mainEd.doc.roots.map((b) => b.id),
-  loadPage: (roots, marks, atoms) => {
-    // 装载边界：空 journal 天在这里补首子块（经事务、一条 op）——
-    // 所有「打开」命令共用的唯一归一落点，`rootsFor`／命令层只选择、不写库
-    materializeEditableRoots(roots)
-    // 换页/换焦点对象：上一条「聚焦块」不再成立，等 focusFirstBlock 重新设上
-    forgetFocusedBlock()
-    ed = mainEd
-    // 正文视图的折叠态是**设备**那份；取当前视图持有的那一份（`device.folded` 只在落盘时同步，可能落后一步）
-    mainEd.loadPage({ roots, folded: mainEd.doc.folded }, marks as never, atoms as never)
-    renderBacklinks()
-    renderQueryView()
-    renderProperties()
-    renderTagPanel()
-  },
-  marks: () => ws.marks,
-  atoms: () => ws.atoms,
-  flush: () => {
-    syncSections()
-    saveNow()
-  },
+  blocks,
+  txRun,
+  run,
+  syncSections,
   saveNow,
   scheduleSave,
-  refreshList: () => renderDocks(),
-  refreshTitle: () => chrome.renderTitle(activeBlock(), activeTrail()),
-  focusFirstBlock: () => {
-    /**
-     * 首行是**当前对象自己**（页／日记／被聚焦块都是正文第一行）。
-     *
-     * ⚠️ 但 **journal 的首行是只读日期**⇒ 光标落到它的**第一个子块**。
-     *    否则「回今日」后光标停在一个不可编辑的行上，用户以为打不了字。
-     *    page / 被 zoom 的块没这个问题：那一行就是可编辑的页名／正文本身。
-     * ⚠️ **先 focus 再 placeCaret**：反过来的话 `focus()` 会把光标重置到容器开头
-     *    （Contenteditable 的默认行为），实测表现为「光标停在只读的日期行上」。
-     */
-    const first = mainEd.doc.roots[0]
-    if (!first) return
-    const target = firstEditableRoot(first)
-    editorEl.focus()
-    if (target) mainEd.placeCaret(target.id, 0)
+  scheduleBadge,
+  repaintBlock,
+  writeBlockProps,
+  renderDocks,
+  editorEl,
+  layers,
+  uiCtx,
+  getApp: () => app,
+  getPanels: () => panels,
+  getWs: () => ws,
+  getEd: () => ed,
+  setEd: (next) => {
+    ed = next
   },
-  toast: (text, kind) => app.toast(text, kind),
-  openRefPicker: (rows) =>
-    layers.openMenu({
-      rows,
-      anchor: ed.caretRect(),
-      title: t('menu.title.refPicker'),
-      searchable: true,
-      focusSearch: true,
-      emptyText: t('ui.refPicker.empty'),
-      onPick: (row) => {
-        registry.invoke('core.editor/insert-page-ref', { pageId: (row.args as { pageId: string }).pageId }, 'menu', uiCtx())
-      },
-    }),
-  pageTitle,
-  pageIcon,
-}
-
-/* ------------------------------------------------------------ App */
-
-/**
- * 前进 / 后退：从栈里取一个**仍然存在**的落点，再用「聚焦到此块」那条命令换当前对象。
- *
- * 为什么走命令而不是直接 `setActiveId`：zoom、面包屑、链接点击、历史回放必须是
- * **同一条**换落点路径（刷新列表/标题/面包屑/落盘都在里面）；再写一份就分叉了。
- * ⚠️ 回放期间 `nav.lock` 必须为真，否则 `setActiveId` 会把这次回放又记成一条新历史。
- */
-function historyGo(dir: 'back' | 'forward'): boolean {
-  const from = dir === 'back' ? nav.back : nav.forward
-  const to = dir === 'back' ? nav.forward : nav.back
-  while (from.length > 0) {
-    const point = from.pop()!
-    const feed = isFeedView()
-    // 同 id 但形态不同（feed ↔ 单日）也是一次真实导航，不能跳过
-    if (point.id === ws.activeId && point.feed === feed) continue
-    if (!findInForest(ws.blocks, point.id)) continue // 目标在历史里被删了：跳过，别把人送到空处
-    to.push({ id: ws.activeId, feed })
-    nav.lock = true
-    try {
-      void registry.invoke('core.block/focus-block', { blockId: point.id, feed: point.feed }, 'history')
-    } finally {
-      nav.lock = false
-    }
-    scheduleBadge()
-    return true
-  }
-  return false
-}
-
+  getMainEd: () => mainEd,
+  getRegistry: () => registry,
+  getChrome: () => chrome,
+})
 /* ------------------------------------------------------------ 属性写入 / 摘标签提示 */
 
 /**
@@ -1190,6 +1000,7 @@ ed.events = {
   },
 }
 
+let panels: ReturnType<typeof setupPanels>
 const { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, scheduleProperties, forgetFocusedBlock } = setupPanels({
   blocks,
   kb,
@@ -1211,6 +1022,14 @@ const { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, sche
   getRegistry: () => registry,
   getChrome: () => chrome,
 })
+panels = {
+  renderBacklinks,
+  renderProperties,
+  renderTagPanel,
+  renderQueryView,
+  scheduleProperties,
+  forgetFocusedBlock,
+}
 
 /* ------------------------------------------------------------ 菜单的菜单 */
 

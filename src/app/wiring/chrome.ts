@@ -19,8 +19,8 @@ export type ChromeDeps = {
   bootNotice: string | null
   shortId: (id: string) => string
   uiCtx: () => CtxKeys
-  activeBlock: () => import('../../core/index.ts').Block
-  pageTitle: (p: import('../../core/index.ts').Block) => string
+  getActiveBlock: () => import('../../core/index.ts').Block
+  getPageTitle: (p: import('../../core/index.ts').Block) => string
   $: <T extends HTMLElement>(id: string) => T
   /** 换库会整体替换 `ws`，不能传值 */
   getWs: () => Workspace
@@ -128,7 +128,7 @@ export function setupChrome(deps: ChromeDeps) {
   const badge = createBadge({
     shortId,
     snapshot: (): BadgeSnapshot => {
-      const page = deps.activeBlock()
+      const page = deps.getActiveBlock()
       const mainEd = deps.getMainEd()
       const ws = deps.getWs()
       return {
@@ -147,7 +147,7 @@ export function setupChrome(deps: ChromeDeps) {
         undoDepth: mainEd.undo.depth(),
         redoDepth: mainEd.undo.redoDepth(),
         lastCommand: deps.getRegistry().last,
-        pageTitle: deps.pageTitle(page),
+        pageTitle: deps.getPageTitle(page),
         pageCount: ws.blocks.length,
         storageKB: JSON.stringify(ws).length / 1024,
         savedAt: ws.savedAt,
