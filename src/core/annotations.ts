@@ -39,8 +39,8 @@ export type AtomKind = 'page' | 'image' | 'tag'
 /**
  * 行内原子：**一个只占 1 个字符位置的区间锚点**（`end = start + 1`，文本里那一格是 U+FFFC）。
  * - 引用／标签：`target` 指向**实体 id**，不指向裸坐标 ⇒ 目标改名/移动不影响；
- * - 引文快照：`quote` C `TextQuoteSelector`；demo 里已随原子一起存；
- * - 图片：`asset` 是资产引用（hash 命名），`state: 'missing'` 演示「资产不可用是状态不是错误」。
+ * - 引文快照：`quote` 对应 `TextQuoteSelector`；随原子一起存；
+ * - 图片：`asset` 是资产引用（hash 命名），`state: 'missing'` 表达「资产不可用是状态不是错误」。
  */
 export interface Atom {
   id: string

@@ -15,8 +15,8 @@
  * 有 `backend` 字段就能说清「这是另一个后端的库」（`incompatible`），
  * 而不是误判成 `corrupt`、让用户以为数据坏了。
  *
- * ⚠️ 写信封会让**升级前的 demo 库读不出来**（旧值是裸 JSON）。按 `AGENTS.md` §3
- *    「demo 不做旧数据迁移」：`WORKSPACE_VERSION` 3 → 4，旧库走 `expired` 显式作废重 seed。
+ * ⚠️ 写信封会让**升级前的旧库读不出来**（旧值是裸 JSON）。原型不做旧数据迁移：
+ *    `WORKSPACE_VERSION` 升一，旧库走 `expired` 显式作废重 seed。
  */
 import type { CommitBatch, LoadResult, SaveResult, StoragePort } from './port.ts'
 
@@ -37,7 +37,7 @@ function isEnvelope(x: unknown): x is Envelope {
 
 export function createLocalStorageAdapter(key: string): StoragePort {
   /**
-   * 串行队列（单写者，承 71.5 第 3 条）：后一次提交永远排在前一次之后。
+   * 串行队列（单写者）：后一次提交永远排在前一次之后。
    * `tail` 只用来「排队」，吞掉失败 —— 失败由各次 `commit` 自己的分支如实返回。
    */
   let tail: Promise<unknown> = Promise.resolve()

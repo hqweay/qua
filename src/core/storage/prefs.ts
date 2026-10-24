@@ -67,7 +67,7 @@ export const DEFAULT_PREFS: Prefs = {
 }
 
 /**
- * 偏好归一：只做**形状兜底**（缺字段补默认），**不做旧库迁移**（demo 不需要兼容）。
+ * 偏好归一：只做**形状兜底**（缺字段补默认），**不做旧库迁移**（原型不需要兼容）。
  */
 export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
   const p = raw ?? {}

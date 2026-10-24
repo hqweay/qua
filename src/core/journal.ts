@@ -76,7 +76,7 @@ export function findJournalDay(blocks: readonly Block[], date: string): Block | 
 }
 
 /**
- * 日记流（32 ）：从 `anchor`（含）向过去取**存在的** journal 块，
+ * 日记流：从 `anchor`（含）向过去取**存在的** journal 块，
  * 按 `_date` **降序**（今日在顶、越往下越早），最多 `limit` 天。
  *
  * ⚠️ **不造空天**：没有写过的日期不会有块，也就不会出现在流里。

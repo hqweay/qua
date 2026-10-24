@@ -4,7 +4,7 @@
  * **组件自持 DOM**：角标与面板这两个元素只有它知道，装配层只调 `update()` / `toggle()`。
  *
  * ⚠️ 这是**诊断面**，不是产品面：它存在的理由是「虚拟化、composing、undo 深度这些看不见的东西
- * 需要一个可读出口」（承 66 的验收方式）。将来应当整体降级成一个可关的诊断插件。
+ * 需要一个可读出口」。将来应当整体降级成一个可关的诊断插件。
  */
 import { flatten, type CtxKeys } from '../core/index.ts'
 import { t } from '../core/msg.ts'

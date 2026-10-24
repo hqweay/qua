@@ -2,8 +2,8 @@
  * 命令表—— **纯语义**：`name` / `title` / `args` / `capability` / `undoable` / `version`。
  *
  * ⚠️ 命令**完全不知道 UI**：这里没有 `key`、没有 `context`、没有 `host`。
- * 键位／菜单／斜杠／工具栏／命令面板全都是**绑定表**（`core/bindings.ts`）的渲染结果（59 ）。
- * 命令面板列的是**本表的全部命令**，与有没有键位无关（59 ）。
+ * 键位／菜单／斜杠／工具栏／命令面板全都是**绑定表**（`core/bindings.ts`）的渲染结果。
+ * 命令面板列的是**本表的全部命令**，与有没有键位无关。
  */
 import type { CommandDecl } from '../ports.ts'
 // ⚠️ 三个收敛点之一：命令表的 `title` / `category` / `keywords` **一律走 t**

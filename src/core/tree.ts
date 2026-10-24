@@ -78,7 +78,7 @@ export function depthOf(doc: Doc, id: string): number {
  *
  * 用途：扁平 DOM 的**可点导轨**——深度 d 的行画 d 段线，
  * 每段对应一个祖先，点击就折叠那一层。它替代嵌套子树的 `border-left`：
- * 我们没有 children 容器（66 ），所以线只能按行画段、由段拼成整条。
+ * 我们没有 children 容器（扁平 DOM），所以线只能按行画段、由段拼成整条。
  *
  * ⚠️ **必须对全量可见行算，不能对虚拟化窗口的 slice 算**：
  *    窗口从中间开始时，slice 的第一行祖先全丢（2026-10-20 调研 的点）。
@@ -107,7 +107,7 @@ export function pathTo(doc: Doc, id: string): Block[] | null {
 /**
  * 在**整片森林**里找块：`zoom` 之后「当前对象」可能在任意深度，不能只在顶层找。
  *
- * ⚠️ 返回**活引用**（不是拷贝）：调用方若要改，必须走事务（16 ），别原地改。
+ * ⚠️ 返回**活引用**（不是拷贝）：调用方若要改，必须走事务，别原地改。
  * ⚠️ 与 `pathTo(doc, id)` 的分工：那个吃 `Doc`（编辑器装载的子树），这个吃**整片森林**——
  *   zoom 之后 `ed.doc` 只是子树，而「当前对象」要按森林解析。
  */
@@ -125,7 +125,7 @@ export function findInForest(forest: readonly Block[], id: string): Block | unde
  * 森林里到某块的**路径**（含它自己）：`[根, …, 它]`；找不到返回 null。
  *
  * ⚠️ zoom 的面包屑就是它去掉末尾 —— **派生、不物化、不入库**：
- *   层级本来就来自 `parent` 链（15 E1），不需要再存一份「焦点栈」）。
+ *   层级本来就来自 `parent` 链，不需要再存一份「焦点栈」。
  */
 export function findPath(forest: readonly Block[], id: string): Block[] | null {
   let found: Block[] | null = null

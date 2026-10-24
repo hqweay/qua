@@ -316,7 +316,7 @@ function uiCtx(): CtxKeys {
  * 现在块是 **block store 里的活引用**（`rootsFor` 不再拷贝）：正文/子树的编辑直接发生在
  * store 上，多个视图共享同一份。这里只把库级的 marks/atoms 引用对齐（它们也是共享数组）。
  *
- * ⚠️ 真实实现里这里是 Tx/Changes 的提交点；demo 提交的是整份库（见 `WHOLE_LIBRARY_CHANGES`）。
+ * ⚠️ 真实实现里这里是 Tx/Changes 的提交点；当前本地适配器提交的是整份库（见 `WHOLE_LIBRARY_CHANGES`）。
  */
 function syncSections(): void {
   ws.marks = blocks.marks
@@ -769,7 +769,7 @@ const openDrawerFor = (kind: PanelKind): void => panelDrawer(panelDeps, kind)
 
 /**
  * 派发的环境。**这里只有接线，没有逻辑**（逻辑在 `dispatch.ts`）。
- * `trace` 写回编辑器的探针队列 ——那是「按键命中追踪」诊断的数据源（59 ）。
+ * `trace` 写回编辑器的探针队列 ——那是「按键命中追踪」诊断的数据源。
  */
 const dispatchEnv: DispatchEnv = {
   ctx: uiCtx,

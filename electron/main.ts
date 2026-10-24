@@ -6,7 +6,7 @@
  *   ② 建窗口（含尺寸/位置记忆）
  *   ③ 装 macOS 规范的中文应用菜单
  *   ④ 生命周期（`whenReady` / `activate` / `window-all-closed`）
- *   ⑤ 给内核留一条 MessageChannel 端口通道（`attachKernel`，承 44 ／60 B）
+ *   ⑤ 给内核留一条 MessageChannel 端口通道（`attachKernel`：内核进程与渲染进程的握手入口）
  *
  * 编辑器、命令表、绑定表、localStorage 持久化**全在 renderer（`../src/`）里**，
  * 这个文件一行都不碰它们——它连 `src/` 里的任何东西都没 import。
@@ -141,7 +141,7 @@ function scheduleWriteState(win: BrowserWindow): void {
   }, 400)
 }
 
-/* ------------------------------------------------------------ 内核端口骨架（承 44  / 60 B） */
+/* ------------------------------------------------------------ 内核端口骨架（attachKernel 的握手通道） */
 
 /**
  * 形状定死：**主进程只做 port 中转，不含业务**。三方拓扑：

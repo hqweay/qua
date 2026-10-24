@@ -342,12 +342,12 @@ export function writeBlockText(b: Block, text: string): void {
 
 /* ---------------------------------------------------------------- props */
 
-/** 读一条属性（没有就是 `undefined`，**不返回默认值**——默认值属派生层，承 41/38） */
+/** 读一条属性（没有就是 `undefined`，**不返回默认值**——默认值属派生层） */
 export function prop<T = unknown>(b: Block, id: SystemPropId | string): T | undefined {
   return b.props?.[id] as T | undefined
 }
 
-/** 写一条属性（返回新块，**不改入参**；块是不可变替换的，承 16 事务快照） */
+/** 写一条属性（返回新块，**不改入参**；块是不可变替换的，事务快照靠它） */
 export function withProp(b: Block, id: SystemPropId | string, value: unknown): Block {
   return { ...b, props: { ...(b.props ?? {}), [id]: value } }
 }

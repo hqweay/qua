@@ -9,13 +9,13 @@
  *   · 实现（`local-storage.ts`／未来 `kernel.ts`）藏在 `storage/` 里；
  *   · 上层只 `import type { StoragePort } from './storage/port.ts'`，不 import 任何实现。
  *
- * 三条硬口径（承 71.5）：
+ * 三条硬口径：
  *   1. **异步**：`load`／`commit` 都返回 Promise，上层不得依赖同步返回。
  *   2. **批次**：写入的单位是 `Change[]`（一块或几块），不是「整个库」。
- *      ⚠️ demo 的 `LocalStorageAdapter` 内部仍然整份序列化 —— 那是**实现细节**，
+ *      ⚠️ 本仓的 `LocalStorageAdapter` 内部仍然整份序列化 —— 那是**实现细节**，
  *      不是契约：`commit` 只承诺「这批改动落盘了」。
  *   3. **单写者**：目标形态是主进程 SQLite ＋ WAL，renderer 经端口调用、不直接碰存储
- * （承 44 ／72）。适配器必须自己保证「同一时刻只有一次提交在飞」。
+ * 适配器必须自己保证「同一时刻只有一次提交在飞」。
  */
 
 import type { Op } from '../kb/types.ts'
@@ -58,17 +58,17 @@ export function idsOfKind(changes: readonly Change[], kind: ChangeKind): string[
   return [...out]
 }
 
-/** 一次提交的内容：这批 op ＋ 它们的最小失效投影 ＋ 落盘时用的整份库（demo 实现细节） */
+/** 一次提交的内容：这批 op ＋ 它们的最小失效投影 ＋ 落盘时用的整份库（本地适配器的实现细节） */
 export interface CommitBatch {
   /**
    * 这批**持久化 op** —— 「一批 op ＝ 一个事务」是写适配器的契约：
    * SQLite 落行时一批开一个事务、`block.delete` 级联、失败整批回滚。
-   * demo 适配器暂不消费它（仍整份 payload），但契约从现在起按 op 说。
+   * 本地适配器暂不消费它（仍整份 payload），但契约从现在起按 op 说。
    */
   ops: Op[]
   /** 索引/订阅侧的最小失效投影（与 op 同源；适配器不消费） */
   changes: Change[]
-  /** 适配器手里**没有**库本身，只收字节 —— 序列化归调用方（承 71.5：适配器只管存） */
+  /** 适配器手里**没有**库本身，只收字节 —— 序列化归调用方（适配器只管存） */
   payload: string
   /** 跟这批一起记的自描述时间（落盘形状的一部分，见 `parseWorkspace`） */
   savedAt: number
