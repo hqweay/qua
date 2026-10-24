@@ -1872,7 +1872,7 @@ export class BlockEditor {
         if (fill && forestLoc) tx.insert(fill, forestLoc.parent?.id ?? null, forestLoc.index)
       })
       // 森林那边已由事务改完；窗口 roots 是**装载单位**，要跟着换掉（它不在事务里）
-      if (wasRoot && fill) {
+      if (wasRoot && fill && forestLoc) {
         this.doc.roots.splice(0, this.doc.roots.length, fill)
         this.viewRootIds = [fill.id]
       } else if (wasRoot) {
