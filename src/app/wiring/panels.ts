@@ -10,7 +10,10 @@ import {
   findByAlias,
   flatten,
   hasList,
+  isJournal,
   isQueryBlock,
+  journalDate,
+  journalDateLabel,
   memberBlocks,
   parentTags,
   type Atom,
@@ -135,10 +138,22 @@ export function setupPanels(deps: PanelsDeps) {
     return roots.length === 1 ? roots[0]! : null
   }
 
+  /**
+   * 检视卡：**常驻卡片**（列在右槽，`renderDockStack` 的 `persistent`）。
+   *
+   * 先挂进堆叠再交给重画：`renderDockStack` 只保留**已在文档里**的常驻节点
+   * （游离节点会被当成垃圾清掉，然后写进一棵看着空的树）。
+   *
+   * 为什么是常驻而不是每次现造：里面是表单，重建会丢焦点与光标 ——
+   * 与钉住区同一条理由（那边踩过一次「每敲一个字跳一次」）。
+   */
+  const inspectCard = chrome.inspectCardEl
+  chrome.dockRightStackEl.appendChild(inspectCard)
+
   const propertiesPanel = new PropertiesPanel(
     {
-      root: chrome.propertiesEl,
-      title: chrome.propertiesTitleEl,
+      root: inspectCard,
+      title: chrome.inspectCardTitleEl,
       body: chrome.propertiesBodyEl,
       add: chrome.propertiesAddEl,
     },
@@ -215,6 +230,7 @@ export function setupPanels(deps: PanelsDeps) {
   )
 
   function renderProperties(): void {
+    renderInspectTitle(subject())
     propertiesPanel.render()
   }
 
@@ -236,6 +252,21 @@ export function setupPanels(deps: PanelsDeps) {
       renderProperties()
     }, 60)
   }
+
+  /**
+   * 卡片标题＝**当前对象的名字**（journal 用日期投影，与面包屑同一口径）。
+   *
+   * 为什么标题交给卡而不是「块属性」四个字：这张卡要回答的是「现在在改**谁**」。
+   * 名字写在卡的抬头，换主体时**标题变、卡不动** —— 位置稳定，用户不用重新认路。
+   */
+  function renderInspectTitle(b: Block | null): void {
+    chrome.inspectCardTitleEl.textContent = b
+      ? isJournal(b)
+        ? journalDateLabel(journalDate(b))
+        : displayNameOf(b).trim() || t('ui.page.untitled')
+      : ''
+  }
+
   blocks.subscribe(() => scheduleProperties())
   renderProperties()
 

@@ -403,44 +403,10 @@
 #editor.drop-end {
   box-shadow: inset 0 -2px 0 0 var(--ui-accent);
 }
-/* ---------------------------------------------------------- 属性区
+/* ---------------------------------------------------------- 属性（检视卡）
    一个平铺列表：同一 propId 只出现一次、来源并列；声明未填的显示「待填」。
-   分家靠 border-top + gap（与反链 footer 同一套），不写块级 padding/margin。 */
-.properties {
-  margin-bottom: var(--ui-gap-4);
-  padding-bottom: var(--ui-gap-3);
-  border-bottom: 1px solid var(--ui-border-subtle);
-}
-.properties[hidden] {
-  display: none;
-}
-.properties-head {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-gap-3);
-  margin-bottom: var(--ui-gap-2);
-  font-size: var(--ui-fs-sm);
-  color: var(--ui-text-secondary);
-}
-.properties-title {
-  font-weight: 600;
-  color: var(--ui-text);
-}
-.properties-add {
-  margin-left: auto;
-  background: none;
-  border: 1px solid var(--ui-border-subtle);
-  border-radius: var(--ui-radius-sm);
-  padding: 0 var(--ui-gap-2);
-  font: inherit;
-  font-size: var(--ui-fs-xs);
-  color: var(--ui-text-secondary);
-  cursor: pointer;
-}
-.properties-add:hover {
-  color: var(--ui-text);
-  border-color: var(--ui-border);
-}
+   它住在**右槽的检视卡**里（`.dock-card`），所以这里只管行本身；
+   分家、间距、边框都归卡片与槽，不在这里再造一套。 */
 .properties-body {
   display: flex;
   flex-direction: column;
@@ -534,6 +500,16 @@
   font: inherit;
   color: var(--ui-text-tertiary);
   cursor: pointer;
+  /*
+   * 删除键平时**不占位**：槽比正文窄得多，每行都挂一个常驻的 ×，
+   * 会把「标签 / 值」挤到放不下（右槽默认宽只够三段式的一半）。
+   * 鼠标移到这一行或焦点进去时才现 —— 它不在打字路径上，藏起来没有代价。
+   */
+  visibility: hidden;
+}
+.prop-row:hover .prop-clear,
+.prop-row:focus-within .prop-clear {
+  visibility: visible;
 }
 .prop-clear:hover {
   color: var(--ui-text);

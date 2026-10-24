@@ -107,7 +107,7 @@ await check('T1 冷启动不抢光标；点块才聚焦；属性区跟着「这�
     const b = window.__qua.blocks()
     const editable = b.find((x) => !x.roles?.includes('journal'))
     const editor = document.getElementById('editor')
-    const props = document.getElementById('properties')
+    const props = document.getElementById('inspect-card')
     return {
       id: editable?.id ?? '',
       focused: editor?.contains(document.activeElement) ?? false,
@@ -131,7 +131,7 @@ await check('T1 冷启动不抢光标；点块才聚焦；属性区跟着「这�
   await page.waitForTimeout(120)
   const clicked = await page.evaluate(() => {
     const editor = document.getElementById('editor')
-    const props = document.getElementById('properties')
+    const props = document.getElementById('inspect-card')
     return {
       focused: editor?.contains(document.activeElement) ?? false,
       sel: window.__qua.snapshot().selection ?? null,
@@ -185,7 +185,7 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
   assert(a && b, `需要两个非根的块：page=${pageId}｜ids=${JSON.stringify(ids)}`)
   const state = () =>
     page.evaluate(() => {
-      const props = document.getElementById('properties')
+      const props = document.getElementById('inspect-card')
       return {
         hidden: props?.hidden ?? null,
         target: props?.dataset.targetBlockId ?? '',
@@ -223,15 +223,20 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
   assert(atB.target === onPage.target, `光标换到块 B，主体依然不变：${JSON.stringify(atB)}`)
 
   /**
-   * ② 布局不跳：面板在正文**上方**，跟着光标走会让每次点/方向键都抽动阅读位置。
-   *    量真实几何：在两个块的属性行数**不同**的前提下，正文首行的屏幕位置必须一模一样。
+   * ② **属性不占正文的流**（这是它搬进右槽换来的性质）。
+   *    量真实几何：只要它还在正文上方，正文首行 top 就会随面板高度变化；
+   *    搬到槽里之后，两个高度不同的主体之间首行 top 必须一模一样。
    */
   const geometry = () =>
     page.evaluate(() => {
       const first = document.querySelector('#editor .blk')
+      const card = document.getElementById('inspect-card')
       return {
         top: first ? Math.round(first.getBoundingClientRect().top) : -1,
-        panel: Math.round(document.getElementById('properties').getBoundingClientRect().height),
+        panel: Math.round(card.getBoundingClientRect().height),
+        // 属性卡必须住在右槽里，而不是正文的 #doc 里
+        inRightDock: document.getElementById('dock-right').contains(card),
+        inDoc: document.getElementById('doc').contains(card),
         rows: document.querySelectorAll('.prop-row[data-prop-id]').length,
       }
     })
@@ -241,9 +246,10 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
   await page.locator(`.blk[data-block-id="${b}"] > .tx`).click()
   await page.waitForTimeout(120)
   const geoB = await geometry()
+  assert(geoA.inRightDock === true && geoA.inDoc === false, `属性卡应住在右槽、不在正文里：${JSON.stringify(geoA)}`)
   assert(geoA.top === geoB.top, `光标换行不该抽动布局：正文首行 top ${geoA.top} → ${geoB.top}`)
-  assert(geoA.panel === geoB.panel, `面板高度也不该随光标变：${geoA.panel} → ${geoB.panel}`)
-  assert(geoA.rows === 0, `页块自己没有那个属性 ⇒ 面板里不该出现块 A 的那一行：${JSON.stringify(geoA)}`)
+  assert(geoA.panel === geoB.panel, `卡的高度也不该随光标变：${geoA.panel} → ${geoB.panel}`)
+  assert(geoA.rows === 0, `页块自己没有那个属性 ⇒ 卡里不该出现块 A 的那一行：${JSON.stringify(geoA)}`)
 
   // ③ 点到编辑区外：面板**不**收起（它不是「焦点面板」）
   await page.mouse.click(8, 8)
@@ -252,16 +258,75 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
   assert(outside.hidden === false && outside.target === onPage.target, `点到编辑区外，主体不变、面板不收起：${JSON.stringify(outside)}`)
 
   // ④ 聚焦到块 A ⇒ 主体换成 A（这就是「不想 zoom 却要改某块属性」的那一下点击）
+  //
+  // ⚠️ 同时钉住**导航与视图配置分家**：zoom 是导航动作，不许去动右槽的开关。
+  //    关掉的槽就是用户明确表示「我现在不要旁栏」，自动展开等于把这个表态推翻；
+  //    而块标点一下就是 zoom（高频），那样「专注写作」永远维持不住。
+  const dockBefore = await page.evaluate(() => window.__qua.snapshot().dock.right.open)
   await page.locator(`.blk[data-block-id="${a}"] .marker`).click()
   await page.waitForTimeout(200)
   const zoomed = await state()
   assert(zoomed.activeId === a, `点块标应把它放上台面（当前对象＝A）：${JSON.stringify(zoomed)}`)
   assert(zoomed.hidden === false && zoomed.target === a, `聚焦后主体换成 A：${JSON.stringify(zoomed)}`)
   const zoomedRows = await page.evaluate(() => document.querySelectorAll('.prop-row[data-prop-id]').length)
-  assert(zoomedRows === 1, `聚焦到 A 之后，它自己那条属性才出现在面板里：${zoomedRows}`)
+  assert(zoomedRows === 1, `聚焦到 A 之后，它自己那条属性才出现在卡里：${zoomedRows}`)
+  const dockAfter = await page.evaluate(() => window.__qua.snapshot().dock.right.open)
+  assert(dockBefore === dockAfter, `zoom 不得改动右槽开关：${dockBefore} → ${dockAfter}`)
+
+  /**
+   * 槽**关着**时 zoom：卡跟着不存在，槽保持关着。
+   *
+   * 这是「关着的槽不自动打开」的断言。不设回退位置（比如「槽关了就把属性挪回正文上方」）：
+   * 那会长出 `if (dockOpen)` 分支，然后长出兄弟分支，最后变成两套按位置分叉的形状。
+   *
+   * ⚠️ 判据取**计算后的可见性**而不是 `getClientRects()`：关槽用的是
+   *    `visibility: hidden` 加列宽归零，DOM 仍在文档里、`getClientRects()` 照样有值
+   *    （这一点与「元素被 display:none 摘掉」不同，早先在这里断言过一次假的失败）。
+   */
+  const inspectVisible = () =>
+    page.evaluate(() => {
+      const c = document.getElementById('inspect-card')
+      if (!c) return null
+      return getComputedStyle(c).visibility !== 'hidden' && c.getClientRects().length > 0
+    })
+
+  await page.evaluate(() => window.__qua.invoke('core.dock/toggle-right', {}))
+  await page.waitForTimeout(150)
+  const closedAtA = await page.evaluate(() => ({
+    open: window.__qua.snapshot().dock.right.open,
+  }))
+  assert(closedAtA.open === false, `前置：右槽应已关闭：${JSON.stringify(closedAtA)}`)
+  assert(!(await inspectVisible()), '槽关着 ⇒ 卡片不可见')
+
+  // 在槽关着的时候再 zoom 一次（换到块 B）
+  await page.locator(`.blk[data-block-id="${b}"] .marker`).click()
+  await page.waitForTimeout(250)
+  const closedAtB = await page.evaluate(() => ({
+    open: window.__qua.snapshot().dock.right.open,
+    activeId: window.__qua.snapshot().activeId,
+  }))
+  assert(closedAtB.activeId === b, `前置：第二次 zoom 应换到 B：${JSON.stringify(closedAtB)}`)
+  assert(closedAtB.open === false, `槽关着时 zoom，不许自动打开：${JSON.stringify(closedAtB)}`)
+  assert(!(await inspectVisible()), '槽关着时 zoom 之后，卡片仍不可见（不留回退位置）')
+
+  /**
+   * ⑥ 显式入口「看属性」——这条**可以**开槽，因为用户点的就是这个。
+   *
+   * 两个方向都钉住：它把槽打开、并且主体确实是刚才那一块。
+   * 于是「导航不动槽／视图命令可以动槽」这条分界有了两头的证据。
+   */
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), b)
+  await page.waitForTimeout(250)
+  const inspected = await page.evaluate(() => ({
+    open: window.__qua.snapshot().dock.right.open,
+    target: document.getElementById('inspect-card')?.dataset.targetBlockId ?? '',
+  }))
+  assert(inspected.open === true, `「看属性」是显式视图命令 ⇒ 应把右槽打开：${JSON.stringify(inspected)}`)
+  assert(inspected.target === b, `「看属性」的卡应画在那一块上：${JSON.stringify(inspected)}`)
+  assert(await inspectVisible(), '槽开了 ⇒ 卡片可见')
 
   await ctx.close()
-  return `页＝主体；光标 A→B 主体不变、布局不跳（top ${geoA.top} / 面板 ${geoA.panel}px）；点外侧不收起；点块标后主体＝A 且其属性行出现`
+  return `页＝主体；光标 A→B 主体不变、正文不跳（top ${geoA.top}）；卡在右槽不在正文；点外侧不收起；zoom 后主体＝A 且开关一字未变（${dockBefore}）；槽关着时 zoom 不自动开、卡不可见；「看属性」才开槽（目标＝B）`
 })
 
 await check('T2 Enter 拆块 ／ Backspace 合并 ／ Tab 缩进 ／ Shift+Tab 还原', async () => {
@@ -3610,7 +3675,7 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
    * 也违反「一个值不开两个编辑面」。声明的唯一入口是菜单。
    */
   const declared = await page.evaluate(() => ({
-    visible: !document.getElementById('properties').hidden,
+    visible: !document.getElementById('inspect-card').hidden,
     declaredRows: document.querySelectorAll('.props-declared').length,
   }))
   assert(declared.visible, '标签页应显示属性区')

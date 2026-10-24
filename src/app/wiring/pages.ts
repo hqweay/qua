@@ -18,7 +18,7 @@ import type { Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { Tx, Change, Op } from '../../core/kb/types.ts'
 import type { BlockStore } from '../../core/store.ts'
-import type { Workspace } from '../../core/workspace.ts'
+import type { Prefs, Workspace } from '../../core/workspace.ts'
 import type { Layers } from '../../ui/layers.ts'
 import type { Chrome } from '../../ui/chrome.ts'
 import { isReadonlyBlock } from '../../view/block-dom.ts'
@@ -55,6 +55,8 @@ export type PagesDeps = {
   getMainEd: () => BlockEditor
   getRegistry: () => Registry
   getChrome: () => Chrome
+  /** 槽开关是设备偏好：`openDock` 要先看它，已开就不再触发一次变更 */
+  prefs: () => Prefs
 }
 
 export function setupPages(deps: PagesDeps) {
@@ -245,6 +247,18 @@ export function setupPages(deps: PagesDeps) {
       const target = firstEditableRoot(first)
       editorEl.focus()
       if (target) mainEd.placeCaret(target.id, 0)
+    },
+    /**
+     * 确保侧槽开着：已经开着就什么都不做（**不写 prefs**，也就不会把
+     * 「没变化」记成一次设备变更）。
+     *
+     * 走命令而不是直接改 `prefs`：开槽要连带 `applyChrome`（列宽/边框/可见性）
+     * 与设备落盘，那是 `core.dock/toggle-*` 那一份的职责，这里再写一遍就会分叉。
+     */
+    openDock: (side) => {
+      if (deps.prefs().dock[side].open) return
+      void deps.getRegistry().invoke(side === 'left' ? 'core.dock/toggle-left' : 'core.dock/toggle-right', {}, 'view')
+      deps.scheduleBadge()
     },
     toast: (text, kind) => deps.getApp().toast(text, kind),
     openRefPicker: (rows) =>

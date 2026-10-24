@@ -532,6 +532,7 @@ export const MSG = {
   'menu.item.devTools': '开发者工具',
   'menu.item.actualSize': '实际大小',
   'cmd.block.focus-block': '聚焦到此块（zoom in）',
+  'cmd.block.inspect': '看属性（打开右槽）',
   'cmd.block.zoom-out': '退回顶层',
   'menu.kw.zoom': '聚焦',
   'menu.item.zoomIn': '放大',

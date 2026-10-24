@@ -65,7 +65,12 @@ export interface PropertiesDeps {
 }
 
 export interface PropertiesEls {
+  /** 卡片本身：`hidden` 与否表达「有没有主体」 */
   root: HTMLElement
+  /**
+   * 卡片标题。**由装配层写当前对象的名字**（`displayNameOf`），面板不写死「块属性」——
+   * 标题要回答「现在在改谁」，而这个名字每个主体都不一样。
+   */
   title: HTMLElement
   body: HTMLElement
   add: HTMLButtonElement
@@ -149,8 +154,8 @@ export class PropertiesPanel {
   constructor(els: PropertiesEls, deps: PropertiesDeps) {
     this.els = els
     this.deps = deps
-    this.els.title.textContent = t('ui.props.title')
     this.els.add.textContent = t('ui.props.add')
+    this.els.add.title = t('ui.props.add')
     this.els.add.addEventListener('click', () => {
       this.formOpen = !this.formOpen
       this.render()

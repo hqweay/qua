@@ -229,6 +229,8 @@ const { renderDocks, addPin, unpinBlock, togglePin, setPins } = setupDocks({
   scheduleDeviceSave: () => scheduleDeviceSave(),
   scheduleBadge: () => scheduleBadge(),
   getSlots: () => ({ left: dockLeft, right: dockRight }),
+  // 检视卡在面板分片里创建并挂进右槽堆叠；这里只在重画时取它（它必须已经在文档里）
+  inspectCard: () => chrome.inspectCardEl,
 })
 
 const { chrome, editorEl, applyChrome, resolvedTheme, dockMinWidth, dockMaxWidth, badge, scheduleBadge, markBooted } = setupChrome({
@@ -466,6 +468,7 @@ const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEdit
   getMainEd: () => mainEd,
   getRegistry: () => registry,
   getChrome: () => chrome,
+  prefs: () => prefs(),
 })
 /* ------------------------------------------------------------ 属性写入 / 摘标签提示 */
 

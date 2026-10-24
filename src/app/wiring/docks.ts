@@ -23,6 +23,13 @@ export type DocksDeps = {
   scheduleBadge: () => void
   /** 两个侧槽在启动段才挂载；重画时现取 */
   getSlots: () => { left: DockSlotEls; right: DockSlotEls }
+  /**
+   * 检视卡本身（右槽里的常驻节点）。
+   *
+   * 装配顺序决定的：面板分片晚于这一节，卡片在那边创建并挂进堆叠；
+   * 这里只在重画时把它列为 `persistent`，免得 `renderDockStack` 把它当垃圾清掉。
+   */
+  inspectCard: () => HTMLElement
 }
 
 export function setupDocks(deps: DocksDeps) {
@@ -40,14 +47,21 @@ export function setupDocks(deps: DocksDeps) {
     newPage: () => void deps.getRegistry().invoke('core.page/new', {}, 'dock'),
   }
 
-  /** 重画两个侧槽（页列表变了、切换了当前页、或反链变了） */
+  /**
+   * **右槽**：反链面板 ＋ 检视卡。
+   *
+   * 检视卡是**常驻节点**（`persistent`）：它里面是表单，重画整槽会换掉正在输入的控件。
+   * 于是重画顺序是「钉住区 → 检视卡 → 反链卡」，常驻的排在前面（槽是纵向堆叠，
+   * 位置稳定是认路的一部分）。
+   */
   function renderDocks(): void {
     const { left: dockLeft, right: dockRight } = deps.getSlots()
     // 先让钉住区处理「清单变了没有」：它只在增删时动 DOM，重画其余卡片不会碰它
     dockPins?.left.render()
     dockPins?.right.render()
     renderTodayInto(dockDeps, dockLeft, dockPins ? { persistent: [dockPins.left.card] } : {})
-    renderBackrefsInto(dockDeps, dockRight, dockPins ? { persistent: [dockPins.right.card] } : {})
+    const persistentRight = dockPins ? [dockPins.right.card, deps.inspectCard()] : [deps.inspectCard()]
+    renderBackrefsInto(dockDeps, dockRight, { persistent: persistentRight })
   }
 
   /** 钉住区的实例（在槽挂载之后创建；`renderDocks` 早于它就跳过） */
