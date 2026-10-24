@@ -14,18 +14,22 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Atom, Block } from '../src/core/index.ts'
-import type { Change } from '../src/core/storage/port.ts'
 import {
-  applyChanges,
+  applyOps,
   fingerprint,
   findJournalDay,
+  incomingCount,
   incomingIds,
   journalIdByDate,
   lookupBlock,
   rebuild,
   tagIdByName,
   tagMemberIdsOf,
+  type Index,
 } from '../src/core/index.ts'
+import { BlockStore } from '../src/core/store.ts'
+import { MemoryKb } from '../src/core/kb/memory.ts'
+import type { Tx } from '../src/core/kb/types.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, text, children: [], ...extra })
 
@@ -56,16 +60,28 @@ function fixture() {
 /** 全量重建的指纹（唯一基准） */
 const full = (forest: readonly Block[], atoms: readonly Atom[]): string => fingerprint(rebuild(forest, atoms))
 
-/** 一路增量累积出来的指纹 */
-function incremental(steps: readonly { changes: Change[]; forest: readonly Block[]; atoms: readonly Atom[] }[]): string {
-  const first = steps[0]!
-  let idx = rebuild(first.forest, first.atoms)
-  for (const s of steps.slice(1)) idx = applyChanges(idx, s.changes, s.forest, s.atoms)
-  return fingerprint(idx)
+/**
+ * **op 驱动的等式断言**：在真 `MemoryKb` 上跑一笔 tx，把这批 op 喂给 `applyOps`，
+ * 每批之后与「当前库的全量重建」比指纹——两条路径必须逐字节一致。
+ */
+function txStep(kb: MemoryKb, store: BlockStore, idx: Index, fn: (tx: Tx) => void): Index {
+  const r = kb.tx(fn, {})
+  const next = applyOps(idx, r.ops, store.blocks, store.atoms)
+  assert.equal(
+    fingerprint(next),
+    fingerprint(rebuild(store.blocks, store.atoms)),
+    `这批 op（${r.ops.length} 条）走增量后必须与全量重建逐字节一致`,
+  )
+  return next
 }
 
-const atomsOnly: Change[] = [{ kind: 'atoms', id: '*' }]
-const blocksOnly: Change[] = [{ kind: 'blocks', id: '*' }]
+/** 从 fixture 起一套真库（BlockStore ＋ MemoryKb ＋ 初始索引） */
+function kbFixture() {
+  const { forest, atoms } = fixture()
+  const store = new BlockStore(JSON.parse(JSON.stringify(forest)), [], JSON.parse(JSON.stringify(atoms)))
+  const kb = new MemoryKb(store)
+  return { store, kb, idx: rebuild(store.blocks, store.atoms) }
+}
 
 /* ------------------------------------------------------------ 基本形状 */
 
@@ -137,124 +153,131 @@ test('日期索引与 journalDays 同口径：嵌在子树里的一天，两条�
   assert.equal(findJournalDay(forest, '2026-10-19')?.id, 'j1')
 })
 
-/* ------------------------------------------------------------ 那条等式 */
+/* ------------------------------------------------------------ 那条等式（op 驱动） */
 
-test('等式：纯原子变化（引用增删）⇒ 增量与全量逐字节一致', () => {
-  const { forest, atoms } = fixture()
-  // 第 1 步：多一处引用；第 2 步：删掉一条旧引用
-  const added = [...atoms, edge('e5', 'c', 't2')]
-  const removed = added.filter((a) => a.id !== 'e1')
+test('等式：改标签名走 tx ⇒ 名字表换主，旧名字不残留', () => {
+  const { store, kb, idx } = kbFixture()
+  const next = txStep(kb, store, idx, (tx) => {
+    tx.setAliases('t1', ['待办'])
+  })
+  assert.equal(tagIdByName(next, '待办'), 't1')
+  assert.equal(tagIdByName(next, 'todo'), undefined, '旧名字必须摘掉（增量最容易漏的就是它）')
+})
+
+test('等式：删子树走 tx ⇒ 块/归属/名字/父页一起退场', () => {
+  const { store, kb, idx } = kbFixture()
+  const next = txStep(kb, store, idx, (tx) => {
+    tx.remove('b') // 它带着 b1；a/b1 都打了 #todo ⇒ 成员表要收掉
+  })
+  assert.equal(lookupBlock(next, 'b'), undefined)
+  assert.equal(lookupBlock(next, 'b1'), undefined, '子树里的块不该还在')
+  assert.deepEqual(tagMemberIdsOf(next, 't1'), ['a'], 'b1 的归属一起收掉')
+})
+
+test('等式：删掉先序认领者后，同名词块接手（heir 规则）', () => {
+  const { store, kb, idx } = kbFixture()
+  let idx2 = txStep(kb, store, idx, (tx) => {
+    tx.insert(b('t3', 'todo', { props: { _aliases: ['todo'], _lists: ['tag'] } }), null, store.blocks.length)
+  })
+  assert.equal(tagIdByName(idx2, 'todo'), 't1', '先序第一个认领者赢')
+  idx2 = txStep(kb, store, idx2, (tx) => {
+    tx.remove('t1')
+  })
+  assert.equal(tagIdByName(idx2, 'todo'), 't3', '认领者退场后名字要有人接手')
+  assert.equal(lookupBlock(idx2, 't1'), undefined)
+})
+
+test('等式：移动子树走 tx ⇒ pageOf 全子树重打', () => {
+  const { store, kb, idx } = kbFixture()
+  const next = txStep(kb, store, idx, (tx) => {
+    tx.move('b', 'p2', 0)
+  })
+  assert.equal(lookupBlock(next, 'b1'), store.find('b1'))
+  // pageOf 已由等式断言兜底；这里点一句「跟着新顶层走」的可读出口
+  assert.equal(next.pageOf.get('b1'), 'p2')
+})
+
+test('等式：插入带归属的新块走 tx ⇒ 块/成员/父页一起进场', () => {
+  const { store, kb, idx } = kbFixture()
+  const next = txStep(kb, store, idx, (tx) => {
+    tx.insert(b('fresh', '新块', { props: { _tags: ['t1'] } }), 'p2', 0)
+  })
+  assert.equal(lookupBlock(next, 'fresh')?.text, '新块')
+  assert.deepEqual(tagMemberIdsOf(next, 't1').sort(), ['a', 'b1', 'fresh'])
+  assert.equal(next.pageOf.get('fresh'), 'p2')
+})
+
+test('等式：改归属走 tx ⇒ 成员表跟着搬（不碰名字表）', () => {
+  const { store, kb, idx } = kbFixture()
+  const next = txStep(kb, store, idx, (tx) => {
+    tx.setTags('a', [])
+    tx.setTags('c', ['t1'])
+  })
+  assert.deepEqual(tagMemberIdsOf(next, 't1').sort(), ['b1', 'c'])
+})
+
+test('等式：引用改向走 tx ⇒ 旧边摘掉、新边算上（簿记要记得旧指向）', () => {
+  const { store, kb, idx } = kbFixture()
+  const next = txStep(kb, store, idx, (tx) => {
+    // e1 原来指向 p1（源块 c）⇒ 同一条引用改成指向 p2
+    tx.setAnnotations('c', [], [edge('e1', 'c', 'p2')])
+  })
+  assert.deepEqual(incomingIds(next, 'p1'), [], '旧指向必须摘干净')
+  assert.equal(incomingCount(next, 'p2', 'c'), 1, '新指向算上')
+  assert.equal(incomingCount(next, 'p2', 'a'), 1, '别人的边不受影响')
+})
+
+test('等式：删引用走 tx ⇒ 边退场（delete op 带着旧值）', () => {
+  const { store, kb, idx } = kbFixture()
+  const next = txStep(kb, store, idx, (tx) => {
+    tx.setAnnotations('c', [], [])
+  })
+  assert.deepEqual(incomingIds(next, 'p1'), [])
+})
+
+test('等式：纯正文补丁走 tx ⇒ 五张表都不动（结构没有变）', () => {
+  const { store, kb, idx } = kbFixture()
+  const before = { blocks: idx.blocks, incoming: idx.incoming, tags: idx.tags, journals: idx.journals, pageOf: idx.pageOf }
+  const next = txStep(kb, store, idx, (tx) => {
+    tx.patch('a', (x) => {
+      x.text = '甲改了字'
+    })
+  })
+  assert.equal(next.blocks, before.blocks)
+  assert.equal(next.incoming, before.incoming)
+  assert.equal(next.tags, before.tags)
+  assert.equal(next.journals, before.journals)
+  assert.equal(next.pageOf, before.pageOf)
+})
+
+test('等式：一串混合 tx 累积（改名/移动/插入/引用/删除）⇒ 每步都与全量一致', () => {
+  const { store, kb, idx } = kbFixture()
+  let cur = idx
+  cur = txStep(kb, store, cur, (tx) => {
+    tx.setAliases('t1', ['待办'])
+  })
+  cur = txStep(kb, store, cur, (tx) => {
+    tx.move('b', 'p2', 0)
+  })
+  cur = txStep(kb, store, cur, (tx) => {
+    tx.insert(b('p3', '页面三', { props: { _aliases: ['页面三'], _lists: ['page'] } }), null, store.blocks.length)
+  })
+  cur = txStep(kb, store, cur, (tx) => {
+    tx.setAnnotations('c', [], [edge('e9', 'c', 'p3')])
+  })
+  cur = txStep(kb, store, cur, (tx) => {
+    tx.remove('p1')
+  })
   assert.equal(
-    incremental([
-      { changes: [], forest, atoms },
-      { changes: atomsOnly, forest, atoms: added },
-      { changes: atomsOnly, forest, atoms: removed },
-    ]),
-    full(forest, removed),
+    fingerprint(cur),
+    fingerprint(rebuild(store.blocks, store.atoms)),
+    '一连串 tx 之后增量仍与全量逐字节一致',
   )
 })
 
-test('等式：块变化（移动 / 删块 / 改名 / 改标签归属）⇒ 增量与全量逐字节一致', () => {
-  const { forest, atoms } = fixture()
-
-  // ① 移动：把 `b` 整棵子树从 p1 挪到 p2（归属跟着块走，块表要跟着）
-  const moved = JSON.parse(JSON.stringify(forest)) as Block[]
-  const p1 = moved.find((x) => x.id === 'p1')!
-  const p2 = moved.find((x) => x.id === 'p2')!
-  const bi = p1.children.findIndex((x) => x.id === 'b')
-  const [bNode] = p1.children.splice(bi, 1)
-  p2.children.push(bNode!)
-
-  assert.equal(
-    incremental([
-      { changes: [], forest, atoms },
-      { changes: blocksOnly, forest: moved, atoms },
-    ]),
-    full(moved, atoms),
-    '块移动后增量应与全量一致',
-  )
-
-  // ② 删块：删掉 `b1`（它带着一个标签归属）⇒ 成员表必须一起收掉
-  const pruned = JSON.parse(JSON.stringify(moved)) as Block[]
-  const bb = pruned.find((x) => x.id === 'p2')!.children.find((x) => x.id === 'b')!
-  bb.children = []
-  assert.equal(
-    incremental([
-      { changes: [], forest, atoms },
-      { changes: blocksOnly, forest: pruned, atoms },
-    ]),
-    full(pruned, atoms),
-  )
-
-  // ③ 改名：标签块的主名从 `todo` 改成 `待办` ⇒ 名字表跟着变
-  const renamed = JSON.parse(JSON.stringify(forest)) as Block[]
-  renamed.find((x) => x.id === 't1')!.props!._aliases = ['待办']
-  assert.equal(
-    incremental([
-      { changes: [], forest, atoms },
-      { changes: blocksOnly, forest: renamed, atoms },
-    ]),
-    full(renamed, atoms),
-  )
-
-  // ④ 改归属：把 `#todo` 从 `a` 挪到 `c` ⇒ 成员表跟着变
-  const retagged = JSON.parse(JSON.stringify(forest)) as Block[]
-  const host = retagged.find((x) => x.id === 'p1')!.children.find((x) => x.id === 'a')!
-  delete host.props!._tags
-  retagged.find((x) => x.id === 'p2')!.children.find((x) => x.id === 'c')!.props = { _tags: ['t1'] }
-  assert.equal(
-    incremental([
-      { changes: [], forest, atoms },
-      { changes: blocksOnly, forest: retagged, atoms },
-    ]),
-    full(retagged, atoms),
-  )
-})
-
-test('等式：一串交替变化（原子 / 块 / marks 混着来）累积到最后＝全量', () => {
-  const { forest, atoms } = fixture()
-
-  const s1Atoms = [...atoms, edge('e9', 'c', 't1')]
-  const s2Forest = JSON.parse(JSON.stringify(forest)) as Block[]
-  s2Forest.find((x) => x.id === 't1')!.props!._aliases = ['TODO']
-  const s3Atoms = s1Atoms.filter((a) => a.id !== 'e1')
-  const s4Forest = JSON.parse(JSON.stringify(s2Forest)) as Block[]
-  s4Forest.push(b('p3', '页面三', { props: { _aliases: ['页面三'], _lists: ['page'] } }))
-
-  const got = incremental([
-    { changes: [], forest, atoms },
-    { changes: atomsOnly, forest, atoms: s1Atoms },
-    { changes: blocksOnly, forest: s2Forest, atoms: s1Atoms },
-    { changes: atomsOnly, forest: s2Forest, atoms: s3Atoms },
-    { changes: [{ kind: 'marks', id: '*' }], forest: s2Forest, atoms: s3Atoms }, // marks 不进索引
-    { changes: blocksOnly, forest: s4Forest, atoms: s3Atoms },
-  ])
-  assert.equal(got, full(s4Forest, s3Atoms))
-})
-
-test('等式：marks 变化不影响索引（指纹不变）', () => {
-  const { forest, atoms } = fixture()
-  const idx = rebuild(forest, atoms)
-  const next = applyChanges(idx, [{ kind: 'marks', id: '*' }], forest, atoms)
-  assert.equal(fingerprint(next), fingerprint(idx), 'marks 不参与「谁指向谁」')
-})
-
-/* ------------------------------------------------------------ 增量的边界 */
-
-test('applyChanges：块动过 ⇒ 整体重建（宁可全量，不要自相矛盾的索引）', () => {
-  const { forest, atoms } = fixture()
-  const idx = rebuild(forest, atoms)
-  // 假装只报了一个原子的变化，但块其实也变了 ⇒ 实现必须靠 blocks 这一侧兜住
-  const mutated = JSON.parse(JSON.stringify(forest)) as Block[]
-  mutated.find((x) => x.id === 't1')!.props!._aliases = ['改过的标签名']
-  const next = applyChanges(idx, blocksOnly, mutated, atoms)
-  assert.equal(fingerprint(next), full(mutated, atoms))
-})
-
-test('applyChanges：空 changes ⇒ 原样返回（不是「重建一遍」）', () => {
-  const { forest, atoms } = fixture()
-  const idx = rebuild(forest, atoms)
-  assert.equal(applyChanges(idx, [], forest, atoms), idx, '没有变化就别重算')
+test('applyOps：空 op ⇒ 原样返回（不是「重建一遍」）', () => {
+  const { store, idx } = kbFixture()
+  assert.equal(applyOps(idx, [], store.blocks, store.atoms), idx, '没有变化就别重算')
 })
 
 test('fingerprint：与插入顺序无关（否则会假报不一致）', () => {
@@ -384,99 +407,35 @@ test('store.reset：换库后索引整体失效（不是拿旧库的块表凑）
   assert.equal(store.find('p1'), undefined, '旧库的块不该还查得到')
 })
 
-/* ------------------------------------------------------------ 按块粒度（Tx/Changes） */
+/* ------------------------------------------------------------ op 流的边界 */
 
 /**
- * 这一步的意义：`Change.id` 从「整类」细化到「具体 id」。
- *
- * ⚠️ 最危险的失败不是崩，而是**修补得不全**——界面上偶尔少一条反链、偶尔查得到已删的块。
- *   所以每条断言都拿**全量重建**当基准，要求逐字节一致。
+ * op 是**事实陈述**，不是「必须可执行」的指令：流里出现一个既不在索引、也不在森林的 id
+ * （比如同一批里先删后又被上游去重漏掉的），跳过它即可——等式断言会抓任何因此的分叉。
  */
-test('按块粒度：改一块 ⇒ 增量与全量逐字节一致（含删块后归属一起收掉）', async () => {
-  const core = await import('../src/core/index.ts')
-  const { forest, atoms } = fixture()
-  const idx = core.rebuild(forest, atoms)
-
-  // ① 改一块的别名（标签块改名 ⇒ 名字表要跟着换）
-  const renamed = JSON.parse(JSON.stringify(forest)) as Block[]
-  renamed.find((x) => x.id === 't1')!.props!._aliases = ['待办']
-  const next = core.applyChanges(idx, [{ kind: 'blocks', id: 't1' }], renamed, atoms)
-  assert.equal(core.fingerprint(next), core.fingerprint(core.rebuild(renamed, atoms)), '改名后索引要跟上')
-  assert.equal(core.tagIdByName(next, '待办'), 't1')
-  assert.equal(core.tagIdByName(next, 'todo'), undefined, '旧名字不该残留')
-
-  // ② 删掉一块（连它的标签归属一起消失）
-  const pruned = JSON.parse(JSON.stringify(forest)) as Block[]
-  pruned.find((x) => x.id === 'p1')!.children = []
-  const afterDelete = core.applyChanges(next, [{ kind: 'blocks', id: 'a' }, { kind: 'blocks', id: 'b1' }], pruned, atoms)
-  assert.equal(core.fingerprint(afterDelete), core.fingerprint(core.rebuild(pruned, atoms)), '删块后归属要一起收掉')
-  assert.equal(core.lookupBlock(afterDelete, 'a'), undefined)
-  assert.equal(core.lookupBlock(afterDelete, 'b1'), undefined, '跟着子树一起没的块不该还在')
+test('applyOps：流里引用不存在的块 ⇒ 跳过该 op（索引不退化也不报错）', () => {
+  const { store, idx } = kbFixture()
+  const next = applyOps(
+    idx,
+    [
+      { e: 'block', id: '不存在的块', op: 'delete', at: 1 },
+      { e: 'prop', block: '也不存在', name: '_tags', op: 'set', value: [], at: 2 },
+    ],
+    store.blocks,
+    store.atoms,
+  )
+  assert.equal(fingerprint(next), fingerprint(idx), '无效 op 不该改变任何东西')
+  assert.equal(next, idx, '没有可修补的东西就别换对象')
 })
 
-test('按块粒度：`*` 仍然触发全量（保守声明不能被当成「没变」）', async () => {
-  const core = await import('../src/core/index.ts')
-  const { forest, atoms } = fixture()
-  const idx = core.rebuild(forest, atoms)
-  const mutated = JSON.parse(JSON.stringify(forest)) as Block[]
-  mutated.push(b('extra', '后来加的页', { props: { _aliases: ['后来加的页'], _lists: ['page'] } }))
-  const next = core.applyChanges(idx, [{ kind: 'blocks', id: '*' }], mutated, atoms)
-  assert.equal(core.fingerprint(next), core.fingerprint(core.rebuild(mutated, atoms)), '整类声明 ⇒ 全量重建')
-  assert.equal(core.lookupBlock(next, 'extra')?.text, '后来加的页')
-})
-
-/**
- * 真实收益所在：**只改原子**时（多一处引用 / 删一处引用）不重建块表与名字表。
- *
- * 打字改的是文本 ⇒ 报 `blocks` ⇒ 走全量（见上面「为什么不按块修补」）；
- * 但挂/摘一处引用只动 `atoms` ⇒ 那三张表完全不该被碰，
- * 而 `tagMembers` 的数据源在块上 ⇒ 同样原样带过去。
- */
-test('按块粒度：只有 atoms 变化 ⇒ 块表/名字表/父页表/成员表**同一个引用**（真的没被重建）', async () => {
-  const core = await import('../src/core/index.ts')
-  const { forest, atoms } = fixture()
-  const idx = core.rebuild(forest, atoms)
-  const added = [...atoms, edge('e7', 'c', 't2')]
-  const next = core.applyChanges(idx, [{ kind: 'atoms', id: 'e7' }], forest, added)
-
+test('applyOps：只有引用边变化 ⇒ 其它四张表是同一个引用（真的没被重建）', () => {
+  const { store, kb, idx } = kbFixture()
+  const next = txStep(kb, store, idx, (tx) => {
+    tx.setAnnotations('c', [], [...store.atoms.filter((a) => a.blockId === 'c'), edge('e7', 'c', 't2')])
+  })
   assert.equal(next.blocks, idx.blocks, '块表原样保留（活引用不换）')
   assert.equal(next.tags, idx.tags, '名字表原样保留')
   assert.equal(next.pageOf, idx.pageOf, '父页表原样保留')
-  assert.equal(next.tagMembers, idx.tagMembers, '标签成员来自块 ⇒ 原子变了不用重算')
-  // 但入向边是新的，且内容正确
-  assert.notEqual(next.incoming, idx.incoming, '入向边必须重算')
-  assert.deepEqual(core.incomingIds(next, 't2'), ['c'], '新边要算进来')
-  assert.equal(core.fingerprint(next), core.fingerprint(core.rebuild(forest, added)), '结果仍与全量一致')
-})
-
-test('按块粒度：一次报多块（跨两棵子树）⇒ 两边都重算，且与全量一致', async () => {
-  const core = await import('../src/core/index.ts')
-  const { forest, atoms } = fixture()
-  const idx = core.rebuild(forest, atoms)
-
-  const mutated = JSON.parse(JSON.stringify(forest)) as Block[]
-  const p2 = mutated.find((x) => x.id === 'p2')!
-  const c = p2.children.find((x) => x.id === 'c')!
-  c.text = '丙改过了'
-  mutated.find((x) => x.id === 't2')!.props!._aliases = ['设计改过了']
-
-  const next = core.applyChanges(idx, [{ kind: 'blocks', id: 'c' }, { kind: 'blocks', id: 't2' }], mutated, atoms)
-  assert.equal(core.fingerprint(next), core.fingerprint(core.rebuild(mutated, atoms)))
-  assert.equal(core.lookupBlock(next, 'c')?.text, '丙改过了')
-  assert.equal(core.tagIdByName(next, '设计改过了'), 't2')
-})
-
-test('按块粒度：报了一个已经不存在的 id ⇒ 退化为全量（不留半新的索引）', async () => {
-  const core = await import('../src/core/index.ts')
-  const { forest, atoms } = fixture()
-  const idx = core.rebuild(forest, atoms)
-
-  // 块真的被删了，但改动只点名了它 ⇒ 找不到路径 ⇒ 必须全量
-  const pruned = JSON.parse(JSON.stringify(forest)) as Block[]
-  const p1 = pruned.find((x) => x.id === 'p1')!
-  p1.children = p1.children.filter((x) => x.id !== 'b')
-
-  const next = core.applyChanges(idx, [{ kind: 'blocks', id: 'b' }], pruned, atoms)
-  assert.equal(core.fingerprint(next), core.fingerprint(core.rebuild(pruned, atoms)))
-  assert.equal(core.lookupBlock(next, 'b1'), undefined, '跟着子树一起没的块不该还在')
+  assert.equal(next.tagMembers, idx.tagMembers, '标签成员来自块 ⇒ 锚点变了不用重算')
+  assert.deepEqual(incomingIds(next, 't2'), ['c'], '新边要算进来')
 })
