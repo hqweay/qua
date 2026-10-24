@@ -21,7 +21,7 @@ import {
   type FoldState,
   type Mark,
 } from '../index.ts'
-import { DEFAULT_PREFS, WORKSPACE_VERSION, type PageBlock, type Workspace } from '../workspace.ts'
+import { WORKSPACE_VERSION, type PageBlock, type Workspace } from '../workspace.ts'
 import { parseInline, type SeedBlock } from './inline.ts'
 
 /* --------------------------------------------------------------- 构建 */
@@ -202,9 +202,12 @@ export const LONG_EN = [
 /**
  * 一片块森林 + 库级锚点/原子（承 1／5：没有「页实体」这一层）。
  *
- * 满态 / 稀疏 / 降级 / 冷启动四处都要装同一个壳。壳里的字段（版本、默认偏好、
- * 空回收站、`activeId` 落在第一块）是**库的形状**，不是某一态的特征：
+ * 满态 / 稀疏 / 降级 / 冷启动四处都要装同一个壳。壳里的字段（版本、空回收站、`activeId`
+ * 落在第一块）是**库的形状**，不是某一态的特征：
  * 各写一份就会让某个态悄悄缺一格，落盘后由别的读路径发现。
+ *
+ * ⚠️ **设备偏好不在壳里**（v15 起）：主题／槽宽／钉住是「这台设备怎么显示」，
+ *    换库（演示状态切换）不该把它带走 ⇒ 它们住在 `qua.device`（`storage/device.ts`）。
  */
 export function forest(blocks: Block[], built: BuiltPage[]): Workspace {
   return {
@@ -212,7 +215,6 @@ export function forest(blocks: Block[], built: BuiltPage[]): Workspace {
     blocks,
     folded: Object.assign({}, ...built.map((b) => b.folded)),
     activeId: blocks[0]?.id ?? '',
-    prefs: { ...DEFAULT_PREFS },
     savedAt: Date.now(),
     marks: built.flatMap((b) => b.marks),
     atoms: built.flatMap((b) => b.atoms),

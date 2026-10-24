@@ -4,7 +4,6 @@
 import type { MsgId } from '../../core/msg.ts'
 import { t } from '../../core/msg.ts'
 import { fixtureWorkspace } from '../../core/seed.ts'
-import { DEFAULT_PREFS } from '../../core/workspace.ts'
 import type { App, FixtureName } from '../../core/ports.ts'
 import type { DevDeps } from './types.ts'
 
@@ -19,17 +18,18 @@ const STATE_LABEL: Record<FixtureName, MsgId> = {
 export function devCommands(d: DevDeps): Pick<App, 'loadState' | 'setVirtualize' | 'runImeProbe'> {
   return {
     loadState: (state) => {
-      const fresh = fixtureWorkspace(state)
-      // 换的是内容，不是外观：保留用户当前的主题档位
-      fresh.prefs = { ...DEFAULT_PREFS, ...fresh.prefs, theme: d.prefs().theme }
-      d.replaceWorkspace(fresh)
+      /**
+       * ⚠️ **换的是内容，不是外观**：夹具不再带偏好（v15 起偏好属于设备、不属库），
+       *    所以这里既不用保留、也不会覆盖用户当前的主题／槽宽／钉住清单。
+       */
+      d.replaceWorkspace(fixtureWorkspace(state))
       d.toast(t('ui.toast.stateLoaded', { state: t(STATE_LABEL[state]) }))
     },
 
     setVirtualize: (on, radius) => {
       const r = typeof radius === 'number' ? radius : 12
       d.setVirtualize(on, r)
-      d.scheduleSave()
+      d.scheduleDeviceSave()
       d.scheduleBadge()
       d.toast(on ? t('ui.toast.virtOn', { radius: r }) : t('ui.toast.virtOff'))
     },

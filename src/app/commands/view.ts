@@ -18,7 +18,8 @@ export function viewCommands(d: ViewDeps): Pick<App, 'setTheme' | 'toggleTheme' 
       d.prefs().theme = m
       d.applyChrome()
       d.renderDebugState()
-      d.scheduleSave()
+      // 主题是**设备状态**：落 `qua.device`，不触库的落盘（调色不该改写内容）
+      d.scheduleDeviceSave()
       d.scheduleBadge()
     },
 
@@ -26,7 +27,7 @@ export function viewCommands(d: ViewDeps): Pick<App, 'setTheme' | 'toggleTheme' 
       d.prefs().theme = nextTheme(d.prefs().theme)
       d.applyChrome()
       d.renderDebugState()
-      d.scheduleSave()
+      d.scheduleDeviceSave()
       d.scheduleBadge()
     },
 
@@ -35,7 +36,7 @@ export function viewCommands(d: ViewDeps): Pick<App, 'setTheme' | 'toggleTheme' 
       const slot = d.prefs().dock[side]
       slot.open = !slot.open
       d.applyChrome()
-      d.scheduleSave()
+      d.scheduleDeviceSave()
       d.scheduleBadge()
     },
   }
