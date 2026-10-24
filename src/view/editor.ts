@@ -33,6 +33,8 @@ import {
   mapAtoms,
   mapMarks,
   mergeIntoPrev,
+  mergeIntoPrevPlan,
+  prevPlaceholder,
   removePrevPlaceholder,
   addTagId,
   ensureTag,
@@ -1634,24 +1636,60 @@ export class BlockEditor {
      * **删掉它**，而不是「把字并进去」（它没有字可并）。
      * 两支互斥，所以顺序不影响别的块：合并路径只在两边都有正文时成立。
      */
-    const placeholder = removePrevPlaceholder(this.doc, id)
+    const placeholder = prevPlaceholder(this.doc, id)
     if (placeholder) {
+      if (this.write) {
+        const write = this.write
+        write((tx) => tx.remove(placeholder.removed))
+      } else {
+        removePrevPlaceholder(this.doc, id)
+      }
       this.undo.record(before, 'structural', Date.now())
       this.renderAll()
       this.placeCaret(id, 0)
       this.emitChange('struct')
       return
     }
-    const r = mergeIntoPrev(this.doc, id)
-    if (!r) return
-    const shift = r.at
-    const moved = <T extends { blockId: string; start: number; end: number }>(arr: readonly T[]): T[] =>
-      arr.map((a) => (a.blockId === id ? { ...a, blockId: r.kept, start: a.start + shift, end: a.end + shift } : a))
-    this.marks = normalizeMarks(moved(this.marks))
-    this.atoms = moved(this.atoms)
+    const plan = mergeIntoPrevPlan(this.doc, id)
+    if (!plan) return
+    /**
+     * 锚点归属：被并块的字现在排在前一块正文的**末尾** ⇒ 整体后移 `plan.at`；
+     * 前一块自己的锚点原地不动。两块都要交：`setAnnotations` 只换这一块的。
+     */
+    const movedCur = <T extends { blockId: string; start: number; end: number }>(arr: readonly T[]): T[] =>
+      arr
+        .filter((a) => a.blockId === id)
+        .map((a) => ({ ...a, blockId: plan.kept, start: a.start + plan.at, end: a.end + plan.at }))
+    if (this.write) {
+      const write = this.write
+      const keptMarks = this.marks.filter((m) => m.blockId === plan.kept)
+      const keptAtoms = this.atoms.filter((a) => a.blockId === plan.kept)
+      const marks = movedCur(this.marks)
+      const atoms = movedCur(this.atoms)
+      write((tx) => {
+        tx.patch(plan.kept, (b) => writeBlockText(b, plan.text))
+        // 子块跟着并进前一块：每块一条 move（各自报自己的 parent/index）
+        plan.children.forEach((kid, n) => tx.move(kid, plan.kept, plan.kidsAt + n))
+        tx.setAnnotations(plan.kept, normalizeMarks([...keptMarks, ...marks]), [...keptAtoms, ...atoms])
+        tx.setAnnotations(plan.removed, [], [])
+        /**
+         * 被并块**不进回收站**：它的正文与子块都已经搬进前一块，留一个空壳只是噪声。
+         * op 仍是 `block.delete` —— 回收站是阶段 1 的内存表示，不是持久化事实。
+         */
+        tx.remove(plan.removed, { trash: false })
+      })
+    } else {
+      if (!mergeIntoPrev(this.doc, id)) return
+      const moved = <T extends { blockId: string; start: number; end: number }>(arr: readonly T[]): T[] =>
+        arr.map((a) =>
+          a.blockId === id ? { ...a, blockId: plan.kept, start: a.start + plan.at, end: a.end + plan.at } : a,
+        )
+      this.marks = normalizeMarks(moved(this.marks))
+      this.atoms = moved(this.atoms)
+    }
     this.undo.record(before, 'structural', Date.now())
     this.renderAll()
-    this.placeCaret(r.kept, shift)
+    this.placeCaret(plan.kept, plan.at)
     this.emitChange('struct')
   }
 

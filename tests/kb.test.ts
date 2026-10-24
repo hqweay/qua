@@ -267,6 +267,14 @@ test('remove ⇒ 子树逐个 block.delete；之后 get 不到、回收站里有
   assert.deepEqual(store.trash[0]?.children.map((x) => x.id), ['g1'])
 })
 
+test('remove({trash:false}) ⇒ op 形状不变，但**不进回收站、不打删除标记**（被并掉的块不留空壳）', () => {
+  const { kb, store } = fixture()
+  const r = kb.tx((tx) => tx.remove('c2', { trash: false }))
+  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c2', op: 'delete' }])
+  assert.equal(kb.get('c2'), undefined)
+  assert.equal(store.trash.length, 0, '合并吃掉一块，不该在回收站里多一个空壳')
+})
+
 /* ------------------------------------------------------------ 写面：语义列表 */
 
 test('setAliases 的 diff：新增按新序带 pos、删掉的报 delete', () => {

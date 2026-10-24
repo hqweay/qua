@@ -389,30 +389,56 @@ export function insertFirstChild(doc: Doc, id: string): Block | null {
   return b
 }
 
-/** Backspace 合并：把 id 块并入前一块（**前一块保留 id**） */export function mergeIntoPrev(doc: Doc, id: string): { kept: string; removed: string; at: number } | null {
+/**
+ * 合并的**落点计划**：只算，不动。
+ *
+ * 前一块的正文不是内容（标签名／字段名／日期投影）⇒ 计划为空：合并的语义是
+ * 「把这块的正文接到前一块正文后面」，前一块没有可写的正文，这块的正文无处可去 ——
+ * 继续做只会静默丢掉它，或往只读的日期行里塞字。
+ *
+ * ⚠️ **折叠态不跟着搬**：被并掉的块曾收着还是开着，是「那一行当时怎么显示」，
+ *    不是它的内容。把它写到前一块上，等于按一次退格就顺手改掉了另一行的显示。
+ *    折叠表里那条残留键读不到（块 id 已经不在树里），也不需要清。
+ */
+export interface MergePlan {
+  kept: string
+  removed: string
+  /** 粘接点：前一块**原**正文长度（锚点整体后移这么多） */
+  at: number
+  /** 合并后的正文 */
+  text: string
+  /** 被并块的直接子块（按原序挂到前一块末尾） */
+  children: string[]
+  /** 前一块此刻的子块数：子块依次落在它后面 */
+  kidsAt: number
+}
+
+export function mergeIntoPrevPlan(doc: Doc, id: string): MergePlan | null {
   const loc = locate(doc, id)
   if (!loc) return null
   const prev = prevBlock(doc, id)
   if (!prev) return null
-  /**
-   * 前一块的正文不是内容（标签名／字段名／日期投影）⇒ **这次合并不成立**。
-   *
-   * 合并的语义是「把这块的正文接到前一块的正文后面」；前一块没有可写的正文，
-   * 这块的正文就无处可去 —— 继续做只会静默丢掉它，或往只读的日期行里塞字。
-   * 退格在这个位置因此是「什么都不发生」，与「不能并进一行抬头」一致。
-   */
   if (!canWriteText(prev)) return null
-  const at = prev.text.length
-  /**
-   * ⚠️ **折叠态不跟着搬**：被并掉的块曾收着还是开着，是「那一行当时怎么显示」，
-   * 不是它的内容。把它写到前一块上，等于按一次退格就顺手改掉了另一行的显示。
-   * 折叠表里那条残留键读不到（块 id 已经不在树里），也不需要清。
-   */
+  return {
+    kept: prev.id,
+    removed: id,
+    at: prev.text.length,
+    text: prev.text + loc.block.text,
+    children: loc.block.children.map((b) => b.id),
+    kidsAt: prev.children.length,
+  }
+}
+
+/** Backspace 合并：把 id 块并入前一块（**前一块保留 id**） */
+export function mergeIntoPrev(doc: Doc, id: string): { kept: string; removed: string; at: number } | null {
+  const plan = mergeIntoPrevPlan(doc, id)
+  if (!plan) return null
+  const loc = locate(doc, plan.removed)!
+  const prev = locate(doc, plan.kept)!.block
   prev.children.push(...loc.block.children)
-  writeBlockText(prev, prev.text + loc.block.text)
-  const list = siblingsOf(doc, loc.parent)
-  list.splice(loc.index, 1)
-  return { kept: prev.id, removed: id, at }
+  writeBlockText(prev, plan.text)
+  siblingsOf(doc, loc.parent).splice(loc.index, 1)
+  return { kept: plan.kept, removed: plan.removed, at: plan.at }
 }
 
 /**
@@ -430,17 +456,24 @@ export function insertFirstChild(doc: Doc, id: string): Block | null {
  *    那是「正文在别处」，不是「没有正文」。退格在日期行上仍然什么都不发生。
  *    区分两者的正是 `isJournalBlock`：它的只读来自投影，而占位型块的只读来自类型声明。
  */
-export function removePrevPlaceholder(doc: Doc, id: string): { removed: string } | null {
+export function prevPlaceholder(doc: Doc, id: string): { removed: string } | null {
   const loc = locate(doc, id)
   if (!loc || loc.block.text !== '') return null
   const prev = prevBlock(doc, id)
   if (!prev) return null
   if (prev.text !== '' || isJournalBlock(prev) || canWriteText(prev)) return null
-  const list = siblingsOf(doc, loc.parent)
-  const at = list.indexOf(prev)
-  if (at < 0) return null
-  list.splice(at, 1)
   return { removed: prev.id }
+}
+
+export function removePrevPlaceholder(doc: Doc, id: string): { removed: string } | null {
+  const plan = prevPlaceholder(doc, id)
+  if (!plan) return null
+  const loc = locate(doc, plan.removed)
+  if (!loc) return null
+  const list = siblingsOf(doc, loc.parent)
+  if (loc.index < 0) return null
+  list.splice(loc.index, 1)
+  return plan
 }
 
 /**

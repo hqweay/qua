@@ -282,16 +282,19 @@ export class MemoryKb implements KbClient {
         sink.blocks(id)
       },
 
-      remove(id) {
+      remove(id, opts = {}) {
         const b = require(id)
         const parent = self.parentOf(id)
         const list = siblings(self.store, parent?.id ?? null)
         if (!list) throw new Error(`kb: no such block "${id}"`)
         list.splice(list.indexOf(b), 1)
         // 与 `removeBlock` 同形：回收站成员靠 `_deletedAt` 标记（阶段 1），
-        // 子树只是跟着根一起被摘出来，后代不各写一份
-        b.props = { ...(b.props ?? {}), [DELETED_AT_PROP]: at() }
-        self.store.trash.push(b)
+        // 子树只是跟着根一起被摘出来，后代不各写一份。
+        // `trash: false` ⇒ 这块是被并掉的（内容已在别处），不留空壳。
+        if (opts.trash !== false) {
+          b.props = { ...(b.props ?? {}), [DELETED_AT_PROP]: at() }
+          self.store.trash.push(b)
+        }
         // 子树逐个 delete：级联是**落库实现**的事（递归 CTE），op 序列本身要说得清删了哪些块
         for (const kid of subtreeIds(b)) {
           ops.push({ e: 'block', id: kid, op: 'delete', at: at() })
