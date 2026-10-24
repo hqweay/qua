@@ -13,7 +13,7 @@
  *    不会被改写。
  * ⚠️ **`text` 不在地址空间里**：只是正文恰好等于某个名字，不构成「这个块也叫那个名」。
  *    这条是与旧模型最重要的分界——旧模型让 `aliasOf` 回落到正文，于是改名（写正文）
- *    会顺手改地址，而 `writeBackRoots` 那条写路径因此会静默重命名。
+ *    会顺手改地址，让「敲字」变成「重命名」。
  */
 import { ALIASES_PROP, DELETED_AT_PROP, aliasesOf, listsOf, primaryAliasOf, type Block } from './model.ts'
 import { walkForest } from './walk.ts'
@@ -378,8 +378,7 @@ export function setAlias(b: Block, name: string): void {
  * 改主名（冲突拒绝）。
  *
  * ⚠️ **不再写 `text`**：正文是描述，改名只改地址。旧实现同时写正文，于是
- *    「块尾回车/退格写回正文」会顺手重命名——那正是 `writeBackRoots` 现在不再
- *    调本函数的原因。
+ *    「块尾回车/退格」会顺手重命名。
  * @deprecated 用 `renameAlias`／`setPrimaryAlias`
  */
 export function renameBlock(
