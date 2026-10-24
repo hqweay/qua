@@ -7,6 +7,12 @@
  * ⚠️ **每条用例必须 `await check(...)`**：`check` 是 async，漏掉 await 的用例会和文件末尾的
  *    `browser.close()` 并发，报 `browserContext.newPage: Target page, context or browser has been closed`
  *    —— 看起来像浏览器挂了，其实是用例没进队列。
+ *
+ * ⚠️ harness 的 `assert` 是裸 `(cond, msg)`——**没有 `deepEqual`**：等值断言用
+ *    `JSON.stringify(a) === JSON.stringify(b)`（真踩过三回，报错是「deepEqual is not a function」）。
+ * ⚠️ `lastOps()` 只在**事务产出 op 时**更新：零事务的动作（幂等打开、重复打已有标签）会让它
+ *    停在上一笔——验「这次没写」要对比动作前后的 `lastOps` 加模型状态，不能直接断言它为空。
+ * ⚠️ 新用例编号先 grep 本文件最大 T 号再接（T76 之后一段时期最大号与直觉不符，撞过一次）。
  */
 import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
