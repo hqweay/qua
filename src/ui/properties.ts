@@ -43,15 +43,12 @@ export interface PropertiesDeps {
   removeTag: (b: Block, tagId: string) => void
   /** 森林里全部定义（「添加已有属性」用） */
   defs: () => Block[]
-  /** 这个页/标签的**标签属性**清单（不是值；值区在下面） */
-  declared: (b: Block) => Block[]
   /** 短 id（未知属性的显示） */
   shortId: (id: string) => string
   setValue: (b: Block, propId: string, value: unknown) => void
   clearValue: (b: Block, propId: string) => void
   /** 把已有属性声明到 owner（页/标签），成为它的标签属性；普通块则登记一条自有属性槽 */
   addField: (b: Block, propId: string) => void
-  undeclare: (b: Block, propId: string) => void
   /** 新建定义（可同时声明成标签属性/加块属性槽） */
   createDef: (b: Block, label: string, kind: PropKind) => void
   /**
@@ -190,7 +187,6 @@ export class PropertiesPanel {
     // 标签在第一行：它是**分类**，比「有哪些字段」更先决定这一块是什么
     this.els.body.appendChild(this.buildTags(target))
 
-    const canDeclare = hasList(target, 'page') || hasList(target, 'tag')
     if (rows.length === 0 && elsewhere.length === 0) {
       const empty = document.createElement('p')
       empty.className = 'props-empty'
@@ -260,7 +256,6 @@ export class PropertiesPanel {
       this.els.body.appendChild(note)
     }
 
-    if (canDeclare) this.els.body.appendChild(this.buildDeclared(target))
     if (this.formOpen) this.els.body.appendChild(this.buildForm(target))
   }
 
@@ -315,53 +310,6 @@ export class PropertiesPanel {
 
     row.append(label, value)
     return row
-  }
-
-  /**
-   * 页/标签的**标签属性**清单（成员可用）。
-   *
-   * ⚠️ 这一节是**声明**，没有值输入：值在成员块上（一块一槽）。
-   *    给标签块本身设一个值不会成为「默认值」——默认值只属于定义（避免两处真相）。
-   * ⚠️ 它**不向成员继承**：只列出这个标签声明了哪些属性，没打这个标签的块一个都没有。
-   */
-  private buildDeclared(target: Block): HTMLElement {
-    const box = document.createElement('div')
-    box.className = 'props-declared'
-    const head = document.createElement('div')
-    head.className = 'props-declared-head'
-    head.textContent = t('ui.props.declaredTitle')
-    box.appendChild(head)
-    const defs = this.deps.declared(target)
-    if (defs.length === 0) {
-      const empty = document.createElement('p')
-      empty.className = 'props-empty'
-      empty.textContent = t('ui.props.declaredEmpty')
-      box.appendChild(empty)
-      return box
-    }
-    for (const def of defs) {
-      const row = document.createElement('div')
-      row.className = 'prop-row'
-      row.dataset.declared = def.id
-      const label = document.createElement('label')
-      label.className = 'prop-label'
-      const name = document.createElement('span')
-      name.className = 'prop-name'
-      name.textContent = def.text.trim() || def.id
-      const src = document.createElement('span')
-      src.className = 'prop-source'
-      src.textContent = t(`ui.props.kind.${propKindOf(def)}`)
-      label.append(name, src)
-      const del = document.createElement('button')
-      del.type = 'button'
-      del.className = 'prop-clear ghost'
-      del.title = t('ui.props.undeclare')
-      del.textContent = '×'
-      del.addEventListener('click', () => this.deps.undeclare(target, def.id))
-      row.append(label, del)
-      box.appendChild(row)
-    }
-    return box
   }
 
   /**

@@ -158,12 +158,10 @@ export function setupPanels(deps: PanelsDeps) {
         propertiesPanel.render()
       },
       defs: () => [...kb.propDefs()],
-      declared: (b) => [...kb.declaredFieldsOf(b.id)],
       shortId: (id) => shortId(id),
       setValue: (b, propId, value) => void deps.getRegistry().invoke('core.props/set-value', { blockId: b.id, propId, value }, 'ui'),
       clearValue: (b, propId) => void deps.getRegistry().invoke('core.props/clear-value', { blockId: b.id, propId }, 'ui'),
       addField: (b, propId) => void deps.getRegistry().invoke('core.props/add-field', { blockId: b.id, propId }, 'ui'),
-      undeclare: (b, propId) => void deps.getRegistry().invoke('core.props/undeclare', { blockId: b.id, propId }, 'ui'),
       createDef: (b, propId, kind) => void deps.getRegistry().invoke('core.props/create-def', { blockId: b.id, propId, kind }, 'ui'),
       /**
        * **`ref` 值的选择器**：从整片森林里挑一块。

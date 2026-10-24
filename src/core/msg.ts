@@ -127,9 +127,6 @@ export const MSG = {
   'ui.props.needLabel': '属性名不能为空',
   /* ⚠️ 「标签属性」＝ 这个标签声明了哪些属性；它**不向下继承**——没打这个标签的块一个都没有。
      所以文案里不能写「被继承」 */
-  'ui.props.declaredTitle': '标签属性',
-  'ui.props.declaredEmpty': '还没有标签属性',
-  'ui.props.undeclare': '解除标签属性（属性本身与值都保留）',
   'ui.props.reused': '已有同名属性（{source}）——已复用它',
   'ui.props.created': '新建属性「{label}」',
   'ui.props.kind.text': '文本',
