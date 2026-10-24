@@ -4684,6 +4684,153 @@ await check(
   },
 )
 
+await check(
+  'T69 删块走一笔事务：子树里每块一条 block.delete（叶子恰好 1 条），进回收站，一次撤销复原',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 挑一个**叶子内容块**（无子块、无身份、无锚点）：子树只有它自己 ⇒ op 数可精确断言；
+     * 没有锚点 ⇒ `syncAnchors` 不会在断言之外动 marks/atoms。
+     */
+    const pick = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const marks = window.__qua.marks()
+      const atoms = window.__qua.atoms()
+      let hit = null
+      // ⚠️ 只在**当前装载窗口**里挑：`remove` 按 `this.doc` 定位，森林里别页的块删不到
+      const walk = (list, parent) => {
+        list.forEach((b, i) => {
+          if (hit) return
+          const content = !(b.props?._lists?.length) && !(b.props?._aliases?.length) && !b.children.length
+          if (content && parent && !marks.some((m) => m.blockId === b.id) && !atoms.some((a) => a.blockId === b.id)) {
+            hit = { id: b.id, parentId: parent.id, index: i, text: b.text }
+            return
+          }
+          walk(b.children, b)
+        })
+      }
+      walk(ed.doc.roots, null)
+      let total = 0
+      const count = (list) => list.forEach((b) => (total++, count(b.children)))
+      count(ed.store.blocks)
+      return { ...(hit ?? {}), total }
+    })
+    assert(pick.id, '第一页里应有一个叶子内容块')
+
+    await page.evaluate((id) => window.__qua.__editor.remove(id), pick.id)
+    await page.waitForTimeout(180)
+
+    const after = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      let total = 0
+      const count = (list) => list.forEach((b) => (total++, count(b.children)))
+      count(ed.store.blocks)
+      const trashed = ed.store.trash.find((b) => b.id === t.id)
+      return {
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op })),
+        gone: ed.store.find(t.id) === undefined,
+        trashed: Boolean(trashed),
+        deletedAt: trashed?.props?._deletedAt ?? null,
+        total,
+        dom: Boolean(document.querySelector(`.blk[data-block-id="${t.id}"]`)),
+        rows: document.querySelectorAll('.blk').length,
+      }
+    }, pick)
+
+    assert(after.ops.length === 1, `叶子删块应恰好 1 条 op：${JSON.stringify(after.ops)}`)
+    assert(
+      after.ops[0].e === 'block' && after.ops[0].id === pick.id && after.ops[0].op === 'delete',
+      `应是一条 block.delete 指向被删块：${JSON.stringify(after.ops)}`,
+    )
+    assert(after.gone, '模型里应找不到它')
+    assert(after.trashed, '整块应进回收站（内容不丢，复活时边还能接上）')
+    assert(after.deletedAt !== null, '回收站成员要带 _deletedAt')
+    assert(after.total === pick.total - 1, `块数应 -1：${pick.total} → ${after.total}`)
+    assert(!after.dom, 'DOM 里应不再有这一行')
+    assert(after.rows > 0, '删掉一行之后编辑器仍有行（不是整片清空）')
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(200)
+    const back = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      let hit = null
+      let total = 0
+      const walk = (list, parent) => {
+        list.forEach((b, i) => {
+          total++
+          if (b.id === t.id) hit = { parentId: parent?.id ?? null, index: i, text: b.text }
+          walk(b.children, b)
+        })
+      }
+      walk(ed.store.blocks, null)
+      return { hit, total, dom: Boolean(document.querySelector(`.blk[data-block-id="${t.id}"]`)) }
+    }, pick)
+
+    assert(back.hit, '一次撤销后块应回到模型里')
+    assert(
+      back.hit.parentId === pick.parentId && back.hit.index === pick.index,
+      `应回到原来的父块与下标：${JSON.stringify(pick)} → ${JSON.stringify(back.hit)}`,
+    )
+    assert(back.hit.text === pick.text, `正文应原样：${JSON.stringify(back.hit.text)}`)
+    assert(back.total === pick.total, `块数应复原：${pick.total}，实际 ${back.total}`)
+    assert(back.dom, '撤销后 DOM 里应重新出现这一行')
+
+    await ctx.close()
+    return `删叶子 ⇒ ops=[block.delete]（1 条）＋ 进回收站（_deletedAt）；⌘Z 回原父/原位/原文`
+  },
+)
+
+await check(
+  'T70 删页也走事务：整棵子树每块一条 block.delete，页进回收站，页列表少一项',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+
+    // 新建一页并给它一个子块（子块插入本身也走事务），然后删页
+    await page.evaluate(() => window.__qua.invoke('core.page/new'))
+    await page.waitForTimeout(120)
+    const created = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const root = ed.doc.roots[0]
+      const kid = ed.insertBlockAfter(root.id, '删页测试子块')
+      return { pageId: root.id, kidId: kid ?? '', pages: window.__qua.pages().length }
+    })
+    assert(created.pageId && created.kidId, `前置：新页与子块都应存在：${JSON.stringify(created)}`)
+
+    await page.evaluate(() => window.__qua.invoke('core.page/delete'))
+    await page.waitForTimeout(200)
+
+    const after = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const trashed = ed.store.trash.filter((b) => b.id === t.pageId)
+      return {
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op })),
+        pages: window.__qua.pages().length,
+        pageGone: ed.store.find(t.pageId) === undefined,
+        kidGone: ed.store.find(t.kidId) === undefined,
+        trashed: trashed.length,
+        deletedAt: trashed[0]?.props?._deletedAt ?? null,
+      }
+    }, created)
+
+    const deletes = after.ops.filter((o) => o.e === 'block' && o.op === 'delete').map((o) => o.id)
+    assert(after.ops.length === 2, `删一页（页 ＋ 1 个子块）应恰好 2 条 op：${JSON.stringify(after.ops)}`)
+    assert(
+      deletes.includes(created.pageId) && deletes.includes(created.kidId),
+      `页与子块各要一条 block.delete（级联是落库实现的事，op 序列要说得清）：${JSON.stringify(after.ops)}`,
+    )
+    assert(after.pageGone && after.kidGone, '模型里页与子块都应消失')
+    assert(after.trashed === 1 && after.deletedAt !== null, '整页应进回收站（带 _deletedAt，内容不丢）')
+    assert(after.pages === created.pages - 1, `页列表应少一项：${created.pages} → ${after.pages}`)
+
+    await ctx.close()
+    return `删页 ⇒ ops=[block.delete × 2]（页＋子块）；页列表 ${created.pages}→${after.pages}；整页进回收站`
+  },
+)
+
 /* ---------------------------------------------------------------- 汇总 */
 
 await browser.close()
