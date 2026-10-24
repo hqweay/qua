@@ -841,6 +841,36 @@ function commandDecls() {
 }
 
 /* ═══════════════════════════════════════════════════════╗
+   ║ 23 · 块存储只有一个持有层（app/ui 不拿整库）             ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  // 块森林的持有者是 view/ 的编辑器与装配层（main.ts）。app/（命令）与 ui/（组件）
+  // 只经注入的依赖面 / 读门面取数据——一旦它们直接 import 块存储，「换实现只改一个
+  // 构造参数」就变成「重写每个调用方」。
+  const FORBIDDEN = /core\/(store|kb\/memory|kb\/index)\.ts$/
+  const hits = []
+  for (const f of codeFiles) {
+    const r = rel(f)
+    if (!(r.startsWith('src/app/') || r.startsWith('src/ui/'))) continue
+    const { sf } = tsFile(f)
+    for (const imp of importsOf(sf)) {
+      if (FORBIDDEN.test(imp.spec)) hits.push(`${r}:${imp.line} import 了块存储：${imp.spec}`)
+    }
+  }
+  add({
+    id: 23,
+    title: 'app／ui 不得 import 块存储（BlockStore／MemoryKb）——数据只经注入的依赖面与读门面',
+    method: `静态扫 src/app/**、src/ui/** 的 import，禁 core/store.ts、core/kb/memory.ts、core/kb/index.ts`,
+    scope: `src/app/** · src/ui/**`,
+    whitelist: 'src/view/**（编辑器就是 store 的持有者）· src/main.ts（renderer 装配层，唯一接线处）· core 内部自用',
+    hits: hits.length,
+    detail: hits,
+    note: '读侧的下一个收口是把 app/ui 里「注入整片森林」的口子换成窄读法（按 id／按查询）——那一步改的是依赖接口本身，见交接的读门面审计',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
    ║ 额外 · 主题双轨静态面                       ║
    ╚═══════════════════════════════════════════════════════ */
 

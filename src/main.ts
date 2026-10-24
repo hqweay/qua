@@ -53,8 +53,6 @@ import {
   createWorkspaceStore,
   DEVICE_KEY,
   STORAGE_KEY,
-  WHOLE_LIBRARY_CHANGES,
-  type Change,
   type Prefs,
   type ThemeMode,
   type Workspace,
@@ -365,50 +363,17 @@ function warnSaveFailed(error: unknown): void {
 }
 
 /**
- * 一批 op ⇒ 这批 op 让**哪几类对象**失效。
- *
- * `StoragePort` 的契约只收 `Change[]`（「这类对象里这一条动过」），所以这里是 op 到
- * `Change` 的**最小投影**：属性/别名/露面/标签都落在块的骨架上 ⇒ `blocks`；
- * 锚点要分 marks/atoms，而 `anno` 的 value 恰好带着它是哪种（有 `kind` 字段的是原子）。
- *
- * ⚠️ 同 kind ＋ 同 id 去重：一次打字可能对一块报好几条 op，订阅者只需要重渲染一次。
- */
-function changesOf(ops: readonly Op[]): Change[] {
-  const out: Change[] = []
-  const seen = new Set<string>()
-  const add = (kind: Change['kind'], id: string): void => {
-    const key = `${kind}\u0000${id}`
-    if (seen.has(key)) return
-    seen.add(key)
-    out.push({ kind, id })
-  }
-  for (const o of ops) {
-    if (o.e === 'anno') {
-      // value 只在 set 上带；delete 时拿不到形状 ⇒ 两类都报（多报一类只是多渲染一次）
-      const ann = o.value
-      const set = ann !== undefined
-      const isAtom = set && typeof ann === 'object' && 'kind' in ann
-      if (!set || !isAtom) add('marks', o.block)
-      if (!set || isAtom) add('atoms', o.block)
-      continue
-    }
-    add('blocks', o.e === 'block' ? o.id : o.block)
-  }
-  return out
-}
-
-/**
  * **提交一次**（异步、批次）：经过 `StoragePort`，失败如实返回。
  * 上层只认「这批改动落盘了没有」——不认「整份库写进去了没有」。
  *
  * 传进来的 op 为空 ⇒ 这批**不是**由事务产生的（编辑器的正文/结构直写仍是直改内存），
- * 只能按整类提交；这是迁移期的真相，不是兜底。
+ * 只能按整类提交；这是迁移期的真相，不是兜底。op → changes 的推导归门面（`changesOf`）。
  */
 function persist(ops: readonly Op[]) {
   if (readOnly) return Promise.resolve({ ok: true as const })
   syncSections()
   ws.savedAt = Date.now()
-  return store.commit(ws, ops.length === 0 ? WHOLE_LIBRARY_CHANGES : changesOf(ops))
+  return store.commit(ws, ops)
 }
 
 /** 编辑期落盘的防抖窗口：连打时只提交最后一批（批次语义见 `StoragePort`） */
