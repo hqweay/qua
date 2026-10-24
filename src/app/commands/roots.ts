@@ -8,7 +8,6 @@
 import {
   ALIASES_PROP,
   DISPLAY_PROP,
-  ensureFirstBlock,
   FEED_INITIAL,
   hasList,
   isJournal,
@@ -22,7 +21,7 @@ import {
 import { t } from '../../core/msg.ts'
 
 /**
- * 编辑器装载的根集合：**只有「当前对象」自己一行**，它的子块**缩进挂在它下面**（2026-10-20）。
+ * 编辑器装载的根集合：**只有「当前对象」自己一行**，它的子块**缩进挂在它下面**。
  *
  * zoom 的形状：
  * ```
@@ -32,10 +31,8 @@ import { t } from '../../core/msg.ts'
  * ```
  *
  * ⚠️ **不是** `[b, ...b.children]`（那是把子块拉成兄弟，会显示成两棵树）。
- * ⚠️ 但也不能直接把 `b` 放进编辑器：那样 `syncActivePage` 写回时
- *   `p.children = roots` 会把「b 自己」塞进 b 的 children（自环）。
- *   所以给 b 一个**浅拷贝、children 用同一批子块**——子块照常缩进渲染，
- *   写回时再靠 `syncActivePage` 剥掉首行。
+ * ⚠️ 装进编辑器的是 **store 里的活块**：块是唯一真相，编辑直接发生在它身上，
+ *   不存在「写回时把自己塞进自己 children」的自环问题。
  */
 /**
  * 落点归一到「**装哪个根**」：`rootsFor(p)` 是唯一规则（块自己就是根，不再拷子树）。
@@ -44,11 +41,14 @@ import { t } from '../../core/msg.ts'
  *    代价是**日记块自己不在 DOM 里**——它作为当前对象时 `data-depth=0`，没有日期就
  *    等于「一屏不知道是哪一天」，聚焦之后也一样（`rootsFor` 是打开页与聚焦共用的同一条规则）。
  *    现在与页同口径：**块自己是第一行**（journal 渲染成只读日期行），子块缩进挂在下面；
- *    「打得开却打不了字」由 `ensureFirstBlock` 管——空 journal 补一个可编辑子块，
+ *    「打得开却打不了字」由**装载边界**管——空 journal 天补一个可编辑子块（经事务真的进库），
  *    光标的落点由 `focusFirstBlock` 跳过只读行。
+ *
+ * ⚠️ **纯函数**：只选择，不改库。早先它顺手给空 journal 补子块——「打开」是读动作，
+ *    读的时候改模型让 op 序列缺一段（块进了库却没有行可落）。补块的唯一落点在装配层的
+ *    装载边界（`materializeEditableRoots`）。
  */
 export function rootsFor(block: Block): Block[] {
-  if (isJournal(block)) ensureFirstBlock(block.children)
   return [block]
 }
 
@@ -65,11 +65,11 @@ export function rootsForMany(blocks: readonly Block[]): Block[] {
  *
  * feed 与「单块聚焦」是两种形态：同一个 journal id 可以走这里（入口），
  * 也可以只走 `rootsFor`（只看这一天）。判据不能是「是不是今天」。
+ *
+ * ⚠️ **纯函数**（同 `rootsFor`）：空天的首子块由装载边界补（经事务进库），这里只选择。
  */
 export function rootsForFeed(target: Block, blocks: readonly Block[]): Block[] {
   const days = journalFeedDays(blocks, journalDate(target), FEED_INITIAL)
-  // 日期行只读；没有子块就没有可落光标的地方（feed 里的每一天都要能直接打字）
-  for (const day of days) ensureFirstBlock(day.children)
   return rootsForMany(days)
 }
 
@@ -92,12 +92,16 @@ export function rootsForTarget(target: Block, blocks: readonly Block[]): Block[]
  * ⚠️ 空标题也必须有一个地址：不变量是「在页列表里 ⇒ 至少有一个名字」。
  *    生成 `未命名-<短 id>` 而不是留空，是让「新建页」立刻可被引用、可被改名，
  *    且不会在落盘校验里变成非法形状。
+ * ⚠️ **天生命中带一个空首子块**（与种子库的空页同形）：页名行展示的是名字，
+ *    没有子块的新页「建出来却没处写正文」。这块随页一起插进库（同一笔事务），
+ *    不是打开时的渲染兜底——半截状态（有页、没处写字）不该有存在的一刻。
  */
 export function makePageBlock(): Block {
   const b = mkBlock('')
   const name = t('ui.page.untitledAlias', { id: b.id.slice(-6) })
   return {
     ...b,
+    children: [mkBlock('')],
     props: { [ALIASES_PROP]: [name], [LISTS_PROP]: ['page'], [DISPLAY_PROP]: 'alias', _icon: 'lucide:file' },
   }
 }
