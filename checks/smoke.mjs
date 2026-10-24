@@ -5441,6 +5441,560 @@ await check(
   },
 )
 
+/* ------------------------------------------------ Task B：编辑器写路径逐条钉 op */
+
+/** 任务 B 共用：从当前文档挑一个「无子块、无标签、有正文」的内容块（带 parent） */
+const pickLeaf = (page) =>
+  page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const rows = []
+    const walk = (list, parent) => {
+      list.forEach((b, i) => {
+        rows.push({ b, parentId: parent?.id ?? null, index: i })
+        walk(b.children, b)
+      })
+    }
+    walk(ed.doc.roots, null)
+    const r = rows.find((x) => !x.b.children.length && x.b.text.length >= 6 && !(x.b.props?._tags?.length))
+    return r ? { id: r.b.id, parentId: r.parentId, index: r.index, text: r.b.text } : null
+  })
+/** 任务 B 共用：op 的可断言投影（block 统一取「这块是谁」；anno 另取锚点 id） */
+const opShape = (page) =>
+  page.evaluate(() =>
+    window.__qua.lastOps().map((o) => ({
+      e: o.e,
+      block: o.block ?? o.id ?? '',
+      aid: o.e === 'anno' ? (o.id ?? '') : '',
+      op: o.op,
+      name: o.name ?? '',
+      value: o.value,
+      parent: o.value?.parent,
+      index: o.value?.index,
+      text: o.value?.text,
+      kind: o.value?.kind ?? '',
+      type: o.value?.type ?? '',
+    })),
+  )
+
+await check(
+  'T77 切换待办走一笔事务：恰好 1 条 prop.set（任务状态槽，首切＝false），一次撤销回无槽',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const target = await pickLeaf(page)
+    assert(target, '第一页里应有可编辑的内容块')
+
+    await page.evaluate((id) => window.__qua.__editor.toggleTodo(id), target.id)
+    await page.waitForTimeout(120)
+    const ops = await opShape(page)
+    assert(ops.length === 1, `切换待办应恰好 1 条 op：${JSON.stringify(ops)}`)
+    assert(
+      ops[0].e === 'prop' && ops[0].op === 'set' && ops[0].block === target.id && ops[0].value === false,
+      `那一条应是任务状态槽的 prop.set（首切＝未完成 false）：${JSON.stringify(ops)}`,
+    )
+    const propName = ops[0].name
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const back = await page.evaluate((t) => window.__qua.__editor.store.find(t.id)?.props ?? null, target)
+    assert(!back || !(propName in back), `一次撤销应回到没有任务槽：${JSON.stringify(back)}`)
+
+    await ctx.close()
+    return `toggleTodo ⇒ 1 条 prop.set{${propName}:false}；⌘Z 回无槽`
+  },
+)
+
+await check(
+  'T78 加粗走一笔事务：只有 anno.set、零 block op，一次撤销格式消失',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const target = await pickLeaf(page)
+    assert(target, '第一页里应有可编辑的内容块')
+
+    await page.evaluate((id) => window.__qua.focusBlock(id, 2), target.id)
+    for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+ArrowRight')
+    await page.evaluate(() => window.__qua.__editor.toggleMark('bold'))
+    await page.waitForTimeout(120)
+    const ops = await opShape(page)
+    assert(ops.length === 1, `加粗应恰好 1 条 op：${JSON.stringify(ops)}`)
+    assert(
+      ops[0].e === 'anno' && ops[0].op === 'set' && ops[0].block === target.id && ops[0].type === 'bold',
+      `那一条应是 anno.set{bold}：${JSON.stringify(ops)}`,
+    )
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const back = await page.evaluate((t) => window.__qua.marks().filter((m) => m.blockId === t.id).length, target)
+    assert(back === 0, `一次撤销后这块应没有锚点：${back}`)
+
+    await ctx.close()
+    return `toggleMark ⇒ 1 条 anno.set{bold}（0 条 block op）；⌘Z 格式消失`
+  },
+)
+
+await check(
+  'T79 清格式走一笔事务：只有 anno.delete、零 block op，一次撤销格式回来',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const target = await pickLeaf(page)
+    assert(target, '第一页里应有可编辑的内容块')
+
+    // 前置：加一段粗体（setup 的 op 不参与断言）
+    await page.evaluate((id) => window.__qua.focusBlock(id, 2), target.id)
+    for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+ArrowRight')
+    await page.evaluate(() => window.__qua.__editor.toggleMark('bold'))
+    await page.waitForTimeout(120)
+
+    // toggleMark 结束时选区原样保留 ⇒ 直接清
+    await page.evaluate(() => window.__qua.__editor.clearMarksAtSel())
+    await page.waitForTimeout(120)
+    const ops = await opShape(page)
+    assert(ops.length === 1, `清格式应恰好 1 条 op：${JSON.stringify(ops)}`)
+    assert(
+      ops[0].e === 'anno' && ops[0].op === 'delete' && ops[0].block === target.id,
+      `那一条应是 anno.delete：${JSON.stringify(ops)}`,
+    )
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const back = await page.evaluate((t) => window.__qua.marks().filter((m) => m.blockId === t.id).length, target)
+    assert(back === 1, `一次撤销后粗体应回来：${back}`)
+
+    await ctx.close()
+    return `clearMarksAtSel ⇒ 1 条 anno.delete（0 条 block op）；⌘Z 格式回来`
+  },
+)
+
+await check(
+  'T80 插行内原子走一笔事务：正文 1 条 upsert ＋ 原子 1 条 anno.set，一次撤销两半一起回滚',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const target = await pickLeaf(page)
+    assert(target, '第一页里应有可编辑的内容块')
+
+    await page.evaluate((id) => window.__qua.focusBlock(id, 9999), target.id)
+    await page.evaluate(
+      (t) => window.__qua.__editor.insertAtom('tag', { label: '冒烟原子', target: { kind: 'block', id: t.id } }),
+      target,
+    )
+    await page.waitForTimeout(120)
+    const ops = await opShape(page)
+    assert(ops.length === 2, `插原子应恰好 2 条 op：${JSON.stringify(ops)}`)
+    assert(
+      ops[0].e === 'block' && ops[0].op === 'upsert' && ops[0].block === target.id && ops[0].text?.includes('\uFFFC'),
+      `第一条应是正文 upsert（带占位格）：${JSON.stringify(ops)}`,
+    )
+    assert(
+      ops[1].e === 'anno' && ops[1].op === 'set' && ops[1].block === target.id && ops[1].kind === 'tag',
+      `第二条应是原子的 anno.set：${JSON.stringify(ops)}`,
+    )
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const back = await page.evaluate((t) => {
+      const b = window.__qua.__editor.store.find(t.id)
+      return { text: b?.text ?? '', atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length }
+    }, target)
+    assert(!back.text.includes('\uFFFC') && back.atoms === 0, `一次撤销应回原文、原子注销：${JSON.stringify(back)}`)
+
+    await ctx.close()
+    return `insertAtom ⇒ [正文 upsert｛含⌷｝, anno.set{tag}]；⌘Z 两半一起回滚`
+  },
+)
+
+await check(
+  'T81 删行内原子走一笔事务：正文 1 条 upsert ＋ 原子 1 条 anno.delete，一次撤销复原',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const target = await pickLeaf(page)
+    assert(target, '第一页里应有可编辑的内容块')
+
+    // 前置：插一枚原子（setup 的 op 不参与断言）
+    await page.evaluate((id) => window.__qua.focusBlock(id, 9999), target.id)
+    const atomId = await page.evaluate(
+      (t) => window.__qua.__editor.insertAtom('tag', { label: '待删原子', target: { kind: 'block', id: t.id } }),
+      target,
+    )
+    assert(atomId, '前置：原子应建出来')
+    await page.waitForTimeout(120)
+
+    await page.evaluate((id) => window.__qua.__editor.removeAtom(id), atomId)
+    await page.waitForTimeout(120)
+    const ops = await opShape(page)
+    assert(ops.length === 2, `删原子应恰好 2 条 op：${JSON.stringify(ops)}`)
+    assert(
+      ops[0].e === 'block' && ops[0].op === 'upsert' && !ops[0].text?.includes('\uFFFC'),
+      `第一条应是正文 upsert（占位格没了）：${JSON.stringify(ops)}`,
+    )
+    assert(ops[1].e === 'anno' && ops[1].op === 'delete' && ops[1].value?.id === atomId, `第二条应是 anno.delete：${JSON.stringify(ops)}`)
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const back = await page.evaluate((t) => {
+      const b = window.__qua.__editor.store.find(t.id)
+      return { text: b?.text ?? '', atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length }
+    }, target)
+    assert(back.text.includes('\uFFFC') && back.atoms === 1, `一次撤销应回占位格、原子复活：${JSON.stringify(back)}`)
+
+    await ctx.close()
+    return `removeAtom ⇒ [正文 upsert, anno.delete]；⌘Z 复原`
+  },
+)
+
+await check(
+  'T82 挂标签走同一笔事务：新标签＝建块 upsert ＋ 归属 prop.set；已有标签＝只写归属 1 条；撤销分步回滚',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const a = await pickLeaf(page)
+    assert(a, '第一页里应有可编辑的内容块')
+
+    // ① 新标签：建标签块 ＋ 写归属，同一笔 2 条
+    await page.evaluate((t) => window.__qua.__editor.addTag(t.id, '冒烟新标签'), a)
+    await page.waitForTimeout(120)
+    const ops1 = await opShape(page)
+    assert(ops1.length === 2, `新标签应恰好 2 条 op：${JSON.stringify(ops1)}`)
+    assert(
+      ops1[0].e === 'block' && ops1[0].op === 'upsert' && ops1[0].parent === null,
+      `第一条应是标签块 upsert{parent:null}：${JSON.stringify(ops1)}`,
+    )
+    assert(
+      ops1[1].e === 'prop' && ops1[1].op === 'set' && ops1[1].block === a.id && Array.isArray(ops1[1].value),
+      `第二条应是归属 prop.set：${JSON.stringify(ops1)}`,
+    )
+    const tagId = ops1[1].value[0]
+    const tagBlock = await page.evaluate((id) => {
+      const t = window.__qua.__editor.store.find(id)
+      return t ? { lists: t.props?._lists ?? [], alias: t.props?._aliases?.[0] ?? '' } : null
+    }, tagId)
+    assert(tagBlock && tagBlock.lists.includes('tag'), `标签块应真的在库里（带 tag 露面）：${JSON.stringify(tagBlock)}`)
+
+    // ② 已有标签：只写归属，1 条（a 已带 _tags ⇒ 再挑一次自然落到别的块）
+    const b = await pickLeaf(page)
+    assert(b && b.id !== a.id, '应有第二个可挂标签的块')
+    await page.evaluate((t) => window.__qua.__editor.addTag(t.id, '冒烟新标签'), b)
+    await page.waitForTimeout(120)
+    const ops2 = await opShape(page)
+    assert(ops2.length === 1 && ops2[0].e === 'prop' && ops2[0].block === b.id, `复用标签应只写归属 1 条：${JSON.stringify(ops2)}`)
+
+    // 一次撤销只回滚第二步（复用那笔）
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const backB = await page.evaluate((t) => window.__qua.__editor.store.find(t.id)?.props?._tags ?? [], b)
+    assert(backB.length === 0, `一次撤销应摘掉第二块的归属：${JSON.stringify(backB)}`)
+    const tagStill = await page.evaluate((id) => Boolean(window.__qua.__editor.store.find(id)), tagId)
+    assert(tagStill, `标签块应还在（那笔撤销不归它）`)
+
+    await ctx.close()
+    return `addTag ⇒ 新标签 [upsert{parent:null}, prop.set]；复用 [prop.set]；⌘Z 分步回滚`
+  },
+)
+
+await check(
+  'T83 摘标签走同一笔事务：只有归属 1 条 prop.set（chip 露面没有正文原子），一次撤销归属回来',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const target = await pickLeaf(page)
+    assert(target, '第一页里应有可编辑的内容块')
+
+    // 前置：挂一个标签（setup 的 op 不参与断言）
+    await page.evaluate((t) => window.__qua.__editor.addTag(t.id, '冒烟摘除标签'), target)
+    await page.waitForTimeout(120)
+    const tagId = await page.evaluate((t) => window.__qua.__editor.store.find(t.id)?.props?._tags?.[0] ?? '', target)
+    assert(tagId, '前置：标签应挂上')
+
+    await page.evaluate((t) => window.__qua.__editor.removeTag(t.id, t.tagId), { ...target, tagId })
+    await page.waitForTimeout(120)
+    const ops = await opShape(page)
+    assert(ops.length === 1, `摘标签应恰好 1 条 op：${JSON.stringify(ops)}`)
+    assert(
+      ops[0].e === 'prop' && ops[0].op === 'set' && ops[0].block === target.id && Array.isArray(ops[0].value) && ops[0].value.length === 0,
+      `那一条应是 _tags 清空的 prop.set：${JSON.stringify(ops)}`,
+    )
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const back = await page.evaluate((t) => window.__qua.__editor.store.find(t.id)?.props?._tags ?? [], target)
+    assert(back.length === 1 && back[0] === tagId, `一次撤销归属应回来：${JSON.stringify(back)}`)
+
+    await ctx.close()
+    return `removeTag ⇒ 1 条 prop.set{_tags:[]}；⌘Z 归属回来`
+  },
+)
+
+await check(
+  'T84 点空白建块走一笔事务：新建＝1 条 insert{parent:末段,index:末尾}；末尾已有空块＝复用零 op；一次撤销回滚',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    // 前置：把末段末块写成非空，保证「新建」这一支（setup 的 op 不参与断言）
+    const tail = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const root = ed.doc.roots[ed.doc.roots.length - 1]
+      const last = root.children[root.children.length - 1]
+      return { rootId: root.id, index: root.children.length - 1, id: last?.id ?? '' }
+    })
+    assert(tail.id, '末段应有末块')
+    await page.evaluate((t) => window.__qua.__editor.setText(t.id, '占住末尾'), tail)
+    await page.waitForTimeout(120)
+
+    await page.evaluate(() => window.__qua.__editor.clickEmptyArea(99999))
+    await page.waitForTimeout(120)
+    const ops = await opShape(page)
+    assert(ops.length === 1, `点空白应恰好 1 条 op：${JSON.stringify(ops)}`)
+    assert(
+      ops[0].e === 'block' && ops[0].op === 'upsert' && ops[0].parent === tail.rootId && ops[0].index === tail.index + 1,
+      `应插在末段末尾：${JSON.stringify(ops)}`,
+    )
+
+    // 再点一次：末尾已是空块 ⇒ 复用，不新建（⚠️ 复用分支没有 tx，lastOps 仍是上一笔的
+    // op——「零 op」只能从模型断：children 数不变、没有多出第二个空块）
+    const kidsBefore = await page.evaluate((t) => {
+      const r = window.__qua.__editor.store.find(t.rootId)
+      return r?.children.length ?? -1
+    }, tail)
+    await page.evaluate(() => window.__qua.__editor.clickEmptyArea(99999))
+    await page.waitForTimeout(120)
+    const kidsAfter = await page.evaluate((t) => {
+      const r = window.__qua.__editor.store.find(t.rootId)
+      return { len: r?.children.length ?? -1, tailKids: r?.children[r.children.length - 1]?.children.length ?? -1 }
+    }, tail)
+    assert(kidsAfter.len === kidsBefore, `末尾已有空块应复用（不新建）：${kidsBefore} → ${kidsAfter.len}`)
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const kids = await page.evaluate((t) => {
+      const r = window.__qua.__editor.store.find(t.rootId)
+      return r?.children.length ?? -1
+    }, tail)
+    assert(kids === tail.index + 1, `一次撤销后末段应少一个空块：${kids}`)
+
+    await ctx.close()
+    return `clickEmptyArea ⇒ 新建 1 条 insert；复用 0 条；⌘Z 回滚`
+  },
+)
+
+await check(
+  'T85 插分割线走同一笔事务：空块原地改类型＝1 条 prop.set；有内容＝同一笔 2 条 insert；各自一次撤销复原',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const target = await pickLeaf(page)
+    assert(target, '第一页里应有可编辑的内容块')
+
+    // ① 空块 ⇒ 原地变线（先造一个空块：setup 的 op 不参与断言）
+    const blankId = await page.evaluate((t) => window.__qua.__editor.insertBlockAfter(t.id, ''), target)
+    assert(blankId, '前置：空块应建出来')
+    await page.waitForTimeout(120)
+    await page.evaluate((id) => window.__qua.__editor.insertDividerAfter(id), blankId)
+    await page.waitForTimeout(120)
+    const ops1 = await opShape(page)
+    assert(ops1.length === 1, `空块变线应恰好 1 条 op：${JSON.stringify(ops1)}`)
+    assert(
+      ops1[0].e === 'prop' && ops1[0].op === 'set' && ops1[0].block === blankId && ops1[0].name === '_type' && ops1[0].value === 'core/divider',
+      `那一条应是 _type=core/divider 的 prop.set：${JSON.stringify(ops1)}`,
+    )
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const backType = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._type ?? null, blankId)
+    assert(backType === null, `一次撤销应回到没有类型：${JSON.stringify(backType)}`)
+
+    // ② 有内容 ⇒ 线 ＋ 空块，同一笔 2 条 insert
+    await page.evaluate((t) => window.__qua.__editor.insertDividerAfter(t.id), target)
+    await page.waitForTimeout(120)
+    const ops2 = await opShape(page)
+    assert(ops2.length === 2, `有内容插线应恰好 2 条 op：${JSON.stringify(ops2)}`)
+    assert(
+      ops2.every((o) => o.e === 'block' && o.op === 'upsert' && o.parent === target.parentId),
+      `两条都应是同级的 insert：${JSON.stringify(ops2)}`,
+    )
+    assert(ops2[0].index === target.index + 1 && ops2[1].index === target.index + 2, `线与空块应紧跟着源块：${JSON.stringify(ops2)}`)
+    const madeIds = [ops2[0].block, ops2[1].block]
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const gone = await page.evaluate((ids) => ids.every((id) => window.__qua.__editor.store.find(id) === undefined), madeIds)
+    assert(gone, `一次撤销后线与空块都应消失：${JSON.stringify(madeIds)}`)
+
+    await ctx.close()
+    return `insertDividerAfter ⇒ 空块 [prop.set _type]；有内容 [insert, insert]；各自 ⌘Z 复原`
+  },
+)
+
+await check(
+  'T86 复制块走一笔事务：克隆子树每块 1 条 upsert（自己的落点）＋ 克隆的锚点 anno.set；源块与别的块的锚点不动；一次撤销全滚回',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const target = await pickLeaf(page)
+    assert(target, '第一页里应有可编辑的内容块')
+
+    // 前置：给源块加一段粗体（setup 的 op 不参与断言）——锚点要跟着克隆走
+    await page.evaluate((id) => window.__qua.focusBlock(id, 2), target.id)
+    for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+ArrowRight')
+    await page.evaluate(() => window.__qua.__editor.toggleMark('bold'))
+    await page.waitForTimeout(120)
+
+    await page.evaluate((id) => window.__qua.__editor.duplicate(id), target.id)
+    await page.waitForTimeout(120)
+    const ops = await opShape(page)
+    assert(ops.length === 2, `复制叶子应恰好 2 条 op（结构＋克隆锚点）：${JSON.stringify(ops)}`)
+    assert(
+      ops[0].e === 'block' && ops[0].op === 'upsert' && ops[0].parent === target.parentId,
+      `第一条应是克隆块自己的落点：${JSON.stringify(ops)}`,
+    )
+    assert(
+      ops[1].e === 'anno' && ops[1].op === 'set' && ops[1].block === ops[0].block && ops[1].type === 'bold',
+      `第二条应是克隆块上的 anno.set：${JSON.stringify(ops)}`,
+    )
+    const marksNow = await page.evaluate((t) => ({
+      source: window.__qua.marks().filter((m) => m.blockId === t.src).length,
+      clone: window.__qua.marks().filter((m) => m.blockId === t.clone).length,
+    }), { src: target.id, clone: ops[0].block })
+    assert(marksNow.source === 1 && marksNow.clone === 1, `源块与克隆块应各有一段粗体：${JSON.stringify(marksNow)}`)
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const back = await page.evaluate((t) => window.__qua.marks().filter((m) => m.blockId === t.id).length, target)
+    assert(back === 1, `一次撤销后源块的粗体应原样还在：${back}`)
+
+    await ctx.close()
+    return `duplicate ⇒ [克隆 upsert{自己落点}, 克隆锚点 anno.set]；源/别块锚点不动；⌘Z 全滚回`
+  },
+)
+
+await check(
+  'T87 删选中的块走一笔事务：每棵被删子树逐块 block.delete，一次撤销整组回来',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    // 前置：两个兄弟块插在页根下（必在视口内；setup 的 op 不参与断言）
+    const made = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const rootId = ed.doc.roots[0].id
+      const a = ed.insertBlockAfter(rootId, '删选甲甲甲')
+      const b = a ? ed.insertBlockAfter(a, '删选乙乙乙') : null
+      return { a, b }
+    })
+    assert(made.a && made.b, '前置：两个兄弟块应建出来')
+    await page.waitForTimeout(120)
+
+    const rects = await page.evaluate((t) => {
+      const el = (id) => document.querySelector(`.blk[data-block-id="${id}"]`)
+      const r = (id) => {
+        const b = el(id)?.getBoundingClientRect()
+        return b ? { x: b.left + b.width / 2, y: b.top + b.height / 2 } : null
+      }
+      return { from: r(t.a), to: r(t.b) }
+    }, made)
+    assert(rects.from && rects.to, '前置：两个块都应画在屏上')
+    await page.mouse.move(rects.from.x, rects.from.y)
+    await page.mouse.down()
+    await page.mouse.move(rects.to.x, rects.to.y, { steps: 8 })
+    await page.mouse.up()
+    await page.waitForTimeout(120)
+    const selCount = await page.evaluate(() => window.__qua.snapshot().blockSelectionCount)
+    assert(selCount === 2, `拖选应选中 2 块：${selCount}`)
+
+    await page.evaluate(() => window.__qua.__editor.deleteSelectedBlocks())
+    await page.waitForTimeout(120)
+    const ops = await opShape(page)
+    assert(ops.length === 2, `删两个叶子应恰好 2 条 op：${JSON.stringify(ops)}`)
+    assert(
+      ops.every((o) => o.e === 'block' && o.op === 'delete' && (o.block === made.a || o.block === made.b)),
+      `两条都应是这两块的 block.delete：${JSON.stringify(ops)}`,
+    )
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const back = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      return t && [t.a, t.b].every((id) => ed.store.find(id))
+    }, made)
+    assert(back, '一次撤销后两块都应回来')
+
+    await ctx.close()
+    return `deleteSelectedBlocks ⇒ block.delete × 2；⌘Z 整组回来`
+  },
+)
+
+await check(
+  'T88 粘贴走同一笔事务：单行＝1 条正文 upsert；多行＝正文 1 ＋ 每行 1 条 insert；各一次撤销复原',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const target = await pickLeaf(page)
+    assert(target, '第一页里应有可编辑的内容块')
+
+    // ① 单行
+    await page.evaluate((t) => window.__qua.__editor.pasteAt(t.id, 0, '粘贴头'), target)
+    await page.waitForTimeout(120)
+    const ops1 = await opShape(page)
+    assert(ops1.length === 1, `单行粘贴应恰好 1 条 op：${JSON.stringify(ops1)}`)
+    assert(
+      ops1[0].e === 'block' && ops1[0].op === 'upsert' && ops1[0].block === target.id && ops1[0].text?.startsWith('粘贴头'),
+      `应是正文 upsert：${JSON.stringify(ops1)}`,
+    )
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const back1 = await page.evaluate((t) => window.__qua.__editor.store.find(t.id)?.text ?? '', target)
+    assert(back1 === target.text, `一次撤销应回原文：${JSON.stringify(back1)}`)
+
+    // ② 多行：首行拼进原块，其余每行一个新块
+    await page.evaluate((t) => window.__qua.__editor.pasteAt(t.id, t.text.length, '甲行\n乙行\n丙行'), target)
+    await page.waitForTimeout(120)
+    const ops2 = await opShape(page)
+    assert(ops2.length === 3, `三行粘贴应恰好 3 条 op（正文＋2 个新块）：${JSON.stringify(ops2)}`)
+    assert(
+      ops2[0].e === 'block' && ops2[0].op === 'upsert' && ops2[0].block === target.id && ops2[0].text?.endsWith('甲行'),
+      `第一条应是首块正文 upsert：${JSON.stringify(ops2)}`,
+    )
+    assert(
+      ops2.slice(1).every((o, i) => o.e === 'block' && o.op === 'upsert' && o.parent === target.parentId && o.index === target.index + 1 + i),
+      `其余行应逐块 insert、落点递增：${JSON.stringify(ops2)}`,
+    )
+    const kids = await page.evaluate((t) => {
+      const p = window.__qua.__editor.store.find(t.parentId)
+      const i = p?.children.findIndex((x) => x.id === t.id) ?? -1
+      return { one: p?.children[i + 1]?.text ?? '', two: p?.children[i + 2]?.text ?? '' }
+    }, target)
+    assert(kids.one === '乙行' && kids.two === '丙行', `新块应真的挂出来：${JSON.stringify(kids)}`)
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const back2 = await page.evaluate((t) => {
+      const p = window.__qua.__editor.store.find(t.parentId)
+      const i = p?.children.findIndex((x) => x.id === t.id) ?? -1
+      return {
+        text: window.__qua.__editor.store.find(t.id)?.text ?? '',
+        next: p?.children[i + 1]?.text ?? '',
+      }
+    }, target)
+    assert(back2.text === target.text && back2.next !== '乙行', `一次撤销应回原文、新块消失：${JSON.stringify(back2)}`)
+
+    await ctx.close()
+    return `pasteAt ⇒ 单行 [upsert{text}]；多行 [upsert ＋ insert×n]；⌘Z 各自复原`
+  },
+)
+
 /* ---------------------------------------------------------------- 汇总 */
 
 await browser.close()
