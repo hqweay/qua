@@ -853,6 +853,8 @@ function commandDecls() {
   for (const f of codeFiles) {
     const r = rel(f)
     if (!(r.startsWith('src/app/') || r.startsWith('src/ui/'))) continue
+    // 装配层的分片（wiring）与 main.ts 同一角色：store 实例只在这里创建并注入
+    if (r.startsWith('src/app/wiring/')) continue
     const { sf } = tsFile(f)
     for (const imp of importsOf(sf)) {
       if (FORBIDDEN.test(imp.spec)) hits.push(`${r}:${imp.line} import 了块存储：${imp.spec}`)
@@ -863,7 +865,7 @@ function commandDecls() {
     title: 'app／ui 不得 import 块存储（BlockStore／MemoryKb）——数据只经注入的依赖面与读门面',
     method: `静态扫 src/app/**、src/ui/** 的 import，禁 core/store.ts、core/kb/memory.ts、core/kb/index.ts`,
     scope: `src/app/** · src/ui/**`,
-    whitelist: 'src/view/**（编辑器就是 store 的持有者）· src/main.ts（renderer 装配层，唯一接线处）· core 内部自用',
+    whitelist: 'src/view/**（编辑器就是 store 的持有者）· src/main.ts ＋ src/app/wiring/**（renderer 装配层：store 实例只在这里创建并注入）· core 内部自用',
     hits: hits.length,
     detail: hits,
     note: '依赖接口里的整库口子由 [24] 看',
