@@ -4831,6 +4831,253 @@ await check(
   },
 )
 
+await check(
+  'T71 退格合并走一笔事务：正文 upsert ＋ 子块逐个 move ＋ 被并块 block.delete，且不进回收站',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 挑一个**有子块、无锚点**的块，且它在**文档序**里的前一块可写。
+     *
+     * ⚠️ 「前一块」是文档序（先序）的前一个，不是上一个**兄弟**：
+     *    有子块的前兄弟 ⇒ 前一块是它子树里的最后一个后代。判据必须与 `mergeIntoPrev` 同一口径。
+     */
+    const pick = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const marks = window.__qua.marks()
+      const atoms = window.__qua.atoms()
+      const rows = []
+      const walk = (list, parent) => {
+        list.forEach((b, i) => {
+          rows.push({ block: b, parentId: parent?.id ?? null, index: i })
+          walk(b.children, b)
+        })
+      }
+      walk(ed.doc.roots, null)
+      const writable = (b) => !b.props?._date && !b.props?._kind && !b.props?._query
+      for (let i = 1; i < rows.length; i++) {
+        const cur = rows[i].block
+        const prev = rows[i - 1].block
+        if (cur.children.length < 1 || !cur.text || !writable(prev)) continue
+        if (marks.some((m) => m.blockId === cur.id) || atoms.some((a) => a.blockId === cur.id)) continue
+        return {
+          id: cur.id,
+          text: cur.text,
+          kids: cur.children.map((k) => k.id),
+          prevId: prev.id,
+          prevText: prev.text,
+          prevKids: prev.children.length,
+          prevChildIds: prev.children.map((k) => k.id),
+        }
+      }
+      return null
+    })
+    assert(pick, '第一页里应有「有子块、无锚点、前一块可写」的块')
+
+    await page.evaluate((id) => window.__qua.focusBlock(id, 0), pick.id)
+    await page.keyboard.press('Backspace')
+    await page.waitForTimeout(200)
+
+    const after = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const prev = ed.store.find(t.prevId)
+      let trashed = false
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === t.id) trashed = true
+          walk(b.children)
+        }
+      }
+      walk(ed.store.trash)
+      return {
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, value: o.value })),
+        gone: ed.store.find(t.id) === undefined,
+        prevText: prev?.text ?? null,
+        prevKids: (prev?.children ?? []).map((b) => b.id),
+        trashed,
+      }
+    }, pick)
+
+    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.text !== undefined)
+    const moveOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent !== undefined)
+    const delOps = after.ops.filter((o) => o.e === 'block' && o.op === 'delete')
+
+    assert(textOps.length === 1, `应恰有 1 条正文 upsert：${JSON.stringify(after.ops)}`)
+    assert(textOps[0].id === pick.prevId, `正文应写进前一块「${pick.prevId}」：${JSON.stringify(textOps[0])}`)
+    assert(
+      textOps[0].value.text === pick.prevText + pick.text,
+      `前一块应变成「前文＋被并块」：${JSON.stringify(textOps[0].value.text)}`,
+    )
+    assert(moveOps.length === pick.kids.length, `子块应逐个 move（${pick.kids.length} 条）：${JSON.stringify(after.ops)}`)
+    for (const [n, kid] of pick.kids.entries()) {
+      const op = moveOps.find((o) => o.id === kid)
+      assert(op, `子块 ${kid} 应有自己的 move op：${JSON.stringify(moveOps)}`)
+      assert(op.value.parent === pick.prevId, `子块应挂到前一块下：${JSON.stringify(op)}`)
+      assert(op.value.index === pick.prevKids + n, `子块落点应是 ${pick.prevKids + n}：${JSON.stringify(op.value)}`)
+    }
+    assert(delOps.length === 1 && delOps[0].id === pick.id, `被并块应有 1 条 block.delete：${JSON.stringify(delOps)}`)
+    assert(after.ops.length === 2 + pick.kids.length, `op 总数应是「正文 1 ＋ 子块 ${pick.kids.length} ＋ 删除 1」：${JSON.stringify(after.ops)}`)
+
+    assert(after.gone, '被并块应从模型里消失')
+    assert(after.prevText === pick.prevText + pick.text, `模型里前一块正文应已拼接：${JSON.stringify(after.prevText)}`)
+    assert(
+      pick.prevChildIds.filter((id) => id !== pick.id).every((id, n) => after.prevKids[n] === id),
+      `前一块原有子块（被并块自己除外）应原样在前：${JSON.stringify({ want: pick.prevChildIds, got: after.prevKids })}`,
+    )
+    assert(
+      pick.kids.every((kid) => after.prevKids.includes(kid)),
+      `被并块的子块应挂到前一块下：${JSON.stringify({ want: pick.kids, got: after.prevKids })}`,
+    )
+    assert(!after.trashed, '被并块不进回收站（内容已经搬进前一块，不留空壳）')
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(200)
+    const back = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const prev = ed.store.find(t.prevId)
+      let cur = null
+      let total = 0
+      const walk = (list, parent) => {
+        list.forEach((b, i) => {
+          total++
+          if (b.id === t.id) cur = { parentId: parent?.id ?? null, index: i, text: b.text, kids: b.children.map((k) => k.id) }
+          walk(b.children, b)
+        })
+      }
+      walk(ed.store.blocks, null)
+      return { prevText: prev?.text ?? null, cur, total, dom: Boolean(document.querySelector(`.blk[data-block-id="${t.id}"]`)) }
+    }, pick)
+
+    assert(back.prevText === pick.prevText, `一次撤销前一块正文应复原：${JSON.stringify(back.prevText)}`)
+    assert(back.cur, '一次撤销后块应回到模型里')
+    assert(back.cur.text === pick.text, `正文应原样：${JSON.stringify(back.cur.text)}`)
+    assert(
+      back.cur.kids.length === pick.kids.length && back.cur.kids.every((k, n) => k === pick.kids[n]),
+      `子块应回到被并块下（原序）：${JSON.stringify(back.cur.kids)}`,
+    )
+    assert(back.dom, '撤销后 DOM 里应重新出现这一行')
+
+    await ctx.close()
+    return `退格合并 ⇒ ops=[正文 1 ＋ 子块 ${pick.kids.length} ＋ delete 1]；不进回收站；⌘Z 连子块一起复原`
+  },
+)
+
+await check(
+  'T72 退格合并把锚点搬到前一块：区间整体后移前一块原长，被并块不留锚点',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /** 挑一个**带锚点**的块（mark 或 atom），且文档序前一块可写 */
+    const target = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const marks = window.__qua.marks()
+      const atoms = window.__qua.atoms()
+      const rows = []
+      const walk = (list, parent) => {
+        list.forEach((b, i) => {
+          rows.push({ block: b, parentId: parent?.id ?? null, index: i })
+          walk(b.children, b)
+        })
+      }
+      walk(ed.doc.roots, null)
+      const writable = (b) => !b.props?._date && !b.props?._kind && !b.props?._query
+      for (let i = 1; i < rows.length; i++) {
+        const cur = rows[i].block
+        const prev = rows[i - 1].block
+        if (!writable(prev)) continue
+        const m = marks.filter((x) => x.blockId === cur.id)
+        const a = atoms.filter((x) => x.blockId === cur.id)
+        if (m.length === 0 && a.length === 0) continue
+        return { id: cur.id, prevId: prev.id }
+      }
+      return null
+    })
+    assert(target, '第一页里应有「带锚点、前一块可写」的块')
+
+    await page.evaluate((id) => window.__qua.focusBlock(id, 0), target.id)
+    /**
+     * **聚焦之后再取锚点**：落光标会裁剪越界锚点（`pruneToText`），拿聚焦前的偏移
+     * 去比撤销快照，会得到一个「撤销后对不上」的假红。
+     */
+    const pick = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const prev = ed.store.find(t.prevId)
+      return {
+        ...t,
+        prevText: prev?.text ?? '',
+        marks: ed.store.marks
+          .filter((x) => x.blockId === t.id)
+          .map(({ id, type, start, end }) => ({ id, type, start, end })),
+        atoms: ed.store.atoms.filter((x) => x.blockId === t.id).map(({ id, start, end }) => ({ id, start, end })),
+      }
+    }, target)
+    await page.keyboard.press('Backspace')
+    await page.waitForTimeout(200)
+
+    const after = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      return {
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, block: o.block, id: o.id, op: o.op })),
+        marks: ed.store.marks.map(({ id, type, blockId, start, end }) => ({ id, type, blockId, start, end })),
+        atoms: ed.store.atoms.map(({ id, blockId, start, end }) => ({ id, blockId, start, end })),
+      }
+    }, pick)
+
+    const shift = pick.prevText.length
+    for (const m of pick.marks) {
+      // `normalizeMarks` 会把同类型、接壤的区间并成一条 ⇒ 用「覆盖范围」判，不认 id
+      const got = after.marks.find(
+        (x) => x.blockId === pick.prevId && x.type === m.type && x.start <= m.start + shift && x.end >= m.end + shift,
+      )
+      assert(got, `mark ${m.id} 应搬到前一块并覆盖 [${m.start + shift},${m.end + shift})：${JSON.stringify(after.marks)}`)
+    }
+    for (const a of pick.atoms) {
+      const got = after.atoms.find((x) => x.id === a.id)
+      assert(got, `atom ${a.id} 应还在`)
+      assert(got.blockId === pick.prevId, `atom ${a.id} 应落到前一块：${JSON.stringify(got)}`)
+      assert(
+        got.start === a.start + shift && got.end === a.end + shift,
+        `atom ${a.id} 区间应整体后移 ${shift}：${JSON.stringify(a)} → ${JSON.stringify(got)}`,
+      )
+    }
+    assert(!after.atoms.some((x) => x.blockId === pick.id), '被并块上不该留下锚点')
+    assert(!after.marks.some((x) => x.blockId === pick.id), '被并块上不该留下 mark')
+
+    const annoDels = after.ops.filter((o) => o.e === 'anno' && o.op === 'delete')
+    assert(
+      annoDels.length === pick.marks.length + pick.atoms.length,
+      `被并块这边每个锚点各一条 anno.delete：${JSON.stringify(after.ops)}`,
+    )
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(200)
+    const back = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      return {
+        marks: ed.store.marks.filter((x) => x.blockId === t.id).map(({ id, start, end }) => ({ id, start, end })),
+        atoms: ed.store.atoms.filter((x) => x.blockId === t.id).map(({ id, start, end }) => ({ id, start, end })),
+      }
+    }, pick)
+    assert(
+      JSON.stringify(back.marks.map((m) => [m.id, m.start, m.end]).sort()) ===
+        JSON.stringify(pick.marks.map((m) => [m.id, m.start, m.end]).sort()),
+      `一次撤销 mark 应回原块原位：undo 后 ${JSON.stringify(back.marks)}，合并前 ${JSON.stringify(pick.marks)}`,
+    )
+    assert(
+      JSON.stringify(back.atoms.map((a) => [a.id, a.start, a.end]).sort()) ===
+        JSON.stringify(pick.atoms.map((a) => [a.id, a.start, a.end]).sort()),
+      `一次撤销 atom 应回原块原位：undo 后 ${JSON.stringify(back.atoms)}，合并前 ${JSON.stringify(pick.atoms)}`,
+    )
+
+    await ctx.close()
+    return `合并搬锚点：${pick.marks.length} mark ＋ ${pick.atoms.length} atom 整体后移 ${shift}；anno.set/delete 各一条；⌘Z 回原位`
+  },
+)
+
 /* ---------------------------------------------------------------- 汇总 */
 
 await browser.close()

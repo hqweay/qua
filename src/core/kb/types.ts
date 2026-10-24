@@ -108,10 +108,11 @@ export interface Tx {
   /**
    * 删除整棵子树：从树上摘下来、打删除标记、放进回收站。
    *
-   * 阶段 1 的回收站仍是「摘出来的一列子树」；等块上有了原位删除标记，
-   * 这里退化成一次属性写入，op 形状不变。
+   * `trash: false` ＝ **这块被并掉了**：正文与子块已经搬进别的块，再留一个空壳
+   * 在回收站里只是噪声。两种情况的 op 形状相同（`block.delete`）——回收站是
+   * 阶段 1 的内存表示，不是持久化事实。
    */
-  remove(id: string): void
+  remove(id: string, opts?: { trash?: boolean }): void
 
   /** 写一个属性槽（`pos` ＝ 显示顺序，给「有行未填」的槽位用） */
   setProp(id: string, name: string, value: unknown, pos?: number): void
