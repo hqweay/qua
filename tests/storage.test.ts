@@ -26,7 +26,6 @@ function lib(patch: Partial<Workspace> = {}): Workspace {
   return {
     version: WORKSPACE_VERSION,
     blocks: [{ id: 'b1', text: 'hello', children: [] }],
-    folded: {},
     activeId: 'b1',
     savedAt: 0,
     marks: [],

@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf, aliasesOf, allPropDefs, allTags, blockTypeOf, DISPLAY_PROP, listsOf, tagIdsOf, childTags, claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, primaryAliasOf, prop, propKindOf, removeList, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { addAlias, addList, addressesOf, aliasesOf, allPropDefs, allTags, blockTypeOf, DISPLAY_PROP, listsOf, tagIdsOf, childTags, claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, primaryAliasOf, prop, propKindOf, removeList, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys, type FoldState } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
 import type { Op, Tx } from './core/kb/types.ts'
@@ -323,11 +323,31 @@ function syncSections(): void {
   // 否则删掉的块只活在内存里，重开就真没了
   ws.trash = blocks.trash
   /**
-   * 折叠态是**库的视图状态**，所以它和 marks/atoms 一样从视图写回库：
-   * 编辑器持的是 `doc.folded`（视图那份），落盘要的是 `ws.folded`（库那份）。
-   * ⚠️ 编辑器还没装配时（读盘后的首次落盘）没有可写回的来源，保留 `ws.folded` 原值。
+   * 折叠态是**设备状态**（`qua.device`），所以它不再写回库：编辑器持的是 `doc.folded`
+   * （视图那份），落盘要的是 `device.folded`（这台设备那份）。
+   * ⚠️ 编辑器还没装配时（读盘后的首次落盘）没有可写回的来源，保留 `device.folded` 原值。
+   * ⚠️ 这里只**搬一次引用**（折叠表的每次改动都是新对象，见 `core/tree.ts` 的 `writeFold`），
+   *    随后交给设备那条防抖队列（`saveDeviceNow`）：它与库那张写队列互不相干，
+   *    一次折叠不会顺带重写两遍库字节，一次打字也不会顺带重写设备字节。
    */
-  if (mainEd) ws.folded = mainEd.doc.folded ?? {}
+  if (mainEd) {
+    const next = mainEd.doc.folded ?? {}
+    /**
+     * ⚠️ **只在真的变了才排设备落盘**：`syncSections` 在每次打字后都会跑，
+     *    无条件排一次就会让「敲一个字」顺便重写一遍设备字节（偏好与折叠表同一份 payload）。
+     *    这里比内容而不是比引用：原地改写也不会让这份落盘悄悄失效。
+     */
+    if (!sameFold(device.folded, next)) {
+      device.folded = next
+      scheduleDeviceSave()
+    }
+  }
+}
+
+/** 两张折叠表是否一致（只记收起的，所以比 key 集合就够） */
+function sameFold(a: FoldState, b: FoldState): boolean {
+  const ak = Object.keys(a)
+  return ak.length === Object.keys(b).length && ak.every((id) => b[id] === true)
 }
 
 let saveFailureShown = false
@@ -856,7 +876,7 @@ const pageDeps: PageDeps = {
     // 换页/换焦点对象：上一条「聚焦块」不再成立，等 focusFirstBlock 重新设上
     propsBlockId = null
     ed = mainEd
-    // 正文视图的折叠态是**库级**那份；取当前视图持有的那一份（`ws.folded` 只在落盘时同步，可能落后一步）
+    // 正文视图的折叠态是**设备**那份；取当前视图持有的那一份（`device.folded` 只在落盘时同步，可能落后一步）
     mainEd.loadPage({ roots, folded: mainEd.doc.folded, trash: blocks.trash }, marks as never, atoms as never)
     renderBacklinks()
     renderQueryView()
@@ -1256,6 +1276,12 @@ const app: App = {
        * 这条兜底上，拿回**旧库首块**再装进新库的视图（表现为「重开后字丢了」）。
        * 反过来，`p` 也不能早于这两步 —— 换了库却还拿旧落点，等于把旧块装进新库。
        */
+      /**
+       * **折叠态不能带过河**：旧库的块 id 在新库里不存在（或指到另一块），
+       * 留着只会让新库的行莫名其妙地折起来 ⇒ 换库即清空（设备那侧的偏好则保留）。
+       */
+      device.folded = {}
+      scheduleDeviceSave()
       blocks.reset(next.blocks, next.marks, next.atoms, next.trash)
       kb = new MemoryKb(blocks)
       const p = activeBlock()
@@ -1275,7 +1301,7 @@ const app: App = {
       // ⚠️ 光标必须落在**第一个可编辑的行**上（日记流的第一段是只读日期行）。
       //    原来固定 `roots[0]`，于是载入假数据后光标停在日期行、第一行看着「没有名字」。
       const caret = firstEditableRoot(roots[0])
-      mainEd.loadPage({ roots, folded: ws.folded, trash: blocks.trash }, ws.marks, ws.atoms, { blockId: caret?.id ?? '', off: 0 })
+      mainEd.loadPage({ roots, folded: device.folded, trash: blocks.trash }, ws.marks, ws.atoms, { blockId: caret?.id ?? '', off: 0 })
       renderBacklinks()
       renderQueryView()
       chrome.renderEmptyHint(activeBlock().children)
@@ -1392,7 +1418,8 @@ ed = new BlockEditor({
   blankArea: chrome.blankAreaEl,
   // 共享 store：块是活引用；marks/atoms/undo 也是共享的
   store: blocks,
-  doc: { roots: bootRoots, folded: ws.folded, trash: blocks.trash },
+  // 折叠态是**设备**那份（`qua.device`）：换机器就是另一份，换库时由 `replaceWorkspace` 清空
+  doc: { roots: bootRoots, folded: device.folded, trash: blocks.trash },
   marks: ws.marks,
   atoms: ws.atoms,
   /**

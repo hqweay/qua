@@ -25,8 +25,6 @@ export interface SeedBlock {
    * 名字到 id 的解析与「敲 `#名字`」共用 `ensureTag` ⇒ 同名块不会被建出两份。
    */
   tags?: string[]
-  /** 种子里的初始折叠态：**进库级的折叠表**，不进块（见 `FoldState`） */
-  folded?: boolean
   /** 系统属性：查询块的 `_query` 条件就落在这里 */
   props?: BlockProps
   children?: SeedBlock[]

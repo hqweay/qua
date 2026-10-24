@@ -1,9 +1,12 @@
 /**
- * 造树器：把迷你 DSL 写成的一段 `SeedBlock[]` 装成模型里的块（＋锚点 / 原子 / 折叠表 / 待落标签）。
+ * 造树器：把迷你 DSL 写成的一段 `SeedBlock[]` 装成模型里的块（＋锚点 / 原子 / 待落标签）。
  *
  * 这里**不放任何一页的具体内容**：数据住在 `seed.ts` / `states.ts`，冷启动态住在
  * `core/bootstrap.ts`。三处共用同一套造块路径，是因为「页 / 日记 / 标签归属 / `[[ ]]` 解析」
  * 的先后顺序本身就是模型约束（标签块必须先于引用解析存在），多一份实现就会多一个顺序答案。
+ *
+ * ⚠️ 夹具**不决定折叠态**：折叠住在设备状态（`qua.device`），块 id 每次 seed 都会变，
+ *    种子里的「折起这一行」没法跟到落盘的那一份上 —— 于是它只会是一次骗人的初始值。
  */
 import {
   addTagId,
@@ -18,7 +21,6 @@ import {
   uuidv7Hex,
   type Atom,
   type Block,
-  type FoldState,
   type Mark,
 } from '../index.ts'
 import { WORKSPACE_VERSION, type PageBlock, type Workspace } from '../workspace.ts'
@@ -36,13 +38,11 @@ export interface BuiltPage {
   atoms: Atom[]
   /** 还没解析成 id 的标签归属（森林凑齐、标签块建好之后再落进 `_tags`） */
   pendingTags: { block: Block; name: string }[]
-  /** 这一页里初始被收起的块 id（最后合并成库级折叠表） */
-  folded: FoldState
 }
 
 export function buildTree(
   seeds: SeedBlock[],
-  out: { marks: Mark[]; atoms: Atom[]; refs: BuiltPage['refs']; folded: FoldState; pendingTags: BuiltPage['pendingTags'] },
+  out: { marks: Mark[]; atoms: Atom[]; refs: BuiltPage['refs']; pendingTags: BuiltPage['pendingTags'] },
 ): Block[] {
   return seeds.map((s) => {
     const parsed = parseInline(s.text)
@@ -54,7 +54,6 @@ export function buildTree(
      */
     const b = mkBlock(text)
     for (const name of s.tags ?? []) out.pendingTags.push({ block: b, name })
-    if (s.folded) out.folded[b.id] = true
     // 任务状态是**真实属性**：它的键是定义块的 id，值与标签声明无关（声明只提供入口）
     if (s.task !== undefined) b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: s.task }
     if (s.props) b.props = { ...(b.props ?? {}), ...s.props }
@@ -101,7 +100,7 @@ export function buildTree(
  *    （引用/反链走主名，列表标题仍可回落到正文，见 `displayNameOf` 的优先级）。
  */
 export function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uuidv7Hex()): BuiltPage {
-  const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'], folded: {} as FoldState, pendingTags: [] as BuiltPage['pendingTags'] }
+  const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'], pendingTags: [] as BuiltPage['pendingTags'] }
   const children = buildTree(seeds, acc)
   const name = title.trim() !== '' ? title.trim() : `未命名-${id.slice(-6)}`
   const page: PageBlock = {
@@ -110,7 +109,7 @@ export function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uui
     children,
     props: { [ALIASES_PROP]: [name], [LISTS_PROP]: ['page'], [DISPLAY_PROP]: 'alias', _icon: icon },
   }
-  return { page, refs: acc.refs, marks: acc.marks, atoms: acc.atoms, folded: acc.folded, pendingTags: acc.pendingTags }
+  return { page, refs: acc.refs, marks: acc.marks, atoms: acc.atoms, pendingTags: acc.pendingTags }
 }
 
 /**
@@ -118,7 +117,7 @@ export function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uui
  * 它和页复用同一个 `BuiltPage` 形状（子树 / 锚点 / 原子），只是身份来源不同。
  */
 export function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
-  const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'], folded: {} as FoldState, pendingTags: [] as BuiltPage['pendingTags'] }
+  const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'], pendingTags: [] as BuiltPage['pendingTags'] }
   const children = buildTree(seeds, acc)
   const block: Block = {
     id: journalId(date),
@@ -126,7 +125,7 @@ export function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
     children,
     props: { _date: date, _icon: 'lucide:calendar' },
   }
-  return { page: block, refs: acc.refs, marks: acc.marks, atoms: acc.atoms, folded: acc.folded, pendingTags: acc.pendingTags }
+  return { page: block, refs: acc.refs, marks: acc.marks, atoms: acc.atoms, pendingTags: acc.pendingTags }
 }
 
 /**
@@ -206,14 +205,14 @@ export const LONG_EN = [
  * 落在第一块）是**库的形状**，不是某一态的特征：
  * 各写一份就会让某个态悄悄缺一格，落盘后由别的读路径发现。
  *
- * ⚠️ **设备偏好不在壳里**（v15 起）：主题／槽宽／钉住是「这台设备怎么显示」，
- *    换库（演示状态切换）不该把它带走 ⇒ 它们住在 `qua.device`（`storage/device.ts`）。
+ * ⚠️ **设备状态不在壳里**（v15 起偏好、v16 起折叠态）：主题／槽宽／钉住／哪几行收起
+ *    是「这台设备怎么显示」，换库（演示状态切换）不该把它带走 ⇒ 它们住在
+ *    `qua.device`（`storage/device.ts`）。
  */
 export function forest(blocks: Block[], built: BuiltPage[]): Workspace {
   return {
     version: WORKSPACE_VERSION,
     blocks,
-    folded: Object.assign({}, ...built.map((b) => b.folded)),
     activeId: blocks[0]?.id ?? '',
     savedAt: Date.now(),
     marks: built.flatMap((b) => b.marks),

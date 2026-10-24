@@ -2,7 +2,7 @@
  * 落盘形状（**纯编解码，零 I/O**）。
  *
  * 这是「库里存的是什么」的唯一权威：版本号、块森林的深度校验。
- * 设备偏好（主题／槽宽／钉住）**不在库里**，见 `storage/device.ts`。
+ * 设备状态（主题／槽宽／钉住／折叠态）**不在库里**，见 `storage/device.ts`。
  * 它不认识 `localStorage`、不认识内核、也不认识 DOM —— 所以能直接单测
  * （`tests/workspace.test.ts` 就是拿它跑的）。
  *
@@ -43,19 +43,19 @@ import { LEGACY_ALIAS_PROP, normalizeAlias } from '../alias.ts'
  * v14 → v15：设备偏好（主题／槽宽／钉住）搬出库，改存 `qua.device`（`storage/device.ts`）。
  *            旧库里的 `prefs` 新代码不读（那份偏好会静默回到默认）⇒ 作废重 seed；
  *            同时保证落盘的每一份库都**没有**这一格，读路径不必判「有没有 prefs」。
+ * v15 → v16：折叠态搬出库，改存 `qua.device` 的 `folded` 一格。
+ *            理由是它与偏好同性质：**这台设备此刻怎么看**，不是内容；
+ *            旧库里的 `folded` 新代码不读（那几个块会静默展开）⇒ 作废重 seed。
+ *            ⇒ 版本号动一格，是为了让「库里没有折叠表」成为**唯一形状**，
+ *            读路径不必再判「这库有没有带 folded」。
  */
-export const WORKSPACE_VERSION = 15
+export const WORKSPACE_VERSION = 16
 
 /** 示例库：一片块森林 ＋ 行内锚点/原子 */
 export interface Workspace {
   version: typeof WORKSPACE_VERSION
   /** 块森林（承 1／5：整个库是一片森林，没有「页实体」这一层） */
   blocks: Block[]
-  /**
-   * 折叠态（块 id → 收起）。它属于**库的视图状态**，不属于任何块：
-   * 挂在块上会被树操作当货物搬走（合并/复制）、会进撤销栈、会跟着导出跑。
-   */
-  folded: FoldState
   /** 中心槽持有的「当前对象」（只有中心槽有这个概念） */
   activeId: string
   savedAt: number
@@ -136,17 +136,7 @@ function isBlock(x: unknown): x is Block {
 }
 
 /**
- * 折叠表：必须是 `Record<string, true>`。
- *
- * ⚠️ 只认 `true`：值的语义是「收起了」，写 `false` 与「不在表里」是同一件事的两种写法，
- *    留着它就能出现「表里有这个 id，但它是展开的」这种第三态。
- */
-function isFoldState(x: unknown): x is FoldState {
-  if (!x || typeof x !== 'object' || Array.isArray(x)) return false
-  return Object.values(x).every((v) => v === true)
-}
-
-/** 深度校验一棵子树（属性袋只检查「是对象」，不校验每个 key —— 那是 schema 层的事） */
+ * 深度校验一棵子树（属性袋只检查「是对象」，不校验每个 key —— 那是 schema 层的事） */
 function isBlockTree(x: unknown): x is Block {
   if (!isBlock(x)) return false
   return x.children.every(isBlockTree)
@@ -169,7 +159,6 @@ export function parseWorkspace(raw: string | null): ParseResult {
   if (!Array.isArray(ws.blocks) || ws.blocks.length === 0 || !ws.blocks.every(isBlockTree)) {
     return { status: 'corrupt', reason: 'shape' }
   }
-  if (!isFoldState(ws.folded)) return { status: 'corrupt', reason: 'shape' }
   // 回收站缺省成空数组：这是**新增**的一格，旧库没有它不代表字节坏了；
   // 但既然有，形状就必须对（「有但读不懂」与「没有」是两件事）。
   if (ws.trash !== undefined && (!Array.isArray(ws.trash) || !ws.trash.every(isBlockTree))) {
@@ -187,8 +176,8 @@ export function parseWorkspace(raw: string | null): ParseResult {
 /**
  * 一份页块的子树 → 编辑器文档（中心槽渲染它的子树）。
  *
- * `folded` 由调用方给：折叠表是**整库**的（块 id 全局唯一），但每个视图只该读它自己那份
- * （正文／反链／查询各带各的），所以这里不偷偷把库里的那份抄进来。
+ * `folded` 由调用方给：折叠表是**设备**级的（块 id 全局唯一），但每个视图只该读它自己那份
+ * （正文／反链／查询各带各的），所以这里不偷偷把别处那份抄进来。
  */
 export function pageDoc(p: Block, folded: FoldState = {}): Doc {
   return { roots: p.children, folded }
