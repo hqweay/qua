@@ -60,7 +60,9 @@ build.on('exit', (code) => {
 
 /* 2. vite */
 function startVite() {
-  const vite = run(process.execPath, [`${root}node_modules/vite/bin/vite.js`])
+  // vite 的 host 默认跟随系统对 localhost 的解析——解析成 ::1 的机器上只绑 IPv6，
+  // 而下面的就绪轮询与 electron 的加载地址都走 127.0.0.1 ⇒ 显式钉 IPv4，两端同址。
+  const vite = run(process.execPath, [`${root}node_modules/vite/bin/vite.js`, '--host', '127.0.0.1'])
   vite.on('exit', (code) => {
     if (!shuttingDown) console.error(`[dev] vite 退出了（code=${code}）`)
     shutdown(code ?? 0)
