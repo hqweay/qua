@@ -65,16 +65,23 @@ export const TASK_STATUS_PROP_ID = derivedId('prop', 'core/task-status')
  *
  * 三态与旧的 `'todo' | 'done' | 无` 对得上：
  *   · `true` ⇒ `'done'`（做完了）；
- *   · `false` ⇒ `'todo'`（**是任务、还没做完** —— 它是有值的，不是缺失）；
- *   · 缺失 ⇒ `undefined`（这块压根没有任务状态）。
+ *   · `false` ⇒ `'todo'`（**是任务、还没做完**）；
+ *   · **有槽但没值** ⇒ 也是 `'todo'`（**刚挂上、还没点过的那一下**）；
+ *   · 没有这一槽 ⇒ `undefined`（这块压根不是任务）。
  *
- * 为什么 `false` 不能并进缺失：那样「还没做完」与「不是任务」会变成同一个状态，
- * 而「按任务筛选」要的正是它们分开。查询层的 `TodoFilter` 因此一行都不用改。
+ * ⚠️ **判据是「有没有这一槽」，不是「有没有值」。** 这是 `e4cb946`（槽位说有没有、
+ *    `props[propId]` 说值是什么）之后最容易踩的一处：槽位与值是两个问题。
+ *    把「未填」并进 `undefined` 会让**刚加上的任务立刻不算任务** —— 屏幕上有一个空心方框
+ *    （渲染看的是槽位），查询「未完成」却查不到它（这里看的是值），同一个块两种答案。
+ *
+ * 为什么 `false` 与「未填」都算 `'todo'`、而不并进缺失：那样「还没做完」与「不是任务」
+ * 会变成同一个状态，而「按任务筛选」要的正是它们分开。查询层的 `TodoFilter` 因此一行都不用改。
  */
 export function todoOf(block: Block): TodoState | undefined {
   const v = valueOf(block, TASK_STATUS_PROP_ID)
   if (v === true) return 'done'
-  if (v === false) return 'todo'
+  // 槽位在 ⇒ 它是任务：`false` 是「点了但没做完」，`undefined` 是「还没点过」，两者都是 todo
+  if (v === false || ownPropIds(block).includes(TASK_STATUS_PROP_ID)) return 'todo'
   return undefined
 }
 

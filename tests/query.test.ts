@@ -16,6 +16,7 @@ import {
   hasTag,
   mkTagBlock,
   normalizeTag,
+  OWN_PROPS_PROP,
   tagMemberIds,
   readResult,
   readSpec,
@@ -137,6 +138,25 @@ test('runQuery：ref 条件＝指向边（只认 atom 的 target id）', () => {
   const { blocks, atoms } = fixture()
   const hits = runQuery({ where: { ref: 'c' }, scope: 'all' }, { blocks, atoms })
   assert.deepEqual(hits.map((h) => h.blockId), ['d'])
+})
+
+test('runQuery：**有槽未填**的块按「未完成」命中（与渲染同一个判据）', () => {
+  /**
+   * 「刚在面板里加上任务状态、还没点过」那一档：槽位在、值不在。
+   *
+   * 它必须是 `todo` —— 屏幕上画着空心方框（渲染看槽位），查询「未完成」若查不到它，
+   * 同一个块就有两种答案。这条与 `props.test.ts` 的 `todoOf` 那条配成一对。
+   */
+  const fresh: Block = {
+    id: 'fresh',
+    text: '刚加上的任务',
+    children: [],
+    props: { [OWN_PROPS_PROP]: [TASK_STATUS_PROP_ID], _tags: [] },
+  }
+  const blocks = [...fixture().blocks, fresh]
+  const hits = runQuery({ where: { todo: 'todo' }, scope: 'all' }, { blocks, atoms: [] })
+  assert.ok(hits.some((h) => h.blockId === 'fresh'), '有槽未填应命中「未完成」')
+  assert.ok(!hits.some((h) => h.blockId === 'j1b'), '没有槽的块仍不该命中')
 })
 
 test('runQuery：journal 条件取那天的**子块**，不含只读日期行本身', () => {

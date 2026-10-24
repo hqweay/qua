@@ -453,7 +453,7 @@ const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEdit
   scheduleSave,
   scheduleBadge,
   repaintBlock,
-  writeBlockProps,
+  writeProps,
   renderDocks,
   editorEl,
   layers,
@@ -473,16 +473,27 @@ const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEdit
 /* ------------------------------------------------------------ 属性写入 / 摘标签提示 */
 
 /**
- * 一次属性写入：模型改动（**经 `tx`**）＋ **一个**撤销快照 ＋ 落盘/重画。
+ * 一次「改块自己的属性」，**连带重画这一行**。
  *
- * 写模型不再自己 `touch`/`invalidateIndex`：`kb.tx` 已经做了这两件事（索引按 op 修补），
- * 而且带着 `source: mainEd` 一起做——发起者收不到自己的通知，别的视图收得到。
- * 这里只负责 tx 管不到的两件装配层的事：**撤销快照**与**攒 op 等落盘**。
+ * 为什么重画是它的一部分，而不是调用方各自记得：这块的属性里有一族是**外观的输入** ——
+ * `_aliases` / `_lists`（别名头与身份图标）、`_type`（类型外观）、
+ * 以及 gutter 标记（待办方框、标签身份）所用的那些 prop。写完之后那一行的 DOM
+ * 就已经过期了，而 `mainEd` 是 `tx` 的发起者、**收不到自己的通知**
+ * （`store.touch(source)` 不回调发起者）—— 所以「写模型」与「重画这一行」
+ * 必须同时发生，否则屏幕上留着一个旧样子，直到别的动作把那一行重画。
+ *
+ * ⚠️ 早先这里只有写、重画靠调用方各自补：`writeBlockProps` 补了，
+ *    而属性命令那条路径（面板「添加块属性」）没补 —— 于是给块挂上「任务状态」之后，
+ *    模型里已经有了、右侧卡里也有了，**块左边的待办方框却不出现**。
+ *    加属性看似「只是一条数据的改动」，但它同时是这一行外观的输入。
  */
 function writeProps(blockId: string, mutate: () => void): void {
   const before = blocks.snap(ed.sel)
   run((tx) => tx.patch(blockId, mutate), mainEd)
   blocks.record(before, 'other', Date.now())
+  // 行自己：别名头 / 身份图标 / 类型外观 / gutter 标记都在这一行的 DOM 里
+  repaintBlock(blockId)
+  // 右槽的检视卡：属性行与「来源」都变了
   scheduleProperties()
   scheduleSave()
   scheduleBadge()
@@ -493,7 +504,7 @@ function writeProps(blockId: string, mutate: () => void): void {
  *
  * ⚠️ 别名头、标签 chip、显示模式都在这行自己的 DOM 里 —— 少了这一步，
  *    改完要等下一次整页重渲染才看得见（用户读到的是「点了没反应」）。
- * `writeBlockProps`（单块属性写）与命令层事务收尾（`PageDeps.run`／`PropsDeps.run`）共用。
+ * 调用方：`writeProps`（每次写属性之后）与命令层的事务收尾（`PageDeps.run`／`PropsDeps.run`）。
  */
 function repaintBlock(blockId: string): void {
   mainEd.renderBlock(blockId)
@@ -506,15 +517,13 @@ function repaintBlock(blockId: string): void {
 }
 
 /**
- * 一次「改块自己的属性 ＋ 重画这一行」。
+ * 名称保留的理由（供日后 grep 到这里的调用方）：**不再有**「只写、不重画」的变体。
  *
- * ⚠️ 不能只调 `writeProps`：`mainEd` 是 `touch` 的发起者，**收不到自己的通知** ——
- *    见 `repaintBlock`。
+ * 曾经有两个名字：`writeProps`（只写）与 `writeBlockProps`（写 ＋ 重画）。
+ * 两次名字并存，第一次就选错了 —— 属性命令那条路径注入的是前者，
+ * 于是「加属性」不刷新那一行。现在只有一个名字，且它**必然重画**：
+ * 「改这一块的属性」与「这一行的样子变了」是同一件事的两面。
  */
-function writeBlockProps(blockId: string, mutate: () => void): void {
-  writeProps(blockId, mutate)
-  repaintBlock(blockId)
-}
 
 /** 显示名：主名叶子 > 正文（空则短 id） */
 function blockName(b: Block): string {
@@ -876,7 +885,7 @@ const app: App = {
  *
  * ⚠️ 不把「打开浮层」写进 `view/`：渲染层不认识 app，也不该向上调用；
  *    委托在装配层，`view/` 只负责把动作标出来。
- * ⚠️ 写操作走 `writeBlockProps`：别名头就在这一行的 DOM 里，写完必须重画它。
+ * ⚠️ 写操作走 `writeProps`：它自带「重画这一行」——别名头就在这一行的 DOM 里。
  */
 const openAliasEditor = (blockId: string, rect: DOMRect | null): void => {
   if (!findInForest(ws.blocks, blockId)) return
@@ -885,7 +894,7 @@ const openAliasEditor = (blockId: string, rect: DOMRect | null): void => {
       renderAliasEditor(host, {
         kb,
         block: () => findInForest(ws.blocks, blockId),
-        write: (mutate) => writeBlockProps(blockId, mutate),
+        write: (mutate) => writeProps(blockId, mutate),
         close: () => layers.closePopover(),
         toast: (text, kind) => app.toast(text, kind),
       }),
@@ -901,7 +910,7 @@ const openFieldsEditor = (blockId: string, _rect: DOMRect | null): void => {
       renderFieldsEditor(host, {
         kb,
         block: () => findInForest(ws.blocks, blockId),
-        write: (mutate) => writeBlockProps(blockId, mutate),
+        write: (mutate) => writeProps(blockId, mutate),
         close: () => layers.closeDrawer(),
         toast: (text, kind) => app.toast(text, kind),
       }),
