@@ -21,7 +21,12 @@ import { displayNameOf, declaredFieldIds, hasList, PROP_KINDS, propKindOf, uiPos
 import { t } from '../core/msg.ts'
 
 export interface PropertiesDeps {
-  /** 属性区画在哪个**聚焦块**上（活动编辑器里光标所在的那一块；没有聚焦块就收起） */
+  /**
+   * 属性区画在哪个块上 —— **这一屏唯一的主体**（中心槽的当前对象）。
+   *
+   * 不是「光标所在的块」：见装配层 `subject()` 的注释（布局跳、位置与主体不符、
+   * 与 `activeId` 形成两套主体）。`null` ⇒ 没有单一主体（多根视图），整区收起。
+   */
   target: () => Block | null | undefined
   /** 派生行（core 算好：标签属性 ∪ 块属性，同一 propId 只一行） */
   rows: (b: Block) => FieldRow[]

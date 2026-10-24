@@ -421,22 +421,8 @@ export class Layers {
   }
 
   /**
-   * 这个节点是不是在**任何浮层**里（菜单 / 信息气泡 / 抽屉）。
-   *
-   * 「点浮层里的东西」不能被当成「点到外面」——比如属性区的 ref 选择器就是复用菜单，
-   * 点它一下不该把宿主面板收起来。
+   * 这个节点是不是在当前信息气泡里（点气泡内的按钮不该被「点外面关闭」吞掉）
    */
-  contains(node: Node | null): boolean {
-    if (!node) return false
-    return (
-      (this.el?.contains(node) ?? false) ||
-      (this.popEl?.contains(node) ?? false) ||
-      (this.drawerEl?.contains(node) ?? false) ||
-      (this.selEl?.contains(node) ?? false)
-    )
-  }
-
-  /** 这个节点是不是在当前信息气泡里（点气泡内的按钮不该被「点外面关闭」吞掉） */
   popoverContains(node: Node | null): boolean {
     return node !== null && (this.popEl?.contains(node) ?? false)
   }

@@ -1,6 +1,6 @@
 /**
- * 面板装配：反链 footer、属性区、标签页、查询视图——四段「跟着当前对象/聚焦块走」的视图。
- * 组件实例由这一节持有；装配入口只拿重画入口与「聚焦块记忆」的清除口。
+ * 面板装配：反链 footer、属性区、标签页、查询视图——四段「跟着当前对象走」的视图。
+ * 组件实例由这一节持有；装配入口只拿重画入口。
  */
 import {
   childTags,
@@ -83,7 +83,7 @@ export function setupPanels(deps: PanelsDeps) {
       },
       onFocus: () => {
         if (backlinksView) deps.setEd(backlinksView.editor)
-        scheduleProperties()
+        // 不重画属性区：反链 footer 里的光标不属于「台面上那个块」，面板主体不随它变
       },
       onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'backlinks'),
       onAtomClick: (a, el, mods) => handleAtomClick(a, el, mods),
@@ -101,44 +101,38 @@ export function setupPanels(deps: PanelsDeps) {
   /* ------------------------------------------------------------ 属性区 */
 
   /**
-   * 属性区画在**当前聚焦块上**（活动编辑器里光标所在的那一块）。
+   * 属性区的**主体**：这一屏**唯一的那个块**。
    *
-   * 为什么不跟「当前对象」：看一个内容块自己的属性不必先 zoom 进来；点哪一块就改哪一块，
-   * 移开焦点（点到编辑区之外、窗口失焦）就收起。焦点落在本区自己的控件或 ref 选择浮层里时
-   * 继续用记住的那一块 —— 否则改到一半面板会自己消失。
+   * 判据一条、不分角色：`doc.roots.length === 1` ⇒ 面板画那一块；否则收起。
+   * 于是「打开一个页 / 聚焦一个块 / 只看今天这一天日记」都显示（它们都是单根），
+   * 而日记流（今日＋更早的几天）、查询列表、多页并排都收起 —— 那些屏上没有
+   * 「一个东西」可言，拿其中一段冒充整屏的主体正是本区最该避免的错位。
    *
-   * ⚠️ 冷启动不抢焦点：没有任何块处于聚焦态时本区保持 `hidden`，不留一条空白。
+   * ## 为什么不跟光标
+   *
+   * 「主体」必须是**被显式放到台面上的东西**。这个应用里台面只有两处：中心槽的当前对象
+   * （`activeId`）与侧槽里**钉住**的块 —— 两者都是用户主动选定的，会一直待在原处直到再选一次。
+   * 光标不在这两处里：它是阅读/输入过程中的瞬时位置。
+   *
+   * 三个具体后果（不是口味）：
+   *   · **布局跳**：本区在正文**上方**。跟着光标 ⇒ 按一次 ↑/↓ 就可能在阅读内容上方
+   *     插进/抽走几行 chrome，用户读到的那段文字整体位移。方向键是最高频的按键。
+   *   · **位置与主体不符**：面板在顶、主体却在第 47 行。
+   *   · **两套主体**：`activeId` 已经是「这一屏是谁」（面包屑、装载根、左右槽不跟随都按它算），
+   *     再让属性区另认一个 ⇒ 同一屏有两处指着不同的块，用户没法从界面推出「改的是哪一个」。
+   *
+   * ## 那「不想 zoom 就想改某块的属性」怎么办
+   *
+   * 那个动作的成本被算错了：**块标点一下就是聚焦**（块标＝聚焦入口），它已经把
+   * 「把这一块放上台面」做成了一次点击。所以不需要第二套主体，需要的是捷径，
+   * 而捷径已经有一条（点块标 / 块菜单「聚焦到此块」）。
+   *
+   * ⚠️ 与「zoom 是视图配置、不引入焦点栈」一致：本区读的就是那个视图配置（当前对象），
+   *    不额外持有任何「上次是谁」的记忆，因此也没有「点空白就收起」这回事。
    */
-
-  /**
-   * 属性区最近一次画过的聚焦块。
-   *
-   * 焦点落到面板自己的输入框、ref 选择浮层，或面板重绘让焦点暂时回到 body 时，
-   * 活动编辑器已经不再「有光标」；没有记住的 id，面板就会在改到一半时消失。
-   * 只有真的点到编辑区之外（pointerdown / 窗口失焦 / 换页）才清空。
-   */
-  let propsBlockId: string | null = null
-
-  function lastFocusedBlock(): Block | null {
-    // 窗口已经不在前台 ⇒ 没有「聚焦块」可言；否则失焦前的 activeElement 还会让我们假装有焦点
-    if (!document.hasFocus()) return null
-    const active = document.activeElement
-    if (active && deps.getEd().container.contains(active)) {
-      const caret = deps.getEd().caretBlock()
-      if (!caret) return null
-      const live = kb.get(caret)
-      if (!live) return null
-      propsBlockId = live.id
-      return live
-    }
-    // 焦点在别的**可聚焦控件**上（Tab 到槽按钮、调试开关…）⇒ 已经没有聚焦块。
-    // `body` 不算：面板重绘会把焦点暂时交回 body，那不是用户离开。
-    if (active && active !== document.body && active !== document.documentElement) {
-      const kept = chrome.propertiesEl.contains(active) || layers.contains(active)
-      if (!kept) return null
-    }
-    // 焦点在面板/浮层/重绘后的 body：沿用上一次编辑器里真正落过的块
-    return propsBlockId ? (kb.get(propsBlockId) ?? null) : null
+  function subject(): Block | null {
+    const roots = deps.getMainEd().doc.roots
+    return roots.length === 1 ? roots[0]! : null
   }
 
   const propertiesPanel = new PropertiesPanel(
@@ -149,7 +143,7 @@ export function setupPanels(deps: PanelsDeps) {
       add: chrome.propertiesAddEl,
     },
     {
-      target: () => lastFocusedBlock(),
+      target: () => subject(),
       rows: (b) => [...kb.fieldsOf(b.id)],
       // 标签（分类归属）与标签属性（字段声明）是两件事：这一行走 `props._tags`
       tags: (b) => [...kb.tagsOf(b.id)],
@@ -226,7 +220,16 @@ export function setupPanels(deps: PanelsDeps) {
     propertiesPanel.render()
   }
 
-  /** 属性区跟着选块走；合并短时间内的多次改动（打字时不必每键重画面板） */
+  /**
+   * 重算时机：**当前对象变了**、或库里那块的内容变了，才需要重画。
+   *
+   * 触发点少而明确 —— 装载（换页 / 聚焦 / 翻日 / 换库，见 `loadPage`）、store 写入、
+   * 面板自己的写入完成。光标移动、窗口失焦、点空白**都不在其中**：那些都不改变「这一屏是谁」。
+   * 这正是本区不跟光标换来的好处：没有一组「焦点去哪了」的监听要维护，
+   * 也就没有「改到一半面板自己消失」这一类要防。
+   *
+   * ⚠️ `blocks.subscribe` 仍要在：改标签/属性值之后行内容要跟着变，这与主体是谁无关。
+   */
   let propertyTimer: number | null = null
   function scheduleProperties(): void {
     if (propertyTimer !== null) window.clearTimeout(propertyTimer)
@@ -237,50 +240,6 @@ export function setupPanels(deps: PanelsDeps) {
   }
   blocks.subscribe(() => scheduleProperties())
   renderProperties()
-
-  /**
-   * **面板跟着「聚焦块」重算**，三条触发各自对应一种「焦点去哪了」：
-   *   · `selectionchange`：在编辑器里点/敲/方向键移动光标；
-   *   · `focusin`：点进编辑器（还没形成选区的那一刻）；
-   *   · `pointerdown`（捕获）：点到了编辑区之外 ⇒ 收起。
-   *
-   * ⚠️ `selectionchange` 只在活动编辑器里处理：属性区自己的输入框也会产生选区变化，
-   *    跟着重绘会把正在输入的控件整块换掉。
-   * ⚠️ 点面板自己或浮层里（含 ref 选择器）不算「出去了」——否则点开选择器的那一下就把面板关了。
-   */
-  document.addEventListener('selectionchange', () => {
-    if (deps.getEd().container.contains(document.activeElement)) scheduleProperties()
-  })
-  document.addEventListener('focusin', (e) => {
-    if (e.target instanceof Node && deps.getEd().container.contains(e.target)) scheduleProperties()
-  })
-  document.addEventListener('focusout', (e) => {
-    const next = e.relatedTarget
-    if (next instanceof Node) {
-      if (deps.getEd().container.contains(next)) return
-      if (chrome.propertiesEl.contains(next) || layers.contains(next)) return
-    }
-    // 焦点落到 body（面板重绘）时下面那条会沿用记住的块；落到别的控件则会收起
-    scheduleProperties()
-  })
-  document.addEventListener(
-    'pointerdown',
-    (e) => {
-      const node = e.target as Node | null
-      if (!node) return
-      if (deps.getEd().container.contains(node)) return
-      if (chrome.propertiesEl.contains(node)) return
-      if ((node as HTMLElement).closest?.('.blk')) return
-      if (layers.contains(node)) return
-      propsBlockId = null
-      scheduleProperties()
-    },
-    true,
-  )
-  window.addEventListener('blur', () => {
-    propsBlockId = null
-    scheduleProperties()
-  })
 
   /* ------------------------------------------------------------ 标签页 footer（属于 / 包含 / 成员） */
 
@@ -333,7 +292,7 @@ export function setupPanels(deps: PanelsDeps) {
       },
       onFocus: () => {
         deps.setEd(tagPanel.editor)
-        scheduleProperties()
+        // 面板主体是中心槽的当前对象，与这个编辑器里的光标无关
       },
       onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'tagpanel'),
       onAtomClick: (a, el, mods) => handleAtomClick(a, el, mods),
@@ -378,7 +337,7 @@ export function setupPanels(deps: PanelsDeps) {
       },
       onFocus: () => {
         if (queryView) deps.setEd(queryView.editor)
-        scheduleProperties()
+        // 面板主体是中心槽的当前对象，与这个编辑器里的光标无关
       },
       onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'query'),
       onAtomClick: (a, el, mods) => handleAtomClick(a, el, mods),
@@ -409,10 +368,5 @@ export function setupPanels(deps: PanelsDeps) {
     else queryView.render()
   }
 
-  /** 换页/换焦点对象：上一条「聚焦块」不再成立，等 focusFirstBlock 重新设上 */
-  function forgetFocusedBlock(): void {
-    propsBlockId = null
-  }
-
-  return { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, scheduleProperties, forgetFocusedBlock }
+  return { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, scheduleProperties }
 }

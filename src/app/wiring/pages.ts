@@ -42,13 +42,12 @@ export type PagesDeps = {
   uiCtx: () => import('../../core/index.ts').CtxKeys
   /** app 门面晚于本节装配；提示经 getter 现取 */
   getApp: () => { toast: (text: string, kind?: 'info' | 'warn' | 'ok') => void }
-  /** 面板分片晚于本节装配；装载边界的重画与聚焦块清除经 getter 现取 */
+  /** 面板分片晚于本节装配：装载边界的重画经 getter 现取 */
   getPanels: () => {
     renderBacklinks: () => void
     renderQueryView: () => void
     renderProperties: () => void
     renderTagPanel: () => void
-    forgetFocusedBlock: () => void
   }
   getWs: () => Workspace
   getEd: () => BlockEditor
@@ -211,9 +210,7 @@ export function setupPages(deps: PagesDeps) {
       // 装载边界：空 journal 天在这里补首子块（经事务、一条 op）——
       // 所有「打开」命令共用的唯一归一落点，`rootsFor`／命令层只选择、不写库
       materializeEditableRoots(roots)
-      // 换页/换焦点对象：上一条「聚焦块」不再成立，等 focusFirstBlock 重新设上
-      const { renderBacklinks, renderQueryView, renderProperties, renderTagPanel, forgetFocusedBlock } = deps.getPanels()
-      forgetFocusedBlock()
+      const { renderBacklinks, renderQueryView, renderProperties, renderTagPanel } = deps.getPanels()
       deps.setEd(mainEd)
       // 正文视图的折叠态是**设备**那份；取当前视图持有的那一份（`device.folded` 只在落盘时同步，可能落后一步）
       mainEd.loadPage({ roots, folded: mainEd.doc.folded }, marks as never, atoms as never)
