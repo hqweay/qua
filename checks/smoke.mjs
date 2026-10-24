@@ -4439,6 +4439,127 @@ await check(
   },
 )
 
+await check(
+  'T67 真实键入 `#不存在的标签` 走同一笔事务：正文 upsert ＋ 新标签块 upsert{parent:null} ＋ 归属 prop.set ＋ 原子 anno.set 同批；一次撤销连标签块一起回滚',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 挑一个**可编辑的内容块**（无子块、无标签、无锚点）：往它末尾敲一段新的是最干净的输入面。
+     * 前面留一个空格 ⇒ `#` 前面不是字，才会被认成标签语法（`a#b` 不是标签）。
+     */
+    const before = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const b = ed
+        .rows()
+        .map((r) => r.block)
+        .find((x) => !(x.roles?.length) && !x.children.length && !(x.props?._tags?.length))
+      const count = (list) => list.reduce((n, k) => n + 1 + count(k.children), 0)
+      return {
+        id: b?.id ?? '',
+        text: b?.text ?? '',
+        total: count(ed.store.blocks),
+        tags: ed.store.blocks.filter((x) => (x.props?._lists ?? []).includes('tag')).length,
+      }
+    })
+    assert(before.id !== '', '第一页里应有可编辑的内容块')
+    await page.waitForTimeout(120)
+
+    // 真按键（走 `input` → `syncFromDom`）：末尾空格是**分隔符**，到这一刻才认 `#zzz` 敲完
+    await page.evaluate((id) => window.__qua.focusBlock(id, 9999), before.id)
+    await page.keyboard.type(' #zzz ')
+    await page.waitForTimeout(150)
+
+    const after = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const live = ed.store.find(t.id)
+      const ops = window.__qua.lastOps()
+      const tagOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === null)
+      const tagId = tagOp?.id ?? ''
+      const tag = tagId ? ed.store.find(tagId) : undefined
+      return {
+        ops: ops.map((o) => ({
+          e: o.e,
+          id: o.id ?? o.block ?? '',
+          block: o.block ?? '',
+          op: o.op,
+          name: o.name ?? '',
+          text: o.value?.text,
+          parent: o.value && 'parent' in o.value ? o.value.parent : undefined,
+          annoKind: o.e === 'anno' ? (o.value?.kind ?? '') : '',
+          annoTarget: o.e === 'anno' ? (o.value?.target?.id ?? '') : '',
+        })),
+        tagId,
+        tagExists: Boolean(tag),
+        tagLists: tag?.props?._lists ?? [],
+        tagAlias: tag?.props?._aliases?.[0] ?? '',
+        text: live?.text ?? '',
+        tags: live?.props?._tags ?? [],
+        atoms: ed.atoms.filter((a) => a.blockId === t.id).map((a) => ({ kind: a.kind, target: a.target?.id ?? '' })),
+      }
+    }, before)
+
+    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined)
+    const tagBlockOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent === null)
+    const tagPropOps = after.ops.filter((o) => o.e === 'prop' && o.name === '_tags' && o.op === 'set')
+    const tagAnnoOps = after.ops.filter((o) => o.e === 'anno' && o.op === 'set' && o.annoKind === 'tag')
+
+    assert(textOps.length >= 1, `应至少 1 条 block.upsert{text}：${JSON.stringify(after.ops)}`)
+    assert(textOps.some((o) => o.id === before.id), `正文那条应指向被敲的块：${JSON.stringify(textOps)}`)
+    assert(tagBlockOps.length === 1, `应恰有 1 条新标签块的 upsert{parent:null}：${JSON.stringify(after.ops)}`)
+    assert(tagPropOps.length === 1, `应恰有 1 条 prop.set{_tags}：${JSON.stringify(after.ops)}`)
+    assert(tagPropOps[0].id === before.id, `归属应写在被敲的块上：${JSON.stringify(tagPropOps[0])}`)
+    assert(tagAnnoOps.length === 1, `应恰有 1 条 tag 原子的 anno.set：${JSON.stringify(after.ops)}`)
+    assert(
+      tagAnnoOps[0].block === before.id && tagAnnoOps[0].annoTarget === after.tagId,
+      `原子应落在被敲块上、指向新建的标签块：${JSON.stringify(tagAnnoOps[0])}`,
+    )
+
+    // 模型：标签块真在库里、块上真有归属、正文里真有原子
+    assert(after.tagExists, `新标签块应真的进了库：${JSON.stringify(after.tagId)}`)
+    assert(after.tagAlias === 'zzz', `标签块的名字应是 zzz：${JSON.stringify(after.tagAlias)}`)
+    assert(after.tagLists.includes('tag'), `新块应有 tag 露面位：${JSON.stringify(after.tagLists)}`)
+    assert(after.tags.includes(after.tagId), `块上的 _tags 应含新标签：${JSON.stringify(after.tags)}`)
+    assert(
+      after.atoms.some((a) => a.kind === 'tag' && a.target === after.tagId),
+      `正文里应有一枚指向它的 tag 原子：${JSON.stringify(after.atoms)}`,
+    )
+    assert(
+      after.text === `${before.text} \uFFFC `,
+      `模型正文应是「前缀 ＋ 空格 ＋ 1 格原子 ＋ 空格」：${JSON.stringify(after.text)}`,
+    )
+
+    // 一次撤销：正文、原子、归属、**标签块本身**都回到输入前
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(220)
+    const back = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const live = ed.store.find(t.id)
+      const count = (list) => list.reduce((n, k) => n + 1 + count(k.children), 0)
+      return {
+        text: live?.text ?? null,
+        tags: live?.props?._tags ?? null,
+        tagGone: ed.store.find(t.tagId) === undefined,
+        atoms: ed.atoms.filter((a) => a.blockId === t.id).length,
+        total: count(ed.store.blocks),
+        tagCount: ed.store.blocks.filter((x) => (x.props?._lists ?? []).includes('tag')).length,
+      }
+    }, { id: before.id, tagId: after.tagId })
+
+    assert(back.text === before.text, `一次撤销应回到输入前的正文「${before.text}」：${JSON.stringify(back.text)}`)
+    assert(back.tagGone, '一次撤销后新建的标签块应不在模型里')
+    assert(!(back.tags ?? []).includes(after.tagId), `一次撤销后归属应回滚：${JSON.stringify(back.tags)}`)
+    assert(back.atoms === 0, `一次撤销后正文里的 tag 原子应回滚：剩 ${back.atoms} 条`)
+    assert(back.total === before.total, `一次撤销块数应回原样：${before.total}，实际 ${back.total}`)
+    assert(back.tagCount === before.tags, `标签块数应回原样：${before.tags}，实际 ${back.tagCount}`)
+
+    await ctx.close()
+    return `键入「 #zzz 」⇒ 同一笔：upsert{text}×${textOps.length} ＋ 新标签 upsert{parent:null} ＋ prop.set{_tags} ＋ anno.set{tag}；⌘Z 连标签块一起回滚`
+  },
+)
+
 /* ---------------------------------------------------------------- 汇总 */
 
 await browser.close()

@@ -88,6 +88,8 @@ import {
 } from '../core/index.ts'
 // 只取**类型**：`view` 拿不到实现，写入的落地方式归装配层（见 `Run`）
 import type { Tx } from '../core/kb/types.ts'
+// 标签块的「找到或创建」有两种落地（直写 / 事务），判据只有一份
+import { ensureTagInTx } from '../core/kb/ensure-tag.ts'
 // 用户可见文案一律走 t
 import { t } from '../core/msg.ts'
 import { LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl, visibleRowHeight } from './block-dom.ts'
@@ -1179,15 +1181,47 @@ export class BlockEditor {
   private convertHashTag(
     id: string,
     opts: { allowEnd?: boolean } = {},
+    tx?: Tx,
   ): { name: string; from: number; to: number; tagId: string } | null {
     const loc = locate(this.doc, id)
     if (!loc) return null
     if (!canWriteText(loc.block)) return null
     const hit = trailingHashTag(loc.block.text, opts)
     if (!hit) return null
+    const ch = { from: hit.from, to: hit.to, insert: ATOM_PLACEHOLDER }
+    /**
+     * **有事务**：建标签块、改正文、换原子、写归属是**同一笔**。
+     * 拆开落盘会留下半批（「字改了、标签没建」「原子有了、归属没写」），
+     * 而半批比慢更贵 —— 一次用户动作 = 一次 `run` = 一个 tx。
+     *
+     * 新建块也走 `tx.insert` ⇒ 不再需要手工失效索引：`kb.tx` 成功之后才 `invalidateIndex`。
+     */
+    if (tx) {
+      const tagBlock = ensureTagInTx(this.store.blocks, hit.name, tx)
+      if (!tagBlock) return null
+      const tagId = tagBlock.id
+      tx.patch(id, (b) => writeBlockText(b, b.text.slice(0, hit.from) + ATOM_PLACEHOLDER + b.text.slice(hit.to)))
+      /**
+       * ⚠️ 只喂**这一块**：`setAnnotations` 会按块拼接（别的块的 + 这次的），
+       *    整组喂进去会让这一块的锚点翻倍。
+       */
+      tx.setAnnotations(
+        id,
+        mapMarks(this.marks, id, ch).filter((m) => m.blockId === id),
+        [
+          ...mapAtoms(this.atoms, id, ch).kept.filter((a) => a.blockId === id),
+          mkAtom('tag', id, hit.from, hit.name, { target: { kind: 'block', id: tagId } }),
+        ],
+      )
+      tx.setTags(id, [...tagIdsOf(loc.block), tagId])
+      return { ...hit, tagId }
+    }
     /**
      * 建标签块要动整片森林 —— `store.blocks` 就是它（所有视图共享同一个数组），
      * 所以这里不需要再注入一个「谁来建」的回调：森林只有一份，读者也是这一份。
+     *
+     * ⚠️ 这条**直写**分支还在用：`split` 的编辑边界转换（同步改正文，结构另起一笔）、
+     *    以及没有 `write` 注入的实例（迁移期兜底）。它产出零条 op，见 debt。
      */
     const tagId = ensureTag(this.store.blocks, hit.name).block?.id ?? null
     if (!tagId) return null
@@ -1197,7 +1231,6 @@ export class BlockEditor {
      *    否则正文里那枚原子会画不出来（表现为「敲完标签什么都没出现」，真踩过）。
      */
     this.store.invalidateIndex()
-    const ch = { from: hit.from, to: hit.to, insert: ATOM_PLACEHOLDER }
     writeBlockText(loc.block, loc.block.text.slice(0, hit.from) + ATOM_PLACEHOLDER + loc.block.text.slice(hit.to))
     this.marks = mapMarks(this.marks, id, ch)
     this.atoms = [
@@ -1285,36 +1318,38 @@ export class BlockEditor {
      * `#名字`」，所以它必须在正文落进模型之前算出来 —— 落进去之后就再也问不出「刚才那一下
      * 是不是敲了分隔符」（`trailingHashTag` 是纯函数，问的就是 `next` 这段字）。
      *
-     * 为什么它决定走哪条管线：成标签那一笔要**建标签块 + 写归属**，而这两个写口都还在直写，
-     * 混进事务里只会得到「正文进了 op、归属没进」的半批。这半批比慢更贵，所以这一笔整体让给直写。
+     * 成标签那一笔**不再退回直写**：建标签块、写归属都能进 `tx`，所以它们与正文、锚点
+     * 属于同一笔（见 `convertHashTag` 的 tx 分支）。组合期不做（输入法中间态里的 `#`
+     * 不是标签语法）。
      */
-    const willTag = !this.probe.isComposing && canWriteText(loc.block) && trailingHashTag(next) !== null
+    const willConvert = !this.probe.isComposing
     const before = this.snap()
-    if (this.write && !willTag) {
+    let conv: { name: string; from: number; to: number; tagId: string } | null = null
+    if (this.write) {
       // 与 `setText` 同一笔：正文对不上敲进来的字，锚点也不可能对得上，所以两者同事务
       // （锚点只喂这一块的，理由见 `setText`）
-      this.write((tx) => {
+      const write = this.write
+      conv = write((tx) => {
         tx.patch(id, (b) => writeBlockText(b, next))
         tx.setAnnotations(
           id,
           mm.filter((m) => m.blockId === id),
           r.kept.filter((a) => a.blockId === id),
         )
+        return willConvert ? this.convertHashTag(id, {}, tx) : null
       })
     } else {
       writeBlockText(loc.block, next)
       this.marks = mm
       this.atoms = r.kept
+      if (willConvert) conv = this.convertHashTag(id)
     }
     /**
      * **行内标签**：敲下分隔符那一刻，`#名字` 换成「1 格原子 ＋ 一条归属」。
-     * 组合期不做（输入法中间态里的 `#` 不是标签语法）。
-     * 放在 `undo.record(before)` 之前 ⇒ 删字、插原子、写归属是**同一笔撤销**。
-     *
-     * 上面已经按 `willTag` 分了流（为真的那一笔走的是直写）⇒ 这里只在直写之后才可能命中；
-     * 留着它是因为「正文已落、标签还没认」这一瞬间**仍在直写里**，去掉它就是把识别一起删了。
+     * 上面已把它放进**同一笔事务**（没有 `write` 时仍在直写），
+     * 所以下面的 `undo.record(before)` 一记，删字、插原子、写归属、新建标签块
+     * 都在**同一笔撤销**里 —— 事务里不再单独记 undo。
      */
-    const conv = this.probe.isComposing ? null : this.convertHashTag(id)
     let caret = this.sel ? this.sel.aOff : null
     // 正文短了「`#名字` 的字数 − 1 格原子」⇒ 光标跟着左移；敲完分隔符时光标在 `to` 之后
     if (conv && caret !== null && caret >= conv.to) caret = caret - (conv.to - conv.from) + 1
@@ -1398,6 +1433,11 @@ export class BlockEditor {
     /**
      * **回车是编辑边界**：行尾那个 `#名字` 到这一刻算敲完（输入中必须等分隔符）。
      * `before` 已在上面取过 ⇒ 转换与拆分是**同一笔撤销**。
+     *
+     * ⚠️ **欠账**：这里仍走 `convertHashTag` 的**直写**分支（零条 op），而紧接着的拆分
+     *    是新起的一笔事务 ⇒ 这一次回车落盘时会得到「正文与归属直写、结构进 op」两份来源。
+     *    要收掉它，得先让「拆分」与「转换」共用一个 tx（段根与选区两条支路都在改结构），
+     *    不是把参数补上就行。
      */
     const conv = this.convertHashTag(id, { allowEnd: true })
     if (conv && offset >= conv.to) offset = offset - (conv.to - conv.from) + 1
