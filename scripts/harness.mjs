@@ -133,7 +133,17 @@ export async function launch() {
   return chromium.launch({ executablePath: CHROME, headless: true })
 }
 
-/** 每个场景一个干净 context ⇒ localStorage 为空 ⇒ 每次都是全新的假数据库 */
+/**
+ * 每个场景一个干净 context ⇒ localStorage 为空 ⇒ 每次都是全新的假数据库。
+ *
+ * ⚠️ **别改成「复用一只 page + 清存储」**（试过，两笔账都不划算）：
+ *   · **不快**：实测单进程四轮交替 0.91×–0.95× —— 省下的「建 context ＋ newPage」在真实长跑里
+ *     不是瓶颈，而为了重置要 `reload`，页面反而多走一遍解析与启动。逐条的失败集合与
+ *     提示文本除随机 id 外完全一致，也就是说**换了没换来任何东西**。
+ *   · **不安全**：`localStorage.clear()` + `reload` 会被旧文档 `beforeunload` 的刷写盖回来
+ *     （实测 5/5 泄漏）⇒ 后面每条用例都跑在**累积**起来的库上，而且不报错。
+ *     要绕开得把清空放进 `addInitScript` 的一次性标志里（那样才 0/6 泄漏）。
+ */
 export async function freshPage(browser, base, opts = {}) {
   const ctx = await browser.newContext({ viewport: opts.viewport ?? { width: 1440, height: 900 }, deviceScaleFactor: opts.dsf ?? 2, locale: 'zh-CN' })
   return openPage(browser, ctx, base)
