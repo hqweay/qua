@@ -27,8 +27,8 @@ export type ChromeDeps = {
   /** 角标启动时编辑器尚未装配；诊断快照只在装配完成后被调 */
   getMainEd: () => BlockEditor
   getRegistry: () => Registry
-  /** DOM 统计（证据源在诊断分片） */
-  domStats: () => { blocks: number; domBlocks: number; domNodes: number }
+  /** DOM 统计（证据源在诊断分片；它晚于本节装配，现取） */
+  getDomStats: () => { blocks: number; domBlocks: number; domNodes: number }
 }
 
 export function setupChrome(deps: ChromeDeps) {
@@ -132,7 +132,7 @@ export function setupChrome(deps: ChromeDeps) {
       const mainEd = deps.getMainEd()
       const ws = deps.getWs()
       return {
-        ...deps.domStats(),
+        ...deps.getDomStats(),
         mounted: mainEd.mounted.size,
         virtualize: mainEd.virtualize,
         radius: mainEd.radius,
