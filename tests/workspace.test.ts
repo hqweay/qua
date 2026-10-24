@@ -13,7 +13,6 @@ const valid = (patch: Record<string, unknown> = {}): string =>
   JSON.stringify({
     version: WORKSPACE_VERSION,
     blocks: [{ id: 'b1', text: 'hello', children: [] }],
-    folded: {},
     activeId: 'b1',
     savedAt: 0,
     marks: [],
@@ -25,13 +24,14 @@ test('parseWorkspace: 从没存过 ⇒ empty（不是错误）', () => {
   assert.deepEqual(parseWorkspace(null), { status: 'empty' })
 })
 
-test('parseWorkspace: 合法库 ⇒ ok（库不含设备偏好）', () => {
+test('parseWorkspace: 合法库 ⇒ ok（库不含设备状态：偏好与折叠表）', () => {
   const r = parseWorkspace(valid())
   assert.equal(r.status, 'ok')
   if (r.status !== 'ok') return
   assert.equal(r.ws.blocks.length, 1)
-  // 偏好是设备状态（`qua.device`），库的形状里**没有**这一格，也不会被补出一份默认值
+  // 偏好与折叠表都是设备状态（`qua.device`），库的形状里**没有**这两格，也不会被补出一份默认值
   assert.equal((r.ws as { prefs?: unknown }).prefs, undefined)
+  assert.equal((r.ws as { folded?: unknown }).folded, undefined)
 })
 
 test('parseWorkspace: 比当前新的版本 ⇒ too-new（绝不 seed 覆盖）', () => {
@@ -56,15 +56,6 @@ test('parseWorkspace: 形状不对（空 blocks / 坏 children）⇒ corrupt(sha
   assert.deepEqual(parseWorkspace(valid({ blocks: [] })), { status: 'corrupt', reason: 'shape' })
   const badChild = valid({ blocks: [{ id: 'b1', text: 'x', children: [{ id: 'b2' }] }] })
   assert.deepEqual(parseWorkspace(badChild), { status: 'corrupt', reason: 'shape' })
-})
-
-test('parseWorkspace: 折叠表形状不对（不是 Record<string,true>）⇒ corrupt(shape)', () => {
-  // 折叠表只认 `true`：`false` 与「不在表里」是同一件事，留着它就出现第三态
-  assert.deepEqual(parseWorkspace(valid({ folded: [] })), { status: 'corrupt', reason: 'shape' })
-  assert.deepEqual(parseWorkspace(valid({ folded: { b1: false } })), { status: 'corrupt', reason: 'shape' })
-  assert.deepEqual(parseWorkspace(valid({ folded: 'x' })), { status: 'corrupt', reason: 'shape' })
-  // 缺字段也是坏形状：v9 的库必须带它（旧库已被版本号挡住，走 expired）
-  assert.deepEqual(parseWorkspace(valid({ folded: undefined })), { status: 'corrupt', reason: 'shape' })
 })
 
 test('parseWorkspace: 缺 version ⇒ corrupt(shape)，不当作旧库', () => {

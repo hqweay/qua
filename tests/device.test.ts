@@ -1,11 +1,11 @@
 /**
- * 设备偏好（`qua.device`）的契约测试：跑**真实现**（`createDeviceStore` ＋ localStorage 适配器 ＋ 内存后端）。
+ * 设备状态（`qua.device`）的契约测试：跑**真实现**（`createDeviceStore` ＋ localStorage 适配器 ＋ 内存后端）。
  *
  * 这里钉的是三件上层要依赖的事：
- *   1. 从没存过 ⇒ 默认偏好（不是 `undefined`，调用方不必到处 `??`）；
- *   2. 存了再读 ⇒ 原样回来（主题／槽宽／钉住的块）；
+ *   1. 从没存过 ⇒ 默认值（不是 `undefined`，调用方不必到处 `??`）；
+ *   2. 存了再读 ⇒ 原样回来（主题／槽宽／钉住的块／折叠表）；
  *   3. 字节坏了 / 是别的后端留下的 ⇒ **回落默认**，不抛、不崩、不进只读态——
- *      偏好不是内容，没有「打不开」这种状态。
+ *      设备状态不是内容，没有「打不开」这种状态。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -32,9 +32,11 @@ function assertDefaults(p: Prefs): void {
   })
 }
 
-test('device: 从没存过 ⇒ 默认偏好（调用方不必再兜底）', async () => {
+test('device: 从没存过 ⇒ 默认偏好与空折叠表（调用方不必再兜底）', async () => {
   resetMemoryLocalStorage()
-  assertDefaults((await store(freshKey()).load()).prefs)
+  const loaded = await store(freshKey()).load()
+  assertDefaults(loaded.prefs)
+  assert.deepEqual(loaded.folded, {}, '没有折叠记录 ＝ 全展开')
 })
 
 test('device: 存了再读 ⇒ 主题／槽宽／钉住都原样回来', async () => {
@@ -52,6 +54,7 @@ test('device: 存了再读 ⇒ 主题／槽宽／钉住都原样回来', async (
         right: { open: true, width: null, pins: [] },
       },
     },
+    folded: { b1: true, b2: true },
   })
   assert.equal(saved.ok, true)
 
@@ -61,6 +64,7 @@ test('device: 存了再读 ⇒ 主题／槽宽／钉住都原样回来', async (
   assert.equal(loaded.prefs.radius, 28)
   assert.deepEqual(loaded.prefs.dock.left, { open: false, width: 312, pins: ['b1', 'b2'] })
   assert.deepEqual(loaded.prefs.dock.right, { open: true, width: null, pins: [] })
+  assert.deepEqual(loaded.folded, { b1: true, b2: true })
 })
 
 test('device: 缺字段只补默认（与库无关：旧字节里没有的键不崩）', async () => {
@@ -76,6 +80,50 @@ test('device: 缺字段只补默认（与库无关：旧字节里没有的键不
   assert.equal(loaded.prefs.theme, 'light')
   assert.deepEqual(loaded.prefs.dock, DEFAULT_PREFS.dock)
   assert.equal(loaded.prefs.radius, DEFAULT_PREFS.radius)
+  assert.deepEqual(loaded.folded, {}, '缺这一格 ⇒ 空表，不是 `undefined`')
+})
+
+test('device: 折叠表只留 `true`（坏键 / false / 空 key 一律丢），整格坏 ⇒ 空表', async () => {
+  resetMemoryLocalStorage()
+  const key = freshKey()
+  const port = createLocalStorageAdapter(key)
+  await port.commit({
+    changes: [],
+    // `false` 与「不在表里」是同一件事；留着它就会出现「表里有这行、但它是展开的」第三态
+    payload: JSON.stringify({ prefs: {}, folded: { b1: true, b2: false, '': true, b3: 1, b4: 'true' } }),
+    savedAt: 1,
+  })
+  assert.deepEqual((await store(key).load()).folded, { b1: true }, '一个坏键不该连累整张表')
+
+  // 整格不是对象：设备状态没有「打不开」分支，只是当作全展开
+  for (const bad of [[], 'x', 0, null, true]) {
+    const k = freshKey()
+    await createLocalStorageAdapter(k).commit({
+      changes: [],
+      payload: JSON.stringify({ prefs: {}, folded: bad }),
+      savedAt: 1,
+    })
+    assert.deepEqual((await store(k).load()).folded, {}, `folded=${JSON.stringify(bad)} 应回空表`)
+  }
+})
+
+test('device: 偏好与折叠表互不连累：一格坏了只回落那一格', async () => {
+  resetMemoryLocalStorage()
+  const save = async (payload: unknown): Promise<string> => {
+    const k = freshKey()
+    await createLocalStorageAdapter(k).commit({ changes: [], payload: JSON.stringify(payload), savedAt: 1 })
+    return k
+  }
+
+  // 偏好坏、折叠表好 ⇒ 偏好回默认，折叠记录还在
+  const a = await store(await save({ prefs: 'x', folded: { b1: true } })).load()
+  assertDefaults(a.prefs)
+  assert.deepEqual(a.folded, { b1: true })
+
+  // 折叠表坏、偏好好 ⇒ 全展开，主题仍是用户选的那一档
+  const b = await store(await save({ prefs: { theme: 'dark' }, folded: { b1: false } })).load()
+  assert.equal(b.prefs.theme, 'dark')
+  assert.deepEqual(b.folded, {})
 })
 
 test('device: 坏字节 / 别的后端的字节 ⇒ 回默认，不抛也不改写原字节', async () => {
@@ -87,5 +135,7 @@ test('device: 坏字节 / 别的后端的字节 ⇒ 回默认，不抛也不改�
 
   const foreignKey = freshKey()
   globalThis.localStorage.setItem(foreignKey, JSON.stringify({ some: 'other-backend' }))
-  assertDefaults((await store(foreignKey).load()).prefs)
+  const foreign = await store(foreignKey).load()
+  assertDefaults(foreign.prefs)
+  assert.deepEqual(foreign.folded, {})
 })

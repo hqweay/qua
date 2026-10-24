@@ -308,8 +308,9 @@ AST 遍历 `electron/**/*.ts`：禁止 `workspace` / `seed` / `core/` / `command
    亮暗。任何依赖 `data-theme='dark'` 的样式/脚本，在「跟随系统 + 系统是暗」时不会命中。
    本轮把唯一一处（`.atom:hover` 的增亮）改成 token `--atom-hover`；以后别再拿 `data-theme` 当
    「当前是暗色」用 —— 要解析值请用 `window.__qua.resolvedTheme()`。
-7. **主题档位已拆到 `qua.device`**（2026-10-24，`prefs` 搬出 `Workspace`，库版本 15）；`folded` 仍在 `Workspace`，
-   下一轮单独搬。`qua.device` 与库是两个键、两个写队列；拆键不做迁移（原型期旧库作废）。
+7. **设备状态全部拆到 `qua.device`**（2026-10-24）：`prefs` 搬出 `Workspace`（库版本 15），
+   随后 `folded` 也搬过去（库版本 16）。`qua.device` 与库是两个键、两个写队列；
+   拆键不做迁移（原型期旧库作废、重新 seed）。换库时 `folded` 清空：块 id 是库内的局部身份。
 8. **`sample()` 从 `core.ts` 搬到了 `seed.ts`**（零引用夹具，为了「中文只许出现在字典/种子」
    这条白名单不是假话）。`core.ts` 的导出面因此少了一个符号 —— 全仓零引用，已核对。
 9. **`index.html` 空壳化的代价**：`<title>`、`#badge` 的静态 `title`、`#page-title` 的

@@ -109,7 +109,7 @@ export function seedWorkspace(): Workspace {
         { text: '见 [[下季度规划]]（还没写）' },
       ],
     },
-    { text: '踩过的坑', folded: true, children: [{ text: 'rollup 原生模块在 node v24 下 dlopen 失败 ⇒ 固定用系统 node v26.7.0' }] },
+    { text: '踩过的坑', children: [{ text: 'rollup 原生模块在 node v24 下 dlopen 失败 ⇒ 固定用系统 node v26.7.0' }] },
   ])
 
   const p4 = mkPage(
