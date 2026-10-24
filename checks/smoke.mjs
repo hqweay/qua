@@ -3602,15 +3602,19 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   const schemaTop = await page.evaluate((id) => window.__qua.allBlocks().some((b) => b.id === id && b.roles.includes('schema')), own[0].id)
   assert(schemaTop, '定义是森林顶层的 schema 块（不是标签的子块）')
 
-  // 标签页的属性区显示「声明字段」，但没有给标签块自己设值的输入
+  /**
+   * 属性区只做**值的编辑**，不再画「声明了哪些字段」。
+   *
+   * 那份清单曾经在这里也画一份，与块菜单「字段声明…」共用同一个 `declaredFieldsOf`
+   * 却是两套实现，而且这里只能解除、不能添加 —— 半个入口比没有入口更糟，
+   * 也违反「一个值不开两个编辑面」。声明的唯一入口是菜单。
+   */
   const declared = await page.evaluate(() => ({
     visible: !document.getElementById('properties').hidden,
-    labels: [...document.querySelectorAll('.props-declared .prop-name')].map((e) => e.textContent),
-    valueInputs: document.querySelectorAll('.props-declared .prop-input').length,
+    declaredRows: document.querySelectorAll('.props-declared').length,
   }))
   assert(declared.visible, '标签页应显示属性区')
-  assert(declared.labels.includes('状态'), `声明字段里应有「状态」：${JSON.stringify(declared)}`)
-  assert(declared.valueInputs === 0, '声明节没有值输入（值在成员块上）')
+  assert(declared.declaredRows === 0, `属性区不该再画声明段（唯一入口在菜单）：${JSON.stringify(declared)}`)
 
   // ③ 成员块上写值：一块一槽 props[propId]
   //
