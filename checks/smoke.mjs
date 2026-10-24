@@ -4284,6 +4284,161 @@ await check(
   },
 )
 
+await check(
+  'T66 块中 Enter（split 支）走一笔事务：恰好 2 条 op（左半 upsert{parent,index} ＋ 原块 upsert{text}），一次撤销回得去',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 取一个**非根**的内容块：带父块（段根走另一支「首个子块」）、无子块、正文 ≥ 4 字，
+     * 且**这一块自己没有锚点**——有 mark/atom 时事务里会多出 `anno.*`，而这条用例
+     * 要钉的是「正文一半 + 结构一块 = 2 条 op」这个形状。
+     */
+    const target = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const parentOf = (id) => {
+        let hit = null
+        const walk = (list, parent) => {
+          for (const b of list) {
+            if (b.id === id) hit = parent
+            walk(b.children, b)
+          }
+        }
+        walk(ed.store.blocks, null)
+        return hit
+      }
+      const marks = window.__qua.marks()
+      const atoms = window.__qua.atoms()
+      const b = ed
+        .rows()
+        .map((r) => r.block)
+        .find(
+          (x) =>
+            x.text.length >= 4 &&
+            !(x.roles?.length) &&
+            !x.children.length &&
+            !(x.props?._tags?.length) &&
+            parentOf(x.id) !== null &&
+            !marks.some((m) => m.blockId === x.id) &&
+            !atoms.some((a) => a.blockId === x.id),
+        )
+      const parent = b ? parentOf(b.id) : null
+      let before = 0
+      const count = (list) => {
+        for (const k of list) {
+          before++
+          count(k.children)
+        }
+      }
+      count(ed.store.blocks)
+      return {
+        id: b?.id ?? '',
+        text: b?.text ?? '',
+        parentId: parent?.id ?? '',
+        index: parent ? parent.children.findIndex((k) => k.id === b.id) : -1,
+        before,
+      }
+    })
+    assert(target.id !== '', '第一页里应有非根、无子块、无锚点的内容块')
+    assert(target.parentId !== '' && target.index >= 0, `前置：应能读出它的父块与下标：${JSON.stringify(target)}`)
+    await page.waitForTimeout(120)
+
+    // 光标落在块中（offset 2 ⇒ 无同块选区 ⇒ 走 `split` 支，不是 forcedSplit）
+    await page.evaluate((id) => window.__qua.focusBlock(id, 2), target.id)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(200)
+
+    const after = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const live = ed.store.find(t.id)
+      const parent = ed.store.find(t.parentId)
+      const kids = (parent?.children ?? []).map((b) => ({ id: b.id, text: b.text }))
+      let total = 0
+      const walk = (list) => {
+        for (const b of list) {
+          total++
+          walk(b.children)
+        }
+      }
+      walk(ed.store.blocks)
+      return {
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, value: o.value })),
+        text: live?.text ?? '',
+        kids,
+        total,
+        // `doc` 是装载窗口：新块也必须在它里面（`tx.insert` 改的是共享的兄弟数组）
+        rows: ed.rows().map((r) => ({ id: r.block.id, text: r.block.text })),
+        // 这两块都没有锚点 ⇒ `textContent` 就是正文
+        domText: [...document.querySelectorAll('.blk .tx')].map((el) => el.textContent ?? ''),
+      }
+    }, target)
+
+    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.text !== undefined)
+    const structOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent !== undefined)
+    assert(after.ops.length === 2, `块中 Enter 只该产 2 条 op（正文一半 ＋ 结构一块）：${JSON.stringify(after.ops)}`)
+    assert(textOps.length === 1, `应恰有 1 条 upsert{text}：${JSON.stringify(after.ops)}`)
+    assert(textOps[0].id === target.id, `正文那一条应指向原块（它保 id）：${JSON.stringify(textOps[0])}`)
+    assert(
+      textOps[0].value.text === target.text.slice(2),
+      `原块应只留右半：期望「${target.text.slice(2)}」，实际「${textOps[0].value.text}」`,
+    )
+    assert(structOps.length === 1, `应恰有 1 条 upsert{parent,index}：${JSON.stringify(after.ops)}`)
+    assert(structOps[0].id !== target.id, '结构那一条应指向左半新块')
+    assert(
+      structOps[0].value.parent === target.parentId,
+      `左半的父应是「${target.parentId}」，实际「${structOps[0].value.parent}」`,
+    )
+    assert(
+      structOps[0].value.index === target.index,
+      `左半应插在原 index 之前（原块顺延到它下面）：期望 ${target.index}，实际 ${structOps[0].value.index}`,
+    )
+
+    // 模型：原块 = 右半；新块 = 左半；新块在原位上方
+    assert(after.text === target.text.slice(2), `模型里原块应是右半：${JSON.stringify(after.text)}`)
+    assert(
+      after.kids[target.index]?.id === structOps[0].id,
+      `左半新块应占原块的位置：${JSON.stringify(after.kids)}`,
+    )
+    assert(
+      after.kids[target.index]?.text === target.text.slice(0, 2),
+      `左半新块的正文应是「${target.text.slice(0, 2)}」：${JSON.stringify(after.kids)}`,
+    )
+    assert(after.total === target.before + 1, `块数应 +1：${target.before} → ${after.total}`)
+    assert(
+      after.rows.some((r) => r.id === structOps[0].id && r.text === target.text.slice(0, 2)),
+      `装载窗口（doc）里应看得见新块：${JSON.stringify(after.rows)}`,
+    )
+    assert(after.domText.includes(target.text.slice(0, 2)), `DOM 应重渲染出左半：${JSON.stringify(after.domText.slice(0, 6))}`)
+    assert(after.domText.includes(target.text.slice(2)), `DOM 应重渲染出右半：${JSON.stringify(after.domText.slice(0, 6))}`)
+
+    // 一次撤销：原块正文回到原样，新块从模型里消失
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(200)
+    const back = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      let gone = true
+      let total = 0
+      const walk = (list) => {
+        for (const b of list) {
+          total++
+          if (b.id === t.leftId) gone = false
+          walk(b.children)
+        }
+      }
+      walk(ed.store.blocks)
+      return { text: ed.store.find(t.id)?.text ?? null, gone, total }
+    }, { id: target.id, leftId: structOps[0].id })
+    assert(back.text === target.text, `一次撤销应回到整块原文「${target.text}」：${JSON.stringify(back)}`)
+    assert(back.gone, '一次撤销后左半新块应不在模型里')
+    assert(back.total === target.before, `一次撤销块数应回原样：${target.before}，实际 ${back.total}`)
+
+    await ctx.close()
+    return `块中 Enter ⇒ ops=[upsert{parent,index}, upsert{text}]（2 条）；原块=右半、左半占原位；⌘Z 回原样`
+  },
+)
+
 /* ---------------------------------------------------------------- 汇总 */
 
 await browser.close()

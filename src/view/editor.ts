@@ -1485,6 +1485,64 @@ export class BlockEditor {
       return
     }
 
+    /**
+     * **有事务入口时，三支都走一个 `tx`**：`split` 是「正文一半 ＋ 结构一块」，
+     * `child`/`sibling` 各只发一条结构 op。
+     *
+     * 落点一律交给 `tx.insert`：它按**整片森林**取兄弟列表（`memory.ts` 的 `siblings`），
+     * 而 `doc` 只是装载窗口 —— 在这里再 `splice` 一下，同一件事就有两个计算者。
+     * `child` 要先展开：折叠着的块插了子块也看不见（规则见 `enterKind`）。
+     *
+     * 没有事务入口、`forcedSplit`（先删选区再拆）与 `outdent` 仍走下面的直写。
+     */
+    if (this.write && !forcedSplit) {
+      const write = this.write
+      const old = loc.block.text
+      // 段根已在上面 return ⇒ 这里一定在某个父块下面
+      const parent = loc.parent
+      if (!parent) return
+
+      if (kind === 'split') {
+        const left = mkBlock(old.slice(0, offset))
+        /**
+         * 锚点归属：切点之前 ⇒ 左半（新块，偏移不变）；切点之后 ⇒ 原块（右半，偏移前移）。
+         * 只交这两块：`setAnnotations` 按块拼接，喂整组会让别的块的锚点重写一遍。
+         */
+        const toLeft = <T extends { blockId: string; start: number; end: number }>(arr: readonly T[]): T[] =>
+          arr.filter((a) => a.blockId === id && a.start < offset).map((a) => ({ ...a, blockId: left.id }))
+        const toRight = <T extends { blockId: string; start: number; end: number }>(arr: readonly T[]): T[] =>
+          arr.filter((a) => a.blockId === id && a.start >= offset).map((a) => ({ ...a, start: a.start - offset, end: a.end - offset }))
+        write((tx) => {
+          tx.insert(left, parent.id, loc.index)
+          // 原块保 id/右半/子树：子树不归 patch 管，这里只该动正文
+          tx.patch(id, (b) => writeBlockText(b, old.slice(offset)))
+          tx.setAnnotations(left.id, normalizeMarks(toLeft(this.marks)), toLeft(this.atoms))
+          tx.setAnnotations(id, normalizeMarks(toRight(this.marks)), toRight(this.atoms))
+        })
+        this.undo.record(before, 'structural', Date.now())
+        this.renderAll()
+        // 块首 Enter（offset=0）⇒ 新块是上方那个空块；否则光标留在原块（右半）0 位
+        this.placeCaret(offset === 0 ? left.id : id, 0)
+        this.emitChange('struct')
+        return
+      }
+
+      const b = mkBlock('')
+      if (kind === 'child') {
+        write((tx) => {
+          unfoldBlock(this.doc, id)
+          tx.insert(b, id, 0)
+        })
+      } else {
+        write((tx) => tx.insert(b, parent.id, loc.index + 1))
+      }
+      this.undo.record(before, 'structural', Date.now())
+      this.renderAll()
+      this.placeCaret(b.id, 0)
+      this.emitChange('struct')
+      return
+    }
+
     if (kind === 'child') {
       const child = insertFirstChild(this.doc, id)
       if (!child) return
