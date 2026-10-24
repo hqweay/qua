@@ -467,7 +467,7 @@ function commandDecls() {
 {
   // 换键 ＝ 用户已存的库静默消失。把值钉死在这里：真要换，必须先改这条断言并写迁移。
   // 2026-10-20：`STORAGE_KEY` 随 StoragePort 拆分留在导出面 `src/core/workspace.ts`，断言路径不变。
-  // 2026-10-20 公开整理：旧键是内部阶段的值，公开版定为 `qua.workspace`（旧数据不迁移，见 AGENTS §1.7）。
+  // 2026-10-20 公开整理：旧键是内部阶段的值，公开版定为 `qua.workspace`（原型不做旧数据迁移，旧库显式作废重 seed）。
   const FROZEN = 'qua.workspace'
   const ws = readFileSync(join(ROOT, 'src/core/workspace.ts'), 'utf8')
   const m = /export const STORAGE_KEY = '([^']+)'/.exec(ws)
