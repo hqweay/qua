@@ -106,7 +106,7 @@ export interface Probe {
   compositionSeq: string[]
   lastKey: { key: string; isComposing: boolean; trusted: boolean } | null
   lastCommand: { name: string; at: number; via: string } | null
-  /** 按键命中追踪（59 ）：这个键命中了哪条规则 / 为什么没命中 */
+  /** 按键命中追踪（诊断）：这个键命中了哪条规则 / 为什么没命中 */
   keyTrace: { key: string; hit: string; when: string; ok: boolean }[]
   traced: boolean
 }
@@ -648,7 +648,7 @@ export class BlockEditor {
    * ⇒ 自己拼一个跨块 Range（首块块首 → 末块块尾），并同步模型选区（`aBlock`≠`hBlock`）。
    *
    * ⚠️ 跨块选区在模型里是合法的（`Sel` 有 `aBlock`/`hBlock`），但**跨块编辑**（删除/替换）
-   * 第 1 期仍不支持（承 63 的块集合选区，属后续内核工作）；这里只负责「选得上」。
+   * 第 1 期仍不支持块集合选区（属后续内核工作）；这里只负责「选得上」。
    */
   selectAll(): boolean {
     this.clearBlockSelection()
@@ -2830,7 +2830,7 @@ export class BlockEditor {
     }
   }
 
-  /** 诊断：composing 为真时命令零触发（59 ） */
+  /** 诊断：composing 为真时命令零触发 */
   guard(name: string, ctx: Record<string, unknown>): boolean {
     if (ctx.composing) return false
     this.log.run(name)

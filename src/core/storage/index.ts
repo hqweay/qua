@@ -20,7 +20,7 @@ import type { Change, CommitBatch, LoadResult, StoragePort } from './port.ts'
 import type { Op } from '../kb/types.ts'
 import { parseWorkspace, type ParseResult, type Workspace } from './shape.ts'
 
-/** 「整份库都动过」的那批改动：demo 适配器的最细粒度（信封实现与门面共用同一份声明） */
+/** 「整份库都动过」的那批改动：本地适配器的最细粒度（信封实现与门面共用同一份声明） */
 export const WHOLE_LIBRARY_CHANGES: Change[] = [
   { kind: 'blocks', id: '*' },
   { kind: 'marks', id: '*' },
@@ -97,7 +97,7 @@ export function createWorkspaceStore(port: StoragePort): WorkspaceStore {
         // 只能按整类提交——这是迁移期的真相，不是兜底
         ops: [...ops],
         changes: ops.length === 0 ? WHOLE_LIBRARY_CHANGES : changesOf(ops),
-        // demo 的适配器只能收整份字节；接 SQLite 后由写适配器把 op 落成行
+        // 本地适配器只能收整份字节；接 SQLite 后由写适配器把 op 落成行
         payload: JSON.stringify(ws),
         savedAt: ws.savedAt,
       }

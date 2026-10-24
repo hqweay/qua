@@ -1,5 +1,5 @@
 /**
- * **查询**：一个块要「显示哪些块」的声明（/D4/D5/D10，承 29 /、33 A）。
+ * **查询**：一个块要「显示哪些块」的声明。
  *
  * 三层分工，别混：
  *   · **条件**（本文件的 `QuerySpec`）——「选谁、按什么序」，写成 `canonical JSON` 存进块属性 `_query`；
@@ -25,13 +25,13 @@ import { todoOf } from './props.ts'
  * 且每一种都能用一次线性扫描算出来（不用索引）。
  *
  * 组合：`{ all: [...] }` / `{ any: [...] }` / `{ not: ... }`，可嵌套。
- * ⚠️ **不加 `mentions`**：未链接提及＝`text` 里出现某个词，那是全文检索的事（承 69 BO），
+ * ⚠️ **不加 `mentions`**：未链接提及＝`text` 里出现某个词，那是全文检索的事，
  *    塞进这里会让「引用」与「文本匹配」变成同一个东西，反链语义当场糊掉。
  */
 export type QueryNode =
-  /** 直接指向 `targetId` 的块（反链的最小形态，承 71.3：只认 id，不认 label） */
+  /** 直接指向 `targetId` 的块（反链的最小形态：只认 id，不认 label） */
   | { ref: string }
-  /** 带某个标签的块：demo 里标签还是 `#tag` 文本（71.4 的 demo 债），所以按文本匹配 */
+  /** 带某个标签的块：按**归属边**判定（见 `matches`），名字解析不到就是空集 */
   | { tag: string }
   /** 正文包含某串 */
   | { text: string }
@@ -65,7 +65,7 @@ export type TodoFilter = 'todo' | 'done' | 'none'
 export interface QuerySpec {
   where: QueryNode
   /**
-   * 从哪个容器往下找。缺省 `subtree`（承 75.4 #5）：
+   * 从哪个容器往下找。缺省 `subtree`：
    * 根 Enter 建的子块只有渲染子树才看得见，否则就是「建了但看不见」（D8）。
    */
   scope?: 'subtree' | 'all'
@@ -78,7 +78,7 @@ export interface QuerySpec {
 
 export interface QueryRunInput {
   blocks: readonly Block[]
-  /** 行内原子（demo 的指向边形状，承 71.3） */
+  /** 行内原子（指向边的载体：一条原子 ＝ 一条「谁指向谁」） */
   atoms: readonly Atom[]
   /** 求值范围锚点：`scope: 'subtree'` 时只在这个块（含）之下找 */
   anchorId?: string

@@ -11,7 +11,7 @@
  *   · **那条白名单可以删掉**，层级断言回到「不设例外」
  *
  * 本体能用什么，命令就能用什么；命令**只经这里**改状态。
- * 承 59 ：命令不知道 UI ——这里不许出现任何 DOM 类型（`HTMLElement`／`KeyboardEvent` …）；
+ * 命令不知道 UI ——这里不许出现任何 DOM 类型（`HTMLElement`／`KeyboardEvent` …）；
  * 唯一放行的是 `DOMRect`，因为「菜单挂在哪个矩形旁边」是**命令参数的形状**，不是 DOM 操作。
  */
 import type { BlockEditor } from '../view/editor.ts'
@@ -22,9 +22,9 @@ export type Capability = 'read' | 'write' | 'admin' | 'plugin'
 export type FixtureName = 'seed' | 'empty' | 'sparse' | 'degraded' | 'boot'
 export type PanelKind = 'context' | 'bindings' | 'shortcuts' | 'model'
 
-/** 命令声明（纯语义）：**没有 `key`／`context`／`host`**（59 ） */
+/** 命令声明（纯语义）：**没有 `key`／`context`／`host`**——落点归绑定表 */
 export interface CommandDecl {
-  /** 命名空间名（`core/*` 保留，承 13／20 R2） */
+  /** 命名空间名（`core/*` 保留给系统命令） */
   name: string
   /** 人话标签（菜单 / 命令面板默认显示名） */
   title: string
@@ -33,9 +33,9 @@ export interface CommandDecl {
   version: string
   /** 命令面板里的分组（纯展示） */
   category: string
-  /** 搜索别名（demo：让「加粗 / bold」都能搜到） */
+  /** 搜索别名（让「加粗 / bold」都能搜到） */
   keywords?: string[]
-  /** `args` 的单一来源（demo 里写成最小 JSONSchema 形状） */
+  /** `args` 的单一来源（最小 JSONSchema 形状） */
   args?: Record<string, unknown>
   /** 不进命令面板（编辑器内部键位） */
   hidden?: boolean

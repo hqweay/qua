@@ -1,5 +1,5 @@
 /**
- * 命令处理器 —— **app 层**（59 ）：handler 只经 `App` 门面改状态，不碰 DOM。
+ * 命令处理器 —— **app 层**（命令不知道 UI）：handler 只经 `App` 门面改状态，不碰 DOM。
  *
  * 原先与命令表、Registry 挤在同一个文件里 ⇒ core 文件不得不认识 app 实现。
  * 拆开后依赖方向恢复单向：core（表/注册表）← app（handler）← main（装配）。

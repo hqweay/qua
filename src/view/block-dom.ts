@@ -5,7 +5,7 @@
  *   · 它**不持有状态**（只吃 `Block` + `marks` + `atoms`，吐 `HTMLElement`），
  *     所以能脱离编辑器单独成型——将来「同一个块在槽里、在正文里、在引用预览里」
  * 用的是同一个函数（29 一源多视的前提）；
- *   · 它是**编辑器 DOM 契约的产地**（`.blk`／`.tx`／`.atom`／`data-depth`，承 66），
+ *   · 它是**编辑器 DOM 契约的产地**（`.blk`／`.tx`／`.atom`／`data-depth`），
  *     契约集中在一处才守得住。
  *
  * ⚠️ 三条实测得来的纪律（不许破坏）：
@@ -243,7 +243,7 @@ export function fillBlockText(
     if (s === e) continue
     const seg = text.slice(s, e)
 
-    // 占位符 ⇒ 原子元素（找不到对应原子就画成 dangling，**不静默吞掉**，承 64 ）
+    // 占位符 ⇒ 原子元素（找不到对应原子就画成 dangling，**不静默吞掉**）
     if (seg === ATOM_PLACEHOLDER) {
       const a = myAtoms.find((x) => x.start === s)
       if (a) tx.appendChild(makeAtomEl(a, views?.get(a.id)))
@@ -293,7 +293,7 @@ export function fillBlockText(
 /**
  * 一个可见行 → `.blk` 元素。
  *
- * **DOM 契约就在这里**（承 66）：`data-block-id`／`data-depth`／`data-has-children`／
+ * **DOM 契约就在这里**：`data-block-id`／`data-depth`／`data-has-children`／
  * `data-collapsed`／`data-todo`／`--depth`，以及 `.left` 里的 `.marker`／`.fold`／`.identity`／`.todo-box`。
  * 主题与插件都按这些选择器选，**改名等于破坏契约**。
  *

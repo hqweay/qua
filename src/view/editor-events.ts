@@ -269,7 +269,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     br.onChange()
   })
 
-  /* ── 粘贴（多行 = 多块，**绝不把换行塞进一个块**，承 19 ）── */
+  /* ── 粘贴（多行 = 多块，**绝不把换行塞进一个块**）── */
   on(c, 'paste', (e: ClipboardEvent) => {
     e.preventDefault()
     const text = e.clipboardData?.getData('text/plain') ?? ''

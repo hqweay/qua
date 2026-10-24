@@ -58,12 +58,12 @@ export const WORKSPACE_VERSION = 17
 /** 示例库：一片块森林 ＋ 行内锚点/原子 */
 export interface Workspace {
   version: typeof WORKSPACE_VERSION
-  /** 块森林（承 1／5：整个库是一片森林，没有「页实体」这一层） */
+  /** 块森林（整个库是一片森林，没有「页实体」这一层） */
   blocks: Block[]
   /** 中心槽持有的「当前对象」（只有中心槽有这个概念） */
   activeId: string
   savedAt: number
-  /** 行内锚点与原子按块 id 索引（demo 平铺存放；接内核后进表） */
+  /** 行内锚点与原子按块 id 索引（原型平铺存放；接内核后进表） */
   marks: Mark[]
   atoms: Atom[]
 }

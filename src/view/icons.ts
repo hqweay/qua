@@ -102,7 +102,7 @@ export function isIconRef(v: string): boolean {
  *
  * 三种情况：
  *   · `lucide:<known>` → SVG；
- *   · `lucide:<unknown>` → 占位图标 ＋ `title`（**不静默消失**，承 64 的口径）；
+ *   · `lucide:<unknown>` → 占位图标 ＋ `title`（**不静默消失**）；
  *   · 其它任何字符串（emoji／字符／旧数据）→ 原样文本；
  *   · 空值 → 调用方给的角色默认。
  *

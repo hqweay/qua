@@ -20,7 +20,7 @@ export interface DispatchEnv {
   isMac: () => boolean
   /** 执行一条命令，返回「是否真的处理了」（false ⇒ 不 preventDefault，让浏览器自己来） */
   invoke: (name: string, args: Record<string, unknown>, ctx: CtxKeys) => boolean
-  /** 按键命中追踪（59 ）：命中与未命中都记，最多 40 条 */
+  /** 按键命中追踪（诊断）：命中与未命中都记，最多 40 条 */
   trace?: (t: KeyTrace) => void
   /** 覆盖层是否打开（打开时按键归覆盖层，不派发） */
   layerOpen: () => boolean

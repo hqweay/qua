@@ -16,7 +16,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     app.ed.split(id, app.ed.caretOffset())
     return true
   },
-  // ⌘A：接管原生全选（66 ）——见 `view/editor.ts` 的 `selectAll` 注释
+  // ⌘A：接管原生全选（系统键归命令表）——见 `view/editor.ts` 的 `selectAll` 注释
   'core.editor/select-all': (_a, app) => app.ed.selectAll(),
   'core.editor/backspace': (_a, app) => {    // 合并成 ⇒ 已处理；没合并 ⇒ **放行给浏览器**（原生删除：命名的威力在于**允许不处理**）
     return app.ed.backspaceAtCaret()
