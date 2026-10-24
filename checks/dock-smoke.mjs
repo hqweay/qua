@@ -478,6 +478,106 @@ await check('A16 每一行的块标与正文首行共中线（含子块；跨字
   return `${rows.length} 行 × ${fontSizes.length} 档字号（${fontSizes.join('/')}px），最大偏差 ${worst}px；压缩密度 ${worstCompact}px`
 })
 
+/* ---------------------------------------------------------------- A17 */
+
+await check('A17 父块的竖线在本行换行后不断：自身延续段 ＋ 子行段拼成一条连续线', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1000, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  /**
+   * **判据**：把一条父块的正文写长到换行（≥3 行）之后，指向它的竖线从**它自己的块标中心**
+   * 一直连到**最后一个子行的底边**，中间不许有豁口。
+   *
+   * 为什么会有豁口：导轨是按「每一行画**祖先**的段」生成的 —— 一条线活在**子行**上。
+   * ⇒ 父块**自己那一行**没有属于它的线。父块单行时这段空隙不到 10px 看不出来，
+   *   正文一换行，那几行正文的左侧就整片是空的，看起来像线断了。
+   * 修法是把父块的线**两处拼起来**：自己这一行（`.rail-self`）＋ 所有子行（`.rail`）。
+   *
+   * ⚠️ 必须**真的写长**再量：不换行时这个 bug 的偏差小于肉眼阈值，断言会假绿。
+   */
+  const target = await page.evaluate(() => {
+    for (const el of document.querySelectorAll('#editor .blk')) {
+      if (Number(el.dataset.depth) === 1 && el.dataset.hasChildren === '1') return el.dataset.blockId
+    }
+    return null
+  })
+  assert(target, '假数据里应有「深度 1 且有子块」的行可测')
+
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), target)
+  await page.keyboard.press('End')
+  await page.keyboard.type('，故意写长一点，让它换行成三行左右，再看这一块自己的竖线有没有跟着走下来。')
+  await page.waitForTimeout(250)
+  await page.evaluate(() => document.activeElement?.blur?.())
+  await page.waitForTimeout(150)
+
+  const r = await page.evaluate((id) => {
+    const rows = [...document.querySelectorAll('#editor .blk')]
+    const el = document.querySelector(`.blk[data-block-id="${id}"]`)
+    const rowRect = el.getBoundingClientRect()
+    const mk = el.querySelector(':scope > .left > .marker').getBoundingClientRect()
+    const self = el.querySelector(':scope > .rail-self')
+    // 这一块自己的线：自身段 ＋ 所有子行上指向它的段
+    const segs = []
+    if (self) {
+      const b = self.getBoundingClientRect()
+      segs.push({ top: b.top, bottom: b.bottom, src: 'self' })
+    }
+    for (const row of rows) {
+      for (const rail of row.querySelectorAll(':scope > .rails > .rail')) {
+        if (rail.dataset.foldLineFor !== id) continue
+        const b = rail.getBoundingClientRect()
+        segs.push({ top: b.top, bottom: b.bottom, src: 'child' })
+      }
+    }
+    segs.sort((a, b) => a.top - b.top)
+    const holes = []
+    let cur = segs[0]?.top ?? 0
+    for (const s of segs) {
+      if (s.top - cur > 0.6) holes.push({ from: +cur.toFixed(1), to: +s.top.toFixed(1), size: +(s.top - cur).toFixed(1) })
+      cur = Math.max(cur, s.bottom)
+    }
+    const lineX = self ? Math.round(self.getBoundingClientRect().left + self.getBoundingClientRect().width / 2) : null
+    const markerX = Math.round(mk.left + mk.width / 2)
+    return {
+      lines: Math.round((el.querySelector(':scope > .tx').getBoundingClientRect().height) / parseFloat(getComputedStyle(el.querySelector(':scope > .tx')).lineHeight)),
+      rowH: +rowRect.height.toFixed(1),
+      hasSelf: Boolean(self),
+      segCount: segs.length,
+      startTop: segs[0] ? +segs[0].top.toFixed(1) : null,
+      markerCenter: +(mk.top + mk.height / 2).toFixed(1),
+      endBottom: +cur.toFixed(1),
+      lastChildBottom: +rows[rows.indexOf(el) + 1] ? 0 : 0,
+      holes,
+      lineX,
+      markerX,
+    }
+  }, target)
+
+  assert(r.lines >= 3, `前置：这一块应已换行成 ≥3 行（否则看不出豁口），实际 ${r.lines} 行`)
+  assert(r.hasSelf, `有子块的行应生成自己的延续段（.rail-self），实际没有`)
+  assert(r.holes.length === 0, `父块的竖线在换行后不该断开，实测豁口：${JSON.stringify(r.holes)}`)
+  assert(Math.abs(r.startTop - r.markerCenter) <= 1.5, `线的起点应贴着块标中心（${r.markerCenter}），实际 ${r.startTop}`)
+  assert(r.lineX === r.markerX, `自己的线应与自己的块标在同一 x：线 ${r.lineX} vs 块标 ${r.markerX}`)
+
+  /**
+   * 折叠后子行不挂载 ⇒ 不留悬空的一段线。
+   * ⚠️ 用的是「折**自己**」（`toggleCollapse`，也就是点折叠三角），不是「折子块」那条：
+   *    折子块时父块仍展开、自身段仍然有意义；折自己才会让子行整体不挂载。
+   */
+  await page.evaluate((id) => window.__qua.__editor.toggleCollapse(id), target)
+  await page.waitForTimeout(250)
+  const folded = await page.evaluate((id) => {
+    const el = document.querySelector(`.blk[data-block-id="${id}"]`)
+    return { collapsed: el?.dataset.collapsed === '1', hasSelf: Boolean(el?.querySelector(':scope > .rail-self')) }
+  }, target)
+  assert(folded.collapsed, `前置：应已折叠：${JSON.stringify(folded)}`)
+  assert(!folded.hasSelf, `折叠（子行不挂载）时不该留一段悬空的自身线段：${JSON.stringify(folded)}`)
+
+  await ctx.close()
+  return `换行 ${r.lines} 行（行高 ${r.rowH}px）时线仍连续：${r.segCount} 段、起点 ${r.startTop}（块标中心 ${r.markerCenter}）、零豁口；折叠后自身段撤掉`
+})
+
 /* ---------------------------------------------------------------- 不适用项 */
 
 skip('A5／A6 布局型块的列数降级与右栏转覆盖', '当前实现还没有「布局型块（表格/看板/白板）」与 minW 类型声明；右栏转覆盖按宽度口径回扫后标为后置')

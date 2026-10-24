@@ -428,6 +428,37 @@ export function makeBlockEl(
     el.appendChild(rails)
   }
 
+  /**
+   * **这一行自己的延续段**（`.rail-self`）：从自己的块标底下垂，贯穿这一行的剩余高度。
+   *
+   * 为什么需要它：上面那批段是「**为了祖先**而画」的——一条线活在**子行**上。
+   * 于是父块**自己那一行**没有属于它的线：块标底下到行底之间是空的，
+   * 而紧接着的第一条子行才开始画。父块只有一行时这段空隙不到 10px，看不出来；
+   * 一旦正文换行成三行，那 100px 的正文左侧就**整片没有线**，看起来像线「断了」。
+   *
+   * ⇒ 父块的线要**两处拼起来**：自己这一行（本节点）＋ 所有子行（上面那批段）。
+   *
+   * ⚠️ **不带 `.rail` 这个 class**：`.rail` 的口径是「深度 d 的行有 d 个**祖先**段」，
+   *    而这个节点是「这一行**自己**的」。挂同一个 class 会让那条「数段数」的契约
+   *    多算一段（`check` 里有一条按 `.rail` 计数，一挂就红）——名字不同是因为语义不同。
+   *
+   * ⚠️ 只在**有子块且未折叠**时画：折叠后子行不挂载，留一段悬空的线没有去处；
+   *    无子块的行本来就没有「往下延续」的东西。
+   * ⚠️ 它是 `.rails` 的**兄弟**、不是它的子节点：`.rails` 的 `overflow:hidden` 与
+   *    `pointer-events:none` 是为「祖先段」定的，这个段要贴着自己的块标、且有自己的命中区。
+   * ⚠️ 纵向范围由 CSS 定（`top: 块标中心`、`bottom: 0`），不在这里算像素：
+   *    `1lh` 与 `--ui-bullet-size` 是 token，DOM 层不该知道它们的数值。
+   */
+  if (r.hasChildren && !folded) {
+    const self = document.createElement('span')
+    self.className = 'rail-self'
+    self.dataset.foldLineFor = b.id
+    self.title = t('ui.block.foldLine')
+    self.setAttribute('aria-hidden', 'true')
+    self.contentEditable = 'false'
+    el.appendChild(self)
+  }
+
   const left = document.createElement('span')
   left.className = 'left'
   left.contentEditable = 'false'

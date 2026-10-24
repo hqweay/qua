@@ -144,6 +144,56 @@
   width: 2px;
   background: var(--ui-rail-hot);
 }
+
+/**
+ * **这一行自己的延续段**：从自己的块标底下垂，贯穿本行剩余高度，接上子行的段。
+ *
+ * 上面那批 `.rail` 是为**祖先**画的、活在子行上 ⇒ 父块自己那一行从块标到行底是空的。
+ * 父块单行时这段空隙不到 10px 看不出来；正文一换行，那几行的左侧就整片没有线。
+ * 所以父块的线是**两处拼的**：自己这一行（本规则）＋ 所有子行（上面那批段）。
+ *
+ * ⚠️ 它**不是 `.rail`**：`.rail` 的口径是「深度 d 的行有 d 个**祖先**段」，
+ *    这个是「这一行**自己**的」。两者形状相同、语义不同，故不复用那个 class
+ *    （按 `.rail` 数段数的断言不该把这一条算进去）。
+ *
+ * 几何：挂在 `.blk` 上（不在 `.rails` 里），`left` 直接用 `--ui-marker-slot`，
+ * 与「自己那颗块标」同源；`top` 从块标中心起，`bottom: 0` 落到行底。
+ * ⚠️ 起点从**块标中心**起、而不是块标底：圆点只有 5px，中间那 1–2px 会成一个可见的豁口。
+ */
+.blk .rail-self {
+  position: absolute;
+  top: calc(1lh / 2);
+  bottom: 0;
+  left: calc(var(--ui-blk-gutter) + var(--depth) * var(--ui-indent) + var(--ui-marker-slot) / 2 - var(--ui-rail-hit) / 2);
+  width: var(--ui-rail-hit);
+  cursor: pointer;
+}
+.blk .rail-self::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-0.5px);
+  background: var(--ui-rail);
+  transition: width 120ms ease, background-color 120ms ease;
+}
+/* 悬停/活动：与祖先段同一套反馈（同一条线，同一处可点） */
+.blk .rail-self:hover::before,
+.blk .rail-self.hot::before {
+  width: 2px;
+  background: var(--ui-rail-hot);
+}
+@media (prefers-reduced-motion: reduce) {
+  .blk .rail-self::before {
+    transition: none;
+  }
+}
+/* 折叠态不生成节点；主题若显式隐藏也认这个口径 */
+.blk[data-collapsed='1'] .rail-self {
+  display: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .blk .rail::before {
     transition: none;
