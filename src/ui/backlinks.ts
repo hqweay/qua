@@ -11,12 +11,11 @@
  * （不在打字时把行抽走），失焦或点刷新再重查。
  */
 import {
-  backrefBlocks,
-  findPath,
   type Atom,
   type Block,
   type BlockStore,
 } from '../core/index.ts'
+import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
 
@@ -24,8 +23,8 @@ export interface BacklinksViewDeps {
   store: BlockStore
   /** 写入事务入口：执行者在装配层，这里只原样转给编辑器（见 `Run`） */
   write?: Run
-  /** 整片森林（活引用） */
-  blocks: () => Block[]
+  /** 读门面：反链源块与祖先链都按 id 取数 */
+  kb: KbClient
   targetId: () => string
   /** 反链编辑器里的编辑：持久化（不刷新 docks，避免把它自己搬走） */
   onChange: (kind: string) => void
@@ -110,13 +109,8 @@ export class BacklinksView {
       this.els.root.hidden = true
       return
     }
-    // 传共享索引：反链从「扫全库 atoms ＋ 遍历森林」变成查表（store 已经缓存了它）
-    const sources = backrefBlocks({
-      blocks: this.deps.blocks(),
-      atoms: this.deps.store.atoms,
-      targetId: target,
-      index: this.deps.store.index,
-    })
+    // 反链源块经读门面取（内部查共享索引的入向边表），祖先链按 id 现读
+    const sources = this.deps.kb.backrefBlocksOf(target)
     if (sources.length === 0) {
       this.els.root.hidden = true
       return
@@ -126,7 +120,7 @@ export class BacklinksView {
     const ids = new Set(sources.map((s) => s.blockId))
     const roots: Block[] = []
     for (const s of sources) {
-      const path = findPath(this.deps.blocks(), s.blockId) ?? []
+      const path = this.deps.kb.pathOf(s.blockId)
       const nested = path.slice(0, -1).some((p) => ids.has(p.id))
       if (nested) continue
       const b = this.deps.store.find(s.blockId)

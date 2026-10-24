@@ -130,6 +130,16 @@ export function checkAddParent(child: Block, parent: Block, forest: readonly Blo
 }
 
 /**
+ * 加一条「child 属于 parent」的边（**不检查**）。
+ *
+ * 检查是 `checkAddParent` 的事（成环要算祖先闭包，那是全库读）；写路径由此
+ * 收窄到「只动子标签这一个块」，调用方才能把它放进事务里 —— 事务内不再扫森林。
+ */
+export function appendParentTag(child: Block, parent: Block): void {
+  child.props = { ...(child.props ?? {}), [PARENT_TAGS_PROP]: [...parentTagIds(child), parent.id] }
+}
+
+/**
  * 加一条「child 属于 parent」。
  *
  * 禁环在**写入时**拒绝（不是读时去重兜底）：A 与 B 互为父时「谁是父」没有答案，
@@ -138,7 +148,7 @@ export function checkAddParent(child: Block, parent: Block, forest: readonly Blo
 export function addParentTag(child: Block, parent: Block, forest: readonly Block[]): AddParentResult {
   const check = checkAddParent(child, parent, forest)
   if (!check.ok) return check
-  child.props = { ...(child.props ?? {}), [PARENT_TAGS_PROP]: [...parentTagIds(child), parent.id] }
+  appendParentTag(child, parent)
   return { ok: true }
 }
 

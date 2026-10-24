@@ -23,9 +23,13 @@ import {
   resolveFrozen,
   runQuery,
   specChanged,
+  queryByIndex,
+  rebuild,
+  BlockStore,
   TASK_STATUS_PROP_ID,
   type QuerySpec,
 } from '../src/core/index.ts'
+import { MemoryKb } from '../src/core/kb/memory.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({
   id,
@@ -163,11 +167,39 @@ test('runQuery：limit 截断；结果顺序＝森林先序（可复现）', () 
   assert.deepEqual(hits.map((h) => h.blockId), ['a', 'b'])
 })
 
+/**
+ * 求值与冻结都经**读门面**（`kb.query` 走索引、`kb.pathOf` 现读）：
+ * 测试里用同一份 fixture 造一个门面，调用方形状与生产一致。
+ */
+function kbOf(blocks: Block[], atoms: Atom[]): { kb: MemoryKb; store: BlockStore } {
+  const store = new BlockStore(blocks, [], atoms)
+  return { kb: new MemoryKb(store), store }
+}
+
+/** 两种求值路径的**等式**：同一份库，纯函数与索引必须给出同一批命中（同一顺序） */
+function assertSameHits(spec: QuerySpec, blocks: Block[], atoms: Atom[], opts: { anchorId?: string } = {}): void {
+  const fromForest = runQuery(spec, { blocks, atoms, anchorId: opts.anchorId })
+  const fromIndex = queryByIndex(rebuild(blocks, atoms), blocks, spec, opts)
+  assert.deepEqual(fromIndex, fromForest)
+}
+
+test('索引路径与纯函数路径同解（ref/tag/journal 查表，判定与顺序共用一份）', () => {
+  const { blocks, atoms } = fixture()
+  assertSameHits({ where: { tag: 'todo' } }, blocks, atoms)
+  assertSameHits({ where: { tag: 'todo' }, scope: 'all' }, blocks, atoms, { anchorId: 'p1' })
+  assertSameHits({ where: { ref: 'c' }, scope: 'all' }, blocks, atoms)
+  assertSameHits({ where: { journal: '2026-10-20' }, scope: 'all' }, blocks, atoms)
+  assertSameHits({ where: { all: [{ tag: 'todo' }, { todo: 'todo' }] }, scope: 'all' }, blocks, atoms)
+  assertSameHits({ where: { text: '丙' }, scope: 'all' }, blocks, atoms)
+  assertSameHits({ where: { tag: 'todo' }, scope: 'all', limit: 2 }, blocks, atoms)
+})
+
 test('refreshSpec：把条件与结果写回块上；丢掉的不再匹配的块要能报出来', () => {
   const { blocks, atoms } = fixture()
+  const { kb, store } = kbOf(blocks, atoms)
   const q = b('q', '查询：带 todo 的')
   const spec: QuerySpec = { where: { tag: 'todo' }, scope: 'all' }
-  const first = refreshSpec(q, spec, { blocks, atoms })
+  const first = refreshSpec(q, spec, kb)
   assert.equal(first.hits.length, 5)
   assert.deepEqual(first.dropped, [])
   assert.deepEqual(readSpec(q), spec, '条件要写进 _query')
@@ -178,9 +210,12 @@ test('refreshSpec：把条件与结果写回块上；丢掉的不再匹配的块
   //    （不是改正文里的字 —— 改字本来就不该改变归属）。
   // ⚠️ 必须从**同一份** fixture 里改块：再调一次 `fixture()` 会造出一个新的标签块（新 id），
   //    于是所有归属都指向一个不在 `blocks` 里的标签 ⇒ 全部被判成 dropped（看着像全丢了）。
+  // ⚠️ 直写绕过事务 ⇒ 索引不会自己跟上：写完必须显式作废
+  //    （生产里唯一写入口是 `tx`，索引随 op 修补；直写是测试里的特殊动作）。
   const flat = (list: Block[]): Block[] => list.flatMap(function walk(x) { return [x, ...x.children.flatMap(walk)] })
   delete flat(blocks).find((x) => x.id === 'a')!.props!._tags
-  const second = refreshSpec(q, spec, { blocks, atoms })
+  store.invalidateIndex()
+  const second = refreshSpec(q, spec, kb)
   assert.deepEqual(second.dropped, ['a'])
   assert.ok(!second.hits.some((h) => h.blockId === 'a'))
 })
@@ -188,35 +223,39 @@ test('refreshSpec：把条件与结果写回块上；丢掉的不再匹配的块
 test('refreshSpec：subtree 的锚点是查询块所在的容器，不是查询块自己（它是叶子）', () => {
   // 实测踩到：查询块只存条件、不吃结果（A）⇒ 拿它当锚点的话 subtree 里只有它自己，永远 0 条
   const { blocks, atoms } = fixture()
+  const { kb } = kbOf(blocks, atoms)
   const q = b('q', '本页的待办', { props: { _query: { where: { todo: 'todo' } } } })
   blocks[0]!.children.push(q)
-  const { hits } = refreshSpec(q, { where: { todo: 'todo' } }, { blocks, atoms })
+  const { hits } = refreshSpec(q, { where: { todo: 'todo' } }, kb)
   assert.deepEqual(hits.map((h) => h.blockId), ['a', 'd1'], '只看 p1 这一页里的待办')
 })
 
 test('resolveFrozen：内容按 id 现读（冻的是成员，不是文字）', () => {
   const { blocks, atoms } = fixture()
+  const { kb } = kbOf(blocks, atoms)
   const q = b('q', 'q')
-  refreshSpec(q, { where: { tag: 'todo' }, scope: 'all' }, { blocks, atoms })
+  refreshSpec(q, { where: { tag: 'todo' }, scope: 'all' }, kb)
 
   // 改文字：冻结结果不变，但**读出来的是新文字**
   blocks[0]!.children[0]!.text = '甲已改名 #todo'
-  const rows = resolveFrozen(readResult(q)!, blocks)
+  const rows = resolveFrozen(readResult(q)!, (id) => kb.pathOf(id))
   assert.equal(rows.find((r) => r.block.id === 'a')!.block.text, '甲已改名 #todo', '内容不冻（D5）')
   assert.equal(rows.length, 5, '成员与顺序不冻（D4）')
 })
 
 test('resolveFrozen：块被删了就不出；祖先也在结果里时只保留祖先', () => {
   const { blocks, atoms } = fixture()
+  const { kb } = kbOf(blocks, atoms)
   const q = b('q', 'q')
   // d 与 d1 都命中标签吗？d 不含标签 ⇒ 用 text 条件让父子同时命中
-  refreshSpec(q, { where: { text: '提到' }, scope: 'all' }, { blocks, atoms })
-  const rows = resolveFrozen(readResult(q)!, blocks)
+  refreshSpec(q, { where: { text: '提到' }, scope: 'all' }, kb)
+  const rows = resolveFrozen(readResult(q)!, (id) => kb.pathOf(id))
   assert.deepEqual(rows.map((r) => r.block.id), ['d'], '子块由父块的子树渲染，不重复出一条')
 
-  // 删掉结果里的块 ⇒ 该行消失（不是显示成空行）
+  // 删掉结果里的块 ⇒ 该行消失（pathOf 解析不到 ⇒ 空数组 ⇒ 这一行不出）
   const without = blocks.map((p) => ({ ...p, children: p.children.filter((c) => c.id !== 'd') }))
-  assert.deepEqual(resolveFrozen(readResult(q)!, without), [])
+  const { kb: kb2 } = kbOf(without, atoms)
+  assert.deepEqual(resolveFrozen(readResult(q)!, (id) => kb2.pathOf(id)), [])
 })
 
 test('runQuery：属性条件按 propId 取值、Object.is 比较（未填与 false 分得开）', () => {
@@ -251,7 +290,8 @@ test('canonicalSpec：属性条件要能存活下来（否则存进 _query 就�
   assert.deepEqual(canonicalSpec(nested), { where: { all: [{ tag: '任务' }, { not: { prop: { id: 'p1', eq: true } } }] } })
 
   const q = b('q', 'q')
-  refreshSpec(q, spec, fixture())
+  const f = fixture()
+  refreshSpec(q, spec, kbOf(f.blocks, f.atoms).kb)
   assert.equal(specChanged(q, spec), false, '同一条件刷新后不该自认「变了」')
 })
 
@@ -261,7 +301,8 @@ test('canonicalSpec：键序固定 ⇒ 同一条件的不同写法判为「没�
   assert.equal(JSON.stringify(canonicalSpec(a)), JSON.stringify(canonicalSpec(b2)))
 
   const q = b('q', 'q')
-  refreshSpec(q, a, fixture())
+  const f = fixture()
+  refreshSpec(q, a, kbOf(f.blocks, f.atoms).kb)
   assert.equal(specChanged(q, b2), false, '写法不同但语义相同 ⇒ 不该触发重算')
   assert.equal(specChanged(q, { where: { tag: 'y' }, scope: 'all' }), true)
 })

@@ -9,18 +9,18 @@
  * ⚠️ 只有页/标签能声明（`declareField` 的判据）；没有露面时按钮禁用并说明原因。
  */
 import {
-  allPropDefs,
-  declaredFields,
   declareField,
   listsOf,
   propKindOf,
   undeclareField,
   type Block,
 } from '../core/index.ts'
+import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 
 export interface FieldsEditorDeps {
-  forest: () => readonly Block[]
+  /** 读门面：已声明的字段与定义清单都是命名的库读 */
+  kb: KbClient
   block: () => Block | undefined
   write: (mutate: () => void) => void
   close: () => void
@@ -45,7 +45,7 @@ export function renderFieldsEditor(host: HTMLElement, deps: FieldsEditorDeps): v
 
   /* --------------------------------------------------------- 已声明 */
 
-  const declared = declaredFields(b, deps.forest())
+  const declared = deps.kb.declaredFieldsOf(b.id)
   const declaredBox = document.createElement('div')
   declaredBox.className = 'fields-section'
   const declaredHead = document.createElement('div')
@@ -87,7 +87,7 @@ export function renderFieldsEditor(host: HTMLElement, deps: FieldsEditorDeps): v
   /* --------------------------------------------------------- 可添加 */
 
   const used = new Set(declared.map((d) => d.id))
-  const candidates = allPropDefs(deps.forest()).filter((d) => !used.has(d.id))
+  const candidates = deps.kb.propDefs().filter((d) => !used.has(d.id))
   const addBox = document.createElement('div')
   addBox.className = 'fields-section'
   const addHead = document.createElement('div')

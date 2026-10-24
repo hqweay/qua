@@ -14,9 +14,8 @@
  * ⚠️ 这层零 DOM：`refreshSpec` 是「决定下一次结果集」的纯函数，好让「冻结」这件事能被单测。
  */
 import type { Block } from './model.ts'
-import { findPath } from './tree.ts'
-import { runQuery, type QueryHit, type QuerySpec } from './query.ts'
-import type { Atom } from './annotations.ts'
+import type { QueryHit, QuerySpec } from './query.ts'
+import type { KbClient } from './kb/types.ts'
 
 /** 冻结进 `_queryResult` 的一条 */
 export interface FrozenHit {
@@ -49,12 +48,14 @@ export function readResult(b: Block): FrozenHit[] | null {
  * 这是「刷新按钮」的全部逻辑，也是「新建查询」时的第一次求值 —— **同一个函数**，
  * 免得出现「新建时算一套、刷新时算另一套」的分叉。
  *
+ * 求值经**读门面**（`kb.query` 走索引、`kb.parentOf` 找容器）：调用方不必持有整片森林。
+ *
  * 返回值用于 UI：`{ hits, dropped }`。`dropped` ＝ 刷新后**不再匹配**的块（D8 的「已不匹配」提示要用它）。
  */
 export function refreshSpec(
   block: Block,
   spec: QuerySpec,
-  input: { blocks: readonly Block[]; atoms: readonly Atom[] },
+  kb: Pick<KbClient, 'parentOf' | 'query'>,
 ): { hits: FrozenHit[]; dropped: string[] } {
   const before = new Set((readResult(block) ?? []).map((h) => h.blockId))
   /**
@@ -65,9 +66,8 @@ export function refreshSpec(
    * 语义上「这页的待办」看的也是**这一页**，不是「这个查询块的子树」。
    * ⚠️ 顶层查询块（没有祖先）就没有容器可言 ⇒ 退回整片森林（`anchorId` 传空）。
    */
-  const path = findPath(input.blocks, block.id) ?? []
-  const container = path.length >= 2 ? path[path.length - 2]! : undefined
-  const hits = runQuery(spec, { blocks: input.blocks, atoms: input.atoms, anchorId: container?.id })
+  const container = kb.parentOf(block.id)
+  const hits = kb.query(spec, { scopeId: container?.id })
   const after = new Set(hits.map((h) => h.blockId))
 
   block.props = { ...(block.props ?? {}), _query: canonicalSpec(spec), _queryResult: hits }
@@ -77,6 +77,9 @@ export function refreshSpec(
 /**
  * **现读**：把冻结的 id 列表翻译成当前活块（D5：内容不冻）。
  *
+ * 查找经**读门面的 `pathOf`**（根→自己的祖先链）：调用方不必持有整片森林；
+ * 空数组 ＝ 这个 id 现在解析不到。
+ *
  * 三条规则：
  *   1. 块被删了 ⇒ 这一行**不出**（冻结集合里的人没了，没有可显示的内容）；
  *   2. 顺序**严格按冻结列表**，不看当前森林顺序；
@@ -84,13 +87,13 @@ export function refreshSpec(
  */
 export function resolveFrozen(
   frozen: readonly FrozenHit[],
-  blocks: readonly Block[],
+  pathOf: (id: string) => readonly Block[],
 ): { block: Block; path: Block[] }[] {
   const keep = new Set<string>()
-  const paths = new Map<string, Block[]>()
+  const paths = new Map<string, readonly Block[]>()
   for (const f of frozen) {
-    const path = findPath(blocks, f.blockId)
-    if (!path) continue
+    const path = pathOf(f.blockId)
+    if (path.length === 0) continue
     keep.add(f.blockId)
     paths.set(f.blockId, path)
   }

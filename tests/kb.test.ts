@@ -12,7 +12,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Atom, Block, Mark } from '../src/core/index.ts'
 import type { Op } from '../src/core/kb/types.ts'
-import { BlockStore, mkBlock, mkPropDef, mkTagBlock } from '../src/core/index.ts'
+import { BlockStore, fingerprint, mkBlock, mkPropDef, mkTagBlock, rebuild } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { seedWorkspace } from '../src/core/seed.ts'
 
@@ -426,4 +426,34 @@ test('tx 的 opts.source 原样转给订阅者（发起者据此跳过自己的�
   // 不传 ≠ 传 undefined：两条路径都要能被订阅者区分出来（默认仍是「没发起者」）
   kb.tx((tx) => tx.setTags('c1', []))
   assert.deepEqual(seen, [me, undefined])
+})
+
+test('索引随 tx 增量修补：任意一批写之后，增量结果与全量重建逐字节一致', () => {
+  const { kb, store } = fixture()
+  const added = mkBlock('新块')
+  // 一串覆盖全部 op 形态的写：正文 / 属性 / 别名 / 露面 / 归属 / 日期 / 锚点 / 插入 / 移动 / 删除
+  const writes: ((tx: Parameters<Parameters<typeof kb.tx>[0]>[0]) => void)[] = [
+    (tx) => tx.patch('c1', (b) => { b.text = '改过的正文' }),
+    (tx) => tx.setProp('c1', '_date', '2026-10-24'),
+    (tx) => tx.setAliases('p2', ['页面二', '别名二']),
+    (tx) => tx.setLists('c1', ['page']),
+    (tx) => tx.setTags('c2', ['t1', 't1']),
+    (tx) => tx.setAnnotations('c1', [], [ref('a9', 'c1', 'p2')]),
+    (tx) => tx.insert(added, 'p1', 1),
+    (tx) => tx.move('c2', 'p1', 0),
+    (tx) => tx.remove('g1'),
+  ]
+  for (const [i, write] of writes.entries()) {
+    // 修补必须**就地**：tx 之前拿到的那份索引对象，tx 之后还是同一个（作废重建会换对象——
+    // 那会让每次写入都退化成全量重建，等式却照样是绿的，所以这里连身份一起断言）
+    const before = store.index
+    kb.tx(write)
+    assert.equal(store.index, before, `第 ${i + 1} 笔写之后：索引应被就地修补，而不是作废重建`)
+    const incremental = fingerprint(store.index)
+    store.invalidateIndex()
+    const full = fingerprint(store.index)
+    assert.equal(incremental, full, `第 ${i + 1} 笔写之后：索引增量修补必须与全量重建一致`)
+  }
+  // tx 之后不作废索引：刚插入的块**不经重建**就在索引里（否则每次写都退化成全量重建）
+  assert.equal(store.index.blocks.has(added.id), true)
 })

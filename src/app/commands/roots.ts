@@ -8,14 +8,9 @@
 import {
   ALIASES_PROP,
   DISPLAY_PROP,
-  FEED_INITIAL,
   hasList,
-  isJournal,
-  journalDate,
-  journalFeedDays,
   LISTS_PROP,
   mkBlock,
-  todayISO,
   type Block,
 } from '../../core/index.ts'
 import { t } from '../../core/msg.ts'
@@ -55,35 +50,13 @@ export function rootsFor(block: Block): Block[] {
 /**
  * **一列真实的根**：日记流／查询列表／多页并排。
  * 现在 block store 是唯一真相：这里返回**活引用**，不是浅拷贝；编辑直接写 store。
+ *
+ * 「日记流装哪些天」是**命名的库读**（`kb.journalFeed`：date 在顶、更早存在的天往下）；
+ * 「单日还是流」的形态判据在各入口（左槽 Daily note 入口＝流、聚焦/翻日＝单日），
+ * 这里只负责把选好的一列块排成装载根。
  */
 export function rootsForMany(blocks: readonly Block[]): Block[] {
   return blocks.slice()
-}
-
-/**
- * **日记流入口装哪些根**：从 `target` 的日期起，今日在顶、更早存在的天往下。
- *
- * feed 与「单块聚焦」是两种形态：同一个 journal id 可以走这里（入口），
- * 也可以只走 `rootsFor`（只看这一天）。判据不能是「是不是今天」。
- *
- * ⚠️ **纯函数**（同 `rootsFor`）：空天的首子块由装载边界补（经事务进库），这里只选择。
- */
-export function rootsForFeed(target: Block, blocks: readonly Block[]): Block[] {
-  const days = journalFeedDays(blocks, journalDate(target), FEED_INITIAL)
-  return rootsForMany(days)
-}
-
-/**
- * **左槽「打开」一个落点时该装哪些根**。
- *
- * 判据：落点是**今天的 journal** ⇒ 这一下是「进入 Daily note 入口」，装**日记流**；
- *       否则就是「这块自己 ＋ 它的子树」。
- *
- * ⚠️ **聚焦不走这里**：点块标是「只看这一块」，即使目标是今天也只装单日。
- *    历史回放要还原当时的形态，所以那条信息随落点一起入栈。
- */
-export function rootsForTarget(target: Block, blocks: readonly Block[]): Block[] {
-  return isJournal(target) && journalDate(target) === todayISO() ? rootsForFeed(target, blocks) : rootsFor(target)
 }
 
 /**

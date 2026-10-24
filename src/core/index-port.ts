@@ -18,6 +18,7 @@ import { normalizeAlias } from './alias.ts'
 import { journalDate, isJournal } from './journal.ts'
 import { tagIdsOf } from './tags.ts'
 import type { Op } from './kb/types.ts'
+import { evaluateQuery, firstJournal, type QueryEnv, type QueryHit, type QueryNode, type QuerySpec } from './query.ts'
 
 /**
  * 一份索引。五张表各答一类问题，**全是派生**：
@@ -440,6 +441,70 @@ export function tagMemberIdsOf(index: Index, tagId: string): string[] {
 /** 按规范化名字找标签块 id */
 export function tagIdByName(index: Index, name: string): string | undefined {
   return index.tags.get(normalizeAlias(name))
+}
+
+/* ------------------------------------------------------------ 查询 */
+
+/**
+ * **查询走索引**：`ref`／`tag`／`journal` 三类条件查表（O(1)），其余谓词仍是逐块判定。
+ *
+ * 为什么不是「查询全在索引里」：索引是五张**派生表**，不记树的形状（`pageOf` 只到顶层、
+ * 挪位后 `blocks` 的插入顺序会漂移）——候选迭代与结果顺序仍按森林先序走，
+ * 判定与顺序共用 `query.ts` 的 `evaluateQuery`（两条路径只有「环境怎么来」不同）。
+ *
+ * 与纯函数路径 `runQuery` 的等式（同一输入 ⇒ 同一输出）由测试钉住；
+ * 换成 SQLite 之后，这张等式的另一边就是 SQL 查询要复刻的口径。
+ */
+export function queryByIndex(
+  index: Index,
+  forest: readonly Block[],
+  spec: QuerySpec,
+  opts: { anchorId?: string } = {},
+): QueryHit[] {
+  const env: QueryEnv = {
+    refs: refsByIndex(spec.where, index),
+    tags: tagsByIndex(spec.where, index),
+    journalDate: firstJournal(spec.where),
+  }
+  let roots: readonly Block[] = forest
+  if (spec.scope !== 'all' && opts.anchorId) {
+    const anchor = index.blocks.get(opts.anchorId)
+    if (anchor) roots = [anchor]
+  }
+  if (env.journalDate) {
+    const dayId = index.journals.get(env.journalDate)
+    roots = dayId ? (index.blocks.get(dayId)?.children ?? []) : []
+  }
+  return evaluateQuery(spec, roots, env)
+}
+
+/** `ref` 条件的目标块集合 —— 查**入向边表**，不再扫 atoms */
+function refsByIndex(node: QueryNode, index: Index): Set<string> {
+  const out = new Set<string>()
+  const visit = (n: QueryNode): void => {
+    if ('all' in n) n.all.forEach(visit)
+    else if ('any' in n) n.any.forEach(visit)
+    else if ('not' in n) visit(n.not)
+    else if ('ref' in n) for (const id of incomingIds(index, n.ref)) out.add(id)
+  }
+  visit(node)
+  return out
+}
+
+/** `tag` 条件的目标块集合 —— 名字表解析成标签块，再查**成员表** */
+function tagsByIndex(node: QueryNode, index: Index): Set<string> {
+  const out = new Set<string>()
+  const visit = (n: QueryNode): void => {
+    if ('all' in n) n.all.forEach(visit)
+    else if ('any' in n) n.any.forEach(visit)
+    else if ('not' in n) visit(n.not)
+    else if ('tag' in n) {
+      const tagId = tagIdByName(index, n.tag)
+      if (tagId) for (const id of tagMemberIdsOf(index, tagId)) out.add(id)
+    }
+  }
+  visit(node)
+  return out
 }
 
 /**

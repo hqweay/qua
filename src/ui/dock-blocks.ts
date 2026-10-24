@@ -15,7 +15,8 @@
  * ⚠️ **外部 store 变化防抖重载**：正文每敲一个键都会 `touch`，若每键重画整槽的块，
  *    侧槽会跟着抖；聚焦在槽内时干脆冻结（用户正在这里打字，不该被外面的变化打断）。
  */
-import { findInForest, findPath, flatten, type Block, type BlockStore } from '../core/index.ts'
+import { flatten, type BlockStore } from '../core/index.ts'
+import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
 import type { DockSlotEls } from './dock.ts'
@@ -27,8 +28,8 @@ export interface DockBlocksDeps {
   side: 'left' | 'right'
   slot: DockSlotEls
   store: BlockStore
-  /** 整片森林（活引用） */
-  blocks: () => Block[]
+  /** 读门面：钉住块按 id 解析（在不在、祖先链） */
+  kb: KbClient
   /** 写入事务入口：执行者在装配层，这里只原样转给每个槽内编辑器（见 `Run`） */
   write?: Run
   /** 这一槽钉住的块 id（有序） */
@@ -134,8 +135,9 @@ export class DockBlocks {
     const out: string[] = []
     for (const id of pins) {
       if (out.includes(id)) continue
-      if (!findInForest(this.deps.blocks(), id)) continue
-      const path = findPath(this.deps.blocks(), id) ?? []
+      // 按 id 解析（在不在、祖先链），不持有森林
+      if (!this.deps.kb.get(id)) continue
+      const path = this.deps.kb.pathOf(id)
       if (path.slice(0, -1).some((p) => pinned.has(p.id))) continue
       out.push(id)
     }
@@ -144,7 +146,7 @@ export class DockBlocks {
 
   private ensure(id: string): void {
     if (this.editors.has(id)) return
-    const block = findInForest(this.deps.blocks(), id)
+    const block = this.deps.kb.get(id)
     if (!block) return
 
     const row = document.createElement('div')
@@ -243,7 +245,7 @@ export class DockBlocks {
       const id = e.dataTransfer?.getData('text/plain') ?? ''
       if (!id) return
       e.preventDefault()
-      if (findInForest(this.deps.blocks(), id)) this.deps.pin(id)
+      if (this.deps.kb.get(id)) this.deps.pin(id)
     })
     // 拖拽可能在槽外结束（Esc / 松在别处）：全局收尾，别把高亮留在槽上
     document.addEventListener('dragend', clear)

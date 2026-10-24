@@ -18,7 +18,6 @@ import {
   aliasLeaf,
   aliasesOf,
   canRemoveAlias,
-  claimAlias,
   DISPLAY_PROP,
   displayNameOf,
   hasList,
@@ -30,14 +29,15 @@ import {
   setPrimaryAlias,
   type Block,
 } from '../core/index.ts'
+import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 
 export interface AliasEditorDeps {
-  /** 整片森林（查重与「这个块还在不在」都从这里现取） */
-  forest: () => readonly Block[]
+  /** 读门面：查重（这个地址现在归谁）按名现取 */
+  kb: KbClient
   /** 当前正在编辑的块（每次现取；撤销/换库后旧引用可能已经不在森林里） */
   block: () => Block | undefined
-  /** 一次写入：撤销快照、索引失效、重画与落盘都在装配层那一条路上 */
+  /** 一次写入：撤销快照、索引修补、重画与落盘都在装配层那一条路上 */
   write: (mutate: () => void) => void
   /** 关闭浮层（保留给「块已经不存在」等退出路径） */
   close: () => void
@@ -177,10 +177,11 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
       toast(t('ui.alias.exists'), 'info')
       return
     }
-    // 即将写进 `_aliases` ⇒ 一律按「要占地址」查重，不看它此刻有没有名字
-    const claim = claimAlias(deps.forest(), b, name, true)
-    if (!claim.ok) {
-      toast(t('ui.toast.nameTaken', { name, where: whereOf(claim.conflict) }), 'warn')
+    // 即将写进 `_aliases` ⇒ 一律按「要占地址」查重，不看它此刻有没有名字。
+    // 判据与 `claimAlias` 同一份（`kb.resolveAlias` 就是「这个地址现在归谁」）
+    const claim = deps.kb.resolveAlias(name)
+    if (claim && claim.id !== b.id) {
+      toast(t('ui.toast.nameTaken', { name, where: whereOf(claim) }), 'warn')
       return
     }
     deps.write(() => {

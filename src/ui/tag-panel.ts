@@ -11,7 +11,8 @@
  * ⚠️ 成员是**算作**进来的（`membersOf`）：`#人物` 的成员含只打 `#演员` 的块，
  *    但这些块**不获得** `#人物` 的字段（字段只看直接标签，见 `core/props.ts`）。
  */
-import { displayNameOf, findPath, type Atom, type Block, type BlockStore } from '../core/index.ts'
+import { displayNameOf, type Atom, type Block, type BlockStore } from '../core/index.ts'
+import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
 
@@ -19,7 +20,8 @@ export interface TagPanelDeps {
   store: BlockStore
   /** 写入事务入口：执行者在装配层，这里只原样转给成员编辑器（见 `Run`） */
   write?: Run
-  blocks: () => Block[]
+  /** 读门面：成员行的祖先链按 id 现读（归属/包含/成员是装配层注入的窄派生） */
+  kb: KbClient
   /** 当前对象；不是标签 ⇒ 整段隐藏 */
   tag: () => Block | undefined
   parents: (tag: Block) => Block[]
@@ -188,7 +190,7 @@ export class TagPanel {
     const ids = new Set(members.map((b) => b.id))
     const roots: Block[] = []
     for (const b of members) {
-      const path = findPath(this.deps.blocks(), b.id) ?? []
+      const path = this.deps.kb.pathOf(b.id)
       if (path.slice(0, -1).some((p) => ids.has(p.id))) continue
       const live = this.deps.store.find(b.id)
       if (live) roots.push(live)
