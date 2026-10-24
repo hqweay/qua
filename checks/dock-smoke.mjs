@@ -287,7 +287,7 @@ await check('A2 通用块样式 padding-block / margin 为 0（S2：豁免只有
   await openFirstPage(page)
 
   /**
-   * ⚠️ 口径（承 `00-块组合防丑` §2 规则 1／§6 S2）：**通用块样式**里 `padding-block: 0; margin: 0`。
+   * ⚠️ 口径：**通用块样式**里 `padding-block: 0; margin: 0`。
    *    「块的垂直留白只来自渲染器的 inset 与容器的 gap」。
    *
    *    ⚠️ 2026-10-20：**甲/乙/丙三皮肤整体删除**，内建只有一种样式
