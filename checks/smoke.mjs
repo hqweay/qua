@@ -4685,7 +4685,7 @@ await check(
 )
 
 await check(
-  'T69 删块走一笔事务：子树里每块一条 block.delete（叶子恰好 1 条），进回收站，一次撤销复原',
+  'T69 删块走一笔事务：操作根恰好 1 条 block.delete；可见读全部消失，块带标记留在森林原位（原位软删），一次撤销复原',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -4725,30 +4725,43 @@ await check(
 
     const after = await page.evaluate((t) => {
       const ed = window.__qua.__editor
+      // 含被删块的遍历：原位软删的块还在树上的原位
+      let hit = null
       let total = 0
-      const count = (list) => list.forEach((b) => (total++, count(b.children)))
-      count(ed.store.blocks)
-      const trashed = ed.store.trash.find((b) => b.id === t.id)
+      let visible = 0
+      const walk = (list, parent) => {
+        list.forEach((b, i) => {
+          total++
+          if (!b.props?._deletedAt) visible++
+          if (b.id === t.id) hit = { parentId: parent?.id ?? null, index: i, marked: Boolean(b.props?._deletedAt), kids: b.children.length }
+          walk(b.children, b)
+        })
+      }
+      walk(ed.store.blocks, null)
       return {
         ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op })),
         gone: ed.store.find(t.id) === undefined,
-        trashed: Boolean(trashed),
-        deletedAt: trashed?.props?._deletedAt ?? null,
+        hit,
         total,
+        visible,
         dom: Boolean(document.querySelector(`.blk[data-block-id="${t.id}"]`)),
         rows: document.querySelectorAll('.blk').length,
       }
     }, pick)
 
-    assert(after.ops.length === 1, `叶子删块应恰好 1 条 op：${JSON.stringify(after.ops)}`)
+    assert(after.ops.length === 1, `叶子删块应恰好 1 条 op（只落操作根）：${JSON.stringify(after.ops)}`)
     assert(
       after.ops[0].e === 'block' && after.ops[0].id === pick.id && after.ops[0].op === 'delete',
       `应是一条 block.delete 指向被删块：${JSON.stringify(after.ops)}`,
     )
-    assert(after.gone, '模型里应找不到它')
-    assert(after.trashed, '整块应进回收站（内容不丢，复活时边还能接上）')
-    assert(after.deletedAt !== null, '回收站成员要带 _deletedAt')
-    assert(after.total === pick.total - 1, `块数应 -1：${pick.total} → ${after.total}`)
+    assert(after.gone, '可见读（store.find）应找不到它')
+    assert(after.hit, '块应留在森林原位（原位软删，不是摘出去）')
+    assert(
+      after.hit.parentId === pick.parentId && after.hit.index === pick.index && after.hit.marked,
+      `原位（父块/下标不变）＋带删除标记：${JSON.stringify({ pick, hit: after.hit })}`,
+    )
+    assert(after.total === pick.total, `块总数不变（内容不丢）：${pick.total} → ${after.total}`)
+    assert(after.visible === pick.total - 1, '可见块数应 -1（被删子树对遍历不可见）')
     assert(!after.dom, 'DOM 里应不再有这一行')
     assert(after.rows > 0, '删掉一行之后编辑器仍有行（不是整片清空）')
 
@@ -4761,7 +4774,7 @@ await check(
       const walk = (list, parent) => {
         list.forEach((b, i) => {
           total++
-          if (b.id === t.id) hit = { parentId: parent?.id ?? null, index: i, text: b.text }
+          if (b.id === t.id) hit = { parentId: parent?.id ?? null, index: i, text: b.text, marked: Boolean(b.props?._deletedAt) }
           walk(b.children, b)
         })
       }
@@ -4775,16 +4788,17 @@ await check(
       `应回到原来的父块与下标：${JSON.stringify(pick)} → ${JSON.stringify(back.hit)}`,
     )
     assert(back.hit.text === pick.text, `正文应原样：${JSON.stringify(back.hit.text)}`)
+    assert(!back.hit.marked, '撤销后删除标记应消失')
     assert(back.total === pick.total, `块数应复原：${pick.total}，实际 ${back.total}`)
     assert(back.dom, '撤销后 DOM 里应重新出现这一行')
 
     await ctx.close()
-    return `删叶子 ⇒ ops=[block.delete]（1 条）＋ 进回收站（_deletedAt）；⌘Z 回原父/原位/原文`
+    return `删叶子 ⇒ ops=[block.delete]（操作根 1 条）；块带标记留在原位；⌘Z 回原父/原位/原文`
   },
 )
 
 await check(
-  'T70 删页也走事务：整棵子树每块一条 block.delete，页进回收站，页列表少一项',
+  'T70 删页走一笔事务：操作根（页块）恰好 1 条 block.delete；页列表少一项，页块带标记留在森林、子树完整',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -4810,37 +4824,45 @@ await check(
 
     const after = await page.evaluate((t) => {
       const ed = window.__qua.__editor
-      const trashed = ed.store.trash.filter((b) => b.id === t.pageId)
+      // 含被删块的遍历：页块与整棵子树都留在森林里（原位软删）
+      let page = null
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === t.pageId) page = b
+          walk(b.children)
+        }
+      }
+      walk(ed.store.blocks)
       return {
         ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op })),
         pages: window.__qua.pages().length,
         pageGone: ed.store.find(t.pageId) === undefined,
         kidGone: ed.store.find(t.kidId) === undefined,
-        trashed: trashed.length,
-        deletedAt: trashed[0]?.props?._deletedAt ?? null,
+        pageMarked: page ? Boolean(page.props?._deletedAt) : false,
+        kids: page ? page.children.map((b) => b.id) : [],
       }
     }, created)
 
     const deletes = after.ops.filter((o) => o.e === 'block' && o.op === 'delete').map((o) => o.id)
     assert(
-      after.ops.length === 1 + created.childIds.length,
-      `删一页（页 ＋ ${created.childIds.length} 个子块）应恰好 ${1 + created.childIds.length} 条 op：${JSON.stringify(after.ops)}`,
+      after.ops.length === 1 && deletes[0] === created.pageId,
+      `删页应恰好 1 条 block.delete（操作根；子树的不可见是继承的）：${JSON.stringify(after.ops)}`,
     )
+    assert(after.pageGone && after.kidGone, '页与子块对可见读都应消失')
+    assert(after.pageMarked, '页块应带删除标记留在森林里')
     assert(
-      deletes.includes(created.pageId) && created.childIds.every((id) => deletes.includes(id)),
-      `页与子树每块各要一条 block.delete（级联是落库实现的事，op 序列要说得清）：${JSON.stringify(after.ops)}`,
+      JSON.stringify(after.kids) === JSON.stringify(created.childIds),
+      `子树应原样保留（恢复时接得回）：${JSON.stringify(after.kids)}`,
     )
-    assert(after.pageGone && after.kidGone, '模型里页与子块都应消失')
-    assert(after.trashed === 1 && after.deletedAt !== null, '整页应进回收站（带 _deletedAt，内容不丢）')
     assert(after.pages === created.pages - 1, `页列表应少一项：${created.pages} → ${after.pages}`)
 
     await ctx.close()
-    return `删页 ⇒ ops=[block.delete × 2]（页＋子块）；页列表 ${created.pages}→${after.pages}；整页进回收站`
+    return `删页 ⇒ ops=[block.delete]（操作根 1 条）；页列表 ${created.pages}→${after.pages}；页块带标记原位保留`
   },
 )
 
 await check(
-  'T71 退格合并走一笔事务：正文 upsert ＋ 子块逐个 move ＋ 被并块 block.delete，且不进回收站',
+  'T71 退格合并走一笔事务：正文 upsert ×2（前块拼接＋空壳清空）＋ 子块逐个 move ＋ block.delete，一次撤销连子块复原',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -4891,20 +4913,21 @@ await check(
     const after = await page.evaluate((t) => {
       const ed = window.__qua.__editor
       const prev = ed.store.find(t.prevId)
-      let trashed = false
+      // 含被删块的遍历：被并块是**原位标记**的空壳
+      let husk = null
       const walk = (list) => {
         for (const b of list) {
-          if (b.id === t.id) trashed = true
+          if (b.id === t.id) husk = { marked: Boolean(b.props?._deletedAt), text: b.text, kids: b.children.length }
           walk(b.children)
         }
       }
-      walk(ed.store.trash)
+      walk(ed.store.blocks)
       return {
         ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, value: o.value })),
         gone: ed.store.find(t.id) === undefined,
         prevText: prev?.text ?? null,
         prevKids: (prev?.children ?? []).map((b) => b.id),
-        trashed,
+        husk,
       }
     }, pick)
 
@@ -4912,8 +4935,11 @@ await check(
     const moveOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent !== undefined)
     const delOps = after.ops.filter((o) => o.e === 'block' && o.op === 'delete')
 
-    assert(textOps.length === 1, `应恰有 1 条正文 upsert：${JSON.stringify(after.ops)}`)
+    // 两条正文 upsert：前一块拼接 ＋ 被并块空壳清空（删除是原位标记，壳留在树上）
+    assert(textOps.length === 2, `应恰有 2 条正文 upsert（前块拼接＋空壳清空）：${JSON.stringify(after.ops)}`)
     assert(textOps[0].id === pick.prevId, `正文应写进前一块「${pick.prevId}」：${JSON.stringify(textOps[0])}`)
+    const huskOp = textOps.find((o) => o.id === pick.id)
+    assert(huskOp && huskOp.value.text === '', `被并块空壳应清空：${JSON.stringify(huskOp)}`)
     assert(
       textOps[0].value.text === pick.prevText + pick.text,
       `前一块应变成「前文＋被并块」：${JSON.stringify(textOps[0].value.text)}`,
@@ -4926,19 +4952,22 @@ await check(
       assert(op.value.index === pick.prevKids + n, `子块落点应是 ${pick.prevKids + n}：${JSON.stringify(op.value)}`)
     }
     assert(delOps.length === 1 && delOps[0].id === pick.id, `被并块应有 1 条 block.delete：${JSON.stringify(delOps)}`)
-    assert(after.ops.length === 2 + pick.kids.length, `op 总数应是「正文 1 ＋ 子块 ${pick.kids.length} ＋ 删除 1」：${JSON.stringify(after.ops)}`)
+    assert(after.ops.length === 3 + pick.kids.length, `op 总数应是「正文 1 ＋ 子块 ${pick.kids.length} ＋ 清壳 1 ＋ 删除 1」：${JSON.stringify(after.ops)}`)
 
-    assert(after.gone, '被并块应从模型里消失')
+    assert(after.gone, '被并块对可见读应消失')
+    assert(after.husk && after.husk.marked, '被并块应带删除标记留在原位（原位软删）')
+    assert(after.husk.text === '' && after.husk.kids === 0, '空壳应确认是空的（内容已搬进前一块）')
     assert(after.prevText === pick.prevText + pick.text, `模型里前一块正文应已拼接：${JSON.stringify(after.prevText)}`)
+    // 被并块的壳原位标记后仍占 raw 槽位（可见序不受影响）⇒ 比较时滤掉壳
+    const gotVisible = after.prevKids.filter((id) => id !== pick.id)
     assert(
-      pick.prevChildIds.filter((id) => id !== pick.id).every((id, n) => after.prevKids[n] === id),
+      pick.prevChildIds.filter((id) => id !== pick.id).every((id, n) => gotVisible[n] === id),
       `前一块原有子块（被并块自己除外）应原样在前：${JSON.stringify({ want: pick.prevChildIds, got: after.prevKids })}`,
     )
     assert(
       pick.kids.every((kid) => after.prevKids.includes(kid)),
       `被并块的子块应挂到前一块下：${JSON.stringify({ want: pick.kids, got: after.prevKids })}`,
     )
-    assert(!after.trashed, '被并块不进回收站（内容已经搬进前一块，不留空壳）')
 
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(200)
@@ -4968,7 +4997,7 @@ await check(
     assert(back.dom, '撤销后 DOM 里应重新出现这一行')
 
     await ctx.close()
-    return `退格合并 ⇒ ops=[正文 1 ＋ 子块 ${pick.kids.length} ＋ delete 1]；不进回收站；⌘Z 连子块一起复原`
+    return `退格合并 ⇒ ops=[正文 2 ＋ 子块 ${pick.kids.length} ＋ delete 1]；被并块原位标记且壳为空；⌘Z 连子块一起复原`
   },
 )
 

@@ -99,7 +99,10 @@ test('合并：前一块是普通内容块 ⇒ 照旧合并（回归）', () => 
   assert.ok(r, '普通内容块之间必须还能合并')
   assert.equal(r.kept, prev.id, '前一块保留 id')
   assert.equal(prev.text, '前半后半')
-  assert.deepEqual(doc.roots.map((b) => b.id), [prev.id])
+  // 合并是**原位标记**：被并块留在树上的原位（不可见），不再从树里摘掉
+  assert.deepEqual(doc.roots.map((b) => b.id), [prev.id, cur.id])
+  assert.equal(cur.text, '', '空壳应清空（正文已搬进前一块）')
+  assert.ok(cur.props?._deletedAt, '带删除标记')
 })
 
 test('复制子树：属性值带走、身份不带走，且每一块都发新 id', () => {

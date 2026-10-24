@@ -15,7 +15,7 @@
  *    这条是与旧模型最重要的分界——旧模型让 `aliasOf` 回落到正文，于是改名（写正文）
  *    会顺手改地址，让「敲字」变成「重命名」。
  */
-import { ALIASES_PROP, DELETED_AT_PROP, aliasesOf, listsOf, primaryAliasOf, type Block } from './model.ts'
+import { ALIASES_PROP, aliasesOf, listsOf, primaryAliasOf, type Block } from './model.ts'
 import { walkForest } from './walk.ts'
 
 /** 旧落盘键（v13 及以前）。新代码**不读**它；形状校验把它判成 corrupt。 */
@@ -113,62 +113,6 @@ export function findByAlias(
   accept: (b: Block) => boolean = isAddressable,
 ): Block | undefined {
   return firstByAddress(forest, name, accept)
-}
-
-/**
- * 在回收站里按地址找（复活前的查询）。
- *
- * 与 `findByAlias` 的差别只有**搜哪儿**：地址不会因为块被删掉就属于别人。
- * 这正是「再打同名标签时该问一句『要不要复活那块』」的依据。
- */
-export function findInTrash(
-  trash: readonly Block[],
-  name: string,
-  accept: (b: Block) => boolean = isAddressable,
-): Block | undefined {
-  return firstByAddress(trash, name, accept)
-}
-
-/**
- * 回收站里同地址的块（给「再打同名标签」时的询问用）。
- *
- * 与 `findInTrash` 是同一个查询的两个叫法：两个名字必须同判据，所以这里直接委托。
- */
-export function trashByAddress(trash: readonly Block[], name: string): Block | undefined {
-  return findInTrash(trash, name)
-}
-
-/** 清掉删除标记（复活时用）：属性袋不留空壳，否则「有没有属性」会有两份答案 */
-function clearDeletedAt(b: Block): void {
-  if (b.props === undefined || !(DELETED_AT_PROP in b.props)) return
-  const props = { ...b.props }
-  delete props[DELETED_AT_PROP]
-  if (Object.keys(props).length === 0) delete b.props
-  else b.props = props
-}
-
-/**
- * 从回收站复活一个块（连同子树）：接回森林顶层，清掉删除标记。返回是否成功。
- *
- * ⚠️ 接回的是**森林顶层**，不是原来的父块：原父块可能已经不存在了，而「复活」要保证
- *    至少回到能看见、能再拖回去的地方。这是诚实的降级 —— 位置可以再摆，身份丢了接不回来。
- *    （身份块本来就要求住在顶层，这一条对它们没有任何损失。）
- * ⚠️ 森林里已经有这个 id 时**不再挂第二份**：撤销可能已经把同一棵子树接回去了，
- *    同一个块出现两次会让「改一处、另一处也变了」变成难查的 bug。
- */
-export function reviveFromTrash(forest: Block[], trash: Block[], blockId: string): boolean {
-  const i = trash.findIndex((b) => b.id === blockId)
-  if (i < 0) return false
-  const [b] = trash.splice(i, 1)
-  clearDeletedAt(b!)
-  let alive = false
-  walkForest(forest, (x) => {
-    if (x.id !== b!.id) return
-    alive = true
-    return false
-  })
-  if (!alive) forest.push(b!)
-  return true
 }
 
 /**

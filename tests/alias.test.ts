@@ -25,7 +25,6 @@ import {
   claimAliases,
   displayNameOf,
   ensureTag,
-  findInTrash,
   findByAlias,
   findTagByName,
   hasList,
@@ -99,10 +98,11 @@ test('findByAlias：accept 只收窄参与比较的块，规范化仍是同一�
   assert.equal(findByAlias(forest, '设计', (x) => x.id === 't')?.id, 't')
 })
 
-test('findInTrash：同一套地址口径，accept 默认仍只认有名字的块', () => {
+test('findByAlias 看不见被删的块：删除标记让地址空出来（遍历默认不进被删子树）', () => {
   const dead = withAliases('d', ['设计'])
-  assert.equal(findInTrash([dead], ' 设计 ')?.id, 'd')
-  assert.equal(findInTrash([b('x', '设计')], '设计'), undefined, '正文不是地址')
+  dead.props = { ...dead.props, _deletedAt: 1 }
+  assert.equal(findByAlias([dead], ' 设计 '), undefined, '被删的块不再占地址')
+  assert.equal(findByAlias([dead], ' 设计 ', () => true), undefined, 'accept 也收窄不回来——跳过发生在遍历层')
 })
 
 /* ------------------------------------------------------------ 冲突 */

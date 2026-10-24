@@ -94,10 +94,12 @@ function emptyIndex(): Index {
 export function rebuild(forest: readonly Block[], atoms: readonly Atom[]): Index {
   const idx = emptyIndex()
 
-  // ① 块表 / 标签表 / 日记表 / 父页表 / 成员表（一次先序遍历；与增量修补同一口径）
+  // ① 块表 / 标签表 / 日记表 / 父页表 / 成员表（一次先序遍历；与增量修补同一口径）。
+  // ⚠️ 遍历默认跳过被删的子树（原位软删：被删的块对索引不可见）。
   for (const b of forest) indexSubtree(idx, b, b.id)
 
-  // ② 入向边（只有引用：标签是块级归属，不占正方位点）
+  // ② 入向边（只有引用：标签是块级归属，不占正方位点）。
+  //    只收**可见源块**的原子——源块被删 ⇒ 它的边跟着退场（遍历口径与 ① 同一条）。
   addEdges(idx, atoms)
 
   return idx
@@ -121,12 +123,13 @@ function bump(idx: Index, target: string, source: string, delta: 1 | -1): void {
   }
 }
 
-/** 把原子的引用累加进 `incoming`（登记簿记，增量的旧边摘除靠它） */
+/** 把原子的引用累加进 `incoming`（登记簿记，增量的旧边摘除靠它）；不可见源块的原子不算边 */
 function addEdges(idx: Index, atoms: readonly Atom[]): void {
   for (const a of atoms) {
     if (a.kind !== 'page') continue
     const target = a.target?.id
     if (!target) continue
+    if (!idx.blocks.has(a.blockId)) continue
     idx.edgeByAnno.set(a.id, { target, source: a.blockId })
     bump(idx, target, a.blockId, 1)
   }
@@ -146,11 +149,11 @@ function addEdges(idx: Index, atoms: readonly Atom[]): void {
  *
  * 与 `rebuild` 的口径对齐点（逐条对过，改任何一边都要回头查另一边）：
  *   · 名字表：先序第一个认领者赢 ⇒ 增量加名时「表里已有人就不抢」；
- *     摘块时受影响的名字**重扫森林**找下一个认领者；
+ *     摘块时受影响的名字**重扫森林**找下一个认领者（被删的块无权认领）；
  *   · 日期表：rebuild 是先序**最后一个**赢 ⇒ 摘块重扫同样取最后一个；
  *   · 成员表：集合语义，同块打两次同标签只算一个；
- *   · 入向边：数据源是**原子数组**——`remove` 不清原子 ⇒ 删块不动入向边
- *     （与 rebuild 数同一份 atoms，两条路自然一致）。
+ *   · 入向边：数据源是**原子数组**，但只算**可见源块**的——
+ *     删块把「源在这个子树里」的边一起摘（恢复时随子树重建），与 rebuild 同口径。
  *
  * 找不到块（op 引用的 id 既不在索引也不在森林）⇒ 跳过该 op：op 序列是事实陈述，
  * 不是「必须可执行」的指令；等式测试会把任何因此产生的分叉抓出来。
@@ -203,7 +206,8 @@ function applyBlockUpsert(
   const block = findInForest(forest, id)
   if (!block) return
   indexSubtree(index, block, pageRoot)
-  // 新子树的成员（数据源在块上）与它自己带来的引用边
+  // 新子树的成员（数据源在块上）与它自己带来的引用边——只算**可见**源块的
+  // （子树里如果嵌着更早被删的后代，它们不在索引里，边也不回来）
   walkForest([block], (b) => {
     for (const tagId of tagIdsOf(b)) {
       const members = index.tagMembers.get(tagId)
@@ -214,6 +218,7 @@ function applyBlockUpsert(
   const subtree = new Set(subtreeIds(block))
   for (const a of atoms) {
     if (a.kind !== 'page' || !subtree.has(a.blockId)) continue
+    if (!index.blocks.has(a.blockId)) continue
     const target = a.target?.id
     if (!target) continue
     index.edgeByAnno.set(a.id, { target, source: a.blockId })
@@ -221,11 +226,20 @@ function applyBlockUpsert(
   }
 }
 
-/** 块 delete：整棵子树从五张表里退场（入向边不动——原子没被删，与 rebuild 同口径） */
+/**
+ * 块 delete：**原位软删**的索引面——块还在森林里，但要从五张表里退场。
+ *
+ * 退场的是「可见集合」：根 ＋ 它**还没被删**的后代（本来就删了的已经不在表里）。
+ * 入向边跟着源块退场（`edgeByAnno` 簿记摘旧边）——数据源 atoms 没动，
+ * 但 rebuild 只数可见源块的原子，两条路必须同口径。名字表/日期表的接手者重扫
+ * 森林时同样跳过被删子树（被删的块无权认领名字）。
+ */
 function applyBlockDelete(index: Index, id: string, forest: readonly Block[]): void {
   const block = index.blocks.get(id)
   if (!block) return
-  const gone = subtreeIds(block)
+  // ⚠️ 取子树要**含被删块**：执行到这里时根已被打上标记（tx 先改内存、后修补索引），
+  //    默认遍历会把整棵子树跳过去——一张都摘不掉。退场的正是「这棵子树里的全部」。
+  const gone = walkSubtreeIncludingDeleted(block)
   for (const bid of gone) {
     index.blocks.delete(bid)
     index.pageOf.delete(bid)
@@ -248,6 +262,12 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[]): v
   // 成员表：把退场的块从所有集合里摘掉
   for (const members of index.tagMembers.values()) {
     for (const bid of gone) members.delete(bid)
+  }
+  // 入向边：源在退场子树里的边一起摘（恢复时随子树重建）
+  for (const [aid, edge] of [...index.edgeByAnno]) {
+    if (!goneSet.has(edge.source)) continue
+    bump(index, edge.target, edge.source, -1)
+    index.edgeByAnno.delete(aid)
   }
 }
 
@@ -360,6 +380,19 @@ function subtreeIds(root: Block): string[] {
   walkForest([root], (b) => {
     out.push(b.id)
   })
+  return out
+}
+
+/** 子树 id（**含被删的后代**）——删块退场用的是这棵子树的全部，不是它的可见部分 */
+function walkSubtreeIncludingDeleted(root: Block): string[] {
+  const out: string[] = []
+  walkForest(
+    [root],
+    (b) => {
+      out.push(b.id)
+    },
+    { includeDeleted: true },
+  )
   return out
 }
 

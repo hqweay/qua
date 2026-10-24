@@ -43,20 +43,10 @@ export class BlockStore {
    */
   private idx: Index | null = null
 
-  /**
-   * **回收站**：库级的，与 `blocks` 并列。
-   *
-   * 放在 store 而不是每个视图各一份：删除是「从森林里摘出来放进回收站」，
-   * 森林只有一份，回收站也只能有一份 —— 否则正文删的块在反链视图里既看不见也救不回。
-   * ⚠️ 与 `blocks` 一样是**共享引用**（落盘那份 `workspace.trash` 就是它）。
-   */
-  trash: Block[]
-
-  constructor(blocks: Block[], marks: Mark[] = [], atoms: Atom[] = [], trash: Block[] = []) {
+  constructor(blocks: Block[], marks: Mark[] = [], atoms: Atom[] = []) {
     this.blocks = blocks
     this.marks = marks
     this.atoms = atoms
-    this.trash = trash
   }
 
   subscribe(fn: StoreSubscriber): () => void {
@@ -149,12 +139,10 @@ export class BlockStore {
   }
 
   /** 演示状态整体换库：换数组引用，清 undo，通知所有视图（source 不传） */
-  reset(blocks: Block[], marks: Mark[], atoms: Atom[], trash: Block[] = []): void {
+  reset(blocks: Block[], marks: Mark[], atoms: Atom[]): void {
     this.blocks = blocks
     this.marks = marks
     this.atoms = atoms
-    // 回收站跟着换库一起换：留着上一份演示数据的回收站，复活出来的块会掉进一个不存在的森林
-    this.trash = trash
     this.undoStack.clear()
     this.touch()
   }

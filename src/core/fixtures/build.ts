@@ -201,7 +201,7 @@ export const LONG_EN = [
 /**
  * 一片块森林 + 库级锚点/原子（承 1／5：没有「页实体」这一层）。
  *
- * 满态 / 稀疏 / 降级 / 冷启动四处都要装同一个壳。壳里的字段（版本、空回收站、`activeId`
+ * 满态 / 稀疏 / 降级 / 冷启动四处都要装同一个壳。壳里的字段（版本、`activeId`
  * 落在第一块）是**库的形状**，不是某一态的特征：
  * 各写一份就会让某个态悄悄缺一格，落盘后由别的读路径发现。
  *
@@ -218,6 +218,5 @@ export function forest(blocks: Block[], built: BuiltPage[]): Workspace {
     marks: built.flatMap((b) => b.marks),
     atoms: built.flatMap((b) => b.atoms),
     // 种子库没有删过东西；回收站是**新增的库级一格**，缺席会让落盘形状少一块
-    trash: [],
   }
 }

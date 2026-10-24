@@ -180,7 +180,7 @@ export class DockBlocks {
       autoReload: false,
       store: this.deps.store,
       write: this.deps.write,
-      doc: { roots: [block], trash: this.deps.store.trash },
+      doc: { roots: [block] },
     })
     editor.events = {
       change: (kind) => {

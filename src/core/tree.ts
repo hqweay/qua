@@ -10,6 +10,7 @@ import {
   DISPLAY_PROP,
   LISTS_PROP,
   hasIdentity,
+  isDeleted,
   isJournalBlock,
   mkBlock,
   writeBlockText,
@@ -62,7 +63,7 @@ export function visibleRows(doc: Doc): VisibleRow[] {
     (b, ctx) => {
       out.push({ block: b, depth: ctx.path.length - 1, hidden: ctx.hidden, hasChildren: b.children.length > 0 })
     },
-    doc.folded,
+    { folded: doc.folded },
   )
   return out
 }
@@ -411,7 +412,10 @@ export function mergeIntoPrev(doc: Doc, id: string): { kept: string; removed: st
   const prev = locate(doc, plan.kept)!.block
   prev.children.push(...loc.block.children)
   writeBlockText(prev, plan.text)
-  siblingsOf(doc, loc.parent).splice(loc.index, 1)
+  // 被并块**原位标记**（不摘树，与 `removeBlock` 同一条口径）：正文已搬走，壳清空——
+  // 留着正文就是库里有两份同一句话
+  writeBlockText(loc.block, '')
+  loc.block.props = { ...(loc.block.props ?? {}), [DELETED_AT_PROP]: Date.now() }
   return { kept: plan.kept, removed: plan.removed, at: plan.at }
 }
 
@@ -660,26 +664,38 @@ export function duplicateBlock(doc: Doc, id: string): string | null {
 }
 
 /**
- * 删除块（含子树）—— 其实是**摘出**：整棵子树从树上摘下来，写 `_deletedAt`，放进回收站。
+ * 删除块（含子树）—— **原位软删**：写 `_deletedAt` 标记，块带着整棵子树留在原位。
  *
- * 为什么不再「删了就没了」：地址（页名／标签名）是可以被别处指向的，删掉一个被引用的块
- * 会让那些边全部悬空，而且**没有任何办法**把同一个 id 找回来。留着整棵子树，复活时边就自己接上了。
- * 对树上的读者，行为没有变化：这块就是不见了。
+ * 为什么不再「摘出去」：回收站若是第二个存放处，「树里一份、回收站一份」就是两处状态；
+ * 落库时也变成两种行形状。标记留在块上，遍历（`walkForest`）默认不进被删子树，
+ * 所有读路径一致地看不见它；恢复 ＝ 摘掉标记，块回到原位。
  *
- * ⚠️ 回收站挂在 `doc` 上而不是一个额外参数，理由与折叠态相同：`Doc` 是一次装载的完整形状，
- *    少传一个参数就会有一条路径悄悄把块丢进「没有家的地方」。
- * ⚠️ 没有接回收站的 `Doc`（临时构造的只读装载）退化成**这份装载自己的**回收站：
- *    仍然丢不掉内容，只是别处看不见它。真实编辑器都接库级那份。
+ * ⚠️ 只标记**操作根**：子树跟着根一起不可见（继承），后代不各写一份标记——
+ *    否则恢复时要逐个摘标记，漏一个就少一块。
  */
 export function removeBlock(doc: Doc, id: string): boolean {
   const loc = locate(doc, id)
   if (!loc) return false
-  const list = siblingsOf(doc, loc.parent)
-  list.splice(loc.index, 1)
-  const b = loc.block
-  b.props = { ...(b.props ?? {}), [DELETED_AT_PROP]: Date.now() }
-  ;(doc.trash ??= []).push(b)
+  loc.block.props = { ...(loc.block.props ?? {}), [DELETED_AT_PROP]: Date.now() }
   return true
+}
+
+/**
+ * **派生回收站**：库里所有带删除标记的块（都是被删子树的**操作根**，先序）。
+ *
+ * 它不是一份存储：没有第二个「块的家」，这个清单每次从森林现算。
+ * 恢复 ＝ 摘掉那块的标记（`Tx.restore`），块回到原位。
+ */
+export function trashOf(forest: readonly Block[]): Block[] {
+  const out: Block[] = []
+  walkForest(
+    forest,
+    (b) => {
+      out.push(b)
+    },
+    { includeDeleted: true },
+  )
+  return out.filter(isDeleted)
 }
 
 /**

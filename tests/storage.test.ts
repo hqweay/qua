@@ -30,7 +30,6 @@ function lib(patch: Partial<Workspace> = {}): Workspace {
     savedAt: 0,
     marks: [],
     atoms: [],
-    trash: [],
     ...patch,
   }
 }
