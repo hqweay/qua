@@ -12,11 +12,18 @@
  * ⚠️ **不再有 `skin`**（2026-10-20）：甲／乙／丙三套内建皮肤整体删除，
  *    内建只保留一种「中性现代大纲」。观感要调就改 token，不再按皮肤分叉。
  */
+import type { SecLayout } from '../feed.ts'
+
 export type ThemeMode = 'system' | 'light' | 'dark'
 
 export interface Prefs {
   /** 主题三档；设备状态，不入 KB */
   theme: ThemeMode
+  /**
+   * 日记流的段排列（设备级视图状态，不进 KB——日记流非块、无 props 可挂，与 dock 开关同位）。
+   * 值域首版只认 `column`／`row`（grid 轴已定、入口未做）。
+   */
+  feedLayout: SecLayout
   /** 三槽的开关与宽度；入口条已作废 */
   dock: DockPrefs
   virtualize: boolean
@@ -60,6 +67,7 @@ export const DEFAULT_DOCK: DockPrefs = {
 
 export const DEFAULT_PREFS: Prefs = {
   theme: 'system',
+  feedLayout: 'column',
   dock: DEFAULT_DOCK,
   virtualize: false,
   radius: 12,
@@ -83,6 +91,8 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
   return {
     ...DEFAULT_PREFS,
     ...p,
+    // 段排列只认两档（grid 轴未开）：别的值一律回单列，不让坏形状进偏好
+    feedLayout: p.feedLayout === 'row' ? 'row' : 'column',
     dock: {
       left: pick(dock?.left, DEFAULT_DOCK.left),
       right: pick(dock?.right, DEFAULT_DOCK.right),

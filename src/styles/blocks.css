@@ -966,3 +966,20 @@
 .blocksel-drag .tx {
   user-select: none;
 }
+/*
+  **空天格子**（复盘兜底）：纯 DOM、不是块——点进格子＝物化那一天。
+  落笔位给一个可点提示（占位文案走 `data-ph` 同一条 CSS），悬停高亮可写。
+*/
+.sec[data-shell] {
+  min-height: 100%;
+}
+.sec[data-shell] .shell-row .tx[data-ph]::before {
+  opacity: 0.7;
+}
+.sec[data-shell] .shell-row {
+  cursor: text;
+  border-radius: var(--ui-radius-sm);
+}
+.sec[data-shell]:hover .shell-row {
+  background: var(--ui-bg-hover, var(--ui-bg-soft));
+}

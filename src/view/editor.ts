@@ -91,6 +91,8 @@ import {
   type UndoKind,
   type VisibleRow,
 } from '../core/index.ts'
+import { journalDateLabel, type SecLayout, type ShellCol } from '../core/index.ts'
+export type { SecLayout }
 // 只取**类型**：`view` 拿不到实现，写入的落地方式归装配层（见 `Run`）
 import type { Tx } from '../core/kb/types.ts'
 // 标签块的「找到或创建」有两种落地（直写 / 事务），判据只有一份
@@ -160,9 +162,6 @@ export interface ViewOpts {
   layout?: SecLayout
 }
 
-/** 段的排列：`row`/`grid` 之下「点空白」按列归属段；虚拟化只在 `column` 下开（横排不虚拟化） */
-export type SecLayout = 'column' | 'row' | 'grid'
-
 export interface ViewEvents {
   /** 任何模型变化（持久化 + 角标刷新） */
   change?: (kind: 'text' | 'struct' | 'mark' | 'atom' | 'load') => void
@@ -193,6 +192,11 @@ export interface ViewEvents {
   selChange?: () => void
   /** 重新挂载窗口后（虚拟化） */
   mounted?: () => void
+  /**
+   * **在空天格子里落笔**（复盘兜底）：装配层物化那一天并重装载。
+   * 编辑器只报日期——「造块进库」是命令层的事，视图不写库。
+   */
+  shellWrite?: (date: string) => void
   /**
    * **一次改名被拒**（编辑边界上撞到已有地址，正文已回滚）。
    *
@@ -288,6 +292,8 @@ export class BlockEditor {
   private allowRootRemove: boolean
   /** 段的排列（视图配置；`data-layout` 供 CSS 选择，见 `setLayout`）；装配层按它挡住只属单列的行为 */
   private _layout: SecLayout = 'column'
+  /** 复盘的空天格子（纯视图兜底，不进库）；换页／换形态即清空 */
+  private shells: readonly ShellCol[] = []
   get layout(): SecLayout {
     return this._layout
   }
@@ -412,6 +418,43 @@ export class BlockEditor {
     else this.container.style.removeProperty('--sec-cols')
   }
 
+  /**
+   * 空天格子（复盘兜底）：窗口里没写过的天渲染成空壳列——**只在 row/grid 下有意义**，
+   * column 不渲染（单列流维持「不造空天」）。格子是纯 DOM（没有块），点进去 ⇒ `shellWrite(date)`。
+   */
+  setShells(cols: readonly ShellCol[]): void {
+    this.shells = cols
+    this.renderAll()
+  }
+
+  /** 造一列空壳：只读日期头 ＋ 一行「点一下开始写」的落笔位（与真实日期行同一个视觉形状） */
+  private makeShellSec(col: ShellCol): HTMLElement {
+    const sec = document.createElement('div')
+    sec.className = 'sec'
+    sec.dataset.shell = col.date
+    const head = document.createElement('div')
+    head.className = 'blk'
+    head.dataset.depth = '0'
+    head.dataset.role = 'journal'
+    const headTx = document.createElement('span')
+    headTx.className = 'tx'
+    headTx.contentEditable = 'false'
+    headTx.dataset.readonly = '1'
+    headTx.dataset.ph = journalDateLabel(col.date)
+    headTx.dataset.phReadonly = '1'
+    head.appendChild(headTx)
+    const write = document.createElement('div')
+    write.className = 'blk shell-row'
+    write.dataset.depth = '1'
+    write.contentEditable = 'false'
+    const writeTx = document.createElement('span')
+    writeTx.className = 'tx'
+    writeTx.dataset.ph = t('ui.feed.shellHint')
+    write.appendChild(writeTx)
+    sec.append(head, write)
+    return sec
+  }
+
   renderAll(): void {
     this.container.textContent = ''
     this.mounted.clear()
@@ -449,12 +492,20 @@ export class BlockEditor {
     let sec: HTMLElement | null = null
     for (const r of rows) {
       if (r.depth === 0 || sec === null) {
+        // 新的一段之前，先摆按列序应出现在这里的空天格子（复盘兜底；column 下 shells 恒空）
+        if (r.depth === 0) {
+          for (const col of this.shells) if (col.beforeRootId === r.block.id) this.container.appendChild(this.makeShellSec(col))
+        }
         sec = document.createElement('div')
         sec.className = 'sec'
         sec.dataset.sec = r.depth === 0 ? r.block.id : ''
         this.container.appendChild(sec)
       }
       sec.appendChild(this.makeBlockEl(r, gutters.get(r.block.id)))
+    }
+    // 比所有已装段都更早的空天格子：追加在最后
+    if (this.layout !== 'column') {
+      for (const col of this.shells) if (col.beforeRootId === null) this.container.appendChild(this.makeShellSec(col))
     }
   }
 
@@ -2557,6 +2608,11 @@ export class BlockEditor {
         const r = el.getBoundingClientRect()
         return r.width > 0 && clientX >= r.left && clientX <= r.right
       })
+      // 点中的是空天格子：落笔物化那一天（与点格子本体同一条出口）
+      if (sec?.dataset.shell) {
+        this.events.shellWrite?.(sec.dataset.shell)
+        return true
+      }
       secId = sec?.dataset.sec ?? ''
       if (secId === '') return false
     }
@@ -2616,6 +2672,7 @@ export class BlockEditor {
       updateMouseSelect: (x, y) => this.updateMouseSelect(x, y),
       endMouseSelect: () => this.endMouseSelect(),
       hasBlockSelection: () => this.hasBlockSelection(),
+      onShellActivate: (date) => this.events.shellWrite?.(date),
       emitSlashQuery: (id) => this.emitSlashQuery(id),
       dropSlashQuery: (id) => this.dropSlashQuery(id),
       insertPlainText: (id, _off, text) => this.pasteAt(id, _off, text),
@@ -2816,6 +2873,8 @@ export class BlockEditor {
     this.mouseSel = null
     this.container.classList.remove('blocksel-drag')
     this.viewRootIds = doc.roots.map((b) => b.id)
+    // 换了装载单位：上一形态的空天格子不再成立（复盘入口装载后会重新 setShells）
+    this.shells = []
     this.applySecCols()
     /**
      * 共享 store：marks/atoms 是库级共享数组。调用方通常传 `store.marks/atoms`（同一引用）；

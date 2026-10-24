@@ -17,6 +17,7 @@
 import type { BlockEditor } from '../view/editor.ts'
 import type { BindingKind } from './bindings.ts'
 import type { CtxKeys } from './index.ts'
+import type { SecLayout } from './feed.ts'
 
 export type Capability = 'read' | 'write' | 'admin' | 'plugin'
 export type FixtureName = 'seed' | 'empty' | 'sparse' | 'degraded' | 'boot'
@@ -133,6 +134,15 @@ export interface App {
   journalToday(date?: string): void
   /** 相对当前日期前后翻（`days` 可正可负）；同样幂等物化 */
   journalShift(days: number): void
+  /**
+   * 复盘＝**带参的日记流**（同一个装载路径换 `days`／排列），不是并列的第二种视图。
+   * 窗口里没写过的天渲染空壳格子，落笔才物化。
+   */
+  journalReview(days: number): void
+  /** 在复盘的空天格子里落笔：物化那一天、按同一参数重开、光标落进那一天 */
+  journalShellWrite(date: string): void
+  /** 设定日记流的段排列（设备偏好；复盘的排列切换入口将来接这里） */
+  journalFeedLayout(layout: SecLayout): void
   /* zoom（块可任意 zoom in；zoom 是视图配置，不是新对象） */
   /**
    * 聚焦到此块：中心槽以 `source=block-ref` ＋ `scope:"subtree"` 渲染它。

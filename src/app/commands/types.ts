@@ -10,7 +10,7 @@
  * ⚠️ 读一律走**读门面**（`KbClient` 的窄方法：按 id、按名字、按清单取数）——
  *   命令层写不出「遍历全库」：整库在内存是门面实现的事，不是调用方的假设。
  */
-import type { Block } from '../../core/index.ts'
+import type { Block, SecLayout, ShellCol } from '../../core/index.ts'
 import type { KbClient, Op, Tx } from '../../core/kb/types.ts'
 import type { AddParentResult } from '../../core/tag-tree.ts'
 import type { ThemeMode, Workspace } from '../../core/workspace.ts'
@@ -75,6 +75,17 @@ export interface PageDeps {
   rootIds: () => readonly string[]
   /** 把某页的子树装进编辑器（marks/atoms 是库级平铺） */
   loadPage: (roots: Block[], marks: unknown[], atoms: unknown[]) => void
+  /**
+   * 日记流的段排列（设备偏好）。命令层只读它——复盘带参、单列流随偏好，
+   * 「偏好怎么写」是 `core.journal/feed-layout` 那一份的事。
+   */
+  feedLayoutPref: () => SecLayout
+  /** 把段排列应用到中心编辑器（渲染差异全在 CSS，不需要重装内容） */
+  applyLayout: (mode: SecLayout) => void
+  /** 复盘的空天格子（纯视图兜底不进库）；空数组＝清掉 */
+  setShells: (cols: readonly ShellCol[]) => void
+  /** 光标落到某一天的首个可编辑行（复盘在空天落笔、重装载之后要用） */
+  focusDay: (date: string) => void
   marks: () => unknown[]
   atoms: () => unknown[]
   /** 切页前把编辑器里的内容写回当前页 + 立即持久化 */
@@ -102,7 +113,7 @@ export interface PageDeps {
 
 export interface ViewDeps {
   /** 可直接改的偏好（装配层持有；设备状态，不进库） */
-  prefs: () => { theme: ThemeMode; dock: { left: { open: boolean }; right: { open: boolean } } }
+  prefs: () => { theme: ThemeMode; feedLayout: SecLayout; dock: { left: { open: boolean }; right: { open: boolean } } }
   applyChrome: () => void
   /** 主题变了要重画的东西（顶栏开关撤掉后＝重画调试菜单的勾选） */
   renderDebugState: () => void

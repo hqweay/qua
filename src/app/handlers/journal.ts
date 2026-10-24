@@ -20,6 +20,14 @@ export const JOURNAL_HANDLERS: Record<string, Handler> = {
     app.journalShift(1)
     return true
   },
+  'core.journal/review': (a, app) => {
+    app.journalReview(typeof a.days === 'number' ? a.days : 3)
+    return true
+  },
+  'core.journal/feed-layout': (a, app) => {
+    app.journalFeedLayout(a.layout === 'row' ? 'row' : 'column')
+    return true
+  },
   'core.page/delete': (_a, app) => {
     app.deletePage(app.activePageId())
     return true

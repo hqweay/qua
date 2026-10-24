@@ -83,6 +83,8 @@ export const MSG = {
   'cmd.journal.today': '回到今日',
   'cmd.journal.prev': '前一天',
   'cmd.journal.next': '后一天',
+  'cmd.journal.review': '复盘最近几天（横向并排）',
+  'cmd.journal.feed-layout': '设定日记流排列（单列 / 横排）',
   'cmd.view.toggle-theme': '亮 / 暗切换',
   'cmd.view.set-theme': '设定主题档位（跟随系统 / 亮 / 暗）',
   'cmd.view.toggle-rail': '收起 / 展开左栏',
@@ -411,6 +413,7 @@ export const MSG = {
   'ui.atom.tagDanglingTitle': '标签：#{label}（目标不存在，点击看信息）',
   'ui.atom.imageTitle': '图片：{label}（点击看资产信息）',
   'ui.virt.placeholder': '⋯ 窗口外 {count} 行（虚拟化，未挂 DOM）',
+  'ui.feed.shellHint': '点一下，开始写这一天',
 
   /* ---------------------------------------------------------------- 信息气泡 */
   'ui.popover.refTitle': '行内引用 · {label}',

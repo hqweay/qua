@@ -983,6 +983,8 @@ ed.events = {
     showMenu({ kind: 'slash', anchor: rect, query: q })
   },
   atomClick: (a, el, mods) => handleAtomClick(a, el, mods),
+  // 复盘空天格子里落笔：编辑器只报日期，物化那一天（幂等）与重装载归命令层
+  shellWrite: (date) => void app.journalShellWrite(date),
   // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
   // 所以「点块标进去」与「点面包屑出来」共用一套语义，没有第二种入口。
   focusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, 'editor'),

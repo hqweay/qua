@@ -86,6 +86,8 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.journal/today', title: t('cmd.journal.today'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { date: { type: 'string' } }, keywords: ['journal', 'today', 'daily'] },
   { name: 'core.journal/prev', title: t('cmd.journal.prev'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), keywords: ['journal', 'prev', 'yesterday'] },
   { name: 'core.journal/next', title: t('cmd.journal.next'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), keywords: ['journal', 'next', 'tomorrow'] },
+  { name: 'core.journal/review', title: t('cmd.journal.review'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { days: { type: 'number' } }, keywords: ['review', 'retro', 'days'] },
+  { name: 'core.journal/feed-layout', title: t('cmd.journal.feed-layout'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { layout: { type: 'string' } }, keywords: ['layout', 'feed', 'column', 'row'] },
 
   /* ---- zoom（zoom 是视图配置，不是新对象，也不引入焦点栈） ---- */
   { name: 'core.block/focus-block', title: t('cmd.block.focus-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' } }, keywords: ['zoom', 'focus', t('menu.kw.zoom')] },

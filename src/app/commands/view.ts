@@ -2,11 +2,12 @@
  * 视图命令：主题三档与槽开关。
  */
 import { nextTheme } from '../../core/theme.ts'
+import type { SecLayout } from '../../core/index.ts'
 import type { ThemeMode } from '../../core/workspace.ts'
 import type { App } from '../../core/ports.ts'
 import type { ViewDeps } from './types.ts'
 
-export function viewCommands(d: ViewDeps): Pick<App, 'setTheme' | 'toggleTheme' | 'toggleDock'> {
+export function viewCommands(d: ViewDeps): Pick<App, 'setTheme' | 'toggleTheme' | 'toggleDock' | 'journalFeedLayout'> {
   return {
     /**
      * 三档**直选**（不是循环切换）。
@@ -36,6 +37,19 @@ export function viewCommands(d: ViewDeps): Pick<App, 'setTheme' | 'toggleTheme' 
       const slot = d.prefs().dock[side]
       slot.open = !slot.open
       d.applyChrome()
+      d.scheduleDeviceSave()
+      d.scheduleBadge()
+    },
+
+    /**
+     * 日记流的段排列（设备偏好）：只写偏好与落盘，不重装当前视图——
+     * 下次「回今日」按它装载；当前屏要换排列走复盘那条带参路径。
+     * 排列切换的 UI 入口（picker 家族）接这里。
+     */
+    journalFeedLayout: (layout) => {
+      const m: SecLayout = layout === 'row' ? 'row' : 'column'
+      if (d.prefs().feedLayout === m) return
+      d.prefs().feedLayout = m
       d.scheduleDeviceSave()
       d.scheduleBadge()
     },

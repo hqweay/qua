@@ -33,3 +33,20 @@ export function feedDays(blocks: readonly Block[], limit: number): Block[] {
     .map((h) => findById(blocks, h.blockId))
     .filter((b): b is Block => b !== undefined)
 }
+
+/**
+ * **段的排列**（视图配置轴，不是导航）：`column`（单列流，缺省）｜`row`（段横排）｜`grid`（折行网格）。
+ * 它是设备级外挂状态（不进 KB），但类型住在这里——「段怎么摆」跟着「段是什么」的口径走，
+ * prefs／编辑器／命令层都从这里取，不各写一份联合。
+ */
+export type SecLayout = 'column' | 'row' | 'grid'
+
+/**
+ * **空天格子**（复盘兜底）：窗口里没写过的天在 row/grid 排列下渲染成空壳列。
+ * `beforeRootId`＝它应插在哪一段之前（按 `_date` 降序的列序）；`null`＝追加在最后。
+ * 纯视图兜底不进库——落笔（点进格子）才物化那一天。
+ */
+export interface ShellCol {
+  date: string
+  beforeRootId: string | null
+}

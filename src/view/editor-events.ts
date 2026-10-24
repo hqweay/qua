@@ -124,6 +124,8 @@ export interface EditorBridge {
    *    决定是否 preventDefault。**不返回布尔就无法区分「没建」与「建了」**。
    */
   clickEmptyArea: (clientY: number, clientX: number) => boolean
+  /** 点进空天格子（复盘兜底）：物化那一天由装配层负责，事件层只报日期 */
+  onShellActivate: (date: string) => void
   /** 勾选 / 取消待办（点方框）*/
   toggleTodo: (blockId: string) => void
   /** 任何模型变化 */
@@ -309,6 +311,20 @@ export function bindEditorEvents(br: EditorBridge): () => void {
           n.classList.contains('queryview-editor')),
     )
     if (!inOwnEditor && inNestedView) return
+
+    /**
+     * 空天格子（复盘兜底）：整列都是纯 DOM，点任何地方＝「开始写这一天」。
+     * 必须最先判——格子里的行复用了 `.blk` 的视觉（没有 blockId），
+     * 落进后面的块分支或「点空白建块」都会把它吞掉。
+     */
+    const shellSec = path.find(
+      (n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('sec') && n.dataset.shell !== undefined,
+    )
+    if (shellSec?.dataset.shell) {
+      br.onShellActivate(shellSec.dataset.shell)
+      e.preventDefault()
+      return
+    }
 
     // 行内原子：交给原子那一条（同样用快照路径，防原子被重渲染摘掉）
     const atomEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('atom'))

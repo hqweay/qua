@@ -93,6 +93,9 @@ export const BINDINGS: Binding[] = [
   // 前后翻日：**仅在 journal 视图且编辑器失焦时**生效的原文口径）
   { command: 'core.journal/prev', kind: 'keymap', key: 'mod+alt+left', when: 'journalView && !editorTextFocus', layer: 'core' },
   { command: 'core.journal/next', kind: 'keymap', key: 'mod+alt+right', when: 'journalView && !editorTextFocus', layer: 'core' },
+  // 复盘＝带参的日记流（同 spec 换 days＋排列）：三天 / 本周
+  { command: 'core.journal/review', kind: 'keymap', key: 'mod+shift+r', args: { days: 3 }, when: '!editorTextFocus', layer: 'core' },
+  { command: 'core.journal/review', kind: 'keymap', key: 'mod+alt+shift+r', args: { days: 7 }, when: '!editorTextFocus', layer: 'core' },
   { command: 'core/bindings/list', kind: 'keymap', key: 'mod+shift+?', when: '', layer: 'core' },
   // 层次序演示：user 层加一条**额外**键位（不改核心口径，只加不改，「用户永远能盖过」）
   { command: 'core.editor/toggle-todo', kind: 'keymap', key: 'mod+shift+t', when: 'editorTextFocus', layer: 'user' },

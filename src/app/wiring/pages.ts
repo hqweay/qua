@@ -9,6 +9,7 @@ import {
   findInForest,
   findPath,
   isJournal,
+  journalId,
   mkBlock,
   prop,
   type Block,
@@ -210,6 +211,20 @@ export function setupPages(deps: PagesDeps) {
       ws.activeId = id
     },
     rootIds: () => deps.getMainEd().doc.roots.map((b) => b.id),
+    // 日记流装载的视图配置：偏好只读（写入走 core.journal/feed-layout），编辑器由装配层持有
+    feedLayoutPref: () => deps.prefs().feedLayout,
+    applyLayout: (mode) => {
+      deps.getMainEd().setLayout(mode)
+    },
+    setShells: (cols) => {
+      deps.getMainEd().setShells(cols)
+    },
+    focusDay: (date) => {
+      const mainEd = deps.getMainEd()
+      const target = firstEditableRoot(mainEd.doc.roots.find((b) => b.id === journalId(date)))
+      editorEl.focus()
+      if (target) mainEd.placeCaret(target.id, 0)
+    },
     loadPage: (roots, marks, atoms) => {
       const mainEd = deps.getMainEd()
       // 装载边界：空 journal 天在这里补首子块（经事务、一条 op）——
