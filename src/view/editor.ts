@@ -1224,8 +1224,8 @@ export class BlockEditor {
      * 建标签块要动整片森林 —— `store.blocks` 就是它（所有视图共享同一个数组），
      * 所以这里不需要再注入一个「谁来建」的回调：森林只有一份，读者也是这一份。
      *
-     * ⚠️ 这条**直写**分支还在用：`split` 的编辑边界转换（同步改正文，结构另起一笔）、
-     *    以及没有 `write` 注入的实例（迁移期兜底）。它产出零条 op，见 debt。
+     * ⚠️ 这条**直写**分支只服务没有 `write` 注入的实例（迁移期兜底）；
+     *    有事务入口时，编辑边界的转换与结构拆分共用同一笔（见 `splitTx`）。
      */
     const tagId = ensureTag(this.store.blocks, hit.name).block?.id ?? null
     if (!tagId) return null
@@ -1435,52 +1435,175 @@ export class BlockEditor {
     const loc = locate(this.doc, id)
     if (!loc) return
     /**
+     * **同块选区 + Enter = 先删选区，再在选区起点拆**（只做无角色的普通内容块；
+     * 跨块选区与页名等身份块仍走原行为）。删除与拆分在**同一笔**里落。
+     */
+    const sel = this.sel
+    const cut =
+      loc.parent !== null && !hasIdentity(loc.block) && sel && sel.aBlock === id && sel.hBlock === id && sel.aOff !== sel.hOff
+        ? { from: Math.min(sel.aOff, sel.hOff), to: Math.max(sel.aOff, sel.hOff) }
+        : null
+
+    if (this.write) {
+      const write = this.write
+      const out = write((tx) => this.splitTx(tx, id, offset, cut))
+      if (!out) return
+      if (out.lost.length > 0) this.reportLost(out.lost)
+      this.undo.record(before, 'structural', Date.now())
+      this.renderAll()
+      if (out.caret) this.placeCaret(out.caret.id, out.caret.off)
+      this.emitChange('struct')
+      return
+    }
+
+    this.splitDirect(id, offset, cut, before)
+  }
+
+  /**
+   * **一次回车 ＝ 一笔事务**：行尾 `#标签` 的转换、同块选区删除、结构拆分共用这一笔。
+   *
+   * 为什么必须同笔：拆开落盘会得到「正文与归属直写、结构进 op」两份来源 ——
+   * 半批比慢更贵。转换放在最前，是因为它会让正文变短、`offset` 随之前移；
+   * 后面一律读**转换之后**的正文与锚点（`tx` 是同步改内存的）。
+   *
+   * ⚠️ 事务里不再 `splice`：落点全部交给 `tx.insert`／`tx.move`（按整片森林取兄弟列表）。
+   * ⚠️ `setAnnotations` 只喂**这一块**的锚点：整组喂会让别的块的锚点重写一遍。
+   */
+  private splitTx(
+    tx: Tx,
+    id: string,
+    offset: number,
+    cut: { from: number; to: number } | null,
+  ): { caret: { id: string; off: number } | null; lost: Atom[] } | null {
+    const conv = this.convertHashTag(id, { allowEnd: true }, tx)
+    if (conv && offset >= conv.to) offset = offset - (conv.to - conv.from) + 1
+
+    const blk = this.store.find(id)
+    if (!blk) return null
+    let text = blk.text
+    let marks = this.store.marks.filter((m) => m.blockId === id)
+    let atoms = this.store.atoms.filter((a) => a.blockId === id)
+    let lost: Atom[] = []
+    if (cut) {
+      const from = Math.max(0, Math.min(cut.from, text.length))
+      const to = Math.max(from, Math.min(cut.to, text.length))
+      const ch = { from, to, insert: '' }
+      text = text.slice(0, from) + text.slice(to)
+      offset = from
+      marks = mapMarks(marks, id, ch)
+      const r = mapAtoms(atoms, id, ch)
+      atoms = r.kept
+      lost = r.lost
+    }
+    offset = Math.min(offset, text.length)
+
+    const loc = locate(this.doc, id)
+    if (!loc) return null
+
+    // 段根没有兄弟位（写回按 root id 走）⇒ 右半成首个子块；有身份的根只插空子块
+    if (loc.parent === null) {
+      if (!hasIdentity(loc.block) && offset > 0 && offset < text.length) {
+        const right = mkBlock(text.slice(offset))
+        tx.patch(id, (b) => writeBlockText(b, text.slice(0, offset)))
+        tx.insert(right, id, 0)
+        tx.setAnnotations(
+          id,
+          normalizeMarks(marks.filter((m) => m.start < offset)),
+          atoms.filter((a) => a.start < offset),
+        )
+        tx.setAnnotations(
+          right.id,
+          normalizeMarks(
+            marks
+              .filter((m) => m.start >= offset)
+              .map((m) => ({ ...m, blockId: right.id, start: m.start - offset, end: m.end - offset })),
+          ),
+          atoms
+            .filter((a) => a.start >= offset)
+            .map((a) => ({ ...a, blockId: right.id, start: a.start - offset, end: a.end - offset })),
+        )
+        unfoldBlock(this.doc, id)
+        return { caret: { id: right.id, off: 0 }, lost }
+      }
+      const child = mkBlock('')
+      unfoldBlock(this.doc, id)
+      tx.insert(child, id, 0)
+      return { caret: { id: child.id, off: 0 }, lost }
+    }
+
+    // 段根已在上面 return ⇒ 这里一定在某个父块下面
+    const parent = loc.parent
+    const kind = cut ? 'split' : enterKind(this.doc, id, offset)
+
+    if (kind === 'outdent') {
+      // 空块 Enter ⇒ 反缩进：不建新块（与这笔里的转换同一笔）
+      const plan = outdentMove(this.doc, id)
+      if (!plan) return { caret: null, lost }
+      tx.move(id, plan.parentId, plan.index)
+      return { caret: { id, off: 0 }, lost }
+    }
+
+    if (kind === 'child') {
+      const b = mkBlock('')
+      unfoldBlock(this.doc, id)
+      tx.insert(b, id, 0)
+      return { caret: { id: b.id, off: 0 }, lost }
+    }
+
+    if (kind === 'sibling') {
+      const b = mkBlock('')
+      tx.insert(b, parent.id, loc.index + 1)
+      return { caret: { id: b.id, off: 0 }, lost }
+    }
+
+    // 块中 ⇒ 同级拆：左半进**上方新块**；原块保 id、右半、子树
+    const left = mkBlock(text.slice(0, offset))
+    tx.insert(left, parent.id, loc.index)
+    tx.patch(id, (b) => writeBlockText(b, text.slice(offset)))
+    tx.setAnnotations(
+      left.id,
+      normalizeMarks(marks.filter((m) => m.start < offset).map((m) => ({ ...m, blockId: left.id }))),
+      atoms.filter((a) => a.start < offset).map((a) => ({ ...a, blockId: left.id })),
+    )
+    tx.setAnnotations(
+      id,
+      normalizeMarks(
+        marks
+          .filter((m) => m.start >= offset)
+          .map((m) => ({ ...m, start: m.start - offset, end: m.end - offset })),
+      ),
+      atoms
+        .filter((a) => a.start >= offset)
+        .map((a) => ({ ...a, start: a.start - offset, end: a.end - offset })),
+    )
+    return { caret: { id: !cut && offset === 0 ? left.id : id, off: 0 }, lost }
+  }
+
+  /** 没有事务入口时的直写落地（迁移期兜底；判定与 `splitTx` 同源，只是逐条改活块） */
+  private splitDirect(id: string, offset: number, cut: { from: number; to: number } | null, before: Snap): void {
+    /**
      * **回车是编辑边界**：行尾那个 `#名字` 到这一刻算敲完（输入中必须等分隔符）。
-     * `before` 已在上面取过 ⇒ 转换与拆分是**同一笔撤销**。
-     *
-     * ⚠️ **欠账**：这里仍走 `convertHashTag` 的**直写**分支（零条 op），而紧接着的拆分
-     *    是新起的一笔事务 ⇒ 这一次回车落盘时会得到「正文与归属直写、结构进 op」两份来源。
-     *    要收掉它，得先让「拆分」与「转换」共用一个 tx（段根与选区两条支路都在改结构），
-     *    不是把参数补上就行。
      */
     const conv = this.convertHashTag(id, { allowEnd: true })
     if (conv && offset >= conv.to) offset = offset - (conv.to - conv.from) + 1
+    const loc = locate(this.doc, id)
+    if (!loc) return
     offset = Math.min(offset, loc.block.text.length)
 
-    // 段根 = `doc.roots` 里的一项（loc.parent 为 null）；不是「只有 roots[0]」。
-    const isSectionRoot = loc.parent === null
-
-    /**
-     * **：同块选区 + Enter = 先删选区，再在选区起点拆**。
-     *
-     * 只做**无角色的普通内容块**；跨块选区、页/日记根仍留旧行为
-     * （跨块属结构编辑，与 63 冲突；页名是身份）。
-     * 删除 + 拆分共用同一个 `before` 快照 ⇒ 一次撤销复原。
-     */
     let forcedSplit = false
-    const sel = this.sel
-    if (
-      !isSectionRoot &&
-      !hasIdentity(loc.block) &&
-      sel &&
-      sel.aBlock === id &&
-      sel.hBlock === id &&
-      sel.aOff !== sel.hOff
-    ) {
-      const from = Math.min(sel.aOff, sel.hOff)
-      const to = Math.max(sel.aOff, sel.hOff)
+    if (cut) {
       const old = loc.block.text
-      writeBlockText(loc.block, old.slice(0, from) + old.slice(to))
-      const change = { from, to, insert: '' }
+      writeBlockText(loc.block, old.slice(0, cut.from) + old.slice(cut.to))
+      const change = { from: cut.from, to: cut.to, insert: '' }
       this.marks = mapMarks(this.marks, id, change)
       const r = mapAtoms(this.atoms, id, change)
       this.atoms = r.kept
       this.reportLost(r.lost)
-      offset = from
+      offset = cut.from
       forcedSplit = true
     }
 
-    if (isSectionRoot) {
+    if (loc.parent === null) {
       /**
        * **段根没有兄弟位**（写回按 root id 走）⇒ 退化成「右半成首个子块」：
        *   · **无角色的内容根**（focus/zoom 进来的普通块）＋ 文本**中间**
@@ -1520,66 +1643,7 @@ export class BlockEditor {
     const kind = forcedSplit ? 'split' : enterKind(this.doc, id, offset)
 
     if (kind === 'outdent') {
-      // 空块 Enter ⇒ 反缩进：不建新块
       this.structuralMove(id, outdentMove(this.doc, id), { caretAt: { id, off: 0 } })
-      return
-    }
-
-    /**
-     * **有事务入口时，三支都走一个 `tx`**：`split` 是「正文一半 ＋ 结构一块」，
-     * `child`/`sibling` 各只发一条结构 op。
-     *
-     * 落点一律交给 `tx.insert`：它按**整片森林**取兄弟列表（`memory.ts` 的 `siblings`），
-     * 而 `doc` 只是装载窗口 —— 在这里再 `splice` 一下，同一件事就有两个计算者。
-     * `child` 要先展开：折叠着的块插了子块也看不见（规则见 `enterKind`）。
-     *
-     * 没有事务入口、`forcedSplit`（先删选区再拆）与 `outdent` 仍走下面的直写。
-     */
-    if (this.write && !forcedSplit) {
-      const write = this.write
-      const old = loc.block.text
-      // 段根已在上面 return ⇒ 这里一定在某个父块下面
-      const parent = loc.parent
-      if (!parent) return
-
-      if (kind === 'split') {
-        const left = mkBlock(old.slice(0, offset))
-        /**
-         * 锚点归属：切点之前 ⇒ 左半（新块，偏移不变）；切点之后 ⇒ 原块（右半，偏移前移）。
-         * 只交这两块：`setAnnotations` 按块拼接，喂整组会让别的块的锚点重写一遍。
-         */
-        const toLeft = <T extends { blockId: string; start: number; end: number }>(arr: readonly T[]): T[] =>
-          arr.filter((a) => a.blockId === id && a.start < offset).map((a) => ({ ...a, blockId: left.id }))
-        const toRight = <T extends { blockId: string; start: number; end: number }>(arr: readonly T[]): T[] =>
-          arr.filter((a) => a.blockId === id && a.start >= offset).map((a) => ({ ...a, start: a.start - offset, end: a.end - offset }))
-        write((tx) => {
-          tx.insert(left, parent.id, loc.index)
-          // 原块保 id/右半/子树：子树不归 patch 管，这里只该动正文
-          tx.patch(id, (b) => writeBlockText(b, old.slice(offset)))
-          tx.setAnnotations(left.id, normalizeMarks(toLeft(this.marks)), toLeft(this.atoms))
-          tx.setAnnotations(id, normalizeMarks(toRight(this.marks)), toRight(this.atoms))
-        })
-        this.undo.record(before, 'structural', Date.now())
-        this.renderAll()
-        // 块首 Enter（offset=0）⇒ 新块是上方那个空块；否则光标留在原块（右半）0 位
-        this.placeCaret(offset === 0 ? left.id : id, 0)
-        this.emitChange('struct')
-        return
-      }
-
-      const b = mkBlock('')
-      if (kind === 'child') {
-        write((tx) => {
-          unfoldBlock(this.doc, id)
-          tx.insert(b, id, 0)
-        })
-      } else {
-        write((tx) => tx.insert(b, parent.id, loc.index + 1))
-      }
-      this.undo.record(before, 'structural', Date.now())
-      this.renderAll()
-      this.placeCaret(b.id, 0)
-      this.emitChange('struct')
       return
     }
 

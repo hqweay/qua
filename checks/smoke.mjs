@@ -5078,6 +5078,296 @@ await check(
   },
 )
 
+await check(
+  'T73 段根 Enter 也走事务：页/天根 ⇒ 插首个子块（1 条）；内容根块中拆 ⇒ 右半首个子块（2 条）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    // ① 有身份的段根（页）：Enter ⇒ 插**空的首个子块**，不在根上切字（根文本是名字/描述）
+    const root = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const r = ed.doc.roots[0]
+      return { id: r.id, text: r.text, kids: r.children.length }
+    })
+    await page.evaluate((id) => window.__qua.focusBlock(id, 0), root.id)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(180)
+    const pageEnter = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const r = ed.store.find(t.id)
+      return {
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, value: o.value })),
+        text: r?.text ?? null,
+        firstKid: r?.children[0]?.id ?? '',
+        kids: r?.children.length ?? 0,
+      }
+    }, root)
+    assert(pageEnter.ops.length === 1, `页根 Enter 应只发 1 条结构 op：${JSON.stringify(pageEnter.ops)}`)
+    const op0 = pageEnter.ops[0]
+    assert(
+      op0.e === 'block' && op0.id === pageEnter.firstKid && op0.op === 'upsert',
+      `应是新首个子块的 upsert：${JSON.stringify(pageEnter.ops)}`,
+    )
+    assert(op0.value.parent === root.id && op0.value.index === 0, `落点应是根的第 0 位：${JSON.stringify(op0.value)}`)
+    assert(pageEnter.text === root.text, '根正文不该被切开（有身份的根只插空子块）')
+    assert(pageEnter.kids === root.kids + 1, `子块数应 +1：${root.kids} → ${pageEnter.kids}`)
+
+    // ② 内容根（zoom 进来的一块）：块中 Enter ⇒ 左半留根、右半成首个子块
+    const inner = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      // 找一个正文 ≥ 4 字、无身份的子孙块，聚焦它（focus-block 会把它装成唯一根）
+      let hit = null
+      const walk = (list) => {
+        for (const b of list) {
+          if (hit) return
+          const identity = Boolean(b.props?._lists?.length || b.props?._aliases?.length || b.props?._date || b.props?._kind || b.props?._query)
+          if (!identity && b.text.length >= 4) {
+            hit = { id: b.id, text: b.text }
+            return
+          }
+          walk(b.children)
+        }
+      }
+      walk(ed.doc.roots[0].children)
+      return hit
+    })
+    assert(inner, '第一页里应有可拆的内容块')
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), inner.id)
+    await page.waitForTimeout(150)
+    const nowRoot = await page.evaluate(() => window.__qua.__editor.doc.roots.map((b) => b.id))
+    assert(nowRoot.length === 1 && nowRoot[0] === inner.id, `focus 之后应只装这一块：${JSON.stringify(nowRoot)}`)
+
+    await page.evaluate((id) => window.__qua.focusBlock(id, 2), inner.id)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(200)
+    const contentEnter = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const r = ed.store.find(t.id)
+      return {
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, value: o.value })),
+        text: r?.text ?? null,
+        firstKid: r?.children[0]?.id ?? '',
+        firstKidText: r?.children[0]?.text ?? null,
+      }
+    }, inner)
+
+    const textOps = contentEnter.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.text !== undefined)
+    const moveOps = contentEnter.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent !== undefined)
+    assert(
+      textOps.length === 1 && moveOps.length === 1,
+      `内容根块中拆应 2 条结构 op（其余只该是锚点跟右半走）：${JSON.stringify(contentEnter.ops)}`,
+    )
+    assert(textOps.length === 1 && textOps[0].id === inner.id, `原块应留左半：${JSON.stringify(textOps)}`)
+    assert(textOps[0].value.text === inner.text.slice(0, 2), `左半应是「${inner.text.slice(0, 2)}」：${JSON.stringify(textOps[0].value.text)}`)
+    assert(moveOps.length === 1 && moveOps[0].id === contentEnter.firstKid, `应插一个新首个子块：${JSON.stringify(moveOps)}`)
+    assert(moveOps[0].value.parent === inner.id && moveOps[0].value.index === 0, `落点应是根的第 0 位：${JSON.stringify(moveOps[0].value)}`)
+    assert(contentEnter.text === inner.text.slice(0, 2), '根块正文应只剩左半')
+    assert(contentEnter.firstKidText === inner.text.slice(2), `右半应进首个子块：${JSON.stringify(contentEnter.firstKidText)}`)
+
+    await ctx.close()
+    return `页根 Enter ⇒ 1 条（空首子块）；内容根块中 ⇒ 2 条（左半留根 ＋ 右半首子块）`
+  },
+)
+
+await check(
+  'T74 同块选区 + Enter 走一笔事务：删选区与拆分合成「1 条插入 ＋ 1 条正文」，一次撤销复原',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /** 挑一个非根、正文 ≥ 8 字、无锚点的内容块（选区删除会动锚点，先避开） */
+    const pick = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const marks = window.__qua.marks()
+      const atoms = window.__qua.atoms()
+      const rows = []
+      const walk = (list, parent) => {
+        list.forEach((b) => {
+          rows.push({ block: b, parentId: parent?.id ?? null })
+          walk(b.children, b)
+        })
+      }
+      walk(ed.doc.roots, null)
+      for (const r of rows) {
+        const b = r.block
+        if (!r.parentId || b.text.length < 8) continue
+        if (b.props?._lists?.length || b.props?._aliases?.length) continue
+        if (marks.some((m) => m.blockId === b.id) || atoms.some((a) => a.blockId === b.id)) continue
+        return { id: b.id, parentId: r.parentId, text: b.text, kidsBefore: 0 }
+      }
+      return null
+    })
+    assert(pick, '第一页里应有「非根、长正文、无锚点」的块')
+    pick.kidsBefore = await page.evaluate(
+      (t) => window.__qua.__editor.store.find(t.parentId)?.children.length ?? 0,
+      pick,
+    )
+
+    await page.evaluate((id) => window.__qua.focusBlock(id, 2), pick.id)
+    // 真键盘选 [2,4)：两次 Shift+→ 让模型选区也跨起来
+    await page.keyboard.press('Shift+ArrowRight')
+    await page.keyboard.press('Shift+ArrowRight')
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(200)
+
+    const after = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const r = ed.store.find(t.id)
+      const parent = ed.store.find(t.parentId)
+      const i = parent?.children.findIndex((b) => b.id === t.id) ?? -1
+      return {
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, value: o.value })),
+        text: r?.text ?? null,
+        sibling: i > 0 ? (parent?.children[i - 1]?.text ?? null) : null,
+        dom: [...document.querySelectorAll('.blk .tx')].map((el) => el.textContent ?? ''),
+      }
+    }, pick)
+
+    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.text !== undefined)
+    const insertOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent !== undefined)
+    assert(after.ops.length === 2, `删选区 + 拆应合成 2 条 op（没有单独的删除 op）：${JSON.stringify(after.ops)}`)
+    assert(textOps.length === 1 && textOps[0].id === pick.id, `原块应只写一次正文：${JSON.stringify(textOps)}`)
+    assert(
+      textOps[0].value.text === pick.text.slice(4),
+      `原块应保选区之后的右半「${pick.text.slice(4)}」：${JSON.stringify(textOps[0].value.text)}`,
+    )
+    assert(insertOps.length === 1, `左半应是一条插入：${JSON.stringify(insertOps)}`)
+    assert(insertOps[0].value.parent === pick.parentId, '左半应与原块同级')
+    assert(after.text === pick.text.slice(4), '模型里原块应是右半')
+    assert(after.sibling === pick.text.slice(0, 2), `左半应是选区之前那截「${pick.text.slice(0, 2)}」：${JSON.stringify(after.sibling)}`)
+    assert(after.dom.includes(pick.text.slice(0, 2)), 'DOM 应重画出左半')
+    assert(after.dom.includes(pick.text.slice(4)), 'DOM 应重画出右半')
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(200)
+    const back = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const r = ed.store.find(t.id)
+      const parent = ed.store.find(t.parentId)
+      return { text: r?.text ?? null, kids: parent?.children.length ?? 0 }
+    }, pick)
+    assert(back.text === pick.text, `一次撤销应回到整块原文：${JSON.stringify(back.text)}`)
+    assert(back.kids === pick.kidsBefore, `块数应复原：${pick.kidsBefore} → ${back.kids}`)
+
+    await ctx.close()
+    return `选区 [2,4) + Enter ⇒ ops=[插入左半, 正文右半]（2 条，无单独删除）；⌘Z 回原文`
+  },
+)
+
+await check(
+  'T75 行尾 `#标签` + Enter 同一笔：转换（建标签/归属/原子）与结构拆分一起落，一次撤销全回滚',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /** 挑一个非根、无子块、无标签的可编辑内容块：行尾敲标签再回车 */
+    const pick = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const rows = []
+      const walk = (list, parent) => {
+        list.forEach((b) => {
+          rows.push({ block: b, parentId: parent?.id ?? null })
+          walk(b.children, b)
+        })
+      }
+      walk(ed.doc.roots, null)
+      const b = rows.find(
+        (r) =>
+          r.parentId &&
+          r.block.children.length === 0 &&
+          !(r.block.props?._lists?.length) &&
+          !(r.block.props?._aliases?.length) &&
+          !(r.block.props?._tags?.length),
+      )
+      return b ? { id: b.block.id, parentId: b.parentId, text: b.block.text } : null
+    })
+    assert(pick, '第一页里应有可编辑的内容块')
+    pick.kidsBefore = await page.evaluate(
+      (t) => window.__qua.__editor.store.find(t.parentId)?.children.length ?? 0,
+      pick,
+    )
+
+    await page.evaluate((id) => window.__qua.focusBlock(id, 9999), pick.id)
+    await page.keyboard.type(' #回车标签')
+    await page.waitForTimeout(120)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(220)
+
+    const after = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const live = ed.store.find(t.id)
+      const ops = window.__qua.lastOps()
+      const tagOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === null)
+      const tagId = tagOp?.id ?? ''
+      const tag = tagId ? ed.store.find(tagId) : undefined
+      const parent = ed.store.find(t.parentId)
+      const i = parent?.children.findIndex((b) => b.id === t.id) ?? -1
+      return {
+        ops: ops.map((o) => ({
+          e: o.e,
+          id: o.id,
+          op: o.op,
+          text: o.value?.text,
+          parent: o.value && 'parent' in o.value ? o.value.parent : undefined,
+          name: o.name ?? '',
+          annoKind: o.e === 'anno' ? (o.value?.kind ?? '') : '',
+        })),
+        text: live?.text ?? null,
+        tags: live?.props?._tags ?? [],
+        nextText: i >= 0 ? (parent?.children[i + 1]?.text ?? null) : null,
+        tagExists: Boolean(tag),
+        tagAlias: tag?.props?._aliases?.[0] ?? '',
+      }
+    }, pick)
+
+    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined)
+    const tagBlockOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent === null)
+    const tagPropOps = after.ops.filter((o) => o.e === 'prop' && o.name === '_tags' && o.op === 'set')
+    const tagAnnoOps = after.ops.filter((o) => o.e === 'anno' && o.op === 'set' && o.annoKind === 'tag')
+    const structOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && typeof o.parent === 'string')
+
+    assert(tagBlockOps.length === 1, `同一笔里应建出标签块：${JSON.stringify(after.ops)}`)
+    assert(tagPropOps.length === 1, `同一笔里应写归属：${JSON.stringify(after.ops)}`)
+    assert(tagAnnoOps.length === 1, `同一笔里应插 tag 原子：${JSON.stringify(after.ops)}`)
+    assert(textOps.length === 1, `正文应只写一次（转换后带原子）：${JSON.stringify(after.ops)}`)
+    assert(structOps.length === 1, `结构拆分应是同一笔里的 1 条插入：${JSON.stringify(after.ops)}`)
+    assert(after.ops.length === 5, `总计应是 5 条（正文＋标签块＋归属＋原子＋结构）：${JSON.stringify(after.ops)}`)
+    assert(after.tagExists && after.tagAlias === '回车标签', `标签块应真的建出来：${JSON.stringify(after)}`)
+    assert(after.tags.includes(tagBlockOps[0].id), `归属应含新标签：${JSON.stringify(after.tags)}`)
+    assert(after.text === `${pick.text} \uFFFC`, `正文应是「前缀＋空格＋1 格原子」：${JSON.stringify(after.text)}`)
+    assert(after.nextText === '', `光标所在块之后应多出一个空块（Enter 的结构那一半）：${JSON.stringify(after.nextText)}`)
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(220)
+    const back = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const live = ed.store.find(t.id)
+      const parent = ed.store.find(t.parentId)
+      return {
+        text: live?.text ?? null,
+        tags: live?.props?._tags ?? null,
+        atoms: ed.atoms.filter((a) => a.blockId === t.id).length,
+        tagGone: ed.store.find(t.tagId) === undefined,
+        kids: parent?.children.length ?? 0,
+      }
+    }, { ...pick, tagId: tagBlockOps[0].id })
+    assert(
+      back.text === pick.text + ' #回车标签',
+      `一次撤销应回到「敲完标签、还没回车」的正文：${JSON.stringify(back.text)}`,
+    )
+    assert(!(back.tags ?? []).length && back.atoms === 0, `归属与原子应回滚：${JSON.stringify(back)}`)
+    assert(back.tagGone, '一次撤销后新建的标签块应消失')
+    assert(back.kids === pick.kidsBefore, `结构拆分也应回滚：${pick.kidsBefore} → ${back.kids}`)
+
+    await ctx.close()
+    return `「 #回车标签」+ Enter ⇒ 同一笔 5 条 op（正文/标签块/归属/原子/结构）；⌘Z 全回滚`
+  },
+)
+
 /* ---------------------------------------------------------------- 汇总 */
 
 await browser.close()
