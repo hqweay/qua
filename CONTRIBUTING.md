@@ -88,7 +88,7 @@ git config user.email "12345678+hqweay@users.noreply.github.com"   # 换成你�
 （一两句）
 
 ## 怎么验的
-（贴 `pnpm gate` 的结论行，例如：arch 14/14 · check 40/40 · dock 8/8 · electron 10/10 · test:core 72/72）
+（贴 `pnpm gate` 的结论行，例如：arch 18/18 · test:core 270/270 · check 97/97 · dock 10/10 · electron 10/10）
 
 ## 已知没做 / 风险
 （没有就写「无」）
@@ -109,10 +109,12 @@ git config user.email "12345678+hqweay@users.noreply.github.com"   # 换成你�
 pnpm gate
 ```
 
-它是下面这一串，**任何一环非 0 退出就是没做完**：
+**任何一环非 0 退出就是没做完。** 它按产物依赖分三段、**段内并发**跑：
 
 ```
-typecheck → test:core → build → build:electron → arch:check → check → check:dock → check:electron
+① 静态与单测   typecheck · arch:check · test:core          彼此独立，也最便宜 ⇒ 先跑，红了不构建
+② 构建         build:test · build:electron                  ③ 的两个输入
+③ 冒烟         check（用例切片并发）· check:dock · check:electron
 ```
 
 | 环节 | 查什么 | 挂了先看 |
@@ -120,13 +122,18 @@ typecheck → test:core → build → build:electron → arch:check → check �
 | `typecheck` | renderer ＋ 主进程两套 tsconfig | 类型错误原文 |
 | `test:core` | `tests/*.test.ts`（`node --test`，零依赖，纯 core） | 测试名就是断言口径 |
 | `arch:check` | 架构断言（秒级） | 命中列表里有文件与行号 |
-| `check` | **真 Chrome** 真按键真鼠标 | `.cache/` 里的截图与日志 |
+| `check` | **真 Chrome** 真按键真鼠标（97 条，按序切片同时跑） | 编排脚本会把红掉那条的名字与失败原文打出来 |
 | `check:dock` | 真量尺寸的布局断言 | 断言的量值与实际值 |
 | `check:electron` | 真 Electron 里的同一批账 | `.cache/etest/electron-smoke.log` |
+
+> **`pnpm gate:fast`** 是**日常小改动**用的：它按 `git diff` 判这次碰得到哪几支，跳过碰不到的，
+> 并把**跳过了什么**逐条打出来（`pnpm gate:fast --plan` 只看不跑）。认不出的路径一律按全量。
+> ⚠️ 它**不是**收工门禁 —— 跳过的那几步都可能被这次改动弄红，**提交前仍要 `pnpm gate`**。
 
 > ⚠️ **单独跑** `check:dock` / `check:electron` / `check:bundle` / `shots` 前，先 `pnpm build:test`。
 > 生产 `pnpm build` 不含 `window.__qua` 与 `dev.*` 命令（测试面在打包时就不存在），这些脚本会等不到诊断口。
 > `pnpm gate` 内部已经用带测试面的构建，无需手动加。
+
 
 > **不要跳过 `electron` 那步。** 浏览器里过的，在 Electron 里可能不过（IME、系统按键、窗口尺寸都见过差异）。
 

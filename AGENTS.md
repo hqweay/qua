@@ -113,7 +113,10 @@ core ← view ← ui ← app ← host
 > **node 必须是 26.x**（`.node-version` 钉住；旧版会让 rollup 原生模块 dlopen 失败）。
 
 ```bash
-pnpm gate           # ★ 唯一门禁：typecheck + test:core + build + build:electron + arch + check + dock + electron
+pnpm gate           # ★ 唯一门禁（全量）：静态 + 单测 + 构建 + 冒烟 + 布局 + 真 Electron
+pnpm gate:fast      # 按 git 改动跳到「碰得到的那几支」——日常小改动用它，收工仍要 gate
+pnpm gate:web       # 同 gate，但不含 Electron（CI 的 Linux job 用这个）
+pnpm gate:fast --plan   # 只打「这次会跑哪些 / 跳过哪些」，不真跑
 pnpm dev            # vite + electron 一起起（src/** 热更新；electron/*.ts 改动要重跑）
 pnpm dev:web        # 只起 vite → http://127.0.0.1:5180/
 pnpm arch:check     # 只跑架构静态断言（秒级）
@@ -128,11 +131,20 @@ pnpm gate:bundle    # gate ＋ 打包产物冒烟（慢，单列）
 
 **改完必须 `pnpm gate` 全绿才能算收工。**
 
+- **`gate` 是编排出来的，不是一条 `&&` 链**（`scripts/gate.mjs`）：彼此独立的检查按产物依赖分三段、
+  段内**并发**，冒烟那 97 条**按序切片**成几片同时跑。快的来源是并发，不是少跑——断言一条没动。
+- **`gate:fast` 不是收工门禁。** 它按 `git diff` 判面（core／web／electron／文档），跳过碰不到的，
+  并且**逐条列出跳过了什么**。判不出的路径一律按全量，所以它只会少跑、不会猜。
+  拿不准时看一眼 `pnpm gate:fast --plan`。
 - `build:electron` 是门禁必需的一环——少它 `check:electron` 会拿旧 `main.cjs` **假绿**（真踩过）。
+- 门禁里的浏览器步骤一律 `QUA_NO_DEV=1`：验的是**构建产物**，不去连 5180 上可能属于
+  **另一棵树**的 dev server（并行车道里真踩过）。
 - `pnpm check` 覆盖：敲字 / Enter 拆块 / Backspace 合并 / Tab 缩进 / 区间格式 /
   锚点粘性映射 / 行内原子 / 折叠 / 拖拽重排 / 命令面板无绑定执行 / 块菜单与斜杠菜单 /
   落盘重开 / 主题只换 token / 三个降级形态不溢出 / 虚拟化 / IME 组合守卫 / 块选区。
 - `pnpm check:electron` 的证据原文落在 `.cache/etest/electron-smoke.log`（每次跑覆盖）。
+- 单跑冒烟时 `QUA_SMOKE_SHARD=i/N` 可只跑第 i 片（分片口径落在 `check()` 里，见 `checks/smoke.mjs`）。
+
 
 ### 已知的偶发失败
 

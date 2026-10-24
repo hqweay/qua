@@ -10,9 +10,11 @@
 #     不是我们要发货的那个平台 —— 那是一条**假绿**。
 name: gate
 
+# **只在 PR 上跑**（外加手动触发）。
+# 为什么不挂 `push`：这条流水线存在的理由是回答「**别人的** PR 过没过门禁」
+# —— 而那件事只需要在 PR 上答。自己往 main 上推的提交由本地 `pnpm gate` 负责，
+# 每推一次就让 CI 全量跑一遍，换来的是同一个答案的重复账单。
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 

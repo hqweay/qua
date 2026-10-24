@@ -154,7 +154,8 @@ core ← view ← ui ← app ← host
 ```bash
 pnpm dev             # 开发：vite + electron（src/** 热更新；electron/*.ts 改动要重跑）
 pnpm dev:web         # 只起 vite → http://127.0.0.1:5180/
-pnpm gate            # ★ 唯一门禁：typecheck + 单测 + build + arch + 三套冒烟
+pnpm gate            # ★ 唯一门禁（全量）：静态 + 单测 + 构建 + 冒烟 + 布局 + 真 Electron
+pnpm gate:fast       # 日常小改动：按 git 改动只跑「碰得到的那几支」（不是收工门禁）
 pnpm arch:check      # 只跑架构静态断言（秒级）
 pnpm test:core       # 只跑纯 core 单测（node --test，零依赖）
 pnpm check           # 浏览器级冒烟（真 Chrome、真按键、真鼠标）
@@ -164,14 +165,24 @@ pnpm shots           # 截图 ⇒ shots/
 pnpm build:mac       # 打包 .app（未签名，首次需右键打开）
 ```
 
-**改完必须 `pnpm gate` 全绿才算收工。** 它由这些组成，缺一项都不算过：
+**改完必须 `pnpm gate` 全绿才算收工。** 它按产物依赖分三段、**段内并发**跑：
 
 ```
-typecheck → test:core → build → build:electron → arch:check → check → check:dock → check:electron
+① 静态与单测   typecheck · arch:check · test:core
+② 构建         build:test · build:electron
+③ 冒烟         check（用例切片并发）· check:dock · check:electron
 ```
+
+> 快的原因**是并发，不是少跑**——断言一条没动。冒烟的用例本就互相独立（每条自己开一个干净
+> 上下文），所以按序切片分给几个进程；合并端会验「各片看到的用例数一致、合并后条数等于它」，
+> 因为分片唯一能悄悄失效的地方就是**漏掉某条用例而它不报错**。
 
 > `build:electron` 是门禁必需的一环——少了它，`check:electron` 会拿旧的 `main.cjs`
 > 跑出**假绿**（真踩过，所以写进门禁而不是写进文档）。
+
+> **`pnpm gate:fast` 不是收工门禁。** 它按这次变动的路径判面（core／web／electron／文档），
+> 跳过碰不到的，并把跳过了什么逐条打出来；认不出的路径一律按全量。
+> 只想看它判定结果：`pnpm gate:fast --plan`。
 
 ---
 

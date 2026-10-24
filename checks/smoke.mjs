@@ -14,19 +14,51 @@
  *    停在上一笔——验「这次没写」要对比动作前后的 `lastOps` 加模型状态，不能直接断言它为空。
  * ⚠️ 新用例编号先 grep 本文件最大 T 号再接（T76 之后一段时期最大号与直觉不符，撞过一次）。
  */
-import { mkdir } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { assert, freshPage, key as kbd, launch, openPage, reopenPage, resolveBase } from '../scripts/harness.mjs'
 
 const SHOTS = fileURLToPath(new URL('../shots/', import.meta.url))
 const results = []
 
+/**
+ * **分片**：这份用例集可以被 N 个进程切片跑（`pnpm gate` 把墙钟时间摊到多核上）。
+ *
+ * 为什么切在 `check()` 里、而不是拆成几个文件：97 条用例是同一个模板
+ *   （`freshPage` ⇒ 断言 ⇒ 不留状态），彼此没有顺序依赖，拆文件要动几千行；
+ *   这里只多一个「这一条归不归我」的判断。
+ *
+ * `QUA_SMOKE_SHARD=i/N`（0 ≤ i < N）；不设 ＝ 全跑（本地单跑、排查时就是这个）。
+ * ⚠️ 切片按**声明顺序的序号**取模 —— 别改成按名字，改个用例名就会改切片。
+ */
+const SHARD = (() => {
+  const spec = process.env.QUA_SMOKE_SHARD
+  if (!spec) return null
+  const m = /^(\d+)\/(\d+)$/.exec(spec)
+  const i = m ? Number(m[1]) : NaN
+  const n = m ? Number(m[2]) : NaN
+  if (!(n >= 1) || !(i >= 0 && i < n)) {
+    throw new Error(`QUA_SMOKE_SHARD 要写成 i/N 且 0 ≤ i < N，收到 "${spec}"`)
+  }
+  return { i, n }
+})()
+
+/**
+ * `QUA_SMOKE_REPORT=<文件>` ⇒ 把结果写成 JSON 并**不逐条打印**（分片时由编排脚本读回合并）。
+ * 报告里带上 `total`（本进程一共看到多少条用例）：合并端据此验「切片有没有漏东西」——
+ * 少一条就等于漏测，而漏测是不报错的（这是分片唯一会静默失效的地方，必须自己验）。
+ */
+const REPORT = process.env.QUA_SMOKE_REPORT ?? ''
+let seq = 0
+
 async function check(name, fn) {
+  const idx = seq++
+  if (SHARD && idx % SHARD.n !== SHARD.i) return
   try {
     const msg = await fn()
-    results.push({ name, ok: true, msg: msg ?? '' })
+    results.push({ idx, name, ok: true, msg: msg ?? '' })
   } catch (e) {
-    results.push({ name, ok: false, msg: e?.message ?? String(e) })
+    results.push({ idx, name, ok: false, msg: e?.message ?? String(e) })
   }
 }
 
@@ -6506,15 +6538,33 @@ await check(
 
 /* ---------------------------------------------------------------- 汇总 */
 
-await browser.close()
+let fail = 0
+for (const r of results) if (!r.ok) fail++
+
+/**
+ * ⚠️ **报告先写，再关浏览器。** 反过来的话，机器被压死那一刻 Chrome 先死，
+ *    `browser.close()` 抛出来，报告就永远没写 —— 编排端只能看到「这一片没留下报告」，
+ *    而真正的原因是「这一片的用例其实已经跑完了，只是答案没被记下来」。
+ *    关浏览器失败不该吞掉结果。
+ */
+if (REPORT) {
+  // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
+  await writeFile(REPORT, JSON.stringify({ total: seq, cases: results }))
+}
+
+try {
+  await browser.close()
+} catch (e) {
+  console.error(`关浏览器失败（结果已写完，不影响判定）：${e?.message ?? e}`)
+}
 if (server) server.close()
 
-console.log('')
-let fail = 0
-for (const r of results) {
-  console.log(`${r.ok ? '\u001b[32mPASS\u001b[0m' : '\u001b[31mFAIL\u001b[0m'}  ${r.name}`)
-  if (r.msg) console.log(`      ${String(r.msg).replace(/\n/g, '\n      ')}`)
-  if (!r.ok) fail++
+if (!REPORT) {
+  console.log('')
+  for (const r of results) {
+    console.log(`${r.ok ? '\u001b[32mPASS\u001b[0m' : '\u001b[31mFAIL\u001b[0m'}  ${r.name}`)
+    if (r.msg) console.log(`      ${String(r.msg).replace(/\n/g, '\n      ')}`)
+  }
+  console.log(`\n${results.length - fail}/${results.length} 通过${SHARD ? `（分片 ${SHARD.i + 1}/${SHARD.n}）` : ''}\n`)
 }
-console.log(`\n${results.length - fail}/${results.length} 通过\n`)
 process.exit(fail === 0 ? 0 : 1)

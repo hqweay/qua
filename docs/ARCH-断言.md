@@ -11,21 +11,29 @@
 ## 0. 门禁入口
 
 ```bash
-pnpm gate         # 类型 + 单测 + 构建 + 静态断言 + 40 条浏览器冒烟 + 8 条布局断言 + 10 条真 Electron 冒烟
+pnpm gate         # 类型 + 单测 + 构建 + 静态断言 + 97 条浏览器冒烟 + 10 条布局断言 + 10 条真 Electron 冒烟
+pnpm gate:fast    # 按这次改动的路径只跑碰得到的那几支（日常小改动用；不是收工门禁）
 pnpm gate:bundle  # gate + 4 条打包产物冒烟（要 .app，慢，所以单列）
 pnpm arch:check   # 只跑静态那一层（秒级）
 ```
 
-`gate` 展开：
+`gate` 是**编排**出来的（`scripts/gate.mjs`），不是一条 `&&` 链 —— 按产物依赖分三段、段内并发：
 
 ```
-pnpm typecheck          # tsc（renderer + electron，两套 tsconfig）
-pnpm build              # tsc + vite build（renderer → dist/）
-pnpm build:electron     # esbuild（electron/*.ts → dist-electron/*.cjs）
-pnpm arch:check         # ← 本文的主角
-pnpm check              # typecheck:electron + build + node checks/smoke.mjs（16/16）
-pnpm check:electron     # node checks/electron-smoke.mjs（10/10，跑 dist/ + dist-electron/）
+① 静态与单测（并发）
+    pnpm typecheck          # tsc（renderer + electron，两套 tsconfig）
+    pnpm arch:check         # ← 本文的主角
+    pnpm test:core          # tests/*.test.ts
+② 构建（并发）
+    pnpm build:test         # tsc + vite build（带测试面 → dist/）
+    pnpm build:electron     # esbuild（electron/*.ts → dist-electron/*.cjs）
+③ 冒烟（并发）
+    pnpm check:smoke ×N     # node checks/smoke.mjs，97 条按序切片分给 N 个进程
+    pnpm check:dock         # 真量尺寸的布局断言
+    pnpm check:electron     # 真 Electron（跑 dist/ + dist-electron/）
 ```
+
+切片数取 `min(4, 核数/2)`（③ 里还有 dock 与 electron 要抢核）；`--shards=N` 可覆盖。
 
 两个**必须写下来的坑**：
 
@@ -318,8 +326,11 @@ AST 遍历 `electron/**/*.ts`：禁止 `workspace` / `seed` / `core/` / `command
    （视觉上只是空着，不影响使用）；将来若要做静态截图/SSR 需要重新考虑。
 10. **字典里有 3 条「假数据」文案**（`ui.arg.*` / `ui.sample.asset*Name`）：严格说它们该进
     `seed.ts`，本轮为了不动 `commands.ts` 的 import 图先留在字典里。下次清理时一起挪。
-11. **`pnpm gate` 会重复跑 tsc 与 vite**（`build` 一次、`check` 里再一次）。是刻意保留的：
-    `check` 单独跑也得是自洽的。嫌慢就把 gate 改成 `… && node checks/smoke.mjs && …`。
+11. **门禁的重复跑已经收掉了**：`gate:web` 以前先跑一遍 `build`、紧接着 `check` 里的 `build:test`
+    又把它覆盖掉（白跑一次构建）；`typecheck:electron` 也跑两遍。现在 gate 是 `scripts/gate.mjs`
+    编排出来的——构建只在 ② 跑一次，③ 直接用那份产物。
+    `pnpm check` 仍然是自洽的（自己 `build:test` 再跑冒烟），所以**单独跑它**不受影响。
+    想再省就 `pnpm gate:fast`；别再往编排脚本里塞第二条 `&&` 链。
 12. **`checks/electron-smoke.mjs` E8 的叙述已改**（原来写「不跟随系统」，现在写「档位不变色、
     颜色交给 CSS」）；断言本身一个字没动。E8 的标题也改了 —— 断言集合与数量仍是 10 条。
 
