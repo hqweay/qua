@@ -1,15 +1,7 @@
 /**
  * 日记命令：翻日与「回今日」。
  */
-import {
-  ensureFirstBlock,
-  isJournal,
-  journalDate,
-  journalId,
-  mkJournalBlock,
-  shiftISO,
-  todayISO,
-} from '../../core/index.ts'
+import { isJournal, journalDate, journalId, mkJournalBlock, shiftISO, todayISO } from '../../core/index.ts'
 import type { App } from '../../core/ports.ts'
 import { rootsFor, rootsForFeed } from './roots.ts'
 import type { PageDeps } from './types.ts'
@@ -44,13 +36,11 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
   const openBlock = (id: string): void => {
     d.flush()
     const b = d.blocks().find((x) => x.id === id)
-    // 全新的一天还没有任何子块 ⇒ 先归一：journal 的首行是**只读日期**，
-    // 没有子块就**没有任何地方可以落光标**（打不了字）
-    if (b) ensureFirstBlock(b.children)
     /**
      * ⚠️ 「哪一天是当前对象」由**日期**决定，不由装载顺序决定：
      *    日期块自己的 `id` 就是它的身份，`setActiveId` 必须拿它的 id
      *    （按「流的第一段」去设在库里留着更早的未打开天时会把人送到那一天）。
+     * ⚠️ 空天补首子块是**装载边界**的事（经事务进库），打开这里只选择、不写库。
      */
     d.setActiveId(id, { feed: false })
     d.loadPage(b ? rootsFor(b) : [], d.marks(), d.atoms())
@@ -66,7 +56,7 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
    * 打开**日记流**：`date` 在顶、更早的「存在的天」往下。
    *
    * ⚠️ 只取森林里**存在的** journal 块（`journalFeedDays`），不按日历逐天生造空天。
-   * ⚠️ 每个加载的天都要 `ensureFirstBlock`：日期行只读，没有子块就「打得开却打不了字」。
+   * ⚠️ 每个加载的天都要能直接打字：日期行只读 ⇒ 空天的首子块由装载边界补（经事务进库）。
    */
   const openFeed = (date: string): void => {
     d.flush()

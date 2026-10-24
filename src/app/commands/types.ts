@@ -23,6 +23,14 @@ export interface PageDeps {
    */
   removeBlock: (id: string) => void
   /**
+   * 插一棵子树（`block` 自带 children）——与 `removeBlock` 对称的**结构写入口**。
+   *
+   * 命令层不许自己 `blocks().push`：结构写必须走事务产 op，否则「这块在库里」
+   * 没有行可落，换库/重开就丢了。落点（`parent`＋`index`）由调用方声明，
+   * 越界夹取与「每个后代报自己的落点」由事务那一份实现负责。
+   */
+  insertBlock: (block: Block, parentId: string | null, index: number) => void
+  /**
    * 打标签的落点：**当前光标所在的块**（没有活动块时回退到首行）。
    *
    * ⚠️ 为什么注入的是**一个函数**而不是 `editor` 对象本身：活动编辑器是会变的

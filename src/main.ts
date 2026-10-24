@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf, aliasesOf, allPropDefs, allTags, blockTypeOf, DISPLAY_PROP, listsOf, tagIdsOf, childTags, claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, normalizeAlias, parentTags, primaryAliasOf, prop, propKindOf, removeList, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys, type FoldState } from './core/index.ts'
+import { addAlias, addList, addressesOf, aliasesOf, allPropDefs, allTags, blockTypeOf, DISPLAY_PROP, listsOf, tagIdsOf, childTags, claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, mkBlock, normalizeAlias, parentTags, primaryAliasOf, prop, propKindOf, removeList, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys, type FoldState } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
 import type { Op, Tx } from './core/kb/types.ts'
@@ -141,6 +141,8 @@ if (boot.status !== 'ok' || !activeStillExists) ws.activeId = todayId
  * ⚠️ 两条路径都只用 `rootsFor` 那条规则：journal ⇒ 每段保证有可编辑子块（否则打得开却打不了字）；
  *    别的块 ⇒ 只要**那一个**。
  * ⚠️ 这里就地找落点、不走 `activeBlock()`：后者是后文才声明的（装配阶段的时序）。
+ * ⚠️ 空天的首子块在**这里**就地补：冷启动发生在仓库构建之前，走不了事务，
+ *    补的块随冷启动后的整库落盘一起进盘——运行时的装载边界才走事务（`materializeEditableRoots`）。
  */
 const bootActive = findInForest(ws.blocks, ws.activeId) ?? ws.blocks[0]
 const bootDays = bootActive && isJournal(bootActive) ? journalFeedDays(ws.blocks, todayISO(), FEED_INITIAL) : []
@@ -838,6 +840,22 @@ function firstEditableRoot(first: Block | undefined): Block | null {
 }
 
 /**
+ * **装载边界的可编辑保证**：被装进中心编辑器的 journal 天至少要有一个子块——
+ * 日期行只读，没有子块就没有可落光标的地方（「打得开却打不了字」）。
+ *
+ * 这是**写库**，不是渲染兜底：渲染兜底会让「看到的块」与「库里的块」分叉，
+ * 补的块经事务真的进库（一条 `insert`，op 里报它自己的落点）。
+ * 所有装载入口共用这一个落点（`loadPage`／日记流增量／演示换库）；
+ * 「新建」一类造数据的路径不走这里——它们在创建时就该把子块带上（同一笔插入）。
+ * 冷启动在仓库构建之前、走不了事务，仍由模型层归一（`ensureFirstBlock`）。
+ */
+function materializeEditableRoots(roots: readonly Block[]): void {
+  for (const r of roots) {
+    if (isJournal(r) && r.children.length === 0) run((tx) => tx.insert(mkBlock(''), r.id, 0), mainEd)
+  }
+}
+
+/**
  * 页与日记**共用同一份依赖**（`PageDeps`）：两者都是「一块 ＋ 一棵子树」，
  * 只是角色不同 ——各给一套依赖就会立刻出现两条分叉的实现路径（要消灭的正是这个）。
  *
@@ -849,6 +867,11 @@ const pageDeps: PageDeps = {
     // 删页：整棵子树摘进回收站。走 `run` 是为了产出 op —— 命令层只声明「删这块」，
     // 摘树与打删除标记由事务那一份实现负责。
     run((tx) => tx.remove(id), mainEd)
+  },
+  insertBlock: (block, parentId, index) => {
+    // 与 `removeBlock` 对称的结构写入口：插一棵子树（含自带的首子块），
+    // op 由事务产出——每个后代报它们自己的 parent/index，换库后行行有落点。
+    run((tx) => tx.insert(block, parentId, index), mainEd)
   },
   // 打标签的落点：**当前光标那一块**（正文 vs 反链 footer 会切换 ⇒ 每次现取活动编辑器）
   caretBlockId: () => ed.caretBlock() ?? ed.rows()[0]?.block.id ?? null,
@@ -877,6 +900,9 @@ const pageDeps: PageDeps = {
   },
   rootIds: () => mainEd.doc.roots.map((b) => b.id),
   loadPage: (roots, marks, atoms) => {
+    // 装载边界：空 journal 天在这里补首子块（经事务、一条 op）——
+    // 所有「打开」命令共用的唯一归一落点，`rootsFor`／命令层只选择、不写库
+    materializeEditableRoots(roots)
     // 换页/换焦点对象：上一条「聚焦块」不再成立，等 focusFirstBlock 重新设上
     propsBlockId = null
     ed = mainEd
@@ -1300,8 +1326,9 @@ const app: App = {
       //    落点是日记 ⇒ 装**日记流**（今日在顶＋存在的更早的天），别的块 ⇒ 只装它自己。
       //    原来这里只有 `rootsFor(p)`，于是「载入假数据」后日记流消失、只剩今天一段。
       const feed = isJournal(p) ? journalFeedDays(ws.blocks, todayISO(), FEED_INITIAL) : []
-      for (const day of feed) ensureFirstBlock(day.children)
       const roots = feed.length > 0 ? rootsForMany(feed) : rootsFor(p)
+      // 装载边界同一条归一：空 journal 天经事务补首子块（演示换库也是一次「打开」）
+      materializeEditableRoots(roots)
       // ⚠️ 光标必须落在**第一个可编辑的行**上（日记流的第一段是只读日期行）。
       //    原来固定 `roots[0]`，于是载入假数据后光标停在日期行、第一行看着「没有名字」。
       const caret = firstEditableRoot(roots[0])
@@ -2062,7 +2089,7 @@ function appendMoreFeed(): boolean {
     .filter((d) => !loaded.has(d.id))
     .slice(0, limit - roots.length)
   if (more.length === 0) return false
-  for (const day of more) ensureFirstBlock(day.children)
+  materializeEditableRoots(more)
   mainEd.appendRoots(rootsForMany(more))
   return true
 }

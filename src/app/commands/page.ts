@@ -49,10 +49,12 @@ export function pageCommands(d: PageDeps): Pick<
     activePageId: () => d.activeId(),
 
     newPage: () => {
+      // 页块**自带空首子块**（`makePageBlock`），整棵子树同一笔插进库：
+      // 「新建页」是一次结构写，必须产 op——直接 `blocks().push` 的页换库后没有行可落，
+      // 重开就丢了；拆成「先建页、打开再补子块」则会存在只有页没处写字的半截状态。
       const p = makePageBlock()
-      d.blocks().push(p)
+      d.insertBlock(p, null, d.blocks().length)
       d.setActiveId(p.id)
-      // 新页必须是**可编辑的**：给它一个空子块（否则「新建页面」后打不了字）
       d.loadPage(rootsFor(p), d.marks(), d.atoms())
       d.refreshList()
       d.refreshTitle()

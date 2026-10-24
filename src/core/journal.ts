@@ -81,7 +81,7 @@ export function findJournalDay(blocks: readonly Block[], date: string): Block | 
  *
  * ⚠️ **不造空天**：没有写过的日期不会有块，也就不会出现在流里。
  *    「日记是按需物化的资源」——没写过的日期不该存在。
- * ⚠️ 只做选择，不做视图：调用方负责 `ensureFirstBlock` 与浅拷贝成 roots。
+ * ⚠️ 只做选择，不做视图：调用方负责装载边界的归一（空天补首子块）与浅拷贝成 roots。
  */
 export function journalFeedDays(blocks: readonly Block[], anchor: string, limit = 14): Block[] {
   const days = journalDays(blocks).filter((b) => journalDate(b) <= anchor)
@@ -104,7 +104,8 @@ export function mkJournalBlock(date: string): Block {
  *
  * ⚠️ 判据：冷启动落在今日是**默认内容**，不是「看存储里恰好有什么」——
  *   旧形状的库（没有 journal）升级上来也必须能直接进今日，否则用户找不到入口。
- * ⚠️ 与 `ensureFirstBlock` 分工：这里保证**块在场**，那里保证**块可编辑**。
+ * ⚠️ 这里只保证**块在场**；「块可编辑」（首子块）由创建／装载边界的路径保证，
+ *   两者不能合成一件事——物化日期与补正文首块是两个时刻。
  */
 export function ensureTodayJournal(blocks: Block[], now: Date = new Date()): string {
   const date = todayISO(now)

@@ -4789,14 +4789,19 @@ await check(
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
 
-    // 新建一页并给它一个子块（子块插入本身也走事务），然后删页
+    // 新建一页（自带一个空首子块）再补一个子块，然后删页：删的是整棵子树
     await page.evaluate(() => window.__qua.invoke('core.page/new'))
     await page.waitForTimeout(120)
     const created = await page.evaluate(() => {
       const ed = window.__qua.__editor
       const root = ed.doc.roots[0]
       const kid = ed.insertBlockAfter(root.id, '删页测试子块')
-      return { pageId: root.id, kidId: kid ?? '', pages: window.__qua.pages().length }
+      return {
+        pageId: root.id,
+        kidId: kid ?? '',
+        childIds: root.children.map((b) => b.id),
+        pages: window.__qua.pages().length,
+      }
     })
     assert(created.pageId && created.kidId, `前置：新页与子块都应存在：${JSON.stringify(created)}`)
 
@@ -4817,10 +4822,13 @@ await check(
     }, created)
 
     const deletes = after.ops.filter((o) => o.e === 'block' && o.op === 'delete').map((o) => o.id)
-    assert(after.ops.length === 2, `删一页（页 ＋ 1 个子块）应恰好 2 条 op：${JSON.stringify(after.ops)}`)
     assert(
-      deletes.includes(created.pageId) && deletes.includes(created.kidId),
-      `页与子块各要一条 block.delete（级联是落库实现的事，op 序列要说得清）：${JSON.stringify(after.ops)}`,
+      after.ops.length === 1 + created.childIds.length,
+      `删一页（页 ＋ ${created.childIds.length} 个子块）应恰好 ${1 + created.childIds.length} 条 op：${JSON.stringify(after.ops)}`,
+    )
+    assert(
+      deletes.includes(created.pageId) && created.childIds.every((id) => deletes.includes(id)),
+      `页与子树每块各要一条 block.delete（级联是落库实现的事，op 序列要说得清）：${JSON.stringify(after.ops)}`,
     )
     assert(after.pageGone && after.kidGone, '模型里页与子块都应消失')
     assert(after.trashed === 1 && after.deletedAt !== null, '整页应进回收站（带 _deletedAt，内容不丢）')
@@ -5365,6 +5373,71 @@ await check(
 
     await ctx.close()
     return `「 #回车标签」+ Enter ⇒ 同一笔 5 条 op（正文/标签块/归属/原子/结构）；⌘Z 全回滚`
+  },
+)
+
+await check(
+  'T76 新建页走一笔事务：页块与空首子块同一笔进库，恰好 2 条 upsert（页{parent:null,index:n}＋子块{parent:pageId,index:0}）；真关重开后页与子块都还在；页数 +1',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    const before = await page.evaluate(() => ({
+      pages: window.__qua.pages().length,
+      // 根数要用**森林根**：`blocks()` 返回的是装载文档的平铺，不是顶层
+      roots: window.__qua.snapshot().topBlocks,
+    }))
+
+    await page.evaluate(() => window.__qua.invoke('core.page/new'))
+    await page.waitForTimeout(200)
+
+    const created = await page.evaluate(() => {
+      const ops = window.__qua.lastOps()
+      const pageOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === null)
+      const childOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === pageOp?.id)
+      // 用真模型取子树：诊断面的 `blocks()` 里 `children` 是数量，不是数组
+      const page = window.__qua.__editor.store.find(pageOp?.id)
+      return {
+        ops: ops.map((o) => ({ e: o.e, id: o.id, op: o.op, parent: o.value?.parent, index: o.value?.index })),
+        pageId: pageOp?.id ?? '',
+        childId: childOp?.id ?? '',
+        pages: window.__qua.pages().length,
+        modelChild: page?.children[0]?.id ?? '',
+      }
+    })
+
+    assert(created.ops.length === 2, `新建一页应恰好 2 条 op：${JSON.stringify(created.ops)}`)
+    assert(
+      created.ops.every((o) => o.e === 'block' && o.op === 'upsert'),
+      `两条都应是 block.upsert（结构写不许零 op 直写）：${JSON.stringify(created.ops)}`,
+    )
+    assert(created.pageId !== '', `应有页块自己的 upsert{parent:null}：${JSON.stringify(created.ops)}`)
+    assert(
+      created.ops.find((o) => o.id === created.pageId)?.index === before.roots,
+      `页块应插在根列表末尾（index=${before.roots}）：${JSON.stringify(created.ops)}`,
+    )
+    assert(
+      created.childId !== '' &&
+        created.ops.find((o) => o.id === created.childId)?.parent === created.pageId &&
+        created.ops.find((o) => o.id === created.childId)?.index === 0,
+      `空首子块应报它自己的落点 {parent:pageId,index:0}：${JSON.stringify(created.ops)}`,
+    )
+    assert(created.modelChild === created.childId, '模型里子块应真的挂在页下')
+    assert(created.pages === before.pages + 1, `页数应 +1：${before.pages} → ${created.pages}`)
+
+    // 真关重开（reload 不算「关掉重开」）：页与子块必须还真的在库里
+    const reopened = await reopenPage(browser, ctx, base, page)
+    const after = await reopened.page.evaluate((t) => {
+      // 用真模型取：诊断面的 `blocks()` 里 `children` 是数量，读不出子块 id
+      const p = window.__qua.__editor.store.find(t.pageId)
+      return { page: Boolean(p), child: p?.children[0]?.id ?? '', pages: window.__qua.pages().length }
+    }, created)
+    await reopened.ctx.close()
+    await ctx.close()
+    assert(after.page, '重开后页应还在库里')
+    assert(after.child === created.childId, `重开后空首子块应还在页下：${JSON.stringify(after)}`)
+    assert(after.pages === created.pages, `重开后页数应不变：${created.pages} → ${after.pages}`)
+
+    return `新建页 ⇒ 恰好 2 条 upsert（页{parent:null,index:${before.roots}}＋子块{parent:页,index:0}）；页数 ${before.pages}→${created.pages}；真关重开两者仍在`
   },
 )
 
