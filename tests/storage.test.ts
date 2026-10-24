@@ -35,7 +35,7 @@ function lib(patch: Partial<Workspace> = {}): Workspace {
   }
 }
 
-const batch = (data: Workspace) => ({ changes: [{ kind: 'blocks' as const, id: '*' }], payload: JSON.stringify(data), savedAt: data.savedAt })
+const batch = (data: Workspace) => ({ ops: [], changes: [{ kind: 'blocks' as const, id: '*' }], payload: JSON.stringify(data), savedAt: data.savedAt })
 
 test('load: 从没存过 ⇒ empty', async () => {
   resetMemoryLocalStorage()
@@ -113,7 +113,7 @@ test('门面：empty / 旧库 / 坏字节 各有自己的分支', async () => {
   const store = createWorkspaceStore(createLocalStorageAdapter(KEY))
   assert.deepEqual(await store.load(), { status: 'empty' })
 
-  await store.commit(lib())
+  await store.commit(lib(), [])
   const ok = await store.load()
   assert.equal(ok.status, 'ok')
 
@@ -124,8 +124,67 @@ test('门面：empty / 旧库 / 坏字节 各有自己的分支', async () => {
 test('clear: 清掉之后回到 empty（清的是存储，不是内存库）', async () => {
   resetMemoryLocalStorage()
   const store = createWorkspaceStore(createLocalStorageAdapter(KEY))
-  await store.commit(lib())
+  await store.commit(lib(), [])
   await store.clear()
   assert.equal(peekMemoryLocalStorage(KEY), null)
   assert.deepEqual(await store.load(), { status: 'empty' })
+})
+
+
+test('一批 op ＝ 一个事务：门面把 op 原样带进 batch，changes 是它的最小投影', async () => {
+  let captured: { ops: unknown[]; changes: unknown[]; payload: string } | null = null
+  const stubPort = {
+    kind: 'test',
+    load: async () => ({ status: 'empty' as const }),
+    commit: async (b: { ops: unknown[]; changes: unknown[]; payload: string }) => {
+      captured = b
+      return { ok: true as const, savedAt: 0 }
+    },
+    clear: async () => {},
+    settle: async () => {},
+  }
+  const store = createWorkspaceStore(stubPort)
+
+  const ops = [
+    { e: 'block', id: 'b1', op: 'upsert', value: { text: 'x' }, at: 1 },
+    { e: 'prop', block: 'b1', name: '_tags', op: 'set', value: ['t1'], at: 2 },
+    { e: 'anno', block: 'b1', id: 'a1', op: 'set', value: { id: 'a1', kind: 'tag', blockId: 'b1', start: 0, end: 1 }, at: 3 },
+    { e: 'anno', block: 'b2', id: 'm1', op: 'delete', at: 4 },
+  ] as const
+  await store.commit(lib({ savedAt: 7 }), ops)
+
+  assert.ok(captured)
+  // op 原样进 batch（一批 op ＝ 一个事务——写适配器按这个契约落行）
+  assert.deepEqual(captured.ops, ops)
+  // changes 是最小投影：块类合并、原子/标记分开
+  assert.deepEqual(captured.changes, [
+    { kind: 'blocks', id: 'b1' },
+    { kind: 'atoms', id: 'b1' },
+    { kind: 'marks', id: 'b2' },
+    { kind: 'atoms', id: 'b2' },
+  ])
+  // 落盘字节仍是整份库（demo 适配器实现细节，SQLite 适配器不收这个）
+  assert.ok((captured as { payload: string }).payload.includes('"b1"'))
+})
+
+test('op 为空 ⇒ 这批不是事务产的：按整类提交（迁移期真相）', async () => {
+  let captured: { changes: unknown[] } | null = null
+  const stubPort = {
+    kind: 'test',
+    load: async () => ({ status: 'empty' as const }),
+    commit: async (b: { ops: unknown[]; changes: unknown[]; payload: string }) => {
+      captured = b
+      return { ok: true as const, savedAt: 0 }
+    },
+    clear: async () => {},
+    settle: async () => {},
+  }
+  const store = createWorkspaceStore(stubPort)
+  await store.commit(lib(), [])
+  assert.ok(captured)
+  assert.deepEqual(captured.changes, [
+    { kind: 'blocks', id: '*' },
+    { kind: 'marks', id: '*' },
+    { kind: 'atoms', id: '*' },
+  ])
 })

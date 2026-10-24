@@ -17,6 +17,7 @@
  * 命令 handler 拿不到端口、也不该拿到 —— 要落盘就 `scheduleSave()`（承 arch-check [17]）。
  */
 import type { Change, CommitBatch, LoadResult, StoragePort } from './port.ts'
+import type { Op } from '../kb/types.ts'
 import { parseWorkspace, type ParseResult, type Workspace } from './shape.ts'
 
 /** 「整份库都动过」的那批改动：demo 适配器的最细粒度（信封实现与门面共用同一份声明） */
@@ -37,8 +38,8 @@ export type LoadedWorkspace = ParseResult | { status: 'storage-error'; error: un
 export interface WorkspaceStore {
   readonly kind: string
   load: () => Promise<LoadedWorkspace>
-  /** 提交一批改动（序列化归这里，适配器只收字节）；不带 changes ＝ 整类对象都动过 */
-  commit: (ws: Workspace, changes?: Change[]) => Promise<{ ok: true } | { ok: false; error: unknown }>
+  /** 提交一批 op（序列化与 changes 推导归这里）；op 为空 ＝ 整类对象都动过 */
+  commit: (ws: Workspace, ops: readonly Op[]) => Promise<{ ok: true } | { ok: false; error: unknown }>
   clear: () => Promise<void>
   /** 等已在途的提交落盘 */
   settle: () => Promise<void>
@@ -52,15 +53,51 @@ export function judge(r: LoadResult): LoadedWorkspace {
   return parseWorkspace(r.raw)
 }
 
+/**
+ * 一批 op ⇒ 这批 op 让**哪几类对象**失效。
+ *
+ * `StoragePort` 的契约只收 `Change[]`（「这类对象里这一条动过」），所以这里是 op 到
+ * `Change` 的**最小投影**：属性/别名/露面/标签都落在块的骨架上 ⇒ `blocks`；
+ * 锚点要分 marks/atoms，而 `anno` 的 value 恰好带着它是哪种（有 `kind` 字段的是原子）。
+ *
+ * ⚠️ 同 kind ＋ 同 id 去重：一次打字可能对一块报好几条 op，订阅者只需要重渲染一次。
+ */
+export function changesOf(ops: readonly Op[]): Change[] {
+  const out: Change[] = []
+  const seen = new Set<string>()
+  const add = (kind: Change['kind'], id: string): void => {
+    const key = `${kind}\u0000${id}`
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push({ kind, id })
+  }
+  for (const o of ops) {
+    if (o.e === 'anno') {
+      // value 只在 set 上带；delete 时拿不到形状 ⇒ 两类都报（多报一类只是多渲染一次）
+      const ann = o.value
+      const set = ann !== undefined
+      const isAtom = set && typeof ann === 'object' && 'kind' in ann
+      if (!set || !isAtom) add('marks', o.block)
+      if (!set || isAtom) add('atoms', o.block)
+      continue
+    }
+    add('blocks', o.e === 'block' ? o.id : o.block)
+  }
+  return out
+}
+
 export function createWorkspaceStore(port: StoragePort): WorkspaceStore {
   return {
     kind: port.kind,
     load: async () => judge(await port.load()),
 
-    async commit(ws, changes) {
+    async commit(ws, ops) {
       const batch: CommitBatch = {
-        // demo 的适配器只能报「整类对象都动过」；接 Tx/Changes 后这里换成真改动
-        changes: changes ?? WHOLE_LIBRARY_CHANGES,
+        // 一批 op ＝ 一个事务（写适配器的契约）；op 为空 ⇒ 这批不是事务产的（迁移期直写），
+        // 只能按整类提交——这是迁移期的真相，不是兜底
+        ops: [...ops],
+        changes: ops.length === 0 ? WHOLE_LIBRARY_CHANGES : changesOf(ops),
+        // demo 的适配器只能收整份字节；接 SQLite 后由写适配器把 op 落成行
         payload: JSON.stringify(ws),
         savedAt: ws.savedAt,
       }

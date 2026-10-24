@@ -100,6 +100,8 @@ export function createDeviceStore(port: StoragePort): DeviceStore {
 
     async save(state: DeviceState): Promise<DeviceSaveResult> {
       const batch: CommitBatch = {
+        // 设备偏好不是库内容：没有 op，如实报空（适配器只看 payload）
+        ops: [],
         changes: NO_KB_CHANGE,
         payload: JSON.stringify({ prefs: state.prefs, folded: state.folded } satisfies DeviceState),
         savedAt: Date.now(),
