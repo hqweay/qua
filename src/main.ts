@@ -28,7 +28,6 @@ import { dispatchKey, installKeydown, type DispatchEnv } from './core/dispatch.t
 import { applyDockVisibility, applyDockWidth, mountDockSlot } from './ui/dock.ts'
 import { DockBlocks } from './ui/dock-blocks.ts'
 import { bindDockResize } from './ui/dock-resize.ts'
-import { renderBackrefsInto, renderTodayInto, type DockContentDeps } from './ui/dock-content.ts'
 import { BacklinksView } from './ui/backlinks.ts'
 import { PropertiesPanel } from './ui/properties.ts'
 import { TagPanel } from './ui/tag-panel.ts'
@@ -42,6 +41,7 @@ import { renderFieldsEditor } from './ui/fields-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type PanelDeps } from './ui/panels.ts'
 import { devCommands, journalCommands, pageCommands, propsCommands, rootsFor, rootsForMany, tagTreeCommands, takenWhere, viewCommands, zoomCommands, type PageDeps } from './app/commands-impl.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
+import { setupDocks } from './app/wiring/docks.ts'
 import { HANDLERS } from './app/handlers.ts'
 import { darkQuery, resolveTheme } from './core/theme.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
@@ -353,65 +353,16 @@ window.addEventListener('resize', () => applyChrome())
 
 /* ------------------------------------------------------------ 槽内容 */
 
-/**
- * 槽内容依赖：**清单形式**列出装配层交给 UI 的能力，UI 不认识 `ws`／`registry`。
- * 全是读函数（库会被 `loadState` 整体替换，传值会拿到过期快照）。
- */
-const dockDeps: DockContentDeps = {
+const { renderDocks, addPin, unpinBlock, togglePin, setPins } = setupDocks({
   kb,
-  activeId: () => ws.activeId,
-  // 共享索引由 store 缓存（懒重建）⇒ 反链不再每次扫全库 atoms ＋ 遍历森林
-  openPage: (id) => void registry.invoke('core.page/open', { pageId: id }, 'menu'),
-  newPage: () => void registry.invoke('core.page/new', {}, 'dock'),
-}
-
-/** 重画两个侧槽（页列表变了、切换了当前页、或反链变了） */
-function renderDocks(): void {
-  // 先让钉住区处理「清单变了没有」：它只在增删时动 DOM，重画其余卡片不会碰它
-  dockPins?.left.render()
-  dockPins?.right.render()
-  renderTodayInto(dockDeps, dockLeft, dockPins ? { persistent: [dockPins.left.card] } : {})
-  renderBackrefsInto(dockDeps, dockRight, dockPins ? { persistent: [dockPins.right.card] } : {})
-}
-
-/** 钉住区的实例（在槽挂载之后创建；`renderDocks` 早于它就跳过） */
-let dockPins: { left: DockBlocks; right: DockBlocks } | null = null
-
-/* ------------------------------------------------------------ 钉住的块 */
-
-/**
- * 钉住的清单是**视图状态**：它只记「要看哪几个块 id」，块本身仍在森林里那一份。
- * 所以撤销/删除块都不需要动这份清单 —— 渲染时按 id 找不到就不画，块回来时它自己回来。
- */
-function addPin(side: 'left' | 'right', blockId: string): void {
-  if (!findInForest(ws.blocks, blockId)) return
-  const slot = prefs().dock[side]
-  if (!slot.pins.includes(blockId)) slot.pins.push(blockId)
-  if (!slot.open) {
-    slot.open = true
-    applyChrome()
-  }
-  renderDocks()
-  // 钉住的清单是**设备状态**（`qua.device`），不是库的内容
-  scheduleDeviceSave()
-  scheduleBadge()
-}
-
-function unpinBlock(side: 'left' | 'right', blockId: string): void {
-  const slot = prefs().dock[side]
-  const i = slot.pins.indexOf(blockId)
-  if (i < 0) return
-  slot.pins.splice(i, 1)
-  renderDocks()
-  scheduleDeviceSave()
-  scheduleBadge()
-}
-
-/** 同一个入口进 / 出（Shift+点块标走它：已钉住则取消） */
-function togglePin(side: 'left' | 'right', blockId: string): void {
-  if (prefs().dock[side].pins.includes(blockId)) unpinBlock(side, blockId)
-  else addPin(side, blockId)
-}
+  prefs,
+  applyChrome,
+  getWs: () => ws,
+  getRegistry: () => registry,
+  scheduleDeviceSave: () => scheduleDeviceSave(),
+  scheduleBadge: () => scheduleBadge(),
+  getSlots: () => ({ left: dockLeft, right: dockRight }),
+})
 
 /* ------------------------------------------------------------ chrome 组件 */
 
@@ -1872,10 +1823,10 @@ const dockBlocksDeps = (side: 'left' | 'right', slot: typeof dockLeft): Construc
   onAtomsLost: (labels) => app.toast(t('ui.toast.atomsLost', { labels: labels.join('、') }), 'warn'),
 })
 
-dockPins = {
+setPins({
   left: new DockBlocks(dockBlocksDeps('left', dockLeft)),
   right: new DockBlocks(dockBlocksDeps('right', dockRight)),
-}
+})
 
 /** 手柄宽度：起拖取**当前渲染宽度**（存的是 null 时也不能让槽先跳一下） */
 const bindResize = (side: 'left' | 'right', slot: typeof dockLeft): void => {
