@@ -929,7 +929,6 @@ mainEd = ed
 // 焦点在正文 → 活动编辑器＝正文；焦点在反链 footer 时由 BacklinksView 切过去
 editorEl.addEventListener('focusin', () => {
   ed = mainEd
-  scheduleProperties()
 })
 
 ed.events = {
@@ -953,7 +952,6 @@ ed.events = {
   // 划选气泡（顶部工具栏作废后的落点）：选区一变就重算「该不该在、装哪几颗」
   selChange: () => {
     refreshSelectionBar()
-    scheduleProperties()
   },
   slashQuery: (q, rect) => {
     if (q === null) {
@@ -992,7 +990,7 @@ ed.events = {
 
 let panels: ReturnType<typeof setupPanels>
 let diag: ReturnType<typeof setupDiagnostics>
-const { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, scheduleProperties, forgetFocusedBlock } = setupPanels({
+const { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, scheduleProperties } = setupPanels({
   blocks,
   kb,
   app,
@@ -1019,7 +1017,6 @@ panels = {
   renderTagPanel,
   renderQueryView,
   scheduleProperties,
-  forgetFocusedBlock,
 }
 
 document.addEventListener('mousedown', (e) => {
@@ -1122,7 +1119,6 @@ const dockBlocksDeps = (side: 'left' | 'right', slot: typeof dockLeft): Construc
   onFocus: (editor) => {
     ed = editor
     scheduleBadge()
-    scheduleProperties()
   },
   // 槽内编辑：只落盘与刷角标，**不重画槽**（重画会打断这一行的输入）
   onChange: () => {

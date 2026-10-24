@@ -99,7 +99,7 @@ const pinRootText = (page, side, blockId) =>
 
 /* ---------------------------------------------------------------- 敲字 */
 
-await check('T1 冷启动不抢光标；点块才聚焦，块属性只在聚焦块时出现；journal 的日期行不被写入', async () => {
+await check('T1 冷启动不抢光标；点块才聚焦；属性区跟着「这一屏是谁」而不是光标；journal 的日期行不被写入', async () => {
   const { ctx, page, errors } = await freshPage(browser, base)
   const before = await snap(page)
   const cold = await page.evaluate(() => {
@@ -107,19 +107,26 @@ await check('T1 冷启动不抢光标；点块才聚焦，块属性只在聚焦�
     const b = window.__qua.blocks()
     const editable = b.find((x) => !x.roles?.includes('journal'))
     const editor = document.getElementById('editor')
+    const props = document.getElementById('properties')
     return {
       id: editable?.id ?? '',
       focused: editor?.contains(document.activeElement) ?? false,
       sel: window.__qua.snapshot().selection ?? null,
-      propsHidden: document.getElementById('properties')?.hidden ?? null,
+      propsHidden: props?.hidden ?? null,
+      propsTarget: props?.dataset.targetBlockId ?? '',
+      activeId: window.__qua.snapshot().activeId,
     }
   })
   assert(cold.id, `冷启动应能找到第一个可编辑块：${JSON.stringify(cold)}`)
   assert(!cold.focused, `冷启动不该把焦点抢进编辑器：${JSON.stringify(cold)}`)
   assert(!cold.sel, `冷启动不该有模型选区：${JSON.stringify(cold)}`)
-  assert(cold.propsHidden === true, `冷启动没有聚焦块 ⇒ 属性区应收起：${JSON.stringify(cold)}`)
+  /**
+   * 冷启动是**日记流**（多根）⇒ 没有单一主体 ⇒ 属性区收起。
+   * 这与「有没有焦点」无关：哪怕光标进了某一天，日记流也不是「一个东西」。
+   */
+  assert(cold.propsHidden === true, `日记流（多根）没有单一主体 ⇒ 属性区应收起：${JSON.stringify(cold)}`)
 
-  // 真点一下那一行：这才是「用户让某一块聚焦」的动作
+  // 真点一下那一行：光标进编辑器（**不是**换当前对象）
   await page.locator(`.blk[data-block-id="${cold.id}"] > .tx`).click()
   await page.waitForTimeout(120)
   const clicked = await page.evaluate(() => {
@@ -134,8 +141,10 @@ await check('T1 冷启动不抢光标；点块才聚焦，块属性只在聚焦�
   })
   assert(clicked.focused, `点击块后编辑器应获得焦点：${JSON.stringify(clicked)}`)
   assert(clicked.sel?.aBlock === cold.id, `点击后选区应落在被点的块上：${JSON.stringify(clicked)}`)
-  assert(clicked.propsHidden === false, `有聚焦块 ⇒ 属性区应显示：${JSON.stringify(clicked)}`)
-  assert(clicked.propsTarget === cold.id, `属性区应画在聚焦块上：${JSON.stringify(clicked)}`)
+  assert(
+    clicked.propsHidden === true,
+    `只是把光标放进某个块，不会让属性区认它当主体（仍是多根的日记流）：${JSON.stringify(clicked)}`,
+  )
 
   await page.keyboard.type('真正敲进去的六个字')
   await page.keyboard.press('End')
@@ -153,46 +162,106 @@ await check('T1 冷启动不抢光标；点块才聚焦，块属性只在聚焦�
   const journalText = await page.evaluate(() => window.__qua.blocks().find((b) => b.roles?.includes('journal'))?.text)
   assert(journalText === '', `journal 行不该被写入：${JSON.stringify(journalText)}`)
   await ctx.close()
-  return `冷启动无焦点、无选区、属性区收起；点击后落点 ${cold.id.slice(-6)}；块数 ${after.blocks}，DOM 节点 ${after.domNodes}`
+  return `冷启动无焦点、无选区、日记流（多根）属性区收起；点击只挪光标不改主体；块数 ${after.blocks}，DOM 节点 ${after.domNodes}`
 })
 
-await check('T1b 属性目标随聚焦块变化；点到编辑区外收起；再点块恢复', async () => {
+await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移动不换、点空白不收起', async () => {
   const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
   const ids = await page.evaluate(() =>
     window.__qua
       .blocks()
       .filter((b) => !b.roles?.includes('journal'))
       .map((b) => b.id),
   )
-  assert(ids.length >= 2, `至少需要两个可编辑块才能测「换目标」：${JSON.stringify(ids)}`)
-  const [a, b] = ids
+  assert(ids.length >= 2, `至少需要两个可编辑块才能测「换主体」：${JSON.stringify(ids)}`)
+  /**
+   * ⚠️ 要拿**内容块**，不能拿页根：`create-def` 落在页块上只是「声明一个字段」
+   *    （`_fieldDefs` 加一条），页自己身上并没有这一行值 —— 行数差就造不出来。
+   *    页根就是 `activeId`，排除它还能顺带保证「主体会真的换」。
+   */
+  const pageId = await page.evaluate(() => window.__qua.snapshot().activeId)
+  const [a, b] = ids.filter((id) => id !== pageId)
+  assert(a && b, `需要两个非根的块：page=${pageId}｜ids=${JSON.stringify(ids)}`)
   const state = () =>
     page.evaluate(() => {
       const props = document.getElementById('properties')
-      return { hidden: props?.hidden ?? null, target: props?.dataset.targetBlockId ?? '' }
+      return {
+        hidden: props?.hidden ?? null,
+        target: props?.dataset.targetBlockId ?? '',
+        activeId: window.__qua.snapshot().activeId,
+      }
     })
 
+  // 打开一页 ⇒ 唯一根 ⇒ 主体＝页块（**不是**光标所在的块）
+  const onPage = await state()
+  assert(onPage.hidden === false, `单根视图（页）⇒ 属性区应显示：${JSON.stringify(onPage)}`)
+  assert(onPage.target === onPage.activeId, `主体应等于当前对象：${JSON.stringify(onPage)}`)
+
+  /**
+   * 给块 A 单加一条属性槽 —— 这样「面板画谁」就有了可测的高度差：
+   * 若跟着光标走，A 多一行、B 少一行，面板高度会变；跟当前对象走则一动不动。
+   *
+   * ⚠️ 不能随便取 `propDefs()[0]`：库里自带的「任务状态」被定成 **gutter 属性**
+   *    （`_uiPosition: 'block-left'`），它**本来就不进面板**（同一个值不开两个编辑面）。
+   *    所以这里显式新建一个面板属性，否则断言的会是「gutter 过滤生效」而不是「主体是谁」。
+   */
+  await page.evaluate((id) => {
+    window.__qua.invoke('core.props/create-def', { blockId: id, label: '主体测试属性', kind: 'text' })
+  }, a)
+  await page.waitForTimeout(200)
+
+  // ① 光标在页里的某块上动来动去 ⇒ 主体不变（这是本口径最要紧的一条）
   await page.locator(`.blk[data-block-id="${a}"] > .tx`).click()
   await page.waitForTimeout(120)
-  assert((await state()).target === a, `焦点在块 A ⇒ 属性目标应是 A：${JSON.stringify(await state())}`)
+  const atA = await state()
+  assert(atA.target === onPage.target, `光标点进块 A，主体仍是当前对象（不是 A）：${JSON.stringify(atA)}`)
 
   await page.locator(`.blk[data-block-id="${b}"] > .tx`).click()
   await page.waitForTimeout(120)
-  assert((await state()).target === b, `焦点换到块 B ⇒ 属性目标应跟着换：${JSON.stringify(await state())}`)
+  const atB = await state()
+  assert(atB.target === onPage.target, `光标换到块 B，主体依然不变：${JSON.stringify(atB)}`)
 
-  // 右上角（三槽外侧的边距/槽头）不是编辑区、也不是属性区 ⇒ 面板收起
+  /**
+   * ② 布局不跳：面板在正文**上方**，跟着光标走会让每次点/方向键都抽动阅读位置。
+   *    量真实几何：在两个块的属性行数**不同**的前提下，正文首行的屏幕位置必须一模一样。
+   */
+  const geometry = () =>
+    page.evaluate(() => {
+      const first = document.querySelector('#editor .blk')
+      return {
+        top: first ? Math.round(first.getBoundingClientRect().top) : -1,
+        panel: Math.round(document.getElementById('properties').getBoundingClientRect().height),
+        rows: document.querySelectorAll('.prop-row[data-prop-id]').length,
+      }
+    })
+  await page.locator(`.blk[data-block-id="${a}"] > .tx`).click()
+  await page.waitForTimeout(120)
+  const geoA = await geometry()
+  await page.locator(`.blk[data-block-id="${b}"] > .tx`).click()
+  await page.waitForTimeout(120)
+  const geoB = await geometry()
+  assert(geoA.top === geoB.top, `光标换行不该抽动布局：正文首行 top ${geoA.top} → ${geoB.top}`)
+  assert(geoA.panel === geoB.panel, `面板高度也不该随光标变：${geoA.panel} → ${geoB.panel}`)
+  assert(geoA.rows === 0, `页块自己没有那个属性 ⇒ 面板里不该出现块 A 的那一行：${JSON.stringify(geoA)}`)
+
+  // ③ 点到编辑区外：面板**不**收起（它不是「焦点面板」）
   await page.mouse.click(8, 8)
   await page.waitForTimeout(120)
   const outside = await state()
-  assert(outside.hidden === true, `点到编辑区外 ⇒ 属性区应收起：${JSON.stringify(outside)}`)
+  assert(outside.hidden === false && outside.target === onPage.target, `点到编辑区外，主体不变、面板不收起：${JSON.stringify(outside)}`)
 
-  await page.locator(`.blk[data-block-id="${a}"] > .tx`).click()
-  await page.waitForTimeout(120)
-  const back = await state()
-  assert(back.hidden === false && back.target === a, `再点块 ⇒ 属性区恢复并画在该块上：${JSON.stringify(back)}`)
+  // ④ 聚焦到块 A ⇒ 主体换成 A（这就是「不想 zoom 却要改某块属性」的那一下点击）
+  await page.locator(`.blk[data-block-id="${a}"] .marker`).click()
+  await page.waitForTimeout(200)
+  const zoomed = await state()
+  assert(zoomed.activeId === a, `点块标应把它放上台面（当前对象＝A）：${JSON.stringify(zoomed)}`)
+  assert(zoomed.hidden === false && zoomed.target === a, `聚焦后主体换成 A：${JSON.stringify(zoomed)}`)
+  const zoomedRows = await page.evaluate(() => document.querySelectorAll('.prop-row[data-prop-id]').length)
+  assert(zoomedRows === 1, `聚焦到 A 之后，它自己那条属性才出现在面板里：${zoomedRows}`)
 
   await ctx.close()
-  return `A→B 跟随、外侧点击收起、再点 A 恢复（${a.slice(-6)} / ${b.slice(-6)}）`
+  return `页＝主体；光标 A→B 主体不变、布局不跳（top ${geoA.top} / 面板 ${geoA.panel}px）；点外侧不收起；点块标后主体＝A 且其属性行出现`
 })
 
 await check('T2 Enter 拆块 ／ Backspace 合并 ／ Tab 缩进 ／ Shift+Tab 还原', async () => {
