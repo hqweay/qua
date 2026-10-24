@@ -1229,6 +1229,8 @@ badge.update()
  */
 function appendMoreFeed(): boolean {
   const roots = mainEd.doc.roots
+  // 增量加载只在单列流成立：横排／网格的段数由打开它的入口定死，「往下滚」不是「要更旧的天」
+  if (mainEd.layout !== 'column') return false
   if (roots.length <= 1 || !roots.every((r) => isJournal(r))) return false
   const active = activeBlock()
   if (!isJournal(active)) return false

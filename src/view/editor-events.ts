@@ -123,7 +123,7 @@ export interface EditorBridge {
    * ⚠️ 返回 false 表示「这里不该由我处理」（例如点中的其实是个块）——调用方据此
    *    决定是否 preventDefault。**不返回布尔就无法区分「没建」与「建了」**。
    */
-  clickEmptyArea: (clientY: number) => boolean
+  clickEmptyArea: (clientY: number, clientX: number) => boolean
   /** 勾选 / 取消待办（点方框）*/
   toggleTodo: (blockId: string) => void
   /** 任何模型变化 */
@@ -330,7 +330,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     if (!inBlock && !inCrumb) {
       // 块选区刚拖出来时，mouseup 后的 click 可能落在空白区 ⇒ 不能当成「点空白建块」
       if (br.hasBlockSelection()) return
-      if (br.clickEmptyArea(e.clientY)) e.preventDefault()
+      if (br.clickEmptyArea(e.clientY, e.clientX)) e.preventDefault()
       return
     }
 

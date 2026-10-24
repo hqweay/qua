@@ -2061,7 +2061,7 @@ await check('T54 聚焦日记块后日期仍可见：它自己是 depth 0 的只
   })
   await page.waitForTimeout(250)
   const view = await page.evaluate(() => {
-    const rows = [...document.querySelectorAll('#editor > .blk')]
+    const rows = [...document.querySelectorAll('#editor > .sec > .blk')]
     const head = rows[0]
     return {
       roots: rows.length,
@@ -2088,8 +2088,8 @@ await check('T54 聚焦日记块后日期仍可见：它自己是 depth 0 的只
   await page.evaluate(() => window.__qua.invoke('core.journal/today'))
   await page.waitForTimeout(200)
   const feed = await page.evaluate(() => ({
-    heads: [...document.querySelectorAll('#editor > .blk[data-depth="0"]')].map((el) => el.dataset.role ?? ''),
-    dates: [...document.querySelectorAll('#editor > .blk[data-depth="0"]')].map((el) => el.querySelector('.tx')?.dataset.ph ?? ''),
+    heads: [...document.querySelectorAll('#editor > .sec > .blk[data-depth="0"]')].map((el) => el.dataset.role ?? ''),
+    dates: [...document.querySelectorAll('#editor > .sec > .blk[data-depth="0"]')].map((el) => el.querySelector('.tx')?.dataset.ph ?? ''),
   }))
   assert(feed.heads.every((r) => r.includes('journal')), `流里每段段头都是日记块：${JSON.stringify(feed)}`)
   assert(feed.dates.every((d) => d.length > 0), `流里每段都显示日期：${JSON.stringify(feed)}`)
@@ -2106,7 +2106,7 @@ await check('T55 载入假数据：落点是日记就装日记流（今日在顶
   await page.evaluate(() => window.__qua.loadState('seed'))
   await page.waitForTimeout(300)
   const after = await page.evaluate(() => {
-    const rows = [...document.querySelectorAll('#editor > .blk')]
+    const rows = [...document.querySelectorAll('#editor > .sec > .blk')]
     const heads = rows.filter((el) => el.dataset.depth === '0')
     return {
       journalView: window.__qua.ctxKeys().journalView,
@@ -2193,7 +2193,7 @@ await check('T57 日记流里 zoom 进某块再「后退」⇒ 回到**日记流
   await page.waitForTimeout(260)
 
   const feedAtStart = await page.evaluate(() => ({
-    roots: [...document.querySelectorAll('#editor > .blk')].filter((el) => el.dataset.depth === '0').length,
+    roots: [...document.querySelectorAll('#editor > .sec > .blk')].filter((el) => el.dataset.depth === '0').length,
     journalView: window.__qua.ctxKeys().journalView,
   }))
   assert(feedAtStart.journalView === true, `前置：落点应是日记：${JSON.stringify(feedAtStart)}`)
@@ -2208,7 +2208,7 @@ await check('T57 日记流里 zoom 进某块再「后退」⇒ 回到**日记流
   })
   await page.waitForTimeout(200)
   const afterZoom = await page.evaluate(() => ({
-    roots: [...document.querySelectorAll('#editor > .blk')].filter((el) => el.dataset.depth === '0').length,
+    roots: [...document.querySelectorAll('#editor > .sec > .blk')].filter((el) => el.dataset.depth === '0').length,
   }))
   assert(afterZoom.roots === 1, `zoom 后视图应只剩一块：${JSON.stringify(afterZoom)}`)
 
@@ -2216,7 +2216,7 @@ await check('T57 日记流里 zoom 进某块再「后退」⇒ 回到**日记流
   await page.evaluate(() => window.__qua.invoke('core.history/back'))
   await page.waitForTimeout(240)
   const back = await page.evaluate(() => ({
-    roots: [...document.querySelectorAll('#editor > .blk')].filter((el) => el.dataset.depth === '0').length,
+    roots: [...document.querySelectorAll('#editor > .sec > .blk')].filter((el) => el.dataset.depth === '0').length,
     journalView: window.__qua.ctxKeys().journalView,
     journalDate: window.__qua.ctxKeys().journalDate,
   }))
@@ -2237,7 +2237,7 @@ await check('T57b 聚焦今天的 journal 块 ⇒ 只装单日；后退回 feed�
 
   const roots = () =>
     page.evaluate(() =>
-      [...document.querySelectorAll('#editor > .blk[data-depth="0"]')].map((el) => el.dataset.blockId),
+      [...document.querySelectorAll('#editor > .sec > .blk[data-depth="0"]')].map((el) => el.dataset.blockId),
     )
   const before = await roots()
   const dayId = await page.evaluate(() => window.__qua.snapshot().activeId)
@@ -2622,7 +2622,7 @@ await check('T28 日记流＝今日在顶＋存在的历史天；历史天可编
 
   // ① 冷启动是 N 个真实 section：today + 种子里存在的 -1/-2（**不造空天**）
   const feed = await page.evaluate(() => {
-    const roots = [...document.querySelectorAll('#editor > .blk[data-role="journal"]')]
+    const roots = [...document.querySelectorAll('#editor > .sec > .blk[data-role="journal"]')]
     return {
       roots: roots.length,
       dates: roots.map((el) => el.querySelector('.tx')?.dataset.ph ?? ''),
@@ -2641,7 +2641,7 @@ await check('T28 日记流＝今日在顶＋存在的历史天；历史天可编
 
   // ② 在**最早的一段**里敲字：模型里是那段子块的正文，段头仍是空（不写日期）
   const oldestChild = await page.evaluate(() => {
-    const roots = [...document.querySelectorAll('#editor > .blk[data-role="journal"]')]
+    const roots = [...document.querySelectorAll('#editor > .sec > .blk[data-role="journal"]')]
     const last = roots[roots.length - 1]
     return last?.nextElementSibling?.dataset.blockId ?? ''
   })
@@ -2650,7 +2650,7 @@ await check('T28 日记流＝今日在顶＋存在的历史天；历史天可编
   await page.keyboard.type('历史编辑')
   const edited = await page.evaluate(() => ({
     hasText: window.__qua.blocks().some((b) => b.text.includes('历史编辑')),
-    rootTexts: [...document.querySelectorAll('#editor > .blk[data-role="journal"]')].map((el) => el.querySelector('.tx')?.textContent ?? ''),
+    rootTexts: [...document.querySelectorAll('#editor > .sec > .blk[data-role="journal"]')].map((el) => el.querySelector('.tx')?.textContent ?? ''),
   }))
   assert(edited.hasText, '历史天的子块应能编辑')
   assert(edited.rootTexts.every((t) => t === ''), `journal 段头的正文应保持为空：${JSON.stringify(edited.rootTexts)}`)
@@ -2660,7 +2660,7 @@ await check('T28 日记流＝今日在顶＋存在的历史天；历史天可编
   await page.evaluate(() => window.__qua.invoke('core.journal/today'))
   const persisted = await page.evaluate(() => ({
     hasText: window.__qua.blocks().some((b) => b.text.includes('历史编辑')),
-    roots: document.querySelectorAll('#editor > .blk[data-role="journal"]').length,
+    roots: document.querySelectorAll('#editor > .sec > .blk[data-role="journal"]').length,
   }))
   assert(persisted.hasText, '切页再回来，历史天的编辑应还在（syncSections 按 root id 写回）')
   assert(persisted.roots === 3, `回今日应重新装 3 段：${JSON.stringify(persisted)}`)
@@ -2671,12 +2671,12 @@ await check('T28 日记流＝今日在顶＋存在的历史天；历史天可编
 
 await check('T29 滚到底加载更早的日记（只加载存在的天）', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  const before = await page.evaluate(() => document.querySelectorAll('#editor > .blk[data-role="journal"]').length)
+  const before = await page.evaluate(() => document.querySelectorAll('#editor > .sec > .blk[data-role="journal"]').length)
   const after = await page.evaluate(() => {
     const el = document.querySelector('#scroll')
     el.scrollTop = el.scrollHeight
     el.dispatchEvent(new Event('scroll'))
-    const roots = [...document.querySelectorAll('#editor > .blk[data-role="journal"]')]
+    const roots = [...document.querySelectorAll('#editor > .sec > .blk[data-role="journal"]')]
     return {
       roots: roots.length,
       dates: roots.map((x) => x.querySelector('.tx')?.dataset.ph ?? ''),
@@ -2689,6 +2689,93 @@ await check('T29 滚到底加载更早的日记（只加载存在的天）', asy
   assert(new Set(after.dates).size === after.dates.length, `日记流不应出现重复的天：${JSON.stringify(after.dates)}`)
   await ctx.close()
   return `滚到底 ${before} → ${after.roots} 段（存在的天）`
+})
+
+await check('T93 段排列：行序列包进 .sec；row 下段是列，点列空白＝那天的最后一个子块，加载只在 column', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+
+  // ① column（缺省）：段物质化——每个 .sec 的第一行是段根（depth 0），段头 id 写在 data-sec 上
+  const secs = await page.evaluate(() => {
+    const editor = document.getElementById('editor')
+    return {
+      layout: editor?.dataset.layout ?? '',
+      list: [...editor.querySelectorAll(':scope > .sec')].map((sec) => ({
+        hasMark: sec.dataset.sec !== undefined,
+        root: sec.dataset.sec,
+        headDepth: sec.firstElementChild?.dataset.depth ?? '',
+        rows: sec.querySelectorAll('.blk').length,
+      })),
+    }
+  })
+  assert(secs.layout === 'column', `缺省布局应是 column：${JSON.stringify(secs.layout)}`)
+  assert(secs.list.length === 3, `冷启动 3 天＝3 段：${JSON.stringify(secs.list.length)}`)
+  assert(secs.list.every((s) => s.hasMark && s.headDepth === '0' && s.rows > 1), `每段应是「段根＋子块」：${JSON.stringify(secs.list)}`)
+
+  // ② 切 row：段变成横向的列
+  await page.evaluate(() => window.__qua.__editor.setLayout('row'))
+  const row = await page.evaluate(() => {
+    const editor = document.getElementById('editor')
+    const rects = [...editor.querySelectorAll(':scope > .sec')].map((el) => el.getBoundingClientRect())
+    const scroll = document.getElementById('scroll')
+    return {
+      layout: editor.dataset.layout,
+      lefts: rects.map((r) => Math.round(r.left)),
+      sameTop: rects.every((r) => Math.abs(r.top - rects[0].top) < 2),
+      scrollable: scroll.scrollWidth > scroll.clientWidth,
+    }
+  })
+  assert(row.layout === 'row', `data-layout 应写上：${JSON.stringify(row.layout)}`)
+  assert(row.lefts.length === 3 && row.lefts.every((l, i) => i === 0 || l > row.lefts[i - 1]), `三列应横向排开：${JSON.stringify(row.lefts)}`)
+  assert(row.sameTop, `列应顶对齐：${JSON.stringify(row.lefts)}`)
+  assert(row.scrollable, `三列应横向溢出（#scroll 承担横向滚动）：${JSON.stringify(row.scrollable)}`)
+
+  // ③ 点第一列（今天）的列内底部空白 ⇒ 新块落在**那一天**下面，别的列不动
+  const target = await page.evaluate(() => {
+    const sec = document.querySelector('#editor > .sec')
+    const rows = [...sec.querySelectorAll('.blk')]
+    const lastRect = rows[rows.length - 1].getBoundingClientRect()
+    const colRect = sec.getBoundingClientRect()
+    return { x: Math.round(colRect.left + colRect.width / 2), y: Math.round(lastRect.bottom + 40) }
+  })
+  const beforeCols = await page.evaluate(() => [...document.querySelectorAll('#editor > .sec')].map((s) => s.querySelectorAll('.blk').length))
+  await page.mouse.click(target.x, target.y)
+  const afterClick = await page.evaluate((secId) => {
+    const sec = [...document.querySelectorAll('#editor > .sec')].find((s) => s.dataset.sec === secId)
+    const rows = [...sec.querySelectorAll('.blk')]
+    const lastRow = rows[rows.length - 1]
+    const root = window.__qua.__editor.doc.roots.find((r) => r.id === secId)
+    return {
+      perCol: [...document.querySelectorAll('#editor > .sec')].map((s) => s.querySelectorAll('.blk').length),
+      lastText: lastRow.querySelector('.tx')?.textContent ?? '',
+      lastIsTail: root.children[root.children.length - 1]?.id === lastRow.dataset.blockId,
+      depth: Number(lastRow.dataset.depth),
+    }
+  }, secs.list[0].root)
+  assert(JSON.stringify(afterClick.perCol) === JSON.stringify(beforeCols.map((n, i) => (i === 0 ? n + 1 : n))), `新块应只落在被点的列：${JSON.stringify(beforeCols)} → ${JSON.stringify(afterClick.perCol)}`)
+  assert(afterClick.lastText === '' && afterClick.lastIsTail && afterClick.depth === 1, `点列空白应建那天的最后一个子块：${JSON.stringify(afterClick)}`)
+
+  // ④ 增量加载只在 column：row 下滚到底不加段；切回 column 才加载
+  await page.evaluate(() => {
+    window.__qua.__editor.setLayout('row')
+    const el = document.getElementById('scroll')
+    el.scrollTop = el.scrollHeight
+    el.dispatchEvent(new Event('scroll'))
+  })
+  await page.waitForTimeout(200)
+  const rowRoots = await page.evaluate(() => document.querySelectorAll('#editor > .sec').length)
+  await page.evaluate(() => {
+    window.__qua.__editor.setLayout('column')
+    const el = document.getElementById('scroll')
+    el.scrollTop = el.scrollHeight
+    el.dispatchEvent(new Event('scroll'))
+  })
+  await page.waitForTimeout(200)
+  const colRoots = await page.evaluate(() => document.querySelectorAll('#editor > .sec').length)
+  assert(rowRoots === 3, `row 下滚到底不应追加天：${rowRoots}`)
+  assert(colRoots > rowRoots, `切回 column 后滚到底才追加：${rowRoots} → ${colRoots}`)
+
+  await ctx.close()
+  return `3 段物质化；row 三列横排、点列空白落当天；加载仅 column`
 })
 
 await check('T34 反链 footer 可原地编辑；同一源块在正文与反链两个实例同步（共享 store）', async () => {
@@ -3604,7 +3691,7 @@ await check('T50 导航历史：⌘[ 后退 / ⌘] 前进跨页可走；新导�
   const backBoot = await page.evaluate(() => ({
     id: window.__qua.snapshot().activeId,
     date: window.__qua.snapshot().journalDate,
-    head: document.querySelector('#editor > .blk[data-depth="0"]')?.dataset.blockId ?? '',
+    head: document.querySelector('#editor > .sec > .blk[data-depth="0"]')?.dataset.blockId ?? '',
   }))
   assert(backBoot.id === info.bootId, `第二次后退应回到冷启动落点：${JSON.stringify({ backBoot, boot: info.bootId })}`)
   assert(backBoot.date !== '' && backBoot.head === backBoot.id, `退回的应是今日日记本身（首行＝它自己）：${JSON.stringify(backBoot)}`)

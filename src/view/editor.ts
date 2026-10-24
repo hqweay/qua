@@ -153,7 +153,15 @@ export interface ViewOpts {
    * 所以那一类实例关掉自动重载，改由承载它的组件防抖后显式 `reloadFromStore()`。
    */
   autoReload?: boolean
+  /**
+   * **段的排列**（视图配置轴，不是导航）：`column`（单列流，缺省）｜`row`（段横排）｜`grid`（折行网格）。
+   * 只改「段怎么摆」，不改「段是什么」——DOM 形状对所有 layout 一致（见 `renderRows` 的 `.sec`）。
+   */
+  layout?: SecLayout
 }
+
+/** 段的排列：`row`/`grid` 之下「点空白」按列归属段；虚拟化只在 `column` 下开（横排不虚拟化） */
+export type SecLayout = 'column' | 'row' | 'grid'
 
 export interface ViewEvents {
   /** 任何模型变化（持久化 + 角标刷新） */
@@ -278,6 +286,11 @@ export class BlockEditor {
   blankArea: HTMLElement
   private allowBlankCreate: boolean
   private allowRootRemove: boolean
+  /** 段的排列（视图配置；`data-layout` 供 CSS 选择，见 `setLayout`）；装配层按它挡住只属单列的行为 */
+  private _layout: SecLayout = 'column'
+  get layout(): SecLayout {
+    return this._layout
+  }
   /**
    * 写入事务入口（装配层注入，见 `Run`）。
    *
@@ -296,6 +309,7 @@ export class BlockEditor {
     this.allowRootRemove = o.allowRootRemove !== false
     this.write = o.write
     this.doc = o.doc
+    this.setLayout(o.layout ?? 'column')
     /**
      * **冷启动也必须有 root id**。
      *
@@ -382,13 +396,30 @@ export class BlockEditor {
     this.ancestors = ancestorsByBlockId(this.rows())
   }
 
+  /**
+   * 切换段的排列。只动一个属性 ＋ 一个 DOM 属性：DOM 形状（`.sec` 包裹）对所有 layout
+   * 一致，布局差异全部由 CSS（`#editor[data-layout]`）承担，不需要重渲染。
+   */
+  setLayout(mode: SecLayout): void {
+    this._layout = mode
+    this.container.dataset.layout = mode
+    this.applySecCols()
+  }
+
+  /** grid 的列数由段数推导（`--sec-cols` 供 CSS 的 `repeat()`）；其余 layout 无意义，清掉 */
+  private applySecCols(): void {
+    if (this.layout === 'grid') this.container.style.setProperty('--sec-cols', String(Math.max(1, this.doc.roots.length)))
+    else this.container.style.removeProperty('--sec-cols')
+  }
+
   renderAll(): void {
     this.container.textContent = ''
     this.mounted.clear()
     this.rebuildAncestors()
     // DOM 重建 ⇒ `data-caret` 全丢，缓存也失效（否则 `markCaret` 会因为「id 没变」而跳过）
     this.caretMarks = ''
-    if (this.virtualize) {
+    // 虚拟化只属单列流：row/grid 的段要完整的盒子才能当列用，窗口切片会把列切残
+    if (this.virtualize && this._layout === 'column') {
       this.applyWindow()
       return
     }
@@ -403,13 +434,28 @@ export class BlockEditor {
    *
    * gutter 字段在**循环外**按整批算一次：每行各自扫库会让整屏渲染退化成 O(n²)，
    * 而这种退化不报错、只是越用越慢。
+   *
+   * **段物质化**：连续的行按段包进 `.sec[data-sec]`——depth 0 的行开新段。
+   * `.sec` 只表达段边界，不表达层级（行在段内仍是扁平的 ＋ `data-depth`）；
+   * 缺省布局下它是 `display: contents`（零几何影响），`row`/`grid` 才由 CSS 给它盒子。
+   * ⚠️ 虚拟化的窗口切片可能从段中间开始：那一段的 `.sec` 没有段根行，
+   *    `data-sec` 落空串——分割线与「点空白归段」的判据都依赖段根在场。
    */
   private renderRows(rows: readonly VisibleRow[]): void {
     const gutters = gutterFieldsFor(
       rows.map((r) => r.block),
       this.store.blocks,
     )
-    for (const r of rows) this.container.appendChild(this.makeBlockEl(r, gutters.get(r.block.id)))
+    let sec: HTMLElement | null = null
+    for (const r of rows) {
+      if (r.depth === 0 || sec === null) {
+        sec = document.createElement('div')
+        sec.className = 'sec'
+        sec.dataset.sec = r.depth === 0 ? r.block.id : ''
+        this.container.appendChild(sec)
+      }
+      sec.appendChild(this.makeBlockEl(r, gutters.get(r.block.id)))
+    }
   }
 
   /** 所有模型变化统一出口：通知其他视图（共享 store），再通知装配层持久化/刷新 */
@@ -2490,21 +2536,40 @@ export class BlockEditor {
    *    `roots[1]`（死区），一下次保存即丢。之后改成「当前对象的子块」。
    *    现在有 N 段（日记流）：点击点在**整个文档最后一行之下**，视觉上属于**最后一段**
    *    （日记流里是最早的一天）⇒ 建它的最后一个子块。N=1 时与旧行为完全一致。
+   *    `row`/`grid` 排列下段是**列**：先按点击的横向位置找列（`.sec` 的盒子），
+   *    再对**那一段**做「最后一行之下」判据——点哪列的空白就落到哪天。
    *
-   * 落点判据（`clientY`）：只在**最后一行可见块的底边之下**才算空白 —— 否则
+   * 落点判据（`clientY`）：只在**目标段最后一行可见块的底边之下**才算空白 —— 否则
    * `#scroll` 里与正文同高的左右留白也会误触。
    *
    * ⚠️ 虚拟化下最后一行可能没挂 DOM ⇒ 取不到 rect 时**放行**（宁可建块，也别「点了没反应」）。
-   * ⚠️ 段与段之间的「缝」暂不单独建块（见 `待定-日记流.md`）；首版只认全局底部。
+   * ⚠️ 段与段之间的「缝」暂不单独建块（见 `待定-日记流.md`）；首版只认全局底部（column）
+   *    与列内底部（row/grid）。
    */
-  clickEmptyArea(clientY: number): boolean {
+  clickEmptyArea(clientY: number, clientX = 0): boolean {
     if (!this.allowBlankCreate) return false
     this.clearBlockSelection()
     const rows = this.rows()
-    const last = rows[rows.length - 1]
-    const root = this.doc.roots[this.doc.roots.length - 1]
-    if (!last || !root) return false
-    const lastEl = this.blockEl(last.block.id)
+    /** `row`/`grid`：先找列。列不存在（点在列缝／边距上）⇒ 不建块 */
+    let secId = ''
+    if (this.layout !== 'column') {
+      const sec = [...this.container.querySelectorAll<HTMLElement>('.sec')].find((el) => {
+        const r = el.getBoundingClientRect()
+        return r.width > 0 && clientX >= r.left && clientX <= r.right
+      })
+      secId = sec?.dataset.sec ?? ''
+      if (secId === '') return false
+    }
+    const root = secId ? this.doc.roots.find((r) => r.id === secId) : this.doc.roots[this.doc.roots.length - 1]
+    if (!root) return false
+    // 目标段的最后一行（column ＝ 全文档最后一行；row/grid ＝ 该列最后一行）
+    let last: VisibleRow | undefined
+    let cur = ''
+    for (const r of rows) {
+      if (r.depth === 0) cur = r.block.id
+      if (secId === '' || cur === secId) last = r
+    }
+    const lastEl = last ? this.blockEl(last.block.id) : null
     if (lastEl && clientY < lastEl.getBoundingClientRect().bottom) return false
 
     const before = this.snap()
@@ -2623,7 +2688,7 @@ export class BlockEditor {
       toggleChildrenCollapse: (id) => this.toggleChildrenCollapse(id),
       toggleTodo: (id) => this.toggleTodo(id),
       blankArea: this.blankArea,
-      clickEmptyArea: (y) => this.clickEmptyArea(y),
+      clickEmptyArea: (y, x) => this.clickEmptyArea(y, x),
       onChange: () => this.emitChange('text'),
       onMounted: () => this.events.mounted?.(),
     })
@@ -2751,6 +2816,7 @@ export class BlockEditor {
     this.mouseSel = null
     this.container.classList.remove('blocksel-drag')
     this.viewRootIds = doc.roots.map((b) => b.id)
+    this.applySecCols()
     /**
      * 共享 store：marks/atoms 是库级共享数组。调用方通常传 `store.marks/atoms`（同一引用）；
      * 换库/独立实例时才需要替换 store 的内容。**不再 clear undo**——undo 是 store 全局的，

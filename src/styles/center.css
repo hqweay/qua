@@ -72,6 +72,48 @@
   outline: none;
 }
 /*
+  **段的排列**：每个 section 根的行序列被包进 `.sec`（段边界是 DOM 的一层，见 editor 的
+  `renderRows`）。缺省（column，单列流）下 `.sec` 是 `display: contents`——零几何影响，
+  只是给「分割线归段」一个判定点；`row`／`grid` 才给段真正的盒子。
+
+  ⚠️ `row`／`grid` 不虚拟化（装配层负责）：段要有完整的盒子才能当列用。
+  ⚠️ grid 的列数由段数推导：`--sec-cols` 由编辑器写（`applySecCols`）。
+*/
+#editor .sec {
+  display: contents;
+}
+#doc:has(> #editor[data-layout='row']),
+#doc:has(> #editor[data-layout='grid']) {
+  /* 横排／网格要吃满一行：measure 收窄是单列流的对齐约束，这里不再适用 */
+  width: calc(100% - var(--ui-doc-pad) * 2);
+}
+#editor[data-layout='row'] {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ui-gap-6);
+  /* 列宽＝文档 measure 的宽度档；横向滚动由 `#scroll` 承担 */
+  width: max-content;
+  min-width: 100%;
+}
+#editor[data-layout='row'] > .sec {
+  display: block;
+  flex: 0 0 min(var(--ui-editor-w), 80vw);
+}
+#editor[data-layout='grid'] {
+  display: grid;
+  grid-template-columns: repeat(var(--sec-cols, 2), minmax(0, 1fr));
+  gap: var(--ui-gap-6);
+}
+#editor[data-layout='grid'] > .sec {
+  display: block;
+  min-width: 0;
+}
+/* 「还能往下写」的气口是单列流的底部元素；横排／网格下它会变成一个 flex/grid 项，关掉 */
+#editor[data-layout='row']::after,
+#editor[data-layout='grid']::after {
+  display: none;
+}
+/*
   **空白处建块的可发现性**。
   行为在 `view/editor-events.ts`：点「最后一行底边之下」的空白 ⇒ 建一个顶层空块。
 

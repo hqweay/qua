@@ -455,9 +455,12 @@
 }
 /*
   日记流：多天同屏时，每一天是一段，日期行是段头。
-  只用 border-top（不写 padding/margin）——不破坏 「间距所有权归容器」。
+  分割线画在**段**的深度 0 行上（`.sec` 包裹后行不再是容器的直接子元素，
+  `:first-child` 的旧判据失效）；只 column（单列流）画——row/grid 下段是列，
+  列头再画一条线是重复表达。只用 border-top（不写 padding/margin）——
+  不破坏「间距所有权归容器」。
 */
-.blk[data-depth='0'][data-role~='journal']:not(:first-child) {
+[data-layout='column'] .sec:not(:first-child) > .blk[data-depth='0'][data-role~='journal'] {
   border-top: 1px solid var(--ui-border-subtle);
 }
 .blk.drag-src {
