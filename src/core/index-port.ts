@@ -7,7 +7,8 @@
  *   但界面上看起来只是偶尔少一条」的静默错误。
  *
  * ⚠️ 索引里存的是**块的活引用**，不是拷贝：块是可变的（正文可经 `writeBlockText` 就地改写），
- *    所以索引一旦可能过期就必须**整体重建**，不能拿着旧条目修补（那会得到两份分叉的真相）。
+ *    所以「块的内容变了」不需要动索引（活引用自动可见），需要动的只有**结构**（谁在场、住哪页、
+ *    谁认领哪个名字）——按 op 修补的正是这一部分（`applyOps`）。
  * ⚠️ 本文件零 DOM、零持久化：它只吃「森林 ＋ 原子」，所以能直接单测。
  */
 import type { Atom } from './annotations.ts'
@@ -16,7 +17,7 @@ import { walkForest } from './walk.ts'
 import { normalizeAlias } from './alias.ts'
 import { journalDate, isJournal } from './journal.ts'
 import { tagIdsOf } from './tags.ts'
-import type { Change } from './storage/port.ts'
+import type { Op } from './kb/types.ts'
 
 /**
  * 一份索引。五张表各答一类问题，**全是派生**：
@@ -61,6 +62,14 @@ export interface Index {
   journals: Map<string, string>
   /** 块 id → 它所在的**顶层块** id（含自己）—— 反链按来源页聚合要用 */
   pageOf: Map<string, string>
+  /**
+   * 内部簿记：anno id → 它此刻贡献的那条边（**不进 fingerprint**）。
+   *
+   * 为什么必须有它：`incoming` 的单位是「target → (源块 → 次数)」，不按 anno id 键控——
+   * 一条引用**改了指向**时，摘掉旧边需要知道它原来指哪，而 op 只带新值。
+   * 全量重建天然有这个信息（重扫所有原子）；增量路径靠这张表补齐。
+   */
+  edgeByAnno: Map<string, { target: string; source: string }>
 }
 
 function emptyIndex(): Index {
@@ -71,6 +80,7 @@ function emptyIndex(): Index {
     tags: new Map(),
     journals: new Map(),
     pageOf: new Map(),
+    edgeByAnno: new Map(),
   }
 }
 
@@ -83,91 +93,286 @@ function emptyIndex(): Index {
 export function rebuild(forest: readonly Block[], atoms: readonly Atom[]): Index {
   const idx = emptyIndex()
 
-  // ① 块表 / 标签表 / 日记表 / 父页表（一次先序遍历；与增量修补同一口径）
-  for (const b of forest) indexSubtree(idx, b)
+  // ① 块表 / 标签表 / 日记表 / 父页表 / 成员表（一次先序遍历；与增量修补同一口径）
+  for (const b of forest) indexSubtree(idx, b, b.id)
 
   // ② 入向边（只有引用：标签是块级归属，不占正方位点）
   addEdges(idx, atoms)
 
-  // ③ 标签成员（数据源是块上的 `_tags`）
-  addTagMembers(idx, forest)
-
   return idx
 }
 
-/** 把原子的引用累加进 `incoming` */
-function addEdges(idx: Index, atoms: readonly Atom[]): void {
-  for (const a of atoms) {
-    const target = a.target?.id
-    if (!target) continue
-    if (a.kind !== 'page') continue
+/** 把一条引用累加进 `incoming`（`delta` 负值＝摘边；计数到 0 就把空壳摘干净） */
+function bump(idx: Index, target: string, source: string, delta: 1 | -1): void {
+  if (delta > 0) {
     const perSource = idx.incoming.get(target)
-    if (perSource) perSource.set(a.blockId, (perSource.get(a.blockId) ?? 0) + 1)
-    else idx.incoming.set(target, new Map([[a.blockId, 1]]))
+    if (perSource) perSource.set(source, (perSource.get(source) ?? 0) + 1)
+    else idx.incoming.set(target, new Map([[source, 1]]))
+    return
+  }
+  const perSource = idx.incoming.get(target)
+  if (!perSource) return
+  const n = (perSource.get(source) ?? 0) - 1
+  if (n > 0) perSource.set(source, n)
+  else {
+    perSource.delete(source)
+    if (perSource.size === 0) idx.incoming.delete(target)
   }
 }
 
-/** 把块上的标签归属累加进 `tagMembers`（一次先序遍历） */
-function addTagMembers(idx: Index, forest: readonly Block[]): void {
-  walkForest(forest, (b) => {
-    for (const tagId of tagIdsOf(b)) {
-      const members = idx.tagMembers.get(tagId)
-      if (members) members.add(b.id)
-      else idx.tagMembers.set(tagId, new Set([b.id]))
-    }
-  })
+/** 把原子的引用累加进 `incoming`（登记簿记，增量的旧边摘除靠它） */
+function addEdges(idx: Index, atoms: readonly Atom[]): void {
+  for (const a of atoms) {
+    if (a.kind !== 'page') continue
+    const target = a.target?.id
+    if (!target) continue
+    idx.edgeByAnno.set(a.id, { target, source: a.blockId })
+    bump(idx, target, a.blockId, 1)
+  }
 }
 
 /**
- * **增量应用**（`Change[]`）。
+ * **按 op 增量应用**（一批 op ＝ 一个事务的那批）。
  *
- * ⚠️ **块一类只要出现就一律全量重建**，不管报的是 `'*'` 还是具体 id。
+ * 修补的单位是 **op**（`MemoryKb.tx` 产出的持久化操作序列），不是 `Change`：
+ * `Change` 只说「哪类对象动过」，op 说清「哪一块、动了什么」——
+ * 名字表/成员表/入向边才能只修被点到的那些条目。
  *
- * 为什么不做「按块修补」：修补的正确性依赖一个前提——**先摘掉旧条目、再改森林**。
- * 现在的调用链却正好相反（编辑器 `emitChange`、命令直接改块，都是「先改了再通知」），
- * 通知到达时**旧名字／旧位置已经读不到了** ⇒ 无法可靠地摘掉旧条目。
- * 实测代价就是「一个标签两个名字」：把 `t1` 从 `todo` 改成 `待办` 后，
- * `tags` 里同时留下 `todo` 和 `待办` 指向同一块 —— 索引不崩，只是**静默地错**。
+ * 修补的正确性靠两件事：
+ *   · **索引持有的是活引用**——「摘掉旧条目」要的旧状态，很多就记在索引自己的表里
+ *     （名字表里谁认领这个名字、成员表里这块在哪些集合里），从表里反查即可，不需要 op 带旧值；
+ *   · **引用边的旧指向记在 `edgeByAnno`**（见 Index 的簿记注释）——op 只带新值时从簿记摘旧边。
  *
- * ⇒ 在 **Tx/Changes 落地之前**宁可全量重建。等真正的事务层把「改了什么」
- *   连同 `op` 一起报出来，这里再换成按块修补，**对外形状不变**
- *   （`Change` 已经预留了精确到 id 的语义）。
+ * 与 `rebuild` 的口径对齐点（逐条对过，改任何一边都要回头查另一边）：
+ *   · 名字表：先序第一个认领者赢 ⇒ 增量加名时「表里已有人就不抢」；
+ *     摘块时受影响的名字**重扫森林**找下一个认领者；
+ *   · 日期表：rebuild 是先序**最后一个**赢 ⇒ 摘块重扫同样取最后一个；
+ *   · 成员表：集合语义，同块打两次同标签只算一个；
+ *   · 入向边：数据源是**原子数组**——`remove` 不清原子 ⇒ 删块不动入向边
+ *     （与 rebuild 数同一份 atoms，两条路自然一致）。
  *
- * 只有**原子**变化时才是真增量：块表／名字表／日记表／父页表完全不动，只重算入向边
- * （`tagMembers` 的数据源在块上 ⇒ 块没动就不用碰它）。
+ * 找不到块（op 引用的 id 既不在索引也不在森林）⇒ 跳过该 op：op 序列是事实陈述，
+ * 不是「必须可执行」的指令；等式测试会把任何因此产生的分叉抓出来。
  */
-export function applyChanges(
-  index: Index,
-  changes: readonly Change[],
-  forest: readonly Block[],
-  atoms: readonly Atom[],
-): Index {
-  const kinds = new Set(changes.map((c) => c.kind))
-  // `marks` 不进索引（区间锚点不参与「谁指向谁」）
-  if (kinds.size === 0 || (kinds.size === 1 && kinds.has('marks'))) return index
-  // 块动过 ⇒ 一切作废（见上面的「为什么不按块修补」）
-  if (kinds.has('blocks')) return rebuild(forest, atoms)
-
-  // 只剩原子变化：块表／名字表／日记表／父页表完全不动，只重算入向边
-  // （`tagMembers` 来自块上的 `_tags` ⇒ 块没动，那张表原样带过去）
-  const next: Index = {
-    blocks: index.blocks,
-    incoming: new Map(),
-    tagMembers: index.tagMembers,
-    tags: index.tags,
-    journals: index.journals,
-    pageOf: index.pageOf,
+export function applyOps(index: Index, ops: readonly Op[], forest: readonly Block[], atoms: readonly Atom[]): Index {
+  for (const op of ops) {
+    switch (op.e) {
+      case 'block':
+        if (op.op === 'upsert') applyBlockUpsert(index, op.id, op.value, forest, atoms)
+        else applyBlockDelete(index, op.id, forest)
+        break
+      case 'prop':
+        // 哪个属性槽喂哪张表：地址/露面 → 名字表；归属 → 成员表；日期 → 日记表；其余不进索引
+        if (op.name === '_aliases' || op.name === '_lists') refreshTagsClaim(index, op.block)
+        else if (op.name === '_tags') refreshTagMembership(index, op.block)
+        else if (op.name === '_date') refreshJournalClaim(index, op.block)
+        break
+      case 'alias':
+      case 'list':
+        refreshTagsClaim(index, op.block)
+        break
+      case 'anno':
+        applyAnnoOp(index, op)
+        break
+    }
   }
-  addEdges(next, atoms)
-  return next
+  return index
 }
 
-/** 把一棵子树写进索引（与 `rebuild` 同一口径：先序、`pageOf` ＝ 顶层那个根） */
-function indexSubtree(index: Index, root: Block): void {
-  walkForest([root], (b, ctx) => {
-    const rootId = ctx.path[0]!.id
+/** 块 upsert：带落点 ⇒ 挪位/新进；不带落点（纯正文补丁）⇒ 索引无事可做 */
+function applyBlockUpsert(
+  index: Index,
+  id: string,
+  value: { parent?: string | null },
+  forest: readonly Block[],
+  atoms: readonly Atom[],
+): void {
+  const known = index.blocks.get(id)
+  if (value.parent === undefined) {
+    // 正文补丁不改结构：`blocks` 里是活引用，文本/属性的变化对五张表不可见
+    return
+  }
+  const parent = value.parent
+  const pageRoot = parent === null ? id : (index.pageOf.get(parent) ?? id)
+  if (known) {
+    // 挪位不改 props/atoms ⇒ 名字表/成员表/入向边都不动；`blocks` 里是活引用，也无事可做
+    reindexSubtreePage(index, known, pageRoot)
+    return
+  }
+  const block = findInForest(forest, id)
+  if (!block) return
+  indexSubtree(index, block, pageRoot)
+  // 新子树的成员（数据源在块上）与它自己带来的引用边
+  walkForest([block], (b) => {
+    for (const tagId of tagIdsOf(b)) {
+      const members = index.tagMembers.get(tagId)
+      if (members) members.add(b.id)
+      else index.tagMembers.set(tagId, new Set([b.id]))
+    }
+  })
+  const subtree = new Set(subtreeIds(block))
+  for (const a of atoms) {
+    if (a.kind !== 'page' || !subtree.has(a.blockId)) continue
+    const target = a.target?.id
+    if (!target) continue
+    index.edgeByAnno.set(a.id, { target, source: a.blockId })
+    bump(index, target, a.blockId, 1)
+  }
+}
+
+/** 块 delete：整棵子树从五张表里退场（入向边不动——原子没被删，与 rebuild 同口径） */
+function applyBlockDelete(index: Index, id: string, forest: readonly Block[]): void {
+  const block = index.blocks.get(id)
+  if (!block) return
+  const gone = subtreeIds(block)
+  for (const bid of gone) {
+    index.blocks.delete(bid)
+    index.pageOf.delete(bid)
+  }
+  const goneSet = new Set(gone)
+  // 名字表：删掉这些块认领的名字，再让**还活着**的认领者按 rebuild 的口径接手
+  const names = [...index.tags].filter(([, owner]) => goneSet.has(owner)).map(([name]) => name)
+  for (const name of names) index.tags.delete(name)
+  for (const name of names) {
+    const heir = firstTagClaimant(forest, name)
+    if (heir) index.tags.set(name, heir)
+  }
+  // 日期表：同上（rebuild 是先序最后一个赢 ⇒ 接手也取最后一个）
+  const dates = [...index.journals].filter(([, owner]) => goneSet.has(owner)).map(([d]) => d)
+  for (const d of dates) index.journals.delete(d)
+  for (const d of dates) {
+    const heir = lastJournalClaimant(forest, d)
+    if (heir) index.journals.set(d, heir)
+  }
+  // 成员表：把退场的块从所有集合里摘掉
+  for (const members of index.tagMembers.values()) {
+    for (const bid of gone) members.delete(bid)
+  }
+}
+
+/**
+ * 重算一个块对**名字表**的认领：索引里记在这个块名下的先摘掉，
+ * 再按活块现在的别名/露面重打（表里已有别的块认领的名字不抢——先序第一优先）。
+ */
+function refreshTagsClaim(index: Index, blockId: string): void {
+  const live = index.blocks.get(blockId)
+  if (!live) return
+  for (const [name, owner] of [...index.tags]) {
+    if (owner === blockId) index.tags.delete(name)
+  }
+  if (!hasList(live, 'tag')) return
+  for (const alias of aliasesOf(live)) {
+    const name = normalizeAlias(alias)
+    if (name !== '' && !index.tags.has(name)) index.tags.set(name, blockId)
+  }
+}
+
+/** 重算一个块对**成员表**的归属（数据源是活块上的 `_tags`） */
+function refreshTagMembership(index: Index, blockId: string): void {
+  const live = index.blocks.get(blockId)
+  if (!live) return
+  for (const members of index.tagMembers.values()) members.delete(blockId)
+  for (const tagId of tagIdsOf(live)) {
+    const members = index.tagMembers.get(tagId)
+    if (members) members.add(blockId)
+    else index.tagMembers.set(tagId, new Set([blockId]))
+  }
+}
+
+/** 重算一个块对**日期表**的认领（口径与 rebuild 相同：无条件覆盖＝先序最后一个赢） */
+function refreshJournalClaim(index: Index, blockId: string): void {
+  const live = index.blocks.get(blockId)
+  if (!live) return
+  for (const [d, owner] of [...index.journals]) {
+    if (owner === blockId) index.journals.delete(d)
+  }
+  if (isJournal(live)) {
+    const d = journalDate(live)
+    if (d !== '') index.journals.set(d, blockId)
+  }
+}
+
+/** 一条 anno op：引用边的新增/改向/摘除（标记类不是边，落到这里就是空操作） */
+function applyAnnoOp(
+  index: Index,
+  op: { id: string; op: 'set' | 'delete'; value?: unknown; block: string },
+): void {
+  const prev = index.edgeByAnno.get(op.id)
+  if (prev) {
+    bump(index, prev.target, prev.source, -1)
+    index.edgeByAnno.delete(op.id)
+  }
+  if (op.op !== 'set' || !op.value || typeof op.value !== 'object' || !('kind' in op.value)) return
+  const v = op.value as Atom
+  if (v.kind !== 'page') return
+  const target = v.target?.id
+  if (!target) return
+  index.edgeByAnno.set(op.id, { target, source: v.blockId })
+  bump(index, target, v.blockId, 1)
+}
+
+/** 把一棵子树的 `pageOf` 重打到新的顶层块（挪位只影响这一件事） */
+function reindexSubtreePage(index: Index, root: Block, pageRoot: string): void {
+  walkForest([root], (b) => {
+    index.pageOf.set(b.id, pageRoot)
+  })
+}
+
+/** 名字表摘块后的接手者：还活着的块里先序第一个认领这个名字的标签 */
+function firstTagClaimant(forest: readonly Block[], name: string): string | undefined {
+  let heir: string | undefined
+  walkForest(forest, (b) => {
+    if (heir) return false
+    if (!hasList(b, 'tag')) return
+    for (const alias of aliasesOf(b)) {
+      if (normalizeAlias(alias) === name) {
+        heir = b.id
+        return false
+      }
+    }
+  })
+  return heir
+}
+
+/** 日期表摘块后的接手者：先序**最后一个**（与 rebuild 的无条件覆盖同一口径） */
+function lastJournalClaimant(forest: readonly Block[], date: string): string | undefined {
+  let heir: string | undefined
+  walkForest(forest, (b) => {
+    if (isJournal(b) && journalDate(b) === date) heir = b.id
+  })
+  return heir
+}
+
+function findInForest(forest: readonly Block[], id: string): Block | undefined {
+  let hit: Block | undefined
+  walkForest(forest, (b) => {
+    if (b.id === id) {
+      hit = b
+      return false
+    }
+  })
+  return hit
+}
+
+function subtreeIds(root: Block): string[] {
+  const out: string[] = []
+  walkForest([root], (b) => {
+    out.push(b.id)
+  })
+  return out
+}
+
+/** 把一棵子树写进索引（与 `rebuild` 同一口径：先序；`pageRoot` ＝ 它所在的顶层块） */
+function indexSubtree(index: Index, root: Block, pageRoot: string): void {
+  walkForest([root], (b) => {
     index.blocks.set(b.id, b)
-    index.pageOf.set(b.id, rootId)
+    index.pageOf.set(b.id, pageRoot)
+    // 标签成员（数据源是块上的 `_tags`）
+    for (const tagId of tagIdsOf(b)) {
+      const members = index.tagMembers.get(tagId)
+      if (members) members.add(b.id)
+      else index.tagMembers.set(tagId, new Set([b.id]))
+    }
     /**
      * 标签名表：一个标签块有多个别名时，**每一个**都是它的地址。
      * 重复时先序第一个赢（与「先序第一个命中」同一个口径，不随机覆盖）。
