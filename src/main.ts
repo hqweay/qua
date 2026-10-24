@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf, aliasesOf, allPropDefs, allTags, blockTypeOf, checkAddParent, cyclePathLabels, DISPLAY_PROP, listsOf, tagIdsOf, childTags, claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList, identityTags, isJournal, journalDate, journalFeedDays, membersOf, normalizeAlias, parentTags, primaryAliasOf, prop, propKindOf, pruneParentTags, removeList, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, checkAddParent, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  isJournal, journalDate, journalFeedDays,  normalizeAlias, parentTags, primaryAliasOf, prop,  pruneParentTags, removeList,  setBlockType, tagMemberIds, todayISO,  type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
 import { BlockEditor } from './view/editor.ts'
@@ -19,8 +19,7 @@ import {
   COMMANDS,
   Registry,
   type App,
-  type FixtureName,
-  type MenuRequest,
+    type MenuRequest,
   type PanelKind,
 } from './core/commands/index.ts'
 import { Layers, paletteRows, rowsFromBindings, type Row } from './ui/layers.ts'
@@ -38,6 +37,7 @@ import { setupDocks } from './app/wiring/docks.ts'
 import { setupPanels } from './app/wiring/panels.ts'
 import { setupChrome } from './app/wiring/chrome.ts'
 import { setupPages } from './app/wiring/pages.ts'
+import { setupDiagnostics } from './app/wiring/diagnostics.ts'
 import { HANDLERS } from './app/handlers.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
 import { t } from './core/msg.ts'
@@ -49,7 +49,6 @@ import {
   DEVICE_KEY,
   STORAGE_KEY,
   type Prefs,
-  type ThemeMode,
   type Workspace,
 } from './core/workspace.ts'
 
@@ -239,11 +238,11 @@ const { chrome, editorEl, applyChrome, resolvedTheme, dockMinWidth, dockMaxWidth
   uiCtx,
   getActiveBlock: () => activeBlock(),
   getPageTitle: (p) => pageTitle(p),
+  getDomStats: () => diag.domStats(),
   $,
   getWs: () => ws,
   getMainEd: () => mainEd,
   getRegistry: () => registry,
-  domStats,
 })
 
 /**
@@ -906,15 +905,6 @@ const openFieldsEditor = (blockId: string, _rect: DOMRect | null): void => {
   )
 }
 
-/** DOM 统计（角标与诊断面板的证据源） */
-function domStats(): { blocks: number; domBlocks: number; domNodes: number } {
-  return {
-    blocks: flatten(mainEd.doc).length,
-    domBlocks: editorEl.querySelectorAll('.blk').length,
-    domNodes: editorEl.querySelectorAll('*').length,
-  }
-}
-
 /* ------------------------------------------------------------ 编辑器装配 */
 
 // ⚠️ 首屏就要把**当前页的 marks/atoms** 一起装进编辑器：少了它们，已存的行内原子
@@ -1001,6 +991,7 @@ ed.events = {
 }
 
 let panels: ReturnType<typeof setupPanels>
+let diag: ReturnType<typeof setupDiagnostics>
 const { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, scheduleProperties, forgetFocusedBlock } = setupPanels({
   blocks,
   kb,
@@ -1030,61 +1021,6 @@ panels = {
   scheduleProperties,
   forgetFocusedBlock,
 }
-
-/* ------------------------------------------------------------ 菜单的菜单 */
-
-/**
- * 调试菜单：**正式软件不暴露的开关都在这里**（2026-10-20）。
- *
- * 原先甲乙丙／明暗是顶栏常驻按钮；正式软件不需要它们常驻，挪进调试菜单。
- * ⇒ 挪进这里。判据：**它是诊断面，不是产品面** —— 与右下角的角标同一性质
- * （`ui/badge.ts` 的注释已经写明「将来应当整体降级成一个可关的诊断插件」）。
- *
- * ⚠️ 入口按钮原先在 `index.html` 里带 `hidden` 且**没有任何代码取消它** ⇒ 是个死入口。
- *    现在让它默认可见，否则这些开关搬进来也点不到。
- * ⚠️ 命令仍然经 `registry.invoke`（不是直改 `prefs()`）：主题是真命令，
- * 走命令面才能撤销/审计/被机器接口调到（命令是唯一写入口，UI 只是它的一个调用者）。
- * ⚠️ **皮肤三行已删**：内建只有一种样式，`core.view/set-skin` 整条命令撤掉。
- */
-stateMenuBtn.addEventListener('click', () => {
-  const th = prefs().theme
-  // 当前档位用图标位的 `check`（不用 hint：hint 会被推到行最右，离标签太远，读不出"这是勾选"）
-  const pick = (on: boolean, icon: string): string => (on ? 'lucide:check' : icon)
-  // ⚠️ 这两类的 hint 一律给**空串**：渲染器的兜底是「没有 hint ⇒ 显示命令名」，
-  //    调试菜单里列 `core.view/set-theme` 只会挡视线（那是诊断信息，不是给用户看的）。
-  const rows: Row[] = [
-    { id: 'theme-system', label: t('ui.theme.mode.system'), hint: '', icon: pick(th === 'system', 'lucide:monitor'), group: 'dbg/1-theme', command: 'core.view/set-theme', args: { mode: 'system' } },
-    { id: 'theme-light', label: t('ui.theme.mode.light'), hint: '', icon: pick(th === 'light', 'lucide:sun'), group: 'dbg/1-theme', command: 'core.view/set-theme', args: { mode: 'light' } },
-    { id: 'theme-dark', label: t('ui.theme.mode.dark'), hint: '', icon: pick(th === 'dark', 'lucide:moon'), group: 'dbg/1-theme', command: 'core.view/set-theme', args: { mode: 'dark' } },
-  ]
-  /**
-   * 演示状态那几行**只在测试面存在**：它们换的是整份库（并立刻落盘）。
-   * 产品构建里那一行根本没注册，摆出来点下去只会得到「命令未注册」—— 不如不摆。
-   */
-  if (DEV_SURFACE) {
-    rows.push(
-      // 演示状态
-      { id: 'seed', label: t('ui.stateMenu.seed'), hint: t('ui.stateMenu.seedHint'), icon: 'lucide:book-open', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'seed' } },
-      // 冷启动：看「第一次打开 app」那一屏到底长什么样（不用清 localStorage 再刷新）
-      { id: 'boot', label: t('ui.stateMenu.boot'), hint: t('ui.stateMenu.bootHint'), icon: 'lucide:sunrise', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'boot' } },
-      { id: 'degraded', label: t('ui.state.degraded'), hint: t('ui.stateMenu.degradedHint'), icon: 'lucide:triangle-alert', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'degraded' } },
-      { id: 'sparse', label: t('ui.state.sparse'), hint: t('ui.stateMenu.sparseHint'), icon: 'lucide:square-dashed', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'sparse' } },
-      { id: 'empty', label: t('ui.state.empty'), hint: t('ui.stateMenu.emptyHint'), icon: 'lucide:square', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'empty' } },
-    )
-  }
-  layers.openMenu({
-    rows,
-    anchor: stateMenuBtn.getBoundingClientRect(),
-    title: t('menu.title.debugMenu'),
-    searchable: false,
-    focusSearch: false,
-    onPick: (row) => {
-      if (row.command) registry.invoke(row.command, (row.args as Record<string, unknown>) ?? {}, 'menu', uiCtx())
-    },
-  })
-})
-
-
 
 document.addEventListener('mousedown', (e) => {
   const target = e.target as Node
@@ -1226,6 +1162,43 @@ const bindResize = (side: 'left' | 'right', slot: typeof dockLeft): void => {
 }
 bindResize('left', dockLeft)
 bindResize('right', dockRight)
+diag = setupDiagnostics({
+  DEV_SURFACE,
+  store,
+  boot,
+  readOnly,
+  bootNotice,
+  prefs,
+  resolvedTheme,
+  applyChrome,
+  chrome,
+  badge,
+  scheduleDeviceSave,
+  scheduleBadge,
+  getLastOps,
+  registry,
+  app,
+  layers,
+  editorEl,
+  shortId,
+  activeBlock,
+  pageTitle,
+  nav,
+  uiCtx,
+  showMenu,
+  openDrawerFor,
+  firstEditableRoot,
+  stateMenuBtn,
+  getWs: () => ws,
+  getMainEd: () => mainEd,
+  getEd: () => ed,
+  setEd: (next) => {
+    ed = next
+  },
+  setQuiet: (v) => {
+    quiet = v
+  },
+})
 
 paintStaticCopy()
 applyChrome()
@@ -1293,223 +1266,3 @@ requestAnimationFrame(() => {
     if (!appendMoreFeed()) break
   }
 })
-
-/* ------------------------------------------------------------ 给截图脚本/检查台的口子 */
-
-const api = {
-  snapshot() {
-    const st = domStats()
-    return {
-      ...st,
-      mounted: mainEd.mounted.size,
-      marks: mainEd.marks.length,
-      atoms: mainEd.atoms.length,
-      theme: prefs().theme,
-      resolvedTheme: resolvedTheme(),
-      themeMode: prefs().theme,
-      composing: mainEd.probe.isComposing,
-      virtualize: mainEd.virtualize,
-      activePage: pageTitle(activeBlock()),
-      // 导航历史断言要认「当前对象」本身（页名可能重复/为空）
-      activeId: ws.activeId,
-      // ⚠️ 「页数」＝ `page` 角色的块数（journal 不算页）；顶层块总数另给 `topBlocks`
-      pageCount: flatten({ roots: ws.blocks }).filter((b) => hasList(b, 'page')).length,
-      topBlocks: ws.blocks.length,
-      totalBlocks: flatten({ roots: ws.blocks }).length,
-      journalDate: isJournal(activeBlock()) ? journalDate(activeBlock()) : '',
-      undoDepth: mainEd.undo.depth(),
-      redoDepth: mainEd.undo.redoDepth(),
-      lastCommand: registry.last,
-      selection: mainEd.sel,
-      blockSelection: mainEd.hasBlockSelection(),
-      blockSelectionCount: mainEd.blockSelectionCount(),
-      hasLocalStorage: boot.status !== 'storage-error',
-      readOnly,
-      bootNotice,
-      storageKind: store.kind,
-      /**
-       * 三槽的设备状态（**诊断面**）：钉住清单与宽度都在 prefs 里，
-       * 断言要能区分「落盘了没有」与「页面里渲染了没有」。
-       */
-      dock: {
-        left: { open: prefs().dock.left.open, width: prefs().dock.left.width, pins: [...prefs().dock.left.pins] },
-        right: { open: prefs().dock.right.open, width: prefs().dock.right.width, pins: [...prefs().dock.right.pins] },
-      },
-      // 导航历史（不是 undo 栈）：给断言看「能退到哪 / 能进到哪」
-      nav: { back: nav.back.map((p) => p.id), forward: nav.forward.map((p) => p.id), canGoBack: nav.back.length > 0, canGoForward: nav.forward.length > 0 },
-    }
-  },
-  text() {
-    return flatten(mainEd.doc).map((b) => b.text)
-  },
-  /**
-   * **整片森林**（区别于 `blocks()`：那个只给当前视图装载的子树）。
-   * 标签块挂在森林根上、不在当前页里 ⇒ 查「标签存不存在」必须用这个。
-   */
-  allBlocks() {
-    return ws.blocks.map((b) => ({
-      id: b.id,
-      text: b.text,
-      roles: identityTags(b),
-      // 地址与露面是两套语义，诊断面要能分别读（`roles` 只给外观认的身份种类）
-      aliases: aliasesOf(b),
-      lists: listsOf(b),
-      display: prop<string>(b, DISPLAY_PROP) ?? null,
-    }))
-  },
-  /** 字段定义（诊断面）：id ＝ propId、正文 ＝ label、谁声明了它 */
-  propDefs() {
-    return allPropDefs(ws.blocks).map((d) => ({
-      id: d.id,
-      label: d.text,
-      kind: propKindOf(d),
-      declaredBy: allTags(ws.blocks).filter((t) => declaredFieldIds(t).includes(d.id)).map((t) => t.id),
-    }))
-  },
-  /** 一个块的属性区（**派生**：声明 ∪ 自有；同一 propId 只一行） */
-  fields(blockId: string) {
-    const b = findInForest(ws.blocks, blockId)
-    if (!b) return []
-    return fieldRows(b, ws.blocks).map((r) => ({
-      propId: r.propId,
-      label: r.label,
-      kind: r.kind,
-      value: r.value ?? null,
-      filled: r.filled,
-      sources: r.sources.map((s) => s.id),
-    }))
-  },
-  /** 标签的直接父/子/失效父（诊断面；同一条边两个读法） */
-  tagParents(tagId: string) {
-    const b = findInForest(ws.blocks, tagId)
-    return b ? parentTags(b, ws.blocks).map((x) => x.id) : []
-  },
-  tagChildren(tagId: string) {
-    const b = findInForest(ws.blocks, tagId)
-    return b ? childTags(b, ws.blocks).map((x) => x.id) : []
-  },
-  tagDanglingParents(tagId: string) {
-    const b = findInForest(ws.blocks, tagId)
-    return b ? danglingParentIds(b, ws.blocks) : []
-  },
-  /** 成员（**含算作**：自己的成员 ∪ 后代标签的成员） */
-  tagMembersDeep(tagId: string) {
-    return [...membersOf(tagId, ws.blocks)]
-  },
-  /** 打了某个标签的块 id（标签的成员列表＝标签块的入向边） */
-  tagMembers(tagId: string) {
-    return [...tagMemberIds(tagId, ws.blocks)]
-  },
-  /** 删掉一个行内原子（**连同它占的那一格** ⇒ 那条边就没了） */
-  removeAtom(atomId: string) {
-    mainEd.removeAtom(atomId)
-  },
-  blocks() {
-    return flatten(mainEd.doc).map((b) => ({
-      id: b.id,
-      text: b.text,
-      todo: todoOf(b) ?? null,
-      // 诊断面的字段名保持 `collapsed`（冒烟按它断言）；值现在来自折叠表
-      collapsed: mainEd.doc.folded?.[b.id] === true,
-      children: b.children.length,
-      // 角色进诊断面（journal 行是只读日期，测试要能把它挑出来）
-      roles: identityTags(b),
-      // 标签归属也进诊断面：它是块级字段，DOM 里只剩渲染出来的 chip
-      tags: tagIdsOf(b),
-    }))
-  },
-  marks() {
-    return mainEd.marks.map((m) => ({ type: m.type, blockId: m.blockId, start: m.start, end: m.end }))
-  },
-  /**
-   * ⚠️ `label` 与 `state` 这里给的是**解析后的**结果（不是落盘的快照）：
-   *   探针要能回答「现在显示的是什么」，否则断言就只是在复读过期的 `atom.label`。
-   */
-  atoms() {
-    // `id` 也要给：DOM 上的 `data-atom-id` 是它，诊断面没有 id 就只能靠位置猜
-    return mainEd.atoms.map((a) => {
-      const v = resolveRef((id) => mainEd.store.find(id), a)
-      return { id: a.id, kind: a.kind, label: v.label, rawLabel: a.label, blockId: a.blockId, start: a.start, end: a.end, state: v.state, target: a.target ?? null }
-    })
-  },
-  shortId: (id: string) => shortId(id),
-  ctxKeys: () => uiCtx(),
-  pages: () => app.listPages(),
-  invoke: (name: string, args: Record<string, unknown> = {}, via = 'api') => registry.invoke(name, args, via, uiCtx()),
-  commandLog: () => registry.log.map((l) => l.name),
-  quiet: (v: boolean) => {
-    quiet = v
-  },
-  setTheme: (mode: ThemeMode) => {
-    prefs().theme = mode
-    applyChrome()
-    chrome.renderDebugState()
-    scheduleDeviceSave()
-    scheduleBadge()
-  },
-  loadState: (s: FixtureName) => registry.invoke('dev.fixture/load', { state: s }, 'api'),
-  focusBlock: (blockId: string, off = 0) => {
-    ed = mainEd
-    editorEl.focus()
-    mainEd.placeCaret(blockId, off)
-  },
-  /**
-   * 把焦点给编辑器：有模型选区就还原它，没有就落到第一个可编辑行。
-   *
-   * ⚠️ **先 focus 再 placeCaret**：`focus()` 在「此前没有焦点」时会把光标重置到容器开头
-   *    （Contenteditable 默认行为）——不补一次 placeCaret，光标会停在只读的日期行上，
-   *    连带把 ⌘A 的全选范围也缩到那一行。
-   * ⚠️ 冷启动**不**走这里：打开 app 时没有任何块处于聚焦态；这是一个显式动作的入口。
-   */
-  focus: () => {
-    ed = mainEd
-    const keep = mainEd.sel
-    editorEl.focus()
-    if (keep) {
-      mainEd.placeCaret(keep.aBlock, keep.aOff)
-      return
-    }
-    const target = firstEditableRoot(mainEd.doc.roots[0])
-    if (target) mainEd.placeCaret(target.id, 0)
-  },
-  openPalette: () => registry.invoke('core.command-palette/show', {}, 'api'),
-  openBlockMenu: (blockId: string) => {
-    const el = ed.blockEl(blockId)
-    showMenu({ kind: 'menu', prefix: 'block/', anchor: el?.getBoundingClientRect() ?? null, title: t('menu.title.block'), ctx: uiCtx() })
-  },
-  openSlash: () => showMenu({ kind: 'slash', anchor: ed.caretRect(), query: '' }),
-  themeMode: () => prefs().theme,
-  resolvedTheme: () => resolvedTheme(),
-  openPanel: (kind: PanelKind) => openDrawerFor(kind),
-  setVirtualize: (on: boolean, radius = 12) => app.setVirtualize(on, radius),
-  badgePanel: (open: boolean) => {
-    // 角标的开合是**设备状态**（下次冷启动按它恢复），不是库的内容
-    prefs().badgeOpen = open
-    badge.toggle(open)
-    scheduleDeviceSave()
-  },
-  /**
-   * 自检用：清掉落盘的那一份（**只清存储，不动当前内存库**）。
-   * 演示状态切换不再调它：`loadState` 换库后会经由 `scheduleSave` 覆盖写，
-   * 「先清后写」在异步批次下会多一次无谓的写序（曾是同步全量 save 时代的口径）。
-   */
-  clearStorage: () => void store.clear(),
-  /**
-   * 自检用：**最近一次事务**产出的 op（诊断面板不用它，只为「一次动作几条 op」留证据）。
-   * 只读副本：调用方改数组不该影响这里记着的那一份。
-   */
-  lastOps: () => getLastOps(),
-  __editor: mainEd,
-  __registry: registry,
-  __layers: layers,
-}
-
-declare global {
-  interface Window {
-    /** 只在测试面存在（`DEV_SURFACE`）；产品构建里这个键根本不会被赋值 */
-    __qua: typeof api
-  }
-}
-// ⚠️ 只在测试面挂上去：诊断口能直接调 `invoke`（含换库、清存储），
-//    接上真库之后留在产品构建里＝把「一键清掉真实数据」放在用户的 F12 里。
-if (DEV_SURFACE) window.__qua = api
