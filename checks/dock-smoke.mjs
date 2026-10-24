@@ -151,8 +151,23 @@ await check('A15 宽度手柄：拖动改宽并落盘、clamp 保证中心槽可
     await page.waitForTimeout(120)
   }
 
+  /**
+   * token 里的默认槽宽：**从 CSS 读，不写死在断言里**。
+   *
+   * 早先这里直接写 `236` / `320`，于是「改默认宽度」这种纯外观调整会把门禁打红，
+   * 而红的是断言本身（它测的是「等于我记住的那个数」），不是行为。
+   * 现在它测的是「双击 == 交回 token 默认」这条真性质。
+   */
+  const tokenDefault = (side) =>
+    page.evaluate(
+      (s) => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(`--ui-dock-w-${s}`)),
+      side,
+    )
+  const defLeft = await tokenDefault('left')
+  const defRight = await tokenDefault('right')
+
   const start = await read()
-  assert(start.dock.left.width === null && Math.abs(start.widths.left - 236) <= 1, `初始应是 token 默认宽：${JSON.stringify(start)}`)
+  assert(start.dock.left.width === null && Math.abs(start.widths.left - defLeft) <= 1, `初始应是 token 默认宽（${defLeft}）：${JSON.stringify(start)}`)
   assert(start.handles.left !== 'none' && start.handles.right !== 'none', `开着的槽应显示手柄：${JSON.stringify(start.handles)}`)
 
   // 左槽向右拖 120：宽度跟着变、写进 prefs、中心槽仍有可用空间
@@ -188,7 +203,7 @@ await check('A15 宽度手柄：拖动改宽并落盘、clamp 保证中心槽可
   await page.waitForTimeout(120)
   const reset = await read()
   assert(reset.dock.left.width === null, `双击后 prefs.width 应为 null：${JSON.stringify(reset.dock.left)}`)
-  assert(Math.abs(reset.widths.left - 236) <= 1, `双击后应回到默认宽：${reset.widths.left}`)
+  assert(Math.abs(reset.widths.left - defLeft) <= 1, `双击后应回到默认宽 ${defLeft}：${reset.widths.left}`)
 
   // 右槽：向左拖 100 ⇒ 变宽（左右手柄方向相反）
   const rightBefore = reset.widths.right
@@ -199,7 +214,7 @@ await check('A15 宽度手柄：拖动改宽并落盘、clamp 保证中心槽可
   await page.locator('#dock-right .dock-resize').dblclick()
   await page.waitForTimeout(120)
   const rightReset = await read()
-  assert(rightReset.dock.right.width === null && Math.abs(rightReset.widths.right - 320) <= 1, `右槽双击恢复默认：${JSON.stringify(rightReset.dock.right)} / ${rightReset.widths.right}`)
+  assert(rightReset.dock.right.width === null && Math.abs(rightReset.widths.right - defRight) <= 1, `右槽双击恢复默认 ${defRight}：${JSON.stringify(rightReset.dock.right)} / ${rightReset.widths.right}`)
 
   // 关闭的槽不可拖（手柄不可见）
   await setOpen(page, true, false)
@@ -217,7 +232,7 @@ await check('A15 宽度手柄：拖动改宽并落盘、clamp 保证中心槽可
   assert(!compact.over, `压缩区间不该横向溢出：${JSON.stringify(compact.widths)}`)
 
   await ctx.close()
-  return `左 236→${Math.round(wide.widths.left)}（clamp ${max}）→双击 236；右 320→${Math.round(rightAfter.widths.right)}；关闭/800px 均无手柄`
+  return `左 ${defLeft}→${Math.round(wide.widths.left)}（clamp ${max}）→双击 ${defLeft}；右 ${defRight}→${Math.round(rightAfter.widths.right)}；关闭/800px 均无手柄`
 })
 
 /* ---------------------------------------------------------------- 保底 */

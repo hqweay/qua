@@ -84,7 +84,7 @@
   --ui-gutter: 22px;
   /* 三槽宽度 */
   --ui-dock-w-left: 236px;
-  --ui-dock-w-right: 320px;
+  --ui-dock-w-right: 360px;
   --ui-dock-min: 180px;
   --ui-center-min: 480px;
   /* 编辑器结构旋钮（**单一内建样式**，：不再有甲/乙/丙分叉） */

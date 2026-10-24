@@ -118,6 +118,9 @@ export const BINDINGS: Binding[] = [
   // zoom：进子树的入口挂在块菜单。**叶子块也给**（修订：
   // 块标左键＝聚焦是一贯行为：若叶子不给，点击结果会时 zoom 时不 zoom）
   { command: 'core.block/focus-block', kind: 'menu', when: 'blockFocused', group: 'block/3-kind', order: 30, layer: 'core', keywords: ['zoom', t('menu.kw.zoom')] },
+  // 显式入口：把「看这一块的属性」做成一次点击。它是**视图命令**（可以动槽开关），
+  // 与 zoom 这种导航动作分家 —— 导航永远不替用户改侧栏的开关。
+  { command: 'core.block/inspect', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 32, layer: 'core' },
   { command: 'core.editor/pick-tag', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 5, layer: 'core' },
   { command: 'core.editor/insert-page-ref', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 10, layer: 'core' },
   { command: 'core.editor/insert-image', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 20, layer: 'core' },

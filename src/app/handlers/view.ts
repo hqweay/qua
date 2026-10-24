@@ -21,6 +21,18 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     app.zoomOut()
     return true
   },
+  /**
+   * 看属性：与 zoom 同一条换落点路径，外加「确保右槽开着」。
+   *
+   * ⚠️ 它是**视图命令**，所以可以动槽开关。导航动作（zoom / 打开页 / 点链接）
+   *    一律不碰它 —— 那条分界由 T1b 钉住（zoom 之后 `dock.right.open` 一字不变）。
+   */
+  'core.block/inspect': (a, app) => {
+    const id = typeof a.blockId === 'string' && a.blockId !== '' ? a.blockId : app.ed.caretBlock()
+    if (!id) return false
+    app.inspectBlock(id)
+    return true
+  },
 
   /* ---- 视图 ---- */
   'core.view/toggle-theme': (_a, app) => {

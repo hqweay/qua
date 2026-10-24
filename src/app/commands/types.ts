@@ -86,6 +86,13 @@ export interface PageDeps {
   refreshTitle: () => void
   /** 把光标放到当前页首块 */
   focusFirstBlock: () => void
+  /**
+   * 确保某个侧槽**开着**（已经开着就是 no-op）。
+   *
+   * 只给「显式视图命令」用（如「看属性」）：导航动作（zoom / 打开页 / 点链接）
+   * 不该动它 —— 关掉侧栏是用户明确表态，导航把它拉开等于不认这个表态。
+   */
+  openDock: (side: 'left' | 'right') => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
   /** 打开引用选择器：装配层负责把它渲染成菜单 */
   openRefPicker: (rows: Row[]) => void

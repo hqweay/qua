@@ -52,11 +52,18 @@ export interface Chrome {
    *    底边之下才算，否则左右留白也会误触。
    */
   blankAreaEl: HTMLElement
-  /** 属性区（当前块声明的字段 ∪ 块自有属性） */
-  propertiesEl: HTMLElement
-  propertiesTitleEl: HTMLElement
+  /**
+   * 右槽里的**检视卡**：属性面板挂在它上面，标题显示当前对象的名字。
+   *
+   * 它是常驻节点（`renderDockStack` 的 `persistent`），不是每次重画现造的卡片：
+   * 里面是表单，重建会丢焦点与光标。
+   */
+  inspectCardEl: HTMLElement
+  inspectCardTitleEl: HTMLElement
   propertiesBodyEl: HTMLElement
   propertiesAddEl: HTMLButtonElement
+  /** 右槽的堆叠容器：检视卡在装配时挂进去（它必须先在文档里，重画才认得它） */
+  dockRightStackEl: HTMLElement
   /** 标签页 footer（属于 / 包含 / 成员） */
   tagPanelEl: HTMLElement
   tagPanelTitleEl: HTMLElement
@@ -106,10 +113,11 @@ export function createChrome(onCrumb?: (blockId: string) => void): Chrome {
   const tagPanelMembersCountEl = must('tagpanel-members-count')
   const tagPanelMembersEmptyEl = must('tagpanel-members-empty')
   const tagPanelMembersEditorEl = must('tagpanel-members-editor')
-  const propertiesEl = must('properties')
-  const propertiesTitleEl = must('properties-title')
+  const inspectCardEl = must('inspect-card')
+  const inspectCardTitleEl = must('inspect-card-title')
   const propertiesBodyEl = must('properties-body')
   const propertiesAddEl = must<HTMLButtonElement>('properties-add')
+  const dockRightStackEl = must('dock-right-stack')
   const backlinksEl = must('backlinks')
   const backlinksEditorEl = must('backlinks-editor')
   const backlinksTitleEl = must('backlinks-title')
@@ -201,10 +209,11 @@ export function createChrome(onCrumb?: (blockId: string) => void): Chrome {
     editorEl,
     scrollEl,
     blankAreaEl: scrollEl,
-    propertiesEl,
-    propertiesTitleEl,
+    inspectCardEl,
+    inspectCardTitleEl,
     propertiesBodyEl,
     propertiesAddEl,
+    dockRightStackEl,
     tagPanelEl,
     tagPanelTitleEl,
     tagPanelPageEl,
