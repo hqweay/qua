@@ -1752,9 +1752,41 @@ export class BlockEditor {
     const before = this.snap()
     const prevIds = this.ownerIds()
     const idx = flatten(this.doc).findIndex((b) => b.id === id)
-    const list = loc.parent ? loc.parent.children : this.doc.roots
-    list.splice(loc.index, 1)
-    if (this.doc.roots.length === 0) this.doc.roots.push(mkBlock(''))
+    const wasRoot = loc.parent === null
+    /**
+     * **窗口里只剩这一块**时，删掉之后必须补一块可编辑的空块，否则编辑器没有落点。
+     *
+     * 补的那块要**真的落进森林**（插在原来那块的位置），不能只塞进 `doc.roots`：
+     * 窗口 roots 不是森林的根，塞进去会得到一个刷新就消失的块。所以它与删除同一笔事务。
+     *
+     * ⚠️ UI 的三个删除入口都带 `!blockIsRoot` ⇒ 正常操作删不到装载根，这一支只服务 API/测试。
+     */
+    const fill = wasRoot && this.doc.roots.length === 1 ? mkBlock('') : null
+    const forestLoc = fill ? locate({ roots: this.store.blocks }, id) : null
+    if (this.write) {
+      const write = this.write
+      write((tx) => {
+        tx.remove(id)
+        if (fill && forestLoc) tx.insert(fill, forestLoc.parent?.id ?? null, forestLoc.index)
+      })
+      // 森林那边已由事务改完；窗口 roots 是**装载单位**，要跟着换掉（它不在事务里）
+      if (wasRoot && fill) {
+        this.doc.roots.splice(0, this.doc.roots.length, fill)
+        this.viewRootIds = [fill.id]
+      } else if (wasRoot) {
+        this.doc.roots.splice(this.doc.roots.indexOf(loc.block), 1)
+        this.viewRootIds = this.viewRootIds.filter((x) => x !== id)
+      }
+    } else {
+      const list = loc.parent ? loc.parent.children : this.doc.roots
+      list.splice(loc.index, 1)
+      if (wasRoot) this.viewRootIds = this.viewRootIds.filter((x) => x !== id)
+      if (this.doc.roots.length === 0) {
+        const empty = mkBlock('')
+        this.doc.roots.push(empty)
+        this.viewRootIds = [empty.id]
+      }
+    }
     const after = flatten(this.doc)
     const caret = after[Math.min(idx, after.length - 1)]!
     // ⚠️ 同上：只回收**本容器内**的死锚点（并上变更前的块集合），容器外的原样保留

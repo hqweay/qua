@@ -12,7 +12,6 @@ import {
   isJournal,
   journalDate,
   journalId,
-  removeBlock,
   renameBlock,
   todayISO,
   type Block,
@@ -94,7 +93,7 @@ export function pageCommands(d: PageDeps): Pick<
       }
       const i = before.findIndex((p) => p.id === id)
       if (i < 0) return
-      removeBlock({ roots: d.blocks(), trash: d.trash() }, id)
+      d.removeBlock(id)
       // 落点必须是**页**（删的可能是 journal，邻位也可能是 journal）
       const rest = pages()
       const p = rest[Math.min(i, rest.length - 1)] ?? rest[0]

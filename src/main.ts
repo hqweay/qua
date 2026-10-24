@@ -845,7 +845,11 @@ function firstEditableRoot(first: Block | undefined): Block | null {
  */
 const pageDeps: PageDeps = {
   blocks: () => ws.blocks,
-  trash: () => blocks.trash,
+  removeBlock: (id) => {
+    // 删页：整棵子树摘进回收站。走 `run` 是为了产出 op —— 命令层只声明「删这块」，
+    // 摘树与打删除标记由事务那一份实现负责。
+    run((tx) => tx.remove(id), mainEd)
+  },
   // 打标签的落点：**当前光标那一块**（正文 vs 反链 footer 会切换 ⇒ 每次现取活动编辑器）
   caretBlockId: () => ed.caretBlock() ?? ed.rows()[0]?.block.id ?? null,
   /**
