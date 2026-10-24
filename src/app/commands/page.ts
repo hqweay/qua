@@ -3,6 +3,7 @@
  */
 import {
   displayNameOf,
+  FEED_INITIAL,
   hasTag,
   isJournal,
   journalDate,
@@ -14,7 +15,7 @@ import {
   type Block,
 } from '../../core/index.ts'
 import { ensureTagInTx } from '../../core/kb/ensure-tag.ts'
-import { FEED_INITIAL } from '../../core/journal.ts'
+import { FEED_SPEC } from '../../core/feed.ts'
 import { t } from '../../core/msg.ts'
 import type { App } from '../../core/ports.ts'
 import type { Row } from '../../ui/layers.ts'
@@ -85,15 +86,17 @@ export function pageCommands(d: PageDeps): Pick<
       /**
        * ⚠️ 落到**今天** ⇒ 当前对象是**今天这一块**（不是流的第一段）。
        *    库里若留着更早的未打开的一天（它不是今天），「回今日」却停在昨天，落点很怪。
-       *    装载顺序由 `kb.journalFeed` 负责（今日在顶 ＋ 存在的更早的天）。
+       *    装载顺序由一份 QuerySpec 字面量负责（今日在顶 ＋ 存在的更早的天）。
        */
       const isTodayEntry = isJournal(p) && journalDate(p) === todayISO()
       d.setActiveId(isTodayEntry ? journalId(todayISO()) : id, { feed: isTodayEntry })
-      d.loadPage(
-        isTodayEntry ? rootsForMany(d.kb.journalFeed(todayISO(), FEED_INITIAL)) : rootsFor(p),
-        d.marks(),
-        d.atoms(),
-      )
+      const feedDays = isTodayEntry
+        ? d
+            .kb.query({ ...FEED_SPEC, limit: FEED_INITIAL })
+            .map((h) => d.kb.get(h.blockId))
+            .filter((b): b is Block => b !== undefined)
+        : []
+      d.loadPage(isTodayEntry ? rootsForMany(feedDays) : rootsFor(p), d.marks(), d.atoms())
       d.refreshList()
       d.refreshTitle()
       d.saveNow()

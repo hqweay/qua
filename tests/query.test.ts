@@ -167,6 +167,66 @@ test('runQuery：journal 条件取那天的**子块**，不含只读日期行本
   assert.deepEqual(hits.map((h) => h.blockId), ['j1a', 'j1b'], '日期行 j1 不该在结果里')
 })
 
+test('runQuery：role 成员条件把**天当结果**（不触发「journal 不当结果」的排除规则）', () => {
+  const { blocks, atoms } = fixture()
+  // 排除规则只挂在范围条件（env.journalDate）上：role 命中的恰恰是日期行自己
+  const hits = runQuery({ where: { role: 'journal' }, scope: 'all' }, { blocks, atoms })
+  assert.deepEqual(hits.map((h) => h.blockId), ['j1'])
+  // 嵌在组合里的 role 是普通谓词，逐块判定，结果同形
+  const inAny = runQuery({ where: { any: [{ role: 'journal' }] }, scope: 'all' }, { blocks, atoms })
+  assert.deepEqual(inAny.map((h) => h.blockId), ['j1'])
+})
+
+test('runQuery：sort 按 spec 排序（先排序后 limit），稳定 ＋ 缺槽最后', () => {
+  const mk = (id: string, v?: unknown): Block => ({
+    id,
+    text: id,
+    children: [],
+    ...(v === undefined ? {} : { props: { k: v } }),
+  })
+  // b 与 e 同值：稳定排序必须保留森林先序（b 在前）；d 缺槽：排最后（与方向无关）
+  const forest = [mk('a', '2026-01-03'), mk('b', '2026-01-01'), mk('c', '2026-01-02'), mk('d'), mk('e', '2026-01-01')]
+  const atoms: Atom[] = []
+  const spec = (sort: QuerySpec['sort'], limit?: number): QuerySpec => ({
+    where: { text: '' },
+    scope: 'all',
+    ...(sort ? { sort } : {}),
+    ...(limit === undefined ? {} : { limit }),
+  })
+  const ids = (hits: { blockId: string }[]): string[] => hits.map((h) => h.blockId)
+  assert.deepEqual(ids(runQuery(spec([{ by: 'k', dir: 'desc' }]), { blocks: forest, atoms })), [
+    'a',
+    'c',
+    'b',
+    'e',
+    'd',
+  ])
+  assert.deepEqual(ids(runQuery(spec([{ by: 'k', dir: 'asc' }]), { blocks: forest, atoms })), [
+    'b',
+    'e',
+    'c',
+    'a',
+    'd',
+  ])
+  // 「取最新的 3 天」＝先按 _date 降序、再 limit —— 截断在排序之后才对
+  assert.deepEqual(ids(runQuery(spec([{ by: 'k', dir: 'desc' }], 2), { blocks: forest, atoms })), ['a', 'c'])
+})
+
+test('canonicalSpec：role 条件与 sort 键要能存活下来（否则存进 _query 就被丢掉）', () => {
+  const spec: QuerySpec = {
+    where: { role: 'journal' },
+    scope: 'all',
+    sort: [{ by: '_date', dir: 'desc' }],
+    limit: 3,
+  }
+  assert.deepEqual(canonicalSpec(spec), spec)
+  assert.equal(
+    JSON.stringify(canonicalSpec(spec)),
+    '{"where":{"role":"journal"},"scope":"all","sort":[{"by":"_date","dir":"desc"}],"limit":3}',
+    '键序固定（where → scope → sort → todo → limit）',
+  )
+})
+
 test('runQuery：all / any / not 组合', () => {
   const { blocks, atoms } = fixture()
   const todoOnly = runQuery({ where: { all: [{ tag: 'todo' }, { todo: 'todo' }] }, scope: 'all' }, { blocks, atoms })
@@ -212,6 +272,9 @@ test('索引路径与纯函数路径同解（ref/tag/journal 查表，判定与�
   assertSameHits({ where: { all: [{ tag: 'todo' }, { todo: 'todo' }] }, scope: 'all' }, blocks, atoms)
   assertSameHits({ where: { text: '丙' }, scope: 'all' }, blocks, atoms)
   assertSameHits({ where: { tag: 'todo' }, scope: 'all', limit: 2 }, blocks, atoms)
+  // 成员条件（索引路径查日期表收窄候选）＋ 排序轴
+  assertSameHits({ where: { role: 'journal' }, scope: 'all' }, blocks, atoms)
+  assertSameHits({ where: { role: 'journal' }, scope: 'all', sort: [{ by: '_date', dir: 'desc' }] }, blocks, atoms)
 })
 
 test('refreshSpec：把条件与结果写回块上；丢掉的不再匹配的块要能报出来', () => {

@@ -23,7 +23,7 @@ import { findByAlias } from '../alias.ts'
 import { findPath, findInForest, trashOf } from '../tree.ts'
 import { walkForest } from '../walk.ts'
 import { findTagByName, tagsOf as tagsOfBlock, tagIdsOf } from '../tags.ts'
-import { findJournalDay, journalFeedDays } from '../journal.ts'
+import { findJournalDay } from '../journal.ts'
 import { queryByIndex } from '../index-port.ts'
 import {
   allPropDefs,
@@ -213,10 +213,6 @@ export class MemoryKb implements KbClient {
 
   journalDay(date: string): Block | undefined {
     return findJournalDay(this.store.blocks, date)
-  }
-
-  journalFeed(date: string, limit: number): readonly Block[] {
-    return journalFeedDays(this.store.blocks, date, limit)
   }
 
   annotationsOf(id: string): { marks: readonly Mark[]; atoms: readonly Atom[] } {

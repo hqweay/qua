@@ -181,8 +181,6 @@ export interface KbClient {
   findTag(name: string): Block | undefined
   /** 某天的 journal 块（一天一个；没有这一天 ⇒ `undefined`） */
   journalDay(date: string): Block | undefined
-  /** 日记流的日子：`date` 当天在顶、更早存在的天按日期降序，最多 `limit` 个 */
-  journalFeed(date: string, limit: number): readonly Block[]
 
   annotationsOf(id: string): { marks: readonly Mark[]; atoms: readonly Atom[] }
 

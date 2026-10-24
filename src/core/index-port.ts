@@ -18,7 +18,7 @@ import { normalizeAlias } from './alias.ts'
 import { journalDate, isJournal } from './journal.ts'
 import { tagIdsOf } from './tags.ts'
 import type { Op } from './kb/types.ts'
-import { evaluateQuery, firstJournal, type QueryEnv, type QueryHit, type QueryNode, type QuerySpec } from './query.ts'
+import { evaluateQuery, firstJournal, isExactRoleJournal, type QueryEnv, type QueryHit, type QueryNode, type QuerySpec } from './query.ts'
 
 /**
  * 一份索引。五张表各答一类问题，**全是派生**：
@@ -507,6 +507,17 @@ export function queryByIndex(
   if (env.journalDate) {
     const dayId = index.journals.get(env.journalDate)
     roots = dayId ? (index.blocks.get(dayId)?.children ?? []) : []
+  }
+  /**
+   * 成员条件的白拿：**日期表就是这条条件的候选集**（一天一个、O(天数)），不用全库逐块判定。
+   * 仅限 where 顶层就是 `{ role: 'journal' }` 本身、且没有范围条件与锚点时——
+   * 嵌进组合里的 role 是普通谓词，收窄会把其它分支的候选丢掉。
+   * 与纯函数路径（走 `journalDays`）的等式由测试钉住。
+   */
+  if (isExactRoleJournal(spec.where) && !env.journalDate && roots === forest) {
+    roots = [...index.journals.values()]
+      .map((id) => index.blocks.get(id))
+      .filter((b): b is Block => b !== undefined)
   }
   return evaluateQuery(spec, roots, env)
 }

@@ -714,6 +714,8 @@ function commandDecls() {
   // ⇒ **所有块都成了「无露面」**，页/标签/日记的每一条身份判据同时翻转，一个红灯都没有。
   // ⇒ `.roles` 只许出现在模型实现里（唯一实现），别处一律走 `hasList`／`listsOf`／`identityTags`。
   const ROLES_IMPL = 'src/core/model.ts'
+  // 查询条件的实现与序列化：这两处读的 `.role` 是条件原子的键，不是块的列表判定
+  const QUERY_LANG = new Set(['src/core/query.ts', 'src/core/query-view.ts'])
   const hits = []
   for (const f of srcFiles) {
     const r = rel(f)
@@ -727,7 +729,10 @@ function commandDecls() {
       if (ts.isPropertyAccessExpression(n) && n.name.text === 'role') {
         // DOM 的 `el.dataset.role` 是对外 CSS 契约（`[data-role~='journal']`），不是块角色判定
         const isDataset = ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'dataset'
-        if (!isDataset) push(n, '读了单值 `.role`')
+        // 查询语言自己的 `role` 键（条件原子 `{ role: 'journal' }`）也不是块角色判定：
+        // 它读的是 QueryNode 联合类型的条件形状，与 `props._lists` 无关
+        const isQueryLang = QUERY_LANG.has(r)
+        if (!isDataset && !isQueryLang) push(n, '读了单值 `.role`')
       }
       // ①b `x.roles`（唯一允许的读点在模型实现里）
       if (ts.isPropertyAccessExpression(n) && n.name.text === 'roles' && r !== ROLES_IMPL) {
@@ -755,7 +760,7 @@ function commandDecls() {
     title: '列表判定只走 `hasList`（禁读单值 `.role` 与裸 `.roles`）',
     method: `AST 扫 src/**/*.ts 的 \`x.role\`／\`x.roles\` 属性访问、\`x["role"]\` 元素访问、\`const { role } = …\` 解构；\`el.dataset.role\` 豁免（DOM 属性，不是块的列表判定）`,
     scope: `src/**/*.ts（${srcFiles.length} 个文件）`,
-    whitelist: `\`el.dataset.role\`（写入 DOM 供 CSS 选择，承的是身份**外观**契约）· \`${ROLES_IMPL}\`（列表集合的唯一实现处）· 列表**写入**请走 \`addList\`／\`removeList\``,
+    whitelist: `\`el.dataset.role\`（写入 DOM 供 CSS 选择，承的是身份**外观**契约）· \`${ROLES_IMPL}\`（列表集合的唯一实现处）· 查询条件原子的键（\`{ role: 'journal' }\`，读的是 QueryNode 形状不是块）：src/core/query.ts ＋ src/core/query-view.ts · 列表**写入**请走 \`addList\`／\`removeList\``,
     hits: hits.length,
     detail: hits,
     note: '为什么必须机检：列表住进属性袋之后，裸读 `.roles` 恒 `undefined`，表现是「所有块都成了无露面」——页、标签、日记的身份判据同时翻转，类型检查也看不出来',

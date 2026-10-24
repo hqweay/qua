@@ -1,8 +1,18 @@
 /**
  * 日记命令：翻日与「回今日」。
  */
-import { FEED_INITIAL, isJournal, journalDate, journalId, mkJournalBlock, shiftISO, todayISO } from '../../core/index.ts'
+import {
+  FEED_INITIAL,
+  FEED_SPEC,
+  isJournal,
+  journalDate,
+  journalId,
+  mkJournalBlock,
+  shiftISO,
+  todayISO,
+} from '../../core/index.ts'
 import type { App } from '../../core/ports.ts'
+import type { Block } from '../../core/model.ts'
 import { rootsFor, rootsForMany } from './roots.ts'
 import type { PageDeps } from './types.ts'
 
@@ -55,7 +65,8 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
   /**
    * 打开**日记流**：`date` 在顶、更早的「存在的天」往下。
    *
-   * ⚠️ 只取森林里**存在的** journal 块（`journalFeedDays`），不按日历逐天生造空天。
+   * ⚠️ 「哪些天」由一份 QuerySpec 字面量回答（role 成员条件＋`_date` 降序＋limit），
+   *    经索引路径求值（`kb.query`）——与查询块共用同一份评估，这里没有第二条来源语言。
    * ⚠️ 每个加载的天都要能直接打字：日期行只读 ⇒ 空天的首子块由装载边界补（经事务进库）。
    */
   const openFeed = (date: string): void => {
@@ -68,9 +79,12 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
      *    装载顺序不变（按日期降序），只是当前对象归今天。
      */
     d.setActiveId(anchorId, { feed: true })
-    // 流的形态＝「date 在顶、更早存在的天往下」：天数是命名的库读（`kb.journalFeed`），
-    // 排一列由 `rootsForMany` 负责——「哪些天」是库的问题，「怎么排」是装载的问题
-    d.loadPage(anchor ? rootsForMany(d.kb.journalFeed(journalDate(anchor), FEED_INITIAL)) : [], d.marks(), d.atoms())
+    // 流的形态＝「date 在顶、更早存在的天往下」：选天是查询的事，「怎么排」是装载的事
+    const days = d
+      .kb.query({ ...FEED_SPEC, limit: FEED_INITIAL })
+      .map((h) => d.kb.get(h.blockId))
+      .filter((b): b is Block => b !== undefined)
+    d.loadPage(anchor ? rootsForMany(days) : [], d.marks(), d.atoms())
     d.refreshList()
     d.refreshTitle()
     d.saveNow()

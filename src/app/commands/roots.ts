@@ -51,9 +51,9 @@ export function rootsFor(block: Block): Block[] {
  * **一列真实的根**：日记流／查询列表／多页并排。
  * 现在 block store 是唯一真相：这里返回**活引用**，不是浅拷贝；编辑直接写 store。
  *
- * 「日记流装哪些天」是**命名的库读**（`kb.journalFeed`：date 在顶、更早存在的天往下）；
- * 「单日还是流」的形态判据在各入口（左槽 Daily note 入口＝流、聚焦/翻日＝单日），
- * 这里只负责把选好的一列块排成装载根。
+ * 「日记流装哪些天」由一份 QuerySpec 字面量回答（role 成员条件＋`_date` 降序＋limit，
+ * 与查询块共用同一份评估）；「单日还是流」的形态判据在各入口
+ * （左槽 Daily note 入口＝流、聚焦/翻日＝单日），这里只负责把选好的一列块排成装载根。
  */
 export function rootsForMany(blocks: readonly Block[]): Block[] {
   return blocks.slice()

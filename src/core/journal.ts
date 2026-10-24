@@ -75,20 +75,6 @@ export function findJournalDay(blocks: readonly Block[], date: string): Block | 
   return journalDays(blocks).find((b) => journalDate(b) === date)
 }
 
-/**
- * 日记流：从 `anchor`（含）向过去取**存在的** journal 块，
- * 按 `_date` **降序**（今日在顶、越往下越早），最多 `limit` 天。
- *
- * ⚠️ **不造空天**：没有写过的日期不会有块，也就不会出现在流里。
- *    「日记是按需物化的资源」——没写过的日期不该存在。
- * ⚠️ 只做选择，不做视图：调用方负责装载边界的归一（空天补首子块）与浅拷贝成 roots。
- */
-export function journalFeedDays(blocks: readonly Block[], anchor: string, limit = 14): Block[] {
-  const days = journalDays(blocks).filter((b) => journalDate(b) <= anchor)
-  days.sort((a, b) => journalDate(b).localeCompare(journalDate(a)))
-  return days.slice(0, Math.max(0, limit))
-}
-
 /** 日记流的首屏/增量/上限（调研 §4.9 的「3 + 5」口径，上限先兜住 DOM） */
 export const FEED_INITIAL = 3
 export const FEED_STEP = 5

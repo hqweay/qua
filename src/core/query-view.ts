@@ -128,10 +128,12 @@ export function canonicalSpec(spec: QuerySpec): QuerySpec {
     if ('text' in n) return { text: n.text }
     if ('prop' in n) return { prop: { id: n.prop.id, eq: n.prop.eq } }
     if ('todo' in n) return { todo: n.todo }
-    return { journal: n.journal }
+    if ('journal' in n) return { journal: n.journal }
+    return { role: n.role }
   }
   const out: QuerySpec = { where: node(spec.where) }
   if (spec.scope) out.scope = spec.scope
+  if (spec.sort && spec.sort.length > 0) out.sort = spec.sort.map((k) => ({ by: k.by, dir: k.dir }))
   if (spec.todo) out.todo = spec.todo
   if (typeof spec.limit === 'number') out.limit = spec.limit
   return out

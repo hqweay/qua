@@ -15,7 +15,7 @@ import { walkForest } from './walk.ts'
 import type { Atom } from './annotations.ts'
 import { findPath } from './tree.ts'
 import { findTagByName, tagMemberIds } from './tags.ts'
-import { findJournalDay } from './journal.ts'
+import { findJournalDay, journalDays } from './journal.ts'
 import { todoOf } from './props.ts'
 
 /* ------------------------------------------------------------ 条件形状 */
@@ -55,11 +55,27 @@ export type QueryNode =
   | { prop: { id: string; eq: unknown } }
   /** 某天（`YYYY-MM-DD`）的日记块**下面的块** */
   | { journal: string }
+  /**
+   * **是某种东西**的块本身（成员条件）。
+   *
+   * ⚠️ 与 `journal` 的分工写死：**范围条件把 journal 块当容器**（钻进那天下面找），
+   *    **成员条件把它当结果**（天自己入选）。所以「journal 块不当结果」的排除规则
+   *    只挂在范围条件上（见 `evaluateQuery` 的 `env.journalDate`），`role` 不触发它。
+   * ⚠️ 逐值分发到**既有唯一判据**，不另设第二份答案：journal 的判据只有「`_date` 在不在」。
+   *    值域首版只实现 `journal`（有日期表可查）；`page`／`tag` 留轴，进值域时在此续支。
+   */
+  | { role: 'journal' }
   | { all: QueryNode[] }
   | { any: QueryNode[] }
   | { not: QueryNode }
 
 export type TodoFilter = 'todo' | 'done' | 'none'
+
+/** 一个排序键：按**属性 id** 取值升/降序（与属性条件同一个理由：键是 id，改名不影响语义） */
+export interface SortKey {
+  by: string
+  dir: 'asc' | 'desc'
+}
 
 /** 整个查询：条件 ＋ 范围 ＋ 顺序。没有 `view: table | board` —— 首版只有大纲列表 */
 export interface QuerySpec {
@@ -70,6 +86,13 @@ export interface QuerySpec {
    */
   scope?: 'subtree' | 'all'
   todo?: TodoFilter
+  /**
+   * 结果顺序：按键**依次**比较（写在前面的优先）。缺省＝森林先序。
+   *
+   * 排序是**稳定**的：同值的行保持森林先序；**缺槽的排最后**（与方向无关）——
+   * 「没有这一槽」不是一个小值，放进有序区会把缺槽的混进中间。
+   */
+  sort?: SortKey[]
   /** 取多少条；缺省不限 */
   limit?: number
 }
@@ -112,20 +135,54 @@ export interface QueryEnv {
 }
 
 /**
- * 谓词判定与**顺序**的唯一一份实现：按森林先序走，命中即收，最后按 `limit` 截断。
+ * 谓词判定与**顺序**的唯一一份实现：按森林先序走，命中即收，
+ * 有 `sort` 时按 spec 排序，最后按 `limit` 截断（先排序后截断——「取最新的 3 天」才取得到）。
  *
- * ⚠️ 顺序是契约的一部分（「冻结」保存的是输出的 `blockId[]`），所以候选迭代
- *    必须是森林先序 —— 索引的插入顺序在挪位之后会漂移，不能拿来当序。
+ * ⚠️ 顺序是契约的一部分（「冻结」保存的是输出的 `blockId[]`）：缺省按森林先序，
+ *    索引的插入顺序在挪位之后会漂移，不能拿来当序；`sort` 是 spec 的一部分，
+ *    同值时稳定排序保留森林先序。
  */
 export function evaluateQuery(spec: QuerySpec, roots: readonly Block[], env: QueryEnv): QueryHit[] {
-  const hits: QueryHit[] = []
+  const hits: { blockId: string; path: string[]; block: Block }[] = []
+  /** 收窄过的候选集（如 role:'journal' 走天表）里，同一块可能既当「后代」又当「候选根」被走到——一条结果只许出现一次 */
+  const seen = new Set<string>()
   walk(roots, (b, ancestors) => {
     if (env.journalDate && isJournalBlock(b)) return
     if (!matches(spec.where, b, env.refs, env.tags)) return
     if (spec.todo && (todoOf(b) ?? 'none') !== spec.todo) return
-    hits.push({ blockId: b.id, path: ancestors.map((a) => a.id) })
+    if (seen.has(b.id)) return
+    seen.add(b.id)
+    hits.push({ blockId: b.id, path: ancestors.map((a) => a.id), block: b })
   })
-  return typeof spec.limit === 'number' ? hits.slice(0, Math.max(0, spec.limit)) : hits
+  applySort(hits, spec.sort)
+  const size = typeof spec.limit === 'number' ? Math.max(0, spec.limit) : hits.length
+  return hits.slice(0, size).map(({ blockId, path }) => ({ blockId, path }))
+}
+
+/** 排序键可能不止一个：从最后一个键往前排，稳定排序让写在前面的键成为主键 */
+function applySort(hits: { block: Block }[], sort: readonly SortKey[] | undefined): void {
+  if (!sort || sort.length === 0) return
+  for (let i = sort.length - 1; i >= 0; i--) {
+    const { by, dir } = sort[i]!
+    const sign = dir === 'desc' ? -1 : 1
+    hits.sort((x, y) => {
+      const xv = x.block.props?.[by]
+      const yv = y.block.props?.[by]
+      if (xv === undefined || yv === undefined) {
+        if (xv === undefined && yv === undefined) return 0
+        return xv === undefined ? 1 : -1
+      }
+      return sign * cmpValues(xv, yv)
+    })
+  }
+}
+
+/** 值的原生比较：数值按大小、其余按字符串序（`_date` 这类 ISO 串字典序即时间序）。异型值不做承诺 */
+function cmpValues(a: unknown, b: unknown): number {
+  if (typeof a === 'number' && typeof b === 'number') return a - b
+  const sa = String(a)
+  const sb = String(b)
+  return sa < sb ? -1 : sa > sb ? 1 : 0
 }
 
 /** 指向 `targetId` 的原子所在的块 id 集合（**一条指向边的另一端**，与渲染无关） */
@@ -154,6 +211,7 @@ function matches(node: QueryNode, b: Block, refs: ReadonlySet<string>, tags: Rea
   if ('all' in node) return node.all.every((n) => matches(n, b, refs, tags))
   if ('any' in node) return node.any.some((n) => matches(n, b, refs, tags))
   if ('not' in node) return !matches(node.not, b, refs, tags)
+  if ('role' in node) return roleMatches(node.role, b)
   if ('ref' in node) return refs.has(b.id)
   if ('tag' in node) return tags.has(b.id)
   if ('text' in node) return b.text.includes(node.text)
@@ -166,6 +224,20 @@ function matches(node: QueryNode, b: Block, refs: ReadonlySet<string>, tags: Rea
   }
   const cur = todoOf(b) ?? 'none'
   return node.todo === cur
+}
+
+/** role 逐值分发到**既有唯一判据**，不另设第二份答案；进新值域时在此续支 */
+function roleMatches(role: 'journal', b: Block): boolean {
+  return role === 'journal' ? isJournalBlock(b) : false
+}
+
+/**
+ * where 的**顶层**就是 `{ role: 'journal' }` 本身（日记流形态）。
+ * 只有这个形态允许把候选集收窄成「天」——嵌进组合里的 role 是普通谓词，
+ * 收窄会把其它分支的候选丢掉（比如 `{ not: { role: 'journal' } }` 恰恰要非天的块）。
+ */
+export function isExactRoleJournal(node: QueryNode): boolean {
+  return 'role' in node && node.role === 'journal'
 }
 
 /**
@@ -185,6 +257,12 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
   let roots: readonly Block[] = input.blocks
   const anchor = spec.scope !== 'all' && input.anchorId ? findById(input.blocks, input.anchorId) : undefined
   if (anchor) roots = [anchor]
+
+  /**
+   * 成员条件的候选收窄：「库里有哪些天」的唯一口径（一天一个、先序第一个）就是候选集，
+   * 不用全库逐块判定。仅限顶层就是这个原子本身、且没有范围条件与锚点时。
+   */
+  if (isExactRoleJournal(spec.where) && !env.journalDate && !anchor) roots = journalDays(input.blocks)
 
   /** `journal` 条件把范围再收一层：只取那天块里的**子块**（日期行是只读标题，不该出现在结果里） */
   if (env.journalDate) {

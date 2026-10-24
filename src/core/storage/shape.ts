@@ -52,8 +52,12 @@ import { LEGACY_ALIAS_PROP, normalizeAlias } from '../alias.ts'
  *            库级 `trash` 数组退场（回收站是标记的**派生视图**，不再是一份存储）。
  *            旧库把被删块存在 `trash` 里，新代码不读那一格（那些块会「消失」——
  *            在旧模型里它们本来也不可见）⇒ 作废重 seed，不写迁移。
+ * v17 → v18：查询条件升形——`where` 新增 role 成员条件原子、spec 新增 `sort` 键
+ *            （日记流的来源从命名的库读改成一份 QuerySpec 字面量）。
+ *            旧库的 `_query` 块没有这两种形状，判「条件合法」的读路径会拒绝它们
+ *            ⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 17
+export const WORKSPACE_VERSION = 18
 
 /** 示例库：一片块森林 ＋ 行内锚点/原子 */
 export interface Workspace {

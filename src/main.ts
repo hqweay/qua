@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, checkAddParent, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  isJournal, journalDate, journalFeedDays,  normalizeAlias, parentTags, primaryAliasOf, prop,  pruneParentTags, removeList,  setBlockType, tagMemberIds, todayISO,  type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, checkAddParent, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  normalizeAlias, parentTags, primaryAliasOf, prop,  pruneParentTags, removeList,  setBlockType, tagMemberIds,  type Atom, type Block, type CtxKeys } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
 import { BlockEditor } from './view/editor.ts'
@@ -137,7 +137,7 @@ if (boot.status !== 'ok' || !activeStillExists) ws.activeId = todayId
  *    补的块随冷启动后的整库落盘一起进盘——运行时的装载边界才走事务（`materializeEditableRoots`）。
  */
 const bootActive = findInForest(ws.blocks, ws.activeId) ?? ws.blocks[0]
-const bootDays = bootActive && isJournal(bootActive) ? journalFeedDays(ws.blocks, todayISO(), FEED_INITIAL) : []
+const bootDays = bootActive && isJournal(bootActive) ? feedDays(ws.blocks, FEED_INITIAL) : []
 for (const day of bootDays) ensureFirstBlock(day.children)
 const bootRoots: Block[] = bootDays.length > 0 ? rootsForMany(bootDays) : bootActive ? rootsFor(bootActive) : []
 
@@ -812,7 +812,7 @@ const app: App = {
       // ⚠️ 装载口径必须与**冷启动**同一条规则（那里是 `bootDays ? rootsForMany(bootDays) : rootsFor(bootActive)`）：
       //    落点是日记 ⇒ 装**日记流**（今日在顶＋存在的更早的天），别的块 ⇒ 只装它自己。
       //    原来这里只有 `rootsFor(p)`，于是「载入假数据」后日记流消失、只剩今天一段。
-      const feed = isJournal(p) ? journalFeedDays(ws.blocks, todayISO(), FEED_INITIAL) : []
+      const feed = isJournal(p) ? feedDays(ws.blocks, FEED_INITIAL) : []
       const roots = feed.length > 0 ? rootsForMany(feed) : rootsFor(p)
       // 装载边界同一条归一：空 journal 天经事务补首子块（演示换库也是一次「打开」）
       materializeEditableRoots(roots)
@@ -1235,7 +1235,7 @@ function appendMoreFeed(): boolean {
   if (roots.length >= FEED_MAX) return false
   const loaded = new Set(roots.map((r) => r.id))
   const limit = Math.min(roots.length + FEED_STEP, FEED_MAX)
-  const more = journalFeedDays(ws.blocks, journalDate(active), limit)
+  const more = feedDays(ws.blocks, limit)
     .filter((d) => !loaded.has(d.id))
     .slice(0, limit - roots.length)
   if (more.length === 0) return false

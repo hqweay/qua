@@ -1,8 +1,9 @@
 /**
  * zoom 命令：把中心槽的「当前对象」换成任意块，以及退回祖先。
  */
-import { FEED_INITIAL, isJournal, journalDate } from '../../core/index.ts'
+import { FEED_INITIAL, FEED_SPEC, isJournal } from '../../core/index.ts'
 import type { App } from '../../core/ports.ts'
+import type { Block } from '../../core/model.ts'
 import { rootsFor, rootsForMany } from './roots.ts'
 import type { PageDeps } from './types.ts'
 
@@ -38,11 +39,14 @@ export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut' | 'ins
 
     d.flush()
     d.setActiveId(id, { feed })
-    d.loadPage(
-      feed && isJournal(b) ? rootsForMany(d.kb.journalFeed(journalDate(b), FEED_INITIAL)) : rootsFor(b),
-      d.marks(),
-      d.atoms(),
-    )
+    const feedDays =
+      feed && isJournal(b)
+        ? d
+            .kb.query({ ...FEED_SPEC, limit: FEED_INITIAL })
+            .map((h) => d.kb.get(h.blockId))
+            .filter((x): x is Block => x !== undefined)
+        : []
+    d.loadPage(feed && isJournal(b) ? rootsForMany(feedDays) : rootsFor(b), d.marks(), d.atoms())
     d.refreshList()
     d.refreshTitle()
     d.saveNow()
