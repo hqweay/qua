@@ -870,11 +870,19 @@ export class BlockEditor {
     const prevIds = this.ownerIds()
     const flat = flatten(this.doc)
     const firstIdx = Math.min(...roots.map((b) => flat.findIndex((x) => x.id === b.id)))
-    // 反向删：前面的 index 不会因后面的删除而漂移
-    for (const b of [...roots].reverse()) {
-      const loc = locate(this.doc, b.id)
-      if (!loc || loc.parent === null) continue
-      loc.parent.children.splice(loc.index, 1)
+    // 落点先算好再动手：删除进行中再 locate，读的是一棵已经少了几块的树
+    const targets = [...roots]
+      .reverse()
+      .map((b) => locate(this.doc, b.id))
+      .filter((l): l is Located & { parent: Block } => Boolean(l && l.parent !== null))
+    if (this.write) {
+      const write = this.write
+      // 每棵子树逐块 `block.delete`（级联是落库实现的事，op 序列要说得清删了哪些块）
+      write((tx) => {
+        for (const loc of targets) tx.remove(loc.block.id)
+      })
+    } else {
+      for (const loc of targets) loc.parent.children.splice(loc.index, 1)
     }
     this.syncAnchors(prevIds)
     this.undo.record(before, 'structural', Date.now())
@@ -1254,13 +1262,25 @@ export class BlockEditor {
   addTag(blockId: string, name: string): boolean {
     const b = this.store.find(blockId)
     if (!b) return false
-    // 快照取在 `ensureTag` **之前**：撤销这次挂标签时，顺手建出的标签块也该一起回滚
+    // 快照取在**建标签**之前：撤销这次挂标签时，顺手建出的标签块也该一起回滚
     const before = this.snap()
-    const tagId = ensureTag(this.store.blocks, name).block?.id
-    if (!tagId || hasTag(b, tagId)) return false
-    // 同 `convertHashTag`：刚建的块不在索引里，紧接着的重画要靠它
-    this.store.invalidateIndex()
-    addTagId(b, tagId)
+    if (this.write) {
+      // 建标签块（可能）＋写归属是同一笔：拆开就会留下「只有标签、没有归属」的半批。
+      // 与 `convertHashTag` 的事务支同形；名字为空／已挂 ⇒ 事务里什么都不写（零 op）
+      const ok = this.write((tx) => {
+        const tag = ensureTagInTx(this.store.blocks, name, tx)
+        if (!tag || hasTag(b, tag.id)) return false
+        tx.setTags(blockId, [...tagIdsOf(b), tag.id])
+        return true
+      })
+      if (!ok) return false
+    } else {
+      const tagId = ensureTag(this.store.blocks, name).block?.id
+      if (!tagId || hasTag(b, tagId)) return false
+      // 同 `convertHashTag` 直写支：刚建的块不在索引里，紧接着的重画要靠它
+      this.store.invalidateIndex()
+      addTagId(b, tagId)
+    }
     this.undo.record(before, 'other', Date.now())
     if (locate(this.doc, blockId)) this.renderBlock(blockId)
     this.emitChange('text', [blockId])
@@ -1288,13 +1308,37 @@ export class BlockEditor {
      *    无关。所以不按 `locate` 决定收不收：目标块不在本视图里时也要把正文那几格收掉，
      *    否则换个视图打开它，会看到一枚「属于标签、但归属里已经没有它」的僵尸原子。
      */
-    for (const a of hits) {
-      const ch = { from: a.start, to: a.end, insert: '' }
-      writeBlockText(b, b.text.slice(0, a.start) + b.text.slice(a.end))
-      this.marks = mapMarks(this.marks, blockId, ch)
-      this.atoms = mapAtoms(this.atoms, blockId, ch).kept.filter((x) => x.id !== a.id)
+    const apply = () => {
+      let text = b.text
+      let marks = this.marks
+      let atoms = this.atoms
+      for (const a of hits) {
+        const ch = { from: a.start, to: a.end, insert: '' }
+        text = text.slice(0, a.start) + text.slice(a.end)
+        marks = mapMarks(marks, blockId, ch)
+        atoms = mapAtoms(atoms, blockId, ch).kept.filter((x) => x.id !== a.id)
+      }
+      return { text, marks, atoms }
     }
-    removeTagId(b, tagId)
+    if (this.write) {
+      // 收原子（正文＋锚点）与摘归属是同一件事 ⇒ 同一笔；正文没变的块 patch 不发 op
+      this.write((tx) => {
+        const { text, marks, atoms } = apply()
+        tx.patch(blockId, (bb) => writeBlockText(bb, text))
+        tx.setAnnotations(
+          blockId,
+          marks.filter((m) => m.blockId === blockId),
+          atoms.filter((x) => x.blockId === blockId),
+        )
+        tx.setTags(blockId, tagIdsOf(b).filter((t) => t !== tagId))
+      })
+    } else {
+      const { text, marks, atoms } = apply()
+      writeBlockText(b, text)
+      this.marks = marks
+      this.atoms = atoms
+      removeTagId(b, tagId)
+    }
     this.undo.record(before, 'delete', Date.now())
     if (loc) this.renderAll()
     this.emitChange('text', [blockId])
@@ -1822,9 +1866,31 @@ export class BlockEditor {
     const before = this.snap()
     const { block, idMap } = cloneSubtree(loc.block)
     const list = loc.parent ? loc.parent.children : this.doc.roots
-    list.splice(loc.index + 1, 0, block)
-    this.marks = normalizeMarks(remapAnchors(this.marks, idMap))
-    this.atoms = remapAnchors(this.atoms, idMap)
+    /**
+     * 克隆块的锚点是**新增**：内容复制 ⇒ 覆盖它的区间标签/原子跟着复制一份。
+     * ⚠️ 不能把整组锚点替换成 remap 的结果——`remapAnchors` 只吐**克隆块**的锚点，
+     *    直接赋值会把克隆子树之外的（连同源块自己的）全部丢掉。
+     */
+    const clonedMarks = normalizeMarks(remapAnchors(this.marks, idMap))
+    const clonedAtoms = remapAnchors(this.atoms, idMap)
+    if (this.write) {
+      const write = this.write
+      write((tx) => {
+        tx.insert(block, loc.parent?.id ?? null, loc.index + 1)
+        // 只喂新块：`setAnnotations` 按 id diff，没动过的块不发 op
+        for (const newId of idMap.values()) {
+          tx.setAnnotations(
+            newId,
+            clonedMarks.filter((m) => m.blockId === newId),
+            clonedAtoms.filter((a) => a.blockId === newId),
+          )
+        }
+      })
+    } else {
+      list.splice(loc.index + 1, 0, block)
+      this.marks = [...this.marks, ...clonedMarks]
+      this.atoms = [...this.atoms, ...clonedAtoms]
+    }
     this.undo.record(before, 'structural', Date.now())
     this.renderAll()
     this.placeCaret(block.id, 0)
@@ -1951,8 +2017,17 @@ export class BlockEditor {
     const field =
       fields.find((f) => f.kind === 'checkbox' && f.propId === TASK_STATUS_PROP_ID) ??
       fields.find((f) => f.kind === 'checkbox')
+    const propId = field?.propId ?? TASK_STATUS_PROP_ID
+    const next = field ? field.value !== true : false
     const before = this.snap()
-    setValue(loc.block, field?.propId ?? TASK_STATUS_PROP_ID, field ? field.value !== true : false)
+    if (this.write) {
+      // 切的是一个属性值：一笔 patch 正好 1 条 `prop.set`（与「插入待办」同一形状）
+      this.write((tx) => {
+        tx.patch(id, (b) => setValue(b, propId, next))
+      })
+    } else {
+      setValue(loc.block, propId, next)
+    }
     this.undo.record(before, 'structural', Date.now())
     this.renderAll()
     this.emitChange('struct', [id])
@@ -2115,7 +2190,14 @@ export class BlockEditor {
      * 那会把子树藏进一条线后面（线没有正文，子块看不见）。
      */
     if (loc.block.text === '' && loc.block.children.length === 0 && canWriteText(loc.block)) {
-      setBlockType(loc.block, DIVIDER_TYPE)
+      if (this.write) {
+        // 原地改类型是一个属性写入：`_type` 一条 op，撤销一次回到「那行还是空白」
+        this.write((tx) => {
+          tx.patch(loc.block.id, (b) => setBlockType(b, DIVIDER_TYPE))
+        })
+      } else {
+        setBlockType(loc.block, DIVIDER_TYPE)
+      }
       this.undo.record(before, 'structural', Date.now())
       this.renderAll()
       this.emitChange('struct', [loc.block.id])
@@ -2124,10 +2206,27 @@ export class BlockEditor {
 
     const divider = mkBlock('')
     setBlockType(divider, DIVIDER_TYPE)
-    if (!this.insertNear(loc, divider)) return false
     const empty = mkBlock('')
-    const at = locate(this.doc, divider.id)
-    if (at) this.insertNear(at, empty)
+    if (this.write) {
+      // 两个块共用一笔（用户按的是一次「插入分割线」）；落点与 `insertNear` 同一条规则：
+      // section 根没有兄弟位，插成它的首两个子块
+      const ok = this.write((tx) => {
+        if (loc.parent === null) {
+          if (typeDeclOf(loc.block).children === 'none') return false
+          tx.insert(divider, loc.block.id, 0)
+          tx.insert(empty, loc.block.id, 1)
+          return true
+        }
+        tx.insert(divider, loc.parent.id, loc.index + 1)
+        tx.insert(empty, loc.parent.id, loc.index + 2)
+        return true
+      })
+      if (!ok) return false
+    } else {
+      if (!this.insertNear(loc, divider)) return false
+      const at = locate(this.doc, divider.id)
+      if (at) this.insertNear(at, empty)
+    }
     this.undo.record(before, 'structural', Date.now())
     this.renderAll()
     this.placeCaret(empty.id, 0)
@@ -2160,12 +2259,27 @@ export class BlockEditor {
     const ranges = selToTextRanges(this.doc, s)
     if (ranges.length === 0) return
     const before = this.snap()
-    for (const r of ranges) {
-      if (r.start >= r.end) continue
-      this.marks = coreToggleMark(this.marks, type, r.blockId, r.start, r.end)
+    const apply = (marks: readonly Mark[]): Mark[] => {
+      let next = marks
+      for (const r of ranges) {
+        if (r.start >= r.end) continue
+        next = coreToggleMark(next, type, r.blockId, r.start, r.end)
+      }
+      return normalizeMarks(next)
+    }
+    if (this.write) {
+      // 只换锚点：正文一个字都不动 ⇒ 零 block op。按块喂（整组进整组出，别的块原样）
+      const touched = [...new Set(ranges.map((r) => r.blockId))]
+      this.write((tx) => {
+        const next = apply(this.marks)
+        for (const bid of touched) {
+          tx.setAnnotations(bid, next.filter((m) => m.blockId === bid), this.atoms.filter((a) => a.blockId === bid))
+        }
+      })
+    } else {
+      this.marks = apply(this.marks)
     }
     this.undo.record(before, 'mark', Date.now())
-    this.marks = normalizeMarks(this.marks)
     if (ranges.length === 1) this.renderBlock(ranges[0]!.blockId)
     else this.renderAll()
     // ⚠️ 还原**整段选区**（不是光标）：否则加完粗选区就塌了，
@@ -2188,10 +2302,26 @@ export class BlockEditor {
     const ranges = selToTextRanges(this.doc, s)
     if (ranges.length === 0) return
     const before = this.snap()
-    for (const r of ranges) {
-      for (const t of ['bold', 'italic', 'highlight', 'code'] as MarkType[]) {
-        this.marks = removeMarkRange(this.marks, t, r.blockId, r.start, r.end)
+    const apply = (marks: Mark[]): Mark[] => {
+      let next = marks
+      for (const r of ranges) {
+        for (const t of ['bold', 'italic', 'highlight', 'code'] as MarkType[]) {
+          next = removeMarkRange(next, t, r.blockId, r.start, r.end)
+        }
       }
+      return next
+    }
+    if (this.write) {
+      // 与 `toggleMark` 同一形状：只换锚点，零 block op
+      const touched = [...new Set(ranges.map((r) => r.blockId))]
+      this.write((tx) => {
+        const next = apply(this.marks)
+        for (const bid of touched) {
+          tx.setAnnotations(bid, next.filter((m) => m.blockId === bid), this.atoms.filter((a) => a.blockId === bid))
+        }
+      })
+    } else {
+      this.marks = apply(this.marks)
     }
     this.undo.record(before, 'mark', Date.now())
     this.renderAll()
@@ -2213,15 +2343,27 @@ export class BlockEditor {
     if (!loc) return null
     const before = this.snap()
     const old = loc.block.text
-    writeBlockText(loc.block, old.slice(0, off) + ATOM_PLACEHOLDER + old.slice(off))
     const shift = { from: off, to: off, insert: ATOM_PLACEHOLDER }
-    this.marks = mapMarks(this.marks, id, shift)
     const a = mkAtom(kind, id, off, opts.label, {
       ...(opts.target ? { target: opts.target } : {}),
       ...(opts.asset ? { asset: opts.asset } : {}),
       ...(opts.quote ? { quote: opts.quote } : {}),
     })
-    this.atoms = [...mapAtoms(this.atoms, id, shift).kept, a]
+    if (this.write) {
+      // 占位格进正文与原子登记是同一件事的两半，拆开落盘会留下「格子在了、原子没登记」的半批
+      this.write((tx) => {
+        tx.patch(id, (b) => writeBlockText(b, old.slice(0, off) + ATOM_PLACEHOLDER + old.slice(off)))
+        tx.setAnnotations(
+          id,
+          mapMarks(this.marks, id, shift).filter((m) => m.blockId === id),
+          [...mapAtoms(this.atoms, id, shift).kept.filter((x) => x.blockId === id), a],
+        )
+      })
+    } else {
+      writeBlockText(loc.block, old.slice(0, off) + ATOM_PLACEHOLDER + old.slice(off))
+      this.marks = mapMarks(this.marks, id, shift)
+      this.atoms = [...mapAtoms(this.atoms, id, shift).kept, a]
+    }
     this.undo.record(before, 'other', Date.now())
     this.renderBlock(id)
     this.placeCaret(id, off + 1)
@@ -2237,17 +2379,31 @@ export class BlockEditor {
     const before = this.snap()
     if (loc) {
       const ch = { from: a.start, to: a.end, insert: '' }
-      writeBlockText(loc.block, loc.block.text.slice(0, a.start) + loc.block.text.slice(a.end))
-      this.marks = mapMarks(this.marks, a.blockId, ch)
-      /**
-       * ⚠️ 必须**显式丢掉这个原子**，不能只交给 `mapAtoms(...).kept`。
-       *
-       * 原因：原子恒占 1 格，删掉它占的那一格后，通用粘性映射（两端各有 bias）
-       * 会把它的区间压到一个长度仍为 1 的位置上 ⇒ **文本里已经没有占位符了，
-       * 原子记录却还活着**。表现是「引用框没了，但那条边还在」。
-       * ⇒ 「占位符没了」与「原子没了」必须一起发生，不能有中间态。
-       */
-      this.atoms = mapAtoms(this.atoms, a.blockId, ch).kept.filter((x) => x.id !== atomId)
+      const old = loc.block.text
+      if (this.write) {
+        // 占位格从正文消失与原子注销必须同笔（见下）：留中间态就是「框没了、边还在」
+        this.write((tx) => {
+          tx.patch(a.blockId, (b) => writeBlockText(b, old.slice(0, a.start) + old.slice(a.end)))
+          tx.setAnnotations(
+            a.blockId,
+            mapMarks(this.marks, a.blockId, ch).filter((m) => m.blockId === a.blockId),
+            mapAtoms(this.atoms, a.blockId, ch)
+              .kept.filter((x) => x.blockId === a.blockId && x.id !== atomId),
+          )
+        })
+      } else {
+        writeBlockText(loc.block, old.slice(0, a.start) + old.slice(a.end))
+        this.marks = mapMarks(this.marks, a.blockId, ch)
+        /**
+         * ⚠️ 必须**显式丢掉这个原子**，不能只交给 `mapAtoms(...).kept`。
+         *
+         * 原因：原子恒占 1 格，删掉它占的那一格后，通用粘性映射（两端各有 bias）
+         * 会把它的区间压到一个长度仍为 1 的位置上 ⇒ **文本里已经没有占位符了，
+         * 原子记录却还活着**。表现是「引用框没了，但那条边还在」。
+         * ⇒ 「占位符没了」与「原子没了」必须一起发生，不能有中间态。
+         */
+        this.atoms = mapAtoms(this.atoms, a.blockId, ch).kept.filter((x) => x.id !== atomId)
+      }
     }
     this.undo.record(before, 'delete', Date.now())
     this.renderAll()
@@ -2353,12 +2509,17 @@ export class BlockEditor {
      * **复用末尾空块，不无中生有**：点底部若最后一段末尾已有一个空块（既无文字也无子块），
      * 直接聚焦它，避免「点一次多一个空块」越点越多。只有末尾没有空块时才新建。
      * 判据收紧到「空文本且空子树」——空标题但带子块的块不当作可复用空块。
+     * ⚠️ 复用支**模型不动、撤销不记**（与 `insertBlockAfter` 的空块支同一条口径）：
+     *    记了就会吃掉一次 ⌘Z——按一次「什么都不变」的动作，退一步却退到上一次改动之前。
      */
     const lastChild = root.children[root.children.length - 1]
     const emptyTail = lastChild && lastChild.text === '' && lastChild.children.length === 0 ? lastChild : null
     const child = emptyTail ?? mkBlock('')
-    if (!emptyTail) root.children.push(child)
-    this.undo.record(before, 'structural', Date.now())
+    if (!emptyTail) {
+      if (this.write) this.write((tx) => tx.insert(child, root.id, root.children.length))
+      else root.children.push(child)
+      this.undo.record(before, 'structural', Date.now())
+    }
     this.renderAll()
     this.placeCaret(child.id, 0)
     this.emitChange('struct')
@@ -2513,22 +2674,54 @@ export class BlockEditor {
     const before = this.snap()
     if (lines.length === 1) {
       const old = loc.block.text
-      writeBlockText(loc.block, old.slice(0, offset) + lines[0]! + old.slice(offset))
-      this.marks = mapMarks(this.marks, id, { from: offset, to: offset, insert: lines[0]! })
-      this.atoms = mapAtoms(this.atoms, id, { from: offset, to: offset, insert: lines[0]! }).kept
+      const next = old.slice(0, offset) + lines[0]! + old.slice(offset)
+      const shift = { from: offset, to: offset, insert: lines[0]! }
+      if (this.write) {
+        // 正文与锚点同一笔（与 `setText` 同形）；锚点只喂这一块的
+        this.write((tx) => {
+          tx.patch(id, (b) => writeBlockText(b, next))
+          tx.setAnnotations(
+            id,
+            mapMarks(this.marks, id, shift).filter((m) => m.blockId === id),
+            mapAtoms(this.atoms, id, shift).kept.filter((x) => x.blockId === id),
+          )
+        })
+      } else {
+        writeBlockText(loc.block, next)
+        this.marks = mapMarks(this.marks, id, shift)
+        this.atoms = mapAtoms(this.atoms, id, shift).kept
+      }
     } else {
       const old = loc.block.text
       const tail = old.slice(offset)
-      writeBlockText(loc.block, old.slice(0, offset) + lines[0]!)
-      const list = loc.parent ? loc.parent.children : this.doc.roots
-      const at = list.indexOf(loc.block)
+      const first = old.slice(0, offset) + lines[0]!
       const created: Block[] = []
       for (let i = 1; i < lines.length; i++) created.push(mkBlock(lines[i]!))
       const last = created[created.length - 1]!
       // 这是**刚造出来、还没进树**的新块（上面 `mkBlock` 那批）⇒ 不走正文写入入口，
       // 它的正文随构造一次给定；那里管的是「改写一个已经存在的地址」
       last.text = last.text + tail
-      list.splice(at + 1, 0, ...created)
+      const list = loc.parent ? loc.parent.children : this.doc.roots
+      /**
+       * 落点与 `insertBlockAfter` 同一条规则：section 根没有兄弟位，余下行成为它的**子块**
+       * （往 `roots` 里插兄弟就是「看得见、写不回去」的死区）。其余块插在它后面的同级位。
+       */
+      const parentId = loc.parent ? loc.parent.id : loc.block.id
+      const baseIndex = loc.parent ? list.indexOf(loc.block) + 1 : 0
+      if (this.write) {
+        const write = this.write
+        write((tx) => {
+          tx.patch(id, (b) => writeBlockText(b, first))
+          created.forEach((c, i) => tx.insert(c, parentId, baseIndex + i))
+        })
+      } else {
+        writeBlockText(loc.block, first)
+        if (loc.parent) list.splice(baseIndex, 0, ...created)
+        else {
+          unfoldBlock(this.doc, loc.block.id)
+          loc.block.children.splice(0, 0, ...created)
+        }
+      }
     }
     this.undo.record(before, 'insert', Date.now())
     this.renderAll()
