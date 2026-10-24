@@ -151,7 +151,7 @@ const bootRoots: Block[] = bootDays.length > 0 ? rootsForMany(bootDays) : bootAc
  * **共享 block store**（下一层）：块/anchors/undo 只有一份；
  * 正文、反链、查询视图都是它的投影。多个 `BlockEditor` 读同一份活块。
  */
-const blocks = new BlockStore(ws.blocks, ws.marks, ws.atoms, ws.trash)
+const blocks = new BlockStore(ws.blocks, ws.marks, ws.atoms)
 /**
  * **读入口**：渲染侧的读都该经它取，而不是自己去 `ws.blocks` 里找。
  *
@@ -321,9 +321,6 @@ function uiCtx(): CtxKeys {
 function syncSections(): void {
   ws.marks = blocks.marks
   ws.atoms = blocks.atoms
-  // 回收站也是库级的共享数组：换库/复位后落盘要写的是 store 那一份，
-  // 否则删掉的块只活在内存里，重开就真没了
-  ws.trash = blocks.trash
   /**
    * 折叠态是**设备状态**（`qua.device`），所以它不再写回库：编辑器持的是 `doc.folded`
    * （视图那份），落盘要的是 `device.folded`（这台设备那份）。
@@ -840,8 +837,8 @@ const pageDeps: PageDeps = {
     return r
   },
   removeBlock: (id) => {
-    // 删页：整棵子树摘进回收站。走 `run` 是为了产出 op —— 命令层只声明「删这块」，
-    // 摘树与打删除标记由事务那一份实现负责。
+    // 删页：整棵子树原位标记（软删）。走 `run` 是为了产出 op —— 命令层只声明「删这块」，
+    // 打标记由事务那一份实现负责（一条 op，只落操作根）。
     run((tx) => tx.remove(id), mainEd)
   },
   insertBlock: (block, parentId, index) => {
@@ -883,7 +880,7 @@ const pageDeps: PageDeps = {
     propsBlockId = null
     ed = mainEd
     // 正文视图的折叠态是**设备**那份；取当前视图持有的那一份（`device.folded` 只在落盘时同步，可能落后一步）
-    mainEd.loadPage({ roots, folded: mainEd.doc.folded, trash: blocks.trash }, marks as never, atoms as never)
+    mainEd.loadPage({ roots, folded: mainEd.doc.folded }, marks as never, atoms as never)
     renderBacklinks()
     renderQueryView()
     renderProperties()
@@ -1308,7 +1305,7 @@ const app: App = {
        */
       device.folded = {}
       scheduleDeviceSave()
-      blocks.reset(next.blocks, next.marks, next.atoms, next.trash)
+      blocks.reset(next.blocks, next.marks, next.atoms)
       const p = activeBlock()
       ed = mainEd
       applyChrome()
@@ -1327,7 +1324,7 @@ const app: App = {
       // ⚠️ 光标必须落在**第一个可编辑的行**上（日记流的第一段是只读日期行）。
       //    原来固定 `roots[0]`，于是载入假数据后光标停在日期行、第一行看着「没有名字」。
       const caret = firstEditableRoot(roots[0])
-      mainEd.loadPage({ roots, folded: device.folded, trash: blocks.trash }, ws.marks, ws.atoms, { blockId: caret?.id ?? '', off: 0 })
+      mainEd.loadPage({ roots, folded: device.folded }, ws.marks, ws.atoms, { blockId: caret?.id ?? '', off: 0 })
       renderBacklinks()
       renderQueryView()
       chrome.renderEmptyHint(activeBlock().children)
@@ -1445,7 +1442,7 @@ ed = new BlockEditor({
   // 共享 store：块是活引用；marks/atoms/undo 也是共享的
   store: blocks,
   // 折叠态是**设备**那份（`qua.device`）：换机器就是另一份，换库时由 `replaceWorkspace` 清空
-  doc: { roots: bootRoots, folded: device.folded, trash: blocks.trash },
+  doc: { roots: bootRoots, folded: device.folded },
   marks: ws.marks,
   atoms: ws.atoms,
   /**

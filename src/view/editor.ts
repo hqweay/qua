@@ -58,6 +58,7 @@ import {
   splitBlockBefore,
   splitBlockIntoFirstChild,
   isFolded,
+  removeBlock,
   toggleChildrenCollapsed,
   toggleCollapsed,
   unfoldBlock,
@@ -1780,11 +1781,10 @@ export class BlockEditor {
         plan.children.forEach((kid, n) => tx.move(kid, plan.kept, plan.kidsAt + n))
         tx.setAnnotations(plan.kept, normalizeMarks([...keptMarks, ...marks]), [...keptAtoms, ...atoms])
         tx.setAnnotations(plan.removed, [], [])
-        /**
-         * 被并块**不进回收站**：它的正文与子块都已经搬进前一块，留一个空壳只是噪声。
-         * op 仍是 `block.delete` —— 回收站是阶段 1 的内存表示，不是持久化事实。
-         */
-        tx.remove(plan.removed, { trash: false })
+        // 被并块的正文已搬进前一块 ⇒ 空壳**清空**：删除是原位标记，壳还留在树上，
+        // 留着正文就是库里有两份同一句话（恢复出来就是重复块）
+        tx.patch(plan.removed, (b) => writeBlockText(b, ''))
+        tx.remove(plan.removed)
       })
     } else {
       if (!mergeIntoPrev(this.doc, id)) return
@@ -1946,10 +1946,14 @@ export class BlockEditor {
         this.viewRootIds = this.viewRootIds.filter((x) => x !== id)
       }
     } else {
-      const list = loc.parent ? loc.parent.children : this.doc.roots
-      list.splice(loc.index, 1)
-      if (wasRoot) this.viewRootIds = this.viewRootIds.filter((x) => x !== id)
-      if (this.doc.roots.length === 0) {
+      // 与事务支同一条口径：森林里**原位标记**（遍历从此看不见它），不摘树；
+      // 装载根被删 ⇒ 窗口 roots 摘掉这一根（roots 是装载单位，不是森林的根）
+      removeBlock(this.doc, id)
+      if (wasRoot) {
+        this.doc.roots.splice(this.doc.roots.indexOf(loc.block), 1)
+        this.viewRootIds = this.viewRootIds.filter((x) => x !== id)
+      }
+      if (flatten(this.doc).length === 0) {
         const empty = mkBlock('')
         this.doc.roots.push(empty)
         this.viewRootIds = [empty.id]

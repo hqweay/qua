@@ -47,13 +47,20 @@ export const DISPLAY_PROP = '_display' as const
 export type DisplayMode = 'alias' | 'text'
 
 /**
- * 删除时间戳（毫秒）。有它 ＝ 这个块在回收站里。
+ * 删除时间戳（毫秒）。有它 ＝ 这个块被删了（**原位软删**）。
  *
- * 它不是「删没删」的开关：树里没有它、回收站里有它，就是删掉了 —— 一份状态只有一个落点。
- * 属性而不是独立的回收站记录，是为了让「一块连同子树」原样搬动：回收站存的就是同一棵子树，
- * 复活时不需要把内容从另一份形状里重新装配一遍。
+ * 删除**不摘树**：块带着整棵子树留在原位，只是遍历（`walkForest`）默认不进被删子树，
+ * 于是所有读路径一致地看不见它。「回收站」是这个标记的**派生视图**（带标记的块清单），
+ * 不是第二个存放处 —— 恢复 ＝ 摘掉标记，块回到原位，内容与祖先链原样接上。
+ * 属性而不是独立记录，为的是「一块连同子树」只有一份真相：不存在「树里一份、回收站一份」
+ * 的两处状态。
  */
 export const DELETED_AT_PROP = '_deletedAt' as const
+
+/** 这一块被删了吗（只看它自己；整棵子树不可见由遍历的跳过规则保证） */
+export function isDeleted(b: Block): boolean {
+  return b.props !== undefined && DELETED_AT_PROP in b.props
+}
 
 /**
  * 系统属性 id。
@@ -88,7 +95,7 @@ export type SystemPropId =
    * 现在这一格是**归属**：块上有哪些标签，与「标签能声明哪些字段」是两件事。
    */
   | '_tags'
-  // 删除时间戳（有它 ＝ 这块在回收站里，见 `DELETED_AT_PROP`）
+  // 删除时间戳（有它 ＝ 这一块被删了，见 `DELETED_AT_PROP`）
   | typeof DELETED_AT_PROP
 
 /**
@@ -308,12 +315,6 @@ export interface Doc {
    * ⚠️ 它不参与撤销：折叠不是内容改动。
    */
   folded?: FoldState
-  /**
-   * **回收站**（被删掉的根块，子树完整）。`Doc` 只**共享引用**，不复制：
-   * 回收站是库级的，而 `Doc` 是一次装载的形状 —— 与 `roots` 共享森林是同一个道理。
-   * 复制一份就会出现「正文视图删的块进这个视图的回收站，别处看不见」。
-   */
-  trash?: Block[]
 }
 
 export interface Located {

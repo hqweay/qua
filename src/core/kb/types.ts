@@ -44,15 +44,13 @@ export function isSystemProp(name: string): boolean {
  * 一个块的**增量补丁**。
  *
  * 结构用 `parent`＋`index` 表达插入与移动（不另造一个 `insert` 事件：
- * 「它现在在哪」是同一件事的两种说法，两个事件就会有两种真相）；
- * `deleted` 表示整棵子树级联删除（落库用递归 CTE）。
+ * 「它现在在哪」是同一件事的两种说法，两个事件就会有两种真相）。
  */
 export type BlockPatch = {
   text?: string
   parent?: string | null
   index?: number
   props?: Record<string, unknown>
-  deleted?: boolean
 }
 
 /**
@@ -106,13 +104,21 @@ export interface Tx {
   /** 移动整棵子树（**自己不能移进自己的子树**） */
   move(id: string, parentId: string | null, index: number): void
   /**
-   * 删除整棵子树：从树上摘下来、打删除标记、放进回收站。
+   * 删除整棵子树：**原位软删** —— 块带着子树留在树上的原位，打上删除标记；
+   * 之后的遍历（读门面的每一条读）都看不见它。
    *
-   * `trash: false` ＝ **这块被并掉了**：正文与子块已经搬进别的块，再留一个空壳
-   * 在回收站里只是噪声。两种情况的 op 形状相同（`block.delete`）——回收站是
-   * 阶段 1 的内存表示，不是持久化事实。
+   * op 只落**操作根**一条 `block.delete`：子树的不可见是继承来的，后代不各报一条
+   * （落库时这也是一行的事：`deleted_at` 写在根行上；恢复才需要把整棵子树接回来，
+   * 而它的行一直都在）。
    */
-  remove(id: string, opts?: { trash?: boolean }): void
+  remove(id: string): void
+  /**
+   * 恢复一个被删的块：摘掉它身上的删除标记，块**回到原位**（它从未离开过树）。
+   *
+   * op 是一条 `block.upsert{parent,index}`——「它回来了、还在这个位置」。
+   * 恢复的是操作根：整棵子树随它一起重新可见。
+   */
+  restore(id: string): void
 
   /** 写一个属性槽（`pos` ＝ 显示顺序，给「有行未填」的槽位用） */
   setProp(id: string, name: string, value: unknown, pos?: number): void
@@ -166,6 +172,11 @@ export interface KbClient {
   pages(): readonly Block[]
   /** 库里的标签块（先序）；标签清单是小集合，大库时改走 `query` */
   tags(): readonly Block[]
+  /**
+   * 回收站（**派生**）：库里所有带删除标记的块（被删子树的操作根，先序）。
+   * 没有第二个存放处——这个清单每次从森林现算，恢复经 `Tx.restore` 回原位。
+   */
+  trash(): readonly Block[]
   /** 这个名字现在归哪个**标签块**（找不到 ≠ 没有同名块——同名地址可能被普通块占着） */
   findTag(name: string): Block | undefined
   /** 某天的 journal 块（一天一个；没有这一天 ⇒ `undefined`） */

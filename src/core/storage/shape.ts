@@ -48,8 +48,12 @@ import { LEGACY_ALIAS_PROP, normalizeAlias } from '../alias.ts'
  *            旧库里的 `folded` 新代码不读（那几个块会静默展开）⇒ 作废重 seed。
  *            ⇒ 版本号动一格，是为了让「库里没有折叠表」成为**唯一形状**，
  *            读路径不必再判「这库有没有带 folded」。
+ * v16 → v17：删除改成**原位软删**——删除标记（`_deletedAt`）写在块上，块带子树留在树里原位；
+ *            库级 `trash` 数组退场（回收站是标记的**派生视图**，不再是一份存储）。
+ *            旧库把被删块存在 `trash` 里，新代码不读那一格（那些块会「消失」——
+ *            在旧模型里它们本来也不可见）⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 16
+export const WORKSPACE_VERSION = 17
 
 /** 示例库：一片块森林 ＋ 行内锚点/原子 */
 export interface Workspace {
@@ -59,14 +63,6 @@ export interface Workspace {
   /** 中心槽持有的「当前对象」（只有中心槽有这个概念） */
   activeId: string
   savedAt: number
-  /**
-   * **回收站**：被删掉的**根**块（子树完整）。每项带着 `_deletedAt`。
-   *
-   * 为什么不只是「删掉就不再存在」：地址（页名／标签名）是块 id 之外的第二个身份，
-   * 删掉一个标签块会让所有指向它的边同时悬空，再打同名又造出一个新 id 的块 —— 旧边一条都不认。
-   * 留住整棵子树，同一地址复活时才接得上。
-   */
-  trash: Block[]
   /** 行内锚点与原子按块 id 索引（demo 平铺存放；接内核后进表） */
   marks: Mark[]
   atoms: Atom[]
@@ -159,17 +155,9 @@ export function parseWorkspace(raw: string | null): ParseResult {
   if (!Array.isArray(ws.blocks) || ws.blocks.length === 0 || !ws.blocks.every(isBlockTree)) {
     return { status: 'corrupt', reason: 'shape' }
   }
-  // 回收站缺省成空数组：这是**新增**的一格，旧库没有它不代表字节坏了；
-  // 但既然有，形状就必须对（「有但读不懂」与「没有」是两件事）。
-  if (ws.trash !== undefined && (!Array.isArray(ws.trash) || !ws.trash.every(isBlockTree))) {
-    return { status: 'corrupt', reason: 'shape' }
-  }
   return {
     status: 'ok',
-    ws: {
-      ...(ws as Workspace),
-      trash: ws.trash ?? [],
-    },
+    ws: ws as Workspace,
   }
 }
 

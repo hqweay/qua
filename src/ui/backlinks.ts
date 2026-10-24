@@ -77,7 +77,7 @@ export class BacklinksView {
       write: deps.write,
       // 折叠态是视图私有的（反链里收起一行，不该让正文里那一块也收起来）；
       // 空表起步，之后一直沿用 `this.editor.doc.folded` 那一份
-      doc: { roots: [], folded: {}, trash: deps.store.trash },
+      doc: { roots: [], folded: {} },
     })
     this.editor.events = {
       change: (kind) => {
@@ -134,7 +134,7 @@ export class BacklinksView {
     this.els.root.hidden = false
     this.els.count.textContent = t('ui.backlinks.count', { count: sources.length })
     this.editor.loadPage(
-      { roots, folded: this.editor.doc.folded, trash: this.deps.store.trash },
+      { roots, folded: this.editor.doc.folded },
       this.deps.store.marks,
       this.deps.store.atoms,
     )

@@ -18,9 +18,9 @@
  */
 import type { Atom, Mark } from '../annotations.ts'
 import { backrefBlocks, backrefsOf, type BackrefBlock, type BackrefSource } from '../backrefs.ts'
-import { aliasesOf, DELETED_AT_PROP, hasList, listsOf, type Block } from '../model.ts'
+import { aliasesOf, DELETED_AT_PROP, hasList, isDeleted, listsOf, type Block } from '../model.ts'
 import { findByAlias } from '../alias.ts'
-import { findPath, findInForest } from '../tree.ts'
+import { findPath, findInForest, trashOf } from '../tree.ts'
 import { walkForest } from '../walk.ts'
 import { findTagByName, tagsOf as tagsOfBlock, tagIdsOf } from '../tags.ts'
 import { findJournalDay, journalFeedDays } from '../journal.ts'
@@ -38,6 +38,38 @@ import {
 import type { QueryHit, QuerySpec } from '../query.ts'
 import type { BlockStore } from '../store.ts'
 import type { Change, KbClient, Op, PathEntry, Tx, TxOpts, TxResult } from './types.ts'
+
+/** 按含**被删块**的遍历找块（可见遍历看不见它们；恢复路径用） */
+function findIncludingDeleted(forest: readonly Block[], id: string): Block | undefined {
+  let hit: Block | undefined
+  walkForest(
+    forest,
+    (b) => {
+      if (b.id === id) {
+        hit = b
+        return false
+      }
+    },
+    { includeDeleted: true },
+  )
+  return hit
+}
+
+/** 同上，连落点（parent ＋ index）一起给（恢复 op 要报「回来了还在原位」） */
+function locateIncludingDeleted(forest: readonly Block[], id: string): { parent: Block | null; index: number; block: Block } | null {
+  let hit: { parent: Block | null; index: number; block: Block } | null = null
+  walkForest(
+    forest,
+    (b, ctx) => {
+      if (b.id === id) {
+        hit = { parent: ctx.parent, index: ctx.index, block: b }
+        return false
+      }
+    },
+    { includeDeleted: true },
+  )
+  return hit
+}
 
 /** 一层的兄弟列表；`null` 父 ⇒ 森林顶层 */
 function siblings(store: BlockStore, parentId: string | null): Block[] | undefined {
@@ -171,6 +203,10 @@ export class MemoryKb implements KbClient {
     return out
   }
 
+  trash(): readonly Block[] {
+    return trashOf(this.store.blocks)
+  }
+
   findTag(name: string): Block | undefined {
     return findTagByName(this.store.blocks, name)
   }
@@ -208,7 +244,7 @@ export class MemoryKb implements KbClient {
   /**
    * 一次事务：进门前快照，成功后交付 `{ ops, changes }`，抛错则**整批恢复**并重抛。
    *
-   * 快照是整片森林 ＋ 锚点 ＋ 回收站：阶段 1 的工作集就是整库，
+   * 快照是整片森林 ＋ 锚点：阶段 1 的工作集就是整库，
    * 所以「回滚」与撤销是同一种机制 —— 它们本来回答的就是同一个问题。
    */
   tx<R>(fn: (tx: Tx) => R, opts: TxOpts = {}): TxResult & { result: R } {
@@ -216,7 +252,6 @@ export class MemoryKb implements KbClient {
       blocks: JSON.stringify(this.store.blocks),
       marks: JSON.stringify(this.store.marks),
       atoms: JSON.stringify(this.store.atoms),
-      trash: JSON.stringify(this.store.trash),
     }
     const ops: Op[] = []
     const changes: Change[] = []
@@ -236,15 +271,13 @@ export class MemoryKb implements KbClient {
   }
 
   /** 按序列化快照原地恢复（保持数组身份：视图手里的引用不会失效） */
-  private restore(snap: { blocks: string; marks: string; atoms: string; trash: string }): void {
+  private restore(snap: { blocks: string; marks: string; atoms: string }): void {
     const blocks = JSON.parse(snap.blocks) as Block[]
     this.store.blocks.splice(0, this.store.blocks.length, ...blocks)
     const marks = JSON.parse(snap.marks) as Mark[]
     this.store.marks.splice(0, this.store.marks.length, ...marks)
     const atoms = JSON.parse(snap.atoms) as Atom[]
     this.store.atoms.splice(0, this.store.atoms.length, ...atoms)
-    const trash = JSON.parse(snap.trash) as Block[]
-    this.store.trash.splice(0, this.store.trash.length, ...trash)
     this.store.invalidateIndex()
     this.store.touch(undefined)
   }
@@ -318,24 +351,30 @@ export class MemoryKb implements KbClient {
         sink.blocks(id)
       },
 
-      remove(id, opts = {}) {
+      remove(id) {
         const b = require(id)
-        const parent = self.parentOf(id)
-        const list = siblings(self.store, parent?.id ?? null)
-        if (!list) throw new Error(`kb: no such block "${id}"`)
-        list.splice(list.indexOf(b), 1)
-        // 与 `removeBlock` 同形：回收站成员靠 `_deletedAt` 标记（阶段 1），
-        // 子树只是跟着根一起被摘出来，后代不各写一份。
-        // `trash: false` ⇒ 这块是被并掉的（内容已在别处），不留空壳。
-        if (opts.trash !== false) {
-          b.props = { ...(b.props ?? {}), [DELETED_AT_PROP]: at() }
-          self.store.trash.push(b)
-        }
-        // 子树逐个 delete：级联是**落库实现**的事（递归 CTE），op 序列本身要说得清删了哪些块
-        for (const kid of subtreeIds(b)) {
-          ops.push({ e: 'block', id: kid, op: 'delete', at: at() })
-          sink.blocks(kid)
-        }
+        // **原位软删**：块带着子树留在树上的原位，只写删除标记。op 只落操作根一条——
+        // 子树的不可见是继承来的（遍历跳过被删子树），落库也是一行的事（`deleted_at` 写在根行）。
+        // 「退化成一次属性写入」说的是模型动作；op 的说法仍是 `block.delete`——
+        // 删除只有这一个词，落库侧才能只认一种形状。
+        b.props = { ...(b.props ?? {}), [DELETED_AT_PROP]: at() }
+        ops.push({ e: 'block', id, op: 'delete', at: at() })
+        sink.blocks(id)
+      },
+
+      restore(id) {
+        // 按含被删块的遍历找（可见遍历看不见它）：摘掉标记 ＋ 报一条「回来了还在原位」
+        const b = findIncludingDeleted(self.store.blocks, id)
+        if (!b || !isDeleted(b)) throw new Error(`kb: no deleted block "${id}"`)
+        const loc = locateIncludingDeleted(self.store.blocks, id)
+        if (!loc) throw new Error(`kb: no such block "${id}"`)
+        const props = { ...(b.props ?? {}) }
+        delete props[DELETED_AT_PROP]
+        // 属性袋不留空壳：`{}` 与「没有属性」是两种东西
+        if (Object.keys(props).length === 0) delete b.props
+        else b.props = props
+        ops.push({ e: 'block', id, op: 'upsert', value: { parent: loc.parent?.id ?? null, index: loc.index }, at: at() })
+        sink.blocks(id)
       },
 
       setProp(id, name, value, pos) {

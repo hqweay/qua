@@ -249,30 +249,45 @@ test('move 报的 index 是**最终位置**（先摘再夹）：越界时不会�
   assert.deepEqual(kb.children('p1').map((x) => x.id), ['c1', 'c2'])
 })
 
-test('remove ⇒ 子树逐个 block.delete；之后 get 不到、回收站里有整棵', () => {
+test('remove ⇒ 原位软删：操作根恰好 1 条 block.delete；get 不到、块带标记留在森林原位（子树完整）', () => {
   const { kb, store } = fixture()
   const r = kb.tx((tx) => tx.remove('c1'))
-  assert.deepEqual(bare(r.ops), [
-    { e: 'block', id: 'c1', op: 'delete' },
-    { e: 'block', id: 'g1', op: 'delete' },
-  ])
-  assert.deepEqual(
-    r.changes.map((c) => c.id),
-    ['c1', 'g1'],
-  )
-  assert.equal(kb.get('c1'), undefined)
-  assert.equal(kb.get('g1'), undefined)
-  assert.equal(store.trash.length, 1, '删掉的是一整棵子树（内容不丢）')
-  assert.ok(store.trash[0]?.props?._deletedAt, '回收站成员带 _deletedAt（与 removeBlock 同形）')
-  assert.deepEqual(store.trash[0]?.children.map((x) => x.id), ['g1'])
+  // op 只落操作根：子树的不可见是继承来的，后代不各报一条（落库也是一行的事）
+  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'delete' }])
+  assert.deepEqual(r.changes.map((c) => c.id), ['c1'])
+  assert.equal(kb.get('c1'), undefined, '可见遍历看不见它')
+  assert.equal(kb.get('g1'), undefined, '整棵子树都看不见')
+  // 块仍在森林里（原位），带删除标记、子树完整——回收站是标记的派生视图
+  //（store.blocks 是顶层数组，c1 嵌在 p1 下面 ⇒ 递归找）
+  let dead: Block | undefined
+  const walk = (list: Block[]): void => {
+    for (const x of list) {
+      if (x.id === 'c1') dead = x
+      walk(x.children)
+    }
+  }
+  walk(store.blocks)
+  assert.ok(dead, '被删的块应留在森林原位（原位软删，不是摘出去）')
+  assert.ok(dead.props?._deletedAt, '删除标记在块上')
+  assert.deepEqual(dead.children.map((x) => x.id), ['g1'], '子树完整（恢复时原样接回）')
+  assert.deepEqual(kb.trash().map((b) => b.id), ['c1'], '派生回收站里是操作根')
 })
 
-test('remove({trash:false}) ⇒ op 形状不变，但**不进回收站、不打删除标记**（被并掉的块不留空壳）', () => {
+test('restore ⇒ 摘掉标记回原位：op 是一条 upsert{parent,index}；整棵子树重新可见', () => {
   const { kb, store } = fixture()
-  const r = kb.tx((tx) => tx.remove('c2', { trash: false }))
-  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c2', op: 'delete' }])
-  assert.equal(kb.get('c2'), undefined)
-  assert.equal(store.trash.length, 0, '合并吃掉一块，不该在回收站里多一个空壳')
+  kb.tx((tx) => tx.remove('c1'))
+  const r = kb.tx((tx) => tx.restore('c1'))
+  // c1 是 p1 的第 0 个孩子；恢复 = 「它回来了、还在这个位置」
+  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { parent: 'p1', index: 0 } }])
+  assert.equal(kb.get('c1')?.text, '一')
+  assert.equal(kb.get('g1')?.text, '一·一', '子树随根一起回来')
+  assert.deepEqual(kb.trash(), [], '派生回收站清空')
+  assert.ok(!store.blocks.find((b) => b.id === 'c1')?.props?._deletedAt, '标记已摘掉')
+  // 再删再恢复也成立（幂等的机制，不是一次性的状态机）
+  kb.tx((tx) => tx.remove('c1'))
+  assert.deepEqual(kb.trash().map((b) => b.id), ['c1'])
+  kb.tx((tx) => tx.restore('c1'))
+  assert.equal(kb.get('c1')?.text, '一')
 })
 
 /* ------------------------------------------------------------ 写面：语义列表 */
@@ -361,7 +376,7 @@ test('setAnnotations 只动这一块：别的块的锚点原样在库里', () =>
 
 test('tx 抛错 ⇒ 内存恢复、索引可用、不返回半批', () => {
   const { kb, store } = fixture([ref('a1', 'p1', 'p2')])
-  const before = JSON.stringify({ blocks: store.blocks, atoms: store.atoms, trash: store.trash })
+  const before = JSON.stringify({ blocks: store.blocks, atoms: store.atoms })
   let delivered = false
   assert.throws(
     () =>
@@ -377,7 +392,7 @@ test('tx 抛错 ⇒ 内存恢复、索引可用、不返回半批', () => {
   )
   assert.equal(delivered, false, '抛错时根本拿不到返回值')
   assert.equal(
-    JSON.stringify({ blocks: store.blocks, atoms: store.atoms, trash: store.trash }),
+    JSON.stringify({ blocks: store.blocks, atoms: store.atoms }),
     before,
     '正文/标签/删除全部回滚',
   )
