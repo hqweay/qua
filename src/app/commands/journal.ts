@@ -1,9 +1,9 @@
 /**
  * 日记命令：翻日与「回今日」。
  */
-import { isJournal, journalDate, journalId, mkJournalBlock, shiftISO, todayISO } from '../../core/index.ts'
+import { FEED_INITIAL, isJournal, journalDate, journalId, mkJournalBlock, shiftISO, todayISO } from '../../core/index.ts'
 import type { App } from '../../core/ports.ts'
-import { rootsFor, rootsForFeed } from './roots.ts'
+import { rootsFor, rootsForMany } from './roots.ts'
 import type { PageDeps } from './types.ts'
 
 /**
@@ -20,10 +20,10 @@ import type { PageDeps } from './types.ts'
  * · **不引入焦点栈**：翻日/回流只是把中心槽的「当前对象」换一块或换一串（同口径）。
  */
 export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journalShift'> {
-  /** 幂等物化：库里没有这一天的块才创建（排在最前，`forest()` 的 `blocks[0]` 即冷启动默认内容） */
+  /** 幂等物化：库里没有这一天的块才创建（排在最前）；经事务产 op——「块在库里」要有行可落 */
   const ensure = (date: string): string => {
     const id = journalId(date)
-    if (!d.blocks().some((b) => b.id === id)) d.blocks().unshift(mkJournalBlock(date))
+    if (!d.kb.get(id)) d.insertBlock(mkJournalBlock(date), null, 0)
     return id
   }
 
@@ -35,7 +35,7 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
    */
   const openBlock = (id: string): void => {
     d.flush()
-    const b = d.blocks().find((x) => x.id === id)
+    const b = d.kb.get(id)
     /**
      * ⚠️ 「哪一天是当前对象」由**日期**决定，不由装载顺序决定：
      *    日期块自己的 `id` 就是它的身份，`setActiveId` 必须拿它的 id
@@ -61,14 +61,16 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
   const openFeed = (date: string): void => {
     d.flush()
     const anchorId = ensure(date)
-    const anchor = d.blocks().find((b) => b.id === anchorId)
+    const anchor = d.kb.get(anchorId)
     /**
      * ⚠️ 「回今日」把**今天**设成当前对象，而不是流的**第一段**：库里若留着更早的
      *    未打开的一天（它不是今天），按下「回今日」人却停在昨天，是很怪的落点。
      *    装载顺序不变（按日期降序），只是当前对象归今天。
      */
     d.setActiveId(anchorId, { feed: true })
-    d.loadPage(anchor ? rootsForFeed(anchor, d.blocks()) : [], d.marks(), d.atoms())
+    // 流的形态＝「date 在顶、更早存在的天往下」：天数是命名的库读（`kb.journalFeed`），
+    // 排一列由 `rootsForMany` 负责——「哪些天」是库的问题，「怎么排」是装载的问题
+    d.loadPage(anchor ? rootsForMany(d.kb.journalFeed(journalDate(anchor), FEED_INITIAL)) : [], d.marks(), d.atoms())
     d.refreshList()
     d.refreshTitle()
     d.saveNow()
@@ -83,7 +85,7 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
       else openFeed(todayISO())
     },
     journalShift: (days) => {
-      const b = d.blocks().find((x) => x.id === d.activeId())
+      const b = d.kb.get(d.activeId())
       // 从「当前对象」的日期出发；当前不是 journal 就从今天出发（翻日永远有起点）
       const from = b && isJournal(b) ? journalDate(b) : todayISO()
       // 单日模式：翻到相邻的一天（流里的「翻一天」是另一种动作）

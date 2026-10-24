@@ -16,13 +16,14 @@
  * ⚠️ 视图状态（滚动、折叠展开态）不进库；滚动位置由外层编辑器自己保。
  */
 import { displayNameOf, resolveFrozen, readResult, refreshSpec, readSpec, type Atom, type Block, type BlockStore } from '../core/index.ts'
+import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
 
 export interface QueryViewDeps {
   store: BlockStore
-  /** 整片森林（活引用） */
-  blocks: () => Block[]
+  /** 读门面：求值走 `kb.query`（索引），冻结结果按 id 现读（`kb.pathOf`） */
+  kb: KbClient
   /** 写入事务入口：执行者在装配层，这里只原样转给编辑器（见 `Run`） */
   write?: Run
   /** 查询块本身（活引用）：读 `_query`／写 `_queryResult` */
@@ -139,7 +140,7 @@ export class QueryView {
       this.renderEmpty(t('ui.query.noSpec'))
       return
     }
-    const { dropped } = refreshSpec(b, spec, { blocks: this.deps.blocks(), atoms: this.deps.store.atoms })
+    const { dropped } = refreshSpec(b, spec, this.deps.kb)
     if (dropped.length > 0) this.deps.toast?.(t('ui.query.dropped', { count: dropped.length }), 'info')
     this.staleIds.clear()
     this.deps.onChange()
@@ -181,7 +182,7 @@ export class QueryView {
       this.renderEmpty(t('ui.query.noSpec'))
       return
     }
-    const rows = resolveFrozen(frozen, this.deps.blocks())
+    const rows = resolveFrozen(frozen, (id) => this.deps.kb.pathOf(id))
     this.els.root.hidden = false
     const name = displayNameOf(b).trim()
     this.els.title.textContent = name === '' ? t('ui.query.untitled') : name

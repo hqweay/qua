@@ -866,7 +866,37 @@ function commandDecls() {
     whitelist: 'src/view/**（编辑器就是 store 的持有者）· src/main.ts（renderer 装配层，唯一接线处）· core 内部自用',
     hits: hits.length,
     detail: hits,
-    note: '读侧的下一个收口是把 app/ui 里「注入整片森林」的口子换成窄读法（按 id／按查询）——那一步改的是依赖接口本身，见交接的读门面审计',
+    note: '依赖接口里的整库口子由 [24] 看',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
+   ║ 24 · 依赖接口不注入整片森林（调用方写不出「遍历全库」）  ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  // import 断言（[23]）拦不住「装配层把森林当能力注入」：app/ui 拿到 `blocks: () => Block[]`
+  // 之后照样能扫全库、能直写树，P5 换懒加载实现时每个这样的调用方都得重写。
+  // 读面只许经 `KbClient` 的窄方法（按 id／按名／按清单取数）；
+  // 全库派生（成环检查、日记流天数这类）由装配层算好再注入答案。
+  const INJECTED_FOREST = /blocks\??\s*:\s*(?:\(\)\s*=>|Readonly<\(\) =>)/
+  const hits = []
+  for (const f of codeFiles) {
+    const r = rel(f)
+    if (!(r.startsWith('src/app/') || r.startsWith('src/ui/'))) continue
+    const lines = readFileSync(f, 'utf8').split('\n')
+    lines.forEach((line, i) => {
+      if (INJECTED_FOREST.test(line)) hits.push(`${r}:${i + 1} 依赖接口注入了整片森林：${line.trim()}`)
+    })
+  }
+  add({
+    id: 24,
+    title: 'app／ui 的依赖接口不得注入「整片森林」——读走 KbClient 窄方法，全库派生由装配层算好注入',
+    method: '静态扫 src/app/**、src/ui/** 的 `blocks: () =>` 形态（把森林当能力注入的口子）',
+    scope: `src/app/** · src/ui/**`,
+    whitelist: 'src/main.ts（装配层是森林的持有者，它**收窄后**再注入）· src/view/**（编辑器持 store）',
+    hits: hits.length,
+    detail: hits,
   })
 }
 

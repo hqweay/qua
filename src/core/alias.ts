@@ -257,9 +257,39 @@ export function setPrimaryAlias(b: Block, name: string): boolean {
 }
 
 /**
+ * **应用**一次别名替换（**不查重**）。
+ *
+ * 查重是 `claimAlias`／读门面 `resolveAlias` 的事；写路径由此收窄到「只动这一个块」，
+ * 调用方才能把它放进事务里 —— 事务内不再扫森林（读面按 id／按名取数），
+ * 也没有必要重扫：调用方查过重才走到这里。
+ *
+ * 语义与 `renameAlias` 的应用段相同：旧名在别名表里 ⇒ **原位替换**（块内同名去重）；
+ * 旧名不在 ⇒ 追加（调用方表达的是「我要这个地址」，而不是「改那个不存在的」）。
+ */
+export function writeRename(b: Block, oldName: string, newName: string): void {
+  const raw = newName.trim()
+  if (normalizeAlias(raw) === '') return
+  const aliases = aliasesOf(b)
+  const oldWant = normalizeAlias(oldName)
+  const at = aliases.findIndex((a) => normalizeAlias(a) === oldWant)
+  if (at < 0) {
+    addAlias(b, raw)
+    return
+  }
+  const want = normalizeAlias(raw)
+  const next: string[] = []
+  for (let i = 0; i < aliases.length; i++) {
+    if (i === at) next.push(raw)
+    // 新名恰好已经是同一个块上的另一个别名 ⇒ 只保留被改的那一格，避免块内重复
+    else if (normalizeAlias(aliases[i]!) !== want) next.push(aliases[i]!)
+  }
+  b.props = { ...(b.props ?? {}), [ALIASES_PROP]: next }
+}
+
+/**
  * 改一个别名（**保留它在数组里的位置**）。
  *
- * 先 claim 再替换：撞车时一个字节都不写，返回冲突块。
+ * 先 claim 再应用：撞车时一个字节都不写，返回冲突块。
  * ⚠️ 旧名不存在 ⇒ 追加新名（调用方表达的是「我要这个地址」，而不是「删掉那个不存在的」）。
  *    这条选择让 `renameBlock` 的兼容形状（主名为空时 add）不需要第二个分支。
  */
@@ -272,23 +302,7 @@ export function renameAlias(
   // 新名即将写进 `_aliases` ⇒ 一律按「要占地址」查重（块此刻可能还没有名字）
   const claim = claimAlias(forest, b, newName, true)
   if (!claim.ok) return claim
-  const raw = newName.trim()
-  if (normalizeAlias(raw) === '') return { ok: true }
-  const aliases = aliasesOf(b)
-  const oldWant = normalizeAlias(oldName)
-  const at = aliases.findIndex((a) => normalizeAlias(a) === oldWant)
-  if (at < 0) {
-    addAlias(b, raw)
-    return { ok: true }
-  }
-  const want = normalizeAlias(raw)
-  const next: string[] = []
-  for (let i = 0; i < aliases.length; i++) {
-    if (i === at) next.push(raw)
-    // 新名恰好已经是同一个块上的另一个别名 ⇒ 只保留被改的那一格，避免块内重复
-    else if (normalizeAlias(aliases[i]!) !== want) next.push(aliases[i]!)
-  }
-  b.props = { ...(b.props ?? {}), [ALIASES_PROP]: next }
+  writeRename(b, oldName, newName)
   return { ok: true }
 }
 

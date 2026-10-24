@@ -17,12 +17,14 @@
  * ⚠️ 本文件零 DOM、零持久化：op 只是被**算出来**，谁来落盘由上层决定。
  */
 import type { Atom, Mark } from '../annotations.ts'
-import { backrefsOf, type BackrefSource } from '../backrefs.ts'
-import { aliasesOf, DELETED_AT_PROP, listsOf, type Block } from '../model.ts'
+import { backrefBlocks, backrefsOf, type BackrefBlock, type BackrefSource } from '../backrefs.ts'
+import { aliasesOf, DELETED_AT_PROP, hasList, listsOf, type Block } from '../model.ts'
 import { findByAlias } from '../alias.ts'
 import { findPath, findInForest } from '../tree.ts'
 import { walkForest } from '../walk.ts'
-import { tagsOf as tagsOfBlock, tagIdsOf } from '../tags.ts'
+import { findTagByName, tagsOf as tagsOfBlock, tagIdsOf } from '../tags.ts'
+import { findJournalDay, journalFeedDays } from '../journal.ts'
+import { queryByIndex } from '../index-port.ts'
 import {
   allPropDefs,
   declaredFields,
@@ -33,7 +35,7 @@ import {
   setValue,
   clearValue,
 } from '../props.ts'
-import { runQuery, type QueryHit, type QuerySpec } from '../query.ts'
+import type { QueryHit, QuerySpec } from '../query.ts'
 import type { BlockStore } from '../store.ts'
 import type { Change, KbClient, Op, PathEntry, Tx, TxOpts, TxResult } from './types.ts'
 
@@ -153,6 +155,34 @@ export class MemoryKb implements KbClient {
     return b ? declaredFields(b, this.store.blocks) : []
   }
 
+  pages(): readonly Block[] {
+    const out: Block[] = []
+    walkForest(this.store.blocks, (b) => {
+      if (hasList(b, 'page')) out.push(b)
+    })
+    return out
+  }
+
+  tags(): readonly Block[] {
+    const out: Block[] = []
+    walkForest(this.store.blocks, (b) => {
+      if (hasList(b, 'tag')) out.push(b)
+    })
+    return out
+  }
+
+  findTag(name: string): Block | undefined {
+    return findTagByName(this.store.blocks, name)
+  }
+
+  journalDay(date: string): Block | undefined {
+    return findJournalDay(this.store.blocks, date)
+  }
+
+  journalFeed(date: string, limit: number): readonly Block[] {
+    return journalFeedDays(this.store.blocks, date, limit)
+  }
+
   annotationsOf(id: string): { marks: readonly Mark[]; atoms: readonly Atom[] } {
     return {
       marks: this.store.marks.filter((m) => m.blockId === id),
@@ -161,11 +191,16 @@ export class MemoryKb implements KbClient {
   }
 
   query(spec: QuerySpec, opts: { scopeId?: string } = {}): QueryHit[] {
-    return runQuery(spec, { blocks: this.store.blocks, atoms: this.store.atoms, anchorId: opts.scopeId })
+    // 走索引：ref/tag/journal 查表，判定与顺序与纯函数路径共用一份
+    return queryByIndex(this.store.index, this.store.blocks, spec, { anchorId: opts.scopeId })
   }
 
   backlinksOf(id: string): readonly BackrefSource[] {
     return backrefsOf({ blocks: this.store.blocks, atoms: this.store.atoms, targetId: id, index: this.store.index })
+  }
+
+  backrefBlocksOf(id: string): readonly BackrefBlock[] {
+    return backrefBlocks({ blocks: this.store.blocks, atoms: this.store.atoms, targetId: id, index: this.store.index })
   }
 
   /* ------------------------------------------------------------ 写面 */
@@ -188,10 +223,11 @@ export class MemoryKb implements KbClient {
     const sink = new ChangeSink(changes)
     try {
       const result = fn(this.makeTx(ops, sink))
-      // 失效与广播只在成功之后：失败路径恢复的是同一份快照，索引没有理由重算，
-      // 而 `touch` 会把「改过」推给每个订阅者 —— 回滚后再推一次等于让他们白渲染两次。
-      this.store.invalidateIndex()
-      this.store.touch(opts.source, sink.ids())
+      // 失效与广播只在成功之后：失败路径恢复的是同一份快照，索引没有理由重算。
+      // 索引按 op 增量修补（不是整库作废）：一批 op 之后与全量重建逐字节一致（等式测试钉住），
+      // 而 `notify` 不作废索引 —— 作废会让这次修补白做，每次写入都退化成全量重建。
+      this.store.applyOps(ops)
+      this.store.notify(opts.source, sink.ids())
       return { ops, changes, result }
     } catch (err) {
       this.restore(snap)

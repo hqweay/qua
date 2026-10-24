@@ -5995,6 +5995,165 @@ await check(
   },
 )
 
+await check(
+  'T89 翻到全新的一天也走事务：空天的首子块经事务一条 upsert{parent:天块,index:0}；天块本身在库顶层；重复翻同一天零 op（幂等）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+
+    const date = '2027-06-01'
+    await page.evaluate((d) => window.__qua.invoke('core.journal/today', { date: d }), date)
+    await page.waitForTimeout(250)
+
+    const first = await page.evaluate((d) => {
+      const st = window.__qua.__editor.store
+      const day = st.blocks.find((b) => b.props?._date === d)
+      return {
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, parent: o.value?.parent, index: o.value?.index })),
+        dayId: day?.id ?? '',
+        dayAtTop: st.blocks.some((b) => b.id === day?.id),
+        childCount: day?.children.length ?? 0,
+      }
+    }, date)
+    assert(first.dayId !== '', `翻到新的一天应在库里物化日期块：${JSON.stringify(first)}`)
+    assert(first.dayAtTop, '天块应住森林顶层（身份块不参与组织）')
+    assert(
+      first.ops.length === 1 && first.ops[0].e === 'block' && first.ops[0].op === 'upsert',
+      `装载空天应恰好 1 条结构 op（首子块）：${JSON.stringify(first.ops)}`,
+    )
+    assert(
+      first.ops[0].parent === first.dayId && first.ops[0].index === 0,
+      `首子块应挂在当天下标 0：${JSON.stringify(first.ops)}`,
+    )
+    assert(first.childCount === 1, `空天补的首子块应真的在库里：${first.childCount}`)
+
+    // 再翻回同一天：日期块已存在 ⇒ 不重建；首子块已在 ⇒ 不补块 ⇒ 整个动作零 op
+    // （lastOps 只在事务产出时更新，零事务的打开会保留上一笔 ⇒ 这里对比前后与模型）
+    const before = await page.evaluate(() => window.__qua.lastOps())
+    await page.evaluate((d) => window.__qua.invoke('core.journal/today', { date: d }), date)
+    await page.waitForTimeout(200)
+    const second = await page.evaluate((d) => {
+      const st = window.__qua.__editor.store
+      const day = st.blocks.find((b) => b.props?._date === d)
+      return { ops: window.__qua.lastOps(), childCount: day?.children.length ?? 0, dayCopies: st.blocks.filter((b) => b.props?._date === d).length }
+    }, date)
+    assert(
+      second.ops.length === before.length && second.ops.every((o, i) => o.id === before[i].id),
+      `重复打开同一天不应有新事务：${JSON.stringify({ before: before.length, after: second.ops.length })}`,
+    )
+    assert(second.childCount === 1 && second.dayCopies === 1, `不应重建天块或补第二个子块：${JSON.stringify(second)}`)
+
+    await ctx.close()
+    return `journal/today(新一天) ⇒ 1 条 upsert{parent:天块,index:0}；重复打开零事务、模型不变`
+  },
+)
+
+await check(
+  'T90 命令面打标签走一笔事务：新标签块 upsert{parent:null} ＋ 归属 prop.set(_tags) 同笔两条；重复打同一个标签零 op；撤销一步全回去',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    // 落点：命令层的回退是「当前行」——页面刚打开、没有光标 ⇒ 回退到第一行（页块自己）
+    const target = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      return { id: ed.rows()[0].block.id, tags: ed.rows()[0].block.props?._tags ?? [] }
+    })
+
+    await page.evaluate(() => window.__qua.invoke('core.editor/insert-tag', { tag: '冒烟新标签' }))
+    await page.waitForTimeout(200)
+
+    const after = await page.evaluate((t) => {
+      const st = window.__qua.__editor.store
+      const host = st.find(t.id)
+      const tagBlock = st.blocks.find((b) => b.props?._lists?.includes('tag') && b.text === '冒烟新标签')
+      return {
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, name: o.name, parent: o.value?.parent })),
+        hostTags: host?.props?._tags ?? [],
+        tagId: tagBlock?.id ?? '',
+        tagAtTop: st.blocks.some((b) => b.id === tagBlock?.id),
+      }
+    }, target)
+
+    assert(
+      after.ops.length === 2 &&
+        after.ops[0].e === 'block' && after.ops[0].op === 'upsert' && after.ops[0].parent === null &&
+        after.ops[1].e === 'prop' && after.ops[1].name === '_tags' && after.ops[1].id === target.id,
+      `一次打标签应恰好 2 条 op（建标签块＋写归属，同一笔）：${JSON.stringify(after.ops)}`,
+    )
+    assert(after.tagId !== '' && after.tagAtTop, '新标签块应住森林顶层')
+    assert(
+      JSON.stringify(after.hostTags) === JSON.stringify([...target.tags, after.tagId]),
+      `归属应写进宿主的 _tags：${JSON.stringify(after.hostTags)}`,
+    )
+
+    // 再打一次：标签已在、归属已挂 ⇒ 事务里什么都不写（零 op）
+    await page.evaluate(() => window.__qua.invoke('core.editor/insert-tag', { tag: '冒烟新标签' }))
+    await page.waitForTimeout(150)
+    const repeat = await page.evaluate(() => window.__qua.lastOps())
+    assert(repeat.length === 0, `重复打同一个标签应是零 op：${JSON.stringify(repeat)}`)
+
+    // 一步撤销：标签块与归属一起回（同一笔的证据）
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const undone = await page.evaluate((t) => {
+      const st = window.__qua.__editor.store
+      const host = st.find(t.id)
+      return {
+        hostTags: host?.props?._tags ?? [],
+        tagGone: !st.blocks.some((b) => b.text === '冒烟新标签'),
+      }
+    }, target)
+    assert(
+      JSON.stringify(undone.hostTags) === JSON.stringify(target.tags),
+      `撤销后归属应回原样：${JSON.stringify(undone.hostTags)}`,
+    )
+    assert(undone.tagGone, '撤销后新建的标签块也应消失（同一笔）')
+
+    await ctx.close()
+    return `insertTag ⇒ [upsert{parent:null}, prop.set _tags] 同笔；重复零 op；⌘Z 一步全回`
+  },
+)
+
+await check(
+  'T91 新建属性定义走一笔事务：定义块 upsert{parent:null} ＋ 声明 prop.set(_ownProps) 同笔两条',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const target = await page.evaluate(() => window.__qua.__editor.store.find(window.__qua.__editor.doc.roots[0].children[0].id)?.id ?? '')
+    assert(target !== '', '前置：应有可打字的目标块')
+
+    await page.evaluate((t) => window.__qua.invoke('core.props/create-def', { blockId: t, label: '冒烟字段', kind: 'text' }), target)
+    await page.waitForTimeout(200)
+
+    const after = await page.evaluate((t) => {
+      const st = window.__qua.__editor.store
+      const def = st.blocks.find((b) => b.text === '冒烟字段')
+      const host = st.find(t)
+      return {
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, name: o.name, parent: o.value?.parent })),
+        defId: def?.id ?? '',
+        defAtTop: st.blocks.some((b) => b.id === def?.id),
+        declared: host?.props?._fields ?? host?.props?._ownProps ?? null,
+      }
+    }, target)
+
+    assert(after.defId !== '' && after.defAtTop, `定义块应在库顶层：${JSON.stringify(after)}`)
+    assert(
+      after.ops.length === 2 &&
+        after.ops[0].e === 'block' && after.ops[0].op === 'upsert' && after.ops[0].parent === null &&
+        after.ops[1].e === 'prop' && after.ops[1].op === 'set' && after.ops[1].id === target,
+      `新建定义＋声明应是同一笔恰好 2 条 op（upsert{parent:null} ＋ prop.set）：${JSON.stringify(after.ops)}`,
+    )
+
+    await ctx.close()
+    return `createPropDef ⇒ [upsert{parent:null}, prop.set]；定义块住顶层`
+  },
+)
+
 /* ---------------------------------------------------------------- 汇总 */
 
 await browser.close()

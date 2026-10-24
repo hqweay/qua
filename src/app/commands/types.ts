@@ -7,14 +7,29 @@
  *
  * ⚠️ 纪律：这里**不碰 `document`**（59 ：命令不知道 UI）。要聚焦、要滚动、要弹菜单，
  *   一律走注入的能力。
+ * ⚠️ 读一律走**读门面**（`KbClient` 的窄方法：按 id、按名字、按清单取数）——
+ *   命令层写不出「遍历全库」：整库在内存是门面实现的事，不是调用方的假设。
  */
 import type { Block } from '../../core/index.ts'
+import type { KbClient, Op, Tx } from '../../core/kb/types.ts'
+import type { AddParentResult } from '../../core/tag-tree.ts'
 import type { ThemeMode, Workspace } from '../../core/workspace.ts'
 import type { Row } from '../../ui/layers.ts'
 
+/** 与编辑器同一个事务入口形状（`Run`）：一次用户动作 ＝ 一笔 */
+export type Run = <R>(fn: (tx: Tx) => R) => R
+
+/** 命令层的事务入口：多带回 op 数，装配层好判「零 op 不记撤销步」 */
+export type TxRun = <R>(fn: (tx: Tx) => R) => { ops: readonly Op[]; result: R }
+
 export interface PageDeps {
-  /** 读块森林（**返回的是活引用**，push/splice 直接生效） */
-  blocks: () => Block[]
+  /** 读门面：块按 id/按名取数，页/标签/日记流是命名的清单 */
+  kb: KbClient
+  /**
+   * 开一笔事务（装配层负责撤销快照与攒 op）：结构写与「找 ＋ 写」的复合动作都经它。
+   * 带回 op 数——零 op 的事务不该记撤销步（没写东西就没有可撤销的）。
+   */
+  run: TxRun
   /**
    * 删一块（含子树）——**结构写路径必须走事务**，否则换库之后这条删除没有行可落。
    *
@@ -38,7 +53,7 @@ export interface PageDeps {
    */
   caretBlockId: () => string | null
   /**
-   * 一次块写入（属性）：装配层负责撤销快照、索引失效、重画当前行与落盘。
+   * 一次块写入（属性）：装配层负责撤销快照、索引修补、重画当前行与落盘。
    *
    * ⚠️ 必须落到**共享 store**，否则别的视图（反链/查询）看不到这次改动。
    */
@@ -109,16 +124,29 @@ export interface DevDeps {
 
 /** 属性写入的宿主能力（装配层负责 undo 快照、落盘、重画；这里只做模型判断） */
 export interface PropsDeps {
-  blocks: () => Block[]
-  /** 一次写入：`blockId` 省略＝改了森林结构（例如新建定义块） */
-  write: (blockId: string | undefined, mutate: () => void) => void
+  kb: KbClient
+  /** 一次写入（属性）：写哪个块是确定的 */
+  write: (blockId: string, mutate: () => void) => void
+  /**
+   * 开一笔事务：给「新建定义 ＋ 声明到块上」这种复合动作用（同一笔才不会有半批）。
+   * 带回 op 数——零 op 的事务不该记撤销步。
+   */
+  run: TxRun
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
-/** 标签归属写入的宿主能力 */
+/** 标签归属写入的宿主能力；森林扫描的派生由装配层按窄口注入（成环检查要全库） */
 export interface TagTreeDeps {
-  blocks: () => Block[]
-  write: (blockId: string | undefined, mutate: () => void) => void
+  kb: KbClient
+  /** 能不能加这条「child 属于 parent」（成环检查要祖先闭包 ⇒ 全库读，装配层注入） */
+  checkAdd: (child: Block, parent: Block) => AddParentResult
+  /** 环路径的显示文本（装配层注入，判据只有 core 那一份） */
+  cycleLabels: (path: readonly string[]) => string[]
+  /** 悬空父引用清单（装配层注入） */
+  danglingOf: (tag: Block) => string[]
+  /** 清掉悬空归属，返回清了几条（写路径；装配层注入） */
+  pruneDangling: (tag: Block) => number
+  write: (blockId: string, mutate: () => void) => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
   shortId: (id: string) => string
 }

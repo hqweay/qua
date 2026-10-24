@@ -6,10 +6,10 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf, aliasesOf, allPropDefs, allTags, blockTypeOf, DISPLAY_PROP, listsOf, tagIdsOf, childTags, claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, mkBlock, normalizeAlias, parentTags, primaryAliasOf, prop, propKindOf, removeList, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys, type FoldState } from './core/index.ts'
+import { addAlias, addList, addressesOf, aliasesOf, allPropDefs, allTags, blockTypeOf, checkAddParent, cyclePathLabels, DISPLAY_PROP, listsOf, tagIdsOf, childTags, claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal, fieldRows, findInForest, findPath, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList, identityTags, isJournal, isQueryBlock, journalDate, journalFeedDays, memberBlocks, membersOf, mkBlock, normalizeAlias, parentTags, primaryAliasOf, prop, propKindOf, pruneParentTags, removeList, resolveRef, setBlockType, tagMemberIds, todayISO, todoOf, type Atom, type Block, type CtxKeys, type FoldState } from './core/index.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
-import type { Op, Tx } from './core/kb/types.ts'
+import type { Change, Op, Tx } from './core/kb/types.ts'
 import { BlockEditor } from './view/editor.ts'
 import {
   BINDINGS,
@@ -157,8 +157,10 @@ const blocks = new BlockStore(ws.blocks, ws.marks, ws.atoms, ws.trash)
  *
  * 装配层先接上读面，写面（`tx`）仍走原来的写路径；这样换掉「整库在内存」
  * 的实现时，改的是这一个构造参数，而不是每个调用方。
+ * ⚠️ **换库（`dev` 换演示数据）不换它**：门面只持有 store 这一个实例，
+ *    `reset` 原地换内容 ⇒ 门面读到的永远是当前库（依赖注入才能按值传）。
  */
-let kb = new MemoryKb(blocks)
+const kb = new MemoryKb(blocks)
 
 const layers = new Layers(() => isMac())
 let ed: BlockEditor
@@ -515,11 +517,9 @@ window.addEventListener('resize', () => applyChrome())
  * 全是读函数（库会被 `loadState` 整体替换，传值会拿到过期快照）。
  */
 const dockDeps: DockContentDeps = {
-  blocks: () => ws.blocks,
+  kb,
   activeId: () => ws.activeId,
-  atoms: () => ws.atoms,
   // 共享索引由 store 缓存（懒重建）⇒ 反链不再每次扫全库 atoms ＋ 遍历森林
-  index: () => blocks.index,
   openPage: (id) => void registry.invoke('core.page/open', { pageId: id }, 'menu'),
   newPage: () => void registry.invoke('core.page/new', {}, 'dock'),
 }
@@ -827,7 +827,18 @@ function materializeEditableRoots(roots: readonly Block[]): void {
  * ⚠️ 依赖一律是**读函数**而不是值：库会被 `loadState` 整体替换，传值会拿到过期快照。
  */
 const pageDeps: PageDeps = {
-  blocks: () => ws.blocks,
+  kb,
+  // 命令层开事务：装配层补撤销快照（零 op 的事务不记——没写东西就没有可撤销的），
+  // 并重画这批改动碰到的行（标签 chip／别名头住在一行自己的 DOM 里，等整页重渲染就晚了）
+  run: (fn) => {
+    const before = blocks.snap(ed.sel)
+    const r = txRun(fn, mainEd)
+    if (r.ops.length > 0) blocks.record(before, 'other', Date.now())
+    for (const id of new Set(r.changes.filter((c) => c.kind === 'blocks').map((c) => c.id))) repaintBlock(id)
+    scheduleSave()
+    scheduleBadge()
+    return r
+  },
   removeBlock: (id) => {
     // 删页：整棵子树摘进回收站。走 `run` 是为了产出 op —— 命令层只声明「删这块」，
     // 摘树与打删除标记由事务那一份实现负责。
@@ -959,58 +970,49 @@ function historyGo(dir: 'back' | 'forward'): boolean {
  *
  * 失败时把 `pendingOps` 截回进门时的长度：`kb.tx` 会把模型整批回滚，
  * 已经攒进去的 op 却不会自己消失 —— 不清掉就等于「内存退回去了、盘上却多了一批」。
- *
- * 返回 `fn` 的返回值：调用方要拿它去放光标、拿新块的 id。
  */
-function run<R>(fn: (tx: Tx) => R, source?: unknown): R {
+function txRun<R>(fn: (tx: Tx) => R, source?: unknown): { ops: Op[]; changes: Change[]; result: R } {
   const n = pendingOps.length
   try {
     const r = kb.tx(fn, { source })
     pendingOps.push(...r.ops)
     lastOps = r.ops
-    return r.result
+    return r
   } catch (e) {
     pendingOps.length = n
     throw e
   }
 }
 
+/** 命令与编辑器共用的入口形状（`Run`）：只要结果 */
+function run<R>(fn: (tx: Tx) => R, source?: unknown): R {
+  return txRun(fn, source).result
+}
+
 /**
  * 一次属性写入：模型改动（**经 `tx`**）＋ **一个**撤销快照 ＋ 落盘/重画。
  *
- * 写模型不再自己 `touch`/`invalidateIndex`：`kb.tx` 已经做了这两件事，而且带着
- * `source: mainEd` 一起做——发起者收不到自己的通知，别的视图收得到。
+ * 写模型不再自己 `touch`/`invalidateIndex`：`kb.tx` 已经做了这两件事（索引按 op 修补），
+ * 而且带着 `source: mainEd` 一起做——发起者收不到自己的通知，别的视图收得到。
  * 这里只负责 tx 管不到的两件装配层的事：**撤销快照**与**攒 op 等落盘**。
- *
- * ⚠️ 新建定义／根数组写（`blockId === undefined`）仍走原路径：那些改动**改的是森林结构**
- *    （往根上 push 一个新块），`patch` 按契约拒绝结构变化。这是迁移期的例外，
- *    它们**不产生 op** ⇒ 那次落盘仍按整类提交（见 `persist`）。
  */
-function writeProps(blockId: string | undefined, mutate: () => void): void {
+function writeProps(blockId: string, mutate: () => void): void {
   const before = blocks.snap(ed.sel)
-  if (blockId === undefined) {
-    mutate()
-    blocks.invalidateIndex()
-    blocks.touch(mainEd)
-  } else {
-    run((tx) => tx.patch(blockId, mutate), mainEd)
-  }
+  run((tx) => tx.patch(blockId, mutate), mainEd)
   blocks.record(before, 'other', Date.now())
   scheduleProperties()
-  if (!blockId) renderDocks()
   scheduleSave()
   scheduleBadge()
 }
 
 /**
- * 一次「改块自己的属性 ＋ 重画这一行」。
+ * 重画一个块所在的行（当前活动编辑器里的；不在视图里的块是 no-op）。
  *
- * ⚠️ 不能只调 `writeProps`：`mainEd` 是 `touch` 的发起者，**收不到自己的通知**，
- *    而别名头、标签 chip、显示模式都在这行自己的 DOM 里 —— 少了这一步，
+ * ⚠️ 别名头、标签 chip、显示模式都在这行自己的 DOM 里 —— 少了这一步，
  *    改完要等下一次整页重渲染才看得见（用户读到的是「点了没反应」）。
+ * `writeBlockProps`（单块属性写）与命令层事务收尾（`PageDeps.run`／`PropsDeps.run`）共用。
  */
-function writeBlockProps(blockId: string, mutate: () => void): void {
-  writeProps(blockId, mutate)
+function repaintBlock(blockId: string): void {
   mainEd.renderBlock(blockId)
   // 名字/显示模式变了 ⇒ 本视图里引用它的 chip（在**别的块**的 `.tx` 里）也要换字
   mainEd.renderRefSources(blockId)
@@ -1018,6 +1020,17 @@ function writeBlockProps(blockId: string, mutate: () => void): void {
     ed.renderBlock(blockId)
     ed.renderRefSources(blockId)
   }
+}
+
+/**
+ * 一次「改块自己的属性 ＋ 重画这一行」。
+ *
+ * ⚠️ 不能只调 `writeProps`：`mainEd` 是 `touch` 的发起者，**收不到自己的通知** ——
+ *    见 `repaintBlock`。
+ */
+function writeBlockProps(blockId: string, mutate: () => void): void {
+  writeProps(blockId, mutate)
+  repaintBlock(blockId)
 }
 
 /** 显示名：主名叶子 > 正文（空则短 id） */
@@ -1142,12 +1155,29 @@ const app: App = {
   ...journalCommands(pageDeps),
   ...zoomCommands(pageDeps),
   ...propsCommands({
-    blocks: () => ws.blocks,
+    kb,
     write: writeProps,
+    // 命令层开事务（新建定义＋声明是同一笔）：装配层补撤销快照，零 op 不记；
+    // 声明改到的那一行要当场重画（gutter 字段住在一行自己的 DOM 里）
+    run: (fn) => {
+      const before = blocks.snap(ed.sel)
+      const r = txRun(fn, mainEd)
+      if (r.ops.length > 0) blocks.record(before, 'other', Date.now())
+      for (const id of new Set(r.changes.filter((c) => c.kind === 'blocks').map((c) => c.id))) repaintBlock(id)
+      scheduleProperties()
+      scheduleSave()
+      scheduleBadge()
+      return r
+    },
     toast: (text, kind) => app.toast(text, kind),
   }),
   ...tagTreeCommands({
-    blocks: () => ws.blocks,
+    kb,
+    // 成环检查要算祖先闭包（全库读）：判据只有 core 一份，森林由装配层收进闭包
+    checkAdd: (child, parent) => checkAddParent(child, parent, ws.blocks),
+    cycleLabels: (path) => cyclePathLabels(path, ws.blocks, (id) => shortId(id)),
+    danglingOf: (tag) => danglingParentIds(tag, ws.blocks),
+    pruneDangling: (tag) => pruneParentTags(tag, ws.blocks),
     write: writeProps,
     toast: (text, kind) => app.toast(text, kind),
     shortId: (id) => shortId(id),
@@ -1264,12 +1294,13 @@ const app: App = {
        */
       pendingOps = []
       /**
-       * ⚠️ 换库的次序：**先换 store，再换读入口，最后才取 `p`**。
+       * ⚠️ 换库的次序：**先换 store 的内容，再取 `p`**。
        *
-       * `kb` 读的是 store 里那片森林；此刻 store 里仍是上一份库。只换 `ws` 不换这两样，
+       * `kb`／`blocks` 是同一个 store 实例（`reset` 原地换内容，门面不用换）；
+       * 此刻 store 里仍是上一份库，只换 `ws` 不换内容的话，
        * `activeBlock()` 就会在**旧库**里找新库的 `activeId`：找不到便落到 `kb.roots()[0]`
        * 这条兜底上，拿回**旧库首块**再装进新库的视图（表现为「重开后字丢了」）。
-       * 反过来，`p` 也不能早于这两步 —— 换了库却还拿旧落点，等于把旧块装进新库。
+       * 反过来，`p` 也不能早于这一步 —— 换了库却还拿旧落点，等于把旧块装进新库。
        */
       /**
        * **折叠态不能带过河**：旧库的块 id 在新库里不存在（或指到另一块），
@@ -1278,7 +1309,6 @@ const app: App = {
       device.folded = {}
       scheduleDeviceSave()
       blocks.reset(next.blocks, next.marks, next.atoms, next.trash)
-      kb = new MemoryKb(blocks)
       const p = activeBlock()
       ed = mainEd
       applyChrome()
@@ -1370,7 +1400,7 @@ const openAliasEditor = (blockId: string, rect: DOMRect | null): void => {
   layers.openPopover(
     (host) =>
       renderAliasEditor(host, {
-        forest: () => ws.blocks,
+        kb,
         block: () => findInForest(ws.blocks, blockId),
         write: (mutate) => writeBlockProps(blockId, mutate),
         close: () => layers.closePopover(),
@@ -1386,7 +1416,7 @@ const openFieldsEditor = (blockId: string, _rect: DOMRect | null): void => {
     t('ui.alias.fieldsTitle'),
     (host) =>
       renderFieldsEditor(host, {
-        forest: () => ws.blocks,
+        kb,
         block: () => findInForest(ws.blocks, blockId),
         write: (mutate) => writeBlockProps(blockId, mutate),
         close: () => layers.closeDrawer(),
@@ -1505,7 +1535,7 @@ backlinksView = new BacklinksView(
   {
     store: blocks,
     write: (fn) => run(fn, backlinksView?.editor),
-    blocks: () => ws.blocks,
+    kb,
     targetId: () => ws.activeId,
     onChange: () => {
       syncSections()
@@ -1720,7 +1750,7 @@ const tagPanel: TagPanel = new TagPanel(
     store: blocks,
     // `tagPanel` 在这一行之前就已声明（`const`），闭包调用时它已经就绪
     write: (fn) => run(fn, tagPanel.editor),
-    blocks: () => ws.blocks,
+    kb,
     tag: () => {
       const b = activeBlock()
       return hasList(b, 'tag') ? b : undefined
@@ -1787,7 +1817,7 @@ queryView = new QueryView(
   {
     store: blocks,
     write: (fn) => run(fn, queryView?.editor),
-    blocks: () => ws.blocks,
+    kb,
     block: () => queryBlock ?? activeBlock(),
     onChange: () => {
       syncSections()
@@ -1975,7 +2005,7 @@ const dockBlocksDeps = (side: 'left' | 'right', slot: typeof dockLeft): Construc
    * 而那种情况下槽里也不会有人正在写。
    */
   write: (fn) => run(fn, ed),
-  blocks: () => ws.blocks,
+  kb,
   pins: () => prefs().dock[side].pins,
   pin: (blockId) => addPin(side, blockId),
   unpin: (blockId) => unpinBlock(side, blockId),

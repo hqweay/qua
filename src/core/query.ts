@@ -7,7 +7,8 @@
  *   · **内容**——永远按 `block id` 现读现渲染（D5：集合冻、内容不冻）。
  *
  * ⚠️ 这里零 DOM、零持久化：求值只吃「森林 ＋ atoms」，所以能直接单测。
- * ⚠️ 接内核后本文件的签名不变：`runQuery` 以后由 `IndexPort.query()` 实现，`QuerySpec` 仍是那个 canonical JSON。
+ * ⚠️ 接索引后本文件的签名不变：`evaluateQuery`（判定与顺序）由两条路径共用，
+ *    索引路径见 `index-port.ts` 的 `queryByIndex`；`QuerySpec` 仍是那个 canonical JSON。
  */
 import { isJournalBlock, type Block } from './model.ts'
 import { walkForest } from './walk.ts'
@@ -96,6 +97,37 @@ function walk(blocks: readonly Block[], fn: (b: Block, ancestors: Block[]) => vo
   })
 }
 
+/**
+ * 谓词环境：`ref`／`tag` 条件已经**按条件收好**的块 id 集合（外加 `journal` 范围条件）。
+ *
+ * 为什么单独立一份：求值有两条路 —— 纯函数路径从「森林 ＋ atoms」收集，
+ * 索引路径从 `IndexPort` 的表里查表；**判定与顺序只有一份**（`evaluateQuery`），
+ * 两条路只许在「环境怎么来」上不同。
+ */
+export interface QueryEnv {
+  refs: ReadonlySet<string>
+  tags: ReadonlySet<string>
+  /** 条件里第一个 `journal` 日期；没有 ⇒ `null`（此时它是普通组合，不当范围用） */
+  journalDate: string | null
+}
+
+/**
+ * 谓词判定与**顺序**的唯一一份实现：按森林先序走，命中即收，最后按 `limit` 截断。
+ *
+ * ⚠️ 顺序是契约的一部分（「冻结」保存的是输出的 `blockId[]`），所以候选迭代
+ *    必须是森林先序 —— 索引的插入顺序在挪位之后会漂移，不能拿来当序。
+ */
+export function evaluateQuery(spec: QuerySpec, roots: readonly Block[], env: QueryEnv): QueryHit[] {
+  const hits: QueryHit[] = []
+  walk(roots, (b, ancestors) => {
+    if (env.journalDate && isJournalBlock(b)) return
+    if (!matches(spec.where, b, env.refs, env.tags)) return
+    if (spec.todo && (todoOf(b) ?? 'none') !== spec.todo) return
+    hits.push({ blockId: b.id, path: ancestors.map((a) => a.id) })
+  })
+  return typeof spec.limit === 'number' ? hits.slice(0, Math.max(0, spec.limit)) : hits
+}
+
 /** 指向 `targetId` 的原子所在的块 id 集合（**一条指向边的另一端**，与渲染无关） */
 export function refSourceIds(atoms: readonly Atom[], targetId: string): Set<string> {
   const out = new Set<string>()
@@ -141,30 +173,25 @@ function matches(node: QueryNode, b: Block, refs: ReadonlySet<string>, tags: Rea
  * 这样「冻结」只要保存输出的 `blockId[]` 就够了（D4：冻结成员与顺序）。
  *
  * ⚠️ `journal` 条件的「这一天是哪一块」不在本文件定义 —— 走 `journal.ts` 的 `findJournalDay`。
+ * ⚠️ 索引路径（`index-port.ts` 的 `queryByIndex`）与环境收集方式不同、判定与顺序共用本函数。
  */
 export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
-  const refs = collectRefs(spec.where, input.atoms)
-  const tags = collectTags(spec.where, input.blocks)
+  const env: QueryEnv = {
+    refs: collectRefs(spec.where, input.atoms),
+    tags: collectTags(spec.where, input.blocks),
+    journalDate: firstJournal(spec.where),
+  }
   /** 范围：`subtree` ⇒ 只收 anchor 之下（含 anchor 自己）；`all` ⇒ 整片森林 */
   let roots: readonly Block[] = input.blocks
   const anchor = spec.scope !== 'all' && input.anchorId ? findById(input.blocks, input.anchorId) : undefined
   if (anchor) roots = [anchor]
 
   /** `journal` 条件把范围再收一层：只取那天块里的**子块**（日期行是只读标题，不该出现在结果里） */
-  const journalDate = firstJournal(spec.where)
-  if (journalDate) {
-    const day = findJournalDay(input.blocks, journalDate)
+  if (env.journalDate) {
+    const day = findJournalDay(input.blocks, env.journalDate)
     roots = day ? day.children : []
   }
-
-  const hits: QueryHit[] = []
-  walk(roots, (b, ancestors) => {
-    if (journalDate && isJournalBlock(b)) return
-    if (!matches(spec.where, b, refs, tags)) return
-    if (spec.todo && (todoOf(b) ?? 'none') !== spec.todo) return
-    hits.push({ blockId: b.id, path: ancestors.map((a) => a.id) })
-  })
-  return typeof spec.limit === 'number' ? hits.slice(0, Math.max(0, spec.limit)) : hits
+  return evaluateQuery(spec, roots, env)
 }
 
 /** 条件里所有 `ref` 的目标（用于一次性收集 refs，避免每个块都扫一遍 atoms） */
@@ -201,7 +228,8 @@ function collectTags(node: QueryNode, forest: readonly Block[]): Set<string> {
   return out
 }
 
-function firstJournal(node: QueryNode): string | null {
+/** 条件里第一个 `journal` 日期（索引路径要按它查日期表，所以导出共用） */
+export function firstJournal(node: QueryNode): string | null {
   if ('all' in node) {
     for (const n of node.all) {
       const d = firstJournal(n)

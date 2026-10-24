@@ -7,23 +7,19 @@
  * ⚠️ 这里**不认 `ws`／`ed`／`registry`**，只认下面这个 `DockContentDeps`。
  * ⚠️ 渲染一律走 `renderBlock`：槽只排一列，块由类型决定长相（角色只叠 chrome）。
  */
-import { findJournalDay, todayISO, type Atom, type Block, type Index } from '../core/index.ts'
-import { backrefsOf } from '../core/backrefs.ts'
+import { todayISO, type Block } from '../core/index.ts'
+import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { renderBlock, type BlockRenderCtx } from './block-renderers.ts'
 import { renderDockStack, type DockCard, type DockSlotEls } from './dock.ts'
 
 export interface DockContentDeps {
-  /** 块森林（页在顶层） */
-  blocks: () => Block[]
+  /** 读门面：今日块、反链源页都按 id／按名取数 */
+  kb: KbClient
   activeId: () => string
   /** 打开某个页（页 id 或反链项的来源页 id） */
   openPage: (id: string) => void
   newPage: () => void
-  /** 库级行内原子（反链的数据源） */
-  atoms: () => Atom[]
-  /** 共享索引（反链走查表，不再扫全库；由 store 缓存） */
-  index: () => Index
 }
 
 /** 额外内容：常驻卡片（活编辑器）与调用方准备的卡片 */
@@ -52,10 +48,9 @@ export function renderTodayInto(deps: DockContentDeps, slot: DockSlotEls, extra:
   }
 
   const cards: DockCard[] = []
-  const forest = deps.blocks()
 
   // Daily note：在库里找今天的 journal 块（冷启动时它一定已经物化，见 seed／装配层）
-  const today = findJournalDay(forest, todayISO())
+  const today = deps.kb.journalDay(todayISO())
   if (today) {
     const body = document.createElement('div')
     body.id = 'journal-today'
@@ -70,7 +65,7 @@ export function renderTodayInto(deps: DockContentDeps, slot: DockSlotEls, extra:
 /** 右槽：反链面板 */
 export function renderBackrefsInto(deps: DockContentDeps, slot: DockSlotEls, extra: DockExtra = {}): void {
   const target = deps.activeId()
-  const sources = backrefsOf({ blocks: deps.blocks(), atoms: deps.atoms(), targetId: target, index: deps.index() })
+  const sources = deps.kb.backlinksOf(target)
 
   const ctx: BlockRenderCtx = {
     isActive: (id) => id === deps.activeId(),

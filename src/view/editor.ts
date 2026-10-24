@@ -93,7 +93,7 @@ import {
 // 只取**类型**：`view` 拿不到实现，写入的落地方式归装配层（见 `Run`）
 import type { Tx } from '../core/kb/types.ts'
 // 标签块的「找到或创建」有两种落地（直写 / 事务），判据只有一份
-import { ensureTagInTx } from '../core/kb/ensure-tag.ts'
+import { ensureTagInTx, tagLookupOf } from '../core/kb/ensure-tag.ts'
 // 用户可见文案一律走 t
 import { t } from '../core/msg.ts'
 import { LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl, visibleRowHeight } from './block-dom.ts'
@@ -1206,10 +1206,10 @@ export class BlockEditor {
      * 拆开落盘会留下半批（「字改了、标签没建」「原子有了、归属没写」），
      * 而半批比慢更贵 —— 一次用户动作 = 一次 `run` = 一个 tx。
      *
-     * 新建块也走 `tx.insert` ⇒ 不再需要手工失效索引：`kb.tx` 成功之后才 `invalidateIndex`。
+     * 新建块也走 `tx.insert` ⇒ 索引随事务按 op 增量修补，不再需要手工失效。
      */
     if (tx) {
-      const tagBlock = ensureTagInTx(this.store.blocks, hit.name, tx)
+      const tagBlock = ensureTagInTx(tagLookupOf(this.store.blocks), hit.name, tx)
       if (!tagBlock) return null
       const tagId = tagBlock.id
       tx.patch(id, (b) => writeBlockText(b, b.text.slice(0, hit.from) + ATOM_PLACEHOLDER + b.text.slice(hit.to)))
@@ -1268,7 +1268,7 @@ export class BlockEditor {
       // 建标签块（可能）＋写归属是同一笔：拆开就会留下「只有标签、没有归属」的半批。
       // 与 `convertHashTag` 的事务支同形；名字为空／已挂 ⇒ 事务里什么都不写（零 op）
       const ok = this.write((tx) => {
-        const tag = ensureTagInTx(this.store.blocks, name, tx)
+        const tag = ensureTagInTx(tagLookupOf(this.store.blocks), name, tx)
         if (!tag || hasTag(b, tag.id)) return false
         tx.setTags(blockId, [...tagIdsOf(b), tag.id])
         return true

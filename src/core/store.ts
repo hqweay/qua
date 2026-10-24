@@ -14,8 +14,9 @@
 import { UndoStack, type Snap, type UndoKind } from './undo.ts'
 import type { Atom, Mark } from './annotations.ts'
 import type { Block } from './model.ts'
+import type { Op } from './kb/types.ts'
 import type { Sel } from './selection.ts'
-import { lookupBlock, rebuild, type Index } from './index-port.ts'
+import { applyOps as patchIndex, lookupBlock, rebuild, type Index } from './index-port.ts'
 
 /**
  * 订阅者收到的信号。
@@ -66,12 +67,20 @@ export class BlockStore {
   /**
    * 通知其他视图：源视图自己已经渲染过；`source` 不参与重渲染。
    * `ids` ＝ 这次动过的块（可选；见 `StoreSubscriber` 的说明）。
+   *
+   * ⚠️ touch 会**作废索引**（保守：调用方没说索引还准不准）；
+   *    写入方已经按 op 修补过索引时（`kb.tx` 的唯一出口）用 `notify` ——
+   *    作废会让那次修补白做，每次写入都退化成全量重建。
    */
+  notify(source?: unknown, ids?: readonly string[]): void {
+    for (const fn of this.subs) fn(source, ids)
+  }
+
   touch(source?: unknown, ids?: readonly string[]): void {
     // 一切模型变化都会走到这里（编辑器的 `emitChange` 是唯一出口）⇒ 索引在这里失效最省事，
     // 也最不容易漏：让「改数据」与「索引可能过期」这一对事实**绑在同一个调用上**。
     this.invalidateIndex()
-    for (const fn of this.subs) fn(source, ids)
+    this.notify(source, ids)
   }
 
   /**
@@ -96,6 +105,16 @@ export class BlockStore {
    */
   invalidateIndex(): void {
     this.idx = null
+  }
+
+  /**
+   * 一批 op 之后**增量修补**索引（`kb.tx` 成功后的唯一调用方）。
+   *
+   * 索引若已失效（先被旁路写入作废过），`index` getter 会先全量重建一遍再修补 ——
+   * 一次性成本，结果不变。等式「修补 == 重建」由 `tests/index-port.test.ts` 钉住。
+   */
+  applyOps(ops: readonly Op[]): void {
+    patchIndex(this.index, ops, this.blocks, this.atoms)
   }
 
   /** 按 id 找块（整片森林；zoom 后当前对象可能在任意深度）—— 走索引，O(1) */
