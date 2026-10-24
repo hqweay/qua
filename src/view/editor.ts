@@ -24,7 +24,7 @@ import {
   DIVIDER_TYPE,
   flatten,
   hasIdentity,
-  indentBlock,
+  indentMove,
   insertFirstChild,
   insertSiblingAfter,
   enterKind,
@@ -40,11 +40,11 @@ import {
   removeTagId,
   trailingHashTag,
   mkBlock,
-  moveBlockTo,
-  moveSibling,
+  applyMove,
+  dropMove,
   normSel,
   normalizeMarks,
-  outdentBlock,
+  outdentMove,
   pruneToText,
   edgeSourceIds,
   tagIdsOf,
@@ -52,6 +52,7 @@ import {
   removeMarkRange,
   selToTextRanges,
   setBlockType,
+  siblingMove,
   splitBlockBefore,
   splitBlockIntoFirstChild,
   isFolded,
@@ -79,6 +80,7 @@ import {
   type Located,
   type Mark,
   type MarkType,
+  type MovePlan,
   type Sel,
   type Snap,
   type TextChange,
@@ -1517,11 +1519,7 @@ export class BlockEditor {
 
     if (kind === 'outdent') {
       // 空块 Enter ⇒ 反缩进：不建新块
-      if (!outdentBlock(this.doc, id)) return
-      this.undo.record(before, 'structural', Date.now())
-      this.renderAll()
-      this.placeCaret(id, 0)
-      this.emitChange('struct')
+      this.structuralMove(id, outdentMove(this.doc, id), { caretAt: { id, off: 0 } })
       return
     }
 
@@ -1671,23 +1669,48 @@ export class BlockEditor {
   }
 
   indent(id: string): void {
-    this.atomsPreservingTx('structural', () => indentBlock(this.doc, id))
+    const plan = indentMove(this.doc, id)
+    this.structuralMove(id, plan, { unfoldId: plan?.parentId ?? null })
   }
 
   outdent(id: string): void {
-    this.atomsPreservingTx('structural', () => outdentBlock(this.doc, id))
+    this.structuralMove(id, outdentMove(this.doc, id))
   }
 
   move(id: string, delta: -1 | 1): void {
-    this.atomsPreservingTx('structural', () => moveSibling(this.doc, id, delta))
+    this.structuralMove(id, siblingMove(this.doc, id, delta))
   }
 
-  private atomsPreservingTx(kind: UndoKind, fn: () => boolean): void {
+  /**
+   * 结构移动的**统一落点管道**（缩进 / 反缩进 / 上下换位 / 拖拽）。
+   *
+   * 落点由 `core/tree.ts` 的 `*Move` 算（一个真相），这里只决定**谁来写**：
+   * 注入事务入口时走 `tx.move` —— 一次移动就是一条 `block.upsert{parent,index}`；
+   * 没有事务入口时才直改活块（迁移期兜底）。
+   *
+   * ⚠️ 折叠态不跟着进事务：那是「这一行此刻收着」，不是内容（与 `unfoldBlock` 同源）。
+   *    缩进进去 / 拖进去之后必须展开，否则块被折在一个看不见的层里。
+   * ⚠️ 事务里**只**开移动那一笔：`applyMove` 与 `tx.move` 是同一件事实的两种落地，
+   *    都写一次就等于同一件事记两遍。
+   */
+  private structuralMove(
+    id: string,
+    plan: MovePlan | null,
+    o: { unfoldId?: string | null; caretAt?: { id: string; off: number } } = {},
+  ): void {
+    if (!plan) return
     const before = this.snap()
-    if (!fn()) return
-    this.undo.record(before, kind, Date.now())
+    if (this.write) {
+      const write = this.write
+      write((tx) => tx.move(id, plan.parentId, plan.index))
+    } else if (!applyMove(this.doc, id, plan)) {
+      return
+    }
+    if (o.unfoldId) unfoldBlock(this.doc, o.unfoldId)
+    this.undo.record(before, 'structural', Date.now())
     this.renderAll()
-    if (this.sel) this.placeCaret(this.sel.aBlock, this.sel.aOff)
+    if (o.caretAt) this.placeCaret(o.caretAt.id, o.caretAt.off)
+    else if (this.sel) this.placeCaret(this.sel.aBlock, this.sel.aOff)
     this.emitChange('struct')
   }
 
@@ -2256,32 +2279,23 @@ export class BlockEditor {
         // 段根（页／天／查询记录）不是内容块：不参与拖拽。
         // 日记流的分段顺序是真实日期序，查询列表是视图序——都不是「可拖的兄弟序」。
         if (loc.parent === null) return
-        const before = this.snap()
-        let ok = false
+        /**
+         * 落点只由 `dropMove` 算（空白处算「最后一个根的最后一位」）。
+         * 目标若也是段根，只接受 inside —— before/after 会给它造出一个没有家的兄弟。
+         */
         if (targetId) {
           const targetLoc = locate(this.doc, targetId)
-          // 段根只接受 inside（放进某一天/某个容器）；before/after 会造出没有家的根。
-          if (!targetLoc || (targetLoc.parent === null && zone !== 'inside')) return
-          ok = moveBlockTo(this.doc, id, targetId, zone)
-        } else {
-          // 落在空白处：放进**最后一段**（日记流里是最早的一天），不推到 doc.roots。
-          // （旧实现 push 到 roots 会造出一个不属于任何 section 的根；N=1 时也是死区。）
-          const root = this.doc.roots[this.doc.roots.length - 1]
-          // 根的类型声明不许有子块（占位型块作根）⇒ 空白处也放不进去
-          if (root && typeDeclOf(root).children !== 'none') {
-            const list = loc.parent ? loc.parent.children : this.doc.roots
-            list.splice(loc.index, 1)
-            root.children.push(loc.block)
-            ok = true
+          if (!targetLoc || (targetLoc.parent === null && zone !== 'inside')) {
+            this.endDrag()
+            return
           }
         }
+        const plan = dropMove(this.doc, id, targetId, zone)
         this.endDrag()
-        if (!ok) return
-        this.undo.record(before, 'structural', Date.now())
-        const caret = this.sel?.aOff ?? 0
-        this.renderAll()
-        this.placeCaret(id, caret)
-        this.emitChange('struct')
+        this.structuralMove(id, plan, {
+          unfoldId: zone === 'inside' ? (plan?.parentId ?? null) : null,
+          caretAt: { id, off: this.sel?.aOff ?? 0 },
+        })
       },
       endDrag: () => this.endDrag(),
 

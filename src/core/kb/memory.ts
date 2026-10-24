@@ -274,8 +274,9 @@ export class MemoryKb implements KbClient {
         const from = siblings(self.store, self.parentOf(id)?.id ?? null)
         const list = siblings(self.store, parentId)
         if (!from || !list) throw new Error(`kb: no such parent "${parentId}"`)
-        const at_ = Math.max(0, Math.min(index, list.length))
+        // 先摘再夹取下标：`index` 是**最终**位置，同列表往后挪时调用方不必自己减一
         from.splice(from.indexOf(b), 1)
+        const at_ = Math.max(0, Math.min(index, list.length))
         list.splice(at_, 0, b)
         ops.push({ e: 'block', id, op: 'upsert', value: { parent: parentId, index: at_ }, at: at() })
         sink.blocks(id)

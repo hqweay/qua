@@ -550,47 +550,97 @@ export function deleteBlockSpan(doc: Doc, startId: string, startOff: number, end
   return head.id
 }
 
+/**
+ * 一次结构移动的**落点**：父块 ＋ 在目标兄弟列表里的**最终**下标。
+ *
+ * 下标口径定成「把自己摘掉之后的位置」，不是「摘之前它排第几个」：
+ * 同列表内前后挪动时两种口径差一格，而落点只能有一个真相 ——
+ * 缩进、反缩进、上下换位、拖拽四条入口都从这里取数（`applyMove` 与 `tx.move`
+ * 按同一口径插），否则同一个动作在不同入口上会落到不同位置。
+ */
+export interface MovePlan {
+  parentId: string | null
+  index: number
+}
+
+/**
+ * 按落点挪一块（**直写路径**；有事务入口时用 `tx.move`，落点同样由本文件的 `*Move` 算）。
+ *
+ * ⚠️ 先摘再插，且「摘之后才夹取下标」：`plan.index` 是最终位置，
+ *    同列表里往后挪时不需要调用方自己减一。
+ * ⚠️ **自己不能移进自己的子树**：先摘再找父块，会把父块跟着一起摘掉 ——
+ *    摘完才发现找不到就太晚了，所以进门先判。
+ */
+export function applyMove(doc: Doc, id: string, plan: MovePlan): boolean {
+  const loc = locate(doc, id)
+  if (!loc) return false
+  const parent = plan.parentId === null ? null : locate(doc, plan.parentId)?.block
+  if (plan.parentId !== null && !parent) return false
+  if (parent && (parent.id === id || hasDescendant(doc, id, parent.id))) return false
+  const from = siblingsOf(doc, loc.parent)
+  from.splice(loc.index, 1)
+  const to = parent ? parent.children : doc.roots
+  to.splice(Math.max(0, Math.min(plan.index, to.length)), 0, loc.block)
+  return true
+}
+
+/**
+ * 缩进的落点：前兄弟的最后一个孩子（tab）。
+ *
+ * 前一块**声明不许有子块**（占位型块）⇒ 没有落点。
+ * 判据落在写路径入口：只把 UI 上的「缩进」灰掉挡不住命令面板与拖拽的另一条路。
+ */
+export function indentMove(doc: Doc, id: string): MovePlan | null {
+  const loc = locate(doc, id)
+  if (!loc || loc.index === 0) return null
+  const prev = siblingsOf(doc, loc.parent)[loc.index - 1]!
+  if (typeDeclOf(prev).children === 'none') return null
+  return { parentId: prev.id, index: prev.children.length }
+}
+
 /** 缩进：变前兄弟的最后一个孩子（tab） */
 export function indentBlock(doc: Doc, id: string): boolean {
-  const loc = locate(doc, id)
-  if (!loc || loc.index === 0) return false
-  const list = siblingsOf(doc, loc.parent)
-  const prev = list[loc.index - 1]!
-  /**
-   * 前一块**声明不许有子块**（占位型块）⇒ 这次缩进不成立。
-   * 判据落在写路径入口：只把 UI 上的「缩进」灰掉挡不住命令面板与拖拽的另一条路。
-   */
-  if (typeDeclOf(prev).children === 'none') return false
-  list.splice(loc.index, 1)
-  prev.children.push(loc.block)
+  const plan = indentMove(doc, id)
+  if (!plan || !applyMove(doc, id, plan)) return false
   // 刚缩进进去的那一块必须看得见，否则用户以为它被吞了
-  unfoldBlock(doc, prev.id)
+  unfoldBlock(doc, plan.parentId!)
   return true
+}
+
+/**
+ * 反缩进的落点：变父的下一个兄弟（shift+tab）。
+ *
+ * ⚠️ **父块自己就是装载根时没有落点**：窗口的 `roots` 不是森林的根
+ *    （页视图只装自己那一行），插进去会得到一个「看得见、写不回去」的块 ——
+ *    刷新就消失，而用户以为移动成功了。这与 `canOutdent`（空块 Enter）是同一条判据。
+ */
+export function outdentMove(doc: Doc, id: string): MovePlan | null {
+  const loc = locate(doc, id)
+  if (!loc || !loc.parent) return null
+  const parentLoc = locate(doc, loc.parent.id)
+  if (!parentLoc || !parentLoc.parent) return null
+  return { parentId: parentLoc.parent.id, index: parentLoc.index + 1 }
 }
 
 /** 取消缩进：变父的下一个兄弟（shift+tab） */
 export function outdentBlock(doc: Doc, id: string): boolean {
+  const plan = outdentMove(doc, id)
+  return plan ? applyMove(doc, id, plan) : false
+}
+
+/** 上下换位的落点：同层相邻兄弟（mod+shift+↑/↓） */
+export function siblingMove(doc: Doc, id: string, delta: -1 | 1): MovePlan | null {
   const loc = locate(doc, id)
-  if (!loc || !loc.parent) return false
-  const parentLoc = locate(doc, loc.parent.id)
-  if (!parentLoc) return false
-  const parentList = siblingsOf(doc, parentLoc.parent)
-  const kids = loc.parent.children
-  kids.splice(loc.index, 1)
-  parentList.splice(parentLoc.index + 1, 0, loc.block)
-  return true
+  if (!loc) return null
+  const to = loc.index + delta
+  if (to < 0 || to >= siblingsOf(doc, loc.parent).length) return null
+  return { parentId: loc.parent?.id ?? null, index: to }
 }
 
 /** 与相邻兄弟交换（mod+shift+↑/↓） */
 export function moveSibling(doc: Doc, id: string, delta: -1 | 1): boolean {
-  const loc = locate(doc, id)
-  if (!loc) return false
-  const list = siblingsOf(doc, loc.parent)
-  const to = loc.index + delta
-  if (to < 0 || to >= list.length) return false
-  const [b] = list.splice(loc.index, 1)
-  list.splice(to, 0, b!)
-  return true
+  const plan = siblingMove(doc, id, delta)
+  return plan ? applyMove(doc, id, plan) : false
 }
 
 /** 复制块（含子树）：返回新块 id */
@@ -625,28 +675,49 @@ export function removeBlock(doc: Doc, id: string): boolean {
   return true
 }
 
+/**
+ * 拖拽的落点（before/after/inside；`targetId === null` 表示落在空白处）。
+ *
+ * 拖拽与键盘移动共用 `applyMove`／`tx.move` 的**最终下标**口径；这里只算「落在哪」：
+ *   · 同列表里自己排得比目标前 ⇒ 摘掉自己之后目标前移一格（`shift`）；
+ *   · 空白处 ⇒ 放进**最后一个根**，不推到森林顶层 ——
+ *     一个不属于任何 section 的根在视图里没有容身处（`roots` 是装载单位，不是兄弟位）。
+ *
+ * 目标是**声明不许有子块**的类型（占位型块）⇒ 落进它里面不成立；
+ * before/after 仍允许：那只是插在它旁边，不需要它容纳任何东西。
+ */
+export function dropMove(
+  doc: Doc,
+  id: string,
+  targetId: string | null,
+  pos: 'before' | 'after' | 'inside',
+): MovePlan | null {
+  const loc = locate(doc, id)
+  if (!loc) return null
+  if (targetId === null) {
+    const root = doc.roots[doc.roots.length - 1]
+    if (!root || typeDeclOf(root).children === 'none') return null
+    const same = loc.parent?.id === root.id
+    return { parentId: root.id, index: root.children.length - (same ? 1 : 0) }
+  }
+  if (id === targetId) return null
+  if (hasDescendant(doc, id, targetId)) return null
+  const tgt = locate(doc, targetId)
+  if (!tgt) return null
+  if (pos === 'inside') {
+    if (typeDeclOf(tgt.block).children === 'none') return null
+    return { parentId: tgt.block.id, index: tgt.block.children.length }
+  }
+  const sameList = (loc.parent?.id ?? null) === (tgt.parent?.id ?? null)
+  const shift = sameList && loc.index < tgt.index ? 1 : 0
+  return { parentId: tgt.parent?.id ?? null, index: tgt.index - shift + (pos === 'after' ? 1 : 0) }
+}
+
 /** 拖拽挂载：把 id 挂到 target 的 before/after/inside（自带循环守卫） */
 export function moveBlockTo(doc: Doc, id: string, targetId: string, pos: 'before' | 'after' | 'inside'): boolean {
-  if (id === targetId) return false
-  if (hasDescendant(doc, id, targetId)) return false
-  const loc = locate(doc, id)
-  const tgt = locate(doc, targetId)
-  if (!loc || !tgt) return false
-  /**
-   * 目标是**声明不许有子块**的类型（占位型块）⇒ 落进它里面不成立。
-   * before/after 仍允许：那只是插在它旁边，不需要它容纳任何东西。
-   */
-  if (pos === 'inside' && typeDeclOf(tgt.block).children === 'none') return false
-  siblingsOf(doc, loc.parent).splice(loc.index, 1)
-  const tgt2 = locate(doc, targetId)!
-  if (pos === 'inside') {
-    tgt2.block.children.push(loc.block)
-    unfoldBlock(doc, tgt2.block.id)
-  } else {
-    const list = siblingsOf(doc, tgt2.parent)
-    const at = pos === 'before' ? locate(doc, targetId)!.index : locate(doc, targetId)!.index + 1
-    list.splice(at, 0, loc.block)
-  }
+  const plan = dropMove(doc, id, targetId, pos)
+  if (!plan || !applyMove(doc, id, plan)) return false
+  if (pos === 'inside') unfoldBlock(doc, targetId)
   return true
 }
 

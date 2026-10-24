@@ -4560,6 +4560,130 @@ await check(
   },
 )
 
+await check(
+  'T68 缩进／反缩进／上下换位各走一笔事务：每次恰好 1 条 upsert{parent,index}，一次撤销复原',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 挑一个**深度 ≥ 2**、且前一行是同深度的块：缩进要有前兄弟，反缩进要有「父块的父块」
+     * （装载根的直接子层没有落点 —— 窗口 roots 不是森林的根）。
+     */
+    const pick = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('.blk')]
+      for (let i = 1; i < rows.length; i++) {
+        const d = Number(rows[i].dataset.depth)
+        if (d >= 2 && Number(rows[i - 1].dataset.depth) === d) {
+          return { id: rows[i].dataset.blockId, depth: d }
+        }
+      }
+      return null
+    })
+    assert(pick, '假数据里应能找到「深度 ≥2 且有同层前兄弟」的块')
+
+    /** 模型位置（整片森林口径）：父块、下标、兄弟列表长度、自己的子块数 */
+    const pos = (id) =>
+      page.evaluate((id) => {
+        const ed = window.__qua.__editor
+        let hit = null
+        const walk = (list, parent) => {
+          list.forEach((b, i) => {
+            if (b.id === id) hit = { parentId: parent?.id ?? null, index: i, siblings: list.length, kids: b.children.length }
+            walk(b.children, b)
+          })
+        }
+        walk(ed.store.blocks, null)
+        return hit
+      }, id)
+
+    const start = await pos(pick.id)
+    assert(start?.parentId, `前置：选中的块应有父块：${JSON.stringify(start)}`)
+    const prev = await page.evaluate(
+      (id) => {
+        const ed = window.__qua.__editor
+        let prevId = null
+        const walk = (list, parent) => {
+          list.forEach((b, i) => {
+            if (b.id === id) prevId = list[i - 1]?.id ?? null
+            walk(b.children, b)
+          })
+        }
+        walk(ed.store.blocks, null)
+        return prevId
+      },
+      pick.id,
+    )
+    assert(prev, '前置：选中的块应有前兄弟')
+    const prevStart = await pos(prev)
+
+    const depthOf = (id) =>
+      page.evaluate(
+        (id) => Number(document.querySelector(`.blk[data-block-id="${id}"]`)?.dataset.depth ?? -1),
+        id,
+      )
+    const ops = () =>
+      page.evaluate(() => window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, value: o.value })))
+
+    /** 一次结构移动的 op 形状：恰好一条 upsert{parent,index}，不带正文、不带属性 */
+    const oneMove = (list, want) => {
+      assert(list.length === 1, `应恰好 1 条 op：${JSON.stringify(list)}`)
+      assert(list[0].e === 'block' && list[0].id === pick.id && list[0].op === 'upsert', `应是一条 block.upsert：${JSON.stringify(list)}`)
+      const v = list[0].value ?? {}
+      assert(
+        Object.keys(v).length === 2 && v.parent !== undefined && v.index !== undefined,
+        `只该带 {parent,index}（不带正文/属性）：${JSON.stringify(v)}`,
+      )
+      assert(v.parent === want.parentId, `父块应是「${want.parentId}」，实际「${v.parent}」`)
+      assert(v.index === want.index, `下标应是 ${want.index}，实际 ${v.index}`)
+    }
+
+    // ① Tab 缩进：变前兄弟的最后一个孩子（落点 ＝ 前兄弟此刻的子块数）
+    await page.evaluate((p) => window.__qua.focusBlock(p.id, 1), pick)
+    await page.keyboard.press('Tab')
+    await page.waitForTimeout(180)
+    oneMove(await ops(), { parentId: prev, index: prevStart.kids })
+    const afterIndent = await pos(pick.id)
+    assert(
+      afterIndent.parentId === prev && afterIndent.index === prevStart.kids,
+      `缩进后应挂在前兄弟的孩子末尾：${JSON.stringify(afterIndent)}（期望 ${prev}#${prevStart.kids}）`,
+    )
+    assert((await depthOf(pick.id)) === pick.depth + 1, `DOM 深度应 +1：${pick.depth} → ${await depthOf(pick.id)}`)
+
+    // ② Shift+Tab 反缩进：变父的下一个兄弟 ⇒ 回到原位
+    await page.keyboard.press('Shift+Tab')
+    await page.waitForTimeout(180)
+    oneMove(await ops(), { parentId: start.parentId, index: prevStart.index + 1 })
+    const afterOutdent = await pos(pick.id)
+    assert(
+      afterOutdent.parentId === start.parentId && afterOutdent.index === start.index,
+      `反缩进应回到原位：${JSON.stringify(start)} → ${JSON.stringify(afterOutdent)}`,
+    )
+    assert((await depthOf(pick.id)) === pick.depth, `DOM 深度应回原样：${await depthOf(pick.id)}`)
+
+    // ③ ⌘⇧↑ 上移一位：同层换位，仍是一条 move
+    await page.keyboard.press('Meta+Shift+ArrowUp')
+    await page.waitForTimeout(180)
+    oneMove(await ops(), { parentId: start.parentId, index: start.index - 1 })
+    const afterUp = await pos(pick.id)
+    assert(afterUp.index === start.index - 1, `上移后下标应是 ${start.index - 1}：${JSON.stringify(afterUp)}`)
+
+    // ④ 一次撤销：回到上移前的位置（不是再往上挪一格）
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(200)
+    const back = await pos(pick.id)
+    assert(
+      back.parentId === start.parentId && back.index === start.index,
+      `一次撤销应回到「${JSON.stringify(start)}」：${JSON.stringify(back)}`,
+    )
+    assert((await depthOf(pick.id)) === pick.depth, '撤销后 DOM 深度也应回原样')
+
+    await ctx.close()
+    return `缩进/反缩进/上移 ⇒ 各 1 条 upsert{parent,index}（父块与下标都随模型真值）；⌘Z 回原位`
+  },
+)
+
 /* ---------------------------------------------------------------- 汇总 */
 
 await browser.close()
