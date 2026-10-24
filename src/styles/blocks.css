@@ -75,7 +75,20 @@
   display: flex;
   align-items: center;
   gap: 1px;
-  height: var(--ui-line-h);
+  /*
+   * gutter 列的高度 ＝ **正文首行行盒**（`1lh`），不是 `--ui-line-h`。
+   *
+   * 两者不是同一个数：行盒 ＝ 字号 × `--ui-lh-relaxed`（深度 0 是 15.5 × 1.85 ≈ 28.7，
+   * 子块是 13.5 × 1.85 ≈ 25），而 `--ui-line-h` 是**行高下限**（28px）。
+   * 用后者定高时，子块的块标在 28px 里居中 ⇒ 比正文首行低 1.5–2px，
+   * 只有字号恰好撑满 28px 的块看起来是齐的（聚焦块就是这样，于是「只有它对齐」）。
+   * `1lh` 让 gutter 跟着**这一行自己的字号**走，深度 0／子块同一个口径。
+   *
+   * ⚠️ `.left` 与 `.tx` 的字号必须一致：都从 `.blk` 继承（页／日记把字号写在 `.blk` 上，
+   *    不在 `.tx` 上单独放大）。若哪天只改 `.tx` 的字号，这条就会静默失效 ——
+   *    `check:dock` 有一条量「块标中心 vs 首行行盒中心」的断言守着它。
+   */
+  height: 1lh;
   user-select: none;
   /* 折叠三角的定位锚：三角要贴**这一行自己的块标**，不能贴整行的最左 */
   position: relative;
@@ -153,12 +166,15 @@
  *    最左边那一列，与它自己的块标离得老远、还会压到祖先的导轨。
  *    锚在 `.left` 上时，`.left` 本身已经落在 `gutter + depth × indent`（块标所在列）
  *    ⇒ 三角恒在**自己那颗块标**左侧 10px，几何上正好接在导轨命中区的右缘（不打架）。
+ *
+ * ⚠️ **高度跟 `.left` 一致**（`100%`，不写 `--ui-line-h`）：三角是 `align-items:center` 的
+ *    一行盒子，它与块标必须**同一个居中基准**，否则三角会比块标低／高半个笔画。
  */
 .blk .fold {
   position: absolute;
   left: calc(-1 * var(--ui-caret-out));
   width: var(--ui-caret-size);
-  height: var(--ui-line-h);
+  height: 100%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -203,7 +219,8 @@
   position: relative;
   flex: 0 0 auto;
   width: var(--ui-marker-slot);
-  height: var(--ui-line-h);
+  /* 跟 `.left` 同高（＝正文首行行盒），见 `.left` 上的说明 */
+  height: 100%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -281,7 +298,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: var(--ui-line-h);
+  /* 与块标同一个居中基准（`.left` 的高度＝正文首行行盒） */
+  height: 100%;
   color: var(--ui-text-tertiary);
   user-select: none;
   -webkit-user-select: none;
@@ -347,13 +365,17 @@
 }
 /*
   **分割线**：整条线就是这一块的内容，所以它住在 `.tx` 里（`.tx` 是块的正文槽契约）。
-  用 margin-block 让线落在行高正中；高度 ＋ 上下留白刚好等于一行高，
+  用 margin-block 让线落在行高正中；高度 ＋ 上下留白刚好等于**一个行盒**（`1lh`），
   所以它不会把这一行撑高，也不破坏「块的垂直留白归容器」。
+
+  ⚠️ 留白按 `1lh`（＝字号 × 行高倍数）算，不按 `--ui-line-h`（行高下限）算：
+     后者在子块上比真实行盒高 3px，线会因此把这一块单独撑高，
+     块标（按 `1lh` 居中）就与线不在一条中线上了。
 */
 .blk .tx .divider-rule {
   display: block;
   height: var(--ui-sep);
-  margin-block: calc((var(--ui-line-h) - var(--ui-sep)) / 2);
+  margin-block: calc((1lh - var(--ui-sep)) / 2);
   background: var(--ui-border);
 }
 /*
@@ -370,10 +392,15 @@
 .blk[data-type='core/divider'] .marker:hover .grip {
   opacity: 0.85;
 }
-/* 页 / 日记 / 被聚焦块作为**正文第一行**时，字号略大一档（它是这一屏的「身份」，但不叫标题） */
+/*
+ 页 / 日记 / 被聚焦块作为**正文第一行**时更大一档（它是这一屏的「身份」，但不叫标题）。
+ ⚠️ 这里**不写 font-size**：字号已经是「深度 0 ⇒ `--ui-fs-lg`」一条规则给出的。
+    在这个 `.tx` 上再写一遍，就会让 `.tx` 的字号与 `.left`（gutter）的字号分家，
+    而 gutter 的高度（`1lh`）是按 `.blk` 的字号算的 —— 两份字号一旦不一致，
+    块标就会与正文首行错位，且**只在部分行**错位，看起来像随机漂移。
+*/
 .blk[data-depth='0'][data-role~='page'] .tx,
 .blk[data-depth='0'][data-role~='journal'] .tx {
-  font-size: var(--ui-fs-lg);
   font-weight: 600;
 }
 /*

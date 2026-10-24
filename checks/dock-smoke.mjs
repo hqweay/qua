@@ -399,6 +399,85 @@ await check('A8 View 态没有缩放手柄；拖拽把手已并进块标，静�
   return `View 态：可见抓手 ${r.grips}/${r.gripTotal} 个、缩放手柄 ${r.resizes} 个（把手已并进块标，D4）`
 })
 
+/* ---------------------------------------------------------------- A16 */
+
+await check('A16 每一行的块标与正文首行共中线（含子块；跨字号与密度）', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  /**
+   * ⚠️ 冷启动是**日记流**：段头那行字在 `::before`（`_date` 的只读投影）里，
+   *    不是文本节点 ⇒ 取不到字形盒。要测「深度 0 的大字号行」得先打开一页
+   *    （页块作为正文第一行时用 `--ui-fs-lg`，正文是可编辑的描述）。
+   */
+  await openFirstPage(page)
+  await page.waitForTimeout(150)
+
+  /**
+   * **判据**：同一行里「块标中心」与「正文首行的**行盒中心**」同高（差 ≤ 0.6px）。
+   *
+   * 为什么不能拿 `--ui-line-h` 当基准：它是**行高下限**（28px），而正文首行的行盒是
+   * `字号 × --ui-lh-relaxed`（子块 13.5 × 1.85 ≈ 25px，深度 0 ≈ 28.7px）。
+   * 两者不是同一个数 ⇒ 用固定高度给 gutter 定高时，**只有字号恰好撑满 28px 的行**看起来齐
+   * （聚焦块正好如此，于是「只有它对齐」）。gutter 必须按 `1lh` 跟这一行自己的字号走。
+   *
+   * ⚠️ 量的是**行盒**（`.tx` 顶部 ＋ 一个 `line-height`），不是字形盒（Range 的 client rects）：
+   *    字形盒是字体的 em 框，同一段文字在 14.5px 与 15.5px 下各有自己的舍入，
+   *    拿它当基准会引入 0.5–1px 的字体度量噪声（实测同一条规则在压缩密度下报 0.91px）。
+   *    块标本来就跟行盒居中，行盒才是它该对齐的东西。
+   * ⚠️ 要**跨字号**取样：只测一种字号时比值恒等，上面那个 bug 从 28 ≡ 28 里看不出来。
+   */
+  const measure = () =>
+    page.evaluate(() => {
+      const out = []
+      for (const el of document.querySelectorAll('#editor .blk')) {
+        const tx = el.querySelector(':scope > .tx')
+        const mk = el.querySelector(':scope > .left > .marker')
+        if (!tx || !mk) continue
+        const cs = getComputedStyle(tx)
+        const lh = parseFloat(cs.lineHeight)
+        const t = tx.getBoundingClientRect()
+        const m = mk.getBoundingClientRect()
+        const rule = tx.querySelector(':scope > .divider-rule')
+        // 分割线没有字：它的「行」就是那条线本身
+        const ref = rule ? (r) => (r.top + r.bottom) / 2 : null
+        const lineCenter = rule ? ref(rule.getBoundingClientRect()) : t.top + lh / 2
+        out.push({
+          depth: Number(el.dataset.depth),
+          fs: parseFloat(cs.fontSize),
+          kind: rule ? 'divider' : (tx.textContent ?? '').trim() ? 'text' : 'empty',
+          delta: Math.round((m.top + m.height / 2 - lineCenter) * 100) / 100,
+          text: (tx.textContent ?? '').slice(0, 10),
+        })
+      }
+      return out
+    })
+
+  const rows = await measure()
+  assert(rows.length >= 5, `应有足够多的行可测：${rows.length}`)
+  const textRows = rows.filter((r) => r.kind === 'text')
+  const fontSizes = [...new Set(textRows.map((r) => r.fs))]
+  assert(fontSizes.length >= 2, `样本必须跨字号（否则这条断言看不出问题）：${JSON.stringify(fontSizes)}`)
+  const bad = rows.filter((r) => Math.abs(r.delta) > 0.6)
+  assert(bad.length === 0, `块标应与正文首行共中线（差 ≤0.6px），实测：${JSON.stringify(bad.slice(0, 4))}`)
+
+  // 压缩密度只改 token：同一判据必须仍成立
+  await page.evaluate(() => {
+    document.body.dataset.density = 'compact'
+  })
+  await page.waitForTimeout(150)
+  const compact = await measure()
+  const badCompact = compact.filter((r) => Math.abs(r.delta) > 0.6)
+  assert(badCompact.length === 0, `压缩密度下块标仍应与正文首行共中线：${JSON.stringify(badCompact.slice(0, 4))}`)
+  await page.evaluate(() => {
+    delete document.body.dataset.density
+  })
+
+  await ctx.close()
+  const worst = Math.max(...rows.map((r) => Math.abs(r.delta)))
+  const worstCompact = Math.max(...compact.map((r) => Math.abs(r.delta)))
+  return `${rows.length} 行 × ${fontSizes.length} 档字号（${fontSizes.join('/')}px），最大偏差 ${worst}px；压缩密度 ${worstCompact}px`
+})
+
 /* ---------------------------------------------------------------- 不适用项 */
 
 skip('A5／A6 布局型块的列数降级与右栏转覆盖', '当前实现还没有「布局型块（表格/看板/白板）」与 minW 类型声明；右栏转覆盖按宽度口径回扫后标为后置')
