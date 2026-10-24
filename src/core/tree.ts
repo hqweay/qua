@@ -121,32 +121,6 @@ export function findInForest(forest: readonly Block[], id: string): Block | unde
 }
 
 /**
- * 把编辑器里的 **N 个 root** 逐项写回森林。
- *
- * 每个 root 都是一个**真实容器**：按 `root.id` 找森林里的活块，写回正文/子树。
- * 与旧的 `syncActivePage`（只认 `roots[0]`）相比，这是「N=1 是特例」收回成通例的那一步。
- *
- * ⚠️ **只写正文，不碰地址**：`text` 是描述，名字住在 `_aliases`。
- *    旧实现在这里顺手 `renameBlock(root.text)`，于是「每敲一个字都写回」等于
- *    每敲一个字都重命名一次 —— 撞名时还会把地址钉回旧值、让显示名滞后。
- *    地址的改名只有一条路：显式改名（`renameAlias`／`setPrimaryAlias`）。
- * ⚠️ journal 的 `text` 是 `_date` 的只读投影⇒ **不写 text**。
- * ⚠️ `children` 在编辑器里通常就是同一个数组（共享引用）；这里仍显式赋值，
- *    因为结构操作可能替换 roots 里的 children 数组（如拆块/插入）。
- * ⚠️ **不搬 `props`**：属性值由属性写路径直接写在那块上（同一份活引用），
- *    这里再搬一遍等于给同一件事写第二份真相。
- * ⚠️ 找不到的 root（例如已被删除）静默跳过；命令层负责解释「为什么少了」。
- */
-export function writeBackRoots(forest: Block[], roots: readonly Block[]): void {
-  for (const root of roots) {
-    const p = findInForest(forest, root.id)
-    if (!p) continue
-    if (!isJournalBlock(p)) writeBlockText(p, root.text)
-    p.children = root.children
-  }
-}
-
-/**
  * 森林里到某块的**路径**（含它自己）：`[根, …, 它]`；找不到返回 null。
  *
  * ⚠️ zoom 的面包屑就是它去掉末尾 —— **派生、不物化、不入库**：
