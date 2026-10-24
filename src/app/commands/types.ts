@@ -66,12 +66,13 @@ export interface PageDeps {
 }
 
 export interface ViewDeps {
-  /** 可直接改的偏好（装配层持有） */
+  /** 可直接改的偏好（装配层持有；设备状态，不进库） */
   prefs: () => { theme: ThemeMode; dock: { left: { open: boolean }; right: { open: boolean } } }
   applyChrome: () => void
   /** 主题变了要重画的东西（顶栏开关撤掉后＝重画调试菜单的勾选） */
   renderDebugState: () => void
-  scheduleSave: () => void
+  /** 偏好变了要落**设备**（`qua.device`），与库的落盘是两条路 */
+  scheduleDeviceSave: () => void
   scheduleBadge: () => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
@@ -84,7 +85,8 @@ export interface DevDeps {
   replaceWorkspace: (next: Workspace) => void
   prefs: () => { theme: ThemeMode }
   setVirtualize: (on: boolean, radius: number) => void
-  scheduleSave: () => void
+  /** 偏好变了要落**设备**（`qua.device`）；换库不碰它 */
+  scheduleDeviceSave: () => void
   scheduleBadge: () => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
   /** 「组合期命令零触发」自检：派发一次合成按键，返回触发了几个命令 */

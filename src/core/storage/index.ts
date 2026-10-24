@@ -9,6 +9,7 @@
  *   storage/port.ts     契约（纯类型）
  *   storage/shape.ts    落盘形状与校验（纯函数，无 I/O）
  *   storage/prefs.ts    偏好：设备状态、默认值与形状兜底
+ *   storage/device.ts   设备偏好（主题／槽宽／钉住）的落盘，**不进库**
  *   storage/<实现>.ts   字节的进与出（目前只有 local-storage）
  * ```
  *

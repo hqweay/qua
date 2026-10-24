@@ -8,6 +8,7 @@
  * | 「页」是什么（`_lists` 里有 `page` 的块） | **本文件**（模型概念，不是存储） |
  * | 库里存什么、版本号、深度校验 | `storage/shape.ts` |
  * | 偏好、默认值、形状兜底 | `storage/prefs.ts` |
+ * | 设备偏好（主题／槽宽／钉住的块）的落盘 | `storage/device.ts` |
  * | 异步 ＋ 批次的存储契约 | `storage/port.ts` |
  * | 字节的进与出（当前 `localStorage`） | `storage/local-storage.ts` |
  * | 上层拿到的那个对象 | `storage/index.ts`（`createWorkspaceStore`） |
@@ -22,6 +23,8 @@ export { pageDoc, parseWorkspace, WORKSPACE_VERSION } from './storage/shape.ts'
 export type { ParseResult, Workspace } from './storage/shape.ts'
 export { createWorkspaceStore, judge, WHOLE_LIBRARY_CHANGES } from './storage/index.ts'
 export type { LoadedWorkspace, WorkspaceStore } from './storage/index.ts'
+export { createDeviceStore, DEVICE_KEY } from './storage/device.ts'
+export type { DeviceSaveResult, DeviceState, DeviceStore } from './storage/device.ts'
 export type { Change, ChangeKind, CommitBatch, LoadResult, SaveResult, StoragePort } from './storage/port.ts'
 export { createLocalStorageAdapter } from './storage/local-storage.ts'
 

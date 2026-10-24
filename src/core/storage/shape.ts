@@ -1,7 +1,8 @@
 /**
  * 落盘形状（**纯编解码，零 I/O**）。
  *
- * 这是「库里存的是什么」的唯一权威：版本号、块森林的深度校验、偏好归一。
+ * 这是「库里存的是什么」的唯一权威：版本号、块森林的深度校验。
+ * 设备偏好（主题／槽宽／钉住）**不在库里**，见 `storage/device.ts`。
  * 它不认识 `localStorage`、不认识内核、也不认识 DOM —— 所以能直接单测
  * （`tests/workspace.test.ts` 就是拿它跑的）。
  *
@@ -11,10 +12,6 @@
 import type { Atom, Mark } from '../annotations.ts'
 import { ALIASES_PROP, DISPLAY_PROP, LISTS_PROP, type Block, type Doc, type FoldState } from '../model.ts'
 import { LEGACY_ALIAS_PROP, normalizeAlias } from '../alias.ts'
-import { normalizePrefs, type Prefs } from './prefs.ts'
-
-export type { DockPrefs, DockSlotPrefs, Prefs, ThemeMode } from './prefs.ts'
-export { DEFAULT_DOCK, DEFAULT_PREFS, normalizePrefs } from './prefs.ts'
 
 /**
  * 落盘形状的版本；**只在显式作废旧库时加一**（/ 71.9）。
@@ -43,8 +40,11 @@ export { DEFAULT_DOCK, DEFAULT_PREFS, normalizePrefs } from './prefs.ts'
  * v13 → v14：地址与露面分家——`props._alias`（单数）改成 `props._aliases`（0..N），
  *            角色 `props._roles` 改成列表 `props._lists`，新增 `props._display`。
  *            旧键新代码**不读**（`isBlock` 直接判 corrupt）⇒ 作废重 seed，不写迁移。
+ * v14 → v15：设备偏好（主题／槽宽／钉住）搬出库，改存 `qua.device`（`storage/device.ts`）。
+ *            旧库里的 `prefs` 新代码不读（那份偏好会静默回到默认）⇒ 作废重 seed；
+ *            同时保证落盘的每一份库都**没有**这一格，读路径不必判「有没有 prefs」。
  */
-export const WORKSPACE_VERSION = 14
+export const WORKSPACE_VERSION = 15
 
 /** 示例库：一片块森林 ＋ 行内锚点/原子 */
 export interface Workspace {
@@ -58,7 +58,6 @@ export interface Workspace {
   folded: FoldState
   /** 中心槽持有的「当前对象」（只有中心槽有这个概念） */
   activeId: string
-  prefs: Prefs
   savedAt: number
   /**
    * **回收站**：被删掉的**根**块（子树完整）。每项带着 `_deletedAt`。
@@ -181,7 +180,6 @@ export function parseWorkspace(raw: string | null): ParseResult {
     ws: {
       ...(ws as Workspace),
       trash: ws.trash ?? [],
-      prefs: normalizePrefs(ws.prefs as Partial<Prefs> | undefined),
     },
   }
 }

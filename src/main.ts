@@ -48,8 +48,10 @@ import { darkQuery, resolveTheme } from './core/theme.ts'
 import { t } from './core/msg.ts'
 import { seedWorkspace } from './core/seed.ts'
 import {
+  createDeviceStore,
   createLocalStorageAdapter,
   createWorkspaceStore,
+  DEVICE_KEY,
   STORAGE_KEY,
   WHOLE_LIBRARY_CHANGES,
   type Change,
@@ -85,12 +87,22 @@ const stateMenuBtn = $('state-menu-btn')
  * 换后端（内核 SQLite／主进程单写者）只换这一行，上层一行不改。
  */
 const store = createWorkspaceStore(createLocalStorageAdapter(STORAGE_KEY))
+/**
+ * **设备状态**（偏好）走它自己的键与端口实例：换库不带走它，库作废也不连累它。
+ * 两个端口各自持有一份写队列 —— 它们的字节落在两个键上，没有共同的写入顺序。
+ */
+const deviceStore = createDeviceStore(createLocalStorageAdapter(DEVICE_KEY))
 
 /**
  * 读盘**是异步的**（71.5 第 2 条：上层不得依赖同步返回）。
  * 入口在文件末尾 `await` —— 模块顶层 await 在 Electron renderer / vite 下都没问题。
  */
 const boot = await store.load()
+/**
+ * 读设备偏好同样要 `await`（同一个契约）。它**永远成功**：读不到就用默认值——
+ * 偏好不是内容，不该因为一格坏了就打不开 app。
+ */
+const device = await deviceStore.load()
 /**
  * 读盘结果分型：
  *   · `empty` / `expired` ⇒ 允许 seed 并落盘；
@@ -211,7 +223,11 @@ function isFeedView(): boolean {
 const isMac = (): boolean => /Mac|iPhone|iPad/.test(navigator.platform)
 /** 短 id：uuidv7 前 12 位是时间戳（同一毫秒创建的块会撞），所以要短就取**尾部随机段** */
 const shortId = (id: string): string => id.slice(-6)
-const prefs = (): Prefs => ws.prefs
+/**
+ * 偏好**不活在库里**（v15 起）：它是这台设备怎么显示（主题／槽宽／钉住的块）。
+ * 调用点仍按「拿到一份可改的偏好对象」用它 —— 改完由 `scheduleDeviceSave()` 落盘。
+ */
+const prefs = (): Prefs => device.prefs
 /**
  * 「当前对象」＝ 中心槽持有的那个块（只有中心槽有这个概念）。
  *
@@ -399,6 +415,35 @@ function scheduleSave(): void {
   saveTimer = window.setTimeout(saveNow, SAVE_DEBOUNCE_MS)
 }
 
+/* ------------------------------------------------------------ 设备状态落盘 */
+
+let deviceTimer: number | null = null
+
+/**
+ * **设备偏好**的落盘，与库**各走各的**（两个键、两个写队列）。
+ *
+ * 为什么不并进 `saveNow`：调一下主题宽度不该触发一次整库提交，反过来打字也不该
+ * 每 250ms 重写一遍偏好。两个防抖窗口互不干扰，代价是页面生命周期里要**各 flush 一次**
+ * （见下面的 `visibilitychange` / `pagehide` / `beforeunload`）。
+ *
+ * ⚠️ 不受 `readOnly` 管：只读态保护的是**库的内容**（过新／损坏的字节不许覆盖），
+ *    而偏好是这份构建自己的设备状态 —— 只读演示时用户调主题，仍应该记得住。
+ */
+function saveDeviceNow(): void {
+  if (deviceTimer !== null) {
+    window.clearTimeout(deviceTimer)
+    deviceTimer = null
+  }
+  void deviceStore.save(device).then((saved) => {
+    if (!saved.ok) warnSaveFailed(saved.error)
+  })
+}
+
+function scheduleDeviceSave(): void {
+  if (deviceTimer !== null) window.clearTimeout(deviceTimer)
+  deviceTimer = window.setTimeout(saveDeviceNow, SAVE_DEBOUNCE_MS)
+}
+
 /**
  * `beforeunload` 里**等不到 Promise**（71.5：等待点由调用方决定）。
  * 所以把仓库生命周期的两个真实等待点接上：页面隐藏时 `settle()`；
@@ -407,10 +452,15 @@ function scheduleSave(): void {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
     saveNow()
+    saveDeviceNow()
     void store.settle()
+    void deviceStore.settle()
   }
 })
-window.addEventListener('pagehide', () => saveNow())
+window.addEventListener('pagehide', () => {
+  saveNow()
+  saveDeviceNow()
+})
 
 /* ------------------------------------------------------------ 渲染 */
 
@@ -514,7 +564,8 @@ function addPin(side: 'left' | 'right', blockId: string): void {
     applyChrome()
   }
   renderDocks()
-  scheduleSave()
+  // 钉住的清单是**设备状态**（`qua.device`），不是库的内容
+  scheduleDeviceSave()
   scheduleBadge()
 }
 
@@ -524,7 +575,7 @@ function unpinBlock(side: 'left' | 'right', blockId: string): void {
   if (i < 0) return
   slot.pins.splice(i, 1)
   renderDocks()
-  scheduleSave()
+  scheduleDeviceSave()
   scheduleBadge()
 }
 
@@ -1181,7 +1232,7 @@ const app: App = {
     prefs: () => prefs(),
     applyChrome,
     renderDebugState: () => chrome.renderDebugState(),
-    scheduleSave,
+    scheduleDeviceSave,
     scheduleBadge,
     toast: (text, kind) => app.toast(text, kind),
   }),
@@ -1232,8 +1283,13 @@ const app: App = {
       scheduleBadge()
     },
     prefs: () => prefs(),
-    setVirtualize: (on, radius) => mainEd.setVirtualize(on, radius),
-    scheduleSave,
+    setVirtualize: (on, radius) => {
+      // 虚拟化档位是**设备状态**：下次冷启动按它恢复（`applyChrome` 之后的启动段读它）
+      prefs().virtualize = on
+      prefs().radius = radius
+      mainEd.setVirtualize(on, radius)
+    },
+    scheduleDeviceSave,
     scheduleBadge,
     toast: (text, kind) => app.toast(text, kind),
     probeComposing: () => {
@@ -1828,7 +1884,10 @@ document.addEventListener('click', (e) => {
   else openAliasEditor(blockId, rect)
 })
 
-window.addEventListener('beforeunload', () => saveNow())
+window.addEventListener('beforeunload', () => {
+  saveNow()
+  saveDeviceNow()
+})
 
 /* ------------------------------------------------------------ 启动 */
 
@@ -1929,12 +1988,12 @@ const bindResize = (side: 'left' | 'right', slot: typeof dockLeft): void => {
     onResize: (width) => {
       prefs().dock[side].width = width
       applyChrome()
-      scheduleSave()
+      scheduleDeviceSave()
     },
     onReset: () => {
       prefs().dock[side].width = null
       applyChrome()
-      scheduleSave()
+      scheduleDeviceSave()
     },
   })
 }
@@ -2158,7 +2217,7 @@ const api = {
     prefs().theme = mode
     applyChrome()
     chrome.renderDebugState()
-    scheduleSave()
+    scheduleDeviceSave()
     scheduleBadge()
   },
   loadState: (s: FixtureName) => registry.invoke('dev.fixture/load', { state: s }, 'api'),
@@ -2196,7 +2255,12 @@ const api = {
   resolvedTheme: () => resolvedTheme(),
   openPanel: (kind: PanelKind) => openDrawerFor(kind),
   setVirtualize: (on: boolean, radius = 12) => app.setVirtualize(on, radius),
-  badgePanel: (open: boolean) => badge.toggle(open),
+  badgePanel: (open: boolean) => {
+    // 角标的开合是**设备状态**（下次冷启动按它恢复），不是库的内容
+    prefs().badgeOpen = open
+    badge.toggle(open)
+    scheduleDeviceSave()
+  },
   /**
    * 自检用：清掉落盘的那一份（**只清存储，不动当前内存库**）。
    * 演示状态切换不再调它：`loadState` 换库后会经由 `scheduleSave` 覆盖写，

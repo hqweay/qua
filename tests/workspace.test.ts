@@ -15,7 +15,6 @@ const valid = (patch: Record<string, unknown> = {}): string =>
     blocks: [{ id: 'b1', text: 'hello', children: [] }],
     folded: {},
     activeId: 'b1',
-    prefs: {},
     savedAt: 0,
     marks: [],
     atoms: [],
@@ -26,33 +25,13 @@ test('parseWorkspace: 从没存过 ⇒ empty（不是错误）', () => {
   assert.deepEqual(parseWorkspace(null), { status: 'empty' })
 })
 
-test('parseWorkspace: 合法库 ⇒ ok，并补默认 prefs', () => {
+test('parseWorkspace: 合法库 ⇒ ok（库不含设备偏好）', () => {
   const r = parseWorkspace(valid())
   assert.equal(r.status, 'ok')
   if (r.status !== 'ok') return
   assert.equal(r.ws.blocks.length, 1)
-  assert.equal(r.ws.prefs.theme, 'system')
-  assert.deepEqual(r.ws.prefs.dock, {
-    left: { open: true, width: null, pins: [] },
-    right: { open: true, width: null, pins: [] },
-  })
-})
-
-test('parseWorkspace: 钉住清单只做形状兜底（缺字段 ⇒ 空；非字符串/重复值丢掉）', () => {
-  const r = parseWorkspace(
-    valid({
-      prefs: {
-        dock: {
-          left: { open: true, width: 300, pins: ['a', 7, null, 'a', '', 'b'] },
-          right: { open: false, width: null },
-        },
-      },
-    }),
-  )
-  assert.equal(r.status, 'ok')
-  if (r.status !== 'ok') return
-  assert.deepEqual(r.ws.prefs.dock.left, { open: true, width: 300, pins: ['a', 'b'] })
-  assert.deepEqual(r.ws.prefs.dock.right, { open: false, width: null, pins: [] })
+  // 偏好是设备状态（`qua.device`），库的形状里**没有**这一格，也不会被补出一份默认值
+  assert.equal((r.ws as { prefs?: unknown }).prefs, undefined)
 })
 
 test('parseWorkspace: 比当前新的版本 ⇒ too-new（绝不 seed 覆盖）', () => {
