@@ -25,13 +25,11 @@ import {
 } from './core/commands/index.ts'
 import { Layers, paletteRows, rowsFromBindings, type Row } from './ui/layers.ts'
 import { dispatchKey, installKeydown, type DispatchEnv } from './core/dispatch.ts'
-import { applyDockVisibility, applyDockWidth, mountDockSlot } from './ui/dock.ts'
 import { DockBlocks } from './ui/dock-blocks.ts'
 import { bindDockResize } from './ui/dock-resize.ts'
-import { createChrome } from './ui/chrome.ts'
 import { isReadonlyBlock } from './view/block-dom.ts'
+import { mountDockSlot } from './ui/dock.ts'
 import { createIcon } from './view/icons.ts'
-import { createBadge, type BadgeSnapshot } from './ui/badge.ts'
 import { renderAliasEditor } from './ui/alias-editor.ts'
 import { renderFieldsEditor } from './ui/fields-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type PanelDeps } from './ui/panels.ts'
@@ -39,8 +37,8 @@ import { devCommands, journalCommands, pageCommands, propsCommands, rootsFor, ro
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupDocks } from './app/wiring/docks.ts'
 import { setupPanels } from './app/wiring/panels.ts'
+import { setupChrome } from './app/wiring/chrome.ts'
 import { HANDLERS } from './app/handlers.ts'
-import { darkQuery, resolveTheme } from './core/theme.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
 import { t } from './core/msg.ts'
 import { seedWorkspace } from './core/seed.ts'
@@ -220,20 +218,6 @@ const pageTitle = (p: Block): string => displayNameOf(p)
 /** 页图标 ＝ 系统属性 `_icon`；空值用 `file`，与 `view/icons.ts` 的角色默认一致 */
 const pageIcon = (p: Block): string => prop<string>(p, '_icon') ?? 'lucide:file'
 
-/* ------------------------------------------------------------ 主题档位 */
-
-/** 系统外观：只用来**记账与诊断**，颜色本身由 CSS 决定 —— 不做 JS 切类 */
-const resolvedTheme = (): 'light' | 'dark' => resolveTheme(prefs().theme, darkQuery.matches)
-/** 启动完成前不碰 DOM 诊断（`ed` 还没建好） */
-let booted = false
-
-// **监听系统外观**的缺口）：只同步诊断与按钮文案 ——颜色由 CSS 的
-// `@media (prefers-color-scheme: dark)` ＋ `light-dark()` 决定，**这里一行切类都不做**。
-darkQuery.addEventListener('change', () => {
-  chrome.renderDebugState()
-  if (booted) scheduleBadge()
-})
-
 /* ------------------------------------------------------------ 键位提示 */
 
 function keyHints(): Map<string, string> {
@@ -277,71 +261,12 @@ function uiCtx(): CtxKeys {
   return ctx
 }
 
-/* ------------------------------------------------------------ 渲染 */
-
-
-/**
- * 把偏好写进 `body[data-*]`：主题档位、三槽开关。
- *
- * ⚠️ 这里**只写属性，不改 DOM 形状**（门禁 5：换肤前后 `data-depth` 序列一致）。
- * ⚠️ `data-theme` 记的是**档位**（system/light/dark），不是解析后的亮暗 —— 颜色由 CSS 取。
- * ⚠️ **不再有 `data-skin`**：内建只有一种样式，观感调 token 即可。
- */
-function applyChrome(): void {
-  document.body.dataset.theme = prefs().theme
-  document.body.dataset.themeMode = prefs().theme
-  applyDockVisibility({ left: prefs().dock.left.open, right: prefs().dock.right.open })
-  const appEl = $('app')
-  applyDockWidth(appEl, 'left', prefs().dock.left.width, prefs().dock.left.open)
-  applyDockWidth(appEl, 'right', prefs().dock.right.width, prefs().dock.right.open)
-}
-
-/**
- * 读一个 CSS 长度 token（`180px` → 180）。
- *
- * 回退值是**数字**而不是 `'180px'` 字面量（TS 里拼 px 会被门禁拦）；
- * 它只在样式没加载到（测试夹具/首帧）时兜底，正常路径永远读 token。
- */
-function cssLength(name: string, fallback: number): number {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  const n = Number.parseFloat(raw)
-  return Number.isFinite(n) ? n : fallback
-}
-
-/** 槽宽下限：token `--ui-dock-min` */
-const dockMinWidth = (): number => cssLength('--ui-dock-min', 180)
-
-/** 没拖过时的默认宽（与 CSS 的 `--ui-dock-w-*` 同源） */
-const dockDefaultWidth = (side: 'left' | 'right'): number =>
-  cssLength(`--ui-dock-w-${side}`, side === 'left' ? 236 : 320)
-
-/**
- * 另一侧**当前占的宽度**：关着的槽不占列（与 CSS 的列宽归零一致）。
- * 拖这一侧时要把它扣掉，否则两边都拖宽会把中心槽挤到 0。
- */
-function dockOtherWidth(side: 'left' | 'right'): number {
-  const other = side === 'left' ? 'right' : 'left'
-  const p = prefs().dock[other]
-  if (!p.open) return 0
-  return typeof p.width === 'number' ? p.width : dockDefaultWidth(other)
-}
-
-/** 槽宽上限：中心槽至少留 `--ui-center-min`。 */
-function dockMaxWidth(side: 'left' | 'right'): number {
-  const min = dockMinWidth()
-  const center = cssLength('--ui-center-min', 480)
-  return Math.max(min, window.innerWidth - dockOtherWidth(side) - center)
-}
-
-// 视口跨过压缩区（839/840）时，inline 宽度要跟着交回 CSS / 重新写回
-window.addEventListener('resize', () => applyChrome())
-
 /* ------------------------------------------------------------ 槽内容 */
 
 const { renderDocks, addPin, unpinBlock, togglePin, setPins } = setupDocks({
   kb,
   prefs,
-  applyChrome,
+  applyChrome: () => applyChrome(),
   getWs: () => ws,
   getRegistry: () => registry,
   scheduleDeviceSave: () => scheduleDeviceSave(),
@@ -349,22 +274,19 @@ const { renderDocks, addPin, unpinBlock, togglePin, setPins } = setupDocks({
   getSlots: () => ({ left: dockLeft, right: dockRight }),
 })
 
-/* ------------------------------------------------------------ chrome 组件 */
-
-/**
- * 中心槽的 chrome（页名 + 空态提示 + 编辑器挂载点）。
- * ⚠️ **组件自持 DOM**：这之后 `main.ts` 里不再出现那些元素的 `getElementById`。
- * ⚠️ 皮肤/主题那两个开关**不在这里**（2026-10-20 撤出顶栏，挪进调试菜单）。
- */
-const chrome = createChrome((blockId) => {
-  // 面包屑一格 ＝「聚焦到这个祖先」：与 zoom in **同一个命令**，只是目标不同
-  registry.invoke('core.block/focus-block', { blockId }, 'chrome')
+const { chrome, editorEl, applyChrome, resolvedTheme, dockMinWidth, dockMaxWidth, badge, scheduleBadge, markBooted } = setupChrome({
+  prefs,
+  bootNotice,
+  shortId,
+  uiCtx,
+  activeBlock,
+  pageTitle,
+  $,
+  getWs: () => ws,
+  getMainEd: () => mainEd,
+  getRegistry: () => registry,
+  domStats,
 })
-
-const editorEl = chrome.editorEl
-
-// 读盘异常 / 首屏保存失败：持久告警常驻，不随 toast 消失
-if (bootNotice) chrome.showNotice(bootNotice)
 
 /**
  * 持久化装配：库与设备两个写队列、防抖、事务收尾都收在这一节。
@@ -395,40 +317,6 @@ const {
   getChrome: () => chrome,
   isQuiet: () => quiet,
 })
-
-/* ------------------------------------------------------------ 角标（诊断面） */
-
-const badge = createBadge({
-  shortId,
-  snapshot: (): BadgeSnapshot => {
-    const page = activeBlock()
-    return {
-      ...domStats(),
-      mounted: mainEd.mounted.size,
-      virtualize: mainEd.virtualize,
-      radius: mainEd.radius,
-      theme: prefs().theme,
-      composing: mainEd.probe.isComposing,
-      compositionSeq: mainEd.probe.compositionSeq,
-      selection: mainEd.sel,
-      blockSelection: mainEd.hasBlockSelection(),
-      blockSelectionCount: mainEd.blockSelectionCount(),
-      marks: mainEd.marks.length,
-      atoms: mainEd.atoms.length,
-      undoDepth: mainEd.undo.depth(),
-      redoDepth: mainEd.undo.redoDepth(),
-      lastCommand: registry.last,
-      pageTitle: pageTitle(page),
-      pageCount: ws.blocks.length,
-      storageKB: JSON.stringify(ws).length / 1024,
-      savedAt: ws.savedAt,
-      ctx: uiCtx(),
-      keyTrace: mainEd.probe.keyTrace,
-    }
-  },
-})
-
-const scheduleBadge = badge.schedule
 
 /* ------------------------------------------------------------ 浮层渲染 */
 
@@ -1575,7 +1463,7 @@ function appendMoreFeed(): boolean {
   )
 }
 
-booted = true
+markBooted()
 
 // 首屏填满：如果 3 天还撑不满视口（短日记），补到能滚为止 —— 否则「下滚加载」没有触发条件。
 // 教训：初始只装 1 条连第一屏都撑不满，用户不会去「加载更多」。
