@@ -26,6 +26,7 @@ import {
   hasValue,
   isPropDef,
   mkPropDef,
+  OWN_PROPS_PROP,
   mkTagBlock,
   TASK_STATUS_PROP_ID,
   todoOf,
@@ -245,12 +246,20 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter）�
   assert.equal(withValue.filter((b) => todoOf(b) === 'done').length, 2, '完成与未完成各两条')
 })
 
-test('todoOf：true ⇒ done，false ⇒ todo（有值），缺失 ⇒ undefined', () => {
+test('todoOf：true ⇒ done，false ⇒ todo，**有槽未填 ⇒ todo**，没槽 ⇒ undefined', () => {
   const done: Block = { id: 'd', text: '', children: [], props: { [TASK_STATUS_PROP_ID]: true } }
   const open: Block = { id: 'o', text: '', children: [], props: { [TASK_STATUS_PROP_ID]: false } }
+  /** 刚在面板里加了「任务状态」、还没点过：槽位在，值不在 */
+  const fresh: Block = { id: 'f', text: '', children: [], props: { [OWN_PROPS_PROP]: [TASK_STATUS_PROP_ID] } }
   const none: Block = { id: 'n', text: '', children: [] }
   assert.equal(todoOf(done), 'done')
   assert.equal(todoOf(open), 'todo', '「是任务、没做完」是**有值**的，不能并进缺失')
+  /**
+   * ⚠️ 这一条是判据本身：**看槽位，不看值**。
+   *    漏了它，屏幕上会画空心方框（渲染看槽位），查询「未完成」却查不到（这里看值）——
+   *    同一个块两种答案。
+   */
+  assert.equal(todoOf(fresh), 'todo', '有槽但没填 ＝ 刚挂上的任务，也是 todo')
   assert.equal(todoOf(none), undefined)
 })
 

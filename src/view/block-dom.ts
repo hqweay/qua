@@ -325,10 +325,16 @@ export function makeBlockEl(
   /** gutter 上那个**二元开关**（本轮只认 checkbox；别的 kind 还没定怎么画） */
   const box = opts.gutter?.find((f) => f.kind === 'checkbox')
   /**
-   * 待办三态：`true` ⇒ 做完了、`false` ⇒ 是任务但没做完、没有这一槽 ⇒ 不是任务。
+   * 待办三态：`true` ⇒ 做完了、`false`／未填 ⇒ 是任务但没做完、没有这一槽 ⇒ 不是任务。
+   *
+   * ⚠️ **未填要算「未完成」，不能算「不是任务」**：这个槽的准入判据是「这块有这条属性」
+   *    而不是「这条属性有值」（见 `gutterFieldsOf`）—— 刚给它加上、还没点过的那一下，
+   *    正是这个入口存在的理由。若未填落进「不是任务」，块左边会画出一个空心方框
+   *    （`box` 为真），却同时被当成普通块（没有 `data-todo`）⇒ 方框与状态各说一套。
+   *
    * ⚠️ `data-todo` 是 **CSS 与冒烟的契约**（删除线按它选），所以这里不换成属性名。
    */
-  const todo: 'todo' | 'done' | undefined = box ? (box.value === true ? 'done' : box.value === false ? 'todo' : undefined) : undefined
+  const todo: 'todo' | 'done' | undefined = box ? (box.value === true ? 'done' : 'todo') : undefined
   const el = document.createElement('div')
   el.className = 'blk'
   el.dataset.blockId = b.id

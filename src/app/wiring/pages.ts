@@ -35,7 +35,10 @@ export type PagesDeps = {
   scheduleSave: () => void
   scheduleBadge: () => void
   repaintBlock: (blockId: string) => void
-  writeBlockProps: (blockId: string, mutate: () => void) => void
+  /**
+   * 改块自己的属性（**必然连带重画这一行**）。见实现处：那一步不是可选项。
+   */
+  writeProps: (blockId: string, mutate: () => void) => void
   renderDocks: () => void
   editorEl: HTMLElement
   layers: Layers
@@ -70,7 +73,7 @@ export function setupPages(deps: PagesDeps) {
     scheduleSave,
     scheduleBadge,
     repaintBlock,
-    writeBlockProps,
+    writeProps,
     renderDocks,
     editorEl,
     layers,
@@ -183,14 +186,14 @@ export function setupPages(deps: PagesDeps) {
     // 打标签的落点：**当前光标那一块**（正文 vs 反链 footer 会切换 ⇒ 每次现取活动编辑器）
     caretBlockId: () => deps.getEd().caretBlock() ?? deps.getEd().rows()[0]?.block.id ?? null,
     /**
-     * 写块属性走装配层这一条路：撤销快照、索引失效、通知其他视图、落盘都在这里。
+     * 写块属性走装配层这一条路：撤销快照、索引失效、通知其他视图、重画这一行、落盘
+     * 都在 `writeProps` 那一处。这里只做转发。
      *
-     * ⚠️ 写完还要**重画这一行**：属性写入默认不碰正文（属性不改文字），
-     *    但标签归属的呈现就在正文里（行尾 chip）⇒ 少了这一步，chip 要等下一次重渲染才出现。
+     * ⚠️ **不要再包一层补重画**：重画是「改这一块的属性」的固有部分（那一行的
+     *    别名头、身份图标、gutter 标记都由 props 派生），不是某个调用方记得要加的一步。
+     *    上面那样包过一次，属性命令那条路径就漏了，表现为「加了属性、模型有了、屏幕没变」。
      */
-    write: (blockId, mutate) => {
-      writeBlockProps(blockId, mutate)
-    },
+    write: writeProps,
     activeId: () => deps.getWs().activeId,
     setActiveId: (id, view) => {
       /**

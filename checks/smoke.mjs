@@ -6327,6 +6327,96 @@ await check(
   },
 )
 
+await check(
+  'T92 加一个 gutter 属性 ⇒ 那一行**当场**画出标记（不靠别处碰一下才刷新）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const target = await pickLeaf(page)
+    assert(target, '第一页里应有可编辑的内容块')
+
+    /**
+     * 同一件事有**两个面**，都必须当场刷新：
+     *   · 右槽卡里的行（`scheduleProperties`）
+     *   · **行自己**（gutter 标记：待办方框 / 标签身份图标，由 `gutterFieldsOf` 派生）
+     *
+     * 后者是这次漏掉的：写属性的入口只写了模型、只重画了卡，没有重画那一行。
+     * 于是「给块挂上任务状态」之后模型里已经有了，屏幕上那个方框要等下一次
+     * 整页重渲染才出现 —— 用户读到的是「点了没反应」。
+     */
+    const before = await page.evaluate((id) => {
+      const blk = document.querySelector(`.blk[data-block-id="${id}"]`)
+      return { todo: blk?.dataset.todo ?? null, box: !!blk?.querySelector('.todo-box') }
+    }, target.id)
+    assert(before.todo === null && before.box === false, `前置：这块一开始不该有任务标记：${JSON.stringify(before)}`)
+
+    // 走**菜单那条路径**（面板里的「添加块属性」调的就是这个命令）
+    const statusId = await page.evaluate(() => window.__qua.propDefs().find((d) => d.label === '任务状态')?.id ?? '')
+    assert(statusId !== '', '库里应自带「任务状态」定义')
+    await page.evaluate(
+      ({ id, propId }) => window.__qua.invoke('core.props/add-field', { blockId: id, propId }),
+      { id: target.id, propId: statusId },
+    )
+    await page.waitForTimeout(200)
+
+    const after = await page.evaluate((id) => {
+      const blk = document.querySelector(`.blk[data-block-id="${id}"]`)
+      const model = window.__qua.__editor.store.find(id)
+      return {
+        // 模型：这块有了任务状态槽（未填 ⇒ false 那一档由渲染器画空心）
+        hasSlot: Array.isArray(model?.props?._ownProps) && model.props._ownProps.includes(window.__qua.propDefs().find((d) => d.label === '任务状态')?.id),
+        todo: blk?.dataset.todo ?? null,
+        box: !!blk?.querySelector('.todo-box'),
+      }
+    }, target.id)
+    assert(after.hasSlot, `前置：模型里应已有这个属性槽：${JSON.stringify(after)}`)
+    assert(after.todo === 'todo', `加完属性，那一行应当场变成「未完成任务」（data-todo=todo）：${JSON.stringify(after)}`)
+    assert(after.box === true, `加完属性，块左侧应当场出现待办方框：${JSON.stringify(after)}`)
+
+    /**
+     * 反向也要当场生效：点一下方框 ⇒ 变成已完成（这个方向本来就是通的，
+     * 但它与上面同一个渲染判据，一起钉住才说明改的是「判据」而不是「某条路径的特例」）。
+     *
+     * ⚠️ 派发 **mousedown**，不是 click：gutter 的动作都挂在 mousedown 上
+     *    （gutter 是 `contenteditable=false` 的兄弟节点，click 之前浏览器会先移光标）。
+     */
+    await page.evaluate((id) => {
+      document.querySelector(`.blk[data-block-id="${id}"] .todo-box`)?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    }, target.id)
+    await page.waitForTimeout(200)
+    const done = await page.evaluate((id) => ({
+      todo: document.querySelector(`.blk[data-block-id="${id}"]`)?.dataset.todo ?? null,
+    }), target.id)
+    assert(done.todo === 'done', `点一下方框应当场变已完成：${JSON.stringify(done)}`)
+
+    /**
+     * 摘掉属性（`clear-value` 会连槽位一起摘）⇒ 标记当场消失。
+     *
+     * 不对称的刷新比不刷新更难查：出现的时候对、消失的时候要等下一次重渲染。
+     */
+    await page.evaluate(
+      ({ id, propId }) => window.__qua.invoke('core.props/clear-value', { blockId: id, propId }),
+      { id: target.id, propId: statusId },
+    )
+    await page.waitForTimeout(200)
+    const removed = await page.evaluate((id) => {
+      const blk = document.querySelector(`.blk[data-block-id="${id}"]`)
+      const model = window.__qua.__editor.store.find(id)
+      return {
+        slot: Array.isArray(model?.props?._ownProps) ? model.props._ownProps.length : 0,
+        todo: blk?.dataset.todo ?? null,
+        box: !!blk?.querySelector('.todo-box'),
+      }
+    }, target.id)
+    assert(removed.slot === 0, `摘掉后模型里不该留着槽位：${JSON.stringify(removed)}`)
+    assert(removed.todo === null && removed.box === false, `摘掉后方框与状态应一起消失：${JSON.stringify(removed)}`)
+
+    await ctx.close()
+    return `add-field(任务状态) ⇒ 当场 todo ＋ 方框；点一下 ⇒ done；clear-value ⇒ 两者一起消失`
+  },
+)
+
 /* ---------------------------------------------------------------- 汇总 */
 
 await browser.close()
