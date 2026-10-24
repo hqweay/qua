@@ -237,6 +237,18 @@ test('move ⇒ 一条 block.upsert{parent,index}；不能移进自己的子树',
   assert.deepEqual(kb.children('p1').map((x) => x.id), ['c1'], '失败 ⇒ 位置没动')
 })
 
+test('move 报的 index 是**最终位置**（先摘再夹）：越界时不会报一个落不下去的下标', () => {
+  const { kb } = fixture()
+  // p1.children = [c1, c2]；把 c1 挪到越界下标 ⇒ 最终在末尾（1），op 也必须报 1
+  const r = kb.tx((tx) => tx.move('c1', 'p1', 9))
+  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { parent: 'p1', index: 1 } }])
+  assert.deepEqual(kb.children('p1').map((x) => x.id), ['c2', 'c1'])
+
+  const back = kb.tx((tx) => tx.move('c1', 'p1', 0))
+  assert.deepEqual(bare(back.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { parent: 'p1', index: 0 } }])
+  assert.deepEqual(kb.children('p1').map((x) => x.id), ['c1', 'c2'])
+})
+
 test('remove ⇒ 子树逐个 block.delete；之后 get 不到、回收站里有整棵', () => {
   const { kb, store } = fixture()
   const r = kb.tx((tx) => tx.remove('c1'))
