@@ -239,7 +239,7 @@ export class PropertiesPanel {
   constructor(els: PropertiesEls, deps: PropertiesDeps) {
     this.els = els
     this.deps = deps
-    this.els.add.textContent = t('ui.props.add')
+    this.els.add.textContent = t('ui.props.addShort')
     this.els.add.title = t('ui.props.add')
     this.els.add.addEventListener('click', () => {
       this.formOpen = !this.formOpen

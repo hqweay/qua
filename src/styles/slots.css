@@ -54,6 +54,12 @@
   background: var(--ui-accent-soft);
   color: var(--ui-text);
 }
+/* 带字的按钮（如检视卡的「＋ 属性」）：固定 24px 会把字逐字竖排 */
+.dock-btn--text {
+  width: auto;
+  padding: 0 var(--ui-gap-2);
+  white-space: nowrap;
+}
 /*
  * 块卡：用**极淡阴影 + 明亮底色**从侧槽里浮起来（深度 ≥2 不再出现 border/shadow——
  * 这一层是深度 1，允许一层"面"）。
