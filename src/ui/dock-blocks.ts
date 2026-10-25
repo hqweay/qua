@@ -3,7 +3,7 @@
  *
  * 它不是「侧栏列表组件」——槽里只有块（承「槽里是一列块」）。这里做三件事：
  *   1. 用 `BlockEditor` 把**共享 store 里的活块**渲染成一列（不是拷贝）；
- *   2. 从正文块标拖进来 ⇒ 钉住（HTML5 DnD，块 id 走 `text/plain`）；
+ *   2. 从任何组件的块标／行拖进来 ⇒ 钉住（块的载荷走 `view/dnd.ts` 的 `BLOCK_MIME`）；
  *   3. 钉住清单是**视图状态**（`Prefs.dock.*.pins`），每次重画按 id 去森林里取。
  *
  * ⚠️ **为什么每个钉住项一个编辑器实例**：槽里每一项都要有自己的移除入口，
@@ -19,6 +19,7 @@ import { flatten, type BlockStore } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
+import { bindDropTarget } from '../view/dnd.ts'
 import type { DockSlotEls } from './dock.ts'
 
 /** 外部变化到侧槽重画的防抖窗口（比正文落盘的 250ms 短，读起来才像「实时」） */
@@ -220,33 +221,22 @@ export class DockBlocks {
     for (const editor of this.editors.values()) editor.reloadFromStore()
   }
 
-  /** 整个槽都是落点：拖到任意位置都算「钉进这一槽」 */
+  /**
+   * 整个槽都是落点：拖到任意位置都算「钉进这一槽」。
+   *
+   * 含义（钉住）由这一处注入；同样的拖拽落到正文行是「移动」、落到归属树 item 是「归到它下面」。
+   * `attr` 保持 `dropPin`：那是槽的 CSS 契约（`[data-drop-pin]`），不跟着实现换名字。
+   */
   private bindDrop(): void {
-    const root = this.deps.slot.root
-    const clear = (): void => {
-      delete root.dataset.dropPin
-    }
-    root.addEventListener('dragover', (e: DragEvent) => {
-      if (!e.dataTransfer?.types.includes('text/plain')) return
-      e.preventDefault()
-      e.dataTransfer.dropEffect = 'copy'
-      root.dataset.dropPin = '1'
+    bindDropTarget(this.deps.slot.root, {
+      attr: 'dropPin',
+      effect: 'copy',
+      // 载荷里是块 id 才接：外部拖来的文字、别处的自定义类型一律不认
+      accept: (id) => this.deps.kb.get(id) !== undefined,
+      targetId: () => null,
+      hint: () => t('ui.dnd.pin'),
+      onDrop: (id) => this.deps.pin(id),
     })
-    root.addEventListener('dragleave', (e: DragEvent) => {
-      // 移到槽内的子元素不算离开
-      const next = e.relatedTarget as Node | null
-      if (next && root.contains(next)) return
-      clear()
-    })
-    root.addEventListener('drop', (e: DragEvent) => {
-      clear()
-      const id = e.dataTransfer?.getData('text/plain') ?? ''
-      if (!id) return
-      e.preventDefault()
-      if (this.deps.kb.get(id)) this.deps.pin(id)
-    })
-    // 拖拽可能在槽外结束（Esc / 松在别处）：全局收尾，别把高亮留在槽上
-    document.addEventListener('dragend', clear)
   }
 }
 

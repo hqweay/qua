@@ -453,3 +453,25 @@
   opacity: 0;
   transform: translateY(6px);
 }
+
+/*
+ * 拖拽悬停提示：**含义按落点变**，所以松手前就得说出来。
+ * 贴着指针右下角、不吃事件（`pointer-events: none`）——它在拖拽期间一直在原地。
+ */
+.dnd-hint {
+  position: fixed;
+  z-index: 85;
+  pointer-events: none;
+  max-width: 260px;
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-raised);
+  border: 1px solid var(--ui-border);
+  box-shadow: var(--ui-shadow-mid);
+  color: var(--ui-text);
+  font-size: var(--ui-fs-xs);
+  line-height: var(--ui-lh-tight);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

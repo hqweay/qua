@@ -68,6 +68,9 @@ export function setupDocks(deps: DocksDeps) {
     open: (id) => dockDeps.openPage(id),
     untitled: t('ui.page.untitled'),
     refresh: () => renderDocks(),
+    link: (childId, parentId) => {
+      void deps.getRegistry().invoke('core.belongs-to/add', { childId, parentId }, 'dock')
+    },
   })
 
   function renderDocks(): void {

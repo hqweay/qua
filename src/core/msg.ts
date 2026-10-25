@@ -177,6 +177,12 @@ export const MSG = {
   'ui.alias.needList': '先在「露面」里让它作为页或标签',
   'ui.alias.noCandidates': '没有可添加的字段',
   /* 标签层级（属于 / 包含 / 成员） */
+  /* 拖拽：含义按落点变，悬停时就要说出来 */
+  'ui.dnd.moveBefore': '移到这一行前面',
+  'ui.dnd.moveAfter': '移到这一行后面',
+  'ui.dnd.moveInto': '移进这一行（作为子块）',
+  'ui.dnd.linkTo': '归到「{name}」下',
+  'ui.dnd.pin': '钉到侧栏',
   'ui.belongs.title': '属于',
   'ui.belongs.treeTitle': '归属',
   'ui.belongs.pages': '页',

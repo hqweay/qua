@@ -2589,6 +2589,10 @@ export class BlockEditor {
       insertPlainText: (id, _off, text) => this.pasteAt(id, _off, text),
       hasChildren: (id) => Boolean(locate(this.doc, id)?.block.children.length),
 
+      acceptDrag: (id) => {
+        const loc = locate(this.doc, id)
+        return loc !== null && loc.parent !== null
+      },
       beginDrag: (id) => {
         this.dragId = id
         this.container.classList.add('dragging')
@@ -2603,8 +2607,12 @@ export class BlockEditor {
         this.container.classList.remove('drop-end')
         if (zone) el.dataset.drop = zone
       },
-      dropDrag: (targetId, zone) => {
-        const id = this.dragId
+      /**
+       * 落点报上来的块 id 是**载荷里那一个**（不是「我认得刚才那次拖拽」）——
+       * 这样从侧槽／面板／任何组件拖过来的块都能落进正文。
+       */
+      dropDrag: (draggedId, targetId, zone) => {
+        const id = draggedId
         if (!id) return
         const loc = locate(this.doc, id)
         if (!loc) return

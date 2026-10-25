@@ -10,14 +10,15 @@
  *    （里面是真编辑器）是两种东西。这也是它便宜的原因。
  * ⚠️ 跨类的边（页挂在标签下）在两棵树里都不画，由属性区的「属于」那一行回答：
  *    树只回答「同类里谁在谁下面」。
- * ⚠️ 本版**不做拖入**：加边的手势要等拖拽收成一条缝之后才能跨组件（现在拖源与落点
- *    靠组件私有状态通信）。到时这里补一个落点，模块本身不变（见 `待办-拖拽一条缝`）。
+ * ⚠️ 拖入＝**加边**（`_belongsTo`），不是把块搬到这棵树里：树是位置，边是关系。
+ *    同一个手势落到正文行是「移动」、落到侧槽是「钉住」—— 含义由落点说，悬停时就贴出来。
  */
 import type { BelongsRow } from '../core/hierarchy.ts'
-import type { Block, BlockList } from '../core/index.ts'
+import { displayNameOf, type Block, type BlockList } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 import { renderBlock, type BlockRenderCtx } from './block-renderers.ts'
 import type { DockCard } from './dock.ts'
+import { bindDropTarget, setDragBlock } from '../view/dnd.ts'
 
 export interface BelongsTreeDeps {
   /**
@@ -32,6 +33,8 @@ export interface BelongsTreeDeps {
   open: (id: string) => void
   /** 换面之后重画这一槽（槽内容由装配层排，组件自己不动别人的 DOM） */
   refresh: () => void
+  /** 把一个块归到另一个块下面（拖入的落点含义；由装配层转成命令） */
+  link: (childId: string, parentId: string) => void
   untitled: string
 }
 
@@ -91,8 +94,24 @@ export class BelongsTree {
       const wrap = document.createElement('div')
       wrap.className = 'belongs-row'
       wrap.dataset.depth = String(row.depth)
+      wrap.dataset.belongsId = row.block.id
       wrap.style.setProperty('--depth', String(row.depth))
       wrap.appendChild(renderRow(row.block, ctx))
+      // 这一行也是**拖源**：能拿到块 id 就能拖（拖到正文＝移动、拖到另一行＝加边、拖到槽＝钉住）
+      wrap.draggable = true
+      wrap.addEventListener('dragstart', (e) => setDragBlock(e.dataTransfer, row.block.id))
+      // 拖一个块到这个 item 上 ⇒ **加边**（不是重排兄弟：兄弟顺序不落盘）
+      const name = displayNameOf(row.block).trim() || this.deps.untitled
+      bindDropTarget(wrap, {
+        effect: 'link',
+        targetId: () => row.block.id,
+        // 自己落自己没意思（命令层也会拒，但悬停就不该亮）
+        accept: (id) => id !== row.block.id,
+        hint: () => t('ui.dnd.linkTo', { name }),
+        onDrop: (childId, parentId) => {
+          if (parentId) this.deps.link(childId, parentId)
+        },
+      })
       list.appendChild(wrap)
     }
     body.appendChild(list)

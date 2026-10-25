@@ -113,7 +113,7 @@ const shiftClickMarker = (page, blockId) =>
     return true
   }, blockId)
 
-/** 真的走一遍 HTML5 DnD：块标 dragstart（`text/plain` = 块 id）→ 槽 dragover → drop */
+/** 真的走一遍 HTML5 DnD：块标 dragstart（`application/x-qua-block` = 块 id）→ 槽 dragover → drop */
 const dragBlockToDock = (page, blockId, side) =>
   page.evaluate(
     ({ id, side }) => {
@@ -127,7 +127,7 @@ const dragBlockToDock = (page, blockId, side) =>
       const hot = root.dataset.dropPin === '1'
       root.dispatchEvent(ev('drop'))
       marker.dispatchEvent(ev('dragend'))
-      return { hot, carried: dt.getData('text/plain') }
+      return { hot, carried: dt.getData('application/x-qua-block') }
     },
     { id: blockId, side },
   )
@@ -3588,7 +3588,8 @@ await check('T46 从正文块标拖进左槽 ⇒ 钉住并渲染；在槽里编�
 
   const drag = await dragBlockToDock(page, id, 'left')
   assert(drag, '拖拽事件应能派发到块标与左槽')
-  assert(drag.carried === id, `dragover 时 dataTransfer 里应带着块 id：${JSON.stringify(drag)}`)
+  // ⚠️ 读的是 **drop 之后**的载荷：悬停期（dragover）`getData` 一律返回空串（保护模式）
+  assert(drag.carried === id, `载荷里应带着块 id（drop 之后才读得到）：${JSON.stringify(drag)}`)
   assert(drag.hot, '拖拽经过槽时应给出高亮（data-drop-pin）')
   await page.waitForTimeout(140)
   const afterDrag = await dockState(page)
@@ -7640,6 +7641,175 @@ await check('T104 归属树面板：页/标签两面、根按本树重算、点�
 
   await ctx.close()
   return `页/标签两面；B 在 A 下 depth=1；点行打开 B；跨类的 C 在自己那棵树里是根、那条边两棵树都不画`
+})
+
+/* ------------------------------------------------- 拖拽的一条缝（载荷跨组件） */
+
+await check('T105 拖拽一条缝：从侧槽拖一个块到正文 ⇒ 写树（不是空操作）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+  const ids = await page.evaluate(() => {
+    const bs = window.__qua.blocks()
+    return { src: bs[2].id, tgt: bs[1].id }
+  })
+
+  // 先钉进左槽：顺带验载荷换了 MIME（brew 的 `carried` 读的就是新键）
+  const pin = await dragBlockToDock(page, ids.src, 'left')
+  assert(pin?.carried === ids.src && pin.hot, `拖进槽应带着块 id 并高亮：${JSON.stringify(pin)}`)
+  await page.waitForTimeout(180)
+
+  // 从槽里的块标拖到正文行上沿 ⇒ 真的移动（旧实现读 editor.dragId，这里必为空 ⇒ 空操作）
+  const moved = await page.evaluate(
+    ({ src, tgt }) => {
+      const handle = document.querySelector(`#dock-left .pin-row[data-block-id="${src}"] .marker`)
+      const tgtEl = document.querySelector(`.blk[data-block-id="${tgt}"]`)
+      if (!handle || !tgtEl) return null
+      const rect = tgtEl.getBoundingClientRect()
+      const dt = new DataTransfer()
+      const at = (type) =>
+        new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: rect.left + 40, clientY: rect.top + 2 })
+      handle.dispatchEvent(at('dragstart'))
+      tgtEl.dispatchEvent(at('dragover'))
+      const hot = { hint: document.querySelector('.dnd-hint')?.textContent ?? '', zone: tgtEl.dataset.drop ?? '' }
+      tgtEl.dispatchEvent(at('drop'))
+      handle.dispatchEvent(at('dragend'))
+      const after = window.__qua.blocks()
+      return { hot, si: after.findIndex((b) => b.id === src), ti: after.findIndex((b) => b.id === tgt) }
+    },
+    ids,
+  )
+  assert(moved, '槽里的块标与正文目标块都应存在')
+  assert(moved.si >= 0 && moved.si < moved.ti, `从槽拖到正文应真的移动（源排到目标之前）：${JSON.stringify(moved)}`)
+  assert(moved.hot.zone === 'before', `悬停时应亮正文三区的上沿：${JSON.stringify(moved.hot)}`)
+  assert(moved.hot.hint.includes('移到'), `正文落点的提示要说「移到…」：${JSON.stringify(moved.hot)}`)
+
+  await ctx.close()
+  return `从侧槽拖入正文：源 ${moved.si} < 目标 ${moved.ti}；悬停提示「${moved.hot.hint}」`
+})
+
+await check('T106 拖拽一条缝：普通文字与坏载荷都不被当成块（不亮落点、不写模型）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+  const ids = await page.evaluate(() => {
+    const bs = window.__qua.blocks()
+    return { src: bs[2].id, tgt: bs[1].id }
+  })
+  const r = await page.evaluate(
+    ({ src, tgt }) => {
+      const handle = document.querySelector(`.blk[data-block-id="${src}"] .marker`)
+      const tgtEl = document.querySelector(`.blk[data-block-id="${tgt}"]`)
+      const rect = tgtEl.getBoundingClientRect()
+      const before = JSON.stringify(window.__qua.blocks().map((b) => b.text))
+
+      // 真的发起一次块拖拽：模块记住「拖的是谁」——这一步是让下面的拒绝有意义
+      handle.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: new DataTransfer() }))
+
+      const attempt = (fill) => {
+        const dt = new DataTransfer()
+        fill(dt)
+        const at = (type) =>
+          new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: rect.left + 40, clientY: rect.top + 2 })
+        tgtEl.dispatchEvent(at('dragover'))
+        const lit = tgtEl.dataset.drop !== undefined || !!document.querySelector('.dnd-hint')
+        tgtEl.dispatchEvent(at('drop'))
+        return lit
+      }
+      // ① 只有 text/plain：外部拖来的普通文字
+      const textLit = attempt((dt) => dt.setData('text/plain', '一段普通文字'))
+      // ② 有块 MIME 但内容不是块 id：**悬停只能看 types**（保护模式读不到内容），
+      //    所以它允许亮；关键是**落手不认**（不写模型、也不借上一次的记忆搬块）
+      const badLit = attempt((dt) => dt.setData('application/x-qua-block', 'not-a-block-id'))
+
+      const after = JSON.stringify(window.__qua.blocks().map((b) => b.text))
+      return { textLit, badLit, same: before === after }
+    },
+    ids,
+  )
+  assert(!r.textLit, '拖一段普通文字进来不该亮落点（载荷里没有块 MIME）')
+  assert(r.same, `两种都不该改模型（坏载荷尤其：不许借「刚才拖的是谁」搬块）；坏载荷高亮=${r.badLit}`)
+
+  await ctx.close()
+  return `普通文字：不亮落点、零写入；坏载荷：悬停只能按 types 判，落手不认、零写入`
+})
+
+await check('T107 三个落点的 hint 各说各的（正文「移到」／归属树「归到」／侧槽「钉住」）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+  const r = await page.evaluate(() => {
+    const src = window.__qua.blocks()[2].id
+    const body = document.querySelector(`.blk[data-block-id="${window.__qua.blocks()[1].id}"]`)
+    const row = document.querySelector('#dock-left .belongs-row')
+    const dock = document.getElementById('dock-left')
+    if (!body || !row || !dock) return null
+    const handle = document.querySelector(`.blk[data-block-id="${src}"] .marker`)
+    const dt = new DataTransfer()
+    handle.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }))
+
+    const hover = (el, text) => {
+      const rect = el.getBoundingClientRect()
+      el.dispatchEvent(
+        new DragEvent('dragover', {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer: dt,
+          clientX: rect.left + 10,
+          clientY: rect.top + 2,
+        }),
+      )
+      return document.querySelector('.dnd-hint')?.textContent ?? ''
+    }
+    const inBody = hover(body, 'body')
+    const inRow = hover(row, 'row')
+    const inDock = hover(dock, 'dock')
+    handle.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }))
+    return { inBody, inRow, inDock }
+  })
+  assert(r, '正文行、归属树行与左槽都应存在')
+  assert(r.inBody.includes('移到'), `正文落点该说「移到…」：${JSON.stringify(r)}`)
+  assert(r.inRow.includes('归到'), `归属树落点该说「归到…」：${JSON.stringify(r)}`)
+  assert(r.inDock.includes('钉'), `侧槽落点该说「钉…」：${JSON.stringify(r)}`)
+  assert(new Set([r.inBody, r.inRow, r.inDock]).size === 3, `三个落点的提示必须各说各的：${JSON.stringify(r)}`)
+
+  await ctx.close()
+  return `${r.inBody} / ${r.inRow} / ${r.inDock}`
+})
+
+await check('T108 拖到归属树的一行上 ⇒ 加边：恰好 1 条 op，只动子块', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+  const ids = await page.evaluate(() => {
+    const bs = window.__qua.blocks()
+    return { src: bs[2].id, page: window.__qua.pages()[1].id }
+  })
+  const r = await page.evaluate(
+    ({ src, target }) => {
+      const handle = document.querySelector(`.blk[data-block-id="${src}"] .marker`)
+      const row = document.querySelector(`#dock-left .belongs-row[data-belongs-id="${target}"]`)
+      if (!handle || !row) return null
+      const rect = row.getBoundingClientRect()
+      const dt = new DataTransfer()
+      const at = (type) =>
+        new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: rect.left + 10, clientY: rect.top + 4 })
+      handle.dispatchEvent(at('dragstart'))
+      row.dispatchEvent(at('dragover'))
+      const hot = { hint: document.querySelector('.dnd-hint')?.textContent ?? '', lit: row.dataset.drop ?? '' }
+      row.dispatchEvent(at('drop'))
+      handle.dispatchEvent(at('dragend'))
+      return { hot, parents: window.__qua.tagParents(src), ops: window.__qua.lastOps() }
+    },
+    { src: ids.src, target: ids.page },
+  )
+  assert(r, '正文块与归属树那一行都应存在')
+  assert(r.hot.lit === '1', `悬停时那一行应高亮：${JSON.stringify(r.hot)}`)
+  assert(r.hot.hint.includes('归到'), `那一行的提示要说「归到…」：${JSON.stringify(r.hot)}`)
+  assert(r.parents.includes(ids.page), `落手之后应多一条归属边：${JSON.stringify(r.parents)}`)
+  assert(
+    r.ops.length === 1 && r.ops[0].e === 'prop' && r.ops[0].name === '_belongsTo',
+    `加一条边应恰好 1 条 op、只动子块：${JSON.stringify(r.ops)}`,
+  )
+
+  await ctx.close()
+  return `拖入一行 ⇒ 1 条 prop.set(_belongsTo)，父 = 目标页`
 })
 
 /** 判红的是「不在已知失败表里的失败」；已知失败逐条打印，不计入退出码 */

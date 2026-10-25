@@ -281,3 +281,9 @@ button.ghost.wide {
 .belongs-row {
   padding-inline-start: calc(var(--ui-indent) * var(--depth, 0));
 }
+
+/* 拖一个块到归属树的一行上：那一行就是落点（高亮一行，不是整棵树） */
+.belongs-row[data-drop='1'] {
+  background: var(--ui-accent-soft);
+  border-radius: var(--ui-radius-sm);
+}

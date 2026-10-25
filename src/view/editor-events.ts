@@ -14,6 +14,7 @@
  *   2. **键位一个都不在这里处理**——全部交给绑定表，这里只碰「输入与拖拽」。
  */
 import type { RunWithId } from '../core/runs.ts'
+import { bindDropTarget, setDragBlock, zoneHint } from './dnd.ts'
 
 /**
  * 行内原子被点时按下了哪些修饰键。
@@ -82,8 +83,16 @@ export interface EditorBridge {
   showDropTarget: (el: HTMLElement | null, zone: 'before' | 'after' | 'inside' | null) => void
   /** 开始拖某块（编辑器负责加 `.drag-src`）*/
   beginDrag: (id: string) => void
+  /**
+   * 这个 id 能不能落到正文里。
+   *
+   * 判据只有一条：**它是这一份文档里的内容块**（段根不参与 —— 页／天／查询记录
+   * 的先后是「真实日期序」或「视图序」，都不是可拖的兄弟序）。
+   * 「不能拖进自己的子树」不在这里：那是**落点对目标**的判定，在 `dropMove` 里自带守卫。
+   */
+  acceptDrag: (id: string) => boolean
   /** 松手：编辑器按落点改结构（含撤销记录与重渲染）*/
-  dropDrag: (targetId: string | null, zone: 'before' | 'after' | 'inside') => void
+  dropDrag: (draggedId: string, targetId: string | null, zone: 'before' | 'after' | 'inside') => void
   /** 结束拖拽（清掉预览）*/
   endDrag: () => void
   /** 当前是否处于组合期 */
@@ -479,28 +488,38 @@ export function bindEditorEvents(br: EditorBridge): () => void {
   })
 
   /* ── 拖拽重排（HTML5 DnD，三区判定）────────────────── */
+  // 拖源只报「我是谁」；载荷形状与悬停记忆在 `view/dnd.ts`（跨组件共用的那一份）
   on(c, 'dragstart', (e: DragEvent) => {
     const handle = (e.target as HTMLElement).closest<HTMLElement>('[data-drag-for]')
     if (!handle?.dataset.dragFor) return
+    setDragBlock(e.dataTransfer, handle.dataset.dragFor)
     br.beginDrag(handle.dataset.dragFor)
-    e.dataTransfer?.setData('text/plain', handle.dataset.dragFor)
-    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
   })
-  on(c, 'dragover', (e: DragEvent) => {
-    const el = (e.target as HTMLElement).closest<HTMLElement>('.blk')
-    if (!el) return
-    e.preventDefault()
-    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-    br.showDropTarget(el, dropZone(el, e.clientY))
-  })
-  on(c, 'drop', (e: DragEvent) => {
-    e.preventDefault()
-    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-block-id]')
-    const id = el?.dataset.blockId ?? null
-    const zone = el ? dropZone(el, e.clientY) : 'after'
-    br.dropDrag(id, id && zone === 'inside' && !br.hasChildren(id) ? 'after' : zone)
-    br.onMounted()
-  })
+
+  // 落点：正文三区。含义（移到这里／移入／移到后面）由**这个落点**说，模块只管贴出来
+  off.push(
+    bindDropTarget(c, {
+      attr: 'drop',
+      effect: 'move',
+      // 段根（页／天／查询记录）不参与拖拽；未知 id 也不接（别人的载荷可能不是块）
+      accept: (id) => br.acceptDrag(id),
+      targetId: (e) => rowOf(e)?.dataset.blockId ?? null,
+      hint: (_id, e) => zoneHint(zoneOf(e)),
+      // 三区各有各的高亮线：由编辑器自己画（模块不认识 CSS 类名）
+      mark: (_id, e) => {
+        const el = rowOf(e)
+        if (el) br.showDropTarget(el, zoneOf(e))
+        else br.showDropTarget(null, null)
+      },
+      unmark: () => br.showDropTarget(null, null),
+      onDrop: (draggedId, targetId, e) => {
+        const el = rowOf(e)
+        const zone = el ? zoneOf(e) : 'after'
+        br.dropDrag(draggedId, targetId, targetId && zone === 'inside' && !br.hasChildren(targetId) ? 'after' : zone)
+        br.onMounted()
+      },
+    }),
+  )
   on(c, 'dragend', () => br.endDrag())
 
   return () => {
@@ -510,3 +529,14 @@ export function bindEditorEvents(br: EditorBridge): () => void {
 }
 
 export { dropZone }
+
+/** 事件落在哪一行（`.blk`；没有就是拖在空白处） */
+function rowOf(e: DragEvent): HTMLElement | null {
+  return (e.target as HTMLElement | null)?.closest<HTMLElement>('.blk') ?? null
+}
+
+/** 三区判定：按指针在行内的高度分上/中/下 */
+function zoneOf(e: DragEvent): 'before' | 'after' | 'inside' {
+  const el = rowOf(e)
+  return el ? dropZone(el, e.clientY) : 'after'
+}
