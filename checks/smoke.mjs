@@ -7068,6 +7068,109 @@ await check(
   },
 )
 
+/**
+ * 这一条钉的是「插入点只准落在可写正文槽里」。
+ *
+ * 事故形状：整片编辑区是**一个** contenteditable 容器，行容器 `.blk` 因此也编辑得了。
+ * 点到「正文之外」（块标的圆角缝、gutter 与正文之间的缝、只读日期行）时，
+ * 浏览器把插入点放进 `.blk` 自己身上 —— 光标看起来在块标左侧（「块前面」），
+ * 打出来的字成为**挂在 `.blk` 上的裸文本节点**：`readRuns` 只读 `.tx`，
+ * 所以模型里什么都没有，重渲染一过就消失。用户当场看得见、事后找不着。
+ *
+ * ⇒ 断言落在**两个面上**，缺一个都不算修好：
+ *   ① 点那些位置之后，插入点不许落在 `.tx` 之外；
+ *   ② 接着打字，`.blk` 的直接子节点里不许出现游离文本，且字必须真的进了模型。
+ */
+await check(
+  'T99 插入点只准落在可写正文槽：点 journal 的竖线/块标缝不落光标，硬打字也不留游离节点',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+
+    /**
+     * ① 结构面：`.blk` 的直接子节点只允许渲染层自己放的那几种。
+     *    这条判据本身就是 `ALLOWED_ROW_CHILDREN` 的镜像——两边一起改才是真的改。
+     */
+    const strayOf = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('#editor .blk')]
+          .map((b) => ({
+            id: b.dataset.blockId?.slice(0, 6) ?? '?',
+            text: [...b.childNodes].filter((n) => n.nodeType === 3 && (n.data ?? '').trim() !== '').map((n) => n.data),
+            extra: [...b.childNodes]
+              .filter((n) => n.nodeType === 1 && !['blk-alias', 'rails', 'rail-self', 'left', 'tx'].includes(n.classList[0] ?? ''))
+              .map((n) => n.nodeName),
+          }))
+          .filter((o) => o.text.length > 0 || o.extra.length > 0),
+      )
+
+    const caret = () =>
+      page.evaluate(() => {
+        const s = document.getSelection()
+        if (!s || s.rangeCount === 0) return { inWritable: false, where: 'no-range' }
+        const n = s.anchorNode
+        const el = n?.nodeType === 1 ? n : n?.parentElement
+        const tx = el?.closest('.tx')
+        return { inWritable: Boolean(tx && !tx.closest('[data-readonly]')), where: el?.className ?? String(n?.nodeName ?? '?') }
+      })
+
+    const modelHas = (needle) =>
+      page.evaluate((s) => window.__qua.blocks().filter((b) => JSON.stringify(b.content ?? '').includes(s)).length, needle)
+
+    const assertClean = async (label) => {
+      const stray = await strayOf()
+      assert(stray.length === 0, `${label}：.blk 里不该出现游离节点：${JSON.stringify(stray)}`)
+      const m = await modelHas('§')
+      assert(m === 0, `${label}：那一下打的字不该悄悄进模型（它不是正文）：${m} 块`)
+    }
+
+    // 落在「正文之外」的三个真实点位：块标左下圆角缝 / gutter 与正文之间的缝 / 只读日期文本
+    const points = await page.evaluate(() => {
+      const row = document.querySelector('#editor .blk[data-role~="journal"]')
+      const marker = row.querySelector('.marker').getBoundingClientRect()
+      const tx = row.querySelector(':scope > .tx').getBoundingClientRect()
+      return {
+        notch: { x: Math.round(marker.left + 1), y: Math.round(marker.bottom - 2) },
+        gap: { x: Math.round(tx.left - 4), y: Math.round(tx.top + tx.height / 2) },
+        date: { x: Math.round(tx.left + 8), y: Math.round(tx.top + tx.height / 2) },
+      }
+    })
+
+    for (const [name, p] of Object.entries(points)) {
+      await page.mouse.click(p.x, p.y)
+      await page.waitForTimeout(150)
+      const c = await caret()
+      assert(!c.inWritable || c.where.includes('tx'), `点 journal 的 ${name} 之后插入点不该留在正文之外：${JSON.stringify(c)}`)
+      // 硬敲一个字：即便插入点被浏览器挪到了奇怪的地方，也不许留下看不见的脏数据
+      await page.keyboard.type('§')
+      await page.waitForTimeout(200)
+      await assertClean(`点 ${name} 后打字`)
+    }
+
+    /**
+     * ② 键盘路径：行首按 `←` 也曾把插入点挤出 `.tx`。
+     *    修好之后要么留在正文里、要么被收回，总之不许漏出游离节点。
+     */
+    const firstChild = await page.evaluate(() => {
+      const row = document.querySelector('#editor .blk[data-role~="journal"]')
+      return row?.nextElementSibling?.dataset.blockId ?? ''
+    })
+    assert(firstChild, '前置：journal 段里应有一个可编辑子块')
+    await page.evaluate((id) => window.__qua.focusBlock(id, 0), firstChild)
+    await page.waitForTimeout(150)
+    await page.keyboard.press('ArrowLeft')
+    await page.waitForTimeout(200)
+    const atStart = await caret()
+    assert(!atStart.inWritable || atStart.where.includes('tx'), `行首按 ← 之后插入点不该跑出正文槽：${JSON.stringify(atStart)}`)
+    await page.keyboard.type('§')
+    await page.waitForTimeout(250)
+    await assertClean('行首按 ← 后打字')
+
+    await ctx.close()
+    return `点 journal 的圆角缝／正文缝／只读日期都不落光标，块首按 ← 也不越界；三处硬打字都没有游离节点、零字进模型`
+  },
+)
+
 /* ---------------------------------------------------------------- 汇总 */
 
 /** 判红的是「不在已知失败表里的失败」；已知失败逐条打印，不计入退出码 */

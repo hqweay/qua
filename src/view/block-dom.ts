@@ -267,6 +267,19 @@ export function fillBlockText(
 }
 
 /**
+ * **一个 `.blk` 允许有哪些直接子节点** —— 这是行的 DOM 契约清单，只有渲染层能增项。
+ *
+ * 为什么需要它：整片编辑区是**一个** contenteditable 容器，所以行容器 `.blk` 自己也可编辑。
+ * 插入点一旦落到「正文之外」（行首按 `←`、点在 gutter 与正文之间的缝、只读日期行），
+ * 浏览器就会把字直接塞进 `.blk` —— 那些裸节点不属于任何块的正文，`readRuns` 读不到，
+ * 重渲染一过就消失（详见 `BlockEditor.reclaimCaret`）。
+ *
+ * ⇒ 判据：`.blk` 的子节点只能是**渲染层自己放进去的那几种**；其余一律当游离内容清掉。
+ *   加新子节点时**必须**在这里登记，否则它会在第一次收光标时被当作脏东西删掉。
+ */
+export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set(['blk-alias', 'rails', 'rail-self', 'left', 'tx'])
+
+/**
  * 一个可见行 → `.blk` 元素。
  *
  * **DOM 契约就在这里**：`data-block-id`／`data-depth`／`data-has-children`／

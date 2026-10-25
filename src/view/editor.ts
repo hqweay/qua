@@ -109,7 +109,7 @@ import type { Tx } from '../core/kb/types.ts'
 import { ensureTagInTx, tagLookupOf } from '../core/kb/ensure-tag.ts'
 // 用户可见文案一律走 t
 import { t } from '../core/msg.ts'
-import { LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl, visibleRowHeight } from './block-dom.ts'
+import { ALLOWED_ROW_CHILDREN, LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl, visibleRowHeight } from './block-dom.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
 import { bindEditorEvents, type AtomClickMods } from './editor-events.ts'
 
@@ -591,6 +591,8 @@ export class BlockEditor {
 
   /** 让模型选区跟上 DOM（**选区由模型持有**，DOM Range 只是它在视窗内的表现） */
   syncSel(): void {
+    // 插入点跑到正文槽之外时先收回来（否则下面的读数会把一处「不存在的位置」当成偏移）
+    if (this.reclaimCaret()) return
     const s = this.readSel()
     if (!s) return
     // 不在这里清块选区：mouseup 前后浏览器会短暂恢复文本 Range，会误杀刚建好的块选区。
@@ -605,6 +607,63 @@ export class BlockEditor {
     this.sel = s
     this.markCaret()
     if (!same) this.events.selChange?.()
+  }
+
+  /**
+   * **插入点现在落在可写正文槽（`.tx`）里吗** —— 这是唯一允许输入的地方。
+   *
+   * 为什么需要一个独立判据：整片编辑区是**一个** contenteditable 容器，行容器 `.blk`
+   * 于是也可编辑。插入点一旦跑到 `.tx` 之外（行容器自己、gutter 与正文之间的缝、
+   * 只读的日期行），打出来的字会变成**裸节点挂在 `.blk` 里**：`readRuns` 只读 `.tx`
+   * ⇒ 模型里什么都没有，重渲染一过就消失（用户当场看到「字在块前面」，事后找不着）。
+   */
+  caretInWritableTx(): boolean {
+    const s = document.getSelection()
+    if (!s || s.rangeCount === 0) return false
+    const n = s.anchorNode
+    const el = n?.nodeType === Node.ELEMENT_NODE ? (n as HTMLElement) : n?.parentElement
+    const tx = el?.closest<HTMLElement>('.tx')
+    return Boolean(tx && !tx.closest('[data-readonly]'))
+  }
+
+  /**
+   * **把跑到正文槽之外的插入点收回来**。
+   *
+   * 收法刻意**不重建这一行**：重建会把角色元素（块标／把手）整个换掉，
+   * 而这条路径可能正发生在「按在把手上、还没开始拖」的那一瞬（`mousedown` 之后、
+   * `dragstart` 之前）——换了元素，这一次拖拽就断了。
+   * 所以只做两件事：清掉浏览器塞进 `.blk` 的游离节点，再把光标按模型选区放回去
+   * （模型没有选区就干脆不留光标：一个不属于任何块的光标本来就是错的状态）。
+   *
+   * @returns 是否真的收回了一次（正常编辑一次都不会走到这里）
+   */
+  reclaimCaret(): boolean {
+    // 拖拽 / 块拖选进行中：此刻的 DOM 选区不是「插入点」，别去动它
+    if (this.dragId !== null || this.mouseSel?.active) return false
+    const s = document.getSelection()
+    if (!s || s.rangeCount === 0) return false
+    const node = s.anchorNode
+    if (!node || !this.container.contains(node)) return false
+    if (this.caretInWritableTx()) return false
+    // ① 清掉游离内容：`.blk` 的直接子节点只允许这几类（其余是浏览器顺手塞进来的）
+    const host = node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement
+    const blk = host?.closest<HTMLElement>('.blk')
+    if (blk) {
+      for (const c of Array.from(blk.childNodes)) {
+        if (c.nodeType === Node.TEXT_NODE) {
+          if ((c.textContent ?? '').trim() !== '') blk.removeChild(c)
+          continue
+        }
+        if (c.nodeType !== Node.ELEMENT_NODE) continue
+        const cls = (c as HTMLElement).className
+        if (typeof cls === 'string' && ALLOWED_ROW_CHILDREN.has(cls)) continue
+        blk.removeChild(c)
+      }
+    }
+    // ② 光标按模型选区放回去
+    if (this.sel) this.restoreSel()
+    else s.removeAllRanges()
+    return true
   }
 
   /**
@@ -2457,6 +2516,7 @@ export class BlockEditor {
       blockOf: (n) => this.blockOf(n),
       syncSel: () => this.syncSel(),
       caretBlock: () => this.caretBlock(),
+      reclaimCaret: () => this.reclaimCaret(),
       commitEdit: (id) => {
         this.commitEdit(id)
       },

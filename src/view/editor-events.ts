@@ -49,6 +49,12 @@ export interface EditorBridge {
   /** 光标当前落在哪个块（没有就是 null）。`focusout` 靠它判断「离开的是哪一行」 */
   caretBlock: () => string | null
   /**
+   * **把跑到正文槽之外的插入点收回来**（见 `BlockEditor.reclaimCaret`）。
+   *
+   * @returns 真的收回了一次 ＝ 这次的输入/选中发生在「不该有光标的地方」，调用方要拦掉它
+   */
+  reclaimCaret: () => boolean
+  /**
    * **编辑边界**：把这一行的正文当作一次改名提交（撞名则回滚并报给装配层）。
    * 只在「离开这一行」时调 —— 逐字符校验会打死输入法。
    */
@@ -180,7 +186,25 @@ export function bindEditorEvents(br: EditorBridge): () => void {
   })
 
   // 焦点离开编辑区时也要把选区同步一次：否则"最后一次点的地方"会丢
-  on(c, 'beforeinput', () => br.syncSel())
+  on(c, 'beforeinput', (e: InputEvent) => {
+    /**
+     * ⚠️ **插入点不在可写正文槽里就不许输入**（`reclaimCaret` 的入口守卫）。
+     *
+     * 场景：行首按 `←` 会把插入点挤出 `.tx`（落到行容器 `.blk` 里），接着打字，字就
+     * 变成挂在 `.blk` 上的裸节点 —— 渲染在块标左侧（看起来像「写在这一块前面」），
+     * 而 `readRuns` 只读 `.tx` ⇒ 模型里没有，重渲染一过就消失。
+     * 所以在这里先收回光标，再吞掉这一笔输入：宁可少打一个字，也不留看不见的脏数据。
+     *
+     * ⚠️ 组合期（IME）不碰：拦掉 `beforeinput` 会打断输入法，而组合期的中间态本来就
+     *    不该按「一次插入」来判。组合结束后 `compositionend` 会走 `syncFromDom`，
+     *    那时再收（`syncSel` → `reclaimCaret`）。
+     */
+    if (!br.composing() && br.reclaimCaret()) {
+      e.preventDefault()
+      return
+    }
+    br.syncSel()
+  })
   on(c, 'mouseup', () => {
     // 块选区激活时不要再 syncSel：mouseup 后浏览器可能恢复一个非折叠 Range，
     // 会把刚建好的块选区立刻清掉（本机探针复现）。
@@ -381,14 +405,25 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     const target = e.target as HTMLElement
 
     /**
-     * ⓞ **只读行（journal 的日期）不落光标**。
-     *    `contenteditable=false` 只挡住「往里打字」，挡不住浏览器把插入点放到它旁边
-     *    （Chrome 会落到容器的相邻位置 ⇒ 一个不属于任何块的死光标）。
-     *    所以这里直接吞掉 mousedown：点日期＝什么也不发生，要写就点下面的空白。
+     * ⓞ **插入点只准落在可写正文槽（`.tx`）里**。gutter、行容器的空白、只读行
+     *    （journal 的日期）都算「正文之外」，在这里一律不移动插入点。
+     *
+     * 为什么必须自己挡：整片编辑区是**一个** contenteditable 容器，行容器 `.blk`
+     * 因此也是可编辑的。当点到的地方没有可写正文时，浏览器会把插入点放进**行容器自己**
+     * （或它旁边）—— 那一处不属于任何 `.tx`，打出来的字就以**裸文本节点挂在 `.blk` 里**：
+     * `readRuns` 只读 `.tx` ⇒ 模型拿不到，重渲染一过就消失，可用户当场看得见
+     * （表现为「点这一行的竖线，光标跳到块标左边，还能打字」）。
+     * `contenteditable=false` 只挡住「往里打字」，挡不住浏览器在外面找一个落点，
+     * 所以拦在 `mousedown`：默认行为不发生 ＝ 插入点原地不动。
+     *
+     * ⚠️ 豁免**拖拽把手**（`data-drag-for`，也就是块标）：把手走原生 `dragstart`，
+     *    `mousedown` 被吞掉连拖拽一起没（实测：preventDefault 之后 `dragstart` 一次都不派发）。
+     *    它的落点由 `click` 那一条收尾（点块标＝聚焦，本来就要重新放光标）。
      */
-    if (target.closest('[data-readonly]')) {
+    const tx = target.closest<HTMLElement>('.tx')
+    const inWritable = Boolean(tx && !tx.closest('[data-readonly]'))
+    if (!inWritable && !target.closest('[data-drag-for]') && target.closest('.blk')) {
       e.preventDefault()
-      return
     }
 
     // ① 折叠三角：只给有子块的行生成，所以这里不需要判 empty
