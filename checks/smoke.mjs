@@ -8755,8 +8755,22 @@ await check('T120 卡片拖拽：槽内排序、跨槽移动、一个块只留�
   }), ids.b)
   assert(backLeft.cards.includes(ids.b), `拖回左槽应成功：${JSON.stringify(backLeft.cards)}`)
   assert(backLeft.text.length > 0, `拖回后窗口正文应可读：${JSON.stringify(backLeft)}`)
+
+  // 派生卡走同一个 moveCard：检视卡从右槽拖到左槽，再拖回去
+  const inspectLeft = await dragCard(page, { from: 'right', to: 'left', id: 'inspect', before: 'journal' })
+  assert(inspectLeft, '派生卡拖拽应派发')
+  assert(inspectLeft.cards.left.cards.includes('inspect'), `检视卡应移入左槽：${JSON.stringify(inspectLeft.cards.left.cards)}`)
+  assert(!inspectLeft.cards.right.cards.includes('inspect'), `右槽不该还有检视卡：${JSON.stringify(inspectLeft.cards.right.cards)}`)
+  const inspectInLeft = await page.evaluate(() => ({
+    inLeft: Boolean(document.querySelector('#dock-left #inspect-card')),
+    visible: !document.getElementById('inspect-card').hidden,
+  }))
+  assert(inspectInLeft.inLeft && inspectInLeft.visible, `检视卡应显示在左槽：${JSON.stringify(inspectInLeft)}`)
+  const inspectBack = await dragCard(page, { from: 'left', to: 'right', id: 'inspect', before: 'backrefs' })
+  assert(inspectBack, '检视卡拖回右槽应派发')
+  assert(inspectBack.cards.right.cards.includes('inspect'), `检视卡应回右槽：${JSON.stringify(inspectBack.cards.right.cards)}`)
   await ctx.close()
-  return `槽内 b 到 a 前；跨槽 b→左（今日前）；Shift+点移回右且只有一张；再拖回左仍可读`
+  return `槽内 b 到 a 前；跨槽 b→左（今日前）；Shift+点移回右且只有一张；再拖回左仍可读；检视卡右→左→右`
 })
 
 await check('T121 右槽反链卡的行走同一条 Shift：行 = 源页，开窗口；中心不动', async () => {
