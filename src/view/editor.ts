@@ -20,8 +20,14 @@ import {
   cloneSubtree,
   depthOf,
   DIVIDER_TYPE,
+  ensurePageDirect,
+  ensurePageInTx,
   flatten,
   hasIdentity,
+  hasList,
+  isJournal,
+  isPropDefBlock,
+  isQueryBlock,
   indentMove,
   insertFirstChild,
   insertSiblingAfter,
@@ -242,6 +248,9 @@ interface EditBase {
 export type AcceptPick =
   | { kind: 'ref'; to: string; label: string; flavor?: '#' }
   | { kind: 'newObj'; name: string }
+  | { kind: 'newPage'; name: string }
+  /** 新标签是**目标**；三种键各给一个落点（`inline` 行内 / `assign` 块标签 / `instance` 新实例） */
+  | { kind: 'newTag'; name: string; action: 'inline' | 'assign' | 'instance' }
   | { kind: 'tag'; name: string }
 
 export class BlockEditor {
@@ -2709,44 +2718,71 @@ export class BlockEditor {
 
     const apply = (tx: Tx | null, block: Block): boolean => {
       let tagId: string | null = null
-      if (pick.kind !== 'ref') {
+      let recordId: string | null = null
+      let pageId: string | null = null
+
+      const needTag = pick.kind === 'tag' || pick.kind === 'newObj' || pick.kind === 'newTag'
+      if (needTag) {
         const tag = tx
           ? ensureTagInTx(tagLookupOf(this.store.blocks), pick.name, tx)
           : ensureTag(this.store.blocks, pick.name).block
         if (!tag) return false
         tagId = tag.id
       }
+
+      if (pick.kind === 'newPage') {
+        const page = tx
+          ? ensurePageInTx(tagLookupOf(this.store.blocks), pick.name, tx)
+          : ensurePageDirect(this.store.blocks, pick.name)
+        if (!page) return false
+        pageId = page.id
+        // 页落在森林顶层，可能不在当前视图里；整片重画一次，让索引/页数跟上
+        createdBlock = true
+      }
+
       /**
-       * 记录是**内容块**，落在当天（与新建页同一条落点口径）。它没有地址：
-       * 正文就是键入的名字（作描述），身份由「哪条引用指向它」给出。
+       * 记录是**内容块**，落在当天。它没有地址：正文就是键入的名字（作描述），
+       * 身份由「哪条引用指向它」给出。
        */
-      let recordId: string | null = null
-      if (pick.kind === 'newObj') {
+      if (pick.kind === 'newObj' || (pick.kind === 'newTag' && pick.action === 'instance')) {
         const record = tx
           ? createObjRecordInTx(tx, (bid) => findInForest(this.store.blocks, bid), pick.name, tagId!)
           : createObjRecordDirect(this.store.blocks, pick.name, tagId!)
         recordId = record.id
         createdBlock = true
       }
-      const inserted: RefRun[] =
-        pick.kind === 'tag'
-          ? []
-          : [
-              {
-                id: uuidv7Hex(),
-                t: 'ref',
-                to: pick.kind === 'ref' ? pick.to : recordId!,
-                ...(pick.kind === 'newObj' || pick.flavor ? { flavor: '#' as const } : {}),
-                label: pick.kind === 'ref' ? pick.label : pick.name,
-              },
-            ]
+
+      const assign = pick.kind === 'tag' || (pick.kind === 'newTag' && pick.action === 'assign')
+
+      /** 一次落点只插**一枚** run；块标签是归类，不插 run。 */
+      let inserted: RefRun[] = []
+      if (pick.kind === 'ref') {
+        inserted = [
+          {
+            id: uuidv7Hex(),
+            t: 'ref',
+            to: pick.to,
+            ...(pick.flavor ? { flavor: pick.flavor } : {}),
+            label: pick.label,
+          },
+        ]
+      } else if (pick.kind === 'newPage') {
+        // 页引用不加 `#` 风味：它是页面，不是标签
+        inserted = [{ id: uuidv7Hex(), t: 'ref', to: pageId!, label: pick.name }]
+      } else if (pick.kind === 'newObj') {
+        inserted = [{ id: uuidv7Hex(), t: 'ref', to: recordId!, flavor: '#', label: pick.name }]
+      } else if (pick.kind === 'newTag' && pick.action !== 'assign') {
+        const to = pick.action === 'instance' ? recordId! : tagId!
+        inserted = [{ id: uuidv7Hex(), t: 'ref', to, flavor: '#', label: pick.name }]
+      }
+
       const next = spliceRuns(block.content, hit.from, hit.to, inserted)
       if (tx) {
         tx.patch(id, (b) => writeBlockContent(b, next))
-        if (pick.kind === 'tag') tx.setTags(id, [...tagIdsOf(block), tagId!])
+        if (assign) tx.setTags(id, [...tagIdsOf(block), tagId!])
       } else {
         writeBlockContent(block, next)
-        if (pick.kind === 'tag') addTagId(block, tagId!)
+        if (assign) addTagId(block, tagId!)
       }
       return true
     }
@@ -2897,6 +2933,11 @@ export class BlockEditor {
     const id = s?.aBlock ?? null
     const at = id ? locate(this.doc, id) : null
     const b = at?.block
+    /**
+     * **森林根**不是「装载根」：一个嵌在天下面的页被单独打开时，`blockIsRoot` 也是 true，
+     * 但它并不是森林顶层。`store.blocks` 是森林根数组，O(根数) 就能判。
+     */
+    const forestRoot = Boolean(id) && this.store.blocks.some((x) => x.id === id)
     return {
       focus: 'editor',
       editorTextFocus: document.activeElement === this.container || this.container.contains(document.activeElement),
@@ -2913,6 +2954,18 @@ export class BlockEditor {
        * ⇒ 菜单靠这个键把自己藏起来，而不是点了再静默失败。
        */
       blockIsRoot: at !== null && at.parent === null,
+      blockIsForestRoot: forestRoot,
+      /**
+       * 「提取为页」只对**内容块**有定义：身份块（journal／tag／schema／query）
+       * 不靠位置表达信息，搬它们没有意义；森林根也没有可移动的落点。
+       */
+      blockCanExtractPage:
+        b !== undefined &&
+        !forestRoot &&
+        !isJournal(b) &&
+        !(hasList(b, 'tag') && !hasList(b, 'page')) &&
+        !isPropDefBlock(b) &&
+        !isQueryBlock(b),
       blockSelection: this.blockSel !== null,
       blockSelectionCount: this.blockSel?.ids.length ?? 0,
       blockType: b && todoOf(b) ? 'todo' : 'paragraph',

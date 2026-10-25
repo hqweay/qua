@@ -5,15 +5,7 @@
  * 把这几条拼装规则收在一处，是为了让「今天点左槽 = 日记流、点块标 = 只看这一天」
  * 这类形态差异只有**一个**判据来源；散在各域里，两处迟早对不上。
  */
-import {
-  ALIASES_PROP,
-  DISPLAY_PROP,
-  LISTS_PROP,
-  mkBlock,
-  whereOf,
-  type Block,
-} from '../../core/index.ts'
-import { t } from '../../core/msg.ts'
+import { whereOf, type Block } from '../../core/index.ts'
 
 /**
  * 编辑器装载的根集合：**只有「当前对象」自己一行**，它的子块**缩进挂在它下面**。
@@ -57,26 +49,6 @@ export function rootsFor(block: Block): Block[] {
  */
 export function rootsForMany(blocks: readonly Block[]): Block[] {
   return blocks.slice()
-}
-
-/**
- * 一个空页块：正文空（描述）、名字进 `_aliases`、身份是 `_lists:['page']`。
- *
- * ⚠️ 空标题也必须有一个地址：不变量是「在页列表里 ⇒ 至少有一个名字」。
- *    生成 `未命名-<短 id>` 而不是留空，是让「新建页」立刻可被引用、可被改名，
- *    且不会在落盘校验里变成非法形状。
- * ⚠️ **天生命中带一个空首子块**（与种子库的空页同形）：页名行展示的是名字，
- *    没有子块的新页「建出来却没处写正文」。这块随页一起插进库（同一笔事务），
- *    不是打开时的渲染兜底——半截状态（有页、没处写字）不该有存在的一刻。
- */
-export function makePageBlock(): Block {
-  const b = mkBlock('')
-  const name = t('ui.page.untitledAlias', { id: b.id.slice(-6) })
-  return {
-    ...b,
-    children: [mkBlock('')],
-    props: { [ALIASES_PROP]: [name], [LISTS_PROP]: ['page'], [DISPLAY_PROP]: 'alias', _icon: 'lucide:file' },
-  }
 }
 
 /**

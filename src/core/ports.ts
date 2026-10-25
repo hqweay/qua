@@ -123,6 +123,13 @@ export interface App {
   /* 露面：加/减一格标记（非破坏性；页/标签各自独立、可兼位） */
   addBlockRole(blockId: string, role: 'page' | 'tag'): boolean
   removeBlockRole(blockId: string, role: 'page' | 'tag'): boolean
+  /**
+   * **提取为页**：补 `page` 露面 ＋ 搬到森林顶层 ＋ 原位置留一枚引用。
+   *
+   * 与 `addBlockRole(...,'page')` 的区别只在位置：那条原地不动，这条显式搬家。
+   * 一次事务一条撤销；原块 id 不变，引用不受影响。
+   */
+  extractToPage(blockId: string): boolean
   /** 打开别名编辑器（名字、露面、显示模式）——纯 UI，落在装配层 */
   openAliasEditor(blockId: string, autofocus?: boolean): void
   /** 打开字段声明（页/标签能声明哪些属性）——纯 UI，落在装配层 */

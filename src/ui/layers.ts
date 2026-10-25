@@ -38,7 +38,8 @@ export interface Row {
 export type RowPick =
   | { kind: 'command'; command: string; args?: unknown }
   | { kind: 'tag'; id: string; name: string }
-  | { kind: 'newObj'; name: string }
+  | { kind: 'newTag'; name: string }
+  | { kind: 'newPage'; name: string }
   | { kind: 'instance'; id: string; name: string; tag: string }
   | { kind: 'page'; id: string; name: string }
   | { kind: 'block'; id: string; name: string }

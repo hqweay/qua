@@ -46,15 +46,6 @@ export interface PageDeps {
    */
   insertBlock: (block: Block, parentId: string | null, index: number) => void
   /**
-   * 插一个**内容**块，落点是**当天**（内容诞生于某天）。
-   *
-   * 与 `insertBlock` 的区别只在「落点由谁决定」：那条要调用方自己声明 `parent`＋`index`
-   * （身份块落顶层、结构移动都用它），这条把「内容该去哪」收在一处——
-   * 否则每个新建内容的入口都要各自记得「先物化今天、再插在它末尾」，
-   * 漏一步就是「页建出来了、却挂在森林顶层」，而这件事只在用户整理旧天时才显形。
-   */
-  insertBlockInDay: (block: Block) => void
-  /**
    * 搬一个块（连子树）到另一个容器下——`index` 是**最终**位置（越界夹取）。
    *
    * 与 `insertBlock` 分开：插入是「新东西进来」，移动是「同一个东西换个地方」。
@@ -113,6 +104,13 @@ export interface PageDeps {
   refreshTitle: () => void
   /** 把光标放到当前页首块 */
   focusFirstBlock: () => void
+  /**
+   * 把光标放到指定的块（`focusFirstBlock` 的精确版）。
+   *
+   * 提取为页后要落到原位置留下的那枚引用上；块不在当前视图时 `placeCaret` 是空操作，
+   * 调用方自己先判「它在不在这一屏」。
+   */
+  focusBlock: (blockId: string, offset?: number) => void
   /**
    * 确保某个侧槽**开着**（已经开着就是 no-op）。
    *

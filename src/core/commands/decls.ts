@@ -98,6 +98,7 @@ export const COMMANDS: CommandDecl[] = [
   /* ---- 角色（加/减一个机制位，不是破坏性转换） ---- */
   { name: 'core.block/as-page', title: t('cmd.block.as-page'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.page'), args: { blockId: { type: 'string' } }, keywords: ['page', 'role'] },
   { name: 'core.block/unpage', title: t('cmd.block.unpage'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.page'), args: { blockId: { type: 'string' } }, keywords: ['page', 'role', 'remove'] },
+  { name: 'core.block/extract-to-page', title: t('cmd.block.extract-to-page'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.page'), args: { blockId: { type: 'string' } }, keywords: ['extract', 'page', 'root'] },
   { name: 'core.block/as-tag', title: t('cmd.block.as-tag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'role'] },
   { name: 'core.block/untag', title: t('cmd.block.untag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'role', 'remove'] },
   { name: 'core.block/edit-aliases', title: t('cmd.block.edit-aliases'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['alias', 'name', 'list'] },

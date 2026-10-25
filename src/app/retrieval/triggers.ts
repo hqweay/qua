@@ -19,6 +19,7 @@ import {
   buildAdjacency,
   displayNameOf,
   findByAlias,
+  findTagByName,
   hasIdentity,
   hasList,
   isJournal,
@@ -171,18 +172,26 @@ function tagRows(query: string, deps: TriggerDeps): Row[] {
   const trimmed = query.trim()
   // 同名页会**兼作标签**（`ensureTagInTx` 复用）——这件事必须在行上说出来
   const page = trimmed === '' ? undefined : findByAlias(forest, trimmed, (b) => hasList(b, 'page') && !hasList(b, 'tag'))
+  /**
+   * 这一行是**目标**（「还不存在的标签」），不是「新建实例」：
+   * `↵` / `⌥↵` / `⇧↵` 仍然各给一个落点（与已有标签行同一条判据）。
+   *
+   * ⚠️ 只在**没有同名标签**时出现：标签已经存在时，已有那一行用三种键就够了；
+   *    再显示「新建标签」是假话。部分匹配（`Foo` 对 `Foobar`）不算同名，
+   *    所以 `Foo` 仍能建出来。
+   */
   const newRows: Row[] =
-    trimmed === ''
+    trimmed === '' || findTagByName(forest, trimmed)
       ? []
       : [
           {
-            id: `retrieval/newObj/${trimmed}`,
-            label: t('ui.retrieval.newObj', { name: trimmed }),
-            hint: page ? t('ui.tagPicker.reuseHint') : t('ui.retrieval.newObjHint'),
+            id: `retrieval/newTag/${trimmed}`,
+            label: t('ui.retrieval.newTag', { name: trimmed }),
+            hint: page ? t('ui.tagPicker.reuseHint') : t('ui.retrieval.newTagHint'),
             icon: 'lucide:plus',
             group: 'retrieval/3-new',
             keyHint: deps.shortcutHint,
-            pick: { kind: 'newObj', name: trimmed },
+            pick: { kind: 'newTag', name: trimmed },
           },
         ]
   return [...instanceRows(tags, want, deps), ...classRows, ...newRows]
@@ -212,11 +221,13 @@ function snippet(text: string): string {
  *    它们被引用时的显示名不是这段字（引用它们有各自的入口），列在这里只会点出怪结果。
  */
 function mentionRows(query: string, deps: TriggerDeps): Row[] {
-  const q = query.trim().toLowerCase().slice(0, TRIGGER_QUERY_MAX)
+  const raw = query.trim().slice(0, TRIGGER_QUERY_MAX)
+  const q = raw.toLowerCase()
+  const forest = deps.forest()
   const pages: Row[] = []
   const blocks: Row[] = []
   const selfId = deps.selfBlockId()
-  walkForest(deps.forest(), (b, ctx) => {
+  walkForest(forest, (b, ctx) => {
     // 正在打字的这一块不进候选：它的正文里还留着 `@查询词`，而且「引用自己」没有意义
     if (b.id === selfId) return
     const text = plainText(b.content)
@@ -249,7 +260,29 @@ function mentionRows(query: string, deps: TriggerDeps): Row[] {
       pick: { kind: 'block', id: b.id, name: snippet(text) },
     })
   })
-  return [...pages, ...blocks]
+  /**
+   * **无同名页 ⇒ 建页**。判据用「地址」而不是「这一屏有没有行」：
+   * 正文命中了几行，不代表用户想引用的那个名字已经存在；`Foo` 对 `Foobar`
+   * 只是正文包含，不能拦住建 `Foo` 这个页。
+   *
+   * 同名地址已经存在（页 / 标签 / 普通块）⇒ 这一行改说「会复用」，不建第二个。
+   */
+  const newRows: Row[] = []
+  if (raw !== '') {
+    const existingPage = findByAlias(forest, raw, (b) => hasList(b, 'page'))
+    if (!existingPage) {
+      const existing = findByAlias(forest, raw)
+      newRows.push({
+        id: `retrieval/newPage/${raw}`,
+        label: t('ui.retrieval.newPage', { name: raw }),
+        hint: existing ? t('ui.retrieval.newPageReuseHint') : t('ui.retrieval.newPageHint'),
+        icon: 'lucide:plus',
+        group: 'retrieval/3-new',
+        pick: { kind: 'newPage', name: raw },
+      })
+    }
+  }
+  return [...pages, ...blocks, ...newRows]
 }
 
 /* ------------------------------------------------------------ 触发表 */

@@ -25,7 +25,6 @@ import type { Chrome } from '../../ui/chrome.ts'
 import { isReadonlyBlock } from '../../view/block-dom.ts'
 import type { BlockEditor } from '../../view/editor.ts'
 import type { PageDeps } from '../commands-impl.ts'
-import { daySlotInTx } from '../commands/placement.ts'
 
 export type PagesDeps = {
   kb: MemoryKb
@@ -196,20 +195,6 @@ export function setupPages(deps: PagesDeps) {
        */
       pageDeps.run((tx) => tx.move(blockId, parentId, index))
     },
-    insertBlockInDay: (block) => {
-      /**
-       * **内容落位**：物化当天 ＋ 插在它末尾，**同一笔事务**。
-       *
-       * ⚠️ 必须是同一笔：拆成「先建天、再插页」的话，两步之间就是一个真实存在的
-       *    半截状态（天建好了、页还没挂上去），而这一步失败会留下一个空天。
-       * ⚠️ 落点算在 `placement.ts`（唯一口径），这里只负责把它落到事务里。
-       */
-      // 同样走带撤销快照的那条（「建了撤不回来」与「搬了回不去」是同一类事故）
-      pageDeps.run((tx) => {
-        const slot = daySlotInTx(tx, kb)
-        tx.insert(block, slot.parentId, slot.index)
-      })
-    },
     // 打标签的落点：**当前光标那一块**（正文 vs 反链 footer 会切换 ⇒ 每次现取活动编辑器）
     caretBlockId: () => deps.getEd().caretBlock() ?? deps.getEd().rows()[0]?.block.id ?? null,
     /**
@@ -289,6 +274,15 @@ export function setupPages(deps: PagesDeps) {
       const target = firstEditableRoot(first)
       editorEl.focus()
       if (target) mainEd.placeCaret(target.id, 0)
+    },
+    focusBlock: (blockId, offset = 0) => {
+      const mainEd = deps.getMainEd()
+      deps.setEd(mainEd)
+      // 换块聚焦先结掉上一块的编辑期（与 `app.focusBlock` 同一条判据）
+      const prev = mainEd.sel?.aBlock ?? mainEd.caretBlock()
+      if (prev && prev !== blockId) mainEd.commitEdit(prev)
+      editorEl.focus()
+      mainEd.placeCaret(blockId, offset)
     },
     /**
      * 确保侧槽开着：已经开着就什么都不做（**不写 prefs**，也就不会把

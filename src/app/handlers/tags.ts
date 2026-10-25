@@ -17,6 +17,14 @@ export const TAGS_HANDLERS: Record<string, Handler> = {
     const id = S(a.blockId) || curBlock(app)
     return id ? app.removeBlockRole(id, 'page') : false
   },
+  /**
+   * 提取为页：标记 ＋ 搬到森林顶层 ＋ 原位置留下引用。
+   * 三个前提（森林根／身份块／撞名）由门面先判，handler 只报「这块」。
+   */
+  'core.block/extract-to-page': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    return id ? app.extractToPage(id) : false
+  },
   'core.block/as-tag': (a, app) => {
     const id = S(a.blockId) || curBlock(app)
     return id ? app.addBlockRole(id, 'tag') : false

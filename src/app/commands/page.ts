@@ -2,15 +2,26 @@
  * 页命令：页是一块，所以「新建 / 打开 / 改名 / 删」全是块的增删改。
  */
 import {
+  aliasesOf,
+  DISPLAY_PROP,
   displayNameOf,
   FEED_INITIAL,
+  hasList,
   hasTag,
   isJournal,
+  isPropDefBlock,
+  isQueryBlock,
   journalDate,
   journalId,
+  listsOf,
+  mkBlock,
+  mkPageBlock,
+  plainText,
   primaryAliasOf,
+  prop,
   tagIdsOf,
   todayISO,
+  uuidv7Hex,
   writeRename,
   type Block,
 } from '../../core/index.ts'
@@ -19,7 +30,7 @@ import { FEED_SPEC } from '../../core/feed.ts'
 import { t } from '../../core/msg.ts'
 import type { App } from '../../core/ports.ts'
 import type { Row } from '../../ui/layers.ts'
-import { makePageBlock, rootsFor, rootsForMany, takenWhere } from './roots.ts'
+import { rootsFor, rootsForMany, takenWhere } from './roots.ts'
 import type { PageDeps } from './types.ts'
 
 /** 页命令（页名＝块正文，所以「改名」就是改块） */
@@ -34,6 +45,7 @@ export function pageCommands(d: PageDeps): Pick<
   | 'focusTitle'
   | 'showRefPicker'
   | 'insertTag'
+  | 'extractToPage'
 > {
   // 子块数：只数 p 的后代（不含 p 自己），与「页里有多少行」的口径一致
   const count = (p: Block): number => {
@@ -60,16 +72,15 @@ export function pageCommands(d: PageDeps): Pick<
 
     newPage: () => {
       /**
-       * 页块**自带空首子块**（`makePageBlock`），整棵子树同一笔插进库：
+       * 页块**自带空首子块**（`mkPageBlock`），整棵子树同一笔插进库：
        * 「新建页」是一次结构写，必须产 op——直接 `blocks().push` 的页换库后没有行可落，
        * 重开就丢了；拆成「先建页、打开再补子块」则会存在只有页没处写字的半截状态。
        *
-       * **落点是当天**（不是森林顶层）：内容诞生于某天，位置是真实信息，
-       * 「从天里长出页」是默认路径。当天还不存在时先物化它——两件事同一笔事务，
-       * 否则会留下「页在库里、却挂在一棵还没建的天上」的半截状态。
+       * **落点是森林顶层**：页是长寿命对象，不是「某天发生的一件事」——它的诞生时刻
+       * 已经由 `created` 记着，不需要再挂到那一天下面。记录仍落当天（`core/obj.ts`）。
        */
-      const p = makePageBlock()
-      d.insertBlockInDay(p)
+      const p = mkPageBlock()
+      d.insertBlock(p, null, d.kb.roots().length)
       d.setActiveId(p.id)
       d.loadPage(rootsFor(p))
       d.refreshList()
@@ -206,6 +217,61 @@ export function pageCommands(d: PageDeps): Pick<
       } else {
         d.toast(t('ui.toast.tagAdded', { tag: displayNameOf(r.block) }))
       }
+    },
+
+    /**
+     * **提取为页**：把一块（连子树）搬到森林顶层，补 `page` 露面，并在原位置留一枚引用。
+     *
+     * 与 `标记为页` 的区别在**位置**：那条只动露面、原地不动；这条是显式点名
+     * 「把它提成独立页」，所以连带搬家。原块 id 不变 ⇒ 所有引用不受影响；
+     * 原位置留一枚 ref run（不是名字文本），改名后能跟着变。
+     *
+     * 三个前提在**命令层先判**，避免「移了半步才发现不行」：
+     *   · 森林顶层不再提取（没有可移动的落点；标记为页就够）；
+     *   · journal / tag / schema / query 不提取（它们是身份块，不是内容）；
+     *   · 名字撞了就停：地址空间全局唯一，先移后标会留下「根上、没身份」的块。
+     */
+    extractToPage: (id) => {
+      const b = d.kb.get(id)
+      if (!b) return false
+      const parent = d.kb.parentOf(id)
+      if (!parent) {
+        d.toast(t('ui.toast.extractRoot'), 'info')
+        return false
+      }
+      // 纯标签是分类，不是内容；兼位成页的块仍可提取（它就是页）
+      if (isJournal(b) || (hasList(b, 'tag') && !hasList(b, 'page')) || isPropDefBlock(b) || isQueryBlock(b)) {
+        d.toast(t('ui.toast.extractNotAllowed'), 'warn')
+        return false
+      }
+      const current = primaryAliasOf(b).trim()
+      const text = plainText(b.content).trim()
+      const name = current || text || t('ui.page.untitledAlias', { id: b.id.slice(-6) })
+      const hit = d.kb.resolveAlias(name)
+      if (hit && hit.id !== b.id) {
+        d.toast(t('ui.toast.nameTaken', { name, where: takenWhere(hit) }), 'warn')
+        return false
+      }
+      const at = parent.children.findIndex((x) => x.id === b.id)
+      if (at < 0) return false
+      const run = { id: uuidv7Hex(), t: 'ref' as const, to: b.id, label: name }
+      const ref = mkBlock([run])
+      d.run((tx) => {
+        if (current === '') tx.setAliases(id, [...aliasesOf(b), name])
+        if (!hasList(b, 'page')) tx.setLists(id, [...listsOf(b), 'page'])
+        if (prop(b, DISPLAY_PROP) === undefined) tx.setProp(id, DISPLAY_PROP, 'alias')
+        tx.move(id, null, d.kb.roots().length)
+        tx.insert(ref, parent.id, at)
+      })
+      const roots = d.rootIds().map((rid) => d.kb.get(rid)).filter((x): x is Block => x !== undefined)
+      d.loadPage(roots)
+      d.refreshList()
+      d.refreshTitle()
+      d.saveNow()
+      // 引用块在原 parent 里时，光标落到它后面；提取的是当前页自己时它不在视图里，只 toast
+      if (d.rootIds().some((rid) => d.kb.pathOf(ref.id).some((p) => p.id === rid))) d.focusBlock(ref.id, 1)
+      d.toast(t('ui.toast.extractedToPage', { name }), 'ok')
+      return true
     },
 
     showRefPicker: () => {

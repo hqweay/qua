@@ -399,17 +399,28 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
     return
   }
 
+  // `@` 无同名页：当场建页（或复用同名地址）并在原位插引用；同一笔事务
+  if (pick.kind === 'newPage') {
+    ed.acceptTrigger({ ch, pick: { kind: 'newPage', name: pick.name } })
+    return
+  }
+
   /**
    * `#` 的三种落点**只看按键**，不看选中的是哪一栏：
    *   · `⇧↵` ⇒ 为这个标签建一条落在今天的新实例（不管当前行是类还是已有实例）；
    *   · `⌥↵` ⇒ 把标签归到本块（写宿主 `_tags`，行尾出 chip）；
    *   · `↵`   ⇒ 行内标签：实例行引用那条记录、标签类行引用类块。
    *
-   * 这条分叉就是「打字路径不猜语义」的落点：`#名` 本身只说明「提到了这个标签」，
-   * 是归类、是提及、还是新起一条实例，由用户按下去的那个键说。
+   * 新建标签行也是这样：行只是**目标**（名字还不存在），三种键各给一个落点；
+   * 标签块在同一笔事务里建出来（`acceptTrigger` 的 `newTag` 分支）。
    */
-  const tagName =
-    pick.kind === 'instance' ? pick.tag : pick.kind === 'tag' || pick.kind === 'newObj' ? pick.name : ''
+  if (pick.kind === 'newTag') {
+    const action = mods.shiftKey ? 'instance' : mods.altKey ? 'assign' : 'inline'
+    ed.acceptTrigger({ ch, pick: { kind: 'newTag', name: pick.name, action } })
+    return
+  }
+
+  const tagName = pick.kind === 'instance' ? pick.tag : pick.kind === 'tag' ? pick.name : ''
   if (ch === '#' && tagName !== '') {
     if (mods.shiftKey) {
       ed.acceptTrigger({ ch, pick: { kind: 'newObj', name: tagName } })
@@ -427,12 +438,6 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
    */
   if (pick.kind === 'instance') {
     ed.acceptTrigger({ ch, pick: { kind: 'ref', to: pick.id, label: pick.name, flavor: '#' } })
-    return
-  }
-
-  // 新建实例：建标签（缺则建）＋ 建一条落在今天的记录 ＋ 插指向它的露面，同一笔事务
-  if (pick.kind === 'newObj') {
-    ed.acceptTrigger({ ch, pick: { kind: 'newObj', name: pick.name } })
     return
   }
 

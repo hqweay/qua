@@ -4942,7 +4942,7 @@ await check(
 )
 
 await check(
-  'T67 `#新标签` + Enter 走**一笔**事务：删触发词 ＋ 建标签块 ＋ 物化记录（落当天）＋ 插 `flavor:#` 露面同批；一次撤销连记录与标签一起回滚、宿主 `_tags` 没被写',
+  'T67 `#新标签` + ⇧↵ 走**一笔**事务：删触发词 ＋ 建标签块 ＋ 物化记录（落当天）＋ 插 `flavor:#` 露面同批；一次撤销连记录与标签一起回滚、宿主 `_tags` 没被写',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -4979,10 +4979,10 @@ await check(
     // 前置：浮层真的弹了，而且当前那一行就是「新建记录 #zzz」
     const rows = await layerRows(page)
     assert(rows.length > 0, `敲 # 应弹出浮层：${JSON.stringify(rows)}`)
-    assert(rows[0].label.includes('zzz'), `第一行应是「新建记录 #zzz」：${JSON.stringify(rows.slice(0, 3))}`)
-    assert(rows[0].key !== '', `新建实例行也支持 ⌥↵ / ⇧↵，徽标不能空：${JSON.stringify(rows[0])}`)
+    assert(rows[0].label.includes('新建标签') && rows[0].label.includes('zzz'), `第一行应是「新建标签 #zzz」：${JSON.stringify(rows.slice(0, 3))}`)
+    assert(rows[0].key !== '', `新建标签行也支持 ⌥↵ / ⇧↵，徽标不能空：${JSON.stringify(rows[0])}`)
 
-    await page.keyboard.press('Enter')
+    await page.keyboard.press('Shift+Enter')
     await page.waitForTimeout(220)
 
     const after = await page.evaluate((t) => {
@@ -5084,7 +5084,86 @@ await check(
     assert(back2 === before.text, `第二次撤销应回到输入前的正文「${before.text}」：${JSON.stringify(back2)}`)
 
     await ctx.close()
-    return `#zzz + Enter ⇒ 一笔 3 条 op（宿主内容带露面 ＋ 标签块 ＋ 落在当天的记录）、宿主 _tags 零写入；一次撤销连记录与标签一起回滚`
+    return `#zzz + ⇧↵ ⇒ 一笔 3 条 op（宿主内容带露面 ＋ 标签块 ＋ 落在当天的记录）、宿主 _tags 零写入；一次撤销连记录与标签一起回滚`
+  },
+)
+
+await check(
+  'T67b `#新标签` 的 ↵ / ⌥↵：↵ 建标签 + 行内引用（不建记录、不写 _tags）；⌥↵ 建标签 + 写 _tags（不建记录、不插 run）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const focusNew = () =>
+      page.evaluate(() => {
+        const ed = window.__qua.__editor
+        const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+        window.__qua.focusBlock(id, 0)
+        return id
+      })
+
+    // ① ↵ = 建标签块 + 正文里留一枚行内引用；宿主不归类、不建记录
+    const inlineBlock = await focusNew()
+    await page.waitForTimeout(80)
+    await page.keyboard.type('#新标签甲')
+    await page.waitForTimeout(220)
+    const inlineRows = await layerRows(page)
+    assert(inlineRows.some((r) => r.label.includes('新建标签') && r.label.includes('新标签甲')), `无同名标签时应出现「新建标签」行：${JSON.stringify(inlineRows)}`)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(220)
+
+    const inline = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const b = ed.store.find(t.id)
+      const tag = window.__qua.allBlocks().find((x) => x.lists.includes('tag') && x.aliases.includes('新标签甲'))
+      const atoms = window.__qua.atoms().filter((a) => a.blockId === t.id)
+      const tagged = window.__qua.allBlocks().filter((x) => (ed.store.find(x.id)?.props?._tags ?? []).includes(tag?.id ?? ''))
+      return {
+        tagId: tag?.id ?? '',
+        tags: b?.props?._tags ?? [],
+        atoms: atoms.map((a) => ({ kind: a.kind, target: a.target?.id ?? '' })),
+        tagged: tagged.length,
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id })),
+      }
+    }, { id: inlineBlock })
+
+    assert(inline.tagId !== '', '↵ 应新建标签块')
+    assert(inline.atoms.length === 1 && inline.atoms[0].kind === 'tag' && inline.atoms[0].target === inline.tagId, `↵ 应插指向**标签类**的行内引用：${JSON.stringify(inline)}`)
+    assert(inline.tags.length === 0, `↵ 不该把宿主归类：${JSON.stringify(inline.tags)}`)
+    assert(inline.tagged === 0, `↵ 不该建记录/成员：${inline.tagged}`)
+    assert(inline.ops.length === 2, `↵ 一笔应恰好 2 条（宿主内容 ＋ 标签块）：${JSON.stringify(inline.ops)}`)
+
+    // ② ⌥↵ = 建标签块 + 写宿主 _tags；不建记录、不插 run
+    const chipBlock = await focusNew()
+    await page.waitForTimeout(80)
+    await page.keyboard.type('#新标签乙')
+    await page.waitForTimeout(220)
+    await page.keyboard.press('Alt+Enter')
+    await page.waitForTimeout(220)
+
+    const chip = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const b = ed.store.find(t.id)
+      const tag = window.__qua.allBlocks().find((x) => x.lists.includes('tag') && x.aliases.includes('新标签乙'))
+      const tagged = window.__qua.allBlocks().filter((x) => (ed.store.find(x.id)?.props?._tags ?? []).includes(tag?.id ?? ''))
+      return {
+        tagId: tag?.id ?? '',
+        tags: b?.props?._tags ?? [],
+        atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length,
+        tagged: tagged.length,
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id })),
+      }
+    }, { id: chipBlock })
+
+    assert(chip.tagId !== '', '⌥↵ 应新建标签块')
+    assert(chip.tags.length === 1 && chip.tags[0] === chip.tagId, `⌥↵ 应写宿主 _tags：${JSON.stringify(chip.tags)}`)
+    assert(chip.atoms === 0, `⌥↵ 是归类，不该插行内原子：${chip.atoms}`)
+    assert(chip.tagged === 1, `⌥↵ 只该有宿主这一条成员：${chip.tagged}`)
+    assert(chip.ops.length === 3, `⌥↵ 一笔应恰好 3 条（宿主内容 ＋ 标签块 ＋ 归属 prop）：${JSON.stringify(chip.ops)}`)
+
+    await ctx.close()
+    return `无同名标签时：↵ 建标签 + 行内引用（2 条 op）；⌥↵ 建标签 + 写 _tags（3 条 op）；两者都不建记录`
   },
 )
 
@@ -5959,123 +6038,47 @@ await check(
 )
 
 await check(
-  'T76 新建页走一笔事务、落点是当天：页块 upsert{parent:当天} ＋ 子块 upsert{parent:页,index:0}；当天已存在＝1 条、不存在＝2 条；重开后仍在页下',
+  'T76 新建页走一笔事务、落点是森林顶层：页块 upsert{parent:null} ＋ 子块 upsert{parent:页,index:0}；不再物化当天；重开后仍在',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
     const before = await page.evaluate(() => ({
       pages: window.__qua.pages().length,
-      // 根数要用**森林根**：`blocks()` 返回的是装载文档的平铺，不是顶层
       roots: window.__qua.snapshot().topBlocks,
     }))
 
-    /**
-     * **落点是当天**：内容诞生于某天，「从天里长出页」是默认路径。
-     * 冷启动落在今日日记流 ⇒ 当天块**已经存在**，所以这一笔应是 **1 条** op（只插页）。
-     * 「当天不存在 ⇒ 2 条」那一档在下面用另一条路径验（清掉当天再建页）。
-     */
-    const day = await page.evaluate(() => window.__qua.snapshot().journalDate)
-    assert(day !== '', `前置：冷启动应落在今天那一天：${JSON.stringify(await Promise.resolve(day))}`)
-
     await page.evaluate(() => window.__qua.invoke('core.page/new'))
-    await page.waitForTimeout(200)
+    await page.waitForTimeout(220)
 
     const created = await page.evaluate(() => {
       const ops = window.__qua.lastOps()
-      const pageOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent !== null && o.value?.index !== 0)
-      // 用真模型取子树：诊断面的 `blocks()` 里 `children` 是数量，不是数组
-      const page = window.__qua.__editor.store.find(pageOp?.id)
-      const parent = pageOp?.value?.parent ? window.__qua.__editor.store.find(pageOp.value.parent) : null
+      const pageOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === null)
+      const page = pageOp ? window.__qua.__editor.store.find(pageOp.id) : null
+      const childOp = page ? ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === page.id) : null
       return {
         ops: ops.map((o) => ({ e: o.e, id: o.id, op: o.op, parent: o.value?.parent, index: o.value?.index })),
         pageId: pageOp?.id ?? '',
-        parentId: pageOp?.value?.parent ?? '',
-        parentDate: parent?.props?._date ?? '',
-        childId: page?.children[0]?.id ?? '',
-        pages: window.__qua.pages().length,
+        childId: childOp?.id ?? '',
         modelChild: page?.children[0]?.id ?? '',
-        // 路径：页块的祖先链（含当天）
-        pathDates: (() => {
-          const p = window.__qua.__editor.store.find(pageOp?.id ?? '')
-          return p ? [] : []
-        })(),
+        parentIsNull: pageOp?.value?.parent === null,
+        pages: window.__qua.pages().length,
+        roots: window.__qua.snapshot().topBlocks,
+        pageAliases: page ? (page.props?._aliases ?? []) : [],
+        pageLists: page ? (page.props?._lists ?? []) : [],
       }
     })
 
     assert(created.ops.every((o) => o.e === 'block' && o.op === 'upsert'), `都是 block.upsert（结构写不许零 op 直写）：${JSON.stringify(created.ops)}`)
-    assert(created.pageId !== '', `应有页块自己的 upsert：${JSON.stringify(created.ops)}`)
-    assert(created.parentId !== '', `页块的父块应是当天（不是 null）：${JSON.stringify(created.ops)}`)
-    assert(created.parentDate === day, `页块应挂在今天那一天下：${created.parentDate} vs ${day}`)
-    assert(
-      created.childId !== '' && created.ops.find((o) => o.id === created.childId)?.parent === created.pageId,
-      `空首子块应报它自己的落点 {parent:页,index:0}：${JSON.stringify(created.ops)}`,
-    )
-    assert(created.modelChild === created.childId, '模型里子块应真的挂在页下')
+    assert(created.pageId !== '' && created.parentIsNull, `页块应报 upsert{parent:null}（森林顶层）：${JSON.stringify(created.ops)}`)
+    assert(created.childId !== '' && created.modelChild === created.childId, `空首子块应真的挂在页下：${JSON.stringify(created)}`)
+    assert(created.ops.length === 2, `新建页应恰好 2 条 op（页 ＋ 空首子块），不再物化当天：${JSON.stringify(created.ops)}`)
     assert(created.pages === before.pages + 1, `页数应 +1：${before.pages} → ${created.pages}`)
+    assert(created.roots === before.roots + 1, `森林根数应 +1：${before.roots} → ${created.roots}`)
+    assert(created.pageLists.includes('page') && created.pageAliases.length === 1, `新页应带 page 露面与一个别名：${JSON.stringify(created)}`)
 
-    /**
-     * **当天不存在 ⇒ 2 条 op**（先物化天、再插页），且两条**同一笔**。
-     *
-     * 为什么要单独验这一档：它是「物化天」与「插内容」必须同笔的那条约束的唯一证据。
-     * 分开写会留下一个真实存在的半截状态（天建好了、页还没挂上去）。
-     */
-    const today = await page.evaluate(() => window.__qua.snapshot().journalDate)
-    const dayExists = await page.evaluate((date) => {
-      // 直接走森林找那一天（`_date` 是身份，不看位置）
-      let hit = false
-      const walk = (list) => {
-        for (const b of list) {
-          if (b.props?._date === date) hit = true
-          walk(b.children)
-        }
-      }
-      walk(window.__qua.__editor.store.blocks)
-      return hit
-    }, today)
-    if (dayExists) {
-      const dayId = await page.evaluate((date) => {
-        let id = ''
-        const walk = (list) => {
-          for (const b of list) {
-            if (b.props?._date === date) id = b.id
-            walk(b.children)
-          }
-        }
-        walk(window.__qua.__editor.store.blocks)
-        return id
-      }, today)
-      await page.evaluate((id) => window.__qua.invoke('core.editor/delete-block', { blockId: id }), dayId)
-      await page.waitForTimeout(200)
-      const stillThere = await page.evaluate((date) => {
-        let hit = false
-        const walk = (list) => {
-          for (const b of list) {
-            if (b.props?._date === date) hit = true
-            walk(b.children)
-          }
-        }
-        walk(window.__qua.__editor.store.blocks)
-        return hit
-      }, today)
-      if (!stillThere) {
-        await page.evaluate(() => window.__qua.invoke('core.page/new'))
-        await page.waitForTimeout(250)
-        const two = await page.evaluate(() => {
-          const ops = window.__qua.lastOps()
-          const dayOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === null)
-          const pageOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === dayOp?.id)
-          return { n: ops.length, hasDay: Boolean(dayOp), hasPageUnderDay: Boolean(pageOp), ops: ops.map((o) => ({ id: o.id, parent: o.value?.parent, index: o.value?.index })) }
-        })
-        assert(two.n === 2, `当天不存在时新建页应恰好 2 条 op（物化天 ＋ 插页）：${JSON.stringify(two.ops)}`)
-        assert(two.hasDay, `应有一条物化当天的 upsert{parent:null}：${JSON.stringify(two.ops)}`)
-        assert(two.hasPageUnderDay, `页块应挂在刚物化的那天下面（同一笔）：${JSON.stringify(two.ops)}`)
-      }
-    }
-
-    // 真关重开（reload 不算「关掉重开」）：页与子块必须还真的在库里
+    // 真关重开：页与子块必须还真的在库里
     const reopened = await reopenPage(browser, ctx, base, page)
     const after = await reopened.page.evaluate((t) => {
-      // 用真模型取：诊断面的 `blocks()` 里 `children` 是数量，读不出子块 id
       const p = window.__qua.__editor.store.find(t.pageId)
       return { page: Boolean(p), child: p?.children[0]?.id ?? '', pages: window.__qua.pages().length }
     }, created)
@@ -6085,7 +6088,7 @@ await check(
     assert(after.child === created.childId, `重开后空首子块应还在页下：${JSON.stringify(after)}`)
     assert(after.pages === created.pages, `重开后页数应不变：${created.pages} → ${after.pages}`)
 
-    return `新建页 ⇒ 页块挂在今天（${created.parentDate}）下 ＋ 子块{parent:页,index:0}；当天不存在时同笔 2 条；页数 ${before.pages}→${created.pages}；真关重开两者仍在`
+    return `新建页 ⇒ 页块 upsert{parent:null} ＋ 子块{parent:页}；恰好 2 条、不再建天；根数 ${before.roots}→${created.roots}；重开仍在`
   },
 )
 
@@ -6911,7 +6914,7 @@ await check(
 /* ------------------------------------------------- 落点与「根不可见」 */
 
 await check(
-  'T96 新建页落进当天 ⇒ 它立刻出现在引用选择器里（候选按身份找，不按位置）',
+  'T96 新建页立刻出现在引用选择器里（候选按身份找，不按位置）',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -6919,9 +6922,10 @@ await check(
 
     /**
      * 这一条钉的是**一个具体的静默失效**：
-     * 引用选择器早先按 `roots()`（森林顶层）列候选。内容改成落进当天之后，
+     * 引用选择器早先按 `roots()`（森林顶层）列候选。内容一度改成落进当天之后，
      * 每个新建的页都不在顶层 ⇒ 选择器会**静默少掉它们**（不报错，只是「找不到」）。
-     * 判据必须落在「新建的那个页 id 在候选里」，而不是「候选非空」。
+     * 现在页回到森林顶层，但判据仍必须是「按身份找」——页可以住在任何位置，
+     * 位置不是「可不可引用」的判据。判据落在「新建的那个页 id 在候选里」。
      */
     const before = await page.evaluate(() => window.__qua.pages().length)
     await page.evaluate(() => window.__qua.invoke('core.page/new'))
@@ -6945,7 +6949,7 @@ await check(
     const short = created.id.slice(-6)
     assert(
       picked.labels.some((x) => x.includes(short)),
-      `刚建的页（不在顶层）必须出现在引用候选里：${JSON.stringify({ short, labels: picked.labels.slice(0, 8) })}`,
+      `刚建的页必须出现在引用候选里：${JSON.stringify({ short, labels: picked.labels.slice(0, 8) })}`,
     )
     // 标签也在候选里（它们同样是可引用的目标，不该因为「不在顶层」被漏掉）
     assert(
@@ -6954,7 +6958,81 @@ await check(
     )
     await page.keyboard.press('Escape')
     await ctx.close()
-    return `新建页落进当天之后，它（和标签一起）都在引用候选里：候选按身份找，不按位置`
+    return `新建页（和标签一起）都在引用候选里：候选按身份找，不按位置`
+  },
+)
+
+await check(
+  'T96b `@` 无同名页 + ↵：当场建页（parent:null）并在原位插引用；一次撤销页与引用一起回滚',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const before = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const b = ed.rows().map((r) => r.block).find((x) => !x.children.length && !(x.props?._tags?.length))
+      window.__qua.focusBlock(b.id, 9999)
+      return { id: b.id, pages: window.__qua.pages().length, roots: window.__qua.snapshot().topBlocks }
+    })
+
+    await page.keyboard.type('@无匹配页甲')
+    await page.waitForTimeout(240)
+    const rows = await layerRows(page)
+    assert(rows.some((r) => r.label.includes('新建页面') && r.label.includes('无匹配页甲')), `无同名页时应出现「新建页面」行：${JSON.stringify(rows.slice(0, 6))}`)
+
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(260)
+
+    const created = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const host = ed.store.find(t.id)
+      const atoms = window.__qua.atoms().filter((a) => a.blockId === t.id)
+      const pageId = atoms[0]?.target?.id ?? ''
+      const p = pageId ? ed.store.find(pageId) : null
+      const ops = window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id, parent: o.value?.parent, index: o.value?.index }))
+      return {
+        hostText: host ? host.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null,
+        atoms: atoms.map((a) => ({ kind: a.kind, target: a.target?.id ?? '' })),
+        pageId,
+        page: p ? { aliases: p.props?._aliases ?? [], lists: p.props?._lists ?? [], children: p.children.length } : null,
+        pages: window.__qua.pages().length,
+        roots: window.__qua.snapshot().topBlocks,
+        ops,
+      }
+    }, before)
+
+    assert(created.pageId !== '' && created.page, `↵ 应插一枚指向新页的引用：${JSON.stringify(created)}`)
+    assert(created.page.aliases[0] === '无匹配页甲', `新页的地址应是输入的文本：${JSON.stringify(created.page)}`)
+    assert(created.page.lists.includes('page'), `新页应带 page 露面：${JSON.stringify(created.page)}`)
+    assert(created.page.children === 1, `新页应自带一个可写的空首子块：${JSON.stringify(created.page)}`)
+    assert(created.pages === before.pages + 1, `页数应 +1：${before.pages} → ${created.pages}`)
+    assert(created.roots === before.roots + 1, `森林根数应 +1：${before.roots} → ${created.roots}`)
+    assert(created.atoms.length === 1 && created.atoms[0].kind === 'page', `引用应是 page 风味：${JSON.stringify(created.atoms)}`)
+    assert(created.ops.every((o) => o.e === 'block' && o.op === 'upsert'), `建页与插引用都走事务 op：${JSON.stringify(created.ops)}`)
+    assert(created.ops.some((o) => o.id === created.pageId && o.parent === null), `页块应报 parent:null：${JSON.stringify(created.ops)}`)
+
+    // 一次撤销：引用与页一起回滚（落点不是打字的延续）
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(220)
+    const back = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const host = ed.store.find(t.id)
+      return {
+        text: host ? host.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null,
+        atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length,
+        pageGone: ed.store.find(t.pageId) === undefined,
+        pages: window.__qua.pages().length,
+      }
+    }, { id: before.id, pageId: created.pageId })
+
+    assert(back.text === `${created.hostText ?? ''}@无匹配页甲`, `一次撤销应回到落点前的正文（字还留着）：${JSON.stringify(back.text)}`)
+    assert(back.atoms === 0, `一次撤销后正文里的引用应回滚：剩 ${back.atoms}`)
+    assert(back.pageGone, '一次撤销后新建的页应不在模型里')
+    assert(back.pages === before.pages, `一次撤销后页数应回原样：${before.pages}，实际 ${back.pages}`)
+
+    await ctx.close()
+    return `@无匹配页甲 + ↵ ⇒ 新页 upsert{parent:null} + 原位 page 引用；一次撤销页与引用一起回滚`
   },
 )
 
@@ -6966,8 +7044,9 @@ await check(
     await openFirstPage(page)
 
     /**
-     * 判据：用户世界里没有「根」——没有根视图、没有提取动词、
-     * 「顶层」不出现在任何菜单。
+     * 判据：用户世界里没有「根」——没有根视图、没有「提取为无名根」、
+     * 「顶层」不出现在任何菜单。`提取为页` 不违反：它产出的是有视口的页，
+     * 不是把块送进没有视口的根。
      *
      * ⚠️ 这条是**否定式**口味：它挡的是「后来有人顺手把那个词加回来」。
      *    代码注释里说「森林顶层」是模型事实，不受这条约束（注释不是用户可见文案）。
@@ -7284,6 +7363,124 @@ await check(
  *   ① 点那些位置之后，插入点不许落在 `.tx` 之外；
  *   ② 接着打字，`.blk` 的直接子节点里不许出现游离文本，且字必须真的进了模型。
  */
+await check(
+  'T98b 提取为页：块连子树搬到森林顶层 + page 露面；原位置留一枚 ref 引用；一次撤销全回',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const setup = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const root = ed.doc.roots[0]
+      const id = ed.insertBlockAfter(root.id, '提取源冒烟')
+      const childId = ed.insertBlockAfter(id, '子块')
+      ed.indent(childId)
+      const walk = (list, parent) => {
+        for (let i = 0; i < list.length; i++) {
+          const b = list[i]
+          if (b.id === id) return { parentId: parent?.id ?? null, index: i }
+          const hit = walk(b.children, b)
+          if (hit) return hit
+        }
+        return null
+      }
+      const loc = walk(ed.store.blocks, null)
+      return {
+        id,
+        childId,
+        parentId: loc.parentId,
+        index: loc.index,
+        roots: window.__qua.snapshot().topBlocks,
+        pages: window.__qua.pages().length,
+        total: window.__qua.snapshot().totalBlocks,
+      }
+    })
+    assert(setup.id && setup.childId && setup.parentId, `前置：源块应在某个 parent 下：${JSON.stringify(setup)}`)
+
+    await page.evaluate((id) => window.__qua.invoke('core.block/extract-to-page', { blockId: id }), setup.id)
+    await page.waitForTimeout(260)
+
+    const after = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const page = ed.store.find(t.id)
+      const walk = (list, parent) => {
+        for (let i = 0; i < list.length; i++) {
+          const b = list[i]
+          const run = b.content.find((r) => r.t === 'ref' && r.to === t.id)
+          if (run && b.id !== t.id) return { block: b, parentId: parent?.id ?? null, index: i }
+          const hit = walk(b.children, b)
+          if (hit) return hit
+        }
+        return null
+      }
+      const ref = walk(ed.store.blocks, null)
+      return {
+        pageRoot: ed.store.blocks.some((b) => b.id === t.id),
+        pageLists: page?.props?._lists ?? [],
+        pageAliases: page?.props?._aliases ?? [],
+        childStill: page?.children[0]?.id === t.childId,
+        refId: ref?.block.id ?? '',
+        refParent: ref?.parentId ?? '',
+        refIndex: ref?.index ?? -1,
+        refTarget: ref?.block.content.find((r) => r.t === 'ref')?.to ?? '',
+        refText: ref ? ref.block.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null,
+        roots: window.__qua.snapshot().topBlocks,
+        pages: window.__qua.pages().length,
+        total: window.__qua.snapshot().totalBlocks,
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id, parent: o.value?.parent, index: o.value?.index })),
+      }
+    }, setup)
+
+    assert(after.pageRoot, `原块应搬到森林顶层（同一 id）：${JSON.stringify(after.ops)}`)
+    assert(after.pageLists.includes('page'), `应补 page 露面：${JSON.stringify(after.pageLists)}`)
+    assert(after.pageAliases[0] === '提取源冒烟', `应把正文当主名：${JSON.stringify(after.pageAliases)}`)
+    assert(after.childStill, '子树应跟着原块一起搬')
+    assert(after.refId !== '' && after.refTarget === setup.id, `原位置应留一枚指向原块的引用：${JSON.stringify(after)}`)
+    assert(after.refParent === setup.parentId && after.refIndex === setup.index, `引用应占原 index：${JSON.stringify(after)} vs ${JSON.stringify(setup)}`)
+    assert(after.refText === '', `引用行不该把名字写成文本：${JSON.stringify(after.refText)}`)
+    assert(after.pages === setup.pages + 1, `页数应 +1：${setup.pages} → ${after.pages}`)
+    assert(after.roots === setup.roots + 1, `森林根数应 +1：${setup.roots} → ${after.roots}`)
+    assert(after.total === setup.total + 1, `块数应 +1（只多了引用行）：${setup.total} → ${after.total}`)
+    assert(after.ops.some((o) => o.id === setup.id && o.parent === null), `应有原块 move 到 parent:null 的 op：${JSON.stringify(after.ops)}`)
+    assert(after.ops.some((o) => o.id === after.refId && o.parent === setup.parentId), `应有引用块的 insert op：${JSON.stringify(after.ops)}`)
+    assert(after.ops.some((o) => o.e === 'prop'), `page 露面/别名应走 prop op：${JSON.stringify(after.ops)}`)
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(240)
+    const back = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const b = ed.store.find(t.id)
+      const walk = (list, parent) => {
+        for (let i = 0; i < list.length; i++) {
+          if (list[i].id === t.id) return { parentId: parent?.id ?? null, index: i }
+          const hit = walk(list[i].children, list[i])
+          if (hit) return hit
+        }
+        return null
+      }
+      const loc = walk(ed.store.blocks, null)
+      return {
+        parentId: loc?.parentId ?? '',
+        index: loc?.index ?? -1,
+        lists: b?.props?._lists ?? [],
+        childStill: b?.children[0]?.id === t.childId,
+        refGone: ed.store.find(t.refId) === undefined,
+        pages: window.__qua.pages().length,
+      }
+    }, { ...setup, refId: after.refId })
+
+    assert(back.parentId === setup.parentId && back.index === setup.index, `撤销后原块应回原位：${JSON.stringify(back)} vs ${JSON.stringify(setup)}`)
+    assert(!back.lists.includes('page'), `撤销后不该留着 page 露面：${JSON.stringify(back.lists)}`)
+    assert(back.childStill, '撤销后子树应还在原块下')
+    assert(back.refGone, '撤销后原位置那枚引用应消失')
+    assert(back.pages === setup.pages, `撤销后页数应回原样：${setup.pages}，实际 ${back.pages}`)
+
+    await ctx.close()
+    return `提取为页 ⇒ 原 id 搬根 + page 露面；原 index 留 ref；一次撤销回原位、引用消失`
+  },
+)
+
 await check(
   'T99 插入点只准落在可写正文槽：点 journal 的竖线/块标缝不落光标，硬打字也不留游离节点',
   async () => {
@@ -8234,7 +8431,8 @@ await check(
     await page.waitForTimeout(80)
     await page.keyboard.type('#检索丙')
     await page.waitForTimeout(200)
-    await page.keyboard.press('Enter')
+    // 首次是「新建标签 ＋ 新实例」：⇧↵；之后有实例行时 ↵ 才是「引用已有记录」
+    await page.keyboard.press('Shift+Enter')
     await page.waitForTimeout(220)
 
     const made = await page.evaluate((id) => {
