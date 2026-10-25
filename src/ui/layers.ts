@@ -62,6 +62,7 @@ const GROUP_TITLES: Record<string, string> = {
   'block/1-basic': t('menu.group.basic'),
   'block/2-structure': t('menu.group.structure'),
   'block/3-kind': t('menu.group.blockKind'),
+  'block/3-role': t('menu.group.identity'),
   'block/4-inline': t('menu.group.inline'),
   'block/5-mark': t('menu.group.mark'),
   'slash/1-basic': t('menu.group.basic'),

@@ -110,10 +110,10 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/outdent-block', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 40, layer: 'core' },
   { command: 'core.editor/toggle-todo', kind: 'menu', when: 'blockFocused', group: 'block/3-kind', order: 10, layer: 'core' },
   { command: 'core.editor/toggle-collapse', kind: 'menu', when: 'blockFocused && blockHasChildren', group: 'block/3-kind', order: 20, layer: 'core', label: t('menu.label.toggleCollapse') },
-  // 角色：加/减一个机制位（页/标签可兼位；顺序无语义）
+  // 露面：加/减一格标记（页/标签各自独立、可兼位；顺序无语义）
   { command: 'core.block/as-page', kind: 'menu', when: 'blockFocused && !blockHasPageRole', group: 'block/3-role', order: 10, layer: 'core' },
   { command: 'core.block/unpage', kind: 'menu', when: 'blockFocused && blockHasPageRole', group: 'block/3-role', order: 11, layer: 'core' },
-  { command: 'core.block/as-tag', kind: 'menu', when: 'blockFocused && !blockHasTagRole && blockHasName', group: 'block/3-role', order: 20, layer: 'core' },
+  { command: 'core.block/as-tag', kind: 'menu', when: 'blockFocused && !blockHasTagRole', group: 'block/3-role', order: 20, layer: 'core' },
   { command: 'core.block/untag', kind: 'menu', when: 'blockFocused && blockHasTagRole', group: 'block/3-role', order: 21, layer: 'core' },
   // 别名/字段是「名字层」的配置，不属于任何具体列表：任何聚焦块都能打开
   { command: 'core.block/edit-aliases', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 30, layer: 'core' },

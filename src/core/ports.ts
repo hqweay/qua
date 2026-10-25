@@ -120,11 +120,11 @@ export interface App {
    * 这条只管「搬」——一条事务一条 op。
    */
   moveBlockTo(blockId: string, targetId: string): void
-  /* 角色：加/减一个机制位（非破坏性；页/标签可兼位） */
+  /* 露面：加/减一格标记（非破坏性；页/标签各自独立、可兼位） */
   addBlockRole(blockId: string, role: 'page' | 'tag'): boolean
   removeBlockRole(blockId: string, role: 'page' | 'tag'): boolean
   /** 打开别名编辑器（名字、露面、显示模式）——纯 UI，落在装配层 */
-  openAliasEditor(blockId: string): void
+  openAliasEditor(blockId: string, autofocus?: boolean): void
   /** 打开字段声明（页/标签能声明哪些属性）——纯 UI，落在装配层 */
   openFieldsEditor(blockId: string): void
   /**

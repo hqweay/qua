@@ -27,6 +27,7 @@ import {
   removeAlias,
   removeList,
   setPrimaryAlias,
+  whereOf,
   type Block,
 } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
@@ -43,13 +44,13 @@ export interface AliasEditorDeps {
   close: () => void
   /** 冲突/拒绝的提示（装配层注入；缺省时静默，不抛） */
   toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
-}
-
-/** 冲突块在提示里怎么称呼（页 / 标签 / 块） —— 与页命令的同一套文案 */
-function whereOf(b: Block): string {
-  if (hasList(b, 'page')) return t('ui.where.page')
-  if (hasList(b, 'tag')) return t('ui.where.tag')
-  return t('ui.where.block')
+  /**
+   * 打开时就把光标放进「添加别名」输入框。
+   *
+   * 用在「无名块想标记为标签」这条路上：走到这里的原因就是没名字，
+   * 所以下一步必须是起名，而不是让用户自己再点一次。
+   */
+  autofocus?: boolean
 }
 
 /** 一个小节：标题 ＋ 内容（每个编辑器里重复三遍，抽出来只为一处排版） */
@@ -262,5 +263,14 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
     }
     displayBox.body.appendChild(group)
     host.appendChild(displayBox.box)
+  }
+
+  // 重绘时若光标已经在浮层里（比如刚敲完回车），不要抢回去。
+  // ⚠️ 首次打开时浮层还没挂进文档（`openPopover` 先 render 再 append）⇒ 此刻
+  //    `focus()` 无效，必须等挂载完成；用微任务而不是 setTimeout，落点确定。
+  if (deps.autofocus && !host.contains(document.activeElement)) {
+    queueMicrotask(() => {
+      if (input.isConnected) input.focus()
+    })
   }
 }

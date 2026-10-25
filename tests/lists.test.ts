@@ -21,7 +21,9 @@ import {
   listsOf,
   mkBlock,
   removeList,
+  whereOf,
 } from '../src/core/index.ts'
+import { t } from '../src/core/msg.ts'
 
 const b = (): Block => mkBlock('一块')
 
@@ -129,4 +131,26 @@ test('identityTags：给外观与诊断面的名字集合是现算的，不落�
   const named = b()
   named.props = { ...(named.props ?? {}), _aliases: ['一个名字'] }
   assert.deepEqual(identityTags(named), [], '别名是地址，不是外观要认的身份种类')
+})
+
+test('whereOf：兼位按集合说 —— 「页、标签」不能只说成「页」', () => {
+  const none = b()
+  assert.equal(whereOf(none), t('ui.where.block'), '不进任何列表 ⇒ 就是「块」')
+
+  const page = b()
+  addList(page, 'page')
+  assert.equal(whereOf(page), t('ui.where.page'))
+
+  const tag = b()
+  addList(tag, 'tag')
+  assert.equal(whereOf(tag), t('ui.where.tag'))
+
+  const both = b()
+  addList(both, 'page')
+  addList(both, 'tag')
+  assert.equal(
+    whereOf(both),
+    `${t('ui.where.page')}${t('ui.where.sep')}${t('ui.where.tag')}`,
+    '只说「页」会让人以为去掉页标记就能腾出这个名字，而名字属于块本身',
+  )
 })

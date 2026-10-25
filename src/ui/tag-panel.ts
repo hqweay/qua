@@ -26,7 +26,7 @@ export interface TagPanelDeps {
   /** 当前对象；不是标签 ⇒ 整段隐藏 */
   tag: () => Block | undefined
   members: (tag: Block) => Block[]
-  /** 这个标签是否**同时作为页**（页角色只决定是否进页列表） */
+  /** 这个标签是否**同时标记为页**（页只决定是否进页列表） */
   isPage: (tag: Block) => boolean
   togglePage: (tagId: string) => void
   shortId: (id: string) => string

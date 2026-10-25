@@ -8,9 +8,9 @@
 import {
   ALIASES_PROP,
   DISPLAY_PROP,
-  hasList,
   LISTS_PROP,
   mkBlock,
+  whereOf,
   type Block,
 } from '../../core/index.ts'
 import { t } from '../../core/msg.ts'
@@ -80,16 +80,14 @@ export function makePageBlock(): Block {
 }
 
 /**
- * 冲突块在提示里怎么称呼。
+ * 冲突块在提示里怎么称呼（薄包装：判据在 `core/where.ts`）。
  *
  * 只到「页／标签」这一层，不做面包屑：`[[ ]]` 打出去的名字撞的是**名字空间**里
  * 的那个块，用户要判断的是「我是不是想引用那个页」，知道它是页还是标签就够了。
  *
- * 导出给装配层：编辑器在编辑边界上拒绝一次改名时，提示要说清「撞的是哪种块」——
- * 同一句话两处拼，措辞就会分叉。
+ * ⚠️ 兼位必须两个都说（「页、标签」）：只说页会让人以为去掉页标记就能腾出名字，
+ *    而名字属于块本身。留这个包装是为了不改调用点。
  */
 export function takenWhere(b: Block): string {
-  if (hasList(b, 'page')) return t('ui.where.page')
-  if (hasList(b, 'tag')) return t('ui.where.tag')
-  return t('ui.where.block')
+  return whereOf(b)
 }

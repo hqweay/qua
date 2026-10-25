@@ -204,7 +204,6 @@ function keyHints(): Map<string, string> {
 function uiCtx(): CtxKeys {
   const focusId = ed.sel?.aBlock ?? ed.caretBlock()
   const focusBlock = focusId ? findInForest(ws.blocks, focusId) : undefined
-  const focusName = focusBlock ? primaryAliasOf(focusBlock).trim() : ''
   const ctx: CtxKeys = {
     ...ed.ctxKeys(),
     blockSelection: ed.hasBlockSelection(),
@@ -218,7 +217,6 @@ function uiCtx(): CtxKeys {
     // 块菜单里的露面开关（只看**当前聚焦块**；顺序无语义，只有「在不在」）
     blockHasPageRole: hasList(focusBlock, 'page'),
     blockHasTagRole: hasList(focusBlock, 'tag'),
-    blockHasName: focusName !== '',
     // 日记：`journalView` 是**真上下文键**（不是 if），`journalDate` 供前后翻日用
     journalView: isJournal(activeBlock()),
     journalDate: isJournal(activeBlock()) ? (prop<string>(activeBlock(), '_date') ?? '') : '',
@@ -671,7 +669,10 @@ function addBlockRole(blockId: string, role: 'page' | 'tag'): boolean {
     if (text !== '') {
       name = text
     } else if (role === 'tag') {
+      // 标签的价值就是名字（`#未命名-abc` 没有意义），但拒绝不该是死路：
+      // 起名是下一步，所以直接把别名编辑器打开、把光标放进输入框。
       app.toast(t('ui.toast.roleNeedName'), 'warn')
+      app.openAliasEditor(b.id, true)
       return false
     } else {
       name = t('ui.page.untitledAlias', { id: b.id.slice(-6) })
@@ -885,7 +886,7 @@ const app: App = {
 
   addBlockRole: (blockId, role) => addBlockRole(blockId, role),
   removeBlockRole: (blockId, role) => removeBlockRole(blockId, role),
-  openAliasEditor: (blockId) => openAliasEditor(blockId, ed.caretRect()),
+  openAliasEditor: (blockId, autofocus) => openAliasEditor(blockId, ed.caretRect(), autofocus),
   openFieldsEditor: (blockId) => openFieldsEditor(blockId, ed.caretRect()),
   setBlockType: (blockId, typeId) => applyBlockType(blockId, typeId),
 
@@ -1015,7 +1016,7 @@ const app: App = {
  *    委托在装配层，`view/` 只负责把动作标出来。
  * ⚠️ 写操作走 `writeProps`：它自带「重画这一行」——别名头就在这一行的 DOM 里。
  */
-const openAliasEditor = (blockId: string, rect: DOMRect | null): void => {
+const openAliasEditor = (blockId: string, rect: DOMRect | null, autofocus = false): void => {
   if (!findInForest(ws.blocks, blockId)) return
   layers.openPopover(
     (host) =>
@@ -1025,6 +1026,7 @@ const openAliasEditor = (blockId: string, rect: DOMRect | null): void => {
         write: (mutate) => writeProps(blockId, mutate),
         close: () => layers.closePopover(),
         toast: (text, kind) => app.toast(text, kind),
+        autofocus,
       }),
     rect,
   )

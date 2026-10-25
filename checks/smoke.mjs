@@ -4135,7 +4135,7 @@ await check('T52 归属边：属于在属性区、成员含算作、禁环、悬
 
 /* ------------------------------------------------- UI：让一个块成为页 / 标签 */
 
-await check('T53 列表露面：输入名字建标签、同名页兼作标签、标签也作为页、摘标签只摘露面', async () => {
+await check('T53 列表露面：输入名字建标签、同名页兼作标签、标签也标记为页、无名块直接标记为标签、摘标签只摘露面', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
 
@@ -4254,8 +4254,47 @@ await check('T53 列表露面：输入名字建标签、同名页兼作标签、
   const restored = await page.evaluate((id) => window.__qua.allBlocks().find((b) => b.id === id).lists, tagTemp.id)
   assert(restored.includes('tag'), `⌘Z 应把 tag 露面恢复：${JSON.stringify(restored)}`)
 
+  // ⑤ **两个露面互不前置**：一个「有正文、没别名」的普通块，块菜单里就该有
+  //    「标记为标签」；点了直接用正文当名字，且**不进页列表**（不需要先当页）。
+  const plainText = '直接标记的标签'
+  const plainId = await page.evaluate((text) => {
+    const id = window.__qua.__editor.insertBlockAfter(window.__qua.snapshot().activeId, text)
+    window.__qua.focusBlock(id, 0)
+    return id
+  }, plainText)
+  await page.waitForTimeout(150)
+  const plainMenu = await page.evaluate((id) => {
+    const el = document.querySelector(`.blk[data-block-id="${id}"] .handle`)
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    return [...document.querySelectorAll('.layer-item .layer-label')].map((r) => r.textContent)
+  }, plainId)
+  assert(plainMenu.some((x) => x.includes('标记为标签')), `无名块也该能直接标记为标签：${JSON.stringify(plainMenu)}`)
+  assert(plainMenu.some((x) => x.includes('标记为页')), `块菜单应能标记为页：${JSON.stringify(plainMenu)}`)
+  await page.locator('.layer-item', { hasText: '标记为标签' }).click()
+  await page.waitForTimeout(200)
+  const direct = await page.evaluate((id) => {
+    const b = window.__qua.allBlocks().find((x) => x.id === id)
+    return { aliases: b.aliases, lists: b.lists }
+  }, plainId)
+  assert(direct.lists.includes('tag'), `应直接成为标签：${JSON.stringify(direct)}`)
+  assert(!direct.lists.includes('page'), `标记为标签不该顺手进页列表：${JSON.stringify(direct)}`)
+  assert(direct.aliases[0] === plainText, `无名块应把正文当主名：${JSON.stringify(direct)} vs ${plainText}`)
+
+  // ⑥ 空正文、没名字 ⇒ 标记为标签不是死路：打开别名编辑器并把光标放进输入框，一个字节都不写
+  const emptyId = await page.evaluate((id) => window.__qua.__editor.insertBlockAfter(id, ''), plainId)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), emptyId)
+  await page.evaluate((id) => window.__qua.invoke('core.block/as-tag', { blockId: id }), emptyId)
+  await page.waitForSelector('.alias-editor')
+  const emptyAfter = await page.evaluate((id) => {
+    const b = window.__qua.allBlocks().find((x) => x.id === id)
+    return { aliases: b.aliases, lists: b.lists, focused: document.activeElement?.className ?? '' }
+  }, emptyId)
+  assert(emptyAfter.lists.length === 0 && emptyAfter.aliases.length === 0, `空正文标记为标签应只开编辑器、不写：${JSON.stringify(emptyAfter)}`)
+  assert(emptyAfter.focused.includes('alias-input'), `应把光标放进「添加别名」输入框：${JSON.stringify(emptyAfter)}`)
+  await page.evaluate(() => window.__qua.__layers.closePopover())
+
   await ctx.close()
-  return `新建 #人物（别名＋tag 露面）；页「${reuseName}」兼作标签；#临时 加 page 露面进页列表；摘 tag 只摘露面、名字还在且可撤销`
+  return `新建 #人物（别名＋tag 露面）；页「${reuseName}」兼作标签；#临时 标记为页；无名块直接标记为标签（主名＝正文、不进页列表）；空正文只开编辑器；摘 tag 只摘露面、名字还在且可撤销`
 })
 
 await check(
