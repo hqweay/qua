@@ -88,7 +88,7 @@ git config user.email "12345678+hqweay@users.noreply.github.com"   # 换成你�
 （一两句）
 
 ## 怎么验的
-（贴 `pnpm gate` 的结论行，例如：arch 18/18 · test:core 270/270 · check 97/97 · dock 10/10 · electron 10/10）
+（贴 `pnpm gate` 的结论行，例如：arch 19/19 · test:core 293/293 · check 98/98 · dock 10/10 · electron 10/10）
 
 ## 已知没做 / 风险
 （没有就写「无」）
@@ -122,7 +122,7 @@ pnpm gate
 | `typecheck` | renderer ＋ 主进程两套 tsconfig | 类型错误原文 |
 | `test:core` | `tests/*.test.ts`（`node --test`，零依赖，纯 core） | 测试名就是断言口径 |
 | `arch:check` | 架构断言（秒级） | 命中列表里有文件与行号 |
-| `check` | **真 Chrome** 真按键真鼠标（97 条，按序切片同时跑） | 编排脚本会把红掉那条的名字与失败原文打出来 |
+| `check` | **真 Chrome** 真按键真鼠标（98 条，按序切片同时跑） | 编排脚本会把红掉那条的名字与失败原文打出来 |
 | `check:dock` | 真量尺寸的布局断言 | 断言的量值与实际值 |
 | `check:electron` | 真 Electron 里的同一批账 | `.cache/etest/electron-smoke.log` |
 

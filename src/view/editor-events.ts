@@ -244,7 +244,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     /**
      * **先信模型光标，DOM 选区只作旁证**：Chrome 在 `input` 派发的那一刻，
      * `getSelection().anchorNode` 可能报成**另一个块**的 `#text`（offset 0，实测）。
-     * 直写时代价是「另一块被 mapMarks 洗一遍」；接 tx 后还会为那块多开一个事务。
+     * 照 DOM 选区写会把那一块的正文顺手改一遍（它的 run 序列被重建成别的东西）；
      * 模型光标由 `selectionchange`/`beforeinput` 先行同步，比这一刻的 DOM 更可信。
      */
     const id = br.caretBlock() ?? br.blockOf(document.getSelection()?.anchorNode ?? null)

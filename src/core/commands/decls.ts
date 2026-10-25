@@ -46,7 +46,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.editor/insert-image', title: t('cmd.editor.insert-image'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { preset: { type: 'string', enum: ['ready', 'missing'] } }, keywords: ['image', 'asset', t('menu.kw.image')] },
   { name: 'core.editor/remove-atom', title: t('cmd.editor.remove-atom'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { atomId: { type: 'string' } }, keywords: ['remove atom'], hidden: true },
 
-  /* ---- 区间格式（锚点，不是 run 属性） ---- */
+  /* ---- 行内格式（run 上的属性） ---- */
   { name: 'core.anno/toggle-bold', title: t('cmd.anno.toggle-bold'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['bold', 'strong', 'b'] },
   { name: 'core.anno/toggle-italic', title: t('cmd.anno.toggle-italic'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['italic', 'em', 'i'] },
   { name: 'core.anno/toggle-highlight', title: t('cmd.anno.toggle-highlight'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['highlight', 'mark', t('menu.kw.background')] },

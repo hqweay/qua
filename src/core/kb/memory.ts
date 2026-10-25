@@ -237,7 +237,7 @@ export class MemoryKb implements KbClient {
   /**
    * 一次事务：进门前快照，成功后交付 `{ ops, changes }`，抛错则**整批恢复**并重抛。
    *
-   * 快照是整片森林 ＋ 锚点：阶段 1 的工作集就是整库，
+   * 快照是整片森林：阶段 1 的工作集就是整库，
    * 所以「回滚」与撤销是同一种机制 —— 它们本来回答的就是同一个问题。
    */
   tx<R>(fn: (tx: Tx) => R, opts: TxOpts = {}): TxResult & { result: R } {
@@ -486,7 +486,7 @@ class ChangeSink {
   annos(id: string): void {
     this.push('annos', id)
   }
-  /** 给 `store.touch(source, ids)`：这次动过的块（含只动锚点的块） */
+  /** 给 `store.touch(source, ids)`：这次动过的块 */
   ids(): string[] {
     return [...new Set(this.list.map((c) => c.id))]
   }

@@ -20,7 +20,7 @@
 
 import type { Op } from '../kb/types.ts'
 
-/** 被写的三类对象：块森林 ＋ 行内锚点 ＋ 行内原子 */
+/** 被写的两类对象：块森林 ＋ 块上的可引用区间 */
 export type ChangeKind = 'blocks' | 'annos'
 
 /**
@@ -32,7 +32,7 @@ export type ChangeKind = 'blocks' | 'annos'
  *    适配器照样只承诺「这批改动落盘了」。
  *
  * `id` 两种取值，消费者必须都处理：
- *   · 具体 id —— 精确到块/锚点/原子，索引可只重算它；
+ *   · 具体 id —— 精确到块／区间，索引可只重算它；
  *   · `'*'`  —— 「这一类都可能动过」，拿不到精确 id 时的**保守**声明。
  *
  * ⚠️ `'*'` 不是「没实现」的兜底，而是「确实不知道」的如实表达
@@ -40,7 +40,7 @@ export type ChangeKind = 'blocks' | 'annos'
  */
 export interface Change {
   kind: ChangeKind
-  /** 对象 id（块／锚点／原子），或 `'*'` ＝ 整类对象都动过 */
+  /** 对象 id（块／区间），或 `'*'` ＝ 整类对象都动过 */
   id: string
 }
 

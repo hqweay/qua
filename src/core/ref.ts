@@ -80,7 +80,7 @@ export function resolveRefs(find: FindBlock, runs: readonly { id: string; label?
   return out
 }
 
-/** 找不到原子时的兜底视图（占位符还在、原子记录没了 ⇒ 看得见的 dangling） */
+/** 找不到目标时的兜底视图（那一格还在、目标块没了 ⇒ 看得见的 dangling） */
 export function danglingView(label: string): RefView {
   return { label, state: 'dangling' }
 }

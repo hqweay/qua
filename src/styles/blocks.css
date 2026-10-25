@@ -846,7 +846,7 @@
   justify-content: center;
 }
 
-/* 区间锚点的四种渲染（**不是 run 属性**：DOM 元素只是锚点的表现） */
+/* 格式的四种渲染（格式是 run 的属性，DOM 元素只是它的表现） */
 .mk-bold {
   font-weight: 700;
 }

@@ -2,7 +2,7 @@
  * 假数据 —— 一份**像真实笔记的库**：中文为主、中英混排、嵌套 3–4 层，含标签 / 引用 chip /
  * 图片占位 / 一段长文 / 一个悬空引用的 `dangling`）/ 一个缺失资产。
  *
- * 正文用迷你 DSL 写（见 `inline.ts`），由它解析成区间锚点与行内原子。
+ * 正文用迷你 DSL 写（见 `inline.ts`），由它解析成 run 序列（文本段带格式、引用与图片是 run）。
  * 三个演示状态（空 / 稀疏 / 降级）在 `states.ts`，冷启动首屏在 `core/bootstrap.ts`：
  * 它们与「满态种子」是**不同的用途**，混在一个文件里会让「改首屏」和「改满态」互相牵连。
  */
@@ -50,7 +50,7 @@ export function seedWorkspace(): Workspace {
       ],
     },
     {
-      text: '输入面：正文用块级 DOM ＋ 自研锚点',
+      text: '输入面：正文用块级 DOM ＋ 自研行内内容',
       children: [
         { text: '与 [[输入面笔记]] 同源；多行块（代码 / SQL）留给独立的编辑器实例' },
         { text: '行内原子在这里：**图片** ![[编辑器分层草图.png]] 就是一个原子 ＋ 资产引用' },
@@ -59,7 +59,7 @@ export function seedWorkspace(): Workspace {
       ],
     },
     { text: '把「引用某段」的 UI 补上', tags: ['任务'], task: false },
-    { text: '锚点边界断言复跑通过', tags: ['任务', '证据'], task: true },
+    { text: '行内内容边界断言复跑通过', tags: ['任务', '证据'], task: true },
     /**
      * **查询块**（–D6）的演示样本：条件＝「本页之下、带 #todo 的块」。
      *
@@ -77,7 +77,7 @@ export function seedWorkspace(): Workspace {
 
   const p2 = mkPage('输入面笔记', 'lucide:flask-conical', [
     {
-      text: '三条判据：块树 / **模型持有选区** / 自研区间锚点',
+      text: '三条判据：块树 / **模型持有选区** / 自研行内内容',
       children: [
         { text: '扁平整棵树 ＋ `data-depth` 是虚拟化的前提' },
         {
@@ -90,7 +90,7 @@ export function seedWorkspace(): Workspace {
     { text: '降级样本 · 超长块：' + longParagraph() },
     { text: '降级样本 · 全英文长行（不该溢出容器）：' + LONG_EN },
     { text: '一行里塞满行内原子：[[产品设计 · 决策日志]] ![[截图 2026-10-18 22.31.07.png]] 后面还要能继续打字。' },
-    { text: '一段带四种区间锚点的句子：**加粗的结论**、*斜体的限定*、==高亮的关键词==、`inline code`。' },
+    { text: '一段带四种行内格式的句子：**加粗的结论**、*斜体的限定*、==高亮的关键词==、`inline code`。' },
     { text: '标记顺序不能错：==先高亮== 再 **后加粗**，两个区间都得落在自己那几个字上。' },
   ])
 

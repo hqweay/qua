@@ -409,7 +409,7 @@ await check('T2 Enter 拆块 ／ Backspace 合并 ／ Tab 缩进 ／ Shift+Tab �
 
 /* -------------------------------------------------------------- 格式 */
 
-await check('T3 四种区间格式走**区间锚点**（⌘B/⌘I/⌘E/⌘`），不是 run 属性', async () => {
+await check('T3 四种行内格式（⌘B/⌘I/⌘E/⌘`）落在**那一截文字自己**身上，不另立实体', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   await page.evaluate(() => {
@@ -428,8 +428,19 @@ await check('T3 四种区间格式走**区间锚点**（⌘B/⌘I/⌘E/⌘`）�
   }
   const marks = await page.evaluate(() => window.__qua.marks())
   const types = new Set(marks.map((m) => m.type))
-  for (const [, t] of keys) assert(types.has(t), `缺少 ${t} 锚点：${JSON.stringify(marks)}`)
-  for (const m of marks) assert(m.end > m.start && m.blockId.length === 32, `锚点形状不对：${JSON.stringify(m)}`)
+  for (const [, t] of keys) assert(types.has(t), `缺少 ${t} 格式段：${JSON.stringify(marks)}`)
+  for (const m of marks) assert(m.end > m.start && m.blockId.length === 32, `格式段形状不对：${JSON.stringify(m)}`)
+  /**
+   * **格式就住在那一截文字上**：模型里没有第二个「格式」实体可查——
+   * 加粗那一段的 text run 自己带 `bold`，没加粗的那一段不带。
+   * 这条是「不另立实体」的机读证据（投影出来的区间只是它的读法）。
+   */
+  const onRuns = await page.evaluate(() => {
+    const id = window.__qua.blocks()[0].id
+    return window.__qua.__editor.store.find(id).content.map((r) => ({ t: r.t, marks: [...(r.marks ?? [])] }))
+  })
+  const boldRun = onRuns.find((r) => r.marks.includes('bold'))
+  assert(boldRun && boldRun.t === 'text', `加粗应落在 text run 上：${JSON.stringify(onRuns)}`)
   const dom = await page.evaluate(() => ({
     bold: document.querySelectorAll('.mk-bold').length,
     italic: document.querySelectorAll('.mk-italic').length,
@@ -438,7 +449,7 @@ await check('T3 四种区间格式走**区间锚点**（⌘B/⌘I/⌘E/⌘`）�
   }))
   assert(dom.bold && dom.italic && dom.hl && dom.code, `DOM 里四种表现不齐：${JSON.stringify(dom)}`)
   await ctx.close()
-  return `marks=${marks.length}（${[...types].join('/')}）`
+  return `格式段 ${marks.length} 个（${[...types].join('/')}）；四种格式都住在 text run 上，模型里没有第二个实体`
 })
 
 await check('T3b 顶部无工具栏／无顶栏：格式在划选气泡，皮肤与明暗在调试菜单（不许加回来）', async () => {
@@ -4988,8 +4999,8 @@ await check(
     await openFirstPage(page)
 
     /**
-     * 挑一个**叶子内容块**（无子块、无身份、无锚点）：子树只有它自己 ⇒ op 数可精确断言；
-     * 没有锚点 ⇒ `syncAnchors` 不会在断言之外动 marks/atoms。
+     * 挑一个**叶子内容块**（无子块、无身份、无行内原子）：子树只有它自己 ⇒ op 数可精确断言；
+     * 内容里没有原子 ⇒ 断言之外不会有多余的内容 op。
      */
     const pick = await page.evaluate(() => {
       const ed = window.__qua.__editor

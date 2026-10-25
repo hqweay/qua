@@ -908,6 +908,58 @@ function commandDecls() {
 }
 
 /* ═══════════════════════════════════════════════════════╗
+   ║ 25 · 行内内容只有 run 序列一套（禁旧形状复活）           ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  // 来由：正文曾经是「一个字符串 ＋ 库级扁平锚点数组」，靠**占位符字符**让原子在字符串里
+  // 占一格，再靠逐端粘性映射让锚点跟着文本走。那套形状的每个零件都自洽，所以它坏起来
+  // 是**静默**的：删字顺手吃掉原子、插入点恰好落在端点时多吞一个字。
+  // 换成 run 序列之后，那些零件全部没有存在的理由（原子是流节点、格式是 run 属性）。
+  // ⇒ 一旦有人把它们写回来（哪怕是「先留着以防万一」），两套形状就会同时成立，
+  //    而分歧只会在某次编辑之后显形。这条断言的作用是让「写回来」当场变红。
+  const BANNED = [
+    'ATOM_PLACEHOLDER',
+    'writeBlockText',
+    'setAnnotations',
+    'normalizeMarks',
+    'mapAtoms',
+    'mapMarks',
+    'syncAnchors',
+  ]
+  const hits = []
+  for (const f of srcFiles) {
+    const r = rel(f)
+    const { sf } = tsFile(f)
+    const visit = (n) => {
+      // 标识符与属性名都算：`mapAtoms(...)` 与 `x.mapAtoms` 是同一次复活
+      if (ts.isIdentifier(n) || ts.isPropertyAccessExpression(n)) {
+        const name = ts.isIdentifier(n) ? n.text : n.name.text
+        if (BANNED.includes(name)) {
+          const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
+          hits.push(`${r}:${line} 旧行内形状的零件复活：\`${name}\``)
+        }
+      }
+      ts.forEachChild(n, visit)
+    }
+    visit(sf)
+  }
+  add({
+    id: 25,
+    title: '行内内容只有 run 序列一套（禁旧形状的零件复活）',
+    method:
+      'AST 扫 src/**/*.ts 的标识符与属性名，命中即复活：' +
+      BANNED.map((n) => `\`${n}\``).join('／') +
+      '（注释不进 AST ⇒ 讲「为什么不用它」不算命中）',
+    scope: `src/**/*.ts（${srcFiles.length} 个文件）`,
+    whitelist: '无——这些名字对应的机制已被 run 序列取代，没有正当用途',
+    hits: hits.length,
+    detail: hits,
+    note: '为什么必须机检：旧形状自带一套自洽的解释（原子在字符串里占一格、锚点靠粘性映射跟随），写回来时类型与单测都不会喊，只有真编辑几轮之后才会显形',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
    ║ 额外 · 主题双轨静态面                       ║
    ╚═══════════════════════════════════════════════════════ */
 

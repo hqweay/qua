@@ -11,7 +11,7 @@
 ## 0. 门禁入口
 
 ```bash
-pnpm gate         # 类型 + 单测 + 构建 + 静态断言 + 97 条浏览器冒烟 + 10 条布局断言 + 10 条真 Electron 冒烟
+pnpm gate         # 类型 + 单测 + 构建 + 静态断言 + 98 条浏览器冒烟 + 10 条布局断言 + 10 条真 Electron 冒烟
 pnpm gate:fast    # 按这次改动的路径只跑碰得到的那几支（日常小改动用；不是收工门禁）
 pnpm gate:bundle  # gate + 4 条打包产物冒烟（要 .app，慢，所以单列）
 pnpm arch:check   # 只跑静态那一层（秒级）
@@ -28,7 +28,7 @@ pnpm arch:check   # 只跑静态那一层（秒级）
     pnpm build:test         # tsc + vite build（带测试面 → dist/）
     pnpm build:electron     # esbuild（electron/*.ts → dist-electron/*.cjs）
 ③ 冒烟（并发）
-    pnpm check:smoke ×N     # node checks/smoke.mjs，97 条按序切片分给 N 个进程
+    pnpm check:smoke ×N     # node checks/smoke.mjs，98 条按序切片分给 N 个进程
     pnpm check:dock         # 真量尺寸的布局断言
     pnpm check:electron     # 真 Electron（跑 dist/ + dist-electron/）
 ```
@@ -64,18 +64,23 @@ pnpm arch:check   # 只跑静态那一层（秒级）
 
 `src/core/` 复用自一个独立的输入面原型（按职责分片，口径不变） ＋ 三处扩展，**没有改动任何一条已验证口径**：
 
-复用：`uuidv7Hex` / `ATOM_PLACEHOLDER` / `diffText` 前缀后缀 diff / **`mapOffset` 逐端粘性映射**（起点插入右移、终点插入不动）/
-`mapMarks` / `locate` / `flatten` / `splitBlockBefore` / `mergeIntoPrev` / `replaceBlockRange` /
-`normSel` / `blockIdsOf` / `fromBlockSet` / `selToTextRanges` / `UndoStack`（1200ms 合并窗口）/ `CommandLog`。
+复用：`uuidv7Hex` / `diffText` 前缀后缀 diff / `locate` / `flatten` / `splitBlockBefore` /
+`mergeIntoPrev` / `replaceBlockRange` / `normSel` / `blockIdsOf` / `fromBlockSet` / `selToTextRanges` /
+`UndoStack`（1200ms 合并窗口）/ `CommandLog`。
+
+**行内内容**换过一次形（这一步不再复用原型的锚点机制）：正文＝**一串 run**（文本段带格式，
+引用／外链／图片是不可分的一枚），可引用区间（`annos`）只在真被引用时才物化、住在块上。
+于是「原子在字符串里占一格」的占位符、逐端粘性映射（`mapOffset`／`mapMarks`／`mapAtoms`）
+与「锚点带 blockId 的库级扁平数组」**全部退场**——它们的活由序列语义与块上归属接管。
+`arch-check` `[25]` 钉住这套旧零件不复活。
 
 原型扩展（**加字段不改口径**）：
 
-1. `MarkType` 扩到 4 种（bold / italic / highlight / code）——仍然是**带 `blockId` 的区间锚点**；
-2. `Atom`：行内原子 ＝ **恒占 1 格的区间锚点**（文本里那一格是 U+FFFC），
-   `target` 指向**实体 id**、带 `quote` 引文快照、解析不到就是 `dangling`（不静默错指）；
-   `mapAtoms` 与 `mapMarks` 共用同一套粘性映射，占位符被吃掉 ⇒ 原子失效并弹提示；
-3. 结构操作：缩进/取消缩进/兄弟交换/拖拽挂载（带循环守卫）/复制子树（全部发新 id）/折叠/待办；
-   `Snap` 多了一个 `atoms` 字段，撤销才不会丢行内原子。
+1. 格式（bold / italic / highlight / code）是 **text run 上的属性**：一段字自己带格式，
+   打字时新字继承邻位格式是序列的自然结果，不需要任何映射；
+2. 行内原子（引用／外链／图片）是 **序列里不可分的一枚**，`to` 指向**实体 id**、带名字快照，
+   解析不到就是 `dangling`（不静默错指）。删掉它一定是显式动作——不会「删字顺手吃掉」；
+3. 结构操作：缩进/取消缩进/兄弟交换/拖拽挂载（带循环守卫）/复制子树（全部发新 id）/折叠/待办。
 
 **视图层**（`src/view/editor.ts`）沿用同一套输入面原型的形状：单一 `contenteditable` 容器 ＋ **扁平块级 DOM ＋ `data-depth` ＋ padding 缩进**
 （DOM 层级会与窗口化虚拟化打架），组合期不重渲染该块、`compositionend` 后补渲染。
@@ -109,7 +114,7 @@ pnpm arch:check   # 只跑静态那一层（秒级）
 | 16 | 换外观不得改 DOM 类名/形状（亮/暗 `data-depth` 一致） | `arch-check` `[16]`（静态确认断言还在）＋ smoke T11 真跑 | **跑** |
 | 17 | 组件不得直改 KB 状态（只经命令） | `arch-check` `[17]` | **跑（只能查一半，见下）** |
 
-额外的七条（不在 17 条清单里，但都是真在跑的硬约束）：
+额外的十条（不在 17 条清单里，但都是真在跑的硬约束）：
 
 | # | 断言 | 落地 | 状态 |
 |---|---|---|---|
@@ -120,8 +125,11 @@ pnpm arch:check   # 只跑静态那一层（秒级）
 | `[20]` | 持久化收口：`localStorage` 只出现在一个适配器文件里；上层不再 import 同步 save/load | `arch-check` `[20]` | **跑** |
 | `[21]` | 列表判定只走 `hasList`（禁读单值 `.role` 与裸 `.roles`） | `arch-check` `[21]`（反证过：放一行 `b.role === 'page'` 会红；裸读 `.roles` 在换载体后会静默恒假，同样拦） | **跑** |
 | `[22]` | **块树遍历只有一个入口**（禁自写递归走 `children`） | `arch-check` `[22]`（反证过：放两种自写递归的写法都会红）＋ `tests/traversal.test.ts` | **跑** |
+| `[23]` | app／ui 不得 import 块存储（数据只经注入的依赖面与读门面） | `arch-check` `[23]` | **跑** |
+| `[24]` | app／ui 的依赖接口不得注入「整片森林」 | `arch-check` `[24]` | **跑** |
+| `[25]` | **行内内容只有 run 序列一套**（禁旧形状的零件复活） | `arch-check` `[25]`（反证过：把 `mapAtoms` 放回去会红） | **跑** |
 
-**当前基线**：`pnpm arch:check` 硬断言 **16/16 过**（`[12b]` 是如实记账、不拦门的欠账；
+**当前基线**：`pnpm arch:check` 硬断言 **19/19 过**（`[12b]` 是如实记账、不拦门的欠账；
 另有 6 条「等内核」，见 §4）。
 
 ---
@@ -265,6 +273,18 @@ AST 遍历 `electron/**/*.ts`：禁止 `workspace` / `seed` / `core/` / `command
 - **反证**：把两种写法各放一处（临时文件）⇒ 立刻两条命中、门禁红；删掉即回绿。
 - **行为那一半由单测钉**：`tests/traversal.test.ts` 断言派生出来的读路径**互相一致**
   （同一片森林、同一个先序）、早退真的立刻停、折叠只改 `hidden` 不改「走不走得到」。
+
+### `[25]` 行内内容只有 run 序列一套
+
+- **检查方式**：AST 扫 `src/**/*.ts` 的**标识符与属性名**，命中 `ATOM_PLACEHOLDER`／
+  `writeBlockText`／`setAnnotations`／`normalizeMarks`／`mapAtoms`／`mapMarks`／`syncAnchors`
+  即复活。注释不进 AST ⇒ 讲「为什么不再用它」不算命中。
+- **为什么必须机检**：旧形状自带一套**自洽**的解释（原子在字符串里占一格、锚点靠逐端粘性映射跟随），
+  所以把它写回来时类型检查与既有单测都不会喊；只有真编辑几轮之后才会显形
+  （「删字顺手吃掉原子」「插在端点处多吞一个字」）。这条断言的作用是让「写回来」当场变红。
+- **白名单：无**——那些名字对应的机制已被序列语义与块上归属取代，没有正当用途。
+- **反证**：在 `src/core/runs.ts` 末尾加一行 `export const mapAtoms = 1` ⇒ 立刻红；
+  删掉即回绿。
 
 ---
 

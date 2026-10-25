@@ -65,10 +65,12 @@ src/**               编辑器、命令表、绑定表、localStorage           
 - **Esc 取消候选 ⇒ 模型零残留**（`zhongwen` 不留；这条正是「两段式」要的回头账，见 ③④）。
 - 原子区间宽度**恒为 1 格**、原子总数不变、DOM 里 `.atom` 元素恒为 1 个。
 
-**⚠️ 一条容易搞错的事实（顺手挖出来的）：DOM 里根本没有 `U+FFFC` 这个字符。**
+**⚠️ 一条容易搞错的事实（顺手挖出来的）：DOM 里没有、模型里也没有「占位符字符」。**
 行内原子在 DOM 里是 `<span class="atom" contenteditable="false">⇢[[标签]]</span>`，
-`U+FFFC` **只活在模型文本里**（`src/core/annotations.ts` 的 `ATOM_PLACEHOLDER`）。
-所以「IME 在 U+FFFC 两侧连打」在实现层其实是「**在一个 `contenteditable=false` 的 inline 元素两侧连打**」——
+在模型里是**序列里不可分的一枚**（没有字符代表它）。
+「原子占 1 格」只是**读数口径**：`offsetIn`／`nodeLen` 把那个元素算作 1，
+所以光标与选区用的块内偏移与 DOM 一致，而序列本身不需要任何替身字符。
+所以「IME 在原子两侧连打」在实现层其实是「**在一个 `contenteditable=false` 的 inline 元素两侧连打**」——
 这恰恰是 Chromium 的 IME 更容易出问题的那一种布局，而它是通的。
 
 **未验证**：当前环境拿不到 macOS 的系统输入法（无法激活拼音候选窗），
@@ -97,8 +99,8 @@ app 的绑定表里**也**有 `core.history/undo`（自己的快照栈）。
 在 macOS 上 **NSMenu 的键等价物先于 web contents 处理**，所以：
 
 - 用户按 `⌘Z` 时，**大概率走菜单 role**（= `webContents.undo()`，即 contenteditable 的原生撤销栈），
-  而**不是** app 自己的 `core.history/undo`（块树+锚点+原子的快照回滚）。
-- 这两个撤销栈是**两套**。原生那个只知道 DOM 文本编辑，不知道块结构/锚点/行内原子。
+  而**不是** app 自己的 `core.history/undo`（块树 ＋ 行内内容的快照回滚）。
+- 这两个撤销栈是**两套**。原生那个只知道 DOM 文本编辑，不知道块结构与行内内容。
 
 **这次没有改它**（改「编辑」菜单会牵动「哪一套才算真撤销」这个产品决定，不该由壳来定）。
 **留给下一步的必须回答**：要么把「编辑 → 撤销/重做」换成 `click: () => 转发给 renderer 的 core.history/undo`，

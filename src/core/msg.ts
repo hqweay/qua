@@ -377,7 +377,7 @@ export const MSG = {
   'ui.panel.composing': 'composing（IME 组合中）',
   'ui.panel.compositionSeq': '组合序列',
   'ui.panel.selection': '选区（模型持有）',
-  'ui.panel.marks': '区间锚点 marks',
+  'ui.panel.marks': '格式段 marks',
   'ui.panel.atomsSuffix': '｜原子 atoms {atoms}',
   'ui.panel.undoDepth': 'undo / redo 栈深',
   'ui.panel.lastCommand': '最近命令',
@@ -430,7 +430,7 @@ export const MSG = {
   'ui.popover.position': '位置',
   'ui.popover.quote': '引文快照',
   'ui.popover.danglingNote': '目标不存在：状态是 dangling，不是静默错指。',
-  'ui.popover.refNote': '引用指向实体 id，编辑只改锚点区间。',
+  'ui.popover.refNote': '引用指向实体 id；删掉这一枚引用不会动目标。',
   // 引用与标签共用：目标可以是任意块（不只是顶层页）
   'ui.popover.openPage': '打开目标',
   'ui.popover.deleteRef': '删除这个引用',
@@ -457,7 +457,7 @@ export const MSG = {
   'ui.drawer.shortcutsTableHead': '<tr><th>键</th><th>命令</th><th>when</th></tr>',
   'ui.drawer.shortcutsNote1': '打字键一个都没绑',
   'ui.drawer.shortcutsNote2': '未绑定的键 ⇒ 文本输入。组合期（composing=true）所有键位绑定自动不命中。',
-  'ui.drawer.modelTitle': '当前页模型 JSON（块树 ＋ 区间锚点 ＋ 行内原子）',
+  'ui.drawer.modelTitle': '当前页模型 JSON（块树 ＋ 行内 run 序列）',
   'ui.drawer.modelNote':
     '这一坨就是唯一事实源：DOM 只是它的表现。命令面板里搜「导出」可以看它，搜「上下文键」看 when 的键空间。',
 

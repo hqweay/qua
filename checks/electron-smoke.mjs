@@ -522,18 +522,22 @@ await check('E6 中文 IME：行内原子两侧组合输入、候选取消、提
         atomEnd: a.end,
         atomCount: window.__qua.atoms().length,
         isComposing: window.__qua.snapshot().composing,
-        // ⚠️ DOM 里**根本没有** U+FFFC 这个字符：行内原子被渲染成
-        //   `<span class="atom" contenteditable="false">`（占 1 格的是那个 span，不是占位字符）。
-        //   U+FFFC 只活在**模型文本**里。所以度量 DOM 侧要看 `.atom` 元素的个数。
+        // 行内原子在 DOM 里是 `<span class="atom" contenteditable="false">`（占 1 格的是那个 span），
+        // 在模型里是序列里不可分的一枚 ⇒ 两侧都没有替身字符可查。
         domAtomEls: document.querySelectorAll(`.blk[data-block-id="${id}"] .tx .atom`).length,
         domTextHasFffc: (document.querySelector(`.blk[data-block-id="${id}"] .tx`)?.textContent ?? '').includes('\uFFFC'),
+        // 序列投影：文本段与原子各自落在哪一段（断言不用认识 run 形状）
+        runKinds: window.__qua.__editor.store.find(id).content.map((r) => r.t),
+        modelTextHasFffc: window.__qua.__editor.store
+          .find(id)
+          .content.some((r) => r.t === 'text' && r.v.includes('\uFFFC')),
       }
     }, blockId)
 
     log(`      ── 原子${side === 'left' ? '**左**' : '**右**'}侧连打（caret off=${off}，插入前文本尾="${caret.textBefore.slice(-6)}"）`)
     log(`         组合中：composing=${composing.isComposing} seq[末2]=${composing.seq} 模型含预编辑串=${composing.modelHasPreedit} DOM 含=${composing.domHasPreedit} 原子数=${composing.atoms}`)
     log(`         取消后：composing=${cancelled.isComposing} 模型残留 zhongwen=${cancelled.textHasPreeditAnywhere} 块文本="${cancelled.blockText}" 原子锚点=[${cancelled.atomStart},${cancelled.atomEnd})`)
-    log(`         提交后：块文本="${committed.blockText}" 原子锚点=[${committed.atomStart},${committed.atomEnd}) DOM 里 .atom 元素=${committed.domAtomEls}（DOM 文本含 U+FFFC=${committed.domTextHasFffc}）原子总数=${committed.atomCount} composing=${committed.isComposing}`)
+    log(`         提交后：块文本="${committed.blockText}" 原子锚点=[${committed.atomStart},${committed.atomEnd}) DOM 里 .atom 元素=${committed.domAtomEls} 序列=${JSON.stringify(committed.runKinds)} 原子总数=${committed.atomCount} composing=${committed.isComposing}`)
     return { before, caret, composing, cancelled, committed }
   }
 
@@ -561,13 +565,23 @@ await check('E6 中文 IME：行内原子两侧组合输入、候选取消、提
   )
   assert(left.committed.atomCount === left.before.atomCount && right.committed.atomCount === right.before.atomCount, '原子总数变了')
   assert(left.committed.domAtomEls === 1 && right.committed.domAtomEls === 1, `DOM 里 .atom 元素应恒为 1 个：左 ${left.committed.domAtomEls} / 右 ${right.committed.domAtomEls}`)
-  assert(left.committed.domTextHasFffc === false, 'DOM 文本里不该出现裸的 U+FFFC（原子由 span 承载，占位字符只在模型里）')
   assert(
-    /^与 中文\uFFFC中文 同源/.test(finalText),
-    `两侧提交后应是「与 中文<U+FFFC>中文 同源…」（两段中文夹着原子）：${finalText}`,
+    !left.committed.domTextHasFffc && !left.committed.modelTextHasFffc && !right.committed.modelTextHasFffc,
+    '两侧都不该有替身字符：原子由 DOM 元素承载、模型里是一枚 run，没有字符代表它',
+  )
+  // 序列投影：两段中文各自是一段 text run，原子夹在中间、自己是一枚
+  assert(
+    JSON.stringify(left.committed.runKinds) === JSON.stringify(['text', 'ref', 'text']) &&
+      JSON.stringify(right.committed.runKinds) === JSON.stringify(['text', 'ref', 'text']),
+    `提交后序列应是「文本段 ＋ 原子 ＋ 文本段」：左 ${JSON.stringify(left.committed.runKinds)} / 右 ${JSON.stringify(right.committed.runKinds)}`,
+  )
+  // 投影文本里原子不进字（它是节点，不是字符）⇒ 两段中文直接相邻
+  assert(
+    /^与 中文中文 同源/.test(finalText),
+    `两侧提交后投影文本应是「与 中文中文 同源…」（两段中文直接相邻，原子不进投影）：${finalText}`,
   )
 
-  return `原子[${atom.start},${atom.end}) 两侧各连打「中文」：compositionstart/update/end 都到 renderer；**候选取消（清空预编辑）后模型零残留、原子零位移**；左侧提交⇒原子右移 2 格，右侧提交⇒原子纹丝不动，宽度恒为 1 格、DOM 里恒 1 个 .atom span（**DOM 文本里没有裸的 U+FFFC**）、总数不变`
+  return `原子[${atom.start},${atom.end}) 两侧各连打「中文」：compositionstart/update/end 都到 renderer；**候选取消（清空预编辑）后模型零残留、原子零位移**；左侧提交⇒原子右移 2 格，右侧提交⇒原子纹丝不动，宽度恒为 1 格、DOM 里恒 1 个 .atom span、序列仍是「文本段＋原子＋文本段」（两侧都没有替身字符）、总数不变`
 })
 
 /* ═══════════════════════════════════════════════════ E7 窗口缩放 / 深色模式 */
