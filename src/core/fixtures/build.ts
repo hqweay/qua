@@ -14,6 +14,7 @@ import {
   DISPLAY_PROP,
   ensureTag,
   findByAlias,
+  findTagByName,
   journalId,
   LISTS_PROP,
   mkBlock,
@@ -27,6 +28,16 @@ import { WORKSPACE_VERSION, type PageBlock, type Workspace } from '../workspace.
 import { parseInline, type SeedBlock } from './inline.ts'
 
 /* --------------------------------------------------------------- 构建 */
+
+/**
+ * **种子的固定时刻**（一个任选的工作日下午）。
+ *
+ * 为什么不用 `Date.now()`：种子每次构建都会重跑（冷启动、演示状态切换），
+ * 取「现在」会让同一份内容每次得到不同时刻 —— 断言钉不住、截图每次变、导出不可比。
+ * 为什么**子块也要它**：块是逐层造的，每一层都得给同一个口径，
+ * 漏一层就会得到「页是 2026-10-20、它的子块是今天」，而且不报错（只是时间线看起来像假的）。
+ */
+export const SEED_AT = Date.parse('2026-10-20T14:30:00+08:00')
 
 export interface BuiltPage {
   /** 页 ＝ `_lists` 里有 `page` 的块；名字在 `_aliases`（journal 也复用这个形状） */
@@ -51,7 +62,7 @@ export function buildTree(
      *    这里拿不到它，写一个假 id 只会得到「指向不存在的东西」。
      */
     const parsed = parseInline(s.text)
-    const b = mkBlock(parsed.runs)
+    const b = mkBlock(parsed.runs, { created: SEED_AT, modified: SEED_AT })
     for (const name of s.tags ?? []) out.pendingTags.push({ block: b, name })
     // 任务状态是**真实属性**：它的键是定义块的 id，值与标签声明无关（声明只提供入口）
     if (s.task !== undefined) b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: s.task }
@@ -77,9 +88,7 @@ export function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uui
   const acc = { refs: [] as BuiltPage['refs'], pendingTags: [] as BuiltPage['pendingTags'] }
   const children = buildTree(seeds, acc)
   const name = title.trim() !== '' ? title.trim() : `未命名-${id.slice(-6)}`
-  // 种子用**固定时刻**，不取 `Date.now()`：每次 seed 得到不同值，断言与截图就钉不住
-  // （这两个时刻是任选的一个工作日下午，只是为了「看起来像真的」）。
-  const at = Date.parse('2026-10-20T14:30:00+08:00')
+  const at = SEED_AT
   const page: PageBlock = {
     id,
     content: textRuns(title),
@@ -98,8 +107,7 @@ export function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uui
 export function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
   const acc = { refs: [] as BuiltPage['refs'], pendingTags: [] as BuiltPage['pendingTags'] }
   const children = buildTree(seeds, acc)
-  // 与 `mkPage` 同一个固定时刻（理由见那里）：种子要可重放，不能带「现在是几点」
-  const at = Date.parse('2026-10-20T14:30:00+08:00')
+  const at = SEED_AT
   const block: Block = {
     id: journalId(date),
     content: [],
@@ -121,8 +129,16 @@ export function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
  */
 export function resolveSeedTags(forest: Block[], pending: readonly { block: Block; name: string }[]): void {
   for (const { block, name } of pending) {
+    const existed = findTagByName(forest, name) !== undefined
     const tag = ensureTag(forest, name).block
-    if (tag) addTagId(block, tag.id)
+    if (!tag) continue
+    // 种子内容里的 `#标签` 会顺手建出标签块（`ensureTag`）—— 它同样是种子内容，
+    // 所以也钉到同一个固定时刻，否则种子时间线上会冒出几块「现在」。
+    if (!existed) {
+      tag.created = SEED_AT
+      tag.modified = SEED_AT
+    }
+    addTagId(block, tag.id)
   }
 }
 

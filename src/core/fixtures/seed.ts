@@ -17,7 +17,7 @@ import {
   type Block,
 } from '../index.ts'
 import type { Workspace } from '../workspace.ts'
-import { forest, longParagraph, LONG_EN, mkJournal, mkPage, resolveRefs, resolveSeedTags } from './build.ts'
+import { forest, longParagraph, LONG_EN, mkJournal, mkPage, resolveRefs, resolveSeedTags, SEED_AT } from './build.ts'
 import type { SeedBlock } from './inline.ts'
 
 /* --------------------------------------------------------------- 假数据 */
@@ -228,5 +228,11 @@ function coreVocabulary(): Block[] {
   const task = mkTagBlock(TASK_TAG_LABEL)
   task.props = { ...(task.props ?? {}), _icon: 'lucide:check-square' }
   declareField(task, TASK_STATUS_PROP_ID)
+  // 它们也是**种子内容**（会进库、会导出）⇒ 与其它种子同一个固定时刻：
+  // 留 `Date.now()` 会让这两块每次 seed 都跟别的内容差一年，而它们本该是同一份快照。
+  for (const b of [taskStatus, task]) {
+    b.created = SEED_AT
+    b.modified = SEED_AT
+  }
   return [taskStatus, task]
 }

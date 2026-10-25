@@ -135,6 +135,26 @@ test('复制子树：属性值带走、身份不带走，且每一块都发新 i
   assert.equal(idMap.get(kid.id), kidCopy.id)
 })
 
+test('复制子树：副本是**新块** ⇒ 时刻取此刻，不抄原件的', () => {
+  /**
+   * 判据：副本不是「同一份内容换了个位置」，而是一块新内容 —— 它此后独立演化。
+   * 抄原件的时间戳，会让「这块何时诞生」指向原件的那一天（甚至早于它的父块）。
+   */
+  const old = 1000
+  const src = mkBlock('原块', { created: old, modified: old })
+  src.children = [mkBlock('子块', { created: old, modified: old })]
+  const before = Date.now()
+  const { block } = cloneSubtree(src)
+
+  assert(block.created >= before, `副本的出生时刻该是此刻：${block.created}（≥ ${before}）`)
+  assert.notEqual(block.created, old, '绝不能抄原件的出生时刻')
+  assert.equal(block.modified, block.created, '一次复制就是一次诞生：两个时刻同值')
+  for (const kid of block.children) {
+    assert(kid.created >= before, `子树里每一块也都要新时刻：${kid.created}`)
+  }
+  assert.equal(src.created, old, '原件的时间戳不受影响')
+})
+
 test('复制子树：原件没有的身份/属性，副本也不凭空多出来', () => {
   const plain = mkBlock('光块')
   const { block } = cloneSubtree(plain)

@@ -7,7 +7,11 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseWorkspace, WORKSPACE_VERSION } from '../src/core/workspace.ts'
+import { parseWorkspace, WORKSPACE_VERSION, type Workspace } from '../src/core/workspace.ts'
+import { mkBlock, type Block } from '../src/core/index.ts'
+import { seedWorkspace } from '../src/core/seed.ts'
+import { bootWorkspace } from '../src/core/bootstrap.ts'
+import { degradedWorkspace, emptyWorkspace, sparseWorkspace } from '../src/core/fixtures/states.ts'
 
 const valid = (patch: Record<string, unknown> = {}): string =>
   JSON.stringify({
@@ -133,4 +137,54 @@ test('parseWorkspace: 旧键 `_roles` / `_alias` 一律判 corrupt（不静默�
 test('parseWorkspace: v3 的裸 JSON（写信封之前）⇒ expired，不会被当成当前版本打开', () => {
   // 2026-10-20：v3 → v4（落盘套信封）。旧库必须走**显式作废**，不能静默当成 v4 读进来。
   assert.deepEqual(parseWorkspace(valid({ version: 3 })), { status: 'expired', version: 3 })
+})
+
+test('每一处创建路径产出的块都带真时刻（不是 undefined、也不是 0）', () => {
+  /**
+   * 「必然有」这一条的落地形态：**遍历**四处造块的来源（种子库／冷启动／三个演示态
+   * ＋ 手造块），而不是逐个断言某一块 —— 逐个断言只会钉住这一次举的例子。
+   *
+   * ⚠️ 反链伪行（`ui/dock-content.ts`）不在库森林里，是渲染时现造的查询结果，
+   *    它不属于「创建路径」；判据因此只走森林。
+   */
+  const forests: [string, Workspace][] = [
+    ['seed', seedWorkspace()],
+    ['boot', bootWorkspace()],
+    ['empty', emptyWorkspace()],
+    ['sparse', sparseWorkspace()],
+    ['degraded', degradedWorkspace()],
+  ]
+  for (const [name, ws] of forests) {
+    let n = 0
+    const walk = (list: readonly Block[]): void => {
+      for (const b of list) {
+        n++
+        assert.equal(typeof b.created, 'number', `${name}: 块 ${b.id} 缺 created`)
+        assert.equal(typeof b.modified, 'number', `${name}: 块 ${b.id} 缺 modified`)
+        assert(b.created > 0, `${name}: 块 ${b.id} 的 created 不是真时刻（${b.created}）`)
+        assert(b.modified >= b.created, `${name}: 块 ${b.id} 的 modified 早于 created`)
+        walk(b.children)
+      }
+    }
+    walk(ws.blocks)
+    assert(n > 0, `${name}: 该有块（否则这条断言什么也没验）`)
+  }
+  // 手造块的默认落点：`mkBlock` 必须当场给出时刻
+  const fresh = mkBlock('新块')
+  assert(fresh.created > 0 && fresh.modified === fresh.created, `mkBlock 该给出同一时刻的两格：${JSON.stringify(fresh)}`)
+  // 种子的时刻是**固定值**（否则每次 seed 不同、断言钉不住）
+  const a = seedWorkspace()
+  const b2 = seedWorkspace()
+  const stampOf = (ws: Workspace): number[] => {
+    const out: number[] = []
+    const walk = (list: readonly Block[]): void => {
+      for (const x of list) {
+        out.push(x.created)
+        walk(x.children)
+      }
+    }
+    walk(ws.blocks)
+    return out
+  }
+  assert.equal(stampOf(a).join(','), stampOf(b2).join(','), '种子的时刻必须可重放（不能是「现在」）')
 })
