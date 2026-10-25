@@ -7529,6 +7529,68 @@ await check(
   },
 )
 
+await check(
+  'T103 点进自己的子块也算离开上一行：父块的修改时间在那一刻更新（同一容器内不派发 focusout）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 挑一个**有子块**的行，并取它 DOM 里紧邻的那一行（那就是它的第一个子块）。
+     *
+     * ⚠️ 这条用例存在的理由：整片编辑区是**一个** contenteditable 容器，
+     *    在容器内部从父块点到子块**不会派发 `focusout`** —— 只认 `focusout` 时，
+     *    那个编辑边界永远不来了，表现为「改完点进子块，修改时间不动」，而且不报错。
+     */
+    const pick = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('.blk')]
+      for (let i = 0; i < rows.length - 1; i++) {
+        const d = Number(rows[i].dataset.depth)
+        const nd = Number(rows[i + 1].dataset.depth)
+        if (rows[i].querySelector('.tx') && nd === d + 1) {
+          return { parentId: rows[i].dataset.blockId, childId: rows[i + 1].dataset.blockId, depth: d, childDepth: nd }
+        }
+      }
+      return null
+    })
+    assert(pick, '前置：应存在一个带子块的行（及其紧邻的子块行）')
+    assert(pick.childDepth === pick.depth + 1, `前置：紧邻那行必须是它的子块：${JSON.stringify(pick)}`)
+
+    const modified = (id) => page.evaluate((i) => window.__qua.__editor.store.find(i)?.modified ?? -1, id)
+
+    await page.evaluate((i) => window.__qua.focusBlock(i, 0), pick.parentId)
+    /**
+     * **跨过一秒**再打字：只读段显示到秒，同秒内的前后值在显示上一样
+     * （这里断的是模型值，跨秒只是为了让人读日志时不会误判）。
+     */
+    await page.waitForTimeout(1100)
+    const t0 = await modified(pick.parentId)
+    await page.keyboard.type('改')
+
+    // 点**父块自己的子块**：真鼠标，落点取子块正文槽里靠左的位置
+    const at = await page.evaluate((cid) => {
+      const el = document.querySelector(`.blk[data-block-id="${cid}"] .tx`)
+      const b = el.getBoundingClientRect()
+      return { x: b.x + 12, y: b.y + b.height / 2 }
+    }, pick.childId)
+    await page.mouse.click(at.x, at.y)
+    await page.waitForTimeout(250)
+
+    const t1 = await modified(pick.parentId)
+    assert(t1 > t0, `点进自己的子块，父块的修改时间该更新：${t0} → ${t1}（脚本时间为准，可能与上一行断言的基准相同）`)
+
+    /**
+     * 反向的一半：**光标真的在子块里**。否则这条会变成「点了但没进去」也绿。
+     */
+    const inChild = await page.evaluate((cid) => window.__qua.snapshot().selection?.aBlock === cid, pick.childId)
+    assert(inChild, '点完之后光标该落在子块里（否则这条验的不是「换块」）')
+
+    await ctx.close()
+    return `父块改字 → 点它自己的子块 ⇒ 父块 modified 由 ${new Date(t0).toISOString().slice(11, 19)} 变为 ${new Date(t1).toISOString().slice(11, 19)}`
+  },
+)
+
 /** 判红的是「不在已知失败表里的失败」；已知失败逐条打印，不计入退出码 */
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length

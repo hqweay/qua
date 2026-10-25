@@ -611,6 +611,18 @@ export class BlockEditor {
     if (this.reclaimCaret()) return
     const s = this.readSel()
     if (!s) return
+    /**
+     * **光标换到另一块 ＝ 上一次编辑的结束。**
+     *
+     * 为什么不能只靠 `focusout`：整片编辑区是**一个** contenteditable 容器，
+     * 在同一个容器里从父块点到子块（或反过来）**不会派发 `focusout`**，
+     * 那个边界就永远不来了 —— 表现为「改完点进子块，修改时间不动」，且不报错。
+     * 光标换块这件事在这里能看见，它就是唯一可靠的落点。
+     *
+     * ⚠️ 判据是 `editBase` 那一块 vs 新光标块，不是 `this.sel`：`this.sel` 已经被
+     *    各种路径改写过，拿它比会漏。`commitEdit` 幂等，重复调用无害。
+     */
+    if (this.editBase && this.editBase.id !== s.aBlock) this.commitEdit(this.editBase.id)
     // 不在这里清块选区：mouseup 前后浏览器会短暂恢复文本 Range，会误杀刚建好的块选区。
     // 块选区的退出来自显式动作（在 .tx 里 mousedown / Shift+拖 / Esc / Enter / 点空白 / 菜单）。
     // 只有**真的变了**才上报：否则气泡会在每次 selectionchange 上重建（打字时每帧一次）
