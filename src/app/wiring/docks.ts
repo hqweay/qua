@@ -1,18 +1,43 @@
 /**
- * 侧槽装配：槽内容依赖、重画与钉住清单。
+ * 侧槽装配：**槽＝一列卡片**（窗口 ＋ 派生卡），以及它们的三件视图状态。
  *
- * 槽实例（mountDockSlot）与钉住区组件（DockBlocks）在装配入口的启动段才创建：
- * 这里只经 deps 现取，不持有它们。
+ * 这一层只做「按 `cards` 顺序取卡、把状态接到卡上、把用户的动作落成 prefs」：
+ *   · 卡片内容由 `DockWindows`（窗口）与 `dock-content`（今日/反链）提供；
+ *   · 卡壳、收起、单卡、拖拽由 `ui/dock` 提供；
+ *   · 这里不认识块的内容，也不碰 DOM 的具体长相。
+ *
+ * 三个状态轴**正交**（不要互相推导）：
+ *   位置 `cards` ／ 收起 `collapsedCards` ／ 单卡 `solo[side]`。
  */
-import { belongsToTree, buildAdjacency, findInForest } from '../../core/index.ts'
+import {
+  belongsToTree,
+  buildAdjacency,
+  displayNameOf,
+  findInForest,
+  isJournal,
+  journalDate,
+  journalDateLabel,
+  type Block,
+} from '../../core/index.ts'
+import { plainText } from '../../core/runs.ts'
 import { t } from '../../core/msg.ts'
 import type { Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { Workspace, Prefs } from '../../core/workspace.ts'
-import type { DockBlocks } from '../../ui/dock-blocks.ts'
-import type { DockSlotEls } from '../../ui/dock.ts'
-import { renderBackrefsInto, renderTodayInto, type DockContentDeps } from '../../ui/dock-content.ts'
+import type { DockWindows } from '../../ui/dock-windows.ts'
+import {
+  buildDockCard,
+  decorateDockCard,
+  renderDockStack,
+  type DockCard,
+  type DockCardEntry,
+  type DockCardState,
+  type DockSlotEls,
+} from '../../ui/dock.ts'
+import { backrefsCard, todayCard, type DockContentDeps } from '../../ui/dock-content.ts'
 import { BelongsTree } from '../../ui/belongs-tree.ts'
+import { bindDropTarget, isBlockId, setDragCard } from '../../view/dnd.ts'
+import { bindWindowDrop } from '../../ui/dock-windows.ts'
 
 export type DocksDeps = {
   kb: MemoryKb
@@ -29,13 +54,18 @@ export type DocksDeps = {
    * 检视卡本身（右槽里的常驻节点）。
    *
    * 装配顺序决定的：面板分片晚于这一节，卡片在那边创建并挂进堆叠；
-   * 这里只在重画时把它列为 `persistent`，免得 `renderDockStack` 把它当垃圾清掉。
+   * 这里只在重画时取它、给它补卡壳（收起/单卡/拖拽）。
    */
   inspectCard: () => HTMLElement
 }
 
+/** 卡片落点：插到哪一张之前/之后；`null` ＝ 末尾 */
+type CardDrop = { targetId: string | null; place: 'before' | 'after' | 'end' }
+
 export function setupDocks(deps: DocksDeps) {
   const { kb } = deps
+  /** 窗口管理器在槽挂载之后创建；重画早于它就跳过窗口、只画派生卡 */
+  let windows: { left: DockWindows; right: DockWindows } | null = null
 
   /**
    * 槽内容依赖：**清单形式**列出装配层交给 UI 的能力，UI 不认识 `ws`／`registry`。
@@ -46,16 +76,9 @@ export function setupDocks(deps: DocksDeps) {
     activeId: () => deps.getWs().activeId,
     // 共享索引由 store 缓存（懒重建）⇒ 反链不再每次扫全库 atoms ＋ 遍历森林
     openPage: (id) => void deps.getRegistry().invoke('core.page/open', { pageId: id }, 'menu'),
-    newPage: () => void deps.getRegistry().invoke('core.page/new', {}, 'dock'),
+    openInDock: (id) => openWindow('right', id),
   }
 
-  /**
-   * **右槽**：反链面板 ＋ 检视卡。
-   *
-   * 检视卡是**常驻节点**（`persistent`）：它里面是表单，重画整槽会换掉正在输入的控件。
-   * 于是重画顺序是「钉住区 → 检视卡 → 反链卡」，常驻的排在前面（槽是纵向堆叠，
-   * 位置稳定是认路的一部分）。
-   */
   /**
    * **归属树面板**（左槽）：页 / 标签两面，同一个摊平函数。
    *
@@ -66,6 +89,7 @@ export function setupDocks(deps: DocksDeps) {
     rows: (face) => belongsToTree(buildAdjacency(deps.getWs().blocks), face),
     activeId: () => deps.getWs().activeId,
     open: (id) => dockDeps.openPage(id),
+    openInDock: (id) => openWindow('right', id),
     untitled: t('ui.page.untitled'),
     refresh: () => renderDocks(),
     link: (childId, parentId) => {
@@ -73,65 +97,267 @@ export function setupDocks(deps: DocksDeps) {
     },
   })
 
-  function renderDocks(): void {
-    const { left: dockLeft, right: dockRight } = deps.getSlots()
-    // 先让钉住区处理「清单变了没有」：它只在增删时动 DOM，重画其余卡片不会碰它
-    dockPins?.left.render()
-    dockPins?.right.render()
-    // 归属树排在今日上面：导航在上、时间在下（同一条判据：先认位置，再看今天）
-    renderTodayInto(dockDeps, dockLeft, {
-      cards: [belongsTree.card()],
-      ...(dockPins ? { persistent: [dockPins.left.card] } : {}),
-    })
-    const persistentRight = dockPins ? [dockPins.right.card, deps.inspectCard()] : [deps.inspectCard()]
-    renderBackrefsInto(dockDeps, dockRight, { persistent: persistentRight })
+  /* ------------------------------------------------------------ 状态 */
+
+  function cardStateFor(side: 'left' | 'right', id: string): DockCardState {
+    const dock = deps.prefs().dock
+    return {
+      collapsed: dock.collapsedCards[id] === true,
+      solo: dock.solo[side] === id,
+      onToggleCollapse: () => toggleCollapse(id),
+      onToggleSolo: () => toggleSolo(side, id),
+      onDragStart: (e) => setDragCard(e.dataTransfer, id),
+    }
   }
 
-  /** 钉住区的实例（在槽挂载之后创建；`renderDocks` 早于它就跳过） */
-  let dockPins: { left: DockBlocks; right: DockBlocks } | null = null
+  function toggleCollapse(id: string): void {
+    const dock = deps.prefs().dock
+    if (dock.collapsedCards[id]) delete dock.collapsedCards[id]
+    else dock.collapsedCards[id] = true
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+  }
+
+  function toggleSolo(side: 'left' | 'right', id: string): void {
+    const dock = deps.prefs().dock
+    dock.solo[side] = dock.solo[side] === id ? null : id
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+  }
+
+  /* ------------------------------------------------------------ 窗口 */
 
   /**
-   * 钉住的清单是**视图状态**：它只记「要看哪几个块 id」，块本身仍在森林里那一份。
-   * 所以撤销/删除块都不需要动这份清单 —— 渲染时按 id 找不到就不画，块回来时它自己回来。
+   * 在右槽打开一个块：**确保打开并定位**，不是 toggle。
+   *
+   * 同一个块全局最多一个窗口：已在另一侧 ⇒ 移过来（状态按 id 跟着走）；
+   * 已在本侧 ⇒ 不改顺序，只滚到它。
+   * 打开会把这一侧的单卡退出——单卡是「只看一张」，加一张与它矛盾。
    */
-  function addPin(side: 'left' | 'right', blockId: string): void {
+  function openWindow(side: 'left' | 'right', blockId: string): void {
     if (!findInForest(deps.getWs().blocks, blockId)) return
-    const slot = deps.prefs().dock[side]
-    if (!slot.pins.includes(blockId)) slot.pins.push(blockId)
-    if (!slot.open) {
-      slot.open = true
+    const dock = deps.prefs().dock
+    const other = side === 'left' ? 'right' : 'left'
+    const oi = dock[other].cards.indexOf(blockId)
+    if (oi >= 0) {
+      dock[other].cards.splice(oi, 1)
+      if (dock.solo[other] === blockId) dock.solo[other] = null
+    }
+    if (!dock[side].cards.includes(blockId)) {
+      const at = lastWindowIndex(dock[side].cards)
+      dock[side].cards.splice(at + 1, 0, blockId)
+    }
+    if (!dock[side].open) {
+      dock[side].open = true
+      deps.applyChrome()
+    }
+    if (dock.solo[side] !== null && dock.solo[side] !== blockId) dock.solo[side] = null
+    renderDocks()
+    reveal(side, blockId)
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+  }
+
+  function closeWindow(side: 'left' | 'right', blockId: string): void {
+    const dock = deps.prefs().dock
+    const i = dock[side].cards.indexOf(blockId)
+    if (i < 0) return
+    dock[side].cards.splice(i, 1)
+    if (dock.solo[side] === blockId) dock.solo[side] = null
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+  }
+
+  /** 最后一个块窗口的下标；没有窗口 ⇒ -1（新窗口插到槽顶） */
+  function lastWindowIndex(cards: readonly string[]): number {
+    for (let i = cards.length - 1; i >= 0; i--) if (isBlockId(cards[i]!)) return i
+    return -1
+  }
+
+  /** 滚到新窗口并短暂描边：Shift+点/拖进来之后必须「看得见」 */
+  function reveal(side: 'left' | 'right', blockId: string): void {
+    const stack = deps.getSlots()[side].stack
+    const el = stack.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(blockId)}"]`)
+    if (!el) return
+    el.scrollIntoView({ block: 'nearest' })
+    el.dataset.flash = '1'
+    window.setTimeout(() => delete el.dataset.flash, 600)
+  }
+
+  /* ------------------------------------------------------------ 重画 */
+
+  function renderDocks(): void {
+    ensureCardDrops()
+    const { left, right } = deps.getSlots()
+    renderSlot('left', left)
+    renderSlot('right', right)
+  }
+
+  function renderSlot(side: 'left' | 'right', slot: DockSlotEls): void {
+    const cards = deps.prefs().dock[side].cards
+    // 窗口先按清单同步（建/拆编辑器）；缺块的 id 不进 entries，但留在 cards 里（撤销回来时复位）
+    const winCards = windows ? windows[side].sync(cards.filter((id) => isBlockId(id))) : new Map<string, HTMLElement>()
+    const entries: DockCardEntry[] = []
+    for (const id of cards) {
+      if (isBlockId(id)) {
+        const el = winCards.get(id)
+        if (el) entries.push({ id, el })
+        continue
+      }
+      const card = derivedCard(side, id)
+      if (card) entries.push(card)
+    }
+    renderDockStack(slot.stack, entries, t('ui.dock.empty'), deps.prefs().dock.solo[side])
+  }
+
+  function derivedCard(side: 'left' | 'right', id: string): DockCardEntry | null {
+    if (id === 'inspect') {
+      const el = deps.inspectCard()
+      decorateDockCard(el, { id, title: '', body: el }, cardStateFor(side, id))
+      return { id, el }
+    }
+    const spec: DockCard | null =
+      id === 'belongs'
+        ? belongsTree.card()
+        : id === 'journal'
+          ? todayCard(dockDeps)
+          : id === 'backrefs'
+            ? backrefsCard(dockDeps)
+            : null
+    if (!spec) return null
+    return { id: spec.id, el: buildDockCard(spec, cardStateFor(side, spec.id)) }
+  }
+
+  /* ------------------------------------------------------------ 卡片拖拽 */
+
+  let dropsBound = false
+  function ensureCardDrops(): void {
+    if (dropsBound) return
+    const { left, right } = deps.getSlots()
+    if (!left?.stack || !right?.stack) return
+    dropsBound = true
+    bindWindowDrop(left.root, (id) => deps.kb.get(id) !== undefined, (id) => openWindow('left', id))
+    bindWindowDrop(right.root, (id) => deps.kb.get(id) !== undefined, (id) => openWindow('right', id))
+    bindCardStack(left.stack, 'left')
+    bindCardStack(right.stack, 'right')
+  }
+
+  function bindCardStack(stack: HTMLElement, side: 'left' | 'right'): void {
+    bindDropTarget(stack, {
+      kind: 'card',
+      effect: 'move',
+      targetId: () => null,
+      accept: (id) => findSide(id) !== null,
+      hint: () => t('ui.dnd.moveCard'),
+      mark: (id, e) => {
+        clearCardDropMarks()
+        const at = cardDrop(e, stack)
+        if (at.targetId && at.targetId !== id) {
+          const el = stack.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(at.targetId)}"]`)
+          if (el) el.dataset[at.place === 'before' ? 'dropBefore' : 'dropAfter'] = '1'
+        } else if (!at.targetId) stack.dataset.dropEnd = '1'
+      },
+      unmark: clearCardDropMarks,
+      onDrop: (id, _target, e) => {
+        const from = findSide(id)
+        if (!from) return
+        moveCard(from, side, id, cardDrop(e, stack))
+      },
+    })
+  }
+
+  function clearCardDropMarks(): void {
+    for (const side of ['left', 'right'] as const) {
+      const stack = deps.getSlots()[side].stack
+      delete stack.dataset.dropEnd
+      for (const el of Array.from(stack.querySelectorAll<HTMLElement>(':scope > .dock-card'))) {
+        delete el.dataset.dropBefore
+        delete el.dataset.dropAfter
+      }
+    }
+  }
+
+  /** 指针落在哪张卡的上半/下半；落在所有卡之下 ⇒ 末尾 */
+  function cardDrop(e: DragEvent, stack: HTMLElement): CardDrop {
+    const cards = Array.from(stack.querySelectorAll<HTMLElement>(':scope > .dock-card')).filter((el) => !el.hidden)
+    for (const el of cards) {
+      const r = el.getBoundingClientRect()
+      if (e.clientY < r.top + r.height / 2) {
+        return { targetId: el.dataset.cardId ?? null, place: 'before' }
+      }
+    }
+    return { targetId: null, place: 'end' }
+  }
+
+  function findSide(id: string): 'left' | 'right' | null {
+    const dock = deps.prefs().dock
+    if (dock.left.cards.includes(id)) return 'left'
+    if (dock.right.cards.includes(id)) return 'right'
+    return null
+  }
+
+  /**
+   * 移动一张卡（槽内排序或跨槽）。
+   *
+   * 先摘再找落点：同一槽里往后拖时，目标下标会因为自己先被摘掉而左移一格。
+   */
+  function moveCard(from: 'left' | 'right', to: 'left' | 'right', id: string, at: CardDrop): void {
+    if (at.targetId === id) return
+    const dock = deps.prefs().dock
+    const src = dock[from].cards
+    const dst = dock[to].cards
+    const i = src.indexOf(id)
+    if (i < 0) return
+    if (from !== to && dst.includes(id)) return
+    src.splice(i, 1)
+
+    let index = dst.length
+    if (at.targetId) {
+      const ti = dst.indexOf(at.targetId)
+      if (ti >= 0) index = at.place === 'before' ? ti : ti + 1
+    }
+    dst.splice(index, 0, id)
+
+    if (dock.solo[from] === id) dock.solo[from] = null
+    if (dock.solo[to] !== null && dock.solo[to] !== id) dock.solo[to] = null
+    if (!dock[to].open) {
+      dock[to].open = true
       deps.applyChrome()
     }
     renderDocks()
-    // 钉住的清单是**设备状态**（`qua.device`），不是库的内容
     deps.scheduleDeviceSave()
     deps.scheduleBadge()
   }
 
-  function unpinBlock(side: 'left' | 'right', blockId: string): void {
-    const slot = deps.prefs().dock[side]
-    const i = slot.pins.indexOf(blockId)
-    if (i < 0) return
-    slot.pins.splice(i, 1)
-    renderDocks()
-    deps.scheduleDeviceSave()
-    deps.scheduleBadge()
+  /** 卡头标题：窗口显示块的**路径**（父 > 父），不重复正文 */
+  function windowLabel(id: string): string {
+    const path = kb.pathOf(id)
+    if (path.length === 0) return ''
+    return path.map(labelOf).join(' / ')
   }
 
-  /** 同一个入口进 / 出（Shift+点块标走它：已钉住则取消） */
-  function togglePin(side: 'left' | 'right', blockId: string): void {
-    if (deps.prefs().dock[side].pins.includes(blockId)) unpinBlock(side, blockId)
-    else addPin(side, blockId)
+  /** 与面包屑同一口径：日记用日期投影；其余用显示名，空则正文，再空兜底 */
+  function labelOf(b: Block): string {
+    if (isJournal(b)) return journalDateLabel(journalDate(b))
+    const name = displayNameOf(b).trim()
+    if (name !== '') return name
+    const text = plainText(b.content).trim()
+    return text !== '' ? text : t('ui.page.untitled')
   }
 
   return {
     renderDocks,
-    addPin,
-    unpinBlock,
-    togglePin,
-    /** 钉住区组件由装配入口在槽挂载之后创建，再交回给这一节 */
-    setPins: (pins: { left: DockBlocks; right: DockBlocks }) => {
-      dockPins = pins
+    openWindow,
+    closeWindow,
+    /** 卡片状态/标题给窗口管理器用（窗口卡由它自己建） */
+    cardStateFor,
+    windowLabel,
+    /** 窗口管理器由装配入口在槽挂载之后创建，再交回给这一节 */
+    setWindows: (next: { left: DockWindows; right: DockWindows }) => {
+      windows = next
     },
   }
 }

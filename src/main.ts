@@ -26,7 +26,7 @@ import {
 import { Layers, paletteRows, rowsFromBindings, type PickMods, type Row } from './ui/layers.ts'
 import { createTriggers } from './app/retrieval/triggers.ts'
 import { dispatchKey, installKeydown, type DispatchEnv } from './core/dispatch.ts'
-import { DockBlocks } from './ui/dock-blocks.ts'
+import { DockWindows } from './ui/dock-windows.ts'
 import { bindDockResize } from './ui/dock-resize.ts'
 import { mountDockSlot } from './ui/dock.ts'
 import { createIcon } from './view/icons.ts'
@@ -232,7 +232,7 @@ function uiCtx(): CtxKeys {
 
 /* ------------------------------------------------------------ 槽内容 */
 
-const { renderDocks, addPin, unpinBlock, togglePin, setPins } = setupDocks({
+const { renderDocks, openWindow, closeWindow, cardStateFor, windowLabel, setWindows } = setupDocks({
   kb,
   prefs,
   applyChrome: () => applyChrome(),
@@ -257,6 +257,7 @@ const { chrome, editorEl, applyChrome, resolvedTheme, dockMinWidth, dockMaxWidth
   getWs: () => ws,
   getMainEd: () => mainEd,
   getRegistry: () => registry,
+  openInDock: (blockId) => openWindow('right', blockId),
 })
 
 /**
@@ -501,6 +502,8 @@ const panelDeps: PanelDeps = {
   findBlock: (id) => findInForest(ws.blocks, id),
   // 引用目标可以是任意深度的块 ⇒ 走 zoom 那条命令，而不是只认顶层页的 `core.page/open`
   openBlock: (id) => void registry.invoke('core.block/focus-block', { blockId: id }, 'popover'),
+  // Shift+点「打开目标」＝在右槽打开一张窗口（中心不换）
+  openInDock: (id) => openWindow('right', id),
   removeAtom: (id) => void registry.invoke('core.editor/remove-atom', { atomId: id }, 'popover'),
   closePopover: () => layers.closePopover(),
   openPopover: (render, anchor) => layers.openPopover(render, anchor),
@@ -519,16 +522,19 @@ const showAtomPopover = (a: RunWithId, rect: DOMRect): void => panelPopover(pane
  * 行内原子的**唯一**点击口径（正文 / 反链 footer / 查询结果共用）。
  *
  * · 左键点引用（含行内标签露面）且目标在森林里 ⇒ 直接打开目标块（`focus-block`，嵌套块也能进）；
+ * · **Shift+左键** ⇒ 同一个「打开」，换到右槽（一张窗口）；中心不换、历史不记；
  * · `⌥` 点击 ⇒ 弹原来的详情浮层（诊断信息、删除引用都还在那里）；
  * · 图片 / 外链 / dangling / 目标缺失 ⇒ 只弹浮层，**不静默失败**。
  *
  * ⚠️ 判断「目标可解析」用 `findInForest`，不是看解析状态：状态是快照，
  *    目标可能在这之后被删掉。
+ * ⚠️ 只有点在**原子元素本身**时才走这里：正文普通文字的 Shift+点仍是原生扩选。
  */
-const handleAtomClick = (a: RunWithId, el: HTMLElement, mods: { altKey: boolean }): void => {
+const handleAtomClick = (a: RunWithId, el: HTMLElement, mods: { altKey: boolean; shiftKey: boolean }): void => {
   const targetId = a.t === 'ref' ? a.to : undefined
   if (!mods.altKey && targetId && findInForest(ws.blocks, targetId)) {
-    void registry.invoke('core.block/focus-block', { blockId: targetId }, 'editor')
+    if (mods.shiftKey) openWindow('right', targetId)
+    else void registry.invoke('core.block/focus-block', { blockId: targetId }, 'editor')
     return
   }
   showAtomPopover(a, el.getBoundingClientRect())
@@ -796,6 +802,7 @@ const app: App = {
     shortId: (id) => shortId(id),
   }),
   removeAtom: (runId) => ed.removeRun(runId),
+  openInDock: (id, side) => openWindow(side === 'left' ? 'left' : 'right', id),
 
   /**
    * 标签选择器：**显示层级**（`#演员 · 属于 #人物、#艺术家`）。
@@ -1110,8 +1117,8 @@ ed.events = {
   // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
   // 所以「点块标进去」与「点面包屑出来」共用一套语义，没有第二种入口。
   focusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, 'editor'),
-  // Shift+点块标 ⇒ 钉到右槽（同一个入口可逆：已钉住则取消）
-  openInDock: (blockId) => togglePin('right', blockId),
+  // Shift+点块标 ⇒ 在右槽打开一个窗口（已在别处则移过去；已在本侧则定位）
+  openInDock: (blockId) => openWindow('right', blockId),
   blockMenu: (blockId, rect) => {
     // 命中**已选中的块**（且多块）⇒ 多块菜单；否则清块选区，走原单块菜单
     if (ed.inBlockSelection(blockId) && ed.blockSelectionCount() > 1) {
@@ -1146,6 +1153,7 @@ const { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, sche
   getMainEd: () => mainEd,
   getRegistry: () => registry,
   getChrome: () => chrome,
+  openInDock: (blockId) => openWindow('right', blockId),
 })
 panels = {
   renderBacklinks,
@@ -1255,42 +1263,45 @@ const dockRight = mountDockSlot($('dock-right'), {
 })
 
 /**
- * 钉住区：每个侧槽一个实例，里面是**真实块**的编辑器（共享 store）。
+ * 窗口：每个侧槽一个管理器，按块 id 建一张卡（卡里是**真实块**的编辑器，共享 store）。
  *
  * 依赖一律是读函数（库会被整体替换，传值会拿到过期快照）。
  */
-const dockBlocksDeps = (side: 'left' | 'right', slot: typeof dockLeft): ConstructorParameters<typeof DockBlocks>[0] => ({
-  side,
-  slot,
+const dockWindowsDeps = (side: 'left' | 'right'): ConstructorParameters<typeof DockWindows>[0] => ({
   store: blocks,
   /**
-   * 槽里的编辑器按**块**各一个实例，组件不把它们吐出来；但点进槽里编辑时
-   * `onFocus` 会把 `ed` 切到那一个（`DockBlocks` 的焦点负责这件事）。
-   * 所以取「当前活动编辑器」，只有在「焦点不在任何槽内编辑器」时才会落到别处 ——
-   * 而那种情况下槽里也不会有人正在写。
+   * 窗口里的编辑器按**块**各一个实例，组件不把它们吐出来；但点进窗口里编辑时
+   * `onFocus` 会把 `ed` 切到那一个。所以取「当前活动编辑器」，
+   * 只有在焦点不在任何窗口里时才会落到别处 —— 那种情况下窗口里也不会有人正在写。
    */
   write: (fn) => run(fn, ed),
   kb,
-  pins: () => prefs().dock[side].pins,
-  pin: (blockId) => addPin(side, blockId),
-  unpin: (blockId) => unpinBlock(side, blockId),
+  label: windowLabel,
+  onClose: (blockId) => closeWindow(side, blockId),
   onFocus: (editor) => {
     ed = editor
     scheduleBadge()
   },
-  // 槽内编辑：只落盘与刷角标，**不重画槽**（重画会打断这一行的输入）
+  /** 窗口被拆掉时，别让 `ed` 指着一个已经 dispose 的编辑器 */
+  onDispose: (editor) => {
+    if (ed !== editor) return
+    ed = mainEd
+    scheduleBadge()
+  },
+  // 窗口内编辑：只落盘与刷角标，**不重画槽**（重画会打断这一行的输入）
   onChange: () => {
     syncSections()
     scheduleSave()
     scheduleBadge()
   },
   onFocusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, 'dock'),
-  onOpenInDock: (blockId) => togglePin('right', blockId),
+  onOpenInDock: (blockId) => openWindow('right', blockId),
+  cardState: (blockId) => cardStateFor(side, blockId),
 })
 
-setPins({
-  left: new DockBlocks(dockBlocksDeps('left', dockLeft)),
-  right: new DockBlocks(dockBlocksDeps('right', dockRight)),
+setWindows({
+  left: new DockWindows(dockWindowsDeps('left')),
+  right: new DockWindows(dockWindowsDeps('right')),
 })
 
 /** 手柄宽度：起拖取**当前渲染宽度**（存的是 null 时也不能让槽先跳一下） */

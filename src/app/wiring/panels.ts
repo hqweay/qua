@@ -44,7 +44,7 @@ export type PanelsDeps = {
   syncSections: () => void
   scheduleSave: () => void
   scheduleBadge: () => void
-  handleAtomClick: (run: RunWithId, el: HTMLElement, mods: { altKey: boolean }) => void
+  handleAtomClick: (run: RunWithId, el: HTMLElement, mods: { altKey: boolean; shiftKey: boolean }) => void
   /** 换库会整体替换 `ws`，不能传值 */
   getWs: () => Workspace
   /** 焦点切到反链 footer／标签页／查询视图的编辑器时，`ed` 要跟着切 */
@@ -53,6 +53,8 @@ export type PanelsDeps = {
   getMainEd: () => BlockEditor
   getRegistry: () => Registry
   getChrome: () => Chrome
+  /** Shift+点任意可打开的行/块标/原子：在右槽打开（窗口） */
+  openInDock: (blockId: string) => void
 }
 
 export function setupPanels(deps: PanelsDeps) {
@@ -94,6 +96,7 @@ export function setupPanels(deps: PanelsDeps) {
         // 不重画属性区：反链 footer 里的光标不属于「台面上那个块」，面板主体不随它变
       },
       onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'backlinks'),
+      onOpenInDock: (blockId) => deps.openInDock(blockId),
       onAtomClick: (run, _blockId, el, mods) => handleAtomClick(run, el, mods),
     },
   )
@@ -348,6 +351,7 @@ export function setupPanels(deps: PanelsDeps) {
         // 面板主体是中心槽的当前对象，与这个编辑器里的光标无关
       },
       onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'tagpanel'),
+      onOpenInDock: (blockId) => deps.openInDock(blockId),
       onAtomClick: (run, _blockId, el, mods) => handleAtomClick(run, el, mods),
     },
   )
@@ -392,6 +396,7 @@ export function setupPanels(deps: PanelsDeps) {
         // 面板主体是中心槽的当前对象，与这个编辑器里的光标无关
       },
       onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'query'),
+      onOpenInDock: (blockId) => deps.openInDock(blockId),
       onAtomClick: (run, _blockId, el, mods) => handleAtomClick(run, el, mods),
       toast: (text, kind) => app.toast(text, kind),
     },

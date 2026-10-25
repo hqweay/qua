@@ -7,12 +7,13 @@
  *
  * 三条硬约束（每一条都对应一个实际会犯的错）：
  *   1. **载荷必须能独立成立**。不能是「我认得刚才那次拖拽」——那是内部状态，跨组件就断。
- *      载荷里只有块 id（`BLOCK_MIME`）；`text/plain` 也留一份，仅为拖到外部应用时有可读内容。
+ *      块载荷里只有块 id（`BLOCK_MIME`）；卡片载荷里只有卡片实例 id（`CARD_MIME`）。
+ *      `text/plain` 也留一份，仅为拖到外部应用时有可读内容。
  *   2. **悬停期读不到载荷**。HTML5 在 `dragover`／`dragenter` 期间 `getData()` 一律返回空串
  *      （保护模式，只能看 `types`）⇒ 模块必须自己记住「现在拖的是谁」，否则悬停给不出提示。
  *      这份记忆是**所有落点共用的那一份**（同一时刻只可能有一次拖拽），不是某个组件的私产。
  *   3. **含义由落点注入**。模块不认识归属边、不认识命令、不认识树 —— 它只知道
- *      「块 X 落到了落点 Y」。加第四种落点不用改本文件。
+ *      「X 落到了落点 Y」。加第四种落点不用改本文件。
  *
  * 放 `view/` 的理由：碰 DOM ⇒ 不是 `core`；要被 `ui/` 用（侧槽），而 `ui → view` 是允许方向。
  */
@@ -20,6 +21,9 @@ import { t } from '../core/msg.ts'
 
 /** 块载荷的 MIME：只有它能被当成「拖的是一个块」 */
 export const BLOCK_MIME = 'application/x-qua-block'
+
+/** 侧槽卡片载荷的 MIME：只有它能被当成「拖的是一张卡」（移动窗口/排序） */
+export const CARD_MIME = 'application/x-qua-dock-card'
 
 /** 拖到**外部应用**时的可读内容（不是给别人当块用的） */
 const TEXT_MIME = 'text/plain'
@@ -31,12 +35,13 @@ export function isBlockId(v: unknown): v is string {
   return typeof v === 'string' && ID_SHAPE.test(v)
 }
 
-/** 此刻正在拖的那个块（`dragover` 期间唯一可得的来源） */
-let dragging: string | null = null
+/** 此刻正在拖的那个块/那张卡（`dragover` 期间唯一可得的来源） */
+let draggingBlock: string | null = null
+let draggingCard: string | null = null
 
 /** 拖源：只报「我是谁」 */
 export function setDragBlock(dt: DataTransfer | null, id: string): void {
-  dragging = id
+  draggingBlock = id
   if (!dt) return
   dt.setData(BLOCK_MIME, id)
   // 只有拿到块 id 时才写 text/plain：拖一段普通文字进来不该被当成块
@@ -45,19 +50,49 @@ export function setDragBlock(dt: DataTransfer | null, id: string): void {
   dt.effectAllowed = 'all'
 }
 
+/** 卡片拖源：移动窗口/排序。载荷只有卡片实例 id，与块载荷分开 */
+export function setDragCard(dt: DataTransfer | null, id: string): void {
+  draggingCard = id
+  if (!dt) return
+  dt.setData(CARD_MIME, id)
+  dt.setData(TEXT_MIME, id)
+  dt.effectAllowed = 'move'
+}
+
 /** 收掉这次的拖拽（`dragend`／`drop` 之后必须调，否则悬停期会读到脏值） */
 export function clearDragBlock(): void {
-  dragging = null
+  draggingBlock = null
+  hideHint()
+}
+
+export function clearDragCard(): void {
+  draggingCard = null
+  hideHint()
+}
+
+/** 全局拖拽结束：两种载荷一起清（`dragend` 可能落在任何地方，甚至不来） */
+export function clearDrag(): void {
+  draggingBlock = null
+  draggingCard = null
   hideHint()
 }
 
 export function currentDraggedId(): string | null {
-  return dragging
+  return draggingBlock
+}
+
+export function currentDraggedCardId(): string | null {
+  return draggingCard
 }
 
 /** 载荷里是不是块（只按 MIME 判，不看内容） */
 export function hasBlockPayload(dt: DataTransfer | null): boolean {
   return dt?.types?.includes(BLOCK_MIME) ?? false
+}
+
+/** 载荷里是不是卡片（只按 MIME 判，不看内容） */
+export function hasCardPayload(dt: DataTransfer | null): boolean {
+  return dt?.types?.includes(CARD_MIME) ?? false
 }
 
 /**
@@ -69,6 +104,12 @@ export function hasBlockPayload(dt: DataTransfer | null): boolean {
 export function draggedBlockId(dt: DataTransfer | null): string | null {
   const raw = dt?.getData(BLOCK_MIME) ?? ''
   return isBlockId(raw) ? raw : null
+}
+
+/** 松手期：从载荷里读卡片 id（卡片 id 是块 id 或派生卡名，只验非空） */
+export function draggedCardId(dt: DataTransfer | null): string | null {
+  const raw = dt?.getData(CARD_MIME) ?? ''
+  return raw === '' ? null : raw
 }
 
 /* ------------------------------------------------------------ 悬停提示 */
@@ -108,6 +149,11 @@ function hideHint(): void {
 
 export interface DropTargetOpts {
   /**
+   * 载荷种类：`block`（缺省）＝块 id；`card`＝侧槽卡片实例 id。
+   * 两种载荷分开判 MIME，块落点不会被卡片拖拽点亮。
+   */
+  kind?: 'block' | 'card'
+  /**
    * 这一刻拖到这儿代表谁（`null` ＝ 不指向具体块）。
    *
    * ⚠️ 是**函数而不是值**：同一个容器里的落点常常随指针动（正文三区、列表行）。
@@ -118,7 +164,7 @@ export interface DropTargetOpts {
   accept?: (draggedId: string, e: DragEvent) => boolean
   /** **落点自己说会变成什么**——悬停时就要能读出来（必填） */
   hint: (draggedId: string, e: DragEvent) => string
-  /** 三种含义各用各的光标：移入／建立关系／钉住 */
+  /** 三种含义各用各的光标：移入／建立关系／打开窗口 */
   effect?: 'move' | 'link' | 'copy'
   /** 松手：含义由落点注入（通常是一次 `registry.invoke`） */
   onDrop: (draggedId: string, targetId: string | null, e: DragEvent) => void
@@ -138,6 +184,11 @@ export interface DropTargetOpts {
  */
 export function bindDropTarget(el: HTMLElement, o: DropTargetOpts): () => void {
   const attr = o.attr ?? 'drop'
+  const kind = o.kind ?? 'block'
+  const draggedNow = kind === 'card' ? currentDraggedCardId : currentDraggedId
+  const hasPayload = kind === 'card' ? hasCardPayload : hasBlockPayload
+  const readId = kind === 'card' ? draggedCardId : draggedBlockId
+  const clear = kind === 'card' ? clearDragCard : clearDragBlock
   const mark = (id: string, e: DragEvent): void => {
     if (o.mark) o.mark(id, e)
     else el.dataset[attr] = '1'
@@ -149,13 +200,13 @@ export function bindDropTarget(el: HTMLElement, o: DropTargetOpts): () => void {
   }
 
   const dragover = (e: DragEvent): void => {
-    const id = currentDraggedId()
+    const id = draggedNow()
     /**
-     * 悬停期只能看 `types`（保护模式读不到内容）⇒ 这里只能判「有没有块载荷」。
+     * 悬停期只能看 `types`（保护模式读不到内容）⇒ 这里只能判「有没有对应载荷」。
      * 内容形状的校验必须留到 `drop`：`dragover` 里 `getData` 一律空串，
      * 想靠它提前验形状是不可能的（真试过）。
      */
-    if (!id || !hasBlockPayload(e.dataTransfer)) return
+    if (!id || !hasPayload(e.dataTransfer)) return
     if (o.accept && !o.accept(id, e)) return
     // **最内层的落点赢**：一行落在槽里时，别让整槽的落点也把提示/高亮抢过去
     e.stopPropagation()
@@ -178,14 +229,14 @@ export function bindDropTarget(el: HTMLElement, o: DropTargetOpts): () => void {
      * 不拿 `currentDraggedId()` 兜底 —— 那会让「拖一段普通文字进正文」借上一次的记忆
      * 把刚才那块搬走（这是最容易漏的一条：悬停期读不到载荷，兜底看起来像是在帮忙）。
      */
-    const id = draggedBlockId(e.dataTransfer)
+    const id = readId(e.dataTransfer)
     unmark()
     if (!id) return
     if (o.accept && !o.accept(id, e)) return
     e.stopPropagation()
     e.preventDefault()
     o.onDrop(id, o.targetId(e), e)
-    clearDragBlock()
+    clear()
   }
 
   const dragend = (): void => unmark()
@@ -208,7 +259,7 @@ export function bindDropTarget(el: HTMLElement, o: DropTargetOpts): () => void {
  * 不清理的话，下一次悬停会读到上一次的块 id —— 那正是「拖了个不存在的块」。
  */
 if (typeof document !== 'undefined') {
-  document.addEventListener('dragend', () => clearDragBlock())
+  document.addEventListener('dragend', () => clearDrag())
   // 外部应用拖进来的东西松手后也会冒泡到这里：顺手把提示收掉
   document.addEventListener('drop', () => hideHint(), true)
 }

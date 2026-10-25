@@ -150,6 +150,32 @@ const shiftClickMarker = (page, blockId) =>
     return true
   }, blockId)
 
+/** 真的走一遍 HTML5 DnD：卡头 dragstart（`CARD_MIME`）→ 目标槽 stack dragover/drop */
+const dragCard = (page, { from, to, id, before }) =>
+  page.evaluate(
+    ({ from, to, id, before }) => {
+      const head = document.querySelector(`#dock-${from} .dock-card[data-card-id="${id}"] .dock-card-head`)
+      const stack = document.querySelector(`#dock-${to} .dock-stack`)
+      if (!head || !stack) return null
+      const target = before ? document.querySelector(`#dock-${to} .dock-card[data-card-id="${before}"]`) : null
+      const box = (target ?? stack).getBoundingClientRect()
+      // 落在目标卡的上半 ⇒ before；落在所有卡之下 ⇒ 末尾
+      const y = target ? box.top + 2 : box.bottom - 2
+      const dt = new DataTransfer()
+      const ev = (type) =>
+        new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: box.left + 8, clientY: y })
+      head.dispatchEvent(ev('dragstart'))
+      stack.dispatchEvent(ev('dragover'))
+      const hot = Boolean(
+        document.querySelector(`#dock-${to} .dock-card[data-drop-before="1"], #dock-${to} .dock-card[data-drop-after="1"]`),
+      )
+      stack.dispatchEvent(ev('drop'))
+      head.dispatchEvent(ev('dragend'))
+      return { hot, cards: window.__qua.snapshot().dock }
+    },
+    { from, to, id, before },
+  )
+
 /** 真的走一遍 HTML5 DnD：块标 dragstart（`application/x-qua-block` = 块 id）→ 槽 dragover → drop */
 const dragBlockToDock = (page, blockId, side) =>
   page.evaluate(
@@ -169,23 +195,31 @@ const dragBlockToDock = (page, blockId, side) =>
     { id: blockId, side },
   )
 
-/** 槽当前状态：prefs 里的清单 + 真正渲染出来的行（按 nav 顺序） */
+/** 槽当前状态：prefs 里的卡片清单 + 真正渲染出来的窗口（按 DOM 顺序） */
 const dockState = (page) =>
   page.evaluate(() => {
-    const rows = (side) =>
-      [...document.querySelectorAll(`#dock-${side} .pin-row`)].map((r) => r.dataset.blockId)
-    return { pref: window.__qua.snapshot().dock, rows: { left: rows('left'), right: rows('right') } }
+    const wins = (side) =>
+      [...document.querySelectorAll(`#dock-${side} .dock-card[data-window="1"]`)].map((r) => r.dataset.cardId)
+    return { pref: window.__qua.snapshot().dock, rows: { left: wins('left'), right: wins('right') } }
   })
 
-/** 钉住行里**那一块自己的**正文（行内还有它的子树，不能取行内第一个/全部 `.tx`） */
+/** 窗口里**那一块自己的**正文（窗口里还有它的子树，不能取窗口内第一个/全部 `.tx`） */
 const pinRootText = (page, side, blockId) =>
   page.evaluate(
     ({ side, id }) =>
       document.querySelector(
-        `#dock-${side} .pin-row[data-block-id="${id}"] .pin-editor .blk[data-depth="0"] > .tx`,
+        `#dock-${side} .dock-card[data-window="1"][data-card-id="${id}"] .dock-window-editor .blk[data-depth="0"] > .tx`,
       )?.textContent ?? '',
     { side, id: blockId },
   )
+
+/** 一个块窗口的卡片选择器（断言与点击共用同一条口径） */
+const windowSel = (side, blockId) => `#dock-${side} .dock-card[data-window="1"][data-card-id="${blockId}"]`
+
+/** 一个块窗口的**根块标**（窗口里还有子树，不能取第一个 marker） */
+const rootMarker = (side, blockId) =>
+  `#dock-${side} .dock-card[data-window="1"][data-card-id="${blockId}"] .blk[data-depth="0"] > .left > .marker`
+
 
 /* ---------------------------------------------------------------- 敲字 */
 
@@ -3542,7 +3576,7 @@ await check('T20 过新 / 损坏的库不被覆盖：进入只读演示态并持
 
 /* ------------------------------------------------------------ 侧槽 */
 
-await check('T45 Shift+点块标 ⇒ 右槽自动打开并钉住该块；再点一次取消；待办方框同样走这条而不勾选', async () => {
+await check('T45 Shift+点块标 ⇒ 右槽打开并定位；不换中心/不入历史；再点不关闭，× 才关闭；待办方框的 Shift 仍是勾选', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -3552,6 +3586,10 @@ await check('T45 Shift+点块标 ⇒ 右槽自动打开并钉住该块；再点�
   const closed = (await dockState(page)).pref.right
   assert(closed.open === false, `右槽应先关着：${JSON.stringify(closed)}`)
 
+  const before = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
+  }))
   const picked = await page.evaluate(() => {
     const b = window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)
     return b?.id ?? ''
@@ -3559,38 +3597,55 @@ await check('T45 Shift+点块标 ⇒ 右槽自动打开并钉住该块；再点�
   assert(picked, '假数据里应有一个普通内容块')
   assert(await shiftClickMarker(page, picked), '应点得到该块的块标')
   await page.waitForTimeout(120)
-  const pinned = await dockState(page)
-  assert(pinned.pref.right.open === true, `Shift+点击应把右槽打开：${JSON.stringify(pinned.pref.right)}`)
-  assert(pinned.pref.right.pins.includes(picked), `应钉住被点的块：${JSON.stringify(pinned.pref.right.pins)}`)
-  assert(pinned.rows.right.includes(picked), `右槽应渲染出该块：${JSON.stringify(pinned.rows.right)}`)
+  const opened = await dockState(page)
+  assert(opened.pref.right.open === true, `Shift+点击应把右槽打开：${JSON.stringify(opened.pref.right)}`)
+  assert(opened.pref.right.cards.includes(picked), `应在右槽清单里：${JSON.stringify(opened.pref.right.cards)}`)
+  assert(opened.rows.right.includes(picked), `右槽应渲染出该窗口：${JSON.stringify(opened.rows.right)}`)
+  const after = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
+  }))
+  assert(after.active === before.active, `Shift+点不换中心：${before.active} → ${after.active}`)
+  assert(JSON.stringify(after.nav) === JSON.stringify(before.nav), `Shift+点不入历史：${JSON.stringify(after.nav)}`)
 
+  // 再点一次：**不关闭**，只是确保打开/定位（没有第二张窗口）
   assert(await shiftClickMarker(page, picked), '第二次 Shift+点击')
   await page.waitForTimeout(120)
-  const unpinned = await dockState(page)
-  assert(!unpinned.pref.right.pins.includes(picked), `再按一次应取消钉住：${JSON.stringify(unpinned.pref.right.pins)}`)
-  assert(!unpinned.rows.right.includes(picked), `取消后右槽不该再渲染它：${JSON.stringify(unpinned.rows.right)}`)
+  const again = await dockState(page)
+  assert(again.pref.right.cards.filter((id) => id === picked).length === 1, `第二次不该出现第二张：${JSON.stringify(again.pref.right.cards)}`)
+  assert(again.rows.right.filter((id) => id === picked).length === 1, `第二次 DOM 里仍只有一张：${JSON.stringify(again.rows.right)}`)
 
-  // 待办行的方框＝块标：Shift+点击是「在右槽打开」，不是勾选
-  await page.evaluate(() => window.__qua.invoke('core.dock/toggle-right'))
-  await page.waitForTimeout(80)
+  // 关闭走卡片 ×
+  await page.locator(`${windowSel('right', picked)} [data-dock-action="close"]`).click()
+  await page.waitForTimeout(120)
+  const closedByX = await dockState(page)
+  assert(!closedByX.pref.right.cards.includes(picked), `× 应把窗口从清单移出：${JSON.stringify(closedByX.pref.right.cards)}`)
+  assert(!closedByX.rows.right.includes(picked), `× 后 DOM 里不该再有它：${JSON.stringify(closedByX.rows.right)}`)
+
+  // 待办行的方框：动作是「切换完成」，Shift 不改变它，也不打开窗口
   const todo = await page.evaluate(() => {
     const b = window.__qua.blocks().find((x) => x.todo)
     return b ? { id: b.id, todo: b.todo } : null
   })
   assert(todo, '假数据里应有待办块')
-  await shiftClickMarker(page, todo.id)
+  // 方框不是块标：它的动作是切换完成。Shift 不改变它，也不打开窗口。
+  await page.evaluate((id) => {
+    const box = document.querySelector(`.blk[data-block-id="${id}"] [data-todo-for]`)
+    if (!box) return false
+    for (const type of ['mousedown', 'click']) {
+      box.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, shiftKey: true }))
+    }
+    return true
+  }, todo.id)
   await page.waitForTimeout(120)
   const afterTodo = await page.evaluate((id) => ({
     todo: window.__qua.blocks().find((b) => b.id === id)?.todo ?? null,
     dock: window.__qua.snapshot().dock,
-    rows: [...document.querySelectorAll('#dock-right .pin-row')].map((r) => r.dataset.blockId),
   }), todo.id)
-  assert(afterTodo.dock.right.open === true, `待办方框的 Shift+点击也应打开右槽：${JSON.stringify(afterTodo.dock.right)}`)
-  assert(afterTodo.dock.right.pins.includes(todo.id), `待办块应被钉住：${JSON.stringify(afterTodo.dock.right.pins)}`)
-  assert(afterTodo.todo === todo.todo, `Shift+点击方框不该切换待办：${todo.todo} → ${afterTodo.todo}`)
-  assert(afterTodo.rows.includes(todo.id), `待办块也应渲染在右槽：${JSON.stringify(afterTodo.rows)}`)
+  assert(afterTodo.todo !== todo.todo, `Shift+点方框仍应切换待办：${todo.todo} → ${afterTodo.todo}`)
+  assert(!afterTodo.dock.right.cards.includes(todo.id), `方框不该打开窗口：${JSON.stringify(afterTodo.dock.right.cards)}`)
   await ctx.close()
-  return `关闭态被叫回；普通块与待办块都按 id 进出（待办状态保持 ${todo.todo}）`
+  return `关闭态被叫回；不换中心/不入历史；再点不关闭、× 关闭；待办方框仍只勾选`
 })
 
 await check('T46 从正文块标拖进左槽 ⇒ 钉住并渲染；在槽里编辑，正文同一个块同步（共享 store）', async () => {
@@ -3607,11 +3662,11 @@ await check('T46 从正文块标拖进左槽 ⇒ 钉住并渲染；在槽里编�
   assert(drag.hot, '拖拽经过槽时应给出高亮（data-drop-pin）')
   await page.waitForTimeout(140)
   const afterDrag = await dockState(page)
-  assert(afterDrag.pref.left.pins.includes(id), `左槽应钉住拖入的块：${JSON.stringify(afterDrag.pref.left.pins)}`)
+  assert(afterDrag.pref.left.cards.includes(id), `左槽应钉住拖入的块：${JSON.stringify(afterDrag.pref.left.cards)}`)
   assert(afterDrag.rows.left.includes(id), `左槽应渲染该块：${JSON.stringify(afterDrag.rows.left)}`)
 
   // 在槽里（它的第一个实例）打字 ⇒ 正文同一个块（同一 store 对象）应同步
-  const sel = `#dock-left .pin-row[data-block-id="${id}"] .pin-editor .blk[data-depth="0"] > .tx`
+  const sel = `#dock-left .dock-card[data-window="1"][data-card-id="${id}"] .dock-window-editor .blk[data-depth="0"] > .tx`
   await page.locator(sel).click()
   await page.keyboard.press('End')
   await page.keyboard.type('槽内附加')
@@ -3646,7 +3701,7 @@ await check('T47 槽内连续输入不被整槽重画打断；⌘Z 在槽里回�
   assert(drag?.hot, '拖进左槽应给出高亮')
   await page.waitForTimeout(140)
 
-  const sel = `#dock-left .pin-row[data-block-id="${id}"] .pin-editor .blk[data-depth="0"] > .tx`
+  const sel = `#dock-left .dock-card[data-window="1"][data-card-id="${id}"] .dock-window-editor .blk[data-depth="0"] > .tx`
   await page.locator(sel).click()
   await page.keyboard.press('End')
   // 逐键输入：若每键都整槽重画，光标会被重置，最终文本不会是一段连续的串
@@ -3655,7 +3710,7 @@ await check('T47 槽内连续输入不被整槽重画打断；⌘Z 在槽里回�
   const typed = await pinRootText(page, 'left', id)
   assert(typed.includes('ABC连续'), `连续输入应完整落在同一处（整槽重画会打断光标）：${JSON.stringify(typed)}`)
   const focusOk = await page.evaluate((id) => {
-    const row = document.querySelector(`#dock-left .pin-row[data-block-id="${id}"]`)
+    const row = document.querySelector(`#dock-left .dock-card[data-window="1"][data-card-id="${id}"]`)
     return Boolean(row && row.contains(document.activeElement))
   }, id)
   assert(focusOk, '输入过程中焦点应仍在槽内那一行')
@@ -3672,7 +3727,7 @@ await check('T47 槽内连续输入不被整槽重画打断；⌘Z 在槽里回�
   return `逐键输入保持连续；⌘Z 后正文与槽同时回滚`
 })
 
-await check('T48 祖先也被钉住 ⇒ 只渲染祖先（不重复）；钉住清单随 prefs 落盘，重开后仍在', async () => {
+await check('T48 祖先和后代都打开 ⇒ 两张窗口都显示（窗口是显式的）；清单随 prefs 落盘，重开后仍在', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -3690,13 +3745,31 @@ await check('T48 祖先也被钉住 ⇒ 只渲染祖先（不重复）；钉住�
   await shiftClickMarker(page, nested.parent)
   await page.waitForTimeout(140)
   const nestedState = await dockState(page)
-  assert(nestedState.pref.right.pins.length === 2, `两块都应记在清单里：${JSON.stringify(nestedState.pref.right.pins)}`)
   assert(
-    nestedState.rows.right.length === 1 && nestedState.rows.right[0] === nested.parent,
-    `祖先也在清单里时只渲染祖先：${JSON.stringify(nestedState.rows.right)}（父 ${nested.parent}）`,
+    nestedState.pref.right.cards.includes(nested.child) && nestedState.pref.right.cards.includes(nested.parent),
+    `两块都应记在清单里：${JSON.stringify(nestedState.pref.right.cards)}`,
+  )
+  assert(
+    nestedState.rows.right.includes(nested.parent) && nestedState.rows.right.includes(nested.child),
+    `窗口是显式的：祖先和后代都该各有一张：${JSON.stringify(nestedState.rows.right)}`,
   )
 
-  const leftId = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
+  const leftId = await page.evaluate((n) => {
+    const right = window.__qua.snapshot().dock.right.cards
+    const b = window.__qua
+      .blocks()
+      .find(
+        (x) =>
+          x.id !== n.parent &&
+          x.id !== n.child &&
+          !right.includes(x.id) &&
+          !(x.roles?.length) &&
+          !x.todo &&
+          x.text.length > 2,
+      )
+    return b?.id ?? ''
+  }, nested)
+  assert(leftId, '应能找到一个不在右槽里的块，用来验左槽窗口')
   await dragBlockToDock(page, leftId, 'left')
   await page.waitForTimeout(400)
   const saved = await dockState(page)
@@ -3704,25 +3777,25 @@ await check('T48 祖先也被钉住 ⇒ 只渲染祖先（不重复）；钉住�
   await reopened.page.waitForTimeout(220)
   const restored = await reopened.page.evaluate(() => ({
     dock: window.__qua.snapshot().dock,
-    left: [...document.querySelectorAll('#dock-left .pin-row')].map((r) => r.dataset.blockId),
-    right: [...document.querySelectorAll('#dock-right .pin-row')].map((r) => r.dataset.blockId),
+    left: [...document.querySelectorAll('#dock-left .dock-card[data-window="1"]')].map((r) => r.dataset.cardId),
+    right: [...document.querySelectorAll('#dock-right .dock-card[data-window="1"]')].map((r) => r.dataset.cardId),
   }))
   await reopened.ctx.close()
   assert(
-    JSON.stringify(restored.dock.left.pins) === JSON.stringify(saved.pref.left.pins) &&
-      JSON.stringify(restored.dock.right.pins) === JSON.stringify(saved.pref.right.pins),
+    JSON.stringify(restored.dock.left.cards) === JSON.stringify(saved.pref.left.cards) &&
+      JSON.stringify(restored.dock.right.cards) === JSON.stringify(saved.pref.right.cards),
     `重开后清单应原样回来：\n  before ${JSON.stringify(saved.pref)}\n  after  ${JSON.stringify(restored.dock)}`,
   )
-  assert(restored.left.includes(leftId), `重开后左槽应仍渲染钉住的块：${JSON.stringify(restored.left)}`)
+  assert(restored.left.includes(leftId), `重开后左槽应仍渲染窗口：${JSON.stringify(restored.left)}`)
   assert(
-    restored.right.length === 1 && restored.right[0] === nested.parent,
-    `重开后右槽仍只渲染祖先：${JSON.stringify(restored.right)}`,
+    restored.right.includes(nested.parent) && restored.right.includes(nested.child),
+    `重开后两张窗口都还在：${JSON.stringify(restored.right)}`,
   )
   await ctx.close()
-  return `清单 ${saved.pref.left.pins.length}+${saved.pref.right.pins.length} 项落盘；右槽只画祖先 ${nested.parent.slice(-6)}`
+  return `清单 ${saved.pref.left.cards.length}+${saved.pref.right.cards.length} 项落盘；右槽两张窗口（父 ${nested.parent.slice(-6)} / 子 ${nested.child.slice(-6)}）`
 })
 
-await check('T49 钉住行有移除入口：移出槽但不删块；左槽移除后清单与 DOM 同时清干净', async () => {
+await check('T49 窗口有 ×：关闭窗口但不删块；左槽清单与 DOM 同时清干净', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -3734,15 +3807,15 @@ await check('T49 钉住行有移除入口：移出槽但不删块；左槽移除
   await dragBlockToDock(page, picked.id, 'left')
   await page.waitForTimeout(140)
   const before = await page.evaluate(() => window.__qua.snapshot().topBlocks)
-  await page.locator(`#dock-left .pin-row[data-block-id="${picked.id}"] .pin-remove`).click()
+  await page.locator(`#dock-left .dock-card[data-window="1"][data-card-id="${picked.id}"] [data-dock-action="close"]`).click()
   await page.waitForTimeout(140)
   const after = await page.evaluate((id) => ({
     dock: window.__qua.snapshot().dock,
-    rows: [...document.querySelectorAll('#dock-left .pin-row')].map((r) => r.dataset.blockId),
+    rows: [...document.querySelectorAll('#dock-left .dock-card[data-window="1"]')].map((r) => r.dataset.cardId),
     block: window.__qua.blocks().find((b) => b.id === id) ?? null,
     topBlocks: window.__qua.snapshot().topBlocks,
   }), picked.id)
-  assert(!after.dock.left.pins.includes(picked.id), `移除后清单里不该还有它：${JSON.stringify(after.dock.left.pins)}`)
+  assert(!after.dock.left.cards.includes(picked.id), `移除后清单里不该还有它：${JSON.stringify(after.dock.left.cards)}`)
   assert(!after.rows.includes(picked.id), `移除后 DOM 里不该还有这一行：${JSON.stringify(after.rows)}`)
   assert(after.block && after.block.text === picked.text, `移除只影响视图，不该删块：${JSON.stringify(after.block)}`)
   assert(after.topBlocks === before, `块数应不变：${before} → ${after.topBlocks}`)
@@ -7129,12 +7202,12 @@ await check(
     /**
      * 为什么钉这条：槽里的行**与正文用同一个渲染器**（`renderBlock`），
      * 所以段物质化加进来的 `.sec` 包裹层在两边都出现。验收里如果按
-     * `.pin-editor > .blk` 这种直接子元素写，就会在包裹层出现那天**静默失效**：
+     * `.dock-window-editor > .blk` 这种直接子元素写，就会在包裹层出现那天**静默失效**：
      * 行其实渲染得好好的，只是选择器等不到它 —— 报错看起来像「槽里没渲染」。
      */
     const shape = await page.evaluate((i) => {
-      const row = document.querySelector(`#dock-left .pin-row[data-block-id="${i}"]`)
-      const host = row?.querySelector('.pin-editor')
+      const row = document.querySelector(`#dock-left .dock-card[data-window="1"][data-card-id="${i}"]`)
+      const host = row?.querySelector('.dock-window-editor')
       return {
         row: Boolean(row),
         host: Boolean(host),
@@ -7677,7 +7750,7 @@ await check('T105 拖拽一条缝：从侧槽拖一个块到正文 ⇒ 写树（
   // 从槽里的块标拖到正文行上沿 ⇒ 真的移动（旧实现读 editor.dragId，这里必为空 ⇒ 空操作）
   const moved = await page.evaluate(
     ({ src, tgt }) => {
-      const handle = document.querySelector(`#dock-left .pin-row[data-block-id="${src}"] .marker`)
+      const handle = document.querySelector(`#dock-left .dock-card[data-window="1"][data-card-id="${src}"] .marker`)
       const tgtEl = document.querySelector(`.blk[data-block-id="${tgt}"]`)
       if (!handle || !tgtEl) return null
       const rect = tgtEl.getBoundingClientRect()
@@ -7748,7 +7821,7 @@ await check('T106 拖拽一条缝：普通文字与坏载荷都不被当成块�
   return `普通文字：不亮落点、零写入；坏载荷：悬停只能按 types 判，落手不认、零写入`
 })
 
-await check('T107 三个落点的 hint 各说各的（正文「移到」／归属树「归到」／侧槽「钉住」）', async () => {
+await check('T107 三个落点的 hint 各说各的（正文「移到」／归属树「归到」／侧槽「在这里打开」）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const r = await page.evaluate(() => {
@@ -7783,7 +7856,7 @@ await check('T107 三个落点的 hint 各说各的（正文「移到」／归�
   assert(r, '正文行、归属树行与左槽都应存在')
   assert(r.inBody.includes('移到'), `正文落点该说「移到…」：${JSON.stringify(r)}`)
   assert(r.inRow.includes('归到'), `归属树落点该说「归到…」：${JSON.stringify(r)}`)
-  assert(r.inDock.includes('钉'), `侧槽落点该说「钉…」：${JSON.stringify(r)}`)
+  assert(r.inDock.includes('打开'), `侧槽落点该说「在这里打开」：${JSON.stringify(r)}`)
   assert(new Set([r.inBody, r.inRow, r.inDock]).size === 3, `三个落点的提示必须各说各的：${JSON.stringify(r)}`)
 
   await ctx.close()
@@ -8453,6 +8526,316 @@ await check(
     return `父块改字 → 点它自己的子块 ⇒ 父块 modified 由 ${new Date(t0).toISOString().slice(11, 19)} 变为 ${new Date(t1).toISOString().slice(11, 19)}`
   },
 )
+
+await check('T116 Shift+点归属行／行内原子 ⇒ 右槽打开窗口；中心与历史不动', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const rowId = await page.evaluate(() => document.querySelector('#dock-left .belongs-row')?.dataset.belongsId ?? '')
+  assert(rowId, '左槽应有一个归属行')
+  const before = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
+  }))
+  await page.locator('#dock-left .belongs-row .page-item').first().click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(120)
+  const afterRow = await dockState(page)
+  assert(afterRow.pref.right.cards.includes(rowId), `归属行应打开窗口：${JSON.stringify(afterRow.pref.right.cards)}`)
+  assert(afterRow.rows.right.includes(rowId), `窗口应渲染：${JSON.stringify(afterRow.rows.right)}`)
+
+  const atomCount = await page.evaluate(() => document.querySelectorAll('#editor .atom').length)
+  assert(atomCount > 0, '当前页应有行内原子')
+  const beforeAtom = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
+    cards: window.__qua.snapshot().dock.right.cards,
+  }))
+  await page.locator('#editor .atom').first().click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(120)
+  const afterAtom = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
+    cards: window.__qua.snapshot().dock.right.cards,
+  }))
+  assert(afterAtom.cards.length > beforeAtom.cards.length, `原子 Shift+点应多一张窗口：${JSON.stringify(afterAtom.cards)}`)
+  assert(afterAtom.active === beforeAtom.active, `原子 Shift+点不换中心：${beforeAtom.active} → ${afterAtom.active}`)
+  assert(JSON.stringify(afterAtom.nav) === JSON.stringify(beforeAtom.nav), `原子 Shift+点不入历史：${JSON.stringify(afterAtom.nav)}`)
+  const after = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
+  }))
+  assert(after.active === before.active, `归属行 Shift+点也不该换中心：${before.active} → ${after.active}`)
+  assert(JSON.stringify(after.nav) === JSON.stringify(before.nav), `归属行 Shift+点也不该入历史：${JSON.stringify(after.nav)}`)
+  await ctx.close()
+  return `归属行 ${rowId.slice(-6)} 与行内原子都在右槽开了窗口；中心/历史零变化`
+})
+
+await check('T117 Shift+点反链 footer 的块标／面包屑 ⇒ 右槽窗口；中心与历史不动', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const src = await page.evaluate(() => document.querySelector('#backlinks .blk[data-block-id]')?.dataset.blockId ?? '')
+  assert(src, '当前页应有反链（footer 里有源块）')
+  const before = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
+  }))
+  await page.locator('#backlinks .blk .marker').first().click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(120)
+  const afterBacklink = await dockState(page)
+  assert(afterBacklink.pref.right.cards.includes(src), `反链源块应开窗口：${JSON.stringify(afterBacklink.pref.right.cards)}`)
+  const after = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
+  }))
+  assert(after.active === before.active, `反链块标 Shift+点不换中心：${before.active} → ${after.active}`)
+  assert(JSON.stringify(after.nav) === JSON.stringify(before.nav), `反链块标 Shift+点不入历史：${JSON.stringify(after.nav)}`)
+
+  // 面包屑：先 zoom 进一个子块（普通点块标），再 Shift+点祖先那格
+  const child = await page.evaluate(() => document.querySelector('#editor .blk[data-depth="1"]')?.dataset.blockId ?? '')
+  assert(child, '当前页应有子块，用来让面包屑出现')
+  await page.locator(`.blk[data-block-id="${child}"] > .left > .marker`).click()
+  await page.waitForTimeout(160)
+  const crumbId = await page.evaluate(() => document.querySelector('#crumbs-trail .crumb')?.dataset.blockId ?? '')
+  assert(crumbId, 'zoom 之后面包屑应有一格祖先')
+  const beforeCrumb = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
+  }))
+  await page.locator('#crumbs-trail .crumb').first().click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(120)
+  const afterCrumb = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
+    cards: window.__qua.snapshot().dock.right.cards,
+  }))
+  assert(afterCrumb.cards.includes(crumbId), `面包屑 Shift+点应开祖先的窗口：${JSON.stringify(afterCrumb.cards)}`)
+  assert(afterCrumb.active === beforeCrumb.active, `面包屑 Shift+点不换中心：${beforeCrumb.active} → ${afterCrumb.active}`)
+  assert(JSON.stringify(afterCrumb.nav) === JSON.stringify(beforeCrumb.nav), `面包屑 Shift+点不入历史：${JSON.stringify(afterCrumb.nav)}`)
+  await ctx.close()
+  return `反链源块 ${src.slice(-6)} 与面包屑祖先 ${crumbId.slice(-6)} 都只开窗口；中心/历史零变化`
+})
+
+await check('T118 卡片收起：只隐藏 body、不销毁窗口编辑器；刷新后仍收起', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
+  assert(id, '应有一个可开的块')
+  await shiftClickMarker(page, id)
+  await page.waitForTimeout(120)
+
+  await page.locator('#dock-left .dock-card[data-card-id="belongs"] [data-dock-action="collapse"]').click()
+  await page.waitForTimeout(80)
+  const folded = await page.evaluate((id) => ({
+    collapsed: document.querySelector('#dock-left .dock-card[data-card-id="belongs"]')?.dataset.collapsed ?? '',
+    body: getComputedStyle(document.querySelector('#dock-left .dock-card[data-card-id="belongs"] .dock-card-body')).display,
+    pref: window.__qua.snapshot().dock.collapsed,
+    windowAlive: Boolean(document.querySelector(`#dock-right .dock-card[data-window="1"][data-card-id="${id}"] .dock-window-editor .blk`)),
+  }), id)
+  assert(folded.collapsed === '1' && folded.body === 'none', `收起应只隐藏 body：${JSON.stringify(folded)}`)
+  assert(folded.pref.includes('belongs'), `收起应落 prefs：${JSON.stringify(folded.pref)}`)
+  assert(folded.windowAlive, '收起别的卡不该销毁窗口里的编辑器')
+
+  const reopened = await reopenPage(browser, ctx, base, page)
+  await reopened.page.waitForTimeout(220)
+  const again = await reopened.page.evaluate(() => ({
+    collapsed: document.querySelector('#dock-left .dock-card[data-card-id="belongs"]')?.dataset.collapsed ?? '',
+    body: getComputedStyle(document.querySelector('#dock-left .dock-card[data-card-id="belongs"] .dock-card-body')).display,
+  }))
+  await reopened.ctx.close()
+  assert(again.collapsed === '1' && again.body === 'none', `刷新后应仍收起：${JSON.stringify(again)}`)
+  return `归属卡收起后 body=none、窗口编辑器仍在；刷新后仍收起`
+})
+
+await check('T119 单卡：只留这一张；目标不可见时自动失效；打开新窗口退出单卡', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  await page.locator('#dock-left .dock-card[data-card-id="belongs"] [data-dock-action="solo"]').click()
+  await page.waitForTimeout(80)
+  const leftSolo = await page.evaluate(() => ({
+    stack: document.querySelector('#dock-left .dock-stack')?.dataset.solo ?? '',
+    card: document.querySelector('#dock-left .dock-card[data-solo-card="1"]')?.dataset.cardId ?? '',
+    journal: getComputedStyle(document.querySelector('#dock-left .dock-card[data-card-id="journal"]')).display,
+    pref: window.__qua.snapshot().dock.solo.left,
+  }))
+  assert(leftSolo.stack === '1' && leftSolo.card === 'belongs', `单卡应只标归属：${JSON.stringify(leftSolo)}`)
+  assert(leftSolo.journal === 'none', `单卡应隐藏其它卡：${JSON.stringify(leftSolo)}`)
+  assert(leftSolo.pref === 'belongs', `单卡应落 prefs：${JSON.stringify(leftSolo)}`)
+
+  // 检视卡有一张；先单卡它，再切到「今日」让主体消失 ⇒ 单卡自动失效、其它卡照常显示
+  const inspectVisible = await page.evaluate(() => !document.getElementById('inspect-card').hidden)
+  assert(inspectVisible, '打开一页后检视卡应有主体')
+  await page.locator('#inspect-card [data-dock-action="solo"]').click()
+  await page.waitForTimeout(80)
+  const journalId = await page.evaluate(() => window.__qua.allBlocks().find((b) => b.roles?.includes('journal'))?.id ?? '')
+  assert(journalId, '应有今日 journal 块')
+  await page.evaluate((jid) => window.__qua.invoke('core.page/open', { pageId: jid }), journalId)
+  await page.waitForTimeout(160)
+  const fallback = await page.evaluate(() => ({
+    solo: window.__qua.snapshot().dock.solo.right,
+    hidden: document.getElementById('inspect-card')?.hidden === true,
+    stack: document.querySelector('#dock-right .dock-stack')?.dataset.solo ?? '',
+    backrefs: getComputedStyle(document.querySelector('#dock-right .dock-card[data-card-id="backrefs"]')).display,
+  }))
+  assert(fallback.solo === 'inspect', `单卡状态应保留：${JSON.stringify(fallback)}`)
+  assert(fallback.hidden, `检视卡此时应不可见：${JSON.stringify(fallback)}`)
+  assert(fallback.stack === '', `目标不可见时不该留空槽：${JSON.stringify(fallback)}`)
+  assert(fallback.backrefs !== 'none', `其它卡应照常显示：${JSON.stringify(fallback)}`)
+
+  // 打开一张窗口 ⇒ 退出右槽单卡（单卡是「只看一张」，加一张与它矛盾）
+  const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
+  assert(id, '当前屏应有一个可开的块')
+  await shiftClickMarker(page, id)
+  await page.waitForTimeout(120)
+  const afterOpen = await page.evaluate((id) => ({
+    solo: window.__qua.snapshot().dock.solo.right,
+    cards: window.__qua.snapshot().dock.right.cards,
+    windows: [...document.querySelectorAll('#dock-right .dock-card[data-window="1"]')].map((e) => e.dataset.cardId),
+  }), id)
+  assert(afterOpen.solo === null, `打开新窗口应退出单卡：${JSON.stringify(afterOpen)}`)
+  assert(afterOpen.windows.includes(id), `新窗口应在右槽：${JSON.stringify(afterOpen)}`)
+  await ctx.close()
+  return `单卡只留一张并落 prefs；检视卡失去主体后单卡自动失效；打开窗口退出单卡`
+})
+
+await check('T120 卡片拖拽：槽内排序、跨槽移动、一个块只留一个窗口；编辑器跟着走', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  const ids = await page.evaluate(() => {
+    const bs = window.__qua.blocks().filter((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)
+    return { a: bs[0]?.id ?? '', b: bs[1]?.id ?? '' }
+  })
+  assert(ids.a && ids.b && ids.a !== ids.b, '应有至少两个不同的可开块')
+  await shiftClickMarker(page, ids.a)
+  await shiftClickMarker(page, ids.b)
+  await page.waitForTimeout(140)
+
+  // 槽内排序：把 b 拖到 a 之前
+  const moved = await dragCard(page, { from: 'right', to: 'right', id: ids.b, before: ids.a })
+  assert(moved, '拖拽事件应能派发到卡头与槽')
+  assert(moved.hot, '拖到卡上半应亮插入线')
+  const order = moved.cards.right.cards.filter((id) => id === ids.a || id === ids.b)
+  assert(JSON.stringify(order) === JSON.stringify([ids.b, ids.a]), `槽内顺序应是 b,a：${JSON.stringify(order)}`)
+
+  // 跨槽：把 b 拖到左槽（落在今日卡上半）
+  const across = await dragCard(page, { from: 'right', to: 'left', id: ids.b, before: 'journal' })
+  assert(across, '跨槽拖拽应派发')
+  const acrossCards = across.cards
+  assert(!acrossCards.right.cards.includes(ids.b), `跨槽后右槽不该还有 b：${JSON.stringify(acrossCards.right.cards)}`)
+  assert(acrossCards.left.cards.includes(ids.b), `跨槽后左槽应有 b：${JSON.stringify(acrossCards.left.cards)}`)
+  const leftIdx = acrossCards.left.cards.indexOf(ids.b)
+  const journalIdx = acrossCards.left.cards.indexOf('journal')
+  assert(leftIdx >= 0 && leftIdx < journalIdx, `b 应落在今日之前：${JSON.stringify(acrossCards.left.cards)}`)
+  const alive = await page.evaluate((id) => Boolean(document.querySelector(`#dock-left .dock-card[data-window="1"][data-card-id="${id}"] .dock-window-editor .blk`)), ids.b)
+  assert(alive, '跨槽后窗口编辑器应跟着走')
+
+  // 一个块只留一个窗口：在左槽的窗口里 Shift+点自己的块标 ⇒ 移到右槽，不是复制
+  await page.locator(rootMarker('left', ids.b)).click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(140)
+  const movedToRight = await page.evaluate((id) => ({
+    left: window.__qua.snapshot().dock.left.cards,
+    right: window.__qua.snapshot().dock.right.cards,
+    windows: document.querySelectorAll(`#dock-right .dock-card[data-window="1"][data-card-id="${id}"]`).length,
+  }), ids.b)
+  assert(!movedToRight.left.includes(ids.b), `移走后左槽不该还有 b：${JSON.stringify(movedToRight.left)}`)
+  assert(movedToRight.right.includes(ids.b), `右槽应有 b：${JSON.stringify(movedToRight.right)}`)
+  assert(movedToRight.windows === 1, `同一个块只能有一张窗口：${movedToRight.windows}`)
+
+  // 再拖回左槽：验证跨槽后仍可编辑（编辑器实例是新建的，不是死引用）
+  await dragCard(page, { from: 'right', to: 'left', id: ids.b, before: 'belongs' })
+  const backLeft = await page.evaluate((id) => ({
+    cards: window.__qua.snapshot().dock.left.cards,
+    text: document.querySelector(`#dock-left .dock-card[data-window="1"][data-card-id="${id}"] .dock-window-editor .blk[data-depth="0"] > .tx`)?.textContent ?? '',
+  }), ids.b)
+  assert(backLeft.cards.includes(ids.b), `拖回左槽应成功：${JSON.stringify(backLeft.cards)}`)
+  assert(backLeft.text.length > 0, `拖回后窗口正文应可读：${JSON.stringify(backLeft)}`)
+  await ctx.close()
+  return `槽内 b 到 a 前；跨槽 b→左（今日前）；Shift+点移回右且只有一张；再拖回左仍可读`
+})
+
+await check('T121 右槽反链卡的行走同一条 Shift：行 = 源页，开窗口；中心不动', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  const rows = await page.evaluate(
+    () => document.querySelectorAll('#dock-right .dock-card[data-card-id="backrefs"] .page-item').length,
+  )
+  assert(rows > 0, '当前页的反链卡应有行')
+  const before = await page.evaluate(() => ({
+    cards: window.__qua.snapshot().dock.right.cards,
+    active: window.__qua.snapshot().activeId,
+  }))
+  await page.locator('#dock-right .dock-card[data-card-id="backrefs"] .page-item').first().click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(120)
+  const after = await page.evaluate(() => ({
+    cards: window.__qua.snapshot().dock.right.cards,
+    active: window.__qua.snapshot().activeId,
+  }))
+  const added = after.cards.filter((id) => !before.cards.includes(id) && /^[0-9a-f]{32}$/.test(id))
+  assert(added.length === 1, `反链行应开一张窗口：${JSON.stringify(after.cards)}`)
+  assert(after.active === before.active, `反链行 Shift+点不换中心：${before.active} → ${after.active}`)
+  await ctx.close()
+  return `反链卡的行走 Shift 打开源页 ${added[0].slice(-6)}；中心不动`
+})
+
+await check('T123 标签页成员块标的 Shift ⇒ 右槽窗口；中心不动', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const tag = await page.evaluate(() => window.__qua.allBlocks().find((b) => b.roles?.includes('tag') && b.text === '任务')?.id ?? '')
+  assert(tag, '假数据里应有 #任务')
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), tag)
+  await page.waitForTimeout(220)
+  const markers = await page.evaluate(() => document.querySelectorAll('#tagpanel .blk .marker').length)
+  assert(markers > 0, '标签页成员编辑器应有块标')
+  const before = await page.evaluate(() => ({
+    cards: window.__qua.snapshot().dock.right.cards,
+    active: window.__qua.snapshot().activeId,
+  }))
+  await page.locator('#tagpanel .blk .marker').first().click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(120)
+  const after = await page.evaluate(() => ({
+    cards: window.__qua.snapshot().dock.right.cards,
+    active: window.__qua.snapshot().activeId,
+  }))
+  assert(after.cards.length > before.cards.length, `成员块标 Shift+点应开窗口：${JSON.stringify(after.cards)}`)
+  assert(after.active === before.active, `成员块标 Shift+点不换中心：${before.active} → ${after.active}`)
+  await ctx.close()
+  return `标签页成员块标开窗口；中心不动`
+})
+
+await check('T124 详情浮层的「打开目标」读 Shift ⇒ 右槽窗口；中心不动', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  const atom = await page.evaluate(() => document.querySelectorAll('#editor .atom').length)
+  assert(atom > 0, '当前页应有行内原子')
+  const before = await page.evaluate(() => ({
+    cards: window.__qua.snapshot().dock.right.cards,
+    active: window.__qua.snapshot().activeId,
+  }))
+  await page.locator('#editor .atom').first().click({ modifiers: ['Alt'] })
+  await page.waitForTimeout(120)
+  const popover = await page.evaluate(() => Boolean(document.querySelector('.popover')))
+  assert(popover, '⌥ 点原子应开详情浮层')
+  await page.locator('.popover button', { hasText: '打开目标' }).click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(120)
+  const after = await page.evaluate(() => ({
+    cards: window.__qua.snapshot().dock.right.cards,
+    active: window.__qua.snapshot().activeId,
+    popover: Boolean(document.querySelector('.popover')),
+  }))
+  assert(after.cards.length > before.cards.length, `浮层的「打开目标」Shift+点应开窗口：${JSON.stringify(after.cards)}`)
+  assert(after.active === before.active, `浮层 Shift+点不换中心：${before.active} → ${after.active}`)
+  assert(!after.popover, '点完应关浮层')
+  await ctx.close()
+  return `浮层「打开目标」Shift+点开窗口；中心不动`
+})
 
 /** 判红的是「不在已知失败表里的失败」；已知失败逐条打印，不计入退出码 */
 const known = results.filter((r) => !r.ok && r.known)

@@ -190,10 +190,14 @@ export interface ViewEvents {
    */
   focusBlock?: (blockId: string) => void
   /**
-   * **Shift+左键点块标**：把这个块钉到右槽（已钉住则取消）。
+   * **Shift+左键点块标**：在右槽打开这个块（已打开则定位；不在则移过去）。
    *
    * 单独一个回调而不是在事件层看 `shiftKey` 调 `focusBlock`：事件层不该知道
-   * 「右槽」与「钉住」这层语义，它只负责把修饰键翻译成另一个动作。
+   * 「右槽」与「窗口」这层语义，它只负责把修饰键翻译成另一个动作。
+   *
+   * ⚠️ 未接的独立/测试实例**什么都不做**，不再退化为中心 zoom——
+   *    那是上一版的 bug：反链 footer／查询／标签面板的 Shift+点看起来有反应，
+   *    其实只是把中心换成了同一个块。生产装配的每个编辑器都必须接它（冒烟逐入口钉住）。
    */
   openInDock?: (blockId: string) => void
   /**
@@ -2602,8 +2606,9 @@ export class BlockEditor {
         if (from && from !== id) this.commitEdit(from)
         this.events.focusBlock?.(id)
       },
-      // Shift+左键点块标 ＝ 在右槽钉住；没有接这个事件的视图（如反链 footer）退化成聚焦
-      openInDock: (id) => (this.events.openInDock ? this.events.openInDock(id) : this.events.focusBlock?.(id)),
+      // Shift+左键点块标 ＝ 在右槽打开；事件层只报「打开谁」，落点由装配层决定
+      // ⚠️ 没接就不做事（不再退化成中心 zoom：那会让缺入口看起来像成功）
+      openInDock: (id) => this.events.openInDock?.(id),
       toggleCollapse: (id) => this.toggleCollapse(id),
       toggleChildrenCollapse: (id) => this.toggleChildrenCollapse(id),
       toggleTodo: (id) => this.toggleTodo(id),

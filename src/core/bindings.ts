@@ -124,6 +124,7 @@ export const BINDINGS: Binding[] = [
   // 显式入口：把「看这一块的属性」做成一次点击。它是**视图命令**（可以动槽开关），
   // 与 zoom 这种导航动作分家 —— 导航永远不替用户改侧栏的开关。
   { command: 'core.block/inspect', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 32, layer: 'core' },
+  { command: 'core.dock/open-block', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 33, layer: 'core' },
   /**
    * 退回上一级：**最外层时不给入口**（`when` 挡住），不是点了没反应。
    *

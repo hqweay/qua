@@ -238,8 +238,10 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
          * 断言要能区分「落盘了没有」与「页面里渲染了没有」。
          */
         dock: {
-          left: { open: prefs().dock.left.open, width: prefs().dock.left.width, pins: [...prefs().dock.left.pins] },
-          right: { open: prefs().dock.right.open, width: prefs().dock.right.width, pins: [...prefs().dock.right.pins] },
+          left: { open: prefs().dock.left.open, width: prefs().dock.left.width, cards: [...prefs().dock.left.cards] },
+          right: { open: prefs().dock.right.open, width: prefs().dock.right.width, cards: [...prefs().dock.right.cards] },
+          collapsed: [...Object.keys(prefs().dock.collapsedCards)],
+          solo: { ...prefs().dock.solo },
         },
         // 导航历史（不是 undo 栈）：给断言看「能退到哪 / 能进到哪」
         nav: { back: nav.back.map((p) => p.id), forward: nav.forward.map((p) => p.id), canGoBack: nav.back.length > 0, canGoForward: nav.forward.length > 0 },

@@ -1,8 +1,9 @@
 /**
- * 两个侧槽的内容：**左槽＝今日，右槽＝反链**。
+ * 两个侧槽的**派生卡**：左槽＝今日，右槽＝反链。
  *
- * 原先这段长在 `main.ts` 里。搬出来的判据：它做的是「用块渲染器排出一列块」，
- * 属于 UI 组件的知识；装配层只需要说「现在有哪几页、当前是哪一页、点了怎么开」。
+ * 这里只产「一张卡的内容」，不负责排槽、不负责卡片的头/折叠/单卡——
+ * 那些是 `ui/dock.ts` 的事。原先这两个函数各自排一整槽，导致槽的顺序只能写死在
+ * 两个函数里；拆成「产卡」之后，装配层才能按 `cards` 列表把窗口与派生卡混排。
  *
  * ⚠️ 这里**不认 `ws`／`ed`／`registry`**，只认下面这个 `DockContentDeps`。
  * ⚠️ 渲染一律走 `renderBlock`：槽只排一列，块由类型决定长相（角色只叠 chrome）。
@@ -12,26 +13,25 @@ import { textRuns } from '../core/runs.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { renderBlock, type BlockRenderCtx } from './block-renderers.ts'
-import { renderDockStack, type DockCard, type DockSlotEls } from './dock.ts'
+import type { DockCard } from './dock.ts'
 
 export interface DockContentDeps {
   /** 读门面：今日块、反链源页都按 id／按名取数 */
   kb: KbClient
   activeId: () => string
-  /** 打开某个页（页 id 或反链项的来源页 id） */
+  /** 打开某个页（页 id 或反链项的来源页 id）——中心槽 */
   openPage: (id: string) => void
-  newPage: () => void
+  /** 在右槽打开某个块（Shift+点行／块标） */
+  openInDock: (id: string) => void
 }
 
-/** 额外内容：常驻卡片（活编辑器）与调用方准备的卡片 */
-export interface DockExtra {
-  /** 排在内建卡片之前的卡片（由调用方决定内容） */
-  cards?: DockCard[]
-  /**
-   * **常驻节点**：不在每次重画里重建（例如承载 `BlockEditor` 的钉住卡片）。
-   * 它们挂在堆叠最上面，重画其余卡片时原地不动 —— 移动会打断 contenteditable 的光标。
-   */
-  persistent?: HTMLElement[]
+function ctx(deps: DockContentDeps): BlockRenderCtx {
+  return {
+    isActive: (id) => id === deps.activeId(),
+    onActivate: (b) => deps.openPage(b.id),
+    onOpenInDock: (b) => deps.openInDock(b.id),
+    untitledLabel: t('ui.page.untitled'),
+  }
 }
 
 /**
@@ -41,38 +41,21 @@ export interface DockExtra {
  *    曾用「普通块 ＋ 一个专用角色 ＋ 内部一列块 id」冒充它 —— 但冒充出来的东西会被读成
  *    产品概念，还白占一个角色值；等真概念从模型里长出来时再进左槽。
  */
-export function renderTodayInto(deps: DockContentDeps, slot: DockSlotEls, extra: DockExtra = {}): void {
-  const ctx: BlockRenderCtx = {
-    isActive: (id) => id === deps.activeId(),
-    onActivate: (b) => deps.openPage(b.id),
-    untitledLabel: t('ui.page.untitled'),
-  }
-
-  const cards: DockCard[] = []
-
+export function todayCard(deps: DockContentDeps): DockCard | null {
   // Daily note：在库里找今天的 journal 块（冷启动时它一定已经物化，见 seed／装配层）
   const today = deps.kb.journalDay(todayISO())
-  if (today) {
-    const body = document.createElement('div')
-    body.id = 'journal-today'
-    body.className = 'block-list'
-    body.appendChild(renderBlock(today, ctx))
-    cards.push({ id: 'journal', title: t('ui.dock.today'), body })
-  }
-
-  renderDockStack(slot.stack, [...(extra.cards ?? []), ...cards], t('ui.dock.empty'), extra.persistent)
+  if (!today) return null
+  const body = document.createElement('div')
+  body.id = 'journal-today'
+  body.className = 'block-list'
+  body.appendChild(renderBlock(today, ctx(deps)))
+  return { id: 'journal', title: t('ui.dock.today'), body }
 }
 
-/** 右槽：反链面板 */
-export function renderBackrefsInto(deps: DockContentDeps, slot: DockSlotEls, extra: DockExtra = {}): void {
+/** 右槽：反链卡（结果总是存在，空时给一句空文案） */
+export function backrefsCard(deps: DockContentDeps): DockCard {
   const target = deps.activeId()
   const sources = deps.kb.backlinksOf(target)
-
-  const ctx: BlockRenderCtx = {
-    isActive: (id) => id === deps.activeId(),
-    onActivate: (b) => deps.openPage(b.id),
-    untitledLabel: t('ui.page.untitled'),
-  }
 
   const list = document.createElement('div')
   list.className = 'block-list'
@@ -95,9 +78,8 @@ export function renderBackrefsInto(deps: DockContentDeps, slot: DockSlotEls, ext
       modified: 0,
       props: { _icon: 'lucide:corner-up-left' },
     }
-    list.appendChild(renderBlock(row, ctx))
+    list.appendChild(renderBlock(row, ctx(deps)))
   }
 
-  const cards: DockCard[] = [{ id: 'backrefs', title: t('ui.dock.backRefs'), body: list }]
-  renderDockStack(slot.stack, [...(extra.cards ?? []), ...cards], t('ui.dock.empty'), extra.persistent)
+  return { id: 'backrefs', title: t('ui.dock.backRefs'), body: list }
 }

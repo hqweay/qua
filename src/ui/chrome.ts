@@ -97,7 +97,7 @@ function must<T extends HTMLElement>(id: string): T {
   return el as T
 }
 
-export function createChrome(onCrumb?: (blockId: string) => void): Chrome {
+export function createChrome(onCrumb?: (blockId: string, shiftKey: boolean) => void): Chrome {
   // —— 自持的 DOM（装配层不再看得到它们）——
   /** 面包屑（2026-10-20）：**只有这一条**，不再兼任「页名／标题」 */
   const trailEl = must('crumbs-trail')
@@ -178,7 +178,7 @@ export function createChrome(onCrumb?: (blockId: string) => void): Chrome {
       : name === ''
         ? t('ui.page.untitled')
         : name
-    el.addEventListener('click', () => onCrumb?.(b.id))
+    el.addEventListener('click', (e) => onCrumb?.(b.id, e.shiftKey))
     return el
   }
 

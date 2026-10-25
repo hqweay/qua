@@ -35,7 +35,9 @@ export interface TagPanelDeps {
   /** 成员编辑器获得焦点：装配层把「活动编辑器」切到它 */
   onFocus: () => void
   onFocusBlock: (blockId: string) => void
-  onAtomClick?: (run: RunWithId, blockId: string, el: HTMLElement, mods: { altKey: boolean }) => void
+  /** Shift+点成员块标：在右槽打开它 */
+  onOpenInDock: (blockId: string) => void
+  onAtomClick?: (run: RunWithId, blockId: string, el: HTMLElement, mods: { altKey: boolean; shiftKey: boolean }) => void
 }
 
 export interface TagPanelEls {
@@ -79,6 +81,7 @@ export class TagPanel {
         if (kind !== 'load') this.deps.onChange()
       },
       focusBlock: (blockId) => this.deps.onFocusBlock(blockId),
+      openInDock: (blockId) => this.deps.onOpenInDock(blockId),
       atomClick: (run, blockId, el, mods) => this.deps.onAtomClick?.(run, blockId, el, mods),
     }
     deps.store.subscribe((source) => {

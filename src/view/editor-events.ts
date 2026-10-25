@@ -25,6 +25,7 @@ import type { TriggerChar } from '../core/trigger.ts'
  */
 export interface AtomClickMods {
   altKey: boolean
+  shiftKey: boolean
 }
 
 /**
@@ -374,7 +375,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     // 行内原子：交给原子那一条（同样用快照路径，防原子被重渲染摘掉）
     const atomEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('atom'))
     if (atomEl?.dataset.atomId) {
-      const a = br.onAtomClick(atomEl.dataset.atomId, atomEl, { altKey: e.altKey })
+      const a = br.onAtomClick(atomEl.dataset.atomId, atomEl, { altKey: e.altKey, shiftKey: e.shiftKey })
       if (a) e.preventDefault()
       return
     }
@@ -475,9 +476,9 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     const todo = target.closest<HTMLElement>('[data-todo-for]')
     if (todo?.dataset.todoFor) {
       e.preventDefault()
-      // Shift+点击方框 = 「在右槽打开」，**不勾选**（修饰键改变的是动作）
-      if (e.shiftKey) br.openInDock(todo.dataset.todoFor)
-      else br.toggleTodo(todo.dataset.todoFor)
+      // 方框的动作是「切换完成」，不是「打开」——Shift 不改变它。
+      // 「在右槽打开」的入口是块标/行/引用，统一由装配层的 openInDock 承担。
+      br.toggleTodo(todo.dataset.todoFor)
     }
   })
 

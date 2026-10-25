@@ -35,8 +35,10 @@ export interface QueryViewDeps {
   onFocus: () => void
   /** 点结果块的块标：聚焦/zoom 到它（中心槽换内容）；由装配层注入 */
   onFocusBlock: (blockId: string) => void
+  /** Shift+点结果块的块标：在右槽打开它 */
+  onOpenInDock: (blockId: string) => void
   /** 点行内原子：与正文同一条逻辑（左键打开、⌥ 详情、解析不到仍弹详情） */
-  onAtomClick?: (run: RunWithId, blockId: string, el: HTMLElement, mods: { altKey: boolean }) => void
+  onAtomClick?: (run: RunWithId, blockId: string, el: HTMLElement, mods: { altKey: boolean; shiftKey: boolean }) => void
   /** 提示（刷新失败、丢了几条） */
   toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
@@ -94,6 +96,7 @@ export class QueryView {
         this.deps.onChange()
       },
       focusBlock: (blockId) => this.deps.onFocusBlock(blockId),
+      openInDock: (blockId) => this.deps.onOpenInDock(blockId),
       atomClick: (run, blockId, el, mods) => this.deps.onAtomClick?.(run, blockId, el, mods),
     }
 

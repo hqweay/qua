@@ -39,6 +39,8 @@ export interface PanelDeps {
    * ⚠️ 与 `core.page/open` 的区别：后者只认顶层页，而引用可以指向嵌套块。
    */
   openBlock: (id: string) => void
+  /** Shift+点「打开目标」：在右槽打开（中心不换） */
+  openInDock: (id: string) => void
   removeAtom: (id: string) => void
   closePopover: () => void
   openPopover: (render: (host: HTMLElement) => void, anchor: DOMRect | null) => void
@@ -206,9 +208,10 @@ export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect, fi
         const open = document.createElement('button')
         open.type = 'button'
         open.textContent = t('ui.popover.openPage')
-        open.addEventListener('click', () => {
+        open.addEventListener('click', (e) => {
           deps.closePopover()
-          deps.openBlock(target.id)
+          if (e.shiftKey) deps.openInDock(target.id)
+          else deps.openBlock(target.id)
         })
         row.appendChild(open)
       }

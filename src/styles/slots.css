@@ -77,17 +77,21 @@
 }
 /*
  * 块卡头：卡片**自己的 chrome**，不是「块」——块在 body 里由 `block-renderers` 画。
+ * 头是卡片的**拖源**：整头可拖（按钮除外），拖的是「这张卡」，不是块。
  */
 .dock-card-head {
   display: flex;
   align-items: center;
-  gap: var(--ui-gap-3);
-  padding: var(--ui-gap-3) var(--ui-gap-3) var(--ui-gap-2) var(--ui-gap-4);
+  gap: var(--ui-gap-2);
+  padding: var(--ui-gap-3) var(--ui-gap-2) var(--ui-gap-2) var(--ui-gap-3);
   font-size: var(--ui-fs-2xs);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
   color: var(--ui-text-tertiary);
   font-weight: 600;
+  cursor: grab;
+}
+.dock-card-head:active {
+  cursor: grabbing;
 }
 .dock-card-title {
   flex: 1;
@@ -99,6 +103,59 @@
 .dock-card-body {
   padding: 0 var(--ui-gap-2) var(--ui-gap-3);
 }
+
+/* 卡头的按钮比槽头小一档：一排要放收起/动作/单卡/关闭 */
+.dock-card-btn {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  font-size: var(--ui-fs-xs);
+}
+/* 关闭是破坏性入口：hover 才出现，避免和单选/收起抢视线 */
+.dock-card-head [data-dock-action='close'] {
+  opacity: 0;
+}
+.dock-card:hover [data-dock-action='close'],
+.dock-card-head [data-dock-action='close']:focus-visible {
+  opacity: 1;
+}
+
+/*
+ * 收起：只隐藏 body，不销毁编辑器。
+ * ⚠️ 与 `hidden`（这张卡没有内容）分开：两个值不能共用同一个属性。
+ */
+.dock-card[data-collapsed='1'] > .dock-card-body {
+  display: none;
+}
+
+/*
+ * 单卡：只看这一张。只隐藏**同槽其它卡**，槽头不动。
+ * 目标不可见时 JS 不会写 `data-solo`（不留空槽）。
+ */
+.dock-stack[data-solo='1'] > .dock-card:not([data-solo-card='1']) {
+  display: none;
+}
+
+/* 卡片拖拽的插入线：落在上半/下半，或末尾 */
+.dock-card[data-drop-before='1'] {
+  box-shadow: inset 0 2px 0 var(--ui-accent);
+}
+.dock-card[data-drop-after='1'] {
+  box-shadow: inset 0 -2px 0 var(--ui-accent);
+}
+.dock-stack[data-drop-end='1'] {
+  box-shadow: inset 0 -2px 0 var(--ui-accent);
+}
+
+/* 打开一个窗口后短暂描边：Shift+点/拖进来必须「看得见」 */
+.dock-card[data-flash='1'] {
+  box-shadow: 0 0 0 2px var(--ui-accent);
+}
+
+/* 窗口的编辑器宿主：与旧 pin-editor 同一条：吃满卡宽，不产生横向溢出 */
+.dock-window-editor {
+  min-width: 0;
+}
 /* 一列块：**没有额外容器语义**，只是排一列 */
 .block-list {
   display: flex;
@@ -106,45 +163,6 @@
   gap: 1px;
 }
 
-/* ---------------------------------------------------------- 钉住的块 */
-
-/*
- * 钉住的块：**真实块的编辑器**，不是一份摘要。
- * 它是一张常驻卡片（重画槽时原地不动），行与行之间只留极小的缝。
- */
-.pin-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-gap-2);
-}
-.pin-row {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--ui-gap-2);
-  min-width: 0;
-}
-.pin-editor {
-  flex: 1;
-  min-width: 0;
-}
-.pin-remove {
-  flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border-radius: var(--ui-radius-sm);
-  color: var(--ui-text-tertiary);
-  opacity: 0;
-  line-height: 1;
-}
-.pin-row:hover .pin-remove,
-.pin-remove:focus-visible {
-  opacity: 1;
-}
-.pin-remove:hover {
-  background: var(--ui-accent-soft);
-  color: var(--ui-text);
-}
 
 /* ---------------------------------------------------------- 宽度手柄 */
 

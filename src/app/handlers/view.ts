@@ -79,6 +79,16 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     app.toggleDock('right')
     return true
   },
+  /**
+   * 在侧槽打开一个块：**不换中心、不入历史**。
+   * 缺省目标是光标所在块（块菜单不传 args）；`side` 缺省右槽（Shift+点的落点）。
+   */
+  'core.dock/open-block': (a, app) => {
+    const id = typeof a.blockId === 'string' && a.blockId !== '' ? a.blockId : curBlock(app)
+    if (!id) return false
+    app.openInDock(id, a.side === 'left' ? 'left' : 'right')
+    return true
+  },
   'core.view/toggle-virtualize': (a, app) => {
     const on = typeof a.on === 'boolean' ? a.on : !app.ed.virtualize
     app.setVirtualize(on, typeof a.radius === 'number' ? a.radius : 12)

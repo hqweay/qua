@@ -28,6 +28,8 @@ export type ChromeDeps = {
   /** 角标启动时编辑器尚未装配；诊断快照只在装配完成后被调 */
   getMainEd: () => BlockEditor
   getRegistry: () => Registry
+  /** Shift+点面包屑：在右槽打开这个祖先 */
+  openInDock: (blockId: string) => void
   /** DOM 统计（证据源在诊断分片；它晚于本节装配，现取） */
   getDomStats: () => { blocks: number; domBlocks: number; domNodes: number }
 }
@@ -114,9 +116,10 @@ export function setupChrome(deps: ChromeDeps) {
    * ⚠️ **组件自持 DOM**：装配入口里不再出现那些元素的 `getElementById`。
    * ⚠️ 皮肤/主题那两个开关**不在这里**：撤出顶栏，挪进调试菜单。
    */
-  const chrome = createChrome((blockId) => {
-    // 面包屑一格 ＝「聚焦到这个祖先」：与 zoom in **同一个命令**，只是目标不同
-    deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'chrome')
+  const chrome = createChrome((blockId, shiftKey) => {
+    // 面包屑一格 ＝「聚焦到这个祖先」；Shift+点 ＝ 同一个「打开」，换到右槽
+    if (shiftKey) deps.openInDock(blockId)
+    else deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'chrome')
   })
 
   const editorEl = chrome.editorEl

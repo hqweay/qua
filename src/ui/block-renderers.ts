@@ -27,8 +27,23 @@ export interface BlockRenderCtx {
   isActive: (id: string) => boolean
   /** 点一下这个块：页块 ＝ 打开它；其余 ＝ 聚焦它的子树 */
   onActivate: (block: Block) => void
+  /** Shift+点：同一个「打开」，换到右槽（打开一张窗口） */
+  onOpenInDock: (block: Block) => void
   /** 空页名时的兜底文案 */
   untitledLabel: string
+}
+
+/**
+ * 行点击的**唯一口径**：Shift ＝ 换目的地，不换动作。
+ *
+ * 放在这里而不是每个渲染器各写一次：四种行渲染器（大纲／日记／分割线／兜底）
+ * 只要有一个漏了 Shift，用户看到的就是「这一行能开窗口、那一行不能」。
+ */
+function bindRowClick(row: HTMLElement, b: Block, ctx: BlockRenderCtx): void {
+  row.addEventListener('click', (e) => {
+    if (e.shiftKey) ctx.onOpenInDock(b)
+    else ctx.onActivate(b)
+  })
 }
 
 export interface BlockRenderer {
@@ -63,7 +78,7 @@ const outlineRenderer: BlockRenderer = {
     title.title = name
 
     row.append(icon, title)
-    row.addEventListener('click', () => ctx.onActivate(b))
+    bindRowClick(row, b, ctx)
     return row
   },
 }
@@ -90,7 +105,7 @@ const journalRenderer: BlockRenderer = {
     title.className = 'p-title'
     title.textContent = journalDateLabel(journalDate(b))
     row.append(icon, title)
-    row.addEventListener('click', () => ctx.onActivate(b))
+    bindRowClick(row, b, ctx)
     return row
   },
 }
@@ -112,7 +127,7 @@ const dividerRenderer: BlockRenderer = {
     rule.className = 'divider-rule'
     rule.setAttribute('aria-hidden', 'true')
     row.appendChild(rule)
-    row.addEventListener('click', () => ctx.onActivate(b))
+    bindRowClick(row, b, ctx)
     return row
   },
 }
@@ -130,7 +145,7 @@ const fallbackRenderer: BlockRenderer = {
     const name = displayNameOf(b).trim()
     title.textContent = name === '' ? ctx.untitledLabel : name
     row.append(title)
-    row.addEventListener('click', () => ctx.onActivate(b))
+    bindRowClick(row, b, ctx)
     return row
   },
 }

@@ -23,7 +23,7 @@ import { normalizePrefs, type Prefs } from './prefs.ts'
 /**
  * 设备状态的落盘键。
  *
- * 与 `STORAGE_KEY` 一样是**固定值**：原型期不做旧数据迁移，换键＝用户的主题/槽宽/钉住静默消失。
+ * 与 `STORAGE_KEY` 一样是**固定值**：原型期不做旧数据迁移，换键＝用户的主题/槽宽/卡片清单静默消失。
  * 它和库分开，是为了「一份坏了不连累另一份」：库作废重 seed 时偏好还在。
  */
 export const DEVICE_KEY = 'qua.device'

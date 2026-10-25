@@ -187,6 +187,14 @@ export interface App {
   toggleTheme(): void
   /** 开/关一个槽（槽的开关归槽自己；`side` 只有左右，中心槽常驻） */
   toggleDock(side: 'left' | 'right'): void
+  /**
+   * **在侧槽打开一个块**（一张窗口）：确保槽开着、把块放进 `cards`、滚到它。
+   *
+   * 与 `inspectBlock` 的区别：那个换中心落点、这次**不换**中心也不入历史；
+   * 与 `zoomTo` 的区别：zoom 是导航，这个是视图配置。
+   * 同一个块全局最多一个窗口（已在另一侧则移过来）。
+   */
+  openInDock(id: string, side?: 'left' | 'right'): void
   /* 浮层 / 提示 */
   toast(text: string, kind?: 'ok' | 'warn' | 'info'): void
   showMenu(req: MenuRequest): void

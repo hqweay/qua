@@ -6,12 +6,12 @@
  * 而是「**本树内**没有可见父」的块（父被露面筛掉 ⇒ 子升级为根）。
  *
  * ⚠️ 这里的行**不是可编辑的块**：`renderBlock` 出来的一行是导航（图标＋名字），
- *    没有 `contenteditable`、不参与选区、不接受正文编辑 —— 与侧槽的钉住卡片
+ *    没有 `contenteditable`、不参与选区、不接受正文编辑 —— 与侧槽的窗口卡片
  *    （里面是真编辑器）是两种东西。这也是它便宜的原因。
  * ⚠️ 跨类的边（页挂在标签下）在两棵树里都不画，由属性区的「属于」那一行回答：
  *    树只回答「同类里谁在谁下面」。
  * ⚠️ 拖入＝**加边**（`_belongsTo`），不是把块搬到这棵树里：树是位置，边是关系。
- *    同一个手势落到正文行是「移动」、落到侧槽是「钉住」—— 含义由落点说，悬停时就贴出来。
+ *    同一个手势落到正文行是「移动」、落到侧槽是「打开窗口」—— 含义由落点说，悬停时就贴出来。
  */
 import type { BelongsRow } from '../core/hierarchy.ts'
 import { displayNameOf, type Block, type BlockList } from '../core/index.ts'
@@ -31,6 +31,8 @@ export interface BelongsTreeDeps {
   activeId: () => string
   /** 点一行：打开它（页/标签都是块，走同一个入口） */
   open: (id: string) => void
+  /** Shift+点一行：在右槽打开它 */
+  openInDock: (id: string) => void
   /** 换面之后重画这一槽（槽内容由装配层排，组件自己不动别人的 DOM） */
   refresh: () => void
   /** 把一个块归到另一个块下面（拖入的落点含义；由装配层转成命令） */
@@ -78,6 +80,7 @@ export class BelongsTree {
     const ctx: BlockRenderCtx = {
       isActive: (id) => id === this.deps.activeId(),
       onActivate: (b) => this.deps.open(b.id),
+      onOpenInDock: (b) => this.deps.openInDock(b.id),
       untitledLabel: this.deps.untitled,
     }
 
@@ -97,7 +100,7 @@ export class BelongsTree {
       wrap.dataset.belongsId = row.block.id
       wrap.style.setProperty('--depth', String(row.depth))
       wrap.appendChild(renderRow(row.block, ctx))
-      // 这一行也是**拖源**：能拿到块 id 就能拖（拖到正文＝移动、拖到另一行＝加边、拖到槽＝钉住）
+      // 这一行也是**拖源**：能拿到块 id 就能拖（拖到正文＝移动、拖到另一行＝加边、拖到槽＝打开窗口）
       wrap.draggable = true
       wrap.addEventListener('dragstart', (e) => setDragBlock(e.dataTransfer, row.block.id))
       // 拖一个块到这个 item 上 ⇒ **加边**（不是重排兄弟：兄弟顺序不落盘）

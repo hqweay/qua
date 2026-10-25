@@ -1,28 +1,56 @@
 /**
- * 槽的渲染：**每个槽的内容是一列块**。
+ * 槽的渲染：**每个槽的内容是一列卡片**。
  *
- * 这一层只做「把一组块卡放进槽里」，**不认识页面、不认识命令、不认识状态**——
- * 那些由调用方（装配层）准备好再传进来。这样做的原因：
- *   · 槽的 DOM 形状（抬头 + 堆叠 + 块卡）是**对外契约**，主题与插件都依赖它；
- *   · 它必须能脱离应用状态单独成型，否则将来「往槽里加一块」（插件注册面板的方式）的入口
- * 会退化成在装配层里手写 DOM（已明确：插件是往槽里加块，不是塞 DOM）。
+ * 这一层只做「把一组卡片放进槽里」和「卡片自己的 chrome」，
+ * **不认识页面、不认识命令、不认识状态**——那些由调用方（装配层）准备好再传进来。
  *
- * ⚠️ 纪律：**槽内只许纵向**。这里不提供任何横向排列的入口。
- * ⚠️ 纪律：槽开关用 `chevron-left`／`chevron-right` 图标，**没有入口条**（2026-10-19 晚作废）。
+ * 三条纪律：
+ *   1. **槽内只许纵向**。这里不提供任何横向排列的入口。
+ *   2. **卡片外壳只有一个产地**：窗口、派生卡、检视卡共用同一套头／收起／单卡／拖拽。
+ *      否则「所有卡片都支持 X」一定会漏掉某一张（真踩过：窗口卡手写的头没有折叠按钮）。
+ *   3. **三个状态分开表达**：
+ *      · `hidden`        ＝ 这张卡没有内容（可用性，归卡片内容的主人）；
+ *      · `data-collapsed`＝ 用户把这张卡收起了（只隐藏 body，不销毁编辑器）；
+ *      · `stack[data-solo]` ＋ `card[data-solo-card]` ＝ 只看这一张。
+ *      不要用同一个 `hidden` 表达两件事——那会让「没有主体」和「收起了」变成同一个值。
  */
 
+import { t } from '../core/msg.ts'
 import { renderIcon } from '../view/icons.ts'
 
-/** 一块卡：标题条 + 内容 */
+/** 一块卡：标题条 + 内容；`hidden` 只表示「没有内容」，不表示「用户收起了」 */
 export interface DockCard {
-  /** 稳定 id（拖序与折叠状态将来按它键控，承） */
+  /** 稳定 id：块 id（窗口）或派生卡 id（`belongs`／`journal`／`inspect`／`backrefs`） */
   id: string
-  /** 块卡标题；空串 ＝ 不画标题条 */
+  /** 块卡标题；空串 ＝ 不画标题文字（仍保留头，因为动作住在这里） */
   title: string
   /** 标题条右侧的额外动作（如「＋」）；由调用方决定要不要 */
-  actions?: { label: string; title?: string; onClick: () => void }[]
-  /** 内容区；由调用方负责填充（页面列表、检索结果、插件界面…） */
+  actions?: DockCardAction[]
+  /** 关闭入口：只有窗口有（派生卡没有「再加一张」的入口，关掉会是单向陷阱） */
+  close?: { title?: string; onClick: () => void }
+  /** 内容区；由调用方负责填充 */
   body: HTMLElement
+  /** 是否可拖（缺省 true） */
+  draggable?: boolean
+  /** 没有内容：保留位置但隐藏 */
+  hidden?: boolean
+}
+
+export interface DockCardAction {
+  /** 图标名（`lucide:<name>`）；与图标槽同一套解析 */
+  label: string
+  title?: string
+  onClick: () => void
+}
+
+export interface DockCardState {
+  /** 用户把这张卡收起了 */
+  collapsed: boolean
+  /** 这张卡就是当前单卡目标 */
+  solo: boolean
+  onToggleCollapse: () => void
+  onToggleSolo: () => void
+  onDragStart?: (e: DragEvent) => void
 }
 
 export interface DockSlotEls {
@@ -51,79 +79,205 @@ export function dockSlotEls(root: HTMLElement): DockSlotEls {
   return { root, head, titleEl, stack, resizeEl }
 }
 
+const ACTION_ATTR = 'data-dock-action'
+
 /**
- * 渲染一个槽的内容：清掉本次不保留的节点、按顺序放块卡。
- *
- * 每次整槽重画（第 1 期）。将来接入事务流后改为**按卡片局部更新**，
- * 但入口形状不变——调用方仍然只给它「这一槽现在有哪几块」。
- *
- * ⚠️ **常驻节点（`persistent`）不移动、只保留**：
- *    · `stack.textContent = ''` 会把子节点一并从文档里摘掉，之后再往该节点里 append，
- *      写的是一棵**游离树**（DOM 里看着是空的）。这是真踩过的 bug —— 页面列表就是这样整槽消失的。
- *    · 但**重新 append 到别的位置同样是破坏**：常驻节点里可能是 contenteditable，
- *      移动一个正在编辑的元素会丢焦点与光标（每敲一个字就跳一次）。
- *    ⇒ 常驻节点原地不动，新卡片**插到它们之后**（`insertBefore(anchor.nextSibling)`）。
- *      于是「钉住的块」这类活内容留在堆叠最上面，重画其余卡片不会打断输入。
+ * 卡片 DOM → 当前状态。按钮在创建时只绑一次，所以不能把回调捕获在闭包里
+ * （下一帧状态就换了）；点击时按卡片的当前状态派发。
  */
-export function renderDockStack(
-  stack: HTMLElement,
-  cards: DockCard[],
-  emptyText: string,
-  persistent: HTMLElement[] = [],
-): void {
-  const keep = new Set<Node>(persistent)
-  for (const n of Array.from(stack.childNodes)) if (!keep.has(n)) stack.removeChild(n)
+const cardStates = new WeakMap<HTMLElement, DockCardState>()
 
-  if (cards.length === 0 && persistent.length === 0) {
-    const empty = document.createElement('p')
-    empty.className = 'dock-empty'
-    empty.textContent = emptyText
-    stack.appendChild(empty)
-    return
-  }
-
-  let anchor: ChildNode | null = null
-  for (const n of persistent) if (n.parentNode === stack) anchor = n
-  for (const card of cards) {
-    const el = buildCard(card)
-    if (anchor) {
-      stack.insertBefore(el, anchor.nextSibling)
-      anchor = el
-    } else {
-      stack.appendChild(el)
-    }
-  }
-}
-
-function buildCard(card: DockCard): HTMLElement {
+/** 卡片外壳的唯一产地：窗口、派生卡都从这里建 */
+export function buildDockCard(card: DockCard, state: DockCardState): HTMLElement {
   const el = document.createElement('div')
   el.className = 'dock-card'
   el.dataset.cardId = card.id
+  el.hidden = card.hidden === true
 
-  if (card.title !== '' || card.actions?.length) {
-    const head = document.createElement('div')
-    head.className = 'dock-card-head'
-    const title = document.createElement('span')
-    title.className = 'dock-card-title'
-    title.textContent = card.title
-    head.appendChild(title)
-    for (const a of card.actions ?? []) {
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = 'dock-btn'
-      renderIcon(btn, a.label, 'plus')
-      if (a.title) btn.title = a.title
-      btn.addEventListener('click', a.onClick)
-      head.appendChild(btn)
+  const head = document.createElement('div')
+  head.className = 'dock-card-head'
+  head.draggable = card.draggable !== false
+  head.addEventListener('dragstart', (e) => {
+    // 头上的按钮各有各的动作；从按钮上起拖不算「拖这张卡」
+    if ((e.target as HTMLElement).closest('button')) {
+      e.preventDefault()
+      return
     }
-    el.appendChild(head)
-  }
+    cardStates.get(el)?.onDragStart?.(e)
+  })
+
+  head.appendChild(collapseButton())
+  const title = document.createElement('span')
+  title.className = 'dock-card-title'
+  title.textContent = card.title
+  head.appendChild(title)
+  for (const a of card.actions ?? []) head.appendChild(actionButton(a))
+  head.appendChild(soloButton())
+  if (card.close) head.appendChild(actionButton({ label: 'lucide:x', ...card.close }))
 
   const body = document.createElement('div')
   body.className = 'dock-card-body'
   body.appendChild(card.body)
-  el.appendChild(body)
+
+  el.append(head, body)
+  applyDockCardState(el, state)
   return el
+}
+
+/**
+ * 给一张**已在文档里的**卡补 chrome（检视卡是静态 HTML，窗口卡由管理器自己建）。
+ *
+ * 幂等：重复调用不会加第二颗按钮；标题由它的主人写，这里不碰。
+ */
+export function decorateDockCard(el: HTMLElement, card: DockCard, state: DockCardState): void {
+  el.dataset.cardId = card.id
+  let head = el.querySelector<HTMLElement>(':scope > .dock-card-head')
+  if (!head) {
+    head = document.createElement('div')
+    head.className = 'dock-card-head'
+    el.prepend(head)
+  }
+  if (!head.querySelector(`[${ACTION_ATTR}="collapse"]`)) head.prepend(collapseButton())
+  if (!head.querySelector(`[${ACTION_ATTR}="solo"]`)) head.appendChild(soloButton())
+  if (!head.querySelector(`[${ACTION_ATTR}="close"]`) && card.close) head.appendChild(actionButton({ label: 'lucide:x', ...card.close }))
+  head.draggable = card.draggable !== false
+  if (head.dataset.dragBound !== '1') {
+    head.dataset.dragBound = '1'
+    head.addEventListener('dragstart', (e) => {
+      if ((e.target as HTMLElement).closest('button')) {
+        e.preventDefault()
+        return
+      }
+      cardStates.get(el)?.onDragStart?.(e)
+    })
+  }
+  applyDockCardState(el, state)
+}
+
+/* ------------------------------------------------------------ 卡片内部 */
+
+function collapseButton(): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'dock-btn dock-card-btn'
+  btn.dataset.dockAction = 'collapse'
+  btn.setAttribute('aria-expanded', 'true')
+  btn.title = t('ui.dock.collapseCard')
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const card = btn.closest<HTMLElement>('.dock-card')
+    if (card) cardStates.get(card)?.onToggleCollapse()
+  })
+  return btn
+}
+
+function soloButton(): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'dock-btn dock-card-btn'
+  btn.dataset.dockAction = 'solo'
+  btn.setAttribute('aria-pressed', 'false')
+  btn.title = t('ui.dock.soloCard')
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const card = btn.closest<HTMLElement>('.dock-card')
+    if (card) cardStates.get(card)?.onToggleSolo()
+  })
+  return btn
+}
+
+function actionButton(a: DockCardAction): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'dock-btn dock-card-btn'
+  if (a.label === 'lucide:x') btn.dataset.dockAction = 'close'
+  renderIcon(btn, a.label, 'square')
+  if (a.title) {
+    btn.title = a.title
+    btn.setAttribute('aria-label', a.title)
+  }
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    a.onClick()
+  })
+  return btn
+}
+
+/**
+ * 把状态画到卡上。**只改属性，不搬 DOM**（搬 contenteditable 会丢光标）。
+ *
+ * 收起与单卡是两件事：收起隐藏 body，单卡由槽层用 `data-solo` 过滤其它卡。
+ */
+export function applyDockCardState(el: HTMLElement, state: DockCardState): void {
+  cardStates.set(el, state)
+  if (state.collapsed) el.dataset.collapsed = '1'
+  else delete el.dataset.collapsed
+
+  const collapse = el.querySelector<HTMLButtonElement>(`:scope > .dock-card-head [${ACTION_ATTR}="collapse"]`)
+  if (collapse) {
+    collapse.setAttribute('aria-expanded', state.collapsed ? 'false' : 'true')
+    collapse.title = state.collapsed ? t('ui.dock.expandCard') : t('ui.dock.collapseCard')
+    const icon = state.collapsed ? 'lucide:chevron-right' : 'lucide:chevron-down'
+    if (collapse.dataset.icon !== icon) renderIcon(collapse, icon, 'chevron-down')
+  }
+  const solo = el.querySelector<HTMLButtonElement>(`:scope > .dock-card-head [${ACTION_ATTR}="solo"]`)
+  if (solo) {
+    solo.setAttribute('aria-pressed', state.solo ? 'true' : 'false')
+    solo.title = state.solo ? t('ui.dock.unsoloCard') : t('ui.dock.soloCard')
+    const icon = state.solo ? 'lucide:minimize-2' : 'lucide:maximize-2'
+    if (solo.dataset.icon !== icon) renderIcon(solo, icon, 'maximize-2')
+  }
+}
+
+/* ------------------------------------------------------------ 槽的排布 */
+
+export interface DockCardEntry {
+  id: string
+  el: HTMLElement
+}
+
+/**
+ * 按 entries 的顺序排一个槽。
+ *
+ * ⚠️ **只移动顺序真的变了的节点**：`appendChild` 对已在文档里的节点是移动，
+ *    移动一个正在编辑的 contenteditable 会丢焦点与光标（每敲一个字跳一次）。
+ *    这里按位置逐个比对，原位不动。
+ * ⚠️ **隐藏的卡仍是 entry**：位置是布局，可用性是内容。从 DOM 里摘掉它，
+ *    后面所有卡都会往上跳；导航时「今天/检视卡」一会出现一会消失，卡就会闪。
+ */
+export function renderDockStack(
+  stack: HTMLElement,
+  entries: DockCardEntry[],
+  emptyText: string,
+  soloId: string | null,
+): void {
+  const keep = new Set<Node>(entries.map((e) => e.el))
+  for (const n of Array.from(stack.childNodes)) if (!keep.has(n)) stack.removeChild(n)
+
+  entries.forEach((entry, i) => {
+    const at = stack.children[i] ?? null
+    if (at !== entry.el) stack.insertBefore(entry.el, at)
+  })
+
+  const empty = stack.querySelector<HTMLElement>(':scope > .dock-empty')
+  if (entries.every((e) => e.el.hidden)) {
+    if (empty) empty.textContent = emptyText
+    else {
+      const p = document.createElement('p')
+      p.className = 'dock-empty'
+      p.textContent = emptyText
+      stack.appendChild(p)
+    }
+  } else empty?.remove()
+
+  // 单卡：目标必须**可见**才生效；不可见时照常显示其它卡（不留空槽）
+  const target = soloId ? entries.find((e) => e.id === soloId && !e.el.hidden) : undefined
+  if (target) stack.dataset.solo = '1'
+  else delete stack.dataset.solo
+  for (const e of entries) {
+    if (target && e === target) e.el.dataset.soloCard = '1'
+    else delete e.el.dataset.soloCard
+  }
 }
 
 /**

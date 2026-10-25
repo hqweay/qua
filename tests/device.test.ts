@@ -27,8 +27,10 @@ function assertDefaults(p: Prefs): void {
   assert.equal(p.radius, 12)
   assert.equal(p.badgeOpen, false)
   assert.deepEqual(p.dock, {
-    left: { open: true, width: null, pins: [] },
-    right: { open: true, width: null, pins: [] },
+    left: { open: true, width: null, cards: ['belongs', 'journal'] },
+    right: { open: true, width: null, cards: ['inspect', 'backrefs'] },
+    collapsedCards: {},
+    solo: { left: null, right: null },
   })
 }
 
@@ -50,8 +52,10 @@ test('device: 存了再读 ⇒ 主题／槽宽／钉住都原样回来', async (
       virtualize: true,
       radius: 28,
       dock: {
-        left: { open: false, width: 312, pins: ['b1', 'b2'] },
-        right: { open: true, width: null, pins: [] },
+        left: { open: false, width: 312, cards: ['belongs', 'b1', 'b2'] },
+        right: { open: true, width: null, cards: ['inspect'] },
+        collapsedCards: { belongs: true },
+        solo: { left: 'b1', right: null },
       },
     },
     folded: { b1: true, b2: true },
@@ -62,8 +66,10 @@ test('device: 存了再读 ⇒ 主题／槽宽／钉住都原样回来', async (
   assert.equal(loaded.prefs.theme, 'dark')
   assert.equal(loaded.prefs.virtualize, true)
   assert.equal(loaded.prefs.radius, 28)
-  assert.deepEqual(loaded.prefs.dock.left, { open: false, width: 312, pins: ['b1', 'b2'] })
-  assert.deepEqual(loaded.prefs.dock.right, { open: true, width: null, pins: [] })
+  assert.deepEqual(loaded.prefs.dock.left, { open: false, width: 312, cards: ['belongs', 'b1', 'b2'] })
+  assert.deepEqual(loaded.prefs.dock.right, { open: true, width: null, cards: ['inspect'] })
+  assert.deepEqual(loaded.prefs.dock.collapsedCards, { belongs: true })
+  assert.deepEqual(loaded.prefs.dock.solo, { left: 'b1', right: null })
   assert.deepEqual(loaded.folded, { b1: true, b2: true })
 })
 
@@ -81,6 +87,54 @@ test('device: 缺字段只补默认（与库无关：旧字节里没有的键不
   assert.deepEqual(loaded.prefs.dock, DEFAULT_PREFS.dock)
   assert.equal(loaded.prefs.radius, DEFAULT_PREFS.radius)
   assert.deepEqual(loaded.folded, {}, '缺这一格 ⇒ 空表，不是 `undefined`')
+})
+
+test('device: 旧设备状态的 `pins` 只在 `cards` 缺失时并入一次（不复活已删的窗口）', async () => {
+  resetMemoryLocalStorage()
+  const legacy = freshKey()
+  await createLocalStorageAdapter(legacy).commit({
+    changes: [],
+    payload: JSON.stringify({ prefs: { dock: { left: { open: true, pins: ['a', 'b'] } } } }),
+    savedAt: 1,
+  })
+  assert.deepEqual((await store(legacy).load()).prefs.dock.left.cards, ['belongs', 'journal', 'a', 'b'])
+
+  // `cards` 一旦存在就只认它：旧 `pins` 里剩下的 id 不回来
+  const next = freshKey()
+  await createLocalStorageAdapter(next).commit({
+    changes: [],
+    payload: JSON.stringify({
+      prefs: {
+        dock: {
+          left: { open: true, pins: ['a', 'b'], cards: ['belongs', 'journal', 'a'] },
+        },
+      },
+    }),
+    savedAt: 1,
+  })
+  assert.deepEqual((await store(next).load()).prefs.dock.left.cards, ['belongs', 'journal', 'a'])
+})
+
+test('device: 一个 id 不留在两个槽（左先到先得）；solo 指向不在本槽的 id ⇒ 清空', async () => {
+  resetMemoryLocalStorage()
+  const key = freshKey()
+  await createLocalStorageAdapter(key).commit({
+    changes: [],
+    payload: JSON.stringify({
+      prefs: {
+        dock: {
+          left: { open: true, cards: ['belongs', 'a'] },
+          right: { open: true, cards: ['a', 'inspect'] },
+          solo: { left: 'zzz', right: 'a' },
+        },
+      },
+    }),
+    savedAt: 1,
+  })
+  const dock = (await store(key).load()).prefs.dock
+  assert.deepEqual(dock.left.cards, ['belongs', 'a'])
+  assert.deepEqual(dock.right.cards, ['inspect'], '同一个 id 不同时留在两边')
+  assert.deepEqual(dock.solo, { left: null, right: null }, 'solo 目标必须在自己槽的清单里')
 })
 
 test('device: 折叠表只留 `true`（坏键 / false / 空 key 一律丢），整格坏 ⇒ 空表', async () => {
