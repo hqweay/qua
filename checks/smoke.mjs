@@ -7171,6 +7171,113 @@ await check(
   },
 )
 
+/**
+ * 这一条钉的是「**没有子块的块不许被记成折叠**」。
+ *
+ * 事故形状（实机）：点一条竖线 ⇒ 折它的**直接子块**，整组一起写折叠态。
+ * 组里那些自己没有子块的成员也被写了 `true` —— 它们没有子树可藏，
+ * 块标却画出折叠环（「这里收着东西」），点开什么都没有。
+ * 而这条记录还会存进设备的折叠表，跟着跑到下一次打开。
+ *
+ * ⇒ 断言落在**三个面**：折叠表只含有子块的那些、叶子块不画折叠环、再点能完整展开。
+ */
+await check(
+  'T100 点竖线只折「有子块的」成员：叶子块不记折叠、不画折叠环，再点完整展开',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+
+    /**
+     * 种子里的某一段天然就是这个形状：段头下面十几个子块，其中只有一两个自己还有子块。
+     * 用它而不是用按键现造树 —— 断言要盯的是「折叠语义」，不是「能不能建树」。
+     */
+    const shape = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('#editor .blk')]
+      // 找一个段头：它的直接子块里，既有带子块的、也有叶子
+      for (let i = 0; i < rows.length; i++) {
+        const head = rows[i]
+        if (head.dataset.depth !== '0' || !head.dataset.hasChildren) continue
+        const kids = []
+        for (let j = i + 1; j < rows.length && Number(rows[j].dataset.depth) > 0; j++) {
+          if (Number(rows[j].dataset.depth) === 1) kids.push(rows[j])
+        }
+        const withKids = kids.filter((k) => k.dataset.hasChildren === '1')
+        const leaves = kids.filter((k) => !k.dataset.hasChildren)
+        if (withKids.length > 0 && leaves.length > 0) {
+          return {
+            headId: head.dataset.blockId,
+            headRow: i,
+            withKids: withKids.map((k) => k.dataset.blockId),
+            leaves: leaves.map((k) => k.dataset.blockId),
+            rows: rows.length,
+          }
+        }
+      }
+      return null
+    })
+    assert(shape, '前置：种子里应有一段，其直接子块里既有带子块的、也有叶子')
+
+    /**
+     * 点「段头最内层的那一段导轨」＝ 折段头的直接子块。
+     * 段画在**子行**上，所以取任一子行上指向段头的段。
+     */
+    const railPos = await page.evaluate((headId) => {
+      const rail = document.querySelector(`#editor .blk .rail[data-fold-line-for="${headId}"]`)
+      if (!rail) return null
+      const r = rail.getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+    }, shape.headId)
+    assert(railPos, '段头应有可点的导轨段')
+
+    await page.mouse.click(railPos.x, railPos.y)
+    await page.waitForTimeout(400)
+
+    const after = await page.evaluate((s) => {
+      const folded = window.__qua.__editor.doc.folded ?? {}
+      const has = (id) => folded[id] === true
+      const ringOf = (id) => {
+        const el = document.querySelector(`#editor .blk[data-block-id="${id}"]`)
+        if (!el) return 'missing'
+        const cs = getComputedStyle(el.querySelector('.marker'), '::after')
+        return cs.content === 'none' ? 'none' : cs.borderTopWidth
+      }
+      return {
+        withKids: s.withKids.map((id) => ({ id: id.slice(-4), folded: has(id), ring: ringOf(id) })),
+        leaves: s.leaves.map((id) => ({ id: id.slice(-4), folded: has(id), ring: ringOf(id) })),
+        foldedCount: Object.keys(folded).length,
+      }
+    }, shape)
+
+    // ① 有子块的成员：折了，且画了折叠环
+    for (const k of after.withKids) {
+      assert(k.folded, `有子块的成员应被折：${JSON.stringify(k)}`)
+      assert(k.ring !== 'none', `折了就该画折叠环：${JSON.stringify(k)}`)
+    }
+    // ② 叶子成员：不许被记成折叠，也不许画环（它没有子树可藏）
+    for (const l of after.leaves) {
+      assert(!l.folded, `叶子块不许被记成折叠（没有子树可藏）：${JSON.stringify(l)}`)
+      assert(l.ring === 'none', `叶子块不许画折叠环（那是「这里收着东西」的承诺）：${JSON.stringify(l)}`)
+    }
+    assert(
+      after.foldedCount === shape.withKids.length,
+      `折叠表里只该有真有子块的那些：实际 ${after.foldedCount} 条，期望 ${shape.withKids.length}`,
+    )
+
+    // ③ 再点同一段 ⇒ 完整展开（叶子那批没被误记，不会让「整组已折」的判定卡住）
+    await page.mouse.click(railPos.x, railPos.y)
+    await page.waitForTimeout(400)
+    const back = await page.evaluate(() => ({
+      rows: document.querySelectorAll('#editor .blk').length,
+      folded: Object.keys(window.__qua.__editor.doc.folded ?? {}).length,
+    }))
+    assert(back.rows === shape.rows, `再点应恢复全部行：${back.rows} vs ${shape.rows}`)
+    assert(back.folded === 0, `展开后折叠表应为空：还剩 ${back.folded} 条`)
+
+    await ctx.close()
+    return `${shape.withKids.length} 个有子块的成员被折、${shape.leaves.length} 个叶子不记折叠也不画环；再点恢复 ${back.rows} 行`
+  },
+)
+
 /* ---------------------------------------------------------------- 汇总 */
 
 /** 判红的是「不在已知失败表里的失败」；已知失败逐条打印，不计入退出码 */

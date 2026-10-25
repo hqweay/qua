@@ -759,7 +759,19 @@ export function isFolded(doc: Doc, id: string): boolean {
   return doc.folded?.[id] === true
 }
 
+/**
+ * 写折叠态 —— **只有有子块的块才可能有折叠态**。
+ *
+ * 为什么这条判断放在写入口、而不是每次渲染再过滤一遍：
+ * 折叠的意义是「把子树藏起来」。叶子块没有子树可藏，标成折叠就是**记录了一个不存在的事实**
+ * —— 块标画出折叠环（「这里收着东西」），点开却什么都没有。而这条记录还会被存进设备状态的
+ * 折叠表里，跟着跑到下一次打开。
+ *
+ * ⇒ 入口防：`v === true` 且没有子块 ⇒ 不记（保持「全展开」这个默认态）。
+ *    `v === false` 永远放行：展开是用来**清**的，不该被同一条判断挡住。
+ */
 function writeFold(doc: Doc, id: string, v: boolean): void {
+  if (v && (locate(doc, id)?.block.children.length ?? 0) === 0) return
   const folded = { ...(doc.folded ?? {}) }
   if (v) folded[id] = true
   else delete folded[id]
@@ -778,9 +790,16 @@ export function setCollapsed(doc: Doc, id: string, v: boolean): boolean {
   return true
 }
 
+/**
+ * 折 / 展**该块自己**（折叠三角、`mod+.`）。
+ *
+ * ⚠️ **无子块 ⇒ `false`**（什么都没变）：折叠是「把子树藏起来」，没有子树就没有这个动作。
+ *    返回 `false` 让调用方跳过重渲染 —— 否则点一下会白画一屏，而屏幕上没有任何变化。
+ */
 export function toggleCollapsed(doc: Doc, id: string): boolean {
   const loc = locate(doc, id)
   if (!loc) return false
+  if (loc.block.children.length === 0) return false
   writeFold(doc, id, !isFolded(doc, id))
   return true
 }
@@ -801,13 +820,19 @@ export function toggleCollapsed(doc: Doc, id: string): boolean {
  * ⚠️ **判定必须按整组**：一组里只要还有开着的，这次就是「折」。
  *    逐个取反会让「一半折一半开」的组点一次之后仍是半折半开。
  *
- * @returns 本次意图：`true` ＝ 折了，`false` ＝ 展了；**无子块 ⇒ `null`**（调用方据此拒绝）
+ * ⚠️ **整组只看「有子块的成员」**：叶子没有可折的东西，写不进折叠态（见 `writeFold`）。
+ *    若把它们算进「还有开着的」，判定就会**永远**认为组没折完 —— 点一下之后再也展不开。
+ *
+ * @returns 本次意图：`true` ＝ 折了，`false` ＝ 展了；
+ *          **没有可折叠的成员 ⇒ `null`**（调用方据此拒绝：不记撤销、不重画）
  */
 export function toggleChildrenCollapsed(doc: Doc, id: string): boolean | null {
   const loc = locate(doc, id)
-  if (!loc || loc.block.children.length === 0) return null
-  const anyOpen = loc.block.children.some((c) => !isFolded(doc, c.id))
-  for (const c of loc.block.children) writeFold(doc, c.id, anyOpen)
+  if (!loc) return null
+  const foldable = loc.block.children.filter((c) => c.children.length > 0)
+  if (foldable.length === 0) return null
+  const anyOpen = foldable.some((c) => !isFolded(doc, c.id))
+  for (const c of foldable) writeFold(doc, c.id, anyOpen)
   return anyOpen
 }
 
