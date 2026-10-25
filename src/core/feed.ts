@@ -29,7 +29,7 @@ export const FEED_SPEC: QuerySpec = {
  * 「不造空天」是这条 spec 的自然结果——没有写过的日期没有块，也就不会命中。
  */
 export function feedDays(blocks: readonly Block[], limit: number): Block[] {
-  return runQuery({ ...FEED_SPEC, limit }, { blocks, atoms: [] })
+  return runQuery({ ...FEED_SPEC, limit }, { blocks })
     .map((h) => findById(blocks, h.blockId))
     .filter((b): b is Block => b !== undefined)
 }

@@ -73,8 +73,8 @@ export interface PageDeps {
    * 用于「同一块再点一次块标 ⇒ 不重装」的判据。
    */
   rootIds: () => readonly string[]
-  /** 把某页的子树装进编辑器（marks/atoms 是库级平铺） */
-  loadPage: (roots: Block[], marks: unknown[], atoms: unknown[]) => void
+  /** 把某页的子树装进编辑器（行内内容住块上，没有第二份要传） */
+  loadPage: (roots: Block[]) => void
   /**
    * 日记流的段排列（设备偏好）。命令层只读它——复盘带参、单列流随偏好，
    * 「偏好怎么写」是 `core.journal/feed-layout` 那一份的事。
@@ -86,8 +86,6 @@ export interface PageDeps {
   setShells: (cols: readonly ShellCol[]) => void
   /** 光标落到某一天的首个可编辑行（复盘在空天落笔、重装载之后要用） */
   focusDay: (date: string) => void
-  marks: () => unknown[]
-  atoms: () => unknown[]
   /** 切页前把编辑器里的内容写回当前页 + 立即持久化 */
   flush: () => void
   saveNow: () => void

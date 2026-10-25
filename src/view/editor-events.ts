@@ -13,7 +13,7 @@
  *   1. **组合期（IME composing）不重渲染该块**——否则会打断输入法，`compositionend` 后才补渲染；
  *   2. **键位一个都不在这里处理**——全部交给绑定表，这里只碰「输入与拖拽」。
  */
-import type { Atom } from '../core/index.ts'
+import type { RunWithId } from '../core/runs.ts'
 
 /**
  * 行内原子被点时按下了哪些修饰键。
@@ -87,7 +87,7 @@ export interface EditorBridge {
   /** 该块有没有子块（拖到 inside 要判）*/
   hasChildren: (id: string) => boolean
   /** 行内原子被点（`mods` 带修饰键：左键默认打开，⌥ 才看详情） */
-  onAtomClick: (atomId: string, el: HTMLElement, mods: AtomClickMods) => Atom | undefined
+  onAtomClick: (runId: string, el: HTMLElement, mods: AtomClickMods) => RunWithId | undefined
   /** 打开块菜单（悬停把手/圆点或右键）*/
   onBlockMenu: (blockId: string, rect: DOMRect) => void
   /**

@@ -16,6 +16,7 @@
  * ⚠️ 组件不写模型：所有写入经注入的回调（由装配层转成命令）。
  */
 import type { Block } from '../core/index.ts'
+import { plainText } from '../core/runs.ts'
 import type { FieldRow, PropKind } from '../core/index.ts'
 import { displayNameOf, declaredFieldIds, hasList, PROP_KINDS, propKindOf, uiPositionOf } from '../core/index.ts'
 import { t } from '../core/msg.ts'
@@ -358,7 +359,7 @@ export class PropertiesPanel {
           : ''
       const o = document.createElement('option')
       o.value = def.id
-      o.textContent = `${def.text.trim() || def.id} · ${t(`ui.props.kind.${propKindOf(def)}`)}${mark ? `（${mark}）` : ''}`
+      o.textContent = `${plainText(def.content).trim() || def.id} · ${t(`ui.props.kind.${propKindOf(def)}`)}${mark ? `（${mark}）` : ''}`
       o.disabled = mark !== ''
       pick.appendChild(o)
     }

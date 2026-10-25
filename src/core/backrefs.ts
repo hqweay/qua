@@ -4,13 +4,14 @@
  * 判据：右槽默认显示「谁指向了当前对象」。这是对**指向边**的一次查询，
  * 不是某个组件的事。所以算法住在这里、可脱离 DOM 单测；渲染在 `ui/`。
  *
- * ⚠️ 指向边的数据源是行内原子（`atoms[].target.id`）—— 引用与标签都是边。
+ * ⚠️ 指向边的数据源是块内容里的引用 run——引用与标签露面都是边。
  *   **算法本身不关心边存在哪**：从 `core/index-port.ts` 的索引里查，形状不变。
  * ⚠️ 指向不存在的目标（`dangling`）**不算**入向边，但也**不许静默**——
  *   由调用方在界面上呈现（这里只返回能解析的）。
  */
-import type { Atom, Block } from './index.ts'
+import type { Block } from './index.ts'
 import { incomingCount, incomingIds, rebuild, type Index } from './index-port.ts'
+import { plainText } from './runs.ts'
 
 /** 一条反链：谁指向了我。`pageId` 是来源所在的页（点开它）*/
 export interface BackrefSource {
@@ -23,10 +24,8 @@ export interface BackrefSource {
 }
 
 export interface BackrefInput {
-  /** 块森林（找来源页与命中块） */
+  /** 块森林（找来源页与命中块；指向边住在块内容里） */
   blocks: Block[]
-  /** 库级行内原子 */
-  atoms: Atom[]
   /** 被指向的对象（当前页） */
   targetId: string
   /**
@@ -43,8 +42,8 @@ export interface BackrefInput {
  * 而不是一处引用一个窗口）。条数用 `count` 表达，不重复占列表位。
  */
 export function backrefsOf(input: BackrefInput): BackrefSource[] {
-  const { blocks, atoms, targetId } = input
-  const idx = input.index ?? rebuild(blocks, atoms)
+  const { blocks, targetId } = input
+  const idx = input.index ?? rebuild(blocks)
 
   // 1) **查表**拿到所有指向目标的源块（引用与标签都是指向边，索引里已经合并）
   const sources = incomingIds(idx, targetId)
@@ -58,7 +57,7 @@ export function backrefsOf(input: BackrefInput): BackrefSource[] {
     if (!pageId || !hit) continue
     const acc = byPage.get(pageId) ?? { count: 0, firstText: null }
     acc.count += incomingCount(idx, targetId, blockId)
-    if (acc.firstText === null) acc.firstText = hit.text.trim()
+    if (acc.firstText === null) acc.firstText = plainText(hit.content).trim()
     byPage.set(pageId, acc)
   }
 
@@ -70,7 +69,7 @@ export function backrefsOf(input: BackrefInput): BackrefSource[] {
     out.push({
       pageId,
       // 命中块为空时退回页名（那也比空字符串好）
-      text: acc.firstText !== null && acc.firstText !== '' ? acc.firstText : page.text,
+      text: acc.firstText !== null && acc.firstText !== '' ? acc.firstText : plainText(page.content),
       count: acc.count,
     })
   }
@@ -93,16 +92,16 @@ export interface BackrefBlock {
 }
 
 export function backrefBlocks(input: BackrefInput): BackrefBlock[] {
-  const idx = input.index ?? rebuild(input.blocks, input.atoms)
+  const idx = input.index ?? rebuild(input.blocks)
   const out: BackrefBlock[] = []
   // 查表：源块清单 ＋ 次数 ＋ 归属页，全在索引里，不再遍历森林
   for (const blockId of incomingIds(idx, input.targetId)) {
     const hit = idx.blocks.get(blockId)
     const pageId = idx.pageOf.get(blockId)
     if (!hit || !pageId) continue
-    out.push({ blockId, pageId, text: hit.text, count: incomingCount(idx, input.targetId, blockId) })
+    out.push({ blockId, pageId, text: plainText(hit.content), count: incomingCount(idx, input.targetId, blockId) })
   }
-  // 顺序：按源块在森林里的先序（`incomingIds` 是原子的顺序，与原实现的「森林先序」不同，
+  // 顺序：按源块在森林里的先序（`incomingIds` 是引用 run 的顺序，与原实现的「森林先序」不同，
   // 但两者都稳定可复现；这里显式声明，免得以后有人以为是巧合）
   return out
 }

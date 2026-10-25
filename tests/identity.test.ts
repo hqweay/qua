@@ -30,10 +30,11 @@ import {
   type Block,
   type Doc,
 } from '../src/core/index.ts'
+import { plainText } from '../src/core/runs.ts'
 
 const j = (date: string, children: Block[] = []): Block => ({
   id: `j-${date}`,
-  text: '',
+  content: [],
   children,
   props: { _date: date },
 })
@@ -63,8 +64,8 @@ test('合并：前一块是字段定义 ⇒ 不成立，名字与两边正文都
   const doc: Doc = { roots: [schema, child] }
 
   assert.equal(mergeIntoPrev(doc, child.id), null)
-  assert.equal(schema.text, '截止日', '定义的名字是身份，不该被并进来的正文改写')
-  assert.equal(child.text, '一行内容', '合并不成立 ⇒ 被并的块也不能丢正文')
+  assert.equal(plainText(schema.content), '截止日', '定义的名字是身份，不该被并进来的正文改写')
+  assert.equal(plainText(child.content), '一行内容', '合并不成立 ⇒ 被并的块也不能丢正文')
   assert.equal(doc.roots.length, 2, '两个块都还在')
 })
 
@@ -74,7 +75,7 @@ test('合并：前一块是日记 ⇒ 不成立，日期投影恒空', () => {
   const doc: Doc = { roots: [day] }
 
   assert.equal(mergeIntoPrev(doc, child.id), null)
-  assert.equal(day.text, '', '日期行的正文是 `_date` 的只读投影，恒空')
+  assert.equal(plainText(day.content), '', '日期行的正文是 `_date` 的只读投影，恒空')
   assert.equal(day.children.length, 1, '子块没被摘走')
 })
 
@@ -86,7 +87,7 @@ test('合并：前一块是标签 ⇒ 照旧合并；名字（别名）不受影
 
   const r = mergeIntoPrev(doc, child.id)
   assert.ok(r, '标签正文是描述 ⇒ 内容写路径不再拦它')
-  assert.equal(tag.text, '设计后面那段', '描述拼接')
+  assert.equal(plainText(tag.content), '设计后面那段', '描述拼接')
   assert.deepEqual(tag.props?._aliases, ['设计'], '地址一个字节不动')
 })
 
@@ -98,10 +99,10 @@ test('合并：前一块是普通内容块 ⇒ 照旧合并（回归）', () => 
   const r = mergeIntoPrev(doc, cur.id)
   assert.ok(r, '普通内容块之间必须还能合并')
   assert.equal(r.kept, prev.id, '前一块保留 id')
-  assert.equal(prev.text, '前半后半')
+  assert.equal(plainText(prev.content), '前半后半')
   // 合并是**原位标记**：被并块留在树上的原位（不可见），不再从树里摘掉
   assert.deepEqual(doc.roots.map((b) => b.id), [prev.id, cur.id])
-  assert.equal(cur.text, '', '空壳应清空（正文已搬进前一块）')
+  assert.equal(plainText(cur.content), '', '空壳应清空（正文已搬进前一块）')
   assert.ok(cur.props?._deletedAt, '带删除标记')
 })
 
@@ -125,7 +126,7 @@ test('复制子树：属性值带走、身份不带走，且每一块都发新 i
   assert.equal(block.props?._display, undefined, '副本不带显示模式：那是身份的一部分')
   assert.equal(block.props?._icon, 'lucide:file', '属性值要一起带走（图标、日期、字段值）')
   assert.notEqual(block.props, page.props, '属性袋是副本，不是同一个对象')
-  assert.equal(block.text, '某页')
+  assert.equal(plainText(block.content), '某页')
 
   const kidCopy = block.children[0]!
   assert.notEqual(kidCopy.id, kid.id, '子树里每一块都发新 id')

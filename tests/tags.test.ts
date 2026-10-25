@@ -14,6 +14,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
+import { plainText, textRuns } from '../src/core/runs.ts'
+import { writeBlockContent } from '../src/core/model.ts'
 import {
   addTagId,
   allTags,
@@ -33,7 +35,7 @@ import {
   trailingHashTag,
 } from '../src/core/index.ts'
 
-const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, text, children: [], ...extra })
+const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, content: textRuns(text), children: [], ...extra })
 
 test('① ensureTag：找到或创建，幂等（第二次不新建）', () => {
   const forest: Block[] = []
@@ -59,7 +61,7 @@ test('①b addTagId / removeTagId：写块上的归属，正文不动，幂等�
   assert.equal(addTagId(block, design.id), true)
   assert.equal(addTagId(block, todo.id), true)
   assert.deepEqual(tagIdsOf(block), [design.id, todo.id], '追加到末尾 ⇒ 顺序＝用户打的先后')
-  assert.equal(block.text, '正文里一个字都不该变', '归属是块级字段，不占正文')
+  assert.equal(plainText(block.content), '正文里一个字都不该变', '归属是块级字段，不占正文')
   assert.equal(addTagId(block, design.id), false, '同一标签打两次只算一条')
 
   assert.equal(removeTagId(block, design.id), true)
@@ -110,7 +112,7 @@ test('④ 标签改名 ⇒ 显示名跟着变，但归属的判定不变（认 i
 
   const before = findTagByName(forest, 'todo')?.id
   // 名字在 `_aliases` 里；写正文（描述）**不该**改地址
-  todo.text = '待办'
+  writeBlockContent(todo, textRuns('待办'))
   assert.equal(findTagByName(forest, '待办'), undefined, '正文不是地址 ⇒ 改正文不改名字')
   assert.equal(findTagByName(forest, 'todo')?.id, before, '地址仍是 todo')
 
@@ -183,30 +185,35 @@ test('⑥c tagsOf：归属指向的块不在了 ⇒ 那一格跳过（不造假�
 })
 
 test('⑥d edgeSourceIds：引用与**行内标签**都算指向边（改名要重画它们）', () => {
-  const atoms = [
-    { id: 'e1', kind: 'page' as const, blockId: 'a', start: 0, end: 1, label: 'x', target: { kind: 'page' as const, id: 't1' } },
-    { id: 'e2', kind: 'image' as const, blockId: 'b', start: 0, end: 1, label: 'p.png' },
-    { id: 'e3', kind: 'tag' as const, blockId: 'c', start: 2, end: 3, label: '设计', target: { kind: 'block' as const, id: 't2' } },
-  ]
-  assert.deepEqual([...edgeSourceIds(atoms, 't1')], ['a'])
-  assert.deepEqual([...edgeSourceIds(atoms, 't2')], ['c'], '行内标签的显示名也是解析出来的 ⇒ 改名要重画')
-  assert.deepEqual([...edgeSourceIds(atoms, 'p.png')], [], '图片不指块，天然不是指向边')
+  // a 引用 t1；b 带一张图片；c 有一枚行内标签露面（指向 t2）
+  const blocks = [
+    { id: 'a', content: [ { id: 'e1', t: 'ref' as const, to: 't1', label: 'x' } ], children: [] },
+    { id: 'b', content: [ { id: 'e2', t: 'image' as const, asset: { hash: 'h', state: 'ready' as const } } ], children: [] },
+    { id: 'c', content: [ ...textRuns('前'), { id: 'e3', t: 'ref' as const, to: 't2', flavor: '#' as const, label: '设计' } ], children: [] },
+  ] as unknown as import('../src/core/model.ts').Block[]
+  assert.deepEqual([...edgeSourceIds(blocks, 't1')], ['a'])
+  assert.deepEqual([...edgeSourceIds(blocks, 't2')], ['c'], '行内标签的显示名也是解析出来的 ⇒ 改名要重画')
+  assert.deepEqual([...edgeSourceIds(blocks, 'p.png')], [], '图片不指块，天然不是指向边')
 })
 
-test('⑥e inlineTagIdsOf：按出现位置排序、同块去重、只认 tag 原子', () => {
-  const atoms = [
-    { id: 't1', kind: 'tag' as const, blockId: 'b', start: 8, end: 9, label: '乙', target: { kind: 'block' as const, id: 'tag-b' } },
-    { id: 't2', kind: 'tag' as const, blockId: 'b', start: 2, end: 3, label: '甲', target: { kind: 'block' as const, id: 'tag-a' } },
-    { id: 't3', kind: 'tag' as const, blockId: 'b', start: 14, end: 15, label: '甲', target: { kind: 'block' as const, id: 'tag-a' } },
-    { id: 't4', kind: 'page' as const, blockId: 'b', start: 0, end: 1, label: '页', target: { kind: 'page' as const, id: 'p' } },
-    { id: 't5', kind: 'tag' as const, blockId: 'other', start: 0, end: 1, label: '丙', target: { kind: 'block' as const, id: 'tag-c' } },
-  ]
-  assert.deepEqual(inlineTagIdsOf('b', atoms), ['tag-a', 'tag-b'], '按位置排；同名的第二枚不重复；别的块不算')
+test('⑥e inlineTagIdsOf：按出现位置排序、同块去重、只认带 # 风味的引用', () => {
+  // b 的内容：普通引用 p ＋ 露面甲 ＋ 露面乙 ＋ 第二枚甲；other 是别的块
+  const b = {
+    id: 'b',
+    content: [
+      { id: 't4', t: 'ref' as const, to: 'p', label: '页' },
+      { id: 't2', t: 'ref' as const, to: 'tag-a', flavor: '#' as const, label: '甲' },
+      { id: 't1', t: 'ref' as const, to: 'tag-b', flavor: '#' as const, label: '乙' },
+      { id: 't3', t: 'ref' as const, to: 'tag-a', flavor: '#' as const, label: '甲' },
+    ],
+    children: [],
+  } as unknown as import('../src/core/model.ts').Block
+  assert.deepEqual(inlineTagIdsOf(b), ['tag-a', 'tag-b'], '按位置排；同名的第二枚不重复；普通引用不算露面')
 })
 
 test('mkTagBlock：名字进 `_aliases`（不带 #），正文是描述，露面是 tag', () => {
   const t = mkTagBlock(' 设计 ')
-  assert.equal(t.text, '设计', '描述的初值可以等于名字')
+  assert.equal(plainText(t.content), '设计', '描述的初值可以等于名字')
   assert.deepEqual(t.props?._aliases, ['设计'])
   assert.deepEqual(t.props?._lists, ['tag'])
   assert.equal(t.props?._display, 'alias')

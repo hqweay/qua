@@ -13,13 +13,14 @@ import {
   isDeleted,
   isJournalBlock,
   mkBlock,
-  writeBlockText,
+  writeBlockContent,
   type Block,
   type BlockProps,
   type Doc,
   type Located,
 } from './model.ts'
 import { canWriteText, typeDeclOf } from './types.ts'
+import { isEmptyContent, joinRuns, plainLen, sliceRuns, splitRuns, cloneRunsNewIds, textRuns } from './runs.ts'
 import { walkForest } from './walk.ts'
 export function locate(doc: Doc, id: string): Located | null {
   let found: Located | null = null
@@ -222,7 +223,9 @@ export function cloneSubtree(b: Block): { block: Block; idMap: Map<string, strin
     idMap.set(x.id, id)
     return {
       id,
-      text: x.text,
+      // 行内内容随副本走，但**原子发新 id**：复制的是内容不是身份，
+      // 两枚同名引用是两个独立的行内对象（按 run id 删一枚不该删掉两枚）
+      content: cloneRunsNewIds(x.content),
       children: x.children.map(cp),
       // ⚠️ 折叠态**不随副本走**：那是「这一行此刻收着」，不是这块的内容。
       ...(x.props ? { props: contentProps(x.props) } : {}),
@@ -252,9 +255,9 @@ export function cloneSubtree(b: Block): { block: Block; idMap: Map<string, strin
 export function splitBlockBefore(doc: Doc, id: string, offset: number): { kept: string; inserted: string } | null {
   const loc = locate(doc, id)
   if (!loc) return null
-  const off = Math.max(0, Math.min(offset, loc.block.text.length))
-  const b = mkBlock(loc.block.text.slice(0, off))
-  writeBlockText(loc.block, loc.block.text.slice(off))
+  const [left, right] = splitRuns(loc.block.content, Math.max(0, Math.min(offset, plainLen(loc.block.content))))
+  const b = mkBlock(left)
+  writeBlockContent(loc.block, right)
   const list = siblingsOf(doc, loc.parent)
   list.splice(loc.index, 0, b)
   return { kept: loc.block.id, inserted: b.id }
@@ -278,10 +281,10 @@ export function splitBlockBefore(doc: Doc, id: string, offset: number): { kept: 
 export function splitBlockIntoFirstChild(doc: Doc, id: string, offset: number): { kept: string; inserted: string } | null {
   const loc = locate(doc, id)
   if (!loc) return null
-  const off = Math.max(0, Math.min(offset, loc.block.text.length))
-  if (off <= 0) return null
-  const b = mkBlock(loc.block.text.slice(off))
-  writeBlockText(loc.block, loc.block.text.slice(0, off))
+  const [left, right] = splitRuns(loc.block.content, Math.max(0, Math.min(offset, plainLen(loc.block.content))))
+  if (left.length === 0 || right.length === 0) return null
+  const b = mkBlock(right)
+  writeBlockContent(loc.block, left)
   unfoldBlock(doc, loc.block.id)
   loc.block.children.unshift(b)
   return { kept: loc.block.id, inserted: b.id }
@@ -317,8 +320,9 @@ export function splitBlockIntoFirstChild(doc: Doc, id: string, offset: number): 
 export function enterKind(doc: Doc, id: string, offset: number): 'split' | 'child' | 'sibling' | 'outdent' {
   const loc = locate(doc, id)
   if (!loc) return 'sibling'
-  if (loc.block.text.length === 0 && canOutdent(doc, loc.parent)) return 'outdent'
-  if (offset < loc.block.text.length) return 'split'
+  const len = plainLen(loc.block.content)
+  if (len === 0 && canOutdent(doc, loc.parent)) return 'outdent'
+  if (offset < len) return 'split'
   const expandedWithChildren = loc.block.children.length > 0 && !isFolded(doc, id)
   return expandedWithChildren ? 'child' : 'sibling'
 }
@@ -378,10 +382,10 @@ export function insertFirstChild(doc: Doc, id: string): Block | null {
 export interface MergePlan {
   kept: string
   removed: string
-  /** 粘接点：前一块**原**正文长度（锚点整体后移这么多） */
+  /** 粘接点：前一块**原**正文长度（合并后光标落在这） */
   at: number
-  /** 合并后的正文 */
-  text: string
+  /** 合并后的行内内容 */
+  content: ReturnType<typeof joinRuns>
   /** 被并块的直接子块（按原序挂到前一块末尾） */
   children: string[]
   /** 前一块此刻的子块数：子块依次落在它后面 */
@@ -397,8 +401,8 @@ export function mergeIntoPrevPlan(doc: Doc, id: string): MergePlan | null {
   return {
     kept: prev.id,
     removed: id,
-    at: prev.text.length,
-    text: prev.text + loc.block.text,
+    at: plainLen(prev.content),
+    content: joinRuns(prev.content, loc.block.content),
     children: loc.block.children.map((b) => b.id),
     kidsAt: prev.children.length,
   }
@@ -411,10 +415,10 @@ export function mergeIntoPrev(doc: Doc, id: string): { kept: string; removed: st
   const loc = locate(doc, plan.removed)!
   const prev = locate(doc, plan.kept)!.block
   prev.children.push(...loc.block.children)
-  writeBlockText(prev, plan.text)
-  // 被并块**原位标记**（不摘树，与 `removeBlock` 同一条口径）：正文已搬走，壳清空——
-  // 留着正文就是库里有两份同一句话
-  writeBlockText(loc.block, '')
+  writeBlockContent(prev, plan.content)
+  // 被并块**原位标记**（不摘树，与 `removeBlock` 同一条口径）：内容已搬走，壳清空——
+  // 留着内容就是库里有两份同一句话
+  writeBlockContent(loc.block, [])
   loc.block.props = { ...(loc.block.props ?? {}), [DELETED_AT_PROP]: Date.now() }
   return { kept: plan.kept, removed: plan.removed, at: plan.at }
 }
@@ -436,10 +440,10 @@ export function mergeIntoPrev(doc: Doc, id: string): { kept: string; removed: st
  */
 export function prevPlaceholder(doc: Doc, id: string): { removed: string } | null {
   const loc = locate(doc, id)
-  if (!loc || loc.block.text !== '') return null
+  if (!loc || !isEmptyContent(loc.block.content)) return null
   const prev = prevBlock(doc, id)
   if (!prev) return null
-  if (prev.text !== '' || isJournalBlock(prev) || canWriteText(prev)) return null
+  if (!isEmptyContent(prev.content) || isJournalBlock(prev) || canWriteText(prev)) return null
   return { removed: prev.id }
 }
 
@@ -490,7 +494,7 @@ export function replaceBlockRange(doc: Doc, fromId: string, toId: string, lines:
   }
   // 不可写的首块不承载正文：另造一块，首块随这一整段一起被替换掉
   const sink = canWriteText(first) ? first : mkBlock('')
-  const kept = lines.map((t, n) => (n === 0 ? (writeBlockText(sink, t), sink) : mkBlock(t)))
+  const kept = lines.map((t, n) => (n === 0 ? (writeBlockContent(sink, textRuns(t)), sink) : mkBlock(t)))
   list.splice(idx, removed.size || j - i + 1, ...kept)
   return kept.map((b) => b.id)
 }
@@ -555,7 +559,8 @@ export function deleteBlockSpan(doc: Doc, startId: string, startOff: number, end
    */
   if (!canWriteText(head) || !canWriteText(tail)) return null
 
-  writeBlockText(head, head.text.slice(0, startOff) + tail.text.slice(endOff))
+  // 首块前半 ＋ 末块后半：原子的归属按切点自然分家（要么整枚在前半、要么整枚在后半）
+  writeBlockContent(head, joinRuns(sliceRuns(head.content, 0, startOff), sliceRuns(tail.content, endOff, plainLen(tail.content))))
   // 首块的子树保留（选区不含它们）；被删掉的那些块连子树一起消失
   list.splice(from + 1, to - from)
   return head.id

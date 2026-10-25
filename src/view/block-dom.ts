@@ -14,7 +14,6 @@
  *   3. gutter（块标/箭头/导轨）**不混进 `.tx`**：读回模型时会把它当成字。
  */
 import {
-  ATOM_PLACEHOLDER,
   DEFAULT_BLOCK_TYPE,
   DIVIDER_TYPE,
   DISPLAY_PROP,
@@ -26,22 +25,19 @@ import {
   isJournal,
   journalDate,
   journalDateLabel,
-  mkAtom,
   primaryAliasOf,
   prop,
   refTitle,
   tagIdsOf,
   typeDeclOf,
-  type Atom,
   type Block,
   type FindBlock,
   type FoldState,
   type GutterField,
-  type Mark,
-  type MarkType,
   type RefView,
   type VisibleRow,
 } from '../core/index.ts'
+import { MARK_TYPES, isEmptyContent, plainText, refRunsOf, type MarkType, type RunWithId } from '../core/runs.ts'
 import { t } from '../core/msg.ts'
 import { danglingView, resolveRefs } from '../core/ref.ts'
 import { createIcon } from './icons.ts'
@@ -81,7 +77,7 @@ export function thumbUri(seed: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
 }
 
-/** 区间锚点 → 语义标签：粗体用 `strong` 之类，让复制出去也是对的 */
+/** 格式 → 语义标签：粗体用 `strong` 之类，让复制出去也是对的 */
 export function tagForMark(t: MarkType): string {
   switch (t) {
     case 'bold':
@@ -96,53 +92,63 @@ export function tagForMark(t: MarkType): string {
 }
 
 /**
- * 行内原子 → inline 元素（**占 1 格**，不可编辑，可点开）。
+ * 行内原子 run → inline 元素（**占 1 格**，不可编辑，可点开）。
  *
- * `view` 是**解析结果**（`core/ref.ts`），不是 `atom.label`：
- * 目标改名后 `label` 是过期的字，显示的必须是 `view.label`。
- * ⚠️ 图片原子不走解析（它的显示名是资产名，不指向块）⇒ `view` 可选。
+ * `view` 是**解析结果**（`core/ref.ts`），不是 run 上的名字快照：
+ * 目标改名后快照是过期的字，显示的必须是 `view.label`。
+ * ⚠️ 图片不走解析（它的显示名是资产名，不指向块）⇒ `view` 可选。
  */
-export function makeAtomEl(a: Atom, view?: RefView): HTMLElement {
-  const label = view?.label ?? a.label
+export function makeRunEl(r: RunWithId, view?: RefView): HTMLElement {
+  const label = r.t === 'link' ? r.v : (view?.label ?? (r.t === 'ref' ? r.label : undefined) ?? (r.t === 'image' ? (r.asset.name ?? '') : ''))
+  const kind = r.t === 'ref' ? (r.flavor === '#' ? 'tag' : 'page') : r.t
   const el = document.createElement('span')
-  el.className = `atom atom-${a.kind}`
+  el.className = `atom atom-${kind}`
   if (view?.state === 'dangling') el.classList.add('dangling')
-  if (a.asset?.state === 'missing') el.classList.add('missing')
+  if (r.t === 'image' && r.asset.state === 'missing') el.classList.add('missing')
   el.contentEditable = 'false'
-  el.dataset.atomId = a.id
+  el.dataset.atomId = r.id
   // ⚠️ 解析后的显示名**另存一份到 `data-ref-label`**：`.atom-label` 里带 `[[ ]]`／`#` 装饰，
-  //    而落盘值 `atom.label` 是过期的快照 —— 给探针一个「此刻真的在显示什么」的读点。
-  if (a.kind === 'page' || a.kind === 'tag') el.dataset.refLabel = label
+  //    而 run 上的名字快照是过期的 —— 给探针一个「此刻真的在显示什么」的读点。
+  if (r.t === 'ref' || r.t === 'link') el.dataset.refLabel = label
   el.title =
-    a.kind === 'page'
-      ? t(view?.state === 'dangling' ? 'ui.atom.pageDanglingTitle' : 'ui.atom.pageTitle', { label })
-      : a.kind === 'tag'
+    r.t === 'image'
+      ? t('ui.atom.imageTitle', { label })
+      : kind === 'tag'
         ? t(view?.state === 'dangling' ? 'ui.atom.tagDanglingTitle' : 'ui.atom.tagTitle', { label })
-        : t('ui.atom.imageTitle', { label })
-  if (a.kind === 'tag') {
+        : t(view?.state === 'dangling' ? 'ui.atom.pageDanglingTitle' : 'ui.atom.pageTitle', { label })
+  if (kind === 'tag') {
     /**
      * 行内标签：**`#名字` 停在敲下的那一格**。
      *
      * ⚠️ 它占正文 1 格（`data-atom-id`），但**不是** chip（不设 `data-tag-id`）：
      *    chip 的读数规则是「跳过、长度为 0」，而这一枚必须被读成 1 格，
-     *    否则正文、光标、区间锚点会整体错位。
+     *    否则正文、光标会整体错位。
      */
     const text = document.createElement('span')
     text.className = 'atom-label'
     text.textContent = `#${label}`
     el.append(text)
-  } else if (a.kind === 'image') {
+  } else if (r.t === 'image') {
     const img = document.createElement('img')
     img.className = 'asset-thumb'
     img.alt = ''
-    img.src = thumbUri(a.asset?.hash ?? a.id)
+    img.src = thumbUri(r.asset.hash)
     const name = document.createElement('span')
     name.className = 'asset-name'
     name.textContent = label
     el.append(img, name)
+  } else if (r.t === 'link') {
+    /**
+     * 外链：显示文本是内容的一部分（`v` 进投影），`url` 只是目标。
+     * 仍按**不可分原子**渲染（占 1 格）——链接是一枚行内对象，不是一串字。
+     */
+    const text = document.createElement('span')
+    text.className = 'atom-label'
+    text.textContent = label
+    el.append(text)
   } else {
     /**
-     * ⚠️ `[[ ]]` 不进正文：正文里那一格只有 U+FFFC，
+     * ⚠️ `[[ ]]` 是**显示装饰**，不进模型：run 上存的是目标 id ＋ 名字快照，
      *    否则「引用目标的正文」与「它在引用处显示的字」会变成两个要同步的东西。
      */
     const ico = document.createElement('span')
@@ -195,8 +201,8 @@ export function isReadonlyBlock(b: Block): boolean {
 }
 
 /**
- * 把一个块的文本装进 `.tx`：按「锚点端点 ∪ 原子端点 ∪ 占位符位置」切段，
- * 每段套上覆盖它的区间标签。
+ * 把一个块的行内内容装进 `.tx`：run 依序画——文本段按自己的 marks 套语义标签，
+ * 原子画成不可分元素。
  *
  * ⚠️ 空块必须留一个可落光标的锚点（`<br>`）：Chrome 里空的 inline span 不接受插入，
  *   会把输入落到上一个文本节点（实测：Enter 拆出空块后紧接着打字会跑进前一块）。
@@ -205,66 +211,36 @@ export function isReadonlyBlock(b: Block): boolean {
 export function fillBlockText(
   tx: HTMLElement,
   b: Block,
-  marks: Mark[],
-  atoms: Atom[],
   /**
    * **引用解析**（可选）：传了 ⇒ 行内引用显示**目标当前的名字**。
-   * 不传 ⇒ 退回 `atom.label` 快照（那是过期的字，只在拿不到森林的场合容忍）。
+   * 不传 ⇒ 退回 run 上的名字快照（那是过期的字，只在拿不到森林的场合容忍）。
    */
   find?: FindBlock,
 ): void {
   tx.textContent = ''
-  const text = b.text
-  const myMarks = marks.filter((m) => m.blockId === b.id)
-  const myAtoms = atoms.filter((a) => a.blockId === b.id)
-  const views = find ? resolveRefs(find, myAtoms) : undefined
+  const refRuns = refRunsOf(b.content)
+  const views = find ? resolveRefs(find, refRuns) : undefined
 
-  const cuts = new Set<number>([0, text.length])
-  const clamp = (n: number): number => Math.max(0, Math.min(n, text.length))
-  for (const m of myMarks) {
-    cuts.add(clamp(m.start))
-    cuts.add(clamp(m.end))
-  }
-  for (const a of myAtoms) {
-    cuts.add(clamp(a.start))
-    cuts.add(clamp(a.end))
-  }
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === ATOM_PLACEHOLDER) {
-      cuts.add(i)
-      cuts.add(i + 1)
-    }
-  }
-
-  const pts = [...cuts].filter((p) => p >= 0 && p <= text.length).sort((a, z) => a - z)
-  for (let k = 0; k < pts.length - 1; k++) {
-    const s = pts[k]!
-    const e = pts[k + 1]!
-    if (s === e) continue
-    const seg = text.slice(s, e)
-
-    // 占位符 ⇒ 原子元素（找不到对应原子就画成 dangling，**不静默吞掉**）
-    if (seg === ATOM_PLACEHOLDER) {
-      const a = myAtoms.find((x) => x.start === s)
-      if (a) tx.appendChild(makeAtomEl(a, views?.get(a.id)))
-      else tx.appendChild(makeAtomEl(mkAtom('page', b.id, s, t('ui.atom.unknown')), danglingView(t('ui.atom.unknown'))))
+  for (const r of b.content) {
+    if (r.t === 'text') {
+      // 格式的嵌套顺序固定（按注册表序）：同一 run 每次渲染出同一棵 DOM，
+      // 读回时按 class 集合解析，不依赖顺序
+      let node: Node = document.createTextNode(r.v)
+      for (const m of MARK_TYPES) {
+        if (!r.marks?.includes(m)) continue
+        const wrap = document.createElement(tagForMark(m))
+        wrap.className = `mk mk-${m}`
+        wrap.appendChild(node)
+        node = wrap
+      }
+      tx.appendChild(node)
       continue
     }
-
-    /**
-     * ⚠️ 这里**不扫 `#标签`**：正文里的标签是一枚 `tag` 原子（上一支），不是靠正则认出来的字。
-     *    靠正则认会得到第二套解析（改名不跟、删字不摘、和归属对不上——都真踩过）。
-     *    所以走到这里的 `#设计` 就只是普通文本（用户还没敲分隔符 / 不是标签语法）。
-     */
-    const covering = myMarks.filter((m) => m.start <= s && m.end >= e)
-    let node: Node = document.createTextNode(seg)
-    for (const m of covering) {
-      const wrap = document.createElement(tagForMark(m.type))
-      wrap.className = `mk mk-${m.type}`
-      wrap.appendChild(node)
-      node = wrap
+    if (r.t === 'ref') {
+      tx.appendChild(makeRunEl(r, views?.get(r.id) ?? danglingView(r.label ?? t('ui.atom.unknown'))))
+      continue
     }
-    tx.appendChild(node)
+    tx.appendChild(makeRunEl(r))
   }
 
   if (tx.childNodes.length === 0) tx.appendChild(document.createElement('br'))
@@ -274,14 +250,14 @@ export function fillBlockText(
    * 但不在正文里（见 `makeTagChipEl` 的说明）。
    *
    * ⚠️ **已经在正文里露面的标签不再出 chip**：同一格归属只占一个显示位置。
-   *    行内那枚是 1 格原子（在正文里），chip 是追加的 0 格装饰 —— 两个都画，
+   *    行内那枚是 1 格引用 run（在正文里），chip 是追加的 0 格装饰 —— 两个都画，
    *    用户会看到两个 `#名`，而且删掉正文里那个，chip 还留着一个「幽灵」。
    * ⚠️ 名字走 `refTitle`（现算）：标签块改名后 chip 上的字要跟着变，
    *    所以这里不存名字、只认 id。目标块不在 ⇒ 这条归属没有可显示的名字，跳过。
    * ⚠️ `<br>` 先于 chip 挂上去：空块也必须有一个能落光标的位置在 chip **之前**。
    */
   if (find) {
-    const inline = new Set(inlineTagIdsOf(b.id, atoms))
+    const inline = new Set(inlineTagIdsOf(b))
     for (const tagId of tagIdsOf(b)) {
       if (inline.has(tagId)) continue
       const tag = find(tagId)
@@ -573,15 +549,15 @@ export function makeBlockEl(
      * 类型不可写的块没有可显示的内容（分割线的线本身就是全部），不挂占位——
      * 否则会在一条线旁边多出一行日期。
      */
-    if (b.text !== '') {
+    if (!isEmptyContent(b.content)) {
       // 兜底：万一旧数据里 journal 有正文（不该发生），仍要能看见它
-      tx.dataset.ph = b.text
+      tx.dataset.ph = plainText(b.content)
       tx.dataset.phReadonly = '1'
     } else if (isJournal(b)) {
       tx.dataset.ph = journalDateLabel(journalDate(b))
       tx.dataset.phReadonly = '1'
     }
-  } else if (b.text === '') {
+  } else if (isEmptyContent(b.content)) {
     // 空块的幽灵占位：CSS 生成内容，**不进 DOM 文本**
     tx.dataset.ph = opts.single ? t('ui.block.placeholderFirst') : t('ui.block.placeholderEmpty')
   }

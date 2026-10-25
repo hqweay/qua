@@ -4,6 +4,7 @@
  */
 
 import { uuidv7Hex } from './ids.ts'
+import { normalizeRuns, textRuns, type Anno, type Run } from './runs.ts'
 
 /**
  * 「任务做完了没有」的**读法**（不是落盘形状）。
@@ -113,8 +114,18 @@ export type FoldState = Record<string, true>
 
 export interface Block {
   id: string
-  text: string
+  /**
+   * **行内内容 ＝ run 序列**（文本段与不可分的行内原子；见 `core/runs.ts`）。
+   * 空块 ＝ `[]`。要一段「纯文本长什么样」用 `plainText(content)` 投影，
+   * 别在这里找字符串字段——投影是派生的，存着的只有 runs。
+   */
+  content: Run[]
   children: Block[]
+  /**
+   * **可引用区间**（按需物化）：只有被别处引用时才存在；没有就保持 `undefined`，
+   * 不写空数组（空壳会让「有没有」出现两份答案）。
+   */
+  annos?: Anno[]
   /**
    * **属性**（属性是块第一公民）：任何块可直接有属性，不需标签即可赋值。
    *
@@ -323,21 +334,23 @@ export interface Located {
   block: Block
 }
 
-export function mkBlock(text = '', extra: Partial<Pick<Block, 'props'>> = {}): Block {
-  return { id: uuidv7Hex(), text, children: [], ...extra }
+export function mkBlock(init: string | readonly Run[] = '', extra: Partial<Pick<Block, 'props'>> = {}): Block {
+  const content = typeof init === 'string' ? textRuns(init) : normalizeRuns(init)
+  return { id: uuidv7Hex(), content, children: [], ...extra }
 }
 
 /**
- * **写块正文的唯一入口。**
+ * **写块内容的唯一入口。**
  *
- * 正文有两重身份：内容块的正文是**内容**，带身份块的正文是**名字**。把写入收在一处，
- * 是为了让「这次写的是内容还是名字」的判断只有一个落点 —— 否则每加一条写路径都要
- * 各自记得它，漏一条就是一次静默改写（块首退格把子块并进前块时改掉标签名，就是这样发生的）。
+ * 内容有两重身份：普通块的内容是**用户写的字**，身份块的正文是**名字或投影**。
+ * 把写入收在一处，是为了让「这次写的是内容还是名字」的判断只有一个落点 ——
+ * 否则每加一条写路径都要各自记得它，漏一条就是一次静默改写（块首退格把子块并进
+ * 前块时改掉标签名，就是这样发生的）。
  *
- * ⚠️ **新建块不走这里**：`mkBlock` 造出来的块还没有身份，正文随构造一次给定。
+ * ⚠️ **新建块不走这里**：`mkBlock` 造出来的块还没有身份，内容随构造一次给定。
  */
-export function writeBlockText(b: Block, text: string): void {
-  b.text = text
+export function writeBlockContent(b: Block, content: readonly Run[]): void {
+  b.content = normalizeRuns(content)
 }
 
 /* ---------------------------------------------------------------- props */

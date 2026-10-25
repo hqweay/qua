@@ -23,8 +23,7 @@ import { parseWorkspace, type ParseResult, type Workspace } from './shape.ts'
 /** 「整份库都动过」的那批改动：本地适配器的最细粒度（信封实现与门面共用同一份声明） */
 export const WHOLE_LIBRARY_CHANGES: Change[] = [
   { kind: 'blocks', id: '*' },
-  { kind: 'marks', id: '*' },
-  { kind: 'atoms', id: '*' },
+  { kind: 'annos', id: '*' },
 ]
 
 /**
@@ -57,8 +56,8 @@ export function judge(r: LoadResult): LoadedWorkspace {
  * 一批 op ⇒ 这批 op 让**哪几类对象**失效。
  *
  * `StoragePort` 的契约只收 `Change[]`（「这类对象里这一条动过」），所以这里是 op 到
- * `Change` 的**最小投影**：属性/别名/露面/标签都落在块的骨架上 ⇒ `blocks`；
- * 锚点要分 marks/atoms，而 `anno` 的 value 恰好带着它是哪种（有 `kind` 字段的是原子）。
+ * `Change` 的**最小投影**：内容/属性/别名/露面/标签都落在块的骨架上 ⇒ `blocks`；
+ * 可引用区间是住块上的第二种对象 ⇒ `annos`。
  *
  * ⚠️ 同 kind ＋ 同 id 去重：一次打字可能对一块报好几条 op，订阅者只需要重渲染一次。
  */
@@ -73,12 +72,7 @@ export function changesOf(ops: readonly Op[]): Change[] {
   }
   for (const o of ops) {
     if (o.e === 'anno') {
-      // value 只在 set 上带；delete 时拿不到形状 ⇒ 两类都报（多报一类只是多渲染一次）
-      const ann = o.value
-      const set = ann !== undefined
-      const isAtom = set && typeof ann === 'object' && 'kind' in ann
-      if (!set || !isAtom) add('marks', o.block)
-      if (!set || isAtom) add('atoms', o.block)
+      add('annos', o.block)
       continue
     }
     add('blocks', o.e === 'block' ? o.id : o.block)

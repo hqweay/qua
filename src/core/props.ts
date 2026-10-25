@@ -18,6 +18,7 @@
  * ⚠️ 本文件零 DOM：属性面板只消费这里的派生结果，写入通过命令。
  */
 import { hasList, isPropDefBlock, prop, type Block, type BlockProps, type TodoState } from './model.ts'
+import { plainText, textRuns } from './runs.ts'
 import { walkForest } from './walk.ts'
 import { derivedId, uuidv7Hex } from './ids.ts'
 import { resolveTagIds, tagsById } from './tags.ts'
@@ -105,7 +106,7 @@ export function isPropKind(v: unknown): v is PropKind {
 export function mkPropDef(label: string, kind: PropKind = 'text', extra: BlockProps = {}, id?: string): Block {
   return {
     id: id ?? uuidv7Hex(),
-    text: label,
+    content: textRuns(label),
     children: [],
     props: { _kind: kind, ...extra },
   }
@@ -118,7 +119,7 @@ export function isPropDef(b: Block): boolean {
 
 /** 定义块上的显示名（**正文即 label**，不存第二份） */
 export function propLabel(def: Block): string {
-  return def.text.trim()
+  return plainText(def.content).trim()
 }
 
 /** 定义的 kind（落盘缺省按 text：旧数据/手写定义不该让面板整段消失） */

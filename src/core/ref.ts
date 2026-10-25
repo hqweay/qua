@@ -12,7 +12,6 @@
  * ⚠️ 「按 id 找块」由调用方注入（`find`）：本文件零 DOM，也**不持有森林**
  *    —— 编辑器、popover、测试各自把「怎么找块」递进来，解析逻辑只有一份。
  */
-import type { Atom } from './annotations.ts'
 import { displayNameOf } from './alias.ts'
 import { journalDate, journalDateLabel, isJournal } from './journal.ts'
 import type { Block } from './model.ts'
@@ -49,9 +48,9 @@ export function refTitle(b: Block): string {
 /**
  * 解析一个行内引用。
  *
- * `a` 只取 `label` 与 `target` ⇒ popover 与测试可以不造完整 `Atom`。
+ * `a` 只取 `label` 与 `to` ⇒ popover 与测试可以不造完整 run。
  *
- * ⚠️ 没有 `target` 的原子（seed 的悬空样本、落盘前就指不到东西的老数据）
+ * ⚠️ 没有 `to` 的引用（seed 的悬空样本、落盘前就指不到东西的老数据）
  *    一律 `dangling` ＋ 沿用 `label`：指不到就是指不到，不假装解析成功。
  *
  * ⚠️ **fallback 是「插入时的快照」，不是「用户最后见过的名字」——这是刻意的取舍**：
@@ -59,11 +58,11 @@ export function refTitle(b: Block): string {
  *    （弄脏快照、连带触发落盘）。「改名靠解析传播、不回头改原子」是本文件的前提，二者不可兼得。
  *    ⇒ dangling 是**少数派状态**（目标被删），给它一个稳定的旧名字，好过让渲染变得不纯。
  */
-export function resolveRef(find: FindBlock, a: Pick<Atom, 'label' | 'target'>): RefView {
-  const target = a.target
-  if (!target) return { label: a.label, state: 'dangling' }
-  const b = find(target.id)
-  if (!b) return { label: a.label, state: 'dangling' }
+export function resolveRef(find: FindBlock, a: { label?: string; to?: string }): RefView {
+  const target = a.to
+  if (!target) return { label: a.label ?? '', state: 'dangling' }
+  const b = find(target)
+  if (!b) return { label: a.label ?? '', state: 'dangling' }
   // 标签的显示名＝**不带 `#` 的正文**；`#` 是呈现时加的装饰（`makeAtomEl`），不进正文，
   // 否则「标签块的正文」与「它在引用里显示的字」就成了两个需要同步的东西。
   return { label: refTitle(b), state: 'resolved' }
@@ -72,12 +71,12 @@ export function resolveRef(find: FindBlock, a: Pick<Atom, 'label' | 'target'>): 
 /**
  * 一次解析多个（`fillBlockText` 用）：省掉「逐格调 `find`」的重复查找。
  *
- * 返回的是 `atomId → RefView`，按 id 取而不是按位置取 —— 原子与占位符的对应关系
- * 由 `atomId` 钉死，不会因为数组顺序变化而张冠李戴。
+ * 返回的是 `runId → RefView`，按 id 取而不是按位置取 —— run 与 DOM 元素的对应关系
+ * 由 run id 钉死，不会因为顺序变化而张冠李戴。
  */
-export function resolveRefs(find: FindBlock, atoms: readonly Atom[]): Map<string, RefView> {
+export function resolveRefs(find: FindBlock, runs: readonly { id: string; label?: string; to?: string }[]): Map<string, RefView> {
   const out = new Map<string, RefView>()
-  for (const a of atoms) out.set(a.id, resolveRef(find, a))
+  for (const a of runs) out.set(a.id, resolveRef(find, a))
   return out
 }
 

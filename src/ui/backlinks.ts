@@ -11,11 +11,11 @@
  * （不在打字时把行抽走），失焦或点刷新再重查。
  */
 import {
-  type Atom,
   type Block,
   type BlockStore,
 } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
+import type { RunWithId } from '../core/runs.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
 
@@ -41,8 +41,7 @@ export interface BacklinksViewDeps {
    * 点行内原子：与正文**同一条**逻辑（左键打开目标、⌥ 看详情、解析不到仍弹详情）。
    * 不在本文件实现，是因为详情浮层与命令面都归装配层。
    */
-  onAtomClick?: (atom: Atom, el: HTMLElement, mods: { altKey: boolean }) => void
-  onAtomsLost?: (labels: string[]) => void
+  onAtomClick?: (run: RunWithId, blockId: string, el: HTMLElement, mods: { altKey: boolean }) => void
 }
 
 export interface BacklinksViewEls {
@@ -84,8 +83,7 @@ export class BacklinksView {
         if (kind !== 'load') this.deps.onChange(kind)
       },
       focusBlock: (blockId) => this.deps.onFocusBlock(blockId),
-      atomClick: (atom, el, mods) => this.deps.onAtomClick?.(atom, el, mods),
-      atomsLost: (atoms) => this.deps.onAtomsLost?.(atoms.map((a) => a.label)),
+      atomClick: (run, blockId, el, mods) => this.deps.onAtomClick?.(run, blockId, el, mods),
     }
 
     // 外部编辑：不在 footer 编辑时重查（编辑中冻结）；footer 自己的编辑不重查（on-blur 再算）
@@ -133,11 +131,7 @@ export class BacklinksView {
 
     this.els.root.hidden = false
     this.els.count.textContent = t('ui.backlinks.count', { count: sources.length })
-    this.editor.loadPage(
-      { roots, folded: this.editor.doc.folded },
-      this.deps.store.marks,
-      this.deps.store.atoms,
-    )
+    this.editor.loadPage({ roots, folded: this.editor.doc.folded })
   }
 
   private schedule(): void {

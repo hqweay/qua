@@ -31,6 +31,7 @@ import {
   type CtxKeys,
 } from '../../core/index.ts'
 import { t } from '../../core/msg.ts'
+import { plainText, type MarkType, type RunWithId } from '../../core/runs.ts'
 import { DISPLAY_PROP } from '../../core/index.ts'
 import type { App, FixtureName, MenuRequest, PanelKind, Registry } from '../../core/commands/index.ts'
 import type { LoadedWorkspace, Prefs, ThemeMode, Workspace, WorkspaceStore } from '../../core/workspace.ts'
@@ -73,6 +74,33 @@ export type DiagnosticsDeps = {
   getEd: () => BlockEditor
   setEd: (ed: BlockEditor) => void
   setQuiet: (v: boolean) => void
+}
+
+
+/** 诊断面的两个派生枚举：格式段（投影坐标）与原子 run（plain 坐标；**整片森林**，与旧库级数组同口径） */
+function markSegments(ed: BlockEditor): { type: MarkType; blockId: string; start: number; end: number }[] {
+  const out: { type: MarkType; blockId: string; start: number; end: number }[] = []
+  for (const b of flatten({ roots: ed.store.blocks })) {
+    let proj = 0
+    for (const r of b.content) {
+      if (r.t !== 'text') continue
+      for (const m of r.marks ?? []) out.push({ type: m, blockId: b.id, start: proj, end: proj + r.v.length })
+      proj += r.v.length
+    }
+  }
+  return out
+}
+
+function atomicRuns(ed: BlockEditor): { blockId: string; run: RunWithId; start: number; end: number }[] {
+  const out: { blockId: string; run: RunWithId; start: number; end: number }[] = []
+  for (const b of flatten({ roots: ed.store.blocks })) {
+    let off = 0
+    for (const r of b.content) {
+      if (r.t !== 'text') out.push({ blockId: b.id, run: r, start: off, end: off + 1 })
+      off += r.t === 'text' ? r.v.length : 1
+    }
+  }
+  return out
 }
 
 export function setupDiagnostics(deps: DiagnosticsDeps) {
@@ -177,8 +205,9 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
       return {
         ...st,
         mounted: mainEd.mounted.size,
-        marks: mainEd.marks.length,
-        atoms: mainEd.atoms.length,
+        // 行内内容住块上：诊断面给「格式段数/原子枚数」两个派生计数（口径同 marks()/atoms()）
+        marks: markSegments(mainEd).length,
+        atoms: atomicRuns(mainEd).length,
         theme: prefs().theme,
         resolvedTheme: resolvedTheme(),
         themeMode: prefs().theme,
@@ -215,7 +244,7 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
       }
     },
     text() {
-      return flatten(mainEd.doc).map((b) => b.text)
+      return flatten(mainEd.doc).map((b) => plainText(b.content))
     },
     /**
      * **整片森林**（区别于 `blocks()`：那个只给当前视图装载的子树）。
@@ -224,7 +253,7 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
     allBlocks() {
       return deps.getWs().blocks.map((b) => ({
         id: b.id,
-        text: b.text,
+        text: plainText(b.content),
         roles: identityTags(b),
         // 地址与露面是两套语义，诊断面要能分别读（`roles` 只给外观认的身份种类）
         aliases: aliasesOf(b),
@@ -237,7 +266,7 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
       const ws = deps.getWs()
       return allPropDefs(ws.blocks).map((d) => ({
         id: d.id,
-        label: d.text,
+        label: plainText(d.content),
         kind: propKindOf(d),
         declaredBy: allTags(ws.blocks).filter((t) => declaredFieldIds(t).includes(d.id)).map((t) => t.id),
       }))
@@ -277,14 +306,14 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
     tagMembers(tagId: string) {
       return [...tagMemberIds(tagId, deps.getWs().blocks)]
     },
-    /** 删掉一个行内原子（**连同它占的那一格** ⇒ 那条边就没了） */
-    removeAtom(atomId: string) {
-      mainEd.removeAtom(atomId)
+    /** 删掉一枚行内原子（显式动作；那条边跟着没了） */
+    removeAtom(runId: string) {
+      mainEd.removeRun(runId)
     },
     blocks() {
       return flatten(mainEd.doc).map((b) => ({
         id: b.id,
-        text: b.text,
+        text: plainText(b.content),
         todo: todoOf(b) ?? null,
         // 诊断面的字段名保持 `collapsed`（冒烟按它断言）；值现在来自折叠表
         collapsed: mainEd.doc.folded?.[b.id] === true,
@@ -295,18 +324,32 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
         tags: tagIdsOf(b),
       }))
     },
+    /**
+     * 格式段（**派生视图**）：格式住在 run 上，这里把它投影回「块内 plain 区间」的形状，
+     * 断言不需要认识 run。一段 ＝ 一个带该格式的 run 在块内的覆盖区间。
+     */
     marks() {
-      return mainEd.marks.map((m) => ({ type: m.type, blockId: m.blockId, start: m.start, end: m.end }))
+      return markSegments(mainEd)
     },
     /**
-     * ⚠️ `label` 与 `state` 这里给的是**解析后的**结果（不是落盘的快照）：
-     *   探针要能回答「现在显示的是什么」，否则断言就只是在复读过期的 `atom.label`。
+     * 行内原子（**派生视图**）：从各块内容里枚举原子 run，标出它住的块与 plain 区间。
+     * ⚠️ `label` 与 `state` 给的是**解析后的**结果（不是落盘的快照）：
+     *   探针要能回答「现在显示的是什么」，否则断言就只是在复读过期的名字快照。
      */
     atoms() {
-      // `id` 也要给：DOM 上的 `data-atom-id` 是它，诊断面没有 id 就只能靠位置猜
-      return mainEd.atoms.map((a) => {
-        const v = resolveRef((id) => mainEd.store.find(id), a)
-        return { id: a.id, kind: a.kind, label: v.label, rawLabel: a.label, blockId: a.blockId, start: a.start, end: a.end, state: v.state, target: a.target ?? null }
+      return atomicRuns(mainEd).map((a) => {
+        const v = a.run.t === 'ref' ? resolveRef((id) => mainEd.store.find(id), a.run) : { label: a.run.t === 'image' ? (a.run.asset.name ?? '') : a.run.v, state: 'resolved' as const }
+        return {
+          id: a.run.id,
+          kind: a.run.t === 'ref' ? (a.run.flavor === '#' ? 'tag' : 'page') : a.run.t,
+          label: v.label,
+          rawLabel: a.run.t === 'ref' ? a.run.label ?? '' : '',
+          blockId: a.blockId,
+          start: a.start,
+          end: a.end,
+          state: v.state,
+          target: a.run.t === 'ref' && a.run.to ? { kind: 'page', id: a.run.to } : null,
+        }
       })
     },
     shortId: (id: string) => shortId(id),

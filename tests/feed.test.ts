@@ -11,14 +11,15 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { FEED_SPEC, feedDays, findById, journalDate, journalDays, queryByIndex, rebuild } from '../src/core/index.ts'
 import type { Block } from '../src/core/model.ts'
+import { textRuns } from '../src/core/runs.ts'
 
 const j = (date: string, children: Block[] = []): Block => ({
   id: `j-${date}`,
-  text: '',
+  content: [],
   children,
   props: { _date: date },
 })
-const p = (id: string, text: string, children: Block[] = []): Block => ({ id, text, children })
+const p = (id: string, text: string, children: Block[] = []): Block => ({ id, content: textRuns(text), children })
 const dates = (days: Block[]): string[] => days.map((b) => String(b.props?._date))
 /** 全量取（避开 limit 干扰）：比 FEED_INITIAL 大得多 */
 const ALL = 99

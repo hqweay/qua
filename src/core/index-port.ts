@@ -1,7 +1,7 @@
 /**
  * **索引**（IndexPort）：把「谁指向谁」这类问题从「每次全库扫一遍」变成「查表」。
  *
- * 判据（派生层不物化）：索引**不是真相源**，是可从「块森林 ＋ 原子」重建的派生视图。
+ * 判据（派生层不物化）：索引**不是真相源**，是可从「块森林（含块上的行内内容）」重建的派生视图。
  *   ⇒ `rebuild(source)` 与「一路增量累积」必须得到**同一份**索引（`fingerprint` 逐字节相等）。
  *   这条等式就是本文件的验收标准 —— 它挡住的正是那种「增量更新漏了一种失效点、
  *   但界面上看起来只是偶尔少一条」的静默错误。
@@ -9,10 +9,10 @@
  * ⚠️ 索引里存的是**块的活引用**，不是拷贝：块是可变的（正文可经 `writeBlockText` 就地改写），
  *    所以「块的内容变了」不需要动索引（活引用自动可见），需要动的只有**结构**（谁在场、住哪页、
  *    谁认领哪个名字）——按 op 修补的正是这一部分（`applyOps`）。
- * ⚠️ 本文件零 DOM、零持久化：它只吃「森林 ＋ 原子」，所以能直接单测。
+ * ⚠️ 本文件零 DOM、零持久化：它只吃森林，所以能直接单测。
  */
-import type { Atom } from './annotations.ts'
 import { aliasesOf, hasList, type Block } from './model.ts'
+import { refRunsOf } from './runs.ts'
 import { walkForest } from './walk.ts'
 import { normalizeAlias } from './alias.ts'
 import { journalDate, isJournal } from './journal.ts'
@@ -64,11 +64,11 @@ export interface Index {
   /** 块 id → 它所在的**顶层块** id（含自己）—— 反链按来源页聚合要用 */
   pageOf: Map<string, string>
   /**
-   * 内部簿记：anno id → 它此刻贡献的那条边（**不进 fingerprint**）。
+   * 内部簿记：引用 run id → 它此刻贡献的那条边（**不进 fingerprint**）。
    *
-   * 为什么必须有它：`incoming` 的单位是「target → (源块 → 次数)」，不按 anno id 键控——
+   * 为什么必须有它：`incoming` 的单位是「target → (源块 → 次数)」，不按 run id 键控——
    * 一条引用**改了指向**时，摘掉旧边需要知道它原来指哪，而 op 只带新值。
-   * 全量重建天然有这个信息（重扫所有原子）；增量路径靠这张表补齐。
+   * 全量重建天然有这个信息（重扫所有块的内容）；增量路径靠这张表补齐。
    */
   edgeByAnno: Map<string, { target: string; source: string }>
 }
@@ -91,16 +91,14 @@ function emptyIndex(): Index {
  * **从源头重建**（全量）。这是唯一的正确性基准：
  * 任何增量路径的结果都必须与它逐字节一致。
  */
-export function rebuild(forest: readonly Block[], atoms: readonly Atom[]): Index {
+export function rebuild(forest: readonly Block[]): Index {
   const idx = emptyIndex()
 
-  // ① 块表 / 标签表 / 日记表 / 父页表 / 成员表（一次先序遍历；与增量修补同一口径）。
+  // ① 块表 / 标签表 / 日记表 / 父页表 / 成员表 / 入向边（一次先序遍历；与增量修补同一口径）。
+  //    边从块内容里的引用 run 提取——只有引用（无 flavor）；行内标签（flavor '#'）
+  //    是归属的露面，不是指向边，不进 `incoming`。
   // ⚠️ 遍历默认跳过被删的子树（原位软删：被删的块对索引不可见）。
   for (const b of forest) indexSubtree(idx, b, b.id)
-
-  // ② 入向边（只有引用：标签是块级归属，不占正方位点）。
-  //    只收**可见源块**的原子——源块被删 ⇒ 它的边跟着退场（遍历口径与 ① 同一条）。
-  addEdges(idx, atoms)
 
   return idx
 }
@@ -123,15 +121,14 @@ function bump(idx: Index, target: string, source: string, delta: 1 | -1): void {
   }
 }
 
-/** 把原子的引用累加进 `incoming`（登记簿记，增量的旧边摘除靠它）；不可见源块的原子不算边 */
-function addEdges(idx: Index, atoms: readonly Atom[]): void {
-  for (const a of atoms) {
-    if (a.kind !== 'page') continue
-    const target = a.target?.id
+/** 把一块内容里的引用 run 累加进 `incoming`（登记簿记，增量的旧边摘除靠它） */
+function addEdgesOfBlock(idx: Index, block: Block): void {
+  for (const r of refRunsOf(block.content)) {
+    if (r.flavor === '#') continue
+    const target = r.to
     if (!target) continue
-    if (!idx.blocks.has(a.blockId)) continue
-    idx.edgeByAnno.set(a.id, { target, source: a.blockId })
-    bump(idx, target, a.blockId, 1)
+    idx.edgeByAnno.set(r.id, { target, source: block.id })
+    bump(idx, target, block.id, 1)
   }
 }
 
@@ -158,11 +155,11 @@ function addEdges(idx: Index, atoms: readonly Atom[]): void {
  * 找不到块（op 引用的 id 既不在索引也不在森林）⇒ 跳过该 op：op 序列是事实陈述，
  * 不是「必须可执行」的指令；等式测试会把任何因此产生的分叉抓出来。
  */
-export function applyOps(index: Index, ops: readonly Op[], forest: readonly Block[], atoms: readonly Atom[]): Index {
+export function applyOps(index: Index, ops: readonly Op[], forest: readonly Block[]): Index {
   for (const op of ops) {
     switch (op.e) {
       case 'block':
-        if (op.op === 'upsert') applyBlockUpsert(index, op.id, op.value, forest, atoms)
+        if (op.op === 'upsert') applyBlockUpsert(index, op.id, op.value, forest)
         else applyBlockDelete(index, op.id, forest)
         break
       case 'prop':
@@ -175,55 +172,44 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
       case 'list':
         refreshTagsClaim(index, op.block)
         break
-      case 'anno':
-        applyAnnoOp(index, op)
-        break
+      // `anno` 是按需物化的可引用区间，不是指向边：边只从引用 run 提取
     }
   }
   return index
 }
 
-/** 块 upsert：带落点 ⇒ 挪位/新进；不带落点（纯正文补丁）⇒ 索引无事可做 */
+/**
+ * 块 upsert：`content` ⇒ 重算这块的指向边（引用 run 增删/改向都在内容里）；
+ * `parent` ⇒ 挪位/新进。`blocks` 里是活引用，块自己的内容变化不用回头改表，
+ * 需要动的只有**以 run id 键控的边簿记**。
+ */
 function applyBlockUpsert(
   index: Index,
   id: string,
-  value: { parent?: string | null },
+  value: { content?: unknown; parent?: string | null },
   forest: readonly Block[],
-  atoms: readonly Atom[],
 ): void {
   const known = index.blocks.get(id)
-  if (value.parent === undefined) {
-    // 正文补丁不改结构：`blocks` 里是活引用，文本/属性的变化对五张表不可见
-    return
+  if (value.content !== undefined && known) {
+    // 摘旧边（簿记里 source 是这块的全部条目），再按新内容加回来
+    for (const [rid, edge] of [...index.edgeByAnno]) {
+      if (edge.source !== id) continue
+      bump(index, edge.target, edge.source, -1)
+      index.edgeByAnno.delete(rid)
+    }
+    addEdgesOfBlock(index, known)
   }
+  if (value.parent === undefined) return
   const parent = value.parent
   const pageRoot = parent === null ? id : (index.pageOf.get(parent) ?? id)
   if (known) {
-    // 挪位不改 props/atoms ⇒ 名字表/成员表/入向边都不动；`blocks` 里是活引用，也无事可做
+    // 挪位不改 props ⇒ 名字表/成员表都不动；`blocks` 里是活引用，也无事可做
     reindexSubtreePage(index, known, pageRoot)
     return
   }
   const block = findInForest(forest, id)
   if (!block) return
   indexSubtree(index, block, pageRoot)
-  // 新子树的成员（数据源在块上）与它自己带来的引用边——只算**可见**源块的
-  // （子树里如果嵌着更早被删的后代，它们不在索引里，边也不回来）
-  walkForest([block], (b) => {
-    for (const tagId of tagIdsOf(b)) {
-      const members = index.tagMembers.get(tagId)
-      if (members) members.add(b.id)
-      else index.tagMembers.set(tagId, new Set([b.id]))
-    }
-  })
-  const subtree = new Set(subtreeIds(block))
-  for (const a of atoms) {
-    if (a.kind !== 'page' || !subtree.has(a.blockId)) continue
-    if (!index.blocks.has(a.blockId)) continue
-    const target = a.target?.id
-    if (!target) continue
-    index.edgeByAnno.set(a.id, { target, source: a.blockId })
-    bump(index, target, a.blockId, 1)
-  }
 }
 
 /**
@@ -313,25 +299,6 @@ function refreshJournalClaim(index: Index, blockId: string): void {
   }
 }
 
-/** 一条 anno op：引用边的新增/改向/摘除（标记类不是边，落到这里就是空操作） */
-function applyAnnoOp(
-  index: Index,
-  op: { id: string; op: 'set' | 'delete'; value?: unknown; block: string },
-): void {
-  const prev = index.edgeByAnno.get(op.id)
-  if (prev) {
-    bump(index, prev.target, prev.source, -1)
-    index.edgeByAnno.delete(op.id)
-  }
-  if (op.op !== 'set' || !op.value || typeof op.value !== 'object' || !('kind' in op.value)) return
-  const v = op.value as Atom
-  if (v.kind !== 'page') return
-  const target = v.target?.id
-  if (!target) return
-  index.edgeByAnno.set(op.id, { target, source: v.blockId })
-  bump(index, target, v.blockId, 1)
-}
-
 /** 把一棵子树的 `pageOf` 重打到新的顶层块（挪位只影响这一件事） */
 function reindexSubtreePage(index: Index, root: Block, pageRoot: string): void {
   walkForest([root], (b) => {
@@ -375,14 +342,6 @@ function findInForest(forest: readonly Block[], id: string): Block | undefined {
   return hit
 }
 
-function subtreeIds(root: Block): string[] {
-  const out: string[] = []
-  walkForest([root], (b) => {
-    out.push(b.id)
-  })
-  return out
-}
-
 /** 子树 id（**含被删的后代**）——删块退场用的是这棵子树的全部，不是它的可见部分 */
 function walkSubtreeIncludingDeleted(root: Block): string[] {
   const out: string[] = []
@@ -401,6 +360,8 @@ function indexSubtree(index: Index, root: Block, pageRoot: string): void {
   walkForest([root], (b) => {
     index.blocks.set(b.id, b)
     index.pageOf.set(b.id, pageRoot)
+    // 指向边：数据源是块内容里的引用 run（可见源块，遍历口径与块表同一条）
+    addEdgesOfBlock(index, b)
     // 标签成员（数据源是块上的 `_tags`）
     for (const tagId of tagIdsOf(b)) {
       const members = index.tagMembers.get(tagId)

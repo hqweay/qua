@@ -4,10 +4,7 @@
 
 export interface Snap {
   blocks: string
-  marks: string
   sel: string
-  /** 扩展（**加字段不改口径**）：行内原子锚点也进快照，否则撤销会静默丢原子 */
-  atoms: string
 }
 
 export type UndoKind = 'insert' | 'delete' | 'structural' | 'mark' | 'other'

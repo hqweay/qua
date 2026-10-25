@@ -32,7 +32,7 @@ import {
 } from './model.ts'
 import { walkForest } from './walk.ts'
 import { findByAlias, normalizeAlias } from './alias.ts'
-import type { Atom } from './annotations.ts'
+import { refRunsOf, textRuns } from './runs.ts'
 
 /** 「这块带着哪些标签」的系统属性（有序 id 列表，pos ＝ 数组下标） */
 export const TAGS_PROP = '_tags'
@@ -56,7 +56,7 @@ export function mkTagBlock(name: string): Block {
   const title = name.trim()
   return {
     id: uuidv7Hex(),
-    text: title,
+    content: textRuns(title),
     children: [],
     props: { [ALIASES_PROP]: [title], [LISTS_PROP]: ['tag'], [DISPLAY_PROP]: 'alias', _icon: 'lucide:hash' },
   }
@@ -256,17 +256,15 @@ export function trailingHashTag(
 /**
  * 这一块**在正文里露面**了哪些标签 id（按出现位置排序，去重）。
  *
+ * 露面 ＝ 行内那枚带 `#` 风味的引用 run（位置跟着用户敲的地方走）。
  * ⚠️ 这是**显示**用的，不是归属：归属看 `tagIdsOf`（`props._tags`）。
- *    两者不一致时的口径见文件头 ①：原子可以比归属先少（删字不摘标签）。
+ *    两者不一致时的口径见文件头 ①：露面可以比归属先少（删字不摘标签）。
  */
-export function inlineTagIdsOf(blockId: string, atoms: readonly Atom[]): string[] {
-  const hits = atoms
-    .filter((a) => a.blockId === blockId && a.kind === 'tag' && a.target)
-    .sort((x, y) => x.start - y.start)
+export function inlineTagIdsOf(block: Block): string[] {
   const out: string[] = []
-  for (const a of hits) {
-    const id = a.target!.id
-    if (!out.includes(id)) out.push(id)
+  for (const r of refRunsOf(block.content)) {
+    if (r.flavor !== '#' || !r.to) continue
+    if (!out.includes(r.to)) out.push(r.to)
   }
   return out
 }
@@ -286,16 +284,18 @@ export function tagMemberIds(tagId: string, forest: readonly Block[]): Set<strin
 }
 
 /**
- * **指向边**的源块集合：引用（`[[ ]]`）的源块（供反链与「改名传播」共用）。
+ * **指向边**的源块集合：引用（含行内标签露面）的源块（供「改名传播」共用）。
  *
  * ⚠️ 标签的**归属**不在这里（它在 `_tags` 里，见上方 ①）；
- *    但标签的**行内露面**在这里 —— 那是一枚 `tag` 原子，名字是渲染时解析的，
- *    改名后也要重画。所以本函数同时收 `page` 与 `tag` 两种原子。
+ *    但标签的**行内露面**在这里 —— 那是一枚带 `#` 风味的引用 run，名字是渲染时解析的，
+ *    改名后也要重画。所以本函数收**全部**引用 run，不只无风味的。
  */
-export function edgeSourceIds(atoms: readonly Atom[], targetId: string): Set<string> {
+export function edgeSourceIds(forest: readonly Block[], targetId: string): Set<string> {
   const out = new Set<string>()
-  for (const a of atoms) {
-    if ((a.kind === 'page' || a.kind === 'tag') && a.target?.id === targetId) out.add(a.blockId)
-  }
+  walkForest(forest, (b) => {
+    for (const r of refRunsOf(b.content)) {
+      if (r.to === targetId) out.add(b.id)
+    }
+  })
   return out
 }

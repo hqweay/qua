@@ -16,6 +16,7 @@ import {
   type Block,
 } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
+import { plainText } from '../core/runs.ts'
 import { t } from '../core/msg.ts'
 
 export interface FieldsEditorDeps {
@@ -65,7 +66,7 @@ export function renderFieldsEditor(host: HTMLElement, deps: FieldsEditorDeps): v
     row.dataset.fieldId = def.id
     const label = document.createElement('span')
     label.className = 'fields-label'
-    label.textContent = def.text.trim() || def.id
+    label.textContent = plainText(def.content).trim() || def.id
     const kind = document.createElement('span')
     kind.className = 'fields-kind'
     kind.textContent = t(`ui.props.kind.${propKindOf(def)}`)
@@ -114,7 +115,7 @@ export function renderFieldsEditor(host: HTMLElement, deps: FieldsEditorDeps): v
     row.dataset.fieldId = def.id
     const label = document.createElement('span')
     label.className = 'fields-label'
-    label.textContent = def.text.trim() || def.id
+    label.textContent = plainText(def.content).trim() || def.id
     const kind = document.createElement('span')
     kind.className = 'fields-kind'
     kind.textContent = t(`ui.props.kind.${propKindOf(def)}`)

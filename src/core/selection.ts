@@ -5,6 +5,7 @@
 import { locate } from './tree.ts'
 import type { Doc } from './model.ts'
 import { flatten } from './tree.ts'
+import { plainLen } from './runs.ts'
 export interface Sel {
   aBlock: string
   aOff: number
@@ -53,7 +54,7 @@ export function fromBlockSet(doc: Doc, ids: readonly string[]): Sel | null {
   if (idx.length === 0) return null
   const first = all[idx[0]!]!
   const last = all[idx[idx.length - 1]!]!
-  return { aBlock: first.id, aOff: 0, hBlock: last.id, hOff: last.text.length }
+  return { aBlock: first.id, aOff: 0, hBlock: last.id, hOff: plainLen(last.content) }
 }
 
 export function selToTextRanges(doc: Doc, sel: Sel): { blockId: string; start: number; end: number }[] {
@@ -62,7 +63,7 @@ export function selToTextRanges(doc: Doc, sel: Sel): { blockId: string; start: n
   return ids.map((id) => {
     const b = locate(doc, id)!.block
     const start = id === r.startBlock ? r.startOff : 0
-    const end = id === r.endBlock ? r.endOff : b.text.length
+    const end = id === r.endBlock ? r.endOff : plainLen(b.content)
     return { blockId: id, start, end }
   })
 }

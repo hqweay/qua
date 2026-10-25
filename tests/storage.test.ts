@@ -25,11 +25,9 @@ installMemoryLocalStorage()
 function lib(patch: Partial<Workspace> = {}): Workspace {
   return {
     version: WORKSPACE_VERSION,
-    blocks: [{ id: 'b1', text: 'hello', children: [] }],
+    blocks: [{ id: 'b1', content: [{ t: 'text', v: 'hello' }], children: [] }],
     activeId: 'b1',
     savedAt: 0,
-    marks: [],
-    atoms: [],
     ...patch,
   }
 }
@@ -145,9 +143,9 @@ test('一批 op ＝ 一个事务：门面把 op 原样带进 batch，changes 是
   const store = createWorkspaceStore(stubPort)
 
   const ops = [
-    { e: 'block', id: 'b1', op: 'upsert', value: { text: 'x' }, at: 1 },
+    { e: 'block', id: 'b1', op: 'upsert', value: { content: [{ t: 'text', v: 'x' }] }, at: 1 },
     { e: 'prop', block: 'b1', name: '_tags', op: 'set', value: ['t1'], at: 2 },
-    { e: 'anno', block: 'b1', id: 'a1', op: 'set', value: { id: 'a1', kind: 'tag', blockId: 'b1', start: 0, end: 1 }, at: 3 },
+    { e: 'anno', block: 'b1', id: 'a1', op: 'set', value: { id: 'a1', range: { start: 0, end: 1 } }, at: 3 },
     { e: 'anno', block: 'b2', id: 'm1', op: 'delete', at: 4 },
   ] as const
   await store.commit(lib({ savedAt: 7 }), ops)
@@ -155,12 +153,11 @@ test('一批 op ＝ 一个事务：门面把 op 原样带进 batch，changes 是
   assert.ok(captured)
   // op 原样进 batch（一批 op ＝ 一个事务——写适配器按这个契约落行）
   assert.deepEqual(captured.ops, ops)
-  // changes 是最小投影：块类合并、原子/标记分开
+  // changes 是最小投影：块类合并、annos 单独一类
   assert.deepEqual(captured.changes, [
     { kind: 'blocks', id: 'b1' },
-    { kind: 'atoms', id: 'b1' },
-    { kind: 'marks', id: 'b2' },
-    { kind: 'atoms', id: 'b2' },
+    { kind: 'annos', id: 'b1' },
+    { kind: 'annos', id: 'b2' },
   ])
   // 落盘字节仍是整份库（demo 适配器实现细节，SQLite 适配器不收这个）
   assert.ok((captured as { payload: string }).payload.includes('"b1"'))
@@ -183,7 +180,6 @@ test('op 为空 ⇒ 这批不是事务产的：按整类提交（迁移期真相
   assert.ok(captured)
   assert.deepEqual(captured.changes, [
     { kind: 'blocks', id: '*' },
-    { kind: 'marks', id: '*' },
-    { kind: 'atoms', id: '*' },
+    { kind: 'annos', id: '*' },
   ])
 })

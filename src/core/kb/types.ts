@@ -16,11 +16,11 @@
  *
  * ⚠️ 本文件只有类型与常量，零运行时依赖、零 DOM。
  */
-import type { Atom, Mark } from '../annotations.ts'
 import type { BackrefBlock, BackrefSource } from '../backrefs.ts'
 import type { GutterField, FieldRow } from '../props.ts'
 import type { QueryHit, QuerySpec } from '../query.ts'
 import type { Block, BlockList } from '../model.ts'
+import type { Anno, Run } from '../runs.ts'
 
 /* ------------------------------------------------------------ 存储槽位 */
 
@@ -47,7 +47,8 @@ export function isSystemProp(name: string): boolean {
  * 「它现在在哪」是同一件事的两种说法，两个事件就会有两种真相）。
  */
 export type BlockPatch = {
-  text?: string
+  /** 行内内容整组替换（文本/格式/原子改动都是这一条 op） */
+  content?: Run[]
   parent?: string | null
   index?: number
   props?: Record<string, unknown>
@@ -65,7 +66,7 @@ export type Op =
   | { e: 'prop'; block: string; name: string; op: 'set' | 'delete'; value?: unknown; pos?: number; at: number }
   | { e: 'alias'; block: string; name: string; op: 'set' | 'delete'; pos?: number; at: number }
   | { e: 'list'; block: string; list: BlockList; op: 'set' | 'delete'; at: number }
-  | { e: 'anno'; block: string; id: string; op: 'set' | 'delete'; value?: Mark | Atom; at: number }
+  | { e: 'anno'; block: string; id: string; op: 'set' | 'delete'; value?: Anno; at: number }
 
 /**
  * 一条**失效通知**：只说「这类对象里的这一条动过」，不带 payload。
@@ -74,7 +75,7 @@ export type Op =
  * 需要字节的是 `StoragePort`，它只吃 `Op[]`。
  */
 export interface Change {
-  kind: 'blocks' | 'marks' | 'atoms'
+  kind: 'blocks' | 'annos'
   id: string
 }
 
@@ -128,8 +129,13 @@ export interface Tx {
   setLists(id: string, lists: readonly BlockList[]): void
   setTags(id: string, tagIds: readonly string[]): void
 
-  /** 整块锚点替换（阶段 1 仍按块分组；只换这一块的，别的块原样） */
-  setAnnotations(id: string, marks: readonly Mark[], atoms: readonly Atom[]): void
+  /**
+   * 整块可引用区间替换（只换这一块的，别的块原样）。
+   *
+   * annos 是**按需物化**的：没有「被引用的区间」就没有 anno，这一格保持空。
+   * 空数组 ⇒ 摘掉这一块的全部 annos（属性袋不留空壳的同一条纪律）。
+   */
+  setAnnos(id: string, annos: readonly Anno[]): void
 }
 
 /* ------------------------------------------------------------ 读面 */
@@ -182,7 +188,8 @@ export interface KbClient {
   /** 某天的 journal 块（一天一个；没有这一天 ⇒ `undefined`） */
   journalDay(date: string): Block | undefined
 
-  annotationsOf(id: string): { marks: readonly Mark[]; atoms: readonly Atom[] }
+  /** 这一块当前的可引用区间（通常为空——anno 只在被引用时存在） */
+  annosOf(id: string): readonly Anno[]
 
   query(spec: QuerySpec, opts?: { scopeId?: string }): QueryHit[]
   backlinksOf(id: string): readonly BackrefSource[]

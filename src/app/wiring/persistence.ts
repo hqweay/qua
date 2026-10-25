@@ -38,16 +38,15 @@ export function setupPersistence(deps: PersistenceDeps) {
   /**
    * 把编辑器里的模型写回森林（**N 个真实 section**）。
    *
-   * 现在块是 **block store 里的活引用**（`rootsFor` 不再拷贝）：正文/子树的编辑直接发生在
-   * store 上，多个视图共享同一份。这里只把库级的 marks/atoms 引用对齐（它们也是共享数组）。
+   * 现在块是 **block store 里的活引用**（`rootsFor` 不再拷贝）：内容/子树的编辑直接发生在
+   * store 上，多个视图共享同一份；行内内容住块上，没有第二份库级数组要对齐。
    *
    * ⚠️ 真实实现里这里是 Tx/Changes 的提交点；当前本地适配器提交的是整份库（见 `WHOLE_LIBRARY_CHANGES`）。
    */
   function syncSections(): void {
     const mainEd = deps.getMainEd()
     const ws = deps.getWs()
-    ws.marks = blocks.marks
-    ws.atoms = blocks.atoms
+    ws.blocks = blocks.blocks
     /**
      * 折叠态是**设备状态**（`qua.device`），所以它不再写回库：编辑器持的是 `doc.folded`
      * （视图那份），落盘要的是 `device.folded`（这台设备那份）。

@@ -1,12 +1,13 @@
 /**
  * 迷你 DSL：种子正文里直接写 `**粗**` / `==高亮==` / `` `代码` `` / `[[页面]]` / `![[图.png]]`，
- * 由 `parseInline` 解析成**区间锚点与行内原子**——这正是 demo 要展示的模型形状
- * （锚点带 blockId、原子占 1 格），而不是把富文本塞进 DOM。
+ * 由 `parseInline` 解析成** run 序列**——这正是模型里的行内内容形状（文本段带 marks、
+ * 原子是 run），而不是把富文本塞进 DOM。
  *
  * 单独一层是为了让「种子内容长什么样」与「内容怎么变成块」分开：
  * 换一批假数据不需要碰到解析器，改 DSL 也不需要碰任何一页的内容。
  */
-import { ATOM_PLACEHOLDER, type BlockProps, type MarkType } from '../index.ts'
+import { uuidv7Hex } from '../ids.ts'
+import { normalizeRuns, textRuns, type ImageRun, type MarkType, type RefRun, type Run } from '../runs.ts'
 
 export interface SeedBlock {
   text: string
@@ -26,30 +27,43 @@ export interface SeedBlock {
    */
   tags?: string[]
   /** 系统属性：查询块的 `_query` 条件就落在这里 */
-  props?: BlockProps
+  props?: Record<string, unknown>
   children?: SeedBlock[]
 }
 
-export interface RawAtom {
+/** 还没解析目标的引用（森林凑齐、页/标签块建好之后再回填 `to`） */
+export interface PendingRef {
+  runId: string
+  label: string
+}
+
+interface AtomToken {
   kind: 'page' | 'image'
   start: number
   label: string
   missing?: boolean
-  dangling?: boolean
 }
 
-export type InlineMark = { type: MarkType; start: number; end: number }
+interface MarkSpan {
+  type: MarkType
+  start: number
+  end: number
+}
 
-/** ① 先把 `[[..]]` / `![[..]]` 换成占位符（**恒占 1 格**），② 再解析成对格式标记 */
-export function parseInline(src: string): { text: string; marks: InlineMark[]; atoms: RawAtom[] } {
+/**
+ * ① 先把 `[[..]]` / `![[..]]` 换成占位字符（解析期坐标用，**不进产物**），
+ * ② 再解析成对格式标记，③ 最后把（去掉了占位字符的）文本流与标记区间
+ * 一起翻译成 run 序列：标记内 ⇒ 文本带 marks／原子整枚带 marks。
+ */
+export function parseInline(src: string): { runs: Run[]; refs: PendingRef[] } {
   let text = ''
-  const atoms: RawAtom[] = []
+  const atoms: AtomToken[] = []
   let i = 0
   while (i < src.length) {
     const rest = src.slice(i)
     const img = /^!\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]/.exec(rest)
     if (img) {
-      text += ATOM_PLACEHOLDER
+      text += '\uFFF9'
       atoms.push({
         kind: 'image',
         start: text.length - 1,
@@ -61,7 +75,7 @@ export function parseInline(src: string): { text: string; marks: InlineMark[]; a
     }
     const page = /^\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]/.exec(rest)
     if (page) {
-      text += ATOM_PLACEHOLDER
+      text += '\uFFF9'
       atoms.push({ kind: 'page', start: text.length - 1, label: page[1]!.trim() })
       i += page[0].length
       continue
@@ -70,10 +84,10 @@ export function parseInline(src: string): { text: string; marks: InlineMark[]; a
     i++
   }
 
-  const marks: InlineMark[] = []
+  const marks: MarkSpan[] = []
   /**
    * 删掉一对标记字符 ⇒ 它右边的**所有位置**左移。
-   * ⚠️ 这里必须把**前面几趟已经找到的 mark 端点**一起挪，否则「先 ==高亮== 后 **加粗**」
+   * ⚠️ 这里必须把**前面几趟已经找到的端点**一起挪，否则「先 ==高亮== 后 **加粗**」
    * 这类句子里，加粗的区间会整体偏掉（这一趟删的字符在它左边）。
    */
   const shiftFrom = (from: number, delta: number) => {
@@ -114,5 +128,48 @@ export function parseInline(src: string): { text: string; marks: InlineMark[]; a
     }
     text = out
   }
-  return { text, marks, atoms }
+
+  // ③ 翻译成 runs：区间端点 ∪ 原子位置都当切点，文本段按覆盖它的标记集带 marks
+  const cuts = new Set<number>([0, text.length])
+  for (const m of marks) {
+    cuts.add(Math.max(0, Math.min(m.start, text.length)))
+    cuts.add(Math.max(0, Math.min(m.end, text.length)))
+  }
+  for (const a of atoms) {
+    cuts.add(Math.max(0, Math.min(a.start, text.length)))
+    cuts.add(Math.max(0, Math.min(a.start + 1, text.length)))
+  }
+  const pts = [...cuts].sort((x, y) => x - y)
+  const marksAt = (s: number, e: number): MarkType[] => marks.filter((m) => m.start <= s && m.end >= e).map((m) => m.type)
+
+  const runs: Run[] = []
+  const refs: PendingRef[] = []
+  for (let k = 0; k < pts.length - 1; k++) {
+    const s = pts[k]!
+    const e = pts[k + 1]!
+    if (s === e) continue
+    const seg = text.slice(s, e)
+    const atom = atoms.find((a) => a.start === s)
+    if (seg === '\uFFF9' && atom) {
+      const mk = marksAt(s, e)
+      if (atom.kind === 'image') {
+        // 图片不带格式（模型红线）；DSL 里的格式标记盖到它也只当没盖
+        const run: ImageRun = {
+          id: uuidv7Hex(),
+          t: 'image',
+          asset: { hash: uuidv7Hex().slice(0, 32), name: atom.label, state: atom.missing ? 'missing' : 'ready' },
+          w: 1440,
+          h: 900,
+        }
+        runs.push(run)
+      } else {
+        const run: RefRun = { id: uuidv7Hex(), t: 'ref', label: atom.label, ...(mk.length ? { marks: mk } : {}) }
+        refs.push({ runId: run.id, label: atom.label })
+        runs.push(run)
+      }
+      continue
+    }
+    runs.push(...textRuns(seg, marksAt(s, e)))
+  }
+  return { runs: normalizeRuns(runs), refs }
 }

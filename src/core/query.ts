@@ -6,13 +6,13 @@
  *   · **结果集**（`runQuery` 的输出）——一次**求值**，**冻结**的是「成员与顺序」；
  *   · **内容**——永远按 `block id` 现读现渲染（D5：集合冻、内容不冻）。
  *
- * ⚠️ 这里零 DOM、零持久化：求值只吃「森林 ＋ atoms」，所以能直接单测。
+ * ⚠️ 这里零 DOM、零持久化：求值只吃森林（指向边住在块内容里），所以能直接单测。
  * ⚠️ 接索引后本文件的签名不变：`evaluateQuery`（判定与顺序）由两条路径共用，
  *    索引路径见 `index-port.ts` 的 `queryByIndex`；`QuerySpec` 仍是那个 canonical JSON。
  */
 import { isJournalBlock, type Block } from './model.ts'
+import { plainText, refRunsOf } from './runs.ts'
 import { walkForest } from './walk.ts'
-import type { Atom } from './annotations.ts'
 import { findPath } from './tree.ts'
 import { findTagByName, tagMemberIds } from './tags.ts'
 import { findJournalDay, journalDays } from './journal.ts'
@@ -101,8 +101,6 @@ export interface QuerySpec {
 
 export interface QueryRunInput {
   blocks: readonly Block[]
-  /** 行内原子（指向边的载体：一条原子 ＝ 一条「谁指向谁」） */
-  atoms: readonly Atom[]
   /** 求值范围锚点：`scope: 'subtree'` 时只在这个块（含）之下找 */
   anchorId?: string
 }
@@ -123,7 +121,7 @@ function walk(blocks: readonly Block[], fn: (b: Block, ancestors: Block[]) => vo
 /**
  * 谓词环境：`ref`／`tag` 条件已经**按条件收好**的块 id 集合（外加 `journal` 范围条件）。
  *
- * 为什么单独立一份：求值有两条路 —— 纯函数路径从「森林 ＋ atoms」收集，
+ * 为什么单独立一份：求值有两条路 —— 纯函数路径从森林收集，
  * 索引路径从 `IndexPort` 的表里查表；**判定与顺序只有一份**（`evaluateQuery`），
  * 两条路只许在「环境怎么来」上不同。
  */
@@ -185,12 +183,15 @@ function cmpValues(a: unknown, b: unknown): number {
   return sa < sb ? -1 : sa > sb ? 1 : 0
 }
 
-/** 指向 `targetId` 的原子所在的块 id 集合（**一条指向边的另一端**，与渲染无关） */
-export function refSourceIds(atoms: readonly Atom[], targetId: string): Set<string> {
+/** 指向 `targetId` 的引用 run 所在的块 id 集合（**一条指向边的另一端**，与渲染无关） */
+export function refSourceIds(forest: readonly Block[], targetId: string): Set<string> {
   const out = new Set<string>()
-  for (const a of atoms) {
-    if (a.kind === 'page' && a.target?.id === targetId) out.add(a.blockId)
-  }
+  walkForest(forest, (b) => {
+    for (const r of refRunsOf(b.content)) {
+      // 行内标签（flavor '#'）是归属的露面，不是指向边——与索引的 `incoming` 同一口径
+      if (r.flavor === undefined && r.to === targetId) out.add(b.id)
+    }
+  })
   return out
 }
 
@@ -214,7 +215,7 @@ function matches(node: QueryNode, b: Block, refs: ReadonlySet<string>, tags: Rea
   if ('role' in node) return roleMatches(node.role, b)
   if ('ref' in node) return refs.has(b.id)
   if ('tag' in node) return tags.has(b.id)
-  if ('text' in node) return b.text.includes(node.text)
+  if ('text' in node) return plainText(b.content).includes(node.text)
   if ('prop' in node) {
     // 属性不存在 ⇒ 不匹配（而不是「等于 undefined」）：先问「有没有这一槽」，再比值。
     // 这样 `eq: false` 与「没填」是两件事，`eq: undefined` 也不会误命中所有块。
@@ -249,7 +250,7 @@ export function isExactRoleJournal(node: QueryNode): boolean {
  */
 export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
   const env: QueryEnv = {
-    refs: collectRefs(spec.where, input.atoms),
+    refs: collectRefs(spec.where, input.blocks),
     tags: collectTags(spec.where, input.blocks),
     journalDate: firstJournal(spec.where),
   }
@@ -272,14 +273,14 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
   return evaluateQuery(spec, roots, env)
 }
 
-/** 条件里所有 `ref` 的目标（用于一次性收集 refs，避免每个块都扫一遍 atoms） */
-function collectRefs(node: QueryNode, atoms: readonly Atom[]): Set<string> {
+/** 条件里所有 `ref` 的目标（用于一次性收集 refs，避免每个块都扫一遍内容） */
+function collectRefs(node: QueryNode, forest: readonly Block[]): Set<string> {
   const out = new Set<string>()
   const visit = (n: QueryNode): void => {
     if ('all' in n) n.all.forEach(visit)
     else if ('any' in n) n.any.forEach(visit)
     else if ('not' in n) visit(n.not)
-    else if ('ref' in n) for (const id of refSourceIds(atoms, n.ref)) out.add(id)
+    else if ('ref' in n) for (const id of refSourceIds(forest, n.ref)) out.add(id)
   }
   visit(node)
   return out

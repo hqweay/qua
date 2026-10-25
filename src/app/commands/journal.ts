@@ -61,7 +61,7 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
      * ⚠️ 空天补首子块是**装载边界**的事（经事务进库），打开这里只选择、不写库。
      */
     d.setActiveId(id, { feed: false })
-    d.loadPage(b ? rootsFor(b) : [], d.marks(), d.atoms())
+    d.loadPage(b ? rootsFor(b) : [])
     d.refreshList()
     d.refreshTitle()
     d.saveNow()
@@ -102,7 +102,7 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
       const oldest = shiftISO(date, -(days - 1))
       dayBlocks = dayBlocks.filter((b) => journalDate(b) >= oldest)
     }
-    d.loadPage(anchor ? rootsForMany(dayBlocks) : [], d.marks(), d.atoms())
+    d.loadPage(anchor ? rootsForMany(dayBlocks) : [])
     d.applyLayout(opts?.layout ?? d.feedLayoutPref())
     // 复盘：窗口里没写过的天渲染空壳格子（纯视图兜底，落笔才物化）；普通流恒清空
     d.setShells(opts?.days !== undefined ? reviewShells(date, days, dayBlocks) : [])

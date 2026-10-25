@@ -47,7 +47,6 @@ export interface DockBlocksDeps {
   /** Shift+点槽内块的块标：在右槽钉住 / 取消钉住 */
   onOpenInDock: (blockId: string) => void
   /** 槽内编辑吃掉了行内原子（不静默） */
-  onAtomsLost?: (labels: string[]) => void
 }
 
 export class DockBlocks {
@@ -188,7 +187,6 @@ export class DockBlocks {
       },
       focusBlock: (blockId) => this.deps.onFocusBlock(blockId),
       openInDock: (blockId) => this.deps.onOpenInDock(blockId),
-      atomsLost: (atoms) => this.deps.onAtomsLost?.(atoms.map((a) => a.label)),
     }
     host.addEventListener('focusin', () => this.deps.onFocus(editor))
 

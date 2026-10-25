@@ -46,7 +46,7 @@ export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut' | 'ins
             .map((h) => d.kb.get(h.blockId))
             .filter((x): x is Block => x !== undefined)
         : []
-    d.loadPage(feed && isJournal(b) ? rootsForMany(feedDays) : rootsFor(b), d.marks(), d.atoms())
+    d.loadPage(feed && isJournal(b) ? rootsForMany(feedDays) : rootsFor(b))
     d.refreshList()
     d.refreshTitle()
     d.saveNow()

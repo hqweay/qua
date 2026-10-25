@@ -6,7 +6,8 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, checkAddParent, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  normalizeAlias, parentTags, primaryAliasOf, prop,  pruneParentTags, removeList,  setBlockType, tagMemberIds,  type Atom, type Block, type CtxKeys } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, checkAddParent, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  normalizeAlias, parentTags, primaryAliasOf, prop,  pruneParentTags, removeList,  setBlockType, tagMemberIds,  type Block, type CtxKeys } from './core/index.ts'
+import { plainText, type RunWithId } from './core/runs.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
 import { BlockEditor } from './view/editor.ts'
@@ -145,7 +146,7 @@ const bootRoots: Block[] = bootDays.length > 0 ? rootsForMany(bootDays) : bootAc
  * **共享 block store**（下一层）：块/anchors/undo 只有一份；
  * 正文、反链、查询视图都是它的投影。多个 `BlockEditor` 读同一份活块。
  */
-const blocks = new BlockStore(ws.blocks, ws.marks, ws.atoms)
+const blocks = new BlockStore(ws.blocks)
 /**
  * **读入口**：渲染侧的读都该经它取，而不是自己去 `ws.blocks` 里找。
  *
@@ -304,7 +305,7 @@ function refreshSelectionBar(): void {
     layers.closeSelectionBar()
     return
   }
-  const activeMarks = new Set(ed.marksAtSel().map((m) => m.type))
+  const activeMarks = new Set(ed.marksAtSel())
   layers.openSelectionBar({
     rows,
     anchor: rect,
@@ -388,8 +389,6 @@ const panelDeps: PanelDeps = {
   decl: (name) => registry.decl(name),
   page: () => activeBlock(),
   roots: () => mainEd.doc.roots,
-  marks: () => mainEd.marks,
-  atoms: () => mainEd.atoms,
   // ⚠️ 必须查**整片森林**：引用的目标可能是嵌套块，只查顶层会让「打开目标」凭空消失
   findBlock: (id) => findInForest(ws.blocks, id),
   // 引用目标可以是任意深度的块 ⇒ 走 zoom 那条命令，而不是只认顶层页的 `core.page/open`
@@ -400,20 +399,20 @@ const panelDeps: PanelDeps = {
   openDrawer: (title, render) => layers.openDrawer(title, render),
 }
 
-const showAtomPopover = (a: Atom, rect: DOMRect): void => panelPopover(panelDeps, a, rect)
+const showAtomPopover = (a: RunWithId, rect: DOMRect): void => panelPopover(panelDeps, a, rect)
 
 /**
  * 行内原子的**唯一**点击口径（正文 / 反链 footer / 查询结果共用）。
  *
- * · 左键点 `page` 引用且目标在森林里 ⇒ 直接打开目标块（`focus-block`，嵌套块也能进）；
+ * · 左键点引用（含行内标签露面）且目标在森林里 ⇒ 直接打开目标块（`focus-block`，嵌套块也能进）；
  * · `⌥` 点击 ⇒ 弹原来的详情浮层（诊断信息、删除引用都还在那里）；
- * · 图片原子 / dangling / 目标缺失 ⇒ 只弹浮层，**不静默失败**。
+ * · 图片 / 外链 / dangling / 目标缺失 ⇒ 只弹浮层，**不静默失败**。
  *
- * ⚠️ 判断「目标可解析」用 `findInForest`，不是看 `a.state`：状态是快照，
+ * ⚠️ 判断「目标可解析」用 `findInForest`，不是看解析状态：状态是快照，
  *    目标可能在这之后被删掉。
  */
-const handleAtomClick = (a: Atom, el: HTMLElement, mods: { altKey: boolean }): void => {
-  const targetId = a.kind === 'page' ? a.target?.id : undefined
+const handleAtomClick = (a: RunWithId, el: HTMLElement, mods: { altKey: boolean }): void => {
+  const targetId = a.t === 'ref' ? a.to : undefined
   if (!mods.altKey && targetId && findInForest(ws.blocks, targetId)) {
     void registry.invoke('core.block/focus-block', { blockId: targetId }, 'editor')
     return
@@ -548,7 +547,7 @@ function addBlockRole(blockId: string, role: 'page' | 'tag'): boolean {
   if (!b || hasList(b, role)) return false
   let name = primaryAliasOf(b).trim()
   if (name === '') {
-    const text = b.text.trim()
+    const text = plainText(b.content).trim()
     if (text !== '') {
       name = text
     } else if (role === 'tag') {
@@ -674,7 +673,7 @@ const app: App = {
     toast: (text, kind) => app.toast(text, kind),
     shortId: (id) => shortId(id),
   }),
-  removeAtom: (atomId) => ed.removeAtom(atomId),
+  removeAtom: (runId) => ed.removeRun(runId),
 
   /**
    * 标签选择器：**显示层级**（`#演员 · 属于 #人物、#艺术家`）。
@@ -800,7 +799,7 @@ const app: App = {
        */
       device.folded = {}
       scheduleDeviceSave()
-      blocks.reset(next.blocks, next.marks, next.atoms)
+      blocks.reset(next.blocks)
       const p = activeBlock()
       ed = mainEd
       applyChrome()
@@ -819,7 +818,7 @@ const app: App = {
       // ⚠️ 光标必须落在**第一个可编辑的行**上（日记流的第一段是只读日期行）。
       //    原来固定 `roots[0]`，于是载入假数据后光标停在日期行、第一行看着「没有名字」。
       const caret = firstEditableRoot(roots[0])
-      mainEd.loadPage({ roots, folded: device.folded }, ws.marks, ws.atoms, { blockId: caret?.id ?? '', off: 0 })
+      mainEd.loadPage({ roots, folded: device.folded }, { blockId: caret?.id ?? '', off: 0 })
       renderBacklinks()
       renderQueryView()
       chrome.renderEmptyHint(activeBlock().children)
@@ -929,8 +928,6 @@ ed = new BlockEditor({
   store: blocks,
   // 折叠态是**设备**那份（`qua.device`）：换机器就是另一份，换库时由 `replaceWorkspace` 清空
   doc: { roots: bootRoots, folded: device.folded },
-  marks: ws.marks,
-  atoms: ws.atoms,
   /**
    * 写入事务入口。`mainEd` 是 `let`（焦点切到别的编辑器时它会变），所以这里
    * **现取**当前实例当 source，而不是把此刻的值焊进闭包。
@@ -958,9 +955,6 @@ ed.events = {
   editRejected: (name, conflict) => {
     app.toast(t('ui.toast.nameTaken', { name, where: takenWhere(conflict) }), 'warn')
   },
-  atomsLost: (atoms) => {
-    app.toast(t('ui.toast.atomsLost', { labels: atoms.map((a) => a.label).join('、') }), 'warn')
-  },
   // 划选气泡（顶部工具栏作废后的落点）：选区一变就重算「该不该在、装哪几颗」
   selChange: () => {
     refreshSelectionBar()
@@ -982,7 +976,7 @@ ed.events = {
     }
     showMenu({ kind: 'slash', anchor: rect, query: q })
   },
-  atomClick: (a, el, mods) => handleAtomClick(a, el, mods),
+  atomClick: (run, _blockId, el, mods) => handleAtomClick(run, el, mods),
   // 复盘空天格子里落笔：编辑器只报日期，物化那一天（幂等）与重装载归命令层
   shellWrite: (date) => void app.journalShellWrite(date),
   // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
@@ -1142,7 +1136,6 @@ const dockBlocksDeps = (side: 'left' | 'right', slot: typeof dockLeft): Construc
   },
   onFocusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, 'dock'),
   onOpenInDock: (blockId) => togglePin('right', blockId),
-  onAtomsLost: (labels) => app.toast(t('ui.toast.atomsLost', { labels: labels.join('、') }), 'warn'),
 })
 
 setPins({

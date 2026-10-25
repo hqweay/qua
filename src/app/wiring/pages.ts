@@ -225,7 +225,7 @@ export function setupPages(deps: PagesDeps) {
       editorEl.focus()
       if (target) mainEd.placeCaret(target.id, 0)
     },
-    loadPage: (roots, marks, atoms) => {
+    loadPage: (roots) => {
       const mainEd = deps.getMainEd()
       // 装载边界：空 journal 天在这里补首子块（经事务、一条 op）——
       // 所有「打开」命令共用的唯一归一落点，`rootsFor`／命令层只选择、不写库
@@ -233,14 +233,12 @@ export function setupPages(deps: PagesDeps) {
       const { renderBacklinks, renderQueryView, renderProperties, renderTagPanel } = deps.getPanels()
       deps.setEd(mainEd)
       // 正文视图的折叠态是**设备**那份；取当前视图持有的那一份（`device.folded` 只在落盘时同步，可能落后一步）
-      mainEd.loadPage({ roots, folded: mainEd.doc.folded }, marks as never, atoms as never)
+      mainEd.loadPage({ roots, folded: mainEd.doc.folded })
       renderBacklinks()
       renderQueryView()
       renderProperties()
       renderTagPanel()
     },
-    marks: () => deps.getWs().marks,
-    atoms: () => deps.getWs().atoms,
     flush: () => {
       syncSections()
       saveNow()

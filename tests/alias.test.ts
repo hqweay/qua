@@ -12,6 +12,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
+import { plainText, textRuns } from '../src/core/runs.ts'
 import {
   addAlias,
   addList,
@@ -39,7 +40,7 @@ import {
   setPrimaryAlias,
 } from '../src/core/index.ts'
 
-const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, text, children: [], ...extra })
+const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, content: textRuns(text), children: [], ...extra })
 const withAliases = (id: string, aliases: string[], text = ''): Block =>
   b(id, text, { props: { _aliases: aliases } })
 const page = (id: string, aliases: string[], text = ''): Block =>
@@ -184,7 +185,7 @@ test('renameAlias：保留位置；撞车时一个字节都不写', () => {
   const forest = [x, other]
   assert.deepEqual(renameAlias(forest, x, '乙', '戊'), { ok: true })
   assert.deepEqual(aliasesOf(x), ['甲', '戊', '丙'], '替换在原位置')
-  assert.equal(x.text, '描述', '改名不写正文')
+  assert.equal(plainText(x.content), '描述', '改名不写正文')
 
   const before = JSON.stringify(x.props)
   const bad = renameAlias(forest, x, '戊', '丁')
@@ -206,7 +207,7 @@ test('renameBlock：只改主名、**不再写 text**（写回正文不会顺手
   const r = renameBlock([x], x, '新名')
   assert.deepEqual(r, { ok: true })
   assert.deepEqual(aliasesOf(x), ['新名'])
-  assert.equal(x.text, '一段描述', '正文是描述，改名一个字都不碰')
+  assert.equal(plainText(x.content), '一段描述', '正文是描述，改名一个字都不碰')
 })
 
 test('renameBlock：主名为空 ⇒ 追加；撞名 ⇒ 拒绝', () => {
@@ -224,7 +225,7 @@ test('setAlias：主名不存在则加、存在则替换首位（不查重；调
   const x = withAliases('x', ['甲', '乙'], '描述')
   setAlias(x, '丙')
   assert.deepEqual(aliasesOf(x), ['丙', '乙'], '替换主名，其余顺序不变')
-  assert.equal(x.text, '描述')
+  assert.equal(plainText(x.content), '描述')
 
   const fresh = b('f', '')
   setAlias(fresh, '丁')

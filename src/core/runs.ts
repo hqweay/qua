@@ -22,9 +22,11 @@
  * 都经过 `normalizeRuns`，于是「库里的内容只有一种等价形状」。
  */
 import { uuidv7Hex } from './ids.ts'
-import type { MarkType } from './annotations.ts'
 
-export type { MarkType }
+/** 行内格式的封闭种类（bold/italic/highlight/code）。 */
+export type MarkType = 'bold' | 'italic' | 'highlight' | 'code'
+
+export const MARK_TYPES: readonly MarkType[] = ['bold', 'italic', 'highlight', 'code']
 
 /* ------------------------------------------------------------- run 形状 */
 
@@ -484,6 +486,27 @@ export function projectOff(content: Content, off: number): number {
     plain += 1
   }
   return proj
+}
+
+/**
+ * 投影偏移 → plain 偏移（`projectOff` 的逆；`fromProjection(projectOff(x)) = x`
+ * 对所有落在文本上的点成立）。「在纯文本里找到的位置」要拿回 run 序列上操作时用它。
+ */
+export function fromProjection(content: Content, projOff: number): number {
+  let plain = 0
+  let proj = 0
+  for (const r of content) {
+    if (r.t === 'text') {
+      const re = plain + r.v.length
+      const pe = proj + r.v.length
+      if (projOff < pe || (projOff === pe && re === plainLen(content))) return plain + (projOff - proj)
+      proj = pe
+      plain = re
+      continue
+    }
+    plain += 1
+  }
+  return plain
 }
 
 /**

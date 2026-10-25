@@ -143,28 +143,20 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     }
     const page = app.listPages().find((p) => p.id === pageId)
     if (!page) return false
-    app.ed.insertAtom('page', {
-      label: page.title || t('ui.page.untitled'),
-      target: { kind: 'page', id: page.id },
-      quote: app.ed.quoteAtSel(),
-    })
+    app.ed.insertRef({ to: page.id, label: page.title || t('ui.page.untitled') })
     return true
   },
   'core.editor/insert-image': (a, app) => {
     const preset = S(a.preset, 'ready')
     const missing = preset === 'missing'
-    app.ed.insertAtom('image', {
-      label: missing ? t('ui.sample.assetMissingName') : t('ui.sample.assetReadyName'),
-      asset: {
+    app.ed.insertImage(
+      {
         hash: 'b7d4' + '1f0a'.repeat(4),
         name: missing ? t('ui.sample.assetMissingName') : t('ui.sample.assetReadyName'),
-        bytes: missing ? 0 : 348_160,
-        mime: 'image/png',
         state: missing ? 'missing' : 'ready',
-        w: 1280,
-        h: 800,
       },
-    })
+      { w: 1280, h: 800 },
+    )
     return true
   },
 

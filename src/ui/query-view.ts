@@ -15,7 +15,8 @@
  * ⚠️ 它不是「可编辑视图 / 实时视图」二选一：它**可编辑**，稳定性靠冻结而不是靠只读。
  * ⚠️ 视图状态（滚动、折叠展开态）不进库；滚动位置由外层编辑器自己保。
  */
-import { displayNameOf, resolveFrozen, readResult, refreshSpec, readSpec, type Atom, type Block, type BlockStore } from '../core/index.ts'
+import { displayNameOf, resolveFrozen, readResult, refreshSpec, readSpec, type Block, type BlockStore } from '../core/index.ts'
+import type { RunWithId } from '../core/runs.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
@@ -35,7 +36,7 @@ export interface QueryViewDeps {
   /** 点结果块的块标：聚焦/zoom 到它（中心槽换内容）；由装配层注入 */
   onFocusBlock: (blockId: string) => void
   /** 点行内原子：与正文同一条逻辑（左键打开、⌥ 详情、解析不到仍弹详情） */
-  onAtomClick?: (atom: Atom, el: HTMLElement, mods: { altKey: boolean }) => void
+  onAtomClick?: (run: RunWithId, blockId: string, el: HTMLElement, mods: { altKey: boolean }) => void
   /** 提示（刷新失败、丢了几条） */
   toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
@@ -93,7 +94,7 @@ export class QueryView {
         this.deps.onChange()
       },
       focusBlock: (blockId) => this.deps.onFocusBlock(blockId),
-      atomClick: (atom, el, mods) => this.deps.onAtomClick?.(atom, el, mods),
+      atomClick: (run, blockId, el, mods) => this.deps.onAtomClick?.(run, blockId, el, mods),
     }
 
     // ⚠️ 这里**只**点亮 stale，不重排列表（D4 的「不自动重算」）。
@@ -191,17 +192,13 @@ export class QueryView {
       // 空结果是**状态**不是错误：保留抬头（含刷新按钮），正文给一句实话
       this.els.editor.replaceChildren()
       // 空结果也保留本视图的折叠态：它记的是「哪些行收着」，不是「这次有几行」
-      this.editor.loadPage({ roots: [], folded: this.editor.doc.folded }, this.deps.store.marks, this.deps.store.atoms)
+      this.editor.loadPage({ roots: [], folded: this.editor.doc.folded })
       this.els.editor.dataset.empty = '1'
       return
     }
     delete this.els.editor.dataset.empty
     // 只装「最外层命中」：子树由编辑器自己展开（D8：带 breadcrumb 的上下文在行首另行标注）
-    this.editor.loadPage(
-      { roots: rows.map((r) => r.block), folded: this.editor.doc.folded },
-      this.deps.store.marks,
-      this.deps.store.atoms,
-    )
+    this.editor.loadPage({ roots: rows.map((r) => r.block), folded: this.editor.doc.folded })
   }
 
   private renderEmpty(text: string): void {

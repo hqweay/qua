@@ -16,7 +16,6 @@
  *
  * ⚠️ 本文件零 DOM、零持久化：op 只是被**算出来**，谁来落盘由上层决定。
  */
-import type { Atom, Mark } from '../annotations.ts'
 import { backrefBlocks, backrefsOf, type BackrefBlock, type BackrefSource } from '../backrefs.ts'
 import { aliasesOf, DELETED_AT_PROP, hasList, isDeleted, listsOf, type Block } from '../model.ts'
 import { findByAlias } from '../alias.ts'
@@ -38,6 +37,7 @@ import {
 import type { QueryHit, QuerySpec } from '../query.ts'
 import type { BlockStore } from '../store.ts'
 import type { Change, KbClient, Op, PathEntry, Tx, TxOpts, TxResult } from './types.ts'
+import type { Anno } from '../runs.ts'
 
 /** 按含**被删块**的遍历找块（可见遍历看不见它们；恢复路径用） */
 function findIncludingDeleted(forest: readonly Block[], id: string): Block | undefined {
@@ -215,11 +215,8 @@ export class MemoryKb implements KbClient {
     return findJournalDay(this.store.blocks, date)
   }
 
-  annotationsOf(id: string): { marks: readonly Mark[]; atoms: readonly Atom[] } {
-    return {
-      marks: this.store.marks.filter((m) => m.blockId === id),
-      atoms: this.store.atoms.filter((a) => a.blockId === id),
-    }
+  annosOf(id: string): readonly Anno[] {
+    return findInForest(this.store.blocks, id)?.annos ?? []
   }
 
   query(spec: QuerySpec, opts: { scopeId?: string } = {}): QueryHit[] {
@@ -228,11 +225,11 @@ export class MemoryKb implements KbClient {
   }
 
   backlinksOf(id: string): readonly BackrefSource[] {
-    return backrefsOf({ blocks: this.store.blocks, atoms: this.store.atoms, targetId: id, index: this.store.index })
+    return backrefsOf({ blocks: this.store.blocks, targetId: id, index: this.store.index })
   }
 
   backrefBlocksOf(id: string): readonly BackrefBlock[] {
-    return backrefBlocks({ blocks: this.store.blocks, atoms: this.store.atoms, targetId: id, index: this.store.index })
+    return backrefBlocks({ blocks: this.store.blocks, targetId: id, index: this.store.index })
   }
 
   /* ------------------------------------------------------------ 写面 */
@@ -244,11 +241,7 @@ export class MemoryKb implements KbClient {
    * 所以「回滚」与撤销是同一种机制 —— 它们本来回答的就是同一个问题。
    */
   tx<R>(fn: (tx: Tx) => R, opts: TxOpts = {}): TxResult & { result: R } {
-    const snap = {
-      blocks: JSON.stringify(this.store.blocks),
-      marks: JSON.stringify(this.store.marks),
-      atoms: JSON.stringify(this.store.atoms),
-    }
+    const snap = JSON.stringify(this.store.blocks)
     const ops: Op[] = []
     const changes: Change[] = []
     const sink = new ChangeSink(changes)
@@ -267,13 +260,9 @@ export class MemoryKb implements KbClient {
   }
 
   /** 按序列化快照原地恢复（保持数组身份：视图手里的引用不会失效） */
-  private restore(snap: { blocks: string; marks: string; atoms: string }): void {
-    const blocks = JSON.parse(snap.blocks) as Block[]
+  private restore(snap: string): void {
+    const blocks = JSON.parse(snap) as Block[]
     this.store.blocks.splice(0, this.store.blocks.length, ...blocks)
-    const marks = JSON.parse(snap.marks) as Mark[]
-    this.store.marks.splice(0, this.store.marks.length, ...marks)
-    const atoms = JSON.parse(snap.atoms) as Atom[]
-    this.store.atoms.splice(0, this.store.atoms.length, ...atoms)
     this.store.invalidateIndex()
     this.store.touch(undefined)
   }
@@ -291,7 +280,7 @@ export class MemoryKb implements KbClient {
     return {
       patch(id, fn) {
         const b = require(id)
-        const before = { text: b.text, props: b.props ? clone(b.props) : undefined, kids: b.children.slice() }
+        const before = { content: JSON.stringify(b.content), props: b.props ? clone(b.props) : undefined, kids: b.children.slice() }
         fn(b)
         // 子树不归 patch 管：能改 `children` 的只有结构 op，否则结构变化会被 diff 静默吞掉
         const kids = b.children
@@ -299,8 +288,10 @@ export class MemoryKb implements KbClient {
         if (!sameKids) {
           throw new Error(`kb: patch("${id}") changed children — use insert/move/remove`)
         }
-        if (b.text !== before.text) {
-          ops.push({ e: 'block', id, op: 'upsert', value: { text: b.text }, at: at() })
+        // 行内内容（文本/格式/原子）是**一组事实**：一次改动就是一条 content upsert，
+        // 落库与同步看到的是整组替换，不是「字一条、格式一条、原子一条」的碎账。
+        if (JSON.stringify(b.content) !== before.content) {
+          ops.push({ e: 'block', id, op: 'upsert', value: { content: b.content }, at: at() })
           sink.blocks(id)
         }
         if (!sameProps(before.props, b.props)) {
@@ -450,36 +441,27 @@ export class MemoryKb implements KbClient {
         sink.blocks(id)
       },
 
-      setAnnotations(id, marks, atoms) {
-        require(id)
+      setAnnos(id, annos) {
+        const b = require(id)
+        const before = new Map((b.annos ?? []).map((a) => [a.id, a]))
+        const after = new Map(annos.map((a) => [a.id, a]))
         /**
-         * 按 id diff。**未变的锚点不发 op**：一次渲染里重算同一批锚点是常见路径，
-         * 每次都整组重写会把「碰过」当成「改过」，让落盘与同步看到一堆空转的写入。
+         * 按 id diff。**未变的不发 op**：anno 的 id 是别人引用的地址，
+         * 逐条比对才能做到「没变的那条一个字节不动」。
+         * 同一条 anno 被**重物化**（range 漂了、quote 重定位了）⇒ set 覆盖，id 不换。
          */
-        const diff = <T extends Mark | Atom>(prev: readonly T[], next: readonly T[], kind: 'marks' | 'atoms'): void => {
-          const before = new Map(prev.filter((x) => x.blockId === id).map((x) => [x.id, x]))
-          const after = new Map(next.filter((x) => x.blockId === id).map((x) => [x.id, x]))
-          let touched = false
-          for (const [aid, a] of after) {
-            const old = before.get(aid)
-            if (old && JSON.stringify(old) === JSON.stringify(a)) continue
-            ops.push({ e: 'anno', block: id, id: aid, op: 'set', value: a, at: at() })
-            touched = true
-          }
-          for (const [aid, a] of before) {
-            if (after.has(aid)) continue
-            ops.push({ e: 'anno', block: id, id: aid, op: 'delete', value: a, at: at() })
-            touched = true
-          }
-          if (touched) sink[kind](id)
+        for (const [aid, a] of after) {
+          const old = before.get(aid)
+          if (old && JSON.stringify(old) === JSON.stringify(a)) continue
+          ops.push({ e: 'anno', block: id, id: aid, op: 'set', value: a, at: at() })
+          sink.annos(id)
         }
-        // 只换这一块的：别的块的锚点原样留在库里（整块替换 = 摘掉这块的、再接上新的）
-        const nextMarks = [...self.store.marks.filter((m) => m.blockId !== id), ...marks]
-        const nextAtoms = [...self.store.atoms.filter((a) => a.blockId !== id), ...atoms]
-        diff(self.store.marks, nextMarks, 'marks')
-        diff(self.store.atoms, nextAtoms, 'atoms')
-        self.store.marks.splice(0, self.store.marks.length, ...clone(nextMarks))
-        self.store.atoms.splice(0, self.store.atoms.length, ...clone(nextAtoms))
+        for (const [aid, a] of before) {
+          if (after.has(aid)) continue
+          ops.push({ e: 'anno', block: id, id: aid, op: 'delete', value: a, at: at() })
+          sink.annos(id)
+        }
+        b.annos = annos.length === 0 ? undefined : clone([...annos])
       },
     }
   }
@@ -501,11 +483,8 @@ class ChangeSink {
   blocks(id: string): void {
     this.push('blocks', id)
   }
-  marks(id: string): void {
-    this.push('marks', id)
-  }
-  atoms(id: string): void {
-    this.push('atoms', id)
+  annos(id: string): void {
+    this.push('annos', id)
   }
   /** 给 `store.touch(source, ids)`：这次动过的块（含只动锚点的块） */
   ids(): string[] {

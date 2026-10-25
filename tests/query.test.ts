@@ -31,10 +31,11 @@ import {
   type QuerySpec,
 } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
+import { plainText, textRuns } from '../src/core/runs.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({
   id,
-  text,
+  content: textRuns(text),
   children: [],
   ...extra,
 })
@@ -74,18 +75,10 @@ function fixture() {
       if (tagged.has(block.id)) block.props = { ...(block.props ?? {}), _tags: [todo.id] }
     }
   }
-  const atoms: Atom[] = [
-    {
-      id: 'at1',
-      kind: 'page',
-      blockId: 'd',
-      start: 2,
-      end: 3,
-      label: '丙',
-      target: { kind: 'page', id: 'c' },
-    } as Atom,
-  ]
-  return { blocks: [...forest, todo], atoms, todo }
+  // 「提到丙的块」正文里带一枚指向 c 的引用 run（指向边住在源块内容里）
+  const d = forest[0]!.children.find((x) => x.id === 'd')!
+  d.content.push({ id: 'at1', t: 'ref', to: 'c', label: '丙' })
+  return { blocks: [...forest, todo], todo }
 }
 
 test('标签按**归属**判定（不扫文本）：正文里写 #todo 不成标签', () => {
@@ -94,7 +87,7 @@ test('标签按**归属**判定（不扫文本）：正文里写 #todo 不成标
   assert.equal(hasTag(flat.find((x) => x.id === 'a')!, todo.id), true)
   assert.equal(hasTag(flat.find((x) => x.id === 'c')!, todo.id), false, '丙没打标签')
   // 正文里那几个字还在（`#todo` 只是普通文本），但不产生归属
-  assert.equal(flat.find((x) => x.id === 'c')?.text.includes('标签'), true)
+  assert.equal(plainText(flat.find((x) => x.id === 'c')!.content).includes('标签'), true)
 })
 
 test('normalizeTag：大小写与空白只有一处口径', () => {
@@ -110,33 +103,33 @@ test('findTagByName / tagMemberIds：标签的成员＝块上的归属', () => {
 })
 
 test('runQuery：标签条件只命中带标签的块', () => {
-  const { blocks, atoms } = fixture()
-  const hits = runQuery({ where: { tag: 'todo' } }, { blocks, atoms })
+  const { blocks } = fixture()
+  const hits = runQuery({ where: { tag: 'todo' } }, { blocks })
   assert.deepEqual(hits.map((h) => h.blockId), ['a', 'b', 'd1', 'e', 'j1b'])
 })
 
 test('runQuery：scope 缺省＝subtree —— 只在锚点之下找（含锚点自己）', () => {
-  const { blocks, atoms } = fixture()
-  const hits = runQuery({ where: { tag: 'todo' } }, { blocks, atoms, anchorId: 'p1' })
+  const { blocks } = fixture()
+  const hits = runQuery({ where: { tag: 'todo' } }, { blocks, anchorId: 'p1' })
   assert.deepEqual(hits.map((h) => h.blockId), ['a', 'b', 'd1'], 'p2 与 journal 不该进来')
 })
 
 test('runQuery：scope 缺省（subtree）＋ 锚点不在森林里 ⇒ 退回整片森林（不炸）', () => {
   // 查询块是**游离块**时（例如刚从 seed 里造出来、还没挂进森林）不该静默返回空结果
-  const { blocks, atoms } = fixture()
-  const hits = runQuery({ where: { tag: 'todo' } }, { blocks, atoms, anchorId: '不存在' })
+  const { blocks } = fixture()
+  const hits = runQuery({ where: { tag: 'todo' } }, { blocks, anchorId: '不存在' })
   assert.equal(hits.length, 5)
 })
 
 test('runQuery：scope=all 时不受锚点限制', () => {
-  const { blocks, atoms } = fixture()
-  const hits = runQuery({ where: { tag: 'todo' }, scope: 'all' }, { blocks, atoms, anchorId: 'p1' })
+  const { blocks } = fixture()
+  const hits = runQuery({ where: { tag: 'todo' }, scope: 'all' }, { blocks, anchorId: 'p1' })
   assert.equal(hits.length, 5)
 })
 
 test('runQuery：ref 条件＝指向边（只认 atom 的 target id）', () => {
-  const { blocks, atoms } = fixture()
-  const hits = runQuery({ where: { ref: 'c' }, scope: 'all' }, { blocks, atoms })
+  const { blocks } = fixture()
+  const hits = runQuery({ where: { ref: 'c' }, scope: 'all' }, { blocks })
   assert.deepEqual(hits.map((h) => h.blockId), ['d'])
 })
 
@@ -149,44 +142,43 @@ test('runQuery：**有槽未填**的块按「未完成」命中（与渲染同�
    */
   const fresh: Block = {
     id: 'fresh',
-    text: '刚加上的任务',
+    content: textRuns('刚加上的任务'),
     children: [],
     props: { [OWN_PROPS_PROP]: [TASK_STATUS_PROP_ID], _tags: [] },
   }
   const blocks = [...fixture().blocks, fresh]
-  const hits = runQuery({ where: { todo: 'todo' }, scope: 'all' }, { blocks, atoms: [] })
+  const hits = runQuery({ where: { todo: 'todo' }, scope: 'all' }, { blocks })
   assert.ok(hits.some((h) => h.blockId === 'fresh'), '有槽未填应命中「未完成」')
   assert.ok(!hits.some((h) => h.blockId === 'j1b'), '没有槽的块仍不该命中')
 })
 
 test('runQuery：journal 条件取那天的**子块**，不含只读日期行本身', () => {
-  const { blocks, atoms } = fixture()
+  const { blocks } = fixture()
   assert.ok(findJournalDay(blocks, '2026-10-20'))
   // ⚠️ 一个 node 只能是一种形态：写成 `{ journal, all: [] }` 会被 `'all' in node` 先命中（恒真）
-  const hits = runQuery({ where: { journal: '2026-10-20' }, scope: 'all' }, { blocks, atoms })
+  const hits = runQuery({ where: { journal: '2026-10-20' }, scope: 'all' }, { blocks })
   assert.deepEqual(hits.map((h) => h.blockId), ['j1a', 'j1b'], '日期行 j1 不该在结果里')
 })
 
 test('runQuery：role 成员条件把**天当结果**（不触发「journal 不当结果」的排除规则）', () => {
-  const { blocks, atoms } = fixture()
+  const { blocks } = fixture()
   // 排除规则只挂在范围条件（env.journalDate）上：role 命中的恰恰是日期行自己
-  const hits = runQuery({ where: { role: 'journal' }, scope: 'all' }, { blocks, atoms })
+  const hits = runQuery({ where: { role: 'journal' }, scope: 'all' }, { blocks })
   assert.deepEqual(hits.map((h) => h.blockId), ['j1'])
   // 嵌在组合里的 role 是普通谓词，逐块判定，结果同形
-  const inAny = runQuery({ where: { any: [{ role: 'journal' }] }, scope: 'all' }, { blocks, atoms })
+  const inAny = runQuery({ where: { any: [{ role: 'journal' }] }, scope: 'all' }, { blocks })
   assert.deepEqual(inAny.map((h) => h.blockId), ['j1'])
 })
 
 test('runQuery：sort 按 spec 排序（先排序后 limit），稳定 ＋ 缺槽最后', () => {
   const mk = (id: string, v?: unknown): Block => ({
     id,
-    text: id,
+    content: textRuns(id),
     children: [],
     ...(v === undefined ? {} : { props: { k: v } }),
   })
   // b 与 e 同值：稳定排序必须保留森林先序（b 在前）；d 缺槽：排最后（与方向无关）
   const forest = [mk('a', '2026-01-03'), mk('b', '2026-01-01'), mk('c', '2026-01-02'), mk('d'), mk('e', '2026-01-01')]
-  const atoms: Atom[] = []
   const spec = (sort: QuerySpec['sort'], limit?: number): QuerySpec => ({
     where: { text: '' },
     scope: 'all',
@@ -194,14 +186,14 @@ test('runQuery：sort 按 spec 排序（先排序后 limit），稳定 ＋ 缺�
     ...(limit === undefined ? {} : { limit }),
   })
   const ids = (hits: { blockId: string }[]): string[] => hits.map((h) => h.blockId)
-  assert.deepEqual(ids(runQuery(spec([{ by: 'k', dir: 'desc' }]), { blocks: forest, atoms })), [
+  assert.deepEqual(ids(runQuery(spec([{ by: 'k', dir: 'desc' }]), { blocks: forest })), [
     'a',
     'c',
     'b',
     'e',
     'd',
   ])
-  assert.deepEqual(ids(runQuery(spec([{ by: 'k', dir: 'asc' }]), { blocks: forest, atoms })), [
+  assert.deepEqual(ids(runQuery(spec([{ by: 'k', dir: 'asc' }]), { blocks: forest })), [
     'b',
     'e',
     'c',
@@ -209,7 +201,7 @@ test('runQuery：sort 按 spec 排序（先排序后 limit），稳定 ＋ 缺�
     'd',
   ])
   // 「取最新的 3 天」＝先按 _date 降序、再 limit —— 截断在排序之后才对
-  assert.deepEqual(ids(runQuery(spec([{ by: 'k', dir: 'desc' }], 2), { blocks: forest, atoms })), ['a', 'c'])
+  assert.deepEqual(ids(runQuery(spec([{ by: 'k', dir: 'desc' }], 2), { blocks: forest })), ['a', 'c'])
 })
 
 test('canonicalSpec：role 条件与 sort 键要能存活下来（否则存进 _query 就被丢掉）', () => {
@@ -228,22 +220,22 @@ test('canonicalSpec：role 条件与 sort 键要能存活下来（否则存进 _
 })
 
 test('runQuery：all / any / not 组合', () => {
-  const { blocks, atoms } = fixture()
-  const todoOnly = runQuery({ where: { all: [{ tag: 'todo' }, { todo: 'todo' }] }, scope: 'all' }, { blocks, atoms })
+  const { blocks } = fixture()
+  const todoOnly = runQuery({ where: { all: [{ tag: 'todo' }, { todo: 'todo' }] }, scope: 'all' }, { blocks })
   // ⚠️ `j1b` 只有标签、没有待办状态 ⇒ 不该命中 `all[tag, todo]`
   assert.deepEqual(todoOnly.map((h) => h.blockId), ['a', 'd1', 'e'])
 
-  const notTag = runQuery({ where: { not: { tag: 'todo' } }, scope: 'all' }, { blocks, atoms })
+  const notTag = runQuery({ where: { not: { tag: 'todo' } }, scope: 'all' }, { blocks })
   assert.ok(!notTag.some((h) => h.blockId === 'a'))
   assert.ok(notTag.some((h) => h.blockId === 'c'))
 
-  const either = runQuery({ where: { any: [{ ref: 'c' }, { todo: 'done' }] }, scope: 'all' }, { blocks, atoms })
+  const either = runQuery({ where: { any: [{ ref: 'c' }, { todo: 'done' }] }, scope: 'all' }, { blocks })
   assert.deepEqual(either.map((h) => h.blockId), ['b', 'd'])
 })
 
 test('runQuery：limit 截断；结果顺序＝森林先序（可复现）', () => {
-  const { blocks, atoms } = fixture()
-  const hits = runQuery({ where: { tag: 'todo' }, scope: 'all', limit: 2 }, { blocks, atoms })
+  const { blocks } = fixture()
+  const hits = runQuery({ where: { tag: 'todo' }, scope: 'all', limit: 2 }, { blocks })
   assert.deepEqual(hits.map((h) => h.blockId), ['a', 'b'])
 })
 
@@ -251,35 +243,35 @@ test('runQuery：limit 截断；结果顺序＝森林先序（可复现）', () 
  * 求值与冻结都经**读门面**（`kb.query` 走索引、`kb.pathOf` 现读）：
  * 测试里用同一份 fixture 造一个门面，调用方形状与生产一致。
  */
-function kbOf(blocks: Block[], atoms: Atom[]): { kb: MemoryKb; store: BlockStore } {
-  const store = new BlockStore(blocks, [], atoms)
+function kbOf(blocks: Block[]): { kb: MemoryKb; store: BlockStore } {
+  const store = new BlockStore(blocks)
   return { kb: new MemoryKb(store), store }
 }
 
 /** 两种求值路径的**等式**：同一份库，纯函数与索引必须给出同一批命中（同一顺序） */
-function assertSameHits(spec: QuerySpec, blocks: Block[], atoms: Atom[], opts: { anchorId?: string } = {}): void {
-  const fromForest = runQuery(spec, { blocks, atoms, anchorId: opts.anchorId })
-  const fromIndex = queryByIndex(rebuild(blocks, atoms), blocks, spec, opts)
+function assertSameHits(spec: QuerySpec, blocks: Block[], opts: { anchorId?: string } = {}): void {
+  const fromForest = runQuery(spec, { blocks, anchorId: opts.anchorId })
+  const fromIndex = queryByIndex(rebuild(blocks), blocks, spec, opts)
   assert.deepEqual(fromIndex, fromForest)
 }
 
 test('索引路径与纯函数路径同解（ref/tag/journal 查表，判定与顺序共用一份）', () => {
-  const { blocks, atoms } = fixture()
-  assertSameHits({ where: { tag: 'todo' } }, blocks, atoms)
-  assertSameHits({ where: { tag: 'todo' }, scope: 'all' }, blocks, atoms, { anchorId: 'p1' })
-  assertSameHits({ where: { ref: 'c' }, scope: 'all' }, blocks, atoms)
-  assertSameHits({ where: { journal: '2026-10-20' }, scope: 'all' }, blocks, atoms)
-  assertSameHits({ where: { all: [{ tag: 'todo' }, { todo: 'todo' }] }, scope: 'all' }, blocks, atoms)
-  assertSameHits({ where: { text: '丙' }, scope: 'all' }, blocks, atoms)
-  assertSameHits({ where: { tag: 'todo' }, scope: 'all', limit: 2 }, blocks, atoms)
+  const { blocks } = fixture()
+  assertSameHits({ where: { tag: 'todo' } }, blocks)
+  assertSameHits({ where: { tag: 'todo' }, scope: 'all' }, blocks, { anchorId: 'p1' })
+  assertSameHits({ where: { ref: 'c' }, scope: 'all' }, blocks)
+  assertSameHits({ where: { journal: '2026-10-20' }, scope: 'all' }, blocks)
+  assertSameHits({ where: { all: [{ tag: 'todo' }, { todo: 'todo' }] }, scope: 'all' }, blocks)
+  assertSameHits({ where: { text: '丙' }, scope: 'all' }, blocks)
+  assertSameHits({ where: { tag: 'todo' }, scope: 'all', limit: 2 }, blocks)
   // 成员条件（索引路径查日期表收窄候选）＋ 排序轴
-  assertSameHits({ where: { role: 'journal' }, scope: 'all' }, blocks, atoms)
-  assertSameHits({ where: { role: 'journal' }, scope: 'all', sort: [{ by: '_date', dir: 'desc' }] }, blocks, atoms)
+  assertSameHits({ where: { role: 'journal' }, scope: 'all' }, blocks)
+  assertSameHits({ where: { role: 'journal' }, scope: 'all', sort: [{ by: '_date', dir: 'desc' }] }, blocks)
 })
 
 test('refreshSpec：把条件与结果写回块上；丢掉的不再匹配的块要能报出来', () => {
-  const { blocks, atoms } = fixture()
-  const { kb, store } = kbOf(blocks, atoms)
+  const { blocks } = fixture()
+  const { kb, store } = kbOf(blocks)
   const q = b('q', '查询：带 todo 的')
   const spec: QuerySpec = { where: { tag: 'todo' }, scope: 'all' }
   const first = refreshSpec(q, spec, kb)
@@ -305,8 +297,8 @@ test('refreshSpec：把条件与结果写回块上；丢掉的不再匹配的块
 
 test('refreshSpec：subtree 的锚点是查询块所在的容器，不是查询块自己（它是叶子）', () => {
   // 实测踩到：查询块只存条件、不吃结果（A）⇒ 拿它当锚点的话 subtree 里只有它自己，永远 0 条
-  const { blocks, atoms } = fixture()
-  const { kb } = kbOf(blocks, atoms)
+  const { blocks } = fixture()
+  const { kb } = kbOf(blocks)
   const q = b('q', '本页的待办', { props: { _query: { where: { todo: 'todo' } } } })
   blocks[0]!.children.push(q)
   const { hits } = refreshSpec(q, { where: { todo: 'todo' } }, kb)
@@ -314,8 +306,8 @@ test('refreshSpec：subtree 的锚点是查询块所在的容器，不是查询�
 })
 
 test('resolveFrozen：内容按 id 现读（冻的是成员，不是文字）', () => {
-  const { blocks, atoms } = fixture()
-  const { kb } = kbOf(blocks, atoms)
+  const { blocks } = fixture()
+  const { kb } = kbOf(blocks)
   const q = b('q', 'q')
   refreshSpec(q, { where: { tag: 'todo' }, scope: 'all' }, kb)
 
@@ -327,8 +319,8 @@ test('resolveFrozen：内容按 id 现读（冻的是成员，不是文字）', 
 })
 
 test('resolveFrozen：块被删了就不出；祖先也在结果里时只保留祖先', () => {
-  const { blocks, atoms } = fixture()
-  const { kb } = kbOf(blocks, atoms)
+  const { blocks } = fixture()
+  const { kb } = kbOf(blocks)
   const q = b('q', 'q')
   // d 与 d1 都命中标签吗？d 不含标签 ⇒ 用 text 条件让父子同时命中
   refreshSpec(q, { where: { text: '提到' }, scope: 'all' }, kb)
@@ -337,7 +329,7 @@ test('resolveFrozen：块被删了就不出；祖先也在结果里时只保留�
 
   // 删掉结果里的块 ⇒ 该行消失（pathOf 解析不到 ⇒ 空数组 ⇒ 这一行不出）
   const without = blocks.map((p) => ({ ...p, children: p.children.filter((c) => c.id !== 'd') }))
-  const { kb: kb2 } = kbOf(without, atoms)
+  const { kb: kb2 } = kbOf(without)
   assert.deepEqual(resolveFrozen(readResult(q)!, (id) => kb2.pathOf(id)), [])
 })
 
@@ -350,17 +342,17 @@ test('runQuery：属性条件按 propId 取值、Object.is 比较（未填与 fa
   const forest: Block[] = Object.entries(props).map(([id, p]) => b(id, id, { props: p }))
   const atoms: Atom[] = []
   assert.deepEqual(
-    runQuery({ where: { prop: { id: 'task', eq: true } }, scope: 'all' }, { blocks: forest, atoms }).map((h) => h.blockId),
+    runQuery({ where: { prop: { id: 'task', eq: true } }, scope: 'all' }, { blocks: forest }).map((h) => h.blockId),
     ['a'],
   )
   assert.deepEqual(
-    runQuery({ where: { prop: { id: 'task', eq: false } }, scope: 'all' }, { blocks: forest, atoms }).map((h) => h.blockId),
+    runQuery({ where: { prop: { id: 'task', eq: false } }, scope: 'all' }, { blocks: forest }).map((h) => h.blockId),
     ['b'],
     '属性不存在（c）不许被当成 false',
   )
   // `eq: undefined` 也匹配不到任何块：`c` 根本没有这一槽（不存在 ≠ 等于 undefined）
   assert.deepEqual(
-    runQuery({ where: { prop: { id: 'task', eq: undefined } }, scope: 'all' }, { blocks: forest, atoms }).map((h) => h.blockId),
+    runQuery({ where: { prop: { id: 'task', eq: undefined } }, scope: 'all' }, { blocks: forest }).map((h) => h.blockId),
     [],
   )
 })

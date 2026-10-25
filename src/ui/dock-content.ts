@@ -8,6 +8,7 @@
  * ⚠️ 渲染一律走 `renderBlock`：槽只排一列，块由类型决定长相（角色只叠 chrome）。
  */
 import { todayISO, type Block } from '../core/index.ts'
+import { textRuns } from '../core/runs.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { renderBlock, type BlockRenderCtx } from './block-renderers.ts'
@@ -84,7 +85,7 @@ export function renderBackrefsInto(deps: DockContentDeps, slot: DockSlotEls, ext
   // 反链项**不是库里的块**，是查询结果：现造一行出来，靠 `props._icon` 拿箭头（大纲行已经读它）。
   // 不给它挂角色 —— 角色说的是「这块在系统里担任什么机制位」，而它没有库身份，从不落盘。
   for (const s of sources) {
-    const row: Block = { id: s.pageId, text: s.text, children: [], props: { _icon: 'lucide:corner-up-left' } }
+    const row: Block = { id: s.pageId, content: textRuns(s.text), children: [], props: { _icon: 'lucide:corner-up-left' } }
     list.appendChild(renderBlock(row, ctx))
   }
 

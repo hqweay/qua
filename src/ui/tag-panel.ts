@@ -11,7 +11,8 @@
  * ⚠️ 成员是**算作**进来的（`membersOf`）：`#人物` 的成员含只打 `#演员` 的块，
  *    但这些块**不获得** `#人物` 的字段（字段只看直接标签，见 `core/props.ts`）。
  */
-import { displayNameOf, type Atom, type Block, type BlockStore } from '../core/index.ts'
+import { displayNameOf, type Block, type BlockStore } from '../core/index.ts'
+import type { RunWithId } from '../core/runs.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
@@ -42,8 +43,7 @@ export interface TagPanelDeps {
   /** 成员编辑器获得焦点：装配层把「活动编辑器」切到它 */
   onFocus: () => void
   onFocusBlock: (blockId: string) => void
-  onAtomClick?: (atom: Atom, el: HTMLElement, mods: { altKey: boolean }) => void
-  onAtomsLost?: (labels: string[]) => void
+  onAtomClick?: (run: RunWithId, blockId: string, el: HTMLElement, mods: { altKey: boolean }) => void
 }
 
 export interface TagPanelEls {
@@ -88,8 +88,7 @@ export class TagPanel {
         if (kind !== 'load') this.deps.onChange()
       },
       focusBlock: (blockId) => this.deps.onFocusBlock(blockId),
-      atomClick: (atom, el, mods) => this.deps.onAtomClick?.(atom, el, mods),
-      atomsLost: (atoms) => this.deps.onAtomsLost?.(atoms.map((a) => a.label)),
+      atomClick: (run, blockId, el, mods) => this.deps.onAtomClick?.(run, blockId, el, mods),
     }
     deps.store.subscribe((source) => {
       if (source === this.editor) return
@@ -182,7 +181,7 @@ export class TagPanel {
     this.els.membersEditor.hidden = members.length === 0
     if (members.length === 0) {
       // 空结果也保留本视图的折叠态：它记的是「哪些行收着」，不是「这次有几行」
-      this.editor.loadPage({ roots: [], folded: this.editor.doc.folded }, this.deps.store.marks, this.deps.store.atoms)
+      this.editor.loadPage({ roots: [], folded: this.editor.doc.folded })
       return
     }
 
@@ -195,11 +194,7 @@ export class TagPanel {
       const live = this.deps.store.find(b.id)
       if (live) roots.push(live)
     }
-    this.editor.loadPage(
-      { roots, folded: this.editor.doc.folded },
-      this.deps.store.marks,
-      this.deps.store.atoms,
-    )
+    this.editor.loadPage({ roots, folded: this.editor.doc.folded })
   }
 
   private schedule(): void {

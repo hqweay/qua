@@ -49,10 +49,13 @@ const SHARD = (() => {
  * 少一条就等于漏测，而漏测是不报错的（这是分片唯一会静默失效的地方，必须自己验）。
  */
 const REPORT = process.env.QUA_SMOKE_REPORT ?? ''
+const ONLY = process.env.QUA_SMOKE_ONLY ?? ''
 let seq = 0
 
 async function check(name, fn) {
   const idx = seq++
+  // 调试过滤：只跑名字含 QUA_SMOKE_ONLY 子串的用例（不设 ＝ 全跑；分片编排不受影响）
+  if (ONLY && !name.includes(ONLY)) return
   if (SHARD && idx % SHARD.n !== SHARD.i) return
   try {
     const msg = await fn()
@@ -555,7 +558,7 @@ await check('T3c 主题三档在调试菜单：点得到、改得动，且不在
   return `调试菜单 ${rows.length} 项（三档主题，无皮肤）；切到暗后顶栏仍未回来`
 })
 
-await check('T4 锚点的粘性映射：在区间起点插入不撑大、终点插入不动', async () => {
+await check('T4 格式随打字继承：粗体末尾接着敲的字仍是粗体、素段末尾敲的字不带格式', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const r = await page.evaluate(() => {
@@ -563,32 +566,41 @@ await check('T4 锚点的粘性映射：在区间起点插入不撑大、终点�
     window.__qua.focusBlock(id, 0)
     return id
   })
-  /**
-   * ⚠️ 读回的是**这一次刚加上的那条**（`[0,2)`），不是 `marks()[0]`：种子里本来就有一条
-   *    `bold`，两者同型时按数组下标取会随写入顺序漂移（实测取到另一块上的那条，报 `[5,21)`）。
-   */
-  const bold0 = () =>
+  /** 读当前视图里这块的 run 序列投影：`runs` ＝ 每段的 t/marks（断言不认识 run 形状也能读） */
+  const readRuns = () =>
     page.evaluate(
-      (id) => window.__qua.marks().find((m) => m.blockId === id && m.type === 'bold' && m.start < 2) ?? null,
+      (id) =>
+        window.__qua.__editor.store
+          .find(id)
+          .content.map((x) => ({ t: x.t, v: x.v ?? '', bold: (x.marks ?? []).includes('bold') })),
       r,
     )
   await page.keyboard.press('Shift+ArrowRight')
   await page.keyboard.press('Shift+ArrowRight')
   await page.keyboard.press(kbd('mod+b'))
-  const m0 = await bold0()
-  assert(m0 && m0.start === 0 && m0.end === 2, `初始锚点应为 [0,2)：${JSON.stringify(m0)}`)
-  // 光标停到区间起点（offset 0）再插入 ⇒ 起点右移（不撑大）
-  await page.evaluate((id) => window.__qua.focusBlock(id, 0), r)
+  let runs = await readRuns()
+  assert(
+    runs.length === 2 && runs[0].bold && !runs[1].bold && runs[0].v.length === 2,
+    `选中两字加粗 ⇒ 前粗后素两段：${JSON.stringify(runs)}`,
+  )
+  // 粗体段末尾接着敲 ⇒ 新字继承邻位格式（仍是粗体段的一部分）
+  await page.evaluate((id) => window.__qua.focusBlock(id, 2), r)
   await page.keyboard.type('X')
-  const m1 = await bold0()
-  assert(m1 && m1.start === 1 && m1.end === 3, `起点插入后应整体右移到 [1,3)：${JSON.stringify(m1)}`)
-  // 光标停到区间终点再插入 ⇒ 终点不动
-  await page.evaluate((id) => window.__qua.focusBlock(id, 3), r)
+  runs = await readRuns()
+  assert(
+    runs.length === 2 && runs[0].bold && runs[0].v.length === 3,
+    `粗体末尾打字应并入粗体段（继承邻位格式）：${JSON.stringify(runs)}`,
+  )
+  // 素段末尾敲 ⇒ 不带格式
+  await page.evaluate((id) => window.__qua.focusBlock(id, 9999), r)
   await page.keyboard.type('Y')
-  const m2 = await bold0()
-  assert(m2 && m2.start === 1 && m2.end === 3, `终点插入后应保持 [1,3)：${JSON.stringify(m2)}`)
+  runs = await readRuns()
+  assert(
+    runs.length === 2 && runs[0].v.length === 3 && runs[1].v.endsWith('Y') && !runs[1].bold,
+    `素段末尾打字不带格式：${JSON.stringify(runs)}`,
+  )
   await ctx.close()
-  return `[0,2) →起点插→ [1,3) →终点插→ [1,3)（两端口径与既有实现一致）`
+  return `打字继承邻位格式：粗末尾仍粗、素末尾仍素（格式是 run 属性，天然粘性）`
 })
 
 /* -------------------------------------------------------- 行内原子 */
@@ -602,12 +614,14 @@ await check('T5 行内原子：引用 chip 与图片占位各占 1 格，随文�
     const target = window.__qua.pages()[1].id
     window.__qua.invoke('core.editor/insert-page-ref', { pageId: target })
     const atom = window.__qua.atoms().find((a) => a.blockId === blk.id)
-    return { atom, text: window.__qua.blocks()[0].text, id: blk.id, total: window.__qua.atoms().length }
+    // run 序列投影：原子是序列里的一枚（t=ref），没有占位符字符
+    const runs = window.__qua.__editor.store.find(blk.id).content.map((x) => x.t)
+    return { atom, runs, id: blk.id, total: window.__qua.atoms().length }
   })
   assert(r.atom, `引用原子没插进去：${JSON.stringify(r)}`)
   const a = r.atom
   assert(a.end - a.start === 1, `原子应恒占 1 格：${JSON.stringify(a)}`)
-  assert(r.text[a.start] === '\uFFFC', `文本里那一格应是占位符 U+FFFC：${JSON.stringify(r.text.slice(0, 6))}`)
+  assert(r.runs[0] === 'ref', `原子应是 run 序列的第一枚（不是占位符字符）：${JSON.stringify(r.runs)}`)
   await page.evaluate((id) => window.__qua.focusBlock(id, 0), r.id)
   await page.keyboard.type('前')
   const shifted = (await page.evaluate(() => window.__qua.atoms())).find((x) => x.blockId === r.id)
@@ -876,7 +890,7 @@ await check('T8 命令面板 ⌘P：列出全部命令、可搜、**无绑定也
   const drawer = await page.locator('.drawer').count()
   assert(drawer === 1, '执行「导出当前页模型 JSON」应打开抽屉')
   const body = await page.locator('.drawer-body').innerText()
-  assert(body.includes('roots') && body.includes('marks') && body.includes('atoms'), '抽屉里应是模型 JSON')
+  assert(body.includes('roots') && body.includes('content'), '抽屉里应是模型 JSON（行内内容住块上）')
   await ctx.close()
   return `共 ${noKey} 条命令可搜可执行（≈ 无键位也能跑）；搜「bold」→ ${filtered} 行；搜「导出」→ 抽屉`
 })
@@ -1212,7 +1226,7 @@ await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器
   assert(described.primary === target.primary, `改正文不该改主别名：${JSON.stringify(described)}`)
   assert(described.title === target.label, `页列表标题应继续显示主名：${JSON.stringify(described)}`)
   // 别名头住在 `.tx` 外：读回正文必须只有描述，不能把行头的名字也读进模型
-  const readback = await page.evaluate((id) => window.__qua.__editor.readText(id), target.targetId)
+  const readback = await page.evaluate((id) => window.__qua.__editor.readRunsOf(id).filter((r) => r.t === 'text').map((r) => r.v).join(''), target.targetId)
   assert(readback === DESC, `别名头不该进正文读回：${JSON.stringify({ readback })}`)
   // 回到引用所在的那一页，看 chip：描述变了，引用名不该变
   await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), homeId)
@@ -1341,13 +1355,13 @@ await check('T40 标签＝块级归属：写进块上、渲染成行尾 chip、�
   assert(it.tag, `归属应指向一个真实存在的标签块：${JSON.stringify(it)}`)
   assert(it.tag.roles?.includes('tag'), `标签应是一个带 tag 角色的**块**（不是字符串、也不是新实体）：${JSON.stringify(it.tag)}`)
   assert(it.tag.text === '回归标签', `标签名字就是它的正文，且不带 #：${JSON.stringify(it.tag)}`)
-  assert(!it.text.includes('\uFFFC'), `正文里不该为标签多出一格占位符：${JSON.stringify(it.text)}`)
+  assert(!it.text.includes('#回归标签'), `标签归属不占正文（投影不含 #名）：${JSON.stringify(it.text)}`)
 
   // ② 呈现：行尾拼一枚 `#名` chip，但**它不参与读数**
   const shown = await page.evaluate(
     ({ blockId, tagId }) => {
       const chip = document.querySelector(`.blk[data-block-id="${blockId}"] .tx .tag-chip[data-tag-id="${tagId}"]`)
-      return { chip: chip?.textContent ?? '', read: window.__qua.__editor.readText(blockId) }
+      return { chip: chip?.textContent ?? '', read: window.__qua.__editor.readRunsOf(blockId).filter((r) => r.t === 'text').map((r) => r.v).join('') }
     },
     { blockId: it.blockId, tagId: it.tag.id },
   )
@@ -1800,11 +1814,12 @@ await check('T30 聚焦块（section 根）文本中间 Enter ⇒ 左半留根�
   await page.keyboard.press('Enter')
   const st = await page.evaluate(() => {
     const ed = window.__qua.__editor
+    const plain = (b) => b.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
     const root = ed.doc.roots[0]
     return {
       roots: ed.doc.roots.length,
-      rootText: root.text,
-      kids: root.children.map((b) => ({ id: b.id, text: b.text })),
+      rootText: plain(root),
+      kids: root.children.map((b) => ({ id: b.id, text: plain(b) })),
       sel: window.__qua.snapshot().selection,
     }
   })
@@ -2351,7 +2366,7 @@ await check('T58 行内标签：敲完分隔符 ⇒ 正文 1 格原子 ＋ 块�
    *   `#名` 不是「正文里的几个字」，而是**正文里的一格**（原子）＋ 块上的一条归属。
    *   两处必须同时成立；只做一半就是「查询里有、正文里看不到」或反过来。
    */
-  assert(got.text === '写点东西 \uFFFC ', '正文里应把 `#名` 换成 1 格占位符（分隔符留着）：' + JSON.stringify(got.text))
+  assert(got.text === '写点东西  ', '投影里 `#名` 那几个字应已换成露面（分隔符留着；露面不进投影）：' + JSON.stringify(got.text))
   assert(got.atoms.length === 1 && got.atoms[0].kind === 'tag', '应产出 1 枚 tag 原子：' + JSON.stringify(got.atoms))
   assert(got.tagBlock !== '', '敲完就该建出标签块：' + JSON.stringify(got.tagBlock))
   assert(got.tags.length === 1 && got.tags[0] === got.tagBlock, '归属应指向那个标签块：' + JSON.stringify({ tags: got.tags, tag: got.tagBlock }))
@@ -2547,7 +2562,7 @@ await check('T60 跨块选区收拢 ⇒ 首尾拼成一块、中间块（连子�
       }
       return null
     }
-    find(b, ed.doc.roots)?.children.push({ id: 'kid-' + b, text: '子块不该留', children: [] })
+    find(b, ed.doc.roots)?.children.push({ id: 'kid-' + b, content: [{ t: 'text', v: '子块不该留' }], children: [] })
     ed.renderAll()
     return { a, b, c, total: window.__qua.snapshot().totalBlocks }
   })
@@ -2899,8 +2914,9 @@ await check('T40 反链 footer 的块标能聚焦：点一下中心槽切到该�
   // 源块挑**深度 ≥ 2** 的：只在顶层里找目标的实现会在这条路径上失败
   const src = await page.evaluate((target) => {
     const ed = window.__qua.__editor
+    const plain = (x) => x.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
     const walk = (b, d) => {
-      if (d >= 2 && b.text.length > 2) return b
+      if (d >= 2 && plain(b).length > 2) return b
       for (const c of b.children) {
         const hit = walk(c, d + 1)
         if (hit) return hit
@@ -2908,10 +2924,10 @@ await check('T40 反链 footer 的块标能聚焦：点一下中心槽切到该�
       return null
     }
     const b = walk(ed.doc.roots[0], 0)
-    window.__qua.focusBlock(b.id, b.text.length)
+    window.__qua.focusBlock(b.id, plain(b).length)
     window.__qua.invoke('core.editor/insert-page-ref', { pageId: target })
-    // 读的是插入**之后**的文本（含原子占位符），它同时也是 zoom 之后的页名
-    return { id: b.id, text: b.text }
+    // 读的是插入**之后**的投影文本（露面不进投影），它同时也是 zoom 之后的页名
+    return { id: b.id, text: plain(b) }
   }, targetPage)
   await page.waitForTimeout(350) // footer 的 200ms 查询去抖
 
@@ -2985,7 +3001,7 @@ await check('T42 冷启动后在反链 footer 编辑，不会把正文重载成�
      * 所以「让今日 journal 有反链」只能直接在编辑器上放一个原子里。这里要紧的是
      * **冷启动**这条路径（没有 openPage），不是用户从哪个菜单插的。
      */
-    const atomId = window.__qua.__editor.insertAtom('page', { label: '今日', target: { kind: 'page', id: j.id } })
+    const atomId = window.__qua.__editor.insertRef({ to: j.id, label: '今日' })
     return { journal: j.id, src: src.id, atomId }
   })
   assert(ids.atomId, '冷启动下应能往正文插一个指向今日 journal 的原子')
@@ -3032,8 +3048,9 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
   // 深缩进：把一个第 3 层的块标成待办
   const deep = await page.evaluate(() => {
     const ed = window.__qua.__editor
+    const plain = (x) => x.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
     const walk = (b, d) => {
-      if (d >= 2 && b.text.length > 2) return b
+      if (d >= 2 && plain(b).length > 2) return b
       for (const c of b.children) {
         const hit = walk(c, d + 1)
         if (hit) return hit
@@ -3843,7 +3860,7 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   const chip = await page.evaluate(
     ({ blockId, tagId }) => {
       const el = document.querySelector(`.blk[data-block-id="${blockId}"] .tx .tag-chip[data-tag-id="${tagId}"]`)
-      return { text: el?.textContent ?? '', read: window.__qua.__editor.readText(blockId) }
+      return { text: el?.textContent ?? '', read: window.__qua.__editor.readRunsOf(blockId).filter((r) => r.t === 'text').map((r) => r.v).join('') }
     },
     { blockId: hostId, tagId: tag.tagId },
   )
@@ -4226,7 +4243,7 @@ await check(
 )
 
 await check(
-  'T63 `setText` 走一笔事务：正文改掉只发 1 条 upsert{text}（无锚点变化 ⇒ 0 条 anno），一次撤销回得去',
+  'T63 `setText` 走一笔事务：内容改掉只发 1 条 upsert{content}（0 条 anno），一次撤销回得去',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -4234,9 +4251,10 @@ await check(
 
     const target = await page.evaluate(() => {
       const ed = window.__qua.__editor
+      const plain = (b) => b.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
       // 挑一个可编辑的内容块（没角色 ⇒ 不是页/日记/标签这些身份块，正文归它自己）
       const b = ed.doc.roots.flatMap((r) => [r, ...r.children]).find((x) => !(x.roles?.length) && !x.children.length)
-      return { id: b?.id ?? '', text: b?.text ?? '', marks: window.__qua.marks().length, atoms: window.__qua.atoms().length }
+      return { id: b?.id ?? '', text: b ? plain(b) : '', marks: window.__qua.marks().length, atoms: window.__qua.atoms().length }
     })
     assert(target.id !== '', '第一页里应有可编辑的内容块')
     await page.waitForTimeout(120)
@@ -4249,8 +4267,9 @@ await check(
       window.__qua.__editor.setText(id, '改过的字')
       const ops = window.__qua.lastOps()
       const atoms = window.__qua.atoms().map((a) => a.id)
+      const runPlain = (c) => c.filter((r) => r.t === 'text').map((r) => r.v).join('')
       return {
-        ops: ops.map((o) => ({ e: o.e, id: o.id, op: o.op, text: o.value?.text })),
+        ops: ops.map((o) => ({ e: o.e, id: o.id, op: o.op, text: o.value?.content === undefined ? undefined : runPlain(o.value.content) })),
         text: window.__qua.blocks().find((b) => b.id === id)?.text ?? '',
         // 只取正文：带标签的块在正文之后还有 chip，`textContent` 会把 `#名` 也读进来
         dom:
@@ -4268,7 +4287,7 @@ await check(
     const upserts = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert')
     const annos = after.ops.filter((o) => o.e === 'anno')
     assert(after.ops.length === 1, `一次 setText 只该产 1 条 op：${JSON.stringify(after.ops)}`)
-    assert(upserts.length === 1 && upserts[0].text === '改过的字', `那一条应是 block.upsert{text}：${JSON.stringify(upserts)}`)
+    assert(upserts.length === 1 && upserts[0].text === '改过的字', `那一条应是 block.upsert{content}：${JSON.stringify(upserts)}`)
     assert(upserts[0].id === target.id, 'op 应指向被改的那一块')
     assert(annos.length === 0, `无锚点变化 ⇒ 0 条 anno：${JSON.stringify(annos)}`)
     assert(after.marks === target.marks && after.atoms === target.atoms, '锚点数不该变（这笔没有锚点变化）')
@@ -4280,18 +4299,18 @@ await check(
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(200)
     const back = await page.evaluate(() => ({
-      text: window.__qua.__editor.doc.roots.flatMap((r) => [r, ...r.children]).map((b) => b.text),
+      text: window.__qua.__editor.doc.roots.flatMap((r) => [r, ...r.children]).map((b) => b.content.filter((x) => x.t === 'text').map((x) => x.v).join('')),
     }))
     assert(back.text.includes(target.text), `一次撤销应回到原文「${target.text}」：${JSON.stringify(back.text)}`)
     assert(!back.text.includes('改过的字'), `撤销后不该还留着新正文：${JSON.stringify(back.text)}`)
 
     await ctx.close()
-    return `setText ⇒ ops=[block.upsert{text}]（1 条，0 条 anno）；正文/DOM 同步改；⌘Z 回原文`
+    return `setText ⇒ ops=[block.upsert{content}]（1 条，0 条 anno）；正文/DOM 同步改；⌘Z 回原文`
   },
 )
 
 await check(
-  'T64 真实键入也走一笔事务：打一个普通字只发 1 条 upsert{text}（无锚点变化 ⇒ 0 条 anno），一次撤销回得去',
+  'T64 真实键入也走一笔事务：打一个普通字只发 1 条 upsert{content}（0 条 anno），一次撤销回得去',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     /**
@@ -4309,11 +4328,12 @@ await check(
        * ⚠️ 必须取**现行**而不是根块的直接子块：有些页打开时聚焦的是 `[[引用]]`（zoom 进子块），
        *    那时根的子块并不在本视图里 —— 往不在视图里的块打字，落点会跑掉（真踩过）。
        */
+      const plain = (x) => x.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
       const b = ed
         .rows()
         .map((r) => r.block)
         .find((x) => !(x.roles?.length) && !x.children.length && !(x.props?._tags?.length))
-      return { id: b?.id ?? '', text: b?.text ?? '' }
+      return { id: b?.id ?? '', text: b ? plain(b) : '' }
     })
     assert(target.id !== '', '第一页里应有可编辑的内容块')
     await page.waitForTimeout(120)
@@ -4329,10 +4349,10 @@ await check(
       const b = window.__qua.blocks().find((x) => x.id === id)
       const ed = window.__qua.__editor
       return {
-        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, text: o.value?.text })),
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, text: o.value?.content === undefined ? undefined : o.value.content.filter((r) => r.t === 'text').map((r) => r.v).join('') })),
         text: b?.text ?? '',
         // 读数与模型同一口径（`readText` 跳过 chip）；另留一份 DOM 原样，便于失败时看出差在哪
-        measured: ed.readText(id),
+        measured: ed.readRunsOf(id).filter((r) => r.t === 'text').map((r) => r.v).join(''),
         domText: ed.txEl(id)?.textContent ?? '',
       }
     }, target.id)
@@ -4351,7 +4371,7 @@ await check(
     const annos = after.ops.filter((o) => o.e === 'anno')
     assert(after.text.endsWith('Z'), `模型里正文应已带上刚敲的字：${JSON.stringify(after.text)}`)
     assert(after.ops.length === 1, `真实键入 1 个字只该产 1 条 op：${JSON.stringify(after.ops)}`)
-    assert(upserts.length === 1 && upserts[0].text === after.text, `那一条应是 block.upsert{text}：${JSON.stringify(upserts)}`)
+    assert(upserts.length === 1 && upserts[0].text === after.text, `那一条应是 block.upsert{content}：${JSON.stringify(upserts)}`)
     assert(upserts[0].id === target.id, 'op 应指向被敲的那一块')
     assert(annos.length === 0, `无锚点变化 ⇒ 0 条 anno：${JSON.stringify(annos)}`)
     assert(after.measured === after.text, `DOM 读数应与模型一致（不是只改了 DOM）：${JSON.stringify([after.measured, after.domText])}`)
@@ -4363,7 +4383,7 @@ await check(
       const ed = window.__qua.__editor
       const live = ed.store.find(id)
       return {
-        text: live?.text ?? null,
+        text: live ? live.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null,
         // 撤销后这一块可能已经不在**本视图**（装载窗口）里了 ⇒ 读数走 store，并留一句给人看
         inView: ed.doc.roots.flatMap((r) => [r, ...r.children]).some((b) => b.id === id),
         roots: ed.doc.roots.length,
@@ -4413,10 +4433,11 @@ await check(
         walk(ed.store.blocks, null)
         return hit
       }
+      const plain = (x) => x.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
       const b = ed
         .rows()
         .map((r) => r.block)
-        .find((x) => x.text !== '' && !(x.roles?.length) && parentOf(x.id) !== null)
+        .find((x) => plain(x) !== '' && !(x.roles?.length) && parentOf(x.id) !== null)
       const parent = b ? parentOf(b.id) : null
       return {
         id: b?.id ?? '',
@@ -4448,7 +4469,7 @@ await check(
       let inModel = false
       const walk = (list) => {
         for (const b of list) {
-          if (b.id === newId && b.text === '插一块') inModel = true
+          if (b.id === newId && b.content.some((r) => r.t === 'text' && r.v === '插一块')) inModel = true
           walk(b.children)
         }
       }
@@ -4548,7 +4569,7 @@ await check(
 )
 
 await check(
-  'T66 块中 Enter（split 支）走一笔事务：恰好 2 条 op（左半 upsert{parent,index} ＋ 原块 upsert{text}），一次撤销回得去',
+  'T66 块中 Enter（split 支）走一笔事务：恰好 2 条 op（左半 upsert{parent,index} ＋ 原块 upsert{content}），一次撤销回得去',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -4574,12 +4595,13 @@ await check(
       }
       const marks = window.__qua.marks()
       const atoms = window.__qua.atoms()
+      const plain = (x) => x.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
       const b = ed
         .rows()
         .map((r) => r.block)
         .find(
           (x) =>
-            x.text.length >= 4 &&
+            plain(x).length >= 4 &&
             !(x.roles?.length) &&
             !x.children.length &&
             !(x.props?._tags?.length) &&
@@ -4598,7 +4620,7 @@ await check(
       count(ed.store.blocks)
       return {
         id: b?.id ?? '',
-        text: b?.text ?? '',
+        text: b ? plain(b) : '',
         parentId: parent?.id ?? '',
         index: parent ? parent.children.findIndex((k) => k.id === b.id) : -1,
         before,
@@ -4615,9 +4637,11 @@ await check(
 
     const after = await page.evaluate((t) => {
       const ed = window.__qua.__editor
+      const plain = (b) => b.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
+      const runPlain = (c) => c.filter((r) => r.t === 'text').map((r) => r.v).join('')
       const live = ed.store.find(t.id)
       const parent = ed.store.find(t.parentId)
-      const kids = (parent?.children ?? []).map((b) => ({ id: b.id, text: b.text }))
+      const kids = (parent?.children ?? []).map((b) => ({ id: b.id, text: plain(b) }))
       let total = 0
       const walk = (list) => {
         for (const b of list) {
@@ -4627,35 +4651,42 @@ await check(
       }
       walk(ed.store.blocks)
       return {
-        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, value: o.value })),
-        text: live?.text ?? '',
+        ops: window.__qua.lastOps().map((o) => ({
+          e: o.e,
+          id: o.id ?? o.block,
+          op: o.op,
+          parent: o.value?.parent,
+          index: o.value?.index,
+          text: o.value?.content === undefined ? undefined : runPlain(o.value.content),
+        })),
+        text: live ? plain(live) : '',
         kids,
         total,
         // `doc` 是装载窗口：新块也必须在它里面（`tx.insert` 改的是共享的兄弟数组）
-        rows: ed.rows().map((r) => ({ id: r.block.id, text: r.block.text })),
+        rows: ed.rows().map((r) => ({ id: r.block.id, text: plain(r.block) })),
         // 这两块都没有锚点 ⇒ `textContent` 就是正文
         domText: [...document.querySelectorAll('.blk .tx')].map((el) => el.textContent ?? ''),
       }
     }, target)
 
-    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.text !== undefined)
-    const structOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent !== undefined)
-    assert(after.ops.length === 2, `块中 Enter 只该产 2 条 op（正文一半 ＋ 结构一块）：${JSON.stringify(after.ops)}`)
-    assert(textOps.length === 1, `应恰有 1 条 upsert{text}：${JSON.stringify(after.ops)}`)
-    assert(textOps[0].id === target.id, `正文那一条应指向原块（它保 id）：${JSON.stringify(textOps[0])}`)
+    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined)
+    const structOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent !== undefined)
+    assert(after.ops.length === 2, `块中 Enter 只该产 2 条 op（内容一半 ＋ 结构一块）：${JSON.stringify(after.ops)}`)
+    assert(textOps.length === 1, `应恰有 1 条 upsert{content}：${JSON.stringify(after.ops)}`)
+    assert(textOps[0].id === target.id, `内容那一条应指向原块（它保 id）：${JSON.stringify(textOps[0])}`)
     assert(
-      textOps[0].value.text === target.text.slice(2),
-      `原块应只留右半：期望「${target.text.slice(2)}」，实际「${textOps[0].value.text}」`,
+      textOps[0].text === target.text.slice(2),
+      `原块应只留右半：期望「${target.text.slice(2)}」，实际「${textOps[0].text}」`,
     )
     assert(structOps.length === 1, `应恰有 1 条 upsert{parent,index}：${JSON.stringify(after.ops)}`)
     assert(structOps[0].id !== target.id, '结构那一条应指向左半新块')
     assert(
-      structOps[0].value.parent === target.parentId,
-      `左半的父应是「${target.parentId}」，实际「${structOps[0].value.parent}」`,
+      structOps[0].parent === target.parentId,
+      `左半的父应是「${target.parentId}」，实际「${structOps[0].parent}」`,
     )
     assert(
-      structOps[0].value.index === target.index,
-      `左半应插在原 index 之前（原块顺延到它下面）：期望 ${target.index}，实际 ${structOps[0].value.index}`,
+      structOps[0].index === target.index,
+      `左半应插在原 index 之前（原块顺延到它下面）：期望 ${target.index}，实际 ${structOps[0].index}`,
     )
 
     // 模型：原块 = 右半；新块 = 左半；新块在原位上方
@@ -4691,7 +4722,9 @@ await check(
         }
       }
       walk(ed.store.blocks)
-      return { text: ed.store.find(t.id)?.text ?? null, gone, total }
+      const live = ed.store.find(t.id)
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null)
+      return { text: plain(live), gone, total }
     }, { id: target.id, leftId: structOps[0].id })
     assert(back.text === target.text, `一次撤销应回到整块原文「${target.text}」：${JSON.stringify(back)}`)
     assert(back.gone, '一次撤销后左半新块应不在模型里')
@@ -4703,7 +4736,7 @@ await check(
 )
 
 await check(
-  'T67 真实键入 `#不存在的标签` 走同一笔事务：正文 upsert ＋ 新标签块 upsert{parent:null} ＋ 归属 prop.set ＋ 原子 anno.set 同批；一次撤销连标签块一起回滚',
+  'T67 真实键入 `#不存在的标签` 走同一笔事务：内容 upsert（末次带露面）＋ 新标签块 upsert{parent:null} ＋ 归属 prop.set 同批；一次撤销连标签块一起回滚',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -4715,6 +4748,7 @@ await check(
      */
     const before = await page.evaluate(() => {
       const ed = window.__qua.__editor
+      const plain = (x) => x.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
       const b = ed
         .rows()
         .map((r) => r.block)
@@ -4722,7 +4756,7 @@ await check(
       const count = (list) => list.reduce((n, k) => n + 1 + count(k.children), 0)
       return {
         id: b?.id ?? '',
-        text: b?.text ?? '',
+        text: b ? plain(b) : '',
         total: count(ed.store.blocks),
         tags: ed.store.blocks.filter((x) => (x.props?._lists ?? []).includes('tag')).length,
       }
@@ -4737,6 +4771,8 @@ await check(
 
     const after = await page.evaluate((t) => {
       const ed = window.__qua.__editor
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '')
+      const runPlain = (c) => c.filter((r) => r.t === 'text').map((r) => r.v).join('')
       const live = ed.store.find(t.id)
       const ops = window.__qua.lastOps()
       const tagOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === null)
@@ -4749,36 +4785,32 @@ await check(
           block: o.block ?? '',
           op: o.op,
           name: o.name ?? '',
-          text: o.value?.text,
+          text: o.value?.content === undefined ? undefined : runPlain(o.value.content),
+          runs: o.value?.content === undefined ? '' : o.value.content.map((r) => (r.t === 'ref' && r.flavor === '#' ? 'tag' : r.t)).join(','),
           parent: o.value && 'parent' in o.value ? o.value.parent : undefined,
-          annoKind: o.e === 'anno' ? (o.value?.kind ?? '') : '',
-          annoTarget: o.e === 'anno' ? (o.value?.target?.id ?? '') : '',
         })),
         tagId,
         tagExists: Boolean(tag),
         tagLists: tag?.props?._lists ?? [],
         tagAlias: tag?.props?._aliases?.[0] ?? '',
-        text: live?.text ?? '',
+        text: plain(live),
         tags: live?.props?._tags ?? [],
-        atoms: ed.atoms.filter((a) => a.blockId === t.id).map((a) => ({ kind: a.kind, target: a.target?.id ?? '' })),
+        atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).map((a) => ({ kind: a.kind, target: a.target?.id ?? '' })),
       }
     }, before)
 
     const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined)
     const tagBlockOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent === null)
     const tagPropOps = after.ops.filter((o) => o.e === 'prop' && o.name === '_tags' && o.op === 'set')
-    const tagAnnoOps = after.ops.filter((o) => o.e === 'anno' && o.op === 'set' && o.annoKind === 'tag')
 
-    assert(textOps.length >= 1, `应至少 1 条 block.upsert{text}：${JSON.stringify(after.ops)}`)
-    assert(textOps.some((o) => o.id === before.id), `正文那条应指向被敲的块：${JSON.stringify(textOps)}`)
+    // 同一笔里内容可能写两段（先落键入的字、再换露面）⇒ 断言「最后一条内容 op 已带露面」
+    assert(textOps.length >= 1, `应至少 1 条 block.upsert{content}：${JSON.stringify(after.ops)}`)
+    assert(textOps.every((o) => o.id === before.id), `内容那些条都应指向被敲的块：${JSON.stringify(textOps)}`)
+    assert(textOps[textOps.length - 1].runs.includes('tag'), `最后一条内容里应已换成露面：${JSON.stringify(textOps)}`)
     assert(tagBlockOps.length === 1, `应恰有 1 条新标签块的 upsert{parent:null}：${JSON.stringify(after.ops)}`)
     assert(tagPropOps.length === 1, `应恰有 1 条 prop.set{_tags}：${JSON.stringify(after.ops)}`)
     assert(tagPropOps[0].id === before.id, `归属应写在被敲的块上：${JSON.stringify(tagPropOps[0])}`)
-    assert(tagAnnoOps.length === 1, `应恰有 1 条 tag 原子的 anno.set：${JSON.stringify(after.ops)}`)
-    assert(
-      tagAnnoOps[0].block === before.id && tagAnnoOps[0].annoTarget === after.tagId,
-      `原子应落在被敲块上、指向新建的标签块：${JSON.stringify(tagAnnoOps[0])}`,
-    )
+    assert(after.ops.every((o) => o.e !== 'anno'), `露面住在内容里 ⇒ 0 条 anno：${JSON.stringify(after.ops)}`)
 
     // 模型：标签块真在库里、块上真有归属、正文里真有原子
     assert(after.tagExists, `新标签块应真的进了库：${JSON.stringify(after.tagId)}`)
@@ -4790,8 +4822,8 @@ await check(
       `正文里应有一枚指向它的 tag 原子：${JSON.stringify(after.atoms)}`,
     )
     assert(
-      after.text === `${before.text} \uFFFC `,
-      `模型正文应是「前缀 ＋ 空格 ＋ 1 格原子 ＋ 空格」：${JSON.stringify(after.text)}`,
+      after.text === `${before.text}  `,
+      `投影应是「前缀 ＋ 空格 ＋ 空格」（露面不进投影、占 1 格）：${JSON.stringify(after.text)}`,
     )
 
     // 一次撤销：正文、原子、归属、**标签块本身**都回到输入前
@@ -4800,12 +4832,13 @@ await check(
     const back = await page.evaluate((t) => {
       const ed = window.__qua.__editor
       const live = ed.store.find(t.id)
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null)
       const count = (list) => list.reduce((n, k) => n + 1 + count(k.children), 0)
       return {
-        text: live?.text ?? null,
+        text: plain(live),
         tags: live?.props?._tags ?? null,
         tagGone: ed.store.find(t.tagId) === undefined,
-        atoms: ed.atoms.filter((a) => a.blockId === t.id).length,
+        atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length,
         total: count(ed.store.blocks),
         tagCount: ed.store.blocks.filter((x) => (x.props?._lists ?? []).includes('tag')).length,
       }
@@ -4819,7 +4852,7 @@ await check(
     assert(back.tagCount === before.tags, `标签块数应回原样：${before.tags}，实际 ${back.tagCount}`)
 
     await ctx.close()
-    return `键入「 #zzz 」⇒ 同一笔：upsert{text}×${textOps.length} ＋ 新标签 upsert{parent:null} ＋ prop.set{_tags} ＋ anno.set{tag}；⌘Z 连标签块一起回滚`
+    return `键入「 #zzz 」⇒ 同一笔：upsert{content}×${textOps.length}（末条含 tag 露面）＋ 新标签 upsert{parent:null} ＋ prop.set{_tags}；⌘Z 连标签块一起回滚`
   },
 )
 
@@ -5125,7 +5158,7 @@ await check(
 )
 
 await check(
-  'T71 退格合并走一笔事务：正文 upsert ×2（前块拼接＋空壳清空）＋ 子块逐个 move ＋ block.delete，一次撤销连子块复原',
+  'T71 退格合并走一笔事务：内容 upsert ×2（前块拼接＋空壳清空）＋ 子块逐个 move ＋ block.delete，一次撤销连子块复原',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -5149,18 +5182,19 @@ await check(
         })
       }
       walk(ed.doc.roots, null)
+      const plain = (b) => b.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
       const writable = (b) => !b.props?._date && !b.props?._kind && !b.props?._query
       for (let i = 1; i < rows.length; i++) {
         const cur = rows[i].block
         const prev = rows[i - 1].block
-        if (cur.children.length < 1 || !cur.text || !writable(prev)) continue
+        if (cur.children.length < 1 || plain(cur) === '' || !writable(prev)) continue
         if (marks.some((m) => m.blockId === cur.id) || atoms.some((a) => a.blockId === cur.id)) continue
         return {
           id: cur.id,
-          text: cur.text,
+          text: plain(cur),
           kids: cur.children.map((k) => k.id),
           prevId: prev.id,
-          prevText: prev.text,
+          prevText: plain(prev),
           prevKids: prev.children.length,
           prevChildIds: prev.children.map((k) => k.id),
         }
@@ -5175,44 +5209,53 @@ await check(
 
     const after = await page.evaluate((t) => {
       const ed = window.__qua.__editor
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null)
+      const runPlain = (c) => c.filter((r) => r.t === 'text').map((r) => r.v).join('')
       const prev = ed.store.find(t.prevId)
       // 含被删块的遍历：被并块是**原位标记**的空壳
       let husk = null
       const walk = (list) => {
         for (const b of list) {
-          if (b.id === t.id) husk = { marked: Boolean(b.props?._deletedAt), text: b.text, kids: b.children.length }
+          if (b.id === t.id) husk = { marked: Boolean(b.props?._deletedAt), text: plain(b), kids: b.children.length }
           walk(b.children)
         }
       }
       walk(ed.store.blocks)
       return {
-        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, value: o.value })),
+        ops: window.__qua.lastOps().map((o) => ({
+          e: o.e,
+          id: o.id,
+          op: o.op,
+          text: o.value?.content === undefined ? undefined : runPlain(o.value.content),
+          parent: o.value?.parent,
+          index: o.value?.index,
+        })),
         gone: ed.store.find(t.id) === undefined,
-        prevText: prev?.text ?? null,
+        prevText: plain(prev),
         prevKids: (prev?.children ?? []).map((b) => b.id),
         husk,
       }
     }, pick)
 
-    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.text !== undefined)
-    const moveOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent !== undefined)
+    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined)
+    const moveOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent !== undefined)
     const delOps = after.ops.filter((o) => o.e === 'block' && o.op === 'delete')
 
-    // 两条正文 upsert：前一块拼接 ＋ 被并块空壳清空（删除是原位标记，壳留在树上）
-    assert(textOps.length === 2, `应恰有 2 条正文 upsert（前块拼接＋空壳清空）：${JSON.stringify(after.ops)}`)
-    assert(textOps[0].id === pick.prevId, `正文应写进前一块「${pick.prevId}」：${JSON.stringify(textOps[0])}`)
+    // 两条内容 upsert：前一块拼接 ＋ 被并块空壳清空（删除是原位标记，壳留在树上）
+    assert(textOps.length === 2, `应恰有 2 条内容 upsert（前块拼接＋空壳清空）：${JSON.stringify(after.ops)}`)
+    assert(textOps[0].id === pick.prevId, `内容应写进前一块「${pick.prevId}」：${JSON.stringify(textOps[0])}`)
     const huskOp = textOps.find((o) => o.id === pick.id)
-    assert(huskOp && huskOp.value.text === '', `被并块空壳应清空：${JSON.stringify(huskOp)}`)
+    assert(huskOp && huskOp.text === '', `被并块空壳应清空：${JSON.stringify(huskOp)}`)
     assert(
-      textOps[0].value.text === pick.prevText + pick.text,
-      `前一块应变成「前文＋被并块」：${JSON.stringify(textOps[0].value.text)}`,
+      textOps[0].text === pick.prevText + pick.text,
+      `前一块应变成「前文＋被并块」：${JSON.stringify(textOps[0].text)}`,
     )
     assert(moveOps.length === pick.kids.length, `子块应逐个 move（${pick.kids.length} 条）：${JSON.stringify(after.ops)}`)
     for (const [n, kid] of pick.kids.entries()) {
       const op = moveOps.find((o) => o.id === kid)
       assert(op, `子块 ${kid} 应有自己的 move op：${JSON.stringify(moveOps)}`)
-      assert(op.value.parent === pick.prevId, `子块应挂到前一块下：${JSON.stringify(op)}`)
-      assert(op.value.index === pick.prevKids + n, `子块落点应是 ${pick.prevKids + n}：${JSON.stringify(op.value)}`)
+      assert(op.parent === pick.prevId, `子块应挂到前一块下：${JSON.stringify(op)}`)
+      assert(op.index === pick.prevKids + n, `子块落点应是 ${pick.prevKids + n}：${JSON.stringify(op)}`)
     }
     assert(delOps.length === 1 && delOps[0].id === pick.id, `被并块应有 1 条 block.delete：${JSON.stringify(delOps)}`)
     assert(after.ops.length === 3 + pick.kids.length, `op 总数应是「正文 1 ＋ 子块 ${pick.kids.length} ＋ 清壳 1 ＋ 删除 1」：${JSON.stringify(after.ops)}`)
@@ -5236,18 +5279,19 @@ await check(
     await page.waitForTimeout(200)
     const back = await page.evaluate((t) => {
       const ed = window.__qua.__editor
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null)
       const prev = ed.store.find(t.prevId)
       let cur = null
       let total = 0
       const walk = (list, parent) => {
         list.forEach((b, i) => {
           total++
-          if (b.id === t.id) cur = { parentId: parent?.id ?? null, index: i, text: b.text, kids: b.children.map((k) => k.id) }
+          if (b.id === t.id) cur = { parentId: parent?.id ?? null, index: i, text: plain(b), kids: b.children.map((k) => k.id) }
           walk(b.children, b)
         })
       }
       walk(ed.store.blocks, null)
-      return { prevText: prev?.text ?? null, cur, total, dom: Boolean(document.querySelector(`.blk[data-block-id="${t.id}"]`)) }
+      return { prevText: plain(prev), cur, total, dom: Boolean(document.querySelector(`.blk[data-block-id="${t.id}"]`)) }
     }, pick)
 
     assert(back.prevText === pick.prevText, `一次撤销前一块正文应复原：${JSON.stringify(back.prevText)}`)
@@ -5265,13 +5309,13 @@ await check(
 )
 
 await check(
-  'T72 退格合并把锚点搬到前一块：区间整体后移前一块原长，被并块不留锚点',
+  'T72 退格合并：格式与原子随内容进前一块，被并块不留内容',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
     await openFirstPage(page)
 
-    /** 挑一个**带锚点**的块（mark 或 atom），且文档序前一块可写 */
+    /** 挑一个**带格式或原子**的块，且文档序前一块可写 */
     const target = await page.evaluate(() => {
       const ed = window.__qua.__editor
       const marks = window.__qua.marks()
@@ -5296,87 +5340,83 @@ await check(
       }
       return null
     })
-    assert(target, '第一页里应有「带锚点、前一块可写」的块')
+    assert(target, '第一页里应有「带格式/原子、前一块可写」的块')
 
-    await page.evaluate((id) => window.__qua.focusBlock(id, 0), target.id)
-    /**
-     * **聚焦之后再取锚点**：落光标会裁剪越界锚点（`pruneToText`），拿聚焦前的偏移
-     * 去比撤销快照，会得到一个「撤销后对不上」的假红。
-     */
+    /** 合并前的快照：被并块自己的格式种类与原子 id，前一块的投影长度 */
     const pick = await page.evaluate((t) => {
       const ed = window.__qua.__editor
+      const plain = (b) => b.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
       const prev = ed.store.find(t.prevId)
       return {
         ...t,
-        prevText: prev?.text ?? '',
-        marks: ed.store.marks
-          .filter((x) => x.blockId === t.id)
-          .map(({ id, type, start, end }) => ({ id, type, start, end })),
-        atoms: ed.store.atoms.filter((x) => x.blockId === t.id).map(({ id, start, end }) => ({ id, start, end })),
+        prevLen: plain(prev).length,
+        types: window.__qua.marks().filter((x) => x.blockId === t.id).map((x) => x.type),
+        atomIds: window.__qua.atoms().filter((x) => x.blockId === t.id).map((x) => x.id),
       }
     }, target)
+    await page.evaluate((id) => window.__qua.focusBlock(id, 0), target.id)
     await page.keyboard.press('Backspace')
     await page.waitForTimeout(200)
 
     const after = await page.evaluate((t) => {
       const ed = window.__qua.__editor
+      const prev = ed.store.find(t.prevId)
+      // 空壳对可见读（索引/`store.find`）已不可见 ⇒ 按含被删块的遍历取
+      let husk = null
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === t.id) husk = b
+          walk(b.children)
+        }
+      }
+      walk(ed.store.blocks)
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null)
       return {
-        ops: window.__qua.lastOps().map((o) => ({ e: o.e, block: o.block, id: o.id, op: o.op })),
-        marks: ed.store.marks.map(({ id, type, blockId, start, end }) => ({ id, type, blockId, start, end })),
-        atoms: ed.store.atoms.map(({ id, blockId, start, end }) => ({ id, blockId, start, end })),
+        prevPlain: plain(prev),
+        // 前一块内容里、落在「被并块那段」的 run：格式种类与原子 id 都该出现在那里
+        prevMarks: window.__qua.marks().filter((x) => x.blockId === t.prevId && x.start >= t.prevLen).map((x) => x.type),
+        prevAtoms: window.__qua.atoms().filter((x) => x.blockId === t.prevId).map((x) => x.id),
+        huskPlain: plain(husk),
+        huskMarks: window.__qua.marks().filter((x) => x.blockId === t.id).length,
+        huskAtoms: window.__qua.atoms().filter((x) => x.blockId === t.id).length,
       }
     }, pick)
 
-    const shift = pick.prevText.length
-    for (const m of pick.marks) {
-      // `normalizeMarks` 会把同类型、接壤的区间并成一条 ⇒ 用「覆盖范围」判，不认 id
-      const got = after.marks.find(
-        (x) => x.blockId === pick.prevId && x.type === m.type && x.start <= m.start + shift && x.end >= m.end + shift,
-      )
-      assert(got, `mark ${m.id} 应搬到前一块并覆盖 [${m.start + shift},${m.end + shift})：${JSON.stringify(after.marks)}`)
-    }
-    for (const a of pick.atoms) {
-      const got = after.atoms.find((x) => x.id === a.id)
-      assert(got, `atom ${a.id} 应还在`)
-      assert(got.blockId === pick.prevId, `atom ${a.id} 应落到前一块：${JSON.stringify(got)}`)
+    for (const type of pick.types) {
       assert(
-        got.start === a.start + shift && got.end === a.end + shift,
-        `atom ${a.id} 区间应整体后移 ${shift}：${JSON.stringify(a)} → ${JSON.stringify(got)}`,
+        after.prevMarks.includes(type),
+        `前一块的拼接段应带 ${type}（格式随内容走）：${JSON.stringify(after)}`,
       )
     }
-    assert(!after.atoms.some((x) => x.blockId === pick.id), '被并块上不该留下锚点')
-    assert(!after.marks.some((x) => x.blockId === pick.id), '被并块上不该留下 mark')
-
-    const annoDels = after.ops.filter((o) => o.e === 'anno' && o.op === 'delete')
-    assert(
-      annoDels.length === pick.marks.length + pick.atoms.length,
-      `被并块这边每个锚点各一条 anno.delete：${JSON.stringify(after.ops)}`,
-    )
+    for (const id of pick.atomIds) {
+      assert(after.prevAtoms.includes(id), `原子 ${id} 应随内容落到前一块：${JSON.stringify(after)}`)
+    }
+    assert(after.huskPlain === '', `被并块空壳应无内容：${JSON.stringify(after.huskPlain)}`)
+    assert(after.huskMarks === 0 && after.huskAtoms === 0, '被并块上不该留下格式/原子')
 
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(200)
     const back = await page.evaluate((t) => {
       const ed = window.__qua.__editor
       return {
-        marks: ed.store.marks.filter((x) => x.blockId === t.id).map(({ id, start, end }) => ({ id, start, end })),
-        atoms: ed.store.atoms.filter((x) => x.blockId === t.id).map(({ id, start, end }) => ({ id, start, end })),
+        marks: window.__qua.marks().filter((x) => x.blockId === t.id).map((x) => x.type),
+        atoms: window.__qua.atoms().filter((x) => x.blockId === t.id).map((x) => x.id),
       }
     }, pick)
     assert(
-      JSON.stringify(back.marks.map((m) => [m.id, m.start, m.end]).sort()) ===
-        JSON.stringify(pick.marks.map((m) => [m.id, m.start, m.end]).sort()),
-      `一次撤销 mark 应回原块原位：undo 后 ${JSON.stringify(back.marks)}，合并前 ${JSON.stringify(pick.marks)}`,
+      JSON.stringify(back.marks.sort()) === JSON.stringify([...pick.types].sort()),
+      `一次撤销格式应回原块：undo 后 ${JSON.stringify(back.marks)}，合并前 ${JSON.stringify(pick.types)}`,
     )
     assert(
-      JSON.stringify(back.atoms.map((a) => [a.id, a.start, a.end]).sort()) ===
-        JSON.stringify(pick.atoms.map((a) => [a.id, a.start, a.end]).sort()),
-      `一次撤销 atom 应回原块原位：undo 后 ${JSON.stringify(back.atoms)}，合并前 ${JSON.stringify(pick.atoms)}`,
+      JSON.stringify([...back.atoms].sort()) === JSON.stringify([...pick.atomIds].sort()),
+      `一次撤销原子应回原块：undo 后 ${JSON.stringify(back.atoms)}，合并前 ${JSON.stringify(pick.atomIds)}`,
     )
 
     await ctx.close()
-    return `合并搬锚点：${pick.marks.length} mark ＋ ${pick.atoms.length} atom 整体后移 ${shift}；anno.set/delete 各一条；⌘Z 回原位`
+    return `合并 ⇒ 格式/原子随内容进前一块（粘接点 ${pick.prevLen}），空壳零残留；⌘Z 原样回`
   },
 )
+
 
 await check(
   'T73 段根 Enter 也走事务：页/天根 ⇒ 插首个子块（1 条）；内容根块中拆 ⇒ 右半首个子块（2 条）',
@@ -5389,7 +5429,8 @@ await check(
     const root = await page.evaluate(() => {
       const ed = window.__qua.__editor
       const r = ed.doc.roots[0]
-      return { id: r.id, text: r.text, kids: r.children.length }
+      const plain = (b) => b.content.filter((x) => x.t === 'text').map((x) => x.v).join('')
+      return { id: r.id, text: plain(r), kids: r.children.length }
     })
     await page.evaluate((id) => window.__qua.focusBlock(id, 0), root.id)
     await page.keyboard.press('Enter')
@@ -5397,9 +5438,10 @@ await check(
     const pageEnter = await page.evaluate((t) => {
       const ed = window.__qua.__editor
       const r = ed.store.find(t.id)
+      const plain = (b) => (b ? b.content.filter((x) => x.t === 'text').map((x) => x.v).join('') : null)
       return {
         ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, value: o.value })),
-        text: r?.text ?? null,
+        text: plain(r),
         firstKid: r?.children[0]?.id ?? '',
         kids: r?.children.length ?? 0,
       }
@@ -5418,13 +5460,14 @@ await check(
     const inner = await page.evaluate(() => {
       const ed = window.__qua.__editor
       // 找一个正文 ≥ 4 字、无身份的子孙块，聚焦它（focus-block 会把它装成唯一根）
+      const plain = (b) => b.content.filter((x) => x.t === 'text').map((x) => x.v).join('')
       let hit = null
       const walk = (list) => {
         for (const b of list) {
           if (hit) return
           const identity = Boolean(b.props?._lists?.length || b.props?._aliases?.length || b.props?._date || b.props?._kind || b.props?._query)
-          if (!identity && b.text.length >= 4) {
-            hit = { id: b.id, text: b.text }
+          if (!identity && plain(b).length >= 4) {
+            hit = { id: b.id, text: plain(b) }
             return
           }
           walk(b.children)
@@ -5445,24 +5488,33 @@ await check(
     const contentEnter = await page.evaluate((t) => {
       const ed = window.__qua.__editor
       const r = ed.store.find(t.id)
+      const plain = (b) => (b ? b.content.filter((x) => x.t === 'text').map((x) => x.v).join('') : null)
+      const runPlain = (c) => c.filter((x) => x.t === 'text').map((x) => x.v).join('')
       return {
-        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, value: o.value })),
-        text: r?.text ?? null,
+        ops: window.__qua.lastOps().map((o) => ({
+          e: o.e,
+          id: o.id,
+          op: o.op,
+          text: o.value?.content === undefined ? undefined : runPlain(o.value.content),
+          parent: o.value?.parent,
+          index: o.value?.index,
+        })),
+        text: plain(r),
         firstKid: r?.children[0]?.id ?? '',
-        firstKidText: r?.children[0]?.text ?? null,
+        firstKidText: plain(r?.children[0]),
       }
     }, inner)
 
-    const textOps = contentEnter.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.text !== undefined)
-    const moveOps = contentEnter.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent !== undefined)
+    const textOps = contentEnter.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined)
+    const moveOps = contentEnter.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent !== undefined)
     assert(
       textOps.length === 1 && moveOps.length === 1,
-      `内容根块中拆应 2 条结构 op（其余只该是锚点跟右半走）：${JSON.stringify(contentEnter.ops)}`,
+      `内容根块中拆应 2 条 op（左半留根 ＋ 右半首子块）：${JSON.stringify(contentEnter.ops)}`,
     )
     assert(textOps.length === 1 && textOps[0].id === inner.id, `原块应留左半：${JSON.stringify(textOps)}`)
-    assert(textOps[0].value.text === inner.text.slice(0, 2), `左半应是「${inner.text.slice(0, 2)}」：${JSON.stringify(textOps[0].value.text)}`)
+    assert(textOps[0].text === inner.text.slice(0, 2), `左半应是「${inner.text.slice(0, 2)}」：${JSON.stringify(textOps[0].text)}`)
     assert(moveOps.length === 1 && moveOps[0].id === contentEnter.firstKid, `应插一个新首个子块：${JSON.stringify(moveOps)}`)
-    assert(moveOps[0].value.parent === inner.id && moveOps[0].value.index === 0, `落点应是根的第 0 位：${JSON.stringify(moveOps[0].value)}`)
+    assert(moveOps[0].parent === inner.id && moveOps[0].index === 0, `落点应是根的第 0 位：${JSON.stringify(moveOps[0])}`)
     assert(contentEnter.text === inner.text.slice(0, 2), '根块正文应只剩左半')
     assert(contentEnter.firstKidText === inner.text.slice(2), `右半应进首个子块：${JSON.stringify(contentEnter.firstKidText)}`)
 
@@ -5491,12 +5543,13 @@ await check(
         })
       }
       walk(ed.doc.roots, null)
+      const plain = (b) => b.content.filter((x) => x.t === 'text').map((x) => x.v).join('')
       for (const r of rows) {
         const b = r.block
-        if (!r.parentId || b.text.length < 8) continue
+        if (!r.parentId || plain(b).length < 8) continue
         if (b.props?._lists?.length || b.props?._aliases?.length) continue
         if (marks.some((m) => m.blockId === b.id) || atoms.some((a) => a.blockId === b.id)) continue
-        return { id: b.id, parentId: r.parentId, text: b.text, kidsBefore: 0 }
+        return { id: b.id, parentId: r.parentId, text: plain(b), kidsBefore: 0 }
       }
       return null
     })
@@ -5515,27 +5568,36 @@ await check(
 
     const after = await page.evaluate((t) => {
       const ed = window.__qua.__editor
+      const plain = (b) => (b ? b.content.filter((x) => x.t === 'text').map((x) => x.v).join('') : null)
+      const runPlain = (c) => c.filter((x) => x.t === 'text').map((x) => x.v).join('')
       const r = ed.store.find(t.id)
       const parent = ed.store.find(t.parentId)
       const i = parent?.children.findIndex((b) => b.id === t.id) ?? -1
       return {
-        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, value: o.value })),
-        text: r?.text ?? null,
-        sibling: i > 0 ? (parent?.children[i - 1]?.text ?? null) : null,
+        ops: window.__qua.lastOps().map((o) => ({
+          e: o.e,
+          id: o.id,
+          op: o.op,
+          text: o.value?.content === undefined ? undefined : runPlain(o.value.content),
+          parent: o.value?.parent,
+          index: o.value?.index,
+        })),
+        text: plain(r),
+        sibling: i > 0 ? plain(parent?.children[i - 1]) : null,
         dom: [...document.querySelectorAll('.blk .tx')].map((el) => el.textContent ?? ''),
       }
     }, pick)
 
-    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.text !== undefined)
-    const insertOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent !== undefined)
+    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined)
+    const insertOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent !== undefined)
     assert(after.ops.length === 2, `删选区 + 拆应合成 2 条 op（没有单独的删除 op）：${JSON.stringify(after.ops)}`)
-    assert(textOps.length === 1 && textOps[0].id === pick.id, `原块应只写一次正文：${JSON.stringify(textOps)}`)
+    assert(textOps.length === 1 && textOps[0].id === pick.id, `原块应只写一次内容：${JSON.stringify(textOps)}`)
     assert(
-      textOps[0].value.text === pick.text.slice(4),
-      `原块应保选区之后的右半「${pick.text.slice(4)}」：${JSON.stringify(textOps[0].value.text)}`,
+      textOps[0].text === pick.text.slice(4),
+      `原块应保选区之后的右半「${pick.text.slice(4)}」：${JSON.stringify(textOps[0].text)}`,
     )
     assert(insertOps.length === 1, `左半应是一条插入：${JSON.stringify(insertOps)}`)
-    assert(insertOps[0].value.parent === pick.parentId, '左半应与原块同级')
+    assert(insertOps[0].parent === pick.parentId, '左半应与原块同级')
     assert(after.text === pick.text.slice(4), '模型里原块应是右半')
     assert(after.sibling === pick.text.slice(0, 2), `左半应是选区之前那截「${pick.text.slice(0, 2)}」：${JSON.stringify(after.sibling)}`)
     assert(after.dom.includes(pick.text.slice(0, 2)), 'DOM 应重画出左半')
@@ -5545,9 +5607,10 @@ await check(
     await page.waitForTimeout(200)
     const back = await page.evaluate((t) => {
       const ed = window.__qua.__editor
+      const plain = (b) => (b ? b.content.filter((x) => x.t === 'text').map((x) => x.v).join('') : null)
       const r = ed.store.find(t.id)
       const parent = ed.store.find(t.parentId)
-      return { text: r?.text ?? null, kids: parent?.children.length ?? 0 }
+      return { text: plain(r), kids: parent?.children.length ?? 0 }
     }, pick)
     assert(back.text === pick.text, `一次撤销应回到整块原文：${JSON.stringify(back.text)}`)
     assert(back.kids === pick.kidsBefore, `块数应复原：${pick.kidsBefore} → ${back.kids}`)
@@ -5558,7 +5621,7 @@ await check(
 )
 
 await check(
-  'T75 行尾 `#标签` + Enter 同一笔：转换（建标签/归属/原子）与结构拆分一起落，一次撤销全回滚',
+  'T75 行尾 `#标签` + Enter 同一笔：转换（建标签/归属/露面 run）与结构拆分一起落，一次撤销全回滚',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -5583,7 +5646,8 @@ await check(
           !(r.block.props?._aliases?.length) &&
           !(r.block.props?._tags?.length),
       )
-      return b ? { id: b.block.id, parentId: b.parentId, text: b.block.text } : null
+      const plain = (x) => x.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
+      return b ? { id: b.block.id, parentId: b.parentId, text: plain(b.block) } : null
     })
     assert(pick, '第一页里应有可编辑的内容块')
     pick.kidsBefore = await page.evaluate(
@@ -5599,6 +5663,8 @@ await check(
 
     const after = await page.evaluate((t) => {
       const ed = window.__qua.__editor
+      const plain = (b) => (b ? b.content.filter((x) => x.t === 'text').map((x) => x.v).join('') : null)
+      const runPlain = (c) => c.filter((x) => x.t === 'text').map((x) => x.v).join('')
       const live = ed.store.find(t.id)
       const ops = window.__qua.lastOps()
       const tagOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === null)
@@ -5611,14 +5677,14 @@ await check(
           e: o.e,
           id: o.id,
           op: o.op,
-          text: o.value?.text,
+          text: o.value?.content === undefined ? undefined : runPlain(o.value.content),
+          runs: o.value?.content === undefined ? '' : o.value.content.map((x) => (x.t === 'ref' && x.flavor === '#' ? 'tag' : x.t)).join(','),
           parent: o.value && 'parent' in o.value ? o.value.parent : undefined,
           name: o.name ?? '',
-          annoKind: o.e === 'anno' ? (o.value?.kind ?? '') : '',
         })),
-        text: live?.text ?? null,
+        text: plain(live),
         tags: live?.props?._tags ?? [],
-        nextText: i >= 0 ? (parent?.children[i + 1]?.text ?? null) : null,
+        nextText: i >= 0 ? plain(parent?.children[i + 1]) : null,
         tagExists: Boolean(tag),
         tagAlias: tag?.props?._aliases?.[0] ?? '',
       }
@@ -5627,30 +5693,32 @@ await check(
     const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined)
     const tagBlockOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent === null)
     const tagPropOps = after.ops.filter((o) => o.e === 'prop' && o.name === '_tags' && o.op === 'set')
-    const tagAnnoOps = after.ops.filter((o) => o.e === 'anno' && o.op === 'set' && o.annoKind === 'tag')
     const structOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && typeof o.parent === 'string')
 
     assert(tagBlockOps.length === 1, `同一笔里应建出标签块：${JSON.stringify(after.ops)}`)
     assert(tagPropOps.length === 1, `同一笔里应写归属：${JSON.stringify(after.ops)}`)
-    assert(tagAnnoOps.length === 1, `同一笔里应插 tag 原子：${JSON.stringify(after.ops)}`)
-    assert(textOps.length === 1, `正文应只写一次（转换后带原子）：${JSON.stringify(after.ops)}`)
+    assert(
+      textOps.length === 1 && textOps[0].runs.includes('tag'),
+      `内容应恰写一次且已带露面（转换与拆分合并成一次写入）：${JSON.stringify(after.ops)}`,
+    )
     assert(structOps.length === 1, `结构拆分应是同一笔里的 1 条插入：${JSON.stringify(after.ops)}`)
-    assert(after.ops.length === 5, `总计应是 5 条（正文＋标签块＋归属＋原子＋结构）：${JSON.stringify(after.ops)}`)
+    assert(after.ops.length === 4, `总计应是 4 条（内容＋标签块＋归属＋结构）：${JSON.stringify(after.ops)}`)
     assert(after.tagExists && after.tagAlias === '回车标签', `标签块应真的建出来：${JSON.stringify(after)}`)
     assert(after.tags.includes(tagBlockOps[0].id), `归属应含新标签：${JSON.stringify(after.tags)}`)
-    assert(after.text === `${pick.text} \uFFFC`, `正文应是「前缀＋空格＋1 格原子」：${JSON.stringify(after.text)}`)
+    assert(after.text === `${pick.text} `, `投影应是「前缀＋空格」（露面不进投影、占 1 格）：${JSON.stringify(after.text)}`)
     assert(after.nextText === '', `光标所在块之后应多出一个空块（Enter 的结构那一半）：${JSON.stringify(after.nextText)}`)
 
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(220)
     const back = await page.evaluate((t) => {
       const ed = window.__qua.__editor
+      const plain = (b) => (b ? b.content.filter((x) => x.t === 'text').map((x) => x.v).join('') : null)
       const live = ed.store.find(t.id)
       const parent = ed.store.find(t.parentId)
       return {
-        text: live?.text ?? null,
+        text: plain(live),
         tags: live?.props?._tags ?? null,
-        atoms: ed.atoms.filter((a) => a.blockId === t.id).length,
+        atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length,
         tagGone: ed.store.find(t.tagId) === undefined,
         kids: parent?.children.length ?? 0,
       }
@@ -5664,7 +5732,7 @@ await check(
     assert(back.kids === pick.kidsBefore, `结构拆分也应回滚：${pick.kidsBefore} → ${back.kids}`)
 
     await ctx.close()
-    return `「 #回车标签」+ Enter ⇒ 同一笔 5 条 op（正文/标签块/归属/原子/结构）；⌘Z 全回滚`
+    return `「 #回车标签」+ Enter ⇒ 同一笔 4 条 op（内容含露面/标签块/归属/结构）；⌘Z 全回滚`
   },
 )
 
@@ -5747,26 +5815,28 @@ const pickLeaf = (page) =>
       })
     }
     walk(ed.doc.roots, null)
-    const r = rows.find((x) => !x.b.children.length && x.b.text.length >= 6 && !(x.b.props?._tags?.length))
-    return r ? { id: r.b.id, parentId: r.parentId, index: r.index, text: r.b.text } : null
+    const plain = (b) => b.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
+    const r = rows.find((x) => !x.b.children.length && plain(x.b).length >= 6 && !(x.b.props?._tags?.length))
+    return r ? { id: r.b.id, parentId: r.parentId, index: r.index, text: plain(r.b) } : null
   })
-/** 任务 B 共用：op 的可断言投影（block 统一取「这块是谁」；anno 另取锚点 id） */
+/** 任务 B 共用：op 的可断言投影（block 统一取「这块是谁」；content upsert 另给投影文本） */
 const opShape = (page) =>
-  page.evaluate(() =>
-    window.__qua.lastOps().map((o) => ({
+  page.evaluate(() => {
+    const runPlain = (content) => (content ?? []).filter((r) => r.t === 'text').map((r) => r.v).join('')
+    return window.__qua.lastOps().map((o) => ({
       e: o.e,
       block: o.block ?? o.id ?? '',
-      aid: o.e === 'anno' ? (o.id ?? '') : '',
       op: o.op,
       name: o.name ?? '',
       value: o.value,
       parent: o.value?.parent,
       index: o.value?.index,
-      text: o.value?.text,
-      kind: o.value?.kind ?? '',
-      type: o.value?.type ?? '',
-    })),
-  )
+      // 内容 upsert：给投影文本与 run 枚数（文本段/原子按 t 统计），断言不用认识 run 形状
+      text: o.value?.text ?? (o.value?.content === undefined ? undefined : runPlain(o.value.content)),
+      runs: o.value?.content === undefined ? undefined : o.value.content.map((r) => r.t).join(','),
+      atomKinds: o.value?.content === undefined ? undefined : o.value.content.filter((r) => r.t !== 'text').map((r) => (r.t === 'ref' && r.flavor === '#' ? 'tag' : r.t)).join(','),
+    }))
+  })
 
 await check(
   'T77 切换待办走一笔事务：恰好 1 条 prop.set（任务状态槽，首切＝false），一次撤销回无槽',
@@ -5798,7 +5868,7 @@ await check(
 )
 
 await check(
-  'T78 加粗走一笔事务：只有 anno.set、零 block op，一次撤销格式消失',
+  'T78 加粗走一笔事务：恰好 1 条 upsert{content}（中段拆出带 marks 的 run）、零 anno，一次撤销格式消失',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -5813,22 +5883,23 @@ await check(
     const ops = await opShape(page)
     assert(ops.length === 1, `加粗应恰好 1 条 op：${JSON.stringify(ops)}`)
     assert(
-      ops[0].e === 'anno' && ops[0].op === 'set' && ops[0].block === target.id && ops[0].type === 'bold',
-      `那一条应是 anno.set{bold}：${JSON.stringify(ops)}`,
+      ops[0].e === 'block' && ops[0].op === 'upsert' && ops[0].block === target.id && ops[0].atomKinds === '' && ops[0].text === target.text,
+      `那一条应是 upsert{content}（投影不变、只动了格式）：${JSON.stringify(ops)}`,
     )
+    assert(ops[0].runs.split(',').length === 3, `加粗应把中段拆成带 marks 的 run（三段）：${JSON.stringify(ops[0])}`)
 
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(150)
     const back = await page.evaluate((t) => window.__qua.marks().filter((m) => m.blockId === t.id).length, target)
-    assert(back === 0, `一次撤销后这块应没有锚点：${back}`)
+    assert(back === 0, `一次撤销后这块应没有格式：${back}`)
 
     await ctx.close()
-    return `toggleMark ⇒ 1 条 anno.set{bold}（0 条 block op）；⌘Z 格式消失`
+    return `toggleMark ⇒ 1 条 upsert{content}（中段带 bold）；⌘Z 格式消失`
   },
 )
 
 await check(
-  'T79 清格式走一笔事务：只有 anno.delete、零 block op，一次撤销格式回来',
+  'T79 清格式走一笔事务：恰好 1 条 upsert{content}（只剩素 text run）、零 anno，一次撤销格式回来',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -5848,8 +5919,8 @@ await check(
     const ops = await opShape(page)
     assert(ops.length === 1, `清格式应恰好 1 条 op：${JSON.stringify(ops)}`)
     assert(
-      ops[0].e === 'anno' && ops[0].op === 'delete' && ops[0].block === target.id,
-      `那一条应是 anno.delete：${JSON.stringify(ops)}`,
+      ops[0].e === 'block' && ops[0].op === 'upsert' && ops[0].block === target.id && ops[0].runs === 'text',
+      `那一条应是 upsert{content}（清完只剩素 text run）：${JSON.stringify(ops)}`,
     )
 
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
@@ -5858,12 +5929,12 @@ await check(
     assert(back === 1, `一次撤销后粗体应回来：${back}`)
 
     await ctx.close()
-    return `clearMarksAtSel ⇒ 1 条 anno.delete（0 条 block op）；⌘Z 格式回来`
+    return `clearMarksAtSel ⇒ 1 条 upsert{content}（素 text）；⌘Z 格式回来`
   },
 )
 
 await check(
-  'T80 插行内原子走一笔事务：正文 1 条 upsert ＋ 原子 1 条 anno.set，一次撤销两半一起回滚',
+  'T80 插行内原子走一笔事务：恰好 1 条 upsert{content}（露面 run 随内容进），一次撤销两半一起回滚',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -5873,36 +5944,35 @@ await check(
 
     await page.evaluate((id) => window.__qua.focusBlock(id, 9999), target.id)
     await page.evaluate(
-      (t) => window.__qua.__editor.insertAtom('tag', { label: '冒烟原子', target: { kind: 'block', id: t.id } }),
+      (t) => window.__qua.__editor.insertRef({ to: t.id, label: '冒烟原子', flavor: '#' }),
       target,
     )
     await page.waitForTimeout(120)
     const ops = await opShape(page)
-    assert(ops.length === 2, `插原子应恰好 2 条 op：${JSON.stringify(ops)}`)
+    // 原子住在内容里 ⇒ 一次插入就是**一条**内容 upsert（文本段与原子 run 同进同出）
+    assert(ops.length === 1, `插原子应恰好 1 条 op：${JSON.stringify(ops)}`)
     assert(
-      ops[0].e === 'block' && ops[0].op === 'upsert' && ops[0].block === target.id && ops[0].text?.includes('\uFFFC'),
-      `第一条应是正文 upsert（带占位格）：${JSON.stringify(ops)}`,
+      ops[0].e === 'block' && ops[0].op === 'upsert' && ops[0].block === target.id && ops[0].atomKinds === 'tag',
+      `那一条应是 upsert{content}（带 tag 露面 run）：${JSON.stringify(ops)}`,
     )
-    assert(
-      ops[1].e === 'anno' && ops[1].op === 'set' && ops[1].block === target.id && ops[1].kind === 'tag',
-      `第二条应是原子的 anno.set：${JSON.stringify(ops)}`,
-    )
+    assert(ops[0].text === target.text, `投影不变（露面不进投影）：${JSON.stringify(ops[0])}`)
 
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(150)
     const back = await page.evaluate((t) => {
       const b = window.__qua.__editor.store.find(t.id)
-      return { text: b?.text ?? '', atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length }
+      const plain = (x) => (x ? x.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '')
+      return { text: plain(b), atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length }
     }, target)
-    assert(!back.text.includes('\uFFFC') && back.atoms === 0, `一次撤销应回原文、原子注销：${JSON.stringify(back)}`)
+    assert(back.text === target.text && back.atoms === 0, `一次撤销应回原文、原子注销：${JSON.stringify(back)}`)
 
     await ctx.close()
-    return `insertAtom ⇒ [正文 upsert｛含⌷｝, anno.set{tag}]；⌘Z 两半一起回滚`
+    return `insertRef ⇒ [upsert{content}（含露面）]；⌘Z 两半一起回滚`
   },
 )
 
 await check(
-  'T81 删行内原子走一笔事务：正文 1 条 upsert ＋ 原子 1 条 anno.delete，一次撤销复原',
+  'T81 删行内原子走一笔事务：恰好 1 条 upsert{content}（露面 run 没了），一次撤销复原',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -5913,32 +5983,32 @@ await check(
     // 前置：插一枚原子（setup 的 op 不参与断言）
     await page.evaluate((id) => window.__qua.focusBlock(id, 9999), target.id)
     const atomId = await page.evaluate(
-      (t) => window.__qua.__editor.insertAtom('tag', { label: '待删原子', target: { kind: 'block', id: t.id } }),
+      (t) => window.__qua.__editor.insertRef({ to: t.id, label: '待删原子', flavor: '#' }),
       target,
     )
     assert(atomId, '前置：原子应建出来')
     await page.waitForTimeout(120)
 
-    await page.evaluate((id) => window.__qua.__editor.removeAtom(id), atomId)
+    await page.evaluate((id) => window.__qua.__editor.removeRun(id), atomId)
     await page.waitForTimeout(120)
     const ops = await opShape(page)
-    assert(ops.length === 2, `删原子应恰好 2 条 op：${JSON.stringify(ops)}`)
+    // 删原子＝内容里那一枚 run 没了 ⇒ 一条内容 upsert，没有第二条「注销」op
+    assert(ops.length === 1, `删原子应恰好 1 条 op：${JSON.stringify(ops)}`)
     assert(
-      ops[0].e === 'block' && ops[0].op === 'upsert' && !ops[0].text?.includes('\uFFFC'),
-      `第一条应是正文 upsert（占位格没了）：${JSON.stringify(ops)}`,
+      ops[0].e === 'block' && ops[0].op === 'upsert' && ops[0].block === target.id && ops[0].atomKinds === '' && ops[0].runs === 'text',
+      `那一条应是 upsert{content}（露面 run 已没了）：${JSON.stringify(ops)}`,
     )
-    assert(ops[1].e === 'anno' && ops[1].op === 'delete' && ops[1].value?.id === atomId, `第二条应是 anno.delete：${JSON.stringify(ops)}`)
 
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(150)
     const back = await page.evaluate((t) => {
       const b = window.__qua.__editor.store.find(t.id)
-      return { text: b?.text ?? '', atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length }
+      return { atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length, kinds: window.__qua.atoms().filter((a) => a.blockId === t.id).map((a) => a.kind) }
     }, target)
-    assert(back.text.includes('\uFFFC') && back.atoms === 1, `一次撤销应回占位格、原子复活：${JSON.stringify(back)}`)
+    assert(back.atoms === 1 && back.kinds.includes('tag'), `一次撤销原子应复活：${JSON.stringify(back)}`)
 
     await ctx.close()
-    return `removeAtom ⇒ [正文 upsert, anno.delete]；⌘Z 复原`
+    return `removeRun ⇒ [upsert{content}]；⌘Z 复原`
   },
 )
 
@@ -6128,7 +6198,7 @@ await check(
 )
 
 await check(
-  'T86 复制块走一笔事务：克隆子树每块 1 条 upsert（自己的落点）＋ 克隆的锚点 anno.set；源块与别的块的锚点不动；一次撤销全滚回',
+  'T86 复制块走一笔事务：克隆子树每块 1 条 upsert（自己的落点，内容自带、原子换新 id）；一次撤销全滚回',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -6145,14 +6215,11 @@ await check(
     await page.evaluate((id) => window.__qua.__editor.duplicate(id), target.id)
     await page.waitForTimeout(120)
     const ops = await opShape(page)
-    assert(ops.length === 2, `复制叶子应恰好 2 条 op（结构＋克隆锚点）：${JSON.stringify(ops)}`)
+    // 克隆自带内容（格式随 run 走、原子换新 id）⇒ 复制叶子＝恰好一条结构 upsert
+    assert(ops.length === 1, `复制叶子应恰好 1 条 op（克隆自带内容）：${JSON.stringify(ops)}`)
     assert(
       ops[0].e === 'block' && ops[0].op === 'upsert' && ops[0].parent === target.parentId,
-      `第一条应是克隆块自己的落点：${JSON.stringify(ops)}`,
-    )
-    assert(
-      ops[1].e === 'anno' && ops[1].op === 'set' && ops[1].block === ops[0].block && ops[1].type === 'bold',
-      `第二条应是克隆块上的 anno.set：${JSON.stringify(ops)}`,
+      `那一条应是克隆块自己的落点：${JSON.stringify(ops)}`,
     )
     const marksNow = await page.evaluate((t) => ({
       source: window.__qua.marks().filter((m) => m.blockId === t.src).length,
@@ -6166,7 +6233,7 @@ await check(
     assert(back === 1, `一次撤销后源块的粗体应原样还在：${back}`)
 
     await ctx.close()
-    return `duplicate ⇒ [克隆 upsert{自己落点}, 克隆锚点 anno.set]；源/别块锚点不动；⌘Z 全滚回`
+    return `duplicate ⇒ 1 条克隆 upsert{自己落点}（内容自带、原子换新 id）；⌘Z 全滚回`
   },
 )
 
@@ -6228,7 +6295,7 @@ await check(
 )
 
 await check(
-  'T88 粘贴走同一笔事务：单行＝1 条正文 upsert；多行＝正文 1 ＋ 每行 1 条 insert；各一次撤销复原',
+  'T88 粘贴走同一笔事务：单行＝1 条内容 upsert；多行＝内容 1 ＋ 每行 1 条 insert；各一次撤销复原',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -6247,7 +6314,10 @@ await check(
     )
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(150)
-    const back1 = await page.evaluate((t) => window.__qua.__editor.store.find(t.id)?.text ?? '', target)
+    const back1 = await page.evaluate((t) => {
+      const b = window.__qua.__editor.store.find(t.id)
+      return b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : ''
+    }, target)
     assert(back1 === target.text, `一次撤销应回原文：${JSON.stringify(back1)}`)
 
     // ② 多行：首行拼进原块，其余每行一个新块
@@ -6264,20 +6334,22 @@ await check(
       `其余行应逐块 insert、落点递增：${JSON.stringify(ops2)}`,
     )
     const kids = await page.evaluate((t) => {
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '')
       const p = window.__qua.__editor.store.find(t.parentId)
       const i = p?.children.findIndex((x) => x.id === t.id) ?? -1
-      return { one: p?.children[i + 1]?.text ?? '', two: p?.children[i + 2]?.text ?? '' }
+      return { one: plain(p?.children[i + 1]), two: plain(p?.children[i + 2]) }
     }, target)
     assert(kids.one === '乙行' && kids.two === '丙行', `新块应真的挂出来：${JSON.stringify(kids)}`)
 
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(150)
     const back2 = await page.evaluate((t) => {
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '')
       const p = window.__qua.__editor.store.find(t.parentId)
       const i = p?.children.findIndex((x) => x.id === t.id) ?? -1
       return {
-        text: window.__qua.__editor.store.find(t.id)?.text ?? '',
-        next: p?.children[i + 1]?.text ?? '',
+        text: plain(window.__qua.__editor.store.find(t.id)),
+        next: plain(p?.children[i + 1]),
       }
     }, target)
     assert(back2.text === target.text && back2.next !== '乙行', `一次撤销应回原文、新块消失：${JSON.stringify(back2)}`)
@@ -6358,8 +6430,9 @@ await check(
 
     const after = await page.evaluate((t) => {
       const st = window.__qua.__editor.store
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '')
       const host = st.find(t.id)
-      const tagBlock = st.blocks.find((b) => b.props?._lists?.includes('tag') && b.text === '冒烟新标签')
+      const tagBlock = st.blocks.find((b) => b.props?._lists?.includes('tag') && plain(b) === '冒烟新标签')
       return {
         ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, name: o.name, parent: o.value?.parent })),
         hostTags: host?.props?._tags ?? [],
@@ -6391,10 +6464,11 @@ await check(
     await page.waitForTimeout(150)
     const undone = await page.evaluate((t) => {
       const st = window.__qua.__editor.store
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '')
       const host = st.find(t.id)
       return {
         hostTags: host?.props?._tags ?? [],
-        tagGone: !st.blocks.some((b) => b.text === '冒烟新标签'),
+        tagGone: !st.blocks.some((b) => plain(b) === '冒烟新标签'),
       }
     }, target)
     assert(
@@ -6423,7 +6497,8 @@ await check(
 
     const after = await page.evaluate((t) => {
       const st = window.__qua.__editor.store
-      const def = st.blocks.find((b) => b.text === '冒烟字段')
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '')
+      const def = st.blocks.find((b) => plain(b) === '冒烟字段')
       const host = st.find(t)
       return {
         ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, name: o.name, parent: o.value?.parent })),

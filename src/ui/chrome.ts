@@ -17,6 +17,7 @@
  *   构造参数也随之为空。
  */
 import { displayNameOf, isJournal, journalDate, journalDateLabel, type Block } from '../core/index.ts'
+import { plainText } from '../core/runs.ts'
 import { t } from '../core/msg.ts'
 
 export interface Chrome {
@@ -185,7 +186,7 @@ export function createChrome(onCrumb?: (blockId: string) => void): Chrome {
 
   function renderEmptyHint(roots: Block[]): void {
     const first = roots[0]
-    const empty = roots.length <= 1 && (first?.text ?? '') === '' && (first?.children.length ?? 0) === 0
+    const empty = roots.length <= 1 && plainText(first?.content ?? []) === '' && (first?.children.length ?? 0) === 0
     emptyHintEl.hidden = !empty
     if (empty) emptyHintEl.innerHTML = t('ui.emptyHint')
   }

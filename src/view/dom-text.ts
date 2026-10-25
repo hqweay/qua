@@ -1,15 +1,24 @@
 /**
- * **DOM → 模型**：把 contenteditable 里看到的字，读回「文本 ＋ 偏移」。
+ * **DOM → 模型**：把 contenteditable 里看到的字，读回「run 序列 ＋ 偏移」。
  *
- * 这是从 `view.ts` 抽出来的纯函数层。判据：它**只依赖 DOM 与块 id**，不持有编辑器状态，
+ * 这是从 `view.ts` 抽出来的纯函数层。判据：它**只依赖 DOM 与既有内容**，不持有编辑器状态，
  * 所以能单独测（这正是「状态层可脱离 DOM 断言」的反面 —— 它是「DOM 可脱离状态断言」）。
  *
  * ⚠️ 与 `block-dom.ts` 是一对：那边**模型 → DOM**，这边**DOM → 模型**。
- *   两条方向都必须认同一套契约：原子元素带 `data-atomId`、占 **1 格**（`U+FFFC`）、
+ *   两条方向都必须认同一套契约：原子元素带 `data-atom-id`、占 **1 格**、
  *   `.left`（gutter）与标签 chip（`data-tag-id`）**永远不参与读数**。
- * ⚠️ 这条不变量是整套锚点能活下来的前提：读数与渲染对不上，区间锚点就会当场错位。
+ * ⚠️ 这条不变量是选区与光标能活下来的前提：读数与渲染对不上，偏移就会当场错位。
  */
-import { ATOM_PLACEHOLDER } from '../core/index.ts'
+import type { MarkType, RefRun, Run, RunWithId } from '../core/runs.ts'
+import { normalizeRuns } from '../core/runs.ts'
+
+/** 格式包装元素的 class 前缀（`mk-bold` 这类）与格式种类的对照——渲染与读回共用这一份 */
+const MARK_CLASS: Record<string, MarkType> = {
+  'mk-bold': 'bold',
+  'mk-italic': 'italic',
+  'mk-highlight': 'highlight',
+  'mk-code': 'code',
+}
 
 /**
  * 这个元素是不是**标签 chip**（`view/block-dom.ts` 的 `makeTagChipEl`）。
@@ -62,26 +71,62 @@ export function offsetIn(root: HTMLElement, node: Node, off: number): number {
   return count
 }
 
-/** 把 `.tx` 读回模型文本（原子 → `U+FFFC`）；`.left` 里的 gutter 与标签 chip 跳过 */
-export function readBlockText(tx: HTMLElement): string {
-  let out = ''
-  const walk = (n: Node): void => {
+/**
+ * 把 `.tx` 读回**行内内容**（run 序列）。
+ *
+ * - 文本节点 ⇒ 文本段，格式来自祖先上的 `mk-*` 包装元素（集合语义）；
+ * - 原子元素 ⇒ 按 `data-atom-id` 从**既有内容**里原样带回（id/目标/资产不重生——
+ *   DOM 上只有显示名，模型数据得从模型拿；id 对不上 ⇒ 造一枚悬空引用兜底，
+ *   不静默吞掉那一格）；
+ * - `.left`（gutter）与标签 chip 不参与读数（它们不在正文里）。
+ *
+ * 产出经归一化：相邻同形文本段合并 ⇒ 同一屏内容只有一种模型形状，
+ * 「碰过但没改」能被 `sameRuns` 识别出来（不发空转的写）。
+ */
+export function readRuns(tx: HTMLElement, prev: readonly Run[]): Run[] {
+  const segs: ({ text: string; marks: MarkType[] } | { atomId: string; label: string })[] = []
+  const byId = new Map<string, RunWithId>()
+  for (const r of prev) if (r.t !== 'text') byId.set(r.id, r)
+
+  const walk = (n: Node, marks: readonly MarkType[]): void => {
+    if (isTagChip(n)) return
     if (n.nodeType === Node.TEXT_NODE) {
-      out += n.textContent ?? ''
+      const v = n.textContent ?? ''
+      if (v !== '') segs.push({ text: v, marks: [...marks] })
       return
     }
     if (n.nodeType !== Node.ELEMENT_NODE) return
     const el = n as HTMLElement
+    if (el.classList.contains('left')) return
     if (el.dataset.atomId) {
-      out += ATOM_PLACEHOLDER
+      segs.push({ atomId: el.dataset.atomId, label: el.dataset.refLabel ?? el.textContent?.trim() ?? '' })
       return
     }
-    if (el.classList.contains('left')) return
-    if (isTagChip(el)) return
-    for (const c of Array.from(el.childNodes)) walk(c)
+    const next = [...marks]
+    for (const cls of Array.from(el.classList)) {
+      const m = MARK_CLASS[cls]
+      if (m && !next.includes(m)) next.push(m)
+    }
+    for (const c of Array.from(el.childNodes)) walk(c, next)
   }
-  walk(tx)
-  return out
+  for (const c of Array.from(tx.childNodes)) walk(c, [])
+
+  const out: Run[] = []
+  for (const seg of segs) {
+    if ('atomId' in seg) {
+      const known = byId.get(seg.atomId)
+      if (known) out.push(known)
+      else {
+        // DOM 里有这一格、模型里却没有对应 run：显示名从 DOM 取，目标留空（悬空可恢复）
+        const run: RefRun = { id: seg.atomId, t: 'ref', ...(seg.label ? { label: seg.label } : {}) }
+        out.push(run)
+      }
+      continue
+    }
+    if (seg.text === '') continue
+    out.push(seg.marks.length === 0 ? { t: 'text', v: seg.text } : { t: 'text', v: seg.text, marks: seg.marks })
+  }
+  return normalizeRuns(out)
 }
 
 /**

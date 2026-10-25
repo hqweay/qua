@@ -9,9 +9,9 @@
  * 适配器只负责**字节的进与出**（见 `local-storage.ts` 的信封）；
  * 「这些字节是不是一份能打开的库」归这里。
  */
-import type { Atom, Mark } from '../annotations.ts'
 import { ALIASES_PROP, DISPLAY_PROP, LISTS_PROP, type Block, type Doc, type FoldState } from '../model.ts'
 import { LEGACY_ALIAS_PROP, normalizeAlias } from '../alias.ts'
+import { isAnno, isRun } from '../runs.ts'
 
 /**
  * 落盘形状的版本；**只在显式作废旧库时加一**（/ 71.9）。
@@ -56,10 +56,14 @@ import { LEGACY_ALIAS_PROP, normalizeAlias } from '../alias.ts'
  *            （日记流的来源从命名的库读改成一份 QuerySpec 字面量）。
  *            旧库的 `_query` 块没有这两种形状，判「条件合法」的读路径会拒绝它们
  *            ⇒ 作废重 seed，不写迁移。
+ * v18 → v19：行内内容模型换形——`Block.text`（含占位符）与库级 `marks[]`/`atoms[]`
+ *            扁平数组退场，正文改存 `Block.content`＝run 序列、可引用区间住
+ *            `Block.annos`。旧库的字符串正文新代码不读（内容会静默消失）
+ *            ⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 18
+export const WORKSPACE_VERSION = 19
 
-/** 示例库：一片块森林 ＋ 行内锚点/原子 */
+/** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {
   version: typeof WORKSPACE_VERSION
   /** 块森林（整个库是一片森林，没有「页实体」这一层） */
@@ -67,9 +71,6 @@ export interface Workspace {
   /** 中心槽持有的「当前对象」（只有中心槽有这个概念） */
   activeId: string
   savedAt: number
-  /** 行内锚点与原子按块 id 索引（原型平铺存放；接内核后进表） */
-  marks: Mark[]
-  atoms: Atom[]
 }
 
 /**
@@ -101,7 +102,8 @@ const LEGACY_ROLES_PROP = '_roles'
 function isBlock(x: unknown): x is Block {
   if (!x || typeof x !== 'object') return false
   const b = x as Block
-  if (typeof b.id !== 'string' || typeof b.text !== 'string' || !Array.isArray(b.children)) return false
+  if (typeof b.id !== 'string' || !Array.isArray(b.content) || !b.content.every(isRun) || !Array.isArray(b.children)) return false
+  if (b.annos !== undefined && (!Array.isArray(b.annos) || !b.annos.every(isAnno))) return false
   if (b.props === undefined) return true
   if (!b.props || typeof b.props !== 'object' || Array.isArray(b.props)) return false
   // 旧形状不静默读：v13 的 `_roles` / `_alias` 在新模型里没有对应物

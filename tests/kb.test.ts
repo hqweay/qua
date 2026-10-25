@@ -10,43 +10,43 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { Atom, Block, Mark } from '../src/core/index.ts'
+import type { Block } from '../src/core/index.ts'
 import type { Op } from '../src/core/kb/types.ts'
-import { BlockStore, fingerprint, mkBlock, mkPropDef, mkTagBlock, rebuild } from '../src/core/index.ts'
+import { BlockStore, fingerprint, mkBlock, mkPropDef, mkTagBlock, rebuild, writeBlockContent } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { seedWorkspace } from '../src/core/seed.ts'
+import { plainText, textRuns, type Anno, type RefRun } from '../src/core/runs.ts'
 
-const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, text, children: [], ...extra })
+const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, content: textRuns(text), children: [], ...extra })
 
 /**
  * 一份小而全的库，手造（不依赖 DOM，也不依赖夹具的规模）：
  *   p1 页 ── c1 ── g1
  *        └─ c2
- *   t1 标签块；x1 带 t1 归属、有一处引用 p2 的原子与一段粗体
+ *   t1 标签块
+ *
+ * `p1RefTo` 给定 ⇒ p1 的内容里带一枚指向它的引用 run（指向边住在源块内容里）。
  */
-function fixture(atoms: Atom[] = [], marks: Mark[] = []) {
+function fixture(p1RefTo?: string) {
   const t1 = mkTagBlock('todo')
   t1.id = 't1'
   const p1 = b('p1', '页面一', {
     props: { _aliases: ['页面一'], _lists: ['page'] },
     children: [b('c1', '一', { children: [b('g1', '一·一')] }), b('c2', '二', { props: { _tags: ['t1'] } })],
   })
+  if (p1RefTo) p1.content.push(refRun('a1', p1RefTo))
   const p2 = b('p2', '页面二', { props: { _aliases: ['页面二'], _lists: ['page'] } })
-  const store = new BlockStore([p1, p2, t1], marks, atoms, [])
+  const store = new BlockStore([p1, p2, t1])
   // 固定的时钟：`at` 可断言，也不会让「同一毫秒内两次写」变成抖动源
   const kb = new MemoryKb(store, { now: () => 1000 })
   return { store, kb, p1, p2, t1 }
 }
 
-const ref = (id: string, blockId: string, targetId: string): Atom => ({
-  id,
-  kind: 'page',
-  blockId,
-  start: 0,
-  end: 1,
-  label: '旧名',
-  target: { kind: 'page', id: targetId },
-})
+/** 一枚引用 run（挂在源块内容里） */
+const refRun = (id: string, to: string): RefRun => ({ id, t: 'ref', to, label: '旧名' })
+
+/** 一条可引用区间（按需物化；range 用 plain 坐标） */
+const anno = (id: string): Anno => ({ id, range: { start: 0, end: 2 }, quote: { exact: '页面', prefix: '', suffix: '' } })
 
 /** 只取 op 的「语义面」（去掉 `at`），断言才是关于形状而不是关于时钟 */
 const bare = (ops: readonly Op[]): unknown[] =>
@@ -59,7 +59,7 @@ const bare = (ops: readonly Op[]): unknown[] =>
 
 test('读面：get/children/roots/parentOf 按 id 取，不暴露整库', () => {
   const { kb } = fixture()
-  assert.equal(kb.get('c1')?.text, '一')
+  assert.equal(plainText(kb.get('c1')!.content), '一')
   assert.deepEqual(kb.children('c1').map((x) => x.id), ['g1'])
   assert.deepEqual(kb.roots().map((x) => x.id), ['p1', 'p2', 't1'])
   assert.equal(kb.parentOf('g1')?.id, 'c1')
@@ -116,17 +116,18 @@ test('读面：declaredFieldsOf 按声明顺序解析、悬空 ref 跳过、没�
   assert.deepEqual(kb.declaredFieldsOf('不存在'), [], '未知块不是「全库定义」，也不该抛')
 })
 
-test('读面：annotationsOf 只给这一块的 mark/atom', () => {
-  const atoms = [ref('a1', 'p1', 'p2'), ref('a2', 'p2', 'p1')]
-  const marks: Mark[] = [{ id: 'm1', type: 'bold', blockId: 'p1', start: 0, end: 2 }]
-  const { kb } = fixture(atoms, marks)
-  assert.deepEqual(kb.annotationsOf('p1').atoms.map((a) => a.id), ['a1'])
-  assert.deepEqual(kb.annotationsOf('p1').marks.map((m) => m.id), ['m1'])
-  assert.deepEqual(kb.annotationsOf('p2').marks, [])
+test('读面：annosOf 只给这一块的 annos；没有就是空（按需物化）', () => {
+  const { kb } = fixture()
+  kb.tx((tx) => tx.setAnnos('p1', [anno('q1')]))
+  assert.deepEqual(kb.annosOf('p1').map((a) => a.id), ['q1'])
+  assert.deepEqual(kb.annosOf('p2'), [])
+  // 摘干净 ⇒ 回到「没有这一格」，不是空数组常驻
+  kb.tx((tx) => tx.setAnnos('p1', []))
+  assert.deepEqual(kb.annosOf('p1'), [])
 })
 
-test('读面：backlinksOf 认原子里的入向边（p2 被 p1 引用）', () => {
-  const { kb } = fixture([ref('a1', 'p1', 'p2')])
+test('读面：backlinksOf 认内容里的引用 run（p2 被 p1 引用）', () => {
+  const { kb } = fixture('p2')
   const links = kb.backlinksOf('p2')
   assert.equal(links.length, 1)
   assert.equal(links[0]?.pageId, 'p1')
@@ -145,16 +146,16 @@ test('夹具上的读面：seedWorkspace 里每一页都能 get 到、别名能�
 
 /* ------------------------------------------------------------ 写面：patch */
 
-test('patch 改正文 ⇒ 恰好一条 block.upsert{text} ＋ 一条 blocks change', () => {
+test('patch 改内容 ⇒ 恰好一条 block.upsert{content} ＋ 一条 blocks change', () => {
   const { kb } = fixture()
   const r = kb.tx((tx) => {
     tx.patch('c1', (x) => {
-      x.text = '改过'
+      writeBlockContent(x, textRuns('改过'))
     })
   })
-  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { text: '改过' } }])
+  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { content: textRuns('改过') } }])
   assert.deepEqual(r.changes, [{ kind: 'blocks', id: 'c1' }])
-  assert.equal(kb.get('c1')?.text, '改过')
+  assert.equal(plainText(kb.get('c1')!.content), '改过')
   assert.equal((r.ops[0] as { at: number }).at, 1000, 'op 带 at')
 })
 
@@ -279,15 +280,15 @@ test('restore ⇒ 摘掉标记回原位：op 是一条 upsert{parent,index}；�
   const r = kb.tx((tx) => tx.restore('c1'))
   // c1 是 p1 的第 0 个孩子；恢复 = 「它回来了、还在这个位置」
   assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { parent: 'p1', index: 0 } }])
-  assert.equal(kb.get('c1')?.text, '一')
-  assert.equal(kb.get('g1')?.text, '一·一', '子树随根一起回来')
+  assert.equal(plainText(kb.get('c1')!.content), '一')
+  assert.equal(plainText(kb.get('g1')!.content), '一·一', '子树随根一起回来')
   assert.deepEqual(kb.trash(), [], '派生回收站清空')
   assert.ok(!store.blocks.find((b) => b.id === 'c1')?.props?._deletedAt, '标记已摘掉')
   // 再删再恢复也成立（幂等的机制，不是一次性的状态机）
   kb.tx((tx) => tx.remove('c1'))
   assert.deepEqual(kb.trash().map((b) => b.id), ['c1'])
   kb.tx((tx) => tx.restore('c1'))
-  assert.equal(kb.get('c1')?.text, '一')
+  assert.equal(plainText(kb.get('c1')!.content), '一')
 })
 
 /* ------------------------------------------------------------ 写面：语义列表 */
@@ -346,43 +347,41 @@ test('setTags 没变化 ⇒ 零 op、零 change', () => {
   assert.deepEqual(r.changes, [])
 })
 
-/* ------------------------------------------------------------ 写面：锚点 */
+/* ------------------------------------------------------------ 写面：annos */
 
-test('setAnnotations 按 id diff：新增 set、删掉 delete、不变的静默', () => {
-  const a1 = ref('a1', 'p1', 'p2')
-  const a2 = ref('a2', 'p1', 'p2')
-  const { kb } = fixture([a1], [{ id: 'm1', type: 'bold', blockId: 'p1', start: 0, end: 1 }])
+test('setAnnos 按 id diff：新增 set、删掉 delete、不变的静默', () => {
+  const q1 = anno('q1')
+  const q2 = anno('q2')
+  const { kb } = fixture()
+  kb.tx((tx) => tx.setAnnos('p1', [q1]))
 
-  const r = kb.tx((tx) => tx.setAnnotations('p1', [], [a1, a2]))
-  assert.deepEqual(bare(r.ops), [
-    { e: 'anno', block: 'p1', id: 'm1', op: 'delete', value: { id: 'm1', type: 'bold', blockId: 'p1', start: 0, end: 1 } },
-    { e: 'anno', block: 'p1', id: 'a2', op: 'set', value: a2 },
-  ])
-  assert.deepEqual(r.changes, [
-    { kind: 'marks', id: 'p1' },
-    { kind: 'atoms', id: 'p1' },
-  ])
-  assert.deepEqual(kb.annotationsOf('p1').atoms.map((a) => a.id), ['a1', 'a2'])
+  const r = kb.tx((tx) => tx.setAnnos('p1', [q1, q2]))
+  assert.deepEqual(bare(r.ops), [{ e: 'anno', block: 'p1', id: 'q2', op: 'set', value: q2 }])
+  assert.deepEqual(r.changes, [{ kind: 'annos', id: 'p1' }])
+
+  const r2 = kb.tx((tx) => tx.setAnnos('p1', [q2]))
+  assert.deepEqual(bare(r2.ops), [{ e: 'anno', block: 'p1', id: 'q1', op: 'delete', value: q1 }])
+  assert.deepEqual(kb.annosOf('p1').map((a) => a.id), ['q2'])
 })
 
-test('setAnnotations 只动这一块：别的块的锚点原样在库里', () => {
-  const other = ref('a9', 'p2', 'p1')
-  const { kb } = fixture([other])
-  kb.tx((tx) => tx.setAnnotations('p1', [], [ref('a1', 'p1', 'p2')]))
-  assert.deepEqual(kb.annotationsOf('p2').atoms.map((a) => a.id), ['a9'])
+test('setAnnos 只动这一块：别的块的 annos 原样在库里', () => {
+  const { kb } = fixture()
+  kb.tx((tx) => tx.setAnnos('p2', [anno('q9')]))
+  kb.tx((tx) => tx.setAnnos('p1', [anno('q1')]))
+  assert.deepEqual(kb.annosOf('p2').map((a) => a.id), ['q9'])
 })
 
 /* ------------------------------------------------------------ 事务 */
 
 test('tx 抛错 ⇒ 内存恢复、索引可用、不返回半批', () => {
-  const { kb, store } = fixture([ref('a1', 'p1', 'p2')])
-  const before = JSON.stringify({ blocks: store.blocks, atoms: store.atoms })
+  const { kb, store } = fixture('p2')
+  const before = JSON.stringify(store.blocks)
   let delivered = false
   assert.throws(
     () =>
       kb.tx((tx) => {
         tx.patch('c1', (x) => {
-          x.text = '改了一半'
+          writeBlockContent(x, textRuns('改了一半'))
         })
         tx.setTags('c1', ['t1'])
         tx.remove('p2')
@@ -391,36 +390,32 @@ test('tx 抛错 ⇒ 内存恢复、索引可用、不返回半批', () => {
     /校验没通过/,
   )
   assert.equal(delivered, false, '抛错时根本拿不到返回值')
-  assert.equal(
-    JSON.stringify({ blocks: store.blocks, atoms: store.atoms }),
-    before,
-    '正文/标签/删除全部回滚',
-  )
+  assert.equal(JSON.stringify(store.blocks), before, '内容/标签/删除全部回滚')
   // 恢复之后索引必须重建过：反链还查得到（回滚不能把索引留在坏状态上）
   assert.equal(kb.backlinksOf('p2')[0]?.pageId, 'p1')
-  assert.equal(kb.get('c1')?.text, '一')
+  assert.equal(plainText(kb.get('c1')!.content), '一')
 })
 
 test('tx 里改两次同一块 ⇒ change 去重，op 各自成条', () => {
   const { kb } = fixture()
   const r = kb.tx((tx) => {
     tx.patch('c1', (x) => {
-      x.text = '甲'
+      writeBlockContent(x, textRuns('甲'))
     })
     tx.patch('c1', (x) => {
-      x.text = '乙'
+      writeBlockContent(x, textRuns('乙'))
     })
   })
   assert.equal(r.ops.length, 2)
   assert.deepEqual(r.changes, [{ kind: 'blocks', id: 'c1' }])
 })
 
-test('tx 只改锚点也把块 id 推给订阅者', () => {
+test('tx 只改 annos 也把块 id 推给订阅者', () => {
   const { kb, store } = fixture()
   const seen: (readonly string[] | undefined)[] = []
   store.subscribe((_s, ids) => seen.push(ids))
-  kb.tx((tx) => tx.setAnnotations('c1', [], [ref('a1', 'c1', 'p2')]))
-  assert.deepEqual(seen, [['c1']], '只有 marks/atoms change 时也不能把 ids 传成空数组')
+  kb.tx((tx) => tx.setAnnos('c1', [anno('q1')]))
+  assert.deepEqual(seen, [['c1']], '只有 annos change 时也不能把 ids 传成空数组')
 })
 
 test('tx 成功会 touch 订阅者并带上动过的块 id', () => {
@@ -448,12 +443,14 @@ test('索引随 tx 增量修补：任意一批写之后，增量结果与全量�
   const added = mkBlock('新块')
   // 一串覆盖全部 op 形态的写：正文 / 属性 / 别名 / 露面 / 归属 / 日期 / 锚点 / 插入 / 移动 / 删除
   const writes: ((tx: Parameters<Parameters<typeof kb.tx>[0]>[0]) => void)[] = [
-    (tx) => tx.patch('c1', (b) => { b.text = '改过的正文' }),
+    (tx) => tx.patch('c1', (b) => { writeBlockContent(b, textRuns('改过的正文')) }),
     (tx) => tx.setProp('c1', '_date', '2026-10-24'),
     (tx) => tx.setAliases('p2', ['页面二', '别名二']),
     (tx) => tx.setLists('c1', ['page']),
     (tx) => tx.setTags('c2', ['t1', 't1']),
-    (tx) => tx.setAnnotations('c1', [], [ref('a9', 'c1', 'p2')]),
+    // 内容里加一枚引用 run：指向边的增量修补必须跟着走（全量重建会重扫内容）
+    (tx) => tx.patch('c1', (b) => { writeBlockContent(b, [...b.content, refRun('a9', 'p2')]) }),
+    (tx) => tx.setAnnos('c1', [anno('q1')]),
     (tx) => tx.insert(added, 'p1', 1),
     (tx) => tx.move('c2', 'p1', 0),
     (tx) => tx.remove('g1'),

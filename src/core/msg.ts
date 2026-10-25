@@ -406,7 +406,7 @@ export const MSG = {
   'ui.block.placeholderEmpty': '空块',
   'ui.todo.toggle': '点击切换完成 · Shift+点击在右槽打开',
   'ui.tag.mark': '标签',
-  'ui.atom.unknown': '未知原子',
+  'ui.atom.unknown': '未知引用',
   'ui.atom.pageTitle': '引用：{label}（左键打开，⌥ 点击看信息）',
   'ui.atom.pageDanglingTitle': '引用：{label}（目标不存在，点击看信息）',
   'ui.atom.tagTitle': '标签：#{label}（左键打开，⌥ 点击看信息）',
@@ -416,6 +416,10 @@ export const MSG = {
   'ui.feed.shellHint': '点一下，开始写这一天',
 
   /* ---------------------------------------------------------------- 信息气泡 */
+  'ui.popover.flavor': '风味',
+  'ui.popover.marks': '格式',
+  'ui.popover.linkTitle': '外链：{label}',
+  'ui.popover.url': '目标',
   'ui.popover.refTitle': '行内引用 · {label}',
   'ui.popover.tagTitle': '标签 · {label}',
   'ui.popover.imageTitle': '图片原子 · {label}',
@@ -493,7 +497,6 @@ export const MSG = {
   'ui.toast.stateLoaded': '已载入：{state}',
   'ui.toast.virtOn': '虚拟化 on（窗口半径 {radius} 行）：DOM 节点数会小于块数',
   'ui.toast.virtOff': '虚拟化 off：全部块都挂 DOM',
-  'ui.toast.atomsLost': '行内原子失效：{labels}（引用目标被删掉了）',
   'ui.toast.tagAdded': '已打标签 #{tag}',
   'ui.toast.tagAlready': '这个块已经打了 #{tag}',
   'ui.toast.tagCreated': '新建标签 #{tag} 并打上',

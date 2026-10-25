@@ -1,5 +1,5 @@
 /**
- * **共享 block store**的下一层）：块、marks、atoms、undo 都只有一份，
+ * **共享 block store**：块（含行内内容与 annos）、undo 只有一份，
  * 多个 `BlockEditor` 视图读同一份数据；编辑任一实例，其他实例收到 `touch` 后重渲染。
  *
  * 为什么需要它：反链/查询视图和正文会渲染**同一个源块**。如果编辑器各持一份拷贝，
@@ -7,12 +7,12 @@
  *
  * 边界：
  *   · store 在 `core/`，**零 DOM**；视图通过 `subscribe` 得到通知。
- *   · 快照是**整片森林**（blocks + marks + atoms + 一个视图的 sel）；undo 是全局的。
+ *   · 快照是**整片森林**（blocks ＋ 一个视图的 sel）；undo 是全局的。
+ *     行内内容与 annos 住块上 ⇒ 快照天然带全它们，没有第二份要拼装。
  *   · `touch(source)` 不通知发起者（它自己的 DOM 已经更新），只通知其他视图。
  *   · 当前是整片森林 JSON 快照；接内核后换成 Tx/Changes ＋ 增量索引。
  */
 import { UndoStack, type Snap, type UndoKind } from './undo.ts'
-import type { Atom, Mark } from './annotations.ts'
 import type { Block } from './model.ts'
 import type { Op } from './kb/types.ts'
 import type { Sel } from './selection.ts'
@@ -29,12 +29,10 @@ export type StoreSubscriber = (source?: unknown, ids?: readonly string[]) => voi
 
 export class BlockStore {
   blocks: Block[]
-  marks: Mark[]
-  atoms: Atom[]
   undoStack = new UndoStack()
   private subs = new Set<StoreSubscriber>()
   /**
-   * **派生索引**（懒重建）：`null` ＝ 已失效，下次访问时从当前 `blocks`/`atoms` 重算一遍。
+   * **派生索引**（懒重建）：`null` ＝ 已失效，下次访问时从当前 `blocks` 重算一遍。
    *
    * 为什么挂在 store 上：它是**共享数据**的唯一持有者，多个视图读同一份；
    * 索引挂在别处就会出现「两个视图拿着不同代的索引」。
@@ -43,10 +41,8 @@ export class BlockStore {
    */
   private idx: Index | null = null
 
-  constructor(blocks: Block[], marks: Mark[] = [], atoms: Atom[] = []) {
+  constructor(blocks: Block[]) {
     this.blocks = blocks
-    this.marks = marks
-    this.atoms = atoms
   }
 
   subscribe(fn: StoreSubscriber): () => void {
@@ -80,7 +76,7 @@ export class BlockStore {
    *    但**名字表**（标签名→id、日期→id）是快照 ⇒ 改名后必须让索引失效（见 `invalidate`）。
    */
   get index(): Index {
-    this.idx ??= rebuild(this.blocks, this.atoms)
+    this.idx ??= rebuild(this.blocks)
     return this.idx
   }
 
@@ -90,7 +86,7 @@ export class BlockStore {
    * ⚠️ **改了 `blocks` 就必须调它**。`touch()` 已经带了（那是编辑器的写入出口），
    *    但还有一条旁路：**命令直接把森林改了**（新建页 / 删页 / 往森林根 push 标签块），
    *    然后调 `loadPage` 换视图 —— 那条路不发 `touch`，索引就会停在旧库上。
-   *    实测代价：删掉一页后，引用它的 chip 仍然显示 resolved（T39 抓到）。
+   *    实测代价：删掉一页后，引用它的 chip 仍然显示 resolved（真踩到过）。
    *    接 Tx/Changes 之后，「所有写入经一个入口」会让这条规则自动成立。
    */
   invalidateIndex(): void {
@@ -104,7 +100,7 @@ export class BlockStore {
    * 一次性成本，结果不变。等式「修补 == 重建」由 `tests/index-port.test.ts` 钉住。
    */
   applyOps(ops: readonly Op[]): void {
-    patchIndex(this.index, ops, this.blocks, this.atoms)
+    patchIndex(this.index, ops, this.blocks)
   }
 
   /** 按 id 找块（整片森林；zoom 后当前对象可能在任意深度）—— 走索引，O(1) */
@@ -112,37 +108,29 @@ export class BlockStore {
     return lookupBlock(this.index, id)
   }
 
-  /** 整片森林 + 库级 anchors + 发起者的选区；这是 undo 的快照单位 */
+  /** 整片森林 ＋ 发起者的选区；这是 undo 的快照单位（行内内容住块上，随块走） */
   snap(sel: Sel | null): Snap {
     return {
       blocks: JSON.stringify(this.blocks),
-      marks: JSON.stringify(this.marks),
-      atoms: JSON.stringify(this.atoms),
       sel: JSON.stringify(sel),
     }
   }
 
   /**
-   * 恢复快照：**原地替换** blocks/marks/atoms 的数组内容，保持数组身份
-   * （编辑器持有的 `this.marks` 引用不会失效）；然后通知其他视图。
+   * 恢复快照：**原地替换** blocks 的数组内容，保持数组身份
+   * （编辑器手里的引用不会失效）；然后通知其他视图。
    * 返回快照里的 sel，让发起者自己恢复选区。
    */
   restore(s: Snap, source?: unknown): Sel | null {
     const blocks = JSON.parse(s.blocks) as Block[]
     this.blocks.splice(0, this.blocks.length, ...blocks)
-    const marks = JSON.parse(s.marks) as Mark[]
-    this.marks.splice(0, this.marks.length, ...marks)
-    const atoms = JSON.parse(s.atoms) as Atom[]
-    this.atoms.splice(0, this.atoms.length, ...atoms)
     this.touch(source)
     return JSON.parse(s.sel) as Sel | null
   }
 
   /** 演示状态整体换库：换数组引用，清 undo，通知所有视图（source 不传） */
-  reset(blocks: Block[], marks: Mark[], atoms: Atom[]): void {
+  reset(blocks: Block[]): void {
     this.blocks = blocks
-    this.marks = marks
-    this.atoms = atoms
     this.undoStack.clear()
     this.touch()
   }
@@ -161,16 +149,5 @@ export class BlockStore {
     const s = this.undoStack.redo(this.snap(sel))
     if (s) this.restore(s, source)
     return s
-  }
-
-  /** 行内锚点整体替换（编辑器 setter 用）；原地替换保持共享数组身份 */
-  replaceMarks(next: Mark[], source?: unknown): void {
-    this.marks.splice(0, this.marks.length, ...next)
-    this.touch(source)
-  }
-
-  replaceAtoms(next: Atom[], source?: unknown): void {
-    this.atoms.splice(0, this.atoms.length, ...next)
-    this.touch(source)
   }
 }

@@ -65,7 +65,7 @@ export function pageCommands(d: PageDeps): Pick<
       const p = makePageBlock()
       d.insertBlock(p, null, d.kb.roots().length)
       d.setActiveId(p.id)
-      d.loadPage(rootsFor(p), d.marks(), d.atoms())
+      d.loadPage(rootsFor(p))
       d.refreshList()
       d.refreshTitle()
       d.saveNow()
@@ -96,7 +96,7 @@ export function pageCommands(d: PageDeps): Pick<
             .map((h) => d.kb.get(h.blockId))
             .filter((b): b is Block => b !== undefined)
         : []
-      d.loadPage(isTodayEntry ? rootsForMany(feedDays) : rootsFor(p), d.marks(), d.atoms())
+      d.loadPage(isTodayEntry ? rootsForMany(feedDays) : rootsFor(p))
       d.refreshList()
       d.refreshTitle()
       d.saveNow()
@@ -117,7 +117,7 @@ export function pageCommands(d: PageDeps): Pick<
       const p = rest[Math.min(i, rest.length - 1)] ?? rest[0]
       if (p) {
         d.setActiveId(p.id)
-        d.loadPage(rootsFor(p), d.marks(), d.atoms())
+        d.loadPage(rootsFor(p))
       }
       d.refreshList()
       d.refreshTitle()

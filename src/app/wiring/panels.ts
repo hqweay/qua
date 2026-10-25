@@ -16,10 +16,10 @@ import {
   journalDateLabel,
   memberBlocks,
   parentTags,
-  type Atom,
   type Block,
 } from '../../core/index.ts'
 import { t } from '../../core/msg.ts'
+import type { RunWithId } from '../../core/runs.ts'
 import type { App, Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { Tx } from '../../core/kb/types.ts'
@@ -44,7 +44,7 @@ export type PanelsDeps = {
   syncSections: () => void
   scheduleSave: () => void
   scheduleBadge: () => void
-  handleAtomClick: (a: Atom, el: HTMLElement, mods: { altKey: boolean }) => void
+  handleAtomClick: (run: RunWithId, el: HTMLElement, mods: { altKey: boolean }) => void
   /** 换库会整体替换 `ws`，不能传值 */
   getWs: () => Workspace
   /** 焦点切到反链 footer／标签页／查询视图的编辑器时，`ed` 要跟着切 */
@@ -89,8 +89,7 @@ export function setupPanels(deps: PanelsDeps) {
         // 不重画属性区：反链 footer 里的光标不属于「台面上那个块」，面板主体不随它变
       },
       onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'backlinks'),
-      onAtomClick: (a, el, mods) => handleAtomClick(a, el, mods),
-      onAtomsLost: (labels) => app.toast(t('ui.toast.atomsLost', { labels: labels.join('、') }), 'warn'),
+      onAtomClick: (run, _blockId, el, mods) => handleAtomClick(run, el, mods),
     },
   )
 
@@ -324,8 +323,7 @@ export function setupPanels(deps: PanelsDeps) {
         // 面板主体是中心槽的当前对象，与这个编辑器里的光标无关
       },
       onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'tagpanel'),
-      onAtomClick: (a, el, mods) => handleAtomClick(a, el, mods),
-      onAtomsLost: (labels) => app.toast(t('ui.toast.atomsLost', { labels: labels.join('、') }), 'warn'),
+      onAtomClick: (run, _blockId, el, mods) => handleAtomClick(run, el, mods),
     },
   )
 
@@ -369,7 +367,7 @@ export function setupPanels(deps: PanelsDeps) {
         // 面板主体是中心槽的当前对象，与这个编辑器里的光标无关
       },
       onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'query'),
-      onAtomClick: (a, el, mods) => handleAtomClick(a, el, mods),
+      onAtomClick: (run, _blockId, el, mods) => handleAtomClick(run, el, mods),
       toast: (text, kind) => app.toast(text, kind),
     },
   )

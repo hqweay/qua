@@ -14,8 +14,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { deleteBlockSpan, flatten } from '../src/core/tree.ts'
 import type { Block, Doc } from '../src/core/model.ts'
+import { plainText, textRuns } from '../src/core/runs.ts'
 
-const mk = (id: string, text = '', children: Block[] = []): Block => ({ id, text, children })
+const mk = (id: string, text = '', children: Block[] = []): Block => ({ id, content: textRuns(text), children })
 
 function fixture(): Doc {
   const b = mk('b', 'BBBB', [mk('b1', '乙的子块')])
@@ -24,7 +25,7 @@ function fixture(): Doc {
   }
 }
 
-const texts = (doc: Doc): string[] => flatten(doc).map((b) => b.text)
+const texts = (doc: Doc): string[] => flatten(doc).map((b) => plainText(b.content))
 
 test('deleteBlockSpan：首块前半 ＋ 末块后半拼成一块，中间的连子树一起没掉', () => {
   const doc = fixture()

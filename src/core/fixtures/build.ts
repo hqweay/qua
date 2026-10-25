@@ -19,10 +19,10 @@ import {
   mkBlock,
   TASK_STATUS_PROP_ID,
   uuidv7Hex,
-  type Atom,
   type Block,
-  type Mark,
 } from '../index.ts'
+import { refRunsOf, textRuns } from '../runs.ts'
+import { walkForest } from '../walk.ts'
 import { WORKSPACE_VERSION, type PageBlock, type Workspace } from '../workspace.ts'
 import { parseInline, type SeedBlock } from './inline.ts'
 
@@ -31,58 +31,32 @@ import { parseInline, type SeedBlock } from './inline.ts'
 export interface BuiltPage {
   /** 页 ＝ `_lists` 里有 `page` 的块；名字在 `_aliases`（journal 也复用这个形状） */
   page: Block
-  /** 页面标题 → id 的解析表（延后处理引用目标） */
-  refs: { atomId: string; label: string }[]
-  /** 这一页自己的锚点与原子（最后上提到库级，demo 平铺存放） */
-  marks: Mark[]
-  atoms: Atom[]
+  /** 页面标题 → id 的解析表（延后处理引用目标；行内内容已就位，只等回填 `to`） */
+  refs: { runId: string; label: string }[]
   /** 还没解析成 id 的标签归属（森林凑齐、标签块建好之后再落进 `_tags`） */
   pendingTags: { block: Block; name: string }[]
 }
 
 export function buildTree(
   seeds: SeedBlock[],
-  out: { marks: Mark[]; atoms: Atom[]; refs: BuiltPage['refs']; pendingTags: BuiltPage['pendingTags'] },
+  out: { refs: BuiltPage['refs']; pendingTags: BuiltPage['pendingTags'] },
 ): Block[] {
   return seeds.map((s) => {
-    const parsed = parseInline(s.text)
-    const text = parsed.text
     /**
+     * 行内内容（文本段/格式/原子）由 DSL 一次解析进 `content`；
+     * 引用目标在森林凑齐之前还解析不到（`to` 先留空，`refs` 记着回填）。
+     *
      * **标签不往正文里插任何东西**：归属是块级字段，正文保持作者写下的那几个字。
      * ⚠️ 名字到 id 的解析推迟到森林凑齐之后 —— 标签块住在森林顶层、比内容块晚建，
      *    这里拿不到它，写一个假 id 只会得到「指向不存在的东西」。
      */
-    const b = mkBlock(text)
+    const parsed = parseInline(s.text)
+    const b = mkBlock(parsed.runs)
     for (const name of s.tags ?? []) out.pendingTags.push({ block: b, name })
     // 任务状态是**真实属性**：它的键是定义块的 id，值与标签声明无关（声明只提供入口）
     if (s.task !== undefined) b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: s.task }
     if (s.props) b.props = { ...(b.props ?? {}), ...s.props }
-    for (const m of parsed.marks) out.marks.push({ id: uuidv7Hex(), type: m.type, blockId: b.id, start: m.start, end: m.end })
-    for (const a of parsed.atoms) {
-      const id = uuidv7Hex()
-      const atom: Atom = {
-        id,
-        kind: a.kind,
-        blockId: b.id,
-        start: a.start,
-        end: a.start + 1,
-        label: a.label,
-      }
-      // 引用要解析目标块；图片不走这条路（它指资产）
-      if (a.kind === 'page') out.refs.push({ atomId: id, label: a.label })
-      else {
-        atom.asset = {
-          hash: uuidv7Hex().slice(0, 32),
-          name: a.label,
-          bytes: a.missing ? 0 : 210_944,
-          mime: 'image/png',
-          state: a.missing ? 'missing' : 'ready',
-          w: 1440,
-          h: 900,
-        }
-      }
-      out.atoms.push(atom)
-    }
+    out.refs.push(...parsed.refs)
     b.children = buildTree(s.children ?? [], out)
     return b
   })
@@ -100,16 +74,16 @@ export function buildTree(
  *    （引用/反链走主名，列表标题仍可回落到正文，见 `displayNameOf` 的优先级）。
  */
 export function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uuidv7Hex()): BuiltPage {
-  const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'], pendingTags: [] as BuiltPage['pendingTags'] }
+  const acc = { refs: [] as BuiltPage['refs'], pendingTags: [] as BuiltPage['pendingTags'] }
   const children = buildTree(seeds, acc)
   const name = title.trim() !== '' ? title.trim() : `未命名-${id.slice(-6)}`
   const page: PageBlock = {
     id,
-    text: title,
+    content: textRuns(title),
     children,
     props: { [ALIASES_PROP]: [name], [LISTS_PROP]: ['page'], [DISPLAY_PROP]: 'alias', _icon: icon },
   }
-  return { page, refs: acc.refs, marks: acc.marks, atoms: acc.atoms, pendingTags: acc.pendingTags }
+  return { page, refs: acc.refs, pendingTags: acc.pendingTags }
 }
 
 /**
@@ -117,15 +91,15 @@ export function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uui
  * 它和页复用同一个 `BuiltPage` 形状（子树 / 锚点 / 原子），只是身份来源不同。
  */
 export function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
-  const acc = { marks: [] as Mark[], atoms: [] as Atom[], refs: [] as BuiltPage['refs'], pendingTags: [] as BuiltPage['pendingTags'] }
+  const acc = { refs: [] as BuiltPage['refs'], pendingTags: [] as BuiltPage['pendingTags'] }
   const children = buildTree(seeds, acc)
   const block: Block = {
     id: journalId(date),
-    text: '',
+    content: [],
     children,
     props: { _date: date, _icon: 'lucide:calendar' },
   }
-  return { page: block, refs: acc.refs, marks: acc.marks, atoms: acc.atoms, pendingTags: acc.pendingTags }
+  return { page: block, refs: acc.refs, pendingTags: acc.pendingTags }
 }
 
 /**
@@ -146,10 +120,10 @@ export function resolveSeedTags(forest: Block[], pending: readonly { block: Bloc
 /**
  * 把 `[[..]]` 解析到真实地址（页与标签共用同一个名字空间）。
  *
- * ⚠️ 解析不到 ⇒ **不写 `target`**：「指不到东西」就是**没有目标**，
+ * ⚠️ 解析不到 ⇒ **不写 `to`**：「指不到东西」就是**没有目标**，
  *    不是「指向一个叫 `missing:xxx` 的实体」（那会让 `dangling` 变成一个能被引用的假目标）。
- *    显示名仍走 `atom.label`（fallback），`dangling` 由渲染层**现算**（`core/ref.ts`）。
- * ⚠️ 只有**能当地址**的块才被解析到（页 / 标签）：journal 的 text 是空的（日期在 `_date` 里），
+ *    显示名仍走 run 的 `label`（fallback），`dangling` 由渲染层**现算**（`core/ref.ts`）。
+ * ⚠️ 只有**能当地址**的块才被解析到（页 / 标签）：journal 的内容是空的（日期在 `_date` 里），
  *    混进来会把 `[[ ]]` 解析到日记块上；schema 的正文是字段名（允许重名），也不进地址空间。
  * ⚠️ 比较走 `core/alias.ts` 的规范化（`[[ 设计 ]]` 与 `#设计` 是同一个块）。
  */
@@ -157,10 +131,22 @@ export function resolveRefs(pages: Block[], built: BuiltPage[]): void {
   for (const bp of built) {
     for (const r of bp.refs) {
       const target = findByAlias(pages, r.label)
-      const atom = bp.atoms.find((a) => a.id === r.atomId)!
-      if (target) atom.target = { kind: 'page', id: target.id }
+      const run = refRunsOf(bp.page.content).find((x) => x.id === r.runId)
+      // 引用只可能落在这一页自己的子树里（DSL 是按块解析的），找不到就是形状坏了
+      const hit = run ?? findRunInTree(bp.page, r.runId)
+      if (target && hit) hit.to = target.id
     }
   }
+}
+
+function findRunInTree(root: Block, runId: string): ReturnType<typeof refRunsOf>[number] | undefined {
+  let hit: ReturnType<typeof refRunsOf>[number] | undefined
+  walkForest([root], (b) => {
+    if (hit) return false
+    hit = refRunsOf(b.content).find((x) => x.id === runId)
+    return hit === undefined
+  })
+  return hit
 }
 
 /* --------------------------------------------------------------- 长文 */
@@ -209,14 +195,12 @@ export const LONG_EN = [
  *    是「这台设备怎么显示」，换库（演示状态切换）不该把它带走 ⇒ 它们住在
  *    `qua.device`（`storage/device.ts`）。
  */
-export function forest(blocks: Block[], built: BuiltPage[]): Workspace {
+export function forest(blocks: Block[], _built: BuiltPage[]): Workspace {
   return {
     version: WORKSPACE_VERSION,
     blocks,
     activeId: blocks[0]?.id ?? '',
     savedAt: Date.now(),
-    marks: built.flatMap((b) => b.marks),
-    atoms: built.flatMap((b) => b.atoms),
-    // 种子库没有删过东西；回收站是**新增的库级一格**，缺席会让落盘形状少一块
+    // 行内内容住块上：库级没有第二份锚点数组要拼装
   }
 }

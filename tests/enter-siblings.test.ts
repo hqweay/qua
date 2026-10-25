@@ -16,9 +16,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { enterKind, flatten, insertFirstChild, insertSiblingAfter, locate, outdentBlock, splitBlockBefore, splitBlockIntoFirstChild } from '../src/core/tree.ts'
+import { writeBlockContent } from '../src/core/model.ts'
 import type { Block, Doc } from '../src/core/model.ts'
+import { plainText, textRuns } from '../src/core/runs.ts'
 
-const mk = (id: string, text = '', children: Block[] = []): Block => ({ id, text, children })
+const mk = (id: string, text = '', children: Block[] = []): Block => ({ id, content: textRuns(text), children })
 
 /** `a` → `a1` → `a11`；`b` 是 `a` 的兄弟 */
 function fixture(): Doc {
@@ -59,7 +61,7 @@ test('Enter child 分支：新块是**第一个**子块，既有子块顺次后�
   assert.equal(doc.roots[0]!.children.length, 2)
   assert.equal(doc.roots[0]!.children[0]!.id, c.id, '新块应排在最前')
   assert.equal(doc.roots[0]!.children[1]!.id, 'a1', '既有子块应完整保留')
-  assert.equal(c.text, '')
+  assert.equal(plainText(c.content), '')
 })
 
 test('Enter sibling 分支：新块是同级，子树原地不动', () => {
@@ -89,12 +91,12 @@ test('Enter（第三次修订）split：左半进**上方同级新块**，原块
   assert.equal(r.kept, 'a', '原块保留 id')
 
   const inserted = locate(doc, r.inserted)!
-  assert.equal(inserted.block.text, 'a', '左半进新块')
+  assert.equal(plainText(inserted.block.content), 'a', '左半进新块')
   assert.equal(inserted.parent, null, '新块与 a 同级（同在 roots）')
   assert.equal(inserted.index, 0, '新块排在 a 之前（视觉上的上一行）')
 
   const kept = locate(doc, 'a')!
-  assert.equal(kept.block.text, 'bc', '原块保留右半')
+  assert.equal(plainText(kept.block.content), 'bc', '原块保留右半')
   assert.equal(kept.index, 1, '原块下移一行')
   assert.equal(kept.block.children[0]!.id, 'a1', '子树留在原块（隐式不变量）')
 })
@@ -105,17 +107,17 @@ test('Enter（第三次修订）split：叶子块也拆成同级，不加深', (
   assert.equal(r.kept, 'b')
   const inserted = locate(doc, r.inserted)!
   assert.equal(inserted.parent, null)
-  assert.equal(inserted.block.text, '', 'offset=0 ⇒ 上方插空块')
+  assert.equal(plainText(inserted.block.content), '', 'offset=0 ⇒ 上方插空块')
   assert.equal(inserted.index, 1, 'b 前面、a 后面')
-  assert.equal(locate(doc, 'b')!.block.text, 'b', '原块文本原样')
+  assert.equal(plainText(locate(doc, 'b')!.block.content), 'b', '原块文本原样')
 })
 
 test('Enter（第三次修订）split：offset=0 退化成「在上方插空块」', () => {
   const doc = fixture()
   const r = splitBlockBefore(doc, 'a', 0)!
   const inserted = locate(doc, r.inserted)!
-  assert.equal(inserted.block.text, '')
-  assert.equal(locate(doc, 'a')!.block.text, 'abc')
+  assert.equal(plainText(inserted.block.content), '')
+  assert.equal(plainText(locate(doc, 'a')!.block.content), 'abc')
   assert.equal(locate(doc, 'a')!.block.children[0]!.id, 'a1')
   assert.equal(inserted.index, 0)
 })
@@ -136,37 +138,37 @@ test('Enter（第三次修订）split：只给新块发 id，原块 id/props 不
 
 test('Enter（第四次修订）空块 + 缩进 ≥ 2 层 ⇒ outdent（Enter 反缩进，不建块）', () => {
   const doc = fixture()
-  doc.roots[0]!.children[0]!.children[0]!.text = '' // a11（深度 2）
+  writeBlockContent(doc.roots[0]!.children[0]!.children[0]!, []) // a11（深度 2）
   assert.equal(enterKind(doc, 'a11', 0), 'outdent')
 })
 
 test('Enter（第四次修订）顶层内容块 / 根块不反缩进；非空块仍走 split', () => {
   const doc = fixture()
-  doc.roots[0]!.text = '' // a 是根块
+  writeBlockContent(doc.roots[0]!, []) // a 是根块
   assert.notEqual(enterKind(doc, 'a', 0), 'outdent')
-  doc.roots[0]!.children[0]!.text = '' // a1 深度 1（父是根）
+  writeBlockContent(doc.roots[0]!.children[0]!, []) // a1 深度 1（父是根）
   assert.notEqual(enterKind(doc, 'a1', 0), 'outdent', '顶层内容块反缩进会离开 section')
-  doc.roots[0]!.children[0]!.children[0]!.text = 'x' // a11 非空
+  writeBlockContent(doc.roots[0]!.children[0]!.children[0]!, textRuns('x')) // a11 非空
   assert.equal(enterKind(doc, 'a11', 0), 'split')
 })
 
 test('Enter（第四次修订）outdent 只搬自己（含子树），不做文本交换', () => {
   const doc = fixture()
   const a11 = doc.roots[0]!.children[0]!.children[0]!
-  a11.text = ''
+  writeBlockContent(a11, [])
   assert.equal(outdentBlock(doc, 'a11'), true)
   const loc = locate(doc, 'a11')!
   assert.equal(loc.parent!.id, 'a', 'a11 应从 a1 下升到 a 下')
   assert.equal(loc.index, 1, '应插在 a1 之后')
-  assert.equal(loc.block.text, '')
+  assert.equal(plainText(loc.block.content), '')
   assert.equal(a11.id, 'a11', 'id 不变')
 })
 
 test('Enter split 分支只改两处：左半新块 + 原块右半，子树留在原块', () => {
   const doc = fixture()
-  const before = flatten(doc).map((b) => `${b.id}:${b.text}`).sort()
+  const before = flatten(doc).map((b) => `${b.id}:${plainText(b.content)}`).sort()
   splitBlockBefore(doc, 'a', 1)
-  const after = flatten(doc).map((b) => `${b.id}:${b.text}`).sort()
+  const after = flatten(doc).map((b) => `${b.id}:${plainText(b.content)}`).sort()
   const changed = after.filter((x) => !before.includes(x))
   assert.equal(changed.length, 2, `应只改两处：${JSON.stringify(changed)}`)
   assert.ok(changed.includes('a:bc'), '原块应变右半')
@@ -179,10 +181,10 @@ test('Enter（第五次修订）section 根块中拆：左半留根，右半成*
   const nRoots = doc.roots.length
   const r = splitBlockIntoFirstChild(doc, 'a', 1)!
   assert.equal(r.kept, 'a')
-  assert.equal(doc.roots[0]!.text, 'a', '左半留在根里')
+  assert.equal(plainText(doc.roots[0]!.content), 'a', '左半留在根里')
   const first = doc.roots[0]!.children[0]!
   assert.equal(first.id, r.inserted)
-  assert.equal(first.text, 'bc', '右半成为首个子块')
+  assert.equal(plainText(first.content), 'bc', '右半成为首个子块')
   assert.equal(doc.roots[0]!.children[1]!.id, 'a1', '既有子块保留在第二位')
   assert.equal(doc.roots.length, nRoots, '不新增根')
 })
@@ -190,7 +192,7 @@ test('Enter（第五次修订）section 根块中拆：左半留根，右半成*
 test('Enter（第五次修订）section 根 offset=0 不拆（避免清空根文本）', () => {
   const doc = fixture()
   assert.equal(splitBlockIntoFirstChild(doc, 'a', 0), null)
-  assert.equal(doc.roots[0]!.text, 'abc')
+  assert.equal(plainText(doc.roots[0]!.content), 'abc')
   assert.equal(doc.roots[0]!.children[0]!.id, 'a1')
 })
 
@@ -205,9 +207,9 @@ test('Enter 判据里 core 不判「是不是首行」——那是视图层的�
 test('Enter 建块不搬 anchors：只加空块，既有块的 id/文本原样', () => {
   for (const fn of [insertSiblingAfter, insertFirstChild]) {
     const doc = fixture()
-    const before = flatten(doc).map((b) => `${b.id}:${b.text}`).sort()
+    const before = flatten(doc).map((b) => `${b.id}:${plainText(b.content)}`).sort()
     fn(doc, 'a')
-    const after = flatten(doc).map((b) => `${b.id}:${b.text}`).sort()
+    const after = flatten(doc).map((b) => `${b.id}:${plainText(b.content)}`).sort()
     const extra = after.filter((x) => !before.includes(x))
     assert.equal(extra.length, 1, `${fn.name} 应只多一条记录：${JSON.stringify(extra)}`)
     assert.match(extra[0]!, /:$/, '多出来的应是空文本块')

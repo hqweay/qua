@@ -12,7 +12,7 @@ import { parseWorkspace, WORKSPACE_VERSION } from '../src/core/workspace.ts'
 const valid = (patch: Record<string, unknown> = {}): string =>
   JSON.stringify({
     version: WORKSPACE_VERSION,
-    blocks: [{ id: 'b1', text: 'hello', children: [] }],
+    blocks: [{ id: 'b1', content: [{ t: 'text', v: 'hello' }], children: [] }],
     activeId: 'b1',
     savedAt: 0,
     marks: [],
@@ -54,7 +54,7 @@ test('parseWorkspace: JSON 坏了 ⇒ corrupt(parse)', () => {
 
 test('parseWorkspace: 形状不对（空 blocks / 坏 children）⇒ corrupt(shape)', () => {
   assert.deepEqual(parseWorkspace(valid({ blocks: [] })), { status: 'corrupt', reason: 'shape' })
-  const badChild = valid({ blocks: [{ id: 'b1', text: 'x', children: [{ id: 'b2' }] }] })
+  const badChild = valid({ blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [{ id: 'b2' }] }] })
   assert.deepEqual(parseWorkspace(badChild), { status: 'corrupt', reason: 'shape' })
 })
 
@@ -64,7 +64,7 @@ test('parseWorkspace: 缺 version ⇒ corrupt(shape)，不当作旧库', () => {
 
 test('parseWorkspace: `_lists` 形状不对（非数组 / 坏值 / 重复）⇒ corrupt(shape)', () => {
   const bad = (lists: unknown): unknown =>
-    valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _lists: lists } }] })
+    valid({ blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [], props: { _lists: lists } }] })
   assert.equal(parseWorkspace(bad('page')).status, 'corrupt')
   assert.equal(parseWorkspace(bad(['page', 'other'])).status, 'corrupt')
   assert.equal(parseWorkspace(bad(['page', 'page'])).status, 'corrupt', '无序集合：重复没有第二种语义')
@@ -72,17 +72,17 @@ test('parseWorkspace: `_lists` 形状不对（非数组 / 坏值 / 重复）⇒ 
 })
 
 test('parseWorkspace: 在列表里 ⇒ 必须有至少一个别名', () => {
-  const withPageNoName = valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _lists: ['page'] } }] })
+  const withPageNoName = valid({ blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [], props: { _lists: ['page'] } }] })
   assert.deepEqual(parseWorkspace(withPageNoName), { status: 'corrupt', reason: 'shape' })
   const withPageName = valid({
-    blocks: [{ id: 'b1', text: 'x', children: [], props: { _lists: ['page'], _aliases: ['页名'] } }],
+    blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [], props: { _lists: ['page'], _aliases: ['页名'] } }],
   })
   assert.equal(parseWorkspace(withPageName).status, 'ok')
 })
 
 test('parseWorkspace: `_aliases` 形状不对（空数组 / 空串 / 规范化重复）⇒ corrupt(shape)', () => {
   const bad = (aliases: unknown): unknown =>
-    valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _aliases: aliases } }] })
+    valid({ blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [], props: { _aliases: aliases } }] })
   assert.equal(parseWorkspace(bad('名字')).status, 'corrupt')
   assert.equal(parseWorkspace(bad([])).status, 'corrupt', '空数组与「没有这一格」是两种写法')
   assert.equal(parseWorkspace(bad(['  '])).status, 'corrupt', '空串不是地址')
@@ -93,7 +93,7 @@ test('parseWorkspace: `_aliases` 形状不对（空数组 / 空串 / 规范化�
 
 test('parseWorkspace: `_display` 只认 `alias` / `text` ⇒ 别的值判 corrupt', () => {
   const bad = (display: unknown): unknown =>
-    valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _aliases: ['x'], _display: display } }] })
+    valid({ blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [], props: { _aliases: ['x'], _display: display } }] })
   assert.equal(parseWorkspace(bad('alias')).status, 'ok')
   assert.equal(parseWorkspace(bad('text')).status, 'ok')
   assert.equal(parseWorkspace(bad('both')).status, 'corrupt')
@@ -101,9 +101,9 @@ test('parseWorkspace: `_display` 只认 `alias` / `text` ⇒ 别的值判 corrup
 })
 
 test('parseWorkspace: 旧键 `_roles` / `_alias` 一律判 corrupt（不静默读旧形状）', () => {
-  const roles = valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _roles: ['page'] } }] })
+  const roles = valid({ blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [], props: { _roles: ['page'] } }] })
   assert.deepEqual(parseWorkspace(roles), { status: 'corrupt', reason: 'shape' })
-  const alias = valid({ blocks: [{ id: 'b1', text: 'x', children: [], props: { _alias: '名字' } }] })
+  const alias = valid({ blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [], props: { _alias: '名字' } }] })
   assert.deepEqual(parseWorkspace(alias), { status: 'corrupt', reason: 'shape' })
 })
 

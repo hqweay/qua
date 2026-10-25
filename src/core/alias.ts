@@ -16,6 +16,7 @@
  *    会顺手改地址，让「敲字」变成「重命名」。
  */
 import { ALIASES_PROP, aliasesOf, listsOf, primaryAliasOf, type Block } from './model.ts'
+import { plainText } from './runs.ts'
 import { walkForest } from './walk.ts'
 
 /** 旧落盘键（v13 及以前）。新代码**不读**它；形状校验把它判成 corrupt。 */
@@ -72,7 +73,7 @@ export function addressOf(b: Block): string {
  * ⚠️ `_display` **不参与**：它只决定这一行自己的头怎么显示；引用／反链永远叫主名叶子。
  */
 export function displayNameOf(b: Block): string {
-  return aliasLeaf(primaryAliasOf(b)) || b.text.trim()
+  return aliasLeaf(primaryAliasOf(b)) || plainText(b.content).trim()
 }
 
 /** 能被地址找到的块 —— **只看 `_aliases`**，不再看页／标签列表。 */

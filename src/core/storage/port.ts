@@ -21,7 +21,7 @@
 import type { Op } from '../kb/types.ts'
 
 /** 被写的三类对象：块森林 ＋ 行内锚点 ＋ 行内原子 */
-export type ChangeKind = 'blocks' | 'marks' | 'atoms'
+export type ChangeKind = 'blocks' | 'annos'
 
 /**
  * 一条改动。

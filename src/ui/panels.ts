@@ -7,8 +7,10 @@
  * ⚠️ 组件自持 DOM：这里不 `getElementById`，所有元素都建在传进来的 `host` 上。
  * ⚠️ 分层：本文件在 `ui` 层，只依赖 core 的类型与函数，**不 import view/装配层**。
  */
-import type { Atom, Block, CtxKeys } from '../core/index.ts'
+import type { Block, CtxKeys } from '../core/index.ts'
+import type { RunWithId } from '../core/runs.ts'
 import { resolveRef } from '../core/ref.ts'
+import { plainText } from '../core/runs.ts'
 import { COMMANDS } from '../core/commands/index.ts'
 import { BINDINGS, keyLabel, keymapRows, referencedKeys } from '../core/bindings.ts'
 import { t } from '../core/msg.ts'
@@ -23,8 +25,6 @@ export interface PanelDeps {
   /** 当前对象（页块）与它的子树 */
   page: () => Block
   roots: () => Block[]
-  marks: () => unknown[]
-  atoms: () => unknown[]
   /**
    * 按 id 在**整片森林**里找块。
    *
@@ -56,11 +56,11 @@ function fmtVal(shortId: (id: string) => string, k: string, v: unknown): string 
   return str
 }
 
-export function showAtomPopover(deps: PanelDeps, a: Atom, rect: DOMRect): void {
+export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect): void {
   deps.openPopover((host) => {
-    if (a.kind === 'page') {
-      const target = deps.findBlock(a.target?.id ?? '')
-      // 显示名与状态**现算**（`core/ref.ts`）：`atom.label` 只是 fallback，
+    if (a.t === 'ref') {
+      const target = a.to ? deps.findBlock(a.to) : undefined
+      // 显示名与状态**现算**（`core/ref.ts`）：run 上的名字快照只是 fallback，
       // popover 上写旧名字等于给用户一份过期的真相。
       const view = resolveRef((id) => deps.findBlock(id), a)
       const h = document.createElement('h4')
@@ -70,17 +70,12 @@ export function showAtomPopover(deps: PanelDeps, a: Atom, rect: DOMRect): void {
         [t('ui.popover.atomId'), a.id],
         [
           t('ui.popover.target'),
-          a.target
-            ? `${a.target.kind}:${target ? a.target.id : `${a.target.id} ${t('ui.popover.targetMissing')}`}`
-            : t('ui.common.none'),
+          a.to ? (target ? a.to : `${a.to} ${t('ui.popover.targetMissing')}`) : t('ui.common.none'),
         ],
         [t('ui.popover.state'), view.state],
-        [t('ui.popover.position'), `${deps.shortId(a.blockId)} @ [${a.start}, ${a.end})`],
-        [t('ui.popover.quote'), a.quote ? `exact=${JSON.stringify(a.quote.exact)}` : t('ui.common.none')],
+        [t('ui.popover.flavor'), a.flavor ?? t('ui.common.none')],
       ]
-      if (a.quote) {
-        rows.push(['prefix / suffix', `${JSON.stringify(a.quote.prefix)} / ${JSON.stringify(a.quote.suffix)}`])
-      }
+      if (a.marks?.length) rows.push([t('ui.popover.marks'), a.marks.join('+')])
       for (const [k, v] of rows) {
         const dt = document.createElement('dt')
         dt.textContent = k
@@ -115,15 +110,42 @@ export function showAtomPopover(deps: PanelDeps, a: Atom, rect: DOMRect): void {
       host.append(h, dl, note, row)
       return
     }
+    if (a.t === 'link') {
+      const h = document.createElement('h4')
+      h.textContent = t('ui.popover.linkTitle', { label: a.v })
+      const dl = document.createElement('dl')
+      const rows: [string, string][] = [
+        [t('ui.popover.atomId'), a.id],
+        [t('ui.popover.url'), a.url],
+      ]
+      if (a.marks?.length) rows.push([t('ui.popover.marks'), a.marks.join('+')])
+      for (const [k, v] of rows) {
+        const dt = document.createElement('dt')
+        dt.textContent = k
+        const dd = document.createElement('dd')
+        dd.textContent = v
+        dl.append(dt, dd)
+      }
+      const row = document.createElement('div')
+      row.className = 'row'
+      const del = document.createElement('button')
+      del.type = 'button'
+      del.textContent = t('ui.popover.deleteRef')
+      del.addEventListener('click', () => {
+        deps.closePopover()
+        deps.removeAtom(a.id)
+      })
+      row.appendChild(del)
+      host.append(h, dl, row)
+      return
+    }
     const h = document.createElement('h4')
-    h.textContent = t('ui.popover.imageTitle', { label: a.label })
+    h.textContent = t('ui.popover.imageTitle', { label: a.asset.name ?? a.asset.hash })
     const dl = document.createElement('dl')
     const rows: [string, string][] = [
-      [t('ui.popover.assetHash'), a.asset?.hash ?? t('ui.common.none')],
-      [t('ui.popover.mimeBytes'), `${a.asset?.mime ?? '?'} / ${(a.asset?.bytes ?? 0).toLocaleString()} B`],
-      [t('ui.popover.size'), `${a.asset?.w ?? '?'}×${a.asset?.h ?? '?'}`],
-      [t('ui.popover.state'), a.asset?.state ?? 'ready'],
-      [t('ui.popover.position'), `${deps.shortId(a.blockId)} @ [${a.start}, ${a.end})`],
+      [t('ui.popover.assetHash'), a.asset.hash],
+      [t('ui.popover.size'), `${a.w ?? '?'}×${a.h ?? '?'}`],
+      [t('ui.popover.state'), a.asset.state],
     ]
     for (const [k, v] of rows) {
       const dt = document.createElement('dt')
@@ -134,7 +156,7 @@ export function showAtomPopover(deps: PanelDeps, a: Atom, rect: DOMRect): void {
     }
     const note = document.createElement('div')
     note.className = 'popover-note'
-    note.textContent = a.asset?.state === 'missing' ? t('ui.popover.assetMissingNote') : t('ui.popover.assetNote')
+    note.textContent = a.asset.state === 'missing' ? t('ui.popover.assetMissingNote') : t('ui.popover.assetNote')
     const row = document.createElement('div')
     row.className = 'row'
     const del = document.createElement('button')
@@ -250,7 +272,7 @@ export function openDrawerFor(deps: PanelDeps, kind: PanelKind): void {
     host.appendChild(p)
     const pre = document.createElement('pre')
     pre.textContent = JSON.stringify(
-      { page: { id: deps.page().id, title: deps.page().text }, roots: deps.roots(), marks: deps.marks(), atoms: deps.atoms() },
+      { page: { id: deps.page().id, title: plainText(deps.page().content) }, roots: deps.roots() },
       null,
       2,
     ).slice(0, 20000)

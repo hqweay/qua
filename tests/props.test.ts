@@ -12,6 +12,7 @@ import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
 import { hasList } from '../src/core/index.ts'
 import { seedWorkspace } from '../src/core/seed.ts'
+import { plainText, textRuns } from '../src/core/runs.ts'
 import {
   cleanableValues,
   declareField,
@@ -46,7 +47,7 @@ test('③ 定义是独立块：森林顶层、`_kind` 是身份、正文＝label
   const forest: Block[] = [def]
   assert.equal(forest[0], def, '直接住森林顶层 —— 不是任何标签的子块')
   assert.ok(isPropDef(def))
-  assert.equal(def.text, '评分')
+  assert.equal(plainText(def.content), '评分')
   assert.equal(def.props?._kind, 'number')
   assert.equal(def.children.length, 0)
   assert.ok(def.id.length > 0, 'propId 就是它自己的 id')
@@ -72,7 +73,7 @@ test('③ 定义可被两个标签同时声明；删其一，定义仍在、另�
 
 test('只有页/标签能声明字段（D4）；普通块只能有值', () => {
   const def = mkPropDef('评分')
-  const plain: Block = { id: 'p', text: '普通块', children: [] }
+  const plain: Block = { id: 'p', content: textRuns('普通块'), children: [] }
   assert.equal(declareField(plain, def.id), false)
   const page: Block = { id: 'pg', text: '页', children: [], props: { _aliases: ['页'], _lists: ['page'] } }
   assert.equal(declareField(page, def.id), true)
@@ -90,7 +91,7 @@ test('④ 同一 propId 被两标签声明 ⇒ 只出现一行、来源完整', 
   const rows = fieldRows(target, forest)
   const scored = rows.filter((r) => r.propId === def.id)
   assert.equal(scored.length, 1, '同一个字段只显示一次')
-  assert.deepEqual(scored[0]!.sources.map((s) => s.text), ['书', '电影'], '来源按正文里标签的先后')
+  assert.deepEqual(scored[0]!.sources.map((s) => plainText(s.content)), ['书', '电影'], '来源按正文里标签的先后')
   assert.equal(scored[0]!.value, 9)
   assert.equal(scored[0]!.filled, true)
 })
@@ -225,11 +226,11 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter）�
   const ws = seedWorkspace()
   const def = ws.blocks.find((b) => b.id === TASK_STATUS_PROP_ID)
   assert.ok(def, '定义块应在森林顶层（不在任何页的子树里）')
-  assert.equal(def!.text, '任务状态')
+  assert.equal(plainText(def!.content), '任务状态')
   assert.equal(def!.props?._kind, 'checkbox')
   assert.equal(uiPositionOf(def), 'block-left')
 
-  const task = ws.blocks.find((b) => hasList(b, 'tag') && b.text === '任务')
+  const task = ws.blocks.find((b) => hasList(b, 'tag') && plainText(b.content) === '任务')
   assert.ok(task, '标签块应在森林顶层')
   assert.deepEqual(declaredFieldIds(task!), [TASK_STATUS_PROP_ID])
 
@@ -241,7 +242,7 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter）�
   const withValue = hosts.filter((b) => b.props?.[TASK_STATUS_PROP_ID] !== undefined)
   assert.equal(withValue.length, 4, '假数据里应有 4 个带任务状态的块')
   for (const b of withValue) {
-    assert.equal(hasTag(b, task!.id), true, `样本块应带 #任务 归属：${b.text}`)
+    assert.equal(hasTag(b, task!.id), true, `样本块应带 #任务 归属：${plainText(b.content)}`)
   }
   assert.equal(withValue.filter((b) => todoOf(b) === 'done').length, 2, '完成与未完成各两条')
 })
@@ -273,7 +274,7 @@ test('批量 gutter 与逐行算**逐块等价**：批级只扫一次库，结�
     assert.deepEqual(
       batch.get(b.id) ?? [],
       gutterFieldsOf(b, ws.blocks),
-      `批量与逐行对不上：${b.text}`,
+      `批量与逐行对不上：${plainText(b.content)}`,
     )
   }
   // 没有 gutter 字段的块**不出现在 map 里**（空数组与缺席同义）
