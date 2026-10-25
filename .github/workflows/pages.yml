@@ -1,0 +1,76 @@
+# 演示站部署 —— **手动触发**，由 GitHub Actions 编译后直接发布。
+#
+# 为什么只在手动：演示站的内容来自 main，而 main 上常有另一条车道开发中的中间态。
+#   push 即部署 ⇒ 线上随时可能是一份还没跑完门禁的树，「对外页面」成了开发过程的直播；
+#   手动触发 ⇒ 每次部署是一次**显式决定**：人在 Actions 页面点 Run workflow 才发布。
+#
+# 为什么**不经过 gh-pages 分支**（不用「Actions 推 Git 提交」那一套）：
+#   既然 Actions 已经能把产物编译出来，就没必要再把产物 commit 回一个分支、
+#   让 Pages 从那个分支再读一遍 —— 那是多绕一道、又白留一份构建物在 git 历史里。
+#   `actions/deploy-pages` 是把「这一次的构建结果」直接交给 Pages，中间不落 git。
+#   ⇒ 因此本流水线**不需要 `contents: write`**：它不写仓库，只发布站点。
+#
+# ⚠️ 自定义域 `qua.leay.net` 现在是 Pages 站点自身的设置（不在任何分支的文件里），
+#    由 `actions/configure-pages` 读取并校核 —— 所以发布产物里不必再塞 `CNAME` 文件，
+#    也不会因为漏传它而丢域名。
+name: pages
+
+on:
+  # 手动触发（Actions 页面右上角的 Run workflow）
+  workflow_dispatch:
+
+# 只发布站点，不写仓库 ⇒ 不需要 contents: write
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# ⚠️ 用**自己的**并发组：`gate.yml` 用的是 `gate-${{ github.ref }}`。
+#    同名会互相 cancel —— 一次 CI 推送可能把正在进行的部署顶掉。
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 构建（无测试面）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
+          cache: pnpm
+
+      # `esbuild` 的 postinstall 必须放行 —— 否则 vite 拿不到原生二进制、构建阶段才红。
+      - run: pnpm i --frozen-lockfile
+
+      # ⚠️ **不加 `VITE_QUA_TEST`** ⇒ 产品构建：`dev.*` 那几条命令因此在面板里看不见，
+      #    外人也就点不到「清空 localStorage」这类入口 —— 这正是对外演示站该有的样子。
+      - run: pnpm build
+
+      # 读 Pages 站点配置（含自定义域），并把发布所需的信息交给后续步骤
+      - uses: actions/configure-pages@v5
+
+      # ⚠️ 必须有 `.nojekyll`：Pages 默认会用 Jekyll 重建静态站点，会跳过一部分产物文件；
+      #    放这个空文件进去就是告诉它「原样发布」。
+      - run: touch dist/.nojekyll
+
+      # 上传这一次的产物；下面的发布 job 从这里取件（两个 job 不共享文件系统）。
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  deploy:
+    name: 发布
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
