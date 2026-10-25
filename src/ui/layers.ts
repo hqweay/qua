@@ -187,6 +187,28 @@ export class Layers {
       if ((t as HTMLElement).closest?.('.blk')) return
       this.closeMenu()
     })
+    /**
+     * 气泡/抽屉的 `Esc`：它们里面是表单，按键不归键位表（`layerOpen` 已把它们算作覆盖层），
+     * 所以关闭动作只能由覆盖层自己接。菜单的 `Esc` 仍走上面那段。
+     */
+    document.addEventListener(
+      'keydown',
+      (e) => {
+        if (e.key !== 'Escape') return
+        if (this.popEl) {
+          e.preventDefault()
+          e.stopPropagation()
+          this.closePopover()
+          return
+        }
+        if (this.drawerEl) {
+          e.preventDefault()
+          e.stopPropagation()
+          this.closeDrawer()
+        }
+      },
+      true,
+    )
   }
 
   /* ------------------------------------------------------------ 菜单 */

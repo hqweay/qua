@@ -154,6 +154,56 @@ export function setupPanels(deps: PanelsDeps) {
   const inspectCard = chrome.inspectCardEl
   chrome.dockRightStackEl.appendChild(inspectCard)
 
+  /**
+   * **`ref` 值的选择器**：从整片森林里挑一块。
+   *
+   * 复用 `layers.openMenu`（与命令面板 / 标签选择器同一个浮层），
+   * 所以键盘、搜索、空态的行为不用再写一份。
+   * 列表给「页 → 它的块」两级，页名与块正文都能搜到。
+   *
+   * ⚠️ 标题用**显示名**（主名叶子 > 正文）：引用要叫「它的名字」，
+   *    不是「它的描述」。描述仍留在 `hint`／后续的块行里。
+   * ⚠️ `anchor` 由调用方给（属性区给按钮 rect、行内浮层给按钮 rect）：
+   *    不再一律贴光标——否则从浮层里选值时，菜单会跑到编辑器的光标处。
+   */
+  const pickRefValue = (
+    owner: Block,
+    _propId: string,
+    current: string,
+    onPick: (targetId: string) => void,
+    anchor?: DOMRect,
+  ): void => {
+    const rows: Row[] = []
+    for (const b of flatten({ roots: [...kb.roots()] })) {
+      // 自己不能指向自己：那会造出一个立刻成环的引用
+      if (b.id === owner.id) continue
+      const title = displayNameOf(b).trim()
+      rows.push({
+        id: `ref/${b.id}`,
+        label: title === '' ? t('ui.page.untitled') : title,
+        hint: hasList(b, 'page') ? t('ui.props.refIsPage') : t('ui.props.refIsBlock'),
+        icon: hasList(b, 'page') ? 'lucide:file' : 'lucide:square',
+        group: hasList(b, 'page') ? 'ref/1-page' : 'ref/2-block',
+        // 当前值做个标记：不然选过一次之后看不出来「现在是哪个」
+        keyHint: b.id === current ? t('ui.props.refCurrent') : undefined,
+      })
+    }
+    layers.openMenu({
+      rows,
+      anchor: anchor ?? deps.getEd().caretRect(),
+      title: t('ui.props.pickRef'),
+      searchable: true,
+      focusSearch: true,
+      emptyText: t('ui.props.refEmpty'),
+      onPick: (row) => {
+        const id = String(row.id).slice('ref/'.length)
+        onPick(id)
+        // 选择器关掉之后属性区要立刻显示新值（不等下一次 store 通知）
+        scheduleProperties()
+      },
+    })
+  }
+
   const propertiesPanel = new PropertiesPanel(
     {
       root: inspectCard,
@@ -204,46 +254,10 @@ export function setupPanels(deps: PanelsDeps) {
       addField: (b, propId) => void deps.getRegistry().invoke('core.props/add-field', { blockId: b.id, propId }, 'ui'),
       createDef: (b, propId, kind) => void deps.getRegistry().invoke('core.props/create-def', { blockId: b.id, propId, kind }, 'ui'),
       /**
-       * **`ref` 值的选择器**：从整片森林里挑一块。
-       *
-       * 复用 `layers.openMenu`（与命令面板 / 标签选择器同一个浮层），
-       * 所以键盘、搜索、空态的行为不用再写一份。
-       * 列表给「页 → 它的块」两级，页名与块正文都能搜到。
-       *
-       * ⚠️ 标题用**显示名**（主名叶子 > 正文）：引用要叫「它的名字」，
-       *    不是「它的描述」。描述仍留在 `hint`／后续的块行里。
+       * **`ref` 值的选择器**（实现见上面的 `pickRefValue`）：从整片森林里挑一块。
+       * 属性区与行内实例浮层共用同一份，候选集合不会分叉。
        */
-      pickRef: (owner, _propId, current, onPick) => {
-        const rows: Row[] = []
-        for (const b of flatten({ roots: [...kb.roots()] })) {
-          // 自己不能指向自己：那会造出一个立刻成环的引用
-          if (b.id === owner.id) continue
-          const title = displayNameOf(b).trim()
-          rows.push({
-            id: `ref/${b.id}`,
-            label: title === '' ? t('ui.page.untitled') : title,
-            hint: hasList(b, 'page') ? t('ui.props.refIsPage') : t('ui.props.refIsBlock'),
-            icon: hasList(b, 'page') ? 'lucide:file' : 'lucide:square',
-            group: hasList(b, 'page') ? 'ref/1-page' : 'ref/2-block',
-            // 当前值做个标记：不然选过一次之后看不出来「现在是哪个」
-            keyHint: b.id === current ? t('ui.props.refCurrent') : undefined,
-          })
-        }
-        layers.openMenu({
-          rows,
-          anchor: deps.getEd().caretRect(),
-          title: t('ui.props.pickRef'),
-          searchable: true,
-          focusSearch: true,
-          emptyText: t('ui.props.refEmpty'),
-          onPick: (row) => {
-            const id = String(row.id).slice('ref/'.length)
-            onPick(id)
-            // 选择器关掉之后属性区要立刻显示新值（不等下一次 store 通知）
-            scheduleProperties()
-          },
-        })
-      },
+      pickRef: pickRefValue,
       refLabel: (targetId) => {
         const b = kb.get(targetId)
         if (!b) return t('ui.props.refMissing', { id: shortId(targetId) })
@@ -406,5 +420,5 @@ export function setupPanels(deps: PanelsDeps) {
     else queryView.render()
   }
 
-  return { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, scheduleProperties }
+  return { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, scheduleProperties, pickRefValue }
 }

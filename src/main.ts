@@ -32,7 +32,7 @@ import { mountDockSlot } from './ui/dock.ts'
 import { createIcon } from './view/icons.ts'
 import { renderAliasEditor } from './ui/alias-editor.ts'
 import { renderFieldsEditor } from './ui/fields-editor.ts'
-import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type PanelDeps } from './ui/panels.ts'
+import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type ObjFieldDeps, type PanelDeps } from './ui/panels.ts'
 import { devCommands, journalCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, zoomCommands } from './app/commands-impl.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupDocks } from './app/wiring/docks.ts'
@@ -507,7 +507,13 @@ const panelDeps: PanelDeps = {
   openDrawer: (title, render) => layers.openDrawer(title, render),
 }
 
-const showAtomPopover = (a: RunWithId, rect: DOMRect): void => panelPopover(panelDeps, a, rect)
+/**
+ * 实例字段卡需要的读写能力（`setupPanels` 之后才有 `pickRef`，所以先留变量）。
+ * ⚠️ 值只写记录块：`setValue` 收的是 recordId，浮层拿不到宿主块。
+ */
+let objFieldDeps: ObjFieldDeps | undefined
+
+const showAtomPopover = (a: RunWithId, rect: DOMRect): void => panelPopover(panelDeps, a, rect, objFieldDeps)
 
 /**
  * 行内原子的**唯一**点击口径（正文 / 反链 footer / 查询结果共用）。
@@ -539,7 +545,7 @@ const dispatchEnv: DispatchEnv = {
   ctx: uiCtx,
   isMac,
   invoke: (name, args, ctx) => registry.invoke(name, args, 'keymap', ctx).handled,
-  layerOpen: () => layers.open,
+  layerOpen: () => layers.anyOpen(),
   trace: (tr) => {
     if (!ed.probe.traced) return
     ed.probe.keyTrace.push(tr)
@@ -1120,7 +1126,7 @@ ed.events = {
 
 let panels: ReturnType<typeof setupPanels>
 let diag: ReturnType<typeof setupDiagnostics>
-const { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, scheduleProperties } = setupPanels({
+const { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, scheduleProperties, pickRefValue } = setupPanels({
   blocks,
   kb,
   app,
@@ -1147,6 +1153,26 @@ panels = {
   renderTagPanel,
   renderQueryView,
   scheduleProperties,
+  pickRefValue,
+}
+
+/**
+ * 行内实例的字段卡：只读写**记录块**的 props。
+ *
+ * `pickRefValue` 来自面板装配（候选集合与属性区共用一份）；
+ * 值的写入走同两条属性命令，随后由 `writeProps` 重画行与属性区。
+ */
+objFieldDeps = {
+  rows: (recordId) => kb.fieldsOf(recordId),
+  setValue: (recordId, propId, value) =>
+    void registry.invoke('core.props/set-value', { blockId: recordId, propId, value }, 'popover'),
+  clearValue: (recordId, propId) =>
+    void registry.invoke('core.props/clear-value', { blockId: recordId, propId }, 'popover'),
+  pickRef: pickRefValue,
+  refLabel: (targetId) => {
+    const b = kb.get(targetId)
+    return b ? blockName(b) : t('ui.props.refMissing', { id: shortId(targetId) })
+  },
 }
 
 document.addEventListener('mousedown', (e) => {
@@ -1156,6 +1182,8 @@ document.addEventListener('mousedown', (e) => {
   // 否则 mousedown 就把宿主节点摘掉，后续 click 根本落不到按钮上。
   if (layers.popoverContains(target)) return
   if ((target as HTMLElement).closest?.('.atom')) return
+  // 从浮层里打开的引用选择器（`.layer`）不算「点到外面」：选完还要回浮层继续改
+  if ((target as HTMLElement).closest?.('.layer')) return
   layers.closePopover()
 })
 

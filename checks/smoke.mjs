@@ -8309,6 +8309,87 @@ await check(
 
 
 
+
+await check(
+  'T115 实例 ⌥ 浮层：字段行读写落在记录块，宿主零写入；Esc 关、一次撤销回滚',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 字段浮层不是新的数据面：值的家还是记录块。
+     * 这条同时钉三件事——① 打开的是**记录**的字段（`data-obj-fields-of`）；
+     * ② 写入只落记录、宿主零字段；③ 关掉浮层后一次撤销回得去。
+     */
+    const hostId = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+      window.__qua.focusBlock(id, 0)
+      return id
+    })
+    await page.waitForTimeout(80)
+    await page.keyboard.type('#浮层甲')
+    await page.waitForTimeout(220)
+    await page.keyboard.press('Shift+Enter')
+    await page.waitForTimeout(420)
+
+    const setup = await page.evaluate((hostId) => {
+      const tag = window.__qua.allBlocks().find((b) => b.lists.includes('tag') && b.text === '浮层甲')
+      const atom = window.__qua.atoms().find((a) => a.blockId === hostId && a.label === '浮层甲')
+      // 给标签声明两个字段：数值 + 下拉（覆盖两种控件，不必跑全类型）
+      window.__qua.invoke('core.props/create-def', { blockId: tag.id, label: '时长', kind: 'number' })
+      window.__qua.invoke('core.props/create-def', { blockId: tag.id, label: '状态', kind: 'select' })
+      return { tagId: tag.id, recordId: atom.target.id, hostId }
+    }, hostId)
+    await page.waitForTimeout(320)
+
+    await page.locator(`.blk[data-block-id="${hostId}"] .atom-obj`).click({ modifiers: ['Alt'] })
+    await page.waitForTimeout(320)
+
+    const opened = await page.evaluate((s) => {
+      const pop = document.querySelector('.popover')
+      const body = pop?.querySelector('.popover-fields')
+      return {
+        open: Boolean(pop),
+        fieldsOf: body?.dataset.objFieldsOf ?? '',
+        rows: [...(body?.querySelectorAll('.prop-row') ?? [])].map((e) => e.querySelector('.prop-name')?.textContent ?? ''),
+        hostFields: window.__qua.fields(s.hostId).length,
+      }
+    }, setup)
+
+    assert(opened.open, '⌥ 点实例应弹字段浮层（前置）')
+    assert(opened.fieldsOf === setup.recordId, `浮层应画记录块的字段，不是宿主的：${JSON.stringify(opened)}`)
+    assert(opened.rows.join('|') === '时长|状态', `应按标签声明列出两行：${JSON.stringify(opened.rows)}`)
+    assert(opened.hostFields === 0, `打开浮层不该给宿主造字段：${opened.hostFields}`)
+
+    const first = page.locator('.popover-fields .prop-row').first().locator('input')
+    await first.fill('3')
+    await first.blur()
+    await page.waitForTimeout(260)
+
+    const wrote = await page.evaluate((s) => ({
+      record: window.__qua.fields(s.recordId).map((f) => ({ label: f.label, value: f.value })),
+      host: window.__qua.fields(s.hostId).map((f) => ({ label: f.label, value: f.value })),
+    }), setup)
+    assert(wrote.record.find((f) => f.label === '时长')?.value === '3', `值应写到记录块：${JSON.stringify(wrote.record)}`)
+    assert(wrote.host.length === 0, `值不该写到宿主块：${JSON.stringify(wrote.host)}`)
+
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(180)
+    assert((await page.locator('.popover').count()) === 0, 'Esc 应关掉字段浮层')
+
+    // 一次撤销：值回到「待填」（浮层已关，走全局模型栈）
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(260)
+    const undone = await page.evaluate((s) => window.__qua.fields(s.recordId).find((f) => f.label === '时长')?.value ?? null, setup)
+    assert(undone === null, `一次撤销应回滚这次字段写入：${JSON.stringify(undone)}`)
+
+    await ctx.close()
+    return `⌥ 展开记录字段卡（时长/状态）、写值只落记录块、Esc 关闭、一次撤销回滚`
+  },
+)
+
 /* --------------------------------------------- 编辑边界（同一容器内换块） */
 
 await check(

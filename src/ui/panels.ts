@@ -7,7 +7,7 @@
  * ⚠️ 组件自持 DOM：这里不 `getElementById`，所有元素都建在传进来的 `host` 上。
  * ⚠️ 分层：本文件在 `ui` 层，只依赖 core 的类型与函数，**不 import view/装配层**。
  */
-import type { Block, CtxKeys } from '../core/index.ts'
+import type { Block, CtxKeys, FieldRow } from '../core/index.ts'
 import type { RunWithId } from '../core/runs.ts'
 import { resolveRef } from '../core/ref.ts'
 import { plainText } from '../core/runs.ts'
@@ -15,6 +15,7 @@ import { COMMANDS } from '../core/commands/index.ts'
 import { BINDINGS, keyLabel, keymapRows, referencedKeys } from '../core/bindings.ts'
 import { t } from '../core/msg.ts'
 import type { CommandDecl, PanelKind } from '../core/ports.ts'
+import { makeFieldRow, type FieldRowDeps } from './properties.ts'
 
 /** 面板要用到的宿主能力（装配层注入；本文件不认识 `ws`/`ed`/`registry` 这些具体对象） */
 export interface PanelDeps {
@@ -44,6 +45,20 @@ export interface PanelDeps {
   openDrawer: (title: string, render: (host: HTMLElement) => void) => void
 }
 
+/**
+ * **实例字段浮层的读写能力**（由装配层注入）。
+ *
+ * 判据：值属于记录块，不属于那枚 run ⇒ 这里的 `setValue`／`clearValue` 只收
+ * **记录块 id**，浮层拿不到宿主块，也就写不到宿主上。
+ */
+export interface ObjFieldDeps {
+  rows: (recordId: string) => readonly FieldRow[]
+  setValue: (recordId: string, propId: string, value: unknown) => void
+  clearValue: (recordId: string, propId: string) => void
+  pickRef: FieldRowDeps['pickRef']
+  refLabel: FieldRowDeps['refLabel']
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] ?? c)
 }
@@ -56,13 +71,111 @@ function fmtVal(shortId: (id: string) => string, k: string, v: unknown): string 
   return str
 }
 
-export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect): void {
+/**
+ * **实例的字段卡**：锚在行内实例上的属性区。
+ *
+ * 它和右侧属性区共用 `makeFieldRow`——同一行渲染、同一组读写回调；
+ * 差别只在「画给谁」：这里的目标永远是那枚露面指向的**记录块**。
+ * 所以浮层里没有标签行、归属行、系统信息，只有值。
+ */
+function renderObjFields(
+  host: HTMLElement,
+  target: Block,
+  fields: ObjFieldDeps,
+  label: string,
+  atomId: string,
+  shortId: (id: string) => string,
+  deps: PanelDeps,
+): void {
+  const draw = (): void => {
+    host.replaceChildren()
+    host.classList.add('popover-obj')
+    const h = document.createElement('h4')
+    h.textContent = t('ui.popover.objTitle', { label })
+    const body = document.createElement('div')
+    body.className = 'popover-fields'
+    // 诊断/冒烟面：这一段画的是哪条记录的字段（不是宿主块）
+    body.dataset.objFieldsOf = target.id
+
+    const rows = fields.rows(target.id)
+    if (rows.length === 0) {
+      const empty = document.createElement('p')
+      empty.className = 'popover-note'
+      empty.textContent = t('ui.popover.objNoFields')
+      body.appendChild(empty)
+    } else {
+      const labelCount = new Map<string, number>()
+      for (const r of rows) labelCount.set(r.label, (labelCount.get(r.label) ?? 0) + 1)
+      const rowDeps: FieldRowDeps = {
+        shortId,
+        setValue: (b, propId, value) => {
+          fields.setValue(b.id, propId, value)
+          draw()
+        },
+        clearValue: (b, propId) => {
+          fields.clearValue(b.id, propId)
+          draw()
+        },
+        pickRef: fields.pickRef,
+        refLabel: fields.refLabel,
+      }
+      for (const row of rows) {
+        body.appendChild(
+          makeFieldRow(row, target, rowDeps, {
+            labelCount,
+            // 单标签时不重复写「来自 #X」；多标签才需要说清值是哪条归属的字段
+            showSource: row.sources.length > 1,
+          }),
+        )
+      }
+    }
+    host.appendChild(h)
+    host.appendChild(body)
+
+    const note = document.createElement('div')
+    note.className = 'popover-note'
+    note.textContent = t('ui.popover.objNote')
+    host.appendChild(note)
+
+    const actions = document.createElement('div')
+    actions.className = 'row'
+    const open = document.createElement('button')
+    open.type = 'button'
+    open.textContent = t('ui.popover.openObject')
+    open.addEventListener('click', () => {
+      deps.closePopover()
+      deps.openBlock(target.id)
+    })
+    const del = document.createElement('button')
+    del.type = 'button'
+    del.textContent = t('ui.popover.deleteRef')
+    del.addEventListener('click', () => {
+      deps.closePopover()
+      deps.removeAtom(atomId)
+    })
+    actions.append(open, del)
+    host.appendChild(actions)
+  }
+  draw()
+}
+
+export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect, fields?: ObjFieldDeps): void {
   deps.openPopover((host) => {
     if (a.t === 'ref') {
       const target = a.to ? deps.findBlock(a.to) : undefined
       // 显示名与状态**现算**（`core/ref.ts`）：run 上的名字快照只是 fallback，
       // popover 上写旧名字等于给用户一份过期的真相。
       const view = resolveRef((id) => deps.findBlock(id), a)
+      /**
+       * 实例的 `⌥` 浮层 = **这条记录的字段卡**；标签类/普通引用仍走下面的详情。
+       *
+       * 判据是**目标当前身份**（`view.kind`），不是 run 上存了什么：
+       * 记录被改成别的东西之后，浮层自然换回详情，不留一个指向旧语义的编辑面。
+       */
+      if (view.kind === 'obj' && target && fields) {
+        renderObjFields(host, target, fields, view.label, a.id, deps.shortId, deps)
+        return
+      }
       const h = document.createElement('h4')
       h.textContent = t('ui.popover.refTitle', { label: view.label })
       const dl = document.createElement('dl')

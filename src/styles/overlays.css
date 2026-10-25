@@ -179,6 +179,32 @@
   gap: var(--ui-gap-2);
   margin-top: var(--ui-gap-4);
 }
+/*
+  **实例字段卡**：与属性区共用 `.prop-row`，只把它装进一个限高的浮层。
+  行宽比右槽宽，所以清空按钮常显（右槽里是悬停才现，为了省宽）。
+  `.popover button` 的通用边框会套到 `prop-clear` 上 —— 这里把它复位。
+*/
+.popover-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+  margin-top: var(--ui-gap-2);
+  max-height: 46vh;
+  overflow: auto;
+}
+.popover.popover-obj {
+  min-width: 300px;
+  max-width: 420px;
+}
+.popover-fields .prop-clear {
+  visibility: visible;
+  border: 0;
+  padding: 0 var(--ui-gap-1);
+}
+.popover-fields .prop-ref {
+  text-align: start;
+  padding: 0 var(--ui-gap-2);
+}
 .popover button {
   border: 1px solid var(--ui-border);
   border-radius: var(--ui-radius-sm);

@@ -59,7 +59,7 @@ export interface PropertiesDeps {
    * 而属性区只认识「当前这一块」——它也拿不到 DOM 之外的浮层。
    * 不注入的话，`ref` 只能让用户手打 32 位 id，那等于没有这个类型。
    */
-  pickRef: (b: Block, propId: string, current: string, onPick: (targetId: string) => void) => void
+  pickRef: (b: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect) => void
   /**
    * **这一块归在谁下面**（`props._belongsTo` 的活块，有序）。
    *
@@ -79,6 +79,14 @@ export interface PropertiesDeps {
   refLabel: (targetId: string) => string
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
+
+/**
+ * 一行字段编辑需要的**最小能力**：读写值、解析 / 选择 `ref` 目标。
+ *
+ * 单独收窄是为了让「属性区」与「行内实例浮层」共用同一个行渲染器：
+ * 后者不需要标签行、归属行、系统信息，只需要这一组回调。
+ */
+export type FieldRowDeps = Pick<PropertiesDeps, 'shortId' | 'setValue' | 'clearValue' | 'pickRef' | 'refLabel'>
 
 export interface PropertiesEls {
   /** 卡片本身：`hidden` 与否表达「有没有主体」 */
@@ -101,7 +109,7 @@ export interface PropertiesEls {
 function valueEditor(
   row: FieldRow,
   commit: (v: unknown) => void,
-  deps?: Pick<PropertiesDeps, 'pickRef' | 'refLabel'>,
+  deps?: Pick<FieldRowDeps, 'pickRef' | 'refLabel'>,
   owner?: Block,
 ): HTMLElement {
   const kind = row.kind
@@ -127,7 +135,7 @@ function valueEditor(
     btn.dataset.refId = current
     btn.textContent = current === '' ? t('ui.props.pending') : deps.refLabel(current)
     btn.addEventListener('click', () => {
-      deps.pickRef(owner, row.propId, current, (targetId) => commit(targetId === '' ? undefined : targetId))
+      deps.pickRef(owner, row.propId, current, (targetId) => commit(targetId === '' ? undefined : targetId), btn.getBoundingClientRect())
     })
     return btn
   }
@@ -160,6 +168,67 @@ function valueEditor(
   input.value = row.value === undefined || row.value === null ? '' : String(row.value)
   input.addEventListener('change', () => commit(input.value === '' ? undefined : input.value))
   return input
+}
+
+/**
+ * **一行字段**：标签名（含来源）＋ 按 kind 的值控件 ＋ 清空。
+ *
+ * 属性区与行内实例浮层共用这一份：一处改了行布局，两处一起变。
+ * `labelCount` 用来消歧「同名不同 propId」——两个字段都叫「状态」时，
+ * 只靠 label 用户分不出改的是哪一个。
+ */
+export function makeFieldRow(
+  row: FieldRow,
+  target: Block,
+  deps: FieldRowDeps,
+  opts: { labelCount?: ReadonlyMap<string, number>; showSource?: boolean } = {},
+): HTMLElement {
+  const el = document.createElement('div')
+  el.className = 'prop-row'
+  el.dataset.propId = row.propId
+  if (!row.filled) el.dataset.pending = '1'
+
+  const label = document.createElement('label')
+  label.className = 'prop-label'
+  const name = document.createElement('span')
+  name.className = 'prop-name'
+  const source = row.sources.length
+    ? t('ui.props.source', { tags: row.sources.map((s) => `#${displayNameOf(s)}`).join('、') })
+    : t('ui.props.own')
+  const duplicated = (opts.labelCount?.get(row.label) ?? 0) > 1
+  const disambiguated = duplicated ? `${row.label}（${row.sources[0] ? displayNameOf(row.sources[0]) : t('ui.props.own')}）` : row.label
+  name.textContent = row.def ? disambiguated : t('ui.props.unknown', { id: deps.shortId(row.propId) })
+  label.appendChild(name)
+  if (opts.showSource !== false) {
+    const src = document.createElement('span')
+    src.className = 'prop-source'
+    src.textContent = source
+    label.appendChild(src)
+  }
+
+  const value = document.createElement('span')
+  value.className = 'prop-value'
+  value.appendChild(
+    valueEditor(
+      row,
+      (v) => {
+        if (v === undefined) deps.clearValue(target, row.propId)
+        else deps.setValue(target, row.propId, v)
+      },
+      deps,
+      target,
+    ),
+  )
+
+  const clear = document.createElement('button')
+  clear.type = 'button'
+  clear.className = 'prop-clear ghost'
+  clear.title = t('ui.props.clear')
+  clear.textContent = '×'
+  clear.addEventListener('click', () => deps.clearValue(target, row.propId))
+
+  el.append(label, value, clear)
+  return el
 }
 
 export class PropertiesPanel {
@@ -222,49 +291,7 @@ export class PropertiesPanel {
     for (const r of rows) labelCount.set(r.label, (labelCount.get(r.label) ?? 0) + 1)
 
     for (const row of rows) {
-      const el = document.createElement('div')
-      el.className = 'prop-row'
-      el.dataset.propId = row.propId
-      if (!row.filled) el.dataset.pending = '1'
-
-      const label = document.createElement('label')
-      label.className = 'prop-label'
-      const name = document.createElement('span')
-      name.className = 'prop-name'
-      const source = row.sources.length
-        ? t('ui.props.source', { tags: row.sources.map((s) => `#${displayNameOf(s)}`).join('、') })
-        : t('ui.props.own')
-      const duplicated = (labelCount.get(row.label) ?? 0) > 1
-      const disambiguated = duplicated ? `${row.label}（${row.sources[0] ? displayNameOf(row.sources[0]) : t('ui.props.own')}）` : row.label
-      name.textContent = row.def ? disambiguated : t('ui.props.unknown', { id: this.deps.shortId(row.propId) })
-      const src = document.createElement('span')
-      src.className = 'prop-source'
-      src.textContent = source
-      label.append(name, src)
-
-      const value = document.createElement('span')
-      value.className = 'prop-value'
-      value.appendChild(
-        valueEditor(
-          row,
-          (v) => {
-            if (v === undefined) this.deps.clearValue(target, row.propId)
-            else this.deps.setValue(target, row.propId, v)
-          },
-          this.deps,
-          target,
-        ),
-      )
-
-      const clear = document.createElement('button')
-      clear.type = 'button'
-      clear.className = 'prop-clear ghost'
-      clear.title = t('ui.props.clear')
-      clear.textContent = '×'
-      clear.addEventListener('click', () => this.deps.clearValue(target, row.propId))
-
-      el.append(label, value, clear)
-      this.els.body.appendChild(el)
+      this.els.body.appendChild(makeFieldRow(row, target, this.deps, { labelCount }))
     }
 
     /**
