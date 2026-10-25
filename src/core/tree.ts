@@ -218,8 +218,8 @@ function contentProps(props: BlockProps): BlockProps | undefined {
  */
 export function cloneSubtree(b: Block): { block: Block; idMap: Map<string, string> } {
   const idMap = new Map<string, string>()
-  // 副本是**新块**，不是「同一份内容换了个位置」⇒ 时间戳取此刻，**不抄原件的**：
-  // 抄过来会让「这块何时诞生」指向原件的那一天，而原件与副本此后各自独立演化。
+  // 副本是**新块**，不是「同一份内容换了个位置」⇒ 时间戳取此刻，不是原件的值：
+  // 沿用原件会让「这块何时诞生」指向原件的那一天，而两者此后各自独立演化。
   // 一次复制算一次「拿现有内容造出新块」，所以 created 与 modified 同值。
   const at = Date.now()
   const cp = (x: Block): Block => {
