@@ -43,8 +43,13 @@ export interface TriggerDeps {
   ctx: () => CtxKeys
   /** 键位提示（斜杠菜单右侧的徽标；各命令的键位在绑定表里） */
   keyHints: () => Map<string, string>
-  /** 「归到本块」的按键徽标（平台相关） */
-  altEnterHint: string
+  /**
+   * `#` 行的三种按法（平台相关）：`↵` 行内标签 / `⌥↵` 块标签 / `⇧↵` 实例。
+   *
+   * ⚠️ 三种落点由**按键**区分，不由行区分；所以每一行都画同一枚徽标，
+   *    否则用户会以为「换一行才能换一种落法」。
+   */
+  shortcutHint: string
   /**
    * 正在打字的那一块（`@` 源用它把自己排除在候选外）。
    *
@@ -88,15 +93,14 @@ function matchesName(b: Block, want: string): boolean {
 }
 
 /**
- * `#` 源：**已有实例** ＋ **标签类** ＋ 一行「新建记录」。
+ * `#` 源：**已有实例** ＋ **标签类** ＋ 一行「新建实例」。
  *
- * 三条候选对应三种语义，由**选中的那一行**决定（不由按键决定）：
- *   · 实例 ＝ 这个标签的一次出现 ⇒ 引用那条记录（`ref` ＋ `flavor:'#'`）；
- *   · 标签类 ⇒ 引用标签本身（同一个 `ref` run，只差 `to` 指向谁）；
- *   · 新建记录 ⇒ 建标签（缺则建）＋ 建一条落在今天的记录 ＋ 插入指向它的露面。
+ * 三条候选只是**目标**；落点由按键区分（`↵` 行内标签 / `⌥↵` 块标签 / `⇧↵` 实例）：
+ *   · `↵` 实例行 ⇒ 引用那条记录（`ref` ＋ `flavor:'#'`）；标签类 ⇒ 引用类块；
+ *   · `⌥↵` ⇒ 把这一行标签归到本块（写宿主 `_tags`，行尾出 chip）；
+ *   · `⇧↵` ⇒ 不管选的是哪一行，都为这个标签建一条落在今天的新实例。
  *
- * ⚠️ **只有标签类行带 `keyHint`（⌥↵）**：它才支持「归到本块」这个第二种按法。
- *    在实例/新建行上画这个徽标，等于告诉用户一个按了没用的键。
+ * ⚠️ **三种落点由按键区分，不由行区分**：所以三栏都画同一枚按键徽标。
  * ⚠️ 空查询不列实例：`#` 刚敲下时先给「有哪些标签」，实例靠继续打字收窄；
  *    否则一屏就是全库带标签的块，滚滚不到底。
  * ⚠️ 实例行**排除身份块与空正文块**：
@@ -120,6 +124,9 @@ function instanceRows(tags: readonly Block[], want: string, deps: TriggerDeps): 
     const ids = tagIdsOf(b).filter((id) => matched.has(id))
     if (ids.length === 0) return
     const label = displayNameOf(b).trim() || t('ui.page.untitled')
+    // 实例行也带着「它属于哪个标签」：⌥↵ 归类、⇧↵ 再建一条实例都要用到这个名字
+    const owner = byId.get(ids[0]!)
+    const tagName = owner ? primaryAliasOf(owner) || displayNameOf(owner) : ''
     hits.push({
       modified: b.modified,
       row: {
@@ -128,7 +135,8 @@ function instanceRows(tags: readonly Block[], want: string, deps: TriggerDeps): 
         hint: ids.map((id) => `#${displayNameOf(byId.get(id)!)}`).join('、'),
         icon: 'lucide:square-dashed',
         group: 'retrieval/1-instance',
-        pick: { kind: 'instance', id: b.id, name: label },
+        keyHint: deps.shortcutHint,
+        pick: { kind: 'instance', id: b.id, name: label, tag: tagName },
       },
     })
   })
@@ -155,7 +163,7 @@ function tagRows(query: string, deps: TriggerDeps): Row[] {
       hint: parents.length > 0 ? t('ui.tagPicker.hierarchy', { parents: parents.map((p) => `#${displayNameOf(p)}`).join('、') }) : '',
       icon: 'lucide:hash',
       group: 'retrieval/2-tag',
-      keyHint: deps.altEnterHint,
+      keyHint: deps.shortcutHint,
       pick: { kind: 'tag', id: tag.id, name: primaryAliasOf(tag) || name },
     }
   })
@@ -173,6 +181,7 @@ function tagRows(query: string, deps: TriggerDeps): Row[] {
             hint: page ? t('ui.tagPicker.reuseHint') : t('ui.retrieval.newObjHint'),
             icon: 'lucide:plus',
             group: 'retrieval/3-new',
+            keyHint: deps.shortcutHint,
             pick: { kind: 'newObj', name: trimmed },
           },
         ]

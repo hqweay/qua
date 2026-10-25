@@ -2,7 +2,7 @@
  * **触发字符检测**：`/`／`#`／`@` 三个引导符号的边界规则。
  *
  * 这组测试守的是「**该弹**」与「**不该弹**」两半：真浏览器冒烟只能验前半
- * （敲进去弹了没），而误弹（`C#`、URL fragment、email）恰好是更难察觉的一半——
+ * （敲进去弹了没），而误弹（URL fragment、email）恰好是更难察觉的一半——
  * 它们不报错，只是在一段普通正文里多出一个浮层，用户敲空格才发现字没了。
  */
 import { test } from 'node:test'
@@ -25,12 +25,12 @@ test('detectTrigger：敲下 `#` 就弹（名字还没开始敲时查询词是�
   assert.deepEqual(detectTrigger('（#设计'), { ch: '#', from: 1, query: '设计' }, '中文括号之后不空一格也算')
 })
 
-test('detectTrigger：`#` 前面是**字**就不弹（`C#`／`a#b`／中文#设计）', () => {
-  assert.equal(detectTrigger('C#'), null)
-  assert.equal(detectTrigger('C#语言'), null)
-  assert.equal(detectTrigger('a#b'), null)
-  assert.equal(detectTrigger('设计#稿'), null)
-  assert.equal(detectTrigger('snake_#tag'), null, '下划线也算字')
+test('detectTrigger：`#` 前面是**字**也弹（不再要求先空格；`C#` 靠 Esc 退出）', () => {
+  assert.deepEqual(detectTrigger('C#'), { ch: '#', from: 1, query: '' })
+  assert.deepEqual(detectTrigger('C#语言'), { ch: '#', from: 1, query: '语言' })
+  assert.deepEqual(detectTrigger('a#b'), { ch: '#', from: 1, query: 'b' })
+  assert.deepEqual(detectTrigger('设计#稿'), { ch: '#', from: 2, query: '稿' })
+  assert.deepEqual(detectTrigger('snake_#tag'), { ch: '#', from: 6, query: 'tag' })
 })
 
 test('detectTrigger：URL 的 `#fragment` 不是标签语法（前面是链接）', () => {
@@ -60,9 +60,10 @@ test('detectTrigger：**最近的触发字符**说了算（不会把后敲的符
   // `@a` 之后又空一格敲 `#`：判的是 `#` 那一段（这里是空查询），
   // 不能把 `#` 也算成 @ 的查询词。
   assert.deepEqual(detectTrigger('@a #'), { ch: '#', from: 3, query: '' })
-  // 最近那个字符自己判不成立（`#` 紧贴字母）⇒ 这里没有触发，**不回头**启用更早的 `@`
-  assert.equal(detectTrigger('@a#'), null, '`#` 紧跟在字后面，不是标签语法')
-  assert.equal(detectTrigger('@a#b '), null, '同上：`#b ` 既不成边，也不是 @ 的查询词')
+  // `#` 紧贴字母也成立（触发不再要求空格）；最近的那个字符说了算，不回头看 `@`
+  assert.deepEqual(detectTrigger('@a#'), { ch: '#', from: 2, query: '' })
+  assert.deepEqual(detectTrigger('@a#b'), { ch: '#', from: 2, query: 'b' })
+  assert.equal(detectTrigger('@a#b '), null, '`#b ` 的分隔符已经落下：这段语法结束，也不回头启用更早的 @')
 })
 
 test('detectTrigger：查询词上限 20 字（超了就当作这段已经结束）', () => {

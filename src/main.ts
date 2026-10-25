@@ -298,13 +298,13 @@ const {
  * 「选中之后做什么」由下面 `pickRow` 按行的 `pick` 决定——浮层不认识插入语义。
  *
  * ⚠️ 森林是**现取**的（`() => ws.blocks`）：换库之后这里必须看到新库。
- * ⚠️ 按平台给「⌥↵」徽标：只有标签类行会用到它（别的行上画一个按了没用的键是骗人）。
+ * ⚠️ `#` 有三枚徽标（`↵`／`⌥↵`／`⇧↵`）：三种落点由按键区分，不由行区分。
  */
 const triggers = createTriggers({
   forest: () => ws.blocks,
   ctx: uiCtx,
   keyHints,
-  altEnterHint: isMac() ? '⌥↵' : 'Alt+↵',
+  shortcutHint: `↵ ${isMac() ? '⌥↵' : 'Alt+↵'} ${isMac() ? '⇧↵' : 'Shift+↵'}`,
   // `@` 候选排除「正在打字的这一块」：它自己的正文含着查询词，点它＝引用自己
   selfBlockId: () => ed.caretBlock() ?? ed.sel?.aBlock ?? null,
 })
@@ -401,6 +401,28 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
   }
 
   /**
+   * `#` 的三种落点**只看按键**，不看选中的是哪一栏：
+   *   · `⇧↵` ⇒ 为这个标签建一条落在今天的新实例（不管当前行是类还是已有实例）；
+   *   · `⌥↵` ⇒ 把标签归到本块（写宿主 `_tags`，行尾出 chip）；
+   *   · `↵`   ⇒ 行内标签：实例行引用那条记录、标签类行引用类块。
+   *
+   * 这条分叉就是「打字路径不猜语义」的落点：`#名` 本身只说明「提到了这个标签」，
+   * 是归类、是提及、还是新起一条实例，由用户按下去的那个键说。
+   */
+  const tagName =
+    pick.kind === 'instance' ? pick.tag : pick.kind === 'tag' || pick.kind === 'newObj' ? pick.name : ''
+  if (ch === '#' && tagName !== '') {
+    if (mods.shiftKey) {
+      ed.acceptTrigger({ ch, pick: { kind: 'newObj', name: tagName } })
+      return
+    }
+    if (mods.altKey) {
+      ed.acceptTrigger({ ch, pick: { kind: 'tag', name: tagName } })
+      return
+    }
+  }
+
+  /**
    * 实例一条记录 ＝ 提及「这个标签的一次出现」：与 `@` 的引用同一个落点，
    * 只多一个 `flavor:'#'` 的显示风味。选中的是哪条记录由浮层那一行给出。
    */
@@ -409,19 +431,14 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
     return
   }
 
-  // 新建记录：建标签（缺则建）＋ 建一条落在今天的记录 ＋ 插指向它的露面，同一笔事务
+  // 新建实例：建标签（缺则建）＋ 建一条落在今天的记录 ＋ 插指向它的露面，同一笔事务
   if (pick.kind === 'newObj') {
     ed.acceptTrigger({ ch, pick: { kind: 'newObj', name: pick.name } })
     return
   }
 
-  // 归类只对**标签类**行有效：实例/新建记录都没有「把整块归进去」这一层含义
-  const classify = mods.altKey && pick.kind === 'tag'
   if (pick.kind === 'tag') {
-    ed.acceptTrigger({
-      ch,
-      pick: classify ? { kind: 'tag', name: pick.name } : { kind: 'ref', to: pick.id, label: pick.name, flavor: '#' },
-    })
+    ed.acceptTrigger({ ch, pick: { kind: 'ref', to: pick.id, label: pick.name, flavor: '#' } })
   }
 }
 

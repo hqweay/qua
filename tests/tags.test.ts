@@ -266,14 +266,14 @@ test('trailingHashTag：只取**最后一个**（刚写完的那个）', () => {
 })
 
 /**
- * `#` 前面必须是行首或空白：`a#b` 与 URL 的 `#fragment` 不是标签。
+ * `#` 前面挨着字也算标签语法（触发不再要求先敲空格）；只有 URL 的 `#fragment` 不算。
  *
- * 判据是「用户敲的是标签语法，还是一段字」——两者在正文里长得一样，
- * 只有边界能分开；不判边界的代价是打一个 `a#b` 就静默改一次模型。
+ * 判据从「前面是不是字」改成「整串是不是链接」：`C#` 这类正文由 `Esc` 退出，
+ * 不靠边界猜用户想不想弹（`C#` 这类正文由 `Esc` 退出）。
  */
-test('trailingHashTag：`#` 紧跟在字后面 ⇒ 不认（URL、`a#b`、`中文#设计` 不是标签）', () => {
-  assert.equal(trailingHashTag('a#b '), null)
-  assert.equal(trailingHashTag('中文#设计 '), null)
+test('trailingHashTag：`#` 紧跟字后面也算（触发不再要求空格）；URL fragment 仍不算', () => {
+  assert.deepEqual(trailingHashTag('a#b '), { name: 'b', from: 1, to: 3 })
+  assert.deepEqual(trailingHashTag('中文#设计 '), { name: '设计', from: 2, to: 5 })
   assert.equal(trailingHashTag('https://x.dev/#anchor '), null, 'URL 的 fragment 不是标签')
   assert.deepEqual(trailingHashTag('（#设计）').name, '设计', '标点之后算数：中文里不空一格也常见')
 })

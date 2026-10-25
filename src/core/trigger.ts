@@ -7,7 +7,7 @@
  *
  * 三个字符各有自己的判据（这张表就是**唯一**的分派点，不在调用方写 `if`）：
  *   · `/` —— 行首或空白之后，查询词里不能再有空白或 `/`（斜杠菜单一直以来的规则）；
- *   · `#` —— 复用 `trailingHashTag` 的判断（前面是字不算、URL fragment 不算）；
+ *   · `#` —— 复用 `trailingHashTag` 的判断（URL fragment 不算；前面挨着字也弹）；
  *   · `@` —— 前面不能是字母/数字（挡掉 email 地址里的 `@`）。
  *
  * ⚠️ **最近的触发字符说了算**：`@a` 之后又敲 `#`，该判的是 `#` 那一段，
@@ -57,8 +57,8 @@ export const TRIGGER_RULES: readonly TriggerRule[] = [
   {
     ch: '#',
     match: (text, at) => {
-      // 边界判据与「`#名字` 挨着什么才算敲完」是同一份（`hashStartAt`）：
-      // 前面是字 ⇒ `C#`；是链接 ⇒ URL fragment —— 两种都不该弹
+      // 开头判据与「`#名字` 挨着什么才算敲完」共用一份（`hashStartAt`）：
+      // URL fragment 不算；**前面挨着字也算**（`中文#名`、`C#`），这样不必先敲空格
       if (!hashStartAt(text, at)) return null
       const rest = text.slice(at + 1)
       // 光一个 `#`：名字还没开始敲。浮层这时就该出现（`#` 之后先空一格就不算语法了）

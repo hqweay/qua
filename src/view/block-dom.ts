@@ -99,7 +99,21 @@ export function tagForMark(t: MarkType): string {
  */
 export function makeRunEl(r: RunWithId, view?: RefView): HTMLElement {
   const label = r.t === 'link' ? r.v : (view?.label ?? (r.t === 'ref' ? r.label : undefined) ?? (r.t === 'image' ? (r.asset.name ?? '') : ''))
-  const kind = r.t === 'ref' ? (r.flavor === '#' ? 'tag' : 'page') : r.t
+  /**
+   * 三种「标签样」的露面必须能一眼分清：
+   *   · `tag`  —— 行内标签（指向标签类，`#名`，无底色）；
+   *   · `obj`  —— 实例（指向一条记录，带小方块图标与细边框）；
+   *   · `page` —— 普通引用（`[[名]]`）。
+   * 判据来自**目标的当前身份**（`RefView.kind`），不在 run 上存第二份。
+   */
+  const kind =
+    r.t === 'ref'
+      ? r.flavor === '#'
+        ? view?.kind === 'obj'
+          ? 'obj'
+          : 'tag'
+        : 'page'
+      : r.t
   const el = document.createElement('span')
   el.className = `atom atom-${kind}`
   if (view?.state === 'dangling') el.classList.add('dangling')
@@ -112,17 +126,26 @@ export function makeRunEl(r: RunWithId, view?: RefView): HTMLElement {
   el.title =
     r.t === 'image'
       ? t('ui.atom.imageTitle', { label })
-      : kind === 'tag'
-        ? t(view?.state === 'dangling' ? 'ui.atom.tagDanglingTitle' : 'ui.atom.tagTitle', { label })
-        : t(view?.state === 'dangling' ? 'ui.atom.pageDanglingTitle' : 'ui.atom.pageTitle', { label })
-  if (kind === 'tag') {
+      : kind === 'obj'
+        ? t(view?.state === 'dangling' ? 'ui.atom.objDanglingTitle' : 'ui.atom.objTitle', { label })
+        : kind === 'tag'
+          ? t(view?.state === 'dangling' ? 'ui.atom.tagDanglingTitle' : 'ui.atom.tagTitle', { label })
+          : t(view?.state === 'dangling' ? 'ui.atom.pageDanglingTitle' : 'ui.atom.pageTitle', { label })
+  if (kind === 'tag' || kind === 'obj') {
     /**
-     * 行内标签：**`#名字` 停在敲下的那一格**。
+     * 实例与标签类都用 `#名字` 停在正文里；区分靠**外观**（实例多一枚小方块＋细边框），
+     * 不靠改显示文字 —— 文字是用户的正文，不能为了区分身份改它。
      *
      * ⚠️ 它占正文 1 格（`data-atom-id`），但**不是** chip（不设 `data-tag-id`）：
      *    chip 的读数规则是「跳过、长度为 0」，而这一枚必须被读成 1 格，
      *    否则正文、光标会整体错位。
      */
+    if (kind === 'obj') {
+      const ico = document.createElement('span')
+      ico.className = 'atom-ico'
+      ico.appendChild(createIcon('square', 'sm'))
+      el.appendChild(ico)
+    }
     const text = document.createElement('span')
     text.className = 'atom-label'
     text.textContent = `#${label}`

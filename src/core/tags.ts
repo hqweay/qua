@@ -212,18 +212,15 @@ export function hasTagName(block: Block, name: string, forest: readonly Block[])
 /**
  * `#` 在 `at` 这一格算不算**标签语法的开头**（只看它前面）。
  *
- * 三条判断合成一处，是因为「`#` 前面是什么」有两个消费者：
- *   · `trailingHashTag`（`#名字` 挨着什么才算敲完）；
- *   · 触发检测（敲下 `#` 就弹浮层，此时名字可能还是空的）。
- * 两份各写一遍就会出现「面板认它、转换不认它」这种两套判据。
+ * 判据只有一条：**URL 的 `#fragment` 不算**（`https://x.dev/#anchor`）。
  *
- * 判据：`#` 前面不能是**字**（字母/数字/下划线）：`a#b`、`中文#设计`；
- * URL 的 `#fragment` 也不算。标点／空白之后算数（中文里「（#设计）」很常见）。
+ * ⚠️ **前面挨着字也算**（`中文#设计`、`C#`）：触发符号要像 `@` 一样「接着打就弹」，
+ *    否则用户得先敲一个空格才能叫出标签面板。`C#` 这类正文靠 `Esc` 退出
+ *    （面板关掉、字原样留着），而不是靠「前面有没有字」猜用户想不想弹。
  */
 export function hashStartAt(text: string, at: number): boolean {
   if (text[at] !== '#') return false
-  if (at > 0 && /[\p{L}\p{N}_]/u.test(text[at - 1]!)) return false
-  // URL 的 `#fragment`（`https://x.dev/#anchor`）：`#` 前面是 `/`，但整串是个链接
+  // URL 的 `#fragment`（`https://x.dev/#anchor`）：整串是个链接，不是标签语法
   if (/[a-z][a-z0-9+.-]*:\/\/\S*$/i.test(text.slice(0, at))) return false
   return true
 }
@@ -239,8 +236,8 @@ export function hashStartAt(text: string, at: number): boolean {
  *    （唯一的例外是**编辑边界**：回车/离开这一行时 `allowEnd: true`——
  *     那时「还在敲」的可能性已经归零，行尾就是敲完了。）
  *
- * ⚠️ `#` **紧跟在字后面**（字母／数字／汉字）就不算：`a#b`、`中文#名`；
- *    URL 的 `#fragment` 也不算。标点／空白之后算数（中文里「（#名）」很常见）。
+ * ⚠️ `#` **紧跟在字后面也算**（`中文#名`、`C#`）：触发与转换共用同一份开头判据，
+ *    而现在的口径是「接着打就弹」。URL 的 `#fragment` 仍不算。
  *
  * ⚠️ `#` 后面必须有至少一个非空白、非 `#` 的字符 —— 光一个 `#` 不成边。
  *

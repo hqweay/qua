@@ -14,13 +14,19 @@
  */
 import { displayNameOf } from './alias.ts'
 import { journalDate, journalDateLabel, isJournal } from './journal.ts'
-import type { Block } from './model.ts'
+import { hasList, type Block } from './model.ts'
+import { tagIdsOf } from './tags.ts'
 import { t } from './msg.ts'
 
 /** 解析结果：**显示名 ＋ 还能不能解析到**（`dangling` 不是错误，是状态） */
 export interface RefView {
   label: string
   state: 'resolved' | 'dangling'
+  /**
+   * 目标的身份，只给**呈现**用（行内 `#` 的三种样式：类／实例／普通引用）。
+   * 省略 ⇒ 按普通引用处理；它不是落盘字段，也不是判定「能不能点开」的依据。
+   */
+  kind?: 'tag' | 'obj' | 'page'
 }
 
 /** 按 id 找块（整片森林；zoom 后引用目标可能在任意深度） */
@@ -58,14 +64,27 @@ export function refTitle(b: Block): string {
  *    （弄脏快照、连带触发落盘）。「改名靠解析传播、不回头改原子」是本文件的前提，二者不可兼得。
  *    ⇒ dangling 是**少数派状态**（目标被删），给它一个稳定的旧名字，好过让渲染变得不纯。
  */
-export function resolveRef(find: FindBlock, a: { label?: string; to?: string }): RefView {
+export function resolveRef(find: FindBlock, a: { label?: string; to?: string; flavor?: '#' }): RefView {
   const target = a.to
-  if (!target) return { label: a.label ?? '', state: 'dangling' }
+  const fallback = a.flavor === '#' ? ('tag' as const) : ('page' as const)
+  if (!target) return { label: a.label ?? '', state: 'dangling', kind: fallback }
   const b = find(target)
-  if (!b) return { label: a.label ?? '', state: 'dangling' }
+  if (!b) return { label: a.label ?? '', state: 'dangling', kind: fallback }
   // 标签的显示名＝**不带 `#` 的正文**；`#` 是呈现时加的装饰（`makeAtomEl`），不进正文，
   // 否则「标签块的正文」与「它在引用里显示的字」就成了两个需要同步的东西。
-  return { label: refTitle(b), state: 'resolved' }
+  return { label: refTitle(b), state: 'resolved', kind: refKindOf(b) }
+}
+
+/**
+ * 引用目标的身份（**只给呈现用**）：标签类／带归属的实例／其它。
+ *
+ * 判据与「它是不是标签」「它有没有归属」是同一份模型读法——不在渲染层另认一遍。
+ * 带 `_tags` 的内容块就是一条实例记录（记录不是新种类，见 `core/obj.ts`）。
+ */
+function refKindOf(b: Block): 'tag' | 'obj' | 'page' {
+  if (hasList(b, 'tag')) return 'tag'
+  if (tagIdsOf(b).length > 0) return 'obj'
+  return 'page'
 }
 
 /**
@@ -74,13 +93,13 @@ export function resolveRef(find: FindBlock, a: { label?: string; to?: string }):
  * 返回的是 `runId → RefView`，按 id 取而不是按位置取 —— run 与 DOM 元素的对应关系
  * 由 run id 钉死，不会因为顺序变化而张冠李戴。
  */
-export function resolveRefs(find: FindBlock, runs: readonly { id: string; label?: string; to?: string }[]): Map<string, RefView> {
+export function resolveRefs(find: FindBlock, runs: readonly { id: string; label?: string; to?: string; flavor?: '#' }[]): Map<string, RefView> {
   const out = new Map<string, RefView>()
   for (const a of runs) out.set(a.id, resolveRef(find, a))
   return out
 }
 
 /** 找不到目标时的兜底视图（那一格还在、目标块没了 ⇒ 看得见的 dangling） */
-export function danglingView(label: string): RefView {
-  return { label, state: 'dangling' }
+export function danglingView(label: string, kind: 'tag' | 'obj' | 'page' = 'page'): RefView {
+  return { label, state: 'dangling', kind }
 }

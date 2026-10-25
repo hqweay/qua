@@ -4868,7 +4868,7 @@ await check(
     const rows = await layerRows(page)
     assert(rows.length > 0, `敲 # 应弹出浮层：${JSON.stringify(rows)}`)
     assert(rows[0].label.includes('zzz'), `第一行应是「新建记录 #zzz」：${JSON.stringify(rows.slice(0, 3))}`)
-    assert(rows[0].key === '', `新建记录行**不是标签类行**，不该画 ⌥↵ 徽标：${JSON.stringify(rows[0])}`)
+    assert(rows[0].key !== '', `新建实例行也支持 ⌥↵ / ⇧↵，徽标不能空：${JSON.stringify(rows[0])}`)
 
     await page.keyboard.press('Enter')
     await page.waitForTimeout(220)
@@ -7844,6 +7844,7 @@ await check(
     const tagName = '检索甲'
     const tagId = await seedTag(page, tagName)
     assert(tagId !== '', `前置：标签块应已存在：${JSON.stringify(tagName)}`)
+    const tagCountBefore = await page.evaluate(() => window.__qua.allBlocks().filter((b) => b.lists.includes('tag')).length)
 
     const target = await page.evaluate(() => {
       const ed = window.__qua.__editor
@@ -7907,6 +7908,7 @@ await check(
     const tagName = '检索乙'
     const tagId = await seedTag(page, tagName)
     assert(tagId !== '', `前置：标签块应已存在：${JSON.stringify(tagName)}`)
+    const tagCountBefore = await page.evaluate(() => window.__qua.allBlocks().filter((b) => b.lists.includes('tag')).length)
 
     const target = await page.evaluate(() => {
       const ed = window.__qua.__editor
@@ -8147,8 +8149,8 @@ await check(
     const sameLabel = rows.filter((r) => r.label === '#检索丙')
     assert(sameLabel.length === 2, `候选里应有「实例」与「标签类」两行：${JSON.stringify(rows.slice(0, 6))}`)
     assert(
-      rows[0].label === '#检索丙' && rows[0].hint.includes('#检索丙') && rows[0].key === '',
-      `第一行应是实例（hint 标明标签、无 ⌥↵）：${JSON.stringify(rows.slice(0, 3))}`,
+      rows[0].label === '#检索丙' && rows[0].hint.includes('#检索丙') && rows[0].key !== '',
+      `第一行应是实例（hint 标明标签、带按键徽标）：${JSON.stringify(rows.slice(0, 3))}`,
     )
 
     await page.keyboard.press('Enter')
@@ -8190,6 +8192,122 @@ await check(
     return `实例行先于标签类；选它 ⇒ 两枚露面都指向同一条记录、零新建；删一枚 ⇒ 记录仍在`
   },
 )
+
+await check(
+  'T114 `#` 的三种落点只看按键：↵ 行内标签 / ⌥↵ 块标签 / ⇧↵ 新实例；`#` 紧接正文也能弹',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 三种落点由**按键**区分，不由「选中的是哪一行」区分：
+     *   · `↵` 行内标签：正文里那一格指向标签类，宿主不被归类；
+     *   · `⌥↵` 块标签：写宿主 `_tags`，正文里不多出原子；
+     *   · `⇧↵` 新实例：建一条落在今天的记录，正文里那一格指向**记录**。
+     * 同一套判据在「类行」上验一遍就够了；实例行上的 ⌥/⇧ 复用同一支。
+     */
+    const tagName = '快捷键甲'
+    const tagId = await seedTag(page, tagName)
+    assert(tagId !== '', `前置：标签块应已存在：${JSON.stringify(tagName)}`)
+    const tagCountBefore = await page.evaluate(() => window.__qua.allBlocks().filter((b) => b.lists.includes('tag')).length)
+
+    const focusNew = () =>
+      page.evaluate(() => {
+        const ed = window.__qua.__editor
+        const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+        window.__qua.focusBlock(id, 0)
+        return id
+      })
+
+    // ① `#` 紧接正文（没有空格）也弹面板；↵ = 行内标签
+    const inlineBlock = await focusNew()
+    await page.waitForTimeout(80)
+    await page.keyboard.type(`前缀#${tagName}`)
+    await page.waitForTimeout(220)
+    const inlineRows = await layerRows(page)
+    assert(inlineRows.length > 0, `「前缀#名」应弹出面板：${JSON.stringify(inlineRows)}`)
+    assert(inlineRows[0].label === `#${tagName}`, `第一行应是标签类：${JSON.stringify(inlineRows.slice(0, 3))}`)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(220)
+
+    const inline = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const b = ed.store.find(t.id)
+      const atoms = window.__qua.atoms().filter((a) => a.blockId === t.id)
+      const tx = document.querySelector(`.blk[data-block-id="${t.id}"]`)
+      return {
+        atoms: atoms.map((a) => a.target?.id ?? ''),
+        tags: b?.props?._tags ?? [],
+        dom: { tag: tx?.querySelectorAll('.atom-tag').length ?? -1, obj: tx?.querySelectorAll('.atom-obj').length ?? -1 },
+      }
+    }, { id: inlineBlock })
+    assert(inline.atoms.length === 1 && inline.atoms[0] === tagId, `↵ 应插指向标签类的行内标签：${JSON.stringify(inline)}`)
+    assert(inline.tags.length === 0, `↵ 不该把宿主归类：${JSON.stringify(inline.tags)}`)
+    assert(inline.dom.tag === 1 && inline.dom.obj === 0, `↵ 的样式应是行内标签（无框），不是实例：${JSON.stringify(inline.dom)}`)
+
+    // ② ⌥↵ = 块标签
+    const chipBlock = await focusNew()
+    await page.waitForTimeout(80)
+    await page.keyboard.type(`#${tagName}`)
+    await page.waitForTimeout(220)
+    await page.keyboard.press('Alt+Enter')
+    await page.waitForTimeout(220)
+
+    const chip = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const b = ed.store.find(t.id)
+      const tx = document.querySelector(`.blk[data-block-id="${t.id}"]`)
+      return {
+        atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length,
+        tags: b?.props?._tags ?? [],
+        chips: tx?.querySelectorAll('.tag-chip').length ?? -1,
+      }
+    }, { id: chipBlock })
+    assert(chip.atoms === 0, `⌥↵ 是归类，不该插行内原子：${chip.atoms}`)
+    assert(chip.tags.length === 1 && chip.tags[0] === tagId, `⌥↵ 应写宿主 _tags：${JSON.stringify(chip.tags)}`)
+    assert(chip.chips === 1, `⌥↵ 的样式应是行尾 chip（实底）：${chip.chips}`)
+
+    // ③ ⇧↵ = 新实例（不新建标签，记录落当天、自带归属）
+    const objBlock = await focusNew()
+    await page.waitForTimeout(80)
+    await page.keyboard.type(`#${tagName}`)
+    await page.waitForTimeout(220)
+    await page.keyboard.press('Shift+Enter')
+    await page.waitForTimeout(260)
+
+    const obj = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const atoms = window.__qua.atoms().filter((a) => a.blockId === t.id)
+      const recordId = atoms[0]?.target?.id ?? ''
+      const record = ed.store.find(recordId)
+      const day = ed.store.blocks.find((b) => b.props?._date)
+      const tx = document.querySelector(`.blk[data-block-id="${t.id}"]`)
+      return {
+        atoms: atoms.map((a) => a.target?.id ?? ''),
+        dom: { tag: tx?.querySelectorAll('.atom-tag').length ?? -1, obj: tx?.querySelectorAll('.atom-obj').length ?? -1 },
+        tags: ed.store.find(t.id)?.props?._tags ?? [],
+        recordTags: record?.props?._tags ?? [],
+        recordText: record ? record.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '',
+        inToday: Boolean(day?.children.some((x) => x.id === recordId)),
+        tagCount: ed.store.blocks.filter((x) => (x.props?._lists ?? []).includes('tag')).length,
+      }
+    }, { id: objBlock })
+
+    assert(obj.atoms.length === 1 && obj.atoms[0] !== tagId, `⇧↵ 应插指向**新记录**的实例：${JSON.stringify(obj)}`)
+    assert(obj.recordTags.length === 1 && obj.recordTags[0] === tagId, `记录应自带标签归属：${JSON.stringify(obj.recordTags)}`)
+    assert(obj.recordText === tagName, `记录的正文应是键入名：${JSON.stringify(obj.recordText)}`)
+    assert(obj.dom.tag === 0 && obj.dom.obj === 1, `⇧↵ 的样式应是实例（细框＋方块），不是行内标签：${JSON.stringify(obj.dom)}`)
+    assert(obj.inToday, '记录应落在当天')
+    assert(obj.tags.length === 0, `⇧↵ 不该把宿主归类：${JSON.stringify(obj.tags)}`)
+    assert(obj.tagCount === tagCountBefore, `⇧↵ 复用已有标签，不新建第二个：${tagCountBefore} → ${obj.tagCount}`)
+
+    await ctx.close()
+    return `前缀#名 也能弹；↵ 行内标签（指向类）、⌥↵ 写宿主 _tags、⇧↵ 建落在当天的新实例`
+  },
+)
+
+
 
 /* --------------------------------------------- 编辑边界（同一容器内换块） */
 

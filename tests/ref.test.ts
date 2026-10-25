@@ -144,5 +144,5 @@ test('resolveRefs：按 atomId 返回（不是按位置，顺序变了也不会�
 
 test('danglingView：占位符还在但原子记录没了时的兜底', () => {
   const v = danglingView('未知原子')
-  assert.deepEqual(v, { label: '未知原子', state: 'dangling' })
+  assert.deepEqual(v, { label: '未知原子', state: 'dangling', kind: 'page' })
 })
