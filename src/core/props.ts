@@ -23,6 +23,15 @@ import { walkForest } from './walk.ts'
 import { derivedId, uuidv7Hex } from './ids.ts'
 import { resolveTagIds, tagsById } from './tags.ts'
 
+/**
+ * 两个属性值是不是同一件事（**结构相等**：属性值可以是数组／对象，`Object.is` 不够）。
+ *
+ * 判据用途：只有真变了才算一次改动（写时刻、发 `prop.set`）。
+ */
+function sameValue(a: unknown, b: unknown): boolean {
+  return Object.is(a, b) || JSON.stringify(a) === JSON.stringify(b)
+}
+
 /** 声明列表的系统属性（有序 ref 列表；pos ＝ 数组下标） */
 export const FIELD_DEFS_PROP = '_fieldDefs'
 
@@ -417,9 +426,18 @@ export function gutterFieldsFor(
 
 /* ------------------------------------------------------------ 写值 */
 
-/** 写一个值（**一块一槽**：键是 propId；不碰任何标签） */
+/**
+ * 写一个值（**一块一槽**：键是 propId；不碰任何标签）。
+ *
+ * **顺带记改动时刻**：属性值住在属性袋里、时刻住在块上，而写属性的事务按属性袋的差异
+ * 发 `prop.set` —— 它不会去看时刻变了没有。不在这里一起写，就会得到一条「值变了、
+ * 修改时间是旧的」的账，而面板上那一行最显眼。
+ * ⚠️ 只认「值真的变了」：点一下已经选中的那个选项不是一次改动。
+ */
 export function setValue(block: Block, propId: string, value: unknown): void {
+  const prev = block.props?.[propId]
   block.props = { ...(block.props ?? {}), [propId]: value }
+  if (!sameValue(prev, value)) block.modified = Date.now()
 }
 
 /**
@@ -442,6 +460,8 @@ export function clearValue(block: Block, propId: string): void {
   // 属性袋不留空壳：`{}` 与「没有属性」在快照比较里是两种东西
   if (Object.keys(next).length === 0) delete block.props
   else block.props = next
+  // 摘一个值是一次改动（早退那条路径已经保证「本来就没有」走不到这里）
+  block.modified = Date.now()
 }
 
 /* ------------------------------------------------------------ 摘标签后的清理 */

@@ -10,7 +10,7 @@
  * 2. **写面先把内存改完，再产出 op**：`tx` 成功才交付 `{ ops, changes }`；
  *    失败按快照整批恢复。阶段 1 不做逆 op，理由与撤销同源 —— 整库快照已经够快，
  *    而逆 op 是「同一件事的第二个正确性来源」，早晚与正路径分叉。
- * 3. **结构不作 diff**：`patch` 只看正文与属性；子树变化一律抛错，逼调用方显式
+ * 3. **结构不作 diff**：`patch` 只看正文、改动时刻与属性；子树变化一律抛错，逼调用方显式
  *    `insert`／`move`／`remove`。结构若靠 diff 猜，删掉的整棵后代就会凭空消失
  *    —— 不报错，只是数据少了一截。
  *
@@ -280,7 +280,12 @@ export class MemoryKb implements KbClient {
     return {
       patch(id, fn) {
         const b = require(id)
-        const before = { content: JSON.stringify(b.content), props: b.props ? clone(b.props) : undefined, kids: b.children.slice() }
+        const before = {
+          content: JSON.stringify(b.content),
+          modified: b.modified,
+          props: b.props ? clone(b.props) : undefined,
+          kids: b.children.slice(),
+        }
         fn(b)
         // 子树不归 patch 管：能改 `children` 的只有结构 op，否则结构变化会被 diff 静默吞掉
         const kids = b.children
@@ -290,8 +295,17 @@ export class MemoryKb implements KbClient {
         }
         // 行内内容（文本/格式/原子）是**一组事实**：一次改动就是一条 content upsert，
         // 落库与同步看到的是整组替换，不是「字一条、格式一条、原子一条」的碎账。
-        if (JSON.stringify(b.content) !== before.content) {
-          ops.push({ e: 'block', id, op: 'upsert', value: { content: b.content }, at: at() })
+        // `modified` 与它**同值同一条**：时刻是这次改动的属性，不是第二件事。
+        const sameContent = JSON.stringify(b.content) === before.content
+        const sameTime = b.modified === before.modified
+        if (!sameContent || !sameTime) {
+          ops.push({
+            e: 'block',
+            id,
+            op: 'upsert',
+            value: { content: b.content, ...(sameTime ? {} : { modified: b.modified }) },
+            at: at(),
+          })
           sink.blocks(id)
         }
         if (!sameProps(before.props, b.props)) {

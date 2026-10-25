@@ -278,6 +278,22 @@ export class BlockEditor {
    * 那不属于「这次编辑」，不该被回滚带走。
    */
   private editBase: EditBase | null = null
+  /**
+   * 这个编辑期里**有没有内容落进过模型**（见 `stampEdited`）。
+   *
+   * 为什么不在边界上「比内容」：编辑期的起点在**第一次落字之前**，落字那一刻
+   * `syncFromDom` 会 `beginEdit` 重开一个编辑期 —— 等边界到来时「起点」早就等于
+   * 此刻了，比较永远相等。真正要记的是「这段时间里写没写过」这一位。
+   */
+  /**
+   * 这个编辑期里**被写过**的块：到边界时给它们记一次修改时间。
+   *
+   * ⚠️ 为什么是「按块 id 的集合」而不是一个布尔：编辑期会在**每一笔输入**上重开
+   *    （`syncFromDom` → `beginEdit` → `rebase`），一个布尔标记会被那次重开清掉，
+   *    于是边界永远看不到「写过」。块的粒度不受编辑期怎么切的影响。
+   */
+  private edited = new Set<string>()
+  // TEMP-PROBE
   /** 「点空白建块」的监听面：比 container 大一圈，见 `ViewOpts.blankArea` */
   blankArea: HTMLElement
   private allowBlankCreate: boolean
@@ -1242,11 +1258,24 @@ export class BlockEditor {
    *
    * 幂等：同一块可以在一串边界上各调一次（失焦之后紧接着 Enter、再点块标），
    * 重复提交必须无害。
+   *
+   * **这里也是「修改时间」唯一该更新的位置之一**：敲字过程中不动它，否则每敲一字都要
+   * 多一条 op，而那个时间也只说明「最后一次按键」。边界才是一次「改动」的粒度。
+   * 整块内容比较（不是「这一笔改了没有」）保证这件事**幂等**：没有边界外改动时，
+   * 内容与时间都不动，一笔事务都不产生。
    */
   commitEdit(id: string): { ok: true } | { ok: false; conflict: Block } {
     const base = this.editBase
     if (!base || base.id !== id) return { ok: true }
-    const b = this.store.find(id)
+    /**
+     * ⚠️ **以 `doc` 里的那一块为准，`store.find` 只作旁证**。
+     *
+     * 装载进来的 roots 未必在 store 的索引里（索引按库建，而视图拿到的可能是
+     * 只属于这个视图的那一份）——早先这里只认 `store.find`，于是那些块上的边界
+     * **一次都没执行过**：`#tag` 的「编辑边界才算敲完」与「修改时间」都静默失效，
+     * 而且不报错（看起来像「边界逻辑没写」）。
+     */
+    const b = locate(this.doc, id)?.block ?? this.store.find(id)
     if (!b) {
       this.editBase = null
       return { ok: true }
@@ -1254,7 +1283,24 @@ export class BlockEditor {
     // 组合期不提交：IME 的预编辑还不是这次编辑的结束
     if (this.probe.isComposing) return { ok: true }
     this.rebase(b)
+    this.stampEdited(b)
     return { ok: true }
+  }
+
+  /**
+   * 记下「这一块刚被显式改过」：内容没变就什么都不做。
+   *
+   * 判据是**整块内容**：`syncFromDom` 已经逐笔把字写进模型，边界的职责只剩「宣布到这里
+   * 算一次改动」；拿「这次有没有写」当判据会把「只移动了光标」也算成改动。
+   */
+  private stampEdited(b: Block): void {
+    // 判据是「这次编辑期里**真的写进过模型**」：`syncFromDom` 把新内容落进模型、
+    // 又确实变了时才在这里记下这一块。
+    if (!this.edited.has(b.id)) return
+    this.edited.delete(b.id)
+    const at = Date.now()
+    if (this.write) this.write((tx) => tx.patch(b.id, (x) => (x.modified = at)))
+    else b.modified = at
   }
 
   /** 换一个编辑期：先把上一块交出去（换块就是上一次编辑的结束），再记下这一块此刻的样子 */
@@ -1418,6 +1464,8 @@ export class BlockEditor {
     if (this.editBase?.id !== id) this.beginEdit(loc.block)
     const next = this.readRunsOf(id)
     if (sameRuns(next, loc.block.content)) return
+    // 这一块真的落过字 ⇒ 到边界时记一次「块被改过」（时刻只在边界写，见 `stampEdited`）
+    this.edited.add(id)
     /**
      * **这一笔会不会顺手成标签**：`convertHashTag` 的判据是「**模型里**的内容刚敲完一个
      * `#名字`」，所以它必须在内容落进模型**之后**、但在这次撤销记录**之前**算出来。
@@ -1828,7 +1876,11 @@ export class BlockEditor {
     const before = this.snap()
     if (this.write) {
       const write = this.write
-      write((tx) => tx.move(id, plan.parentId, plan.index))
+      write((tx) => {
+        tx.move(id, plan.parentId, plan.index)
+        // 结构换位置也是一次改动：时刻若只跟着正文走，块会被搬到别处、时间停在原处
+        tx.patch(id, (x) => (x.modified = Date.now()))
+      })
     } else if (!applyMove(this.doc, id, plan)) {
       return
     }
@@ -2137,12 +2189,17 @@ export class BlockEditor {
      */
     if (isEmptyContent(loc.block.content) && loc.block.children.length === 0 && canWriteText(loc.block)) {
       if (this.write) {
-        // 原地改类型是一个属性写入：`_type` 一条 op，撤销一次回到「那行还是空白」
+        // 原地改类型是一次属性写入：`_type` 一条 op，撤销一次回到「那行还是空白」。
+        // 改类型也算一次改动 ⇒ 时刻并进同一笔（第二条 op）。
         this.write((tx) => {
-          tx.patch(loc.block.id, (b) => setBlockType(b, DIVIDER_TYPE))
+          tx.patch(loc.block.id, (b) => {
+            setBlockType(b, DIVIDER_TYPE)
+            b.modified = Date.now()
+          })
         })
       } else {
         setBlockType(loc.block, DIVIDER_TYPE)
+        loc.block.modified = Date.now()
       }
       this.undo.record(before, 'structural', Date.now())
       this.renderAll()
@@ -2708,6 +2765,15 @@ export class BlockEditor {
      * 索引缓存住的是「库长什么样」，所以这里必须显式作废 —— 否则删掉的一页还能被 `find` 到。
      */
     this.store.invalidateIndex()
+    /**
+     * **换视图也是一个编辑边界**：上一行的编辑期在这里结束。
+     *
+     * 必须先 `commitEdit` 再清 `editBase`：反过来的话，「敲完字直接点面包屑/引用/块标」
+     * 这条路会**丢掉这次边界**——正文已经进模型，修改时间却停在上一处。
+     * `commitEdit` 幂等，编辑期本来就是空的时候它什么都不做。
+     */
+    const ending = this.editBase?.id
+    if (ending) this.commitEdit(ending)
     this.doc = doc
     // 换视图 ＝ 换了一份装载单位：上一行那个编辑期在这里结束，不能带到新页上
     this.editBase = null

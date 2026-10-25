@@ -4426,7 +4426,7 @@ await check(
 )
 
 await check(
-  'T65 `insertBlockAfter` 走一笔事务：插一块只发 1 条 upsert{parent,index}（落点由事务算，不是 splice 出来再报）；空块 + 待办只发 1 条 prop.set；一次撤销回得去',
+  'T65 `insertBlockAfter` 走一笔事务：插一块只发 1 条 upsert{parent,index}（落点由事务算，不是 splice 出来再报）；空块 + 待办＝时刻 upsert ＋ 1 条 prop.set；一次撤销回得去',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -4584,16 +4584,25 @@ await check(
     if (!todo.skipped) {
       const propSets = todo.ops.filter((o) => o.e === 'prop' && o.op === 'set')
       const structOps = todo.ops.filter((o) => o.e === 'block')
-      assert(todo.ops.length === 1, `空块 + 待办只该产 1 条 op：${JSON.stringify(todo.ops)}`)
-      assert(propSets.length === 1, `那一条应是 prop.set：${JSON.stringify(todo.ops)}`)
-      assert(structOps.length === 0, `空块 + 待办不该发结构 op：${JSON.stringify(structOps)}`)
+      /**
+       * **一次属性写入会同时刷新「修改于」**（时刻住在块上、值住在属性袋里）⇒ 这一支
+       * 产出「一条 upsert{content,modified} ＋ 一条 prop.set」，一次撤销仍然一步回去。
+       * 判据因此是「恰好这两条、没有结构 op」，不是「总共一条」——后者会逼实现
+       * 把两件不同的事实塞进同一条 op 里。
+       */
+      assert(todo.ops.length === 2, `空块 + 待办应恰好 2 条 op（时刻 upsert ＋ prop.set）：${JSON.stringify(todo.ops)}`)
+      assert(propSets.length === 1, `其中一条应是 prop.set：${JSON.stringify(todo.ops)}`)
+      assert(
+        structOps.length === 1 && Object.keys(structOps[0].value ?? {}).includes('modified'),
+        `另一条只该是「记改动时刻」的 upsert（不带 parent/index）：${JSON.stringify(structOps)}`,
+      )
       assert(todo.bools.length === 1 && todo.bools[0] === false, `块上应落一个「未完成」的任务状态值：${JSON.stringify(todo.bools)}`)
     }
 
     await ctx.close()
     return todo.skipped
       ? 'insertBlockAfter ⇒ ops=[block.upsert{parent,index}]（1 条，落点＝原块之后）；⌘Z 回原样。空块+待办分支本页没有空块，跳过'
-      : 'insertBlockAfter ⇒ ops=[block.upsert{parent,index}]（1 条，落点＝原块之后）；⌘Z 回原样；空块 + /待办 ⇒ ops=[prop.set]（1 条，0 条结构 op）'
+      : 'insertBlockAfter ⇒ ops=[block.upsert{parent,index}]（1 条，落点＝原块之后）；⌘Z 回原样；空块 + /待办 ⇒ ops=[upsert{modified}, prop.set]（一笔事务，没有结构 op）'
   },
 )
 
@@ -4886,7 +4895,7 @@ await check(
 )
 
 await check(
-  'T68 缩进／反缩进／上下换位各走一笔事务：每次恰好 1 条 upsert{parent,index}，一次撤销复原',
+  'T68 缩进／反缩进／上下换位各走一笔事务：每次一条 upsert{parent,index} ＋ 一条时刻 upsert，一次撤销复原',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -4951,17 +4960,27 @@ await check(
     const ops = () =>
       page.evaluate(() => window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, value: o.value })))
 
-    /** 一次结构移动的 op 形状：恰好一条 upsert{parent,index}，不带正文、不带属性 */
+    /**
+     * 一次结构移动的 op 形状：**一条** `upsert{parent,index}` ＋ **一条**记时刻的 `upsert{…,modified}`。
+     *
+     * 为什么是两条而不是并成一条：换位置与「最后一次改动」是同一块上的两件事，
+     * 但结构 op 的判据是「它现在在哪」，往里掺正文/时刻会让「结构不作 diff」那条
+     * 纪律失效（结构变化必须一眼看得出）。两条仍在一笔事务里 ⇒ 撤销一次回去。
+     */
     const oneMove = (list, want) => {
-      assert(list.length === 1, `应恰好 1 条 op：${JSON.stringify(list)}`)
-      assert(list[0].e === 'block' && list[0].id === pick.id && list[0].op === 'upsert', `应是一条 block.upsert：${JSON.stringify(list)}`)
-      const v = list[0].value ?? {}
+      const places = list.filter((o) => o.e === 'block' && o.op === 'upsert' && (o.value?.parent !== undefined || o.value?.index !== undefined))
+      const stamps = list.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.modified !== undefined && o.value?.parent === undefined)
+      assert(places.length === 1 && stamps.length === 1 && list.length === 2, `应恰好 2 条 op（落点 ＋ 时刻）：${JSON.stringify(list)}`)
+      const p0 = places[0]
+      assert(p0.e === 'block' && p0.id === pick.id && p0.op === 'upsert', `落点应是一条 block.upsert：${JSON.stringify(p0)}`)
+      const v = p0.value ?? {}
       assert(
-        Object.keys(v).length === 2 && v.parent !== undefined && v.index !== undefined,
-        `只该带 {parent,index}（不带正文/属性）：${JSON.stringify(v)}`,
+        Object.keys(v).length === 2,
+        `落点只该带 {parent,index}（不带正文/属性）：${JSON.stringify(v)}`,
       )
       assert(v.parent === want.parentId, `父块应是「${want.parentId}」，实际「${v.parent}」`)
       assert(v.index === want.index, `下标应是 ${want.index}，实际 ${v.index}`)
+      assert(stamps[0].id === pick.id, `记时刻的那条该是同一块：${JSON.stringify(stamps[0])}`)
     }
 
     // ① Tab 缩进：变前兄弟的最后一个孩子（落点 ＝ 前兄弟此刻的子块数）
@@ -5005,7 +5024,7 @@ await check(
     assert((await depthOf(pick.id)) === pick.depth, '撤销后 DOM 深度也应回原样')
 
     await ctx.close()
-    return `缩进/反缩进/上移 ⇒ 各 1 条 upsert{parent,index}（父块与下标都随模型真值）；⌘Z 回原位`
+    return `缩进/反缩进/上移 ⇒ 各「1 条 upsert{parent,index} ＋ 1 条时刻 upsert」（父块与下标都随模型真值）；⌘Z 回原位`
   },
 )
 
@@ -5934,7 +5953,7 @@ const opShape = (page) =>
   })
 
 await check(
-  'T77 切换待办走一笔事务：恰好 1 条 prop.set（任务状态槽，首切＝false），一次撤销回无槽',
+  'T77 切换待办走一笔事务：时刻 upsert ＋ 1 条 prop.set（任务状态槽，首切＝false），一次撤销回无槽',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -5945,12 +5964,19 @@ await check(
     await page.evaluate((id) => window.__qua.__editor.toggleTodo(id), target.id)
     await page.waitForTimeout(120)
     const ops = await opShape(page)
-    assert(ops.length === 1, `切换待办应恰好 1 条 op：${JSON.stringify(ops)}`)
+    /**
+     * 改属性值同时也是「改了这一块」⇒ 一笔里两条：记时刻的 `block.upsert{…,modified}`（不带
+     * parent/index，所以不是结构 op）＋ 任务状态槽的 `prop.set`。撤销仍然一步回。
+     */
+    const propOps = ops.filter((o) => o.e === 'prop' && o.op === 'set')
+    const stampOps = ops.filter((o) => o.e === 'block' && o.op === 'upsert')
+    assert(ops.length === 2, `切换待办应恰好 2 条 op（时刻 upsert ＋ prop.set）：${JSON.stringify(ops)}`)
+    assert(stampOps.length === 1, `其中一条应是记时刻的 upsert：${JSON.stringify(ops)}`)
     assert(
-      ops[0].e === 'prop' && ops[0].op === 'set' && ops[0].block === target.id && ops[0].value === false,
-      `那一条应是任务状态槽的 prop.set（首切＝未完成 false）：${JSON.stringify(ops)}`,
+      propOps.length === 1 && propOps[0].block === target.id && propOps[0].value === false,
+      `另一条应是任务状态槽的 prop.set（首切＝未完成 false）：${JSON.stringify(ops)}`,
     )
-    const propName = ops[0].name
+    const propName = propOps[0].name
 
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(150)
@@ -5958,7 +5984,7 @@ await check(
     assert(!back || !(propName in back), `一次撤销应回到没有任务槽：${JSON.stringify(back)}`)
 
     await ctx.close()
-    return `toggleTodo ⇒ 1 条 prop.set{${propName}:false}；⌘Z 回无槽`
+    return `toggleTodo ⇒ upsert{modified} ＋ prop.set{${propName}:false}；⌘Z 回无槽`
   },
 )
 
@@ -6246,7 +6272,7 @@ await check(
 )
 
 await check(
-  'T85 插分割线走同一笔事务：空块原地改类型＝1 条 prop.set；有内容＝同一笔 2 条 insert；各自一次撤销复原',
+  'T85 插分割线走同一笔事务：空块原地改类型＝时刻 upsert ＋ 1 条 prop.set；有内容＝同一笔 2 条 insert；各自一次撤销复原',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -6261,10 +6287,12 @@ await check(
     await page.evaluate((id) => window.__qua.__editor.insertDividerAfter(id), blankId)
     await page.waitForTimeout(120)
     const ops1 = await opShape(page)
-    assert(ops1.length === 1, `空块变线应恰好 1 条 op：${JSON.stringify(ops1)}`)
+    /** 改类型＝一次改动 ⇒ 一只 upsert{…,modified} 记时刻 ＋ 一条 `_type` 的 prop.set（同笔） */
+    const typeSet = ops1.filter((o) => o.e === 'prop' && o.op === 'set' && o.block === blankId)
+    assert(ops1.length === 2, `空块变线应恰好 2 条 op（时刻 upsert ＋ prop.set）：${JSON.stringify(ops1)}`)
     assert(
-      ops1[0].e === 'prop' && ops1[0].op === 'set' && ops1[0].block === blankId && ops1[0].name === '_type' && ops1[0].value === 'core/divider',
-      `那一条应是 _type=core/divider 的 prop.set：${JSON.stringify(ops1)}`,
+      typeSet.length === 1 && typeSet[0].name === '_type' && typeSet[0].value === 'core/divider',
+      `其中一条应是 _type=core/divider 的 prop.set：${JSON.stringify(ops1)}`,
     )
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(150)
@@ -7068,6 +7096,7 @@ await check(
   },
 )
 
+
 /**
  * 这一条钉的是「插入点只准落在可写正文槽里」。
  *
@@ -7278,7 +7307,227 @@ await check(
   },
 )
 
-/* ---------------------------------------------------------------- 汇总 */
+await check(
+  'T101 修改时间只在编辑边界走：连打 5 字不动、离开这一行才动一次；再打再动一次；且那一次仍然恰好 1 条 op',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+
+    const id = await page.evaluate(() => {
+      const b = window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo)
+      if (!b) return ''
+      window.__qua.focusBlock(b.id, 0)
+      return b.id
+    })
+    assert(id, '前置：应有一个可写的普通块')
+
+    /**
+     * 读时刻：**从活的模型读**（`__editor.store`），不读 DOM、不读落盘。
+     * 修改时间是模型事实，DOM 上它还看不见（只读段在属性面板里）。
+     */
+    const stamp = (target) => target.evaluate((bid) => window.__qua.__editor.store.find(bid)?.modified ?? -1, id)
+    const created = (target) => target.evaluate((bid) => window.__qua.__editor.store.find(bid)?.created ?? -1, id)
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+    const created0 = await created(page)
+    const t0 = await stamp(page)
+    // 时钟粒度是毫秒：等一下再敲，否则「变了没有」可能因为同一毫秒而看不出来
+    await sleep(15)
+    await page.keyboard.type('时间戳一')
+    await sleep(15)
+    const tTyping = await stamp(page)
+    assert(tTyping === t0, `打字过程中不该动修改时间：${t0} → ${tTyping}`)
+
+    /**
+     * **离开这一行** ＝ 编辑边界。走真点击：点正文里另一块（`focusBlock` 会调 `commitEdit`）。
+     * 那一刻改的字与时刻都在模型里，且这一次仍然只发一条 op（时刻并进内容那条）。
+     */
+    await page.evaluate(() => {
+      const other = window.__qua.blocks().find((x) => x.id !== window.__qua.snapshot().selection.aBlock)
+      if (other) window.__qua.focusBlock(other.id, 0)
+    })
+    await sleep(20)
+    const tBoundary = await stamp(page)
+    assert(tBoundary > t0, `离开这一行应刷新修改时间：${t0} → ${tBoundary}`)
+    const ops = await page.evaluate(() => window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, keys: Object.keys(o.value ?? {}) })))
+    /**
+     * **恰好一条** `block.upsert`（整批，不是「这条块上的」）：时刻并进内容那条。
+     * 发成两条（内容一条、时刻一条）也「有且只有一条带 modified」，所以判据必须是**总数**。
+     */
+    const upserts = ops.filter((o) => o.e === 'block' && o.op === 'upsert')
+    assert(
+      upserts.length === 1,
+      `边界那一次只该有一条 block.upsert（时刻并进内容那条，不发第二条）：${JSON.stringify(ops)}`,
+    )
+    assert(upserts[0].id === id, `那条 upsert 该是这次编辑的块：${JSON.stringify(upserts)}`)
+    assert(
+      upserts[0].keys.includes('content') && upserts[0].keys.includes('modified'),
+      `时刻必须并进同一条 upsert（与正文同批）：${JSON.stringify(upserts)}`,
+    )
+    assert(!ops.some((o) => o.e === 'prop'), `时刻不该走属性 op：${JSON.stringify(ops)}`)
+
+    /**
+     * 回到被编辑的那一块继续敲 ⇒ 到下一个边界**再动一次**。
+     * （上面那次离开把光标放到了别的块上，所以这里先回到这一块；顺手验「换块＝边界」
+     *   这条既有行为：回来时不该有任何改动被记上。）
+     */
+    await page.evaluate((bid) => window.__qua.focusBlock(bid, 0), id)
+    await sleep(20)
+    assert((await stamp(page)) === tBoundary, `只是回到这一块不算改动：${tBoundary} → ${await stamp(page)}`)
+    await sleep(15)
+    await page.keyboard.type('二')
+    await sleep(15)
+    assert((await stamp(page)) === tBoundary, `打字过程中不该动时刻：${tBoundary} → ${await stamp(page)}`)
+    // 再离开一次 ⇒ 再动一次
+    await page.evaluate(() => {
+      const other = window.__qua.blocks().find((x) => x.id !== window.__qua.snapshot().selection.aBlock)
+      if (other) window.__qua.focusBlock(other.id, 0)
+    })
+    await sleep(20)
+    const tAgain = await stamp(page)
+    assert(tAgain > tBoundary, `再一次离开应再动一次：${tBoundary} → ${tAgain}`)
+
+    /**
+     * **重开仍在**：关掉这一页、从剩下那份存储复原（不是 reload），出生时刻一字不变。
+     */
+    const re = await reopenPage(browser, ctx, base, page)
+    await re.page.evaluate(() => window.__qua.quiet(true))
+    await sleep(50)
+    const after = await re.page.evaluate((bid) => {
+      const b = window.__qua.__editor.store.find(bid)
+      return b ? { created: b.created, modified: b.modified } : null
+    }, id)
+    assert(after, `重开后那块还在：${id}`)
+    assert(after.created === created0, `重开后出生时刻一字不变：${created0} → ${after.created}`)
+    assert(after.modified === tAgain, `重开后修改时刻也还在：${tAgain} → ${after.modified}`)
+    await re.ctx.close()
+    return `打字 5 字不动（${t0}）→ 离开这一行动一次（${tBoundary}，恰好 1 条 upsert、零 prop op）→ 再打再动一次（${tAgain}）；重开后 created/modified 原样`
+  },
+)
+
+await check(
+  'T102 属性面板的「系统信息」是只读段：两行时刻都在、没有输入控件；摘掉时间戳的值不归它管',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const id = await page.evaluate(() => {
+      const b = window.__qua.blocks().find((x) => x.roles.length === 0 && x.text.length > 2)
+      if (!b) return ''
+      window.__qua.invoke('core.block/focus-block', { blockId: b.id })
+      return b.id
+    })
+    assert(id, '前置：应有一个可聚焦的内容块')
+    await page.waitForTimeout(150)
+    await page.waitForSelector('.prop-system', { timeout: 4000 })
+
+    /**
+     * **可见但只读**：判据是这一段里**没有可编辑控件**（input/textarea/contenteditable），
+     * 而不是「字段名不叫 text」。只读由通道提供 —— 这就是通道。
+     */
+    const sys = await page.evaluate((bid) => {
+      const box = document.querySelector('.prop-system')
+      const lines = [...document.querySelectorAll('.prop-system-line')].map((e) => ({
+        field: e.dataset.systemField,
+        text: e.textContent?.trim() ?? '',
+      }))
+      const model = window.__qua.__editor.store.find(bid)
+      return {
+        present: Boolean(box),
+        lines,
+        controls: box?.querySelectorAll('input, textarea, select, [contenteditable="true"]').length ?? -1,
+        inPanel: Boolean(box?.closest('#inspect-card')),
+        // 口径与模型同源：显示的是这一块自己的时刻，不是「现在」
+        created: model?.created ?? -1,
+        modified: model?.modified ?? -1,
+      }
+    }, id)
+
+    assert(sys.present, `系统信息段该在属性面板里：${JSON.stringify(sys)}`)
+    assert(sys.inPanel, `它属于属性面板（不是别处冒出的一段）：${JSON.stringify(sys)}`)
+    assert(sys.controls === 0, `系统信息段不许有可编辑控件：${JSON.stringify(sys)}`)
+    assert(sys.lines.length === 2, `应有两行（创建/修改）：${JSON.stringify(sys)}`)
+    assert(
+      sys.lines.map((l) => l.field).join(',') === 'created,modified',
+      `两行的顺序应是创建在上、修改在下：${JSON.stringify(sys.lines)}`,
+    )
+    assert(
+      sys.lines.every((l) => l.text.length > 0 && !l.text.includes('undefined')),
+      `两行都该有可读时刻：${JSON.stringify(sys.lines)}`,
+    )
+    assert(
+      sys.created > 0 && sys.modified >= sys.created,
+      `结构化前提：块必须带真的时刻（否则这一段显示的是假的）：${JSON.stringify(sys)}`,
+    )
+
+    // 同一份口径也覆盖「改过之后这一行跟着变」（只读不等于陈旧）
+    const before = sys.lines[1].text
+    const modelBefore = await page.evaluate((bid) => {
+      const m = window.__qua.__editor.store.find(bid)?.modified ?? -1
+      window.__probeBefore = m
+      return m
+    }, id)
+    await page.evaluate((bid) => window.__qua.focusBlock(bid, 0), id)
+    /**
+     * ⚠️ **慢到跨过一秒再落字**：块内时刻的显示精度到秒。若改字落在与创建同一秒里，
+     *    「改完之后变没变」就变成了「有没有跨秒」，而不是「改没改」——那样它会看运气。
+     *    （等待是为了让下一笔落在下一秒；面板刷新本身由下面的 `waitForFunction` 等。）
+     */
+    await page.waitForTimeout(1100)
+    await page.keyboard.type('改')
+    // 落字是异步进模型的（`input` 事件）：等模型文本真的变了再往下走，别赌毫秒
+    await page.waitForFunction(
+      (bid) => (window.__qua.__editor.store.find(bid)?.content ?? []).some((r) => r.t === 'text' && r.v.includes('改')),
+      id,
+      { timeout: 4000 },
+    )
+    const typed = await page.evaluate((bid) => ({
+      text: (window.__qua.__editor.store.find(bid)?.content ?? []).filter((r) => r.t === 'text').map((r) => r.v).join(''),
+      modified: window.__qua.__editor.store.find(bid)?.modified ?? -1,
+    }), id)
+    assert(typed.text.includes('改'), `前置：字应真的进了这一块：${JSON.stringify(typed)}`)
+    await page.evaluate(() => {
+      const other = window.__qua.blocks().find((x) => x.id !== window.__qua.snapshot().selection.aBlock)
+      if (other) window.__qua.focusBlock(other.id, 0)
+    })
+
+    /**
+     * 属性区的主体跟「中心槽当前对象」走 ⇒ 落回原来那一块再看它自己的那一行。
+     * ⚠️ 面板刷新是**防抖**的：一次 `waitForTimeout` 在负载高时会读到一个还没重画的旧值，
+     *    于是这条断言会变成「看机器心情」。等条件成立（有上限），不是等固定毫秒。
+     */
+    await page.evaluate((bid) => window.__qua.invoke('core.block/focus-block', { blockId: bid }), id)
+    await page.waitForSelector('.prop-system', { timeout: 4000 })
+    await page
+      .waitForFunction(
+        (was) => {
+          const line = document.querySelector('.prop-system-line[data-system-field="modified"]')
+          return Boolean(line) && line.textContent?.trim() !== was
+        },
+        before,
+        { timeout: 4000 },
+      )
+      .catch(() => {})
+    const after = await page.evaluate((bid) => ({
+      lines: [...document.querySelectorAll('.prop-system-line')].map((e) => e.textContent?.trim() ?? ''),
+      modified: window.__qua.__editor.store.find(bid)?.modified ?? -1,
+      modelBefore: window.__probeBefore ?? -1,
+      // 面板画的是不是这一块（主体换过就说明我们看错了行）
+      target: document.getElementById('inspect-card')?.dataset.targetBlockId ?? '',
+    }), id)
+    assert(after.target === id, `面板主体应回到被编辑的那一块：${JSON.stringify(after)}`)
+    assert(after.modified > modelBefore, `这一块的时刻真的动过（前置）：${modelBefore} → ${JSON.stringify(after)}`)
+    assert(
+      after.lines[1] !== before,
+      `改完之后「修改于」该跟着变（只读 ≠ 陈旧）：${JSON.stringify({ before, after })}`,
+    )
+    await ctx.close()
+    return `系统信息段：创建/修改两行，0 个可编辑控件；改一次正文后「修改于」跟着变`
+  },
+)
 
 /** 判红的是「不在已知失败表里的失败」；已知失败逐条打印，不计入退出码 */
 const known = results.filter((r) => !r.ok && r.known)

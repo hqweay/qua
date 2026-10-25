@@ -49,6 +49,11 @@ export function isSystemProp(name: string): boolean {
 export type BlockPatch = {
   /** 行内内容整组替换（文本/格式/原子改动都是这一条 op） */
   content?: Run[]
+  /**
+   * 最后一次改动时刻。**必须与 `content` 并进同一条 op**：一次编辑是一条账，
+   * 多一个属性写账本就会翻倍（而「这一次改动」本来就只有一个时刻）。
+   */
+  modified?: number
   parent?: string | null
   index?: number
   props?: Record<string, unknown>

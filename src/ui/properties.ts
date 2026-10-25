@@ -18,7 +18,7 @@
 import type { Block } from '../core/index.ts'
 import { plainText } from '../core/runs.ts'
 import type { FieldRow, PropKind } from '../core/index.ts'
-import { displayNameOf, declaredFieldIds, hasList, PROP_KINDS, propKindOf, uiPositionOf } from '../core/index.ts'
+import { clockLabel, displayNameOf, declaredFieldIds, hasList, PROP_KINDS, propKindOf, uiPositionOf } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 
 export interface PropertiesDeps {
@@ -263,6 +263,41 @@ export class PropertiesPanel {
     }
 
     if (this.formOpen) this.els.body.appendChild(this.buildForm(target))
+    // 系统信息在**最后**：它是这一块的出生与改动记录，不是可编辑的数据
+    this.els.body.appendChild(this.buildSystem(target))
+  }
+
+  /**
+   * **系统信息**（只读）：创建时间／修改时间两行。
+   *
+   * 为什么单独成段而不是混进属性行：它们**不是属性**（不在属性袋里，也没有定义块），
+   * 面板的每一行都带「编辑控件 ＋ 清除按钮」，把只读事实塞进那种行里，用户会去点、
+   * 点了没反应。判据是「可见但只读」由**通道**提供 —— 这一段就没有输入控件。
+   */
+  private buildSystem(target: Block): HTMLElement {
+    const box = document.createElement('div')
+    box.className = 'prop-row prop-system'
+    const label = document.createElement('label')
+    label.className = 'prop-label'
+    const name = document.createElement('span')
+    name.className = 'prop-name'
+    name.textContent = t('ui.props.systemTitle')
+    label.append(name)
+
+    const value = document.createElement('span')
+    value.className = 'prop-value prop-system-value'
+    for (const [key, at] of [
+      ['created', target.created],
+      ['modified', target.modified],
+    ] as const) {
+      const line = document.createElement('span')
+      line.className = 'prop-system-line'
+      line.dataset.systemField = key
+      line.textContent = `${t(key === 'created' ? 'ui.props.createdAt' : 'ui.props.modifiedAt')} ${clockLabel(at) || t('ui.props.timeUnknown')}`
+      value.appendChild(line)
+    }
+    box.append(label, value)
+    return box
   }
 
   /**

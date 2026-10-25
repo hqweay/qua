@@ -12,7 +12,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
 import type { Op } from '../src/core/kb/types.ts'
-import { BlockStore, fingerprint, mkBlock, mkPropDef, mkTagBlock, rebuild, writeBlockContent } from '../src/core/index.ts'
+import { BlockStore, fingerprint, mkBlock, mkPropDef, mkTagBlock, rebuild, setValue, TASK_STATUS_PROP_ID, writeBlockContent } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { seedWorkspace } from '../src/core/seed.ts'
 import { plainText, textRuns, type Anno, type RefRun } from '../src/core/runs.ts'
@@ -157,6 +157,50 @@ test('patch 改内容 ⇒ 恰好一条 block.upsert{content} ＋ 一条 blocks c
   assert.deepEqual(r.changes, [{ kind: 'blocks', id: 'c1' }])
   assert.equal(plainText(kb.get('c1')!.content), '改过')
   assert.equal((r.ops[0] as { at: number }).at, 1000, 'op 带 at')
+})
+
+test('patch 改内容 ＋ 时刻 ⇒ **仍然一条** upsert{content, modified}（时刻并进去，不发第二条）', () => {
+  const { kb } = fixture()
+  const r = kb.tx((tx) => {
+    tx.patch('c1', (x) => {
+      writeBlockContent(x, textRuns('改过'))
+      x.modified = 2000
+    })
+  })
+  // 一条账：时刻是这次改动的属性，不是第二件事
+  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { content: textRuns('改过'), modified: 2000 } }])
+  assert.deepEqual(r.changes, [{ kind: 'blocks', id: 'c1' }])
+  assert.equal(kb.get('c1')!.modified, 2000)
+})
+
+test('patch 只改时刻（换位置/缩进）⇒ 一条 upsert{content, modified}，不带属性', () => {
+  // 写路径按设计总是带上正文（它就是这一块的正文槽），所以这里断言的是
+  // 「**只有一条**、且属性袋没被牵进来」，而不是「正文那一格不出现」。
+  const { kb } = fixture()
+  const r = kb.tx((tx) => tx.patch('c1', (x) => (x.modified = 3000)))
+  assert.equal(r.ops.length, 1)
+  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { content: textRuns('一'), modified: 3000 } }])
+})
+
+test('patch 什么都没变 ⇒ 零 op（幂等的边界不该产账）', () => {
+  const { kb } = fixture()
+  const r = kb.tx((tx) => tx.patch('c1', (x) => (x.modified = x.modified)))
+  assert.deepEqual(bare(r.ops), [])
+})
+
+test('patch 改属性 ⇒ prop.set 照旧；写属性值顺带记时刻 ⇒ 一条 upsert{modified} ＋ 一条 prop.set', () => {
+  const { kb } = fixture()
+  // 先取一个**早于这次写**的时刻当基准（事务是就地改活块的，事后再读会读到同一个对象）
+  kb.tx((tx) => tx.patch('c1', (x) => (x.modified = 1)))
+  const r = kb.tx((tx) => {
+    tx.patch('c1', (x) => setValue(x, TASK_STATUS_PROP_ID, true))
+  })
+  const now = kb.get('c1')!.modified
+  assert(now > 1, `写值必须刷新时刻：1 → ${now}`)
+  assert.deepEqual(bare(r.ops), [
+    { e: 'block', id: 'c1', op: 'upsert', value: { content: textRuns('一'), modified: now } },
+    { e: 'prop', block: 'c1', name: TASK_STATUS_PROP_ID, op: 'set', value: true },
+  ])
 })
 
 test('patch 改属性 ⇒ prop.set；删属性 ⇒ prop.delete（值不变不动）', () => {

@@ -387,6 +387,13 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
     loadState: (s: FixtureName) => registry.invoke('dev.fixture/load', { state: s }, 'api'),
     focusBlock: (blockId: string, off = 0) => {
       deps.setEd(mainEd)
+      /**
+       * **换块聚焦是一次编辑边界**（先交上一块再落光标）。
+       * `placeCaret` 只是把插入点挪过去，不会替你结束上一块的那个编辑期——
+       * 少这一步，「敲完字直接点另一块」那个边界就永远不来了。
+       */
+      const prev = mainEd.sel?.aBlock ?? mainEd.caretBlock()
+      if (prev && prev !== blockId) mainEd.commitEdit(prev)
       editorEl.focus()
       mainEd.placeCaret(blockId, off)
     },

@@ -519,6 +519,17 @@
 .prop-row[data-pending='1'] .prop-name {
   color: var(--ui-text-secondary);
 }
+/* 系统信息只读段：两行时刻竖排在值槽里，用次要色 —— 它是记录，不是待填的数据 */
+.prop-system-value {
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+  font-size: var(--ui-fs-2xs);
+  color: var(--ui-text-tertiary);
+}
+.prop-system-line {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .prop-value {
   flex: 1 1 50%;
   display: flex;

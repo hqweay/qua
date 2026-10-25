@@ -118,3 +118,20 @@ export function journalDateLabel(date: string): string {
 }
 
 /** 块的「页名」＝它的正文（**中间没有页标题**，页名就是那个块的文本） */
+
+/**
+ * **时刻的人类显示**（墙钟毫秒 → 本地时间可读串）。
+ *
+ * 为什么不引日期库：本仓零运行时依赖，而这里只要「某年某月某日 时:分」。
+ * 为什么用手写补零而不用 `toLocaleString`：后者在不同平台上对「时:分」的补零、
+ * 分隔符并不一致（`9:05` / `09:05`），只读段里的两行会跟着系统变样；
+ * 而断言要能钉住。**年/月/日走系统的中文长格式**（与日记日期同一套写法），
+ * 时分秒自己拼 —— 一处格式，两处用同一口径。
+ */
+export function clockLabel(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return ''
+  const d = new Date(ms)
+  const day = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }).format(d)
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${day} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}

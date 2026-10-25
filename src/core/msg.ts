@@ -111,6 +111,12 @@ export const MSG = {
   'ui.props.addShort': '＋ 属性',
   'ui.props.empty': '还没有块属性',
   'ui.props.own': '本块自有',
+  /* 系统信息：创建/修改时刻是**块自己的事实**，不是可编辑的数据 ⇒ 只有这一段的**只读**露面。
+     可见但只读这件事由通道（这一段）提供，不靠字段名或隐藏机制。 */
+  'ui.props.systemTitle': '系统信息',
+  'ui.props.createdAt': '创建于',
+  'ui.props.modifiedAt': '修改于',
+  'ui.props.timeUnknown': '未知',
   'ui.props.source': '来自 {tags}',
   'ui.props.pending': '待填',
   'ui.props.unknown': '未知属性 {id}',
