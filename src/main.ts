@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  type Block, type CtxKeys } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
@@ -23,7 +23,8 @@ import {
     type MenuRequest,
   type PanelKind,
 } from './core/commands/index.ts'
-import { Layers, paletteRows, rowsFromBindings, type Row } from './ui/layers.ts'
+import { Layers, paletteRows, rowsFromBindings, type PickMods, type Row } from './ui/layers.ts'
+import { createTriggers } from './app/retrieval/triggers.ts'
 import { dispatchKey, installKeydown, type DispatchEnv } from './core/dispatch.ts'
 import { DockBlocks } from './ui/dock-blocks.ts'
 import { bindDockResize } from './ui/dock-resize.ts'
@@ -171,8 +172,9 @@ let ed: BlockEditor
 /** 中心槽的主编辑器；`ed` 是「当前活动编辑器」（正文或反链 footer） */
 let mainEd: BlockEditor
 let registry: Registry
-let slashOpen = false
-let lastSlashQuery = ''
+/** 现在开着的是哪个触发字符的浮层（`null` ＝ 没开）；`lastQuery` 是上次列的查询词 */
+let triggerCh: TriggerChar | null = null
+let lastQuery = ''
 /** 截图/自检时静音 toast（产品行为不变，只是不弹提示） */
 let quiet = false
 
@@ -289,9 +291,23 @@ const {
 
 /* ------------------------------------------------------------ 浮层渲染 */
 
-function rowsForSlash(query: string): Row[] {
-  return rowsFromBindings(resolveBindings('slash', uiCtx(), { query }), keyHints(), { showKeywords: true })
-}
+/**
+ * **触发表**：`/` 命令源 · `#` 标签源 · `@` 页块源。
+ *
+ * 三个触发字符共用**一个**浮层组件（`layers.openMenu`），差别只在「列什么行」；
+ * 「选中之后做什么」由下面 `pickRow` 按行的 `pick` 决定——浮层不认识插入语义。
+ *
+ * ⚠️ 森林是**现取**的（`() => ws.blocks`）：换库之后这里必须看到新库。
+ * ⚠️ 按平台给「⌥↵」徽标：只有标签类行会用到它（别的行上画一个按了没用的键是骗人）。
+ */
+const triggers = createTriggers({
+  forest: () => ws.blocks,
+  ctx: uiCtx,
+  keyHints,
+  altEnterHint: isMac() ? '⌥↵' : 'Alt+↵',
+  // `@` 候选排除「正在打字的这一块」：它自己的正文含着查询词，点它＝引用自己
+  selfBlockId: () => ed.caretBlock() ?? ed.sel?.aBlock ?? null,
+})
 
 /**
  * 划选气泡：**选区存在就在它上方浮一排格式按钮，选区塌了就消失**。
@@ -328,8 +344,80 @@ function refreshSelectionBar(): void {
   })
 }
 
+/**
+ * **打开检索浮层**（三个触发字符共用这一个入口）。
+ *
+ * 行为与原来的斜杠菜单同形：不抢焦点（`focusSearch:false`）、`searchable:false`
+ * ——打字继续进 `.tx`，`triggerQuery` 每次上报就来 `setRows`。
+ */
+function openTrigger(ch: TriggerChar, query: string, anchor: DOMRect | null, title?: string): void {
+  const trigger = triggers.get(ch)
+  if (!trigger) return
+  triggerCh = ch
+  lastQuery = query
+  layers.openMenu({
+    rows: trigger.source(query),
+    anchor,
+    title: title ?? trigger.title,
+    searchable: false,
+    focusSearch: false,
+    emptyText: trigger.emptyText,
+    // ⚠️ `ch` 走闭包而不是读全局：`closeMenu` 会在 `onPick` 之前回调 `onClose` 把状态清掉，
+    //    读全局就会读到「已经没开着了」，于是这次选中什么都不做（真实踩过）。
+    onPick: (row, mods) => pickRow(ch, row, mods),
+    onClose: () => {
+      triggerCh = null
+    },
+  })
+}
+
+/**
+ * **选中之后做什么**：浮层只报「选中了谁 ＋ 按了什么键」，落点在这里决定。
+ *
+ * 这条分叉是拍板过的：同一条 `#名` 行按 `↵` 是「插进正文」（`ref` 露面，不写归属），
+ * 按 `⌥↵` 是「归到本块」（写 `_tags`，正文里那串字消失、行尾出 chip）。
+ * 让按键去区分插法，而不是让同一行有两种「长得一样、按下去不一样」的入口 ——
+ * 行的身份已经决定它是不是标签类；按键只在这个范围内换结果。
+ *
+ * ⚠️ `⌘Enter` 已归「切换待办」，所以这里**不用** ⌘／Ctrl 做归类。
+ */
+function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
+  const pick = row.pick
+  // 浮层已关：从这里往后「现在开着的是谁」一律清掉（同一笔动作只发生一次）
+  triggerCh = null
+  if (!pick) return
+
+  // 命令行：先把 `/查询词` 让出来，再走命令 —— 命令自己决定落在哪一格（与原来同形）
+  if (pick.kind === 'command') {
+    const id = ed.caretBlock()
+    if (id) ed.dropTrigger(id)
+    if (pick.command) registry.invoke(pick.command, (pick.args as Record<string, unknown>) ?? {}, 'slash', uiCtx())
+    return
+  }
+
+  if (pick.kind === 'page' || pick.kind === 'block') {
+    ed.acceptTrigger({ ch, pick: { kind: 'ref', to: pick.id, label: pick.name } })
+    return
+  }
+
+  const classify = mods.altKey && (pick.kind === 'tag' || pick.kind === 'newTag')
+  if (pick.kind === 'tag') {
+    ed.acceptTrigger({
+      ch,
+      pick: classify ? { kind: 'tag', name: pick.name } : { kind: 'ref', to: pick.id, label: pick.name, flavor: '#' },
+    })
+    return
+  }
+  ed.acceptTrigger({ ch, pick: classify ? { kind: 'tag', name: pick.name } : { kind: 'newTag', name: pick.name } })
+}
+
 function showMenu(req: MenuRequest): void {
   const ctx = req.ctx ?? uiCtx()
+  /**
+   * 别的菜单取代检索浮层时把状态清掉：`openMenu` 换掉旧浮层不会回调 `onClose`，
+   * 留着 `triggerCh` 会让下一次按键去改一个已经不在的浮层。
+   */
+  triggerCh = null
   if (req.kind === 'palette') {
     const rows = paletteRows(registry.list(), keyHints())
     layers.openMenu({
@@ -362,27 +450,7 @@ function showMenu(req: MenuRequest): void {
     })
     return
   }
-  if (req.kind === 'slash') {
-    slashOpen = true
-    lastSlashQuery = req.query ?? ''
-    layers.openMenu({
-      rows: rowsForSlash(lastSlashQuery),
-      anchor: req.anchor,
-      title: req.title ?? t('menu.title.slashFilter'),
-      searchable: false,
-      focusSearch: false,
-      emptyText: t('ui.slash.empty'),
-      onPick: (row) => {
-        const id = ed.caretBlock()
-        if (id) ed.dropSlashQuery(id)
-        slashOpen = false
-        if (row.command) registry.invoke(row.command, (row.args as Record<string, unknown>) ?? {}, 'slash', uiCtx())
-      },
-      onClose: () => {
-        slashOpen = false
-      },
-    })
-  }
+  if (req.kind === 'slash') openTrigger('/', req.query ?? '', req.anchor, req.title ?? t('menu.title.slashFilter'))
 }
 
 /* ------------------------------------------------------------ 浮层（转发到 ui/panels） */
@@ -882,7 +950,7 @@ const app: App = {
   showMenu,
   showPopover: (render, anchor) => layers.openPopover(render, anchor),
   closeLayers: () => {
-    slashOpen = false
+    triggerCh = null
     layers.closeAll()
   },
   showPanel: (kind) => openDrawerFor(kind),
@@ -976,22 +1044,28 @@ ed.events = {
   selChange: () => {
     refreshSelectionBar()
   },
-  slashQuery: (q, rect) => {
-    if (q === null) {
-      if (slashOpen) {
-        slashOpen = false
+  /**
+   * 编辑器报「此刻在敲什么」：同一个触发字符继续打字就只换行（浮层不重建、不抢焦点），
+   * 换成另一个字符（或从关闭状态敲下）才重新打开。
+   */
+  triggerQuery: (hit, rect) => {
+    if (hit === null) {
+      if (triggerCh) {
+        triggerCh = null
         layers.closeMenu()
       }
       return
     }
-    if (slashOpen && layers.open) {
-      if (q !== lastSlashQuery) {
-        lastSlashQuery = q
-        layers.setRows(rowsForSlash(q))
+    const trigger = triggers.get(hit.ch)
+    if (!trigger) return
+    if (triggerCh === hit.ch && layers.open) {
+      if (hit.query !== lastQuery) {
+        lastQuery = hit.query
+        layers.setRows(trigger.source(hit.query))
       }
       return
     }
-    showMenu({ kind: 'slash', anchor: rect, query: q })
+    openTrigger(hit.ch, hit.query, rect)
   },
   atomClick: (run, _blockId, el, mods) => handleAtomClick(run, el, mods),
   // 复盘空天格子里落笔：编辑器只报日期，物化那一天（幂等）与重装载归命令层

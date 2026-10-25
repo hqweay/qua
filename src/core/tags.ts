@@ -210,6 +210,25 @@ export function hasTagName(block: Block, name: string, forest: readonly Block[])
 }
 
 /**
+ * `#` 在 `at` 这一格算不算**标签语法的开头**（只看它前面）。
+ *
+ * 三条判断合成一处，是因为「`#` 前面是什么」有两个消费者：
+ *   · `trailingHashTag`（`#名字` 挨着什么才算敲完）；
+ *   · 触发检测（敲下 `#` 就弹浮层，此时名字可能还是空的）。
+ * 两份各写一遍就会出现「面板认它、转换不认它」这种两套判据。
+ *
+ * 判据：`#` 前面不能是**字**（字母/数字/下划线）：`a#b`、`中文#设计`；
+ * URL 的 `#fragment` 也不算。标点／空白之后算数（中文里「（#设计）」很常见）。
+ */
+export function hashStartAt(text: string, at: number): boolean {
+  if (text[at] !== '#') return false
+  if (at > 0 && /[\p{L}\p{N}_]/u.test(text[at - 1]!)) return false
+  // URL 的 `#fragment`（`https://x.dev/#anchor`）：`#` 前面是 `/`，但整串是个链接
+  if (/[a-z][a-z0-9+.-]*:\/\/\S*$/i.test(text.slice(0, at))) return false
+  return true
+}
+
+/**
  * **从一段正文里切出「刚敲完的那个 `#名字`」**。纯函数，零 DOM。
  *
  * 判据：`#名字` 后面必须**真的跟了分隔符**（空格／中英文标点）。
@@ -235,13 +254,7 @@ export function trailingHashTag(
   const SEP = /[\s.,;:!?)\]}。，、；：！？）】]/
   const hash = text.lastIndexOf('#')
   if (hash < 0) return null
-  /**
-   * `#` 前面不能是**字**（字母/数字/汉字）：`a#b`、`中文#设计`、URL 的 `#fragment`
-   * 都不是标签语法。反过来，标点/空白之后算数 —— 中文里「（#设计）」不空一格也很常见。
-   */
-  if (hash > 0 && /[\p{L}\p{N}_]/u.test(text[hash - 1]!)) return null
-  // URL 的 `#fragment`（`https://x.dev/#anchor`）：`#` 前面是 `/`，但整串是个链接
-  if (/[a-z][a-z0-9+.-]*:\/\/\S*$/i.test(text.slice(0, hash))) return null
+  if (!hashStartAt(text, hash)) return null
   const rest = text.slice(hash + 1)
   // `#` 之后不能有空白或再一个 `#`
   if (rest.length === 0 || /^[\s#]/.test(rest)) return null

@@ -287,6 +287,7 @@ export const MSG = {
   'menu.group.ref': '引用',
   'menu.group.pickPage': '页面',
   'menu.group.pickTag': '标签',
+  'menu.group.new': '新建',
 
   /* ------------------------------------------------- 绑定表 label（menu.label.*） */
   'menu.label.toggleCollapse': '折叠 / 展开',
@@ -413,6 +414,12 @@ export const MSG = {
   'ui.palette.placeholder': '输入命令名、中文标题或别名…',
   'ui.palette.empty': '没有匹配的命令',
   'ui.slash.empty': '没有匹配的斜杠命令',
+  /* ------------------------------------------------------------ 检索浮层 */
+  'ui.retrieval.tagTitle': '标签 · 继续打字可过滤',
+  'ui.retrieval.tagEmpty': '没有匹配的标签，继续打字可新建',
+  'ui.retrieval.newTag': '新建 #{name}',
+  'ui.retrieval.mentionTitle': '页与块 · 继续打字可过滤',
+  'ui.retrieval.mentionEmpty': '没有匹配的页或块',
   'ui.refPicker.empty': '没有页面',
   'ui.refPicker.blocks': '{count} 块',
 

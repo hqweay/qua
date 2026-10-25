@@ -24,7 +24,38 @@ export interface Row {
   args?: unknown
   keyHint?: string
   disabled?: boolean
+  /**
+   * 「这一行选中了谁」——**浮层只报对象，不报动作**。
+   *
+   * 同一条 `#名` 行按 `Enter` 与 `⌥Enter` 是两个不同的结果（插进正文 / 归到本块），
+   * 所以「插什么」必须由**调用方那一栏**决定（触发字符表），不能写进行里：
+   * 写进行里就成了「同一行有两种按法、还得记住哪行是哪行」。
+   */
+  pick?: RowPick
 }
+
+/** 一行的选中对象。`fresh` 的那两种还没有块 id（要在落点里当场建出来）。 */
+export type RowPick =
+  | { kind: 'command'; command: string; args?: unknown }
+  | { kind: 'tag'; id: string; name: string }
+  | { kind: 'newTag'; name: string }
+  | { kind: 'page'; id: string; name: string }
+  | { kind: 'block'; id: string; name: string }
+
+/**
+ * 选中时按下的修饰键。
+ *
+ * ⚠️ 只传**判据**，不传 `KeyboardEvent`：浮层不是「谁按了什么」的日志处，
+ *    调用方也不需要为了读一个 `altKey` 拿到整个原生事件（与行内原子的点击同理）。
+ */
+export interface PickMods {
+  altKey: boolean
+  metaKey: boolean
+  ctrlKey: boolean
+  shiftKey: boolean
+}
+
+const NO_MODS: PickMods = { altKey: false, metaKey: false, ctrlKey: false, shiftKey: false }
 
 const GROUP_TITLES: Record<string, string> = {
   'block/1-basic': t('menu.group.basic'),
@@ -39,6 +70,11 @@ const GROUP_TITLES: Record<string, string> = {
   'sel/2-ref': t('menu.group.ref'),
   'pick/1': t('menu.group.pickPage'),
   'pick/2': t('menu.group.pickTag'),
+  // 检索浮层（`#` 标签源 / `@` 页块源）：分组是「结果从哪儿来」，不是命令分类
+  'retrieval/0-new': t('menu.group.new'),
+  'retrieval/1-tag': t('menu.group.pickTag'),
+  'retrieval/1-page': t('menu.group.pickPage'),
+  'retrieval/2-block': t('menu.group.block'),
   'dbg/1-look': t('menu.group.debugLook'),
   'dbg/2-theme': t('menu.group.debugTheme'),
   'dbg/3-state': t('menu.group.debugState'),
@@ -82,7 +118,11 @@ export interface MenuOpts {
   focusSearch?: boolean
   placeholder?: string
   emptyText?: string
-  onPick: (row: Row) => void
+  /**
+   * 选中一行。`mods` 是**按下时的修饰键**：同一个对象在不同按键下可以落到不同结果
+   * （`#名` 按 `Enter` 插进正文、按 `⌥Enter` 归到本块），所以这枚参数必须在选中那一刻取。
+   */
+  onPick: (row: Row, mods: PickMods) => void
   onQuery?: (q: string) => void
   onClose?: () => void
 }
@@ -119,7 +159,9 @@ export class Layers {
         if (k === 'Enter') {
           ke.preventDefault()
           ke.stopPropagation()
-          this.pickActive()
+          // 修饰键必须传出去：同一个对象按 ⌘/⌥ 是不同的落点（⌘Enter 已归「切换待办」，
+          // 所以浮层这里不替它编语义，只如实上报按了什么）
+          this.pickActive({ altKey: ke.altKey, metaKey: ke.metaKey, ctrlKey: ke.ctrlKey, shiftKey: ke.shiftKey })
           return
         }
         if (k === 'Escape') {
@@ -262,7 +304,7 @@ export class Layers {
         e.preventDefault()
         e.stopPropagation()
         this.active = i
-        this.pickActive()
+        this.pickActive({ altKey: e.altKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey })
       })
       this.listEl!.appendChild(item)
     })
@@ -288,12 +330,12 @@ export class Layers {
     this.scrollActiveIntoView()
   }
 
-  private pickActive(): void {
+  private pickActive(mods: PickMods = NO_MODS): void {
     const row = this.rows[this.active]
     if (!row || row.disabled) return
     const onPick = this.opts?.onPick
     this.closeMenu()
-    onPick?.(row)
+    onPick?.(row, mods)
   }
 
   closeMenu(notify = true): void {
