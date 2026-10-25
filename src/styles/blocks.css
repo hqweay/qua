@@ -925,23 +925,21 @@
 }
 /*
   **实例**：`#名` 指向一条记录（不是标签类）。它和行内标签一样占正文 1 格，
-  但用户要能一眼分出「这是某一次」——所以给一枚小方块 ＋ 细边框；
+  但用户要能一眼分出「这是某一次」——所以给它一枚**空心胶囊**（细边框）。
   行内标签保持纯文字，块级 chip 仍是行尾的实底胶囊。三者不靠颜色深浅区分
-  （暗色主题下那不可靠），靠**形状**：无框 / 细框 / 实底。
+  （暗色主题下那不可靠），靠**形状**：无框 / 空心 / 实底。
+  ⚠️ 不加前置小方块：那是待办勾选框的形状，会被误读成「点它能打勾」。
 */
 .atom-obj {
-  padding: 0 4px 0 2px;
+  padding: 0 5px;
   margin: 0 1px;
   background: transparent;
   border: var(--ui-sep) solid var(--ui-border);
-  border-radius: var(--ui-radius-sm);
+  border-radius: var(--ui-radius-pill);
 }
 .atom-obj:hover {
   background: var(--ui-accent-soft);
   border-color: transparent;
-}
-.atom-obj .atom-ico {
-  opacity: 0.55;
 }
 .asset-thumb {
   display: block;

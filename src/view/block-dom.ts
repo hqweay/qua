@@ -102,7 +102,7 @@ export function makeRunEl(r: RunWithId, view?: RefView): HTMLElement {
   /**
    * 三种「标签样」的露面必须能一眼分清：
    *   · `tag`  —— 行内标签（指向标签类，`#名`，无底色）；
-   *   · `obj`  —— 实例（指向一条记录，带小方块图标与细边框）；
+   *   · `obj`  —— 实例（指向一条记录，空心胶囊）；
    *   · `page` —— 普通引用（`[[名]]`）。
    * 判据来自**目标的当前身份**（`RefView.kind`），不在 run 上存第二份。
    */
@@ -133,19 +133,14 @@ export function makeRunEl(r: RunWithId, view?: RefView): HTMLElement {
           : t(view?.state === 'dangling' ? 'ui.atom.pageDanglingTitle' : 'ui.atom.pageTitle', { label })
   if (kind === 'tag' || kind === 'obj') {
     /**
-     * 实例与标签类都用 `#名字` 停在正文里；区分靠**外观**（实例多一枚小方块＋细边框），
+     * 实例与标签类都用 `#名字` 停在正文里；区分靠**外观**（实例是一枚空心胶囊，标签类是纯文字），
      * 不靠改显示文字 —— 文字是用户的正文，不能为了区分身份改它。
+     * ⚠️ 不要给实例加前置小方块：那是待办勾选框的形状，用户会以为点它能打勾。
      *
      * ⚠️ 它占正文 1 格（`data-atom-id`），但**不是** chip（不设 `data-tag-id`）：
      *    chip 的读数规则是「跳过、长度为 0」，而这一枚必须被读成 1 格，
      *    否则正文、光标会整体错位。
      */
-    if (kind === 'obj') {
-      const ico = document.createElement('span')
-      ico.className = 'atom-ico'
-      ico.appendChild(createIcon('square', 'sm'))
-      el.appendChild(ico)
-    }
     const text = document.createElement('span')
     text.className = 'atom-label'
     text.textContent = `#${label}`

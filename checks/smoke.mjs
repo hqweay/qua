@@ -8297,7 +8297,7 @@ await check(
     assert(obj.atoms.length === 1 && obj.atoms[0] !== tagId, `⇧↵ 应插指向**新记录**的实例：${JSON.stringify(obj)}`)
     assert(obj.recordTags.length === 1 && obj.recordTags[0] === tagId, `记录应自带标签归属：${JSON.stringify(obj.recordTags)}`)
     assert(obj.recordText === tagName, `记录的正文应是键入名：${JSON.stringify(obj.recordText)}`)
-    assert(obj.dom.tag === 0 && obj.dom.obj === 1, `⇧↵ 的样式应是实例（细框＋方块），不是行内标签：${JSON.stringify(obj.dom)}`)
+    assert(obj.dom.tag === 0 && obj.dom.obj === 1, `⇧↵ 的样式应是实例（空心胶囊），不是行内标签：${JSON.stringify(obj.dom)}`)
     assert(obj.inToday, '记录应落在当天')
     assert(obj.tags.length === 0, `⇧↵ 不该把宿主归类：${JSON.stringify(obj.tags)}`)
     assert(obj.tagCount === tagCountBefore, `⇧↵ 复用已有标签，不新建第二个：${tagCountBefore} → ${obj.tagCount}`)
