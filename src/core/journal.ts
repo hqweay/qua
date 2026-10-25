@@ -82,7 +82,15 @@ export const FEED_MAX = 30
 
 /** 一个还没进库的日记块（`blocks` 里没有时才造它） */
 export function mkJournalBlock(date: string): Block {
-  return { id: journalId(date), content: [], children: [], props: { _date: date, _icon: 'lucide:calendar' } }
+  const now = Date.now()
+  return {
+    id: journalId(date),
+    content: [],
+    children: [],
+    created: now,
+    modified: now,
+    props: { _date: date, _icon: 'lucide:calendar' },
+  }
 }
 
 /**

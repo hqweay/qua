@@ -12,13 +12,26 @@ import { parseWorkspace, WORKSPACE_VERSION } from '../src/core/workspace.ts'
 const valid = (patch: Record<string, unknown> = {}): string =>
   JSON.stringify({
     version: WORKSPACE_VERSION,
-    blocks: [{ id: 'b1', content: [{ t: 'text', v: 'hello' }], children: [] }],
+    blocks: [blk()],
     activeId: 'b1',
     savedAt: 0,
-    marks: [],
-    atoms: [],
     ...patch,
   })
+
+/**
+ * 一个合法块（时间戳必填，所以每个手写块都要带）。
+ *
+ * 下面那些「形状不对」的用例只该让**被测的那一格**不对：少写时间戳会被判 corrupt，
+ * 于是用例会在错误的理由上变绿（整条链都红，看不出是哪一格拦下来的）。
+ */
+const blk = (patch: Record<string, unknown> = {}): Record<string, unknown> => ({
+  id: 'b1',
+  content: [{ t: 'text', v: 'x' }],
+  children: [],
+  created: 1,
+  modified: 1,
+  ...patch,
+})
 
 test('parseWorkspace: 从没存过 ⇒ empty（不是错误）', () => {
   assert.deepEqual(parseWorkspace(null), { status: 'empty' })
@@ -54,8 +67,20 @@ test('parseWorkspace: JSON 坏了 ⇒ corrupt(parse)', () => {
 
 test('parseWorkspace: 形状不对（空 blocks / 坏 children）⇒ corrupt(shape)', () => {
   assert.deepEqual(parseWorkspace(valid({ blocks: [] })), { status: 'corrupt', reason: 'shape' })
-  const badChild = valid({ blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [{ id: 'b2' }] }] })
+  const badChild = valid({ blocks: [blk({ children: [blk({ id: 'b2', content: [], created: undefined, modified: undefined })] })] })
   assert.deepEqual(parseWorkspace(badChild), { status: 'corrupt', reason: 'shape' })
+})
+
+test('parseWorkspace: 缺 created / modified ⇒ corrupt(shape)（时间戳不可能缺席）', () => {
+  // 这两个字段是**必填**的：每块都必然诞生过一次、也必然有个「最后一次改动」。
+  // 允许它们缺席，就等于给一件不可能缺席的事开一个合法状态，然后每处读代码都要处理它。
+  const noCreated = valid({ blocks: [blk({ created: undefined })] })
+  assert.deepEqual(parseWorkspace(noCreated), { status: 'corrupt', reason: 'shape' })
+  const noModified = valid({ blocks: [blk({ modified: undefined })] })
+  assert.deepEqual(parseWorkspace(noModified), { status: 'corrupt', reason: 'shape' })
+  // 还得是数字：`null` / 字符串不是「有值」，读出来做减法会得到 NaN，而 NaN 不报错
+  assert.equal(parseWorkspace(valid({ blocks: [blk({ created: null })] })).status, 'corrupt')
+  assert.equal(parseWorkspace(valid({ blocks: [blk({ modified: '1' })] })).status, 'corrupt')
 })
 
 test('parseWorkspace: 缺 version ⇒ corrupt(shape)，不当作旧库', () => {
@@ -64,7 +89,7 @@ test('parseWorkspace: 缺 version ⇒ corrupt(shape)，不当作旧库', () => {
 
 test('parseWorkspace: `_lists` 形状不对（非数组 / 坏值 / 重复）⇒ corrupt(shape)', () => {
   const bad = (lists: unknown): unknown =>
-    valid({ blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [], props: { _lists: lists } }] })
+    valid({ blocks: [blk({ props: { _lists: lists } })] })
   assert.equal(parseWorkspace(bad('page')).status, 'corrupt')
   assert.equal(parseWorkspace(bad(['page', 'other'])).status, 'corrupt')
   assert.equal(parseWorkspace(bad(['page', 'page'])).status, 'corrupt', '无序集合：重复没有第二种语义')
@@ -72,17 +97,15 @@ test('parseWorkspace: `_lists` 形状不对（非数组 / 坏值 / 重复）⇒ 
 })
 
 test('parseWorkspace: 在列表里 ⇒ 必须有至少一个别名', () => {
-  const withPageNoName = valid({ blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [], props: { _lists: ['page'] } }] })
+  const withPageNoName = valid({ blocks: [blk({ props: { _lists: ['page'] } })] })
   assert.deepEqual(parseWorkspace(withPageNoName), { status: 'corrupt', reason: 'shape' })
-  const withPageName = valid({
-    blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [], props: { _lists: ['page'], _aliases: ['页名'] } }],
-  })
+  const withPageName = valid({ blocks: [blk({ props: { _lists: ['page'], _aliases: ['页名'] } })] })
   assert.equal(parseWorkspace(withPageName).status, 'ok')
 })
 
 test('parseWorkspace: `_aliases` 形状不对（空数组 / 空串 / 规范化重复）⇒ corrupt(shape)', () => {
   const bad = (aliases: unknown): unknown =>
-    valid({ blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [], props: { _aliases: aliases } }] })
+    valid({ blocks: [blk({ props: { _aliases: aliases } })] })
   assert.equal(parseWorkspace(bad('名字')).status, 'corrupt')
   assert.equal(parseWorkspace(bad([])).status, 'corrupt', '空数组与「没有这一格」是两种写法')
   assert.equal(parseWorkspace(bad(['  '])).status, 'corrupt', '空串不是地址')
@@ -93,7 +116,7 @@ test('parseWorkspace: `_aliases` 形状不对（空数组 / 空串 / 规范化�
 
 test('parseWorkspace: `_display` 只认 `alias` / `text` ⇒ 别的值判 corrupt', () => {
   const bad = (display: unknown): unknown =>
-    valid({ blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [], props: { _aliases: ['x'], _display: display } }] })
+    valid({ blocks: [blk({ props: { _aliases: ['x'], _display: display } })] })
   assert.equal(parseWorkspace(bad('alias')).status, 'ok')
   assert.equal(parseWorkspace(bad('text')).status, 'ok')
   assert.equal(parseWorkspace(bad('both')).status, 'corrupt')
@@ -101,9 +124,9 @@ test('parseWorkspace: `_display` 只认 `alias` / `text` ⇒ 别的值判 corrup
 })
 
 test('parseWorkspace: 旧键 `_roles` / `_alias` 一律判 corrupt（不静默读旧形状）', () => {
-  const roles = valid({ blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [], props: { _roles: ['page'] } }] })
+  const roles = valid({ blocks: [blk({ props: { _roles: ['page'] } })] })
   assert.deepEqual(parseWorkspace(roles), { status: 'corrupt', reason: 'shape' })
-  const alias = valid({ blocks: [{ id: 'b1', content: [{ t: 'text', v: 'x' }], children: [], props: { _alias: '名字' } }] })
+  const alias = valid({ blocks: [blk({ props: { _alias: '名字' } })] })
   assert.deepEqual(parseWorkspace(alias), { status: 'corrupt', reason: 'shape' })
 })
 

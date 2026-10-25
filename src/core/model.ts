@@ -122,6 +122,25 @@ export interface Block {
   content: Run[]
   children: Block[]
   /**
+   * **这块何时诞生**（墙钟毫秒）。
+   *
+   * 为什么是**必填字段**而不是一个 `_` 开头的系统属性：`props` 里每一个键都允许缺席，
+   * 而且缺席本身是信息（`_date` 缺席＝不是日记、`_deletedAt` 缺席＝没被删）。
+   * 创建时间不可能缺席 —— 每块都必然诞生过一次。用属性装它，等于给一件
+   * 不可能缺席的事开了一个「缺席」的合法状态，然后每处读代码都要处理那个不存在的分支。
+   */
+  created: number
+  /**
+   * **最后一次改动这块**（墙钟毫秒）。
+   *
+   * 与 `created` 同一条判据（必填字段），另有两条落地约束：
+   *   · 只在**显式编辑边界**更新（见 `view/editor.ts` 的 `commitEdit`）：每敲一字更新会让
+   *     op 流翻倍，且语义退化成「最后按键时刻」；读操作（打开／聚焦／折叠）一律不算改动。
+   *   · 它必须与正文改动**并进同一条** `block.upsert`：一次编辑是一条 op，
+   *     多一个属性写就多一条账。这也是它不能住在 `props` 里的另一半理由。
+   */
+  modified: number
+  /**
    * **可引用区间**（按需物化）：只有被别处引用时才存在；没有就保持 `undefined`，
    * 不写空数组（空壳会让「有没有」出现两份答案）。
    */
@@ -334,9 +353,15 @@ export interface Located {
   block: Block
 }
 
-export function mkBlock(init: string | readonly Run[] = '', extra: Partial<Pick<Block, 'props'>> = {}): Block {
+export function mkBlock(
+  init: string | readonly Run[] = '',
+  extra: Partial<Pick<Block, 'props' | 'created' | 'modified'>> = {},
+): Block {
   const content = typeof init === 'string' ? textRuns(init) : normalizeRuns(init)
-  return { id: uuidv7Hex(), content, children: [], ...extra }
+  // 创建时刻的**默认落点**：所有「造一块」的路径都从这里过，只有库外的伪块
+  // （反链伪行）与导入/测试显式指定时刻时才各自给值。
+  const now = Date.now()
+  return { id: uuidv7Hex(), content, children: [], created: now, modified: now, ...extra }
 }
 
 /**

@@ -104,10 +104,13 @@ export function isPropKind(v: unknown): v is PropKind {
  * 参数放在最后，现有调用点（`label`／`kind`／`extra`）不受影响。
  */
 export function mkPropDef(label: string, kind: PropKind = 'text', extra: BlockProps = {}, id?: string): Block {
+  const now = Date.now()
   return {
     id: id ?? uuidv7Hex(),
     content: textRuns(label),
     children: [],
+    created: now,
+    modified: now,
     props: { _kind: kind, ...extra },
   }
 }

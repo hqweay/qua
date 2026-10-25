@@ -25,7 +25,7 @@ installMemoryLocalStorage()
 function lib(patch: Partial<Workspace> = {}): Workspace {
   return {
     version: WORKSPACE_VERSION,
-    blocks: [{ id: 'b1', content: [{ t: 'text', v: 'hello' }], children: [] }],
+    blocks: [{ id: 'b1', content: [{ t: 'text', v: 'hello' }], children: [], created: 1, modified: 1 }],
     activeId: 'b1',
     savedAt: 0,
     ...patch,

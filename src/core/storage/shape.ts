@@ -60,8 +60,11 @@ import { isAnno, isRun } from '../runs.ts'
  *            扁平数组退场，正文改存 `Block.content`＝run 序列、可引用区间住
  *            `Block.annos`。旧库的字符串正文新代码不读（内容会静默消失）
  *            ⇒ 作废重 seed，不写迁移。
+ * v19 → v20：`Block` 新增**必填**的 `created`／`modified`（墙钟毫秒）。旧库的块没有
+ *            出生时刻，而它补不回来——补一个假值会让「创建时间」从第一天就说谎
+ *            ⇒ 作废重 seed，**不写**迁移分支。
  */
-export const WORKSPACE_VERSION = 19
+export const WORKSPACE_VERSION = 20
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {
@@ -103,6 +106,9 @@ function isBlock(x: unknown): x is Block {
   if (!x || typeof x !== 'object') return false
   const b = x as Block
   if (typeof b.id !== 'string' || !Array.isArray(b.content) || !b.content.every(isRun) || !Array.isArray(b.children)) return false
+  // **时间戳是必填字段**，少一个就是旧库/坏字节：把它当成「可以缺」的读进来，
+  // 后面每个读它的地方都得处理一个不该存在的分支（`created` 不可能缺席）。
+  if (typeof b.created !== 'number' || typeof b.modified !== 'number') return false
   if (b.annos !== undefined && (!Array.isArray(b.annos) || !b.annos.every(isAnno))) return false
   if (b.props === undefined) return true
   if (!b.props || typeof b.props !== 'object' || Array.isArray(b.props)) return false

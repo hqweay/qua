@@ -77,10 +77,15 @@ export function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uui
   const acc = { refs: [] as BuiltPage['refs'], pendingTags: [] as BuiltPage['pendingTags'] }
   const children = buildTree(seeds, acc)
   const name = title.trim() !== '' ? title.trim() : `未命名-${id.slice(-6)}`
+  // 种子用**固定时刻**，不取 `Date.now()`：每次 seed 得到不同值，断言与截图就钉不住
+  // （这两个时刻是任选的一个工作日下午，只是为了「看起来像真的」）。
+  const at = Date.parse('2026-10-20T14:30:00+08:00')
   const page: PageBlock = {
     id,
     content: textRuns(title),
     children,
+    created: at,
+    modified: at,
     props: { [ALIASES_PROP]: [name], [LISTS_PROP]: ['page'], [DISPLAY_PROP]: 'alias', _icon: icon },
   }
   return { page, refs: acc.refs, pendingTags: acc.pendingTags }
@@ -93,10 +98,14 @@ export function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uui
 export function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
   const acc = { refs: [] as BuiltPage['refs'], pendingTags: [] as BuiltPage['pendingTags'] }
   const children = buildTree(seeds, acc)
+  // 与 `mkPage` 同一个固定时刻（理由见那里）：种子要可重放，不能带「现在是几点」
+  const at = Date.parse('2026-10-20T14:30:00+08:00')
   const block: Block = {
     id: journalId(date),
     content: [],
     children,
+    created: at,
+    modified: at,
     props: { _date: date, _icon: 'lucide:calendar' },
   }
   return { page: block, refs: acc.refs, pendingTags: acc.pendingTags }

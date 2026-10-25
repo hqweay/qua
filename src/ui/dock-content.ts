@@ -84,8 +84,17 @@ export function renderBackrefsInto(deps: DockContentDeps, slot: DockSlotEls, ext
   }
   // 反链项**不是库里的块**，是查询结果：现造一行出来，靠 `props._icon` 拿箭头（大纲行已经读它）。
   // 不给它挂角色 —— 角色说的是「这块在系统里担任什么机制位」，而它没有库身份，从不落盘。
+  // 时间戳只是为了让形状成立（`Block` 的必填字段）：这一行没有生命周期，现造现丢，
+  // 所以不去装成「它刚被创建」——给它一个固定的零值，一眼看出它不是库里的块。
   for (const s of sources) {
-    const row: Block = { id: s.pageId, content: textRuns(s.text), children: [], props: { _icon: 'lucide:corner-up-left' } }
+    const row: Block = {
+      id: s.pageId,
+      content: textRuns(s.text),
+      children: [],
+      created: 0,
+      modified: 0,
+      props: { _icon: 'lucide:corner-up-left' },
+    }
     list.appendChild(renderBlock(row, ctx))
   }
 

@@ -54,10 +54,13 @@ export const normalizeTag = normalizeAlias
  */
 export function mkTagBlock(name: string): Block {
   const title = name.trim()
+  const now = Date.now()
   return {
     id: uuidv7Hex(),
     content: textRuns(title),
     children: [],
+    created: now,
+    modified: now,
     props: { [ALIASES_PROP]: [title], [LISTS_PROP]: ['tag'], [DISPLAY_PROP]: 'alias', _icon: 'lucide:hash' },
   }
 }
