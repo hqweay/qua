@@ -19,12 +19,14 @@ import {
   buildAdjacency,
   displayNameOf,
   findByAlias,
+  hasIdentity,
   hasList,
   isJournal,
   normalizeAlias,
   parentsOf,
   plainText,
   primaryAliasOf,
+  tagIdsOf,
   walkForest,
   type Block,
   type CtxKeys,
@@ -86,12 +88,54 @@ function matchesName(b: Block, want: string): boolean {
 }
 
 /**
- * `#` 源：**标签类** ＋ 一行「新建」。
+ * `#` 源：**已有实例** ＋ **标签类** ＋ 一行「新建记录」。
  *
- * 「新建」只在这一刻**还没有同名标签**时出现：有同名的就别让人再建一个
- * （地址唯一，同名必同一块，所以那一行会是「复用」而不是「新建」）。
- * 「实例」那一栏等记录落地后自然长在这张表里，现在不造。
+ * 三条候选对应三种语义，由**选中的那一行**决定（不由按键决定）：
+ *   · 实例 ＝ 这个标签的一次出现 ⇒ 引用那条记录（`ref` ＋ `flavor:'#'`）；
+ *   · 标签类 ⇒ 引用标签本身（同一个 `ref` run，只差 `to` 指向谁）；
+ *   · 新建记录 ⇒ 建标签（缺则建）＋ 建一条落在今天的记录 ＋ 插入指向它的露面。
+ *
+ * ⚠️ **只有标签类行带 `keyHint`（⌥↵）**：它才支持「归到本块」这个第二种按法。
+ *    在实例/新建行上画这个徽标，等于告诉用户一个按了没用的键。
+ * ⚠️ 空查询不列实例：`#` 刚敲下时先给「有哪些标签」，实例靠继续打字收窄；
+ *    否则一屏就是全库带标签的块，滚滚不到底。
+ * ⚠️ 实例行**排除身份块与空正文块**：
+ *    · 身份块（页／标签／日记／定义／查询）的正文是名字或投影，不是「一次出现」的描述；
+ *    · 空正文的成员多半是「刚被 chip 归类、还没写字」的宿主块 —— 引用它会显示「无标题」，
+ *      这不是用户想提及的对象。正在打字的这一块也排除（引用自己没有意义）。
  */
+const INSTANCE_CAP = 20
+
+function instanceRows(tags: readonly Block[], want: string, deps: TriggerDeps): Row[] {
+  if (want === '') return []
+  const byId = new Map(tags.map((tag) => [tag.id, tag]))
+  const matched = new Set(tags.filter((tag) => matchesName(tag, want)).map((tag) => tag.id))
+  if (matched.size === 0) return []
+  const selfId = deps.selfBlockId()
+  const hits: { row: Row; modified: number }[] = []
+  walkForest(deps.forest(), (b) => {
+    if (b.id === selfId || hasIdentity(b)) return
+    const name = plainText(b.content).trim()
+    if (name === '') return
+    const ids = tagIdsOf(b).filter((id) => matched.has(id))
+    if (ids.length === 0) return
+    const label = displayNameOf(b).trim() || t('ui.page.untitled')
+    hits.push({
+      modified: b.modified,
+      row: {
+        id: `retrieval/obj/${b.id}`,
+        label: `#${label}`,
+        hint: ids.map((id) => `#${displayNameOf(byId.get(id)!)}`).join('、'),
+        icon: 'lucide:square-dashed',
+        group: 'retrieval/1-instance',
+        pick: { kind: 'instance', id: b.id, name: label },
+      },
+    })
+  })
+  // 最近的在前：同一段文字可能有很多次出现，用户更可能想引用刚记下的那一条
+  return hits.sort((a, b) => b.modified - a.modified).slice(0, INSTANCE_CAP).map((h) => h.row)
+}
+
 function tagRows(query: string, deps: TriggerDeps): Row[] {
   const forest = deps.forest()
   const want = normalizeAlias(query)
@@ -102,7 +146,7 @@ function tagRows(query: string, deps: TriggerDeps): Row[] {
 
   // 边图邻接表一次建好：这一屏要为每个标签问「它的上级是谁」，逐个现建就是 O(标签数 × 全库)
   const adj = buildAdjacency(forest)
-  const rows: Row[] = tags.filter((tag) => matchesName(tag, want)).map((tag) => {
+  const classRows: Row[] = tags.filter((tag) => matchesName(tag, want)).map((tag) => {
     const name = displayNameOf(tag)
     const parents = parentsOf(tag, adj)
     return {
@@ -110,28 +154,29 @@ function tagRows(query: string, deps: TriggerDeps): Row[] {
       label: `#${name}`,
       hint: parents.length > 0 ? t('ui.tagPicker.hierarchy', { parents: parents.map((p) => `#${displayNameOf(p)}`).join('、') }) : '',
       icon: 'lucide:hash',
-      group: 'retrieval/1-tag',
+      group: 'retrieval/2-tag',
       keyHint: deps.altEnterHint,
       pick: { kind: 'tag', id: tag.id, name: primaryAliasOf(tag) || name },
     }
   })
 
   const trimmed = query.trim()
-  const exists = trimmed !== '' && tags.some((tag) => addressesOf(tag).some((a) => normalizeAlias(a) === want))
-  if (trimmed !== '' && !exists) {
-    // 同名页会**兼作标签**（`ensureTag` 复用），这件事必须在行上说出来，否则是一次静默的模型改动
-    const page = findByAlias(forest, trimmed, (b) => hasList(b, 'page') && !hasList(b, 'tag'))
-    rows.unshift({
-      id: `retrieval/newTag/${trimmed}`,
-      label: page ? t('ui.tagPicker.reusePage', { name: trimmed }) : t('ui.retrieval.newTag', { name: trimmed }),
-      hint: page ? t('ui.tagPicker.reuseHint') : '',
-      icon: 'lucide:plus',
-      group: 'retrieval/0-new',
-      keyHint: deps.altEnterHint,
-      pick: { kind: 'newTag', name: trimmed },
-    })
-  }
-  return rows
+  // 同名页会**兼作标签**（`ensureTagInTx` 复用）——这件事必须在行上说出来
+  const page = trimmed === '' ? undefined : findByAlias(forest, trimmed, (b) => hasList(b, 'page') && !hasList(b, 'tag'))
+  const newRows: Row[] =
+    trimmed === ''
+      ? []
+      : [
+          {
+            id: `retrieval/newObj/${trimmed}`,
+            label: t('ui.retrieval.newObj', { name: trimmed }),
+            hint: page ? t('ui.tagPicker.reuseHint') : t('ui.retrieval.newObjHint'),
+            icon: 'lucide:plus',
+            group: 'retrieval/3-new',
+            pick: { kind: 'newObj', name: trimmed },
+          },
+        ]
+  return [...instanceRows(tags, want, deps), ...classRows, ...newRows]
 }
 
 /* -------------------------------------------------------- 页与块（`@` 源）*/

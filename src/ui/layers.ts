@@ -38,7 +38,8 @@ export interface Row {
 export type RowPick =
   | { kind: 'command'; command: string; args?: unknown }
   | { kind: 'tag'; id: string; name: string }
-  | { kind: 'newTag'; name: string }
+  | { kind: 'newObj'; name: string }
+  | { kind: 'instance'; id: string; name: string }
   | { kind: 'page'; id: string; name: string }
   | { kind: 'block'; id: string; name: string }
 
@@ -71,8 +72,9 @@ const GROUP_TITLES: Record<string, string> = {
   'pick/1': t('menu.group.pickPage'),
   'pick/2': t('menu.group.pickTag'),
   // 检索浮层（`#` 标签源 / `@` 页块源）：分组是「结果从哪儿来」，不是命令分类
-  'retrieval/0-new': t('menu.group.new'),
-  'retrieval/1-tag': t('menu.group.pickTag'),
+  'retrieval/1-instance': t('menu.group.instance'),
+  'retrieval/2-tag': t('menu.group.pickTag'),
+  'retrieval/3-new': t('menu.group.new'),
   'retrieval/1-page': t('menu.group.pickPage'),
   'retrieval/2-block': t('menu.group.block'),
   'dbg/1-look': t('menu.group.debugLook'),

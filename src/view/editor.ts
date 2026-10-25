@@ -38,6 +38,9 @@ import {
   hasTag,
   removeTagId,
   mkBlock,
+  createObjRecordDirect,
+  createObjRecordInTx,
+  findInForest,
   applyMove,
   dropMove,
   normSel,
@@ -229,12 +232,12 @@ interface EditBase {
  * 浮层选中之后的**落点**（由触发字符那一栏决定，不由行决定）。
  *
  * · `ref`：正文里插一枚指向它的引用（`flavor:'#'` 就是行内标签的露面）；
- * · `newTag`：同一笔里建出标签块，再插那枚露面；
+ * · `newObj`：同一笔里建出标签块（缺则建）＋ 建一条落在今天的记录，再插指向记录的露面；
  * · `tag`：**只归类**——抹掉触发词、把标签写进本块的 `_tags`（行尾出 chip）。
  */
 export type AcceptPick =
   | { kind: 'ref'; to: string; label: string; flavor?: '#' }
-  | { kind: 'newTag'; name: string }
+  | { kind: 'newObj'; name: string }
   | { kind: 'tag'; name: string }
 
 export class BlockEditor {
@@ -2685,13 +2688,13 @@ export class BlockEditor {
    * **选中浮层一行之后的落点**：删掉触发词，并把结果落到它原来的位置。
    *
    * 三件事在同一笔事务里（一次撤销就是一次动作）：
-   *   ① 抹掉 `#查询词`／`@查询词`；② 需要时建出标签块；③ 插入露面 run 或写归属。
+   *   ① 抹掉 `#查询词`／`@查询词`；② 需要时建出标签块／记录；③ 插入露面 run 或写归属。
    * 拆开落盘会留下「字删了、标签没建」这种半批，而半批比慢更贵。
    *
    * `ch` 是**打开浮层时那个触发字符**：落点前再检测一次（文本此刻才是事实），
    * 若最近敲下的已经不是它（用户改了主意／挪了光标），就什么都不做而不是猜一个落点。
    *
-   * 为什么只有 `tag`／`newTag` 才建标签块：`ref` 指向的目标已经存在（浮层刚列出它），
+   * 为什么只有 `tag`／`newObj` 才建标签块：`ref` 指向的目标已经存在（浮层刚列出它），
    * 再 `ensureTag` 一遍等于用名字重新解析一次，反而会把别名/同名页的口径再走一道。
    */
   acceptTrigger(opts: { ch: TriggerChar; pick: AcceptPick }): boolean {
@@ -2702,6 +2705,8 @@ export class BlockEditor {
     if (!id || !loc) return false
     const pick = opts.pick
     const before = this.snap()
+    /** 这次是否往树上插了新块（记录）——真插了就整片重画（记录落在当天，可能就在当前视图里） */
+    let createdBlock = false
 
     const apply = (tx: Tx | null, block: Block): boolean => {
       let tagId: string | null = null
@@ -2712,6 +2717,18 @@ export class BlockEditor {
         if (!tag) return false
         tagId = tag.id
       }
+      /**
+       * 记录是**内容块**，落在当天（与新建页同一条落点口径）。它没有地址：
+       * 正文就是键入的名字（作描述），身份由「哪条引用指向它」给出。
+       */
+      let recordId: string | null = null
+      if (pick.kind === 'newObj') {
+        const record = tx
+          ? createObjRecordInTx(tx, (bid) => findInForest(this.store.blocks, bid), pick.name, tagId!)
+          : createObjRecordDirect(this.store.blocks, pick.name, tagId!)
+        recordId = record.id
+        createdBlock = true
+      }
       const inserted: RefRun[] =
         pick.kind === 'tag'
           ? []
@@ -2719,8 +2736,8 @@ export class BlockEditor {
               {
                 id: uuidv7Hex(),
                 t: 'ref',
-                to: pick.kind === 'ref' ? pick.to : tagId!,
-                ...(pick.kind === 'newTag' || pick.flavor ? { flavor: '#' as const } : {}),
+                to: pick.kind === 'ref' ? pick.to : recordId!,
+                ...(pick.kind === 'newObj' || pick.flavor ? { flavor: '#' as const } : {}),
                 label: pick.kind === 'ref' ? pick.label : pick.name,
               },
             ]
@@ -2751,10 +2768,12 @@ export class BlockEditor {
      * `other`（不可合并）：落点动作是**显式的一次选择**，不是打字的延续。
      */
     this.undo.record(before, 'other', Date.now())
-    this.renderBlock(id)
+    // 插了新块 ⇒ 整片重画（记录落在当天，可能就在这个视图里）；只改这一行时仍走单行
+    if (createdBlock) this.renderAll()
+    else this.renderBlock(id)
     // 光标：插了露面的落在它之后（1 格）；只归类的那一格已经没了，落在原处
     this.placeCaret(id, hit.from + (pick.kind === 'tag' ? 0 : 1))
-    this.emitChange('text', [id])
+    this.emitChange(createdBlock ? 'struct' : 'text', [id])
     return true
   }
 

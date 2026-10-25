@@ -4831,7 +4831,7 @@ await check(
 )
 
 await check(
-  'T67 `#新标签` + Enter 走**一笔**事务：删触发词 ＋ 建标签块 ＋ 插 `flavor:#` 露面同批；一次撤销连标签块一起回滚、宿主 `_tags` 没被写',
+  'T67 `#新标签` + Enter 走**一笔**事务：删触发词 ＋ 建标签块 ＋ 物化记录（落当天）＋ 插 `flavor:#` 露面同批；一次撤销连记录与标签一起回滚、宿主 `_tags` 没被写',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -4839,11 +4839,12 @@ await check(
 
     /**
      * 判据是「一次用户动作 ＝ 一笔事务」：删掉 `#zzz` 那几个字、按名字建出标签块、
-     * 在原位插一枚露面 —— 三件事拆开落盘会留下「字删了、标签没建」「露面有了、归属没写」
-     * 这类半批。它只能靠**同一笔**的 op 集合来证，界面全绿也可能已经是半批。
+     * 物化一条记录（落当天）、在原位插一枚指向**记录**的露面 —— 四件事拆开落盘会留下
+     * 「字删了、记录没建」「露面有了、归属没写」这类半批。它只能靠**同一笔**的 op 集合来证，
+     * 界面全绿也可能已经是半批。
      *
-     * ⚠️ 这条同时钉「提及 ≠ 归类」：Enter 只插露面，**不写宿主 `_tags`**。
-     *    写了的话「同一笔里没有 prop op」这一格就会红。
+     * ⚠️ 这条同时钉「提及 ≠ 归类」：Enter 只插露面，**不写宿主的** `_tags`
+     *    （记录自己的 `_tags` 是它的归属，不是宿主的）。
      */
     const before = await page.evaluate(() => {
       const ed = window.__qua.__editor
@@ -4864,11 +4865,11 @@ await check(
     await page.evaluate((id) => window.__qua.focusBlock(id, 9999), before.id)
     await page.keyboard.type(' #zzz')
     await page.waitForTimeout(180)
-    // 前置：浮层真的弹了，而且当前那一行就是「新建 #zzz」
+    // 前置：浮层真的弹了，而且当前那一行就是「新建记录 #zzz」
     const rows = await layerRows(page)
     assert(rows.length > 0, `敲 # 应弹出浮层：${JSON.stringify(rows)}`)
-    assert(rows[0].label.includes('zzz'), `第一行应是「新建 #zzz」：${JSON.stringify(rows.slice(0, 3))}`)
-    assert(rows[0].key !== '', `标签类行要画出 ⌥↵ 徽标：${JSON.stringify(rows[0])}`)
+    assert(rows[0].label.includes('zzz'), `第一行应是「新建记录 #zzz」：${JSON.stringify(rows.slice(0, 3))}`)
+    assert(rows[0].key === '', `新建记录行**不是标签类行**，不该画 ⌥↵ 徽标：${JSON.stringify(rows[0])}`)
 
     await page.keyboard.press('Enter')
     await page.waitForTimeout(220)
@@ -4881,6 +4882,10 @@ await check(
       const ops = window.__qua.lastOps()
       const tagOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === null)
       const tagId = tagOp?.id ?? ''
+      const atoms = window.__qua.atoms().filter((a) => a.blockId === t.id)
+      const recordId = atoms[0]?.target?.id ?? ''
+      const record = ed.store.find(recordId)
+      const day = ed.store.blocks.find((b) => b.props?._date)
       return {
         ops: ops.map((o) => ({
           e: o.e,
@@ -4891,28 +4896,40 @@ await check(
           parent: o.value && 'parent' in o.value ? o.value.parent : undefined,
         })),
         tagId,
+        recordId,
         tagAlias: ed.store.find(tagId)?.props?._aliases?.[0] ?? '',
+        recordText: plain(record),
+        recordTags: record?.props?._tags ?? [],
+        recordInToday: Boolean(day?.children.some((x) => x.id === recordId)),
         text: plain(live),
         tags: live?.props?._tags ?? [],
-        atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).map((a) => ({ kind: a.kind, target: a.target?.id ?? '' })),
+        atoms: atoms.map((a) => ({ kind: a.kind, target: a.target?.id ?? '' })),
       }
     }, before)
 
     const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.runs !== '')
     const tagBlockOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent === null)
+    const recordOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.id === after.recordId)
     assert(textOps.length === 1, `内容应恰写一次：${JSON.stringify(after.ops)}`)
     assert(textOps[0].id === before.id && textOps[0].runs.includes('tag'), `那一次已是露面：${JSON.stringify(textOps)}`)
     assert(tagBlockOps.length === 1, `同一笔里应建出 1 个标签块：${JSON.stringify(after.ops)}`)
-    assert(after.ops.every((o) => o.e !== 'prop'), `提及不写归属 ⇒ 0 条 prop op：${JSON.stringify(after.ops)}`)
+    assert(recordOps.length === 1, `同一笔里应物化 1 条记录：${JSON.stringify(after.ops)}`)
+    assert(after.ops.every((o) => o.e !== 'prop'), `提及不写**宿主**归属 ⇒ 0 条 prop op：${JSON.stringify(after.ops)}`)
     assert(after.ops.every((o) => o.e !== 'anno'), `露面住在内容里 ⇒ 0 条 anno：${JSON.stringify(after.ops)}`)
-    assert(after.ops.length === 2, `这一笔应恰好 2 条（内容 ＋ 标签块）：${JSON.stringify(after.ops)}`)
+    assert(after.ops.length === 3, `这一笔应恰好 3 条（宿主内容 ＋ 标签块 ＋ 记录）：${JSON.stringify(after.ops)}`)
 
     assert(after.tagAlias === 'zzz', `标签块的名字应是 zzz：${JSON.stringify(after.tagAlias)}`)
     assert(after.tags.length === 0, `宿主这个块不该被归类：${JSON.stringify(after.tags)}`)
+    assert(after.recordText === 'zzz', `记录的正文应是键入名（作描述）：${JSON.stringify(after.recordText)}`)
+    assert(
+      after.recordTags.length === 1 && after.recordTags[0] === after.tagId,
+      `记录自己应归属那个标签（不是宿主）：${JSON.stringify(after.recordTags)}`,
+    )
+    assert(after.recordInToday, `记录应落在当天：位置是真实信息（这件事发生在哪天）`)
     assert(after.text === `${before.text} `, `投影应是「前缀 ＋ 空格」（露面不进投影、占 1 格）：${JSON.stringify(after.text)}`)
     assert(
-      after.atoms.length === 1 && after.atoms[0].kind === 'tag' && after.atoms[0].target === after.tagId,
-      `正文里应有 1 枚指向它的 tag 露面：${JSON.stringify(after.atoms)}`,
+      after.atoms.length === 1 && after.atoms[0].kind === 'tag' && after.atoms[0].target === after.recordId,
+      `正文里应有 1 枚指向**记录**（不是标签类）的 tag 露面：${JSON.stringify(after.atoms)}`,
     )
 
     // 落点那笔撤销：正文、原子、**标签块本身**回到 pick 前（打完字、还没选中的样子）
@@ -4930,14 +4947,16 @@ await check(
         text: plain(live),
         tags: live?.props?._tags ?? [],
         tagGone: ed.store.find(t.tagId) === undefined,
+        recordGone: ed.store.find(t.recordId) === undefined,
         atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length,
         total: count(ed.store.blocks),
         tagCount: ed.store.blocks.filter((x) => (x.props?._lists ?? []).includes('tag')).length,
       }
-    }, { id: before.id, tagId: after.tagId })
+    }, { id: before.id, tagId: after.tagId, recordId: after.recordId })
 
     assert(back.text === `${before.text} #zzz`, `一次撤销应回到落点前的正文（字还留着）：${JSON.stringify(back.text)}`)
     assert(back.tagGone, '一次撤销后新建的标签块应不在模型里')
+    assert(back.recordGone, '一次撤销后新建的记录应不在模型里')
     assert(back.tags.length === 0, `一次撤销后归属仍该是空的：${JSON.stringify(back.tags)}`)
     assert(back.atoms === 0, `一次撤销后正文里的 tag 露面应回滚：剩 ${back.atoms} 枚`)
     assert(back.total === before.total, `一次撤销块数应回原样：${before.total}，实际 ${back.total}`)
@@ -4954,7 +4973,7 @@ await check(
     assert(back2 === before.text, `第二次撤销应回到输入前的正文「${before.text}」：${JSON.stringify(back2)}`)
 
     await ctx.close()
-    return `#zzz + Enter ⇒ 一笔 2 条 op（内容带露面 ＋ 标签块）、宿主 _tags 零写入；一次撤销连标签块一起回滚`
+    return `#zzz + Enter ⇒ 一笔 3 条 op（宿主内容带露面 ＋ 标签块 ＋ 落在当天的记录）、宿主 _tags 零写入；一次撤销连记录与标签一起回滚`
   },
 )
 
@@ -8080,6 +8099,99 @@ await check(
 
     await ctx.close()
     return `@${pageQuery} ⇒ 页引用（指向 ${pg.id.slice(-6)}）；@检索标记甲 ⇒ 块引用（指向 ${setup.targetId.slice(-6)}）`
+  },
+)
+
+await check(
+  'T113 `#` 浮层的实例行：选已有记录 ⇒ 指向那条记录（不新建）；删正文里那枚只摘引用，记录还在',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 「实例」是**这个标签的一次出现**：同一条记录可以被提及很多次，每次插入的都是一枚
+     * 指向**同一条记录**的 `ref` run。所以这一条要能回答两件事：
+     *   ① 实例行排在标签类之前（有实例时，默认 Enter 是提及那条记录，不是引用类）；
+     *   ② 选实例**不新建**记录/标签，删掉正文里那一枚也**不删记录**（对象库心智）。
+     */
+    const target = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+      window.__qua.focusBlock(id, 0)
+      return id
+    })
+    await page.waitForTimeout(80)
+    await page.keyboard.type('#检索丙')
+    await page.waitForTimeout(200)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(220)
+
+    const made = await page.evaluate((id) => {
+      const ed = window.__qua.__editor
+      const tag = window.__qua.allBlocks().find((x) => x.roles?.includes('tag') && x.text === '检索丙')
+      const atom = window.__qua.atoms().filter((a) => a.blockId === id)[0]
+      const count = (list) => list.reduce((n, k) => n + 1 + count(k.children), 0)
+      return {
+        tagId: tag?.id ?? '',
+        recordId: atom?.target?.id ?? '',
+        total: count(ed.store.blocks),
+        tags: ed.store.blocks.filter((x) => (x.props?._lists ?? []).includes('tag')).length,
+        records: window.__qua.allBlocks().filter((x) => !x.roles?.length && x.text === '检索丙').length,
+      }
+    }, target)
+    assert(made.tagId !== '' && made.recordId !== '', `前置：应已建出标签与记录：${JSON.stringify(made)}`)
+    assert(made.recordId !== made.tagId, `露面应指向记录，不是标签类：${JSON.stringify(made)}`)
+
+    // 再提一次：有实例时实例行排在标签类之前、且**不带** ⌥↵ 徽标（它没有「归类」这层含义）
+    await page.evaluate((id) => window.__qua.focusBlock(id, 9999), target)
+    await page.keyboard.type(' #检索丙')
+    await page.waitForTimeout(220)
+    const rows = await layerRows(page)
+    const sameLabel = rows.filter((r) => r.label === '#检索丙')
+    assert(sameLabel.length === 2, `候选里应有「实例」与「标签类」两行：${JSON.stringify(rows.slice(0, 6))}`)
+    assert(
+      rows[0].label === '#检索丙' && rows[0].hint.includes('#检索丙') && rows[0].key === '',
+      `第一行应是实例（hint 标明标签、无 ⌥↵）：${JSON.stringify(rows.slice(0, 3))}`,
+    )
+
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(220)
+
+    const after = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const atoms = window.__qua.atoms().filter((a) => a.blockId === t.id)
+      const count = (list) => list.reduce((n, k) => n + 1 + count(k.children), 0)
+      return {
+        atoms: atoms.map((a) => ({ id: a.id, target: a.target?.id ?? '' })),
+        total: count(ed.store.blocks),
+        tags: ed.store.blocks.filter((x) => (x.props?._lists ?? []).includes('tag')).length,
+        records: window.__qua.allBlocks().filter((x) => !x.roles?.length && x.text === '检索丙').length,
+        recordAlive: ed.store.find(t.recordId) !== undefined,
+      }
+    }, { id: target, recordId: made.recordId })
+
+    assert(after.atoms.length === 2, `两次提及应各插一枚露面：${JSON.stringify(after.atoms)}`)
+    assert(after.atoms.every((a) => a.target === made.recordId), `两枚都该指向同一条记录（实体语义）：${JSON.stringify(after.atoms)}`)
+    assert(after.total === made.total, `选实例不该新建块：${made.total} → ${after.total}`)
+    assert(after.tags === made.tags, `选实例不该新建标签：${made.tags} → ${after.tags}`)
+    assert(after.records === made.records, `选实例不该新建记录：${made.records} → ${after.records}`)
+
+    // 删正文里那一枚 = 摘引用，**不删记录**（删记录本体是另一件事）
+    await page.evaluate((atomId) => window.__qua.__editor.removeRun(atomId), after.atoms[1].id)
+    await page.waitForTimeout(160)
+    const removed = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      return {
+        atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length,
+        recordAlive: ed.store.find(t.recordId) !== undefined,
+      }
+    }, { id: target, recordId: made.recordId })
+    assert(removed.atoms === 1, `删一枚只该少一枚：${JSON.stringify(removed)}`)
+    assert(removed.recordAlive, '删引用不该删记录（对象库心智）')
+
+    await ctx.close()
+    return `实例行先于标签类；选它 ⇒ 两枚露面都指向同一条记录、零新建；删一枚 ⇒ 记录仍在`
   },
 )
 

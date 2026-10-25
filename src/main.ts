@@ -400,15 +400,29 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
     return
   }
 
-  const classify = mods.altKey && (pick.kind === 'tag' || pick.kind === 'newTag')
+  /**
+   * 实例一条记录 ＝ 提及「这个标签的一次出现」：与 `@` 的引用同一个落点，
+   * 只多一个 `flavor:'#'` 的显示风味。选中的是哪条记录由浮层那一行给出。
+   */
+  if (pick.kind === 'instance') {
+    ed.acceptTrigger({ ch, pick: { kind: 'ref', to: pick.id, label: pick.name, flavor: '#' } })
+    return
+  }
+
+  // 新建记录：建标签（缺则建）＋ 建一条落在今天的记录 ＋ 插指向它的露面，同一笔事务
+  if (pick.kind === 'newObj') {
+    ed.acceptTrigger({ ch, pick: { kind: 'newObj', name: pick.name } })
+    return
+  }
+
+  // 归类只对**标签类**行有效：实例/新建记录都没有「把整块归进去」这一层含义
+  const classify = mods.altKey && pick.kind === 'tag'
   if (pick.kind === 'tag') {
     ed.acceptTrigger({
       ch,
       pick: classify ? { kind: 'tag', name: pick.name } : { kind: 'ref', to: pick.id, label: pick.name, flavor: '#' },
     })
-    return
   }
-  ed.acceptTrigger({ ch, pick: classify ? { kind: 'tag', name: pick.name } : { kind: 'newTag', name: pick.name } })
 }
 
 function showMenu(req: MenuRequest): void {
