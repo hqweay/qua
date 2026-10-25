@@ -245,3 +245,39 @@ button.ghost.wide {
   width: 100%;
   text-align: left;
 }
+
+/* ---------------------------------------------------------- 归属树面板 */
+
+/*
+ * 归属树：一条归属边摊平成一行行**导航**（不是可编辑的块）。
+ * 缩进只用 `--ui-indent`：深度是这一行唯一的结构信息，别处不需要知道它。
+ */
+.belongs-tabs {
+  display: flex;
+  gap: var(--ui-gap-2);
+  padding: 0 var(--ui-gap-3) var(--ui-gap-2);
+}
+.belongs-tab {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: var(--ui-gap-1) var(--ui-gap-3);
+  border-radius: var(--ui-radius-pill);
+  font: inherit;
+  font-size: var(--ui-fs-2xs);
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.belongs-tab:hover {
+  background: var(--ui-surface-sunken);
+  color: var(--ui-text);
+}
+/* 当前面：只靠底色与字重，不加边框（与槽里其它小控件一致） */
+.belongs-tab[data-active='1'] {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+  font-weight: 600;
+}
+.belongs-row {
+  padding-inline-start: calc(var(--ui-indent) * var(--depth, 0));
+}

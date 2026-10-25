@@ -7574,6 +7574,74 @@ await check(
   },
 )
 
+/* ------------------------------------------------- 归属树面板（左槽） */
+
+await check('T104 归属树面板：页/标签两面、根按本树重算、点行打开、跨类只由属性区回答', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  const ids = await page.evaluate(() => {
+    const ps = window.__qua.pages()
+    return { a: ps[0].id, b: ps[1].id, c: ps[2].id, nameB: ps[1].title, nameC: ps[2].title }
+  })
+  const invoke = (name, args) => page.evaluate(([n, a]) => window.__qua.invoke(n, a), [name, args])
+
+  // 左槽有一张「归属」卡，默认看**页**那一面
+  const card = await page.evaluate(() => ({
+    hasCard: [...document.querySelectorAll('#dock-left .dock-card-title')].some((e) => e.textContent === '归属'),
+    active: document.querySelector('#dock-left .belongs-tab[data-active="1"]')?.textContent ?? '',
+    rows: document.querySelectorAll('#dock-left .belongs-row').length,
+  }))
+  assert(card.hasCard, '左槽应有「归属」卡')
+  assert(card.active === '页', `默认面应是页：${JSON.stringify(card)}`)
+
+  // 页 B 归在页 A 下 ⇒ B 以 depth=1 出现在 A 下面
+  await invoke('core.belongs-to/add', { childId: ids.b, parentId: ids.a })
+  await page.waitForTimeout(250)
+  const nested = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#dock-left .belongs-row')].map((r) => ({
+      depth: r.dataset.depth,
+      text: r.querySelector('.p-title')?.textContent ?? '',
+    }))
+    return rows
+  })
+  const atOne = nested.filter((r) => r.depth === '1')
+  assert(atOne.some((r) => r.text === ids.nameB), `B 应在 A 下面（depth=1）：${JSON.stringify(nested)}`)
+  assert(nested.some((r) => r.depth === '0' && r.text !== ids.nameB), '同屏要有根行（A 仍是根）')
+
+  // 点那一行 ⇒ 打开 B（面板只是导航，不写库）
+  await page.locator('#dock-left .belongs-row[data-depth="1"] .page-item').first().click()
+  await page.waitForTimeout(250)
+  const opened = await page.evaluate(() => window.__qua.snapshot().activeId)
+  assert(opened === ids.b, `点行应打开 B：${opened} ≠ ${ids.b}`)
+
+  // 跨类：页 C 归在**标签** T 下 ⇒ 页的树里 C 是根、T 不出现；标签的树里 T 是根、C 不出现
+  const tagId = await page.evaluate(() => window.__qua.allBlocks().find((b) => b.roles.includes('tag')).id)
+  await invoke('core.belongs-to/add', { childId: ids.c, parentId: tagId })
+  await page.waitForTimeout(250)
+  const pageFace = await page.evaluate(() => ({
+    rows: [...document.querySelectorAll('#dock-left .belongs-row')].map((r) => ({ depth: r.dataset.depth, text: r.querySelector('.p-title')?.textContent ?? '' })),
+  }))
+  assert(
+    pageFace.rows.some((r) => r.depth === '0' && r.text === ids.nameC),
+    `C 的父被露面筛掉 ⇒ C 升级为根（否则它从树里消失）：${JSON.stringify(pageFace)}`,
+  )
+  assert(!pageFace.rows.some((r) => r.text === '任务'), '标签不该出现在页的归属树里')
+
+  await page.locator('#dock-left .belongs-tab[data-face="tag"]').click()
+  await page.waitForTimeout(250)
+  const tagFace = await page.evaluate(() => ({
+    active: document.querySelector('#dock-left .belongs-tab[data-active="1"]')?.textContent ?? '',
+    rows: [...document.querySelectorAll('#dock-left .belongs-row')].map((r) => r.querySelector('.p-title')?.textContent ?? ''),
+  }))
+  assert(tagFace.active === '标签', `切面之后应是标签那一面：${JSON.stringify(tagFace)}`)
+  assert(tagFace.rows.includes('任务'), `标签树里 T 是根：${JSON.stringify(tagFace)}`)
+  assert(!tagFace.rows.includes(ids.nameC), '页不进标签的归属树')
+
+  await ctx.close()
+  return `页/标签两面；B 在 A 下 depth=1；点行打开 B；跨类的 C 在自己那棵树里是根、那条边两棵树都不画`
+})
+
 /** 判红的是「不在已知失败表里的失败」；已知失败逐条打印，不计入退出码 */
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length

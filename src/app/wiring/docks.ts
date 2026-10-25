@@ -4,13 +4,15 @@
  * 槽实例（mountDockSlot）与钉住区组件（DockBlocks）在装配入口的启动段才创建：
  * 这里只经 deps 现取，不持有它们。
  */
-import { findInForest } from '../../core/index.ts'
+import { belongsToTree, buildAdjacency, findInForest } from '../../core/index.ts'
+import { t } from '../../core/msg.ts'
 import type { Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { Workspace, Prefs } from '../../core/workspace.ts'
 import type { DockBlocks } from '../../ui/dock-blocks.ts'
 import type { DockSlotEls } from '../../ui/dock.ts'
 import { renderBackrefsInto, renderTodayInto, type DockContentDeps } from '../../ui/dock-content.ts'
+import { BelongsTree } from '../../ui/belongs-tree.ts'
 
 export type DocksDeps = {
   kb: MemoryKb
@@ -54,12 +56,30 @@ export function setupDocks(deps: DocksDeps) {
    * 于是重画顺序是「钉住区 → 检视卡 → 反链卡」，常驻的排在前面（槽是纵向堆叠，
    * 位置稳定是认路的一部分）。
    */
+  /**
+   * **归属树面板**（左槽）：页 / 标签两面，同一个摊平函数。
+   *
+   * 面是视图状态、住在组件实例里；每次整槽重画都重新取一行行 —— 根集合随露面变，
+   * 缓存一处就会出现「补了露面，位置还是原来那个」。
+   */
+  const belongsTree = new BelongsTree({
+    rows: (face) => belongsToTree(buildAdjacency(deps.getWs().blocks), face),
+    activeId: () => deps.getWs().activeId,
+    open: (id) => dockDeps.openPage(id),
+    untitled: t('ui.page.untitled'),
+    refresh: () => renderDocks(),
+  })
+
   function renderDocks(): void {
     const { left: dockLeft, right: dockRight } = deps.getSlots()
     // 先让钉住区处理「清单变了没有」：它只在增删时动 DOM，重画其余卡片不会碰它
     dockPins?.left.render()
     dockPins?.right.render()
-    renderTodayInto(dockDeps, dockLeft, dockPins ? { persistent: [dockPins.left.card] } : {})
+    // 归属树排在今日上面：导航在上、时间在下（同一条判据：先认位置，再看今天）
+    renderTodayInto(dockDeps, dockLeft, {
+      cards: [belongsTree.card()],
+      ...(dockPins ? { persistent: [dockPins.left.card] } : {}),
+    })
     const persistentRight = dockPins ? [dockPins.right.card, deps.inspectCard()] : [deps.inspectCard()]
     renderBackrefsInto(dockDeps, dockRight, { persistent: persistentRight })
   }

@@ -178,6 +178,11 @@ export const MSG = {
   'ui.alias.noCandidates': '没有可添加的字段',
   /* 标签层级（属于 / 包含 / 成员） */
   'ui.belongs.title': '属于',
+  'ui.belongs.treeTitle': '归属',
+  'ui.belongs.pages': '页',
+  'ui.belongs.tags': '标签',
+  'ui.belongs.emptyPages': '还没有页',
+  'ui.belongs.emptyTags': '还没有标签',
   'ui.belongs.remove': '移除这条归属',
   'ui.belongs.placeholder': '页名或标签名（回车添加）',
   'ui.belongs.notFound': '找不到页或标签「{name}」',

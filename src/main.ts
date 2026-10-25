@@ -679,7 +679,14 @@ const app: App = {
     cycleLabels: (path) => cyclePathLabels(path, adjacency(), (id) => shortId(id)),
     danglingOf: (child) => danglingOf(child, adjacency()),
     pruneGone: (child) => pruneGone(child, adjacency()),
-    write: writeProps,
+    /**
+     * 边一改，左槽的归属树要当场变：那条树就是这条边的摊平。
+     * （属性区自己会重画；槽由装配层排，所以在这里补一次。）
+     */
+    write: (id, fn) => {
+      writeProps(id, fn)
+      renderDocks()
+    },
     toast: (text, kind) => app.toast(text, kind),
     shortId: (id) => shortId(id),
   }),
