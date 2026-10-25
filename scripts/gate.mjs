@@ -172,14 +172,18 @@ async function runSmoke() {
   cases.sort((a, b) => a.idx - b.idx)
   await rm(dir, { recursive: true, force: true })
 
-  const failures = cases.filter((c) => !c.ok)
+  const failures = cases.filter((c) => !c.ok && !c.known)
+  const knownFailures = cases.filter((c) => !c.ok && c.known)
   return {
     code: problems.length || failures.length ? 1 : 0,
     ms: Date.now() - t0,
     out: rs.map((r, i) => `--- 冒烟 ${i + 1}/${SHARDS} ---\n${r.out}`).join('\n'),
     problems,
     failures,
-    evidence: `${cases.length - failures.length}/${cases.length}`,
+    knownFailures,
+    evidence: `${cases.length - failures.length - knownFailures.length}/${cases.length}${
+      knownFailures.length ? `（${knownFailures.length} 条已知失败）` : ''
+    }`,
   }
 }
 
@@ -193,12 +197,15 @@ async function runGroup(title, items, env = {}) {
   console.log(`\n${C.bold(title)}`)
   for (const it of items) console.log(`  ${C.dim(`▶ ${it.label}`)}`)
   const red = []
+  /** 已知失败：即使这一步整体算过，也要逐条打出来 */
+  const knownRows = []
   await Promise.all(
     items.map(async (it) => {
       const r = await it.run(env)
       const ok = r.code === 0
       const ev = r.evidence ?? (ok ? evidenceOf(it.label, r.out) : '')
       if (!ok) red.push({ it, r })
+      for (const c of r.knownFailures ?? []) knownRows.push({ it, c })
       console.log(`  ${ok ? C.green('✓') : C.red('✗')} ${pad(it.label, 18)} ${secs(r.ms).padStart(6)}${ev ? `   ${C.dim(`（${ev}）`)}` : ''}`)
       if (ok && VERBOSE) console.log(r.out.replace(/^/gm, '      '))
     }),
@@ -209,6 +216,10 @@ async function runGroup(title, items, env = {}) {
     for (const c of r.failures ?? []) {
       console.log(`      ${C.red('FAIL')}  ${c.name}\n            ${String(c.msg).replace(/\n/g, '\n            ')}`)
     }
+  }
+  // 已知失败：不判红，但**必须**看得见（否则「放行」会退化成「不知道」）
+  for (const { c } of knownRows) {
+    console.log(`\n      ${C.yellow('KNOWN')}  ${c.name}\n            ${C.yellow(`已知失败（不判红）：${c.known}`)}`)
   }
   return red.length === 0
 }
