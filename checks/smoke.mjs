@@ -59,24 +59,14 @@ let seq = 0
  * 把同一份用例拷过去跑，失败原文逐字相同。那种失败不是当前改动的账，但也不能假装不存在：
  * 命中这里时**逐条打印**（带原因），只是不计入退出码。
  *
- * ⚠️ 这张表只能**短**。它一长，门禁就变成了「读日志」而不是「看红绿」。
+ * ⚠️ **这张表只能短，最好是空的。** 它一长，门禁就变成了「读日志」而不是「看红绿」。
  *    新条目必须写明「在哪个检出上验过同样挂」，并留一条待办去修；
  *    修好之后从表里删掉（而不是把断言改松）。
+ *
+ * 2026-10-25：三条全修好了 ⇒ 表回到空。留这张空表而不是删掉机制——
+ *    下一个「既有失败」出现时，需要的是一个**显式**的去处，而不是又一次「先放着不管」。
  */
-const KNOWN_FAILURES = [
-  {
-    match: 'T39 显示名 = 主别名',
-    why: '删空首行后打不进字：空块拿不到输入（真机探针复现：焦点在编辑器里、选区也在，模型不落字）',
-  },
-  {
-    match: 'T46 从正文块标拖进左槽',
-    why: '槽内那一行渲染不出 .tx（钉住行是空的）⇒ 选择器等不到',
-  },
-  {
-    match: 'T47 槽内连续输入不被整槽重画打断',
-    why: '同 T46 的同一处：槽内 .tx 缺失',
-  },
-]
+const KNOWN_FAILURES = []
 
 const knownOf = (name) => KNOWN_FAILURES.find((k) => name.includes(k.match))
 
@@ -155,7 +145,7 @@ const pinRootText = (page, side, blockId) =>
   page.evaluate(
     ({ side, id }) =>
       document.querySelector(
-        `#dock-${side} .pin-row[data-block-id="${id}"] > .pin-editor > .blk[data-depth="0"] > .tx`,
+        `#dock-${side} .pin-row[data-block-id="${id}"] .pin-editor .blk[data-depth="0"] > .tx`,
       )?.textContent ?? '',
     { side, id: blockId },
   )
@@ -3606,7 +3596,7 @@ await check('T46 从正文块标拖进左槽 ⇒ 钉住并渲染；在槽里编�
   assert(afterDrag.rows.left.includes(id), `左槽应渲染该块：${JSON.stringify(afterDrag.rows.left)}`)
 
   // 在槽里（它的第一个实例）打字 ⇒ 正文同一个块（同一 store 对象）应同步
-  const sel = `#dock-left .pin-row[data-block-id="${id}"] > .pin-editor > .blk[data-depth="0"] > .tx`
+  const sel = `#dock-left .pin-row[data-block-id="${id}"] .pin-editor .blk[data-depth="0"] > .tx`
   await page.locator(sel).click()
   await page.keyboard.press('End')
   await page.keyboard.type('槽内附加')
@@ -3641,7 +3631,7 @@ await check('T47 槽内连续输入不被整槽重画打断；⌘Z 在槽里回�
   assert(drag?.hot, '拖进左槽应给出高亮')
   await page.waitForTimeout(140)
 
-  const sel = `#dock-left .pin-row[data-block-id="${id}"] > .pin-editor > .blk[data-depth="0"] > .tx`
+  const sel = `#dock-left .pin-row[data-block-id="${id}"] .pin-editor .blk[data-depth="0"] > .tx`
   await page.locator(sel).click()
   await page.keyboard.press('End')
   // 逐键输入：若每键都整槽重画，光标会被重置，最终文本不会是一段连续的串
@@ -6647,6 +6637,108 @@ await check(
 
     await ctx.close()
     return `add-field(任务状态) ⇒ 当场 todo ＋ 方框；点一下 ⇒ done；clear-value ⇒ 两者一起消失`
+  },
+)
+
+/* ------------------------------------------------------- 行契约（会红的回归） */
+
+/**
+ * 这两条是 2026-10-25 修掉的两个**真事故**的钉子。它们都不是「模型算错了」，
+ * 而是「DOM 契约被别的东西悄悄改掉了」——所以断言必须落在 DOM 结构上，不能只看模型。
+ */
+
+await check(
+  'T94 首块块首退格不拆行：gutter 与 .tx 都还在，之后照常打得进字（放给浏览器会把它们整段删掉）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const id = await page.evaluate(() => window.__qua.blocks()[0].id)
+    const shape = () =>
+      page.evaluate((i) => {
+        const el = document.querySelector(`.blk[data-block-id="${i}"]`)
+        const tx = el?.querySelector(':scope > .tx')
+        return {
+          left: Boolean(el?.querySelector(':scope > .left')),
+          tx: Boolean(tx),
+          txText: tx?.textContent ?? '(no .tx)',
+          blk: Boolean(el),
+          model: window.__qua.blocks().find((x) => x.id === i)?.text ?? '(not in view)',
+        }
+      }, id)
+
+    const start = await shape()
+    assert(start.left && start.tx, `前置：这一行应同时有 gutter 与 .tx：${JSON.stringify(start)}`)
+
+    // 清空（正好按到空），再**多按一下**——那一按在首块上没有任何事可做
+    const len = start.txText.length
+    await page.evaluate(({ i, l }) => window.__qua.focusBlock(i, l), { i: id, l: len })
+    for (let n = 0; n < len + 1; n++) await page.keyboard.press('Backspace')
+    await page.waitForTimeout(200)
+
+    const after = await shape()
+    /**
+     * 判据：**行还在、结构没被拆**。
+     * 放给浏览器时原生删除会把 gutter（`.left`）与正文（`.tx`）当成两个可删节点整段摘掉，
+     * 那一行从此没有可落光标的地方 —— 表现是「把这块删空之后再也打不进字」。
+     */
+    assert(after.blk, `这一行不该消失：${JSON.stringify(after)}`)
+    assert(after.left, `gutter 不该被删掉：${JSON.stringify(after)}`)
+    assert(after.tx, `正文槽 .tx 不该被删掉（没了它就没有可落光标的地方）：${JSON.stringify(after)}`)
+    assert(after.model === '', `模型里应是空块：${JSON.stringify(after)}`)
+
+    // 关键的后半句：还能打进去
+    await page.keyboard.type('还能打字')
+    await page.waitForTimeout(250)
+    const typed = await shape()
+    assert(typed.model === '还能打字', `空块之后必须照常打得进字：${JSON.stringify(typed)}`)
+    await ctx.close()
+    return `首块清空再多按一次退格：gutter／.tx 都还在，模型为空，接着打字照常落进模型`
+  },
+)
+
+await check(
+  'T95 槽内钉住行的 DOM 契约：行里有 .sec 包裹，正文在 .sec > .blk > .tx（选择器别按直接子元素写）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
+    assert(id, '应有一个可拖的普通块')
+    const drag = await dragBlockToDock(page, id, 'left')
+    assert(drag?.hot, '拖进左槽应给出高亮')
+    await page.waitForTimeout(200)
+
+    /**
+     * 为什么钉这条：槽里的行**与正文用同一个渲染器**（`renderBlock`），
+     * 所以段物质化加进来的 `.sec` 包裹层在两边都出现。验收里如果按
+     * `.pin-editor > .blk` 这种直接子元素写，就会在包裹层出现那天**静默失效**：
+     * 行其实渲染得好好的，只是选择器等不到它 —— 报错看起来像「槽里没渲染」。
+     */
+    const shape = await page.evaluate((i) => {
+      const row = document.querySelector(`#dock-left .pin-row[data-block-id="${i}"]`)
+      const host = row?.querySelector('.pin-editor')
+      return {
+        row: Boolean(row),
+        host: Boolean(host),
+        // 契约：正文行在 host 的后代里（不是直接子元素），并且 `.tx` 在那一行里
+        blkAnywhere: Boolean(host?.querySelector('.blk[data-depth="0"]')),
+        txAnywhere: Boolean(host?.querySelector('.blk[data-depth="0"] > .tx')),
+        // 反证：按**直接子元素**写会等不到（这就是当初那条选择器挂掉的原因）
+        blkDirectChild: Boolean(host?.querySelector(':scope > .blk')),
+        secWrapped: Boolean(host?.querySelector(':scope > .sec')),
+        text: host?.querySelector('.blk[data-depth="0"] > .tx')?.textContent ?? '',
+      }
+    }, id)
+    assert(shape.row && shape.host, `钉住行与编辑器宿主都该在：${JSON.stringify(shape)}`)
+    assert(shape.secWrapped, `段物质化之后，宿主里应有一层 .sec 包裹：${JSON.stringify(shape)}`)
+    assert(shape.blkAnywhere, `正文行应在宿主的后代里（不是直接子元素）：${JSON.stringify(shape)}`)
+    assert(shape.txAnywhere, `正文槽 .tx 应在那一行里：${JSON.stringify(shape)}`)
+    assert(!shape.blkDirectChild, `正文行不该是宿主的直接子元素（它被 .sec 包了一层）：${JSON.stringify(shape)}`)
+    assert(shape.text.length > 0, `槽里那一行应显示块自己的正文：${JSON.stringify(shape)}`)
+    await ctx.close()
+    return `槽内行：宿主 → .sec → .blk[data-depth=0] → .tx；按直接子元素写会等不到（这条就是那条选择器的钉子）`
   },
 )
 

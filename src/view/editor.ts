@@ -1720,7 +1720,17 @@ export class BlockEditor {
     if (r.startBlock !== r.endBlock) return false
     if (s.aOff !== 0 || s.hOff !== 0) return false
     const all = flatten(this.doc)
-    if (all.findIndex((x) => x.id === s.aBlock) <= 0) return false
+    const i = all.findIndex((x) => x.id === s.aBlock)
+    /**
+     * **块首但没有上一块可并（首块）⇒ 这次退格没有语义，必须吃掉它。**
+     *
+     * 放给浏览器会出真事故：原生删除看不见「块」这个单位，它只看见一串内联元素，
+     * 于是会把 gutter（`.left`）和正文（`.tx`）当成两个可删的节点整段摘掉——
+     * 那一行从此**没有可落光标的地方**，用户看到的是「把这块删空之后再也打不进字」
+     * （光标还在编辑器里、选区也还在，就是字进不去）。
+     * ⇒ 判据是「这一下有没有事可做」：有事就自己做，没事就吞掉，绝不交给浏览器。
+     */
+    if (i <= 0) return true
     this.mergeBack(s.aBlock)
     return true
   }
