@@ -1423,16 +1423,21 @@ await check('T40 标签＝块级归属：写进块上、渲染成行尾 chip、�
   assert(it.tag.text === '回归标签', `标签名字就是它的正文，且不带 #：${JSON.stringify(it.tag)}`)
   assert(!it.text.includes('#回归标签'), `标签归属不占正文（投影不含 #名）：${JSON.stringify(it.text)}`)
 
-  // ② 呈现：行尾拼一枚 `#名` chip，但**它不参与读数**
+  // ② 呈现：标签槽里一枚 `#名` chip，**槽在正文槽之外**，且 chip 不参与读数
   const shown = await page.evaluate(
     ({ blockId, tagId }) => {
-      const chip = document.querySelector(`.blk[data-block-id="${blockId}"] .tx .tag-chip[data-tag-id="${tagId}"]`)
-      return { chip: chip?.textContent ?? '', read: window.__qua.__editor.readRunsOf(blockId).filter((r) => r.t === 'text').map((r) => r.v).join('') }
+      const chip = document.querySelector(`.blk[data-block-id="${blockId}"] .blk-tags .tag-chip[data-tag-id="${tagId}"]`)
+      return {
+        chip: chip?.textContent ?? '',
+        inTx: Boolean(chip?.closest('.tx')),
+        read: window.__qua.__editor.readRunsOf(blockId).filter((r) => r.t === 'text').map((r) => r.v).join(''),
+      }
     },
     { blockId: it.blockId, tagId: it.tag.id },
   )
   assert(shown.chip === '#回归标签', `标签应显示成 #名（引用才是 [[名]]）：${JSON.stringify(shown)}`)
-  assert(shown.read === it.text, `chip 拼在正文里但不属于正文：读数应仍是原正文 —— ${JSON.stringify(shown)}`)
+  assert(!shown.inTx, `chip 应住在标签槽（.blk-tags）里，不该在正文槽里：${JSON.stringify(shown)}`)
+  assert(shown.read === it.text, `chip 不属于正文：读数应仍是原正文 —— ${JSON.stringify(shown)}`)
 
   // ③ **打标签 ⇒ 成员里出现这个块**（成员从块上的归属派生）
   const members = await page.evaluate((tagId) => window.__qua.tagMembers(tagId), it.tag.id)
@@ -2457,16 +2462,15 @@ await check('T58b 属性面板挂/摘块标签：只写归属，正文不动', a
 
   const added = await page.evaluate((id) => {
     const b = window.__qua.blocks().find((x) => x.id === id)
-    const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
     return {
       text: b?.text ?? '',
       tags: b?.tags ?? [],
-      chips: tx ? [...tx.querySelectorAll('.tag-chip')].map((e) => e.textContent) : [],
+      chips: [...document.querySelectorAll(`.blk[data-block-id="${id}"] .blk-tags .tag-chip`)].map((e) => e.textContent),
       panel: [...document.querySelectorAll('.props-tag')].map((e) => e.textContent),
     }
   }, pageId)
   assert(added.tags.length === 1, '面板挂标签应写进块上的归属：' + JSON.stringify(added))
-  assert(added.chips.length === 1 && added.chips[0] === '#项目', '块级标签应渲染成正文之后的 chip：' + JSON.stringify(added.chips))
+  assert(added.chips.length === 1 && added.chips[0] === '#项目', '块级标签应渲染成标签槽里的 chip：' + JSON.stringify(added.chips))
   assert(added.panel.some((s) => s.includes('#项目')), '面板这一行应显示刚挂上的标签：' + JSON.stringify(added.panel))
   assert(!added.text.includes('项目'), '属性面板入口**不碰正文**：' + JSON.stringify(added.text))
 
@@ -2474,10 +2478,9 @@ await check('T58b 属性面板挂/摘块标签：只写归属，正文不动', a
   await page.waitForTimeout(250)
   const removed = await page.evaluate((id) => {
     const b = window.__qua.blocks().find((x) => x.id === id)
-    const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
     return {
       tags: b?.tags ?? [],
-      chips: tx ? tx.querySelectorAll('.tag-chip').length : -1,
+      chips: document.querySelectorAll(`.blk[data-block-id="${id}"] .blk-tags .tag-chip`).length,
       panel: document.querySelectorAll('.props-tag').length,
     }
   }, pageId)
@@ -3900,12 +3903,12 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
    */
   const chip = await page.evaluate(
     ({ blockId, tagId }) => {
-      const el = document.querySelector(`.blk[data-block-id="${blockId}"] .tx .tag-chip[data-tag-id="${tagId}"]`)
+      const el = document.querySelector(`.blk[data-block-id="${blockId}"] .blk-tags .tag-chip[data-tag-id="${tagId}"]`)
       return { text: el?.textContent ?? '', read: window.__qua.__editor.readRunsOf(blockId).filter((r) => r.t === 'text').map((r) => r.v).join('') }
     },
     { blockId: hostId, tagId: tag.tagId },
   )
-  assert(chip.text === '#任务', `成员块行尾应有一枚 #任务 chip：${JSON.stringify(chip)}`)
+  assert(chip.text === '#任务', `成员块标签槽里应有一枚 #任务 chip：${JSON.stringify(chip)}`)
   assert(!chip.read.includes('#任务'), `chip 不该进正文读数：${JSON.stringify(chip)}`)
 
   await ctx.close()
@@ -4357,12 +4360,8 @@ await check(
       return {
         ops: ops.map((o) => ({ e: o.e, id: o.id, op: o.op, text: o.value?.content === undefined ? undefined : runPlain(o.value.content) })),
         text: window.__qua.blocks().find((b) => b.id === id)?.text ?? '',
-        // 只取正文：带标签的块在正文之后还有 chip，`textContent` 会把 `#名` 也读进来
-        dom:
-          [...(document.querySelector(`.blk[data-block-id="${id}"] .tx`)?.childNodes ?? [])]
-            .filter((n) => !(n instanceof Element && n.classList.contains('tag-chip')))
-            .map((n) => n.textContent)
-            .join('') || '',
+        // 只取正文：标签槽（.blk-tags）在正文槽之外，`textContent` 不会把 `#名` 读进来
+        dom: document.querySelector(`.blk[data-block-id="${id}"] .tx`)?.textContent ?? '',
         marks: window.__qua.marks().length,
         atoms: atoms.length,
         dupAtoms: atoms.length - new Set(atoms).size,
@@ -7190,7 +7189,7 @@ await check(
             id: b.dataset.blockId?.slice(0, 6) ?? '?',
             text: [...b.childNodes].filter((n) => n.nodeType === 3 && (n.data ?? '').trim() !== '').map((n) => n.data),
             extra: [...b.childNodes]
-              .filter((n) => n.nodeType === 1 && !['blk-alias', 'rails', 'rail-self', 'left', 'tx'].includes(n.classList[0] ?? ''))
+              .filter((n) => n.nodeType === 1 && !['blk-alias', 'rails', 'rail-self', 'left', 'tx', 'blk-tags'].includes(n.classList[0] ?? ''))
               .map((n) => n.nodeName),
           }))
           .filter((o) => o.text.length > 0 || o.extra.length > 0),
@@ -7866,16 +7865,15 @@ await check(
     await page.keyboard.press('Enter')
     await page.waitForTimeout(220)
 
-    const got = await page.evaluate(({ id, tagId }) => {
+      const got = await page.evaluate(({ id, tagId }) => {
       const b = window.__qua.blocks().find((x) => x.id === id)
-      const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
       return {
         text: b?.text ?? '',
         tags: b?.tags ?? [],
         atoms: window.__qua.atoms().filter((a) => a.blockId === id),
-        inline: tx?.querySelector('.atom-tag')?.textContent ?? '',
-        inlineLabel: tx?.querySelector('.atom-tag')?.dataset.refLabel ?? '',
-        chips: tx ? tx.querySelectorAll('.tag-chip').length : -1,
+        inline: document.querySelector(`.blk[data-block-id="${id}"] .tx .atom-tag`)?.textContent ?? '',
+        inlineLabel: document.querySelector(`.blk[data-block-id="${id}"] .tx .atom-tag`)?.dataset.refLabel ?? '',
+        chips: document.querySelectorAll(`.blk[data-block-id="${id}"] .blk-tags .tag-chip`).length,
         layerOpen: document.querySelectorAll('.layer').length,
         tagId,
       }
@@ -7926,12 +7924,11 @@ await check(
 
     const got = await page.evaluate(({ id, tagId }) => {
       const b = window.__qua.blocks().find((x) => x.id === id)
-      const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
       return {
         text: b?.text ?? '',
         tags: b?.tags ?? [],
         atoms: window.__qua.atoms().filter((a) => a.blockId === id).length,
-        chips: tx ? tx.querySelectorAll('.tag-chip').length : -1,
+        chips: document.querySelectorAll(`.blk[data-block-id="${id}"] .blk-tags .tag-chip`).length,
         layerOpen: document.querySelectorAll('.layer').length,
         tagId,
       }
@@ -7952,10 +7949,9 @@ await check(
     await page.keyboard.press('Enter')
     await page.waitForTimeout(220)
     const inline = await page.evaluate((id) => {
-      const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
       return {
-        chips: tx ? tx.querySelectorAll('.tag-chip').length : -1,
-        atoms: tx ? tx.querySelectorAll('.atom-tag').length : -1,
+        chips: document.querySelectorAll(`.blk[data-block-id="${id}"] .blk-tags .tag-chip`).length,
+        atoms: document.querySelector(`.blk[data-block-id="${id}"] .tx`)?.querySelectorAll('.atom-tag').length ?? -1,
       }
     }, target)
     assert(inline.chips === 0 && inline.atoms === 1, `正文里露面了 ⇒ 不出 chip：${JSON.stringify(inline)}`)

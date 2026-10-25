@@ -944,15 +944,35 @@
 }
 
 /*
-  **标签 chip**：标签是块级的分类字段，这枚 chip 只是把归属显示出来
-  —— 视觉上跟在正文后面，但它不是正文（读回模型时跳过 `data-tag-id`）。
-  比引用 chip 淡一点：引用是一个可以点开的位置，标签只是一个分类。
+  **标签槽**：块级标签的挂载位置 —— `.blk` 下、`.tx` 外的一个不可编辑容器。
+  `.tx` 是 `flex:1` ⇒ 槽自然靠到行右端；`align-self:flex-start` 让多标签换行时贴着首行。
+  槽不在正文槽里 ⇒ 插入点进不去，「光标落到标签后面打字」从根上不存在。
+  名字 `blk-tags` 与 `tag-chip` 同属渲染契约：主题按它们上色，探针按它们找标签。
   颜色只用语义槽（主题换肤才改得动）。
+*/
+.blk-tags {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  max-width: 40%;
+  margin-inline-start: var(--ui-gap-2);
+  line-height: var(--ui-lh-relaxed);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/*
+  **标签 chip**：标签是块级的分类字段，这枚 chip 只是把归属显示出来
+  —— 挂在行的标签槽里（`.blk-tags`），不占正文。
+  比引用 chip 淡一点：引用是一个可以点开的位置，标签只是一个分类。
 */
 .tag-chip {
   display: inline-flex;
   align-items: center;
-  margin-inline-start: 6px;
   padding: 0 5px;
   border-radius: var(--ui-radius-sm);
   background: var(--ui-accent-soft);

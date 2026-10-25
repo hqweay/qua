@@ -578,6 +578,7 @@ export class BlockEditor {
         ancestors: this.ancestors.get(r.block.id) ?? [],
         folded: this.doc.folded,
         gutter,
+        find: (id) => this.store.find(id),
       },
     )
     this.mounted.add(r.block.id)
@@ -1460,15 +1461,7 @@ export class BlockEditor {
     const caret = this.sel ? this.sel.aOff : null
     const kind = plainLen(next) < prevLen ? 'delete' : 'insert'
     this.undo.record(before, kind, Date.now())
-    /**
-     * 带标签的块每次改字都重画一次（组合期除外）。
-     *
-     * 为什么：标签 chip 在正文**之后**、但不占正文位置 ⇒ 光标可以落在 chip 之后，
-     * 那时新敲的字会在 DOM 里排在 chip 后面，而模型里它是正文的末尾。
-     * 重画一次就把「显示顺序」与「正文顺序」重新对齐（光标按模型偏移贴回，落在 chip 之前）。
-     */
-    const tagged = tagIdsOf(loc.block).length > 0 && !this.probe.isComposing
-    if (reRender || tagged) {
+    if (reRender) {
       this.renderBlock(id)
       if (caret !== null) this.placeCaret(id, Math.min(caret, plainLen(loc.block.content)))
       // **改名传播**：这一块可能是别处引用的目标 ⇒ 引用它的那些块也要重画（显示名现算）。

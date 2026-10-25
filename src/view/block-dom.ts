@@ -27,7 +27,6 @@ import {
   journalDateLabel,
   primaryAliasOf,
   prop,
-  refTitle,
   tagIdsOf,
   typeDeclOf,
   type Block,
@@ -39,7 +38,7 @@ import {
 } from '../core/index.ts'
 import { MARK_TYPES, isEmptyContent, plainText, refRunsOf, type MarkType, type RunWithId } from '../core/runs.ts'
 import { t } from '../core/msg.ts'
-import { danglingView, resolveRefs } from '../core/ref.ts'
+import { danglingView, refTitle, resolveRefs } from '../core/ref.ts'
 import { createIcon } from './icons.ts'
 
 /** 行高：与 CSS 的 `--ui-line-h` 必须一致（虚拟化算占位高度要用） */
@@ -167,10 +166,11 @@ export function makeRunEl(r: RunWithId, view?: RefView): HTMLElement {
  *
  * 形状（`tag-chip` ＋ `data-tag-id`）是渲染契约：主题按它上色，探针按它找标签。
  *
- * ⚠️ 它住在 `.tx` 里（视觉上就是正文的一部分，跟在文字后面），
- *    但**不参与读数**：`view/dom-text.ts` 的三条路径（`readBlockText`／`offsetIn`／`nodeLen`）
- *    遇到 `data-tag-id` 一律跳过。于是「正文显示」与「正文读回」不再逐字相同 ——
- *    这是有意的：标签不属于内容，它没有位点，正文里也不该多出几个字。
+ * ⚠️ 它住在 `.blk` 的**标签槽**（`.blk-tags`）里、**`.tx` 之外**：标签没有位点，
+ *    而正文槽里每个 DOM 位置都是潜在的插入点 —— chip 一旦在 `.tx` 里，
+ *    光标就能落到它后面，打出来的字在 DOM 里排在 chip 后、模型里却是正文末尾，
+ *    重画一次就表现为「标签跳到文本后面」。挪出正文槽后，插入点**物理上**进不去。
+ *    读数路径（`view/dom-text.ts`）遇 `data-tag-id` 跳过 —— 这层防御保留。
  */
 export function makeTagChipEl(tagId: string, name: string): HTMLElement {
   const el = document.createElement('span')
@@ -244,26 +244,39 @@ export function fillBlockText(
   }
 
   if (tx.childNodes.length === 0) tx.appendChild(document.createElement('br'))
+}
 
-  /**
-   * **标签 chip 拼在正文末尾**：标签是整块的分类，显示上跟在文字后面，
-   * 但不在正文里（见 `makeTagChipEl` 的说明）。
-   *
-   * ⚠️ **已经在正文里露面的标签不再出 chip**：同一格归属只占一个显示位置。
-   *    行内那枚是 1 格引用 run（在正文里），chip 是追加的 0 格装饰 —— 两个都画，
-   *    用户会看到两个 `#名`，而且删掉正文里那个，chip 还留着一个「幽灵」。
-   * ⚠️ 名字走 `refTitle`（现算）：标签块改名后 chip 上的字要跟着变，
-   *    所以这里不存名字、只认 id。目标块不在 ⇒ 这条归属没有可显示的名字，跳过。
-   * ⚠️ `<br>` 先于 chip 挂上去：空块也必须有一个能落光标的位置在 chip **之前**。
-   */
-  if (find) {
-    const inline = new Set(inlineTagIdsOf(b))
-    for (const tagId of tagIdsOf(b)) {
-      if (inline.has(tagId)) continue
-      const tag = find(tagId)
-      if (tag) tx.appendChild(makeTagChipEl(tagId, refTitle(tag)))
-    }
-  }
+/**
+ * **标签槽**：块级标签的显示位置 —— `.blk` 下、`.tx` 外的一个不可编辑容器。
+ *
+ * 为什么是独立槽而不是「拼在正文末尾」：标签是**无位点的归属**（`props._tags`），
+ * 正文槽里每个位置都是潜在插入点 —— chip 留在 `.tx` 里，光标就能落到它后面，
+ * 打出来的字 DOM 上排在 chip 后、模型里是正文末尾，重画后就「标签跳到文本后面」。
+ * 槽挂在行右端（flex 布局，不悬浮不遮挡），插入点物理上进不去，错位从根上不存在。
+ *
+ * ⚠️ **已经在正文里露面的标签不再出 chip**：同一格归属只占一个显示位置。
+ *    行内那枚是 1 格引用 run（在正文里），chip 是槽里的 0 格装饰 —— 两个都画，
+ *    用户会看到两个 `#名`，而且删掉正文里那个，chip 还留着一个「幽灵」。
+ * ⚠️ 名字走 `refTitle`（现算）：标签块改名后 chip 上的字要跟着变，
+ *    所以这里不存名字、只认 id。目标块不在 ⇒ 这条归属没有可显示的名字，跳过。
+ * ⚠️ **没有标签就不生成这个节点**（同 `.fold` 的口径，不是隐藏）：空槽是纯噪声。
+ * ⚠️ 分割线没有正文槽，也不画标签槽。
+ *
+ * @returns 标签槽元素；无标签可显示时返回 null
+ */
+export function makeTagsEl(
+  b: Block,
+  find?: FindBlock,
+): HTMLElement | null {
+  if (!find) return null
+  const inline = new Set(inlineTagIdsOf(b))
+  const tags = [...tagIdsOf(b)].filter((tagId) => !inline.has(tagId) && find(tagId))
+  if (tags.length === 0) return null
+  const el = document.createElement('span')
+  el.className = 'blk-tags'
+  el.contentEditable = 'false'
+  for (const tagId of tags) el.appendChild(makeTagChipEl(tagId, refTitle(find(tagId)!)))
+  return el
 }
 
 /**
@@ -277,7 +290,7 @@ export function fillBlockText(
  * ⇒ 判据：`.blk` 的子节点只能是**渲染层自己放进去的那几种**；其余一律当游离内容清掉。
  *   加新子节点时**必须**在这里登记，否则它会在第一次收光标时被当作脏东西删掉。
  */
-export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set(['blk-alias', 'rails', 'rail-self', 'left', 'tx'])
+export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set(['blk-alias', 'rails', 'rail-self', 'left', 'tx', 'blk-tags'])
 
 /**
  * 一个可见行 → `.blk` 元素。
@@ -306,8 +319,11 @@ export function makeBlockEl(
    *
    * `gutter` 同样是**已经算好的**（由调用方按森林 ＋ atoms 派生）：本文件是渲染层，
    * 不知道森林在哪；在这里现算就会变成「每画一行都扫一遍全库」。
+   *
+   * `find` 是引用解析用的查找函数（同 `fillBlockText`）：标签槽的名字也是现算的，
+   * 不传 ⇒ 不画标签槽（静态卡片没有森林可查，容忍没有 chip）。
    */
-  opts: { single: boolean; ancestors?: readonly string[]; folded?: FoldState; gutter?: readonly GutterField[] },
+  opts: { single: boolean; ancestors?: readonly string[]; folded?: FoldState; gutter?: readonly GutterField[]; find?: FindBlock },
 ): HTMLElement {
   const b = r.block
   const folded = opts.folded?.[b.id] === true
@@ -576,5 +592,17 @@ export function makeBlockEl(
   }
 
   el.append(left, tx)
+
+  /**
+   * **标签槽**：挂在正文槽**之后**（行右端），是 `.blk` 的直接子节点。
+   *
+   * ⚠️ 必须在 `.tx` 之外 —— 见 `makeTagsEl` 的说明：chip 在正文槽里，
+   *    插入点就能落到它后面，那是「标签跳到文本后面」的全部来源。
+   * ⚠️ 无标签不生成节点（`makeTagsEl` 返回 null ⇒ 不留空槽）。
+   * ⚠️ `ALLOWED_ROW_CHILDREN` 已登记 `blk-tags`：漏了它，第一次收光标
+   *    （`reclaimCaret`）就会把这枚槽当游离节点删掉。
+   */
+  const tags = makeTagsEl(b, opts.find)
+  if (tags) el.appendChild(tags)
   return el
 }
