@@ -31,6 +31,7 @@ import {
   type CtxKeys,
 } from '../../core/index.ts'
 import { t } from '../../core/msg.ts'
+import { walkForest } from '../../core/walk.ts'
 import { plainText, type MarkType, type RunWithId } from '../../core/runs.ts'
 import { DISPLAY_PROP } from '../../core/index.ts'
 import type { App, FixtureName, MenuRequest, PanelKind, Registry } from '../../core/commands/index.ts'
@@ -248,18 +249,34 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
     },
     /**
      * **整片森林**（区别于 `blocks()`：那个只给当前视图装载的子树）。
-     * 标签块挂在森林根上、不在当前页里 ⇒ 查「标签存不存在」必须用这个。
+     *
+     * ⚠️ 必须真的走**整片森林**：早先这里是 `ws.blocks.map(...)`——只映射了森林顶层，
+     *    而注释写着「整片森林」。那个不一致长期没被发现，只因为当时几乎所有东西
+     *    都恰好住在顶层；内容改成落进当天之后，「按 id 在 allBlocks 里找一个刚建的页」
+     *    会**静默找不到**（页在库里，只是不在顶层）。
+     * ⇒ 判据：注释说什么就做什么。这里用 `walkForest`，与其余读路径同一个入口。
      */
     allBlocks() {
-      return deps.getWs().blocks.map((b) => ({
-        id: b.id,
-        text: plainText(b.content),
-        roles: identityTags(b),
-        // 地址与露面是两套语义，诊断面要能分别读（`roles` 只给外观认的身份种类）
-        aliases: aliasesOf(b),
-        lists: listsOf(b),
-        display: prop<string>(b, DISPLAY_PROP) ?? null,
-      }))
+      const out: {
+        id: string
+        text: string
+        roles: string[]
+        aliases: string[]
+        lists: string[]
+        display: string | null
+      }[] = []
+      walkForest(deps.getWs().blocks, (b) => {
+        out.push({
+          id: b.id,
+          text: plainText(b.content),
+          roles: identityTags(b),
+          // 地址与露面是两套语义，诊断面要能分别读（`roles` 只给外观认的身份种类）
+          aliases: aliasesOf(b),
+          lists: listsOf(b),
+          display: prop<string>(b, DISPLAY_PROP) ?? null,
+        })
+      })
+      return out
     },
     /** 字段定义（诊断面）：id ＝ propId、正文 ＝ label、谁声明了它 */
     propDefs() {

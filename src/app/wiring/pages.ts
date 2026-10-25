@@ -25,6 +25,7 @@ import type { Chrome } from '../../ui/chrome.ts'
 import { isReadonlyBlock } from '../../view/block-dom.ts'
 import type { BlockEditor } from '../../view/editor.ts'
 import type { PageDeps } from '../commands-impl.ts'
+import { daySlotInTx } from '../commands/placement.ts'
 
 export type PagesDeps = {
   kb: MemoryKb
@@ -184,6 +185,31 @@ export function setupPages(deps: PagesDeps) {
       // op 由事务产出——每个后代报它们自己的 parent/index，换库后行行有落点。
       run((tx) => tx.insert(block, parentId, index), deps.getMainEd())
     },
+    moveBlock: (blockId, parentId, index) => {
+      /**
+       * 一次移动 = **一条** `block.upsert{parent,index}`（`tx.move` 就是这么发的）。
+       * 拆成「先删后插」会让 ⌘Z 只回一半，也会让指向这块的引用在中间那一刻指向空。
+       *
+       * ⚠️ 走 `pageDeps.run`（**带撤销快照**），不是注入的 `deps.run`：
+       *    后者只跑事务、不记快照 ⇒ 移动能成功但 ⌘Z 撤不回来。
+       *    「搬了回不去」比「搬错了」更糟，而它不会报错，只在用户按 ⌘Z 时显形。
+       */
+      pageDeps.run((tx) => tx.move(blockId, parentId, index))
+    },
+    insertBlockInDay: (block) => {
+      /**
+       * **内容落位**：物化当天 ＋ 插在它末尾，**同一笔事务**。
+       *
+       * ⚠️ 必须是同一笔：拆成「先建天、再插页」的话，两步之间就是一个真实存在的
+       *    半截状态（天建好了、页还没挂上去），而这一步失败会留下一个空天。
+       * ⚠️ 落点算在 `placement.ts`（唯一口径），这里只负责把它落到事务里。
+       */
+      // 同样走带撤销快照的那条（「建了撤不回来」与「搬了回不去」是同一类事故）
+      pageDeps.run((tx) => {
+        const slot = daySlotInTx(tx, kb)
+        tx.insert(block, slot.parentId, slot.index)
+      })
+    },
     // 打标签的落点：**当前光标那一块**（正文 vs 反链 footer 会切换 ⇒ 每次现取活动编辑器）
     caretBlockId: () => deps.getEd().caretBlock() ?? deps.getEd().rows()[0]?.block.id ?? null,
     /**
@@ -277,7 +303,7 @@ export function setupPages(deps: PagesDeps) {
       deps.scheduleBadge()
     },
     toast: (text, kind) => deps.getApp().toast(text, kind),
-    openRefPicker: (rows) =>
+    openRefPicker: (rows, onPick) =>
       layers.openMenu({
         rows,
         anchor: deps.getEd().caretRect(),
@@ -285,9 +311,11 @@ export function setupPages(deps: PagesDeps) {
         searchable: true,
         focusSearch: true,
         emptyText: t('ui.refPicker.empty'),
-        onPick: (row) => {
-          deps.getRegistry().invoke('core.editor/insert-page-ref', { pageId: (row.args as { pageId: string }).pageId }, 'menu', uiCtx())
-        },
+        onPick:
+          onPick ??
+          ((row) => {
+            deps.getRegistry().invoke('core.editor/insert-page-ref', { pageId: (row.args as { pageId: string }).pageId }, 'menu', uiCtx())
+          }),
       }),
     pageTitle,
     pageIcon,

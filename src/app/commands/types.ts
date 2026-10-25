@@ -46,6 +46,24 @@ export interface PageDeps {
    */
   insertBlock: (block: Block, parentId: string | null, index: number) => void
   /**
+   * 插一个**内容**块，落点是**当天**（内容诞生于某天）。
+   *
+   * 与 `insertBlock` 的区别只在「落点由谁决定」：那条要调用方自己声明 `parent`＋`index`
+   * （身份块落顶层、结构移动都用它），这条把「内容该去哪」收在一处——
+   * 否则每个新建内容的入口都要各自记得「先物化今天、再插在它末尾」，
+   * 漏一步就是「页建出来了、却挂在森林顶层」，而这件事只在用户整理旧天时才显形。
+   */
+  insertBlockInDay: (block: Block) => void
+  /**
+   * 搬一个块（连子树）到另一个容器下——`index` 是**最终**位置（越界夹取）。
+   *
+   * 与 `insertBlock` 分开：插入是「新东西进来」，移动是「同一个东西换个地方」。
+   * 两者的 op 形状也不同（插入报 `parent,index`；移动同样报，但语义是「它现在在哪」）。
+   * ⚠️ 一条移动 = **一条** `block.upsert{parent,index}`，不许拆成「先删后插」——
+   *    那会让一次 ⌘Z 只回一半。
+   */
+  moveBlock: (blockId: string, parentId: string, index: number) => void
+  /**
    * 打标签的落点：**当前光标所在的块**（没有活动块时回退到首行）。
    *
    * ⚠️ 为什么注入的是**一个函数**而不是 `editor` 对象本身：活动编辑器是会变的
@@ -103,8 +121,14 @@ export interface PageDeps {
    */
   openDock: (side: 'left' | 'right') => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
-  /** 打开引用选择器：装配层负责把它渲染成菜单 */
-  openRefPicker: (rows: Row[]) => void
+  /**
+   * 打开一个**目标选择器**：装配层负责把它渲染成菜单。
+   *
+   * `onPick` 省略 ＝ 插入引用（默认语义）。「移动到…」复用它，只是把
+   * 「选中之后做什么」换掉——**选择器本身只有一份**，两处各写一份就会出现
+   * 两种候选集合（同一件事两个答案）。
+   */
+  openRefPicker: (rows: Row[], onPick?: (row: Row) => void) => void
   pageTitle: (b: Block) => string
   pageIcon: (b: Block) => string
 }

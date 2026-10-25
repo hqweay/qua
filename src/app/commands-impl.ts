@@ -16,6 +16,7 @@
  */
 export { devCommands } from './commands/dev.ts'
 export { journalCommands } from './commands/journal.ts'
+export { moveCommands } from './commands/move.ts'
 export { pageCommands } from './commands/page.ts'
 export { propsCommands } from './commands/props.ts'
 export { makePageBlock, rootsFor, rootsForMany, takenWhere } from './commands/roots.ts'

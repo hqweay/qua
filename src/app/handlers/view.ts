@@ -22,6 +22,29 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     return true
   },
   /**
+   * 移动到…：先选块（光标 / 选区），再弹目标选择器。
+   *
+   * 块选区有多个块时**只搬第一个**（v1）：多块跨父搬运要处理「同一棵子树里的多块」
+   * 与「搬完顺序」两件事，那是拖拽版一起做的事（`待办-拖拽一条缝.md`）。
+   * 现在不静默搬一半——明确只搬光标那一块。
+   */
+  'core.block/move-to': (a, app) => {
+    const id = typeof a.blockId === 'string' && a.blockId !== '' ? a.blockId : (app.ed.caretBlock() ?? '')
+    if (!id) return false
+    /**
+     * 带 `targetId` ＝ **直接点名目标**（脚本、将来的拖拽版、以及验收都走这条）；
+     * 不带 ＝ 弹选择器让用户挑。两条最终落到同一个 `moveBlockTo`，
+     * 所以「怎么选目标」不影响「怎么搬」。
+     */
+    const target = typeof a.targetId === 'string' ? a.targetId : ''
+    if (target !== '') {
+      app.moveBlockTo(id, target)
+      return true
+    }
+    app.showMovePicker(id)
+    return true
+  },
+  /**
    * 看属性：与 zoom 同一条换落点路径，外加「确保右槽开着」。
    *
    * ⚠️ 它是**视图命令**，所以可以动槽开关。导航动作（zoom / 打开页 / 点链接）

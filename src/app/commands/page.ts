@@ -59,11 +59,17 @@ export function pageCommands(d: PageDeps): Pick<
     activePageId: () => d.activeId(),
 
     newPage: () => {
-      // 页块**自带空首子块**（`makePageBlock`），整棵子树同一笔插进库：
-      // 「新建页」是一次结构写，必须产 op——直接 `blocks().push` 的页换库后没有行可落，
-      // 重开就丢了；拆成「先建页、打开再补子块」则会存在只有页没处写字的半截状态。
+      /**
+       * 页块**自带空首子块**（`makePageBlock`），整棵子树同一笔插进库：
+       * 「新建页」是一次结构写，必须产 op——直接 `blocks().push` 的页换库后没有行可落，
+       * 重开就丢了；拆成「先建页、打开再补子块」则会存在只有页没处写字的半截状态。
+       *
+       * **落点是当天**（不是森林顶层）：内容诞生于某天，位置是真实信息，
+       * 「从天里长出页」是默认路径。当天还不存在时先物化它——两件事同一笔事务，
+       * 否则会留下「页在库里、却挂在一棵还没建的天上」的半截状态。
+       */
       const p = makePageBlock()
-      d.insertBlock(p, null, d.kb.roots().length)
+      d.insertBlockInDay(p)
       d.setActiveId(p.id)
       d.loadPage(rootsFor(p))
       d.refreshList()
@@ -203,7 +209,17 @@ export function pageCommands(d: PageDeps): Pick<
     },
 
     showRefPicker: () => {
-      const rows: Row[] = d.kb.roots().map((p) => ({
+      /**
+       * 候选来源是**身份**，不是位置。
+       *
+       * ⚠️ 早先列的是 `kb.roots()`（森林顶层）——那等于用「住在哪」当「可不可引用」的判据。
+       *    它曾经看起来没问题，只因为当时所有页都恰好住在顶层；内容改成落进当天之后，
+       *    **每一个新建的页都不在顶层** ⇒ 那个选择器会静默少掉它们（不报错，只是「找不到」）。
+       * ⚠️ 正确的判据是「有地址、可被引用」：页与标签都是（`page`／`tag` 露面）。
+       *    两者都扫**整片森林**（`kb.pages`／`kb.tags`），所以嵌在任何位置的目标都在候选里。
+       * ⚠️ journal 天不进候选：它的「名字」是日期，引用它没有稳定语义（哪天？）。
+       */
+      const pageRow = (p: Block): Row => ({
         id: `pick/${p.id}`,
         label: d.pageTitle(p).trim() === '' ? t('ui.page.untitled') : d.pageTitle(p),
         hint: t('ui.refPicker.blocks', { count: count(p) }),
@@ -211,7 +227,16 @@ export function pageCommands(d: PageDeps): Pick<
         group: 'pick/1',
         command: 'core.editor/insert-page-ref',
         args: { pageId: p.id },
-      }))
+      })
+      const tagRow = (tag: Block): Row => ({
+        id: `pick/${tag.id}`,
+        label: `#${displayNameOf(tag)}`,
+        icon: 'lucide:hash',
+        group: 'pick/2',
+        command: 'core.editor/insert-page-ref',
+        args: { pageId: tag.id },
+      })
+      const rows: Row[] = [...pages().map(pageRow), ...d.kb.tags().map(tagRow)]
       d.openRefPicker(rows)
     },
   }

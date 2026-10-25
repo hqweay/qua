@@ -108,6 +108,18 @@ export interface App {
   pruneTagParents(childId: string): void
   /** 打开标签选择器（显示层级；选中＝在当前块插一条 tag 边） */
   showTagPicker(): void
+  /**
+   * 「移动到…」：弹目标选择器（页 ＋ 标签块）。
+   *
+   * 与 `insert-page-ref` 共用同一个选择器组件，只是选中之后做的是**搬块**。
+   * ⚠️ 目标集合按**身份**找（页/标签），不按位置——位置不是「可不可搬进去」的判据。
+   */
+  showMovePicker(blockId: string): void
+  /**
+   * 把一块（连子树）搬到目标容器末尾。自环/原地不动由命令层先判并给提示，
+   * 这条只管「搬」——一条事务一条 op。
+   */
+  moveBlockTo(blockId: string, targetId: string): void
   /* 角色：加/减一个机制位（非破坏性；页/标签可兼位） */
   addBlockRole(blockId: string, role: 'page' | 'tag'): boolean
   removeBlockRole(blockId: string, role: 'page' | 'tag'): boolean

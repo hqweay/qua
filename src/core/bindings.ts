@@ -124,6 +124,22 @@ export const BINDINGS: Binding[] = [
   // 显式入口：把「看这一块的属性」做成一次点击。它是**视图命令**（可以动槽开关），
   // 与 zoom 这种导航动作分家 —— 导航永远不替用户改侧栏的开关。
   { command: 'core.block/inspect', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 32, layer: 'core' },
+  /**
+   * 退回上一级：**最外层时不给入口**（`when` 挡住），不是点了没反应。
+   *
+   * ⚠️ 早先它没有绑定，只在命令面板里裸着一条——面板是「兜底可达性」，
+   *    一条永远点不动的命令放在那里，用户只会以为是坏的。
+   * ⚠️ 标题也从「退回顶层」改掉了：那个词把**系统架**露给了用户
+   *    （用户世界里不该有「顶层」这个概念，根是系统自己的事）。
+   */
+  { command: 'core.block/zoom-out', kind: 'menu', when: 'blockFocused && !blockIsRoot', group: 'block/3-kind', order: 20, layer: 'core', keywords: ['zoom', 'out', 'back'] },
+  /**
+   * 移动到…：**显式点名**的重排。与「块上移/下移」不同——那两个只换同级顺序，
+   * 这个跨容器。身份块不给入口：它们不参与组织，搬它们没有意义（位置不承载信息）。
+   */
+  { command: 'core.block/move-to', kind: 'menu', when: 'blockFocused && !blockIsRoot', group: 'block/2-structure', order: 30, layer: 'core' },
+  { command: 'core.block/move-to', kind: 'palette', when: 'blockFocused', layer: 'core' },
+  { command: 'core.block/zoom-out', kind: 'palette', when: '!blockIsRoot', layer: 'core' },
   { command: 'core.editor/pick-tag', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 5, layer: 'core' },
   { command: 'core.editor/insert-page-ref', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 10, layer: 'core' },
   { command: 'core.editor/insert-image', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 20, layer: 'core' },

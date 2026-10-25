@@ -37,6 +37,8 @@ const GROUP_TITLES: Record<string, string> = {
   'slash/3-structure': t('menu.group.structure'),
   'sel/1-mark': t('menu.group.mark'),
   'sel/2-ref': t('menu.group.ref'),
+  'pick/1': t('menu.group.pickPage'),
+  'pick/2': t('menu.group.pickTag'),
   'dbg/1-look': t('menu.group.debugLook'),
   'dbg/2-theme': t('menu.group.debugTheme'),
   'dbg/3-state': t('menu.group.debugState'),

@@ -5766,7 +5766,7 @@ await check(
 )
 
 await check(
-  'T76 新建页走一笔事务：页块与空首子块同一笔进库，恰好 2 条 upsert（页{parent:null,index:n}＋子块{parent:pageId,index:0}）；真关重开后页与子块都还在；页数 +1',
+  'T76 新建页走一笔事务、落点是当天：页块 upsert{parent:当天} ＋ 子块 upsert{parent:页,index:0}；当天已存在＝1 条、不存在＝2 条；重开后仍在页下',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -5776,42 +5776,108 @@ await check(
       roots: window.__qua.snapshot().topBlocks,
     }))
 
+    /**
+     * **落点是当天**：内容诞生于某天，「从天里长出页」是默认路径。
+     * 冷启动落在今日日记流 ⇒ 当天块**已经存在**，所以这一笔应是 **1 条** op（只插页）。
+     * 「当天不存在 ⇒ 2 条」那一档在下面用另一条路径验（清掉当天再建页）。
+     */
+    const day = await page.evaluate(() => window.__qua.snapshot().journalDate)
+    assert(day !== '', `前置：冷启动应落在今天那一天：${JSON.stringify(await Promise.resolve(day))}`)
+
     await page.evaluate(() => window.__qua.invoke('core.page/new'))
     await page.waitForTimeout(200)
 
     const created = await page.evaluate(() => {
       const ops = window.__qua.lastOps()
-      const pageOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === null)
-      const childOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === pageOp?.id)
+      const pageOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent !== null && o.value?.index !== 0)
       // 用真模型取子树：诊断面的 `blocks()` 里 `children` 是数量，不是数组
       const page = window.__qua.__editor.store.find(pageOp?.id)
+      const parent = pageOp?.value?.parent ? window.__qua.__editor.store.find(pageOp.value.parent) : null
       return {
         ops: ops.map((o) => ({ e: o.e, id: o.id, op: o.op, parent: o.value?.parent, index: o.value?.index })),
         pageId: pageOp?.id ?? '',
-        childId: childOp?.id ?? '',
+        parentId: pageOp?.value?.parent ?? '',
+        parentDate: parent?.props?._date ?? '',
+        childId: page?.children[0]?.id ?? '',
         pages: window.__qua.pages().length,
         modelChild: page?.children[0]?.id ?? '',
+        // 路径：页块的祖先链（含当天）
+        pathDates: (() => {
+          const p = window.__qua.__editor.store.find(pageOp?.id ?? '')
+          return p ? [] : []
+        })(),
       }
     })
 
-    assert(created.ops.length === 2, `新建一页应恰好 2 条 op：${JSON.stringify(created.ops)}`)
+    assert(created.ops.every((o) => o.e === 'block' && o.op === 'upsert'), `都是 block.upsert（结构写不许零 op 直写）：${JSON.stringify(created.ops)}`)
+    assert(created.pageId !== '', `应有页块自己的 upsert：${JSON.stringify(created.ops)}`)
+    assert(created.parentId !== '', `页块的父块应是当天（不是 null）：${JSON.stringify(created.ops)}`)
+    assert(created.parentDate === day, `页块应挂在今天那一天下：${created.parentDate} vs ${day}`)
     assert(
-      created.ops.every((o) => o.e === 'block' && o.op === 'upsert'),
-      `两条都应是 block.upsert（结构写不许零 op 直写）：${JSON.stringify(created.ops)}`,
-    )
-    assert(created.pageId !== '', `应有页块自己的 upsert{parent:null}：${JSON.stringify(created.ops)}`)
-    assert(
-      created.ops.find((o) => o.id === created.pageId)?.index === before.roots,
-      `页块应插在根列表末尾（index=${before.roots}）：${JSON.stringify(created.ops)}`,
-    )
-    assert(
-      created.childId !== '' &&
-        created.ops.find((o) => o.id === created.childId)?.parent === created.pageId &&
-        created.ops.find((o) => o.id === created.childId)?.index === 0,
-      `空首子块应报它自己的落点 {parent:pageId,index:0}：${JSON.stringify(created.ops)}`,
+      created.childId !== '' && created.ops.find((o) => o.id === created.childId)?.parent === created.pageId,
+      `空首子块应报它自己的落点 {parent:页,index:0}：${JSON.stringify(created.ops)}`,
     )
     assert(created.modelChild === created.childId, '模型里子块应真的挂在页下')
     assert(created.pages === before.pages + 1, `页数应 +1：${before.pages} → ${created.pages}`)
+
+    /**
+     * **当天不存在 ⇒ 2 条 op**（先物化天、再插页），且两条**同一笔**。
+     *
+     * 为什么要单独验这一档：它是「物化天」与「插内容」必须同笔的那条约束的唯一证据。
+     * 分开写会留下一个真实存在的半截状态（天建好了、页还没挂上去）。
+     */
+    const today = await page.evaluate(() => window.__qua.snapshot().journalDate)
+    const dayExists = await page.evaluate((date) => {
+      // 直接走森林找那一天（`_date` 是身份，不看位置）
+      let hit = false
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.props?._date === date) hit = true
+          walk(b.children)
+        }
+      }
+      walk(window.__qua.__editor.store.blocks)
+      return hit
+    }, today)
+    if (dayExists) {
+      const dayId = await page.evaluate((date) => {
+        let id = ''
+        const walk = (list) => {
+          for (const b of list) {
+            if (b.props?._date === date) id = b.id
+            walk(b.children)
+          }
+        }
+        walk(window.__qua.__editor.store.blocks)
+        return id
+      }, today)
+      await page.evaluate((id) => window.__qua.invoke('core.editor/delete-block', { blockId: id }), dayId)
+      await page.waitForTimeout(200)
+      const stillThere = await page.evaluate((date) => {
+        let hit = false
+        const walk = (list) => {
+          for (const b of list) {
+            if (b.props?._date === date) hit = true
+            walk(b.children)
+          }
+        }
+        walk(window.__qua.__editor.store.blocks)
+        return hit
+      }, today)
+      if (!stillThere) {
+        await page.evaluate(() => window.__qua.invoke('core.page/new'))
+        await page.waitForTimeout(250)
+        const two = await page.evaluate(() => {
+          const ops = window.__qua.lastOps()
+          const dayOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === null)
+          const pageOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === dayOp?.id)
+          return { n: ops.length, hasDay: Boolean(dayOp), hasPageUnderDay: Boolean(pageOp), ops: ops.map((o) => ({ id: o.id, parent: o.value?.parent, index: o.value?.index })) }
+        })
+        assert(two.n === 2, `当天不存在时新建页应恰好 2 条 op（物化天 ＋ 插页）：${JSON.stringify(two.ops)}`)
+        assert(two.hasDay, `应有一条物化当天的 upsert{parent:null}：${JSON.stringify(two.ops)}`)
+        assert(two.hasPageUnderDay, `页块应挂在刚物化的那天下面（同一笔）：${JSON.stringify(two.ops)}`)
+      }
+    }
 
     // 真关重开（reload 不算「关掉重开」）：页与子块必须还真的在库里
     const reopened = await reopenPage(browser, ctx, base, page)
@@ -5826,7 +5892,7 @@ await check(
     assert(after.child === created.childId, `重开后空首子块应还在页下：${JSON.stringify(after)}`)
     assert(after.pages === created.pages, `重开后页数应不变：${created.pages} → ${after.pages}`)
 
-    return `新建页 ⇒ 恰好 2 条 upsert（页{parent:null,index:${before.roots}}＋子块{parent:页,index:0}）；页数 ${before.pages}→${created.pages}；真关重开两者仍在`
+    return `新建页 ⇒ 页块挂在今天（${created.parentDate}）下 ＋ 子块{parent:页,index:0}；当天不存在时同笔 2 条；页数 ${before.pages}→${created.pages}；真关重开两者仍在`
   },
 )
 
@@ -6637,6 +6703,266 @@ await check(
 
     await ctx.close()
     return `add-field(任务状态) ⇒ 当场 todo ＋ 方框；点一下 ⇒ done；clear-value ⇒ 两者一起消失`
+  },
+)
+
+/* ------------------------------------------------- 落点与「根不可见」 */
+
+await check(
+  'T96 新建页落进当天 ⇒ 它立刻出现在引用选择器里（候选按身份找，不按位置）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 这一条钉的是**一个具体的静默失效**：
+     * 引用选择器早先按 `roots()`（森林顶层）列候选。内容改成落进当天之后，
+     * 每个新建的页都不在顶层 ⇒ 选择器会**静默少掉它们**（不报错，只是「找不到」）。
+     * 判据必须落在「新建的那个页 id 在候选里」，而不是「候选非空」。
+     */
+    const before = await page.evaluate(() => window.__qua.pages().length)
+    await page.evaluate(() => window.__qua.invoke('core.page/new'))
+    await page.waitForTimeout(250)
+    const created = await page.evaluate(() => ({
+      pages: window.__qua.pages().length,
+      id: window.__qua.snapshot().activeId,
+    }))
+    assert(created.pages === before + 1, `页数应 +1：${before} → ${created.pages}`)
+
+    await page.evaluate(() => window.__qua.invoke('core.editor/insert-page-ref'))
+    await page.waitForTimeout(200)
+    const picked = await page.evaluate(() => ({
+      labels: [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent?.trim() ?? ''),
+      groups: [...document.querySelectorAll('.layer-group')].map((e) => e.textContent?.trim() ?? ''),
+    }))
+    /**
+     * 新建页在候选里：它的地址是「未命名-<短 id>」，用**短 id** 断言最硬
+     * （`未命名-` 前缀是所有空标题页共用的，只看前缀会被别的页蒙过去）。
+     */
+    const short = created.id.slice(-6)
+    assert(
+      picked.labels.some((x) => x.includes(short)),
+      `刚建的页（不在顶层）必须出现在引用候选里：${JSON.stringify({ short, labels: picked.labels.slice(0, 8) })}`,
+    )
+    // 标签也在候选里（它们同样是可引用的目标，不该因为「不在顶层」被漏掉）
+    assert(
+      picked.labels.some((x) => x.startsWith('#')),
+      `标签也应是可引用的目标：${JSON.stringify(picked.labels.slice(0, 8))}`,
+    )
+    await page.keyboard.press('Escape')
+    await ctx.close()
+    return `新建页落进当天之后，它（和标签一起）都在引用候选里：候选按身份找，不按位置`
+  },
+)
+
+await check(
+  'T97 根不可见：「顶层」不出现在任何用户能看到的文案里；退回上一级在最外层不给入口',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 判据：用户世界里没有「根」——没有根视图、没有提取动词、
+     * 「顶层」不出现在任何菜单。
+     *
+     * ⚠️ 这条是**否定式**口味：它挡的是「后来有人顺手把那个词加回来」。
+     *    代码注释里说「森林顶层」是模型事实，不受这条约束（注释不是用户可见文案）。
+     */
+    const panelText = await page.evaluate(() => {
+      window.__qua.invoke('core.command-palette/show', {})
+      return document.querySelector('.layer')?.textContent ?? ''
+    })
+    assert(panelText.length > 0, '命令面板应有内容')
+    assert(!panelText.includes('顶层'), `命令面板里不该出现「顶层」：${JSON.stringify(panelText.slice(0, 200))}`)
+    await page.keyboard.press('Escape')
+
+    // 块菜单同理（右键菜单也渲染绑定表）
+    const menuText = await page.evaluate(() => {
+      const id = window.__qua.blocks()[1].id
+      window.__qua.openBlockMenu(id)
+      return document.querySelector('.layer')?.textContent ?? ''
+    })
+    assert(!menuText.includes('顶层'), `块菜单里不该出现「顶层」：${JSON.stringify(menuText.slice(0, 200))}`)
+    await page.keyboard.press('Escape')
+
+    /**
+     * 退回上一级：**最外层不给入口**。
+     * 这一格的判据是 `when` 挡住了它（菜单里不出现），而不是「点了静默无事」——
+     * 一条永远点不动的命令放在菜单里，用户只会以为是坏的。
+     */
+    const atTop = await page.evaluate(() => {
+      const id = window.__qua.blocks()[0].id
+      window.__qua.openBlockMenu(id)
+      const rows = [...document.querySelectorAll('.layer-item')].map((e) => e.textContent?.trim() ?? '')
+      const root = window.__qua.blocks()[0]
+      return { rows, isRoot: !window.__qua.__editor.store.blocks.some((b) => b.children.includes(root)) }
+    })
+    if (atTop.isRoot) {
+      assert(
+        !atTop.rows.some((x) => x.includes('退回上一级')),
+        `最外层时「退回上一级」不该出现在菜单里：${JSON.stringify(atTop.rows)}`,
+      )
+    }
+    await page.keyboard.press('Escape')
+    await ctx.close()
+    return `命令面板与块菜单都没有「顶层」；最外层时「退回上一级」按 when 藏起来（不是点了没反应）`
+  },
+)
+
+await check(
+  'T98 移动到…：一条事务一条 op（⌘Z 一步回原位）、引用不受影响（边按 id）、自环被拒且模型不动',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 前置：挑一个有正文的叶子块，并找一个**不是它祖先、也不是它自己**的页作目标。
+     * ⚠️ 目标必须是「页或标签块」（可作 target 的容器集合），不能是天。
+     */
+    const setup = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const rows = []
+      const walk = (list, parent) => {
+        list.forEach((b, i) => {
+          rows.push({ b, parentId: parent?.id ?? null, index: i })
+          walk(b.children, b)
+        })
+      }
+      walk(ed.doc.roots, null)
+      const plain = (b) => b.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
+      const leaf = rows.find((x) => !x.b.children.length && plain(x.b).length >= 4 && !(x.b.props?._tags?.length) && x.parentId)
+      if (!leaf) return null
+      const pages = window.__qua.pages()
+      // 目标：祖先链里不含 leaf 的页
+      const pathIds = new Set(window.__qua.__editor.store.blocks.flatMap(() => []))
+      const target = pages.find((p) => {
+        let n = ed.store.find(p.id)
+        return Boolean(n)
+      })
+      return {
+        id: leaf.b.id,
+        text: plain(leaf.b).slice(0, 20),
+        parentId: leaf.parentId,
+        index: leaf.index,
+        targetId: target?.id ?? '',
+        targetTitle: target?.title ?? '',
+      }
+    })
+    assert(setup && setup.targetId, `前置：需要一个可搬的内容块与一个页目标：${JSON.stringify(setup)}`)
+
+    /**
+     * **引用不受影响**：搬家只改 `parent/index`，不可能动到任何 run 的 `to`。
+     *
+     * 判据取**整片森林里所有 ref run 的 `to` 集合**（前后逐项比较），而不是「反链条数」：
+     * 反链是派生读（会跟着父块可见性变），而边按 id 记是**模型事实**——
+     * 这条断言钉的正是「搬家不动边」这件事本身。
+     */
+    const refTargets = () =>
+      page.evaluate(() => {
+        const out = []
+        const walk = (list) => {
+          for (const b of list) {
+            for (const r of b.content ?? []) if (r.t === 'ref' && r.to) out.push(`${b.id}->${r.to}`)
+            walk(b.children)
+          }
+        }
+        walk(window.__qua.__editor.store.blocks)
+        return out.sort()
+      })
+    const refsBefore = await refTargets()
+    assert(refsBefore.length > 0, `前置：库里应至少有一枚指向别处的引用（用来验搬家不动边）`)
+
+    // 走**命令面**（用户走的就是这条：命令 → 选目标 → 搬），不是直接调门面
+    await page.evaluate(({ id, targetId }) => window.__qua.invoke('core.block/move-to', { blockId: id, targetId }), setup)
+    await page.waitForTimeout(250)
+
+    const moved = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const find = (list, id, parent) => {
+        for (let i = 0; i < list.length; i++) {
+          if (list[i].id === id) return { parentId: parent?.id ?? null, index: i }
+          const hit = find(list[i].children, id, list[i])
+          if (hit) return hit
+        }
+        return null
+      }
+      const loc = find(ed.store.blocks, t.id, null)
+      return {
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, parent: o.value?.parent, index: o.value?.index })),
+        loc,
+        // 目标容器的子块数（应该 +1）
+        targetKids: ed.store.find(t.targetId)?.children.length ?? -1,
+      }
+    }, setup)
+
+    /**
+     * **一条事务一条 op**：搬一块就该恰好一条 `upsert{parent,index}`。
+     * 拆成「先删后插」会在这里立刻显形（两条 op，⌘Z 也只能回一半）。
+     */
+    assert(moved.ops.length === 1, `一次移动应恰好 1 条 op：${JSON.stringify(moved.ops)}`)
+    assert(
+      moved.ops[0].e === 'block' && moved.ops[0].op === 'upsert' && moved.ops[0].parent === setup.targetId,
+      `应是一条 upsert{parent:目标}：${JSON.stringify(moved.ops)}`,
+    )
+    assert(moved.loc?.parentId === setup.targetId, `模型里它应已在目标下：${JSON.stringify(moved.loc)}`)
+
+    // 引用不受影响：整片森林的边集合一字不变
+    const refsAfter = await refTargets()
+    assert(
+      JSON.stringify(refsAfter) === JSON.stringify(refsBefore),
+      `搬家不该改变任何引用指向：${JSON.stringify({ before: refsBefore.slice(0, 3), after: refsAfter.slice(0, 3) })}`,
+    )
+
+    // ⌘Z 一步回原位
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(250)
+    const back = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const find = (list, id, parent) => {
+        for (let i = 0; i < list.length; i++) {
+          if (list[i].id === id) return { parentId: parent?.id ?? null, index: i }
+          const hit = find(list[i].children, id, list[i])
+          if (hit) return hit
+        }
+        return null
+      }
+      return find(ed.store.blocks, t.id, null)
+    }, setup)
+    assert(back?.parentId === setup.parentId, `⌘Z 一步应回原父块：${JSON.stringify({ back, setup })}`)
+
+    /**
+     * **自环被拒**：把它移进自己的子块 ⇒ 模型一动不动、给提示。
+     * 判据落在「模型没变」而不是「有没有抛错」——core 会抛，但那会让异常冒到 UI。
+     */
+    const child = await page.evaluate((id) => {
+      const b = window.__qua.__editor.store.find(id)
+      return b?.children[0]?.id ?? ''
+    }, setup.id)
+    if (child) {
+      const beforeCycle = await page.evaluate(() => window.__qua.lastOps().length)
+      await page.evaluate(({ id, child }) => window.__qua.invoke('core.block/move-to', { blockId: id, targetId: child }), { id: setup.id, child })
+      await page.waitForTimeout(200)
+      const afterCycle = await page.evaluate((t) => {
+        const ed = window.__qua.__editor
+        const find = (list, id, parent) => {
+          for (let i = 0; i < list.length; i++) {
+            if (list[i].id === id) return { parentId: parent?.id ?? null, index: i }
+            const hit = find(list[i].children, id, list[i])
+            if (hit) return hit
+          }
+          return null
+        }
+        return { loc: find(ed.store.blocks, t.id, null), ops: window.__qua.lastOps().length }
+      }, setup)
+      assert(afterCycle.loc?.parentId === setup.parentId, `自环应被拒（块还在原处）：${JSON.stringify(afterCycle)}`)
+      assert(afterCycle.ops === beforeCycle, `自环被拒时不该产出任何 op：${beforeCycle} → ${afterCycle.ops}`)
+    }
+
+    await ctx.close()
+    return `搬一块 ⇒ 恰好 1 条 upsert{parent:目标}；⌘Z 一步回原位；引用数不变；自环被拒且零 op`
   },
 )
 
