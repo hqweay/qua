@@ -12,8 +12,8 @@
  * ⚠️ 归一化只影响**比较**，不写回：`# 设计 ` 找到的是「设计」，块上的 `_aliases`
  *    不会被改写。
  * ⚠️ **`text` 不在地址空间里**：只是正文恰好等于某个名字，不构成「这个块也叫那个名」。
- *    这条是与旧模型最重要的分界——旧模型让 `aliasOf` 回落到正文，于是改名（写正文）
- *    会顺手改地址，让「敲字」变成「重命名」。
+ *    这条是地址模型最重要的一处分界：地址只有 `_aliases` 一个来源。若让正文也参与，
+ *    那么「敲字」就变成了「重命名」—— 块尾回车、退格都会顺手改掉它的地址。
  */
 import { ALIASES_PROP, aliasesOf, listsOf, primaryAliasOf, type Block } from './model.ts'
 import { plainText } from './runs.ts'
@@ -236,7 +236,7 @@ export function writeRename(b: Block, oldName: string, newName: string): void {
  *
  * 先 claim 再应用：撞车时一个字节都不写，返回冲突块。
  * ⚠️ 旧名不存在 ⇒ 追加新名（调用方表达的是「我要这个地址」，而不是「删掉那个不存在的」）。
- *    这条选择让 `renameBlock` 的兼容形状（主名为空时 add）不需要第二个分支。
+ *    这条选择让「块还没有名字时改名」不需要第二个分支。
  */
 export function renameAlias(
   forest: readonly Block[],
@@ -292,65 +292,4 @@ export function claimAliases(
     if (!claim.ok) return claim
   }
   return { ok: true }
-}
-
-/*
- * ---------------------------------------------------------------- 兼容别名
- *
- * 下一阶段删：调用方已按新名字写，但命令／UI 还有几处旧入口（编辑器改名、
- * 测试夹具）暂时靠这些包装保持可见行为不变。包装里**没有第二套语义**。
- */
-
-/** @deprecated 用 `primaryAliasOf`（名字住在 `_aliases`，正文不再回落到地址） */
-export const aliasOf = primaryAliasOf
-
-/** @deprecated 用 `claimAlias` */
-export function claimAddress(
-  forest: readonly Block[],
-  b: Block,
-  name: string,
-  occupiesAddress: boolean = isAddressable(b),
-): { ok: true } | { ok: false; conflict: Block } {
-  return claimAlias(forest, b, name, occupiesAddress)
-}
-
-/**
- * 写主名（**不查重**；调用方先 `claimAlias`）。
- *
- * 主名不存在时追加；存在时替换首位。正文一个字节不动：地址与描述是两件事。
- * @deprecated 用 `addAlias`／`renameAlias`／`setPrimaryAlias`
- */
-export function setAlias(b: Block, name: string): void {
-  const raw = name.trim()
-  if (normalizeAlias(raw) === '') return
-  const aliases = aliasesOf(b)
-  if (aliases.length === 0) {
-    addAlias(b, raw)
-    return
-  }
-  const want = normalizeAlias(raw)
-  const rest = aliases.slice(1).filter((a) => normalizeAlias(a) !== want)
-  b.props = { ...(b.props ?? {}), [ALIASES_PROP]: [raw, ...rest] }
-}
-
-/**
- * 改主名（冲突拒绝）。
- *
- * ⚠️ **不再写 `text`**：正文是描述，改名只改地址。旧实现同时写正文，于是
- *    「块尾回车/退格」会顺手重命名。
- * @deprecated 用 `renameAlias`／`setPrimaryAlias`
- */
-export function renameBlock(
-  forest: readonly Block[],
-  b: Block,
-  name: string,
-): { ok: true } | { ok: false; conflict: Block } {
-  const primary = primaryAliasOf(b)
-  if (normalizeAlias(primary) === '') {
-    const claim = claimAlias(forest, b, name, true)
-    if (!claim.ok) return claim
-    addAlias(b, name)
-    return { ok: true }
-  }
-  return renameAlias(forest, b, primary, name)
 }

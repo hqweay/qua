@@ -21,8 +21,14 @@ import { todoOf } from './props.ts'
 /* ------------------------------------------------------------ 条件形状 */
 
 /**
- * 条件**原子**。首版只做这五种——够表达「反链」「某标签下的块」「某天之后改过的待办」这类常见诉求，
+ * 条件**原子**。够表达「反链」「某标签下的块」「某天之后改过的待办」这类常见诉求，
  * 且每一种都能用一次线性扫描算出来（不用索引）。
+ *
+ * ⚠️ **能用通用属性条件表达的，就别造专用键**：专用键每多一个，`canonicalSpec` 就要多一支，
+ *    漏一处 = 条件存进 `_query` 时被静默丢掉（而丢掉的后果是「条件没变、结果却对不上」）。
+ *    唯一的例外是 `{todo}`：它表达的是**三态**（做完／是任务但没填／不是任务），
+ *    而属性条件只能问「有没有值」和「值等于什么」—— `eq:false` 不含「有槽未填」，
+ *    `exists:false` 也不含。三种状态要靠两个条件的组合去拼，反而更难读（见那一条的注释）。
  *
  * 组合：`{ all: [...] }` / `{ any: [...] }` / `{ not: ... }`，可嵌套。
  * ⚠️ **不加 `mentions`**：未链接提及＝`text` 里出现某个词，那是全文检索的事，
@@ -44,15 +50,28 @@ export type QueryNode =
    *    都统一表示「不匹配」。要让用户说清「没有这个字段」，得给属性条件加一个
    *    「不存在」的形态——没做之前，这一支留着更诚实。
    */
+  /**
+   * 待办状态（三态：做完／是任务但没填／不是任务）。
+   *
+   * ⚠️ 为什么不用 `{prop}` 表达（两个条件组合也拼不出来，实测过）：
+   *    · 屏幕上画着空心方框的块**是待办**：它的槽位在、值还没填。
+   *    · `{prop:{id,eq:false}}` 只命中「点了但没做完」的那种，**漏掉**有槽未填的；
+   *    · `{prop:{id,exists:false}}` 会把「不是任务」和「有槽未填」混成一个。
+   *    ⇒ 三态写在 `core/props.ts` 的 `todoOf` 里，这里是它唯一的查询入口。
+   */
   | { todo: TodoFilter }
   /**
-   * 某属性等于某值（`eq` 用 `Object.is` 比较；属性不存在 ⇒ 不匹配）。
+   * 某属性**等于某值**，或**有没有这一槽**。
    *
-   * 属性条件是**通用路径**：键是定义块的 id（不是名字），所以改显示名不影响查询语义。
-   * `Object.is` 让 `false` 与 `undefined`（未填）严格区分开 —— 按 `===` 也满足，
-   * 但 `Object.is` 把 `NaN` 与 `-0` 也说清楚了，不必再讨论它们。
+   * 属性条件是**通用路径**：键是定义块的 id（不是名字），所以改显示名不影响查询语义；
+   * 类型、日期这类身份位也是 `props` 里的槽，所以同一个条件能把它们都问到。
+   * `Object.is` 让 `false` 与 `undefined`（未填）严格区分开。
+   *
+   * `eq` 与 `exists` **互斥**；同时给时按 `exists` 判（不猜）。
+   * 「有没有这一槽」是 `eq` 表达不出来的一个真问题：`未完成的任务` 是 `eq: false`，
+   * `不是任务` 是 `exists: false` —— 拿 `eq: undefined` 冒充会把两者混成一个。
    */
-  | { prop: { id: string; eq: unknown } }
+  | { prop: { id: string } & ({ eq: unknown } | { exists: boolean }) }
   /** 某天（`YYYY-MM-DD`）的日记块**下面的块** */
   | { journal: string }
   /**
@@ -69,13 +88,13 @@ export type QueryNode =
   | { any: QueryNode[] }
   | { not: QueryNode }
 
-export type TodoFilter = 'todo' | 'done' | 'none'
-
 /** 一个排序键：按**属性 id** 取值升/降序（与属性条件同一个理由：键是 id，改名不影响语义） */
 export interface SortKey {
   by: string
   dir: 'asc' | 'desc'
 }
+
+export type TodoFilter = 'todo' | 'done' | 'none'
 
 /** 整个查询：条件 ＋ 范围 ＋ 顺序。没有 `view: table | board` —— 首版只有大纲列表 */
 export interface QuerySpec {
@@ -198,9 +217,9 @@ export function refSourceIds(forest: readonly Block[], targetId: string): Set<st
 /**
  * 标签条件：**按边判定**，不扫文本。
  *
- * ⚠️ 以前这里是正则扫 `b.text`（`#tag` 当作文本匹配）—— 那是 71.4 承认的「第二套解析」：
- *    「看起来是标签的文本」与「真的是一条标签边」成了两件事，改名也不同步。
- *    现在标签＝指向标签块的边，判定只在 `core/tags.ts` 里发生。
+ * ⚠️ 标签＝指向标签块的边，**判定只在 `core/tags.ts` 里发生**（`tagMemberIds`）。
+ *    不要在正文上再扫一遍 `#tag`：那会得到「看起来是标签的文本」与「真的是一条边」
+ *    两套答案 —— 两条路径对同一个块说法不一，改名也不同步。
  *
  * ⚠️ 名字→标签块只解析一次（`collectTags`），不在 `matches` 里逐个块查，
  *    否则一次查询会退化成 O(块数 × 条件数) 次森林遍历。
@@ -217,14 +236,18 @@ function matches(node: QueryNode, b: Block, refs: ReadonlySet<string>, tags: Rea
   if ('tag' in node) return tags.has(b.id)
   if ('text' in node) return plainText(b.content).includes(node.text)
   if ('prop' in node) {
-    // 属性不存在 ⇒ 不匹配（而不是「等于 undefined」）：先问「有没有这一槽」，再比值。
-    // 这样 `eq: false` 与「没填」是两件事，`eq: undefined` 也不会误命中所有块。
+    /**
+     * 先问「有没有这一槽」，再决定比值还是比存在性。
+     * 这样 `eq: false` 与「没填」是两件事，`eq: undefined` 也不会误命中所有块。
+     */
     const props = b.props
-    if (!props || !(node.prop.id in props)) return false
+    const has = props !== undefined && node.prop.id in props
+    if ('exists' in node.prop) return has === node.prop.exists
+    if (!has) return false
     return Object.is(props[node.prop.id], node.prop.eq)
   }
-  const cur = todoOf(b) ?? 'none'
-  return node.todo === cur
+  // 剩下的只有 `{todo}`：三态判据在 `core/props.ts`，这里不另写一份
+  return (todoOf(b) ?? 'none') === node.todo
 }
 
 /** role 逐值分发到**既有唯一判据**，不另设第二份答案；进新值域时在此续支 */

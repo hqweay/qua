@@ -19,7 +19,6 @@ import {
   addressOf,
   aliasConflict,
   aliasLeaf,
-  aliasOf,
   aliasesOf,
   canRemoveAlias,
   claimAlias,
@@ -35,8 +34,6 @@ import {
   removeAlias,
   removeList,
   renameAlias,
-  renameBlock,
-  setAlias,
   setPrimaryAlias,
 } from '../src/core/index.ts'
 
@@ -71,7 +68,6 @@ test('addressesOf / addressOf / primaryAliasOf：首个主名，全部别名都�
   assert.equal(primaryAliasOf(x), ' A/B ')
   assert.equal(addressOf(x), 'a/b')
   assert.equal(displayNameOf(x), 'B', '主名叶子 > 正文')
-  assert.equal(aliasOf(x), primaryAliasOf(x), '兼容别名没有第二套语义')
 })
 
 test('displayNameOf：主名叶子 > 正文；正文不在地址空间（只是描述）', () => {
@@ -200,36 +196,35 @@ test('renameAlias：旧名不存在 ⇒ 追加新名（不静默丢调用）', (
   assert.deepEqual(aliasesOf(x), ['甲', '乙'])
 })
 
-/* ------------------------------------------------------------ 兼容包装 */
+/* ------------------------------------------------------------ 改名 */
 
-test('renameBlock：只改主名、**不再写 text**（写回正文不会顺手重命名）', () => {
+test('renameAlias：只改地址、**不写 text**（写回正文不会顺手重命名）', () => {
   const x = page('x', ['旧名'], '一段描述')
-  const r = renameBlock([x], x, '新名')
+  const r = renameAlias([x], x, '旧名', '新名')
   assert.deepEqual(r, { ok: true })
   assert.deepEqual(aliasesOf(x), ['新名'])
   assert.equal(plainText(x.content), '一段描述', '正文是描述，改名一个字都不碰')
 })
 
-test('renameBlock：主名为空 ⇒ 追加；撞名 ⇒ 拒绝', () => {
+test('renameAlias：块还没有名字 ⇒ 追加；撞名 ⇒ 拒绝且一个字节都不写', () => {
   const x = b('x', '描述')
-  assert.deepEqual(renameBlock([x], x, '名字'), { ok: true })
+  assert.deepEqual(renameAlias([x], x, '', '名字'), { ok: true })
   assert.deepEqual(aliasesOf(x), ['名字'])
 
   const other = withAliases('o', ['占用了'])
-  const r = renameBlock([other, x], x, '占用了')
+  const r = renameAlias([other, x], x, '名字', '占用了')
   assert.equal(r.ok, false)
   assert.deepEqual(aliasesOf(x), ['名字'], '拒绝时一个字节都不写')
 })
 
-test('setAlias：主名不存在则加、存在则替换首位（不查重；调用方先 claim）', () => {
+test('setPrimaryAlias：在已有的名字里挑一个当主名（不新增、不查重）', () => {
   const x = withAliases('x', ['甲', '乙'], '描述')
-  setAlias(x, '丙')
-  assert.deepEqual(aliasesOf(x), ['丙', '乙'], '替换主名，其余顺序不变')
+  assert.equal(setPrimaryAlias(x, '乙'), true)
+  assert.deepEqual(aliasesOf(x), ['乙', '甲'], '移到首位，其余顺序不变')
   assert.equal(plainText(x.content), '描述')
-
-  const fresh = b('f', '')
-  setAlias(fresh, '丁')
-  assert.deepEqual(aliasesOf(fresh), ['丁'])
+  // 不新增：名单里没有的名字不会被偷偷造出来
+  assert.equal(setPrimaryAlias(x, '丙'), false)
+  assert.deepEqual(aliasesOf(x), ['乙', '甲'])
 })
 
 test('ensureTag / findTagByName：标签名字同样是地址（复用同一个规范化）', () => {

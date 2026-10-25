@@ -61,7 +61,7 @@ export function seedWorkspace(): Workspace {
     { text: '把「引用某段」的 UI 补上', tags: ['任务'], task: false },
     { text: '行内内容边界断言复跑通过', tags: ['任务', '证据'], task: true },
     /**
-     * **查询块**（–D6）的演示样本：条件＝「本页之下、带 #todo 的块」。
+     * **查询块**的演示样本：条件＝「本页之下、还没做完的待办」。
      *
      * ⚠️ 只是**数据侧**（A）：条件写在 `_query` 里，块的正文是它的名字。
      * 结果集是**外源渲染**，刷新时只改这个块的 `_queryResult`（不 re-parent，A/A）。
@@ -70,7 +70,8 @@ export function seedWorkspace(): Workspace {
      */
     {
       text: '本页的待办',
-      // 条件只用「待办状态」：这张页里没有同时带 `#todo` 标签的块，加标签条件会得到 0 条
+      // 条件只用「待办状态」：三态（做完／是任务但没填／不是任务）只有这一条条件分得开，
+      // 属性条件会漏掉「有槽未填」的那种。这张页里没有同时带某个标签的块，加标签条件会得到 0 条
       props: { _icon: 'lucide:list-filter', _query: { where: { todo: 'todo' } } },
     },
   ])

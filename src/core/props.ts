@@ -85,7 +85,7 @@ export const TASK_STATUS_PROP_ID = derivedId('prop', 'core/task-status')
  *    （渲染看的是槽位），查询「未完成」却查不到它（这里看的是值），同一个块两种答案。
  *
  * 为什么 `false` 与「未填」都算 `'todo'`、而不并进缺失：那样「还没做完」与「不是任务」
- * 会变成同一个状态，而「按任务筛选」要的正是它们分开。查询层的 `TodoFilter` 因此一行都不用改。
+ * 会变成同一个状态，而「按任务筛选」要的正是它们分开 —— 所以三态在值上，不在类型里。
  */
 export function todoOf(block: Block): TodoState | undefined {
   const v = valueOf(block, TASK_STATUS_PROP_ID)

@@ -87,7 +87,7 @@ const store = createWorkspaceStore(createLocalStorageAdapter(STORAGE_KEY))
 const deviceStore = createDeviceStore(createLocalStorageAdapter(DEVICE_KEY))
 
 /**
- * 读盘**是异步的**（71.5 第 2 条：上层不得依赖同步返回）。
+ * 读盘**是异步的**：上层不得依赖同步返回（写队列与读盘共用一条契约）。
  * 入口在文件末尾 `await` —— 模块顶层 await 在 Electron renderer / vite 下都没问题。
  */
 const boot = await store.load()
@@ -300,7 +300,7 @@ function rowsForSlash(query: string): Row[] {
  *   · 中性现代的口径是 chrome 极弱 —— 一排常驻按钮是**最重**的 chrome；
  *   · 加粗/高亮这类命令**只对选区有意义**（光标态按下去没有任何效果），
  *     常驻等于长期摆着几个点不动的按钮；把「有没有选区」做成**唯一开关**，
- *     可用性靠 `when` 表达（承 §1.3：「这次怎么显示」归查询/绑定，不是给块加字段）。
+ *     可用性靠 `when` 表达（「这次怎么显示」归查询或绑定，不是给块加字段）。
  *
  * ⚠️ 气泡**不进 `layers.open`**（那是菜单/命令面板的模态状态）：它在的时候用户还能打字，
  *    Esc 也不该关它 —— 关它的唯一条件是「选区没了」。

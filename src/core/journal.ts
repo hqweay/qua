@@ -75,7 +75,7 @@ export function findJournalDay(blocks: readonly Block[], date: string): Block | 
   return journalDays(blocks).find((b) => journalDate(b) === date)
 }
 
-/** 日记流的首屏/增量/上限（调研 §4.9 的「3 + 5」口径，上限先兜住 DOM） */
+/** 日记流的首屏/增量/上限（首屏 3 天、每次加 5 天；上限先兜住 DOM） */
 export const FEED_INITIAL = 3
 export const FEED_STEP = 5
 export const FEED_MAX = 30

@@ -381,3 +381,74 @@ test('canonicalSpec：键序固定 ⇒ 同一条件的不同写法判为「没�
   assert.equal(specChanged(q, b2), false, '写法不同但语义相同 ⇒ 不该触发重算')
   assert.equal(specChanged(q, { where: { tag: 'y' }, scope: 'all' }), true)
 })
+
+/* ------------------------------------------------- 属性条件是通用路径 */
+
+test('属性条件问得到身份位：类型／日期／定义种类都是 props 里的槽', () => {
+  const divider: Block = b('v', '', { props: { _type: 'core/divider' } })
+  const day: Block = b('j', '', { props: { _date: '2026-10-20' } })
+  const def: Block = b('d', '截止日', { props: { _kind: 'date' } })
+  const plain = b('p', '普通一行')
+  const blocks = [divider, day, def, plain]
+
+  assert.deepEqual(
+    runQuery({ where: { prop: { id: '_type', eq: 'core/divider' } } }, { blocks }).map((h) => h.blockId),
+    ['v'],
+    '类型不需要专用条件键：它就是 `_type` 这一槽',
+  )
+  assert.deepEqual(
+    runQuery({ where: { prop: { id: '_date', eq: '2026-10-20' } } }, { blocks }).map((h) => h.blockId),
+    ['j'],
+  )
+  assert.deepEqual(
+    runQuery({ where: { prop: { id: '_kind', eq: 'date' } } }, { blocks }).map((h) => h.blockId),
+    ['d'],
+  )
+  assert.deepEqual(runQuery({ where: { prop: { id: '_kind', exists: true } } }, { blocks }).map((h) => h.blockId), ['d'])
+})
+
+test('exists：问「有没有这一槽」，与 eq 是两件事；同时给时按 exists（不猜）', () => {
+  const filled = b('a', '填了 false', task(false))
+  const empty = b('b', '没这一槽')
+  const blocks = [filled, empty]
+
+  assert.deepEqual(runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, exists: true } } }, { blocks }).map((h) => h.blockId), ['a'])
+  assert.deepEqual(runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, exists: false } } }, { blocks }).map((h) => h.blockId), ['b'])
+  // `eq: undefined` 不等于「没有这一槽」：先问有没有，再比值
+  assert.deepEqual(runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: undefined } } }, { blocks }), [])
+  // 两种形态互斥；同时写按 exists 判（形状写歪时给出可预期的一种答案，而不是靠键序）
+  const both = { prop: { id: TASK_STATUS_PROP_ID, exists: false, eq: false } } as unknown as QuerySpec['where']
+  assert.deepEqual(runQuery({ where: both }, { blocks }).map((h) => h.blockId), ['b'])
+})
+
+test('`{todo}` 不是 `{prop}` 的语法糖：三态里「有槽未填」只有它命中', () => {
+  /**
+   * 空心方框（槽位在、值没填）在屏幕上是「待办 · 没做完」，所以它必须被「未完成」查到。
+   * 这条同时是**不删 `{todo}`** 的理由：
+   *   · `{prop:{eq:false}}` 只命中「点了但没做」的那种（漏掉空方框）；
+   *   · `{prop:{exists:false}}` 把「不是任务」与「空方框」混成一个。
+   * 两个条件的组合也拼不出来（「声明过但没值」不是属性值能表达的）。
+   */
+  const untouched = b('u', '空方框', { props: { [OWN_PROPS_PROP]: [TASK_STATUS_PROP_ID] } })
+  const falseVal = b('f', '点了没做', task(false))
+  const done = b('d', '做完了', task(true))
+  const blocks = [untouched, falseVal, done]
+
+  assert.deepEqual(runQuery({ where: { todo: 'todo' }, scope: 'all' }, { blocks }).map((h) => h.blockId), ['u', 'f'])
+  assert.deepEqual(
+    runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } }, scope: 'all' }, { blocks }).map((h) => h.blockId),
+    ['f'],
+    '属性条件漏掉空方框 —— 这就是 `{todo}` 存在的理由',
+  )
+  assert.deepEqual(runQuery({ where: { todo: 'done' }, scope: 'all' }, { blocks }).map((h) => h.blockId), ['d'])
+  assert.deepEqual(runQuery({ where: { todo: 'none' }, scope: 'all' }, { blocks }).map((h) => h.blockId), [])
+})
+
+test('canonicalSpec：`exists` 要能存活下来（漏了这一支 = 存进 _query 就被丢掉）', () => {
+  const spec: QuerySpec = { where: { prop: { id: '_kind', exists: true } } }
+  assert.deepEqual(canonicalSpec(spec), spec)
+  assert.equal(JSON.stringify(canonicalSpec(spec)), '{"where":{"prop":{"id":"_kind","exists":true}}}')
+  // 两种形态原样带走：不补默认值（补了 `eq` 与 `exists` 的两种写法就不再等价）
+  const eqSpec: QuerySpec = { where: { prop: { id: '_kind', eq: 'date' } } }
+  assert.equal(JSON.stringify(canonicalSpec(eqSpec)), '{"where":{"prop":{"id":"_kind","eq":"date"}}}')
+})

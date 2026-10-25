@@ -14,7 +14,7 @@ import { LEGACY_ALIAS_PROP, normalizeAlias } from '../alias.ts'
 import { isAnno, isRun } from '../runs.ts'
 
 /**
- * 落盘形状的版本；**只在显式作废旧库时加一**（/ 71.9）。
+ * 落盘形状的版本；**只在显式作废旧库时加一**（原型不做迁移，旧库直接作废重 seed）。
  *
  * v1 → v2：`_icon` 值域改为 `lucide:<name>`（2026-10-20）
  * v2 → v3：三皮肤删除
