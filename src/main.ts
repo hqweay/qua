@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, checkAddParent, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingParentIds, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  normalizeAlias, parentTags, primaryAliasOf, prop,  pruneParentTags, removeList,  setBlockType, tagMemberIds,  type Block, type CtxKeys } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  type Block, type CtxKeys } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
@@ -32,7 +32,7 @@ import { createIcon } from './view/icons.ts'
 import { renderAliasEditor } from './ui/alias-editor.ts'
 import { renderFieldsEditor } from './ui/fields-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type PanelDeps } from './ui/panels.ts'
-import { devCommands, journalCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, tagTreeCommands, takenWhere, viewCommands, zoomCommands } from './app/commands-impl.ts'
+import { devCommands, journalCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, zoomCommands } from './app/commands-impl.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupDocks } from './app/wiring/docks.ts'
 import { setupPanels } from './app/wiring/panels.ts'
@@ -105,6 +105,15 @@ const device = await deviceStore.load()
  */
 const readOnly = boot.status === 'too-new' || boot.status === 'corrupt' || boot.status === 'storage-error'
 let ws: Workspace = boot.status === 'ok' ? boot.ws : seedWorkspace()
+
+/**
+ * 边图邻接表（**现建一次、当次用完**）。
+ *
+ * 不缓存成「源点集合」：根的判据是「本树内没有可见父」，父一变（加减露面、
+ * 软删、恢复）根集合就得跟着变。缓存一处就是「给 A 加了页露面，A 在归属树里还是原位」。
+ * 同一次动作里要问好几遍的调用方自己 `const adj = adjacency()` 一次传下去。
+ */
+const adjacency = () => buildAdjacency(ws.blocks)
 let bootNotice: string | null = null
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 if (boot.status === 'too-new') bootNotice = t('ui.boot.tooNew', { version: boot.version })
@@ -663,13 +672,13 @@ const app: App = {
     },
     toast: (text, kind) => app.toast(text, kind),
   }),
-  ...tagTreeCommands({
+  ...belongsToCommands({
     kb,
     // 成环检查要算祖先闭包（全库读）：判据只有 core 一份，森林由装配层收进闭包
-    checkAdd: (child, parent) => checkAddParent(child, parent, ws.blocks),
-    cycleLabels: (path) => cyclePathLabels(path, ws.blocks, (id) => shortId(id)),
-    danglingOf: (tag) => danglingParentIds(tag, ws.blocks),
-    pruneDangling: (tag) => pruneParentTags(tag, ws.blocks),
+    checkAdd: (child, parent) => checkEdge(child, parent, adjacency()),
+    cycleLabels: (path) => cyclePathLabels(path, adjacency(), (id) => shortId(id)),
+    danglingOf: (child) => danglingOf(child, adjacency()),
+    pruneGone: (child) => pruneGone(child, adjacency()),
     write: writeProps,
     toast: (text, kind) => app.toast(text, kind),
     shortId: (id) => shortId(id),
@@ -708,7 +717,7 @@ const app: App = {
             addressesOf(tag).some((a) => a.includes(want)),
         )
         .map((tag) => {
-          const parents = parentTags(tag, ws.blocks)
+          const parents = parentsOf(tag, adjacency())
           return {
             id: `tagpick/${tag.id}`,
             label: `#${blockName(tag)}`,

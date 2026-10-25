@@ -17,7 +17,7 @@
  */
 import type { Block } from '../core/index.ts'
 import { plainText } from '../core/runs.ts'
-import type { FieldRow, PropKind } from '../core/index.ts'
+import type { Dangling, FieldRow, PropKind } from '../core/index.ts'
 import { clockLabel, displayNameOf, declaredFieldIds, hasList, PROP_KINDS, propKindOf, uiPositionOf } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 
@@ -60,6 +60,21 @@ export interface PropertiesDeps {
    * 不注入的话，`ref` 只能让用户手打 32 位 id，那等于没有这个类型。
    */
   pickRef: (b: Block, propId: string, current: string, onPick: (targetId: string) => void) => void
+  /**
+   * **这一块归在谁下面**（`props._belongsTo` 的活块，有序）。
+   *
+   * ⚠️ 与「标签」那一行不是一回事：标签是分类（instance-of），归属是 filed-under。
+   *    一条归属边可以连任何块；**跨类的那条边只在这里看得见**（归属树按露面筛子项）。
+   */
+  belongsTo: (b: Block) => Block[]
+  /** 悬空上级的两态（回收站里的不能清、真没了的能清） */
+  belongsDangling: (b: Block) => Dangling
+  /** 加一条归属（按名字在页／标签里找；找不到就提示） */
+  addBelong: (b: Block, name: string) => void
+  /** 删一条归属（只动这一块；不碰名字、不碰它的子块） */
+  removeBelong: (b: Block, parentId: string) => void
+  /** 清理「上级真没了」的那些 */
+  pruneBelongs: (b: Block) => void
   /** 把一个块 id 变成人能读的名字（`ref` 值的显示） */
   refLabel: (targetId: string) => string
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
@@ -192,6 +207,8 @@ export class PropertiesPanel {
 
     // 标签在第一行：它是**分类**，比「有哪些字段」更先决定这一块是什么
     this.els.body.appendChild(this.buildTags(target))
+    // 归属紧随其后：与标签并列的另一种「它是谁的」。任何块都有这一行
+    this.els.body.appendChild(this.buildBelongs(target))
 
     if (rows.length === 0 && elsewhere.length === 0) {
       const empty = document.createElement('p')
@@ -298,6 +315,87 @@ export class PropertiesPanel {
     }
     box.append(label, value)
     return box
+  }
+
+  /**
+   * **这一块归在谁下面**（`props._belongsTo`）。
+   *
+   * 判据：**能配在任何块上的关系，住在属性区**；只有某类块才有的关系（成员）住在那个块的面板里。
+   * 所以这一行对**每个**块都出现，而标签面板只剩「成员」。
+   *
+   * 两种悬空必须分开显示：上级在回收站（等它复活，边会自己接回）与上级真没了（可清理）。
+   * 都画成「已删除」会让人一点清理就把能复活的边清掉。
+   */
+  private buildBelongs(target: Block): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'prop-row prop-belongs'
+    const label = document.createElement('label')
+    label.className = 'prop-label'
+    const name = document.createElement('span')
+    name.className = 'prop-name'
+    name.textContent = t('ui.belongs.title')
+    label.append(name)
+
+    const value = document.createElement('span')
+    value.className = 'prop-value props-tag-value'
+
+    const chip = (id: string, text: string, title: string): HTMLElement => {
+      const el = document.createElement('span')
+      el.className = 'props-tag'
+      el.dataset.belongsId = id
+      const t0 = document.createElement('span')
+      t0.textContent = text
+      t0.title = title
+      const del = document.createElement('button')
+      del.type = 'button'
+      del.className = 'props-tag-x'
+      del.title = t('ui.belongs.remove')
+      del.textContent = '×'
+      del.addEventListener('click', () => this.deps.removeBelong(target, id))
+      el.append(t0, del)
+      return el
+    }
+
+    for (const p of this.deps.belongsTo(target)) {
+      const n = displayNameOf(p).trim()
+      value.appendChild(chip(p.id, n === '' ? this.deps.shortId(p.id) : n, p.id))
+    }
+    const dangling = this.deps.belongsDangling(target)
+    for (const id of dangling.revivable) {
+      const el = chip(id, `${this.deps.shortId(id)}${t('ui.belongs.revivable')}`, t('ui.belongs.revivableHint'))
+      el.dataset.dangling = 'revivable'
+      value.appendChild(el)
+    }
+    for (const id of dangling.gone) {
+      const el = chip(id, `${this.deps.shortId(id)}${t('ui.belongs.deleted')}`, t('ui.belongs.deletedHint'))
+      el.dataset.dangling = 'gone'
+      value.appendChild(el)
+    }
+    if (dangling.gone.length > 0) {
+      const prune = document.createElement('button')
+      prune.type = 'button'
+      prune.className = 'tagpanel-action ghost'
+      prune.dataset.pruneBelongs = '1'
+      prune.textContent = t('ui.belongs.prune', { count: dangling.gone.length })
+      prune.addEventListener('click', () => this.deps.pruneBelongs(target))
+      value.appendChild(prune)
+    }
+
+    const input = document.createElement('input')
+    input.className = 'prop-input props-tag-input'
+    input.placeholder = t('ui.belongs.placeholder')
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return
+      e.preventDefault()
+      const parentName = input.value.trim()
+      if (parentName === '') return
+      this.deps.addBelong(target, parentName)
+      input.value = ''
+    })
+    value.appendChild(input)
+
+    row.append(label, value)
+    return row
   }
 
   /**

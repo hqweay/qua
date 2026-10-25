@@ -181,7 +181,7 @@ export function hasDescendant(doc: Doc, ancestorId: string, maybeChildId: string
  * ⚠️ `_queryResult` 跟着 `_query` 一起剔：它是那次查询的冻结结果，副本没有条件可依，
  *    留着就是一个指向别处 block id 的死列表（刷新时会重新求值，不需要旧值）。
  *
- * ⚠️ `_parentTags` 也剔除：它是「这个标签算作谁的子标签」，而那条关系属于原件。
+ * ⚠️ `_belongsTo` 也剔除：它是「这一块归在谁下面」，而那条关系属于原件。
  *    留着就是一个潜伏值 —— 副本此刻没有 `tag` 列表，用不上它；一旦副本被加进
  *    标签列表，它就会生效，而它指向的父标签关系是原件的。
  *
@@ -193,7 +193,7 @@ const IDENTITY_PROPS: readonly string[] = [
   ALIASES_PROP,
   LISTS_PROP,
   DISPLAY_PROP,
-  '_parentTags',
+  '_belongsTo',
   '_date',
   '_kind',
   '_query',

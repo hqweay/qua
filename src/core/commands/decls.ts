@@ -56,9 +56,9 @@ export const COMMANDS: CommandDecl[] = [
   /* ---- 标签层级（属于 / 包含：一条边，两个读法） ---- */
   { name: 'core.tags/add', title: t('cmd.tags.add'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, name: { type: 'string' } }, keywords: ['tag', t('menu.kw.tag')] },
   { name: 'core.tags/remove', title: t('cmd.tags.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, tagId: { type: 'string' } }, keywords: ['tag', t('menu.kw.tag'), 'remove'] },
-  { name: 'core.tags/add-parent', title: t('cmd.tags.add-parent'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' }, parentId: { type: 'string' } } },
-  { name: 'core.tags/remove-parent', title: t('cmd.tags.remove-parent'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' }, parentId: { type: 'string' } } },
-  { name: 'core.tags/prune-parents', title: t('cmd.tags.prune-parents'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' } } },
+  { name: 'core.belongs-to/add', title: t('cmd.belongs.add'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' }, parentId: { type: 'string' } } },
+  { name: 'core.belongs-to/remove', title: t('cmd.belongs.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' }, parentId: { type: 'string' } } },
+  { name: 'core.belongs-to/prune', title: t('cmd.belongs.prune'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' } } },
 
   /* ---- 属性（属性是块第一公民；值在块上 props[propId]） ---- */
   { name: 'core.props/set-value', title: t('cmd.props.set-value'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' }, value: {} } },

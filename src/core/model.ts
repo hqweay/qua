@@ -86,8 +86,8 @@ export type SystemPropId =
   | '_ownProps'
   // 字段定义的**编辑位置**（见 `core/props.ts` 的 `uiPositionOf`）
   | '_uiPosition'
-  // 包含（算作）：子标签 → 父标签的有序 ref 列表
-  | '_parentTags'
+  // 归属边（算作）：子块 → 上级的有序 ref 列表（见 `core/hierarchy.ts`）
+  | '_belongsTo'
   /**
    * 这块带着哪些标签：**有序的标签块 id 列表**（见 `core/tags.ts` 的 `tagIdsOf`）。
    *

@@ -1,14 +1,14 @@
 /**
- * **标签页的 footer**：属于 / 包含 / 成员。
+ * **标签页的 footer：成员**。
  *
- * 三块内容，两个方向：
- *   · **属于**：`#演员._parentTags`（可写，× 删一条；父标签被删后留下「已删除」＋清理）；
- *   · **包含**：谁把 `#演员` 写进了自己的 `_parentTags`（**派生、只读**，同一条边的反向读法）；
- *   · **成员**：打了这个标签（含后代标签）的真实块 —— 复用反链 footer 的形状：
- *     挂的是共享 store 的活块，可原地编辑。
+ * 只剩一件事：打了这个标签（含下级标签，见 `membersOf` 的「算作」）的真实块 ——
+ * 复用反链 footer 的形状，挂的是共享 store 的活块，可原地编辑。
  *
- * ⚠️ 不设第二条边：两个面板读的是同一份 `_parentTags`。
- * ⚠️ 成员是**算作**进来的（`membersOf`）：`#人物` 的成员含只打 `#演员` 的块，
+ * ⚠️ 「属于／包含」**不在这里**：归属边能配在任何块上（不只是标签），
+ *    所以它住在属性区（`ui/properties.ts` 的「属于」那一行）。
+ *    判据：**能配在任何块上的关系，住在属性区；只有某类块才有的关系，住在那个块的面板里。**
+ *    成员是后者（谁是这一支的成员，只有标签有）。
+ * ⚠️ 成员是**算作**进来的：`#人物` 的成员含只打 `#演员` 的块，
  *    但这些块**不获得** `#人物` 的字段（字段只看直接标签，见 `core/props.ts`）。
  */
 import { displayNameOf, type Block, type BlockStore } from '../core/index.ts'
@@ -21,23 +21,15 @@ export interface TagPanelDeps {
   store: BlockStore
   /** 写入事务入口：执行者在装配层，这里只原样转给成员编辑器（见 `Run`） */
   write?: Run
-  /** 读门面：成员行的祖先链按 id 现读（归属/包含/成员是装配层注入的窄派生） */
+  /** 读门面：成员行的祖先链按 id 现读（成员是装配层注入的窄派生） */
   kb: KbClient
   /** 当前对象；不是标签 ⇒ 整段隐藏 */
   tag: () => Block | undefined
-  parents: (tag: Block) => Block[]
-  dangling: (tag: Block) => string[]
-  children: (tag: Block) => Block[]
   members: (tag: Block) => Block[]
   /** 这个标签是否**同时作为页**（页角色只决定是否进页列表） */
   isPage: (tag: Block) => boolean
   togglePage: (tagId: string) => void
   shortId: (id: string) => string
-  /** 加一条归属（按名字找父标签；找不到就提示） */
-  addParent: (tagId: string, name: string) => void
-  removeParent: (tagId: string, parentId: string) => void
-  /** 清理全部悬空归属 */
-  pruneParents: (tagId: string) => void
   /** 成员编辑器里的编辑：落盘 */
   onChange: () => void
   /** 成员编辑器获得焦点：装配层把「活动编辑器」切到它 */
@@ -50,7 +42,6 @@ export interface TagPanelEls {
   root: HTMLElement
   title: HTMLElement
   pageToggle: HTMLButtonElement
-  relations: HTMLElement
   membersTitle: HTMLElement
   membersCount: HTMLElement
   membersEmpty: HTMLElement
@@ -112,66 +103,7 @@ export class TagPanel {
     const name = displayNameOf(tag).trim()
     this.els.title.textContent = `#${name === '' ? this.deps.shortId(tag.id) : name}`
     this.els.pageToggle.textContent = this.deps.isPage(tag) ? t('ui.tagpanel.unPage') : t('ui.tagpanel.asPage')
-    this.renderRelations(tag)
     this.renderMembers(tag)
-  }
-
-  private renderRelations(tag: Block): void {
-    const box = this.els.relations
-    box.replaceChildren()
-
-    const parents = this.deps.parents(tag)
-    const dangling = this.deps.dangling(tag)
-    const children = this.deps.children(tag)
-
-    box.appendChild(
-      relationRow(
-        t('ui.tagpanel.belongsTo'),
-        [
-          ...parents.map((p) => {
-            const name = displayNameOf(p).trim()
-            return { label: `#${name === '' ? this.deps.shortId(p.id) : name}`, onRemove: () => this.deps.removeParent(tag.id, p.id) }
-          }),
-          ...dangling.map((id) => ({
-            label: `#${this.deps.shortId(id)}${t('ui.tagpanel.deleted')}`,
-            onRemove: () => this.deps.removeParent(tag.id, id),
-          })),
-        ],
-        dangling.length > 0
-          ? { label: t('ui.tagpanel.prune', { count: dangling.length }), onClick: () => this.deps.pruneParents(tag.id) }
-          : null,
-      ),
-    )
-
-    box.appendChild(
-      relationRow(
-        t('ui.tagpanel.contains'),
-        children.map((c) => {
-          const name = displayNameOf(c).trim()
-          return { label: `#${name === '' ? this.deps.shortId(c.id) : name}` }
-        }),
-        null,
-      ),
-    )
-
-    // 加一条归属：输入标签名（名字比较走地址规范化 —— `# 人物 ` 与 `#人物` 是同一个）
-    const form = document.createElement('form')
-    form.className = 'tagpanel-add'
-    form.addEventListener('submit', (e) => e.preventDefault())
-    const input = document.createElement('input')
-    input.className = 'prop-input'
-    input.placeholder = t('ui.tagpanel.addParentPlaceholder')
-    const add = document.createElement('button')
-    add.type = 'submit'
-    add.textContent = t('ui.tagpanel.addParent')
-    add.addEventListener('click', () => {
-      const name = input.value.trim()
-      if (name === '') return
-      this.deps.addParent(tag.id, name)
-      input.value = ''
-    })
-    form.append(input, add)
-    box.appendChild(form)
   }
 
   private renderMembers(tag: Block): void {
@@ -204,47 +136,4 @@ export class TagPanel {
       this.render()
     }, 200)
   }
-}
-
-function relationRow(
-  title: string,
-  items: { label: string; onRemove?: () => void }[],
-  action: { label: string; onClick: () => void } | null,
-): HTMLElement {
-  const row = document.createElement('div')
-  row.className = 'tagpanel-relation'
-  const head = document.createElement('span')
-  head.className = 'tagpanel-relation-title'
-  head.textContent = title
-  row.appendChild(head)
-  if (items.length === 0) {
-    const none = document.createElement('span')
-    none.className = 'tagpanel-relation-empty'
-    none.textContent = t('ui.common.none')
-    row.appendChild(none)
-  }
-  for (const item of items) {
-    const chip = document.createElement('span')
-    chip.className = 'tagpanel-chip'
-    chip.textContent = item.label
-    if (item.onRemove) {
-      const x = document.createElement('button')
-      x.type = 'button'
-      x.className = 'tagpanel-chip-x'
-      x.title = t('ui.tagpanel.remove')
-      x.textContent = '×'
-      x.addEventListener('click', item.onRemove)
-      chip.appendChild(x)
-    }
-    row.appendChild(chip)
-  }
-  if (action) {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = 'tagpanel-action ghost'
-    btn.textContent = action.label
-    btn.addEventListener('click', action.onClick)
-    row.appendChild(btn)
-  }
-  return row
 }

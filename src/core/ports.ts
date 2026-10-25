@@ -101,11 +101,11 @@ export interface App {
   addProp(blockId: string, propId: string): void
   /** 解除声明（**定义块与成员块上的值都不动**） */
   undeclareProp(blockId: string, propId: string): void
-  /* 标签层级（属于 / 包含；一条边存在子标签的 `_parentTags`） */
-  addTagParent(childId: string, parentId: string): boolean
-  removeTagParent(childId: string, parentId: string): void
-  /** 清理失效归属（父标签已被删） */
-  pruneTagParents(childId: string): void
+  /* 归属边（属于／包含；一条边存在子块的 `_belongsTo`，任何块都能配） */
+  addBelongsTo(childId: string, parentId: string): boolean
+  removeBelongsTo(childId: string, parentId: string): void
+  /** 清理失效归属（上级**真的没了**；在回收站里的不清——复活要自愈） */
+  pruneBelongs(childId: string): void
   /** 打开标签选择器（显示层级；选中＝在当前块插一条 tag 边） */
   showTagPicker(): void
   /**

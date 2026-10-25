@@ -1,8 +1,8 @@
 /**
- * 角色与标签层级 handler。
+ * 角色与归属边 handler。
  *
- * 「这块是什么」用角色（`as-page` / `as-tag`），「标签之间有层级」用归属边
- * （`add-parent` / `remove-parent` / `prune-parents`）——两件事，两个区段。
+ * 「这块是什么」用角色（`as-page` / `as-tag`），「这一块归在谁下面」用归属边
+ * （`core.belongs-to/*`）——两件事，两个区段。
  */
 import type { Handler } from '../../core/ports.ts'
 import { curBlock, S } from './shared.ts'
@@ -62,24 +62,24 @@ export const TAGS_HANDLERS: Record<string, Handler> = {
     return app.ed.removeTag(blockId, tagId)
   },
 
-  /* ---- 标签层级 ---- */
-  'core.tags/add-parent': (a, app) => {
+  /* ---- 归属边 ---- */
+  'core.belongs-to/add': (a, app) => {
     const childId = S(a.childId)
     const parentId = S(a.parentId)
     if (!childId || !parentId) return false
-    return app.addTagParent(childId, parentId)
+    return app.addBelongsTo(childId, parentId)
   },
-  'core.tags/remove-parent': (a, app) => {
+  'core.belongs-to/remove': (a, app) => {
     const childId = S(a.childId)
     const parentId = S(a.parentId)
     if (!childId || !parentId) return false
-    app.removeTagParent(childId, parentId)
+    app.removeBelongsTo(childId, parentId)
     return true
   },
-  'core.tags/prune-parents': (a, app) => {
+  'core.belongs-to/prune': (a, app) => {
     const childId = S(a.childId)
     if (!childId) return false
-    app.pruneTagParents(childId)
+    app.pruneBelongs(childId)
     return true
   },
   'core.editor/pick-tag': (_a, app) => {

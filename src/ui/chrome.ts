@@ -69,7 +69,6 @@ export interface Chrome {
   tagPanelEl: HTMLElement
   tagPanelTitleEl: HTMLElement
   tagPanelPageEl: HTMLButtonElement
-  tagPanelRelationsEl: HTMLElement
   tagPanelMembersTitleEl: HTMLElement
   tagPanelMembersCountEl: HTMLElement
   tagPanelMembersEmptyEl: HTMLElement
@@ -109,7 +108,6 @@ export function createChrome(onCrumb?: (blockId: string) => void): Chrome {
   const tagPanelEl = must('tagpanel')
   const tagPanelTitleEl = must('tagpanel-title')
   const tagPanelPageEl = must<HTMLButtonElement>('tagpanel-page')
-  const tagPanelRelationsEl = must('tagpanel-relations')
   const tagPanelMembersTitleEl = must('tagpanel-members-title')
   const tagPanelMembersCountEl = must('tagpanel-members-count')
   const tagPanelMembersEmptyEl = must('tagpanel-members-empty')
@@ -218,7 +216,6 @@ export function createChrome(onCrumb?: (blockId: string) => void): Chrome {
     tagPanelEl,
     tagPanelTitleEl,
     tagPanelPageEl,
-    tagPanelRelationsEl,
     tagPanelMembersTitleEl,
     tagPanelMembersCountEl,
     tagPanelMembersEmptyEl,

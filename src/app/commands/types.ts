@@ -12,7 +12,7 @@
  */
 import type { Block, SecLayout, ShellCol } from '../../core/index.ts'
 import type { KbClient, Op, Tx } from '../../core/kb/types.ts'
-import type { AddParentResult } from '../../core/tag-tree.ts'
+import type { CheckEdgeResult, Dangling } from '../../core/hierarchy.ts'
 import type { ThemeMode, Workspace } from '../../core/workspace.ts'
 import type { Row } from '../../ui/layers.ts'
 
@@ -175,17 +175,17 @@ export interface PropsDeps {
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
-/** 标签归属写入的宿主能力；森林扫描的派生由装配层按窄口注入（成环检查要全库） */
-export interface TagTreeDeps {
+/** 归属边写入的宿主能力；森林扫描的派生由装配层按窄口注入（成环检查要全库） */
+export interface BelongsToDeps {
   kb: KbClient
-  /** 能不能加这条「child 属于 parent」（成环检查要祖先闭包 ⇒ 全库读，装配层注入） */
-  checkAdd: (child: Block, parent: Block) => AddParentResult
+  /** 能不能加这条「child 归在 parent 下」（成环检查要祖先闭包 ⇒ 全库读，装配层注入） */
+  checkAdd: (child: Block, parent: Block) => CheckEdgeResult
   /** 环路径的显示文本（装配层注入，判据只有 core 那一份） */
   cycleLabels: (path: readonly string[]) => string[]
-  /** 悬空父引用清单（装配层注入） */
-  danglingOf: (tag: Block) => string[]
-  /** 清掉悬空归属，返回清了几条（写路径；装配层注入） */
-  pruneDangling: (tag: Block) => number
+  /** 悬空上级的两态（装配层注入） */
+  danglingOf: (child: Block) => Dangling
+  /** 清掉「真没了」的上级引用，返回清了几条（写路径；装配层注入） */
+  pruneGone: (child: Block) => number
   write: (blockId: string, mutate: () => void) => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
   shortId: (id: string) => string

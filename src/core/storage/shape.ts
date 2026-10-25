@@ -64,7 +64,7 @@ import { isAnno, isRun } from '../runs.ts'
  *            出生时刻，而它补不回来——补一个假值会让「创建时间」从第一天就说谎
  *            ⇒ 作废重 seed，**不写**迁移分支。
  */
-export const WORKSPACE_VERSION = 20
+export const WORKSPACE_VERSION = 21
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

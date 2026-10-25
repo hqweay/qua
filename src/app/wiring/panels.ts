@@ -3,8 +3,8 @@
  * 组件实例由这一节持有；装配入口只拿重画入口。
  */
 import {
-  childTags,
-  danglingParentIds,
+  buildAdjacency,
+  danglingOf,
   displayNameOf,
   findInForest,
   findByAlias,
@@ -15,7 +15,7 @@ import {
   journalDate,
   journalDateLabel,
   memberBlocks,
-  parentTags,
+  parentsOf,
   type Block,
 } from '../../core/index.ts'
 import { t } from '../../core/msg.ts'
@@ -59,6 +59,11 @@ export function setupPanels(deps: PanelsDeps) {
   const { blocks, kb, layers, app, shortId, run, syncSections, scheduleSave, scheduleBadge, handleAtomClick } = deps
   const chrome = deps.getChrome()
   const mainEd = deps.getMainEd()
+  /**
+   * 边图邻接表**当次现建**：根集合随「父的露面」变，缓存一处就会让加了露面之后
+   * 树里的位置不变。一屏之内要问好几遍的（属性区那一行）共用一次。
+   */
+  const adj = () => buildAdjacency(deps.getWs().blocks)
   const activeBlock = deps.activeBlock
 
   /**
@@ -161,6 +166,27 @@ export function setupPanels(deps: PanelsDeps) {
       rows: (b) => [...kb.fieldsOf(b.id)],
       // 标签（分类归属）与标签属性（字段声明）是两件事：这一行走 `props._tags`
       tags: (b) => [...kb.tagsOf(b.id)],
+      // 归属（filed-under）：任何块都有这一行；跨类的那条边只在这里看得见
+      belongsTo: (b) => parentsOf(b, adj()),
+      belongsDangling: (b) => danglingOf(b, adj()),
+      addBelong: (b, name) => {
+        // 入口收窄：候选只给页与标签（模型不查露面，这是 UI 的取舍）
+        const parent = findByAlias(deps.getWs().blocks, name, (x) => hasList(x, 'page') || hasList(x, 'tag'))
+        if (!parent) {
+          app.toast(t('ui.belongs.notFound', { name }), 'warn')
+          return
+        }
+        void deps.getRegistry().invoke('core.belongs-to/add', { childId: b.id, parentId: parent.id }, 'ui')
+        propertiesPanel.render()
+      },
+      removeBelong: (b, parentId) => {
+        void deps.getRegistry().invoke('core.belongs-to/remove', { childId: b.id, parentId }, 'ui')
+        propertiesPanel.render()
+      },
+      pruneBelongs: (b) => {
+        void deps.getRegistry().invoke('core.belongs-to/prune', { childId: b.id }, 'ui')
+        propertiesPanel.render()
+      },
       // 挂/摘之后**面板自己重画**：这一行显示的就是刚改的那份 `_tags`，
       // 等下一次选区变化才刷会让「加完没反应」
       addTag: (b, name) => {
@@ -276,7 +302,6 @@ export function setupPanels(deps: PanelsDeps) {
       root: chrome.tagPanelEl,
       title: chrome.tagPanelTitleEl,
       pageToggle: chrome.tagPanelPageEl,
-      relations: chrome.tagPanelRelationsEl,
       membersTitle: chrome.tagPanelMembersTitleEl,
       membersCount: chrome.tagPanelMembersCountEl,
       membersEmpty: chrome.tagPanelMembersEmptyEl,
@@ -291,9 +316,6 @@ export function setupPanels(deps: PanelsDeps) {
         const b = activeBlock()
         return hasList(b, 'tag') ? b : undefined
       },
-      parents: (t) => parentTags(t, deps.getWs().blocks),
-      dangling: (t) => danglingParentIds(t, deps.getWs().blocks),
-      children: (t) => childTags(t, deps.getWs().blocks),
       members: (t) => memberBlocks(t.id, deps.getWs().blocks),
       isPage: (t) => hasList(t, 'page'),
       togglePage: (tagId) => {
@@ -302,17 +324,6 @@ export function setupPanels(deps: PanelsDeps) {
         void deps.getRegistry().invoke(hasList(b, 'page') ? 'core.block/unpage' : 'core.block/as-page', { blockId: tagId }, 'tagpanel')
       },
       shortId: (id) => shortId(id),
-      addParent: (tagId, name) => {
-        const parent = findByAlias(deps.getWs().blocks, name, (b) => hasList(b, 'tag'))
-        if (!parent) {
-          app.toast(t('ui.tagpanel.notFound', { name }), 'warn')
-          return
-        }
-        void deps.getRegistry().invoke('core.tags/add-parent', { childId: tagId, parentId: parent.id }, 'ui')
-      },
-      removeParent: (tagId, parentId) =>
-        void deps.getRegistry().invoke('core.tags/remove-parent', { childId: tagId, parentId }, 'ui'),
-      pruneParents: (tagId) => void deps.getRegistry().invoke('core.tags/prune-parents', { childId: tagId }, 'ui'),
       onChange: () => {
         scheduleSave()
         scheduleBadge()

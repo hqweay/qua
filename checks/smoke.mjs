@@ -3900,9 +3900,9 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   return `定义 ${defs[0].id.slice(-6)} 被 #任务 声明；成员值「已完成」；行尾 chip ${JSON.stringify(chip.text)} 不进读数`
 })
 
-/* ------------------------------------------------- 标签层级（属于 / 包含 / 成员） */
+/* ------------------------------------------------- 归属边（属于 / 包含 / 成员） */
 
-await check('T52 标签层级：属于/包含双面板、成员含算作、禁环、删父留悬空可见', async () => {
+await check('T52 归属边：属于在属性区、成员含算作、禁环、悬空两态分得开', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
 
@@ -3924,33 +3924,43 @@ await check('T52 标签层级：属于/包含双面板、成员含算作、禁�
   })
   assert(tags['人物'] && tags['演员'], `应有两个标签块：${JSON.stringify(tags)}`)
 
-  // #演员 属于 #人物（子侧写 _parentTags）
+  // #演员 属于 #人物（子侧写 `_belongsTo`；命令不再叫 tags/* —— 边不是标签专有）
   await page.evaluate(
-    ({ child, parent }) => window.__qua.invoke('core.tags/add-parent', { childId: child, parentId: parent }),
+    ({ child, parent }) => window.__qua.invoke('core.belongs-to/add', { childId: child, parentId: parent }),
     { child: tags['演员'], parent: tags['人物'] },
   )
   const rel = await page.evaluate(
     (id) => ({ parents: window.__qua.tagParents(id), children: window.__qua.tagChildren(id) }),
-    tags['人物'],
+    tags['演员'],
   )
-  assert(rel.children.includes(tags['演员']), `#人物 的「包含」应含 #演员：${JSON.stringify(rel)}`)
+  assert(rel.parents.includes(tags['人物']), `#演员 的上级应含 #人物：${JSON.stringify(rel)}`)
+
+  // 「属于」住在**属性区**：打开 #演员，那一行列出 #人物
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), tags['演员'])
+  await page.waitForTimeout(250)
+  const belongsRow = await page.evaluate(() => ({
+    hasRow: !!document.querySelector('.prop-belongs'),
+    chips: [...document.querySelectorAll('.prop-belongs .props-tag')].map((e) => e.textContent ?? ''),
+    panelVisible: !document.getElementById('inspect-card').hidden,
+  }))
+  assert(belongsRow.hasRow, '属性区应有「属于」一行（任何块都显示）')
+  assert(belongsRow.chips.some((t) => t.includes('人物')), `「属于」应列出 #人物：${JSON.stringify(belongsRow)}`)
 
   // 算作：查 #人物 的成员要含只打 #演员 的 B
   const deep = await page.evaluate((id) => window.__qua.tagMembersDeep(id), tags['人物'])
   assert(deep.includes(ids.b), `#人物 的成员应含只打 #演员 的块（算作）：${JSON.stringify(deep)}`)
   assert(deep.includes(ids.a), '#人物 也应含双打的块')
 
-  // 打开 #人物 页：双面板 ＋ 成员 footer
+  // 打开 #人物 页：只剩成员 footer（关系区已撤到属性区）
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), tags['人物'])
   await page.waitForTimeout(200)
   const ui = await page.evaluate(() => ({
     visible: !document.getElementById('tagpanel').hidden,
-    relations: document.getElementById('tagpanel-relations').textContent ?? '',
+    hasRelations: !!document.getElementById('tagpanel-relations'),
     members: document.querySelectorAll('#tagpanel-members-editor .blk').length,
   }))
   assert(ui.visible, '打开标签页应显示 footer')
-  assert(ui.relations.includes('包含') && ui.relations.includes('#演员'), `「包含」面板应列 #演员：${ui.relations}`)
-  assert(ui.relations.includes('属于'), '「属于」面板也在（两个方向同一块页上并列）')
+  assert(!ui.hasRelations, '「属于／包含」不该还留在标签面板里（它们对任何块都能配 ⇒ 住属性区）')
   assert(ui.members >= 2, `成员 footer 应渲染出成员块（含算作）：${ui.members}`)
 
   // 算作 ≠ 拥有字段：给 #人物 声明一个字段，只打 #演员 的 B 不获得它
@@ -3969,7 +3979,7 @@ await check('T52 标签层级：属于/包含双面板、成员含算作、禁�
 
   // 禁环：#人物 属于 #演员 ⇒ 拒绝，且不留下半截状态
   await page.evaluate(
-    ({ child, parent }) => window.__qua.invoke('core.tags/add-parent', { childId: child, parentId: parent }),
+    ({ child, parent }) => window.__qua.invoke('core.belongs-to/add', { childId: child, parentId: parent }),
     { child: tags['人物'], parent: tags['演员'] },
   )
   const afterCycle = await page.evaluate(
@@ -3979,25 +3989,60 @@ await check('T52 标签层级：属于/包含双面板、成员含算作、禁�
   assert(!afterCycle.parents.includes(tags['演员']), `成环写入应被拒绝：${JSON.stringify(afterCycle)}`)
   assert(afterCycle.children.includes(tags['演员']), '原有那条边不能被拒绝的写入改掉')
 
-  // 删父（模拟：直接从森林移除）⇒ 子标签的 ref 留着、面板显示「已删除」、可清理
-  const dangling = await page.evaluate((parentId) => {
+  // 悬空**两态**：软删的上级 = 在回收站（清不掉），真没了的才可清
+  // ① 软删 #人物：边落 revivable
+  //    （直接打标记而不走「删除块」命令：那一步受「根块不许删」的守卫拦，而这里要验的是
+  //     **读路径对回收站里的上级怎么判**，不是删除命令本身）
+  await page.evaluate((id) => {
     const forest = window.__qua.__editor.store.blocks
-    const i = forest.findIndex((b) => b.id === parentId)
-    if (i < 0) return null
-    forest.splice(i, 1)
+    let hit = null
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.id === id) hit = b
+        walk(b.children)
+      }
+    }
+    walk(forest)
+    if (hit) hit.props = { ...(hit.props ?? {}), _deletedAt: Date.now() }
     window.__qua.__editor.store.invalidateIndex()
     window.__qua.__editor.store.touch()
-    window.__qua.invoke('core.block/focus-block', { blockId: window.__qua.allBlocks().find((b) => b.text === '演员')?.id ?? '' })
-    return { parents: window.__qua.tagParents(window.__qua.allBlocks().find((b) => b.text === '演员')?.id ?? ''), danglingIds: window.__qua.tagDanglingParents(window.__qua.allBlocks().find((b) => b.text === '演员')?.id ?? '') }
   }, tags['人物'])
-  assert(dangling && dangling.danglingIds.length === 1, `删父应留下悬空 ref：${JSON.stringify(dangling)}`)
+  await page.waitForTimeout(200)
+  const soft = await page.evaluate((id) => window.__qua.tagDanglingStates(id), tags['演员'])
+  assert(soft.revivable.length === 1 && soft.gone.length === 0, `软删的上级应落 revivable：${JSON.stringify(soft)}`)
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), tags['演员'])
   await page.waitForTimeout(250)
-  const danglingUi = await page.evaluate(() => document.getElementById('tagpanel-relations').textContent ?? '')
-  assert(danglingUi.includes('已删除'), `悬空归属应可见：${danglingUi}`)
-  assert(danglingUi.includes('清理'), '悬空归属应可清理')
+  const softUi = await page.evaluate(() => ({
+    text: document.querySelector('.prop-belongs')?.textContent ?? '',
+    prune: !!document.querySelector('.prop-belongs [data-prune-belongs]'),
+    revivable: !!document.querySelector('.prop-belongs [data-dangling="revivable"]'),
+  }))
+  assert(softUi.revivable && /回收站/.test(softUi.text), `「上级在回收站」要看得见：${JSON.stringify(softUi)}`)
+  assert(!softUi.prune, '回收站里的上级不给清理入口（复活要自愈）')
+
+  // ② 真删 #人物（从森林里摘掉）：落 gone，可清理；点清理 ⇒ 边没了
+  await page.evaluate((parentId) => {
+    const forest = window.__qua.__editor.store.blocks
+    const i = forest.findIndex((b) => b.id === parentId)
+    if (i >= 0) forest.splice(i, 1)
+    window.__qua.__editor.store.invalidateIndex()
+    window.__qua.__editor.store.touch()
+  }, tags['人物'])
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), tags['演员'])
+  await page.waitForTimeout(250)
+  const goneUi = await page.evaluate(() => ({
+    text: document.querySelector('.prop-belongs')?.textContent ?? '',
+    prune: !!document.querySelector('.prop-belongs [data-prune-belongs]'),
+  }))
+  assert(/已删除/.test(goneUi.text), `真删的上级应显示「已删除」：${JSON.stringify(goneUi)}`)
+  assert(goneUi.prune, '真删的上级应可清理')
+  await page.evaluate(() => document.querySelector('.prop-belongs [data-prune-belongs]')?.click())
+  await page.waitForTimeout(250)
+  const pruned = await page.evaluate((id) => window.__qua.tagParents(id), tags['演员'])
+  assert(pruned.length === 0, `清理之后不该还有上级：${JSON.stringify(pruned)}`)
 
   await ctx.close()
-  return `#演员 属于 #人物；#人物 成员含只打 #演员 的块；成环被拒；删父留可见悬空`
+  return `#演员 属于 #人物（属性区一行）；成员含算作；成环被拒；回收站里的上级清不掉、真删的能清`
 })
 
 /* ------------------------------------------------- UI：让一个块成为页 / 标签 */

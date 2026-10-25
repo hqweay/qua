@@ -7,8 +7,9 @@
 import {
   allPropDefs,
   allTags,
-  childTags,
-  danglingParentIds,
+  buildAdjacency,
+  childrenIn,
+  danglingOf,
   declaredFieldIds,
   fieldRows,
   findInForest,
@@ -20,7 +21,7 @@ import {
   listsOf,
   aliasesOf,
   membersOf,
-  parentTags,
+  parentsOf,
   prop,
   propKindOf,
   resolveRef,
@@ -302,18 +303,26 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
         sources: r.sources.map((s) => s.id),
       }))
     },
-    /** 标签的直接父/子/失效父（诊断面；同一条边两个读法） */
+    /** 直接上级／下级（诊断面；同一条边两个读法） */
     tagParents(tagId: string) {
       const b = findInForest(deps.getWs().blocks, tagId)
-      return b ? parentTags(b, deps.getWs().blocks).map((x) => x.id) : []
+      return b ? parentsOf(b, buildAdjacency(deps.getWs().blocks)).map((x) => x.id) : []
     },
     tagChildren(tagId: string) {
       const b = findInForest(deps.getWs().blocks, tagId)
-      return b ? childTags(b, deps.getWs().blocks).map((x) => x.id) : []
+      return b ? childrenIn(b.id, buildAdjacency(deps.getWs().blocks)).map((x) => x.id) : []
     },
+    /** 悬空上级（两种状态合并；`revivable` ＝ 在回收站里，**清不掉**） */
     tagDanglingParents(tagId: string) {
       const b = findInForest(deps.getWs().blocks, tagId)
-      return b ? danglingParentIds(b, deps.getWs().blocks) : []
+      if (!b) return []
+      const d = danglingOf(b, buildAdjacency(deps.getWs().blocks))
+      return [...d.revivable, ...d.gone]
+    },
+    /** 悬空上级的两态（诊断面：回收站里的与真没了的必须分得开） */
+    tagDanglingStates(tagId: string) {
+      const b = findInForest(deps.getWs().blocks, tagId)
+      return b ? danglingOf(b, buildAdjacency(deps.getWs().blocks)) : { revivable: [], gone: [] }
     },
     /** 成员（**含算作**：自己的成员 ∪ 后代标签的成员） */
     tagMembersDeep(tagId: string) {
