@@ -146,3 +146,30 @@ test('danglingView：占位符还在但原子记录没了时的兜底', () => {
   const v = danglingView('未知原子')
   assert.deepEqual(v, { label: '未知原子', state: 'dangling', kind: 'page' })
 })
+
+/**
+ * 引用目标的**呈现身份**只看归属：`props._tags` 非空 ⇒ `obj`。
+ *
+ * 这条看起来像漏判（一个页被打了块标签就显示成「实例」），其实是口径：
+ * 归属即实例 —— 打上标签的块同时也是那个标签的一条记录。
+ * 钉住它，是为了下次有人觉得「页不该算实例」时先撞到断言，而不是先改代码。
+ */
+test('kind 只看归属：带 `_tags` 的页也算实例，标签类优先，其余是页', () => {
+  const forest: Block[] = [
+    // 标签类：`_lists` 里有 tag ⇒ 判 tag（先于归属）
+    b('t', '咖啡', { props: { _aliases: ['咖啡'], _lists: ['tag'], _tags: ['t'] } }),
+    // 页 + 块标签：地址在了，但归属非空 ⇒ obj（口径如此）
+    named('p', '星巴克', '一家店', { props: { _aliases: ['星巴克'], _lists: ['page'], _tags: ['t'] } }),
+    // 普通内容块 + 块标签 ⇒ obj
+    b('r', '一杯拿铁', { props: { _tags: ['t'] } }),
+    // 只有正文里那枚行内提及（`_tags` 为空）⇒ 还是 page
+    b('m', '提到咖啡', { props: {} }),
+    named('q', '干净页'),
+  ]
+  const find = finder(forest)
+  assert.equal(resolveRef(find, { to: 't' }).kind, 'tag', '露面为 tag 的块先判标签类')
+  assert.equal(resolveRef(find, { to: 'p' }).kind, 'obj', '带归属的页也是那个标签的实例')
+  assert.equal(resolveRef(find, { to: 'r' }).kind, 'obj', '归属非空即实例（不看正文）')
+  assert.equal(resolveRef(find, { to: 'm' }).kind, 'page', '没有归属 ⇒ 不是实例')
+  assert.equal(resolveRef(find, { to: 'q' }).kind, 'page')
+})

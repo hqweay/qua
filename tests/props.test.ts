@@ -26,6 +26,7 @@ import {
   hasTag,
   hasValue,
   isPropDef,
+  mkBlock,
   mkPropDef,
   OWN_PROPS_PROP,
   mkTagBlock,
@@ -297,4 +298,33 @@ test('批量 gutter 的**行序与去重**与逐行一致：两个标签声明�
   const batch = gutterFieldsFor([target], forest).get('t') ?? []
   assert.deepEqual(batch, gutterFieldsOf(target, forest))
   assert.deepEqual(batch.map((f) => f.propId), [shown.id], '只有归 gutter 的那个字段；同一字段只一行')
+})
+
+test('字段只跟**归属**走：正文里那枚行内 `#名` 不给宿主长出字段', () => {
+  const forest: Block[] = []
+  const tagBlock = ensureTag(forest, '咖啡').block!
+  const price = mkPropDef('价格')
+  forest.push(price)
+  declareField(tagBlock, price.id)
+
+  // 宿主：正文里有一枚行内提及（`flavor:'#'`），但 `props._tags` 为空
+  const inlineOnly = mkBlock('喝了一杯 ')
+  inlineOnly.content = [
+    ...textRuns('喝了一杯 '),
+    { id: 'r1', t: 'ref', to: tagBlock.id, label: '咖啡', flavor: '#' },
+  ]
+  forest.push(inlineOnly)
+
+  // 对照：同一段正文，另外写了块级归属
+  const withChip = mkBlock('一杯 ')
+  withChip.content = [
+    ...textRuns('一杯 '),
+    { id: 'r2', t: 'ref', to: tagBlock.id, label: '咖啡', flavor: '#' },
+  ]
+  withChip.props = { _tags: [tagBlock.id] }
+  forest.push(withChip)
+
+  // 提及不是归属：它不产生成员资格，也就不该凭空长出一排待填字段
+  assert.deepEqual(fieldRows(inlineOnly, forest), [], '行内提及 ⇒ 一行字段都不该出现')
+  assert.equal(fieldRows(withChip, forest).length, 1, '块级归属才带来标签声明的字段')
 })

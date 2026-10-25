@@ -1364,7 +1364,8 @@ export class BlockEditor {
   /**
    * **给一个块挂标签**（块级露面：正文之后出 chip）。
    *
-   * 与行内标签共用 `_tags`：这里只写归属、不碰正文 —— 面板/命令路径的入口。
+   * 只写归属、不碰正文 —— 正文里那枚 `#名` 是**另一个动作**（`↵` 的提及），
+   * 它不写 `_tags`；所以这里也不替用户删字、不替他造 run。
    * @returns 真的加上了才 `true`（已经有、名字为空 ⇒ `false`）
    */
   addTag(blockId: string, name: string): boolean {

@@ -79,7 +79,9 @@ export function resolveRef(find: FindBlock, a: { label?: string; to?: string; fl
  * 引用目标的身份（**只给呈现用**）：标签类／带归属的实例／其它。
  *
  * 判据与「它是不是标签」「它有没有归属」是同一份模型读法——不在渲染层另认一遍。
- * 带 `_tags` 的内容块就是一条实例记录（记录不是新种类，见 `core/obj.ts`）。
+ * `props._tags` 非空的块就是一条实例记录（记录不是新种类，见 `core/obj.ts`）。
+ * ⚠️ 判据**只看归属**，不看露面、不看正文、不看身份：一个页只要打了块标签，
+ *    它同时也是那个标签的一条实例，所以引用它时会画成实例。这是口径，不是漏判。
  */
 function refKindOf(b: Block): 'tag' | 'obj' | 'page' {
   if (hasList(b, 'tag')) return 'tag'
