@@ -100,6 +100,43 @@ const texts = (page) => page.evaluate(() => window.__qua.text())
 const openFirstPage = (page) =>
   page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
 
+/**
+ * 检索浮层的行读点：**标签 / 右侧按键徽标 / 是不是当前那一行**。
+ *
+ * 浮层是同一个组件（`Layers.openMenu`），所以三个触发字符共用这一个读法；
+ * 断言要能回答「这一行支不支持 ⌥↵」（徽标在不在），而不只是「列表非空」。
+ */
+const layerRows = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('.layer-item')].map((e) => ({
+      label: e.querySelector('.layer-label')?.textContent ?? '',
+      hint: e.querySelector('.layer-hint')?.textContent ?? '',
+      key: e.querySelector('.layer-key')?.textContent ?? '',
+      active: e.dataset.active === '1',
+    })),
+  )
+
+/** 让一个标签块先存在（走命令面，不经过打字路径）：返回它的 id */
+const seedTag = (page, name) =>
+  page.evaluate((name) => {
+    const b = window.__qua.blocks().find((x) => !x.roles.includes('journal'))
+    window.__qua.focusBlock(b.id, 0)
+    window.__qua.invoke('core.editor/insert-tag', { tag: name })
+    return window.__qua.allBlocks().find((x) => x.roles?.includes('tag') && x.text === name)?.id ?? ''
+  }, name)
+
+/** 找一个「可编辑、无子块、无标签、无身份」的内容块 —— 打字路径最干净的落点 */
+const cleanBlock = (page) =>
+  page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const plain = (x) => x.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
+    const b = ed
+      .rows()
+      .map((r) => r.block)
+      .find((x) => !(x.roles?.length) && !x.children.length && !(x.props?._tags?.length))
+    return b ? { id: b.id, text: plain(b) } : null
+  })
+
 /* ------------------------------------------------------- 侧槽的钉住区工具 */
 
 /** Shift+点某个块的块标（待办行的方框也是块标）；mousedown 与 click 都发，覆盖两条分支 */
@@ -2352,78 +2389,52 @@ await check('T57b 聚焦今天的 journal 块 ⇒ 只装单日；后退回 feed�
   return `feed ${before.length} 段 → 聚焦单日（1 段）→ 再点不重装 → 后退回 feed（${back.length} 段）`
 })
 
-await check('T58 行内标签：敲完分隔符 ⇒ 正文 1 格原子 ＋ 块上的归属，chip 不重复', async () => {
+await check('T58 敲 `#名` + 空格**不再**静默成标签：字原样留着、归属没写、没有原子', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
 
-  // 找一个空块并落光标（focusBlock 同时把 DOM 焦点交进去；冷启动不再自动聚焦）
+  /**
+   * 这一条钉的是「打字路径＝提及／实例化，不是归类」：`#名` 敲到分隔符时**不再转换**。
+   *
+   * 判据必须是三件事**同时**没有：块归属（`_tags`）、行内原子、以及建出来的标签块。
+   * 只做了一半（例如字删了、归属没写）用户看到的仍然是「一敲 `#` 就出 chip」，
+   * 而那正是被撤掉的那套行为。
+   */
   const target = await page.evaluate(() => {
     const ed = window.__qua.__editor
-    const rootId = window.__qua.blocks()[0].id
-    const id = ed.insertBlockAfter(rootId, '')
+    const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
     window.__qua.focusBlock(id, 0)
     return id
   })
   await page.waitForTimeout(80)
 
-  const tagName = '自动归属'
+  const tagName = '不猜归属'
   await page.keyboard.type(`写点东西 #${tagName} `)
   await page.waitForTimeout(220)
 
   const got = await page.evaluate(({ id, name }) => {
     const b = window.__qua.blocks().find((x) => x.id === id)
     const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
-    const atomEl = tx?.querySelector('.atom-tag')
     return {
       text: b?.text ?? '',
-      found: Boolean(b),
+      domText: tx?.textContent ?? '',
       tags: b?.tags ?? [],
-      atoms: window.__qua.atoms().filter((a) => a.blockId === id),
-      chips: tx ? tx.querySelectorAll('.tag-chip').length : -1,
-      inline: atomEl?.textContent ?? '',
-      inlineLabel: atomEl?.dataset.refLabel ?? '',
-      tagBlock: window.__qua.allBlocks().find((x) => x.roles?.includes('tag') && x.text === name)?.id ?? '',
-      caret: window.__qua.__editor.sel,
+      atoms: window.__qua.atoms().filter((a) => a.blockId === id).length,
+      tagCreated: window.__qua.allBlocks().some((x) => x.roles?.includes('tag') && x.text === name),
+      layerOpen: document.querySelectorAll('.layer').length,
     }
   }, { id: target, name: tagName })
 
-  assert(got.found, '前置：插入的块应在当前视图里：' + JSON.stringify(got))
-
-  /**
-   * **行内标签的判据**：
-   *   `#名` 不是「正文里的几个字」，而是**正文里的一格**（原子）＋ 块上的一条归属。
-   *   两处必须同时成立；只做一半就是「查询里有、正文里看不到」或反过来。
-   */
-  assert(got.text === '写点东西  ', '投影里 `#名` 那几个字应已换成露面（分隔符留着；露面不进投影）：' + JSON.stringify(got.text))
-  assert(got.atoms.length === 1 && got.atoms[0].kind === 'tag', '应产出 1 枚 tag 原子：' + JSON.stringify(got.atoms))
-  assert(got.tagBlock !== '', '敲完就该建出标签块：' + JSON.stringify(got.tagBlock))
-  assert(got.tags.length === 1 && got.tags[0] === got.tagBlock, '归属应指向那个标签块：' + JSON.stringify({ tags: got.tags, tag: got.tagBlock }))
-  assert(got.inline === `#${tagName}`, '正文里应显示成 `#名`：' + JSON.stringify(got.inline))
-  assert(got.inlineLabel === tagName, '显示名应是解析出来的（不带 #）：' + JSON.stringify(got.inlineLabel))
-  assert(got.chips === 0, '已经在正文里露面 ⇒ 不该再出一个 chip（否则一个标签显示两次）')
-  assert(got.caret?.aOff === 7, '光标应停在标签之后（`写点东西 ` 5 字 ＋ 1 格 ＋ 1 空格）：' + JSON.stringify(got.caret))
-
-  // 删字不摘标签：光标停在标签之后按 Backspace ⇒ 那一格没了，归属还在，落回 chip
-  await page.evaluate((id) => window.__qua.__editor.placeCaret(id, 6), target)
-  await page.keyboard.press('Backspace')
-  await page.waitForTimeout(200)
-  const afterDel = await page.evaluate((id) => {
-    const b = window.__qua.blocks().find((x) => x.id === id)
-    const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
-    return {
-      tags: b?.tags ?? [],
-      atoms: window.__qua.atoms().filter((a) => a.blockId === id).length,
-      chips: tx ? tx.querySelectorAll('.tag-chip').length : -1,
-      inline: tx ? tx.querySelectorAll('.atom-tag').length : -1,
-    }
-  }, target)
-  assert(afterDel.atoms === 0, '删掉那一格 ⇒ 原子跟着没了（不留孤儿）：' + JSON.stringify(afterDel))
-  assert(afterDel.tags.length === 1, '⚠️ 删字**不摘标签**：归属仍在「这块属于它」：' + JSON.stringify(afterDel))
-  assert(afterDel.chips === 1 && afterDel.inline === 0, '不在正文里露面了 ⇒ 归属落回 chip（只一个显示位置）')
+  assert(got.text === `写点东西 #${tagName} `, `正文应逐字留着（不转换）：${JSON.stringify(got.text)}`)
+  assert(got.domText.includes(`#${tagName}`), `DOM 里也应是那几个字：${JSON.stringify(got.domText)}`)
+  assert(got.tags.length === 0, `这次输入不该写块归属：${JSON.stringify(got.tags)}`)
+  assert(got.atoms === 0, `不该凭空长出一枚原子：${got.atoms}`)
+  assert(!got.tagCreated, '不该顺手建出标签块')
+  assert(got.layerOpen === 0, `分隔符落下之后浮层该自己关掉：${got.layerOpen}`)
 
   await ctx.close()
-  return `敲「#${tagName}」⇒ 1 格原子 ＋ 归属；删字 ⇒ 原子消失、归属落回 chip`
+  return `敲「#${tagName}」＋空格 ⇒ 正文原样、0 归属、0 原子、0 新标签块；浮层随分隔符关掉`
 })
 
 await check('T58b 属性面板挂/摘块标签：只写归属，正文不动', async () => {
@@ -4820,15 +4831,19 @@ await check(
 )
 
 await check(
-  'T67 真实键入 `#不存在的标签` 走同一笔事务：内容 upsert（末次带露面）＋ 新标签块 upsert{parent:null} ＋ 归属 prop.set 同批；一次撤销连标签块一起回滚',
+  'T67 `#新标签` + Enter 走**一笔**事务：删触发词 ＋ 建标签块 ＋ 插 `flavor:#` 露面同批；一次撤销连标签块一起回滚、宿主 `_tags` 没被写',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
     await openFirstPage(page)
 
     /**
-     * 挑一个**可编辑的内容块**（无子块、无标签、无锚点）：往它末尾敲一段新的是最干净的输入面。
-     * 前面留一个空格 ⇒ `#` 前面不是字，才会被认成标签语法（`a#b` 不是标签）。
+     * 判据是「一次用户动作 ＝ 一笔事务」：删掉 `#zzz` 那几个字、按名字建出标签块、
+     * 在原位插一枚露面 —— 三件事拆开落盘会留下「字删了、标签没建」「露面有了、归属没写」
+     * 这类半批。它只能靠**同一笔**的 op 集合来证，界面全绿也可能已经是半批。
+     *
+     * ⚠️ 这条同时钉「提及 ≠ 归类」：Enter 只插露面，**不写宿主 `_tags`**。
+     *    写了的话「同一笔里没有 prop op」这一格就会红。
      */
     const before = await page.evaluate(() => {
       const ed = window.__qua.__editor
@@ -4839,88 +4854,81 @@ await check(
         .find((x) => !(x.roles?.length) && !x.children.length && !(x.props?._tags?.length))
       const count = (list) => list.reduce((n, k) => n + 1 + count(k.children), 0)
       return {
-        id: b?.id ?? '',
-        text: b ? plain(b) : '',
+        id: b.id,
+        text: plain(b),
         total: count(ed.store.blocks),
-        tags: ed.store.blocks.filter((x) => (x.props?._lists ?? []).includes('tag')).length,
+        tagCount: ed.store.blocks.filter((x) => (x.props?._lists ?? []).includes('tag')).length,
       }
     })
-    assert(before.id !== '', '第一页里应有可编辑的内容块')
-    await page.waitForTimeout(120)
 
-    // 真按键（走 `input` → `syncFromDom`）：末尾空格是**分隔符**，到这一刻才认 `#zzz` 敲完
     await page.evaluate((id) => window.__qua.focusBlock(id, 9999), before.id)
-    await page.keyboard.type(' #zzz ')
-    await page.waitForTimeout(150)
+    await page.keyboard.type(' #zzz')
+    await page.waitForTimeout(180)
+    // 前置：浮层真的弹了，而且当前那一行就是「新建 #zzz」
+    const rows = await layerRows(page)
+    assert(rows.length > 0, `敲 # 应弹出浮层：${JSON.stringify(rows)}`)
+    assert(rows[0].label.includes('zzz'), `第一行应是「新建 #zzz」：${JSON.stringify(rows.slice(0, 3))}`)
+    assert(rows[0].key !== '', `标签类行要画出 ⌥↵ 徽标：${JSON.stringify(rows[0])}`)
+
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(220)
 
     const after = await page.evaluate((t) => {
       const ed = window.__qua.__editor
-      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '')
-      const runPlain = (c) => c.filter((r) => r.t === 'text').map((r) => r.v).join('')
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null)
+      const runKinds = (c) => c.map((r) => (r.t === 'ref' && r.flavor === '#' ? 'tag' : r.t)).join(',')
       const live = ed.store.find(t.id)
       const ops = window.__qua.lastOps()
       const tagOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === null)
       const tagId = tagOp?.id ?? ''
-      const tag = tagId ? ed.store.find(tagId) : undefined
       return {
         ops: ops.map((o) => ({
           e: o.e,
-          id: o.id ?? o.block ?? '',
-          block: o.block ?? '',
+          id: o.id ?? '',
           op: o.op,
           name: o.name ?? '',
-          text: o.value?.content === undefined ? undefined : runPlain(o.value.content),
-          runs: o.value?.content === undefined ? '' : o.value.content.map((r) => (r.t === 'ref' && r.flavor === '#' ? 'tag' : r.t)).join(','),
+          runs: o.value?.content === undefined ? '' : runKinds(o.value.content),
           parent: o.value && 'parent' in o.value ? o.value.parent : undefined,
         })),
         tagId,
-        tagExists: Boolean(tag),
-        tagLists: tag?.props?._lists ?? [],
-        tagAlias: tag?.props?._aliases?.[0] ?? '',
+        tagAlias: ed.store.find(tagId)?.props?._aliases?.[0] ?? '',
         text: plain(live),
         tags: live?.props?._tags ?? [],
         atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).map((a) => ({ kind: a.kind, target: a.target?.id ?? '' })),
       }
     }, before)
 
-    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined)
+    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.runs !== '')
     const tagBlockOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent === null)
-    const tagPropOps = after.ops.filter((o) => o.e === 'prop' && o.name === '_tags' && o.op === 'set')
-
-    // 同一笔里内容可能写两段（先落键入的字、再换露面）⇒ 断言「最后一条内容 op 已带露面」
-    assert(textOps.length >= 1, `应至少 1 条 block.upsert{content}：${JSON.stringify(after.ops)}`)
-    assert(textOps.every((o) => o.id === before.id), `内容那些条都应指向被敲的块：${JSON.stringify(textOps)}`)
-    assert(textOps[textOps.length - 1].runs.includes('tag'), `最后一条内容里应已换成露面：${JSON.stringify(textOps)}`)
-    assert(tagBlockOps.length === 1, `应恰有 1 条新标签块的 upsert{parent:null}：${JSON.stringify(after.ops)}`)
-    assert(tagPropOps.length === 1, `应恰有 1 条 prop.set{_tags}：${JSON.stringify(after.ops)}`)
-    assert(tagPropOps[0].id === before.id, `归属应写在被敲的块上：${JSON.stringify(tagPropOps[0])}`)
+    assert(textOps.length === 1, `内容应恰写一次：${JSON.stringify(after.ops)}`)
+    assert(textOps[0].id === before.id && textOps[0].runs.includes('tag'), `那一次已是露面：${JSON.stringify(textOps)}`)
+    assert(tagBlockOps.length === 1, `同一笔里应建出 1 个标签块：${JSON.stringify(after.ops)}`)
+    assert(after.ops.every((o) => o.e !== 'prop'), `提及不写归属 ⇒ 0 条 prop op：${JSON.stringify(after.ops)}`)
     assert(after.ops.every((o) => o.e !== 'anno'), `露面住在内容里 ⇒ 0 条 anno：${JSON.stringify(after.ops)}`)
+    assert(after.ops.length === 2, `这一笔应恰好 2 条（内容 ＋ 标签块）：${JSON.stringify(after.ops)}`)
 
-    // 模型：标签块真在库里、块上真有归属、正文里真有原子
-    assert(after.tagExists, `新标签块应真的进了库：${JSON.stringify(after.tagId)}`)
     assert(after.tagAlias === 'zzz', `标签块的名字应是 zzz：${JSON.stringify(after.tagAlias)}`)
-    assert(after.tagLists.includes('tag'), `新块应有 tag 露面位：${JSON.stringify(after.tagLists)}`)
-    assert(after.tags.includes(after.tagId), `块上的 _tags 应含新标签：${JSON.stringify(after.tags)}`)
+    assert(after.tags.length === 0, `宿主这个块不该被归类：${JSON.stringify(after.tags)}`)
+    assert(after.text === `${before.text} `, `投影应是「前缀 ＋ 空格」（露面不进投影、占 1 格）：${JSON.stringify(after.text)}`)
     assert(
-      after.atoms.some((a) => a.kind === 'tag' && a.target === after.tagId),
-      `正文里应有一枚指向它的 tag 原子：${JSON.stringify(after.atoms)}`,
-    )
-    assert(
-      after.text === `${before.text}  `,
-      `投影应是「前缀 ＋ 空格 ＋ 空格」（露面不进投影、占 1 格）：${JSON.stringify(after.text)}`,
+      after.atoms.length === 1 && after.atoms[0].kind === 'tag' && after.atoms[0].target === after.tagId,
+      `正文里应有 1 枚指向它的 tag 露面：${JSON.stringify(after.atoms)}`,
     )
 
-    // 一次撤销：正文、原子、归属、**标签块本身**都回到输入前
+    // 落点那笔撤销：正文、原子、**标签块本身**回到 pick 前（打完字、还没选中的样子）
+    // ⚠️ 打字与落点是**两次动作、两笔撤销**：落点不是打字的延续（它是一次显式选择），
+    //    所以一次撤销回滚落点（露面收起、标签块消失），再一次才回滚打字——这正是
+    //    「落点不并进打字的撤销步」的判据（undo 合并窗口对 `other` 不生效）。
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(220)
     const back = await page.evaluate((t) => {
       const ed = window.__qua.__editor
-      const live = ed.store.find(t.id)
       const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null)
+      const live = ed.store.find(t.id)
       const count = (list) => list.reduce((n, k) => n + 1 + count(k.children), 0)
       return {
         text: plain(live),
-        tags: live?.props?._tags ?? null,
+        tags: live?.props?._tags ?? [],
         tagGone: ed.store.find(t.tagId) === undefined,
         atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length,
         total: count(ed.store.blocks),
@@ -4928,15 +4936,25 @@ await check(
       }
     }, { id: before.id, tagId: after.tagId })
 
-    assert(back.text === before.text, `一次撤销应回到输入前的正文「${before.text}」：${JSON.stringify(back.text)}`)
+    assert(back.text === `${before.text} #zzz`, `一次撤销应回到落点前的正文（字还留着）：${JSON.stringify(back.text)}`)
     assert(back.tagGone, '一次撤销后新建的标签块应不在模型里')
-    assert(!(back.tags ?? []).includes(after.tagId), `一次撤销后归属应回滚：${JSON.stringify(back.tags)}`)
-    assert(back.atoms === 0, `一次撤销后正文里的 tag 原子应回滚：剩 ${back.atoms} 条`)
+    assert(back.tags.length === 0, `一次撤销后归属仍该是空的：${JSON.stringify(back.tags)}`)
+    assert(back.atoms === 0, `一次撤销后正文里的 tag 露面应回滚：剩 ${back.atoms} 枚`)
     assert(back.total === before.total, `一次撤销块数应回原样：${before.total}，实际 ${back.total}`)
-    assert(back.tagCount === before.tags, `标签块数应回原样：${before.tags}，实际 ${back.tagCount}`)
+    assert(back.tagCount === before.tagCount, `标签块数应回原样：${before.tagCount}，实际 ${back.tagCount}`)
+
+    // 再一次撤销才回滚打字：`#zzz` 那几个字也消失
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(220)
+    const back2 = await page.evaluate((t) => {
+      const ed = window.__qua.__editor
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null)
+      return plain(ed.store.find(t.id))
+    }, { id: before.id })
+    assert(back2 === before.text, `第二次撤销应回到输入前的正文「${before.text}」：${JSON.stringify(back2)}`)
 
     await ctx.close()
-    return `键入「 #zzz 」⇒ 同一笔：upsert{content}×${textOps.length}（末条含 tag 露面）＋ 新标签 upsert{parent:null} ＋ prop.set{_tags}；⌘Z 连标签块一起回滚`
+    return `#zzz + Enter ⇒ 一笔 2 条 op（内容带露面 ＋ 标签块）、宿主 _tags 零写入；一次撤销连标签块一起回滚`
   },
 )
 
@@ -5715,13 +5733,17 @@ await check(
 )
 
 await check(
-  'T75 行尾 `#标签` + Enter 同一笔：转换（建标签/归属/露面 run）与结构拆分一起落，一次撤销全回滚',
+  'T75 `#标签` 后按 Esc：字原样留着；紧接着 Enter 只做普通拆块（不退格、不误建标签）',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
     await openFirstPage(page)
 
-    /** 挑一个非根、无子块、无标签的可编辑内容块：行尾敲标签再回车 */
+    /**
+     * `Esc` 是「我要这几个字，不要你的候选」的唯一出口：关浮层、字留着、**不退格**，
+     * 且**不留下任何模型改动**（撤销栈深不变）。紧接着的 Enter 必须是普通拆块——
+     * 浮层已经关了，它不该再有机会把一个候选落进正文。
+     */
     const pick = await page.evaluate(() => {
       const ed = window.__qua.__editor
       const rows = []
@@ -5741,92 +5763,68 @@ await check(
           !(r.block.props?._tags?.length),
       )
       const plain = (x) => x.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
-      return b ? { id: b.block.id, parentId: b.parentId, text: plain(b.block) } : null
+      const el = document.querySelector(`.blk[data-block-id="${b.block.id}"]`)
+      return { id: b.block.id, parentId: b.parentId, text: plain(b.block), depth: el?.dataset.depth ?? '' }
     })
-    assert(pick, '第一页里应有可编辑的内容块')
-    pick.kidsBefore = await page.evaluate(
-      (t) => window.__qua.__editor.store.find(t.parentId)?.children.length ?? 0,
-      pick,
-    )
+    assert(pick.id !== '', '第一页里应有可编辑的内容块')
 
     await page.evaluate((id) => window.__qua.focusBlock(id, 9999), pick.id)
     await page.keyboard.type(' #回车标签')
-    await page.waitForTimeout(120)
-    await page.keyboard.press('Enter')
-    await page.waitForTimeout(220)
+    await page.waitForTimeout(160)
+    const open = await layerRows(page)
+    assert(open.length > 0, `敲 # 应弹出浮层（前置）：${JSON.stringify(open)}`)
 
-    const after = await page.evaluate((t) => {
-      const ed = window.__qua.__editor
-      const plain = (b) => (b ? b.content.filter((x) => x.t === 'text').map((x) => x.v).join('') : null)
-      const runPlain = (c) => c.filter((x) => x.t === 'text').map((x) => x.v).join('')
-      const live = ed.store.find(t.id)
-      const ops = window.__qua.lastOps()
-      const tagOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === null)
-      const tagId = tagOp?.id ?? ''
-      const tag = tagId ? ed.store.find(tagId) : undefined
-      const parent = ed.store.find(t.parentId)
-      const i = parent?.children.findIndex((b) => b.id === t.id) ?? -1
+    const undoBefore = await page.evaluate(() => window.__qua.snapshot().undoDepth)
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(140)
+
+    const kept = await page.evaluate((t) => {
+      const b = window.__qua.blocks().find((x) => x.id === t.id)
+      const el = document.querySelector(`.blk[data-block-id="${t.id}"]`)
       return {
-        ops: ops.map((o) => ({
-          e: o.e,
-          id: o.id,
-          op: o.op,
-          text: o.value?.content === undefined ? undefined : runPlain(o.value.content),
-          runs: o.value?.content === undefined ? '' : o.value.content.map((x) => (x.t === 'ref' && x.flavor === '#' ? 'tag' : x.t)).join(','),
-          parent: o.value && 'parent' in o.value ? o.value.parent : undefined,
-          name: o.name ?? '',
-        })),
-        text: plain(live),
-        tags: live?.props?._tags ?? [],
-        nextText: i >= 0 ? plain(parent?.children[i + 1]) : null,
-        tagExists: Boolean(tag),
-        tagAlias: tag?.props?._aliases?.[0] ?? '',
+        text: b?.text ?? '',
+        domText: el?.querySelector('.tx')?.textContent ?? '',
+        depth: el?.dataset.depth ?? '',
+        tags: b?.tags ?? [],
+        atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length,
+        tagCreated: window.__qua.allBlocks().some((x) => x.roles?.includes('tag') && x.text === '回车标签'),
+        layerOpen: document.querySelectorAll('.layer').length,
+        undoDepth: window.__qua.snapshot().undoDepth,
       }
     }, pick)
 
-    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined)
-    const tagBlockOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent === null)
-    const tagPropOps = after.ops.filter((o) => o.e === 'prop' && o.name === '_tags' && o.op === 'set')
-    const structOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && typeof o.parent === 'string')
+    assert(kept.layerOpen === 0, 'Esc 应关掉浮层')
+    assert(kept.text === `${pick.text} #回车标签`, `` + `字应逐字留着（不退格、不转换）：${JSON.stringify(kept.text)}`)
+    assert(kept.domText.includes('#回车标签'), `DOM 里也应是那几个字：${JSON.stringify(kept.domText)}`)
+    assert(kept.depth === pick.depth, `Esc 不该退格：depth ${pick.depth} → ${kept.depth}`)
+    assert(kept.tags.length === 0 && kept.atoms === 0, `Esc 不该落任何结果：${JSON.stringify(kept)}`)
+    assert(!kept.tagCreated, 'Esc 不该建出标签块')
+    assert(kept.undoDepth === undoBefore, `Esc 本身不该占一格撤销：${undoBefore} → ${kept.undoDepth}`)
 
-    assert(tagBlockOps.length === 1, `同一笔里应建出标签块：${JSON.stringify(after.ops)}`)
-    assert(tagPropOps.length === 1, `同一笔里应写归属：${JSON.stringify(after.ops)}`)
-    assert(
-      textOps.length === 1 && textOps[0].runs.includes('tag'),
-      `内容应恰写一次且已带露面（转换与拆分合并成一次写入）：${JSON.stringify(after.ops)}`,
-    )
-    assert(structOps.length === 1, `结构拆分应是同一笔里的 1 条插入：${JSON.stringify(after.ops)}`)
-    assert(after.ops.length === 4, `总计应是 4 条（内容＋标签块＋归属＋结构）：${JSON.stringify(after.ops)}`)
-    assert(after.tagExists && after.tagAlias === '回车标签', `标签块应真的建出来：${JSON.stringify(after)}`)
-    assert(after.tags.includes(tagBlockOps[0].id), `归属应含新标签：${JSON.stringify(after.tags)}`)
-    assert(after.text === `${pick.text} `, `投影应是「前缀＋空格」（露面不进投影、占 1 格）：${JSON.stringify(after.text)}`)
-    assert(after.nextText === '', `光标所在块之后应多出一个空块（Enter 的结构那一半）：${JSON.stringify(after.nextText)}`)
-
-    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    // 紧接着的 Enter：浮层已关 ⇒ 普通拆块（原来那一套结构语义），不是「落一个候选」
+    await page.keyboard.press('Enter')
     await page.waitForTimeout(220)
-    const back = await page.evaluate((t) => {
+    const split = await page.evaluate((t) => {
       const ed = window.__qua.__editor
-      const plain = (b) => (b ? b.content.filter((x) => x.t === 'text').map((x) => x.v).join('') : null)
-      const live = ed.store.find(t.id)
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null)
       const parent = ed.store.find(t.parentId)
+      const i = parent?.children.findIndex((b) => b.id === t.id) ?? -1
+      const live = ed.store.find(t.id)
       return {
         text: plain(live),
-        tags: live?.props?._tags ?? null,
+        nextText: i >= 0 ? plain(parent?.children[i + 1]) : null,
+        tags: live?.props?._tags ?? [],
         atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length,
-        tagGone: ed.store.find(t.tagId) === undefined,
-        kids: parent?.children.length ?? 0,
+        tagCount: ed.store.blocks.filter((x) => (x.props?._lists ?? []).includes('tag')).length,
       }
-    }, { ...pick, tagId: tagBlockOps[0].id })
-    assert(
-      back.text === pick.text + ' #回车标签',
-      `一次撤销应回到「敲完标签、还没回车」的正文：${JSON.stringify(back.text)}`,
-    )
-    assert(!(back.tags ?? []).length && back.atoms === 0, `归属与原子应回滚：${JSON.stringify(back)}`)
-    assert(back.tagGone, '一次撤销后新建的标签块应消失')
-    assert(back.kids === pick.kidsBefore, `结构拆分也应回滚：${pick.kidsBefore} → ${back.kids}`)
+    }, pick)
+
+    assert(split.text === `${pick.text} #回车标签`, `` + `Enter 不该改这一块的正文：${JSON.stringify(split.text)}`)
+    assert(split.nextText === '', `行尾 Enter 应在下面拆出一个空块：${JSON.stringify(split.nextText)}`)
+    assert(split.tags.length === 0 && split.atoms === 0, `仍然不该有归属/原子：${JSON.stringify(split)}`)
 
     await ctx.close()
-    return `「 #回车标签」+ Enter ⇒ 同一笔 4 条 op（内容含露面/标签块/归属/结构）；⌘Z 全回滚`
+    return `#回车标签 + Esc ⇒ 字留着、depth 不变、没有模型改动；再 Enter ⇒ 只是普通拆块`
   },
 )
 
@@ -7811,6 +7809,279 @@ await check('T108 拖到归属树的一行上 ⇒ 加边：恰好 1 条 op，只
   await ctx.close()
   return `拖入一行 ⇒ 1 条 prop.set(_belongsTo)，父 = 目标页`
 })
+/* ------------------------------------------------------- 检索浮层（`#` / `@`） */
+
+await check(
+  'T109 `#` 浮层 ＋ Enter：插一枚 `flavor:#` 的指向露面，**不写宿主 `_tags`**（提及 ≠ 归类）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 「提及」是**正文里的一格**：它指向标签块、显示成 `#名`，但**不把这块归进去**。
+     * 反面（行尾多出一个 chip）一旦发生，用户就会以为「我提了一句＝我归了类」——
+     * 所以断言必须是「有露面 ∧ 无归属」，只查其中一个都是半个结论。
+     */
+    const tagName = '检索甲'
+    const tagId = await seedTag(page, tagName)
+    assert(tagId !== '', `前置：标签块应已存在：${JSON.stringify(tagName)}`)
+
+    const target = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+      window.__qua.focusBlock(id, 0)
+      return id
+    })
+    await page.waitForTimeout(80)
+    await page.keyboard.type(`#${tagName}`)
+    await page.waitForTimeout(200)
+
+    const rows = await layerRows(page)
+    assert(rows.length > 0, `敲 # 应弹出浮层：${JSON.stringify(rows)}`)
+    const hit = rows.find((r) => r.label === `#${tagName}`)
+    assert(Boolean(hit), `候选里应有「#${tagName}」：${JSON.stringify(rows.slice(0, 5))}`)
+    assert(hit.key !== '', `标签类行要画出 ⌥↵ 徽标（它支持第二种按法）：${JSON.stringify(hit)}`)
+    assert(hit.active, `默认落在第一行（新建那行不存在时就是它）：${JSON.stringify(rows.slice(0, 3))}`)
+
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(220)
+
+    const got = await page.evaluate(({ id, tagId }) => {
+      const b = window.__qua.blocks().find((x) => x.id === id)
+      const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
+      return {
+        text: b?.text ?? '',
+        tags: b?.tags ?? [],
+        atoms: window.__qua.atoms().filter((a) => a.blockId === id),
+        inline: tx?.querySelector('.atom-tag')?.textContent ?? '',
+        inlineLabel: tx?.querySelector('.atom-tag')?.dataset.refLabel ?? '',
+        chips: tx ? tx.querySelectorAll('.tag-chip').length : -1,
+        layerOpen: document.querySelectorAll('.layer').length,
+        tagId,
+      }
+    }, { id: target, tagId })
+
+    assert(got.layerOpen === 0, '选中后浮层应关掉')
+    assert(got.text === '', `触发词应被抹掉（露面不进投影）：${JSON.stringify(got.text)}`)
+    assert(got.atoms.length === 1 && got.atoms[0].kind === 'tag', `应恰有 1 枚 tag 露面：${JSON.stringify(got.atoms)}`)
+    assert(got.atoms[0].target?.id === got.tagId, `露面应指向那个标签块（按 id，不按名字）：${JSON.stringify(got.atoms[0])}`)
+    assert(got.tags.length === 0, `⚠️ 提及不写归属：${JSON.stringify(got.tags)}`)
+    assert(got.inline === `#${tagName}` && got.inlineLabel === tagName, `正文里应显示成 \`#名\`：${JSON.stringify(got)}`)
+    assert(got.chips === 0, `没有归属 ⇒ 也不该凭空出 chip：${got.chips}`)
+
+    await ctx.close()
+    return `#${tagName} + Enter ⇒ 1 枚 flavor:# 露面（指向 ${tagId.slice(-6)}）、正文投影空、宿主 _tags 仍是空`
+  },
+)
+
+await check(
+  'T110 `#` 浮层 ＋ ⌥Enter：把标签归到本块（写 `_tags`、行尾出 chip），正文里**不多出原子**',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 「归类」的结果必须落在**动作发生的地方**：在行中间敲 `#`，按 ⌥↵ 后 chip 出现在行尾，
+     * 而刚才敲的字消失 —— 这是拍板过的取舍（归类的规范入口是属性区，这里是快捷方式）。
+     * 与 T101 的差别只有一条：**写不写宿主 `_tags`**。所以两条测试必须在同一套前置下对读。
+     */
+    const tagName = '检索乙'
+    const tagId = await seedTag(page, tagName)
+    assert(tagId !== '', `前置：标签块应已存在：${JSON.stringify(tagName)}`)
+
+    const target = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+      window.__qua.focusBlock(id, 0)
+      return id
+    })
+    await page.waitForTimeout(80)
+    await page.keyboard.type(`#${tagName}`)
+    await page.waitForTimeout(200)
+    assert((await layerRows(page)).some((r) => r.label === `#${tagName}`), '候选里应有那个标签（前置）')
+
+    await page.keyboard.press('Alt+Enter')
+    await page.waitForTimeout(220)
+
+    const got = await page.evaluate(({ id, tagId }) => {
+      const b = window.__qua.blocks().find((x) => x.id === id)
+      const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
+      return {
+        text: b?.text ?? '',
+        tags: b?.tags ?? [],
+        atoms: window.__qua.atoms().filter((a) => a.blockId === id).length,
+        chips: tx ? tx.querySelectorAll('.tag-chip').length : -1,
+        layerOpen: document.querySelectorAll('.layer').length,
+        tagId,
+      }
+    }, { id: target, tagId })
+
+    assert(got.layerOpen === 0, '⌥Enter 之后浮层应关掉')
+    assert(got.tags.length === 1 && got.tags[0] === got.tagId, `宿主应带上这个标签：${JSON.stringify(got.tags)}`)
+    assert(got.atoms === 0, `归类**不插**行内原子：还有 ${got.atoms} 枚`)
+    assert(got.text === '', `触发词应被抹掉：${JSON.stringify(got.text)}`)
+    assert(got.chips === 1, `归属只在行尾出一个 chip：${got.chips}`)
+
+    /**
+     * 同一条归属的**两种露面不重复**：再提一次（Enter）⇒ 正文里那一枚出现、chip 收起。
+     * （「删掉那一格 ⇒ 归属还在、chip 回来」由 T58 的既有断言覆盖，不在这里重复。）
+     */
+    await page.keyboard.type(`#${tagName}`)
+    await page.waitForTimeout(200)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(220)
+    const inline = await page.evaluate((id) => {
+      const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
+      return {
+        chips: tx ? tx.querySelectorAll('.tag-chip').length : -1,
+        atoms: tx ? tx.querySelectorAll('.atom-tag').length : -1,
+      }
+    }, target)
+    assert(inline.chips === 0 && inline.atoms === 1, `正文里露面了 ⇒ 不出 chip：${JSON.stringify(inline)}`)
+
+    await ctx.close()
+    return `#${tagName} + ⌥Enter ⇒ 写 _tags、0 原子、行尾 1 chip；再提一次 ⇒ 原子出现、chip 收起（两种露面不重复）`
+  },
+)
+
+await check(
+  'T111 `#` 浮层 ＋ Esc：关浮层、`#名` 原样留作纯文本（不转换、不退格、不占撤销格）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * `C#`／`#1` 这类正文要能打出来。边界规则挡掉一部分（前面是字的不弹），
+     * 剩下的靠 Esc —— 它必须是「我就要这几个字」的干净出口：关浮层、字不动、结构不动。
+     */
+    const target = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+      window.__qua.focusBlock(id, 0)
+      return id
+    })
+    await page.waitForTimeout(80)
+    const depthBefore = await page.evaluate(
+      (id) => document.querySelector(`.blk[data-block-id="${id}"]`)?.dataset.depth ?? '',
+      target,
+    )
+
+    await page.keyboard.type('#保留原文')
+    await page.waitForTimeout(200)
+    assert((await page.locator('.layer-item').count()) > 0, '敲 # 应弹出浮层（前置）')
+
+    const undoBefore = await page.evaluate(() => window.__qua.snapshot().undoDepth)
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(180)
+
+    const got = await page.evaluate(({ id, depth }) => {
+      const b = window.__qua.blocks().find((x) => x.id === id)
+      const el = document.querySelector(`.blk[data-block-id="${id}"]`)
+      return {
+        text: b?.text ?? '',
+        domText: el?.querySelector('.tx')?.textContent ?? '',
+        depth: el?.dataset.depth ?? '',
+        depthBefore: depth,
+        tags: b?.tags ?? [],
+        atoms: window.__qua.atoms().filter((a) => a.blockId === id).length,
+        tagCreated: window.__qua.allBlocks().some((x) => x.roles?.includes('tag') && x.text === '保留原文'),
+        layerOpen: document.querySelectorAll('.layer').length,
+        undoDepth: window.__qua.snapshot().undoDepth,
+      }
+    }, { id: target, depth: depthBefore })
+
+    assert(got.layerOpen === 0, 'Esc 应关掉浮层')
+    assert(got.text === '#保留原文', `字应逐字留着（当纯文本）：${JSON.stringify(got.text)}`)
+    assert(got.domText.includes('#保留原文'), `DOM 里也应是那几个字：${JSON.stringify(got.domText)}`)
+    assert(got.tags.length === 0 && got.atoms === 0, `Esc 不该落任何结果：${JSON.stringify(got)}`)
+    assert(!got.tagCreated, 'Esc 不该建出标签块')
+    assert(got.depth === got.depthBefore, `Esc 不该退格：depth ${got.depthBefore} → ${got.depth}`)
+    assert(got.undoDepth === undoBefore, `Esc 本身不该占一格撤销：${undoBefore} → ${got.undoDepth}`)
+
+    await ctx.close()
+    return 'Esc ⇒ 浮层关、`#保留原文` 逐字还在、depth 不变、撤销栈不涨'
+  },
+)
+
+await check(
+  'T112 `@` 浮层：搜页能插一条页引用；搜正文片段能搜到块（同一个浮层、同一个落点）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * `@` 的候选是**页 ＋ 块**，两栏都从**整片森林**里线性扫（临时实现）。
+     * 判据是「搜到一个就插一个**指向它**的引用」：页行与块行走同一条落点，
+     * 所以这里两条都验，且都按**目标 id** 断言（不是看显示名对不对）。
+     */
+    const pg = await page.evaluate(() => window.__qua.pages()[0])
+    const pageQuery = pg.title.split(/\s/)[0] || pg.title
+    const first = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+      window.__qua.focusBlock(id, 0)
+      return id
+    })
+    await page.waitForTimeout(80)
+
+    await page.keyboard.type(`@${pageQuery}`)
+    await page.waitForTimeout(220)
+    const pageRows = await layerRows(page)
+    assert(pageRows.length > 0, `敲 @ 应弹出浮层：${JSON.stringify(pageRows.slice(0, 5))}`)
+    const pageRowAt = pageRows.findIndex((r) => r.label.includes(pageQuery))
+    assert(pageRowAt >= 0, `候选里应有那一页：${JSON.stringify(pageRows.slice(0, 8))}`)
+    await page.locator('.layer-item').nth(pageRowAt).click()
+    await page.waitForTimeout(220)
+
+    const afterPage = await page.evaluate(({ id, pageId }) => {
+      const a = window.__qua.atoms().filter((x) => x.blockId === id)
+      const b = window.__qua.blocks().find((x) => x.id === id)
+      return { atoms: a, text: b?.text ?? '', pageId }
+    }, { id: first, pageId: pg.id })
+
+    assert(afterPage.atoms.length === 1, `页引用应插一枚原子：${JSON.stringify(afterPage.atoms)}`)
+    assert(afterPage.atoms[0].kind === 'page', `页引用**不带** flavor（不是行内标签）：${JSON.stringify(afterPage.atoms[0])}`)
+    assert(afterPage.atoms[0].target?.id === afterPage.pageId, `应指向那一页：${JSON.stringify(afterPage.atoms[0])}`)
+    assert(afterPage.text === '', `触发词应被抹掉：${JSON.stringify(afterPage.text)}`)
+
+    // 块：先造一块带独特正文的标记块，再到**另一个**空块里 `@` 它
+    const setup = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const rootId = window.__qua.blocks()[0].id
+      const targetId = ed.insertBlockAfter(rootId, '块检索标记甲')
+      const typingId = ed.insertBlockAfter(rootId, '')
+      window.__qua.focusBlock(typingId, 0)
+      return { targetId, typingId }
+    })
+    await page.waitForTimeout(120)
+
+    await page.keyboard.type('@检索标记甲')
+    await page.waitForTimeout(220)
+    const blockRows = await layerRows(page)
+    assert(blockRows.length > 0, `敲 @ 应弹出浮层：${JSON.stringify(blockRows.slice(0, 5))}`)
+    const blockRowAt = blockRows.findIndex((r) => r.label.includes('检索标记甲'))
+    assert(blockRowAt >= 0, `按正文片段应能搜到那一块：${JSON.stringify(blockRows.slice(0, 8))}`)
+    await page.locator('.layer-item').nth(blockRowAt).click()
+    await page.waitForTimeout(220)
+
+    const afterBlock = await page.evaluate((id) => {
+      const a = window.__qua.atoms().filter((x) => x.blockId === id)
+      return { atoms: a, text: window.__qua.blocks().find((x) => x.id === id)?.text ?? '' }
+    }, setup.typingId)
+
+    assert(afterBlock.atoms.length === 1, `块引用应插一枚原子：${JSON.stringify(afterBlock.atoms)}`)
+    assert(afterBlock.atoms[0].kind === 'page', `块引用同样不带 flavor：${JSON.stringify(afterBlock.atoms[0])}`)
+    assert(afterBlock.atoms[0].target?.id === setup.targetId, `应指向那个标记块：${JSON.stringify(afterBlock.atoms[0])}`)
+    assert(afterBlock.text === '', `触发词应被抹掉：${JSON.stringify(afterBlock.text)}`)
+
+    await ctx.close()
+    return `@${pageQuery} ⇒ 页引用（指向 ${pg.id.slice(-6)}）；@检索标记甲 ⇒ 块引用（指向 ${setup.targetId.slice(-6)}）`
+  },
+)
 
 /** 判红的是「不在已知失败表里的失败」；已知失败逐条打印，不计入退出码 */
 const known = results.filter((r) => !r.ok && r.known)

@@ -28,6 +28,7 @@ import {
   enterKind,
   locate,
   deleteBlockSpan,
+  detectTrigger,
   mergeIntoPrev,
   mergeIntoPrevPlan,
   prevPlaceholder,
@@ -36,7 +37,6 @@ import {
   ensureTag,
   hasTag,
   removeTagId,
-  trailingHashTag,
   mkBlock,
   applyMove,
   dropMove,
@@ -73,6 +73,8 @@ import {
   type Sel,
   type Snap,
   type TodoState,
+  type TriggerChar,
+  type TriggerHit,
   type UndoKind,
   type VisibleRow,
 } from '../core/index.ts'
@@ -111,7 +113,7 @@ import { ensureTagInTx, tagLookupOf } from '../core/kb/ensure-tag.ts'
 import { t } from '../core/msg.ts'
 import { ALLOWED_ROW_CHILDREN, LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl, visibleRowHeight } from './block-dom.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
-import { bindEditorEvents, type AtomClickMods } from './editor-events.ts'
+import { bindEditorEvents, type AtomClickMods, type TriggerQuery } from './editor-events.ts'
 
 export interface Probe {
   isComposing: boolean
@@ -173,8 +175,8 @@ export interface ViewOpts {
 export interface ViewEvents {
   /** 任何模型变化（持久化 + 角标刷新）。格式/原子改动也是内容改动 ⇒ 归 `text` */
   change?: (kind: 'text' | 'struct' | 'load') => void
-  /** 输入 `/` 且光标在查询词尾部 */
-  slashQuery?: (q: string | null, rect: DOMRect) => void
+  /** 光标前是不是在敲一个触发词（`/`／`#`／`@`）；`null` ＝ 这一段已经结束 */
+  triggerQuery?: (hit: TriggerQuery | null, rect: DOMRect) => void
   /** 点行内原子（`mods` 是修饰键：左键打开目标，⌥ 才看详情） */
   atomClick?: (run: RunWithId, blockId: string, el: HTMLElement, mods: AtomClickMods) => void
   /** 悬停把手/圆点或右键 → 块菜单 */
@@ -222,6 +224,18 @@ export interface ViewEvents {
 interface EditBase {
   id: string
 }
+
+/**
+ * 浮层选中之后的**落点**（由触发字符那一栏决定，不由行决定）。
+ *
+ * · `ref`：正文里插一枚指向它的引用（`flavor:'#'` 就是行内标签的露面）；
+ * · `newTag`：同一笔里建出标签块，再插那枚露面；
+ * · `tag`：**只归类**——抹掉触发词、把标签写进本块的 `_tags`（行尾出 chip）。
+ */
+export type AcceptPick =
+  | { kind: 'ref'; to: string; label: string; flavor?: '#' }
+  | { kind: 'newTag'; name: string }
+  | { kind: 'tag'; name: string }
 
 export class BlockEditor {
   container: HTMLElement
@@ -293,7 +307,6 @@ export class BlockEditor {
    *    于是边界永远看不到「写过」。块的粒度不受编辑期怎么切的影响。
    */
   private edited = new Set<string>()
-  // TEMP-PROBE
   /** 「点空白建块」的监听面：比 container 大一圈，见 `ViewOpts.blankArea` */
   blankArea: HTMLElement
   private allowBlankCreate: boolean
@@ -611,6 +624,18 @@ export class BlockEditor {
     if (this.reclaimCaret()) return
     const s = this.readSel()
     if (!s) return
+    /**
+     * **光标换到另一块 ＝ 上一次编辑的结束。**
+     *
+     * 为什么不能只靠 `focusout`：整片编辑区是**一个** contenteditable 容器，
+     * 在同一个容器里从父块点到子块（或反过来）**不会派发 `focusout`**，
+     * 那个边界就永远不来了 —— 表现为「改完点进子块，修改时间不动」，
+     * 而且不报错。光标换块这件事在这里能看见，它就是唯一可靠的落点。
+     *
+     * ⚠️ 判据是 `editBase` 那一块 vs 新光标块，不是 `this.sel`：`this.sel` 已经被
+     *    各种路径改写过，拿它比会漏掉。`commitEdit` 幂等，重复调用无害。
+     */
+    if (this.editBase && this.editBase.id !== s.aBlock) this.commitEdit(this.editBase.id)
     // 不在这里清块选区：mouseup 前后浏览器会短暂恢复文本 Range，会误杀刚建好的块选区。
     // 块选区的退出来自显式动作（在 .tx 里 mousedown / Shift+拖 / Esc / Enter / 点空白 / 菜单）。
     // 只有**真的变了**才上报：否则气泡会在每次 selectionchange 上重建（打字时每帧一次）
@@ -745,9 +770,12 @@ export class BlockEditor {
     const target = { node: tx as Node, off: 0 }
     let acc = 0
     let done = false
+    /** walk 有没有摸到过正文内容：空块与「offset 越过正文末尾」的落点不同 */
+    let sawContent = false
     const walk = (n: Node): void => {
       if (done || isTagChip(n)) return
       if (n.nodeType === Node.TEXT_NODE) {
+        sawContent = true
         const len = (n.textContent ?? '').length
         if (acc + len >= offset) {
           target.node = n
@@ -759,6 +787,7 @@ export class BlockEditor {
         return
       }
       if (n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).dataset.atomId) {
+        sawContent = true
         if (acc + 1 > offset) {
           target.node = n.parentNode ?? tx
           target.off = Array.from((n.parentNode ?? tx).childNodes).indexOf(n as ChildNode)
@@ -773,7 +802,17 @@ export class BlockEditor {
     walk(tx)
     if (!done) {
       target.node = tx
-      target.off = textEndOff(tx)
+      /**
+       * 有正文的落到「正文末尾、chip 之前」（textEndOff 的职责）。
+       * **空块**（只有 `<br>`，可能再跟一枚 chip）必须落到元素 0 位：
+       * 「br 与 chip 之间」不是 Chrome 认的稳定光标位——下一次按键前它会把光标
+       * 自己挪到别处（contenteditable=false 的邻居它不认），随后的删除键就按
+       * 挪错的位置走原生删除，把整行的内联元素整段摘掉，那一行从此没有
+       * 可落光标的地方（⌥Enter 归类后的空行真踩过）。(tx, 0) 是 Chrome 对
+       * `<br>` 占位空段的标准光标位，稳定。
+       */
+      const end = textEndOff(tx)
+      target.off = sawContent || end === tx.childNodes.length ? end : 0
     }
     return target
   }
@@ -1315,68 +1354,6 @@ export class BlockEditor {
   }
 
   /**
-   * **把刚敲完的 `#名字` 换成行内标签**：名字那几个字换成一枚 `#` 风味的引用 run，
-   * 归属写进 `_tags`。
-   *
-   * 三件事必须一起发生（否则各留一个半截状态，都难修）：
-   *   ① 名字那几个字从内容里删掉；② 原位插一枚引用 run（flavor `'#'`）；③ 归属写 `_tags`。
-   * 调用方负责把它们包进**同一笔撤销**（`snap()` 在调用前取）。
-   *
-   * ⚠️ 归属写的是**标签块 id**：标签改名后正文里那枚露面照样显示新名字（解析走 id）。
-   * ⚠️ 判定在**投影**（纯文本）上做（`trailingHashTag` 是纯字符串函数），
-   *    命中后再把投影偏移换算回 plain 偏移去切内容——两套坐标换算收在 runs 层。
-   * ⚠️ `allowEnd`：只在**编辑边界**（回车/离开这一行）为真 —— 那时「还在敲」的可能已归零，
-   *    行尾也算敲完。输入过程中必须等分隔符，否则 `#自` 会在半路变成标签「自」。
-   */
-  private convertHashTag(
-    id: string,
-    opts: { allowEnd?: boolean } = {},
-    tx?: Tx,
-  ): { name: string; from: number; to: number; tagId: string } | null {
-    const loc = locate(this.doc, id)
-    if (!loc) return null
-    if (!canWriteText(loc.block)) return null
-    const hit = trailingHashTag(plainText(loc.block.content), opts)
-    if (!hit) return null
-    const from = fromProjection(loc.block.content, hit.from)
-    const to = fromProjection(loc.block.content, hit.to)
-    const mkRun = (tagId: string): RefRun => ({ id: uuidv7Hex(), t: 'ref', to: tagId, flavor: '#', label: hit.name })
-    /**
-     * **有事务**：建标签块、改内容、写归属是**同一笔**。
-     * 拆开落盘会留下半批（「字改了、标签没建」「露面有了、归属没写」），
-     * 而半批比慢更贵 —— 一次用户动作 = 一次 `run` = 一个 tx。
-     *
-     * 新建块也走 `tx.insert` ⇒ 索引随事务按 op 增量修补，不再需要手工失效。
-     */
-    if (tx) {
-      const tagBlock = ensureTagInTx(tagLookupOf(this.store.blocks), hit.name, tx)
-      if (!tagBlock) return null
-      const tagId = tagBlock.id
-      tx.patch(id, (b) => writeBlockContent(b, spliceRuns(b.content, from, to, [mkRun(tagId)])))
-      tx.setTags(id, [...tagIdsOf(loc.block), tagId])
-      return { name: hit.name, from, to, tagId }
-    }
-    /**
-     * 建标签块要动整片森林 —— `store.blocks` 就是它（所有视图共享同一个数组），
-     * 所以这里不需要再注入一个「谁来建」的回调：森林只有一份，读者也是这一份。
-     *
-     * ⚠️ 这条**直写**分支只服务没有 `write` 注入的实例（迁移期兜底）；
-     *    有事务入口时，编辑边界的转换与结构拆分共用同一笔（见 `splitTx`）。
-     */
-    const tagId = ensureTag(this.store.blocks, hit.name).block?.id ?? null
-    if (!tagId) return null
-    /**
-     * ⚠️ 新建的标签块**还没进派生索引**（索引是快照，下一次 `touch` 才失效重建）。
-     *    紧接着的这次重画要用 `find(tagId)` 去找它 ⇒ 先把索引失效掉，
-     *    否则正文里那枚露面会画不出来（表现为「敲完标签什么都没出现」，真踩过）。
-     */
-    this.store.invalidateIndex()
-    writeBlockContent(loc.block, spliceRuns(loc.block.content, from, to, [mkRun(tagId)]))
-    addTagId(loc.block, tagId)
-    return { name: hit.name, from, to, tagId }
-  }
-
-  /**
    * **给一个块挂标签**（块级露面：正文之后出 chip）。
    *
    * 与行内标签共用 `_tags`：这里只写归属、不碰正文 —— 面板/命令路径的入口。
@@ -1389,7 +1366,7 @@ export class BlockEditor {
     const before = this.snap()
     if (this.write) {
       // 建标签块（可能）＋写归属是同一笔：拆开就会留下「只有标签、没有归属」的半批。
-      // 与 `convertHashTag` 的事务支同形；名字为空／已挂 ⇒ 事务里什么都不写（零 op）
+      // 名字为空／已挂 ⇒ 事务里什么都不写（零 op）
       const ok = this.write((tx) => {
         const tag = ensureTagInTx(tagLookupOf(this.store.blocks), name, tx)
         if (!tag || hasTag(b, tag.id)) return false
@@ -1400,7 +1377,7 @@ export class BlockEditor {
     } else {
       const tagId = ensureTag(this.store.blocks, name).block?.id
       if (!tagId || hasTag(b, tagId)) return false
-      // 同 `convertHashTag` 直写支：刚建的块不在索引里，紧接着的重画要靠它
+      // 刚建的块不在索引里，紧接着的重画要靠它
       this.store.invalidateIndex()
       addTagId(b, tagId)
     }
@@ -1454,8 +1431,10 @@ export class BlockEditor {
    * 原样带回），模型侧整组替换。没有偏移映射——原子的存亡由「元素还在不在」决定，
    * 用户删掉那一格就是一次显式删除。
    *
-   * 顺序：**先把内容同步进模型，再认 `#名字`**。
-   * 反过来的话，判据问的就不是「模型里刚敲完的字」。
+   * ⚠️ **这里不认任何语法**：`#名字` 不再在敲到分隔符时静默变成标签。
+   *    触发浮层与落点都在别的层（`emitTrigger` 报「在敲什么」，装配层按触发表弹浮层，
+   *    选中之后才由 `acceptTrigger` 一次落账）。输入路径只做「把字同步进模型」这件事，
+   *    否则同一串字会出现两套行为，而用户不知道刚才发生了哪一套。
    */
   syncFromDom(id: string, reRender: boolean): void {
     const loc = locate(this.doc, id)
@@ -1466,37 +1445,16 @@ export class BlockEditor {
     if (sameRuns(next, loc.block.content)) return
     // 这一块真的落过字 ⇒ 到边界时记一次「块被改过」（时刻只在边界写，见 `stampEdited`）
     this.edited.add(id)
-    /**
-     * **这一笔会不会顺手成标签**：`convertHashTag` 的判据是「**模型里**的内容刚敲完一个
-     * `#名字`」，所以它必须在内容落进模型**之后**、但在这次撤销记录**之前**算出来。
-     * 成标签那一笔**不再退回直写**：建标签块、写归属都能进 `tx`，所以它们与内容
-     * 属于同一笔（见 `convertHashTag` 的 tx 分支）。组合期不做（输入法中间态里的 `#`
-     * 不是标签语法）。
-     */
-    const willConvert = !this.probe.isComposing
     const before = this.snap()
     const prevLen = plainLen(loc.block.content)
-    let conv: { name: string; from: number; to: number; tagId: string } | null = null
     if (this.write) {
-      // 内容与（可能的）标签转换同一笔：字对不上敲进来的字，归属也不可能对得上
-      const write = this.write
-      conv = write((tx) => {
+      this.write((tx) => {
         tx.patch(id, (b) => writeBlockContent(b, next))
-        return willConvert ? this.convertHashTag(id, {}, tx) : null
       })
     } else {
       writeBlockContent(loc.block, next)
-      if (willConvert) conv = this.convertHashTag(id)
     }
-    /**
-     * **行内标签**：敲下分隔符那一刻，`#名字` 换成「1 格露面 ＋ 一条归属」。
-     * 上面已把它放进**同一笔事务**（没有 `write` 时仍在直写），
-     * 所以下面的 `undo.record(before)` 一记，删字、插露面、写归属、新建标签块
-     * 都在**同一笔撤销**里 —— 事务里不再单独记 undo。
-     */
-    let caret = this.sel ? this.sel.aOff : null
-    // 内容短了「`#名字` 的字数 − 1 格」⇒ 光标跟着左移；敲完分隔符时光标在 `to` 之后
-    if (conv && caret !== null && caret >= conv.to) caret = caret - (conv.to - conv.from) + 1
+    const caret = this.sel ? this.sel.aOff : null
     const kind = plainLen(next) < prevLen ? 'delete' : 'insert'
     this.undo.record(before, kind, Date.now())
     /**
@@ -1507,7 +1465,7 @@ export class BlockEditor {
      * 重画一次就把「显示顺序」与「正文顺序」重新对齐（光标按模型偏移贴回，落在 chip 之前）。
      */
     const tagged = tagIdsOf(loc.block).length > 0 && !this.probe.isComposing
-    if (reRender || tagged || conv) {
+    if (reRender || tagged) {
       this.renderBlock(id)
       if (caret !== null) this.placeCaret(id, Math.min(caret, plainLen(loc.block.content)))
       // **改名传播**：这一块可能是别处引用的目标 ⇒ 引用它的那些块也要重画（显示名现算）。
@@ -1596,11 +1554,9 @@ export class BlockEditor {
   }
 
   /**
-   * **一次回车 ＝ 一笔事务**：行尾 `#标签` 的转换、同块选区删除、结构拆分共用这一笔。
+   * **一次回车 ＝ 一笔事务**：同块选区删除、结构拆分共用这一笔。
    *
-   * 为什么必须同笔：拆开落盘会得到「内容与归属直写、结构进 op」两份来源 ——
-   * 半批比慢更贵。转换放在最前，是因为它会让内容变短、`offset` 随之前移；
-   * 后面一律读**转换之后**的内容（`tx` 是同步改内存的）。
+   * 为什么必须同笔：拆开落盘会得到「内容直写、结构进 op」两份来源 —— 半批比慢更贵。
    *
    * 拆分＝内容按 plain 偏移切两半：格式随切片走、原子的归属按切点自然分家，
    * 没有「锚点搬家」这一步——它们本来就在内容里。
@@ -1613,9 +1569,6 @@ export class BlockEditor {
     offset: number,
     cut: { from: number; to: number } | null,
   ): { caret: { id: string; off: number } | null } | null {
-    const conv = this.convertHashTag(id, { allowEnd: true }, tx)
-    if (conv && offset >= conv.to) offset = offset - (conv.to - conv.from) + 1
-
     const blk = this.store.find(id)
     if (!blk) return null
     // 同块选区先删：只在**内存**里切掉，切点收回到选区起点——
@@ -1683,11 +1636,6 @@ export class BlockEditor {
 
   /** 没有事务入口时的直写落地（迁移期兜底；判定与 `splitTx` 同源，只是逐条改活块） */
   private splitDirect(id: string, offset: number, cut: { from: number; to: number } | null, before: Snap): void {
-    /**
-     * **回车是编辑边界**：行尾那个 `#名字` 到这一刻算敲完（输入中必须等分隔符）。
-     */
-    const conv = this.convertHashTag(id, { allowEnd: true })
-    if (conv && offset >= conv.to) offset = offset - (conv.to - conv.from) + 1
     const loc = locate(this.doc, id)
     if (!loc) return
     offset = Math.min(offset, plainLen(loc.block.content))
@@ -2584,8 +2532,8 @@ export class BlockEditor {
       endMouseSelect: () => this.endMouseSelect(),
       hasBlockSelection: () => this.hasBlockSelection(),
       onShellActivate: (date) => this.events.shellWrite?.(date),
-      emitSlashQuery: (id) => this.emitSlashQuery(id),
-      dropSlashQuery: (id) => this.dropSlashQuery(id),
+      emitTrigger: (id) => this.emitTrigger(id),
+      dropTrigger: (id) => this.dropTrigger(id),
       insertPlainText: (id, _off, text) => this.pasteAt(id, _off, text),
       hasChildren: (id) => Boolean(locate(this.doc, id)?.block.children.length),
 
@@ -2685,30 +2633,129 @@ export class BlockEditor {
     if (id) this.blockEl(id)?.classList.remove('drag-src')
   }
 
-  /** `/` 触发：块文本在光标前是 `/` 或 `/查询词`（无空格）时上报 */
-  private emitSlashQuery(id: string): void {
-    if (!this.events.slashQuery) return
-    const loc = locate(this.doc, id)
-    if (!loc) return
-    const off = this.sel?.aBlock === id ? (this.sel?.aOff ?? 0) : 0
-    const m = /(^|\s)\/([^\s/]{0,20})$/.exec(plainText(loc.block.content).slice(0, projectOff(loc.block.content, off)))
-    if (!m) {
-      this.events.slashQuery(null, new DOMRect())
-      return
-    }
-    this.events.slashQuery(m[2] ?? '', this.caretRect() ?? new DOMRect())
+  /**
+   * 此刻光标前有没有一个**正在输入的触发词**（`/`／`#`／`@`）。
+   *
+   * 判定落在**投影**（`plainText`）上：触发字符是正文里的字，与格式无关；
+   * 判定本身在 `core/trigger.ts`（纯函数、被单测逐条钉），这里只负责把
+   * 「光标 plain 偏移」换算成那段投影文本，并把结果换算回 **plain 偏移**。
+   *
+   * `from`／`to` 是 plain 偏移：抹字与插原子都在这套坐标里做，
+   * 于是「删掉触发词、插入一枚原子」不需要第二套偏移换算。
+   */
+  triggerAt(id?: string): (Omit<TriggerHit, 'from'> & { from: number; to: number }) | null {
+    const bid = id ?? this.sel?.aBlock
+    if (!bid) return null
+    const loc = locate(this.doc, bid)
+    // 只读行（日记日期）与不写正文的块上不该弹：那里连字都敲不进去
+    if (!loc || !canWriteText(loc.block)) return null
+    const off = this.sel?.aBlock === bid ? (this.sel?.aOff ?? 0) : 0
+    const text = plainText(loc.block.content).slice(0, projectOff(loc.block.content, off))
+    const hit = detectTrigger(text, { composing: this.probe.isComposing })
+    if (!hit) return null
+    return { ch: hit.ch, query: hit.query, from: fromProjection(loc.block.content, hit.from), to: off }
   }
 
-  /** 把 `/查询词` 从模型里抹掉（选中命令后调用） */
-  dropSlashQuery(id: string): void {
-    const loc = locate(this.doc, id)
-    if (!loc) return
-    const off = this.sel?.aBlock === id ? (this.sel?.aOff ?? 0) : 0
-    const m = /(^|\s)\/([^\s/]{0,20})$/.exec(plainText(loc.block.content).slice(0, projectOff(loc.block.content, off)))
-    if (!m) return
-    const qLen = (m[2] ?? '').length + 1
-    this.editBlock(id, off - qLen, off, '', 'delete')
-    this.placeCaret(id, off - qLen)
+  /** 上报「在敲什么」（`null` ＝ 这一段已经结束，浮层该关） */
+  private emitTrigger(id: string): void {
+    if (!this.events.triggerQuery) return
+    const hit = this.triggerAt(id)
+    if (!hit) {
+      this.events.triggerQuery(null, new DOMRect())
+      return
+    }
+    this.events.triggerQuery({ ch: hit.ch, query: hit.query }, this.caretRect() ?? new DOMRect())
+  }
+
+  /**
+   * 把触发词从模型里抹掉（选中命令后调用）。
+   *
+   * 只在**命令行**上有这一步：命令要落在「触发词原来那一格」，所以得先把它让出来。
+   * `#`／`@` 的落点不走这里——它们与插入本身是**同一笔事务**（见 `acceptTrigger`）。
+   */
+  dropTrigger(id: string): boolean {
+    const hit = this.triggerAt(id)
+    if (!hit) return false
+    this.editBlock(id, hit.from, hit.to, '', 'delete')
+    this.placeCaret(id, hit.from)
+    return true
+  }
+
+  /**
+   * **选中浮层一行之后的落点**：删掉触发词，并把结果落到它原来的位置。
+   *
+   * 三件事在同一笔事务里（一次撤销就是一次动作）：
+   *   ① 抹掉 `#查询词`／`@查询词`；② 需要时建出标签块；③ 插入露面 run 或写归属。
+   * 拆开落盘会留下「字删了、标签没建」这种半批，而半批比慢更贵。
+   *
+   * `ch` 是**打开浮层时那个触发字符**：落点前再检测一次（文本此刻才是事实），
+   * 若最近敲下的已经不是它（用户改了主意／挪了光标），就什么都不做而不是猜一个落点。
+   *
+   * 为什么只有 `tag`／`newTag` 才建标签块：`ref` 指向的目标已经存在（浮层刚列出它），
+   * 再 `ensureTag` 一遍等于用名字重新解析一次，反而会把别名/同名页的口径再走一道。
+   */
+  acceptTrigger(opts: { ch: TriggerChar; pick: AcceptPick }): boolean {
+    const hit = this.triggerAt()
+    if (!hit || hit.ch !== opts.ch) return false
+    const id = this.sel?.aBlock
+    const loc = id ? locate(this.doc, id) : null
+    if (!id || !loc) return false
+    const pick = opts.pick
+    const before = this.snap()
+
+    const apply = (tx: Tx | null, block: Block): boolean => {
+      let tagId: string | null = null
+      if (pick.kind !== 'ref') {
+        const tag = tx
+          ? ensureTagInTx(tagLookupOf(this.store.blocks), pick.name, tx)
+          : ensureTag(this.store.blocks, pick.name).block
+        if (!tag) return false
+        tagId = tag.id
+      }
+      const inserted: RefRun[] =
+        pick.kind === 'tag'
+          ? []
+          : [
+              {
+                id: uuidv7Hex(),
+                t: 'ref',
+                to: pick.kind === 'ref' ? pick.to : tagId!,
+                ...(pick.kind === 'newTag' || pick.flavor ? { flavor: '#' as const } : {}),
+                label: pick.kind === 'ref' ? pick.label : pick.name,
+              },
+            ]
+      const next = spliceRuns(block.content, hit.from, hit.to, inserted)
+      if (tx) {
+        tx.patch(id, (b) => writeBlockContent(b, next))
+        if (pick.kind === 'tag') tx.setTags(id, [...tagIdsOf(block), tagId!])
+      } else {
+        writeBlockContent(block, next)
+        if (pick.kind === 'tag') addTagId(block, tagId!)
+      }
+      return true
+    }
+
+    let ok: boolean
+    if (this.write) {
+      const write = this.write
+      ok = write((tx) => apply(tx, loc.block))
+    } else {
+      ok = apply(null, loc.block)
+      // 新建的标签块还没进派生索引（同 `addTag` 的直写支）：紧接着的重画要靠它
+      this.store.invalidateIndex()
+    }
+    if (!ok) return false
+    /**
+     * 撤销合并窗口的陷阱：打字那笔（`insert`）与这一笔若同 kind 且落在 1200ms 内，
+     * 会被并成一步 —— 一次撤销就回到「输入前」，跳过落点那一格。所以这里一律记
+     * `other`（不可合并）：落点动作是**显式的一次选择**，不是打字的延续。
+     */
+    this.undo.record(before, 'other', Date.now())
+    this.renderBlock(id)
+    // 光标：插了露面的落在它之后（1 格）；只归类的那一格已经没了，落在原处
+    this.placeCaret(id, hit.from + (pick.kind === 'tag' ? 0 : 1))
+    this.emitChange('text', [id])
+    return true
   }
 
   /** 粘贴：多行 → 拆块（id 规则：首块保留原 id，其余新发）。纯文本插入，继承插入点的格式。 */

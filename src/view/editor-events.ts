@@ -15,6 +15,7 @@
  */
 import type { RunWithId } from '../core/runs.ts'
 import { bindDropTarget, setDragBlock, zoneHint } from './dnd.ts'
+import type { TriggerChar } from '../core/trigger.ts'
 
 /**
  * 行内原子被点时按下了哪些修饰键。
@@ -24,6 +25,17 @@ import { bindDropTarget, setDragBlock, zoneHint } from './dnd.ts'
  */
 export interface AtomClickMods {
   altKey: boolean
+}
+
+/**
+ * 浮层要的「此刻在敲什么」。
+ *
+ * ⚠️ 只报**触发字符与查询词**，不带偏移：抹掉这段字的偏移由编辑器自己算
+ *    （投影坐标 ↔ plain 坐标的换算在 runs 层，事件层不需要认识）。
+ */
+export interface TriggerQuery {
+  ch: TriggerChar
+  query: string
 }
 
 /**
@@ -70,10 +82,10 @@ export interface EditorBridge {
   collapseSelection: () => string | null
   /** 把某个块的 DOM 文本同步回模型；`reRender` 为 false 时不重渲染（组合期专用）*/
   syncFromDom: (id: string, reRender: boolean) => void
-  /** 光标在 `/查询词` 尾部时上报（由装配层决定弹不弹斜杠菜单）*/
-  emitSlashQuery: (id: string) => void
-  /** `/查询词` 被消费后从文本里抹掉 */
-  dropSlashQuery: (id: string) => void
+  /** 光标前是不是在敲一个触发词（`/`／`#`／`@`）——由装配层决定弹不弹浮层 */
+  emitTrigger: (id: string) => void
+  /** 触发词被消费掉之后从正文里抹掉（`#查询词`／`@查询词`／`/查询词`） */
+  dropTrigger: (id: string) => void
   /** 插入一行纯文本（多行粘贴用）*/
   insertPlainText: (id: string, offset: number, text: string) => void
   /**
@@ -271,7 +283,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     const collapsed = br.collapseSelection()
     if (collapsed) {
       br.syncFromDom(collapsed, true)
-      if (!br.composing()) br.emitSlashQuery(collapsed)
+      if (!br.composing()) br.emitTrigger(collapsed)
       return
     }
     /**
@@ -285,7 +297,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     br.syncSel()
     // 组合期不重渲染（否则打断输入法）；合成结束时会补渲染
     br.syncFromDom(id, !br.composing())
-    if (!br.composing()) br.emitSlashQuery(id)
+    if (!br.composing()) br.emitTrigger(id)
   })
 
   on(c, 'compositionstart', () => {
@@ -299,7 +311,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     if (id) {
       br.syncSel()
       br.syncFromDom(id, true)
-      br.emitSlashQuery(id)
+      br.emitTrigger(id)
     }
     br.onChange()
   })
