@@ -256,7 +256,6 @@ export const MSG = {
   'ui.mount.addHint': '复制这个查询的条件',
   'ui.mount.remove': '摘掉这一栏',
   'ui.mount.duplicate': '挂载区里已经有一栏叫「{label}」',
-  'ui.mount.expand': '展开',
   'ui.mount.collapse': '收起',
   'ui.mount.count': '{count} 条',
   'ui.mount.demo.todayTodos': '今天的待办',
