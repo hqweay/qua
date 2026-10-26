@@ -371,9 +371,9 @@ export class BlockEditor {
     this.offStore =
       o.autoReload === false
         ? () => {}
-        : this.store.subscribe((source?: unknown) => {
+        : this.store.subscribe((source?: unknown, ids?: readonly string[]) => {
             // 发起编辑的视图自己已经渲染过；其他视图按 root id 从 store 重取（共享对象，不拷贝块数据）
-            if (source !== this) this.reloadFromStore()
+            if (source !== this) this.reloadFromStore(true, ids)
           })
     this.container.setAttribute('contenteditable', 'true')
     this.container.setAttribute('spellcheck', 'false')
@@ -411,15 +411,104 @@ export class BlockEditor {
    *
    * ⚠️ 其他视图收到 `touch` 时调用；不触发 `events.change`（否则会回写成“编辑”）。
    */
-  reloadFromStore(restoreSelection = true): void {
+  reloadFromStore(restoreSelection = true, ids?: readonly string[]): void {
+    /**
+     * **别的编辑器（嵌在本视图的段里）正在打字 ⇒ 只按 id 重画，不动结构。**
+     * 动结构 ＝ 把挂载区那棵子树搬一遍 ＝ 里层编辑器失焦、光标丢失。
+     * 全量重排记在 `pendingReload`，等焦点离开编辑岛再补（`flushPendingReload`）。
+     */
+    if (this.pointerDown || this.focusInMount()) {
+      if (ids && ids.length > 0) for (const id of ids) this.renderBlock(id)
+      this.pendingReload = true
+      this.armFlush()
+      return
+    }
     const roots = this.viewRootIds
       .map((id) => this.store.find(id))
       .filter((b): b is Block => Boolean(b))
     // 折叠表属于**这一份文档**（视图各带各的），换 roots 时原样保留
     this.doc = { roots, folded: this.doc.folded }
-    const focused = this.container.contains(document.activeElement)
+    // 焦点只算**本视图自己的**（里层编辑器是独立编辑岛，不是「我在编辑」）
+    const focused = restoreSelection && this.ownFocus()
     this.renderAll()
-    if (restoreSelection && focused) this.restoreSel()
+    if (focused) this.restoreSel()
+  }
+
+  /**
+   * 焦点是不是落在**本实例的编辑宿主**上。
+   *
+   * ⚠️ 不能用 `container.contains(activeElement)`：挂载区／查询视图的编辑器是
+   *    **独立的编辑岛**，它们的 DOM 也在这个容器里面。按「含在里面」算，
+   *    本视图会以为自己有焦点，于是 `restoreSel()` 把光标从里层抢回来（实测：
+   *    点挂载区里的行，插入点立刻跳回正文）。
+   */
+  private ownFocus(): boolean {
+    const active = document.activeElement as HTMLElement | null
+    if (!active) return false
+    if (active === this.container) return true
+    if (!this.container.contains(active)) return false
+    // 焦点在挂载区那棵子树里（里层编辑器或它的按钮）⇒ 不算「本视图在编辑」
+    return !active.closest('.sec-mount') && !active.isContentEditable
+  }
+
+  /**
+   * 焦点是不是在本视图里那些**别的视图**的段尾槽里（挂载区／查询视图）。
+   *
+   * ⚠️ 判据不能只是「焦点在里层编辑器上」：点一下挂载区抬头那颗刷新按钮，
+   *    焦点落到按钮上——那一刻**也不是**本视图在编辑。只判可编辑元素的话，
+   *    按钮按下与抬起之间本视图会重排一次，把按钮从指针下搬走 ⇒ 一次真点击变成「点了没反应」
+   *    （实测：`page.mouse.click` 不触发，`.click()` 能触发）。
+   */
+  private focusInMount(): boolean {
+    const active = document.activeElement as HTMLElement | null
+    if (!active || active === this.container) return false
+    return this.container.contains(active) && Boolean(active.closest('.sec-mount'))
+  }
+
+  /** 有没有**另一台**编辑宿主正拿着焦点（挂载区／查询视图的就属于这种） */
+  private nestedEditorActive(): boolean {
+    const active = document.activeElement as HTMLElement | null
+    if (!active || active === this.container) return false
+    return this.container.contains(active) && active.isContentEditable
+  }
+
+  /**
+   * 排一次「补做被推迟的重排」。
+   *
+   * 为什么不是「等 focusout 再补」：点挂载区抬头那颗按钮时，焦点从头到尾没离开过
+   * 本容器（只是从里层编辑器换到了按钮上）——`focusout` 那条路永远等不到，
+   * 正文就会一直停在旧形状。用计时器补：在里层**编辑器**里打字时它会一直往后推
+   * （那时重排会打断输入），一旦焦点离开编辑岛就补上。
+   */
+  private armFlush(): void {
+    if (this.pendingTimer !== null) window.clearTimeout(this.pendingTimer)
+    this.pendingTimer = window.setTimeout(() => {
+      this.pendingTimer = null
+      this.flushPendingReload()
+    }, 200)
+  }
+
+  setPointerDown(down: boolean): void {
+    this.pointerDown = down
+    /**
+     * 抬起后补做被推迟的装载/重排。
+     * ⚠️ **不能**用 `setTimeout(…, 0)`：`click` 不是在 mouseup 的同一个任务里派发的，
+     *    0 毫秒的定时器会抢在它前面把 DOM 换掉 ⇒ 那颗按钮的 `click` 又被弄丢了。
+     *    走 `armFlush`（200ms）：远在 `click` 之后，而在用户眼里仍是「立刻」。
+     */
+    if (!down && this.pendingReload) this.armFlush()
+  }
+
+  /** 补一次被推迟的结构重排（焦点离开里层视图、且指针已抬起之后才真的做） */
+  flushPendingReload(): void {
+    if (this.pointerDown) return
+    if (this.nestedEditorActive()) {
+      this.armFlush()
+      return
+    }
+    if (!this.pendingReload) return
+    this.pendingReload = false
+    this.reloadFromStore()
   }
 
   /* ------------------------------------------------------------ 渲染 */
@@ -526,17 +615,43 @@ export class BlockEditor {
    * 缺省布局下它是 `display: contents`（零几何影响），`row`/`grid` 才由 CSS 给它盒子。
    * ⚠️ 虚拟化的窗口切片可能从段中间开始：那一段的 `.sec` 没有段根行，
    *    `data-sec` 落空串——分割线与「点空白归段」的判据都依赖段根在场。
+   *
+   * **段尾空槽**（`.sec-mount`）：每段末尾留一个**空的** div，装配层把「块底的挂载区」
+   * 挂进去。为什么空着而不是由这里建实例：渲染是纯的，实例的生命周期要有人管
+   * （哪一段展开、哪个 tab 激活），那是装配层的知识。`view/` 只交代「这儿有个位置」。
+   * ⚠️ 只给 **`data-sec` 非空的段**发槽：窗口切片从段中间开始时那段没有段根行，
+   *    给它发槽就等于把挂载区挂到一个装配层认不出的段上（`data-sec` 是空串）。
+   * ⚠️ 最后一段只有在**它完整**时才发槽（`tailComplete`）：虚拟化窗口的下边界可能切在
+   *    段中间，那时这一段还在往下长，槽会被后一行挤到中间去。
    */
-  private renderRows(rows: readonly VisibleRow[]): void {
+  private renderRows(rows: readonly VisibleRow[], tailComplete = true): void {
     const gutters = gutterFieldsFor(
       rows.map((r) => r.block),
       this.store.blocks,
     )
     let sec: HTMLElement | null = null
+    /** 给上一段收尾：追加那个空槽（只给有段根的行段） */
+    const closeSec = (): void => {
+      if (!sec || sec.dataset.sec === '' || sec.dataset.sec === undefined) return
+      const slot = document.createElement('div')
+      slot.className = 'sec-mount'
+      // 它不是「可点空白建块」的地方：挂载区自己有点击语义，落到建块上就是静默多一个空块
+      slot.dataset.noEmptyCreate = '1'
+      /**
+       * ⚠️ **必须断开可编辑链**：`.sec-mount` 落在 `#editor`（一个 contenteditable 容器）里面，
+       * 而挂载区里是**另一个编辑器实例**。可编辑元素嵌在可编辑元素里时，Chrome 把焦点交给
+       * **外层的编辑宿主**（实测：对里层 `focus()` 之后 `activeElement` 仍是 `#editor`，
+       * 打出来的字一个都不进模型）⇒ 里层编辑器根本收不到键盘。
+       * ⇒ 槽本身不可编辑，里层那个 `contenteditable=true` 才成为独立的编辑岛。
+       */
+      slot.contentEditable = 'false'
+      sec.appendChild(slot)
+    }
     for (const r of rows) {
       if (r.depth === 0 || sec === null) {
         // 新的一段之前，先摆按列序应出现在这里的空天格子（复盘兜底；column 下 shells 恒空）
         if (r.depth === 0) {
+          closeSec()
           for (const col of this.shells) if (col.beforeRootId === r.block.id) this.container.appendChild(this.makeShellSec(col))
         }
         sec = document.createElement('div')
@@ -546,6 +661,7 @@ export class BlockEditor {
       }
       sec.appendChild(this.makeBlockEl(r, gutters.get(r.block.id)))
     }
+    if (tailComplete) closeSec()
     // 比所有已装段都更早的空天格子：追加在最后
     if (this.layout !== 'column') {
       for (const col of this.shells) if (col.beforeRootId === null) this.container.appendChild(this.makeShellSec(col))
@@ -741,6 +857,20 @@ export class BlockEditor {
    * ⚠️ 只在**块 id 变了**时才动 DOM：`selectionchange` 在打字时很密，逐个块删属性会掉帧。
    */
   private caretMarks = ''
+
+  /**
+   * 挂载区／查询视图这些**嵌在本视图里的**编辑器正在打字时，结构重排要推迟。
+   *
+   * 为什么：它们的 DOM 落在本视图的段里。一次 `renderAll` 会把那些节点搬一遍
+   * （`textContent=''` 之后重新 append）⇒ 里层编辑器当场失焦、光标没了，用户看到的是
+   * 「打一个字，光标跳走」（实测）。所以那时候只做「按 id 重画一行」，全量重排放到
+   * 焦点离开编辑岛之后补（见 `flushPendingReload`）。
+   */
+  private pendingReload = false
+  /** 推迟重排的补做计时器（见 `deferReload`） */
+  private pendingTimer: number | null = null
+  /** 指针是否按着（按下期间不重排，否则按钮的 `click` 会被搬走） */
+  private pointerDown = false
 
   private markCaret(): void {
     const id = this.sel?.aBlock ?? ''
@@ -2430,7 +2560,7 @@ export class BlockEditor {
       const headH = rows.slice(0, from).reduce((n, r) => n + visibleRowHeight(r.block), 0)
       this.container.appendChild(this.placeholder(from, 'head', headH))
     }
-    this.renderRows(rows.slice(from, to))
+    this.renderRows(rows.slice(from, to), to >= rows.length)
     if (to < rows.length) {
       const tailH = rows.slice(to).reduce((n, r) => n + visibleRowHeight(r.block), 0)
       this.container.appendChild(this.placeholder(rows.length - to, 'tail', tailH))
@@ -2641,6 +2771,9 @@ export class BlockEditor {
       clickEmptyArea: (y, x) => this.clickEmptyArea(y, x),
       onChange: () => this.emitChange('text'),
       onMounted: () => this.events.mounted?.(),
+      flushPendingReload: () => this.flushPendingReload(),
+      armFlush: () => this.armFlush(),
+      setPointerDown: (down) => this.setPointerDown(down),
     })
   }
 

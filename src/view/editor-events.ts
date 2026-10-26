@@ -184,6 +184,12 @@ export interface EditorBridge {
   onChange: () => void
   /** 重挂载窗口后 */
   onMounted: () => void
+  /** 焦点离开编辑岛之后补一次被推迟的结构重排（见 `reloadFromStore`） */
+  flushPendingReload: () => void
+  /** 排一次「补做」（200ms 后；按下/抬起的间隙里不重排） */
+  armFlush: () => void
+  /** 指针按下/抬起（按下期间不重排：重排会把 `click` 从按钮上弄丢，见绑定处） */
+  setPointerDown: (down: boolean) => void
 }
 
 /** 拖拽时的目标区域判定：竖直三分（上 1/4 before、下 1/4 after、中间 inside）*/
@@ -224,6 +230,29 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     target.addEventListener(type, fn as EventListener, opts)
     off.push(() => target.removeEventListener(type, fn as EventListener, opts))
   }
+
+  /**
+   * **指针按下的这一小段时间里不重排 DOM**。
+   *
+   * 为什么：`click` 的生灭要求按下与抬起落在同一个节点上。若两次之间本视图重排一次
+   * （很常见：点按钮时里层编辑器失焦 ⇒ 提交一次编辑 ⇒ 别的视图 `touch`），
+   * 按钮会被搬到别处，Chrome 就**不派发 `click`** —— 用户看到的是「这颗按钮点了没反应」。
+   * 实测：同一颗刷新按钮，真鼠标点击不触发、脚本 `.click()` 触发。
+   * ⇒ 按下期间只记「该重排了」，抬起后再补（`flushPendingReload`）。
+   */
+  on(document, 'pointerdown', () => br.setPointerDown(true), { capture: true })
+  on(
+    document,
+    'pointerup',
+    /**
+     * ⚠️ **不在这里立刻放开**：`pointerup` 之后紧跟着 `mouseup` 与 `click`（同一个任务）。
+     *    `mouseup` 那条路会提交一次编辑 ⇒ `store.touch` ⇒ 别的视图重排 DOM ⇒
+     *    正在被按的元素被换掉 ⇒ 浏览器**不派发 `click`**（实测：挂载区里的块标/文本点上去没反应）。
+     *    ⇒ 放开推到下一拍，让 `click` 先派发完。
+     */
+    () => window.setTimeout(() => br.setPointerDown(false), 0),
+    { capture: true },
+  )
 
   /* ── 选区 ───────────────────────────────────────────── */
   on(document, 'selectionchange', () => {
@@ -298,6 +327,19 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     br.commitEdit(from)
   })
 
+  /**
+   * **焦点离开编辑岛之后补上被推迟的结构重排**。
+   *
+   * 嵌在本视图里的挂载区／查询视图也是编辑器；它们拿着焦点时本视图不做全量重排
+   * （搬 DOM 会把它们的光标扔掉，见 `BlockEditor.reloadFromStore`）。等焦点真的离开，
+   * 那些推迟的重排在这里一次补上——否则「在挂载区里删掉一行」之后正文会停在旧形状。
+   */
+  on(c, 'focusout', () => {
+    // ⚠️ 排到 `armFlush`（200ms）而不是 `setTimeout(…, 0)`：焦点变化常常发生在**按下**那一瞬，
+    //    0 毫秒就补一次重排会把正在被按的按钮换掉 ⇒ `click` 不派发（实测）。
+    br.armFlush()
+  })
+
   /* ── 输入与组合（**不打断 IME**）────────────────────── */
   on(c, 'input', () => {
     /**
@@ -366,21 +408,21 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     const inBlock = path.some((n) => n instanceof HTMLElement && n.classList.contains('blk'))
     const inCrumb = path.some((n) => n instanceof HTMLElement && n.id === 'crumbs-trail')
     /**
-     * 反链 footer / 查询结果都有自己的编辑器实例，而它们的 DOM 落在正文的
-     * `blankArea`（`#scroll`）里面 ⇒ 点它们时事件也会冒到**正文**的这套监听上。
-     * 判据是「路径里有没有**本实例**的 container」：别的视图的点击交还给它自己那份绑定，
-     * **本实例**的点击（含它自己的块标/原子）必须继续往下走，否则 footer 点块标永远没反应。
+     * **别的视图**（挂载区 / 查询结果 / 反链）各有自己的编辑器实例，而它们的 DOM 可能落在
+     * 正文的 `blankArea`（`#scroll`）里面 ⇒ 点它们时事件也会冒到**正文**的这套监听上。
+     *
+     * 判据：路径里有没有某个「视图根」，且它**不是本实例所属的那一棵**
+     * （`nestedRoot.contains(br.container)`）。这样两种挂法都对：
+     *   · 视图挂在正文之外（右槽/旧 footer）⇒ 本实例的 container 不在它里面 ⇒ 交还；
+     *   · 视图嵌在正文的段里（块底的挂载区）⇒ 本实例的 container 也不在它里面 ⇒ 交还；
+     *   · 视图**自己**的点击 ⇒ container 在视图根内 ⇒ 继续往下走（否则它自己的块标永远没反应）。
      */
-    const inOwnEditor = path.includes(br.container)
-    const inNestedView = path.some(
-      (n) =>
+    const nestedRoot = path.find(
+      (n): n is HTMLElement =>
         n instanceof HTMLElement &&
-        (n.classList.contains('backlinks') ||
-          n.classList.contains('backlinks-editor') ||
-          n.classList.contains('queryview') ||
-          n.classList.contains('queryview-editor')),
+        (n.classList.contains('mount') || n.classList.contains('queryview')),
     )
-    if (!inOwnEditor && inNestedView) return
+    if (nestedRoot && !nestedRoot.contains(br.container)) return
 
     /**
      * 空天格子（复盘兜底）：整列都是纯 DOM，点任何地方＝「开始写这一天」。
