@@ -18,7 +18,17 @@ import { normalizeAlias } from './alias.ts'
 import { journalDate, isJournal } from './journal.ts'
 import { tagIdsOf } from './tags.ts'
 import type { Op } from './kb/types.ts'
-import { evaluateQuery, firstJournal, isExactRoleJournal, type QueryEnv, type QueryHit, type QueryNode, type QuerySpec } from './query.ts'
+import {
+  evaluateQuery,
+  firstJournal,
+  isExactRoleJournal,
+  resolveSelfSpec,
+  usesSelf,
+  type QueryEnv,
+  type QueryHit,
+  type QueryNode,
+  type QuerySpec,
+} from './query.ts'
 
 /**
  * 一份索引。五张表各答一类问题，**全是派生**：
@@ -453,15 +463,23 @@ export function queryByIndex(
   index: Index,
   forest: readonly Block[],
   spec: QuerySpec,
-  opts: { anchorId?: string } = {},
+  opts: { anchorId?: string; selfId?: string } = {},
 ): QueryHit[] {
+  /**
+   * `'$self'` 的解析与纯函数路径**共用同一份**（`resolveSelfSpec`），
+   * 连「没有宿主 ⇒ 空结果」这条也在同一个判据上：两条路径只许在「环境怎么来」上不同。
+   */
+  const host = opts.selfId !== undefined ? lookupBlock(index, opts.selfId) : undefined
+  if (!host && usesSelf(spec.where)) return []
+  const q = host ? resolveSelfSpec(spec, host, forest) : spec
   const env: QueryEnv = {
-    refs: refsByIndex(spec.where, index),
-    tags: tagsByIndex(spec.where, index),
-    journalDate: firstJournal(spec.where),
+    refs: refsByIndex(q.where, index),
+    tags: tagsByIndex(q.where, index),
+    journalDate: firstJournal(q.where),
+    selfId: opts.selfId,
   }
   let roots: readonly Block[] = forest
-  if (spec.scope !== 'all' && opts.anchorId) {
+  if (q.scope !== 'all' && opts.anchorId) {
     const anchor = index.blocks.get(opts.anchorId)
     if (anchor) roots = [anchor]
   }
@@ -475,12 +493,12 @@ export function queryByIndex(
    * 嵌进组合里的 role 是普通谓词，收窄会把其它分支的候选丢掉。
    * 与纯函数路径（走 `journalDays`）的等式由测试钉住。
    */
-  if (isExactRoleJournal(spec.where) && !env.journalDate && roots === forest) {
+  if (isExactRoleJournal(q.where) && !env.journalDate && roots === forest) {
     roots = [...index.journals.values()]
       .map((id) => index.blocks.get(id))
       .filter((b): b is Block => b !== undefined)
   }
-  return evaluateQuery(spec, roots, env)
+  return evaluateQuery(q, roots, env)
 }
 
 /** `ref` 条件的目标块集合 —— 查**入向边表**，不再扫 atoms */

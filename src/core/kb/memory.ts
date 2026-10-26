@@ -219,9 +219,9 @@ export class MemoryKb implements KbClient {
     return findInForest(this.store.blocks, id)?.annos ?? []
   }
 
-  query(spec: QuerySpec, opts: { scopeId?: string } = {}): QueryHit[] {
+  query(spec: QuerySpec, opts: { scopeId?: string; selfId?: string } = {}): QueryHit[] {
     // 走索引：ref/tag/journal 查表，判定与顺序与纯函数路径共用一份
-    return queryByIndex(this.store.index, this.store.blocks, spec, { anchorId: opts.scopeId })
+    return queryByIndex(this.store.index, this.store.blocks, spec, { anchorId: opts.scopeId, selfId: opts.selfId })
   }
 
   backlinksOf(id: string): readonly BackrefSource[] {

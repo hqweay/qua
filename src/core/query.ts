@@ -10,12 +10,13 @@
  * ⚠️ 接索引后本文件的签名不变：`evaluateQuery`（判定与顺序）由两条路径共用，
  *    索引路径见 `index-port.ts` 的 `queryByIndex`；`QuerySpec` 仍是那个 canonical JSON。
  */
-import { isJournalBlock, type Block } from './model.ts'
+import { isJournalBlock, primaryAliasOf, type Block } from './model.ts'
 import { plainText, refRunsOf } from './runs.ts'
 import { walkForest } from './walk.ts'
 import { findPath } from './tree.ts'
-import { findTagByName, tagMemberIds } from './tags.ts'
-import { findJournalDay, journalDays } from './journal.ts'
+import { findTagByName, tagIdsOf, tagMemberIds } from './tags.ts'
+import { findJournalDay, journalDate, journalDays } from './journal.ts'
+import { displayTextOf } from './alias.ts'
 import { todoOf } from './props.ts'
 
 /* ------------------------------------------------------------ 条件形状 */
@@ -122,6 +123,15 @@ export interface QueryRunInput {
   blocks: readonly Block[]
   /** 求值范围锚点：`scope: 'subtree'` 时只在这个块（含）之下找 */
   anchorId?: string
+  /**
+   * **宿主块**：条件里的 `'$self'` 按它解析，且结果里**一律不含它**。
+   *
+   * 两件事都随这个字段而来，因为它们是同一个位置的性质（「这一块下面挂的看板」）：
+   *   · `'$self'` 是相对条件 —— 离开宿主就没有指代，**不退回全库**（那是另一种查询）；
+   *   · 宿主自己一定满足「和我同标签」「正文提到我」这类条件，留在结果里只是噪声。
+   * 普通查询块不传它 ⇒ 条件里的 `$self` 解析不了 ⇒ 空结果（调用方给一行提示）。
+   */
+  selfId?: string
 }
 
 /** 一条结果：块 id ＋ 它在森林里的路径（D8：可编辑列表必须给上下文，否则不知道这条住哪） */
@@ -149,6 +159,13 @@ export interface QueryEnv {
   tags: ReadonlySet<string>
   /** 条件里第一个 `journal` 日期；没有 ⇒ `null`（此时它是普通组合，不当范围用） */
   journalDate: string | null
+  /**
+   * 宿主块 id：求值时**一律跳过它**（见 `QueryRunInput.selfId`）。
+   *
+   * 它不进 spec，因为「看不见自己」是这个**位置**的性质（挂在这一块下面），
+   * 不是条件的性质：写进条件就成了「同一份条件在挂载区内外求值不同」。
+   */
+  selfId?: string
 }
 
 /**
@@ -164,6 +181,7 @@ export function evaluateQuery(spec: QuerySpec, roots: readonly Block[], env: Que
   /** 收窄过的候选集（如 role:'journal' 走天表）里，同一块可能既当「后代」又当「候选根」被走到——一条结果只许出现一次 */
   const seen = new Set<string>()
   walk(roots, (b, ancestors) => {
+    if (env.selfId !== undefined && b.id === env.selfId) return
     if (env.journalDate && isJournalBlock(b)) return
     if (!matches(spec.where, b, env.refs, env.tags)) return
     if (spec.todo && (todoOf(b) ?? 'none') !== spec.todo) return
@@ -270,31 +288,116 @@ export function isExactRoleJournal(node: QueryNode): boolean {
  *
  * ⚠️ `journal` 条件的「这一天是哪一块」不在本文件定义 —— 走 `journal.ts` 的 `findJournalDay`。
  * ⚠️ 索引路径（`index-port.ts` 的 `queryByIndex`）与环境收集方式不同、判定与顺序共用本函数。
+ * ⚠️ `'$self'` 的解析只有一份（`resolveSelfSpec`），两条路径都在**求值第一行**调它。
  */
 export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
+  const host = input.selfId !== undefined ? findById(input.blocks, input.selfId) : undefined
+  // 含 `$self` 却没有宿主 ⇒ 空结果。**不退回全库**：那会把「看不懂的指代」变成一次大范围命中，
+  // 而用户看到的只是「结果不对」，没有任何线索指向条件。
+  if (!host && usesSelf(spec.where)) return []
+  const q = host ? resolveSelfSpec(spec, host, input.blocks) : spec
   const env: QueryEnv = {
-    refs: collectRefs(spec.where, input.blocks),
-    tags: collectTags(spec.where, input.blocks),
-    journalDate: firstJournal(spec.where),
+    refs: collectRefs(q.where, input.blocks),
+    tags: collectTags(q.where, input.blocks),
+    journalDate: firstJournal(q.where),
+    selfId: input.selfId,
   }
   /** 范围：`subtree` ⇒ 只收 anchor 之下（含 anchor 自己）；`all` ⇒ 整片森林 */
   let roots: readonly Block[] = input.blocks
-  const anchor = spec.scope !== 'all' && input.anchorId ? findById(input.blocks, input.anchorId) : undefined
+  const anchor = q.scope !== 'all' && input.anchorId ? findById(input.blocks, input.anchorId) : undefined
   if (anchor) roots = [anchor]
 
   /**
    * 成员条件的候选收窄：「库里有哪些天」的唯一口径（一天一个、先序第一个）就是候选集，
    * 不用全库逐块判定。仅限顶层就是这个原子本身、且没有范围条件与锚点时。
    */
-  if (isExactRoleJournal(spec.where) && !env.journalDate && !anchor) roots = journalDays(input.blocks)
+  if (isExactRoleJournal(q.where) && !env.journalDate && !anchor) roots = journalDays(input.blocks)
 
   /** `journal` 条件把范围再收一层：只取那天块里的**子块**（日期行是只读标题，不该出现在结果里） */
   if (env.journalDate) {
     const day = findJournalDay(input.blocks, env.journalDate)
     roots = day ? day.children : []
   }
-  return evaluateQuery(spec, roots, env)
+  return evaluateQuery(q, roots, env)
 }
+
+/* ------------------------------------------------------------ `$self`：相对条件 */
+
+/**
+ * 条件里有没有 `'$self'` 这个**字符串哨兵**。
+ *
+ * 为什么是字符串而不是新原子：`canonicalSpec` 逐条列了每一种条件、只存字面量——
+ * 加一个 `{self:true}` 原子就要两边一起加，而它表达的东西本来就能用**已有的值位**说清
+ * （「指向我」「我这天」「我的标签」「我的可读文本」）。哨兵只是这些值位的一个特殊取值。
+ */
+export function usesSelf(node: QueryNode): boolean {
+  if ('all' in node) return node.all.some(usesSelf)
+  if ('any' in node) return node.any.some(usesSelf)
+  if ('not' in node) return usesSelf(node.not)
+  if ('ref' in node) return node.ref === SELF
+  if ('tag' in node) return node.tag === SELF
+  if ('text' in node) return node.text === SELF
+  if ('journal' in node) return node.journal === SELF
+  return false
+}
+
+/** 哨兵字面量：条件里写它 ＝ 「这一块自己」的这一侧面 */
+export const SELF = '$self'
+
+/**
+ * 把条件里的 `'$self'` 解析成**宿主的这一侧面**。纯函数，不改入参。
+ *
+ * | 条件 | 解析成 |
+ * |---|---|
+ * | `{ref:'$self'}` | 指向宿主 id |
+ * | `{journal:'$self'}` | 宿主的 `_date` |
+ * | `{tag:'$self'}` | 宿主带的那几个标签（`any` 并集） |
+ * | `{text:'$self'}` | 宿主的可读文本（`displayTextOf`） |
+ *
+ * ⚠️ **解析只写这一处**：纯函数路径与索引路径在求值第一行调它。写第二份就会得到
+ *    「同一个 tab 在两条路径下结果不同」，而那是不报错的。
+ * ⚠️ 解析出**空值**（宿主的 `_date`／可读文本／标签都为空）⇒ 换成一条**永不命中**的条件，
+ *    而不是把空串当成值去比 —— `{text:''}` 会命中所有块。
+ * ⚠️ `{tag}` 要的是**名字**（`findTagByName` 的口径），而 `_tags` 存的是 id ⇒ 这里做一次
+ *    「id → 主名」翻译；`resolveSelfSpec` 因此需要森林（标签块得先找得到）。
+ */
+export function resolveSelfSpec(spec: QuerySpec, host: Block, forest: readonly Block[]): QuerySpec {
+  const tagNames = tagIdsOf(host)
+    .map((id) => findById(forest, id))
+    .map((tag) => (tag ? primaryAliasOf(tag) : ''))
+    .filter((name) => name.trim() !== '')
+  const node = (n: QueryNode): QueryNode => {
+    if ('all' in n) return { all: n.all.map(node) }
+    if ('any' in n) return { any: n.any.map(node) }
+    if ('not' in n) return { not: node(n.not) }
+    if ('ref' in n) return { ref: n.ref === SELF ? host.id : n.ref }
+    if ('journal' in n) {
+      if (n.journal !== SELF) return { journal: n.journal }
+      const date = journalDate(host)
+      return date === '' ? NEVER : { journal: date }
+    }
+    if ('tag' in n) {
+      if (n.tag !== SELF) return { tag: n.tag }
+      if (tagNames.length === 0) return NEVER
+      return { any: tagNames.map((tag) => ({ tag })) }
+    }
+    if ('text' in n) {
+      if (n.text !== SELF) return { text: n.text }
+      const text = displayTextOf(host)
+      return text === '' ? NEVER : { text }
+    }
+    return n
+  }
+  return { ...spec, where: node(spec.where) }
+}
+
+/**
+ * 「永不命中」的条件：`{any: []}` 的判定是 `[].some(...)` ＝ `false`。
+ *
+ * ⚠️ 不用 `{all: []}`：那是**恒真**（`[].every(...)`），正好相反。
+ */
+const NEVER: QueryNode = { any: [] }
+
 
 /** 条件里所有 `ref` 的目标（用于一次性收集 refs，避免每个块都扫一遍内容） */
 function collectRefs(node: QueryNode, forest: readonly Block[]): Set<string> {

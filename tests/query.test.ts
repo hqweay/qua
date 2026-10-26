@@ -23,6 +23,8 @@ import {
   refreshSpec,
   resolveFrozen,
   runQuery,
+  resolveSelfSpec,
+  usesSelf,
   specChanged,
   queryByIndex,
   rebuild,
@@ -32,6 +34,7 @@ import {
 } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { plainText, textRuns } from '../src/core/runs.ts'
+import { journalDateLabel } from '../src/core/journal.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({
   id,
@@ -249,8 +252,8 @@ function kbOf(blocks: Block[]): { kb: MemoryKb; store: BlockStore } {
 }
 
 /** 两种求值路径的**等式**：同一份库，纯函数与索引必须给出同一批命中（同一顺序） */
-function assertSameHits(spec: QuerySpec, blocks: Block[], opts: { anchorId?: string } = {}): void {
-  const fromForest = runQuery(spec, { blocks, anchorId: opts.anchorId })
+function assertSameHits(spec: QuerySpec, blocks: Block[], opts: { anchorId?: string; selfId?: string } = {}): void {
+  const fromForest = runQuery(spec, { blocks, anchorId: opts.anchorId, selfId: opts.selfId })
   const fromIndex = queryByIndex(rebuild(blocks), blocks, spec, opts)
   assert.deepEqual(fromIndex, fromForest)
 }
@@ -451,4 +454,116 @@ test('canonicalSpec：`exists` 要能存活下来（漏了这一支 = 存进 _qu
   // 两种形态原样带走：不补默认值（补了 `eq` 与 `exists` 的两种写法就不再等价）
   const eqSpec: QuerySpec = { where: { prop: { id: '_kind', eq: 'date' } } }
   assert.equal(JSON.stringify(canonicalSpec(eqSpec)), '{"where":{"prop":{"id":"_kind","eq":"date"}}}')
+})
+
+/* ------------------------------------------------------------ `$self`（相对条件） */
+
+/**
+ * 一份带「宿主侧面」的森林：一天的日记（`_date`）＋ 两个带同标签的块 ＋ 一个引用那天的块
+ * ＋ 一个正文里写 `#<日期名>` 的块（行内标签是**露面**，不是指向边）。
+ *
+ * 这几块的差别正是「提及」要分清的三种东西：指向我（算）、同标签（另算）、
+ * 正文里写着同一个字符串（`{text}` 算，但 `#名` 那种露面不算指向）。
+ */
+function selfFixture() {
+  const tag = mkTagBlock('项目')
+  const j = b('j1', '', {
+    props: { _date: '2026-10-26' },
+    children: [b('j1a', '今天的记录'), b('j1b', '今天的第二行')],
+  })
+  const host = b('h', '宿主块', { props: { _tags: [tag.id] } })
+  const same = b('s1', '同标签的另一块', { props: { _tags: [tag.id] } })
+  // 指向日记块：正文里一枚 flavor 缺省的引用 run
+  const pointing = b('r1', '引用那一天')
+  pointing.content.push({ id: 'r1a', t: 'ref', to: 'j1', label: '那天' })
+  // 正文里写一个 `#` 行内标签，指的那天和宿主同一天：它是露面（flavor '#'），**不是**指向边
+  const inline = b('r2', '写在正文里的 ')
+  inline.content.push({ id: 'r2a', t: 'ref', to: 'j1', label: journalDateLabel('2026-10-26'), flavor: '#' })
+  // 正文里**真的写着**宿主的可读文本（`{text}` 吃的是文本段，不是原子标签）
+  const literal = b('r3', `今天记了一笔：${journalDateLabel('2026-10-26')}`)
+  return { blocks: [j, host, same, pointing, inline, literal, tag], host, j, same, pointing, inline, literal }
+}
+
+test('U3 同一个带 $self 的 spec：纯路径与索引路径结果相等', () => {
+  const { blocks, host, j } = selfFixture()
+  assertSameHits({ where: { all: [{ text: '$self' }, { not: { ref: '$self' } }] }, scope: 'all' }, blocks, {
+    selfId: j.id,
+  })
+  assertSameHits({ where: { tag: '$self' }, scope: 'all' }, blocks, { selfId: host.id })
+  assertSameHits({ where: { journal: '$self' }, scope: 'all' }, blocks, { selfId: j.id })
+  assertSameHits({ where: { ref: '$self' }, scope: 'all' }, blocks, { selfId: j.id })
+})
+
+test('U4 selfId 缺省 ＋ spec 含 $self ⇒ 空结果（不退回全库）', () => {
+  const { blocks } = selfFixture()
+  // 若「解析不了」退化成「条件被忽略」，这里会返回整库
+  assert.deepEqual(runQuery({ where: { ref: '$self' }, scope: 'all' }, { blocks }), [])
+  assert.deepEqual(runQuery({ where: { text: '$self' }, scope: 'all' }, { blocks }), [])
+  assert.deepEqual(runQuery({ where: { journal: '$self' }, scope: 'all' }, { blocks }), [])
+  // 不含 `$self` 的条件不受影响：没有宿主也照常求值
+  assert.equal(runQuery({ where: { tag: '项目' }, scope: 'all' }, { blocks }).length, 2)
+})
+
+test('U5 {tag:$self} 命中同标签的块，但**不含宿主自己**', () => {
+  const { blocks, host, same } = selfFixture()
+  const hits = runQuery({ where: { tag: '$self' }, scope: 'all' }, { blocks, selfId: host.id })
+  assert.deepEqual(hits.map((h) => h.blockId), [same.id], '同类含宿主就只是噪声：它是位置的性质')
+})
+
+test('U6 {journal:$self} 等价于写死那一天的日期', () => {
+  const { blocks, j } = selfFixture()
+  const viaSelf = runQuery({ where: { journal: '$self' }, scope: 'all' }, { blocks, selfId: j.id })
+  const literal = runQuery({ where: { journal: '2026-10-26' }, scope: 'all' }, { blocks })
+  assert.deepEqual(viaSelf, literal)
+  assert.deepEqual(viaSelf.map((h) => h.blockId), ['j1a', 'j1b'])
+})
+
+/**
+ * 提及 ＝「正文里有我这串字」且「没有指向我的边」。
+ *
+ * 边界有两条，都钉在这儿：
+ *   ① **行内 `#名` 是露面，不是指向边**（`flavor:'#'` 不进 `incoming`）⇒ `not {ref}` 不排除它；
+ *   ② `{text}` 吃的是**文本段**，原子（引用／`#名`）上的 label 不进 `plainText` ⇒
+ *      只有「真的把这串字写在正文里」的块才算提及。
+ * 于是两栏不重叠：引用我的块在「引用」里，写着我的名字的块在「提及」里。
+ */
+test('U6b 提及的边界：`#名` 是露面不是边（不被 not-ref 排除）；真引用我的块不算提及', () => {
+  const { blocks, j, pointing, inline, literal } = selfFixture()
+  // ① 只否指向边：行内 `#` 的那块还在，真引用我的那块被排除
+  const notRef = runQuery({ where: { not: { ref: '$self' } }, scope: 'all' }, { blocks, selfId: j.id }).map((h) => h.blockId)
+  assert.equal(notRef.includes(inline.id), true, '行内 `#名` 不产生指向边 ⇒ 不被 not-ref 排除')
+  assert.equal(notRef.includes(pointing.id), false, '真引用我的块被排除（它在引用那一栏）')
+
+  // ② 提及＝文本里有 ＋ 没指向我
+  const mentions = { where: { all: [{ text: '$self' }, { not: { ref: '$self' } }] }, scope: 'all' as const }
+  const hits = runQuery(mentions, { blocks, selfId: j.id })
+  assert.deepEqual(hits.map((h) => h.blockId), [literal.id])
+  assert.equal(hits.map((h) => h.blockId).includes(inline.id), false, '`#名` 的 label 不在文本段里，不构成文本提及')
+})
+test('U6c 宿主的可读文本为空 ⇒ 提及是空集（空串不能当值去比）', () => {
+  const { blocks } = selfFixture()
+  const bare = b('bare', '   ')
+  const withBare = [...blocks, bare]
+  assert.deepEqual(runQuery({ where: { text: '$self' }, scope: 'all' }, { blocks: withBare, selfId: bare.id }), [])
+})
+
+test('U6d 宿主没有日期 ⇒ {journal:$self} 是空集（不是「全部日记」）', () => {
+  const { blocks, host } = selfFixture()
+  assert.deepEqual(runQuery({ where: { journal: '$self' }, scope: 'all' }, { blocks, selfId: host.id }), [])
+})
+
+test('resolveSelfSpec：不改入参，且嵌套组合里的 $self 也解析', () => {
+  const { blocks, host } = selfFixture()
+  const spec: QuerySpec = { where: { all: [{ any: [{ tag: '$self' }, { ref: '$self' }] }, { not: { text: '无' } }] } }
+  const before = JSON.stringify(spec)
+  const out = resolveSelfSpec(spec, host, blocks)
+  assert.equal(JSON.stringify(spec), before, '解析是纯函数：原 spec 一个字节不动')
+  assert.equal(usesSelf(out.where), false)
+})
+
+test('宿主自己不进结果：selfId 设了但条件里没有 $self，也一律跳过宿主', () => {
+  const { blocks, host } = selfFixture()
+  // 「带项目标签的块」按条件本该含宿主；挂载区的位置性质把它剔掉
+  const hits = runQuery({ where: { tag: '项目' }, scope: 'all' }, { blocks, selfId: host.id })
+  assert.deepEqual(hits.map((h) => h.blockId), ['s1'])
 })
