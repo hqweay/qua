@@ -65,6 +65,9 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.props/clear-value', title: t('cmd.props.clear-value'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' } } },
   { name: 'core.props/create-def', title: t('cmd.props.create-def'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, label: { type: 'string' }, kind: { type: 'string' }, target: { type: 'string', description: 'own = this block\u2019s own value slot; declared = declared to members' } } },
   { name: 'core.props/add-field', title: t('cmd.props.add-field'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' }, target: { type: 'string', description: 'own = this block\u2019s own value slot; declared = declared to members' } } },
+  /* ---- 块底的挂载区（tab 是一格数据，不是块） ---- */
+  { name: 'core.mount/add', title: t('cmd.mount.add'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { hostId: { type: 'string' }, label: { type: 'string' }, spec: {} }, keywords: ['mount', 'query', 'tab', 'panel'] },
+  { name: 'core.mount/remove', title: t('cmd.mount.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { hostId: { type: 'string' }, index: { type: 'integer' } }, keywords: ['mount', 'query', 'tab', 'remove'] },
   { name: 'core.props/undeclare', title: t('cmd.props.undeclare'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' } } },
 
   /* ---- 历史 ---- */

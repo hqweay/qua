@@ -48,10 +48,8 @@ export type PagesDeps = {
   getApp: () => { toast: (text: string, kind?: 'info' | 'warn' | 'ok') => void }
   /** 面板分片晚于本节装配：装载边界的重画经 getter 现取 */
   getPanels: () => {
-    renderBacklinks: () => void
-    renderQueryView: () => void
+    renderMounts: () => void
     renderProperties: () => void
-    renderTagPanel: () => void
   }
   getWs: () => Workspace
   getEd: () => BlockEditor
@@ -241,14 +239,13 @@ export function setupPages(deps: PagesDeps) {
       // 装载边界：空 journal 天在这里补首子块（经事务、一条 op）——
       // 所有「打开」命令共用的唯一归一落点，`rootsFor`／命令层只选择、不写库
       materializeEditableRoots(roots)
-      const { renderBacklinks, renderQueryView, renderProperties, renderTagPanel } = deps.getPanels()
+      const { renderMounts, renderProperties } = deps.getPanels()
       deps.setEd(mainEd)
       // 正文视图的折叠态是**设备**那份；取当前视图持有的那一份（`device.folded` 只在落盘时同步，可能落后一步）
       mainEd.loadPage({ roots, folded: mainEd.doc.folded })
-      renderBacklinks()
-      renderQueryView()
+      // 装载之后才建挂载区：它按**段根**建实例，而段是 `loadPage` 造出来的
+      renderMounts()
       renderProperties()
-      renderTagPanel()
     },
     flush: () => {
       syncSections()

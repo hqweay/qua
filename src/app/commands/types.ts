@@ -160,6 +160,16 @@ export interface DevDeps {
   compositionSeq: () => string[]
 }
 
+/** 挂载区的宿主能力：写一格 `_mounts`（必要时先物化日记那份共享配置块） */
+export interface MountsDeps {
+  kb: KbClient
+  /** 一次属性写入（撤销快照、落盘、重画都在装配层） */
+  write: (blockId: string, mutate: () => void) => void
+  /** 开一笔事务：给「物化配置块 ＋ 挂上第一栏」这种复合动作用（同一笔才不留半截） */
+  run: TxRun
+  toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
+}
+
 /** 属性写入的宿主能力（装配层负责 undo 快照、落盘、重画；这里只做模型判断） */
 export interface PropsDeps {
   kb: KbClient

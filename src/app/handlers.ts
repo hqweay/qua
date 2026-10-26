@@ -16,6 +16,7 @@ import type { Handler } from '../core/ports.ts'
 import { STRUCT_HANDLERS } from './handlers/block.ts'
 import { DEV_HANDLERS } from './handlers/dev.ts'
 import { JOURNAL_HANDLERS } from './handlers/journal.ts'
+import { MOUNT_HANDLERS } from './handlers/mount.ts'
 import { PAGE_HANDLERS } from './handlers/page.ts'
 import { PROPS_HANDLERS } from './handlers/props.ts'
 import { TAGS_HANDLERS } from './handlers/tags.ts'
@@ -26,6 +27,7 @@ import { VIEW_HANDLERS } from './handlers/view.ts'
 export const HANDLERS: Record<string, Handler> = {
   ...STRUCT_HANDLERS,
   ...PROPS_HANDLERS,
+  ...MOUNT_HANDLERS,
   ...TAGS_HANDLERS,
   ...PAGE_HANDLERS,
   ...JOURNAL_HANDLERS,

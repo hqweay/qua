@@ -65,26 +65,12 @@ export interface Chrome {
   propertiesAddEl: HTMLButtonElement
   /** 右槽的堆叠容器：检视卡在装配时挂进去（它必须先在文档里，重画才认得它） */
   dockRightStackEl: HTMLElement
-  /** 标签页 footer（属于 / 包含 / 成员） */
-  tagPanelEl: HTMLElement
-  tagPanelTitleEl: HTMLElement
-  tagPanelPageEl: HTMLButtonElement
-  tagPanelMembersTitleEl: HTMLElement
-  tagPanelMembersCountEl: HTMLElement
-  tagPanelMembersEmptyEl: HTMLElement
-  tagPanelMembersEditorEl: HTMLElement
-  /** 反链 view block 的容器（footer； 下一层） */
-  backlinksEl: HTMLElement
-  backlinksEditorEl: HTMLElement
-  backlinksTitleEl: HTMLElement
-  backlinksCountEl: HTMLElement
-  backlinksRefreshEl: HTMLButtonElement
-  queryViewEl: HTMLElement
-  queryViewEditorEl: HTMLElement
-  queryViewTitleEl: HTMLElement
-  queryViewCountEl: HTMLElement
-  queryViewStaleEl: HTMLElement
-  queryViewRefreshEl: HTMLButtonElement
+  /**
+   * ⚠️ **块底的三段（标签页 footer／查询视图／反链 footer）不在这里了**：
+   *    它们收成了「每段末尾一个挂载区」，DOM 由组件按段自建（`ui/mount-area.ts`、
+   *    `ui/query-view.ts` 的 `createQueryViewEls`）。静态模板里没有它们的节点，
+   *    这一层也就取不到 —— 那是「一个位置只能属于一段」的直接后果。
+   */
   /** 空态提示（编辑器为空时的引导文案） */
   renderEmptyHint: (roots: Block[]) => void
   /** 启动级持久告警（数据只读 / 保存失败）；传 null 收起 */
@@ -105,29 +91,11 @@ export function createChrome(onCrumb?: (blockId: string, shiftKey: boolean) => v
   const editorEl = must('editor')
   const emptyHintEl = must('empty-hint')
   const noticeEl = must('boot-notice')
-  const tagPanelEl = must('tagpanel')
-  const tagPanelTitleEl = must('tagpanel-title')
-  const tagPanelPageEl = must<HTMLButtonElement>('tagpanel-page')
-  const tagPanelMembersTitleEl = must('tagpanel-members-title')
-  const tagPanelMembersCountEl = must('tagpanel-members-count')
-  const tagPanelMembersEmptyEl = must('tagpanel-members-empty')
-  const tagPanelMembersEditorEl = must('tagpanel-members-editor')
   const inspectCardEl = must('inspect-card')
   const inspectCardTitleEl = must('inspect-card-title')
   const propertiesBodyEl = must('properties-body')
   const propertiesAddEl = must<HTMLButtonElement>('properties-add')
   const dockRightStackEl = must('dock-right-stack')
-  const backlinksEl = must('backlinks')
-  const backlinksEditorEl = must('backlinks-editor')
-  const backlinksTitleEl = must('backlinks-title')
-  const backlinksCountEl = must('backlinks-count')
-  const backlinksRefreshEl = must<HTMLButtonElement>('backlinks-refresh')
-  const queryViewEl = must('queryview')
-  const queryViewEditorEl = must('queryview-editor')
-  const queryViewTitleEl = must('queryview-title')
-  const queryViewCountEl = must('queryview-count')
-  const queryViewStaleEl = must('queryview-stale')
-  const queryViewRefreshEl = must<HTMLButtonElement>('queryview-refresh')
 
   function showNotice(text: string | null): void {
     noticeEl.textContent = text ?? ''
@@ -213,23 +181,5 @@ export function createChrome(onCrumb?: (blockId: string, shiftKey: boolean) => v
     propertiesBodyEl,
     propertiesAddEl,
     dockRightStackEl,
-    tagPanelEl,
-    tagPanelTitleEl,
-    tagPanelPageEl,
-    tagPanelMembersTitleEl,
-    tagPanelMembersCountEl,
-    tagPanelMembersEmptyEl,
-    tagPanelMembersEditorEl,
-    backlinksEl,
-    backlinksEditorEl,
-    backlinksTitleEl,
-    backlinksCountEl,
-    backlinksRefreshEl,
-    queryViewEl,
-    queryViewEditorEl,
-    queryViewTitleEl,
-    queryViewCountEl,
-    queryViewStaleEl,
-    queryViewRefreshEl,
   }
 }

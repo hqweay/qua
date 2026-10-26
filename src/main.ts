@@ -34,7 +34,8 @@ import { renderAliasEditor } from './ui/alias-editor.ts'
 import { renderFieldsEditor } from './ui/fields-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type ObjFieldDeps, type PanelDeps } from './ui/panels.ts'
 import type { RefClickHit, RefClickMods } from './view/editor-events.ts'
-import { devCommands, journalCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, zoomCommands } from './app/commands-impl.ts'
+import { devCommands, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, zoomCommands } from './app/commands-impl.ts'
+import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupDocks } from './app/wiring/docks.ts'
 import { setupPanels } from './app/wiring/panels.ts'
@@ -768,6 +769,23 @@ function applyBlockType(blockId: string, typeId: string): boolean {
 }
 
 /**
+ * 命令层的事务入口：装配层补撤销快照（零 op 不记），并把**改到的那几行**当场重画。
+ *
+ * 为什么在装配层：撤销快照与「重画哪一行」都需要 `ed`／`blocks`／`repaintBlock`，
+ * 而命令层只声明「发生了什么」。
+ */
+const runTx: TxRun = (fn) => {
+  const before = blocks.snap(ed.sel)
+  const r = txRun(fn, mainEd)
+  if (r.ops.length > 0) blocks.record(before, 'other', Date.now())
+  for (const id of new Set(r.changes.filter((c) => c.kind === 'blocks').map((c) => c.id))) repaintBlock(id)
+  scheduleProperties()
+  scheduleSave()
+  scheduleBadge()
+  return r
+}
+
+/**
  * `App` 门面：**四个工厂拼装**（页／日记／视图／演示），加上浮层与提示这几件装配层专有的能力。
  *
  * ⚠️ 这里仍然是**唯一**拼装点：本文件持有 `ws`／`ed`／`registry`，工厂只拿到「能做什么」。
@@ -782,21 +800,16 @@ const app: App = {
   ...journalCommands(pageDeps),
   ...zoomCommands(pageDeps),
   ...moveCommands(pageDeps),
+  ...mountCommands({
+    kb,
+    write: writeProps,
+    run: runTx,
+    toast: (text, kind) => app.toast(text, kind),
+  }),
   ...propsCommands({
     kb,
     write: writeProps,
-    // 命令层开事务（新建定义＋声明是同一笔）：装配层补撤销快照，零 op 不记；
-    // 声明改到的那一行要当场重画（gutter 字段住在一行自己的 DOM 里）
-    run: (fn) => {
-      const before = blocks.snap(ed.sel)
-      const r = txRun(fn, mainEd)
-      if (r.ops.length > 0) blocks.record(before, 'other', Date.now())
-      for (const id of new Set(r.changes.filter((c) => c.kind === 'blocks').map((c) => c.id))) repaintBlock(id)
-      scheduleProperties()
-      scheduleSave()
-      scheduleBadge()
-      return r
-    },
+    run: runTx,
     toast: (text, kind) => app.toast(text, kind),
   }),
   ...belongsToCommands({
@@ -964,8 +977,7 @@ const app: App = {
       //    原来固定 `roots[0]`，于是载入假数据后光标停在日期行、第一行看着「没有名字」。
       const caret = firstEditableRoot(roots[0])
       mainEd.loadPage({ roots, folded: device.folded }, { blockId: caret?.id ?? '', off: 0 })
-      renderBacklinks()
-      renderQueryView()
+      renderMounts()
       chrome.renderEmptyHint(activeBlock().children)
       saveNow()
       scheduleBadge()
@@ -1150,7 +1162,7 @@ ed.events = {
 
 let panels: ReturnType<typeof setupPanels>
 let diag: ReturnType<typeof setupDiagnostics>
-const { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, scheduleProperties, pickRefValue } = setupPanels({
+const { renderMounts, renderProperties, scheduleProperties, pickRefValue } = setupPanels({
   blocks,
   kb,
   app,
@@ -1173,10 +1185,8 @@ const { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, sche
   openInDock: (blockId) => openWindow('right', blockId),
 })
 panels = {
-  renderBacklinks,
+  renderMounts,
   renderProperties,
-  renderTagPanel,
-  renderQueryView,
   scheduleProperties,
   pickRefValue,
 }
@@ -1243,7 +1253,12 @@ registry = new Registry(
 )
 
 // 让「块菜单」这类命令也能从面板/键盘走到
-ed.events.mounted = () => scheduleBadge()
+ed.events.mounted = () => {
+  scheduleBadge()
+  // 段是每次渲染新建的：挂载区按段根建实例，重挂之后要把实例搬进新的空槽
+  // （虚拟化滚出窗口再滚回来也走这一条，所以实例必须复用、不能重建）
+  renderMounts()
+}
 
 /** `index.html` 里只剩空壳：用户可见文案一律在启动时从字典灌进去 */
 function paintStaticCopy(): void {

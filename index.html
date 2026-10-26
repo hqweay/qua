@@ -65,36 +65,13 @@
             <!-- 面包屑：顶层时 hidden（不占高度）；点一格＝聚焦到该祖先（＝退回） -->
             <div id="crumbs-trail" hidden></div>
             <div id="editor" spellcheck="false"></div>
-            <!-- 标签页 footer：成员（可原地编辑）。「属于」在属性区（任何块都能配） -->
-            <section class="tagpanel" id="tagpanel" data-tagpanel hidden>
-              <div class="tagpanel-head">
-                <span class="tagpanel-title" id="tagpanel-title"></span>
-                <button class="tagpanel-page" id="tagpanel-page" type="button"></button>
-                <span class="tagpanel-count" id="tagpanel-members-count"></span>
-              </div>
-              <div class="tagpanel-members-title" id="tagpanel-members-title"></div>
-              <p class="props-empty" id="tagpanel-members-empty" hidden></p>
-              <div class="tagpanel-members-editor" id="tagpanel-members-editor" spellcheck="false"></div>
-            </section>
+            <!--
+              块底的挂载区（引用／同类／提及 ＋ 用户配的查询）**不在这里**：
+              它是**每一段**末尾的 chrome —— 编辑器在段尾留一个空槽（`.sec-mount`），
+              装配层按段根把实例挂进去。静态模板放一份就只能属于某一段。
+              「点开查询块看结果」同理：那一段的槽里会先有一份查询视图。
+            -->
             <div id="empty-hint" hidden></div>
-            <!-- 查询视图（–D6）：紧跟查询块的一段外源渲染；结果集冻结、按钮刷新 -->
-            <section class="queryview" id="queryview" data-queryview hidden>
-              <div class="queryview-head">
-                <span class="queryview-title" id="queryview-title"></span>
-                <span class="queryview-count" id="queryview-count"></span>
-                <span class="queryview-stale" id="queryview-stale" hidden></span>
-                <button class="queryview-refresh" id="queryview-refresh" type="button"></button>
-              </div>
-              <div class="queryview-editor" id="queryview-editor" spellcheck="false"></div>
-            </section>
-            <section class="backlinks" id="backlinks" data-backlinks hidden>
-              <div class="backlinks-head">
-                <span class="backlinks-title" id="backlinks-title"></span>
-                <span class="backlinks-count" id="backlinks-count"></span>
-                <button class="backlinks-refresh" id="backlinks-refresh" type="button"></button>
-              </div>
-              <div class="backlinks-editor" id="backlinks-editor" spellcheck="false"></div>
-            </section>
           </div>
         </div>
       </main>

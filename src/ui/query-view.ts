@@ -1,8 +1,9 @@
 /**
  * **查询视图块**。
  *
- * 它和 `backlinks.ts` 是同一类东西：不是「查询面板组件」，而是一个 **view block**——
+ * 它不是「查询面板组件」，而是一个 **view block**——
  * source = `_query` 条件，view = outline，结果是一列**真实块**（活引用）。
+ * placement：被**打开的那一个查询块**自己那一段的段尾槽里（与块底的挂载区同一个槽，在它上面）。
  *
  * 三条口径与代码的对应：
  *
@@ -15,7 +16,16 @@
  * ⚠️ 它不是「可编辑视图 / 实时视图」二选一：它**可编辑**，稳定性靠冻结而不是靠只读。
  * ⚠️ 视图状态（滚动、折叠展开态）不进库；滚动位置由外层编辑器自己保。
  */
-import { displayNameOf, resolveFrozen, readResult, refreshSpec, readSpec, type Block, type BlockStore } from '../core/index.ts'
+import {
+  displayNameOf,
+  resolveFrozen,
+  readResult,
+  refreshSpec,
+  readSpec,
+  usesSelf,
+  type Block,
+  type BlockStore,
+} from '../core/index.ts'
 import type { RefClickHit, RefClickMods } from '../view/editor-events.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
@@ -51,6 +61,40 @@ export interface QueryViewEls {
   refresh: HTMLButtonElement
   /** 「结果可能已过期」标记（D6 的兜底，见 待定-日记流 #1） */
   stale?: HTMLElement
+}
+
+/**
+ * 自建 DOM。
+ *
+ * 为什么不再从静态模板里 `getElementById` 取：查询视图现在只出现在**某一段**里
+ * （被打开的那个查询块自己的段），一个静态节点没法同时属于「页脚」和「段内」。
+ * 组件自己造自己那几格，装配层只负责把它放进那一段。
+ */
+export function createQueryViewEls(): QueryViewEls {
+  const root = document.createElement('section')
+  root.className = 'queryview'
+  root.hidden = true
+
+  const head = document.createElement('div')
+  head.className = 'queryview-head'
+  const title = document.createElement('span')
+  title.className = 'queryview-title'
+  const count = document.createElement('span')
+  count.className = 'queryview-count'
+  const stale = document.createElement('span')
+  stale.className = 'queryview-stale'
+  stale.hidden = true
+  const refresh = document.createElement('button')
+  refresh.type = 'button'
+  refresh.className = 'queryview-refresh'
+  head.append(title, count, stale, refresh)
+
+  const editor = document.createElement('div')
+  editor.className = 'queryview-editor'
+  editor.spellcheck = false
+
+  root.append(head, editor)
+  return { root, editor, title, count, refresh, stale }
 }
 
 export class QueryView {
@@ -107,6 +151,11 @@ export class QueryView {
       if (source === this.editor) return
       if (ids && ids.length > 0) this.noteTouched(ids)
     })
+  }
+
+  /** 查询视图的根（装配层把它放进某一段；查询视图没有静态模板节点了） */
+  get root(): HTMLElement {
+    return this.els.root
   }
 
   /** 首次装载（或查询块换了）：**冻结**一次结果，然后渲染 */
@@ -192,11 +241,16 @@ export class QueryView {
     this.els.title.textContent = name === '' ? t('ui.query.untitled') : name
     this.els.count.textContent = t('ui.query.count', { count: rows.length })
     if (rows.length === 0) {
-      // 空结果是**状态**不是错误：保留抬头（含刷新按钮），正文给一句实话
+      // 空结果是**状态**不是错误：保留抬头（含刷新按钮），正文给一句实话。
+      // ⚠️ 「条件里有 `$self` 但没有宿主」是**另一种空**：不解释一句，用户会以为条件写错了。
+      //    这里的空态文案就是那条解释的落点（单独打开一个相对查询时看到它）。
+      const spec = readSpec(b)
+      const why = spec && usesSelf(spec.where) ? t('ui.mount.needsHost') : t('ui.query.empty')
       this.els.editor.replaceChildren()
       // 空结果也保留本视图的折叠态：它记的是「哪些行收着」，不是「这次有几行」
       this.editor.loadPage({ roots: [], folded: this.editor.doc.folded })
       this.els.editor.dataset.empty = '1'
+      this.els.editor.dataset.emptyText = why
       return
     }
     delete this.els.editor.dataset.empty
@@ -208,6 +262,7 @@ export class QueryView {
     this.els.root.hidden = false
     this.els.editor.replaceChildren()
     this.els.editor.dataset.empty = '1'
+    this.els.editor.dataset.emptyText = text
     this.els.title.textContent = text
     this.els.count.textContent = ''
   }

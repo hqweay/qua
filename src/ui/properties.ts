@@ -504,7 +504,7 @@ export class PropertiesPanel {
     if (dangling.gone.length > 0) {
       const prune = document.createElement('button')
       prune.type = 'button'
-      prune.className = 'tagpanel-action ghost'
+      prune.className = 'ghost'
       prune.dataset.pruneBelongs = '1'
       prune.textContent = t('ui.belongs.prune', { count: dangling.gone.length })
       prune.addEventListener('click', () => this.deps.pruneBelongs(target))

@@ -1,12 +1,15 @@
 /**
- * 面板装配：反链 footer、属性区、标签页、查询视图——四段「跟着当前对象走」的视图。
+ * 面板装配：属性区 ＋ **块底的挂载区**（每段一个）。
+ *
+ * 两者判据不同，别合并：
+ *   · 属性区回答「这一屏是谁」（单根才画）；
+ *   · 挂载区回答「这一块下面能展开哪些查询」（单根 ＋ 日记流的每一段）。
  * 组件实例由这一节持有；装配入口只拿重画入口。
  */
 import {
   buildAdjacency,
   danglingOf,
   displayNameOf,
-  findInForest,
   findByAlias,
   flatten,
   hasList,
@@ -14,8 +17,9 @@ import {
   isQueryBlock,
   journalDate,
   journalDateLabel,
-  memberBlocks,
   parentsOf,
+  readSpec,
+  todayISO,
   type Block,
 } from '../../core/index.ts'
 import { t } from '../../core/msg.ts'
@@ -25,11 +29,10 @@ import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { Tx } from '../../core/kb/types.ts'
 import type { BlockStore } from '../../core/store.ts'
 import type { Workspace } from '../../core/workspace.ts'
-import { BacklinksView } from '../../ui/backlinks.ts'
 import type { Layers, Row } from '../../ui/layers.ts'
+import { MountArea } from '../../ui/mount-area.ts'
 import { PropertiesPanel } from '../../ui/properties.ts'
-import { QueryView } from '../../ui/query-view.ts'
-import { TagPanel } from '../../ui/tag-panel.ts'
+import { createQueryViewEls, QueryView } from '../../ui/query-view.ts'
 import type { Chrome } from '../../ui/chrome.ts'
 import type { BlockEditor } from '../../view/editor.ts'
 
@@ -70,47 +73,9 @@ export function setupPanels(deps: PanelsDeps) {
    * 树里的位置不变。一屏之内要问好几遍的（属性区那一行）共用一次。
    */
   const adj = () => buildAdjacency(deps.getWs().blocks)
-  const activeBlock = deps.activeBlock
 
-  /**
-   * **反链 view block**（footer 版， 下一层）：挂的是共享 store 的活块，
-   * 所以这里可以原地编辑；右槽以后挂同一个 view。
-   */
-  let backlinksView: BacklinksView | null = null
-  backlinksView = new BacklinksView(
-    {
-      root: chrome.backlinksEl,
-      editor: chrome.backlinksEditorEl,
-      title: chrome.backlinksTitleEl,
-      count: chrome.backlinksCountEl,
-      refresh: chrome.backlinksRefreshEl,
-    },
-    {
-      store: blocks,
-      write: (fn) => run(fn, backlinksView?.editor),
-      kb,
-      targetId: () => deps.getWs().activeId,
-      onChange: () => {
-        syncSections()
-        scheduleSave()
-        scheduleBadge()
-      },
-      onFocus: () => {
-        if (backlinksView) deps.setEd(backlinksView.editor)
-        // 不重画属性区：反链 footer 里的光标不属于「台面上那个块」，面板主体不随它变
-      },
-      onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'backlinks'),
-      onOpenInDock: (blockId) => deps.openInDock(blockId),
-      onRefClick: (ref, mods, el) => refClick(ref, mods, el),
-    },
-  )
-
-  /** 页面/日记/zoom 装载后重查 footer 反链（target = activeId） */
-  function renderBacklinks(): void {
-    backlinksView?.render()
-  }
-
-  renderBacklinks()
+  /* 挂载区（每段一个）：装配在文件末尾的 renderMounts 里 —— 它要按段根建实例，
+     而属性区只认「这一屏是谁」，两者判据不同，所以不挤在同一段。 */
 
   /* ------------------------------------------------------------ 属性区 */
 
@@ -328,118 +293,182 @@ export function setupPanels(deps: PanelsDeps) {
   blocks.subscribe(() => scheduleProperties())
   renderProperties()
 
-  /* ------------------------------------------------------------ 标签页 footer（属于 / 包含 / 成员） */
+  /* ------------------------------------------------------------ 挂载区（每段一个） */
 
-  const tagPanel: TagPanel = new TagPanel(
-    {
-      root: chrome.tagPanelEl,
-      title: chrome.tagPanelTitleEl,
-      pageToggle: chrome.tagPanelPageEl,
-      membersTitle: chrome.tagPanelMembersTitleEl,
-      membersCount: chrome.tagPanelMembersCountEl,
-      membersEmpty: chrome.tagPanelMembersEmptyEl,
-      membersEditor: chrome.tagPanelMembersEditorEl,
-    },
-    {
-      store: blocks,
-      // `tagPanel` 在这一行之前就已声明（`const`），闭包调用时它已经就绪
-      write: (fn) => run(fn, tagPanel.editor),
-      kb,
-      tag: () => {
-        const b = activeBlock()
-        return hasList(b, 'tag') ? b : undefined
-      },
-      members: (t) => memberBlocks(t.id, deps.getWs().blocks),
-      isPage: (t) => hasList(t, 'page'),
-      togglePage: (tagId) => {
-        const b = findInForest(deps.getWs().blocks, tagId)
-        if (!b) return
-        void deps.getRegistry().invoke(hasList(b, 'page') ? 'core.block/unpage' : 'core.block/as-page', { blockId: tagId }, 'tagpanel')
-      },
-      shortId: (id) => shortId(id),
-      onChange: () => {
-        scheduleSave()
-        scheduleBadge()
-        scheduleProperties()
-      },
-      onFocus: () => {
-        deps.setEd(tagPanel.editor)
-        // 面板主体是中心槽的当前对象，与这个编辑器里的光标无关
-      },
-      onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'tagpanel'),
-      onOpenInDock: (blockId) => deps.openInDock(blockId),
-      onRefClick: (ref, mods, el) => refClick(ref, mods, el),
-    },
-  )
+  /**
+   * **一条 tab 条 ＋ 一个 body**，挂在**每一段**末尾那个空槽里（`.sec-mount`）。
+   *
+   * 三件放在这里而不是组件里的知识：
+   *   · **哪一段有挂载区**：单根（页 / zoom / 单日）＋ 日记流的每一段；
+   *     N>1 的非日记（查询结果列表、多页并排）**没有**——那些屏上没有「一个对象」可言。
+   *   · **实例按段根缓存**：段根不变就复用（切换/滚动不重建编辑器，撤销栈与选区都还在）。
+   *   · **查询块的结果视图**：被打开的那个查询块自己就是段根 ⇒ 那一段的槽里先放它的结果，
+   *     再放挂载区。页面里「底部单列一条查询结果」没有了（那是旧形状）。
+   *
+   * 日记流里**只有今天展开**：更早的天是一行摘要（`MountArea` 初始 `expanded`）。
+   */
+  type MountInstance = { area: MountArea; query: QueryView | null; queryHostId: string }
+  const mountInstances = new Map<string, MountInstance>()
 
-  function renderTagPanel(): void {
-    tagPanel.render()
+  /** 这一段该不该默认展开：日记只展开今天（「今天 = 你要写的那一天」） */
+  const expandedFor = (host: Block): boolean => (isJournal(host) ? journalDate(host) === todayISO() : true)
+
+  function createMount(host: Block): MountInstance {
+    const hostId = host.id
+    const area = new MountArea(
+      {
+        store: blocks,
+        write: (fn) => run(fn, edOfMount(hostId)),
+        kb,
+        host: () => blocks.find(hostId),
+        onChange: () => {
+          syncSections()
+          scheduleSave()
+          scheduleBadge()
+        },
+        onFocus: () => {
+          const inst = mountInstances.get(hostId)
+          if (inst?.area.blockEditor) deps.setEd(inst.area.blockEditor)
+        },
+        onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'mount'),
+        onOpenInDock: (blockId) => deps.openInDock(blockId),
+        onRefClick: (ref, mods, el) => refClick(ref, mods, el),
+        onAddTab: (id) => openMountPicker(id),
+        onRemoveTab: (id, index) => {
+          void deps.getRegistry().invoke('core.mount/remove', { hostId: id, index }, 'mount')
+          // 摘完当场重排：栏是模型里的一格，DOM 不会自己知道
+          renderMounts()
+        },
+        expanded: expandedFor(host),
+      },
+    )
+    /**
+     * 查询块的结果视图：只有**段根是查询块**时才建（点开它才看结果）。
+     * 冻结/刷新由 `QueryView` 自己管，这里只负责「换了一个查询块就重新冻结」。
+     */
+    const query = isQueryBlock(host)
+      ? new QueryView(createQueryViewEls(), {
+          store: blocks,
+          write: (fn) => run(fn, edOfMount(hostId)),
+          kb,
+          block: () => blocks.find(hostId) ?? host,
+          onChange: () => {
+            syncSections()
+            scheduleSave()
+            scheduleBadge()
+          },
+          onFocus: () => {
+            const inst = mountInstances.get(hostId)
+            if (inst?.query) deps.setEd(inst.query.editor)
+          },
+          onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'query'),
+          onOpenInDock: (blockId) => deps.openInDock(blockId),
+          onRefClick: (ref, mods, el) => refClick(ref, mods, el),
+          toast: (text, kind) => app.toast(text, kind),
+        })
+      : null
+    return { area, query, queryHostId: query ? hostId : '' }
   }
-  renderTagPanel()
+
+  /** 挂载区里那个编辑器（写事务的 source）。焦点切过去之后 `ed` 就是它 */
+  const edOfMount = (hostId: string) => mountInstances.get(hostId)?.area.blockEditor ?? undefined
 
   /**
-   * **查询视图**：挂在「当前正文里那个查询块」下面。
+   * 「＋」：从**库里已保存的查询块**挑一个，把它的条件复制成一栏。
    *
-   * 口径：**查询块＝数据侧**，不吃结果——
-   *   · 查询块自己只是大纲里的一行（正文＝它的名字，`_query` 里是条件）；
-   *   · 结果是**外源渲染**，跟在它后面、**不 re-parent** ⇒ 刷新只改结果；
-   *   · 正文里没有查询块 ⇒ 整段隐藏（不留死抬头）。
+   * 为什么是复制条件而不是把查询块挂上来：挂载项不是库对象（没有身份、不能被引用），
+   * 而查询块是。让一格数据指着一个块，就带回孤儿与悬空 id 的老问题。
+   * 代价（登记在文档里）：条件在挂上那一刻定格，之后改查询块不会同步。
    */
-  let queryView: QueryView | null = null
-  /** 当前正文里那个查询块（没有 ⇒ `null`，视图整段隐藏） */
-  let queryBlock: Block | null = null
-  queryView = new QueryView(
-    {
-      root: chrome.queryViewEl,
-      editor: chrome.queryViewEditorEl,
-      title: chrome.queryViewTitleEl,
-      count: chrome.queryViewCountEl,
-      refresh: chrome.queryViewRefreshEl,
-      stale: chrome.queryViewStaleEl,
-    },
-    {
-      store: blocks,
-      write: (fn) => run(fn, queryView?.editor),
-      kb,
-      block: () => queryBlock ?? activeBlock(),
-      onChange: () => {
-        syncSections()
-        scheduleSave()
-        scheduleBadge()
-      },
-      onFocus: () => {
-        if (queryView) deps.setEd(queryView.editor)
-        // 面板主体是中心槽的当前对象，与这个编辑器里的光标无关
-      },
-      onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'query'),
-      onOpenInDock: (blockId) => deps.openInDock(blockId),
-      onRefClick: (ref, mods, el) => refClick(ref, mods, el),
-      toast: (text, kind) => app.toast(text, kind),
-    },
-  )
-
-  /**
-   * 找出**当前这一段**里的查询块并装载。
-   *
-   * ⚠️ 只认 `doc.roots` 那一层（及它的直接子块）：查询块是「这张页面里的一个块」，
-   *    不是全库搜索结果——否则打开任意页都会突然冒出一个别处的查询视图。
-   * ⚠️ 视图实例复用：换查询块时 `mount()` 重新冻结，不重建编辑器（否则 undo/选区全丢）。
-   */
-  function renderQueryView(): void {
-    if (!queryView) return
-    const inRoots = mainEd.doc.roots.flatMap((r) => [r, ...r.children])
-    const q = inRoots.find((b) => isQueryBlock(b))
-    if (!q) {
-      queryBlock = null
-      chrome.queryViewEl.hidden = true
+  function openMountPicker(hostId: string): void {
+    const rows: Row[] = []
+    for (const b of flatten({ roots: [...kb.roots()] })) {
+      const spec = readSpec(b)
+      if (!spec) continue
+      rows.push({
+        id: `query/${b.id}`,
+        label: displayNameOf(b).trim() || t('ui.query.untitled'),
+        hint: t('ui.mount.addHint'),
+        icon: 'lucide:list-filter',
+      })
+    }
+    const host = blocks.find(hostId)
+    if (!host) return
+    if (rows.length === 0) {
+      app.toast(t('ui.mount.addEmpty'), 'info')
       return
     }
-    const changed = queryBlock?.id !== q.id
-    queryBlock = q
-    chrome.queryViewEl.hidden = false
-    if (changed) queryView.mount()
-    else queryView.render()
+    layers.openMenu({
+      rows,
+      anchor: deps.getEd().caretRect(),
+      title: t('ui.mount.add'),
+      searchable: true,
+      focusSearch: true,
+      emptyText: t('ui.mount.addEmpty'),
+      onPick: (row) => {
+        const id = String(row.id).slice('query/'.length)
+        const b = blocks.find(id)
+        const spec = b ? readSpec(b) : null
+        if (!b || !spec) return
+        void deps.getRegistry().invoke(
+          'core.mount/add',
+          { hostId, label: displayNameOf(b).trim() || t('ui.query.untitled'), spec },
+          'mount',
+        )
+        // 当场看见新栏：store 订阅在「焦点还在本视图里」时会跳过（同 × 那条理由）
+        mountInstances.get(hostId)?.area.render()
+      },
+    })
   }
 
-  return { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, scheduleProperties, pickRefValue }
+  /**
+   * 按编辑器里**有段根的那些段**建/收实例，并把实例的 DOM 放进那一段的空槽。
+   *
+   * 只在「装载 / 换库 / 段集合变了」时调：DOM 节点自己带着编辑器与会话状态，
+   * 这里做的是**搬**（appendChild 到新段），不是重建。
+   */
+  function renderMounts(): void {
+    const roots = mainEd.doc.roots
+    // N>1 且不是日记流 ⇒ 没有「一个对象」可挂（查询结果列表、多页并排）
+    const allow = roots.length <= 1 || roots.every((r) => isJournal(r))
+    const seen = new Set<string>()
+    if (allow) {
+      for (const sec of mainEd.container.querySelectorAll<HTMLElement>('.sec')) {
+        const hostId = sec.dataset.sec ?? ''
+        if (hostId === '') continue
+        const slot = sec.querySelector<HTMLElement>(':scope > .sec-mount')
+        if (!slot) continue
+        const host = blocks.find(hostId)
+        if (!host) continue
+        seen.add(hostId)
+        let inst = mountInstances.get(hostId)
+        if (!inst) {
+          inst = createMount(host)
+          mountInstances.set(hostId, inst)
+          // 新实例才装载一次（之后由它自己的 store 订阅跟进）
+          if (inst.query) {
+            inst.queryHostId = hostId
+            inst.query.mount()
+          }
+        }
+        if (inst.query && inst.query.root.parentElement !== slot) slot.appendChild(inst.query.root)
+        if (inst.area.root.parentElement !== slot) slot.appendChild(inst.area.root)
+      }
+    }
+    /**
+     * 收掉「这一屏已经不该有它」的实例。判据是**它还是不是这次的段根**，不是「这一轮有没有见到」：
+     * 虚拟化的窗口之外那些段这一轮确实没见到，但它们是同一屏的其余部分——滚回去还要用同一个
+     * 实例（否则每滚一下 tab 的激活项与撤销栈都重置一次）。
+     */
+    for (const [id, inst] of mountInstances) {
+      if (roots.some((r) => r.id === id)) continue
+      inst.query?.root.remove()
+      inst.area.root.remove()
+      mountInstances.delete(id)
+    }
+  }
+
+  renderMounts()
+
+  return { renderMounts, renderProperties, scheduleProperties, pickRefValue }
 }

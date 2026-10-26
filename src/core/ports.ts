@@ -17,6 +17,7 @@
 import type { BlockEditor } from '../view/editor.ts'
 import type { BindingKind } from './bindings.ts'
 import type { CtxKeys } from './index.ts'
+import type { QuerySpec } from './query.ts'
 import type { SecLayout } from './feed.ts'
 
 export type Capability = 'read' | 'write' | 'admin' | 'plugin'
@@ -154,6 +155,16 @@ export interface App {
   openAliasEditor(blockId: string, autofocus?: boolean): void
   /** 打开字段声明（页/标签能声明哪些属性）——纯 UI，落在装配层 */
   openFieldsEditor(blockId: string): void
+  /**
+   * **给这一块的挂载区加一栏查询**（写宿主上的 `_mounts`，不建块）。
+   *
+   * `label` 是这一栏的名字（同一个宿主下必须唯一）。日记宿主写在**共享配置块**上，
+   * 没有就当场物化——那是那个内部块唯一的诞生入口。
+   * @returns 写进去了才 `true`（过去的日记天、重名、形状不合法都返回 `false`）
+   */
+  addMountTab(hostId: string, label: string, spec: QuerySpec): boolean
+  /** 摘掉一栏用户 tab（`index` 是用户栏的序）。**不删任何块**——因为压根没有块 */
+  removeMountTab(hostId: string, index: number): boolean
   /**
    * 写块的类型（`_type`）。
    *
