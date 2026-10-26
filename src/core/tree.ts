@@ -188,6 +188,11 @@ export function hasDescendant(doc: Doc, ancestorId: string, maybeChildId: string
  *    留着就是一个潜伏值 —— 副本此刻没有 `tag` 列表，用不上它；一旦副本被加进
  *    标签列表，它就会生效，而它指向的父标签关系是原件的。
  *
+ * ⚠️ `_mounts` 同样剔除：挂载区是**原件的看板配置**（挂哪几栏查询、端口叫什么）。
+ *    副本拖着原件配好的看板，就是一个潜伏值——它此刻看着无关，一旦改动就会
+ *    和原件共用同一份「我以为只属于那一块」的配置。
+ *    注意它**不让块变成身份块**：`hasIdentity` 不认它，副本该是内容块还是内容块。
+ *
  * ⚠️ 代价：复制一个页，副本**失去 `page` 列表与全部名字**，于是它不再出现在页列表里，
  *    只是一棵长得像页的普通子树；复制一个标签同理，副本不再被 `#` 补全找到。
  *    这是有意的：身份不可复制，副本只能是内容。
@@ -201,6 +206,7 @@ const IDENTITY_PROPS: readonly string[] = [
   '_kind',
   '_query',
   '_queryResult',
+  '_mounts',
 ]
 
 function contentProps(props: BlockProps): BlockProps | undefined {

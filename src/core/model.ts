@@ -96,6 +96,13 @@ export type SystemPropId =
    * 现在这一格是**归属**：块上有哪些标签，与「标签能声明哪些字段」是两件事。
    */
   | '_tags'
+  /**
+   * 这一块的**挂载区配置**：`{ label, spec }[]`（见 `core/mount.ts`）。
+   *
+   * 它不是内容：tab 上那一栏是「这一块下面挂的看板」，不是子块。所以它既不在 `children` 里，
+   * 也不让块变成身份块（不进 `hasIdentity`）——它只是一格结构属性，与 `_tags` 同形。
+   */
+  | '_mounts'
   // 删除时间戳（有它 ＝ 这一块被删了，见 `DELETED_AT_PROP`）
   | typeof DELETED_AT_PROP
 

@@ -8,6 +8,7 @@
  */
 import {
   declareField,
+  mkJournalMountsBlock,
   mkPropDef,
   mkTagBlock,
   shiftISO,
@@ -16,6 +17,7 @@ import {
   UI_POSITION_PROP,
   type Block,
 } from '../index.ts'
+import { t } from '../msg.ts'
 import type { Workspace } from '../workspace.ts'
 import { forest, longParagraph, LONG_EN, mkJournal, mkPage, resolveRefs, resolveSeedTags, SEED_AT } from './build.ts'
 import type { SeedBlock } from './inline.ts'
@@ -198,6 +200,21 @@ export function seedWorkspace(): Workspace {
   // 核心词汇（定义块 ＋ 标签块）先在森林顶层就位：`ensureTag` 要能找到 `任务` 并复用，
   // 否则种子会建出第二个同名标签；`[[ ]]` 的解析也要在这之后（标签同样占地址）。
   blocks.push(...coreVocabulary())
+  /**
+   * 日记的挂载区共享配置：一个**没有列表露面**的内部块（只按 id 找）。
+   *
+   * 种子里给它挂一栏演示查询，是为了让首次装载真的走一次「用户 tab」那条分支——
+   * 一份只在内置三栏上测过的实现，会在「有用户栏」时才暴露排序、空态、摘除的问题。
+   * 条件带 `$self`：它在今天求值时指今天，所以这一栏的名字与内容不必写死日期。
+   */
+  const todayTodos = t('ui.mount.demo.todayTodos')
+  const mountsBlock = mkJournalMountsBlock([
+    { label: todayTodos, spec: { where: { all: [{ journal: '$self' }, { todo: 'todo' }] } } },
+  ])
+  // 它也是**种子内容**（会进库、会导出）⇒ 与其它种子同一个固定时刻，理由同 `coreVocabulary`
+  mountsBlock.created = SEED_AT
+  mountsBlock.modified = SEED_AT
+  blocks.push(mountsBlock)
   // 标签归属先落成 id（新标签块会在这时进森林），再解析 `[[ ]]`
   resolveSeedTags(blocks, built.flatMap((b) => b.pendingTags))
   resolveRefs(blocks, built)

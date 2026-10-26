@@ -11,6 +11,7 @@
  */
 import { ALIASES_PROP, DISPLAY_PROP, LISTS_PROP, type Block, type Doc, type FoldState } from '../model.ts'
 import { LEGACY_ALIAS_PROP, normalizeAlias } from '../alias.ts'
+import { isMountsValue, MOUNTS_PROP } from '../mount.ts'
 import { isAnno, isRun } from '../runs.ts'
 
 /**
@@ -63,8 +64,13 @@ import { isAnno, isRun } from '../runs.ts'
  * v19 → v20：`Block` 新增**必填**的 `created`／`modified`（墙钟毫秒）。旧库的块没有
  *            出生时刻，而它补不回来——补一个假值会让「创建时间」从第一天就说谎
  *            ⇒ 作废重 seed，**不写**迁移分支。
+ * v20 → v21：归属边的存储名从 `_parentTags` 换成 `_belongsTo`（端点放开、第一个是命名父）。
+ *            旧键新代码不读 ⇒ 作废重 seed，不写迁移。
+ * v21 → v22：新增系统属性 `_mounts`（块底挂载查询面板的配置）。
+ *            旧库没有这一格读出来就是「没有自定义 tab」，本不必作废；加一版是为了让
+ *            **写路径**只面对一种形状（与 v11→v12 加 `trash` 同一条理由）。
  */
-export const WORKSPACE_VERSION = 21
+export const WORKSPACE_VERSION = 22
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {
@@ -137,6 +143,12 @@ function isBlock(x: unknown): x is Block {
 
   const display = b.props[DISPLAY_PROP]
   if (display !== undefined && display !== 'alias' && display !== 'text') return false
+  /**
+   * 挂载区配置：形状判据与**读路径**共用一份（`core/mount.ts` 的 `isMountsValue`）——
+   * 读路径那边坏了只当没有，落盘这边坏了判 corrupt，但「什么算坏」只能有一个答案。
+   */
+  const mounts = b.props[MOUNTS_PROP]
+  if (mounts !== undefined && !isMountsValue(mounts)) return false
   // 不变量：在列表里 ⇒ 至少有一个名字（不能出现在页/标签列表里却没有任何地址）。
   // 这里只拦「有列表、完全没有 _aliases」；别名数组本身的空/空串已在上面判 corrupt。
   if (Array.isArray(lists) && lists.length > 0 && !Array.isArray(aliases)) return false
