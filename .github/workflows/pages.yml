@@ -52,6 +52,8 @@ jobs:
       #    外人也就点不到「清空 localStorage」这类入口 —— 这正是对外演示站该有的样子。
       - run: pnpm build
 
+      - run: node scripts/fill-arch-diagram.mjs --in public/arch.html --out dist/arch.html
+
       # 读 Pages 站点配置（含自定义域），并把发布所需的信息交给后续步骤
       - uses: actions/configure-pages@v5
 
