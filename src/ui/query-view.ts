@@ -59,7 +59,7 @@ export interface QueryViewEls {
   title: HTMLElement
   count: HTMLElement
   refresh: HTMLButtonElement
-  /** 「结果可能已过期」标记（D6 的兜底，见 待定-日记流 #1） */
+  /** 「结果可能已过期」标记：只提示、不改列表（自动移除会让人正在读的那行凭空消失） */
   stale?: HTMLElement
 }
 
