@@ -133,8 +133,11 @@ export const MSG = {
      否则小库的下拉会变成空的，用户分不清「库里没有」与「本块已经有」 */
   'ui.props.alreadyOn': '已在块上',
   'ui.props.declaredOn': '已声明',
-  /* 归 gutter 的属性不在这一面板编辑，但要让用户知道它在哪儿 */
-  'ui.props.gutterOnly': '在块左侧编辑：{names}',
+  /* 声明给成员的属性（只有页/标签有这一段）：清单 ＋ 解除，不给值控件 */
+  'ui.props.declaredTitle': '声明给成员',
+  'ui.props.declaredHint': '成员的属性格',
+  'ui.props.declaredEmpty': '还没有声明属性',
+  'ui.props.undeclare': '解除声明（成员已有的值保留）',
   'ui.props.newOption': '＋ 新建属性…',
   'ui.props.newLabel': '属性名',
   'ui.props.create': '新建',

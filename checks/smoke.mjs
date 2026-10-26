@@ -3921,18 +3921,26 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   assert(schemaTop, '定义是森林顶层的 schema 块（不是标签的子块）')
 
   /**
-   * 属性区只做**值的编辑**，不再画「声明了哪些字段」。
+   * 属性区**也画声明段**（只有页/标签有）。
    *
-   * 那份清单曾经在这里也画一份，与块菜单「字段声明…」共用同一个 `declaredFieldsOf`
-   * 却是两套实现，而且这里只能解除、不能添加 —— 半个入口比没有入口更糟，
-   * 也违反「一个值不开两个编辑面」。声明的唯一入口是菜单。
+   * 它曾经被撤掉过（理由：与块菜单「字段声明…」是同一份东西的两套实现，且这里只能解除）。
+   * 撤掉之后在页/标签上点「添加属性」**没有任何可见结果** —— 那次点击写的是
+   * `_fieldDefs`（给成员用），页自己没有值，块属性那一段一行都不会多。
+   * ⇒ 现在这一段只做**清单 ＋ 解除**，不加第二个「新建/添加」入口（那仍在抬头）。
    */
   const declared = await page.evaluate(() => ({
     visible: !document.getElementById('inspect-card').hidden,
-    declaredRows: document.querySelectorAll('.props-declared').length,
+    declaredRows: [...document.querySelectorAll('.prop-declared [data-declared-prop-id]')].map(
+      (x) => x.dataset.declaredPropId,
+    ),
+    addEntry: document.querySelectorAll('.prop-declared input, .prop-declared button.props-use').length,
   }))
   assert(declared.visible, '标签页应显示属性区')
-  assert(declared.declaredRows === 0, `属性区不该再画声明段（唯一入口在菜单）：${JSON.stringify(declared)}`)
+  assert(
+    declared.declaredRows.includes(own[0].id),
+    `属性区的声明段应列出刚声明的「状态」：${JSON.stringify(declared)}`,
+  )
+  assert(declared.addEntry === 0, `声明段里不该再有添加/新建控件（那一个入口在抬头）：${JSON.stringify(declared)}`)
 
   // ③ 成员块上写值：一块一槽 props[propId]
   //
@@ -3949,20 +3957,22 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
 
   // ④ 打开成员块：属性区平铺一行、来源写「来自 #任务」
   //
-  // ⚠️ 「任务状态」归 gutter（`_uiPosition: 'block-left'`）⇒ **不进右侧面板**：
-  //    同一个值不能有两个编辑面。所以这里看得到的仍只有「状态」那一行。
+  // ⚠️ 「任务状态」归 gutter（`_uiPosition: 'block-left'`），但**卡里同样可编辑**：
+  //    两面读同一份 `fieldRows`、写同一条命令、写完两边都重画 —— 所以它也是这里的一行。
+  //    断言一律按 propId 取，不按下标（行序随声明顺序变，不是契约）。
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), hostId)
   await page.waitForTimeout(120)
-  const panel = await page.evaluate(() => {
-    const row = document.querySelector(`.prop-row[data-prop-id]`)
+  const panel = await page.evaluate((propId) => {
+    const row = document.querySelector(`.prop-row[data-prop-id="${propId}"]`)
     return {
       label: row?.querySelector('.prop-name')?.textContent ?? '',
       source: row?.querySelector('.prop-source')?.textContent ?? '',
       value: row?.querySelector('.prop-input')?.value ?? '',
-      rows: document.querySelectorAll('.prop-row[data-prop-id]').length,
+      rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
     }
-  })
-  assert(panel.rows === 1, `同一 propId 只显示一行，且归 gutter 的不在面板里：${JSON.stringify(panel)}`)
+  }, own[0].id)
+  assert(panel.rows.length === 2, `这一块有两条属性（「状态」＋ #任务 声明的「任务状态」）：${JSON.stringify(panel)}`)
+  assert(new Set(panel.rows).size === panel.rows.length, `同一 propId 只显示一行：${JSON.stringify(panel)}`)
   assert(panel.label === '状态' && panel.value === '已完成', JSON.stringify(panel))
   assert(panel.source.includes('#任务'), `来源应标出标签：${JSON.stringify(panel)}`)
 
@@ -4404,7 +4414,7 @@ await check(
 )
 
 await check(
-  'T62 已在块上的属性留在 picker 里（灰掉而不是消失），归 gutter 的属性在面板里说清它在哪',
+  'T62 已在块上的属性留在 picker 里（灰掉而不是消失）；归 gutter 的属性在卡里**同样可编辑**，两面共写一份',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
 
@@ -4420,13 +4430,44 @@ await check(
     assert(target.blockId !== '', '种子里应有打了 #任务 的块')
     await page.waitForTimeout(150)
 
-    const panel = await page.evaluate((propId) => ({
-      rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
-      note: [...document.querySelectorAll('.props-empty')].map((x) => x.textContent),
-    }), target.defId)
-    assert(!panel.rows.includes(target.defId), `归 gutter 的属性不在这里出第二个编辑面：${JSON.stringify(panel)}`)
-    assert(panel.note.some((x) => x.includes('任务状态')), `面板要说明它在块左侧：${JSON.stringify(panel)}`)
+    /**
+     * **卡片与 gutter 是同一个值的两个编辑面，不是互斥的两处**。
+     *
+     * 曾经的规则是「一个值不开两个编辑面」⇒ 卡片只写一句「在块左侧编辑」。
+     * 那一句是死路：任务状态最高频，用户在卡里看到它却改不了，得先想起来「左侧还有个小方框」。
+     * 撤掉互斥的前提是两面**读同一份行派生、写同一条命令**（见 `ui/properties.ts` 的注释），
+     * 所以这里同时钉两件事：卡里有这一行可编辑、且改卡里那一格 ⇒ 左侧方框跟着变。
+     */
+    const panel = await page.evaluate((propId) => {
+      const row = document.querySelector(`.prop-row[data-prop-id="${propId}"]`)
+      return {
+        rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
+        hasBox: Boolean(row?.querySelector('input.prop-check')),
+        note: [...document.querySelectorAll('.props-empty')].map((x) => x.textContent),
+      }
+    }, target.defId)
+    assert(panel.rows.includes(target.defId), `归 gutter 的属性也要在卡里出现（否则卡里改不了它）：${JSON.stringify(panel)}`)
+    assert(panel.hasBox === true, `卡里那一行要有自己的勾选控件：${JSON.stringify(panel)}`)
     assert(!panel.note.some((x) => x.includes('还没有块属性')), `已有属性时不能同时说「还没有块属性」：${JSON.stringify(panel)}`)
+
+    // 卡里勾一下 ⇒ 模型与左侧方框都要变（两个编辑面共写一份，不能一边改另一边不动）
+    await page.evaluate((propId) => {
+      const box = document.querySelector(`.prop-row[data-prop-id="${propId}"] input.prop-check`)
+      box.checked = true
+      box.dispatchEvent(new Event('change', { bubbles: true }))
+    }, target.defId)
+    await page.waitForTimeout(250)
+    const afterTick = await page.evaluate((id) => {
+      const blk = document.querySelector(`.blk[data-block-id="${id}"]`)
+      const model = window.__qua.__editor.store.find(id)
+      return {
+        value: model?.props?.[window.__qua.propDefs().find((d) => d.label === '任务状态')?.id],
+        todo: blk?.dataset.todo ?? null,
+        cardChecked: document.querySelector('.prop-row[data-prop-id] input.prop-check')?.checked ?? null,
+      }
+    }, target.blockId)
+    assert(afterTick.value === true, `卡里勾选要写进模型：${JSON.stringify(afterTick)}`)
+    assert(afterTick.todo === 'done', `卡里勾完，左侧方框也要跟着变成已完成：${JSON.stringify(afterTick)}`)
 
     await page.click('#properties-add')
     await page.waitForSelector('.props-form')
@@ -4439,7 +4480,7 @@ await check(
     assert(option.text.includes('已在块上'), `要写明为什么不可选：${JSON.stringify(option)}`)
 
     await ctx.close()
-    return `picker 保留「任务状态 · 勾选（已在块上）」且 disabled；面板写明「在块左侧编辑」`
+    return `picker 保留「任务状态 · 勾选（已在块上）」且 disabled；卡里同一行可勾，左侧方框跟着变`
   },
 )
 
@@ -9086,6 +9127,109 @@ await check('T124 详情浮层的「打开目标」读 Shift ⇒ 右槽窗口；
   assert(!after.popover, '点完应关浮层')
   await ctx.close()
   return `浮层「打开目标」Shift+点开窗口；中心不动`
+})
+
+await check('T125 「新建属性」真的建出定义并当场出现那一行；页/标签上添加 ⇒ 卡片出现「声明给成员」段', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  /** 找一个普通内容块（无身份、无标签）当属性卡的主体 */
+  const hostId = await page.evaluate(() => {
+    const b = window.__qua.allBlocks().find((x) => x.lists.length === 0 && x.roles.length === 0 && x.text.length > 2)
+    if (b) window.__qua.invoke('core.block/focus-block', { blockId: b.id })
+    return b?.id ?? ''
+  })
+  assert(hostId !== '', '应能找到一个内容块当属性卡的主体')
+  await page.waitForTimeout(200)
+
+  const before = await page.evaluate(() => window.__qua.propDefs().map((d) => d.label))
+  await page.click('#properties-add')
+  await page.waitForSelector('.props-form')
+  // 选「＋ 新建属性…」⇒ 展开名字＋类型那一组
+  await page.evaluate(() => {
+    const sel = document.querySelector('.props-form .props-pick')
+    sel.value = '__new__'
+    sel.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await page.waitForTimeout(80)
+  await page.fill('.props-new-group input.prop-input', '冒烟新属性')
+  await page.evaluate(() => document.querySelector('.props-create')?.click())
+  await page.waitForTimeout(300)
+
+  /**
+   * ⚠️ 这条断言钉的是一次**真踩过的空操作**：卡片调命令时把「名字」传成了 `propId`，
+   *    而 `core.props/create-def` 读的是 `label` ⇒ 名字永远是空串 ⇒ handler 早退。
+   *    表现是「点了新建、什么都没发生」：库里没有定义、卡里也没有那一行。
+   */
+  const after = await page.evaluate(() => {
+    const def = window.__qua.propDefs().find((d) => d.label === '冒烟新属性')
+    return {
+      defs: window.__qua.propDefs().map((d) => d.label),
+      defId: def?.id ?? '',
+      rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
+      form: Boolean(document.querySelector('.props-form')),
+      cardText: document.querySelector('#properties-body')?.innerText ?? '',
+    }
+  })
+  assert(after.defs.length === before.length + 1, `新建属性应真的在库里多一条定义：${JSON.stringify(after.defs)}`)
+  assert(after.defId !== '', '新建出来的定义要能被 `propDefs()` 找到')
+  assert(after.rows.includes(after.defId), `新建之后卡片要当场出现那一行（不能等别处碰一下）：${JSON.stringify(after)}`)
+  assert(!after.form, `新建完表单应关闭：${JSON.stringify(after)}`)
+
+  /**
+   * 页/标签上「添加属性」做的是**声明**（`_fieldDefs`），页自己没有值 ⇒
+   * 块属性那一段一行都不会多。所以卡片必须有一段「声明给成员」把结果说出来，
+   * 否则那次点击同样看起来没生效。
+   */
+  const pageId = await page.evaluate(() => {
+    const p = window.__qua.allBlocks().find((b) => b.lists.includes('page') && !b.lists.includes('tag'))
+    if (p) window.__qua.invoke('core.block/focus-block', { blockId: p.id })
+    return p?.id ?? ''
+  })
+  assert(pageId !== '', '假数据里应有页')
+  await page.waitForTimeout(200)
+
+  const pageBefore = await page.evaluate(() => ({
+    declared: [...document.querySelectorAll('[data-declared-prop-id]')].length,
+    rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].length,
+    text: document.querySelector('#properties-body')?.innerText ?? '',
+  }))
+  assert(pageBefore.declared === 0, `前置：这一页一开始没有声明任何属性：${JSON.stringify(pageBefore)}`)
+
+  const pickId = await page.evaluate(() => window.__qua.propDefs().find((d) => d.label === '冒烟新属性')?.id ?? '')
+  await page.click('#properties-add')
+  await page.waitForSelector('.props-form')
+  await page.evaluate((id) => {
+    const sel = document.querySelector('.props-form .props-pick')
+    sel.value = id
+    sel.dispatchEvent(new Event('change', { bubbles: true }))
+  }, pickId)
+  await page.waitForTimeout(80)
+  await page.evaluate(() => document.querySelector('.props-use')?.click())
+  await page.waitForTimeout(300)
+
+  const pageAfter = await page.evaluate(() => ({
+    declared: [...document.querySelectorAll('[data-declared-prop-id]')].map((x) => x.dataset.declaredPropId),
+    rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].length,
+    text: document.querySelector('#properties-body')?.innerText ?? '',
+  }))
+  assert(pageAfter.declared.length === 1, `页上添加属性 ⇒ 卡片要出现「声明给成员」那一条：${JSON.stringify(pageAfter)}`)
+  assert(pageAfter.declared[0] === pickId, `声明段要显示刚加的那条定义：${JSON.stringify(pageAfter)}`)
+  assert(pageAfter.text.includes('声明给成员'), `这一段要有名字，不能只靠 chip：${JSON.stringify(pageAfter.text)}`)
+
+  // 解除声明：只摘清单，定义本身与别的块的声明都不动
+  await page.evaluate(() => document.querySelector('[data-declared-prop-id] .props-tag-x')?.click())
+  await page.waitForTimeout(300)
+  const undeclared = await page.evaluate((id) => ({
+    declared: [...document.querySelectorAll('[data-declared-prop-id]')].length,
+    defStillThere: window.__qua.propDefs().some((d) => d.id === id),
+  }), pickId)
+  assert(undeclared.declared === 0, `解除后声明段应清空：${JSON.stringify(undeclared)}`)
+  assert(undeclared.defStillThere, '解除声明不该删掉定义块本身')
+
+  await ctx.close()
+  return `新建属性当场建出定义并出现那一行；页上添加 ⇒ 「声明给成员」段出现，可解除且定义仍在`
 })
 
 /** 判红的是「不在已知失败表里的失败」；已知失败逐条打印，不计入退出码 */

@@ -255,7 +255,10 @@ export function setupPanels(deps: PanelsDeps) {
       setValue: (b, propId, value) => void deps.getRegistry().invoke('core.props/set-value', { blockId: b.id, propId, value }, 'ui'),
       clearValue: (b, propId) => void deps.getRegistry().invoke('core.props/clear-value', { blockId: b.id, propId }, 'ui'),
       addField: (b, propId) => void deps.getRegistry().invoke('core.props/add-field', { blockId: b.id, propId }, 'ui'),
-      createDef: (b, propId, kind) => void deps.getRegistry().invoke('core.props/create-def', { blockId: b.id, propId, kind }, 'ui'),
+      // ⚠️ 这条命令收的是**名字**（`label`）：定义块还不存在，id 由模型现生成
+      createDef: (b, label, kind) => void deps.getRegistry().invoke('core.props/create-def', { blockId: b.id, label, kind }, 'ui'),
+      declaredFields: (b) => [...kb.declaredFieldsOf(b.id)],
+      undeclareField: (b, propId) => void deps.getRegistry().invoke('core.props/undeclare', { blockId: b.id, propId }, 'ui'),
       /**
        * **`ref` 值的选择器**（实现见上面的 `pickRefValue`）：从整片森林里挑一块。
        * 属性区与行内实例浮层共用同一份，候选集合不会分叉。

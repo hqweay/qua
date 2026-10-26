@@ -18,7 +18,7 @@
 import type { Block } from '../core/index.ts'
 import { plainText } from '../core/runs.ts'
 import type { Dangling, FieldRow, PropKind } from '../core/index.ts'
-import { clockLabel, displayNameOf, declaredFieldIds, hasList, PROP_KINDS, propKindOf, uiPositionOf } from '../core/index.ts'
+import { clockLabel, displayNameOf, declaredFieldIds, hasList, PROP_KINDS, propKindOf } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 
 export interface PropertiesDeps {
@@ -50,8 +50,22 @@ export interface PropertiesDeps {
   clearValue: (b: Block, propId: string) => void
   /** 把已有属性声明到 owner（页/标签），成为它的标签属性；普通块则登记一条自有属性槽 */
   addField: (b: Block, propId: string) => void
-  /** 新建定义（可同时声明成标签属性/加块属性槽） */
+  /**
+   * 新建定义（可同时声明成标签属性/加块属性槽）。
+   *
+   * ⚠️ 收的是**名字**，不是 `propId`：这条命令是「先造定义」，id 由模型现生成。
+   *    把它写成 `propId` 会让 `label` 永远是空串 ⇒ handler 早退、点了完全没反应（真踩过）。
+   */
   createDef: (b: Block, label: string, kind: PropKind) => void
+  /**
+   * 页/标签**声明给成员**的那些属性定义（`_fieldDefs` 的活块）。
+   *
+   * ⚠️ 与「这一块自己有哪些值」是两件事：在页上点「添加属性」做的是**声明**，
+   *    页自己没有值，所以不会在块属性里长出任何一行。没有这一段，那次点击就没有可见结果。
+   */
+  declaredFields: (b: Block) => Block[]
+  /** 解除一条声明（只摘清单；成员块上的值一个字节不动） */
+  undeclareField: (b: Block, propId: string) => void
   /**
    * **给 `ref` 类型的值选一个目标块**（装配层弹出选择器，选中后回调写值）。
    *
@@ -255,13 +269,21 @@ export class PropertiesPanel {
       return
     }
     /**
-     * ⚠️ **归 gutter 的属性不出现在这里**：同一个值不能有两个编辑面
-     *    （面板改了、gutter 没跟上）。过滤放在这里而不是 `fieldRows` 里：
-     *    那份行派生是共享的，gutter 要用**同一份**（`gutterFieldsOf` 就是它的一个视图）。
+     * **全部属性行都在这一张卡里可编辑**，包括 `_uiPosition: 'block-left'` 的那些。
+     *
+     * 曾经的规则是「一个值不开两个编辑面」⇒ 归 gutter 的行从这里排除，只留一句
+     * 「在块左侧编辑」。实际用起来那一句就是死路：任务状态是最高频的属性，而用户
+     * 在这个卡片里看到它、却改不了它，得先想起来「左侧还有个小方框」。
+     *
+     * 改成两面共存的前提是**两面读写同一份东西**：行的派生是同一个 `fieldRows`
+     * （`gutterFieldsOf` 是它的一个视图）、写是同一类 `core.props/set-value`、
+     * 写完两边都重画（`writeProps` 会 `repaintBlock` ＋ `scheduleProperties`）。
+     * ⇒ 「面板改了 gutter 没跟上」这个当初的理由不再成立，所以互斥可以撤。
+     *
+     * ⚠️ `_uiPosition` 仍然有意义：它决定**快捷入口画在哪**（高频二元开关要在行上够得着），
+     *    不是「只有那一处能改」。
      */
-    const allRows = this.deps.rows(target)
-    const rows = allRows.filter((r) => uiPositionOf(r.def) !== 'block-left')
-    const elsewhere = allRows.filter((r) => uiPositionOf(r.def) === 'block-left')
+    const rows = this.deps.rows(target)
     /**
      * **有当前对象就显示**，不因为「没有行」而收起。
      *
@@ -279,7 +301,7 @@ export class PropertiesPanel {
     // 归属紧随其后：与标签并列的另一种「它是谁的」。任何块都有这一行
     this.els.body.appendChild(this.buildBelongs(target))
 
-    if (rows.length === 0 && elsewhere.length === 0) {
+    if (rows.length === 0) {
       const empty = document.createElement('p')
       empty.className = 'props-empty'
       empty.textContent = t('ui.props.empty')
@@ -295,15 +317,13 @@ export class PropertiesPanel {
     }
 
     /**
-     * 归 gutter 的属性**不在这里编辑**，但必须在这里**可见**：
-     * 否则面板说「还没有块属性」、添加表单说「都已在块上」，两句话互相矛盾，
-     * 用户会以为那条系统属性不见了。这一行只说它在哪儿，不给第二个编辑面。
+     * **声明给成员的属性**（只有页/标签有）。
+     *
+     * 与上面那一段是两件事：那一段是「这一块自己的值」，这一段是「我的成员会有哪些格子」。
+     * 页/标签上点「添加属性」做的正是**声明**，所以不画这一段，那次点击就没有可见结果。
      */
-    if (elsewhere.length > 0) {
-      const note = document.createElement('p')
-      note.className = 'props-empty props-elsewhere'
-      note.textContent = t('ui.props.gutterOnly', { names: elsewhere.map((r) => r.label).join('、') })
-      this.els.body.appendChild(note)
+    if (hasList(target, 'page') || hasList(target, 'tag')) {
+      this.els.body.appendChild(this.buildDeclared(target))
     }
 
     if (this.formOpen) this.els.body.appendChild(this.buildForm(target))
@@ -342,6 +362,60 @@ export class PropertiesPanel {
     }
     box.append(label, value)
     return box
+  }
+
+  /**
+   * **声明给成员的属性**（只有页/标签有这一段）。
+   *
+   * 判据：声明是「我的成员/子块会有这一格」，不是「给这一块设一个值」——
+   * 所以这一段只有清单和解除，没有值控件。值仍旧只在成员块上。
+   *
+   * ⚠️ 解除声明**不动值**：成员块上已有的值落回「本块自有」，重新声明后自动回来。
+   * ⚠️ 这段与「字段声明」抽屉（`ui/fields-editor.ts`）看的是同一份 `_fieldDefs`：
+   *    抽屉里还能**从全部定义里挑一条**加，这里只列已声明 ＋ 解除。
+   *    多出来的「添加」入口在抬头的「＋ 属性」里（选已有／新建都走它）。
+   */
+  private buildDeclared(target: Block): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'prop-row prop-declared'
+    const label = document.createElement('label')
+    label.className = 'prop-label'
+    const name = document.createElement('span')
+    name.className = 'prop-name'
+    name.textContent = t('ui.props.declaredTitle')
+    label.append(name)
+    const hint = document.createElement('span')
+    hint.className = 'prop-source'
+    hint.textContent = t('ui.props.declaredHint')
+    label.append(hint)
+
+    const value = document.createElement('span')
+    value.className = 'prop-value props-tag-value'
+    const defs = this.deps.declaredFields(target)
+    if (defs.length === 0) {
+      const empty = document.createElement('span')
+      empty.className = 'props-empty'
+      empty.textContent = t('ui.props.declaredEmpty')
+      value.appendChild(empty)
+    }
+    for (const def of defs) {
+      const chip = document.createElement('span')
+      chip.className = 'props-tag'
+      chip.dataset.declaredPropId = def.id
+      const text = document.createElement('span')
+      text.textContent = `${plainText(def.content).trim() || def.id} · ${t(`ui.props.kind.${propKindOf(def)}`)}`
+      const del = document.createElement('button')
+      del.type = 'button'
+      del.className = 'props-tag-x'
+      del.title = t('ui.props.undeclare')
+      del.textContent = '×'
+      del.addEventListener('click', () => this.deps.undeclareField(target, def.id))
+      chip.append(text, del)
+      value.appendChild(chip)
+    }
+
+    row.append(label, value)
+    return row
   }
 
   /**
