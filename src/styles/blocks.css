@@ -70,6 +70,46 @@
   background: var(--ui-accent-soft);
   opacity: 1;
 }
+/*
+ * **面包屑**（装载根那一行来自库的哪条路径）。
+ *
+ * 与别名头同一条布局：`flex: 0 0 100%` 独占一行，`.left`/`.tx` 留在下一行。
+ * 它描述**位置**，不是这一块的正文 —— 所以不在 `.tx` 里，也不可编辑／不可选。
+ */
+.blk[data-context='1'] {
+  flex-wrap: wrap;
+  row-gap: var(--ui-gap-1);
+}
+.blk-context {
+  flex: 0 0 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--ui-fs-xs);
+  line-height: var(--ui-lh-tight);
+  color: var(--ui-text-tertiary);
+  user-select: none;
+}
+.blk-context-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.blk-context-cell:hover,
+.blk-context-cell:focus-visible {
+  color: var(--ui-accent);
+}
+.blk-context-sep {
+  flex: 0 0 auto;
+  color: var(--ui-text-tertiary);
+  opacity: 0.6;
+}
 .blk .left {
   flex: 0 0 auto;
   display: flex;

@@ -427,7 +427,7 @@ export class BlockEditor {
       .map((id) => this.store.find(id))
       .filter((b): b is Block => Boolean(b))
     // 折叠表属于**这一份文档**（视图各带各的），换 roots 时原样保留
-    this.doc = { roots, folded: this.doc.folded }
+    this.doc = { roots, folded: this.doc.folded, contexts: this.doc.contexts }
     // 焦点只算**本视图自己的**（里层编辑器是独立编辑岛，不是「我在编辑」）
     const focused = restoreSelection && this.ownFocus()
     this.renderAll()
@@ -714,6 +714,8 @@ export class BlockEditor {
         folded: this.doc.folded,
         gutter,
         find: (id) => this.store.find(id),
+        // 只有装载根会带上下文：子行的位置已经由缩进表达
+        context: r.depth === 0 ? this.doc.contexts?.get(r.block.id) : undefined,
       },
     )
     this.mounted.add(r.block.id)
@@ -2557,18 +2559,23 @@ export class BlockEditor {
     // 占位高度按**实际行高**累加：带别名头的行是两行，按 LINE_H 算会让长文档的
     // 滚动条与落点系统性偏小（越靠后偏得越多）。
     if (from > 0) {
-      const headH = rows.slice(0, from).reduce((n, r) => n + visibleRowHeight(r.block), 0)
+      const headH = rows.slice(0, from).reduce((n, r) => n + visibleRowHeight(r.block, this.extraHeads(r)), 0)
       this.container.appendChild(this.placeholder(from, 'head', headH))
     }
     this.renderRows(rows.slice(from, to), to >= rows.length)
     if (to < rows.length) {
-      const tailH = rows.slice(to).reduce((n, r) => n + visibleRowHeight(r.block), 0)
+      const tailH = rows.slice(to).reduce((n, r) => n + visibleRowHeight(r.block, this.extraHeads(r)), 0)
       this.container.appendChild(this.placeholder(rows.length - to, 'tail', tailH))
     }
     this.caretMarks = ''
     this.markCaret()
     this.paintBlockSel()
     this.events.mounted?.()
+  }
+
+  /** 这一行除正文外还占几条「整行头」（面包屑／别名头的高度由 block-dom 统一算） */
+  private extraHeads(r: VisibleRow): number {
+    return r.depth === 0 && (this.doc.contexts?.get(r.block.id)?.length ?? 0) > 0 ? 1 : 0
   }
 
   private placeholder(count: number, which: string, height = count * LINE_H): HTMLElement {

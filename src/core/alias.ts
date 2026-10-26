@@ -19,6 +19,7 @@ import { ALIASES_PROP, aliasesOf, listsOf, primaryAliasOf, type Block } from './
 import { isJournal, journalDate, journalDateLabel } from './journal.ts'
 import { plainText } from './runs.ts'
 import { walkForest } from './walk.ts'
+import { t } from './msg.ts'
 
 /** 旧落盘键（v13 及以前）。新代码**不读**它；形状校验把它判成 corrupt。 */
 export const LEGACY_ALIAS_PROP = '_alias' as const
@@ -96,6 +97,17 @@ export function displayTextOf(b: Block): string {
     if (date !== '') return journalDateLabel(date)
   }
   return displayNameOf(b).trim()
+}
+
+/**
+ * 呈现层的「这一行叫什么」：`displayTextOf` ＋ **无标题兜底**。
+ *
+ * 与 `displayTextOf` 的分工：那个说「可读文本是什么，空就是空」（查询拿空串去匹配
+ * 文本时不能用「无标题」冒充），这里说「界面上必须有个名字」。面包屑、卡片头、
+ * 检视卡标题都是同一个问题，只在这里回答一次。
+ */
+export function blockLabel(b: Block): string {
+  return displayTextOf(b) || t('ui.page.untitled')
 }
 
 /** 能被地址找到的块 —— **只看 `_aliases`**，不再看页／标签列表。 */

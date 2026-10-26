@@ -11,15 +11,10 @@
  */
 import {
   belongsToTree,
+  blockLabel,
   buildAdjacency,
-  displayNameOf,
   findInForest,
-  isJournal,
-  journalDate,
-  journalDateLabel,
-  type Block,
 } from '../../core/index.ts'
-import { plainText } from '../../core/runs.ts'
 import { t } from '../../core/msg.ts'
 import type { Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
@@ -336,16 +331,7 @@ export function setupDocks(deps: DocksDeps) {
   function windowLabel(id: string): string {
     const path = kb.pathOf(id)
     if (path.length === 0) return ''
-    return path.map(labelOf).join(' / ')
-  }
-
-  /** 与面包屑同一口径：日记用日期投影；其余用显示名，空则正文，再空兜底 */
-  function labelOf(b: Block): string {
-    if (isJournal(b)) return journalDateLabel(journalDate(b))
-    const name = displayNameOf(b).trim()
-    if (name !== '') return name
-    const text = plainText(b.content).trim()
-    return text !== '' ? text : t('ui.page.untitled')
+    return path.map(blockLabel).join(' / ')
   }
 
   return {

@@ -1253,6 +1253,16 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
   assert(first.rows.length === 1, `本页应只有 1 条待办，实际 ${JSON.stringify(first.rows)}`)
   assert(first.refresh.length > 0, '刷新按钮必须有文案（D6）')
   assert(!first.stale, '刚冻结完不该显示「可能已过期」')
+  /**
+   * 结果行可能来自库的任意深度 ⇒ 行首要标出祖先链；否则同一句话在别的页里
+   * 也出现时，读者不知道这一行是哪一页的那一条。
+   */
+  const firstCrumbs = await page.evaluate(() =>
+    [...document.querySelectorAll('.queryview-editor .blk[data-depth="0"] > .blk-context .blk-context-cell')].map(
+      (e) => e.textContent ?? '',
+    ),
+  )
+  assert(firstCrumbs.includes('产品设计 · 决策日志'), `查询结果行应显示祖先链（面包屑）：${JSON.stringify(firstCrumbs)}`)
 
   const targetId = await page.evaluate(() => {
     let found = ''
@@ -8933,6 +8943,15 @@ await check('T117 Shift+点反链 footer 的块标／面包屑 ⇒ 右槽窗口�
 
   const src = await page.evaluate(() => document.querySelector('#editor .mount .blk[data-block-id]')?.dataset.blockId ?? '')
   assert(src, '当前页应有反链（footer 里有源块）')
+  /**
+   * 反链行要回答「这句话在哪」：来源块不是顶层时，行首给出祖先链（面包屑）。
+   * 第一页那条反链来自「输入面笔记」，正好是「祖先只有一层」的形态。
+   */
+  const refCrumb = await page.evaluate((src) => {
+    const cell = document.querySelector(`#editor .mount .blk[data-block-id="${src}"] > .blk-context .blk-context-cell`)
+    return cell ? { text: cell.textContent ?? '', id: cell.dataset.crumbFor ?? '' } : null
+  }, src)
+  assert(refCrumb?.text === '输入面笔记', `反链行应显示来源页的面包屑：${JSON.stringify(refCrumb)}`)
   const before = await page.evaluate(() => ({
     active: window.__qua.snapshot().activeId,
     nav: window.__qua.snapshot().nav,
@@ -8947,6 +8966,14 @@ await check('T117 Shift+点反链 footer 的块标／面包屑 ⇒ 右槽窗口�
   }))
   assert(after.active === before.active, `反链块标 Shift+点不换中心：${before.active} → ${after.active}`)
   assert(JSON.stringify(after.nav) === JSON.stringify(before.nav), `反链块标 Shift+点不入历史：${JSON.stringify(after.nav)}`)
+
+  // 面包屑那一格点下去＝聚焦到那个祖先（与块标左键同一语义）
+  await page.locator(`#editor .mount .blk[data-block-id="${src}"] > .blk-context .blk-context-cell`).click()
+  await page.waitForTimeout(150)
+  const afterRefCrumb = await page.evaluate(() => window.__qua.snapshot().activeId)
+  assert(afterRefCrumb === refCrumb.id, `点反链面包屑应聚焦到祖先：${refCrumb.id} → ${afterRefCrumb}`)
+  await openFirstPage(page)
+  await page.waitForTimeout(150)
 
   // 面包屑：先 zoom 进一个子块（普通点块标），再 Shift+点祖先那格
   const child = await page.evaluate(() => document.querySelector('#editor .blk[data-depth="1"]')?.dataset.blockId ?? '')

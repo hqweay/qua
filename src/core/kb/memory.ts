@@ -19,11 +19,11 @@
 import { backrefBlocks, backrefsOf, type BackrefBlock, type BackrefSource } from '../backrefs.ts'
 import { aliasesOf, DELETED_AT_PROP, hasList, isDeleted, listsOf, type Block } from '../model.ts'
 import { findByAlias } from '../alias.ts'
-import { findPath, findInForest, trashOf } from '../tree.ts'
+import { findInForest, trashOf } from '../tree.ts'
 import { walkForest } from '../walk.ts'
 import { findTagByName, tagsOf as tagsOfBlock, tagIdsOf } from '../tags.ts'
 import { findJournalDay } from '../journal.ts'
-import { queryByIndex } from '../index-port.ts'
+import { indexPathOf, queryByIndex } from '../index-port.ts'
 import {
   allPropDefs,
   declaredFields,
@@ -141,12 +141,13 @@ export class MemoryKb implements KbClient {
   }
 
   parentOf(id: string): Block | undefined {
-    const path = findPath(this.store.blocks, id)
-    return path && path.length >= 2 ? path[path.length - 2] : undefined
+    const parentId = this.store.index.parentOf.get(id)
+    if (parentId === undefined || parentId === null) return undefined
+    return this.store.index.blocks.get(parentId)
   }
 
   pathOf(id: string): readonly Block[] {
-    return findPath(this.store.blocks, id) ?? []
+    return indexPathOf(this.store.index, id)
   }
 
   resolveAlias(name: string): Block | undefined {

@@ -352,6 +352,16 @@ export interface Doc {
    * ⚠️ 它不参与撤销：折叠不是内容改动。
    */
   folded?: FoldState
+  /**
+   * **根行的上下文**（面包屑）：root id → 祖先链（从根到父，**不含这一行自己**）。
+   *
+   * 反链／查询结果里的行可能来自库的任意深度；把「它在哪」画在行首，读者才知道
+   * 这一行是「哪一页里的那句话」。子行不需要它——缩进已经表达了父子关系。
+   *
+   * ⚠️ 派生、视图私有、不入库：路径由 `KbClient.pathOf` 现取，装载时随 `Doc` 一起给。
+   * ⚠️ 只有 `roots` 里的块会被查；不在表里 ＝ 这一行没有面包屑（顶层根就是这种）。
+   */
+  contexts?: ReadonlyMap<string, readonly Block[]>
 }
 
 export interface Located {

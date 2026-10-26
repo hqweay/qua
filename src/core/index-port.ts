@@ -31,7 +31,7 @@ import {
 } from './query.ts'
 
 /**
- * 一份索引。五张表各答一类问题，**全是派生**：
+ * 一份索引。六张表各答一类问题，**全是派生**：
  *
  * | 表 | 答什么 | 谁在用 |
  * |---|---|---|
@@ -40,6 +40,7 @@ import {
  * | `tagMembers` | 谁打了这个标签（**从块上的 `_tags` 建**，同块多次只算一次） | 标签成员 |
  * | `tags` / `journals` | 按名字/日期找块 | 标签解析、日记条件 |
  * | `rootOf` | 这块住在哪个顶层根 | 反链按来源根聚合 |
+ * | `parentOf` | 这块的**树父**（`null` ＝ 森林顶层） | 面包屑／路径：沿父链向上 O(depth) |
  */
 export interface Index {
   /** 块 id → 块（**活引用**） */
@@ -74,6 +75,15 @@ export interface Index {
   /** 块 id → 它所在的**顶层块** id（含自己）—— 反链按来源根聚合要用 */
   rootOf: Map<string, string>
   /**
+   * 块 id → 它的**树父** id（`null` ＝ 森林顶层）。
+   *
+   * ⚠️ 只走**内容树**（`children`），与 `_belongsTo` 那条归属边无关：面包屑回答
+   *    「它在哪」，归属边回答「它归在谁下面」，两者可以指向不同的块。
+   * ⚠️ 这张表是**派生**的：`children` 仍是唯一真相。有它之后取路径是 O(depth)，
+   *    不再为每条反链／每个查询结果各走一遍整片森林。
+   */
+  parentOf: Map<string, string | null>
+  /**
    * 内部簿记：引用 run id → 它此刻贡献的那条边（**不进 fingerprint**）。
    *
    * 为什么必须有它：`incoming` 的单位是「target → (源块 → 次数)」，不按 run id 键控——
@@ -91,6 +101,7 @@ function emptyIndex(): Index {
     tags: new Map(),
     journals: new Map(),
     rootOf: new Map(),
+    parentOf: new Map(),
     edgeByAnno: new Map(),
   }
 }
@@ -108,7 +119,7 @@ export function rebuild(forest: readonly Block[]): Index {
   //    边从块内容里的引用 run 提取——只有引用（无 flavor）；行内标签（flavor '#'）
   //    是归属的露面，不是指向边，不进 `incoming`。
   // ⚠️ 遍历默认跳过被删的子树（原位软删：被删的块对索引不可见）。
-  for (const b of forest) indexSubtree(idx, b, b.id)
+  for (const b of forest) indexSubtree(idx, b, b.id, null)
 
   return idx
 }
@@ -213,17 +224,19 @@ function applyBlockUpsert(
   const parent = value.parent
   const rootId = parent === null ? id : (index.rootOf.get(parent) ?? id)
   if (known) {
-    // 挪位不改 props ⇒ 名字表/成员表都不动；`blocks` 里是活引用，也无事可做
+    // 挪位不改 props ⇒ 名字表/成员表都不动；`blocks` 里是活引用，也无事可做。
+    // `parentOf` 只改**被移的这一块**：后代的父还是它自己，不需要重打。
+    index.parentOf.set(id, parent)
     reindexSubtreeRoot(index, known, rootId)
     return
   }
   const block = findInForest(forest, id)
   if (!block) return
-  indexSubtree(index, block, rootId)
+  indexSubtree(index, block, rootId, parent)
 }
 
 /**
- * 块 delete：**原位软删**的索引面——块还在森林里，但要从五张表里退场。
+ * 块 delete：**原位软删**的索引面——块还在森林里，但要从索引表里退场。
  *
  * 退场的是「可见集合」：根 ＋ 它**还没被删**的后代（本来就删了的已经不在表里）。
  * 入向边跟着源块退场（`edgeByAnno` 簿记摘旧边）——数据源 atoms 没动，
@@ -239,6 +252,7 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[]): v
   for (const bid of gone) {
     index.blocks.delete(bid)
     index.rootOf.delete(bid)
+    index.parentOf.delete(bid)
   }
   const goneSet = new Set(gone)
   // 名字表：删掉这些块认领的名字，再让**还活着**的认领者按 rebuild 的口径接手
@@ -366,10 +380,15 @@ function walkSubtreeIncludingDeleted(root: Block): string[] {
 }
 
 /** 把一棵子树写进索引（与 `rebuild` 同一口径：先序；`rootId` ＝ 它所在的顶层块） */
-function indexSubtree(index: Index, root: Block, rootId: string): void {
-  walkForest([root], (b) => {
+function indexSubtree(index: Index, root: Block, rootId: string, parentId: string | null): void {
+  walkForest([root], (b, ctx) => {
     index.blocks.set(b.id, b)
     index.rootOf.set(b.id, rootId)
+    /**
+     * 根块的父不在**这棵子树里**（`ctx.parent === null`）⇒ 用调用方给的 `parentId`；
+     * 后代从走查里拿。两者只有一个来源，不另传一张父表。
+     */
+    index.parentOf.set(b.id, ctx.parent?.id ?? parentId)
     // 指向边：数据源是块内容里的引用 run（可见源块，遍历口径与块表同一条）
     addEdgesOfBlock(index, b)
     // 标签成员（数据源是块上的 `_tags`）
@@ -405,7 +424,7 @@ function indexSubtree(index: Index, root: Block, rootId: string): void {
  */
 export function fingerprint(index: Index): string {
   const sortedKeys = (m: Map<string, unknown>): string[] => [...m.keys()].sort()
-  const flat = (m: Map<string, string>): unknown => [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  const flat = (m: Map<string, string | null>): unknown => [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   const counts = (m: Map<string, Map<string, number>>): unknown =>
     [...m.entries()]
       .map(([k, v]) => [k, [...v.entries()].sort((a, b) => a[0].localeCompare(b[0]))] as const)
@@ -419,12 +438,38 @@ export function fingerprint(index: Index): string {
     tags: flat(index.tags),
     journals: flat(index.journals),
     rootOf: flat(index.rootOf),
+    parentOf: flat(index.parentOf),
   })
 }
 
 /** 这个 id 现在是哪一块（引用解析用；与 `store.find` 同语义） */
 export function lookupBlock(index: Index, id: string): Block | undefined {
   return index.blocks.get(id)
+}
+
+/**
+ * 从根到它（含自己）——面包屑。
+ *
+ * 沿 `parentOf` 向上再反转：O(depth)，不再对每条反链／每个查询结果走一遍森林。
+ * 找不到（或父链中途断开／成环）⇒ 空数组：**宁可没有路径，也不给半截路径**
+ * （半截面包屑会指向错误的位置，比不显示更糟）。
+ */
+export function indexPathOf(index: Index, id: string): Block[] {
+  const out: Block[] = []
+  const seen = new Set<string>()
+  let cur: string | null = id
+  while (cur !== null) {
+    if (seen.has(cur)) return []
+    seen.add(cur)
+    const b = index.blocks.get(cur)
+    if (!b) return []
+    out.push(b)
+    const parent = index.parentOf.get(cur)
+    // `undefined` ＝ 索引里没有这条（不该发生）⇒ 整条路径不可信；`null` ＝ 到了顶层
+    if (parent === undefined) return []
+    cur = parent
+  }
+  return out.reverse()
 }
 
 /** 谁引用它（`[[名]]`）—— 反链的源块清单（标签成员见 `tagMemberIdsOf`） */
@@ -452,7 +497,7 @@ export function tagIdByName(index: Index, name: string): string | undefined {
 /**
  * **查询走索引**：`ref`／`tag`／`journal` 三类条件查表（O(1)），其余谓词仍是逐块判定。
  *
- * 为什么不是「查询全在索引里」：索引是五张**派生表**，不记树的形状（`rootOf` 只到顶层、
+ * 为什么不是「查询全在索引里」：索引是派生**表**，不记树的形状（`rootOf` 只到顶层、
  * 挪位后 `blocks` 的插入顺序会漂移）——候选迭代与结果顺序仍按森林先序走，
  * 判定与顺序共用 `query.ts` 的 `evaluateQuery`（两条路径只有「环境怎么来」不同）。
  *

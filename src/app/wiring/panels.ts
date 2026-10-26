@@ -7,6 +7,7 @@
  * 组件实例由这一节持有；装配入口只拿重画入口。
  */
 import {
+  blockLabel,
   buildAdjacency,
   danglingOf,
   displayNameOf,
@@ -16,7 +17,6 @@ import {
   isJournal,
   isQueryBlock,
   journalDate,
-  journalDateLabel,
   parentsOf,
   readSpec,
   todayISO,
@@ -288,11 +288,7 @@ export function setupPanels(deps: PanelsDeps) {
    * 名字写在卡的抬头，换主体时**标题变、卡不动** —— 位置稳定，用户不用重新认路。
    */
   function renderInspectTitle(b: Block | null): void {
-    chrome.inspectCardTitleEl.textContent = b
-      ? isJournal(b)
-        ? journalDateLabel(journalDate(b))
-        : displayNameOf(b).trim() || t('ui.page.untitled')
-      : ''
+    chrome.inspectCardTitleEl.textContent = b ? blockLabel(b) : ''
   }
 
   blocks.subscribe(() => scheduleProperties())

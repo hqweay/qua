@@ -439,6 +439,18 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     }
 
     /**
+     * **面包屑一格**：聚焦到那个祖先（与块标左键同一个入口），Shift+点＝钉到右槽。
+     * 必须在「点空白建块」之前判：面包屑不是正文，但也不该被当成空白。
+     */
+    const crumbEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.crumbFor !== undefined)
+    if (crumbEl?.dataset.crumbFor) {
+      if (e.shiftKey) br.openInDock(crumbEl.dataset.crumbFor)
+      else br.focusBlock(crumbEl.dataset.crumbFor)
+      e.preventDefault()
+      return
+    }
+
+    /**
      * **指向某块的露面**（行内引用／行尾标签 chip）：同一句话，不分形状。
      *
      * 判据是 `data-ref-to` 而不是 `classList.contains('atom')`：chip 不是原子

@@ -51,6 +51,12 @@ export interface MountAreaDeps {
 /** 一条 tab 的键：内置栏用 `kind`，用户栏用 `user:<序>` */
 const keyOf = (tab: MountTab, userIndex: number): string => (tab.kind === 'user' ? `user:${userIndex}` : tab.kind)
 
+/** 一栏装载什么：根块 ＋ 每个根行的面包屑（祖先链，不含自己） */
+interface MountRoots {
+  roots: Block[]
+  contexts: Map<string, readonly Block[]>
+}
+
 const BUILTIN_LABEL: Record<MountTab['kind'], MsgId | ''> = {
   refs: 'ui.mount.refs',
   same: 'ui.mount.same',
@@ -265,7 +271,7 @@ export class MountArea {
   /* ------------------------------------------------------------ body */
 
   private load(host: Block, tab: MountTab): void {
-    const roots = this.rootsFor(host, tab)
+    const { roots, contexts } = this.rootsFor(host, tab)
     if (roots.length === 0) {
       this.showEmpty(t(EMPTY_TEXT[tab.kind]))
       // 空结果也保留这份视图的折叠态：它记的是「哪些行收着」，不是「这次有几行」
@@ -276,7 +282,7 @@ export class MountArea {
     this.emptyEl.hidden = true
     this.editorEl.hidden = false
     delete this.editorEl.dataset.empty
-    ed.loadPage({ roots, folded: ed.doc.folded })
+    ed.loadPage({ roots, folded: ed.doc.folded, contexts })
   }
 
   private showEmpty(text: string): void {
@@ -287,46 +293,59 @@ export class MountArea {
   }
 
   /**
-   * 一栏的 roots。
+   * 一栏的 roots（＋ 每个装载根的面包屑）。
    *
    * 「引用」走索引的入向边表（与反链 footer 同一条数），其余走查询——
    * 两条路都必须**剔除宿主自己**：它是位置的性质，不是条件的性质。
    */
-  private rootsFor(host: Block, tab: MountTab): Block[] {
+  private rootsFor(host: Block, tab: MountTab): MountRoots {
     if (tab.kind === 'refs') return this.refRoots(host)
     /**
      * `$self` 的解析**不在这里**：查询求值的第一步就按 `selfId` 解析（两条求值路径共用那一份）。
      * 这里只声明「谁是宿主」，免得同一份条件在 UI 与 core 各解释一遍。
      */
     const hits = this.deps.kb.query(tab.spec, { selfId: host.id })
-    return this.topLevel(hits.map((h) => ({ id: h.blockId, path: h.path })))
+    return this.topLevel(
+      hits.map((h) => ({
+        id: h.blockId,
+        // `QueryHit.path` 已经是「根 → 父」（不含自己），正是面包屑要的那一段
+        path: h.path.map((id) => this.deps.store.find(id)).filter((b): b is Block => b !== undefined),
+      })),
+    )
   }
 
-  private refRoots(host: Block): Block[] {
+  private refRoots(host: Block): MountRoots {
     const sources = this.deps.kb
       .backrefBlocksOf(host.id)
       .filter((s) => s.blockId !== host.id)
-      .map((s) => ({ id: s.blockId, path: this.deps.kb.pathOf(s.blockId).slice(0, -1).map((b) => b.id) }))
+      // 路径只取一次：topLevel 判「祖先也在结果里」和面包屑用的是同一份
+      .map((s) => ({ id: s.blockId, path: this.deps.kb.pathOf(s.blockId).slice(0, -1) }))
     return this.topLevel(sources)
   }
 
   /**
    * 只留**最外层**命中：祖先也在结果里时，那一块会被祖先的子树渲染出来，
    * 再单列一次就是同一个块出现两遍。顺序沿用命中顺序（查询的「冻结」需要它稳定）。
+   *
+   * `path` 是**祖先链（不含自己）**：它同时是「最外层」的判据与根行的面包屑。
    */
-  private topLevel(hits: readonly { id: string; path: readonly string[] }[]): Block[] {
+  private topLevel(hits: readonly { id: string; path: readonly Block[] }[]): MountRoots {
     const ids = new Set(hits.map((h) => h.id))
-    const out: Block[] = []
+    const roots: Block[] = []
+    const contexts = new Map<string, readonly Block[]>()
     for (const h of hits) {
-      if (h.path.some((p) => ids.has(p))) continue
+      if (h.path.some((p) => ids.has(p.id))) continue
       const live = this.deps.store.find(h.id)
-      if (live) out.push(live)
+      if (!live) continue
+      roots.push(live)
+      // 顶层根没有祖先 ⇒ 不画面包屑（它自己那一行已经有名字了）
+      if (h.path.length > 0) contexts.set(h.id, h.path)
     }
-    return out
+    return { roots, contexts }
   }
 
   private countRefs(host: Block): number {
-    return this.refRoots(host).length
+    return this.refRoots(host).roots.length
   }
 
   /** 懒建那一个编辑器：折叠的天不建；建了就一直复用 */

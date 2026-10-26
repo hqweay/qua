@@ -14,6 +14,7 @@ import {
   findJournalDay,
   incomingCount,
   incomingIds,
+  indexPathOf,
   journalIdByDate,
   lookupBlock,
   rebuild,
@@ -202,6 +203,34 @@ test('等式：移动子树走 tx ⇒ rootOf 全子树重打', () => {
   assert.equal(lookupBlock(next, 'b1'), store.find('b1'))
   // rootOf 已由等式断言兜底；这里点一句「跟着新顶层走」的可读出口
   assert.equal(next.rootOf.get('b1'), 'p2')
+})
+
+test('parentOf：重建填树父（顶层 null），路径沿父链从根到它', () => {
+  const idx = rebuild(fixture().forest)
+  assert.equal(idx.parentOf.get('p1'), null, '森林顶层没有父')
+  assert.equal(idx.parentOf.get('b'), 'p1')
+  assert.equal(idx.parentOf.get('b1'), 'b')
+  assert.deepEqual(indexPathOf(idx, 'b1').map((x) => x.id), ['p1', 'b', 'b1'])
+  assert.deepEqual(indexPathOf(idx, 'nope'), [], '索引里没有 ⇒ 不给半截路径')
+})
+
+test('parentOf：加/摘 page 露面不改树父（换露面没换位置）', () => {
+  const { store, kb, idx } = kbFixture()
+  const next = txStep(kb, store, idx, (tx) => {
+    tx.setLists('a', ['page'])
+  })
+  assert.equal(next.parentOf.get('a'), 'p1')
+  assert.equal(next.parentOf.get('b1'), 'b')
+})
+
+test('等式：移动子树走 tx ⇒ parentOf 只改被移的那一块', () => {
+  const { store, kb, idx } = kbFixture()
+  const next = txStep(kb, store, idx, (tx) => {
+    tx.move('b', 'p2', 0)
+  })
+  assert.equal(next.parentOf.get('b'), 'p2', '被移的块换父')
+  assert.equal(next.parentOf.get('b1'), 'b', '后代的父没变（它还是 b 的孩子）')
+  assert.deepEqual(indexPathOf(next, 'b1').map((x) => x.id), ['p2', 'b', 'b1'])
 })
 
 test('rootOf：page 只是露面，不是作用域——页嵌在天下时仍归天', () => {

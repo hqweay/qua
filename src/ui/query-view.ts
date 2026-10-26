@@ -244,8 +244,10 @@ export class QueryView {
       return
     }
     delete this.els.editor.dataset.empty
-    // 只装「最外层命中」：子树由编辑器自己展开（D8：带 breadcrumb 的上下文在行首另行标注）
-    this.editor.loadPage({ roots: rows.map((r) => r.block), folded: this.editor.doc.folded })
+    // 只装「最外层命中」：子树由编辑器自己展开，命中块的祖先链作为行首面包屑。
+    const contexts = new Map<string, readonly Block[]>()
+    for (const r of rows) if (r.path.length > 0) contexts.set(r.block.id, r.path)
+    this.editor.loadPage({ roots: rows.map((r) => r.block), folded: this.editor.doc.folded, contexts })
   }
 
   private renderEmpty(text: string): void {

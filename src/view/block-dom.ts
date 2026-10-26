@@ -18,6 +18,7 @@ import {
   DIVIDER_TYPE,
   DISPLAY_PROP,
   aliasesOf,
+  blockLabel,
   blockTypeOf,
   displayNameOf,
   identityTags,
@@ -53,9 +54,10 @@ export const LINE_H = 30
  */
 export const ALIAS_HEAD_H = 18
 
-/** 这一行在虚拟化里占多高：有别名头（且不是显示文本）就是两行 */
-export function visibleRowHeight(b: Block): number {
-  return aliasesOf(b).length > 0 && prop<string>(b, DISPLAY_PROP) !== 'text' ? LINE_H + ALIAS_HEAD_H : LINE_H
+/** 这一行在虚拟化里占多高：有别名头（且不是显示文本）或面包屑就是两行以上 */
+export function visibleRowHeight(b: Block, extraHeads = 0): number {
+  const aliasHead = aliasesOf(b).length > 0 && prop<string>(b, DISPLAY_PROP) !== 'text' ? 1 : 0
+  return LINE_H + (aliasHead + extraHeads) * ALIAS_HEAD_H
 }
 
 /**
@@ -327,7 +329,7 @@ export function makeTagsEl(
  * ⇒ 判据：`.blk` 的子节点只能是**渲染层自己放进去的那几种**；其余一律当游离内容清掉。
  *   加新子节点时**必须**在这里登记，否则它会在第一次收光标时被当作脏东西删掉。
  */
-export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set(['blk-alias', 'rails', 'rail-self', 'left', 'tx', 'blk-tags'])
+export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set(['blk-context', 'blk-alias', 'rails', 'rail-self', 'left', 'tx', 'blk-tags'])
 
 /**
  * 一个可见行 → `.blk` 元素。
@@ -360,7 +362,7 @@ export function makeBlockEl(
    * `find` 是引用解析用的查找函数（同 `fillBlockText`）：标签槽的名字也是现算的，
    * 不传 ⇒ 不画标签槽（静态卡片没有森林可查，容忍没有 chip）。
    */
-  opts: { single: boolean; ancestors?: readonly string[]; folded?: FoldState; gutter?: readonly GutterField[]; find?: FindBlock },
+  opts: { single: boolean; ancestors?: readonly string[]; folded?: FoldState; gutter?: readonly GutterField[]; find?: FindBlock; context?: readonly Block[] },
 ): HTMLElement {
   const b = r.block
   const folded = opts.folded?.[b.id] === true
@@ -398,6 +400,41 @@ export function makeBlockEl(
   const roles = identityTags(b)
   if (roles.length) el.dataset.role = roles.join(' ')
   el.style.setProperty('--depth', String(r.depth))
+
+  /**
+   * **面包屑**：这一行来自库的哪一条路径（只有 `roots` 里那些行会带）。
+   *
+   * 为什么在 `.blk` 里、`.tx` 外：它描述**位置**，不是这一块的正文；落进 `.tx`
+   * 就会被 `readRuns` 当字读回去。与别名头同一条布局（`flex: 0 0 100%` 独占一行）。
+   * ⚠️ 必须登记进 `ALLOWED_ROW_CHILDREN`：漏了它，第一次收光标就会被当游离节点删掉。
+   */
+  const trail = opts.context ?? []
+  if (trail.length > 0) {
+    el.dataset.context = '1'
+    const ctx = document.createElement('span')
+    ctx.className = 'blk-context'
+    ctx.contentEditable = 'false'
+    for (const [i, a] of trail.entries()) {
+      if (i > 0) {
+        const sep = document.createElement('span')
+        sep.className = 'blk-context-sep'
+        sep.setAttribute('aria-hidden', 'true')
+        sep.textContent = '›'
+        ctx.appendChild(sep)
+      }
+      /**
+       * 一格 ＝ **聚焦到那个祖先**（与块标左键同一个语义）；Shift+点 ＝ 钉到右槽。
+       * 只是标记，点击由装配层的事件委托处理 —— `view` 不认识浮层/导航。
+       */
+      const cell = document.createElement('button')
+      cell.type = 'button'
+      cell.className = 'blk-context-cell'
+      cell.dataset.crumbFor = a.id
+      cell.textContent = blockLabel(a)
+      ctx.appendChild(cell)
+    }
+    el.appendChild(ctx)
+  }
 
   /**
    * **别名头**：这一行显示的名字（主别名叶子），以及两个入口（别名与露面 / 字段声明）。
