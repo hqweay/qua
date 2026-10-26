@@ -12,11 +12,10 @@
  * ⚠️ 「按 id 找块」由调用方注入（`find`）：本文件零 DOM，也**不持有森林**
  *    —— 编辑器、popover、测试各自把「怎么找块」递进来，解析逻辑只有一份。
  */
-import { displayNameOf } from './alias.ts'
-import { journalDate, journalDateLabel, isJournal } from './journal.ts'
+import { t } from './msg.ts'
+import { displayTextOf } from './alias.ts'
 import { hasList, type Block } from './model.ts'
 import { tagIdsOf } from './tags.ts'
-import { t } from './msg.ts'
 
 /** 解析结果：**显示名 ＋ 还能不能解析到**（`dangling` 不是错误，是状态） */
 export interface RefView {
@@ -41,13 +40,11 @@ export type FindBlock = (id: string) => Block | undefined
  * ⚠️ 有一条特例：journal 的 `text` 恒为空（日期在 `_date` 里）⇒ 直接取名字会得到
  *    「无标题」。日期是它的可读投影，引用到某一天就该显示那一天
  *    （这也是「日期可引用」的第一个落点）。
+ * ⚠️ 投影本身**不在这里算**：`displayTextOf` 是「这一块的可读文本」的唯一来源，
+ *    本函数只负责给它兜一条「无标题」。两处各判一次日记，就是同一件事两个答案。
  */
 export function refTitle(b: Block): string {
-  if (isJournal(b)) {
-    const d = journalDate(b)
-    if (d !== '') return journalDateLabel(d)
-  }
-  const s = displayNameOf(b).trim()
+  const s = displayTextOf(b)
   return s === '' ? t('ui.page.untitled') : s
 }
 

@@ -16,6 +16,7 @@
  *    那么「敲字」就变成了「重命名」—— 块尾回车、退格都会顺手改掉它的地址。
  */
 import { ALIASES_PROP, aliasesOf, listsOf, primaryAliasOf, type Block } from './model.ts'
+import { isJournal, journalDate, journalDateLabel } from './journal.ts'
 import { plainText } from './runs.ts'
 import { walkForest } from './walk.ts'
 
@@ -74,6 +75,27 @@ export function addressOf(b: Block): string {
  */
 export function displayNameOf(b: Block): string {
   return aliasLeaf(primaryAliasOf(b)) || plainText(b.content).trim()
+}
+
+/**
+ * 这一块的**可读文本**：日记 ⇒ 日期投影；其余 ⇒ 主名叶子 > 正文投影。空 ⇒ `''`。
+ *
+ * 为什么要有它、以及为什么住在这里：日记的正文恒为空（日期住在 `_date` 里），
+ * 所以「这一块叫什么」对它有第二种投影。这个投影此前只在引用标题里特判过一次；
+ * 一旦第二个读者（按可读文本做查询）出现，特判就会变成两份各自演化的答案。
+ * ⇒ 它和 `displayNameOf` 相邻，**是同一个问题的完整答案**，不是「引用专用」。
+ *
+ * ⚠️ 返回空串不兜底「无标题」：那是呈现层的事（`refTitle`）。查询要的是「空就是空」——
+ *    拿「无标题」去匹配文本会得到一批莫名其妙的命中。
+ * ⚠️ 日记的格式**可配**，落点就是这个函数：改一处，引用显示与「按文本提及」的查询
+ *    同时跟着走（代价：同一份条件在格式改了之后结果集会变）。
+ */
+export function displayTextOf(b: Block): string {
+  if (isJournal(b)) {
+    const date = journalDate(b)
+    if (date !== '') return journalDateLabel(date)
+  }
+  return displayNameOf(b).trim()
 }
 
 /** 能被地址找到的块 —— **只看 `_aliases`**，不再看页／标签列表。 */

@@ -14,6 +14,8 @@ import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
 import { writeBlockContent } from '../src/core/model.ts'
 import { renameAlias, refTitle, resolveRef, resolveRefs, danglingView } from '../src/core/index.ts'
+import { displayTextOf } from '../src/core/alias.ts'
+import { journalDateLabel } from '../src/core/journal.ts'
 import { textRuns, type RefRun } from '../src/core/runs.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, content: textRuns(text), children: [], ...extra })
@@ -172,4 +174,31 @@ test('kind 只看归属：带 `_tags` 的页也算实例，标签类优先，其
   assert.equal(resolveRef(find, { to: 'r' }).kind, 'obj', '归属非空即实例（不看正文）')
   assert.equal(resolveRef(find, { to: 'm' }).kind, 'page', '没有归属 ⇒ 不是实例')
   assert.equal(resolveRef(find, { to: 'q' }).kind, 'page')
+})
+
+/**
+ * **可读文本只有一个来源**（`displayTextOf`）。
+ *
+ * 它此前藏在 `refTitle` 的日记特判里；一旦「按文本匹配」的查询也用得上它，
+ * 第二份实现就会出现——于是把投影上移成函数，`refTitle` 只负责兜底文案。
+ * 这里钉的是「上移没有改变任何一句话」：投影本身逐字相等，兜底仍旧只发生在 `refTitle`。
+ */
+test('U1 displayTextOf：日记 ⇒ 日期投影（不是空串、不是「无标题」）', () => {
+  const j = b('j', '', { props: { _date: '2026-10-26' } })
+  assert.equal(displayTextOf(j), journalDateLabel('2026-10-26'))
+  assert.notEqual(displayTextOf(j), '')
+  assert.notEqual(displayTextOf(j), '无标题')
+})
+
+test('U1b displayTextOf：主名叶子 > 正文；都空 ⇒ 空串（不兜「无标题」）', () => {
+  assert.equal(displayTextOf(named('p', 'A/B', '描述')), 'B')
+  assert.equal(displayTextOf(b('p', '  正文  ')), '正文')
+  assert.equal(displayTextOf(b('p', '   ')), '', '空就是空：查询拿「无标题」去匹配会命中一批怪东西')
+})
+
+test('U2 refTitle 与 displayTextOf 对日记是同一个串（收成一个入口，不是两份答案）', () => {
+  for (const date of ['2026-10-26', '2026-01-01', '2026-12-31']) {
+    const j = b(`j-${date}`, '', { props: { _date: date } })
+    assert.equal(refTitle(j), displayTextOf(j))
+  }
 })
