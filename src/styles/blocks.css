@@ -653,161 +653,9 @@
   margin-left: var(--ui-gap-4);
 }
 
-/* ---------------------------------------------------------- 标签页 footer（属于 / 包含 / 成员）
-   与反链 footer 同一套分家方式（border-top + gap）；成员列表是共享 store 的活块。 */
-.tagpanel {
-  margin-top: var(--ui-gap-6);
-  padding-top: var(--ui-gap-3);
-  border-top: 1px solid var(--ui-border-subtle);
-}
-.tagpanel[hidden] {
-  display: none;
-}
-.tagpanel-head {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-gap-3);
-  margin-bottom: var(--ui-gap-2);
-  font-size: var(--ui-fs-sm);
-}
-.tagpanel-title {
-  font-weight: 600;
-  color: var(--ui-text);
-}
-.tagpanel-page {
-  margin-left: auto;
-  background: none;
-  border: 1px solid var(--ui-border-subtle);
-  border-radius: var(--ui-radius-sm);
-  padding: 0 var(--ui-gap-2);
-  font: inherit;
-  font-size: var(--ui-fs-xs);
-  color: var(--ui-text-secondary);
-  cursor: pointer;
-}
-.tagpanel-page:hover {
-  color: var(--ui-text);
-  border-color: var(--ui-border);
-}
-.tagpanel-count {
-  color: var(--ui-text-tertiary);
-}
-.tagpanel-relations {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-gap-2);
-  margin-bottom: var(--ui-gap-3);
-  font-size: var(--ui-fs-sm);
-}
-.tagpanel-relation {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--ui-gap-2);
-}
-.tagpanel-relation-title {
-  min-width: 3em;
-  font-size: var(--ui-fs-xs);
-  color: var(--ui-text-tertiary);
-}
-.tagpanel-relation-empty {
-  font-size: var(--ui-fs-xs);
-  color: var(--ui-text-tertiary);
-}
-.tagpanel-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ui-gap-1);
-  padding: 0 var(--ui-gap-2);
-  border: 1px solid var(--ui-border-subtle);
-  border-radius: var(--ui-radius-pill);
-  color: var(--ui-text);
-  font-size: var(--ui-fs-xs);
-}
-.tagpanel-chip-x {
-  background: none;
-  border: 0;
-  padding: 0;
-  font: inherit;
-  color: var(--ui-text-tertiary);
-  cursor: pointer;
-}
-.tagpanel-chip-x:hover {
-  color: var(--ui-text);
-}
-.tagpanel-action {
-  font: inherit;
-  font-size: var(--ui-fs-xs);
-}
-.tagpanel-add {
-  display: flex;
-  gap: var(--ui-gap-2);
-  align-items: center;
-}
-.tagpanel-add .prop-input {
-  max-width: 14em;
-}
-.tagpanel-add button {
-  font: inherit;
-  font-size: var(--ui-fs-xs);
-}
-.tagpanel-members-title {
-  margin: var(--ui-gap-3) 0 var(--ui-gap-1);
-  font-size: var(--ui-fs-sm);
-  font-weight: 600;
-  color: var(--ui-text);
-}
-.tagpanel-members-editor {
-  min-height: var(--ui-line-h);
-  outline: none;
-}
-
-/* ---------------------------------------------------------- 反链 footer（下一层）
-   view block 的 placement；header 是 chrome，列表是共享 store 的活块（可原地编辑）。
-   只用 border-top 分家，不写块级 padding/margin。 */
-.backlinks {
-  margin-top: var(--ui-gap-6);
-  padding-top: var(--ui-gap-3);
-  border-top: 1px solid var(--ui-border-subtle);
-}
-.backlinks[hidden] {
-  display: none;
-}
-.backlinks-head {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-gap-3);
-  margin-bottom: var(--ui-gap-2);
-  font-size: var(--ui-fs-sm);
-  color: var(--ui-text-secondary);
-}
-.backlinks-title {
-  font-weight: 600;
-  color: var(--ui-text);
-}
-.backlinks-count {
-  color: var(--ui-text-tertiary);
-}
-.backlinks-refresh {
-  margin-left: auto;
-  background: none;
-  border: 0;
-  padding: 0;
-  font: inherit;
-  color: var(--ui-text-secondary);
-  cursor: pointer;
-}
-.backlinks-refresh:hover {
-  color: var(--ui-text);
-}
-.backlinks-editor {
-  min-height: var(--ui-line-h);
-  outline: none;
-}
-
-/* ---------------------------------------------------------- 查询视图（–D6）
+/* ---------------------------------------------------------- 查询视图
    view block 的 placement：抬头（标题/条数/刷新）是 chrome，列表是共享 store 的活块。
-   与反链 footer 同一套分家方式（border-top + gap），不写块级 padding/margin。 */
+   现在它只出现在「被打开的那个查询块那一端」的段尾槽里（与挂载区同一个槽，在它上面）。 */
 .queryview {
   margin-top: var(--ui-gap-6);
   padding-top: var(--ui-gap-3);
@@ -864,6 +712,118 @@
   content: attr(data-empty-text);
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-sm);
+}
+
+/* ---------------------------------------------------------- 挂载区（块底）
+   一条 tab 条 ＋ 一个 body：箱子是块的 chrome，列表是共享 store 的活块（可原地编辑）。
+   与反链 footer 同一套分家方式（border-top + gap），不写块级 padding/margin。 */
+.mount {
+  margin-top: var(--ui-gap-4);
+  padding-top: var(--ui-gap-2);
+  border-top: 1px solid var(--ui-border-subtle);
+  font-size: var(--ui-fs-sm);
+}
+.mount[hidden] {
+  display: none;
+}
+.mount-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  flex-wrap: wrap;
+}
+.mount-tabs[hidden],
+.mount-body[hidden],
+.mount-summary[hidden],
+.mount-empty[hidden] {
+  display: none;
+}
+/* 一栏 ＝ 一个 tab ＋（用户栏才有）一个 ×。两条按钮同一个盒子，靠底色表达激活。 */
+.mount-tabwrap {
+  display: flex;
+  align-items: center;
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-secondary);
+}
+.mount-tabwrap:hover {
+  background: var(--ui-surface-sunken);
+}
+.mount-tabwrap[data-active='1'] {
+  background: var(--ui-surface-sunken);
+  color: var(--ui-text);
+}
+.mount-tab {
+  background: none;
+  border: 0;
+  padding: var(--ui-gap-1) var(--ui-gap-3);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--ui-radius-sm);
+}
+.mount-x {
+  background: none;
+  border: 0;
+  padding: 0 var(--ui-gap-2);
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+  line-height: 1;
+}
+.mount-x:hover {
+  color: var(--ui-danger);
+}
+.mount-add {
+  background: none;
+  border: 0;
+  padding: var(--ui-gap-1) var(--ui-gap-3);
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.mount-add:hover {
+  color: var(--ui-text);
+}
+.mount-body {
+  margin-top: var(--ui-gap-2);
+}
+.mount-editor {
+  min-height: var(--ui-line-h);
+  outline: none;
+}
+.mount-empty {
+  margin: 0;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-sm);
+}
+/* 折叠：更早的天只留一行摘要（引用条数）。点它展开，展开后 tab 条右端有「收起」。 */
+.mount-summary {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.mount-summary:hover {
+  color: var(--ui-text-secondary);
+}
+.mount-collapse {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.mount-collapse:hover {
+  color: var(--ui-text-secondary);
 }
 
 .ph {
