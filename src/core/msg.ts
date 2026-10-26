@@ -133,11 +133,16 @@ export const MSG = {
      否则小库的下拉会变成空的，用户分不清「库里没有」与「本块已经有」 */
   'ui.props.alreadyOn': '已在块上',
   'ui.props.declaredOn': '已声明',
-  /* 声明给成员的属性（只有页/标签有这一段）：清单 ＋ 解除，不给值控件 */
+  /* 声明给成员的属性（只有页/标签有这一段）：清单 ＋ 解除，入口也在这一段自己身上 */
   'ui.props.declaredTitle': '声明给成员',
   'ui.props.declaredHint': '成员的属性格',
   'ui.props.declaredEmpty': '还没有声明属性',
   'ui.props.undeclare': '解除声明（成员已有的值保留）',
+  /* 两个添加入口：抬头那个写这一块自己的值，这一段那个写成员的声明 */
+  'ui.props.addDeclared': '声明一条属性给成员',
+  'ui.props.addDeclaredShort': '＋ 声明属性',
+  'ui.props.pickDeclared': '选一条要声明给成员的属性…',
+  'ui.props.useDeclared': '声明给成员',
   'ui.props.newOption': '＋ 新建属性…',
   'ui.props.newLabel': '属性名',
   'ui.props.create': '新建',

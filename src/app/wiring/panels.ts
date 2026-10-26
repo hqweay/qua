@@ -254,9 +254,15 @@ export function setupPanels(deps: PanelsDeps) {
       shortId: (id) => shortId(id),
       setValue: (b, propId, value) => void deps.getRegistry().invoke('core.props/set-value', { blockId: b.id, propId, value }, 'ui'),
       clearValue: (b, propId) => void deps.getRegistry().invoke('core.props/clear-value', { blockId: b.id, propId }, 'ui'),
-      addField: (b, propId) => void deps.getRegistry().invoke('core.props/add-field', { blockId: b.id, propId }, 'ui'),
-      // ⚠️ 这条命令收的是**名字**（`label`）：定义块还不存在，id 由模型现生成
-      createDef: (b, label, kind) => void deps.getRegistry().invoke('core.props/create-def', { blockId: b.id, label, kind }, 'ui'),
+      // ⚠️ 两个去处显式声明（`target`），不按块类型猜：标签块既要有自己的值、又要声明给成员
+      addOwnProp: (b, propId) =>
+        void deps.getRegistry().invoke('core.props/add-field', { blockId: b.id, propId, target: 'own' }, 'ui'),
+      createOwnDef: (b, label, kind) =>
+        void deps.getRegistry().invoke('core.props/create-def', { blockId: b.id, label, kind, target: 'own' }, 'ui'),
+      declareProp: (b, propId) =>
+        void deps.getRegistry().invoke('core.props/add-field', { blockId: b.id, propId, target: 'declared' }, 'ui'),
+      createDeclaredDef: (b, label, kind) =>
+        void deps.getRegistry().invoke('core.props/create-def', { blockId: b.id, label, kind, target: 'declared' }, 'ui'),
       declaredFields: (b) => [...kb.declaredFieldsOf(b.id)],
       undeclareField: (b, propId) => void deps.getRegistry().invoke('core.props/undeclare', { blockId: b.id, propId }, 'ui'),
       /**

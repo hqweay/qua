@@ -7,7 +7,6 @@ import {
   declareOwnProp,
   declaredFieldIds,
   displayNameOf,
-  hasList,
   mkPropDef,
   normalizeAlias,
   propKindOf,
@@ -17,7 +16,7 @@ import {
   type Block,
 } from '../../core/index.ts'
 import { t } from '../../core/msg.ts'
-import type { App } from '../../core/ports.ts'
+import type { App, PropTarget } from '../../core/ports.ts'
 import type { PropsDeps } from './types.ts'
 
 export function propsCommands(
@@ -25,12 +24,17 @@ export function propsCommands(
 ): Pick<App, 'setPropValue' | 'clearPropValue' | 'createPropDef' | 'addProp' | 'undeclareProp'> {
   const find = (id: string): Block | undefined => d.kb.get(id)
 
-  const addProp = (blockId: string, propId: string): void => {
+  const addProp = (blockId: string, propId: string, target: PropTarget): void => {
     const b = find(blockId)
     if (!b) return
-    // 页/标签声明它（成员／子块可用）；普通块没有消费者，只登记「这一块有它」
-    if (hasList(b, 'page') || hasList(b, 'tag')) d.write(blockId, () => declareField(b, propId))
-    else d.write(blockId, () => declareOwnProp(b, propId))
+    // 两个去处写两个不同的槽，**不按块类型猜**：
+    // 「自己的值」与「成员的声明」可以同时存在于同一个页/标签块上。
+    if (target === 'declared') {
+      // 声明必须有自动获得方（标签的成员、页的子块）—— 普通块没有，返回 false 不写
+      d.write(blockId, () => void declareField(b, propId))
+      return
+    }
+    d.write(blockId, () => declareOwnProp(b, propId))
   }
 
   return {
@@ -54,7 +58,7 @@ export function propsCommands(
      * 误复用可改回、误分槽要迁数据 ⇒ 默认选「错了好改」的那一边。
      * 定义清单与标签清单都是**命名的库读**（`kb.propDefs`／`kb.tags`），不扫森林。
      */
-    createPropDef: (blockId, label, kind) => {
+    createPropDef: (blockId, label, kind, target) => {
       const name = label.trim()
       if (name === '') {
         d.toast(t('ui.props.needLabel'), 'warn')
@@ -76,7 +80,7 @@ export function propsCommands(
       } else {
         const def = mkPropDef(name, k === 'text' || k === 'number' || k === 'date' || k === 'checkbox' || k === 'select' || k === 'ref' || k === 'url' ? k : 'text')
         propId = def.id
-        // 定义块与「声明到这一块」是**同一笔**：拆开就会留下「定义有了、没人声明」的半批。
+        // 定义块与「挂到这一块」是**同一笔**：拆开就会留下「定义有了、没人用它」的半批。
         // 定义住**森林顶层**（不被任何标签子树带走）；结构写经 `tx.insert` 产 op，
         // 不再零 op 直写——换库之后这条定义才有行可落。
         d.run((tx) => {
@@ -84,14 +88,14 @@ export function propsCommands(
           if (blockId) {
             const b = d.kb.get(blockId)
             if (b) {
-              if (hasList(b, 'page') || hasList(b, 'tag')) tx.patch(blockId, (x) => declareField(x, def.id))
+              if (target === 'declared') tx.patch(blockId, (x) => void declareField(x, def.id))
               else tx.patch(blockId, (x) => declareOwnProp(x, def.id))
             }
           }
         })
         d.toast(t('ui.props.created', { label: name }))
       }
-      if (blockId && existing) addProp(blockId, propId)
+      if (blockId && existing) addProp(blockId, propId, target)
       return propId
     },
 

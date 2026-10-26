@@ -631,6 +631,16 @@
 .props-new-group[hidden] {
   display: none;
 }
+/* 声明那一段的添加入口：它长在「声明给成员」行里，不是抬头那个「＋ 属性」 */
+.props-declare-add {
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  white-space: nowrap;
+}
+/* 声明表单跟在「声明给成员」行后面，左侧缩进一格以表明它属于这一段 */
+.props-form--declared {
+  margin-left: var(--ui-gap-4);
+}
 
 /* ---------------------------------------------------------- 标签页 footer（属于 / 包含 / 成员）
    与反链 footer 同一套分家方式（border-top + gap）；成员列表是共享 store 的活块。 */

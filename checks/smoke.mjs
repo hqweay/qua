@@ -331,7 +331,7 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
    *    所以这里显式新建一个面板属性，否则断言的会是「gutter 过滤生效」而不是「主体是谁」。
    */
   await page.evaluate((id) => {
-    window.__qua.invoke('core.props/create-def', { blockId: id, label: '主体测试属性', kind: 'text' })
+    window.__qua.invoke('core.props/create-def', { blockId: id, label: '主体测试属性', kind: 'text', target: 'own' })
   }, a)
   await page.waitForTimeout(200)
 
@@ -2546,7 +2546,7 @@ await check('T59 `ref` 类型的值走选择器：显示目标**名字**、能�
   await page.waitForTimeout(220)
 
   const defId = await page.evaluate((host) => {
-    window.__qua.invoke('core.props/create-def', { blockId: host, label: '负责人', kind: 'ref' })
+    window.__qua.invoke('core.props/create-def', { blockId: host, label: '负责人', kind: 'ref', target: 'own' })
     return window.__qua.propDefs().find((d) => d.label === '负责人')?.id ?? ''
   }, setup.host)
   assert(defId, '前置：应建出「负责人」字段定义')
@@ -3907,7 +3907,7 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), tag.tagId)
   await page.waitForTimeout(100)
   await page.evaluate(
-    (tagId) => window.__qua.invoke('core.props/create-def', { blockId: tagId, label: '状态', kind: 'text' }),
+    (tagId) => window.__qua.invoke('core.props/create-def', { blockId: tagId, label: '状态', kind: 'text', target: 'declared' }),
     tag.tagId,
   )
   await page.waitForTimeout(200)
@@ -3926,21 +3926,22 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
    * 它曾经被撤掉过（理由：与块菜单「字段声明…」是同一份东西的两套实现，且这里只能解除）。
    * 撤掉之后在页/标签上点「添加属性」**没有任何可见结果** —— 那次点击写的是
    * `_fieldDefs`（给成员用），页自己没有值，块属性那一段一行都不会多。
-   * ⇒ 现在这一段只做**清单 ＋ 解除**，不加第二个「新建/添加」入口（那仍在抬头）。
+   * ⇒ 这一段现在**自带自己的添加入口**（写 `_fieldDefs`），抬头那个写 `_ownProps`。
+   *    两个槽两个入口：共用一个就必须按块类型猜意图，而标签块恰好两个都需要。
    */
   const declared = await page.evaluate(() => ({
     visible: !document.getElementById('inspect-card').hidden,
     declaredRows: [...document.querySelectorAll('.prop-declared [data-declared-prop-id]')].map(
       (x) => x.dataset.declaredPropId,
     ),
-    addEntry: document.querySelectorAll('.prop-declared input, .prop-declared button.props-use').length,
+    ownEntry: document.querySelectorAll('[data-declare-add]').length,
   }))
   assert(declared.visible, '标签页应显示属性区')
   assert(
     declared.declaredRows.includes(own[0].id),
     `属性区的声明段应列出刚声明的「状态」：${JSON.stringify(declared)}`,
   )
-  assert(declared.addEntry === 0, `声明段里不该再有添加/新建控件（那一个入口在抬头）：${JSON.stringify(declared)}`)
+  assert(declared.ownEntry === 1, `声明段要有自己的添加入口（写 _fieldDefs）：${JSON.stringify(declared)}`)
 
   // ③ 成员块上写值：一块一槽 props[propId]
   //
@@ -4063,7 +4064,7 @@ await check('T52 归属边：属于在属性区、成员含算作、禁环、悬
 
   // 算作 ≠ 拥有字段：给 #人物 声明一个字段，只打 #演员 的 B 不获得它
   await page.evaluate(
-    (id) => window.__qua.invoke('core.props/create-def', { blockId: id, label: '姓名', kind: 'text' }),
+    (id) => window.__qua.invoke('core.props/create-def', { blockId: id, label: '姓名', kind: 'text', target: 'declared' }),
     tags['人物'],
   )
   await page.waitForTimeout(150)
@@ -4331,11 +4332,11 @@ await check(
 
     const open = async () => {
       await page.click('#properties-add')
-      await page.waitForSelector('.props-form')
+      await page.waitForSelector('.props-form--own')
     }
     const shape = () =>
       page.evaluate(() => {
-        const form = document.querySelector('.props-form')
+        const form = document.querySelector('.props-form--own')
         const group = form?.querySelector('.props-new-group')
         const visible = (el) => el.getClientRects().length > 0
         return {
@@ -4355,7 +4356,7 @@ await check(
     assert(before.visibleSelects === 1, `默认表单里可见的 select 只能有 picker 一个（类型下拉不许露出来）：${JSON.stringify(before)}`)
 
     const option = await page.evaluate((id) => {
-      const o = [...document.querySelectorAll('.props-form .props-pick option')].find((x) => x.value === id)
+      const o = [...document.querySelectorAll('.props-form--own .props-pick option')].find((x) => x.value === id)
       return o ? o.textContent : null
     }, defId)
     assert(option !== null, `picker 里应有「评分」这一项：${option}`)
@@ -4364,7 +4365,7 @@ await check(
 
     // ② 选真实定义 ⇒ 只露「用这个」，新建组仍收着
     await page.evaluate((id) => {
-      const sel = document.querySelector('.props-form .props-pick')
+      const sel = document.querySelector('.props-form--own .props-pick')
       sel.value = id
       sel.dispatchEvent(new Event('change', { bubbles: true }))
     }, defId)
@@ -4374,13 +4375,13 @@ await check(
     assert(picked.visibleSelects === 1, `选已有属性时类型下拉仍不该出现：${JSON.stringify(picked)}`)
 
     // 直接派发 DOM click：面板会随焦点变化重建，Playwright 的「等元素稳定」会撞上那次重建
-    await page.evaluate(() => document.querySelector('.props-use')?.click())
+    await page.evaluate(() => document.querySelector('.props-form--own .props-use')?.click())
     await page.waitForTimeout(150)
     // 点按钮后焦点在面板里；把光标放回刚才那块，面板目标仍是它
     await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), hostId)
     await page.waitForTimeout(150)
     const used = await page.evaluate((id) => ({
-      form: Boolean(document.querySelector('.props-form')),
+      form: Boolean(document.querySelector('.props-form--own')),
       row: Boolean(document.querySelector(`.prop-row[data-prop-id="${id}"]`)),
     }), defId)
     assert(!used.form, `点「用这个」后表单应关闭：${JSON.stringify(used)}`)
@@ -4391,12 +4392,12 @@ await check(
     await page.waitForTimeout(100)
     await open()
     await page.evaluate(() => {
-      const sel = document.querySelector('.props-form .props-pick')
+      const sel = document.querySelector('.props-form--own .props-pick')
       sel.value = '__new__'
       sel.dispatchEvent(new Event('change', { bubbles: true }))
     })
     const fresh = await page.evaluate(() => {
-      const form = document.querySelector('.props-form')
+      const form = document.querySelector('.props-form--own')
       const group = form?.querySelector('.props-new-group')
       return {
         groupHidden: group?.hidden ?? null,
@@ -4470,9 +4471,9 @@ await check(
     assert(afterTick.todo === 'done', `卡里勾完，左侧方框也要跟着变成已完成：${JSON.stringify(afterTick)}`)
 
     await page.click('#properties-add')
-    await page.waitForSelector('.props-form')
+    await page.waitForSelector('.props-form--own')
     const option = await page.evaluate((propId) => {
-      const o = [...document.querySelectorAll('.props-form .props-pick option')].find((x) => x.value === propId)
+      const o = [...document.querySelectorAll('.props-form--own .props-pick option')].find((x) => x.value === propId)
       return o ? { text: o.textContent, disabled: o.disabled } : null
     }, target.defId)
     assert(option !== null, '已在块上的属性不该从 picker 里消失（那会让小库的下拉变空）')
@@ -6833,7 +6834,7 @@ await check(
     const target = await page.evaluate(() => window.__qua.__editor.store.find(window.__qua.__editor.doc.roots[0].children[0].id)?.id ?? '')
     assert(target !== '', '前置：应有可打字的目标块')
 
-    await page.evaluate((t) => window.__qua.invoke('core.props/create-def', { blockId: t, label: '冒烟字段', kind: 'text' }), target)
+    await page.evaluate((t) => window.__qua.invoke('core.props/create-def', { blockId: t, label: '冒烟字段', kind: 'text', target: 'own' }), target)
     await page.waitForTimeout(200)
 
     const after = await page.evaluate((t) => {
@@ -6890,7 +6891,7 @@ await check(
     const statusId = await page.evaluate(() => window.__qua.propDefs().find((d) => d.label === '任务状态')?.id ?? '')
     assert(statusId !== '', '库里应自带「任务状态」定义')
     await page.evaluate(
-      ({ id, propId }) => window.__qua.invoke('core.props/add-field', { blockId: id, propId }),
+      ({ id, propId }) => window.__qua.invoke('core.props/add-field', { blockId: id, propId, target: 'own' }),
       { id: target.id, propId: statusId },
     )
     await page.waitForTimeout(200)
@@ -8689,8 +8690,8 @@ await check(
       const tag = window.__qua.allBlocks().find((b) => b.lists.includes('tag') && b.text === '浮层甲')
       const atom = window.__qua.atoms().find((a) => a.blockId === hostId && a.label === '浮层甲')
       // 给标签声明两个字段：数值 + 下拉（覆盖两种控件，不必跑全类型）
-      window.__qua.invoke('core.props/create-def', { blockId: tag.id, label: '时长', kind: 'number' })
-      window.__qua.invoke('core.props/create-def', { blockId: tag.id, label: '状态', kind: 'select' })
+      window.__qua.invoke('core.props/create-def', { blockId: tag.id, label: '时长', kind: 'number', target: 'declared' })
+      window.__qua.invoke('core.props/create-def', { blockId: tag.id, label: '状态', kind: 'select', target: 'declared' })
       return { tagId: tag.id, recordId: atom.target.id, hostId }
     }, hostId)
     await page.waitForTimeout(320)
@@ -9178,9 +9179,11 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   assert(!after.form, `新建完表单应关闭：${JSON.stringify(after)}`)
 
   /**
-   * 页/标签上「添加属性」做的是**声明**（`_fieldDefs`），页自己没有值 ⇒
-   * 块属性那一段一行都不会多。所以卡片必须有一段「声明给成员」把结果说出来，
-   * 否则那次点击同样看起来没生效。
+   * 页/标签上「添加属性」现在有**两个入口**，各写各的槽：
+   *   · 抬头的「＋ 属性」→ 这一块自己的值（`_ownProps`）
+   *   · 声明段里的「＋ 声明属性」→ 成员的声明清单（`_fieldDefs`）
+   *
+   * 曾经只有一个入口，靠「这个块有没有 page/tag 露面」猜意图 ⇒ 标签块永远加不了自己的属性。
    */
   const pageId = await page.evaluate(() => {
     const p = window.__qua.allBlocks().find((b) => b.lists.includes('page') && !b.lists.includes('tag'))
@@ -9198,24 +9201,44 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   assert(pageBefore.declared === 0, `前置：这一页一开始没有声明任何属性：${JSON.stringify(pageBefore)}`)
 
   const pickId = await page.evaluate(() => window.__qua.propDefs().find((d) => d.label === '冒烟新属性')?.id ?? '')
+
+  // ① 抬头那个入口 ⇒ 这一页**自己**多一行值（不是声明）
   await page.click('#properties-add')
-  await page.waitForSelector('.props-form')
+  await page.waitForSelector('.props-form--own')
   await page.evaluate((id) => {
-    const sel = document.querySelector('.props-form .props-pick')
+    const sel = document.querySelector('.props-form--own .props-pick')
     sel.value = id
     sel.dispatchEvent(new Event('change', { bubbles: true }))
   }, pickId)
   await page.waitForTimeout(80)
-  await page.evaluate(() => document.querySelector('.props-use')?.click())
+  await page.evaluate(() => document.querySelector('.props-form--own .props-use')?.click())
+  await page.waitForTimeout(300)
+
+  const pageOwn = await page.evaluate((id) => ({
+    rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
+    declared: [...document.querySelectorAll('[data-declared-prop-id]')].length,
+  }), pickId)
+  assert(pageOwn.rows.includes(pickId), `抬头入口要加「这一块自己的」属性行：${JSON.stringify(pageOwn)}`)
+  assert(pageOwn.declared === 0, `抬头入口**不该**写声明清单（那是另一个槽）：${JSON.stringify(pageOwn)}`)
+
+  // ② 声明段自己的入口 ⇒ 只写声明，不给自己加行
+  await page.evaluate(() => document.querySelector('[data-declare-add]')?.click())
+  await page.waitForSelector('.props-form--declared')
+  await page.evaluate((id) => {
+    const sel = document.querySelector('.props-form--declared .props-pick')
+    sel.value = id
+    sel.dispatchEvent(new Event('change', { bubbles: true }))
+  }, pickId)
+  await page.waitForTimeout(80)
+  await page.evaluate(() => document.querySelector('.props-form--declared .props-use')?.click())
   await page.waitForTimeout(300)
 
   const pageAfter = await page.evaluate(() => ({
     declared: [...document.querySelectorAll('[data-declared-prop-id]')].map((x) => x.dataset.declaredPropId),
-    rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].length,
     text: document.querySelector('#properties-body')?.innerText ?? '',
   }))
-  assert(pageAfter.declared.length === 1, `页上添加属性 ⇒ 卡片要出现「声明给成员」那一条：${JSON.stringify(pageAfter)}`)
-  assert(pageAfter.declared[0] === pickId, `声明段要显示刚加的那条定义：${JSON.stringify(pageAfter)}`)
+  assert(pageAfter.declared.length === 1, `声明入口 ⇒ 「声明给成员」那一条要出现：${JSON.stringify(pageAfter)}`)
+  assert(pageAfter.declared[0] === pickId, `声明段要显示刚声明的那条定义：${JSON.stringify(pageAfter)}`)
   assert(pageAfter.text.includes('声明给成员'), `这一段要有名字，不能只靠 chip：${JSON.stringify(pageAfter.text)}`)
 
   // 解除声明：只摘清单，定义本身与别的块的声明都不动
@@ -9228,8 +9251,46 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   assert(undeclared.declared === 0, `解除后声明段应清空：${JSON.stringify(undeclared)}`)
   assert(undeclared.defStillThere, '解除声明不该删掉定义块本身')
 
+  /**
+   * ③ **标签块也能给自己加属性**（这条是本次的核心回归）。
+   *
+   * 判据不是「两个按钮都在」，而是**两个槽各自收到各的东西**：
+   * 标签块上点头部入口 ⇒ `_ownProps` 里多一条；点声明入口 ⇒ `_fieldDefs` 里多一条。
+   * 只看界面「有反应」会让「两个入口写同一个槽」这种错配照样绿。
+   */
+  const tagId = await page.evaluate(() => {
+    const tg = window.__qua.allBlocks().find((b) => b.lists.includes('tag') && !b.lists.includes('page'))
+    if (tg) window.__qua.invoke('core.block/focus-block', { blockId: tg.id })
+    return tg?.id ?? ''
+  })
+  assert(tagId !== '', '假数据里应有标签')
+  await page.waitForTimeout(200)
+
+  const ownDefId = await page.evaluate(() => window.__qua.propDefs().find((d) => d.label === '任务状态')?.id ?? '')
+  await page.click('#properties-add')
+  await page.waitForSelector('.props-form--own')
+  await page.evaluate((id) => {
+    const sel = document.querySelector('.props-form--own .props-pick')
+    sel.value = id
+    sel.dispatchEvent(new Event('change', { bubbles: true }))
+  }, ownDefId)
+  await page.waitForTimeout(80)
+  await page.evaluate(() => document.querySelector('.props-form--own .props-use')?.click())
+  await page.waitForTimeout(300)
+
+  const tagOwn = await page.evaluate((id) => {
+    const raw = window.__qua.__editor.store.find(id)
+    return {
+      ownProps: Array.isArray(raw?.props?._ownProps) ? raw.props._ownProps.length : 0,
+      fieldDefs: Array.isArray(raw?.props?._fieldDefs) ? raw.props._fieldDefs.length : 0,
+      rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
+    }
+  }, tagId)
+  assert(tagOwn.ownProps === 1, `标签块点头部入口要写进它**自己的**值槽：${JSON.stringify(tagOwn)}`)
+  assert(tagOwn.rows.length > 0, `标签块自己的属性要出现在卡里：${JSON.stringify(tagOwn)}`)
+
   await ctx.close()
-  return `新建属性当场建出定义并出现那一行；页上添加 ⇒ 「声明给成员」段出现，可解除且定义仍在`
+  return `两个入口各写各的槽：抬头 ⇒ _ownProps（标签块也能给自己加），声明段 ⇒ _fieldDefs；解除只摘清单`
 })
 
 /** 判红的是「不在已知失败表里的失败」；已知失败逐条打印，不计入退出码 */

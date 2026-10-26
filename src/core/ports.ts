@@ -23,6 +23,17 @@ export type Capability = 'read' | 'write' | 'admin' | 'plugin'
 export type FixtureName = 'seed' | 'empty' | 'sparse' | 'degraded' | 'boot'
 export type PanelKind = 'context' | 'bindings' | 'shortcuts' | 'model'
 
+/**
+ * **一条属性挂到块上的两种去处**（不是「按块类型推断」，是调用方声明）。
+ *
+ *   · `own`      —— 写进这一块自己的值槽（`props._ownProps`）：**我**有这条属性；
+ *   · `declared` —— 写进这一块的成员声明清单（`props._fieldDefs`）：**我的成员**有这一格。
+ *
+ * ⚠️ 为什么必须显式：页/标签**两个都要**（它既可以是成员、又有成员），
+ *    用「有没有 page/tag 露面」去猜会让标签块永远加不了自己的属性（真踩过）。
+ */
+export type PropTarget = 'own' | 'declared'
+
 /** 命令声明（纯语义）：**没有 `key`／`context`／`host`**——落点归绑定表 */
 export interface CommandDecl {
   /** 命名空间名（`core/*` 保留给系统命令） */
@@ -95,10 +106,19 @@ export interface App {
   /* 属性（属性是块第一公民；值在块上 `props[propId]`，一块一槽） */
   setPropValue(blockId: string, propId: string, value: unknown): void
   clearPropValue(blockId: string, propId: string): void
-  /** 新建字段定义（可同时声明到该块）；返回 `propId`（空串＝没建） */
-  createPropDef(blockId: string, label: string, kind: string): string
-  /** 把已有定义加到块上：页/标签＝声明，普通块＝加一个空值槽 */
-  addProp(blockId: string, propId: string): void
+  /**
+   * 新建字段定义，并按 `target` 挂到该块上；返回 `propId`（空串＝没建）。
+   *
+   * `target` 必填、不许猜：写自己的值槽与写「成员的声明清单」是**两件事**，
+   * 用「这个块有没有 page/tag 露面」去推断会让页/标签永远走不到「给自己加一条」。
+   */
+  createPropDef(blockId: string, label: string, kind: string, target: PropTarget): string
+  /**
+   * 把已有定义挂到块上：`own` ＝ 这一块自己的值槽，`declared` ＝ 声明给成员。
+   *
+   * ⚠️ 两个目标写的是两个不同的槽（`_ownProps` / `_fieldDefs`），不共用一条写路径。
+   */
+  addProp(blockId: string, propId: string, target: PropTarget): void
   /** 解除声明（**定义块与成员块上的值都不动**） */
   undeclareProp(blockId: string, propId: string): void
   /* 归属边（属于／包含；一条边存在子块的 `_belongsTo`，任何块都能配） */

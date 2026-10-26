@@ -63,8 +63,8 @@ export const COMMANDS: CommandDecl[] = [
   /* ---- 属性（属性是块第一公民；值在块上 props[propId]） ---- */
   { name: 'core.props/set-value', title: t('cmd.props.set-value'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' }, value: {} } },
   { name: 'core.props/clear-value', title: t('cmd.props.clear-value'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' } } },
-  { name: 'core.props/create-def', title: t('cmd.props.create-def'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, label: { type: 'string' }, kind: { type: 'string' } } },
-  { name: 'core.props/add-field', title: t('cmd.props.add-field'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' } } },
+  { name: 'core.props/create-def', title: t('cmd.props.create-def'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, label: { type: 'string' }, kind: { type: 'string' }, target: { type: 'string', description: 'own = this block\u2019s own value slot; declared = declared to members' } } },
+  { name: 'core.props/add-field', title: t('cmd.props.add-field'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' }, target: { type: 'string', description: 'own = this block\u2019s own value slot; declared = declared to members' } } },
   { name: 'core.props/undeclare', title: t('cmd.props.undeclare'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' } } },
 
   /* ---- 历史 ---- */

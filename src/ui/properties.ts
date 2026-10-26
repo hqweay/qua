@@ -48,15 +48,14 @@ export interface PropertiesDeps {
   shortId: (id: string) => string
   setValue: (b: Block, propId: string, value: unknown) => void
   clearValue: (b: Block, propId: string) => void
-  /** 把已有属性声明到 owner（页/标签），成为它的标签属性；普通块则登记一条自有属性槽 */
-  addField: (b: Block, propId: string) => void
-  /**
-   * 新建定义（可同时声明成标签属性/加块属性槽）。
-   *
-   * ⚠️ 收的是**名字**，不是 `propId`：这条命令是「先造定义」，id 由模型现生成。
-   *    把它写成 `propId` 会让 `label` 永远是空串 ⇒ handler 早退、点了完全没反应（真踩过）。
-   */
-  createDef: (b: Block, label: string, kind: PropKind) => void
+  /** 把已有属性加进**这一块自己的值槽**（`_ownProps`） */
+  addOwnProp: (b: Block, propId: string) => void
+  /** 新建一条定义并加进**这一块自己的值槽** */
+  createOwnDef: (b: Block, label: string, kind: PropKind) => void
+  /** 把已有属性**声明给成员**（`_fieldDefs`，只有页/标签能声明） */
+  declareProp: (b: Block, propId: string) => void
+  /** 新建一条定义并**声明给成员** */
+  createDeclaredDef: (b: Block, label: string, kind: PropKind) => void
   /**
    * 页/标签**声明给成员**的那些属性定义（`_fieldDefs` 的活块）。
    *
@@ -248,7 +247,12 @@ export function makeFieldRow(
 export class PropertiesPanel {
   private readonly els: PropertiesEls
   private readonly deps: PropertiesDeps
-  private formOpen = false
+  /**
+   * 哪个添加表单开着：`own`（这一块自己的值）／`declared`（声明给成员）／`null`。
+   *
+   * ⚠️ 不能是一个布尔：两个入口写的是两个槽，同时开着会让「点了哪个」变得不可知。
+   */
+  private formOpen: 'own' | 'declared' | null = null
 
   constructor(els: PropertiesEls, deps: PropertiesDeps) {
     this.els = els
@@ -256,7 +260,7 @@ export class PropertiesPanel {
     this.els.add.textContent = t('ui.props.addShort')
     this.els.add.title = t('ui.props.add')
     this.els.add.addEventListener('click', () => {
-      this.formOpen = !this.formOpen
+      this.formOpen = this.formOpen === 'own' ? null : 'own'
       this.render()
     })
   }
@@ -324,9 +328,10 @@ export class PropertiesPanel {
      */
     if (hasList(target, 'page') || hasList(target, 'tag')) {
       this.els.body.appendChild(this.buildDeclared(target))
+      if (this.formOpen === 'declared') this.els.body.appendChild(this.buildDeclareForm(target))
     }
 
-    if (this.formOpen) this.els.body.appendChild(this.buildForm(target))
+    if (this.formOpen === 'own') this.els.body.appendChild(this.buildForm(target))
     // 系统信息在**最后**：它是这一块的出生与改动记录，不是可编辑的数据
     this.els.body.appendChild(this.buildSystem(target))
   }
@@ -370,10 +375,11 @@ export class PropertiesPanel {
    * 判据：声明是「我的成员/子块会有这一格」，不是「给这一块设一个值」——
    * 所以这一段只有清单和解除，没有值控件。值仍旧只在成员块上。
    *
+   * ⚠️ 这一段**自带**自己的添加入口（`＋ 声明属性`）：它写的是 `_fieldDefs`，
+   *    而抬头那个「＋ 属性」写的是 `_ownProps`。两个槽两个入口，
+   *    共用一个入口就必须按块类型猜意图，而标签块恰好两个都需要。
+   *
    * ⚠️ 解除声明**不动值**：成员块上已有的值落回「本块自有」，重新声明后自动回来。
-   * ⚠️ 这段与「字段声明」抽屉（`ui/fields-editor.ts`）看的是同一份 `_fieldDefs`：
-   *    抽屉里还能**从全部定义里挑一条**加，这里只列已声明 ＋ 解除。
-   *    多出来的「添加」入口在抬头的「＋ 属性」里（选已有／新建都走它）。
    */
   private buildDeclared(target: Block): HTMLElement {
     const row = document.createElement('div')
@@ -413,6 +419,21 @@ export class PropertiesPanel {
       chip.append(text, del)
       value.appendChild(chip)
     }
+
+    /**
+     * 这一段的添加入口。`data-declare-add` 是给断言认「这是声明那一个，不是抬头那个」的。
+     */
+    const add = document.createElement('button')
+    add.type = 'button'
+    add.className = 'props-declare-add ghost'
+    add.dataset.declareAdd = '1'
+    add.textContent = t('ui.props.addDeclaredShort')
+    add.title = t('ui.props.addDeclared')
+    add.addEventListener('click', () => {
+      this.formOpen = this.formOpen === 'declared' ? null : 'declared'
+      this.render()
+    })
+    value.appendChild(add)
 
     row.append(label, value)
     return row
@@ -554,15 +575,62 @@ export class PropertiesPanel {
   }
 
   /**
-   * 添加块属性：选已有定义（默认复用）或新建一个。
+   * **添加「这一块自己的」属性**：选已有定义（默认复用）或新建一个。
+   *
+   * ⚠️ 这个表单只管一件事：往 `_ownProps` 里加一条。**声明给成员**有它自己的入口
+   *    （`buildDeclareForm`），因为那是写另一个槽（`_fieldDefs`）、长在另一段下面。
+   *    曾经这两件事共用一个表单，靠「这个块有没有 page/tag 露面」猜用户要哪个 ——
+   *    于是标签块永远加不了自己的属性（真踩过）。
    *
    * ⚠️ **类型只属于「新建定义」，不属于「给这一块加一条属性」**：`_kind` 住在定义块上、
-   *    全库一份，而 `addField` 只吃一个 `propId`——选已有属性能配类型是假的。
+   *    全库一份，而「用这个」只吃一个 `propId`——选已有属性能配类型是假的。
    *    所以两件事分两行画：第一行选/复用，第二行（只在「新建」时出现）才是名字＋类型。
    */
   private buildForm(target: Block): HTMLElement {
+    return this.buildAddForm(target, {
+      className: 'props-form props-form--own',
+      pick: t('ui.props.pick'),
+      use: t('ui.props.use'),
+      onUse: (propId) => this.deps.addOwnProp(target, propId),
+      onCreate: (label, kind) => this.deps.createOwnDef(target, label, kind),
+    })
+  }
+
+  /**
+   * **添加「声明给成员」的属性**（只有页/标签有这个入口）。
+   *
+   * 与 `buildForm` 的差别只有「挂到哪个槽」和文案，形状完全共用一份 ——
+   * 两处各写一份表单迟早会长出两种键盘行为（Enter 提交 / Esc 取消 / 新建哨兵）。
+   */
+  private buildDeclareForm(target: Block): HTMLElement {
+    return this.buildAddForm(target, {
+      className: 'props-form props-form--declared',
+      pick: t('ui.props.pickDeclared'),
+      use: t('ui.props.useDeclared'),
+      onUse: (propId) => this.deps.declareProp(target, propId),
+      onCreate: (label, kind) => this.deps.createDeclaredDef(target, label, kind),
+    })
+  }
+
+  /**
+   * 两个添加入口共用的表单形状。
+   *
+   * 差异只有三处（外层类名 / 两条按钮文案 / 两个回调），所以收成一份：
+   * 「选已有 → 用这个」「新建 → 名字＋类型」这两个形态是同一个交互，
+   * 分两份写就会出现「一个表单 Enter 能用、另一个不能」。
+   */
+  private buildAddForm(
+    target: Block,
+    opts: {
+      className: string
+      pick: string
+      use: string
+      onUse: (propId: string) => void
+      onCreate: (label: string, kind: PropKind) => void
+    },
+  ): HTMLElement {
     const form = document.createElement('form')
-    form.className = 'props-form'
+    form.className = opts.className
     form.addEventListener('submit', (e) => e.preventDefault())
 
     /** 「新建定义」的哨兵值：它不是任何真实定义的 id，只用来把下拉切到第二行 */
@@ -572,7 +640,7 @@ export class PropertiesPanel {
     pick.className = 'prop-input props-pick'
     const placeholder = document.createElement('option')
     placeholder.value = ''
-    placeholder.textContent = t('ui.props.pick')
+    placeholder.textContent = opts.pick
     pick.appendChild(placeholder)
     /**
      * **「已有」＝ 这一块已经有这条属性**，而它的入口不一定在这个面板：
@@ -606,12 +674,11 @@ export class PropertiesPanel {
     const pickBtn = document.createElement('button')
     pickBtn.type = 'button'
     pickBtn.className = 'props-use'
-    pickBtn.textContent = t('ui.props.use')
+    pickBtn.textContent = opts.use
     pickBtn.addEventListener('click', () => {
       if (!pick.value || pick.value === NEW_OPTION) return
-      this.deps.addField(target, pick.value)
-      this.formOpen = false
-      this.render()
+      opts.onUse(pick.value)
+      this.closeForm()
     })
 
     const label = document.createElement('input')
@@ -635,9 +702,8 @@ export class PropertiesPanel {
         this.deps.toast(t('ui.props.needLabel'), 'warn')
         return
       }
-      this.deps.createDef(target, name, kind.value as PropKind)
-      this.formOpen = false
-      this.render()
+      opts.onCreate(name, kind.value as PropKind)
+      this.closeForm()
     })
 
     // 新建组整块占一行：它的三个控件只一起出现，不能和第一行的「用这个」混排
@@ -658,10 +724,7 @@ export class PropertiesPanel {
     cancel.type = 'button'
     cancel.className = 'ghost'
     cancel.textContent = t('ui.props.cancel')
-    cancel.addEventListener('click', () => {
-      this.formOpen = false
-      this.render()
-    })
+    cancel.addEventListener('click', () => this.closeForm())
 
     // 库里一条定义都没有时，空下拉是死路：直接切到「新建」并展开第二行。
     // ⚠️ 只有「没有定义」才算死路；「定义都在本块上」不是 —— 下拉里那些灰掉的项
@@ -671,5 +734,11 @@ export class PropertiesPanel {
 
     for (const el of [pick, pickBtn, cancel, newGroup]) form.appendChild(el)
     return form
+  }
+
+  /** 关掉当前打开的那个添加表单并重画（两个入口共用一份状态） */
+  private closeForm(): void {
+    this.formOpen = null
+    this.render()
   }
 }
