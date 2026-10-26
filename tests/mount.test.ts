@@ -150,3 +150,40 @@ test('日记共享配置只有一份：同一天读到的永远是那个派生 i
   assert.equal(a.id, b2.id)
   assert.equal(a.id, journalMountsId())
 })
+
+/**
+ * **标签块的「同类」＝ 它的成员**。
+ *
+ * 打开一个标签要看的是「这一支下面有哪些块」——那正是标签页 footer 原来的成员列表。
+ * 标签块自己没有 `_tags`（它就是那条轴），所以这条口径必须显式并进去，否则
+ * 「成员」这个读法会随着 footer 一起消失（不报错，只是没地方看）。
+ */
+test('标签块的「同类」用的是它自己的名字：条件＝{tag: 主名}', () => {
+  const tag = mkTagBlock('人物')
+  const tabs = mountTabsOf(tag, [tag], NOW)
+  const same = tabs.find((t) => t.kind === 'same')
+  assert.ok(same, '标签块也要有「同类」栏（它就是成员列表的落点）')
+  assert.deepEqual(same.spec, { where: { tag: '人物' } }, '只有一个标签时就是它自己那一条')
+})
+
+test('兼位块（既带标签又是标签）：两条轴并进同一个条件（any）', () => {
+  const a = mkTagBlock('甲')
+  const b = mkTagBlock('乙')
+  const both = { ...mkTagBlock('丙'), props: { _aliases: ['丙'], _lists: ['tag'], _tags: [a.id] } }
+  const tabs = mountTabsOf(both, [a, b, both], NOW)
+  const same = tabs.find((t) => t.kind === 'same')
+  assert.ok(same)
+  assert.deepEqual(same.spec, { where: { any: [{ tag: '$self' }, { tag: '丙' }] } }, '两个来源都在：一个条件两半')
+})
+
+test('「同类」沿下级标签展开（算作）：#人物 的成员含只打 #演员 的块', () => {
+  const 人物 = mkTagBlock('人物')
+  const 演员 = mkTagBlock('演员')
+  // 归属边：演员 归在 人物 下（任何块都能配，这条边住在子块上）
+  const 演员WithEdge = { ...演员, props: { ...(演员.props ?? {}), _belongsTo: [人物.id] } }
+  const forest = [人物, 演员WithEdge]
+  const tabs = mountTabsOf(人物, forest, NOW)
+  const same = tabs.find((t) => t.kind === 'same')
+  assert.ok(same)
+  assert.deepEqual(same.spec, { where: { any: [{ tag: '人物' }, { tag: '演员' }] } })
+})

@@ -21,9 +21,10 @@
 import { derivedId } from './ids.ts'
 import { isJournal, journalDate, todayISO } from './journal.ts'
 import { displayTextOf } from './alias.ts'
-import { prop, type Block } from './model.ts'
+import { hasList, primaryAliasOf, prop, type Block } from './model.ts'
 import { tagIdsOf } from './tags.ts'
-import type { QuerySpec } from './query.ts'
+import { descendantTagIds } from './tag-tree.ts'
+import type { QueryNode, QuerySpec } from './query.ts'
 import { findById } from './query.ts'
 
 /** `_mounts`：宿主块上的一格（有序） */
@@ -51,7 +52,6 @@ export interface MountTab {
  * 而「提及」本来就能用「正文有我这串字 ∧ 没有指向我的边」说清。
  */
 const SPEC_REFS: QuerySpec = { where: { ref: '$self' } }
-const SPEC_SAME: QuerySpec = { where: { tag: '$self' } }
 const SPEC_MENTIONS: QuerySpec = { where: { all: [{ text: '$self' }, { not: { ref: '$self' } }] } }
 
 /**
@@ -63,7 +63,18 @@ const SPEC_MENTIONS: QuerySpec = { where: { all: [{ text: '$self' }, { not: { re
  */
 export function mountTabsOf(host: Block, forest: readonly Block[], now: Date = new Date()): MountTab[] {
   const tabs: MountTab[] = [{ kind: 'refs', spec: SPEC_REFS }]
-  if (tagIdsOf(host).length > 0) tabs.push({ kind: 'same', spec: SPEC_SAME })
+  /**
+   * 「同类」＝ 与这一块**同一条分类轴**的块。
+   *
+   * 两个来源合成同一栏，因为它们是同一个问题的两种问法：
+   *   · 普通块：它带着哪些标签（`_tags`）⇒ 同标签的块；
+   *   · **标签块自己**：它就是那条轴 ⇒ 它的成员（「这一支下面有哪些块」）。
+   * 少了后一边，打开一个标签就再也看不到它的成员了（成员列表原来的落点是标签页 footer）。
+   * ⚠️ 标签块用**自己的主名**当条件（派生时现算，改名自动跟上）；它没有 `_tags`，
+   *    所以 `{tag:'$self'}` 对它永远是空集，必须把这一支显式并进去。
+   */
+  const same = sameSpecOf(host, forest)
+  if (same) tabs.push({ kind: 'same', spec: same })
   if (displayTextOf(host) !== '') tabs.push({ kind: 'mentions', spec: SPEC_MENTIONS })
   for (const tab of userMountsOf(host, forest, now)) tabs.push(tab)
   return tabs
@@ -79,6 +90,27 @@ export function userMountsOf(host: Block, forest: readonly Block[], now: Date = 
   if (!canEditMounts(host, now)) return []
   const source = isJournal(host) ? journalMountsBlock(forest) : host
   return readMounts(source)
+}
+
+/**
+ * 「同类」的条件；两个来源都空 ⇒ `null`（这一栏根本不出现）。
+ *
+ * ⚠️ 标签那一支要**沿下级标签展开**（「算作」）：`#人物` 的成员含只打 `#演员` 的块。
+ *    这条口径只在 `core/tag-tree.ts` 里有一份（`descendantTagIds`）——在这里另写一遍
+ *    「沿归属边往下走」就会出现两种「谁算这一支的成员」。
+ */
+function sameSpecOf(host: Block, forest: readonly Block[]): QuerySpec | null {
+  const nodes: QueryNode[] = []
+  if (tagIdsOf(host).length > 0) nodes.push({ tag: '$self' })
+  if (hasList(host, 'tag')) {
+    for (const id of descendantTagIds(host.id, forest)) {
+      const tag = findById(forest, id)
+      const name = tag ? primaryAliasOf(tag).trim() : ''
+      if (name !== '') nodes.push({ tag: name })
+    }
+  }
+  if (nodes.length === 0) return null
+  return { where: nodes.length === 1 ? nodes[0]! : { any: nodes } }
 }
 
 /**
