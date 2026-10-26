@@ -10,7 +10,7 @@ import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency,
 import { plainText, type RunWithId } from './core/runs.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
-import { BlockEditor } from './view/editor.ts'
+import { BlockEditor, type ViewEvents } from './view/editor.ts'
 import {
   BINDINGS,
   keyLabel,
@@ -1098,67 +1098,87 @@ editorEl.addEventListener('focusin', () => {
   ed = mainEd
 })
 
-ed.events = {
-  change: () => {
+/**
+ * **一台视图编辑器的完整事件表**：正文、挂载区、查询结果**共用这一份**。
+ *
+ * 为什么收成一个函数：这些编辑器是同一种东西（`BlockEditor` ＋ 一份 roots），
+ * 差别只在「装载谁」。三处各接一半 ⇒ 面板里点引用不跳、右键没有块菜单、「#」不弹补全，
+ * 而这些漏接都不报错。改一处就该三处一起变。
+ *
+ * `change` 由调用方给：各自要刷的集合不同（正文还要刷空态提示与侧槽卡片）。
+ * `editor` 传一个取值函数而不是实例：`ed` 是 `let`（焦点切走时会变）。
+ */
+function viewEvents(editor: () => BlockEditor, change: ViewEvents['change'], via: string): ViewEvents {
+  const active = () => editor()
+  return {
+    change,
+    /**
+     * **编辑边界上撞名**：正文已经被编辑器回滚成改名前那个值，这里只负责说一句为什么。
+     * 拒绝发生在用户离开这一行的那一刻，途中没有可以放确认框的位置 —— 提示是唯一的出口。
+     */
+    editRejected: (name, conflict) => {
+      app.toast(t('ui.toast.nameTaken', { name, where: takenWhere(conflict) }), 'warn')
+    },
+    // 划选气泡（顶部工具栏作废后的落点）：选区一变就重算「该不该在、装哪几颗」
+    selChange: () => {
+      refreshSelectionBar()
+    },
+    /**
+     * 编辑器报「此刻在敲什么」：同一个触发字符继续打字就只换行（浮层不重建、不抢焦点），
+     * 换成另一个字符（或从关闭状态敲下）才重新打开。
+     */
+    triggerQuery: (hit, rect) => {
+      if (hit === null) {
+        if (triggerCh) {
+          triggerCh = null
+          layers.closeMenu()
+        }
+        return
+      }
+      const trigger = triggers.get(hit.ch)
+      if (!trigger) return
+      if (triggerCh === hit.ch && layers.open) {
+        if (hit.query !== lastQuery) {
+          lastQuery = hit.query
+          layers.setRows(trigger.source(hit.query))
+        }
+        return
+      }
+      openTrigger(hit.ch, hit.query, rect)
+    },
+    refClick: (ref, mods, el) => handleRefClick(ref, mods, el),
+    // 复盘空天格子里落笔：编辑器只报日期，物化那一天（幂等）与重装载归命令层
+    shellWrite: (date) => void app.journalShellWrite(date),
+    // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
+    // 所以「点块标进去」与「点面包屑出来」共用一套语义，没有第二种入口。
+    focusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, via),
+    // Shift+点块标 ⇒ 在右槽打开一个窗口（已在别处则移过去；已在本侧则定位）
+    openInDock: (blockId) => openWindow('right', blockId),
+    blockMenu: (blockId, rect) => {
+      const ed = active()
+      // 命中**已选中的块**（且多块）⇒ 多块菜单；否则清块选区，走原单块菜单
+      if (ed.inBlockSelection(blockId) && ed.blockSelectionCount() > 1) {
+        showMenu({ kind: 'menu', prefix: 'blockSel/', anchor: rect, title: t('menu.title.blockSel') })
+        return
+      }
+      ed.clearBlockSelection()
+      ed.sel = { aBlock: blockId, aOff: ed.sel?.aBlock === blockId ? (ed.sel?.aOff ?? 0) : 0, hBlock: blockId, hOff: ed.sel?.aBlock === blockId ? (ed.sel?.hOff ?? 0) : 0 }
+      showMenu({ kind: 'menu', prefix: 'block/', anchor: rect, title: t('menu.title.block') })
+    },
+  }
+}
+
+ed.events = viewEvents(
+  () => mainEd,
+  () => {
     syncSections()
     scheduleSave()
     chrome.renderEmptyHint(activeBlock().children)
     renderDocks() // 块数变了要更新
     scheduleBadge()
   },
-  /**
-   * **编辑边界上撞名**：正文已经被编辑器回滚成改名前那个值，这里只负责说一句为什么。
-   * 拒绝发生在用户离开这一行的那一刻，途中没有可以放确认框的位置 —— 提示是唯一的出口。
-   */
-  editRejected: (name, conflict) => {
-    app.toast(t('ui.toast.nameTaken', { name, where: takenWhere(conflict) }), 'warn')
-  },
-  // 划选气泡（顶部工具栏作废后的落点）：选区一变就重算「该不该在、装哪几颗」
-  selChange: () => {
-    refreshSelectionBar()
-  },
-  /**
-   * 编辑器报「此刻在敲什么」：同一个触发字符继续打字就只换行（浮层不重建、不抢焦点），
-   * 换成另一个字符（或从关闭状态敲下）才重新打开。
-   */
-  triggerQuery: (hit, rect) => {
-    if (hit === null) {
-      if (triggerCh) {
-        triggerCh = null
-        layers.closeMenu()
-      }
-      return
-    }
-    const trigger = triggers.get(hit.ch)
-    if (!trigger) return
-    if (triggerCh === hit.ch && layers.open) {
-      if (hit.query !== lastQuery) {
-        lastQuery = hit.query
-        layers.setRows(trigger.source(hit.query))
-      }
-      return
-    }
-    openTrigger(hit.ch, hit.query, rect)
-  },
-  refClick: (ref, mods, el) => handleRefClick(ref, mods, el),
-  // 复盘空天格子里落笔：编辑器只报日期，物化那一天（幂等）与重装载归命令层
-  shellWrite: (date) => void app.journalShellWrite(date),
-  // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
-  // 所以「点块标进去」与「点面包屑出来」共用一套语义，没有第二种入口。
-  focusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, 'editor'),
-  // Shift+点块标 ⇒ 在右槽打开一个窗口（已在别处则移过去；已在本侧则定位）
-  openInDock: (blockId) => openWindow('right', blockId),
-  blockMenu: (blockId, rect) => {
-    // 命中**已选中的块**（且多块）⇒ 多块菜单；否则清块选区，走原单块菜单
-    if (ed.inBlockSelection(blockId) && ed.blockSelectionCount() > 1) {
-      showMenu({ kind: 'menu', prefix: 'blockSel/', anchor: rect, title: t('menu.title.blockSel') })
-      return
-    }
-    ed.clearBlockSelection()
-    ed.sel = { aBlock: blockId, aOff: ed.sel?.aBlock === blockId ? (ed.sel?.aOff ?? 0) : 0, hBlock: blockId, hOff: ed.sel?.aBlock === blockId ? (ed.sel?.hOff ?? 0) : 0 }
-    showMenu({ kind: 'menu', prefix: 'block/', anchor: rect, title: t('menu.title.block') })
-  },
-}
+  'editor',
+)
 
 let panels: ReturnType<typeof setupPanels>
 let diag: ReturnType<typeof setupDiagnostics>
@@ -1174,6 +1194,10 @@ const { renderMounts, renderProperties, scheduleProperties, pickRefValue } = set
   scheduleSave,
   scheduleBadge,
   refClick: handleRefClick,
+  // 挂载区/查询结果接的是**同一份**事件表（差别只在「装载谁」）
+  wireEditor: (editor, change, via) => {
+    editor.events = viewEvents(() => editor, change, via)
+  },
   getWs: () => ws,
   getEd: () => ed,
   setEd: (next) => {

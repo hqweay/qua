@@ -26,7 +26,6 @@ import {
   type Block,
   type BlockStore,
 } from '../core/index.ts'
-import type { RefClickHit, RefClickMods } from '../view/editor-events.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
@@ -43,12 +42,8 @@ export interface QueryViewDeps {
   onChange: () => void
   /** 获得焦点时装配层把「活动编辑器」切过来 */
   onFocus: () => void
-  /** 点结果块的块标：聚焦/zoom 到它（中心槽换内容）；由装配层注入 */
-  onFocusBlock: (blockId: string) => void
-  /** Shift+点结果块的块标：在右槽打开它 */
-  onOpenInDock: (blockId: string) => void
-  /** 点行内原子：与正文同一条逻辑（左键打开、⌥ 详情、解析不到仍弹详情） */
-  onRefClick?: (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement) => void
+  /** 接上与正文同一套编辑器事件（见 `MountAreaDeps.wire`） */
+  wire: (editor: BlockEditor, change: (kind: string) => void) => void
   /** 提示（刷新失败、丢了几条） */
   toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
@@ -133,16 +128,11 @@ export class QueryView {
       // 折叠态是视图私有的（理由同反链）
       doc: { roots: [], folded: {} },
     })
-    this.editor.events = {
-      change: (kind) => {
-        if (kind === 'load') return
-        // 视图内编辑：内容立即生效（D5），但要落盘；成员不动（D4）
-        this.deps.onChange()
-      },
-      focusBlock: (blockId) => this.deps.onFocusBlock(blockId),
-      openInDock: (blockId) => this.deps.onOpenInDock(blockId),
-      refClick: (ref, mods, el) => this.deps.onRefClick?.(ref, mods, el),
-    }
+    this.deps.wire(this.editor, (kind) => {
+      if (kind === 'load') return
+      // 视图内编辑：内容立即生效（D5），但要落盘；成员不动（D4）
+      this.deps.onChange()
+    })
 
     // ⚠️ 这里**只**点亮 stale，不重排列表（D4 的「不自动重算」）。
     // ⚠️ 拿得到「动过哪些块」就精确判断；拿不到（`ids === undefined`，例如结构操作）就先不点亮——

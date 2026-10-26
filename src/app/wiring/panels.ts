@@ -48,6 +48,11 @@ export type PanelsDeps = {
   scheduleSave: () => void
   scheduleBadge: () => void
   /**
+   * **给一台视图编辑器接上与正文同一套事件**（`main.ts` 的 `viewEvents` 是唯一一份）。
+   * 挂载区、查询结果都走它 —— 各接一半的代价是「面板里点引用不跳」这类静默漏接。
+   */
+  wireEditor: (editor: BlockEditor, change: (kind: string) => void, via: string) => void
+  /**
    * **「指向某块的露面」被点**（行内引用 / 行尾标签 chip 共用同一条口径）。
    * 由装配层注入，本层不认识「去哪」的语义；`el` 只是浮层锚点，可省。
    */
@@ -330,9 +335,8 @@ export function setupPanels(deps: PanelsDeps) {
           const inst = mountInstances.get(hostId)
           if (inst?.area.blockEditor) deps.setEd(inst.area.blockEditor)
         },
-        onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'mount'),
-        onOpenInDock: (blockId) => deps.openInDock(blockId),
-        onRefClick: (ref, mods, el) => refClick(ref, mods, el),
+        // 与正文同一套事件（点引用/块标/右键菜单/`#`·`@` 补全），装配层只给这一份
+        wire: (editor, change) => deps.wireEditor(editor, change, 'mount'),
         onAddTab: (id) => openMountPicker(id),
         onRemoveTab: (id, index) => {
           void deps.getRegistry().invoke('core.mount/remove', { hostId: id, index }, 'mount')
@@ -361,9 +365,7 @@ export function setupPanels(deps: PanelsDeps) {
             const inst = mountInstances.get(hostId)
             if (inst?.query) deps.setEd(inst.query.editor)
           },
-          onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'query'),
-          onOpenInDock: (blockId) => deps.openInDock(blockId),
-          onRefClick: (ref, mods, el) => refClick(ref, mods, el),
+          wire: (editor, change) => deps.wireEditor(editor, change, 'query'),
           toast: (text, kind) => app.toast(text, kind),
         })
       : null

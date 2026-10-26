@@ -15,7 +15,6 @@
  */
 import { type Block, type BlockStore, type MountTab, mountTabsOf, canEditMounts } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
-import type { RefClickHit, RefClickMods } from '../view/editor-events.ts'
 import { t, type MsgId } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
 
@@ -31,10 +30,14 @@ export interface MountAreaDeps {
   onChange: (kind: string) => void
   /** 获得焦点：装配层把「活动编辑器」切过来 */
   onFocus: () => void
-  onFocusBlock: (blockId: string) => void
-  /** Shift+点行/块标：在右槽打开 */
-  onOpenInDock: (blockId: string) => void
-  onRefClick?: (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement) => void
+  /**
+   * **接上与正文同一套编辑器事件**（点引用/点块标/右键块菜单/`#`·`@` 补全…）。
+   *
+   * 为什么是「接一份」而不是在这里一项一项写：这些编辑器是同一种东西，
+   * 差别只在装载谁。分散着接就会漏（漏了也不报错：面板里点引用不跳、右键没菜单）。
+   * 事件表本身在装配层只有一份（`viewEvents`）。
+   */
+  wire: (editor: BlockEditor, change: (kind: string) => void) => void
   /** 「＋」：由装配层弹一个选择器（本层不知道浮层长什么样） */
   onAddTab?: (hostId: string) => void
   /** 「×」：摘掉一栏用户 tab（`index` 是**用户栏**的序，不是整条 tab 条的序） */
@@ -340,14 +343,9 @@ export class MountArea {
       // 折叠态是视图私有的（在块底收起一行，不该让正文里那一块也收起来）
       doc: { roots: [], folded: {} },
     })
-    ed.events = {
-      change: (kind) => {
-        if (kind !== 'load') this.deps.onChange(kind)
-      },
-      focusBlock: (blockId) => this.deps.onFocusBlock(blockId),
-      openInDock: (blockId) => this.deps.onOpenInDock(blockId),
-      refClick: (ref, mods, el) => this.deps.onRefClick?.(ref, mods, el),
-    }
+    this.deps.wire(ed, (kind) => {
+      if (kind !== 'load') this.deps.onChange(kind)
+    })
     this.editorEl.addEventListener('focusin', () => this.deps.onFocus())
     this.editorEl.dataset.editor = '1'
     this.editor = ed

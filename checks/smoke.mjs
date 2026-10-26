@@ -9829,6 +9829,67 @@ await check('T134 日记的自定义栏跟随今天：加一栏 ⇒ 推到明天
   return `${day1.slice(-6)} 加栏 → 明天 ${day2.slice(-6)} 有同一栏且列出它自己的块 → 昨天没有、无加号 → 摘掉后块数仍 ${blocksAfter}`
 })
 
+await check('T135 挂载区与正文**同一套手势**：点引用跳、块标聚焦、右键出块菜单、`#` 出补全', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.loadState('seed'))
+  await page.waitForTimeout(300)
+  // 页 P：一个块 B 引用了 P（引用栏里有它）＋ 再引用一页 Q（面板里点它应当跳）
+  const ids = await page.evaluate(() => {
+    const pages = window.__qua.pages()
+    const P = pages[0].id
+    const Q = pages[1].id
+    window.__qua.invoke('core.page/open', { pageId: P })
+    const rows = window.__qua.__editor.rows().map((r) => r.block)
+    const b = rows.find((x) => x.id !== P && x.id !== Q && x.children.length === 0)
+    window.__qua.focusBlock(b.id, 0)
+    window.__qua.invoke('core.editor/insert-page-ref', { pageId: P })
+    window.__qua.invoke('core.editor/insert-page-ref', { pageId: Q })
+    return { P, Q, b: b.id }
+  })
+  await page.waitForTimeout(500)
+  const panel = `#editor .mount .mount-editor .blk[data-block-id="${ids.b}"]`
+
+  // ① 行内引用：点它 ⇒ 中心跳到目标（与正文同一条 refClick）
+  await page.locator(`${panel} [data-ref-to="${ids.Q}"]`).first().click()
+  await page.waitForTimeout(350)
+  assert((await page.evaluate(() => window.__qua.snapshot().activeId)) === ids.Q, '面板里的行内引用应当跳转')
+
+  // ② 块标：点它 ⇒ 聚焦到那一块（与正文同一颗块标、同一条命令）
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), ids.P)
+  await page.waitForTimeout(400)
+  await page.locator(`${panel} > .left > .marker`).first().click()
+  await page.waitForTimeout(400)
+  assert((await page.evaluate(() => window.__qua.snapshot().activeId)) === ids.b, '面板里的块标应当聚焦到那一块')
+
+  // ③ 右键：出块菜单（这条以前在面板里是空的——事件只接了一半）
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), ids.P)
+  await page.waitForTimeout(400)
+  await page.locator(`${panel} > .left > .marker`).first().click({ button: 'right' })
+  await page.waitForTimeout(250)
+  const menu = await page.evaluate(() => ({
+    open: Boolean(document.querySelector('.layer')),
+    rows: [...document.querySelectorAll('.layer-item')].map((e) => e.textContent ?? ''),
+  }))
+  assert(menu.open && menu.rows.length > 0, `面板里右键应出块菜单：${JSON.stringify(menu)}`)
+  await page.evaluate(() => window.__qua.__layers.closeMenu())
+  await page.waitForTimeout(150)
+
+  // ④ `#`：出标签补全（同一条触发链，证据是浮层里出现了标签源的行）
+  await page.locator(`${panel} > .tx`).first().click()
+  await page.keyboard.press('End')
+  // ⚠️ `#` 后面要跟一个字才成边（与正文同一个判据：光一个 `#` 不算触发完）
+  await page.keyboard.type(' #设')
+  await page.waitForTimeout(350)
+  const tagLayer = await page.evaluate(() => ({
+    open: Boolean(document.querySelector('.layer')),
+    rows: document.querySelectorAll('.layer-item').length,
+  }))
+  assert(tagLayer.open && tagLayer.rows > 0, `面板里敲 \`#设\` 也应弹标签补全（与正文同一条触发链）：${JSON.stringify(tagLayer)}`)
+  await page.keyboard.press('Escape')
+  await ctx.close()
+  return '引用跳转 / 块标聚焦 / 右键块菜单 / `#` 补全 —— 面板与正文走同一份事件表'
+})
+
 /** 判红的是「不在已知失败表里的失败」；已知失败逐条打印，不计入退出码 */
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
