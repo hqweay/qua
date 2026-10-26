@@ -160,6 +160,13 @@ export interface EditorBridge {
   /** Shift+左键点块标（待办行的方框也是块标）＝ 在右槽钉住 / 取消钉住 */
   openInDock: (blockId: string) => void
   /**
+   * **面包屑普通点击 ＝ 就地展开上下文**；`rowId` 是这一格所在的行。
+   * 省略 ⇒ 事件层退回 `focusBlock`（不是所有编辑器都有「一栏可装载的根」）。
+   */
+  expandContext?: (ancestorId: string, rowId: string) => void
+  /** 展开根行首的「收起上下文」：收掉这一层，露出下一层 */
+  contextBack?: (rootId: string) => void
+  /**
    * 折叠 / 展开某块（点三角）*/
   toggleCollapse: (blockId: string) => void
   toggleChildrenCollapse: (blockId: string) => void
@@ -439,13 +446,35 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     }
 
     /**
-     * **面包屑一格**：聚焦到那个祖先（与块标左键同一个入口），Shift+点＝钉到右槽。
-     * 必须在「点空白建块」之前判：面包屑不是正文，但也不该被当成空白。
+     * **「收起上下文」**：收掉这一层展开，露出下一层（退完就是原始命中行）。
+     */
+    const backEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.contextBackFor !== undefined)
+    if (backEl?.dataset.contextBackFor) {
+      br.contextBack?.(backEl.dataset.contextBackFor)
+      e.preventDefault()
+      return
+    }
+
+    /**
+     * **面包屑一格**：普通点＝就地展开上下文；⌘/Ctrl 点＝跳转；Shift 点＝右槽。
+     * `rowId` 是这一格所在的行（原始命中或已展开的上下文根），用来算展开后滚到哪。
      */
     const crumbEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.crumbFor !== undefined)
     if (crumbEl?.dataset.crumbFor) {
-      if (e.shiftKey) br.openInDock(crumbEl.dataset.crumbFor)
-      else br.focusBlock(crumbEl.dataset.crumbFor)
+      const ancestor = crumbEl.dataset.crumbFor
+      if (e.shiftKey) {
+        br.openInDock(ancestor)
+      } else if (e.metaKey || e.ctrlKey) {
+        br.focusBlock(ancestor)
+      } else if (br.expandContext) {
+        const rowEl = path.find(
+          (n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('blk') && n.dataset.blockId !== undefined,
+        )
+        br.expandContext(ancestor, rowEl?.dataset.blockId ?? '')
+      } else {
+        // 没有「一栏可装载的根」的编辑器：退回旧行为，不让点击看起来像成功
+        br.focusBlock(ancestor)
+      }
       e.preventDefault()
       return
     }

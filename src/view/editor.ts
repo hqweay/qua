@@ -175,6 +175,16 @@ export interface ViewOpts {
    */
   autoReload?: boolean
   /**
+   * **点行首面包屑（普通点击）＝就地展开上下文**。
+   * `rowId` 是这一格所在的行（原始命中或已展开的上下文根），用来算滚到哪。
+   *
+   * 省略 ⇒ 事件层退回 `focusBlock`（旧行为）：不是所有编辑器都有「一栏可装载的根」。
+   * `⌘/Ctrl` 点与 Shift 点不走这里（仍是跳转／右槽）。
+   */
+  onExpandContext?: (ancestorId: string, rowId: string) => void
+  /** 展开出来的上下文根行首的「收起上下文」＝收掉这一层，露出下一层 */
+  onContextBack?: (rootId: string) => void
+  /**
    * **段的排列**（视图配置轴，不是导航）：`column`（单列流，缺省）｜`row`（段横排）｜`grid`（折行网格）。
    * 只改「段怎么摆」，不改「段是什么」——DOM 形状对所有 layout 一致（见 `renderRows` 的 `.sec`）。
    */
@@ -347,6 +357,9 @@ export class BlockEditor {
    * 逐个接过来、接一个有断言一个，免得「一次改全线」把行为变化的来源和管道本身混在一起。
    */
   write: Run | undefined
+  /** 面包屑的就地展开／逐层收起；见 `ViewOpts` */
+  private readonly onExpandContext: ViewOpts['onExpandContext']
+  private readonly onContextBack: ViewOpts['onContextBack']
   /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
   private readonly offStore: () => void
   private readonly unbind: () => void
@@ -357,6 +370,8 @@ export class BlockEditor {
     this.allowBlankCreate = o.allowBlankCreate !== false
     this.allowRootRemove = o.allowRootRemove !== false
     this.write = o.write
+    this.onExpandContext = o.onExpandContext
+    this.onContextBack = o.onContextBack
     this.doc = o.doc
     this.setLayout(o.layout ?? 'column')
     /**
@@ -427,7 +442,7 @@ export class BlockEditor {
       .map((id) => this.store.find(id))
       .filter((b): b is Block => Boolean(b))
     // 折叠表属于**这一份文档**（视图各带各的），换 roots 时原样保留
-    this.doc = { roots, folded: this.doc.folded, contexts: this.doc.contexts }
+    this.doc = { roots, folded: this.doc.folded, contexts: this.doc.contexts, expandedRoots: this.doc.expandedRoots }
     // 焦点只算**本视图自己的**（里层编辑器是独立编辑岛，不是「我在编辑」）
     const focused = restoreSelection && this.ownFocus()
     this.renderAll()
@@ -515,6 +530,24 @@ export class BlockEditor {
 
   blockEl(id: string): HTMLElement | null {
     return this.container.querySelector<HTMLElement>(`.blk[data-block-id="${id}"]`)
+  }
+
+  /**
+   * 把某一行滚进视口并闪一下。
+   *
+   * 用途：上下文展开后命中行可能在屏幕外（展开了一整页祖先）——不滚过去，
+   * 用户只看到一堆无关兄弟块，会以为「点了跳到别处」。
+   * ⚠️ 虚拟化时目标可能不在窗口里：先把窗口中心移到它，再取元素。
+   */
+  reveal(id: string): void {
+    if (this.virtualize && !this.blockEl(id)) this.applyWindow(id)
+    const el = this.blockEl(id)
+    if (!el) return
+    el.scrollIntoView({ block: 'center' })
+    el.dataset.flash = '1'
+    window.setTimeout(() => {
+      if (el.isConnected) delete el.dataset.flash
+    }, 900)
   }
 
   txEl(id: string): HTMLElement | null {
@@ -716,6 +749,8 @@ export class BlockEditor {
         find: (id) => this.store.find(id),
         // 只有装载根会带上下文：子行的位置已经由缩进表达
         context: r.depth === 0 ? this.doc.contexts?.get(r.block.id) : undefined,
+        // 展开出来的根才有「收起上下文」；没接回调就不画一个点了没反应的按钮
+        contextBack: Boolean(this.onContextBack) && r.depth === 0 && (this.doc.expandedRoots?.has(r.block.id) ?? false),
       },
     )
     this.mounted.add(r.block.id)
@@ -2575,7 +2610,10 @@ export class BlockEditor {
 
   /** 这一行除正文外还占几条「整行头」（面包屑／别名头的高度由 block-dom 统一算） */
   private extraHeads(r: VisibleRow): number {
-    return r.depth === 0 && (this.doc.contexts?.get(r.block.id)?.length ?? 0) > 0 ? 1 : 0
+    if (r.depth !== 0) return 0
+    const hasTrail = (this.doc.contexts?.get(r.block.id)?.length ?? 0) > 0
+    const hasBack = Boolean(this.onContextBack) && (this.doc.expandedRoots?.has(r.block.id) ?? false)
+    return hasTrail || hasBack ? 1 : 0
   }
 
   private placeholder(count: number, which: string, height = count * LINE_H): HTMLElement {
@@ -2771,6 +2809,24 @@ export class BlockEditor {
       // Shift+左键点块标 ＝ 在右槽打开；事件层只报「打开谁」，落点由装配层决定
       // ⚠️ 没接就不做事（不再退化成中心 zoom：那会让缺入口看起来像成功）
       openInDock: (id) => this.events.openInDock?.(id),
+      /**
+       * 面包屑普通点击 ＝ 这一栏就地展开上下文。也是一次编辑边界（与 focusBlock 同理）：
+       * 点击 `contenteditable=false` 的按钮不会派发 `focusout`。
+       */
+      expandContext: this.onExpandContext
+        ? (ancestorId, rowId) => {
+            const from = this.caretBlock() ?? this.editBase?.id ?? null
+            if (from) this.commitEdit(from)
+            this.onExpandContext?.(ancestorId, rowId)
+          }
+        : undefined,
+      contextBack: this.onContextBack
+        ? (rootId) => {
+            const from = this.caretBlock() ?? this.editBase?.id ?? null
+            if (from) this.commitEdit(from)
+            this.onContextBack?.(rootId)
+          }
+        : undefined,
       toggleCollapse: (id) => this.toggleCollapse(id),
       toggleChildrenCollapse: (id) => this.toggleChildrenCollapse(id),
       toggleTodo: (id) => this.toggleTodo(id),

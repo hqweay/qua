@@ -1263,6 +1263,29 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
     ),
   )
   assert(firstCrumbs.includes('产品设计 · 决策日志'), `查询结果行应显示祖先链（面包屑）：${JSON.stringify(firstCrumbs)}`)
+  /**
+   * 查询结果与反链共用同一条手势：普通点＝就地展开上下文（中心不动），
+   * 展开根行首的「收起上下文」逐层退回。
+   */
+  const firstCrumbId = await page.evaluate(
+    () => document.querySelector('.queryview-editor .blk[data-depth="0"] > .blk-context .blk-context-cell')?.dataset.crumbFor ?? '',
+  )
+  assert(firstCrumbId, '查询结果行首应有可展开的面包屑')
+  const activeBeforeExpand = await page.evaluate(() => window.__qua.snapshot().activeId)
+  await page.locator('.queryview-editor .blk[data-depth="0"] > .blk-context .blk-context-cell').first().click()
+  await page.waitForTimeout(220)
+  const qExpanded = await page.evaluate((id) => {
+    const root = document.querySelector(`.queryview-editor .blk[data-block-id="${id}"][data-depth="0"]`)
+    return {
+      root: Boolean(root),
+      back: Boolean(root?.querySelector('.blk-context-back')),
+      active: window.__qua.snapshot().activeId,
+    }
+  }, firstCrumbId)
+  assert(qExpanded.root && qExpanded.back, `查询结果的面包屑也应就地展开并给收起入口：${JSON.stringify(qExpanded)}`)
+  assert(qExpanded.active === activeBeforeExpand, `查询结果原地展开不换中心：${activeBeforeExpand} → ${qExpanded.active}`)
+  await page.locator(`.queryview-editor .blk[data-block-id="${firstCrumbId}"] .blk-context-back`).click()
+  await page.waitForTimeout(220)
 
   const targetId = await page.evaluate(() => {
     let found = ''
@@ -8967,11 +8990,56 @@ await check('T117 Shift+点反链 footer 的块标／面包屑 ⇒ 右槽窗口�
   assert(after.active === before.active, `反链块标 Shift+点不换中心：${before.active} → ${after.active}`)
   assert(JSON.stringify(after.nav) === JSON.stringify(before.nav), `反链块标 Shift+点不入历史：${JSON.stringify(after.nav)}`)
 
-  // 面包屑那一格点下去＝聚焦到那个祖先（与块标左键同一语义）
+  // 普通点＝就地展开上下文：根换成祖先，中心/历史不动；命中行落在子树里
+  const beforeExpand = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
+  }))
   await page.locator(`#editor .mount .blk[data-block-id="${src}"] > .blk-context .blk-context-cell`).click()
-  await page.waitForTimeout(150)
-  const afterRefCrumb = await page.evaluate(() => window.__qua.snapshot().activeId)
-  assert(afterRefCrumb === refCrumb.id, `点反链面包屑应聚焦到祖先：${refCrumb.id} → ${afterRefCrumb}`)
+  await page.waitForTimeout(220)
+  const expanded = await page.evaluate(
+    ({ src, crumbId }) => {
+      const panel = document.querySelector('#editor .mount')
+      const root = panel?.querySelector(`.blk[data-block-id="${crumbId}"][data-depth="0"]`)
+      const hit = panel?.querySelector(`.blk[data-block-id="${src}"]`)
+      return {
+        root: Boolean(root),
+        hitDepth: hit?.dataset.depth ?? '',
+        back: Boolean(root?.querySelector('.blk-context-back')),
+        active: window.__qua.snapshot().activeId,
+        nav: window.__qua.snapshot().nav,
+      }
+    },
+    { src, crumbId: refCrumb.id },
+  )
+  assert(expanded.root, `普通点面包屑应把祖先装成这一栏的根（原地展开）：${JSON.stringify(expanded)}`)
+  assert(expanded.hitDepth === '1', `命中行应落在祖先的子树里（depth 1）：${JSON.stringify(expanded)}`)
+  assert(expanded.back, `展开根应有「收起上下文」：${JSON.stringify(expanded)}`)
+  assert(expanded.active === beforeExpand.active, `原地展开不换中心：${beforeExpand.active} → ${expanded.active}`)
+  assert(JSON.stringify(expanded.nav) === JSON.stringify(beforeExpand.nav), '原地展开不入历史')
+
+  // 「收起上下文」：退一层，回到原始命中行
+  await page.locator(`#editor .mount .blk[data-block-id="${refCrumb.id}"] > .blk-context .blk-context-back`).click()
+  await page.waitForTimeout(220)
+  const collapsed = await page.evaluate(
+    ({ src, crumbId }) => {
+      const panel = document.querySelector('#editor .mount')
+      return {
+        hitDepth: panel?.querySelector(`.blk[data-block-id="${src}"]`)?.dataset.depth ?? '',
+        rootGone: !panel?.querySelector(`.blk[data-block-id="${crumbId}"][data-depth="0"]`),
+      }
+    },
+    { src, crumbId: refCrumb.id },
+  )
+  assert(collapsed.rootGone && collapsed.hitDepth === '0', `收起后应回到原始命中行：${JSON.stringify(collapsed)}`)
+
+  // ⌘/Ctrl + 点＝跳转（原来的行为，保留）
+  await page.locator(`#editor .mount .blk[data-block-id="${src}"] > .blk-context .blk-context-cell`).click({
+    modifiers: ['ControlOrMeta'],
+  })
+  await page.waitForTimeout(200)
+  const afterJump = await page.evaluate(() => window.__qua.snapshot().activeId)
+  assert(afterJump === refCrumb.id, `⌘/Ctrl 点面包屑应跳到那个祖先：${refCrumb.id} → ${afterJump}`)
   await openFirstPage(page)
   await page.waitForTimeout(150)
 

@@ -362,7 +362,16 @@ export function makeBlockEl(
    * `find` 是引用解析用的查找函数（同 `fillBlockText`）：标签槽的名字也是现算的，
    * 不传 ⇒ 不画标签槽（静态卡片没有森林可查，容忍没有 chip）。
    */
-  opts: { single: boolean; ancestors?: readonly string[]; folded?: FoldState; gutter?: readonly GutterField[]; find?: FindBlock; context?: readonly Block[] },
+  opts: {
+    single: boolean
+    ancestors?: readonly string[]
+    folded?: FoldState
+    gutter?: readonly GutterField[]
+    find?: FindBlock
+    context?: readonly Block[]
+    /** 这是一个「展开出来的上下文根」：行首给「收起上下文」 */
+    contextBack?: boolean
+  },
 ): HTMLElement {
   const b = r.block
   const folded = opts.folded?.[b.id] === true
@@ -409,29 +418,44 @@ export function makeBlockEl(
    * ⚠️ 必须登记进 `ALLOWED_ROW_CHILDREN`：漏了它，第一次收光标就会被当游离节点删掉。
    */
   const trail = opts.context ?? []
-  if (trail.length > 0) {
+  if (trail.length > 0 || opts.contextBack) {
     el.dataset.context = '1'
     const ctx = document.createElement('span')
     ctx.className = 'blk-context'
     ctx.contentEditable = 'false'
+    const sep = (): HTMLSpanElement => {
+      const s = document.createElement('span')
+      s.className = 'blk-context-sep'
+      s.setAttribute('aria-hidden', 'true')
+      s.textContent = '›'
+      return s
+    }
     for (const [i, a] of trail.entries()) {
-      if (i > 0) {
-        const sep = document.createElement('span')
-        sep.className = 'blk-context-sep'
-        sep.setAttribute('aria-hidden', 'true')
-        sep.textContent = '›'
-        ctx.appendChild(sep)
-      }
+      if (i > 0) ctx.appendChild(sep())
       /**
-       * 一格 ＝ **聚焦到那个祖先**（与块标左键同一个语义）；Shift+点 ＝ 钉到右槽。
-       * 只是标记，点击由装配层的事件委托处理 —— `view` 不认识浮层/导航。
+       * 一格 ＝ **就地展开上下文**：点一级把那个祖先装成这一栏的根，命中行落进真实子树；
+       * ⌘/Ctrl 点仍是跳转，Shift 点仍是右槽。只是标记，动作由装配层的事件委托处理 ——
+       * `view` 不认识导航，也不认识「这一栏的 root 怎么换」。
        */
       const cell = document.createElement('button')
       cell.type = 'button'
       cell.className = 'blk-context-cell'
       cell.dataset.crumbFor = a.id
+      cell.title = t('ui.crumb.hint')
       cell.textContent = blockLabel(a)
       ctx.appendChild(cell)
+    }
+    if (opts.contextBack) {
+      /**
+       * 展开出来的根可以**逐层退回**：点一次收掉这一层，露出下面一层；
+       * 退完所有层就是原来那条命中行。这是视图动作，由装配层接（`data-context-back-for`）。
+       */
+      const back = document.createElement('button')
+      back.type = 'button'
+      back.className = 'blk-context-back'
+      back.dataset.contextBackFor = b.id
+      back.textContent = `↩ ${t('ui.context.collapse')}`
+      ctx.appendChild(back)
     }
     el.appendChild(ctx)
   }

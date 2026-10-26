@@ -110,6 +110,33 @@
   color: var(--ui-text-tertiary);
   opacity: 0.6;
 }
+/*
+ * **收起上下文**：只出现在「展开出来的根」的行首。
+ * 收一次退一层（内层还留在栈里），退完就是原始命中行。
+ */
+.blk-context-back {
+  flex: 0 0 auto;
+  margin-left: var(--ui-gap-2);
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+  border-radius: var(--ui-radius-sm);
+}
+.blk-context-back:hover,
+.blk-context-back:focus-visible {
+  color: var(--ui-accent);
+}
+/* 展开后把命中行滚进视口并闪一下：不然很容易以为「点了跳到别处」 */
+.blk[data-flash='1'] {
+  animation: blk-flash 900ms ease-out;
+}
+@keyframes blk-flash {
+  from {
+    background: var(--ui-accent-soft);
+  }
+  to {
+    background: transparent;
+  }
+}
 .blk .left {
   flex: 0 0 auto;
   display: flex;

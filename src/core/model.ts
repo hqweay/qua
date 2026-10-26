@@ -362,6 +362,13 @@ export interface Doc {
    * ⚠️ 只有 `roots` 里的块会被查；不在表里 ＝ 这一行没有面包屑（顶层根就是这种）。
    */
   contexts?: ReadonlyMap<string, readonly Block[]>
+  /**
+   * **哪些根是「展开出来的上下文根」**（不是原始命中行）。
+   *
+   * 只影响行首那一条控制：这些根可以「收起上下文」退回上一层；普通装载根没有。
+   * 与 `contexts` 一样是派生、视图私有、不入库。
+   */
+  expandedRoots?: ReadonlySet<string>
 }
 
 export interface Located {

@@ -13,7 +13,7 @@
  *    挂载区是「在这一块下面就地展开」。硬统一会得到两份各自记激活项的 tab 条。
  * ⚠️ 这里不碰命令、不认识浮层：`＋` 只回调装配层。
  */
-import { type Block, type BlockStore, type MountTab, mountTabsOf, canEditMounts } from '../core/index.ts'
+import { type Block, type BlockStore, type MountTab, mountTabsOf, canEditMounts, expandContexts, unfoldForContext } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t, type MsgId } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
@@ -91,6 +91,15 @@ export class MountArea {
   private active = ''
   private open: boolean
   private timer: number | null = null
+  /**
+   * 每个 tab 的**上下文展开栈**（祖先 id）。视图状态，不落盘。
+   * 每个 tab 各记各的：在「引用」里展开的上下文不会突然出现在「同类」。
+   */
+  private readonly expandedByTab = new Map<string, Set<string>>()
+  /** 上次装载的「上下文根 → 覆盖的命中行」；收起一层时用它算滚回哪 */
+  private covers: ReadonlyMap<string, readonly string[]> = new Map()
+  /** 这一段是谁；段落换人时清空展开状态 */
+  private hostId = ''
 
   constructor(deps: MountAreaDeps) {
     this.deps = deps
@@ -149,11 +158,17 @@ export class MountArea {
     this.render()
   }
 
-  render(): void {
+  render(focusHint?: string): void {
     const host = this.deps.host()
     if (!host) {
       this.root.hidden = true
       return
+    }
+    // 段落换人：上一段的展开栈没有意义
+    if (this.hostId !== host.id) {
+      this.hostId = host.id
+      this.expandedByTab.clear()
+      this.covers = new Map()
     }
     this.root.hidden = false
     this.tabs = mountTabsOf(host, this.deps.kb.roots())
@@ -179,7 +194,7 @@ export class MountArea {
       this.showEmpty(t('ui.mount.empty.user'))
       return
     }
-    this.load(host, this.tabs[activeAt]!)
+    this.load(host, this.tabs[activeAt]!, focusHint)
   }
 
   /* ------------------------------------------------------------ tab 条 */
@@ -224,6 +239,12 @@ export class MountArea {
         x.addEventListener('click', (e) => {
           e.stopPropagation()
           this.deps.onRemoveTab?.(host.id, userIndex)
+          /**
+           * 用户栏的下标是数组位：摘掉一栏之后，`user:1` 会变成另一栏。
+           * 展开栈按 tab 键记账，键全都会漂 ⇒ 整批清掉，宁可从收起态重来。
+           */
+          this.expandedByTab.clear()
+          this.covers = new Map()
           /**
            * 当场重画：焦点在这颗 × 上，而 store 订阅在「焦点在本视图里」时会**跳过**
            * （那是「打字时别把行抽走」的保护）。不补这一次，用户会看到「点了 × 没反应」。
@@ -270,9 +291,13 @@ export class MountArea {
 
   /* ------------------------------------------------------------ body */
 
-  private load(host: Block, tab: MountTab): void {
-    const { roots, contexts } = this.rootsFor(host, tab)
-    if (roots.length === 0) {
+  private load(host: Block, tab: MountTab, focusHint?: string): void {
+    const base = this.rootsFor(host, tab)
+    const plan = expandContexts(base, this.expandedFor(this.active), (id) => this.deps.kb.pathOf(id), focusHint)
+    // 过期的展开 id 当场剪掉：下次再出现同 id 时不该「自己又展开」
+    this.expandedByTab.set(this.active, plan.expanded)
+    this.covers = plan.covers
+    if (plan.roots.length === 0) {
       this.showEmpty(t(EMPTY_TEXT[tab.kind]))
       // 空结果也保留这份视图的折叠态：它记的是「哪些行收着」，不是「这次有几行」
       this.editor?.loadPage({ roots: [], folded: this.editor.doc.folded })
@@ -282,7 +307,36 @@ export class MountArea {
     this.emptyEl.hidden = true
     this.editorEl.hidden = false
     delete this.editorEl.dataset.empty
-    ed.loadPage({ roots, folded: ed.doc.folded, contexts })
+    const folded = unfoldForContext(ed.doc.folded, plan.covers, (id) => this.deps.kb.pathOf(id))
+    ed.loadPage({ roots: plan.roots, folded, contexts: plan.contexts, expandedRoots: plan.contextRoots })
+    if (plan.focusId) ed.reveal(plan.focusId)
+  }
+
+  /** 当前 tab 的展开栈（懒建；每个 tab 一份） */
+  private expandedFor(key: string): Set<string> {
+    let set = this.expandedByTab.get(key)
+    if (!set) {
+      set = new Set()
+      this.expandedByTab.set(key, set)
+    }
+    return set
+  }
+
+  /**
+   * 普通点面包屑：把那个祖先装成这一栏的根，**中心／历史不动**。
+   * `rowId` 是点击那一格所在的行；`expandContexts` 用它算展开后滚到哪条命中。
+   */
+  private expand(ancestorId: string, rowId: string): void {
+    if (!ancestorId) return
+    this.expandedFor(this.active).add(ancestorId)
+    this.render(rowId || undefined)
+  }
+
+  /** 「收起上下文」：只收这一层；内层还留在栈里，下一次渲染会浮出来 */
+  private collapse(rootId: string): void {
+    const set = this.expandedFor(this.active)
+    if (!set.delete(rootId)) return
+    this.render(this.covers.get(rootId)?.[0])
   }
 
   private showEmpty(text: string): void {
@@ -361,6 +415,9 @@ export class MountArea {
       write: this.deps.write,
       // 折叠态是视图私有的（在块底收起一行，不该让正文里那一块也收起来）
       doc: { roots: [], folded: {} },
+      // 面包屑：普通点＝就地展开；展开根行首的「收起上下文」＝逐层退回
+      onExpandContext: (ancestorId, rowId) => this.expand(ancestorId, rowId),
+      onContextBack: (rootId) => this.collapse(rootId),
     })
     this.deps.wire(ed, (kind) => {
       if (kind !== 'load') this.deps.onChange(kind)

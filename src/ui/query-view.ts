@@ -18,10 +18,12 @@
  */
 import {
   displayNameOf,
+  expandContexts,
   resolveFrozen,
   readResult,
   refreshSpec,
   readSpec,
+  unfoldForContext,
   usesSelf,
   type Block,
   type BlockStore,
@@ -109,6 +111,10 @@ export class QueryView {
    *    真正会让人怀疑「这条还该在吗」的，是**结果里的块自己变了**（改字、改 todo、被删）。
    */
   private staleIds = new Set<string>()
+  /** 上下文展开栈（祖先 id）；刷新时清空，外部编辑重画时保留 */
+  private expanded = new Set<string>()
+  /** 上次渲染的「上下文根 → 覆盖的命中行」：收起一层时滚回那一行 */
+  private covers: ReadonlyMap<string, readonly string[]> = new Map()
 
   constructor(els: QueryViewEls, deps: QueryViewDeps) {
     this.els = els
@@ -127,6 +133,9 @@ export class QueryView {
       write: deps.write,
       // 折叠态是视图私有的（理由同反链）
       doc: { roots: [], folded: {} },
+      // 面包屑：普通点＝就地展开；展开根行首的「收起上下文」＝逐层退回
+      onExpandContext: (ancestorId, rowId) => this.expand(ancestorId, rowId),
+      onContextBack: (rootId) => this.collapse(rootId),
     })
     this.deps.wire(this.editor, (kind) => {
       if (kind === 'load') return
@@ -185,6 +194,9 @@ export class QueryView {
     }
     const { dropped } = refreshSpec(b, spec, this.deps.kb)
     if (dropped.length > 0) this.deps.toast?.(t('ui.query.dropped', { count: dropped.length }), 'info')
+    // 刷新＝成员与顺序都换了：上一轮的上下文展开没有依据，从头来
+    this.expanded = new Set()
+    this.covers = new Map()
     this.staleIds.clear()
     this.deps.onChange()
     this.render()
@@ -217,7 +229,7 @@ export class QueryView {
   }
 
   /** 按冻结结果渲染**当前活块**（D5：内容不冻） */
-  render(): void {
+  render(focusHint?: string): void {
     this.paintStale()
     const b = this.deps.block()
     const frozen = readResult(b)
@@ -231,6 +243,9 @@ export class QueryView {
     this.els.title.textContent = name === '' ? t('ui.query.untitled') : name
     this.els.count.textContent = t('ui.query.count', { count: rows.length })
     if (rows.length === 0) {
+      // 空结果里没有可展开的东西：收起栈也一起清掉
+      this.expanded = new Set()
+      this.covers = new Map()
       // 空结果是**状态**不是错误：保留抬头（含刷新按钮），正文给一句实话。
       // ⚠️ 「条件里有 `$self` 但没有宿主」是**另一种空**：不解释一句，用户会以为条件写错了。
       //    这里的空态文案就是那条解释的落点（单独打开一个相对查询时看到它）。
@@ -247,10 +262,35 @@ export class QueryView {
     // 只装「最外层命中」：子树由编辑器自己展开，命中块的祖先链作为行首面包屑。
     const contexts = new Map<string, readonly Block[]>()
     for (const r of rows) if (r.path.length > 0) contexts.set(r.block.id, r.path)
-    this.editor.loadPage({ roots: rows.map((r) => r.block), folded: this.editor.doc.folded, contexts })
+    const plan = expandContexts(
+      { roots: rows.map((r) => r.block), contexts },
+      this.expanded,
+      (id) => this.deps.kb.pathOf(id),
+      focusHint,
+    )
+    this.expanded = plan.expanded
+    this.covers = plan.covers
+    const folded = unfoldForContext(this.editor.doc.folded, plan.covers, (id) => this.deps.kb.pathOf(id))
+    this.editor.loadPage({ roots: plan.roots, folded, contexts: plan.contexts, expandedRoots: plan.contextRoots })
+    if (plan.focusId) this.editor.reveal(plan.focusId)
+  }
+
+  /** 普通点面包屑：把祖先装成这一栏的根（中心／历史不动） */
+  private expand(ancestorId: string, rowId: string): void {
+    if (!ancestorId) return
+    this.expanded.add(ancestorId)
+    this.render(rowId || undefined)
+  }
+
+  /** 收起一层：内层还留在栈里，下一次渲染会浮出来 */
+  private collapse(rootId: string): void {
+    if (!this.expanded.delete(rootId)) return
+    this.render(this.covers.get(rootId)?.[0])
   }
 
   private renderEmpty(text: string): void {
+    this.expanded = new Set()
+    this.covers = new Map()
     this.els.root.hidden = false
     this.els.editor.replaceChildren()
     this.els.editor.dataset.empty = '1'
