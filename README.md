@@ -7,6 +7,8 @@
 
 **[在线演示 → qua.leay.net](https://qua.leay.net/)** · 不用安装，打开就能写；
 数据只落在你自己的浏览器里（`localStorage`），首次打开会载入一份假数据库。
+想先看设计再看产品：**[架构与数据结构 → /arch.html](https://qua.leay.net/arch.html)**，
+一张图讲清分层、块的字段、写/读路径 —— 图上的版本号与门禁基线由部署流水线现算，不是手写的。
 
 > ⚠️ **这是原型，不是 v1。** 不接数据库、不接内核进程、允许硬编码假数据。
 > 当前阶段唯一不许退化的两样东西：**输入面的形状**（块树 ＋ 块内 run 序列 ＋ 稳定块 id）
@@ -265,6 +267,7 @@ pnpm build:mac       # 打包 .app（未签名，首次需右键打开）
 | `docs/ROADMAP.md` | 想动手的人 | 接下来做什么、按什么顺序、怎么验收 |
 | `docs/模型-一切皆块.md` | 改模型的人 | 模型第一性、三条判据、已否决清单 |
 | `docs/ARCH-断言.md` | 贡献者 | 架构断言逐条账：能静态查的 / 只能靠约定的 / 等内核的 |
+| [`public/arch.html`](public/arch.html) | 所有人 | 一张图的架构与数据结构（部署时填真值 ⇒ 线上版 [/arch.html](https://qua.leay.net/arch.html)） |
 | `docs/ELECTRON-备忘.md` | 改壳的人 | 桌面壳踩坑、与 Chrome 的行为差异、真机实测 |
 | `TODO.md` | 贡献者 | 已知 bug 与概念澄清（QB 编号、复现步骤、状态） |
 | `electron/userdata/` | 发布/排障 | 运行时数据目录的形状 |

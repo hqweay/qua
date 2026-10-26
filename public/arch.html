@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --ink: #1d1f23;
+    --ink2: #4d525a;
+    --ink3: #6b7078;
+    --ink4: #9aa0a8;
+    --line: #e4e6e9;
+    --line2: #eff1f3;
+    --bg: #fcfcfd;
+    --card: #ffffff;
+    --accent: #6b5bd2;
+    --accent-soft: #f2f0fd;
+    --ok: #2f855a;
+    --ok-soft: #eef8f2;
+    --warn: #b8742a;
+    --warn-soft: #fdf5ec;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  body {
+    width: 1680px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif;
+    padding: 46px 52px 40px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── 抬头 ── */
+  header { display: flex; align-items: flex-end; justify-content: space-between; padding-bottom: 22px; border-bottom: 2px solid var(--ink); }
+  h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
+  h1 span { color: var(--ink4); font-weight: 500; }
+  .sub { margin-top: 7px; font-size: 13.5px; color: var(--ink3); line-height: 1.55; }
+  .stamp { text-align: right; font-size: 11.5px; color: var(--ink4); line-height: 1.7; font-family: var(--mono); }
+
+  /* ── 通用卡片 ── */
+  .sec { margin-top: 26px; }
+  .sec-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .sec-h b { font-size: 15px; font-weight: 650; letter-spacing: 0.01em; }
+  .sec-h i { font-style: normal; font-size: 11.5px; color: var(--ink4); }
+  .sec-h::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+  .pad { padding: 16px 18px; }
+
+  /* ── 分层 ── */
+  .layers { display: flex; flex-direction: column; gap: 0; }
+  .layer { display: grid; grid-template-columns: 76px 1fr; gap: 16px; align-items: center; padding: 11px 16px; border-radius: 8px; }
+  .layer + .layer { border-top: 1px dashed var(--line2); }
+  .layer .tag {
+    font-family: var(--mono); font-size: 12px; font-weight: 600; text-align: center;
+    padding: 4px 0; border-radius: 5px; letter-spacing: 0.02em;
+  }
+  .layer .body { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .layer .files { font-family: var(--mono); font-size: 11.5px; color: var(--ink2); }
+  .layer .note { font-size: 11.5px; color: var(--ink3); }
+  .l-host .tag { background: #f1f2f4; color: var(--ink2); }
+  .l-app .tag  { background: #f0eefb; color: #5a4bc0; }
+  .l-ui .tag   { background: #eef3fb; color: #3f6ba8; }
+  .l-view .tag { background: #edf6f1; color: #2f7a58; }
+  .l-core .tag { background: #1d1f23; color: #fff; }
+
+  .arrowline { display: flex; align-items: center; gap: 8px; margin: 0 0 10px 92px; font-size: 11px; color: var(--ink4); font-family: var(--mono); }
+  .arrowline .bar { flex: 1; height: 1px; background: repeating-linear-gradient(90deg, var(--line) 0 5px, transparent 5px 10px); }
+
+  .grid2 { display: grid; grid-template-columns: 1.35fr 1fr; gap: 18px; align-items: start; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; align-items: start; }
+
+  /* ── 数据流 ── */
+  .flow { display: flex; align-items: stretch; gap: 0; }
+  .step { flex: 1; padding: 13px 12px; position: relative; }
+  .step + .step { border-left: 1px solid var(--line2); }
+  .step .k { font-size: 10.5px; color: var(--ink4); font-family: var(--mono); margin-bottom: 5px; letter-spacing: 0.03em; }
+  .step .v { font-size: 13px; font-weight: 600; }
+  .step .d { font-size: 11px; color: var(--ink3); margin-top: 5px; line-height: 1.5; }
+  .step .v code, .layer .files code { font-family: var(--mono); font-size: 11.5px; background: #f5f6f7; padding: 1px 5px; border-radius: 4px; }
+  .step.accent { background: var(--accent-soft); border-radius: 8px; }
+  .step.accent .v { color: #5344b8; }
+
+  /* ── 数据结构 ── */
+  .struct { font-family: var(--mono); font-size: 12px; line-height: 1.95; color: var(--ink2); white-space: pre-wrap; }
+  .struct .type { color: var(--accent); font-weight: 600; }
+  .struct .key { color: var(--ink); }
+  .struct .cmt { color: var(--ink4); font-size: 11px; font-family: -apple-system, "PingFang SC", sans-serif; }
+  .struct .pipe { color: var(--ink4); }
+
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; font-size: 12px; line-height: 1.7; }
+  .kv dt { font-family: var(--mono); font-size: 11.5px; color: #5a4bc0; }
+  .kv dd { color: var(--ink2); }
+
+  .chip { display: inline-block; font-size: 10.5px; padding: 1px 7px; border-radius: 20px; vertical-align: 1px; }
+  .chip.sys { background: #f1f2f4; color: var(--ink2); font-family: var(--mono); }
+  .chip.ok { background: var(--ok-soft); color: var(--ok); }
+  .chip.warn { background: var(--warn-soft); color: var(--warn); }
+
+  .note { font-size: 11.5px; color: var(--ink3); line-height: 1.65; }
+  .note b { color: var(--ink2); font-weight: 600; }
+  .note code { font-family: var(--mono); font-size: 11px; background: #f5f6f7; padding: 0 4px; border-radius: 3px; }
+
+  footer { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; font-size: 11px; color: var(--ink4); font-family: var(--mono); }
+
+  .must { display: flex; flex-direction: column; gap: 8px; }
+  .must .row { display: flex; gap: 9px; font-size: 12px; line-height: 1.55; color: var(--ink2); }
+  .must .n { flex: 0 0 17px; height: 17px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 700; display: grid; place-items: center; margin-top: 1px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>相 / Qua <span>— 设计架构与数据结构</span></h1>
+    <div class="sub">块级大纲笔记 · Electron 桌面版。库里只有一种实体：<b>块</b>。页、日记、标签、实例、视图、侧栏都是块在不同位置的呈现。</div>
+  </div>
+  <div class="stamp">
+    WORKSPACE_VERSION {{WORKSPACE_VERSION}}<br>
+    layers core ← view ← ui ← app ← host<br>
+    gate {{GATE}}
+  </div>
+</header>
+
+<!-- ───────────── 一、分层 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>一、分层：单向依赖，由内向外</b><i>arch-check [13] 硬断言，不设白名单例外</i></div>
+  <div class="card layers">
+    <div class="layer l-host">
+      <div class="tag">host</div>
+      <div class="body">
+        <span class="files">electron/main.ts</span>
+        <span class="note">只做五件壳的事：名字与数据目录 · 建窗口 · 应用菜单 · 生命周期 · 给内核留一条 MessageChannel。<b>不 import src/</b>，主进程零业务逻辑</span>
+      </div>
+    </div>
+    <div class="layer l-app">
+      <div class="tag">app</div>
+      <div class="body">
+        <span class="files">src/app/ · handlers/ · wiring/</span>
+        <span class="note">命令实现与装配。<b>handler 不得碰 DOM</b>（arch [18]），要焦点/滚动/剪贴板一律走 <code>App</code> 门面</span>
+      </div>
+    </div>
+    <div class="layer l-ui">
+      <div class="tag">ui</div>
+      <div class="body">
+        <span class="files">src/ui/ · 槽 / 面板 / 弹层 / 周边编辑器</span>
+        <span class="note">堆叠归槽、tab 归块；槽里只有块，没有「页面列表组件」这类实体化容器</span>
+      </div>
+    </div>
+    <div class="layer l-view">
+      <div class="tag">view</div>
+      <div class="body">
+        <span class="files">src/view/ · block-dom · editor · editor-events · dom-text · icons · dnd（拖拽的载荷与落点）</span>
+        <span class="note"><b>view 不得 import ui</b>（这条被断言拦下来过）。块 DOM 契约在这里诞生：<code>data-block-id / data-depth / .marker / .left / .tx</code></span>
+      </div>
+    </div>
+    <div class="layer l-core">
+      <div class="tag">core</div>
+      <div class="body">
+        <span class="files">src/core/ · {{CORE_MODULES}} 个模块</span>
+        <span class="note"><b>零 DOM</b>。模型 / 行内内容 / 树 / 查询 / 命令声明 / 绑定表 / 上下文键 / 持久化全在这层，可直接在 Node 里单测</span>
+      </div>
+    </div>
+  </div>
+  <div class="arrowline">
+    <span>依赖只能向下（外→内）</span><span class="bar"></span><span>inner 不知道 outer 的存在</span>
+  </div>
+</section>
+
+<!-- ───────────── 二、数据结构 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>二、数据结构：一片森林，行内内容是块上的一串 run</b><i>落盘形状见 src/core/storage/shape.ts · 类型见 src/core/runs.ts</i></div>
+  <div class="grid2">
+    <div class="card pad">
+      <div class="struct">
+<span class="type">Block</span> <span class="pipe">{</span>
+  <span class="key">id</span>: string            <span class="cmt">32-hex UUIDv7</span>
+  <span class="key">content</span>: Run[]        <span class="cmt">行内内容＝run 序列；空块＝[]</span>
+  <span class="key">children</span>: Block[]    <span class="cmt">子树；整库是一片森林，没有「页实体」</span>
+  <span class="key">created</span>: number      <span class="cmt">出生时刻（墙钟毫秒）。必填：不可能缺席，所以不是属性槽</span>
+  <span class="key">modified</span>: number     <span class="cmt">最后一次改动（只在编辑边界更新，并进内容那条 upsert）</span>
+  <span class="key">annos?</span>: Anno[]       <span class="cmt">可引用区间：只在被引用时才存在（不写空数组）</span>
+  <span class="key">props?</span>: {            <span class="cmt">属性袋：键＝定义块的 id，不是名字</span>
+    <span class="key">_type</span>?      <span class="cmt">封闭注册表：core/outline · core/divider</span>
+    <span class="key">_icon</span>?      <span class="cmt">lucide:&lt;name&gt; 或字面文本</span>
+    <span class="key">_date</span>?      <span class="cmt">有它 ⇒ 日记块（只读、全局一天一个）</span>
+    <span class="key">_aliases</span>?   <span class="cmt">地址：0..N，首个是主名，全局唯一</span>
+    <span class="key">_lists</span>?     <span class="cmt">露面：page / tag，可兼位、可空</span>
+    <span class="key">_display</span>?   <span class="cmt">这一行显示别名还是正文</span>
+    <span class="key">_tags</span>?      <span class="cmt">分类归属：存标签块的 id（有序）</span>
+    <span class="key">_belongsTo</span>? <span class="cmt">归属（filed-under）：子块 → 上级，任何块都能配、可多父</span>
+    <span class="key">_deletedAt</span>? <span class="cmt">有它 ⇒ 这块被软删了（子树不可见是继承来的）</span>
+    <span class="key">_kind</span>?      <span class="cmt">有它 ⇒ 属性定义块（种类是它自己的数据）</span>
+    <span class="key">_query</span>?     <span class="cmt">有它 ⇒ 查询视图块（值是 where 条件）</span>
+    <span class="key">_queryResult</span>? <span class="cmt">冻结的查询结果（成员与顺序；只在刷新时改）</span>
+    <span class="key">_ownProps</span>? · <span class="key">_fieldDefs</span>? · <span class="key">_choices</span>? · <span class="key">_uiPosition</span>?
+    <span class="key">[定义块 id]</span>: unknown  <span class="cmt">用户/插件定义的字段值</span>
+  <span class="pipe">}</span>
+<span class="pipe">}</span>
+
+<span class="type">Doc</span>   <span class="pipe">= {</span> roots: Block[], folded?: Record&lt;id, true&gt; <span class="pipe">}</span>   <span class="cmt">折叠态在 Doc 上，不在块上</span>
+<span class="type">Workspace</span> <span class="pipe">= {</span>
+  version: {{WORKSPACE_VERSION}}, blocks: Block[], activeId: string, savedAt: number
+<span class="pipe">}</span>                                   <span class="cmt">行内内容与区间都住在块上：库里没有第二份扁平数组</span>
+      </div>
+    </div>
+
+    <div class="card pad">
+      <div class="struct">
+<span class="type">Run</span> <span class="pipe">=</span> text | ref | link | image    <span class="cmt">判别键 t 开放扩展</span>
+
+  <span class="key">text</span>  <span class="pipe">{</span> t, v, marks? <span class="pipe">}</span>          <span class="cmt">格式是 run 的属性，不是另一个实体</span>
+  <span class="key">ref</span>   <span class="pipe">{</span> id, t, to?, flavor?: '#',      <span class="cmt">flavor '#' ＝ 行内 # 露面（指向标签类或实例）</span>
+          label?, marks? <span class="pipe">}</span>            <span class="cmt">label 只是插入时的快照，显示名一律现算</span>
+  <span class="key">link</span>  <span class="pipe">{</span> id, t, v, url, marks? <span class="pipe">}</span>     <span class="cmt">外链：v 是显示文本，不产生块间边</span>
+  <span class="key">image</span> <span class="pipe">{</span> id, t, asset, w?, h? <span class="pipe">}</span>       <span class="cmt">只存 hash 定位；bytes 住在资产侧</span>
+
+<span class="cmt">── 实例（obj）不新增类型：props._tags 非空的块就是一条记录 ──</span>
+<span class="type">记录</span> <span class="pipe">=</span> Block <span class="pipe">{</span> props: <span class="pipe">{</span> _tags: [标签 id] <span class="pipe">}</span> <span class="pipe">}</span>
+       <span class="cmt">值住它自己的 props（同一个属性袋）；正文里那枚 #名 只是一次提及，不写 _tags</span>
+       <span class="cmt">目标身份由 RefView.kind 现算：tag / obj / page（不落盘）</span>
+
+<span class="type">RefView</span> <span class="pipe">= {</span> label, state: 'resolved' | 'dangling', kind?: 'tag' | 'obj' | 'page' <span class="pipe">}</span>
+
+<span class="type">Anno</span> <span class="pipe">= {</span> id, range: {start,end}, quote?, version? <span class="pipe">}</span>
+
+<span class="cmt">── 两套坐标：所有 start/end/off 都要先问自己用的是哪套 ──</span>
+<span class="key">plain</span>     <span class="cmt">文本字符数 ＋ 每个原子算 1 格（与 DOM 同系）</span>
+           <span class="cmt">选区 / 光标 / IME / run 切片 / anno.range 用它</span>
+<span class="key">projection</span> <span class="cmt">plainText 里的位置：原子贡献 0 格</span>
+           <span class="cmt">引文快照用它（quote.exact 必须是投影的子串）</span>
+           <span class="cmt">换算走 projectOff / projectRange，别手算</span>
+</div>
+      <div class="note" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)">
+        <b>原子是不可分节点</b>（ref/link/image）：位置由邻居携带，删它一定是显式动作——
+        不需要「原子在字符串里占一格」的占位符，也不需要偏移映射。<b>格式随 run 走</b>，
+        打字继承邻位格式是序列的自然结果。<b>区间（annos）按需物化</b>，只在被引用时存在。
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── 三、写：事务与 op ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>三、写路径：一次用户动作 ＝ 一笔事务 ＝ 一批 op</b><i>Tx 是唯一的模型写入口；失败整批回滚，没有「半批」</i></div>
+  <div class="card">
+    <div class="flow">
+      <div class="step">
+        <div class="k">① 入口</div>
+        <div class="v">键位 / 菜单 / 斜杠</div>
+        <div class="d"><code>bindings.ts</code> 一张表供五处共用；<code>when.ts</code> 求值上下文键</div>
+      </div>
+      <div class="step">
+        <div class="k">② 声明</div>
+        <div class="v">命令（{{COMMANDS}} 条）</div>
+        <div class="d">纯语义：capability / undoable，没有 key、没有 context</div>
+      </div>
+      <div class="step">
+        <div class="k">③ 实现</div>
+        <div class="v">handler ＋ App 门面</div>
+        <div class="d">命令不知道 UI 长什么样；最终落到内存文档</div>
+      </div>
+      <div class="step accent">
+        <div class="k">④ 事务</div>
+        <div class="v">KbClient.tx</div>
+        <div class="d">patch / insert / move / remove / restore / setProp / setAnnos</div>
+      </div>
+      <div class="step">
+        <div class="k">⑤ 产出</div>
+        <div class="v">Op[] ＋ Change[]</div>
+        <div class="d">Op 给存储，Change 只做失效通知（不带 payload）</div>
+      </div>
+      <div class="step">
+        <div class="k">⑥ 落盘</div>
+        <div class="v">StoragePort.commit</div>
+        <div class="d">单写者串行队列；<code>localStorage</code> 只出现在一个适配器里（arch [20]）</div>
+      </div>
+    </div>
+  </div>
+  <div class="grid2" style="margin-top:18px">
+    <div class="card pad">
+      <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">Op — 持久化事件（6 类）</b></div>
+      <div class="struct">
+<span class="pipe">{</span> e: <span class="key">'block'</span>, id, op: <span class="key">'upsert'</span>, value: { content?, parent?, index?, props? }, at <span class="pipe">}</span>
+<span class="pipe">{</span> e: <span class="key">'block'</span>, id, op: <span class="key">'delete'</span>, at <span class="pipe">}</span>          <span class="cmt">只落操作根一条，子树不可见是继承来的</span>
+<span class="pipe">{</span> e: <span class="key">'prop'</span>,  block, name, op, value?, pos?, at <span class="pipe">}</span>
+<span class="pipe">{</span> e: <span class="key">'alias'</span>, block, name, op, pos?, at <span class="pipe">}</span>
+<span class="pipe">{</span> e: <span class="key">'list'</span>,  block, list, op, at <span class="pipe">}</span>
+<span class="pipe">{</span> e: <span class="key">'anno'</span>,  block, id, op: <span class="key">'set'</span> | <span class="key">'delete'</span>, value?, at <span class="pipe">}</span>   <span class="cmt">只在真被引用时出现</span>
+      </div>
+      <div class="note" style="margin-top:9px">结构用 <code>parent ＋ index</code> 表达，不另造 <code>insert</code> 事件——「它现在在哪」只有一种说法。<b>格式与原子的一次改动就是一条 <code>upsert{content}</code></b>：内容整组替换，不是逐段记差。<b>实例字段写入＝一条 <code>prop.set</code>／<code>prop.delete</code></b>，没有「实例」专用 op。</div>
+    </div>
+    <div class="card pad">
+      <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">落盘：两个键，都是固定值</b></div>
+      <div class="kv">
+        <dt>qua.workspace</dt><dd>整库（块森林；行内内容与区间都在块上），套一层信封 <code>{ backend, envelope, data }</code></dd>
+        <dt>qua.device</dt><dd>设备态：主题 / 槽宽 / 钉住清单（<b>不进 KB</b>）</dd>
+      </div>
+      <div class="note" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)">
+        <b>不做旧数据迁移</b>：改口径就 <code>WORKSPACE_VERSION + 1</code>，旧库显式作废重 seed。
+        换键 ＝ 用户数据静默消失，所以键名被逐字钉死在门禁里。
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── 四、读：门面 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>四、读路径：一个门面，不给「遍历全库」的入口</b><i>方法只按 id 取或按子树取</i></div>
+  <div class="grid3">
+    <div class="card pad">
+      <div class="sec-h" style="margin:0 0 9px"><b style="font-size:13px">结构读</b></div>
+      <div class="struct" style="line-height:1.8">get(id) · children(id)<br>roots() · parentOf(id) · pathOf(id)</div>
+      <div class="note" style="margin-top:8px">阶段 1 实现可以整库缓存，但<b>调用方写不出「遍历全库」</b>——否则懒加载那天要改遍每个调用方。</div>
+    </div>
+    <div class="card pad">
+      <div class="sec-h" style="margin:0 0 9px"><b style="font-size:13px">语义读</b></div>
+      <div class="struct" style="line-height:1.8">resolveAlias(name) · allPaths()<br>pages() · tags() · trash()<br>fieldsOf · tagsOf · journalDay</div>
+      <div class="note" style="margin-top:8px">页／标签／回收站都是<b>派生</b>：没有第二存放处，每次从森林现算。<code>fieldsOf(记录 id)</code> 同时供属性区与行内实例字段卡，值只写记录块。</div>
+    </div>
+    <div class="card pad">
+      <div class="sec-h" style="margin:0 0 9px"><b style="font-size:13px">查询与反向</b></div>
+      <div class="struct" style="line-height:1.8">query(spec) · backlinksOf(id)<br>backrefBlocksOf(id) · annotationsOf</div>
+      <div class="note" style="margin-top:8px">QuerySpec ＝ <code>where</code>（ref / tag / text / todo / prop / all / any / not）＋ sort ＋ limit。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── 五、一切皆块 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>五、「一切皆块」落在哪：身份是派生的，位置只是默认落点</b><i>不再造 Page / Tag / Journal 实体</i></div>
+  <div class="grid2">
+    <div class="card pad">
+      <div class="kv" style="gap:7px 16px">
+        <dt>页</dt><dd>带 <code>page</code> 露面的块；页名＝主别名，正文是描述</dd>
+        <dt>日记</dt><dd>有 <code>_date</code> 的块；日期是只读投影，<b>不进正文</b>，全局一天一个</dd>
+        <dt>标签</dt><dd>带 <code>tag</code> 露面的块；归属在 <code>props._tags</code>，<b>只有块级一处入口写它</b>，渲染成行右端标签槽 <code>.blk-tags</code> 里的 chip（不占正文）。正文里敲的 <code>#名</code> 是<b>提及</b>（ref run），不写归属</dd>
+        <dt>实例（obj）</dt><dd><b>不是新类型</b>：<code>props._tags</code> 非空的块就是那个标签的一条记录（归属即实例，不看身份与正文）。行内 <code>#名</code> 的 ref run 指向它，但那只是提及；值住它自己的 <code>props</code>（同一个属性袋），字段来自标签声明；<code>⌥</code> 字段卡与属性区共用同一行渲染器，值只写记录块</dd>
+        <dt>属性</dt><dd>键＝定义块的 id ⇒ 改显示名不动任何值，两个插件撞名也不冲突</dd>
+        <dt>类型</dt><dd>唯一「值必须来自封闭注册表」的字段；声明（纯数据）与绑定（渲染器）分家</dd>
+        <dt>视图</dt><dd>对真实树的一次渲染；视图状态（滚动/折叠/宽度）外挂，不入 KB</dd>
+        <dt>侧栏</dt><dd>一个槽，里面是一列块；堆叠归槽，tab 归块</dd>
+        <dt>落点</dt><dd><b>页</b>（新建 / <code>@</code> 建页）与<b>身份</b>（tag / schema / journal）创建时物化在森林顶层；<b>记录 / 笔记</b>落当天。<code>标记为页</code> 原地；<code>提取为页</code> 才把块连子树搬到顶层，并在原位置留一枚引用。用户世界仍没有「根」：无根视图、无「提取为无名根」</dd>
+      </div>
+    </div>
+    <div class="card pad">
+      <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">三条不变量</b></div>
+      <div class="must">
+        <div class="row"><span class="n">A</span><div><b>位置＝默认落点</b>，不是不变量：身份块创建时物化在顶层，此后移动/加露面不再强制移出——被卷进所附内容的删除由软删兜底。</div></div>
+        <div class="row"><span class="n">B</span><div><b>正文语义</b>：身份块的正文是名字或投影，内容写路径一律不许改它（一个 <code>canWriteText</code> 判据喂给所有写路径）。</div></div>
+        <div class="row"><span class="n">C</span><div><b>存在</b>：软删除 ＋ 同地址复活——删了能回来、类不分裂；恢复是摘标记回原位。</div></div>
+      </div>
+      <div class="note" style="margin-top:11px;padding-top:10px;border-top:1px dashed var(--line2)">
+        B、C 在 <code>core/</code> 里维护，<b>只查被操作的那一块自己，不扫子树</b>——代价放到低频入口，让高频出口零判断。
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <span>qua · 一切皆块 · 块的身份与内容槽：id / content / children / created / modified / props</span>
+  <span>结构取自代码类型与架构断言；数字由 render 脚本现读</span>
+</footer>
+
+</body>
+</html>

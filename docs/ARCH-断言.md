@@ -5,6 +5,10 @@
 >
 > 一条命令：`pnpm gate`。单跑静态那一层：`pnpm arch:check`（`scripts/arch-check.mjs`）。
 > 本文所有「命中数」都是那次运行会打印出来的东西 —— 数字对不上就是文档过期了，以脚本输出为准。
+>
+> 想先看全貌：[架构与数据结构](https://qua.leay.net/arch.html) —— 一张图的分层、块字段、
+> 写/读路径。它从 [`public/arch.html`](../public/arch.html) 发布，抬头上的版本号与门禁基线由
+> `scripts/fill-arch-diagram.mjs` 在部署时现算（`{{占位符}}` 是源，不是成品）。
 
 ---
 
