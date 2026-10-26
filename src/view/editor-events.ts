@@ -13,19 +13,32 @@
  *   1. **组合期（IME composing）不重渲染该块**——否则会打断输入法，`compositionend` 后才补渲染；
  *   2. **键位一个都不在这里处理**——全部交给绑定表，这里只碰「输入与拖拽」。
  */
-import type { RunWithId } from '../core/runs.ts'
 import { bindDropTarget, setDragBlock, zoneHint } from './dnd.ts'
 import type { TriggerChar } from '../core/trigger.ts'
+import type { RunWithId } from '../core/runs.ts'
 
 /**
- * 行内原子被点时按下了哪些修饰键。
+ * 「指向某块的露面」被点时按下了哪些修饰键。
  *
  * ⚠️ 只传**判据**（修饰键），不传 `MouseEvent`：事件层不是 DOM 类型的分发处，
  *    再往上的消费者（装配层、UI 组件）不该为了读一个 `altKey` 拿到整个原生事件。
  */
-export interface AtomClickMods {
+export interface RefClickMods {
   altKey: boolean
   shiftKey: boolean
+}
+
+/**
+ * 一次「指向某块的露面」被点：**去哪**（`to`）＋ **它自己的身份**（`run`，可无）。
+ *
+ * ⚠️ `to` 与 `run` 指的不是同一个东西：`to` 是**目标块**（点了去哪），`run` 是**这枚露面
+ *    自己的行内对象**（有它才有「详情／删引用」可做）。chip 与属性区的标签名只有归属、
+ *    没有 run —— 这也是为什么它们不弹详情浮层：那里没有可看可删的东西。
+ * ⚠️ `to` 为空串 ＝ 这枚不是块引用（图片／外链），只能弹详情。
+ */
+export interface RefClickHit {
+  to: string
+  run?: RunWithId
 }
 
 /**
@@ -114,8 +127,19 @@ export interface EditorBridge {
   noteComposition: (step: 'start' | 'update' | 'end') => void
   /** 该块有没有子块（拖到 inside 要判）*/
   hasChildren: (id: string) => boolean
-  /** 行内原子被点（`mods` 带修饰键：左键默认打开，⌥ 才看详情） */
-  onAtomClick: (runId: string, el: HTMLElement, mods: AtomClickMods) => RunWithId | undefined
+  /**
+   * **点了一个「指向某块的露面」**——行内原子、行尾标签 chip、属性区的标签名，
+   * 全是同一件事，所以只有一个入口。
+   *
+   * `ref.to` 是**目标块**（去哪；空串 ＝ 这枚不是块引用，例如图片／外链），
+   * `ref.runId` 是这枚露面自己的 run id（有它才有「详情／删引用」可做；
+   * chip 与属性区只有归属，没有 run）。
+   * `mods` 带修饰键：左键默认打开，⌥ 才看详情。
+   *
+   * ⚠️ 事件层只报「点到了谁」，不判「该不该导航」：目标可能刚被删掉，
+   *    那要现查森林，而森林在装配层手里。
+   */
+  onRefClick: (ref: { to: string; runId?: string }, el: HTMLElement, mods: RefClickMods) => void
   /** 打开块菜单（悬停把手/圆点或右键）*/
   onBlockMenu: (blockId: string, rect: DOMRect) => void
   /**
@@ -372,11 +396,32 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       return
     }
 
-    // 行内原子：交给原子那一条（同样用快照路径，防原子被重渲染摘掉）
+    /**
+     * **指向某块的露面**（行内引用／行尾标签 chip）：同一句话，不分形状。
+     *
+     * 判据是 `data-ref-to` 而不是 `classList.contains('atom')`：chip 不是原子
+     * （不占正文、没有 run），但它和原子是同一件事的两种露面 —— 「点了一个指向 X 的东西」。
+     * 只认 `.atom` 的话，每多一种露面就要在这里多一条分支，而漏掉的那一种会静默不响应。
+     */
+    const refEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.refTo !== undefined)
+    if (refEl?.dataset.refTo) {
+      br.onRefClick({ to: refEl.dataset.refTo, ...(refEl.dataset.atomId ? { runId: refEl.dataset.atomId } : {}) }, refEl, {
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+      })
+      e.preventDefault()
+      return
+    }
+
+    /**
+     * 非引用的行内对象（图片／外链）：它们没有目标块，只有一枚 run 可看可删。
+     * ⚠️ 这一支必须在上面那支**之后**：它是「没有 `data-ref-to` 的原子」，
+     *    而上面那一支只认有目标的露面。
+     */
     const atomEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('atom'))
     if (atomEl?.dataset.atomId) {
-      const a = br.onAtomClick(atomEl.dataset.atomId, atomEl, { altKey: e.altKey, shiftKey: e.shiftKey })
-      if (a) e.preventDefault()
+      br.onRefClick({ to: '', runId: atomEl.dataset.atomId }, atomEl, { altKey: e.altKey, shiftKey: e.shiftKey })
+      e.preventDefault()
       return
     }
 

@@ -461,6 +461,7 @@ export const MSG = {
   'ui.atom.tagDanglingTitle': '标签：#{label}（目标不存在，点击看信息）',
   'ui.atom.objTitle': '实例：#{label}（左键打开，⌥ 点击看信息）',
   'ui.atom.objDanglingTitle': '实例：#{label}（目标不存在，点击看信息）',
+  'ui.chip.tagTitle': '标签：#{label}（左键打开，Shift+左键在右槽打开）',
   'ui.atom.imageTitle': '图片：{label}（点击看资产信息）',
   'ui.virt.placeholder': '⋯ 窗口外 {count} 行（虚拟化，未挂 DOM）',
   'ui.feed.shellHint': '点一下，开始写这一天',

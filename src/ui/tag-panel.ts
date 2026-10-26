@@ -12,7 +12,7 @@
  *    但这些块**不获得** `#人物` 的字段（字段只看直接标签，见 `core/props.ts`）。
  */
 import { displayNameOf, type Block, type BlockStore } from '../core/index.ts'
-import type { RunWithId } from '../core/runs.ts'
+import type { RefClickHit, RefClickMods } from '../view/editor-events.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
@@ -37,7 +37,7 @@ export interface TagPanelDeps {
   onFocusBlock: (blockId: string) => void
   /** Shift+点成员块标：在右槽打开它 */
   onOpenInDock: (blockId: string) => void
-  onAtomClick?: (run: RunWithId, blockId: string, el: HTMLElement, mods: { altKey: boolean; shiftKey: boolean }) => void
+  onRefClick?: (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement) => void
 }
 
 export interface TagPanelEls {
@@ -82,7 +82,7 @@ export class TagPanel {
       },
       focusBlock: (blockId) => this.deps.onFocusBlock(blockId),
       openInDock: (blockId) => this.deps.onOpenInDock(blockId),
-      atomClick: (run, blockId, el, mods) => this.deps.onAtomClick?.(run, blockId, el, mods),
+      refClick: (ref, mods, el) => this.deps.onRefClick?.(ref, mods, el),
     }
     deps.store.subscribe((source) => {
       if (source === this.editor) return

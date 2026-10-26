@@ -122,7 +122,7 @@ import { ensureTagInTx, tagLookupOf } from '../core/kb/ensure-tag.ts'
 import { t } from '../core/msg.ts'
 import { ALLOWED_ROW_CHILDREN, LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl, visibleRowHeight } from './block-dom.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
-import { bindEditorEvents, type AtomClickMods, type TriggerQuery } from './editor-events.ts'
+import { bindEditorEvents, type RefClickHit, type RefClickMods, type TriggerQuery } from './editor-events.ts'
 
 export interface Probe {
   isComposing: boolean
@@ -186,8 +186,14 @@ export interface ViewEvents {
   change?: (kind: 'text' | 'struct' | 'load') => void
   /** 光标前是不是在敲一个触发词（`/`／`#`／`@`）；`null` ＝ 这一段已经结束 */
   triggerQuery?: (hit: TriggerQuery | null, rect: DOMRect) => void
-  /** 点行内原子（`mods` 是修饰键：左键打开目标，⌥ 才看详情） */
-  atomClick?: (run: RunWithId, blockId: string, el: HTMLElement, mods: AtomClickMods) => void
+  /**
+   * **点了一个「指向某块的露面」**：行内引用、行尾标签 chip 走同一条。
+   *
+   * 装配层据此决定去哪（左键开中心／Shift 开右槽／⌥ 看详情）。
+   * `el` 只是详情浮层的锚点。
+   * ⚠️ 未接的实例什么都不做——不静默退化成某一种（那会让「缺入口」看起来像成功）。
+   */
+  refClick?: (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement) => void
   /** 悬停把手/圆点或右键 → 块菜单 */
   blockMenu?: (blockId: string, rect: DOMRect) => void
   /**
@@ -2603,10 +2609,19 @@ export class BlockEditor {
         if (step === 'end') this.probe.isComposing = false
         this.probe.compositionSeq.push(step)
       },
-      onAtomClick: (runId, el, mods) => {
-        const hit = this.findRun(runId)
-        if (hit) this.events.atomClick?.(hit.run, hit.block.id, el, mods)
-        return hit?.run
+      /**
+       * 点了一个「指向某块的露面」。**先交出当前行的编辑期**，理由与 `focusBlock` 完全相同：
+       * 点击 `contenteditable=false` 的元素不会派发 `focusout`（浏览器不认为焦点离开），
+       * 所以不在这里显式 `commitEdit`，「敲完字直接点标签」这条路上修改时间与撞名校验
+       * 就会停在上一处 —— 而那正是编辑边界该发生的地方。
+       *
+       * ⚠️ `runId` → 真的 run 在这一层换（它持有 store），事件层只认 DOM 上的字符串。
+       */
+      onRefClick: (ref, el, mods) => {
+        const from = this.caretBlock() ?? this.editBase?.id ?? null
+        if (from) this.commitEdit(from)
+        const run = ref.runId ? this.findRun(ref.runId)?.run : undefined
+        this.events.refClick?.({ to: ref.to, ...(run ? { run } : {}) }, mods, el)
       },
       onBlockMenu: (id, rect) => this.events.blockMenu?.(id, rect),
       // 左键点块标 ＝ 聚焦/zoom。这也是**离开这一行**：先把当前行的编辑交出去

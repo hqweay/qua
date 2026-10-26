@@ -120,6 +120,19 @@ export function makeRunEl(r: RunWithId, view?: RefView): HTMLElement {
   if (r.t === 'image' && r.asset.state === 'missing') el.classList.add('missing')
   el.contentEditable = 'false'
   el.dataset.atomId = r.id
+  /**
+   * **导航契约**（与读数契约分开）：`data-ref-to` ＝「这枚元素指向哪一块」。
+   *
+   * 它和 `data-atom-id` 是两个不同的事实，所以不能共用一个属性：
+   *   · `data-atom-id` 是**这枚 run 的身份**（读数要按它把 run 原样带回，删引用也按它）；
+   *   · `data-ref-to` 是**它的目标**（点了该去哪）。
+   * 只有引用有目标：图片／外链是行内对象但不是块引用，没有这一格。
+   *
+   * ⚠️ 为什么值得单开一格而不是让事件层去认 `.atom`：块级标签 chip 与属性区的标签
+   *    也是「指向某块的露面」，但它们没有 run、也不住在编辑器里。共用同一个属性之后，
+   *    「点了一个指向 X 的露面」在每一处都是同一句话，不用为每种形状再写一条分支。
+   */
+  if (r.t === 'ref' && r.to) el.dataset.refTo = r.to
   // ⚠️ 解析后的显示名**另存一份到 `data-ref-label`**：`.atom-label` 里带 `[[ ]]`／`#` 装饰，
   //    而 run 上的名字快照是过期的 —— 给探针一个「此刻真的在显示什么」的读点。
   if (r.t === 'ref' || r.t === 'link') el.dataset.refLabel = label
@@ -182,20 +195,25 @@ export function makeRunEl(r: RunWithId, view?: RefView): HTMLElement {
 /**
  * 标签 chip：**标签的归属在块上，这枚 chip 只是把它显示出来**。
  *
- * 形状（`tag-chip` ＋ `data-tag-id`）是渲染契约：主题按它上色，探针按它找标签。
+ * 形状（`tag-chip` ＋ `data-tag-id` ＋ `data-ref-to`）是渲染契约：主题按它上色，探针按它找标签。
  *
  * ⚠️ 它住在 `.blk` 的**标签槽**（`.blk-tags`）里、**`.tx` 之外**：标签没有位点，
  *    而正文槽里每个 DOM 位置都是潜在的插入点 —— chip 一旦在 `.tx` 里，
  *    光标就能落到它后面，打出来的字在 DOM 里排在 chip 后、模型里却是正文末尾，
  *    重画一次就表现为「标签跳到文本后面」。挪出正文槽后，插入点**物理上**进不去。
  *    读数路径（`view/dom-text.ts`）遇 `data-tag-id` 跳过 —— 这层防御保留。
+ *
+ * ⚠️ `data-tag-id`（读数：占 0 格）与 `data-ref-to`（导航：指向标签块）**两格都要有**：
+ *    它们是两个事实（「这枚不占正文」与「它指向谁」），合成一格就会让读数或点击其一失效。
  */
 export function makeTagChipEl(tagId: string, name: string): HTMLElement {
   const el = document.createElement('span')
   el.className = 'tag-chip'
   el.dataset.tagId = tagId
+  el.dataset.refTo = tagId
   el.contentEditable = 'false'
   el.textContent = `#${name}`
+  el.title = t('ui.chip.tagTitle', { label: name })
   return el
 }
 

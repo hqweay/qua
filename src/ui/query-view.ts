@@ -16,7 +16,7 @@
  * ⚠️ 视图状态（滚动、折叠展开态）不进库；滚动位置由外层编辑器自己保。
  */
 import { displayNameOf, resolveFrozen, readResult, refreshSpec, readSpec, type Block, type BlockStore } from '../core/index.ts'
-import type { RunWithId } from '../core/runs.ts'
+import type { RefClickHit, RefClickMods } from '../view/editor-events.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
@@ -38,7 +38,7 @@ export interface QueryViewDeps {
   /** Shift+点结果块的块标：在右槽打开它 */
   onOpenInDock: (blockId: string) => void
   /** 点行内原子：与正文同一条逻辑（左键打开、⌥ 详情、解析不到仍弹详情） */
-  onAtomClick?: (run: RunWithId, blockId: string, el: HTMLElement, mods: { altKey: boolean; shiftKey: boolean }) => void
+  onRefClick?: (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement) => void
   /** 提示（刷新失败、丢了几条） */
   toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
@@ -97,7 +97,7 @@ export class QueryView {
       },
       focusBlock: (blockId) => this.deps.onFocusBlock(blockId),
       openInDock: (blockId) => this.deps.onOpenInDock(blockId),
-      atomClick: (run, blockId, el, mods) => this.deps.onAtomClick?.(run, blockId, el, mods),
+      refClick: (ref, mods, el) => this.deps.onRefClick?.(ref, mods, el),
     }
 
     // ⚠️ 这里**只**点亮 stale，不重排列表（D4 的「不自动重算」）。

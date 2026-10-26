@@ -33,6 +33,7 @@ import { createIcon } from './view/icons.ts'
 import { renderAliasEditor } from './ui/alias-editor.ts'
 import { renderFieldsEditor } from './ui/fields-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type ObjFieldDeps, type PanelDeps } from './ui/panels.ts'
+import type { RefClickHit, RefClickMods } from './view/editor-events.ts'
 import { devCommands, journalCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, zoomCommands } from './app/commands-impl.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupDocks } from './app/wiring/docks.ts'
@@ -522,25 +523,34 @@ let objFieldDeps: ObjFieldDeps | undefined
 const showAtomPopover = (a: RunWithId, rect: DOMRect): void => panelPopover(panelDeps, a, rect, objFieldDeps)
 
 /**
- * 行内原子的**唯一**点击口径（正文 / 反链 footer / 查询结果共用）。
+ * **「指向某块的露面」被点**的唯一口径（正文 / 反链 footer / 查询结果 / 标签成员 /
+ * 侧槽窗口 / 属性区，全部共用）。
  *
- * · 左键点引用（含行内标签露面）且目标在森林里 ⇒ 直接打开目标块（`focus-block`，嵌套块也能进）；
+ * · 左键 ⇒ 打开目标块（`focus-block`，嵌套块也能进）；
  * · **Shift+左键** ⇒ 同一个「打开」，换到右槽（一张窗口）；中心不换、历史不记；
- * · `⌥` 点击 ⇒ 弹原来的详情浮层（诊断信息、删除引用都还在那里）；
+ * · `⌥` 点击 ⇒ 弹详情浮层（诊断信息、删除引用都还在那里）；
  * · 图片 / 外链 / dangling / 目标缺失 ⇒ 只弹浮层，**不静默失败**。
  *
+ * ⚠️ 判据是 `ref.run` 有没有，不是「这是不是原子」：详情浮层要一枚 run 才有内容可看可删。
+ *    块级标签 chip 与属性区的标签名只有归属、没有 run —— 对它们 `⌥` 不构成第二件事，
+ *    所以退回左键那一种（而不是「按了没反应」）。
  * ⚠️ 判断「目标可解析」用 `findInForest`，不是看解析状态：状态是快照，
  *    目标可能在这之后被删掉。
- * ⚠️ 只有点在**原子元素本身**时才走这里：正文普通文字的 Shift+点仍是原生扩选。
+ * ⚠️ `el` 只是浮层的**锚点**，可省：没有 run 的露面（chip／属性区）永远不弹浮层。
  */
-const handleAtomClick = (a: RunWithId, el: HTMLElement, mods: { altKey: boolean; shiftKey: boolean }): void => {
-  const targetId = a.t === 'ref' ? a.to : undefined
-  if (!mods.altKey && targetId && findInForest(ws.blocks, targetId)) {
-    if (mods.shiftKey) openWindow('right', targetId)
-    else void registry.invoke('core.block/focus-block', { blockId: targetId }, 'editor')
+function handleRefClick(ref: RefClickHit, mods: RefClickMods, el?: HTMLElement): void {
+  const target = ref.to !== '' && findInForest(ws.blocks, ref.to) ? ref.to : undefined
+  if (target && (!mods.altKey || !ref.run)) {
+    if (mods.shiftKey) openWindow('right', target)
+    else void registry.invoke('core.block/focus-block', { blockId: target }, 'editor')
     return
   }
-  showAtomPopover(a, el.getBoundingClientRect())
+  if (ref.run && el) showAtomPopover(ref.run, el.getBoundingClientRect())
+  /**
+   * 剩下的两种情形都不做事，且都不假装成功：
+   *   · 没有 run（chip／属性区）且目标不在了 ⇒ 没有可弹的内容；
+   *   · 有 run 但没给锚点 ⇒ 调用方明确表示不弹浮层。
+   */
 }
 const openDrawerFor = (kind: PanelKind): void => panelDrawer(panelDeps, kind)
 
@@ -1118,7 +1128,7 @@ ed.events = {
     }
     openTrigger(hit.ch, hit.query, rect)
   },
-  atomClick: (run, _blockId, el, mods) => handleAtomClick(run, el, mods),
+  refClick: (ref, mods, el) => handleRefClick(ref, mods, el),
   // 复盘空天格子里落笔：编辑器只报日期，物化那一天（幂等）与重装载归命令层
   shellWrite: (date) => void app.journalShellWrite(date),
   // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
@@ -1151,7 +1161,7 @@ const { renderBacklinks, renderProperties, renderTagPanel, renderQueryView, sche
   syncSections,
   scheduleSave,
   scheduleBadge,
-  handleAtomClick,
+  refClick: handleRefClick,
   getWs: () => ws,
   getEd: () => ed,
   setEd: (next) => {
@@ -1303,6 +1313,7 @@ const dockWindowsDeps = (side: 'left' | 'right'): ConstructorParameters<typeof D
   },
   onFocusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, 'dock'),
   onOpenInDock: (blockId) => openWindow('right', blockId),
+  onRefClick: (ref, mods, el) => handleRefClick(ref, mods, el),
   cardState: (blockId) => cardStateFor(side, blockId),
 })
 

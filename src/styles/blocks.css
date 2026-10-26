@@ -565,6 +565,17 @@
   font-size: var(--ui-fs-xs);
   white-space: nowrap;
 }
+/*
+  **只有名字可点**（`×` 不在里面）：与正文 chip 同一口径，点名字＝打开那个标签块。
+  一枚 chip 上两个命中区会互相抢 —— 点「摘掉」时顺手把标签页也打开是最烦的一种。
+*/
+.props-tag-name {
+  cursor: pointer;
+}
+.props-tag-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .props-tag-x {
   background: none;
   border: 0;
@@ -996,7 +1007,10 @@
 /*
   **标签 chip**：标签是块级的分类字段，这枚 chip 只是把归属显示出来
   —— 挂在行的标签槽里（`.blk-tags`），不占正文。
-  比引用 chip 淡一点：引用是一个可以点开的位置，标签只是一个分类。
+  比引用 chip 淡一点：引用是一个可以点开的位置，标签是一个分类。
+  ⚠️ 但**它可点开**：chip 是「指向标签块的一处露面」，与正文里那枚 `#名` 同一口径
+     （左键开中心、Shift+左键开右槽）。能点就必须看得出来 —— 否则「点了没反应」
+     和「点了但看不出来能点」是同一种坏。所以给它 pointer 与悬停反馈。
 */
 .tag-chip {
   display: inline-flex;
@@ -1012,6 +1026,12 @@
   white-space: nowrap;
   user-select: none;
   -webkit-user-select: none;
+  cursor: pointer;
+}
+.tag-chip:hover {
+  opacity: 1;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* ：块选区（跨块拖拽/全选块）。

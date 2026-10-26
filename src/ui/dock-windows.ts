@@ -21,6 +21,7 @@ import { flatten, type Block, type BlockStore } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
+import type { RefClickHit, RefClickMods } from '../view/editor-events.ts'
 import { bindDropTarget } from '../view/dnd.ts'
 import { applyDockCardState, buildDockCard, type DockCardState } from './dock.ts'
 
@@ -49,6 +50,14 @@ export interface DockWindowsDeps {
   onOpenInDock: (blockId: string) => void
   /** 这张卡的收起/单卡/拖拽状态（装配层按 prefs 现算） */
   cardState: (blockId: string) => DockCardState
+  /**
+   * **「指向某块的露面」被点**（行内引用 / 行尾标签 chip）。
+   *
+   * ⚠️ 侧槽的窗口是**生产装配里的编辑器实例**，与正文同一个口径。
+   *    不接它，槽里那张卡上的引用与标签点了就没反应 —— 而缺入口最糟的形态
+   *    不是报错，是「看起来点了、其实什么都没发生」。
+   */
+  onRefClick: (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement) => void
 }
 
 export class DockWindows {
@@ -153,6 +162,7 @@ export class DockWindows {
       },
       focusBlock: (blockId) => this.deps.onFocusBlock(blockId),
       openInDock: (blockId) => this.deps.onOpenInDock(blockId),
+      refClick: (ref, mods, el) => this.deps.onRefClick(ref, mods, el),
     }
     host.addEventListener('focusin', () => this.deps.onFocus(editor))
 

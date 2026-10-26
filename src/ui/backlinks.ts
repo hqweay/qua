@@ -15,7 +15,7 @@ import {
   type BlockStore,
 } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
-import type { RunWithId } from '../core/runs.ts'
+import type { RefClickHit, RefClickMods } from '../view/editor-events.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
 
@@ -43,7 +43,7 @@ export interface BacklinksViewDeps {
    * 点行内原子：与正文**同一条**逻辑（左键打开目标、⌥ 看详情、解析不到仍弹详情）。
    * 不在本文件实现，是因为详情浮层与命令面都归装配层。
    */
-  onAtomClick?: (run: RunWithId, blockId: string, el: HTMLElement, mods: { altKey: boolean; shiftKey: boolean }) => void
+  onRefClick?: (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement) => void
 }
 
 export interface BacklinksViewEls {
@@ -86,7 +86,7 @@ export class BacklinksView {
       },
       focusBlock: (blockId) => this.deps.onFocusBlock(blockId),
       openInDock: (blockId) => this.deps.onOpenInDock(blockId),
-      atomClick: (run, blockId, el, mods) => this.deps.onAtomClick?.(run, blockId, el, mods),
+      refClick: (ref, mods, el) => this.deps.onRefClick?.(ref, mods, el),
     }
 
     // 外部编辑：不在 footer 编辑时重查（编辑中冻结）；footer 自己的编辑不重查（on-blur 再算）

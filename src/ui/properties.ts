@@ -42,6 +42,14 @@ export interface PropertiesDeps {
   addTag: (b: Block, name: string) => void
   /** 摘掉一个标签（连带收掉它在正文里的露面） */
   removeTag: (b: Block, tagId: string) => void
+  /**
+   * **打开一个指向某块的露面**（这一行里只有标签名用它）。
+   *
+   * 判据与正文里的标签 chip 是同一条：**一份归属的每一处露面，点名字都打开它**。
+   * 不注入的话，同一个标签在正文里能点、在属性区点了没反应 —— 同一件事有两种行为，
+   * 每一次都要重新猜一遍哪个能点。
+   */
+  openRef: (to: string, mods: { shiftKey: boolean }) => void
   /** 森林里全部定义（「添加已有属性」用） */
   defs: () => Block[]
   /** 短 id（未知属性的显示） */
@@ -547,7 +555,17 @@ export class PropertiesPanel {
       chip.className = 'props-tag'
       chip.dataset.panelTagId = tag.id
       const text = document.createElement('span')
-      text.textContent = `#${displayNameOf(tag)}`
+      const name = displayNameOf(tag)
+      text.textContent = `#${name}`
+      /**
+       * **只有名字可点**，`×` 不在里面：一枚 chip 上两个命中区会互相抢 ——
+       * 点「摘掉」时顺手把标签页也打开了是最烦的一种。摘除仍只有 `×` 一个入口。
+       * 契约与正文 chip 相同（`data-ref-to`），所以「点名字＝打开它」只有一句话。
+       */
+      text.dataset.refTo = tag.id
+      text.className = 'props-tag-name'
+      text.title = t('ui.chip.tagTitle', { label: name })
+      text.addEventListener('click', (e) => this.deps.openRef(tag.id, { shiftKey: e.shiftKey }))
       const del = document.createElement('button')
       del.type = 'button'
       del.className = 'props-tag-x'

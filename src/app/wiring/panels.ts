@@ -19,7 +19,7 @@ import {
   type Block,
 } from '../../core/index.ts'
 import { t } from '../../core/msg.ts'
-import type { RunWithId } from '../../core/runs.ts'
+import type { RefClickHit, RefClickMods } from '../../view/editor-events.ts'
 import type { App, Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { Tx } from '../../core/kb/types.ts'
@@ -44,7 +44,11 @@ export type PanelsDeps = {
   syncSections: () => void
   scheduleSave: () => void
   scheduleBadge: () => void
-  handleAtomClick: (run: RunWithId, el: HTMLElement, mods: { altKey: boolean; shiftKey: boolean }) => void
+  /**
+   * **「指向某块的露面」被点**（行内引用 / 行尾标签 chip 共用同一条口径）。
+   * 由装配层注入，本层不认识「去哪」的语义；`el` 只是浮层锚点，可省。
+   */
+  refClick: (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement) => void
   /** 换库会整体替换 `ws`，不能传值 */
   getWs: () => Workspace
   /** 焦点切到反链 footer／标签页／查询视图的编辑器时，`ed` 要跟着切 */
@@ -58,7 +62,7 @@ export type PanelsDeps = {
 }
 
 export function setupPanels(deps: PanelsDeps) {
-  const { blocks, kb, layers, app, shortId, run, syncSections, scheduleSave, scheduleBadge, handleAtomClick } = deps
+  const { blocks, kb, layers, app, shortId, run, syncSections, scheduleSave, scheduleBadge, refClick } = deps
   const chrome = deps.getChrome()
   const mainEd = deps.getMainEd()
   /**
@@ -97,7 +101,7 @@ export function setupPanels(deps: PanelsDeps) {
       },
       onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'backlinks'),
       onOpenInDock: (blockId) => deps.openInDock(blockId),
-      onAtomClick: (run, _blockId, el, mods) => handleAtomClick(run, el, mods),
+      onRefClick: (ref, mods, el) => refClick(ref, mods, el),
     },
   )
 
@@ -250,6 +254,9 @@ export function setupPanels(deps: PanelsDeps) {
         void deps.getRegistry().invoke('core.tags/remove', { blockId: b.id, tagId }, 'ui')
         propertiesPanel.render()
       },
+      // 属性区里的标签名也是「指向标签块的一处露面」，与正文 chip 同一条口径
+      // 属性区里的标签名也是「指向标签块的一处露面」，与正文 chip 同一条口径
+      openRef: (to, mods) => refClick({ to }, { altKey: false, ...mods }),
       defs: () => [...kb.propDefs()],
       shortId: (id) => shortId(id),
       setValue: (b, propId, value) => void deps.getRegistry().invoke('core.props/set-value', { blockId: b.id, propId, value }, 'ui'),
@@ -361,7 +368,7 @@ export function setupPanels(deps: PanelsDeps) {
       },
       onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'tagpanel'),
       onOpenInDock: (blockId) => deps.openInDock(blockId),
-      onAtomClick: (run, _blockId, el, mods) => handleAtomClick(run, el, mods),
+      onRefClick: (ref, mods, el) => refClick(ref, mods, el),
     },
   )
 
@@ -406,7 +413,7 @@ export function setupPanels(deps: PanelsDeps) {
       },
       onFocusBlock: (blockId) => void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'query'),
       onOpenInDock: (blockId) => deps.openInDock(blockId),
-      onAtomClick: (run, _blockId, el, mods) => handleAtomClick(run, el, mods),
+      onRefClick: (ref, mods, el) => refClick(ref, mods, el),
       toast: (text, kind) => app.toast(text, kind),
     },
   )

@@ -9293,6 +9293,134 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   return `两个入口各写各的槽：抬头 ⇒ _ownProps（标签块也能给自己加），声明段 ⇒ _fieldDefs；解除只摘清单`
 })
 
+/**
+ * T126｜**一份归属的每一处露面，点名字都打开它**（这是「同一句话」的回归钉子）。
+ *
+ * 曾经：正文里那枚 `#名` 能点开（走原子口径），行尾 chip 与属性区的标签名点了没反应 ——
+ * 同一个标签、两种行为，用户要学两遍。chip 从正文槽挪到标签槽时，那条点击没跟着搬。
+ *
+ * 判据落在**「去了哪」**上，不是「有没有反应」：
+ *   · 行尾 chip 左键 ⇒ 中心换成标签块；
+ *   · 行尾 chip Shift+左键 ⇒ 右槽多一张窗口、中心与历史不动；
+ *   · 属性区的标签名左键 ⇒ 同样打开；点 `×` **只摘标签、不导航**；
+ *   · 点 chip 前后正文读数不变（chip 仍是 0 格装饰）。
+ */
+await check('T126 行尾 chip / 属性区标签名点名字 ⇒ 打开标签块；Shift ⇒ 右槽；`×` 只摘不导航', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const tagName = `露面标签${Date.now().toString(36).slice(-4)}`
+  const tagId = await seedTag(page, tagName)
+  assert(tagId !== '', '应能建出一个标签块')
+
+  /** 找一个普通内容块，用 ⌥↵ 把标签归到它身上（块级露面 ⇒ 行尾 chip） */
+  const hostId = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const b = ed.rows().map((r) => r.block).find((x) => !x.roles?.length && !x.props?._tags?.length)
+    return b?.id ?? ''
+  })
+  assert(hostId !== '', '应能找到一个没有标签的内容块')
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), hostId)
+  await page.waitForTimeout(120)
+  await page.evaluate(
+    ({ id, tag }) => window.__qua.invoke('core.tags/add', { blockId: id, name: tag }),
+    { id: hostId, tag: tagName },
+  )
+  await page.waitForTimeout(200)
+
+  const before = await page.evaluate(
+    ({ hostId, tagId }) => {
+      const chip = document.querySelector(`.blk[data-block-id="${hostId}"] .blk-tags .tag-chip[data-tag-id="${tagId}"]`)
+      return {
+        chip: Boolean(chip),
+        refTo: chip?.dataset.refTo ?? '',
+        title: chip?.title ?? '',
+        inTx: Boolean(chip?.closest('.tx')),
+        read: window.__qua.__editor.readRunsOf(hostId).filter((r) => r.t === 'text').map((r) => r.v).join(''),
+      }
+    },
+    { hostId, tagId },
+  )
+  assert(before.chip, `前置：块级归属要在行尾出一枚 chip：${JSON.stringify(before)}`)
+  assert(before.refTo === tagId, `chip 要带导航契约 data-ref-to（指向标签块）：${JSON.stringify(before)}`)
+  assert(before.title.includes(tagName), `可点就要看得出来能点（title 要说去哪）：${JSON.stringify(before)}`)
+  assert(!before.inTx, `chip 仍须在正文槽之外：${JSON.stringify(before)}`)
+
+  // ① 左键点 chip ⇒ 中心换成标签块
+  await page.locator(`.blk[data-block-id="${hostId}"] .blk-tags .tag-chip`).first().click()
+  await page.waitForTimeout(200)
+  const afterLeft = await page.evaluate(() => window.__qua.snapshot().activeId)
+  assert(afterLeft === tagId, `点行尾 chip 应打开标签块：${afterLeft} ≠ ${tagId}`)
+
+  // ② 回到宿主，Shift+点 chip ⇒ 右槽开窗口、中心不动
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), hostId)
+  await page.waitForTimeout(150)
+  const centerBefore = await page.evaluate(() => window.__qua.snapshot().activeId)
+  const navBeforeShift = await page.evaluate(() => window.__qua.snapshot().nav)
+  const dockBefore = await dockState(page)
+  await page.locator(`.blk[data-block-id="${hostId}"] .blk-tags .tag-chip`).first().click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(200)
+  const afterShift = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
+  }))
+  const dockAfter = await dockState(page)
+  assert(dockAfter.pref.right.cards.includes(tagId), `Shift+点 chip 应在右槽开窗口：${JSON.stringify(dockAfter.pref.right.cards)}`)
+  assert(afterShift.active === centerBefore, `Shift+点 chip 不换中心：${centerBefore} → ${afterShift.active}`)
+  assert(JSON.stringify(afterShift.nav) === JSON.stringify(navBeforeShift), `Shift+点 chip 不入历史：${JSON.stringify(afterShift.nav)}`)
+  assert(dockBefore.pref.right.cards.length < dockAfter.pref.right.cards.length, '前置：右槽确实多了一张卡')
+
+  /**
+   * ③ 属性区的标签名：**点名字打开**，`×` **只摘不导航**。
+   *
+   * ⚠️ 这两半必须一起断言：一枚 chip 上两个命中区最容易出的错是「点 × 时顺手把标签页也打开了」，
+   *    只测「× 能摘掉」会照样绿。
+   */
+  // 属性区的主体＝**当前对象**（单根），所以这里要真的 zoom 过去，不是只放光标
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), hostId)
+  await page.waitForTimeout(250)
+  const panelChip = await page.evaluate((tagId) => {
+    const name = document.querySelector(`[data-panel-tag-id="${tagId}"] .props-tag-name`)
+    return { found: Boolean(name), refTo: name?.dataset.refTo ?? '', title: name?.title ?? '' }
+  }, tagId)
+  assert(panelChip.found, `属性区的标签名要带 props-tag-name（点名字的命中区）：${JSON.stringify(panelChip)}`)
+  assert(panelChip.refTo === tagId, `属性区标签名要用同一条导航契约：${JSON.stringify(panelChip)}`)
+  assert(panelChip.title.includes(tagName), `属性区标签名也要说去哪：${JSON.stringify(panelChip)}`)
+
+  await page.locator(`[data-panel-tag-id="${tagId}"] .props-tag-name`).click()
+  await page.waitForTimeout(200)
+  const afterPanel = await page.evaluate(() => window.__qua.snapshot().activeId)
+  assert(afterPanel === tagId, `点属性区的标签名也应打开标签块：${afterPanel} ≠ ${tagId}`)
+
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), hostId)
+  await page.waitForTimeout(250)
+  const tagsBeforeX = await page.evaluate((id) => {
+    const b = window.__qua.__editor.store.find(id)
+    return Array.isArray(b?.props?._tags) ? b.props._tags.length : 0
+  }, hostId)
+  const centerBeforeX = await page.evaluate(() => window.__qua.snapshot().activeId)
+  await page.locator(`[data-panel-tag-id="${tagId}"] .props-tag-x`).click()
+  await page.waitForTimeout(250)
+  const afterX = await page.evaluate(
+    ({ id }) => {
+      const b = window.__qua.__editor.store.find(id)
+      return {
+        tags: Array.isArray(b?.props?._tags) ? b.props._tags.length : 0,
+        active: window.__qua.snapshot().activeId,
+        chips: document.querySelectorAll(`.blk[data-block-id="${id}"] .blk-tags .tag-chip`).length,
+      }
+    },
+    { id: hostId },
+  )
+  assert(afterX.tags === tagsBeforeX - 1, `点 × 要摘掉这个标签：${JSON.stringify(afterX)}`)
+  assert(afterX.active === centerBeforeX, `点 × **不该**导航（一枚 chip 两个命中区不能互相抢）：${centerBeforeX} → ${afterX.active}`)
+  assert(afterX.chips === 0, `摘掉之后行尾不该还留着 chip：${JSON.stringify(afterX)}`)
+
+  await ctx.close()
+  return `行尾 chip 与属性区标签名都打开了标签块；Shift 走右槽且中心/历史不动；× 只摘不导航`
+})
+
 /** 判红的是「不在已知失败表里的失败」；已知失败逐条打印，不计入退出码 */
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
