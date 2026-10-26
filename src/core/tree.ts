@@ -127,6 +127,9 @@ export function findInForest(forest: readonly Block[], id: string): Block | unde
  *
  * ⚠️ zoom 的面包屑就是它去掉末尾 —— **派生、不物化、不入库**：
  *   层级本来就来自 `parent` 链，不需要再存一份「焦点栈」。
+ * ⚠️ 现在是 **O(n)**（走整片森林）：树只有 parent→children 的 `children` 数组，没有反向 parent。
+ *   若它成为热路径（move／extract／反链上下文），在 `IndexPort` 加 `parentOf` 派生索引，
+ *   让路径沿 parent 向上 O(depth)；**不要**往 Block 上加 `parent`/`left`（`children` 是唯一真相）。
  */
 export function findPath(forest: readonly Block[], id: string): Block[] | null {
   let found: Block[] | null = null
