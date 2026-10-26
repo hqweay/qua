@@ -249,7 +249,7 @@ function mentionRows(query: string, deps: TriggerDeps): Row[] {
     if (text.trim() === '') return
     if (q !== '' && !text.toLowerCase().includes(q)) return
     if (blocks.length >= MENTION_CAP) return
-    // 来源页（块住在哪一页）作为提示：同一段字可能出现在几处，用户要能分清
+    // 来源根（块住在哪个顶层根）作为提示：同一段字可能出现在几处，用户要能分清
     const root = ctx.path[0]
     blocks.push({
       id: `retrieval/block/${b.id}`,

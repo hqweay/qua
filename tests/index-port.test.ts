@@ -171,7 +171,7 @@ test('等式：改标签名走 tx ⇒ 名字表换主，旧名字不残留', () 
   assert.equal(tagIdByName(next, 'todo'), undefined, '旧名字必须摘掉（增量最容易漏的就是它）')
 })
 
-test('等式：删子树走 tx ⇒ 块/归属/名字/父页一起退场', () => {
+test('等式：删子树走 tx ⇒ 块/归属/名字/根表一起退场', () => {
   const { store, kb, idx } = kbFixture()
   const next = txStep(kb, store, idx, (tx) => {
     tx.remove('b') // 它带着 b1；a/b1 都打了 #todo ⇒ 成员表要收掉
@@ -194,24 +194,60 @@ test('等式：删掉先序认领者后，同名词块接手（heir 规则）', 
   assert.equal(lookupBlock(idx2, 't1'), undefined)
 })
 
-test('等式：移动子树走 tx ⇒ pageOf 全子树重打', () => {
+test('等式：移动子树走 tx ⇒ rootOf 全子树重打', () => {
   const { store, kb, idx } = kbFixture()
   const next = txStep(kb, store, idx, (tx) => {
     tx.move('b', 'p2', 0)
   })
   assert.equal(lookupBlock(next, 'b1'), store.find('b1'))
-  // pageOf 已由等式断言兜底；这里点一句「跟着新顶层走」的可读出口
-  assert.equal(next.pageOf.get('b1'), 'p2')
+  // rootOf 已由等式断言兜底；这里点一句「跟着新顶层走」的可读出口
+  assert.equal(next.rootOf.get('b1'), 'p2')
 })
 
-test('等式：插入带归属的新块走 tx ⇒ 块/成员/父页一起进场', () => {
+test('rootOf：page 只是露面，不是作用域——页嵌在天下时仍归天', () => {
+  const day = b('day', '', {
+    props: { _date: '2026-10-21' },
+    children: [b('p', '页', { props: { _aliases: ['页'], _lists: ['page'] }, children: [b('x', 'X')] })],
+  })
+  const idx = rebuild([day])
+  assert.equal(idx.rootOf.get('p'), 'day', '页自己不是新的作用域')
+  assert.equal(idx.rootOf.get('x'), 'day', '页里的块也不归页，仍归顶层根')
+})
+
+test('rootOf：加/摘 page 露面不改根（同一个块换露面，位置没动）', () => {
+  const { store, kb, idx } = kbFixture()
+  const next = txStep(kb, store, idx, (tx) => {
+    tx.setLists('a', ['page'])
+  })
+  assert.equal(next.rootOf.get('a'), 'p1', '加 page 露面不改它所在的顶层根')
+  assert.equal(next.rootOf.get('b1'), 'p1')
+})
+
+test('backrefsOf：按来源顶层根聚合；页嵌在天下时来源根是天', async () => {
+  const { backrefsOf } = await import('../src/core/index.ts')
+  const target = b('target', '目标')
+  const day = b('day', '', {
+    props: { _date: '2026-10-21' },
+    children: [
+      b('p', '页', {
+        props: { _aliases: ['页'], _lists: ['page'] },
+        children: [withRefs(b('src', '源'), ref('e', 'target'))],
+      }),
+    ],
+  })
+  const out = backrefsOf({ blocks: [day, target], targetId: 'target' })
+  assert.equal(out.length, 1)
+  assert.equal(out[0]!.rootId, 'day', '来源根是顶层根，不是最近的 page 露面')
+})
+
+test('等式：插入带归属的新块走 tx ⇒ 块/成员/根表一起进场', () => {
   const { store, kb, idx } = kbFixture()
   const next = txStep(kb, store, idx, (tx) => {
     tx.insert(b('fresh', '新块', { props: { _tags: ['t1'] } }), 'p2', 0)
   })
   assert.equal(plainText(lookupBlock(next, 'fresh')!.content), '新块')
   assert.deepEqual(tagMemberIdsOf(next, 't1').sort(), ['a', 'b1', 'fresh'])
-  assert.equal(next.pageOf.get('fresh'), 'p2')
+  assert.equal(next.rootOf.get('fresh'), 'p2')
 })
 
 test('等式：改归属走 tx ⇒ 成员表跟着搬（不碰名字表）', () => {
@@ -360,7 +396,7 @@ test('backrefsOf：count 是**边数**（同一块引用两次算两条），不
   const p2 = b('p2', '页面二', { props: { _aliases: ['页面二'], _lists: ['page'] }, children: [b('c', '丙')] })
   const out = backrefsOf({ blocks: [p1, p2], targetId: 'p2' })
   assert.equal(out.length, 1, '同一页聚合成一条')
-  assert.equal(out[0]!.pageId, 'p1')
+  assert.equal(out[0]!.rootId, 'p1')
   assert.equal(out[0]!.count, 3, '三处引用 ⇒ count 3（用 Set 会压成 2）')
 })
 
@@ -388,7 +424,7 @@ test('backrefBlocks：给可编辑 footer 用 —— 返回**块**级来源，�
   const out = backrefBlocks({ blocks: forest, targetId: 'p1' })
   assert.equal(out.length, 1)
   assert.equal(out[0]!.blockId, 'a2', '返回源**块**，不是页')
-  assert.equal(out[0]!.pageId, 'p1')
+  assert.equal(out[0]!.rootId, 'p1')
   assert.equal(out[0]!.count, 2)
 })
 
@@ -441,7 +477,7 @@ test('applyOps：只有指向边变化 ⇒ 其它四张表是同一个引用（�
   })
   assert.equal(next.blocks, idx.blocks, '块表原样保留（活引用不换）')
   assert.equal(next.tags, idx.tags, '名字表原样保留')
-  assert.equal(next.pageOf, idx.pageOf, '父页表原样保留')
+  assert.equal(next.rootOf, idx.rootOf, '根表原样保留')
   assert.equal(next.tagMembers, idx.tagMembers, '标签成员来自块 ⇒ 内容变了不用重算')
   assert.deepEqual(incomingIds(next, 't2'), ['c'], '新边要算进来')
 })

@@ -129,7 +129,7 @@ pnpm build:mac      # 打包 .app
 pnpm gate:bundle    # gate ＋ 打包产物冒烟（慢，单列）
 ```
 
-**改完必须 `pnpm gate` 全绿才能算收工**（当前基线：arch **19/19** · test:core **342/342** ·
+**改完必须 `pnpm gate` 全绿才能算收工**（当前基线：arch **19/19** · test:core **345/345** ·
 浏览器冒烟 **131/131** · dock **11/11** · electron **10/10**）。
 
 - **`gate` 是编排出来的，不是一条 `&&` 链**（`scripts/gate.mjs`）：彼此独立的检查按产物依赖分三段、

@@ -130,7 +130,7 @@ test('读面：backlinksOf 认内容里的引用 run（p2 被 p1 引用）', () 
   const { kb } = fixture('p2')
   const links = kb.backlinksOf('p2')
   assert.equal(links.length, 1)
-  assert.equal(links[0]?.pageId, 'p1')
+  assert.equal(links[0]?.rootId, 'p1')
   assert.equal(links[0]?.count, 1)
 })
 
@@ -436,7 +436,7 @@ test('tx 抛错 ⇒ 内存恢复、索引可用、不返回半批', () => {
   assert.equal(delivered, false, '抛错时根本拿不到返回值')
   assert.equal(JSON.stringify(store.blocks), before, '内容/标签/删除全部回滚')
   // 恢复之后索引必须重建过：反链还查得到（回滚不能把索引留在坏状态上）
-  assert.equal(kb.backlinksOf('p2')[0]?.pageId, 'p1')
+  assert.equal(kb.backlinksOf('p2')[0]?.rootId, 'p1')
   assert.equal(plainText(kb.get('c1')!.content), '一')
 })
 

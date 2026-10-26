@@ -16,10 +16,10 @@ import { renderBlock, type BlockRenderCtx } from './block-renderers.ts'
 import type { DockCard } from './dock.ts'
 
 export interface DockContentDeps {
-  /** 读门面：今日块、反链源页都按 id／按名取数 */
+  /** 读门面：今日块、反链源根都按 id／按名取数 */
   kb: KbClient
   activeId: () => string
-  /** 打开某个页（页 id 或反链项的来源页 id）——中心槽 */
+  /** 打开某个根（页/天/被 zoom 的根；反链项给的是来源根 id）——中心槽 */
   openPage: (id: string) => void
   /** 在右槽打开某个块（Shift+点行／块标） */
   openInDock: (id: string) => void
@@ -71,7 +71,7 @@ export function backrefsCard(deps: DockContentDeps): DockCard {
   // 所以不去装成「它刚被创建」——给它一个固定的零值，一眼看出它不是库里的块。
   for (const s of sources) {
     const row: Block = {
-      id: s.pageId,
+      id: s.rootId,
       content: textRuns(s.text),
       children: [],
       created: 0,

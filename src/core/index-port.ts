@@ -29,7 +29,7 @@ import { evaluateQuery, firstJournal, isExactRoleJournal, type QueryEnv, type Qu
  * | `incoming` | 谁引用它、引用了几次 | 反链 |
  * | `tagMembers` | 谁打了这个标签（**从块上的 `_tags` 建**，同块多次只算一次） | 标签成员 |
  * | `tags` / `journals` | 按名字/日期找块 | 标签解析、日记条件 |
- * | `pageOf` | 这块住哪一页 | 反链按来源页聚合 |
+ * | `rootOf` | 这块住在哪个顶层根 | 反链按来源根聚合 |
  */
 export interface Index {
   /** 块 id → 块（**活引用**） */
@@ -61,8 +61,8 @@ export interface Index {
   tags: Map<string, string>
   /** 日期（`YYYY-MM-DD`）→ journal 块 id */
   journals: Map<string, string>
-  /** 块 id → 它所在的**顶层块** id（含自己）—— 反链按来源页聚合要用 */
-  pageOf: Map<string, string>
+  /** 块 id → 它所在的**顶层块** id（含自己）—— 反链按来源根聚合要用 */
+  rootOf: Map<string, string>
   /**
    * 内部簿记：引用 run id → 它此刻贡献的那条边（**不进 fingerprint**）。
    *
@@ -80,7 +80,7 @@ function emptyIndex(): Index {
     tagMembers: new Map(),
     tags: new Map(),
     journals: new Map(),
-    pageOf: new Map(),
+    rootOf: new Map(),
     edgeByAnno: new Map(),
   }
 }
@@ -94,7 +94,7 @@ function emptyIndex(): Index {
 export function rebuild(forest: readonly Block[]): Index {
   const idx = emptyIndex()
 
-  // ① 块表 / 标签表 / 日记表 / 父页表 / 成员表 / 入向边（一次先序遍历；与增量修补同一口径）。
+  // ① 块表 / 标签表 / 日记表 / 根表 / 成员表 / 入向边（一次先序遍历；与增量修补同一口径）。
   //    边从块内容里的引用 run 提取——只有引用（无 flavor）；行内标签（flavor '#'）
   //    是归属的露面，不是指向边，不进 `incoming`。
   // ⚠️ 遍历默认跳过被删的子树（原位软删：被删的块对索引不可见）。
@@ -201,15 +201,15 @@ function applyBlockUpsert(
   }
   if (value.parent === undefined) return
   const parent = value.parent
-  const pageRoot = parent === null ? id : (index.pageOf.get(parent) ?? id)
+  const rootId = parent === null ? id : (index.rootOf.get(parent) ?? id)
   if (known) {
     // 挪位不改 props ⇒ 名字表/成员表都不动；`blocks` 里是活引用，也无事可做
-    reindexSubtreePage(index, known, pageRoot)
+    reindexSubtreeRoot(index, known, rootId)
     return
   }
   const block = findInForest(forest, id)
   if (!block) return
-  indexSubtree(index, block, pageRoot)
+  indexSubtree(index, block, rootId)
 }
 
 /**
@@ -228,7 +228,7 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[]): v
   const gone = walkSubtreeIncludingDeleted(block)
   for (const bid of gone) {
     index.blocks.delete(bid)
-    index.pageOf.delete(bid)
+    index.rootOf.delete(bid)
   }
   const goneSet = new Set(gone)
   // 名字表：删掉这些块认领的名字，再让**还活着**的认领者按 rebuild 的口径接手
@@ -299,10 +299,10 @@ function refreshJournalClaim(index: Index, blockId: string): void {
   }
 }
 
-/** 把一棵子树的 `pageOf` 重打到新的顶层块（挪位只影响这一件事） */
-function reindexSubtreePage(index: Index, root: Block, pageRoot: string): void {
+/** 把一棵子树的 `rootOf` 重打到新的顶层块（挪位只影响这一件事） */
+function reindexSubtreeRoot(index: Index, root: Block, rootId: string): void {
   walkForest([root], (b) => {
-    index.pageOf.set(b.id, pageRoot)
+    index.rootOf.set(b.id, rootId)
   })
 }
 
@@ -355,11 +355,11 @@ function walkSubtreeIncludingDeleted(root: Block): string[] {
   return out
 }
 
-/** 把一棵子树写进索引（与 `rebuild` 同一口径：先序；`pageRoot` ＝ 它所在的顶层块） */
-function indexSubtree(index: Index, root: Block, pageRoot: string): void {
+/** 把一棵子树写进索引（与 `rebuild` 同一口径：先序；`rootId` ＝ 它所在的顶层块） */
+function indexSubtree(index: Index, root: Block, rootId: string): void {
   walkForest([root], (b) => {
     index.blocks.set(b.id, b)
-    index.pageOf.set(b.id, pageRoot)
+    index.rootOf.set(b.id, rootId)
     // 指向边：数据源是块内容里的引用 run（可见源块，遍历口径与块表同一条）
     addEdgesOfBlock(index, b)
     // 标签成员（数据源是块上的 `_tags`）
@@ -408,7 +408,7 @@ export function fingerprint(index: Index): string {
     tagMembers: sets(index.tagMembers),
     tags: flat(index.tags),
     journals: flat(index.journals),
-    pageOf: flat(index.pageOf),
+    rootOf: flat(index.rootOf),
   })
 }
 
@@ -442,7 +442,7 @@ export function tagIdByName(index: Index, name: string): string | undefined {
 /**
  * **查询走索引**：`ref`／`tag`／`journal` 三类条件查表（O(1)），其余谓词仍是逐块判定。
  *
- * 为什么不是「查询全在索引里」：索引是五张**派生表**，不记树的形状（`pageOf` 只到顶层、
+ * 为什么不是「查询全在索引里」：索引是五张**派生表**，不记树的形状（`rootOf` 只到顶层、
  * 挪位后 `blocks` 的插入顺序会漂移）——候选迭代与结果顺序仍按森林先序走，
  * 判定与顺序共用 `query.ts` 的 `evaluateQuery`（两条路径只有「环境怎么来」不同）。
  *
