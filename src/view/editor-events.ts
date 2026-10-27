@@ -16,6 +16,8 @@
 import { bindDropTarget, setDragBlock, zoneHint } from './dnd.ts'
 import type { TriggerChar } from '../core/trigger.ts'
 import type { RunWithId } from '../core/runs.ts'
+import type { Content } from '../core/runs.ts'
+import { isCommittedTextInput } from '../core/ime.ts'
 
 /**
  * 「指向某块的露面」被点时按下了哪些修饰键。
@@ -125,6 +127,10 @@ export interface EditorBridge {
   composing: () => boolean
   /** 记录组合序列（诊断用）*/
   noteComposition: (step: 'start' | 'update' | 'end') => void
+  /** 读某块此刻的 run 序列（组合开始时记快照用；纯读） */
+  blockContent: (id: string) => Content
+  /** 把某块的 run 序列写回（取消候选时收回预编辑串；**不重渲染**） */
+  restoreBlockContent: (id: string, content: Content) => void
   /** 该块有没有子块（拖到 inside 要判）*/
   hasChildren: (id: string) => boolean
   /**
@@ -359,7 +365,16 @@ export function bindEditorEvents(br: EditorBridge): () => void {
   })
 
   /* ── 输入与组合（**不打断 IME**）────────────────────── */
-  on(c, 'input', () => {
+  on(c, 'input', (e: InputEvent) => {
+    /**
+     * ⚠️ **「已提交的文本输入」本身就是组合结束的信号**，不能只等 `compositionend`。
+     *
+     * 判据：`isComposing === false` 且 `inputType ∈ {insertText, insertReplacementText,
+     * insertFromComposition}`。外接键盘、部分输入法的 `compositionend` 会缺失；漏掉它
+     * `composing` 就永久为真 —— 而组合期现在**挡着所有换 DOM 的路径**，卡住的代价比之前大得多
+     * （正文会一直停在旧形状）。所以恢复信号必须在这里。
+     */
+    if (isCommittedTextInput(e) && br.composing()) br.noteComposition('end')
     /**
      * ⚠️ **先收跨块选区**：浏览器会把整段内容删掉，但模型里那些块一块都没少
      *    ⇒ 不收的话重渲染时它们又全回来了（看起来像「删除没生效」）。
@@ -385,14 +400,40 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     if (!br.composing()) br.emitTrigger(id)
   })
 
+  /**
+   * **取消候选（Esc 语义）后要把预编辑串收回。**
+   *
+   * 为什么不能指望浏览器：组合期我们**把预编辑串同步进了模型**（DOM 是模型的投影，不投影
+   * 就会「打拼音时正文不动」）。Chromium 在取消候选时会把 DOM 里的预编辑串撤掉，模型跟着
+   * 被下一笔 `syncFromDom` 改正——但这条依赖**浏览器一定会撤**。实测里本机 Chromium 确实会撤，
+   * 所以这条回滚现在是「第二道保险」，不是主路径。
+   *
+   * 判据：`compositionstart` 记下那一刻这一块的 run 序列；空 `compositionend`（`data === ''`）
+   * 时如果模型还带着预编辑串，就整块写回快照。
+   * ⚠️ 只在**空 data** 时回滚：有 data ＝ 用户选了词，那是正常提交，回滚会吃掉他的字。
+   * ⚠️ 不重渲染（`renderBlock`）——组合刚结束，换 DOM 仍可能撞上浏览器的收尾；只改模型，
+   *    外观交给紧随其后的那次 `syncFromDom(id, true)`。
+   */
+  let compositionBase: { id: string; content: Content } | null = null
+
   on(c, 'compositionstart', () => {
     br.noteComposition('start')
+    const id = br.blockOf(document.getSelection()?.anchorNode ?? null)
+    compositionBase = id ? { id, content: br.blockContent(id) } : null
     br.onChange()
   })
   on(c, 'compositionupdate', () => br.noteComposition('update'))
-  on(c, 'compositionend', () => {
+  on(c, 'compositionend', (e: CompositionEvent) => {
     br.noteComposition('end')
     const id = br.blockOf(document.getSelection()?.anchorNode ?? null)
+    /**
+     * 取消候选：`data === ''` ⇒ 用户没选词，正文必须回到组合前。
+     * ⚠️ 判据用 `compositionBase.id === id`：光标换过块就不能拿旧块的内容往回写。
+     */
+    if (compositionBase && e.data === '' && id && compositionBase.id === id) {
+      br.restoreBlockContent(id, compositionBase.content)
+    }
+    compositionBase = null
     if (id) {
       br.syncSel()
       br.syncFromDom(id, true)

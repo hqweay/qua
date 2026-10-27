@@ -689,6 +689,26 @@ await check('E9 虚拟化下选区投影与组合期两段式的 Electron 现状
     window.__qua.focusBlock(first, 0)
     for (let i = 0; i < 40; i++) window.__qua.invoke('core.editor/split-block')
   })
+  /**
+   * ④ 需要一个**有正文的可写行**：`split-block` 造出来的都是空块，而空块没有 `.tx` 文本节点
+   *    （只有 `<br>` 占位），在它上面 `imeSetComposition` 进不去组合期。
+   *    所以先往第一行里写一段字 —— 它同时也保证这行是「用户真能打字」的那种行。
+   */
+  await page.evaluate(() => {
+    const id = window.__qua.blocks().find((b) => b.text === '')?.id
+    if (id) window.__qua.invoke('core.editor/insert-block', { type: 'paragraph', text: '可写正文行，用来测组合期' })
+  })
+  await new Promise((r) => setTimeout(r, 200))
+  // 诊断：这时哪些行是可写且已挂载的（④ 的目标就从这里挑）
+  log(`      ④ 候选可写行：${JSON.stringify(await page.evaluate(() => {
+    const out = []
+    for (const b of window.__qua.blocks()) {
+      const tx = document.querySelector(`.blk[data-block-id="${b.id}"] .tx`)
+      if (!tx) continue
+      out.push({ id: b.id.slice(-6), text: b.text.slice(0, 12), ce: Boolean(tx.isContentEditable), ro: tx.dataset.readonly ?? null })
+    }
+    return out.slice(0, 8)
+  }))}`)
   const n = await page.evaluate(() => window.__qua.blocks().length)
   await page.evaluate(() => window.__qua.setVirtualize(true, 8))
   await new Promise((r) => setTimeout(r, 300))
@@ -750,14 +770,51 @@ await check('E9 虚拟化下选区投影与组合期两段式的 Electron 现状
     sc.scrollTop = 0
   })
   await new Promise((r) => setTimeout(r, 300))
-  const targetId = await page.evaluate(() => window.__qua.blocks()[0].id)
+  /**
+   * ⚠️ 目标必须是**可写**的一行：`blocks()[0]` 是只读的日记头（`isJournal` ⇒ `.tx` 不可编辑），
+   *    在它上面 `imeSetComposition` **根本进不去组合期** —— 那样这一档测的就不是
+   *    「组合期被卸载」，而是「普通滚动加载」（真踩过：断言看着在跑，其实没在测它声称的东西）。
+   *    判据用 `isContentEditable`（计算后），不是 `contenteditable` 属性（子块不带那个属性）。
+   */
+  const targetId = await page.evaluate(() => {
+    for (const b of window.__qua.blocks()) {
+      if (!b.text || b.text.length < 3) continue
+      const tx = document.querySelector(`.blk[data-block-id="${b.id}"] .tx`)
+      if (tx?.isContentEditable && tx.dataset.readonly !== '1') return b.id
+    }
+    return null
+  })
+  assert(targetId, '找不到可写的一行来测组合期卸载')
+  /**
+   * 落光标：**先真点一下把焦点给到窗口**，再用 `focusBlock` 精确落到目标块。
+   * ⚠️ 不能只靠点击坐标：虚拟化下行的位置随窗口变，点到的可能是**旁边那一行**
+   *    （实测：点下去 `caretBlock` 是另一个 id，于是「提交落点漂移」是探针自己造成的假红）。
+   */
+  const box = await page.evaluate((id) => {
+    const el = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
+    const r = el.getBoundingClientRect()
+    return { x: r.left + 8, y: r.top + r.height / 2 }
+  }, targetId)
+  await page.mouse.click(box.x, box.y)
+  await new Promise((r) => setTimeout(r, 150))
   await page.evaluate((id) => window.__qua.focusBlock(id, 0), targetId)
+  await new Promise((r) => setTimeout(r, 150))
+  const caret0 = await page.evaluate(() => {
+    const s = document.getSelection()
+    return s?.anchorNode?.parentElement?.closest?.('.blk')?.dataset.blockId ?? null
+  })
+  assert(caret0 === targetId, `前置：光标没落到目标块（期望 ${targetId.slice(-6)}，实际 ${caret0?.slice(-6)}）`)
   await cdp.send('Input.imeSetComposition', { text: 'zhongwen', selectionStart: 8, selectionEnd: 8 })
   await new Promise((r) => setTimeout(r, 250))
-  const midCompose = await page.evaluate(() => ({
-    isComposing: window.__qua.snapshot().composing,
-    seq: window.__qua.__editor.probe.compositionSeq.join(','),
-  }))
+  const midCompose = await page.evaluate(() => {
+    const s = document.getSelection()
+    return {
+      isComposing: window.__qua.snapshot().composing,
+      seq: window.__qua.__editor.probe.compositionSeq.join(','),
+      caretBlock: s?.anchorNode?.parentElement?.closest?.('.blk')?.dataset.blockId?.slice(-6) ?? null,
+    }
+  })
+  assert(midCompose.isComposing === true, `前置：组合期没进得去（${JSON.stringify(midCompose)}），本轮断言无效`)
   // 组合中把它滚出窗口 ⇒ 该块应被卸载（DOM 节点连同预编辑串一起没了）
   await page.evaluate(() => {
     const sc = document.getElementById('scroll')
@@ -811,9 +868,23 @@ await check('E9 虚拟化下选区投影与组合期两段式的 Electron 现状
   log(`      ④ 提交后：目标块文本="${afterCommit.targetText}"（块还在=${afterCommit.targetSurvived}，共 ${afterCommit.totalBlocks} 块）`)
   log(`      ④ 提交的「中文」落在 ${afterCommit.committedCount} 块上：${JSON.stringify(afterCommit.committedAt)}`)
   log(`      ④ 预编辑串 zhongwen 还留在模型里：${JSON.stringify(afterCommit.preeditLeft)}`)
-  log('      ④ ⇒ 组合期**块被卸载**这件事是真的（还挂着=false）；提交后要盯的是「提交结果落在哪一块、预编辑串有没有被丢下」——上面两行就是答案')
+  /**
+   * 这一档钉的是**组合期的卸载守卫**（`deferWhileComposing`）：
+   *   · 组合中把承载块滚出窗口 ⇒ 块**仍挂载**（不许换/卸 DOM）；
+   *   · 提交后文本落在**目标块自己**身上（不是漂到别的块）；
+   *   · 预编辑串不留在模型里（提交取代了它）；
+   *   · `composing` 收尾复位。
+   * 反证：守卫去掉后这三条会一起红（`stillMounted=false`、落点漂移、`composing` 卡住）。
+   */
+  assert(afterScroll.stillMounted === true,
+    `组合期承载块被卸载了（stillMounted=${afterScroll.stillMounted}）——守卫没生效`)
+  assert(afterCommit.isComposing === false, `组合结束后 composing 没复位：${afterCommit.isComposing}`)
+  assert(afterCommit.committedAt.length === 1 && afterCommit.committedAt[0].id === targetId.slice(-6),
+    `提交落点漂移：期望落在 ${targetId.slice(-6)}，实际 ${JSON.stringify(afterCommit.committedAt)}`)
+  assert(afterCommit.preeditLeft.length === 0,
+    `预编辑串残留在模型里：${JSON.stringify(afterCommit.preeditLeft)}`)
   assert(virt.mounted < n, `虚拟化没卸载东西：mounted=${virt.mounted} 块数=${n}`)
-  return `③ 本实现下**没能复现**投影消失（被选中的 ${selInfo0.spannedIds.length} 块滚动后仍挂着 ${selInfo1.stillMountedCount} 块）；④ **复现了**组合期卸载（目标块还挂着=${afterScroll.stillMounted}）⇒ 提交后目标块文本="${afterCommit.targetText}"、提交落点=${JSON.stringify(afterCommit.committedAt)}、残留预编辑串=${JSON.stringify(afterCommit.preeditLeft)}`
+  return `③ 本实现下**没能复现**投影消失（被选中的 ${selInfo0.spannedIds.length} 块滚动后仍挂着 ${selInfo1.stillMountedCount} 块）；④ 组合期滚动**未卸载**承载块（守卫生效）⇒ 提交落在目标块、无残留预编辑串、composing 已复位`
 })
 
 /* ═══════════════════════════════════════════════════ 汇总 */

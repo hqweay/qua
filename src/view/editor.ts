@@ -441,6 +441,12 @@ export class BlockEditor {
    */
   reloadFromStore(restoreSelection = true, ids?: readonly string[]): void {
     /**
+     * **组合期不换 DOM**（见 `deferWhileComposing`）：记一笔「欠一次」就返回。
+     * ⚠️ 这条必须**先于**下面那两条分支判：`renderBlock` 自己也有守卫，但在这里早退
+     *    才能把 `renderAll`／`restoreSel` 一起推迟，而不是「重画了一半」。
+     */
+    if (this.deferWhileComposing()) return
+    /**
      * **别的编辑器（嵌在本视图的段里）正在打字 ⇒ 只按 id 重画，不动结构。**
      * 动结构 ＝ 把挂载区那棵子树搬一遍 ＝ 里层编辑器失焦、光标丢失。
      * 全量重排记在 `pendingReload`，等焦点离开编辑岛再补（`flushPendingReload`）。
@@ -529,13 +535,39 @@ export class BlockEditor {
     if (!down && this.pendingReload) this.armFlush()
   }
 
-  /** 补一次被推迟的结构重排（焦点离开里层视图、且指针已抬起之后才真的做） */
+  /**
+   * **组合期不换 DOM：记一笔「欠一次」，等组合结束再补。**
+   *
+   * 为什么这是一条**渲染前置条件**而不是某个事件里的分支：
+   * 输入法的预编辑串（拼音字母）由浏览器持有，它不是正文；承载它的节点一旦被换掉或
+   * 被卸载，浏览器就把这段预编辑**当成已提交文本**冻结在原位 —— 表现为「打拼音时冒出
+   * 一个字母，且取消候选也收不回去」（实测：`checks/probe-ime-dom.mjs` 的 C／D 两档）。
+   *
+   * 而「换 DOM」的入口不止 `input` 一条：属性写入（`repaintBlock`）、别的视图 `store.touch`
+   * （`reloadFromStore`）、`armFlush` 的延时重排、`applyWindow` 的窗口重算都会走到这里。
+   * 判据必须放在**渲染入口**才覆盖得住；放在事件回调里只能覆盖其中一条路径。
+   *
+   * @returns `true` ＝ 已经记下「欠一次」，调用方**必须跳过这次换 DOM**。
+   */
+  private deferWhileComposing(): boolean {
+    if (!this.probe.isComposing) return false
+    this.pendingReload = true
+    this.armFlush()
+    return true
+  }
+
+  /** 补一次被推迟的结构重排（指针已抬起、焦点不在里层视图、且**不在组合期**之后才真的做） */
   flushPendingReload(): void {
     if (this.pointerDown) return
     if (this.nestedEditorActive()) {
       this.armFlush()
       return
     }
+    /**
+     * ⚠️ 组合期不能补：这条 200ms 的计时器很可能正好落在用户选词的那几秒里
+     *    （组合开始前刚发生过一次 `touch` 就会排上它）。
+     */
+    if (this.deferWhileComposing()) return
     if (!this.pendingReload) return
     this.pendingReload = false
     this.reloadFromStore()
@@ -636,6 +668,11 @@ export class BlockEditor {
   }
 
   renderAll(): void {
+    /**
+     * ⚠️ **组合期不换 DOM**（见 `deferWhileComposing`）。这条是全量重排的唯一入口，
+     *    守卫放在这里才覆盖得住 `loadPage`／`reloadFromStore`／各命令路径。
+     */
+    if (this.deferWhileComposing()) return
     this.container.textContent = ''
     this.mounted.clear()
     this.rebuildAncestors()
@@ -746,6 +783,13 @@ export class BlockEditor {
     const loc = locate(this.doc, id)
     const el = this.blockEl(id)
     if (!loc || !el) return
+    /**
+     * ⚠️ **组合期不重画这一行**（见 `deferWhileComposing`）。这一条比 `renderAll` 更容易踩到：
+     *    属性写入（`writeProps` → `repaintBlock`）、改名传播（`renderRefSources`）、
+     *    以及 `syncFromDom` 的收尾都会调到它，而它们**都不看组合期**。
+     *    它换的是 `.tx` 所在的那一行 ⇒ 输入法正持有的文本节点被换掉，预编辑串当场落成正文。
+     */
+    if (this.deferWhileComposing()) return
     const row = this.rows().find((r) => r.block.id === id) ?? {
       block: loc.block,
       depth: depthOf(this.doc, id),
@@ -2613,6 +2657,13 @@ export class BlockEditor {
 
   /** 窗口化挂载：只挂「光标所在行 ± radius」（**以可见行计**，折叠的子树本来就不在窗口里） */
   applyWindow(centerId?: string): void {
+    /**
+     * ⚠️ **组合期不重算窗口**（见 `deferWhileComposing`）。
+     *    这条不是可有可无的：`applyWindow` 会 `container.textContent = ''` 再按窗口重新挂，
+     *    承载块因此换成**另一个元素**（即使 `virtualize=false`，判据 `before === after` 为假）——
+     *    那一下就把输入法的组合锚点摘掉了。
+     */
+    if (this.deferWhileComposing()) return
     const rows = this.rows()
     const cid = centerId ?? this.sel?.aBlock ?? rows[0]?.block.id
     let ci = rows.findIndex((r) => r.block.id === cid)
@@ -2813,9 +2864,29 @@ export class BlockEditor {
 
       composing: () => this.probe.isComposing,
       noteComposition: (step) => {
+        const was = this.probe.isComposing
         if (step === 'start') this.probe.isComposing = true
         if (step === 'end') this.probe.isComposing = false
         this.probe.compositionSeq.push(step)
+        /**
+         * **组合结束 ⇒ 把欠下的那次重排补上。**
+         *
+         * 没有这一步，组合期的守卫就成了死锁：`renderBlock`／`renderAll`／`applyWindow`
+         * 在组合期一律只记「欠一次」，而唯一会消费它的是 `flushPendingReload`（200ms 计时器）——
+         * 用户如果组合完就不再动，正文会**一直停在旧形状**（改了属性看不到、别的视图的改动
+         * 也不显示）。所以「结束」这件事必须自己把账清掉。
+         */
+        if (was && !this.probe.isComposing) this.armFlush()
+      },
+      blockContent: (id) => locate(this.doc, id)?.block.content ?? [],
+      restoreBlockContent: (id, content) => {
+        const loc = locate(this.doc, id)
+        if (!loc) return
+        const before = this.snap()
+        if (this.write) this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, content)))
+        else writeBlockContent(loc.block, content)
+        this.undo.record(before, 'delete', Date.now())
+        this.emitChange('text', [id])
       },
       /**
        * 点了一个「指向某块的露面」。**先交出当前行的编辑期**，理由与 `focusBlock` 完全相同：
@@ -3166,6 +3237,13 @@ export class BlockEditor {
    */
   appendRoots(blocks: readonly Block[]): void {
     if (blocks.length === 0) return
+    /**
+     * ⚠️ **组合期不追加**（见 `deferWhileComposing`）：这一句必须在改 `doc.roots` **之前**。
+     *    放在 `renderAll` 里挡是不够的 —— 那时根已经 push 进去了，而渲染被推迟，
+     *    于是「文档多了一天、屏幕还是旧的一天」，两个事实分叉。
+     *    推迟到组合结束：调用方（下滚加载）会在下一次滚动时再试。
+     */
+    if (this.deferWhileComposing()) return
     this.doc.roots.push(...blocks)
     this.viewRootIds.push(...blocks.map((b) => b.id))
     const scrollTop = this.blankArea.scrollTop

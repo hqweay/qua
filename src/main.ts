@@ -1540,6 +1540,12 @@ badge.update()
  */
 function appendMoreFeed(): boolean {
   const roots = mainEd.doc.roots
+  /**
+   * ⚠️ **组合期不追加**（与 `appendRoots` 的守卫同一条理由）：这里必须在 `materializeEditableRoots`
+   *    **之前**返回——那一步会物化根并改模型，而渲染会被 `appendRoots` 推迟，两者就分叉了。
+   *    推迟到组合结束：用户下一次滚到底会再触发一次。
+   */
+  if (mainEd.probe.isComposing) return false
   // 增量加载只在单列流成立：横排／网格的段数由打开它的入口定死，「往下滚」不是「要更旧的天」
   if (mainEd.layout !== 'column') return false
   if (roots.length <= 1 || !roots.every((r) => isJournal(r))) return false
