@@ -434,9 +434,9 @@ export class BlockEditor {
     this.offStore =
       o.autoReload === false
         ? () => {}
-        : this.store.subscribe((source?: unknown, ids?: readonly string[]) => {
+        : this.store.subscribe((source?: unknown, ids?: readonly string[], forestReplaced?: boolean) => {
             // 发起编辑的视图自己已经渲染过；其他视图按 root id 从 store 重取（共享对象，不拷贝块数据）
-            if (source !== this) this.reloadFromStore(true, ids)
+            if (source !== this) this.reloadFromStore(true, ids, forestReplaced === true)
           })
     this.container.setAttribute('contenteditable', 'true')
     this.container.setAttribute('spellcheck', 'false')
@@ -474,7 +474,11 @@ export class BlockEditor {
    *
    * ⚠️ 其他视图收到 `touch` 时调用；不触发 `events.change`（否则会回写成“编辑”）。
    */
-  reloadFromStore(restoreSelection = true, ids?: readonly string[]): void {
+  /**
+   * @param force 忽略「里层编辑岛优先」的推迟（undo/redo 用的：森林整体被换掉时
+   *              推迟只会让正文停在旧内容上；那时也不存在「打断里层打字」的问题）
+   */
+  reloadFromStore(restoreSelection = true, ids?: readonly string[], force = false): void {
     /**
      * **组合期不换 DOM**（见 `deferWhileComposing`）：记一笔「欠一次」就返回。
      * ⚠️ 这条必须**先于**下面那两条分支判：`renderBlock` 自己也有守卫，但在这里早退
@@ -486,7 +490,7 @@ export class BlockEditor {
      * 动结构 ＝ 把挂载区那棵子树搬一遍 ＝ 里层编辑器失焦、光标丢失。
      * 全量重排记在 `pendingReload`，等焦点离开编辑岛再补（`flushPendingReload`）。
      */
-    if (this.pointerDown || this.focusInMount()) {
+    if (!force && (this.pointerDown || this.focusInMount())) {
       if (ids && ids.length > 0) for (const id of ids) this.renderBlock(id)
       this.pendingReload = true
       this.armFlush()
@@ -511,7 +515,7 @@ export class BlockEditor {
    *    本视图会以为自己有焦点，于是 `restoreSel()` 把光标从里层抢回来（实测：
    *    点挂载区里的行，插入点立刻跳回正文）。
    */
-  private ownFocus(): boolean {
+  ownFocus(): boolean {
     const active = document.activeElement as HTMLElement | null
     if (!active) return false
     if (active === this.container) return true
@@ -1524,7 +1528,8 @@ export class BlockEditor {
     const s = this.store.undo(this, this.sel)
     if (!s) return
     this.sel = JSON.parse(s.sel) as Sel | null
-    this.reloadFromStore(false)
+    // force：森林整体被换掉（见 `reloadFromStore` 的 force 说明）
+    this.reloadFromStore(false, undefined, true)
     this.restoreSel()
     this.emitChange('struct')
   }
@@ -1534,7 +1539,8 @@ export class BlockEditor {
     const s = this.store.redo(this, this.sel)
     if (!s) return
     this.sel = JSON.parse(s.sel) as Sel | null
-    this.reloadFromStore(false)
+    // force：同上（redo 也是整片森林换一遍）
+    this.reloadFromStore(false, undefined, true)
     this.restoreSel()
     this.emitChange('struct')
   }

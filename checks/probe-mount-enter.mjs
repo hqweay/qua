@@ -92,23 +92,35 @@ const rowsBefore = await page.evaluate(() => {
 })
 log(`提及里的行（按 ↵ 之前）：${JSON.stringify(rowsBefore)}`)
 
-/** 在提及的第一行末尾落光标 */
-const focused = await page.evaluate(() => {
+/**
+ * 在提及的第一行末尾落光标。
+ *
+ * ⚠️ 必须**真鼠标点击**：挂载区编辑器靠 `focusin` 才被装配层认成「活动编辑器」
+ *    （`onFocus` ⇒ `deps.setEd`）。用 `el.focus()` 或手工塞 Range 都不会派发
+ *    `focusin`，那一刻 `app.ed` 还是**正文** ⇒ ↵ 会被正文接走（探针踩过）。
+ */
+const spot = await page.evaluate(() => {
   const ed = document.querySelector('.sec > .sec-mount .mount-editor')
-  const blk = ed?.querySelector('.blk')
-  if (!blk) return null
-  const tx = blk.querySelector('.tx')
-  const r = document.createRange()
-  r.selectNodeContents(tx)
-  r.collapse(false)
-  const s = getSelection()
-  s.removeAllRanges()
-  s.addRange(r)
-  ed.focus?.()
-  return { id: blk.dataset.blockId?.slice(-8), text: tx?.textContent }
+  const tx = ed?.querySelector('.blk .tx')
+  if (!tx) return null
+  const r = tx.getBoundingClientRect()
+  return { x: Math.round(r.right - 3), y: Math.round(r.y + r.height / 2), id: tx.closest('.blk')?.dataset.blockId?.slice(-6) }
 })
-log(`落光标到提及行：${JSON.stringify(focused)}`)
-await sleep(300)
+if (!spot) {
+  log('✗ 提及里没有可点的行')
+  await app.close()
+  process.exit(1)
+}
+await page.mouse.click(spot.x, spot.y)
+await sleep(350)
+const focused = await page.evaluate(() => {
+  const a = document.activeElement
+  return {
+    inMount: Boolean(a?.closest('.sec-mount')),
+    caretBlock: window.__qua.snapshot().selection?.aBlock?.slice(-6) ?? null,
+  }
+})
+log(`点提及行 ${spot.id}：${JSON.stringify(focused)}`)
 
 const activeBefore = await page.evaluate(() => {
   const a = document.activeElement
@@ -116,19 +128,104 @@ const activeBefore = await page.evaluate(() => {
 })
 log(`按 ↵ 前焦点：${JSON.stringify(activeBefore)}`)
 
+/**
+ * ⌘A 也走**命令层**（`app.ed.selectAll()`），所以它落在哪个编辑宿主里
+ * ＝「活动编辑器」到底是谁。打字走事件层，即使活动编辑器错了也能打对——
+ * 这正是「能打字、但 ↵ 跑到正文」能同时成立的原因。
+ */
+await page.keyboard.press('Meta+a')
+await sleep(250)
+const selHost = await page.evaluate(() => {
+  const s = getSelection()
+  const n = s?.anchorNode
+  const el = n?.nodeType === 3 ? n.parentElement : n
+  return {
+    inMount: Boolean(el?.closest('.sec-mount')),
+    inBody: Boolean(el?.closest('#editor') && !el?.closest('.sec-mount')),
+    text: (s?.toString() ?? '').slice(0, 24),
+  }
+})
+log(`⌘A 的选区落在：${JSON.stringify(selHost)}  ⇒ 活动编辑器＝${selHost.inMount ? '挂载区' : '正文'}`)
+await page.evaluate(() => getSelection()?.removeAllRanges())
+await sleep(150)
+
 await page.keyboard.press('Enter')
 await sleep(600)
 
-const after = await page.evaluate(() => {
+const dumpMount = () =>
+  page.evaluate(() => {
+    const mount = document.querySelector('.sec > .sec-mount')
+    return Array.from(mount?.querySelectorAll('.mount-editor .blk') ?? []).map((b) => ({
+      id: b.dataset.blockId?.slice(-6),
+      depth: b.dataset.depth,
+      text: b.querySelector('.tx')?.textContent ?? '',
+    }))
+  })
+
+const after = await page.evaluate((rowsBeforeIds) => {
   const a = document.activeElement
-  const mount = document.querySelector('.sec > .sec-mount')
+  const mounted = document.querySelector('.sec > .sec-mount .mount-editor')
   return {
-    active: { tag: a?.tagName, cls: String(a?.className ?? ''), inMount: Boolean(a?.closest('.sec-mount')) },
-    mountRows: Array.from(mount?.querySelectorAll('.mount-editor .blk') ?? []).map((b) => ({ id: b.dataset.blockId?.slice(-8), text: b.querySelector('.tx')?.textContent ?? '' })),
+    active: {
+      id: a?.id || null,
+      tag: a?.tagName,
+      cls: String(a?.className ?? '').slice(0, 40),
+      inMount: Boolean(a?.closest('.sec-mount')),
+      isEditor: a?.id === 'editor',
+    },
+    mountRows: Array.from(mounted?.querySelectorAll('.blk') ?? []).map((b) => ({
+      id: b.dataset.blockId?.slice(-6),
+      depth: b.dataset.depth,
+      text: b.querySelector('.tx')?.textContent ?? '',
+    })),
+  }
+}, [])
+log(`\n按 ↵ 后焦点：${JSON.stringify(after.active)}`)
+log(`按 ↵ 后挂载区里的行（含 depth）：${JSON.stringify(after.mountRows)}`)
+
+/** 新建的那块在**正文**里在哪：父是谁、能不能看见 */
+const inBody = await page.evaluate(() => {
+  const out = []
+  const walk = (b, parent, d) => {
+    out.push({ id: b.id.slice(-6), depth: d, text: (b.content ?? []).map((r) => r.v ?? '').join(''), parent: parent?.slice(-6) ?? null })
+    for (const c of b.children ?? []) walk(c, b.id, d + 1)
+  }
+  for (const r of window.__qua.__editor.doc.roots) walk(r, null, 0)
+  const ed = window.__qua.__editor
+  const cid = ed.caretBlock() ?? ed.sel?.aBlock
+  return {
+    caret: cid?.slice(-6) ?? null,
+    empties: out.filter((o) => o.text === ''),
+    caretVisibleInBody: Boolean(cid && document.querySelector(`#editor .blk[data-block-id="${cid}"]`)),
   }
 })
-log(`\n按 ↵ 后焦点：${JSON.stringify(after.active)}`)
-log(`按 ↵ 后提及里的行：${JSON.stringify(after.mountRows)}`)
+log(`正文里的空块（新建的那块应当在这里）：${JSON.stringify(inBody.empties)}`)
+log(`光标块=${inBody.caret}；它在正文 DOM 里可见=${inBody.caretVisibleInBody}`)
+
+/**
+ * 新块**真正的父**是谁（从整片森林里查，不靠任一视图的 doc）。
+ * 父＝命中块 ⇒ ↵ 被挂载区接了；父＝命中块的父 ⇒ ↵ 被正文接了。
+ */
+const kinship = await page.evaluate(() => {
+  const ed = window.__qua.__editor
+  const cid = ed.caretBlock() ?? ed.sel?.aBlock
+  const parentOf = new Map()
+  for (const r of ed.store.blocks) {
+    const walk = (b, p) => {
+      parentOf.set(b.id, p)
+      for (const c of b.children ?? []) walk(c, b.id)
+    }
+    walk(r, null)
+  }
+  const chain = []
+  let cur = cid
+  while (cur) {
+    chain.push(String(cur).slice(-6))
+    cur = parentOf.get(cur)
+  }
+  return { caret: String(cid ?? '').slice(-6), chain }
+})
+log(`新块的祖先链（自己→根）：${JSON.stringify(kinship.chain)}`)
 
 /** 库里多出来的块挂在哪 */
 const tree = await page.evaluate((childId) => {

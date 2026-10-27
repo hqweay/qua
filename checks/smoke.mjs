@@ -3563,6 +3563,12 @@ await check('T34 反链 footer 可原地编辑；同一源块在正文与反链�
 
   // 全局 undo：焦点在 footer，Meta+Z 回滚 store，正文与 footer 一起复原
   await page.keyboard.press(kbd('mod+z'))
+  /**
+   * undo 是「整片森林换一遍」：`store.restore` 原地换 `blocks` 的内容 ⇒ 各视图手里
+   * 那批块对象**当场过期**，必须按 id 重取。而此刻焦点在挂载区里——那条「里层在打字时
+   * 不搬 DOM」的推迟策略曾经把正文这次重排一直拖到焦点离开（正文停在旧内容上）。
+   * 现在 undo/redo 走 `force`（森林整体被换掉时推迟没有意义）⇒ 120ms 内两边就一致。
+   */
   await page.waitForTimeout(120)
   const undone = await page.evaluate((id) => ({
     main: window.__qua.blocks().find((b) => b.id === id)?.text ?? '',
@@ -10924,6 +10930,79 @@ await check('T141 空块里敲拼音：第一个字母不被冻成正文（组�
   assert(out.text === '你好', `空块里打 nihao 应得到「你好」，实际 ${JSON.stringify(out.text)}`)
   await ctx.close()
   return `空块：compositionstart×${out.starts}，结果 ${JSON.stringify(out.text)}`
+})
+
+/**
+ * **在挂载区（查询结果的派生视图）里按 ↵：新块要是命中块的**子块**，且留在这一栏里看得见。**
+ *
+ * 为什么单列一条：挂载区的 DOM **嵌在 `#editor` 里**，而 `focusin` **冒泡**——
+ * 正文那条 `focusin` 曾经无条件把活动编辑器改回自己，把里层 `onFocus` 刚切的
+ * 挂载区覆盖掉。打字走事件层（各编辑器自己绑 container）不受影响，
+ * 而 ↵／⌘A 走命令层的 `app.ed` ⇒ 会被**正文**接走：新块建成命中块的**兄弟**
+ * （不在这一栏的查询条件里 ⇒ 用户看不见），光标还被甩到正文。
+ *
+ * Roam/Logseq 的语义：在引用区那一行按 ↵ ＝ 在那一块**下面**接着写，就地可见。
+ */
+await check('T142 挂载区里 ↵：新块是命中块的子块、留在本栏可见、光标不跳出挂载区', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.loadState('seed'))
+  await page.waitForTimeout(300)
+
+  // 页 P：让一个块 b 引用 P ⇒ b 出现在 P 的「引用」栏（与 T135 同一招）
+  const ids = await page.evaluate(() => {
+    const pages = window.__qua.pages()
+    const P = pages[0].id
+    window.__qua.invoke('core.page/open', { pageId: P })
+    const rows = window.__qua.__editor.rows().map((r) => r.block)
+    const b = rows.find((x) => x.id !== P && x.children.length === 0)
+    window.__qua.focusBlock(b.id, 999)
+    window.__qua.invoke('core.editor/insert-page-ref', { pageId: P })
+    return { P, b: b.id }
+  })
+  await page.waitForTimeout(500)
+
+  const row = `#editor .mount .mount-editor .blk[data-block-id="${ids.b}"]`
+  const n0 = await mountRows(page)
+  assert(n0 >= 1, `引用栏里应当有 ${ids.b.slice(-6)}，实际 ${n0} 行`)
+
+  // ⚠️ 必须**真点击**：挂载区靠 `focusin` 才被认成活动编辑器（手工塞 Range 不会派发）
+  await page.locator(`${row} .tx`).first().click()
+  await page.waitForTimeout(300)
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(500)
+
+  const out = await page.evaluate((bSel) => {
+    const a = document.activeElement
+    const mount = document.querySelector('#editor .mount')
+    const kids = Array.from(mount?.querySelectorAll('.mount-editor .blk') ?? []).map((e) => ({
+      id: e.dataset.blockId?.slice(-6),
+      depth: e.dataset.depth,
+    }))
+    return {
+      caretInMount: Boolean(a?.closest('.sec-mount')),
+      rows: kids,
+      // 新块在**整片森林**里的父（不靠任一视图的 doc）
+      parentOfNew: (() => {
+        const ed = window.__qua.__editor
+        const caret = ed.caretBlock()
+        const map = new Map()
+        for (const r of ed.store.blocks) {
+          const walk = (x, p) => {
+            map.set(x.id, p)
+            for (const c of x.children ?? []) walk(c, x.id)
+          }
+          walk(r, null)
+        }
+        return { caret: String(caret ?? '').slice(-6), parent: String(map.get(caret) ?? '').slice(-6) }
+      })(),
+    }
+  }, row)
+
+  assert(out.caretInMount, `按 ↵ 后光标应当还在挂载区里，实际焦点在 ${out.rows.length ? '别处' : '别处'}（activeElement 不在 .sec-mount 内）`)
+  assert(out.rows.length === n0 + 1, `新块应当**留在本栏里看得见**：${n0} → ${out.rows.length}`)
+  assert(out.parentOfNew.parent === ids.b.slice(-6), `新块应当是命中块的子块（Roam 语义），实际父＝${out.parentOfNew.parent}，命中块＝${ids.b.slice(-6)}`)
+  await ctx.close()
+  return `引用栏 ${n0}→${out.rows.length} 行；新块父＝${out.parentOfNew.parent}（命中块）；光标仍在挂载区`
 })
 
 /**

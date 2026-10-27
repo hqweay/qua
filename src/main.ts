@@ -1276,8 +1276,22 @@ ed = new BlockEditor({
   write: (fn) => run(fn, mainEd),
 })
 mainEd = ed
-// 焦点在正文 → 活动编辑器＝正文；焦点在反链 footer 时由 BacklinksView 切过去
+/**
+ * 焦点在正文 → 活动编辑器＝正文；焦点在里层编辑岛时由那一层自己切
+ * （挂载区的 `onFocus`／右槽窗口的 `onFocus`）。
+ *
+ * ⚠️ **`focusin` 会冒泡，所以这里必须让位**：挂载区／组件体的 DOM 都**嵌在 `#editor` 里**，
+ *    里层的 `focusin` 先跑（把 `ed` 切成挂载区），冒泡到这儿再无条件改回正文 ⇒
+ *    里层那一次等于没发生，`ed` 永远停在正文。
+ *
+ *    后果只在**命令层**上现身：打字走事件层（各编辑器自己把 `input` 绑在自己的 container 上），
+ *    所以在挂载区里打字一直是对的；而 ↵／⌘A／Tab 这些走 `app.ed` 的键位会被**正文**接走。
+ *    实测（`checks/probe-mount-enter.mjs`）：在「提及」里按 ↵ ⇒ 新块建在**命中块的后面**
+ *    （兄弟，不是子块）⇒ 它不满足这一栏的查询条件 ⇒ **用户在原地看不见自己刚建的东西**，
+ *    而光标被甩到正文。点上 ⌘A 也能看出活动编辑器仍是正文。
+ */
 editorEl.addEventListener('focusin', () => {
+  if (!mainEd.ownFocus()) return
   ed = mainEd
 })
 

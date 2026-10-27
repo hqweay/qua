@@ -25,7 +25,15 @@ import { applyOps as patchIndex, lookupBlock, rebuild, type Index } from './inde
  * 而不是靠「store 被碰过几次」——后者会把「刷新顺带引起的重渲染」也算成过期（实测假阳性）。
  * ⚠️ 拿不到精确 id 的调用方（续用旧的 `touch(this)`）就不传，订阅者必须容忍 `ids === undefined`。
  */
-export type StoreSubscriber = (source?: unknown, ids?: readonly string[]) => void
+/**
+ * `forestReplaced` ＝ **整片森林被换掉了**（undo/redo：`restore` 里 `blocks` 数组原地换内容
+ * ⇒ 各视图手里那批块对象**当场过期**，只有按 id 重取才能看到新值）。
+ *
+ * 为什么订阅者需要知道它：编辑器有一条「焦点在里层编辑岛时不搬 DOM」的推迟策略
+ * （防打断里层输入），但那条是为**打字**准备的。森林整体被换掉时推迟是错的——
+ * 用户按了 ⌘Z，正文却停在旧内容上、直到焦点离开挂载区才补（实测：1.2 秒都不刷）。
+ */
+export type StoreSubscriber = (source?: unknown, ids?: readonly string[], forestReplaced?: boolean) => void
 
 export class BlockStore {
   blocks: Block[]
@@ -58,15 +66,15 @@ export class BlockStore {
    *    写入方已经按 op 修补过索引时（`kb.tx` 的唯一出口）用 `notify` ——
    *    作废会让那次修补白做，每次写入都退化成全量重建。
    */
-  notify(source?: unknown, ids?: readonly string[]): void {
-    for (const fn of this.subs) fn(source, ids)
+  notify(source?: unknown, ids?: readonly string[], forestReplaced = false): void {
+    for (const fn of this.subs) fn(source, ids, forestReplaced)
   }
 
-  touch(source?: unknown, ids?: readonly string[]): void {
+  touch(source?: unknown, ids?: readonly string[], forestReplaced = false): void {
     // 一切模型变化都会走到这里（编辑器的 `emitChange` 是唯一出口）⇒ 索引在这里失效最省事，
     // 也最不容易漏：让「改数据」与「索引可能过期」这一对事实**绑在同一个调用上**。
     this.invalidateIndex()
-    this.notify(source, ids)
+    this.notify(source, ids, forestReplaced)
   }
 
   /**
@@ -124,7 +132,8 @@ export class BlockStore {
   restore(s: Snap, source?: unknown): Sel | null {
     const blocks = JSON.parse(s.blocks) as Block[]
     this.blocks.splice(0, this.blocks.length, ...blocks)
-    this.touch(source)
+    // ⚠️ 数组身份保住、但**块对象是新的** ⇒ 订阅者必须按 id 重取，见 `StoreSubscriber`
+    this.touch(source, undefined, true)
     return JSON.parse(s.sel) as Sel | null
   }
 
