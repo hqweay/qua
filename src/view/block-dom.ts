@@ -377,9 +377,6 @@ export function makeTagsEl(
  */
 export const EDIT_ISLAND_ATTR = 'data-edit-island'
 
-/** 这一行是**组件的正文露面**（`.tx` 里那一格），高度由类型声明给 */
-export const WIDGET_BODY_ATTR = 'data-widget-body'
-
 /**
  * **一个 `.blk` 允许有哪些直接子节点** —— 这是行的 DOM 契约清单，只有渲染层能增项。
  *
