@@ -9,7 +9,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createDeviceStore, createLocalStorageAdapter, DEFAULT_PREFS, DEVICE_KEY, type Prefs } from '../src/core/workspace.ts'
+import { createDeviceStore, createLocalStorageAdapter, DEFAULT_DOCK, DEFAULT_PREFS, DEVICE_KEY, type Prefs } from '../src/core/workspace.ts'
 import { installMemoryLocalStorage, peekMemoryLocalStorage, resetMemoryLocalStorage } from './storage/test-local-storage.ts'
 
 installMemoryLocalStorage()
@@ -27,7 +27,18 @@ function assertDefaults(p: Prefs): void {
   assert.equal(p.radius, 12)
   assert.equal(p.badgeOpen, false)
   assert.deepEqual(p.dock, {
-    left: { open: true, width: null, cards: ['belongs', 'journal'] },
+    left: {
+      open: true,
+      width: null,
+      cards: [
+        'cmd:core.journal/today',
+        'cmd:core.page/new',
+        'cmd:core.command-palette/show',
+        'cmd:core.journal/prev',
+        'belongs',
+        'journal',
+      ],
+    },
     right: { open: true, width: null, cards: ['inspect', 'backrefs'] },
     collapsedCards: {},
     solo: { left: null, right: null },
@@ -97,7 +108,7 @@ test('device: 旧设备状态的 `pins` 只在 `cards` 缺失时并入一次（�
     payload: JSON.stringify({ prefs: { dock: { left: { open: true, pins: ['a', 'b'] } } } }),
     savedAt: 1,
   })
-  assert.deepEqual((await store(legacy).load()).prefs.dock.left.cards, ['belongs', 'journal', 'a', 'b'])
+  assert.deepEqual((await store(legacy).load()).prefs.dock.left.cards, [...DEFAULT_DOCK.left.cards, 'a', 'b'])
 
   // `cards` 一旦存在就只认它：旧 `pins` 里剩下的 id 不回来
   const next = freshKey()
@@ -178,6 +189,26 @@ test('device: 偏好与折叠表互不连累：一格坏了只回落那一格', 
   const b = await store(await save({ prefs: { theme: 'dark' }, folded: { b1: false } })).load()
   assert.equal(b.prefs.theme, 'dark')
   assert.deepEqual(b.folded, {})
+})
+
+test('device: `cmd:` 不是块，同一个命令可以同时出现在两槽', async () => {
+  resetMemoryLocalStorage()
+  const key = freshKey()
+  await store(key).save({
+    prefs: {
+      ...DEFAULT_PREFS,
+      dock: {
+        left: { open: true, width: null, cards: ['cmd:core.journal/today', 'belongs'] },
+        right: { open: true, width: null, cards: ['cmd:core.journal/today', 'inspect'] },
+        collapsedCards: {},
+        solo: { left: null, right: null },
+      },
+    },
+    folded: {},
+  })
+  const dock = (await store(key).load()).prefs.dock
+  assert.deepEqual(dock.left.cards, ['cmd:core.journal/today', 'belongs'])
+  assert.deepEqual(dock.right.cards, ['cmd:core.journal/today', 'inspect'], 'cmd: 不是块，不参与「一个块最多一张窗口」的去重')
 })
 
 test('device: 坏字节 / 别的后端的字节 ⇒ 回默认，不抛也不改写原字节', async () => {

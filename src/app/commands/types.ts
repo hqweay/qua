@@ -160,6 +160,13 @@ export interface DevDeps {
   compositionSeq: () => string[]
 }
 
+/** 集合组件的宿主能力：写一格 `_items`，或新建一个集合块 */
+export interface CollectionDeps {
+  kb: KbClient
+  write: (blockId: string, mutate: () => void) => void
+  run: TxRun
+}
+
 /** 挂载区的宿主能力：写一格 `_mounts`（必要时先物化日记那份共享配置块） */
 export interface MountsDeps {
   kb: KbClient

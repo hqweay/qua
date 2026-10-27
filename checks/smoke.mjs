@@ -190,6 +190,85 @@ const dragCard = (page, { from, to, id, before }) =>
     { from, to, id, before },
   )
 
+/** 真的走一遍 HTML5 DnD：小卡 dragstart（`CARD_MIME`）→ 目标槽 dragover/drop */
+const dragTile = (page, { from, to, id, before }) =>
+  page.evaluate(
+    ({ from, to, id, before }) => {
+      const tile = document.querySelector(`#dock-${from} .dock-tile[data-card-id="${id}"]`)
+      const stack = document.querySelector(`#dock-${to} .dock-stack`)
+      if (!tile || !stack) return null
+      const target = before ? document.querySelector(`#dock-${to} [data-card-id="${before}"]`) : null
+      const box = (target ?? stack).getBoundingClientRect()
+      // 落在目标格的左半边 ⇒ before；落在末尾 ⇒ 最后
+      const x = target ? box.left + 2 : box.right - 2
+      const y = box.top + box.height / 2
+      const dt = new DataTransfer()
+      const ev = (type) =>
+        new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y })
+      tile.dispatchEvent(ev('dragstart'))
+      stack.dispatchEvent(ev('dragover'))
+      const hot = Boolean(
+        document.querySelector(`#dock-${to} .dock-tile[data-drop-before="1"], #dock-${to} .dock-tile[data-drop-after="1"], #dock-${to} .dock-card[data-drop-before="1"], #dock-${to} .dock-card[data-drop-after="1"]`),
+      )
+      stack.dispatchEvent(ev('drop'))
+      tile.dispatchEvent(ev('dragend'))
+      return { hot, cards: window.__qua.snapshot().dock }
+    },
+    { from, to, id, before },
+  )
+
+/** 真的走一遍 HTML5 DnD：块标 dragstart（`application/x-qua-block` = 块 id）→ 集合卡 body dragover → drop */
+const dragBlockToCollection = (page, blockId, cardId) =>
+  page.evaluate(
+    ({ id, cardId }) => {
+      const marker = document.querySelector(`.blk[data-block-id="${id}"] .marker`)
+      const body = document.querySelector(`#dock-right .dock-card[data-card-id="${cardId}"] .collection-list`)
+      if (!marker || !body) return null
+      const dt = new DataTransfer()
+      const rect = body.getBoundingClientRect()
+      const ev = (type) =>
+        new DragEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer: dt,
+          clientX: rect.left + 8,
+          clientY: rect.top + 8,
+        })
+      marker.dispatchEvent(ev('dragstart'))
+      body.dispatchEvent(ev('dragover'))
+      const hot = body.dataset.drop === '1'
+      body.dispatchEvent(ev('drop'))
+      marker.dispatchEvent(ev('dragend'))
+      return { hot }
+    },
+    { id: blockId, cardId },
+  )
+
+/** 真的走一遍 HTML5 DnD：集合项手柄 dragstart（`ITEM_MIME`）→ 集合 body dragover → drop */
+const dragCollectionItem = (page, cardId, itemId, toIndex) =>
+  page.evaluate(
+    ({ cardId, itemId, toIndex }) => {
+      const card = document.querySelector(`#dock-right .dock-card[data-card-id="${cardId}"]`)
+      const grip = card?.querySelector(`.collection-row[data-item-id="${itemId}"] .collection-grip`)
+      const list = card?.querySelector('.collection-list')
+      if (!grip || !list) return null
+      const rows = [...list.querySelectorAll(':scope > .collection-row')]
+      const target = rows[toIndex] ?? null
+      const rect = target ? target.getBoundingClientRect() : list.getBoundingClientRect()
+      const y = target ? rect.top + 2 : rect.bottom - 2
+      const dt = new DataTransfer()
+      const ev = (type) =>
+        new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: rect.left + 8, clientY: y })
+      grip.dispatchEvent(ev('dragstart'))
+      list.dispatchEvent(ev('dragover'))
+      const hot = list.dataset.drop === '1'
+      list.dispatchEvent(ev('drop'))
+      grip.dispatchEvent(ev('dragend'))
+      return { hot }
+    },
+    { cardId, itemId, toIndex },
+  )
+
 /** 真的走一遍 HTML5 DnD：块标 dragstart（`application/x-qua-block` = 块 id）→ 槽 dragover → drop */
 const dragBlockToDock = (page, blockId, side) =>
   page.evaluate(
@@ -9988,6 +10067,311 @@ await check('T135 挂载区与正文**同一套手势**：点引用跳、块标�
 /** 判红的是「不在已知失败表里的失败」；已知失败逐条打印，不计入退出码 */
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
+
+/* ---------------------------------------------------------------- T136 */
+
+await check('T136 小卡：点击走命令面；可加/可移；同排可拖序', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  const initial = await page.evaluate(() => ({
+    cards: window.__qua.snapshot().dock.left.cards,
+    tiles: [...document.querySelectorAll('#dock-left-stack > .dock-tile')].map((el) => el.dataset.cardId),
+  }))
+  assert(initial.tiles.length === 4, `默认左槽应有 4 张小卡：${JSON.stringify(initial)}`)
+  assert(initial.cards.slice(0, 4).every((id) => id.startsWith('cmd:')), `默认前四项应是 cmd:：${JSON.stringify(initial.cards)}`)
+
+  // 点「回到今日」：必须走命令面，且 via 标成 tile（诊断能区分入口）
+  await page.locator('#dock-left-stack > .dock-tile[data-card-id="cmd:core.journal/today"] .dock-tile-main').click()
+  await page.waitForTimeout(200)
+  const afterClick = await page.evaluate(() => ({ last: window.__qua.snapshot().lastCommand, date: window.__qua.snapshot().journalDate }))
+  assert(afterClick.last?.name === 'core.journal/today' && afterClick.last?.via === 'tile', `小卡点击应走命令面：${JSON.stringify(afterClick)}`)
+  assert(afterClick.date !== '', `回到今日后当前对象应是日记：${JSON.stringify(afterClick)}`)
+
+  // 右槽加一张：默认右槽没有小卡；画廊只列带 tile 的命令
+  await page.locator('#dock-right-add').click()
+  await page.waitForTimeout(120)
+  const gallery = await page.evaluate(() => ({
+    open: Boolean(document.querySelector('.layer')),
+    title: document.querySelector('.layer-head')?.textContent ?? '',
+    rows: document.querySelectorAll('.layer .layer-item').length,
+  }))
+  assert(gallery.open && gallery.title !== '' && gallery.rows > 0, `「添加快捷」应打开并列出命令：${JSON.stringify(gallery)}`)
+  await page.locator('.layer .layer-item').first().click()
+  await page.waitForTimeout(150)
+  const added = await page.evaluate(() => ({
+    cards: window.__qua.snapshot().dock.right.cards,
+    tiles: document.querySelectorAll('#dock-right-stack > .dock-tile').length,
+  }))
+  assert(added.cards.some((id) => id.startsWith('cmd:')) && added.tiles === 1, `右槽应新增一张小卡：${JSON.stringify(added)}`)
+
+  // 移出：只动 cards，不碰命令
+  await page.locator('#dock-right-stack > .dock-tile .dock-tile-x').first().click()
+  await page.waitForTimeout(150)
+  const removed = await page.evaluate(() => ({
+    cards: window.__qua.snapshot().dock.right.cards,
+    tiles: document.querySelectorAll('#dock-right-stack > .dock-tile').length,
+  }))
+  assert(removed.tiles === 0 && !removed.cards.some((id) => id.startsWith('cmd:')), `移出应只动清单：${JSON.stringify(removed)}`)
+
+  // 同排拖序：把「前一天」拖到「回到今日」之前
+  const dragged = await dragTile(page, {
+    from: 'left',
+    to: 'left',
+    id: 'cmd:core.journal/prev',
+    before: 'cmd:core.journal/today',
+  })
+  assert(dragged?.hot === true, `拖到目标格应出现落点：${JSON.stringify(dragged)}`)
+  const order = await page.evaluate(() => ({
+    cards: window.__qua.snapshot().dock.left.cards,
+    dom: [...document.querySelectorAll('#dock-left-stack > .dock-tile')].map((el) => el.dataset.cardId),
+  }))
+  assert(order.cards[0] === 'cmd:core.journal/prev' && order.cards[1] === 'cmd:core.journal/today', `同排拖序应改清单：${JSON.stringify(order)}`)
+  assert(order.dom[0] === 'cmd:core.journal/prev' && order.dom[1] === 'cmd:core.journal/today', `DOM 顺序应跟清单：${JSON.stringify(order)}`)
+
+  await ctx.close()
+  return `4 张小卡；点击 via=tile；右槽可加/可移；同排拖序 ${order.cards[0]} → ${order.cards[1]}`
+})
+
+/* ---------------------------------------------------------------- T137 */
+
+await check('T137 收藏卡：新建 ⇒ 槽里出现组件卡；拖块进来＝加引用；× 只摘引用不删块', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  await page.locator('#dock-right-add').click()
+  await page.waitForTimeout(120)
+  const gallery = await page.evaluate(() => ({
+    title: document.querySelector('.layer-head')?.textContent ?? '',
+    hasNew: [...document.querySelectorAll('.layer .layer-item')].some((el) => el.textContent?.includes('新建收藏')),
+  }))
+  assert(gallery.hasNew, `画廊应列出「新建收藏」：${JSON.stringify(gallery)}`)
+
+  await page.locator('.layer .layer-item', { hasText: '新建收藏' }).click()
+  await page.waitForTimeout(200)
+  const made = await page.evaluate(() => {
+    const cards = window.__qua.snapshot().dock.right.cards
+    const collection = window.__qua.allBlocks().find((b) => b.aliases.includes('收藏'))
+    const card = collection
+      ? document.querySelector(`#dock-right .dock-card[data-card-id="${collection.id}"]`)
+      : null
+    return {
+      cards,
+      collection: collection ? { id: collection.id, aliases: collection.aliases } : null,
+      card: card ? { widget: card.dataset.widget === '1', title: card.querySelector('.dock-card-title')?.textContent ?? '' } : null,
+      blocks: window.__qua.allBlocks().length,
+    }
+  })
+  assert(made.collection, `新建收藏应真的建出一个块：${JSON.stringify(made)}`)
+  assert(made.card?.widget === true && made.card.title.includes('收藏'), `槽里应出现组件卡：${JSON.stringify(made)}`)
+  assert(made.cards.includes(made.collection.id), `卡片 id 应在右槽清单里：${JSON.stringify(made)}`)
+
+  // 找一个当前视图里的块（它的块标在 DOM 里），拖进收藏
+  const target = await page.evaluate(() => {
+    const row = document.querySelector('#editor .blk[data-depth="1"][data-block-id]') ?? document.querySelector('#editor .blk[data-block-id]')
+    return row ? { id: row.dataset.blockId, text: row.querySelector('.tx')?.textContent ?? '' } : null
+  })
+  assert(target, '当前视图里应有一个可拖的块')
+
+  const dragged = await dragBlockToCollection(page, target.id, made.collection.id)
+  assert(dragged?.hot === true, `拖进收藏应亮落点：${JSON.stringify(dragged)}`)
+  await page.waitForTimeout(200)
+  const added = await page.evaluate((cid) => {
+    const rows = [...document.querySelectorAll(`#dock-right .dock-card[data-card-id="${cid}"] .collection-row`)]
+    return { rows: rows.length, text: rows[0]?.textContent ?? '', blocks: window.__qua.allBlocks().length }
+  }, made.collection.id)
+  assert(added.rows === 1, `收藏里应出现一行：${JSON.stringify(added)}`)
+  assert(added.blocks === made.blocks, `收藏只加引用，块数不变：${made.blocks} → ${added.blocks}`)
+
+  // × 只摘引用：行消失、块仍在、块数不变
+  await page.locator(`#dock-right .dock-card[data-card-id="${made.collection.id}"] .collection-x`).first().click()
+  await page.waitForTimeout(150)
+  const removed = await page.evaluate(({ cid, id }) => ({
+    rows: document.querySelectorAll(`#dock-right .dock-card[data-card-id="${cid}"] .collection-row`).length,
+    blockStill: window.__qua.allBlocks().some((b) => b.id === id),
+    blocks: window.__qua.allBlocks().length,
+  }), { cid: made.collection.id, id: target.id })
+  assert(removed.rows === 0, `× 后行应消失：${JSON.stringify(removed)}`)
+  assert(removed.blockStill, `× 只摘引用，块必须还在：${JSON.stringify(removed)}`)
+  assert(removed.blocks === made.blocks, `× 不删块：${made.blocks} → ${removed.blocks}`)
+
+  await ctx.close()
+  return `新建收藏 ⇒ 右槽组件卡；拖入 1 行（块数不变）；× 只摘引用（块仍在）`
+})
+
+/* ---------------------------------------------------------------- T138 */
+
+await check('T138 收藏卡：选择块可加两条；拖手柄换序只动引用，块数不变', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  await page.locator('#dock-right-add').click()
+  await page.waitForTimeout(100)
+  await page.locator('.layer .layer-item', { hasText: '新建收藏' }).click()
+  await page.waitForTimeout(200)
+  const cid = await page.evaluate(() => {
+    const c = window.__qua.allBlocks().find((b) => b.aliases.includes('收藏'))
+    return c?.id ?? ''
+  })
+  assert(cid !== '', '前置：应已建出收藏块')
+  const before = await page.evaluate(() => window.__qua.allBlocks().length)
+
+  // 用「选择块」加两条：每次点按钮 → 点选择器第一行
+  for (let i = 0; i < 2; i++) {
+    await page.locator(`#dock-right .dock-card[data-card-id="${cid}"] .collection-add`).click()
+    await page.waitForTimeout(100)
+    await page.locator('.layer .layer-item').first().click()
+    await page.waitForTimeout(150)
+  }
+  const two = await page.evaluate((cid) => {
+    const rows = [...document.querySelectorAll(`#dock-right .dock-card[data-card-id="${cid}"] .collection-row`)]
+    return { ids: rows.map((r) => r.dataset.itemId), blocks: window.__qua.allBlocks().length }
+  }, cid)
+  assert(two.ids.length === 2, `应加进两条引用：${JSON.stringify(two)}`)
+  assert(two.blocks === before, `选择块只加引用，块数不变：${before} → ${two.blocks}`)
+
+  // 把第二条拖到第一条前面
+  const dragged = await dragCollectionItem(page, cid, two.ids[1], 0)
+  assert(dragged?.hot === true, `拖手柄应亮落点：${JSON.stringify(dragged)}`)
+  await page.waitForTimeout(200)
+  const after = await page.evaluate((cid) => {
+    const rows = [...document.querySelectorAll(`#dock-right .dock-card[data-card-id="${cid}"] .collection-row`)]
+    return { ids: rows.map((r) => r.dataset.itemId), blocks: window.__qua.allBlocks().length }
+  }, cid)
+  assert(after.ids[0] === two.ids[1] && after.ids[1] === two.ids[0], `拖序应换位：${JSON.stringify({ before: two.ids, after: after.ids })}`)
+  assert(after.blocks === before, `拖序只动引用，块数不变：${before} → ${after.blocks}`)
+
+  await ctx.close()
+  return `选择块加 2 条（块数不变）；拖序 ${two.ids.join(',')} → ${after.ids.join(',')}`
+})
+
+/* ---------------------------------------------------------------- T139 */
+
+/**
+ * 正文露面 `body: 'row'`：一块组件在正文里是一行**只读摘要**。
+ *
+ * 三条必须一起断言，只测「画出来了」会让另外两条照样绿：
+ *   ① 摘要**不进正文**（读数契约）：打字、刷新之后块的 content 仍为空 ——
+ *      否则一次 `readRuns` 就把「收藏 3 条 打开」写成真正文，组件行从此消失；
+ *   ② 点它＝打开那张卡（Shift ＝ 换目的地，不换动作）；
+ *   ③ 摘要**与槽里那张卡共享配置**：加一条引用，两处同时变。
+ */
+await check('T139 正文里的组件行：只读摘要不进正文；点它打开卡；与槽里共享配置', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  // 在一个普通块后面插一个收藏（走命令面，与斜杠菜单同一条路）
+  await page.evaluate(() => {
+    const first = window.__qua.blocks().find((r) => r.roles.length === 0)
+    window.__qua.focusBlock(first.id, 0)
+  })
+  await page.waitForTimeout(120)
+  const inserted = await page.evaluate(() => window.__qua.invoke('core.editor/insert-block', { type: 'collection' }))
+  assert(inserted?.handled === true, `插入收藏应被处理：${JSON.stringify(inserted)}`)
+  await page.waitForTimeout(200)
+
+  const cid = await page.evaluate(() => document.querySelector('#editor .widget-row')?.dataset.widgetRow ?? '')
+  assert(cid !== '', '正文里应出现组件行')
+
+  const shape = await page.evaluate((id) => {
+    const row = document.querySelector(`#editor .widget-row`)
+    const blk = row?.closest('.blk')
+    const tx = row?.closest('.tx')
+    return {
+      type: blk?.dataset.type ?? '',
+      sameBlock: blk?.dataset.blockId === id,
+      editable: row?.contentEditable,
+      readonly: tx?.dataset.readonly ?? null,
+      text: row?.textContent ?? '',
+    }
+  }, cid)
+  assert(shape.type === 'core/collection-widget' && shape.sameBlock, `组件行应挂在组件块自己的行上：${JSON.stringify(shape)}`)
+  assert(shape.editable === 'false' && shape.readonly === '1', `组件行不可编辑：${JSON.stringify(shape)}`)
+
+  /**
+   * ① **读数契约**：摘要不进正文。
+   *
+   * ⚠️ 为什么这里**直接调 `readRuns`** 而不是「打字再看 content」：组件行的 `.tx` 是
+   *    `data-readonly`，`syncFromDom` 那条路根本走不到它身上 —— 只测「打字不污染」
+   *    会是一条**恒绿**的断言（删掉 `isWidgetRow` 的读数分支它照样过，实测过）。
+   *    真正会把摘要写进正文的是 `readRuns` 本身（别的收光标路径会经过它），
+   *    所以断言要打在**读数层**：让它读这一行的 `.tx`，结果必须是空。
+   */
+  const readBack = await page.evaluate((id) => {
+    const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
+    return { runs: window.__qua.readRuns(tx), txText: tx?.textContent ?? '' }
+  }, cid)
+  assert(
+    readBack.runs.length === 0,
+    `读数必须跳过组件行（摘要不是正文）：${JSON.stringify(readBack)}`,
+  )
+  assert(readBack.txText.includes('收藏'), `组件行确实画在 .tx 里（否则上面那条也没验到东西）：${JSON.stringify(readBack)}`)
+
+  // 刷新（重新读库）之后：正文仍为空、行还在
+  await page.reload()
+  await page.waitForTimeout(400)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), cid)
+  await page.waitForTimeout(300)
+  const clean = await page.evaluate((id) => ({
+    text: window.__qua.allBlocks().find((b) => b.id === id)?.text ?? null,
+    rowStill: Boolean(document.querySelector('#editor .widget-row')),
+  }), cid)
+  assert(clean.text === '', `刷新后正文仍应为空：${JSON.stringify(clean)}`)
+  assert(clean.rowStill, `刷新后组件行仍应画出来：${JSON.stringify(clean)}`)
+
+  // ③ 与槽里那张卡共享配置：加一条引用 ⇒ 两处同时变
+  /**
+   * ⚠️ 先在**别的**视图里挑一个块再加引用：此刻中心已经 zoom 到那个收藏块，
+   *    `blocks()` 读的是**当前页的子树** —— 在这一屏里找「另一个块」只能找到它自己
+   *    （`r.id !== id` 过滤后为空 ⇒ 拿到 undefined）。
+   */
+  await page.evaluate(() => window.__qua.invoke('core.journal/today', {}))
+  await page.waitForTimeout(250)
+  const shared = await page.evaluate((id) => {
+    const other = window.__qua.blocks().find((r) => r.id !== id && r.roles.length === 0)
+    window.__qua.invoke('core.collection/add', { collectionId: id, blockId: other.id })
+    return { otherId: other.id }
+  }, cid)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), cid)
+  await page.waitForTimeout(300)
+  const shown = await page.evaluate((id) => ({
+    row: document.querySelector('#editor .widget-row')?.textContent ?? '',
+    count: window.__qua.snapshot().dock.right.cards.length,
+  }), cid)
+  // 摘要应报「1 条」；配置是块上那一格 `_items`，槽里那张卡读的是同一格（见 T137）
+  assert(/1\s*条/.test(shown.row), `正文摘要应跟着引用条数变：${JSON.stringify({ shared, shown })}`)
+
+  // ② 点组件行 ＝ 打开那张卡（中心换成这一块）
+  await page.evaluate(() => window.__qua.invoke('core.journal/today', {}))
+  await page.waitForTimeout(300)
+  const beforeClick = await page.evaluate(() => window.__qua.snapshot().activeId)
+  await page.locator('#editor .widget-row').first().click()
+  await page.waitForTimeout(400)
+  const afterClick = await page.evaluate((id) => ({
+    activeId: window.__qua.snapshot().activeId,
+    last: window.__qua.snapshot().lastCommand,
+  }), cid)
+  assert(afterClick.activeId === cid, `点组件行应把中心换成这一块：${JSON.stringify({ beforeClick, afterClick })}`)
+
+  // ② Shift+点 ＝ 右槽，中心不动
+  await page.evaluate(() => window.__qua.invoke('core.journal/today', {}))
+  await page.waitForTimeout(300)
+  const beforeShift = await page.evaluate(() => window.__qua.snapshot().activeId)
+  const box = await page.locator('#editor .widget-row').first().boundingBox()
+  await page.keyboard.down('Shift')
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+  await page.keyboard.up('Shift')
+  await page.waitForTimeout(400)
+  const afterShift = await page.evaluate(({ id, beforeId }) => ({
+    inRight: window.__qua.snapshot().dock.right.cards.includes(id),
+    centerStill: window.__qua.snapshot().activeId === beforeId,
+  }), { id: cid, beforeId: beforeShift })
+  assert(afterShift.inRight, `Shift+点应在右槽开窗：${JSON.stringify(afterShift)}`)
+  assert(afterShift.centerStill, `Shift+点不该换中心：${JSON.stringify(afterShift)}`)
+
+  await ctx.close()
+  return `只读摘要（content 仍为空）· 点开卡 · Shift 开右槽且中心不动 · 加一条引用后摘要＝「${shown.row.trim()}」`
+})
 
 /**
  * ⚠️ **报告先写，再关浏览器。** 反过来的话，机器被压死那一刻 Chrome 先死，

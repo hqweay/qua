@@ -187,6 +187,17 @@ export interface EditorBridge {
   onShellActivate: (date: string) => void
   /** 勾选 / 取消待办（点方框）*/
   toggleTodo: (blockId: string) => void
+  /**
+   * **点了正文里的组件行**（`.widget-row`）。
+   *
+   * 与 `onRefClick` 分开：那一支是「点了一个指向某块的**行内对象**」，这里是「点了
+   * 一整行**组件**」。对象有 run（可看可删），组件行只有摘要 —— 混成一支会让
+   * 「⌥ 看详情」在组件行上变成「按了没反应」（它没有 run 可弹）。
+   *
+   * 修饰键分工沿用既有口径：**Shift ＝ 换目的地，不换动作**
+   * （左键开中心／Shift 开右槽），与 `focusBlock`／`openInDock` 那一对同形。
+   */
+  onWidgetRowClick: (blockId: string, shiftKey: boolean) => void
   /** 任何模型变化 */
   onChange: () => void
   /** 重挂载窗口后 */
@@ -486,6 +497,22 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      * （不占正文、没有 run），但它和原子是同一件事的两种露面 —— 「点了一个指向 X 的东西」。
      * 只认 `.atom` 的话，每多一种露面就要在这里多一条分支，而漏掉的那一种会静默不响应。
      */
+    /**
+     * **正文里的组件行**（`.widget-row`）：点它 ＝ 打开这张卡。
+     *
+     * ⚠️ 这一支在「指向某块的露面」**之前**：组件行是 `contenteditable=false` 的整行，
+     *    它内部没有 `data-ref-to`，而它所在的那一行**有** block id —— 两条判据不冲突，
+     *    但顺序写反会让读者以为「组件行靠行内引用那条路工作」。
+     * ⚠️ 用 `composedPath()` 而不是 `target.closest()`：与面包屑那一条同一条实测理由
+     *    （点它 ⇒ 换中心 ⇒ 整棵树重渲染 ⇒ 被点元素已从 DOM 摘掉，`closest` 恒为 null）。
+     */
+    const widget = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.widgetRow !== undefined)
+    if (widget?.dataset.widgetRow) {
+      e.preventDefault()
+      br.onWidgetRowClick(widget.dataset.widgetRow, e.shiftKey)
+      return
+    }
+
     const refEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.refTo !== undefined)
     if (refEl?.dataset.refTo) {
       br.onRefClick({ to: refEl.dataset.refTo, ...(refEl.dataset.atomId ? { runId: refEl.dataset.atomId } : {}) }, refEl, {

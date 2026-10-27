@@ -235,6 +235,48 @@ await check('A15 宽度手柄：拖动改宽并落盘、clamp 保证中心槽可
   return `左 ${defLeft}→${Math.round(wide.widths.left)}（clamp ${max}）→双击 ${defLeft}；右 ${defRight}→${Math.round(rightAfter.widths.right)}；关闭/800px 均无手柄`
 })
 
+/* ---------------------------------------------------------------- A17 */
+
+await check('A18 小卡是 44px 固定格、同一行顶对齐；大卡占满整行（流式槽）', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  const m = await page.evaluate(() => {
+    const stack = document.getElementById('dock-left-stack')
+    const cs = getComputedStyle(stack)
+    const sr = stack.getBoundingClientRect()
+    const tiles = [...stack.querySelectorAll(':scope > .dock-tile')].map((el) => {
+      const r = el.getBoundingClientRect()
+      return { w: +r.width.toFixed(1), h: +r.height.toFixed(1), top: +r.top.toFixed(1), left: +r.left.toFixed(1), right: +r.right.toFixed(1) }
+    })
+    const card = [...stack.querySelectorAll(':scope > .dock-card')].find((el) => !el.hidden)
+    const cr = card ? card.getBoundingClientRect() : null
+    return {
+      tiles,
+      rightTiles: document.querySelectorAll('#dock-right-stack > .dock-tile').length,
+      stack: { left: +sr.left.toFixed(1), right: +sr.right.toFixed(1), width: +sr.width.toFixed(1) },
+      padL: parseFloat(cs.paddingLeft),
+      padR: parseFloat(cs.paddingRight),
+      card: cr ? { left: +cr.left.toFixed(1), right: +cr.right.toFixed(1), top: +cr.top.toFixed(1), width: +cr.width.toFixed(1) } : null,
+    }
+  })
+
+  assert(m.tiles.length === 4, `默认左槽应有 4 张小卡，实际 ${m.tiles.length}`)
+  assert(m.rightTiles === 0, `默认右槽不该有小卡，实际 ${m.rightTiles}`)
+  for (const t of m.tiles) {
+    assert(Math.abs(t.w - 44) <= 0.5 && Math.abs(t.h - 44) <= 0.5, `小卡应固定 44×44：${JSON.stringify(t)}`)
+  }
+  const tops = [...new Set(m.tiles.map((t) => t.top))]
+  assert(tops.length === 1, `同一行小卡应顶对齐：${JSON.stringify(tops)}`)
+  assert(Math.abs(m.tiles[0].left - (m.stack.left + m.padL)) <= 0.5, `第一张小卡应贴内容区左缘：${JSON.stringify(m)}`)
+  assert(m.tiles[m.tiles.length - 1].right <= m.stack.right - m.padR + 0.5, `小卡不该越过内容区右缘：${JSON.stringify(m)}`)
+  assert(m.card, '默认左槽应有一张大卡')
+  assert(m.card.top >= m.tiles[0].top + 44, `大卡应换到小卡下一行：${JSON.stringify(m)}`)
+  assert(Math.abs(m.card.width - (m.stack.width - m.padL - m.padR)) <= 1, `大卡应占满整行：${JSON.stringify(m)}`)
+
+  await ctx.close()
+  return `左槽 4×44px 小卡顶对齐；大卡 ${m.card.width}px 占满整行；右槽 0 张小卡`
+})
+
 /* ---------------------------------------------------------------- 保底 */
 
 await check('中心槽保底 480：840 以上守住；840 以下解除且**无横向溢出**', async () => {

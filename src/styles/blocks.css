@@ -510,6 +510,60 @@
   opacity: 0.85;
 }
 /*
+ * **正文里的组件行**：一行只读摘要（图标 ＋ 名字 ＋ 几条 ＋ 「打开」）。
+ *
+ * 它住在 `.tx` 里（与分割线那一格同形状），但**不是正文** —— 那一行是组件的摘要，
+ * 不是用户写的字。所以：
+ *   · 整行 `contenteditable=false`（在 `widgetRow()` 里自带），插入点进不去；
+ *   · 高度按 `1lh` 收（与 gutter 同一条中线），不额外撑高这一行；
+ *   · 悬停才给出「打开」两字 —— 常驻的「打开」会把一行摘要变成一颗按钮，
+ *     而这一行的主职是「说明这儿有个组件」。
+ *
+ * ⚠️ 颜色只用 `--ui-*`：主题机制靠「主题只填 `--ui-*`」生效，直连基础色会让它改不动。
+ */
+.blk .tx .widget-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  height: 1lh;
+  max-width: 100%;
+  padding-inline: var(--ui-gap-2);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+  color: var(--ui-text);
+  font-size: var(--ui-fs-sm);
+  cursor: pointer;
+  user-select: none;
+}
+.blk .tx .widget-row:hover {
+  border-color: var(--ui-accent);
+  background: var(--ui-accent-soft);
+}
+.widget-row .ico {
+  color: var(--ui-text-tertiary);
+}
+.widget-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.widget-row-count {
+  flex: 0 0 auto;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+  font-family: var(--ui-font-mono);
+}
+.widget-row-open {
+  flex: 0 0 auto;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+  opacity: 0;
+}
+.widget-row:hover .widget-row-open {
+  opacity: 1;
+}
+/*
  页 / 日记 / 被聚焦块作为**正文第一行**时更大一档（它是这一屏的「身份」，但不叫标题）。
  ⚠️ 这里**不写 font-size**：字号已经是「深度 0 ⇒ `--ui-fs-lg`」一条规则给出的。
     在这个 `.tx` 上再写一遍，就会让 `.tx` 的字号与 `.left`（gutter）的字号分家，

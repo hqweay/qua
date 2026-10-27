@@ -64,23 +64,179 @@
  * 块卡：用**极淡阴影 + 明亮底色**从侧槽里浮起来（深度 ≥2 不再出现 border/shadow——
  * 这一层是深度 1，允许一层"面"）。
  */
+/*
+ * 槽内容 = **流**：小卡 44px 自动换行，大卡占满一整行。
+ * 顺序仍是一条线（DOM 顺序 = `cards` 顺序）；换行只是排版，不是第二层列表。
+ */
 .dock-stack {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden; /* 槽内禁横向 */
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: var(--ui-gap-3);
+  padding: var(--ui-gap-3);
 }
 
 .dock-card {
   background: var(--ui-surface-raised);
   border-radius: var(--ui-radius-md);
   box-shadow: var(--ui-shadow-low);
-  margin: var(--ui-gap-3) var(--ui-gap-3) 0;
   overflow: hidden;
 }
-.dock-card:last-child {
-  margin-bottom: var(--ui-gap-3);
+/* 流自己管间距：卡不再带外边距，否则 gap 会变成双份 */
+.dock-stack > .dock-card {
+  flex: 0 0 100%;
+  margin: 0;
 }
+.dock-stack > .dock-empty {
+  flex: 0 0 100%;
+  margin: 0;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+
+/*
+ * 小卡：44px 的动作格。图标是「词汇」，不随槽宽拉伸——
+ * 固定宽度才能让同一排在左右槽里保持同一种手感。
+ */
+.dock-tile {
+  position: relative;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--ui-radius-lg);
+}
+.dock-tile-main {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-surface-raised);
+  box-shadow: var(--ui-shadow-low);
+  color: var(--ui-text-secondary);
+}
+.dock-tile-main:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+.dock-tile-main:focus-visible,
+.dock-tile-x:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 2px;
+}
+/* 命令不可用：置灰但**不移除**——位置稳定优先于可用性过滤 */
+.dock-tile[data-missing='1'] .dock-tile-main {
+  opacity: 0.45;
+  box-shadow: none;
+}
+.dock-tile-x {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-surface-raised);
+  box-shadow: var(--ui-shadow-low);
+  color: var(--ui-text-tertiary);
+  opacity: 0;
+}
+.dock-tile:hover .dock-tile-x,
+.dock-tile:focus-within .dock-tile-x {
+  opacity: 1;
+}
+.dock-tile-x:hover {
+  color: var(--ui-text);
+  background: var(--ui-accent-soft);
+}
+/* 集合卡：一组**引用**行；拖进来＝加一条引用，× 只摘引用 */
+.collection-list {
+  min-height: 28px;
+  border-radius: var(--ui-radius-sm);
+}
+.collection-list[data-drop='1'] {
+  box-shadow: inset 0 0 0 2px var(--ui-accent);
+}
+.collection-list > .dock-empty {
+  padding: var(--ui-gap-2);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+.collection-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  min-height: 24px;
+}
+.collection-grip {
+  width: 14px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ui-text-tertiary);
+  cursor: grab;
+  opacity: 0;
+}
+.collection-row:hover .collection-grip,
+.collection-grip:focus-visible {
+  opacity: 1;
+}
+.collection-grip:active {
+  cursor: grabbing;
+}
+.collection-row > .page-item {
+  flex: 1;
+  min-width: 0;
+}
+.collection-add {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  width: 100%;
+  padding: var(--ui-gap-2);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+  border-radius: var(--ui-radius-sm);
+}
+.collection-add:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+.collection-x {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-tertiary);
+  opacity: 0;
+}
+.collection-row:hover .collection-x,
+.collection-x:focus-visible {
+  opacity: 1;
+}
+.collection-x:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+.collection-missing {
+  flex: 1;
+  min-width: 0;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+
 /*
  * 块卡头：卡片**自己的 chrome**，不是「块」——块在 body 里由 `block-renderers` 画。
  * 头是卡片的**拖源**：整头可拖（按钮除外），拖的是「这张卡」，不是块。
@@ -138,7 +294,8 @@
  * 单卡：只看这一张。只隐藏**同槽其它卡**，槽头不动。
  * 目标不可见时 JS 不会写 `data-solo`（不留空槽）。
  */
-.dock-stack[data-solo='1'] > .dock-card:not([data-solo-card='1']) {
+.dock-stack[data-solo='1'] > .dock-card:not([data-solo-card='1']),
+.dock-stack[data-solo='1'] > .dock-tile {
   display: none;
 }
 
@@ -148,6 +305,12 @@
 }
 .dock-card[data-drop-after='1'] {
   box-shadow: inset 0 -2px 0 var(--ui-accent);
+}
+/* 小卡是横排的：用整格描边表示落点，不猜左右 */
+.dock-tile[data-drop-before='1'],
+.dock-tile[data-drop-after='1'] {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: -2px;
 }
 .dock-stack[data-drop-end='1'] {
   box-shadow: inset 0 -2px 0 var(--ui-accent);

@@ -76,6 +76,7 @@ import {
   type Block,
   type CtxKeys,
   type Doc,
+  type FindBlock,
   type GutterField,
   type Located,
   type MovePlan,
@@ -229,6 +230,17 @@ export interface ViewEvents {
   selChange?: () => void
   /** 重新挂载窗口后（虚拟化） */
   mounted?: () => void
+  /**
+   * **正文里组件行的画法**（`ui/dock-widgets.ts` 的 `widgetRow`）。
+   *
+   * 为什么经事件表注入而不是让 `view` 直接 import：`view` 不得 import `ui`
+   * （arch-check [13]），而「一块组件在正文里长什么样」属于组件那一层。
+   *
+   * ⚠️ 未接 ⇒ 组件块在正文里是**空的 `.tx`**（只读块本来就没有正文），
+   *    不退化成「画一行普通文字」——那会把摘要当成正文，而摘要不是用户写的内容。
+   *    与 `refClick` 同一条口径：缺入口就让它看得见地缺，不静默做成另一种东西。
+   */
+  widgetRow?: (block: Block, find: FindBlock | undefined) => HTMLElement
   /**
    * **在空天格子里落笔**（复盘兜底）：装配层物化那一天并重装载。
    * 编辑器只报日期——「造块进库」是命令层的事，视图不写库。
@@ -738,19 +750,22 @@ export class BlockEditor {
   private makeBlockEl(r: VisibleRow, gutter: readonly GutterField[] | undefined): HTMLElement {
     // 引用解析走**共享 store** 的森林：引用目标可能在当前视图之外（另一页／另一天），
     // 只有整片森林能回答「它还在不在、现在叫什么」。
+    const find = (id: string) => this.store.find(id)
     const el = makeBlockEl(
       r,
-      (tx) => fillBlockText(tx, r.block, (id) => this.store.find(id)),
+      (tx) => fillBlockText(tx, r.block, find),
       {
         single: flatten(this.doc).length === 1,
         ancestors: this.ancestors.get(r.block.id) ?? [],
         folded: this.doc.folded,
         gutter,
-        find: (id) => this.store.find(id),
+        find,
         // 只有装载根会带上下文：子行的位置已经由缩进表达
         context: r.depth === 0 ? this.doc.contexts?.get(r.block.id) : undefined,
         // 展开出来的根才有「收起上下文」；没接回调就不画一个点了没反应的按钮
         contextBack: Boolean(this.onContextBack) && r.depth === 0 && (this.doc.expandedRoots?.has(r.block.id) ?? false),
+        // 组件行由 UI 层画（`view` 不得 import `ui`）；`widgetRow` 为 null ⇒ 组件块在正文里退化成空行
+        ...(this.events.widgetRow ? { widgetRow: this.events.widgetRow } : {}),
       },
     )
     this.mounted.add(r.block.id)
@@ -2286,37 +2301,38 @@ export class BlockEditor {
     return b.id
   }
 
+  /** 插入一个**分割线**：它只是「没有正文的块」里的一种，实现见 `insertWidgetAfter` */
+  insertDividerAfter(id: string): boolean {
+    return this.insertWidgetAfter(id, DIVIDER_TYPE)
+  }
+
   /**
-   * 插入一个**分割线**块，并在它下面留一个空块给光标。
+   * **插入一个没有正文的块**（组件块／分割线），共用一个形状。
    *
-   * 为什么不能只插线：分割线没有正文，光标没有地方可落 —— 用户看到的是
-   * 「插了一条线，然后光标消失了」。下面那个空块是落点，不是内容。
+   * 为什么两者是同一个动作：它们的共同点不是「长什么样」，而是**「插完之后光标要落哪」
+   * 这个问题没有现成答案** —— 这类块的 `.tx` 里没有可写正文，插进去之后用户会看到
+   * 「多了一行，但光标消失了」。所以两支都要在下面留一个空块当落点。
    *
-   * 两个块共用**一**个撤销快照：用户按的是一次「插入分割线」，
-   * 撤销一次就该回到按下之前，而不是先撤掉光标再撤掉线。
-   */
-  /**
-   * 插入一个**分割线**块。
-   *
-   * 分两支，判据是**插入点本身是不是一个空块**：
-   *   · 空块 ⇒ 它**变成**分割线（原地改类型，不新建）—— 用户在一行空白里
-   *     要一条线，得到的就是那一行变成线，而不是线 + 多出来的空行；
-   *   · 有内容 ⇒ 在它下面**新建**分割线，再留一个空块给光标 ——
-   *     否则那条线会盖住用户已经写好的字。
+   * 分两支，判据是**插入点本身是不是一个空块**（与分割线同一条规则）：
+   *   · 空块 ⇒ 它**原地变成**这个类型（不新建）—— 用户在一行空白里要一个组件，
+   *     得到的就是那一行变成组件，而不是组件 + 多出来的空行；
+   *   · 有内容 ⇒ 在它下面**新建**，并留一个空块给光标。
    *
    * ⚠️ 改类型那一支**不新建块**，所以撤销一次就回到「那行还是空白」。
-   * ⚠️ 新建那一支**两个块共用一个撤销快照**：用户按的是一次「插入分割线」，
-   *    撤销一次该回到按下之前，而不是先撤光标再撤线。
+   * ⚠️ 新建那一支**两个块共用一个撤销快照**：用户按的是一次「插入」，
+   *    撤销一次该回到按下之前，而不是先撤光标再撤组件。
+   *
+   * @param typeId 目标类型（必须声明 `text:'readonly'`；可写的类型不该走这条路）
    */
-  insertDividerAfter(id: string): boolean {
+  insertWidgetAfter(id: string, typeId: string): boolean {
     const loc = locate(this.doc, id)
     if (!loc) return false
     const before = this.snap()
 
     /**
-     * 空块 ⇒ 原地变成分割线。
-     * 判据要**两块都空**：正文为空、且没有子块。有子块的块不能变线 ——
-     * 那会把子树藏进一条线后面（线没有正文，子块看不见）。
+     * 空块 ⇒ 原地变类型。
+     * 判据要**两块都空**：正文为空、且没有子块。有子块的块不能变成组件 ——
+     * 那会把子树藏进一行摘要后面（组件块不许有子块，子块看不见）。
      */
     if (isEmptyContent(loc.block.content) && loc.block.children.length === 0 && canWriteText(loc.block)) {
       if (this.write) {
@@ -2324,12 +2340,12 @@ export class BlockEditor {
         // 改类型也算一次改动 ⇒ 时刻并进同一笔（第二条 op）。
         this.write((tx) => {
           tx.patch(loc.block.id, (b) => {
-            setBlockType(b, DIVIDER_TYPE)
+            setBlockType(b, typeId)
             b.modified = Date.now()
           })
         })
       } else {
-        setBlockType(loc.block, DIVIDER_TYPE)
+        setBlockType(loc.block, typeId)
         loc.block.modified = Date.now()
       }
       this.undo.record(before, 'structural', Date.now())
@@ -2338,27 +2354,27 @@ export class BlockEditor {
       return true
     }
 
-    const divider = mkBlock('')
-    setBlockType(divider, DIVIDER_TYPE)
+    const widget = mkBlock('')
+    setBlockType(widget, typeId)
     const empty = mkBlock('')
     if (this.write) {
-      // 两个块共用一笔（用户按的是一次「插入分割线」）；落点与 `insertNear` 同一条规则：
+      // 两个块共用一笔（用户按的是一次「插入」）；落点与 `insertNear` 同一条规则：
       // section 根没有兄弟位，插成它的首两个子块
       const ok = this.write((tx) => {
         if (loc.parent === null) {
           if (typeDeclOf(loc.block).children === 'none') return false
-          tx.insert(divider, loc.block.id, 0)
+          tx.insert(widget, loc.block.id, 0)
           tx.insert(empty, loc.block.id, 1)
           return true
         }
-        tx.insert(divider, loc.parent.id, loc.index + 1)
+        tx.insert(widget, loc.parent.id, loc.index + 1)
         tx.insert(empty, loc.parent.id, loc.index + 2)
         return true
       })
       if (!ok) return false
     } else {
-      if (!this.insertNear(loc, divider)) return false
-      const at = locate(this.doc, divider.id)
+      if (!this.insertNear(loc, widget)) return false
+      const at = locate(this.doc, widget.id)
       if (at) this.insertNear(at, empty)
     }
     this.undo.record(before, 'structural', Date.now())
@@ -2797,6 +2813,16 @@ export class BlockEditor {
         if (from) this.commitEdit(from)
         const run = ref.runId ? this.findRun(ref.runId)?.run : undefined
         this.events.refClick?.({ to: ref.to, ...(run ? { run } : {}) }, mods, el)
+      },
+      /**
+       * 点了正文里的组件行：先交出当前行的编辑期——理由与 `focusBlock` 完全相同
+       * （点 `contenteditable=false` 不派发 `focusout`，不显式提交则修改时间停在上一处）。
+       */
+      onWidgetRowClick: (id, shiftKey) => {
+        const from = this.caretBlock() ?? this.editBase?.id ?? null
+        if (from && from !== id) this.commitEdit(from)
+        if (shiftKey) this.events.openInDock?.(id)
+        else this.events.focusBlock?.(id)
       },
       onBlockMenu: (id, rect) => this.events.blockMenu?.(id, rect),
       // 左键点块标 ＝ 聚焦/zoom。这也是**离开这一行**：先把当前行的编辑交出去

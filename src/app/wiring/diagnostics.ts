@@ -31,6 +31,7 @@ import {
   type Block,
   type CtxKeys,
 } from '../../core/index.ts'
+import { readRuns } from '../../view/dom-text.ts'
 import { t } from '../../core/msg.ts'
 import { walkForest } from '../../core/walk.ts'
 import { plainText, type MarkType, type RunWithId } from '../../core/runs.ts'
@@ -461,6 +462,19 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
      * 只读副本：调用方改数组不该影响这里记着的那一份。
      */
     lastOps: () => getLastOps(),
+    /**
+     * 自检用：**让读数层读一个 `.tx`**（DOM → run 序列）。
+     *
+     * 为什么要开这个口子：「摘要／装饰不进正文」这类契约，落点是 `view/dom-text.ts`
+     * 的 `readRuns`。组件行的 `.tx` 是只读的，任何「打字再看 content」的测法都
+     * **走不到**那条路（实测：删掉读数分支，断言照样绿）——只有直接调读数层才验得到。
+     */
+    readRuns: (tx: HTMLElement) => {
+      const blk = tx.closest<HTMLElement>('.blk')
+      const id = blk?.dataset.blockId
+      const prev = id ? (findInForest(deps.getWs().blocks, id)?.content ?? []) : []
+      return readRuns(tx, prev)
+    },
     __editor: mainEd,
     __registry: registry,
     __layers: layers,

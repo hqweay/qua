@@ -14,6 +14,7 @@ import {
   blockLabel,
   buildAdjacency,
   findInForest,
+  isWidgetBlock,
 } from '../../core/index.ts'
 import { t } from '../../core/msg.ts'
 import type { Registry } from '../../core/commands/index.ts'
@@ -22,14 +23,17 @@ import type { Workspace, Prefs } from '../../core/workspace.ts'
 import type { DockWindows } from '../../ui/dock-windows.ts'
 import {
   buildDockCard,
+  buildDockTile,
   decorateDockCard,
   renderDockStack,
   type DockCard,
   type DockCardEntry,
   type DockCardState,
   type DockSlotEls,
+  type DockTile,
 } from '../../ui/dock.ts'
 import { backrefsCard, todayCard, type DockContentDeps } from '../../ui/dock-content.ts'
+import { widgetBody, widgetTitle, type WidgetDeps } from '../../ui/dock-widgets.ts'
 import { BelongsTree } from '../../ui/belongs-tree.ts'
 import { bindDropTarget, isBlockId, setDragCard } from '../../view/dnd.ts'
 import { bindWindowDrop } from '../../ui/dock-windows.ts'
@@ -52,6 +56,8 @@ export type DocksDeps = {
    * 这里只在重画时取它、给它补卡壳（收起/单卡/拖拽）。
    */
   inspectCard: () => HTMLElement
+  /** 集合卡的块选择器（锚在「选择块」按钮上） */
+  pickBlock: (collectionId: string, anchor: DOMRect) => void
 }
 
 /** 卡片落点：插到哪一张之前/之后；`null` ＝ 末尾 */
@@ -72,6 +78,31 @@ export function setupDocks(deps: DocksDeps) {
     // 共享索引由 store 缓存（懒重建）⇒ 反链不再每次扫全库 atoms ＋ 遍历森林
     openPage: (id) => void deps.getRegistry().invoke('core.page/open', { pageId: id }, 'menu'),
     openInDock: (id) => openWindow('right', id),
+  }
+
+  /**
+   * 组件卡的宿主能力：读门面、打开、以及「加/摘引用」两条写路径。
+   * 写走命令面；写完在这里补一次重画（集合卡不是编辑器，没有自己的 change 事件）。
+   */
+  const widgetDeps: WidgetDeps = {
+    kb,
+    activeId: () => deps.getWs().activeId,
+    open: (id) => dockDeps.openPage(id),
+    openInDock: (id) => openWindow('right', id),
+    addItem: (collectionId, blockId) => {
+      void deps.getRegistry().invoke('core.collection/add', { collectionId, blockId }, 'dock')
+      renderDocks()
+    },
+    removeItem: (collectionId, blockId) => {
+      void deps.getRegistry().invoke('core.collection/remove', { collectionId, blockId }, 'dock')
+      renderDocks()
+    },
+    moveItem: (collectionId, blockId, to) => {
+      void deps.getRegistry().invoke('core.collection/move', { collectionId, blockId, to }, 'dock')
+      renderDocks()
+    },
+    pickBlock: (collectionId, anchor) => deps.pickBlock(collectionId, anchor),
+    untitledLabel: t('ui.page.untitled'),
   }
 
   /**
@@ -193,19 +224,101 @@ export function setupDocks(deps: DocksDeps) {
 
   function renderSlot(side: 'left' | 'right', slot: DockSlotEls): void {
     const cards = deps.prefs().dock[side].cards
-    // 窗口先按清单同步（建/拆编辑器）；缺块的 id 不进 entries，但留在 cards 里（撤销回来时复位）
-    const winCards = windows ? windows[side].sync(cards.filter((id) => isBlockId(id))) : new Map<string, HTMLElement>()
+    /**
+     * 窗口管理器只收**内容块**：组件块（类型声明了 widget）由下面的 renderer 画，
+     * 不能再建一个 `BlockEditor` —— 那会得到一张「窗口卡」和一张「组件卡」抢同一个 id。
+     */
+    const contentIds = cards.filter((id) => {
+      if (!isBlockId(id)) return false
+      return !isWidgetBlock(deps.kb.get(id))
+    })
+    const winCards = windows ? windows[side].sync(contentIds) : new Map<string, HTMLElement>()
     const entries: DockCardEntry[] = []
     for (const id of cards) {
+      // ⚠️ 先认 `cmd:` 再认块 id：`isBlockId` 的类型守卫把 else 分支收成 `never`，
+      //    反过来写会让 `id.startsWith` 在类型层报错（运行时其实没事）。
+      if (id.startsWith('cmd:')) {
+        entries.push({ id, el: actionTile(side, id), size: 'small' })
+        continue
+      }
       if (isBlockId(id)) {
+        const block = deps.kb.get(id)
+        if (block && isWidgetBlock(block)) {
+          const el = buildDockCard(
+            {
+              id,
+              title: widgetTitle(block),
+              body: widgetBody(block, widgetDeps),
+              draggable: true,
+              close: { title: t('ui.dock.closeWidget'), onClick: () => closeWindow(side, id) },
+            },
+            cardStateFor(side, id),
+          )
+          el.dataset.widget = '1'
+          entries.push({ id, el, size: 'large' })
+          continue
+        }
         const el = winCards.get(id)
-        if (el) entries.push({ id, el })
+        if (el) entries.push({ id, el, size: 'large' })
         continue
       }
       const card = derivedCard(side, id)
-      if (card) entries.push(card)
+      if (card) entries.push({ ...card, size: 'large' })
     }
     renderDockStack(slot.stack, entries, t('ui.dock.empty'), deps.prefs().dock.solo[side])
+  }
+
+  /**
+   * 小卡：`cmd:<命令名>` → 44px 动作格。
+   *
+   * 命令不可用（产品构建裁掉、插件卸载）时**保留位置**，画成占位格：
+   * 从 cards 里删掉会让整排 reflow，用户会以为自己的布局丢了。
+   */
+  function actionTile(side: 'left' | 'right', id: string): HTMLElement {
+    const name = id.slice('cmd:'.length)
+    const decl = deps.getRegistry().decl(name)
+    const ok = Boolean(decl?.tile) && decl?.hidden !== true
+    const tile: DockTile = {
+      id,
+      title: ok ? decl!.title : t('ui.dock.tileMissing'),
+      icon: ok ? decl!.tile!.icon : 'lucide:circle-help',
+      missing: !ok,
+      close: { title: t('ui.dock.removeTile'), onClick: () => removeTile(side, id) },
+      onClick: () => {
+        if (ok) void deps.getRegistry().invoke(name, {}, 'tile')
+      },
+      onDragStart: (e) => setDragCard(e.dataTransfer, id),
+    }
+    return buildDockTile(tile)
+  }
+
+  /** 添加快捷：只接受带 `tile` 元数据的命令；插在已有小卡之后，小卡聚成一排 */
+  function addTile(side: 'left' | 'right', command: string): void {
+    const decl = deps.getRegistry().decl(command)
+    if (!decl?.tile || decl.hidden) return
+    const dock = deps.prefs().dock
+    const id = `cmd:${command}`
+    if (dock[side].cards.includes(id)) return
+    const lastTile = dock[side].cards.reduce((at, card, i) => (card.startsWith('cmd:') ? i : at), -1)
+    dock[side].cards.splice(lastTile + 1, 0, id)
+    if (!dock[side].open) {
+      dock[side].open = true
+      deps.applyChrome()
+    }
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+  }
+
+  /** 移出小卡：只动 cards，不碰命令本身 */
+  function removeTile(side: 'left' | 'right', id: string): void {
+    const dock = deps.prefs().dock
+    const at = dock[side].cards.indexOf(id)
+    if (at < 0) return
+    dock[side].cards.splice(at, 1)
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
   }
 
   function derivedCard(side: 'left' | 'right', id: string): DockCardEntry | null {
@@ -268,23 +381,37 @@ export function setupDocks(deps: DocksDeps) {
     for (const side of ['left', 'right'] as const) {
       const stack = deps.getSlots()[side].stack
       delete stack.dataset.dropEnd
-      for (const el of Array.from(stack.querySelectorAll<HTMLElement>(':scope > .dock-card'))) {
+      for (const el of Array.from(stack.querySelectorAll<HTMLElement>(':scope > .dock-card, :scope > .dock-tile'))) {
         delete el.dataset.dropBefore
         delete el.dataset.dropAfter
       }
     }
   }
 
-  /** 指针落在哪张卡的上半/下半；落在所有卡之下 ⇒ 末尾 */
+  /**
+   * 指针落在哪个 Widget 的哪一侧。
+   *
+   * 流里小卡横排、大卡整行，不能用单纯的 Y 中点：取**离指针最近的 Widget**，
+   * 同一行看 X、跨行看 Y。这样小卡可以左右换位，大卡可以上下换位。
+   */
   function cardDrop(e: DragEvent, stack: HTMLElement): CardDrop {
-    const cards = Array.from(stack.querySelectorAll<HTMLElement>(':scope > .dock-card')).filter((el) => !el.hidden)
-    for (const el of cards) {
+    const items = Array.from(
+      stack.querySelectorAll<HTMLElement>(':scope > .dock-card, :scope > .dock-tile'),
+    ).filter((el) => !el.hidden)
+    if (items.length === 0) return { targetId: null, place: 'end' }
+
+    let best: { el: HTMLElement; d: number } | null = null
+    for (const el of items) {
       const r = el.getBoundingClientRect()
-      if (e.clientY < r.top + r.height / 2) {
-        return { targetId: el.dataset.cardId ?? null, place: 'before' }
-      }
+      const dx = e.clientX - (r.left + r.width / 2)
+      const dy = e.clientY - (r.top + r.height / 2)
+      const d = dx * dx + dy * dy
+      if (!best || d < best.d) best = { el, d }
     }
-    return { targetId: null, place: 'end' }
+    const r = best!.el.getBoundingClientRect()
+    const sameRow = e.clientY >= r.top && e.clientY <= r.bottom
+    const before = sameRow ? e.clientX < r.left + r.width / 2 : e.clientY < r.top + r.height / 2
+    return { targetId: best!.el.dataset.cardId ?? null, place: before ? 'before' : 'after' }
   }
 
   function findSide(id: string): 'left' | 'right' | null {
@@ -338,6 +465,7 @@ export function setupDocks(deps: DocksDeps) {
     renderDocks,
     openWindow,
     closeWindow,
+    addTile,
     /** 卡片状态/标题给窗口管理器用（窗口卡由它自己建） */
     cardStateFor,
     windowLabel,

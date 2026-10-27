@@ -52,6 +52,17 @@ export interface CommandDecl {
   args?: Record<string, unknown>
   /** 不进命令面板（编辑器内部键位） */
   hidden?: boolean
+  /**
+   * 这个命令可以作为一个「小卡」摆在槽里。
+   *
+   * 只有带它的命令才进「添加快捷」画廊——这是一份**策展过的**集合，
+   * 不是「所有命令」。危险命令（删页/删块）和依赖光标的命令（加粗/缩进）
+   * 不写它，就不会被摆成一个一键入口。
+   *
+   * 图标是宿主的词汇（`lucide:<name>`），插件不能自带 path：未知名字由
+   * `view/icons.ts` 降级成占位，不会静默消失。
+   */
+  tile?: { icon: string }
   expose?: { http?: { description: string }; cli?: { aliases: string[] } }
 }
 
@@ -233,6 +244,15 @@ export interface App {
    * 同一个块全局最多一个窗口（已在另一侧则移过来）。
    */
   openInDock(id: string, side?: 'left' | 'right'): void
+  /* 集合组件 */
+  /** 新建一个集合块（森林顶层），返回它的 id；放进哪个槽由调用方决定 */
+  createCollection(name?: string): string
+  /** 往集合里加一条引用：块必须存在，且不能是集合自己；重复加入是 no-op */
+  addCollectionItem(collectionId: string, blockId: string): boolean
+  /** 从集合里摘一条引用：只摘引用，不删块；摘不存在的项返回 false */
+  removeCollectionItem(collectionId: string, blockId: string): boolean
+  /** 把一条引用移到新位置；`to` 是当前列表里的插入下标（含被拖项） */
+  moveCollectionItem(collectionId: string, blockId: string, to: number): boolean
   /* 浮层 / 提示 */
   toast(text: string, kind?: 'ok' | 'warn' | 'info'): void
   showMenu(req: MenuRequest): void

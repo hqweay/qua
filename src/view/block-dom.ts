@@ -30,6 +30,7 @@ import {
   prop,
   tagIdsOf,
   typeDeclOf,
+  widgetBodyOf,
   type Block,
   type FindBlock,
   type FoldState,
@@ -328,8 +329,22 @@ export function makeTagsEl(
  *
  * ⇒ 判据：`.blk` 的子节点只能是**渲染层自己放进去的那几种**；其余一律当游离内容清掉。
  *   加新子节点时**必须**在这里登记，否则它会在第一次收光标时被当作脏东西删掉。
+ *
+ * ⚠️ `widget-row` 是**正文槽的子节点**，不是 `.blk` 的直接子节点 —— 它登记在这里
+ *    是因为 `reclaimCaret` 沿 `.blk` 收节点时会走进 `.tx`（插入点常常落在 `.tx` 里），
+ *    而组件行是 `contenteditable=false` 的：浏览器把「清理游离节点」看成从它内部开始，
+ *    不登记就会在收光标时把整个组件行删掉（表现为「点一下组件行，它消失了」）。
  */
-export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set(['blk-context', 'blk-alias', 'rails', 'rail-self', 'left', 'tx', 'blk-tags'])
+export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
+  'blk-context',
+  'blk-alias',
+  'rails',
+  'rail-self',
+  'left',
+  'tx',
+  'blk-tags',
+  'widget-row',
+])
 
 /**
  * 一个可见行 → `.blk` 元素。
@@ -361,6 +376,12 @@ export function makeBlockEl(
    *
    * `find` 是引用解析用的查找函数（同 `fillBlockText`）：标签槽的名字也是现算的，
    * 不传 ⇒ 不画标签槽（静态卡片没有森林可查，容忍没有 chip）。
+   *
+   * `widgetRow` 是**正文里组件行的画法**（`ui/dock-widgets.ts`）。为什么由调用方注入
+   * 而不是在这里 import：`view` 不得 import `ui`（arch-check [13]），而「一个组件在正文里
+   * 画成什么样」天然属于组件那一层。这里只定**契约**——行了，这一格由谁画、画在哪：
+   * `.tx` 之内、`contenteditable=false`，与分割线那一格同形状。
+   * 不传 ⇒ 组件块在正文里退化成空的 `.tx`（只读块本来就没有正文，数据一个字节不丢）。
    */
   opts: {
     single: boolean
@@ -371,6 +392,7 @@ export function makeBlockEl(
     context?: readonly Block[]
     /** 这是一个「展开出来的上下文根」：行首给「收起上下文」 */
     contextBack?: boolean
+    widgetRow?: (b: Block, find: FindBlock | undefined) => HTMLElement
   },
 ): HTMLElement {
   const b = r.block
@@ -644,11 +666,21 @@ export function makeBlockEl(
   tx.className = 'tx'
   if (todo === 'done') tx.classList.add('done')
   /**
-   * **分割线**：线放在 `.tx` **里面**，不另换一个元素替代 `.tx`。
+   * **没有正文的两种块**：线（分割线）与组件行（组件块的正文露面）。
+   *
+   * 两者都放在 `.tx` **里面**，不另换一个元素替代 `.tx`。
    * 编辑器里有一批路径按 `.tx` 认块（取文本、落光标、标 caret），换掉 `.tx`
    * 等于让这一行在那些路径里「不存在」——静默失效，不报错。
+   *
+   * ⚠️ **组件行优先于 `fill`**：组件块的正文是只读的（类型声明 `text:'readonly'`），
+   *    它显示的是**摘要**（有几条），不是块里的字。走 `fill` 会把那几个字画出来，
+   *    而那几个字根本不是用户写的内容。
+   * ⚠️ 组件行是 `contenteditable=false`（在 `widgetRow` 里自带）：它占用了正文槽的
+   *    位置但没有位点，与标签 chip 同一条道理 —— 有位点的容器里不放没位点的东西。
    */
-  if (blockTypeOf(b) === DIVIDER_TYPE) {
+  if (widgetBodyOf(b) === 'row' && opts.widgetRow) {
+    tx.appendChild(opts.widgetRow(b, opts.find))
+  } else if (blockTypeOf(b) === DIVIDER_TYPE) {
     const rule = document.createElement('span')
     rule.className = 'divider-rule'
     rule.setAttribute('aria-hidden', 'true')

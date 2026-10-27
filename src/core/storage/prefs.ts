@@ -40,14 +40,16 @@ export interface DockSlotPrefs {
   /** 用户拖过的宽度；`null` ＝ 没拖过，用 token 里的默认值 */
   width: number | null
   /**
-   * 这一槽的卡片实例，**有序**。
+   * 这一槽的 Widget，**有序**。
    *
-   * 两种 id 混在同一个列表里：
-   *   · 块 id（32 位 hex）＝ 一张**窗口**（一个块一张卡）；
-   *   · 派生卡 id（`belongs`／`journal`／`inspect`／`backrefs`）＝ 一张视图卡。
+   * 三种 id 混在同一个列表里：
+   *   · 块 id（32 位 hex）＝ 一个块的一次露面（窗口卡；以后也可以是组件块）；
+   *   · 派生卡 id（`belongs`／`journal`／`inspect`／`backrefs`）＝ 宿主现算的视图卡；
+   *   · `cmd:<命令名>` ＝ 一个**小卡**：没有块，点击执行这条命令。
    *
-   * 它只是**视图状态**：块仍然只有森林里那一份，这里存的是「看哪几张、怎么排」。
+   * 它只是**视图状态**：块仍然只有森林里那一份，这里存的是「看哪几个、怎么排」。
    * 隐藏的卡也留在这里（位置是布局，可用性是内容）；删块/撤销不会污染清单。
+   * `cmd:` 条目不是块，所以同一个命令可以同时出现在左右两槽；块 id 仍全局最多一张。
    */
   cards: string[]
 }
@@ -74,11 +76,22 @@ export interface DockPrefs {
  * 默认槽状态：**左右都开**。
  *
  * 判据（32 「不加空侧栏」的准确读法）：反对的是**空侧栏**，不是侧栏本身。
- * 左槽默认「归属树在上、今日在下」；右槽默认「检视卡在上、反链在下」。
+ * 左槽默认「四个快捷在上、归属树与今日在下」；右槽默认「检视卡在上、反链在下」。
  * 宽度 `null` ⇒ 用 token 的默认值（`--ui-dock-w-left`／`--ui-dock-w-right`）。
  */
 export const DEFAULT_DOCK: DockPrefs = {
-  left: { open: true, width: null, cards: ['belongs', 'journal'] },
+  left: {
+    open: true,
+    width: null,
+    cards: [
+      'cmd:core.journal/today',
+      'cmd:core.page/new',
+      'cmd:core.command-palette/show',
+      'cmd:core.journal/prev',
+      'belongs',
+      'journal',
+    ],
+  },
   right: { open: true, width: null, cards: ['inspect', 'backrefs'] },
   collapsedCards: {},
   solo: { left: null, right: null },
@@ -127,10 +140,11 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
 
   const left = pick(dock?.left, DEFAULT_DOCK.left, legacyPins(dock?.left))
   const right = pick(dock?.right, DEFAULT_DOCK.right, legacyPins(dock?.right))
-  // 一个块全局最多一张窗口：同一个 id（块或派生卡）不留在两边。
+  // 一个块全局最多一张窗口：同一个块 id（或派生卡）不留在两边。
   // 左槽先到先得——默认布局里左槽是导航位，冲突时保留它更符合直觉。
-  const leftSet = new Set(left.cards)
-  right.cards = right.cards.filter((id) => !leftSet.has(id))
+  // `cmd:` 不是块，同一个命令可以两槽都有（它没有窗口状态可冲突）。
+  const leftSet = new Set(left.cards.filter((id) => !id.startsWith('cmd:')))
+  right.cards = right.cards.filter((id) => id.startsWith('cmd:') || !leftSet.has(id))
 
   const collapsedCards: Record<string, true> = {}
   if (dock?.collapsedCards && typeof dock.collapsedCards === 'object' && !Array.isArray(dock.collapsedCards)) {

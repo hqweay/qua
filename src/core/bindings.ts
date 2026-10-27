@@ -160,6 +160,8 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-basic', order: 20, layer: 'core', label: t('menu.label.todo'), args: { type: 'todo' }, keywords: ['todo', 'task'], icon: 'lucide:square' },
   // 分割线：没有正文的块，插完光标要落到它下面那一行（见 insertDividerAfter）
   { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-basic', order: 30, layer: 'core', label: t('menu.label.divider'), args: { type: 'divider' }, keywords: ['divider', 'hr', 'line', t('menu.kw.divider')], icon: 'lucide:minus' },
+  // 收藏：正文里是一行摘要（body:'row'），点摘要打开那张卡
+  { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-basic', order: 40, layer: 'core', label: t('menu.label.collection'), args: { type: 'collection' }, keywords: ['collection', 'widget', t('menu.kw.collection')], icon: 'lucide:list-tree' },
   { command: 'core.editor/insert-page-ref', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 10, layer: 'core', label: t('menu.label.pageRef'), keywords: ['ref', 'link', t('menu.kw.ref')], icon: 'lucide:arrow-up-right' },
   { command: 'core.editor/insert-image', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 20, layer: 'core', label: t('menu.label.image'), args: { preset: 'ready' }, keywords: ['image', 'asset', t('menu.kw.image')], icon: 'lucide:image' },
   { command: 'core.editor/insert-tag', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 30, layer: 'core', label: t('menu.label.tag'), args: { tag: t('ui.arg.demoTag') }, keywords: ['tag', t('menu.kw.tag')], icon: 'lucide:hash' },

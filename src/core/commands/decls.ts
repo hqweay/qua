@@ -27,7 +27,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.editor/duplicate-block', title: t('cmd.editor.duplicate-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['duplicate', 'clone'] },
   { name: 'core.editor/delete-block', title: t('cmd.editor.delete-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['delete', 'remove'] },
   { name: 'core.editor/toggle-todo', title: t('cmd.editor.toggle-todo'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['todo', 'check', 'checkbox'] },
-  { name: 'core.editor/insert-block', title: t('cmd.editor.insert-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { type: { type: 'string' }, text: { type: 'string' } }, keywords: ['insert', 'new block'] },
+  { name: 'core.editor/insert-block', title: t('cmd.editor.insert-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { type: { type: 'string', enum: ['paragraph', 'todo', 'divider', 'collection'] }, text: { type: 'string' } }, keywords: ['insert', 'new block'] },
   { name: 'core.editor/clear-block', title: t('cmd.editor.clear-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor') },
   { name: 'core.editor/insert-tag', title: t('cmd.editor.insert-tag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { tag: { type: 'string' } }, keywords: ['tag', t('menu.kw.tag')] },
   { name: 'core.editor/pick-tag', title: t('cmd.editor.pick-tag'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.inline'), keywords: ['tag', 'autocomplete', t('menu.kw.tag')] },
@@ -68,6 +68,10 @@ export const COMMANDS: CommandDecl[] = [
   /* ---- 块底的挂载区（tab 是一格数据，不是块） ---- */
   { name: 'core.mount/add', title: t('cmd.mount.add'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { hostId: { type: 'string' }, label: { type: 'string' }, spec: {} }, keywords: ['mount', 'query', 'tab', 'panel'] },
   { name: 'core.mount/remove', title: t('cmd.mount.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { hostId: { type: 'string' }, index: { type: 'integer' } }, keywords: ['mount', 'query', 'tab', 'remove'] },
+  { name: 'core.collection/create', title: t('cmd.collection.create'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.widget'), args: { name: { type: 'string' }, side: { type: 'string', enum: ['left', 'right'] } }, keywords: ['collection', 'widget', 'favorite', 'list'] },
+  { name: 'core.collection/add', title: t('cmd.collection.add'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.widget'), args: { collectionId: { type: 'string' }, blockId: { type: 'string' } }, keywords: ['collection', 'widget', 'favorite', 'add'] },
+  { name: 'core.collection/remove', title: t('cmd.collection.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.widget'), args: { collectionId: { type: 'string' }, blockId: { type: 'string' } }, keywords: ['collection', 'widget', 'favorite', 'remove'] },
+  { name: 'core.collection/move', title: t('cmd.collection.move'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.widget'), args: { collectionId: { type: 'string' }, blockId: { type: 'string' }, to: { type: 'integer' } }, keywords: ['collection', 'widget', 'favorite', 'move', 'reorder'] },
   { name: 'core.props/undeclare', title: t('cmd.props.undeclare'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' } } },
 
   /* ---- 历史 ---- */
@@ -78,7 +82,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.history/forward', title: t('cmd.history.forward'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.history'), keywords: ['forward', 'history', 'navigate'] },
 
   /* ---- 页面 ---- */
-  { name: 'core.page/new', title: t('cmd.page.new'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.page') },
+  { name: 'core.page/new', title: t('cmd.page.new'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.page'), tile: { icon: 'lucide:plus' } },
   { name: 'core.page/open', title: t('cmd.page.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.page'), args: { pageId: { type: 'string' } } },
   { name: 'core.page/next', title: t('cmd.page.next'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.page') },
   { name: 'core.page/prev', title: t('cmd.page.prev'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.page') },
@@ -86,8 +90,8 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.page/delete', title: t('cmd.page.delete'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.page'), keywords: ['delete page'] },
 
   /* ---- 日记（今日是落点，不是特例；：日期只读、一天一个） ---- */
-  { name: 'core.journal/today', title: t('cmd.journal.today'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { date: { type: 'string' } }, keywords: ['journal', 'today', 'daily'] },
-  { name: 'core.journal/prev', title: t('cmd.journal.prev'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), keywords: ['journal', 'prev', 'yesterday'] },
+  { name: 'core.journal/today', title: t('cmd.journal.today'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { date: { type: 'string' } }, keywords: ['journal', 'today', 'daily'], tile: { icon: 'lucide:calendar' } },
+  { name: 'core.journal/prev', title: t('cmd.journal.prev'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), keywords: ['journal', 'prev', 'yesterday'], tile: { icon: 'lucide:chevron-left' } },
   { name: 'core.journal/next', title: t('cmd.journal.next'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), keywords: ['journal', 'next', 'tomorrow'] },
   { name: 'core.journal/review', title: t('cmd.journal.review'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { days: { type: 'number' } }, keywords: ['review', 'retro', 'days'] },
   { name: 'core.journal/feed-layout', title: t('cmd.journal.feed-layout'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { layout: { type: 'string' } }, keywords: ['layout', 'feed', 'column', 'row'] },
@@ -118,7 +122,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.view/toggle-virtualize', title: t('cmd.view.toggle-virtualize'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { on: { type: 'boolean' }, radius: { type: 'integer' } }, keywords: ['virtual', 'window', 'DOM'] },
 
   /* ---- 浮层 ---- */
-  { name: 'core.command-palette/show', title: t('cmd.command-palette.show'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), keywords: ['palette', 'command', t('menu.kw.command')] },
+  { name: 'core.command-palette/show', title: t('cmd.command-palette.show'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), keywords: ['palette', 'command', t('menu.kw.command')], tile: { icon: 'lucide:compass' } },
   { name: 'core.menu/block', title: t('cmd.menu.block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), args: { blockId: { type: 'string' } } },
   { name: 'core.menu/slash', title: t('cmd.menu.slash'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer') },
   { name: 'core.layer/close', title: t('cmd.layer.close'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), hidden: true },

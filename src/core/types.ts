@@ -48,10 +48,23 @@ export interface TypeDecl {
    * 现在全是 `false`；多行是给将来的代码块留的能力位。
    */
   multiline?: boolean
+  /**
+   * 这个类型能不能作为一种 **Widget 露面**。
+   *
+   * `slot`：槽里的卡/瓦片；`body`：正文里的露面（`row` 只读摘要，`inline` 完整 UI）。
+   * 两格都没有 ⇒ 只能当普通块；有 `slot` 没有 `body` ⇒ 只能出现在槽里。
+   */
+  widget?: {
+    slot?: { size: 'small' | 'large' }
+    body?: 'row' | 'inline'
+  }
 }
 
 /** 分割线的类型 id：出现在声明表、插入入口与渲染绑定三处，只写一份 */
 export const DIVIDER_TYPE = 'core/divider'
+
+/** 集合组件（收藏/阅读清单）的类型 id：声明、创建、槽内分派共用一份 */
+export const COLLECTION_TYPE = 'core/collection-widget'
 
 /**
  * 类型声明表。
@@ -62,6 +75,40 @@ export const DIVIDER_TYPE = 'core/divider'
 export const TYPE_DECLS: Record<string, TypeDecl> = {
   [DEFAULT_BLOCK_TYPE]: { id: DEFAULT_BLOCK_TYPE, children: 'content', text: 'editable' },
   [DIVIDER_TYPE]: { id: DIVIDER_TYPE, children: 'none', text: 'readonly' },
+  [COLLECTION_TYPE]: {
+    id: COLLECTION_TYPE,
+    children: 'none',
+    text: 'readonly',
+    widget: { slot: { size: 'large' }, body: 'row' },
+  },
+}
+
+/**
+ * 这一块是不是一种 Widget 露面。
+ *
+ * 判据是**类型声明**，不是「它被放在槽里」：同一块在正文里仍然是它自己，
+ * 槽只是它的一个露面。没有声明 widget 的类型（普通内容块）在槽里走窗口卡。
+ */
+export function isWidgetBlock(b: Block | undefined): boolean {
+  return b !== undefined && typeDeclOf(b).widget !== undefined
+}
+
+/** 这一块在槽里声明的尺寸；没有声明 ⇒ null（调用方按大卡兜底） */
+export function widgetSlotSize(b: Block | undefined): 'small' | 'large' | null {
+  if (b === undefined) return null
+  return typeDeclOf(b).widget?.slot?.size ?? null
+}
+
+/**
+ * 这一块在**正文里**的露面形状；没有 ⇒ null（只能出现在槽里）。
+ *
+ * ⚠️ 判据是**类型声明**，不是「它现在在哪」：同一块在正文是一行、在槽里是一张卡，
+ * 这是**一源多视**，不是两种块。按位置判会让「把它从槽里拖进正文」这件事失去答案
+ * （拖动的那一刻它既不在槽里也不在正文里）。
+ */
+export function widgetBodyOf(b: Block | undefined): 'row' | 'inline' | null {
+  if (b === undefined) return null
+  return typeDeclOf(b).widget?.body ?? null
 }
 
 /**

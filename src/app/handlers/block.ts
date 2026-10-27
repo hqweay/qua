@@ -5,6 +5,7 @@
  * 只经 `App` 门面改状态（`app.ed.*`），不碰 DOM。
  */
 import { t } from '../../core/msg.ts'
+import { COLLECTION_TYPE } from '../../core/index.ts'
 import type { Handler } from '../../core/ports.ts'
 import { curBlock, S } from './shared.ts'
 
@@ -82,8 +83,9 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     if (!id) return false
     const text = S(a.text, '')
     const type = S(a.type, 'paragraph')
-    // 分割线没有正文可落光标：插入动作自己负责在它下面留一个落点
+    // 分割线／组件块没有正文可落光标：插入动作自己负责在它下面留一个落点
     if (type === 'divider') return app.ed.insertDividerAfter(id)
+    if (type === 'collection') return app.ed.insertWidgetAfter(id, COLLECTION_TYPE)
     const todo = type === 'todo' ? ('todo' as const) : undefined
     app.ed.insertBlockAfter(id, text, todo)
     return true

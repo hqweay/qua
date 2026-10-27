@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
@@ -30,11 +30,12 @@ import { DockWindows } from './ui/dock-windows.ts'
 import { bindDockResize } from './ui/dock-resize.ts'
 import { mountDockSlot } from './ui/dock.ts'
 import { createIcon } from './view/icons.ts'
+import { widgetRow } from './ui/dock-widgets.ts'
 import { renderAliasEditor } from './ui/alias-editor.ts'
 import { renderFieldsEditor } from './ui/fields-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type ObjFieldDeps, type PanelDeps } from './ui/panels.ts'
 import type { RefClickHit, RefClickMods } from './view/editor-events.ts'
-import { devCommands, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, zoomCommands } from './app/commands-impl.ts'
+import { collectionCommands, devCommands, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, zoomCommands } from './app/commands-impl.ts'
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupDocks } from './app/wiring/docks.ts'
@@ -232,7 +233,7 @@ function uiCtx(): CtxKeys {
 
 /* ------------------------------------------------------------ 槽内容 */
 
-const { renderDocks, openWindow, closeWindow, cardStateFor, windowLabel, setWindows } = setupDocks({
+const { renderDocks, openWindow, closeWindow, addTile, cardStateFor, windowLabel, setWindows } = setupDocks({
   kb,
   prefs,
   applyChrome: () => applyChrome(),
@@ -243,6 +244,7 @@ const { renderDocks, openWindow, closeWindow, cardStateFor, windowLabel, setWind
   getSlots: () => ({ left: dockLeft, right: dockRight }),
   // 检视卡在面板分片里创建并挂进右槽堆叠；这里只在重画时取它（它必须已经在文档里）
   inspectCard: () => chrome.inspectCardEl,
+  pickBlock: (collectionId, anchor) => showCollectionPicker(collectionId, anchor),
 })
 
 const { chrome, editorEl, applyChrome, resolvedTheme, dockMinWidth, dockMaxWidth, badge, scheduleBadge, markBooted } = setupChrome({
@@ -806,6 +808,11 @@ const app: App = {
     run: runTx,
     toast: (text, kind) => app.toast(text, kind),
   }),
+  ...collectionCommands({
+    kb,
+    write: writeProps,
+    run: runTx,
+  }),
   ...propsCommands({
     kb,
     write: writeProps,
@@ -1147,6 +1154,13 @@ function viewEvents(editor: () => BlockEditor, change: ViewEvents['change'], via
       openTrigger(hit.ch, hit.query, rect)
     },
     refClick: (ref, mods, el) => handleRefClick(ref, mods, el),
+    /**
+     * 正文里的组件行（`ui/dock-widgets.ts` 画摘要，`view` 只留契约）。
+     *
+     * ⚠️ `find` 传的是共享 store 的那一个：摘要要数「还有几条活着」，
+     *    而集合里的块可能在当前视图之外（另一页／另一天），只有整片森林答得出来。
+     */
+    widgetRow: (block, find) => widgetRow(block, find),
     // 复盘空天格子里落笔：编辑器只报日期，物化那一天（幂等）与重装载归命令层
     shellWrite: (date) => void app.journalShellWrite(date),
     // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
@@ -1299,22 +1313,104 @@ function paintStaticCopy(): void {
 }
 
 /**
- * 两条侧槽：左槽放今日与钉住的块，右槽放反链；内容由 `renderDocks()` 填。
+ * 「添加组件」画廊：复用命令面板的列表/搜索/键盘。
+ *
+ * 两类条目共用一张列表：
+ *   · 带 `tile` 的命令 → `cmd:<命令名>` 小卡；
+ *   · 「新建收藏」→ 一个 `core/collection-widget` 块，建完直接开进这一槽。
+ * 命令是**策展过的**集合（不是所有命令）；集合则是一个真正的组件块。
  */
+function showWidgetGallery(side: 'left' | 'right'): void {
+  const taken = new Set(prefs().dock[side].cards.filter((id) => id.startsWith('cmd:')))
+  const rows: Row[] = [
+    ...registry
+      .list()
+      .filter((d) => d.tile && !d.hidden && !taken.has(`cmd:${d.name}`))
+      .map((d) => ({
+        id: d.name,
+        label: d.title,
+        hint: d.name,
+        icon: d.tile!.icon,
+        group: `palette/${d.category}`,
+        command: d.name,
+        keyHint: keyHints().get(d.name),
+      })),
+    {
+      id: 'new-collection',
+      label: t('ui.widget.newCollection'),
+      hint: '',
+      icon: 'lucide:list-tree',
+      group: `palette/${t('menu.cat.widget')}`,
+      keyHint: undefined,
+    },
+  ].sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label))
+  layers.openMenu({
+    rows,
+    anchor: null,
+    title: t('ui.dock.tileGallery'),
+    searchable: true,
+    focusSearch: true,
+    placeholder: t('ui.palette.placeholder'),
+    emptyText: t('ui.dock.tileGalleryEmpty'),
+    onPick: (row) => {
+      if (row.id === 'new-collection') {
+        void registry.invoke('core.collection/create', { side }, 'dock')
+        return
+      }
+      if (row.command) addTile(side, row.command)
+    },
+  })
+}
+
+/**
+ * 集合卡的块选择器：列出还没在收藏里的块，选中即加一条引用。
+ * 复用命令面板的列表/搜索/键盘；锚在「选择块」按钮上。
+ */
+function showCollectionPicker(collectionId: string, anchor: DOMRect): void {
+  const collection = findInForest(ws.blocks, collectionId)
+  const taken = new Set(collectionItems(collection))
+  const rows: Row[] = flatten({ roots: ws.blocks })
+    .filter((b) => b.id !== collectionId && !taken.has(b.id))
+    .map((b) => ({
+      id: b.id,
+      label: displayNameOf(b).trim() || plainText(b.content).trim() || t('ui.page.untitled'),
+      hint: shortId(b.id),
+      icon: prop<string>(b, '_icon') ?? 'lucide:file',
+      group: `palette/${t('menu.cat.page')}`,
+    }))
+  layers.openMenu({
+    rows,
+    anchor,
+    title: t('ui.widget.pickBlock'),
+    searchable: true,
+    focusSearch: true,
+    placeholder: t('ui.palette.placeholder'),
+    emptyText: t('ui.widget.pickBlockEmpty'),
+    onPick: (row) => {
+      void registry.invoke('core.collection/add', { collectionId, blockId: row.id }, 'dock')
+      renderDocks()
+    },
+  })
+}
+
 const dockLeft = mountDockSlot($('dock-left'), {
   side: 'left',
   title: t('ui.dock.leftTitle'),
+  addLabel: t('ui.dock.addTile'),
   collapseLabel: t('ui.dock.collapseLeft'),
   resizeLabel: t('ui.dock.resize'),
   icon: 'lucide:chevron-left',
+  onAdd: () => showWidgetGallery('left'),
   onCollapse: () => registry.invoke('core.dock/toggle-left', {}, 'dock'),
 })
 const dockRight = mountDockSlot($('dock-right'), {
   side: 'right',
   title: t('ui.dock.rightTitle'),
+  addLabel: t('ui.dock.addTile'),
   collapseLabel: t('ui.dock.collapseRight'),
   resizeLabel: t('ui.dock.resize'),
   icon: 'lucide:chevron-right',
+  onAdd: () => showWidgetGallery('right'),
   onCollapse: () => registry.invoke('core.dock/toggle-right', {}, 'dock'),
 })
 

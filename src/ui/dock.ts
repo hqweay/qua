@@ -43,6 +43,72 @@ export interface DockCardAction {
   onClick: () => void
 }
 
+/**
+ * 小卡：一个 44px 的动作格。
+ *
+ * 它**不是卡片**：没有卡头、没有折叠/单卡。把它硬塞进卡壳，会长出
+ * 「没有折叠按钮的卡」那种半成品；44px 也放不下卡头。
+ * 宿主只画这个格子，动作归调用方（通常是一条命令）。
+ */
+export interface DockTile {
+  /** 稳定 id：`cmd:<命令名>` */
+  id: string
+  title: string
+  /** 图标名（`lucide:<name>`）；未知名字由 renderIcon 降级成占位 */
+  icon: string
+  /** 命令已经不可用（插件卸载/产品构建裁掉）：置灰、保留位置 */
+  missing?: boolean
+  /** 移出入口；小卡只有这一个 chrome 动作 */
+  close?: { title?: string; onClick: () => void }
+  onClick: () => void
+  onDragStart?: (e: DragEvent) => void
+}
+
+/** 小卡的唯一产地：44px 格 + 主按钮 + hover 出现的移除入口 */
+export function buildDockTile(tile: DockTile): HTMLElement {
+  const el = document.createElement('div')
+  el.className = 'dock-tile'
+  el.dataset.cardId = tile.id
+  if (tile.missing) el.dataset.missing = '1'
+  el.draggable = true
+  el.addEventListener('dragstart', (e) => {
+    // 移除按钮不是拖源：从它起拖会把「点 ×」变成一次拖拽
+    if ((e.target as HTMLElement).closest('.dock-tile-x')) {
+      e.preventDefault()
+      return
+    }
+    tile.onDragStart?.(e)
+  })
+
+  const main = document.createElement('button')
+  main.type = 'button'
+  main.className = 'dock-tile-main'
+  main.title = tile.title
+  main.setAttribute('aria-label', tile.title)
+  if (tile.missing) main.setAttribute('aria-disabled', 'true')
+  renderIcon(main, tile.missing ? 'lucide:circle-help' : tile.icon, 'square', 'md')
+  main.addEventListener('click', (e) => {
+    e.stopPropagation()
+    if (!tile.missing) tile.onClick()
+  })
+  el.appendChild(main)
+
+  if (tile.close) {
+    const x = document.createElement('button')
+    x.type = 'button'
+    x.className = 'dock-tile-x'
+    x.title = tile.close.title ?? ''
+    if (tile.close.title) x.setAttribute('aria-label', tile.close.title)
+    renderIcon(x, 'lucide:x', 'x', 'sm')
+    x.addEventListener('click', (e) => {
+      e.stopPropagation()
+      tile.close?.onClick()
+    })
+    el.appendChild(x)
+  }
+  return el
+}
+
 export interface DockCardState {
   /** 用户把这张卡收起了 */
   collapsed: boolean
@@ -234,6 +300,8 @@ export function applyDockCardState(el: HTMLElement, state: DockCardState): void 
 export interface DockCardEntry {
   id: string
   el: HTMLElement
+  /** 小卡不参与折叠/单卡；缺省按大卡处理 */
+  size?: 'small' | 'large'
 }
 
 /**
@@ -270,8 +338,10 @@ export function renderDockStack(
     }
   } else empty?.remove()
 
-  // 单卡：目标必须**可见**才生效；不可见时照常显示其它卡（不留空槽）
-  const target = soloId ? entries.find((e) => e.id === soloId && !e.el.hidden) : undefined
+  // 单卡：目标必须**可见的大卡**才生效；小卡没有单卡，目标不可见时照常显示其它卡（不留空槽）
+  const target = soloId
+    ? entries.find((e) => e.id === soloId && !e.el.hidden && (e.size ?? 'large') === 'large')
+    : undefined
   if (target) stack.dataset.solo = '1'
   else delete stack.dataset.solo
   for (const e of entries) {
@@ -287,11 +357,27 @@ export function renderDockStack(
  */
 export function mountDockSlot(
   root: HTMLElement,
-  opts: { side: 'left' | 'right'; title: string; collapseLabel: string; resizeLabel: string; icon: string; onCollapse: () => void },
+  opts: {
+    side: 'left' | 'right'
+    title: string
+    addLabel: string
+    collapseLabel: string
+    resizeLabel: string
+    icon: string
+    onAdd: () => void
+    onCollapse: () => void
+  },
 ): DockSlotEls {
   const els = dockSlotEls(root)
   els.titleEl.textContent = opts.title
-  const btn = els.head.querySelector<HTMLButtonElement>('.dock-btn')
+  const add = els.head.querySelector<HTMLButtonElement>('.dock-add')
+  if (add) {
+    renderIcon(add, 'lucide:plus', 'plus')
+    add.setAttribute('aria-label', opts.addLabel)
+    add.title = opts.addLabel
+    add.addEventListener('click', opts.onAdd)
+  }
+  const btn = els.head.querySelector<HTMLButtonElement>('.dock-collapse')
   if (btn) {
     renderIcon(btn, opts.icon, 'chevron-left')
     btn.setAttribute('aria-label', opts.collapseLabel)

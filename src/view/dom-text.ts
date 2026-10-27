@@ -33,11 +33,26 @@ export function isTagChip(n: Node): boolean {
   return n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).dataset.tagId !== undefined
 }
 
-/** DOM 子树长度：文本节点＝字符数，原子元素＝1，标签 chip＝0，其余递归 */
+/**
+ * 这个元素是不是**正文里的组件行**（`ui/dock-widgets.ts` 的 `widgetRow`）。
+ *
+ * 它占着 `.tx` 的位置（不像标签槽在 `.tx` 之外），但**不是正文**：那一行是组件的
+ * **摘要**（有多少条），不是用户写的字。读数把它算进去，一次 `readRuns` 就会把
+ * 「收藏 3 条 打开」写进块的 `content` —— 刷新之后那行字变成真正文，
+ * 而组件行消失（`.tx` 里有了字，摘要分支不再生效）⇒ 一块组件凭空变成一行普通文字。
+ *
+ * 与 chip 同一条判据（**无位点 ⇒ 读数为 0、光标不入**），只是它住在正文槽里，
+ * 所以三处（读数／偏移／落光标）**都**要认它，不能靠「它不可编辑」来兜。
+ */
+export function isWidgetRow(n: Node): boolean {
+  return n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).dataset.widgetRow !== undefined
+}
+
+/** DOM 子树长度：文本节点＝字符数，原子元素＝1，标签 chip 与组件行＝0，其余递归 */
 export function nodeLen(n: Node): number {
   if (n.nodeType === Node.TEXT_NODE) return (n.textContent ?? '').length
   if (n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).dataset.atomId) return 1
-  if (isTagChip(n)) return 0
+  if (isTagChip(n) || isWidgetRow(n)) return 0
   let sum = 0
   for (const c of Array.from(n.childNodes)) sum += nodeLen(c)
   return sum
@@ -63,7 +78,7 @@ export function offsetIn(root: HTMLElement, node: Node, off: number): number {
       count += 1
       return false
     }
-    if (isTagChip(n)) return false
+    if (isTagChip(n) || isWidgetRow(n)) return false
     for (const c of Array.from(n.childNodes)) if (walk(c)) return true
     return false
   }
@@ -89,7 +104,7 @@ export function readRuns(tx: HTMLElement, prev: readonly Run[]): Run[] {
   for (const r of prev) if (r.t !== 'text') byId.set(r.id, r)
 
   const walk = (n: Node, marks: readonly MarkType[]): void => {
-    if (isTagChip(n)) return
+    if (isTagChip(n) || isWidgetRow(n)) return
     if (n.nodeType === Node.TEXT_NODE) {
       const v = n.textContent ?? ''
       if (v !== '') segs.push({ text: v, marks: [...marks] })
@@ -130,15 +145,19 @@ export function readRuns(tx: HTMLElement, prev: readonly Run[]): Run[] {
 }
 
 /**
- * 正文末尾在 `.tx` 里的**子节点下标**：第一个标签 chip 的位置（没有 chip 就是末尾）。
+ * 正文末尾在 `.tx` 里的**子节点下标**：第一个「不占正文的东西」的位置（没有就是末尾）。
  *
- * 为什么需要它：模型偏移走到正文末尾时，DOM 里紧跟其后的还有 chip。
- * 直接落到 `childNodes.length` 会把光标放到 chip **之后**，下次打字就排在 chip 后面
- * —— 模型里那仍是正文末尾，显示上却跑到了标签后面。落在 chip 之前才是同一个位置。
+ * 为什么需要它：模型偏移走到正文末尾时，DOM 里紧跟其后的还有那些**无位点**的元素
+ * （标签 chip、组件行）。直接落到 `childNodes.length` 会把光标放到它们**之后**，
+ * 下次打字就排在它们后面 —— 模型里那仍是正文末尾，显示上却跑到了标签/摘要后面。
+ * 落在它们之前才是同一个位置。
+ *
+ * ⚠️ 判据是「无位点」，不是枚举类名：将来再有第三种「住在正文槽里却不占正文」的东西，
+ *    漏了它就会得到一个「看起来对、偶尔差一格」的落点（同 `nodeLen` 的口径）。
  */
 export function textEndOff(tx: HTMLElement): number {
   const children = Array.from(tx.childNodes)
-  const i = children.findIndex(isTagChip)
+  const i = children.findIndex((n) => isTagChip(n) || isWidgetRow(n))
   return i < 0 ? children.length : i
 }
 
