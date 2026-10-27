@@ -35,9 +35,9 @@ import { parseInline, type SeedBlock } from './inline.ts'
  * 为什么不用 `Date.now()`：种子每次构建都会重跑（冷启动、演示状态切换），
  * 取「现在」会让同一份内容每次得到不同时刻 —— 断言钉不住、截图每次变、导出不可比。
  * 为什么**子块也要它**：块是逐层造的，每一层都得给同一个口径，
- * 漏一层就会得到「页是 2026-10-20、它的子块是今天」，而且不报错（只是时间线看起来像假的）。
+ * 漏一层就会得到「页是 2026-10-27、它的子块是今天」，而且不报错（只是时间线看起来像假的）。
  */
-export const SEED_AT = Date.parse('2026-10-20T14:30:00+08:00')
+export const SEED_AT = Date.parse('2026-10-27T15:00:00+08:00')
 
 export interface BuiltPage {
   /** 页 ＝ `_lists` 里有 `page` 的块；名字在 `_aliases`（journal 也复用这个形状） */

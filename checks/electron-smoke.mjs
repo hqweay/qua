@@ -454,9 +454,13 @@ await check('E6 中文 IME：行内原子两侧组合输入、候选取消、提
   await page.evaluate(() => window.__qua.quiet(true))
 
   // ⚠️ `atoms()` 是**库级**的，`blocks()` 是**当前页子树**：
-  // 冷启动落在今日 journal，而假数据的原子长在第一页 ⇒ 先显式打开那一页。
+  // 冷启动落在今日 journal（今天这一屏自己也有原子），所以先打开第一页，
+  // 再挑一个**真的挂在这一页上**的原子 —— 只取 `atoms()[0]` 会挑到 journal 里的那一枚。
   await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
-  const atom = await page.evaluate(() => window.__qua.atoms()[0])
+  const atom = await page.evaluate(() => {
+    const mounted = new Set(window.__qua.blocks().map((b) => b.id))
+    return window.__qua.atoms().find((a) => mounted.has(a.blockId)) ?? null
+  })
   assert(atom, '假数据里应能找到行内原子')
   const blockId = atom.blockId
   const text0 = await page.evaluate((id) => window.__qua.blocks().find((b) => b.id === id)?.text, blockId)

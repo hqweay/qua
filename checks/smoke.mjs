@@ -3862,9 +3862,32 @@ await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling
   return `左键打开「${r.targetTitle}」；⌥/dangling 弹详情、图片左键 lightbox / ⌥ 详情；块数仍 ${opened.total}`
 })
 
-await check('T15 角标：块数 / DOM 节点数 / 主题 / composing 都在', async () => {  const { ctx, page } = await freshPage(browser, base)
-  const badge = await page.locator('#badge').innerText()
-  const s = await snap(page)
+await check('T15 角标：块数 / DOM 节点数 / 主题 / composing 都在', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  /**
+   * 角标是**按 rAF 刷新**的，而首屏的行内图片是异步到位的（占位 → 真图会换掉几个节点）：
+   * 先等资产落定，再触发一次角标刷新，最后在**同一个 JS 任务**里读角标与快照。
+   * 分两次 evaluate 会让这条断言变成一条时序竞态（真踩过）。
+   */
+  await page.evaluate(async () => {
+    for (let i = 0; i < 80; i++) {
+      const imgs = [...document.querySelectorAll('#editor .atom-image img')]
+      if (imgs.length === 0 || imgs.every((im) => im.naturalWidth > 0)) break
+      await new Promise((r) => setTimeout(r, 50))
+    }
+  })
+  /**
+   * 角标只在**有事发生时**才被排一次刷新；资产换图本身不排。用一次系统外观变更
+   * 触发它（`prefers-color-scheme` 的监听只重算诊断，不动 DOM 形状），等它落定再读。
+   */
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.waitForTimeout(200)
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.waitForTimeout(300)
+  const { badge, s } = await page.evaluate(() => ({
+    badge: document.getElementById('badge')?.innerText ?? '',
+    s: window.__qua.snapshot(),
+  }))
   assert(badge.includes(String(s.blocks)), `角标应含块数 ${s.blocks}：${badge}`)
   assert(badge.includes(String(s.domNodes)), `角标应含 DOM 节点数 ${s.domNodes}：${badge}`)
   assert(/主题/.test(badge), `角标应含主题：${badge}`)
@@ -10472,8 +10495,14 @@ await check('T135 挂载区与正文**同一套手势**：点引用跳、块标�
   await page.waitForTimeout(150)
 
   // ④ `#`：出标签补全（同一条触发链，证据是浮层里出现了标签源的行）
-  await page.locator(`${panel} > .tx`).first().click()
-  await page.keyboard.press('End')
+  /**
+   * ⚠️ 光标要落在**这一行的文字末尾**才验得准：触发判定读的是模型偏移，而挂载区是
+   *    容器级 contenteditable，`End` 在它上面不动模型光标（真踩过：只有点击点恰好落在
+   *    文字之后时测试才是绿的）。点行右端＝文字之后，与用户「点到行尾再敲」同一条手势。
+   */
+  const rowBox = await page.locator(`${panel} > .tx`).first().boundingBox()
+  assert(rowBox, '前置：挂载区那一行应能量到尺寸')
+  await page.mouse.click(rowBox.x + rowBox.width - 4, rowBox.y + rowBox.height / 2)
   // ⚠️ `#` 后面要跟一个字才成边（与正文同一个判据：光一个 `#` 不算触发完）
   await page.keyboard.type(' #设')
   await page.waitForTimeout(350)
@@ -10941,7 +10970,7 @@ await check('T141 空块里敲拼音：第一个字母不被冻成正文（组�
  * 而 ↵／⌘A 走命令层的 `app.ed` ⇒ 会被**正文**接走：新块建成命中块的**兄弟**
  * （不在这一栏的查询条件里 ⇒ 用户看不见），光标还被甩到正文。
  *
- * Roam/Logseq 的语义：在引用区那一行按 ↵ ＝ 在那一块**下面**接着写，就地可见。
+ * 目标语义：在引用区那一行按 ↵ ＝ 在那一块**下面**接着写，就地可见。
  */
 await check('T142 挂载区里 ↵：新块是命中块的子块、留在本栏可见、光标不跳出挂载区', async () => {
   const { ctx, page } = await freshPage(browser, base)
