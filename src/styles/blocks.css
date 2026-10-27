@@ -1036,9 +1036,52 @@
   font-size: 0.9em;
 }
 .atom-image {
-  padding: 0 8px 0 3px;
+  padding: 0 4px 0 2px;
 }
-/* 行内标签：`#名` 停在正文里，**不加底色** —— 它是正文的一部分，不是贴上去的 chip */
+/*
+  **行内资产的两个失败态**：占位与「库不可用」必须长得不一样。
+  · `missing` —— 库里没有这份字节（等同步／找回文件）；
+  · `unavailable` —— 资产库本身打不开（换环境／修存储）。
+  两种都用**虚线**（「这里本该有东西」），但颜色不同：缺失偏警示、不可用偏中性。
+  不用同一套灰：那会把两种完全不同的建议压成一句「坏了」。
+*/
+.atom-file {
+  padding: 0 6px 0 3px;
+}
+.atom-file.missing {
+  background: transparent;
+  border: 1px dashed var(--ui-danger);
+  color: var(--ui-danger);
+}
+.atom-file.unavailable {
+  background: transparent;
+  border: 1px dashed var(--ui-border);
+  color: var(--ui-fg-mute);
+}
+.asset-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: baseline;
+}
+.asset-chip-ico {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.8;
+}
+.asset-chip-label {
+  font-size: 0.93em;
+}
+/* 缩略图：**行高不变**（1.35em、随基线），宽按原比例 —— 行内层的契约是一个点，不是一张画 */
+.asset-thumb {
+  display: block;
+  height: 1.35em;
+  width: auto;
+  max-width: 12em;
+  object-fit: contain;
+  border-radius: 3px;
+  vertical-align: baseline;
+}
 .atom-tag {
   padding: 0 2px;
   margin: 0;
@@ -1066,24 +1109,10 @@
   background: var(--ui-accent-soft);
   border-color: transparent;
 }
-.asset-thumb {
-  display: block;
-  height: 1.35em;
-  width: auto;
-  border-radius: 3px;
-}
 .atom.dangling {
   background: transparent;
   border: 1px dashed var(--ui-accent);
   opacity: 0.85;
-}
-.atom.missing {
-  background: var(--ui-danger);
-  color: var(--ui-danger);
-}
-.atom.missing .asset-thumb {
-  filter: grayscale(1) contrast(0.6);
-  opacity: 0.5;
 }
 
 /*

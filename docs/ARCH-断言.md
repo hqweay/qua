@@ -131,9 +131,10 @@ pnpm arch:check   # 只跑静态那一层（秒级）
 | `[22]` | **块树遍历只有一个入口**（禁自写递归走 `children`） | `arch-check` `[22]`（反证过：放两种自写递归的写法都会红）＋ `tests/traversal.test.ts` | **跑** |
 | `[23]` | app／ui 不得 import 块存储（数据只经注入的依赖面与读门面） | `arch-check` `[23]` | **跑** |
 | `[24]` | app／ui 的依赖接口不得注入「整片森林」 | `arch-check` `[24]` | **跑** |
-| `[25]` | **行内内容只有 run 序列一套**（禁旧形状的零件复活） | `arch-check` `[25]`（反证过：把 `mapAtoms` 放回去会红） | **跑** |
+| `[25]` | **行内内容只有 run 序列一套**（禁旧形状的零件复活；含 `ImageRun` / `thumbUri` / `t:'image'`） | `arch-check` `[25]`（反证过：把 `mapAtoms` 放回去会红） | **跑** |
+| `[26]` | **资产库只有一个产地**：`indexedDB` 只在适配器里；`URL.createObjectURL` 只在唯一文件里 | `arch-check` `[26]` | **跑** |
 
-**当前基线**：`pnpm arch:check` 硬断言 **19/19 过**（`[12b]` 是如实记账、不拦门的欠账；
+**当前基线**：`pnpm arch:check` 硬断言 **20/20 过**（`[12b]` 是如实记账、不拦门的欠账；
 另有 6 条「等内核」，见 §4）。
 
 ---
@@ -215,10 +216,7 @@ AST 遍历 `electron/**/*.ts`：禁止 `workspace` / `seed` / `core/` / `command
    这条欠账要消失，得单独排一轮「token 化全量 CSS」，不是顺手能干的。
 - **白名单与理由**：
   - `src/core/msg.ts` / `src/core/seed.ts`（里面没有样式）；
-  - `view.ts` 的 `thumbUri`：**内联 SVG 数据 URI** 的取色（`hsl(${h} 62% 62%)` / `rgba(255,255,255,.75)`）。
-    两个硬理由：①`data:` URI 里的 SVG **看不见页面 CSS 变量**（它是独立文档）；
-    ②那两种颜色是按内容 hash **算**出来的（同一张图同色相），不是设计 token。
-    要真 token 化，得把 `<img src="data:…">` 换成 DOM/CSS 渐变 —— 那是改 DOM，等资产层落地。
+  - （原 `thumbUri` 的 SVG 取色白名单已随资产层落地删除：那张程序生成的渐变图不再是「真图」的替身。）
   - `electron/main.ts` 的 `BrowserWindow.backgroundColor`：主进程**没有 CSS**，首帧前的窗口底色
     只能由 shell 给（现在是 `nativeTheme.shouldUseDarkColors ? 暗 : 亮`，避免暗色系统上先闪一帧白）。
 
@@ -289,6 +287,19 @@ AST 遍历 `electron/**/*.ts`：禁止 `workspace` / `seed` / `core/` / `command
 - **白名单：无**——那些名字对应的机制已被序列语义与块上归属取代，没有正当用途。
 - **反证**：在 `src/core/runs.ts` 末尾加一行 `export const mapAtoms = 1` ⇒ 立刻红；
   删掉即回绿。
+- **资产那一半**：`ImageRun` / `thumbUri` 也在同一张禁用名单里，另外单扫
+  「`t:` 的值是 `'image'`」——那是**不需要标识符**的复活方式（写个字面量就成立），
+  而它会让形状校验把整份库判成 corrupt（比静默错更糟：打不开）。
+
+### `[26]` 资产库只有一个产地
+
+- **检查方式**：AST 扫 `src/**/*.ts` 的 `indexedDB` 标识符（属性名不算）与
+  `.createObjectURL` 属性访问；各自只允许出现在一个文件里
+  （`core/storage/asset-idb.ts` / `view/asset-views.ts`）。
+- **为什么是硬断言**：两条都不是风格问题 —— 一条是**数据静默消失**
+  （IDB 库名 `qua.assets` 是不可逆契约，换名等于已有资产没了；散出去就守不住），
+  一条是**慢性泄漏**（每次重渲染都建一个对象 URL，浏览器不回收，直到文档卸载）。
+- **反证**：在 `src/main.ts` 里加一行 `URL.createObjectURL(new Blob([]))` ⇒ 立刻红。
 
 ---
 
@@ -327,9 +338,8 @@ AST 遍历 `electron/**/*.ts`：禁止 `workspace` / `seed` / `core/` / `command
 2. **`view.ts` 的 `LINE_H = 30` 与 CSS 的 `--line-h`（28/30，随皮肤变）不是同一个数**：虚拟化占位
    高度是按 30px × 行数算的，乙皮肤真实行高 24px ⇒ 占位与真实滚动高度有偏差。既有近似，
    本轮没动（它参与布局计算，token 化会动行为）。记在这里。
-3. **缩略图配色不随主题/皮肤走**：`thumbUri` 的 SVG 在 `data:` URI 里，看不见 CSS 变量
-   （见 `[12]` 白名单）。要真跟随主题，得把 `<img>` 换成 DOM/CSS 渐变 —— 那会改 DOM，
-   等资产层一起做。
+3. ~~**缩略图配色不随主题/皮肤走**~~ —— 已消解：行内图现在是资产库里的**真实字节**
+   （`blob:` URL），颜色由图片自己决定，与主题无关；程序生成的渐变图已删除。
 4. **`check:electron` 与 `dist-electron/` 的时序坑**：本轮改了 Electron 菜单文案，如果不
    `pnpm build:electron`，E3 会拿**旧** `main.cjs` 过（假绿）。已在 `gate` 里补上
    `build:electron`，并在 §0 写死；但单独跑 `check:electron` 仍然有这个坑。

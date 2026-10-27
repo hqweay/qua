@@ -76,6 +76,23 @@ const isStrLike = (n) =>
   n.kind === ts.SyntaxKind.TemplateMiddle ||
   n.kind === ts.SyntaxKind.TemplateTail
 
+/**
+ * 这个字符串是不是**判别键的值**（`t: 'image'` 那种）。
+ *
+ * 判据是「父节点是属性赋值、键名是 `t`」——只看字面量会把
+ * `img.type = 'image/png'`、`t('…image…')` 之类一起算进来。
+ */
+function isDiscriminantValue(n) {
+  const p = n.parent
+  return (
+    p &&
+    ts.isPropertyAssignment(p) &&
+    p.name &&
+    ts.isIdentifier(p.name) &&
+    p.name.text === 't'
+  )
+}
+
 /** 全部字符串/模板片段（注释不进 AST ⇒ 天然豁免） */
 function literalsOf(sf) {
   const out = []
@@ -926,6 +943,8 @@ function commandDecls() {
     'mapAtoms',
     'mapMarks',
     'syncAnchors',
+    'ImageRun',
+    'thumbUri',
   ]
   const hits = []
   for (const f of srcFiles) {
@@ -940,6 +959,12 @@ function commandDecls() {
           hits.push(`${r}:${line} 旧行内形状的零件复活：\`${name}\``)
         }
       }
+      // `t: 'image'` 是**另一种**复活方式：不需要标识符，写个字面量就成立了，
+      // 而它会让形状校验把整份库判成 corrupt（比静默错更糟：打不开）。
+      if (ts.isStringLiteral(n) && n.text === 'image' && isDiscriminantValue(n)) {
+        const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
+        hits.push(`${r}:${line} 旧 run 种类复活：\`t: 'image'\`（资产用 \`t: 'asset'\`）`)
+      }
       ts.forEachChild(n, visit)
     }
     visit(sf)
@@ -950,12 +975,68 @@ function commandDecls() {
     method:
       'AST 扫 src/**/*.ts 的标识符与属性名，命中即复活：' +
       BANNED.map((n) => `\`${n}\``).join('／') +
-      '（注释不进 AST ⇒ 讲「为什么不用它」不算命中）',
+      '；另扫「`t:` 的值是 `\'image\'`」这种形状复活（注释不进 AST ⇒ 讲「为什么不用它」不算命中）',
     scope: `src/**/*.ts（${srcFiles.length} 个文件）`,
-    whitelist: '无——这些名字对应的机制已被 run 序列取代，没有正当用途',
+    whitelist: '无——这些名字对应的机制已被 run 序列与资产对象取代，没有正当用途',
     hits: hits.length,
     detail: hits,
-    note: '为什么必须机检：旧形状自带一套自洽的解释（原子在字符串里占一格、锚点靠粘性映射跟随），写回来时类型与单测都不会喊，只有真编辑几轮之后才会显形',
+    note: '为什么必须机检：旧形状自带一套自洽的解释（原子在字符串里占一格、锚点靠粘性映射跟随、图片带一份内联 state），写回来时类型与单测都不会喊，只有真编辑几轮之后才会显形',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
+   ║ 26 · 资产库：indexedDB 与对象 URL 各自只有一个产地        ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  /**
+   * 两条不可逆/易漏的口径：
+   *
+   * ① **`indexedDB` 只许出现在一个适配器文件里**。与 `localStorage` 同一条理由：
+   *    散出去之后「换存储只改一处」就变成重写每个调用方；而且 IDB 的库名是**不可逆契约**
+   *    （换名＝已有资产静默消失），必须只有一处能碰它。
+   * ② **`URL.createObjectURL` 只许出现在一个文件里**。每次渲染都建一个 URL 会一直泄漏
+   *    （浏览器不回收，直到文档卸载），而泄漏不报错、只是越来越占内存。
+   *    收口之后「按 hash 缓存 + 统一 revoke」才是一处能保证的事。
+   *
+   * 为什么是 hard：两条都不是风格问题——一条是数据静默消失，一条是慢性泄漏。
+   */
+  const IDB_ADAPTER = 'src/core/storage/asset-idb.ts'
+  const URL_HOME = 'src/view/asset-views.ts'
+  const idbHits = []
+  const urlHits = []
+  for (const f of srcFiles) {
+    const r = rel(f)
+    const { sf } = tsFile(f)
+    const visit = (n) => {
+      if (ts.isIdentifier(n) && n.text === 'indexedDB' && r !== IDB_ADAPTER) {
+        const isPropName = ts.isPropertyAccessExpression(n.parent) && n.parent.name === n
+        if (!isPropName) {
+          const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
+          idbHits.push(`${r}:${line} 适配器之外直接碰 indexedDB`)
+        }
+      }
+      if (
+        ts.isPropertyAccessExpression(n) &&
+        n.name.text === 'createObjectURL' &&
+        r !== URL_HOME
+      ) {
+        const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
+        urlHits.push(`${r}:${line} 对象 URL 在唯一产地之外创建（会漏 revoke）`)
+      }
+      ts.forEachChild(n, visit)
+    }
+    visit(sf)
+  }
+  add({
+    id: 26,
+    title: '资产库：`indexedDB` 只在一个适配器里；`URL.createObjectURL` 只在唯一产地',
+    method: 'AST 扫 src/**/*.ts 的 `indexedDB` 标识符与 `.createObjectURL` 属性访问',
+    scope: `src/**/*.ts（${srcFiles.length} 个文件；适配器 ${IDB_ADAPTER}、URL 产地 ${URL_HOME} 豁免）`,
+    whitelist: `${IDB_ADAPTER}（唯一实现）· ${URL_HOME}（唯一创建与回收处）`,
+    hits: idbHits.length + urlHits.length,
+    detail: [...idbHits, ...urlHits],
+    note: '库名 `qua.assets` 是新的不可逆契约（换名＝资产静默消失），与 `qua.workspace` 同级；由本条的另一半（只允许一个产地）保证它不会散出去',
   })
 }
 

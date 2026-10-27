@@ -69,8 +69,11 @@ import { isAnno, isRun } from '../runs.ts'
  * v21 → v22：新增系统属性 `_mounts`（块底挂载查询面板的配置）。
  *            旧库没有这一格读出来就是「没有自定义 tab」，本不必作废；加一版是为了让
  *            **写路径**只面对一种形状（与 v11→v12 加 `trash` 同一条理由）。
+ * v22 → v23：行内图片从「`{t:'image', asset:{hash,name,state}}`」改成
+ *            「`{t:'asset', asset: hash, label?, w?, h?}`」——载荷与派生状态搬出正文。
+ *            旧库的 `t:'image'` 新代码判非法（形状校验会拒绝整份库）⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 22
+export const WORKSPACE_VERSION = 23
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

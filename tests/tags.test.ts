@@ -188,7 +188,7 @@ test('⑥d edgeSourceIds：引用与**行内标签**都算指向边（改名要�
   // a 引用 t1；b 带一张图片；c 有一枚行内标签露面（指向 t2）
   const blocks = [
     { id: 'a', content: [ { id: 'e1', t: 'ref' as const, to: 't1', label: 'x' } ], children: [] },
-    { id: 'b', content: [ { id: 'e2', t: 'image' as const, asset: { hash: 'h', state: 'ready' as const } } ], children: [] },
+    { id: 'b', content: [ { id: 'e2', t: 'asset' as const, asset: 'h' } ], children: [] },
     { id: 'c', content: [ ...textRuns('前'), { id: 'e3', t: 'ref' as const, to: 't2', flavor: '#' as const, label: '设计' } ], children: [] },
   ] as unknown as import('../src/core/model.ts').Block[]
   assert.deepEqual([...edgeSourceIds(blocks, 't1')], ['a'])

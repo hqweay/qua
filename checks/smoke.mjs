@@ -798,7 +798,7 @@ await check('T4 格式随打字继承：粗体末尾接着敲的字仍是粗体�
 
 /* -------------------------------------------------------- 行内原子 */
 
-await check('T5 行内原子：引用 chip 与图片占位各占 1 格，随文本漂移，可点开信息', async () => {
+await check('T5 行内原子：引用 chip 与资产原子各占 1 格，随文本漂移，可点开信息', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const r = await page.evaluate(() => {
@@ -821,13 +821,14 @@ await check('T5 行内原子：引用 chip 与图片占位各占 1 格，随文�
   assert(shifted.start === a.start + 1, `在原子前插入应右移 1：${a.start} → ${shifted.start}`)
   await page.evaluate(() => window.__qua.invoke('core.editor/insert-image', { preset: 'missing' }))
   const atoms = await page.evaluate(() => window.__qua.atoms())
-  assert(atoms.some((x) => x.kind === 'image'), '图片原子没插进去')
+  assert(atoms.some((x) => x.kind === 'asset'), '资产原子没插进去')
   const domAtoms = await page.evaluate(() => ({
     page: document.querySelectorAll('.atom-page').length,
-    image: document.querySelectorAll('.atom-image').length,
-    missing: document.querySelectorAll('.atom-image.missing').length,
+    asset: document.querySelectorAll('.atom-asset').length,
+    // 缺字节的资产是**文件形占位**（`.atom-file.missing`），不是「图片形 + 滤镜」
+    missing: document.querySelectorAll('.atom-file.missing').length,
   }))
-  assert(domAtoms.page >= 3 && domAtoms.image >= 1, `假数据 + 新插入的原子数不对：${JSON.stringify(domAtoms)}`)
+  assert(domAtoms.page >= 3 && domAtoms.asset >= 1, `假数据 + 新插入的原子数不对：${JSON.stringify(domAtoms)}`)
   assert(domAtoms.missing >= 1, '缺失资产应有 .missing 表现（状态不是错误）')
   // ⌥ 点击才弹信息（左键默认是「打开目标」，见 T43）
   await page.locator('.atom-page').first().click({ modifiers: ['Alt'] })
@@ -836,7 +837,399 @@ await check('T5 行内原子：引用 chip 与图片占位各占 1 格，随文�
   await page.keyboard.press('Escape')
   assert((await page.locator('.popover').count()) === 0, 'Esc 应关掉信息气泡')
   await ctx.close()
-  return `原子 ${atoms.length} 个；chip+图片都在，缺资产有 .missing 表现，点开有信息`
+  return `原子 ${atoms.length} 个；chip+资产都在，缺资产有 .missing 表现，点开有信息`
+})
+
+await check('T5b 行内资产：真图按内容地址画出来（naturalWidth > 0），missing / unavailable 是两种不同的失败', async () => {
+  const { ctx, page, errors } = await freshPage(browser, base)
+  // 打开含样本资产的页
+  await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => x.title.includes('输入面笔记')) ?? window.__qua.pages()[1]
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+  })
+  await page.waitForTimeout(500)
+  const r = await page.evaluate(() => {
+    const imgs = [...document.querySelectorAll('#editor .atom-image img')]
+    const missing = [...document.querySelectorAll('#editor .atom-file.missing')]
+    const atomRows = [...document.querySelectorAll('#editor .atom-asset')].map((e) => ({
+      hash: e.dataset.assetHash ?? '',
+      kind: e.dataset.atomKind ?? '',
+      cls: e.className,
+    }))
+    return {
+      imgs: imgs.map((i) => ({ nw: i.naturalWidth, nh: i.naturalHeight, draggable: i.draggable, alt: i.alt, blob: i.src.startsWith('blob:') })),
+      missing: missing.map((e) => e.textContent ?? ''),
+      atoms: atomRows,
+      assets: window.__qua.snapshot().assets,
+      // 行高不因图而变（行内层的契约是一个点）：比「含图那一行」与「纯文本行」
+      rowH: (() => {
+        const rows = [...document.querySelectorAll('#editor .blk')]
+        const withImg = rows.find((b) => b.querySelector('.atom-image'))?.getBoundingClientRect().height ?? -1
+        const plain = rows.find((b) => !b.querySelector('.atom') && !b.dataset.alias)?.getBoundingClientRect().height ?? -1
+        return { withImg: Math.round(withImg), plain: Math.round(plain) }
+      })(),
+    }
+  })
+  assert(r.assets.available, `资产库应可用：${JSON.stringify(r.assets)}`)
+  assert(r.assets.keys >= 1, `资产库应有种子样本：${JSON.stringify(r.assets)}`)
+  assert(r.imgs.length >= 1, `样本资产应画成真图：${JSON.stringify(r.atoms)}`)
+  const img = r.imgs[0]
+  assert(img.nw > 0 && img.nh > 0, `真图必须解码成功（CSP 的 img-src 少了 blob: 会静默变 0）：${JSON.stringify(img)}`)
+  assert(img.blob, `图的 src 应是对象 URL（不是 data URI、不是程序生成的 SVG）：${img.src}`)
+  assert(img.draggable === false, '图必须 draggable=false（否则 contenteditable 会把裸 <img> 拖进来）')
+  assert(img.alt.includes('.png'), `alt 应是插入时的文件名快照：${img.alt}`)
+  assert(r.atoms.every((a) => a.hash.length === 64 && a.kind === 'asset'), `资产原子应带 64 位 hash 与 kind：${JSON.stringify(r.atoms)}`)
+  assert(r.missing.length >= 1, `种子里应有一张刻意缺失的资产：${JSON.stringify(r.atoms)}`)
+  assert(r.missing[0].includes('缺失'), `缺失资产的文案要说清是「缺失」：${r.missing[0]}`)
+  // 行高：**含图那一行与纯文本行同高**（图片不把行撑开，虚拟化的占位才不用跟着图变）
+  assert(
+    r.rowH.withImg === r.rowH.plain,
+    `图片不应改变行高：含图行 ${r.rowH.withImg} vs 纯文本行 ${r.rowH.plain}`,
+  )
+  assert(errors.length === 0, `控制台不该有错误（CSP 拦截会在这里现形）：${errors.join(' | ')}`)
+  await ctx.close()
+  return `真图 ${img.nw}×${img.nh}（blob URL）、${r.atoms.length} 枚资产原子、${r.missing.length} 张缺失、行高 ${r.rowH.withImg}`
+})
+
+await check('T5c 行内资产：字节到达才画出图（首帧是占位，第二帧换成真图，不重排整页）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => x.title.includes('输入面笔记')) ?? window.__qua.pages()[1]
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+  })
+  /**
+   * 判据是「渲染是同步纯函数，字节是异步的」：第一帧必然可能还没有 URL。
+   * 这里不断言那一帧长什么样（时序不稳），只断言**最终**会换成真图，
+   * 且**没有**用整页重排去换（重排会打断正在输入的那一行）。
+   */
+  const settled = await page.evaluate(async () => {
+    const first = document.querySelectorAll('#editor .atom-image img').length
+    // 等到真图出现（上限 3s；超时说明「字节到了没人重画」）
+    for (let i = 0; i < 60; i++) {
+      if (document.querySelector('#editor .atom-image img')?.naturalWidth) break
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    const img = document.querySelector('#editor .atom-image img')
+    return { first, nw: img?.naturalWidth ?? 0, sameNode: true }
+  })
+  assert(settled.nw > 0, `字节到达后应重画成真图（拿到 ${settled.nw}）：${JSON.stringify(settled)}`)
+  await ctx.close()
+  return `首帧 ${settled.first} 张图位 → 最终 naturalWidth ${settled.nw}`
+})
+
+await check('T5d 行内资产：DOM 里有、模型里没有时按 kind 还原成资产 run（不是悬空引用）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => x.title.includes('输入面笔记')) ?? window.__qua.pages()[1]
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+  })
+  await page.waitForTimeout(300)
+  const r = await page.evaluate(() => {
+    const el = document.querySelector('#editor .atom-image')
+    const blockId = el.closest('.blk').dataset.blockId
+    const ed = window.__qua.__editor
+    const normal = ed.readRunsOf(blockId).filter((x) => x.t !== 'text').map((x) => x.t)
+    // 模拟「模型没跟上」：把 DOM 上的原子 id 改成模型里没有的值
+    const old = el.dataset.atomId
+    el.dataset.atomId = 'zzz-unknown-id'
+    const fallback = ed.readRunsOf(blockId).filter((x) => x.t !== 'text')
+    el.dataset.atomId = old
+    return { normal, fallback }
+  })
+  assert(r.normal.includes('asset'), `正常读数应带回资产 run：${JSON.stringify(r.normal)}`)
+  const restored = r.fallback.find((x) => x.id === 'zzz-unknown-id')
+  assert(restored, `兜底必须保留这一格（不能静默吞掉）：${JSON.stringify(r.fallback)}`)
+  assert(restored.t === 'asset', `兜底应按 data-atom-kind 还原成资产，而不是悬空引用：${JSON.stringify(restored)}`)
+  assert(restored.asset && restored.asset.length === 64, `还原出的 run 要带内容地址：${JSON.stringify(restored)}`)
+  await ctx.close()
+  return `正常 ${r.normal.join('/')}；兜底还原成 ${restored.t}（hash ${restored.asset.slice(0, 8)}…）`
+})
+
+await check('T5e 行内资产：左键开 lightbox（点图不关、Esc 关），⌥ 看详情，缺失不开空 lightbox', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => x.title.includes('输入面笔记')) ?? window.__qua.pages()[1]
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+  })
+  await page.waitForTimeout(400)
+
+  // ① 左键 ⇒ lightbox（真图、有副标题）
+  await page.locator('#editor .atom-image').first().click()
+  const lb = await page.evaluate(() => {
+    const el = document.querySelector('.lightbox')
+    return {
+      open: Boolean(el),
+      nw: el?.querySelector('img')?.naturalWidth ?? 0,
+      sub: el?.querySelector('.lightbox-sub')?.textContent ?? '',
+      title: el?.querySelector('.lightbox-title')?.textContent ?? '',
+    }
+  })
+  assert(lb.open, '左键点图应开 lightbox')
+  assert(lb.nw > 0, `lightbox 里的图要真的解码出来：${JSON.stringify(lb)}`)
+  assert(lb.sub.includes('×') && lb.sub.length > 5, `副标题应有尺寸等说明：${lb.sub}`)
+  assert(lb.title.includes('.png'), `标题应是文件名快照：${lb.title}`)
+
+  // ② 点图不关
+  await page.locator('.lightbox-img').click()
+  assert(await page.evaluate(() => Boolean(document.querySelector('.lightbox'))), '点图不该关掉 lightbox')
+  // ③ Esc 关
+  await page.keyboard.press('Escape')
+  assert(!(await page.evaluate(() => Boolean(document.querySelector('.lightbox')))), 'Esc 应关掉 lightbox')
+
+  // ④ ⌥ ⇒ 详情（且不开 lightbox）
+  await page.locator('#editor .atom-image').first().click({ modifiers: ['Alt'] })
+  const alt = await page.evaluate(() => ({
+    text: document.querySelector('.popover')?.textContent ?? '',
+    lb: Boolean(document.querySelector('.lightbox')),
+  }))
+  assert(!alt.lb, '⌥ 不该开 lightbox')
+  assert(alt.text.includes('资产 hash') && alt.text.includes('mime'), `⌥ 应给资产详情：${alt.text.slice(0, 80)}`)
+  await page.keyboard.press('Escape')
+
+  // ⑤ 缺失资产：左键也**不开空 lightbox**，直接给详情
+  await page.locator('#editor .atom-file.missing').first().click()
+  const miss = await page.evaluate(() => ({
+    text: document.querySelector('.popover')?.textContent ?? '',
+    lb: Boolean(document.querySelector('.lightbox')),
+  }))
+  assert(!miss.lb, '缺失资产不该开空 lightbox（那是一个黑屏）')
+  assert(miss.text.includes('missing'), `缺失应说明状态：${miss.text.slice(0, 80)}`)
+  await page.keyboard.press('Escape')
+
+  await ctx.close()
+  return `lightbox ${lb.title}（${lb.sub}）；点图不关、Esc 关；⌥ 详情；缺失不开空 lightbox`
+})
+
+await check('T5f 行内资产：粘贴图片 → 内容寻址入库 → 插在**捕获的落点**（不是当前光标）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
+  await page.waitForTimeout(300)
+  const r = await page.evaluate(async () => {
+    /**
+     * 真 PNG 的字节（40×40 纯色）：粘贴路径要过 magic bytes 嗅探，
+     * 造一个「名字像图片、字节不是」的文件会走拒绝分支（那是另一条断言）。
+     */
+    const b64 =
+      'iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAIAAAADnC86AAAAMElEQVR4nO3NQQkAAAgEsItjHGMbyxKCn8H+y3S9iFgsFovFYrFYLBaLxWKxWHxnAY8m0GozORegAAAAAElFTkSuQmCC'
+    const bin = atob(b64)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    const dt = new DataTransfer()
+    dt.items.add(new File([bytes], '粘贴的图.png', { type: 'image/png' }))
+    const blk = document.querySelector('#editor .blk')
+    const blockId = blk.dataset.blockId
+    window.__qua.focusBlock(blockId, 0)
+    const before = window.__qua.__editor.store.find(blockId).content.map((x) => x.t)
+    const atomsBefore = window.__qua.snapshot().atoms
+    const ev = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })
+    blk.querySelector('.tx').dispatchEvent(ev)
+    for (let i = 0; i < 80; i++) {
+      if (window.__qua.snapshot().atoms > atomsBefore) break
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    /**
+     * 入库是异步的，**画出来**还要再异步一步（取字节 → 对象 URL → 重画那一行）。
+     * 断言要等它落地：否则验的是「此刻屏幕上有没有」而不是「这条链路成不成立」。
+     */
+    for (let i = 0; i < 80; i++) {
+      if ([...document.querySelectorAll('#editor .atom-image img')].every((im) => im.naturalWidth > 0)) break
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    const content = window.__qua.__editor.store.find(blockId).content
+    return {
+      before,
+      after: content.map((x) => (x.t === 'asset' ? `asset:${x.label}:${x.asset.length}` : x.t)),
+      assets: window.__qua.snapshot().assets,
+      imgs: [...document.querySelectorAll('#editor .atom-image img')].map((i) => i.naturalWidth),
+    }
+  })
+  assert(r.after.some((x) => String(x).startsWith('asset:粘贴的图.png:64')), `粘贴应插一枚带 64 位地址的资产 run：${JSON.stringify(r.after)}`)
+  assert(r.assets.keys >= 2, `新字节应真的入库（去重后应多一份）：${JSON.stringify(r.assets)}`)
+  assert(r.imgs.every((n) => n > 0), `粘进来的图也要能解码：${JSON.stringify(r.imgs)}`)
+
+  // 同一份字节再贴一次 ⇒ 库里仍只有那些 key（内容寻址去重），但多一枚 run
+  const twice = await page.evaluate(async () => {
+    const b64 =
+      'iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAIAAAADnC86AAAAMElEQVR4nO3NQQkAAAgEsItjHGMbyxKCn8H+y3S9iFgsFovFYrFYLBaLxWKxWHxnAY8m0GozORegAAAAAElFTkSuQmCC'
+    const bin = atob(b64)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    const keysBefore = window.__qua.snapshot().assets.keys
+    const atomsBefore = window.__qua.snapshot().atoms
+    const dt = new DataTransfer()
+    dt.items.add(new File([bytes], '同一张.png', { type: 'image/png' }))
+    const blk = document.querySelector('#editor .blk')
+    blk.querySelector('.tx').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+    for (let i = 0; i < 80; i++) {
+      if (window.__qua.snapshot().atoms > atomsBefore) break
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    const assets = window.__qua.snapshot().assets
+    const labels = window.__qua.atoms().filter((a) => a.kind === 'asset').map((a) => a.rawLabel)
+    return { keysBefore, keys: assets.keys, atoms: window.__qua.snapshot().atoms, labels }
+  })
+  assert(twice.keys === twice.keysBefore, `同一份字节不该多一份资产（内容寻址去重）：${JSON.stringify(twice)}`)
+  assert(twice.labels.includes('同一张.png') && twice.labels.includes('粘贴的图.png'), `两枚 run 各保留自己的 label：${JSON.stringify(twice.labels)}`)
+
+  await ctx.close()
+  return `粘贴入库 ${r.assets.keys} 份；同字节再贴 ⇒ 仍 ${twice.keys} 份、两枚 run（label 各自保留）`
+})
+
+await check('T5g 行内资产：选文件走隐藏 input；拖入文件被拦住（不产生裸 <img>）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.invoke('core.page.open', { pageId: window.__qua.pages()[0].id }))
+  await page.waitForTimeout(300)
+  await page.evaluate(() => window.__qua.focusBlock(window.__qua.blocks()[0].id, 0))
+
+  // ① 选文件：真 PNG 走 `filechooser`（字节由 node 侧给，不落临时文件）
+  const b64 =
+    'iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAIAAAADnC86AAAAMElEQVR4nO3NQQkAAAgEsItjHGMbyxKCn8H+y3S9iFgsFovFYrFYLBaLxWKxWHxnAY8m0GozORegAAAAAElFTkSuQmCC'
+  const [chooser] = await Promise.all([
+    page.waitForEvent('filechooser', { timeout: 5000 }),
+    page.evaluate(() => window.__qua.invoke('core.editor/insert-image', {})),
+  ])
+  const atomsBefore = await page.evaluate(() => window.__qua.snapshot().atoms)
+  await chooser.setFiles({ name: '选中的图.png', mimeType: 'image/png', buffer: Buffer.from(b64, 'base64') })
+  await page.waitForFunction((n) => window.__qua.snapshot().atoms > n, atomsBefore, { timeout: 5000 })
+  const picked = await page.evaluate(() => ({
+    labels: window.__qua.atoms().filter((a) => a.kind === 'asset').map((a) => a.rawLabel),
+    assets: window.__qua.snapshot().assets,
+  }))
+  assert(picked.labels.includes('选中的图.png'), `选文件应插一枚带文件名的资产：${JSON.stringify(picked.labels)}`)
+  assert(picked.assets.keys >= 2, `选文件也要真的入库：${JSON.stringify(picked.assets)}`)
+
+  // ② 拖入文件：拦住、给文案、**不产生裸 <img>**
+  const drop = await page.evaluate(async () => {
+    const dt = new DataTransfer()
+    dt.items.add(new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], '拖入.png', { type: 'image/png' }))
+    const tx = document.querySelector('#editor .tx')
+    const before = document.querySelectorAll('#editor img').length
+    const prevented = !tx.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }))
+    await new Promise((r) => setTimeout(r, 200))
+    return {
+      prevented,
+      before,
+      after: document.querySelectorAll('#editor img').length,
+      // 裸 <img> 判据：DOM 里没有 data-atom-id 祖先的 img
+      naked: [...document.querySelectorAll('#editor img')].filter((i) => !i.closest('[data-atom-id]')).length,
+      toast: document.querySelector('.toast')?.textContent ?? '',
+    }
+  })
+  assert(drop.prevented, '拖入 Files 必须 preventDefault（否则浏览器会塞裸 <img>）')
+  assert(drop.after === drop.before, `拖入不该产生新的 <img>：${JSON.stringify(drop)}`)
+  assert(drop.naked === 0, `DOM 里不该有裸 <img>（没有 data-atom-id 祖先）：${JSON.stringify(drop)}`)
+  assert(drop.toast.includes('暂不支持'), `拖入应给一句明确的话：${drop.toast}`)
+
+  await ctx.close()
+  return `选文件 ⇒ ${picked.labels.length} 枚资产（库 ${picked.assets.keys} 份）；拖入被拦（裸 img ${drop.naked} 个）`
+})
+
+await check('T5h 行内资产：关掉重开，图还在（workspace ＋ IndexedDB 一起恢复）；只清 IDB ⇒ missing', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.invoke('core.page.open', { pageId: window.__qua.pages()[0].id }))
+  await page.waitForTimeout(300)
+  /**
+   * ⚠️ 用**粘贴进来的图**验重开，不用种子样本：种子资产在每次启动时都会被
+   * `ensureSeedAssets` 补回去（那是「默认演示不该看起来像坏了」的设计），
+   * 所以「清 IDB ⇒ 变 missing」在种子样本上永远验不出来。
+   */
+  const PASTED_B64 =
+    'iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAIAAAADnC86AAAAMElEQVR4nO3NQQkAAAgEsItjHGMbyxKCn8H+y3S9iFgsFovFYrFYLBaLxWKxWHxnAY8m0GozORegAAAAAElFTkSuQmCC'
+  const before = await page.evaluate(async (b64) => {
+    const bin = atob(b64)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    const dt = new DataTransfer()
+    dt.items.add(new File([bytes], '重开验证.png', { type: 'image/png' }))
+    /**
+     * ⚠️ 落点要**显式挑一个正文块**，不能用 `#editor .blk` 的第一个：
+     *    块底的挂载区里也嵌着编辑器（`.blk` 在 `#editor` 里面），
+     *    而挂载区的块在重开之后不一定还在当前视图里 —— 那样断言验的是「视图没装」，
+     *    不是「资产还在不在」。
+     */
+    const target = window.__qua.blocks()[0]
+    const blk = document.querySelector(`#editor .blk[data-block-id="${target.id}"]`)
+    window.__qua.focusBlock(target.id, 0)
+    const atomsBefore = window.__qua.snapshot().atoms
+    blk.querySelector('.tx').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+    for (let i = 0; i < 80; i++) {
+      if (window.__qua.snapshot().atoms > atomsBefore) break
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    // 再等一帧：字节入库之后要有人把占位换成真图（异步取字节 → 对象 URL）
+    for (let i = 0; i < 60; i++) {
+      if ([...document.querySelectorAll('#editor .atom-image img')].some((im) => im.naturalWidth > 0 && im.alt === '重开验证.png')) break
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    return {
+      blockId: target.id,
+      assets: window.__qua.snapshot().assets,
+      labels: window.__qua.atoms().filter((a) => a.kind === 'asset').map((a) => a.rawLabel),
+      imgs: [...document.querySelectorAll('#editor .atom-image img')].filter((i) => i.naturalWidth > 0).length,
+      pastedDecoded: [...document.querySelectorAll('#editor .atom-image img')].some((i) => i.naturalWidth > 0 && i.alt === '重开验证.png'),
+    }
+  }, PASTED_B64)
+  assert(before.labels.includes('重开验证.png'), `粘贴的图应进正文：${JSON.stringify(before.labels)}`)
+  assert(before.pastedDecoded, `粘贴的图要真的解码出来：${JSON.stringify(before)}`)
+  // 让「字节 → 对象 URL → 重画」这条异步链先跑完，再关页（否则关的是半途的状态）
+  await page.waitForTimeout(300)
+
+  /**
+   * ⚠️ **IndexedDB 不在 Playwright `storageState` 的默认快照里**：不加 `indexedDB: true`，
+   * 「重开」会得到一份空资产库 —— 断言看起来像「图丢了」，其实是快照没带上。
+   */
+  await page.close({ runBeforeUnload: true })
+  await new Promise((r) => setTimeout(r, 150))
+  const state = await ctx.storageState({ indexedDB: true })
+  await ctx.close()
+  const next = await browser.newContext({ storageState: state })
+  const p2 = await next.newPage()
+  await p2.goto(base, { waitUntil: 'load' })
+  await p2.waitForFunction(() => Boolean(window.__qua), undefined, { timeout: 15_000 })
+  // 聚焦到**同一块**：断言要回答「这一块里的图还在不在」，而不是「某个视图装没装」
+  await p2.evaluate((id) => window.__qua.focusBlock(id, 0), before.blockId)
+  await p2.waitForTimeout(600)
+  const after = await p2.evaluate(async () => {
+    for (let i = 0; i < 80; i++) {
+      if ([...document.querySelectorAll('#editor .atom-image img')].some((im) => im.naturalWidth > 0 && im.alt === '重开验证.png')) break
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    return {
+      assets: window.__qua.snapshot().assets,
+      labels: window.__qua.atoms().filter((a) => a.kind === 'asset').map((a) => a.rawLabel),
+      imgs: [...document.querySelectorAll('#editor .atom-image img')].filter((i) => i.naturalWidth > 0).length,
+      pastedDecoded: [...document.querySelectorAll('#editor .atom-image img')].some((i) => i.naturalWidth > 0 && i.alt === '重开验证.png'),
+      dom: [...document.querySelectorAll('#editor .atom-asset')].map((e) => [e.className, e.dataset.assetHash?.slice(0, 8), e.querySelector('img')?.alt ?? '', e.querySelector('img')?.naturalWidth ?? -1]),
+    }
+  })
+  assert(after.assets.keys === before.assets.keys, `重开后资产库应有同样多的 key：${JSON.stringify({ before: before.assets, after: after.assets })}`)
+  assert(after.labels.includes('重开验证.png'), `重开后资产 run 不该丢：${JSON.stringify(after.labels)}`)
+  assert(after.pastedDecoded, `重开后粘贴的那张图要还能解码（workspace ＋ IDB 一起恢复）：${JSON.stringify(after)}`)
+
+  // 只清 IDB（保留 workspace）⇒ 用户那张图变成 missing，且**不报错**、库仍可用
+  await p2.evaluate(async () => {
+    await new Promise((resolve) => {
+      const r = indexedDB.deleteDatabase('qua.assets')
+      r.onsuccess = r.onerror = r.onblocked = () => resolve()
+    })
+  })
+  await p2.reload({ waitUntil: 'load' })
+  await p2.waitForFunction(() => Boolean(window.__qua), undefined, { timeout: 15_000 })
+  await p2.evaluate((id) => window.__qua.focusBlock(id, 0), before.blockId)
+  await p2.waitForTimeout(500)
+  const cleared = await p2.evaluate(() => ({
+    assets: window.__qua.snapshot().assets,
+    missing: document.querySelectorAll('#editor .atom-file.missing').length,
+    // 种子样本会被补回去（那是设计），所以这里判的是「用户那张图」
+    states: window.__qua.atoms().filter((a) => a.kind === 'asset').map((a) => [a.rawLabel, a.state]),
+  }))
+  assert(cleared.assets.available, `清 IDB 不该让整个库「打不开」（那是 unavailable）：${JSON.stringify(cleared.assets)}`)
+  const pastedState = cleared.states.find(([label]) => label === '重开验证.png')
+  assert(pastedState && pastedState[1] === 'missing', `字节没了应显示 missing：${JSON.stringify(cleared.states)}`)
+  assert(cleared.missing >= 1, `字节没了应有 missing 占位（不是空白、不是抛错）：${JSON.stringify(cleared)}`)
+
+  await next.close()
+  return `重开：${after.assets.keys} 份资产、${after.imgs} 张图；清 IDB ⇒ 用户那张 missing、库仍可用`
 })
 
 /* ---------------------------------------------------------- 结构 */
@@ -1119,14 +1512,31 @@ await check('T9 块菜单与斜杠菜单**都是绑定表的渲染结果**（同
   await page.keyboard.type('图')
   const filteredRows = await page.locator('.layer-item').count()
   assert(filteredRows >= 1 && filteredRows <= slashRows, `斜杠应随打字过滤：${slashRows} → ${filteredRows}`)
+  /**
+   * 斜杠菜单里的「图片」是**真入口**：它开一个文件选择器（选真图 → 入库 → 插 run）。
+   * 断言就验这条接线本身：菜单项选中 ⇒ 弹出 filechooser（而不是「插一枚假资产」）。
+   */
   const beforeAtoms = (await page.evaluate(() => window.__qua.atoms())).length
-  await page.keyboard.press('Enter')
+  const [chooser] = await Promise.all([
+    page.waitForEvent('filechooser', { timeout: 5000 }),
+    page.keyboard.press('Enter'),
+  ])
+  assert(Boolean(chooser), '斜杠菜单选「图片」应打开文件选择器')
+  await chooser.setFiles({
+    name: '斜杠插入.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAIAAAADnC86AAAAMElEQVR4nO3NQQkAAAgEsItjHGMbyxKCn8H+y3S9iFgsFovFYrFYLBaLxWKxWHxnAY8m0GozORegAAAAAElFTkSuQmCC',
+      'base64',
+    ),
+  })
+  await page.waitForFunction((n) => window.__qua.atoms().length > n, beforeAtoms, { timeout: 5000 })
   const afterAtoms = (await page.evaluate(() => window.__qua.atoms())).length
-  assert(afterAtoms === beforeAtoms + 1, '斜杠菜单选「图片」应插入一个原子')
+  assert(afterAtoms === beforeAtoms + 1, '斜杠菜单选「图片」→ 选文件应插入一个原子')
   const t = await texts(page)
   assert(!t.some((x) => x.includes('/图')), `` + `斜杠查询词应从文本里抹掉：${JSON.stringify(t.slice(-2))}`)
   await ctx.close()
-  return `块菜单 ${viaClick.length} 项 / ${grouped.length} 组；斜杠输入「/图」→ ${filteredRows} 项 → 插入原子`
+  return `块菜单 ${viaClick.length} 项 / ${grouped.length} 组；斜杠输入「/图」→ ${filteredRows} 项 → 选文件插入原子`
 })
 
 /* ------------------------------------------------------- 持久化 / 状态 */
@@ -3381,7 +3791,7 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
   return `todo/done/深缩进（depth ${deepRow.depth}）三种：块标恒为圆点＋可聚焦，方框在身份图标上（.ico ${deepRow.boxW}）`
 })
 
-await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling / 图片仍弹详情', async () => {
+await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling 弹详情；图片左键 lightbox', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
 
@@ -3430,13 +3840,20 @@ await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling
   assert(dPop.includes('dangling') || dPop.includes('目标不存在'), `dangling 该弹详情并说明状态：${dPop.slice(0, 80)}`)
   await page.keyboard.press('Escape')
 
-  // 图片原子：行为不变（点开资产信息）
+  /**
+   * 图片原子：左键**不再是详情**，而是 lightbox（那是「看这张图」的默认动作）；
+   * `⌥` 才回到详情。两条都验，否则「点了没反应」与「弹错东西」分不开。
+   */
   await page.locator('#editor .atom-image').first().click()
+  const openedLb = await page.evaluate(() => Boolean(document.querySelector('.lightbox')))
+  assert(openedLb, '左键点图应开 lightbox（不是详情）')
+  await page.keyboard.press('Escape')
+  await page.locator('#editor .atom-image').first().click({ modifiers: ['Alt'] })
   const iPop = await page.locator('.popover').innerText()
-  assert(iPop.includes('删除这个图片原子'), `图片原子仍应弹资产信息：${iPop.slice(0, 60)}`)
+  assert(iPop.includes('删除这个图片原子'), `⌥ 点图仍应弹资产信息：${iPop.slice(0, 60)}`)
 
   await ctx.close()
-  return `左键打开「${r.targetTitle}」；⌥/dangling/图片仍弹详情；块数仍 ${opened.total}`
+  return `左键打开「${r.targetTitle}」；⌥/dangling 弹详情、图片左键 lightbox / ⌥ 详情；块数仍 ${opened.total}`
 })
 
 await check('T15 角标：块数 / DOM 节点数 / 主题 / composing 都在', async () => {  const { ctx, page } = await freshPage(browser, base)

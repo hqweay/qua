@@ -409,9 +409,13 @@ page.evaluate: TypeError: port.postMessage is not a function
   3. 这个 app 只加载**自己的**本地资源，`webSecurity` / `contextIsolation` / `sandbox` 都在，
      且导航与新窗都被禁（见 4.5），风险面本来就窄。
 - **该加的形状**（下一步，别忘）：生产构建时注入
-  `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'`
+  `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'`
   （`style-src` 的 `'unsafe-inline'` 是因为本仓有内联样式写入；`connect-src 'none'` 对纯本地 app 是合适的）。
   dev 与 prod 用不同策略，别共用一份。
+- **`img-src` 必须有 `blob:`**：行内资产的字节从资产库读出来是 Blob，经 `URL.createObjectURL`
+  变成 blob URL 才能交给 `<img>`。少了它，真实图片被静默拦下——页面一片空白，只有 console 里
+  一条 error（实测：`data:` 能过、`blob:` 不能）。这条与 `index.html` 的 meta 是**同一份口径**，
+  改一处就要改另一处。
 
 ### 4.5 导航与新窗：一律关掉
 

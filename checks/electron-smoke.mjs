@@ -887,6 +887,39 @@ await check('E9 虚拟化下选区投影与组合期两段式的 Electron 现状
   return `③ 本实现下**没能复现**投影消失（被选中的 ${selInfo0.spannedIds.length} 块滚动后仍挂着 ${selInfo1.stillMountedCount} 块）；④ 组合期滚动**未卸载**承载块（守卫生效）⇒ 提交落在目标块、无残留预编辑串、composing 已复位`
 })
 
+/* ═══════════════════════════════════════════════════ E10 行内资产：CSP 下的真图 */
+
+await check('E10 行内资产：CSP 的 img-src 里必须有 blob:（否则真实图片被静默拦下）', async () => {
+  const { app, page, errors } = await launch('asset-csp')
+  /**
+   * 这条在**真 Electron**里验，不在浏览器里：CSP 的两种落法（meta 与响应头）
+   * 在 `file://` 加载下只有 meta 生效，而 meta 是被 Vite 原样搬进产物的。
+   * 浏览器冒烟验的是同一份 HTML，但 Electron 的 `file://` 才是用户手上那条路。
+   */
+  const r = await page.evaluate(async () => {
+    // 选一张含样本资产的页
+    const p = window.__qua.pages().find((x) => x.title.includes('输入面笔记')) ?? window.__qua.pages()[1]
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    for (let i = 0; i < 60; i++) {
+      if (document.querySelector('#editor .atom-image img')?.naturalWidth > 0) break
+      await new Promise((res) => setTimeout(res, 50))
+    }
+    const img = document.querySelector('#editor .atom-image img')
+    return {
+      nw: img?.naturalWidth ?? 0,
+      src: (img?.src ?? '').slice(0, 12),
+      meta: document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content') ?? '',
+      assets: window.__qua.snapshot().assets,
+    }
+  })
+  assert(r.meta.includes('blob:'), `CSP 的 img-src 缺 blob:（真实图片会被静默拦下）：${r.meta}`)
+  assert(r.assets.available, `资产库应可用：${JSON.stringify(r.assets)}`)
+  assert(r.nw > 0, `CSP 下真图必须解码成功（naturalWidth>0），实际 ${r.nw}；src=${r.src}`)
+  assert(errors.length === 0, `页面报错（CSP 拦截会出现在这里）：${errors.join(' | ')}`)
+  await app.close()
+  return `img-src 含 blob:；真图 ${r.nw}px 解码成功；页面无报错`
+})
+
 /* ═══════════════════════════════════════════════════ 汇总 */
 
 const passed = results.filter((r) => r.ok).length

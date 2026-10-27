@@ -7,7 +7,8 @@
  * 换一批假数据不需要碰到解析器，改 DSL 也不需要碰任何一页的内容。
  */
 import { uuidv7Hex } from '../ids.ts'
-import { normalizeRuns, textRuns, type ImageRun, type MarkType, type RefRun, type Run } from '../runs.ts'
+import { normalizeRuns, textRuns, type AssetRun, type MarkType, type RefRun, type Run } from '../runs.ts'
+import { MISSING_ASSET_HASH, SEED_ASSET_H, SEED_ASSET_HASH, SEED_ASSET_W } from './assets.ts'
 
 export interface SeedBlock {
   text: string
@@ -153,13 +154,21 @@ export function parseInline(src: string): { runs: Run[]; refs: PendingRef[] } {
     if (seg === '\uFFF9' && atom) {
       const mk = marksAt(s, e)
       if (atom.kind === 'image') {
-        // 图片不带格式（模型红线）；DSL 里的格式标记盖到它也只当没盖
-        const run: ImageRun = {
+        /**
+         * 资产不带格式（模型红线）；DSL 里的格式标记盖到它也只当没盖。
+         *
+         * 地址只有两种：**真的样本字节**（`SEED_ASSET_HASH`，启动时会被写进资产库）
+         * 或**刻意缺失的地址**（`MISSING_ASSET_HASH`，库里没有它）。
+         * 不再造「随手一个 uuid 前 32 位」——那种地址永远不存在，演示看起来像资产库坏了，
+         * 而且它连合法 hash 形状都不是。
+         */
+        const run: AssetRun = {
           id: uuidv7Hex(),
-          t: 'image',
-          asset: { hash: uuidv7Hex().slice(0, 32), name: atom.label, state: atom.missing ? 'missing' : 'ready' },
-          w: 1440,
-          h: 900,
+          t: 'asset',
+          asset: atom.missing ? MISSING_ASSET_HASH : SEED_ASSET_HASH,
+          label: atom.label,
+          w: SEED_ASSET_W,
+          h: SEED_ASSET_H,
         }
         runs.push(run)
       } else {

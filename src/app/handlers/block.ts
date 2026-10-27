@@ -6,6 +6,7 @@
  */
 import { t } from '../../core/msg.ts'
 import { COLLECTION_TYPE } from '../../core/index.ts'
+import { MISSING_ASSET_HASH, SEED_ASSET_H, SEED_ASSET_HASH, SEED_ASSET_W } from '../../core/fixtures/assets.ts'
 import type { Handler } from '../../core/ports.ts'
 import { curBlock, S } from './shared.ts'
 
@@ -149,16 +150,24 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     return true
   },
   'core.editor/insert-image': (a, app) => {
-    const preset = S(a.preset, 'ready')
-    const missing = preset === 'missing'
-    app.ed.insertImage(
-      {
-        hash: 'b7d4' + '1f0a'.repeat(4),
-        name: missing ? t('ui.sample.assetMissingName') : t('ui.sample.assetReadyName'),
-        state: missing ? 'missing' : 'ready',
-      },
-      { w: 1280, h: 800 },
-    )
+    /**
+     * **没有 `preset` ⇒ 真入口**：选一张图（隐藏的 file input）→ 校验 → 入库 → 按捕获点插 run。
+     * 这段时序是异步的（算 hash、写字节、读尺寸），所以只能交给门面：
+     * 命令 handler 同步返回 `handled`，它拿不到「入库回来之后」那一刻。
+     *
+     * **有 `preset` ⇒ 验收/演示入口**：直接插种子里的样本（`ready`）或刻意缺失的地址
+     * （`missing`）。冒烟用它验「缺失态长什么样」，不需要真的去挑一张图。
+     */
+    const preset = a.preset === undefined ? undefined : S(a.preset, 'ready')
+    if (preset === undefined) {
+      app.pickImage()
+      return true
+    }
+    app.ed.insertAsset(preset === 'missing' ? MISSING_ASSET_HASH : SEED_ASSET_HASH, {
+      label: preset === 'missing' ? t('ui.sample.assetMissingName') : t('ui.sample.assetReadyName'),
+      w: SEED_ASSET_W,
+      h: SEED_ASSET_H,
+    })
     return true
   },
 

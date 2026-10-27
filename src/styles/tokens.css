@@ -46,6 +46,14 @@
   --ui-ok: var(--c-ok);
   --ui-hl: var(--c-hl);
   --ui-code-bg: var(--c-code);
+  /* 全屏遮罩（lightbox）：压暗页面，让唯一该看的东西浮起来。
+     比 `--c-n-900` 更暗一档 —— 遮罩要盖住内容，不是与它同色。 */
+  --ui-scrim: light-dark(rgba(20, 22, 26, 0.72), rgba(0, 0, 0, 0.82));
+  /* 遮罩上的字：遮罩在亮暗两套主题下都暗，所以它是**固定**的浅色，不是 `--ui-text` */
+  --ui-text-inverse: light-dark(#f4f5f6, #e7e9ed);
+  /* 字重：只开两档（正文 / 强调），多一档就没人分得清该用哪个 */
+  --ui-fw-normal: 400;
+  --ui-fw-medium: 600;
   /* 圆角：三级对比（容器 / 卡片 / 行内） */
   --ui-radius-lg: 10px;
   --ui-radius-md: 6px;

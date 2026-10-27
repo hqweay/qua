@@ -32,6 +32,7 @@ import {
   type CtxKeys,
 } from '../../core/index.ts'
 import { readRuns } from '../../view/dom-text.ts'
+import { assetKeyCount, assetViewOf, assetsAvailable } from '../../view/asset-views.ts'
 import { t } from '../../core/msg.ts'
 import { walkForest } from '../../core/walk.ts'
 import { plainText, type MarkType, type RunWithId } from '../../core/runs.ts'
@@ -242,6 +243,12 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
         bootNotice,
         storageKind: store.kind,
         /**
+         * **资产库**：`available` 与 `keys` 是两个不同的事实。
+         * 「图显示不出来」的两种原因（字节不在库／库打不开）在 DOM 上长得一样，
+         * 断言必须能问到库这一层才分得清。
+         */
+        assets: { available: assetsAvailable(), keys: assetKeyCount() },
+        /**
          * 三槽的设备状态（**诊断面**）：钉住清单与宽度都在 prefs 里，
          * 断言要能区分「落盘了没有」与「页面里渲染了没有」。
          */
@@ -374,17 +381,29 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
      */
     atoms() {
       return atomicRuns(mainEd).map((a) => {
-        const v = a.run.t === 'ref' ? resolveRef((id) => mainEd.store.find(id), a.run) : { label: a.run.t === 'image' ? (a.run.asset.name ?? '') : a.run.v, state: 'resolved' as const }
+        const run = a.run
+        /**
+         * `label` 与 `state` 都是**现算**的（不是落盘的快照）：
+         * 引用要回答「目标现在叫什么、还在不在」，资产要回答「字节在不在、库里有没有」。
+         * 探针读不到落盘的旧值，断言才不是「复读过期的真相」。
+         */
+        const v =
+          run.t === 'ref'
+            ? resolveRef((id) => mainEd.store.find(id), run)
+            : run.t === 'asset'
+              ? { label: run.label ?? run.asset.slice(0, 8), state: assetViewOf(run.asset).state }
+              : { label: run.v, state: 'resolved' as const }
         return {
-          id: a.run.id,
-          kind: a.run.t === 'ref' ? (a.run.flavor === '#' ? 'tag' : 'page') : a.run.t,
+          id: run.id,
+          kind: run.t === 'ref' ? (run.flavor === '#' ? 'tag' : 'page') : run.t,
           label: v.label,
-          rawLabel: a.run.t === 'ref' ? a.run.label ?? '' : '',
+          rawLabel: run.t === 'ref' ? run.label ?? '' : run.t === 'asset' ? run.label ?? '' : '',
           blockId: a.blockId,
           start: a.start,
           end: a.end,
           state: v.state,
-          target: a.run.t === 'ref' && a.run.to ? { kind: 'page', id: a.run.to } : null,
+          ...(run.t === 'asset' ? { asset: run.asset } : {}),
+          target: run.t === 'ref' && run.to ? { kind: 'page', id: run.to } : null,
         }
       })
     },

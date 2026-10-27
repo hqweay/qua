@@ -108,6 +108,26 @@ export interface App {
   focusTitle(): void
   showRefPicker(): void
   /**
+   * **选一张图片并插到当前光标处**（`core.editor/insert-image` 的入口）。
+   *
+   * 为什么落点在门面而不是命令 handler：入库是**异步**的（算 hash、写字节、读尺寸），
+   * 而命令 handler 是同步返回 `handled` 的。真正要做的是：
+   * 捕获落点 → 等字节落库 → 按捕获点插 run。这段时序只有装配层管得了。
+   *
+   * 失败（拒绝的类型／超限／解码失败／块被删）都给用户一句明确文案，不静默。
+   */
+  pickImage(): void
+  /**
+   * 把一份字节入库并按**捕获到的落点**插一枚资产 run。
+   *
+   * `point` 是用户按下那一刻的光标位置：入库期间光标会动、块甚至会被删，
+   * 所以不能「插到当前光标」——那会把图插到用户后来移到的地方。
+   * 省略 `point` ⇒ 现取当前光标（粘贴路径在事件里已经先捕获，正常都会传）。
+   *
+   * @returns 真的插入了才 `true`；块没了／越界／字节不合法 ⇒ `false`（一个字节都不写）
+   */
+  insertAssetBlob(blob: Blob, label: string, point?: { blockId: string; offset: number }): Promise<boolean>
+  /**
    * **打标签**＝给当前块加一格分类（`props._tags`；`ensureTag` 找不到标签块就先建）。
    *
    * ⚠️ 为什么整个动作要一门面方法、而不是 handler 里「建块 ＋ 写属性」两步：

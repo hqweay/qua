@@ -34,6 +34,7 @@ import { widgetBodyInDoc } from './ui/dock-widgets.ts'
 import { renderAliasEditor } from './ui/alias-editor.ts'
 import { renderFieldsEditor } from './ui/fields-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type ObjFieldDeps, type PanelDeps } from './ui/panels.ts'
+import { openImageLightbox } from './ui/lightbox.ts'
 import type { RefClickHit, RefClickMods } from './view/editor-events.ts'
 import { collectionCommands, devCommands, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, zoomCommands } from './app/commands-impl.ts'
 import type { TxRun } from './app/commands/types.ts'
@@ -47,6 +48,16 @@ import { HANDLERS } from './app/handlers.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
 import { t } from './core/msg.ts'
 import { seedWorkspace } from './core/seed.ts'
+import { createIdbAssetStore } from './core/storage/asset-idb.ts'
+import { ensureSeedAssets } from './core/storage/seed-assets.ts'
+import { assetMetaOf, assetViewOf, assetsAvailable, loadAssetKeys, onAssetReady, primeAsset, useAssetStore } from './view/asset-views.ts'
+import type { AssetView } from './core/assets.ts'
+import {
+  IMAGE_MIME_ALLOWLIST,
+  MAX_IMAGE_BYTES,
+  sniffImageMime,
+  type AssetMeta,
+} from './core/assets.ts'
 import {
   createDeviceStore,
   createLocalStorageAdapter,
@@ -91,6 +102,17 @@ const store = createWorkspaceStore(createLocalStorageAdapter(STORAGE_KEY))
 const deviceStore = createDeviceStore(createLocalStorageAdapter(DEVICE_KEY))
 
 /**
+ * **资产库**：字节的唯一去处（v1 是 IndexedDB，将来按库根换适配器）。
+ *
+ * 为什么在**读库之前**就建好：行内资产是正文的一部分，渲染第一帧就要知道
+ * 「这份 hash 在不在」——`keys()` 必须赶在首次渲染之前拿到。
+ * ⚠️ IDB 打不开不是启动失败：整个库标成 `unavailable`，应用照常开，
+ *    已有图显示「资产库不可用」而不是一片空白（见 `view/asset-views.ts`）。
+ */
+const assetStore = createIdbAssetStore()
+useAssetStore(assetStore)
+
+/**
  * 读盘**是异步的**：上层不得依赖同步返回（写队列与读盘共用一条契约）。
  * 入口在文件末尾 `await` —— 模块顶层 await 在 Electron renderer / vite 下都没问题。
  */
@@ -109,6 +131,18 @@ const device = await deviceStore.load()
  */
 const readOnly = boot.status === 'too-new' || boot.status === 'corrupt' || boot.status === 'storage-error'
 let ws: Workspace = boot.status === 'ok' ? boot.ws : seedWorkspace()
+
+/**
+ * **启动顺序**：先把种子资产的字节写进资产库，再拿一次全库 key，最后才渲染。
+ *
+ * 顺序不能反：`keys()` 是「这份 hash 在不在」的同步判据，种子的图必须在它之前入库；
+ * 反过来（先 keys 再 put）会让默认演示里的图全部显示成 `missing`——
+ * 用户看到「资产库坏了」，而实际只是顺序错了。
+ *
+ * 失败不拦启动：入库失败只影响那一张图（`missing`），`keys()` 失败才整库 `unavailable`。
+ */
+if (!readOnly) await ensureSeedAssets(assetStore)
+await loadAssetKeys()
 
 /**
  * 边图邻接表（**现建一次、当次用完**）。
@@ -526,6 +560,54 @@ let objFieldDeps: ObjFieldDeps | undefined
 const showAtomPopover = (a: RunWithId, rect: DOMRect): void => panelPopover(panelDeps, a, rect, objFieldDeps)
 
 /**
+ * 一枚 run 的**当前模型对象**（点击时 DOM 上只有 id，载荷要现查）。
+ *
+ * 为什么不从 DOM 反推：DOM 上只有显示用的快照（hash、label），
+ * 而「删这一枚」需要 run id 与它所在块的模型对象；查不到就说明它已经被删了。
+ */
+function findRunOrNull(runId: string): RunWithId | null {
+  return ed.findRun(runId)?.run ?? null
+}
+
+/**
+ * **资产详情浮层**（`⌥` 点击 / 缺失与不可用时的默认动作）。
+ *
+ * 与图片 lightbox 分开：lightbox 只回答「这张图长什么样」，
+ * 这里回答「这份字节是什么、在不在、能不能删掉这一枚」。
+ * 两者都会出现在同一枚原子上，但**不该合成一个**：缺失的图没有大图可看。
+ */
+function showAssetDetails(runId: string, _hash: string, el: HTMLElement): void {
+  const run = findRunOrNull(runId)
+  if (run?.t === 'asset') {
+    showAtomPopover(run, el.getBoundingClientRect())
+    return
+  }
+  // 模型里已经没有了（刚被删）：不弹一个操作不了的空浮层
+  app.toast(t('ui.asset.runGone'), 'warn')
+}
+
+/**
+ * 打开 lightbox。副标题是「尺寸 · 字节 · hash 短码」——
+ * 三样都能帮人确认「这是我以为的那张图」。
+ */
+function openLightbox(hash: string, view: AssetView, el: HTMLElement): void {
+  const run = findRunOrNull(el.dataset.atomId ?? '')
+  const meta = assetMetaOf(hash)
+  const label = (run?.t === 'asset' ? run.label : undefined) ?? t('ui.asset.unnamed')
+  const dims = view.w && view.h ? `${view.w}×${view.h}` : meta?.w && meta.h ? `${meta.w}×${meta.h}` : ''
+  const size = meta ? formatBytes(meta.size) : ''
+  const parts = [dims, size, hash.slice(0, 8)].filter((x) => x !== '')
+  openImageLightbox({ url: view.url ?? '', label, subtitle: parts.join(' · ') })
+}
+
+/** 字节数的人话形式（详情浮层与 lightbox 共用一份，免得两处各算一套） */
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/**
  * **「指向某块的露面」被点**的唯一口径（正文 / 反链 footer / 查询结果 / 标签成员 /
  * 侧槽窗口 / 属性区，全部共用）。
  *
@@ -788,6 +870,92 @@ const runTx: TxRun = (fn) => {
 }
 
 /**
+ * **行内资产的入库路径**（粘贴 / 选文件共用）。
+ *
+ * 三步的顺序不能换（「字节先落、引用后落」）：
+ *   ① 校验字节（嗅 MIME、allowlist、上限）——不合格就一句明确文案，**不写 run**；
+ *   ② `assetStore.put` 入库（算 hash、去重、读尺寸）；
+ *   ③ 按**捕获到的落点**插 run（块被删/越界 ⇒ no-op）。
+ *
+ * 为什么校验在入库之前：`put` 会把字节写进库。先入库再校验等于让不合格的字节占了地方
+ * （还拿到一个 hash），而 v1 没有 GC——那些字节会一直躺着。
+ *
+ * 失败一律走 toast，不静默：用户刚按了粘贴/选了文件，「什么都没发生」是最糟的反馈。
+ */
+async function insertAssetBlob(
+  blob: Blob,
+  label: string,
+  point?: { blockId: string; offset: number },
+): Promise<boolean> {
+  const where = point ?? ed.caretPoint()
+  if (!where) {
+    app.toast(t('ui.asset.needCaret'), 'warn')
+    return false
+  }
+  if (!assetsAvailable()) {
+    app.toast(t('ui.asset.storeUnavailable'), 'warn')
+    return false
+  }
+  if (blob.size > MAX_IMAGE_BYTES) {
+    app.toast(t('ui.asset.tooLarge', { mb: String(Math.round(MAX_IMAGE_BYTES / (1024 * 1024))) }), 'warn')
+    return false
+  }
+  let meta: AssetMeta
+  try {
+    // 嗅探要在 put 之前判：不让不合格的字节先进库（v1 没有 GC）
+    const head = new Uint8Array(await blob.slice(0, 32).arrayBuffer())
+    if (!sniffImageMime(head)) {
+      app.toast(t('ui.asset.unsupported'), 'warn')
+      return false
+    }
+    meta = await assetStore.put(blob)
+  } catch (e) {
+    // 解码失败（createImageBitmap 读不出尺寸）与配额/权限失败都走这里
+    console.warn('[assets] put failed:', e)
+    app.toast(t('ui.asset.putFailed'), 'warn')
+    return false
+  }
+  // 入库成功 ⇒ 立刻登记，新 run 的首帧就能画出图（不用等下一次启动的 keys()）
+  primeAsset(meta)
+  const runId = ed.insertAssetAt(where.blockId, where.offset, meta.hash, {
+    label,
+    ...(meta.w !== undefined ? { w: meta.w } : {}),
+    ...(meta.h !== undefined ? { h: meta.h } : {}),
+  })
+  if (!runId) {
+    // 块在入库期间被删 / 光标越界：字节已经落库（孤儿，无害），引用不落
+    app.toast(t('ui.asset.caretGone'), 'warn')
+    return false
+  }
+  return true
+}
+
+/**
+ * 选文件入口：临时 `<input type=file>`。
+ *
+ * 为什么临时建而不是常驻一个：这个元素只在这一刻有意义，常驻会让 `index.html`
+ * 多一个谁都不认识的空控件；用完即摘（连同它的 change 监听）。
+ */
+function pickImageViaFileInput(): void {
+  const point = ed.caretPoint()
+  if (!point) {
+    app.toast(t('ui.asset.needCaret'), 'warn')
+    return
+  }
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = IMAGE_MIME_ALLOWLIST.join(',')
+  input.addEventListener('change', () => {
+    const file = input.files?.[0]
+    if (file) void insertAssetBlob(file, file.name, point)
+    input.remove()
+  })
+  // 取消选择不派发 change：用 cancel 事件把临时节点收掉（新浏览器都有；没有也不泄漏，只是留一个游离节点）
+  input.addEventListener('cancel', () => input.remove())
+  input.click()
+}
+
+/**
  * `App` 门面：**四个工厂拼装**（页／日记／视图／演示），加上浮层与提示这几件装配层专有的能力。
  *
  * ⚠️ 这里仍然是**唯一**拼装点：本文件持有 `ws`／`ed`／`registry`，工厂只拿到「能做什么」。
@@ -839,6 +1007,14 @@ const app: App = {
   }),
   removeAtom: (runId) => ed.removeRun(runId),
   openInDock: (id, side) => openWindow(side === 'left' ? 'left' : 'right', id),
+
+  /* ---- 行内资产：入口（粘贴/选文件）与异步入库 ---- */
+  /**
+   * 选文件：隐藏的 `<input type=file>`。Electron 与 web 同一个入口——
+   * 原生对话框只在主进程有，而这条路浏览器里也能走通，没必要分两套。
+   */
+  pickImage: () => pickImageViaFileInput(),
+  insertAssetBlob: (blob, label, point) => insertAssetBlob(blob, label, point),
 
   /**
    * 标签选择器：**显示层级**（`#演员 · 属于 #人物、#艺术家`）。
@@ -1155,6 +1331,38 @@ function viewEvents(editor: () => BlockEditor, change: ViewEvents['change'], via
     },
     refClick: (ref, mods, el) => handleRefClick(ref, mods, el),
     /**
+     * **资产此刻的样子**：所有编辑器实例共用这一个函数，于是同一张图在
+     * 正文／挂载区／查询结果／侧槽里长得一样（同一份答案，不是四份实现）。
+     * 字节缺失 ⇒ `missing`，资产库打不开 ⇒ `unavailable`；两者都不抛错、不空白。
+     */
+    assetView: assetViewOf,
+    /**
+     * 非引用的行内对象被点：图片默认开 lightbox，`⌥` 才看详情；
+     * 缺失/不可用**不开空 lightbox**，直接给详情（那里面说清为什么没有图）。
+     */
+    onAtomClick: (atom, el, mods) => {
+      if (atom.kind !== 'asset' || !atom.hash) {
+        // 外链与将来别的行内对象：先给详情（它们的「打开」还没做，别假装做了）
+        if (atom.runId) showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), el.getBoundingClientRect())
+        return
+      }
+      const view = assetViewOf(atom.hash)
+      if (!mods.altKey && view.state === 'ready' && (view.mime ?? '').startsWith('image/')) {
+        openLightbox(atom.hash, view, el)
+        return
+      }
+      showAssetDetails(atom.runId, atom.hash, el)
+    },
+    /**
+     * 粘贴图片：落点在事件里已经捕获，这里只管校验 → 入库 → 插 run。
+     * 失败一律有文案（用户刚按了粘贴，「什么都没发生」是最糟的反馈）。
+     */
+    onPasteImage: async (file, point) => {
+      await app.insertAssetBlob(file, file.name || t('ui.asset.pastedName'), point ?? undefined)
+    },
+    /** 拖入文件：v1 不做，但必须给一句明确的话（而不是「拖进来什么都没发生」） */
+    onDropFilesRejected: () => app.toast(t('ui.asset.dropUnsupported'), 'warn'),
+    /**
      * 正文里的组件体（`ui/dock-widgets.ts` 画，`view` 只留契约）。
      *
      * ⚠️ `find` 传的是共享 store 的那一个：摘要要数「还有几条活着」，
@@ -1195,6 +1403,23 @@ ed.events = viewEvents(
   },
   'editor',
 )
+
+/**
+ * **字节到达时重画引用了它的那几行**。
+ *
+ * 为什么需要这一步：渲染是同步纯函数（`fillBlockText`），它拿不到还停在 IndexedDB 里的
+ * 字节。第一帧画的是「文件占位」，字节取到、对象 URL 建好之后必须有人把那一行换掉——
+ * 否则图永远停在一个占位上，而用户以为图坏了。
+ *
+ * 只重画**引用了这个 hash 的块**（不是 `renderAll`）：重排整页会打断正在输入的那一行。
+ */
+onAssetReady((hash) => {
+  const hit = new Set<string>()
+  for (const b of flatten({ roots: blocks.blocks })) {
+    if (b.content.some((r) => r.t === 'asset' && r.asset === hash)) hit.add(b.id)
+  }
+  for (const id of hit) repaintBlock(id)
+})
 
 let panels: ReturnType<typeof setupPanels>
 let diag: ReturnType<typeof setupDiagnostics>

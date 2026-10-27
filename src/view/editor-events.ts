@@ -20,6 +20,23 @@ import type { Content } from '../core/runs.ts'
 import { isCommittedTextInput } from '../core/ime.ts'
 
 /**
+ * 剪贴板里的图片文件（只认 `image/*` 的 item）。
+ *
+ * 为什么不看 `clipboardData.files`：它在某些平台上是空的（只有 items 里有），
+ * 而 items 是唯一跨平台稳定的入口。`getAsFile()` 返回 `null` 的项直接跳过。
+ */
+function clipboardImageFiles(dt: DataTransfer | null): File[] {
+  if (!dt) return []
+  const out: File[] = []
+  for (const item of Array.from(dt.items ?? [])) {
+    if (item.kind !== 'file' || !item.type.startsWith('image/')) continue
+    const f = item.getAsFile()
+    if (f) out.push(f)
+  }
+  return out
+}
+
+/**
  * 「指向某块的露面」被点时按下了哪些修饰键。
  *
  * ⚠️ 只传**判据**（修饰键），不传 `MouseEvent`：事件层不是 DOM 类型的分发处，
@@ -105,6 +122,22 @@ export interface EditorBridge {
   /** 插入一行纯文本（多行粘贴用）*/
   insertPlainText: (id: string, offset: number, text: string) => void
   /**
+   * **当前光标落点**（粘贴/选文件时先捕获它，入库回来按它插）。
+   *
+   * 为什么事件层不能自己读 `sel`：选区是模型状态，读数要走编辑器；
+   * 而且 `paste` 发生在浏览器改 DOM 之前，此刻的 `sel` 才是用户按下那一刻的位置。
+   */
+  caretPoint: () => { blockId: string; offset: number } | null
+  /**
+   * 粘贴进来一份图片字节（v1 只取第一张）。
+   *
+   * `point` 由事件层**在入库之前**捕获：入库是异步的，按「入库回来时的光标」插
+   * 会把图插到用户后来移到的地方。
+   */
+  onPasteImage: (file: File, point: { blockId: string; offset: number } | null) => Promise<void>
+  /** 拖入文件被拒（v1 不做拖拽入图）：装配层给一句明确文案 */
+  onDropFilesRejected?: () => void
+  /**
    * 拖拽落点：**视觉反馈（`.dragging`／`data-drop`）由编辑器自己画**，事件层只报坐标与判定。
    * 这样事件层不需要知道 CSS 类名，编辑器也不需要知道 DnD 事件的形状。
    */
@@ -146,6 +179,18 @@ export interface EditorBridge {
    *    那要现查森林，而森林在装配层手里。
    */
   onRefClick: (ref: { to: string; runId?: string }, el: HTMLElement, mods: RefClickMods) => void
+  /**
+   * **非引用的行内对象被点**（图片／将来的文件、外链）。
+   *
+   * 为什么与 `onRefClick` 分成两个入口而不是「to 传空串」：
+   *   引用是「去哪」，行内对象是「看它自己」。合成一支之后，装配层只能靠
+   *   「`to === ''` 就当图片」来分派 —— 每加一种行内对象就要在那一条分支里再猜一次，
+   *   而猜错的表现是「点了没反应」或「点图片跳到一个空页」。
+   *
+   * `mods.altKey` ＝ 要详情而不是默认动作（图片默认是 lightbox）。
+   * ⚠️ 未接 ⇒ 什么都不做（与 `refClick` 同一条口径：缺入口就让它看得见地缺）。
+   */
+  onAtomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: RefClickMods) => void
   /** 打开块菜单（悬停把手/圆点或右键）*/
   onBlockMenu: (blockId: string, rect: DOMRect) => void
   /**
@@ -445,12 +490,51 @@ export function bindEditorEvents(br: EditorBridge): () => void {
   /* ── 粘贴（多行 = 多块，**绝不把换行塞进一个块**）── */
   on(c, 'paste', (e: ClipboardEvent) => {
     e.preventDefault()
+    /**
+     * **先看剪贴板里有没有图**：截图粘贴是贴图的主路径，而图片只住在
+     * `clipboardData.items`（`getData` 只给文本）。有图就走图，否则照旧走文本。
+     *
+     * 三条口径：
+     *   ① **v1 只取第一张**：多张的先后没有稳定语义，逐张入库还要处理部分失败；
+     *   ② 落点**先捕获**（`br.caretPoint()`）：入库是异步的，插的时候光标可能已经动了；
+     *   ③ 认不出图就继续走文本 —— 剪贴板里常常同时有图与文本（复制网页内容），
+     *      这时用户按的是「粘贴文字」的直觉。
+     */
+    const files = clipboardImageFiles(e.clipboardData)
+    if (files.length > 0) {
+      const point = br.caretPoint()
+      const file = files[0]!
+      // 事件层只报「有这么一份字节、落在哪」，入库与插 run 是装配层的事
+      void br.onPasteImage(file, point)
+      return
+    }
     const text = e.clipboardData?.getData('text/plain') ?? ''
     const sel = document.getSelection()
     const id = br.blockOf(sel?.anchorNode ?? null)
     if (!id || !sel) return
     br.syncSel()
     br.insertPlainText(id, 0, text)
+  })
+
+  /* ── 拖入文件：v1 明确不做，但**必须拦住原生注入** ── */
+  /**
+   * contenteditable 会把拖进来的 `<img>` 直接塞进 DOM，而它没有 `data-atom-id`
+   * —— `readRuns` 读不到，重渲染就消失；同时「拖进来一张图」看起来像成功了。
+   * ⇒ 对 `Files` 一律 `preventDefault`，并让装配层给一句「暂不支持」。
+   */
+  const filesOnly = (e: DragEvent): boolean =>
+    Array.from(e.dataTransfer?.types ?? []).includes('Files')
+  on(c, 'dragover', (e: DragEvent) => {
+    if (!filesOnly(e)) return
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'
+  })
+  on(c, 'drop', (e: DragEvent) => {
+    if (!filesOnly(e)) return
+    e.preventDefault()
+    e.stopPropagation()
+    br.onDropFilesRejected?.()
   })
 
   /* ── 点击：原子 / 块标聚焦 ─────────────────────────── */
@@ -574,10 +658,26 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      * 非引用的行内对象（图片／外链）：它们没有目标块，只有一枚 run 可看可删。
      * ⚠️ 这一支必须在上面那支**之后**：它是「没有 `data-ref-to` 的原子」，
      *    而上面那一支只认有目标的露面。
+     * ⚠️ 分派按 `data-atom-kind`（渲染层写进 DOM 的种类），不按类名：
+     *    呈现（`.atom-image` / `.atom-file`）会随字节到没到而变化，种类不会。
      */
     const atomEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('atom'))
     if (atomEl?.dataset.atomId) {
-      br.onRefClick({ to: '', runId: atomEl.dataset.atomId }, atomEl, { altKey: e.altKey, shiftKey: e.shiftKey })
+      const mods = { altKey: e.altKey, shiftKey: e.shiftKey }
+      if (br.onAtomClick) {
+        br.onAtomClick(
+          {
+            runId: atomEl.dataset.atomId,
+            kind: atomEl.dataset.atomKind ?? '',
+            ...(atomEl.dataset.assetHash ? { hash: atomEl.dataset.assetHash } : {}),
+          },
+          atomEl,
+          mods,
+        )
+      } else {
+        // 没有专门的入口 ⇒ 退回「看它自己」的详情（旧行为），而不是让它点了没反应
+        br.onRefClick({ to: '', runId: atomEl.dataset.atomId }, atomEl, mods)
+      }
       e.preventDefault()
       return
     }

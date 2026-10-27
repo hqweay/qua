@@ -35,7 +35,7 @@ import {
   splitRuns,
   textRuns,
   toggleMark,
-  type ImageRun,
+  type AssetRun,
   type RefRun,
   type Run,
 } from '../src/core/runs.ts'
@@ -47,12 +47,12 @@ const ref = (to: string, extra: Partial<RefRun> = {}): RefRun => ({
   ...extra,
 })
 
-const img = (hash: string): ImageRun => ({ id: `img-${hash}`, t: 'image', asset: { hash, state: 'ready' } })
+const asset = (hash: string): AssetRun => ({ id: `asset-${hash}`, t: 'asset', asset: hash, label: 'sample.png' })
 
 /* ------------------------------------------------------------ 投影 */
 
 test('plainText：只由 text run 决定，ref/link/image 不进投影', () => {
-  const c: Run[] = [ ...textRuns('引用'), ref('p1', { label: '目标' }), ...textRuns('与图'), img('h1'), ...textRuns('尾') ]
+  const c: Run[] = [ ...textRuns('引用'), ref('p1', { label: '目标' }), ...textRuns('与图'), asset('h1'), ...textRuns('尾') ]
   assert.equal(plainText(c), '引用与图尾')
   // plain 长度 ＝ 文本字符数 ＋ 原子各 1 格（与 DOM 展示同一坐标系）
   assert.equal(plainLen(c), '引用与图尾'.length + 2)
@@ -61,7 +61,7 @@ test('plainText：只由 text run 决定，ref/link/image 不进投影', () => {
 })
 
 test('projectRange：quote.exact 恒为 plainText 的子串（原子两侧的区间要先换算坐标）', () => {
-  const c: Run[] = [...textRuns('前后'), ref('p1'), ...textRuns('中间'), img('h'), ...textRuns('后面')]
+  const c: Run[] = [...textRuns('前后'), ref('p1'), ...textRuns('中间'), asset('h'), ...textRuns('后面')]
   // plain 坐标 [2,6) ＝ 原子 ＋ 「中间」；投影里它是「中间」
   const q = projectRange(c, 2, 6)
   assert.ok(q)
@@ -122,10 +122,10 @@ test('normalizeRuns：幂等（normalize(normalize(x)) 逐字节相等）', () =
   assert.deepEqual(JSON.stringify(normalizeRuns(once)), JSON.stringify(once))
 })
 
-test('normalizeRuns：image 的 marks 一律剥掉（红线：格式不上 image run）', () => {
-  const bad = { ...img('h1'), marks: ['bold'] } as unknown as Run
+test('normalizeRuns：资产的 marks 一律剥掉（红线：格式不上资产 run）', () => {
+  const bad = { ...asset('h1'), marks: ['bold'] } as unknown as Run
   const out = normalizeRuns([bad])
-  assert.equal((out[0] as ImageRun).marks, undefined)
+  assert.equal((out[0] as AssetRun).marks, undefined)
 })
 
 test('sameRuns：按归一化形态比，「碰过但没改」能被识别', () => {
@@ -198,16 +198,16 @@ test('toggleMark：加格式拆 run、取消格式复原；幂等形态稳定', 
   assert.deepEqual(toggleMark(bold, 'bold', 2, 5), c)
 })
 
-test('toggleMark：区间盖住 ref ⇒ ref 整枚携带格式（整句加粗不断裂）；image 永不携带', () => {
+test('toggleMark：区间盖住 ref ⇒ ref 整枚携带格式（整句加粗不断裂）；资产永不携带', () => {
   const r = ref('p1')
-  const im = img('h')
+  const im = asset('h')
   const c: Run[] = [...textRuns('ab'), r, im, ...textRuns('cd')]
   const bold = toggleMark(c, 'bold', 0, plainLen(c))
   const gotRef = bold.find((x): x is RefRun => x.t === 'ref')!
-  const gotImg = bold.find((x): x is ImageRun => x.t === 'image')!
+  const gotImg = bold.find((x): x is AssetRun => x.t === 'asset')!
   assert.deepEqual(gotRef.marks, ['bold'])
   assert.equal(gotImg.marks, undefined)
-  // 区间里有 image ⇒ 永远判「未全覆盖」⇒ toggle 恒走「加」的一支（image 自己仍不动）
+  // 区间里有资产 ⇒ 永远判「未全覆盖」⇒ toggle 恒走「加」的一支（资产自己仍不动）
   assert.ok(!isCovered(c, 'bold', 0, plainLen(c)))
 })
 
@@ -262,7 +262,7 @@ test('refRunsOf：按出现序提取引用 run（边提取的唯一入口）', (
 
 test('cloneRunsNewIds：内容等价、原子全换新 id（复制 ≠ 共享身份）', () => {
   const a = ref('p1')
-  const c: Run[] = [...textRuns('ab', ['bold']), a, img('h')]
+  const c: Run[] = [...textRuns('ab', ['bold']), a, asset('h')]
   const cp = cloneRunsNewIds(c)
   assert.equal(plainText(cp), 'ab')
   const cpRef = cp.find((x): x is RefRun => x.t === 'ref')!
@@ -272,17 +272,33 @@ test('cloneRunsNewIds：内容等价、原子全换新 id（复制 ≠ 共享身
 
 /* ------------------------------------------------------ 形状校验 */
 
-test('isRun / isAnno：合法形状放行、非法形状拦下（image 带 marks 判非法）', () => {
+test('isRun / isAnno：合法形状放行、非法形状拦下（资产带 marks / 带字节 / 把 state 落盘都判非法）', () => {
   assert.ok(isRun({ t: 'text', v: 'x' }))
   assert.ok(isRun({ t: 'text', v: 'x', marks: ['bold'] }))
   assert.ok(!isRun({ t: 'text', v: 'x', marks: ['wow'] }))
   assert.ok(isRun(ref('p', { label: '名' })))
   assert.ok(!isRun({ t: 'ref', to: 1 }))
   assert.ok(isRun({ id: 'l', t: 'link', v: '字', url: 'https://x' }))
-  assert.ok(isRun(img('h')))
-  assert.ok(!isRun({ ...img('h'), marks: ['bold'] }))
+  assert.ok(isRun(asset('h')))
+  assert.ok(isRun({ id: 'a', t: 'asset', asset: 'h', label: '名', w: 4, h: 3 }))
+  assert.ok(!isRun({ ...asset('h'), marks: ['bold'] }), '资产不带格式')
+  assert.ok(!isRun({ ...asset('h'), bytes: 'AAAA' }), '字节不进正文')
+  assert.ok(!isRun({ ...asset('h'), state: 'ready' }), 'state 是派生值，不落盘')
+  assert.ok(!isRun({ id: 'a', t: 'asset' }), '缺地址不是合法资产')
+  assert.ok(!isRun({ id: 'a', t: 'asset', asset: { hash: 'h' } }), '旧形状（asset 是对象）必须判非法')
+  assert.ok(!isRun({ id: 'a', t: 'image', asset: { hash: 'h', state: 'ready' } }), '旧种类名必须判非法')
   assert.ok(!isRun({ id: 'a', t: 'anno' }))
   assert.ok(isAnno({ id: 'x', range: { start: 0, end: 2 } }))
   assert.ok(isAnno({ id: 'x', range: { start: 0, end: 2 }, quote: { exact: 'a', prefix: '', suffix: '' } }))
   assert.ok(!isAnno({ id: 'x' }))
+})
+
+test('资产 run：plainText 贡献 0、plain 占 1 格、永不带 marks（三条一起才叫「行内原子」）', () => {
+  const a = asset('deadbeef')
+  const c: Run[] = [...textRuns('前'), a, ...textRuns('后')]
+  assert.equal(plainText(c), '前后')
+  assert.equal(plainLen(c), 3)
+  // 归一化之后仍然没有 marks（即使被区间格式盖过）
+  const bold = toggleMark(c, 'bold', 0, plainLen(c))
+  assert.equal((bold.find((x): x is AssetRun => x.t === 'asset')!).marks, undefined)
 })

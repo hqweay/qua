@@ -40,7 +40,8 @@ import {
   type RefView,
   type VisibleRow,
 } from '../core/index.ts'
-import { MARK_TYPES, isEmptyContent, plainText, refRunsOf, type MarkType, type RunWithId } from '../core/runs.ts'
+import { MARK_TYPES, isEmptyContent, plainText, refRunsOf, type AssetRun, type MarkType, type RunWithId } from '../core/runs.ts'
+import type { AssetView } from '../core/assets.ts'
 import { t } from '../core/msg.ts'
 import { danglingView, refTitle, resolveRefs } from '../core/ref.ts'
 import { createIcon } from './icons.ts'
@@ -106,24 +107,6 @@ export function visibleRowHeight(b: Block, extraHeads = 0): number {
   return body + (aliasHead + extraHeads) * ALIAS_HEAD_H
 }
 
-/**
- * 图片占位的缩略图：**内联 SVG，零网络**。
- * 真资产在里是独立对象；这里只是让占位能看出「这是一张图」。
- * 注意色值是按内容 hash **算**出来的（不是设计 token），所以本文件在 `[12]` 有白名单豁免。
- */
-export function thumbUri(seed: string): string {
-  let h = 0
-  for (const c of seed) h = (h * 31 + c.charCodeAt(0)) % 360
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="40">` +
-    `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">` +
-    `<stop offset="0" stop-color="hsl(${h} 62% 62%)"/><stop offset="1" stop-color="hsl(${(h + 48) % 360} 58% 44%)"/>` +
-    `</linearGradient></defs><rect width="64" height="40" fill="url(#g)"/>` +
-    `<circle cx="46" cy="12" r="5" fill="rgba(255,255,255,.75)"/>` +
-    `<path d="M4 36 L22 20 L34 30 L44 24 L60 36 Z" fill="rgba(255,255,255,.55)"/></svg>`
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
-}
-
 /** 格式 → 语义标签：粗体用 `strong` 之类，让复制出去也是对的 */
 export function tagForMark(t: MarkType): string {
   switch (t) {
@@ -143,10 +126,14 @@ export function tagForMark(t: MarkType): string {
  *
  * `view` 是**解析结果**（`core/ref.ts`），不是 run 上的名字快照：
  * 目标改名后快照是过期的字，显示的必须是 `view.label`。
- * ⚠️ 图片不走解析（它的显示名是资产名，不指向块）⇒ `view` 可选。
+ * `asset` 是资产**此刻**的样子（`view/asset-views.ts` 现算，不落盘）：
+ * 图片不指向块，所以它没有 `RefView`，只有「字节在不在、URL 有没有」。
  */
-export function makeRunEl(r: RunWithId, view?: RefView): HTMLElement {
-  const label = r.t === 'link' ? r.v : (view?.label ?? (r.t === 'ref' ? r.label : undefined) ?? (r.t === 'image' ? (r.asset.name ?? '') : ''))
+export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView): HTMLElement {
+  const label =
+    r.t === 'link'
+      ? r.v
+      : (view?.label ?? (r.t === 'ref' ? r.label : undefined) ?? (r.t === 'asset' ? (r.label ?? '') : ''))
   /**
    * 三种「标签样」的露面必须能一眼分清：
    *   · `tag`  —— 行内标签（指向标签类，`#名`，无底色）；
@@ -165,9 +152,31 @@ export function makeRunEl(r: RunWithId, view?: RefView): HTMLElement {
   const el = document.createElement('span')
   el.className = `atom atom-${kind}`
   if (view?.state === 'dangling') el.classList.add('dangling')
-  if (r.t === 'image' && r.asset.state === 'missing') el.classList.add('missing')
+  const assetState = r.t === 'asset' ? (asset?.state ?? 'unavailable') : undefined
+  /**
+   * 资产的**呈现类**（`.atom-image` / `.atom-file`）与种类类（`.atom-asset`）分开：
+   * 种类回答「这是什么 run」（读数、点击分流按它），呈现回答「现在画成图还是文件 chip」
+   * （样式与探针按它）。两者会随字节到没到而变化，所以不能合成一个类名。
+   */
+  const assetPresentsAsImage =
+    r.t === 'asset' && assetState === 'ready' && (asset?.mime ?? '').startsWith('image/')
+  if (r.t === 'asset') el.classList.add(assetPresentsAsImage ? 'atom-image' : 'atom-file')
+  if (assetState && assetState !== 'ready') el.classList.add(assetState === 'missing' ? 'missing' : 'unavailable')
   el.contentEditable = 'false'
+  /**
+   * **原子必须自己声明「不可拖」**：contenteditable 里拖一枚原子会把它的 DOM 搬到
+   * 别的位置（甚至别的块），而模型里那一格没动 —— 重渲染后图会「消失」或「跑到别处」。
+   * 拖拽重排是块级的（`.blk` 的把手），原子不参与。
+   */
+  el.draggable = false
   el.dataset.atomId = r.id
+  /**
+   * **种类进 DOM**（读数契约的一部分，不只是样式）：DOM 里有这一格、模型里却找不到
+   * 对应 run 时，`readRuns` 要按它还原出同种的原子。缺了这一格，一张图会被兜底成
+   * 「指向不存在页面的引用」—— 静默变成另一种东西。
+   */
+  el.dataset.atomKind = kind
+  if (r.t === 'asset') el.dataset.assetHash = r.asset
   /**
    * **导航契约**（与读数契约分开）：`data-ref-to` ＝「这枚元素指向哪一块」。
    *
@@ -183,10 +192,17 @@ export function makeRunEl(r: RunWithId, view?: RefView): HTMLElement {
   if (r.t === 'ref' && r.to) el.dataset.refTo = r.to
   // ⚠️ 解析后的显示名**另存一份到 `data-ref-label`**：`.atom-label` 里带 `[[ ]]`／`#` 装饰，
   //    而 run 上的名字快照是过期的 —— 给探针一个「此刻真的在显示什么」的读点。
-  if (r.t === 'ref' || r.t === 'link') el.dataset.refLabel = label
+  if (r.t === 'ref' || r.t === 'link' || r.t === 'asset') el.dataset.refLabel = label
   el.title =
-    r.t === 'image'
-      ? t('ui.atom.imageTitle', { label })
+    r.t === 'asset'
+      ? t(
+          assetState === 'missing'
+            ? 'ui.atom.assetMissingTitle'
+            : assetState === 'unavailable'
+              ? 'ui.atom.assetUnavailableTitle'
+              : 'ui.atom.imageTitle',
+          { label },
+        )
       : kind === 'obj'
         ? t(view?.state === 'dangling' ? 'ui.atom.objDanglingTitle' : 'ui.atom.objTitle', { label })
         : kind === 'tag'
@@ -206,15 +222,8 @@ export function makeRunEl(r: RunWithId, view?: RefView): HTMLElement {
     text.className = 'atom-label'
     text.textContent = `#${label}`
     el.append(text)
-  } else if (r.t === 'image') {
-    const img = document.createElement('img')
-    img.className = 'asset-thumb'
-    img.alt = ''
-    img.src = thumbUri(r.asset.hash)
-    const name = document.createElement('span')
-    name.className = 'asset-name'
-    name.textContent = label
-    el.append(img, name)
+  } else if (r.t === 'asset') {
+    el.append(...assetAtomContent(r, asset, label))
   } else if (r.t === 'link') {
     /**
      * 外链：显示文本是内容的一部分（`v` 进投影），`url` 只是目标。
@@ -238,6 +247,54 @@ export function makeRunEl(r: RunWithId, view?: RefView): HTMLElement {
     el.append(ico, text)
   }
   return el
+}
+
+/**
+ * 资产原子的内容：真图 / 文件 chip / 两种失败占位。
+ *
+ * 为什么是三种形状而不是一种加滤镜：`missing`（库里没有这份字节）与
+ * `unavailable`（库本身打不开）给用户的动作不同 —— 前者去找文件，后者去修存储。
+ * 同一个「灰掉」表达不出这个区别。
+ */
+function assetAtomContent(r: AssetRun, asset: AssetView | undefined, label: string): Node[] {
+  const state = asset?.state ?? 'unavailable'
+  if (state === 'ready' && asset?.url && (asset.mime ?? '').startsWith('image/')) {
+    const img = document.createElement('img')
+    img.className = 'asset-thumb'
+    img.src = asset.url
+    // 名字快照当 alt：图裂开/读屏时用户还能知道这是哪一张
+    img.alt = label
+    /**
+     * ⚠️ `draggable=false` 是**防原生注入**的一半（另一半是 `paste`/`drop` 的拦截）：
+     *    浏览器把 `<img>` 拖进 contenteditable 会塞一个没有 `data-atom-id` 的裸 `<img>`，
+     *    `readRuns` 读不到它，重渲染就消失。
+     */
+    img.draggable = false
+    /**
+     * **宽高比先占住**：`w/h` 是布局提示（同一份字节的尺寸不会变），
+     * 有了它，图还没解码完时行高不会先塌下去再弹回来。
+     */
+    if (r.w && r.h) {
+      img.width = r.w
+      img.height = r.h
+    }
+    return [img]
+  }
+  const box = document.createElement('span')
+  box.className = `asset-chip asset-${state}`
+  const ico = document.createElement('span')
+  ico.className = 'asset-chip-ico'
+  ico.appendChild(createIcon(state === 'ready' ? 'file' : 'image-off', 'sm'))
+  const text = document.createElement('span')
+  text.className = 'asset-chip-label'
+  text.textContent =
+    state === 'ready'
+      ? label
+      : state === 'missing'
+        ? t('ui.atom.assetMissingLabel', { label })
+        : t('ui.atom.assetUnavailableLabel', { label })
+  box.append(ico, text)
+  return [box]
 }
 
 /**
@@ -300,6 +357,12 @@ export function fillBlockText(
    * 不传 ⇒ 退回 run 上的名字快照（那是过期的字，只在拿不到森林的场合容忍）。
    */
   find?: FindBlock,
+  /**
+   * **资产此刻的样子**（可选）：传了 ⇒ 行内资产画成真图 / 文件 chip / 失败占位。
+   * 不传 ⇒ 一律按 `unavailable` 画：那正是「这台宿主没接资产库」的真相，
+   * 而不是「这张图不存在」——两者的文案与建议不同（见 `view/asset-views.ts`）。
+   */
+  assetView?: (hash: string) => AssetView,
 ): void {
   tx.textContent = ''
   const refRuns = refRunsOf(b.content)
@@ -322,6 +385,10 @@ export function fillBlockText(
     }
     if (r.t === 'ref') {
       tx.appendChild(makeRunEl(r, views?.get(r.id) ?? danglingView(r.label ?? t('ui.atom.unknown'))))
+      continue
+    }
+    if (r.t === 'asset') {
+      tx.appendChild(makeRunEl(r, undefined, assetView?.(r.asset)))
       continue
     }
     tx.appendChild(makeRunEl(r))

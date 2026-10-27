@@ -107,7 +107,7 @@ import {
   splitRuns,
   textRuns,
   toggleMark as toggleRunMark,
-  type ImageRun,
+  type AssetRun,
   type MarkType,
   type RefRun,
   type Run as InlineRun,
@@ -117,11 +117,13 @@ import { journalDateLabel, type SecLayout, type ShellCol } from '../core/index.t
 export type { SecLayout }
 // 只取**类型**：`view` 拿不到实现，写入的落地方式归装配层（见 `Run`）
 import type { Tx } from '../core/kb/types.ts'
+import type { AssetView } from '../core/assets.ts'
 // 标签块的「找到或创建」有两种落地（直写 / 事务），判据只有一份
 import { ensureTagInTx, tagLookupOf } from '../core/kb/ensure-tag.ts'
 // 用户可见文案一律走 t
 import { t } from '../core/msg.ts'
 import { ALLOWED_ROW_CHILDREN, EDIT_ISLAND_ATTR, LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl, visibleRowHeight } from './block-dom.ts'
+import { assetViewOf } from './asset-views.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
 import { bindEditorEvents, type RefClickHit, type RefClickMods, type TriggerQuery } from './editor-events.ts'
 
@@ -205,6 +207,27 @@ export interface ViewEvents {
    * ⚠️ 未接的实例什么都不做——不静默退化成某一种（那会让「缺入口」看起来像成功）。
    */
   refClick?: (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement) => void
+  /**
+   * **点了非引用的行内对象**（图片／将来的文件、外链）。
+   *
+   * 为什么与 `refClick` 分开：引用是「去哪」，行内对象是「看它自己」。
+   * 合成一支之后，装配层只能靠「`to === ''` 就当图片」来分派 —— 每加一种行内对象
+   * 就要在那条分支里再猜一次，猜错的表现是「点了没反应」或「点图跳到一个空页」。
+   *
+   * ⚠️ 未接 ⇒ 事件层退回详情浮层（旧行为），不让点击看起来像没发生。
+   */
+  onAtomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: RefClickMods) => void
+  /**
+   * **粘贴进来一份图片字节**（v1 只取第一张）。
+   *
+   * 落点由事件层在入库前捕获（`point`）；装配层负责：校验 → 入库 → 按落点插 run。
+   * 为什么经事件表注入：`view` 不该知道资产库在哪（IDB／库目录／云端）。
+   *
+   * ⚠️ 未接 ⇒ 粘贴图片**什么都不做**，不退化成「把图当文本贴」——后者是另一种静默失败。
+   */
+  onPasteImage?: (file: File, point: { blockId: string; offset: number } | null) => Promise<void>
+  /** 拖入文件被拒（v1 不做拖拽入图）：装配层给一句明确文案 */
+  onDropFilesRejected?: () => void
   /** 悬停把手/圆点或右键 → 块菜单 */
   blockMenu?: (blockId: string, rect: DOMRect) => void
   /**
@@ -242,6 +265,18 @@ export interface ViewEvents {
    *    与 `refClick` 同一条口径：缺入口就让它看得见地缺，不静默做成另一种东西。
    */
   widgetBody?: (block: Block, find: FindBlock | undefined, mode: 'summary' | 'full') => HTMLElement
+  /**
+   * **资产此刻的样子**（`view/asset-views.ts` 的 `assetViewOf`）。
+   *
+   * 为什么经事件表注入而不是让 `view` 直接拿资产库：`view` 不该知道字节存在哪
+   * （IDB／库目录／云端），它只问「这份 hash 现在能不能画、URL 是什么」。
+   * 装配层把同一个函数递给**所有**编辑器实例（正文／挂载区／查询／侧槽），
+   * 于是「同一张图在四个视图里长得一样」是同一份答案的自然结果。
+   *
+   * ⚠️ 未接 ⇒ 行内资产一律画成 `unavailable` 占位（这是真相：这台宿主没有资产库），
+   *    不退化成「缺失」——那会让用户去找一个根本没被查过的文件。
+   */
+  assetView?: (hash: string) => AssetView
   /**
    * **在空天格子里落笔**（复盘兜底）：装配层物化那一天并重装载。
    * 编辑器只报日期——「造块进库」是命令层的事，视图不写库。
@@ -814,7 +849,17 @@ export class BlockEditor {
     const find = (id: string) => this.store.find(id)
     const el = makeBlockEl(
       r,
-      (tx) => fillBlockText(tx, r.block, find),
+      /**
+       * **资产此刻的样子**：默认直接问 `view/asset-views.ts`（它是进程级的一份缓存，
+       * 不是某个视图的状态）。事件表只留一个**覆盖**入口 —— 测试/独立实例可以把
+       * 它换成受控答案。
+       *
+       * ⚠️ 为什么不能只靠 `events.assetView`：编辑器**在构造时**就渲染首帧，
+       *    而 `events` 是构造之后才赋上去的。只认事件表 ⇒ 首帧一律画成
+       *    `unavailable`，之后没有任何人再重画（那一行已经"画完了"）——
+       *    表现为「重开之后图全是库不可用」，而库里明明有字节。
+       */
+      (tx) => fillBlockText(tx, r.block, find, this.events.assetView ?? assetViewOf),
       {
         single: flatten(this.doc).length === 1,
         ancestors: this.ancestors.get(r.block.id) ?? [],
@@ -2581,26 +2626,59 @@ export class BlockEditor {
     return run.id
   }
 
-  /** 在光标处插一枚图片 run（asset 只存定位信息，载荷住资产侧） */
-  insertImage(asset: ImageRun['asset'], dims?: { w?: number; h?: number }): string | null {
-    const id = this.sel?.aBlock ?? this.rows()[0]?.block.id
-    if (!id) return null
-    const off = this.sel?.aOff ?? 0
-    const loc = locate(this.doc, id)
+  /**
+   * 在**给定落点**插一枚资产 run。
+   *
+   * 为什么落点要显式给、而不是「插到当前光标」：入库是异步的（算 hash、写字节、读尺寸），
+   * 这期间光标会动、块甚至会被删。正确的顺序是**先捕获 `{blockId, offset}`**，
+   * 字节落库成功后再按捕获点插 —— 按当前光标插会把图插到用户后来移到的地方。
+   *
+   * @returns 新 run 的 id；块不在了或 offset 越界 ⇒ `null`（一个字节都不写，不静默插到别处）
+   */
+  insertAssetAt(
+    blockId: string,
+    offset: number,
+    asset: string,
+    snap?: { label?: string; w?: number; h?: number },
+  ): string | null {
+    const loc = locate(this.doc, blockId)
     if (!loc) return null
+    const len = plainLen(loc.block.content)
+    if (offset < 0 || offset > len) return null
     const before = this.snap()
-    const run: ImageRun = { id: uuidv7Hex(), t: 'image', asset, ...(dims?.w ? { w: dims.w } : {}), ...(dims?.h ? { h: dims.h } : {}) }
-    const next = insertRunAt(loc.block.content, off, run)
+    const run: AssetRun = {
+      id: uuidv7Hex(),
+      t: 'asset',
+      asset,
+      ...(snap?.label ? { label: snap.label } : {}),
+      ...(snap?.w ? { w: snap.w } : {}),
+      ...(snap?.h ? { h: snap.h } : {}),
+    }
+    const next = insertRunAt(loc.block.content, offset, run)
     if (this.write) {
-      this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
+      this.write((tx) => tx.patch(blockId, (b) => writeBlockContent(b, next)))
     } else {
       writeBlockContent(loc.block, next)
     }
     this.undo.record(before, 'other', Date.now())
-    this.renderBlock(id)
-    this.placeCaret(id, off + 1)
+    this.renderBlock(blockId)
+    this.placeCaret(blockId, offset + 1)
     this.emitChange('text')
     return run.id
+  }
+
+  /** 在当前光标处插一枚资产 run（落点捕获的便捷版；入口应当用 `insertAssetAt`）。 */
+  insertAsset(asset: string, snap?: { label?: string; w?: number; h?: number }): string | null {
+    const id = this.sel?.aBlock ?? this.rows()[0]?.block.id
+    if (!id) return null
+    return this.insertAssetAt(id, this.sel?.aOff ?? 0, asset, snap)
+  }
+
+  /** 当前光标落点（粘贴/选文件时**先捕获**它，入库回来按它插） */
+  caretPoint(): { blockId: string; offset: number } | null {
+    const blockId = this.sel?.aBlock ?? this.rows()[0]?.block.id
+    if (!blockId) return null
+    return { blockId, offset: this.sel?.aOff ?? 0 }
   }
 
   /** 按 run id 找到它（诊断/popover 用；全库找，popover 的目标块不一定在本视图） */
@@ -2810,6 +2888,24 @@ export class BlockEditor {
       emitTrigger: (id) => this.emitTrigger(id),
       dropTrigger: (id) => this.dropTrigger(id),
       insertPlainText: (id, _off, text) => this.pasteAt(id, _off, text),
+      /**
+       * 光标落点：**在浏览器改 DOM 之前**读（`paste` 处理器里第一件事就是捕获它）。
+       * 入库是异步的，落点必须在那一刻定下来。
+       */
+      caretPoint: () => this.caretPoint(),
+      /**
+       * 粘贴图片：事件层只报「有这么一份字节、落在哪」；入库与插 run 由装配层接
+       * （`view` 不该知道资产库长什么样）。
+       *
+       * ⚠️ 没有接 `onPasteImage` 的实例（测试/独立编辑器）**什么都不做**，
+       *    不退回「把图片当文本贴」——那是另一种静默失败。
+       */
+      onPasteImage: async (file, point) => {
+        const from = this.caretBlock() ?? this.editBase?.id ?? null
+        if (from) this.commitEdit(from)
+        await this.events.onPasteImage?.(file, point)
+      },
+      onDropFilesRejected: () => this.events.onDropFilesRejected?.(),
       hasChildren: (id) => Boolean(locate(this.doc, id)?.block.children.length),
 
       acceptDrag: (id) => {
@@ -2901,6 +2997,15 @@ export class BlockEditor {
         if (from) this.commitEdit(from)
         const run = ref.runId ? this.findRun(ref.runId)?.run : undefined
         this.events.refClick?.({ to: ref.to, ...(run ? { run } : {}) }, mods, el)
+      },
+      /**
+       * 非引用的行内对象（图片/外链）。与 `onRefClick` 同一套编辑边界：
+       * 点击 `contenteditable=false` 的元素不派发 `focusout`，不显式提交则修改时间停在上一处。
+       */
+      onAtomClick: (atom, el, mods) => {
+        const from = this.caretBlock() ?? this.editBase?.id ?? null
+        if (from) this.commitEdit(from)
+        this.events.onAtomClick?.(atom, el, mods)
       },
       /**
        * 点了正文里的组件行：先交出当前行的编辑期——理由与 `focusBlock` 完全相同

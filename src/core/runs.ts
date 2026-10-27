@@ -2,7 +2,7 @@
  * **行内内容 ＝ run 序列**（纯函数层，零 DOM、零持久化）。
  *
  * 一个块的正文不是一根字符串，而是一列 run：文本段（`text`）与行内原子
- * （`ref` 引用／`link` 外链／`image` 图片）。原子是**不可分节点**——它没有「半格」，
+ * （`ref` 引用／`link` 外链／`asset` 资产）。原子是**不可分节点**——它没有「半格」，
  * 位置由邻居天然携带，所以不需要任何偏移映射机制；格式（粗体等）是 run 上的
  * 属性集合，编辑文本时格式跟着 run 走，天然粘性。
  *
@@ -18,7 +18,7 @@
  * ## 归一化（幂等，可测断言）
  *
  * 相邻同形 text run（同 marks）合并、空文本段清除、marks 去重排序、
- * image run 永不携带 marks（格式对位图没有视觉对应物）。所有写入口的产出
+ * asset run 永不携带 marks（格式对位图/文件没有视觉对应物）。所有写入口的产出
  * 都经过 `normalizeRuns`，于是「库里的内容只有一种等价形状」。
  */
 import { uuidv7Hex } from './ids.ts'
@@ -65,28 +65,36 @@ export interface LinkRun {
 }
 
 /**
- * 图片 run：**行内小图**（整张贴图作为内容是资产块的事，不在这层）。
+ * 资产 run：**行内指向一份资产**（图片是 v1 唯一的入口，形状不锁死图片）。
  *
- * `asset` 只存定位信息：`bytes` 这类载荷住在资产侧，行内内容不携带载荷——
+ * `asset` 是内容 hash，不是载荷：字节住在资产库，行内内容只留地址——
  * 否则同一次粘贴会在正文里留两份二进制，改一处就与另一处分叉。
- * `w/h` 只做宽高比占位（防加载跳动），不是尺寸约束。
+ * `label` 是插入时的文件名快照（同 `RefRun.label`），`w/h` 是布局提示
+ * （同一份字节的显示尺寸不会变，重复一次是为了在字节还没读出来时先占宽高比）。
  *
- * ⚠️ 唯一不许携带 marks 的 run：四种格式对位图都没有对应物，
+ * 为什么 `state` 不在这里：它会在「字节被清／还没同步」时说谎。
+ * 现在看到的是 `ready` 还是 `missing`，由资产库**现算**（`AssetView`）。
+ *
+ * ⚠️ 唯一不许携带 marks 的 run：四种格式对位图/文件都没有对应物，
  *    「技术上能盖上」不构成开禁的理由。
  */
-export interface ImageRun {
+export interface AssetRun {
   id: string
-  t: 'image'
-  asset: { hash: string; name?: string; state: 'ready' | 'missing' }
+  t: 'asset'
+  /** 资产的内容 hash（SHA-256 小写 hex）；字节不在这里 */
+  asset: string
+  /** 插入时的文件名快照；只在资产缺失时兜底显示 */
+  label?: string
+  /** 布局提示（防加载跳动），不是尺寸约束 */
   w?: number
   h?: number
 }
 
 /** 一个 run。判别键 `t` 开放扩展（插件自定义种类从这型往外长）。 */
-export type Run = TextRun | RefRun | LinkRun | ImageRun
+export type Run = TextRun | RefRun | LinkRun | AssetRun
 
 /** 带身份的 run（原子节点：编辑器按不可分元素对待）。 */
-export type RunWithId = RefRun | LinkRun | ImageRun
+export type RunWithId = RefRun | LinkRun | AssetRun
 
 /** 一块的行内内容。空块 ＝ `[]`。 */
 export type Content = readonly Run[]
@@ -117,7 +125,7 @@ export interface Anno {
 /* ------------------------------------------------------------- 投影 */
 
 /**
- * `plainText`＝text run 的 `v` 依序 join。ref/link/image **不进投影**——
+ * `plainText`＝text run 的 `v` 依序 join。ref/link/asset **不进投影**——
  * 它们不是文本流的一部分（搜索/导出/引文都按这个口径，永不各说一套）。
  */
 export function plainText(content: Content): string {
@@ -164,7 +172,7 @@ function withoutMarks<T extends object>(r: T): T {
 
 /**
  * 归一化：相邻同形 text run 合并、空文本段清除、marks 去重排序、
- * image 的 marks 剥掉。**幂等**（`normalizeRuns(normalizeRuns(x))` 逐字节相等）——
+ * asset 的 marks 剥掉。**幂等**（`normalizeRuns(normalizeRuns(x))` 逐字节相等）——
  * 这条是写入口的纪律：库里永远只存规范形态，「碰过但没改」才可能被识别出来。
  */
 export function normalizeRuns(content: Content): Run[] {
@@ -181,8 +189,8 @@ export function normalizeRuns(content: Content): Run[] {
       out.push(marks === undefined ? { t: 'text', v: r.v } : { t: 'text', v: r.v, marks })
       continue
     }
-    if (r.t === 'image') {
-      // 红线：格式不上 image run。写入时剥掉，不靠每个调用方自觉。
+    if (r.t === 'asset') {
+      // 红线：格式不上资产 run。写入时剥掉，不靠每个调用方自觉。
       out.push(withoutMarks(r))
       continue
     }
@@ -342,8 +350,8 @@ export function isCovered(content: Content, type: MarkType, start: number, end: 
     const cell = acc
     if (cell >= start && cell + 1 <= end) {
       sawRange = true
-      // image 拿不了格式：区间里有它就永远「未全覆盖」⇒ toggle 走加的一支（它自己仍不动）
-      if (r.t === 'image' || !r.marks?.includes(type)) coveredAll = false
+      // 资产拿不了格式：区间里有它就永远「未全覆盖」⇒ toggle 走加的一支（它自己仍不动）
+      if (r.t === 'asset' || !r.marks?.includes(type)) coveredAll = false
     }
     acc = cell + 1
   }
@@ -352,7 +360,7 @@ export function isCovered(content: Content, type: MarkType, start: number, end: 
 
 /**
  * ⌘B 手感：全覆盖 ⇒ 取消；否则 ⇒ 加。按 run 序列运算：文本在边界拆 run、
- * 覆盖段改 marks；ref/link 整枚改（不可分 ⇒ 零拆分成本）；image 永远不动。
+ * 覆盖段改 marks；ref/link 整枚改（不可分 ⇒ 零拆分成本）；资产永远不动。
  */
 export function toggleMark(content: Content, type: MarkType, start: number, end: number): Run[] {
   if (start >= end) return normalizeRuns(content)
@@ -378,7 +386,7 @@ export function toggleMark(content: Content, type: MarkType, start: number, end:
       continue
     }
     const cell = acc
-    if (cell >= start && cell + 1 <= end && r.t !== 'image') {
+    if (cell >= start && cell + 1 <= end && r.t !== 'asset') {
       out.push({ ...r, marks: flipMarks(r.marks, type, removing) } as RunWithId)
     } else {
       out.push(r)
@@ -388,7 +396,7 @@ export function toggleMark(content: Content, type: MarkType, start: number, end:
   return normalizeRuns(out)
 }
 
-/** 清掉区间上的**全部**格式（四种一起）。image 无格式可清，天然不动。 */
+/** 清掉区间上的**全部**格式（四种一起）。资产无格式可清，天然不动。 */
 export function clearMarks(content: Content, start: number, end: number): Run[] {
   if (start >= end) return normalizeRuns(content)
   const out: Run[] = []
@@ -411,7 +419,7 @@ export function clearMarks(content: Content, start: number, end: number): Run[] 
       continue
     }
     const cell = acc
-    if (cell >= start && cell + 1 <= end && r.t !== 'image') {
+    if (cell >= start && cell + 1 <= end && r.t !== 'asset') {
       out.push(withoutMarks(r))
     } else {
       out.push(r)
@@ -441,8 +449,8 @@ export function marksInRange(content: Content, start: number, end: number): Mark
       continue
     }
     const cell = acc
-    // image 没有格式可报；写在这里只是让类型收窄，语义等价（它永远没有 marks）
-    if (cell >= start && cell + 1 <= end && r.t !== 'image') for (const m of r.marks ?? []) out.add(m)
+    // 资产没有格式可报；写在这里只是让类型收窄，语义等价（它永远没有 marks）
+    if (cell >= start && cell + 1 <= end && r.t !== 'asset') for (const m of r.marks ?? []) out.add(m)
     acc = cell + 1
   }
   return [...out].sort((a, b) => a.localeCompare(b))
@@ -552,7 +560,7 @@ function isMarks(x: unknown): x is MarkType[] {
   return Array.isArray(x) && x.every((m) => typeof m === 'string' && MARK_SET.has(m))
 }
 
-/** 落盘形状校验用：这真的是一个合法 run 吗（image 带 marks 一律判非法）。 */
+/** 落盘形状校验用：这真的是一个合法 run 吗（资产带 marks 一律判非法）。 */
 export function isRun(x: unknown): x is Run {
   if (!x || typeof x !== 'object') return false
   const r = x as Record<string, unknown>
@@ -569,16 +577,15 @@ export function isRun(x: unknown): x is Run {
       )
     case 'link':
       return typeof r.id === 'string' && typeof r.v === 'string' && typeof r.url === 'string'
-    case 'image': {
-      if (r.marks !== undefined) return false
-      const a = r.asset
-      if (!a || typeof a !== 'object') return false
-      const asset = a as Record<string, unknown>
+    case 'asset': {
+      // 资产 run 只存地址与快照：带 marks、带 bytes、把 state 落盘都判非法
+      if (r.marks !== undefined || r.bytes !== undefined || r.state !== undefined) return false
       return (
         typeof r.id === 'string' &&
-        typeof asset.hash === 'string' &&
-        (asset.name === undefined || typeof asset.name === 'string') &&
-        (asset.state === 'ready' || asset.state === 'missing')
+        typeof r.asset === 'string' &&
+        (r.label === undefined || typeof r.label === 'string') &&
+        (r.w === undefined || typeof r.w === 'number') &&
+        (r.h === undefined || typeof r.h === 'number')
       )
     }
     default:

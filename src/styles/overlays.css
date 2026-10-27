@@ -501,3 +501,66 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/*
+ * **lightbox**：全屏看一张行内图片。
+ *
+ * 为什么是 `position: fixed` 盖住整个视口、而不是一个居中的大卡片：
+ * 行内图只有 1.35em 高，「看清楚」是它唯一的存在理由；四周留白越多，
+ * 眼睛越容易被页面上的其他内容抢走。遮罩压暗是同一件事的一半。
+ *
+ * 尺寸只走语义 token；图片自己用 `object-fit: contain` 适配任意宽高比
+ * （不裁切、不拉伸 —— 图的内容比「填满这个框」重要）。
+ */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ui-gap-6);
+  background: var(--ui-scrim);
+  outline: none;
+  cursor: zoom-out;
+}
+.lightbox-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ui-gap-3);
+  max-width: 100%;
+  max-height: 100%;
+  cursor: default;
+}
+.lightbox-img {
+  display: block;
+  max-width: 100%;
+  max-height: 80vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: var(--ui-radius-md);
+  box-shadow: var(--ui-shadow-pop);
+  cursor: default;
+}
+.lightbox-caption {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ui-gap-3);
+  color: var(--ui-text-inverse);
+  font-size: var(--ui-fs-sm);
+  max-width: 100%;
+}
+.lightbox-title {
+  font-weight: var(--ui-fw-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lightbox-sub {
+  color: var(--ui-text-inverse);
+  opacity: 0.7;
+  font-size: var(--ui-fs-xs);
+  white-space: nowrap;
+}

@@ -147,7 +147,7 @@ export function setupChrome(deps: ChromeDeps) {
         blockSelection: mainEd.hasBlockSelection(),
         blockSelectionCount: mainEd.blockSelectionCount(),
         // 行内内容住块上：角标给两个派生计数（带格式的 run 数／原子 run 数；整片森林口径）
-        marks: flatten({ roots: mainEd.store.blocks }).reduce((n, b) => n + b.content.filter((r) => r.t !== 'image' && r.marks?.length).length, 0),
+        marks: flatten({ roots: mainEd.store.blocks }).reduce((n, b) => n + b.content.filter((r) => r.t !== 'asset' && r.marks?.length).length, 0),
         atoms: flatten({ roots: mainEd.store.blocks }).reduce((n, b) => n + b.content.filter((r) => r.t !== 'text').length, 0),
         undoDepth: mainEd.undo.depth(),
         redoDepth: mainEd.undo.redoDepth(),

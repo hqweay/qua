@@ -209,13 +209,23 @@
 
     <div class="card pad">
       <div class="struct">
-<span class="type">Run</span> <span class="pipe">=</span> text | ref | link | image    <span class="cmt">判别键 t 开放扩展</span>
+<span class="type">Run</span> <span class="pipe">=</span> text | ref | link | asset    <span class="cmt">判别键 t 开放扩展</span>
 
   <span class="key">text</span>  <span class="pipe">{</span> t, v, marks? <span class="pipe">}</span>          <span class="cmt">格式是 run 的属性，不是另一个实体</span>
   <span class="key">ref</span>   <span class="pipe">{</span> id, t, to?, flavor?: '#',      <span class="cmt">flavor '#' ＝ 行内 # 露面（指向标签类或实例）</span>
           label?, marks? <span class="pipe">}</span>            <span class="cmt">label 只是插入时的快照，显示名一律现算</span>
   <span class="key">link</span>  <span class="pipe">{</span> id, t, v, url, marks? <span class="pipe">}</span>     <span class="cmt">外链：v 是显示文本，不产生块间边</span>
-  <span class="key">image</span> <span class="pipe">{</span> id, t, asset, w?, h? <span class="pipe">}</span>       <span class="cmt">只存 hash 定位；bytes 住在资产侧</span>
+  <span class="key">asset</span> <span class="pipe">{</span> id, t, asset, label?, w?, h? <span class="pipe">}</span>
+                                   <span class="cmt">asset ＝ 内容 hash（字节住资产库）；永不带 marks</span>
+                                   <span class="cmt">label/w/h 是快照与布局提示，不是真相</span>
+
+<span class="cmt">── 资产是独立对象（不是第二个内容实体，也不是 run 的载荷） ──</span>
+<span class="type">AssetMeta</span> <span class="pipe">= {</span> hash, mime, size, w?, h?, createdAt <span class="pipe">}</span>   <span class="cmt">bytes 只在资产库记录里</span>
+<span class="type">AssetView</span> <span class="pipe">= {</span> state: 'ready' | 'missing' | 'unavailable', mime?, url?, w?, h? <span class="pipe">}</span>
+                                   <span class="cmt">state 是**现算**的：missing ＝ 库里没有这份 hash</span>
+                                   <span class="cmt">unavailable ＝ 资产库本身打不开（两种建议不同）</span>
+<span class="type">AssetStorePort</span> <span class="pipe">= {</span> put(blob) · get(hash) · stat(hash) · keys() <span class="pipe">}</span>
+                                   <span class="cmt">v1 ＝ IndexedDB 内容寻址（qua.assets）；将来按库根换文件夹适配器</span>
 
 <span class="cmt">── 实例（obj）不新增类型：props._tags 非空的块就是一条记录 ──</span>
 <span class="type">记录</span> <span class="pipe">=</span> Block <span class="pipe">{</span> props: <span class="pipe">{</span> _tags: [标签 id] <span class="pipe">}</span> <span class="pipe">}</span>
@@ -234,7 +244,7 @@
            <span class="cmt">换算走 projectOff / projectRange，别手算</span>
 </div>
       <div class="note" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)">
-        <b>原子是不可分节点</b>（ref/link/image）：位置由邻居携带，删它一定是显式动作——
+        <b>原子是不可分节点</b>（ref/link/asset）：位置由邻居携带，删它一定是显式动作——
         不需要「原子在字符串里占一格」的占位符，也不需要偏移映射。<b>格式随 run 走</b>，
         打字继承邻位格式是序列的自然结果。<b>区间（annos）按需物化</b>，只在被引用时存在。
       </div>
@@ -297,7 +307,12 @@
       <div class="kv">
         <dt>qua.workspace</dt><dd>整库（块森林；行内内容与区间都在块上），套一层信封 <code>{ backend, envelope, data }</code></dd>
         <dt>qua.device</dt><dd>设备态：主题 / 槽宽 / 钉住清单（<b>不进 KB</b>）</dd>
+        <dt>qua.assets</dt><dd><b>资产库</b>（IndexedDB）：<code>hash → { mime, size, w?, h?, createdAt, bytes }</code>。
+          内容寻址 ⇒ 同字节只存一份；记录里存 <code>ArrayBuffer</code>（<code>Blob</code> 过不了存储快照）。键名同样不可改</dd>
       </div>
+      <div class="note" style="margin-top:9px">两个存储之间**没有跨库事务**：写图片的顺序固定为
+        <b>字节先落 → 引用后落</b>（put 成功才写 run）。崩在中间只留孤儿字节（无害）；
+        反过来会留下一枚指向空字节的 run。v1 无 GC，删 run 不回收字节。</div>
       <div class="note" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)">
         <b>不做旧数据迁移</b>：改口径就 <code>WORKSPACE_VERSION + 1</code>，旧库显式作废重 seed。
         换键 ＝ 用户数据静默消失，所以键名被逐字钉死在门禁里。

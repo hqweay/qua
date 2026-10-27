@@ -13,6 +13,7 @@ import { resolveRef } from '../core/ref.ts'
 import { plainText } from '../core/runs.ts'
 import { COMMANDS } from '../core/commands/index.ts'
 import { BINDINGS, keyLabel, keymapRows, referencedKeys } from '../core/bindings.ts'
+import { assetMetaOf, assetViewOf } from '../view/asset-views.ts'
 import { t } from '../core/msg.ts'
 import type { CommandDecl, PanelKind } from '../core/ports.ts'
 import { makeFieldRow, type FieldRowDeps } from './properties.ts'
@@ -256,12 +257,23 @@ export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect, fi
       return
     }
     const h = document.createElement('h4')
-    h.textContent = t('ui.popover.imageTitle', { label: a.asset.name ?? a.asset.hash })
+    h.textContent = t('ui.popover.imageTitle', { label: a.label ?? a.asset.slice(0, 8) })
+    /**
+     * 详情浮层里的字段**全是现算**的：hash 是 run 上唯一落盘的东西，
+     * `mime/size/state` 归资产库（`AssetMeta`／`AssetView`），不在正文里存第二份。
+     * 库打不开 ⇒ 那几格显示「不可用」，而不是让整个浮层失败。
+     */
+    const meta = assetMetaOf(a.asset)
+    const view = assetViewOf(a.asset)
     const dl = document.createElement('dl')
     const rows: [string, string][] = [
-      [t('ui.popover.assetHash'), a.asset.hash],
-      [t('ui.popover.size'), `${a.w ?? '?'}×${a.h ?? '?'}`],
-      [t('ui.popover.state'), a.asset.state],
+      [t('ui.popover.assetHash'), a.asset],
+      [t('ui.popover.state'), view.state],
+      [t('ui.popover.size'), `${a.w ?? meta?.w ?? '?'}×${a.h ?? meta?.h ?? '?'}`],
+      [
+        t('ui.popover.mimeBytes'),
+        meta ? `${meta.mime} / ${meta.size}` : t('ui.popover.assetNoMeta'),
+      ],
     ]
     for (const [k, v] of rows) {
       const dt = document.createElement('dt')
@@ -272,7 +284,12 @@ export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect, fi
     }
     const note = document.createElement('div')
     note.className = 'popover-note'
-    note.textContent = a.asset.state === 'missing' ? t('ui.popover.assetMissingNote') : t('ui.popover.assetNote')
+    note.textContent =
+      view.state === 'missing'
+        ? t('ui.popover.assetMissingNote')
+        : view.state === 'unavailable'
+          ? t('ui.popover.assetUnavailableNote')
+          : t('ui.popover.assetNote')
     const row = document.createElement('div')
     row.className = 'row'
     const del = document.createElement('button')
