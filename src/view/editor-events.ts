@@ -498,18 +498,24 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      * 只认 `.atom` 的话，每多一种露面就要在这里多一条分支，而漏掉的那一种会静默不响应。
      */
     /**
-     * **正文里的组件行**（`.widget-row`）：点它 ＝ 打开这张卡。
+     * **正文里的组件体**（`.tx` 里那一格）：点它做什么，取决于它此刻是哪个高度档。
      *
-     * ⚠️ 这一支在「指向某块的露面」**之前**：组件行是 `contenteditable=false` 的整行，
+     * · `rest: 'summary'`（静止时只有一行摘要）⇒ **点它 ＝ 打开这张卡**。
+     *   摘要是一个指路牌，不是可操作的面；点进去要么去中心、要么（Shift）去右槽。
+     * · 已经是完整 UI（`data-widget-height` 是某个高度档）⇒ **不抢**：里面的按钮、
+     *   输入框、可拖条目各有自己的 click，这里只放行。抢了就等于「点集合里的 ×
+     *   把整张卡打开」——一次点击两件事。
+     *
+     * ⚠️ 这一支在「指向某块的露面」**之前**：组件体是 `contenteditable=false` 的整格，
      *    它内部没有 `data-ref-to`，而它所在的那一行**有** block id —— 两条判据不冲突，
-     *    但顺序写反会让读者以为「组件行靠行内引用那条路工作」。
+     *    但顺序写反会让读者以为「组件体靠行内引用那条路工作」。
      * ⚠️ 用 `composedPath()` 而不是 `target.closest()`：与面包屑那一条同一条实测理由
      *    （点它 ⇒ 换中心 ⇒ 整棵树重渲染 ⇒ 被点元素已从 DOM 摘掉，`closest` 恒为 null）。
      */
-    const widget = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.widgetRow !== undefined)
-    if (widget?.dataset.widgetRow) {
+    const widget = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.widgetBody !== undefined)
+    if (widget?.dataset.widgetBody && widget.dataset.widgetHeight === 'summary') {
       e.preventDefault()
-      br.onWidgetRowClick(widget.dataset.widgetRow, e.shiftKey)
+      br.onWidgetRowClick(widget.dataset.widgetBody, e.shiftKey)
       return
     }
 

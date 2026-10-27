@@ -30,7 +30,7 @@ import { DockWindows } from './ui/dock-windows.ts'
 import { bindDockResize } from './ui/dock-resize.ts'
 import { mountDockSlot } from './ui/dock.ts'
 import { createIcon } from './view/icons.ts'
-import { widgetRow } from './ui/dock-widgets.ts'
+import { widgetBodyInDoc } from './ui/dock-widgets.ts'
 import { renderAliasEditor } from './ui/alias-editor.ts'
 import { renderFieldsEditor } from './ui/fields-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type ObjFieldDeps, type PanelDeps } from './ui/panels.ts'
@@ -233,7 +233,7 @@ function uiCtx(): CtxKeys {
 
 /* ------------------------------------------------------------ 槽内容 */
 
-const { renderDocks, openWindow, closeWindow, addTile, cardStateFor, windowLabel, setWindows } = setupDocks({
+const { renderDocks, openWindow, closeWindow, addTile, cardStateFor, windowLabel, setWindows, widgetDeps: dockWidgetDeps } = setupDocks({
   kb,
   prefs,
   applyChrome: () => applyChrome(),
@@ -1155,12 +1155,14 @@ function viewEvents(editor: () => BlockEditor, change: ViewEvents['change'], via
     },
     refClick: (ref, mods, el) => handleRefClick(ref, mods, el),
     /**
-     * 正文里的组件行（`ui/dock-widgets.ts` 画摘要，`view` 只留契约）。
+     * 正文里的组件体（`ui/dock-widgets.ts` 画，`view` 只留契约）。
      *
      * ⚠️ `find` 传的是共享 store 的那一个：摘要要数「还有几条活着」，
      *    而集合里的块可能在当前视图之外（另一页／另一天），只有整片森林答得出来。
+     * ⚠️ 这里**不判**静止档是摘要还是完整 UI —— 那是类型声明的事，判据与画法
+     *    一起住在 `widgetBodyInDoc`。装配层只递「宿主能力」。
      */
-    widgetRow: (block, find) => widgetRow(block, find),
+    widgetBody: (block, find, mode) => widgetBodyInDoc(block, find, dockWidgetDeps(), mode),
     // 复盘空天格子里落笔：编辑器只报日期，物化那一天（幂等）与重装载归命令层
     shellWrite: (date) => void app.journalShellWrite(date),
     // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，

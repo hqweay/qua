@@ -265,6 +265,22 @@
 .dock-card-body {
   padding: 0 var(--ui-gap-2) var(--ui-gap-3);
 }
+/*
+ * **组件卡的两个高度**：静止（`--widget-h-rest`）与被聚焦（`--widget-h-focus`）。
+ *
+ * 变量由 `view/block-dom.ts` 的 `applyWidgetHeights` 挂上（与正文里的组件体同一份声明、
+ * 同一个数值表）；切档是纯 CSS 的 `:focus-within` —— 卡里一有焦点就长开，离开就收回。
+ * 高度加在**卡的身体**而不是内容上：卡头（标题/收起/单卡/关闭）必须始终在场，
+ * 被内容撑走之后用户就没有出口了。
+ * 没有挂高度（没声明 `slot.height`）⇒ `auto`，按内容自然高（旧行为不变）。
+ */
+.dock-card[data-widget='1'] > .dock-card-body {
+  height: var(--widget-h-rest, auto);
+  overflow: auto;
+}
+.dock-card[data-widget='1']:focus-within > .dock-card-body {
+  height: var(--widget-h-focus, auto);
+}
 
 /* 卡头的按钮比槽头小一档：一排要放收起/动作/单卡/关闭 */
 .dock-card-btn {

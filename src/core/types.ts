@@ -51,14 +51,49 @@ export interface TypeDecl {
   /**
    * 这个类型能不能作为一种 **Widget 露面**。
    *
-   * `slot`：槽里的卡/瓦片；`body`：正文里的露面（`row` 只读摘要，`inline` 完整 UI）。
    * 两格都没有 ⇒ 只能当普通块；有 `slot` 没有 `body` ⇒ 只能出现在槽里。
    */
   widget?: {
-    slot?: { size: 'small' | 'large' }
-    body?: 'row' | 'inline'
+    /**
+     * 槽里的露面。`height` 是**这一张卡的两个高度**：静止时与被聚焦时。
+     *
+     * 为什么要两档：组件的内容长度不确定，一张卡不该被 50 条收藏撑成两屏；
+     * 但「我正在这张卡里操作」时它又该长开。一档只能二选一
+     * ——要么永远截断，要么永远占满。
+     */
+    slot?: { size: 'small' | 'large'; height?: WidgetHeights }
+    /**
+     * 正文里的露面。
+     *
+     * · `summary` —— 一行只读摘要（标题 ＋ 条数 ＋ 打开）。**不带高度**：
+     *   它就是一行，多给一档没有意义。
+     * · `inline`  —— 完整 UI 嵌进正文，是一个**有界盒子**（内部滚动），
+     *   高度同样两档（静止／被聚焦），理由与卡相同。
+     *
+     * ⚠️ 这是**两种形状**而不是同一个东西的两个高度：摘要不可聚焦、点它是「打开那张卡」；
+     *    内联体可聚焦、点它是「在正文里操作」。混成一种会让「点它到底开不开卡」没有答案。
+     * ⚠️ 高度档必须给数值（`WidgetHeights` 的两档都是枚举）：虚拟化的占位高度是在
+     *    **没有挂 DOM 的行**上算的（`view/block-dom.ts` 的 `visibleRowHeight`），
+     *    读不到 computed style。给不出数 ⇒ 长文档的滚动条与落点会系统性偏小。
+     */
+    body?: { kind: 'summary' } | { kind: 'inline'; height: WidgetHeights }
   }
 }
+
+/**
+ * **两个高度**：静止时（`rest`）与被聚焦时（`focus`）。
+ *
+ * 数值只有一处定义（`view/block-dom.ts` 的 `WIDGET_H`），视觉与虚拟化占位读同一个数。
+ * 切档由 `:focus-within` 完成（纯 CSS），所以它是**视图状态**：不进库、不进 `Doc`、
+ * 不参与撤销 —— 与折叠态同一条口径。
+ */
+export interface WidgetHeights {
+  rest: WidgetHeight
+  focus: WidgetHeight
+}
+
+/** 组件体的一个高度档；像素值只有一处定义：`view/block-dom.ts` 的 `WIDGET_H` */
+export type WidgetHeight = 'compact' | 'medium' | 'tall'
 
 /** 分割线的类型 id：出现在声明表、插入入口与渲染绑定三处，只写一份 */
 export const DIVIDER_TYPE = 'core/divider'
@@ -79,7 +114,14 @@ export const TYPE_DECLS: Record<string, TypeDecl> = {
     id: COLLECTION_TYPE,
     children: 'none',
     text: 'readonly',
-    widget: { slot: { size: 'large' }, body: 'row' },
+    /**
+     * 正文里：一行摘要（`kind: 'summary'`）——收藏在正文里是**指路牌**，不是一张摊开的列表。
+     * 槽里：一张卡，两个高度（静止 `compact`、聚焦 `tall`）。
+     */
+    widget: {
+      slot: { size: 'large', height: { rest: 'compact', focus: 'tall' } },
+      body: { kind: 'summary' },
+    },
   },
 }
 
@@ -106,9 +148,30 @@ export function widgetSlotSize(b: Block | undefined): 'small' | 'large' | null {
  * 这是**一源多视**，不是两种块。按位置判会让「把它从槽里拖进正文」这件事失去答案
  * （拖动的那一刻它既不在槽里也不在正文里）。
  */
-export function widgetBodyOf(b: Block | undefined): 'row' | 'inline' | null {
+export function widgetBodyOf(b: Block | undefined): 'summary' | 'inline' | null {
   if (b === undefined) return null
-  return typeDeclOf(b).widget?.body ?? null
+  return typeDeclOf(b).widget?.body?.kind ?? null
+}
+
+/**
+ * 这一块在**正文里**的两个高度（静止／被聚焦）。
+ *
+ * 只有 `inline` 那一档有高度：摘要就是一行，多给一档没有意义 ⇒ `null`。
+ * `focus` 与 `rest` 相同也是合法声明（「我聚焦时不变高」），不要把它当缺省。
+ *
+ * ⚠️ 切档发生在 DOM 层（`:focus-within` ＋ inline style），这里是**声明**；
+ *    焦点不进库、不进 `Doc` —— 与折叠态同一条口径（那是「这一屏怎么摆」）。
+ */
+export function widgetBodyHeightOf(b: Block | undefined): WidgetHeights | null {
+  if (b === undefined) return null
+  const body = typeDeclOf(b).widget?.body
+  return body?.kind === 'inline' ? body.height : null
+}
+
+/** 这一块在**槽里那张卡**的两个高度；没声明 ⇒ null（卡按内容自然高） */
+export function widgetSlotHeightOf(b: Block | undefined): WidgetHeights | null {
+  if (b === undefined) return null
+  return typeDeclOf(b).widget?.slot?.height ?? null
 }
 
 /**

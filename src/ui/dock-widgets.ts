@@ -69,27 +69,43 @@ export function widgetBody(block: Block, deps: WidgetDeps): HTMLElement {
 }
 
 /**
- * **正文里的组件行**（`body: 'row'` 这一档）：一块组件在正文里的一行只读摘要。
+ * **正文里的组件体**：一块组件在正文里那一格（`.tx` 之内、`contenteditable=false`）。
  *
- * 它是一行**摘要**，不是一个嵌进正文的编辑器：
- *   · 不可编辑（`contenteditable=false`）⇒ 插入点进不去，也就不会「在组件行里打出字」；
- *   · 点它 ＝ 打开这张卡（去中心或去右槽），**不展开**——展开是 `inline` 那一档的事；
- *   · 它**不读正文**（`.tx` 里没有它的字），所以改名／改描述不影响这一行。
+ * 两种形状，判据是类型声明（`widget.body.kind`）：
+ *   · `summary` —— 一行摘要（图标 ＋ 名字 ＋ 几条 ＋「打开」）：不可编辑、点它 ＝ 打开那张卡；
+ *   · `inline`  —— 完整 UI 的一个**有界盒子**（高度两档，内部滚动）。
  *
- * 为什么摘要只画「几个条」而不画条目列表：正文一行放不下 N 条，画成 N 行就等于
- * 把整张卡搬进正文——那是 `inline`。摘要回答的是「这里面有东西吗、有多少」，
- * 具体是哪些由点开之后那张卡回答。
+ * 为什么摘要是**另一种形状**而不是「inline 的最低高度档」：摘要不可聚焦，
+ * 点它的语义是「打开那张卡」；内联体可聚焦，点它的语义是「在正文里操作」。
+ * 同一个东西不能有两种点击语义（那会让「点它到底开不开卡」没有答案）。
  *
- * ⚠️ 与 `widgetBody` 的分工：那边是槽里的**卡**，这边是正文里的**行**；
- *    两者读同一格配置，但绘制尺寸完全不同，合成一个函数会让「画多高」变成分支条件。
+ * ⚠️ 与 `widgetBody` 的分工：那边是槽里的**卡**，这边是正文里的**体**；
+ *    两者读同一格配置，但**容器不同**（卡有自己的壳与宽度，体在 `.tx` 里跟正文同宽），
+ *    合成一个函数会让「画多高、跟谁一样宽」变成分支条件。
  * ⚠️ `find` 由调用方给（正文渲染时是共享 store 的 `find`）：摘要要数「还有几条活着」，
  *    而这一层不持有森林。
  */
-export function widgetRow(block: Block, find: FindBlock | undefined): HTMLElement {
+export function widgetBodyInDoc(
+  block: Block,
+  find: FindBlock | undefined,
+  deps: WidgetDeps,
+  kind: 'summary' | 'full',
+): HTMLElement {
+  if (kind === 'summary') return widgetSummary(block, find)
+  const el = document.createElement('div')
+  el.className = 'widget-body'
+  el.appendChild(widgetBody(block, deps))
+  return el
+}
+
+/**
+ * 摘要那一档：图标 ＋ 名字 ＋ 条数 ＋「打开」。
+ *
+ * 它是**指路牌**，不是可操作的面 —— 所以整格只做一件事：打开那张卡。
+ */
+function widgetSummary(block: Block, find: FindBlock | undefined): HTMLElement {
   const el = document.createElement('span')
   el.className = 'widget-row'
-  el.contentEditable = 'false'
-  el.dataset.widgetRow = block.id
   renderIcon(el, 'lucide:list-tree', 'list-tree', 'sm')
 
   const label = document.createElement('span')

@@ -10270,23 +10270,32 @@ await check('T139 正文里的组件行：只读摘要不进正文；点它打�
   assert(inserted?.handled === true, `插入收藏应被处理：${JSON.stringify(inserted)}`)
   await page.waitForTimeout(200)
 
-  const cid = await page.evaluate(() => document.querySelector('#editor .widget-row')?.dataset.widgetRow ?? '')
-  assert(cid !== '', '正文里应出现组件行')
+  const cid = await page.evaluate(() => document.querySelector('#editor [data-widget-body]')?.dataset.widgetBody ?? '')
+  assert(cid !== '', '正文里应出现组件体')
 
   const shape = await page.evaluate((id) => {
-    const row = document.querySelector(`#editor .widget-row`)
-    const blk = row?.closest('.blk')
-    const tx = row?.closest('.tx')
+    const body = document.querySelector(`#editor [data-widget-body]`)
+    const blk = body?.closest('.blk')
+    const tx = body?.closest('.tx')
     return {
       type: blk?.dataset.type ?? '',
       sameBlock: blk?.dataset.blockId === id,
-      editable: row?.contentEditable,
+      editable: body?.contentEditable,
       readonly: tx?.dataset.readonly ?? null,
-      text: row?.textContent ?? '',
+      text: body?.textContent ?? '',
+      // 静止档：摘要（声明 `rest: 'summary'`）
+      height: body?.dataset.widgetHeight ?? '',
+      isIsland: body?.dataset.editIsland ?? '',
     }
   }, cid)
-  assert(shape.type === 'core/collection-widget' && shape.sameBlock, `组件行应挂在组件块自己的行上：${JSON.stringify(shape)}`)
-  assert(shape.editable === 'false' && shape.readonly === '1', `组件行不可编辑：${JSON.stringify(shape)}`)
+  assert(shape.type === 'core/collection-widget' && shape.sameBlock, `组件体应挂在组件块自己的行上：${JSON.stringify(shape)}`)
+  assert(shape.editable === 'false' && shape.readonly === '1', `组件体不可编辑：${JSON.stringify(shape)}`)
+  /**
+   * **静止档 ＝ 摘要**（声明 `rest: 'summary'`）：这一格现在只有一行高，
+   * 且它是**编辑岛**（本视图的重排判据按这一格认它，见 `EDIT_ISLAND_ATTR`）。
+   */
+  assert(shape.height === 'summary', `静止档应是摘要：${JSON.stringify(shape)}`)
+  assert(shape.isIsland === '1', `组件体必须标成编辑岛（否则里层打字时会被重排掉）：${JSON.stringify(shape)}`)
 
   /**
    * ① **读数契约**：摘要不进正文。
@@ -10314,7 +10323,7 @@ await check('T139 正文里的组件行：只读摘要不进正文；点它打�
   await page.waitForTimeout(300)
   const clean = await page.evaluate((id) => ({
     text: window.__qua.allBlocks().find((b) => b.id === id)?.text ?? null,
-    rowStill: Boolean(document.querySelector('#editor .widget-row')),
+    rowStill: Boolean(document.querySelector('#editor [data-widget-body]')),
   }), cid)
   assert(clean.text === '', `刷新后正文仍应为空：${JSON.stringify(clean)}`)
   assert(clean.rowStill, `刷新后组件行仍应画出来：${JSON.stringify(clean)}`)
@@ -10335,7 +10344,7 @@ await check('T139 正文里的组件行：只读摘要不进正文；点它打�
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), cid)
   await page.waitForTimeout(300)
   const shown = await page.evaluate((id) => ({
-    row: document.querySelector('#editor .widget-row')?.textContent ?? '',
+    row: document.querySelector('#editor [data-widget-body]')?.textContent ?? '',
     count: window.__qua.snapshot().dock.right.cards.length,
   }), cid)
   // 摘要应报「1 条」；配置是块上那一格 `_items`，槽里那张卡读的是同一格（见 T137）
@@ -10345,7 +10354,7 @@ await check('T139 正文里的组件行：只读摘要不进正文；点它打�
   await page.evaluate(() => window.__qua.invoke('core.journal/today', {}))
   await page.waitForTimeout(300)
   const beforeClick = await page.evaluate(() => window.__qua.snapshot().activeId)
-  await page.locator('#editor .widget-row').first().click()
+  await page.locator('#editor [data-widget-body]').first().click()
   await page.waitForTimeout(400)
   const afterClick = await page.evaluate((id) => ({
     activeId: window.__qua.snapshot().activeId,
@@ -10357,7 +10366,7 @@ await check('T139 正文里的组件行：只读摘要不进正文；点它打�
   await page.evaluate(() => window.__qua.invoke('core.journal/today', {}))
   await page.waitForTimeout(300)
   const beforeShift = await page.evaluate(() => window.__qua.snapshot().activeId)
-  const box = await page.locator('#editor .widget-row').first().boundingBox()
+  const box = await page.locator('#editor [data-widget-body]').first().boundingBox()
   await page.keyboard.down('Shift')
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
   await page.keyboard.up('Shift')
@@ -10371,6 +10380,86 @@ await check('T139 正文里的组件行：只读摘要不进正文；点它打�
 
   await ctx.close()
   return `只读摘要（content 仍为空）· 点开卡 · Shift 开右槽且中心不动 · 加一条引用后摘要＝「${shown.row.trim()}」`
+})
+
+/* ---------------------------------------------------------------- T140 */
+
+/**
+ * **组件卡的两个高度**：静止一档、被聚焦一档，切档是纯 CSS 的 `:focus-within`。
+ *
+ * 为什么必须真量尺寸：这一格的全部内容就是「两张高度」，只断言「变量挂上了」
+ * 会让「CSS 没读那两个变量」照样绿（实测过的同类：断言打在配置上，渲染分支删掉它也过）。
+ * 所以要量**卡身体的像素高度**，并且**两次**：聚焦前、聚焦后。
+ *
+ * 另有一条必须一起钉：切档**不改模型**（它是视图状态，与折叠态同一条口径）。
+ */
+await check('T140 组件卡的两个高度：聚焦前＝静止档、聚焦后＝聚焦档；切档不改模型', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  // 新建一个收藏并开进右槽（走命令面，与「添加组件」同一条路）
+  const cid = await page.evaluate(() =>
+    window.__qua.invoke('core.collection/create', { name: '两个高度', side: 'right' }),
+  )
+  assert(cid?.handled === true, `新建收藏应被处理：${JSON.stringify(cid)}`)
+  await page.waitForTimeout(400)
+
+  const card = '#dock-right .dock-card[data-widget="1"]'
+  const readHeights = () =>
+    page.evaluate((sel) => {
+      const el = document.querySelector(sel)
+      const body = el?.querySelector('.dock-card-body')
+      if (!el || !body) return null
+      return {
+        restVar: el.style.getPropertyValue('--widget-h-rest').trim(),
+        focusVar: el.style.getPropertyValue('--widget-h-focus').trim(),
+        height: Math.round(body.getBoundingClientRect().height),
+        tier: el.dataset.widgetHeight ?? '',
+      }
+    }, card)
+
+  const before = await readHeights()
+  assert(before !== null, '右槽里应出现组件卡')
+  /**
+   * 静止档：变量在场、卡身体真的**有界**（`compact` ＝ 96px 的内容高，含上下留白会略大）。
+   * 用「≤ 一张普通大卡的高度」判，不写死像素：像素值随 padding 变，那是样式的事。
+   */
+  assert(before.restVar !== '' && before.focusVar !== '', `两个高度都要挂上：${JSON.stringify(before)}`)
+  assert(before.tier === 'compact', `静止档应是 compact：${JSON.stringify(before)}`)
+
+  // 聚焦卡里的一个可聚焦元素（「选择块」那颗按钮）⇒ 卡身体切到 focus 档
+  await page.locator(`${card} .collection-add`).first().focus()
+  await page.waitForTimeout(200)
+  const after = await readHeights()
+  assert(
+    after.height > before.height,
+    `聚焦后卡应变高（两个高度真的在起作用）：${JSON.stringify({ before, after })}`,
+  )
+
+  /**
+   * 切档**不改模型**：高度是视图状态（与折叠态同一条口径），不是块上的字段。
+   * 判据是「块数不变 ＋ 卡里画出的条目行数不变」——`_items` 不在诊断面上，
+   * 但「画出来的行数」正是它的一处投影，且顺手钉住了「长开之后内容也还在」。
+   */
+  const snapModel = () =>
+    page.evaluate((sel) => ({
+      count: window.__qua.allBlocks().length,
+      rows: document.querySelectorAll(`${sel} .collection-row`).length,
+    }), card)
+  const model = await snapModel()
+  // 让焦点离开（点卡头）⇒ 收回静止档
+  await page.locator(`${card} .dock-card-head`).first().click()
+  await page.waitForTimeout(250)
+  const modelAfter = await snapModel()
+  const shrunk = await readHeights()
+  assert(
+    modelAfter.count === model.count && modelAfter.rows === model.rows,
+    `切高度档不该改模型：${JSON.stringify({ model, modelAfter })}`,
+  )
+  assert(shrunk.height <= before.height + 1, `焦点离开后应收回静止档：${JSON.stringify({ before, shrunk })}`)
+
+  await ctx.close()
+  return `静止 ${before.height}px → 聚焦 ${after.height}px；块数与 _items 都没变`
 })
 
 /**

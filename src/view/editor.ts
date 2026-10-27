@@ -121,7 +121,7 @@ import type { Tx } from '../core/kb/types.ts'
 import { ensureTagInTx, tagLookupOf } from '../core/kb/ensure-tag.ts'
 // 用户可见文案一律走 t
 import { t } from '../core/msg.ts'
-import { ALLOWED_ROW_CHILDREN, LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl, visibleRowHeight } from './block-dom.ts'
+import { ALLOWED_ROW_CHILDREN, EDIT_ISLAND_ATTR, LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl, visibleRowHeight } from './block-dom.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
 import { bindEditorEvents, type RefClickHit, type RefClickMods, type TriggerQuery } from './editor-events.ts'
 
@@ -231,16 +231,17 @@ export interface ViewEvents {
   /** 重新挂载窗口后（虚拟化） */
   mounted?: () => void
   /**
-   * **正文里组件行的画法**（`ui/dock-widgets.ts` 的 `widgetRow`）。
+   * **正文里组件体的画法**（`ui/dock-widgets.ts` 的 `widgetBodyInDoc`）。
    *
    * 为什么经事件表注入而不是让 `view` 直接 import：`view` 不得 import `ui`
-   * （arch-check [13]），而「一块组件在正文里长什么样」属于组件那一层。
+   * （arch-check [13]），而「一块组件长什么样」属于组件那一层。
+   * 画**多大**由 `block-dom` 按类型声明（`widget.height`）决定，这一格只给「画什么」。
    *
    * ⚠️ 未接 ⇒ 组件块在正文里是**空的 `.tx`**（只读块本来就没有正文），
-   *    不退化成「画一行普通文字」——那会把摘要当成正文，而摘要不是用户写的内容。
+   *    不退化成「画一行普通文字」——那会把组件当成正文，而组件不是用户写的内容。
    *    与 `refClick` 同一条口径：缺入口就让它看得见地缺，不静默做成另一种东西。
    */
-  widgetRow?: (block: Block, find: FindBlock | undefined) => HTMLElement
+  widgetBody?: (block: Block, find: FindBlock | undefined, mode: 'summary' | 'full') => HTMLElement
   /**
    * **在空天格子里落笔**（复盘兜底）：装配层物化那一天并重装载。
    * 编辑器只报日期——「造块进库」是命令层的事，视图不写库。
@@ -474,12 +475,12 @@ export class BlockEditor {
     if (!active) return false
     if (active === this.container) return true
     if (!this.container.contains(active)) return false
-    // 焦点在挂载区那棵子树里（里层编辑器或它的按钮）⇒ 不算「本视图在编辑」
-    return !active.closest('.sec-mount') && !active.isContentEditable
+    // 焦点在**另一个编辑宿主**的子树里（挂载区、正文里的组件体）⇒ 不算「本视图在编辑」
+    return !active.closest(`[${EDIT_ISLAND_ATTR}]`) && !active.isContentEditable
   }
 
   /**
-   * 焦点是不是在本视图里那些**别的视图**的段尾槽里（挂载区／查询视图）。
+   * 焦点是不是在本视图里那些**别的编辑宿主**上（挂载区／查询视图／正文里的组件体）。
    *
    * ⚠️ 判据不能只是「焦点在里层编辑器上」：点一下挂载区抬头那颗刷新按钮，
    *    焦点落到按钮上——那一刻**也不是**本视图在编辑。只判可编辑元素的话，
@@ -489,14 +490,16 @@ export class BlockEditor {
   private focusInMount(): boolean {
     const active = document.activeElement as HTMLElement | null
     if (!active || active === this.container) return false
-    return this.container.contains(active) && Boolean(active.closest('.sec-mount'))
+    return this.container.contains(active) && Boolean(active.closest(`[${EDIT_ISLAND_ATTR}]`))
   }
 
-  /** 有没有**另一台**编辑宿主正拿着焦点（挂载区／查询视图的就属于这种） */
+  /** 有没有**另一台**编辑宿主正拿着焦点（挂载区／查询视图／组件体里的输入框） */
   private nestedEditorActive(): boolean {
     const active = document.activeElement as HTMLElement | null
     if (!active || active === this.container) return false
-    return this.container.contains(active) && active.isContentEditable
+    if (!this.container.contains(active)) return false
+    // 里层可编辑宿主，或**里层宿主里的任何东西**（输入框、按钮）都算「不在我这」
+    return active.isContentEditable || Boolean(active.closest(`[${EDIT_ISLAND_ATTR}]`))
   }
 
   /**
@@ -683,6 +686,20 @@ export class BlockEditor {
       // 它不是「可点空白建块」的地方：挂载区自己有点击语义，落到建块上就是静默多一个空块
       slot.dataset.noEmptyCreate = '1'
       /**
+       * **编辑岛标记**（`.sec-mount` 与正文里的组件体共用这一格）。
+       *
+       * 为什么需要一个标记而不是按类名判：本视图里有几处要回答「焦点现在是不是
+       * **在别人的地盘**上」（`ownFocus`／`focusInMount`／`nestedEditorActive`）。
+       * 按 `.sec-mount` 这个**类名**判，就等于「只有挂载区算别人的地盘」——
+       * 正文里的组件体（`.widget-body`）同样嵌在本视图里、同样有自己的焦点，
+       * 类名一换，那三处全部判错，而且是静默的：
+       *   · `ownFocus` 判成「我在编辑」⇒ `restoreSel()` 把光标从里层抢回来；
+       *   · `focusInMount` 判成「没有里层」⇒ 每次 store 变化都全量重排 ⇒
+       *     里层正在打字的节点被换掉（`click` 不派发、光标跳走）。
+       * ⇒ 判据是**标记**（「这一棵子树是另一个编辑宿主」），不是它属于哪一种容器。
+       */
+      slot.dataset.editIsland = '1'
+      /**
        * ⚠️ **必须断开可编辑链**：`.sec-mount` 落在 `#editor`（一个 contenteditable 容器）里面，
        * 而挂载区里是**另一个编辑器实例**。可编辑元素嵌在可编辑元素里时，Chrome 把焦点交给
        * **外层的编辑宿主**（实测：对里层 `focus()` 之后 `activeElement` 仍是 `#editor`，
@@ -764,8 +781,8 @@ export class BlockEditor {
         context: r.depth === 0 ? this.doc.contexts?.get(r.block.id) : undefined,
         // 展开出来的根才有「收起上下文」；没接回调就不画一个点了没反应的按钮
         contextBack: Boolean(this.onContextBack) && r.depth === 0 && (this.doc.expandedRoots?.has(r.block.id) ?? false),
-        // 组件行由 UI 层画（`view` 不得 import `ui`）；`widgetRow` 为 null ⇒ 组件块在正文里退化成空行
-        ...(this.events.widgetRow ? { widgetRow: this.events.widgetRow } : {}),
+        // 组件体由 UI 层画（`view` 不得 import `ui`）；没接 ⇒ 组件块在正文里退化成空行
+        ...(this.events.widgetBody ? { widgetBody: this.events.widgetBody } : {}),
       },
     )
     this.mounted.add(r.block.id)

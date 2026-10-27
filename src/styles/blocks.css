@@ -510,14 +510,13 @@
   opacity: 0.85;
 }
 /*
- * **正文里的组件行**：一行只读摘要（图标 ＋ 名字 ＋ 几条 ＋ 「打开」）。
+ * **正文里的组件体**：占着 `.tx` 的位置，却不是正文（读数契约见 `view/dom-text.ts`）。
  *
- * 它住在 `.tx` 里（与分割线那一格同形状），但**不是正文** —— 那一行是组件的摘要，
- * 不是用户写的字。所以：
- *   · 整行 `contenteditable=false`（在 `widgetRow()` 里自带），插入点进不去；
- *   · 高度按 `1lh` 收（与 gutter 同一条中线），不额外撑高这一行；
- *   · 悬停才给出「打开」两字 —— 常驻的「打开」会把一行摘要变成一颗按钮，
- *     而这一行的主职是「说明这儿有个组件」。
+ * 两个形状：
+ *   · `.widget-row` —— 摘要那一档（`rest: 'summary'`），一行、`1lh` 高；
+ *   · `.widget-body` —— 完整 UI（`rest`／`focus` 是高度档），有界盒子、内部滚动。
+ * 高度不写在这里：它由类型声明给，`view/block-dom.ts` 用 `CSS.px()` 写成 inline style
+ * （同一个数还要喂给虚拟化的占位高度，两处各写一份会静默错开）。
  *
  * ⚠️ 颜色只用 `--ui-*`：主题机制靠「主题只填 `--ui-*`」生效，直连基础色会让它改不动。
  */
@@ -539,6 +538,30 @@
 .blk .tx .widget-row:hover {
   border-color: var(--ui-accent);
   background: var(--ui-accent-soft);
+}
+/*
+ * 完整 UI 那一档：一个**有界**盒子（高度由声明给，写在 inline style 上），
+ * 内容超出就在里面滚 —— 不让一块组件把整页撑长，也不让它在正文里「长到一半被截断」。
+ * `display: block` 而不是 inline-flex：它是正文里的一段面，不是一行字。
+ *
+ * **两个高度**（`--widget-h-rest` / `--widget-h-focus` 由 `applyWidgetHeights` 挂上）：
+ * 静止一档、被聚焦一档，切档是纯 CSS 的 `:focus-within` —— 状态由焦点推出，
+ * 不存第二份。没挂高度（摘要档）就不设 `height`，让它按内容自然高。
+ */
+.blk .tx .widget-body {
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+  padding: var(--ui-gap-2);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+  cursor: default;
+  height: var(--widget-h-rest, auto);
+}
+.blk .tx .widget-body:focus-within {
+  height: var(--widget-h-focus, auto);
+  border-color: var(--ui-accent);
 }
 .widget-row .ico {
   color: var(--ui-text-tertiary);

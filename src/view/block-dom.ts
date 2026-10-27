@@ -30,7 +30,9 @@ import {
   prop,
   tagIdsOf,
   typeDeclOf,
+  widgetBodyHeightOf,
   widgetBodyOf,
+  type WidgetHeights,
   type Block,
   type FindBlock,
   type FoldState,
@@ -55,10 +57,53 @@ export const LINE_H = 30
  */
 export const ALIAS_HEAD_H = 18
 
-/** 这一行在虚拟化里占多高：有别名头（且不是显示文本）或面包屑就是两行以上 */
+/**
+ * 组件体的三个高度档（像素）。
+ *
+ * 为什么数值住在 TS 而不是 CSS token：**同一个数有两个消费者** ——
+ *   · 视觉：组件体的盒子高度；
+ *   · 虚拟化：`visibleRowHeight` 在**没有挂 DOM 的行**上算占位高度，读不到 computed style。
+ * 两处若各写一份，滚动条与实际高度会静默错开（越靠后偏得越多）。
+ * 所以**数值只在这里定义**，DOM 侧经 `CSS.px()` 写 inline style（`[12]` 允许的那条路），
+ * CSS 里不重复一遍。
+ */
+export const WIDGET_H: Record<'compact' | 'medium' | 'tall', number> = {
+  compact: 96,
+  medium: 168,
+  tall: 320,
+}
+
+/**
+ * 给**一个组件露面**挂上它的两个高度：`--widget-h-rest`（静止）与 `--widget-h-focus`（被聚焦）。
+ *
+ * 为什么是一个函数而不是各写一遍：卡（槽里）与体（正文里）**读同一份声明**
+ * （`widget.slot.height` / `widget.body.height`），也读同一个 `WIDGET_H`。
+ * 各写一遍就会有一处漏挂某个档，而漏挂不报错——只是那张卡不长开。
+ *
+ * 切档是**纯 CSS**（`:focus-within` 选 `--widget-h-focus`），所以：
+ *   · 不需要往 `Doc` 里加展开表（视图状态与折叠态同一条口径，不进库）；
+ *   · 不需要监听 focusin/focusout，也就没有「按 Tab 出去忘了收回」；
+ *   · 重渲染后状态自然正确（它由焦点推出，不是存下来的）。
+ */
+export function applyWidgetHeights(el: HTMLElement, h: WidgetHeights | null): void {
+  if (!h) return
+  el.dataset.widgetHeight = h.rest
+  el.style.setProperty('--widget-h-rest', CSS.px(WIDGET_H[h.rest]).toString())
+  el.style.setProperty('--widget-h-focus', CSS.px(WIDGET_H[h.focus]).toString())
+}
+
+/**
+ * 这一行在虚拟化里占多高：有别名头（且不是显示文本）或面包屑就是两行以上。
+ *
+ * ⚠️ **内联组件体要算进来**：它占着 `.tx` 的位置却不占正文，高度由类型声明给
+ *    （`widget.body.height.rest`）。按 `LINE_H` 算会让带组件行的文档滚动条系统性偏小。
+ *    这里只读**静止档**：聚焦档只发生在窗口里的那一行上，而占位算的是窗口**之外**的行。
+ */
 export function visibleRowHeight(b: Block, extraHeads = 0): number {
   const aliasHead = aliasesOf(b).length > 0 && prop<string>(b, DISPLAY_PROP) !== 'text' ? 1 : 0
-  return LINE_H + (aliasHead + extraHeads) * ALIAS_HEAD_H
+  const h = widgetBodyHeightOf(b)
+  const body = h ? WIDGET_H[h.rest] : LINE_H
+  return body + (aliasHead + extraHeads) * ALIAS_HEAD_H
 }
 
 /**
@@ -320,6 +365,22 @@ export function makeTagsEl(
 }
 
 /**
+ * **编辑岛标记**：这一棵子树是**另一个编辑宿主**（挂载区、查询视图、正文里的组件体）。
+ *
+ * 为什么是标记而不是类名判据：本视图里有三处要回答「焦点现在是不是在别人的地盘上」
+ * （`ownFocus`／`focusInMount`／`nestedEditorActive`）。按 `.sec-mount` 这个类名判，
+ * 就等于「只有挂载区算别人的地盘」——每多一种编辑岛，那三处就静默判错一次
+ * （光标被抢回来、里层正在打字的节点被重排掉）。判据应该是**这件事本身**。
+ *
+ * 放在这里（渲染层的契约产地）：它和 `data-block-id`／`data-depth` 是同一类东西 ——
+ * 别的层按它选，改名等于破坏契约。
+ */
+export const EDIT_ISLAND_ATTR = 'data-edit-island'
+
+/** 这一行是**组件的正文露面**（`.tx` 里那一格），高度由类型声明给 */
+export const WIDGET_BODY_ATTR = 'data-widget-body'
+
+/**
  * **一个 `.blk` 允许有哪些直接子节点** —— 这是行的 DOM 契约清单，只有渲染层能增项。
  *
  * 为什么需要它：整片编辑区是**一个** contenteditable 容器，所以行容器 `.blk` 自己也可编辑。
@@ -330,10 +391,11 @@ export function makeTagsEl(
  * ⇒ 判据：`.blk` 的子节点只能是**渲染层自己放进去的那几种**；其余一律当游离内容清掉。
  *   加新子节点时**必须**在这里登记，否则它会在第一次收光标时被当作脏东西删掉。
  *
- * ⚠️ `widget-row` 是**正文槽的子节点**，不是 `.blk` 的直接子节点 —— 它登记在这里
+ * ⚠️ `widget-body`／`widget-row` 是**正文槽的子节点**，不是 `.blk` 的直接子节点 —— 登记在这里
  *    是因为 `reclaimCaret` 沿 `.blk` 收节点时会走进 `.tx`（插入点常常落在 `.tx` 里），
- *    而组件行是 `contenteditable=false` 的：浏览器把「清理游离节点」看成从它内部开始，
- *    不登记就会在收光标时把整个组件行删掉（表现为「点一下组件行，它消失了」）。
+ *    而组件体是 `contenteditable=false` 的：浏览器把「清理游离节点」看成从它内部开始，
+ *    不登记就会在收光标时把整个组件体删掉（表现为「点一下组件，它消失了」）。
+ *    （`widget-row` 是摘要那一档的类名，两个都登记：高度档不同，容器契约是同一个。）
  */
 export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'blk-context',
@@ -343,6 +405,7 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'left',
   'tx',
   'blk-tags',
+  'widget-body',
   'widget-row',
 ])
 
@@ -392,7 +455,16 @@ export function makeBlockEl(
     context?: readonly Block[]
     /** 这是一个「展开出来的上下文根」：行首给「收起上下文」 */
     contextBack?: boolean
-    widgetRow?: (b: Block, find: FindBlock | undefined) => HTMLElement
+    /**
+     * **组件体的画法**（`ui/dock-widgets.ts` 的 `widgetBodyInDoc`）。`view` 不得 import `ui`
+     * （arch-check [13]），而「一个组件长什么样」天然属于组件那一层 ⇒ 经这里注入。
+     *
+     * 只给**一个**入口、不给「摘要」与「完整 UI」两个：它们不是两种东西，
+     * 是同一个组件体的两个高度（`widget.height` 的 `rest`／`focus`）。
+     * 画多大由 `block-dom` 按声明决定，画什么由这里决定（`mode` 只报「这一档要哪个形状」）。
+     * 不传 ⇒ 组件块在正文里退化成空的 `.tx`（只读块本来就没有正文，数据一个字节不丢）。
+     */
+    widgetBody?: (b: Block, find: FindBlock | undefined, mode: 'summary' | 'full') => HTMLElement
   },
 ): HTMLElement {
   const b = r.block
@@ -666,20 +738,39 @@ export function makeBlockEl(
   tx.className = 'tx'
   if (todo === 'done') tx.classList.add('done')
   /**
-   * **没有正文的两种块**：线（分割线）与组件行（组件块的正文露面）。
+   * **没有正文的两种块**：线（分割线）与组件体（组件块的正文露面）。
    *
    * 两者都放在 `.tx` **里面**，不另换一个元素替代 `.tx`。
    * 编辑器里有一批路径按 `.tx` 认块（取文本、落光标、标 caret），换掉 `.tx`
    * 等于让这一行在那些路径里「不存在」——静默失效，不报错。
    *
-   * ⚠️ **组件行优先于 `fill`**：组件块的正文是只读的（类型声明 `text:'readonly'`），
-   *    它显示的是**摘要**（有几条），不是块里的字。走 `fill` 会把那几个字画出来，
+   * ⚠️ **组件体优先于 `fill`**：组件块的正文是只读的（类型声明 `text:'readonly'`），
+   *    它显示的是组件自己（摘要或完整 UI），不是块里的字。走 `fill` 会把那几个字画出来，
    *    而那几个字根本不是用户写的内容。
-   * ⚠️ 组件行是 `contenteditable=false`（在 `widgetRow` 里自带）：它占用了正文槽的
+   * ⚠️ 组件体自带 `contenteditable=false` 与 `data-widget-body`：它占用了正文槽的
    *    位置但没有位点，与标签 chip 同一条道理 —— 有位点的容器里不放没位点的东西。
+   *    那个属性是**读数契约**（`view/dom-text.ts` 的四处都按它判），所以由这里兜一层：
+   *    画法在 `ui`，契约在 `view`。
    */
-  if (widgetBodyOf(b) === 'row' && opts.widgetRow) {
-    tx.appendChild(opts.widgetRow(b, opts.find))
+  if (widgetBodyOf(b) && opts.widgetBody) {
+    const kind = widgetBodyOf(b)
+    const h = widgetBodyHeightOf(b)
+    const body = opts.widgetBody(b, opts.find, kind === 'summary' ? 'summary' : 'full')
+    body.contentEditable = 'false'
+    body.dataset.widgetBody = b.id
+    /**
+     * 它是**另一个编辑宿主**：里面可能有输入框、可拖的条目、自己的焦点。
+     * 本视图的重排判据按这一格认它（见 `EDIT_ISLAND_ATTR`），否则
+     * 「里层在打字时全量重排」会把它连同焦点一起搬走。
+     */
+    body.setAttribute(EDIT_ISLAND_ATTR, '1')
+    /**
+     * **两个高度：静止与被聚焦**（数值与切档机制见 `applyWidgetHeights`）。
+     * 摘要那一档没有高度（它就是一行），所以只标 `'summary'`。
+     */
+    if (h) applyWidgetHeights(body, h)
+    else body.dataset.widgetHeight = 'summary'
+    tx.appendChild(body)
   } else if (blockTypeOf(b) === DIVIDER_TYPE) {
     const rule = document.createElement('span')
     rule.className = 'divider-rule'

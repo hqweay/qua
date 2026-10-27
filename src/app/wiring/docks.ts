@@ -15,6 +15,7 @@ import {
   buildAdjacency,
   findInForest,
   isWidgetBlock,
+  widgetSlotHeightOf,
 } from '../../core/index.ts'
 import { t } from '../../core/msg.ts'
 import type { Registry } from '../../core/commands/index.ts'
@@ -35,6 +36,7 @@ import {
 import { backrefsCard, todayCard, type DockContentDeps } from '../../ui/dock-content.ts'
 import { widgetBody, widgetTitle, type WidgetDeps } from '../../ui/dock-widgets.ts'
 import { BelongsTree } from '../../ui/belongs-tree.ts'
+import { applyWidgetHeights } from '../../view/block-dom.ts'
 import { bindDropTarget, isBlockId, setDragCard } from '../../view/dnd.ts'
 import { bindWindowDrop } from '../../ui/dock-windows.ts'
 
@@ -244,17 +246,28 @@ export function setupDocks(deps: DocksDeps) {
       if (isBlockId(id)) {
         const block = deps.kb.get(id)
         if (block && isWidgetBlock(block)) {
+          const body = widgetBody(block, widgetDeps)
           const el = buildDockCard(
             {
               id,
               title: widgetTitle(block),
-              body: widgetBody(block, widgetDeps),
+              body,
               draggable: true,
               close: { title: t('ui.dock.closeWidget'), onClick: () => closeWindow(side, id) },
             },
             cardStateFor(side, id),
           )
           el.dataset.widget = '1'
+          /**
+           * **卡的两个高度**：静止（`rest`）与被聚焦（`focus`）。
+           *
+           * 与正文里的组件体读同一份声明、同一个数值表（`applyWidgetHeights`）：
+           * 「同一张卡在槽里和正文里长得不一样高」会让人以为是两份配置。
+           * 切档同样是纯 CSS（`:focus-within`）——卡里一有焦点就长开，焦点离开就收回。
+           * ⚠️ 高度挂在**卡根**上（自定义属性向下继承，`.dock-card-body` 自己读）：
+           *    挂在内容元素上，卡壳那一层读不到。
+           */
+          applyWidgetHeights(el, widgetSlotHeightOf(block))
           entries.push({ id, el, size: 'large' })
           continue
         }
@@ -469,6 +482,14 @@ export function setupDocks(deps: DocksDeps) {
     /** 卡片状态/标题给窗口管理器用（窗口卡由它自己建） */
     cardStateFor,
     windowLabel,
+    /**
+     * 正文里的组件体要的宿主能力（与槽里的卡**同一份** `widgetDeps`）。
+     *
+     * 为什么不另建一份：正文里的组件与槽里的卡是**同一个组件的两个露面**，
+     * 「加一条引用」这类动作写的是同一格 `_items`。两份 deps 会长出两套「写完重画谁」，
+     * 于是「在正文里加一条，槽里的卡没跟上」。
+     */
+    widgetDeps: (): WidgetDeps => widgetDeps,
     /** 窗口管理器由装配入口在槽挂载之后创建，再交回给这一节 */
     setWindows: (next: { left: DockWindows; right: DockWindows }) => {
       windows = next
