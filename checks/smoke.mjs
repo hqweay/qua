@@ -10880,6 +10880,53 @@ await check('T140 组件卡的两个高度：聚焦前＝静止档、聚焦后�
 })
 
 /**
+ * **空块里敲拼音，第一个字母不许被冻成正文。**
+ *
+ * 为什么单列一条：`posAt` 曾经把空块的光标落到 `.tx` 的 **offset 1**（`<br>` 之后），
+ * 那里不是 Chrome 认的稳定组合位——预编辑串插入时 `<br>` 被摘掉，组合区间当场失焦，
+ * 上一次组合被当作已提交 ⇒ 打 `nihao` 得到 `n你好`（`checks/probe-ime-live.mjs` 实测）。
+ * 而**新建的块总是空的**，这条正好压在「↵ 建块 ⇒ 马上打中文」这条最常用的路上。
+ *
+ * ⚠️ 走 CDP 的 `Input.imeSetComposition`（真 Chromium 输入管线），手搓合成事件测不出来。
+ */
+await check('T141 空块里敲拼音：第一个字母不被冻成正文（组合只起一次）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  await page.evaluate(() => {
+    window.__imeStarts = 0
+    for (const ty of ['compositionstart', 'compositionend']) {
+      window.addEventListener(ty, () => { window.__imeStarts += ty === 'compositionstart' ? 1 : 0 }, { capture: true })
+    }
+    // ↵ 建块 ⇒ 光标落进一个**空的**新块（正是用户报的那条路）
+    const id = window.__qua.blocks()[0].id
+    window.__qua.focusBlock(id, 999)
+  })
+  await page.waitForTimeout(200)
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(200)
+
+  const cdp = await page.context().newCDPSession(page)
+  for (const s of ['n', 'ni', 'nih', 'niha', 'nihao']) {
+    await cdp.send('Input.imeSetComposition', { text: s, selectionStart: s.length, selectionEnd: s.length })
+    await page.waitForTimeout(45)
+  }
+  await cdp.send('Input.insertText', { text: '你好' })
+  await page.waitForTimeout(250)
+
+  const out = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const id = ed.caretBlock() ?? ed.sel?.aBlock
+    return { text: id ? (window.__qua.blocks().find((b) => b.id === id)?.text ?? null) : null, starts: window.__imeStarts }
+  })
+  assert(out.starts === 1, `一串拼音只应起一次 compositionstart，实际 ${out.starts} 次（第二次＝第一次被冻成正文）`)
+  assert(out.text === '你好', `空块里打 nihao 应得到「你好」，实际 ${JSON.stringify(out.text)}`)
+  await ctx.close()
+  return `空块：compositionstart×${out.starts}，结果 ${JSON.stringify(out.text)}`
+})
+
+/**
  * ⚠️ **报告先写，再关浏览器。** 反过来的话，机器被压死那一刻 Chrome 先死，
  *    `browser.close()` 抛出来，报告就永远没写 —— 编排端只能看到「这一片没留下报告」，
  *    而真正的原因是「这一片的用例其实已经跑完了，只是答案没被记下来」。

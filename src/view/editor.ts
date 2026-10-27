@@ -1115,15 +1115,20 @@ export class BlockEditor {
       target.node = tx
       /**
        * 有正文的落到「正文末尾、chip 之前」（textEndOff 的职责）。
-       * **空块**（只有 `<br>`，可能再跟一枚 chip）必须落到元素 0 位：
-       * 「br 与 chip 之间」不是 Chrome 认的稳定光标位——下一次按键前它会把光标
-       * 自己挪到别处（contenteditable=false 的邻居它不认），随后的删除键就按
-       * 挪错的位置走原生删除，把整行的内联元素整段摘掉，那一行从此没有
-       * 可落光标的地方（⌥Enter 归类后的空行真踩过）。(tx, 0) 是 Chrome 对
-       * `<br>` 占位空段的标准光标位，稳定。
+       * **没有正文的一律落到元素 0 位**（`<br>` 之前）：
+       * 「br 之后 / br 与 chip 之间」都不是 Chrome 认的稳定光标位。
+       *
+       * ⚠️ 除了上面那一条（下一次按键前 Chrome 会自己把光标挪走，随后的删除键
+       *    按挪错的位置走原生删除，把整行的内联元素整段摘掉——⌥Enter 归类后的空行
+       *    真踩过），它还有第二个后果：**输入法在 (tx, 1) 上组合不起来**。
+       *    实测（`checks/probe-ime-live.mjs`）：空块里敲 `nihao`，第一个字母 `n`
+       *    被冻结成正文，随后又起一次 `compositionstart`，结果成 `n你好`。
+       *    Chrome 在 `<br>` 之后那个位置插入预编辑串时会把 `<br>` 摘掉，组合区间
+       *    当场失焦 ⇒ 上一次组合被当作已提交。而 (tx, 0) 上同一串拼音干净
+       *    （`probe-ime-matrix.mjs` 的假块对照）。新建的块**总是空的**，所以这条
+       *    正好压在「↵ 建块后马上打中文」这条最常用的路上。
        */
-      const end = textEndOff(tx)
-      target.off = sawContent || end === tx.childNodes.length ? end : 0
+      target.off = sawContent ? textEndOff(tx) : 0
     }
     return target
   }
@@ -1479,31 +1484,14 @@ export class BlockEditor {
       this.placeCaret(s.hBlock, s.hOff)
       return
     }
-    const tx = this.txEl(s.aBlock)
-    if (!tx) return
-    const at = (offset: number): { node: Node; off: number } => {
-      let acc = 0
-      const target = { node: tx as Node, off: 0 }
-      const walk = (n: Node): void => {
-        if (target.node !== tx || isTagChip(n)) return
-        if (n.nodeType === Node.TEXT_NODE) {
-          const len = (n.textContent ?? '').length
-          if (acc + len >= offset) {
-            target.node = n
-            target.off = Math.max(0, offset - acc)
-            return
-          }
-          acc += len
-          return
-        }
-        for (const c of Array.from(n.childNodes)) walk(c)
-      }
-      walk(tx)
-      if (target.node === tx) target.off = textEndOff(tx)
-      return target
-    }
-    const a = at(s.aOff)
-    const h = at(s.hOff)
+    /**
+     * ⚠️ **复用 `posAt`，不要在这里再抄一份「偏移 → DOM 位置」**：
+     * 这一份漏了原子（`data-atom-id`），也不认「空块落到元素 0 位」那条
+     * （见 `posAt` 的注释）——两处各判一次，空块上的输入法就会有一边仍然坏着。
+     */
+    const a = this.posAt(s.aBlock, s.aOff)
+    const h = this.posAt(s.aBlock, s.hOff)
+    if (!a || !h) return
     const r = document.createRange()
     r.setStart(a.node, a.off)
     r.setEnd(h.node, h.off)
