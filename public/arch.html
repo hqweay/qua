@@ -144,7 +144,7 @@
       <div class="tag">ui</div>
       <div class="body">
         <span class="files">src/ui/ · 槽 / 面板 / 弹层 / 周边编辑器</span>
-        <span class="note">堆叠归槽、tab 归块；槽里只有块，没有「页面列表组件」这类实体化容器</span>
+        <span class="note">堆叠归槽、tab 归块；槽的清单里只有<b>位置</b>（块 id ／ <code>cmd:</code> 小卡 ／ 宿主现算的派生卡），没有「页面列表组件」这类实体化容器。组件块的两个露面：槽里一张卡、正文一行只读摘要</span>
       </div>
     </div>
     <div class="layer l-view">
@@ -181,7 +181,7 @@
   <span class="key">modified</span>: number     <span class="cmt">最后一次改动（只在编辑边界更新，并进内容那条 upsert）</span>
   <span class="key">annos?</span>: Anno[]       <span class="cmt">可引用区间：只在被引用时才存在（不写空数组）</span>
   <span class="key">props?</span>: {            <span class="cmt">属性袋：键＝定义块的 id，不是名字</span>
-    <span class="key">_type</span>?      <span class="cmt">封闭注册表：core/outline · core/divider</span>
+    <span class="key">_type</span>?      <span class="cmt">封闭注册表：core/outline · core/divider · core/collection-widget</span>
     <span class="key">_icon</span>?      <span class="cmt">lucide:&lt;name&gt; 或字面文本</span>
     <span class="key">_date</span>?      <span class="cmt">有它 ⇒ 日记块（只读、全局一天一个）</span>
     <span class="key">_aliases</span>?   <span class="cmt">地址：0..N，首个是主名，全局唯一</span>
@@ -194,6 +194,7 @@
     <span class="key">_query</span>?     <span class="cmt">有它 ⇒ 查询视图块（值是 where 条件）</span>
     <span class="key">_queryResult</span>? <span class="cmt">冻结的查询结果（成员与顺序；只在刷新时改）</span>
     <span class="key">_mounts</span>?   <span class="cmt">块底挂载区的用户栏：{ label, spec }[]（tab 是一格数据，不是块）</span>
+    <span class="key">_items</span>?    <span class="cmt">集合组件的引用列表：块 id[]（有序引用，不是 children —— 零级联）</span>
     <span class="key">_ownProps</span>? · <span class="key">_fieldDefs</span>? · <span class="key">_choices</span>? · <span class="key">_uiPosition</span>?
     <span class="key">[定义块 id]</span>: unknown  <span class="cmt">用户/插件定义的字段值</span>
   <span class="pipe">}</span>
