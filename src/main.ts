@@ -1433,6 +1433,9 @@ onAssetReady((hash) => {
     if (b.content.some((r) => r.t === 'asset' && r.asset === hash)) hit.add(b.id)
   }
   for (const id of hit) repaintBlock(id)
+  // 重画换了节点（文件占位 → 真图）⇒ 角标里的 DOM 读数是**派生量**，也要跟着排一次刷新。
+  // 漏了这一行的症状：首屏图是最先出现的东西，角标却会停在占位那一帧的数上，直到下一次交互。
+  scheduleBadge()
 })
 
 let panels: ReturnType<typeof setupPanels>

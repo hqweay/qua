@@ -3865,25 +3865,20 @@ await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling
 await check('T15 角标：块数 / DOM 节点数 / 主题 / composing 都在', async () => {
   const { ctx, page } = await freshPage(browser, base)
   /**
-   * 角标是**按 rAF 刷新**的，而首屏的行内图片是异步到位的（占位 → 真图会换掉几个节点）：
-   * 先等资产落定，再触发一次角标刷新，最后在**同一个 JS 任务**里读角标与快照。
-   * 分两次 evaluate 会让这条断言变成一条时序竞态（真踩过）。
+   * 首屏的行内图片是异步到位的（文件占位 → 真图会换掉几个节点），而角标是**按 rAF 刷新**
+   * 的派生读数。判据是「资产落定之后，角标跟得上当前快照」——等它收敛，而不是读一帧快照
+   * 赌那一帧恰好是新的（分两次 evaluate 更会变成时序竞态，真踩过）。
    */
-  await page.evaluate(async () => {
-    for (let i = 0; i < 80; i++) {
+  await page.waitForFunction(
+    () => {
       const imgs = [...document.querySelectorAll('#editor .atom-image img')]
-      if (imgs.length === 0 || imgs.every((im) => im.naturalWidth > 0)) break
-      await new Promise((r) => setTimeout(r, 50))
-    }
-  })
-  /**
-   * 角标只在**有事发生时**才被排一次刷新；资产换图本身不排。用一次系统外观变更
-   * 触发它（`prefers-color-scheme` 的监听只重算诊断，不动 DOM 形状），等它落定再读。
-   */
-  await page.emulateMedia({ colorScheme: 'dark' })
-  await page.waitForTimeout(200)
-  await page.emulateMedia({ colorScheme: 'light' })
-  await page.waitForTimeout(300)
+      const settled = imgs.length === 0 || imgs.every((im) => im.naturalWidth > 0)
+      const s = window.__qua.snapshot()
+      return settled && (document.getElementById('badge')?.innerText ?? '').includes(String(s.domNodes))
+    },
+    null,
+    { timeout: 8000 },
+  )
   const { badge, s } = await page.evaluate(() => ({
     badge: document.getElementById('badge')?.innerText ?? '',
     s: window.__qua.snapshot(),
