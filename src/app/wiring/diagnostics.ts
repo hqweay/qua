@@ -520,6 +520,22 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
     __editor: mainEd,
     __registry: registry,
     __layers: layers,
+    /**
+     * **带外改动**（只在测试面）：把森林改成你给的样子，然后照常宣布一次。
+     *
+     * 为什么需要它：有些状态**没有生产入口**——例如「真删」（块从森林里消失，
+     * 而不是进回收站）。回收站的「悬空两态」要靠它区分；而那条断言验的是
+     * **读路径怎么判**，不是删除命令本身。
+     *
+     * ⚠️ 它不是第二条写路径：它不产 op、不落盘，且**只在 `DEV_SURFACE` 下存在**。
+     *    用它改完必须**立刻**断言，不能拿来模拟「用户做了一件事」。
+     */
+    forceForest: (mutate: (forest: Block[]) => void) => {
+      mutate(mainEd.store.blocks)
+      // 森林被整体换掉 ⇒ 索引必须整库重建（没有 op 可依），与 `store.reset` 同一条路
+      mainEd.store.discardIndex()
+      mainEd.store.apply([], 'diagnostics')
+    },
   }
 
   // ⚠️ 只在测试面挂上去：诊断口能直接调 `invoke`（含换库、清存储），

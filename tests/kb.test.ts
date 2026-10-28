@@ -522,11 +522,13 @@ test('索引随 tx 增量修补：任意一批写之后，增量结果与全量�
     // 修补必须**就地**：tx 之前拿到的那份索引对象，tx 之后还是同一个（作废重建会换对象——
     // 那会让每次写入都退化成全量重建，等式却照样是绿的，所以这里连身份一起断言）
     const before = store.index
+    const rebuilds = store.probe.rebuildCount
     kb.tx(write)
     assert.equal(store.index, before, `第 ${i + 1} 笔写之后：索引应被就地修补，而不是作废重建`)
+    assert.equal(store.probe.rebuildCount, rebuilds, `第 ${i + 1} 笔写之后：不许发生整库重建`)
     const incremental = fingerprint(store.index)
-    store.invalidateIndex()
-    const full = fingerprint(store.index)
+    // 与全量重建比：`rebuild` 是纯函数，直接拿森林算一份对照（不动 store 的索引）
+    const full = fingerprint(rebuild(store.blocks))
     assert.equal(incremental, full, `第 ${i + 1} 笔写之后：索引增量修补必须与全量重建一致`)
   }
   // tx 之后不作废索引：刚插入的块**不经重建**就在索引里（否则每次写都退化成全量重建）

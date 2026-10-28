@@ -288,11 +288,10 @@ test('refreshSpec：把条件与结果写回块上；丢掉的不再匹配的块
   //    （不是改正文里的字 —— 改字本来就不该改变归属）。
   // ⚠️ 必须从**同一份** fixture 里改块：再调一次 `fixture()` 会造出一个新的标签块（新 id），
   //    于是所有归属都指向一个不在 `blocks` 里的标签 ⇒ 全部被判成 dropped（看着像全丢了）。
-  // ⚠️ 直写绕过事务 ⇒ 索引不会自己跟上：写完必须显式作废
-  //    （生产里唯一写入口是 `tx`，索引随 op 修补；直写是测试里的特殊动作）。
+  // 走真实写路径（事务）：索引随 op 修补 —— 不直写、也不显式作废索引。
   const flat = (list: Block[]): Block[] => list.flatMap(function walk(x) { return [x, ...x.children.flatMap(walk)] })
-  delete flat(blocks).find((x) => x.id === 'a')!.props!._tags
-  store.invalidateIndex()
+  const member = flat(blocks).find((x) => x.id === 'a')!
+  kb.tx((tx) => tx.setTags(member.id, []))
   const second = refreshSpec(q, spec, kb)
   assert.deepEqual(second.dropped, ['a'])
   assert.ok(!second.hits.some((h) => h.blockId === 'a'))

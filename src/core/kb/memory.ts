@@ -262,11 +262,15 @@ export class MemoryKb implements KbClient {
     const sink = new ChangeSink(changes)
     try {
       const result = fn(this.makeTx(ops, sink))
-      // 失效与广播只在成功之后：失败路径恢复的是同一份快照，索引没有理由重算。
-      // 索引按 op 增量修补（不是整库作废）：一批 op 之后与全量重建逐字节一致（等式测试钉住），
-      // 而 `notify` 不作废索引 —— 作废会让这次修补白做，每次写入都退化成全量重建。
-      this.store.applyOps(ops)
-      this.store.notify(opts.source, sink.ids())
+      /**
+       * **宣布只在这里发生**：`store.apply` 是状态转移的唯一入口 ——
+       * 它同时做「按 op 修补索引」与「通知订阅者」两件事。
+       *
+       * 为什么必须在出口：失败路径恢复的是同一份快照，索引没有理由重算；
+       * 而成功的这一批 op 说清了「变了哪几格」，所以索引只修补、不作废。
+       * 调用方（编辑器／命令）**不得**再自己宣布（那会让这次修补白做）。
+       */
+      this.store.apply(ops, opts.source, sink.ids())
       return { ops, changes, result }
     } catch (err) {
       this.restore(snap)
@@ -274,12 +278,17 @@ export class MemoryKb implements KbClient {
     }
   }
 
-  /** 按序列化快照原地恢复（保持数组身份：视图手里的引用不会失效） */
+  /**
+   * 事务失败 ⇒ 按序列化快照原地恢复（保持数组身份：视图手里的引用不会失效）。
+   *
+   * 失败路径**不通知**（`store.apply` 不会被调用）：别的视图看到的还是失败之前那份，
+   * 而那份就是它们该看到的 —— 通知它们只会让所有视图白重画一遍。
+   * 索引整库重建是必需的：块对象全换成快照里那批了。
+   */
   private restore(snap: string): void {
     const blocks = JSON.parse(snap) as Block[]
     this.store.blocks.splice(0, this.store.blocks.length, ...blocks)
-    this.store.invalidateIndex()
-    this.store.touch(undefined)
+    this.store.discardIndex()
   }
 
   private makeTx(ops: Op[], sink: ChangeSink): Tx {

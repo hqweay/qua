@@ -811,7 +811,18 @@ export class BlockEditor {
    *            订阅方必须容忍 `ids === undefined`（那就是「不知道，按整体处理」）。
    */
   private emitChange(kind: 'text' | 'struct' | 'load', ids?: readonly string[]): void {
-    if (kind !== 'load') this.store.touch(this, ids)
+    /**
+     * ⚠️ **这里不发通知**：宣布者是事务的出口（`Kb.tx` → `store.apply`），
+     * 它知道「变了哪几格」并能按 op 增量修补索引。
+     *
+     * 这里曾经也调 `store.touch(this, ids)`，于是同一次按键有**两个宣布者**：
+     * 事务出口刚按 op 修补完索引，`touch` 又无条件把它作废 ⇒ 每次按键后第一次读索引
+     * 都整库重建；而且订阅者被通知两次 ⇒ 所有别的视图每键重载两次。
+     * 两者都不报错，界面只是慢一点、抖一点 —— 这正是「同一件事两个宣布者」的形状。
+     *
+     * @param ids 这次动过哪些块（留给 `events.change` 的消费方；通知已由事务发出）
+     */
+    void ids
     this.events.change?.(kind)
   }
 
@@ -3129,13 +3140,13 @@ export class BlockEditor {
 
   loadPage(doc: Doc, caret?: { blockId: string; off: number }): void {
     /**
-     * ⚠️ **换视图前先让索引失效**。
+     * **换视图不再是「索引可能过期」的时机**。
      *
-     * `loadPage` 是「命令改完森林之后」的收尾动作（新建页 / 删页 / 换当前对象），
-     * 而那条路径**不发 `store.touch()`**（`kind === 'load'` 刻意跳过，避免把加载当成编辑）。
-     * 索引缓存住的是「库长什么样」，所以这里必须显式作废 —— 否则删掉的一页还能被 `find` 到。
+     * 这里曾经无条件 `store.invalidateIndex()`，理由是「命令改完森林之后」会调它，
+     * 而那条路径不发通知 —— 那是**编辑面还能直改活块**时的形状。
+     * 现在所有写都经事务，事务出口已经按 op 修补过索引 ⇒ 换视图只换「装载单位」，
+     * 不碰库的形状，索引没有任何理由作废。
      */
-    this.store.invalidateIndex()
     /**
      * **换视图也是一个编辑边界**：上一行的编辑期在这里结束。
      *

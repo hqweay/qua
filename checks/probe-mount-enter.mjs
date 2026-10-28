@@ -65,7 +65,7 @@ const made = await page.evaluate(() => {
   const headText = typeof d === 'string' ? label(d) : (document.querySelector(`.blk[data-block-id="${headId}"] .tx`)?.textContent ?? '')
   const child = { id: 'probe-child-' + Math.random().toString(16).slice(2), content: [{ t: 'text', v: headText }], children: [], created: Date.now(), modified: Date.now() }
   parent.children.push(child)
-  ed.store.invalidateIndex()
+  ed.store.discardIndex()
   ed.renderAll()
   return { headId, headText, childId: child.id, isJournal: Boolean(d) }
 })

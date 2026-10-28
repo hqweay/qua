@@ -4719,18 +4719,17 @@ await check('T52 归属边：属于在属性区、成员含算作、禁环、悬
   //    （直接打标记而不走「删除块」命令：那一步受「根块不许删」的守卫拦，而这里要验的是
   //     **读路径对回收站里的上级怎么判**，不是删除命令本身）
   await page.evaluate((id) => {
-    const forest = window.__qua.__editor.store.blocks
-    let hit = null
-    const walk = (list) => {
-      for (const b of list) {
-        if (b.id === id) hit = b
-        walk(b.children)
+    window.__qua.forceForest((forest) => {
+      let hit = null
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === id) hit = b
+          walk(b.children)
+        }
       }
-    }
-    walk(forest)
-    if (hit) hit.props = { ...(hit.props ?? {}), _deletedAt: Date.now() }
-    window.__qua.__editor.store.invalidateIndex()
-    window.__qua.__editor.store.touch()
+      walk(forest)
+      if (hit) hit.props = { ...(hit.props ?? {}), _deletedAt: Date.now() }
+    })
   }, tags['人物'])
   await page.waitForTimeout(200)
   const soft = await page.evaluate((id) => window.__qua.tagDanglingStates(id), tags['演员'])
@@ -4747,11 +4746,10 @@ await check('T52 归属边：属于在属性区、成员含算作、禁环、悬
 
   // ② 真删 #人物（从森林里摘掉）：落 gone，可清理；点清理 ⇒ 边没了
   await page.evaluate((parentId) => {
-    const forest = window.__qua.__editor.store.blocks
-    const i = forest.findIndex((b) => b.id === parentId)
-    if (i >= 0) forest.splice(i, 1)
-    window.__qua.__editor.store.invalidateIndex()
-    window.__qua.__editor.store.touch()
+    window.__qua.forceForest((forest) => {
+      const i = forest.findIndex((b) => b.id === parentId)
+      if (i >= 0) forest.splice(i, 1)
+    })
   }, tags['人物'])
   await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), tags['演员'])
   await page.waitForTimeout(250)

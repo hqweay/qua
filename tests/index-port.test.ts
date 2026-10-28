@@ -365,49 +365,47 @@ test('fingerprint：与插入顺序无关（否则会假报不一致）', () => 
  * ⚠️ 这里钉的是**失效时机**——索引错不会崩，只会静默读到旧数据，
  *    所以「改完必须能读到新值」要逐个路径验。
  */
-test('store.find：走索引，且结构变化后能查到新块', async () => {
-  const { BlockStore } = await import('../src/core/index.ts')
+test('store.find：走索引，且**经事务**的结构变化后能查到新块', async () => {
   const { forest } = fixture()
   const store = new BlockStore(JSON.parse(JSON.stringify(forest)))
+  const kb = new MemoryKb(store)
 
   assert.equal(plainText(store.find('b1')!.content), '乙的子块')
   assert.equal(store.find('不存在'), undefined)
 
-  // 加一块 + 通知 ⇒ 索引失效重建 ⇒ 查得到
+  // 加一块（走事务）⇒ 索引按 op 修补 ⇒ 查得到
   const fresh = b('new', '新块')
-  store.blocks.find((x) => x.id === 'p2')!.children.push(fresh)
-  store.touch()
+  kb.tx((tx) => tx.insert(fresh, 'p2', 0))
   assert.equal(plainText(store.find('new')!.content), '新块', '结构变化后新块要能被查到')
 })
 
-test('store.find：挖掉一块 + 通知 ⇒ 查不到了（不是留着旧条目）', async () => {
-  const { BlockStore } = await import('../src/core/index.ts')
+test('store.find：挖掉一块（走事务）⇒ 查不到了（不是留着旧条目）', async () => {
   const { forest } = fixture()
   const store = new BlockStore(JSON.parse(JSON.stringify(forest)))
+  const kb = new MemoryKb(store)
   assert.equal(plainText(store.find('b1')!.content), '乙的子块')
 
-  const p1 = store.blocks.find((x) => x.id === 'p1')!
-  const bNode = p1.children.find((x) => x.id === 'b')!
-  bNode.children = []
-  store.touch()
+  kb.tx((tx) => tx.remove('b'))
   assert.equal(store.find('b1'), undefined, '删掉的块不该还能查到')
 })
 
-test('store.index：块是**活引用**（改名不用重建就可见），但名字表要重建', async () => {
-  const { BlockStore } = await import('../src/core/index.ts')
+test('store.index：块是**活引用**（改字不用重建就可见），但名字表要**按 op 修补**', async () => {
   const { forest } = fixture()
   const store = new BlockStore(JSON.parse(JSON.stringify(forest)))
+  const kb = new MemoryKb(store)
 
-  // ① 活引用：拿到的那块就是 store 里那块 ⇒ 改别名立刻可见（不需要重建）
+  // ① 活引用：拿到的那块就是 store 里那块 ⇒ 改字立刻可见（不需要重建）
   const block = store.find('t1')!
-  block.props = { ...(block.props ?? {}), _aliases: ['待办'] }
-  assert.deepEqual(store.find('t1')?.props?._aliases, ['待办'], '块是活引用，不是拷贝')
+  writeBlockContent(block, textRuns('改了'))
+  assert.equal(plainText(store.find('t1')!.content), '改了', '块是活引用，不是拷贝')
 
-  // ② 但**名字表**是快照 ⇒ 不重建就还停在旧名字上
-  assert.equal(tagIdByName(store.index, 'todo'), 't1', '未重建时名字表仍是旧的')
+  // ② **名字表**是快照：直改正文不会让它跟上（那是「没走事务」的形状）
+  assert.equal(tagIdByName(store.index, 'todo'), 't1', '直改正文时名字表不动')
 
-  // ③ 走一次 touch（＝任何一个真实的改动出口）⇒ 名字表跟着变
-  store.touch()
+  // ③ 走一次事务 ⇒ 名字表**按 op 修补**（不是整库作废重建）
+  const rebuilds = store.probe.rebuildCount
+  kb.tx((tx) => tx.setAliases('t1', ['待办']))
+  assert.equal(store.probe.rebuildCount, rebuilds, '修补之后不许再发生整库重建')
   assert.equal(tagIdByName(store.index, '待办'), 't1')
   assert.equal(tagIdByName(store.index, 'todo'), undefined, '旧名字不该残留')
 })
