@@ -82,7 +82,7 @@ const qua = {
 
   /** 内容（四张内容表的全部行；编码归渲染层） */
   load: (): Promise<unknown> => ipcRenderer.invoke('qua:storage/load'),
-  save: (writes: unknown[], opts?: { replace?: boolean }): Promise<unknown> =>
+  save: (writes: unknown[], opts?: { replace?: boolean; oplog?: unknown[] }): Promise<unknown> =>
     ipcRenderer.invoke('qua:storage/save', writes, opts ?? {}),
 
   /** 每库设置（窗口 bounds／槽布局／折叠态） */

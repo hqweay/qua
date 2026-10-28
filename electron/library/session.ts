@@ -76,6 +76,14 @@ export interface RepoSession {
   assets: AssetStore
   windows: Set<number>
   /**
+   * **这台设备**的标识（来自 `app.json` 的注册表，库外）。
+   *
+   * 为什么每设备一个、且存在库外：`op_log` 的主键是 `(device_id, seq)`，
+   * 身份跟随机器、序号跟随库 —— 库可以拷给别人，机器不会。若把 device_id 存进库，
+   * 拷贝库目录就复制了身份（两台机器同 id ⇒ 序号撞车，幂等失效）。
+   */
+  deviceId: string
+  /**
    * 这个会话**累计写进去多少行**（`saveContent` 的返回值累加）。
    *
    * 为什么留这个数：它是「写成本」的直接证据 —— 「打一个字写几行」只能靠它回答。
@@ -114,7 +122,7 @@ function isEmptyDir(dir: string): boolean {
  * 顺序有意为之：**先写 manifest 再建 DB**。崩在中间只留下「有 manifest 没 DB」——
  * 那是可判的坏库（重新初始化即可），而不是「有 DB 没身份」（后者拷贝后会被当成副本）。
  */
-function initLibraryDir(dir: string, id: string): { ok: true; session: RepoSession } | { ok: false; failure: OpenFailure } {
+function initLibraryDir(dir: string, id: string, deviceId: string): { ok: true; session: RepoSession } | { ok: false; failure: OpenFailure } {
   try {
     mkdirSync(join(dir, ASSETS_DIR), { recursive: true })
     mkdirSync(join(dir, BACKUPS_DIR), { recursive: true })
@@ -129,16 +137,17 @@ function initLibraryDir(dir: string, id: string): { ok: true; session: RepoSessi
   const db = opened.db
   writeMeta(db, META_KEYS.libraryId, id)
   writeMeta(db, META_KEYS.seq, '0')
-  return { ok: true, session: makeSession(id, dir, db) }
+  return { ok: true, session: makeSession(id, dir, db, deviceId) }
 }
 
-function makeSession(id: string, dir: string, db: Db): RepoSession {
+function makeSession(id: string, dir: string, db: Db, deviceId: string): RepoSession {
   return {
     id,
     dir,
     db,
     assets: createFolderAssetStore(join(dir, ASSETS_DIR)),
     windows: new Set<number>(),
+    deviceId,
     writes: { rows: 0, saves: 0 },
     close: () => {
       try {
@@ -158,14 +167,14 @@ function makeSession(id: string, dir: string, db: Db): RepoSession {
  *
  * @param expectId 调用方（注册表）认为这个目录是哪个库。给了就**必须一致**，否则是副本。
  */
-export function openSession(dir: string, opts: { expectId?: string } = {}): OpenSessionResult {
+export function openSession(dir: string, opts: { expectId?: string; deviceId?: string } = {}): OpenSessionResult {
   const parsed = parseManifest(readTextFile(join(dir, MANIFEST_FILE)))
 
   if (parsed.status === 'missing') {
     // 没有 manifest ⇒ 只有**空目录**才允许被初始化（`expectId` 说明调用方已经决定要建它）
     if (!opts.expectId) return { status: 'failed', failure: { reason: 'not-a-library', dir } }
     if (!isEmptyDir(dir)) return { status: 'failed', failure: { reason: 'not-a-library', dir } }
-    const made = initLibraryDir(dir, opts.expectId)
+    const made = initLibraryDir(dir, opts.expectId, opts.deviceId ?? '')
     return made.ok ? { status: 'ok', session: made.session } : { status: 'failed', failure: made.failure }
   }
 
@@ -205,7 +214,7 @@ export function openSession(dir: string, opts: { expectId?: string } = {}): Open
   if (metaId === undefined) writeMeta(db, META_KEYS.libraryId, manifest.id)
   if (readMeta(db, META_KEYS.seq) === undefined) writeMeta(db, META_KEYS.seq, '0')
 
-  return { status: 'ok', session: makeSession(manifest.id, dir, db) }
+  return { status: 'ok', session: makeSession(manifest.id, dir, db, opts.deviceId ?? '') }
 }
 
 /* ------------------------------------------------------------ 内容读写（行） */
@@ -230,8 +239,18 @@ export function loadContent(session: RepoSession): ReturnType<typeof readContent
  * 要不要先清空内容表。清空只该发生在「整份写」的入口 —— 常规编辑走增量，
  * 顺手清表是一次数据事故，而它看起来只是「慢了一点」。
  */
-export function saveContent(session: RepoSession, writes: readonly RowWrite[], opts: { replace?: boolean } = {}): number {
-  const changed = opts.replace ? replaceContentRows(session.db, writes) : applyRowWrites(session.db, writes)
+export function saveContent(
+  session: RepoSession,
+  writes: readonly RowWrite[],
+  opts: { replace?: boolean; oplog?: readonly { at: number; opJson: string }[] } = {},
+): number {
+  /**
+   * **变更流与行写入同一个事务**（`applyRowWrites` 内部把它并进同一层事务）。
+   * 整份替换那几笔（种子／换库）不产 op ⇒ `oplog` 为空，`replace` 时也不追。
+   */
+  const changed = opts.replace
+    ? replaceContentRows(session.db, writes)
+    : applyRowWrites(session.db, writes, { deviceId: session.deviceId, oplog: opts.oplog })
   session.writes.rows += changed
   session.writes.saves += 1
   return changed

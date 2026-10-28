@@ -19,10 +19,14 @@
  * ⇒ 「建表/改表 ＋ 版本号 +1」可以包在一个事务里：崩在中间只会回到旧版本，不会留下半迁移库。
  * 这条是「主进程开库时迁移」这条选法的最大红利 —— 失败状态天然可判（旧版本＝可只读打开）。
  *
- * ## 为什么 `op_log` 现在就建（哪怕还不接生产写入）
+ * ## `op_log` 为什么先建表、后来才接写入
  *
- * 它是**不可逆历史**：没人写过的历史补不回来。表在这里，`op_json` 的**内容形状**
- * （`index` 还是 `prev`）等同步层立项时拍板 —— 所以现在**只建表 + 一条幂等断言**，不接写入路径。
+ * 它是**不可逆历史**：没人写过的历史补不回来。所以第一版只建表、只钉幂等断言，
+ * 等「所有让库变化的路径都产 op」成立之后才接 —— 否则 append-only 日志里的空洞
+ * 与「那段时间什么都没发生」无法区分（**半截历史比没有历史更糟**）。
+ *
+ * 现在它接了：撤销改走 `diff`、冷启动物化走事务、换库天然跨库不混流 ⇒ 三个缺口都销了。
+ * 写入与内容行**同一个事务**（`applyRowWrites`），整份替换那几笔不产 op。
  *
  * ⚠️ 这个文件在主进程里跑：`node:sqlite` 是同步 API，一次批量导入会卡 UI（已知代价）。
  */
@@ -117,10 +121,12 @@ create table if not exists ${DB_TABLES.meta} (
   key text primary key,
   value text not null
 );
--- Change stream. PK(device_id, seq) makes a resend idempotent by construction.
--- The edit path does not write here yet: whether op_json carries "index" or
--- "prev" is irreversible history and is still undecided, so writing now would weld
--- the ambiguity into the first rows.
+-- Change stream (append-only history). PK(device_id, seq) makes a resend idempotent
+-- by construction: the same (device, seq) can only ever be one row.
+-- Written in the SAME transaction as the content rows (see applyRowWrites): a batch
+-- is one user action, so a half-batch would leave the log claiming something the
+-- tables do not show. Full replacements (seed / switching libraries) do not write
+-- here — they say "the library is now this", not "someone did something".
 create table if not exists ${DB_TABLES.opLog} (
   device_id text not null,
   seq integer not null,
@@ -444,11 +450,22 @@ function runWrite(db: Db, w: RowWrite): number {
  *
  * @returns 真正改到的行数（诊断面与成本断言用它数「打一个字写了几行」）
  */
-export function applyRowWrites(db: Db, writes: readonly RowWrite[]): number {
+export function applyRowWrites(
+  db: Db,
+  writes: readonly RowWrite[],
+  opts: { deviceId?: string; oplog?: readonly { at: number; opJson: string }[] } = {},
+): number {
   if (writes.length === 0) return 0
   let changed = 0
   inTransaction(db, () => {
     for (const w of writes) changed += runWrite(db, w)
+    /**
+     * **变更流与行写入同一个事务**：分开写会在崩溃时重号（幂等失效）或跳号
+     * （对端水位出现空洞）。`appendLocalOps` 自己**不开**事务（它假定已在事务里），
+     * 所以这里不能把两层事务套起来。
+     */
+    const oplog = opts.oplog ?? []
+    if (oplog.length > 0 && opts.deviceId) appendLocalOpsInner(db, opts.deviceId, oplog)
   })
   return changed
 }
@@ -539,18 +556,36 @@ export function appendLocalOps(
   if (ops.length === 0) return 0
   let written = 0
   inTransaction(db, () => {
-    let seq = opts.startSeq ?? readSeq(db)
-    for (const op of ops) {
-      seq += 1
-      // `insert or ignore`：同 (device_id, seq) 已存在 ＝ 这次是重发，跳过而不是炸掉整批
-      const r = db
-        .prepare('insert or ignore into op_log (device_id, seq, at, op_json) values (?, ?, ?, ?)')
-        .run(deviceId, seq, op.at, op.opJson)
-      if (Number(r.changes) > 0) written++
-    }
-    // 水位**只在真写了之后**推进（重发时 `seq` 的增量是白算的，不推进就对了）
-    if (written > 0) writeMeta(db, META_KEYS.seq, String(readSeq(db) + written))
+    written = appendLocalOpsInner(db, deviceId, ops, opts)
   })
+  return written
+}
+
+/**
+ * **事务内**追加一批 op 并推进水位（调用方负责已在事务里）。
+ *
+ * 为什么单拆出来：生产路径是「行写入 ＋ 变更流**同一个事务**」（`applyRowWrites`），
+ * 而 `appendLocalOps` 自己会开事务 —— 套起来就是嵌套事务（`begin` 会报错）。
+ * 两条路共用这一份写入逻辑，水位口径只有一处。
+ */
+function appendLocalOpsInner(
+  db: Db,
+  deviceId: string,
+  ops: readonly { at: number; opJson: string }[],
+  opts: { startSeq?: number } = {},
+): number {
+  let written = 0
+  let seq = opts.startSeq ?? readSeq(db)
+  for (const op of ops) {
+    seq += 1
+    // `insert or ignore`：同 (device_id, seq) 已存在 ＝ 这次是重发，跳过而不是炸掉整批
+    const r = db
+      .prepare('insert or ignore into op_log (device_id, seq, at, op_json) values (?, ?, ?, ?)')
+      .run(deviceId, seq, op.at, op.opJson)
+    if (Number(r.changes) > 0) written++
+  }
+  // 水位**只在真写了之后**推进（重发时 `seq` 的增量是白算的，不推进就对了）
+  if (written > 0) writeMeta(db, META_KEYS.seq, String(readSeq(db) + written))
   return written
 }
 

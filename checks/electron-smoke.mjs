@@ -1154,7 +1154,6 @@ await check('E12 落库：块拆成行（没有整份 blob 表），打一个字
   await new Promise((r) => setTimeout(r, 700))
   const after = (await page.evaluate(() => window.qua.libraryInfo()))?.writes?.rows
   const delta = after - before
-  db.close()
 
   /**
    * 一次「插一个块」＝ 1 行块 ＋ 它自己的属性/地址/露面行（0..几行）＋ 2 行 meta。
@@ -1167,6 +1166,23 @@ await check('E12 落库：块拆成行（没有整份 blob 表），打一个字
     `打一个字只该写常数行（<= 12），实际写了 ${delta} 行 —— 这仍是「随库体量增长」的写法（块数 ${typed}）`,
   )
   log(`      打一个块：total_changes +${delta}（块数 ${typed}）`)
+
+  /**
+   * ④ **变更流真的在写**（`op_log` 接了生产写入）。
+   *
+   * 判据不是「表里有行」（有空洞时照样绿），而是「**每一批落盘**都有账」：
+   * 这里数 `op_log` 的行数，并要求它与水位一致 —— 水位是同一事务里推进的，
+   * 两者不一致就说明有一批只写了行、没写日志（半截历史）。
+   */
+  const logRows = db.prepare('select count(*) as n from op_log').all()[0].n
+  const seq = (await page.evaluate(() => window.qua.libraryInfo()))?.seq
+  assert(logRows > 0, '变更流必须有行：接了之后一次编辑就是一批账')
+  assert(logRows === seq, `op_log 行数（${logRows}）必须等于水位（${seq}）—— 不一致就是有批只写了行`)
+  const last = db.prepare('select op_json from op_log order by seq desc limit 1').all()[0]
+  const parsed = JSON.parse(last.op_json)
+  assert(typeof parsed.e === 'string', `op_json 存的是那条 op 本身：${last.op_json}`)
+  log(`      op_log = ${logRows} 行（水位 ${seq}）；最后一条 e=${parsed.e}`)
+  db.close()
 
   await app.close()
   return `内容表 = ${tables.sort().join(',')}（无 workspace blob）；Block 行 ${rows}；插一个块只写 ${delta} 行`

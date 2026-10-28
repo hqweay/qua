@@ -115,6 +115,12 @@ export function createWorkspaceStore(port: StoragePort): WorkspaceStore {
       if (port.consumes === 'rows') {
         batch.replace = replace
         batch.writes = replace ? workspaceToRowWrites(ws) : rowWritesFor(ws, ops, ensure)
+        /**
+         * **变更流与行写入同一批**（落库侧同一事务追加进 `op_log`）。
+         * 整份替换那几笔（种子／换库）不产 op —— 它们不是「一次编辑」，
+         * 而 `op_log` 记的是编辑流。这条边界由 `replace` 表达，不需要第二套信号。
+         */
+        if (!replace && ops.length > 0) batch.oplog = ops
       } else {
         batch.payload = JSON.stringify(ws)
       }

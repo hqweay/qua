@@ -315,3 +315,63 @@ test('A4：op_log 的列形状是契约（device_id/seq/at/op_json，PK 两列�
   db.close()
   assert.deepEqual(cols, ['device_id:1', 'seq:2', 'at:0', 'op_json:0'], `op_log 的列与主键是契约，实际：${cols.join(' ')}`)
 })
+
+/* ------------------------------------------------------------ S4：变更流接了 */
+
+/**
+ * **每一批行写入都有对应的 op 行**（同一个事务）。
+ *
+ * 这是 `op_log` 接上生产写入之后的最小可判定验收：不是「表里有行」，
+ * 而是「**每一批**落盘都有一条账」—— 前者在有空洞时照样绿。
+ */
+test('S4：一批行写入 ＋ 变更流 ⇒ 同一个事务，op_log 与水位一起前进', () => {
+  const file = tmpDb()
+  const r = openLibraryDb(file)
+  const db = r.db!
+  const dev = 'b'.repeat(32)
+
+  const ops = [
+    { at: 11, opJson: JSON.stringify({ e: 'block', id: 'b1', op: 'upsert', value: { content: [] }, at: 11 }) },
+    { at: 12, opJson: JSON.stringify({ e: 'prop', block: 'b1', name: '_icon', op: 'set', value: 'x', at: 12 }) },
+  ]
+  applyRowWrites(db, [blockRow('b1')], { deviceId: dev, oplog: ops })
+
+  const rows = db.prepare('select seq, at, op_json from op_log where device_id = ? order by seq').all(dev) as {
+    seq: number
+    at: number
+    op_json: string
+  }[]
+  assert.equal(rows.length, 2, '两批 op ⇒ 两行账（每一批落盘都有对应记录）')
+  assert.deepEqual(rows.map((x) => x.seq), [1, 2], '序号连续')
+  assert.equal(readSeq(db), 2, '水位与 op_log 一起前进')
+  assert.equal(JSON.parse(rows[0]!.op_json).id, 'b1', 'op_json 存的是那条 op 本身（不拆列）')
+  db.close()
+})
+
+test('S4：行写入失败 ⇒ 变更流也不落（同一个事务，不能留半批）', () => {
+  const file = tmpDb()
+  const r = openLibraryDb(file)
+  const db = r.db!
+  const dev = 'c'.repeat(32)
+
+  // 一条会失败的写入：update 匹配不到行 ⇒ 抛错（见 `runWrite`）
+  const bad = { table: 'Block' as const, op: 'update' as const, key: { id: '不存在' }, values: { content: '[]' } }
+  assert.throws(() =>
+    applyRowWrites(db, [bad], { deviceId: dev, oplog: [{ at: 1, opJson: '{"e":"x"}' }] }),
+  )
+
+  const n = (db.prepare('select count(*) as n from op_log').all() as { n: number }[])[0]!.n
+  assert.equal(n, 0, '行写入失败 ⇒ 变更流一行都不许留（半批历史比没有历史更糟）')
+  assert.equal(readSeq(db), 0, '水位也不许前进')
+  db.close()
+})
+
+test('S4：`replace` 那几笔不产 op（种子／换库不是「一次编辑」）', () => {
+  const file = tmpDb()
+  const r = openLibraryDb(file)
+  const db = r.db!
+  replaceContentRows(db, [blockRow('seed')])
+  const n = (db.prepare('select count(*) as n from op_log').all() as { n: number }[])[0]!.n
+  assert.equal(n, 0, '整份替换不写变更流：它表达的是「库里现在就是这份」，不是「谁做了什么」')
+  db.close()
+})

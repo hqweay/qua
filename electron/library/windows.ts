@@ -89,7 +89,7 @@ export class LibraryManager {
     }
 
     const dir = libraryDir(this.deps.io, entry)
-    const opened = openSession(dir, { expectId: id })
+    const opened = openSession(dir, { expectId: id, deviceId: loaded.registry.deviceId })
     if (opened.status === 'failed') return { status: 'failed', failure: opened.failure }
 
     const session = opened.session
@@ -109,7 +109,7 @@ export class LibraryManager {
   create(id: string, name: string, parentDir?: string): { status: 'ok'; window: BrowserWindow } | { status: 'failed'; failure: OpenFailure } {
     const loaded = loadRegistry(this.deps.io)
     const dir = parentDir ?? join(this.deps.io.reposDir, id)
-    const opened = openSession(dir, { expectId: id })
+    const opened = openSession(dir, { expectId: id, deviceId: loaded.registry.deviceId })
     if (opened.status === 'failed') return { status: 'failed', failure: opened.failure }
 
     const session = opened.session
@@ -303,9 +303,22 @@ export class LibraryManager {
       const s = sessionOf(e)
       if (!s) return { ok: false, error: 'no-library' }
       if (!Array.isArray(writes)) return { ok: false, error: 'bad-args' }
-      const replace = Boolean((opts as { replace?: unknown } | null)?.replace)
+      const o = opts as { replace?: unknown; oplog?: unknown } | null
+      const replace = Boolean(o?.replace)
+      /**
+       * **变更流**（可选）：与行写入**同一个事务**追加进 `op_log`。
+       * 校验它是不是数组，但不认识 op 的语义 —— 编码与形状归渲染层，
+       * 主进程只做「原样存进去 + 推进水位」。
+       */
+      const oplog: { at: number; opJson: string }[] = Array.isArray(o?.oplog)
+        ? (o!.oplog as unknown[])
+            .filter((x): x is { at: unknown; opJson: unknown } => !!x && typeof x === 'object')
+            // 只做**形状**校验（数字/字符串），不认识 op 的语义：编码归渲染层
+            .map((x) => ({ at: Number(x.at), opJson: String(x.opJson) }))
+            .filter((x) => Number.isFinite(x.at) && x.opJson.length > 0)
+        : []
       try {
-        const changed = saveContent(s, writes as RowWrite[], { replace })
+        const changed = saveContent(s, writes as RowWrite[], { replace, oplog })
         return { ok: true, changed }
       } catch (err) {
         return { ok: false, error: String(err) }
