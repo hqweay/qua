@@ -291,21 +291,19 @@
   </div>
   <div class="grid2" style="margin-top:18px">
     <div class="card pad">
-      <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">Op — 持久化事件（6 类）</b></div>
+      <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">Op — 持久化事件（3 类，一格一个地址）</b></div>
       <div class="struct">
-<span class="pipe">{</span> e: <span class="key">'block'</span>, id, op: <span class="key">'upsert'</span>, value: { content?, parent?, prev?, props? }, at <span class="pipe">}</span>
+<span class="pipe">{</span> e: <span class="key">'block'</span>, id, op: <span class="key">'upsert'</span>, value: { content?, modified?, parent?, prev? }, at <span class="pipe">}</span>
 <span class="pipe">{</span> e: <span class="key">'block'</span>, id, op: <span class="key">'delete'</span>, at <span class="pipe">}</span>          <span class="cmt">只落操作根一条，子树不可见是继承来的</span>
-<span class="pipe">{</span> e: <span class="key">'prop'</span>,  block, name, op, value?, pos?, at <span class="pipe">}</span>
-<span class="pipe">{</span> e: <span class="key">'alias'</span>, block, name, op, pos?, at <span class="pipe">}</span>
-<span class="pipe">{</span> e: <span class="key">'list'</span>,  block, list, op, at <span class="pipe">}</span>
+<span class="pipe">{</span> e: <span class="key">'prop'</span>,  block, name, op: <span class="key">'set'</span> | <span class="key">'delete'</span>, value?, at <span class="pipe">}</span>   <span class="cmt">含 _aliases／_lists／_tags 整袋值</span>
 <span class="pipe">{</span> e: <span class="key">'anno'</span>,  block, id, op: <span class="key">'set'</span> | <span class="key">'delete'</span>, value?, at <span class="pipe">}</span>   <span class="cmt">只在真被引用时出现</span>
       </div>
-      <div class="note" style="margin-top:9px">结构用 <code>parent ＋ prev</code>（<b>前兄弟 id</b>）表达，不另造 <code>insert</code> 事件——「它现在在哪」只有一种说法。不用整数下标：下标只对「那一刻的兄弟列表」有意义，同一个下标在短列表上会静默落到别处，而 op 是不可逆历史。<b>格式与原子的一次改动就是一条 <code>upsert{content}</code></b>：内容整组替换，不是逐段记差。<b>实例字段写入＝一条 <code>prop.set</code>／<code>prop.delete</code></b>，没有「实例」专用 op。</div>
+      <div class="note" style="margin-top:9px">结构用 <code>parent ＋ prev</code>（<b>前兄弟 id</b>）表达，不另造 <code>insert</code> 事件——「它现在在哪」只有一种说法。不用整数下标：下标只对「那一刻的兄弟列表」有意义，同一个下标在短列表上会静默落到别处，而 op 是不可逆历史。<b>格式与原子的一次改动就是一条 <code>upsert{content}</code></b>：内容整组替换，不是逐段记差。<b>一格只有一个地址</b>：地址与露面走 <code>prop</code> 的整袋值，不另立 <code>alias</code>／<code>list</code> 两种「按项增量」——同一个格两条账会让重放顺序决定结果、幂等性也破。只有「绝对的、按格寻址的 set」才能满足<b>应用两次等于一次</b>，而那是撤销与同步的共同前提。</div>
     </div>
     <div class="card pad">
       <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">落盘：两种宿主，三条不可逆契约</b></div>
       <div class="kv">
-        <dt>qua.db（Electron）</dt><dd><b>每个库一份</b> SQLite（主进程单写者，WAL）。块是<b>自己的行</b>：<code>Block</code>（正文 run 序列／annos／时刻／落库编码的 <code>parent</code>＋<code>left</code>／软删）＋ <code>BlockProperty</code>（一格一行，有序列表拆行＋<code>pos</code>）＋ <code>BlockAlias</code>（地址，主键是名字）＋ <code>BlockList</code>（露面）＋ <code>meta</code>／<code>settings</code>／<code>op_log</code>（只建表、不接写入）。schema 版本＝<code>PRAGMA user_version</code>（唯一判据，当前 {{DB_SCHEMA_VERSION}}）</dd>
+        <dt>qua.db（Electron）</dt><dd><b>每个库一份</b> SQLite（主进程单写者，WAL）。块是<b>自己的行</b>：<code>Block</code>（正文 run 序列／annos／时刻／落库编码的 <code>parent</code>＋<code>left</code>／软删）＋ <code>BlockProperty</code>（一格一行，有序列表拆行＋<code>pos</code>）＋ <code>BlockAlias</code>（地址，主键是名字）＋ <code>BlockList</code>（露面）＋ <code>meta</code>／<code>settings</code>／<code>op_log</code>（<b>变更流</b>，与内容行<b>同一个事务</b>追加；整份替换那几笔不产 op）。schema 版本＝<code>PRAGMA user_version</code>（唯一判据，当前 {{DB_SCHEMA_VERSION}}）</dd>
         <dt>编码在哪</dt><dd>「一个块长成哪几行」只有一份定义（<code>storage/db-rows.ts</code>）；主进程只做<b>通用 SQL</b>（表名/列名白名单，不认识块）。一次编辑只写动过的那几块 ⇒ <b>写成本不随库体量增长</b></dd>
         <dt>qua.workspace（web）</dt><dd>整库（块森林；行内内容与区间都在块上），套一层信封 <code>{ backend, envelope, data }</code>。浏览器没有用户可选目录的同等语义 ⇒ 单窗口单库</dd>
         <dt>qua.device</dt><dd>设备态：主题 / 槽宽 / 钉住清单（<b>不进 KB</b>）</dd>
@@ -319,6 +317,28 @@
         接库之后库内换形状走 <code>user_version</code> ＋ 只加不删迁移 ＋ 迁移前快照（实测：版本号随事务原子回滚）。
         换键／换库名 ＝ 用户数据静默消失，所以它们被逐字钉死在门禁里。
       </div>
+    </div>
+  </div>
+
+  <div class="card pad" style="margin-top:18px">
+    <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">两个纯函数：变化代数的全部</b><i>撤销 / 导出 / 导入 / 同步收端 / 崩溃恢复 / 块历史，全是它们的组合</i></div>
+    <div class="grid2">
+      <div>
+        <div class="struct" style="line-height:1.9"><span class="key">diff</span>(a, b) <span class="pipe">→</span> Op[]      <span class="cmt">把「a 变成 b」表达成格写入</span>
+<span class="key">applyOps</span>(forest, ops, 目标)  <span class="cmt">原地写格，对象身份不变</span></div>
+        <div class="note" style="margin-top:9px"><b>四条性质</b>（每条都能单独证伪）：① <code>applyOps(a, diff(a,b))</code> 与 <code>b</code> <b>逐字节相等</b>；② <code>diff(x,x) == []</code>；③ 发射序＝目标森林<b>先序</b>（父 op 先于子 op）；④ 同一次 diff 跑两次<b>字节相同</b>（<code>at</code> 从目标森林派生，不取墙钟）。</div>
+      </div>
+      <div>
+        <div class="kv">
+          <dt>撤销</dt><dd><code>applyOps(s, diff(s, 快照))</code> —— 与一次普通编辑<b>同一条路</b>，不再「清四表 + 整库重写」</dd>
+          <dt>索引</dt><dd>唯一的宣布者是事务出口 <code>store.apply(ops)</code>：按 op <b>增量修补</b>，不整库作废；订阅者只被通知一次</dd>
+          <dt>回滚</dt><dd>事务失败走<b>回滚日志</b>（O(动过的块)），不是整库快照。它不是逆 op：生命周期＝一个调用，不落盘、不进历史</dd>
+        </div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)">
+      <b>为什么 <code>applyOps</code> 必须原地写格</b>：索引存的是块的<b>活引用</b>。若替换块对象（CoW／<code>JSON.parse</code>），索引会<b>静默失效</b>——它手里那批对象当场过期，而没有任何一层会报错。
+      ⇒ 这也是「撤销不再需要 <code>forestReplaced</code> 旗标」的原因：旗标存在的唯一理由是旧机制的实现细节。
     </div>
   </div>
 </section>
