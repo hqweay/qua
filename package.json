@@ -27,7 +27,7 @@
     "check:bundle": "node checks/bundle-smoke.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.electron.json",
     "arch:check": "node scripts/arch-check.mjs",
-    "test:core": "node --test tests/*.test.ts",
+    "test:core": "node --test 'tests/**/*.test.ts'",
     "gate": "node scripts/gate.mjs",
     "gate:web": "node scripts/gate.mjs --no-electron",
     "gate:fast": "node scripts/gate.mjs --fast",
