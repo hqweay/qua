@@ -108,6 +108,26 @@ export interface App {
   focusTitle(): void
   showRefPicker(): void
   /**
+   * **用系统浏览器打开一个外链**（`core.link/open` 的落点）。
+   *
+   * 为什么「打开」要成为门面上的一个方法：命令 handler **不许碰 `window`**
+   * （`arch-check [18]`：命令面也是机器接口，HTTP／CLI 会走到它），
+   * 而打开外部地址这件事只有宿主做得到。
+   *
+   * 协议白名单（`http:`／`https:`）由 `core/link.ts` 的 `checkExternalUrl` 判——
+   * 调用方可以先自己判一遍以便给用户一句人话，但**判据只有那一份**。
+   *
+   * @returns 真的把请求发出去了才 `true`（空串／写得不完整／协议不在白名单 ⇒ `false`）
+   */
+  openExternal(url: string): boolean
+  /**
+   * **打开插入外链的输入框**（`core.editor/insert-link` 不带 `url` 时的那条路）。
+   *
+   * 与「选图片」同一条理由：这一步要向用户**要一句话**（URL 与显示名），
+   * 而命令 handler 不许碰 DOM ⇒ 浮层归装配层。
+   */
+  showLinkComposer(): void
+  /**
    * **选一张图片并插到当前光标处**（`core.editor/insert-image` 的入口）。
    *
    * 为什么落点在门面而不是命令 handler：入库是**异步**的（算 hash、写字节、读尺寸），

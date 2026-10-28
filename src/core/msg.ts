@@ -45,7 +45,10 @@ export const MSG = {
   'cmd.selection.extend-down': '向下扩展块选择',
   'cmd.editor.insert-page-ref': '插入引用 [[页面]]',
   'cmd.editor.insert-image': '插入图片',
+  'cmd.editor.insert-link': '插入外链',
+  'cmd.link.open': '打开这个外链',
   'cmd.editor.remove-atom': '删除行内原子',
+  'cmd.editor.set-anchor': '设置这一处引用的显示名（锚文本）',
   'cmd.props.set-value': '设置属性值',
   'cmd.props.clear-value': '删除属性值',
   'cmd.props.create-def': '新建属性',
@@ -370,6 +373,7 @@ export const MSG = {
   'menu.label.clearMarks': '清除格式',
   'menu.label.insertRef': '插入引用',
   'menu.label.insertImage': '插入图片',
+  'menu.label.link': '外链',
   'menu.label.fold': '折叠',
   'menu.label.copyRef': '复制带引文的引用',
 
@@ -383,6 +387,7 @@ export const MSG = {
   'menu.kw.tag': '标签',
   'menu.kw.ref': '引用',
   'menu.kw.image': '图片',
+  'menu.kw.link': '链接',
   'menu.kw.background': '背景',
   'menu.kw.command': '命令',
   'menu.kw.paragraph': '正文',
@@ -406,6 +411,7 @@ export const MSG = {
 
   /* ------------------------------------------------------------ 命令 expose 描述 */
   'menu.expose.insertPageRef': '在光标处插入一条指向页面的行内引用',
+  'menu.expose.insertLink': '在光标处插入一枚外链（只收 http / https）',
 
   /* --------------------------------------------------------------- 错误（err.*） */
   'err.when.unclosedString': 'when: 未闭合的字符串 @{i}',
@@ -419,6 +425,17 @@ export const MSG = {
   'err.cmd.notRegistered': '未注册的命令：{name}',
   'err.cmd.failed': '命令失败：{name}｜{message}',
   'err.clipboardFailed': '复制失败（浏览器未授权剪贴板）',
+
+  /* ------------------------------------------------------------ 外链的打开判据 */
+  'ui.link.rejectEmpty': '链接是空的',
+  'ui.link.rejectMalformed': '这不是一个完整的网址（要带 http:// 或 https://）',
+  'ui.link.rejectScheme': '只打开 http / https 链接：「{scheme}」不允许',
+  /* 插入外链的输入框（斜杠菜单／⌘K 的那条路） */
+  'ui.link.composerTitle': '插入外链',
+  'ui.link.urlPlaceholder': 'https://…',
+  'ui.link.textPlaceholder': '显示的名字（可留空）',
+  'ui.link.composerNote': '只收 http / https；显示名留空就显示地址本身。',
+  'ui.link.insert': '插入',
 
   /* ------------------------------------------------------------ 通用小词 */
   'ui.common.none': '（无）',
@@ -542,6 +559,11 @@ export const MSG = {
   'ui.popover.marks': '格式',
   'ui.popover.linkTitle': '外链：{label}',
   'ui.popover.url': '目标',
+  'ui.popover.openLink': '打开链接',
+  /* 锚文本：这一处显示什么。留空 ⇒ 跟随目标现算的名字（改名照旧传播） */
+  'ui.popover.anchorApply': '用作显示名',
+  'ui.popover.anchorHint': '这一处显示的名字（留空 ⇒ 用目标现在的名字）',
+  'ui.popover.anchorNote': '只改这一处显示什么：目标的地址、反链与提及都不变。',
   'ui.popover.refTitle': '行内引用 · {label}',
   'ui.popover.objTitle': '实例：#{label}',
   'ui.popover.objNoFields': '这个标签还没有声明字段——去标签页给它的成员加字段。',

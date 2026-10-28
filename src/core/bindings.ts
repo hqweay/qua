@@ -57,6 +57,8 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/toggle-collapse', kind: 'keymap', key: 'mod+.', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/toggle-todo', kind: 'keymap', key: 'mod+enter', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/insert-page-ref', kind: 'keymap', key: 'mod+shift+k', when: 'editorTextFocus', layer: 'core' },
+  // 外链：⌘K（与「引用 ⌘⇧K」同族，差一个修饰键）；开了输入框之后由浮层接手，不在这里绑第二下
+  { command: 'core.editor/insert-link', kind: 'keymap', key: 'mod+k', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.anno/toggle-bold', kind: 'keymap', key: 'mod+b', when: 'editorTextFocus && !selectionEmpty', layer: 'core' },
   { command: 'core.anno/toggle-italic', kind: 'keymap', key: 'mod+i', when: 'editorTextFocus && !selectionEmpty', layer: 'core' },
   { command: 'core.anno/toggle-highlight', kind: 'keymap', key: 'mod+e', when: 'editorTextFocus && !selectionEmpty', layer: 'core' },
@@ -146,6 +148,7 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/pick-tag', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 5, layer: 'core' },
   { command: 'core.editor/insert-page-ref', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 10, layer: 'core' },
   { command: 'core.editor/insert-image', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 20, layer: 'core' },
+  { command: 'core.editor/insert-link', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 25, layer: 'core' },
   { command: 'core.editor/copy-ref', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 30, layer: 'core' },
   { command: 'core.anno/clear-marks', kind: 'menu', when: 'blockFocused && !selectionEmpty', group: 'block/5-mark', order: 50, layer: 'core' },
 
@@ -165,6 +168,8 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/insert-page-ref', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 10, layer: 'core', label: t('menu.label.pageRef'), keywords: ['ref', 'link', t('menu.kw.ref')], icon: 'lucide:arrow-up-right' },
   // 斜杠菜单的「图片」是**真入口**（选文件）；不带 preset 才走 `App.pickImage()`
   { command: 'core.editor/insert-image', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 20, layer: 'core', label: t('menu.label.image'), keywords: ['image', 'asset', t('menu.kw.image')], icon: 'lucide:image' },
+  // 外链：不带 `url` ⇒ 命令打开输入框（`App.showLinkComposer`）；带了 ⇒ 直接插
+  { command: 'core.editor/insert-link', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 25, layer: 'core', label: t('menu.label.link'), keywords: ['link', 'url', t('menu.kw.link')], icon: 'lucide:link' },
   { command: 'core.editor/insert-tag', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 30, layer: 'core', label: t('menu.label.tag'), args: { tag: t('ui.arg.demoTag') }, keywords: ['tag', t('menu.kw.tag')], icon: 'lucide:hash' },
   { command: 'core.editor/toggle-collapse', kind: 'slash', when: 'editorTextFocus && blockHasChildren', group: 'slash/3-structure', order: 10, layer: 'core', label: t('menu.label.toggleCollapse'), icon: 'lucide:chevron-down' },
   { command: 'core.editor/duplicate-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/3-structure', order: 20, layer: 'core', label: t('menu.label.duplicate'), icon: 'lucide:copy' },

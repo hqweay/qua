@@ -75,8 +75,12 @@ import { isAnno, isRun } from '../runs.ts'
  * v23 → v24：块 id 的生成修了「48 位时间戳被位与收成 int32」——旧库里有 `000-7fde…`
  *            这种 32 字符**带 `-`** 的 id。下游按形状认块 id（拖拽/侧槽窗口），
  *            带 `-` 的 id 会被判成「不是块」⇒ 作废重 seed，不写迁移。
+ * v24 → v25：`RefRun` 新增**可选**字段 `anchor`（这一处引用的锚文本）。
+ *            加字段即升版是本文件的原型纪律（上面每一版都是同一条理由）：
+ *            旧库照旧作废重 seed，换来的是**写路径只面对一种形状**——
+ *            「这一枚 run 有没有 anchor」在读侧永远只有一个答案。
  */
-export const WORKSPACE_VERSION = 24
+export const WORKSPACE_VERSION = 25
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

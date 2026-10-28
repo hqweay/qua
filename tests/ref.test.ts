@@ -150,6 +150,55 @@ test('danglingView：占位符还在但原子记录没了时的兜底', () => {
 })
 
 /**
+ * **锚文本叠在现算名之上**：显示链只有一条，
+ * resolved ＝ `anchor ?? 现算名`，dangling ＝ `anchor ?? label ?? ''`。
+ */
+test('A1 resolved：anchor 压过目标现算出来的名字；目标改名只影响没有 anchor 的那些引用', () => {
+  const target = named('p1', '甲', '描述')
+  const forest = [target]
+  const find = finder(forest)
+  const anchored = ref({ to: 'p1', anchor: '合同第三版' })
+  const plain = ref({ to: 'p1' })
+  assert.equal(resolveRef(find, anchored).label, '合同第三版', 'anchor 是用户显式写的显示名')
+  assert.equal(resolveRef(find, plain).label, '甲')
+
+  // 改名：anchor 那一处**不动**（这正是它存在的理由），没有 anchor 的那一处跟着变
+  renameAlias(forest, target, '甲', '乙')
+  assert.equal(resolveRef(find, anchored).label, '合同第三版')
+  assert.equal(resolveRef(find, plain).label, '乙')
+})
+
+test('A1b anchor 是空串 ⇒ 不当作「用户写了空名字」，照样按现算名显示', () => {
+  const forest = [named('p1', '甲')]
+  // 空串与「没写」在库里是同一个形状（写空＝删键），所以判据只看非空
+  assert.equal(resolveRef(finder(forest), ref({ to: 'p1', anchor: '' })).label, '甲')
+})
+
+test('A2 dangling：anchor ?? label；两者皆无 ⇒ 空串占位（现状不变）', () => {
+  const forest = [named('p1', '甲')]
+  const find = finder(forest)
+  // 目标还在：label 不参与（它是快照，不是显示名）
+  assert.equal(resolveRef(find, ref({ to: 'p1', label: '旧名字', anchor: '锚' })).label, '锚')
+
+  forest.length = 0
+  const dangling = finder(forest)
+  assert.equal(resolveRef(dangling, ref({ to: 'p1', label: '旧名字', anchor: '锚' })).label, '锚', 'anchor 优先')
+  assert.equal(resolveRef(dangling, ref({ to: 'p1', label: '旧名字' })).label, '旧名字', '没有 anchor ⇒ 快照兜底')
+  assert.equal(resolveRef(dangling, ref({ to: 'p1', label: undefined })).label, '', '两者皆无 ⇒ 空串')
+  // 状态始终是 dangling：anchor 不给「解析成功」的错觉
+  assert.equal(resolveRef(dangling, ref({ to: 'p1', anchor: '锚' })).state, 'dangling')
+})
+
+test('A2b anchor 不是身份：它不进 `_aliases`，也不影响任何一次「按名字取块」', () => {
+  const target = named('p1', '甲')
+  const forest = [target]
+  const a = ref({ to: 'p1', anchor: '合同第三版' })
+  resolveRef(finder(forest), a)
+  assert.deepEqual(target.props?._aliases, ['甲'], '解析是纯读：不回写 run，也不回写目标')
+  assert.equal(JSON.stringify(a), JSON.stringify({ id: 'a1', t: 'ref', label: '旧名字', to: 'p1', anchor: '合同第三版' }))
+})
+
+/**
  * 引用目标的**呈现身份**只看归属：`props._tags` 非空 ⇒ `obj`。
  *
  * 这条看起来像漏判（一个页被打了块标签就显示成「实例」），其实是口径：

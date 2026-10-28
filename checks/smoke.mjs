@@ -11189,6 +11189,323 @@ await check('T143 回收站：删掉的块看得见、能一键恢复回原位�
   return `回收站卡在右槽；删子树只列 1 条（操作根）；恢复回原位且可撤销；空态有文案`
 })
 
+/* --------------------------------------- 行内引用的锚文本（这一处显示什么）与外链 */
+
+/** 整片森林里所有 ref run 的「所在块 → 目标」集合（模型事实，不是派生的反链条数） */
+const refEdges = (page) =>
+  page.evaluate(() => {
+    const out = []
+    const walk = (list) => {
+      for (const b of list) {
+        for (const r of b.content ?? []) if (r.t === 'ref' && r.to) out.push(`${b.id}->${r.to}`)
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return out.sort()
+  })
+
+/**
+ * 插一枚指向某个页的引用，返回它所在块与 run id。
+ *
+ * ⚠️ 目标取**另一页**（`pages()[1]`）：引用当前装载的那一页会让反链 footer 的判据
+ *    掺进「自己也指自己」这一条，读起来要额外解释。
+ */
+const seedPageRef = (page) =>
+  page.evaluate(() => {
+    const target = window.__qua.pages()[1].id
+    const b = window.__qua.blocks()[0]
+    window.__qua.focusBlock(b.id, 0)
+    window.__qua.invoke('core.editor/insert-page-ref', { pageId: target })
+    const atom = window.__qua.atoms().filter((a) => a.blockId === b.id).at(-1)
+    return { blockId: b.id, target, runId: atom?.id ?? '' }
+  })
+
+await check('T144 锚文本：⌥ 浮层设一次 ⇒ 行内显示它；投影／边／提及都不变，且只产一条 upsert', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  const setup = await seedPageRef(page)
+  assert(setup.runId, `前置：引用没插进去：${JSON.stringify(setup)}`)
+  const before = await page.evaluate(
+    ({ id, runId }) => ({
+      label: window.__qua.atoms().find((a) => a.id === runId)?.label ?? '',
+      anchor: window.__qua.__editor.store.find(id).content.find((r) => r.id === runId)?.anchor,
+      text: window.__qua.text(),
+    }),
+    { id: setup.blockId, runId: setup.runId },
+  )
+  const edgesBefore = await refEdges(page)
+  assert(before.anchor === undefined, `插入路径**不写** anchor（否则既有引用会冻在插入时刻）：${JSON.stringify(before)}`)
+  assert(before.label.length > 0, '前置：引用应显示目标的现算名')
+
+  // ⌥ 点那枚引用 ⇒ 浮层里有锚文本输入框（它是唯一入口）
+  await page.locator(`#editor [data-atom-id="${setup.runId}"]`).click({ modifiers: ['Alt'] })
+  const input = page.locator('.popover [data-anchor-input]')
+  assert((await input.count()) === 1, `详情浮层应有且只有一个锚文本输入框：${await page.locator('.popover').innerText()}`)
+  assert(
+    (await input.getAttribute('placeholder')) === before.label,
+    `占位应是目标**此刻**的名字（现算，不是快照）：${await input.getAttribute('placeholder')} ≠ ${before.label}`,
+  )
+  await input.fill('合同第三版')
+  await input.press('Enter')
+  await page.waitForTimeout(180)
+
+  const after = await page.evaluate(
+    ({ id, runId }) => ({
+      label: window.__qua.atoms().find((a) => a.id === runId)?.label ?? '',
+      anchor: window.__qua.__editor.store.find(id).content.find((r) => r.id === runId)?.anchor,
+      text: window.__qua.text(),
+      dom: document.querySelector(`#editor [data-atom-id="${runId}"]`)?.textContent ?? '',
+      ops: window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id })),
+    }),
+    { id: setup.blockId, runId: setup.runId },
+  )
+  assert(after.anchor === '合同第三版', `模型里应写上 anchor：${JSON.stringify(after)}`)
+  assert(after.label === '合同第三版', `行内应显示 anchor（不是目标的名字）：${after.label}`)
+  assert(after.dom.includes('合同第三版'), `DOM 上应看到它：${after.dom}`)
+
+  /**
+   * 三条负向断言的前两条（锚文本不是第二份身份）：
+   *   · 投影不变 ⇒ 搜索／导出／引文与 `{text}` 提及的结果一字不动；
+   *   · 边集合不变 ⇒ 反链计数不受影响（反链按 run 的 `to` 算，不认 anchor）。
+   */
+  assert(JSON.stringify(after.text) === JSON.stringify(before.text), '锚文本不进投影：`plainText` 应一字不变')
+  assert(JSON.stringify(await refEdges(page)) === JSON.stringify(edgesBefore), '锚文本不动边：ref run 的 to 集合应一字不变')
+  assert(
+    after.ops.length === 1 && after.ops[0].e === 'block' && after.ops[0].op === 'upsert' && after.ops[0].id === setup.blockId,
+    `改锚文本应只产一条 block.upsert{content}：${JSON.stringify(after.ops)}`,
+  )
+
+  // 一次 ⌘Z 回到「跟随目标现算」
+  await page.keyboard.press('Escape')
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForTimeout(180)
+  const undone = await page.evaluate(
+    ({ id, runId }) => ({
+      label: window.__qua.atoms().find((a) => a.id === runId)?.label ?? '',
+      anchor: window.__qua.__editor.store.find(id).content.find((r) => r.id === runId)?.anchor,
+    }),
+    { id: setup.blockId, runId: setup.runId },
+  )
+  assert(undone.anchor === undefined, `撤销应把键删掉（不是留下空串）：${JSON.stringify(undone)}`)
+  assert(undone.label === before.label, `撤销后应回到现算名：${undone.label} ≠ ${before.label}`)
+
+  await ctx.close()
+  return `设锚文本：现算名 → 「合同第三版」（1 条 upsert、1 次撤销）；投影与边零变化`
+})
+
+await check('T145 锚文本：清空 ⇒ 回到现算名（空串＝删键，不是「显示成空」）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+  const setup = await seedPageRef(page)
+
+  // 先设一次（走命令面：与浮层同一个入口，省掉一次浮层交互）
+  await page.evaluate((runId) => window.__qua.invoke('core.editor/set-anchor', { atomId: runId, text: '临时名' }), setup.runId)
+  await page.waitForTimeout(150)
+  const set = await page.evaluate(
+    ({ id, runId }) => ({
+      label: window.__qua.atoms().find((a) => a.id === runId)?.label ?? '',
+      anchor: window.__qua.__editor.store.find(id).content.find((r) => r.id === runId)?.anchor,
+    }),
+    { id: setup.blockId, runId: setup.runId },
+  )
+  assert(set.label === '临时名', `前置：应已设上锚文本：${JSON.stringify(set)}`)
+
+  // 清空 ⇒ 键被删掉，显示回到现算名（不是空白）
+  await page.evaluate((runId) => window.__qua.invoke('core.editor/set-anchor', { atomId: runId, text: '' }), setup.runId)
+  await page.waitForTimeout(150)
+  const cleared = await page.evaluate(
+    ({ id, runId }) => ({
+      label: window.__qua.atoms().find((a) => a.id === runId)?.label ?? '',
+      anchor: window.__qua.__editor.store.find(id).content.find((r) => r.id === runId)?.anchor,
+      hasKey: 'anchor' in (window.__qua.__editor.store.find(id).content.find((r) => r.id === runId) ?? {}),
+      dom: document.querySelector(`#editor [data-atom-id="${runId}"]`)?.textContent ?? '',
+      ops: window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op })),
+    }),
+    { id: setup.blockId, runId: setup.runId },
+  )
+  assert(cleared.hasKey === false, `写空串应**删掉这个键**（缺席与空值不并存）：${JSON.stringify(cleared)}`)
+  assert(cleared.label.length > 0, `清空后应显示现算名，不是空白：${JSON.stringify(cleared)}`)
+  assert(cleared.dom.includes(cleared.label), `DOM 上应看得见名字：${cleared.dom}`)
+  assert(cleared.ops.length === 1, `清一次也是一条 upsert：${JSON.stringify(cleared.ops)}`)
+
+  await ctx.close()
+  return `清锚文本：键被删掉、行内回到现算名（${cleared.label}）`
+})
+
+await check('T146 锚文本：目标被删 ⇒ dangling 仍显示 anchor（`anchor ?? label`，不是空白）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  /**
+   * 两块**都在当前视图里**的普通叶子块：一个当宿主（放引用），另两个当目标。
+   *
+   * ⚠️ 目标必须取**视图里的块**（不能取「另一页」）：`ed.remove` 走 `locate(this.doc, id)`，
+   *    不在当前视图的块它**直接返回**——块数不变、也不报错，于是 dangling 永远不来，
+   *    而断言看起来像「锚文本没生效」（真踩过）。
+   * ⚠️ 目标取**叶子**：删掉一棵子树时不会顺带把宿主也删了（那样引用跟着消失，测不到 dangling）。
+   */
+  const setup = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const plain = (b) => b.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
+    const rootIds = new Set(ed.doc.roots.map((b) => b.id))
+    const leaves = []
+    const walk = (list) => {
+      for (const b of list) {
+        if (!rootIds.has(b.id) && b.children.length === 0 && plain(b).length > 0) leaves.push(b.id)
+        walk(b.children)
+      }
+    }
+    walk(ed.doc.roots)
+    if (leaves.length < 3) return null
+    const [hostId, t1, t2] = leaves
+    window.__qua.focusBlock(hostId, 0)
+    const labelOf = (id) => plain(ed.store.find(id))
+    const anchored = ed.insertRef({ to: t1, label: labelOf(t1) })
+    const snapshot = ed.insertRef({ to: t2, label: labelOf(t2) })
+    return { hostId, t1, t2, anchored, snapshot, labels: [labelOf(t1), labelOf(t2)] }
+  })
+  assert(setup, '前置：当前视图里应有三块可当宿主/目标的叶子块')
+
+  // 只给其中一枚设锚文本（另一枚保持「只有插入快照」的现状）
+  await page.evaluate(
+    (runId) => window.__qua.invoke('core.editor/set-anchor', { atomId: runId, text: '被删的那个' }),
+    setup.anchored,
+  )
+  await page.waitForTimeout(150)
+  await page.evaluate((ids) => ids.forEach((id) => window.__qua.__editor.remove(id)), [setup.t1, setup.t2])
+  await page.waitForTimeout(300)
+
+  const dangling = await page.evaluate(
+    ({ anchored, snapshot }) => {
+      const read = (runId) => {
+        const el = document.querySelector(`#editor [data-atom-id="${runId}"]`)
+        return {
+          atom: window.__qua.atoms().find((a) => a.id === runId) ?? null,
+          dom: el?.textContent ?? '',
+          cls: el?.className ?? '',
+        }
+      }
+      return { anchored: read(anchored), snapshot: read(snapshot) }
+    },
+    { anchored: setup.anchored, snapshot: setup.snapshot },
+  )
+
+  const a = dangling.anchored
+  assert(a.atom?.state === 'dangling', `目标没了应是 dangling：${JSON.stringify(a)}`)
+  assert(a.atom?.label === '被删的那个', `dangling 应显示 anchor（不是空白、也不是旧快照）：${JSON.stringify(a)}`)
+  assert(a.dom.includes('被删的那个'), `DOM 上应看得见：${a.dom}`)
+  assert(a.cls.includes('dangling'), `dangling 要看得见（不是静默错指）：${a.cls}`)
+
+  const s = dangling.snapshot
+  assert(s.atom?.state === 'dangling', `没有 anchor 的那一枚也应是 dangling：${JSON.stringify(s)}`)
+  assert(s.atom?.label === setup.labels[1], `没有 anchor ⇒ 沿用插入快照：${JSON.stringify(s)} ≠ ${setup.labels[1]}`)
+  assert(s.dom.includes(setup.labels[1]), `DOM 上应看得见快照名：${s.dom}`)
+
+  await ctx.close()
+  return `dangling 链：有 anchor 显示「被删的那个」，没有则沿用快照「${setup.labels[1]}」`
+})
+
+await check('T147 外链：插入成 LinkRun；点一下被拦下并交给壳；非 http(s) 协议拒绝打开且给文案', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  /**
+   * **拦截 `window.open`**：这一刀要验的是「应用把地址交给了宿主」，
+   * 而不是「浏览器真的开了一个标签」——真的开一个标签会把冒烟机拖进网络，
+   * 而断言要的只是那一次调用与它的参数。
+   */
+  await page.evaluate(() => {
+    window.__opened = []
+    window.open = (url) => {
+      window.__opened.push(String(url))
+      return null
+    }
+  })
+
+  const inserted = await page.evaluate(() => {
+    const b = window.__qua.blocks()[0]
+    window.__qua.focusBlock(b.id, 0)
+    window.__qua.invoke('core.editor/insert-link', { url: 'https://qua.leay.net/arch.html', text: '架构图' })
+    return { blockId: b.id, content: window.__qua.__editor.store.find(b.id).content.map((r) => ({ id: r.id, t: r.t, v: r.v ?? '', url: r.url ?? '' })) }
+  })
+  const link = inserted.content.find((r) => r.t === 'link')
+  assert(link, `应插进一枚 link run：${JSON.stringify(inserted.content)}`)
+  assert(link.v === '架构图' && link.url === 'https://qua.leay.net/arch.html', `显示文本与地址各在自己的键上：${JSON.stringify(link)}`)
+
+  const dom = await page.evaluate(() => {
+    const el = document.querySelector('#editor .atom-link')
+    return { text: el?.textContent ?? '', kind: el?.dataset.atomKind ?? '', title: el?.getAttribute('title') ?? '' }
+  })
+  assert(dom.kind === 'link' && dom.text.includes('架构图'), `DOM 上应是一枚 link 原子：${JSON.stringify(dom)}`)
+
+  // ① 左键点 ⇒ 经 atomClick → 命令 → 门面 ⇒ 交给壳（这里被拦下）
+  await page.locator('#editor .atom-link').first().click()
+  await page.waitForTimeout(150)
+  const opened = await page.evaluate(() => window.__opened)
+  assert(opened.length === 1, `点一次应只发出一次打开请求：${JSON.stringify(opened)}`)
+  assert(opened[0].startsWith('https://qua.leay.net/'), `交出去的应是 http(s) 地址：${opened[0]}`)
+
+  // ② ⌥ 点 ⇒ 详情浮层（有「打开」按钮，与点正文同一条命令）
+  await page.locator('#editor .atom-link').first().click({ modifiers: ['Alt'] })
+  const popText = await page.locator('.popover').innerText()
+  assert(popText.includes('https://qua.leay.net/arch.html'), `详情里应显示 URL：${popText}`)
+  const openBtn = page.locator('.popover [data-link-open]')
+  assert((await openBtn.count()) === 1, `详情浮层应有「打开」按钮：${popText}`)
+  await openBtn.click()
+  await page.waitForTimeout(150)
+  assert((await page.evaluate(() => window.__opened.length)) === 2, '浮层的「打开」应走同一条命令（再发一次）')
+  await page.keyboard.press('Escape')
+
+  /**
+   * ③ 非 http(s) 一律拒绝：**一次都没交给壳**，且给了文案。
+   *    （`javascript:` / `file:` 能被 `openExternal` 直接吃掉，这是本条存在的原因。）
+   */
+  const rejected = await page.evaluate(
+    ({ runId, blockId }) => {
+      const before = window.__opened.length
+      // (a) 插入阶段就拒（与打开同一份判据，不留「能插但不能开」的链接）
+      window.__qua.focusBlock(blockId, 0)
+      window.__qua.invoke('core.editor/insert-link', { url: 'javascript:alert(1)' })
+      const insertedBad = window.__qua.__editor.store
+        .find(blockId)
+        .content.some((r) => r.t === 'link' && r.url.startsWith('javascript:'))
+      const toastAfterInsert = [...document.querySelectorAll('.toast')].map((t) => t.textContent ?? '')
+
+      /**
+       * (b) 打开阶段：把这一枚 link 的 url 换成 `file:`（**测试侧的坏数据**——
+       *     模拟「外来的旧库／插件写入的链接」：写入口不止命令一条，而打开只有一条）。
+       *     白名单在打开这一侧也必须成立，否则前面所有写入口的纪律都被绕过了。
+       */
+      const run = window.__qua.__editor.findRun(runId)?.run
+      if (run && run.t === 'link') run.url = 'file:///etc/passwd'
+      window.__qua.invoke('core.link/open', { atomId: runId })
+      return {
+        before,
+        after: window.__opened.length,
+        insertedBad,
+        toastAfterInsert,
+        toastAfterOpen: [...document.querySelectorAll('.toast')].map((t) => t.textContent ?? ''),
+      }
+    },
+    { runId: inserted.content.find((r) => r.t === 'link').id, blockId: inserted.blockId },
+  )
+  assert(rejected.insertedBad === false, '非 http(s) 的链接不该被插进正文')
+  assert(rejected.after === rejected.before, `非 http(s) 不该交给壳：${JSON.stringify(rejected)}`)
+  assert(
+    rejected.toastAfterInsert.some((x) => x.length > 0),
+    `插入被拒要给用户一句话（不是静默失败）：${JSON.stringify(rejected.toastAfterInsert)}`,
+  )
+  assert(
+    rejected.toastAfterOpen.length > rejected.toastAfterInsert.length,
+    `打开被拒也要给一句话：${JSON.stringify(rejected.toastAfterOpen)}`,
+  )
+
+  await ctx.close()
+  return `外链：插入成 link run、点一次交一次给壳、非 http(s) 插不进也打不开且有文案`
+})
+
 /**
  * ⚠️ **报告先写，再关浏览器。** 反过来的话，机器被压死那一刻 Chrome 先死，
  *    `browser.close()` 抛出来，报告就永远没写 —— 编排端只能看到「这一片没留下报告」，

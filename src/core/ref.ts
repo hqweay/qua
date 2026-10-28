@@ -5,7 +5,10 @@
  * 双链里「改名要能传播」这件事只能靠**渲染时解析**，不能靠「改名时批量回去改一遍原子」
  * （后者一有第二处写入路径就会漏，而且撤销时还要反向再改一遍）。
  *
- * ⇒ `Atom.label` 降级为 **fallback**：只有目标找不到时才用它（那时它是用户最后见过的信息）。
+ * ⇒ 显示名**一律现算**，上面再叠一层用户覆盖（`RefRun.anchor`）：
+ *   有 anchor 就显示 anchor（用户明确指定这一处叫什么），否则才是现算出来的名字。
+ * ⇒ `Atom.label` 降级为 **fallback**：只有「目标找不到、且没有 anchor」时才用它
+ *   （那时它是插入时刻的字，是用户关于这一指唯一还可能记得的信息）。
  * ⇒ `state` 是**派生**、不落盘：能不能解析到由「此刻森林里有没有这块」决定，
  *    存一份下来只会得到一个可能与事实不符的第二份真相。
  *
@@ -51,7 +54,21 @@ export function refTitle(b: Block): string {
 /**
  * 解析一个行内引用。
  *
- * `a` 只取 `label` 与 `to` ⇒ popover 与测试可以不造完整 run。
+ * `a` 只取 `label`／`anchor`／`to`／`flavor` ⇒ popover 与测试可以不造完整 run。
+ *
+ * ## 显示名的唯一一条链（改这里之前先看一眼）
+ *
+ * | 目标状态 | 显示什么 |
+ * |---|---|
+ * | resolved | `anchor ?? refTitle(target)` |
+ * | dangling  | `anchor ?? label ?? ''` |
+ *
+ * anchor 是「用户想让这一处叫什么」，所以它**压过一切派生出来的名字**；
+ * `label` 只在「目标没了、用户又没指定显示名」时才露面——它是插入时刻的快照。
+ *
+ * ⚠️ `anchor` **不是第二份身份答案**：它不参与 `_aliases`、不进 `plainText`
+ *    投影、不改反链计数、也不被 `{text}` 条件读到（那些地方只认 target 与投影）。
+ *    把这条看成「一处显示内容」，就不会诱惑任何人去同步它。
  *
  * ⚠️ 没有 `to` 的引用（seed 的悬空样本、落盘前就指不到东西的老数据）
  *    一律 `dangling` ＋ 沿用 `label`：指不到就是指不到，不假装解析成功。
@@ -61,15 +78,21 @@ export function refTitle(b: Block): string {
  *    （弄脏快照、连带触发落盘）。「改名靠解析传播、不回头改原子」是本文件的前提，二者不可兼得。
  *    ⇒ dangling 是**少数派状态**（目标被删），给它一个稳定的旧名字，好过让渲染变得不纯。
  */
-export function resolveRef(find: FindBlock, a: { label?: string; to?: string; flavor?: '#' }): RefView {
+export function resolveRef(
+  find: FindBlock,
+  a: { label?: string; to?: string; flavor?: '#'; anchor?: string },
+): RefView {
   const target = a.to
+  // 空串 ＝ 没写（写入侧「写空即删键」⇒ 库里没有「有但是空的」这种形状），
+  // 读侧把两者合成一个值，判据才不会在某一处漏成「显示一片空白」
+  const anchor = a.anchor === '' ? undefined : a.anchor
   const fallback = a.flavor === '#' ? ('tag' as const) : ('page' as const)
-  if (!target) return { label: a.label ?? '', state: 'dangling', kind: fallback }
+  if (!target) return { label: anchor ?? a.label ?? '', state: 'dangling', kind: fallback }
   const b = find(target)
-  if (!b) return { label: a.label ?? '', state: 'dangling', kind: fallback }
+  if (!b) return { label: anchor ?? a.label ?? '', state: 'dangling', kind: fallback }
   // 标签的显示名＝**不带 `#` 的正文**；`#` 是呈现时加的装饰（`makeAtomEl`），不进正文，
   // 否则「标签块的正文」与「它在引用里显示的字」就成了两个需要同步的东西。
-  return { label: refTitle(b), state: 'resolved', kind: refKindOf(b) }
+  return { label: anchor ?? refTitle(b), state: 'resolved', kind: refKindOf(b) }
 }
 
 /**
@@ -92,7 +115,10 @@ function refKindOf(b: Block): 'tag' | 'obj' | 'page' {
  * 返回的是 `runId → RefView`，按 id 取而不是按位置取 —— run 与 DOM 元素的对应关系
  * 由 run id 钉死，不会因为顺序变化而张冠李戴。
  */
-export function resolveRefs(find: FindBlock, runs: readonly { id: string; label?: string; to?: string; flavor?: '#' }[]): Map<string, RefView> {
+export function resolveRefs(
+  find: FindBlock,
+  runs: readonly { id: string; label?: string; to?: string; flavor?: '#'; anchor?: string }[],
+): Map<string, RefView> {
   const out = new Map<string, RefView>()
   for (const a of runs) out.set(a.id, resolveRef(find, a))
   return out

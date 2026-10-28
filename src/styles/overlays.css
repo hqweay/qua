@@ -327,6 +327,42 @@
   color: var(--ui-accent);
 }
 
+/* ------------------------------------------------ 锚文本（引用详情浮层里那一行） */
+
+/*
+  与「别名编辑器」同一套几何：**输入框占满、按钮跟着、说明在下面一行**。
+  不另做一套尺寸，是因为这两处做的是同一件事（在一枚对象上改一处文本），
+  长得不同只会让人以为它们是两种不同的机制。
+*/
+.popover-anchor {
+  display: flex;
+  gap: var(--ui-gap-2);
+  margin-top: var(--ui-gap-2);
+}
+.popover-anchor-input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  border: var(--ui-sep) solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  outline: none;
+}
+.popover-anchor-input:focus {
+  border-color: var(--ui-accent);
+}
+.popover-anchor button {
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  border: var(--ui-sep) solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-secondary);
+}
+.popover-anchor .popover-note {
+  margin-top: 0;
+  flex: 1 0 100%;
+}
+
 /* ------------------------------------------------ 字段声明（抽屉） */
 
 .fields-section {

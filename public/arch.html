@@ -213,7 +213,7 @@
 
   <span class="key">text</span>  <span class="pipe">{</span> t, v, marks? <span class="pipe">}</span>          <span class="cmt">格式是 run 的属性，不是另一个实体</span>
   <span class="key">ref</span>   <span class="pipe">{</span> id, t, to?, flavor?: '#',      <span class="cmt">flavor '#' ＝ 行内 # 露面（指向标签类或实例）</span>
-          label?, marks? <span class="pipe">}</span>            <span class="cmt">label 只是插入时的快照，显示名一律现算</span>
+          label?, anchor?, marks? <span class="pipe">}</span>  <span class="cmt">显示名＝现算 ＋ anchor 覆盖（用户写的这一处）；label 只在 dangling 且无 anchor 时兜底</span>
   <span class="key">link</span>  <span class="pipe">{</span> id, t, v, url, marks? <span class="pipe">}</span>     <span class="cmt">外链：v 是显示文本，不产生块间边</span>
   <span class="key">asset</span> <span class="pipe">{</span> id, t, asset, label?, w?, h? <span class="pipe">}</span>
                                    <span class="cmt">asset ＝ 内容 hash（字节住资产库）；永不带 marks</span>

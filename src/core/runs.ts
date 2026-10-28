@@ -43,8 +43,19 @@ export interface TextRun {
  * - `to` 可选：解析不到目标就是没有目标（dangling 是派生态，不造假 id）；
  * - `flavor: '#'` ＝ 行内标签的显示风味（显示成 `#名`、点击跳目标），
  *   它与普通引用是**同一种 run**，只是呈现不同；
- * - `label` 是**插入时的名字快照**，只在目标找不到时当兜底显示名——
- *   目标改名后它就是过期的字，显示名一律现算（`core/ref.ts`）。
+ * - `label` 与 `anchor` 是**两个文本键，回答两个不同的问题**（别合并、别互相代替）：
+ *     · `anchor` —— 「用户想让**这一处**叫什么」（内容，与 `LinkRun.v` 同族）。
+ *       有它就覆盖目标现算出来的名字；它属于**这一枚 run**，不属于任何块的正文。
+ *     · `label`  —— 「目标删了以后它叫什么」（**插入时刻**的名字快照，
+ *       只在 dangling 且没有 anchor 时兜底显示）。
+ *
+ * ⚠️ 为什么不用 `label` 兼作锚文本：四条插入路径都全量写 `label` 快照，一旦判据
+ *    改成「有 label 就显示」，既有引用会**冻在插入那一刻的名字上**，改名不再跟随——
+ *    那是一次静默的行为变化。两个键分家之后，改名仍靠解析传播（身份在 `_aliases`），
+ *    anchor 不是第二份身份答案，只是这一处的显示内容。
+ *
+ * ⚠️ 显示名的链只有一条（在 `core/ref.ts` 的 `resolveRef`）：目标在 ⇒ `anchor ?? 现算名`；
+ *    目标没了 ⇒ `anchor ?? label`。别在任何读路径上另写一份优先级。
  */
 export interface RefRun {
   id: string
@@ -52,6 +63,8 @@ export interface RefRun {
   to?: string
   flavor?: '#'
   label?: string
+  /** 这一处引用的锚文本（用户显式写的显示名）；写空串 ＝ 不写这个键 */
+  anchor?: string
   marks?: MarkType[]
 }
 
@@ -573,6 +586,7 @@ export function isRun(x: unknown): x is Run {
         typeof r.id === 'string' &&
         (r.to === undefined || typeof r.to === 'string') &&
         (r.label === undefined || typeof r.label === 'string') &&
+        (r.anchor === undefined || typeof r.anchor === 'string') &&
         (r.flavor === undefined || r.flavor === '#')
       )
     case 'link':

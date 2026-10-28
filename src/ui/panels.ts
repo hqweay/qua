@@ -10,6 +10,7 @@
 import type { Block, CtxKeys, FieldRow } from '../core/index.ts'
 import type { RunWithId } from '../core/runs.ts'
 import { resolveRef } from '../core/ref.ts'
+import { checkExternalUrl, rejectText } from '../core/link.ts'
 import { plainText } from '../core/runs.ts'
 import { COMMANDS } from '../core/commands/index.ts'
 import { BINDINGS, keyLabel, keymapRows, referencedKeys } from '../core/bindings.ts'
@@ -42,6 +43,18 @@ export interface PanelDeps {
   openBlock: (id: string) => void
   /** Shift+点「打开目标」：在右槽打开（中心不换） */
   openInDock: (id: string) => void
+  /**
+   * **改一枚引用的锚文本**（这一处显示什么）。
+   *
+   * ⚠️ 浮层自己**不碰模型**：怎么写由装配层给（它知道走哪条事务、算不算一次撤销），
+   *    本文件只负责把「用户想让这一处叫什么」交出去。
+   */
+  setAnchor: (runId: string, text: string) => void
+  /**
+   * **打开一枚外链**（被点/按了「打开」）。由装配层走同一个命令 ⇒
+   * 点 atomic 与点这个按钮是同一条路径，不会有一个能开另一个不开。
+   */
+  openLink: (runId: string) => void
   removeAtom: (id: string) => void
   closePopover: () => void
   openPopover: (render: (host: HTMLElement) => void, anchor: DOMRect | null) => void
@@ -162,6 +175,105 @@ function renderObjFields(
   draw()
 }
 
+/**
+ * **插入外链的输入框**（`core.editor/insert-link` 不带 `url` 时的那条路）。
+ *
+ * 为什么它是一枚浮层而不是「先插一个空链接再就地打字」：外链是**不可分的行内对象**，
+ * 正文流里没有给它打字的位点（原子占 1 格的契约）。所以先问、后插，一次成形。
+ *
+ * ⚠️ 校验用 `core/link.ts` 的 `checkExternalUrl`（与插入/打开同一份判据），
+ *    不合格就留在浮层里说一句为什么 —— 关掉浮层再弹一条 toast 等于让用户猜刚才是哪一步错了。
+ */
+export function renderLinkComposer(host: HTMLElement, deps: LinkComposerDeps): void {
+  host.replaceChildren()
+  const h = document.createElement('h4')
+  h.textContent = t('ui.link.composerTitle')
+  const form = document.createElement('form')
+  form.className = 'popover-anchor'
+  const url = document.createElement('input')
+  url.className = 'popover-anchor-input'
+  url.dataset.linkUrl = '1'
+  url.type = 'text'
+  url.placeholder = t('ui.link.urlPlaceholder')
+  url.spellcheck = false
+  const text = document.createElement('input')
+  text.className = 'popover-anchor-input'
+  text.dataset.linkText = '1'
+  text.type = 'text'
+  text.placeholder = t('ui.link.textPlaceholder')
+  const submit = document.createElement('button')
+  submit.type = 'submit'
+  submit.textContent = t('ui.link.insert')
+  const note = document.createElement('div')
+  note.className = 'popover-note'
+  note.textContent = t('ui.link.composerNote')
+  form.addEventListener('submit', (e) => {
+    e.preventDefault()
+    const chk = checkExternalUrl(url.value)
+    if (!chk.ok) {
+      deps.toast?.(rejectText(chk), 'warn')
+      url.focus()
+      return
+    }
+    deps.insert(chk.url, text.value)
+  })
+  form.append(url, text, submit, note)
+  host.append(h, form)
+  // 浮层是「先 render 再 append」⇒ 此刻还没进文档，focus 要等挂载（与别名编辑器同一条理由）
+  queueMicrotask(() => {
+    if (url.isConnected) url.focus()
+  })
+}
+
+/**
+ * 锚文本那一行：**输入框 ＋ 一句说明**。
+ *
+ * `placeholder` 给的是目标此刻的名字（现算），不是 run 上的快照——
+ * 「留空就显示现算名」这句话要能被看见，否则用户不知道空着意味着什么。
+ *
+ * 提交时机：回车（表单 submit）与失焦后值变了（change）。改一次是**一轮撤销**，
+ * 所以不按每一次键入都写——那样撤销栈会被一次命名填成十几层。
+ */
+function anchorRow(a: { id: string; anchor?: string }, resolvedLabel: string, deps: PanelDeps): HTMLElement {
+  const box = document.createElement('form')
+  box.className = 'popover-anchor'
+  box.dataset.anchorFor = a.id
+  const input = document.createElement('input')
+  input.className = 'popover-anchor-input'
+  input.dataset.anchorInput = a.id
+  input.type = 'text'
+  input.value = a.anchor ?? ''
+  input.placeholder = resolvedLabel
+  input.spellcheck = false
+  input.title = t('ui.popover.anchorHint')
+  const hint = document.createElement('div')
+  hint.className = 'popover-note'
+  hint.textContent = t('ui.popover.anchorNote')
+  const submit = document.createElement('button')
+  submit.type = 'submit'
+  submit.textContent = t('ui.popover.anchorApply')
+  const commit = (): void => {
+    deps.setAnchor(a.id, input.value)
+    // 写回之后把自己的值调成真正的形态（空串 ⇒ 键被删掉，输入框跟着空）
+    input.value = input.value.trim()
+  }
+  box.addEventListener('submit', (e) => {
+    e.preventDefault()
+    commit()
+  })
+  input.addEventListener('change', commit)
+  box.append(input, submit, hint)
+  return box
+}
+
+/** 外链输入框的宿主能力（装配层注入；本文件不认识「怎么写进正文」） */
+export interface LinkComposerDeps {
+  /** 真的写进去（校验已过）；由装配层走命令，浮层自己不碰模型 */
+  insert: (url: string, text: string) => void
+  /** 校验没过的那句话（缺省则静默） */
+  toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
+}
+
 export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect, fields?: ObjFieldDeps): void {
   deps.openPopover((host) => {
     if (a.t === 'ref') {
@@ -203,6 +315,15 @@ export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect, fi
       // 间距/颜色走类与 token（原来这里是两条内联 style，字面量散在 TS 里）
       note.className = 'popover-note'
       note.textContent = view.state === 'dangling' ? t('ui.popover.danglingNote') : t('ui.popover.refNote')
+      /**
+       * **锚文本输入框**：这一处显示什么（留空 ＝ 用目标现在的名字）。
+       *
+       * ⚠️ `flavor:'#'` 的一枚**不给**这个入口：它的语义是「提及这个标签」，
+       *    显示成 `#自定义` 就成了一句谎话——先不放宽，口子留给真实需求。
+       * ⚠️ 它是锚文本的**唯一**入口：正文流里的原子不可编辑（不可分契约），
+       *    就地打字改不动它，也不该改得动。
+       */
+      const anchorBox = a.flavor === '#' ? null : anchorRow(a, view.label, deps)
       const row = document.createElement('div')
       row.className = 'row'
       if (target) {
@@ -224,7 +345,8 @@ export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect, fi
         deps.removeAtom(a.id)
       })
       row.appendChild(del)
-      host.append(h, dl, note, row)
+      if (anchorBox) host.append(h, dl, anchorBox, note, row)
+      else host.append(h, dl, note, row)
       return
     }
     if (a.t === 'link') {
@@ -245,6 +367,19 @@ export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect, fi
       }
       const row = document.createElement('div')
       row.className = 'row'
+      /**
+       * **「打开」**：与点正文里那一枚走**同一条命令**（`core.link/open`），
+       * 所以「点链接」和「点这个按钮」不会有能开/不能开的分叉；
+       * 非 http(s) 的协议由那一条链路拦下并给文案，浮层也照做（关闭后提示）。
+       */
+      const open = document.createElement('button')
+      open.type = 'button'
+      open.dataset.linkOpen = a.id
+      open.textContent = t('ui.popover.openLink')
+      open.addEventListener('click', () => {
+        deps.closePopover()
+        deps.openLink(a.id)
+      })
       const del = document.createElement('button')
       del.type = 'button'
       del.textContent = t('ui.popover.deleteRef')
@@ -252,7 +387,7 @@ export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect, fi
         deps.closePopover()
         deps.removeAtom(a.id)
       })
-      row.appendChild(del)
+      row.append(open, del)
       host.append(h, dl, row)
       return
     }

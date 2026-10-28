@@ -293,6 +293,37 @@ test('isRun / isAnno：合法形状放行、非法形状拦下（资产带 marks
   assert.ok(!isAnno({ id: 'x' }))
 })
 
+/**
+ * **锚文本（`RefRun.anchor`）是「一处显示内容」，不是身份。**
+ *
+ * 三条负向断言：
+ *   ① 它不进投影（`plainText` 只由 text run 决定 ⇒ 搜索/导出/引文都看不到它）；
+ *   ② 它不进引文快照（`quote.exact` 恒为投影的子串，锚文本改了引文不变）；
+ *   ③ 它是**可选**键（写空串＝删键 ⇒ 库里只有一种形状）。
+ * 三条一起才撑得住「改名传播仍然只靠解析」——否则 anchor 就是第二份身份。
+ */
+test('anchor：不进投影、不改引文、写空＝删键（锚文本不是第二份身份）', () => {
+  const a = ref('p1', { label: '目标', anchor: '这一处叫别的' })
+  const c: Run[] = [...textRuns('前'), a, ...textRuns('后')]
+  // ① 投影：原子整体贡献 0，anchor 更不进（它连「原子」这一格都不占）
+  assert.equal(plainText(c), '前后')
+  assert.equal(plainLen(c), 3)
+  // ② 引文快照：坐标是投影，anchor 无论多长都不参与
+  const q = projectRange(c, 0, 3)
+  assert.ok(q)
+  assert.equal(q.exact, '前后')
+  // ③ 归一化不替它补空值：写了就有，没写就没有（`''` 不被当成合法值留下）
+  assert.equal((normalizeRuns(c).find((x): x is RefRun => x.t === 'ref')!).anchor, '这一处叫别的')
+  assert.equal('anchor' in (normalizeRuns([ref('p1')])[0] as RefRun), false)
+})
+
+test('isRun：ref 认 `anchor?: string`（缺席放行、字符串放行、其它类型判非法）', () => {
+  assert.ok(isRun(ref('p1', { anchor: '锚' })), '有合法锚文本 ⇒ 合法')
+  assert.ok(isRun(ref('p1')), '没有这一格 ⇒ 合法（可选字段）')
+  assert.ok(!isRun({ ...ref('p1'), anchor: 42 }), '非字符串 ⇒ 非法')
+  assert.ok(!isRun({ ...ref('p1'), anchor: null }), 'null ⇒ 非法')
+})
+
 test('资产 run：plainText 贡献 0、plain 占 1 格、永不带 marks（三条一起才叫「行内原子」）', () => {
   const a = asset('deadbeef')
   const c: Run[] = [...textRuns('前'), a, ...textRuns('后')]

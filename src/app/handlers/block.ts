@@ -5,7 +5,7 @@
  * 只经 `App` 门面改状态（`app.ed.*`），不碰 DOM。
  */
 import { t } from '../../core/msg.ts'
-import { COLLECTION_TYPE } from '../../core/index.ts'
+import { COLLECTION_TYPE, checkExternalUrl, rejectText } from '../../core/index.ts'
 import { MISSING_ASSET_HASH, SEED_ASSET_H, SEED_ASSET_HASH, SEED_ASSET_W } from '../../core/fixtures/assets.ts'
 import type { Handler } from '../../core/ports.ts'
 import { curBlock, S } from './shared.ts'
@@ -182,6 +182,46 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
       h: SEED_ASSET_H,
     })
     return true
+  },
+
+  /**
+   * 外链：给 `url` ⇒ 直接插（机器接口与验收走这一条）；不给 ⇒ 开输入框（人走的入口）。
+   *
+   * ⚠️ 协议白名单在这里**先判一次**：插入与打开是外链仅有的两个出口，
+   *    两个都判、判据只有 `core/link.ts` 那一份，就不会出现「能插进去但打不开」的链接。
+   */
+  'core.editor/insert-link': (a, app) => {
+    if (a.url === undefined) {
+      app.showLinkComposer()
+      return true
+    }
+    const chk = checkExternalUrl(S(a.url))
+    if (!chk.ok) {
+      app.toast(rejectText(chk), 'warn')
+      return true
+    }
+    const text = a.text === undefined ? undefined : S(a.text)
+    return app.ed.insertLink({ url: chk.url, ...(text === undefined ? {} : { text }) }) !== null
+  },
+
+  /**
+   * **锚文本**（这一处引用显示什么）：`text` 为空串 ⇒ 删掉这个键 ⇒ 回到「跟随目标现算」。
+   *
+   * ⚠️ 入口只有 ⌥ 浮层那一个输入框（正文流里的原子不可编辑），
+   *    命令化是为了让撤销与落盘走同一条路，不是为了给人第二个入口。
+   */
+  'core.editor/set-anchor': (a, app) => app.ed.setRunAnchor(S(a.atomId), S(a.text)),
+
+  /**
+   * 打开一枚外链：`atomId` ⇒ 去正文里读它**此刻**的 url（run 是唯一事实源，
+   * 浮层上显示的那一份是它的投影）。点与浮层的「打开」按钮共用这一条命令。
+   */
+  'core.link/open': (a, app) => {
+    const atomId = S(a.atomId)
+    if (!atomId) return false
+    const hit = app.ed.findRun(atomId)
+    if (!hit || hit.run.t !== 'link') return false
+    return app.openExternal(hit.run.url)
   },
 
   /* ---- 区间格式 ---- */

@@ -109,6 +109,7 @@ import {
   textRuns,
   toggleMark as toggleRunMark,
   type AssetRun,
+  type LinkRun,
   type MarkType,
   type RefRun,
   type Run as InlineRun,
@@ -2625,28 +2626,71 @@ export class BlockEditor {
   /* --------------------------------------------------------- 行内原子 */
 
   /**
-   * 在光标处插一枚引用 run（页引用／行内标签共用；标签带 `flavor:'#'`）。
-   * 返回 run id。
+   * **落一次内容改写**（报快照 → 写 → 记撤销 → 重画 → 必要时放回光标）。
+   *
+   * 抽它的直接理由是「第三处」：引用、外链、资产三个插入口原先各自背着同样的五步，
+   * 写第三遍时已经开始漂移（记哪一种撤销、要不要 `emitChange` 各有一套写法）。
+   * 收成一支 ⇒ 加第四种 run 只需要给一枚形状，不会再漏掉「写完要重画」。
+   *
+   * ⚠️ **顺序不许改**：先在事务里写模型，再拿 `before` 记撤销（快照必须在写之前取，
+   *    由调用方传进来），最后才重画 —— 重画会重建这一块的 DOM。
+   * ⚠️ `caret` 省略 ⇒ **不动光标**：从浮层里改东西时，用户的注意力在浮层上，
+   *    把光标甩到别处等于抢一次焦点。
    */
-  insertRef(opts: { to: string; label: string; flavor?: '#' }): string | null {
-    const id = this.sel?.aBlock ?? this.rows()[0]?.block.id
-    if (!id) return null
-    const off = this.sel?.aOff ?? 0
-    const loc = locate(this.doc, id)
-    if (!loc) return null
-    const before = this.snap()
-    const run: RefRun = { id: uuidv7Hex(), t: 'ref', to: opts.to, ...(opts.flavor ? { flavor: opts.flavor } : {}), label: opts.label }
-    const next = insertRunAt(loc.block.content, off, run)
+  private commitContent(id: string, next: readonly InlineRun[], before: Snap, undo: UndoKind, caret?: number): void {
     if (this.write) {
       this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
     } else {
-      writeBlockContent(loc.block, next)
+      const loc = locate(this.doc, id)
+      if (loc) writeBlockContent(loc.block, next)
     }
-    this.undo.record(before, 'other', Date.now())
+    this.undo.record(before, undo, Date.now())
     this.renderBlock(id)
-    this.placeCaret(id, off + 1)
+    if (caret !== undefined) this.placeCaret(id, caret)
     this.emitChange('text')
+  }
+
+  /**
+   * 在**当前光标**处插一枚原子 run（引用／外链共用；资产的落点是显式捕获的，走下面那一条）。
+   * @returns 新 run 的 id；此刻没有可落的块 ⇒ `null`
+   */
+  private insertRun(run: RunWithId): string | null {
+    const id = this.sel?.aBlock ?? this.rows()[0]?.block.id
+    if (!id) return null
+    const loc = locate(this.doc, id)
+    if (!loc) return null
+    const off = this.sel?.aOff ?? 0
+    const before = this.snap()
+    const next = insertRunAt(loc.block.content, off, run)
+    this.commitContent(id, next, before, 'other', off + 1)
     return run.id
+  }
+
+  /**
+   * 在光标处插一枚引用 run（页引用／行内标签共用；标签带 `flavor:'#'`）。
+   * 返回 run id。
+   *
+   * ⚠️ **不写 `anchor`**：锚文本是用户事后显式改的那一处名字，插入路径
+   *    一律不带它（否则「这一处显示什么」就有了两个书写入口，且其中一个无人负责同步）。
+   */
+  insertRef(opts: { to: string; label: string; flavor?: '#' }): string | null {
+    const run: RefRun = { id: uuidv7Hex(), t: 'ref', to: opts.to, ...(opts.flavor ? { flavor: opts.flavor } : {}), label: opts.label }
+    return this.insertRun(run)
+  }
+
+  /**
+   * 在光标处插一枚外链 run（`core.editor/insert-link` 的落点）。
+   *
+   * `text` 省略 ⇒ 显示**地址本身**：`LinkRun.v` 是内容而不是提示占位，
+   * 留空会让这一枚 link 显示成一片空白（用户看不出那里有个 link）。
+   *
+   * ⚠️ url 的合法性由调用方用 `core/link.ts` 的 `checkExternalUrl` 判过：
+   *    编辑器只管形状，协议的取舍不属于它。
+   */
+  insertLink(opts: { url: string; text?: string }): string | null {
+    const text = (opts.text ?? '').trim()
+    const run: LinkRun = { id: uuidv7Hex(), t: 'link', v: text === '' ? opts.url : text, url: opts.url }
+    return this.insertRun(run)
   }
 
   /**
@@ -2678,15 +2722,7 @@ export class BlockEditor {
       ...(snap?.h ? { h: snap.h } : {}),
     }
     const next = insertRunAt(loc.block.content, offset, run)
-    if (this.write) {
-      this.write((tx) => tx.patch(blockId, (b) => writeBlockContent(b, next)))
-    } else {
-      writeBlockContent(loc.block, next)
-    }
-    this.undo.record(before, 'other', Date.now())
-    this.renderBlock(blockId)
-    this.placeCaret(blockId, offset + 1)
-    this.emitChange('text')
+    this.commitContent(blockId, next, before, 'other', offset + 1)
     return run.id
   }
 
@@ -2714,6 +2750,41 @@ export class BlockEditor {
       return hit === null
     })
     return hit
+  }
+
+  /**
+   * **改一枚引用的锚文本**（⌥ 浮层的输入框是**唯一**入口）。
+   *
+   * 写空串 ⇒ **删掉这个键**：遵守「缺席与空值不并存」的既有口径 ——
+   * 读侧只需判「有没有 anchor」，不必再判「有但是空的」（那种形状在一处漏判就显示成空白 Link）。
+   *
+   * ⚠️ 为什么入口不能在正文流里（让用户在原子上直接打字）：原子占 1 格的契约
+   *    （plain 偏移核算、IME 组合、读回配对）全部建立在「这一格不可分割」之上；
+   *    在流里改＝给一枚原子做一个内部编辑器，那三条约束会同时失效。
+   *
+   * ⚠️ 一次调用一轮撤销 ⇒ **一条** `block.upsert{content}`（内容整段改写，
+   *    不新增任何第二份真相：名字仍住在目标的 `_aliases` 里）。
+   *
+   * @returns 真的改了才 `true`（run 不在了 / 已经是这个值 ⇒ `false`，一个字节都不写）
+   */
+  setRunAnchor(runId: string, anchor: string): boolean {
+    const hit = this.findRun(runId)
+    // 只有普通块引用有锚文本。两处排除：①外链与资产的显示名是它们自己的内容（`v`／`asset`），
+    // 再给一枚 anchor 等于同一句话两个来源；② `flavor:'#'` 的语义是「提及这个标签」，
+    // 给它换一个显示名就会出现「写着 `#自定义` 却真指 `#咖啡`」——这一版不开放它的锚文本。
+    if (!hit || hit.run.t !== 'ref' || hit.run.flavor === '#') return false
+    const text = anchor.trim()
+    if ((hit.run.anchor ?? '') === text) return false
+    const patch = (r: RefRun): RefRun => {
+      const rest: RefRun = { ...r }
+      delete rest.anchor
+      return text === '' ? rest : { ...rest, anchor: text }
+    }
+    const next: InlineRun[] = hit.block.content.map((r) => (r.t === 'ref' && r.id === runId ? patch(r) : r))
+    const before = this.snap()
+    // 不强迫光标：这个动作来自浮层，此刻用户的焦点在浮层里，抢回来就是一次焦点跳变
+    this.commitContent(hit.block.id, next, before, 'other')
+    return true
   }
 
   /** 删掉一枚行内原子（显式动作；只动那一格，文本不受影响） */

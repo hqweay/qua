@@ -384,7 +384,7 @@ export function fillBlockText(
       continue
     }
     if (r.t === 'ref') {
-      tx.appendChild(makeRunEl(r, views?.get(r.id) ?? danglingView(r.label ?? t('ui.atom.unknown'))))
+      tx.appendChild(makeRunEl(r, views?.get(r.id) ?? danglingView(r.anchor ?? r.label ?? t('ui.atom.unknown'))))
       continue
     }
     if (r.t === 'asset') {

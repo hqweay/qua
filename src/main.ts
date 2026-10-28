@@ -8,6 +8,7 @@
 import './styles.css'
 import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  journalId, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
+import { checkExternalUrl, rejectText } from './core/link.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
 import { BlockEditor, type ViewEvents } from './view/editor.ts'
@@ -33,7 +34,7 @@ import { createIcon } from './view/icons.ts'
 import { widgetBodyInDoc } from './ui/dock-widgets.ts'
 import { renderAliasEditor } from './ui/alias-editor.ts'
 import { renderFieldsEditor } from './ui/fields-editor.ts'
-import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type ObjFieldDeps, type PanelDeps } from './ui/panels.ts'
+import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, renderLinkComposer, type ObjFieldDeps, type PanelDeps } from './ui/panels.ts'
 import { openImageLightbox } from './ui/lightbox.ts'
 import type { RefClickHit, RefClickMods } from './view/editor-events.ts'
 import { collectionCommands, devCommands, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, zoomCommands } from './app/commands-impl.ts'
@@ -603,6 +604,16 @@ const panelDeps: PanelDeps = {
   openBlock: (id) => void registry.invoke('core.block/focus-block', { blockId: id }, 'popover'),
   // Shift+点「打开目标」＝在右槽打开一张窗口（中心不换）
   openInDock: (id) => openWindow('right', id),
+  /**
+   * **锚文本**：写进这一枚 run（一条事务 ⇒ 一次撤销）。
+   * 走命令而不是直接调编辑器，是为了让 HTTP／CLI 面也能改它，且撤销与落盘照旧。
+   */
+  setAnchor: (runId, text) => void registry.invoke('core.editor/set-anchor', { atomId: runId, text }, 'popover'),
+  /**
+   * **打开外链**：与点正文里那一枚走**同一条命令**（`core.link/open`）。
+   * 两处入口不会分叉成「一个能开、一个不能开」。
+   */
+  openLink: (id) => void registry.invoke('core.link/open', { atomId: id }, 'popover'),
   removeAtom: (id) => void registry.invoke('core.editor/remove-atom', { atomId: id }, 'popover'),
   closePopover: () => layers.closePopover(),
   openPopover: (render, anchor) => layers.openPopover(render, anchor),
@@ -1014,6 +1025,28 @@ function pickImageViaFileInput(): void {
 }
 
 /**
+ * **把地址交给系统浏览器**（`App.openExternal` 的实现）。
+ *
+ * 为什么这里只调 `window.open`：壳已经在那头等着了——`electron/main.ts` 的
+ * `setWindowOpenHandler` 把 `_blank` 拦下来转成 `shell.openExternal`，只放行 http(s)；
+ * web 下就是一次普通的新标签。渲染层因此不需要知道「我现在跑在哪个宿主里」。
+ *
+ * ⚠️ 白名单一律走 `core/link.ts`：**与主进程那一份取值相同**（`/^https?:/`）。
+ *    两处分叉的表现是「界面上看着能开、点下去毫无反应」，而它不报错。
+ *
+ * @returns 真的发出去了才 `true`（被拦下时已经给了文案，调用方不必再说一遍）
+ */
+function openExternalUrl(raw: string): boolean {
+  const chk = checkExternalUrl(raw)
+  if (!chk.ok) {
+    app.toast(rejectText(chk), 'warn')
+    return false
+  }
+  window.open(chk.url, '_blank', 'noopener,noreferrer')
+  return true
+}
+
+/**
  * `App` 门面：**四个工厂拼装**（页／日记／视图／演示），加上浮层与提示这几件装配层专有的能力。
  *
  * ⚠️ 这里仍然是**唯一**拼装点：本文件持有 `ws`／`ed`／`registry`，工厂只拿到「能做什么」。
@@ -1073,6 +1106,35 @@ const app: App = {
    */
   pickImage: () => pickImageViaFileInput(),
   insertAssetBlob: (blob, label, point) => insertAssetBlob(blob, label, point),
+
+  /**
+   * **打开外链**：协议白名单一过，就把地址交给壳。
+   *
+   * Electron 下 `window.open('_blank')` 被 `setWindowOpenHandler` 接住并转成
+   * `shell.openExternal`（那份判据在 `electron/main.ts`，与主进程同侧，是信任边界上的那一道）；
+   * web 下就是浏览器的新标签。两处都不在 app 里开一个裸窗口。
+   */
+  openExternal: (url) => openExternalUrl(url),
+
+  /**
+   * **插入外链的输入框**（斜杠菜单／⌘K ⇒ 命令不带 `url` ⇒ 走这里）。
+   *
+   * 与「选图片」同一条理由：要跟用户要**一句话**，而命令 handler 不许碰 DOM。
+   */
+  showLinkComposer: () => {
+    layers.openPopover(
+      (host) =>
+        renderLinkComposer(host, {
+          // 仍然走命令面：插入是写动作，撤销/落盘/审计都在那条路上
+          insert: (url, text) => {
+            layers.closePopover()
+            void registry.invoke('core.editor/insert-link', { url, text }, 'popover', uiCtx())
+          },
+          toast: (text, kind) => app.toast(text, kind),
+        }),
+      ed.caretRect(),
+    )
+  },
 
   /**
    * 标签选择器：**显示层级**（`#演员 · 属于 #人物、#艺术家`）。
@@ -1413,8 +1475,20 @@ function viewEvents(editor: () => BlockEditor, change: ViewEvents['change'], via
      * 缺失/不可用**不开空 lightbox**，直接给详情（那里面说清为什么没有图）。
      */
     onAtomClick: (atom, el, mods) => {
+      if (atom.kind === 'link') {
+        /**
+         * 外链：**左键＝打开**，⌥ ＝ 看详情（与图片同款分工：默认动作 / 详情）。
+         * 打开走命令 ⇒ 协议白名单、对外接口、将来的审计都在一条路上。
+         */
+        if (!mods.altKey) {
+          void registry.invoke('core.link/open', { atomId: atom.runId }, via)
+          return
+        }
+        showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), el.getBoundingClientRect())
+        return
+      }
       if (atom.kind !== 'asset' || !atom.hash) {
-        // 外链与将来别的行内对象：先给详情（它们的「打开」还没做，别假装做了）
+        // 将来别的行内对象：先给详情（它们的「打开」还没做，别假装做了）
         if (atom.runId) showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), el.getBoundingClientRect())
         return
       }
