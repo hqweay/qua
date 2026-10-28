@@ -1,13 +1,14 @@
 /**
- * 迷你 DSL：种子正文里直接写 `**粗**` / `==高亮==` / `` `代码` `` / `[[页面]]` / `![[图.png]]`，
- * 由 `parseInline` 解析成** run 序列**——这正是模型里的行内内容形状（文本段带 marks、
- * 原子是 run），而不是把富文本塞进 DOM。
+ * 迷你 DSL：种子正文里直接写 `**粗**` / `==高亮==` / `` `代码` `` / `[[页面]]` / `![[图.png]]` /
+ * `[名字](https://…)`，由 `parseInline` 解析成** run 序列**——这正是模型里的行内内容形状
+ * （文本段带 marks、原子是 run），而不是把富文本塞进 DOM。
  *
  * 单独一层是为了让「种子内容长什么样」与「内容怎么变成块」分开：
  * 换一批假数据不需要碰到解析器，改 DSL 也不需要碰任何一页的内容。
  */
 import { uuidv7Hex } from '../ids.ts'
-import { normalizeRuns, textRuns, type AssetRun, type MarkType, type RefRun, type Run } from '../runs.ts'
+import { checkExternalUrl } from '../link.ts'
+import { normalizeRuns, textRuns, type AssetRun, type LinkRun, type MarkType, type RefRun, type Run } from '../runs.ts'
 import { MISSING_ASSET_HASH, SEED_ASSET_H, SEED_ASSET_HASH, SEED_ASSET_W } from './assets.ts'
 
 export interface SeedBlock {
@@ -39,9 +40,11 @@ export interface PendingRef {
 }
 
 interface AtomToken {
-  kind: 'page' | 'image'
+  kind: 'page' | 'image' | 'link'
   start: number
   label: string
+  /** 只有 `kind: 'link'` 有：规范化之后的地址（显示名与地址是两个键，同 `LinkRun`） */
+  url?: string
   missing?: boolean
 }
 
@@ -79,6 +82,29 @@ export function parseInline(src: string): { runs: Run[]; refs: PendingRef[] } {
       text += '\uFFF9'
       atoms.push({ kind: 'page', start: text.length - 1, label: page[1]!.trim() })
       i += page[0].length
+      continue
+    }
+    /**
+     * `[名字](地址)` ⇒ 一枚外链。名字可以为空（`[](地址)`）⇒ 显示地址本身，
+     * 与编辑器里 `text` 留空是同一条口径：`LinkRun.v` 是内容，不许是空。
+     *
+     * 放在 `[[…]]` 之后是安全的：引用要求两个方括号，这里要求 `](`，互相吃不掉。
+     *
+     * ⚠️ 地址过 **同一份白名单**（`core/link.ts`），不过就**原样留成纯文本**——
+     *    种子写错一个地址时，宁可首屏显示一段点不动的字，也不要造一枚打不开的 link：
+     *    那会让人以为是链接功能坏了，而不是数据写错了。
+     */
+    const link = /^\[([^\]]*)\]\(([^)\s]+)\)/.exec(rest)
+    if (link) {
+      const chk = checkExternalUrl(link[2]!.trim())
+      if (!chk.ok) {
+        text += link[0]
+        i += link[0].length
+        continue
+      }
+      text += '\uFFF9'
+      atoms.push({ kind: 'link', start: text.length - 1, label: link[1]!.trim(), url: chk.url })
+      i += link[0].length
       continue
     }
     text += src[i]
@@ -169,6 +195,17 @@ export function parseInline(src: string): { runs: Run[]; refs: PendingRef[] } {
           label: atom.label,
           w: SEED_ASSET_W,
           h: SEED_ASSET_H,
+        }
+        runs.push(run)
+      } else if (atom.kind === 'link') {
+        // 显示名与地址各在自己的键上：名字空着 ＝ 显示地址本身（`v` 是内容，不许是空串）。
+        // 外链没有目标块，所以不进 `refs`（那份留给 `[[…]]` 之后回填 `to`）。
+        const run: LinkRun = {
+          id: uuidv7Hex(),
+          t: 'link',
+          v: atom.label === '' ? atom.url! : atom.label,
+          url: atom.url!,
+          ...(mk.length ? { marks: mk } : {}),
         }
         runs.push(run)
       } else {

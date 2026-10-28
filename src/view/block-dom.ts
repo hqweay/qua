@@ -226,8 +226,12 @@ export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView): HTML
     el.append(...assetAtomContent(r, asset, label))
   } else if (r.t === 'link') {
     /**
-     * 外链：显示文本是内容的一部分（`v` 进投影），`url` 只是目标。
-     * 仍按**不可分原子**渲染（占 1 格）——链接是一枚行内对象，不是一串字。
+     * 外链：`v` 是**显示文本**（内容），`url` 是目标——两键分家，改名字不动地址。
+     * 仍按**不可分原子**渲染（占 1 格）：链接是一枚行内对象，不是一串字。
+     *
+     * ⚠️ 但 `v` **不进 `plainText` 投影**（原子都不是文本流的一部分，见 `core/runs.ts`）：
+     *    搜索／引文／导出里看不见这枚链接的显示文本。把它显示出来是**呈现**，
+     *    不是「这几个字在正文里能被搜到」——两件事，别混。
      */
     const text = document.createElement('span')
     text.className = 'atom-label'

@@ -49,9 +49,11 @@ export function seedWorkspace(): Workspace {
     {
       text: '三个地址先存下：',
       children: [
-        { text: '仓库　https://github.com/hqweay/qua' },
-        { text: '在线演示　https://qua.leay.net/ （数据只落在你自己的浏览器里）' },
-        { text: '架构与数据结构　https://qua.leay.net/arch.html （一张图：分层、块字段、读写路径）' },
+        // 这三行是**首屏唯一的外链样本**：点一下交给系统浏览器、⌥ 看详情（地址与「打开」）。
+        // 显示名留空 ⇒ 显示地址本身，读者一眼看见要去哪；换成「仓库」这种名字就只剩一处可点的字。
+        { text: '仓库　[](https://github.com/hqweay/qua)' },
+        { text: '在线演示　[](https://qua.leay.net/) （数据只落在你自己的浏览器里）' },
+        { text: '架构与数据结构　[](https://qua.leay.net/arch.html) （一张图：分层、块字段、读写路径）' },
       ],
     },
     {
@@ -99,8 +101,8 @@ export function seedWorkspace(): Workspace {
     {
       text: '这几天的地址也记一下：',
       children: [
-        { text: 'https://github.com/hqweay/qua' },
-        { text: 'https://qua.leay.net/' },
+        { text: '[](https://github.com/hqweay/qua)' },
+        { text: '[](https://qua.leay.net/)' },
       ],
     },
     { text: '昨天的判断：先做「看得见」，再做「管理」——lightbox 与详情够用，图库放到以后。' },
@@ -250,9 +252,9 @@ export function seedWorkspace(): Workspace {
     {
       text: '地址',
       children: [
-        { text: '仓库　https://github.com/hqweay/qua' },
-        { text: '在线演示　https://qua.leay.net/' },
-        { text: '架构与数据结构　https://qua.leay.net/arch.html' },
+        { text: '仓库　[](https://github.com/hqweay/qua)' },
+        { text: '在线演示　[](https://qua.leay.net/)' },
+        { text: '架构与数据结构　[](https://qua.leay.net/arch.html)' },
       ],
     },
     {
