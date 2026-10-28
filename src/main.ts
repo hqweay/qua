@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  journalId, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
@@ -186,6 +186,13 @@ if (readOnly) console.warn('[boot] read-only prototype state:', boot.status)
  * ⚠️ 这两条**会写模型**（幂等物化），所以要在装配编辑器之前做，且落盘一次。
  */
 const activeStillExists = Boolean(findInForest(ws.blocks, ws.activeId))
+/**
+ * **冷启动这一步会改模型**（幂等物化今日的日记块）。它发生在仓库/事务构建之前，
+ * 所以产不出 op —— 落盘必须知道这件事：盘上那份**不含**这次补的块，
+ * 第一笔落盘要整份写，否则今天那块永远没有行，它下面的字会以「父块不存在」的形状
+ * 变成顶层块（下次装载时自己冒出来，而且不报错）。
+ */
+const hadToday = Boolean(findInForest(ws.blocks, journalId(todayISO())))
 const todayId = ensureTodayJournal(ws.blocks)
 if (boot.status !== 'ok' || !activeStillExists) ws.activeId = todayId
 /**
@@ -200,7 +207,21 @@ if (boot.status !== 'ok' || !activeStillExists) ws.activeId = todayId
  */
 const bootActive = findInForest(ws.blocks, ws.activeId) ?? ws.blocks[0]
 const bootDays = bootActive && isJournal(bootActive) ? feedDays(ws.blocks, FEED_INITIAL) : []
-for (const day of bootDays) ensureFirstBlock(day.children)
+/**
+ * **冷启动补了哪些块**：盘上那份可能还没有它们（今日那块、空天的首子块）。
+ *
+ * 它们没有 op（这一步在事务之外，发生在仓库构建之前）⇒ 第一笔落盘要把它们
+ * **当成「模型里有、盘上还没有」的块**写进去。不记这件事的后果不是报错：
+ * 那块永远没有行，它下面的字会以「父块不存在」的形状变成顶层块。
+ */
+const bootAdded: string[] = []
+if (!hadToday) bootAdded.push(todayId)
+for (const day of bootDays) {
+  if (day.children.length === 0) {
+    ensureFirstBlock(day.children)
+    bootAdded.push(day.children[0]!.id)
+  }
+}
 const bootRoots: Block[] = bootDays.length > 0 ? rootsForMany(bootDays) : bootActive ? rootsFor(bootActive) : []
 
 /**
@@ -332,6 +353,14 @@ const {
   blocks,
   kb,
   readOnly,
+  /**
+   * **内存这份与盘上那份是同一份吗**。判据是「读到过、且没在装配期改过它」：
+   * 冷启动会幂等物化「今日」那块（读动作顺手补一块），那一步在事务之外，
+   * 所以盘上那份可能少它 ⇒ 第一笔落盘必须整份写。否则今天那块没有行，
+   * 它下面的字会以「父块不存在」的形状变成顶层块（下次装载时自己冒出来，不报错）。
+   */
+  loadedFromDisk: boot.status === 'ok',
+  bootAdded,
   errText,
   layers,
   getWs: () => ws,

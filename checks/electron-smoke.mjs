@@ -1081,6 +1081,98 @@ await check('E11 多库：两库两窗、各自编辑、关掉重开内容都在
 })
 
 
+/* ═══════════════════════════════════════════════════ E12 落库：块是行，不是一份 JSON */
+
+/**
+ * 这一档钉的是**这次改造的验收口径**：`qua.db` 里块是自己的行，
+ * 而且**打一个字只写常数行**（不随库体量增长）。
+ *
+ * 三条判据（都要能单独证伪）：
+ *   ① 内容表真的存在，`workspace` 那张整份 blob 表**不在了**；
+ *   ② 库里的块数 ＝ `Block` 表的行数（不是「一份 JSON 里有几块」）；
+ *   ③ 打一个字之后，`Block` 表的**总变更量**是常数（不是全表重写）。
+ *      度量用 SQLite 的 `total_changes`（进程内累计改到的行数）：它与时间无关，
+ *      在 CI 上稳定，而且正是「写成本」本身。
+ */
+await check('E12 落库：块拆成行（没有整份 blob 表），打一个字只写常数行', async () => {
+  const dir = join(CACHE, '12-rows')
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+
+  const { app, page } = await launch('rows', { userData: dir })
+  // 先写一句，确保这个库有内容（新建的库第一次落盘走整份写）
+  await page.evaluate(() => {
+    const id = window.__qua.blocks()[0].id
+    window.__qua.focusBlock(id, 0)
+    window.__qua.invoke('core.editor/insert-block', { type: 'paragraph', text: 'ROW-MARK-1' })
+  })
+  await new Promise((r) => setTimeout(r, 700))
+
+  const info = await page.evaluate(() => window.kb.shellInfo())
+  const root = join(info.userData, 'qua-data', 'repos')
+  const libId = (await page.evaluate(() => window.qua.libraryInfo()))?.id
+  assert(typeof libId === 'string' && libId.length === 32, `拿不到库 id：${JSON.stringify(libId)}`)
+  const file = join(root, libId, 'qua.db')
+  assert(existsSync(file), `库文件不在：${file}`)
+
+  /** 用真 SQLite 读（主进程与自检脚本共用同一个库文件；WAL 下读不挡写） */
+  const { DatabaseSync } = await import('node:sqlite')
+  const db = new DatabaseSync(file)
+
+  // ① 表形状
+  const tables = db
+    .prepare("select name from sqlite_master where type='table' and name not like 'sqlite_%'")
+    .all()
+    .map((t) => t.name)
+  assert(!tables.includes('workspace'), `v1 的整份 blob 表必须退场，实际还有：${tables.join(',')}`)
+  for (const t of ['Block', 'BlockProperty', 'BlockAlias', 'BlockList']) {
+    assert(tables.includes(t), `内容表 ${t} 不在：${tables.join(',')}`)
+  }
+
+  // ② 块数 ＝ Block 行数（真行，不是 JSON 里数出来的）
+  const uiCount = await page.evaluate(() => window.__qua.blocks().length)
+  const rows = db.prepare('select count(*) as n from Block').all()[0].n
+  assert(uiCount > 0, `界面上应当有块，实际 ${uiCount}`)
+  assert(rows >= uiCount, `Block 表里应当至少有界面上的块数（${uiCount}），实际 ${rows}`)
+  log(`      Block 行数 = ${rows}（界面上 ${uiCount} 块）；表 = ${tables.sort().join(',')}`)
+
+  /**
+   * ③ 打一个字：只写常数行。
+   *
+   * ⚠️ **不能用 `select total_changes()` 量**：它是**每条连接各自**的累计值，
+   * 而这条连接是刚开的 ⇒ 永远是 0（实测踩到，那一版断言因此恒红）。
+   * 真正能回答「这一笔写了几行」的是主进程自己累加的数（`libraryInfo().writes`）。
+   */
+  const before = (await page.evaluate(() => window.qua.libraryInfo()))?.writes?.rows
+  assert(typeof before === 'number', `主进程应当报出累计写行数：${JSON.stringify(before)}`)
+  const typed = await page.evaluate(async () => {
+    const b = window.__qua.blocks()[0]
+    window.__qua.focusBlock(b.id, 0)
+    window.__qua.invoke('core.editor/insert-block', { type: 'paragraph', text: 'ROW-MARK-2' })
+    return window.__qua.blocks().length
+  })
+  await new Promise((r) => setTimeout(r, 700))
+  const after = (await page.evaluate(() => window.qua.libraryInfo()))?.writes?.rows
+  const delta = after - before
+  db.close()
+
+  /**
+   * 一次「插一个块」＝ 1 行块 ＋ 它自己的属性/地址/露面行（0..几行）＋ 2 行 meta。
+   * 常数上界取 12：够宽松（不脆），但远小于「整库重写」——库里块数 ≥ 10 时
+   * 整份写会立刻超过它，所以这条**能证伪**。
+   */
+  assert(delta > 0, '打一个字必须真的写盘（delta = 0 说明落盘没发生）')
+  assert(
+    delta <= 12,
+    `打一个字只该写常数行（<= 12），实际写了 ${delta} 行 —— 这仍是「随库体量增长」的写法（块数 ${typed}）`,
+  )
+  log(`      打一个块：total_changes +${delta}（块数 ${typed}）`)
+
+  await app.close()
+  return `内容表 = ${tables.sort().join(',')}（无 workspace blob）；Block 行 ${rows}；插一个块只写 ${delta} 行`
+})
+
+
 /* ═══════════════════════════════════════════════════ 汇总 */
 
 const passed = results.filter((r) => r.ok).length

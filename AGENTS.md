@@ -13,9 +13,12 @@
 **「相 / Qua」的桌面应用**——块级大纲笔记，Electron 壳，主进程不含业务逻辑。
 
 - 显示名「相」，英文名 Qua，`bundleId = net.leay.qua`。
-- 仍是**原型**：不接 SQLite／内核进程、允许硬编码假数据。
+- 仍是**原型**：没有内核进程、允许硬编码假数据。
   唯一不许退化的两样：**输入面形状**（块树 ＋ 带 `blockId` 的区间锚点）与**命令/绑定/上下文键三张表**。
-- 数据落 `localStorage`（键 `qua.workspace`），**不做旧数据迁移**（`WORKSPACE_VERSION` 加一即作废旧库）。
+- **桌面版内容真相是每个库目录里的 `qua.db`**：块拆成行（`Block`／`BlockProperty`／`BlockAlias`／
+  `BlockList`），一次编辑只写动过的那几块。编码只有一份定义（`src/core/storage/db-rows.ts`），
+  主进程只做通用 SQL（不认识块语义）。浏览器端仍是 `localStorage`（键 `qua.workspace`）。
+- **不做旧数据迁移**：库的 `DB_SCHEMA_VERSION`／浏览器侧的 `WORKSPACE_VERSION` 加一即作废旧库。
 
 ---
 
@@ -103,8 +106,13 @@ core ← view ← ui ← app ← host
 
 ### 1.11 不做数据迁移
 
-`qua/` 是原型，**没有兼容负担**。改模型或落盘口径就直接改：`WORKSPACE_VERSION` 加一，
-旧库显式作废、重新 seed。**不写映射/兼容分支**（例：`_icon` 从 emoji 改成 `lucide:<name>` 就是这么办的）。
+`qua/` 是原型，**没有兼容负担**。改模型或落盘口径就直接改版本号，旧库显式作废、重新 seed：
+
+- **桌面版**：`DB_SCHEMA_VERSION`（`PRAGMA user_version`，库的唯一 schema 版本）加一，
+  `MIGRATIONS` 里加一步**只丢旧形状、不搬数据**的迁移（例：v1 的整份 blob 表 → v2 的四张内容表）；
+- **浏览器**：`WORKSPACE_VERSION` 加一。
+
+**不写映射/兼容分支**（例：`_icon` 从 emoji 改成 `lucide:<name>` 就是这么办的）。
 
 ---
 
@@ -166,7 +174,8 @@ pnpm gate:bundle    # gate ＋ 打包产物冒烟（慢，单列）
 | 命令要碰 DOM | 走 `App` 门面 | handler 里 `document.xxx` |
 | `view` 想用 UI 组件 | 从 `ui` 层拿，不反向 import | `view` import `ui` |
 | 全局状态/选区 | 进 `core`（模型持有选区） | 散在 `view` 的局部变量 |
-| 改落盘口径 | `WORKSPACE_VERSION` 加一、旧库作废 | 写迁移/兼容分支 |
+| 改落盘口径 | `DB_SCHEMA_VERSION`／`WORKSPACE_VERSION` 加一、旧库作废 | 写搬数据的迁移/兼容分支 |
+| 改「一个块长成哪几行」 | 只改 `src/core/storage/db-rows.ts`（编码唯一落点） | 在主进程里写块语义（`[2+]` 会拦，且会有两份定义） |
 | 想走一遍块树 | 用 `src/core/walk.ts` 的 `walkForest`（先序，带 `path`／`hidden`，返回 `false` 即停） | 自己写递归走 `children`（`arch-check [22]` 会拦） |
 | 想再渲染一列**可编辑**块 | **第二处就抽组件**：`new BlockEditor({…})` ＋ 订阅 ＋ 焦点 ＋ 空态这套配方已经抄了四份（正文／挂载区／查询结果／侧槽窗口），差异留参数 | 再手抄一份；也不要只接一半事件表（漏了不报错：点引用不跳、右键没菜单） |
 | 里层编辑器里**打字对、但 ↵／⌘A／Tab 跑偏** | 先查**活动编辑器 `app.ed` 是谁**（验法：⌘A 看选区落在哪个宿主）。打字走**事件层**（各编辑器绑自己的 container），键位走**命令层**（`app.ed`）——两者能各错各的 | 去改事件层。挂载区的 DOM 嵌在 `#editor` 里，`focusin` **会冒泡** ⇒ 正文那条无条件 `ed = mainEd` 会把里层 `onFocus` 刚切好的活动编辑器覆盖回去（真踩过，见 T142） |

@@ -5,13 +5,14 @@
  *
  * > **半截历史比没有历史更糟。**
  *
- * 现在 `op_log` 表已建好、形状已定（前兄弟 id），但**内容编辑走直写**（编辑器的正文改动
- * 不产生 op，只有结构性动作产生）。若此刻开始往 `op_log` 追加，日志里就**只有结构变更**。
- * 而 append-only 日志里的空洞与「那段时间什么都没发生」**无法区分**——
- * 将来按它做同步或审计，会得到一份看起来完整、实际缺内容的账。
+ * 现在表已建好、形状已定（前兄弟 id），而且**正文改动已经产出 op**（`tx.patch` 报
+ * `block.upsert{content}`）。但还有一类写路径**不产 op**：整份替换——
+ * 撤销/重做（`BlockStore.restore`）、换库（`reset`）、冷启动物化今日与空天首子块
+ * （发生在事务之外，`persist` 用 `ensure` 补写）。它们让「库变成了另一份」，
+ * 而 append-only 日志里只会留下一个**空洞**，与「那段时间什么都没发生」无法区分。
  *
- * ⇒ 什么时候可以接：`CommitBatch.ops` 成为**唯一输入**（正文改动也产出 op）时。
- * 那时这份日志才是完整的。在那之前，`op_log` 只承载「形状已定」这一件事。
+ * ⇒ 什么时候可以接：**所有让库变化的路径都产 op**（整份替换也表达成 op，或日志另有一类
+ * 「快照/重置」记录）。在那之前，`op_log` 只承载「形状已定」这一件事。
  *
  * ⚠️ 这条是**负向断言**：它拦的是「有人顺手把 op 写进去」。反证方式：
  * 在 `electron/library/windows.ts` 的 save handler 里加一行 `appendLocalOps(...)`，本条即红。
@@ -66,7 +67,7 @@ test('op_log：生产路径上**没有**写入者（半截历史比没有历史�
 
 test('op_log：表在、形状对（前兄弟 id 的 op 才能落进去）', () => {
   const sql = readFileSync(join(ROOT, 'electron/library/sqlite.ts'), 'utf8')
-  assert.match(sql, /create table if not exists op_log/, '表要建好：形状定下来是「现在就能定」的全部理由')
+  assert.match(sql, /create table if not exists \$\{DB_TABLES\.opLog\}/, '表要建好：形状定下来是「现在就能定」的全部理由')
   assert.match(sql, /primary key \(device_id, seq\)/, 'PK(device_id, seq) 是幂等的来源')
   assert.match(sql, /op_json text not null/, '整条 op 存 JSON（不拆列：拆列等于把 op 形状再钉一次）')
 })

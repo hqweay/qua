@@ -21,6 +21,22 @@ export type PersistenceDeps = {
   blocks: BlockStore
   kb: MemoryKb
   readOnly: boolean
+  /**
+   * **内存里这份模型是从盘上读来的吗**。
+   *
+   * 判据只有一个用处：第一次落盘要不要整份写。从盘上读来的 ⇒ 盘上已经有它，
+   * 第一次落盘照常增量（只写 meta）；否则（种子／旧库作废）⇒ 盘上是空的，
+   * 第一次必须把整份模型写进去，否则「新建的库永远没有内容」。
+   */
+  loadedFromDisk: boolean
+  /**
+   * **装配期补出来的块**（冷启动物化今日／空天首子块）。
+   *
+   * 这一步在事务之外，产不出 op ⇒ 它们「模型里有、盘上还没有」。
+   * 第一笔落盘要把它们补上（否则那块永远没有行，它的字会以「父块不存在」的形状
+   * 变成顶层块 —— 不报错，下次装载时自己冒出来）。
+   */
+  bootAdded: readonly string[]
   errText: (e: unknown) => string
   layers: Layers
   /** chrome 在本节之后才装配；保存失败的常驻告警走 getter 现取 */
@@ -91,16 +107,39 @@ export function setupPersistence(deps: PersistenceDeps) {
    * **提交一次**（异步、批次）：经过 `StoragePort`，失败如实返回。
    * 上层只认「这批改动落盘了没有」——不认「整份库写进去了没有」。
    *
-   * 传进来的 op 为空 ⇒ 这批**不是**由事务产生的（编辑器的正文/结构直写仍是直改内存），
-   * 只能按整类提交；这是迁移期的真相，不是兜底。op → changes 的推导归门面（`changesOf`）。
+   * `replace` 的判据是**森林有没有被整份换掉**（撤销/重做/换库），不是「这批 op 空不空」：
+   * 换落点也是零 op，而它只需要写 `meta` 两格。混成一件事，每次翻页都要整库重写一遍。
    */
-  function persist(ops: readonly Op[]) {
+  function persist(ops: readonly Op[], replace = false) {
     if (readOnly) return Promise.resolve({ ok: true as const })
     syncSections()
     const ws = deps.getWs()
     ws.savedAt = Date.now()
-    return store.commit(ws, ops)
+    // 装配期补的块随第一笔提交一起进库（之后就没有了）
+    const ensure = pendingEnsure
+    pendingEnsure = []
+    return store.commit(ws, ops, { replace, ensure })
   }
+
+  /**
+   * 上一次落盘时**森林被换掉的次数**（`BlockStore.replacementCount`）。
+   *
+   * 为什么记它而不是记「上一次写的是哪一份」：换森林只有两条路（`reset`／`restore`），
+   * 它们都让这个数加一。于是「要不要整份写」只用一个整数判断，不必逐块 diff。
+   */
+  let savedReplacements = blocks.replacementCount
+  /**
+   * 盘上还没有这份模型 ⇒ 第一次落盘必须整份写（种子／旧库作废／换库之后的第一笔）。
+   *
+   * 为什么不靠「零 op」判：零 op 的提交太常见（换落点、只调偏好），
+   * 把它当成整库重写会让「翻一页」变成一次全库写。
+   */
+  let needsFullWrite = !deps.loadedFromDisk
+  /**
+   * 还没落盘的「装配期补出来的块」。第一笔提交之后清空：它们已经进库了。
+   * ⚠️ 不是「整份写」：那会把整库重写一遍，而这里只多了几块。
+   */
+  let pendingEnsure = deps.loadedFromDisk ? [...deps.bootAdded] : []
 
   /** 编辑期落盘的防抖窗口：连打时只提交最后一批（批次语义见 `StoragePort`） */
   const SAVE_DEBOUNCE_MS = 250
@@ -133,7 +172,15 @@ export function setupPersistence(deps: PersistenceDeps) {
     // 模型上（那时的 op 已经说不清自己相对哪份盘上数据）。
     const ops = pendingOps
     pendingOps = []
-    void persist(ops).then((saved) => {
+    /**
+     * **整份替换的判据**：盘上还没有这份模型（首次落种子），或者森林被换过
+     * （撤销/重做/换库）⇒ 盘上的行已经对不上模型了，这批只能整份写。
+     * 零 op 但森林没换（例如只换了落点）⇒ 照常增量，只写 meta 两格。
+     */
+    const replace = needsFullWrite || blocks.replacementCount !== savedReplacements
+    needsFullWrite = false
+    savedReplacements = blocks.replacementCount
+    void persist(ops, replace).then((saved) => {
       if (!saved.ok) warnSaveFailed(saved.error)
     })
   }

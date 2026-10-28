@@ -1,57 +1,42 @@
 /**
- * 渲染层的 `StoragePort` 实现 —— 把字节交给主进程（Electron 的库）。
+ * 渲染层的 `StoragePort` 实现 —— 把**行写入**交给主进程（Electron 的库）。
  *
  * ## 为什么这层是「薄得只剩一次转发」
  *
  * `StoragePort` 的契约是「这批改动落盘了没有」，而落盘归主进程（`node:sqlite` 必须在主进程）。
- * 所以这里只做三件事：把字节转过去、把结果转回来、把错误如实报出去。
+ * 所以这里只做三件事：把行写入转过去、把行读回来交给编码层、把错误如实报出去。
  * 上层（装配层/命令）一行都不用知道「库在哪」——这正是端口存在的原因。
  *
- * ## 为什么 `version` 在落盘前被剥掉
+ * ## 为什么编码在这一侧（渲染层）而不是主进程
+ *
+ * 「一个块长成哪几行」是**块语义**，而主进程不许有块语义（它只认表名与列名，见
+ * `electron/library/sqlite.ts` 的白名单）。⇒ 编码住 `core/storage/db-rows.ts`，
+ * 主进程只做通用 SQL。两边共享的只有**表名**（`core/library.ts` 的 `DB_TABLES`）。
+ *
+ * ## 为什么装载要补回 `version`
  *
  * 库的 schema 版本只有一个判据：`PRAGMA user_version`（主进程读，装载前就能拿到）。
- * 而 `Workspace` 的 JSON 里也带一份 `version`——两份版本并存时，真实故障形状是**中间态**：
+ * 而 `Workspace` 的形状里也带一份 `version`——两份版本并存时，真实故障形状是**中间态**：
  * `user_version` 认了、payload 里的还是旧值 ⇒ 装载成功、模型按旧口径解释、**不报错**。
- * ⇒ 写之前剥掉，读之后补回当前值。这样「能不能读」永远只有一个答案。
- *
- * ⚠️ 这是过渡期的做法。换成规范化表之后 `Workspace` 这个整份 blob 本身会退场。
+ * ⇒ 库里不存 `version`，装载时由这里补上当前值。这样「能不能读」永远只有一个答案。
  */
 import type { CommitBatch, LoadResult, SaveResult, StoragePort } from './port.ts'
 import { WORKSPACE_VERSION, type Workspace } from './shape.ts'
+import { rowsToWorkspace, type RawLibraryRows, type RowWrite } from './db-rows.ts'
 
 /** 主进程那一侧的最小面（`electron/preload.ts` 暴露的同名方法） */
 export interface LibraryBridge {
   onFlush?(cb: () => void | Promise<void>): void
   libraryInfo(): Promise<unknown>
   load(): Promise<unknown>
-  save(json: string, savedAt: number): Promise<unknown>
+  save(writes: unknown[], opts?: { replace?: boolean }): Promise<unknown>
 }
 
 export const IPC_BACKEND = 'ipc-library'
 
-/** 从 `Workspace` 的 JSON 里剥掉 `version`（写库用） */
-export function stripVersion(json: string): string {
-  let value: unknown
-  try {
-    value = JSON.parse(json)
-  } catch {
-    return json
-  }
-  if (!value || typeof value !== 'object') return json
-  const { version: _drop, ...rest } = value as Record<string, unknown>
-  return JSON.stringify(rest)
-}
-
-/** 给从库里读出来的 JSON 补回当前 `version`（装载用） */
-export function withVersion(json: string): string {
-  let value: unknown
-  try {
-    value = JSON.parse(json)
-  } catch {
-    return json
-  }
-  if (!value || typeof value !== 'object') return json
-  return JSON.stringify({ ...(value as Record<string, unknown>), version: WORKSPACE_VERSION })
+/** 从库里读出来的库补回当前 `version`（装载用） */
+export function withVersion(stored: Omit<Workspace, 'version'>): Workspace {
+  return { ...stored, version: WORKSPACE_VERSION }
 }
 
 export function createIpcAdapter(bridge: LibraryBridge): StoragePort {
@@ -60,6 +45,7 @@ export function createIpcAdapter(bridge: LibraryBridge): StoragePort {
 
   return {
     kind: IPC_BACKEND,
+    consumes: 'rows',
 
     async load(): Promise<LoadResult> {
       let r: unknown
@@ -68,12 +54,12 @@ export function createIpcAdapter(bridge: LibraryBridge): StoragePort {
       } catch (error) {
         return { status: 'storage-error', error }
       }
-      const res = r as { status?: string; json?: string } | null
+      const res = r as { status?: string; rows?: RawLibraryRows } | null
       if (!res || typeof res !== 'object') return { status: 'storage-error', error: new Error('bad bridge reply') }
       if (res.status === 'empty') return { status: 'empty' }
-      if (res.status === 'ok' && typeof res.json === 'string') {
-        // 补回当前版本：库里的字节**不带**版本（唯一真相是 user_version）
-        return { status: 'ok', raw: withVersion(res.json) }
+      if (res.status === 'ok' && res.rows) {
+        // 补回当前版本：库里不存版本（唯一真相是 user_version）
+        return { status: 'ok', raw: JSON.stringify(withVersion(rowsToWorkspace(res.rows))) }
       }
       // `no-library` 等：这不是「库坏了」，是「这个窗口没有库」
       return { status: 'incompatible', reason: String(res.status ?? 'unknown') }
@@ -82,7 +68,8 @@ export function createIpcAdapter(bridge: LibraryBridge): StoragePort {
     commit(batch: CommitBatch): Promise<SaveResult> {
       const run = async (): Promise<SaveResult> => {
         try {
-          const r = (await bridge.save(stripVersion(batch.payload), batch.savedAt)) as
+          const writes: RowWrite[] = batch.writes ?? []
+          const r = (await bridge.save(writes, { replace: batch.replace === true })) as
             | { ok?: boolean; error?: unknown }
             | null
           if (r && r.ok === true) return { ok: true, savedAt: batch.savedAt }
@@ -111,7 +98,7 @@ export function createIpcAdapter(bridge: LibraryBridge): StoragePort {
   }
 }
 
-/** 读库里的内容并判成 `Workspace`（当前的 blob 形状） */
-export function parseLibraryJson(raw: string): Workspace {
-  return JSON.parse(withVersion(raw)) as Workspace
+/** 读库里的内容并判成 `Workspace`（行 → 模型，补当前版本） */
+export function parseLibraryRows(rows: RawLibraryRows): Workspace {
+  return withVersion(rowsToWorkspace(rows))
 }

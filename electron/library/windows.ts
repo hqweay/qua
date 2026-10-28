@@ -24,7 +24,7 @@ import { join } from 'node:path'
 import { DB_SCHEMA_VERSION, type LibraryEntry } from '../../src/core/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
 import { loadContent, openSession, saveContent, type OpenFailure, type RepoSession } from './session.ts'
-import { readSeq } from './sqlite.ts'
+import { readSeq, type RowWrite } from './sqlite.ts'
 
 /** 关窗握手等 renderer 回话的上限。超时就强关——卡住比丢一句话更糟。 */
 const CLOSE_ACK_TIMEOUT_MS = 1500
@@ -269,25 +269,44 @@ export class LibraryManager {
         deviceId: loaded.registry.deviceId,
         schemaVersion: DB_SCHEMA_VERSION,
         seq: readSeq(s.db),
+        /**
+         * 这个库到目前为止**写过多少行**（`saveContent` 累加）。
+         *
+         * 给诊断面与自检脚本用：`rows` 是「写成本」的直接证据 ——
+         * 「打一个字写几行」只能靠它回答，而「行数随库体量增长」正是要消灭的形状。
+         */
+        writes: { ...s.writes },
       }
     })
 
-    /** 读内容（整份 blob） */
+    /**
+     * 读内容（四张内容表的**全部行**）。
+     *
+     * 送行不送「一份库」：编码归渲染层，主进程不认识块语义。
+     * `status: 'empty'` ＝ 这个库还没有内容（新建／被作废的旧库），渲染层据此 seed。
+     */
     ipcMain.handle('qua:storage/load', (e) => {
       const s = sessionOf(e)
       if (!s) return { status: 'no-library' }
       const content = loadContent(s)
-      return content ? { status: 'ok', json: content.json, savedAt: content.savedAt } : { status: 'empty' }
+      return content ? { status: 'ok', rows: content } : { status: 'empty' }
     })
 
-    /** 写内容（整份替换；payload 里**不带** version：库的 schema 版本只有一个判据，就是 user_version） */
-    ipcMain.handle('qua:storage/save', (e, json: unknown, savedAt: unknown) => {
+    /**
+     * 落一批行写入。
+     *
+     * `writes` 是渲染层按 `core/storage/db-rows.ts` 算出来的行（表名/列名由主进程校验）；
+     * `replace` 为真 ＝ 整份替换（种子／换库／撤销之后）。**失败必须如实返回**：
+     * 假装存上了会让用户以为写进去了。
+     */
+    ipcMain.handle('qua:storage/save', (e, writes: unknown, opts: unknown) => {
       const s = sessionOf(e)
       if (!s) return { ok: false, error: 'no-library' }
-      if (typeof json !== 'string' || typeof savedAt !== 'number') return { ok: false, error: 'bad-args' }
+      if (!Array.isArray(writes)) return { ok: false, error: 'bad-args' }
+      const replace = Boolean((opts as { replace?: unknown } | null)?.replace)
       try {
-        saveContent(s, json, savedAt)
-        return { ok: true, savedAt }
+        const changed = saveContent(s, writes as RowWrite[], { replace })
+        return { ok: true, changed }
       } catch (err) {
         return { ok: false, error: String(err) }
       }

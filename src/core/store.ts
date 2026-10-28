@@ -38,6 +38,14 @@ export type StoreSubscriber = (source?: unknown, ids?: readonly string[], forest
 export class BlockStore {
   blocks: Block[]
   undoStack = new UndoStack()
+  /**
+   * **整片森林被换掉的次数**（`restore`／`reset`）。
+   *
+   * 为什么需要它：增量落盘按 op 走，而撤销/重做与换库**不产生 op** ——
+   * 它们把森林整个换成另一份。落盘层据此判「这批必须整份写」，
+   * 而不是靠「这批 op 是空的」去猜（那会把「只是换了个落点」也当成整库重写）。
+   */
+  private replaced = 0
   private subs = new Set<StoreSubscriber>()
   /**
    * **派生索引**（懒重建）：`null` ＝ 已失效，下次访问时从当前 `blocks` 重算一遍。
@@ -131,6 +139,7 @@ export class BlockStore {
    */
   restore(s: Snap, source?: unknown): Sel | null {
     const blocks = JSON.parse(s.blocks) as Block[]
+    this.replaced++
     this.blocks.splice(0, this.blocks.length, ...blocks)
     // ⚠️ 数组身份保住、但**块对象是新的** ⇒ 订阅者必须按 id 重取，见 `StoreSubscriber`
     this.touch(source, undefined, true)
@@ -139,9 +148,20 @@ export class BlockStore {
 
   /** 演示状态整体换库：换数组引用，清 undo，通知所有视图（source 不传） */
   reset(blocks: Block[]): void {
+    this.replaced++
     this.blocks = blocks
     this.undoStack.clear()
     this.touch()
+  }
+
+  /**
+   * 森林被整份换掉的次数。**只增**，落盘层拿它判断「这一批要不要整份写」。
+   *
+   * 为什么不看「这批 op 是空的」：换落点（`setActiveId`）也是零 op，
+   * 而它只需要写 `meta` 两格。把两者混成一件事，每次翻页都要整库重写一遍。
+   */
+  get replacementCount(): number {
+    return this.replaced
   }
 
   record(before: Snap, kind: UndoKind, at: number): boolean {

@@ -15,7 +15,7 @@
 ## 0. 门禁入口
 
 ```bash
-pnpm gate         # 类型 + 单测 + 构建 + 静态断言 + 156 条浏览器冒烟 + 12 条布局断言 + 11 条真 Electron 冒烟
+pnpm gate         # 类型 + 单测 + 构建 + 静态断言 + 157 条浏览器冒烟 + 12 条布局断言 + 13 条真 Electron 冒烟
 pnpm gate:fast    # 按这次改动的路径只跑碰得到的那几支（日常小改动用；不是收工门禁）
 pnpm gate:bundle  # gate + 4 条打包产物冒烟（要 .app，慢，所以单列）
 pnpm arch:check   # 只跑静态那一层（秒级）
@@ -337,7 +337,7 @@ AST 遍历 `electron/**/*.ts`：禁止 `workspace` / `seed` / `core/` / `command
 | 5 | 授权/审计不入 KB 表；绑定入 KB | 这是**表结构**事实（哪张表放什么），现在没有表。 |
 | 6 | ID 同型（32-hex UUIDv7） | 运行时/单测口径；静态只能证明 `uuidv7Hex()` 在，证明不了每个落库 id 同型。 |
 | 7 | 三寄存器存在、无单一 `hlc` 列 | 寄存器是 migration 里的事实，现在没有库、没有 migration。 |
-| 8 | 写事务必产 op-log 批 | op-log 是内核事务的一部分；renderer 的 localStorage 写入没有这个语义。 |
+| 8 | 写事务必产 op-log 批 | 现在**正文改动已经产 op**（`tx.patch` 报 `block.upsert{content}`），但**整份替换不产**（撤销/重做、换库、冷启动物化今日）⇒ append-only 日志里那一段是空洞。接的判据是「所有让库变化的路径都产 op」；`tests/op-log-timing.test.ts` 把「还没接」钉成负向断言。 |
 | 9 | 未 `expose` 的命令不出现在 HTTP／MCP／CLI 面 | 三个面都还没起，没有可断言的对象。 |
 | 10 | 派生索引可全量重建且与增量逐字节一致 | 派生索引（FTS 等）还没建；这条本质是**集成测试**，不是静态检查。 |
 

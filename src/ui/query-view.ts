@@ -192,7 +192,24 @@ export class QueryView {
       this.renderEmpty(t('ui.query.noSpec'))
       return
     }
-    const { dropped } = refreshSpec(b, spec, this.deps.kb)
+    /**
+     * **写回要走事务**（`deps.write`）：冻结结果与条件都是模型改动，
+     * 直改活块不会产出 op ⇒ 落盘时这一笔被静默跳过（条件变了、库里还是旧的）。
+     * 没有事务入口（只读视图/测试）时才直改。
+     */
+    const run = this.deps.write
+    let dropped: string[] = []
+    if (run) {
+      dropped = run((tx) => {
+        let out: string[] = []
+        tx.patch(b.id, (x) => {
+          out = refreshSpec(x, spec, this.deps.kb).dropped
+        })
+        return out
+      })
+    } else {
+      dropped = refreshSpec(b, spec, this.deps.kb).dropped
+    }
     if (dropped.length > 0) this.deps.toast?.(t('ui.query.dropped', { count: dropped.length }), 'info')
     // 刷新＝成员与顺序都换了：上一轮的上下文展开没有依据，从头来
     this.expanded = new Set()

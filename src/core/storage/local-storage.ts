@@ -44,6 +44,11 @@ export function createLocalStorageAdapter(key: string): StoragePort {
 
   return {
     kind: BACKEND,
+    /**
+     * 浏览器没有库，只能存一份字节 ⇒ 要整份序列化。
+     * 这条 `consumes` 就是「门面要不要序列化整库」的唯一判据（见 `port.ts`）。
+     */
+    consumes: 'bytes',
 
     async load(): Promise<LoadResult> {
       let raw: string | null
@@ -70,7 +75,8 @@ export function createLocalStorageAdapter(key: string): StoragePort {
 
     commit(batch: CommitBatch): Promise<SaveResult> {
       const run = async (): Promise<SaveResult> => {
-        const envelope: Envelope = { backend: BACKEND, envelope: ENVELOPE, data: JSON.parse(batch.payload) }
+        // `payload` 一定在：门面按 `consumes: 'bytes'` 序列化过（见 `storage/index.ts`）
+        const envelope: Envelope = { backend: BACKEND, envelope: ENVELOPE, data: JSON.parse(batch.payload ?? 'null') }
         try {
           localStorage.setItem(key, JSON.stringify(envelope))
           return { ok: true, savedAt: batch.savedAt }

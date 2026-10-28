@@ -40,7 +40,18 @@ import {
   type LibraryManifest,
 } from '../../src/core/library.ts'
 import { createFolderAssetStore, type AssetStore } from './assets.ts'
-import { openLibraryDb, readMeta, readWorkspaceBlob, writeMeta, writeSetting, writeWorkspaceBlob, type Db } from './sqlite.ts'
+import {
+  applyRowWrites,
+  hasContent,
+  openLibraryDb,
+  readContentRows,
+  readMeta,
+  replaceContentRows,
+  writeMeta,
+  writeSetting,
+  type Db,
+  type RowWrite,
+} from './sqlite.ts'
 
 export type OpenFailure =
   /** 目录里没有 `library.json`：这不是一个库，拒绝往里撒文件 */
@@ -64,6 +75,14 @@ export interface RepoSession {
   db: Db
   assets: AssetStore
   windows: Set<number>
+  /**
+   * 这个会话**累计写进去多少行**（`saveContent` 的返回值累加）。
+   *
+   * 为什么留这个数：它是「写成本」的直接证据 —— 「打一个字写几行」只能靠它回答。
+   * 时间在 CI 上不稳，行数是确定的；而「行数随库体量增长」正是这次改造要消灭的形状。
+   * 诊断面（`libraryInfo`）会把它报出去，自检脚本据此判「这一笔是不是整库重写」。
+   */
+  writes: { rows: number; saves: number }
   /** 关连接（最后一个窗口关掉时调）。关之前 checkpoint，让主库文件自包含。 */
   close(): void
 }
@@ -120,6 +139,7 @@ function makeSession(id: string, dir: string, db: Db): RepoSession {
     db,
     assets: createFolderAssetStore(join(dir, ASSETS_DIR)),
     windows: new Set<number>(),
+    writes: { rows: 0, saves: 0 },
     close: () => {
       try {
         // 关之前 checkpoint：WAL 里的内容回主库 ⇒「只拷 qua.db」也能读出完整数据。
@@ -188,22 +208,33 @@ export function openSession(dir: string, opts: { expectId?: string } = {}): Open
   return { status: 'ok', session: makeSession(manifest.id, dir, db) }
 }
 
-/* ------------------------------------------------------------ 内容读写（整份 blob） */
+/* ------------------------------------------------------------ 内容读写（行） */
 
 /**
- * 读这份库的内容。
+ * 读这份库的**全部内容行**。
  *
- * ⚠️ **临时形状**：现在存的是一份整库 JSON（`Workspace`），规范化表是下一步。
- * `undefined` ＝ 这个库还没有内容（新建的库），**调用方**决定要不要 seed。
- * 这里绝不替它写种子：种子一旦写进来，「用户数据」与「演示数据」就分不开了。
+ * 为什么返回行而不是「一份 Workspace」：编码归渲染层（`core/storage/db-rows.ts`），
+ * 主进程不认识块语义。`undefined` ＝ 这个库还没有内容（新建的库／被作废的旧库），
+ * **调用方**决定要不要 seed —— 这里绝不替它写种子：
+ * 种子一旦写进来，「用户数据」与「演示数据」就分不开了。
  */
-export function loadContent(session: RepoSession): { json: string; savedAt: number } | undefined {
-  return readWorkspaceBlob(session.db)
+export function loadContent(session: RepoSession): ReturnType<typeof readContentRows> | undefined {
+  if (!hasContent(session.db)) return undefined
+  return readContentRows(session.db)
 }
 
-/** 写这份库的内容（整份替换；将来换成按 op 落行） */
-export function saveContent(session: RepoSession, json: string, savedAt: number): void {
-  writeWorkspaceBlob(session.db, json, savedAt)
+/**
+ * 落一批行写入（**增量**：这批 op 动过的块）。
+ *
+ * `replace` 为真 ＝ 整份替换（种子／换库／撤销之后）。两者的区别只有一个：
+ * 要不要先清空内容表。清空只该发生在「整份写」的入口 —— 常规编辑走增量，
+ * 顺手清表是一次数据事故，而它看起来只是「慢了一点」。
+ */
+export function saveContent(session: RepoSession, writes: readonly RowWrite[], opts: { replace?: boolean } = {}): number {
+  const changed = opts.replace ? replaceContentRows(session.db, writes) : applyRowWrites(session.db, writes)
+  session.writes.rows += changed
+  session.writes.saves += 1
+  return changed
 }
 
 /** 每库设置（窗口 bounds / 槽布局 / 折叠态）：存的是块 id，必须跟着库走 */

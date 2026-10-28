@@ -48,10 +48,15 @@ function collect() {
   const problems = []
   const read = (p) => readFileSync(join(ROOT, p), 'utf8')
 
-  // WORKSPACE_VERSION
+  // WORKSPACE_VERSION（浏览器那侧的载荷版本）
   const mVer = /export const WORKSPACE_VERSION = (\d+)/.exec(read('src/core/storage/shape.ts'))
   if (mVer) vals.WORKSPACE_VERSION = mVer[1]
   else problems.push('读不到 WORKSPACE_VERSION（src/core/storage/shape.ts）')
+
+  // DB_SCHEMA_VERSION（库的唯一 schema 版本，`PRAGMA user_version`）
+  const mDbVer = /export const DB_SCHEMA_VERSION = (\d+)/.exec(read('src/core/library.ts'))
+  if (mDbVer) vals.DB_SCHEMA_VERSION = mDbVer[1]
+  else problems.push('读不到 DB_SCHEMA_VERSION（src/core/library.ts）')
 
   // core 模块数（只算 .ts 与 .tsx，不看测试）
   try {
@@ -80,7 +85,15 @@ function collect() {
    */
   const arch = run(process.execPath, ['scripts/arch-check.mjs'])
   const mArch = /硬断言\s+(\d+\/\d+)\s+过/.exec(arch.out)
-  const core = run(process.execPath, ['--test', ...readdirSync(join(ROOT, 'tests')).filter((f) => f.endsWith('.test.ts')).map((f) => `tests/${f}`)])
+  /**
+   * ⚠️ **递归**取测试文件：`readdirSync('tests')` 只列一层，`tests/storage/*.test.ts` 会被漏掉。
+   * 漏掉之后这里的数字会**比门禁少**（实测 479 vs 520），而它印在公开站的图上 ——
+   * 「少算」比「读不到」更糟：它看起来是一个权威的数。
+   */
+  const testFiles = readdirSync(join(ROOT, 'tests'), { recursive: true })
+    .filter((f) => typeof f === 'string' && f.endsWith('.test.ts'))
+    .map((f) => `tests/${f}`)
+  const core = run(process.execPath, ['--test', ...testFiles])
   const mPass = /ℹ\s+pass\s+(\d+)/.exec(core.out)
   const mTests = /ℹ\s+tests\s+(\d+)/.exec(core.out)
 

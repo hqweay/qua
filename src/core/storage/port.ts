@@ -12,13 +12,15 @@
  * 三条硬口径：
  *   1. **异步**：`load`／`commit` 都返回 Promise，上层不得依赖同步返回。
  *   2. **批次**：写入的单位是 `Change[]`（一块或几块），不是「整个库」。
- *      ⚠️ 本仓的 `LocalStorageAdapter` 内部仍然整份序列化 —— 那是**实现细节**，
- *      不是契约：`commit` 只承诺「这批改动落盘了」。
+ *      ⚠️ `LocalStorageAdapter` 内部仍然整份序列化 —— 那是**实现细节**
+ *      （浏览器没有库，只能存一份字节），不是契约：`commit` 只承诺「这批改动落盘了」。
+ *      接库的适配器（`consumes: 'rows'`）只写这批 op 动过的块的行。
  *   3. **单写者**：目标形态是主进程 SQLite ＋ WAL，renderer 经端口调用、不直接碰存储
  * 适配器必须自己保证「同一时刻只有一次提交在飞」。
  */
 
 import type { Op } from '../kb/types.ts'
+import type { RowWrite } from './db-rows.ts'
 
 /** 被写的两类对象：块森林 ＋ 块上的可引用区间 */
 export type ChangeKind = 'blocks' | 'annos'
@@ -27,9 +29,9 @@ export type ChangeKind = 'blocks' | 'annos'
  * 一条改动。
  *
  * ⚠️ **不带 payload**：契约只说「这类对象里的这一条动过」，不说动成了什么
- *    （落盘字节由 `CommitBatch.payload` 承载）。将来接内核时这里会扩成
- *    `{ kind, id, op: 'upsert' | 'delete', value }`，但**对外形状不变**——
- *    适配器照样只承诺「这批改动落盘了」。
+ *    （落盘字节由 `CommitBatch.payload` 承载，落库行由 `CommitBatch.writes` 承载）。
+ *    将来接同步层时这里会扩成 `{ kind, id, op: 'upsert' | 'delete', value }`，
+ *    但**对外形状不变**——适配器照样只承诺「这批改动落盘了」。
  *
  * `id` 两种取值，消费者必须都处理：
  *   · 具体 id —— 精确到块／区间，索引可只重算它；
@@ -58,18 +60,36 @@ export function idsOfKind(changes: readonly Change[], kind: ChangeKind): string[
   return [...out]
 }
 
-/** 一次提交的内容：这批 op ＋ 它们的最小失效投影 ＋ 落盘时用的整份库（本地适配器的实现细节） */
+/**
+ * 一次提交的内容。
+ *
+ * **适配器按自己的 `consumes` 取其中一份**：
+ *   · `bytes`（`localStorage`）要 `payload`（整份序列化）——浏览器没有库，只能存一份字节；
+ *   · `rows`（Electron 的 `qua.db`）要 `writes`（这批 op 动过的块的行）——**只写动过的那几块**。
+ *
+ * 为什么不是「两个都给」：`payload` 是整库序列化，成本随库体量线性增长。
+ * 在接库之后仍然每次提交都算一遍它，等于把「整库覆盖写」的成本从存储层搬到了 CPU 上，
+ * 而验收口径是「打一个字的落盘成本不随库体量增长」——那条也包含这一份。
+ */
 export interface CommitBatch {
   /**
    * 这批**持久化 op** —— 「一批 op ＝ 一个事务」是写适配器的契约：
    * SQLite 落行时一批开一个事务、`block.delete` 级联、失败整批回滚。
-   * 本地适配器暂不消费它（仍整份 payload），但契约从现在起按 op 说。
    */
   ops: Op[]
   /** 索引/订阅侧的最小失效投影（与 op 同源；适配器不消费） */
   changes: Change[]
-  /** 适配器手里**没有**库本身，只收字节 —— 序列化归调用方（适配器只管存） */
-  payload: string
+  /** 整份库的字节（只有 `consumes: 'bytes'` 的适配器要） */
+  payload?: string
+  /** 这批 op 动过的块的行（只有 `consumes: 'rows'` 的适配器要；编码见 `db-rows.ts`） */
+  writes?: RowWrite[]
+  /**
+   * **整份替换**：这批不是增量，而是「库里现在就是这份模型」。
+   *
+   * 只有三种情况会置它：首次落种子、换库、撤销/重做（整片森林被换掉）。
+   * 常规编辑一律走增量 —— 顺手整份替换是一次数据事故，而它看起来只是「慢了一点」。
+   */
+  replace?: boolean
   /** 跟这批一起记的自描述时间（落盘形状的一部分，见 `parseWorkspace`） */
   savedAt: number
 }
@@ -103,6 +123,14 @@ export type SaveResult = { ok: true; savedAt: number } | { ok: false; error: unk
 export interface StoragePort {
   /** 适配器名（诊断面板显示「数据存在哪」） */
   readonly kind: string
+  /**
+   * 这个适配器**要哪一种提交载荷**。
+   *
+   * 门面（`createWorkspaceStore`）据此决定「要不要序列化整份库」——
+   * 判据是「存储要什么」，而不是「哪个适配器更省事」：接库之后仍然每笔都序列化整库，
+   * 就是把整库覆盖写的成本从存储层搬到了 CPU 上。
+   */
+  readonly consumes: 'bytes' | 'rows'
   load(): Promise<LoadResult>
   /** 提交一批改动；**失败必须返回失败**，不许假装存上了 */
   commit(batch: CommitBatch): Promise<SaveResult>

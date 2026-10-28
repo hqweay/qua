@@ -36,10 +36,15 @@ export const LIBRARY_FORMAT = 1
  * `app.json.version` 判「注册表怎么读」、`WORKSPACE_VERSION` 是当前过渡期的载荷版本 ——
  * 三者都不判「这份数据能不能读」，只有这一格判。
  *
- * 为什么现在只有 1 而下一步会到 2：现在 `workspace` 是一份整库 JSON 的临时形状，
- * 换成规范化表时**加一**并写迁移。`user_version` 只增不减。
+ * 为什么是 2：v1 是过渡形状——`workspace` 表里一整份库 JSON，每次编辑整份覆盖写
+ * （写成本随库体量线性增长）。v2 把块拆成 `Block`／`BlockProperty`／`BlockAlias`／`BlockList`
+ * 四张表，一次编辑只写它动过的那几块的行。
+ *
+ * **v1 → v2 不写迁移**：原型不做旧数据迁移，旧库作废重 seed（`judgeDbVersion` 判到
+ * `migrate` 时 `MIGRATIONS` 里没有对应步骤 ⇒ 打开失败并明确报出来，不是静默丢数据）。
+ * `user_version` 只增不减。
  */
-export const DB_SCHEMA_VERSION = 1
+export const DB_SCHEMA_VERSION = 2
 
 /** `meta` 表里被代码解释的键（其余键归将来，不在这里登记）。 */
 export const META_KEYS = {
@@ -49,7 +54,38 @@ export const META_KEYS = {
   name: 'name',
   /** 这台设备在这个库上的写序号水位（与 `op_log` 同一事务推进） */
   seq: 'seq',
+  /** 中心槽持有的「当前对象」（块 id）。它属于内容：换台机器接着看同一处 */
+  activeId: 'active_id',
+  /** 上一次落盘时刻（墙钟毫秒）。只给人看（诊断面／「改到哪了」） */
+  savedAt: 'saved_at',
 } as const
+
+/**
+ * 内容表的**名字**（主进程建表与通用 SQL 用；编码语义在 `core/storage/db-rows.ts`）。
+ *
+ * 为什么表名住这里：主进程要建表、要按表名拼 SQL，而它**不许 import 块语义**
+ * （白名单只放零依赖的 `core/library.ts` 与纯类型的 core）。表名是「库的形状」，
+ * 与 `DB_FILE`／`MANIFEST_FILE` 同一类事实，所以和它们放一处。
+ */
+export const DB_TABLES = {
+  /** 块：一行一块（`content`／`annos` ＋ 落库编码的 `parent`／`left`） */
+  block: 'Block',
+  /** 属性：一格一行（有序字符串列表拆成多行 ＋ `pos`） */
+  property: 'BlockProperty',
+  /** 地址：一块 0..N 行，`pos` 有序，首个是主名 */
+  alias: 'BlockAlias',
+  /** 露面：一块 0..N 行（page／tag），PK 保证不重复 */
+  list: 'BlockList',
+  /** 库级两格（`active_id`／`saved_at`）＋ 身份与序号水位 */
+  meta: 'meta',
+  /** 每库设置（窗口 bounds／槽布局／折叠态这类视图状态） */
+  settings: 'settings',
+  /** 变更流（`PK(device_id, seq)` 让重发天然幂等） */
+  opLog: 'op_log',
+} as const
+
+/** 内容表（**装载时整份读、换库时整份清**的那四张） */
+export const DB_CONTENT_TABLES = [DB_TABLES.block, DB_TABLES.property, DB_TABLES.alias, DB_TABLES.list] as const
 
 /* ------------------------------------------------------------ id */
 

@@ -19,6 +19,7 @@
 import type { Change, CommitBatch, LoadResult, StoragePort } from './port.ts'
 import type { Op } from '../kb/types.ts'
 import { parseWorkspace, type ParseResult, type Workspace } from './shape.ts'
+import { rowWritesFor, workspaceToRowWrites } from './db-rows.ts'
 
 /** 「整份库都动过」的那批改动：本地适配器的最细粒度（信封实现与门面共用同一份声明） */
 export const WHOLE_LIBRARY_CHANGES: Change[] = [
@@ -37,8 +38,19 @@ export type LoadedWorkspace = ParseResult | { status: 'storage-error'; error: un
 export interface WorkspaceStore {
   readonly kind: string
   load: () => Promise<LoadedWorkspace>
-  /** 提交一批 op（序列化与 changes 推导归这里）；op 为空 ＝ 整类对象都动过 */
-  commit: (ws: Workspace, ops: readonly Op[]) => Promise<{ ok: true } | { ok: false; error: unknown }>
+  /**
+   * 提交一批 op（序列化／行编码与 changes 推导归这里）。
+   *
+   * `replace` 为真 ＝ 库里现在就是这份模型（换库／撤销／首次落种子），必须整份写。
+   * 常规编辑传假：只写这批 op 说到的那些格。
+   * `ensure` ＝ **模型里有、盘上还没有**的块（装配期补出来的那几块，没有 op）：
+   * 按 id 把它们整块写进去。
+   */
+  commit: (
+    ws: Workspace,
+    ops: readonly Op[],
+    opts?: { replace?: boolean; ensure?: readonly string[] },
+  ) => Promise<{ ok: true } | { ok: false; error: unknown }>
   clear: () => Promise<void>
   /** 等已在途的提交落盘 */
   settle: () => Promise<void>
@@ -85,15 +97,26 @@ export function createWorkspaceStore(port: StoragePort): WorkspaceStore {
     kind: port.kind,
     load: async () => judge(await port.load()),
 
-    async commit(ws, ops) {
+    async commit(ws, ops, opts = {}) {
+      const replace = opts.replace === true
+      const ensure = opts.ensure ?? []
       const batch: CommitBatch = {
-        // 一批 op ＝ 一个事务（写适配器的契约）；op 为空 ⇒ 这批不是事务产的（迁移期直写），
-        // 只能按整类提交——这是迁移期的真相，不是兜底
+        // 一批 op ＝ 一个事务（写适配器的契约）。零 op 且非整份替换 ⇒ 这批不是事务产的
+        // （例如只换了落点），按整类提交是**保守**的如实表达
         ops: [...ops],
         changes: ops.length === 0 ? WHOLE_LIBRARY_CHANGES : changesOf(ops),
-        // 本地适配器只能收整份字节；接 SQLite 后由写适配器把 op 落成行
-        payload: JSON.stringify(ws),
         savedAt: ws.savedAt,
+      }
+      /**
+       * **按适配器的 `consumes` 准备载荷**：接库只要「这批 op 说到的那些格的行」，
+       * 浏览器只要整份字节。两条都备着就等于每次都把整库序列化一遍 ——
+       * 那是把「整库覆盖写」的成本从存储层搬到 CPU 上，验收口径一样过不去。
+       */
+      if (port.consumes === 'rows') {
+        batch.replace = replace
+        batch.writes = replace ? workspaceToRowWrites(ws) : rowWritesFor(ws, ops, ensure)
+      } else {
+        batch.payload = JSON.stringify(ws)
       }
       const r = await port.commit(batch)
       return r.ok ? { ok: true } : { ok: false, error: r.error }

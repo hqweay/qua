@@ -86,17 +86,19 @@
 
 ## 2 下一格：换真实存储
 
-### 2.1 Tx / Changes —— 写盘不再整库序列化
+### 2.1 Tx / Changes —— ~~写盘不再整库序列化~~（桌面版已落地）
 
-**现状**：`StoragePort` 已经异步 ＋ 批次，但**适配器内部仍是 `JSON.stringify(整库)`**。
-⇒ 容量有限、卡顿、没有真正的事务。
-**要做**：让 `commit(batch)` 收到的 `Change[]` 真的只含改过的那几块（现在是「整类对象都动过」）。
-**验收**：改一个块 ⇒ 提交的 `Change[]` 里只有它；大库里打字不掉帧。
+**现状**：桌面版已经不是整库序列化了 —— 每个库一份 `qua.db`，块是**自己的行**
+（`Block`／`BlockProperty`／`BlockAlias`／`BlockList`），一次编辑只写它动过的那几块。
+**验收**：`tests/storage/db-rows.test.ts`（小库与大库的落盘行数必须相同）＋
+`checks/electron-smoke.mjs` 的 E12（真 Electron 里数行）。
+**还剩**：浏览器端仍是整份字节（浏览器没有库目录的同等语义）；`Change[]` 仍可能报「整类都动过」
+（那是「确实不知道」的如实表达，不是漏做）。
 
-### 2.2 SQLite 适配器
+### 2.2 SQLite 适配器 —— ~~已完成~~（桌面版就是它）
 
-**前置**：2.1 完成。端口不变，只换实现（`createWorkspaceStore(createSqliteAdapter(...))`）。
-**那一刻**才叫「接数据库」。**renderer 一行不改**是本条的验收标准。
+端口不变、只换实现已经做到：`createWorkspaceStore(createIpcAdapter(...))`，**renderer 的业务代码一行没改**。
+**还剩**：装载仍是整份读（运行模型是「整片森林在内存」）；按 id／按页的局部装载要等查询与反链也走 SQL。
 
 ### 2.3 备份 / 导出
 

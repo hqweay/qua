@@ -171,8 +171,6 @@ pnpm dev:web      # → http://127.0.0.1:5180/
 
 **还不能**（原型边界）：
 
-- **持久化仍是整库序列化**：每次提交把整库（或整批）JSON 序列化进 localStorage；
-  模型层有 `tx`／`Op` 事务语义，但没有数据库事务、没有多窗口同步。
 - **没有备份/导出入口**：读盘失败时进入只读演示态（不覆盖原数据），但用户暂时没法抢救坏库。
 - 没有自研查找（`⌘F`）、没有全文搜索（`#`／`@` 浮层只扫内存里的名字与正文，不是全文索引）、
   没有图谱、没有导入导出；界面文案只有中文（走字典，但没有多语言切换）。
@@ -259,14 +257,33 @@ pnpm build:mac       # 打包 .app（未签名，首次需右键打开）
 
 ## 数据放在哪
 
-`localStorage` 的键是 **`qua.workspace`**（`src/core/workspace.ts`）。
-在 Electron 里它落在 `~/Library/Application Support/net.leay.qua/Local Storage/`。
+**桌面版（Electron）**：每个库是一个目录，内容真相是目录里的 **`qua.db`**（SQLite）。
+块是**自己的行**，不是一份 JSON：
 
-⚠️ **改这个键名＝所有用户的数据静默消失**，所以 `arch-check` 有一条断言把值钉死。
+| 表 | 装什么 |
+|---|---|
+| `Block` | 一行一块：正文（run 序列 JSON）、区间注解、`created`／`modified`、落库编码的 `parent`／`left`、软删时刻 |
+| `BlockProperty` | 属性袋，一格一行（有序的字符串列表拆成多行 ＋ `pos`） |
+| `BlockAlias` | 地址（有序，首个是主名） |
+| `BlockList` | 露面（`page`／`tag`） |
+| `meta` | 库级两格（当前对象、落盘时刻）＋ 身份与写序号水位 |
 
-落盘形状的版本号是 `WORKSPACE_VERSION`（`src/core/storage/shape.ts`）。原型**不做旧数据迁移**：
-模型或落盘口径一变就把版本号加一，旧库显式作废、重新 seed，不写兼容分支。
-在浏览器（含[在线演示](https://qua.leay.net/)）里，同一份键落在那个站点的 `localStorage` 中。
+⇒ **一次编辑只写它动过的那几块**，写成本不随库体量增长。
+「一个块长成哪几行」只有一份定义（`src/core/storage/db-rows.ts`）；主进程只做通用 SQL。
+
+库目录形状：`library.json`（身份）＋ `qua.db` ＋ `assets/` ＋ `backups/`。
+
+**浏览器（含[在线演示](https://qua.leay.net/)）**：没有库目录，仍是 `localStorage`，
+键 **`qua.workspace`**（`src/core/workspace.ts`）——浏览器没有「用户可选目录」的同等语义。
+
+⚠️ **改 `qua.workspace` 这个键名＝所有浏览器端数据静默消失**，所以 `arch-check` 有一条断言把值钉死。
+
+版本号有两个，各判各的：
+
+- `PRAGMA user_version`（`DB_SCHEMA_VERSION`）判**这份数据能不能读**；
+- `WORKSPACE_VERSION`（`src/core/storage/shape.ts`）是浏览器那侧的载荷版本。
+
+原型**不做旧数据迁移**：口径一变就把版本号加一，旧库显式作废、重新 seed，不写兼容分支。
 
 数据目录的整体形状（`kb/` `logs/` `cache/` …）见 [`electron/userdata/README.md`](electron/userdata/README.md)。
 

@@ -1,16 +1,17 @@
 /**
- * `qua.db` 的 SQLite 适配器 —— **有意的临时形状**。
+ * `qua.db` 的 SQLite 适配器 —— **主进程唯一的 SQL 落点**。
  *
- * ## 这是有意的临时形状，不是终态
+ * ## 这个文件负责什么、不负责什么
  *
- * 现在只把**整份 `Workspace` JSON** 塞进 `workspace(id=1, json, saved_at)`，
- * 为的是先把多库／多窗口／关闭握手／持久化跑通。**下一步必须换成规范化 schema**
- * （blocks/content/props/aliases/lists/tags/belongs/annos/settings/meta）并写迁移。
+ * | 这里 | 别处 |
+ * |---|---|
+ * | 建表、迁移、`user_version`、`wal_checkpoint` | 「一个块长成哪几行」→ `src/core/storage/db-rows.ts` |
+ * | **通用**行写入（`applyRowWrites`／`replaceContentRows`） | 什么时候写、写哪一批 → 渲染层的 `StoragePort` |
+ * | `settings`／`meta`／`op_log` 的读写 | 块语义、查询、渲染（主进程一律不许） |
  *
- * 两条纪律，别让临时形状变成终态：
- *   ① **不许在这里长规范化表**（`Block`／`BlockProperty`／`BlockAlias`…）——那会让下一次迁移
- *      的迁移同时面对「两种形状混在一个库里」；
- *   ② **不许写旧数据迁移**（开发阶段旧数据可弃，`WORKSPACE_VERSION` 升一即作废）。
+ * 判据：主进程只认**表名与列名**，不认「块」。渲染层送来的是一批行写入，
+ * 这里校验表名/列名白名单后拼 SQL —— 这样「块长什么样」只有一份定义，
+ * 而主进程仍然拿不到任何块语义（`arch-check [2+]` 的白名单也照旧成立）。
  *
  * ## 为什么建表与迁移都是「一个事务包住版本号」
  *
@@ -29,7 +30,9 @@ import { DatabaseSync } from 'node:sqlite'
 import { dirname } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import {
+  DB_CONTENT_TABLES,
   DB_SCHEMA_VERSION,
+  DB_TABLES,
   META_KEYS,
   judgeDbVersion,
   type DbVersionVerdict,
@@ -44,12 +47,117 @@ export interface Migration {
 }
 
 /**
- * 迁移表。**现在是空的**：还没有任何一版 schema 需要抬。
+ * 内容表的 DDL —— **v2 起的形状**：块拆成行，写成本只与「这次动过几块」有关。
  *
- * 加一步的判据：只有当**已经有人写过**的库需要换形状时才加。
- * 「blob → 规范化表」会是第一步。
+ * 列的分工与「为什么这么分」在 `src/core/storage/db-rows.ts`（编码层）；这里只有 SQL。
+ *
+ * 三条口径：
+ *   · **`parent`／`left` 不设外键**：写入顺序按 op 流来，子块可能先于父块落行
+ *     （`insert` 一棵子树时 op 是逐块报的）。设了外键就会把「顺序」变成一个必须满足的前提，
+ *     而那个前提在并发/重放里不成立 —— 真出现悬空指针时，读路径按「当顶层」兜底，不报错也不丢块。
+ *   · **子表也不设外键**：删一块时由写入端显式删它的属性/地址/露面行（`db-rows.ts` 的
+ *     `blockWrites`），比 `on delete cascade` 更容易在测试里数清楚「这次写了几行」。
+ *   · **`pos` 进主键**：属性与地址都是有序的，`pos` 是顺序本身；不放进主键就只能靠 `rowid`，
+ *     而 `rowid` 的顺序不是语义。
  */
-export const MIGRATIONS: Migration[] = []
+const CONTENT_DDL = `
+create table if not exists ${DB_TABLES.block} (
+  id text primary key,
+  content text not null,
+  annos text,
+  parent text,
+  left text,
+  created integer not null,
+  modified integer not null,
+  deleted integer,
+  display text,
+  kind text,
+  date text,
+  query text,
+  type text
+);
+create index if not exists idx_Block_parent_left on ${DB_TABLES.block}(parent, left);
+create index if not exists idx_Block_date on ${DB_TABLES.block}(date);
+create index if not exists idx_Block_deleted on ${DB_TABLES.block}(deleted) where deleted is not null;
+
+create table if not exists ${DB_TABLES.property} (
+  block text not null,
+  name text not null,
+  pos integer not null,
+  multi integer not null default 0,
+  value text,
+  primary key (block, name, pos)
+);
+
+create table if not exists ${DB_TABLES.alias} (
+  name text primary key,
+  block text not null,
+  pos integer not null
+);
+create index if not exists idx_BlockAlias_block on ${DB_TABLES.alias}(block);
+
+create table if not exists ${DB_TABLES.list} (
+  block text not null,
+  list text not null,
+  primary key (block, list)
+);
+create index if not exists idx_BlockList_list on ${DB_TABLES.list}(list);
+`
+
+/**
+ * 库级表（`settings`／`meta`／`op_log`）—— 与内容表分开：它们**换库不换形状**，
+ * 从 v1 起就在这里（`workspace` 那张临时表才是 v1 的产物）。
+ */
+const BASE_DDL = `
+create table if not exists ${DB_TABLES.settings} (
+  key text primary key,
+  value text not null
+);
+create table if not exists ${DB_TABLES.meta} (
+  key text primary key,
+  value text not null
+);
+-- Change stream. PK(device_id, seq) makes a resend idempotent by construction.
+-- The edit path does not write here yet: whether op_json carries "index" or
+-- "prev" is irreversible history and is still undecided, so writing now would weld
+-- the ambiguity into the first rows.
+create table if not exists ${DB_TABLES.opLog} (
+  device_id text not null,
+  seq integer not null,
+  at integer not null,
+  op_json text not null,
+  primary key (device_id, seq)
+);
+create index if not exists idx_op_log_at on ${DB_TABLES.opLog}(at);
+`
+
+/**
+ * 新建库的建表脚本。
+ *
+ * ⚠️ **不含 v1 的 `workspace` 表**：那是「一整份库 JSON 塞一行」的过渡形状。
+ * 新建的库直接是 v2 —— 一个库里只有一种形状，迁移路径才不必同时应付两种。
+ */
+const DDL = `${BASE_DDL}${CONTENT_DDL}`
+
+/**
+ * 迁移表。
+ *
+ * **v1 → v2：丢掉整份 blob，建内容表**。这不是「旧数据迁移」，是**作废旧形状**：
+ * 原型不做映射/兼容分支（`WORKSPACE_VERSION` 那套「升一版即作废重 seed」的纪律同样适用），
+ * 但**也不许把用户的库变成打不开**——库的身份（`library.json`／`meta.library_id`）留着，
+ * 只把内容清空，渲染层读到 `empty` 就重新 seed。
+ *
+ * ⇒ 用户看到的是「这个库重新变成空的」，而不是「这个库打不开了」。
+ */
+export const MIGRATIONS: Migration[] = [
+  {
+    to: 2,
+    up: (db) => {
+      db.exec(`drop table if exists workspace`)
+      db.exec(CONTENT_DDL)
+    },
+  },
+]
 
 export type OpenResult =
   /** 全新目录：建了表，版本号写当前 */
@@ -65,38 +173,6 @@ export type OpenResult =
   /** `user_version` 不是合法版本号（负数／小数） */
   | { status: 'corrupt'; version: number }
 
-/**
- * Table set for now. The normalized schema (blocks/props/aliases/...) is the next step's job;
- * nothing here may grow into it, otherwise the next migration has to face two shapes
- * living in one database.
- */
-const DDL = `
-create table if not exists workspace (
-  id integer primary key check (id = 1),
-  json text not null,
-  saved_at integer not null
-);
-create table if not exists settings (
-  key text primary key,
-  value text not null
-);
-create table if not exists meta (
-  key text primary key,
-  value text not null
-);
--- Change stream. PK(device_id, seq) makes a resend idempotent by construction.
--- The edit path does not write here yet: whether op_json carries "index" or
--- "prev" is irreversible history and is still undecided, so writing now would weld
--- the ambiguity into the first rows.
-create table if not exists op_log (
-  device_id text not null,
-  seq integer not null,
-  at integer not null,
-  op_json text not null,
-  primary key (device_id, seq)
-);
-create index if not exists idx_op_log_at on op_log(at);
-`
 
 /** 读 `user_version`（唯一 schema 版本判据） */
 export function readUserVersion(db: Db): number {
@@ -179,7 +255,16 @@ export function openLibraryDb(
   try {
     inTransaction(db, () => {
       const steps = migrations.filter((m) => m.to > found && m.to <= target).sort((a, b) => a.to - b.to)
-      for (const step of steps) step.up(db)
+      /**
+       * **每一步都得在**：缺一步就说明这个库是从一个我们没有迁移路径的版本升上来的。
+       * 不报错而直接跳过，结果是「版本号升了、表没建」——一个看起来能打开、
+       * 但每次读写都撞 `no such table` 的库。宁可在这里判失败（调用方据此提示重建）。
+       */
+      for (let to = found + 1; to <= target; to++) {
+        const step = steps.find((m) => m.to === to)
+        if (!step) throw new Error(`no migration step to schema v${to} (found v${found}, target v${target})`)
+        step.up(db)
+      }
       // 版本号**在同一个事务里**抬到最后：崩在中间只会回到 found
       setUserVersion(db, target)
     })
@@ -190,18 +275,210 @@ export function openLibraryDb(
   return { status: 'migrated', db, version: target }
 }
 
-/* ------------------------------------------------------------ workspace blob */
+/* ------------------------------------------------------------ 内容行（v2） */
 
-export function readWorkspaceBlob(db: Db): { json: string; savedAt: number } | undefined {
-  const rows = db.prepare('select json, saved_at from workspace where id = 1').all() as { json: string; saved_at: number }[]
-  const row = rows[0]
-  return row ? { json: row.json, savedAt: row.saved_at } : undefined
+/**
+ * 读**整份内容行**：四张表各 `select *`。
+ *
+ * 为什么整份读：运行模型是「整片森林在内存」（阶段 1），装载必须一次拿全；
+ * 而**写**是增量的（见 `applyRowWrites`）——读全、写增量，是本层的全部取舍。
+ * 编码（行 → 块）归渲染层：主进程不认识块语义（白名单只放 `core/library.ts` 与纯类型）。
+ */
+export function readContentRows(db: Db): {
+  blocks: Record<string, unknown>[]
+  props: Record<string, unknown>[]
+  aliases: Record<string, unknown>[]
+  lists: Record<string, unknown>[]
+  meta: Record<string, string>
+} {
+  const rows = (table: string): Record<string, unknown>[] =>
+    db.prepare(`select * from ${table}`).all() as Record<string, unknown>[]
+  const meta: Record<string, string> = {}
+  for (const r of rows(DB_TABLES.meta) as { key: string; value: string }[]) meta[r.key] = r.value
+  return {
+    blocks: rows(DB_TABLES.block),
+    props: rows(DB_TABLES.property),
+    aliases: rows(DB_TABLES.alias),
+    lists: rows(DB_TABLES.list),
+    meta,
+  }
 }
 
-export function writeWorkspaceBlob(db: Db, json: string, savedAt: number): void {
-  db.prepare(
-    'insert into workspace (id, json, saved_at) values (1, ?, ?) on conflict(id) do update set json = excluded.json, saved_at = excluded.saved_at',
-  ).run(json, savedAt)
+/**
+ * 一条行写入。形状与 `core/storage/db-rows.ts` 的 `RowWrite` 同构（主进程只认形状，不认语义）。
+ *
+ * 三种操作，`update` 与 `upsert` 的区别是**语义**不是风格：
+ *   · `upsert` —— 这一行可能还不存在（新块、新属性），缺的列必须有默认值或由调用方给全；
+ *   · `update` —— 这一行**必须已经存在**（改一个已存在块的正文／一格属性）。
+ *     为什么需要它：`insert … on conflict do update` 在 SQLite 里会**先校验 NOT NULL**
+ *     （实测：对已存在的行做部分列的 upsert 也会撞 `NOT NULL constraint failed`），
+ *     所以「只改一列」不能走 upsert。走 update 的好处是它**匹配不到行就报错**——
+ *     「改一个盘上没有的块」是 bug，不该静默变成「插入一行只有这一列的块」。
+ *   · `delete` —— 只给一部分主键 ＝ 删这一组的全部行。
+ */
+export interface RowWrite {
+  table: 'Block' | 'BlockProperty' | 'BlockAlias' | 'BlockList' | 'meta'
+  /**
+   * `relink` ＝ **兄弟链维护**：`Block.left` 是「前一个兄弟」的 id，所以一个块换位置时
+   * 有两个邻居要跟着改（旧位置的后继、新位置的后继），光写自己那一格会让链断掉 ——
+   * 断链不会报错，只会在下次装载时把顺序排错。
+   * 这两条改法只依赖 `left`／`parent` 两列，不需要块语义，所以留在主进程。
+   */
+  op: 'upsert' | 'update' | 'delete' | 'relink'
+  key: Record<string, string | number | null>
+  values?: Record<string, string | number | null>
+}
+
+/** 主进程只允许写这几张表（渲染层送来的表名是**数据**，不能拿它拼任意 SQL） */
+const WRITABLE = new Set<string>(['Block', 'BlockProperty', 'BlockAlias', 'BlockList', 'meta'])
+
+/**
+ * 列名白名单：只允许出现 DDL 里真实存在的列。
+ *
+ * 为什么要它：表名／列名会被拼进 SQL（SQLite 不吃参数绑定），而它们来自渲染层。
+ * 不校验就等于把「拼 SQL」的入口交给了对面；校验之后最坏情况只是「写错一格」。
+ */
+const COLUMNS: Record<string, ReadonlySet<string>> = {
+  Block: new Set(['id', 'content', 'annos', 'parent', 'left', 'created', 'modified', 'deleted', 'display', 'kind', 'date', 'query', 'type']),
+  BlockProperty: new Set(['block', 'name', 'pos', 'multi', 'value']),
+  BlockAlias: new Set(['block', 'pos', 'name']),
+  BlockList: new Set(['block', 'list']),
+  meta: new Set(['key', 'value']),
+}
+
+function sqlOf(w: RowWrite): string {
+  if (!WRITABLE.has(w.table)) throw new Error(`row write: unknown table "${w.table}"`)
+  const allowed = COLUMNS[w.table]!
+  const keys = Object.keys(w.key)
+  const vals = Object.keys(w.values ?? {})
+  for (const c of [...keys, ...vals]) if (!allowed.has(c)) throw new Error(`row write: unknown column "${w.table}.${c}"`)
+  if (keys.length === 0) throw new Error('row write: empty key')
+  const where = keys.map((c) => `${c} = ?`).join(' and ')
+  if (w.op === 'delete') {
+    // 只给一部分主键 ＝ 删这块的全部行（`{block}`），给全 ＝ 删那一行
+    return `delete from ${w.table} where ${where}`
+  }
+  if (w.op === 'update') {
+    if (vals.length === 0) throw new Error(`row write: update ${w.table} with no values`)
+    return `update ${w.table} set ${vals.map((c) => `${c} = ?`).join(', ')} where ${where}`
+  }
+  if (w.op === 'relink') {
+    /**
+     * 兄弟链的两条维护语句（见 `RowWrite.op` 的说明）：
+     *   ① 旧位置的后继（`left` 指着我）改指我的旧前驱 —— 我的旧前驱从**库里现读**，
+     *      因为模型里已经没有旧位置那份兄弟列表了；
+     *   ② 新位置的后继（`parent`／`left` 等于我的新落点）改指我。
+     *
+     * 顺序不能换：① 读的是**改之前**那一行的 `left`，先写我自己那一格就把它冲掉了。
+     * 两条都带 `id <> ?`：我自己也在「left 指着我」的集合里（挪到首位时），不能把自己改坏。
+     */
+    return relinkSql(w.table)[0]
+  }
+  const cols = [...new Set([...keys, ...vals])]
+  const set = cols.filter((c) => !keys.includes(c))
+  const insert = `insert into ${w.table} (${cols.join(', ')}) values (${cols.map(() => '?').join(', ')})`
+  const conflict = `on conflict(${keys.join(', ')}) do update set ${set.map((c) => `${c} = excluded.${c}`).join(', ')}`
+  return set.length === 0 ? `${insert} on conflict(${keys.join(', ')}) do nothing` : `${insert} ${conflict}`
+}
+
+/**
+ * 参数顺序必须与 `sqlOf` 拼出来的占位符顺序**逐字对齐**：
+ * `update` 是 `set` 在前、`where` 在后；其余是 `where`／`values` 按列名合并的顺序。
+ */
+/**
+ * 兄弟链的两条维护语句（`relink` 用；参数顺序与调用处逐字对齐）。
+ *
+ * 为什么这两条留在主进程而不是编码层：它们只依赖 `left`／`parent` 两列与 id，
+ * **不认识块**。放进编码层反而要把「怎么写 SQL」搬到渲染层去。
+ */
+function relinkSql(table: string): [string, string] {
+  return [
+    `update ${table} set left = (select left from ${table} where id = ?) where left = ? and id <> ?`,
+    `update ${table} set left = ? where parent is ? and left is ? and id <> ?`,
+  ]
+}
+
+function argsOf(w: RowWrite): (string | number | null)[] {
+  if (w.op === 'update') {
+    const vals = Object.keys(w.values ?? {}).map((c) => w.values![c] ?? null)
+    return [...vals, ...Object.keys(w.key).map((c) => w.key[c]!)]
+  }
+  const cols = [...new Set([...Object.keys(w.key), ...Object.keys(w.values ?? {})])]
+  return cols.map((c) => (c in w.key ? w.key[c]! : (w.values?.[c] ?? null)))
+}
+
+/**
+ * 落一行；`update` 匹配不到行 ⇒ **抛错**。
+ *
+ * 为什么这里必须抛：`update` 的语义是「改一个已经存在的块」。匹配不到就说明
+ * 盘上少了一行而模型里还有它 —— 静默忽略会让「这次改动没落盘」变成一个不报错的洞，
+ * 要等到重开之后才发现字没了。
+ */
+function runWrite(db: Db, w: RowWrite): number {
+  /**
+   * `relink` 是两条语句 ⇒ 分开执行（`prepare().run()` 一次只吃一条）。
+   * 用 `exec` 会丢掉参数绑定，所以这里按 `;` 切开、各自 `run`。
+   */
+  if (w.op === 'relink') {
+    const id = w.key.id as string
+    const parent = (w.values?.parent ?? null) as string | null
+    const left = (w.values?.left ?? null) as string | null
+    const [fixOld, fixNew] = relinkSql(w.table)
+    let n = Number(db.prepare(fixOld).run(id, id, id).changes)
+    n += Number(db.prepare(fixNew).run(id, parent, left, id).changes)
+    return n
+  }
+  const r = db.prepare(sqlOf(w)).run(...argsOf(w))
+  const n = Number(r.changes)
+  if (w.op === 'update' && n === 0) {
+    throw new Error(`row write: update matched no row in ${w.table} (${JSON.stringify(w.key)})`)
+  }
+  return n
+}
+
+/**
+ * 落一批行写入 —— **一个事务**。
+ *
+ * 为什么必须整批一个事务：一批 op 是一次用户动作；半批落盘＝模型改了、盘上只有一半，
+ * 而读回来那份会是一棵缺了父块或顺序错乱的树（不报错）。
+ *
+ * @returns 真正改到的行数（诊断面与成本断言用它数「打一个字写了几行」）
+ */
+export function applyRowWrites(db: Db, writes: readonly RowWrite[]): number {
+  if (writes.length === 0) return 0
+  let changed = 0
+  inTransaction(db, () => {
+    for (const w of writes) changed += runWrite(db, w)
+  })
+  return changed
+}
+
+/**
+ * **整份替换**：清空四张内容表再写进去（种子、换库、撤销之后）。
+ *
+ * 与 `applyRowWrites` 分开是因为「清空」这件事只该发生在这几个入口：
+ * 常规编辑走增量，谁都不许顺手清表（那是一次数据事故，而且看起来只是「慢了一点」）。
+ */
+export function replaceContentRows(db: Db, writes: readonly RowWrite[]): number {
+  let changed = 0
+  inTransaction(db, () => {
+    for (const t of DB_CONTENT_TABLES) changed += Number(db.prepare(`delete from ${t}`).run().changes)
+    changed += applyRowWritesInner(db, writes)
+  })
+  return changed
+}
+
+/** 事务内的行写入（`replaceContentRows` 用；不再开一层事务） */
+function applyRowWritesInner(db: Db, writes: readonly RowWrite[]): number {
+  let changed = 0
+  for (const w of writes) changed += runWrite(db, w)
+  return changed
+}
+
+/** 内容是不是空的（新建的库／被迁移作废的库 ⇒ 渲染层据此 seed） */
+export function hasContent(db: Db): boolean {
+  const r = db.prepare(`select exists(select 1 from ${DB_TABLES.block}) as n`).all() as { n: number }[]
+  return (r[0]?.n ?? 0) === 1
 }
 
 /* ------------------------------------------------------------ settings / meta */

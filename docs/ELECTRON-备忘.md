@@ -37,10 +37,11 @@ src/**               编辑器、命令表、绑定表、localStorage           
   两份 README（根目录 / `kb/`）说明每个子目录的用途，**只在文件不存在时写**，不覆盖用户改过的内容。
 - **首次打开**（没签名没公证，本地自用）：**右键 → 打开 → 打开**；或
   `xattr -dr com.apple.quarantine "<...>/相.app"`。本机自己 build 的产物一般可直接双击。
-- **localStorage 仍然是持久化实现**：落在 `<userData>/Local Storage/leveldb/`，跟着 app 走。
-  `TODO: 换 DbClient` —— 换的时候**写入通道的形状不变**（一次提交一整份 workspace），
-  调用点从 `localStorage.setItem(键, JSON.stringify(ws))` 变成 `ctx.tx.run(...)`，
-  见 `src/core/workspace.ts` 顶部注释与 `electron/userdata/kb/README.md`。
+- **持久化：桌面版是每个库目录里的 `qua.db`**（SQLite，主进程单写者，WAL）。块拆成行
+  （`Block`／`BlockProperty`／`BlockAlias`／`BlockList`），一次编辑只写动过的那几块。
+  浏览器端（含在线演示）仍是 `localStorage`，落在 `<userData>/Local Storage/leveldb/`。
+  编码只有一份定义（`src/core/storage/db-rows.ts`）；主进程只做通用 SQL（表名/列名白名单）。
+  ⇒ 「一个块长成哪几行」要改，只改编码层；别在主进程里写块语义（`arch-check [2+]` 会拦）。
 - 壳级硬化：`contextIsolation: true` ＋ `nodeIntegration: false` ＋ `sandbox: true`；
   导航与新窗一律禁（外链交给系统浏览器）；单实例锁。
 
@@ -472,7 +473,7 @@ Qua/
 ├── app.json          # 库列表 ＋ device_id；原子写（临时文件＋rename）
 └── repos/<libraryId>/
     ├── library.json  # { kind:'qua-library', format:1, id } —— 身份权威
-    ├── qua.db        # SQLite（WAL）；PRAGMA user_version 是唯一 schema 版本
+    ├── qua.db        # SQLite（WAL）；块拆成行；PRAGMA user_version 是唯一 schema 版本
     ├── assets/       # <hash前2>/<hash> ＋ <hash>.json 侧车
     └── backups/      # 迁移前快照
 ```
@@ -492,6 +493,16 @@ Qua/
 
 **`node:sqlite` 是同步 API**：一次批量导入会卡 UI。v1 接受（单写者主进程），
 批量导入／索引重建将来搬 `utilityProcess`。
+
+**一次编辑写多少行（实测，判据在 `checks/electron-smoke.mjs` 的 E12）**：插一个块只涨 **3 行**
+（1 行 `Block` ＋ 2 行 `meta`）。⚠️ 别用 `select total_changes()` 量它 —— 那是**每条连接各自**的
+累计值，自检脚本新开的连接永远是 0（踩过）。主进程自己累加 `session.writes.rows`，
+经 `libraryInfo()` 报出去。
+
+**兄弟链维护（`left` 是前兄弟指针）**：一个块换位置时**有两个邻居**要跟着改 ——
+旧位置的后继（还指着我）与新位置的后继（还指着我的前驱）。只写自己那一格链就断了，
+而断链**不报错**，只在下次装载时把顺序排错。落库层为此有一个 `relink` 动作（两条语句），
+且它必须排在「写我自己那一行」**之前**（第一条要读改之前的前驱）。
 
 ## ⑦ 明确没做 / 没验（别当成做过了）
 

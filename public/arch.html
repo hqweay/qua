@@ -305,7 +305,8 @@
     <div class="card pad">
       <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">落盘：两种宿主，三条不可逆契约</b></div>
       <div class="kv">
-        <dt>qua.db（Electron）</dt><dd><b>每个库一份</b> SQLite（主进程单写者，WAL）。当前是 <b>临时形状</b>：<code>workspace(id=1, json, saved_at)</code> ＋ <code>settings</code> ＋ <code>meta</code> ＋ <code>op_log</code>（只建表、不接写入）。schema 版本＝<code>PRAGMA user_version</code>（唯一判据）</dd>
+        <dt>qua.db（Electron）</dt><dd><b>每个库一份</b> SQLite（主进程单写者，WAL）。块是<b>自己的行</b>：<code>Block</code>（正文 run 序列／annos／时刻／落库编码的 <code>parent</code>＋<code>left</code>／软删）＋ <code>BlockProperty</code>（一格一行，有序列表拆行＋<code>pos</code>）＋ <code>BlockAlias</code>（地址，主键是名字）＋ <code>BlockList</code>（露面）＋ <code>meta</code>／<code>settings</code>／<code>op_log</code>（只建表、不接写入）。schema 版本＝<code>PRAGMA user_version</code>（唯一判据，当前 {{DB_SCHEMA_VERSION}}）</dd>
+        <dt>编码在哪</dt><dd>「一个块长成哪几行」只有一份定义（<code>storage/db-rows.ts</code>）；主进程只做<b>通用 SQL</b>（表名/列名白名单，不认识块）。一次编辑只写动过的那几块 ⇒ <b>写成本不随库体量增长</b></dd>
         <dt>qua.workspace（web）</dt><dd>整库（块森林；行内内容与区间都在块上），套一层信封 <code>{ backend, envelope, data }</code>。浏览器没有用户可选目录的同等语义 ⇒ 单窗口单库</dd>
         <dt>qua.device</dt><dd>设备态：主题 / 槽宽 / 钉住清单（<b>不进 KB</b>）</dd>
         <dt>qua.assets</dt><dd><b>资产库</b>：Electron 走每库 <code>assets/&lt;hash前2&gt;/&lt;hash&gt;</code> ＋ <code>.json</code> 侧车（字节是真相、侧车可重建）；web 仍走 IndexedDB <code>hash → { mime, size, w?, h?, createdAt, bytes }</code>。内容寻址 ⇒ 同字节只存一份</dd>

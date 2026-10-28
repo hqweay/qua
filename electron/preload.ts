@@ -80,9 +80,10 @@ const qua = {
   openLibrary: (id: string): Promise<unknown> => ipcRenderer.invoke('qua:library/open', id),
   createLibrary: (id: string, name: string): Promise<unknown> => ipcRenderer.invoke('qua:library/create', id, name),
 
-  /** 内容（整份 blob） */
+  /** 内容（四张内容表的全部行；编码归渲染层） */
   load: (): Promise<unknown> => ipcRenderer.invoke('qua:storage/load'),
-  save: (json: string, savedAt: number): Promise<unknown> => ipcRenderer.invoke('qua:storage/save', json, savedAt),
+  save: (writes: unknown[], opts?: { replace?: boolean }): Promise<unknown> =>
+    ipcRenderer.invoke('qua:storage/save', writes, opts ?? {}),
 
   /** 每库设置（窗口 bounds／槽布局／折叠态） */
   getSetting: (key: string): Promise<unknown> => ipcRenderer.invoke('qua:settings/get', key),

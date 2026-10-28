@@ -3,7 +3,7 @@
  *
  * 这一组测试的判据只有四条：
  *   ① `user_version` 偏大 ⇒ **拒绝打开**（不是重 seed，不是猜着读）；
- *   ② `user_version` 偏小 ⇒ **走迁移**，且迁移后数据全可读（不是 `expired` 重 seed）；
+ *   ② `user_version` 偏小 ⇒ **走迁移**，且迁移后库可用（不是 `expired` 重 seed）；
  *   ③ 迁移与版本号在**同一事务**里（实测：`PRAGMA user_version` 随事务回滚）；
  *   ④ 负向断言：**任何** schema 变更路径下，seed 都不许覆盖用户数据。
  *
@@ -16,17 +16,20 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { DB_SCHEMA_VERSION, META_KEYS } from '../src/core/library.ts'
+import { DB_CONTENT_TABLES, DB_SCHEMA_VERSION, DB_TABLES, META_KEYS } from '../src/core/library.ts'
 import {
   appendOp,
   appendLocalOps,
+  applyRowWrites,
+  hasContent,
   openLibraryDb,
+  readContentRows,
   readMeta,
   readSeq,
-  readWorkspaceBlob,
+  replaceContentRows,
   writeMeta,
-  writeWorkspaceBlob,
   type Migration,
+  type RowWrite,
 } from '../electron/library/sqlite.ts'
 
 const dirs: string[] = []
@@ -39,7 +42,7 @@ process.on('exit', () => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true })
 })
 
-/** 造一个「上一版代码留下的库」：给定版本号，只有它那一版的表 */
+/** 造一个「上一版代码留下的库」：给定版本号，只有它那一版的表（v1 是整份 blob） */
 function legacyDb(file: string, userVersion: number): void {
   const db = new DatabaseSync(file)
   db.exec('pragma journal_mode=wal')
@@ -50,6 +53,14 @@ function legacyDb(file: string, userVersion: number): void {
   db.exec(`pragma user_version = ${userVersion}`)
   db.close()
 }
+
+/** 一行最小的块写入（编码层的事由 `tests/storage/db-rows.test.ts` 管） */
+const blockRow = (id: string, extra: Record<string, string | number | null> = {}): RowWrite => ({
+  table: 'Block',
+  op: 'upsert',
+  key: { id },
+  values: { content: '[]', created: 1, modified: 1, parent: null, left: null, ...extra },
+})
 
 /* ------------------------------------------------------------ ① 偏大 ⇒ 拒绝 */
 
@@ -69,25 +80,24 @@ test('user_version 偏大 ⇒ too-new：不建表、不写入、原样留给更�
 
 /* ------------------------------------------------------------ ② 偏小 ⇒ 迁移 */
 
-test('user_version 偏小 ⇒ migrate：旧数据全可读，版本号升到当前', () => {
+test('user_version 偏小 ⇒ migrate：旧形状退场、内容表建好、版本号升到当前', () => {
   const file = tmpDb()
   legacyDb(file, 1)
-  // 目标定 2：当前版本是 1，所以「偏小」要有一个真的更新的目标才成立
-  const r = openLibraryDb(file, { target: 2, migrations: [{ to: 2, up: () => {} }] })
+  const r = openLibraryDb(file)
   assert.equal(r.status, 'migrated', `偏小必须走迁移，实际 ${r.status}`)
-  assert.ok(r.db, '迁移成功要交出可写连接')
   const db = r.db!
-  const blob = readWorkspaceBlob(db)
-  assert.ok(blob, '迁移之后旧数据必须读得出来（不是 expired 重 seed）')
-  assert.deepEqual(JSON.parse(blob!.json), { blocks: [] }, '读回来的是**原来那份**，不是种子的')
-  assert.equal(r.version, 2)
+  // 旧形状（整份 blob）必须退场：一个库里只有一种形状
+  const tables = (db.prepare("select name from sqlite_master where type='table'").all() as { name: string }[]).map((t) => t.name)
+  assert.equal(tables.includes('workspace'), false, `v2 不该还留着 v1 的 blob 表：${tables.join(',')}`)
+  for (const t of DB_CONTENT_TABLES) assert.ok(tables.includes(t), `内容表 ${t} 应当被迁移建出来：${tables.join(',')}`)
+  assert.equal(r.version, DB_SCHEMA_VERSION)
   db.close()
 })
 
 test('迁移是一条条走的：中间版本也能升到当前（不是只认「上一版」）', () => {
   const file = tmpDb()
   legacyDb(file, 1)
-  /** 合成两步迁移：证明机制支持多步（真实迁移表目前是空的，所以这里注入） */
+  /** 合成两步迁移：证明机制支持多步（真实迁移表只有 v1→v2 一步，所以这里注入） */
   const steps: Migration[] = [
     { to: 2, up: (db) => void db.exec('create table t2 (a integer)') },
     { to: 3, up: (db) => void db.exec('create table t3 (a integer)') },
@@ -102,6 +112,19 @@ test('迁移是一条条走的：中间版本也能升到当前（不是只认�
   assert.ok(tables.includes('t3'), `t3 应当被第二步建出来：${tables.join(',')}`)
   assert.equal(r.version, 3)
   db.close()
+})
+
+test('迁移缺一步 ⇒ 如实失败（不许「版本号升了、表没建」）', () => {
+  const file = tmpDb()
+  legacyDb(file, 1)
+  // 目标 3 但只给到 2 那一步：跳过缺失的步骤会留下一个「能打开、但每次读写都撞 no such table」的库
+  const r = openLibraryDb(file, { migrations: [{ to: 2, up: (db) => void db.exec('create table t2 (a integer)') }], target: 3 })
+  assert.equal(r.status, 'migrate-failed', `缺步骤必须如实报，实际 ${r.status}`)
+
+  const db = new DatabaseSync(file)
+  const v = (db.prepare('pragma user_version').all()[0] as { user_version: number }).user_version
+  db.close()
+  assert.equal(v, 1, '失败之后版本号必须还是旧的')
 })
 
 /* ------------------------------------------------------------ ③ 原子性 */
@@ -135,15 +158,13 @@ test('迁移失败 ⇒ 版本号与表一起回滚（不许留半迁移库）', 
 
 /* ------------------------------------------------------------ ④ 负向：seed 不覆盖 */
 
-test('负向断言：库里有数据时，任何打开路径都不许 seed 覆盖（including 新建库那条）', () => {
+test('负向断言：库里有数据时，任何打开路径都不许 seed 覆盖', () => {
   const file = tmpDb()
   // 一个「用户已经写了东西」的库
   const first = openLibraryDb(file)
   assert.equal(first.status, 'created')
   const db = first.db!
-  const userJson = JSON.stringify({ blocks: [{ id: 'user-written' }], activeId: 'user-written', savedAt: 1 })
-  writeWorkspaceBlob(db, userJson, 1)
-  writeMeta(db, META_KEYS.name, '我的库')
+  applyRowWrites(db, [blockRow('user-written'), { table: 'meta', op: 'upsert', key: { key: META_KEYS.name }, values: { value: '我的库' } }])
   db.close()
 
   // 再打开三次（模拟启动三次）：每次都必须是 ok，且**绝不**把 seed 写进去
@@ -151,24 +172,24 @@ test('负向断言：库里有数据时，任何打开路径都不许 seed 覆�
     const again = openLibraryDb(file)
     assert.equal(again.status, 'ok', `第 ${i + 1} 次打开应当是 ok，实际 ${again.status}`)
     const d = again.db!
-    assert.equal(readWorkspaceBlob(d)?.json, userJson, '用户数据必须逐字节不变')
+    assert.deepEqual(readContentRows(d).blocks.map((b) => b.id), ['user-written'], '用户数据必须还在')
     assert.equal(readMeta(d, META_KEYS.name), '我的库')
     d.close()
   }
 })
 
-test('负向断言：`created` 只建空表，不写任何 workspace 行（seed 是调用方的事）', () => {
+test('负向断言：`created` 只建空表，不写任何块行（seed 是调用方的事）', () => {
   const file = tmpDb()
   const r = openLibraryDb(file)
   assert.equal(r.status, 'created')
   const db = r.db!
-  assert.equal(readWorkspaceBlob(db), undefined, '建库不许顺手塞一份种子：种子一旦写进来，「用户数据」与「演示数据」就分不开了')
+  assert.equal(hasContent(db), false, '建库不许顺手塞一份种子：种子一旦写进来，「用户数据」与「演示数据」就分不开了')
   db.close()
 })
 
-/* ------------------------------------------------------------ 附带：临时形状的边界 */
+/* ------------------------------------------------------------ 形状：内容四张表 ＋ 库级三张 */
 
-test('当前的临时形状只有四张表（规范化 schema 是下一步的事，不许提前长出来）', () => {
+test('v2 的表形状：四张内容表 ＋ settings／meta／op_log（没有 blob 表）', () => {
   const file = tmpDb()
   const r = openLibraryDb(file)
   const db = r.db!
@@ -176,7 +197,67 @@ test('当前的临时形状只有四张表（规范化 schema 是下一步的事
     name: string
   }[]).map((t) => t.name).sort()
   db.close()
-  assert.deepEqual(tables, ['meta', 'op_log', 'settings', 'workspace'], `现在只该有这四张表，实际：${tables.join(',')}`)
+  assert.deepEqual(
+    tables,
+    [DB_TABLES.alias, DB_TABLES.block, DB_TABLES.list, DB_TABLES.meta, DB_TABLES.opLog, DB_TABLES.property, DB_TABLES.settings].sort(),
+    `实际：${tables.join(',')}`,
+  )
+})
+
+test('Block 的列形状是契约：`parent`／`left` 是落库编码，`deleted` 是软删时刻', () => {
+  const file = tmpDb()
+  const r = openLibraryDb(file)
+  const db = r.db!
+  const cols = (db.prepare(`pragma table_info(${DB_TABLES.block})`).all() as { name: string }[]).map((c) => c.name)
+  db.close()
+  for (const c of ['id', 'content', 'annos', 'parent', 'left', 'created', 'modified', 'deleted']) {
+    assert.ok(cols.includes(c), `Block 少了列 ${c}：${cols.join(',')}`)
+  }
+})
+
+/* ------------------------------------------------------------ 行写入 */
+
+test('行写入：一批一个事务，撞错整批回滚（不留半批）', () => {
+  const file = tmpDb()
+  const r = openLibraryDb(file)
+  const db = r.db!
+  assert.throws(
+    () =>
+      applyRowWrites(db, [
+        blockRow('a'),
+        // 表名不在白名单 ⇒ 拼 SQL 之前就被拦下（渲染层送来的表名是数据，不是代码）
+        { table: 'NoSuchTable' as RowWrite['table'], op: 'upsert', key: { id: 'x' } },
+      ]),
+    /unknown table/,
+  )
+  assert.equal(hasContent(db), false, '整批失败之后一行都不许留下')
+  db.close()
+})
+
+test('行写入：`delete` 只给一部分主键 ⇒ 删这一块的全部行', () => {
+  const file = tmpDb()
+  const r = openLibraryDb(file)
+  const db = r.db!
+  applyRowWrites(db, [
+    blockRow('a'),
+    { table: 'BlockProperty', op: 'upsert', key: { block: 'a', name: '_icon', pos: 0 }, values: { multi: 0, value: '"x"' } },
+    { table: 'BlockProperty', op: 'upsert', key: { block: 'a', name: '_tags', pos: 0 }, values: { multi: 1, value: '"t1"' } },
+    { table: 'BlockProperty', op: 'upsert', key: { block: 'a', name: '_tags', pos: 1 }, values: { multi: 1, value: '"t2"' } },
+  ])
+  applyRowWrites(db, [{ table: 'BlockProperty', op: 'delete', key: { block: 'a' } }])
+  const left = db.prepare(`select count(*) as n from ${DB_TABLES.property}`).all() as { n: number }[]
+  assert.equal(left[0]!.n, 0, '按块删必须把这块的每一格都删掉')
+  db.close()
+})
+
+test('整份替换：先清四张内容表再写（换库/种子/撤销之后）', () => {
+  const file = tmpDb()
+  const r = openLibraryDb(file)
+  const db = r.db!
+  applyRowWrites(db, [blockRow('old')])
+  replaceContentRows(db, [blockRow('new')])
+  assert.deepEqual(readContentRows(db).blocks.map((b) => b.id), ['new'], '整份替换之后旧块必须不在')
+  db.close()
 })
 
 /* ------------------------------------------------------------ A4：序号与幂等 */

@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { DB_FILE, LIBRARY_KIND, MANIFEST_FILE, serializeManifest, libraryId } from '../src/core/library.ts'
+import { DB_FILE, LIBRARY_KIND, MANIFEST_FILE, META_KEYS, serializeManifest, libraryId } from '../src/core/library.ts'
 import {
   findLibrary,
   libraryDir,
@@ -197,7 +197,7 @@ test('openSession：manifest 与目录名不一致 ⇒ identity-conflict（改�
   assert.equal(r.failure.reason, 'identity-conflict')
 })
 
-test('openSession：内容往返（写进去的 json 读回来逐字节相同）', () => {
+test('openSession：内容往返（写进去的行读回来一模一样）', () => {
   const io = tmpRoot()
   const id = libraryId()
   const dir = join(io.reposDir, id)
@@ -206,16 +206,34 @@ test('openSession：内容往返（写进去的 json 读回来逐字节相同）
   const s = r.status === 'ok' ? r.session : null
   assert.equal(loadContent(s!), undefined, '新建的库**没有内容**：seed 是调用方的事')
 
-  const json = JSON.stringify({ blocks: [{ id: 'b1' }], activeId: 'b1', savedAt: 7 })
-  saveContent(s!, json, 7)
-  assert.equal(loadContent(s!)!.json, json)
+  /**
+   * 一条最小的行写入：一个块 ＋ 库级两格。
+   * ⚠️ 这里**不经过编码层**（`core/storage/db-rows.ts`）——测的是「主进程存得下、读得回」，
+   *    编码的正确性由 `tests/storage/db-rows.test.ts` 用真模型往返钉住。
+   */
+  const writes = [
+    {
+      table: 'Block' as const,
+      op: 'upsert' as const,
+      key: { id: 'b1' },
+      values: { content: '[]', created: 1, modified: 2, parent: null, left: null },
+    },
+    { table: 'meta' as const, op: 'upsert' as const, key: { key: META_KEYS.activeId }, values: { value: 'b1' } },
+    { table: 'meta' as const, op: 'upsert' as const, key: { key: META_KEYS.savedAt }, values: { value: '7' } },
+  ]
+  saveContent(s!, writes, { replace: true })
+  const back = loadContent(s!)
+  assert.ok(back, '写进去之后必须读得出来')
+  assert.deepEqual(back!.blocks.map((b) => b.id), ['b1'])
+  assert.equal(back!.meta[META_KEYS.activeId], 'b1')
+  assert.equal(back!.meta[META_KEYS.savedAt], '7')
   s!.close()
 
   // 重开：内容还在（这是当前完成判据里最小的那一格）
   const again = openSession(dir, { expectId: id })
   assert.equal(again.status, 'ok')
   const s2 = again.status === 'ok' ? again.session : null
-  assert.equal(loadContent(s2!)!.json, json)
+  assert.deepEqual(loadContent(s2!)!.blocks.map((b) => b.id), ['b1'])
   s2!.close()
 })
 
