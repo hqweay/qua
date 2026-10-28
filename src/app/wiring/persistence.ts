@@ -173,8 +173,9 @@ export function setupPersistence(deps: PersistenceDeps) {
     const ops = pendingOps
     pendingOps = []
     /**
-     * **整份替换的判据**：盘上还没有这份模型（首次落种子），或者森林被换过
-     * （撤销/重做/换库）⇒ 盘上的行已经对不上模型了，这批只能整份写。
+     * **整份替换的判据**只剩两条：盘上还没有这份模型（首次落种子／换库后的第一笔），
+     * 或者**森林被整片换过** —— 后者的来源已经只剩「换库」一条：
+     * 撤销/重做改走 op 之后，它们与一次普通编辑同路（增量写盘）。
      * 零 op 但森林没换（例如只换了落点）⇒ 照常增量，只写 meta 两格。
      */
     const replace = needsFullWrite || blocks.replacementCount !== savedReplacements
@@ -265,6 +266,15 @@ export function setupPersistence(deps: PersistenceDeps) {
 
   return {
     syncSections,
+    /**
+     * **撤销/重做产出的 op** 并进待落盘队列（与一次普通编辑同一条路）。
+     *
+     * 为什么不在这里 `scheduleSave()`：撤销紧接着还会重画、刷角标，排期由调用方统一做
+     * （`main.ts` 的 `undoOps` 一处），免得同一批 op 被排两次。
+     */
+    addOps: (ops: readonly Op[]) => {
+      pendingOps.push(...ops)
+    },
     saveNow,
     scheduleSave,
     saveDeviceNow,

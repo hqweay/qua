@@ -21,6 +21,7 @@ import assert from 'node:assert/strict'
 import { mkBlock } from '../../src/core/model.ts'
 import { WORKSPACE_VERSION, type Workspace } from '../../src/core/workspace.ts'
 import { createWorkspaceStore } from '../../src/core/storage/index.ts'
+import { rowWritesFor } from '../../src/core/storage/db-rows.ts'
 import type { CommitBatch, StoragePort } from '../../src/core/storage/port.ts'
 
 const ws = (): Workspace => ({
@@ -84,4 +85,42 @@ test('门面：整份替换的行写入覆盖全部块（换库/撤销之后盘�
   await store.commit(w, [], { replace: true })
   const ids = (batch()!.writes ?? []).filter((x) => x.table === 'Block' && x.op === 'upsert').map((x) => x.key.id)
   assert.deepEqual(ids, [w.blocks[0]!.id])
+})
+
+/* ------------------------------------------------------------ 撤销：与库体量无关 */
+
+/**
+ * **撤销的落盘成本只与「这次撤销涉及的块数」有关，与库体量无关。**
+ *
+ * 判据沿用本文件的主口径（「小库 == 大库」），只是把它搬到撤销路径上。
+ * 为什么这条能一眼证伪旧实现：撤销曾经走 `replace: true` ⇒
+ * `workspaceToRowWrites` 把**整库**每一块都写一遍，行数随体量线性增长。
+ */
+test('撤销：小库与大库的落盘行数**相同**（撤销不再整库重写）', async () => {
+  const { mkBlock, writeBlockContent } = await import('../../src/core/model.ts')
+  const { textRuns } = await import('../../src/core/runs.ts')
+  const { BlockStore } = await import('../../src/core/store.ts')
+  const { MemoryKb } = await import('../../src/core/kb/memory.ts')
+
+  /** 造一个 n 块的库，改中间一块的正文，然后撤销 —— 返回这批 op 的行写入条数 */
+  const rowsForUndo = (n: number): number => {
+    const blocks = Array.from({ length: n }, (_, i) => mkBlock(`块${i}`))
+    const store = new BlockStore(blocks)
+    const kb = new MemoryKb(store)
+    const target = blocks[Math.floor(n / 2)]!
+
+    const before = store.snap(null)
+    kb.tx((tx) => tx.patch(target.id, (b) => writeBlockContent(b, textRuns('改了'))))
+    store.record(before, 'other', Date.now())
+
+    const r = store.undo('me', null)!
+    // 撤销产出的 op 走同一条增量编码路径（`rowWritesFor`，不是 `workspaceToRowWrites`）
+    const writes = rowWritesFor({ version: WORKSPACE_VERSION, blocks: store.blocks, activeId: '', savedAt: 1 }, r.ops)
+    return writes.filter((w) => w.table === 'Block').length
+  }
+
+  const small = rowsForUndo(10)
+  const large = rowsForUndo(400)
+  assert.equal(small, large, `撤销的 Block 行数必须与库体量无关：10 块 ⇒ ${small} 行，400 块 ⇒ ${large} 行`)
+  assert.ok(small > 0, '撤销确实写了东西（不是零行假绿）')
 })

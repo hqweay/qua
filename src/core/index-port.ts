@@ -11,7 +11,7 @@
  *    谁认领哪个名字）与**内容里指向谁**（边）——按 op 修补的正是这两部分（`applyOps`）。
  * ⚠️ 本文件零 DOM、零持久化：它只吃森林，所以能直接单测。
  */
-import { aliasesOf, ALIASES_PROP, hasList, LISTS_PROP, type Block } from './model.ts'
+import { aliasesOf, ALIASES_PROP, DELETED_AT_PROP, hasList, isDeleted, LISTS_PROP, type Block } from './model.ts'
 import { refRunsOf } from './runs.ts'
 import { walkForest } from './walk.ts'
 import { normalizeAlias } from './alias.ts'
@@ -184,10 +184,19 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
         else applyBlockDelete(index, op.id, forest)
         break
       case 'prop':
-        // 哪个属性槽喂哪张表：地址/露面 → 名字表；归属 → 成员表；日期 → 日记表；其余不进索引
+        /**
+         * 哪个属性槽喂哪张表：地址/露面 → 名字表；归属 → 成员表；日期 → 日记表；
+         * **存在（`_deletedAt`）→ 可见集合**；其余不进索引。
+         *
+         * ⚠️ `_deletedAt` 这一支曾经缺失，而那时**看不出来**：撤销走整片替换 ⇒
+         *    索引被整库重建，漏掉的修补被重建盖住了。撤销改走 op 之后它立刻显形
+         *    （冒烟 T87／T143：「撤销删除后块没回到可见集合」）。
+         *    这正是「增量漏一种失效点、界面上只是偶尔少一条」的形状 —— 等式断言抓它。
+         */
         if (op.name === ALIASES_PROP || op.name === LISTS_PROP) refreshTagsClaim(index, op.block)
         else if (op.name === '_tags') refreshTagMembership(index, op.block)
         else if (op.name === '_date') refreshJournalClaim(index, op.block)
+        else if (op.name === DELETED_AT_PROP) refreshVisibility(index, op.block, forest)
         break
       // `anno` 是按需物化的可引用区间，不是指向边：边只从引用 run 提取
     }
@@ -319,7 +328,46 @@ function refreshJournalClaim(index: Index, blockId: string): void {
   }
 }
 
-/** 把一棵子树的 `rootOf` 重打到新的顶层块（挪位只影响这一件事） */
+/**
+ * **重算一个块的可见性**（`_deletedAt` 这一格）。
+ *
+ * 软删是「块还在树上原位、但索引看不见它」⇒ 这一格改了要按**当前**的删除态
+ * 把整棵子树加进／移出索引（子树的可不见是继承来的，所以必须整棵一起动）。
+ *
+ * 口径与 `rebuild` 一致：走 `walkForest`，用 `includeDeleted` 让被删的块也参与遍历，
+ * 再按 `isDeleted` 自己判 —— 与 `rebuild`／`applyBlockDelete` 同一份判据。
+ */
+function refreshVisibility(index: Index, blockId: string, forest: readonly Block[]): void {
+  // 走 `walkForest` 含被删块找它（`findInForest` 是可见遍历，看不见软删的块）
+  let block: Block | undefined
+  walkForest(
+    forest,
+    (b) => {
+      if (b.id !== blockId) return
+      block = b
+      return false
+    },
+    { includeDeleted: true },
+  )
+  if (!block) return
+  const parentId = index.parentOf.get(blockId) ?? null
+  if (isDeleted(block)) {
+    // 变不可见 ⇒ 与 `block.delete` 走同一条退场路径（摘子树、退名字/日期/成员/边）
+    applyBlockDelete(index, blockId, forest)
+    return
+  }
+  /**
+   * 变可见 ⇒ 重新入场。`parentOf` 可能还在（软删时没删它，见 `applyBlockDelete` 会删）
+   * ⇒ 统一按「它现在挂在哪」重打：父的 `rootOf` 决定它属于哪个顶层根。
+   */
+  const rootId = parentId === null ? blockId : (index.rootOf.get(parentId) ?? blockId)
+  indexSubtree(index, block, rootId, parentId)
+  // 名字/日期/成员：入场后要重新认领（被删期间它们无权认领，见 `rebuild` 的同一口径）
+  refreshTagsClaim(index, blockId)
+  refreshJournalClaim(index, blockId)
+  refreshTagMembership(index, blockId)
+}
+
 function reindexSubtreeRoot(index: Index, root: Block, rootId: string): void {
   walkForest([root], (b) => {
     index.rootOf.set(b.id, rootId)

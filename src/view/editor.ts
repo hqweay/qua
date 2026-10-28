@@ -105,7 +105,7 @@ import {
 import { journalDateLabel, type SecLayout, type ShellCol } from '../core/index.ts'
 export type { SecLayout }
 // 只取**类型**：`view` 拿不到实现，写入的落地方式归装配层（见 `Run`）
-import type { Tx } from '../core/kb/types.ts'
+import type { Op, Tx } from '../core/kb/types.ts'
 import type { AssetView } from '../core/assets.ts'
 // 标签块的「找到或创建」有两种落地（直写 / 事务），判据只有一份
 import { ensureTagInTx, tagLookupOf } from '../core/kb/ensure-tag.ts'
@@ -287,6 +287,16 @@ export interface ViewEvents {
    * `name` 是**用户敲的那个名字**（回滚前取），`conflict` 是已经占用它的块。
    */
   editRejected?: (name: string, conflict: Block) => void
+  /**
+   * **撤销/重做产出的 op**（装配层据此并进待落盘队列）。
+   *
+   * 为什么走事件表而不是让编辑器自己落盘：撤销的 op 与一次普通编辑的 op 是**同一种东西**
+   * （都只是「每一格现在是什么」），而落盘的排期与批次归装配层
+   * （`app/wiring/persistence.ts` 的 `pendingOps`）。
+   *
+   * ⚠️ 不接 ⇒ 撤销改了模型却没进盘（用户关掉应用、重开发现撤销没生效）。
+   */
+  undoOps?: (ops: readonly Op[]) => void
 }
 
 /**
@@ -452,17 +462,6 @@ export class BlockEditor {
   snap(): Snap {
     // 快照是**整片森林**（store 的 blocks + marks + atoms），不是当前视图的拷贝
     return this.store.snap(this.sel)
-  }
-
-  restore(s: Snap): void {
-    // 整片森林被换掉 ⇒ 「改名前」已经无处可指，这个编辑期作废
-    this.editBase = null
-    // store 原地恢复并通知其他视图；发起者自己重取 roots/选区
-    const sel = this.store.restore(s, this)
-    this.sel = sel
-    this.reloadFromStore(false)
-    this.restoreSel()
-    this.emitChange('struct')
   }
 
   /**
@@ -1528,22 +1527,23 @@ export class BlockEditor {
 
   undoStep(): void {
     this.editBase = null
-    const s = this.store.undo(this, this.sel)
-    if (!s) return
-    this.sel = JSON.parse(s.sel) as Sel | null
-    // force：森林整体被换掉（见 `reloadFromStore` 的 force 说明）
-    this.reloadFromStore(false, undefined, true)
+    const r = this.store.undo(this, this.sel)
+    if (!r) return
+    // 撤销产出的 op 与一次普通编辑同路：交回装配层，并进待落盘队列（增量写盘）
+    this.events.undoOps?.(r.ops)
+    this.sel = r.sel
+    this.reloadFromStore(false)
     this.restoreSel()
     this.emitChange('struct')
   }
 
   redoStep(): void {
     this.editBase = null
-    const s = this.store.redo(this, this.sel)
-    if (!s) return
-    this.sel = JSON.parse(s.sel) as Sel | null
-    // force：同上（redo 也是整片森林换一遍）
-    this.reloadFromStore(false, undefined, true)
+    const r = this.store.redo(this, this.sel)
+    if (!r) return
+    this.events.undoOps?.(r.ops)
+    this.sel = r.sel
+    this.reloadFromStore(false)
     this.restoreSel()
     this.emitChange('struct')
   }

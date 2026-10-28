@@ -347,6 +347,7 @@ const {
   run,
   getLastOps,
   clearPendingOps,
+  addOps,
 } = setupPersistence({
   store,
   deviceStore,
@@ -1549,6 +1550,16 @@ ed.events = viewEvents(
   },
   'editor',
 )
+/**
+ * **撤销/重做产出的 op** 并进待落盘队列。
+ *
+ * 撤销现在与一次普通编辑走同一条路（`diff` → op → 增量写盘），
+ * 所以它需要的只是「把 op 交出来」，不再需要「整库重写」那条旁路。
+ */
+ed.events.undoOps = (ops) => {
+  addOps(ops)
+  scheduleSave()
+}
 
 /**
  * **字节到达时重画引用了它的那几行**。

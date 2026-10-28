@@ -18,6 +18,7 @@ import type { Block } from './model.ts'
 import type { Op } from './kb/types.ts'
 import type { Sel } from './selection.ts'
 import { applyOps as patchIndex, lookupBlock, rebuild, type Index } from './index-port.ts'
+import { applyOps, diff } from './kb/diff.ts'
 
 /**
  * 订阅者收到的信号。
@@ -135,23 +136,30 @@ export class BlockStore {
   }
 
   /**
-   * 恢复快照：**原地替换** blocks 的数组内容，保持数组身份
-   * （编辑器手里的引用不会失效）；然后通知其他视图。
-   * 返回快照里的 sel，让发起者自己恢复选区。
+   * **恢复快照**：把森林变成快照里那份，并把「怎么变」表达成一批 op 交回去。
+   *
+   * 这是撤销/重做唯一的落地方式（`diff` + `applyOps`）。它与一次普通编辑走**同一条路**：
+   * 产出 op ⇒ 装配层并进待落盘队列 ⇒ 增量写盘。所以 `⌘Z` 不再需要「清四表 + 整库重写」。
+   *
+   * 三条口径：
+   *   · **快照仍是唯一真相**：`applyOps` 的第二参数就是快照那份森林（要复活的块从那里取）。
+   *     这**不是逆 op** —— op 说的是「每一格现在是什么」，逆 op 是另一份正确性来源。
+   *   · **未动块的对象身份不变**（`applyOps` 原地写格）⇒ 索引只需按 op 修补，不必整库重建。
+   *   · `at` 从目标快照派生（`diff` 保证）⇒ 同一次撤销重放两次字节相同。
+   *
+   * @returns `{ ops, sel }`：`ops` 交给装配层落盘；`sel` 让发起者自己恢复选区。
    */
-  restore(s: Snap, source?: unknown): Sel | null {
-    const blocks = JSON.parse(s.blocks) as Block[]
-    this.replaced++
-    this.blocks.splice(0, this.blocks.length, ...blocks)
+  restore(s: Snap, source?: unknown): { ops: Op[]; sel: Sel | null } {
+    const target = JSON.parse(s.blocks) as Block[]
+    const ops = diff(this.blocks, target)
+    // 原地改（保持数组身份：编辑器手里的引用不会失效）
+    applyOps(this.blocks, ops, target)
     /**
-     * 整片森林被换掉 ⇒ 索引必须整库重建（不是修补：对象全换了，增量无从谈起）。
-     * 这是**唯一**还允许作废索引的地方 —— 它已经不是「一批 op」，没有 op 可修补。
-     * 摘掉它的那一天 = `diff` 落地那天（撤销改走 op）。
+     * ⚠️ **按 op 修补索引，不作废**：`applyOps` 原地写格 ⇒ 未动块还是同一批对象。
+     * 曾经这里 `discardIndex()`，因为当时是 `splice` 换掉整片森林（对象全换了）。
      */
-    this.discardIndex()
-    // ⚠️ 数组身份保住、但**块对象是新的** ⇒ 订阅者必须按 id 重取，见 `StoreSubscriber`
-    this.notify(source, undefined, true)
-    return JSON.parse(s.sel) as Sel | null
+    this.apply(ops, source)
+    return { ops, sel: JSON.parse(s.sel) as Sel | null }
   }
 
   /** 演示状态整体换库：换数组引用，清 undo，通知所有视图（source 不传） */
@@ -177,15 +185,15 @@ export class BlockStore {
     return this.undoStack.record(before, kind, at)
   }
 
-  undo(source: unknown, sel: Sel | null): Snap | null {
+  /** 撤销一步；返回「怎么变」的 op 与要恢复的选区（`null` ＝ 没有可撤的） */
+  undo(source: unknown, sel: Sel | null): { ops: Op[]; sel: Sel | null } | null {
     const s = this.undoStack.undo(this.snap(sel))
-    if (s) this.restore(s, source)
-    return s
+    return s ? this.restore(s, source) : null
   }
 
-  redo(source: unknown, sel: Sel | null): Snap | null {
+  /** 重做一步；同 `undo` */
+  redo(source: unknown, sel: Sel | null): { ops: Op[]; sel: Sel | null } | null {
     const s = this.undoStack.redo(this.snap(sel))
-    if (s) this.restore(s, source)
-    return s
+    return s ? this.restore(s, source) : null
   }
 }
