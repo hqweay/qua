@@ -1124,6 +1124,48 @@ function commandDecls() {
 }
 
 /* ═══════════════════════════════════════════════════════╗
+   ║ 额外 · 块形状：四个内容槽                               ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  // 父子关系只能有一份。`parent`／`left` 一旦进了 `Block`，就与 `children` 并列成第二份真相：
+  // 移动／复制／撤销／软删每处都要维护，漏一处就静默分叉；取路径改走派生索引 `Index.parentOf`。
+  // 白名单 ＝ 四个内容槽 ＋ 两个必填时间戳（创建／改动时刻，不可能缺席）＋ 按需物化的 `annos`。
+  // 加任何新字段都要先改这里 —— 那正是本条存在的意义：让「顺手加个字段」变成一次显式动作。
+  const MODEL = join(ROOT, 'src/core/model.ts')
+  const ALLOWED = new Set(['id', 'content', 'children', 'created', 'modified', 'annos', 'props'])
+  const hits = []
+  let seen = 0
+  if (!existsSync(MODEL)) hits.push('src/core/model.ts 不存在（本条断言的锚点丢了）')
+  else {
+    const { sf } = tsFile(MODEL)
+    for (const st of sf.statements) {
+      if (!ts.isInterfaceDeclaration(st) || st.name.text !== 'Block') continue
+      for (const m of st.members) {
+        if (m.name === undefined) continue
+        const name = m.name.getText(sf)
+        seen++
+        if (!ALLOWED.has(name)) {
+          const line = sf.getLineAndCharacterOfPosition(m.getStart(sf)).line + 1
+          hits.push(`src/core/model.ts:${line} \`Block.${name}\` 不在白名单 —— 父/序/正文只能是派生的第二份答案`)
+        }
+      }
+    }
+  }
+  add({
+    id: 27,
+    title: '块只有四个内容槽：`Block` 不得长出 `parent` / `left` / `text` 这类第二份真相',
+    method:
+      'AST 定位 `src/core/model.ts` 的 `interface Block`，逐个成员名对白名单（`id`/`content`/`children`/`created`/`modified`/`annos`/`props`）',
+    scope: `src/core/model.ts（${seen} 个成员）`,
+    whitelist: 'id / content / children / created / modified / annos / props —— 加字段＝改这条白名单的一次显式动作',
+    hits: hits.length,
+    detail: hits,
+    note: '父子关系只有 `children` 一份，取路径走派生索引 `Index.parentOf`；插件读路径走读门面（`kb.pathOf`），不靠块上的指针',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
    ║ 等内核（不假装在跑）                                     ║
    ╚═══════════════════════════════════════════════════════ */
 
