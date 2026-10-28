@@ -8,8 +8,31 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { derivedId, isUuidv7Hex } from '../src/core/index.ts'
+import { derivedId, isUuidv7Hex, uuidv7Hex } from '../src/core/index.ts'
 import { journalId } from '../src/core/index.ts'
+
+/* ------------------------------------------------------------ 随机 id */
+
+test('uuidv7Hex：恒为 32 位小写十六进制，版本位 7（下游按形状认块 id）', () => {
+  for (let i = 0; i < 50; i++) {
+    const id = uuidv7Hex()
+    assert.match(id, /^[0-9a-f]{32}$/, `不该出现非十六进制字符：${id}`)
+    assert.ok(isUuidv7Hex(id), `应通过 isUuidv7Hex：${id}`)
+  }
+})
+
+test('uuidv7Hex：时间戳低 32 位为负时也不得退化成带 `-` 的 id（位与会被收成 int32）', () => {
+  /**
+   * `x & 0xffffffffffff` 的掩码会被 ToInt32 收成 `-1` ⇒ 整个表达式变成 `x | 0`：
+   * 32 位、且低 32 位落在负半区时得到负数 ⇒ `toString(16)` 带负号、补位跑到负号前面。
+   * 这不是假想：时间戳低 32 位每 ~49.7 天轮换一次符号，每次约 25 天。
+   */
+  const negativeLow32 = 2 ** 32 * 417 + 2 ** 31 + 1234
+  assert.ok((negativeLow32 | 0) < 0, '这个时刻应当落进负半区（用例前提）')
+  const id = uuidv7Hex(negativeLow32)
+  assert.match(id, /^[0-9a-f]{32}$/, `负半区也要是干净的 32 位 hex：${id}`)
+  assert.ok(isUuidv7Hex(id), `负半区也应通过 isUuidv7Hex：${id}`)
+})
 
 test('derivedId：同输入同输出（纯函数，不依赖时钟与随机）', () => {
   assert.equal(derivedId('prop', 'core/task-status'), derivedId('prop', 'core/task-status'))

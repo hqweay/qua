@@ -72,8 +72,11 @@ import { isAnno, isRun } from '../runs.ts'
  * v22 → v23：行内图片从「`{t:'image', asset:{hash,name,state}}`」改成
  *            「`{t:'asset', asset: hash, label?, w?, h?}`」——载荷与派生状态搬出正文。
  *            旧库的 `t:'image'` 新代码判非法（形状校验会拒绝整份库）⇒ 作废重 seed，不写迁移。
+ * v23 → v24：块 id 的生成修了「48 位时间戳被位与收成 int32」——旧库里有 `000-7fde…`
+ *            这种 32 字符**带 `-`** 的 id。下游按形状认块 id（拖拽/侧槽窗口），
+ *            带 `-` 的 id 会被判成「不是块」⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 23
+export const WORKSPACE_VERSION = 24
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

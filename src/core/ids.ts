@@ -7,7 +7,17 @@ let seq = 0
 const HEX = (n: number, w: number) => n.toString(16).padStart(w, '0')
 
 export function uuidv7Hex(now: number = Date.now()): string {
-  const ts = Math.floor(now) & 0xffffffffffff
+  /**
+   * **48 位时间戳只能取模，不能用位与**：`x & 0xffffffffffff` 里那个掩码会被
+   * ToInt32 收成 `-1`，整个表达式退化成 `x | 0`（**32 位**、可为负）。
+   * 负的时间戳经 `toString(16)` 得到 `-7fde…`，`padStart(12,'0')` 又把补位加在**负号前面**
+   * ⇒ 产出 `000-7fde…` 这种 32 字符里带 `-` 的 id。
+   *
+   * 后果不是「id 变丑」：下游按形状认块 id（`view/dnd.ts` 的 `ID_SHAPE` 只收 32 位十六进制），
+   * 于是侧槽窗口整片画不出来、块拖拽全部落空 —— 而且**只在时间戳低 32 位为负的那约 25 天里发生**
+   * （每 ~49.7 天轮换一次），换台机器/换个月份就自愈，看起来像偶发。
+   */
+  const ts = Math.floor(now) % 0x1000000000000
   seq = (seq + 1) & 0x0fff
   const rnd = new Uint8Array(8)
   for (let i = 0; i < 8; i++) rnd[i] = Math.floor(Math.random() * 256)
