@@ -434,12 +434,14 @@ export function rowWritesFor(
         if (op.op === 'delete') {
           out.push({ table: 'BlockProperty', op: 'delete', key: { block: op.block, name: op.name } })
           out.push(...columnWrites(op.block, op.name, undefined))
+          // 地址／露面被整格摘掉时，它们自己的表也要跟着清（否则盘上留着一份「模型里已经没有」的身份）
+          if (op.name === ALIASES_PROP) out.push({ table: 'BlockAlias', op: 'delete', key: { block: op.block } })
+          if (op.name === LISTS_PROP) out.push({ table: 'BlockList', op: 'delete', key: { block: op.block } })
           break
         }
         out.push(...columnWrites(op.block, op.name, op.value))
-        // 地址与露面各有自己的表（`patch` 直接改 `_aliases`／`_lists` 时走这里）
+        // 地址与露面各有自己的表（整袋值 ⇒ 先按块清旧行、再按新值写；地址表以**名字**为键）
         if (op.name === ALIASES_PROP) {
-          // 地址表以**名字**为键 ⇒ 先按块删它的旧行，再按新值写（改名＝删旧名、写新名）
           out.push({ table: 'BlockAlias', op: 'delete', key: { block: op.block } })
           out.push(...aliasRows(op.block, op.value))
           break
@@ -452,15 +454,6 @@ export function rowWritesFor(
         out.push(...onePropRows(op.block, op.name, op.value))
         break
       }
-      case 'alias':
-        // `alias` op 是「这一块的地址表变成了这样」的增量：按名字删/写，`pos` 就是它的顺序
-        if (op.op === 'delete') out.push({ table: 'BlockAlias', op: 'delete', key: { name: op.name } })
-        else out.push({ table: 'BlockAlias', op: 'upsert', key: { name: op.name }, values: { block: op.block, pos: op.pos ?? 0 } })
-        break
-      case 'list':
-        if (op.op === 'delete') out.push({ table: 'BlockList', op: 'delete', key: { block: op.block, list: op.list } })
-        else out.push({ table: 'BlockList', op: 'upsert', key: { block: op.block, list: op.list } })
-        break
       case 'anno': {
         // annos 是一整列：op 按条报，列只能整列替换 ⇒ 这里要看模型
         if (done.has(op.block)) break

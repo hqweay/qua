@@ -394,8 +394,8 @@ test('增量写：属性／地址／露面／annos 各自的 op 都落到对的�
   b.annos = [{ id: 'a1', range: { start: 0, end: 1 } }]
   const writes = rowWritesFor(ws([b]), [
     { e: 'prop', block: b.id, name: '_icon', op: 'set', value: 'lucide:y', at: 1 },
-    { e: 'alias', block: b.id, name: '新名', op: 'set', pos: 0, at: 1 },
-    { e: 'list', block: b.id, list: 'page', op: 'set', at: 1 },
+    { e: 'prop', block: b.id, name: '_aliases', op: 'set', value: ['新名'], at: 1 },
+    { e: 'prop', block: b.id, name: '_lists', op: 'set', value: ['page'], at: 1 },
     { e: 'anno', block: b.id, id: 'a1', op: 'set', value: { id: 'a1', range: { start: 0, end: 2 } }, at: 1 },
   ])
   const tables = writes.map((w) => w.table)

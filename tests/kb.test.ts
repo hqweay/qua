@@ -338,43 +338,59 @@ test('restore ⇒ 摘掉标记回原位：op 是一条 upsert{parent,prev}；整
   assert.equal(plainText(kb.get('c1')!.content), '一')
 })
 
-/* ------------------------------------------------------------ 写面：语义列表 */
+/* ------------------------------------------------------------ 写面：一格一地址 */
 
-test('setAliases 的 diff：新增按新序带 pos、删掉的报 delete', () => {
+test('setAliases ⇒ **一条** prop.set(_aliases)：地址只有一个地址（不再发 alias.*）', () => {
   const { kb } = fixture()
   const r = kb.tx((tx) => tx.setAliases('p1', ['页面一', '首页']))
-  assert.deepEqual(bare(r.ops), [{ e: 'alias', block: 'p1', name: '首页', op: 'set', pos: 1 }])
+  assert.deepEqual(bare(r.ops), [{ e: 'prop', block: 'p1', name: '_aliases', op: 'set', value: ['页面一', '首页'] }])
 
   const r2 = kb.tx((tx) => tx.setAliases('p1', ['首页']))
-  assert.deepEqual(bare(r2.ops), [
-    { e: 'alias', block: 'p1', name: '页面一', op: 'delete' },
-    { e: 'alias', block: 'p1', name: '首页', op: 'set', pos: 0 },
-  ])
+  assert.deepEqual(bare(r2.ops), [{ e: 'prop', block: 'p1', name: '_aliases', op: 'set', value: ['首页'] }])
   assert.deepEqual(kb.get('p1')?.props?._aliases, ['首页'])
   assert.equal(kb.resolveAlias('页面一'), undefined, '旧地址不再解析得到')
   assert.equal(kb.resolveAlias('首页')?.id, 'p1')
 })
 
-test('setAliases 只换序也报改动（首个是主名），并把新 pos 写出来', () => {
+test('setAliases 只换序也报改动（首个是主名），整袋值带新序', () => {
   const { kb } = fixture()
   kb.tx((tx) => tx.setAliases('p1', ['页面一', '首页']))
   const r = kb.tx((tx) => tx.setAliases('p1', ['首页', '页面一']))
   assert.equal(r.changes.length, 1, '顺序变化也是改动')
-  assert.deepEqual(bare(r.ops), [
-    { e: 'alias', block: 'p1', name: '首页', op: 'set', pos: 0 },
-    { e: 'alias', block: 'p1', name: '页面一', op: 'set', pos: 1 },
-  ])
+  assert.deepEqual(bare(r.ops), [{ e: 'prop', block: 'p1', name: '_aliases', op: 'set', value: ['首页', '页面一'] }])
   assert.deepEqual(kb.get('p1')?.props?._aliases, ['首页', '页面一'])
 })
 
-test('setLists 的 diff ⇒ list.set / list.delete（兼位就是两条 set）', () => {
+test('setAliases 摘干净 ⇒ 一条 prop.set([])：空数组 ＝ 没有这一格（读侧口径一致）', () => {
+  const { kb } = fixture()
+  kb.tx((tx) => tx.setAliases('p1', ['首页']))
+  const r = kb.tx((tx) => tx.setAliases('p1', []))
+  assert.deepEqual(bare(r.ops), [{ e: 'prop', block: 'p1', name: '_aliases', op: 'set', value: [] }])
+  assert.equal(kb.get('p1')?.props?._aliases, undefined, '空数组不留属性槽')
+})
+
+test('setLists ⇒ **一条** prop.set(_lists)（兼位就是数组里两个值）', () => {
   const { kb } = fixture()
   const r = kb.tx((tx) => tx.setLists('p1', ['page', 'tag']))
-  assert.deepEqual(bare(r.ops), [{ e: 'list', block: 'p1', list: 'tag', op: 'set' }])
+  assert.deepEqual(bare(r.ops), [{ e: 'prop', block: 'p1', name: '_lists', op: 'set', value: ['page', 'tag'] }])
 
   const r2 = kb.tx((tx) => tx.setLists('p1', ['tag']))
-  assert.deepEqual(bare(r2.ops), [{ e: 'list', block: 'p1', list: 'page', op: 'delete' }])
+  assert.deepEqual(bare(r2.ops), [{ e: 'prop', block: 'p1', name: '_lists', op: 'set', value: ['tag'] }])
   assert.deepEqual(kb.get('p1')?.props?._lists, ['tag'])
+})
+
+test('一格一地址：op 种类只有 block／prop／anno（`alias`／`list` 不许复活）', () => {
+  const { kb } = fixture()
+  const seen = new Set<string>()
+  const run = (fn: Parameters<typeof kb.tx>[0]): void => {
+    for (const op of kb.tx(fn).ops) seen.add(op.e)
+  }
+  run((tx) => tx.setAliases('p1', ['页面一', '首页']))
+  run((tx) => tx.setLists('p1', ['page', 'tag']))
+  run((tx) => tx.setTags('c1', ['t1']))
+  run((tx) => tx.setProp('c1', '_icon', 'lucide:x'))
+  run((tx) => tx.insert(mkBlock('新'), 'p1', 0))
+  assert.deepEqual([...seen].sort(), ['block', 'prop'], '每种写路径都只落到 block／prop 这两格之一')
 })
 
 test('setTags 的 diff ⇒ 一条 prop.set(_tags)；摘干净时属性槽不留空壳', () => {

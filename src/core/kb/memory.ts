@@ -17,7 +17,7 @@
  * ⚠️ 本文件零 DOM、零持久化：op 只是被**算出来**，谁来落盘由上层决定。
  */
 import { backrefBlocks, backrefsOf, type BackrefBlock, type BackrefSource } from '../backrefs.ts'
-import { aliasesOf, DELETED_AT_PROP, hasList, isDeleted, listsOf, type Block } from '../model.ts'
+import { aliasesOf, ALIASES_PROP, DELETED_AT_PROP, hasList, isDeleted, LISTS_PROP, listsOf, type Block } from '../model.ts'
 import { findByAlias } from '../alias.ts'
 import { findInForest, trashOf } from '../tree.ts'
 import { walkForest } from '../walk.ts'
@@ -114,16 +114,6 @@ function subtreeIds(block: Block): string[] {
 /** 深拷贝（活动对象之间共享引用：改内存不能改到快照里那份） */
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T
-}
-
-/** 旧的没了（按旧序：先删旧位再按新序 set，`pos` 才对得上） */
-function gone<T>(next: readonly T[], prev: readonly T[]): T[] {
-  return prev.filter((x) => !next.includes(x))
-}
-
-/** 新的多了（按新序：`pos` 就是它在新数组里的下标） */
-function came<T>(next: readonly T[], prev: readonly T[]): T[] {
-  return next.filter((x) => !prev.includes(x))
 }
 
 /** 值比较：数组/对象也要比内容（`Object.is` 会把「就地 push」当成没变） */
@@ -430,10 +420,10 @@ export class MemoryKb implements KbClient {
         sink.blocks(id)
       },
 
-      setProp(id, name, value, pos) {
+      setProp(id, name, value) {
         const b = require(id)
         setValue(b, name, value)
-        ops.push({ e: 'prop', block: id, name, op: 'set', value, ...(pos === undefined ? {} : { pos }), at: at() })
+        ops.push({ e: 'prop', block: id, name, op: 'set', value, at: at() })
         sink.blocks(id)
       },
 
@@ -450,20 +440,16 @@ export class MemoryKb implements KbClient {
         const next = aliases.filter((a) => a.trim() !== '')
         // 校验与落库分开：撞名由调用方先问（`aliasConflict`），这里只保证「写了什么就报什么」
         b.props = { ...(b.props ?? {}) }
-        if (next.length === 0) delete b.props._aliases
-        else b.props._aliases = [...next]
-        const dropped = gone(next, prev)
-        // 先删旧位、再按**新序**逐个 set：`pos` 是数组下标，两者的先后决定它指向谁。
-        // 只换序、或删掉一个导致后面整体前移，都要把新 pos 写出来。
-        let touched = dropped.length > 0
-        for (const name of dropped) ops.push({ e: 'alias', block: id, name, op: 'delete', at: at() })
-        for (let i = 0; i < next.length; i++) {
-          const name = next[i]!
-          if (prev.indexOf(name) === i) continue
-          ops.push({ e: 'alias', block: id, name, op: 'set', pos: i, at: at() })
-          touched = true
-        }
-        if (touched) sink.blocks(id)
+        if (next.length === 0) {
+          delete b.props._aliases
+          // 属性袋不留空壳：`{}` 与「没有属性」在快照比较里是两种东西
+          if (Object.keys(b.props).length === 0) delete b.props
+        } else b.props._aliases = [...next]
+        // 地址走**一个属性槽**：`_aliases` 的整组值就是事实，所以一条 set 说完整件事
+        // （与 `setTags` 同形；不再发 `alias.set/delete` —— 同一个格不许有两种地址）
+        if (sameValue(prev, next)) return
+        ops.push({ e: 'prop', block: id, name: ALIASES_PROP, op: 'set', value: next, at: at() })
+        sink.blocks(id)
       },
 
       setLists(id, lists) {
@@ -479,14 +465,10 @@ export class MemoryKb implements KbClient {
         } else {
           b.props = { ...(b.props ?? {}), _lists: next }
         }
-        for (const list of gone(next, prev)) {
-          ops.push({ e: 'list', block: id, list, op: 'delete', at: at() })
-          sink.blocks(id)
-        }
-        for (const list of came(next, prev)) {
-          ops.push({ e: 'list', block: id, list, op: 'set', at: at() })
-          sink.blocks(id)
-        }
+        // 露面同样走一个属性槽（理由见 `setAliases`）
+        if (sameValue(prev, next)) return
+        ops.push({ e: 'prop', block: id, name: LISTS_PROP, op: 'set', value: next, at: at() })
+        sink.blocks(id)
       },
 
       setTags(id, tagIds) {
@@ -502,7 +484,7 @@ export class MemoryKb implements KbClient {
           b.props = { ...(b.props ?? {}), _tags: next }
         }
         // 归属走一个属性槽：`_tags` 的整组值就是事实，所以一条 set 说完整件事
-        if (gone(next, prev).length === 0 && came(next, prev).length === 0) return
+        if (sameValue(prev, next)) return
         ops.push({ e: 'prop', block: id, name: '_tags', op: 'set', value: next, at: at() })
         sink.blocks(id)
       },

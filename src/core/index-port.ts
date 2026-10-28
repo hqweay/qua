@@ -11,7 +11,7 @@
  *    谁认领哪个名字）与**内容里指向谁**（边）——按 op 修补的正是这两部分（`applyOps`）。
  * ⚠️ 本文件零 DOM、零持久化：它只吃森林，所以能直接单测。
  */
-import { aliasesOf, hasList, type Block } from './model.ts'
+import { aliasesOf, ALIASES_PROP, hasList, LISTS_PROP, type Block } from './model.ts'
 import { refRunsOf } from './runs.ts'
 import { walkForest } from './walk.ts'
 import { normalizeAlias } from './alias.ts'
@@ -185,13 +185,9 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
         break
       case 'prop':
         // 哪个属性槽喂哪张表：地址/露面 → 名字表；归属 → 成员表；日期 → 日记表；其余不进索引
-        if (op.name === '_aliases' || op.name === '_lists') refreshTagsClaim(index, op.block)
+        if (op.name === ALIASES_PROP || op.name === LISTS_PROP) refreshTagsClaim(index, op.block)
         else if (op.name === '_tags') refreshTagMembership(index, op.block)
         else if (op.name === '_date') refreshJournalClaim(index, op.block)
-        break
-      case 'alias':
-      case 'list':
-        refreshTagsClaim(index, op.block)
         break
       // `anno` 是按需物化的可引用区间，不是指向边：边只从引用 run 提取
     }

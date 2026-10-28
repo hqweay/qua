@@ -79,13 +79,32 @@ export type BlockPatch = {
  *
  * `at` 现在写 `Date.now()`，为将来的 HLC／设备标识留位；它**不参与排序**，
  * 消费者不得靠它重建顺序（顺序由 op 序列本身表达）。
+ *
+ * ## 三个种类，一格一个地址
+ *
+ * 每个 op 说「**某一个格现在是什么**」，不说「它变了多少」——这是全域性（重放幂等、
+ * 撤销可表达、同步可收敛）的前提：只有绝对的格写入才能「应用两次等于一次」。
+ *
+ * | op | 寻址的格 |
+ * |---|---|
+ * | `block.upsert{content}` | 这一块的正文（整组 run 序列） |
+ * | `block.upsert{modified}` | 这一块的改动时刻 |
+ * | `block.upsert{parent, prev}` | 这一块的位置（**唯一的相对格**，见 `BlockPatch.prev`） |
+ * | `block.delete` | 这一块的存在（原位软删） |
+ * | `prop.set` / `prop.delete` | `block:<id>.prop:<name>` 这一格 |
+ * | `anno.set` / `anno.delete` | `block:<id>.annos:<aid>` 这一格 |
+ *
+ * ⚠️ **地址与露面走 `prop`，没有自己的 op 种类**（`_aliases`／`_lists` 各一条整袋值）。
+ * 曾经有过 `alias`／`list` 两种「按项增量」的 op，它们与 `prop.set` **指向同一个格**：
+ * 日志里同一个格出现两条地址，重放顺序不同结果不同、幂等性也破
+ * （`prop.set([a,b])` 后再来一条 `alias.set(a, pos 0)` 会把它覆盖一遍）。
+ * ⇒ 一个格只能有一种地址，否则「应用两次等于一次」不成立，而那是撤销与同步的共同前提。
+ * 代价：改名从写 1 行变成清 N 行 + 写 N 行——改名是低频动作，别名表是 1–3 项。
  */
 export type Op =
   | { e: 'block'; id: string; op: 'upsert'; value: BlockPatch; at: number }
   | { e: 'block'; id: string; op: 'delete'; at: number }
-  | { e: 'prop'; block: string; name: string; op: 'set' | 'delete'; value?: unknown; pos?: number; at: number }
-  | { e: 'alias'; block: string; name: string; op: 'set' | 'delete'; pos?: number; at: number }
-  | { e: 'list'; block: string; list: BlockList; op: 'set' | 'delete'; at: number }
+  | { e: 'prop'; block: string; name: string; op: 'set' | 'delete'; value?: unknown; at: number }
   | { e: 'anno'; block: string; id: string; op: 'set' | 'delete'; value?: Anno; at: number }
 
 /**
@@ -141,8 +160,14 @@ export interface Tx {
    */
   restore(id: string): void
 
-  /** 写一个属性槽（`pos` ＝ 显示顺序，给「有行未填」的槽位用） */
-  setProp(id: string, name: string, value: unknown, pos?: number): void
+  /**
+   * 写一个属性槽。**一格一个地址**：`block:<id>.prop:<name>` 这一格现在的值。
+   *
+   * （曾有一个 `pos` 参数，只有 `alias`／`list` 那两种「按项增量」的 op 会用到它；
+   * 那两种 op 已删——同一个格不许有两种地址。属性行的显示顺序不是模型语义，
+   * 不靠 op 传。）
+   */
+  setProp(id: string, name: string, value: unknown): void
   clearProp(id: string, name: string): void
 
   setAliases(id: string, aliases: readonly string[]): void
