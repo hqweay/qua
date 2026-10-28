@@ -21,7 +21,7 @@ import { BlockEditor, type Run } from '../view/editor.ts'
 export interface MountAreaDeps {
   store: BlockStore
   /** 写入事务入口：执行者在装配层，这里只原样转给编辑器（见 `Run`） */
-  write?: Run
+  write: Run
   /** 读门面：三栏的数据都按 id 取（反链查表、查询走索引、祖先链按 id 现读） */
   kb: KbClient
   /** 宿主块（＝这一段段根）。段被换掉/收掉时由装配层丢弃实例 */

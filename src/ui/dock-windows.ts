@@ -33,7 +33,7 @@ export interface DockWindowsDeps {
   /** 读门面：窗口按 id 解析（在不在、祖先链） */
   kb: KbClient
   /** 写入事务入口：执行者在装配层，这里只原样转给每个窗口编辑器（见 `Run`） */
-  write?: Run
+  write: Run
   /** 卡头标题：这个块的路径（显示名由装配层算，UI 不认识地址规则） */
   label: (blockId: string) => string
   /** 关闭窗口（**不删块**） */

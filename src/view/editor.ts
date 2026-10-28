@@ -20,7 +20,6 @@ import {
   cloneSubtree,
   depthOf,
   DIVIDER_TYPE,
-  ensurePageDirect,
   ensurePageInTx,
   flatten,
   hasIdentity,
@@ -29,26 +28,17 @@ import {
   isPropDefBlock,
   isQueryBlock,
   indentMove,
-  insertFirstChild,
-  insertSiblingAfter,
   enterKind,
   locate,
   deleteBlockSpan,
   detectTrigger,
-  mergeIntoPrev,
   mergeIntoPrevPlan,
   prevPlaceholder,
-  removePrevPlaceholder,
-  addTagId,
-  ensureTag,
   hasTag,
-  removeTagId,
   mkBlock,
-  createObjRecordDirect,
   createObjRecordInTx,
   findInForest,
   trashOf,
-  applyMove,
   dropMove,
   normSel,
   outdentMove,
@@ -56,10 +46,7 @@ import {
   selToTextRanges,
   setBlockType,
   siblingMove,
-  splitBlockBefore,
-  splitBlockIntoFirstChild,
   isFolded,
-  removeBlock,
   toggleChildrenCollapsed,
   toggleCollapsed,
   unfoldBlock,
@@ -152,8 +139,16 @@ export type Run = <R>(fn: (tx: Tx) => R) => R
 
 export interface ViewOpts {
   container: HTMLElement
-  /** 写入事务入口，见 `Run`。装配层注入；省略时编辑器直改（迁移期） */
-  write?: Run
+  /**
+   * **写入事务入口**（`Run`）。装配层必须注入 —— 这不是可选参数。
+   *
+   * 为什么必需：模型变化的**宣布者只有一个**，就是事务的出口（`Kb.apply` 里补索引、
+   * 通知订阅者）。编辑器若允许「没有事务时直改活块」，那条路径就没有宣布者：
+   * 模型变了、别的视图与索引都不知道，而且**不报错**。
+   * 曾经这里有一个「省略时直改」的兜底，理由写的是「迁移期」——迁移早结束了，
+   * 剩下的是四条静默漏通知的路径（标签直写、页面直写、记录直写、撤销外直改）。
+   */
+  write: Run
   /**
    * **「点空白建块」的监听面**——通常比 `container` 大一圈
    * （编辑器 ＋ 它下方那段「还能往下写」的气口）。
@@ -401,12 +396,12 @@ export class BlockEditor {
     return this._layout
   }
   /**
-   * 写入事务入口（装配层注入，见 `Run`）。
+   * **写入事务入口**（装配层注入，见 `Run`）。
    *
-   * 目前由 `setText`／`editBlock`／`syncFromDom` 的主路径使用；还有一批写方法在直改活块，
-   * 逐个接过来、接一个有断言一个，免得「一次改全线」把行为变化的来源和管道本身混在一起。
+   * 唯一的模型写入口：模型变化只有一个宣布者，就在事务的出口。
+   * 这里不再是 `undefined` 可省——省掉就意味着那条路径没有宣布者（静默漏通知）。
    */
-  write: Run | undefined
+  write: Run
   /** 面包屑的就地展开／逐层收起；见 `ViewOpts` */
   private readonly onExpandContext: ViewOpts['onExpandContext']
   private readonly onContextBack: ViewOpts['onContextBack']
@@ -1392,15 +1387,10 @@ export class BlockEditor {
       .reverse()
       .map((b) => locate(this.doc, b.id))
       .filter((l): l is Located & { parent: Block } => Boolean(l && l.parent !== null))
-    if (this.write) {
-      const write = this.write
-      // 每棵子树逐块 `block.delete`（级联是落库实现的事，op 序列要说得清删了哪些块）
-      write((tx) => {
-        for (const loc of targets) tx.remove(loc.block.id)
-      })
-    } else {
-      for (const loc of targets) loc.parent.children.splice(loc.index, 1)
-    }
+    // 每棵子树逐块 `block.delete`（级联是落库实现的事，op 序列要说得清删了哪些块）
+    this.write((tx) => {
+      for (const loc of targets) tx.remove(loc.block.id)
+    })
     this.undo.record(before, 'structural', Date.now())
     this.blockSel = null
     this.mouseSel = null
@@ -1556,11 +1546,7 @@ export class BlockEditor {
     if (!loc) return
     const before = this.snap()
     const next = spliceRuns(loc.block.content, from, to, insert)
-    if (this.write) {
-      this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
-    } else {
-      writeBlockContent(loc.block, next)
-    }
+    this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
     this.undo.record(before, kind, Date.now())
     this.renderBlock(id)
     this.emitChange('text')
@@ -1645,8 +1631,7 @@ export class BlockEditor {
     if (!this.edited.has(b.id)) return
     this.edited.delete(b.id)
     const at = Date.now()
-    if (this.write) this.write((tx) => tx.patch(b.id, (x) => (x.modified = at)))
-    else b.modified = at
+    this.write((tx) => tx.patch(b.id, (x) => (x.modified = at)))
   }
 
   /** 换一个编辑期：先把上一块交出去（换块就是上一次编辑的结束），再记下这一块此刻的样子 */
@@ -1672,23 +1657,15 @@ export class BlockEditor {
     if (!b) return false
     // 快照取在**建标签**之前：撤销这次挂标签时，顺手建出的标签块也该一起回滚
     const before = this.snap()
-    if (this.write) {
-      // 建标签块（可能）＋写归属是同一笔：拆开就会留下「只有标签、没有归属」的半批。
-      // 名字为空／已挂 ⇒ 事务里什么都不写（零 op）
-      const ok = this.write((tx) => {
-        const tag = ensureTagInTx(tagLookupOf(this.store.blocks), name, tx)
-        if (!tag || hasTag(b, tag.id)) return false
-        tx.setTags(blockId, [...tagIdsOf(b), tag.id])
-        return true
-      })
-      if (!ok) return false
-    } else {
-      const tagId = ensureTag(this.store.blocks, name).block?.id
-      if (!tagId || hasTag(b, tagId)) return false
-      // 刚建的块不在索引里，紧接着的重画要靠它
-      this.store.invalidateIndex()
-      addTagId(b, tagId)
-    }
+    // 建标签块（可能）＋写归属是同一笔：拆开就会留下「只有标签、没有归属」的半批。
+    // 名字为空／已挂 ⇒ 事务里什么都不写（零 op）
+    const ok = this.write((tx) => {
+      const tag = ensureTagInTx(tagLookupOf(this.store.blocks), name, tx)
+      if (!tag || hasTag(b, tag.id)) return false
+      tx.setTags(blockId, [...tagIdsOf(b), tag.id])
+      return true
+    })
+    if (!ok) return false
     this.undo.record(before, 'other', Date.now())
     if (locate(this.doc, blockId)) this.renderBlock(blockId)
     this.emitChange('text', [blockId])
@@ -1716,16 +1693,11 @@ export class BlockEditor {
      *    否则换个视图打开它，会看到一枚「属于标签、但归属里已经没有它」的僵尸露面。
      */
     const strip = (content: readonly InlineRun[]): InlineRun[] => hits.reduce((acc: InlineRun[], h) => removeRunById(acc, h.id), [...content])
-    if (this.write) {
-      // 收露面与摘归属是同一件事 ⇒ 同一笔；内容没变的块 patch 不发 op
-      this.write((tx) => {
-        tx.patch(blockId, (bb) => writeBlockContent(bb, strip(bb.content)))
-        tx.setTags(blockId, tagIdsOf(b).filter((t) => t !== tagId))
-      })
-    } else {
-      writeBlockContent(b, strip(b.content))
-      removeTagId(b, tagId)
-    }
+    // 收露面与摘归属是同一件事 ⇒ 同一笔；内容没变的块 patch 不发 op
+    this.write((tx) => {
+      tx.patch(blockId, (bb) => writeBlockContent(bb, strip(bb.content)))
+      tx.setTags(blockId, tagIdsOf(b).filter((t) => t !== tagId))
+    })
     this.undo.record(before, 'delete', Date.now())
     if (loc) this.renderAll()
     this.emitChange('text', [blockId])
@@ -1755,13 +1727,9 @@ export class BlockEditor {
     this.edited.add(id)
     const before = this.snap()
     const prevLen = plainLen(loc.block.content)
-    if (this.write) {
-      this.write((tx) => {
-        tx.patch(id, (b) => writeBlockContent(b, next))
-      })
-    } else {
-      writeBlockContent(loc.block, next)
-    }
+    this.write((tx) => {
+      tx.patch(id, (b) => writeBlockContent(b, next))
+    })
     const caret = this.sel ? this.sel.aOff : null
     const kind = plainLen(next) < prevLen ? 'delete' : 'insert'
     this.undo.record(before, kind, Date.now())
@@ -1839,18 +1807,12 @@ export class BlockEditor {
         ? { from: Math.min(sel.aOff, sel.hOff), to: Math.max(sel.aOff, sel.hOff) }
         : null
 
-    if (this.write) {
-      const write = this.write
-      const out = write((tx) => this.splitTx(tx, id, offset, cut))
-      if (!out) return
-      this.undo.record(before, 'structural', Date.now())
-      this.renderAll()
-      if (out.caret) this.placeCaret(out.caret.id, out.caret.off)
-      this.emitChange('struct')
-      return
-    }
-
-    this.splitDirect(id, offset, cut, before)
+    const out = this.write((tx) => this.splitTx(tx, id, offset, cut))
+    if (!out) return
+    this.undo.record(before, 'structural', Date.now())
+    this.renderAll()
+    if (out.caret) this.placeCaret(out.caret.id, out.caret.off)
+    this.emitChange('struct')
   }
 
   /**
@@ -1934,89 +1896,6 @@ export class BlockEditor {
     return { caret: { id: !cut && offset === 0 ? leftBlock.id : id, off: 0 } }
   }
 
-  /** 没有事务入口时的直写落地（迁移期兜底；判定与 `splitTx` 同源，只是逐条改活块） */
-  private splitDirect(id: string, offset: number, cut: { from: number; to: number } | null, before: Snap): void {
-    const loc = locate(this.doc, id)
-    if (!loc) return
-    offset = Math.min(offset, plainLen(loc.block.content))
-
-    let forcedSplit = false
-    if (cut) {
-      const from = Math.max(0, Math.min(cut.from, plainLen(loc.block.content)))
-      const to = Math.max(from, Math.min(cut.to, plainLen(loc.block.content)))
-      writeBlockContent(loc.block, spliceRuns(loc.block.content, from, to, ''))
-      offset = from
-      forcedSplit = true
-    }
-
-    if (loc.parent === null) {
-      /**
-       * **段根没有兄弟位**（写回按 root id 走）⇒ 退化成「右半成首个子块」：
-       *   · **无角色的内容根**（focus/zoom 进来的普通块）＋ 文本**中间**
-       *     ⇒ 左半留在根里、右半成**首个子块**，光标到子块；
-       *   · **有身份的根**（页/日记）或块首 / 空块 / 块尾
-       *     ⇒ 插一个**空的首个子块**（根内容是名字/投影，不拆，避免静默改名）。
-       * 内容的左右分家由 `splitBlockIntoFirstChild` 按 runs 切，锚点本来就在内容里。
-       */
-      const canSplitRoot = !hasIdentity(loc.block)
-      if (canSplitRoot && offset > 0 && offset < plainLen(loc.block.content)) {
-        const r = splitBlockIntoFirstChild(this.doc, id, offset)
-        if (r) {
-          this.undo.record(before, 'structural', Date.now())
-          this.renderAll()
-          this.placeCaret(r.inserted, 0)
-          this.emitChange('struct')
-          return
-        }
-      }
-      const child = insertFirstChild(this.doc, id)
-      if (!child) return
-      this.undo.record(before, 'structural', Date.now())
-      this.renderAll()
-      this.placeCaret(child.id, 0)
-      this.emitChange('struct')
-      return
-    }
-
-    const kind = forcedSplit ? 'split' : enterKind(this.doc, id, offset)
-
-    if (kind === 'outdent') {
-      this.structuralMove(id, outdentMove(this.doc, id), { caretAt: { id, off: 0 } })
-      return
-    }
-
-    if (kind === 'child') {
-      const child = insertFirstChild(this.doc, id)
-      if (!child) return
-      this.undo.record(before, 'structural', Date.now())
-      this.renderAll()
-      this.placeCaret(child.id, 0)
-      this.emitChange('struct')
-      return
-    }
-
-    if (kind === 'sibling') {
-      const b = insertSiblingAfter(this.doc, id)
-      if (!b) return
-      this.undo.record(before, 'structural', Date.now())
-      this.renderAll()
-      this.placeCaret(b.id, 0)
-      this.emitChange('struct')
-      return
-    }
-
-    // 块中 ⇒ 同级拆：左半进**上方新块**；原块保 id、右半、子树（内容分家在 core 层完成）
-    const r = splitBlockBefore(this.doc, id, offset)
-    if (!r) return
-    this.undo.record(before, 'structural', Date.now())
-    this.renderAll()
-    // 块首 Enter（offset=0 且无选区）：新块是上方那个空块（左半为空）⇒ 光标去新块；
-    // 否则光标留在原块（右半）0 位。
-    // ⚠️ 选区删除后即使起点是 0，也应落**原块**（右半）——选区被“块断开”替换，光标在断开之后。
-    this.placeCaret(!forcedSplit && offset === 0 ? r.inserted : r.kept, 0)
-    this.emitChange('struct')
-  }
-
   mergeBack(id: string): void {
     const all = flatten(this.doc)
     const i = all.findIndex((b) => b.id === id)
@@ -2029,12 +1908,7 @@ export class BlockEditor {
      */
     const placeholder = prevPlaceholder(this.doc, id)
     if (placeholder) {
-      if (this.write) {
-        const write = this.write
-        write((tx) => tx.remove(placeholder.removed))
-      } else {
-        removePrevPlaceholder(this.doc, id)
-      }
+      this.write((tx) => tx.remove(placeholder.removed))
       this.undo.record(before, 'structural', Date.now())
       this.renderAll()
       this.placeCaret(id, 0)
@@ -2047,20 +1921,15 @@ export class BlockEditor {
      * 内容拼接在 core 层完成（`joinRuns`：边界两侧同形段合并、原子原样排队）。
      * 被并块的字现在排在前一块内容的**末尾** ⇒ 光标落在粘接点 `plan.at`。
      */
-    if (this.write) {
-      const write = this.write
-      write((tx) => {
-        tx.patch(plan.kept, (b) => writeBlockContent(b, plan.content))
-        // 子块跟着并进前一块：每块一条 move（各自报自己的 parent/index）
-        plan.children.forEach((kid, n) => tx.move(kid, plan.kept, plan.kidsAt + n))
-        // 被并块的内容已搬进前一块 ⇒ 空壳**清空**：删除是原位标记，壳还留在树上，
-        // 留着内容就是库里有两份同一句话（恢复出来就是重复块）
-        tx.patch(plan.removed, (b) => writeBlockContent(b, []))
-        tx.remove(plan.removed)
-      })
-    } else {
-      if (!mergeIntoPrev(this.doc, id)) return
-    }
+    this.write((tx) => {
+      tx.patch(plan.kept, (b) => writeBlockContent(b, plan.content))
+      // 子块跟着并进前一块：每块一条 move（各自报自己的 parent/index）
+      plan.children.forEach((kid, n) => tx.move(kid, plan.kept, plan.kidsAt + n))
+      // 被并块的内容已搬进前一块 ⇒ 空壳**清空**：删除是原位标记，壳还留在树上，
+      // 留着内容就是库里有两份同一句话（恢复出来就是重复块）
+      tx.patch(plan.removed, (b) => writeBlockContent(b, []))
+      tx.remove(plan.removed)
+    })
     this.undo.record(before, 'structural', Date.now())
     this.renderAll()
     this.placeCaret(plan.kept, plan.at)
@@ -2122,16 +1991,11 @@ export class BlockEditor {
   ): void {
     if (!plan) return
     const before = this.snap()
-    if (this.write) {
-      const write = this.write
-      write((tx) => {
-        tx.move(id, plan.parentId, plan.index)
-        // 结构换位置也是一次改动：时刻若只跟着正文走，块会被搬到别处、时间停在原处
-        tx.patch(id, (x) => (x.modified = Date.now()))
-      })
-    } else if (!applyMove(this.doc, id, plan)) {
-      return
-    }
+    this.write((tx) => {
+      tx.move(id, plan.parentId, plan.index)
+      // 结构换位置也是一次改动：时刻若只跟着正文走，块会被搬到别处、时间停在原处
+      tx.patch(id, (x) => (x.modified = Date.now()))
+    })
     if (o.unfoldId) unfoldBlock(this.doc, o.unfoldId)
     this.undo.record(before, 'structural', Date.now())
     this.renderAll()
@@ -2146,13 +2010,7 @@ export class BlockEditor {
     const before = this.snap()
     // 克隆自带内容（原子已换新 id——复制的是内容不是身份），没有第二份锚点要搬
     const { block } = cloneSubtree(loc.block)
-    const list = loc.parent ? loc.parent.children : this.doc.roots
-    if (this.write) {
-      const write = this.write
-      write((tx) => tx.insert(block, loc.parent?.id ?? null, loc.index + 1))
-    } else {
-      list.splice(loc.index + 1, 0, block)
-    }
+    this.write((tx) => tx.insert(block, loc.parent?.id ?? null, loc.index + 1))
     this.undo.record(before, 'structural', Date.now())
     this.renderAll()
     this.placeCaret(block.id, 0)
@@ -2168,7 +2026,6 @@ export class BlockEditor {
    * 用户按 ⌘Z 撤不回来，关掉应用还会丢。
    */
   restoreFromTrash(id: string): boolean {
-    if (!this.write) return false
     const before = this.snap()
     /**
      * 恢复的是**被删的那个操作根**；它的祖先若也被删了，它仍然不可见
@@ -2220,33 +2077,17 @@ export class BlockEditor {
      */
     const fill = wasRoot && this.doc.roots.length === 1 ? mkBlock('') : null
     const forestLoc = fill ? locate({ roots: this.store.blocks }, id) : null
-    if (this.write) {
-      const write = this.write
-      write((tx) => {
-        tx.remove(id)
-        if (fill && forestLoc) tx.insert(fill, forestLoc.parent?.id ?? null, forestLoc.index)
-      })
-      // 森林那边已由事务改完；窗口 roots 是**装载单位**，要跟着换掉（它不在事务里）
-      if (wasRoot && fill && forestLoc) {
-        this.doc.roots.splice(0, this.doc.roots.length, fill)
-        this.viewRootIds = [fill.id]
-      } else if (wasRoot) {
-        this.doc.roots.splice(this.doc.roots.indexOf(loc.block), 1)
-        this.viewRootIds = this.viewRootIds.filter((x) => x !== id)
-      }
-    } else {
-      // 与事务支同一条口径：森林里**原位标记**（遍历从此看不见它），不摘树；
-      // 装载根被删 ⇒ 窗口 roots 摘掉这一根（roots 是装载单位，不是森林的根）
-      removeBlock(this.doc, id)
-      if (wasRoot) {
-        this.doc.roots.splice(this.doc.roots.indexOf(loc.block), 1)
-        this.viewRootIds = this.viewRootIds.filter((x) => x !== id)
-      }
-      if (flatten(this.doc).length === 0) {
-        const empty = mkBlock('')
-        this.doc.roots.push(empty)
-        this.viewRootIds = [empty.id]
-      }
+    this.write((tx) => {
+      tx.remove(id)
+      if (fill && forestLoc) tx.insert(fill, forestLoc.parent?.id ?? null, forestLoc.index)
+    })
+    // 森林那边已由事务改完；窗口 roots 是**装载单位**，要跟着换掉（它不在事务里）
+    if (wasRoot && fill && forestLoc) {
+      this.doc.roots.splice(0, this.doc.roots.length, fill)
+      this.viewRootIds = [fill.id]
+    } else if (wasRoot) {
+      this.doc.roots.splice(this.doc.roots.indexOf(loc.block), 1)
+      this.viewRootIds = this.viewRootIds.filter((x) => x !== id)
     }
     const after = flatten(this.doc)
     const caret = after[Math.min(idx, after.length - 1)]!
@@ -2311,14 +2152,10 @@ export class BlockEditor {
     const propId = field?.propId ?? TASK_STATUS_PROP_ID
     const next = field ? field.value !== true : false
     const before = this.snap()
-    if (this.write) {
-      // 切的是一个属性值：一笔 patch 正好 1 条 `prop.set`（与「插入待办」同一形状）
-      this.write((tx) => {
-        tx.patch(id, (b) => setValue(b, propId, next))
-      })
-    } else {
-      setValue(loc.block, propId, next)
-    }
+    // 切的是一个属性值：一笔 patch 正好 1 条 `prop.set`（与「插入待办」同一形状）
+    this.write((tx) => {
+      tx.patch(id, (b) => setValue(b, propId, next))
+    })
     this.undo.record(before, 'structural', Date.now())
     this.renderAll()
     this.emitChange('struct', [id])
@@ -2330,11 +2167,7 @@ export class BlockEditor {
     if (!loc) return
     const before = this.snap()
     const next = textRuns(text)
-    if (this.write) {
-      this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
-    } else {
-      writeBlockContent(loc.block, next)
-    }
+    this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
     this.undo.record(before, 'insert', Date.now())
     this.renderBlock(id)
     this.emitChange('text')
@@ -2379,13 +2212,9 @@ export class BlockEditor {
       }
       if (todoOf(loc.block) !== undefined) return null
       // 只落一个属性值、不动结构 ⇒ 一笔事务里正好 1 条 `prop.set`
-      if (this.write) {
-        this.write((tx) => {
-          tx.patch(loc.block.id, (b) => setValue(b, TASK_STATUS_PROP_ID, todo === 'done'))
-        })
-      } else {
-        setValue(loc.block, TASK_STATUS_PROP_ID, todo === 'done')
-      }
+      this.write((tx) => {
+        tx.patch(loc.block.id, (b) => setValue(b, TASK_STATUS_PROP_ID, todo === 'done'))
+      })
       this.undo.record(before, 'structural', Date.now())
       this.renderAll()
       this.placeCaret(loc.block.id, 0)
@@ -2410,20 +2239,16 @@ export class BlockEditor {
      * 声明「不许有子块」的根在这里容纳不下一个新块：直接返回 `false`，
      * 事务里什么都没写 ⇒ 没有任何 op。
      */
-    if (this.write) {
-      const ok = this.write((tx) => {
-        if (loc.parent === null) {
-          if (typeDeclOf(loc.block).children === 'none') return false
-          tx.insert(b, loc.block.id, 0)
-          return true
-        }
-        tx.insert(b, loc.parent.id, loc.index + 1)
+    const ok = this.write((tx) => {
+      if (loc.parent === null) {
+        if (typeDeclOf(loc.block).children === 'none') return false
+        tx.insert(b, loc.block.id, 0)
         return true
-      })
-      if (!ok) return null
-    } else if (!this.insertNear(loc, b)) {
-      return null
-    }
+      }
+      tx.insert(b, loc.parent.id, loc.index + 1)
+      return true
+    })
+    if (!ok) return null
     this.undo.record(before, 'structural', Date.now())
     this.renderAll()
     this.placeCaret(b.id, 0)
@@ -2465,19 +2290,14 @@ export class BlockEditor {
      * 那会把子树藏进一行摘要后面（组件块不许有子块，子块看不见）。
      */
     if (isEmptyContent(loc.block.content) && loc.block.children.length === 0 && canWriteText(loc.block)) {
-      if (this.write) {
-        // 原地改类型是一次属性写入：`_type` 一条 op，撤销一次回到「那行还是空白」。
-        // 改类型也算一次改动 ⇒ 时刻并进同一笔（第二条 op）。
-        this.write((tx) => {
-          tx.patch(loc.block.id, (b) => {
-            setBlockType(b, typeId)
-            b.modified = Date.now()
-          })
+      // 原地改类型是一次属性写入：`_type` 一条 op，撤销一次回到「那行还是空白」。
+      // 改类型也算一次改动 ⇒ 时刻并进同一笔（第二条 op）。
+      this.write((tx) => {
+        tx.patch(loc.block.id, (b) => {
+          setBlockType(b, typeId)
+          b.modified = Date.now()
         })
-      } else {
-        setBlockType(loc.block, typeId)
-        loc.block.modified = Date.now()
-      }
+      })
       this.undo.record(before, 'structural', Date.now())
       this.renderAll()
       this.emitChange('struct', [loc.block.id])
@@ -2487,47 +2307,24 @@ export class BlockEditor {
     const widget = mkBlock('')
     setBlockType(widget, typeId)
     const empty = mkBlock('')
-    if (this.write) {
-      // 两个块共用一笔（用户按的是一次「插入」）；落点与 `insertNear` 同一条规则：
-      // section 根没有兄弟位，插成它的首两个子块
-      const ok = this.write((tx) => {
-        if (loc.parent === null) {
-          if (typeDeclOf(loc.block).children === 'none') return false
-          tx.insert(widget, loc.block.id, 0)
-          tx.insert(empty, loc.block.id, 1)
-          return true
-        }
-        tx.insert(widget, loc.parent.id, loc.index + 1)
-        tx.insert(empty, loc.parent.id, loc.index + 2)
+    // 两个块共用一笔（用户按的是一次「插入」）；落点与 `insertNear` 同一条规则：
+    // section 根没有兄弟位，插成它的首两个子块
+    const ok = this.write((tx) => {
+      if (loc.parent === null) {
+        if (typeDeclOf(loc.block).children === 'none') return false
+        tx.insert(widget, loc.block.id, 0)
+        tx.insert(empty, loc.block.id, 1)
         return true
-      })
-      if (!ok) return false
-    } else {
-      if (!this.insertNear(loc, widget)) return false
-      const at = locate(this.doc, widget.id)
-      if (at) this.insertNear(at, empty)
-    }
+      }
+      tx.insert(widget, loc.parent.id, loc.index + 1)
+      tx.insert(empty, loc.parent.id, loc.index + 2)
+      return true
+    })
+    if (!ok) return false
     this.undo.record(before, 'structural', Date.now())
     this.renderAll()
     this.placeCaret(empty.id, 0)
     this.emitChange('struct')
-    return true
-  }
-
-  /**
-   * 把 `b` 插到 `loc` 的位置上：section 根**没有兄弟位**（写回按 root id 走），
-   * 只能成为它的首个子块；其余块插在它后面的同级位。
-   *
-   * 返回 `false` ＝ 这个位置容纳不了一个块（根的类型声明不许有子块）。
-   */
-  private insertNear(loc: Located, b: Block): boolean {
-    if (loc.parent === null) {
-      if (typeDeclOf(loc.block).children === 'none') return false
-      unfoldBlock(this.doc, loc.block.id)
-      loc.block.children.unshift(b)
-      return true
-    }
-    loc.parent.children.splice(loc.index + 1, 0, b)
     return true
   }
 
@@ -2552,19 +2349,12 @@ export class BlockEditor {
       return next
     }
     const touched = [...new Set(ranges.map((r) => r.blockId))]
-    if (this.write) {
-      this.write((tx) => {
-        for (const bid of touched) {
-          const b = this.store.find(bid)
-          if (b) tx.patch(bid, (bb) => writeBlockContent(bb, apply(bid, bb.content)))
-        }
-      })
-    } else {
+    this.write((tx) => {
       for (const bid of touched) {
-        const b = locate(this.doc, bid)?.block ?? this.store.find(bid)
-        if (b) writeBlockContent(b, apply(bid, b.content))
+        const b = this.store.find(bid)
+        if (b) tx.patch(bid, (bb) => writeBlockContent(bb, apply(bid, bb.content)))
       }
-    }
+    })
     this.undo.record(before, 'mark', Date.now())
     if (ranges.length === 1) this.renderBlock(ranges[0]!.blockId)
     else this.renderAll()
@@ -2603,19 +2393,12 @@ export class BlockEditor {
       return next
     }
     const touched = [...new Set(ranges.map((r) => r.blockId))]
-    if (this.write) {
-      this.write((tx) => {
-        for (const bid of touched) {
-          const b = this.store.find(bid)
-          if (b) tx.patch(bid, (bb) => writeBlockContent(bb, apply(bid, bb.content)))
-        }
-      })
-    } else {
+    this.write((tx) => {
       for (const bid of touched) {
-        const b = locate(this.doc, bid)?.block ?? this.store.find(bid)
-        if (b) writeBlockContent(b, apply(bid, b.content))
+        const b = this.store.find(bid)
+        if (b) tx.patch(bid, (bb) => writeBlockContent(bb, apply(bid, bb.content)))
       }
-    }
+    })
     this.undo.record(before, 'mark', Date.now())
     this.renderAll()
     // 同上：清格式也要保住选区（清完还能接着改别的格式）
@@ -2638,12 +2421,7 @@ export class BlockEditor {
    *    把光标甩到别处等于抢一次焦点。
    */
   private commitContent(id: string, next: readonly InlineRun[], before: Snap, undo: UndoKind, caret?: number): void {
-    if (this.write) {
-      this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
-    } else {
-      const loc = locate(this.doc, id)
-      if (loc) writeBlockContent(loc.block, next)
-    }
+    this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
     this.undo.record(before, undo, Date.now())
     this.renderBlock(id)
     if (caret !== undefined) this.placeCaret(id, caret)
@@ -2793,11 +2571,7 @@ export class BlockEditor {
     if (!hit) return
     const before = this.snap()
     const next = removeRunById(hit.block.content, runId)
-    if (this.write) {
-      this.write((tx) => tx.patch(hit.block.id, (b) => writeBlockContent(b, next)))
-    } else {
-      writeBlockContent(hit.block, next)
-    }
+    this.write((tx) => tx.patch(hit.block.id, (b) => writeBlockContent(b, next)))
     this.undo.record(before, 'delete', Date.now())
     this.renderAll()
     this.emitChange('text')
@@ -2946,8 +2720,7 @@ export class BlockEditor {
     const emptyTail = lastChild && isEmptyContent(lastChild.content) && lastChild.children.length === 0 ? lastChild : null
     const child = emptyTail ?? mkBlock('')
     if (!emptyTail) {
-      if (this.write) this.write((tx) => tx.insert(child, root.id, root.children.length))
-      else root.children.push(child)
+      this.write((tx) => tx.insert(child, root.id, root.children.length))
       this.undo.record(before, 'structural', Date.now())
     }
     this.renderAll()
@@ -3070,11 +2843,9 @@ export class BlockEditor {
       },
       blockContent: (id) => locate(this.doc, id)?.block.content ?? [],
       restoreBlockContent: (id, content) => {
-        const loc = locate(this.doc, id)
-        if (!loc) return
+        if (!locate(this.doc, id)) return
         const before = this.snap()
-        if (this.write) this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, content)))
-        else writeBlockContent(loc.block, content)
+        this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, content)))
         this.undo.record(before, 'delete', Date.now())
         this.emitChange('text', [id])
       },
@@ -3240,24 +3011,20 @@ export class BlockEditor {
     /** 这次是否往树上插了新块（记录）——真插了就整片重画（记录落在当天，可能就在当前视图里） */
     let createdBlock = false
 
-    const apply = (tx: Tx | null, block: Block): boolean => {
+    const apply = (tx: Tx, block: Block): boolean => {
       let tagId: string | null = null
       let recordId: string | null = null
       let pageId: string | null = null
 
       const needTag = pick.kind === 'tag' || pick.kind === 'newObj' || pick.kind === 'newTag'
       if (needTag) {
-        const tag = tx
-          ? ensureTagInTx(tagLookupOf(this.store.blocks), pick.name, tx)
-          : ensureTag(this.store.blocks, pick.name).block
+        const tag = ensureTagInTx(tagLookupOf(this.store.blocks), pick.name, tx)
         if (!tag) return false
         tagId = tag.id
       }
 
       if (pick.kind === 'newPage') {
-        const page = tx
-          ? ensurePageInTx(tagLookupOf(this.store.blocks), pick.name, tx)
-          : ensurePageDirect(this.store.blocks, pick.name)
+        const page = ensurePageInTx(tagLookupOf(this.store.blocks), pick.name, tx)
         if (!page) return false
         pageId = page.id
         // 页落在森林顶层，可能不在当前视图里；整片重画一次，让索引/页数跟上
@@ -3269,9 +3036,7 @@ export class BlockEditor {
        * 身份由「哪条引用指向它」给出。
        */
       if (pick.kind === 'newObj' || (pick.kind === 'newTag' && pick.action === 'instance')) {
-        const record = tx
-          ? createObjRecordInTx(tx, (bid) => findInForest(this.store.blocks, bid), pick.name, tagId!)
-          : createObjRecordDirect(this.store.blocks, pick.name, tagId!)
+        const record = createObjRecordInTx(tx, (bid) => findInForest(this.store.blocks, bid), pick.name, tagId!)
         recordId = record.id
         createdBlock = true
       }
@@ -3301,25 +3066,12 @@ export class BlockEditor {
       }
 
       const next = spliceRuns(block.content, hit.from, hit.to, inserted)
-      if (tx) {
-        tx.patch(id, (b) => writeBlockContent(b, next))
-        if (assign) tx.setTags(id, [...tagIdsOf(block), tagId!])
-      } else {
-        writeBlockContent(block, next)
-        if (assign) addTagId(block, tagId!)
-      }
+      tx.patch(id, (b) => writeBlockContent(b, next))
+      if (assign) tx.setTags(id, [...tagIdsOf(block), tagId!])
       return true
     }
 
-    let ok: boolean
-    if (this.write) {
-      const write = this.write
-      ok = write((tx) => apply(tx, loc.block))
-    } else {
-      ok = apply(null, loc.block)
-      // 新建的标签块还没进派生索引（同 `addTag` 的直写支）：紧接着的重画要靠它
-      this.store.invalidateIndex()
-    }
+    const ok = this.write((tx) => apply(tx, loc.block))
     if (!ok) return false
     /**
      * 撤销合并窗口的陷阱：打字那笔（`insert`）与这一笔若同 kind 且落在 1200ms 内，
@@ -3344,11 +3096,7 @@ export class BlockEditor {
     const before = this.snap()
     if (lines.length === 1) {
       const next = spliceRuns(loc.block.content, offset, offset, lines[0]!)
-      if (this.write) {
-        this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
-      } else {
-        writeBlockContent(loc.block, next)
-      }
+      this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
     } else {
       // 光标处切两半：首行接在左半后面，余下各成新块，**原右半接到最后一块尾部**
       const [head, tail] = splitRuns(loc.block.content, offset)
@@ -3366,20 +3114,10 @@ export class BlockEditor {
        */
       const parentId = loc.parent ? loc.parent.id : loc.block.id
       const baseIndex = loc.parent ? list.indexOf(loc.block) + 1 : 0
-      if (this.write) {
-        const write = this.write
-        write((tx) => {
-          tx.patch(id, (b) => writeBlockContent(b, first))
-          created.forEach((c, i) => tx.insert(c, parentId, baseIndex + i))
-        })
-      } else {
-        writeBlockContent(loc.block, first)
-        if (loc.parent) list.splice(baseIndex, 0, ...created)
-        else {
-          unfoldBlock(this.doc, loc.block.id)
-          loc.block.children.splice(0, 0, ...created)
-        }
-      }
+      this.write((tx) => {
+        tx.patch(id, (b) => writeBlockContent(b, first))
+        created.forEach((c, i) => tx.insert(c, parentId, baseIndex + i))
+      })
     }
     this.undo.record(before, 'insert', Date.now())
     this.renderAll()

@@ -37,7 +37,7 @@ export interface QueryViewDeps {
   /** 读门面：求值走 `kb.query`（索引），冻结结果按 id 现读（`kb.pathOf`） */
   kb: KbClient
   /** 写入事务入口：执行者在装配层，这里只原样转给编辑器（见 `Run`） */
-  write?: Run
+  write: Run
   /** 查询块本身（活引用）：读 `_query`／写 `_queryResult` */
   block: () => Block
   /** 刷新后要落盘（结果集入 KB） */
