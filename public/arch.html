@@ -129,8 +129,8 @@
     <div class="layer l-host">
       <div class="tag">host</div>
       <div class="body">
-        <span class="files">electron/main.ts</span>
-        <span class="note">只做五件壳的事：名字与数据目录 · 建窗口 · 应用菜单 · 生命周期 · 给内核留一条 MessageChannel。<b>不 import src/</b>，主进程零业务逻辑</span>
+        <span class="files">electron/ · main.ts ＋ library/（sqlite／session／registry／assets／windows）</span>
+        <span class="note">窗口 · 库会话 · SQLite · fs · 路径 · 菜单。<b>准入是白名单</b>（arch <code>[2+]</code>）：只许 <code>node:*</code>／<code>electron</code>／<code>core/msg</code>／<code>core/library</code> ＋ core 的<b>类型</b>；块语义、查询、渲染一律不许。IPC 按 <code>sender.id</code> 路由，渲染层不告诉主进程「我是哪个库」</span>
       </div>
     </div>
     <div class="layer l-app">
@@ -303,19 +303,20 @@
       <div class="note" style="margin-top:9px">结构用 <code>parent ＋ index</code> 表达，不另造 <code>insert</code> 事件——「它现在在哪」只有一种说法。<b>格式与原子的一次改动就是一条 <code>upsert{content}</code></b>：内容整组替换，不是逐段记差。<b>实例字段写入＝一条 <code>prop.set</code>／<code>prop.delete</code></b>，没有「实例」专用 op。</div>
     </div>
     <div class="card pad">
-      <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">落盘：两个键，都是固定值</b></div>
+      <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">落盘：两种宿主，三条不可逆契约</b></div>
       <div class="kv">
-        <dt>qua.workspace</dt><dd>整库（块森林；行内内容与区间都在块上），套一层信封 <code>{ backend, envelope, data }</code></dd>
+        <dt>qua.db（Electron）</dt><dd><b>每个库一份</b> SQLite（主进程单写者，WAL）。当前是 <b>临时形状</b>：<code>workspace(id=1, json, saved_at)</code> ＋ <code>settings</code> ＋ <code>meta</code> ＋ <code>op_log</code>（只建表、不接写入）。schema 版本＝<code>PRAGMA user_version</code>（唯一判据）</dd>
+        <dt>qua.workspace（web）</dt><dd>整库（块森林；行内内容与区间都在块上），套一层信封 <code>{ backend, envelope, data }</code>。浏览器没有用户可选目录的同等语义 ⇒ 单窗口单库</dd>
         <dt>qua.device</dt><dd>设备态：主题 / 槽宽 / 钉住清单（<b>不进 KB</b>）</dd>
-        <dt>qua.assets</dt><dd><b>资产库</b>（IndexedDB）：<code>hash → { mime, size, w?, h?, createdAt, bytes }</code>。
-          内容寻址 ⇒ 同字节只存一份；记录里存 <code>ArrayBuffer</code>（<code>Blob</code> 过不了存储快照）。键名同样不可改</dd>
+        <dt>qua.assets</dt><dd><b>资产库</b>：Electron 走每库 <code>assets/&lt;hash前2&gt;/&lt;hash&gt;</code> ＋ <code>.json</code> 侧车（字节是真相、侧车可重建）；web 仍走 IndexedDB <code>hash → { mime, size, w?, h?, createdAt, bytes }</code>。内容寻址 ⇒ 同字节只存一份</dd>
       </div>
       <div class="note" style="margin-top:9px">两个存储之间**没有跨库事务**：写图片的顺序固定为
         <b>字节先落 → 引用后落</b>（put 成功才写 run）。崩在中间只留孤儿字节（无害）；
         反过来会留下一枚指向空字节的 run。v1 无 GC，删 run 不回收字节。</div>
       <div class="note" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)">
-        <b>不做旧数据迁移</b>：改口径就 <code>WORKSPACE_VERSION + 1</code>，旧库显式作废重 seed。
-        换键 ＝ 用户数据静默消失，所以键名被逐字钉死在门禁里。
+        <b>开发阶段不做旧数据迁移</b>：<code>WORKSPACE_VERSION + 1</code> ＝ 旧库显式作废重 seed。
+        接库之后库内换形状走 <code>user_version</code> ＋ 只加不删迁移 ＋ 迁移前快照（实测：版本号随事务原子回滚）。
+        换键／换库名 ＝ 用户数据静默消失，所以它们被逐字钉死在门禁里。
       </div>
     </div>
   </div>

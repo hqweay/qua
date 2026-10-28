@@ -463,9 +463,42 @@ pnpm check:bundle         # 4/4（验打出来的 相.app）
 `pnpm dev` 会**自己**处理两件环境破事（默认数据目录不可写、Chromium 沙箱起不来），并**打印出来**；
 普通 macOS 上这两段都是空转。
 
-## ⑥ 明确没做 / 没验（别当成做过了）
+## ⑥ 库根、SQLite 与备份
 
-- **没做**：SQLite、`utilityProcess` 内核、插件宿主、CM6 第二实例、虚拟化滚动联动（这是另外几条线）。
+**库根**：`<用户文档目录>/Qua/`（默认），结构：
+
+```
+Qua/
+├── app.json          # 库列表 ＋ device_id；原子写（临时文件＋rename）
+└── repos/<libraryId>/
+    ├── library.json  # { kind:'qua-library', format:1, id } —— 身份权威
+    ├── qua.db        # SQLite（WAL）；PRAGMA user_version 是唯一 schema 版本
+    ├── assets/       # <hash前2>/<hash> ＋ <hash>.json 侧车
+    └── backups/      # 迁移前快照
+```
+
+`--qua-data-dir=` 覆盖库根；**给了 `--user-data-dir=` 时库根跟着它走**
+（否则跑一次自检就在用户的文档目录里建库——真踩过）。
+
+**备份口径（实测，必须知道）**：SQLite 开着 WAL 时，只拷 `qua.db` 会**拷不到数据**
+（连表都读不出来：`no such table`）。三条对策，代码里都做了：
+
+1. 关窗／关库时 `PRAGMA wal_checkpoint(TRUNCATE)` ⇒ 主库文件自包含（正常关闭之后只拷它也行）；
+2. 「在 Finder 中显示」要指向**目录**，并在文案里说「拷整个文件夹」；
+3. 程序内任何快照一律 `VACUUM INTO`（它**不能在事务里跑**：`cannot VACUUM from within a transaction`）。
+
+**`user_version` 的事务语义（实测）**：`PRAGMA user_version` 随事务原子回滚 ⇒
+「建表/迁移 ＋ 版本号 +1」可以包在一个事务里，崩在中间只会回到旧版本（不会留半迁移库）。
+
+**`node:sqlite` 是同步 API**：一次批量导入会卡 UI。v1 接受（单写者主进程），
+批量导入／索引重建将来搬 `utilityProcess`。
+
+## ⑦ 明确没做 / 没验（别当成做过了）
+
+- **没做**：`utilityProcess` 内核、插件宿主、CM6 第二实例、虚拟化滚动联动（这是另外几条线）。
+- **没做**：库的**规范化 schema**（`workspace` 表存的是整份库 JSON，是**临时形状**）；
+  `op_log` 只建表、**不接写入**（`op_json` 里 `index`/`prev` 的形状还没定）。
+- **没做**：欢迎页／最近库管理（启动总会开一个库，没有库时自动建默认库）；同库第二窗。
 - **没做**：签名与公证（本地自用）；DMG 目标（只出了 `.app`，`target: dir`）。
 - **没做**：CSP（缺口见 4.4）；「编辑 → 撤销/重做」与 app 自己的 `⌘Z` 的冲突（见 1.2.1）；
   深色跟随系统（见 1.5）；`⌘A` 接管与自研查找（四件账①②）。

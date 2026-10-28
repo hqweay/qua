@@ -1,20 +1,25 @@
 /**
  * preload：**最小面**——壳不暴露业务。
  *
- * 暴露给页面的只有两样：
+ * 暴露给页面的只有三样：
  *   - `kb.shellInfo()`      —— 壳的版本/平台/数据目录（**不是业务**）
  *   - `kb.kernel.attach()`  —— 拿一条通向内核的通道（port 中转形状）
+ *   - `qua.*`               —— 库／存储／设置／资产／关闭握手（多库面）
  *
  * ⚠️ **不暴露 `ipcRenderer` 本体**，也不暴露任何 `require`：页面拿不到 Node。
  * `contextIsolation:true` + `nodeIntegration:false` + `sandbox:true` ⇒ 这个文件里能用的
  * 只有 `contextBridge` / `ipcRenderer` 两个 import，`node:fs` 之类连 import 都会失败。
  *
- * ── 一个实测出来的坑（详见 docs/ELECTRON-备忘.md）────────────────────────────
- * **`MessagePort` 本体过不了 `contextBridge`**：`exposeInMainWorld` 只搬运**自有属性**，
- * 原型上的 `postMessage/close` 不会被带过去 ⇒ 页面拿到的对象上 `postMessage` 是 `undefined`
- * （实测报错：`port.postMessage is not a function`）。
- * 所以这里**不把 port 交给页面**，而是用一层**闭包**把方法包成普通函数再暴露——
- * 顺带还更安全：页面拿不到 transferable 通道本体，只能通过这两个函数说话。
+ * ## 为什么 `qua.*` 的方法全是「普通函数」
+ *
+ * 同一个坑（见 `docs/ELECTRON-备忘.md`）：`contextBridge.exposeInMainWorld` 只搬运**自有属性**，
+ * 原型上的方法不会被带过去。所以这里每一个方法都是箭头函数，返回值是可结构化克隆的普通对象。
+ *
+ * ## 为什么渲染层不告诉主进程「我是哪个库」
+ *
+ * 主进程按 `event.sender.id` 路由（`electron/library/windows.ts`）。渲染层手里的库 id
+ * 可能是过期的（库被移除／窗口切库），而 `sender.id` 是 Electron 给的事实。
+ * ⇒ 这里所有方法都**不带库 id 参数**。
  */
 import { contextBridge, ipcRenderer } from 'electron'
 
@@ -66,7 +71,45 @@ const kernel = {
   },
 }
 
+/* ------------------------------------------------------------ 库面 */
+
+const qua = {
+  /** 这个窗口订阅的是哪个库（没有库 ⇒ `status:'no-library'`，走欢迎页） */
+  libraryInfo: (): Promise<unknown> => ipcRenderer.invoke('qua:library/info'),
+  libraryList: (): Promise<unknown> => ipcRenderer.invoke('qua:library/list'),
+  openLibrary: (id: string): Promise<unknown> => ipcRenderer.invoke('qua:library/open', id),
+  createLibrary: (id: string, name: string): Promise<unknown> => ipcRenderer.invoke('qua:library/create', id, name),
+
+  /** 内容（整份 blob） */
+  load: (): Promise<unknown> => ipcRenderer.invoke('qua:storage/load'),
+  save: (json: string, savedAt: number): Promise<unknown> => ipcRenderer.invoke('qua:storage/save', json, savedAt),
+
+  /** 每库设置（窗口 bounds／槽布局／折叠态） */
+  getSetting: (key: string): Promise<unknown> => ipcRenderer.invoke('qua:settings/get', key),
+  setSetting: (key: string, value: string): Promise<unknown> => ipcRenderer.invoke('qua:settings/set', key, value),
+
+  /** 资产（内容寻址；字节走 ArrayBuffer） */
+  assetKeys: (): Promise<unknown> => ipcRenderer.invoke('qua:assets/keys'),
+  assetGet: (hash: string): Promise<unknown> => ipcRenderer.invoke('qua:assets/get', hash),
+  assetPut: (bytes: ArrayBuffer, mime: string, dims?: { w?: number; h?: number }): Promise<unknown> =>
+    ipcRenderer.invoke('qua:assets/put', bytes, mime, dims ?? {}),
+
+  /**
+   * 关闭握手：主进程发 `qua:flush`，这里把待落盘的那批发出去再回 ack。
+   *
+   * 为什么要有这条：渲染层的落盘是 250ms 防抖，关窗那一刻可能还有一笔没发出去。
+   * 不握手就是「关掉重开少最后一句」。
+   */
+  onFlush: (cb: () => void | Promise<void>): void => {
+    ipcRenderer.on('qua:flush', () => {
+      Promise.resolve(cb()).finally(() => ipcRenderer.send('qua:flush/ack'))
+    })
+  },
+}
+
 contextBridge.exposeInMainWorld('kb', {
   shellInfo: (): Promise<Record<string, unknown>> => ipcRenderer.invoke('kb:shell/info'),
   kernel,
 })
+
+contextBridge.exposeInMainWorld('qua', qua)

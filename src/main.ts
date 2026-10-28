@@ -58,6 +58,7 @@ import {
   sniffImageMime,
   type AssetMeta,
 } from './core/assets.ts'
+import { createIpcAdapter, type LibraryBridge } from './core/storage/ipc-adapter.ts'
 import {
   createDeviceStore,
   createLocalStorageAdapter,
@@ -93,8 +94,21 @@ const stateMenuBtn = $('state-menu-btn')
 /**
  * **存储端口**：装配层是它的唯一持有者。
  * 换后端（内核 SQLite／主进程单写者）只换这一行，上层一行不改。
+ *
+ * 两个宿主两条路（115 D13）：
+ *   · Electron：库在**主进程**（`node:sqlite`），字节经 IPC；一个窗口一个库。
+ *   · web：单窗口单库，仍是 localStorage（浏览器没有用户可选目录的同等语义）。
+ * 判据是 `window.qua` 在不在（preload 暴露的库面），**不是** `userAgent`——
+ * 后者会被插件/代理改写，而 preload 面是壳给的事实。
  */
-const store = createWorkspaceStore(createLocalStorageAdapter(STORAGE_KEY))
+const LIBRARY_BRIDGE: LibraryBridge | null =
+  typeof window !== 'undefined' && typeof (window as unknown as { qua?: LibraryBridge }).qua === 'object'
+    ? (window as unknown as { qua: LibraryBridge }).qua
+    : null
+
+const store = createWorkspaceStore(
+  LIBRARY_BRIDGE ? createIpcAdapter(LIBRARY_BRIDGE) : createLocalStorageAdapter(STORAGE_KEY),
+)
 /**
  * **设备状态**（偏好）走它自己的键与端口实例：换库不带走它，库作废也不连累它。
  * 两个端口各自持有一份写队列 —— 它们的字节落在两个键上，没有共同的写入顺序。
@@ -324,6 +338,21 @@ const {
   getMainEd: () => mainEd,
   getChrome: () => chrome,
   isQuiet: () => quiet,
+})
+
+/* ------------------------------------------------------------ 关闭握手（Electron 库面） */
+
+/**
+ * 主进程关窗之前会发 `qua:flush`，这里把待落盘的那批**立刻发出去**再回 ack。
+ *
+ * 为什么必须有这条：落盘是 250ms 防抖，关窗那一刻可能还有一笔没发。
+ * 不接这条的话主进程只能等满 1.5s 超时——「关窗变慢」是症状，真问题是那一笔可能丢。
+ */
+LIBRARY_BRIDGE?.onFlush?.(async () => {
+  saveNow()
+  saveDeviceNow()
+  await store.settle()
+  await deviceStore.settle()
 })
 
 /* ------------------------------------------------------------ 浮层渲染 */

@@ -15,7 +15,7 @@
  *     不加就是 GPU 进程反复崩到 `FATAL: GPU process isn't usable. Goodbye.`。
  */
 import { _electron } from 'playwright-core'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -128,12 +128,14 @@ await check('E1 启动：加载 dist 产物、preload 面在位、无页面报�
     qua: typeof window.__qua,
   }))
   const userDataHonored = page ? await app.evaluate(({ app: a }) => a.getPath('userData')) : ''
+  const libInfo = await page.evaluate(() => window.qua?.libraryInfo?.())
   await app.close()
   log(`      URL=${url}`)
   log(`      shellInfo=${JSON.stringify(info)}`)
   log(`      页面可见面=${JSON.stringify(surfaces)}`)
   log(`      --user-data-dir 生效？ ${userDataHonored}`)
   log(`      启动目录=${dir}`)
+  log(`      库：${JSON.stringify(libInfo)}`)
   log(`      窗口可见：${JSON.stringify(vis)}（当前环境 ready-to-show 不触发 ⇒ 走 2s 兜底）`)
   assert(url.startsWith('file://') && url.endsWith('/dist/index.html'), `prod 应加载 dist/index.html，实际 ${url}`)
   assert(surfaces.kb === 'object' && surfaces.kernelAttach === 'function', 'preload 没暴露 kb.kernel.attach')
@@ -143,7 +145,17 @@ await check('E1 启动：加载 dist 产物、preload 面在位、无页面报�
   assert(vis.visible === true, '窗口始终不可见（show() 没生效）')
   assert(info.electron?.startsWith('44.'), `electron 版本异常：${info.electron}`)
   assert(userDataHonored === dir, `--user-data-dir 没生效：${userDataHonored} ≠ ${dir}`)
-  return `Electron ${info.electron} / Chromium ${info.chrome} / Node ${info.node}；页面里 require=undefined、process=undefined`
+  /**
+   * 库根必须**跟着 `--user-data-dir` 走**：不然跑一次冒烟就在用户的文档目录里建库
+   * （真踩过：第一次接多库时把测试库写进了用户的文档目录）。
+   */
+  assert(
+    libInfo?.status === 'ok' && String(libInfo.dir).startsWith(dir),
+    `库目录没关进隔离目录：${JSON.stringify(libInfo)} 不在 ${dir} 下`,
+  )
+  assert(libInfo.schemaVersion >= 1, `库的 schema 版本没报出来：${JSON.stringify(libInfo)}`)
+  assert(typeof libInfo.deviceId === 'string' && /^[0-9a-f]{32}$/.test(libInfo.deviceId), `device_id 形状不对：${libInfo.deviceId}`)
+  return `Electron ${info.electron} / Chromium ${info.chrome} / Node ${info.node}；页面里 require=undefined、process=undefined；库 ${libInfo.id} schema v${libInfo.schemaVersion}`
 })
 
 /* ═══════════════════════════════════════════════════ E2 内核端口骨架 */
@@ -923,6 +935,151 @@ await check('E10 行内资产：CSP 的 img-src 里必须有 blob:（否则真�
   await app.close()
   return `img-src 含 blob:；真图 ${r.nw}px 解码成功；页面无报错`
 })
+
+/* ═══════════════════════════════════════════════════ E11 多库：两库两窗、各自编辑、关掉重开 */
+
+/**
+ * 多库这一档的**完成判据**：
+ *
+ *   两个库两个窗口 → 各自编辑 → 关掉重开 → 内容都在。
+ *
+ * 这一条是唯一不能靠单测替代的验收：它同时证明
+ *   ① `app.json` 注册表真的记了两个库；
+ *   ② 一库一窗（同库再打开不新开窗）；
+ *   ③ 两个库的 `qua.db` 是**两个文件**（不是同一份被写两遍）；
+ *   ④ 关闭握手把最后一笔发出去了（打一个字立刻关窗，重开还在）；
+ *   ⑤ 关掉重开之后 `lastOpenedId` 能恢复。
+ *
+ * ⚠️ 测试数据必须关在 `--user-data-dir` 里：库根跟着它走（见 `electron/main.ts`）。
+ *    这条本身就是一次回归——第一版把库根写死在用户的文档目录，跑一次冒烟
+ *    就在用户的文档目录里建了库。
+ */
+await check('E11 多库：两库两窗、各自编辑、关掉重开内容都在；同库再打开只聚焦不新开', async () => {
+  const dir = join(CACHE, '11-multilib')
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+
+  const first = await launch('multilib', { userData: dir })
+  const app = first.app
+  // 第一个窗口已经开了一个默认库（`bootLibraries()` 建的）
+  const libA = await first.page.evaluate(() => window.qua.libraryInfo())
+  assert(libA?.status === 'ok', `首个窗口应当已经有一个库：${JSON.stringify(libA)}`)
+
+  // 造第二个库并开窗（直接走主进程的库面：这是「新建库」的接线点）
+  // id 用固定值：断言要能对着它查磁盘，而随机 id 只能靠回读（回读也能，但固定值让失败信息可读）
+  const LIB_B_ID = 'bb'.repeat(16)
+  const created = await first.page.evaluate((id) => window.qua.createLibrary(id, '库 B'), LIB_B_ID)
+  assert(created?.status === 'ok', `新建第二个库失败：${JSON.stringify(created)}`)
+
+  const pagesAfterCreate = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
+  assert(pagesAfterCreate === 2, `两个库应当有两个窗口，实际 ${pagesAfterCreate}`)
+
+  // 第二个窗口 = 后开的那扇；拿到它的 page
+  // ⚠️ Playwright 的 `app.windows()` 是**事件驱动的缓存**：主进程已经建好第二扇窗，
+  //    但 `window` 事件可能还没送达 Playwright 侧。直接读会读到 1（实测踩到）。
+  const pageB = await (async () => {
+    const t0 = Date.now()
+    while (Date.now() - t0 < 8000) {
+      const found = app.windows().find((p) => p !== first.page)
+      if (found) return found
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    return undefined
+  })()
+  assert(pageB, `没找到第二个窗口的 page（Playwright 侧看到 ${app.windows().length} 个）`)
+  await pageB.waitForFunction(() => Boolean(window.__qua))
+  const libB = await pageB.evaluate(() => window.qua.libraryInfo())
+  assert(libB?.status === 'ok' && libB.id !== libA.id, `两个窗口应当是**两个不同的库**：${libA.id} vs ${libB?.id}`)
+
+  // 各自写一句不同的话
+  const MARK_A = 'LIB-A-内容'
+  const MARK_B = 'LIB-B-内容'
+  await first.page.evaluate((mark) => {
+    const id = window.__qua.blocks()[0].id
+    window.__qua.focusBlock(id, 0)
+    window.__qua.invoke('core.editor/insert-block', { type: 'paragraph', text: mark })
+  }, MARK_A)
+  await pageB.evaluate((mark) => {
+    const id = window.__qua.blocks()[0].id
+    window.__qua.focusBlock(id, 0)
+    window.__qua.invoke('core.editor/insert-block', { type: 'paragraph', text: mark })
+  }, MARK_B)
+  // 等防抖落盘
+  await new Promise((r) => setTimeout(r, 700))
+
+  // 互不串场：A 库里没有 B 的字，反之亦然
+  const seenA = await first.page.evaluate(() => window.__qua.text())
+  const seenB = await pageB.evaluate(() => window.__qua.text())
+  assert(seenA.includes(MARK_A), 'A 库里没有自己刚写的字')
+  assert(!seenA.includes(MARK_B), 'A 库里出现了 B 库的字（两个窗口写进同一份库了）')
+  assert(seenB.includes(MARK_B), 'B 库里没有自己刚写的字')
+  assert(!seenB.includes(MARK_A), 'B 库里出现了 A 库的字（两个窗口写进同一份库了）')
+
+  // 两个库 = 两个目录、两个 qua.db（用 shellInfo 的 userData 推库根，不依赖主进程的 require）
+  const onDisk = await (async () => {
+    const info = await first.page.evaluate(() => window.kb.shellInfo())
+    const root = join(info.userData, 'qua-data', 'repos')
+    const libs = existsSync(root) ? readdirSync(root) : []
+    return {
+      root,
+      libs,
+      dbs: libs.filter((id) => existsSync(join(root, id, 'qua.db'))),
+      manifests: libs.filter((id) => existsSync(join(root, id, 'library.json'))),
+      assets: libs.filter((id) => existsSync(join(root, id, 'assets'))),
+    }
+  })()
+  assert(onDisk.libs.length === 2, `磁盘上应当有两个库目录，实际 ${JSON.stringify(onDisk.libs)}`)
+  assert(onDisk.dbs.length === 2, `每个库都要有自己的 qua.db：${JSON.stringify(onDisk.dbs)}`)
+  assert(onDisk.manifests.length === 2, `每个库都要有自己的 library.json：${JSON.stringify(onDisk.manifests)}`)
+  assert(onDisk.assets.length === 2, `每个库都要有自己的 assets/：${JSON.stringify(onDisk.assets)}`)
+
+  // 同库再打开 ⇒ 只聚焦，不新开窗
+  const before = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
+  await first.page.evaluate((id) => window.qua.openLibrary(id), libA.id)
+  const after = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
+  assert(after === before, `同库再打开不该新开窗口（${before} → ${after}）`)
+
+  await app.close()
+
+  /* ---- 关掉重开 ---- */
+
+  const second = await launch('multilib', { userData: dir })
+  const libA2 = await second.page.evaluate(() => window.qua.libraryInfo())
+  assert(libA2?.status === 'ok', `重开之后应当恢复上次的库：${JSON.stringify(libA2)}`)
+  /**
+   * 恢复的是**最后打开的那个**（115 D7：v1 只恢复最后一个）。
+   * 上面最后打开的是 B ⇒ 重开应当落到 B。断言写成 A 会把「正确的行为」判成红。
+   */
+  assert(libA2.id === LIB_B_ID, `应当恢复最后打开的那个库（B=${LIB_B_ID.slice(-6)}），实际 ${libA2.id.slice(-6)}`)
+
+  const list = await second.page.evaluate(() => window.qua.libraryList())
+  assert(list?.libraries?.length === 2, `重开之后注册表里应当还有两个库：${JSON.stringify(list?.libraries)}`)
+
+  const textB2 = await second.page.evaluate(() => window.__qua.text())
+  assert(textB2.includes(MARK_B), '关掉重开之后 B 库的字不见了（关闭握手或落盘有问题）')
+  assert(!textB2.includes(MARK_A), 'B 库里混进了 A 库的字')
+
+  // 打开另一个库（A），内容也还在
+  await second.page.evaluate((id) => window.qua.openLibrary(id), libA.id)
+  const pageA2 = await (async () => {
+    const t0 = Date.now()
+    while (Date.now() - t0 < 8000) {
+      const found = second.app.windows().find((p) => p !== second.page)
+      if (found) return found
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    return undefined
+  })()
+  assert(pageA2, '打开另一个库之后应当有第二扇窗口')
+  await pageA2.waitForFunction(() => Boolean(window.__qua))
+  const textA2 = await pageA2.evaluate(() => window.__qua.text())
+  assert(textA2.includes(MARK_A), '关掉重开之后 A 库的字不见了')
+  assert(!textA2.includes(MARK_B), 'A 库里混进了 B 库的字')
+
+  await second.app.close()
+  return `两库两窗（${libA.id.slice(-6)} / ${libB.id.slice(-6)}）各自编辑、互不串场；两个 qua.db ＋ library.json ＋ assets/；同库再打开只聚焦；关掉重开两库内容都在，恢复最后打开的库（B）`
+})
+
 
 /* ═══════════════════════════════════════════════════ 汇总 */
 

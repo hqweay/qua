@@ -456,24 +456,56 @@ function commandDecls() {
 }
 
 {
+  /**
+   * 主进程准入 —— **白名单**，不是黑名单。
+   *
+   * 为什么改成白名单（原先是一条禁 `workspace|seed|core|commands` 的正则）：
+   * 那条正则实测**放行** `core/query.ts`、`core/kb/types.ts`、`view/editor.ts`、`app/handlers.ts`
+   * —— 也就是说「块语义搬进主进程」这件事，门禁不会红。而 `[13]` 对 `electron/` 零约束
+   * （它被映射成 `host`，是层序最后一层 ⇒ 什么都不算越界）。两条加起来等于**主进程没有任何边界**。
+   *
+   * 判据不是「哪些 import 危险」（黑名单永远列不全），而是**主进程该做什么**：
+   * 窗口／会话／DB／fs／路径／菜单。块语义、查询、渲染一律不许。
+   * ⇒ 白名单只放三样：`node:*`（fs/sqlite/path）、`electron`（壳本体）、
+   *   以及两个**零依赖叶子**：`src/core/msg.ts`（纯文案字典）与 `src/core/library.ts`
+   *   （库身份/版本判据，两个进程共读同一份口径，故必须零依赖）。
+   */
+  const ALLOWED = [
+    /^node:/,
+    /^electron$/,
+    // 主进程**自己目录内**的相对 import（`./assets.ts`／`./library/session.ts`）不是跨层边。
+    // ⚠️ 必须排除 `..`：`../../src/core/walk.ts` 也能被「允许任意相对路径」的正则放过，
+    //    那样这条断言就形同虚设（实测踩到过）。
+    /^\.\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+(\.ts)?$/,
+    /^(\.\.\/)+src\/core\/msg(\.ts)?$/,
+    /^(\.\.\/)+src\/core\/library(\.ts)?$/,
+  ]
   const hits = []
   for (const f of electronFiles) {
     const r = rel(f)
     const { sf } = tsFile(f)
     for (const imp of importsOf(sf)) {
-      if (/workspace|seed|core\.ts$|commands\.ts$/.test(imp.spec)) {
-        hits.push(`${r}:${imp.line} → ${imp.spec}（主进程不得 import 数据层／业务）`)
-      }
+      if (ALLOWED.some((re) => re.test(imp.spec))) continue
+      /**
+       * **类型导入可以进 `src/core/`**：`verbatimModuleSyntax: true` 保证它写成 `import type`，
+       * 运行时被擦除（esbuild 也照样剥掉）⇒ 它拖不进任何运行时代码。
+       * 主进程要的正是「共享形状但不共享实现」：端口的类型来自 core，实现留在主进程。
+       */
+      if (imp.typeOnly && /^(\.\.\/)+src\/core\//.test(imp.spec)) continue
+      hits.push(`${r}:${imp.line} → ${imp.spec}（主进程只许 node:* / electron / core/msg / core/library，以及 core 的**类型**）`)
     }
   }
   add({
     id: '2+',
-    title: '主进程不得 import 数据层',
-    method: 'AST 遍历 electron/**/*.ts 的 import/export-from，禁 workspace / seed / core / commands；只放行 src/core/msg.ts（纯字典）',
-    scope: 'electron/main.ts · electron/preload.ts',
-    whitelist: '`../src/core/msg`（纯文案字典，零依赖，不是数据层）· `electron` · `node:*`',
+    title: '主进程准入白名单：只许 node:* / electron / core/msg / core/library（块语义、查询、渲染一律不许）',
+    method:
+      'AST 遍历 electron/**/*.ts 的 import/export-from，**白名单**逐条比：`node:*`／`electron`／`src/core/msg`／`src/core/library`；其余一律命中',
+    scope: `electron/**/*.ts（${electronFiles.length} 个文件：${electronFiles.map(rel).join(' · ')}）`,
+    whitelist:
+      '`node:*`（fs／sqlite／path）· `electron`（壳本体）· `./x.ts`（主进程自己目录内）· `src/core/msg`（纯文案字典）· `src/core/library`（库身份与版本判据，零依赖、两进程共读）',
     hits: hits.length,
     detail: hits,
+    note: '为什么是白名单：黑名单版本实测放行 core/query、core/kb/types、view/editor、app/handlers —— 「块语义搬进主进程」时门禁不会红，而那时块语义已经有两个实现',
   })
 }
 

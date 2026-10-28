@@ -27,6 +27,9 @@ import { join } from 'node:path'
 // 文案字典与 renderer **共用同一份**（`src/core/msg.ts` 是零依赖叶子）。菜单是用户可见文案，
 // 所以连「相」都走 t('app.name')，不在这里硬编码。
 import { t } from '../src/core/msg'
+import { libraryId } from '../src/core/library.ts'
+import { loadRegistry } from './library/registry.ts'
+import { LibraryManager } from './library/windows.ts'
 
 /** dev：脚本 `scripts/dev.mjs` 把 vite 的地址塞进来；prod：加载 `dist/index.html` */
 const DEV_URL = process.env.KB_DEV_SERVER_URL ?? null
@@ -212,9 +215,36 @@ ipcMain.handle('kb:shell/info', () => ({
 
 /* ------------------------------------------------------------ 窗口 */
 
-let win: BrowserWindow | null = null
+/**
+ * 库根：`~/Documents/Qua/`。测试用 `--qua-data-dir=` 覆盖，
+ * 与 `--user-data-dir=` **分开**——后者是 Electron 的 app 数据（缓存/日志），
+ * 前者是**用户的库**。混成一个的话自检脚本会把测试库写进用户文档目录。
+ *
+ * ⚠️ **但给了 `--user-data-dir=` 时，库根必须跟着它走**（除非显式再给 `--qua-data-dir=`）。
+ *    理由：`--user-data-dir` 是「这次运行与用户的真实数据隔离」的显式声明（自检脚本全靠它），
+ *    而库根是**用户数据里最重要的那一份**。不跟着走的话，跑一次冒烟就会在
+ *    `~/Documents/Qua` 里建出库来——实测真踩到过（第一次接多库时把测试库写进了用户文档目录）。
+ */
+const argvDataDir = process.argv.find((a) => a.startsWith('--qua-data-dir='))
+const QUA_DATA_ROOT = argvDataDir
+  ? argvDataDir.slice('--qua-data-dir='.length)
+  : argvUserDataDir
+    ? join(USER_DATA, 'qua-data')
+    : join(app.getPath('documents'), 'Qua')
+console.log(
+  `[shell] qua data root = ${QUA_DATA_ROOT}` +
+    `${argvDataDir ? '（命令行 --qua-data-dir 覆盖）' : argvUserDataDir ? '（跟随 --user-data-dir，与用户库隔离）' : ''}`,
+)
 
-function createWindow(): BrowserWindow {
+const REGISTRY_IO = { file: join(QUA_DATA_ROOT, 'app.json'), reposDir: join(QUA_DATA_ROOT, 'repos') }
+
+// 无库时的兜底窗口：`bootLibraries()` 总会开一个库，这个变量留给「将来加欢迎页」
+
+/**
+ * 建一扇库窗口。`libraryId` 交给 renderer 走 `qua.libraryInfo()` 取（不从 URL 传：
+ * URL 会被用户/插件看见，而库身份该由主进程按 sender 路由）。
+ */
+function createWindow(_libraryId?: string, title?: string): BrowserWindow {
   const st = readState()
 
   const w = new BrowserWindow({
@@ -230,7 +260,7 @@ function createWindow(): BrowserWindow {
     height: st.height,
     minWidth: 720,
     minHeight: 480,
-    title: APP_NAME,
+    title: title ?? APP_NAME,
     show: false,
     // 窗口底色：**主进程拿不到 CSS token**，只能在这里给。跟随系统外观 ⇒ 暗色系统上
     // 不会先闪一帧白（首帧前的底色由 shell 决定，首帧之后由 styles.css 的 color-scheme 接管）。
@@ -292,9 +322,6 @@ function createWindow(): BrowserWindow {
   w.on('close', () => {
     if (stateTimer) clearTimeout(stateTimer)
     scheduleWriteState(w)
-  })
-  w.on('closed', () => {
-    win = null
   })
 
   // —— 壳级硬化：这个 app 只有**一个**页面，任何导航/开新窗都不是它该做的事 ——
@@ -407,24 +434,88 @@ function buildMenu(): Menu {
 
 /* ------------------------------------------------------------ 生命周期 */
 
-// 单实例：第二次从 Finder 双击只是把已有窗口拉到前面（而不是起第二个 app 抢同一份 localStorage）
+/**
+ * 库管理器：一库一窗、会话、IPC 路由。
+ *
+ * 为什么在 `whenReady` 之前建：`installIpc()` 必须在任何窗口加载之前装好
+ * （renderer 一加载就会问 `qua:library/info`）。
+ */
+const manager = new LibraryManager({
+  io: REGISTRY_IO,
+  createWindow: (libraryId, title) => createWindow(libraryId, title),
+  readBounds: readState,
+  writeBounds: (w) => scheduleWriteState(w),
+})
+
+manager.installIpc()
+
+/**
+ * 启动落点：`lastOpenedId` 能开就开它；否则建／开第一个库。
+ *
+ * 为什么 v1 **总是**开一个库（而不是欢迎页）：欢迎页要一套没有库的渲染面，
+ * 那是一整块独立的 UI。当前的完成判据是「两个库两个窗口」——
+ * 先保证「有库可用」，「没有库时怎么办」留给最近库管理那一档。
+ *
+ * ⚠️ 没有库时**建一个默认库**，不是「什么都不开」：空窗口会让 renderer 拿不到库，
+ * 于是它走 `no-library` 分支——那条分支现在还不存在。
+ */
+function bootLibraries(): void {
+  const loaded = loadRegistry(REGISTRY_IO)
+  const last = loaded.registry.lastOpenedId
+  if (last) {
+    const r = manager.open(last)
+    if (r.status === 'ok') return
+    console.warn('[library] lastOpenedId failed to open, falling back', r.failure)
+  }
+  const first = loaded.registry.libraries[0]
+  if (first) {
+    const r = manager.open(first.id)
+    if (r.status === 'ok') return
+    console.warn('[library] first library failed to open', r.failure)
+  }
+  // 一个库都没有（首次启动）：建默认库
+  const id = libraryId()
+  const r = manager.create(id, t('library.defaultName'))
+  if (r.status === 'failed') console.error('[library] failed to create default library', r.failure)
+}
+
+// 单实例：第二次从 Finder 双击只是把已有窗口拉到前面（而不是起第二个 app 抢同一份库）
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    if (!win) return
-    if (win.isMinimized()) win.restore()
-    win.focus()
+    // v1：聚焦最后聚焦的那扇窗口（恢复「上次全部窗口」后置）
+    const wins = BrowserWindow.getAllWindows()
+    const w = wins[wins.length - 1]
+    if (!w) return
+    if (w.isMinimized()) w.restore()
+    w.show()
+    w.focus()
   })
 
   void app.whenReady().then(() => {
     Menu.setApplicationMenu(buildMenu())
-    win = createWindow()
+    bootLibraries()
 
     app.on('activate', () => {
-      // macOS：点 Dock 图标且没有窗口时重开一个
-      if (BrowserWindow.getAllWindows().length === 0) win = createWindow()
+      // macOS：点 Dock 图标且没有窗口时重开最后库
+      if (BrowserWindow.getAllWindows().length === 0) bootLibraries()
     })
+  })
+
+  /**
+   * 退出前等所有库 settle。
+   *
+   * ⚠️ 这里是 `preventDefault` 的**第二处**（第一处是每个窗口的 `close`）：
+   * 不挡的话 app 会直接退，renderer 那 250ms 防抖里最后一批就丢了。
+   * 挡了之后由 `quitAll()` 逐个走握手，走完再真退。
+   */
+  let quitting = false
+  app.on('before-quit', (e) => {
+    if (quitting) return
+    e.preventDefault()
+    quitting = true
+    void manager.quitAll().then(() => app.quit())
   })
 
   app.on('window-all-closed', () => {
