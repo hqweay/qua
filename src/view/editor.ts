@@ -441,9 +441,9 @@ export class BlockEditor {
     this.offStore =
       o.autoReload === false
         ? () => {}
-        : this.store.subscribe((source?: unknown, ids?: readonly string[], forestReplaced?: boolean) => {
+        : this.store.subscribe((source?: unknown, ids?: readonly string[]) => {
             // 发起编辑的视图自己已经渲染过；其他视图按 root id 从 store 重取（共享对象，不拷贝块数据）
-            if (source !== this) this.reloadFromStore(true, ids, forestReplaced === true)
+            if (source !== this) this.reloadFromStore(true, ids)
           })
     this.container.setAttribute('contenteditable', 'true')
     this.container.setAttribute('spellcheck', 'false')
@@ -470,11 +470,7 @@ export class BlockEditor {
    *
    * ⚠️ 其他视图收到 `touch` 时调用；不触发 `events.change`（否则会回写成“编辑”）。
    */
-  /**
-   * @param force 忽略「里层编辑岛优先」的推迟（undo/redo 用的：森林整体被换掉时
-   *              推迟只会让正文停在旧内容上；那时也不存在「打断里层打字」的问题）
-   */
-  reloadFromStore(restoreSelection = true, ids?: readonly string[], force = false): void {
+  reloadFromStore(restoreSelection = true, ids?: readonly string[]): void {
     /**
      * **组合期不换 DOM**（见 `deferWhileComposing`）：记一笔「欠一次」就返回。
      * ⚠️ 这条必须**先于**下面那两条分支判：`renderBlock` 自己也有守卫，但在这里早退
@@ -486,7 +482,7 @@ export class BlockEditor {
      * 动结构 ＝ 把挂载区那棵子树搬一遍 ＝ 里层编辑器失焦、光标丢失。
      * 全量重排记在 `pendingReload`，等焦点离开编辑岛再补（`flushPendingReload`）。
      */
-    if (!force && (this.pointerDown || this.focusInMount())) {
+    if (this.pointerDown || this.focusInMount()) {
       if (ids && ids.length > 0) for (const id of ids) this.renderBlock(id)
       this.pendingReload = true
       this.armFlush()

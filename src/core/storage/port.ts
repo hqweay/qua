@@ -33,12 +33,13 @@ export type ChangeKind = 'blocks' | 'annos'
  *    将来接同步层时这里会扩成 `{ kind, id, op: 'upsert' | 'delete', value }`，
  *    但**对外形状不变**——适配器照样只承诺「这批改动落盘了」。
  *
- * `id` 两种取值，消费者必须都处理：
- *   · 具体 id —— 精确到块／区间，索引可只重算它；
- *   · `'*'`  —— 「这一类都可能动过」，拿不到精确 id 时的**保守**声明。
+ * `id` 两种取值：
+ *   · 具体 id —— 精确到块／区间；
+ *   · `'*'`  —— 「这一类都可能动过」。它现在**只剩一个来源**：零 op 的提交
+ *     （例如只换了落点）。那不是「不知道变了什么」，而是「这一批确实什么都没改」，
+ *     适配器只需要写 meta 两格 —— 报整类是为了不假装知道具体 id。
  *
- * ⚠️ `'*'` 不是「没实现」的兜底，而是「确实不知道」的如实表达
- *    （例如换库、批量导入、结构性重排）。宁可多重建一次，也不要自相矛盾的索引。
+ * ⚠️ 有 op 的时候**永远**给具体 id（`changesOf` 从 op 推导）：`apply` 知道每一格。
  */
 export interface Change {
   kind: ChangeKind
@@ -48,17 +49,6 @@ export interface Change {
 
 export const WHOLE_CLASS = '*'
 
-/** 这批改动里，`kind` 这一类是不是「整类都动过」 */
-export function isWholeClass(changes: readonly Change[], kind: ChangeKind): boolean {
-  return changes.some((c) => c.kind === kind && c.id === WHOLE_CLASS)
-}
-
-/** 这批改动里 `kind` 这一类点到的具体 id（**不含** `'*'`） */
-export function idsOfKind(changes: readonly Change[], kind: ChangeKind): string[] {
-  const out = new Set<string>()
-  for (const c of changes) if (c.kind === kind && c.id !== WHOLE_CLASS) out.add(c.id)
-  return [...out]
-}
 
 /**
  * 一次提交的内容。

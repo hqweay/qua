@@ -122,12 +122,12 @@ export function setupPersistence(deps: PersistenceDeps) {
   }
 
   /**
-   * 上一次落盘时**森林被换掉的次数**（`BlockStore.replacementCount`）。
+   * 上一次落盘时**森林被整片换掉的次数**（`BlockStore.swapCount`）。
    *
-   * 为什么记它而不是记「上一次写的是哪一份」：换森林只有两条路（`reset`／`restore`），
-   * 它们都让这个数加一。于是「要不要整份写」只用一个整数判断，不必逐块 diff。
+   * 为什么记它而不是记「上一次写的是哪一份」：换森林今天只有一条路（`reset`＝换库）。
+   * 撤销/重做曾经也走那条路，现在改走 op ⇒ 它们不再需要整份写。
    */
-  let savedReplacements = blocks.replacementCount
+  let savedSwap = blocks.swapCount
   /**
    * 盘上还没有这份模型 ⇒ 第一次落盘必须整份写（种子／旧库作废／换库之后的第一笔）。
    *
@@ -178,9 +178,9 @@ export function setupPersistence(deps: PersistenceDeps) {
      * 撤销/重做改走 op 之后，它们与一次普通编辑同路（增量写盘）。
      * 零 op 但森林没换（例如只换了落点）⇒ 照常增量，只写 meta 两格。
      */
-    const replace = needsFullWrite || blocks.replacementCount !== savedReplacements
+    const replace = needsFullWrite || blocks.swapCount !== savedSwap
     needsFullWrite = false
-    savedReplacements = blocks.replacementCount
+    savedSwap = blocks.swapCount
     void persist(ops, replace).then((saved) => {
       if (!saved.ok) warnSaveFailed(saved.error)
     })

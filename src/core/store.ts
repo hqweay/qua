@@ -28,24 +28,24 @@ import { applyOps, diff } from './kb/diff.ts'
  * ⚠️ 拿不到精确 id 的调用方（续用旧的 `touch(this)`）就不传，订阅者必须容忍 `ids === undefined`。
  */
 /**
- * `forestReplaced` ＝ **整片森林被换掉了**（undo/redo：`restore` 里 `blocks` 数组原地换内容
- * ⇒ 各视图手里那批块对象**当场过期**，只有按 id 重取才能看到新值）。
+ * 订阅者收到的信号：**谁发起的**、**动过哪些块**。
  *
- * 为什么订阅者需要知道它：编辑器有一条「焦点在里层编辑岛时不搬 DOM」的推迟策略
- * （防打断里层输入），但那条是为**打字**准备的。森林整体被换掉时推迟是错的——
- * 用户按了 ⌘Z，正文却停在旧内容上、直到焦点离开挂载区才补（实测：1.2 秒都不刷）。
+ * ⚠️ 曾经还有第三个参数 `forestReplaced`（「整片森林被换掉了」）：撤销那时
+ * `JSON.parse` 换掉整片森林 ⇒ 各视图手里的块对象当场过期，必须靠这个旗标
+ * 让它们「按 id 重取、并且不许推迟」。撤销改走 `applyOps`（原地写格、对象身份不变）之后，
+ * **没有任何地方需要它了** —— 旗标存在的唯一原因是旧机制的实现细节。
  */
-export type StoreSubscriber = (source?: unknown, ids?: readonly string[], forestReplaced?: boolean) => void
+export type StoreSubscriber = (source?: unknown, ids?: readonly string[]) => void
 
 export class BlockStore {
   blocks: Block[]
   undoStack = new UndoStack()
   /**
-   * **整片森林被换掉的次数**（`restore`／`reset`）。
+   * **森林被整片换过没有**（只有 `reset` ＝ 换库会置它）。
    *
-   * 为什么需要它：增量落盘按 op 走，而撤销/重做与换库**不产生 op** ——
-   * 它们把森林整个换成另一份。落盘层据此判「这批必须整份写」，
-   * 而不是靠「这批 op 是空的」去猜（那会把「只是换了个落点」也当成整库重写）。
+   * 为什么需要它：增量落盘按 op 走，而换库**不产生 op** —— 它把森林整个换成另一份。
+   * 落盘层据此判「这批必须整份写」，而不是靠「这批 op 是空的」去猜
+   * （那会把「只是换了个落点」也当成整库重写）。
    */
   private replaced = 0
   private subs = new Set<StoreSubscriber>()
@@ -83,9 +83,9 @@ export class BlockStore {
    * 唯一的宣布者是一次事务的出口（`Kb.apply`），因为只有它知道「变了哪几格」。
    * 自己宣布 ⇒ 索引会被无谓作废、订阅者会被通知两次（真踩过：打字每键两次全视图重载）。
    */
-  private notify(source?: unknown, ids?: readonly string[], forestReplaced = false): void {
+  private notify(source?: unknown, ids?: readonly string[]): void {
     this.probe.notifyCount++
-    for (const fn of this.subs) fn(source, ids, forestReplaced)
+    for (const fn of this.subs) fn(source, ids)
   }
 
   /**
@@ -162,7 +162,13 @@ export class BlockStore {
     return { ops, sel: JSON.parse(s.sel) as Sel | null }
   }
 
-  /** 演示状态整体换库：换数组引用，清 undo，通知所有视图（source 不传） */
+  /**
+   * 整体换库：换数组引用，清 undo，通知所有视图（source 不传）。
+   *
+   * ⚠️ 这是**今天唯一**还会「整片换掉森林」的路径 —— 而它天然跨库，不产 op 是对的
+   *    （`op_log` 记的是「这个库里发生了什么」，换库不是这个库里的一次编辑）。
+   *    撤销/重做曾走同一条路（`JSON.parse` + `splice`），现在改走 `diff`+`applyOps`。
+   */
   reset(blocks: Block[]): void {
     this.replaced++
     this.blocks = blocks
@@ -172,12 +178,15 @@ export class BlockStore {
   }
 
   /**
-   * 森林被整份换掉的次数。**只增**，落盘层拿它判断「这一批要不要整份写」。
+   * **森林被整片换掉的次数**（只有 `reset` ＝ 换库会让它加一）。
+   *
+   * 为什么是**计数**而不是标志：标志需要在消费后清零（否则第二次换库检测不到），
+   * 而那会引入一个「谁负责清零」的协议。计数天然是「比上一次的值」，不需要协议。
    *
    * 为什么不看「这批 op 是空的」：换落点（`setActiveId`）也是零 op，
    * 而它只需要写 `meta` 两格。把两者混成一件事，每次翻页都要整库重写一遍。
    */
-  get replacementCount(): number {
+  get swapCount(): number {
     return this.replaced
   }
 
