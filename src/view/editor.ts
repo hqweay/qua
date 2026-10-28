@@ -47,6 +47,7 @@ import {
   createObjRecordDirect,
   createObjRecordInTx,
   findInForest,
+  trashOf,
   applyMove,
   dropMove,
   normSel,
@@ -2156,6 +2157,34 @@ export class BlockEditor {
     this.placeCaret(block.id, 0)
     this.emitChange('struct')
     return block.id
+  }
+
+  /**
+   * 从回收站恢复一块：它回原位（`Tx.restore`），整棵子树一起重新可见。
+   *
+   * 为什么走编辑器而不是模型层的裸 `kb.tx`：**写入口只有一个**（`this.write` 里带着
+   * 撤销快照与落盘排期）。绕过去的话，这次恢复不进撤销栈、也不触发落盘——
+   * 用户按 ⌘Z 撤不回来，关掉应用还会丢。
+   */
+  restoreFromTrash(id: string): boolean {
+    if (!this.write) return false
+    const before = this.snap()
+    /**
+     * 恢复的是**被删的那个操作根**；它的祖先若也被删了，它仍然不可见
+     * （不可见是继承来的）⇒ 这种情况如实返回 `false`，由调用方给文案。
+     *
+     * ⚠️ 查它必须**含被删块**：`findInForest` 走可见遍历，看不见已删的块
+     *    （实测踩到：用它查，恢复永远返回 false）。所以用 `trashOf` 的那一份清单。
+     */
+    const inTrash = trashOf(this.store.blocks).some((b) => b.id === id)
+    if (!inTrash) return false
+    this.write((tx) => {
+      tx.restore(id)
+    })
+    this.undo.record(before, 'structural', Date.now())
+    this.renderAll()
+    this.emitChange('struct')
+    return true
   }
 
   remove(id: string): void {

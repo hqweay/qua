@@ -73,6 +73,19 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     app.toast(t('ui.toast.blockDeleted'))
     return true
   },
+  /**
+   * 从回收站恢复一块（回收站卡的「恢复」按钮与命令面板共用这一条）。
+   *
+   * 判据：恢复**不改变「它是哪一块」**——只摘掉删除标记，块回到原位。
+   * 所以这里不新建块、不复制内容，也不改它的 id（引用它的地方会自己接回来）。
+   */
+  'core.block/restore': (args, app) => {
+    const id = (args as { blockId?: string }).blockId
+    if (!id) return false
+    if (!app.ed.restoreFromTrash(id)) return false
+    app.toast(t('ui.toast.blockRestored'))
+    return true
+  },
   'core.editor/toggle-todo': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false

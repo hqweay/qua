@@ -11067,6 +11067,128 @@ await check('T142 挂载区里 ↵：新块是命中块的子块、留在本栏�
   return `引用栏 ${n0}→${out.rows.length} 行；新块父＝${out.parentOfNew.parent}（命中块）；光标仍在挂载区`
 })
 
+/* ---------------------------------------------------------------- T143 */
+
+/**
+ * 回收站：**看得见 ＋ 能找回**。
+ *
+ * 模型早就有（原位软删 ＋ `kb.trash()` ＋ `Tx.restore`），缺的一直是入口。
+ * 删掉一块在 UI 里是单向的——只有 ⌘Z 能回去，而撤销栈是**内存快照**：
+ * 关掉应用再打开，那块就再也找不回来了，尽管它还在库里。
+ *
+ * 判据：
+ *   ① 回收站卡在右槽，列出被删的块（正文可见，不是空白行）；
+ *   ② 删一棵子树只列**一条**（操作根），后代不各列一条；
+ *   ③ 点「恢复」⇒ 块回原位，且**一次撤销**能回滚这次恢复；
+ *   ④ 空态给一句明确文案。
+ */
+await check('T143 回收站：删掉的块看得见、能一键恢复回原位、空态有话说', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  // ① 卡在右槽（派生卡，id 固定）
+  const cardPresent = await page.evaluate(() => Boolean(document.querySelector('[data-card-id="trash"]')))
+  assert(cardPresent, '右槽应有回收站卡（派生卡 id 固定为 trash）')
+
+  // ② 删一棵**有子块**的块 ⇒ 回收站只列一条
+  /**
+   * 挑一块**在当前视图里**的普通内容块（有子块、有正文、且**不是装载根**）。
+   *
+   * ⚠️ 必须从 `ed.doc.roots` 里挑，不能从 `ed.store.blocks`（整片森林）里挑：
+   *    `ed.remove` 走 `locate(this.doc, id)`——不在当前视图里的块它**直接返回**，
+   *    块数不变、也不报错（实测踩到：挑到森林里另一页的块，删了等于没删）。
+   * ⚠️ 排除装载根：`ed.remove` 对有身份的根块会拒绝（页／日记是视图的装载单位）。
+   */
+  const target = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const plain = (b) => b.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
+    const rootIds = new Set(ed.doc.roots.map((b) => b.id))
+    let hit = null
+    const walk = (list) => {
+      for (const b of list) {
+        if (!hit && !rootIds.has(b.id) && b.children.length > 0 && plain(b).length > 1) {
+          hit = { id: b.id, text: plain(b), kids: b.children.length }
+        }
+        walk(b.children)
+      }
+    }
+    walk(ed.doc.roots)
+    return hit
+  })
+  assert(target, '前置：应有「有子块且有正文」的块可删')
+
+  /**
+   * 删除走编辑器层（\`ed.remove\` 才是用户按删除时走的那一条：它带视图补偿）。
+   * 命令面 \`core.editor/delete-block\` 取的是「当前块」，而这里要删的是**指定的一块**。
+   */
+  await page.evaluate((id) => window.__qua.__editor.remove(id), target.id)
+  await page.waitForTimeout(250)
+
+  const rows = await page.evaluate(() => {
+    const card = document.querySelector('[data-card-id="trash"]')
+    if (!card) return []
+    return [...card.querySelectorAll('[data-trash-row]')].map((el) => ({
+      id: el.getAttribute('data-trash-row'),
+      text: el.textContent ?? '',
+    }))
+  })
+  assert(rows.length === 1, `删一棵子树只该列一条（操作根），实际 ${rows.length}：${JSON.stringify(rows)}`)
+  assert(rows[0].id === target.id, `回收站里应是刚删的那一块：${rows[0].id} ≠ ${target.id}`)
+  assert(rows[0].text.includes(target.text.slice(0, 4)), `回收站那一行要带它自己的正文（不是空白行）：${rows[0].text}`)
+
+  // ③ 恢复 ⇒ 回原位
+  const before = await page.evaluate((id) => {
+    const ed = window.__qua.__editor
+    const p = ed.store.find(id)
+    return { gone: !p, roots: ed.store.blocks.map((b) => b.id) }
+  }, target.id)
+  assert(before.gone, '前置：删掉之后按可见读应当找不到它')
+
+  /**
+   * 点「恢复」（与按钮同一个入口：命令面）。
+   * ⚠️ 参数名是 `blockId`（命令声明里的名字）——写成 `id` 会被当成没给参数，
+   *    handler 直接返回 false，而界面看起来「点了没反应」（实测踩到）。
+   */
+  await page.evaluate(() =>
+    window.__qua.invoke('core.block/restore', {
+      blockId: document.querySelector('[data-trash-row]')?.getAttribute('data-trash-row'),
+    }),
+  )
+  await page.waitForTimeout(250)
+  const after = await page.evaluate((id) => {
+    const ed = window.__qua.__editor
+    const b = ed.store.find(id)
+    return { back: Boolean(b), trashRows: document.querySelectorAll('[data-card-id="trash"] [data-trash-row]').length }
+  }, target.id)
+  assert(after.back, '点恢复之后那一块应当又能读到')
+  assert(after.trashRows === 0, `恢复之后回收站该空，实际还有 ${after.trashRows} 条`)
+
+  // ③b 一次撤销回滚这次恢复
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForTimeout(250)
+  const undone = await page.evaluate((id) => ({
+    gone: !window.__qua.__editor.store.find(id),
+    trashRows: document.querySelectorAll('[data-card-id="trash"] [data-trash-row]').length,
+  }), target.id)
+  assert(undone.gone, '撤销应当把恢复回滚（块又回到回收站）')
+  assert(undone.trashRows === 1, `撤销之后回收站该又有一条，实际 ${undone.trashRows}`)
+
+  // ④ 空态：再恢复一次，然后看空态文案
+  await page.evaluate(() => window.__qua.invoke('core.history/redo'))
+  await page.waitForTimeout(250)
+  const empty = await page.evaluate(() => {
+    const card = document.querySelector('[data-card-id="trash"]')
+    const msg = card?.querySelector('.dock-empty')?.textContent ?? ''
+    return { rows: card?.querySelectorAll('[data-trash-row]').length ?? -1, msg }
+  })
+  assert(empty.rows === 0, `空态时不该有行，实际 ${empty.rows}`)
+  assert(empty.msg.length > 0, '空态要给一句明确文案（不是一张空白卡）')
+
+  await ctx.close()
+  return `回收站卡在右槽；删子树只列 1 条（操作根）；恢复回原位且可撤销；空态有文案`
+})
+
 /**
  * ⚠️ **报告先写，再关浏览器。** 反过来的话，机器被压死那一刻 Chrome 先死，
  *    `browser.close()` 抛出来，报告就永远没写 —— 编排端只能看到「这一片没留下报告」，
@@ -11084,6 +11206,9 @@ try {
   console.error(`关浏览器失败（结果已写完，不影响判定）：${e?.message ?? e}`)
 }
 if (server) server.close()
+
+
+
 
 if (!REPORT) {
   console.log('')

@@ -92,7 +92,7 @@ export const DEFAULT_DOCK: DockPrefs = {
       'journal',
     ],
   },
-  right: { open: true, width: null, cards: ['inspect', 'backrefs'] },
+  right: { open: true, width: null, cards: ['inspect', 'backrefs', 'trash'] },
   collapsedCards: {},
   solo: { left: null, right: null },
 }

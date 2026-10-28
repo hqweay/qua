@@ -33,7 +33,7 @@ import {
   type DockSlotEls,
   type DockTile,
 } from '../../ui/dock.ts'
-import { backrefsCard, todayCard, type DockContentDeps } from '../../ui/dock-content.ts'
+import { backrefsCard, todayCard, trashCard, type DockContentDeps } from '../../ui/dock-content.ts'
 import { widgetBody, widgetTitle, type WidgetDeps } from '../../ui/dock-widgets.ts'
 import { BelongsTree } from '../../ui/belongs-tree.ts'
 import { applyWidgetHeights } from '../../view/block-dom.ts'
@@ -80,6 +80,14 @@ export function setupDocks(deps: DocksDeps) {
     // 共享索引由 store 缓存（懒重建）⇒ 反链不再每次扫全库 atoms ＋ 遍历森林
     openPage: (id) => void deps.getRegistry().invoke('core.page/open', { pageId: id }, 'menu'),
     openInDock: (id) => openWindow('right', id),
+    /**
+     * 回收站的「恢复」走命令面：撤销、落盘、索引失效三条路径只有一处入口。
+     * 写完补一次重画——回收站卡不是编辑器，没有自己的 change 事件。
+     */
+    restoreBlock: (id) => {
+      void deps.getRegistry().invoke('core.block/restore', { blockId: id }, 'dock')
+      renderDocks()
+    },
   }
 
   /**
@@ -347,7 +355,9 @@ export function setupDocks(deps: DocksDeps) {
           ? todayCard(dockDeps)
           : id === 'backrefs'
             ? backrefsCard(dockDeps)
-            : null
+            : id === 'trash'
+              ? trashCard(dockDeps)
+              : null
     if (!spec) return null
     return { id: spec.id, el: buildDockCard(spec, cardStateFor(side, spec.id)) }
   }

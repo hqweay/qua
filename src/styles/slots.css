@@ -490,3 +490,40 @@ button.ghost.wide {
   background: var(--ui-accent-soft);
   border-radius: var(--ui-radius-sm);
 }
+
+/* 回收站卡：一行一个被删的块（只读正文 ＋ 恢复按钮）。
+   为什么不做成可编辑行：它此刻是「被删的」，就地改它没有语义——
+   要改就先恢复。渲染成普通行会诱使人去改一个不在树上的东西。 */
+.trash-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  min-height: 26px;
+  padding: 0 var(--ui-gap-1);
+  border-radius: var(--ui-radius-sm);
+}
+.trash-row:hover {
+  background: var(--ui-bg-hover);
+}
+.trash-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-text-secondary);
+}
+.trash-restore {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--ui-accent);
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  cursor: pointer;
+  padding: 2px var(--ui-gap-1);
+  border-radius: var(--ui-radius-sm);
+}
+.trash-restore:hover {
+  background: var(--ui-bg-hover);
+}
