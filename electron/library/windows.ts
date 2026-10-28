@@ -280,7 +280,7 @@ export class LibraryManager {
       return content ? { status: 'ok', json: content.json, savedAt: content.savedAt } : { status: 'empty' }
     })
 
-    /** 写内容（整份替换；`payload` 里**不带** `version`，见 A1） */
+    /** 写内容（整份替换；payload 里**不带** version：库的 schema 版本只有一个判据，就是 user_version） */
     ipcMain.handle('qua:storage/save', (e, json: unknown, savedAt: unknown) => {
       const s = sessionOf(e)
       if (!s) return { ok: false, error: 'no-library' }

@@ -5360,7 +5360,7 @@ await check(
       upsert.value?.parent === target.parentId,
       `落点应由事务按整片森林算：父应是「${target.parentId}」，实际「${upsert.value?.parent}」`,
     )
-    assert(upsert.value?.index === target.index + 1, `下标应是原块之后：${JSON.stringify(upsert.value)}（期望 ${target.index + 1}）`)
+    assert(upsert.value?.prev === target.id, `前兄弟应是原块（${target.id.slice(-6)}）：${JSON.stringify(upsert.value)}`)
     assert(after.inModel, '新块应真的在模型里（不是只算出一条 op）')
     assert(after.total === target.before + 1, `块数应 +1：${target.before} → ${after.total}`)
 
@@ -5500,6 +5500,11 @@ await check(
         text: b ? plain(b) : '',
         parentId: parent?.id ?? '',
         index: parent ? parent.children.findIndex((k) => k.id === b.id) : -1,
+        // 原块的前兄弟 id（op 记的是它，不是下标）
+        prevId: (() => {
+          const i = parent ? parent.children.findIndex((k) => k.id === b.id) : -1
+          return i <= 0 ? null : (parent.children[i - 1]?.id ?? null)
+        })(),
         before,
       }
     })
@@ -5533,7 +5538,8 @@ await check(
           id: o.id ?? o.block,
           op: o.op,
           parent: o.value?.parent,
-          index: o.value?.index,
+          pos: o.value?.prev === null ? 0 : undefined,
+          prev: o.value?.prev,
           text: o.value?.content === undefined ? undefined : runPlain(o.value.content),
         })),
         text: live ? plain(live) : '',
@@ -5562,8 +5568,8 @@ await check(
       `左半的父应是「${target.parentId}」，实际「${structOps[0].parent}」`,
     )
     assert(
-      structOps[0].index === target.index,
-      `左半应插在原 index 之前（原块顺延到它下面）：期望 ${target.index}，实际 ${structOps[0].index}`,
+      structOps[0].prev === target.prevId,
+      `左半的前兄弟应是原块前面那一块：实际 ${JSON.stringify(structOps[0].prev)}`,
     )
 
     // 模型：原块 = 右半；新块 = 左半；新块在原位上方
@@ -5895,6 +5901,14 @@ await check(
     )
     assert(prev, '前置：选中的块应有前兄弟')
     const prevStart = await pos(prev)
+    /**
+     * 缩进之后的**前兄弟**＝`prev` 的最后一个孩子（那一层只有 prev 有孩子）。
+     * 用 id 而不是下标表达落点：op 记的是前兄弟 id（下标进了持久化历史就补不回来）。
+     */
+    const prevLastKid = await page.evaluate((id) => {
+      const b = window.__qua.__editor.store.find(id)
+      return b?.children.at(-1)?.id ?? null
+    }, prev)
 
     const depthOf = (id) =>
       page.evaluate(
@@ -5905,14 +5919,19 @@ await check(
       page.evaluate(() => window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, value: o.value })))
 
     /**
-     * 一次结构移动的 op 形状：**一条** `upsert{parent,index}` ＋ **一条**记时刻的 `upsert{…,modified}`。
+     * 一次结构移动的 op 形状：**一条** `upsert{parent,prev}` ＋ **一条**记时刻的 `upsert{…,modified}`。
      *
      * 为什么是两条而不是并成一条：换位置与「最后一次改动」是同一块上的两件事，
      * 但结构 op 的判据是「它现在在哪」，往里掺正文/时刻会让「结构不作 diff」那条
      * 纪律失效（结构变化必须一眼看得出）。两条仍在一笔事务里 ⇒ 撤销一次回去。
+     *
+     * 落点记的是**前兄弟 id**（不是下标）：下标只对「那一刻的兄弟列表」有意义，
+     * 进了持久化历史就补不回来。这里断言锚点，位置由「锚点之后」唯一确定。
      */
     const oneMove = (list, want) => {
-      const places = list.filter((o) => o.e === 'block' && o.op === 'upsert' && (o.value?.parent !== undefined || o.value?.index !== undefined))
+      const places = list.filter(
+        (o) => o.e === 'block' && o.op === 'upsert' && (o.value?.parent !== undefined || o.value?.prev !== undefined),
+      )
       const stamps = list.filter((o) => o.e === 'block' && o.op === 'upsert' && o.value?.modified !== undefined && o.value?.parent === undefined)
       assert(places.length === 1 && stamps.length === 1 && list.length === 2, `应恰好 2 条 op（落点 ＋ 时刻）：${JSON.stringify(list)}`)
       const p0 = places[0]
@@ -5920,10 +5939,10 @@ await check(
       const v = p0.value ?? {}
       assert(
         Object.keys(v).length === 2,
-        `落点只该带 {parent,index}（不带正文/属性）：${JSON.stringify(v)}`,
+        `落点只该带 {parent,prev}（不带正文/属性）：${JSON.stringify(v)}`,
       )
       assert(v.parent === want.parentId, `父块应是「${want.parentId}」，实际「${v.parent}」`)
-      assert(v.index === want.index, `下标应是 ${want.index}，实际 ${v.index}`)
+      assert(v.prev === want.prev, `前兄弟应是 ${JSON.stringify(want.prev)}，实际 ${JSON.stringify(v.prev)}`)
       assert(stamps[0].id === pick.id, `记时刻的那条该是同一块：${JSON.stringify(stamps[0])}`)
     }
 
@@ -5931,7 +5950,7 @@ await check(
     await page.evaluate((p) => window.__qua.focusBlock(p.id, 1), pick)
     await page.keyboard.press('Tab')
     await page.waitForTimeout(180)
-    oneMove(await ops(), { parentId: prev, index: prevStart.kids })
+    oneMove(await ops(), { parentId: prev, prev: prevLastKid })
     const afterIndent = await pos(pick.id)
     assert(
       afterIndent.parentId === prev && afterIndent.index === prevStart.kids,
@@ -5942,7 +5961,7 @@ await check(
     // ② Shift+Tab 反缩进：变父的下一个兄弟 ⇒ 回到原位
     await page.keyboard.press('Shift+Tab')
     await page.waitForTimeout(180)
-    oneMove(await ops(), { parentId: start.parentId, index: prevStart.index + 1 })
+    oneMove(await ops(), { parentId: start.parentId, prev })
     const afterOutdent = await pos(pick.id)
     assert(
       afterOutdent.parentId === start.parentId && afterOutdent.index === start.index,
@@ -5951,9 +5970,22 @@ await check(
     assert((await depthOf(pick.id)) === pick.depth, `DOM 深度应回原样：${await depthOf(pick.id)}`)
 
     // ③ ⌘⇧↑ 上移一位：同层换位，仍是一条 move
+    // 上移一格之后，前兄弟是「原来在它前面第二块」的那一块（用 id 表达锚点）
+    const prev2 = await page.evaluate((id) => {
+      const ed = window.__qua.__editor
+      let out = null
+      const walk = (list) => {
+        list.forEach((b, i) => {
+          if (b.id === id) out = list[i - 2]?.id ?? null
+          walk(b.children)
+        })
+      }
+      walk(ed.store.blocks)
+      return out
+    }, pick.id)
     await page.keyboard.press('Meta+Shift+ArrowUp')
     await page.waitForTimeout(180)
-    oneMove(await ops(), { parentId: start.parentId, index: start.index - 1 })
+    oneMove(await ops(), { parentId: start.parentId, prev: prev2 })
     const afterUp = await pos(pick.id)
     assert(afterUp.index === start.index - 1, `上移后下标应是 ${start.index - 1}：${JSON.stringify(afterUp)}`)
 
@@ -6220,7 +6252,8 @@ await check(
           op: o.op,
           text: o.value?.content === undefined ? undefined : runPlain(o.value.content),
           parent: o.value?.parent,
-          index: o.value?.index,
+          pos: o.value?.prev === null ? 0 : undefined,
+          prev: o.value?.prev,
         })),
         gone: ed.store.find(t.id) === undefined,
         prevText: plain(prev),
@@ -6247,7 +6280,9 @@ await check(
       const op = moveOps.find((o) => o.id === kid)
       assert(op, `子块 ${kid} 应有自己的 move op：${JSON.stringify(moveOps)}`)
       assert(op.parent === pick.prevId, `子块应挂到前一块下：${JSON.stringify(op)}`)
-      assert(op.index === pick.prevKids + n, `子块落点应是 ${pick.prevKids + n}：${JSON.stringify(op)}`)
+      // 子块按顺序接到前一块的末尾：第一块的锚点是前一块原来的最后一个孩子，之后依次相承
+      const wantPrev = n === 0 ? (pick.prevKids === 0 ? null : pick.prevChildIds[pick.prevKids - 1] ?? null) : pick.kids[n - 1]
+      assert(op.prev === wantPrev, `子块的前兄弟应是 ${JSON.stringify(wantPrev)}：${JSON.stringify(op)}`)
     }
     assert(delOps.length === 1 && delOps[0].id === pick.id, `被并块应有 1 条 block.delete：${JSON.stringify(delOps)}`)
     assert(after.ops.length === 3 + pick.kids.length, `op 总数应是「正文 1 ＋ 子块 ${pick.kids.length} ＋ 清壳 1 ＋ 删除 1」：${JSON.stringify(after.ops)}`)
@@ -6444,7 +6479,7 @@ await check(
       op0.e === 'block' && op0.id === pageEnter.firstKid && op0.op === 'upsert',
       `应是新首个子块的 upsert：${JSON.stringify(pageEnter.ops)}`,
     )
-    assert(op0.value.parent === root.id && op0.value.index === 0, `落点应是根的第 0 位：${JSON.stringify(op0.value)}`)
+    assert(op0.value.parent === root.id && op0.value.prev === null, `落点应是根的第 0 位（前兄弟 null）：${JSON.stringify(op0.value)}`)
     assert(pageEnter.text === root.text, '根正文不该被切开（有身份的根只插空子块）')
     assert(pageEnter.kids === root.kids + 1, `子块数应 +1：${root.kids} → ${pageEnter.kids}`)
 
@@ -6489,7 +6524,8 @@ await check(
           op: o.op,
           text: o.value?.content === undefined ? undefined : runPlain(o.value.content),
           parent: o.value?.parent,
-          index: o.value?.index,
+          pos: o.value?.prev === null ? 0 : undefined,
+          prev: o.value?.prev,
         })),
         text: plain(r),
         firstKid: r?.children[0]?.id ?? '',
@@ -6506,7 +6542,7 @@ await check(
     assert(textOps.length === 1 && textOps[0].id === inner.id, `原块应留左半：${JSON.stringify(textOps)}`)
     assert(textOps[0].text === inner.text.slice(0, 2), `左半应是「${inner.text.slice(0, 2)}」：${JSON.stringify(textOps[0].text)}`)
     assert(moveOps.length === 1 && moveOps[0].id === contentEnter.firstKid, `应插一个新首个子块：${JSON.stringify(moveOps)}`)
-    assert(moveOps[0].parent === inner.id && moveOps[0].index === 0, `落点应是根的第 0 位：${JSON.stringify(moveOps[0])}`)
+    assert(moveOps[0].parent === inner.id && moveOps[0].prev === null, `落点应是根的第 0 位（前兄弟 null）：${JSON.stringify(moveOps[0])}`)
     assert(contentEnter.text === inner.text.slice(0, 2), '根块正文应只剩左半')
     assert(contentEnter.firstKidText === inner.text.slice(2), `右半应进首个子块：${JSON.stringify(contentEnter.firstKidText)}`)
 
@@ -6572,7 +6608,8 @@ await check(
           op: o.op,
           text: o.value?.content === undefined ? undefined : runPlain(o.value.content),
           parent: o.value?.parent,
-          index: o.value?.index,
+          pos: o.value?.prev === null ? 0 : undefined,
+          prev: o.value?.prev,
         })),
         text: plain(r),
         sibling: i > 0 ? plain(parent?.children[i - 1]) : null,
@@ -6727,7 +6764,7 @@ await check(
       const page = pageOp ? window.__qua.__editor.store.find(pageOp.id) : null
       const childOp = page ? ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === page.id) : null
       return {
-        ops: ops.map((o) => ({ e: o.e, id: o.id, op: o.op, parent: o.value?.parent, index: o.value?.index })),
+        ops: ops.map((o) => ({ e: o.e, id: o.id, op: o.op, parent: o.value?.parent, prev: o.value?.prev })),
         pageId: pageOp?.id ?? '',
         childId: childOp?.id ?? '',
         modelChild: page?.children[0]?.id ?? '',
@@ -6792,7 +6829,8 @@ const opShape = (page) =>
       name: o.name ?? '',
       value: o.value,
       parent: o.value?.parent,
-      index: o.value?.index,
+      pos: o.value?.prev === null ? 0 : undefined,
+          prev: o.value?.prev,
       // 内容 upsert：给投影文本与 run 枚数（文本段/原子按 t 统计），断言不用认识 run 形状
       text: o.value?.text ?? (o.value?.content === undefined ? undefined : runPlain(o.value.content)),
       runs: o.value?.content === undefined ? undefined : o.value.content.map((r) => r.t).join(','),
@@ -7088,7 +7126,7 @@ await check(
     const ops = await opShape(page)
     assert(ops.length === 1, `点空白应恰好 1 条 op：${JSON.stringify(ops)}`)
     assert(
-      ops[0].e === 'block' && ops[0].op === 'upsert' && ops[0].parent === tail.rootId && ops[0].index === tail.index + 1,
+      ops[0].e === 'block' && ops[0].op === 'upsert' && ops[0].parent === tail.rootId && ops[0].prev === tail.id,
       `应插在末段末尾：${JSON.stringify(ops)}`,
     )
 
@@ -7156,7 +7194,7 @@ await check(
       ops2.every((o) => o.e === 'block' && o.op === 'upsert' && o.parent === target.parentId),
       `两条都应是同级的 insert：${JSON.stringify(ops2)}`,
     )
-    assert(ops2[0].index === target.index + 1 && ops2[1].index === target.index + 2, `线与空块应紧跟着源块：${JSON.stringify(ops2)}`)
+    assert(ops2[0].prev === target.id && ops2[1].prev === ops2[0].block, `线与空块应紧跟着源块：${JSON.stringify(ops2)}`)
     const madeIds = [ops2[0].block, ops2[1].block]
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(150)
@@ -7301,7 +7339,7 @@ await check(
       `第一条应是首块正文 upsert：${JSON.stringify(ops2)}`,
     )
     assert(
-      ops2.slice(1).every((o, i) => o.e === 'block' && o.op === 'upsert' && o.parent === target.parentId && o.index === target.index + 1 + i),
+      ops2.slice(1).every((o, i) => o.e === 'block' && o.op === 'upsert' && o.parent === target.parentId && o.prev === (i === 0 ? target.id : ops2[i].block)),
       `其余行应逐块 insert、落点递增：${JSON.stringify(ops2)}`,
     )
     const kids = await page.evaluate((t) => {
@@ -7344,7 +7382,7 @@ await check(
       const st = window.__qua.__editor.store
       const day = st.blocks.find((b) => b.props?._date === d)
       return {
-        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, parent: o.value?.parent, index: o.value?.index })),
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, parent: o.value?.parent, prev: o.value?.prev })),
         dayId: day?.id ?? '',
         dayAtTop: st.blocks.some((b) => b.id === day?.id),
         childCount: day?.children.length ?? 0,
@@ -7357,7 +7395,7 @@ await check(
       `装载空天应恰好 1 条结构 op（首子块）：${JSON.stringify(first.ops)}`,
     )
     assert(
-      first.ops[0].parent === first.dayId && first.ops[0].index === 0,
+      first.ops[0].parent === first.dayId && first.ops[0].prev === null,
       `首子块应挂在当天下标 0：${JSON.stringify(first.ops)}`,
     )
     assert(first.childCount === 1, `空天补的首子块应真的在库里：${first.childCount}`)
@@ -7661,7 +7699,7 @@ await check(
       const atoms = window.__qua.atoms().filter((a) => a.blockId === t.id)
       const pageId = atoms[0]?.target?.id ?? ''
       const p = pageId ? ed.store.find(pageId) : null
-      const ops = window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id, parent: o.value?.parent, index: o.value?.index }))
+      const ops = window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id, parent: o.value?.parent, prev: o.value?.prev }))
       return {
         hostText: host ? host.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null,
         atoms: atoms.map((a) => ({ kind: a.kind, target: a.target?.id ?? '' })),
@@ -7843,7 +7881,7 @@ await check(
       }
       const loc = find(ed.store.blocks, t.id, null)
       return {
-        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, parent: o.value?.parent, index: o.value?.index })),
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, parent: o.value?.parent, prev: o.value?.prev })),
         loc,
         // 目标容器的子块数（应该 +1）
         targetKids: ed.store.find(t.targetId)?.children.length ?? -1,
@@ -8099,7 +8137,7 @@ await check(
         roots: window.__qua.snapshot().topBlocks,
         pages: window.__qua.pages().length,
         total: window.__qua.snapshot().totalBlocks,
-        ops: window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id, parent: o.value?.parent, index: o.value?.index })),
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id, parent: o.value?.parent, prev: o.value?.prev })),
       }
     }, setup)
 

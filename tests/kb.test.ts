@@ -253,44 +253,47 @@ test('patch 改 children ⇒ 抛错（结构必须走 insert/move/remove）', ()
 
 /* ------------------------------------------------------------ 写面：结构 */
 
-test('insert ⇒ block.upsert{parent,index}（子树里每一块都有落点）', () => {
+test('insert ⇒ block.upsert{parent,prev}（子树里每一块都有落点）', () => {
   const { kb } = fixture()
   const n1 = b('n1', '新', { children: [b('n1a', '新·一')] })
+  // c1 是 p1 的第一块 ⇒ 插在它前面时，前兄弟是 null
   const r = kb.tx((tx) => tx.insert(n1, 'c1', 0))
   assert.deepEqual(bare(r.ops), [
-    { e: 'block', id: 'n1', op: 'upsert', value: { parent: 'c1', index: 0 } },
-    { e: 'block', id: 'n1a', op: 'upsert', value: { parent: 'n1', index: 0 } },
+    { e: 'block', id: 'n1', op: 'upsert', value: { parent: 'c1', prev: null } },
+    { e: 'block', id: 'n1a', op: 'upsert', value: { parent: 'n1', prev: null } },
   ])
   assert.deepEqual(kb.children('c1').map((x) => x.id), ['n1', 'g1'])
 })
 
-test('insert 到根 ⇒ parent 为 null 且落在根数组里', () => {
+test('insert 到根 ⇒ parent 为 null 且落在根数组里；前兄弟＝当时根里的最后一块', () => {
   const { kb } = fixture()
   const n1 = b('n1', '新的页')
   const r = kb.tx((tx) => tx.insert(n1, null, kb.roots().length))
-  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'n1', op: 'upsert', value: { parent: null, index: 3 } }])
+  // 根＝[p1, p2, t1] ⇒ 追加到末尾时前兄弟是 t1（**不是** index 3）
+  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'n1', op: 'upsert', value: { parent: null, prev: 't1' } }])
   assert.equal(kb.roots().at(-1)?.id, 'n1')
 })
 
-test('move ⇒ 一条 block.upsert{parent,index}；不能移进自己的子树', () => {
+test('move ⇒ 一条 block.upsert{parent,prev}；不能移进自己的子树', () => {
   const { kb } = fixture()
+  // p1.children = [c1, c2]；把 c2 挪到首位 ⇒ 前兄弟 null
   const r = kb.tx((tx) => tx.move('c2', 'c1', 0))
-  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c2', op: 'upsert', value: { parent: 'c1', index: 0 } }])
+  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c2', op: 'upsert', value: { parent: 'c1', prev: null } }])
   assert.deepEqual(kb.children('c1').map((x) => x.id), ['c2', 'g1'])
 
   assert.throws(() => kb.tx((tx) => tx.move('c1', 'g1', 0)), /own subtree/)
   assert.deepEqual(kb.children('p1').map((x) => x.id), ['c1'], '失败 ⇒ 位置没动')
 })
 
-test('move 报的 index 是**最终位置**（先摘再夹）：越界时不会报一个落不下去的下标', () => {
+test('move 报的前兄弟是**最终位置**的前一块（先摘再落）：越界时不会报一个落不下去的锚点', () => {
   const { kb } = fixture()
-  // p1.children = [c1, c2]；把 c1 挪到越界下标 ⇒ 最终在末尾（1），op 也必须报 1
+  // p1.children = [c1, c2]；把 c1 挪到越界下标 ⇒ 最终在末尾，前兄弟是 c2
   const r = kb.tx((tx) => tx.move('c1', 'p1', 9))
-  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { parent: 'p1', index: 1 } }])
+  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { parent: 'p1', prev: 'c2' } }])
   assert.deepEqual(kb.children('p1').map((x) => x.id), ['c2', 'c1'])
 
   const back = kb.tx((tx) => tx.move('c1', 'p1', 0))
-  assert.deepEqual(bare(back.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { parent: 'p1', index: 0 } }])
+  assert.deepEqual(bare(back.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { parent: 'p1', prev: null } }])
   assert.deepEqual(kb.children('p1').map((x) => x.id), ['c1', 'c2'])
 })
 
@@ -318,12 +321,12 @@ test('remove ⇒ 原位软删：操作根恰好 1 条 block.delete；get 不到�
   assert.deepEqual(kb.trash().map((b) => b.id), ['c1'], '派生回收站里是操作根')
 })
 
-test('restore ⇒ 摘掉标记回原位：op 是一条 upsert{parent,index}；整棵子树重新可见', () => {
+test('restore ⇒ 摘掉标记回原位：op 是一条 upsert{parent,prev}；整棵子树重新可见', () => {
   const { kb, store } = fixture()
   kb.tx((tx) => tx.remove('c1'))
   const r = kb.tx((tx) => tx.restore('c1'))
-  // c1 是 p1 的第 0 个孩子；恢复 = 「它回来了、还在这个位置」
-  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { parent: 'p1', index: 0 } }])
+  // c1 是 p1 的第 0 个孩子 ⇒ 前兄弟 null
+  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { parent: 'p1', prev: null } }])
   assert.equal(plainText(kb.get('c1')!.content), '一')
   assert.equal(plainText(kb.get('g1')!.content), '一·一', '子树随根一起回来')
   assert.deepEqual(kb.trash(), [], '派生回收站清空')

@@ -479,8 +479,31 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
     /**
      * 自检用：**最近一次事务**产出的 op（诊断面板不用它，只为「一次动作几条 op」留证据）。
      * 只读副本：调用方改数组不该影响这里记着的那一份。
+     *
+     * ⚠️ op 里的位置是**前兄弟 id**（`prev`），不是下标。断言要看「落在第几位」时，
+     * 用下面 `lastOpPositions()` 的**派生**位置——把 `prev` 换算成下标是读侧的事，
+     * 绝不能把它塞回 op 形状里（那会让「op 记什么」有两个答案）。
      */
     lastOps: () => getLastOps(),
+    /**
+     * 自检用：把最近一次事务的 op 位置**派生**成下标（`prev` 现在排在兄弟列表第几位）。
+     *
+     * 为什么要派生而不是让 op 存下标：op 是**持久化历史**，下标只对「那一刻的列表」有意义
+     * （同一个下标在短列表上落到别处且不报错）。读侧换算不产生第二份真相。
+     * `-1` ＝ 前兄弟已经不在可见树里（悬空锚点）。
+     */
+    lastOpPositions: () =>
+      getLastOps().map((op) => {
+        if (op.e !== 'block' || op.op !== 'upsert') return -1
+        const { parent, prev } = op.value
+        if (parent === undefined && prev === undefined) return -1
+        const parentBlock = parent ? findInForest(deps.getWs().blocks, parent) : null
+        const list = parent ? (parentBlock?.children ?? []) : deps.getWs().blocks
+        if (prev === null) return 0
+        if (typeof prev !== 'string') return -1
+        const i = list.findIndex((b) => b.id === prev)
+        return i < 0 ? -1 : i + 1
+      }),
     /**
      * 自检用：**让读数层读一个 `.tx`**（DOM → run 序列）。
      *

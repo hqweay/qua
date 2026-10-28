@@ -78,6 +78,30 @@ function siblings(store: BlockStore, parentId: string | null): Block[] | undefin
   return p?.children
 }
 
+/**
+ * 一块在它所在兄弟列表里的**前一块**（`null` ＝ 它是第一块）。
+ *
+ * 为什么要单独算而不是用 `locateIncludingDeleted` 给的 `index`：恢复的 op 要记
+ * 「前兄弟 id」，而 `index` 是相对值（见 `BlockPatch.prev` 的说明）。
+ * 这里走**含被删块**的遍历：恢复的块可能正挨着另一块被删的块，
+ * 而那两块都还在原位（软删不搬位置）。
+ *
+ * ⚠️ 走 `walkForest` 而不是自己递归：块树遍历只有一个入口（`arch-check [22]`）。
+ */
+function prevSiblingIdOf(forest: readonly Block[], id: string): string | null {
+  let prev: string | null = null
+  walkForest(
+    forest,
+    (b, ctx) => {
+      if (b.id !== id) return
+      prev = ctx.index === 0 ? null : (ctx.parent ? ctx.parent.children[ctx.index - 1]?.id : forest[ctx.index - 1]?.id) ?? null
+      return false
+    },
+    { includeDeleted: true },
+  )
+  return prev
+}
+
 /** 子树里的全部块（先序，**含自身**）——删子树时要逐个报 op，不靠「级联」这个词 */
 function subtreeIds(block: Block): string[] {
   const out: string[] = []
@@ -327,14 +351,29 @@ export class MemoryKb implements KbClient {
         if (!list) throw new Error(`kb: no such parent "${parentId}"`)
         const at_ = Math.max(0, Math.min(index, list.length))
         list.splice(at_, 0, block)
-        // 一棵新子树里每一块都要有落点：后代报**它们自己的** parent/index，
-        // 不是把根的 parent 复制一遍（那会让整棵子树在库里都挂到同一层）
-        const place = (node: Block, parent: string | null, index: number): void => {
-          ops.push({ e: 'block', id: node.id, op: 'upsert', value: { parent, index }, at: at() })
-          sink.blocks(node.id)
-          node.children.forEach((kid, i) => place(kid, node.id, i))
-        }
-        place(block, parentId, at_)
+        // 一棵新子树里每一块都要有落点：后代报**它们自己的** parent/prev，
+        // 不是把根的 parent 复制一遍（那会让整棵子树在库里都挂到同一层）。
+        // 走 `walkForest` 而不是自己递归：块树遍历只有一个入口（`arch-check [22]`）。
+        //
+        // ⚠️ `walkForest` 给的 `ctx.index` 是**子树内部**的下标，不是根块在目标列表里的位置
+        //    ⇒ 根块的前兄弟要单独算（它就是目标列表里 `at_` 之前那一块）。
+        const rootPrev = at_ === 0 ? null : (list[at_ - 1]?.id ?? null)
+        walkForest(
+          [block],
+          (node, ctx) => {
+            const parent = ctx.parent?.id ?? parentId
+            const prev =
+              ctx.parent === null
+                ? rootPrev
+                : ctx.index === 0
+                  ? null
+                  : (ctx.parent.children[ctx.index - 1]?.id ?? null)
+            ops.push({ e: 'block', id: node.id, op: 'upsert', value: { parent, prev }, at: at() })
+            sink.blocks(node.id)
+          },
+          // 新子树里没有软删的块，但显式写出来：这条路径不该被「看不见的块」影响
+          { includeDeleted: true },
+        )
       },
 
       move(id, parentId, index) {
@@ -349,7 +388,13 @@ export class MemoryKb implements KbClient {
         from.splice(from.indexOf(b), 1)
         const at_ = Math.max(0, Math.min(index, list.length))
         list.splice(at_, 0, b)
-        ops.push({ e: 'block', id, op: 'upsert', value: { parent: parentId, index: at_ }, at: at() })
+        ops.push({
+          e: 'block',
+          id,
+          op: 'upsert',
+          value: { parent: parentId, prev: at_ === 0 ? null : (list[at_ - 1]?.id ?? null) },
+          at: at(),
+        })
         sink.blocks(id)
       },
 
@@ -375,7 +420,13 @@ export class MemoryKb implements KbClient {
         // 属性袋不留空壳：`{}` 与「没有属性」是两种东西
         if (Object.keys(props).length === 0) delete b.props
         else b.props = props
-        ops.push({ e: 'block', id, op: 'upsert', value: { parent: loc.parent?.id ?? null, index: loc.index }, at: at() })
+        ops.push({
+          e: 'block',
+          id,
+          op: 'upsert',
+          value: { parent: loc.parent?.id ?? null, prev: prevSiblingIdOf(self.store.blocks, id) },
+          at: at(),
+        })
         sink.blocks(id)
       },
 

@@ -55,7 +55,22 @@ export type BlockPatch = {
    */
   modified?: number
   parent?: string | null
-  index?: number
+  /**
+   * **前兄弟的 id**（`null` ＝ 落在父的第一个位置；`parent: null` ＋ `prev: null` ＝ 森林最前）。
+   *
+   * 为什么不是整数 `index`：`index` 只对「那一刻的兄弟列表」有意义。
+   * 同一个 `index=2` 在一个短了一截的列表上会落到另一个位置，而且**不报错**
+   * （落点计算里有 `Math.max(0, Math.min(index, len))` 的夹取）。
+   * 进了 `op_log` 之后「当时那条 index 指的是哪」就再也补不回来。
+   *
+   * 为什么不是分数键：单写者 ＋ 链表下没有人需要「插入不重排」，而分数键会在
+   * `children` 之外引入第二套序——两层各存一份序，就能静默分叉。
+   *
+   * ⚠️ **前兄弟已被删／不在本次重放集合**时：落成「父的第一个位置」并在
+   * `at` 相同的两条 op 之间按 `(prev, id)` 定序（确定性 tie-break）。
+   * 这条兜底是**显式**的：宁可把块放到可预期的位置，也不要静默夹取。
+   */
+  prev?: string | null
   props?: Record<string, unknown>
 }
 

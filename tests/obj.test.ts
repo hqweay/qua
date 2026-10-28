@@ -45,7 +45,7 @@ test('createObjRecordInTx：当天已存在 ⇒ 只插记录（不重复物化�
   const { result, ops } = kb.tx((tx) => createObjRecordInTx(tx, (id) => kb.get(id), '咖啡', 'tag-1', at))
 
   assert.equal(store.blocks.length, 1, '天块本来就在：森林仍是 1 个顶层块')
-  assert.deepEqual(ops.map((o) => (o.e === 'block' ? o.value : null)), [{ parent: journalId('2026-10-25'), index: 0 }])
+  assert.deepEqual(ops.map((o) => (o.e === 'block' ? o.value : null)), [{ parent: journalId('2026-10-25'), prev: null }])
   assert.equal(findJournalDay(store.blocks, '2026-10-25')?.children[0]?.id, result.id)
 })
 

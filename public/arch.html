@@ -293,14 +293,14 @@
     <div class="card pad">
       <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">Op — 持久化事件（6 类）</b></div>
       <div class="struct">
-<span class="pipe">{</span> e: <span class="key">'block'</span>, id, op: <span class="key">'upsert'</span>, value: { content?, parent?, index?, props? }, at <span class="pipe">}</span>
+<span class="pipe">{</span> e: <span class="key">'block'</span>, id, op: <span class="key">'upsert'</span>, value: { content?, parent?, prev?, props? }, at <span class="pipe">}</span>
 <span class="pipe">{</span> e: <span class="key">'block'</span>, id, op: <span class="key">'delete'</span>, at <span class="pipe">}</span>          <span class="cmt">只落操作根一条，子树不可见是继承来的</span>
 <span class="pipe">{</span> e: <span class="key">'prop'</span>,  block, name, op, value?, pos?, at <span class="pipe">}</span>
 <span class="pipe">{</span> e: <span class="key">'alias'</span>, block, name, op, pos?, at <span class="pipe">}</span>
 <span class="pipe">{</span> e: <span class="key">'list'</span>,  block, list, op, at <span class="pipe">}</span>
 <span class="pipe">{</span> e: <span class="key">'anno'</span>,  block, id, op: <span class="key">'set'</span> | <span class="key">'delete'</span>, value?, at <span class="pipe">}</span>   <span class="cmt">只在真被引用时出现</span>
       </div>
-      <div class="note" style="margin-top:9px">结构用 <code>parent ＋ index</code> 表达，不另造 <code>insert</code> 事件——「它现在在哪」只有一种说法。<b>格式与原子的一次改动就是一条 <code>upsert{content}</code></b>：内容整组替换，不是逐段记差。<b>实例字段写入＝一条 <code>prop.set</code>／<code>prop.delete</code></b>，没有「实例」专用 op。</div>
+      <div class="note" style="margin-top:9px">结构用 <code>parent ＋ prev</code>（<b>前兄弟 id</b>）表达，不另造 <code>insert</code> 事件——「它现在在哪」只有一种说法。不用整数下标：下标只对「那一刻的兄弟列表」有意义，同一个下标在短列表上会静默落到别处，而 op 是不可逆历史。<b>格式与原子的一次改动就是一条 <code>upsert{content}</code></b>：内容整组替换，不是逐段记差。<b>实例字段写入＝一条 <code>prop.set</code>／<code>prop.delete</code></b>，没有「实例」专用 op。</div>
     </div>
     <div class="card pad">
       <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">落盘：两种宿主，三条不可逆契约</b></div>
