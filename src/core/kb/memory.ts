@@ -250,48 +250,52 @@ export class MemoryKb implements KbClient {
   /* ------------------------------------------------------------ 写面 */
 
   /**
-   * 一次事务：进门前快照，成功后交付 `{ ops, changes }`，抛错则**整批恢复**并重抛。
+   * 一次事务：成功后交付 `{ ops, changes }`，抛错则**整批回滚**并重抛。
    *
-   * 快照是整片森林：阶段 1 的工作集就是整库，
-   * 所以「回滚」与撤销是同一种机制 —— 它们本来回答的就是同一个问题。
+   * ## 回滚成本只与「动过的块」有关
+   *
+   * 曾经这里进门就 `JSON.stringify(整片森林)`，失败时再 `JSON.parse` 回来 ——
+   * 于是**每一次事务**（一次打字就是一次事务）都要整库序列化一遍。
+   * 现在改成**回滚日志**：每个 `Tx` 方法在改之前记一条「怎么退回去」，
+   * 失败时逆序应用。生命周期＝这一个调用，出门即丢。
+   *
+   * ⚠️ **回滚日志不是逆 op**。逆 op 是「撤销语义的第二份正确性来源」（文件头已否决）；
+   *    这里是**一次事务内部**的异常安全机制：不落盘、不进历史、不参与同步。
+   *    它替换的是「整库快照」这个实现细节，对外语义（失败整批回滚、不返回半批）一个字不改。
+   *
+   * ## 校验在哪
+   *
+   * `Tx` 的每个方法在**改之前**校验自己的前置条件（`require` 查块在不在、
+   * `siblings` 查父在不在、`move` 查不成环）—— 那是「已知非法」的防线，也是今天的现状。
+   * 另一道 `validate(state, ops)` 服务**重放**（同步收端／`applyOps`）：对端的流必须先验再吃。
+   * 两者不是重复：前者管「这次能不能写」，后者管「这批 op 能不能应用在别的库上」。
    */
   tx<R>(fn: (tx: Tx) => R, opts: TxOpts = {}): TxResult & { result: R } {
-    const snap = JSON.stringify(this.store.blocks)
     const ops: Op[] = []
     const changes: Change[] = []
     const sink = new ChangeSink(changes)
+    /** 回滚日志：逆序应用的「怎么退回去」 */
+    const rollback: (() => void)[] = []
     try {
-      const result = fn(this.makeTx(ops, sink))
+      const result = fn(this.makeTx(ops, sink, rollback))
       /**
        * **宣布只在这里发生**：`store.apply` 是状态转移的唯一入口 ——
        * 它同时做「按 op 修补索引」与「通知订阅者」两件事。
        *
-       * 为什么必须在出口：失败路径恢复的是同一份快照，索引没有理由重算；
+       * 为什么必须在出口：失败路径不宣布（模型退回原样，别的视图本该看到的还是那份）；
        * 而成功的这一批 op 说清了「变了哪几格」，所以索引只修补、不作废。
        * 调用方（编辑器／命令）**不得**再自己宣布（那会让这次修补白做）。
        */
       this.store.apply(ops, opts.source, sink.ids())
       return { ops, changes, result }
     } catch (err) {
-      this.restore(snap)
+      // 逆序回滚：后做的先退（同一块被改两次时，先退第二次再退第一次）
+      for (let i = rollback.length - 1; i >= 0; i--) rollback[i]!()
       throw err
     }
   }
 
-  /**
-   * 事务失败 ⇒ 按序列化快照原地恢复（保持数组身份：视图手里的引用不会失效）。
-   *
-   * 失败路径**不通知**（`store.apply` 不会被调用）：别的视图看到的还是失败之前那份，
-   * 而那份就是它们该看到的 —— 通知它们只会让所有视图白重画一遍。
-   * 索引整库重建是必需的：块对象全换成快照里那批了。
-   */
-  private restore(snap: string): void {
-    const blocks = JSON.parse(snap) as Block[]
-    this.store.blocks.splice(0, this.store.blocks.length, ...blocks)
-    this.store.discardIndex()
-  }
-
-  private makeTx(ops: Op[], sink: ChangeSink): Tx {
+  private makeTx(ops: Op[], sink: ChangeSink, rollback: (() => void)[]): Tx {
     const at = (): number => this.now()
     const require = (id: string): Block => {
       const b = this.get(id)
@@ -299,11 +303,39 @@ export class MemoryKb implements KbClient {
       return b
     }
 
+    /**
+     * 记一块的**字段**快照（第一次碰到这一块时记一次，之后不再重复记）。
+     *
+     * 为什么不整块深拷：`content`／`props`／`annos` 已经是**按需替换**的（每次写都是新对象），
+     * 所以记引用就够了 —— 回滚时把那几个引用放回去，块对象本身不变（视图手里的引用不失效）。
+     *
+     * ⚠️ **`children` 也要记**，而且必须记**内容**（`splice` 原地放回、保持数组身份）：
+     *    `patch` 的唯一约束是「不许改子树」，而它恰恰是**改完才检查**的
+     *    （要等 `fn` 跑完才知道有没有动）⇒ 抛错时子树已经被改过，必须退回去。
+     *    只记引用是不够的：`children` 是同一个数组被就地 `push`。
+     */
+    const seen = new Set<string>()
+    const snapBlock = (b: Block): void => {
+      if (seen.has(b.id)) return
+      seen.add(b.id)
+      const before = { content: b.content, modified: b.modified, props: b.props, annos: b.annos, children: b.children.slice() }
+      rollback.push(() => {
+        b.content = before.content
+        b.modified = before.modified
+        if (before.props === undefined) delete b.props
+        else b.props = before.props
+        if (before.annos === undefined) delete b.annos
+        else b.annos = before.annos
+        b.children.splice(0, b.children.length, ...before.children)
+      })
+    }
+
     // `this` 是 **MemoryKb**：事务句柄要同步改内存（`siblings`／`parentOf` 都在外层）
     const self = this
     return {
       patch(id, fn) {
         const b = require(id)
+        snapBlock(b)
         const before = {
           content: JSON.stringify(b.content),
           modified: b.modified,
@@ -350,6 +382,11 @@ export class MemoryKb implements KbClient {
         if (!list) throw new Error(`kb: no such parent "${parentId}"`)
         const at_ = Math.max(0, Math.min(index, list.length))
         list.splice(at_, 0, block)
+        // 回滚＝把它从列表里摘掉（新子树里的块本来就不在树上，摘根即可）
+        rollback.push(() => {
+          const i = list.indexOf(block)
+          if (i >= 0) list.splice(i, 1)
+        })
         // 一棵新子树里每一块都要有落点：后代报**它们自己的** parent/prev，
         // 不是把根的 parent 复制一遍（那会让整棵子树在库里都挂到同一层）。
         // 走 `walkForest` 而不是自己递归：块树遍历只有一个入口（`arch-check [22]`）。
@@ -384,9 +421,16 @@ export class MemoryKb implements KbClient {
         const list = siblings(self.store, parentId)
         if (!from || !list) throw new Error(`kb: no such parent "${parentId}"`)
         // 先摘再夹取下标：`index` 是**最终**位置，同列表往后挪时调用方不必自己减一
-        from.splice(from.indexOf(b), 1)
+        const fromIndex = from.indexOf(b)
+        from.splice(fromIndex, 1)
         const at_ = Math.max(0, Math.min(index, list.length))
         list.splice(at_, 0, b)
+        // 回滚＝放回原位（原父与原下标都记下来；`from` 与 `list` 可能是同一个数组）
+        rollback.push(() => {
+          const i = list.indexOf(b)
+          if (i >= 0) list.splice(i, 1)
+          from.splice(fromIndex, 0, b)
+        })
         ops.push({
           e: 'block',
           id,
@@ -403,6 +447,7 @@ export class MemoryKb implements KbClient {
         // 子树的不可见是继承来的（遍历跳过被删子树），落库也是一行的事（`deleted_at` 写在根行）。
         // 「退化成一次属性写入」说的是模型动作；op 的说法仍是 `block.delete`——
         // 删除只有这一个词，落库侧才能只认一种形状。
+        snapBlock(b)
         b.props = { ...(b.props ?? {}), [DELETED_AT_PROP]: at() }
         ops.push({ e: 'block', id, op: 'delete', at: at() })
         sink.blocks(id)
@@ -414,6 +459,7 @@ export class MemoryKb implements KbClient {
         if (!b || !isDeleted(b)) throw new Error(`kb: no deleted block "${id}"`)
         const loc = locateIncludingDeleted(self.store.blocks, id)
         if (!loc) throw new Error(`kb: no such block "${id}"`)
+        snapBlock(b)
         const props = { ...(b.props ?? {}) }
         delete props[DELETED_AT_PROP]
         // 属性袋不留空壳：`{}` 与「没有属性」是两种东西
@@ -431,6 +477,7 @@ export class MemoryKb implements KbClient {
 
       setProp(id, name, value) {
         const b = require(id)
+        snapBlock(b)
         setValue(b, name, value)
         ops.push({ e: 'prop', block: id, name, op: 'set', value, at: at() })
         sink.blocks(id)
@@ -438,6 +485,7 @@ export class MemoryKb implements KbClient {
 
       clearProp(id, name) {
         const b = require(id)
+        snapBlock(b)
         clearValue(b, name)
         ops.push({ e: 'prop', block: id, name, op: 'delete', at: at() })
         sink.blocks(id)
@@ -445,6 +493,7 @@ export class MemoryKb implements KbClient {
 
       setAliases(id, aliases) {
         const b = require(id)
+        snapBlock(b)
         const prev = aliasesOf(b)
         const next = aliases.filter((a) => a.trim() !== '')
         // 校验与落库分开：撞名由调用方先问（`aliasConflict`），这里只保证「写了什么就报什么」
@@ -463,6 +512,7 @@ export class MemoryKb implements KbClient {
 
       setLists(id, lists) {
         const b = require(id)
+        snapBlock(b)
         const prev = listsOf(b)
         const next = [...new Set(lists)]
         if (next.length === 0) {
@@ -482,6 +532,7 @@ export class MemoryKb implements KbClient {
 
       setTags(id, tagIds) {
         const b = require(id)
+        snapBlock(b)
         const prev = tagIdsOf(b)
         const next = [...new Set(tagIds)]
         if (next.length === 0) {
@@ -500,6 +551,7 @@ export class MemoryKb implements KbClient {
 
       setAnnos(id, annos) {
         const b = require(id)
+        snapBlock(b)
         const before = new Map((b.annos ?? []).map((a) => [a.id, a]))
         const after = new Map(annos.map((a) => [a.id, a]))
         /**
