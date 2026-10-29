@@ -24,6 +24,14 @@ const rows = (patch: Partial<RawLibraryRows> = {}): RawLibraryRows => ({
   ...patch,
 })
 
+/** 桥的资产面：本文件不测它（在 storage/asset-ipc.test.ts），但 `LibraryBridge` 的形状要求它在 */
+const assetFace = {
+  assetKeys: async () => ({ status: 'ok', keys: [] }),
+  assetGet: async () => ({ status: 'missing' }),
+  assetStat: async () => ({ status: 'missing' }),
+  assetPut: async () => ({ status: 'bad-args' }),
+}
+
 /** 一个记下「收到了什么」的假桥 */
 function fakeBridge(reply: { status: string; rows?: RawLibraryRows } = { status: 'empty' }): {
   bridge: LibraryBridge
@@ -39,6 +47,7 @@ function fakeBridge(reply: { status: string; rows?: RawLibraryRows } = { status:
         saves.push({ writes, opts })
         return { ok: true }
       },
+      ...assetFace,
     },
   }
 }
@@ -92,6 +101,7 @@ test('load：桥抛错 ⇒ storage-error（读不到 ≠ 库坏了）', async ()
       throw new Error('ipc broke')
     },
     save: async () => ({ ok: true }),
+    ...assetFace,
   }
   const r = await createIpcAdapter(bridge).load()
   assert.equal(r.status, 'storage-error')
@@ -121,6 +131,7 @@ test('commit：主进程说失败 ⇒ 如实返回失败（不许假装存上）
     libraryInfo: async () => ({}),
     load: async () => ({ status: 'empty' }),
     save: async () => ({ ok: false, error: 'disk full' }),
+    ...assetFace,
   }
   const r = await createIpcAdapter(bridge).commit({
     ops: [],
@@ -142,6 +153,7 @@ test('commit：单写者 —— 后一次提交永远排在前一次之后', asy
       order.push(opts?.replace ? 1 : 2)
       return { ok: true }
     },
+    ...assetFace,
   }
   const port = createIpcAdapter(bridge)
   const batch = (savedAt: number, replace: boolean) => ({

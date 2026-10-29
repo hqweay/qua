@@ -16,7 +16,7 @@
  *    `ArrayBuffer` 两个方向都原样往返；`get()` 再按 mime 包回 `Blob` 交给渲染层。
  */
 import type { AssetMeta } from '../assets.ts'
-import { MAX_IMAGE_PIXELS, sha256Hex, sniffImageMime } from '../assets.ts'
+import { prepareAssetBlob } from './asset-prepare.ts'
 import type { AssetStorePort } from './asset-port.ts'
 
 const DB_NAME = 'qua.assets'
@@ -81,23 +81,10 @@ function toMeta(rec: AssetRecord): AssetMeta {
   }
 }
 
-/**
- * 读一张图的显示尺寸（EXIF 方向已校正）。
- *
- * 非图片/解码失败返回 `undefined`：尺寸只是布局提示，不是入库的前提；
- * 真正的类型判断由 `sniffImageMime` 做，渲染由 `<img>` 自己失败。
+/*
+ * 读一张图的显示尺寸、嗅探类型、算 hash、挡像素炸弹——**判据只有一份**，
+ * 住在 `asset-prepare.ts`（IDB 与 IPC 两个适配器共用，见那边的文件头）。
  */
-async function imageSize(blob: Blob): Promise<{ w: number; h: number } | undefined> {
-  if (typeof createImageBitmap !== 'function') return undefined
-  try {
-    const bmp = await createImageBitmap(blob, { imageOrientation: 'from-image' })
-    const out = { w: bmp.width, h: bmp.height }
-    bmp.close()
-    return out
-  } catch {
-    return undefined
-  }
-}
 
 export function createIdbAssetStore(): AssetStorePort {
   let dbp: Promise<IDBDatabase> | null = null
@@ -112,33 +99,18 @@ export function createIdbAssetStore(): AssetStorePort {
 
   return {
     async put(blob: Blob): Promise<AssetMeta> {
-      const buf = await blob.arrayBuffer()
-      const bytes = new Uint8Array(buf)
-      const hash = await sha256Hex(bytes)
-      const old = await stat(hash)
+      const p = await prepareAssetBlob(blob)
+      const old = await stat(p.hash)
       if (old) return old
 
-      const sniffed = sniffImageMime(bytes)
-      const mime = sniffed ?? (blob.type || 'application/octet-stream')
-      let w: number | undefined
-      let h: number | undefined
-      if (sniffed) {
-        const size = await imageSize(blob)
-        // 像素炸弹：字节不大但解码会吃内存；宁可拒绝，不给渲染器埋雷。
-        if (size && size.w * size.h > MAX_IMAGE_PIXELS) {
-          throw new Error(`image is too large to decode: ${size.w}x${size.h}`)
-        }
-        w = size?.w
-        h = size?.h
-      }
       const rec: AssetRecord = {
-        hash,
-        mime,
-        size: bytes.byteLength,
-        ...(w !== undefined ? { w } : {}),
-        ...(h !== undefined ? { h } : {}),
+        hash: p.hash,
+        mime: p.mime,
+        size: p.bytes.byteLength,
+        ...(p.w !== undefined ? { w: p.w } : {}),
+        ...(p.h !== undefined ? { h: p.h } : {}),
         createdAt: Date.now(),
-        bytes: buf,
+        bytes: p.buffer,
       }
       const d = await db()
       const tx = d.transaction(STORE, 'readwrite')

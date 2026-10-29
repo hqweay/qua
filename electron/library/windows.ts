@@ -356,8 +356,23 @@ export class LibraryManager {
       const s = sessionOf(e)
       if (!s || typeof hash !== 'string') return { status: 'no-library' }
       const bytes = await s.assets.get(hash)
+      if (!bytes) return { status: 'missing' }
+      // MIME 给渲染层包 Blob 用（对象 URL 的 Content-Type）：侧车优先，读不出侧车
+      // 按未知类型给——`<img>` 按字节自己解码，不依赖这个头。
+      const meta = await s.assets.stat(hash).catch(() => null)
       // `Uint8Array` 过 IPC 会被结构化克隆成 `Uint8Array`（Node 侧是 Buffer）⇒ 统一成 ArrayBuffer
-      return bytes ? { status: 'ok', bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) } : { status: 'missing' }
+      return {
+        status: 'ok',
+        bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+        mime: meta?.mime ?? 'application/octet-stream',
+      }
+    })
+
+    ipcMain.handle('qua:assets/stat', async (e, hash: unknown) => {
+      const s = sessionOf(e)
+      if (!s || typeof hash !== 'string') return { status: 'no-library' }
+      const meta = await s.assets.stat(hash)
+      return meta ? { status: 'ok', meta } : { status: 'missing' }
     })
 
     ipcMain.handle('qua:assets/put', async (e, bytes: unknown, mime: unknown, dims: unknown) => {

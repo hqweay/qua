@@ -51,6 +51,7 @@ import { HANDLERS } from './app/handlers.ts'
 import { t } from './core/msg.ts'
 import { seedWorkspace } from './core/seed.ts'
 import { createIdbAssetStore } from './core/storage/asset-idb.ts'
+import { createIpcAssetStore } from './core/storage/asset-ipc.ts'
 import { ensureSeedAssets } from './core/storage/seed-assets.ts'
 import { assetMetaOf, assetViewOf, assetsAvailable, loadAssetKeys, onAssetReady, primeAsset, useAssetStore } from './view/asset-views.ts'
 import type { AssetView } from './core/assets.ts'
@@ -118,14 +119,16 @@ const store = createWorkspaceStore(
 const deviceStore = createDeviceStore(createLocalStorageAdapter(DEVICE_KEY))
 
 /**
- * **资产库**：字节的唯一去处（v1 是 IndexedDB，将来按库根换适配器）。
+ * **资产库**：字节的唯一去处。与内容存储同一条分叉判据（`window.qua` 在不在）：
+ *   · Electron：字节住在**库目录的 `assets/`**（主进程写，经 IPC）⇒ 拷库目录＝图一起走；
+ *   · web：IndexedDB（浏览器没有「用户可选的库目录」这个语义）。
  *
  * 为什么在**读库之前**就建好：行内资产是正文的一部分，渲染第一帧就要知道
  * 「这份 hash 在不在」——`keys()` 必须赶在首次渲染之前拿到。
- * ⚠️ IDB 打不开不是启动失败：整个库标成 `unavailable`，应用照常开，
+ * ⚠️ 资产库打不开不是启动失败：整个库标成 `unavailable`，应用照常开，
  *    已有图显示「资产库不可用」而不是一片空白（见 `view/asset-views.ts`）。
  */
-const assetStore = createIdbAssetStore()
+const assetStore = LIBRARY_BRIDGE ? createIpcAssetStore(LIBRARY_BRIDGE) : createIdbAssetStore()
 useAssetStore(assetStore)
 
 /**

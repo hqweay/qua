@@ -36,6 +36,12 @@ export interface LibraryBridge {
    * 或跳号（对端水位出现空洞），而 `op_log` 的两条性质都建立在这条上。
    */
   save(writes: unknown[], opts?: { replace?: boolean; oplog?: { at: number; opJson: string }[] }): Promise<unknown>
+
+  /** 资产面（内容寻址；字节走 ArrayBuffer，主进程写进库目录的 `assets/`） */
+  assetKeys(): Promise<unknown>
+  assetGet(hash: string): Promise<unknown>
+  assetStat(hash: string): Promise<unknown>
+  assetPut(bytes: ArrayBuffer, mime: string, dims?: { w?: number; h?: number }): Promise<unknown>
 }
 
 export const IPC_BACKEND = 'ipc-library'
