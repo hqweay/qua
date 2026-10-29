@@ -610,6 +610,7 @@ await check('A17 父块的竖线在本行换行后不断：自身延续段 ＋ �
       rowH: +rowRect.height.toFixed(1),
       hasSelf: Boolean(self),
       segCount: segs.length,
+      rowTop: +rowRect.top.toFixed(1),
       startTop: segs[0] ? +segs[0].top.toFixed(1) : null,
       markerCenter: +(mk.top + mk.height / 2).toFixed(1),
       endBottom: +cur.toFixed(1),
@@ -623,7 +624,12 @@ await check('A17 父块的竖线在本行换行后不断：自身延续段 ＋ �
   assert(r.lines >= 3, `前置：这一块应已换行成 ≥3 行（否则看不出豁口），实际 ${r.lines} 行`)
   assert(r.hasSelf, `有子块的行应生成自己的延续段（.rail-self），实际没有`)
   assert(r.holes.length === 0, `父块的竖线在换行后不该断开，实测豁口：${JSON.stringify(r.holes)}`)
-  assert(Math.abs(r.startTop - r.markerCenter) <= 1.5, `线的起点应贴着块标中心（${r.markerCenter}），实际 ${r.startTop}`)
+  /**
+   * 起点是**行顶**（这一行没有别名头，所以行顶就是行首），不是块标中心。
+   * 从中心起会在块标上方留半行空白，且与 `.rail`（行顶到行底）不同口径 —— 见 A23 的说明。
+   */
+  assert(Math.abs(r.startTop - r.rowTop) <= 1, `线的起点应贴行顶（${r.rowTop}），实际 ${r.startTop}`)
+  assert(r.startTop <= r.markerCenter, `线必须从块标中心之上起（穿过圆点）：起点 ${r.startTop} vs 中心 ${r.markerCenter}`)
   assert(r.lineX === r.markerX, `自己的线应与自己的块标在同一 x：线 ${r.lineX} vs 块标 ${r.markerX}`)
 
   /**
@@ -641,30 +647,29 @@ await check('A17 父块的竖线在本行换行后不断：自身延续段 ＋ �
   assert(!folded.hasSelf, `折叠（子行不挂载）时不该留一段悬空的自身线段：${JSON.stringify(folded)}`)
 
   await ctx.close()
-  return `换行 ${r.lines} 行（行高 ${r.rowH}px）时线仍连续：${r.segCount} 段、起点 ${r.startTop}（块标中心 ${r.markerCenter}）、零豁口；折叠后自身段撤掉`
+  return `换行 ${r.lines} 行（行高 ${r.rowH}px）时线仍连续：${r.segCount} 段、起点 ${r.startTop}（行顶 ${r.rowTop} / 块标中心 ${r.markerCenter}）、零豁口；折叠后自身段撤掉`
 })
 
 /* ---------------------------------------------------------------- A23 */
 
-await check('A23 行首带头的块（聚焦页那一行）：自身延续段起点贴块标中心，不伸进别名头', async () => {
+await check('A23 行首带头的块：自己的竖线从头下方起，穿过块标、不伸进头里', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1200, height: 900 } })
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
   await page.waitForTimeout(150)
 
   /**
-   * **判据**：`.rail-self` 的起点必须贴着**这一行自己的块标中心**（差 ≤ 1.5px），
-   * 且**不高于**别名头的下边缘——也就是那条线一个字都不许画到头里去。
+   * **判据**：`.rail-self` 的纵向范围 ＝ **行首（头下方）到行底**，块标中心必须落在里面。
    *
-   * 为什么会画到头里：起点写的是 `top: calc(1lh / 2)`，那是按**整行顶**算的。
-   * 可这一行的块标**不在行顶**：别名头（`.blk-alias`）与面包屑（`.blk-context`）
-   * 各是 `flex: 0 0 100%` 的**一整行**，块标与正文被挤到它们下面。
-   * ⇒ 线从页名里面开始往上冒，多出整整一个头的高度（实测 16px＋2px 行距）。
+   * 为什么这样定：线要在视觉上「穿过圆点」，而且它和 `.rail`（祖先段）是同一条线的两截，
+   * 两者必须同一条口径（`.rail` 就是行顶到行底）。从块标中心起会同时坏两件事：
+   *   · 块标**上方**留一整个半行的空白 ⇒ 线像从圆点中间长出来，与块标看着不对齐；
+   *   · 同列相邻两颗块标之间，线只贴住上边那颗的中心、离下边那颗还差半行
+   *     ⇒ 上下两段长度不相等（实测 12.49px 全落在上方）。
    *
-   * ⚠️ **A17 测不到这一条**：它挑的是「深度 1 且有子块」的行 —— 那种行没有别名头
-   *    （头只挂在根行上），于是「起点按行顶算」与「起点按块标中心算」是同一个数。
-   *    这个 bug 只在**带头的根行**上出现，也就是聚焦一个页时看到的第一行。
-   * ⚠️ 判据量的是**真实矩形**而不是 `--head-rows` 的值：后者是结构（行数），
+   * ⚠️ 带别名头的行，行首是**头下方**（块标与正文都在那一行），所以起点要先跨过头。
+   *    这就是上一轮那个「线伸进页名里」的同一个量：`--head-rows × (头高 ＋ 行距)`。
+   * ⚠️ 判据量的是**真实矩形**而不是 `--head-rows` 的值：后者是结构（头数），
    *    它算对了但 CSS 乘错了照样难看 —— 只有矩形能同时钉住这两半。
    */
   const r = await page.evaluate(() => {
@@ -673,38 +678,149 @@ await check('A23 行首带头的块（聚焦页那一行）：自身延续段起
       const self = el.querySelector(':scope > .rail-self')
       const mk = el.querySelector(':scope > .left > .marker')
       if (!self || !mk) continue
-      const head = el.querySelector(':scope > .blk-alias, :scope > .blk-context')
+      const heads = [...el.querySelectorAll(':scope > .blk-alias, :scope > .blk-context')]
       const sr = self.getBoundingClientRect()
       const mr = mk.getBoundingClientRect()
+      const er = el.getBoundingClientRect()
+      const lr = el.querySelector(':scope > .left').getBoundingClientRect()
       out.push({
         id: el.dataset.blockId.slice(-4),
         depth: Number(el.dataset.depth),
-        hasHead: Boolean(head),
-        headBottom: head ? +head.getBoundingClientRect().bottom.toFixed(1) : null,
+        headCount: heads.length,
+        headBottom: heads.length ? +Math.max(...heads.map((h) => h.getBoundingClientRect().bottom)).toFixed(1) : null,
+        rowTop: +er.top.toFixed(1),
+        rowBottom: +er.bottom.toFixed(1),
+        // 块标那一行的**顶**：带头时它落在头的下方（中间隔一道 row-gap），不带头时就是行顶
+        contentTop: +lr.top.toFixed(1),
         startTop: +sr.top.toFixed(1),
+        endBottom: +sr.bottom.toFixed(1),
         markerCenter: +(mr.top + mr.height / 2).toFixed(1),
-        lineX: +(sr.left + sr.width / 2).toFixed(1),
-        markerX: +(mr.left + mr.width / 2).toFixed(1),
       })
     }
     return out
   })
 
-  const headed = r.filter((x) => x.hasHead)
   assert(r.length > 0, `应至少量到一行带自身延续段：${JSON.stringify(r)}`)
+  const headed = r.filter((x) => x.headCount > 0)
   assert(headed.length > 0, `前置：应有带别名头的根行可测（聚焦页的第一行就是）：${JSON.stringify(r)}`)
 
-  const drift = r.filter((x) => Math.abs(x.startTop - x.markerCenter) > 1.5)
-  assert(drift.length === 0, `延续段的起点应贴块标中心（差 ≤1.5px），实际：${JSON.stringify(drift)}`)
+  // ① 穿过块标：起点必须在块标中心**之上**（或齐平），终点在它之下
+  const notCrossing = r.filter((x) => !(x.startTop <= x.markerCenter + 0.5 && x.endBottom >= x.markerCenter))
+  assert(notCrossing.length === 0, `线必须穿过块标中心：${JSON.stringify(notCrossing)}`)
 
+  // ② 落到行底：终点贴行底（差 ≤0.5px）
+  const notToBottom = r.filter((x) => Math.abs(x.endBottom - x.rowBottom) > 0.5)
+  assert(notToBottom.length === 0, `线的终点应贴行底：${JSON.stringify(notToBottom)}`)
+
+  // ③ 起点 ＝ 块标那一行的顶（带头时＝头底＋一道行距）
+  const badStart = r.filter((x) => Math.abs(x.startTop - x.contentTop) > 1)
+  assert(badStart.length === 0, `线的起点应贴块标那一行的顶（带头＝头底＋行距）：${JSON.stringify(badStart)}`)
+
+  // ④ 不伸进头里
   const inHead = headed.filter((x) => x.startTop < x.headBottom - 0.5)
-  assert(inHead.length === 0, `带头的行，线不许伸进头里（起点 ${JSON.stringify(inHead)}）`)
-
-  const offX = r.filter((x) => Math.abs(x.lineX - x.markerX) > 1)
-  assert(offX.length === 0, `线与块标必须同一 x：${JSON.stringify(offX)}`)
+  assert(inHead.length === 0, `带头的行，线不许伸进头里：${JSON.stringify(inHead)}`)
 
   await ctx.close()
-  return `${r.length} 行自身延续段（其中 ${headed.length} 行带别名头）：起点均贴块标中心、零伸进头里、x 与块标一致（带头行起点 ${headed[0].startTop} / 头底 ${headed[0].headBottom}）`
+  return `${r.length} 行自身延续段（其中 ${headed.length} 行带别名头）：均穿过块标、落到行底、起点贴块标那一行的顶（带头行 ${headed[0].startTop} / 头底 ${headed[0].headBottom} / 块标中心 ${headed[0].markerCenter}）`
+})
+
+/* ---------------------------------------------------------------- A23c */
+
+await check('A23c 同一列上，线从「有子块那一行的顶」一路连续到它子树的底，中间零断口', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1200, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(150)
+
+  /**
+   * **判据**（用户原话「线距离上下两个块标距离不相等」）：一条竖线在视觉上是**一列**。
+   * 对每一颗**有子块**的块标，它那一列上的线必须：
+   *   ① 从**块标那一行的顶**开始（线穿过圆点，不是从圆点中间长出来）；
+   *   ② 一路连续到它**子树的底**，中间零断口。
+   *
+   * 为什么会有断口：`.rail-self` 曾经从块标中心开始画，而 `.rail`（祖先段）从**行顶**开始画。
+   * 于是「A 的子树结束于 B 的行顶」与「B 的线从 B 的块标中心才开始」之间差了半行
+   * （实测 12.49px），全落在**上方**那一侧 ⇒ 看起来像线离上面那颗近、离下面那颗远。
+   *
+   * ⚠️ **判据对象是「有子块的块标」**，不是「同列相邻两颗块标」：没有子块的块本来就没有
+   *    「往下延续」的东西，它那一行不该有线。按「相邻两颗」判会把正常的空行判成断口。
+   * ⚠️ 判据按**列**判，不按行判：逐行看每一段都各有各的正确起止，只有拼起来才看得出断口。
+   */
+  const r = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#editor .blk')]
+    // 每一列（同一个 x）的所有段
+    const cols = new Map()
+    for (const el of rows) {
+      for (const s of el.querySelectorAll(':scope > .rail-self, :scope > .rails > .rail')) {
+        const b = s.getBoundingClientRect()
+        const x = +(b.left + b.width / 2).toFixed(1)
+        if (!cols.has(x)) cols.set(x, [])
+        cols.get(x).push([+b.top.toFixed(1), +b.bottom.toFixed(1)])
+      }
+    }
+    // 每颗有子块的块标：它自己那一列（= 自己块标的 x），范围应从它中心到子树底
+    const out = []
+    for (let i = 0; i < rows.length; i++) {
+      const el = rows[i]
+      if (el.dataset.hasChildren !== '1') continue
+      const mk = el.querySelector(':scope > .left > .marker')
+      if (!mk) continue
+      const mr = mk.getBoundingClientRect()
+      const x = +(mr.left + mr.width / 2).toFixed(1)
+      const y = +(mr.top + mr.height / 2).toFixed(1)
+      // 子树底 ＝ 后面**连续**那些更深的行的最后一个的底（遇到 depth ≤ 自己的就停）。
+      // ⚠️ 不能取「后面第一行 depth ≤ 自己的那一行的顶」：正文与挂载区之间本来就有一道
+      //    区域间隔（实测 43.6px），那一段不是线的断口，按「下一行的顶」判会把它算成豁口。
+      const depth = Number(el.dataset.depth)
+      let subtreeBottom = +el.getBoundingClientRect().bottom.toFixed(1)
+      for (let j = i + 1; j < rows.length; j++) {
+        if (Number(rows[j].dataset.depth) <= depth) break
+        subtreeBottom = +rows[j].getBoundingClientRect().bottom.toFixed(1)
+      }
+      /**
+       * 覆盖范围从**块标那一行的顶**（`contentTop`）起，不是从块标中心起。
+       *
+       * ⚠️ 这一点是这条断言的关键：只判「从中心到子树底」时，旧写法（起点＝中心）
+       *    会**照样通过** —— 因为它确实从中心一路连到子树底，缺的是**中心上方那半行**。
+       *    实测反证：把起点改回 `1lh / 2`，只判中心→底的版本仍然全绿。
+       */
+      const contentTop = +el.querySelector(':scope > .left').getBoundingClientRect().top.toFixed(1)
+      const segs = (cols.get(x) ?? []).sort((a, b) => a[0] - b[0])
+      // 合并成连续区间
+      const merged = []
+      for (const [t, bm] of segs) {
+        const last = merged[merged.length - 1]
+        if (last && t <= last[1] + 0.5) last[1] = Math.max(last[1], bm)
+        else merged.push([t, bm])
+      }
+      const cover = merged.find(([t, bm]) => t <= contentTop + 0.5 && bm >= subtreeBottom - 0.5)
+      out.push({
+        id: el.dataset.blockId.slice(-4),
+        depth,
+        x,
+        contentTop,
+        y,
+        subtreeBottom,
+        covered: Boolean(cover),
+        coverSpan: cover ? [+cover[0].toFixed(1), +cover[1].toFixed(1)] : null,
+        // 缺的那一段：从 contentTop 到第一段线的起点
+        firstSegTop: segs[0] ? +segs[0][0].toFixed(1) : null,
+      })
+    }
+    return out
+  })
+
+  assert(r.length > 0, `前置：假数据里应有「有子块」的行可测：${JSON.stringify(r)}`)
+  const broken = r.filter((p) => !p.covered)
+  assert(
+    broken.length === 0,
+    `有子块的块标，线须从它那一行的顶连续到子树底（零断口）；缺口 = 块标上方那半行：${JSON.stringify(
+      broken.map((b) => ({ id: b.id, 缺口: [b.contentTop, b.firstSegTop], 缺: +(b.firstSegTop - b.contentTop).toFixed(1) })),
+    )}`,
+  )
+
+  await ctx.close()
+  return `${r.length} 颗有子块的块标：线均从自己那一行的顶连续到子树底，零断口（例 ${r[0].id} 覆盖 ${r[0].coverSpan?.join('..')}，子树底 ${r[0].subtreeBottom}）`
 })
 
 /* ---------------------------------------------------------------- A23b */
@@ -718,7 +834,7 @@ await check('A23b 根行同时带面包屑＋别名头（两个头）：偏移�
   /**
    * **判据**：同 A23，但场景是**两个头**（面包屑在上、别名头在下）。
    *
-   * 为什么单独一条：偏移是 `头数 × (头高 ＋ 行距)`。这个乘法最容易被后人改成
+   * 为什么单独一条：起点是 `头数 × (头高 ＋ 行距)`。这个乘法最容易被后人改成
    * 「只在有一个头时加一次」——那种写法在 A23 的场景（一个头）里**完全正确**，
    * 只在两个头时少加一段，而两个头的组合（反链／查询结果就地展开到一页块）恰恰是常见的。
    *
@@ -737,16 +853,17 @@ await check('A23b 根行同时带面包屑＋别名头（两个头）：偏移�
     for (const el of document.querySelectorAll('#editor .blk[data-depth="0"]')) {
       const self = el.querySelector(':scope > .rail-self')
       const mk = el.querySelector(':scope > .left > .marker')
-      const heads = el.querySelectorAll(':scope > .blk-alias, :scope > .blk-context')
+      const heads = [...el.querySelectorAll(':scope > .blk-alias, :scope > .blk-context')]
       if (!self || !mk || heads.length < 2) continue
       const sr = self.getBoundingClientRect()
       const mr = mk.getBoundingClientRect()
-      const headBottom = Math.max(...[...heads].map((h) => h.getBoundingClientRect().bottom))
+      const headBottom = Math.max(...heads.map((h) => h.getBoundingClientRect().bottom))
       out.push({
         id: el.dataset.blockId.slice(-4),
         headCount: heads.length,
         headRows: getComputedStyle(el).getPropertyValue('--head-rows'),
         headBottom: +headBottom.toFixed(1),
+        contentTop: +el.querySelector(':scope > .left').getBoundingClientRect().top.toFixed(1),
         startTop: +sr.top.toFixed(1),
         markerCenter: +(mr.top + mr.height / 2).toFixed(1),
       })
@@ -755,13 +872,15 @@ await check('A23b 根行同时带面包屑＋别名头（两个头）：偏移�
   })
 
   assert(r.length > 0, `前置：应出现「面包屑＋别名头」两个头的根行：${JSON.stringify(r)}`)
-  const bad = r.filter((x) => Math.abs(x.startTop - x.markerCenter) > 1.5)
-  assert(bad.length === 0, `两个头的根行，起点仍须贴块标中心（差 ≤1.5px），实际：${JSON.stringify(bad)}`)
+  const badStart = r.filter((x) => Math.abs(x.startTop - x.contentTop) > 1)
+  assert(badStart.length === 0, `两个头的根行，起点须贴块标那一行的顶（头底＋行距），实际：${JSON.stringify(badStart)}`)
   const inHead = r.filter((x) => x.startTop < x.headBottom - 0.5)
   assert(inHead.length === 0, `两个头的根行，线不许伸进头里：${JSON.stringify(inHead)}`)
+  const notCrossing = r.filter((x) => !(x.startTop <= x.markerCenter + 0.5))
+  assert(notCrossing.length === 0, `两个头的根行，线仍须穿过块标中心：${JSON.stringify(notCrossing)}`)
 
   await ctx.close()
-  return `${r.length} 行两个头的根行：起点贴块标中心、零伸进头里（起点 ${r[0].startTop} / 头底 ${r[0].headBottom} / --head-rows ${r[0].headRows}）`
+  return `${r.length} 行两个头的根行：起点贴块标那一行的顶、穿过块标、零伸进头里（起点 ${r[0].startTop} / 头底 ${r[0].headBottom} / 行顶 ${r[0].contentTop} / 块标中心 ${r[0].markerCenter} / --head-rows ${r[0].headRows}）`
 })
 
 /* ---------------------------------------------------------------- A19 */
