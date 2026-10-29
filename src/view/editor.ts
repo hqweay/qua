@@ -147,7 +147,7 @@ import { ensureTagInTx, tagLookupOf } from '../core/kb/ensure-tag.ts'
 // 用户可见文案一律走 t
 import { t } from '../core/msg.ts'
 import { ALLOWED_ROW_CHILDREN, EDIT_ISLAND_ATTR, LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl, visibleRowHeight } from './block-dom.ts'
-import { assetViewOf } from './asset-views.ts'
+import { assetViewOf, markAssetMissing } from './asset-views.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
 import { bindEditorEvents, type RefClickHit, type RefClickMods, type TriggerQuery } from './editor-events.ts'
 
@@ -309,6 +309,11 @@ export interface ViewEvents {
    *    不退化成「缺失」——那会让用户去找一个根本没被查过的文件。
    */
   assetView?: (hash: string) => AssetView
+  /**
+   * **字节取不到时**（`<img>` 报错）的回落。默认直接问 `view/asset-views.ts`：
+   * 索引里有一行不代表文件还在 —— 浏览器去取的那一刻才是真相。
+   */
+  onAssetError?: (hash: string) => void
   /**
    * **在空天格子里落笔**（复盘兜底）：装配层物化那一天并重装载。
    * 编辑器只报日期——「造块进库」是命令层的事，视图不写库。
@@ -913,7 +918,7 @@ export class BlockEditor {
        *    `unavailable`，之后没有任何人再重画（那一行已经"画完了"）——
        *    表现为「重开之后图全是库不可用」，而库里明明有字节。
        */
-      (tx) => fillBlockText(tx, r.block, find, this.events.assetView ?? assetViewOf),
+      (tx) => fillBlockText(tx, r.block, find, this.events.assetView ?? assetViewOf, this.events.onAssetError ?? markAssetMissing),
       {
         single: flatten(this.doc).length === 1,
         ancestors: this.ancestors.get(r.block.id) ?? [],
@@ -2562,12 +2567,7 @@ export class BlockEditor {
    *
    * @returns 新 run 的 id；块不在了或 offset 越界 ⇒ `null`（一个字节都不写，不静默插到别处）
    */
-  insertAssetAt(
-    blockId: string,
-    offset: number,
-    asset: string,
-    snap?: { label?: string; w?: number; h?: number },
-  ): string | null {
+  insertAssetAt(blockId: string, offset: number, asset: string, snap?: { label?: string }): string | null {
     const loc = locate(this.doc, blockId)
     if (!loc) return null
     const len = plainLen(loc.block.content)
@@ -2578,8 +2578,6 @@ export class BlockEditor {
       t: 'asset',
       asset,
       ...(snap?.label ? { label: snap.label } : {}),
-      ...(snap?.w ? { w: snap.w } : {}),
-      ...(snap?.h ? { h: snap.h } : {}),
     }
     const next = insertRunAt(loc.block.content, offset, run)
     this.commitContent(blockId, next, before, 'other', offset + 1)
@@ -2587,7 +2585,7 @@ export class BlockEditor {
   }
 
   /** 在当前光标处插一枚资产 run（落点捕获的便捷版；入口应当用 `insertAssetAt`）。 */
-  insertAsset(asset: string, snap?: { label?: string; w?: number; h?: number }): string | null {
+  insertAsset(asset: string, snap?: { label?: string }): string | null {
     const id = this.sel?.aBlock ?? this.rows()[0]?.block.id
     if (!id) return null
     return this.insertAssetAt(id, this.sel?.aOff ?? 0, asset, snap)

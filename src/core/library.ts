@@ -19,7 +19,7 @@
 export const DB_FILE = 'qua.db'
 /** 库目录的身份标记。它的职责只是「这目录像不像一个库」，不判数据能不能读。 */
 export const MANIFEST_FILE = 'library.json'
-/** 资产字节的目录（内容寻址：`<hash 前 2 位>/<hash>` ＋ 同名 `.json` 侧车）。 */
+/** 资产字节的目录（内容寻址：`<hash 前 2 位>/<hash>.<ext>`；元信息在 `qua.db` 的 `assets` 表）。 */
 export const ASSETS_DIR = 'assets'
 /** 迁移前快照。放在库目录里，因为「拷贝目录＝完整备份」要求它跟着走。 */
 export const BACKUPS_DIR = 'backups'
@@ -36,17 +36,19 @@ export const LIBRARY_FORMAT = 1
  * `app.json.version` 判「注册表怎么读」、`WORKSPACE_VERSION` 是当前过渡期的载荷版本 ——
  * 三者都不判「这份数据能不能读」，只有这一格判。
  *
- * 为什么是 3：v1 是过渡形状——`workspace` 表里一整份库 JSON，每次编辑整份覆盖写
+ * 为什么是 4：v1 是过渡形状——`workspace` 表里一整份库 JSON，每次编辑整份覆盖写
  * （写成本随库体量线性增长）。v2 把块拆成 `Block`／`BlockProperty`／`BlockAlias`／`BlockList`
  * 四张表，一次编辑只写它动过的那几块的行。v3 是**日志即状态**：`op_log` 的 op 形状改成
  * 完整、可重放的格写入（`block.exist` 三态、genesis 带 `created`/内容），
- * 旧的 op 历史按「升版作废」的纪律丢掉。
+ * 旧的 op 历史按「升版作废」的纪律丢掉。v4 让**资产元信息回到库里**
+ * （`assets` 表；`assets/` 目录只留字节），并且启动不再扫目录 —— 那一步的重建
+ * 是一次性的 `reindex()`。
  *
  * **不写数据迁移**：原型不做旧数据迁移，旧库作废重 seed（`judgeDbVersion` 判到
  * `migrate` 时跑 `MIGRATIONS` 里那一步**只丢旧形状、不搬数据**的 DDL）。
  * `user_version` 只增不减。
  */
-export const DB_SCHEMA_VERSION = 3
+export const DB_SCHEMA_VERSION = 4
 
 /** `meta` 表里被代码解释的键（其余键归将来，不在这里登记）。 */
 export const META_KEYS = {
@@ -84,6 +86,13 @@ export const DB_TABLES = {
   settings: 'settings',
   /** 变更流（`PK(device_id, seq)` 让重发天然幂等） */
   opLog: 'op_log',
+  /**
+   * 资产元信息：一行一份字节（`hash` 是主键，也是正文里引用的地址）。
+   *
+   * 为什么是**库级**表（不放内容表那一组）：内容表在「换库／重 seed」时整份清掉，
+   * 而资产行描述的是**盘上的字节**，不该被一次内容替换连坐。
+   */
+  assets: 'assets',
 } as const
 
 /** 内容表（**装载时整份读、换库时整份清**的那四张） */

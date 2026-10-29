@@ -474,12 +474,24 @@ Qua/
 └── repos/<libraryId>/
     ├── library.json  # { kind:'qua-library', format:1, id } —— 身份权威
     ├── qua.db        # SQLite（WAL）；块拆成行；PRAGMA user_version 是唯一 schema 版本
-    ├── assets/       # <hash前2>/<hash> ＋ <hash>.json 侧车
+    ├── assets/       # <hash前2>/<hash>.<ext> —— 一图一行一文件（元信息在 qua.db 的 assets 表）
     └── backups/      # 迁移前快照
 ```
 
 `--qua-data-dir=` 覆盖库根；**给了 `--user-data-dir=` 时库根跟着它走**
 （否则跑一次自检就在用户的文档目录里建库——真踩过）。
+
+**资产地址是一条自定义协议，不是 IPC**（2026-10-29）。壳在 `app.ready` 之前
+`registerSchemesAsPrivileged`（`standard` ＋ `secure` ＋ `stream`），之后
+`protocol.handle('qua-asset', …)` 把 `qua-asset://<hash>` 映射到 `assets/` 里的那份文件。
+
+三个必须知道的点：
+
+1. **登记必须早于 ready**，晚了不生效且**不报错**（页面只是没有图）。
+2. CSP 的 `img-src` 要显式放行 `qua-asset:`；被拦时没有任何文案，图就是个空框。
+3. 地址里**不带库 id**：内容寻址 ⇒ 同一个 hash 在哪个库里都是同一份字节。
+   主进程按 hash 在所有会话里找一个能回答的（`assetFileOf`），
+   于是「渲染层不许告诉主进程我是哪个库」这条纪律在协议这一侧也保住了。
 
 **备份口径（实测，必须知道）**：SQLite 开着 WAL 时，只拷 `qua.db` 会**拷不到数据**
 （连表都读不出来：`no such table`）。三条对策，代码里都做了：

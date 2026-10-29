@@ -905,7 +905,7 @@ await check('E9 虚拟化下选区投影与组合期两段式的 Electron 现状
 
 /* ═══════════════════════════════════════════════════ E10 行内资产：CSP 下的真图 */
 
-await check('E10 行内资产：CSP 下真图可显示，且字节落在**库目录的 assets/**（拷库目录＝图一起走）', async () => {
+await check('E10 行内资产：CSP 下真图直出（qua-asset 协议），字节落在**库目录的 assets/**（一图一行一文件）', async () => {
   const { app, page, errors } = await launch('asset-csp')
   /**
    * 这条在**真 Electron**里验，不在浏览器里：CSP 的两种落法（meta 与响应头）
@@ -929,9 +929,15 @@ await check('E10 行内资产：CSP 下真图可显示，且字节落在**库目
       libDir: (await window.qua?.libraryInfo?.())?.dir ?? '',
     }
   })
-  assert(r.meta.includes('blob:'), `CSP 的 img-src 缺 blob:（真实图片会被静默拦下）：${r.meta}`)
+  /**
+   * CSP 必须放行**自定义协议**：`<img src="qua-asset://…">` 被 `img-src` 拦下时
+   * 没有任何报错文案，图就是一个空框 —— 只能靠这条断言与 `errors` 一起看。
+   */
+  assert(r.meta.includes('qua-asset:'), `CSP 的 img-src 缺 qua-asset:（真图会被静默拦下）：${r.meta}`)
   assert(r.assets.available, `资产库应可用：${JSON.stringify(r.assets)}`)
   assert(r.nw > 0, `CSP 下真图必须解码成功（naturalWidth>0），实际 ${r.nw}；src=${r.src}`)
+  // 地址是协议，不是对象 URL：桌面版不该出现 blob:（那意味着渲染层还在自己缓存字节）
+  assert(r.src.startsWith('qua-asset://'), `桌面版的图应直连 qua-asset://，实际 src=${r.src}`)
   assert(errors.length === 0, `页面报错（CSP 拦截会出现在这里）：${errors.join(' | ')}`)
   /**
    * 字节必须真的写在库目录里（渲染层经 IPC 入库，不是浏览器的 IndexedDB）：
@@ -939,11 +945,19 @@ await check('E10 行内资产：CSP 下真图可显示，且字节落在**库目
    * 它与字节的对应关系另有单测钉住，这里只验「入库后的落点」。
    */
   const SEED_HASH = '6743b62328fe8d48b0c214a92a89ebcc6b2426b1e64f1f5916bc056169432d12'
-  const onDisk = join(r.libDir, 'assets', SEED_HASH.slice(0, 2), SEED_HASH)
-  assert(Boolean(r.libDir) && existsSync(onDisk), `种子图片应落在库目录 assets/ 下：${onDisk} 不存在（libDir=${r.libDir}）`)
+  const bucket = join(r.libDir, 'assets', SEED_HASH.slice(0, 2))
+  const onDisk = join(bucket, `${SEED_HASH}.png`)
+  assert(Boolean(r.libDir) && existsSync(onDisk), `种子图片应落在 assets/ 下且带扩展名：${onDisk} 不存在（libDir=${r.libDir}）`)
   assert(readFileSync(onDisk).byteLength > 0, `库目录里的资产字节是空的：${onDisk}`)
+  /**
+   * **一个资产只有一个文件**：元信息在 `qua.db` 的 `assets` 表里，不是旁边的侧车。
+   * 这一条钉的是「别再长回第二个 store」——侧车与正文没有共同的事务。
+   */
+  const files = readdirSync(bucket)
+  assert(!files.some((n) => n.endsWith('.json')), `assets/ 下不该再有 .json 侧车：${JSON.stringify(files)}`)
+  assert(files.filter((n) => n.startsWith(SEED_HASH)).length === 1, `一份字节应只有一个文件：${JSON.stringify(files)}`)
   await app.close()
-  return `img-src 含 blob:；真图 ${r.nw}px 解码成功；字节在 ${onDisk.slice(r.libDir.length)}；页面无报错`
+  return `img-src 含 qua-asset:；真图 ${r.nw}px 直出（src=${r.src}）；字节在 ${onDisk.slice(r.libDir.length)}，无侧车；页面无报错`
 })
 
 /* ═══════════════════════════════════════════════════ E11 多库：两库两窗、各自编辑、关掉重开 */

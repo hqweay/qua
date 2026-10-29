@@ -79,8 +79,12 @@ import { isAnno, isRun } from '../runs.ts'
  *            加字段即升版是本文件的原型纪律（上面每一版都是同一条理由）：
  *            旧库照旧作废重 seed，换来的是**写路径只面对一种形状**——
  *            「这一枚 run 有没有 anchor」在读侧永远只有一个答案。
+ * v25 → v26：`AssetRun` **去掉** `w`/`h`。它们是那份字节的属性，由资产索引回答
+ *            （`AssetView`）；留在 run 上就是同一件事的第二个答案——两份能不一致，
+ *            而不一致时没有任何一层会报错。写路径只面对一种形状：run 说「哪一份字节」，
+ *            索引说「它是什么、多大」。
  */
-export const WORKSPACE_VERSION = 25
+export const WORKSPACE_VERSION = 26
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

@@ -53,7 +53,7 @@ import { seedWorkspace } from './core/seed.ts'
 import { createIdbAssetStore } from './core/storage/asset-idb.ts'
 import { createIpcAssetStore } from './core/storage/asset-ipc.ts'
 import { ensureSeedAssets } from './core/storage/seed-assets.ts'
-import { assetMetaOf, assetViewOf, assetsAvailable, loadAssetKeys, onAssetReady, primeAsset, useAssetStore } from './view/asset-views.ts'
+import { assetMetaOf, assetViewOf, assetsAvailable, loadAssetIndex, onAssetChange, primeAsset, useAssetStore } from './view/asset-views.ts'
 import type { AssetView } from './core/assets.ts'
 import {
   IMAGE_MIME_ALLOWLIST,
@@ -121,10 +121,11 @@ const deviceStore = createDeviceStore(createLocalStorageAdapter(DEVICE_KEY))
 /**
  * **资产库**：字节的唯一去处。与内容存储同一条分叉判据（`window.qua` 在不在）：
  *   · Electron：字节住在**库目录的 `assets/`**（主进程写，经 IPC）⇒ 拷库目录＝图一起走；
- *   · web：IndexedDB（浏览器没有「用户可选的库目录」这个语义）。
+ *              地址是 `qua-asset://<hash>`，由壳的协议处理器映射到那份文件；
+ *   · web：IndexedDB（浏览器没有「用户可选的库目录」这个语义），地址由实现自己管。
  *
  * 为什么在**读库之前**就建好：行内资产是正文的一部分，渲染第一帧就要知道
- * 「这份 hash 在不在」——`keys()` 必须赶在首次渲染之前拿到。
+ * 「这份 hash 在不在、多大」—— 索引必须赶在首次渲染之前拿到。
  * ⚠️ 资产库打不开不是启动失败：整个库标成 `unavailable`，应用照常开，
  *    已有图显示「资产库不可用」而不是一片空白（见 `view/asset-views.ts`）。
  */
@@ -152,16 +153,16 @@ const readOnly = boot.status === 'too-new' || boot.status === 'corrupt' || boot.
 let ws: Workspace = boot.status === 'ok' ? boot.ws : seedWorkspace()
 
 /**
- * **启动顺序**：先把种子资产的字节写进资产库，再拿一次全库 key，最后才渲染。
+ * **启动顺序**：先把种子资产的字节写进资产库，再拿一次全库索引，最后才渲染。
  *
- * 顺序不能反：`keys()` 是「这份 hash 在不在」的同步判据，种子的图必须在它之前入库；
- * 反过来（先 keys 再 put）会让默认演示里的图全部显示成 `missing`——
+ * 顺序不能反：索引是「这份 hash 在不在、多大」的同步判据，种子的图必须在它之前入库；
+ * 反过来（先取索引再 put）会让默认演示里的图全部显示成 `missing`——
  * 用户看到「资产库坏了」，而实际只是顺序错了。
  *
- * 失败不拦启动：入库失败只影响那一张图（`missing`），`keys()` 失败才整库 `unavailable`。
+ * 失败不拦启动：入库失败只影响那一张图（`missing`），取索引失败才整库 `unavailable`。
  */
 if (!readOnly) await ensureSeedAssets(assetStore)
-await loadAssetKeys()
+await loadAssetIndex()
 
 /**
  * 边图邻接表（**现建一次、当次用完**）。
@@ -1002,13 +1003,10 @@ async function insertAssetBlob(
     app.toast(t('ui.asset.putFailed'), 'warn')
     return false
   }
-  // 入库成功 ⇒ 立刻登记，新 run 的首帧就能画出图（不用等下一次启动的 keys()）
+  // 入库成功 ⇒ 立刻登记，新 run 的首帧就能画出图（不用等下一次启动的索引）
   primeAsset(meta)
-  const runId = ed.insertAssetAt(where.blockId, where.offset, meta.hash, {
-    label,
-    ...(meta.w !== undefined ? { w: meta.w } : {}),
-    ...(meta.h !== undefined ? { h: meta.h } : {}),
-  })
+  // 尺寸不进 run：它是那份字节的属性，从索引里读（见 `AssetRun`）
+  const runId = ed.insertAssetAt(where.blockId, where.offset, meta.hash, { label })
   if (!runId) {
     // 块在入库期间被删 / 光标越界：字节已经落库（孤儿，无害），引用不落
     app.toast(t('ui.asset.caretGone'), 'warn')
@@ -1598,15 +1596,14 @@ ed.events.undoOps = (ops) => {
 }
 
 /**
- * **字节到达时重画引用了它的那几行**。
+ * **某个资产地址变了（就绪 / 判定缺失）时，重画引用了它的那几行**。
  *
- * 为什么需要这一步：渲染是同步纯函数（`fillBlockText`），它拿不到还停在 IndexedDB 里的
- * 字节。第一帧画的是「文件占位」，字节取到、对象 URL 建好之后必须有人把那一行换掉——
- * 否则图永远停在一个占位上，而用户以为图坏了。
+ * 桌面版地址是常量，这一段平时不会响；浏览器端字节从 IndexedDB 读出来才会有一次
+ * 「地址就绪」，以及 `<img>` 报错时的「判定缺失」。
  *
  * 只重画**引用了这个 hash 的块**（不是 `renderAll`）：重排整页会打断正在输入的那一行。
  */
-onAssetReady((hash) => {
+onAssetChange((hash) => {
   const hit = new Set<string>()
   for (const b of flatten({ roots: blocks.blocks })) {
     if (b.content.some((r) => r.t === 'asset' && r.asset === hash)) hit.add(b.id)

@@ -871,7 +871,7 @@ await check('T5b 行内资产：真图按内容地址画出来（naturalWidth > 
     }
   })
   assert(r.assets.available, `资产库应可用：${JSON.stringify(r.assets)}`)
-  assert(r.assets.keys >= 1, `资产库应有种子样本：${JSON.stringify(r.assets)}`)
+  assert(r.assets.rows >= 1, `资产库应有种子样本：${JSON.stringify(r.assets)}`)
   assert(r.imgs.length >= 1, `样本资产应画成真图：${JSON.stringify(r.atoms)}`)
   const img = r.imgs[0]
   assert(img.nw > 0 && img.nh > 0, `真图必须解码成功（CSP 的 img-src 少了 blob: 会静默变 0）：${JSON.stringify(img)}`)
@@ -1044,7 +1044,7 @@ await check('T5f 行内资产：粘贴图片 → 内容寻址入库 → 插在**
     }
   })
   assert(r.after.some((x) => String(x).startsWith('asset:粘贴的图.png:64')), `粘贴应插一枚带 64 位地址的资产 run：${JSON.stringify(r.after)}`)
-  assert(r.assets.keys >= 2, `新字节应真的入库（去重后应多一份）：${JSON.stringify(r.assets)}`)
+  assert(r.assets.rows >= 2, `新字节应真的入库（去重后应多一份）：${JSON.stringify(r.assets)}`)
   assert(r.imgs.every((n) => n > 0), `粘进来的图也要能解码：${JSON.stringify(r.imgs)}`)
 
   // 同一份字节再贴一次 ⇒ 库里仍只有那些 key（内容寻址去重），但多一枚 run
@@ -1054,7 +1054,7 @@ await check('T5f 行内资产：粘贴图片 → 内容寻址入库 → 插在**
     const bin = atob(b64)
     const bytes = new Uint8Array(bin.length)
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-    const keysBefore = window.__qua.snapshot().assets.keys
+    const rowsBefore = window.__qua.snapshot().assets.rows
     const atomsBefore = window.__qua.snapshot().atoms
     const dt = new DataTransfer()
     dt.items.add(new File([bytes], '同一张.png', { type: 'image/png' }))
@@ -1066,13 +1066,13 @@ await check('T5f 行内资产：粘贴图片 → 内容寻址入库 → 插在**
     }
     const assets = window.__qua.snapshot().assets
     const labels = window.__qua.atoms().filter((a) => a.kind === 'asset').map((a) => a.rawLabel)
-    return { keysBefore, keys: assets.keys, atoms: window.__qua.snapshot().atoms, labels }
+    return { rowsBefore, rows: assets.rows, atoms: window.__qua.snapshot().atoms, labels }
   })
-  assert(twice.keys === twice.keysBefore, `同一份字节不该多一份资产（内容寻址去重）：${JSON.stringify(twice)}`)
+  assert(twice.rows === twice.rowsBefore, `同一份字节不该多一份资产（内容寻址去重）：${JSON.stringify(twice)}`)
   assert(twice.labels.includes('同一张.png') && twice.labels.includes('粘贴的图.png'), `两枚 run 各保留自己的 label：${JSON.stringify(twice.labels)}`)
 
   await ctx.close()
-  return `粘贴入库 ${r.assets.keys} 份；同字节再贴 ⇒ 仍 ${twice.keys} 份、两枚 run（label 各自保留）`
+  return `粘贴入库 ${r.assets.rows} 条；同字节再贴 ⇒ 仍 ${twice.rows} 条、两枚 run（label 各自保留）`
 })
 
 await check('T5g 行内资产：选文件走隐藏 input；拖入文件被拦住（不产生裸 <img>）', async () => {
@@ -1096,7 +1096,7 @@ await check('T5g 行内资产：选文件走隐藏 input；拖入文件被拦住
     assets: window.__qua.snapshot().assets,
   }))
   assert(picked.labels.includes('选中的图.png'), `选文件应插一枚带文件名的资产：${JSON.stringify(picked.labels)}`)
-  assert(picked.assets.keys >= 2, `选文件也要真的入库：${JSON.stringify(picked.assets)}`)
+  assert(picked.assets.rows >= 2, `选文件也要真的入库：${JSON.stringify(picked.assets)}`)
 
   // ② 拖入文件：拦住、给文案、**不产生裸 <img>**
   const drop = await page.evaluate(async () => {
@@ -1121,7 +1121,7 @@ await check('T5g 行内资产：选文件走隐藏 input；拖入文件被拦住
   assert(drop.toast.includes('暂不支持'), `拖入应给一句明确的话：${drop.toast}`)
 
   await ctx.close()
-  return `选文件 ⇒ ${picked.labels.length} 枚资产（库 ${picked.assets.keys} 份）；拖入被拦（裸 img ${drop.naked} 个）`
+  return `选文件 ⇒ ${picked.labels.length} 枚资产（库 ${picked.assets.rows} 条）；拖入被拦（裸 img ${drop.naked} 个）`
 })
 
 await check('T5h 行内资产：关掉重开，图还在（workspace ＋ IndexedDB 一起恢复）；只清 IDB ⇒ missing', async () => {
@@ -1202,7 +1202,7 @@ await check('T5h 行内资产：关掉重开，图还在（workspace ＋ Indexed
       dom: [...document.querySelectorAll('#editor .atom-asset')].map((e) => [e.className, e.dataset.assetHash?.slice(0, 8), e.querySelector('img')?.alt ?? '', e.querySelector('img')?.naturalWidth ?? -1]),
     }
   })
-  assert(after.assets.keys === before.assets.keys, `重开后资产库应有同样多的 key：${JSON.stringify({ before: before.assets, after: after.assets })}`)
+  assert(after.assets.rows === before.assets.rows, `重开后资产库应有同样多的行：${JSON.stringify({ before: before.assets, after: after.assets })}`)
   assert(after.labels.includes('重开验证.png'), `重开后资产 run 不该丢：${JSON.stringify(after.labels)}`)
   assert(after.pastedDecoded, `重开后粘贴的那张图要还能解码（workspace ＋ IDB 一起恢复）：${JSON.stringify(after)}`)
 
@@ -1229,7 +1229,7 @@ await check('T5h 行内资产：关掉重开，图还在（workspace ＋ Indexed
   assert(cleared.missing >= 1, `字节没了应有 missing 占位（不是空白、不是抛错）：${JSON.stringify(cleared)}`)
 
   await next.close()
-  return `重开：${after.assets.keys} 份资产、${after.imgs} 张图；清 IDB ⇒ 用户那张 missing、库仍可用`
+  return `重开：${after.assets.rows} 条资产、${after.imgs} 张图；清 IDB ⇒ 用户那张 missing、库仍可用`
 })
 
 /* ---------------------------------------------------------- 结构 */

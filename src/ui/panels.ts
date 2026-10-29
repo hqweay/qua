@@ -411,7 +411,7 @@ export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect | n
     const rows: [string, string][] = [
       [t('ui.popover.assetHash'), a.asset],
       [t('ui.popover.state'), view.state],
-      [t('ui.popover.size'), `${a.w ?? meta?.w ?? '?'}×${a.h ?? meta?.h ?? '?'}`],
+      [t('ui.popover.size'), `${view.w ?? meta?.w ?? '?'}×${view.h ?? meta?.h ?? '?'}`],
       [
         t('ui.popover.mimeBytes'),
         meta ? `${meta.mime} / ${meta.size}` : t('ui.popover.assetNoMeta'),

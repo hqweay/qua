@@ -6,7 +6,7 @@
  * 否则默认演示看起来就像「资产库坏了」，而用户没有任何办法把它修好。
  *
  * 三条纪律：
- *   1. **幂等**：已有这份 hash 就直接返回（`put` 自己也会去重，这里省一次读字节）。
+ *   1. **幂等**：索引里已有这份 hash 就直接返回（省一次整份字节过 IPC）。
  *   2. **失败只影响这一张图**：入不了库 ⇒ 那一枚 run 显示 `missing`，应用照常启动；
  *      绝不因为一张演示图把启动拦下来。
  *   3. **不写「刻意缺失」那一份**：`MISSING_ASSET_HASH` 的存在意义就是库里没有它。
@@ -16,7 +16,8 @@ import { SEED_ASSET_HASH, seedAssetBytes } from '../fixtures/assets.ts'
 
 export async function ensureSeedAssets(port: AssetStorePort): Promise<void> {
   try {
-    if (await port.stat(SEED_ASSET_HASH)) return
+    const rows = await port.index()
+    if (rows.some((r) => r.hash === SEED_ASSET_HASH)) return
     await port.put(new Blob([seedAssetBytes()], { type: 'image/png' }))
   } catch (e) {
     // 开发者日志（英文）：用户可见的后果是那一张图显示「缺失」，不是启动失败

@@ -1,14 +1,25 @@
 /**
  * `AssetStorePort` —— 资产字节的唯一契约（纯类型，零运行时）。
  *
- * 为什么单独一个端口：正文只存 hash，不知道字节在 IndexedDB、库目录还是云端。
- * 换存储（原型 IDB → 工作区 `assets/` → 将来的 BlobStore）时，渲染/命令一行不改。
+ * ## 为什么是「地址」而不是「字节」
  *
- * 三条硬口径：
+ * 正文只存 hash，不知道字节在库目录、IndexedDB 还是云端。渲染要的是一个能塞进
+ * `<img src>` 的**地址**——不是一堆需要自己缓存、自己回收的字节。
+ *
+ * 上一版端口给的是 `get(): Blob`，于是每一个调用方都得自己发明一套缓存：
+ * 按 hash 去重、建对象 URL、什么时候 revoke、同一份被多行引用时只发一次请求……
+ * 那套东西现在住在**实现内部**（它才知道地址的生命周期）。
+ *
+ * ⇒ 端口只有三件事：写字节、一次拿全部索引、把 hash 变成一个地址。
+ *   - Electron：`qua-asset://<hash>`，地址是常量，没有生命周期；
+ *   - 浏览器：实现内部自己管 Blob URL（它自己 revoke 自己）。
+ *
+ * ## 三条硬口径
+ *
  *   1. **内容寻址**：`put` 算 hash；同一份字节重复 `put` 幂等。
- *   2. **字节不进正文**：端口只返回元信息/Blob，不把 bytes 塞回 run。
- *   3. **缺失是状态**：`get`/`stat` 找不到返回 `null`，不抛「资产不存在」的错误；
- *      「库本身打不开」由装配层区分成 `unavailable`。
+ *   2. **字节不进正文**：端口只返回元信息／地址，不把 bytes 塞回 run。
+ *   3. **缺失是状态**：索引里没有 ⇒ `missing`；库打不开 ⇒ `unavailable`。
+ *      两者不是一件事（前者去找文件，后者去修存储），别压成一个。
  */
 import type { AssetMeta } from '../assets.ts'
 
@@ -20,15 +31,26 @@ export interface AssetStorePort {
    * 不许假装成功。`w/h` 对非视觉媒体可以缺。
    */
   put(blob: Blob): Promise<AssetMeta>
-  /** 取字节；没有这份资产返回 `null`。 */
-  get(hash: string): Promise<Blob | null>
-  /** 取元信息；没有返回 `null`。 */
-  stat(hash: string): Promise<AssetMeta | null>
+
   /**
-   * 启动时一次拿全库 key，让「这份资产在不在」可以同步判。
+   * 一次拿全库资产元信息（随库装载一次）。
    *
-   * 返回的是 hash 列表；顺序无语义。读失败必须 reject——「不知道有哪些资产」
-   * 和「没有资产」不是一件事。
+   * 为什么不是「启动时扫一遍目录」：元信息是**内容属性**，它和正文住在同一个库里
+   * （桌面版是 `qua.db` 的一行）。于是启动不必做一次 O(文件数) 的 `readdir`，
+   * 也不必等字节读完才知道「这张图是不是图片、多大」——首帧就画对。
+   *
+   * 读失败必须 reject：「不知道有哪些资产」和「没有资产」不是一件事。
    */
-  keys(): Promise<string[]>
+  index(): Promise<AssetMeta[]>
+
+  /**
+   * 这份 hash **此刻**的地址；空串 ＝ 还没有（实现正在准备）。
+   *
+   * 同步：渲染是同步纯函数。拿不到地址时画文件 chip，等 `onAddressChange` 回来重画——
+   * 那条延迟属于实现，不属于视图。
+   */
+  urlOf(hash: string): string
+
+  /** 某个地址就绪／失效时回调（实现自己决定什么时候有事要说）。返回取消订阅。 */
+  onAddressChange(fn: (hash: string) => void): () => void
 }

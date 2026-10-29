@@ -199,8 +199,13 @@ AST 取 `COMMANDS[].name` 查重。现状 51 条命令 / 51 个唯一名。
 
 ### `[2+]` 主进程不得 import 数据层
 
-AST 遍历 `electron/**/*.ts`：禁止 `workspace` / `seed` / `core/` / `commands/`；
-只放行 `../src/msg`（零依赖的纯字典，不是数据层）。
+AST 遍历 `electron/**/*.ts`，按**白名单**判：只放行 `node:*`／`electron`／主进程自己目录内／
+`src/core/msg`（纯字典）／`src/core/library`（库身份与版本判据）／`src/core/assets`
+（字节 → 类型／后缀／地址的纯函数，零依赖、无块语义）。
+
+最后一个叶子是 2026-10-29 加的：**同一条协议的两端必须用同一份判据** ——
+后缀由入库那侧算（`extOf`），地址由协议那侧认（`ASSET_SCHEME`／`isAssetHash`），
+各写一份就是「两份答案」。它没有任何块语义，所以不在「数据层」之列。
 
 ### `[12]` 颜色 / 间距字面量（**硬**）
 
@@ -295,8 +300,10 @@ AST 遍历 `electron/**/*.ts`：禁止 `workspace` / `seed` / `core/` / `command
 ### `[26]` 资产库只有一个产地
 
 - **检查方式**：AST 扫 `src/**/*.ts` 的 `indexedDB` 标识符（属性名不算）与
-  `.createObjectURL` 属性访问；各自只允许出现在一个文件里
-  （`core/storage/asset-idb.ts` / `view/asset-views.ts`）。
+  `.createObjectURL` 属性访问；**两个产地现在都在 `core/storage/asset-idb.ts`**
+  （2026-10-29 起）。上一版对象 URL 在 `view/asset-views.ts` —— 那是「渲染层只拿到字节，
+  只好自己建 URL」的形状；现在端口给的是**地址**（`urlOf`），地址的生命周期归实现，
+  于是创建者与回收者是同一个文件，视图层连 `URL` 这个标识符都不该碰。
 - **为什么是硬断言**：两条都不是风格问题 —— 一条是**数据静默消失**
   （IDB 库名 `qua.assets` 是不可逆契约，换名等于已有资产没了；散出去就守不住），
   一条是**慢性泄漏**（每次重渲染都建一个对象 URL，浏览器不回收，直到文档卸载）。

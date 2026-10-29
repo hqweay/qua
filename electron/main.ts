@@ -18,18 +18,33 @@ import {
   app,
   ipcMain,
   nativeTheme,
+  net,
+  protocol,
   shell,
   type MenuItemConstructorOptions,
   type WebContents,
 } from 'electron'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 // 文案字典与 renderer **共用同一份**（`src/core/msg.ts` 是零依赖叶子）。菜单是用户可见文案，
 // 所以连「相」都走 t('app.name')，不在这里硬编码。
 import { t } from '../src/core/msg'
+import { ASSET_SCHEME, isAssetHash } from '../src/core/assets.ts'
 import { libraryId } from '../src/core/library.ts'
 import { loadRegistry } from './library/registry.ts'
 import { LibraryManager } from './library/windows.ts'
+
+/**
+ * 资产协议必须在 `app.ready` **之前**登记特权（登记晚了不生效，且没有报错）。
+ *
+ * `stream: true`：大图靠流式读取，不把整份字节先读进主进程内存。
+ * `secure: true`：它和 `https:` 同级 —— 页面是 `file://`/`localhost` 的安全上下文，
+ * 一条非 secure 的自定义协议会被混合内容规则拦掉。
+ */
+protocol.registerSchemesAsPrivileged([
+  { scheme: ASSET_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+])
 
 /** dev：脚本 `scripts/dev.mjs` 把 vite 的地址塞进来；prod：加载 `dist/index.html` */
 const DEV_URL = process.env.KB_DEV_SERVER_URL ?? null
@@ -450,6 +465,33 @@ const manager = new LibraryManager({
 manager.installIpc()
 
 /**
+ * `qua-asset://<hash>` → 那份字节。
+ *
+ * 这一小段是整个资产方案里**唯一**需要「字节从哪来」的地方：渲染层只写一个字符串，
+ * 其余全在这里。于是「取字节 → 建对象 URL → 什么时候回收」这套生命周期不存在了。
+ *
+ * - 地址就是内容，所以它可以 **immutable 缓存**：同一个 hash 永远同一份字节。
+ * - 找不到 ⇒ 404。渲染层据此把那枚原子标成 `missing`（不是空白，也不是崩溃）。
+ */
+async function serveAsset(request: Request): Promise<Response> {
+  const hash = new URL(request.url).hostname
+  if (!isAssetHash(hash)) return new Response(null, { status: 400 })
+  const hit = manager.assetFileOf(hash)
+  if (!hit) return new Response(null, { status: 404 })
+  try {
+    const file = await net.fetch(pathToFileURL(hit.path).toString())
+    if (!file.ok) return new Response(null, { status: 404 })
+    return new Response(file.body, {
+      status: 200,
+      headers: { 'content-type': hit.mime, 'cache-control': 'public, max-age=31536000, immutable' },
+    })
+  } catch {
+    // 文件被删 / 没有权限：对渲染层就是「这份资产不在了」，不是壳坏了
+    return new Response(null, { status: 404 })
+  }
+}
+
+/**
  * 启动落点：`lastOpenedId` 能开就开它；否则建／开第一个库。
  *
  * 为什么 v1 **总是**开一个库（而不是欢迎页）：欢迎页要一套没有库的渲染面，
@@ -495,6 +537,7 @@ if (!app.requestSingleInstanceLock()) {
 
   void app.whenReady().then(() => {
     Menu.setApplicationMenu(buildMenu())
+    protocol.handle(ASSET_SCHEME, serveAsset)
     bootLibraries()
 
     app.on('activate', () => {

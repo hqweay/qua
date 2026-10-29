@@ -1,19 +1,27 @@
 /**
- * IndexedDB 资产库 —— 原型期的 `AssetStorePort` 实现。
+ * IndexedDB 资产库 —— **浏览器端**的 `AssetStorePort` 实现。
  *
  * 为什么不是 localStorage：图片是二进制，base64 会多 33% 且很快撞 5MB 配额；
  * IDB 原生能存二进制，配额也大得多。字节仍然**不进正文**，正文只存 hash。
  *
+ * ## 两个 store：索引与字节分家（与桌面版同一条口径）
+ *
+ * 桌面版是「`qua.db` 一行元信息 ＋ `assets/<hash>.<ext>` 一份字节」。浏览器没有库目录，
+ * 但**分家这件事本身**是口径：`index()` 只读元信息那一半，不把全库字节拉进内存。
+ *
+ * ## 地址的生命周期住在这里
+ *
+ * 浏览器没有自定义协议，地址只能是 `blob:` —— 而对象 URL 是要还的。既然
+ * 「谁创建谁回收」是唯一可靠的纪律，创建与回收就都放进本文件：
+ * 渲染层拿到的只是一个字符串，它没有能力（也没有责任）去泄漏。
+ *
  * ⚠️ 库名 `qua.assets` 是**不可逆契约**：换名等于已有资产静默消失。
  *    与 `qua.workspace` 同级对待，arch 断言会钉住。
- *
- * ⚠️ 这是**过渡实现**：将来的工作区目录会有 `assets/<hash前2位>/<hash>` ＋ 侧车，
- *    端口不变，换适配器即可；调用方不要 import 本文件。
  *
  * ⚠️ **记录里存 `ArrayBuffer`，不存 `Blob`**：两者结构化克隆都能过，但 `Blob`
  *    在「把存储快照出来再放回去」的链路上会掉成空对象（验收脚本的存储快照就是这条路），
  *    于是一次「关掉重开」之后每张图都读不出字节 —— 表现为「图全丢了」，而库里 key 还在。
- *    `ArrayBuffer` 两个方向都原样往返；`get()` 再按 mime 包回 `Blob` 交给渲染层。
+ *    `ArrayBuffer` 两个方向都原样往返；`urlOf()` 再按 mime 包回 `Blob` 建地址。
  */
 import type { AssetMeta } from '../assets.ts'
 import { prepareAssetBlob } from './asset-prepare.ts'
@@ -21,16 +29,12 @@ import type { AssetStorePort } from './asset-port.ts'
 
 const DB_NAME = 'qua.assets'
 /**
- * v2：记录里的字节从 `Blob` 改成 `ArrayBuffer`（见文件头最后一条）。
- * 旧记录新代码读不出字节 ⇒ **显式作废**（删库重建），不写迁移 —— 原型不做迁移。
+ * v3：**元信息与字节拆成两个 store**（v2 把两者塞进同一条记录 ⇒ 拿索引就得把所有字节
+ * 读进内存）。旧记录新代码不读 ⇒ 显式作废（删库重建），不写迁移 —— 原型不做迁移。
  */
-const DB_VERSION = 2
-const STORE = 'assets'
-
-interface AssetRecord extends AssetMeta {
-  /** 原始字节；**不是 Blob**（理由见文件头） */
-  bytes: ArrayBuffer
-}
+const DB_VERSION = 3
+const META = 'meta'
+const BYTES = 'bytes'
 
 function req<T>(r: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -58,9 +62,10 @@ function openDb(): Promise<IDBDatabase> {
     }
     r.onupgradeneeded = () => {
       const db = r.result
-      // 旧版本的记录形状（Blob）新代码不读 ⇒ 整库作废重建（原型纪律：升版清库，不写迁移）
-      if (db.objectStoreNames.contains(STORE)) db.deleteObjectStore(STORE)
-      db.createObjectStore(STORE, { keyPath: 'hash' })
+      // 旧版本的记录形状新代码不读 ⇒ 整库作废重建（原型纪律：升版清库，不写迁移）
+      for (const name of [META, BYTES]) if (db.objectStoreNames.contains(name)) db.deleteObjectStore(name)
+      db.createObjectStore(META, { keyPath: 'hash' })
+      db.createObjectStore(BYTES)
     }
     r.onsuccess = () => resolve(r.result)
     r.onerror = () => reject(r.error)
@@ -70,7 +75,7 @@ function openDb(): Promise<IDBDatabase> {
 }
 
 /** 记录 → 对外元信息（不带 bytes；避免调用方误把载荷当元数据传回去）。 */
-function toMeta(rec: AssetRecord): AssetMeta {
+function toMeta(rec: AssetMeta): AssetMeta {
   return {
     hash: rec.hash,
     mime: rec.mime,
@@ -90,56 +95,81 @@ export function createIdbAssetStore(): AssetStorePort {
   let dbp: Promise<IDBDatabase> | null = null
   const db = (): Promise<IDBDatabase> => (dbp ??= openDb())
 
-  const stat = async (hash: string): Promise<AssetMeta | null> => {
-    const d = await db()
-    const tx = d.transaction(STORE, 'readonly')
-    const rec = await req<AssetRecord | undefined>(tx.objectStore(STORE).get(hash))
-    return rec ? toMeta(rec) : null
+  /** hash → 对象 URL。**唯一创建处**，也是唯一回收处（见文件头）。 */
+  const urls = new Map<string, string>()
+  /** 正在取字节的 hash：同一份被多行引用时只发一次请求 */
+  const inflight = new Set<string>()
+  const listeners = new Set<(hash: string) => void>()
+
+  const notify = (hash: string): void => {
+    for (const fn of listeners) fn(hash)
+  }
+
+  /** 取字节 → 建地址 → 通知。重复调用是幂等的（`inflight` 挡住并发）。 */
+  const ensureUrl = (hash: string): void => {
+    if (urls.has(hash) || inflight.has(hash)) return
+    inflight.add(hash)
+    void (async () => {
+      try {
+        const d = await db()
+        const tx = d.transaction(BYTES, 'readonly')
+        const rec = await req<ArrayBuffer | undefined>(tx.objectStore(BYTES).get(hash))
+        /**
+         * 字节读出来不是 `ArrayBuffer` ⇒ 这条记录坏了（旧形状/被外力改过）。
+         * 不建地址、不抛错：**一份坏记录不该让整个资产库变成「不可用」**，
+         * 那一份显示 `missing` 就够了，其余图照常。
+         */
+        if (rec instanceof ArrayBuffer && !urls.has(hash)) urls.set(hash, URL.createObjectURL(new Blob([rec])))
+      } catch {
+        /* 取不到就是取不到：`urlOf` 继续返回空串，视图停在 chip 上 */
+      } finally {
+        inflight.delete(hash)
+        notify(hash)
+      }
+    })()
   }
 
   return {
     async put(blob: Blob): Promise<AssetMeta> {
       const p = await prepareAssetBlob(blob)
-      const old = await stat(p.hash)
-      if (old) return old
+      const d = await db()
+      const read = d.transaction(META, 'readonly')
+      const old = await req<AssetMeta | undefined>(read.objectStore(META).get(p.hash))
+      if (old) return toMeta(old)
 
-      const rec: AssetRecord = {
+      const meta: AssetMeta = {
         hash: p.hash,
         mime: p.mime,
         size: p.bytes.byteLength,
         ...(p.w !== undefined ? { w: p.w } : {}),
         ...(p.h !== undefined ? { h: p.h } : {}),
         createdAt: Date.now(),
-        bytes: p.buffer,
       }
-      const d = await db()
-      const tx = d.transaction(STORE, 'readwrite')
-      tx.objectStore(STORE).put(rec)
+      // 元信息与字节**同一个事务**：要么两半都有，要么都没有（不存在「行指了指不存在的字节」）
+      const tx = d.transaction([META, BYTES], 'readwrite')
+      tx.objectStore(META).put(meta)
+      tx.objectStore(BYTES).put(p.buffer, p.hash)
       await txDone(tx)
-      return toMeta(rec)
+      return meta
     },
 
-    async get(hash: string): Promise<Blob | null> {
+    async index(): Promise<AssetMeta[]> {
       const d = await db()
-      const tx = d.transaction(STORE, 'readonly')
-      const rec = await req<AssetRecord | undefined>(tx.objectStore(STORE).get(hash))
-      if (!rec) return null
-      /**
-       * 字节读出来不是 `ArrayBuffer` ⇒ 这条记录坏了（旧形状/被外力改过）。
-       * 返回 `null` 而不是抛错：**一份坏记录不该让整个资产库变成「不可用」**，
-       * 那一份显示 `missing` 就够了，其余图照常。
-       */
-      if (!(rec.bytes instanceof ArrayBuffer)) return null
-      return new Blob([rec.bytes], { type: rec.mime })
+      const tx = d.transaction(META, 'readonly')
+      const rows = await req<AssetMeta[]>(tx.objectStore(META).getAll())
+      return rows.map(toMeta)
     },
 
-    stat,
+    urlOf(hash: string): string {
+      const url = urls.get(hash)
+      // 没有就排一次取字节：首帧画 chip、地址到了再重画这一行（见文件头）
+      if (!url) ensureUrl(hash)
+      return url ?? ''
+    },
 
-    async keys(): Promise<string[]> {
-      const d = await db()
-      const tx = d.transaction(STORE, 'readonly')
-      const keys = await req<IDBValidKey[]>(tx.objectStore(STORE).getAllKeys())
-      return keys.filter((k): k is string => typeof k === 'string')
+    onAddressChange(fn: (hash: string) => void): () => void {
+      listeners.add(fn)
+      return () => listeners.delete(fn)
     },
   }
 }

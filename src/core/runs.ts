@@ -82,11 +82,11 @@ export interface LinkRun {
  *
  * `asset` 是内容 hash，不是载荷：字节住在资产库，行内内容只留地址——
  * 否则同一次粘贴会在正文里留两份二进制，改一处就与另一处分叉。
- * `label` 是插入时的文件名快照（同 `RefRun.label`），`w/h` 是布局提示
- * （同一份字节的显示尺寸不会变，重复一次是为了在字节还没读出来时先占宽高比）。
+ * `label` 是插入时的文件名快照（同 `RefRun.label`）。
  *
- * 为什么 `state` 不在这里：它会在「字节被清／还没同步」时说谎。
- * 现在看到的是 `ready` 还是 `missing`，由资产库**现算**（`AssetView`）。
+ * 为什么 `state` / `w` / `h` 都不在这里：它们是**同一份字节的属性**，由资产库的索引
+ * 回答（`AssetView`）。在 run 上再存一份，就是同一件事的第二个答案 —— 两份能不一致，
+ * 而不一致时没有任何一层会报错（比如「图实际是 96×60，正文里写着 800×600」）。
  *
  * ⚠️ 唯一不许携带 marks 的 run：四种格式对位图/文件都没有对应物，
  *    「技术上能盖上」不构成开禁的理由。
@@ -98,9 +98,6 @@ export interface AssetRun {
   asset: string
   /** 插入时的文件名快照；只在资产缺失时兜底显示 */
   label?: string
-  /** 布局提示（防加载跳动），不是尺寸约束 */
-  w?: number
-  h?: number
 }
 
 /** 一个 run。判别键 `t` 开放扩展（插件自定义种类从这型往外长）。 */
@@ -592,15 +589,13 @@ export function isRun(x: unknown): x is Run {
     case 'link':
       return typeof r.id === 'string' && typeof r.v === 'string' && typeof r.url === 'string'
     case 'asset': {
-      // 资产 run 只存地址与快照：带 marks、带 bytes、把 state 落盘都判非法
+      /**
+       * 资产 run 只存地址与名字快照：带 marks、带 bytes、把 state 落盘都判非法。
+       * `w`/`h` 同理 —— 那是**这份字节的属性**，由资产索引回答；写在 run 上就是第二份答案。
+       */
       if (r.marks !== undefined || r.bytes !== undefined || r.state !== undefined) return false
-      return (
-        typeof r.id === 'string' &&
-        typeof r.asset === 'string' &&
-        (r.label === undefined || typeof r.label === 'string') &&
-        (r.w === undefined || typeof r.w === 'number') &&
-        (r.h === undefined || typeof r.h === 'number')
-      )
+      if (r.w !== undefined || r.h !== undefined) return false
+      return typeof r.id === 'string' && typeof r.asset === 'string' && (r.label === undefined || typeof r.label === 'string')
     }
     default:
       return false

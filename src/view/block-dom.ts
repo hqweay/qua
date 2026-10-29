@@ -134,7 +134,7 @@ export function tagForMark(t: MarkType): string {
  * `asset` 是资产**此刻**的样子（`view/asset-views.ts` 现算，不落盘）：
  * 图片不指向块，所以它没有 `RefView`，只有「字节在不在、URL 有没有」。
  */
-export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView): HTMLElement {
+export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView, onAssetError?: (hash: string) => void): HTMLElement {
   const label =
     r.t === 'link'
       ? r.v
@@ -228,7 +228,7 @@ export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView): HTML
     text.textContent = `#${label}`
     el.append(text)
   } else if (r.t === 'asset') {
-    el.append(...assetAtomContent(r, asset, label))
+    el.append(...assetAtomContent(r, asset, label, onAssetError))
   } else if (r.t === 'link') {
     /**
      * 外链：`v` 是**显示文本**（内容），`url` 是目标——两键分家，改名字不动地址。
@@ -265,7 +265,12 @@ export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView): HTML
  * `unavailable`（库本身打不开）给用户的动作不同 —— 前者去找文件，后者去修存储。
  * 同一个「灰掉」表达不出这个区别。
  */
-function assetAtomContent(r: AssetRun, asset: AssetView | undefined, label: string): Node[] {
+function assetAtomContent(
+  r: AssetRun,
+  asset: AssetView | undefined,
+  label: string,
+  onAssetError?: (hash: string) => void,
+): Node[] {
   const state = asset?.state ?? 'unavailable'
   if (state === 'ready' && asset?.url && (asset.mime ?? '').startsWith('image/')) {
     const img = document.createElement('img')
@@ -274,18 +279,24 @@ function assetAtomContent(r: AssetRun, asset: AssetView | undefined, label: stri
     // 名字快照当 alt：图裂开/读屏时用户还能知道这是哪一张
     img.alt = label
     /**
+     * **字节到底在不在，由浏览器告诉我们** —— 索引里有这一行，不代表文件还在
+     * （人手删了、同步删掉了）。`<img>` 报错一次就把这份 hash 上锁成 `missing`，
+     * 之后按缺失态画，不再反复重试。
+     */
+    if (onAssetError) img.addEventListener('error', () => onAssetError(r.asset), { once: true })
+    /**
      * ⚠️ `draggable=false` 是**防原生注入**的一半（另一半是 `paste`/`drop` 的拦截）：
      *    浏览器把 `<img>` 拖进 contenteditable 会塞一个没有 `data-atom-id` 的裸 `<img>`，
      *    `readRuns` 读不到它，重渲染就消失。
      */
     img.draggable = false
     /**
-     * **宽高比先占住**：`w/h` 是布局提示（同一份字节的尺寸不会变），
+     * **宽高比先占住**：尺寸来自索引（字节自身的像素尺寸），不是 run 上的第二份拷贝。
      * 有了它，图还没解码完时行高不会先塌下去再弹回来。
      */
-    if (r.w && r.h) {
-      img.width = r.w
-      img.height = r.h
+    if (asset.w && asset.h) {
+      img.width = asset.w
+      img.height = asset.h
     }
     return [img]
   }
@@ -372,6 +383,11 @@ export function fillBlockText(
    * 而不是「这张图不存在」——两者的文案与建议不同（见 `view/asset-views.ts`）。
    */
   assetView?: (hash: string) => AssetView,
+  /**
+   * **字节取不到时**的回落（可选）：`<img>` 报错 ⇒ 把这份 hash 判成缺失并重画。
+   * 不传 ⇒ 图裂了就只是图裂了（索引里仍认为它有）。
+   */
+  onAssetError?: (hash: string) => void,
 ): void {
   tx.textContent = ''
   const refRuns = refRunsOf(b.content)
@@ -397,7 +413,7 @@ export function fillBlockText(
       continue
     }
     if (r.t === 'asset') {
-      tx.appendChild(makeRunEl(r, undefined, assetView?.(r.asset)))
+      tx.appendChild(makeRunEl(r, undefined, assetView?.(r.asset), onAssetError))
       continue
     }
     tx.appendChild(makeRunEl(r))

@@ -89,10 +89,8 @@ const qua = {
   getSetting: (key: string): Promise<unknown> => ipcRenderer.invoke('qua:settings/get', key),
   setSetting: (key: string, value: string): Promise<unknown> => ipcRenderer.invoke('qua:settings/set', key, value),
 
-  /** 资产（内容寻址；字节走 ArrayBuffer，mime 从库目录的侧车来） */
-  assetKeys: (): Promise<unknown> => ipcRenderer.invoke('qua:assets/keys'),
-  assetGet: (hash: string): Promise<unknown> => ipcRenderer.invoke('qua:assets/get', hash),
-  assetStat: (hash: string): Promise<unknown> => ipcRenderer.invoke('qua:assets/stat', hash),
+  /** 资产（内容寻址；字节走 ArrayBuffer；地址由主进程的 `qua-asset://` 协议接住） */
+  assetIndex: (): Promise<unknown> => ipcRenderer.invoke('qua:assets/index'),
   assetPut: (bytes: ArrayBuffer, mime: string, dims?: { w?: number; h?: number }): Promise<unknown> =>
     ipcRenderer.invoke('qua:assets/put', bytes, mime, dims ?? {}),
 

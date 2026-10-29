@@ -241,6 +241,23 @@ export class LibraryManager {
     this.sessions.clear()
   }
 
+  /* ------------------------------------------------------------ 资产地址 */
+
+  /**
+   * `qua-asset://<hash>` → 库目录里的那份文件（协议处理器用）。
+   *
+   * 为什么不带库 id：**内容寻址 ⇒ 同一个 hash 在哪个库里都是同一份字节**。
+   * 「这是哪个库的」不是这个地址要回答的问题；让它多带一格，就多一处能错的地方
+   * （而且渲染层手里的库 id 可能是过期的 —— 那正是 IPC 一律按 `sender.id` 路由的原因）。
+   */
+  assetFileOf(hash: string): { path: string; mime: string } | null {
+    for (const s of this.sessions.values()) {
+      const hit = s.assets.locate(hash)
+      if (hit) return hit
+    }
+    return null
+  }
+
   /* ------------------------------------------------------------ IPC 路由 */
 
   /**
@@ -346,33 +363,15 @@ export class LibraryManager {
       }
     })
 
-    /** 资产：字节与名单（渲染层的 `AssetStorePort` 经这里转发） */
-    ipcMain.handle('qua:assets/keys', async (e) => {
+    /**
+     * 资产：**一次拿全部元信息** ＋ 写一份字节。
+     *
+     * 地址（`qua-asset://<hash>`）不走 IPC —— 壳里注册的协议处理器直接把它映射到
+     * 库目录里的文件。少一次往返，也少一处「地址什么时候失效」的状态。
+     */
+    ipcMain.handle('qua:assets/index', (e) => {
       const s = sessionOf(e)
-      return s ? { status: 'ok', keys: await s.assets.keys() } : { status: 'no-library' }
-    })
-
-    ipcMain.handle('qua:assets/get', async (e, hash: unknown) => {
-      const s = sessionOf(e)
-      if (!s || typeof hash !== 'string') return { status: 'no-library' }
-      const bytes = await s.assets.get(hash)
-      if (!bytes) return { status: 'missing' }
-      // MIME 给渲染层包 Blob 用（对象 URL 的 Content-Type）：侧车优先，读不出侧车
-      // 按未知类型给——`<img>` 按字节自己解码，不依赖这个头。
-      const meta = await s.assets.stat(hash).catch(() => null)
-      // `Uint8Array` 过 IPC 会被结构化克隆成 `Uint8Array`（Node 侧是 Buffer）⇒ 统一成 ArrayBuffer
-      return {
-        status: 'ok',
-        bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-        mime: meta?.mime ?? 'application/octet-stream',
-      }
-    })
-
-    ipcMain.handle('qua:assets/stat', async (e, hash: unknown) => {
-      const s = sessionOf(e)
-      if (!s || typeof hash !== 'string') return { status: 'no-library' }
-      const meta = await s.assets.stat(hash)
-      return meta ? { status: 'ok', meta } : { status: 'missing' }
+      return s ? { status: 'ok', rows: s.assets.rows() } : { status: 'no-library' }
     })
 
     ipcMain.handle('qua:assets/put', async (e, bytes: unknown, mime: unknown, dims: unknown) => {

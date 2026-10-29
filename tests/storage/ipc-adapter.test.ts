@@ -26,9 +26,7 @@ const rows = (patch: Partial<RawLibraryRows> = {}): RawLibraryRows => ({
 
 /** 桥的资产面：本文件不测它（在 storage/asset-ipc.test.ts），但 `LibraryBridge` 的形状要求它在 */
 const assetFace = {
-  assetKeys: async () => ({ status: 'ok', keys: [] }),
-  assetGet: async () => ({ status: 'missing' }),
-  assetStat: async () => ({ status: 'missing' }),
+  assetIndex: async () => ({ status: 'ok', rows: [] }),
   assetPut: async () => ({ status: 'bad-args' }),
 }
 

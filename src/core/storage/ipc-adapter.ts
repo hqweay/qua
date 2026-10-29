@@ -37,10 +37,13 @@ export interface LibraryBridge {
    */
   save(writes: unknown[], opts?: { replace?: boolean; oplog?: { at: number; opJson: string }[] }): Promise<unknown>
 
-  /** 资产面（内容寻址；字节走 ArrayBuffer，主进程写进库目录的 `assets/`） */
-  assetKeys(): Promise<unknown>
-  assetGet(hash: string): Promise<unknown>
-  assetStat(hash: string): Promise<unknown>
+  /**
+   * 资产面（内容寻址；字节走 ArrayBuffer，主进程写进库目录的 `assets/`）。
+   *
+   * 只有两格：**写字节**与**一次拿全部元信息**。地址不走 IPC（`qua-asset://<hash>`
+   * 由壳的协议处理器接住）—— 少一次往返，也少一处「地址什么时候失效」的状态。
+   */
+  assetIndex(): Promise<unknown>
   assetPut(bytes: ArrayBuffer, mime: string, dims?: { w?: number; h?: number }): Promise<unknown>
 }
 

@@ -141,11 +141,23 @@ function initLibraryDir(dir: string, id: string, deviceId: string): { ok: true; 
 }
 
 function makeSession(id: string, dir: string, db: Db, deviceId: string): RepoSession {
+  const assets = createFolderAssetStore(db, join(dir, ASSETS_DIR))
+  /**
+   * **索引空、目录非空 ⇒ 索引丢了**（旧库升级、从别处拷来、行被清）。
+   * 从目录重建一次 —— 这是「导入／修复」那条通用入口，与正常路径方向相反。
+   * 正常启动不扫目录：只有第一次看见一个没有索引的 `assets/` 才会走到这里。
+   */
+  if (assets.rows().length === 0) {
+    const rebuilt = assets.reindex()
+    if (rebuilt.rows > 0 || rebuilt.renamed > 0) {
+      console.log(`[assets] reindexed ${rebuilt.rows} asset(s), renamed ${rebuilt.renamed}`)
+    }
+  }
   return {
     id,
     dir,
     db,
-    assets: createFolderAssetStore(join(dir, ASSETS_DIR)),
+    assets,
     windows: new Set<number>(),
     deviceId,
     writes: { rows: 0, saves: 0 },

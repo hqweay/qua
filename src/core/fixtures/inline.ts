@@ -9,7 +9,7 @@
 import { uuidv7Hex } from '../ids.ts'
 import { checkExternalUrl } from '../link.ts'
 import { normalizeRuns, textRuns, type AssetRun, type LinkRun, type MarkType, type RefRun, type Run } from '../runs.ts'
-import { MISSING_ASSET_HASH, SEED_ASSET_H, SEED_ASSET_HASH, SEED_ASSET_W } from './assets.ts'
+import { MISSING_ASSET_HASH, SEED_ASSET_HASH } from './assets.ts'
 
 export interface SeedBlock {
   text: string
@@ -188,13 +188,12 @@ export function parseInline(src: string): { runs: Run[]; refs: PendingRef[] } {
          * 不再造「随手一个 uuid 前 32 位」——那种地址永远不存在，演示看起来像资产库坏了，
          * 而且它连合法 hash 形状都不是。
          */
+        // 尺寸不在 run 上：它是那份**字节**的属性，由资产索引回答（`AssetView`）
         const run: AssetRun = {
           id: uuidv7Hex(),
           t: 'asset',
           asset: atom.missing ? MISSING_ASSET_HASH : SEED_ASSET_HASH,
           label: atom.label,
-          w: SEED_ASSET_W,
-          h: SEED_ASSET_H,
         }
         runs.push(run)
       } else if (atom.kind === 'link') {

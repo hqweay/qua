@@ -28,6 +28,7 @@ import {
   appendLocalOps,
   applyRowWrites,
   hasContent,
+  MIGRATIONS,
   openLibraryDb,
   readContentRows,
   readMeta,
@@ -82,6 +83,33 @@ test('user_version 偏大 ⇒ too-new：不建表、不写入、原样留给更�
   const v = (db.prepare('pragma user_version').all()[0] as { user_version: number }).user_version
   db.close()
   assert.equal(v, DB_SCHEMA_VERSION + 1, '拒绝打开之后版本号必须原样')
+})
+
+/* ---------------------------------------------- ③ v3 → v4：只加表，不动内容 */
+
+/**
+ * v4（资产元信息回库）与其他几次形状变化**不是一类**：
+ * 它不丢内容、不搬数据，只多一张 `assets` 表 —— 旧字节由 `reindex()` 从目录重建行。
+ * 判据就一句：**升级之后用户的内容还在**（不像 v2/v3 那样按纪律清空重 seed）。
+ */
+test('v3 → v4：只建 assets 表，内容行原样留着（升级不该吞掉用户的块）', () => {
+  const file = tmpDb()
+  // 造一个「v3 的库」：内容表已经建好、有一行块
+  const first = openLibraryDb(file, { migrations: MIGRATIONS, target: 3 })
+  assert.equal(first.status, 'created')
+  applyRowWrites(first.db!, [blockRow('b1')])
+  assert.equal(hasContent(first.db!), true)
+  first.db!.close()
+
+  const r = openLibraryDb(file)
+  assert.equal(r.status, 'migrated', `v3 应当被迁移到 v4，实际 ${r.status}`)
+  const db = r.db!
+  const tables = (db.prepare("select name from sqlite_master where type='table'").all() as { name: string }[]).map((t) => t.name)
+  assert.ok(tables.includes(DB_TABLES.assets), `v4 应当建出 assets 表：${tables.join(',')}`)
+  assert.equal(hasContent(db), true, 'v4 不许像 v2/v3 那样清空内容')
+  const n = (db.prepare(`select count(*) as c from ${DB_TABLES.block}`).all() as { c: number }[])[0].c
+  assert.equal(n, 1, '那一行块应当还在')
+  db.close()
 })
 
 /* ------------------------------------------------------------ ② 偏小 ⇒ 迁移 */
@@ -195,7 +223,7 @@ test('负向断言：`created` 只建空表，不写任何块行（seed 是调�
 
 /* ------------------------------------------------------------ 形状：内容四张表 ＋ 库级三张 */
 
-test('v2 的表形状：四张内容表 ＋ settings／meta／op_log（没有 blob 表）', () => {
+test('v4 的表形状：四张内容表 ＋ settings／meta／op_log／assets（没有 blob 表）', () => {
   const file = tmpDb()
   const r = openLibraryDb(file)
   const db = r.db!
@@ -205,7 +233,16 @@ test('v2 的表形状：四张内容表 ＋ settings／meta／op_log（没有 bl
   db.close()
   assert.deepEqual(
     tables,
-    [DB_TABLES.alias, DB_TABLES.block, DB_TABLES.list, DB_TABLES.meta, DB_TABLES.opLog, DB_TABLES.property, DB_TABLES.settings].sort(),
+    [
+      DB_TABLES.alias,
+      DB_TABLES.assets,
+      DB_TABLES.block,
+      DB_TABLES.list,
+      DB_TABLES.meta,
+      DB_TABLES.opLog,
+      DB_TABLES.property,
+      DB_TABLES.settings,
+    ].sort(),
     `实际：${tables.join(',')}`,
   )
 })

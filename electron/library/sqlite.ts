@@ -135,6 +135,20 @@ create table if not exists ${DB_TABLES.opLog} (
   primary key (device_id, seq)
 );
 create index if not exists idx_op_log_at on ${DB_TABLES.opLog}(at);
+-- Asset metadata: one row per blob. The bytes live in the library's assets/ dir
+-- (a library must stay copyable as a directory; hundreds of MB of binaries in one
+-- SQLite file turn every sync into a whole-file conflict). Keeping bytes out of here
+-- also gives us: files only ever grow, rows are written after the file lands, so
+-- "every row has a file" always holds -- a DB rollback only ever leaves orphans,
+-- never a broken reference.
+create table if not exists ${DB_TABLES.assets} (
+  hash text primary key,
+  mime text not null,
+  size integer not null,
+  w integer,
+  h integer,
+  added_at integer not null
+);
 `
 
 /**
@@ -175,6 +189,23 @@ export const MIGRATIONS: Migration[] = [
       db.exec(`drop table if exists ${DB_TABLES.opLog}`)
       db.exec(DDL)
       db.prepare(`delete from ${DB_TABLES.meta} where key = ?`).run(META_KEYS.seq)
+    },
+  },
+  {
+    to: 4,
+    up: (db) => {
+      /**
+       * **资产元信息回到家（库）里**：只建表，不动内容。
+       *
+       * 旧形状把 `{mime,size,w,h}` 写在每份字节旁边的 `.json` 侧车里 —— 那是第二个
+       * store，与正文没有事务关系。新形状一行一份字节，正文（同在这个库里）才是它的读者。
+       *
+       * 为什么这一步**不**像 v2/v3 那样丢内容：内容形状没变（`AssetRun` 的地址仍然是
+       * hash），变的只是元信息住哪。旧资产由 `reindex()` 从目录重建行
+       * （`electron/library/assets.ts`）—— 那正是「导入／修复」那条通用入口，
+       * 顺手把它真跑一遍，等于免费验收。
+       */
+      db.exec(BASE_DDL)
     },
   },
 ]

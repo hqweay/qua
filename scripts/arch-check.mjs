@@ -604,6 +604,13 @@ function commandDecls() {
     /^\.\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+(\.ts)?$/,
     /^(\.\.\/)+src\/core\/msg(\.ts)?$/,
     /^(\.\.\/)+src\/core\/library(\.ts)?$/,
+    /**
+     * `src/core/assets.ts` 是第三个零依赖叶子：只有「字节 → 类型／后缀／地址」的纯函数
+     * （嗅探、`extOf`、`sha256Hex`、`assetUrl`），没有块语义、没有 DOM、没有存储。
+     * 主进程需要它是因为**同一条协议的两端必须用同一份判据**：
+     * 后缀由入库那侧算、地址由协议那侧认，各写一份就是「两份答案」。
+     */
+    /^(\.\.\/)+src\/core\/assets(\.ts)?$/,
   ]
   const hits = []
   for (const f of electronFiles) {
@@ -622,12 +629,12 @@ function commandDecls() {
   }
   add({
     id: '2+',
-    title: '主进程准入白名单：只许 node:* / electron / core/msg / core/library（块语义、查询、渲染一律不许）',
+    title: '主进程准入白名单：只许 node:* / electron / core/msg / core/library / core/assets（块语义、查询、渲染一律不许）',
     method:
-      'AST 遍历 electron/**/*.ts 的 import/export-from，**白名单**逐条比：`node:*`／`electron`／`src/core/msg`／`src/core/library`；其余一律命中',
+      'AST 遍历 electron/**/*.ts 的 import/export-from，**白名单**逐条比：`node:*`／`electron`／`src/core/msg`／`src/core/library`／`src/core/assets`；其余一律命中',
     scope: `electron/**/*.ts（${electronFiles.length} 个文件：${electronFiles.map(rel).join(' · ')}）`,
     whitelist:
-      '`node:*`（fs／sqlite／path）· `electron`（壳本体）· `./x.ts`（主进程自己目录内）· `src/core/msg`（纯文案字典）· `src/core/library`（库身份与版本判据，零依赖、两进程共读）',
+      '`node:*`（fs／sqlite／path）· `electron`（壳本体）· `./x.ts`（主进程自己目录内）· `src/core/msg`（纯文案字典）· `src/core/library`（库身份与版本判据，零依赖、两进程共读）· `src/core/assets`（字节→类型/后缀/地址的纯函数，同一份判据给协议两端）',
     hits: hits.length,
     detail: hits,
     note: '为什么是白名单：黑名单版本实测放行 core/query、core/kb/types、view/editor、app/handlers —— 「块语义搬进主进程」时门禁不会红，而那时块语义已经有两个实现',
@@ -1154,12 +1161,21 @@ function commandDecls() {
    *    （换名＝已有资产静默消失），必须只有一处能碰它。
    * ② **`URL.createObjectURL` 只许出现在一个文件里**。每次渲染都建一个 URL 会一直泄漏
    *    （浏览器不回收，直到文档卸载），而泄漏不报错、只是越来越占内存。
-   *    收口之后「按 hash 缓存 + 统一 revoke」才是一处能保证的事。
+   *    收口到**实现内部**之后，「按 hash 缓存 + 统一 revoke」才是这个文件能自己保证的事
+   *    —— 视图层不再有机会漏。
    *
    * 为什么是 hard：两条都不是风格问题——一条是数据静默消失，一条是慢性泄漏。
    */
   const IDB_ADAPTER = 'src/core/storage/asset-idb.ts'
-  const URL_HOME = 'src/view/asset-views.ts'
+  /**
+   * 对象 URL 的产地是**适配器自己**（2026-10-29 改）。
+   *
+   * 上一版它在 `view/asset-views.ts`：那是「渲染层拿到的只有字节，于是只好自己建 URL」
+   * 的形状。现在端口给的是**地址**（`urlOf`），地址的生命周期归实现 ——
+   * 浏览器端那个实现就是 `blob:` 的创建者，也就是唯一有资格回收它的人。
+   * 视图层连 `URL` 这个标识符都不该再碰。
+   */
+  const URL_HOME = 'src/core/storage/asset-idb.ts'
   const idbHits = []
   const urlHits = []
   for (const f of srcFiles) {

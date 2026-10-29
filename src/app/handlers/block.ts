@@ -6,7 +6,7 @@
  */
 import { t } from '../../core/msg.ts'
 import { COLLECTION_TYPE, checkExternalUrl, rejectText } from '../../core/index.ts'
-import { MISSING_ASSET_HASH, SEED_ASSET_H, SEED_ASSET_HASH, SEED_ASSET_W } from '../../core/fixtures/assets.ts'
+import { MISSING_ASSET_HASH, SEED_ASSET_HASH } from '../../core/fixtures/assets.ts'
 import type { Handler } from '../../core/ports.ts'
 import { curBlock, S } from './shared.ts'
 
@@ -176,10 +176,9 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
       app.pickImage()
       return true
     }
+    // 尺寸不在这里：一份字节多大由资产索引回答（见 `AssetRun`）
     app.ed.insertAsset(preset === 'missing' ? MISSING_ASSET_HASH : SEED_ASSET_HASH, {
       label: preset === 'missing' ? t('ui.sample.assetMissingName') : t('ui.sample.assetReadyName'),
-      w: SEED_ASSET_W,
-      h: SEED_ASSET_H,
     })
     return true
   },

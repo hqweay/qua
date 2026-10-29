@@ -32,7 +32,7 @@ import {
   type CtxKeys,
 } from '../../core/index.ts'
 import { readRuns } from '../../view/dom-text.ts'
-import { assetKeyCount, assetViewOf, assetsAvailable } from '../../view/asset-views.ts'
+import { assetRowCount, assetViewOf, assetsAvailable } from '../../view/asset-views.ts'
 import { t } from '../../core/msg.ts'
 import { walkForest } from '../../core/walk.ts'
 import { plainText, type MarkType, type RunWithId } from '../../core/runs.ts'
@@ -247,7 +247,7 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
          * 「图显示不出来」的两种原因（字节不在库／库打不开）在 DOM 上长得一样，
          * 断言必须能问到库这一层才分得清。
          */
-        assets: { available: assetsAvailable(), keys: assetKeyCount() },
+        assets: { available: assetsAvailable(), rows: assetRowCount() },
         /**
          * 三槽的设备状态（**诊断面**）：钉住清单与宽度都在 prefs 里，
          * 断言要能区分「落盘了没有」与「页面里渲染了没有」。

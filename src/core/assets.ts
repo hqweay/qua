@@ -64,6 +64,51 @@ export function isAssetHash(value: string): boolean {
   return /^[0-9a-f]{64}$/.test(value)
 }
 
+/**
+ * 桌面版把字节交给渲染层的**协议名**（壳注册、渲染层拼地址）。
+ *
+ * 为什么是一条自定义协议而不是 IPC／对象 URL：`<img src>` 需要一个**同步可写**的地址，
+ * 而主进程恰好有能力把这个地址映射到一份文件。给了地址，渲染层就不必再管
+ * 「取字节 → 建 URL → 什么时候回收」那套生命周期 —— 那套东西漏一次就是内存泄漏。
+ */
+export const ASSET_SCHEME = 'qua-asset'
+
+/**
+ * 一份资产在桌面版的地址。
+ *
+ * ⚠️ **地址里不含库 id**：内容寻址 ⇒ 同一个 hash 在哪个库里都是同一份字节。
+ *    「这是哪个库的」不是这个地址需要回答的问题，让它多带一格只会多一处能错的地方。
+ */
+export function assetUrl(hash: string): string {
+  return `${ASSET_SCHEME}://${hash}`
+}
+
+/**
+ * 字节落盘时的**文件名后缀**（`mime` 的纯投影）。
+ *
+ * 为什么要有它：文件名是给**人和外部工具**看的（Finder 能预览、能双击、能拖给别的
+ * app，导出成 Markdown 时链接可以独立成立）。没有后缀的文件在 Finder 里是一张白纸。
+ *
+ * ⚠️ **代码不许读后缀**。类型只有一处真相：入库时从字节嗅出来的 `mime`（随行装载）。
+ *    去读后缀，就是把一个外部随手可改的东西拉进判断 —— 那正是「两份答案能不一致」的形状。
+ */
+export function extOf(mime: string): string {
+  switch (mime) {
+    case 'image/png':
+      return 'png'
+    case 'image/jpeg':
+      return 'jpg'
+    case 'image/gif':
+      return 'gif'
+    case 'image/webp':
+      return 'webp'
+    case 'image/avif':
+      return 'avif'
+    default:
+      return 'bin'
+  }
+}
+
 function has(bytes: Uint8Array, offset: number, text: string): boolean {
   if (bytes.length < offset + text.length) return false
   for (let i = 0; i < text.length; i++) {
