@@ -52,9 +52,14 @@ export const LINE_H = 30
 /**
  * 别名头额外占的高度（近似值，只给虚拟化的占位滚动条用）。
  *
- * 别名头是 `.tx` 之外的一行：`--ui-fs-xs` × `--ui-lh-tight` ＋ `.blk` 的 row-gap。
+ * 别名头是 `.tx` 之外的一行：`--ui-fs-xs` × `--ui-lh-tight` ＋ `.blk` 的 row-gap
+ * （＝ `tokens.css` 的 `--ui-head-h` ＋ `--ui-gap-1`，实测 18.09）。
  * 这里不读 computed style，是因为占位是在**没有挂 DOM**的行上算的；数值略大一点
  * 比略小好（滚动条高估只会多留白，低估会让最后几行跳一下）。
+ *
+ * ⚠️ 它与 `--ui-head-h` 是**同一件事的两份数值**（一份给 DOM、一份给虚拟化）：
+ *    改那头的高度就要两边一起改。真实的纵向几何（`.rail-self` 的起点）走的是 token，
+ *    所以两处偏了不会让线画错，只会让滚动条估偏——`check:dock` 的 A23 量的是线，管不到这里。
  */
 export const ALIAS_HEAD_H = 18
 
@@ -665,6 +670,23 @@ export function makeBlockEl(
     head.appendChild(fields)
     el.appendChild(head)
   }
+
+  /**
+   * **行首头占了几行**（`--head-rows`）：别名头与面包屑各自 `flex: 0 0 100%`，
+   * 一个头就是**一整行**，块标与正文被挤到它们下面。
+   *
+   * 为什么要在 DOM 里报这个数：`.rail-self`（这一行自己的延续段）的起点是
+   * 「块标中心」，而块标**不一定在行顶**。`top: 1lh/2` 是按行顶算的 —— 聚焦一个页
+   * 时那条线就从页名里面冒出来，往上多出一整段（`.blk-alias` 高 16px 左右）。
+   * ⇒ 纵向几何必须先跨过这几个头。
+   *
+   * 报**行数**而不是像素：行高与行距是 token，渲染层不该知道它们的数值
+   * （`blocks.css` 拿这个数乘 token 得到偏移）。行数则是**结构**，只有这里知道。
+   * 判据取 `data-alias`／`data-context` 这两个已经落下的标记，不重写一遍条件 ——
+   * 重写就会在「哪天头换了触发条件」时与它们分叉。
+   */
+  const headRows = Number(el.dataset.context === '1') + Number(el.dataset.alias === '1')
+  if (headRows > 0) el.style.setProperty('--head-rows', String(headRows))
 
   /**
    * **可点导轨**：每个活着的祖先画 1 段。

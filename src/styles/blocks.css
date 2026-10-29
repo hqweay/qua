@@ -41,6 +41,12 @@
   min-width: 0;
   font-size: var(--ui-fs-xs);
   line-height: var(--ui-lh-tight);
+  /*
+   * 高度由 `--ui-head-h` **定义**（不是由内容撑出来）：`.rail-self` 的起点要跨过这一行，
+   * 它算的是同一个 token ⇒ 头高只有一个出处。若哪天这里改成自然高，
+   * 那条线就会再次从头里冒出来（断言 A23 量真实矩形，会抓到）。
+   */
+  height: var(--ui-head-h);
   color: var(--ui-text-secondary);
 }
 .blk-alias-name {
@@ -86,6 +92,8 @@
   overflow: hidden;
   font-size: var(--ui-fs-xs);
   line-height: var(--ui-lh-tight);
+  /* 与 `.blk-alias` 同一个高度出处：两者都是「行首头」，`.rail-self` 按行数跨过它们 */
+  height: var(--ui-head-h);
   color: var(--ui-text-tertiary);
   user-select: none;
 }
@@ -220,10 +228,15 @@
  * 几何：挂在 `.blk` 上（不在 `.rails` 里），`left` 直接用 `--ui-marker-slot`，
  * 与「自己那颗块标」同源；`top` 从块标中心起，`bottom: 0` 落到行底。
  * ⚠️ 起点从**块标中心**起、而不是块标底：圆点只有 5px，中间那 1–2px 会成一个可见的豁口。
+ * ⚠️ **块标不一定在行顶**：行首若带别名头 / 面包屑（`flex: 0 0 100%` 各占一整行），
+ *    块标被推到**头下面**那一行。所以起点要先跨过 `--head-rows` 个头。
+ *    漏掉这一段的形态：聚焦一个页时，那条线从**头里面**开始往上冒出一截，压在页名上
+ *    （`1lh / 2` 是按整行顶算的，而块标在 16px 之下）。`--head-rows` 只报**行数**
+ *    （结构），高度与行距仍是 token —— DOM 层不该知道像素。
  */
 .blk .rail-self {
   position: absolute;
-  top: calc(1lh / 2);
+  top: calc(var(--head-rows, 0) * (var(--ui-head-h) + var(--ui-gap-1)) + 1lh / 2);
   bottom: 0;
   left: calc(var(--ui-blk-gutter) + var(--depth) * var(--ui-indent) + var(--ui-marker-slot) / 2 - var(--ui-rail-hit) / 2);
   width: var(--ui-rail-hit);

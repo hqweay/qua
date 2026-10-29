@@ -644,6 +644,126 @@ await check('A17 父块的竖线在本行换行后不断：自身延续段 ＋ �
   return `换行 ${r.lines} 行（行高 ${r.rowH}px）时线仍连续：${r.segCount} 段、起点 ${r.startTop}（块标中心 ${r.markerCenter}）、零豁口；折叠后自身段撤掉`
 })
 
+/* ---------------------------------------------------------------- A23 */
+
+await check('A23 行首带头的块（聚焦页那一行）：自身延续段起点贴块标中心，不伸进别名头', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1200, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(150)
+
+  /**
+   * **判据**：`.rail-self` 的起点必须贴着**这一行自己的块标中心**（差 ≤ 1.5px），
+   * 且**不高于**别名头的下边缘——也就是那条线一个字都不许画到头里去。
+   *
+   * 为什么会画到头里：起点写的是 `top: calc(1lh / 2)`，那是按**整行顶**算的。
+   * 可这一行的块标**不在行顶**：别名头（`.blk-alias`）与面包屑（`.blk-context`）
+   * 各是 `flex: 0 0 100%` 的**一整行**，块标与正文被挤到它们下面。
+   * ⇒ 线从页名里面开始往上冒，多出整整一个头的高度（实测 16px＋2px 行距）。
+   *
+   * ⚠️ **A17 测不到这一条**：它挑的是「深度 1 且有子块」的行 —— 那种行没有别名头
+   *    （头只挂在根行上），于是「起点按行顶算」与「起点按块标中心算」是同一个数。
+   *    这个 bug 只在**带头的根行**上出现，也就是聚焦一个页时看到的第一行。
+   * ⚠️ 判据量的是**真实矩形**而不是 `--head-rows` 的值：后者是结构（行数），
+   *    它算对了但 CSS 乘错了照样难看 —— 只有矩形能同时钉住这两半。
+   */
+  const r = await page.evaluate(() => {
+    const out = []
+    for (const el of document.querySelectorAll('#editor .blk')) {
+      const self = el.querySelector(':scope > .rail-self')
+      const mk = el.querySelector(':scope > .left > .marker')
+      if (!self || !mk) continue
+      const head = el.querySelector(':scope > .blk-alias, :scope > .blk-context')
+      const sr = self.getBoundingClientRect()
+      const mr = mk.getBoundingClientRect()
+      out.push({
+        id: el.dataset.blockId.slice(-4),
+        depth: Number(el.dataset.depth),
+        hasHead: Boolean(head),
+        headBottom: head ? +head.getBoundingClientRect().bottom.toFixed(1) : null,
+        startTop: +sr.top.toFixed(1),
+        markerCenter: +(mr.top + mr.height / 2).toFixed(1),
+        lineX: +(sr.left + sr.width / 2).toFixed(1),
+        markerX: +(mr.left + mr.width / 2).toFixed(1),
+      })
+    }
+    return out
+  })
+
+  const headed = r.filter((x) => x.hasHead)
+  assert(r.length > 0, `应至少量到一行带自身延续段：${JSON.stringify(r)}`)
+  assert(headed.length > 0, `前置：应有带别名头的根行可测（聚焦页的第一行就是）：${JSON.stringify(r)}`)
+
+  const drift = r.filter((x) => Math.abs(x.startTop - x.markerCenter) > 1.5)
+  assert(drift.length === 0, `延续段的起点应贴块标中心（差 ≤1.5px），实际：${JSON.stringify(drift)}`)
+
+  const inHead = headed.filter((x) => x.startTop < x.headBottom - 0.5)
+  assert(inHead.length === 0, `带头的行，线不许伸进头里（起点 ${JSON.stringify(inHead)}）`)
+
+  const offX = r.filter((x) => Math.abs(x.lineX - x.markerX) > 1)
+  assert(offX.length === 0, `线与块标必须同一 x：${JSON.stringify(offX)}`)
+
+  await ctx.close()
+  return `${r.length} 行自身延续段（其中 ${headed.length} 行带别名头）：起点均贴块标中心、零伸进头里、x 与块标一致（带头行起点 ${headed[0].startTop} / 头底 ${headed[0].headBottom}）`
+})
+
+/* ---------------------------------------------------------------- A23b */
+
+await check('A23b 根行同时带面包屑＋别名头（两个头）：偏移按头数乘，不是只让第一个头生效', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1400, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(150)
+
+  /**
+   * **判据**：同 A23，但场景是**两个头**（面包屑在上、别名头在下）。
+   *
+   * 为什么单独一条：偏移是 `头数 × (头高 ＋ 行距)`。这个乘法最容易被后人改成
+   * 「只在有一个头时加一次」——那种写法在 A23 的场景（一个头）里**完全正确**，
+   * 只在两个头时少加一段，而两个头的组合（反链／查询结果就地展开到一页块）恰恰是常见的。
+   *
+   * 造法：在反链 footer 里点行首面包屑 ⇒ 把那个祖先装成这一栏的根。
+   * 祖先若是页块，它自己就带别名头 ⇒ 根行上两个头同时出现。
+   */
+  const crumbId = await page.evaluate(
+    () => document.querySelector('#editor .mount .blk[data-depth="0"] > .blk-context .blk-context-cell')?.dataset.crumbFor ?? '',
+  )
+  assert(crumbId, '前置：反链行首应有可展开的面包屑')
+  await page.locator('#editor .mount .blk[data-depth="0"] > .blk-context .blk-context-cell').first().click()
+  await page.waitForTimeout(300)
+
+  const r = await page.evaluate(() => {
+    const out = []
+    for (const el of document.querySelectorAll('#editor .blk[data-depth="0"]')) {
+      const self = el.querySelector(':scope > .rail-self')
+      const mk = el.querySelector(':scope > .left > .marker')
+      const heads = el.querySelectorAll(':scope > .blk-alias, :scope > .blk-context')
+      if (!self || !mk || heads.length < 2) continue
+      const sr = self.getBoundingClientRect()
+      const mr = mk.getBoundingClientRect()
+      const headBottom = Math.max(...[...heads].map((h) => h.getBoundingClientRect().bottom))
+      out.push({
+        id: el.dataset.blockId.slice(-4),
+        headCount: heads.length,
+        headRows: getComputedStyle(el).getPropertyValue('--head-rows'),
+        headBottom: +headBottom.toFixed(1),
+        startTop: +sr.top.toFixed(1),
+        markerCenter: +(mr.top + mr.height / 2).toFixed(1),
+      })
+    }
+    return out
+  })
+
+  assert(r.length > 0, `前置：应出现「面包屑＋别名头」两个头的根行：${JSON.stringify(r)}`)
+  const bad = r.filter((x) => Math.abs(x.startTop - x.markerCenter) > 1.5)
+  assert(bad.length === 0, `两个头的根行，起点仍须贴块标中心（差 ≤1.5px），实际：${JSON.stringify(bad)}`)
+  const inHead = r.filter((x) => x.startTop < x.headBottom - 0.5)
+  assert(inHead.length === 0, `两个头的根行，线不许伸进头里：${JSON.stringify(inHead)}`)
+
+  await ctx.close()
+  return `${r.length} 行两个头的根行：起点贴块标中心、零伸进头里（起点 ${r[0].startTop} / 头底 ${r[0].headBottom} / --head-rows ${r[0].headRows}）`
+})
+
 /* ---------------------------------------------------------------- A19 */
 
 await check('A19 浮层里的输入行：输入框拿到可用的宽度，说明文字独占一行', async () => {
