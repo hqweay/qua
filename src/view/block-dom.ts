@@ -727,7 +727,7 @@ export function makeBlockEl(
   }
 
   /**
-   * **这一行自己的线**（`.rail-self`）：**每行都有**，分上下两段（CSS 的 `::before`／`::after`）。
+   * **这一行自己的线**（`.rail-self`）：分上下两段（CSS 的 `::before`／`::after`）。
    *
    * 为什么需要它：上面那批段是「**为了祖先**而画」的——一条线活在**子行**上。
    * 于是父块**自己那一行**没有属于它的线：块标底下到行底之间是空的，
@@ -735,43 +735,39 @@ export function makeBlockEl(
    * 一旦正文换行成三行，那 100px 的正文左侧就**整片没有线**，看起来像线「断了」。
    * ⇒ 父块的线要**两处拼起来**：自己这一行（本节点）＋ 所有子行（上面那批段）。
    *
+   * **只在有子块且未折叠的行生成**：线的语义是**子树的范围**，叶子块没有子树
+   * ⇒ 它不该碰线，圆点上下都不画。
+   * ⚠️ 曾经为了「留白一致」给叶子行也画上段，结果叶子圆点上方凭空多出一截线
+   *    （实测 8.5px）—— 那一截上方是空的，既不表示子树、也不表示「上方有东西」。
+   *    「留白一致」说的是**有子块的行上下留白相等**，不是「所有圆点都碰线」。
+   *
    * **两段各有各的准入**（都从块标处留白断开，见 `blocks.css`）：
-   *   · **上段**（行首 → 块标上方）：只在**同列上方确实有线**时画。
-   *     判据由调用方给（`railAbove`）：同列上方有块标 ⇔ 上一行的 depth ≥ 自己的 depth。
-   *     ⚠️ 缺这一条的形态：每棵子树的第一颗圆点上方会**悬着一小截线**（实测 8.5px），
-   *        它上面什么都没有 —— 看起来像线飘在空中。
-   *   · **下段**（块标下方 → 行底）：只在**有子块且未折叠**时画。
-   *     折叠后子行不挂载，留一段悬空的线没有去处；无子块的行本来就没有「往下延续」的东西。
+   *   · **上段**（行首 → 块标上方）：只在**同列上方确实有线**时画（`railAbove`）。
+   *     判据由调用方给：**上一个同列块标有子块**（它的下段连同子树一直延伸到这里）。
+   *     ⚠️ 缺这一条的形态：子树的第一颗圆点上方会**悬着一小截线**，它上面什么都没有。
+   *   · **下段**（块标下方 → 行底）：这个分支里恒画（`hasChildren && !folded` 就是它）。
    *
    * ⚠️ **不带 `.rail` 这个 class**：`.rail` 的口径是「深度 d 的行有 d 个**祖先**段」，
    *    而这个节点是「这一行**自己**的」。挂同一个 class 会让那条「数段数」的契约
    *    多算一段（`check` 里有一条按 `.rail` 计数，一挂就红）——名字不同是因为语义不同。
-   * ⚠️ **叶子块也生成它**：它只是没有下段，上段仍要画（上段属于「自己的圆点上方」）。
-   *    只给有子块的行生成时，叶子圆点上方就没人补那半行 ⇒ 同一列里两种留白宽度，
-   *    看上去「有的点贴线、有的点离线远」。
-   * ⚠️ **折叠语义只挂在有子块的行上**（`data-fold-line-for` ＋ `pointer-events: auto`）：
-   *    叶子块的这一段是纯视觉，点它没有任何可折的东西。
    * ⚠️ 它是 `.rails` 的**兄弟**、不是它的子节点：`.rails` 的 `overflow:hidden` 与
    *    `pointer-events:none` 是为「祖先段」定的，这个段要贴着自己的块标、且有自己的命中区。
    * ⚠️ 纵向范围由 CSS 定（`top: 块标中心 ± gap`、`bottom: 0`），不在这里算像素：
    *    `1lh` 与 `--ui-bullet-size` 是 token，DOM 层不该知道它们的数值。
    */
-  const self = document.createElement('span')
-  self.className = 'rail-self'
-  self.setAttribute('aria-hidden', 'true')
-  self.contentEditable = 'false'
-  self.dataset.railAbove = opts.railAbove ? '1' : '0'
-  const drawsBelow = r.hasChildren && !folded
-  self.dataset.railBelow = drawsBelow ? '1' : '0'
-  if (drawsBelow) {
-    // 有下段 ⇒ 这一段是「自己的子树」，可点折子块
+  if (r.hasChildren && !folded) {
+    const self = document.createElement('span')
+    self.className = 'rail-self'
+    self.setAttribute('aria-hidden', 'true')
+    self.contentEditable = 'false'
+    self.dataset.railAbove = opts.railAbove ? '1' : '0'
+    // 这个分支就是「有子块且未折叠」⇒ 下段恒画
+    self.dataset.railBelow = '1'
+    // 这一段是「自己的子树」，可点折子块
     self.dataset.foldLineFor = b.id
     self.title = t('ui.block.foldLine')
-  } else {
-    // 只有上段 ⇒ 纯视觉，不接命中区（否则它会挡住这一行 gutter 上的选择）
-    self.style.pointerEvents = 'none'
+    el.appendChild(self)
   }
-  el.appendChild(self)
 
   const left = document.createElement('span')
   left.className = 'left'

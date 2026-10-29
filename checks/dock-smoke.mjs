@@ -636,26 +636,17 @@ await check('A17 父块的竖线在本行换行后不断：自身延续段 ＋ �
    * 折叠后子行不挂载 ⇒ 不留悬空的下段。
    * ⚠️ 用的是「折**自己**」（`toggleCollapse`，也就是点折叠三角），不是「折子块」那条：
    *    折子块时父块仍展开、下段仍然有意义；折自己才会让子行整体不挂载。
-   * ⚠️ 判据是「**下段**撤掉」，不是「节点消失」：节点现在总是生成（每颗块标都有，
-   *    叶子行只有上段），折叠只撤 `data-rail-below` —— 整段隐藏会让折叠那一行的
-   *    圆点上方也空掉，与同一列上下的留白不一致。
+   * ⚠️ 判据是「**节点消失**」：节点只在「有子块且未折叠」时生成（线的语义是子树的范围），
+   *    折叠之后它没有子树可表示 ⇒ 整段不该存在。
    */
   await page.evaluate((id) => window.__qua.__editor.toggleCollapse(id), target)
   await page.waitForTimeout(250)
   const folded = await page.evaluate((id) => {
     const el = document.querySelector(`.blk[data-block-id="${id}"]`)
-    const self = el?.querySelector(':scope > .rail-self')
-    return {
-      collapsed: el?.dataset.collapsed === '1',
-      hasSelf: Boolean(self),
-      railBelow: self?.dataset.railBelow ?? null,
-      // 下段是否真的画出来（伪元素的 content 不是 none）
-      belowDrawn: self ? getComputedStyle(self, '::after').content !== 'none' : false,
-    }
+    return { collapsed: el?.dataset.collapsed === '1', hasSelf: Boolean(el?.querySelector(':scope > .rail-self')) }
   }, target)
   assert(folded.collapsed, `前置：应已折叠：${JSON.stringify(folded)}`)
-  assert(!folded.belowDrawn && folded.railBelow === '0', `折叠（子行不挂载）时不该留悬空的下段：${JSON.stringify(folded)}`)
-  assert(folded.hasSelf, `折叠时节点仍在（上段要留着，否则这一行圆点上方会空）：${JSON.stringify(folded)}`)
+  assert(!folded.hasSelf, `折叠（子行不挂载）时不该留一段悬空的自身线段：${JSON.stringify(folded)}`)
 
   await ctx.close()
   return `换行 ${r.lines} 行（行高 ${r.rowH}px）时线仍连续：${r.segCount} 段、起点 ${r.startTop}（行顶 ${r.rowTop} / 块标中心 ${r.markerCenter}）、零豁口；折叠后自身段撤掉`
@@ -903,48 +894,74 @@ await check('A23d 线与块标之间留白：上下各 --ui-rail-gap，且每颗
   await page.waitForTimeout(150)
 
   /**
-   * **判据**（用户要的形状）：线**不穿过圆点**，在圆点上下各留一段空隙。
+   * **判据**（用户要的形状）：线**不穿过圆点**，在圆点上下各留一段空隙；
+   * 而且**叶子块根本不碰线** —— 线的语义是「子树的范围」，没有子树就没有线。
    *
-   * 为什么这是设计而不是细节：线贯穿时，圆点只是线上一个加粗的点，整列读起来是一条
+   * 为什么这是设计而不是细节：线贯穿时圆点只是线上一个加粗的点，整列读起来是一条
    * 长直线 —— 眼睛看到的是「一根柱子」，不是「一个点 ＋ 它的子树」。断开之后圆点独立、
    * 线只表示子树的范围，两件事各说各的。
    *
-   * 三条子判据：
-   *   ① 上段的下端点离块标中心 `--ui-rail-gap`；
-   *   ② 下段的上端点也离中心 `--ui-rail-gap`（所以两侧留白**相等**）；
-   *   ③ 同一列里**每颗**块标的留白都一样 —— 叶子行只有上段，但它上段的留白
-   *      必须与有子块的行相同（否则「有的点贴线、有的点离线远」）。
+   * 五条子判据：
+   *   ① `--ui-rail-gap` 必须是一个正的像素值；
+   *   ② 上段的下端点离块标中心 ＝ gap；
+   *   ③ 下段的上端点也离中心 ＝ gap，且与上段**相等**（「距离对称」的全部意思）；
+   *   ④ **叶子行不生成 `.rail-self`** —— 圆点上下都没有段；
+   *   ⑤ 有上段的行，上方必须**真的有线接到它的行顶**（不许悬空）。
    *
-   * ⚠️ ③ 是这条断言真正要钉的：叶子行没有下段，很容易被写成「不生成节点」，
-   *    那样叶子圆点上方就没人补那半行，留白宽度与有子块的行差出一大截（实测 12.5 vs 8.5）。
+   * ⚠️ ④ 曾经被我写成反面（「叶子也要画上段，才叫留白一致」）—— 那是错的：
+   *    叶子圆点上方那一截线上面什么都没有，它既不表示子树、也不表示「上方有东西」，
+   *    只是凭空多出一截。留白一致说的是**有子块的行上下留白相等**。
+   * ⚠️ ⑤ 是 ④ 的直接后果：不给叶子画线之后，「上方有没有线」就不再等于
+   *    「上方有没有块标」—— 叶子兄弟那一列到它的行底就断了。
    */
   const r = await page.evaluate(() => {
     const out = []
     const gapToken = getComputedStyle(document.documentElement).getPropertyValue('--ui-rail-gap').trim()
-    for (const el of document.querySelectorAll('#editor .blk')) {
+    const rows = [...document.querySelectorAll('#editor .blk')]
+    for (const el of rows) {
       const self = el.querySelector(':scope > .rail-self')
       const mk = el.querySelector(':scope > .left > .marker')
-      if (!self || !mk) continue
-      const sr = self.getBoundingClientRect()
+      if (!mk) continue
       const mr = mk.getBoundingClientRect()
-      const centerRel = mr.top + mr.height / 2 - sr.top
-      const above = getComputedStyle(self, '::before')
-      const below = getComputedStyle(self, '::after')
-      const aboveH = above.content === 'none' ? 0 : parseFloat(above.height)
-      const belowTop = below.content === 'none' ? null : parseFloat(below.top)
-      out.push({
+      const row = {
         id: el.dataset.blockId.slice(-4),
         depth: Number(el.dataset.depth),
         hasChildren: el.dataset.hasChildren === '1',
-        railAbove: self.dataset.railAbove,
-        railBelow: self.dataset.railBelow,
-        centerRel: +centerRel.toFixed(1),
-        aboveH: +aboveH.toFixed(1),
-        // 上段末端离中心的距离
-        aboveGap: +(centerRel - aboveH).toFixed(1),
-        // 下段起点离中心的距离（没有下段就是 null）
-        belowGap: belowTop === null ? null : +(belowTop - centerRel).toFixed(1),
-      })
+        hasRail: Boolean(self),
+      }
+      if (self) {
+        const sr = self.getBoundingClientRect()
+        const centerRel = mr.top + mr.height / 2 - sr.top
+        const above = getComputedStyle(self, '::before')
+        const below = getComputedStyle(self, '::after')
+        const aboveH = above.content === 'none' ? 0 : parseFloat(above.height)
+        const belowTop = below.content === 'none' ? null : parseFloat(below.top)
+        row.railAbove = self.dataset.railAbove
+        row.railBelow = self.dataset.railBelow
+        row.centerRel = +centerRel.toFixed(1)
+        row.aboveH = +aboveH.toFixed(1)
+        row.aboveGap = +(centerRel - aboveH).toFixed(1)
+        row.belowGap = belowTop === null ? null : +(belowTop - centerRel).toFixed(1)
+        row.selfTop = +sr.top.toFixed(1)
+        /**
+         * **上方真的接得上吗**：上一行在**这一列**的同一处有没有段。
+         * 线是**拼**出来的，所以「接得上」只能是「上一行的这一列上有段」——
+         * 只看自己这一行画了什么，永远看不出悬空。
+         */
+        const prev = el.previousElementSibling
+        let connected = false
+        if (prev && prev.classList.contains('blk')) {
+          for (const s of prev.querySelectorAll(':scope > .rail-self, :scope > .rails > .rail')) {
+            const b = s.getBoundingClientRect()
+            if (Math.abs(b.left + b.width / 2 - (sr.left + sr.width / 2)) > 1.5) continue
+            if (Math.abs(b.bottom - sr.top) > 1.5) continue
+            connected = true
+            break
+          }
+        }
+        row.aboveConnected = connected
+      }
+      out.push(row)
     }
     return { rows: out, gapToken }
   })
@@ -954,37 +971,42 @@ await check('A23d 线与块标之间留白：上下各 --ui-rail-gap，且每颗
   const gap = parseFloat(r.gapToken)
   assert(Number.isFinite(gap) && gap > 0, `--ui-rail-gap 必须是一个正的像素值，实际「${r.gapToken}」`)
 
-  // ① 上段留白 ＝ gap（只对有上段的行判）
-  const withAbove = rows.filter((x) => x.railAbove === '1')
-  assert(withAbove.length > 0, `应至少有一行画上段：${JSON.stringify(rows)}`)
+  // ① 叶子行不碰线
+  const leaves = rows.filter((x) => !x.hasChildren)
+  assert(leaves.length > 0, `假数据里应有叶子行（否则这条判据测不到）：${JSON.stringify(rows)}`)
+  const leafRails = leaves.filter((x) => x.hasRail)
+  assert(
+    leafRails.length === 0,
+    `叶子块（没有子块）不该碰线 —— 线的语义是「子树的范围」，它圆点上下都该是空的：${JSON.stringify(leafRails)}`,
+  )
+
+  const withRail = rows.filter((x) => x.hasRail)
+  assert(withRail.length > 0, `应至少有一行有子块：${JSON.stringify(rows)}`)
+
+  // ② 上段留白 ＝ gap（只对有上段的行判）
+  const withAbove = withRail.filter((x) => x.railAbove === '1')
+  assert(withAbove.length > 0, `应至少有一行画上段：${JSON.stringify(withRail)}`)
   const badAbove = withAbove.filter((x) => Math.abs(x.aboveGap - gap) > 0.6)
   assert(badAbove.length === 0, `上段的末端应离块标中心 ${gap}px，实际：${JSON.stringify(badAbove)}`)
 
-  // ② 下段留白 ＝ gap
-  const withBelow = rows.filter((x) => x.railBelow === '1')
-  assert(withBelow.length > 0, `应至少有一行画下段：${JSON.stringify(rows)}`)
+  // ③ 下段留白 ＝ gap
+  const withBelow = withRail.filter((x) => x.railBelow === '1')
+  assert(withBelow.length > 0, `应至少有一行画下段：${JSON.stringify(withRail)}`)
   const badBelow = withBelow.filter((x) => Math.abs(x.belowGap - gap) > 0.6)
   assert(badBelow.length === 0, `下段的起点应离块标中心 ${gap}px，实际：${JSON.stringify(badBelow)}`)
-  /**
-   * ③ 上下对称：只判**两段都画**的行。
-   *
-   * ⚠️ 不能把「只有下段」的行算进来：子树的第一行（或装载根）上方本来就没有线，
-   *    它的 `aboveGap` 是「从行首到中心」的整段（12.5px），不是「留白」——
-   *    拿它跟 4px 比，会把**正确的不画**判成不对称。
-   */
+
+  // ④ 上下对称：只判**两段都画**的行（只有下段的行上方本来就没有线，它的 aboveGap 不是留白）
   const both = withBelow.filter((x) => x.railAbove === '1')
-  assert(both.length > 0, `应至少有一行上下两段都画：${JSON.stringify(rows)}`)
+  assert(both.length > 0, `应至少有一行上下两段都画：${JSON.stringify(withRail)}`)
   const asym = both.filter((x) => Math.abs(x.aboveGap - x.belowGap) > 0.6)
   assert(asym.length === 0, `上下留白必须相等（这是「距离对称」的全部意思）：${JSON.stringify(asym)}`)
 
-  // ④ 叶子行与有子块的行，上段留白一致
-  const leaves = rows.filter((x) => !x.hasChildren && x.railAbove === '1')
-  assert(leaves.length > 0, `假数据里应有「叶子行且画上段」的行（否则这条判据测不到 ④）：${JSON.stringify(rows)}`)
-  const leafDrift = leaves.filter((x) => Math.abs(x.aboveGap - gap) > 0.6)
-  assert(leafDrift.length === 0, `叶子行的上段留白也必须与有子块的行相同：${JSON.stringify(leafDrift)}`)
+  // ⑤ 上段不许悬空
+  const floating = withAbove.filter((x) => !x.aboveConnected)
+  assert(floating.length === 0, `上段不许悬空（上方这一列什么都没有）：${JSON.stringify(floating)}`)
 
   await ctx.close()
-  return `${rows.length} 行（${withAbove.length} 有上段、${withBelow.length} 有下段、${both.length} 两段都有、${leaves.length} 叶子行）：留白 ${gap}px、上下对称、叶子与有子块的行一致`
+  return `${rows.length} 行（${withRail.length} 有子块：${withAbove.length} 有上段、${withBelow.length} 有下段、${both.length} 两段都有；${leaves.length} 叶子行不碰线）：留白 ${gap}px、上下对称、上段均接得上`
 })
 
 /* ---------------------------------------------------------------- A19 */

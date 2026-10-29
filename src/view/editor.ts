@@ -108,18 +108,36 @@ export type { SecLayout }
 /**
  * **这一行上方同列是否有线** —— `.rail-self` 上段的唯一准入判据。
  *
- * 判据：**上一行的 depth ≥ 自己的 depth**。
+ * 判据是「**这一列上方确实有线接到这一行的行顶**」，不是「上面有没有块标」。
+ * 两者不等价：上一个同 depth 的块标如果是**叶子**，它没有下段 ⇒ 那一列到它的行底就断了，
+ * 于是这一行画出来的上段就是**悬空的一截**（上面什么都没有）。
  *
- * 为什么不是「有几个祖先」：子树的第一颗子块同样有祖先，但它**这一列**上方什么都没有
- * （上一行是它的父块，父块的线在自己那一列，不在这一列）。按祖先数判会把那一截画出来，
- * 表现为「每棵子树的第一颗圆点上方悬着一小段线」（实测 8.5px）。
+ * 三种情形（`prev` ＝ 上一行）：
  *
- * 为什么不是「不是第一个元素」：一栏多段（日记流／查询结果）时，每段的第一行上方都没有线，
- * 但只有第一段的第一行是「第一个元素」。
+ * | `prev.depth` | 上方有线？ | 为什么 |
+ * |---|---|---|
+ * | **> 自己** | 有 | 自己是从更深回来；上方那些行里有指向自己这一列祖先的段，一直延伸到这里 |
+ * | **== 自己** | **看 prev 有没有子块** | 有 ⇒ 它的下段连同子树铺满这一列；没有 ⇒ 它自己就断了 |
+ * | **< 自己** | 无 | 自己是这棵子树的第一行，这一列上方还没有块标 |
+ *
+ * ⚠️ 不能简化成「`prev.depth ≥ 自己`」：漏掉 `== ` 那一格的分叉，叶子兄弟后面那颗
+ *    有子块的圆点上方就会凭空多一截线。
+ * ⚠️ 折叠的 `prev` 也没有下段（子行不挂载、下段撤掉）⇒ 同样无线。
  */
-export function railAboveOf(rows: readonly { depth: number }[], index: number): boolean {
+export function railAboveOf(
+  rows: readonly { depth: number; hasChildren: boolean; block: { id: string } }[],
+  index: number,
+  folded?: Readonly<Record<string, true>>,
+): boolean {
   if (index <= 0) return false
-  return rows[index - 1]!.depth >= rows[index]!.depth
+  const prev = rows[index - 1]!
+  const cur = rows[index]!
+  if (prev.depth > cur.depth) return true
+  if (prev.depth < cur.depth) return false
+  // 同 depth：只有「上一个兄弟自己有子树」才把线铺到了这一列
+  if (!prev.hasChildren) return false
+  if (folded && folded[prev.block.id] === true) return false
+  return true
 }
 // 只取**类型**：`view` 拿不到实现，写入的落地方式归装配层（见 `Run`）
 import type { Op, Tx } from '../core/kb/types.ts'
@@ -806,7 +824,7 @@ export class BlockEditor {
         sec.dataset.sec = r.depth === 0 ? r.block.id : ''
         this.container.appendChild(sec)
       }
-      sec.appendChild(this.makeBlockEl(r, gutters.get(r.block.id), railAboveOf(rows, i)))
+      sec.appendChild(this.makeBlockEl(r, gutters.get(r.block.id), railAboveOf(rows, i, this.doc.folded)))
     }
     if (tailComplete) closeSec()
     // 比所有已装段都更早的空天格子：追加在最后
@@ -864,7 +882,7 @@ export class BlockEditor {
       this.makeBlockEl(
         row,
         gutterFieldsOf(row.block, this.store.blocks),
-        at > 0 ? railAboveOf(allRows, at) : undefined,
+        at > 0 ? railAboveOf(allRows, at, this.doc.folded) : undefined,
       ),
     )
     // 被换掉的那个元素带着 `data-caret` ⇒ 缓存与标记都要重来

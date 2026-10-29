@@ -309,15 +309,11 @@
   }
 }
 /*
- * 折叠态：**只撤下段**（子行不挂载 ⇒ 没有「往下延续」的去处），上段留着。
- *
- * ⚠️ 不能整段 `display: none`：叶子行只有上段，它自己永远不会被折叠，
- *    但折叠的**父块**那一行也可能带别名头… 更关键的是「折叠态不生成节点」这条
- *    旧口径现在不成立 —— 节点总是生成（两段的准入在 `data-rail-*` 上）。
- *    整段隐藏会让折叠那一行的圆点上方也空掉，与同一列上下的留白不一致。
+ * 折叠态不生成节点（`hasChildren && !folded` 是唯一准入）；主题若显式隐藏也认这个口径。
+ * ⚠️ 节点本身在折叠时就不存在，所以这条只是给「主题想藏得更狠」留的口子。
  */
-.blk[data-collapsed='1'] .rail-self::after {
-  content: none;
+.blk[data-collapsed='1'] .rail-self {
+  display: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .blk .rail::before {
