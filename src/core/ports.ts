@@ -302,6 +302,13 @@ export interface App {
   copy(text: string, label?: string): void
   /* 演示与诊断 */
   loadState(state: FixtureName): void
+  /**
+   * **备份当前字节并重建本地库**（演示数据）。
+   *
+   * 这是只读态的出路，不是常规清库入口：实现必须先备份，备份失败就放弃覆盖。
+   * 异步在实现里收尾（按钮已经退场，不需要等它）。
+   */
+  resetWorkspace(): void
   setVirtualize(on: boolean, radius?: number): void
   runImeProbe(): { fired: number; seq: string[] }
 }

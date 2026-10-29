@@ -148,8 +148,15 @@ const device = await deviceStore.load()
  *   · `too-new` / `corrupt` / `storage-error` ⇒ **只读演示态**，绝不覆盖原数据。
  *
  * ⚠️ 旧实现是 `loadWorkspace() ?? seedWorkspace()` 后立刻 save：读失败一次就把用户库覆盖了。
+ *
+ * 为什么收成一个对象：只读态不是启动时的一锤子事实 —— 用户在调试菜单里
+ * 「备份并重建本地库」之后，它必须**当场翻回可写**（否则重建只改了内存，刷新又回到损坏态）。
+ * 对象由装配层与持久化层**共持一份**，不存在「两边各记一个 boolean」的第二种答案。
  */
-const readOnly = boot.status === 'too-new' || boot.status === 'corrupt' || boot.status === 'storage-error'
+const bootState = {
+  readOnly: boot.status === 'too-new' || boot.status === 'corrupt' || boot.status === 'storage-error',
+  notice: null as string | null,
+}
 let ws: Workspace = boot.status === 'ok' ? boot.ws : seedWorkspace()
 
 /**
@@ -161,7 +168,7 @@ let ws: Workspace = boot.status === 'ok' ? boot.ws : seedWorkspace()
  *
  * 失败不拦启动：入库失败只影响那一张图（`missing`），取索引失败才整库 `unavailable`。
  */
-if (!readOnly) await ensureSeedAssets(assetStore)
+if (!bootState.readOnly) await ensureSeedAssets(assetStore)
 await loadAssetIndex()
 
 /**
@@ -178,8 +185,11 @@ if (boot.status === 'too-new') bootNotice = t('ui.boot.tooNew', { version: boot.
 else if (boot.status === 'corrupt') bootNotice = t('ui.boot.corrupt')
 else if (boot.status === 'storage-error') bootNotice = t('ui.boot.storageError')
 else if (boot.status === 'expired') bootNotice = t('ui.boot.expired', { version: boot.version })
+// 开发构建里把恢复入口指出来：没有这句，用户只知道「去开发者工具备份」，不知道菜单里已经能一键做
+if (boot.status === 'corrupt' && DEV_SURFACE) bootNotice += t('ui.boot.corruptDevHint')
+bootState.notice = bootNotice
 // 开发者日志（英文，不走 msg 字典）：排查「为什么是只读态」时这是唯一的第一手线索
-if (readOnly) console.warn('[boot] read-only prototype state:', boot.status)
+if (bootState.readOnly) console.warn('[boot] read-only prototype state:', boot.status)
 
 /**
  * 冷启动的**落点**：从没存过 / 旧库作废 ⇒ 进**今日**。
@@ -346,6 +356,7 @@ const {
   syncSections,
   saveNow,
   scheduleSave,
+  forceReplaceNow,
   saveDeviceNow,
   scheduleDeviceSave,
   txRun,
@@ -359,7 +370,7 @@ const {
   device,
   blocks,
   kb,
-  readOnly,
+  bootState,
   /**
    * **内存这份与盘上那份是同一份吗**。判据是「读到过」：
    * 从盘上读来的 ⇒ 盘上已有内容，第一笔照常增量；否则（种子／旧库作废）⇒
@@ -1063,6 +1074,63 @@ function openExternalUrl(raw: string): boolean {
 }
 
 /**
+ * **换库的唯一落地点**：内容 + 落点 + 各视图重画。
+ *
+ * `save` 分两档，因为「换演示数据」与「从坏库恢复」对写入时机的要求相反：
+ *   · 演示状态切换：换完立刻按正常写路径落盘（`true`）；
+ *   · 恢复：现在还不能写 —— 必须先备份原始字节，再由 `forceReplaceNow()` 显式整份替换（`false`）。
+ *
+ * ⚠️ 换库的次序：**先换 store 的内容，再取 `p`**。
+ *
+ * `kb`／`blocks` 是同一个 store 实例（`reset` 原地换内容，门面不用换）；
+ * 此刻 store 里仍是上一份库，只换 `ws` 不换内容的话，
+ * `activeBlock()` 就会在**旧库**里找新库的 `activeId`：找不到便落到 `kb.roots()[0]`
+ * 这条兜底上，拿回**旧库首块**再装进新库的视图（表现为「重开后字丢了」）。
+ * 反过来，`p` 也不能早于这一步 —— 换了库却还拿旧落点，等于把旧块装进新库。
+ */
+function swapWorkspace(next: Workspace, save: boolean): void {
+  ws = next
+  // 换库 ⇒ 旧落点全部失效；历史留着只会把用户送到「上一份演示数据」的 id
+  nav.back = []
+  nav.forward = []
+  /**
+   * **旧库的 op 不能落到新库**：它们说的是「旧库里那块长这样」，带过河就是脏写。
+   * 换库本来就是「整体换一份」，落盘会按整类提交（新库的 op 从零开始攒）。
+   */
+  clearPendingOps()
+  /**
+   * **折叠态不能带过河**：旧库的块 id 在新库里不存在（或指到另一块），
+   * 留着只会让新库的行莫名其妙地折起来 ⇒ 换库即清空（设备那侧的偏好则保留）。
+   */
+  device.folded = {}
+  scheduleDeviceSave()
+  blocks.reset(next.blocks)
+  const p = activeBlock()
+  ed = mainEd
+  applyChrome()
+  chrome.renderDebugState()
+  renderDocks()
+  chrome.renderTitle(activeBlock(), activeTrail())
+  // 演示状态**不强制跳今日**（那是冷启动的行为）：用这个库自己的 activeId，
+  // 否则切到「空态 / 稀疏态 / 降级态」时会看不到那几个状态本身。
+  // ⚠️ 装载口径必须与**冷启动**同一条规则（那里是 `bootDays ? rootsForMany(bootDays) : rootsFor(bootActive)`）：
+  //    落点是日记 ⇒ 装**日记流**（今日在顶＋存在的更早的天），别的块 ⇒ 只装它自己。
+  //    原来这里只有 `rootsFor(p)`，于是「载入假数据」后日记流消失、只剩今天一段。
+  const feed = isJournal(p) ? feedDays(ws.blocks, FEED_INITIAL) : []
+  const roots = feed.length > 0 ? rootsForMany(feed) : rootsFor(p)
+  // 装载边界同一条归一：空 journal 天经事务补首子块（演示换库也是一次「打开」）
+  materializeEditableRoots(roots)
+  // ⚠️ 光标必须落在**第一个可编辑的行**上（日记流的第一段是只读日期行）。
+  //    原来固定 `roots[0]`，于是载入假数据后光标停在日期行、第一行看着「没有名字」。
+  const caret = firstEditableRoot(roots[0])
+  mainEd.loadPage({ roots, folded: device.folded }, { blockId: caret?.id ?? '', off: 0 })
+  renderMounts()
+  chrome.renderEmptyHint(activeBlock().children)
+  if (save) saveNow()
+  scheduleBadge()
+}
+
+/**
  * `App` 门面：**四个工厂拼装**（页／日记／视图／演示），加上浮层与提示这几件装配层专有的能力。
  *
  * ⚠️ 这里仍然是**唯一**拼装点：本文件持有 `ws`／`ed`／`registry`，工厂只拿到「能做什么」。
@@ -1251,56 +1319,7 @@ const app: App = {
   }),
 
   ...devCommands({
-    replaceWorkspace: (next) => {
-      ws = next
-      // 换库 ⇒ 旧落点全部失效；历史留着只会把用户送到「上一份演示数据」的 id
-      nav.back = []
-      nav.forward = []
-      /**
-       * **旧库的 op 不能落到新库**：它们说的是「旧库里那块长这样」，带过河就是脏写。
-       * 换库本来就是「整体换一份」，落盘会按整类提交（新库的 op 从零开始攒）。
-       */
-      clearPendingOps()
-      /**
-       * ⚠️ 换库的次序：**先换 store 的内容，再取 `p`**。
-       *
-       * `kb`／`blocks` 是同一个 store 实例（`reset` 原地换内容，门面不用换）；
-       * 此刻 store 里仍是上一份库，只换 `ws` 不换内容的话，
-       * `activeBlock()` 就会在**旧库**里找新库的 `activeId`：找不到便落到 `kb.roots()[0]`
-       * 这条兜底上，拿回**旧库首块**再装进新库的视图（表现为「重开后字丢了」）。
-       * 反过来，`p` 也不能早于这一步 —— 换了库却还拿旧落点，等于把旧块装进新库。
-       */
-      /**
-       * **折叠态不能带过河**：旧库的块 id 在新库里不存在（或指到另一块），
-       * 留着只会让新库的行莫名其妙地折起来 ⇒ 换库即清空（设备那侧的偏好则保留）。
-       */
-      device.folded = {}
-      scheduleDeviceSave()
-      blocks.reset(next.blocks)
-      const p = activeBlock()
-      ed = mainEd
-      applyChrome()
-      chrome.renderDebugState()
-      renderDocks()
-      chrome.renderTitle(activeBlock(), activeTrail())
-      // 演示状态**不强制跳今日**（那是冷启动的行为）：用这个库自己的 activeId，
-      // 否则切到「空态 / 稀疏态 / 降级态」时会看不到那几个状态本身。
-      // ⚠️ 装载口径必须与**冷启动**同一条规则（那里是 `bootDays ? rootsForMany(bootDays) : rootsFor(bootActive)`）：
-      //    落点是日记 ⇒ 装**日记流**（今日在顶＋存在的更早的天），别的块 ⇒ 只装它自己。
-      //    原来这里只有 `rootsFor(p)`，于是「载入假数据」后日记流消失、只剩今天一段。
-      const feed = isJournal(p) ? feedDays(ws.blocks, FEED_INITIAL) : []
-      const roots = feed.length > 0 ? rootsForMany(feed) : rootsFor(p)
-      // 装载边界同一条归一：空 journal 天经事务补首子块（演示换库也是一次「打开」）
-      materializeEditableRoots(roots)
-      // ⚠️ 光标必须落在**第一个可编辑的行**上（日记流的第一段是只读日期行）。
-      //    原来固定 `roots[0]`，于是载入假数据后光标停在日期行、第一行看着「没有名字」。
-      const caret = firstEditableRoot(roots[0])
-      mainEd.loadPage({ roots, folded: device.folded }, { blockId: caret?.id ?? '', off: 0 })
-      renderMounts()
-      chrome.renderEmptyHint(activeBlock().children)
-      saveNow()
-      scheduleBadge()
-    },
+    replaceWorkspace: (next) => swapWorkspace(next, true),
     prefs: () => prefs(),
     setVirtualize: (on, radius) => {
       // 虚拟化档位是**设备状态**：下次冷启动按它恢复（`applyChrome` 之后的启动段读它）
@@ -1350,6 +1369,46 @@ const app: App = {
       () => app.toast(label ?? t('ui.toast.copied')),
       () => app.toast(t('err.clipboardFailed'), 'warn'),
     )
+  },
+
+  /**
+   * **备份并重建本地库**（只读态下唯一的出路）。
+   *
+   * 顺序不能反：**先备份原始字节，再换内容**。反过来的话，正常可写态下
+   * `swapWorkspace(..., true)` 会先把新种子写进盘里，备份拿到的就是种子 ——
+   * 用户真正要抢救的那份字节已经没了，而且这次备份看起来还成功了。
+   * 备份失败（配额满 / 隐私模式）⇒ **直接放弃**，不做「没有备份的覆盖」。
+   *
+   * 成功后要做三件收尾：告警收起、种子资产补齐（只读启动时跳过了这一步）、
+   * 诊断面回到可写态（`forceReplaceNow` 翻的就是 `bootState.readOnly`）。
+   */
+  resetWorkspace: () => {
+    void (async () => {
+      let backupKey: string | null = null
+      try {
+        backupKey = await store.backup()
+      } catch (e) {
+        app.toast(t('ui.toast.resetBackupFailed', { message: errText(e) }), 'warn')
+        return
+      }
+      // 只换内存：写入交给 forceReplaceNow（它才知道「这一次是整份替换」）
+      swapWorkspace(seedWorkspace(), false)
+      const r = await forceReplaceNow()
+      if (!r.ok) {
+        app.toast(t('ui.toast.resetFailed', { message: errText(r.error) }), 'warn')
+        return
+      }
+      bootState.notice = null
+      chrome.showNotice(null)
+      // 只读启动时跳过了种子资产；重建之后补上，否则演示库里的图全是 missing
+      await ensureSeedAssets(assetStore)
+      await loadAssetIndex()
+      chrome.renderDebugState()
+      app.toast(
+        backupKey ? t('ui.toast.resetDone', { key: backupKey }) : t('ui.toast.resetDoneNoBackup'),
+        backupKey ? 'ok' : 'warn',
+      )
+    })()
   },
 }
 
@@ -1933,8 +1992,8 @@ diag = setupDiagnostics({
   DEV_SURFACE,
   store,
   boot,
-  readOnly,
-  bootNotice,
+  getReadOnly: () => bootState.readOnly,
+  getBootNotice: () => bootState.notice,
   prefs,
   resolvedTheme,
   applyChrome,

@@ -100,6 +100,24 @@ export function createLocalStorageAdapter(key: string): StoragePort {
       }
     },
 
+    /**
+     * 把当前字节抄到一个**独立键**，返回那个键名。
+     *
+     * 为什么抄原始字符串而不是解析后再序列化：损坏的库正是「解析不了」的那份，
+     * 能抄的只有字节本身；备份的意义就是让用户事后还能用开发者工具把它导出。
+     * 没有可抄的字节（从没保存过）⇒ `null`。
+     * 写不进去（配额满 / 隐私模式）必须抛出：调用方会因此中止覆盖。
+     */
+    async backup(): Promise<string | null> {
+      await tail
+      const raw = localStorage.getItem(key)
+      if (raw === null) return null
+      const at = new Date().toISOString().replace(/[:.]/g, '-')
+      const backupKey = `${key}.bak.${at}`
+      localStorage.setItem(backupKey, raw)
+      return backupKey
+    },
+
     async settle(): Promise<void> {
       await tail
     },

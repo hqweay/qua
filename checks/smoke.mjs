@@ -4209,7 +4209,70 @@ await check('T20 过新 / 损坏的库不被覆盖：进入只读演示态并持
   assert(b.snap.readOnly === true, `损坏库应进入只读态：${JSON.stringify(b.snap.bootNotice)}`)
   assert(b.after === corrupt, `损坏的库被覆盖了：${String(b.after).slice(0, 80)}`)
 
-  return `过新 v99 原样保留；损坏 JSON 原样保留；告警「${a.text.slice(0, 24)}…」`
+  /**
+   * ③ **只读态下的出路**：调试菜单里有一行「备份并重建本地库」。
+   *
+   * 行为要同时满足两条：
+   *   · 覆盖之前**先把原始字节抄到备份键**（否则「恢复」等于「抹掉唯一还能抢救的那份」）；
+   *   · 覆盖之后真的回到可写（`readOnly` 翻假、告警收起），而且新字节能被下一次启动打开。
+   * 第二点只能靠**另起一个 context 装新字节**来验：同一个页面上的 initScript 每次导航都会
+   * 把损坏的字节写回去，原样刷新验不出「盘上那份现在是好的」。
+   */
+  const recoverCtx = await browser.newContext({ viewport: { width: 1200, height: 800 } })
+  const recoverPage = await recoverCtx.newPage()
+  await recoverPage.addInitScript(([k, v]) => localStorage.setItem(k, v), [KEY, corrupt])
+  await recoverPage.goto(base, { waitUntil: 'load' })
+  await recoverPage.waitForFunction(() => Boolean(window.__qua))
+  await recoverPage.locator('#state-menu-btn').click()
+  await recoverPage.waitForFunction(
+    () => [...document.querySelectorAll('.layer-label')].some((e) => e.textContent === '备份并重建本地库'),
+    null,
+    { timeout: 2000 },
+  )
+  // 与 T3c 的菜单点击同一个入口（行是 mousedown 选中，不是 click）
+  await recoverPage.evaluate(() => {
+    const row = [...document.querySelectorAll('.layer-item')].find((r) => r.querySelector('.layer-label')?.textContent === '备份并重建本地库')
+    row.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await recoverPage.waitForFunction(() => localStorage.getItem('qua.workspace') !== '{oops', null, { timeout: 3000 })
+  const recovered = await recoverPage.evaluate(() => {
+    const backupKeys = Object.keys(localStorage).filter((k) => k.startsWith('qua.workspace.bak.'))
+    const snap = window.__qua.snapshot()
+    return {
+      raw: localStorage.getItem('qua.workspace'),
+      backupKey: backupKeys[0] ?? '',
+      backup: backupKeys.length > 0 ? localStorage.getItem(backupKeys[0]) : null,
+      snap,
+      noticeHidden: document.querySelector('#boot-notice')?.hidden ?? false,
+    }
+  })
+  assert(recovered.backupKey, '重建前应先把原始字节存到备份键')
+  assert(recovered.backup === corrupt, `备份内容应是损坏的原始字节：${String(recovered.backup).slice(0, 80)}`)
+  assert(recovered.snap.readOnly === false, `重建后应回到可写：${JSON.stringify(recovered.snap.bootNotice)}`)
+  assert(recovered.noticeHidden, '重建后只读告警应当收起')
+  const written = JSON.parse(String(recovered.raw))
+  assert(written?.backend === 'local-storage' && Array.isArray(written?.data?.blocks) && written.data.blocks.length > 0,
+    `重建应写回一份能读的库：${String(recovered.raw).slice(0, 80)}`)
+
+  // 菜单里那一行自退场（`getReadOnly()` 已翻假），不会留着「点第二次又清一次」
+  await recoverPage.locator('#state-menu-btn').click()
+  const labelsAfter = await recoverPage.evaluate(() =>
+    [...document.querySelectorAll('.layer-label')].map((e) => e.textContent ?? ''),
+  )
+  assert(!labelsAfter.includes('备份并重建本地库'), `重建成功后恢复入口应退场：${JSON.stringify(labelsAfter)}`)
+  await recoverCtx.close()
+
+  // ④ 另起 context 用新字节冷启动：能打开，且不是只读态
+  const reopenCtx = await browser.newContext({ viewport: { width: 1200, height: 800 } })
+  const reopenPage = await reopenCtx.newPage()
+  await reopenPage.addInitScript(([k, v]) => localStorage.setItem(k, v), [KEY, recovered.raw])
+  await reopenPage.goto(base, { waitUntil: 'load' })
+  await reopenPage.waitForFunction(() => Boolean(window.__qua))
+  const reopened = await reopenPage.evaluate(() => window.__qua.snapshot())
+  assert(reopened.readOnly === false, `重建后的库冷启动应可读：${JSON.stringify(reopened.bootNotice)}`)
+  await reopenCtx.close()
+
+  return `过新 v99 原样保留；损坏 JSON 原样保留；调试菜单备份（${recovered.backupKey.replace('qua.workspace.bak.', 'bak.')}）并重建后可写、冷启动可读；告警「${a.text.slice(0, 24)}…」`
 })
 
 /* ------------------------------------------------------------ 侧槽 */

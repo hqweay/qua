@@ -49,8 +49,9 @@ export type DiagnosticsDeps = {
   DEV_SURFACE: boolean
   store: WorkspaceStore
   boot: LoadedWorkspace
-  readOnly: boolean
-  bootNotice: string | null
+  /** 启动态是**活的**：重建本地库之后要当场从只读翻回可写，所以传 getter 而不是值 */
+  getReadOnly: () => boolean
+  getBootNotice: () => string | null
   prefs: () => Prefs
   resolvedTheme: () => 'light' | 'dark'
   applyChrome: () => void
@@ -112,8 +113,8 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
     DEV_SURFACE,
     store,
     boot,
-    readOnly,
-    bootNotice,
+    getReadOnly,
+    getBootNotice,
     prefs,
     resolvedTheme,
     applyChrome,
@@ -194,6 +195,21 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
         { id: 'sparse', label: t('ui.state.sparse'), hint: t('ui.stateMenu.sparseHint'), icon: 'lucide:square-dashed', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'sparse' } },
         { id: 'empty', label: t('ui.state.empty'), hint: t('ui.stateMenu.emptyHint'), icon: 'lucide:square', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'empty' } },
       )
+      /**
+       * 只读态下的出路。**只在真的读不出来时出现**：
+       *   · `corrupt` 是唯一「重建能解决」的那一档（`too-new` 该升级，`storage-error` 重建也写不进去）；
+       *   · 重建成功后 `getReadOnly()` 变假 ⇒ 这一行自己消失，不会留着一个「点第二次又备份又清空」的按钮。
+       */
+      if (boot.status === 'corrupt' && getReadOnly()) {
+        rows.push({
+          id: 'recover',
+          label: t('ui.dbg.recover'),
+          hint: t('ui.dbg.recoverHint'),
+          icon: 'lucide:life-buoy',
+          group: 'dbg/3-data',
+          command: 'dev.workspace/reset',
+        })
+      }
     }
     layers.openMenu({
       rows,
@@ -239,8 +255,8 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
         blockSelection: mainEd.hasBlockSelection(),
         blockSelectionCount: mainEd.blockSelectionCount(),
         hasLocalStorage: boot.status !== 'storage-error',
-        readOnly,
-        bootNotice,
+        readOnly: getReadOnly(),
+        bootNotice: getBootNotice(),
         storageKind: store.kind,
         /**
          * **资产库**：`available` 与 `keys` 是两个不同的事实。

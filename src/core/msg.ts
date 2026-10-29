@@ -344,7 +344,7 @@ export const MSG = {
   'cmd.debug.dump-model': '导出当前页模型 JSON',
   'cmd.dev.load-state': '载入演示状态',
   'cmd.dev.simulate-ime': '模拟 IME 组合期按键（守卫自检）',
-  'cmd.dev.reset-all': '清空 localStorage 并还原假数据',
+  'cmd.dev.reset-all': '备份并重建本地库',
 
   /* -------------------------------------------------- 命令分组 category（menu.*） */
   'menu.cat.editor': '编辑器',
@@ -643,10 +643,13 @@ export const MSG = {
   'ui.stateMenu.degradedHint': '超长块 / 全英文 / 超长标题 / 无标题',
   'ui.stateMenu.sparseHint': '只有 1 个块',
   'ui.stateMenu.emptyHint': '什么都没写',
+  'ui.dbg.recover': '备份并重建本地库',
+  'ui.dbg.recoverHint': '读不出来的原始字节先备份，再写入演示数据',
 
   /* ------------------------------------------------------------ 启动 / 持久化告警 */
   'ui.boot.tooNew': '本地库版本（v{version}）比当前应用新，已进入只读演示模式：不会写入或覆盖你的数据。请升级应用后再打开。',
   'ui.boot.corrupt': '本地库无法读取（数据损坏），已进入只读演示模式：不会写入或覆盖你的数据。请先用开发者工具备份 localStorage。',
+  'ui.boot.corruptDevHint': '（调试菜单里可以一键备份并重建）',
   'ui.boot.storageError': '无法访问本地存储，已进入只读演示模式：本次改动不会保存。',
   'ui.boot.expired': '本地库是旧版本（v{version}），已载入新的演示数据。',
   'ui.boot.saveFailed': '保存失败：{message}。本次改动没有写入本地存储。',
@@ -666,7 +669,10 @@ export const MSG = {
   'ui.toast.blocksCopied': '已复制选中的块（大纲文本）',
   'ui.toast.blockRefsCopied': '已复制选中块的引用',
   'ui.toast.imeProbe': '组合期触发命令 {fired} 次（应为 0）｜序列 {seq}',
-  'ui.toast.resetAll': '已清空本地存储并还原假数据',
+  'ui.toast.resetDone': '已重建本地库；原始字节备份在 {key}',
+  'ui.toast.resetDoneNoBackup': '已重建本地库（这个后端没有备份能力，原字节未保留）',
+  'ui.toast.resetBackupFailed': '备份原始字节失败，已中止重建：{message}',
+  'ui.toast.resetFailed': '重建本地库失败：{message}',
   'ui.toast.copied': '已复制',
   'ui.toast.stateLoaded': '已载入：{state}',
   'ui.toast.virtOn': '虚拟化 on（窗口半径 {radius} 行）：DOM 节点数会小于块数',

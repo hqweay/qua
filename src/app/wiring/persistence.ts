@@ -21,7 +21,14 @@ export type PersistenceDeps = {
   device: DeviceState
   blocks: BlockStore
   kb: MemoryKb
-  readOnly: boolean
+  /**
+   * **启动是否只读**，外加要显示的启动告警。
+   *
+   * 传对象而不是两个值：用户在只读态点「备份并重建」之后，`readOnly` 要由这里
+   * **当场翻回 false**，同时把告警收起。两个平铺的 `boolean` / `string` 改不了，
+   * 上层就得再存一份 —— 两份状态能不一致，而不一致时没有任何一层会报错。
+   */
+  bootState: { readOnly: boolean; notice: string | null }
   /**
    * **内存里这份模型是从盘上读来的吗**。
    *
@@ -52,7 +59,7 @@ export type PersistenceDeps = {
 }
 
 export function setupPersistence(deps: PersistenceDeps) {
-  const { store, deviceStore, device, blocks, kb, readOnly, errText, layers } = deps
+  const { store, deviceStore, device, blocks, kb, errText, layers } = deps
 
   /**
    * 把编辑器里的模型写回森林（**N 个真实 section**）。
@@ -113,8 +120,8 @@ export function setupPersistence(deps: PersistenceDeps) {
    * `replace` 的判据是**森林有没有被整份换掉**（种子／换库），不是「这批 op 空不空」：
    * 换落点也是零 op，而它只需要写 `meta` 两格。混成一件事，每次翻页都要整库重写一遍。
    */
-  function persist(ops: readonly Op[], replace = false) {
-    if (readOnly) return Promise.resolve({ ok: true as const })
+  function persist(ops: readonly Op[], replace = false, force = false) {
+    if (deps.bootState.readOnly && !force) return Promise.resolve({ ok: true as const })
     syncSections()
     const ws = deps.getWs()
     ws.savedAt = Date.now()
@@ -157,7 +164,7 @@ export function setupPersistence(deps: PersistenceDeps) {
   let saveTimer: number | null = null
 
   function saveNow(): void {
-    if (readOnly) return
+    if (deps.bootState.readOnly) return
     if (saveTimer !== null) {
       window.clearTimeout(saveTimer)
       saveTimer = null
@@ -187,10 +194,34 @@ export function setupPersistence(deps: PersistenceDeps) {
   }
 
   function scheduleSave(): void {
-    if (readOnly) return
+    if (deps.bootState.readOnly) return
     syncSections()
     if (saveTimer !== null) window.clearTimeout(saveTimer)
     saveTimer = window.setTimeout(saveNow, SAVE_DEBOUNCE_MS)
+  }
+
+  /**
+   * **只读态下唯一允许的一笔写入**：用户显式点了「备份并重建本地库」。
+   *
+   * 调用方已经把这批内容换进 `getWs()`（并清过 `pendingOps`）；这里只负责
+   * 「整份替换落盘，并把启动态翻回可写」。成功之后 `readOnly` 永远不回滚 ——
+   * 盘上已经不是那份读不出来的字节了。失败时**保持只读**：写不进去就继续装作能写，
+   * 只会得到「用户以为存上了、下次打开又没了」。
+   *
+   * 不做幂等 `genesis` 判断：这条路径本身就是一次显式全量重建，
+   * `diff([], 当前森林)` 与 `replace` 一起表达它，而后把 `genesis` 关掉。
+   */
+  async function forceReplaceNow(): Promise<{ ok: true } | { ok: false; error: unknown }> {
+    genesis = false
+    pendingOps = []
+    const r = await persist(diff([], deps.getWs().blocks), true, true)
+    if (!r.ok) return { ok: false, error: r.error }
+    deps.bootState.readOnly = false
+    deps.bootState.notice = null
+    // 上一次失败的告警不该跟着新库继续挂着
+    saveFailureShown = false
+    savedSwap = blocks.swapCount
+    return { ok: true }
   }
 
   /* ------------------------------------------------------------ 设备状态落盘 */
@@ -277,6 +308,7 @@ export function setupPersistence(deps: PersistenceDeps) {
     },
     saveNow,
     scheduleSave,
+    forceReplaceNow,
     saveDeviceNow,
     scheduleDeviceSave,
     txRun,

@@ -52,6 +52,11 @@ export interface WorkspaceStore {
     opts?: { replace?: boolean },
   ) => Promise<{ ok: true } | { ok: false; error: unknown }>
   clear: () => Promise<void>
+  /**
+   * 作废前抄一份原始字节（见 `StoragePort.backup`）。
+   * 后端不支持 ⇒ `null`；备份失败 ⇒ 抛出（调用方中止覆盖）。
+   */
+  backup: () => Promise<string | null>
   /** 等已在途的提交落盘 */
   settle: () => Promise<void>
 }
@@ -109,6 +114,12 @@ export function createWorkspaceStore(port: StoragePort): WorkspaceStore {
     },
 
     clear: () => port.clear(),
+
+    /**
+     * 备份是**可选能力**：没有就是 `null`（「没有备份」与「备份失败」必须分开——
+     * 前者可以继续，后者必须中止）。
+     */
+    backup: async () => (port.backup ? port.backup() : null),
     settle: () => port.settle(),
   }
 }

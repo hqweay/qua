@@ -19,8 +19,7 @@ export const DEV_HANDLERS: Record<string, Handler> = {
     return true
   },
   'dev.workspace/reset': (_a, app) => {
-    app.loadState('seed')
-    app.toast(t('ui.toast.resetAll'))
+    app.resetWorkspace()
     return true
   },
 }

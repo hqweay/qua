@@ -625,17 +625,23 @@ button.ghost.wide {
   font-weight: var(--ui-fw-medium);
 }
 /*
- * 这天写过：右下角一颗点。
+ * 这天写过：数字正下方一颗点。
  *
  * 为什么是点而不是给整格上色：上色与「今天」的底色会撞成两种「有颜色」，
  * 而它们说的是不同的事（今天／写过）。点是小面积、不与底色竞争。
+ *
+ * ⚠️ **点必须与数字同一个竖中线**（`left: 50%` ＋ 半个自身宽的回退）。
+ *    贴着格子右下角时，点与数字中心差 8px 左右：整片格子读起来是
+ *    「每个数字右下角各挂了一点」，而不是「这个数字下面有个点」——
+ *    点在说数字的事，就得落在数字的轴上。
  */
 .cal-dot {
   position: absolute;
-  right: var(--ui-gap-2);
+  left: 50%;
   bottom: var(--ui-gap-2);
   width: 4px;
   height: 4px;
+  transform: translateX(-50%);
   border-radius: var(--ui-radius-pill);
   background: var(--ui-text-tertiary);
 }
