@@ -189,11 +189,22 @@ function addEdgesOfBlock(idx: Index, block: Block): void {
  * 不是「必须可执行」的指令；等式测试会把任何因此产生的分叉抓出来。
  */
 export function applyOps(index: Index, ops: readonly Op[], forest: readonly Block[]): Index {
+  /**
+   * 这一批里**刚由位置 op 建进索引**的块。
+   *
+   * 位置 op 的 `indexSubtree` 读的是**模型最终值**：新块的地址/露面/标签/日期
+   * 已经写进索引了。紧随其后的 `prop.set(_aliases|_lists|_tags|_date)` 是同一笔
+   * genesis 的格，**不必再扫一遍名字表找「摘掉的旧名字」** —— 新块没有旧名字。
+   * 不跳过的话，建页/建标签在 50,000 块时要扫全库（实测 15.8ms）。
+   */
+  const fresh = new Set<string>()
   for (const op of ops) {
     switch (op.e) {
       case 'block':
-        if (op.op === 'upsert') applyBlockUpsert(index, op.id, op.value, forest)
-        else applyBlockExist(index, op.id, op.state, forest)
+        if (op.op === 'upsert') {
+          if (op.value.parent !== undefined && !index.blocks.has(op.id)) fresh.add(op.id)
+          applyBlockUpsert(index, op.id, op.value, forest)
+        } else applyBlockExist(index, op.id, op.state, forest)
         break
       case 'prop':
         /**
@@ -204,6 +215,7 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
          *    曾经它确实在这里，而那时「软删」与「清除」共用一个 `block.delete`，
          *    撤销一次插入再重开会让块从回收站冒出来 —— 一个格只能有一种地址。
          */
+        if (fresh.has(op.block) && (op.name === ALIASES_PROP || op.name === LISTS_PROP || op.name === '_tags' || op.name === '_date')) break
         if (op.name === ALIASES_PROP || op.name === LISTS_PROP) refreshTagsClaim(index, op.block, forest)
         else if (op.name === '_tags') refreshTagMembership(index, op.block)
         else if (op.name === '_date') refreshJournalClaim(index, op.block)
@@ -264,12 +276,33 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[]): v
   // ⚠️ 取子树要**含被删块**：执行到这里时根已被打上标记（tx 先改内存、后修补索引），
   //    默认遍历会把整棵子树跳过去——一张都摘不掉。退场的正是「这棵子树里的全部」。
   const gone = walkSubtreeIncludingDeleted(block)
+  const goneSet = new Set(gone)
+  /**
+   * **先只从这棵子树里收集名字/日期**，再摘索引。
+   *
+   * 不从 `index.tags`／`index.aliases` 里过滤（那是 O(整库)：50,000 块删一个普通块要 2ms，
+   * 删一个带地址的块要 13.5ms）。子树通常很小，名字只可能是这棵子树里的那些。
+   * 只有**真的丢掉一个名字**时才需要重扫森林找接手者（O(n)，但只发生在删页/标签这种低频动作）。
+   */
+  const names = new Set<string>()
+  const dates = new Set<string>()
+  walkForest(
+    [block],
+    (b) => {
+      for (const alias of aliasesOf(b)) {
+        const name = normalizeAlias(alias)
+        if (name !== '') names.add(name)
+      }
+      if (isJournal(b)) dates.add(journalDate(b))
+    },
+    { includeDeleted: true },
+  )
+
   for (const bid of gone) {
     index.blocks.delete(bid)
     index.rootOf.delete(bid)
     index.parentOf.delete(bid)
   }
-  const goneSet = new Set(gone)
   /**
    * 名字表：删掉这些块认领的名字，再让**还活着**的认领者按 rebuild 的口径接手。
    *
@@ -277,22 +310,31 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[]): v
    *    只处理 `tags` 会让 `aliases` 里留下死条目 —— 那时 `resolveAlias` 会返回一个
    *    已经不在树上的块 id，而没有任何一层会报错（等式断言抓到的正是这个）。
    */
-  const tagNames = [...index.tags].filter(([, owner]) => goneSet.has(owner)).map(([name]) => name)
+  const tagNames = [...names].filter((name) => {
+    const owner = index.tags.get(name)
+    return owner !== undefined && goneSet.has(owner)
+  })
   for (const name of tagNames) index.tags.delete(name)
   for (const name of tagNames) {
     const heir = firstTagClaimant(forest, name)
     if (heir) index.tags.set(name, heir)
   }
-  const aliasNames = [...index.aliases].filter(([, owner]) => goneSet.has(owner)).map(([name]) => name)
+  const aliasNames = [...names].filter((name) => {
+    const owner = index.aliases.get(name)
+    return owner !== undefined && goneSet.has(owner)
+  })
   for (const name of aliasNames) index.aliases.delete(name)
   for (const name of aliasNames) {
     const heir = firstAddressClaimant(forest, name)
     if (heir !== undefined) index.aliases.set(name, heir)
   }
   // 日期表：同上（rebuild 是先序最后一个赢 ⇒ 接手也取最后一个）
-  const dates = [...index.journals].filter(([, owner]) => goneSet.has(owner)).map(([d]) => d)
-  for (const d of dates) index.journals.delete(d)
-  for (const d of dates) {
+  const goneDates = [...dates].filter((d) => {
+    const owner = index.journals.get(d)
+    return owner !== undefined && goneSet.has(owner)
+  })
+  for (const d of goneDates) index.journals.delete(d)
+  for (const d of goneDates) {
     const heir = lastJournalClaimant(forest, d)
     if (heir) index.journals.set(d, heir)
   }

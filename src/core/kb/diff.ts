@@ -355,6 +355,19 @@ export function diffTouched(touched: Iterable<TouchedBlock>): Op[] {
  * @param ops    `diff`／`diffTouched` 的输出，或 `op_log` 里的历史
  */
 export function applyOps(forest: Block[], ops: readonly Op[]): void {
+  /**
+   * **空森林 ⇒ 走构建器**：`replay` 与「从日志重建整库」都从这里过。
+   *
+   * 为什么单独一条路：逐条 `findAnywhere` ＋ `splice` 在 50,000 块的 genesis 上是
+   * O(n²)（实测 82.7s）。构建器维护 `id → 父`、`父 → 子列表`、`父 → 最后一个孩子` 三张表，
+   * 新块按 `prev` 追加是 O(1)；只有真正的「插到中间」才 `findIndex`。
+   * 它写出的仍是同一批 `byId` 里的块与同一套格，不是第二份语义。
+   */
+  if (forest.length === 0) {
+    buildFromEmpty(forest, ops)
+    return
+  }
+
   /** ① **清除**：块从树上消失（与软删是两件事）。 */
   for (const op of ops) {
     if (op.e === 'block' && op.op === 'exist' && op.state === 'purged') removeFromTree(forest, op.id)
@@ -384,54 +397,141 @@ export function applyOps(forest: Block[], ops: readonly Op[]): void {
   const byId = new Map<string, Block>()
   walkForest(forest, (b) => void byId.set(b.id, b), { includeDeleted: true })
   for (const op of ops) {
-    if (op.e === 'prop') {
-      const block = byId.get(op.block)
-      if (!block) continue
-      const props = { ...(block.props ?? {}) }
-      if (op.op === 'delete') delete props[op.name]
-      else props[op.name] = op.value
-      // 属性袋不留空壳：`{}` 与「没有属性」是两种东西
-      if (Object.keys(props).length === 0) delete block.props
-      else block.props = props
-      continue
-    }
-    if (op.e === 'anno') {
-      const block = byId.get(op.block)
-      if (!block) continue
-      const list = [...(block.annos ?? [])]
-      const i = list.findIndex((x) => x.id === op.id)
-      if (op.op === 'delete') {
-        if (i >= 0) list.splice(i, 1)
-      } else if (i >= 0 && op.value) list[i] = op.value
-      else if (op.value) list.push(op.value)
-      block.annos = list.length === 0 ? undefined : list
-      continue
-    }
-    if (op.e !== 'block') continue
-
-    if (op.op === 'exist') {
-      if (op.state === 'purged') {
-        removeFromTree(forest, op.id)
-        continue
-      }
-      const block = byId.get(op.id)
-      if (!block) continue
-      const props = { ...(block.props ?? {}) }
-      if (op.state === 'deleted') props[DELETED_AT_PROP] = op.at
-      else delete props[DELETED_AT_PROP]
-      if (Object.keys(props).length === 0) delete block.props
-      else block.props = props
-      continue
-    }
-
-    // 位置/genesis 已在 ② 里写过；这里只处理「只带格」的 upsert
-    if (op.value.parent !== undefined) continue
-    const block = byId.get(op.id)
-    if (!block) continue
-    if (op.value.created !== undefined) block.created = op.value.created
-    if (op.value.content !== undefined) block.content = op.value.content
-    if (op.value.modified !== undefined) block.modified = op.value.modified
+    if (op.e === 'block' && op.op === 'exist' && op.state === 'purged') continue
+    applyCellOp(op, byId)
   }
+}
+
+/**
+ * **空森林构建器**：新块的 genesis 按 `prev` 追加 O(1)，最后一次性物化 `children`。
+ *
+ * 口径与 `applyOps` 的增量路径完全相同：位置 op 才造块／挂树；`purged` 先退场；
+ * 其余格走同一个 `applyCellOp`。差别只有「怎么把块挂上去」这一层数据结构。
+ */
+function buildFromEmpty(forest: Block[], ops: readonly Op[]): void {
+  const byId = new Map<string, Block>()
+  const parentOf = new Map<string, string | null>()
+  const kids = new Map<string | null, Block[]>()
+  const lastOf = new Map<string | null, string | null>()
+
+  const detach = (id: string): void => {
+    if (!parentOf.has(id)) return
+    const parent = parentOf.get(id)!
+    const list = kids.get(parent)
+    if (list) {
+      const i = list.findIndex((b) => b.id === id)
+      if (i >= 0) list.splice(i, 1)
+      lastOf.set(parent, list.at(-1)?.id ?? null)
+    }
+    parentOf.delete(id)
+  }
+
+  const attach = (block: Block, parent: string | null, prev: string | null): void => {
+    if (parent !== null && !byId.has(parent)) {
+      throw new Error(`kb: replay: missing parent "${parent}" for block "${block.id}"`)
+    }
+    detach(block.id)
+    const list = kids.get(parent) ?? []
+    kids.set(parent, list)
+    if (prev === null) {
+      list.unshift(block)
+    } else if (lastOf.get(parent) === prev) {
+      // 目标先序里「接在最后一个孩子后面」是最常见的一支：O(1)
+      list.push(block)
+    } else {
+      const i = list.findIndex((x) => x.id === prev)
+      if (i < 0) list.unshift(block)
+      else list.splice(i + 1, 0, block)
+    }
+    lastOf.set(parent, list.at(-1)?.id ?? null)
+    parentOf.set(block.id, parent)
+  }
+
+  /**
+   * **按日志顺序走一遍**：清除、位置、格都在同一条流里。
+   *
+   * 不能像增量路径那样「先把所有 purge 跑完，再挂所有位置」：完整日志里
+   * 「先插入、后撤销」的 purge 出现在 position 之后；先跑 purge 会让它扑空，
+   * 块又被后面的 position 造出来 ⇒ 撤销掉的块在重放里复活。
+   */
+  for (const op of ops) {
+    if (op.e === 'block' && op.op === 'exist' && op.state === 'purged') {
+      detach(op.id)
+      byId.delete(op.id)
+      continue
+    }
+    if (op.e === 'block' && op.op === 'upsert' && op.value.parent !== undefined) {
+      let block = byId.get(op.id)
+      if (!block) {
+        const created = op.value.created ?? 0
+        block = {
+          id: op.id,
+          content: op.value.content ?? [],
+          children: [],
+          created,
+          modified: op.value.modified ?? created,
+        }
+        byId.set(op.id, block)
+      }
+      if (op.value.created !== undefined) block.created = op.value.created
+      if (op.value.content !== undefined) block.content = op.value.content
+      if (op.value.modified !== undefined) block.modified = op.value.modified
+      attach(block, op.value.parent, op.value.prev ?? null)
+      continue
+    }
+    applyCellOp(op, byId)
+  }
+
+  /** ④ 物化：把「父 → 子列表」写回块；根列表写回 `forest`。 */
+  for (const [parent, list] of kids) {
+    if (parent === null) continue
+    const p = byId.get(parent)
+    if (p) p.children = list
+  }
+  forest.push(...(kids.get(null) ?? []))
+}
+
+/** 一格的解释器（`applyOps` 与 `buildFromEmpty` 共用）：位置由调用方处理。 */
+function applyCellOp(op: Op, byId: ReadonlyMap<string, Block>): void {
+  if (op.e === 'prop') {
+    const block = byId.get(op.block)
+    if (!block) return
+    const props = { ...(block.props ?? {}) }
+    if (op.op === 'delete') delete props[op.name]
+    else props[op.name] = op.value
+    // 属性袋不留空壳：`{}` 与「没有属性」是两种东西
+    if (Object.keys(props).length === 0) delete block.props
+    else block.props = props
+    return
+  }
+  if (op.e === 'anno') {
+    const block = byId.get(op.block)
+    if (!block) return
+    const list = [...(block.annos ?? [])]
+    const i = list.findIndex((x) => x.id === op.id)
+    if (op.op === 'delete') {
+      if (i >= 0) list.splice(i, 1)
+    } else if (i >= 0 && op.value) list[i] = op.value
+    else if (op.value) list.push(op.value)
+    block.annos = list.length === 0 ? undefined : list
+    return
+  }
+  if (op.e !== 'block') return
+
+  const block = byId.get(op.id)
+  if (!block) return
+  if (op.op === 'exist') {
+    if (op.state === 'purged') return
+    const props = { ...(block.props ?? {}) }
+    if (op.state === 'deleted') props[DELETED_AT_PROP] = op.at
+    else delete props[DELETED_AT_PROP]
+    if (Object.keys(props).length === 0) delete block.props
+    else block.props = props
+    return
+  }
+  if (op.value.created !== undefined) block.created = op.value.created
+  if (op.value.content !== undefined) block.content = op.value.content
+  if (op.value.modified !== undefined) block.modified = op.value.modified
 }
 
 /** **从空森林重放整条日志。** `replay(log)` 与当前状态逐字节相等，是「日志完整」的定义。 */
