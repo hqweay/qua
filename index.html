@@ -98,10 +98,14 @@
           <div class="dock-card" id="inspect-card" data-inspect-card hidden>
             <div class="dock-card-head">
               <span class="dock-card-title" id="inspect-card-title"></span>
-              <button class="dock-btn dock-btn--text" id="properties-add" type="button"></button>
             </div>
             <div class="dock-card-body">
               <div class="properties-body" id="properties-body"></div>
+              <!--
+                添加入口在**体**里、不在卡头：卡头只放卡级控件（收起／单卡／关闭），
+                每张卡同构；作用于内容的动作贴着内容长（与日历「点月份回本月」同一条口径）。
+              -->
+              <button class="props-add" id="properties-add" type="button"></button>
             </div>
           </div>
         </div>

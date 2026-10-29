@@ -21,15 +21,22 @@ import { cardNote } from './card-parts.ts'
 
 /** 一块卡：标题条 + 内容；`hidden` 只表示「没有内容」，不表示「用户收起了」 */
 export interface DockCard {
-  /** 稳定 id：块 id（窗口）或派生卡 id（`belongs`／`journal`／`inspect`／`backrefs`） */
+  /** 稳定 id：块 id（窗口）或派生卡 id（`belongs`／`calendar`／`inspect`／`backrefs`／`trash`） */
   id: string
   /** 块卡标题；空串 ＝ 不画标题文字（仍保留头，因为动作住在这里） */
   title: string
-  /** 标题条右侧的额外动作（如「＋」）；由调用方决定要不要 */
-  actions?: DockCardAction[]
-  /** 关闭入口：只有窗口有（派生卡没有「再加一张」的入口，关掉会是单向陷阱） */
+  /**
+   * 关闭入口：**每一张卡都有**（窗口／组件／派生）——关掉只是从 `cards` 里摘掉这一次露面，
+   * 回程是槽头的「添加组件」。
+   */
   close?: { title?: string; onClick: () => void }
-  /** 内容区；由调用方负责填充 */
+  /**
+   * 卡头**没有**「本卡专属动作」这个通道。
+   *
+   * 卡头是**跨卡扫视**的一块区域：多一颗按钮，那一列的图标就会错开，而用户扫的是一列卡，
+   * 不是一张卡。所以作用于**内容**的动作（回到本月、清空回收站…）长在 body 里、
+   * 贴着它作用的那件东西；卡头只留「这张卡」的三个控件（收起／单卡／关闭），每张卡同构。
+   */
   body: HTMLElement
   /** 是否可拖（缺省 true） */
   draggable?: boolean
@@ -178,7 +185,6 @@ export function buildDockCard(card: DockCard, state: DockCardState): HTMLElement
   title.className = 'dock-card-title ui-ellipsis ui-ellipsis-grow'
   title.textContent = card.title
   head.appendChild(title)
-  for (const a of card.actions ?? []) head.appendChild(actionButton(a))
   head.appendChild(soloButton())
   if (card.close) head.appendChild(actionButton({ label: 'lucide:x', ...card.close }))
 

@@ -9964,7 +9964,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
 
   /**
    * 页/标签上「添加属性」现在有**两个入口**，各写各的槽：
-   *   · 抬头的「＋ 属性」→ 这一块自己的值（`_ownProps`）
+   *   · 底部的「＋ 添加属性」→ 这一块自己的值（`_ownProps`）
    *   · 声明段里的「＋ 声明属性」→ 成员的声明清单（`_fieldDefs`）
    *
    * 曾经只有一个入口，靠「这个块有没有 page/tag 露面」猜意图 ⇒ 标签块永远加不了自己的属性。
@@ -10002,7 +10002,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
     rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
     declared: [...document.querySelectorAll('[data-declared-prop-id]')].length,
   }), pickId)
-  assert(pageOwn.rows.includes(pickId), `抬头入口要加「这一块自己的」属性行：${JSON.stringify(pageOwn)}`)
+  assert(pageOwn.rows.includes(pickId), `底部入口要加「这一块自己的」属性行：${JSON.stringify(pageOwn)}`)
   assert(pageOwn.declared === 0, `抬头入口**不该**写声明清单（那是另一个槽）：${JSON.stringify(pageOwn)}`)
 
   // ② 声明段自己的入口 ⇒ 只写声明，不给自己加行

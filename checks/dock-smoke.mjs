@@ -1350,8 +1350,22 @@ await check('A21 日历卡：一格一天、周一起始、点一格去那天；
   assert(after.written, `点完这一格应立刻标成「写过」（写完要看得见）：${JSON.stringify(after)}`)
   assert(after.editorRows > 0, `点一格应把中心槽换成那一天：${JSON.stringify(after)}`)
 
+  /**
+   * ⑤ 翻月之后能回到本月：入口是 **body 里的月份标签**（卡头只放卡级控件）。
+   * 翻月没有边界，没有这个入口就得靠记得今天是几月。
+   */
+  await page.locator('#dock-left .cal-head .cal-nav').last().click()
+  await page.locator('#dock-left .cal-head .cal-nav').last().click()
+  await page.waitForTimeout(120)
+  const far = await page.evaluate(() => document.querySelector('#dock-left .cal-label')?.textContent ?? '')
+  assert(far !== before.label, `← → 应真的翻月：${JSON.stringify({ far, was: before.label })}`)
+  await page.locator('#dock-left .cal-label').click()
+  await page.waitForTimeout(150)
+  const labelBack = await page.evaluate(() => document.querySelector('#dock-left .cal-label')?.textContent ?? '')
+  assert(labelBack === before.label, `点月份标签应回到本月：${JSON.stringify({ far, back: labelBack, want: before.label })}`)
+
   await ctx.close()
-  return `日历 ${before.label}：${before.cellCount} 格 ＋ ${before.pads} 空位（周一起始）；写过 ${before.written.length} 天；点 ${blank} ⇒ 打开且立刻标为写过`
+  return `日历 ${before.label}：${before.cellCount} 格 ＋ ${before.pads} 空位（周一起始）；写过 ${before.written.length} 天；点 ${blank} ⇒ 打开且立刻标为写过；翻月后点月份标签回本月`
 })
 
 /* ---------------------------------------------------------------- A22 */
@@ -1393,6 +1407,96 @@ await check('A22 卡里的一列块与空态只有一个产地（`card-parts`）
 
   await ctx.close()
   return `${m.listCount} 处一列块共用同一形状；${m.noteCount} 处空态都有话`
+})
+
+/* ---------------------------------------------------------------- A24 */
+
+await check('A24 卡头右侧同构：每张卡都是「单卡／关闭」两格；关闭贴内容区右缘、跨卡同一列', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  // 再开一张窗口卡：三种来源（派生／窗口／检视）同时在场才叫「跨卡」
+  const id = await page.evaluate(
+    () => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '',
+  )
+  assert(id, '前置：应有一个可开的块')
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), id)
+  await page.locator(`.blk[data-block-id="${id}"] > .left > .marker`).click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(200)
+
+  const m = await page.evaluate(() => {
+    const out = []
+    for (const side of ['left', 'right']) {
+      for (const card of document.querySelectorAll(`#dock-${side}-stack > .dock-card`)) {
+        if (card.hidden) continue
+        const head = card.querySelector(':scope > .dock-card-head')
+        if (!head) continue
+        const hr = head.getBoundingClientRect()
+        const btns = [...head.querySelectorAll(':scope > button')].map((b) => {
+          const r = b.getBoundingClientRect()
+          return {
+            action: b.dataset.dockAction ?? '',
+            op: Number(getComputedStyle(b).opacity),
+            x: +r.left.toFixed(1),
+            right: +r.right.toFixed(1),
+            w: +r.width.toFixed(1),
+          }
+        })
+        out.push({
+          id: card.dataset.cardId,
+          side,
+          kind: card.dataset.window === '1' ? 'window' : card.dataset.widget === '1' ? 'widget' : 'derived',
+          headRight: +hr.right.toFixed(1),
+          padR: parseFloat(getComputedStyle(head).paddingRight),
+          btns,
+        })
+      }
+    }
+    return out
+  })
+
+  assert(m.length >= 4, `应至少量到 4 张卡（派生／窗口／检视）：${JSON.stringify(m.map((c) => c.id))}`)
+  assert(new Set(m.map((c) => c.kind)).size >= 2, `应同时量到两种来源的卡：${JSON.stringify(m.map((c) => c.kind))}`)
+
+  const columns = { left: { close: new Set(), solo: new Set() }, right: { close: new Set(), solo: new Set() } }
+  for (const c of m) {
+    // 卡头只有三颗：收起（最左）＋ 单卡 ＋ 关闭。**不许有「本卡专属动作」**：
+    // 多一颗就会把那一列图标推歪，而卡头是跨卡扫视的区域。
+    const right = c.btns.filter((b) => b.action !== 'collapse')
+    assert(
+      c.btns.length === 3 && right.length === 2,
+      `${c.id}（${c.kind}）：卡头应只有 收起／单卡／关闭 三颗，实际 ${JSON.stringify(c.btns)}`,
+    )
+    const close = right.find((b) => b.action === 'close')
+    const solo = right.find((b) => b.action === 'solo')
+    assert(close && solo, `${c.id}：右侧应是单卡 ＋ 关闭：${JSON.stringify(c.btns)}`)
+    // 判据是「看得见的最右一颗贴内容区右缘」：关闭若靠 opacity 藏起来仍占位，
+    // 它左边那颗（单卡）就会离右缘差一格——一列卡看下来是一条虚的边。
+    assert(close.op > 0, `${c.id}：关闭不能靠「透明但仍占位」隐藏：${JSON.stringify(close)}`)
+    assert(
+      Math.abs(close.right - (c.headRight - c.padR)) <= 1,
+      `${c.id}：关闭应贴内容区右缘：${JSON.stringify({ close, headRight: c.headRight, padR: c.padR })}`,
+    )
+    assert(close.w === solo.w, `${c.id}：两颗按钮同宽：${JSON.stringify({ close, solo })}`)
+    // 对齐是**同一槽内**的事：左右槽的 x 当然不同；判的是「一列卡里这些图标是否同列」
+    columns[c.side].close.add(close.x)
+    columns[c.side].solo.add(solo.x)
+  }
+  for (const side of ['left', 'right']) {
+    const n = m.filter((c) => c.side === side).length
+    assert(n >= 2, `${side} 槽应至少量到两张卡（否则「跨卡对齐」无从判断）：${n}`)
+    assert(
+      columns[side].close.size === 1,
+      `${side} 槽所有卡的关闭必须在同一列：${JSON.stringify([...columns[side].close])}`,
+    )
+    assert(
+      columns[side].solo.size === 1,
+      `${side} 槽所有卡的单卡必须在同一列：${JSON.stringify([...columns[side].solo])}`,
+    )
+  }
+
+  await ctx.close()
+  return `${m.length} 张卡（${[...new Set(m.map((c) => c.kind))].join('/')}）：左槽关闭 x=${[...columns.left.close][0]}、右槽 x=${[...columns.right.close][0]}；关闭右缘＝内容区右缘`
 })
 
 /* ---------------------------------------------------------------- 不适用项 */

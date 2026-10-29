@@ -265,7 +265,8 @@
   display: flex;
   align-items: center;
   gap: var(--ui-gap-2);
-  padding: var(--ui-gap-3) var(--ui-gap-2) var(--ui-gap-2) var(--ui-gap-3);
+  /* 右边与 body 同一条内边距：最右那颗按钮的右缘 ＝ 内容区右缘（否则图标看起来「悬空」） */
+  padding: var(--ui-gap-3) var(--ui-gap-3) var(--ui-gap-2) var(--ui-gap-3);
   font-size: var(--ui-fs-2xs);
   letter-spacing: 0.02em;
   color: var(--ui-text-tertiary);
@@ -306,11 +307,19 @@
   flex: 0 0 auto;
   font-size: var(--ui-fs-xs);
 }
-/* 关闭是破坏性入口：hover 才出现，避免和单选/收起抢视线 */
+/*
+ * 关闭常驻但**低对比**（hover 这张卡 / 聚焦到它 / 直接 hover ✕ 才提到满）。
+ *
+ * 为什么不再「hover 才出现」：`opacity: 0` 的按钮**仍占 20px ＋ 缝**，
+ * 于是每张卡最右那颗**看得见的**图标都离右缘差 28px —— 一列卡看下来就是一条虚的边。
+ * 常驻解决了那条缝，也顺手消掉 hover 时的位移；代价是每张卡多一颗 0.45 的 ✕。
+ */
 .dock-card-head [data-dock-action='close'] {
-  opacity: 0;
+  opacity: 0.45;
 }
-.dock-card:hover [data-dock-action='close'],
+.dock-card:hover > .dock-card-head [data-dock-action='close'],
+.dock-card:focus-within > .dock-card-head [data-dock-action='close'],
+.dock-card-head [data-dock-action='close']:hover,
 .dock-card-head [data-dock-action='close']:focus-visible {
   opacity: 1;
 }
@@ -561,10 +570,16 @@ button.ghost.wide {
 .cal-label {
   flex: 1;
   min-width: 0;
+  width: 100%;
   text-align: center;
   font-size: var(--ui-fs-xs);
   color: var(--ui-text-secondary);
   font-variant-numeric: tabular-nums;
+  border-radius: var(--ui-radius-sm);
+}
+.cal-label:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
 }
 .cal-nav {
   flex: 0 0 auto;

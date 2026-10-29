@@ -145,7 +145,7 @@ export const MSG = {
   'ui.props.tagPlaceholder': '标签名（回车添加）',
   'ui.props.tagRemove': '摘掉这个标签（正文里那枚也不再生效）',
   'ui.props.add': '添加块属性',
-  'ui.props.addShort': '＋ 属性',
+  'ui.props.addShort': '＋ 添加属性',
   'ui.props.empty': '还没有块属性',
   'ui.props.own': '本块自有',
   /* 系统信息：创建/修改时刻是**块自己的事实**，不是可编辑的数据 ⇒ 只有这一段的**只读**露面。

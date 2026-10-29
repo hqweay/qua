@@ -693,6 +693,21 @@
   font-size: var(--ui-fs-xs);
   color: var(--ui-text-tertiary);
 }
+/* 属性区的添加入口：一行，贴着属性列表长（它不是卡头的控件） */
+.props-add {
+  display: block;
+  width: 100%;
+  margin-top: var(--ui-gap-1);
+  padding: var(--ui-gap-1) var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+  text-align: left;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+.props-add:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
 /* 行结构走 `.ui-row`（原语）；这里只给属性区自己的密度与字号 */
 .prop-row {
   --ui-row-gap: var(--ui-gap-3);

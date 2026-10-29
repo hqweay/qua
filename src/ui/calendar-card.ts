@@ -74,8 +74,21 @@ export function calendarCard(deps: CalendarDeps): DockCard {
   prev.title = t('ui.cal.prevMonth')
   prev.setAttribute('aria-label', t('ui.cal.prevMonth'))
   renderIcon(prev, 'lucide:chevron-left', 'chevron-left')
-  const label = document.createElement('span')
+  const label = document.createElement('button')
+  label.type = 'button'
   label.className = 'cal-label'
+  /**
+   * **点月份回本月**：翻远了之后回到今天那一月。
+   *
+   * 为什么它长在 body 里而不是卡头：它作用于**卡里的内容**（这个月视图），
+   * 不是这张卡本身。卡头只放卡级控件，否则每张卡的图标列就会错开。
+   */
+  label.title = t('ui.cal.thisMonth')
+  label.setAttribute('aria-label', t('ui.cal.thisMonth'))
+  label.addEventListener('click', () => {
+    cursor = todayISO()
+    paint()
+  })
   const next = document.createElement('button')
   next.type = 'button'
   next.className = 'dock-btn cal-nav'
@@ -165,22 +178,5 @@ export function calendarCard(deps: CalendarDeps): DockCard {
 
   paint()
 
-  /**
-   * 卡头动作：**回本月**（翻远了之后回到今天那一月）。
-   *
-   * 它是这颗「回到起点」的唯一入口：日历没有「关闭」，翻月又没有边界，
-   * 没有它就得靠记得今天是几月。
-   */
-  const actions: DockCard['actions'] = [
-    {
-      label: 'lucide:calendar',
-      title: t('ui.cal.thisMonth'),
-      onClick: () => {
-        cursor = todayISO()
-        paint()
-      },
-    },
-  ]
-
-  return { id: 'calendar', title: t('ui.cal.title'), body, actions }
+  return { id: 'calendar', title: t('ui.cal.title'), body }
 }
