@@ -65,35 +65,28 @@
  * 这一层是深度 1，允许一层"面"）。
  */
 /*
- * 槽内容 = **流**：小卡按列均分自动换行，大卡占满一整行。
+ * 槽内容 = **流**：小卡均分一整行、放不下自动换行，大卡占满一整行。
  * 顺序仍是一条线（DOM 顺序 = `cards` 顺序）；换行只是排版，不是第二层列表。
  *
- * ⚠️ **为什么是 grid 而不是 flex-wrap**：小卡曾是 `flex: 0 0 44px`，
- *    于是「一行能放几个」由固定宽度决定 —— 224px 的内容区放 4 个（194px），
- *    剩下 30px 空在最右边，**与大卡的右缘对不齐**（大卡占满 224px）。
- *    槽宽一拖，那个空隙在 3px～36px 之间乱跳，看起来像「小卡没摆正」。
+ * ⚠️ **一排小卡为什么是「最多 4 张 ＋ 每张分到 1/4 行宽」，而不是 `auto-fill` 网格**：
+ *    `repeat(auto-fill, minmax(44px, 1fr))` 的列数由**可用宽度**决定，而它不知道
+ *    实际有几张小卡 ⇒ **张数少于列数时会多出一条空轨**，小卡排到 4/5 处就停了，
+ *    右边留一条缝（实测：槽拖到 270px 时有 5 列、4 张小卡，右缘差 53px）。
+ *    这条缝只在「槽宽恰好放得下 N+1 张」的宽度区间出现，所以默认 236 的断言一直是绿的。
  *
- *    `grid-template-columns: repeat(auto-fit, minmax(0, 1fr))` 把这件事交给布局：
- *    列数仍由可用宽度决定，但**列宽均分** ⇒ 最后一列的右缘永远等于内容区右缘。
- *    代价：小卡不再是恒定 44px（会随槽宽在 40–56px 之间浮动）。
- *    这个代价是划算的：**对齐是每次都能看见的，绝对尺寸只有在两槽并排比时才看得出**。
+ *    现在让**每张自己**最多占一行的 1/4（减掉三条款缝）：张数够时 4 张正好铺满，
+ *    张数少时小卡保持这个宽度、靠左排——不会出现「一张小卡被拉成一整根长条」。
+ *    代价：槽拖得很宽时小卡会跟着变宽（320 宽的四张约 72px），
+ *    判据仍是「对齐每次都能看见，绝对尺寸只有两槽并排比时才看得出」。
  */
 .dock-stack {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden; /* 槽内禁横向 */
-  display: grid;
-  /*
-    小卡那一档的列：最小 40px，`auto-fill` 自己决定几列，`1fr` 让各列均分剩余宽度。
-    ⇒ 整排右缘与内容区右缘对齐（不再留 30px 的尾巴）。
-
-    ⚠️ **必须是 `auto-fill`，不能是 `auto-fit`**：`auto-fit` 会把空轨道折叠掉，
-    于是「槽里只有 1 张小卡」时那一格被拉到整行宽（实测 224px）——从动作格变成一个按钮。
-    `auto-fill` 保留空轨道，单张小卡仍是 ~45px。
-  */
-  grid-template-columns: repeat(auto-fill, minmax(var(--ui-tile-min), 1fr));
-  align-content: start;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
   gap: var(--ui-gap-3);
   padding: var(--ui-gap-3);
 }
@@ -105,31 +98,37 @@
   overflow: hidden;
 }
 /*
- * 大卡**跨整行**：小卡的列数由 `auto-fit` 决定，大卡不能去猜那个数字，
- * 所以用 `grid-column: 1 / -1`（从第一列到最后一列）——不管当前是 4 列还是 6 列。
+ * 大卡**独占一整行**：小卡是几条一行的，大卡不能去猜那一行现在挤了几张，
+ * 所以按整行宽占位（`flex-basis: 100%`）——不管现在是一行 4 张还是 3 张。
  * 这也顺手保住了「槽内只许纵向」：大卡永远是完整的一行。
  */
 .dock-stack > .dock-card {
-  grid-column: 1 / -1;
+  flex: 0 0 100%;
   margin: 0;
 }
 .dock-stack > .dock-empty {
-  grid-column: 1 / -1;
+  flex: 0 0 100%;
   margin: 0;
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-xs);
 }
 
 /*
- * 小卡：动作格。**宽度由网格分配**，高度固定 44px。
+ * 小卡：动作格。**宽度由这一行分**，高度固定 44px。
  *
  * 为什么高度仍固定：图标是「词汇」，同一排必须一样高才能读成一排；
  * 而宽度均分不影响这一点 —— 视觉上仍是一排等距的方块。
+ *
+ * `max-width` 是「一排最多 4 张」：每张最多占 1/4 行宽（扣掉三条款缝）。
+ * ⇒ 4 张时正好铺满整行、右缘与大卡对齐；1–3 张时保持这个格子大小、靠左排，
+ *   不会被拉成一根长条（那是 `auto-fit` 的老问题）。
  */
 .dock-tile {
   position: relative;
+  flex: 1 1 var(--ui-tile-min);
+  min-width: var(--ui-tile-min);
+  max-width: calc((100% - 3 * var(--ui-gap-3)) / 4);
   height: 44px;
-  min-width: 0;
   border-radius: var(--ui-radius-lg);
 }
 .dock-tile-main {

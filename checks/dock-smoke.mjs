@@ -297,8 +297,48 @@ await check('A18 小卡按列均分、整排右缘与大卡对齐；高度固定
   assert(m.card.top >= m.tiles[0].top + 44, `大卡应换到小卡下一行：${JSON.stringify(m)}`)
   assert(Math.abs(m.card.width - (m.stack.width - m.padL - m.padR)) <= 1, `大卡应跨整行：${JSON.stringify(m)}`)
 
+  /**
+   * **槽拖宽之后仍要铺满**：默认 236 恰好是「4 列」的宽度区间，只测它会漏掉
+   * 「张数少于列数 ⇒ 多一条空轨」那种缝（实测 270 宽时有 5 列、小卡右缘差 53px）。
+   * 判据与默认宽一致：最后一格贴内容区右缘、相邻缝恒等、整排仍是一行。
+   */
+  for (const width of [270, 320]) {
+    const wide = await page.evaluate((width) => {
+      document.getElementById('app').style.setProperty('--dock-left-w', `${width}px`)
+      const stack = document.getElementById('dock-left-stack')
+      const cs = getComputedStyle(stack)
+      const sr = stack.getBoundingClientRect()
+      const tiles = [...stack.querySelectorAll(':scope > .dock-tile')].map((el) => {
+        const r = el.getBoundingClientRect()
+        return { w: +r.width.toFixed(1), left: +r.left.toFixed(1), right: +r.right.toFixed(1), top: +r.top.toFixed(1) }
+      })
+      return {
+        tiles,
+        stackRight: sr.right,
+        padR: parseFloat(cs.paddingRight),
+        contentLeft: sr.left + parseFloat(cs.paddingLeft),
+      }
+    }, width)
+    await page.waitForTimeout(80)
+    const lastWide = wide.tiles[wide.tiles.length - 1]
+    const wideContentRight = wide.stackRight - wide.padR
+    const wideTops = [...new Set(wide.tiles.map((t) => t.top))]
+    const wideGaps = wide.tiles.slice(1).map((t, i) => +(t.left - wide.tiles[i].right).toFixed(1))
+    assert(wideTops.length === 1, `槽宽 ${width} 时 4 张小卡应排成一行：${JSON.stringify(wideTops)}`)
+    assert(
+      Math.abs(lastWide.right - wideContentRight) <= 1,
+      `槽宽 ${width} 时最后一格小卡也要贴内容区右缘：${JSON.stringify({ lastWide, wideContentRight })}`,
+    )
+    assert(
+      Math.abs(wide.tiles[0].left - wide.contentLeft) <= 0.5,
+      `槽宽 ${width} 时第一格小卡也要贴内容区左缘：${JSON.stringify(wide)}`,
+    )
+    assert(new Set(wideGaps).size === 1, `槽宽 ${width} 时相邻小卡的缝仍要恒等：${JSON.stringify(wideGaps)}`)
+  }
+  await page.evaluate(() => document.getElementById('app').style.removeProperty('--dock-left-w'))
+
   await ctx.close()
-  return `左槽 4 张小卡均分（各 ${m.tiles[0].w}px）、右缘与大卡对齐（${last.right}＝${m.card.right}）；高度 44px；右槽 0 张小卡`
+  return `左槽 4 张小卡均分（各 ${m.tiles[0].w}px）、右缘与大卡对齐（${last.right}＝${m.card.right}）；高度 44px；右槽 0 张小卡；槽拖到 270/320 仍铺满`
 })
 
 /* ---------------------------------------------------------------- 保底 */
