@@ -852,15 +852,49 @@
 .props-new-group[hidden] {
   display: none;
 }
-/* 声明那一段的添加入口：它长在「声明给成员」行里，不是抬头那个「＋ 属性」 */
+/*
+ * **标签属性 / 字段声明**：独立成段，不是一条属性行。
+ *
+ * 它和「这一块自己的值」是两个槽（`_fieldDefs` / `_ownProps`）：画成同一种行，
+ * 用户会把它当成另一条属性，两个 picker 的去重也就容易混在一起。
+ */
+.props-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+  margin-top: var(--ui-gap-1);
+  padding-top: var(--ui-gap-3);
+  border-top: var(--ui-sep) solid var(--ui-border-subtle);
+}
+.props-section-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--ui-gap-2);
+}
+.props-section-title {
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-secondary);
+}
+.props-section-hint {
+  font-size: var(--ui-fs-2xs);
+  line-height: 1.4;
+  color: var(--ui-text-tertiary);
+}
+.props-declared-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-1);
+}
+/* 声明段的添加入口：与「＋ 添加属性」同形，贴着它自己的清单 */
 .props-declare-add {
   font: inherit;
   font-size: var(--ui-fs-xs);
-  white-space: nowrap;
 }
-/* 声明表单跟在「声明给成员」行后面，左侧缩进一格以表明它属于这一段 */
+/* 声明表单就在这一段的清单下面，不再额外缩进 */
 .props-form--declared {
-  margin-left: var(--ui-gap-4);
+  margin-left: 0;
 }
 
 /* 可编辑块列的岛根：断链靠属性（contenteditable=false），布局靠这一条——

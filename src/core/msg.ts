@@ -159,20 +159,28 @@ export const MSG = {
   'ui.props.unknown': '未知属性 {id}',
   'ui.props.pick': '选择已有属性…',
   'ui.props.use': '用这个',
-  /* 定义已经在本块上（标签声明／页声明／已有值）：留在下拉里但不可选，
+  /* 定义已经在本块的行里（标签声明来的／自己的值）：留在下拉里但不可选，
      否则小库的下拉会变成空的，用户分不清「库里没有」与「本块已经有」 */
   'ui.props.alreadyOn': '已在块上',
   'ui.props.declaredOn': '已声明',
-  /* 声明给成员的属性（只有页/标签有这一段）：清单 ＋ 解除，入口也在这一段自己身上 */
-  'ui.props.declaredTitle': '声明给成员',
-  'ui.props.declaredHint': '成员的属性格',
-  'ui.props.declaredEmpty': '还没有声明属性',
-  'ui.props.undeclare': '解除声明（成员已有的值保留）',
-  /* 两个添加入口：抬头那个写这一块自己的值，这一段那个写成员的声明 */
-  'ui.props.addDeclared': '声明一条属性给成员',
-  'ui.props.addDeclaredShort': '＋ 声明属性',
-  'ui.props.pickDeclared': '选一条要声明给成员的属性…',
-  'ui.props.useDeclared': '声明给成员',
+  /* 本块自己的属性表单里，这一条已经声明给成员：**可以选**——声明不占值槽 */
+  'ui.props.isTagProp': '标签属性',
+  'ui.props.isFieldDecl': '字段声明',
+  /* 标签属性（标签）／字段声明（页）：清单 ＋ 解除，入口也在这一段自己身上 */
+  'ui.props.tagPropsTitle': '标签属性',
+  'ui.props.tagPropsHint': '使用这个标签的块都会有这些属性；值仍然填在各块上',
+  'ui.props.tagPropsEmpty': '还没有标签属性',
+  'ui.props.pageFieldsTitle': '字段声明',
+  'ui.props.pageFieldsEmpty': '还没有声明字段',
+  'ui.props.undeclare': '移除这条声明（已有的值保留）',
+  /* 两个添加入口：一个写这一块自己的值，一个写标签属性/字段声明 */
+  'ui.props.addTagPropTitle': '添加一条标签属性（使用这个标签的块都会有它）',
+  'ui.props.addTagProp': '＋ 添加标签属性',
+  'ui.props.addPageFieldTitle': '添加一条字段声明',
+  'ui.props.addPageField': '＋ 添加字段',
+  'ui.props.pickTagProp': '选择要添加的标签属性…',
+  'ui.props.pickPageField': '选择要声明的字段…',
+  'ui.props.useDeclared': '添加',
   'ui.props.newOption': '＋ 新建属性…',
   'ui.props.newLabel': '属性名',
   'ui.props.create': '新建',

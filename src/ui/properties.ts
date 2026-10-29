@@ -5,14 +5,16 @@
  * 某个标签声明了哪些属性，**块属性**是这个块自己有哪些属性的值。
  * 本组件画的是「这个块有哪些属性的值」，顺带把「标签属性」的清单也画出来。
  *
- * 形状是**一个平铺列表**，不是按标签分节：
- *   · 同一 `propId` 只出现一次（被多个标签声明属性时**来源并列**）；
+ * 形状是**块属性一段 ＋ 标签属性一段**，段内平铺：
+ *   · 块属性：同一 `propId` 只出现一次（被多个标签声明属性时**来源并列**）；
  *   · 每行标来源：`来自 #A、#B`，没有标签声明就标「本块自有」；
- *   · 声明了但没填 ⇒ 仍在列表里，显示「待填」占位（这正是标签属性的意义）；
+ *   · 声明了但没填 ⇒ 仍出现在块属性里，显示「待填」占位（这正是标签属性的意义）；
  *   · 顺序由数据层给（标签正文顺序 × `_fieldDefs` 顺序），本组件不重排。
  *
- * ⚠️ 为什么不分节：同一条属性出现在两节里会重复；只放一节又会让来源随标签顺序变化。
+ * ⚠️ 为什么块属性段内不分节：同一条属性出现在两节里会重复；只放一节又会让来源随标签顺序变化。
  *    平铺 ＋ 多来源标注两个问题都没有（顺序只影响行序）。
+ * ⚠️ 但**声明**必须另成一段：它写 `_fieldDefs`、不是这一块的值；画成同一种行会让人
+ *    把它当成另一条属性（也会诱导两个 picker 共用去重集合）。
  * ⚠️ 组件不写模型：所有写入经注入的回调（由装配层转成命令）。
  */
 import type { Block } from '../core/index.ts'
@@ -60,14 +62,14 @@ export interface PropertiesDeps {
   addOwnProp: (b: Block, propId: string) => void
   /** 新建一条定义并加进**这一块自己的值槽** */
   createOwnDef: (b: Block, label: string, kind: PropKind) => void
-  /** 把已有属性**声明给成员**（`_fieldDefs`，只有页/标签能声明） */
+  /** 把已有属性**声明给成员**（标签属性／字段声明，写 `_fieldDefs`；只有页/标签能声明） */
   declareProp: (b: Block, propId: string) => void
-  /** 新建一条定义并**声明给成员** */
+  /** 新建一条定义并**声明给成员**（标签属性／字段声明） */
   createDeclaredDef: (b: Block, label: string, kind: PropKind) => void
   /**
    * 页/标签**声明给成员**的那些属性定义（`_fieldDefs` 的活块）。
    *
-   * ⚠️ 与「这一块自己有哪些值」是两件事：在页上点「添加属性」做的是**声明**，
+   * ⚠️ 与「这一块自己有哪些值」是两件事：在页/标签上点自己的添加入口做的是**声明**，
    *    页自己没有值，所以不会在块属性里长出任何一行。没有这一段，那次点击就没有可见结果。
    */
   declaredFields: (b: Block) => Block[]
@@ -256,7 +258,7 @@ export class PropertiesPanel {
   private readonly els: PropertiesEls
   private readonly deps: PropertiesDeps
   /**
-   * 哪个添加表单开着：`own`（这一块自己的值）／`declared`（声明给成员）／`null`。
+   * 哪个添加表单开着：`own`（这一块自己的值）／`declared`（标签属性／字段声明）／`null`。
    *
    * ⚠️ 不能是一个布尔：两个入口写的是两个槽，同时开着会让「点了哪个」变得不可知。
    */
@@ -299,7 +301,7 @@ export class PropertiesPanel {
     /**
      * **有当前对象就显示**，不因为「没有行」而收起。
      *
-     * ⚠️ 判据是入口而不是内容：一个块总能加属性，而「＋ 添加块属性」就在这一区的抬头上。
+     * ⚠️ 判据是入口而不是内容：一个块总能加属性，而「＋ 添加属性」就在这一区里。
      *    按行数收起过一次，结果普通块在加第一条属性之前面板根本不出现 —— 那个加号也就
      *    没了，于是「给一个空块加第一个属性」这条路径根本走不通。
      */
@@ -329,17 +331,25 @@ export class PropertiesPanel {
     }
 
     /**
-     * **声明给成员的属性**（只有页/标签有）。
+     * **入口和表单都紧贴它们写的那一组**。
+     *
+     * `els.add` 原来挂在 body 外面（卡片最下面），结果是：点「＋ 添加属性」以后，
+     * 表单长在「声明给成员」段**下面** —— 看起来像在给声明段加东西。
+     * 现在 own 的行、按钮、表单在同一个位置，声明段另起一段（`buildDeclared`）。
+     */
+    this.els.body.appendChild(this.els.add)
+    if (this.formOpen === 'own') this.els.body.appendChild(this.buildForm(target))
+
+    /**
+     * **标签属性**（标签）／**字段声明**（页）：只有页/标签有。
      *
      * 与上面那一段是两件事：那一段是「这一块自己的值」，这一段是「我的成员会有哪些格子」。
-     * 页/标签上点「添加属性」做的正是**声明**，所以不画这一段，那次点击就没有可见结果。
+     * 页/标签上点这一段自己的入口做的正是**声明**，所以不画这一段，那次点击就没有可见结果。
      */
     if (hasList(target, 'page') || hasList(target, 'tag')) {
       this.els.body.appendChild(this.buildDeclared(target))
-      if (this.formOpen === 'declared') this.els.body.appendChild(this.buildDeclareForm(target))
     }
 
-    if (this.formOpen === 'own') this.els.body.appendChild(this.buildForm(target))
     // 系统信息在**最后**：它是这一块的出生与改动记录，不是可编辑的数据
     this.els.body.appendChild(this.buildSystem(target))
   }
@@ -378,39 +388,49 @@ export class PropertiesPanel {
   }
 
   /**
-   * **声明给成员的属性**（只有页/标签有这一段）。
+   * **标签属性**（标签）／**字段声明**（页）：只有页/标签有这一段。
    *
    * 判据：声明是「我的成员/子块会有这一格」，不是「给这一块设一个值」——
    * 所以这一段只有清单和解除，没有值控件。值仍旧只在成员块上。
    *
-   * ⚠️ 这一段**自带**自己的添加入口（`＋ 声明属性`）：它写的是 `_fieldDefs`，
-   *    而抬头那个「＋ 属性」写的是 `_ownProps`。两个槽两个入口，
-   *    共用一个入口就必须按块类型猜意图，而标签块恰好两个都需要。
+   * ⚠️ 这一段**自带**自己的添加入口：它写的是 `_fieldDefs`，而「＋ 添加属性」写的是
+   *    `_ownProps`。两个槽两个入口，共用一个入口就必须按块类型猜意图，而标签块恰好两个都需要。
+   *
+   * ⚠️ 这一段**不是一条属性行**（`props-section`，不是 `prop-row`）：视觉上它必须和
+   *    「这一块自己的值」分开，否则用户会把声明当成另一条属性 —— 去重也就跟着混了。
    *
    * ⚠️ 解除声明**不动值**：成员块上已有的值落回「本块自有」，重新声明后自动回来。
    */
   private buildDeclared(target: Block): HTMLElement {
-    const row = document.createElement('div')
-    row.className = 'prop-row prop-declared ui-row'
-    const label = document.createElement('label')
-    label.className = 'prop-label'
-    const name = document.createElement('span')
-    name.className = 'prop-name'
-    name.textContent = t('ui.props.declaredTitle')
-    label.append(name)
-    const hint = document.createElement('span')
-    hint.className = 'prop-source'
-    hint.textContent = t('ui.props.declaredHint')
-    label.append(hint)
+    const isTag = hasList(target, 'tag')
+    const section = document.createElement('section')
+    // `prop-declared` 是既有断言的选择器锚点（`.prop-declared [data-declared-prop-id]`），
+    // `props-declared` 是这一段自己的名字（新的断言与样式用它）
+    section.className = 'prop-declared props-declared props-section'
+    section.dataset.declaredSection = isTag ? 'tag' : 'page'
 
-    const value = document.createElement('span')
-    value.className = 'prop-value props-tag-value'
+    const head = document.createElement('div')
+    head.className = 'props-section-head'
+    const title = document.createElement('span')
+    title.className = 'props-section-title'
+    title.textContent = t(isTag ? 'ui.props.tagPropsTitle' : 'ui.props.pageFieldsTitle')
+    head.appendChild(title)
+    if (isTag) {
+      const hint = document.createElement('span')
+      hint.className = 'props-section-hint'
+      hint.textContent = t('ui.props.tagPropsHint')
+      head.appendChild(hint)
+    }
+    section.appendChild(head)
+
+    const list = document.createElement('div')
+    list.className = 'props-declared-list'
     const defs = this.deps.declaredFields(target)
     if (defs.length === 0) {
       const empty = document.createElement('span')
       empty.className = 'props-empty'
-      empty.textContent = t('ui.props.declaredEmpty')
-      value.appendChild(empty)
+      empty.textContent = t(isTag ? 'ui.props.tagPropsEmpty' : 'ui.props.pageFieldsEmpty')
+      list.appendChild(empty)
     }
     for (const def of defs) {
       const chip = document.createElement('span')
@@ -425,26 +445,28 @@ export class PropertiesPanel {
       del.textContent = '×'
       del.addEventListener('click', () => this.deps.undeclareField(target, def.id))
       chip.append(text, del)
-      value.appendChild(chip)
+      list.appendChild(chip)
     }
+    section.appendChild(list)
 
     /**
-     * 这一段的添加入口。`data-declare-add` 是给断言认「这是声明那一个，不是抬头那个」的。
+     * 这一段的添加入口。`data-declare-add` 是给断言认「这是声明那一个，不是自己的值那一个」的。
+     * 形状与「＋ 添加属性」相同（`.props-add`），但位置在它自己的清单下面。
      */
     const add = document.createElement('button')
     add.type = 'button'
-    add.className = 'props-declare-add ghost'
+    add.className = 'props-add props-declare-add'
     add.dataset.declareAdd = '1'
-    add.textContent = t('ui.props.addDeclaredShort')
-    add.title = t('ui.props.addDeclared')
+    add.textContent = t(isTag ? 'ui.props.addTagProp' : 'ui.props.addPageField')
+    add.title = t(isTag ? 'ui.props.addTagPropTitle' : 'ui.props.addPageFieldTitle')
     add.addEventListener('click', () => {
       this.formOpen = this.formOpen === 'declared' ? null : 'declared'
       this.render()
     })
-    value.appendChild(add)
+    section.appendChild(add)
 
-    row.append(label, value)
-    return row
+    if (this.formOpen === 'declared') section.appendChild(this.buildDeclareForm(target))
+    return section
   }
 
   /**
@@ -595,7 +617,7 @@ export class PropertiesPanel {
   /**
    * **添加「这一块自己的」属性**：选已有定义（默认复用）或新建一个。
    *
-   * ⚠️ 这个表单只管一件事：往 `_ownProps` 里加一条。**声明给成员**有它自己的入口
+   * ⚠️ 这个表单只管一件事：往 `_ownProps` 里加一条。**标签属性／字段声明**有它自己的入口
    *    （`buildDeclareForm`），因为那是写另一个槽（`_fieldDefs`）、长在另一段下面。
    *    曾经这两件事共用一个表单，靠「这个块有没有 page/tag 露面」猜用户要哪个 ——
    *    于是标签块永远加不了自己的属性（真踩过）。
@@ -606,6 +628,7 @@ export class PropertiesPanel {
    */
   private buildForm(target: Block): HTMLElement {
     return this.buildAddForm(target, {
+      slot: 'own',
       className: 'props-form props-form--own',
       pick: t('ui.props.pick'),
       use: t('ui.props.use'),
@@ -615,15 +638,17 @@ export class PropertiesPanel {
   }
 
   /**
-   * **添加「声明给成员」的属性**（只有页/标签有这个入口）。
+   * **添加标签属性 / 字段声明**（只有页/标签有这个入口）。
    *
-   * 与 `buildForm` 的差别只有「挂到哪个槽」和文案，形状完全共用一份 ——
+   * 与 `buildForm` 的差别是「挂到哪个槽」、`slot` 的去重口径和文案；形状完全共用一份 ——
    * 两处各写一份表单迟早会长出两种键盘行为（Enter 提交 / Esc 取消 / 新建哨兵）。
    */
   private buildDeclareForm(target: Block): HTMLElement {
+    const isTag = hasList(target, 'tag')
     return this.buildAddForm(target, {
+      slot: 'declared',
       className: 'props-form props-form--declared',
-      pick: t('ui.props.pickDeclared'),
+      pick: t(isTag ? 'ui.props.pickTagProp' : 'ui.props.pickPageField'),
       use: t('ui.props.useDeclared'),
       onUse: (propId) => this.deps.declareProp(target, propId),
       onCreate: (label, kind) => this.deps.createDeclaredDef(target, label, kind),
@@ -633,13 +658,15 @@ export class PropertiesPanel {
   /**
    * 两个添加入口共用的表单形状。
    *
-   * 差异只有三处（外层类名 / 两条按钮文案 / 两个回调），所以收成一份：
+   * 差异只有四处（槽 / 外层类名 / 两条按钮文案 / 两个回调），所以收成一份：
    * 「选已有 → 用这个」「新建 → 名字＋类型」这两个形态是同一个交互，
    * 分两份写就会出现「一个表单 Enter 能用、另一个不能」。
    */
   private buildAddForm(
     target: Block,
     opts: {
+      /** 这个表单写哪个槽：own ＝ `_ownProps`，declared ＝ `_fieldDefs` */
+      slot: 'own' | 'declared'
       className: string
       pick: string
       use: string
@@ -661,27 +688,41 @@ export class PropertiesPanel {
     placeholder.textContent = opts.pick
     pick.appendChild(placeholder)
     /**
-     * **「已有」＝ 这一块已经有这条属性**，而它的入口不一定在这个面板：
-     * 标签声明的、块上已有值的都算；页/标签自己**声明过**的也算 ——
-     * 否则选它只会再声明一次（`declareField` 幂等），点了像没反应。
+     * **每个表单只按自己写的那个槽去重，两个槽互不占位。**
      *
-     * 这些项**留在列表里但不可选**，而不是从列表里删掉：
-     * 删掉之后，一个只有两三条定义的小库会得到空下拉 ——
+     *   · `own` 写 `_ownProps`：已经在本块的行里（`fieldRows`，含标签声明来的行）就不可再加；
+     *   · `declared` 写 `_fieldDefs`：只有已经声明过才不可再加。
+     *
+     * 所以：
+     *   · 标签把 P 声明给成员后，标签自己**仍可以**有一条 P 的值（声明不占值槽）；
+     *   · 本块已经有 P 的值/行，也**仍可以**把 P 声明给成员（值不让声明失效）。
+     *
+     * 曾经两个表单共用一套 `used = rows ∪ declared`：两个方向互相挡住，用户报的就是这个。
+     * 这些项**留在列表里但不可选**，而不是从列表里删掉：小库的下拉会变空，
      * 用户分不清「库里没有这条属性」与「本块已经有了」。
      */
     const defs = this.deps.defs()
-    const used = new Set(this.deps.rows(target).map((r) => r.propId))
+    const rows = new Set(this.deps.rows(target).map((r) => r.propId))
     const declared = hasList(target, 'page') || hasList(target, 'tag') ? new Set(declaredFieldIds(target)) : new Set<string>()
     for (const def of defs) {
-      const mark = used.has(def.id)
-        ? t('ui.props.alreadyOn')
-        : declared.has(def.id)
-          ? t('ui.props.declaredOn')
-          : ''
+      let mark = ''
+      let disabled = false
+      if (opts.slot === 'own') {
+        if (rows.has(def.id)) {
+          mark = t('ui.props.alreadyOn')
+          disabled = true
+        } else if (declared.has(def.id)) {
+          // 已经声明给成员，但自己的值槽还空着：这一条**可选中**（只是标出来由）
+          mark = t(hasList(target, 'tag') ? 'ui.props.isTagProp' : 'ui.props.isFieldDecl')
+        }
+      } else if (declared.has(def.id)) {
+        mark = t('ui.props.declaredOn')
+        disabled = true
+      }
       const o = document.createElement('option')
       o.value = def.id
       o.textContent = `${plainText(def.content).trim() || def.id} · ${t(`ui.props.kind.${propKindOf(def)}`)}${mark ? `（${mark}）` : ''}`
-      o.disabled = mark !== ''
+      o.disabled = disabled
       pick.appendChild(o)
     }
     const newOption = document.createElement('option')

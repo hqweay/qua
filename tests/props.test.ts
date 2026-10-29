@@ -16,6 +16,7 @@ import { plainText, textRuns } from '../src/core/runs.ts'
 import {
   cleanableValues,
   declareField,
+  declareOwnProp,
   declaredFieldIds,
   declaredFields,
   ensureTag,
@@ -29,6 +30,7 @@ import {
   mkBlock,
   mkPropDef,
   OWN_PROPS_PROP,
+  ownPropIds,
   mkTagBlock,
   TASK_STATUS_PROP_ID,
   todoOf,
@@ -78,6 +80,21 @@ test('只有页/标签能声明字段（D4）；普通块只能有值', () => {
   assert.equal(declareField(plain, def.id), false)
   const page: Block = { id: 'pg', text: '页', children: [], props: { _aliases: ['页'], _lists: ['page'] } }
   assert.equal(declareField(page, def.id), true)
+})
+
+test('声明给成员与块自有是两个槽：声明不长自己的行，自己的值不写声明', () => {
+  const def = mkPropDef('状态')
+  const task = mkTagBlock('任务')
+  declareField(task, def.id)
+  const forest = [def, task]
+
+  assert.deepEqual(fieldRows(task, forest), [], '声明是给成员的，标签自己不会凭空长出一行')
+  assert.deepEqual(declaredFieldIds(task), [def.id])
+
+  assert.equal(declareOwnProp(task, def.id), true, '标签自己也可以有这条属性的值槽')
+  assert.deepEqual(ownPropIds(task), [def.id])
+  assert.deepEqual(fieldRows(task, forest).map((r) => r.propId), [def.id], '给自己加完才出现这一行')
+  assert.deepEqual(declaredFieldIds(task), [def.id], '给自己加值不该动声明清单')
 })
 
 test('④ 同一 propId 被两标签声明 ⇒ 只出现一行、来源完整', () => {
