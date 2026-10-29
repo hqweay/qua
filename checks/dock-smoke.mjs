@@ -297,14 +297,11 @@ await check('A18 小卡按列均分、整排右缘与大卡对齐；高度固定
   assert(m.card.top >= m.tiles[0].top + 44, `大卡应换到小卡下一行：${JSON.stringify(m)}`)
   assert(Math.abs(m.card.width - (m.stack.width - m.padL - m.padR)) <= 1, `大卡应跨整行：${JSON.stringify(m)}`)
 
-  /**
-   * **槽拖宽之后仍要铺满**：默认 236 恰好是「4 列」的宽度区间，只测它会漏掉
-   * 「张数少于列数 ⇒ 多一条空轨」那种缝（实测 270 宽时有 5 列、小卡右缘差 53px）。
-   * 判据与默认宽一致：最后一格贴内容区右缘、相邻缝恒等、整排仍是一行。
-   */
-  for (const width of [270, 320]) {
-    const wide = await page.evaluate((width) => {
-      document.getElementById('app').style.setProperty('--dock-left-w', `${width}px`)
+  /** 设槽宽 → 等 ResizeObserver 重算列数 → 量一次几何 */
+  const tileLayout = async (width) => {
+    await page.evaluate((w) => document.getElementById('app').style.setProperty('--dock-left-w', `${w}px`), width)
+    await page.waitForTimeout(150)
+    return page.evaluate(() => {
       const stack = document.getElementById('dock-left-stack')
       const cs = getComputedStyle(stack)
       const sr = stack.getBoundingClientRect()
@@ -314,31 +311,106 @@ await check('A18 小卡按列均分、整排右缘与大卡对齐；高度固定
       })
       return {
         tiles,
-        stackRight: sr.right,
-        padR: parseFloat(cs.paddingRight),
+        cols: Number(cs.getPropertyValue('--dock-tile-cols')) || 0,
         contentLeft: sr.left + parseFloat(cs.paddingLeft),
+        contentRight: sr.right - parseFloat(cs.paddingRight),
       }
-    }, width)
-    await page.waitForTimeout(80)
-    const lastWide = wide.tiles[wide.tiles.length - 1]
-    const wideContentRight = wide.stackRight - wide.padR
-    const wideTops = [...new Set(wide.tiles.map((t) => t.top))]
-    const wideGaps = wide.tiles.slice(1).map((t, i) => +(t.left - wide.tiles[i].right).toFixed(1))
-    assert(wideTops.length === 1, `槽宽 ${width} 时 4 张小卡应排成一行：${JSON.stringify(wideTops)}`)
-    assert(
-      Math.abs(lastWide.right - wideContentRight) <= 1,
-      `槽宽 ${width} 时最后一格小卡也要贴内容区右缘：${JSON.stringify({ lastWide, wideContentRight })}`,
-    )
-    assert(
-      Math.abs(wide.tiles[0].left - wide.contentLeft) <= 0.5,
-      `槽宽 ${width} 时第一格小卡也要贴内容区左缘：${JSON.stringify(wide)}`,
-    )
-    assert(new Set(wideGaps).size === 1, `槽宽 ${width} 时相邻小卡的缝仍要恒等：${JSON.stringify(wideGaps)}`)
+    })
   }
+  const rowsOf = (layout) => {
+    const rows = new Map()
+    for (const t of layout.tiles) rows.set(t.top, [...(rows.get(t.top) ?? []), t])
+    return [...rows.values()]
+  }
+  /** 同一槽里格宽必须一致（换行不拉伸）；满行（除末行外）必须贴右缘；缝必须恒等 */
+  const assertRows = (layout, label, expectRows) => {
+    const rows = rowsOf(layout)
+    if (expectRows !== undefined) assert(rows.length === expectRows, `${label}：应排 ${expectRows} 行，实际 ${rows.length}`)
+    const widths = new Set(layout.tiles.map((t) => t.w))
+    assert(widths.size === 1, `${label}：小卡格宽必须一致（换行不拉伸）：${JSON.stringify([...widths])}`)
+    for (const row of rows.slice(0, -1)) {
+      assert(
+        Math.abs(row[row.length - 1].right - layout.contentRight) <= 1,
+        `${label}：满行应贴内容区右缘：${JSON.stringify({ row, contentRight: layout.contentRight })}`,
+      )
+    }
+    assert(Math.abs(rows[0][0].left - layout.contentLeft) <= 0.5, `${label}：首格应贴内容区左缘`)
+    for (const row of rows) {
+      const gaps = row.slice(1).map((t, i) => +(t.left - row[i].right).toFixed(1))
+      assert(new Set(gaps).size <= 1, `${label}：同一行相邻缝必须恒等：${JSON.stringify(gaps)}`)
+    }
+  }
+
+  /**
+   * **槽拖宽之后仍要铺满**：默认 236 恰好是「4 列」的宽度区间，只测它会漏掉
+   * 「张数少于列数 ⇒ 多一条空轨」那种缝（实测 270 宽时有 5 列、小卡右缘差 53px）。
+   * 列数由装配层算（min(放得下几列, 几张)），所以这里也要等它重算。
+   */
+  for (const width of [270, 320]) {
+    const layout = await tileLayout(width)
+    assert(layout.tiles.length === 4, `槽宽 ${width} 时仍应有 4 张小卡，实际 ${layout.tiles.length}`)
+    assertRows(layout, `槽宽 ${width}`, 1)
+    assert(layout.cols === 4, `槽宽 ${width} 时列数应等于张数：${JSON.stringify({ cols: layout.cols })}`)
+    assert(
+      Math.abs(layout.tiles[layout.tiles.length - 1].right - layout.contentRight) <= 1,
+      `槽宽 ${width} 时最后一格小卡也要贴内容区右缘：${JSON.stringify(layout)}`,
+    )
+  }
+
+  /**
+   * **换行不拉伸**：槽窄到放不下 4 张时，末行只剩一张也不能被拉成整宽动作带
+   * （曾是 flex 均分的毛病：180 宽时第 4 张变成 168px）。
+   */
+  const narrow = await tileLayout(180)
+  const narrowRows = rowsOf(narrow)
+  assert(narrowRows.length === 2, `槽宽 180 时 4 张小卡应换行：${JSON.stringify(narrowRows.length)}`)
+  assertRows(narrow, '槽宽 180', 2)
+  assert(
+    narrow.tiles[narrow.tiles.length - 1].right < narrow.contentRight - 20,
+    `换行后的末行小卡不许被拉宽：${JSON.stringify(narrow)}`,
+  )
+
+  /**
+   * **删到 3 张 / 2 张仍要铺满**——这是「删一张就露缝」的原始现场：
+   * 列数若还按「放得下几列」算（而不是 min(列, 张数)），3 张就会停在 3/4 处。
+   * 走真实路径：点小卡的 ✕（`removeTile` ⇒ prefs ⇒ 重画 ⇒ 列数重算）。
+   */
+  for (const keep of [3, 2]) {
+    await page.evaluate(() => {
+      const tiles = [...document.querySelectorAll('#dock-left-stack > .dock-tile')]
+      tiles[tiles.length - 1].querySelector('.dock-tile-x').click()
+    })
+    await page.waitForTimeout(150)
+    for (const width of [236, 270]) {
+      const layout = await tileLayout(width)
+      assert(layout.tiles.length === keep, `删到 ${keep} 张后应剩 ${keep} 张小卡，实际 ${layout.tiles.length}`)
+      assert(layout.cols === keep, `${keep} 张 @ ${width}：列数应等于张数：${JSON.stringify({ cols: layout.cols })}`)
+      assertRows(layout, `${keep} 张 @ ${width}`, 1)
+      assert(
+        Math.abs(layout.tiles[layout.tiles.length - 1].right - layout.contentRight) <= 1,
+        `${keep} 张 @ ${width}：应铺满整行：${JSON.stringify(layout)}`,
+      )
+    }
+  }
+
+  /** 只剩一张：N 张就是 N 等分——一张也是一整行的一格（不留缝、不封顶） */
+  await page.evaluate(() => {
+    const tiles = [...document.querySelectorAll('#dock-left-stack > .dock-tile')]
+    tiles[tiles.length - 1].querySelector('.dock-tile-x').click()
+  })
+  await page.waitForTimeout(150)
+  const single = await tileLayout(270)
+  assert(single.tiles.length === 1, `应只剩一张小卡，实际 ${single.tiles.length}`)
+  assertRows(single, '单张 @ 270', 1)
+  assert(
+    Math.abs(single.tiles[0].right - single.contentRight) <= 1,
+    `只剩一张也要铺满整行：${JSON.stringify(single)}`,
+  )
+
   await page.evaluate(() => document.getElementById('app').style.removeProperty('--dock-left-w'))
 
   await ctx.close()
-  return `左槽 4 张小卡均分（各 ${m.tiles[0].w}px）、右缘与大卡对齐（${last.right}＝${m.card.right}）；高度 44px；右槽 0 张小卡；槽拖到 270/320 仍铺满`
+  return `左槽 4 张小卡均分（各 ${m.tiles[0].w}px）、右缘与大卡对齐（${last.right}＝${m.card.right}）；高度 44px；右槽 0 张小卡；槽拖到 270/320 仍铺满；180 宽换行不拉伸；删到 3/2 张仍铺满；单张也铺满`
 })
 
 /* ---------------------------------------------------------------- 保底 */

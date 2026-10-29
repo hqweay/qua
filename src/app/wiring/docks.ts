@@ -228,6 +228,7 @@ export function setupDocks(deps: DocksDeps) {
 
   function renderDocks(): void {
     ensureCardDrops()
+    ensureTileCols()
     const { left, right } = deps.getSlots()
     renderSlot('left', left)
     renderSlot('right', right)
@@ -288,6 +289,56 @@ export function setupDocks(deps: DocksDeps) {
       if (card) entries.push({ ...card, size: 'large' })
     }
     renderDockStack(slot.stack, entries, t('ui.dock.empty'), deps.prefs().dock.solo[side])
+    syncTileCols(slot.stack)
+  }
+
+  /**
+   * 小卡那一行分几列 ＝ **min(这一行放得下几列, 实际有几张小卡)**。
+   *
+   * 为什么必须由这一层算（CSS 两条路都不对）：
+   *   · `repeat(auto-fill, …)` 的列数只看可用宽度 ⇒ 张数少于列数时末尾多出一条空轨，
+   *     小卡排到 4/5 处就停、右边留一条缝（槽 270px：5 列 4 张，右缘差 53px）；
+   *   · `flex: 1` 均分不知道换行 ⇒ 换行后的末行只剩一张时会被拉成一整条动作带
+   *     （槽 180px 时 4 张 → 3＋1，第 4 张变成整宽）。
+   *
+   * 只有同时知道「张数」与「宽度」才能既铺满、又不在换行时拉伸——这两件事渲染层都有。
+   * 换行后的末行**保持与上面一行同样的格宽**，右边自然留白：那是一个「换行了的网格」，
+   * 不是「没摆正」。
+   */
+  function syncTileCols(stack: HTMLElement): void {
+    const tiles = stack.querySelectorAll(':scope > .dock-tile').length
+    if (tiles === 0) {
+      stack.style.removeProperty('--dock-tile-cols')
+      return
+    }
+    const cs = getComputedStyle(stack)
+    const inner = stack.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+    const gap = parseFloat(cs.columnGap) || 0
+    const min = parseFloat(cs.getPropertyValue('--ui-tile-min')) || 44
+    const capacity = Math.max(1, Math.floor((inner + gap) / (min + gap)))
+    const next = String(Math.min(capacity, tiles))
+    // 只在真的变了时才写：ResizeObserver 会观察到「行数变化 ⇒ 高度变化」，别自激
+    if (stack.style.getPropertyValue('--dock-tile-cols') !== next) stack.style.setProperty('--dock-tile-cols', next)
+  }
+
+  /**
+   * 槽宽变了（拖手柄／窗口缩放／开合对侧）⇒ 一行能放几列也变了。
+   *
+   * 观察的是**槽自己的宽度**而不是 window：压缩区间里侧槽锁在下限、拖手柄只改这一列，
+   * window 的 resize 监听在这些情况下要么不触发、要么要先自己算一遍谁变了。
+   */
+  let tileColsBound = false
+  function ensureTileCols(): void {
+    if (tileColsBound) return
+    const { left, right } = deps.getSlots()
+    if (!left?.stack || !right?.stack) return
+    tileColsBound = true
+    const ro = new ResizeObserver(() => {
+      syncTileCols(left.stack)
+      syncTileCols(right.stack)
+    })
+    ro.observe(left.stack)
+    ro.observe(right.stack)
   }
 
   /**
