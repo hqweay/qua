@@ -157,6 +157,112 @@ export function sniffImageMime(bytes: Uint8Array): ImageMime | null {
   return null
 }
 
+function be16(b: Uint8Array, o: number): number {
+  return (b[o] << 8) | b[o + 1]
+}
+
+function be32(b: Uint8Array, o: number): number {
+  return ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0
+}
+
+function le16(b: Uint8Array, o: number): number {
+  return b[o] | (b[o + 1] << 8)
+}
+
+function le24(b: Uint8Array, o: number): number {
+  return b[o] | (b[o + 1] << 8) | (b[o + 2] << 16)
+}
+
+/** JPEG 的尺寸在某个 SOF 段里，前面有一串长度可变的段要走过去。 */
+function jpegDims(bytes: Uint8Array): { w: number; h: number } | null {
+  let p = 2
+  while (p + 4 <= bytes.length) {
+    if (bytes[p] !== 0xff) return null
+    const marker = bytes[p + 1]
+    if (marker === 0xff) {
+      p++ // 填充字节
+      continue
+    }
+    // 无载荷的标记：SOI／TEM／RSTn
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      p += 2
+      continue
+    }
+    if (marker === 0xda) return null // 进了扫描数据还没有 SOF：这份字节读不出尺寸
+    const len = be16(bytes, p + 2)
+    if (len < 2) return null
+    // SOF0..SOF15，除了 DHT(C4)／JPG(C8)／DAC(CC)
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      if (p + 9 > bytes.length) return null
+      const h = be16(bytes, p + 5)
+      const w = be16(bytes, p + 7)
+      return w > 0 && h > 0 ? { w, h } : null
+    }
+    p += 2 + len
+  }
+  return null
+}
+
+/**
+ * 从字节头读**显示尺寸**（不解码像素）。
+ *
+ * 正常入库那条路已经解码过一次（`prepareAssetBlob`），尺寸直接来自解码结果，比读头更准
+ * （EXIF 方向已校正）。这里只服务一件事：**外人给的字节没有行**——旧库升级、从别处拷来的
+ * `assets/`、被清过索引的库。有了尺寸，图还没解码完时行高才不塌下去再弹回来。
+ *
+ * 读不出就返回 `null`：尺寸是布局提示，不是入库前提。不认识的容器（AVIF 的 `ispe` 埋在
+ * 任意深度的 box 里）宁可不猜——**一个错的宽高比比没有宽高比更糟**。
+ */
+export function sniffImageDims(bytes: Uint8Array): { w: number; h: number } | null {
+  const mime = sniffImageMime(bytes)
+  if (mime === null) return null
+
+  if (mime === 'image/png') {
+    // 签名 8 ＋ 长度 4 ＋ 'IHDR' 4 ⇒ 宽高各 4 字节大端
+    if (bytes.length < 24 || !has(bytes, 12, 'IHDR')) return null
+    const w = be32(bytes, 16)
+    const h = be32(bytes, 20)
+    return w > 0 && h > 0 ? { w, h } : null
+  }
+
+  if (mime === 'image/gif') {
+    // 逻辑屏幕宽高：各 2 字节小端
+    if (bytes.length < 10) return null
+    const w = le16(bytes, 6)
+    const h = le16(bytes, 8)
+    return w > 0 && h > 0 ? { w, h } : null
+  }
+
+  if (mime === 'image/jpeg') return jpegDims(bytes)
+
+  if (mime === 'image/webp') {
+    // RIFF 头 12 字节之后第一个 chunk 说明用哪种编码，三种的尺寸位置各不相同
+    if (bytes.length >= 30 && has(bytes, 12, 'VP8X')) {
+      return { w: le24(bytes, 24) + 1, h: le24(bytes, 27) + 1 } // 画布尺寸存的是「值 - 1」
+    }
+    if (bytes.length >= 30 && has(bytes, 12, 'VP8 ')) {
+      // 3 字节帧标签 ＋ 起始码 9d 01 2a 之后才是宽高（各 14 位）
+      if (bytes[23] !== 0x9d || bytes[24] !== 0x01 || bytes[25] !== 0x2a) return null
+      const w = le16(bytes, 26) & 0x3fff
+      const h = le16(bytes, 28) & 0x3fff
+      return w > 0 && h > 0 ? { w, h } : null
+    }
+    if (bytes.length >= 25 && has(bytes, 12, 'VP8L')) {
+      // 签名 0x2f 之后：14 位宽 ＋ 14 位高，各减一
+      if (bytes[20] !== 0x2f) return null
+      const b0 = bytes[21]
+      const b1 = bytes[22]
+      const b2 = bytes[23]
+      const b3 = bytes[24]
+      return { w: 1 + (((b1 & 0x3f) << 8) | b0), h: 1 + (((b3 & 0x0f) << 10) | (b2 << 2) | ((b1 & 0xc0) >> 6)) }
+    }
+    return null
+  }
+
+  // AVIF：`ispe` 在 meta→iprp→ipco 里，位置不固定 ⇒ 不猜
+  return null
+}
+
 /**
  * 原始字节的 SHA-256（小写 hex）。
  *

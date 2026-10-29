@@ -35,13 +35,16 @@
  * 导入、修复、旧库迁移三件事是同一个动作：**从目录重建索引**。它与正常路径方向相反
  * （行 → 路径 / 路径 → 行），共享的只有 hash 算法。正常启动**不**扫目录。
  *
+ * 它也是唯一一处「行比字节老」会被修好的地方：旧版把 `w/h` 写在侧车里，`reindex` 当时
+ * 只嗅类型不读尺寸，于是那些行里尺寸是空的。现在它从字节头补回来（只补空格，不覆盖已有值）。
+ *
  * ⚠️ 这个文件在主进程里跑（`node:fs`）；渲染层拿到的仍然是 `AssetStorePort` 的形状，
  * 经 IPC 转发 —— 换实现不改调用方。
  */
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { extOf, sniffImageMime, type AssetMeta } from '../../src/core/assets.ts'
+import { extOf, sniffImageDims, sniffImageMime, type AssetMeta } from '../../src/core/assets.ts'
 import { DB_TABLES } from '../../src/core/library.ts'
 import type { Db } from './sqlite.ts'
 
@@ -51,14 +54,21 @@ export interface AssetStore {
   rows(): AssetMeta[]
   /** 协议处理器用：hash → 文件路径与类型；没有这一行 ⇒ `null` */
   locate(hash: string): { path: string; mime: string } | null
-  /** 从目录重建索引（导入 / 修复 / 旧库迁移） */
-  reindex(): { rows: number; renamed: number }
+  /**
+   * 从目录重建索引（导入 / 修复 / 旧库迁移）。
+   *
+   * `rows` 是新认下的资产，`renamed` 是补了后缀的文件，`filled` 是补回尺寸的行。
+   */
+  reindex(): { rows: number; renamed: number; filled: number }
 }
 
 /** hash 的前两位分桶：一个目录里不会堆几万个文件（Finder 与 readdir 都会变慢） */
 function bucketOf(hash: string): string {
   return hash.slice(0, 2)
 }
+
+/** 一行的列清单：`hydrate` 与「写完重读」共用一份，免得两处各列一遍再漂开 */
+const ASSET_COLS = 'hash, mime, size, w, h, added_at'
 
 function hex(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
@@ -90,9 +100,7 @@ export function createFolderAssetStore(db: Db, assetsDir: string): AssetStore {
 
   const hydrate = (): void => {
     metas.clear()
-    const rows = db
-      .prepare(`select hash, mime, size, w, h, added_at from ${DB_TABLES.assets}`)
-      .all() as unknown as AssetRow[]
+    const rows = db.prepare(`select ${ASSET_COLS} from ${DB_TABLES.assets}`).all() as unknown as AssetRow[]
     for (const r of rows) metas.set(r.hash, rowToMeta(r))
   }
   hydrate()
@@ -101,11 +109,26 @@ export function createFolderAssetStore(db: Db, assetsDir: string): AssetStore {
   const pathOf = (hash: string, mime: string): string =>
     join(assetsDir, bucketOf(hash), `${hash}.${extOf(mime)}`)
 
-  const insert = (m: AssetMeta): void => {
+  /**
+   * 写一行；**已有的格子优先**（第一次入库是权威），只补空格。
+   *
+   * 为什么不是 `do nothing`：行可以比字节老——旧版把尺寸写在侧车里，`reindex` 当时只嗅类型
+   * 不读尺寸，那些行里 `w/h` 是空的。补空格是唯一一个「越跑越对」的方向；反过来覆盖已有值，
+   * 会让一次 reindex 把好数据改坏。
+   */
+  const upsert = (m: AssetMeta): void => {
     db.prepare(
       `insert into ${DB_TABLES.assets} (hash, mime, size, w, h, added_at) values (?, ?, ?, ?, ?, ?)
-       on conflict(hash) do nothing`,
+       on conflict(hash) do update set w = coalesce(w, excluded.w), h = coalesce(h, excluded.h)`,
     ).run(m.hash, m.mime, m.size, m.w ?? null, m.h ?? null, m.createdAt)
+  }
+
+  /** 行是真相，`metas` 只是它的投影 —— 补完空格要重读一次，别让缓存落后一拍。 */
+  const readMeta = (hash: string): AssetMeta | undefined => {
+    const rows = db
+      .prepare(`select ${ASSET_COLS} from ${DB_TABLES.assets} where hash = ?`)
+      .all(hash) as unknown as AssetRow[]
+    return rows.length > 0 ? rowToMeta(rows[0]) : undefined
   }
 
   return {
@@ -130,8 +153,8 @@ export function createFolderAssetStore(db: Db, assetsDir: string): AssetStore {
       }
 
       // ② 行才说话（已有同 hash 的行 ⇒ 保留它的 `added_at`：入库时刻是第一次）
-      insert(meta)
-      const kept = metas.get(hash) ?? meta
+      upsert(meta)
+      const kept = readMeta(hash) ?? meta
       metas.set(hash, kept)
       return kept
     },
@@ -147,9 +170,10 @@ export function createFolderAssetStore(db: Db, assetsDir: string): AssetStore {
     },
 
     reindex() {
-      if (!existsSync(assetsDir)) return { rows: 0, renamed: 0 }
+      if (!existsSync(assetsDir)) return { rows: 0, renamed: 0, filled: 0 }
       let inserted = 0
       let renamed = 0
+      let filled = 0
       for (const bucket of readdirSync(assetsDir)) {
         // 只认两字符的 hex 桶；`未命名文件夹` / `.DS_Store` 这类是外人的东西，不参与
         if (!/^[0-9a-f]{2}$/.test(bucket)) continue
@@ -180,7 +204,13 @@ export function createFolderAssetStore(db: Db, assetsDir: string): AssetStore {
             console.warn(`[assets] skip ${name}: content does not match its name`)
             continue
           }
-          const mime = sniffImageMime(bytes) ?? 'application/octet-stream'
+          const had = metas.get(hash)
+          /**
+           * 类型：**已有行优先**。文件名是行的投影，两处各判一次就会漂开
+           * （行说 `application/octet-stream`、文件被补成 `.png`，`locate` 就指向一个不存在的路径）。
+           * 没有行才从字节嗅。
+           */
+          const mime = had?.mime ?? sniffImageMime(bytes) ?? 'application/octet-stream'
           // 旧版文件名没有后缀：就地补上（这是那次形状变化的唯一一次动作）
           const want = `${hash}.${extOf(mime)}`
           if (name !== want) {
@@ -198,14 +228,15 @@ export function createFolderAssetStore(db: Db, assetsDir: string): AssetStore {
               return Date.now()
             }
           })()
-          if (!metas.has(hash)) {
-            insert({ hash, mime, size: bytes.byteLength, createdAt: mtime })
-            inserted++
-          }
+          // 尺寸从字节头读（不解码）：行里空着的那一格由这里补，已经有了就不动
+          const dims = sniffImageDims(bytes)
+          upsert({ hash, mime, size: bytes.byteLength, ...(dims ?? {}), createdAt: mtime })
+          if (had === undefined) inserted++
+          else if (dims !== null && (had.w === undefined || had.h === undefined)) filled++
         }
       }
       hydrate()
-      return { rows: inserted, renamed }
+      return { rows: inserted, renamed, filled }
     },
   }
 }

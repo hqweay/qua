@@ -149,8 +149,10 @@ function makeSession(id: string, dir: string, db: Db, deviceId: string): RepoSes
    */
   if (assets.rows().length === 0) {
     const rebuilt = assets.reindex()
-    if (rebuilt.rows > 0 || rebuilt.renamed > 0) {
-      console.log(`[assets] reindexed ${rebuilt.rows} asset(s), renamed ${rebuilt.renamed}`)
+    if (rebuilt.rows > 0 || rebuilt.renamed > 0 || rebuilt.filled > 0) {
+      console.log(
+        `[assets] reindexed ${rebuilt.rows} asset(s), renamed ${rebuilt.renamed}, filled ${rebuilt.filled} dims`,
+      )
     }
   }
   return {

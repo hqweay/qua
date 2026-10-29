@@ -9,6 +9,7 @@
  *   ③ **后缀只写不读**：它是 `mime` 的投影，给 Finder／外部工具看；类型只从行里来；
  *   ④ **`reindex()` 是「外人给的字节」的唯一入口**：导入／修复／旧库迁移同一个动作 ——
  *      它会补后缀、会校验「名字与内容一致」（内容寻址的意义就在这里），
+ *      也会把行里空着的尺寸从字节头补回来（只补空格，不覆盖已有值），
  *      正常启动**不**扫目录。
  */
 import { test } from 'node:test'
@@ -37,6 +38,28 @@ process.on('exit', () => {
 })
 
 const bytes = (s: string): Uint8Array => new TextEncoder().encode(s)
+
+/**
+ * 一份最小 PNG 头（96×60）：够嗅类型、够读尺寸，不是能解码的图。
+ *
+ * 用它而不是随手一段文本，是因为尺寸只有字节头能给——`reindex` 那条路不解码。
+ */
+function pngHead(w = 96, h = 60): Uint8Array {
+  const b = new Uint8Array(33)
+  b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
+  b.set([0, 0, 0, 13], 8) // IHDR 的载荷长
+  b.set(new TextEncoder().encode('IHDR'), 12)
+  const be32 = (o: number, v: number): void => {
+    b[o] = (v >>> 24) & 0xff
+    b[o + 1] = (v >>> 16) & 0xff
+    b[o + 2] = (v >>> 8) & 0xff
+    b[o + 3] = v & 0xff
+  }
+  be32(16, w)
+  be32(20, h)
+  b.set([8, 2, 0, 0, 0], 24) // 位深／颜色类型／压缩／滤波／隔行
+  return b
+}
 
 test('put：内容寻址 —— 同一份字节两次入库只有一行、一个文件', async () => {
   const lib = tmpLibrary()
@@ -146,5 +169,30 @@ test('④ reindex：目录里的外人东西（非 hex 桶／杂物）不参与'
   writeFileSync(join(lib.assets, '.DS_Store'), 'junk')
   const store = createFolderAssetStore(lib.db, lib.assets)
   assert.equal(store.reindex().rows, 0)
+  lib.close()
+})
+
+test('④ reindex：行里空着的尺寸从字节头补回（旧库的尺寸原本写在侧车里）', async () => {
+  const lib = tmpLibrary()
+  const store = createFolderAssetStore(lib.db, lib.assets)
+  const meta = await store.put(pngHead(), 'image/png')
+  assert.equal(meta.w, undefined, '入库时没给尺寸 ⇒ 行里就是空的')
+
+  const r = store.reindex()
+  assert.equal(r.filled, 1, '补回一行的尺寸')
+  const [row] = store.rows()
+  assert.deepEqual([row.w, row.h], [96, 60], '尺寸来自字节头，不需要侧车')
+  assert.equal(store.reindex().filled, 0, '已经填满 ⇒ 再跑一次无事可做（幂等）')
+  lib.close()
+})
+
+test('④ reindex：行里已有的尺寸不被字节头覆盖（解码结果比读头更准）', async () => {
+  const lib = tmpLibrary()
+  const store = createFolderAssetStore(lib.db, lib.assets)
+  // 40×20 是「解码后、EXIF 已校正」的尺寸：字节头里的 96×60 是原始像素，方向可能不同
+  await store.put(pngHead(), 'image/png', { w: 40, h: 20 })
+  assert.equal(store.reindex().filled, 0)
+  const [row] = store.rows()
+  assert.deepEqual([row.w, row.h], [40, 20], '补空格，不覆盖——否则一次 reindex 会把好数据改坏')
   lib.close()
 })

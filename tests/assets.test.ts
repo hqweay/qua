@@ -4,6 +4,7 @@
  * 这些断言钉的是「入口能失败」：
  *   · 不信文件名（改后缀骗不过嗅探）；
  *   · 未知类型不静默当图片；
+ *   · 尺寸只从字节来（读头不解码），读不出就是 `null`——不猜一个宽高比；
  *   · hash 由字节决定（同一份字节永远同一个地址）；
  *   · **种子里的 hash 真的是那份字节的 hash**——写错的话默认演示会静默变成 `missing`，
  *     而那种失败看起来像「资产库坏了」，没有任何报错指向真正的原因。
@@ -16,6 +17,7 @@ import {
   MAX_IMAGE_BYTES,
   MAX_IMAGE_PIXELS,
   sha256Hex,
+  sniffImageDims,
   sniffImageMime,
 } from '../src/core/assets.ts'
 import {
@@ -75,6 +77,51 @@ test('sniffImageMime：截断/伪装/未知一律 null，不猜', () => {
   assert.equal(sniffImageMime(new TextEncoder().encode('<svg xmlns=')), null)
   assert.equal(sniffImageMime(new TextEncoder().encode('hello')), null)
   assert.equal(sniffImageMime(bytes(0x00, 0x00, 0x00)), null)
+})
+
+test('sniffImageDims：从字节头读尺寸，不解码（PNG／GIF／JPEG／WebP）', () => {
+  // PNG：签名 8 ＋ 长度 4 ＋ 'IHDR' 4 ⇒ 宽高各 4 字节大端
+  const png = new Uint8Array(24)
+  png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13], 0)
+  png.set(new TextEncoder().encode('IHDR'), 12)
+  png.set([0, 0, 0, 96, 0, 0, 0, 60], 16)
+
+  // GIF：'GIF89a' 之后是逻辑屏幕宽高，各 2 字节小端
+  const gif = new Uint8Array(10)
+  gif.set(new TextEncoder().encode('GIF89a'), 0)
+  gif.set([96, 0, 60, 0], 6)
+
+  // JPEG：APP0 段走完之后是 SOF0，宽高在 SOF 的载荷里
+  const jpeg = bytes(0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x3c, 0x00, 0x60)
+
+  // WebP（无损）：'VP8L' ＋ 签名 0x2f ＋ 14 位宽 ＋ 14 位高（各减一）
+  const webp = new Uint8Array(25)
+  webp.set(new TextEncoder().encode('RIFF'), 0)
+  webp.set(new TextEncoder().encode('WEBP'), 8)
+  webp.set(new TextEncoder().encode('VP8L'), 12)
+  webp.set([0x2f, 0x5f, 0xc0, 0x0e, 0x00], 20)
+
+  assert.deepEqual(sniffImageDims(png), { w: 96, h: 60 })
+  assert.deepEqual(sniffImageDims(gif), { w: 96, h: 60 })
+  assert.deepEqual(sniffImageDims(jpeg), { w: 96, h: 60 })
+  assert.deepEqual(sniffImageDims(webp), { w: 96, h: 60 })
+})
+
+test('sniffImageDims：读不出就 null —— 不猜一个宽高比', () => {
+  // 截断的 PNG 头（没有 IHDR 的宽高）
+  assert.equal(sniffImageDims(bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0)), null)
+  // 进了扫描数据还没遇到 SOF 的 JPEG
+  assert.equal(sniffImageDims(bytes(0xff, 0xd8, 0xff, 0xda, 0x00, 0x02)), null)
+  // AVIF 的 `ispe` 埋在任意深度的 box 里 ⇒ 不猜
+  const avif = new Uint8Array(16)
+  avif.set(new TextEncoder().encode('ftyp'), 4)
+  avif.set(new TextEncoder().encode('avif'), 8)
+  assert.equal(sniffImageDims(avif), null)
+  assert.equal(sniffImageDims(new TextEncoder().encode('hello')), null)
+})
+
+test('sniffImageDims：真样本（种子 PNG）读出它自己的尺寸', () => {
+  assert.deepEqual(sniffImageDims(seedAssetBytes()), { w: SEED_ASSET_W, h: SEED_ASSET_H })
 })
 
 test('isSupportedImageMime：v1 allowlist 与上限常量', () => {
