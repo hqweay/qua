@@ -2,8 +2,9 @@
  * 侧槽装配：**槽＝一列卡片**（窗口 ＋ 派生卡），以及它们的三件视图状态。
  *
  * 这一层只做「按 `cards` 顺序取卡、把状态接到卡上、把用户的动作落成 prefs」：
- *   · 卡片内容由 `DockWindows`（窗口）与 `dock-content`（今日/反链）提供；
- *   · 卡壳、收起、单卡、拖拽由 `ui/dock` 提供；
+ *   · 卡片内容由 `DockWindows`（窗口）、`widgetBody`（组件）与 `dock-content`
+ *     （归属树／日历／反链／回收站／检视卡）提供；
+ *   · 卡壳、收起、单卡、关闭、拖拽由 `ui/dock` 提供；
  *   · 这里不认识块的内容，也不碰 DOM 的具体长相。
  *
  * 三个状态轴**正交**（不要互相推导）：
@@ -197,12 +198,18 @@ export function setupDocks(deps: DocksDeps) {
     deps.scheduleBadge()
   }
 
-  function closeWindow(side: 'left' | 'right', blockId: string): void {
+  /**
+   * 关掉**一张卡**：窗口卡、组件卡、派生卡同一条路——只从 `cards` 里摘掉这一次露面。
+   *
+   * 三者的差别只在内容从哪来（块 / 组件 / 宿主现算），「关掉」的语义是同一个：
+   * 这块数据还在库里，只是这一槽不再显示它。所以不叫 `closeWindow`。
+   */
+  function closeCard(side: 'left' | 'right', id: string): void {
     const dock = deps.prefs().dock
-    const i = dock[side].cards.indexOf(blockId)
+    const i = dock[side].cards.indexOf(id)
     if (i < 0) return
     dock[side].cards.splice(i, 1)
-    if (dock.solo[side] === blockId) dock.solo[side] = null
+    if (dock.solo[side] === id) dock.solo[side] = null
     renderDocks()
     deps.scheduleDeviceSave()
     deps.scheduleBadge()
@@ -263,7 +270,7 @@ export function setupDocks(deps: DocksDeps) {
               title: widgetTitle(block),
               body,
               draggable: true,
-              close: { title: t('ui.dock.closeWidget'), onClick: () => closeWindow(side, id) },
+              close: { title: t('ui.dock.closeWidget'), onClick: () => closeCard(side, id) },
             },
             cardStateFor(side, id),
           )
@@ -394,10 +401,18 @@ export function setupDocks(deps: DocksDeps) {
     deps.scheduleBadge()
   }
 
+  /**
+   * 派生卡也能关：**关掉只是从 `cards` 里摘掉这一个露面**，模型一个字节都不动。
+   *
+   * 早先它没有 ✕，理由是「关掉就没有再加回来的入口，是单向陷阱」——那个理由在
+   * 「添加组件」画廊能列派生卡（`addDerived`）之后就不成立了。回程既然存在，
+   * 就该给去程；否则「我不想看归属树」只能靠拖走或换个槽，而那是另一件事。
+   */
   function derivedCard(side: 'left' | 'right', id: string): DockCardEntry | null {
+    const close = { title: t('ui.dock.closeCard'), onClick: () => closeCard(side, id) }
     if (id === 'inspect') {
       const el = deps.inspectCard()
-      decorateDockCard(el, { id, title: '', body: el }, cardStateFor(side, id))
+      decorateDockCard(el, { id, title: '', body: el, close }, cardStateFor(side, id))
       return { id, el }
     }
     const spec: DockCard | null =
@@ -411,7 +426,7 @@ export function setupDocks(deps: DocksDeps) {
               ? calendarCard({ kb, openDate: (date) => void deps.getRegistry().invoke('core.journal/today', { date }, 'dock') })
               : null
     if (!spec) return null
-    return { id: spec.id, el: buildDockCard(spec, cardStateFor(side, spec.id)) }
+    return { id: spec.id, el: buildDockCard({ ...spec, close }, cardStateFor(side, spec.id)) }
   }
 
   /* ------------------------------------------------------------ 卡片拖拽 */
@@ -537,10 +552,10 @@ export function setupDocks(deps: DocksDeps) {
   }
 
   /**
-   * 把一张**派生卡**加回槽（`calendar`／`belongs`／`backrefs`／`trash`）。
+   * 把一张**派生卡**加回槽（`calendar`／`belongs`／`backrefs`／`trash`／`inspect`）。
    *
-   * 为什么它必须存在：派生卡没有「关闭」按钮（关掉就没有再加回来的入口，
-   * 那是一个单向陷阱）——它们的入口只在「添加组件」画廊里。
+   * 为什么它必须存在：派生卡的 ✕ 只是把卡从 `cards` 里摘掉（与窗口卡同一条路），
+   * 摘掉之后**加回来只有这一处入口**——「添加组件」画廊。没有它，✕ 就是单向陷阱。
    * ⚠️ 与 `addTile` 分开：小卡是 `cmd:<命令>`，派生卡是固定 id，两者落进 `cards`
    *    的形状不同，混成一个会让「加回来的是哪一种」取决于字符串前缀。
    */
@@ -560,7 +575,7 @@ export function setupDocks(deps: DocksDeps) {
   return {
     renderDocks,
     openWindow,
-    closeWindow,
+    closeCard,
     addTile,
     addDerived,
     /** 卡片状态/标题给窗口管理器用（窗口卡由它自己建） */

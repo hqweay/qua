@@ -76,6 +76,8 @@ export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut' | 'ins
      */
     inspectBlock: (id) => {
       open(id)
+      // 承诺是「看属性」：属性卡若被关掉，只开个槽就是假成功（开了个空列）
+      d.ensureDockCard('right', 'inspect')
       d.openDock('right')
     },
   }

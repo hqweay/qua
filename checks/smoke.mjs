@@ -10604,8 +10604,6 @@ await check('T135 挂载区与正文**同一套手势**：点引用跳、块标�
 })
 
 /** 判红的是「不在已知失败表里的失败」；已知失败逐条打印，不计入退出码 */
-const known = results.filter((r) => !r.ok && r.known)
-const fail = results.filter((r) => !r.ok && !r.known).length
 
 /* ---------------------------------------------------------------- T136 */
 
@@ -11745,6 +11743,76 @@ await check('T149 覆盖层：关掉之后按键仍落在编辑器；浮层开�
   await ctx.close()
   return `关掉面板后打字进得去（${before.slice(0, 8)}→${after.slice(0, 8)}）；视口 1440→760 后浮层仍在内；锚点消失即关`
 })
+
+await check('T150 派生卡也能关：关掉即离开槽（模型不动）；「添加组件」能加回来；「看属性」会把它放回来', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const dockState = () =>
+    page.evaluate(() => ({
+      left: window.__qua.snapshot().dock.left.cards,
+      right: window.__qua.snapshot().dock.right.cards,
+      belongs: Boolean(document.querySelector('#dock-left .dock-card[data-card-id="belongs"]')),
+      inspect: Boolean(document.querySelector('#dock-right .dock-card[data-card-id="inspect"]')),
+      blocks: window.__qua.allBlocks().length,
+    }))
+
+  const before = await dockState()
+  assert(before.left.includes('belongs') && before.belongs, `前置：默认左槽有归属卡：${JSON.stringify(before)}`)
+  assert(before.right.includes('inspect') && before.inspect, `前置：默认右槽有检视卡：${JSON.stringify(before)}`)
+
+  // ① 卡头的 ✕（与窗口卡同一颗按钮、同一条路）：只摘 cards，模型一个字节不动
+  await page.locator('#dock-left .dock-card[data-card-id="belongs"] [data-dock-action="close"]').click()
+  await page.waitForTimeout(140)
+  const closed = await dockState()
+  assert(!closed.left.includes('belongs'), `关掉后应离开 cards：${JSON.stringify(closed.left)}`)
+  assert(!closed.belongs, '关掉后 DOM 里也不该有这张卡')
+  assert(closed.blocks === before.blocks, `关掉一张视图卡不该动模型：${before.blocks} → ${closed.blocks}`)
+
+  // ② 回程：「添加组件」画廊里它还在，点了就回来（否则 ✕ 就是单向陷阱）
+  await page.locator('#dock-left .dock-add').click()
+  await page.waitForTimeout(160)
+  const rows = await layerRows(page)
+  assert(
+    rows.some((r) => r.label === '归属'),
+    `画廊里应有归属卡：${JSON.stringify(rows.map((r) => r.label))}`,
+  )
+  // 行是 `mousedown` 触发的（与命令面板同一条选择路径），所以用真鼠标点
+  const at = rows.findIndex((r) => r.label === '归属')
+  await page.locator(`.layer-item[data-index="${at}"]`).click()
+  await page.waitForTimeout(160)
+  const back = await dockState()
+  assert(back.left.includes('belongs') && back.belongs, `加回来应重新出现在槽里：${JSON.stringify(back.left)}`)
+  assert(back.blocks === before.blocks, '加回来也不该动模型')
+
+  // ③ 检视卡（唯一的「常驻节点」派生卡）：关掉再走「看属性」回来 —— 命令承诺的是内容，不是空槽
+  await page.locator('#dock-right .dock-card[data-card-id="inspect"] [data-dock-action="close"]').click()
+  await page.waitForTimeout(140)
+  const noInspect = await dockState()
+  assert(!noInspect.right.includes('inspect') && !noInspect.inspect, `检视卡应能关掉：${JSON.stringify(noInspect.right)}`)
+  const activeId = await page.evaluate(() => window.__qua.snapshot().activeId)
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), activeId)
+  await page.waitForTimeout(200)
+  const viaCmd = await page.evaluate(() => ({
+    cards: window.__qua.snapshot().dock.right.cards,
+    present: Boolean(document.querySelector('#dock-right .dock-card[data-card-id="inspect"]')),
+    hidden: document.getElementById('inspect-card')?.hidden === true,
+    title: document.querySelector('#dock-right .dock-card[data-card-id="inspect"] .dock-card-title')?.textContent ?? '',
+  }))
+  assert(viaCmd.cards.includes('inspect') && viaCmd.present, `「看属性」应把检视卡放回来：${JSON.stringify(viaCmd)}`)
+  assert(!viaCmd.hidden, `放回来的检视卡该有内容（当前块有属性行）：${JSON.stringify(viaCmd)}`)
+
+  await ctx.close()
+  return `归属卡关掉→画廊加回来（模型 0 变化）；检视卡关掉→「看属性」自动放回（${viaCmd.title || '当前块'}）`
+})
+
+/**
+ * **判定放在所有用例之后**：写在这里之前时，后面的用例（T136 起）即使红了也不会进
+ * `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。
+ */
+const known = results.filter((r) => !r.ok && r.known)
+const fail = results.filter((r) => !r.ok && !r.known).length
 
 /**
  * ⚠️ **报告先写，再关浏览器。** 反过来的话，机器被压死那一刻 Chrome 先死，

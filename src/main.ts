@@ -307,7 +307,7 @@ function uiCtx(): CtxKeys {
 
 /* ------------------------------------------------------------ 槽内容 */
 
-const { renderDocks, openWindow, closeWindow, addTile, addDerived, cardStateFor, windowLabel, setWindows, widgetDeps: dockWidgetDeps } = setupDocks({
+const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, windowLabel, setWindows, widgetDeps: dockWidgetDeps } = setupDocks({
   kb,
   prefs,
   applyChrome: () => applyChrome(),
@@ -771,6 +771,8 @@ const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEdit
   getRegistry: () => registry,
   getChrome: () => chrome,
   prefs: () => prefs(),
+  // 「看属性」承诺的是内容而不是一列空槽：卡被关掉之后由这一条放回来
+  ensureDockCard: (side, id) => addDerived(side, id),
 })
 /* ------------------------------------------------------------ 属性写入 / 摘标签提示 */
 
@@ -1752,6 +1754,7 @@ function showWidgetGallery(side: 'left' | 'right'): void {
   const DERIVED: { id: string; label: string; icon: string }[] = [
     { id: 'calendar', label: t('ui.cal.title'), icon: 'lucide:calendar' },
     { id: 'belongs', label: t('ui.belongs.treeTitle'), icon: 'lucide:list-tree' },
+    { id: 'inspect', label: t('ui.dock.inspect'), icon: 'lucide:sliders-horizontal' },
     { id: 'backrefs', label: t('ui.dock.backRefs'), icon: 'lucide:corner-up-left' },
     { id: 'trash', label: t('ui.dock.trash'), icon: 'lucide:trash-2' },
   ]
@@ -1875,7 +1878,7 @@ const dockWindowsDeps = (side: 'left' | 'right'): ConstructorParameters<typeof D
   write: (fn) => run(fn, ed),
   kb,
   label: windowLabel,
-  onClose: (blockId) => closeWindow(side, blockId),
+  onClose: (blockId) => closeCard(side, blockId),
   /**
    * 窗口编辑器也接**整份** `viewEvents`（与挂载区/查询结果同一条口径）。
    *

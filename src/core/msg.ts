@@ -107,6 +107,8 @@ export const MSG = {
   'ui.dock.unsoloCard': '退出单卡',
   'ui.dock.closeWindow': '关闭这个窗口（块本身不删）',
   'ui.dock.closeWidget': '关闭卡片（组件本身不删）',
+  'ui.dock.closeCard': '关闭这张卡；需要时在「添加组件」里加回来',
+  'ui.dock.inspect': '检视卡',
   'ui.dock.addTile': '添加组件',
   'ui.dock.removeTile': '从槽里移出（命令本身不动）',
   'ui.dock.tileMissing': '这个命令已不可用',

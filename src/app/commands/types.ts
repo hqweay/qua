@@ -118,6 +118,14 @@ export interface PageDeps {
    * 不该动它 —— 关掉侧栏是用户明确表态，导航把它拉开等于不认这个表态。
    */
   openDock: (side: 'left' | 'right') => void
+  /**
+   * 确保某张**派生卡**在某个槽里（已经在就是 no-op；被关掉就放回来）。
+   *
+   * 与 `openDock` 分开：开槽是「看这一列」，放卡是「看这张」。给「看属性」这种
+   * 承诺了**具体内容**的命令用——卡被关掉之后只开槽，会得到一个「打开了一个空列」
+   * 的假成功。
+   */
+  ensureDockCard: (side: 'left' | 'right', id: 'inspect' | 'belongs' | 'backrefs' | 'trash' | 'calendar') => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
   /**
    * 打开一个**目标选择器**：装配层负责把它渲染成菜单。

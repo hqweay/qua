@@ -42,7 +42,7 @@ interface DockSlotPrefs {
 |---|---|---|---|
 | `cmd:<命令名>` | **小卡**：一个命令的快捷方式 | small | 没有 |
 | 32 位块 id | 一个块的一次露面（窗口卡；以后也可以是组件块） | large | 有 |
-| `belongs`／`journal`／`inspect`／`backrefs` | 宿主现算的派生卡 | large | 没有 |
+| `belongs`／`inspect`／`backrefs`／`trash` | 宿主现算的派生卡 | large | 没有 |
 
 `cmd:` 不是块，所以**同一个命令可以同时出现在左右两槽**；块 id 仍然全局最多一张窗口
 （同一个块不会在两边各开一份）。

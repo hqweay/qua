@@ -59,6 +59,8 @@ export type PagesDeps = {
   getChrome: () => Chrome
   /** 槽开关是设备偏好：`openDock` 要先看它，已开就不再触发一次变更 */
   prefs: () => Prefs
+  /** 把某张派生卡放回槽（关掉之后「看属性」还能把它放回来）；由装配层接到 `addDerived` */
+  ensureDockCard: (side: 'left' | 'right', id: 'inspect' | 'belongs' | 'backrefs' | 'trash' | 'calendar') => void
 }
 
 export function setupPages(deps: PagesDeps) {
@@ -293,6 +295,7 @@ export function setupPages(deps: PagesDeps) {
       void deps.getRegistry().invoke(side === 'left' ? 'core.dock/toggle-left' : 'core.dock/toggle-right', {}, 'view')
       deps.scheduleBadge()
     },
+    ensureDockCard: (side, id) => deps.ensureDockCard(side, id),
     toast: (text, kind) => deps.getApp().toast(text, kind),
     openRefPicker: (rows, onPick) =>
       layers.openMenu({
