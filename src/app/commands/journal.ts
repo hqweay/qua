@@ -22,7 +22,7 @@ import type { PageDeps } from './types.ts'
  * 日记（日记流）。
  *
  * 两种形态，共用「先幂等物化，再打开」：
- *   · **日记流**（`journalToday` 不带日期／冷启动／左槽 Daily note 入口）：
+ *   · **日记流**（`journalToday` 不带日期／冷启动／「回到今日」快捷）：
  *     `date` 在顶，更早的「存在的天」按 `_date` 降序往下；
  *   · **单日**（`journalShift`／`journalToday` 指定日期／聚焦这一块）：只装那一天。
  *
@@ -48,7 +48,7 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
   /**
    * 打开**单日**：只装这一天自己（不是日记流）。
    *
-   * ⚠️ 与左槽「Daily note」入口不同：入口是**流**，聚焦/翻日是**这一天**。
+   * ⚠️ 与「回到今日」快捷不同：快捷是**流**，聚焦/翻日是**这一天**。
    *    两者都落在同一个 journal id 上，但装的根数量不同 —— 形态由调用方决定。
    */
   const openBlock = (id: string): void => {

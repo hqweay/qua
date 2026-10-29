@@ -72,7 +72,7 @@ export interface PageDeps {
    * 换「当前对象」。
    *
    * `view.feed` 说的是**这次要装的形态**（日记流入口 / 单块），不是数据属性：
-   * 同一个 journal id 既可以从左槽以「今日日记流」打开，也可以从块标以「只看这一天」聚焦。
+   * 同一个 journal id 既可以从「回到今日」以「今日日记流」打开，也可以从块标以「只看这一天」聚焦。
    * 历史回放要记住的是「当时是哪一种」，所以它得跟着落点一起入栈。
    */
   setActiveId: (id: string, view?: { feed?: boolean }) => void

@@ -38,7 +38,6 @@ function assertDefaults(p: Prefs): void {
         // 日历卡：默认就在左槽（它是「去某一天」的入口，与上面四颗快捷同一档）
         'calendar',
         'belongs',
-        'journal',
       ],
     },
     right: { open: true, width: null, cards: ['inspect', 'backrefs', 'trash'] },
@@ -119,13 +118,13 @@ test('device: 旧设备状态的 `pins` 只在 `cards` 缺失时并入一次（�
     payload: JSON.stringify({
       prefs: {
         dock: {
-          left: { open: true, pins: ['a', 'b'], cards: ['belongs', 'journal', 'a'] },
+          left: { open: true, pins: ['a', 'b'], cards: ['belongs', 'calendar', 'a'] },
         },
       },
     }),
     savedAt: 1,
   })
-  assert.deepEqual((await store(next).load()).prefs.dock.left.cards, ['belongs', 'journal', 'a'])
+  assert.deepEqual((await store(next).load()).prefs.dock.left.cards, ['belongs', 'calendar', 'a'])
 })
 
 test('device: 一个 id 不留在两个槽（左先到先得）；solo 指向不在本槽的 id ⇒ 清空', async () => {

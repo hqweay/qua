@@ -44,7 +44,7 @@ export interface DockSlotPrefs {
    *
    * 三种 id 混在同一个列表里：
    *   · 块 id（32 位 hex）＝ 一个块的一次露面（窗口卡；以后也可以是组件块）；
-   *   · 派生卡 id（`belongs`／`journal`／`inspect`／`backrefs`／`trash`／`calendar`）＝ 宿主现算的视图卡；
+   *   · 派生卡 id（`belongs`／`inspect`／`backrefs`／`trash`／`calendar`）＝ 宿主现算的视图卡；
    *   · `cmd:<命令名>` ＝ 一个**小卡**：没有块，点击执行这条命令。
    *
    * 它只是**视图状态**：块仍然只有森林里那一份，这里存的是「看哪几个、怎么排」。
@@ -76,7 +76,7 @@ export interface DockPrefs {
  * 默认槽状态：**左右都开**。
  *
  * 判据（32 「不加空侧栏」的准确读法）：反对的是**空侧栏**，不是侧栏本身。
- * 左槽默认「四个快捷在上、归属树与今日在下」；右槽默认「检视卡在上、反链在下」。
+ * 左槽默认「四个快捷在上、日历与归属树在下」；右槽默认「检视卡在上、反链在下」。
  * 宽度 `null` ⇒ 用 token 的默认值（`--ui-dock-w-left`／`--ui-dock-w-right`）。
  */
 export const DEFAULT_DOCK: DockPrefs = {
@@ -90,7 +90,6 @@ export const DEFAULT_DOCK: DockPrefs = {
       'cmd:core.journal/prev',
       'calendar',
       'belongs',
-      'journal',
     ],
   },
   right: { open: true, width: null, cards: ['inspect', 'backrefs', 'trash'] },

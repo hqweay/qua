@@ -1752,7 +1752,6 @@ function showWidgetGallery(side: 'left' | 'right'): void {
   const DERIVED: { id: string; label: string; icon: string }[] = [
     { id: 'calendar', label: t('ui.cal.title'), icon: 'lucide:calendar' },
     { id: 'belongs', label: t('ui.belongs.treeTitle'), icon: 'lucide:list-tree' },
-    { id: 'journal', label: t('ui.dock.today'), icon: 'lucide:newspaper' },
     { id: 'backrefs', label: t('ui.dock.backRefs'), icon: 'lucide:corner-up-left' },
     { id: 'trash', label: t('ui.dock.trash'), icon: 'lucide:trash-2' },
   ]

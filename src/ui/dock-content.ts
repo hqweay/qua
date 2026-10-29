@@ -1,14 +1,18 @@
 /**
- * 两个侧槽的**派生卡**：左槽＝今日，右槽＝反链。
+ * 两个侧槽的**派生卡**：归属树／反链／回收站。
  *
  * 这里只产「一张卡的内容」，不负责排槽、不负责卡片的头/折叠/单卡——
- * 那些是 `ui/dock.ts` 的事。原先这两个函数各自排一整槽，导致槽的顺序只能写死在
+ * 那些是 `ui/dock.ts` 的事。原先这些函数各自排一整槽，导致槽的顺序只能写死在
  * 两个函数里；拆成「产卡」之后，装配层才能按 `cards` 列表把窗口与派生卡混排。
  *
  * ⚠️ 这里**不认 `ws`／`ed`／`registry`**，只认下面这个 `DockContentDeps`。
  * ⚠️ 渲染一律走 `renderBlock`：槽只排一列，块由类型决定长相（角色只叠 chrome）。
+ *
+ * 没有「我选的一组块」这种卡：那个概念（用户自己命名的分组）还没有载体。曾用「普通块 ＋
+ * 一个专用角色 ＋ 内部一列块 id」冒充它 —— 但冒充出来的东西会被读成产品概念，还白占一个
+ * 角色值；等真概念从模型里长出来时再进槽。
  */
-import { displayTextOf, todayISO, type Block } from '../core/index.ts'
+import { displayTextOf, type Block } from '../core/index.ts'
 import { textRuns } from '../core/runs.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
@@ -17,7 +21,7 @@ import type { DockCard } from './dock.ts'
 import { cardList, cardNote, emptyCardList } from './card-parts.ts'
 
 export interface DockContentDeps {
-  /** 读门面：今日块、反链源根都按 id／按名取数 */
+  /** 读门面：反链源根、回收站项都按 id 取数 */
   kb: KbClient
   activeId: () => string
   /** 打开某个根（页/天/被 zoom 的根；反链项给的是来源根 id）——中心槽 */
@@ -43,23 +47,8 @@ function ctx(deps: DockContentDeps): BlockRenderCtx {
 }
 
 /**
- * 左槽：**今日**（journal 块）。
- *
- * ⚠️ 这里没有「我选的一组块」这种卡片：那个概念（用户自己命名的分组）还没有载体。
- *    曾用「普通块 ＋ 一个专用角色 ＋ 内部一列块 id」冒充它 —— 但冒充出来的东西会被读成
- *    产品概念，还白占一个角色值；等真概念从模型里长出来时再进左槽。
+ * 右槽：反链卡（结果总是存在，空时给一句空文案）
  */
-export function todayCard(deps: DockContentDeps): DockCard | null {
-  // Daily note：在库里找今天的 journal 块（冷启动时它一定已经物化，见 seed／装配层）
-  const today = deps.kb.journalDay(todayISO())
-  if (!today) return null
-  const body = cardList()
-  body.id = 'journal-today'
-  body.appendChild(renderBlock(today, ctx(deps)))
-  return { id: 'journal', title: t('ui.dock.today'), body }
-}
-
-/** 右槽：反链卡（结果总是存在，空时给一句空文案） */
 export function backrefsCard(deps: DockContentDeps): DockCard {
   const target = deps.activeId()
   const sources = deps.kb.backlinksOf(target)

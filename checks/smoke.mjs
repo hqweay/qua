@@ -9722,11 +9722,11 @@ await check('T119 单卡：只留这一张；目标不可见时自动失效；�
   const leftSolo = await page.evaluate(() => ({
     stack: document.querySelector('#dock-left .dock-stack')?.dataset.solo ?? '',
     card: document.querySelector('#dock-left .dock-card[data-solo-card="1"]')?.dataset.cardId ?? '',
-    journal: getComputedStyle(document.querySelector('#dock-left .dock-card[data-card-id="journal"]')).display,
+    other: getComputedStyle(document.querySelector('#dock-left .dock-card[data-card-id="calendar"]')).display,
     pref: window.__qua.snapshot().dock.solo.left,
   }))
   assert(leftSolo.stack === '1' && leftSolo.card === 'belongs', `单卡应只标归属：${JSON.stringify(leftSolo)}`)
-  assert(leftSolo.journal === 'none', `单卡应隐藏其它卡：${JSON.stringify(leftSolo)}`)
+  assert(leftSolo.other === 'none', `单卡应隐藏其它卡：${JSON.stringify(leftSolo)}`)
   assert(leftSolo.pref === 'belongs', `单卡应落 prefs：${JSON.stringify(leftSolo)}`)
 
   // 检视卡有一张；先单卡它，再切到「今日」让主体消失 ⇒ 单卡自动失效、其它卡照常显示
@@ -9785,15 +9785,15 @@ await check('T120 卡片拖拽：槽内排序、跨槽移动、一个块只留�
   const order = moved.cards.right.cards.filter((id) => id === ids.a || id === ids.b)
   assert(JSON.stringify(order) === JSON.stringify([ids.b, ids.a]), `槽内顺序应是 b,a：${JSON.stringify(order)}`)
 
-  // 跨槽：把 b 拖到左槽（落在今日卡上半）
-  const across = await dragCard(page, { from: 'right', to: 'left', id: ids.b, before: 'journal' })
+  // 跨槽：把 b 拖到左槽（落在日历卡上半）
+  const across = await dragCard(page, { from: 'right', to: 'left', id: ids.b, before: 'calendar' })
   assert(across, '跨槽拖拽应派发')
   const acrossCards = across.cards
   assert(!acrossCards.right.cards.includes(ids.b), `跨槽后右槽不该还有 b：${JSON.stringify(acrossCards.right.cards)}`)
   assert(acrossCards.left.cards.includes(ids.b), `跨槽后左槽应有 b：${JSON.stringify(acrossCards.left.cards)}`)
   const leftIdx = acrossCards.left.cards.indexOf(ids.b)
-  const journalIdx = acrossCards.left.cards.indexOf('journal')
-  assert(leftIdx >= 0 && leftIdx < journalIdx, `b 应落在今日之前：${JSON.stringify(acrossCards.left.cards)}`)
+  const calendarIdx = acrossCards.left.cards.indexOf('calendar')
+  assert(leftIdx >= 0 && leftIdx < calendarIdx, `b 应落在日历之前：${JSON.stringify(acrossCards.left.cards)}`)
   const alive = await page.evaluate((id) => Boolean(document.querySelector(`#dock-left .dock-card[data-window="1"][data-card-id="${id}"] .dock-window-editor .blk`)), ids.b)
   assert(alive, '跨槽后窗口编辑器应跟着走')
 
@@ -9819,7 +9819,7 @@ await check('T120 卡片拖拽：槽内排序、跨槽移动、一个块只留�
   assert(backLeft.text.length > 0, `拖回后窗口正文应可读：${JSON.stringify(backLeft)}`)
 
   // 派生卡走同一个 moveCard：检视卡从右槽拖到左槽，再拖回去
-  const inspectLeft = await dragCard(page, { from: 'right', to: 'left', id: 'inspect', before: 'journal' })
+  const inspectLeft = await dragCard(page, { from: 'right', to: 'left', id: 'inspect', before: 'calendar' })
   assert(inspectLeft, '派生卡拖拽应派发')
   assert(inspectLeft.cards.left.cards.includes('inspect'), `检视卡应移入左槽：${JSON.stringify(inspectLeft.cards.left.cards)}`)
   assert(!inspectLeft.cards.right.cards.includes('inspect'), `右槽不该还有检视卡：${JSON.stringify(inspectLeft.cards.right.cards)}`)
@@ -9832,7 +9832,7 @@ await check('T120 卡片拖拽：槽内排序、跨槽移动、一个块只留�
   assert(inspectBack, '检视卡拖回右槽应派发')
   assert(inspectBack.cards.right.cards.includes('inspect'), `检视卡应回右槽：${JSON.stringify(inspectBack.cards.right.cards)}`)
   await ctx.close()
-  return `槽内 b 到 a 前；跨槽 b→左（今日前）；Shift+点移回右且只有一张；再拖回左仍可读；检视卡右→左→右`
+  return `槽内 b 到 a 前；跨槽 b→左（日历前）；Shift+点移回右且只有一张；再拖回左仍可读；检视卡右→左→右`
 })
 
 await check('T121 右槽反链卡的行走同一条 Shift：行 = 源页，开窗口；中心不动', async () => {

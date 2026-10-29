@@ -297,7 +297,6 @@ export const MSG = {
   'ui.query.noSpec': '这个查询还没有条件',
   'ui.query.empty': '没有匹配的块',
   'ui.dock.resize': '拖动调整宽度；双击恢复默认',
-  'ui.dock.today': 'Daily note',
   'ui.dock.backRefs': '反链',
   'ui.dock.noBackRefs': '还没有块指向这里',
   'ui.dock.trash': '回收站',

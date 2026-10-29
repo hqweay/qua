@@ -33,7 +33,7 @@ import {
   type DockSlotEls,
   type DockTile,
 } from '../../ui/dock.ts'
-import { backrefsCard, todayCard, trashCard, type DockContentDeps } from '../../ui/dock-content.ts'
+import { backrefsCard, trashCard, type DockContentDeps } from '../../ui/dock-content.ts'
 import { calendarCard } from '../../ui/calendar-card.ts'
 import { widgetBody, widgetTitle, type WidgetDeps } from '../../ui/dock-widgets.ts'
 import { BelongsTree } from '../../ui/belongs-tree.ts'
@@ -352,15 +352,13 @@ export function setupDocks(deps: DocksDeps) {
     const spec: DockCard | null =
       id === 'belongs'
         ? belongsTree.card()
-        : id === 'journal'
-          ? todayCard(dockDeps)
-          : id === 'backrefs'
-            ? backrefsCard(dockDeps)
-            : id === 'trash'
-              ? trashCard(dockDeps)
-              : id === 'calendar'
-                ? calendarCard({ kb, openDate: (date) => void deps.getRegistry().invoke('core.journal/today', { date }, 'dock') })
-                : null
+        : id === 'backrefs'
+          ? backrefsCard(dockDeps)
+          : id === 'trash'
+            ? trashCard(dockDeps)
+            : id === 'calendar'
+              ? calendarCard({ kb, openDate: (date) => void deps.getRegistry().invoke('core.journal/today', { date }, 'dock') })
+              : null
     if (!spec) return null
     return { id: spec.id, el: buildDockCard(spec, cardStateFor(side, spec.id)) }
   }
@@ -488,7 +486,7 @@ export function setupDocks(deps: DocksDeps) {
   }
 
   /**
-   * 把一张**派生卡**加回槽（`calendar`／`belongs`／`backrefs`／`trash`／`journal`）。
+   * 把一张**派生卡**加回槽（`calendar`／`belongs`／`backrefs`／`trash`）。
    *
    * 为什么它必须存在：派生卡没有「关闭」按钮（关掉就没有再加回来的入口，
    * 那是一个单向陷阱）——它们的入口只在「添加组件」画廊里。
