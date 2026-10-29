@@ -224,8 +224,9 @@
 <span class="type">AssetView</span> <span class="pipe">= {</span> state: 'ready' | 'missing' | 'unavailable', mime?, url?, w?, h? <span class="pipe">}</span>
                                    <span class="cmt">state 是**现算**的：missing ＝ 库里没有这份 hash</span>
                                    <span class="cmt">unavailable ＝ 资产库本身打不开（两种建议不同）</span>
-<span class="type">AssetStorePort</span> <span class="pipe">= {</span> put(blob) · get(hash) · stat(hash) · keys() <span class="pipe">}</span>
-                                   <span class="cmt">v1 ＝ IndexedDB 内容寻址（qua.assets）；将来按库根换文件夹适配器</span>
+<span class="type">AssetStorePort</span> <span class="pipe">= {</span> put(blob) · index() · urlOf(hash) · onAddressChange(fn) <span class="pipe">}</span>
+                                   <span class="cmt">端口给<b>地址</b>不给字节：桌面版＝ qua-asset://&lt;hash&gt;（常量）</span>
+                                   <span class="cmt">浏览器＝实现内部自己建/回收 Blob URL，调用方零生命周期</span>
 
 <span class="cmt">── 实例（obj）不新增类型：props._tags 非空的块就是一条记录 ──</span>
 <span class="type">记录</span> <span class="pipe">=</span> Block <span class="pipe">{</span> props: <span class="pipe">{</span> _tags: [标签 id] <span class="pipe">}</span> <span class="pipe">}</span>
@@ -307,7 +308,7 @@
         <dt>编码在哪</dt><dd>「一个块长成哪几行」只有一份定义（<code>storage/db-rows.ts</code>）；主进程只做<b>通用 SQL</b>（表名/列名白名单，不认识块）。一次编辑只写动过的那几块 ⇒ <b>写成本不随库体量增长</b></dd>
         <dt>qua.workspace（web）</dt><dd>整库（块森林；行内内容与区间都在块上），套一层信封 <code>{ backend, envelope, data }</code>。浏览器没有用户可选目录的同等语义 ⇒ 单窗口单库</dd>
         <dt>qua.device</dt><dd>设备态：主题 / 槽宽 / 钉住清单（<b>不进 KB</b>）</dd>
-        <dt>qua.assets</dt><dd><b>资产库</b>：Electron 走每库 <code>assets/&lt;hash前2&gt;/&lt;hash&gt;</code> ＋ <code>.json</code> 侧车（字节是真相、侧车可重建）；web 仍走 IndexedDB <code>hash → { mime, size, w?, h?, createdAt, bytes }</code>。内容寻址 ⇒ 同字节只存一份</dd>
+        <dt>assets/（Electron）</dt><dd><b>资产库</b>：一图<b>一行一文件</b> —— 元信息在 <code>qua.db</code> 的 <code>assets</code> 表（<code>hash / mime / size / w / h / added_at</code>），字节在 <code>assets/&lt;hash前2&gt;/&lt;hash&gt;.&lt;ext&gt;</code>，<b>没有侧车</b>；渲染层拿到的是<b>地址</b> <code>qua-asset://&lt;hash&gt;</code>（壳的协议处理器直出文件），没有对象 URL 生命周期。web 仍走 IndexedDB <code>hash → { mime, size, w?, h?, createdAt, bytes }</code>。内容寻址 ⇒ 同字节只存一份；后缀只写不读（类型只从行里来）</dd>
       </div>
       <div class="note" style="margin-top:9px">两个存储之间**没有跨库事务**：写图片的顺序固定为
         <b>字节先落 → 引用后落</b>（put 成功才写 run）。崩在中间只留孤儿字节（无害）；
