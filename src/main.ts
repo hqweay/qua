@@ -6,11 +6,12 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf, ensureFirstBlock, ensureTodayJournal,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  journalId, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  journalId, mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { checkExternalUrl, rejectText } from './core/link.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
+import type { Op } from './core/kb/types.ts'
 import { BlockEditor, type ViewEvents } from './view/editor.ts'
 import {
   BINDINGS,
@@ -187,15 +188,47 @@ if (readOnly) console.warn('[boot] read-only prototype state:', boot.status)
  * ⚠️ 这两条**会写模型**（幂等物化），所以要在装配编辑器之前做，且落盘一次。
  */
 const activeStillExists = Boolean(findInForest(ws.blocks, ws.activeId))
-/**
- * **冷启动这一步会改模型**（幂等物化今日的日记块）。它发生在仓库/事务构建之前，
- * 所以产不出 op —— 落盘必须知道这件事：盘上那份**不含**这次补的块，
- * 第一笔落盘要整份写，否则今天那块永远没有行，它下面的字会以「父块不存在」的形状
- * 变成顶层块（下次装载时自己冒出来，而且不报错）。
- */
 const hadToday = Boolean(findInForest(ws.blocks, journalId(todayISO())))
-const todayId = ensureTodayJournal(ws.blocks)
+const todayId = journalId(todayISO())
+
+/**
+ * **共享 block store**（下一层）：块/anchors/undo 只有一份；
+ * 正文、反链、查询视图都是它的投影。多个 `BlockEditor` 读同一份活块。
+ *
+ * ⚠️ 它必须早于冷启动物化：今日块与空天首子块现在走 `kb.tx`（有 op，可重放），
+ *    不再是「事务之外补一块，落盘时整份兜底」。
+ */
+const blocks = new BlockStore(ws.blocks)
+/**
+ * **读入口**：渲染侧的读都该经它取，而不是自己去 `ws.blocks` 里找。
+ *
+ * 装配层先接上读面；换掉「整库在内存」的实现时，改的是这一个构造参数，
+ * 而不是每个调用方。
+ * ⚠️ **换库（`dev` 换演示数据）不换它**：门面只持有 store 这一个实例，
+ *    `reset` 原地换内容 ⇒ 门面读到的永远是当前库（依赖注入才能按值传）。
+ */
+const kb = new MemoryKb(blocks)
+
+/**
+ * **冷启动物化走事务**：今日块、空天首子块都是真实编辑，
+ * 所以它们有 op（`bootOps`）—— 落盘与重放看到的是同一件事。
+ *
+ * 没有这一步时，这两块只在内存里「凭空出现」，第一笔落盘要靠 `ensure` 整块补；
+ * 日志里则完全缺了它们，`replay(log)` 永远对不上装载出来的库。
+ */
+const bootOps: Op[] = []
+const bootFeed = feedDays(ws.blocks, FEED_INITIAL)
+if (!hadToday || bootFeed.some((d) => d.children.length === 0)) {
+  const r = kb.tx((tx) => {
+    if (!hadToday) tx.insert(mkJournalBlock(todayISO()), null, 0)
+    for (const day of feedDays(ws.blocks, FEED_INITIAL)) {
+      if (day.children.length === 0) tx.insert(mkBlock(''), day.id, 0)
+    }
+  })
+  bootOps.push(...r.ops)
+}
 if (boot.status !== 'ok' || !activeStillExists) ws.activeId = todayId
+
 /**
  * **冷启动装哪几段**：日记流＝「今日 ＋ 存在的更早的天」，**装什么按落点的角色分叉**。
  * ⚠️ 原来是「无条件装日记流」：于是任何非 journal 的落点（页 / 稀疏态那种 page 块）都被
@@ -203,42 +236,10 @@ if (boot.status !== 'ok' || !activeStillExists) ws.activeId = todayId
  * ⚠️ 两条路径都只用 `rootsFor` 那条规则：journal ⇒ 每段保证有可编辑子块（否则打得开却打不了字）；
  *    别的块 ⇒ 只要**那一个**。
  * ⚠️ 这里就地找落点、不走 `activeBlock()`：后者是后文才声明的（装配阶段的时序）。
- * ⚠️ 空天的首子块在**这里**就地补：冷启动发生在仓库构建之前，走不了事务，
- *    补的块随冷启动后的整库落盘一起进盘——运行时的装载边界才走事务（`materializeEditableRoots`）。
  */
 const bootActive = findInForest(ws.blocks, ws.activeId) ?? ws.blocks[0]
 const bootDays = bootActive && isJournal(bootActive) ? feedDays(ws.blocks, FEED_INITIAL) : []
-/**
- * **冷启动补了哪些块**：盘上那份可能还没有它们（今日那块、空天的首子块）。
- *
- * 它们没有 op（这一步在事务之外，发生在仓库构建之前）⇒ 第一笔落盘要把它们
- * **当成「模型里有、盘上还没有」的块**写进去。不记这件事的后果不是报错：
- * 那块永远没有行，它下面的字会以「父块不存在」的形状变成顶层块。
- */
-const bootAdded: string[] = []
-if (!hadToday) bootAdded.push(todayId)
-for (const day of bootDays) {
-  if (day.children.length === 0) {
-    ensureFirstBlock(day.children)
-    bootAdded.push(day.children[0]!.id)
-  }
-}
 const bootRoots: Block[] = bootDays.length > 0 ? rootsForMany(bootDays) : bootActive ? rootsFor(bootActive) : []
-
-/**
- * **共享 block store**（下一层）：块/anchors/undo 只有一份；
- * 正文、反链、查询视图都是它的投影。多个 `BlockEditor` 读同一份活块。
- */
-const blocks = new BlockStore(ws.blocks)
-/**
- * **读入口**：渲染侧的读都该经它取，而不是自己去 `ws.blocks` 里找。
- *
- * 装配层先接上读面，写面（`tx`）仍走原来的写路径；这样换掉「整库在内存」
- * 的实现时，改的是这一个构造参数，而不是每个调用方。
- * ⚠️ **换库（`dev` 换演示数据）不换它**：门面只持有 store 这一个实例，
- *    `reset` 原地换内容 ⇒ 门面读到的永远是当前库（依赖注入才能按值传）。
- */
-const kb = new MemoryKb(blocks)
 
 const layers = new Layers(() => isMac())
 let ed: BlockEditor
@@ -356,13 +357,12 @@ const {
   kb,
   readOnly,
   /**
-   * **内存这份与盘上那份是同一份吗**。判据是「读到过、且没在装配期改过它」：
-   * 冷启动会幂等物化「今日」那块（读动作顺手补一块），那一步在事务之外，
-   * 所以盘上那份可能少它 ⇒ 第一笔落盘必须整份写。否则今天那块没有行，
-   * 它下面的字会以「父块不存在」的形状变成顶层块（下次装载时自己冒出来，不报错）。
+   * **内存这份与盘上那份是同一份吗**。判据是「读到过」：
+   * 从盘上读来的 ⇒ 盘上已有内容，第一笔照常增量；否则（种子／旧库作废）⇒
+   * 第一笔要写 genesis（`diff([], 模型)`），行与日志一起从零开始。
    */
   loadedFromDisk: boot.status === 'ok',
-  bootAdded,
+  bootOps,
   errText,
   layers,
   getWs: () => ws,

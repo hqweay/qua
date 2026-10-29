@@ -9,6 +9,7 @@ import type { FoldState } from '../../core/index.ts'
 import type { Op, Tx, Change } from '../../core/kb/types.ts'
 import type { BlockStore } from '../../core/store.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
+import { diff } from '../../core/kb/diff.ts'
 import type { DeviceState, DeviceStore, Workspace, WorkspaceStore } from '../../core/workspace.ts'
 import type { Layers } from '../../ui/layers.ts'
 import type { Chrome } from '../../ui/chrome.ts'
@@ -24,19 +25,21 @@ export type PersistenceDeps = {
   /**
    * **内存里这份模型是从盘上读来的吗**。
    *
-   * 判据只有一个用处：第一次落盘要不要整份写。从盘上读来的 ⇒ 盘上已经有它，
+   * 判据只有一个用处：第一次落盘要不要**写 genesis**。从盘上读来的 ⇒ 盘上已经有它，
    * 第一次落盘照常增量（只写 meta）；否则（种子／旧库作废）⇒ 盘上是空的，
-   * 第一次必须把整份模型写进去，否则「新建的库永远没有内容」。
+   * 第一次必须把整份模型写成 `diff([], seed)` 那一批 op。
+   *
+   * 为什么不是「整份写」：`diff([], seed)` 的每一块都带位置与所有格，
+   * 行写入仍然走增量那条路 —— 种子不是特例，它就是**第一批 op**。
    */
   loadedFromDisk: boolean
   /**
-   * **装配期补出来的块**（冷启动物化今日／空天首子块）。
+   * **冷启动物化补出来的 op**（今日块、空天首子块）。
    *
-   * 这一步在事务之外，产不出 op ⇒ 它们「模型里有、盘上还没有」。
-   * 第一笔落盘要把它们补上（否则那块永远没有行，它的字会以「父块不存在」的形状
-   * 变成顶层块 —— 不报错，下次装载时自己冒出来）。
+   * 这一步现在走 `kb.tx`，所以有 op；`loadedFromDisk` 时把它们并进第一笔落盘。
+   * 没有它们，日志里会缺「今天那块是什么时候、怎么出现的」。
    */
-  bootAdded: readonly string[]
+  bootOps: readonly Op[]
   errText: (e: unknown) => string
   layers: Layers
   /** chrome 在本节之后才装配；保存失败的常驻告警走 getter 现取 */
@@ -107,7 +110,7 @@ export function setupPersistence(deps: PersistenceDeps) {
    * **提交一次**（异步、批次）：经过 `StoragePort`，失败如实返回。
    * 上层只认「这批改动落盘了没有」——不认「整份库写进去了没有」。
    *
-   * `replace` 的判据是**森林有没有被整份换掉**（撤销/重做/换库），不是「这批 op 空不空」：
+   * `replace` 的判据是**森林有没有被整份换掉**（种子／换库），不是「这批 op 空不空」：
    * 换落点也是零 op，而它只需要写 `meta` 两格。混成一件事，每次翻页都要整库重写一遍。
    */
   function persist(ops: readonly Op[], replace = false) {
@@ -115,10 +118,7 @@ export function setupPersistence(deps: PersistenceDeps) {
     syncSections()
     const ws = deps.getWs()
     ws.savedAt = Date.now()
-    // 装配期补的块随第一笔提交一起进库（之后就没有了）
-    const ensure = pendingEnsure
-    pendingEnsure = []
-    return store.commit(ws, ops, { replace, ensure })
+    return store.commit(ws, ops, { replace })
   }
 
   /**
@@ -129,17 +129,12 @@ export function setupPersistence(deps: PersistenceDeps) {
    */
   let savedSwap = blocks.swapCount
   /**
-   * 盘上还没有这份模型 ⇒ 第一次落盘必须整份写（种子／旧库作废／换库之后的第一笔）。
+   * 盘上还没有这份模型 ⇒ 第一笔落盘要写 **genesis**（`diff([], 当前模型)`）。
    *
    * 为什么不靠「零 op」判：零 op 的提交太常见（换落点、只调偏好），
-   * 把它当成整库重写会让「翻一页」变成一次全库写。
+   * 把它当成 genesis 会让「翻一页」变成一次全库写。
    */
-  let needsFullWrite = !deps.loadedFromDisk
-  /**
-   * 还没落盘的「装配期补出来的块」。第一笔提交之后清空：它们已经进库了。
-   * ⚠️ 不是「整份写」：那会把整库重写一遍，而这里只多了几块。
-   */
-  let pendingEnsure = deps.loadedFromDisk ? [...deps.bootAdded] : []
+  let genesis = !deps.loadedFromDisk
 
   /** 编辑期落盘的防抖窗口：连打时只提交最后一批（批次语义见 `StoragePort`） */
   const SAVE_DEBOUNCE_MS = 250
@@ -151,7 +146,7 @@ export function setupPersistence(deps: PersistenceDeps) {
    * 每事务各提交一次就把「批次」变回「逐条写」；攒到这里，落盘的那一下才是**一批**。
    * ⚠️ 非空 ⇒ 库与盘上不再一致，所以**换库前必须清空**（旧库的 op 落到新库就是脏写）。
    */
-  let pendingOps: Op[] = []
+  let pendingOps: Op[] = deps.loadedFromDisk ? [...deps.bootOps] : []
   /**
    * **最近一次事务的 op**（诊断用，只给 dev 面看）。
    *
@@ -167,19 +162,24 @@ export function setupPersistence(deps: PersistenceDeps) {
       window.clearTimeout(saveTimer)
       saveTimer = null
     }
-    // 取出并清空：这批 op 只该落一次。提前清空是**对的**——提交失败时盘上是旧的，
-    // 而那份旧的本来就是「上一次成功提交」；留着它们等下次重提，只会浮在一份已经改过的
-    // 模型上（那时的 op 已经说不清自己相对哪份盘上数据）。
-    const ops = pendingOps
-    pendingOps = []
     /**
-     * **整份替换的判据**只剩两条：盘上还没有这份模型（首次落种子／换库后的第一笔），
-     * 或者**森林被整片换过** —— 后者的来源已经只剩「换库」一条：
+     * **第一笔是 genesis，不是「整份替换」**：`diff([], 当前模型)` 的每一块都带
+     * 位置、出生、时刻与正文；行写入仍走增量那条路，`op_log` 也拿到同一批 op。
+     *
+     * 种子／旧库作废／换库之后的第一次落盘都是它；此后 `genesis` 永假。
+     */
+    const first = genesis
+    genesis = false
+    let ops = pendingOps
+    pendingOps = []
+    if (first) ops = diff([], deps.getWs().blocks)
+    /**
+     * **整份替换的判据**只剩两条：第一笔 genesis（盘上还没有这份模型），
+     * 或者**森林被整片换过** —— 后者只剩「换库」一条：
      * 撤销/重做改走 op 之后，它们与一次普通编辑同路（增量写盘）。
      * 零 op 但森林没换（例如只换了落点）⇒ 照常增量，只写 meta 两格。
      */
-    const replace = needsFullWrite || blocks.swapCount !== savedSwap
-    needsFullWrite = false
+    const replace = first || blocks.swapCount !== savedSwap
     savedSwap = blocks.swapCount
     void persist(ops, replace).then((saved) => {
       if (!saved.ok) warnSaveFailed(saved.error)

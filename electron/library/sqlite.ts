@@ -163,6 +163,20 @@ export const MIGRATIONS: Migration[] = [
       db.exec(CONTENT_DDL)
     },
   },
+  {
+    to: 3,
+    up: (db) => {
+      /**
+       * **日志即状态**：旧 `op_log` 里的 op 不完整（新块的正文/属性/出生时刻
+       * 从来没写进去、`block.delete` 一个词两个意思）⇒ 那份历史不可重放。
+       * 按原型纪律：丢掉旧内容与旧日志，渲染层重新 seed；不写搬数据的迁移。
+       */
+      for (const t of DB_CONTENT_TABLES) db.exec(`drop table if exists ${t}`)
+      db.exec(`drop table if exists ${DB_TABLES.opLog}`)
+      db.exec(DDL)
+      db.prepare(`delete from ${DB_TABLES.meta} where key = ?`).run(META_KEYS.seq)
+    },
+  },
 ]
 
 export type OpenResult =
@@ -471,16 +485,28 @@ export function applyRowWrites(
 }
 
 /**
- * **整份替换**：清空四张内容表再写进去（种子、换库、撤销之后）。
+ * **整份替换**：清空四张内容表再写进去（种子、换库）。
  *
  * 与 `applyRowWrites` 分开是因为「清空」这件事只该发生在这几个入口：
  * 常规编辑走增量，谁都不许顺手清表（那是一次数据事故，而且看起来只是「慢了一点」）。
+ *
+ * ⚠️ **替换 ＝ 新 genesis**：同一个事务里也清掉 `op_log`、把 `meta.seq` 归零，
+ * 再把这一批 op 写进去。日志永远不混两段历史 —— 否则重放会把「换库前」与
+ * 「换库后」的两份事实拼成一份不存在的库。
  */
-export function replaceContentRows(db: Db, writes: readonly RowWrite[]): number {
+export function replaceContentRows(
+  db: Db,
+  writes: readonly RowWrite[],
+  opts: { deviceId?: string; oplog?: readonly { at: number; opJson: string }[] } = {},
+): number {
   let changed = 0
   inTransaction(db, () => {
     for (const t of DB_CONTENT_TABLES) changed += Number(db.prepare(`delete from ${t}`).run().changes)
     changed += applyRowWritesInner(db, writes)
+    db.prepare(`delete from ${DB_TABLES.opLog}`).run()
+    db.prepare(`delete from ${DB_TABLES.meta} where key = ?`).run(META_KEYS.seq)
+    const oplog = opts.oplog ?? []
+    if (oplog.length > 0 && opts.deviceId) appendLocalOpsInner(db, opts.deviceId, oplog)
   })
   return changed
 }

@@ -407,11 +407,32 @@ test('增量写：属性／地址／露面／annos 各自的 op 都落到对的�
 
 test('增量写：软删只写 `deleted` 列（原位软删，不删行）', () => {
   const b = mkBlock('x')
-  const writes = rowWritesFor(ws([b]), [{ e: 'block', id: b.id, op: 'delete', at: 4242 }])
+  const writes = rowWritesFor(ws([b]), [{ e: 'block', id: b.id, op: 'exist', state: 'deleted', at: 4242 }])
   const row = writes.find((w) => w.table === 'Block')
   assert.ok(row)
   assert.equal(row!.op, 'update', '软删是改一列，不是删行（块留在原位）')
   assert.equal(row!.values?.deleted, 4242)
+})
+
+test('增量写：恢复把 `deleted` 清空（块从未离开树，行也原样留着）', () => {
+  const b = mkBlock('x')
+  b.props = { _deletedAt: 4242 }
+  const writes = rowWritesFor(ws([b]), [{ e: 'block', id: b.id, op: 'exist', state: 'present', at: 5000 }])
+  const row = writes.find((w) => w.table === 'Block')
+  assert.equal(row!.op, 'update')
+  assert.equal(row!.values?.deleted, null)
+})
+
+test('增量写：清除（撤销一次插入）**删掉这块的全部行**，不是写成软删', () => {
+  const b = mkBlock('x')
+  const writes = rowWritesFor(ws([b]), [{ e: 'block', id: b.id, op: 'exist', state: 'purged', at: 4242 }])
+  assert.ok(
+    writes.some((w) => w.table === 'Block' && w.op === 'delete' && w.key.id === b.id),
+    '清除要删块行：写成 deleted=at 会让撤销后重开时块从回收站冒出来',
+  )
+  for (const table of ['BlockProperty', 'BlockAlias', 'BlockList'] as const) {
+    assert.ok(writes.some((w) => w.table === table && w.op === 'delete'), `${table} 的子表行也要一起清`)
+  }
 })
 
 test('增量写：改一列走 `update`（匹配不到行要报错，不许静默变成「插入一行空块」）', () => {
@@ -421,37 +442,13 @@ test('增量写：改一列走 `update`（匹配不到行要报错，不许静�
   assert.equal(row!.op, 'update', 'SQLite 的部分列 upsert 会先撞 NOT NULL（实测），所以改一列只能走 update')
 })
 
-test('增量写：op 说到的块在模型里没有 ⇒ 连它的子表行一起清掉（不留幽灵块）', () => {
+test('增量写：模型里的块不在树上 ⇒ 连它的子表行一起清掉（不留幽灵块）', () => {
   const writes = rowWritesFor(ws([mkBlock('x')]), [{ e: 'block', id: 'ghost', op: 'upsert', value: { parent: null, prev: null }, at: 1 }])
   assert.ok(
     writes.some((w) => w.table === 'Block' && w.op === 'delete' && w.key.id === 'ghost'),
     '模型里没有它 ⇒ 盘上也不该有（留着会在下次装载时自己冒出来）',
   )
   assert.equal(writes.filter((w) => w.table === 'Block' && w.op === 'upsert').length, 0, '不许插入一个只有落点的空块')
-})
-
-test('增量写：装配期补出来的块（`ensure`）整块写进去（它们没有 op）', () => {
-  const day = mkBlock('今天')
-  day.children = [mkBlock('第一行')]
-  const writes = rowWritesFor(ws([day]), [], [day.id])
-  const row = writes.find((w) => w.table === 'Block' && w.key.id === day.id)
-  assert.ok(row, '模型里有、盘上还没有的块必须写进去')
-  assert.equal(row!.op, 'upsert', '它是新行（盘上没有）⇒ upsert')
-  assert.equal(row!.values?.parent, null)
-  assert.equal(row!.values?.left, null)
-})
-
-test('增量写：`ensure` 不影响「一次打字只写常数行」', () => {
-  const one = mkBlock('x')
-  const big = mkBlock('大库')
-  big.children = Array.from({ length: 200 }, (_, i) => mkBlock(`c${i}`))
-  const a = rowWritesFor(ws([one]), [
-    { e: 'block', id: one.id, op: 'upsert', value: { content: [], modified: 1 }, at: 1 },
-  ])
-  const b = rowWritesFor(ws([big, one]), [
-    { e: 'block', id: one.id, op: 'upsert', value: { content: [], modified: 1 }, at: 1 },
-  ])
-  assert.equal(a.length, b.length)
 })
 
 /* ------------------------------------------------------------ 探测 */

@@ -36,7 +36,8 @@ function fixture() {
 
 /** 只比「格」那部分（结构 op 由 MemoryKb 的 Tx 负责，见 `applyGrid` 的注释） */
 function gridEqual(x: readonly unknown[], y: readonly unknown[]): void {
-  assert.equal(JSON.stringify(x), JSON.stringify(y))
+  // 键序不是语义：`forestFingerprint` 会规范化键序，所以「从日志重放」与「直接构造」能逐字节比
+  assert.equal(forestFingerprint(x as never), forestFingerprint(y as never))
 }
 
 /* ------------------------------------------------------------ ① 等式 */
@@ -52,7 +53,7 @@ test('① 等式：apply(a, diff(a,b)) 与 b 逐字节相等（含属性与 anno
   target[2]!.annos = [{ id: 'an1', range: { start: 0, end: 1 } }]
 
   const cur = clone(forest)
-  applyOps(cur, diff(cur, target), target)
+  applyOps(cur, diff(cur, target))
   gridEqual(cur, target)
 })
 
@@ -62,12 +63,12 @@ test('① 等式：块被软删（`_deletedAt` 出现／消失）也是格写入
   target[1]!.props = { _deletedAt: 12345 }
 
   const cur = clone(forest)
-  applyOps(cur, diff(cur, target), target)
+  applyOps(cur, diff(cur, target))
   gridEqual(cur, target)
 
   // 反向：摘掉删除标记
   const back = clone(target)
-  applyOps(back, diff(back, clone(forest)), forest)
+  applyOps(back, diff(back, clone(forest)))
   gridEqual(back, forest)
 })
 
@@ -140,12 +141,12 @@ test('⑤ 撤销一次插入 ⇒ 块**从树上消失**（不是进回收站）'
   const target = JSON.parse(before) as typeof store.blocks
   const ops = diff(store.blocks, target)
   assert.ok(
-    ops.some((o) => o.e === 'block' && o.op === 'delete' && o.id === fresh.id),
+    ops.some((o) => o.e === 'block' && o.op === 'exist' && o.state === 'purged' && o.id === fresh.id),
     `撤销一次插入必须产出「清除这一块」的 op（不是软删）：${JSON.stringify(ops)}`,
   )
 })
 
-test('⑥ 撤销一次**软删** ⇒ 一条 `prop.delete(_deletedAt)`，**不需要**位置 op', () => {
+test('⑥ 撤销一次**软删** ⇒ 一条 `block.exist{present}`，**不需要**位置 op', () => {
   const store = new BlockStore([mkBlock('甲'), mkBlock('乙'), mkBlock('丙')])
   const kb = new MemoryKb(store)
   const ids = kb.roots().map((b) => b.id)
@@ -161,11 +162,11 @@ test('⑥ 撤销一次**软删** ⇒ 一条 `prop.delete(_deletedAt)`，**不需
    */
   assert.deepEqual(
     ops,
-    [{ e: 'prop', block: ids[1], name: '_deletedAt', op: 'delete', at: target[1]!.modified }],
+    [{ e: 'block', id: ids[1], op: 'exist', state: 'present', at: target[1]!.modified }],
     `撤销软删 = 摘标记一条 op，实际：${JSON.stringify(ops)}`,
   )
   // 且它本来就在原位（父与前兄弟都没变）
   const cur = clone(store.blocks)
-  applyOps(cur, ops, target)
+  applyOps(cur, ops)
   gridEqual(cur, target)
 })

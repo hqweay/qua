@@ -41,16 +41,22 @@ export function isSystemProp(name: string): boolean {
 /* ------------------------------------------------------------ 写面 */
 
 /**
- * 一个块的**增量补丁**。
+ * 一个块的**块级格补丁**。
  *
- * 结构用 `parent`＋`index` 表达插入与移动（不另造一个 `insert` 事件：
+ * 结构用 `parent`＋`prev` 表达插入与移动（不另造一个 `insert` 事件：
  * 「它现在在哪」是同一件事的两种说法，两个事件就会有两种真相）。
+ *
+ * **新块的 genesis 用同一条 op 说全**：`{parent, prev, created, modified, content}`。
+ * 属性与 annos 仍各走各的格（`prop`／`anno`）—— 把整袋属性塞进这里，
+ * 会让「改一格」变成「写一整袋」，而那是同一个格两种地址的老路。
  */
 export type BlockPatch = {
   /** 行内内容整组替换（文本/格式/原子改动都是这一条 op） */
   content?: Run[]
+  /** 出生时刻：只在 genesis 里出现一次，此后不许改（可重放的前提） */
+  created?: number
   /**
-   * 最后一次改动时刻。**必须与 `content` 并进同一条 op**：一次编辑是一条账，
+   * 最后一次改动时刻。**与 `content` 并进同一条 op**：一次编辑是一条账，
    * 多一个属性写账本就会翻倍（而「这一次改动」本来就只有一个时刻）。
    */
   modified?: number
@@ -71,8 +77,10 @@ export type BlockPatch = {
    * 这条兜底是**显式**的：宁可把块放到可预期的位置，也不要静默夹取。
    */
   prev?: string | null
-  props?: Record<string, unknown>
 }
+
+/** 一块的存在：在场 / 软删（可恢复） / 清除（身份不复活） */
+export type Existence = 'present' | 'deleted' | 'purged'
 
 /**
  * 一条**持久化 op**。
@@ -80,7 +88,7 @@ export type BlockPatch = {
  * `at` 现在写 `Date.now()`，为将来的 HLC／设备标识留位；它**不参与排序**，
  * 消费者不得靠它重建顺序（顺序由 op 序列本身表达）。
  *
- * ## 三个种类，一格一个地址
+ * ## 四个种类，一格一个地址
  *
  * 每个 op 说「**某一个格现在是什么**」，不说「它变了多少」——这是全域性（重放幂等、
  * 撤销可表达、同步可收敛）的前提：只有绝对的格写入才能「应用两次等于一次」。
@@ -88,11 +96,24 @@ export type BlockPatch = {
  * | op | 寻址的格 |
  * |---|---|
  * | `block.upsert{content}` | 这一块的正文（整组 run 序列） |
+ * | `block.upsert{created}` | 这一块的出生时刻（只写一次） |
  * | `block.upsert{modified}` | 这一块的改动时刻 |
  * | `block.upsert{parent, prev}` | 这一块的位置（**唯一的相对格**，见 `BlockPatch.prev`） |
- * | `block.delete` | 这一块的存在（原位软删） |
+ * | `block.exist{state}` | 这一块的存在（三态，见 `Existence`） |
  * | `prop.set` / `prop.delete` | `block:<id>.prop:<name>` 这一格 |
  * | `anno.set` / `anno.delete` | `block:<id>.annos:<aid>` 这一格 |
+ *
+ * ## 为什么存在是三态、且只有一个词
+ *
+ * 「软删」与「清除」在内存里是两件事：前者留在原位、可恢复；后者从树上消失、身份不复活。
+ * 曾经它们都叫 `block.delete`，于是 `Tx.remove` 与 `diff`（撤销一次插入）发出同一条 op，
+ * 而落盘侧只能按软删解释 —— **撤销一次插入再重开，块会从回收站里冒出来**。
+ * 一个格只能有一种地址，存在这一格也一样。
+ *
+ * ## 为什么 `_queryResult` 不进日志
+ *
+ * 它是「那次查询的冻结结果」，派生值；每次装载重算。写它不发 op，
+ * 否则日志会记下一份会过期的缓存，而重放出来的状态与装载出来的不一致。
  *
  * ⚠️ **地址与露面走 `prop`，没有自己的 op 种类**（`_aliases`／`_lists` 各一条整袋值）。
  * 曾经有过 `alias`／`list` 两种「按项增量」的 op，它们与 `prop.set` **指向同一个格**：
@@ -103,18 +124,27 @@ export type BlockPatch = {
  */
 export type Op =
   | { e: 'block'; id: string; op: 'upsert'; value: BlockPatch; at: number }
-  | { e: 'block'; id: string; op: 'delete'; at: number }
+  | { e: 'block'; id: string; op: 'exist'; state: Existence; at: number }
   | { e: 'prop'; block: string; name: string; op: 'set' | 'delete'; value?: unknown; at: number }
   | { e: 'anno'; block: string; id: string; op: 'set' | 'delete'; value?: Anno; at: number }
+
+/** 被写的两类对象：块森林 ＋ 块上的可引用区间 */
+export type ChangeKind = 'blocks' | 'annos'
 
 /**
  * 一条**失效通知**：只说「这类对象里的这一条动过」，不带 payload。
  *
  * 索引与视图订阅不该被迫接收大对象（一次打字就会把整块正文推给每个订阅者）；
  * 需要字节的是 `StoragePort`，它只吃 `Op[]`。
+ *
+ * `id` 两种取值：具体 id（精确到块／区间），或者 `'*'`（整类都可能动过）。
+ * `'*'` 现在**只剩一个来源**：零 op 的提交（例如只换了落点）——
+ * 那不是「不知道变了什么」，而是「这一批确实什么都没改」。
+ * 有 op 的时候永远给具体 id（`changesOf` 从 op 推导）。
  */
 export interface Change {
-  kind: 'blocks' | 'annos'
+  kind: ChangeKind
+  /** 对象 id（块／区间），或 `'*'` ＝ 整类对象都动过 */
   id: string
 }
 
@@ -147,7 +177,7 @@ export interface Tx {
    * 删除整棵子树：**原位软删** —— 块带着子树留在树上的原位，打上删除标记；
    * 之后的遍历（读门面的每一条读）都看不见它。
    *
-   * op 只落**操作根**一条 `block.delete`：子树的不可见是继承来的，后代不各报一条
+   * op 是**一条** `block.exist{state:'deleted'}`：子树的不可见是继承来的，后代不各报一条
    * （落库时这也是一行的事：`deleted_at` 写在根行上；恢复才需要把整棵子树接回来，
    * 而它的行一直都在）。
    */
@@ -155,7 +185,7 @@ export interface Tx {
   /**
    * 恢复一个被删的块：摘掉它身上的删除标记，块**回到原位**（它从未离开过树）。
    *
-   * op 是一条 `block.upsert{parent,index}`——「它回来了、还在这个位置」。
+   * op 是**一条** `block.exist{state:'present'}` —— 与 `remove` 同一个格、同一个词。
    * 恢复的是操作根：整棵子树随它一起重新可见。
    */
   restore(id: string): void

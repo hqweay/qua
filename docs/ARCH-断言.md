@@ -15,7 +15,7 @@
 ## 0. 门禁入口
 
 ```bash
-pnpm gate         # 类型 + 单测 + 构建 + 静态断言 + 157 条浏览器冒烟 + 12 条布局断言 + 13 条真 Electron 冒烟
+pnpm gate         # 类型 + 单测 + 构建 + 静态断言 + 161 条浏览器冒烟 + 12 条布局断言 + 13 条真 Electron 冒烟
 pnpm gate:fast    # 按这次改动的路径只跑碰得到的那几支（日常小改动用；不是收工门禁）
 pnpm gate:bundle  # gate + 4 条打包产物冒烟（要 .app，慢，所以单列）
 pnpm arch:check   # 只跑静态那一层（秒级）

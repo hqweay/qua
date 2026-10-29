@@ -45,7 +45,17 @@ test('createObjRecordInTx：当天已存在 ⇒ 只插记录（不重复物化�
   const { result, ops } = kb.tx((tx) => createObjRecordInTx(tx, (id) => kb.get(id), '咖啡', 'tag-1', at))
 
   assert.equal(store.blocks.length, 1, '天块本来就在：森林仍是 1 个顶层块')
-  assert.deepEqual(ops.map((o) => (o.e === 'block' ? o.value : null)), [{ parent: journalId('2026-10-25'), prev: null }])
+  const pos = ops.filter(
+    (o): o is Extract<(typeof ops)[number], { e: 'block' }> =>
+      o.e === 'block' && o.op === 'upsert' && o.value.parent !== undefined,
+  )
+  assert.equal(pos.length, 1, `只插记录一块：${JSON.stringify(ops)}`)
+  assert.equal(pos[0]!.value.parent, journalId('2026-10-25'))
+  assert.equal(pos[0]!.value.prev, null)
+  assert.equal(plainText(pos[0]!.value.content ?? []), '咖啡', 'genesis 带正文')
+  const tagOp = ops.find((o) => o.e === 'prop' && o.name === '_tags')
+  assert.ok(tagOp && tagOp.e === 'prop' && tagOp.op === 'set', '归属走 prop 格')
+  assert.deepEqual(tagOp.value, ['tag-1'])
   assert.equal(findJournalDay(store.blocks, '2026-10-25')?.children[0]?.id, result.id)
 })
 

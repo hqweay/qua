@@ -1,35 +1,231 @@
 /**
- * **`diff`：把「从 a 变成 b」这件事表达成一批 op。**
+ * **「把状态的变化表达成一批 op」的代数**：`diff`／`diffTouched`／`applyOps`／`replay`。
  *
- * ## 为什么需要它
+ * ## 一句话
  *
- * 撤销今天不是一次写入，是一次**旁路**：`BlockStore.restore` 把整片森林换成快照里那份
- * （`JSON.parse` + `splice`），于是落盘层只能靠一个计数器（`replacementCount`）猜
- * 「这批必须整份写」⇒ 每次 ⌘Z 都是「清四表 + 整库重写」。
+ * 状态是日志的 fold。`op_log` 里的每一格都是**绝对写入**，所以
+ * `replay(ops)` 能从空森林重建整库；数据库行只是这份 fold 的物化视图。
  *
- * 而「库变成了另一份」本来就是可以表达成 op 的：op 说的是**每一格现在是什么**。
- * 补齐这个函数之后，撤销就是 `apply(diff(当前, 快照))` —— 与一次普通编辑走同一条路。
+ * ## 为什么一条 op 里可以带多个「块级格」
  *
- * ## 它不推翻任何已定口径
+ * `block.upsert{content, modified}` 本来就是一格账（一次改动只有一个时刻）。
+ * 新块的 genesis 同理：`{parent, prev, created, modified, content}` 一次说全，
+ * 省掉「位置一条、出生一条、正文一条」的三条账 —— 它们本来就是同一件事。
+ * **属性与 annos 仍各走各的格**：把整袋属性塞进 genesis 会让「改一格」变成「写一整袋」，
+ * 而那正是「同一个格两种地址」的老路。
  *
- * **快照仍是唯一真相**：输入是两份森林，输出只是「怎么走」。这**不是逆 op**
- * （逆 op 是「撤销语义的第二份正确性来源」，已在 `kb/memory.ts` 文件头否决）。
- * 同一条判据：**读侧派生不产生第二份真相**（诊断口把 `prev` 派生成下标，也是这么做的）。
+ * ## 四条必须成立的性质（`tests/kb-diff.test.ts` 与 `tests/kb-replay.test.ts` 逐条钉住）
  *
- * ## 四条必须成立的性质（`tests/kb-diff.test.ts` 逐条钉住）
+ * 1. **等式**：`apply(a, diff(a, b))` 与 `b` **逐字节相等**（键序也算，见 `forestFingerprint`）。
+ * 2. **完备**：`diff(x, x) == []`（未变的不发 op）。
+ * 3. **顺序**：发射序 ＝ 目标森林的**先序**（父 op 先于子 op）。
+ * 4. **时刻**：`at` 从**目标**派生（不取 `Date.now()`）；同一次 diff 跑两次逐字节相同。
  *
- * 1. **等式**：`apply(a, diff(a, b))` 与 `b` **逐字节相等**。
- * 2. **完备**：`diff(x, x)` ＝ `[]`（未变的不发 op）。
- * 3. **顺序**：发射序 ＝ 目标森林的**先序**（父 op 先于子 op）——
- *    一棵子树的 op 隐含「父在子前」这个拓扑序，派生时不许打乱它。
- * 4. **时刻**：`at` 从**目标**森林派生（不取 `Date.now()`）。否则同一次撤销重放两次
- *    会得到不同的字节，第 1 条当场失效。
+ * ## 五条实现口径
  *
- * ⚠️ 本文件零 DOM、零持久化、零 store：它只吃两片森林，所以能直接单测。
+ * 1. **存在是一个格、三个值**：`block.exist{present|deleted|purged}`。
+ *    软删／恢复与「撤销一次插入」的清除不再共用一个词。
+ * 2. **派生格不进日志**：`_queryResult` 不投影（每次装载重算）；
+ *    `_deletedAt` 不走 `prop`（它是 `exist` 在内存里的表示）。
+ * 3. **新块从 op 里生出来**：`applyOps` 遇到位置 op 时若块不存在，就按 op 里的
+ *    `created`／`modified`／`content` 造一块，再挂上去。**不需要 `source` 快照**。
+ * 4. **原地写格**：`applyOps` 不替换未动块的对象（索引存的是活引用）。
+ * 5. **`diffTouched` 吃 tx 的 touched 表**：只比动过的块，成本与库体量无关；
+ *    它是 `Tx` 的唯一 op 生产者（`kb/memory.ts`）。
+ *
+ * ⚠️ 本文件零 DOM、零持久化、零 store：它只吃森林与 op，所以能直接单测。
  */
-import type { Block } from '../model.ts'
+import { DELETED_AT_PROP, QUERY_RESULT_PROP, type Block } from '../model.ts'
 import { walkForest } from '../walk.ts'
+import type { Anno } from '../runs.ts'
 import type { Op } from './types.ts'
+
+/* ------------------------------------------------------------ 格与落点 */
+
+/** 一块的**块级格**（位置另算；属性与 annos 各走各的 op） */
+export type BlockCells = Pick<Block, 'content' | 'created' | 'modified' | 'props' | 'annos'>
+
+/** 落点：父与前兄弟（`null` ＝ 顶层／该层第一个） */
+export interface Placement {
+  parent: string | null
+  prev: string | null
+}
+
+/**
+ * tx 里「碰到一块之前」的快照。
+ *
+ * `children` 不是格：它只用来做两件事 —— `patch` 的「不许改子树」校验、
+ * 以及失败回滚。位置另记在 `TouchedBlock.beforePlacement`，因为只有 `move` 需要它。
+ */
+export interface BeforeBlock {
+  cells: BlockCells
+  children: Block[]
+}
+
+/** `Tx` 出口要处理的一块：改前快照（新块为 `null`）＋ 改后落点（没动就不给） */
+export interface TouchedBlock {
+  block: Block
+  before: BeforeBlock | null
+  beforePlacement?: Placement
+  afterPlacement?: Placement
+}
+
+export function cellsOf(b: Block): BlockCells {
+  return { content: b.content, created: b.created, modified: b.modified, props: b.props, annos: b.annos }
+}
+
+/** 值比较：数组/对象也比内容。键序不承载语义，但 `forestFingerprint` 会规范化。 */
+function same(a: unknown, b: unknown): boolean {
+  return Object.is(a, b) || JSON.stringify(a) === JSON.stringify(b)
+}
+
+/**
+ * op 里的属性值必须是**当时的快照**。
+ *
+ * `pendingOps` 会活到防抖窗口结束（250ms）；这段时间里调用方可以就地改属性数组
+ * （`props.arr.push`，`patch` 是允许的）。只存引用的话，先落进队列的那条 op
+ * 会被后来的就地修改改掉 —— 日志记的就不再是「当时是什么」。
+ * 属性值都很小（id 列表／标量），深拷一次的代价远低于一条错账。
+ */
+function snapshotValue(v: unknown): unknown {
+  if (v === null || typeof v !== 'object') return v
+  return JSON.parse(JSON.stringify(v)) as unknown
+}
+
+/** 一块的「时刻」：`at` 从这个字段派生（不是 `Date.now()`，见文件头第 4 条） */
+const stampOf = (b: Block): number => b.modified
+
+function deletedAtOf(cells: Pick<Block, 'props'> | undefined): number | undefined {
+  const v = cells?.props?.[DELETED_AT_PROP]
+  return typeof v === 'number' ? v : undefined
+}
+
+/** 哪些属性键**不是**普通 prop 格（各有各的地址） */
+function isPropCell(name: string): boolean {
+  return name !== DELETED_AT_PROP && name !== QUERY_RESULT_PROP
+}
+
+/* ------------------------------------------------------------ 生成 op */
+
+function positionOp(block: Block, placement: Placement): Op {
+  return {
+    e: 'block',
+    id: block.id,
+    op: 'upsert',
+    value: { parent: placement.parent, prev: placement.prev },
+    at: stampOf(block),
+  }
+}
+
+/**
+ * 新块的**一条 genesis**：位置 ＋ 出生 ＋ 时刻 ＋ 正文。
+ *
+ * 属性与 annos 不在其中（各走各的格）。这条 op 让 `applyOps` 能在空森林里
+ * 只凭它就把一块造出来 —— 不需要任何外部快照。
+ */
+function genesisOp(block: Block, placement: Placement): Op {
+  return {
+    e: 'block',
+    id: block.id,
+    op: 'upsert',
+    value: {
+      parent: placement.parent,
+      prev: placement.prev,
+      created: block.created,
+      modified: block.modified,
+      content: block.content,
+    },
+    at: stampOf(block),
+  }
+}
+
+function existOp(id: string, before: number | undefined, after: number | undefined, stamp: number): Op | undefined {
+  if (before === after) return undefined
+  if (after !== undefined) return { e: 'block', id, op: 'exist', state: 'deleted', at: after }
+  return { e: 'block', id, op: 'exist', state: 'present', at: stamp }
+}
+
+function propOps(id: string, before: Record<string, unknown> | undefined, after: Record<string, unknown> | undefined, stamp: number): Op[] {
+  const out: Op[] = []
+  const a = before ?? {}
+  const b = after ?? {}
+  for (const name of Object.keys(b)) {
+    if (!isPropCell(name)) continue
+    if (name in a && same(a[name], b[name])) continue
+    out.push({ e: 'prop', block: id, name, op: 'set', value: snapshotValue(b[name]), at: stamp })
+  }
+  for (const name of Object.keys(a)) {
+    if (!isPropCell(name)) continue
+    if (name in b) continue
+    out.push({ e: 'prop', block: id, name, op: 'delete', at: stamp })
+  }
+  return out
+}
+
+function annoOps(id: string, before: readonly Anno[] | undefined, after: readonly Anno[] | undefined, stamp: number): Op[] {
+  const out: Op[] = []
+  const a = new Map((before ?? []).map((x) => [x.id, x]))
+  const b = new Map((after ?? []).map((x) => [x.id, x]))
+  for (const [aid, anno] of b) {
+    const old = a.get(aid)
+    if (old && same(old, anno)) continue
+    out.push({ e: 'anno', block: id, id: aid, op: 'set', value: anno, at: stamp })
+  }
+  for (const [aid, anno] of a) {
+    if (b.has(aid)) continue
+    out.push({ e: 'anno', block: id, id: aid, op: 'delete', value: anno, at: stamp })
+  }
+  return out
+}
+
+/** 新块：genesis ＋ 存在（若一开始就是软删） ＋ 属性 ＋ annos */
+function newBlockOps(block: Block, placement: Placement): Op[] {
+  const out: Op[] = [genesisOp(block, placement)]
+  const deleted = deletedAtOf(block)
+  if (deleted !== undefined) {
+    out.push({ e: 'block', id: block.id, op: 'exist', state: 'deleted', at: deleted })
+  }
+  out.push(...propOps(block.id, undefined, block.props, stampOf(block)))
+  out.push(...annoOps(block.id, undefined, block.annos, stampOf(block)))
+  return out
+}
+
+/** 已有块：位置（若动） ＋ 存在（若变） ＋ created/content/modified ＋ 属性 ＋ annos */
+function existingBlockOps(old: BlockCells, block: Block, placement?: Placement): Op[] {
+  const out: Op[] = []
+  if (placement) out.push(positionOp(block, placement))
+
+  const exist = existOp(block.id, deletedAtOf(old), deletedAtOf(block), stampOf(block))
+  if (exist) out.push(exist)
+
+  if (old.created !== block.created) {
+    out.push({ e: 'block', id: block.id, op: 'upsert', value: { created: block.created }, at: stampOf(block) })
+  }
+
+  /**
+   * **正文**：整组替换；时刻并进同一条 op（一次改动一条账）。
+   * 只有时刻变了（例如属性写入顺带改了 `modified`）⇒ 单独一条 `{modified}`。
+   */
+  const contentChanged = !same(old.content, block.content)
+  const timeChanged = old.modified !== block.modified
+  if (contentChanged) {
+    out.push({
+      e: 'block',
+      id: block.id,
+      op: 'upsert',
+      value: { content: block.content, ...(timeChanged ? { modified: block.modified } : {}) },
+      at: stampOf(block),
+    })
+  } else if (timeChanged) {
+    out.push({ e: 'block', id: block.id, op: 'upsert', value: { modified: block.modified }, at: stampOf(block) })
+  }
+
+  out.push(...propOps(block.id, old.props, block.props, stampOf(block)))
+  out.push(...annoOps(block.id, old.annos, block.annos, stampOf(block)))
+  return out
+}
+
+/* ------------------------------------------------------------ 两份森林 */
 
 /** 一份森林的扁平视图：块 id → 块，以及它的落点（父与前兄弟） */
 interface Snapshot {
@@ -71,18 +267,10 @@ function snapshotOf(forest: readonly Block[]): Snapshot {
   return { order, byId, parent, prev, inTree }
 }
 
-/** 值比较：数组/对象也比内容（键序不承载语义，所以按 JSON 比是够的——两边的来源同一套） */
-function same(a: unknown, b: unknown): boolean {
-  return Object.is(a, b) || JSON.stringify(a) === JSON.stringify(b)
-}
-
-/** 一块的「时刻」：`at` 从这个字段派生（不是 `Date.now()`，见文件头第 4 条） */
-const stampOf = (b: Block): number => b.modified
+/* ------------------------------------------------------------ diff */
 
 /**
- * **把 `from → to` 表达成一批 op**。
- *
- * 输出只含三种种类（`block`／`prop`／`anno`）—— 一格一个地址（见 `kb/types.ts` 的 `Op`）。
+ * **把 `from → to` 表达成一批 op**（撤销用）。
  *
  * @param from 起点森林（通常是「当前」）
  * @param to   终点森林（通常是「快照里那份」）
@@ -98,12 +286,12 @@ export function diff(from: readonly Block[], to: readonly Block[]): Op[] {
    * 这与「软删」是两件事：软删是**留在原位、打标记**（可恢复）；清除是**真的不在树上**。
    * 撤销一次「插入块」要的是清除 —— 用软删会让回收站每撤一次新建就涨一条。
    *
-   * ⚠️ 顺序：先发清除，再发 upsert。否则「同一块先在 to 里、又在 from 里」这种
-   *    不存在的形状会被后来的 op 覆盖掉（这里显式写出来，免得读代码的人以为顺序无所谓）。
+   * ⚠️ **先发清除，再发目标先序**：否则「同一块先在 to 里、又在 from 里」这种
+   *    不存在的形状会被后来的 op 覆盖掉。
    */
   for (const block of a.order) {
     if (b.inTree.has(block.id)) continue
-    ops.push({ e: 'block', id: block.id, op: 'delete', at: stampOf(block) })
+    ops.push({ e: 'block', id: block.id, op: 'exist', state: 'purged', at: stampOf(block) })
   }
 
   /**
@@ -112,119 +300,87 @@ export function diff(from: readonly Block[], to: readonly Block[]): Op[] {
    */
   for (const block of b.order) {
     const old = a.byId.get(block.id)
-    const wasInTree = a.inTree.has(block.id)
+    const placement: Placement = { parent: b.parent.get(block.id) ?? null, prev: b.prev.get(block.id) ?? null }
 
-    /**
-     * **位置**：新建（不在起点树里）或移动（父/前兄弟变了）都要报。
-     * 落点从**目标**森林现算（`b.parent`／`b.prev`）—— op 只记「它现在挂在哪」。
-     */
-    const moved = !wasInTree || a.parent.get(block.id) !== b.parent.get(block.id) || a.prev.get(block.id) !== b.prev.get(block.id)
-    if (moved) {
-      ops.push({
-        e: 'block',
-        id: block.id,
-        op: 'upsert',
-        value: { parent: b.parent.get(block.id) ?? null, prev: b.prev.get(block.id) ?? null },
-        at: stampOf(block),
-      })
+    if (!old) {
+      ops.push(...newBlockOps(block, placement))
+      continue
     }
 
-    if (!old) continue // 新建块：位置 op 已带上它，属性与内容随整块落库
-
-    /**
-     * **正文**：整组替换（run 序列是「一组事实」）。时刻并进同一条 op ——
-     * 一次改动是一条账，多一条属性写账本就会翻倍（与 `Tx.patch` 同一条口径）。
-     */
-    const contentChanged = !same(old.content, block.content)
-    const timeChanged = old.modified !== block.modified
-    if (contentChanged || timeChanged) {
-      ops.push({
-        e: 'block',
-        id: block.id,
-        op: 'upsert',
-        value: { ...(contentChanged ? { content: block.content } : {}), ...(timeChanged ? { modified: block.modified } : {}) },
-        at: stampOf(block),
-      })
-    }
-
-    /**
-     * **属性**：按**格**比（一个格一条 op）。这里不按整袋报：
-     * `prop` op 的地址是 `block:<id>.prop:<name>`，整袋报会让「改一格」变成「写 N 格」。
-     */
-    const aProps = old.props ?? {}
-    const bProps = block.props ?? {}
-    for (const name of Object.keys(bProps)) {
-      if (name in aProps && same(aProps[name], bProps[name])) continue
-      ops.push({ e: 'prop', block: block.id, name, op: 'set', value: bProps[name], at: stampOf(block) })
-    }
-    for (const name of Object.keys(aProps)) {
-      if (name in bProps) continue
-      ops.push({ e: 'prop', block: block.id, name, op: 'delete', at: stampOf(block) })
-    }
-
-    /**
-     * **annos**：按 anno id 一条一格。
-     * ⚠️ 落库侧会把它收成一整列（`db-rows.ts` 的 `anno` 分支）—— 那是**投影的粗粒度**，
-     *    不是代数里有两套地址。代数必须按条，因为「哪一条被引用了」是逐条的事实。
-     */
-    const aAnnos = new Map((old.annos ?? []).map((x) => [x.id, x]))
-    const bAnnos = new Map((block.annos ?? []).map((x) => [x.id, x]))
-    for (const [aid, anno] of bAnnos) {
-      const prevAnno = aAnnos.get(aid)
-      if (prevAnno && same(prevAnno, anno)) continue
-      ops.push({ e: 'anno', block: block.id, id: aid, op: 'set', value: anno, at: stampOf(block) })
-    }
-    for (const [aid, anno] of aAnnos) {
-      if (bAnnos.has(aid)) continue
-      ops.push({ e: 'anno', block: block.id, id: aid, op: 'delete', value: anno, at: stampOf(block) })
-    }
+    const moved =
+      a.parent.get(block.id) !== placement.parent || a.prev.get(block.id) !== placement.prev
+    ops.push(...existingBlockOps(old, block, moved ? placement : undefined))
   }
 
   return ops
 }
 
 /**
- * **把 op 应用到一片森林**（`diff` 的逆运算）。
+ * **tx 出口的唯一 op 生产者**：只比 `touched` 里那几块，成本与库体量无关。
  *
- * 两条硬口径：
+ * `touched` 的插入顺序就是输出顺序。`Tx.insert` 按子树先序登记，所以
+ * **父 op 先于子 op** 这条性质由调用方保持；其它方法都只碰一块，顺序无歧义。
+ */
+export function diffTouched(touched: Iterable<TouchedBlock>): Op[] {
+  const ops: Op[] = []
+  for (const t of touched) {
+    if (t.before === null) {
+      if (!t.afterPlacement) throw new Error(`kb: new block "${t.block.id}" has no placement`)
+      ops.push(...newBlockOps(t.block, t.afterPlacement))
+      continue
+    }
+    const moved =
+      t.beforePlacement !== undefined &&
+      t.afterPlacement !== undefined &&
+      (t.beforePlacement.parent !== t.afterPlacement.parent || t.beforePlacement.prev !== t.afterPlacement.prev)
+    ops.push(...existingBlockOps(t.before.cells, t.block, moved ? t.afterPlacement : undefined))
+  }
+  return ops
+}
+
+/* ------------------------------------------------------------ apply / replay */
+
+/**
+ * **把 op 应用到一片森林**（`diff` 的逆运算，也是 `replay` 的解释器）。
  *
- * 1. **原地写格、保持未动块的对象身份**。索引存的是块的**活引用**（`index-port.ts` 文件头）；
+ * 1. **原地写格、保持未动块的对象身份**。索引存的是块的**活引用**；
  *    若这里替换块对象（CoW／`JSON.parse`），索引会静默失效 —— 它手里那批对象当场过期，
  *    而没有任何一层会报错。所以「换一片森林」不是这个函数做的事。
- * 2. **需要「重新出现」的块从 `source` 里取**（撤销的 `source` ＝ 目标快照那份森林）。
- *    只给 op 是不够的：`block.upsert{parent,prev}` 只说「它挂在哪」，
- *    块的内容与属性在目标那份森林里 —— 那也是「快照仍是唯一真相」的落地方式。
+ * 2. **新块从 op 里生出来**：位置 op 若带 `created`／`modified`／`content`（genesis），
+ *    就直接造一块；不再需要 `source` 快照。
+ * 3. **父必须先出现**：op 流按目标先序发射；父不在树上是**日志残缺**，
+ *    抛错而不是静默落到顶层（静默会让一棵子树长到错的地方，且不报错）。
  *
  * @param forest 要改的森林（原地改）
- * @param ops    `diff` 的输出（或任何同形状的一批 op）
- * @param source 目标森林（用来取「要重新出现的块」；省略 ⇒ 不处理这类 op）
+ * @param ops    `diff`／`diffTouched` 的输出，或 `op_log` 里的历史
  */
-export function applyOps(forest: Block[], ops: readonly Op[], source?: readonly Block[]): void {
-  const srcById = new Map<string, Block>()
-  if (source) walkForest(source, (b) => void srcById.set(b.id, b), { includeDeleted: true })
-
-  /** ① **清除**：块从树上消失（不是软删 —— 软删走 `prop.delete(_deletedAt)`）。 */
+export function applyOps(forest: Block[], ops: readonly Op[]): void {
+  /** ① **清除**：块从树上消失（与软删是两件事）。 */
   for (const op of ops) {
-    if (op.e !== 'block' || op.op !== 'delete') continue
-    removeFromTree(forest, op.id)
+    if (op.e === 'block' && op.op === 'exist' && op.state === 'purged') removeFromTree(forest, op.id)
   }
 
-  /** ② **位置**：按 op 顺序逐条落（同父多条时，后一条依赖前一条已就位）。 */
+  /** ② **位置与 genesis**：按 op 顺序逐条落（同父多条时，后一条依赖前一条已就位）。 */
   for (const op of ops) {
-    if (op.e !== 'block' || op.op !== 'upsert') continue
-    const parentId = op.value.parent
-    if (parentId === undefined) continue
-    // 块可能不在树上（撤销一次清除 ⇒ 它要回来）⇒ 从 `source` 取一份（深拷：不改快照那份）
+    if (op.e !== 'block' || op.op !== 'upsert' || op.value.parent === undefined) continue
     let block = findAnywhere(forest, op.id)
     if (!block) {
-      const orig = srcById.get(op.id)
-      if (!orig) continue
-      block = JSON.parse(JSON.stringify(orig)) as Block
+      const created = op.value.created ?? 0
+      block = {
+        id: op.id,
+        content: op.value.content ?? [],
+        children: [],
+        created,
+        modified: op.value.modified ?? created,
+      }
     }
-    placeAt(forest, block, parentId, op.value.prev ?? null)
+    if (op.value.created !== undefined) block.created = op.value.created
+    if (op.value.content !== undefined) block.content = op.value.content
+    if (op.value.modified !== undefined) block.modified = op.value.modified
+    placeAt(forest, block, op.value.parent, op.value.prev ?? null)
   }
 
-  /** ③ **格**：正文／时刻／属性／annos（原地写，对象身份不变）。 */
+  /** ③ **格**：正文／出生／时刻／属性／annos／存在（原地写，对象身份不变）。 */
   const byId = new Map<string, Block>()
   walkForest(forest, (b) => void byId.set(b.id, b), { includeDeleted: true })
   for (const op of ops) {
@@ -251,14 +407,41 @@ export function applyOps(forest: Block[], ops: readonly Op[], source?: readonly 
       block.annos = list.length === 0 ? undefined : list
       continue
     }
-    if (op.e === 'block' && op.op === 'upsert') {
+    if (op.e !== 'block') continue
+
+    if (op.op === 'exist') {
+      if (op.state === 'purged') {
+        removeFromTree(forest, op.id)
+        continue
+      }
       const block = byId.get(op.id)
       if (!block) continue
-      if (op.value.content !== undefined) block.content = op.value.content
-      if (op.value.modified !== undefined) block.modified = op.value.modified
+      const props = { ...(block.props ?? {}) }
+      if (op.state === 'deleted') props[DELETED_AT_PROP] = op.at
+      else delete props[DELETED_AT_PROP]
+      if (Object.keys(props).length === 0) delete block.props
+      else block.props = props
+      continue
     }
+
+    // 位置/genesis 已在 ② 里写过；这里只处理「只带格」的 upsert
+    if (op.value.parent !== undefined) continue
+    const block = byId.get(op.id)
+    if (!block) continue
+    if (op.value.created !== undefined) block.created = op.value.created
+    if (op.value.content !== undefined) block.content = op.value.content
+    if (op.value.modified !== undefined) block.modified = op.value.modified
   }
 }
+
+/** **从空森林重放整条日志。** `replay(log)` 与当前状态逐字节相等，是「日志完整」的定义。 */
+export function replay(ops: readonly Op[]): Block[] {
+  const forest: Block[] = []
+  applyOps(forest, ops)
+  return forest
+}
+
+/* ------------------------------------------------------------ 小工具 */
 
 /** 含被删块的遍历找块（可见遍历看不见软删的块） */
 function findAnywhere(forest: readonly Block[], id: string): Block | undefined {
@@ -299,8 +482,11 @@ function removeFromTree(forest: Block[], id: string): void {
 }
 
 /**
- * 把块放到 `(parentId, prev)` 这个位置（父不存在 ⇒ 落到顶层末尾，与 `BlockPatch.prev` 的
- * 悬空兜底同一条口径：**宁可放到可预期的位置，也不要静默夹取**）。
+ * 把块放到 `(parentId, prev)` 这个位置。
+ *
+ * - **父不存在** ⇒ 抛错：完整日志里父一定先于子；静默落到顶层会把子树挂错地方，且不报错。
+ * - **前兄弟不存在** ⇒ 落该层首位：这是 `BlockPatch.prev` 写明的确定性兜底
+ *   （软删不搬位置，所以被删的前兄弟仍是合法锚点；只有 purge 或缺口会让它消失）。
  *
  * ⚠️ 遍历一律走 `walkForest`（块树遍历的唯一入口，`arch-check [22]`）——
  *    这里要「改树」，所以先把「摘掉」与「找落点」拆成两次走，中间不改结构。
@@ -309,25 +495,43 @@ function placeAt(forest: Block[], block: Block, parentId: string | null, prev: s
   // 先摘（同一层内换位时，不摘会让下标算错）
   removeFromTree(forest, block.id)
 
-  /**
-   * 目标列表：`parentId === null` ⇒ 顶层；否则找那一块的 `children`。
-   * 走 `walkForest`（唯一遍历入口）—— 只读不写，改结构留给下面。
-   */
-  const siblings: Block[] = parentId === null ? forest : (findAnywhere(forest, parentId)?.children ?? forest)
+  const parent = parentId === null ? null : findAnywhere(forest, parentId)
+  if (parentId !== null && !parent) {
+    throw new Error(`kb: replay: missing parent "${parentId}" for block "${block.id}"`)
+  }
+  const siblings: Block[] = parent ? parent.children : forest
 
   if (prev === null) {
     siblings.unshift(block)
     return
   }
   const i = siblings.findIndex((b) => b.id === prev)
-  // 前兄弟不在了（含「父也不在了」的兜底）⇒ 落该层首位，与 `BlockPatch.prev` 同一条口径
+  // 前兄弟不在了 ⇒ 落该层首位，与 `BlockPatch.prev` 同一条口径
   siblings.splice(i < 0 ? 0 : i + 1, 0, block)
 }
 
+/* ------------------------------------------------------------ 断言用 */
 
-/** 供断言用：一份森林的可比较投影（键序稳定，所以能逐字节比） */
+/** 递归把对象键排序（数组顺序保留：数组是内容，对象键序不是） */
+function canonical(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonical)
+  if (v !== null && typeof v === 'object') {
+    const src = v as Record<string, unknown>
+    const out: Record<string, unknown> = {}
+    for (const k of Object.keys(src).sort()) out[k] = canonical(src[k])
+    return out
+  }
+  return v
+}
+
+/**
+ * 供断言用：一份森林的可比较投影。
+ *
+ * 先序 ＋ 规范化键序，所以「从日志重放」与「直接构造」可以逐字节比 ——
+ * 即使两条路径给属性键的插入顺序不同（键序不是语义）。
+ */
 export function forestFingerprint(forest: readonly Block[]): string {
   const out: unknown[] = []
-  walkForest(forest, (b) => void out.push(b), { includeDeleted: true })
+  walkForest(forest, (b) => void out.push(canonical(b)), { includeDeleted: true })
   return JSON.stringify(out)
 }

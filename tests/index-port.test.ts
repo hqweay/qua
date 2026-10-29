@@ -488,7 +488,7 @@ test('applyOps：流里引用不存在的块 ⇒ 跳过该 op（索引不退化�
   const next = applyOps(
     idx,
     [
-      { e: 'block', id: '不存在的块', op: 'delete', at: 1 },
+      { e: 'block', id: '不存在的块', op: 'exist', state: 'purged', at: 1 },
       { e: 'prop', block: '也不存在', name: '_tags', op: 'set', value: [], at: 2 },
     ],
     store.blocks,

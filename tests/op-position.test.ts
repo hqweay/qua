@@ -147,19 +147,30 @@ test('④ 一棵子树的 op 仍隐含「父先于子」：这是已知边界，
   )
 })
 
-/* ------------------------------------------------------------ ⑤ 旧形状不许复活 */
+/* ------------------------------------------------------------ ⑤ 形状守卫 */
 
-test('⑤ 旧形状 `index` 不许复活（它一回来，op_log 里就又是相对下标）', () => {
+test('⑤ 旧形状 `index` 不许复活；replay 必须存在且以 `applyOps` 为唯一解释器', () => {
   const src = readAllSources()
   assert.equal(
     /index\?:\s*number/.test(src),
     false,
     '`BlockPatch` 上不该再有 `index?: number`：它只对那一刻的兄弟列表有意义，进了 op_log 就补不回来',
   )
+  assert.match(src, /export function replay\(/, '日志即状态：`replay` 必须存在（它是「日志完整」的可执行判据）')
   assert.equal(
     /function\s+applyOp\b|function\s+replayOps?\b|replayFromOps/.test(src),
     false,
-    '仓里不该有 replay 实现（有的话「现在改」的成本要重算：改的是已写进去的历史）',
+    '解释器只能有一个：`applyOps`；另造一份就会与它分叉，而分叉只在重放时显形',
+  )
+  assert.match(
+    readFileSync(join(import.meta.dirname, '..', 'src', 'core', 'kb', 'types.ts'), 'utf8'),
+    /op: 'exist'/,
+    '存在必须是一个格、三个状态（`block.exist`），不是「软删/清除共用一个词」',
+  )
+  assert.match(
+    readFileSync(join(import.meta.dirname, '..', 'src', 'core', 'kb', 'types.ts'), 'utf8'),
+    /created\?: number/,
+    '出生时刻是必填格：新块的 genesis 必须能把它写进日志',
   )
 })
 

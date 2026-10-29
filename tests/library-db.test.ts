@@ -17,6 +17,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { DB_CONTENT_TABLES, DB_SCHEMA_VERSION, DB_TABLES, META_KEYS } from '../src/core/library.ts'
+import { mkBlock } from '../src/core/model.ts'
+import { BlockStore } from '../src/core/store.ts'
+import { MemoryKb } from '../src/core/kb/memory.ts'
+import { diff, forestFingerprint, replay } from '../src/core/kb/diff.ts'
+import type { Op } from '../src/core/kb/types.ts'
+import { rowWritesFor, rowsToWorkspace, workspaceToRowWrites, type StoredWorkspace } from '../src/core/storage/db-rows.ts'
 import {
   appendOp,
   appendLocalOps,
@@ -366,12 +372,74 @@ test('S4：行写入失败 ⇒ 变更流也不落（同一个事务，不能留�
   db.close()
 })
 
-test('S4：`replace` 那几笔不产 op（种子／换库不是「一次编辑」）', () => {
+test('整份替换＝新 genesis：清旧日志、序号归零，再把这一批 op 写进去', () => {
   const file = tmpDb()
   const r = openLibraryDb(file)
   const db = r.db!
-  replaceContentRows(db, [blockRow('seed')])
-  const n = (db.prepare('select count(*) as n from op_log').all() as { n: number }[])[0]!.n
-  assert.equal(n, 0, '整份替换不写变更流：它表达的是「库里现在就是这份」，不是「谁做了什么」')
+  const dev = 'd'.repeat(32)
+
+  // 先写一段旧历史
+  applyRowWrites(db, [blockRow('old')], {
+    deviceId: dev,
+    oplog: [{ at: 1, opJson: JSON.stringify({ e: 'block', id: 'old', op: 'exist', state: 'deleted', at: 1 }) }],
+  })
+  assert.equal(readSeq(db), 1)
+
+  // 整份替换 ＋ 新 genesis：旧日志必须被清掉，序号从 0 重新开始
+  replaceContentRows(db, [blockRow('seed')], {
+    deviceId: dev,
+    oplog: [
+      { at: 2, opJson: JSON.stringify({ e: 'block', id: 'seed', op: 'upsert', value: { parent: null, prev: null, created: 2, modified: 2, content: [] }, at: 2 }) },
+    ],
+  })
+  const rows = db.prepare('select seq, op_json from op_log order by seq').all() as { seq: number; op_json: string }[]
+  assert.equal(rows.length, 1, '旧历史被清掉，只剩新 genesis 这一条')
+  assert.equal(rows[0]!.seq, 1, '序号从 0 重新走到 1')
+  assert.equal(JSON.parse(rows[0]!.op_json).id, 'seed')
+  assert.equal(readSeq(db), 1)
+  db.close()
+})
+
+/* ------------------------------------------------------------ 日志即状态 */
+
+test('撤销一次插入后重开 ⇒ 块不进回收站（purged 删行，不是写 deleted）', () => {
+  const file = tmpDb()
+  const r = openLibraryDb(file)
+  const db = r.db!
+  const dev = 'e'.repeat(32)
+
+  const root = mkBlock('根', { created: 1, modified: 1 })
+  const store = new BlockStore([root])
+  const kb = new MemoryKb(store)
+  const wsOf = (): StoredWorkspace => ({ blocks: store.blocks, activeId: root.id, savedAt: 1 })
+  const log = (ops: readonly Op[]): { at: number; opJson: string }[] =>
+    ops.map((op) => ({ at: op.at, opJson: JSON.stringify(op) }))
+
+  // 种子：整份替换 ＝ 新 genesis
+  const genesis = diff([], store.blocks)
+  replaceContentRows(db, workspaceToRowWrites(wsOf()), { deviceId: dev, oplog: log(genesis) })
+
+  // 插入一块并落盘
+  const snap = store.snap(null)
+  const fresh = mkBlock('新', { created: 2, modified: 2 })
+  const ins = kb.tx((tx) => tx.insert(fresh, root.id, 0)).ops
+  applyRowWrites(db, rowWritesFor(wsOf(), ins), { deviceId: dev, oplog: log(ins) })
+
+  // ⌘Z：撤销一次插入 ⇒ `exist{purged}`
+  const undo = store.restore(snap).ops
+  applyRowWrites(db, rowWritesFor(wsOf(), undo), { deviceId: dev, oplog: log(undo) })
+
+  const reloaded = rowsToWorkspace(readContentRows(db))
+  const found = reloaded.blocks.flatMap(function walk(b) { return [b, ...b.children.flatMap(walk)] }).find((b) => b.id === fresh.id)
+  assert.equal(found, undefined, '撤销后重开：块必须真的不在（连回收站也不该有）')
+
+  // 日志与行必须说同一件事：从空森林重放 op_log ＝ 装载出来的库
+  const rows = db.prepare('select op_json from op_log order by seq').all() as { op_json: string }[]
+  const ops = rows.map((x) => JSON.parse(x.op_json) as Op)
+  assert.equal(
+    forestFingerprint(replay(ops)),
+    forestFingerprint(reloaded.blocks),
+    'replay(op_log) 必须等于装载出来的模型（日志是状态的事实源）',
+  )
   db.close()
 })

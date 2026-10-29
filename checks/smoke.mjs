@@ -5563,7 +5563,7 @@ await check(
       }
     }, target)
 
-    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined)
+    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined && o.parent === undefined)
     const structOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent !== undefined)
     assert(after.ops.length === 2, `块中 Enter 只该产 2 条 op（内容一半 ＋ 结构一块）：${JSON.stringify(after.ops)}`)
     assert(textOps.length === 1, `应恰有 1 条 upsert{content}：${JSON.stringify(after.ops)}`)
@@ -5688,11 +5688,11 @@ await check(
       return {
         ops: ops.map((o) => ({
           e: o.e,
-          id: o.id ?? '',
+          id: o.id ?? o.block ?? '',
           op: o.op,
           name: o.name ?? '',
           runs: o.value?.content === undefined ? '' : runKinds(o.value.content),
-          parent: o.value && 'parent' in o.value ? o.value.parent : undefined,
+          parent: o.value && typeof o.value === 'object' && !Array.isArray(o.value) && 'parent' in o.value ? o.value.parent : undefined,
         })),
         tagId,
         recordId,
@@ -5706,16 +5706,20 @@ await check(
       }
     }, before)
 
-    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.runs !== '')
+    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.runs !== '' && o.parent === undefined)
+    const blockOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert')
+    const propOps = after.ops.filter((o) => o.e === 'prop')
     const tagBlockOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent === null)
     const recordOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.id === after.recordId)
-    assert(textOps.length === 1, `内容应恰写一次：${JSON.stringify(after.ops)}`)
+    assert(textOps.length === 1, `宿主内容应恰写一次：${JSON.stringify(after.ops)}`)
     assert(textOps[0].id === before.id && textOps[0].runs.includes('tag'), `那一次已是露面：${JSON.stringify(textOps)}`)
     assert(tagBlockOps.length === 1, `同一笔里应建出 1 个标签块：${JSON.stringify(after.ops)}`)
     assert(recordOps.length === 1, `同一笔里应物化 1 条记录：${JSON.stringify(after.ops)}`)
-    assert(after.ops.every((o) => o.e !== 'prop'), `提及不写**宿主**归属 ⇒ 0 条 prop op：${JSON.stringify(after.ops)}`)
+    assert(blockOps.length === 3, `这一笔应恰好 3 条 block op（宿主内容 ＋ 标签块 ＋ 记录）：${JSON.stringify(after.ops)}`)
+    assert(propOps.every((o) => o.id !== before.id), `提及不写**宿主**归属：${JSON.stringify(propOps)}`)
+    assert(propOps.some((o) => o.id === after.tagId && o.name === '_aliases'), `标签块的地址要进日志：${JSON.stringify(propOps)}`)
+    assert(propOps.some((o) => o.id === after.recordId && o.name === '_tags'), `记录的归属要进日志：${JSON.stringify(propOps)}`)
     assert(after.ops.every((o) => o.e !== 'anno'), `露面住在内容里 ⇒ 0 条 anno：${JSON.stringify(after.ops)}`)
-    assert(after.ops.length === 3, `这一笔应恰好 3 条（宿主内容 ＋ 标签块 ＋ 记录）：${JSON.stringify(after.ops)}`)
 
     assert(after.tagAlias === 'zzz', `标签块的名字应是 zzz：${JSON.stringify(after.tagAlias)}`)
     assert(after.tags.length === 0, `宿主这个块不该被归类：${JSON.stringify(after.tags)}`)
@@ -5812,7 +5816,7 @@ await check(
         tags: b?.props?._tags ?? [],
         atoms: atoms.map((a) => ({ kind: a.kind, target: a.target?.id ?? '' })),
         tagged: tagged.length,
-        ops: window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id })),
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id, block: o.block ?? o.id, name: o.name })),
       }
     }, { id: inlineBlock })
 
@@ -5820,7 +5824,11 @@ await check(
     assert(inline.atoms.length === 1 && inline.atoms[0].kind === 'tag' && inline.atoms[0].target === inline.tagId, `↵ 应插指向**标签类**的行内引用：${JSON.stringify(inline)}`)
     assert(inline.tags.length === 0, `↵ 不该把宿主归类：${JSON.stringify(inline.tags)}`)
     assert(inline.tagged === 0, `↵ 不该建记录/成员：${inline.tagged}`)
-    assert(inline.ops.length === 2, `↵ 一笔应恰好 2 条（宿主内容 ＋ 标签块）：${JSON.stringify(inline.ops)}`)
+    const inlineBlockOps = inline.ops.filter((o) => o.e === 'block')
+    const inlinePropOps = inline.ops.filter((o) => o.e === 'prop')
+    assert(inlineBlockOps.length === 2, `↵ 应恰好 2 条 block op（宿主内容 ＋ 标签块）：${JSON.stringify(inline.ops)}`)
+    assert(inlinePropOps.some((o) => o.block === inline.tagId && o.op === 'set'), `标签块的地址/露面要进日志：${JSON.stringify(inline.ops)}`)
+    assert(inlinePropOps.every((o) => o.block !== inlineBlock), `↵ 不给宿主写归属：${JSON.stringify(inline.ops)}`)
 
     // ② ⌥↵ = 建标签块 + 写宿主 _tags；不建记录、不插 run
     const chipBlock = await focusNew()
@@ -5840,7 +5848,7 @@ await check(
         tags: b?.props?._tags ?? [],
         atoms: window.__qua.atoms().filter((a) => a.blockId === t.id).length,
         tagged: tagged.length,
-        ops: window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id })),
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id, block: o.block ?? o.id, name: o.name })),
       }
     }, { id: chipBlock })
 
@@ -5848,7 +5856,11 @@ await check(
     assert(chip.tags.length === 1 && chip.tags[0] === chip.tagId, `⌥↵ 应写宿主 _tags：${JSON.stringify(chip.tags)}`)
     assert(chip.atoms === 0, `⌥↵ 是归类，不该插行内原子：${chip.atoms}`)
     assert(chip.tagged === 1, `⌥↵ 只该有宿主这一条成员：${chip.tagged}`)
-    assert(chip.ops.length === 3, `⌥↵ 一笔应恰好 3 条（宿主内容 ＋ 标签块 ＋ 归属 prop）：${JSON.stringify(chip.ops)}`)
+    const chipBlockOps = chip.ops.filter((o) => o.e === 'block')
+    const chipPropOps = chip.ops.filter((o) => o.e === 'prop')
+    assert(chipBlockOps.length === 2, `⌥↵ 应恰好 2 条 block op（宿主内容 ＋ 标签块）：${JSON.stringify(chip.ops)}`)
+    assert(chipPropOps.some((o) => o.block === chipBlock && o.name === '_tags'), `⌥↵ 要写宿主 _tags：${JSON.stringify(chip.ops)}`)
+    assert(chipPropOps.some((o) => o.block === chip.tagId && o.name === '_aliases'), `标签块的地址要进日志：${JSON.stringify(chip.ops)}`)
 
     await ctx.close()
     return `无同名标签时：↵ 建标签 + 行内引用（2 条 op）；⌥↵ 建标签 + 写 _tags（3 条 op）；两者都不建记录`
@@ -6070,7 +6082,7 @@ await check(
       }
       walk(ed.store.blocks, null)
       return {
-        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op })),
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, state: o.state })),
         gone: ed.store.find(t.id) === undefined,
         hit,
         total,
@@ -6082,8 +6094,8 @@ await check(
 
     assert(after.ops.length === 1, `叶子删块应恰好 1 条 op（只落操作根）：${JSON.stringify(after.ops)}`)
     assert(
-      after.ops[0].e === 'block' && after.ops[0].id === pick.id && after.ops[0].op === 'delete',
-      `应是一条 block.delete 指向被删块：${JSON.stringify(after.ops)}`,
+      after.ops[0].e === 'block' && after.ops[0].id === pick.id && after.ops[0].op === 'exist' && after.ops[0].state === 'deleted',
+      `应是一条 block.exist{deleted} 指向被删块：${JSON.stringify(after.ops)}`,
     )
     assert(after.gone, '可见读（store.find）应找不到它')
     assert(after.hit, '块应留在森林原位（原位软删，不是摘出去）')
@@ -6165,7 +6177,7 @@ await check(
       }
       walk(ed.store.blocks)
       return {
-        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op })),
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, state: o.state })),
         pages: window.__qua.pages().length,
         pageGone: ed.store.find(t.pageId) === undefined,
         kidGone: ed.store.find(t.kidId) === undefined,
@@ -6174,10 +6186,10 @@ await check(
       }
     }, created)
 
-    const deletes = after.ops.filter((o) => o.e === 'block' && o.op === 'delete').map((o) => o.id)
+    const deletes = after.ops.filter((o) => o.e === 'block' && o.op === 'exist' && o.state === 'deleted').map((o) => o.id)
     assert(
       after.ops.length === 1 && deletes[0] === created.pageId,
-      `删页应恰好 1 条 block.delete（操作根；子树的不可见是继承的）：${JSON.stringify(after.ops)}`,
+      `删页应恰好 1 条 block.exist{deleted}（操作根；子树的不可见是继承的）：${JSON.stringify(after.ops)}`,
     )
     assert(after.pageGone && after.kidGone, '页与子块对可见读都应消失')
     assert(after.pageMarked, '页块应带删除标记留在森林里')
@@ -6261,6 +6273,7 @@ await check(
           e: o.e,
           id: o.id,
           op: o.op,
+          state: o.state,
           text: o.value?.content === undefined ? undefined : runPlain(o.value.content),
           parent: o.value?.parent,
           pos: o.value?.prev === null ? 0 : undefined,
@@ -6273,9 +6286,9 @@ await check(
       }
     }, pick)
 
-    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined)
+    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined && o.parent === undefined)
     const moveOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent !== undefined)
-    const delOps = after.ops.filter((o) => o.e === 'block' && o.op === 'delete')
+    const delOps = after.ops.filter((o) => o.e === 'block' && o.op === 'exist' && o.state === 'deleted')
 
     // 两条内容 upsert：前一块拼接 ＋ 被并块空壳清空（删除是原位标记，壳留在树上）
     assert(textOps.length === 2, `应恰有 2 条内容 upsert（前块拼接＋空壳清空）：${JSON.stringify(after.ops)}`)
@@ -6295,7 +6308,7 @@ await check(
       const wantPrev = n === 0 ? (pick.prevKids === 0 ? null : pick.prevChildIds[pick.prevKids - 1] ?? null) : pick.kids[n - 1]
       assert(op.prev === wantPrev, `子块的前兄弟应是 ${JSON.stringify(wantPrev)}：${JSON.stringify(op)}`)
     }
-    assert(delOps.length === 1 && delOps[0].id === pick.id, `被并块应有 1 条 block.delete：${JSON.stringify(delOps)}`)
+    assert(delOps.length === 1 && delOps[0].id === pick.id, `被并块应有 1 条 block.exist{deleted}：${JSON.stringify(delOps)}`)
     assert(after.ops.length === 3 + pick.kids.length, `op 总数应是「正文 1 ＋ 子块 ${pick.kids.length} ＋ 清壳 1 ＋ 删除 1」：${JSON.stringify(after.ops)}`)
 
     assert(after.gone, '被并块对可见读应消失')
@@ -6533,6 +6546,7 @@ await check(
           e: o.e,
           id: o.id,
           op: o.op,
+          state: o.state,
           text: o.value?.content === undefined ? undefined : runPlain(o.value.content),
           parent: o.value?.parent,
           pos: o.value?.prev === null ? 0 : undefined,
@@ -6544,7 +6558,7 @@ await check(
       }
     }, inner)
 
-    const textOps = contentEnter.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined)
+    const textOps = contentEnter.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined && o.parent === undefined)
     const moveOps = contentEnter.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent !== undefined)
     assert(
       textOps.length === 1 && moveOps.length === 1,
@@ -6617,6 +6631,7 @@ await check(
           e: o.e,
           id: o.id,
           op: o.op,
+          state: o.state,
           text: o.value?.content === undefined ? undefined : runPlain(o.value.content),
           parent: o.value?.parent,
           pos: o.value?.prev === null ? 0 : undefined,
@@ -6628,7 +6643,7 @@ await check(
       }
     }, pick)
 
-    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined)
+    const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.text !== undefined && o.parent === undefined)
     const insertOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent !== undefined)
     assert(after.ops.length === 2, `删选区 + 拆应合成 2 条 op（没有单独的删除 op）：${JSON.stringify(after.ops)}`)
     assert(textOps.length === 1 && textOps[0].id === pick.id, `原块应只写一次内容：${JSON.stringify(textOps)}`)
@@ -6775,7 +6790,7 @@ await check(
       const page = pageOp ? window.__qua.__editor.store.find(pageOp.id) : null
       const childOp = page ? ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === page.id) : null
       return {
-        ops: ops.map((o) => ({ e: o.e, id: o.id, op: o.op, parent: o.value?.parent, prev: o.value?.prev })),
+        ops: ops.map((o) => ({ e: o.e, id: o.id, block: o.block ?? o.id, op: o.op, name: o.name, parent: o.value?.parent, prev: o.value?.prev })),
         pageId: pageOp?.id ?? '',
         childId: childOp?.id ?? '',
         modelChild: page?.children[0]?.id ?? '',
@@ -6787,10 +6802,14 @@ await check(
       }
     })
 
-    assert(created.ops.every((o) => o.e === 'block' && o.op === 'upsert'), `都是 block.upsert（结构写不许零 op 直写）：${JSON.stringify(created.ops)}`)
+    const blockOps = created.ops.filter((o) => o.e === 'block')
+    const propOps = created.ops.filter((o) => o.e === 'prop')
+    assert(blockOps.every((o) => o.op === 'upsert'), `结构写必须是 block.upsert（不许零 op 直写）：${JSON.stringify(created.ops)}`)
+    assert(propOps.every((o) => o.block === created.pageId), `页的属性格只写在页块上：${JSON.stringify(created.ops)}`)
     assert(created.pageId !== '' && created.parentIsNull, `页块应报 upsert{parent:null}（森林顶层）：${JSON.stringify(created.ops)}`)
     assert(created.childId !== '' && created.modelChild === created.childId, `空首子块应真的挂在页下：${JSON.stringify(created)}`)
-    assert(created.ops.length === 2, `新建页应恰好 2 条 op（页 ＋ 空首子块），不再物化当天：${JSON.stringify(created.ops)}`)
+    assert(blockOps.length === 2, `新建页应恰好 2 条 block op（页 ＋ 空首子块），不再物化当天：${JSON.stringify(created.ops)}`)
+    assert(propOps.some((o) => o.name === '_aliases'), `页的地址要进日志：${JSON.stringify(created.ops)}`)
     assert(created.pages === before.pages + 1, `页数应 +1：${before.pages} → ${created.pages}`)
     assert(created.roots === before.roots + 1, `森林根数应 +1：${before.roots} → ${created.roots}`)
     assert(created.pageLists.includes('page') && created.pageAliases.length === 1, `新页应带 page 露面与一个别名：${JSON.stringify(created)}`)
@@ -6837,6 +6856,7 @@ const opShape = (page) =>
       e: o.e,
       block: o.block ?? o.id ?? '',
       op: o.op,
+      state: o.state,
       name: o.name ?? '',
       value: o.value,
       parent: o.value?.parent,
@@ -7043,16 +7063,16 @@ await check(
     await page.evaluate((t) => window.__qua.__editor.addTag(t.id, '冒烟新标签'), a)
     await page.waitForTimeout(120)
     const ops1 = await opShape(page)
-    assert(ops1.length === 2, `新标签应恰好 2 条 op：${JSON.stringify(ops1)}`)
+    const block1 = ops1.filter((o) => o.e === 'block')
+    assert(block1.length === 1, `新标签应只建 1 个块：${JSON.stringify(ops1)}`)
+    assert(block1[0].op === 'upsert' && block1[0].parent === null, `标签块应 upsert{parent:null}：${JSON.stringify(ops1)}`)
+    const tagProp = ops1.find((o) => o.e === 'prop' && o.block === a.id && o.name === '_tags')
+    assert(tagProp && Array.isArray(tagProp.value), `必须有一条写宿主的 _tags：${JSON.stringify(ops1)}`)
+    const tagId = tagProp.value[0]
     assert(
-      ops1[0].e === 'block' && ops1[0].op === 'upsert' && ops1[0].parent === null,
-      `第一条应是标签块 upsert{parent:null}：${JSON.stringify(ops1)}`,
+      ops1.some((o) => o.e === 'prop' && o.block === tagId && o.name === '_aliases'),
+      `标签块的地址要进日志：${JSON.stringify(ops1)}`,
     )
-    assert(
-      ops1[1].e === 'prop' && ops1[1].op === 'set' && ops1[1].block === a.id && Array.isArray(ops1[1].value),
-      `第二条应是归属 prop.set：${JSON.stringify(ops1)}`,
-    )
-    const tagId = ops1[1].value[0]
     const tagBlock = await page.evaluate((id) => {
       const t = window.__qua.__editor.store.find(id)
       return t ? { lists: t.props?._lists ?? [], alias: t.props?._aliases?.[0] ?? '' } : null
@@ -7100,8 +7120,8 @@ await check(
     const ops = await opShape(page)
     assert(ops.length === 1, `摘标签应恰好 1 条 op：${JSON.stringify(ops)}`)
     assert(
-      ops[0].e === 'prop' && ops[0].op === 'set' && ops[0].block === target.id && Array.isArray(ops[0].value) && ops[0].value.length === 0,
-      `那一条应是 _tags 清空的 prop.set：${JSON.stringify(ops)}`,
+      ops[0].e === 'prop' && ops[0].op === 'delete' && ops[0].block === target.id && ops[0].name === '_tags',
+      `那一条应是 _tags 的 prop.delete（空集合＝没有这一格）：${JSON.stringify(ops)}`,
     )
 
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
@@ -7200,13 +7220,16 @@ await check(
     await page.evaluate((t) => window.__qua.__editor.insertDividerAfter(t.id), target)
     await page.waitForTimeout(120)
     const ops2 = await opShape(page)
-    assert(ops2.length === 2, `有内容插线应恰好 2 条 op：${JSON.stringify(ops2)}`)
+    const block2 = ops2.filter((o) => o.e === 'block')
+    const prop2 = ops2.filter((o) => o.e === 'prop')
+    assert(block2.length === 2, `有内容插线应恰好 2 条 block op：${JSON.stringify(ops2)}`)
     assert(
-      ops2.every((o) => o.e === 'block' && o.op === 'upsert' && o.parent === target.parentId),
+      block2.every((o) => o.op === 'upsert' && o.parent === target.parentId),
       `两条都应是同级的 insert：${JSON.stringify(ops2)}`,
     )
-    assert(ops2[0].prev === target.id && ops2[1].prev === ops2[0].block, `线与空块应紧跟着源块：${JSON.stringify(ops2)}`)
-    const madeIds = [ops2[0].block, ops2[1].block]
+    assert(block2[0].prev === target.id && block2[1].prev === block2[0].block, `线与空块应紧跟着源块：${JSON.stringify(block2)}`)
+    assert(prop2.some((o) => o.block === block2[0].block && o.name === '_type' && o.value === 'core/divider'), `分割线的类型要进日志：${JSON.stringify(prop2)}`)
+    const madeIds = [block2[0].block, block2[1].block]
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(150)
     const gone = await page.evaluate((ids) => ids.every((id) => window.__qua.__editor.store.find(id) === undefined), madeIds)
@@ -7297,8 +7320,8 @@ await check(
     const ops = await opShape(page)
     assert(ops.length === 2, `删两个叶子应恰好 2 条 op：${JSON.stringify(ops)}`)
     assert(
-      ops.every((o) => o.e === 'block' && o.op === 'delete' && (o.block === made.a || o.block === made.b)),
-      `两条都应是这两块的 block.delete：${JSON.stringify(ops)}`,
+      ops.every((o) => o.e === 'block' && o.op === 'exist' && o.state === 'deleted' && (o.block === made.a || o.block === made.b)),
+      `两条都应是这两块的 block.exist{deleted}：${JSON.stringify(ops)}`,
     )
 
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
@@ -7454,18 +7477,26 @@ await check(
       const host = st.find(t.id)
       const tagBlock = st.blocks.find((b) => b.props?._lists?.includes('tag') && plain(b) === '冒烟新标签')
       return {
-        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, name: o.name, parent: o.value?.parent })),
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, name: o.name, value: o.value, parent: o.value?.parent })),
         hostTags: host?.props?._tags ?? [],
         tagId: tagBlock?.id ?? '',
         tagAtTop: st.blocks.some((b) => b.id === tagBlock?.id),
       }
     }, target)
 
+    const blockOps = after.ops.filter((o) => o.e === 'block')
+    const propOps = after.ops.filter((o) => o.e === 'prop')
     assert(
-      after.ops.length === 2 &&
-        after.ops[0].e === 'block' && after.ops[0].op === 'upsert' && after.ops[0].parent === null &&
-        after.ops[1].e === 'prop' && after.ops[1].name === '_tags' && after.ops[1].id === target.id,
-      `一次打标签应恰好 2 条 op（建标签块＋写归属，同一笔）：${JSON.stringify(after.ops)}`,
+      blockOps.length === 1 && blockOps[0].op === 'upsert' && blockOps[0].parent === null,
+      `一次打标签应只建 1 个块（parent:null）：${JSON.stringify(after.ops)}`,
+    )
+    assert(
+      propOps.some((o) => o.name === '_tags' && o.id === target.id && Array.isArray(o.value)),
+      `必须有一条写宿主 _tags：${JSON.stringify(after.ops)}`,
+    )
+    assert(
+      propOps.some((o) => o.id === after.tagId && o.name === '_aliases'),
+      `标签块的地址要进日志：${JSON.stringify(after.ops)}`,
     )
     assert(after.tagId !== '' && after.tagAtTop, '新标签块应住森林顶层')
     assert(
@@ -7521,7 +7552,7 @@ await check(
       const def = st.blocks.find((b) => plain(b) === '冒烟字段')
       const host = st.find(t)
       return {
-        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, name: o.name, parent: o.value?.parent })),
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, name: o.name, value: o.value, parent: o.value?.parent })),
         defId: def?.id ?? '',
         defAtTop: st.blocks.some((b) => b.id === def?.id),
         declared: host?.props?._fields ?? host?.props?._ownProps ?? null,
@@ -7529,11 +7560,20 @@ await check(
     }, target)
 
     assert(after.defId !== '' && after.defAtTop, `定义块应在库顶层：${JSON.stringify(after)}`)
+    const blockOps = after.ops.filter((o) => o.e === 'block')
+    const propOps = after.ops.filter((o) => o.e === 'prop')
     assert(
-      after.ops.length === 2 &&
-        after.ops[0].e === 'block' && after.ops[0].op === 'upsert' && after.ops[0].parent === null &&
-        after.ops[1].e === 'prop' && after.ops[1].op === 'set' && after.ops[1].id === target,
-      `新建定义＋声明应是同一笔恰好 2 条 op（upsert{parent:null} ＋ prop.set）：${JSON.stringify(after.ops)}`,
+      blockOps.length === 1 &&
+        blockOps[0].op === 'upsert' && blockOps[0].parent === null && blockOps[0].id === after.defId,
+      `新建定义应只建 1 个块（parent:null）：${JSON.stringify(after.ops)}`,
+    )
+    assert(
+      propOps.some((o) => o.id === after.defId && o.name === '_kind'),
+      `定义块的 _kind 要进日志：${JSON.stringify(after.ops)}`,
+    )
+    assert(
+      propOps.some((o) => o.id === target && o.name === '_ownProps'),
+      `声明要进日志：${JSON.stringify(after.ops)}`,
     )
 
     await ctx.close()
@@ -7710,7 +7750,7 @@ await check(
       const atoms = window.__qua.atoms().filter((a) => a.blockId === t.id)
       const pageId = atoms[0]?.target?.id ?? ''
       const p = pageId ? ed.store.find(pageId) : null
-      const ops = window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id, parent: o.value?.parent, prev: o.value?.prev }))
+      const ops = window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id, block: o.block ?? o.id, name: o.name, parent: o.value?.parent, prev: o.value?.prev }))
       return {
         hostText: host ? host.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null,
         atoms: atoms.map((a) => ({ kind: a.kind, target: a.target?.id ?? '' })),
@@ -7729,8 +7769,11 @@ await check(
     assert(created.pages === before.pages + 1, `页数应 +1：${before.pages} → ${created.pages}`)
     assert(created.roots === before.roots + 1, `森林根数应 +1：${before.roots} → ${created.roots}`)
     assert(created.atoms.length === 1 && created.atoms[0].kind === 'page', `引用应是 page 风味：${JSON.stringify(created.atoms)}`)
-    assert(created.ops.every((o) => o.e === 'block' && o.op === 'upsert'), `建页与插引用都走事务 op：${JSON.stringify(created.ops)}`)
-    assert(created.ops.some((o) => o.id === created.pageId && o.parent === null), `页块应报 parent:null：${JSON.stringify(created.ops)}`)
+    const createdBlockOps = created.ops.filter((o) => o.e === 'block')
+    const createdPropOps = created.ops.filter((o) => o.e === 'prop')
+    assert(createdBlockOps.every((o) => o.op === 'upsert'), `建页与插引用都走事务 op：${JSON.stringify(created.ops)}`)
+    assert(createdBlockOps.some((o) => o.id === created.pageId && o.parent === null), `页块应报 parent:null：${JSON.stringify(created.ops)}`)
+    assert(createdPropOps.some((o) => o.block === created.pageId && o.name === '_aliases'), `页的地址要进日志：${JSON.stringify(created.ops)}`)
 
     // 一次撤销：引用与页一起回滚（落点不是打字的延续）
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
@@ -8400,8 +8443,7 @@ await check(
 
 await check(
   'T101 修改时间只在编辑边界走：连打 5 字不动、离开这一行才动一次；再打再动一次；且那一次仍然恰好 1 条 op',
-  async () => {
-    const { ctx, page } = await freshPage(browser, base)
+  async () => {    const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
     await openFirstPage(page)
 
@@ -8444,18 +8486,19 @@ await check(
     assert(tBoundary > t0, `离开这一行应刷新修改时间：${t0} → ${tBoundary}`)
     const ops = await page.evaluate(() => window.__qua.lastOps().map((o) => ({ e: o.e, id: o.id, op: o.op, keys: Object.keys(o.value ?? {}) })))
     /**
-     * **恰好一条** `block.upsert`（整批，不是「这条块上的」）：时刻并进内容那条。
-     * 发成两条（内容一条、时刻一条）也「有且只有一条带 modified」，所以判据必须是**总数**。
+     * **恰好一条** `block.upsert`（整批，不是「这条块上的」）。
+     * 正文若是在这一笔才落的，时刻并进内容那条；若正文已经在更早的事务里落了，
+     * 边界这一笔就只剩时刻一条 —— 两者都是「本次净变化」的如实表达，不能拆成两条。
      */
     const upserts = ops.filter((o) => o.e === 'block' && o.op === 'upsert')
     assert(
       upserts.length === 1,
-      `边界那一次只该有一条 block.upsert（时刻并进内容那条，不发第二条）：${JSON.stringify(ops)}`,
+      `边界那一次只该有一条 block.upsert（时刻并进内容那条，或只剩时刻）：${JSON.stringify(ops)}`,
     )
     assert(upserts[0].id === id, `那条 upsert 该是这次编辑的块：${JSON.stringify(upserts)}`)
     assert(
-      upserts[0].keys.includes('content') && upserts[0].keys.includes('modified'),
-      `时刻必须并进同一条 upsert（与正文同批）：${JSON.stringify(upserts)}`,
+      upserts[0].keys.includes('modified') && upserts[0].keys.every((k) => k === 'modified' || k === 'content'),
+      `边界这一条要么是 content+modified，要么只有 modified：${JSON.stringify(upserts)}`,
     )
     assert(!ops.some((o) => o.e === 'prop'), `时刻不该走属性 op：${JSON.stringify(ops)}`)
 
@@ -11073,7 +11116,7 @@ await check('T142 挂载区里 ↵：新块是命中块的子块、留在本栏�
 
   assert(out.caretInMount, `按 ↵ 后光标应当还在挂载区里，实际焦点在 ${out.rows.length ? '别处' : '别处'}（activeElement 不在 .sec-mount 内）`)
   assert(out.rows.length === n0 + 1, `新块应当**留在本栏里看得见**：${n0} → ${out.rows.length}`)
-  assert(out.parentOfNew.parent === ids.b.slice(-6), `新块应当是命中块的子块（Roam 语义），实际父＝${out.parentOfNew.parent}，命中块＝${ids.b.slice(-6)}`)
+  assert(out.parentOfNew.parent === ids.b.slice(-6), `新块应当是命中块的子块，实际父＝${out.parentOfNew.parent}，命中块＝${ids.b.slice(-6)}`)
   await ctx.close()
   return `引用栏 ${n0}→${out.rows.length} 行；新块父＝${out.parentOfNew.parent}（命中块）；光标仍在挂载区`
 })

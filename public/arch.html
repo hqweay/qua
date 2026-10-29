@@ -293,17 +293,17 @@
     <div class="card pad">
       <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">Op — 持久化事件（3 类，一格一个地址）</b></div>
       <div class="struct">
-<span class="pipe">{</span> e: <span class="key">'block'</span>, id, op: <span class="key">'upsert'</span>, value: { content?, modified?, parent?, prev? }, at <span class="pipe">}</span>
-<span class="pipe">{</span> e: <span class="key">'block'</span>, id, op: <span class="key">'delete'</span>, at <span class="pipe">}</span>          <span class="cmt">只落操作根一条，子树不可见是继承来的</span>
+<span class="pipe">{</span> e: <span class="key">'block'</span>, id, op: <span class="key">'upsert'</span>, value: { content?, created?, modified?, parent?, prev? }, at <span class="pipe">}</span>   <span class="cmt">新块的 genesis 一次说全：位置＋出生＋时刻＋正文</span>
+<span class="pipe">{</span> e: <span class="key">'block'</span>, id, op: <span class="key">'exist'</span>, state: <span class="key">'present'</span> | <span class="key">'deleted'</span> | <span class="key">'purged'</span>, at <span class="pipe">}</span>
 <span class="pipe">{</span> e: <span class="key">'prop'</span>,  block, name, op: <span class="key">'set'</span> | <span class="key">'delete'</span>, value?, at <span class="pipe">}</span>   <span class="cmt">含 _aliases／_lists／_tags 整袋值</span>
 <span class="pipe">{</span> e: <span class="key">'anno'</span>,  block, id, op: <span class="key">'set'</span> | <span class="key">'delete'</span>, value?, at <span class="pipe">}</span>   <span class="cmt">只在真被引用时出现</span>
       </div>
-      <div class="note" style="margin-top:9px">结构用 <code>parent ＋ prev</code>（<b>前兄弟 id</b>）表达，不另造 <code>insert</code> 事件——「它现在在哪」只有一种说法。不用整数下标：下标只对「那一刻的兄弟列表」有意义，同一个下标在短列表上会静默落到别处，而 op 是不可逆历史。<b>格式与原子的一次改动就是一条 <code>upsert{content}</code></b>：内容整组替换，不是逐段记差。<b>一格只有一个地址</b>：地址与露面走 <code>prop</code> 的整袋值，不另立 <code>alias</code>／<code>list</code> 两种「按项增量」——同一个格两条账会让重放顺序决定结果、幂等性也破。只有「绝对的、按格寻址的 set」才能满足<b>应用两次等于一次</b>，而那是撤销与同步的共同前提。</div>
+      <div class="note" style="margin-top:9px">结构用 <code>parent ＋ prev</code>（<b>前兄弟 id</b>）表达，不另造 <code>insert</code> 事件——「它现在在哪」只有一种说法。不用整数下标：下标只对「那一刻的兄弟列表」有意义，同一个下标在短列表上会静默落到别处，而 op 是不可逆历史。<b>格式与原子的一次改动就是一条 <code>upsert{content}</code></b>：内容整组替换，不是逐段记差。<b>存在是一个格、三个值</b>：软删是可恢复的 <code>deleted</code>，撤销一次插入是终态 <code>purged</code>——曾经它们共用一个 <code>delete</code>，于是撤销后重开，块会从回收站冒出来。<b>一格只有一个地址</b>：地址与露面走 <code>prop</code> 的整袋值，不另立 <code>alias</code>／<code>list</code> 两种「按项增量」——同一个格两条账会让重放顺序决定结果、幂等性也破。只有「绝对的、按格寻址的 set」才能满足<b>应用两次等于一次</b>，而那是撤销与同步的共同前提。</div>
     </div>
     <div class="card pad">
       <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">落盘：两种宿主，三条不可逆契约</b></div>
       <div class="kv">
-        <dt>qua.db（Electron）</dt><dd><b>每个库一份</b> SQLite（主进程单写者，WAL）。块是<b>自己的行</b>：<code>Block</code>（正文 run 序列／annos／时刻／落库编码的 <code>parent</code>＋<code>left</code>／软删）＋ <code>BlockProperty</code>（一格一行，有序列表拆行＋<code>pos</code>）＋ <code>BlockAlias</code>（地址，主键是名字）＋ <code>BlockList</code>（露面）＋ <code>meta</code>／<code>settings</code>／<code>op_log</code>（<b>变更流</b>，与内容行<b>同一个事务</b>追加；整份替换那几笔不产 op）。schema 版本＝<code>PRAGMA user_version</code>（唯一判据，当前 {{DB_SCHEMA_VERSION}}）</dd>
+        <dt>qua.db（Electron）</dt><dd><b>每个库一份</b> SQLite（主进程单写者，WAL）。块是<b>自己的行</b>：<code>Block</code>（正文 run 序列／annos／时刻／落库编码的 <code>parent</code>＋<code>left</code>／软删）＋ <code>BlockProperty</code>（一格一行，有序列表拆行＋<code>pos</code>）＋ <code>BlockAlias</code>（地址，主键是名字）＋ <code>BlockList</code>（露面）＋ <code>meta</code>／<code>settings</code>／<code>op_log</code>（<b>变更流</b>，与内容行<b>同一个事务</b>追加；整份替换＝新 genesis：清旧日志、序号归零，再把这一批 op 写进去）。schema 版本＝<code>PRAGMA user_version</code>（唯一判据，当前 {{DB_SCHEMA_VERSION}}）</dd>
         <dt>编码在哪</dt><dd>「一个块长成哪几行」只有一份定义（<code>storage/db-rows.ts</code>）；主进程只做<b>通用 SQL</b>（表名/列名白名单，不认识块）。一次编辑只写动过的那几块 ⇒ <b>写成本不随库体量增长</b></dd>
         <dt>qua.workspace（web）</dt><dd>整库（块森林；行内内容与区间都在块上），套一层信封 <code>{ backend, envelope, data }</code>。浏览器没有用户可选目录的同等语义 ⇒ 单窗口单库</dd>
         <dt>qua.device</dt><dd>设备态：主题 / 槽宽 / 钉住清单（<b>不进 KB</b>）</dd>

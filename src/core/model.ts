@@ -58,6 +58,15 @@ export type DisplayMode = 'alias' | 'text'
  */
 export const DELETED_AT_PROP = '_deletedAt' as const
 
+/**
+ * 查询视图的**冻结结果**（`[{ blockId, path }]`）。
+ *
+ * 它是派生值：每次装载按条件重算。**不进 `op_log`**——日志记的是状态，
+ * 而这份缓存会随条件变化过期；把它写进日志会让「重放出来的库」与「装载出来的库」
+ * 在某些时刻不同，而两者本该是同一份事实。
+ */
+export const QUERY_RESULT_PROP = '_queryResult' as const
+
 /** 这一块被删了吗（只看它自己；整棵子树不可见由遍历的跳过规则保证） */
 export function isDeleted(b: Block): boolean {
   return b.props !== undefined && DELETED_AT_PROP in b.props
@@ -77,7 +86,7 @@ export type SystemPropId =
   | typeof LISTS_PROP
   | typeof DISPLAY_PROP
   | '_query'
-  | '_queryResult'
+  | typeof QUERY_RESULT_PROP
   // 字段定义（prop-def）：kind / 选项目录 / 声明列表
   | '_kind'
   | '_choices'

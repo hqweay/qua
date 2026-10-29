@@ -18,6 +18,7 @@
  */
 import type { Change, CommitBatch, LoadResult, StoragePort } from './port.ts'
 import type { Op } from '../kb/types.ts'
+import { changesOf } from '../kb/changes.ts'
 import { parseWorkspace, type ParseResult, type Workspace } from './shape.ts'
 import { rowWritesFor, workspaceToRowWrites } from './db-rows.ts'
 
@@ -41,15 +42,14 @@ export interface WorkspaceStore {
   /**
    * 提交一批 op（序列化／行编码与 changes 推导归这里）。
    *
-   * `replace` 为真 ＝ 库里现在就是这份模型（换库／撤销／首次落种子），必须整份写。
+   * `replace` 为真 ＝ 库里现在就是这份模型（种子／换库）：整份写行，**并重置变更流**
+   * （清 `op_log`、序号归零，再把这一批作为新 genesis 写进去）。日志永远不混两段历史。
    * 常规编辑传假：只写这批 op 说到的那些格。
-   * `ensure` ＝ **模型里有、盘上还没有**的块（装配期补出来的那几块，没有 op）：
-   * 按 id 把它们整块写进去。
    */
   commit: (
     ws: Workspace,
     ops: readonly Op[],
-    opts?: { replace?: boolean; ensure?: readonly string[] },
+    opts?: { replace?: boolean },
   ) => Promise<{ ok: true } | { ok: false; error: unknown }>
   clear: () => Promise<void>
   /** 等已在途的提交落盘 */
@@ -67,30 +67,10 @@ export function judge(r: LoadResult): LoadedWorkspace {
 /**
  * 一批 op ⇒ 这批 op 让**哪几类对象**失效。
  *
- * `StoragePort` 的契约只收 `Change[]`（「这类对象里这一条动过」），所以这里是 op 到
- * `Change` 的**最小投影**：内容/属性/别名/露面/标签都落在块的骨架上 ⇒ `blocks`；
- * 可引用区间是住块上的第二种对象 ⇒ `annos`。
- *
- * ⚠️ 同 kind ＋ 同 id 去重：一次打字可能对一块报好几条 op，订阅者只需要重渲染一次。
+ * 唯一实现在 `core/kb/changes.ts`：`apply` 与落盘层读同一份推导，
+ * 不再有「tx 里手写一个 ChangeSink、落盘层再从 op 推一个」的两份答案。
  */
-export function changesOf(ops: readonly Op[]): Change[] {
-  const out: Change[] = []
-  const seen = new Set<string>()
-  const add = (kind: Change['kind'], id: string): void => {
-    const key = `${kind}\u0000${id}`
-    if (seen.has(key)) return
-    seen.add(key)
-    out.push({ kind, id })
-  }
-  for (const o of ops) {
-    if (o.e === 'anno') {
-      add('annos', o.block)
-      continue
-    }
-    add('blocks', o.e === 'block' ? o.id : o.block)
-  }
-  return out
-}
+export { changesOf }
 
 export function createWorkspaceStore(port: StoragePort): WorkspaceStore {
   return {
@@ -99,7 +79,6 @@ export function createWorkspaceStore(port: StoragePort): WorkspaceStore {
 
     async commit(ws, ops, opts = {}) {
       const replace = opts.replace === true
-      const ensure = opts.ensure ?? []
       const batch: CommitBatch = {
         // 一批 op ＝ 一个事务（写适配器的契约）。零 op 且非整份替换 ⇒ 这批不是事务产的
         // （例如只换了落点），按整类提交是**保守**的如实表达
@@ -114,13 +93,14 @@ export function createWorkspaceStore(port: StoragePort): WorkspaceStore {
        */
       if (port.consumes === 'rows') {
         batch.replace = replace
-        batch.writes = replace ? workspaceToRowWrites(ws) : rowWritesFor(ws, ops, ensure)
+        batch.writes = replace ? workspaceToRowWrites(ws) : rowWritesFor(ws, ops)
         /**
          * **变更流与行写入同一批**（落库侧同一事务追加进 `op_log`）。
-         * 整份替换那几笔（种子／换库）不产 op —— 它们不是「一次编辑」，
-         * 而 `op_log` 记的是编辑流。这条边界由 `replace` 表达，不需要第二套信号。
+         *
+         * 整份替换（种子／换库）也带 op：它是**新 genesis** —— 清旧日志、序号归零、
+         * 再把这一批写进去。日志不混两段历史，重放永远从「空森林 ＋ 这一批」开始。
          */
-        if (!replace && ops.length > 0) batch.oplog = ops
+        if (ops.length > 0) batch.oplog = ops
       } else {
         batch.payload = JSON.stringify(ws)
       }

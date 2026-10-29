@@ -19,6 +19,7 @@ import type { Op } from './kb/types.ts'
 import type { Sel } from './selection.ts'
 import { applyOps as patchIndex, lookupBlock, rebuild, type Index } from './index-port.ts'
 import { applyOps, diff } from './kb/diff.ts'
+import { changesOf } from './kb/changes.ts'
 
 /**
  * 订阅者收到的信号。
@@ -96,11 +97,15 @@ export class BlockStore {
    * 分成两个入口（`applyOps` ＋ `touch`）时，第二个会把第一个的成果当场作废
    * （`touch` 无条件 `invalidateIndex`）—— 而那正是打字路径上每次按键都在发生的事。
    *
+   * `ids` **从 op 推导**（`changesOf`）：调用方不再另外传一份「这次动过谁」，
+   * 于是「索引修补的集合」与「视图重画的集合」结构上不可能分叉。
+   *
    * ⚠️ 索引是**增量修补**，不是整库作废：一批 op 之后与全量重建逐字节一致
    * （`tests/index-port.test.ts` 的等式断言钉住）。
    */
-  apply(ops: readonly Op[], source?: unknown, ids?: readonly string[]): void {
+  apply(ops: readonly Op[], source?: unknown): void {
     patchIndex(this.index, ops, this.blocks)
+    const ids = [...new Set(changesOf(ops).map((c) => c.id))]
     this.notify(source, ids)
   }
 
@@ -120,8 +125,8 @@ export class BlockStore {
    *
    * 与 `apply` 的区别：`apply` 有一批 op 可依，所以只做增量修补；
    * 这里对象全换了，没有 op 可依 ⇒ 只能整库重建。
-   * 只有两条路会走到这里：`restore`（撤销/重做）与事务失败回滚。
-   * **摘掉它 = `diff` 落地那天**（撤销改走 op 之后，就再没有「整片换掉」了）。
+   * 今天只有 `reset`（换库）会走到这里 —— 撤销改走 `diff` + `applyOps` 之后，
+   * 对象身份不变，不再需要整库重建。
    */
   discardIndex(): void {
     this.idx = null
@@ -142,7 +147,8 @@ export class BlockStore {
    * 产出 op ⇒ 装配层并进待落盘队列 ⇒ 增量写盘。所以 `⌘Z` 不再需要「清四表 + 整库重写」。
    *
    * 三条口径：
-   *   · **快照仍是唯一真相**：`applyOps` 的第二参数就是快照那份森林（要复活的块从那里取）。
+   *   · **快照仍是唯一真相**：`diff` 只回答「怎么走」；op 本身是每格的绝对值，
+   *     所以 `applyOps` 不再需要把快照当「复活块的来源」。
    *     这**不是逆 op** —— op 说的是「每一格现在是什么」，逆 op 是另一份正确性来源。
    *   · **未动块的对象身份不变**（`applyOps` 原地写格）⇒ 索引只需按 op 修补，不必整库重建。
    *   · `at` 从目标快照派生（`diff` 保证）⇒ 同一次撤销重放两次字节相同。
@@ -153,7 +159,7 @@ export class BlockStore {
     const target = JSON.parse(s.blocks) as Block[]
     const ops = diff(this.blocks, target)
     // 原地改（保持数组身份：编辑器手里的引用不会失效）
-    applyOps(this.blocks, ops, target)
+    applyOps(this.blocks, ops)
     /**
      * ⚠️ **按 op 修补索引，不作废**：`applyOps` 原地写格 ⇒ 未动块还是同一批对象。
      * 曾经这里 `discardIndex()`，因为当时是 `splice` 换掉整片森林（对象全换了）。

@@ -19,33 +19,10 @@
  * 适配器必须自己保证「同一时刻只有一次提交在飞」。
  */
 
-import type { Op } from '../kb/types.ts'
+import type { Change, ChangeKind, Op } from '../kb/types.ts'
 import type { RowWrite } from './db-rows.ts'
 
-/** 被写的两类对象：块森林 ＋ 块上的可引用区间 */
-export type ChangeKind = 'blocks' | 'annos'
-
-/**
- * 一条改动。
- *
- * ⚠️ **不带 payload**：契约只说「这类对象里的这一条动过」，不说动成了什么
- *    （落盘字节由 `CommitBatch.payload` 承载，落库行由 `CommitBatch.writes` 承载）。
- *    将来接同步层时这里会扩成 `{ kind, id, op: 'upsert' | 'delete', value }`，
- *    但**对外形状不变**——适配器照样只承诺「这批改动落盘了」。
- *
- * `id` 两种取值：
- *   · 具体 id —— 精确到块／区间；
- *   · `'*'`  —— 「这一类都可能动过」。它现在**只剩一个来源**：零 op 的提交
- *     （例如只换了落点）。那不是「不知道变了什么」，而是「这一批确实什么都没改」，
- *     适配器只需要写 meta 两格 —— 报整类是为了不假装知道具体 id。
- *
- * ⚠️ 有 op 的时候**永远**给具体 id（`changesOf` 从 op 推导）：`apply` 知道每一格。
- */
-export interface Change {
-  kind: ChangeKind
-  /** 对象 id（块／区间），或 `'*'` ＝ 整类对象都动过 */
-  id: string
-}
+export type { Change, ChangeKind }
 
 export const WHOLE_CLASS = '*'
 
@@ -64,7 +41,7 @@ export const WHOLE_CLASS = '*'
 export interface CommitBatch {
   /**
    * 这批**持久化 op** —— 「一批 op ＝ 一个事务」是写适配器的契约：
-   * SQLite 落行时一批开一个事务、`block.delete` 级联、失败整批回滚。
+   * SQLite 落行时一批开一个事务、`block.exist{purged}` 删行、失败整批回滚。
    */
   ops: Op[]
   /** 索引/订阅侧的最小失效投影（与 op 同源；适配器不消费） */
@@ -87,8 +64,12 @@ export interface CommitBatch {
   /**
    * **整份替换**：这批不是增量，而是「库里现在就是这份模型」。
    *
-   * 只有三种情况会置它：首次落种子、换库、撤销/重做（整片森林被换掉）。
-   * 常规编辑一律走增量 —— 顺手整份替换是一次数据事故，而它看起来只是「慢了一点」。
+   * 只有两种情况会置它：首次落种子、换库。常规编辑一律走增量 ——
+   * 顺手整份替换是一次数据事故，而它看起来只是「慢了一点」。
+   *
+   * ⚠️ 它与 `oplog` **不是互斥的**：整份替换是**新 genesis**，
+   *    落库侧会清旧日志、序号归零，再把这一批 op 当作新历史的第一段写进去。
+   *    「行要不要整份重写」与「这批算不算历史」是两个问题，各由一个字段回答。
    */
   replace?: boolean
   /** 跟这批一起记的自描述时间（落盘形状的一部分，见 `parseWorkspace`） */

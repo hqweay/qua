@@ -11,7 +11,7 @@
  *    谁认领哪个名字）与**内容里指向谁**（边）——按 op 修补的正是这两部分（`applyOps`）。
  * ⚠️ 本文件零 DOM、零持久化：它只吃森林，所以能直接单测。
  */
-import { aliasesOf, ALIASES_PROP, DELETED_AT_PROP, hasList, isDeleted, LISTS_PROP, type Block } from './model.ts'
+import { aliasesOf, ALIASES_PROP, hasList, isDeleted, LISTS_PROP, type Block } from './model.ts'
 import { refRunsOf } from './runs.ts'
 import { walkForest } from './walk.ts'
 import { normalizeAlias } from './alias.ts'
@@ -193,22 +193,20 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
     switch (op.e) {
       case 'block':
         if (op.op === 'upsert') applyBlockUpsert(index, op.id, op.value, forest)
-        else applyBlockDelete(index, op.id, forest)
+        else applyBlockExist(index, op.id, op.state, forest)
         break
       case 'prop':
         /**
          * 哪个属性槽喂哪张表：地址/露面 → 名字表；归属 → 成员表；日期 → 日记表；
-         * **存在（`_deletedAt`）→ 可见集合**；其余不进索引。
+         * 其余不进索引。
          *
-         * ⚠️ `_deletedAt` 这一支曾经缺失，而那时**看不出来**：撤销走整片替换 ⇒
-         *    索引被整库重建，漏掉的修补被重建盖住了。撤销改走 op 之后它立刻显形
-         *    （冒烟 T87／T143：「撤销删除后块没回到可见集合」）。
-         *    这正是「增量漏一种失效点、界面上只是偶尔少一条」的形状 —— 等式断言抓它。
+         * ⚠️ **存在（`_deletedAt`）不走 `prop`**：它是 `block.exist` 这一格。
+         *    曾经它确实在这里，而那时「软删」与「清除」共用一个 `block.delete`，
+         *    撤销一次插入再重开会让块从回收站冒出来 —— 一个格只能有一种地址。
          */
         if (op.name === ALIASES_PROP || op.name === LISTS_PROP) refreshTagsClaim(index, op.block, forest)
         else if (op.name === '_tags') refreshTagMembership(index, op.block)
         else if (op.name === '_date') refreshJournalClaim(index, op.block)
-        else if (op.name === DELETED_AT_PROP) refreshVisibility(index, op.block, forest)
         break
       // `anno` 是按需物化的可引用区间，不是指向边：边只从引用 run 提取
     }
@@ -404,7 +402,27 @@ function refreshJournalClaim(index: Index, blockId: string): void {
 }
 
 /**
- * **重算一个块的可见性**（`_deletedAt` 这一格）。
+ * **存在这一格的三态**：
+ *
+ * - `deleted`／`present`：块仍在树上（软删只是打标记），按**当前**删除态重算可见性 ——
+ *   与旧 `_deletedAt` 属性走的是同一条 `refreshVisibility`。
+ * - `purged`：块已经不在树上，但索引里还在 ⇒ 直接按「退场」摘掉整棵子树。
+ *
+ * 为什么 `purged` 不能也走 `refreshVisibility`：它在森林里找不到这块（`includeDeleted`
+ * 也找不到），而索引里的旧条目必须被摘掉 —— 那正是「同一个词两个意思」时漏掉的一支。
+ */
+function applyBlockExist(index: Index, id: string, state: 'present' | 'deleted' | 'purged', forest: readonly Block[]): void {
+  if (state === 'purged') {
+    applyBlockDelete(index, id, forest)
+    return
+  }
+  // 幂等：已经在索引里（可见）的块再收到一次 present ⇒ 一个字节都不该动
+  if (state === 'present' && index.blocks.has(id)) return
+  refreshVisibility(index, id, forest)
+}
+
+/**
+ * **重算一个块的可见性**（`block.exist` 这一格）。
  *
  * 软删是「块还在树上原位、但索引看不见它」⇒ 这一格改了要按**当前**的删除态
  * 把整棵子树加进／移出索引（子树的可不见是继承来的，所以必须整棵一起动）。
@@ -415,25 +433,29 @@ function refreshJournalClaim(index: Index, blockId: string): void {
 function refreshVisibility(index: Index, blockId: string, forest: readonly Block[]): void {
   // 走 `walkForest` 含被删块找它（`findInForest` 是可见遍历，看不见软删的块）
   let block: Block | undefined
+  let parentId: string | null = null
   walkForest(
     forest,
-    (b) => {
+    (b, ctx) => {
       if (b.id !== blockId) return
       block = b
+      parentId = ctx.parent?.id ?? null
       return false
     },
     { includeDeleted: true },
   )
   if (!block) return
-  const parentId = index.parentOf.get(blockId) ?? null
   if (isDeleted(block)) {
-    // 变不可见 ⇒ 与 `block.delete` 走同一条退场路径（摘子树、退名字/日期/成员/边）
+    // 变不可见 ⇒ 与「退场」走同一条路径（摘子树、退名字/日期/成员/边）
     applyBlockDelete(index, blockId, forest)
     return
   }
   /**
-   * 变可见 ⇒ 重新入场。`parentOf` 可能还在（软删时没删它，见 `applyBlockDelete` 会删）
-   * ⇒ 统一按「它现在挂在哪」重打：父的 `rootOf` 决定它属于哪个顶层根。
+   * 变可见 ⇒ 重新入场。
+   *
+   * ⚠️ 父**不能**从 `index.parentOf` 取：退场时它已经被摘掉了（`applyBlockDelete` 会删
+   * 子树三张表）——拿它会让恢复出来的块变成「父为空、自己是根」，
+   * 而全量重建会给出真实父。这条正是等式断言抓到的那种「哪一层都不报错」的分叉。
    */
   const rootId = parentId === null ? blockId : (index.rootOf.get(parentId) ?? blockId)
   indexSubtree(index, block, rootId, parentId)

@@ -154,11 +154,6 @@ export function probeOf(forest: readonly Block[], ids: Iterable<string>): Forest
   return { get: (id) => found.get(id) }
 }
 
-/** 一块在森林里的位置（找不到 ⇒ 顶层：它本来就不该被写到别的父下面） */
-function positionOf(forest: readonly Block[], id: string): { parent: string | null; left: string | null } {
-  return positionsOf(forest).get(id) ?? { parent: null, left: null }
-}
-
 /**
  * 整片森林的「id → 位置」表（`parent` ＋ `left`）。
  *
@@ -339,9 +334,12 @@ export function workspaceToRowWrites(ws: StoredWorkspace): RowWrite[] {
  * | op | 写什么 | 为什么 |
  * |---|---|---|
  * | `block.upsert{content, modified}`（打字） | 只改这两列（`update`） | 一次打字只碰一格；整块写会把这块的属性/地址一起重写，白写 |
+ * | `block.upsert{created}`（genesis 的一部分） | 只改 `created` 一列 | 出生时刻只写一次；行已由位置 op 的整块写建好 |
  * | `block.upsert{parent, prev}`（新建/移动） | **整块**（`upsert` ＋ 子表） | 新块的行还不存在，而 op 只带落点 ⇒ 只能回头读模型 |
- * | `block.delete`（软删） | 只改 `deleted` 一列 | 原位软删：块留在树里，行也在 |
- * | `prop` / `alias` / `list` | 只动那一格 | op 自带新值 |
+ * | `block.exist{deleted}`（软删） | 只改 `deleted` 一列 | 原位软删：块留在树里，行也在 |
+ * | `block.exist{present}`（恢复） | 把 `deleted` 清成 null | 摘掉标记，行原样留着 |
+ * | `block.exist{purged}`（清除） | **删掉这块的全部行** | 撤销一次插入要的是「真的不在」，不是「进回收站」 |
+ * | `prop` | 只动那一格 | op 自带新值 |
  * | `anno` | 只改 `annos` 一列（要读模型） | annos 是一整列，op 是按条报的 |
  *
  * ## 为什么「改一格」走 `update` 而不是 `upsert`
@@ -356,14 +354,6 @@ export function workspaceToRowWrites(ws: StoredWorkspace): RowWrite[] {
 export function rowWritesFor(
   ws: StoredWorkspace,
   ops: readonly Op[],
-  /**
-   * **模型里有、盘上还没有**的块（装配期补出来的那几块：今日那块、空天的首子块）。
-   *
-   * 它们没有 op（补块发生在事务之外），但盘上确实还没有它们 ——
-   * 不写进去的后果不是报错：那块永远没有行，它下面的字会以「父块不存在」的形状
-   * 变成顶层块，下次装载时自己冒出来。
-   */
-  ensure: readonly string[] = [],
 ): RowWrite[] {
   const out: RowWrite[] = []
   /** 需要整块的块（新进来/被移动的）：只有它们要回头读模型 */
@@ -373,26 +363,31 @@ export function rowWritesFor(
     if (op.e === 'block' && op.op === 'upsert' && op.value.parent !== undefined) structural.add(op.id)
     else if (op.e === 'anno') annoBlocks.add(op.block)
   }
-  const look = probeOf(ws.blocks, [...ensure, ...structural, ...annoBlocks])
+  const look = probeOf(ws.blocks, [...structural, ...annoBlocks])
 
   const done = new Set<string>()
-  /**
-   * 装配期补出来的块：**整块写**（它们没有 op，位置只能从森林现算）。
-   * 先写它们，再把 `done` 留给 op 那一轮判重 —— 顺序反过来会让
-   * 「op 里带着落点的新块」被这里的现算位置覆盖掉。
-   */
-  for (const id of ensure) {
-    const b = look.get(id)
-    if (!b) continue
-    out.push(...blockWrites(b, positionOf(ws.blocks, id)))
-  }
   for (const op of ops) {
     switch (op.e) {
       case 'block': {
-        if (op.op === 'delete') {
-          // 原位软删：块带着子树留在树里，只写删除时刻（`op.at` 就是它，见 `Tx.remove`）
-          out.push({ table: 'Block', op: 'update', key: { id: op.id }, values: { deleted: op.at } })
+        if (op.op === 'exist') {
+          /**
+           * **存在这一格的三态**。`deleted`／`present` 是「块还在树上」的两种状态，
+           * 只改 `deleted` 一列；`purged` 是**真的不在** —— 删掉块行与三张子表。
+           *
+           * ⚠️ 这里曾经把 `block.delete` 一律写成 `deleted = at`。于是「撤销一次插入」
+           * （`diff` 的清除）与「删块」（软删）落成了同一个形状：撤销后重开，块从回收站冒出来。
+           */
+          if (op.state === 'deleted') {
+            out.push({ table: 'Block', op: 'update', key: { id: op.id }, values: { deleted: op.at } })
+          } else if (op.state === 'present') {
+            out.push({ table: 'Block', op: 'update', key: { id: op.id }, values: { deleted: null } })
+          } else {
+            out.push(...clearBlock(op.id))
+          }
           break
+        }
+        if (op.value.created !== undefined && op.value.parent === undefined) {
+          out.push({ table: 'Block', op: 'update', key: { id: op.id }, values: { created: op.value.created } })
         }
         if (op.value.parent !== undefined) {
           if (done.has(op.id)) break
@@ -468,15 +463,14 @@ export function rowWritesFor(
 }
 
 /**
- * 升成列的系统属性：`_display`／`_kind`／`_date`／`_query`／`_type`／`_deletedAt`。
+ * 升成列的系统属性：`_display`／`_kind`／`_date`／`_query`／`_type`。
  *
  * 它们不进属性表（见文件头的表），所以「写一格属性」在这里要分叉一次：
  * 是列 ⇒ 改列；不是列 ⇒ 走属性表（由调用方做）。
+ *
+ * ⚠️ `_deletedAt` 不在这里：它是 `block.exist` 这一格，不是一个普通 prop。
  */
 function columnWrites(block: string, name: string, value: unknown): RowWrite[] {
-  if (name === DELETED_AT_PROP) {
-    return [{ table: 'Block', op: 'update', key: { id: block }, values: { deleted: typeof value === 'number' ? value : null } }]
-  }
   const col = COLUMN_PROPS[name]
   if (col === undefined) return []
   return [{ table: 'Block', op: 'update', key: { id: block }, values: { [col]: columnValue(name, value) } }]

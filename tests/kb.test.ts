@@ -17,7 +17,14 @@ import { MemoryKb } from '../src/core/kb/memory.ts'
 import { seedWorkspace } from '../src/core/seed.ts'
 import { plainText, textRuns, type Anno, type RefRun } from '../src/core/runs.ts'
 
-const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, content: textRuns(text), children: [], ...extra })
+const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({
+  id,
+  content: textRuns(text),
+  children: [],
+  created: 1000,
+  modified: 1000,
+  ...extra,
+})
 
 /**
  * 一份小而全的库，手造（不依赖 DOM，也不依赖夹具的规模）：
@@ -173,13 +180,12 @@ test('patch 改内容 ＋ 时刻 ⇒ **仍然一条** upsert{content, modified}�
   assert.equal(kb.get('c1')!.modified, 2000)
 })
 
-test('patch 只改时刻（换位置/缩进）⇒ 一条 upsert{content, modified}，不带属性', () => {
-  // 写路径按设计总是带上正文（它就是这一块的正文槽），所以这里断言的是
-  // 「**只有一条**、且属性袋没被牵进来」，而不是「正文那一格不出现」。
+test('patch 只改时刻（换位置/缩进）⇒ 一条 upsert{modified}，不重写正文、不带属性', () => {
+  // 出口按**净变化**发 op：正文没变就不写正文那一格，只写时刻。
   const { kb } = fixture()
   const r = kb.tx((tx) => tx.patch('c1', (x) => (x.modified = 3000)))
   assert.equal(r.ops.length, 1)
-  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { content: textRuns('一'), modified: 3000 } }])
+  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { modified: 3000 } }])
 })
 
 test('patch 什么都没变 ⇒ 零 op（幂等的边界不该产账）', () => {
@@ -198,7 +204,7 @@ test('patch 改属性 ⇒ prop.set 照旧；写属性值顺带记时刻 ⇒ 一�
   const now = kb.get('c1')!.modified
   assert(now > 1, `写值必须刷新时刻：1 → ${now}`)
   assert.deepEqual(bare(r.ops), [
-    { e: 'block', id: 'c1', op: 'upsert', value: { content: textRuns('一'), modified: now } },
+    { e: 'block', id: 'c1', op: 'upsert', value: { modified: now } },
     { e: 'prop', block: 'c1', name: TASK_STATUS_PROP_ID, op: 'set', value: true },
   ])
 })
@@ -225,7 +231,7 @@ test('patch 改属性 ⇒ prop.set；删属性 ⇒ prop.delete（值不变不动
   assert.deepEqual(bare(r2.ops), [{ e: 'prop', block: 'c1', name: 'prop-b', op: 'delete' }])
 })
 
-test('patch 就地改属性数组也算改动（快照要深拷贝）', () => {
+test('patch 就地改属性数组也算改动（快照要深拷贝；op 里的值是当时的快照）', () => {
   const { kb } = fixture()
   kb.tx((tx) => tx.setProp('c1', 'arr', ['a']))
   const r = kb.tx((tx) => {
@@ -234,6 +240,9 @@ test('patch 就地改属性数组也算改动（快照要深拷贝）', () => {
     })
   })
   assert.deepEqual(bare(r.ops), [{ e: 'prop', block: 'c1', name: 'arr', op: 'set', value: ['a', 'b'] }])
+  // op 会在 pendingOps 里活到防抖窗口结束；之后就地改模型不能倒着改账
+  ;(kb.get('c1')!.props!.arr as string[]).push('后来的')
+  assert.deepEqual((r.ops[0] as { value: string[] }).value, ['a', 'b'], 'op 的值必须是当时的快照')
 })
 
 test('patch 改 children ⇒ 抛错（结构必须走 insert/move/remove）', () => {
@@ -253,14 +262,24 @@ test('patch 改 children ⇒ 抛错（结构必须走 insert/move/remove）', ()
 
 /* ------------------------------------------------------------ 写面：结构 */
 
-test('insert ⇒ block.upsert{parent,prev}（子树里每一块都有落点）', () => {
+test('insert ⇒ 每块一条 genesis（位置＋出生＋时刻＋正文）', () => {
   const { kb } = fixture()
   const n1 = b('n1', '新', { children: [b('n1a', '新·一')] })
   // c1 是 p1 的第一块 ⇒ 插在它前面时，前兄弟是 null
   const r = kb.tx((tx) => tx.insert(n1, 'c1', 0))
   assert.deepEqual(bare(r.ops), [
-    { e: 'block', id: 'n1', op: 'upsert', value: { parent: 'c1', prev: null } },
-    { e: 'block', id: 'n1a', op: 'upsert', value: { parent: 'n1', prev: null } },
+    {
+      e: 'block',
+      id: 'n1',
+      op: 'upsert',
+      value: { parent: 'c1', prev: null, created: 1000, modified: 1000, content: textRuns('新') },
+    },
+    {
+      e: 'block',
+      id: 'n1a',
+      op: 'upsert',
+      value: { parent: 'n1', prev: null, created: 1000, modified: 1000, content: textRuns('新·一') },
+    },
   ])
   assert.deepEqual(kb.children('c1').map((x) => x.id), ['n1', 'g1'])
 })
@@ -270,7 +289,14 @@ test('insert 到根 ⇒ parent 为 null 且落在根数组里；前兄弟＝当�
   const n1 = b('n1', '新的页')
   const r = kb.tx((tx) => tx.insert(n1, null, kb.roots().length))
   // 根＝[p1, p2, t1] ⇒ 追加到末尾时前兄弟是 t1（**不是** index 3）
-  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'n1', op: 'upsert', value: { parent: null, prev: 't1' } }])
+  assert.deepEqual(bare(r.ops), [
+    {
+      e: 'block',
+      id: 'n1',
+      op: 'upsert',
+      value: { parent: null, prev: 't1', created: 1000, modified: 1000, content: textRuns('新的页') },
+    },
+  ])
   assert.equal(kb.roots().at(-1)?.id, 'n1')
 })
 
@@ -297,11 +323,11 @@ test('move 报的前兄弟是**最终位置**的前一块（先摘再落）：�
   assert.deepEqual(kb.children('p1').map((x) => x.id), ['c1', 'c2'])
 })
 
-test('remove ⇒ 原位软删：操作根恰好 1 条 block.delete；get 不到、块带标记留在森林原位（子树完整）', () => {
+test('remove ⇒ 原位软删：操作根恰好 1 条 block.exist{deleted}；get 不到、块带标记留在森林原位（子树完整）', () => {
   const { kb, store } = fixture()
   const r = kb.tx((tx) => tx.remove('c1'))
   // op 只落操作根：子树的不可见是继承来的，后代不各报一条（落库也是一行的事）
-  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'delete' }])
+  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'exist', state: 'deleted' }])
   assert.deepEqual(r.changes.map((c) => c.id), ['c1'])
   assert.equal(kb.get('c1'), undefined, '可见遍历看不见它')
   assert.equal(kb.get('g1'), undefined, '整棵子树都看不见')
@@ -321,12 +347,11 @@ test('remove ⇒ 原位软删：操作根恰好 1 条 block.delete；get 不到�
   assert.deepEqual(kb.trash().map((b) => b.id), ['c1'], '派生回收站里是操作根')
 })
 
-test('restore ⇒ 摘掉标记回原位：op 是一条 upsert{parent,prev}；整棵子树重新可见', () => {
+test('restore ⇒ 摘掉标记回原位：op 是一条 exist{present}；整棵子树重新可见', () => {
   const { kb, store } = fixture()
   kb.tx((tx) => tx.remove('c1'))
   const r = kb.tx((tx) => tx.restore('c1'))
-  // c1 是 p1 的第 0 个孩子 ⇒ 前兄弟 null
-  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { parent: 'p1', prev: null } }])
+  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'exist', state: 'present' }])
   assert.equal(plainText(kb.get('c1')!.content), '一')
   assert.equal(plainText(kb.get('g1')!.content), '一·一', '子树随根一起回来')
   assert.deepEqual(kb.trash(), [], '派生回收站清空')
@@ -361,11 +386,11 @@ test('setAliases 只换序也报改动（首个是主名），整袋值带新序
   assert.deepEqual(kb.get('p1')?.props?._aliases, ['首页', '页面一'])
 })
 
-test('setAliases 摘干净 ⇒ 一条 prop.set([])：空数组 ＝ 没有这一格（读侧口径一致）', () => {
+test('setAliases 摘干净 ⇒ 一条 prop.delete(_aliases)：空集合 ＝ 没有这一格（读侧口径一致）', () => {
   const { kb } = fixture()
   kb.tx((tx) => tx.setAliases('p1', ['首页']))
   const r = kb.tx((tx) => tx.setAliases('p1', []))
-  assert.deepEqual(bare(r.ops), [{ e: 'prop', block: 'p1', name: '_aliases', op: 'set', value: [] }])
+  assert.deepEqual(bare(r.ops), [{ e: 'prop', block: 'p1', name: '_aliases', op: 'delete' }])
   assert.equal(kb.get('p1')?.props?._aliases, undefined, '空数组不留属性槽')
 })
 
@@ -399,7 +424,7 @@ test('setTags 的 diff ⇒ 一条 prop.set(_tags)；摘干净时属性槽不留�
   assert.deepEqual(bare(r.ops), [{ e: 'prop', block: 'c1', name: '_tags', op: 'set', value: ['t1'] }])
 
   const r2 = kb.tx((tx) => tx.setTags('c1', []))
-  assert.deepEqual(bare(r2.ops), [{ e: 'prop', block: 'c1', name: '_tags', op: 'set', value: [] }])
+  assert.deepEqual(bare(r2.ops), [{ e: 'prop', block: 'c1', name: '_tags', op: 'delete' }])
   assert.equal(kb.get('c1')?.props?._tags, undefined, '空数组不留：空与没有不能有两份答案')
 })
 
@@ -459,7 +484,7 @@ test('tx 抛错 ⇒ 内存恢复、索引可用、不返回半批', () => {
   assert.equal(plainText(kb.get('c1')!.content), '一')
 })
 
-test('tx 里改两次同一块 ⇒ change 去重，op 各自成条', () => {
+test('tx 里改两次同一块 ⇒ 出口只发**净变化**一条 op，change 去重', () => {
   const { kb } = fixture()
   const r = kb.tx((tx) => {
     tx.patch('c1', (x) => {
@@ -469,7 +494,8 @@ test('tx 里改两次同一块 ⇒ change 去重，op 各自成条', () => {
       writeBlockContent(x, textRuns('乙'))
     })
   })
-  assert.equal(r.ops.length, 2)
+  assert.equal(r.ops.length, 1)
+  assert.deepEqual(bare(r.ops), [{ e: 'block', id: 'c1', op: 'upsert', value: { content: textRuns('乙') } }])
   assert.deepEqual(r.changes, [{ kind: 'blocks', id: 'c1' }])
 })
 

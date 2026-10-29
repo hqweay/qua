@@ -36,15 +36,17 @@ export const LIBRARY_FORMAT = 1
  * `app.json.version` 判「注册表怎么读」、`WORKSPACE_VERSION` 是当前过渡期的载荷版本 ——
  * 三者都不判「这份数据能不能读」，只有这一格判。
  *
- * 为什么是 2：v1 是过渡形状——`workspace` 表里一整份库 JSON，每次编辑整份覆盖写
+ * 为什么是 3：v1 是过渡形状——`workspace` 表里一整份库 JSON，每次编辑整份覆盖写
  * （写成本随库体量线性增长）。v2 把块拆成 `Block`／`BlockProperty`／`BlockAlias`／`BlockList`
- * 四张表，一次编辑只写它动过的那几块的行。
+ * 四张表，一次编辑只写它动过的那几块的行。v3 是**日志即状态**：`op_log` 的 op 形状改成
+ * 完整、可重放的格写入（`block.exist` 三态、genesis 带 `created`/内容），
+ * 旧的 op 历史按「升版作废」的纪律丢掉。
  *
- * **v1 → v2 不写迁移**：原型不做旧数据迁移，旧库作废重 seed（`judgeDbVersion` 判到
- * `migrate` 时 `MIGRATIONS` 里没有对应步骤 ⇒ 打开失败并明确报出来，不是静默丢数据）。
+ * **不写数据迁移**：原型不做旧数据迁移，旧库作废重 seed（`judgeDbVersion` 判到
+ * `migrate` 时跑 `MIGRATIONS` 里那一步**只丢旧形状、不搬数据**的 DDL）。
  * `user_version` 只增不减。
  */
-export const DB_SCHEMA_VERSION = 2
+export const DB_SCHEMA_VERSION = 3
 
 /** `meta` 表里被代码解释的键（其余键归将来，不在这里登记）。 */
 export const META_KEYS = {

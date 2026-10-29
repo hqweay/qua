@@ -246,10 +246,11 @@ export function saveContent(
 ): number {
   /**
    * **变更流与行写入同一个事务**（`applyRowWrites` 内部把它并进同一层事务）。
-   * 整份替换那几笔（种子／换库）不产 op ⇒ `oplog` 为空，`replace` 时也不追。
+   * 整份替换（种子／换库）也是**新 genesis**：清旧日志、序号归零，
+   * 再把这一批 op 作为新历史的第一段写进去。
    */
   const changed = opts.replace
-    ? replaceContentRows(session.db, writes)
+    ? replaceContentRows(session.db, writes, { deviceId: session.deviceId, oplog: opts.oplog })
     : applyRowWrites(session.db, writes, { deviceId: session.deviceId, oplog: opts.oplog })
   session.writes.rows += changed
   session.writes.saves += 1
