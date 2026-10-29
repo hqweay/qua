@@ -327,10 +327,8 @@ export function setupPanels(deps: PanelsDeps) {
           scheduleSave()
           scheduleBadge()
         },
-        onFocus: () => {
-          const inst = mountInstances.get(hostId)
-          if (inst?.area.blockEditor) deps.setEd(inst.area.blockEditor)
-        },
+        // 焦点进挂载区 ⇒ 活动编辑器就是那一个（键位走命令层，认的是它）
+        onFocus: (editor) => deps.setEd(editor),
         // 与正文同一套事件（点引用/块标/右键菜单/`#`·`@` 补全），装配层只给这一份
         wire: (editor, change) => deps.wireEditor(editor, change, 'mount'),
         onAddTab: (id) => openMountPicker(id),
@@ -357,10 +355,7 @@ export function setupPanels(deps: PanelsDeps) {
             scheduleSave()
             scheduleBadge()
           },
-          onFocus: () => {
-            const inst = mountInstances.get(hostId)
-            if (inst?.query) deps.setEd(inst.query.editor)
-          },
+          onFocus: (editor) => deps.setEd(editor),
           wire: (editor, change) => deps.wireEditor(editor, change, 'query'),
           toast: (text, kind) => app.toast(text, kind),
         })
@@ -457,10 +452,18 @@ export function setupPanels(deps: PanelsDeps) {
      * 收掉「这一屏已经不该有它」的实例。判据是**它还是不是这次的段根**，不是「这一轮有没有见到」：
      * 虚拟化的窗口之外那些段这一轮确实没见到，但它们是同一屏的其余部分——滚回去还要用同一个
      * 实例（否则每滚一下 tab 的激活项与撤销栈都重置一次）。
+     *
+     * 摘掉＝退订＋卸事件（游离容器不该继续被重画）；活动编辑器若正指着它，退回正文
+     * ——键位走命令层，认的是 `ed`，指着一个已卸事件的编辑器会把按键静默丢掉。
      */
     for (const [id, inst] of mountInstances) {
       if (roots.some((r) => r.id === id)) continue
+      for (const ed of [inst.area.blockEditor, inst.query ? inst.query.editor : null]) {
+        if (ed && deps.getEd() === ed) deps.setEd(deps.getMainEd())
+      }
+      inst.query?.dispose()
       inst.query?.root.remove()
+      inst.area.dispose()
       inst.area.root.remove()
       mountInstances.delete(id)
     }

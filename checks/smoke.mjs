@@ -11560,6 +11560,92 @@ await check('T147 外链：插入成 LinkRun；点一下被拦下并交给壳；
   return `外链：插入成 link run、点一次交一次给壳、非 http(s) 插不进也打不开且有文案`
 })
 
+/* ---------------------------------------------------------------- T148 */
+
+/**
+ * **一源三视的同步闭环**：同一块在正文、挂载区、侧槽窗口同时可见时，在任意一处
+ * 改一个字，另外两处要跟上；一次 ⌘Z 三处一起回滚。
+ *
+ * 三处是三台编辑器实例，共享同一个 store。同步不靠视图之间互相转发（那会漏接），
+ * 靠「写入口只有一个、通知只有一条」——这条用例守的就是这个装配契约：
+ * 任何一台自己画的行（挂载区），别的两台（正文、窗口）都要在防抖窗口后跟上。
+ *
+ * 末段顺带钉窗口的事件表是**整份** viewEvents：右键在窗口里也要有块菜单。
+ * 只手接几支事件的时候，缺的那几样在窗口里点了就是没反应——漏接不报错。
+ */
+await check('T148 一源三视：挂载区里改字 ⇒ 正文与右槽窗口都跟上；⌘Z 一次三处回滚；窗口右键有块菜单', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.loadState('seed'))
+  await page.waitForTimeout(300)
+
+  // 页 P 的一个叶子块 b 引用 P ⇒ b 出现在 P 的「引用」栏（与 T135 同一招）
+  const ids = await page.evaluate(() => {
+    const P = window.__qua.pages()[0].id
+    window.__qua.invoke('core.page/open', { pageId: P })
+    const rows = window.__qua.__editor.rows().map((r) => r.block)
+    const b = rows.find((x) => x.id !== P && x.children.length === 0)
+    window.__qua.focusBlock(b.id, 999)
+    window.__qua.invoke('core.editor/insert-page-ref', { pageId: P })
+    return { P, b: b.id }
+  })
+  await page.waitForTimeout(450)
+
+  // 同一块再开进右槽 ⇒ 正文／挂载区／窗口三处同时可见
+  await page.evaluate((id) => window.__qua.invoke('core.dock/open-block', { blockId: id, side: 'right' }), ids.b)
+  await page.waitForTimeout(350)
+
+  /** 同一块此刻在三个视图里的正文（挂载区/查询视图也住在 #editor 里，读数要把它们排除） */
+  const readThree = () =>
+    page.evaluate((b) => {
+      // #editor 里同名行有两份：正文那一份，与段尾槽里挂载区的那一份
+      const main = [...document.querySelectorAll(`#editor .blk[data-block-id="${b}"] > .tx`)].find((e) => !e.closest('.mount, .queryview'))?.textContent ?? ''
+      return {
+        main,
+        mount: document.querySelector(`#editor .mount .mount-editor .blk[data-block-id="${b}"] .tx`)?.textContent ?? '',
+        dock: document.querySelector(`#dock-right .dock-card[data-window="1"][data-card-id="${b}"] .dock-window-editor .blk[data-depth="0"] > .tx`)?.textContent ?? '',
+      }
+    }, ids.b)
+
+  const before = await readThree()
+  assert(before.main.length > 0, `前置：正文里应看得见它：${JSON.stringify(before)}`)
+  assert(before.mount.length > 0, `前置：挂载区「引用」栏里应看得见它：${JSON.stringify(before)}`)
+  assert(before.dock.length > 0, `前置：右槽窗口里应看得见它：${JSON.stringify(before)}`)
+  assert(before.main === before.mount && before.mount === before.dock, `同一块三处应显示同一份正文（一源三视）：${JSON.stringify(before)}`)
+
+  // ① 在挂载区那一处改字：自己那一行立即变（自己的编辑路径），正文与窗口要在防抖窗口后跟上
+  const row = `#editor .mount .mount-editor .blk[data-block-id="${ids.b}"] .tx`
+  await page.locator(row).first().click()
+  await page.keyboard.press('End')
+  await page.keyboard.type('X')
+  await page.waitForTimeout(500)
+  const edited = await readThree()
+  assert(edited.mount.includes('X'), `挂载区里改字应当立即显示：${JSON.stringify(edited)}`)
+  assert(edited.main.includes('X'), `正文里的同一块应当跟上：${JSON.stringify(edited)}`)
+  assert(edited.dock.includes('X'), `右槽窗口里的同一块应当跟上：${JSON.stringify(edited)}`)
+
+  // ② 一次 ⌘Z（焦点还在挂载区）：三处一起回滚
+  await page.locator(row).first().click()
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(500)
+  const undone = await readThree()
+  assert(!undone.mount.includes('X'), `挂载区应回滚：${JSON.stringify(undone)}`)
+  assert(!undone.main.includes('X'), `正文应一起回滚（共享 undo 栈）：${JSON.stringify(undone)}`)
+  assert(!undone.dock.includes('X'), `右槽窗口应一起回滚（共享 undo 栈）：${JSON.stringify(undone)}`)
+  assert(undone.main === before.main && undone.mount === before.mount && undone.dock === before.dock, `回滚后三处应回到改字前的同一份正文：${JSON.stringify(undone)}`)
+
+  // ③ 窗口的事件表是整份：右键窗口里的块标 ⇒ 块菜单（不是「点了没反应」）
+  await page.locator(`#dock-right .dock-card[data-window="1"][data-card-id="${ids.b}"] .blk[data-depth="0"] > .left > .marker`).first().click({ button: 'right' })
+  await page.waitForTimeout(250)
+  const menu = await page.evaluate(() => ({
+    open: Boolean(document.querySelector('.layer')),
+    rows: document.querySelectorAll('.layer-item').length,
+  }))
+  assert(menu.open && menu.rows > 0, `窗口里右键应出块菜单（事件表整份，不是只接几支）：${JSON.stringify(menu)}`)
+  await page.keyboard.press('Escape')
+  await ctx.close()
+  return `一源三视：改字三处同步、⌘Z 三处回滚、窗口右键有菜单（${menu.rows} 项）`
+})
+
 /**
  * ⚠️ **报告先写，再关浏览器。** 反过来的话，机器被压死那一刻 Chrome 先死，
  *    `browser.close()` 抛出来，报告就永远没写 —— 编排端只能看到「这一片没留下报告」，

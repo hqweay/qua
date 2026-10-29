@@ -5,7 +5,7 @@
  * 清单已经变成槽的 `cards`（位置），这里只按 id 建/拆卡片。
  *
  * 三件事：
- *   1. 用 `BlockEditor` 把**共享 store 里的活块**渲染成一张卡（不是拷贝）；
+ *   1. 用 `EditableBlock` 把**共享 store 里的活块**渲染成一张卡（不是拷贝）；
  *   2. 卡头显示这个块的**路径**（父 > 父），不是重复正文；
  *   3. 卡片自己的折叠/单卡/拖拽由 `ui/dock.ts` 的统一卡壳提供，
  *      这里只提供 body 与关闭入口。
@@ -14,19 +14,17 @@
  *    多实例共享同一个 `BlockStore`（undo 也是全局的），所以「槽里改、正文同步」。
  * ⚠️ **重画不得移动常驻卡片**：卡片是槽层的 entry，按顺序原地不动；
  *    移动一个正在编辑的 contenteditable 会丢焦点与光标（每敲一个字跳一次）。
- * ⚠️ **外部 store 变化防抖重载**：正文每敲一个键都会 `touch`，若每键重画整槽，
- *    侧槽会跟着抖；聚焦在某个窗口里时干脆冻结（用户正在这里打字）。
+ * ⚠️ **重载节奏在 `EditableBlock` 里**（每个窗口一份，各管各的卡：防抖、聚焦冻结、
+ *    离焦补做）。正文每敲一个键都会 `touch`，每键重画整槽会让侧槽跟着抖；
+ *    聚焦在某个窗口里时冻结（用户正在这里打字）。
  */
 import { flatten, type Block, type BlockStore } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
-import { BlockEditor, type Run } from '../view/editor.ts'
-import type { RefClickHit, RefClickMods } from '../view/editor-events.ts'
+import type { BlockEditor, Run } from '../view/editor.ts'
 import { bindDropTarget } from '../view/dnd.ts'
 import { applyDockCardState, buildDockCard, type DockCardState } from './dock.ts'
-
-/** 外部变化到侧槽重画的防抖窗口（比正文落盘的 250ms 短，读起来才像「实时」） */
-const RELOAD_DEBOUNCE_MS = 120
+import { EditableBlock } from './editable-block.ts'
 
 export interface DockWindowsDeps {
   store: BlockStore
@@ -38,63 +36,29 @@ export interface DockWindowsDeps {
   label: (blockId: string) => string
   /** 关闭窗口（**不删块**） */
   onClose: (blockId: string) => void
-  /** 窗口编辑器获得焦点：装配层把「活动编辑器」切过去 */
+  /**
+   * **给窗口编辑器接上与正文同一套事件表**（装配层的 `viewEvents` 是唯一一份）。
+   *
+   * ⚠️ 必须整份接上：只手接几支的话，缺的那几样（右键块菜单、`#`·`@` 补全、
+   *    撞名提示…）在窗口里点了就是没反应——漏接不报错。
+   */
+  wire: (editor: BlockEditor, change: (kind: string) => void) => void
+  /** 窗口编辑器获得焦点：装配层把「活动编辑器」切过来 */
   onFocus: (editor: BlockEditor) => void
   /** 窗口被拆掉：装配层若正把 `ed` 指着它，要退回正文 */
   onDispose: (editor: BlockEditor) => void
   /** 窗口编辑器改了模型 */
   onChange: () => void
-  /** 点窗口内块的块标：与正文同一个「聚焦/zoom」命令 */
-  onFocusBlock: (blockId: string) => void
-  /** Shift+点窗口内块的块标：在右槽打开（已在右槽则定位；不在则移过去） */
-  onOpenInDock: (blockId: string) => void
   /** 这张卡的收起/单卡/拖拽状态（装配层按 prefs 现算） */
   cardState: (blockId: string) => DockCardState
-  /**
-   * **「指向某块的露面」被点**（行内引用 / 行尾标签 chip）。
-   *
-   * ⚠️ 侧槽的窗口是**生产装配里的编辑器实例**，与正文同一个口径。
-   *    不接它，槽里那张卡上的引用与标签点了就没反应 —— 而缺入口最糟的形态
-   *    不是报错，是「看起来点了、其实什么都没发生」。
-   */
-  onRefClick: (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement) => void
 }
 
 export class DockWindows {
   private readonly deps: DockWindowsDeps
-  private readonly windows = new Map<string, { editor: BlockEditor; card: HTMLElement }>()
-  private timer: number | null = null
-  /** 聚焦期间跳过的外部重载：失焦后补一次（否则窗口里的内容会停在旧值） */
-  private frozen = false
+  private readonly windows = new Map<string, { block: EditableBlock; card: HTMLElement }>()
 
   constructor(deps: DockWindowsDeps) {
     this.deps = deps
-    /**
-     * 自己订阅 store（编辑器实例设了 `autoReload: false`）：
-     * 防抖 + 聚焦冻结。`ids` 能拿到时只重载**真的被改到**的那些窗口。
-     * ⚠️ 来源是**其中一个**窗口时不能整个跳过：一次撤销会改到别的窗口，
-     *    只有发起编辑的那一个自己不需要重画（它已经渲染过了）。
-     */
-    deps.store.subscribe((source, ids) => {
-      const own = this.ownEditor(source)
-      if (own) {
-        this.scheduleReload(ids, own)
-        return
-      }
-      if (this.hasFocus()) {
-        this.frozen = true
-        return
-      }
-      this.scheduleReload(ids)
-    })
-    document.addEventListener('focusout', () => {
-      window.setTimeout(() => {
-        if (this.hasFocus()) return
-        if (!this.frozen) return
-        this.frozen = false
-        this.reloadAll()
-      }, 0)
-    })
   }
 
   /**
@@ -125,18 +89,38 @@ export class DockWindows {
     return out
   }
 
-  private ensure(id: string, block: Block): { editor: BlockEditor; card: HTMLElement } {
+  private ensure(id: string, block: Block): { block: EditableBlock; card: HTMLElement } {
     const had = this.windows.get(id)
     if (had) return had
 
     const host = document.createElement('div')
     host.className = 'dock-window-editor'
 
+    const win = new EditableBlock({
+      host,
+      store: this.deps.store,
+      write: this.deps.write,
+      // 窗口不是「真实兄弟序」：点空白不建块、删段根不删块（只是同一批块的一个视图）。
+      // roots 是「一个块一张卡」，构造时就知道；此后 `load` 只按 id 重取。
+      initialRoots: [block],
+      load: (ed, ids) => {
+        if (!ed) return
+        // 与己无关的变化不重画（拿得到 ids 时）；拿不到（结构操作）按全量重取
+        if (ids && !ids.some((i) => flatten(ed.doc).some((b) => b.id === i))) return
+        ed.reloadFromStore()
+      },
+      wire: (editor, change) => this.deps.wire(editor, change),
+      onChange: () => this.deps.onChange(),
+      onFocus: (editor) => this.deps.onFocus(editor),
+    })
+    // 窗口建了就有编辑器（roots 构造时就知道，没有「先空着」的阶段）
+    win.ensureEditor()
+
     const card = buildDockCard(
       {
         id,
         title: this.deps.label(id),
-        body: host,
+        body: win.root,
         draggable: true,
         close: { title: t('ui.dock.closeWindow'), onClick: () => this.deps.onClose(id) },
       },
@@ -144,29 +128,7 @@ export class DockWindows {
     )
     card.dataset.window = '1'
 
-    const editor = new BlockEditor({
-      container: host,
-      blankArea: host,
-      // 窗口不是「真实兄弟序」：点空白不建块、删段根不删块（只是同一批块的一个视图）
-      allowBlankCreate: false,
-      allowRootRemove: false,
-      // 重载节奏归本组件（防抖 + 聚焦冻结）
-      autoReload: false,
-      store: this.deps.store,
-      write: this.deps.write,
-      doc: { roots: [block] },
-    })
-    editor.events = {
-      change: (kind) => {
-        if (kind !== 'load') this.deps.onChange()
-      },
-      focusBlock: (blockId) => this.deps.onFocusBlock(blockId),
-      openInDock: (blockId) => this.deps.onOpenInDock(blockId),
-      refClick: (ref, mods, el) => this.deps.onRefClick(ref, mods, el),
-    }
-    host.addEventListener('focusin', () => this.deps.onFocus(editor))
-
-    const w = { editor, card }
+    const w = { block: win, card }
     this.windows.set(id, w)
     return w
   }
@@ -174,41 +136,11 @@ export class DockWindows {
   private dispose(id: string): void {
     const w = this.windows.get(id)
     if (!w) return
-    this.deps.onDispose(w.editor)
-    w.editor.dispose()
+    const ed = w.block.ed
+    if (ed) this.deps.onDispose(ed)
+    w.block.dispose()
     w.card.remove()
     this.windows.delete(id)
-  }
-
-  private hasFocus(): boolean {
-    for (const w of this.windows.values()) if (w.card.contains(document.activeElement)) return true
-    return false
-  }
-
-  private ownEditor(source: unknown): BlockEditor | null {
-    for (const w of this.windows.values()) if (w.editor === source) return w.editor
-    return null
-  }
-
-  private scheduleReload(ids?: readonly string[], except?: BlockEditor): void {
-    if (this.timer !== null) window.clearTimeout(this.timer)
-    this.timer = window.setTimeout(() => {
-      this.timer = null
-      // 焦点在某个窗口里时不重画那一张（会丢光标）；失焦后补
-      if (!except && this.hasFocus()) {
-        this.frozen = true
-        return
-      }
-      for (const { editor } of this.windows.values()) {
-        if (editor === except) continue
-        if (ids && !flatten(editor.doc).some((b) => ids.includes(b.id))) continue
-        editor.reloadFromStore()
-      }
-    }, RELOAD_DEBOUNCE_MS)
-  }
-
-  private reloadAll(): void {
-    for (const { editor } of this.windows.values()) editor.reloadFromStore()
   }
 }
 

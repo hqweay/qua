@@ -31,6 +31,7 @@ import {
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
+import { EditableBlock } from './editable-block.ts'
 
 export interface QueryViewDeps {
   store: BlockStore
@@ -43,7 +44,7 @@ export interface QueryViewDeps {
   /** 刷新后要落盘（结果集入 KB） */
   onChange: () => void
   /** 获得焦点时装配层把「活动编辑器」切过来 */
-  onFocus: () => void
+  onFocus: (editor: BlockEditor) => void
   /** 接上与正文同一套编辑器事件（见 `MountAreaDeps.wire`） */
   wire: (editor: BlockEditor, change: (kind: string) => void) => void
   /** 提示（刷新失败、丢了几条） */
@@ -95,9 +96,12 @@ export function createQueryViewEls(): QueryViewEls {
 }
 
 export class QueryView {
-  readonly editor: BlockEditor
   private readonly els: QueryViewEls
   private readonly deps: QueryViewDeps
+  /** 编辑器装配（订阅／防抖重载／聚焦冻结／事件表都在它里面） */
+  private readonly block: EditableBlock
+  /** 查询视图自己的 stale 订阅（只点亮提示、不重排——冻结成员是 D4，重载走 `block`） */
+  private readonly offStale: () => void
   /**
    * 上次刷新之后**有没有别的视图碰过 store**（点亮 stale，但**不重排**，D4）。
    * ⚠️ 用一个自增版本号而不是布尔：刷新过程中 `onChange` 会连带触发同步（`touch`），
@@ -121,32 +125,31 @@ export class QueryView {
     this.deps = deps
     this.els.refresh.textContent = t('ui.query.refresh')
     this.els.refresh.addEventListener('click', () => this.refresh())
-    this.els.editor.addEventListener('focusin', () => this.deps.onFocus())
 
-    this.editor = new BlockEditor({
-      container: els.editor,
-      // 记录视图：没有「视图级同级」；点空白/删段根都不该发生
-      blankArea: els.editor,
-      allowBlankCreate: false,
-      allowRootRemove: false,
+    this.block = new EditableBlock({
+      host: els.editor,
       store: deps.store,
       write: deps.write,
-      // 折叠态是视图私有的（理由同反链）
-      doc: { roots: [], folded: {} },
+      // 冻结范围＝整片查询视图：焦点落在刷新按钮上时，重画抬头会把正被按的那颗换掉
+      area: els.root,
+      // 装载动作＝按冻结结果渲染当前活块（成员与顺序不重算——那是「刷新」按钮的事）
+      load: () => this.render(),
+      wire: (editor, change) => deps.wire(editor, change),
+      onChange: () => deps.onChange(),
+      onFocus: (editor) => deps.onFocus(editor),
       // 面包屑：普通点＝就地展开；展开根行首的「收起上下文」＝逐层退回
       onExpandContext: (ancestorId, rowId) => this.expand(ancestorId, rowId),
       onContextBack: (rootId) => this.collapse(rootId),
     })
-    this.deps.wire(this.editor, (kind) => {
-      if (kind === 'load') return
-      // 视图内编辑：内容立即生效（D5），但要落盘；成员不动（D4）
-      this.deps.onChange()
-    })
+    // 查询视图建了就有编辑器（结果空也是「渲染了空态」，不是「还没建」）
+    this.block.ensureEditor()
+    // 岛根装进这一片（host 已在它里面——组件把它从 els.root 里挪了进去）
+    els.root.appendChild(this.block.root)
 
     // ⚠️ 这里**只**点亮 stale，不重排列表（D4 的「不自动重算」）。
     // ⚠️ 拿得到「动过哪些块」就精确判断；拿不到（`ids === undefined`，例如结构操作）就先不点亮——
     //    宁可少提示，也不要因为「刷新顺带的重渲染」误报「结果已过期」（实测过这种假阳性）。
-    this.deps.store.subscribe((source, ids) => {
+    this.offStale = deps.store.subscribe((source, ids) => {
       if (source === this.editor) return
       if (ids && ids.length > 0) this.noteTouched(ids)
     })
@@ -155,6 +158,17 @@ export class QueryView {
   /** 查询视图的根（装配层把它放进某一段；查询视图没有静态模板节点了） */
   get root(): HTMLElement {
     return this.els.root
+  }
+
+  /** 那一个编辑器（装配层判「活动编辑器」、取写事务 source 都用它） */
+  get editor(): BlockEditor {
+    return this.block.ed!
+  }
+
+  /** 摘掉实例（装配层在段根换人时调）：退订 store、卸事件 */
+  dispose(): void {
+    this.offStale()
+    this.block.dispose()
   }
 
   /** 首次装载（或查询块换了）：**冻结**一次结果，然后渲染 */

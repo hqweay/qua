@@ -1539,6 +1539,16 @@ function viewEvents(editor: () => BlockEditor, change: ViewEvents['change'], via
   }
 }
 
+/**
+ * **给任何一台视图编辑器接上与正文同一套事件**（`viewEvents` 是唯一一份）。
+ *
+ * 挂载区、查询结果、侧槽窗口都走它——事件表按落点挑几支的接法漏接不报错
+ * （右键没菜单、`#` 不弹补全、撞名没提示），所以这里不存在「挑几支」的分支。
+ */
+function wireViewEditor(editor: BlockEditor, change: ViewEvents['change'], via: string): void {
+  editor.events = viewEvents(() => editor, change, via)
+}
+
 ed.events = viewEvents(
   () => mainEd,
   () => {
@@ -1596,9 +1606,7 @@ const { renderMounts, renderProperties, scheduleProperties, pickRefValue } = set
   scheduleBadge,
   refClick: handleRefClick,
   // 挂载区/查询结果接的是**同一份**事件表（差别只在「装载谁」）
-  wireEditor: (editor, change, via) => {
-    editor.events = viewEvents(() => editor, change, via)
-  },
+  wireEditor: (editor, change, via) => wireViewEditor(editor, change, via),
   getWs: () => ws,
   getEd: () => ed,
   setEd: (next) => {
@@ -1817,6 +1825,13 @@ const dockWindowsDeps = (side: 'left' | 'right'): ConstructorParameters<typeof D
   kb,
   label: windowLabel,
   onClose: (blockId) => closeWindow(side, blockId),
+  /**
+   * 窗口编辑器也接**整份** `viewEvents`（与挂载区/查询结果同一条口径）。
+   *
+   * ⚠️ 必须整份接上：只手接几支（change/块标/右槽/引用）的做法漏接不报错——
+   * 右键块菜单、`#`·`@` 补全、撞名提示这些在窗口里点了就是没反应。
+   */
+  wire: (editor, change) => wireViewEditor(editor, change, 'dock'),
   onFocus: (editor) => {
     ed = editor
     scheduleBadge()
@@ -1833,9 +1848,6 @@ const dockWindowsDeps = (side: 'left' | 'right'): ConstructorParameters<typeof D
     scheduleSave()
     scheduleBadge()
   },
-  onFocusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, 'dock'),
-  onOpenInDock: (blockId) => openWindow('right', blockId),
-  onRefClick: (ref, mods, el) => handleRefClick(ref, mods, el),
   cardState: (blockId) => cardStateFor(side, blockId),
 })
 

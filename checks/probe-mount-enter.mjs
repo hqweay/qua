@@ -74,7 +74,7 @@ await sleep(400)
 
 /** 切到「提及」栏 */
 const tabInfo = await page.evaluate(() => {
-  const mount = document.querySelector('.sec > .sec-mount')
+  const mount = document.querySelector('.sec .sec-mount')
   const tabs = Array.from(mount?.querySelectorAll('.mount-tab') ?? []).map((b) => b.textContent)
   const m = mount?.querySelector('.mount-tab[data-tab="mentions"]')
   m?.click()
@@ -84,7 +84,7 @@ log(`挂载区 tab：${JSON.stringify(tabInfo)}`)
 await sleep(500)
 
 const rowsBefore = await page.evaluate(() => {
-  const ed = document.querySelector('.sec > .sec-mount .mount-editor')
+  const ed = document.querySelector('.sec .sec-mount .mount-editor')
   return Array.from(ed?.querySelectorAll('.blk') ?? []).map((b) => ({
     id: b.dataset.blockId?.slice(-8),
     text: b.querySelector('.tx')?.textContent ?? '',
@@ -100,7 +100,7 @@ log(`提及里的行（按 ↵ 之前）：${JSON.stringify(rowsBefore)}`)
  *    `focusin`，那一刻 `app.ed` 还是**正文** ⇒ ↵ 会被正文接走（探针踩过）。
  */
 const spot = await page.evaluate(() => {
-  const ed = document.querySelector('.sec > .sec-mount .mount-editor')
+  const ed = document.querySelector('.sec .sec-mount .mount-editor')
   const tx = ed?.querySelector('.blk .tx')
   if (!tx) return null
   const r = tx.getBoundingClientRect()
@@ -154,7 +154,7 @@ await sleep(600)
 
 const dumpMount = () =>
   page.evaluate(() => {
-    const mount = document.querySelector('.sec > .sec-mount')
+    const mount = document.querySelector('.sec .sec-mount')
     return Array.from(mount?.querySelectorAll('.mount-editor .blk') ?? []).map((b) => ({
       id: b.dataset.blockId?.slice(-6),
       depth: b.dataset.depth,
@@ -164,7 +164,7 @@ const dumpMount = () =>
 
 const after = await page.evaluate((rowsBeforeIds) => {
   const a = document.activeElement
-  const mounted = document.querySelector('.sec > .sec-mount .mount-editor')
+  const mounted = document.querySelector('.sec .sec-mount .mount-editor')
   return {
     active: {
       id: a?.id || null,

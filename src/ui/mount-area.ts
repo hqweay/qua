@@ -9,6 +9,9 @@
  *   · **空 tab 仍在**：栏在、body 里一行说明。空是**状态**不是错误，把栏藏掉
  *     会让用户以为「这块没有引用」，而真相是「还没有人引用它」。
  *
+ * 编辑器装配（建实例、订阅、防抖重载、聚焦冻结、离焦补做、事件表）全部在
+ * `EditableBlock` 里；这一层只决定**装哪些根**（哪个 tab、展开到哪层、面包屑怎么给）。
+ *
  * ⚠️ 与右槽的分工：右槽的 `backrefsCard` 是**页级派生卡**（读当前对象、跟着它走）。
  *    挂载区是「在这一块下面就地展开」。硬统一会得到两份各自记激活项的 tab 条。
  * ⚠️ 这里不碰命令、不认识浮层：`＋` 只回调装配层。
@@ -16,7 +19,8 @@
 import { type Block, type BlockStore, type MountTab, mountTabsOf, canEditMounts, expandContexts, unfoldForContext } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t, type MsgId } from '../core/msg.ts'
-import { BlockEditor, type Run } from '../view/editor.ts'
+import { type BlockEditor, type Run } from '../view/editor.ts'
+import { EditableBlock } from './editable-block.ts'
 
 export interface MountAreaDeps {
   store: BlockStore
@@ -28,8 +32,8 @@ export interface MountAreaDeps {
   host: () => Block | undefined
   /** 编辑器里的编辑：落盘 */
   onChange: (kind: string) => void
-  /** 获得焦点：装配层把「活动编辑器」切过来 */
-  onFocus: () => void
+  /** 获得焦点（编辑器已建好才可能发生）：装配层把「活动编辑器」切过来 */
+  onFocus: (editor: BlockEditor) => void
   /**
    * **接上与正文同一套编辑器事件**（点引用/点块标/右键块菜单/`#`·`@` 补全…）。
    *
@@ -82,15 +86,14 @@ export class MountArea {
   /** 折叠时那一行摘要（只有「引用 N」——同类／提及的计数要现算，折叠时不值得算） */
   private readonly summaryEl: HTMLButtonElement
   /**
-   * 那**一个**编辑器。懒建：折叠的天不建（30 天 feed 只该有一个），
-   * 建了就一直复用（切 tab 不重建 ⇒ 撤销栈与选区都不丢）。
+   * 那**一个**编辑器装配。懒建由它自己管：折叠的天、空的栏不建实例（30 天 feed
+   * 只该有一个编辑器），建了就一直复用（切 tab 不重建 ⇒ 撤销栈与选区都不丢）。
    */
-  private editor: BlockEditor | null = null
+  private readonly block: EditableBlock
   private tabs: MountTab[] = []
   /** 当前激活那一条的键；找不到（栏被摘掉了）就回落到第一条 */
   private active = ''
   private open: boolean
-  private timer: number | null = null
   /**
    * 每个 tab 的**上下文展开栈**（祖先 id）。视图状态，不落盘。
    * 每个 tab 各记各的：在「引用」里展开的上下文不会突然出现在「同类」。
@@ -128,27 +131,38 @@ export class MountArea {
     this.emptyEl.className = 'mount-empty'
     this.emptyEl.hidden = true
 
-    this.bodyEl.append(this.emptyEl, this.editorEl)
-    this.root.append(this.summaryEl, this.tabsEl, this.bodyEl)
+    this.block = new EditableBlock({
+      host: this.editorEl,
+      store: deps.store,
+      write: deps.write,
+      // 重查比窗口贵一档（要跑查询），防抖放长一点；焦点/按下/组合期的冻结在组件里
+      debounceMs: 200,
+      // 冻结范围＝整片挂载区：焦点落在 tab 按钮上时，重排 tab 条同样会把正被按的那颗换掉
+      area: this.root,
+      // 装载动作＝重画整片（tab 出现条件读维度存在性，内容变了栏可能增减）
+      load: () => this.render(),
+      wire: (editor, change) => deps.wire(editor, change),
+      onChange: (kind) => deps.onChange(kind),
+      onFocus: (editor) => deps.onFocus(editor),
+      // 面包屑：普通点＝就地展开；展开根行首的「收起上下文」＝逐层退回
+      onExpandContext: (ancestorId, rowId) => this.expand(ancestorId, rowId),
+      onContextBack: (rootId) => this.collapse(rootId),
+    })
 
-    // 外部编辑 ⇒ 重查（编辑中冻结：不在打字时把行抽走）。与反链 footer 同一条策略。
-    deps.store.subscribe((source) => {
-      if (source === this.editor) return
-      if (this.root.contains(document.activeElement)) return
-      this.schedule()
-    })
-    this.editorEl.addEventListener('focusout', () => {
-      window.setTimeout(() => {
-        if (!this.root.contains(document.activeElement)) this.render()
-      }, 0)
-    })
+    this.bodyEl.append(this.emptyEl, this.block.root)
+    this.root.append(this.summaryEl, this.tabsEl, this.bodyEl)
 
     this.render()
   }
 
   /** 编辑器实例（折叠／空 tab 时可能还没有）。装配层用它判「活动编辑器」 */
   get blockEditor(): BlockEditor | null {
-    return this.editor
+    return this.block.ed
+  }
+
+  /** 摘掉实例（装配层在段根换人时调）：退订 store、卸事件，别让游离容器继续被重画 */
+  dispose(): void {
+    this.block.dispose()
   }
 
   /** 展开/收起（视图状态，不进库） */
@@ -300,10 +314,10 @@ export class MountArea {
     if (plan.roots.length === 0) {
       this.showEmpty(t(EMPTY_TEXT[tab.kind]))
       // 空结果也保留这份视图的折叠态：它记的是「哪些行收着」，不是「这次有几行」
-      this.editor?.loadPage({ roots: [], folded: this.editor.doc.folded })
+      this.block.ed?.loadPage({ roots: [], folded: this.block.ed.doc.folded })
       return
     }
-    const ed = this.ensureEditor()
+    const ed = this.block.ensureEditor()
     this.emptyEl.hidden = true
     this.editorEl.hidden = false
     delete this.editorEl.dataset.empty
@@ -400,39 +414,5 @@ export class MountArea {
 
   private countRefs(host: Block): number {
     return this.refRoots(host).roots.length
-  }
-
-  /** 懒建那一个编辑器：折叠的天不建；建了就一直复用 */
-  private ensureEditor(): BlockEditor {
-    if (this.editor) return this.editor
-    const ed = new BlockEditor({
-      container: this.editorEl,
-      // 记录视图：没有「视图级同级」；点空白／删段根都不该发生
-      blankArea: this.editorEl,
-      allowBlankCreate: false,
-      allowRootRemove: false,
-      store: this.deps.store,
-      write: this.deps.write,
-      // 折叠态是视图私有的（在块底收起一行，不该让正文里那一块也收起来）
-      doc: { roots: [], folded: {} },
-      // 面包屑：普通点＝就地展开；展开根行首的「收起上下文」＝逐层退回
-      onExpandContext: (ancestorId, rowId) => this.expand(ancestorId, rowId),
-      onContextBack: (rootId) => this.collapse(rootId),
-    })
-    this.deps.wire(ed, (kind) => {
-      if (kind !== 'load') this.deps.onChange(kind)
-    })
-    this.editorEl.addEventListener('focusin', () => this.deps.onFocus())
-    this.editorEl.dataset.editor = '1'
-    this.editor = ed
-    return ed
-  }
-
-  private schedule(): void {
-    if (this.timer !== null) window.clearTimeout(this.timer)
-    this.timer = window.setTimeout(() => {
-      this.timer = null
-      this.render()
-    }, 200)
   }
 }
