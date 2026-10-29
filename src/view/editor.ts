@@ -924,6 +924,22 @@ export class BlockEditor {
 
   /** 让模型选区跟上 DOM（**选区由模型持有**，DOM Range 只是它在视窗内的表现） */
   syncSel(): void {
+    /**
+     * **投影丢了就把模型选区重新投影回来。**
+     *
+     * 模型是选区的权威（`this.sel`），DOM Range 只是它在视窗内的表现。两者会脱钩：
+     * 焦点被别的覆盖层拿走时浏览器会把 Range 清掉（`rangeCount === 0`），
+     * 而模型里的选区还在。此时焦点回到本容器、`activeElement` 看起来完全正常，
+     * 但**打字一个字符都进不去**——按键需要一个存在的插入点。
+     *
+     * 实测：`⌘P` 开命令面板 → `Esc` 关掉 → 打字 ⇒ 焦点已回到编辑器、正文一字不变。
+     * 这类脱钩只有在这里能修（本类持有模型选区与它的 DOM 映射，别处只会去猜）。
+     */
+    const dom = document.getSelection()
+    if ((!dom || dom.rangeCount === 0) && this.sel && this.ownFocus()) {
+      this.restoreSel()
+      return
+    }
     // 插入点跑到正文槽之外时先收回来（否则下面的读数会把一处「不存在的位置」当成偏移）
     if (this.reclaimCaret()) return
     const s = this.readSel()

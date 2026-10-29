@@ -14,6 +14,7 @@
    分片按职责：token 定义 / 外壳 / 槽 / 中心槽 / 块 / 浮层 / 诊断角标。 */
 
 @import './styles/tokens.css';
+@import './styles/primitives.css';
 @import './styles/shell.css';
 @import './styles/slots.css';
 @import './styles/center.css';

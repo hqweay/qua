@@ -63,10 +63,10 @@ export function renderFieldsEditor(host: HTMLElement, deps: FieldsEditorDeps): v
   }
   for (const def of declared) {
     const row = document.createElement('div')
-    row.className = 'fields-row'
+    row.className = 'fields-row ui-row'
     row.dataset.fieldId = def.id
     const label = document.createElement('span')
-    label.className = 'fields-label'
+    label.className = 'fields-label ui-ellipsis ui-ellipsis-grow'
     label.textContent = plainText(def.content).trim() || def.id
     const kind = document.createElement('span')
     kind.className = 'fields-kind'
@@ -112,10 +112,10 @@ export function renderFieldsEditor(host: HTMLElement, deps: FieldsEditorDeps): v
   }
   for (const def of candidates) {
     const row = document.createElement('div')
-    row.className = 'fields-row'
+    row.className = 'fields-row ui-row'
     row.dataset.fieldId = def.id
     const label = document.createElement('span')
-    label.className = 'fields-label'
+    label.className = 'fields-label ui-ellipsis ui-ellipsis-grow'
     label.textContent = plainText(def.content).trim() || def.id
     const kind = document.createElement('span')
     kind.className = 'fields-kind'

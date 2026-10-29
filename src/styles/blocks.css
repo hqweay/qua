@@ -44,10 +44,7 @@
   color: var(--ui-text-secondary);
 }
 .blk-alias-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 省略行为由 `.ui-ellipsis` 给；这里只剩颜色与交互 */
   color: var(--ui-text);
   font-weight: 600;
   cursor: pointer;
@@ -93,10 +90,7 @@
   user-select: none;
 }
 .blk-context-cell {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 省略行为由 `.ui-ellipsis` 给 */
   border-radius: var(--ui-radius-sm);
   color: var(--ui-text-secondary);
   cursor: pointer;
@@ -300,7 +294,7 @@
   cursor: pointer;
   opacity: 0;
   transition: opacity 120ms ease;
-  z-index: 1;
+  z-index: var(--ui-z-rail);
 }
 .blk:hover .fold {
   opacity: 0.9;
@@ -567,9 +561,7 @@
   color: var(--ui-text-tertiary);
 }
 .widget-row-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 省略行为由 `.ui-ellipsis` 给（本处不需要占满剩余宽度：外层已定宽） */
 }
 .widget-row-count {
   flex: 0 0 auto;
@@ -641,10 +633,9 @@
   font-size: var(--ui-fs-xs);
   color: var(--ui-text-tertiary);
 }
+/* 行结构走 `.ui-row`（原语）；这里只给属性区自己的密度与字号 */
 .prop-row {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-gap-3);
+  --ui-row-gap: var(--ui-gap-3);
   font-size: var(--ui-fs-sm);
 }
 .prop-label {

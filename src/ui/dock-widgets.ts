@@ -26,6 +26,7 @@ import { t } from '../core/msg.ts'
 import { bindDropTarget, clearDragItem, setDragItem } from '../view/dnd.ts'
 import { renderIcon } from '../view/icons.ts'
 import { renderBlock, type BlockRenderCtx } from './block-renderers.ts'
+import { cardList, cardNote } from './card-parts.ts'
 
 export interface WidgetDeps {
   /** 读门面：集合里的项按 id 取活块 */
@@ -62,10 +63,7 @@ export function widgetTitle(block: Block): string {
  */
 export function widgetBody(block: Block, deps: WidgetDeps): HTMLElement {
   if (isCollectionBlock(block)) return collectionBody(block, deps)
-  const fallback = document.createElement('p')
-  fallback.className = 'dock-empty'
-  fallback.textContent = t('ui.widget.noRenderer')
-  return fallback
+  return cardNote(t('ui.widget.noRenderer'))
 }
 
 /**
@@ -109,7 +107,7 @@ function widgetSummary(block: Block, find: FindBlock | undefined): HTMLElement {
   renderIcon(el, 'lucide:list-tree', 'list-tree', 'sm')
 
   const label = document.createElement('span')
-  label.className = 'widget-row-label'
+  label.className = 'widget-row-label ui-ellipsis'
   label.textContent = widgetTitle(block)
   el.appendChild(label)
 
@@ -142,16 +140,15 @@ function parseItem(raw: string): { collectionId: string; itemId: string } | null
 
 /** 集合卡：一组**引用**，不是一组子块 */
 function collectionBody(block: Block, deps: WidgetDeps): HTMLElement {
-  const list = document.createElement('div')
-  list.className = 'block-list collection-list'
   const items = collectionItems(block)
-
-  if (items.length === 0) {
-    const empty = document.createElement('p')
-    empty.className = 'dock-empty'
-    empty.textContent = t('ui.widget.collectionEmpty')
-    list.appendChild(empty)
-  }
+  /**
+   * 集合卡要带 `collection-list`：那一档有自己的拖放落点样式（不是通用列表）。
+   *
+   * ⚠️ **空集合也要带**：拖一个块进空集合是它的主要用法之一，
+   *    少了这个类就没有落点高亮——而「拖进来没反应」正是这类缺陷的形态。
+   */
+  const list = cardList('collection-list')
+  if (items.length === 0) list.appendChild(cardNote(t('ui.widget.collectionEmpty')))
 
   const ctx: BlockRenderCtx = {
     isActive: (id) => id === deps.activeId(),

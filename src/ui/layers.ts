@@ -13,6 +13,8 @@ import { DECL_BY_NAME, type CommandDecl } from '../core/commands/index.ts'
 // ⚠️ 三个收敛点之三：UI 组件的文案一律走 t
 import { t } from '../core/msg.ts'
 import { renderIcon } from '../view/icons.ts'
+import { captureFocus, type FocusReturn } from './focus-return.ts'
+import { placeNear } from './place.ts'
 
 export interface Row {
   id: string
@@ -143,6 +145,18 @@ export class Layers {
   private drawerEl: HTMLElement | null = null
   private toastEl: HTMLElement | null = null
   private popEl: HTMLElement | null = null
+  /**
+   * 信息浮层的锚点**取值函数**（不是矩形快照）。
+   *
+   * 见 `openPopover` 的说明：快照记不住自己指向谁，窗口一变／正文一滚它就失效。
+   */
+  private popAnchor: (() => DOMRect | null) | null = null
+  /** 菜单打开之前焦点在哪（关闭时归还；见 `ui/focus-return.ts`） */
+  private menuFocus: FocusReturn | null = null
+  /** 信息浮层打开之前焦点在哪（同上） */
+  private popFocus: FocusReturn | null = null
+  /** 抽屉打开之前焦点在哪（同上） */
+  private drawerFocus: FocusReturn | null = null
   /** 划选气泡（顶部工具栏作废后的落点，2026-10-19）*/
   private selEl: HTMLElement | null = null
   open = false
@@ -217,6 +231,11 @@ export class Layers {
 
   openMenu(o: MenuOpts): void {
     this.closeMenu(false)
+    /**
+     * **焦点归还**：菜单会抢焦点（搜索框要能打字），关掉之后必须还回去。
+     * 不还的后果见 `ui/focus-return.ts`：关掉后打字一个字符都进不去，且不报错。
+     */
+    this.menuFocus = captureFocus()
     this.opts = o
     this.allRows = o.rows
     this.rows = o.rows
@@ -310,10 +329,10 @@ export class Layers {
       if (r.icon) renderIcon(ico, r.icon, 'circle-help')
       else ico.textContent = '·'
       const label = document.createElement('span')
-      label.className = 'layer-label'
+      label.className = 'layer-label ui-ellipsis ui-ellipsis-grow'
       label.textContent = r.label
       const hint = document.createElement('span')
-      hint.className = 'layer-hint'
+      hint.className = 'layer-hint ui-ellipsis'
       hint.textContent = r.hint ?? (r.keyHint ? '' : (r.command ?? ''))
       item.append(ico, label, hint)
       if (r.keyHint) {
@@ -366,6 +385,7 @@ export class Layers {
 
   closeMenu(notify = true): void {
     if (!this.open) return
+    const box = this.el
     this.el?.remove()
     this.el = null
     this.listEl = null
@@ -375,24 +395,36 @@ export class Layers {
     this.open = false
     const cb = this.opts?.onClose
     this.opts = null
+    // 先归还焦点再回调：回调里可能立刻打开另一个覆盖层（那会重新记一次焦点）
+    const fr = this.menuFocus
+    this.menuFocus = null
+    fr?.restore(box)
     if (notify) cb?.()
   }
 
+  /**
+   * 菜单落位：宽度先定（430 上限、且不许超出视口），再按锚点算坐标。
+   *
+   * ⚠️ 坐标算在 `ui/place.ts` 的 `placeNear` 里——**三处浮层共用那一份**。
+   *    这里只负责「量 box 尺寸」和「写回坐标」，那两件事都要求 box 已经进文档。
+   */
   private place(box: HTMLElement, anchor: DOMRect | null): void {
     const pad = 8
     const w = Math.min(430, window.innerWidth - pad * 2)
     box.style.width = `${w}px`
-    const h = box.offsetHeight
-    if (!anchor) {
-      box.style.left = `${Math.max(pad, (window.innerWidth - w) / 2)}px`
-      box.style.top = `${Math.max(pad, window.innerHeight * 0.16)}px`
-      return
-    }
-    const left = Math.min(Math.max(pad, anchor.left), window.innerWidth - w - pad)
-    const below = anchor.bottom + 6
-    const top = below + h > window.innerHeight - pad ? Math.max(pad, anchor.top - h - 6) : below
-    box.style.left = `${left}px`
-    box.style.top = `${top}px`
+    const at = placeNear({
+      boxW: w,
+      boxH: box.offsetHeight,
+      vw: window.innerWidth,
+      vh: window.innerHeight,
+      anchor,
+      side: 'below',
+      align: 'left',
+      gap: 6,
+      pad,
+    })
+    box.style.left = `${at.left}px`
+    box.style.top = `${at.top}px`
   }
 
   /* -------------------------------------------------------- 划选气泡 */
@@ -441,16 +473,26 @@ export class Layers {
     document.body.appendChild(box)
     this.selEl?.remove()
     this.selEl = box
-    const pad = 8
-    const w = box.offsetWidth
-    const h = box.offsetHeight
-    const a = o.anchor ?? new DOMRect(window.innerWidth / 2, 120, 0, 0)
-    const left = Math.min(Math.max(pad, a.left + a.width / 2 - w / 2), window.innerWidth - w - pad)
-    // 优先放在选区上方（间隔一个行高的一半，别贴着上一行的字底）；上方放不下才落到下方
-    const above = a.top - h - 10
-    const top = above >= pad ? above : Math.min(a.bottom + 10, window.innerHeight - h - pad)
-    box.style.left = `${left}px`
-    box.style.top = `${Math.max(pad, top)}px`
+    /**
+     * 划选气泡：**锚在选区上方**（下方会盖住刚选中的那行）。
+     *
+     * 落位仍走同一份 `placeNear` —— 与菜单的差别只是偏好方向（`side: 'above'`）
+     * 与水平居中。此前这里另写了一遍钳位，于是「加一种对齐」只能加到一处。
+     */
+    const a = o.anchor ?? null
+    const at = placeNear({
+      boxW: box.offsetWidth,
+      boxH: box.offsetHeight,
+      vw: window.innerWidth,
+      vh: window.innerHeight,
+      anchor: a,
+      side: 'above',
+      align: 'center',
+      gap: 10,
+      pad: 8,
+    })
+    box.style.left = `${at.left}px`
+    box.style.top = `${at.top}px`
   }
 
   closeSelectionBar(): void {
@@ -464,26 +506,84 @@ export class Layers {
 
   /* ---------------------------------------------------------- 信息气泡 */
 
-  openPopover(render: (host: HTMLElement) => void, anchor: DOMRect | null): void {
+  /**
+   * 打开信息浮层。
+   *
+   * `anchor` 收**两种形态**：一个矩形（快照），或一个**取矩形的函数**（实时）。
+   *
+   * 为什么需要第二种：矩形快照记不住自己指向谁。窗口一被拖动、正文一被滚动，
+   * 那个矩形就变成「曾经指向某处」——浮层留在原地、锚点早已跑开（实测滚动 300px 后
+   * 两者相距 308px），而且**不报错**。传函数则每次重算都对着当前那处。
+   *
+   * ⚠️ 两种形态的差别是**只在桌面端才显形**的：Web 上很少拖窗口边、也很少在浮层开着
+   *    时滚动整页；桌面应用这两件事都是日常动作。
+   */
+  openPopover(render: (host: HTMLElement) => void, anchor: DOMRect | null | (() => DOMRect | null)): void {
     this.closePopover()
     const box = document.createElement('div')
     box.className = 'popover'
+    // 浮层是对话框：它里面有可编辑的字段，读屏与键盘导航都该知道「这是一层」
+    box.setAttribute('role', 'dialog')
     render(box)
     document.body.appendChild(box)
     this.popEl = box
-    const pad = 8
-    const w = box.offsetWidth
-    const h = box.offsetHeight
-    const a = anchor ?? new DOMRect(window.innerWidth / 2, 120, 0, 0)
-    const left = Math.min(Math.max(pad, a.left), window.innerWidth - w - pad)
-    const top = a.bottom + 8 + h > window.innerHeight - pad ? Math.max(pad, a.top - h - 8) : a.bottom + 8
-    box.style.left = `${left}px`
-    box.style.top = `${top}px`
+    this.popAnchor = typeof anchor === 'function' ? anchor : anchor ? () => anchor : null
+    /**
+     * 焦点归还：浮层本身**不抢**焦点（只有里面的输入框在 autofocus 时才会拿走），
+     * 但用户一旦点进去，关掉之后就没人负责把焦点还回来。见 `ui/focus-return.ts`。
+     */
+    this.popFocus = captureFocus()
+    this.placePopover()
+    // 窗口尺寸变了要重算（拖窗口边是桌面端常态）；正文滚动同理
+    window.addEventListener('resize', this.reflow)
+    window.addEventListener('scroll', this.reflow, true)
+  }
+
+  /**
+   * 按当前锚点重算浮层位置。
+   *
+   * ⚠️ **锚点消失就关掉浮层**（而不是留着它悬空）：目标那一行被滚动出视口、
+   *    或者那一块被删掉时，一个「指向不存在的东西」的浮层比没有浮层更糟——
+   *    用户会对着它操作，而操作落在一个已经不在的位置上。
+   */
+  private placePopover(): void {
+    const box = this.popEl
+    if (!box) return
+    const anchor = this.popAnchor?.() ?? null
+    if (this.popAnchor && !anchor) {
+      this.closePopover()
+      return
+    }
+    const at = placeNear({
+      boxW: box.offsetWidth,
+      boxH: box.offsetHeight,
+      vw: window.innerWidth,
+      vh: window.innerHeight,
+      anchor,
+      side: 'below',
+      align: 'left',
+      gap: 8,
+      pad: 8,
+    })
+    box.style.left = `${at.left}px`
+    box.style.top = `${at.top}px`
+  }
+
+  /** 重算落位（`resize`／`scroll` 的监听体；箭头函数保证 `this` 与解绑是同一个引用） */
+  private reflow = (): void => {
+    this.placePopover()
   }
 
   closePopover(): void {
+    window.removeEventListener('resize', this.reflow)
+    window.removeEventListener('scroll', this.reflow, true)
+    const box = this.popEl
+    this.popAnchor = null
     this.popEl?.remove()
     this.popEl = null
+    const fr = this.popFocus
+    this.popFocus = null
+    fr?.restore(box)
   }
 
   popoverOpen(): boolean {
@@ -503,6 +603,7 @@ export class Layers {
     this.closeDrawer()
     const box = document.createElement('div')
     box.className = 'drawer'
+    box.setAttribute('role', 'dialog')
     const head = document.createElement('div')
     head.className = 'drawer-head'
     const t = document.createElement('span')
@@ -519,11 +620,16 @@ export class Layers {
     box.append(head, body)
     document.body.appendChild(box)
     this.drawerEl = box
+    this.drawerFocus = captureFocus()
   }
 
   closeDrawer(): void {
+    const box = this.drawerEl
     this.drawerEl?.remove()
     this.drawerEl = null
+    const fr = this.drawerFocus
+    this.drawerFocus = null
+    fr?.restore(box)
   }
 
   drawerOpen(): boolean {

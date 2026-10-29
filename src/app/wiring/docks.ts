@@ -34,6 +34,7 @@ import {
   type DockTile,
 } from '../../ui/dock.ts'
 import { backrefsCard, todayCard, trashCard, type DockContentDeps } from '../../ui/dock-content.ts'
+import { calendarCard } from '../../ui/calendar-card.ts'
 import { widgetBody, widgetTitle, type WidgetDeps } from '../../ui/dock-widgets.ts'
 import { BelongsTree } from '../../ui/belongs-tree.ts'
 import { applyWidgetHeights } from '../../view/block-dom.ts'
@@ -357,7 +358,9 @@ export function setupDocks(deps: DocksDeps) {
             ? backrefsCard(dockDeps)
             : id === 'trash'
               ? trashCard(dockDeps)
-              : null
+              : id === 'calendar'
+                ? calendarCard({ kb, openDate: (date) => void deps.getRegistry().invoke('core.journal/today', { date }, 'dock') })
+                : null
     if (!spec) return null
     return { id: spec.id, el: buildDockCard(spec, cardStateFor(side, spec.id)) }
   }
@@ -484,11 +487,33 @@ export function setupDocks(deps: DocksDeps) {
     return path.map(blockLabel).join(' / ')
   }
 
+  /**
+   * 把一张**派生卡**加回槽（`calendar`／`belongs`／`backrefs`／`trash`／`journal`）。
+   *
+   * 为什么它必须存在：派生卡没有「关闭」按钮（关掉就没有再加回来的入口，
+   * 那是一个单向陷阱）——它们的入口只在「添加组件」画廊里。
+   * ⚠️ 与 `addTile` 分开：小卡是 `cmd:<命令>`，派生卡是固定 id，两者落进 `cards`
+   *    的形状不同，混成一个会让「加回来的是哪一种」取决于字符串前缀。
+   */
+  function addDerived(side: 'left' | 'right', id: string): void {
+    const dock = deps.prefs().dock
+    if (dock[side].cards.includes(id)) return
+    dock[side].cards.push(id)
+    if (!dock[side].open) {
+      dock[side].open = true
+      deps.applyChrome()
+    }
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+  }
+
   return {
     renderDocks,
     openWindow,
     closeWindow,
     addTile,
+    addDerived,
     /** 卡片状态/标题给窗口管理器用（窗口卡由它自己建） */
     cardStateFor,
     windowLabel,

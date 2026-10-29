@@ -44,7 +44,7 @@ export interface DockSlotPrefs {
    *
    * 三种 id 混在同一个列表里：
    *   · 块 id（32 位 hex）＝ 一个块的一次露面（窗口卡；以后也可以是组件块）；
-   *   · 派生卡 id（`belongs`／`journal`／`inspect`／`backrefs`）＝ 宿主现算的视图卡；
+   *   · 派生卡 id（`belongs`／`journal`／`inspect`／`backrefs`／`trash`／`calendar`）＝ 宿主现算的视图卡；
    *   · `cmd:<命令名>` ＝ 一个**小卡**：没有块，点击执行这条命令。
    *
    * 它只是**视图状态**：块仍然只有森林里那一份，这里存的是「看哪几个、怎么排」。
@@ -88,6 +88,7 @@ export const DEFAULT_DOCK: DockPrefs = {
       'cmd:core.page/new',
       'cmd:core.command-palette/show',
       'cmd:core.journal/prev',
+      'calendar',
       'belongs',
       'journal',
     ],

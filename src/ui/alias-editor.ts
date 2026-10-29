@@ -115,7 +115,7 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
   list.className = 'alias-list'
   for (const name of aliases) {
     const row = document.createElement('div')
-    row.className = 'alias-row'
+    row.className = 'alias-row ui-row'
     row.dataset.aliasName = name
     const isPrimary = name === primary
     if (isPrimary) row.dataset.primary = '1'
@@ -136,7 +136,7 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
     row.appendChild(mark)
 
     const label = document.createElement('span')
-    label.className = 'alias-label'
+    label.className = 'alias-label ui-ellipsis ui-ellipsis-grow'
     label.textContent = name
     row.appendChild(label)
 
@@ -197,12 +197,12 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
     host.querySelector<HTMLInputElement>('.alias-input')?.focus()
   })
   const input = document.createElement('input')
-  input.className = 'alias-input'
+  input.className = 'alias-input ui-field'
   input.placeholder = t('ui.alias.add')
   input.spellcheck = false
   const add = document.createElement('button')
   add.type = 'submit'
-  add.className = 'alias-add-btn'
+  add.className = 'alias-add-btn ui-btn'
   add.textContent = t('ui.alias.add')
   form.append(input, add)
   listBox.appendChild(form)
@@ -249,6 +249,7 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
     for (const mode of ['alias', 'text'] as const) {
       const btn = document.createElement('button')
       btn.type = 'button'
+      btn.className = 'ui-btn'
       btn.dataset.aliasDisplay = mode
       if (mode === current) btn.dataset.active = '1'
       btn.textContent = t(mode === 'alias' ? 'ui.alias.showAlias' : 'ui.alias.showText')

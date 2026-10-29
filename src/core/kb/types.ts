@@ -262,6 +262,17 @@ export interface KbClient {
   findTag(name: string): Block | undefined
   /** 某天的 journal 块（一天一个；没有这一天 ⇒ `undefined`） */
   journalDay(date: string): Block | undefined
+  /**
+   * 库里**存在哪几天**（`YYYY-MM-DD`，升序）。
+   *
+   * 为什么要有它：日历卡要在一格里标出「这天写过／没写过」，
+   * 而 `journalDay(date)` 是**单点**读——照日历那样一天问一次，
+   * 一个 6 周视图就是 42 次整片森林遍历（每次 `journalDays` 都重建一张表）。
+   *
+   * ⚠️ 口径与 `journalDay` 同源：走索引里的 `journals` 表（日期 → id），
+   *    不另开一条「从森林里数日期」的实现——两份答案迟早会分叉。
+   */
+  journalDates(): readonly string[]
 
   /** 这一块当前的可引用区间（通常为空——anno 只在被引用时存在） */
   annosOf(id: string): readonly Anno[]

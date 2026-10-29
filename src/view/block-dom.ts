@@ -601,7 +601,7 @@ export function makeBlockEl(
        */
       const cell = document.createElement('button')
       cell.type = 'button'
-      cell.className = 'blk-context-cell'
+      cell.className = 'blk-context-cell ui-ellipsis'
       cell.dataset.crumbFor = a.id
       cell.title = t('ui.crumb.hint')
       cell.textContent = blockLabel(a)
@@ -641,7 +641,7 @@ export function makeBlockEl(
     head.dataset.aliasFor = b.id
 
     const name = document.createElement('span')
-    name.className = 'blk-alias-name'
+    name.className = 'blk-alias-name ui-ellipsis'
     name.dataset.aliasAction = 'config'
     // 显示叶子（`A/B` ⇒ `B`）；全名放进 title，路径语义不挤占行宽
     name.textContent = displayNameOf(b)

@@ -163,7 +163,7 @@ function showHint(text: string, e: DragEvent): void {
   }
   if (!hintEl) {
     hintEl = document.createElement('div')
-    hintEl.className = 'dnd-hint'
+    hintEl.className = 'dnd-hint ui-ellipsis'
     hintEl.setAttribute('role', 'presentation')
     document.body.appendChild(hintEl)
   }

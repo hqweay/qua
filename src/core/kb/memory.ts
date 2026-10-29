@@ -188,6 +188,16 @@ export class MemoryKb implements KbClient {
     return findJournalDay(this.store.blocks, date)
   }
 
+  /**
+   * 库里存在哪几天（升序）。
+   *
+   * 走索引的 `journals` 表，不是遍历森林：日历一屏要问几十天，
+   * 而 `journalDay` 每次都会重建一张「日期 → 块」表。
+   */
+  journalDates(): readonly string[] {
+    return [...this.store.index.journals.keys()].sort()
+  }
+
   annosOf(id: string): readonly Anno[] {
     return findInForest(this.store.blocks, id)?.annos ?? []
   }

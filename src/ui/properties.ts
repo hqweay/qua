@@ -205,7 +205,7 @@ export function makeFieldRow(
   opts: { labelCount?: ReadonlyMap<string, number>; showSource?: boolean } = {},
 ): HTMLElement {
   const el = document.createElement('div')
-  el.className = 'prop-row'
+  el.className = 'prop-row ui-row'
   el.dataset.propId = row.propId
   if (!row.filled) el.dataset.pending = '1'
 
@@ -353,7 +353,7 @@ export class PropertiesPanel {
    */
   private buildSystem(target: Block): HTMLElement {
     const box = document.createElement('div')
-    box.className = 'prop-row prop-system'
+    box.className = 'prop-row prop-system ui-row'
     const label = document.createElement('label')
     label.className = 'prop-label'
     const name = document.createElement('span')
@@ -391,7 +391,7 @@ export class PropertiesPanel {
    */
   private buildDeclared(target: Block): HTMLElement {
     const row = document.createElement('div')
-    row.className = 'prop-row prop-declared'
+    row.className = 'prop-row prop-declared ui-row'
     const label = document.createElement('label')
     label.className = 'prop-label'
     const name = document.createElement('span')
@@ -458,7 +458,7 @@ export class PropertiesPanel {
    */
   private buildBelongs(target: Block): HTMLElement {
     const row = document.createElement('div')
-    row.className = 'prop-row prop-belongs'
+    row.className = 'prop-row prop-belongs ui-row'
     const label = document.createElement('label')
     label.className = 'prop-label'
     const name = document.createElement('span')
@@ -540,7 +540,7 @@ export class PropertiesPanel {
    */
   private buildTags(target: Block): HTMLElement {
     const row = document.createElement('div')
-    row.className = 'prop-row prop-tags'
+    row.className = 'prop-row prop-tags ui-row'
     const label = document.createElement('label')
     label.className = 'prop-label'
     const name = document.createElement('span')

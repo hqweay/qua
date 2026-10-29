@@ -237,7 +237,7 @@ await check('A15 宽度手柄：拖动改宽并落盘、clamp 保证中心槽可
 
 /* ---------------------------------------------------------------- A17 */
 
-await check('A18 小卡是 44px 固定格、同一行顶对齐；大卡占满整行（流式槽）', async () => {
+await check('A18 小卡按列均分、整排右缘与大卡对齐；高度固定 44px；大卡跨整行', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
   await page.evaluate(() => window.__qua.quiet(true))
   const m = await page.evaluate(() => {
@@ -256,25 +256,49 @@ await check('A18 小卡是 44px 固定格、同一行顶对齐；大卡占满整
       stack: { left: +sr.left.toFixed(1), right: +sr.right.toFixed(1), width: +sr.width.toFixed(1) },
       padL: parseFloat(cs.paddingLeft),
       padR: parseFloat(cs.paddingRight),
+      gap: parseFloat(cs.gap),
       card: cr ? { left: +cr.left.toFixed(1), right: +cr.right.toFixed(1), top: +cr.top.toFixed(1), width: +cr.width.toFixed(1) } : null,
     }
   })
 
   assert(m.tiles.length === 4, `默认左槽应有 4 张小卡，实际 ${m.tiles.length}`)
   assert(m.rightTiles === 0, `默认右槽不该有小卡，实际 ${m.rightTiles}`)
+
+  /**
+   * **判据（对齐，不是绝对宽度）**：小卡排成一整行时，**最后一格的右缘 ＝ 大卡的右缘
+   * ＝ 内容区右缘**。
+   *
+   * 为什么不再断言「固定 44px」：固定宽会留下一条 30px 的尾巴（224px 的内容区
+   * 只放得下 4×44 ＋ 3×6 ＝ 194px），于是小卡右缘与大卡右缘差 30px —— 看起来像没摆正。
+   * 现在列宽由网格均分，格子会在 40–56px 之间浮动，但**右缘永远对齐**。
+   * 宽度只保留一个「不许被压成一条」的下限。
+   */
+  const last = m.tiles[m.tiles.length - 1]
+  const contentRight = m.stack.right - m.padR
+  assert(Math.abs(last.right - contentRight) <= 1, `最后一格小卡应贴内容区右缘（不留尾巴）：${JSON.stringify({ last, contentRight })}`)
+  assert(Math.abs(m.card.right - contentRight) <= 1, `大卡右缘也应贴内容区右缘（两者必须对齐）：${JSON.stringify(m.card)}`)
+  assert(Math.abs(last.right - m.card.right) <= 1, `小卡与大卡的右缘必须对齐：${JSON.stringify({ tileRight: last.right, cardRight: m.card.right })}`)
+
   for (const t of m.tiles) {
-    assert(Math.abs(t.w - 44) <= 0.5 && Math.abs(t.h - 44) <= 0.5, `小卡应固定 44×44：${JSON.stringify(t)}`)
+    assert(t.h === 44, `小卡高度仍固定 44px（一排要一样高）：${JSON.stringify(t)}`)
+    // 宽度均分后不许被压成一条（槽很窄时列会缩，但不该小于可点的下限）
+    assert(t.w >= 36, `小卡宽度不该被压到不可点：${JSON.stringify(t)}`)
   }
+
   const tops = [...new Set(m.tiles.map((t) => t.top))]
   assert(tops.length === 1, `同一行小卡应顶对齐：${JSON.stringify(tops)}`)
   assert(Math.abs(m.tiles[0].left - (m.stack.left + m.padL)) <= 0.5, `第一张小卡应贴内容区左缘：${JSON.stringify(m)}`)
-  assert(m.tiles[m.tiles.length - 1].right <= m.stack.right - m.padR + 0.5, `小卡不该越过内容区右缘：${JSON.stringify(m)}`)
+
+  // 间距恒等：相邻两格的缝必须都一样（均分之后仍要守这条，否则「看起来不齐」会以另一种形式回来）
+  const gaps = m.tiles.slice(1).map((t, i) => +(t.left - m.tiles[i].right).toFixed(1))
+  assert(new Set(gaps).size === 1, `相邻小卡的缝必须恒等：${JSON.stringify(gaps)}`)
+
   assert(m.card, '默认左槽应有一张大卡')
   assert(m.card.top >= m.tiles[0].top + 44, `大卡应换到小卡下一行：${JSON.stringify(m)}`)
-  assert(Math.abs(m.card.width - (m.stack.width - m.padL - m.padR)) <= 1, `大卡应占满整行：${JSON.stringify(m)}`)
+  assert(Math.abs(m.card.width - (m.stack.width - m.padL - m.padR)) <= 1, `大卡应跨整行：${JSON.stringify(m)}`)
 
   await ctx.close()
-  return `左槽 4×44px 小卡顶对齐；大卡 ${m.card.width}px 占满整行；右槽 0 张小卡`
+  return `左槽 4 张小卡均分（各 ${m.tiles[0].w}px）、右缘与大卡对齐（${last.right}＝${m.card.right}）；高度 44px；右槽 0 张小卡`
 })
 
 /* ---------------------------------------------------------------- 保底 */
@@ -618,6 +642,280 @@ await check('A17 父块的竖线在本行换行后不断：自身延续段 ＋ �
 
   await ctx.close()
   return `换行 ${r.lines} 行（行高 ${r.rowH}px）时线仍连续：${r.segCount} 段、起点 ${r.startTop}（块标中心 ${r.markerCenter}）、零豁口；折叠后自身段撤掉`
+})
+
+/* ---------------------------------------------------------------- A19 */
+
+await check('A19 浮层里的输入行：输入框拿到可用的宽度，说明文字独占一行', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  /**
+   * **判据**：`.popover-anchor`（锚文本那一行、外链输入框）里，输入框的**可用宽度**
+   * 不能小于浮层内容宽的一半，且说明那一行必须**在输入框下方**（不是被挤进同一行）。
+   *
+   * 为什么这条要量而不是看图：说明是 `flex: 1 0 100%`——它要独占整行，
+   * 但容器**不换行**时这条 basis 只会去挤同一行：输入框被压成 14px 宽、拉成 100 多像素高，
+   * 外观上「浮层里有几个竖条」，而**用户打不进字**。字面看 CSS 每一条都对，
+   * 缺的只是容器上的 `flex-wrap`（实测：380px 浮层里输入框只剩 14px）。
+   */
+  const setup = await page.evaluate(() => {
+    // 先造一枚页引用，再 ⌥ 点开它的详情浮层（锚文本输入框只在这里）
+    const target = window.__qua.pages()[1].id
+    const b = window.__qua.blocks()[0]
+    window.__qua.focusBlock(b.id, 0)
+    window.__qua.invoke('core.editor/insert-page-ref', { pageId: target })
+    return { blockId: b.id, target }
+  })
+  assert(setup.target, `前置：应能取到第二页：${JSON.stringify(setup)}`)
+  await page.waitForTimeout(200)
+  await page.locator(`#editor .atom-page`).first().click({ modifiers: ['Alt'] })
+  await page.waitForTimeout(200)
+
+  const m = await page.evaluate(() => {
+    const read = (label) => {
+      const box = document.querySelector(`.popover form.popover-anchor`)
+      if (!box) return { label, missing: true }
+      const inputs = [...box.querySelectorAll('input')]
+      const note = box.querySelector('.popover-note')
+      const content = box.getBoundingClientRect()
+      const widest = inputs.length ? Math.max(...inputs.map((i) => i.getBoundingClientRect().width)) : 0
+      return {
+        label,
+        count: inputs.length,
+        contentW: +content.width.toFixed(1),
+        widestInputW: +widest.toFixed(1),
+        // 说明是不是真的换到下一行了：它的顶边要在**每一个输入框**的底边之下
+        noteBelow: note ? inputs.every((i) => note.getBoundingClientRect().top >= i.getBoundingClientRect().bottom - 0.5) : null,
+        inputH: inputs.length ? +Math.max(...inputs.map((i) => i.getBoundingClientRect().height)).toFixed(1) : 0,
+      }
+    }
+    return { anchor: read('锚文本') }
+  })
+  assert(!m.anchor.missing, `⌥ 点页引用应开出带锚文本输入行的浮层：${JSON.stringify(m)}`)
+  assert(m.anchor.count >= 1, `锚文本那一行应有输入框：${JSON.stringify(m.anchor)}`)
+  assert(
+    m.anchor.widestInputW >= m.anchor.contentW / 2,
+    `输入框应拿到至少半个浮层宽（否则打不进字）：${JSON.stringify(m.anchor)}`,
+  )
+  assert(m.anchor.noteBelow === true, `说明应换到输入框下方，而不是挤在同一行：${JSON.stringify(m.anchor)}`)
+  // 高度也别被拉变形：一行输入框的高度不该超过两倍行高（被挤成竖条时实测 113px）
+  assert(m.anchor.inputH <= 48, `输入框高度应是一行（≤48px），实际 ${m.anchor.inputH}px：${JSON.stringify(m.anchor)}`)
+
+  // 同一条几何也被外链输入框复用（两个字段 ＋ 按钮 ＋ 说明）：一起验
+  await page.keyboard.press('Escape')
+  await page.evaluate(() => window.__qua.invoke('core.editor/insert-link', {}))
+  await page.waitForTimeout(200)
+  const link = await page.evaluate(() => {
+    const box = document.querySelector('.popover form.popover-anchor')
+    if (!box) return { missing: true }
+    const inputs = [...box.querySelectorAll('input')]
+    const note = box.querySelector('.popover-note')
+    const content = box.getBoundingClientRect()
+    return {
+      count: inputs.length,
+      contentW: +content.width.toFixed(1),
+      widestInputW: +Math.max(...inputs.map((i) => i.getBoundingClientRect().width)).toFixed(1),
+      noteBelow: note ? inputs.every((i) => note.getBoundingClientRect().top >= i.getBoundingClientRect().bottom - 0.5) : null,
+      inputH: +Math.max(...inputs.map((i) => i.getBoundingClientRect().height)).toFixed(1),
+    }
+  })
+  assert(!link.missing, `插入外链应开出一个问地址的浮层：${JSON.stringify(link)}`)
+  assert(link.count === 2, `外链浮层应有地址与显示文本两个输入框：${JSON.stringify(link)}`)
+  /**
+   * 这一行是两个字段**并排**（地址 ＋ 显示文本 ＋ 按钮），所以判据不是「半个浮层」，
+   * 而是**每个字段都还剩能打字的宽度**——挤成竖条时每个只剩 14px。
+   */
+  assert(
+    link.widestInputW >= 120,
+    `外链的输入框都该有能打字的宽度（≥120px），实测最宽 ${link.widestInputW}px：${JSON.stringify(link)}`,
+  )
+  assert(link.noteBelow === true, `外链浮层的说明应独占一行：${JSON.stringify(link)}`)
+  assert(link.inputH <= 48, `外链输入框高度应是一行（≤48px），实际 ${link.inputH}px：${JSON.stringify(link)}`)
+
+  await ctx.close()
+  return `锚文本输入框 ${m.anchor.widestInputW}px（浮层 ${m.anchor.contentW}px）、说明换行；外链两框 ${link.widestInputW}px`
+})
+
+/* ---------------------------------------------------------------- A20 */
+
+await check('A20 单行省略原语：名字足够长时也不折行、不撑破容器', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  /**
+   * **判据**：`.ui-ellipsis` 的元素在**长名字**下仍然
+   * ① `white-space: nowrap` ＋ `text-overflow: ellipsis`（省略而不是折行）；
+   * ② 右缘不越过容器内容区（`min-width: 0` 真的生效）。
+   *
+   * 为什么要专门喂长名字：这四条声明漏任何一条，**短名字下都看不出来**
+   * ——而真实库里的页名／标签名经常很长。这条用例的前身是「11 处逐字相同的五条声明」，
+   * 现在是「一处原语 ＋ 一条只喂长名字的断言」。
+   *
+   * ⚠️ 顺带钉住 `ui-ellipsis` 与 `ui-ellipsis-grow` 是**两件事**：前者是文本行为、
+   *    后者是布局行为。合成一条时，被外层定宽的那些元素（块别名、看图标题）
+   *    会被硬塞一个 `flex: 1`，宽度分配当场变样。
+   */
+  const probe = await page.evaluate(() => {
+    /**
+     * 把第一个页名改成一个**很长的**名字。
+     *
+     * ⚠️ 用 `forceForest`（模型层的探针入口）而不是命令面：这里要验的是**渲染**，
+     *    不是「改名命令写对了没有」。走命令面会把两件事的失败混在一条断言里。
+     */
+    const long = '一个非常长的页名'.repeat(8)
+    window.__qua.forceForest((forest) => {
+      const P = forest[0]
+      P.props = { ...(P.props ?? {}), _aliases: [long] }
+    })
+    window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id })
+    return { long }
+  })
+  await page.waitForTimeout(350)
+
+  const m = await page.evaluate(() => {
+    const out = []
+    for (const el of document.querySelectorAll('#dock-left .ui-ellipsis, #dock-right .ui-ellipsis')) {
+      const cs = getComputedStyle(el)
+      const r = el.getBoundingClientRect()
+      const pr = el.parentElement.getBoundingClientRect()
+      const lines = Math.round(r.height / (parseFloat(cs.lineHeight) || 16))
+      out.push({
+        cls: el.className,
+        ws: cs.whiteSpace,
+        to: cs.textOverflow,
+        lines,
+        overflowsParent: r.right > pr.right + 1,
+        text: (el.textContent ?? '').slice(0, 12),
+      })
+    }
+    return out
+  })
+  assert(m.length >= 2, `槽里应有若干走省略原语的名字：${JSON.stringify(m)}`)
+  const wrapped = m.filter((x) => x.ws !== 'nowrap' || x.to !== 'ellipsis')
+  assert(wrapped.length === 0, `省略原语必须是 nowrap ＋ ellipsis（不许退化成折行）：${JSON.stringify(wrapped)}`)
+  const tall = m.filter((x) => x.lines > 1)
+  assert(tall.length === 0, `长名字下也不许折成两行：${JSON.stringify(tall)}`)
+  const spill = m.filter((x) => x.overflowsParent)
+  assert(spill.length === 0, `长名字不许撑破容器（min-width: 0 要真的生效）：${JSON.stringify(spill)}`)
+
+  await ctx.close()
+  void probe
+  return `${m.length} 处省略原语在长名字下仍单行、不溢出（最长名字 ${probe.long.length} 字）`
+})
+
+/* ---------------------------------------------------------------- A21 */
+
+await check('A21 日历卡：一格一天、周一起始、点一格去那天；写过的那天有标记', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.waitForTimeout(400)
+
+  /**
+   * **判据**（四条，都是日历自己要说的事）：
+   *   ① 一屏一个月：格数 ＝ 这个月的天数，月外留空（不画邻月日期）；
+   *   ② 周一起始：表头是「一…日」，且 1 号落在它真实的那一格；
+   *   ③ **写过的那天要看得见**（`data-written`）——日历一半的用处是「这天写过」；
+   *   ④ **点一格 ＝ 去那天**，且点完这一格立刻变成「写过」。
+   *
+   * ⚠️ ③ 特别值得钉：只画数字的日历看起来完全正常，但「哪天写过」看不出来 ——
+   *    而那正是用户打开日历的理由。
+   */
+  const before = await page.evaluate(() => {
+    const card = document.querySelector('#dock-left .dock-card[data-card-id="calendar"]')
+    if (!card) return { missing: true }
+    const cells = [...card.querySelectorAll('.cal-cell:not(.cal-pad)')]
+    return {
+      title: card.querySelector('.dock-card-title')?.textContent ?? '',
+      label: card.querySelector('.cal-label')?.textContent ?? '',
+      weekdays: [...card.querySelectorAll('.cal-week')].map((w) => w.textContent),
+      cellCount: cells.length,
+      pads: card.querySelectorAll('.cal-pad').length,
+      today: cells.filter((c) => c.dataset.today === '1').map((c) => c.dataset.date),
+      written: cells.filter((c) => c.dataset.written === '1').map((c) => c.dataset.date),
+      dates: cells.map((c) => c.dataset.date),
+    }
+  })
+  assert(!before.missing, '默认左槽应有日历卡（派生卡，靠 cards 里的 `calendar`）')
+  assert(before.weekdays.join(',') === '一,二,三,四,五,六,日', `表头应周一起始：${before.weekdays.join(',')}`)
+  assert(before.cellCount >= 28 && before.cellCount <= 31, `一屏一个月（28–31 格）：${before.cellCount}`)
+  assert(before.today.length === 1, `今天应恰好有一格被标出：${JSON.stringify(before.today)}`)
+
+  // ① 月外留空：格数 ＋ 空位数 ＝ 这个月占的格（含 1 号之前的那几格）
+  const y = Number(before.today[0].slice(0, 4))
+  const m = Number(before.today[0].slice(5, 7))
+  const days = new Date(y, m, 0).getDate()
+  assert(before.cellCount === days, `${y}-${m} 应有 ${days} 格，实际 ${before.cellCount}`)
+  // 1 号之前的空位数 ＝ 1 号是周几（周一起始 ⇒ 周一为 0）
+  const firstPad = (new Date(y, m - 1, 1).getDay() + 6) % 7
+  assert(before.pads === firstPad, `1 号之前的空位应是 ${firstPad} 个（周一起始），实际 ${before.pads}`)
+
+  // ③ 写过的那天要有标记（种子库里今天一定写过）
+  assert(before.written.length >= 1, `有内容的日期必须标出来（否则日历只剩数字）：${JSON.stringify(before.written)}`)
+  assert(before.written.includes(before.today[0]), `今天写过，应带 written 标记：${JSON.stringify(before.written)}`)
+
+  // ④ 点一个**没写过**的日期 ⇒ 中心槽换成那天，且这一格立刻变成「写过」
+  const blank = before.dates.find((d) => !before.written.includes(d))
+  assert(blank, `本月应有一个没写过的日期可点：${JSON.stringify(before.written)}`)
+  await page.locator(`#dock-left .cal-cell[data-date="${blank}"]`).click()
+  await page.waitForTimeout(450)
+  const after = await page.evaluate((d) => {
+    const cell = document.querySelector(`#dock-left .cal-cell[data-date="${d}"]`)
+    return {
+      written: cell?.dataset.written === '1',
+      // 中心槽换成了那一天（日记块的日期行是只读投影，取它的占位文案）
+      editorRows: document.querySelectorAll('#editor .blk').length,
+      firstBlock: window.__qua.text()[0]?.slice(0, 24) ?? '',
+    }
+  }, blank)
+  assert(after.written, `点完这一格应立刻标成「写过」（写完要看得见）：${JSON.stringify(after)}`)
+  assert(after.editorRows > 0, `点一格应把中心槽换成那一天：${JSON.stringify(after)}`)
+
+  await ctx.close()
+  return `日历 ${before.label}：${before.cellCount} 格 ＋ ${before.pads} 空位（周一起始）；写过 ${before.written.length} 天；点 ${blank} ⇒ 打开且立刻标为写过`
+})
+
+/* ---------------------------------------------------------------- A22 */
+
+await check('A22 卡里的一列块与空态只有一个产地（`card-parts`）：形状一致、空态有话说', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
+  await page.waitForTimeout(400)
+
+  /**
+   * **判据**：所有派生卡里的「一列块」都带 `block-list`（同一个行距来源），
+   * 所有空态都带 `dock-empty`（同一种「为什么这里是空的」写法）。
+   *
+   * 为什么这条值得有：这两样此前在四张派生卡 ＋ 组件卡 ＋ 槽空态里各手写一遍。
+   * 抄漏 `block-list` 的后果是「这一列块没有行距」——而在两三行的短列表上，
+   * 行距差不出来。抄漏空态则是「一个什么都没有的框」，用户分不清「没内容」和「没加载」。
+   */
+  const m = await page.evaluate(() => {
+    const lists = [...document.querySelectorAll('#dock-left .dock-card .block-list, #dock-right .dock-card .block-list')]
+    const notes = [...document.querySelectorAll('#dock-left .dock-empty, #dock-right .dock-empty')]
+    const emptyWithText = notes.filter((n) => (n.textContent ?? '').trim() !== '')
+    return {
+      listCount: lists.length,
+      // 一列块的形状来源：`display: flex` ＋ 纵向（来自 `.block-list`）
+      listShapes: lists.map((el) => {
+        const cs = getComputedStyle(el)
+        return { display: cs.display, dir: cs.flexDirection }
+      }),
+      noteCount: notes.length,
+      notesWithoutText: notes.filter((n) => (n.textContent ?? '').trim() === '').length,
+      emptyWithText: emptyWithText.length,
+    }
+  })
+  assert(m.listCount >= 2, `槽里应有若干「一列块」容器：${JSON.stringify(m)}`)
+  const bad = m.listShapes.filter((s) => s.display !== 'flex' || s.dir !== 'column')
+  assert(bad.length === 0, `「一列块」都该来自同一份原语（flex ＋ column）：${JSON.stringify(bad)}`)
+  assert(m.notesWithoutText === 0, `空态必须说一句为什么（不许留空框）：${JSON.stringify(m)}`)
+
+  await ctx.close()
+  return `${m.listCount} 处一列块共用同一形状；${m.noteCount} 处空态都有话`
 })
 
 /* ---------------------------------------------------------------- 不适用项 */

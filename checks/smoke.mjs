@@ -11646,6 +11646,106 @@ await check('T148 一源三视：挂载区里改字 ⇒ 正文与右槽窗口都
   return `一源三视：改字三处同步、⌘Z 三处回滚、窗口右键有菜单（${menu.rows} 项）`
 })
 
+/* ---------------------------------------------------------------- T149 */
+
+/**
+ * **覆盖层的两条桌面纪律**：关掉之后按键要有落点、开着的时候要跟着锚点走。
+ *
+ * 为什么这两条要专门一条用例：它们的失效形态都是**静默**的。
+ *   · 关掉浮层后焦点掉到 `BODY` ⇒ 用户接着打字，一个字符都进不去、正文一字不变、
+ *     屏幕上没有任何提示（看起来像「输入法坏了」）；
+ *   · 浮层拿的是**矩形快照** ⇒ 拖窗口边或滚动正文之后它留在原地、锚点早已跑开，
+ *     而它看起来仍然「好好地开着」。
+ *
+ * 这两件事在 Web 上很少发生（不拖窗口边、不在浮层开着时滚动整页），
+ * 桌面应用里都是日常动作 —— 所以判据落在「真按键 + 真改视口」上，不是读 CSS。
+ */
+await check('T149 覆盖层：关掉之后按键仍落在编辑器；浮层开着时改视口/滚动会重新贴住锚点', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  /** 真点进正文（合成事件拿不到真实焦点，这条必须用真鼠标） */
+  const caret = await page.evaluate(() => {
+    const tx = document.querySelector('#editor .blk .tx')
+    const r = tx.getBoundingClientRect()
+    return { x: r.left + 20, y: r.top + r.height / 2 }
+  })
+  await page.mouse.click(caret.x, caret.y)
+  await page.waitForTimeout(200)
+
+  // ① 命令面板：开 → Esc 关 → **打字必须进得去**
+  await page.keyboard.press('Meta+p')
+  await page.waitForTimeout(250)
+  const opened = await page.evaluate(() => Boolean(document.querySelector('.layer')))
+  assert(opened, '⌘P 应打开命令面板')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
+  const closed = await page.evaluate(() => {
+    const sel = document.getSelection()
+    return {
+      layer: Boolean(document.querySelector('.layer')),
+      active: document.activeElement?.tagName ?? '',
+      inEditor: Boolean(document.activeElement?.closest?.('#editor')),
+      // **能打字的真正判据**：模型选区投影回了 DOM（焦点回来而 Range 没了照样打不进）
+      rangeInTx: Boolean(sel?.rangeCount && sel.anchorNode?.parentElement?.closest?.('.tx')),
+    }
+  })
+  assert(!closed.layer, `Esc 应关掉命令面板：${JSON.stringify(closed)}`)
+  assert(closed.inEditor, `关掉之后焦点应回到编辑器，不是掉到 ${closed.active}：${JSON.stringify(closed)}`)
+  assert(closed.rangeInTx, `关掉之后插入点应回到正文槽（焦点回来≠能打字）：${JSON.stringify(closed)}`)
+
+  const before = await page.evaluate(() => window.__qua.text()[0] ?? '')
+  await page.keyboard.type('Z')
+  await page.waitForTimeout(250)
+  const after = await page.evaluate(() => window.__qua.text()[0] ?? '')
+  /**
+   * ⚠️ 判据是「多了一个字」而**不是**「开头是 Z」：插入点在刚才点进去的那一处，
+   *    不一定是行首（实测落在「产|品设计」中间）。写死开头会把「字进去了」误判成失败。
+   */
+  assert(
+    after.length === before.length + 1 && after.includes('Z'),
+    `关掉浮层后打的字必须进得去：${before.slice(0, 12)} → ${after.slice(0, 12)}`,
+  )
+
+  // ② 浮层跟着锚点：开着时改视口，必须重新钳位（不许留在窗口外）
+  await page.evaluate(() => {
+    window.__qua.__layers.openPopover((h) => {
+      h.textContent = 'probe'
+    }, new DOMRect(window.innerWidth - 100, 100, 0, 20))
+  })
+  await page.waitForTimeout(200)
+  const wide = await page.evaluate(() => {
+    const p = document.querySelector('.popover')
+    const r = p.getBoundingClientRect()
+    return { right: Math.round(r.right), vw: window.innerWidth, offRight: r.right > window.innerWidth }
+  })
+  assert(!wide.offRight, `前置：宽视口下浮层本来就该在视口内：${JSON.stringify(wide)}`)
+
+  await page.setViewportSize({ width: 760, height: 600 })
+  await page.waitForTimeout(350)
+  const narrow = await page.evaluate(() => {
+    const p = document.querySelector('.popover')
+    if (!p) return { closed: true }
+    const r = p.getBoundingClientRect()
+    return { left: Math.round(r.left), right: Math.round(r.right), vw: window.innerWidth, offRight: r.right > window.innerWidth }
+  })
+  assert(!narrow.closed, '改视口不该把浮层关掉（它还有锚点）')
+  assert(!narrow.offRight, `窗口变窄后浮层必须重新钳位在视口内（不许挂在窗口外）：${JSON.stringify(narrow)}`)
+
+  // ③ 锚点消失（指向的元素被摘掉）⇒ 浮层自己关掉，不留一个「指向不存在」的面
+  await page.evaluate(() => {
+    window.__qua.__layers.openPopover((h) => {
+      h.textContent = 'gone'
+    }, () => null)
+  })
+  await page.waitForTimeout(200)
+  const gone = await page.evaluate(() => Boolean(document.querySelector('.popover')))
+  assert(!gone, '锚点取不到时不该留下一个悬空的浮层')
+
+  await ctx.close()
+  return `关掉面板后打字进得去（${before.slice(0, 8)}→${after.slice(0, 8)}）；视口 1440→760 后浮层仍在内；锚点消失即关`
+})
+
 /**
  * ⚠️ **报告先写，再关浏览器。** 反过来的话，机器被压死那一刻 Chrome 先死，
  *    `browser.close()` 抛出来，报告就永远没写 —— 编排端只能看到「这一片没留下报告」，

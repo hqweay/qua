@@ -429,6 +429,124 @@ function commandDecls() {
 }
 
 /* ═══════════════════════════════════════════════════════╗
+   ║ 28 · 层叠层级只能走 --ui-z-*                             ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  /**
+   * 来由：`z-index` 此前是 11 个裸数字（1 / 4 / 55 / 56 / 60 / 65 / 70 / 72 / 80 / 85 / 90）。
+   * 谁比谁高只能靠「我记得那个数字更大」；加一层新浮层时唯一可用的办法是猜一个更大的数字，
+   * 而猜错的形态是**静默被盖住**——不报错、不红、只有人眼能发现。
+   *
+   * ⇒ 层级改成**语义排序**（`--ui-z-menu` / `--ui-z-popover` / …），这条断言禁裸数字回潮。
+   * 与 `[19]` 同一条纪律：token 段是唯一定义处，段外只许引用。
+   */
+  const hits = []
+  for (const f of cssFiles) {
+    const r = rel(f)
+    const src = readFileSync(f, 'utf8')
+    const end = src.indexOf('/* @token:end */')
+    const head = end >= 0 ? src.slice(0, end) : ''
+    const body = end >= 0 ? src.slice(end) : src
+    body.split('\n').forEach((line, i) => {
+      // 只查「声明值」：`z-index: 70;` 这种裸数字；`var(--ui-z-*)` 与注释都不算
+      if (!/z-index\s*:\s*[0-9]/.test(line)) return
+      const lineNo = end >= 0 ? head.split('\n').length + i : i + 1
+      hits.push(`${r}:${lineNo}  ${line.trim().slice(0, 70)}`)
+    })
+  }
+  add({
+    id: 28,
+    title: '层叠层级只能走 `--ui-z-*`（不许再出现裸 `z-index: <数字>`）',
+    method: '扫 src/**/*.css 的非 token 段，找 `z-index:` 后面直接跟数字的行',
+    scope: `src/**/*.css 的非 token 段（${cssFiles.length} 个文件）`,
+    whitelist: 'token 段（`/* @token:begin */`…`/* @token:end */`，`--ui-z-*` 的唯一定义处）',
+    hits: hits.length,
+    detail: hits,
+    note: '判据是**语义排序**不是数值排序：读 `--ui-z-popover` 的人知道它是「浮层」，不需要知道它比谁大',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
+   ║ 29 · 原语的几何不许在组件里再写一份                    ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  /**
+   * 来由：`primitives.css` 立起四条原语（`.ui-field` / `.ui-btn` / `.ui-row` /
+   * `.ui-ellipsis`）之前，同一套完整几何在 3–4 处逐字重复：
+   *   · 输入框（padding + border + radius + 背景）4 套；
+   *   · 按钮（逐字相同的 4 条声明）3 处；
+   *   · 「一行：标签 ＋ 控件」4 套（于是行距各自漂移）；
+   *   · 「单行省略」5 条声明 4 处（漏 `min-width: 0` 就撑破容器）。
+   *
+   * ⇒ 这条断言的判据落在**声明的去处**，不是语法形状：只要某个非原语规则里
+   *   又出现了「原语那份几何的整组」，就是有人把原语抄回去了一份。
+   *
+   * ⚠️ 为什么用「整组声明逐字相同」而不是关键词：关键词会把「碰巧用了同一个 token」
+   *    也判成重复（`--ui-gap-2` 到处都在用）。整组相同才是「同一套形状」。
+   */
+  const PRIMITIVES = 'src/styles/primitives.css'
+  const GEOMETRY_SETS = [
+    {
+      name: '输入字段',
+      decls: [
+        'padding: var(--ui-gap-2) var(--ui-gap-3)',
+        'border: var(--ui-sep) solid var(--ui-border)',
+        'border-radius: var(--ui-radius-sm)',
+        'background: var(--ui-surface)',
+      ],
+    },
+    {
+      name: '小按钮',
+      decls: [
+        'padding: var(--ui-gap-2) var(--ui-gap-3)',
+        'border: var(--ui-sep) solid var(--ui-border)',
+        'border-radius: var(--ui-radius-sm)',
+        'color: var(--ui-text-secondary)',
+      ],
+    },
+    {
+      name: '单行省略',
+      decls: ['overflow: hidden', 'text-overflow: ellipsis', 'white-space: nowrap'],
+    },
+  ]
+  const hits = []
+  for (const f of cssFiles) {
+    const r = rel(f)
+    if (r === PRIMITIVES) continue // 原语自己的定义处，豁免
+    const src = readFileSync(f, 'utf8')
+    // 粗解析成规则块：`选择器 { 声明 }`（本仓 CSS 没有嵌套，够用）
+    const re = /([^{}]+)\{([^{}]*)\}/g
+    let m
+    while ((m = re.exec(src))) {
+      const sel = m[1].replace(/\/\*[\s\S]*?\*\//g, '').trim().replace(/\s+/g, ' ')
+      if (!sel || sel.startsWith('@')) continue
+      const decls = m[2]
+        .split(';')
+        .map((x) => x.trim())
+        .filter(Boolean)
+      for (const set of GEOMETRY_SETS) {
+        const all = set.decls.every((d) => decls.includes(d))
+        if (!all) continue
+        const lineNo = src.slice(0, m.index).split('\n').length
+        hits.push(`${r}:${lineNo}  ${sel}  ← 这套几何属于「${set.name}」原语`)
+      }
+    }
+  }
+  add({
+    id: 29,
+    title: '原语的几何不许在组件里再写一份（改形状只改 `styles/primitives.css`）',
+    method: '扫 src/**/*.css（除 primitives.css 自己），找**整组逐字相同**的几何声明',
+    scope: `src/**/*.css（${cssFiles.length} 个文件，原语自身豁免）`,
+    whitelist: `${PRIMITIVES} —— 原语的唯一定义处`,
+    hits: hits.length,
+    detail: hits,
+    note: '判据落在**声明的去处**：整组相同才算「同一套形状」；只共用一个 token 不算（那到处都在用）',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
    ║ 额外（里能静态查的）                          ║
    ║   4  同名命令不可二次注册                                ║
    ║   2  主进程不得 import 数据层                            ║

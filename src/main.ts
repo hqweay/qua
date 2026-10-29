@@ -307,7 +307,7 @@ function uiCtx(): CtxKeys {
 
 /* ------------------------------------------------------------ 槽内容 */
 
-const { renderDocks, openWindow, closeWindow, addTile, cardStateFor, windowLabel, setWindows, widgetDeps: dockWidgetDeps } = setupDocks({
+const { renderDocks, openWindow, closeWindow, addTile, addDerived, cardStateFor, windowLabel, setWindows, widgetDeps: dockWidgetDeps } = setupDocks({
   kb,
   prefs,
   applyChrome: () => applyChrome(),
@@ -630,7 +630,19 @@ const panelDeps: PanelDeps = {
  */
 let objFieldDeps: ObjFieldDeps | undefined
 
-const showAtomPopover = (a: RunWithId, rect: DOMRect): void => panelPopover(panelDeps, a, rect, objFieldDeps)
+/**
+ * 浮层的锚点：**取矩形的函数**，不是快照。
+ *
+ * 为什么：浮层要跟着锚点走。桌面端拖窗口边、滚动正文都是日常动作，而一个矩形快照
+ * 记不住自己指向谁 —— 滚动 300px 之后锚点早已跑开、浮层留在原地（实测相距 308px），
+ * 且不报错。传函数则每次重算都对着当前那处。
+ *
+ * `el.isConnected === false` ⇒ 返回 `null`，浮层自己会关掉（指向不存在的东西比没有更糟）。
+ */
+const anchorOf = (el: HTMLElement) => () => (el.isConnected ? el.getBoundingClientRect() : null)
+
+const showAtomPopover = (a: RunWithId, anchor: DOMRect | null | (() => DOMRect | null)): void =>
+  panelPopover(panelDeps, a, anchor, objFieldDeps)
 
 /**
  * 一枚 run 的**当前模型对象**（点击时 DOM 上只有 id，载荷要现查）。
@@ -652,7 +664,7 @@ function findRunOrNull(runId: string): RunWithId | null {
 function showAssetDetails(runId: string, _hash: string, el: HTMLElement): void {
   const run = findRunOrNull(runId)
   if (run?.t === 'asset') {
-    showAtomPopover(run, el.getBoundingClientRect())
+    showAtomPopover(run, anchorOf(el))
     return
   }
   // 模型里已经没有了（刚被删）：不弹一个操作不了的空浮层
@@ -703,7 +715,7 @@ function handleRefClick(ref: RefClickHit, mods: RefClickMods, el?: HTMLElement):
     else void registry.invoke('core.block/focus-block', { blockId: target }, 'editor')
     return
   }
-  if (ref.run && el) showAtomPopover(ref.run, el.getBoundingClientRect())
+  if (ref.run && el) showAtomPopover(ref.run, anchorOf(el))
   /**
    * 剩下的两种情形都不做事，且都不假装成功：
    *   · 没有 run（chip／属性区）且目标不在了 ⇒ 没有可弹的内容；
@@ -1222,7 +1234,7 @@ const app: App = {
   addBlockRole: (blockId, role) => addBlockRole(blockId, role),
   removeBlockRole: (blockId, role) => removeBlockRole(blockId, role),
   openAliasEditor: (blockId, autofocus) => openAliasEditor(blockId, ed.caretRect(), autofocus),
-  openFieldsEditor: (blockId) => openFieldsEditor(blockId, ed.caretRect()),
+  openFieldsEditor: (blockId) => openFieldsEditor(blockId, null),
   setBlockType: (blockId, typeId) => applyBlockType(blockId, typeId),
 
   // 导航历史（中心槽走到哪）；与 undo/redo 的模型快照栈无关
@@ -1350,7 +1362,11 @@ const app: App = {
  *    委托在装配层，`view/` 只负责把动作标出来。
  * ⚠️ 写操作走 `writeProps`：它自带「重画这一行」——别名头就在这一行的 DOM 里。
  */
-const openAliasEditor = (blockId: string, rect: DOMRect | null, autofocus = false): void => {
+/**
+ * @param anchor 可以是**那颗按钮**（浮层跟着它走），也可以是一个矩形（没有稳定元素时，
+ *   例如命令面按光标位置打开）。两者都收，是因为调用者确实有这两种情形。
+ */
+const openAliasEditor = (blockId: string, anchor: HTMLElement | DOMRect | null, autofocus = false): void => {
   if (!findInForest(ws.blocks, blockId)) return
   layers.openPopover(
     (host) =>
@@ -1362,11 +1378,16 @@ const openAliasEditor = (blockId: string, rect: DOMRect | null, autofocus = fals
         toast: (text, kind) => app.toast(text, kind),
         autofocus,
       }),
-    rect,
+    // 元素锚点会跟着那一颗按钮走（行随重渲染被换掉时由 `anchorOf` 兜住「不在了」）
+    anchor === null ? null : anchor instanceof HTMLElement ? anchorOf(anchor) : anchor,
   )
 }
 
-const openFieldsEditor = (blockId: string, _rect: DOMRect | null): void => {
+/**
+ * 字段声明抽屉。**不用锚点**：抽屉贴着窗口右缘整高铺开，锚点对它没有意义
+ * （它不是「指向某一处」的浮层，是一个面板）。所以这里收 `_anchor` 只为签名一致。
+ */
+const openFieldsEditor = (blockId: string, _anchor: HTMLElement | null): void => {
   if (!findInForest(ws.blocks, blockId)) return
   layers.openDrawer(
     t('ui.alias.fieldsTitle'),
@@ -1488,12 +1509,12 @@ function viewEvents(editor: () => BlockEditor, change: ViewEvents['change'], via
           void registry.invoke('core.link/open', { atomId: atom.runId }, via)
           return
         }
-        showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), el.getBoundingClientRect())
+        showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), anchorOf(el))
         return
       }
       if (atom.kind !== 'asset' || !atom.hash) {
         // 将来别的行内对象：先给详情（它们的「打开」还没做，别假装做了）
-        if (atom.runId) showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), el.getBoundingClientRect())
+        if (atom.runId) showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), anchorOf(el))
         return
       }
       const view = assetViewOf(atom.hash)
@@ -1668,9 +1689,8 @@ document.addEventListener('click', (e) => {
   const row = action.closest<HTMLElement>('.blk[data-block-id]')
   const blockId = row?.dataset.blockId
   if (!blockId) return
-  const rect = action.getBoundingClientRect()
-  if (action.dataset.aliasAction === 'fields') openFieldsEditor(blockId, rect)
-  else openAliasEditor(blockId, rect)
+  if (action.dataset.aliasAction === 'fields') openFieldsEditor(blockId, action)
+  else openAliasEditor(blockId, action)
 })
 
 window.addEventListener('beforeunload', () => {
@@ -1719,7 +1739,23 @@ function paintStaticCopy(): void {
  * 命令是**策展过的**集合（不是所有命令）；集合则是一个真正的组件块。
  */
 function showWidgetGallery(side: 'left' | 'right'): void {
-  const taken = new Set(prefs().dock[side].cards.filter((id) => id.startsWith('cmd:')))
+  const cards = prefs().dock[side].cards
+  const taken = new Set(cards.filter((id) => id.startsWith('cmd:')))
+  /**
+   * **派生卡的目录**：固定 id ＋ 标题 ＋ 图标 ＋ 一个显式的 `derived` 标记。
+   *
+   * 为什么它们要和「带 `tile` 的命令」并列在同一张画廊里：派生卡**没有关闭按钮**
+   * （关掉就没有再加回来的入口），所以「加回来」必须有一个地方。
+   * 不带 `derived` 标记的话，`onPick` 只能靠「id 里有没有点号」去猜它是命令还是卡片 ——
+   * 那是用字符串形状代替类型，而猜错的表现是「点了没反应」。
+   */
+  const DERIVED: { id: string; label: string; icon: string }[] = [
+    { id: 'calendar', label: t('ui.cal.title'), icon: 'lucide:calendar' },
+    { id: 'belongs', label: t('ui.belongs.treeTitle'), icon: 'lucide:list-tree' },
+    { id: 'journal', label: t('ui.dock.today'), icon: 'lucide:newspaper' },
+    { id: 'backrefs', label: t('ui.dock.backRefs'), icon: 'lucide:corner-up-left' },
+    { id: 'trash', label: t('ui.dock.trash'), icon: 'lucide:trash-2' },
+  ]
   const rows: Row[] = [
     ...registry
       .list()
@@ -1733,6 +1769,14 @@ function showWidgetGallery(side: 'left' | 'right'): void {
         command: d.name,
         keyHint: keyHints().get(d.name),
       })),
+    ...DERIVED.filter((d) => !cards.includes(d.id)).map((d) => ({
+      id: `derived:${d.id}`,
+      label: d.label,
+      hint: '',
+      icon: d.icon,
+      group: `palette/${t('menu.cat.widget')}`,
+      keyHint: undefined,
+    })),
     {
       id: 'new-collection',
       label: t('ui.widget.newCollection'),
@@ -1753,6 +1797,11 @@ function showWidgetGallery(side: 'left' | 'right'): void {
     onPick: (row) => {
       if (row.id === 'new-collection') {
         void registry.invoke('core.collection/create', { side }, 'dock')
+        return
+      }
+      // `derived:` 前缀是**画廊内部的判据**，不进 `cards`（那里存的是裸 id）
+      if (row.id.startsWith('derived:')) {
+        addDerived(side, row.id.slice('derived:'.length))
         return
       }
       if (row.command) addTile(side, row.command)

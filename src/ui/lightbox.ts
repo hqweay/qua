@@ -72,7 +72,7 @@ export function openImageLightbox(o: LightboxOptions): void {
   const caption = document.createElement('figcaption')
   caption.className = 'lightbox-caption'
   const title = document.createElement('span')
-  title.className = 'lightbox-title'
+  title.className = 'lightbox-title ui-ellipsis'
   title.textContent = o.label
   caption.appendChild(title)
   if (o.subtitle) {

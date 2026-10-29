@@ -17,6 +17,7 @@
 
 import { t } from '../core/msg.ts'
 import { renderIcon } from '../view/icons.ts'
+import { cardNote } from './card-parts.ts'
 
 /** 一块卡：标题条 + 内容；`hidden` 只表示「没有内容」，不表示「用户收起了」 */
 export interface DockCard {
@@ -174,7 +175,7 @@ export function buildDockCard(card: DockCard, state: DockCardState): HTMLElement
 
   head.appendChild(collapseButton())
   const title = document.createElement('span')
-  title.className = 'dock-card-title'
+  title.className = 'dock-card-title ui-ellipsis ui-ellipsis-grow'
   title.textContent = card.title
   head.appendChild(title)
   for (const a of card.actions ?? []) head.appendChild(actionButton(a))
@@ -330,12 +331,7 @@ export function renderDockStack(
   const empty = stack.querySelector<HTMLElement>(':scope > .dock-empty')
   if (entries.every((e) => e.el.hidden)) {
     if (empty) empty.textContent = emptyText
-    else {
-      const p = document.createElement('p')
-      p.className = 'dock-empty'
-      p.textContent = emptyText
-      stack.appendChild(p)
-    }
+    else stack.appendChild(cardNote(emptyText))
   } else empty?.remove()
 
   // 单卡：目标必须**可见的大卡**才生效；小卡没有单卡，目标不可见时照常显示其它卡（不留空槽）

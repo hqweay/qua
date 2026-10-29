@@ -35,6 +35,8 @@ function assertDefaults(p: Prefs): void {
         'cmd:core.page/new',
         'cmd:core.command-palette/show',
         'cmd:core.journal/prev',
+        // 日历卡：默认就在左槽（它是「去某一天」的入口，与上面四颗快捷同一档）
+        'calendar',
         'belongs',
         'journal',
       ],

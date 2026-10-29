@@ -57,7 +57,12 @@ export interface PanelDeps {
   openLink: (runId: string) => void
   removeAtom: (id: string) => void
   closePopover: () => void
-  openPopover: (render: (host: HTMLElement) => void, anchor: DOMRect | null) => void
+  /**
+   * @param anchor 锚点：可以直接给矩形，也可以给**取矩形的函数**。
+   *   后者才是桌面端该用的形态——浮层要跟着锚点走（拖窗口、滚动正文），
+   *   而一个矩形快照记不住自己指向谁。见 `ui/layers.ts` 的 `openPopover`。
+   */
+  openPopover: (render: (host: HTMLElement) => void, anchor: DOMRect | null | (() => DOMRect | null)) => void
   openDrawer: (title: string, render: (host: HTMLElement) => void) => void
 }
 
@@ -191,18 +196,19 @@ export function renderLinkComposer(host: HTMLElement, deps: LinkComposerDeps): v
   const form = document.createElement('form')
   form.className = 'popover-anchor'
   const url = document.createElement('input')
-  url.className = 'popover-anchor-input'
+  url.className = 'popover-anchor-input ui-field'
   url.dataset.linkUrl = '1'
   url.type = 'text'
   url.placeholder = t('ui.link.urlPlaceholder')
   url.spellcheck = false
   const text = document.createElement('input')
-  text.className = 'popover-anchor-input'
+  text.className = 'popover-anchor-input ui-field'
   text.dataset.linkText = '1'
   text.type = 'text'
   text.placeholder = t('ui.link.textPlaceholder')
   const submit = document.createElement('button')
   submit.type = 'submit'
+  submit.className = 'ui-btn'
   submit.textContent = t('ui.link.insert')
   const note = document.createElement('div')
   note.className = 'popover-note'
@@ -239,7 +245,7 @@ function anchorRow(a: { id: string; anchor?: string }, resolvedLabel: string, de
   box.className = 'popover-anchor'
   box.dataset.anchorFor = a.id
   const input = document.createElement('input')
-  input.className = 'popover-anchor-input'
+  input.className = 'popover-anchor-input ui-field'
   input.dataset.anchorInput = a.id
   input.type = 'text'
   input.value = a.anchor ?? ''
@@ -251,6 +257,7 @@ function anchorRow(a: { id: string; anchor?: string }, resolvedLabel: string, de
   hint.textContent = t('ui.popover.anchorNote')
   const submit = document.createElement('button')
   submit.type = 'submit'
+  submit.className = 'ui-btn'
   submit.textContent = t('ui.popover.anchorApply')
   const commit = (): void => {
     deps.setAnchor(a.id, input.value)
@@ -274,7 +281,7 @@ export interface LinkComposerDeps {
   toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
-export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect, fields?: ObjFieldDeps): void {
+export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect | null | (() => DOMRect | null), fields?: ObjFieldDeps): void {
   deps.openPopover((host) => {
     if (a.t === 'ref') {
       const target = a.to ? deps.findBlock(a.to) : undefined

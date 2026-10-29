@@ -65,17 +65,35 @@
  * 这一层是深度 1，允许一层"面"）。
  */
 /*
- * 槽内容 = **流**：小卡 44px 自动换行，大卡占满一整行。
+ * 槽内容 = **流**：小卡按列均分自动换行，大卡占满一整行。
  * 顺序仍是一条线（DOM 顺序 = `cards` 顺序）；换行只是排版，不是第二层列表。
+ *
+ * ⚠️ **为什么是 grid 而不是 flex-wrap**：小卡曾是 `flex: 0 0 44px`，
+ *    于是「一行能放几个」由固定宽度决定 —— 224px 的内容区放 4 个（194px），
+ *    剩下 30px 空在最右边，**与大卡的右缘对不齐**（大卡占满 224px）。
+ *    槽宽一拖，那个空隙在 3px～36px 之间乱跳，看起来像「小卡没摆正」。
+ *
+ *    `grid-template-columns: repeat(auto-fit, minmax(0, 1fr))` 把这件事交给布局：
+ *    列数仍由可用宽度决定，但**列宽均分** ⇒ 最后一列的右缘永远等于内容区右缘。
+ *    代价：小卡不再是恒定 44px（会随槽宽在 40–56px 之间浮动）。
+ *    这个代价是划算的：**对齐是每次都能看见的，绝对尺寸只有在两槽并排比时才看得出**。
  */
 .dock-stack {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden; /* 槽内禁横向 */
-  display: flex;
-  flex-wrap: wrap;
-  align-content: flex-start;
+  display: grid;
+  /*
+    小卡那一档的列：最小 40px，`auto-fill` 自己决定几列，`1fr` 让各列均分剩余宽度。
+    ⇒ 整排右缘与内容区右缘对齐（不再留 30px 的尾巴）。
+
+    ⚠️ **必须是 `auto-fill`，不能是 `auto-fit`**：`auto-fit` 会把空轨道折叠掉，
+    于是「槽里只有 1 张小卡」时那一格被拉到整行宽（实测 224px）——从动作格变成一个按钮。
+    `auto-fill` 保留空轨道，单张小卡仍是 ~45px。
+  */
+  grid-template-columns: repeat(auto-fill, minmax(var(--ui-tile-min), 1fr));
+  align-content: start;
   gap: var(--ui-gap-3);
   padding: var(--ui-gap-3);
 }
@@ -86,27 +104,32 @@
   box-shadow: var(--ui-shadow-low);
   overflow: hidden;
 }
-/* 流自己管间距：卡不再带外边距，否则 gap 会变成双份 */
+/*
+ * 大卡**跨整行**：小卡的列数由 `auto-fit` 决定，大卡不能去猜那个数字，
+ * 所以用 `grid-column: 1 / -1`（从第一列到最后一列）——不管当前是 4 列还是 6 列。
+ * 这也顺手保住了「槽内只许纵向」：大卡永远是完整的一行。
+ */
 .dock-stack > .dock-card {
-  flex: 0 0 100%;
+  grid-column: 1 / -1;
   margin: 0;
 }
 .dock-stack > .dock-empty {
-  flex: 0 0 100%;
+  grid-column: 1 / -1;
   margin: 0;
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-xs);
 }
 
 /*
- * 小卡：44px 的动作格。图标是「词汇」，不随槽宽拉伸——
- * 固定宽度才能让同一排在左右槽里保持同一种手感。
+ * 小卡：动作格。**宽度由网格分配**，高度固定 44px。
+ *
+ * 为什么高度仍固定：图标是「词汇」，同一排必须一样高才能读成一排；
+ * 而宽度均分不影响这一点 —— 视觉上仍是一排等距的方块。
  */
 .dock-tile {
   position: relative;
-  flex: 0 0 44px;
-  width: 44px;
   height: 44px;
+  min-width: 0;
   border-radius: var(--ui-radius-lg);
 }
 .dock-tile-main {
@@ -255,12 +278,9 @@
 .dock-card-head:active {
   cursor: grabbing;
 }
+/* 单行省略 ＋ 占满剩余宽度 */
 .dock-card-title {
   flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .dock-card-body {
   padding: 0 var(--ui-gap-2) var(--ui-gap-3);
@@ -361,7 +381,7 @@
   top: 0;
   bottom: 0;
   width: var(--ui-gap-3);
-  z-index: 4;
+  z-index: var(--ui-z-resize);
   cursor: col-resize;
   touch-action: none;
 }
@@ -425,12 +445,9 @@ body[data-dock-resizing='1'] * {
   /* 固定图标槽宽：emoji/字面文本与 SVG 混用时页名仍然对齐 */
   width: 18px;
 }
+/* 单行省略 ＋ 占满剩余宽度 */
 .page-item .p-title {
   flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* 分割线在槽里的一行：壳仍是 `.page-item`，线自己撑满剩余宽度 */
 .page-item .divider-rule {
@@ -507,10 +524,6 @@ button.ghost.wide {
 }
 .trash-text {
   flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ui-text-secondary);
 }
 .trash-restore {
@@ -526,4 +539,94 @@ button.ghost.wide {
 }
 .trash-restore:hover {
   background: var(--ui-bg-hover);
+}
+
+/*
+ * ------------------------------------------------ 日历卡
+ *
+ * 一屏一个月，周一起始。**月外留空**而不是画邻月日期：
+ * 画邻月会让「这一格是几号」需要靠位置猜（同一个月里出现两个「1」）。
+ *
+ * 格子是 `<button>`：每一格都能点（去那天写日记），键盘也能走。
+ * 格子宽度均分（`1fr`）——与上面小卡的列同一条理由：右缘要对齐。
+ */
+.cal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+}
+.cal-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  padding: 0 var(--ui-gap-1);
+}
+.cal-label {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.cal-nav {
+  flex: 0 0 auto;
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--ui-gap-1);
+}
+.cal-week {
+  text-align: center;
+  font-size: var(--ui-fs-2xs);
+  color: var(--ui-text-tertiary);
+  line-height: 1.6;
+}
+.cal-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  border-radius: var(--ui-radius-sm);
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+/* 月外的空格：不可点、不画数字（它只是占位，让 1 号落在正确的星期几） */
+.cal-pad {
+  pointer-events: none;
+}
+.cal-cell:not(.cal-pad):hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+.cal-cell:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: -2px;
+}
+/* 今天：底色 + 加重字重（不画边框：边框会让它看起来像「选中」而不是「今天」） */
+.cal-cell[data-today='1'] {
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent);
+  font-weight: var(--ui-fw-medium);
+}
+/*
+ * 这天写过：右下角一颗点。
+ *
+ * 为什么是点而不是给整格上色：上色与「今天」的底色会撞成两种「有颜色」，
+ * 而它们说的是不同的事（今天／写过）。点是小面积、不与底色竞争。
+ */
+.cal-dot {
+  position: absolute;
+  right: var(--ui-gap-2);
+  bottom: var(--ui-gap-2);
+  width: 4px;
+  height: 4px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-text-tertiary);
+}
+.cal-cell[data-today='1'] .cal-dot {
+  background: var(--ui-accent);
 }

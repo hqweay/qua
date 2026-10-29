@@ -14,6 +14,7 @@ import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { renderBlock, type BlockRenderCtx } from './block-renderers.ts'
 import type { DockCard } from './dock.ts'
+import { cardList, cardNote, emptyCardList } from './card-parts.ts'
 
 export interface DockContentDeps {
   /** 读门面：今日块、反链源根都按 id／按名取数 */
@@ -52,9 +53,8 @@ export function todayCard(deps: DockContentDeps): DockCard | null {
   // Daily note：在库里找今天的 journal 块（冷启动时它一定已经物化，见 seed／装配层）
   const today = deps.kb.journalDay(todayISO())
   if (!today) return null
-  const body = document.createElement('div')
+  const body = cardList()
   body.id = 'journal-today'
-  body.className = 'block-list'
   body.appendChild(renderBlock(today, ctx(deps)))
   return { id: 'journal', title: t('ui.dock.today'), body }
 }
@@ -64,14 +64,7 @@ export function backrefsCard(deps: DockContentDeps): DockCard {
   const target = deps.activeId()
   const sources = deps.kb.backlinksOf(target)
 
-  const list = document.createElement('div')
-  list.className = 'block-list'
-  if (sources.length === 0) {
-    const empty = document.createElement('p')
-    empty.className = 'dock-empty'
-    empty.textContent = t('ui.dock.noBackRefs')
-    list.appendChild(empty)
-  }
+  const list = sources.length === 0 ? emptyCardList(t('ui.dock.noBackRefs')) : cardList()
   // 反链项**不是库里的块**，是查询结果：现造一行出来，靠 `props._icon` 拿箭头（大纲行已经读它）。
   // 不给它挂角色 —— 角色说的是「这块在系统里担任什么机制位」，而它没有库身份，从不落盘。
   // 时间戳只是为了让形状成立（`Block` 的必填字段）：这一行没有生命周期，现造现丢，
@@ -111,20 +104,13 @@ export function backrefsCard(deps: DockContentDeps): DockCard {
  */
 export function trashCard(deps: DockContentDeps): DockCard {
   const items = deps.kb.trash()
-  const list = document.createElement('div')
-  list.className = 'block-list'
-
   if (items.length === 0) {
-    const empty = document.createElement('p')
-    empty.className = 'dock-empty'
-    empty.textContent = t('ui.dock.trashEmpty')
-    list.appendChild(empty)
-    const hint = document.createElement('p')
-    hint.className = 'dock-empty'
-    hint.textContent = t('ui.dock.trashHint')
-    list.appendChild(hint)
-    return { id: 'trash', title: t('ui.dock.trash'), body: list }
+    // 空态要说两句：一句「为什么是空的」，一句「删掉的东西去哪了」
+    const empty = emptyCardList(t('ui.dock.trashEmpty'))
+    empty.appendChild(cardNote(t('ui.dock.trashHint')))
+    return { id: 'trash', title: t('ui.dock.trash'), body: empty }
   }
+  const list = cardList()
 
   for (const b of items) {
     const row = document.createElement('div')
@@ -133,7 +119,7 @@ export function trashCard(deps: DockContentDeps): DockCard {
     row.dataset.trashRow = b.id
 
     const text = document.createElement('span')
-    text.className = 'trash-text'
+    text.className = 'trash-text ui-ellipsis ui-ellipsis-grow'
     // 正文投影（与搜索／导出同一份口径）；空块给一句占位，否则行看起来像坏的
     const plain = displayTextOf(b)
     text.textContent = plain === '' ? t('ui.dock.trashBlank') : plain

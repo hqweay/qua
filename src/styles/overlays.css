@@ -2,7 +2,7 @@
 
 .layer {
   position: fixed;
-  z-index: 60;
+  z-index: var(--ui-z-menu);
   background: var(--ui-surface-raised);
   border: 1px solid var(--ui-border);
   border-radius: var(--ui-radius-md);
@@ -61,12 +61,9 @@
   font-family: var(--ui-font-mono);
   font-size: var(--ui-fs-sm);
 }
+/* 单行省略 ＋ 占满剩余宽度，两条原语各说一件事 */
 .layer-label {
   flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .layer-hint {
   flex: 0 1 auto;
@@ -74,9 +71,6 @@
   font-size: var(--ui-fs-xs);
   font-family: var(--ui-font-mono);
   max-width: 58%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   opacity: 0.75;
 }
 .layer-key {
@@ -99,7 +93,7 @@
 */
 .selbar {
   position: fixed;
-  z-index: 72;
+  z-index: var(--ui-z-selbar);
   display: flex;
   align-items: center;
   gap: var(--ui-gap-1);
@@ -138,7 +132,7 @@
 
 .popover {
   position: fixed;
-  z-index: 70;
+  z-index: var(--ui-z-popover);
   min-width: 240px;
   max-width: 380px;
   background: var(--ui-surface-raised);
@@ -242,11 +236,10 @@
   font-size: var(--ui-fs-xs);
   margin-bottom: var(--ui-gap-2);
 }
+/* 行结构走 `.ui-row`；这里只给别名列表自己的密度 */
 .alias-row {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-gap-2);
-  padding: var(--ui-gap-1) 0;
+  --ui-row-gap: var(--ui-gap-2);
+  --ui-row-pad: var(--ui-gap-1) 0;
 }
 .alias-row[data-primary='1'] .alias-label {
   font-weight: 600;
@@ -263,12 +256,9 @@
   color: var(--ui-accent);
   cursor: default;
 }
+/* 单行省略 ＋ 占满剩余宽度（`overflow-wrap` 是本处额外要的） */
 .alias-label {
   flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   overflow-wrap: anywhere;
 }
 .alias-del,
@@ -286,23 +276,14 @@
   gap: var(--ui-gap-2);
   margin-top: var(--ui-gap-2);
 }
+/* 输入框与按钮的形状走原语（见 primitives.css）：这两处此前各写一份逐字相同的几何 */
 .alias-input {
   flex: 1;
   min-width: 0;
-  padding: var(--ui-gap-2) var(--ui-gap-3);
-  border: var(--ui-sep) solid var(--ui-border);
-  border-radius: var(--ui-radius-sm);
-  background: var(--ui-surface);
-  outline: none;
-}
-.alias-input:focus {
-  border-color: var(--ui-accent);
 }
 .alias-add-btn {
-  padding: var(--ui-gap-2) var(--ui-gap-3);
-  border: var(--ui-sep) solid var(--ui-border);
-  border-radius: var(--ui-radius-sm);
-  color: var(--ui-text-secondary);
+  /* 形状由 `.ui-btn` 给；这里只剩「它在这行里不许被压扁」 */
+  flex: 0 0 auto;
 }
 .alias-check {
   display: flex;
@@ -315,17 +296,8 @@
   display: flex;
   gap: var(--ui-gap-2);
 }
-.alias-display button {
-  padding: var(--ui-gap-2) var(--ui-gap-3);
-  border: var(--ui-sep) solid var(--ui-border);
-  border-radius: var(--ui-radius-sm);
-  color: var(--ui-text-secondary);
-}
-.alias-display button[data-active='1'] {
-  background: var(--ui-accent-soft);
-  border-color: var(--ui-accent);
-  color: var(--ui-accent);
-}
+/* 切换类按钮的形状与按下态都在 `.ui-btn[data-active]` 里，这里不重复 */
+
 
 /* ------------------------------------------------ 锚文本（引用详情浮层里那一行） */
 
@@ -333,30 +305,24 @@
   与「别名编辑器」同一套几何：**输入框占满、按钮跟着、说明在下面一行**。
   不另做一套尺寸，是因为这两处做的是同一件事（在一枚对象上改一处文本），
   长得不同只会让人以为它们是两种不同的机制。
+
+  ⚠️ `flex-wrap: wrap` 不是可选项：说明那一行是 `flex: 1 0 100%`（它要独占整行），
+  而没有换行时这条 basis 只会去**挤同一行**——输入框被压到十几像素宽、被拉成一百多像素高，
+  用户根本没法输入（实测 380px 的浮层里输入框只剩 14px）。**「独占一行」的前提是容器会换行。**
 */
 .popover-anchor {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--ui-gap-2);
   margin-top: var(--ui-gap-2);
 }
+/* 形状走 `.ui-field`／`.ui-btn`；这里只留这一行的布局约束 */
 .popover-anchor-input {
   flex: 1;
   min-width: 0;
-  padding: var(--ui-gap-2) var(--ui-gap-3);
-  border: var(--ui-sep) solid var(--ui-border);
-  border-radius: var(--ui-radius-sm);
-  background: var(--ui-surface);
-  color: var(--ui-text);
-  outline: none;
-}
-.popover-anchor-input:focus {
-  border-color: var(--ui-accent);
 }
 .popover-anchor button {
-  padding: var(--ui-gap-2) var(--ui-gap-3);
-  border: var(--ui-sep) solid var(--ui-border);
-  border-radius: var(--ui-radius-sm);
-  color: var(--ui-text-secondary);
+  flex: 0 0 auto;
 }
 .popover-anchor .popover-note {
   margin-top: 0;
@@ -373,19 +339,15 @@
   font-size: var(--ui-fs-xs);
   margin-bottom: var(--ui-gap-2);
 }
+/* 行结构走 `.ui-row`；这里只给字段声明行的密度与分隔线 */
 .fields-row {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-gap-3);
-  padding: var(--ui-gap-2) 0;
+  --ui-row-gap: var(--ui-gap-3);
+  --ui-row-pad: var(--ui-gap-2) 0;
   border-bottom: var(--ui-sep) solid var(--ui-border-subtle);
 }
+/* 单行省略 ＋ 占满剩余宽度 */
 .fields-label {
   flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .fields-kind {
   color: var(--ui-text-tertiary);
@@ -412,7 +374,7 @@
   top: 0;
   right: 0;
   bottom: 0;
-  z-index: 65;
+  z-index: var(--ui-z-drawer);
   width: min(520px, 100%);
   display: flex;
   flex-direction: column;
@@ -488,7 +450,7 @@
   left: 50%;
   bottom: var(--ui-gap-6);
   transform: translateX(-50%);
-  z-index: 80;
+  z-index: var(--ui-z-toast);
   display: flex;
   flex-direction: column;
   gap: var(--ui-gap-2);
@@ -522,7 +484,7 @@
  */
 .dnd-hint {
   position: fixed;
-  z-index: 85;
+  z-index: var(--ui-z-hint);
   pointer-events: none;
   max-width: 260px;
   padding: var(--ui-gap-2) var(--ui-gap-3);
@@ -533,9 +495,6 @@
   color: var(--ui-text);
   font-size: var(--ui-fs-xs);
   line-height: var(--ui-lh-tight);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /*
@@ -551,7 +510,7 @@
 .lightbox {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: var(--ui-z-lightbox);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -588,11 +547,9 @@
   font-size: var(--ui-fs-sm);
   max-width: 100%;
 }
+/* 省略行为由 `.ui-ellipsis` 给（本处不占满剩余宽度：外层已定宽） */
 .lightbox-title {
   font-weight: var(--ui-fw-medium);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .lightbox-sub {
   color: var(--ui-text-inverse);

@@ -72,7 +72,7 @@ const outlineRenderer: BlockRenderer = {
     renderIcon(icon, prop<string>(b, '_icon'), 'file')
 
     const title = document.createElement('span')
-    title.className = 'p-title'
+    title.className = 'p-title ui-ellipsis ui-ellipsis-grow'
     const name = displayNameOf(b).trim()
     title.textContent = name === '' ? ctx.untitledLabel : name
     title.title = name
@@ -102,7 +102,7 @@ const journalRenderer: BlockRenderer = {
     icon.className = 'p-ico'
     renderIcon(icon, prop<string>(b, '_icon'), 'calendar')
     const title = document.createElement('span')
-    title.className = 'p-title'
+    title.className = 'p-title ui-ellipsis ui-ellipsis-grow'
     title.textContent = journalDateLabel(journalDate(b))
     row.append(icon, title)
     bindRowClick(row, b, ctx)
@@ -141,7 +141,7 @@ const fallbackRenderer: BlockRenderer = {
     row.className = 'page-item'
     if (ctx.isActive(b.id)) row.dataset.active = '1'
     const title = document.createElement('span')
-    title.className = 'p-title'
+    title.className = 'p-title ui-ellipsis ui-ellipsis-grow'
     const name = displayNameOf(b).trim()
     title.textContent = name === '' ? ctx.untitledLabel : name
     row.append(title)

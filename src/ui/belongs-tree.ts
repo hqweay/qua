@@ -17,6 +17,7 @@ import type { BelongsRow } from '../core/hierarchy.ts'
 import { displayNameOf, type Block, type BlockList } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 import { renderBlock, type BlockRenderCtx } from './block-renderers.ts'
+import { cardList, cardNote } from './card-parts.ts'
 import type { DockCard } from './dock.ts'
 import { bindDropTarget, setDragBlock } from '../view/dnd.ts'
 
@@ -86,13 +87,9 @@ export class BelongsTree {
 
     const rows = this.deps.rows(this.face)
     if (rows.length === 0) {
-      const empty = document.createElement('p')
-      empty.className = 'dock-empty'
-      empty.textContent = this.face === 'page' ? t('ui.belongs.emptyPages') : t('ui.belongs.emptyTags')
-      body.appendChild(empty)
+      body.appendChild(cardNote(this.face === 'page' ? t('ui.belongs.emptyPages') : t('ui.belongs.emptyTags')))
     }
-    const list = document.createElement('div')
-    list.className = 'block-list'
+    const list = cardList()
     for (const row of rows) {
       const wrap = document.createElement('div')
       wrap.className = 'belongs-row'

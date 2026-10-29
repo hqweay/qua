@@ -137,7 +137,7 @@ export function createChrome(onCrumb?: (blockId: string, shiftKey: boolean) => v
   function mkCrumb(b: Block): HTMLElement {
     const el = document.createElement('button')
     el.type = 'button'
-    el.className = 'crumb'
+    el.className = 'crumb ui-ellipsis'
     el.dataset.blockId = b.id
     // journal 的「名字」是日期的只读投影；其余走显示名（主名叶子 > 正文，空则兜底）
     el.textContent = blockLabel(b)
