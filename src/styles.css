@@ -19,5 +19,6 @@
 @import './styles/slots.css';
 @import './styles/center.css';
 @import './styles/blocks.css';
+@import './styles/view-table.css';
 @import './styles/overlays.css';
 @import './styles/badge.css';

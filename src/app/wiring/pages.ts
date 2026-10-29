@@ -5,6 +5,7 @@
  * 面板分片晚于本节装配，重画入口经 `getPanels` 延迟取用。
  */
 import {
+  activeView,
   displayNameOf,
   findInForest,
   findPath,
@@ -156,6 +157,29 @@ export function setupPages(deps: PagesDeps) {
   }
 
   /**
+   * 装载一屏（打开页/聚焦/翻日/切视图共用这一个落点）。
+   *
+   * **视图让位**：单根块若有激活的非大纲视图，正文只画这一行 —— children 由段尾的视图宿主画。
+   * 判据从模型派生（`activeView`），不额外存一份「当前是不是表格」：
+   * 存了就要在切视图/切页/换库三处同时维护，漏一处就是同一批子块画两遍（或一遍都不画）。
+   */
+  function loadRoots(roots: Block[]): void {
+    const mainEd = deps.getMainEd()
+    // 装载边界：空 journal 天在这里补首子块（经事务、一条 op）——
+    // 所有「打开」命令共用的唯一归一落点，`rootsFor`／命令层只选择、不写库
+    materializeEditableRoots(roots)
+    const { renderMounts, renderProperties } = deps.getPanels()
+    deps.setEd(mainEd)
+    const only = roots.length === 1 ? roots[0] : undefined
+    const viewRootId = only && activeView(only) ? only.id : ''
+    // 正文视图的折叠态是**设备**那份；取当前视图持有的那一份（`device.folded` 只在落盘时同步，可能落后一步）
+    mainEd.loadPage({ roots, folded: mainEd.doc.folded, ...(viewRootId ? { viewRootId } : {}) })
+    // 装载之后才建挂载区：它按**段根**建实例，而段是 `loadPage` 造出来的
+    renderMounts()
+    renderProperties()
+  }
+
+  /**
    * 页与日记**共用同一份依赖**（`PageDeps`）：两者都是「一块 ＋ 一棵子树」，
    * 只是角色不同 ——各给一套依赖就会立刻出现两条分叉的实现路径（要消灭的正是这个）。
    *
@@ -237,17 +261,16 @@ export function setupPages(deps: PagesDeps) {
       if (target) mainEd.placeCaret(target.id, 0)
     },
     loadPage: (roots) => {
-      const mainEd = deps.getMainEd()
-      // 装载边界：空 journal 天在这里补首子块（经事务、一条 op）——
-      // 所有「打开」命令共用的唯一归一落点，`rootsFor`／命令层只选择、不写库
-      materializeEditableRoots(roots)
-      const { renderMounts, renderProperties } = deps.getPanels()
-      deps.setEd(mainEd)
-      // 正文视图的折叠态是**设备**那份；取当前视图持有的那一份（`device.folded` 只在落盘时同步，可能落后一步）
-      mainEd.loadPage({ roots, folded: mainEd.doc.folded })
-      // 装载之后才建挂载区：它按**段根**建实例，而段是 `loadPage` 造出来的
-      renderMounts()
-      renderProperties()
+      loadRoots(roots)
+    },
+    /**
+     * 重装当前这一屏（根不变）。
+     *
+     * 用途：切视图之后**装载形状**变了 —— 有激活视图时正文只画根行、children 交给视图宿主，
+     * 切回大纲又要把子树放回正文。走同一条 `loadRoots` 才不会出现「两种重装」。
+     */
+    reloadPage: () => {
+      loadRoots(deps.getMainEd().doc.roots.slice())
     },
     flush: () => {
       syncSections()

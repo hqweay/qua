@@ -32,7 +32,7 @@ import type { Workspace } from '../../core/workspace.ts'
 import type { Layers, Row } from '../../ui/layers.ts'
 import { MountArea } from '../../ui/mount-area.ts'
 import { PropertiesPanel } from '../../ui/properties.ts'
-import { createQueryViewEls, QueryView } from '../../ui/query-view.ts'
+import { createViewHostEls, ViewHost } from '../../ui/query-view.ts'
 import type { Chrome } from '../../ui/chrome.ts'
 import type { BlockEditor } from '../../view/editor.ts'
 
@@ -67,6 +67,15 @@ export type PanelsDeps = {
   getChrome: () => Chrome
   /** Shift+点任意可打开的行/块标/原子：在右槽打开（窗口） */
   openInDock: (blockId: string) => void
+  /**
+   * **把一块的正文投影进一个容器**（run/marks/引用/图片都在）。
+   *
+   * 由装配层注入：表格标题列要画的是**块的样子**，而「引用现在叫什么、图在哪」
+   * 只有持有读门面的那一层答得出来。`ui` 自己拼一份投影就会长出第二套 run 渲染。
+   */
+  project: (block: Block, into: HTMLElement) => void
+  /** 点标题里的一枚非引用原子（图片/外链）：默认动作 / ⌥ 详情（与正文同一份） */
+  atomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: { altKey: boolean; shiftKey: boolean }) => void
 }
 
 export function setupPanels(deps: PanelsDeps) {
@@ -308,11 +317,53 @@ export function setupPanels(deps: PanelsDeps) {
    *
    * 日记流里**只有今天展开**：更早的天是一行摘要（`MountArea` 初始 `expanded`）。
    */
-  type MountInstance = { area: MountArea; query: QueryView | null; queryHostId: string }
+  type MountInstance = { area: MountArea; query: ViewHost | null; queryHostId: string }
   const mountInstances = new Map<string, MountInstance>()
 
   /** 这一段该不该默认展开：日记只展开今天（「今天 = 你要写的那一天」） */
   const expandedFor = (host: Block): boolean => (isJournal(host) ? journalDate(host) === todayISO() : true)
+
+  /**
+   * **这一段要不要建视图宿主**。
+   *
+   * 两条判据缺一不可：
+   *   · 查询块：它自己就是一张视图（不论激活哪种 kind）；
+   *   · 普通块：只有当它是**这一屏的视图根**（`Doc.viewRootId`）时才有 ——
+   *     否则「页里有子块」的每一条日记天都会在流里长出一张表（它在别的页里只是普通子块）。
+   */
+  const wantsView = (host: Block): boolean => isQueryBlock(host) || mainEd.doc.viewRootId === host.id
+
+  function createView(host: Block): ViewHost {
+    const hostId = host.id
+    const vh = new ViewHost(createViewHostEls(), {
+      store: blocks,
+      write: (fn) => run(fn, edOfMount(hostId)),
+      kb,
+      block: () => blocks.find(hostId) ?? host,
+      onChange: () => {
+        syncSections()
+        scheduleSave()
+        scheduleBadge()
+      },
+      onFocus: (editor) => deps.setEd(editor),
+      wire: (editor, change) => deps.wireEditor(editor, change, 'query'),
+      toast: (text, kind) => app.toast(text, kind),
+      invoke: (name, args) => void deps.getRegistry().invoke(name, args, 'queryview'),
+      project: (b, into) => deps.project(b, into),
+      refClick: (hit, el, mods) => deps.refClick(hit, mods, el),
+      ...(deps.atomClick ? { onAtomClick: (atom, el, mods) => deps.atomClick!(atom, el, mods) } : {}),
+      openBlock: (id) => void deps.getRegistry().invoke('core.block/focus-block', { blockId: id }, 'queryview'),
+      pickRef: (b, propId, current, onPick, anchor) => pickRefValue(b, propId, current, onPick, anchor),
+      refLabel: (id) => {
+        const b = kb.get(id)
+        if (!b) return t('ui.props.refMissing', { id: shortId(id) })
+        const name = displayNameOf(b).trim()
+        return name === '' ? shortId(b.id) : name
+      },
+    })
+    void vh
+    return vh
+  }
 
   function createMount(host: Block): MountInstance {
     const hostId = host.id
@@ -340,26 +391,7 @@ export function setupPanels(deps: PanelsDeps) {
         expanded: expandedFor(host),
       },
     )
-    /**
-     * 查询块的结果视图：只有**段根是查询块**时才建（点开它才看结果）。
-     * 冻结/刷新由 `QueryView` 自己管，这里只负责「换了一个查询块就重新冻结」。
-     */
-    const query = isQueryBlock(host)
-      ? new QueryView(createQueryViewEls(), {
-          store: blocks,
-          write: (fn) => run(fn, edOfMount(hostId)),
-          kb,
-          block: () => blocks.find(hostId) ?? host,
-          onChange: () => {
-            syncSections()
-            scheduleSave()
-            scheduleBadge()
-          },
-          onFocus: (editor) => deps.setEd(editor),
-          wire: (editor, change) => deps.wireEditor(editor, change, 'query'),
-          toast: (text, kind) => app.toast(text, kind),
-        })
-      : null
+    const query = wantsView(host) ? createView(host) : null
     return { area, query, queryHostId: query ? hostId : '' }
   }
 
@@ -443,6 +475,23 @@ export function setupPanels(deps: PanelsDeps) {
             inst.queryHostId = hostId
             inst.query.mount()
           }
+        } else if (inst.query && !wantsView(host)) {
+          /**
+           * 切回大纲：**摘掉视图宿主**（连同它订阅的编辑器），别藏一台还在跟着 store 重画的。
+           * 段尾的挂载区留着 —— 它与视图是两件事。
+           */
+          if (inst.query.editor && deps.getEd() === inst.query.editor) deps.setEd(deps.getMainEd())
+          inst.query.dispose()
+          inst.query.root.remove()
+          inst.query = null
+          inst.queryHostId = ''
+        } else if (!inst.query && wantsView(host)) {
+          inst.query = createView(host)
+          inst.queryHostId = hostId
+          inst.query.mount()
+        } else {
+          // 已经在位：画法变了（切了视图/增删了行）就换分支，没变只对齐数据
+          inst.query?.sync()
         }
         if (inst.query && inst.query.root.parentElement !== slot) slot.appendChild(inst.query.root)
         if (inst.area.root.parentElement !== slot) slot.appendChild(inst.area.root)

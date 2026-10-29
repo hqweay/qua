@@ -85,6 +85,14 @@ export interface PageDeps {
   /** 把某页的子树装进编辑器（行内内容住块上，没有第二份要传） */
   loadPage: (roots: Block[]) => void
   /**
+   * **重装当前这一屏**（根集合不变）。
+   *
+   * 用途：切视图／增删行之后，装载形状变了（正文只画根行 ⇄ 恢复子树），
+   * 而「当前装的是谁」只有装配层知道。与 `loadPage(同样一批根)` 的区别：
+   * 调用方不必自己把 id 翻回块，也不会因为「同根再点一次不重装」的短路而什么都不发生。
+   */
+  reloadPage: () => void
+  /**
    * 日记流的段排列（设备偏好）。命令层只读它——复盘带参、单列流随偏好，
    * 「偏好怎么写」是 `core.journal/feed-layout` 那一份的事。
    */
@@ -212,4 +220,19 @@ export interface BelongsToDeps {
   write: (blockId: string, mutate: () => void) => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
   shortId: (id: string) => string
+}
+
+/**
+ * 视图配置的宿主能力。
+ *
+ * `reloadPage` 是**必须**的：切视图要换中心槽的装载形状（正文只画根行 / 恢复子树），
+ * 而「怎么重装一屏」只有装配层知道（段、视图宿主、挂载区的生命周期都在那里）。
+ */
+export interface ViewConfigDeps {
+  kb: KbClient
+  /** 开一笔事务：改配置／插行／软删行各是一次写，装配层负责撤销快照与落盘 */
+  run: TxRun
+  /** 重装当前这一屏（切视图、增删行之后要让屏幕跟上） */
+  reloadPage: () => void
+  toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }

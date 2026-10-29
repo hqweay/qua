@@ -21,6 +21,7 @@ import { MOUNT_HANDLERS } from './handlers/mount.ts'
 import { PAGE_HANDLERS } from './handlers/page.ts'
 import { PROPS_HANDLERS } from './handlers/props.ts'
 import { TAGS_HANDLERS } from './handlers/tags.ts'
+import { VIEW_CONFIG_HANDLERS } from './handlers/views.ts'
 import { VIEW_HANDLERS } from './handlers/view.ts'
 
 /* ------------------------------------------------------------ 处理器 */
@@ -34,5 +35,6 @@ export const HANDLERS: Record<string, Handler> = {
   ...PAGE_HANDLERS,
   ...JOURNAL_HANDLERS,
   ...VIEW_HANDLERS,
+  ...VIEW_CONFIG_HANDLERS,
   ...DEV_HANDLERS,
 }

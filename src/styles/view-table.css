@@ -1,0 +1,318 @@
+/* ---------------------------------------------------------- 视图宿主（抬头 ＋ body）
+
+   一个块「怎么看」的那一层：抬头是 chrome（条数 / 视图切换 / 新建一行），
+   body 要么是查询结果的大纲，要么是表格。两份 body 同一时刻只有一个可见。 */
+.queryview-body {
+  min-height: var(--ui-line-h);
+}
+.queryview-views {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  /* 视图切换贴着抬头右侧：它是这一栏最常点的东西 */
+  margin-left: auto;
+}
+.qv-view-btn {
+  background: none;
+  border: 0;
+  padding: 0 var(--ui-gap-3);
+  height: var(--ui-row-h);
+  border-radius: var(--ui-radius-sm);
+  font: inherit;
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.qv-view-btn:hover {
+  background: var(--ui-surface-sunken);
+  color: var(--ui-text);
+}
+.qv-view-btn[data-active='1'] {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+  font-weight: var(--ui-fw-medium);
+}
+.qv-view-add {
+  color: var(--ui-text-tertiary);
+}
+/* 抬头右侧的三颗按钮挤在一行：切换器吃剩余空间，按钮各自只占自己那一格 */
+.queryview-refresh,
+.queryview-newrow {
+  margin-left: var(--ui-gap-3);
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.queryview-newrow {
+  color: var(--ui-text);
+  font-weight: var(--ui-fw-medium);
+}
+.queryview-refresh:hover,
+.queryview-newrow:hover {
+  color: var(--ui-text);
+}
+.queryview-refresh:disabled {
+  cursor: default;
+  color: var(--ui-text-tertiary);
+}
+.queryview-newrow[hidden],
+.queryview-refresh[hidden],
+.queryview-views[hidden] {
+  display: none;
+}
+
+/* ---------------------------------------------------------- 平表（div 行 ＋ grid）
+
+   为什么不是 <table>：`<tr>` 是 internal table box，`content-visibility` 在它上面实测
+   是 no-op ⇒ 300–2000 行那档直接失效。行是普通块级盒，列宽由 `--qv-cols` 一处给出。 */
+.tv {
+  --tv-row-h: 36px;
+  --tv-gutter-w: 22px;
+  --tv-act-w: 28px;
+  --qv-cols: 240px;
+  margin-top: var(--ui-gap-2);
+}
+.tv-scroll {
+  overflow: auto;
+  /* 表自己滚：不这样，长表会把整页拉长，而页面滚动时窗口化的账算不准 */
+  max-height: min(60vh, 640px);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface);
+}
+.tv-head,
+.tv-row {
+  display: grid;
+  grid-template-columns: var(--tv-gutter-w) var(--qv-cols) var(--tv-act-w);
+  align-items: center;
+  min-width: min-content;
+}
+.tv-head {
+  position: sticky;
+  top: 0;
+  z-index: var(--ui-z-sticky-head);
+  height: var(--ui-row-h);
+  background: var(--ui-surface-sunken);
+  border-bottom: 1px solid var(--ui-border-subtle);
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+.tv-head[hidden] {
+  display: none;
+}
+.tv-row {
+  height: var(--tv-row-h);
+  border-bottom: 1px solid var(--ui-border-subtle);
+  font-size: var(--ui-fs-md);
+}
+.tv-row:last-child {
+  border-bottom: 0;
+}
+.tv-row:hover {
+  background: var(--ui-surface-sunken);
+}
+/* 300 行以上才让浏览器跳过屏幕外的行：DOM 仍在（编辑/选区不用管窗口），布局与绘制省掉 */
+.tv[data-cv='1'] .tv-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--tv-row-h);
+}
+.tv-cell {
+  padding: 0 var(--ui-gap-4);
+}
+/* 首列（标题）与行首那一格都钉住：横向滚到右边时还知道这一行是谁 */
+.tv-head > .tv-title,
+.tv-row > .tv-title {
+  position: sticky;
+  left: var(--tv-gutter-w);
+  z-index: var(--ui-z-sticky-cell);
+  background: var(--ui-surface);
+  border-right: 1px solid var(--ui-border-subtle);
+}
+.tv-row:hover > .tv-title {
+  background: var(--ui-surface-sunken);
+}
+.tv-row > .tv-gutter {
+  position: sticky;
+  left: 0;
+  z-index: var(--ui-z-sticky-cell);
+  background: var(--ui-surface);
+  padding: 0 var(--ui-gap-2);
+}
+.tv-row:hover > .tv-gutter {
+  background: var(--ui-surface-sunken);
+}
+.tv-head > .tv-h {
+  cursor: default;
+}
+.tv-head > .tv-h[data-sortable='1'] {
+  cursor: pointer;
+}
+.tv-head > .tv-h[data-sortable='1']:hover {
+  color: var(--ui-text);
+}
+.tv-head > .tv-h[data-sort='asc'],
+.tv-head > .tv-h[data-sort='desc'] {
+  color: var(--ui-text);
+  font-weight: var(--ui-fw-medium);
+}
+.tv-sort {
+  margin-left: var(--ui-gap-2);
+}
+/* 行首块标：点它＝打开这一块（与正文里点块标同一条命令） */
+.tv-marker {
+  width: var(--ui-caret-size);
+  height: var(--ui-caret-size);
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-border);
+  cursor: pointer;
+  opacity: 0;
+}
+.tv-row:hover .tv-marker,
+.tv-title-inner[data-editing='1'] .tv-marker {
+  opacity: 1;
+}
+.tv-marker:hover {
+  background: var(--ui-text-tertiary);
+}
+.tv-del {
+  visibility: hidden;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.tv-row:hover .tv-del {
+  visibility: visible;
+}
+.tv-del:hover {
+  color: var(--ui-danger);
+}
+/* 标题格：画的是**块的样子**（run/marks/引用/图片），不是纯文本 */
+.tv-title-inner {
+  cursor: text;
+}
+.tv-title-inner[data-editing='1'] {
+  outline: 1px solid var(--ui-accent);
+  outline-offset: 2px;
+  border-radius: var(--ui-radius-sm);
+}
+.tv-title-text {
+  white-space: nowrap;
+}
+.tv-title-text .atom-image {
+  height: 1.4em;
+  width: auto;
+}
+/* 属性格：控件本身不画边框，格子才是那个「框」 */
+.tv-editor .prop-input {
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}
+.tv-editor .prop-input:focus {
+  outline: none;
+}
+.tv-tags {
+  display: flex;
+  gap: var(--ui-gap-2);
+  overflow: hidden;
+}
+.tv-count {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ui-text-tertiary);
+}
+.tv-time {
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+.tv-tail {
+  pointer-events: none;
+}
+.tv-unsupported {
+  margin: var(--ui-gap-4) 0;
+  font-size: var(--ui-fs-sm);
+  color: var(--ui-text-tertiary);
+}
+
+/* 单块标题编辑器：贴在格子上（fixed ⇒ 不改行高、不打断窗口化） */
+.tv-edit {
+  position: fixed;
+  z-index: var(--ui-z-chrome);
+  padding: var(--ui-gap-2) var(--ui-gap-4);
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-accent);
+  border-radius: var(--ui-radius-md);
+  box-shadow: var(--ui-shadow-pop);
+  font-size: var(--ui-fs-md);
+}
+.tv-edit-host {
+  outline: none;
+}
+.tv-edit .blk {
+  margin: 0;
+}
+
+/* ---------------------------------------------------------- 降级：紧凑列表
+
+   侧槽 360px（最窄 180px）里多列读不动。判据不是「挤一挤还能看」而是「还读得懂」：
+   换成标题 ＋ 一个标签的列表，点一行去中心槽。 */
+.tv-rows--compact {
+  display: block;
+}
+.tv-compact {
+  display: flex;
+  flex-direction: column;
+}
+.tv-compact-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ui-gap-3);
+  width: 100%;
+  padding: var(--ui-gap-3) var(--ui-gap-4);
+  border: 0;
+  border-bottom: 1px solid var(--ui-border-subtle);
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--ui-text);
+  cursor: pointer;
+}
+.tv-compact-row:hover {
+  background: var(--ui-surface-sunken);
+}
+.tv-compact-title {
+  flex: 1;
+}
+.tv-compact-tag {
+  flex: none;
+  max-width: 40%;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+.tv-compact-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-3);
+  padding: var(--ui-gap-3) var(--ui-gap-4);
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+.tv-compact-open {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--ui-accent);
+  cursor: pointer;
+}

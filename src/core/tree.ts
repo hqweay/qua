@@ -6,9 +6,11 @@
 import { uuidv7Hex } from './ids.ts'
 import {
   ALIASES_PROP,
+  ACTIVE_VIEW_PROP,
   DELETED_AT_PROP,
   DISPLAY_PROP,
   LISTS_PROP,
+  VIEWS_PROP,
   hasIdentity,
   isDeleted,
   isJournalBlock,
@@ -56,15 +58,25 @@ export interface VisibleRow {
 /**
  * 可见行（渲染用）：折叠块的**子树不产出可见行**，但块自身仍可见。
  * 这是「折叠 = 不挂 DOM」的唯一来源，DOM 节点数因此能真实反映折叠。
+ *
+ * `doc.viewRootId`（非大纲视图的宿主）的子块也在这里被摘掉：它们由视图宿主渲染，
+ * 正文再画一遍就是同一批块出现两次。那一行的 `hasChildren` 也判成 false ——
+ * 折叠三角要回答「点它能收起子块吗」，而此刻子块在别处展开着。
  */
 export function visibleRows(doc: Doc): VisibleRow[] {
   const out: VisibleRow[] = []
+  const viewRoot = doc.viewRootId
   walkForest(
     doc.roots,
     (b, ctx) => {
-      out.push({ block: b, depth: ctx.path.length - 1, hidden: ctx.hidden, hasChildren: b.children.length > 0 })
+      out.push({
+        block: b,
+        depth: ctx.path.length - 1,
+        hidden: ctx.hidden,
+        hasChildren: b.children.length > 0 && b.id !== viewRoot,
+      })
     },
-    { folded: doc.folded },
+    { folded: doc.folded, ...(viewRoot ? { childless: new Set([viewRoot]) } : {}) },
   )
   return out
 }
@@ -212,6 +224,15 @@ const IDENTITY_PROPS: readonly string[] = [
 function contentProps(props: BlockProps): BlockProps | undefined {
   const out = { ...props }
   for (const k of IDENTITY_PROPS) delete out[k]
+  /**
+   * **查询块的副本就连视图配置一起剔**：视图配置说的是「这批命中怎么看」，
+   * 而副本的条件已经按 `IDENTITY_PROPS` 拿掉了 —— 没有源的视图配置没有意义。
+   * 普通块正相反：副本的子块跟着复制，视图仍然成立，配置必须留着。
+   */
+  if ('_query' in props) {
+    delete out[VIEWS_PROP]
+    delete out[ACTIVE_VIEW_PROP]
+  }
   // 属性袋不留空壳：一块只有身份的块复制后不该留下 `{}`，否则「有没有属性」会有两份答案
   return Object.keys(out).length === 0 ? undefined : out
 }

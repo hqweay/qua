@@ -16,6 +16,7 @@ import {
   BlockStore,
   CommandLog,
   UndoStack,
+  activeView,
   ancestorsByBlockId,
   cloneSubtree,
   depthOf,
@@ -531,8 +532,18 @@ export class BlockEditor {
     const roots = this.viewRootIds
       .map((id) => this.store.find(id))
       .filter((b): b is Block => Boolean(b))
-    // 折叠表属于**这一份文档**（视图各带各的），换 roots 时原样保留
-    this.doc = { roots, folded: this.doc.folded, contexts: this.doc.contexts, expandedRoots: this.doc.expandedRoots }
+    /**
+     * 折叠表／面包屑属于**这一份文档**（视图各带各的），换 roots 时原样保留。
+     *
+     * `viewRootId` 不同：它是**从模型派生的**（`activeView(根)`），所以每次重取 roots 都重算一遍。
+     * 不重算的后果是「撤销一次切视图，模型回到表格、屏幕还停在大纲」——
+     * 而那正是 ⌘Z 最该表现对的地方。
+     * ⚠️ 其余字段用展开带过去：逐字段列举漏过一次（漏的正是 `viewRootId`）。
+     */
+    const only = roots.length === 1 ? roots[0] : undefined
+    this.doc = { ...this.doc, roots }
+    if (only && activeView(only)) this.doc.viewRootId = only.id
+    else delete this.doc.viewRootId
     // 焦点只算**本视图自己的**（里层编辑器是独立编辑岛，不是「我在编辑」）
     const focused = restoreSelection && this.ownFocus()
     this.renderAll()
@@ -1054,6 +1065,16 @@ export class BlockEditor {
   reclaimCaret(): boolean {
     // 拖拽 / 块拖选进行中：此刻的 DOM 选区不是「插入点」，别去动它
     if (this.dragId !== null || this.mouseSel?.active) return false
+    /**
+     * **焦点在表单控件里 ⇒ 那次输入不是正文**。
+     *
+     * `<input>`／`<textarea>`／`<select>` 有自己的编辑面，`document.getSelection()` 对它们
+     * 返回的是控件**外面**那个位置（Chrome 实测：锚点落在父元素上）。不做这个豁免，
+     * 「插入点不在 `.tx` 里」这条守卫会把控件里的每一个字符都吞掉 ——
+     * 表现是「表格/面板里的输入框点得进去、打得出来看不见」，而且不报错。
+     */
+    const active = document.activeElement
+    if (active instanceof HTMLElement && active.closest('input, textarea, select')) return false
     const s = document.getSelection()
     if (!s || s.rangeCount === 0) return false
     const node = s.anchorNode
@@ -3319,6 +3340,12 @@ export class BlockEditor {
       blockSelectionCount: this.blockSel?.ids.length ?? 0,
       blockType: b && todoOf(b) ? 'todo' : 'paragraph',
       blockHasChildren: Boolean(b?.children.length),
+      /**
+       * 这一块值不值得给「视图…」入口：查询块（源＝命中），或**有子块**的容器，
+       * 或已经有激活视图（要能切回大纲）。叶子普通块没有可摊开的东西 ——
+       * 给一个点了什么都没有的菜单项，用户只会以为是坏的。
+       */
+      blockCanHaveView: Boolean(b && (isQueryBlock(b) || b.children.length > 0 || activeView(b) !== null)),
       blockCollapsed: Boolean(b && isFolded(this.doc, b.id)),
       blockDone: b ? todoOf(b) === 'done' : false,
       marking: b ? this.marksAtSel().join('+') : '',

@@ -34,6 +34,13 @@ export interface EditableBlockDeps {
   /** 编辑器的初始 roots（窗口是「一个块一张卡」，构造时就知道；其余落点从空开始由 `load` 装） */
   initialRoots?: readonly Block[]
   /**
+   * **这一份装载里，哪个根的子块不归编辑器画**（见 `Doc.viewRootId`）。
+   *
+   * 单块标题编辑器用它把「这一块的 children」摘掉：它们本来就画在别处（表格/正文），
+   * 在浮层里再画一遍既超出格子的语义，也会让 Enter 拆出一块看不见的块。
+   */
+  viewRootId?: string
+  /**
    * **装载动作**。「什么时候装」归组件，「装什么」归这里。
    * `ed` 是当前编辑器（懒建时可能是 null——空结果不该建实例）；`ids` 是这次动过的块
    * （拿得到时），窗口用它跳过与己无关的重载。
@@ -164,7 +171,11 @@ export class EditableBlock {
       store: this.deps.store,
       write: this.deps.write,
       // 折叠态是视图私有的（在块底收起一行，不该让正文里那一块也收起来）
-      doc: { roots: [...(this.deps.initialRoots ?? [])], folded: {} },
+      doc: {
+        roots: [...(this.deps.initialRoots ?? [])],
+        folded: {},
+        ...(this.deps.viewRootId ? { viewRootId: this.deps.viewRootId } : {}),
+      },
       onExpandContext: this.deps.onExpandContext,
       onContextBack: this.deps.onContextBack,
     })

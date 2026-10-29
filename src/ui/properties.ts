@@ -128,20 +128,49 @@ export interface PropertiesEls {
  *
  * `ref` 与其它类型不同：它不是「输入一个值」，而是**选一个块**。
  * 所以它需要 deps（弹选择器、解析显示名），不能只靠 `commit`。
+ *
+ * ⚠️ **属性区与表格单元格共用这一份**：两处各写一套控件，迟早出现
+ *    「面板里 Enter 能提交、表格里不能」这种只在某处复现的分叉。
  */
-function valueEditor(
+export function makeCellEditor(
   row: FieldRow,
   commit: (v: unknown) => void,
   deps?: Pick<FieldRowDeps, 'pickRef' | 'refLabel'>,
   owner?: Block,
 ): HTMLElement {
   const kind = row.kind
+  /**
+   * **同一个值不重复提交**。
+   *
+   * 控件会给两条提交路径：`change`（失焦/选择）与 Enter（表格里显式派一次 `change`）。
+   * 用键盘在输入框里敲完直接 Enter 时两条都会走到 —— 第二次提交的值与第一次相同，
+   * 于是产出一次「零 op 的事务」，把 `lastOps` 冲成空数组：
+   * 账面上「改了却没写」，而实际写了。这里按**控件自己记住的最后一个值**去重。
+   */
+  let last: unknown = row.value
+  const same = (a: unknown, b: unknown): boolean => {
+    const ea = a === undefined || a === null || a === ''
+    const eb = b === undefined || b === null || b === ''
+    if (ea && eb) return true
+    return a === b
+  }
+  const send = (v: unknown): void => {
+    if (same(last, v)) return
+    last = v
+    commit(v)
+  }
   if (kind === 'checkbox') {
     const box = document.createElement('input')
     box.type = 'checkbox'
     box.className = 'prop-check'
+    /**
+     * **三态**：有槽没勾（`false`）与没有这一槽（`undefined`）是两件事 ——
+     * 「是任务但没填」与「不是任务」在待办条件里分得开，靠的就是这两位。
+     * 浏览器只能画两态 ⇒ 用 `indeterminate` 把「没有值」画出来。
+     */
     box.checked = row.value === true
-    box.addEventListener('change', () => commit(box.checked))
+    box.indeterminate = row.value === undefined || row.value === null
+    box.addEventListener('change', () => send(box.checked))
     return box
   }
   /**
@@ -158,7 +187,7 @@ function valueEditor(
     btn.dataset.refId = current
     btn.textContent = current === '' ? t('ui.props.pending') : deps.refLabel(current)
     btn.addEventListener('click', () => {
-      deps.pickRef(owner, row.propId, current, (targetId) => commit(targetId === '' ? undefined : targetId), btn.getBoundingClientRect())
+      deps.pickRef(owner, row.propId, current, (targetId) => send(targetId === '' ? undefined : targetId), btn.getBoundingClientRect())
     })
     return btn
   }
@@ -180,7 +209,7 @@ function valueEditor(
       sel.appendChild(o)
     }
     sel.value = current
-    sel.addEventListener('change', () => commit(sel.value === '' ? undefined : sel.value))
+    sel.addEventListener('change', () => send(sel.value === '' ? undefined : sel.value))
     return sel
   }
   const input = document.createElement('input')
@@ -189,7 +218,27 @@ function valueEditor(
   if (kind === 'number') input.inputMode = 'decimal'
   input.placeholder = t('ui.props.pending')
   input.value = row.value === undefined || row.value === null ? '' : String(row.value)
-  input.addEventListener('change', () => commit(input.value === '' ? undefined : input.value))
+  input.addEventListener('change', () => {
+    if (input.value === '') {
+      send(undefined)
+      return
+    }
+    /**
+     * **数字提交的是 `number`**（不是字符串）：排序与统计按值比，字符串会退化成字典序
+     * （`10` 排在 `9` 前面），而且从表面看只是「顺序有点怪」。
+     * 解析失败 ⇒ 不写（回退原值，一次 op 都不产）。
+     */
+    if (kind === 'number') {
+      const n = Number(input.value)
+      if (!Number.isFinite(n)) {
+        input.value = row.value === undefined || row.value === null ? '' : String(row.value)
+        return
+      }
+      send(n)
+      return
+    }
+    send(input.value)
+  })
   return input
 }
 
@@ -232,7 +281,7 @@ export function makeFieldRow(
   const value = document.createElement('span')
   value.className = 'prop-value'
   value.appendChild(
-    valueEditor(
+    makeCellEditor(
       row,
       (v) => {
         if (v === undefined) deps.clearValue(target, row.propId)

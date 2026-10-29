@@ -132,6 +132,16 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.dock/open-block', title: t('cmd.dock.open-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, side: { type: 'string' } }, keywords: ['dock', 'open', 'window', 'sidebar'] },
   { name: 'core.view/toggle-virtualize', title: t('cmd.view.toggle-virtualize'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { on: { type: 'boolean' }, radius: { type: 'integer' } }, keywords: ['virtual', 'window', 'DOM'] },
 
+  /* ---- 视图配置（块怎么看：表格/看板/…；大纲 ＝ 没有激活视图） ---- */
+  { name: 'core.view/add', title: t('cmd.view.add'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, kind: { type: 'string' } }, keywords: ['view', 'table', 'board', 'gallery', 'calendar'] },
+  { name: 'core.view/set-active', title: t('cmd.view.set-active'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, viewId: { type: 'string' } }, keywords: ['view', 'outline', 'switch'] },
+  { name: 'core.view/remove', title: t('cmd.view.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, viewId: { type: 'string' } }, keywords: ['view', 'remove', 'delete'] },
+  { name: 'core.view/rename', title: t('cmd.view.rename'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, name: { type: 'string' } }, keywords: ['view', 'rename'] },
+  { name: 'core.view/set-sort', title: t('cmd.view.set-sort'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, by: { type: 'string' }, dir: { type: 'string' } }, keywords: ['sort', 'order', 'column'] },
+  { name: 'core.view/new-row', title: t('cmd.view.new-row'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' } }, keywords: ['row', 'insert', 'new'] },
+  { name: 'core.view/delete-row', title: t('cmd.view.delete-row'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { rowId: { type: 'string' } }, keywords: ['row', 'delete', 'trash'] },
+  { name: 'core.view/menu', title: t('cmd.view.menu'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' } }, keywords: ['view', 'menu', 'table'] },
+
   /* ---- 浮层 ---- */
   { name: 'core.command-palette/show', title: t('cmd.command-palette.show'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), keywords: ['palette', 'command', t('menu.kw.command')], tile: { icon: 'lucide:compass' } },
   { name: 'core.menu/block', title: t('cmd.menu.block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), args: { blockId: { type: 'string' } } },

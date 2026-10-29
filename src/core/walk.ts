@@ -45,13 +45,20 @@ export interface WalkOpts {
   folded?: FoldState
   /** 连**被删的**块（及其子树）也走 —— 派生回收站、按 id 找回被删块用 */
   includeDeleted?: boolean
+  /**
+   * **这几块的子树不归我画**（不进、不算 hidden、`hasChildren` 也判成 false）。
+   *
+   * 唯一的消费者是「非大纲视图」的装载：children 由视图宿主渲染，正文只画根行。
+   * 与 `folded` 分开是因为语义相反 —— 折叠是「用户收起来了」，这里是「别处正在展开」。
+   */
+  childless?: ReadonlySet<string>
 }
 
 /**
  * 先序（深度优先）走一遍；`roots` 既可以是整片森林，也可以是一个子树的孩子列表。
  */
 export function walkForest(roots: readonly Block[], visit: (b: Block, ctx: WalkCtx) => boolean | void, opts: WalkOpts = {}): void {
-  const { folded, includeDeleted } = opts
+  const { folded, includeDeleted, childless } = opts
   const path: Block[] = []
   const step = (list: readonly Block[], parent: Block | null, hidden: boolean): boolean => {
     for (let i = 0; i < list.length; i++) {
@@ -59,7 +66,9 @@ export function walkForest(roots: readonly Block[], visit: (b: Block, ctx: WalkC
       if (!includeDeleted && isDeleted(b)) continue
       path.push(b)
       const stop = visit(b, { parent, index: i, path, hidden }) === false
-      if (stop || step(b.children, b, hidden || folded?.[b.id] === true)) {
+      // `childless` 的块：这一层到此为止（它的子树由别处渲染）；命中即收工时**连子树都不进**
+      const descend = !stop && !childless?.has(b.id) && step(b.children, b, hidden || folded?.[b.id] === true)
+      if (stop || descend) {
         path.pop()
         return true
       }

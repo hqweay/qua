@@ -9,9 +9,10 @@
  * 适配器只负责**字节的进与出**（见 `local-storage.ts` 的信封）；
  * 「这些字节是不是一份能打开的库」归这里。
  */
-import { ALIASES_PROP, DISPLAY_PROP, LISTS_PROP, type Block, type Doc, type FoldState } from '../model.ts'
+import { ALIASES_PROP, ACTIVE_VIEW_PROP, DISPLAY_PROP, LISTS_PROP, VIEWS_PROP, type Block, type Doc, type FoldState } from '../model.ts'
 import { LEGACY_ALIAS_PROP, normalizeAlias } from '../alias.ts'
 import { isMountsValue, MOUNTS_PROP } from '../mount.ts'
+import { isActiveViewValue, isViewsValue } from '../view.ts'
 import { isAnno, isRun } from '../runs.ts'
 
 /**
@@ -83,8 +84,12 @@ import { isAnno, isRun } from '../runs.ts'
  *            （`AssetView`）；留在 run 上就是同一件事的第二个答案——两份能不一致，
  *            而不一致时没有任何一层会报错。写路径只面对一种形状：run 说「哪一份字节」，
  *            索引说「它是什么、多大」。
+ * v26 → v27：新增系统属性 `_views`／`_activeView`（视图配置与激活视图 id）。
+ *            旧库没有这两格读出来就是「大纲」，本不必作废；加一版与 v11→v12 同一条理由：
+ *            让**写路径只面对一种形状**（配置都由一处写、一处校验），
+ *            读路径也就不必在「有没有这一格」上分叉。
  */
-export const WORKSPACE_VERSION = 26
+export const WORKSPACE_VERSION = 27
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {
@@ -163,6 +168,15 @@ function isBlock(x: unknown): x is Block {
    */
   const mounts = b.props[MOUNTS_PROP]
   if (mounts !== undefined && !isMountsValue(mounts)) return false
+  /**
+   * 视图配置：**这里只判容器形状**（是不是一份列表 / 是不是字符串）。
+   * 逐项内容归 `canonicalViews` 逐条重建 —— 那里坏一项只丢一项、退回大纲；
+   * 在这里按「一项坏了就整库 corrupt」处理，会让一个错键把整个库变成打不开。
+   */
+  const views = b.props[VIEWS_PROP]
+  if (views !== undefined && !isViewsValue(views)) return false
+  const activeView = b.props[ACTIVE_VIEW_PROP]
+  if (activeView !== undefined && !isActiveViewValue(activeView)) return false
   // 不变量：在列表里 ⇒ 至少有一个名字（不能出现在页/标签列表里却没有任何地址）。
   // 这里只拦「有列表、完全没有 _aliases」；别名数组本身的空/空串已在上面判 corrupt。
   if (Array.isArray(lists) && lists.length > 0 && !Array.isArray(aliases)) return false

@@ -6,13 +6,14 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  journalId, mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  journalId, mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, activeView, readViews, viewNameOf, type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { checkExternalUrl, rejectText } from './core/link.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
 import type { Op } from './core/kb/types.ts'
 import { BlockEditor, type ViewEvents } from './view/editor.ts'
+import { fillBlockText } from './view/block-dom.ts'
 import {
   BINDINGS,
   keyLabel,
@@ -38,7 +39,7 @@ import { renderFieldsEditor } from './ui/fields-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, renderLinkComposer, type ObjFieldDeps, type PanelDeps } from './ui/panels.ts'
 import { openImageLightbox } from './ui/lightbox.ts'
 import type { RefClickHit, RefClickMods } from './view/editor-events.ts'
-import { collectionCommands, devCommands, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, zoomCommands } from './app/commands-impl.ts'
+import { collectionCommands, devCommands, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, zoomCommands } from './app/commands-impl.ts'
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupDocks } from './app/wiring/docks.ts'
@@ -53,7 +54,7 @@ import { seedWorkspace } from './core/seed.ts'
 import { createIdbAssetStore } from './core/storage/asset-idb.ts'
 import { createIpcAssetStore } from './core/storage/asset-ipc.ts'
 import { ensureSeedAssets } from './core/storage/seed-assets.ts'
-import { assetMetaOf, assetViewOf, assetsAvailable, loadAssetIndex, onAssetChange, primeAsset, useAssetStore } from './view/asset-views.ts'
+import { assetMetaOf, assetViewOf, assetsAvailable, loadAssetIndex, markAssetMissing, onAssetChange, primeAsset, useAssetStore } from './view/asset-views.ts'
 import type { AssetView } from './core/assets.ts'
 import {
   IMAGE_MIME_ALLOWLIST,
@@ -697,8 +698,41 @@ function openLightbox(hash: string, view: AssetView, el: HTMLElement): void {
   openImageLightbox({ url: view.url ?? '', label, subtitle: parts.join(' · ') })
 }
 
-/** 字节数的人话形式（详情浮层与 lightbox 共用一份，免得两处各算一套） */
-function formatBytes(n: number): string {
+/**
+ * **点一枚非引用的行内对象**（图片 / 外链）：默认动作 or `⌥` 详情。
+ *
+ * 正文、挂载区、查询结果、表格标题格**共用这一份**：分开写就会出现
+ * 「正文里点图能开、表里点图没反应」这种只在某处复现的差别。
+ */
+function handleAtomClick(
+  atom: { runId: string; kind: string; hash?: string },
+  el: HTMLElement,
+  mods: { altKey: boolean; shiftKey: boolean },
+  via: string,
+): void {
+  if (atom.kind === 'link') {
+    // 外链：**左键＝打开**，⌥ ＝ 看详情（与图片同款分工：默认动作 / 详情）
+    if (!mods.altKey) {
+      void registry.invoke('core.link/open', { atomId: atom.runId }, via)
+      return
+    }
+    showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), anchorOf(el))
+    return
+  }
+  if (atom.kind !== 'asset' || !atom.hash) {
+    // 将来别的行内对象：先给详情（它们的「打开」还没做，别假装做了）
+    if (atom.runId) showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), anchorOf(el))
+    return
+  }
+  const view = assetViewOf(atom.hash)
+  if (!mods.altKey && view.state === 'ready' && (view.mime ?? '').startsWith('image/')) {
+    openLightbox(atom.hash, view, el)
+    return
+  }
+  showAssetDetails(atom.runId, atom.hash, el)
+}
+
+/** 字节数的人话形式（详情浮层与 lightbox 共用一份，免得两处各算一套） */function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
@@ -1162,6 +1196,12 @@ const app: App = {
     run: runTx,
     toast: (text, kind) => app.toast(text, kind),
   }),
+  ...viewConfigCommands({
+    kb,
+    run: runTx,
+    reloadPage: () => pageDeps.reloadPage(),
+    toast: (text, kind) => app.toast(text, kind),
+  }),
   ...belongsToCommands({
     kb,
     // 成环检查要算祖先闭包（全库读）：判据只有 core 一份，森林由装配层收进闭包
@@ -1182,6 +1222,49 @@ const app: App = {
   }),
   removeAtom: (runId) => ed.removeRun(runId),
   openInDock: (id, side) => openWindow(side === 'left' ? 'left' : 'right', id),
+
+  /**
+   * **块菜单里的「视图…」**：大纲 ＋ 这个块已有的视图 ＋「新建表格」。
+   *
+   * 为什么是**动态菜单**而不是几条静态绑定：绑定表是静态的，而「这个块有哪些视图」
+   * 是数据。菜单项由 `_views` 现画，选中之后仍走命令面（`core.view/*`）——
+   * 于是撤销、落盘、审计只有一条路（与「菜单由绑定表渲染」同一条纪律的延伸）。
+   */
+  openViewMenu: (blockId) => {
+    const b = blocks.find(blockId)
+    if (!b) return
+    const active = activeView(b)
+    const rows: Row[] = [
+      {
+        id: 'view//outline',
+        label: t('ui.view.outline'),
+        icon: 'lucide:list',
+        ...(active ? {} : { keyHint: t('ui.view.current') }),
+      },
+    ]
+    for (const v of readViews(b)) {
+      rows.push({
+        id: `view//${v.id}`,
+        label: viewNameOf(v, (k) => t(`ui.view.kind.${k}`)),
+        icon: 'lucide:table',
+        ...(active?.id === v.id ? { keyHint: t('ui.view.current') } : {}),
+      })
+    }
+    rows.push({ id: 'view/add/table', label: t('ui.view.addTable'), icon: 'lucide:plus', group: 'view/9-add' })
+    const anchor = app.ed.blockEl(blockId)?.getBoundingClientRect() ?? null
+    layers.openMenu({
+      rows,
+      anchor,
+      title: t('menu.label.views'),
+      searchable: false,
+      onPick: (row) => {
+        const id = String(row.id)
+        if (id === 'view//outline') void registry.invoke('core.view/set-active', { blockId, viewId: '' }, 'menu')
+        else if (id.startsWith('view//')) void registry.invoke('core.view/set-active', { blockId, viewId: id.slice('view//'.length) }, 'menu')
+        else if (id.startsWith('view/add/')) void registry.invoke('core.view/add', { blockId, kind: id.slice('view/add/'.length) }, 'menu')
+      },
+    })
+  },
 
   /* ---- 行内资产：入口（粘贴/选文件）与异步入库 ---- */
   /**
@@ -1558,31 +1641,7 @@ function viewEvents(editor: () => BlockEditor, change: ViewEvents['change'], via
      * 非引用的行内对象被点：图片默认开 lightbox，`⌥` 才看详情；
      * 缺失/不可用**不开空 lightbox**，直接给详情（那里面说清为什么没有图）。
      */
-    onAtomClick: (atom, el, mods) => {
-      if (atom.kind === 'link') {
-        /**
-         * 外链：**左键＝打开**，⌥ ＝ 看详情（与图片同款分工：默认动作 / 详情）。
-         * 打开走命令 ⇒ 协议白名单、对外接口、将来的审计都在一条路上。
-         */
-        if (!mods.altKey) {
-          void registry.invoke('core.link/open', { atomId: atom.runId }, via)
-          return
-        }
-        showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), anchorOf(el))
-        return
-      }
-      if (atom.kind !== 'asset' || !atom.hash) {
-        // 将来别的行内对象：先给详情（它们的「打开」还没做，别假装做了）
-        if (atom.runId) showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), anchorOf(el))
-        return
-      }
-      const view = assetViewOf(atom.hash)
-      if (!mods.altKey && view.state === 'ready' && (view.mime ?? '').startsWith('image/')) {
-        openLightbox(atom.hash, view, el)
-        return
-      }
-      showAssetDetails(atom.runId, atom.hash, el)
-    },
+    onAtomClick: (atom, el, mods) => handleAtomClick(atom, el, mods, via),
     /**
      * 粘贴图片：落点在事件里已经捕获，这里只管校验 → 入库 → 插 run。
      * 失败一律有文案（用户刚按了粘贴，「什么都没发生」是最糟的反馈）。
@@ -1634,12 +1693,20 @@ function wireViewEditor(editor: BlockEditor, change: ViewEvents['change'], via: 
 
 ed.events = viewEvents(
   () => mainEd,
-  () => {
+  (kind) => {
     syncSections()
     scheduleSave()
     chrome.renderEmptyHint(activeBlock().children)
     renderDocks() // 块数变了要更新
     scheduleBadge()
+    /**
+     * **结构变化要重排段与视图宿主**。
+     *
+     * 撤销/重做改的是模型（例如「上一步正在切视图」），而「这一屏长什么样」是**派生**的：
+     * 只有重新排一次段，视图宿主才会跟着长出来或摘掉。少这一句的表现是
+     * 「⌘Z 之后模型已经回到表格，屏幕还停在大纲」，不报错。
+     */
+    if (kind === 'struct') panels?.renderMounts()
   },
   'editor',
 )
@@ -1687,6 +1754,9 @@ const { renderMounts, renderProperties, scheduleProperties, pickRefValue } = set
   scheduleSave,
   scheduleBadge,
   refClick: handleRefClick,
+  // 表格标题列画的是**块的样子**：投影与正文同一条路（run/marks/引用/图片）
+  project: (b, into) => fillBlockText(into, b, (id) => blocks.find(id), assetViewOf, markAssetMissing),
+  atomClick: (atom, el, mods) => handleAtomClick(atom, el, mods, 'table'),
   // 挂载区/查询结果接的是**同一份**事件表（差别只在「装载谁」）
   wireEditor: (editor, change, via) => wireViewEditor(editor, change, via),
   getWs: () => ws,

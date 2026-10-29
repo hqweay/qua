@@ -284,6 +284,30 @@ export interface App {
    * 同一个块全局最多一个窗口（已在另一侧则移过来）。
    */
   openInDock(id: string, side?: 'left' | 'right'): void
+  /* 视图配置（一个块怎么看：`_views` / `_activeView`；视图不是实体） */
+  /**
+   * 新建一个视图并设为激活，返回它的 id（空串＝没建）。
+   *
+   * 表格的列在这里算**一次**并写进配置：算完就不随结果漂移（否则列宽/列序会自己动）。
+   */
+  addView(blockId: string, kind: string): string
+  /** 切换激活视图（`''` ＝ 大纲，删掉 `_activeView` 而不是存一个 outline） */
+  setActiveView(blockId: string, viewId: string): boolean
+  /** 删一个视图：只动配置，记录一个字节不碰；删的是激活那个就去相邻项 */
+  removeView(blockId: string, viewId: string): boolean
+  /** 给当前激活的视图改名（空名 ⇒ 回到按类型的默认名） */
+  renameActiveView(blockId: string, name: string): boolean
+  /** 新建一行＝在容器末尾插一个子块（查询源没有这一行：它的行是命中） */
+  viewInsertRow(blockId: string): boolean
+  /** 删除一行＝软删那个子块（可恢复） */
+  viewDeleteRow(rowId: string): boolean
+  /**
+   * 表头排序。children 源写 `activeView.table.sort`（只改显示序）；
+   * 查询源写 `_query.sort` 并重算（排序可能影响 `limit` 的成员）。`dir === ''` ＝ 清掉。
+   */
+  viewSetSort(blockId: string, by: string, dir: string): boolean
+  /** 块菜单里的「视图…」：列出大纲 ＋ 已有视图 ＋ 新建表格（**纯 UI**，落在装配层） */
+  openViewMenu(blockId: string): void
   /* 集合组件 */
   /** 新建一个集合块（森林顶层），返回它的 id；放进哪个槽由调用方决定 */
   createCollection(name?: string): string

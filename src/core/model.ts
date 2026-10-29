@@ -67,6 +67,27 @@ export const DELETED_AT_PROP = '_deletedAt' as const
  */
 export const QUERY_RESULT_PROP = '_queryResult' as const
 
+/**
+ * **视图配置**（`ViewConfig[]`，见 `core/view.ts`）：
+ * 「这一块怎么看」——列、序、行高、分组、封面。
+ *
+ * 为什么住在块的系统属性里，而不是节点/视图块：
+ *   · 视图不是实体，它是对**同一批块**的一次渲染（与「页/日记/标签都是块」同一条判据）；
+ *   · 换设备打开要看到同一张表 ⇒ 它是内容，必须入 KB（滚动/选中/折叠才是外挂状态）。
+ * 为什么是数组：一个块可以存多个命名视图，切换只是换个 `_activeView`；
+ *   从第一天就是数组，以后加第二个视图不需要迁移。
+ */
+export const VIEWS_PROP = '_views' as const
+
+/**
+ * **当前激活的视图 id**（必须指向 `_views` 里的一项）。
+ *
+ * `缺失 ＝ 大纲`：大纲不是一种「视图配置」，它是「没有任何激活视图」这一状态 ——
+ * 把它也存成一个 kind，切换视图就要写两份事实（存了 kind=outline、又存了激活 id），
+ * 而两份能不一致。缺失是**唯一**的「没有」。
+ */
+export const ACTIVE_VIEW_PROP = '_activeView' as const
+
 /** 这一块被删了吗（只看它自己；整棵子树不可见由遍历的跳过规则保证） */
 export function isDeleted(b: Block): boolean {
   return b.props !== undefined && DELETED_AT_PROP in b.props
@@ -87,6 +108,9 @@ export type SystemPropId =
   | typeof DISPLAY_PROP
   | '_query'
   | typeof QUERY_RESULT_PROP
+  // 视图配置（见 `core/view.ts`）：一个块怎么看，与它是什么是两件事
+  | typeof VIEWS_PROP
+  | typeof ACTIVE_VIEW_PROP
   // 字段定义（prop-def）：kind / 选项目录 / 声明列表
   | '_kind'
   | '_choices'
@@ -378,6 +402,17 @@ export interface Doc {
    * 与 `contexts` 一样是派生、视图私有、不入库。
    */
   expandedRoots?: ReadonlySet<string>
+  /**
+   * **这一份装载里，哪个根的子块不归编辑器画**（非大纲视图的宿主）。
+   *
+   * 判据：有激活的表格/看板/…视图时，children 由那一段的视图宿主渲染；
+   * 编辑器只画根行（标题/说明），否则同一批子块会在正文和表格里各画一遍。
+   *
+   * ⚠️ 它是**这一屏怎么渲染**，不是块的内容：不进库、不进撤销、不是 `Block` 的第五个槽。
+   * ⚠️ **不复用 `folded`**：折叠是用户状态（三角要显示「收着」），而这里视图其实展开了；
+   *    两者语义不同，共用一个字段会让折叠三角撒谎。
+   */
+  viewRootId?: string
 }
 
 export interface Located {

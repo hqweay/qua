@@ -151,6 +151,12 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/insert-link', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 25, layer: 'core' },
   { command: 'core.editor/copy-ref', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 30, layer: 'core' },
   { command: 'core.anno/clear-marks', kind: 'menu', when: 'blockFocused && !selectionEmpty', group: 'block/5-mark', order: 50, layer: 'core' },
+  /**
+   * **视图**（一个块换个看法）：入口只在「有东西可摊开」的块上（查询块 / 有子块 / 已有视图）。
+   * 菜单里是**动态**的一份清单（大纲 ＋ 已有视图 ＋ 新建表格），所以只挂一条命令、
+   * 由装配层按当前的 `_views` 现画 —— 绑定表是静态的，装不下「每个块不一样」的项。
+   */
+  { command: 'core.view/menu', kind: 'menu', when: 'blockFocused && blockCanHaveView', group: 'block/6-view', order: 10, layer: 'core', label: t('menu.label.views'), keywords: ['view', 'table', 'grid', t('menu.kw.views')] },
 
   /* ================= 块选区菜单 ================= */
   { command: 'core.editor/delete-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 10, layer: 'core', keywords: [t('menu.kw.delete')] },

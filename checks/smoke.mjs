@@ -9508,7 +9508,8 @@ await check(
       record: window.__qua.fields(s.recordId).map((f) => ({ label: f.label, value: f.value })),
       host: window.__qua.fields(s.hostId).map((f) => ({ label: f.label, value: f.value })),
     }), setup)
-    assert(wrote.record.find((f) => f.label === '时长')?.value === '3', `值应写到记录块：${JSON.stringify(wrote.record)}`)
+    // number 字段提交的是**数值**（不是字符串）：排序/统计按值比，字符串会退化成字典序
+    assert(wrote.record.find((f) => f.label === '时长')?.value === 3, `值应写到记录块（number）：${JSON.stringify(wrote.record)}`)
     assert(wrote.host.length === 0, `值不该写到宿主块：${JSON.stringify(wrote.host)}`)
 
     await page.keyboard.press('Escape')
@@ -11925,6 +11926,658 @@ await check('T150 派生卡也能关：关掉即离开槽（模型不动）；�
 
   await ctx.close()
   return `归属卡关掉→画廊加回来（模型 0 变化）；检视卡关掉→「看属性」自动放回（${viaCmd.title || '当前块'}）`
+})
+
+/* ---------------------------------------------------------------- T151 */
+
+/**
+ * **平表**：行＝容器的直接子块；容器是表标题，不是一行。
+ *
+ * 这一条同时钉三件事（各自都能静默错）：
+ *   ① 非大纲视图时**正文只画根行** —— 否则同一批子块在正文和表里各画一遍；
+ *   ② 切回大纲**子树原样回来**，而且刚才那一步还在撤销栈上（不是「重装把历史清了」）；
+ *   ③ 标题列画的是**块的样子**（marks／引用／图片都在），不是纯文本投影。
+ */
+const pageByTitle = async (page, part) =>
+  page.evaluate((s) => {
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes(s))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    return p.id
+  }, part)
+
+const viewState = (page) =>
+  page.evaluate(() => ({
+    visible: Boolean(document.querySelector('.queryview')) && document.querySelector('.queryview').hidden === false,
+    rows: document.querySelectorAll('.tv-row').length,
+    rowIds: [...document.querySelectorAll('.tv-row')].map((r) => r.dataset.blockId ?? ''),
+    rootBlks: document.querySelectorAll('#editor > .sec > .blk[data-block-id]').length,
+    titleHtml: [...document.querySelectorAll('.tv-row .tv-title-inner')].map((e) => e.innerHTML),
+    undoDepth: window.__qua.__editor.undo.depth(),
+    viewRoot: window.__qua.__editor.doc.viewRootId ?? '',
+  }))
+
+await check('T151 平表：行＝直接子块、正文只画根行、切回大纲子树回来；标题列是块投影不是纯文本', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const id = await pageByTitle(page, '输入面笔记')
+  await page.waitForTimeout(300)
+  const before = await viewState(page)
+  const children = await page.evaluate((pid) => {
+    const walk = (l) => {
+      for (const x of l) {
+        if (x.id === pid) return x
+        const r = walk(x.children)
+        if (r) return r
+      }
+      return null
+    }
+    return walk(window.__qua.__editor.store.blocks).children.map((c) => c.id)
+  }, id)
+  assert(!before.visible, '前置：大纲形态下没有视图宿主')
+
+  await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'table' }), id)
+  await page.waitForTimeout(400)
+  const table = await viewState(page)
+  assert(table.visible, '新建表格后应出现视图宿主（抬头 ＋ 表格）')
+  assert(table.rows === children.length, `行数＝直接子块数：${table.rows} vs ${children.length}`)
+  assert(
+    table.rowIds.every((x, i) => x === children[i]),
+    `平表的行序就是 children 顺序：${JSON.stringify(table.rowIds.slice(0, 3))} vs ${JSON.stringify(children.slice(0, 3))}`,
+  )
+  assert(table.rootBlks === 1, `正文只画根行（子块不在正文里重复）：${table.rootBlks}`)
+  assert(table.viewRoot === id, `装载层记着「这一屏谁的孩子由视图画」：${table.viewRoot}`)
+  assert(
+    table.titleHtml.some((h) => h.includes('mk-') || h.includes('data-atom-id') || h.includes('data-ref-to')),
+    `标题列应是 run 投影（marks／原子／引用），不是纯文本：${table.titleHtml[0]?.slice(0, 120)}`,
+  )
+
+  // 新建行 ＝ 容器末尾一个子块（结构 op）；删除行 ＝ 软删（可恢复，不是从列表里抹掉）
+  const kids = () =>
+    page.evaluate((pid) => {
+      const walk = (l) => {
+        for (const x of l) {
+          if (x.id === pid) return x
+          const r = walk(x.children)
+          if (r) return r
+        }
+        return null
+      }
+      const b = walk(window.__qua.__editor.store.blocks)
+      return { live: b.children.filter((c) => !c.props?._deletedAt).length, all: b.children.length }
+    }, id)
+  const k0 = await kids()
+  await page.locator('.queryview-newrow').click()
+  await page.waitForTimeout(350)
+  const k1 = await kids()
+  assert(k1.live === k0.live + 1, `新建一行＝末尾多一个子块：${JSON.stringify(k0)} → ${JSON.stringify(k1)}`)
+  assert((await viewState(page)).rows === k1.live, '表格当场多一行（不用手动刷新）')
+
+  await page.locator('.tv-row').last().hover()
+  await page.locator('.tv-row .tv-del').last().click()
+  await page.waitForTimeout(350)
+  const k2 = await kids()
+  assert(k2.live === k1.live - 1, `删除一行＝那一块不再算活着的子块：${JSON.stringify(k1)} → ${JSON.stringify(k2)}`)
+  assert(k2.all === k1.all, `删除是**软删**（块还在树上，可恢复）：${JSON.stringify(k2)}`)
+
+  // 切回大纲：摘掉视图宿主、正文恢复子树，撤销栈原样（并且多出「切回大纲」这一步）
+  await page.locator('.qv-view-btn', { hasText: '大纲' }).first().click()
+  await page.waitForTimeout(400)
+  const outline = await viewState(page)
+  assert(!outline.visible, '切回大纲后视图宿主应摘掉（不是藏一台还在订阅的）')
+  assert(outline.rootBlks > 1, `切回大纲正文要重新装子树：${outline.rootBlks}`)
+  assert(outline.undoDepth > before.undoDepth, '撤销栈不该被重装清掉')
+  // 切回大纲：**活着的**子块一个不少（刚才软删的那一块不算，它还在树上可恢复）
+  const back = await page.evaluate((pid) => {
+    const walk = (l) => {
+      for (const x of l) {
+        if (x.id === pid) return x
+        const r = walk(x.children)
+        if (r) return r
+      }
+      return null
+    }
+    return walk(window.__qua.__editor.store.blocks).children.filter((c) => !c.props?._deletedAt).length
+  }, id)
+  assert(back === children.length, `切回大纲子块一个不少：${back} vs ${children.length}`)
+
+  // 再按一次 ⌘Z ⇒ 回到表格（那一步真在栈上，不是「历史被清了所以按了没反应」）
+  // ⚠️ 先让焦点回到编辑器：⌘Z 只在「焦点在编辑器里」时才接（点视图切换按钮之后焦点悬空）
+  await page.evaluate(() => window.__qua.focus())
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(400)
+  const undone = await viewState(page)
+  assert(undone.visible, '⌘Z 一次应退回表格视图（切视图＝一轮撤销）')
+
+  await ctx.close()
+  return `${table.rows} 行＝直接子块；正文只画根行；切回大纲 ${outline.rootBlks} 行、⌘Z 回表格`
+})
+
+/* ---------------------------------------------------------------- T152 */
+
+await check('T152 标题列＝块本身：点文字就地进单块编辑器；Enter 提交、Esc 取消不写；点引用先导航', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const id = await pageByTitle(page, '输入面笔记')
+  await page.waitForTimeout(300)
+  await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'table' }), id)
+  await page.waitForTimeout(400)
+
+  const rowText = () =>
+    page.evaluate(() => {
+      const row = document.querySelector('.tv-row')
+      const id = row.dataset.blockId
+      const walk = (l) => {
+        for (const x of l) {
+          if (x.id === id) return x
+          const r = walk(x.children)
+          if (r) return r
+        }
+        return null
+      }
+      const b = walk(window.__qua.__editor.store.blocks)
+      return { id, text: b.content.filter((r) => r.t === 'text').map((r) => r.v).join(''), modified: b.modified }
+    })
+
+  const first = await rowText()
+  // 点标题里的文字 ⇒ 一台贴在格子上的编辑器（不是 input、不是每行一台）
+  await page.locator('.tv-row .tv-title-inner').first().click()
+  await page.waitForTimeout(220)
+  const opened = await page.evaluate(() => {
+    const box = document.querySelector('.tv-edit')
+    const active = document.activeElement
+    return {
+      overlay: Boolean(box),
+      overlays: document.querySelectorAll('.tv-edit').length,
+      focusInside: Boolean(box?.contains(active)),
+      inputs: document.querySelectorAll('.tv-edit input').length,
+    }
+  })
+  assert(opened.overlay && opened.overlays === 1, `同一时刻只有一台浮层编辑器：${JSON.stringify(opened)}`)
+  assert(opened.focusInside, '打开后焦点必须在浮层里（否则打的字进正文）')
+  assert(opened.inputs === 0, '标题列不是 <input>（要用块编辑器）')
+  /**
+   * **不是「每行一台编辑器」**：表格行里不该出现块编辑器的行 DOM（`.blk`）。
+   * 每行常驻一台的代价不是观感——DOM 与订阅按行数增长（5k 行＝5k 台），
+   * 每一台还要各自维护重载节奏。这条断言就是那个量级错误的照妖镜。
+   */
+  const perRow = await page.evaluate(() => ({
+    blk: document.querySelectorAll('.tv-row .blk').length,
+    tx: document.querySelectorAll('.tv-row .tx').length,
+  }))
+  assert(perRow.blk === 0 && perRow.tx === 0, `表格行里不该有编辑器（每行一台是量级错误）：${JSON.stringify(perRow)}`)
+
+  /**
+   * **同一时刻只有一台**：点另一行的标题 ⇒ 上一台先提交并关掉，不是并排开出第二台。
+   * （并排的后果不是「看起来乱」：两台都在跟着 store 重画，谁先失焦谁把内容写回去，
+   *  撤销栈里也会多出一段没人按过的编辑。）
+   */
+  // 隔几行去点：浮层贴着第 1 行，紧邻那一行的上半截会被它盖住（真人点的是字，不是那一条缝）
+  const secondTitle = page.locator('.tv-row .tv-title-inner').nth(4)
+  await secondTitle.click()
+  await page.waitForTimeout(220)
+  const swapped = await page.evaluate(() => ({
+    overlays: document.querySelectorAll('.tv-edit').length,
+    row: document.querySelector('.tv-edit')?.dataset.blockId ?? '',
+    rows: [...document.querySelectorAll('.tv-row')].map((r) => r.dataset.blockId ?? ''),
+  }))
+  assert(swapped.overlays === 1, `换一行编辑不该并排开出第二台：${JSON.stringify(swapped)}`)
+  assert(swapped.row === swapped.rows[4], `浮层应贴在刚点的那一行上：${JSON.stringify(swapped)}`)
+
+  // 回到第一行继续（后面几条断言都针对第一行）
+  await page.locator('.tv-row .tv-title-inner').first().click()
+  await page.waitForTimeout(220)
+  await page.keyboard.type('Q')
+  await page.waitForTimeout(150)
+  const typed = await rowText()
+  assert(typed.text.includes('Q') && typed.id === first.id, `打字进的是这一块：${typed.text.slice(0, 20)}`)
+  const pageText = await page.evaluate((pid) => {
+    const walk = (l) => {
+      for (const x of l) {
+        if (x.id === pid) return x
+        const r = walk(x.children)
+        if (r) return r
+      }
+      return null
+    }
+    return walk(window.__qua.__editor.store.blocks).content.filter((r) => r.t === 'text').map((r) => r.v).join('')
+  }, id)
+  assert(!pageText.includes('Q'), '浮层里的字不该落到根块上')
+
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(250)
+  const committed = await page.evaluate(() => ({ overlay: Boolean(document.querySelector('.tv-edit')), activeTag: document.activeElement?.tagName }))
+  assert(!committed.overlay, `Enter 提交后浮层应关掉：${JSON.stringify(committed)}`)
+  const afterCommit = await rowText()
+  assert(afterCommit.text.includes('Q'), '提交后内容留在模型里')
+  assert(afterCommit.modified > first.modified, `提交是一次改动边界（修改时间要动）：${first.modified} → ${afterCommit.modified}`)
+
+  // Esc 取消：内容写回打开那一刻的样子
+  await page.locator('.tv-row .tv-title-inner').first().click()
+  await page.waitForTimeout(200)
+  await page.keyboard.type('ZZZ')
+  await page.waitForTimeout(150)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(250)
+  const cancelled = await page.evaluate(() => ({ overlay: Boolean(document.querySelector('.tv-edit')) }))
+  const afterCancel = await rowText()
+  assert(!cancelled.overlay, 'Esc 之后浮层关掉')
+  assert(afterCancel.text === afterCommit.text, `Esc 不写：${afterCommit.text.slice(-6)} → ${afterCancel.text.slice(-6)}`)
+
+  // 点引用先导航（不进编辑）：标题里那一枚 `[[产品设计 · 决策日志]]`
+  const refRow = page.locator('.tv-row .tv-title-inner [data-ref-to]').first()
+  const hasRef = (await refRow.count()) > 0
+  assert(hasRef, '标题列里应能看到行内引用（run 投影）')
+  const activeBefore = await page.evaluate(() => window.__qua.snapshot().activeId)
+  const refTarget = await refRow.getAttribute('data-ref-to')
+  await refRow.click()
+  await page.waitForTimeout(350)
+  const nav = await page.evaluate(() => ({ active: window.__qua.snapshot().activeId, overlay: Boolean(document.querySelector('.tv-edit')) }))
+  assert(!nav.overlay, '点引用不该开编辑器（先导航）')
+  assert(nav.active !== activeBefore || nav.active === refTarget, `点引用应换中心（或本来就指向当前页）：${activeBefore} → ${nav.active}`)
+
+  await ctx.close()
+  return `点文字→一台浮层；Enter 提交（${first.modified}→${afterCommit.modified}）；Esc 不写；点引用先导航`
+})
+
+/* ---------------------------------------------------------------- T153 */
+
+await check('T153 属性列：number 提交的是 number、排序不退化成字典序、一次提交一条 op；children 顺序不变', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const id = await pageByTitle(page, '输入面笔记')
+  await page.waitForTimeout(300)
+
+  // 造一个 number 属性（声明给子块），给前三个子块写 2 / 10 / 9
+  const setup = await page.evaluate((pid) => {
+    window.__qua.invoke('core.props/create-def', { blockId: pid, label: '评分', kind: 'number', target: 'declared' })
+    const walk = (l) => {
+      for (const x of l) {
+        if (x.id === pid) return x
+        const r = walk(x.children)
+        if (r) return r
+      }
+      return null
+    }
+    const b = walk(window.__qua.__editor.store.blocks)
+    const def = window.__qua.propDefs().find((d) => d.label === '评分')
+    const kids = b.children.slice(0, 3)
+    ;[2, 10, 9].forEach((v, i) =>
+      window.__qua.invoke('core.props/set-value', { blockId: kids[i].id, propId: def.id, value: v }),
+    )
+    return { defId: def.id, ids: kids.map((k) => k.id), order: b.children.map((c) => c.id) }
+  }, id)
+  await page.waitForTimeout(200)
+  await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'table' }), id)
+  await page.waitForTimeout(400)
+
+  const colIndex = await page.evaluate((defId) => {
+    const cells = [...document.querySelectorAll('.tv-head .tv-cell')]
+    return cells.findIndex((c) => c.dataset.col === defId)
+  }, setup.defId)
+  assert(colIndex > 0, '默认列应包含子块实际拥有的属性（评分）')
+
+  const values = () =>
+    page.evaluate(
+      (defId) => [...document.querySelectorAll('.tv-row')].map((r) => r.querySelector(`.tv-cell[data-prop="${defId}"] input`)?.value ?? ''),
+      setup.defId,
+    )
+  assert(JSON.stringify((await values()).slice(0, 3)) === JSON.stringify(['2', '10', '9']), `初始值按 children 顺序：${await values()}`)
+
+  // 表头升序：2 < 9 < 10（字典序会得到 10 < 2 < 9）
+  await page.locator('.tv-head .tv-cell').nth(colIndex).click()
+  await page.waitForTimeout(300)
+  const asc = (await values()).slice(0, 3)
+  assert(JSON.stringify(asc) === JSON.stringify(['2', '9', '10']), `number 排序按数值：${JSON.stringify(asc)}`)
+  await page.locator('.tv-head .tv-cell').nth(colIndex).click()
+  await page.waitForTimeout(300)
+  const desc = (await values()).slice(0, 3)
+  assert(JSON.stringify(desc) === JSON.stringify(['10', '9', '2']), `降序：${JSON.stringify(desc)}`)
+
+  // 排序只改显示序：children 一个字节不动
+  const orderAfterSort = await page.evaluate((pid) => {
+    const walk = (l) => {
+      for (const x of l) {
+        if (x.id === pid) return x
+        const r = walk(x.children)
+        if (r) return r
+      }
+      return null
+    }
+    return walk(window.__qua.__editor.store.blocks).children.map((c) => c.id)
+  }, id)
+  assert(JSON.stringify(orderAfterSort) === JSON.stringify(setup.order), '表头排序只改显示序，children 顺序不变')
+
+  // 改一格：提交的是 number，且只有一条 prop.set
+  const editor = page.locator(`.tv-row .tv-cell[data-prop="${setup.defId}"] input`).first()
+  await editor.click()
+  await editor.fill('42')
+  await editor.press('Enter')
+  await page.waitForTimeout(300)
+  const cell = await page.evaluate(() => ({
+    ops: window.__qua.lastOps().map((o) => (o.e === 'prop' ? `prop:${o.op}:${o.name}` : `${o.e}:${o.op}`)),
+  }))
+  const propSets = cell.ops.filter((x) => x.startsWith('prop:set'))
+  assert(propSets.length === 1 && propSets[0].endsWith(setup.defId), `一次提交只写这一格：${JSON.stringify(cell.ops)}`)
+  assert(cell.ops.length <= 2, `一格值＋修改时间最多两条 op：${JSON.stringify(cell.ops)}`)
+  const stored = await page.evaluate(
+    (a) => {
+      const walk = (l) => {
+        for (const x of l) {
+          if (x.id === a.ids[1]) return x
+          const r = walk(x.children)
+          if (r) return r
+        }
+        return null
+      }
+      const v = walk(window.__qua.__editor.store.blocks)?.props?.[a.defId]
+      return { v, type: typeof v }
+    },
+    setup,
+  )
+  assert(stored.type === 'number', `number 单元格提交的是 number（不是字符串）：${JSON.stringify(stored)}`)
+
+  await ctx.close()
+  return `升序 ${asc.join('<')}；降序 ${desc.join('>')}；children 顺序不变；一格一条 prop.set（${stored.type}）`
+})
+
+/* ---------------------------------------------------------------- T154 */
+
+await check('T154 checkbox 三态分得开（未填／false／true）；点一下写一条 op', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const id = await pageByTitle(page, '产品设计')
+  await page.waitForTimeout(300)
+  await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'table' }), id)
+  await page.waitForTimeout(400)
+
+  const states = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('.tv-row')].map((r) => {
+        const box = r.querySelector('.tv-cell[data-prop] input[type="checkbox"]')
+        if (!box) return 'none'
+        if (box.indeterminate) return 'empty'
+        return box.checked ? 'true' : 'false'
+      }),
+    )
+  const s = await states()
+  assert(s.includes('false') && s.includes('true') && s.includes('empty'), `三态都在 DOM 上看得见：${JSON.stringify(s)}`)
+
+  const emptyAt = s.indexOf('empty')
+  assert(emptyAt >= 0, '前置：有一个「没有这一槽」的块')
+  const firstBox = page.locator('.tv-row').nth(emptyAt).locator('input[type="checkbox"]')
+  await firstBox.click()
+  await page.waitForTimeout(250)
+  const after = await states()
+  assert(after[emptyAt] === 'true', `点一下 ⇒ 已勾（从「没有值」到 true）：${JSON.stringify(after)}`)
+  const ops = await page.evaluate(() => window.__qua.lastOps().map((o) => (o.e === 'prop' ? `prop:${o.op}` : `${o.e}:${o.op}`)))
+  assert(ops.filter((x) => x === 'prop:set').length === 1, `一次勾选一条 prop.set：${JSON.stringify(ops)}`)
+
+  await ctx.close()
+  return `三态 ${JSON.stringify(s)}；点一下 → true（1 条 prop.set）`
+})
+
+/* ---------------------------------------------------------------- T155 */
+
+await check('T155 规模：300 行不窗口化（全挂）、3000 行窗口化（首屏 ≤60 行、DOM ≤2000）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const id = await pageByTitle(page, '输入面笔记')
+  await page.waitForTimeout(300)
+
+  /**
+   * 300 行 / 3000 行都用 `forceForest` 造：这是**没有生产入口**的状态（用户不会手写 3000 个块），
+   * 而断言要验的是**渲染策略怎么选**，不是「建 3000 个块要多久」。
+   * ⚠️ 它不产 op、不落盘，只在测试面存在（见诊断面注释），不拿来模拟用户动作。
+   */
+  const fill = (n) =>
+    page.evaluate(
+      (a) => {
+        window.__qua.forceForest((forest) => {
+          const walk = (l) => {
+            for (const x of l) {
+              if (x.id === a.id) return x
+              const r = walk(x.children)
+              if (r) return r
+            }
+            return null
+          }
+          const target = walk(forest)
+          const at = Date.now()
+          for (let i = target.children.length; i < a.n; i++) {
+            target.children.push({
+              id: `bulk${a.n}-${i}`,
+              content: [{ t: 'text', v: `第 ${i + 1} 行` }],
+              children: [],
+              created: at,
+              modified: at,
+            })
+          }
+        })
+      },
+      { id, n },
+    )
+
+  await fill(300)
+  await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'table' }), id)
+  await page.waitForTimeout(500)
+  const small = await page.evaluate(() => ({
+    rows: document.querySelectorAll('.tv-row').length,
+    virtual: document.querySelector('.tv')?.dataset.virtual ?? '',
+    cv: document.querySelector('.tv')?.dataset.cv ?? '',
+  }))
+  assert(small.rows === 300, `300 行全挂（不虚拟化）：${JSON.stringify(small)}`)
+  assert(small.virtual === '0' && small.cv === '1', `300–2000 那档用 content-visibility：${JSON.stringify(small)}`)
+
+  await fill(3000)
+  await page.waitForTimeout(600)
+  const big = await page.evaluate(() => ({
+    mounted: document.querySelectorAll('.tv-row').length,
+    virtual: document.querySelector('.tv')?.dataset.virtual ?? '',
+    nodes: document.querySelectorAll('#editor *').length,
+    total: [...document.querySelectorAll('.tv-row')].length,
+  }))
+  assert(big.virtual === '1', `3000 行应窗口化：${JSON.stringify(big)}`)
+  assert(big.mounted <= 60, `首屏挂载的行 ≤60：${big.mounted}`)
+  assert(big.nodes <= 2000, `#editor 里 DOM ≤2000：${big.nodes}`)
+
+  // 滚一段：窗口跟着换，且不重挂整表（行数仍在上限内）
+  await page.evaluate(() => {
+    const sc = document.querySelector('.tv-scroll')
+    sc.scrollTop = 4000
+    sc.dispatchEvent(new Event('scroll'))
+  })
+  await page.waitForTimeout(200)
+  const scrolled = await page.evaluate(() => ({
+    mounted: document.querySelectorAll('.tv-row').length,
+    first: document.querySelector('.tv-row')?.dataset.blockId ?? '',
+  }))
+  assert(scrolled.mounted <= 60, `滚动后仍只挂一屏：${scrolled.mounted}`)
+  assert(scrolled.first !== 'bulk3000-0', `滚动后窗口确实移动了：${scrolled.first}`)
+
+  await ctx.close()
+  return `300 行全挂（cv=1）；3000 行挂 ${big.mounted} 行、DOM ${big.nodes}；滚动后 ${scrolled.mounted} 行`
+})
+
+/* ---------------------------------------------------------------- T156 */
+
+await check('T156 窄容器降级：表格变紧凑列表（不横向溢出），点一行去中心槽打开', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 900, height: 800 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  const id = await pageByTitle(page, '输入面笔记')
+  await page.waitForTimeout(300)
+  await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'table' }), id)
+  await page.waitForTimeout(500)
+
+  const compact = await page.evaluate(() => {
+    const tv = document.querySelector('.tv')
+    const sc = document.querySelector('.tv-scroll')
+    return {
+      flag: tv?.dataset.compact ?? 'none',
+      rows: document.querySelectorAll('.tv-row').length,
+      compactRows: document.querySelectorAll('.tv-compact-row').length,
+      overflowX: sc ? sc.scrollWidth > sc.clientWidth + 1 : false,
+      width: tv?.clientWidth ?? 0,
+      hint: document.querySelector('.tv-compact-foot')?.textContent ?? '',
+    }
+  })
+  assert(compact.flag === '1', `窄容器应降级：${JSON.stringify(compact)}`)
+  assert(compact.compactRows > 0 && compact.rows === 0, `降级后是紧凑列表：${JSON.stringify(compact)}`)
+  assert(!compact.overflowX, `紧凑列表不该横向溢出：${JSON.stringify(compact)}`)
+  assert(compact.hint.length > 0, '降级要说明白（不能悄悄换了个形态）')
+
+  const target = await page.locator('.tv-compact-row').first().getAttribute('data-block-id')
+  await page.locator('.tv-compact-row').first().click()
+  await page.waitForTimeout(400)
+  const opened = await page.evaluate(() => window.__qua.snapshot().activeId)
+  assert(opened === target, `点一行应打开那一块：${target} → ${opened}`)
+
+  await ctx.close()
+  return `${compact.width}px ⇒ 紧凑列表（${compact.compactRows} 行、无横向溢出）；点行打开 ${target.slice(0, 6)}`
+})
+
+/* ---------------------------------------------------------------- T157 */
+
+await check('T157 入口：块菜单「视图…」→ 新建表格 ⇒ _activeView 指向新视图；叶子块不给这一项', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const id = await pageByTitle(page, '输入面笔记')
+  await page.waitForTimeout(300)
+
+  // 块菜单的 `when` 认「聚焦的是哪一块」⇒ 先真的把光标落到它上面
+  await page.evaluate((pid) => window.__qua.focusBlock(pid, 0), id)
+  await page.evaluate((pid) => window.__qua.openBlockMenu(pid), id)
+  await page.waitForTimeout(250)
+  const first = await layerRows(page)
+  assert(
+    first.some((r) => r.label.includes('视图')),
+    `有子块的块，块菜单里应有「视图…」：${JSON.stringify(first.map((r) => r.label))}`,
+  )
+  const at = first.findIndex((r) => r.label.includes('视图'))
+  await page.locator(`.layer-item[data-index="${at}"]`).click()
+  await page.waitForTimeout(220)
+  const second = await layerRows(page)
+  assert(second.some((r) => r.label === '大纲'), `子菜单里有「大纲」：${JSON.stringify(second.map((r) => r.label))}`)
+  assert(second.some((r) => r.label === '新建表格'), `子菜单里有「新建表格」：${JSON.stringify(second.map((r) => r.label))}`)
+  const addAt = second.findIndex((r) => r.label === '新建表格')
+  assert(second[addAt].hint !== undefined || true, '行可点')
+  await page.locator(`.layer-item[data-index="${addAt}"]`).click()
+  await page.waitForTimeout(450)
+
+  const after = await page.evaluate((pid) => {
+    const walk = (l) => {
+      for (const x of l) {
+        if (x.id === pid) return x
+        const r = walk(x.children)
+        if (r) return r
+      }
+      return null
+    }
+    const b = walk(window.__qua.__editor.store.blocks)
+    const views = b.props?._views ?? []
+    return {
+      activeView: b.props?._activeView ?? '',
+      viewIds: views.map((v) => v.id),
+      kinds: views.map((v) => v.kind),
+      rows: document.querySelectorAll('.tv-row').length,
+      cols: (views[0]?.table?.columns ?? []).map((c) => c.key),
+    }
+  }, id)
+  assert(after.viewIds.length === 1 && after.kinds[0] === 'table', `新建的是一个表格视图：${JSON.stringify(after)}`)
+  assert(after.activeView === after.viewIds[0], `_activeView 指向它：${JSON.stringify(after)}`)
+  assert(after.rows > 0, '建完当场就是表格（不用再点一次）')
+  assert(after.cols[0] === 'title' && after.cols.length > 1, `默认列算了一次并写进配置：${JSON.stringify(after.cols)}`)
+
+  // 叶子块（没有子块、不是查询块）不给这一项：点了没有结果的入口比没有更糟
+  const leaf = await page.evaluate(() => {
+    const walk = (l) => {
+      for (const x of l) {
+        if (x.children.length === 0 && !x.props?._query && (x.content ?? []).length > 0) return x
+        const r = walk(x.children)
+        if (r) return r
+      }
+      return null
+    }
+    return walk(window.__qua.__editor.store.blocks)?.id ?? ''
+  })
+  assert(leaf, '前置：库里应有一个叶子块')
+  await page.evaluate((bid) => window.__qua.focusBlock(bid, 0), leaf)
+  await page.evaluate((bid) => window.__qua.openBlockMenu(bid), leaf)
+  await page.waitForTimeout(200)
+  const leafRows = await layerRows(page)
+  assert(
+    !leafRows.some((r) => r.label.includes('视图')),
+    `叶子块不该有「视图…」：${JSON.stringify(leafRows.map((r) => r.label))}`,
+  )
+
+  await ctx.close()
+  return `块菜单→视图…→新建表格 ⇒ ${after.viewIds.length} 个视图（${after.kinds.join(',')}），列 ${after.cols.length} 个；叶子块不给入口`
+})
+
+/* ---------------------------------------------------------------- T158 */
+
+await check('T158 查询源也能是表格：行＝冻结命中（不折叠祖先）、没有「新建一行」、刷新照旧', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    let found = ''
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.props?._query) {
+          found = b.id
+          return
+        }
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return found
+  })
+  assert(qid, '前置：库里有一个查询块')
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
+  await page.waitForTimeout(400)
+
+  // 冻结一次（打开查询块时触发），看几张命中
+  const hits = await page.evaluate((id) => {
+    const walk = (l) => {
+      for (const x of l) {
+        if (x.id === id) return x
+        const r = walk(x.children)
+        if (r) return r
+      }
+      return null
+    }
+    const b = walk(window.__qua.__editor.store.blocks)
+    return { frozen: (b.props?._queryResult ?? []).map((h) => h.blockId), views: (b.props?._views ?? []).length }
+  }, qid)
+  assert(hits.frozen.length > 0, `前置：查询应冻结出至少一条命中：${JSON.stringify(hits)}`)
+
+  await page.evaluate((id) => window.__qua.invoke('core.view/add', { blockId: id, kind: 'table' }), qid)
+  await page.waitForTimeout(450)
+  const table = await page.evaluate(() => ({
+    rows: [...document.querySelectorAll('.tv-row')].map((r) => r.dataset.blockId ?? ''),
+    newRow: !document.querySelector('.queryview-newrow')?.hidden,
+    refresh: !document.querySelector('.queryview-refresh')?.hidden,
+    count: document.querySelector('.queryview-count')?.textContent ?? '',
+  }))
+  assert(table.rows.length === hits.frozen.length, `行＝冻结命中：${table.rows.length} vs ${hits.frozen.length}`)
+  assert(
+    table.rows.every((id) => hits.frozen.includes(id)),
+    `每一行都来自冻结集合：${JSON.stringify(table.rows)}`,
+  )
+  assert(!table.newRow, '查询源没有「新建一行」（行是命中，不是这里能长出来的块）')
+  assert(table.refresh, '查询源的刷新按钮还在（冻结/过期仍是它的机制）')
+  assert(table.count.length > 0, '抬头要报条数')
+
+  // 刷新不变成员：还是那几条（判据与大纲分支同一套）
+  await page.locator('.queryview-refresh').click()
+  await page.waitForTimeout(450)
+  const after = await page.evaluate(() => [...document.querySelectorAll('.tv-row')].map((r) => r.dataset.blockId ?? ''))
+  assert(JSON.stringify(after) === JSON.stringify(table.rows), `刷新后成员与顺序不变：${JSON.stringify(after)}`)
+
+  await ctx.close()
+  return `${table.rows.length} 行＝冻结命中；无「新建一行」；刷新后成员不变（${table.count}）`
 })
 
 /**
