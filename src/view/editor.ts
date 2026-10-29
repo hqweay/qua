@@ -1732,14 +1732,25 @@ export class BlockEditor {
     if (sameRuns(next, loc.block.content)) return
     // 这一块真的落过字 ⇒ 到边界时记一次「块被改过」（时刻只在边界写，见 `stampEdited`）
     this.edited.add(id)
-    const before = this.snap()
     const prevLen = plainLen(loc.block.content)
+    const kind = plainLen(next) < prevLen ? 'delete' : 'insert'
+    const at = Date.now()
+    /**
+     * **连续打字不取撤销快照**（这是真实按键成本里最大的一笔）。
+     *
+     * 判据：`kind` 与 `at` 在**改动之前**就能定（它们只取决于内容长度与时钟），
+     * 所以可以先问 `willMerge` —— 会合并进上一笔时那份快照根本不会入栈，
+     * 而它是 `JSON.stringify(整片森林)`（50000 块时 10.2ms，而事务本身 0.55ms）。
+     *
+     * ⚠️ 顺序不许反：必须在 `write` **之前**取（快照记的是「要回到的那份」）；
+     *    但「要不要取」可以更早决定 —— 那正是这里省下来的。
+     */
+    const before = this.undo.willMerge(kind, at) ? null : this.snap()
     this.write((tx) => {
       tx.patch(id, (b) => writeBlockContent(b, next))
     })
     const caret = this.sel ? this.sel.aOff : null
-    const kind = plainLen(next) < prevLen ? 'delete' : 'insert'
-    this.undo.record(before, kind, Date.now())
+    this.undo.record(before, kind, at)
     if (reRender) {
       this.renderBlock(id)
       if (caret !== null) this.placeCaret(id, Math.min(caret, plainLen(loc.block.content)))

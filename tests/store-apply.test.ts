@@ -87,3 +87,57 @@ test('连续 N 次事务 ⇒ 通知 N 次、重建 0 次（成本不随次数累
   assert.equal(calls, 5, 'N 次事务 ⇒ N 次通知（不是 2N）')
   assert.equal(store.probe.rebuildCount, rebuilds, 'N 次事务 ⇒ 0 次整库重建')
 })
+
+/* ------------------------------------------------------------ 撤销快照：合并时不许取 */
+
+/**
+ * **连续打字时不许取撤销快照**。
+ *
+ * 判据用**序列化字节数**（不用耗时：耗时在并发门禁下会抖）。
+ * 一次按键的撤销快照是 `JSON.stringify(整片森林)`；而连续打字时它会被合并进上一笔、
+ * **取完就丢**。实测 50000 块时那一笔 10.2ms，而事务本身只有 0.55ms。
+ *
+ * 反证方式：把 `syncFromDom` 里的 `willMerge` 判断删掉（无条件 `this.snap()`），本条红。
+ */
+test('撤销快照：合并窗口内**不序列化整片森林**', () => {
+  const blocks = Array.from({ length: 200 }, (_, i) => mkBlock(`块${i}`))
+  const store = new BlockStore(blocks)
+  const target = blocks[100]!
+
+  const orig = JSON.stringify
+  let total = 0
+  // eslint-disable-next-line no-global-assign
+  JSON.stringify = ((v: unknown, ...rest: unknown[]) => {
+    const out = (orig as (...a: unknown[]) => string | undefined)(v, ...rest)
+    total += typeof out === 'string' ? out.length : 0
+    return out
+  }) as typeof JSON.stringify
+  try {
+    const at = Date.now()
+    // 第一笔：会真的入栈 ⇒ 必须取快照
+    const first = store.undoStack.willMerge('insert', at) ? null : store.snap(null)
+    store.record(first, 'insert', at)
+    const afterFirst = total
+    assert.ok(afterFirst > 0, '第一笔必须取快照（否则撤销无内容可回）')
+
+    // 第二笔（同一毫秒内、同类）⇒ 会被合并 ⇒ 不许再取
+    const second = store.undoStack.willMerge('insert', at) ? null : store.snap(null)
+    store.record(second, 'insert', at)
+    assert.equal(total, afterFirst, '合并窗口内不该再序列化一次整片森林')
+    assert.equal(store.undoStack.depth(), 1, '两笔合并成一格（撤销一次回到第一笔之前）')
+  } finally {
+    JSON.stringify = orig
+  }
+})
+
+test('撤销快照：超出合并窗口 ⇒ 照常入栈并取快照', () => {
+  const blocks = Array.from({ length: 50 }, (_, i) => mkBlock(`块${i}`))
+  const store = new BlockStore(blocks)
+  const t0 = 1_000_000
+  store.record(store.snap(null), 'insert', t0)
+  // 超出 1200ms 窗口 ⇒ 不合并
+  const at = t0 + store.undoStack.mergeWindowMs + 1
+  assert.equal(store.undoStack.willMerge('insert', at), false, '超出窗口就不合并')
+  store.record(store.snap(null), 'insert', at)
+  assert.equal(store.undoStack.depth(), 2, '两笔各占一格')
+})
