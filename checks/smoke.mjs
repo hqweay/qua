@@ -2665,14 +2665,27 @@ await check('T33 同块选区 + Enter ⇒ 先删选区、再在起点拆（一�
 await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除 + 一次撤销', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
+  /**
+   * ⚠️ **等一次渲染落定再插块**：`openFirstPage` 只等 `invoke` 的 Promise，
+   * 而 `core.page/open` 的收尾（`loadPage` → `renderAll`）在之后几拍才完成。
+   * 不等的话 `insertBlockAfter(rootId, …)` 里的 `locate(this.doc, rootId)` 会落空
+   * ⇒ 返回 `null` ⇒ 后面 `rect(null)` 报 `getBoundingClientRect of null`。
+   * 这条在并发门禁下才显形（分片抢核时那几拍会被拉长）。
+   */
+  await page.waitForTimeout(150)
   const ids = await page.evaluate(() => {
     const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
     const a = ed.insertBlockAfter(rootId, 'AAAA')
     const b = ed.insertBlockAfter(a, 'BBBB')
     const c = ed.insertBlockAfter(b, 'CCCC')
-    return { a, b, c }
+    return { a, b, c, rootId, roots: ed.doc.roots.map((x) => x.id) }
   })
+  assert(
+    ids.a && ids.b && ids.c,
+    `前置：三个块都要建出来。a=${ids.a} b=${ids.b} c=${ids.c}；` +
+      `根 ${ids.rootId}；doc.roots=[${ids.roots.join(',')}]`,
+  )
   const rect = async (id) =>
     page.evaluate((id) => {
       const el = document.querySelector(`.blk[data-block-id="${id}"] .tx`)

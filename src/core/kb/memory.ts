@@ -23,7 +23,7 @@ import { findInForest, trashOf } from '../tree.ts'
 import { walkForest } from '../walk.ts'
 import { findTagByName, tagsOf as tagsOfBlock, tagIdsOf } from '../tags.ts'
 import { findJournalDay } from '../journal.ts'
-import { indexPathOf, queryByIndex } from '../index-port.ts'
+import { blockIdByAlias, indexPathOf, queryByIndex } from '../index-port.ts'
 import {
   allPropDefs,
   declaredFields,
@@ -164,8 +164,18 @@ export class MemoryKb implements KbClient {
     return indexPathOf(this.store.index, id)
   }
 
+  /**
+   * 按地址找块 —— **走索引**（`aliases` 表），不遍历森林。
+   *
+   * 与 `findByAlias` 同一条口径（规范化同一份、先序第一个赢）；差别只在成本：
+   * 遍历是 O(整库)（50000 块 ≈ 1.1ms），而 `@` 补全每敲一个字都要问一次。
+   *
+   * ⚠️ 索引里存的是 **id**：拿块要再 `find(id)` —— 索引的块表是活引用，但
+   *    「地址 → id」这一格是快照，改名/删块由 `refreshTagsClaim`／`applyBlockDelete` 修补。
+   */
   resolveAlias(name: string): Block | undefined {
-    return findByAlias(this.store.blocks, name)
+    const id = blockIdByAlias(this.store.index, name)
+    return id === undefined ? undefined : this.store.find(id)
   }
 
   allPaths(): readonly PathEntry[] {

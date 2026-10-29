@@ -70,6 +70,17 @@ export interface Index {
    *    重名时先序第一个赢。这里与 `findByAlias` 同口径，不另写一套比较。
    */
   tags: Map<string, string>
+  /**
+   * **全地址表**：规范化地址 → 块 id（**任何**有地址的块，不只是标签）。
+   *
+   * 与 `tags` 的区别：`tags` 只收「有 `tag` 露面的块」（标签解析用），
+   * 这张表收所有 `_aliases` 非空的块（`[[名字]]` 解析、`@` 补全、改名查重都用它）。
+   *
+   * 为什么要单独一张：`resolveAlias` 曾经是**遍历整片森林**（50000 块时 1.1ms，
+   * 而 `@` 补全每敲一个字都要问一次）。表在这里、口径与 `findByAlias` 同一条
+   * （先序第一个赢），所以读侧换表不改语义。
+   */
+  aliases: Map<string, string>
   /** 日期（`YYYY-MM-DD`）→ journal 块 id */
   journals: Map<string, string>
   /** 块 id → 它所在的**顶层块** id（含自己）—— 反链按来源根聚合要用 */
@@ -99,6 +110,7 @@ function emptyIndex(): Index {
     incoming: new Map(),
     tagMembers: new Map(),
     tags: new Map(),
+    aliases: new Map(),
     journals: new Map(),
     rootOf: new Map(),
     parentOf: new Map(),
@@ -193,7 +205,7 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
          *    （冒烟 T87／T143：「撤销删除后块没回到可见集合」）。
          *    这正是「增量漏一种失效点、界面上只是偶尔少一条」的形状 —— 等式断言抓它。
          */
-        if (op.name === ALIASES_PROP || op.name === LISTS_PROP) refreshTagsClaim(index, op.block)
+        if (op.name === ALIASES_PROP || op.name === LISTS_PROP) refreshTagsClaim(index, op.block, forest)
         else if (op.name === '_tags') refreshTagMembership(index, op.block)
         else if (op.name === '_date') refreshJournalClaim(index, op.block)
         else if (op.name === DELETED_AT_PROP) refreshVisibility(index, op.block, forest)
@@ -260,12 +272,24 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[]): v
     index.parentOf.delete(bid)
   }
   const goneSet = new Set(gone)
-  // 名字表：删掉这些块认领的名字，再让**还活着**的认领者按 rebuild 的口径接手
-  const names = [...index.tags].filter(([, owner]) => goneSet.has(owner)).map(([name]) => name)
-  for (const name of names) index.tags.delete(name)
-  for (const name of names) {
+  /**
+   * 名字表：删掉这些块认领的名字，再让**还活着**的认领者按 rebuild 的口径接手。
+   *
+   * ⚠️ **两张表都要走**（`tags` 与 `aliases` 收的块不同，但记的是同一批名字）。
+   *    只处理 `tags` 会让 `aliases` 里留下死条目 —— 那时 `resolveAlias` 会返回一个
+   *    已经不在树上的块 id，而没有任何一层会报错（等式断言抓到的正是这个）。
+   */
+  const tagNames = [...index.tags].filter(([, owner]) => goneSet.has(owner)).map(([name]) => name)
+  for (const name of tagNames) index.tags.delete(name)
+  for (const name of tagNames) {
     const heir = firstTagClaimant(forest, name)
     if (heir) index.tags.set(name, heir)
+  }
+  const aliasNames = [...index.aliases].filter(([, owner]) => goneSet.has(owner)).map(([name]) => name)
+  for (const name of aliasNames) index.aliases.delete(name)
+  for (const name of aliasNames) {
+    const heir = firstAddressClaimant(forest, name)
+    if (heir !== undefined) index.aliases.set(name, heir)
   }
   // 日期表：同上（rebuild 是先序最后一个赢 ⇒ 接手也取最后一个）
   const dates = [...index.journals].filter(([, owner]) => goneSet.has(owner)).map(([d]) => d)
@@ -290,17 +314,68 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[]): v
  * 重算一个块对**名字表**的认领：索引里记在这个块名下的先摘掉，
  * 再按活块现在的别名/露面重打（表里已有别的块认领的名字不抢——先序第一优先）。
  */
-function refreshTagsClaim(index: Index, blockId: string): void {
+function refreshTagsClaim(index: Index, blockId: string, forest: readonly Block[]): void {
   const live = index.blocks.get(blockId)
   if (!live) return
+
+  /**
+   * **这一块名下现在记着哪些名字**（摘掉之前先记下）。
+   *
+   * ⚠️ 两张表都要收：`tags` 与 `aliases` 收的块不同（标签 vs 所有有地址的块），
+   *    但它们记的是**同一批名字**。只从 `tags` 收会漏掉「这一块不是标签、
+   *    但它的旧名字被别人接手」那一半（等式断言抓到的就是这个）。
+   */
+  const dropped: string[] = []
   for (const [name, owner] of [...index.tags]) {
-    if (owner === blockId) index.tags.delete(name)
+    if (owner !== blockId) continue
+    index.tags.delete(name)
+    dropped.push(name)
   }
-  if (!hasList(live, 'tag')) return
+  for (const [name, owner] of [...index.aliases]) {
+    if (owner !== blockId) continue
+    index.aliases.delete(name)
+    if (!dropped.includes(name)) dropped.push(name)
+  }
+
+  /**
+   * **现在**这个名字属于谁：先序第一个（与 `rebuild` 同一条口径）。
+   *
+   * 为什么接手者要重扫森林：同名不同块时先序第一个赢，而「谁是第一个」只有森林知道。
+   * 只重打自己会让那个名字消失 —— 与 `rebuild` 不一致，等式断言会抓出来。
+   */
+  const names = new Set<string>(dropped)
+  const own: string[] = []
   for (const alias of aliasesOf(live)) {
-    const name = normalizeAlias(alias)
-    if (name !== '' && !index.tags.has(name)) index.tags.set(name, blockId)
+    const n = normalizeAlias(alias)
+    if (n === '') continue
+    names.add(n)
+    own.push(n)
   }
+  const isTag = hasList(live, 'tag')
+  for (const name of names) {
+    // 全地址表：按先序第一个赢
+    if (!index.aliases.has(name)) {
+      const heir = firstAddressClaimant(forest, name)
+      if (heir !== undefined) index.aliases.set(name, heir)
+    }
+    /**
+     * 标签名表：只有**这一块自己现在还有的**名字才可能归它。
+     * ⚠️ 摘掉的旧名字不许重打回 `tags` —— 那正是「旧名字残留」的形状。
+     */
+    if (isTag && own.includes(name) && !index.tags.has(name)) index.tags.set(name, blockId)
+  }
+}
+
+/** 森林里先序第一个以这个名字为地址的**可见**块（与 `rebuild` 同一条口径） */
+function firstAddressClaimant(forest: readonly Block[], name: string): string | undefined {
+  let hit: string | undefined
+  walkForest(forest, (b) => {
+    if (hit !== undefined) return false
+    if (!aliasesOf(b).some((a) => normalizeAlias(a) === name)) return
+    hit = b.id
+    return false
+  })
+  return hit
 }
 
 /** 重算一个块对**成员表**的归属（数据源是活块上的 `_tags`） */
@@ -363,7 +438,7 @@ function refreshVisibility(index: Index, blockId: string, forest: readonly Block
   const rootId = parentId === null ? blockId : (index.rootOf.get(parentId) ?? blockId)
   indexSubtree(index, block, rootId, parentId)
   // 名字/日期/成员：入场后要重新认领（被删期间它们无权认领，见 `rebuild` 的同一口径）
-  refreshTagsClaim(index, blockId)
+  refreshTagsClaim(index, blockId, forest)
   refreshJournalClaim(index, blockId)
   refreshTagMembership(index, blockId)
 }
@@ -442,14 +517,17 @@ function indexSubtree(index: Index, root: Block, rootId: string, parentId: strin
       else index.tagMembers.set(tagId, new Set([b.id]))
     }
     /**
-     * 标签名表：一个标签块有多个别名时，**每一个**都是它的地址。
+     * 地址表：**每一个**别名都是一个地址（一个块可以有多个名字）。
      * 重复时先序第一个赢（与「先序第一个命中」同一个口径，不随机覆盖）。
+     *
+     * 全地址表（`aliases`）与标签名表（`tags`）在同一趟里打：两者的规范化与
+     * 「先序第一个赢」完全一致，只有「收哪些块」不同。
      */
-    if (hasList(b, 'tag')) {
-      for (const alias of aliasesOf(b)) {
-        const name = normalizeAlias(alias)
-        if (name !== '' && !index.tags.has(name)) index.tags.set(name, b.id)
-      }
+    for (const alias of aliasesOf(b)) {
+      const name = normalizeAlias(alias)
+      if (name === '') continue
+      if (!index.aliases.has(name)) index.aliases.set(name, b.id)
+      if (hasList(b, 'tag') && !index.tags.has(name)) index.tags.set(name, b.id)
     }
     if (isJournal(b)) {
       const d = journalDate(b)
@@ -480,6 +558,7 @@ export function fingerprint(index: Index): string {
     incoming: counts(index.incoming),
     tagMembers: sets(index.tagMembers),
     tags: flat(index.tags),
+    aliases: flat(index.aliases),
     journals: flat(index.journals),
     rootOf: flat(index.rootOf),
     parentOf: flat(index.parentOf),
@@ -534,6 +613,21 @@ export function tagMemberIdsOf(index: Index, tagId: string): string[] {
 /** 按规范化名字找标签块 id */
 export function tagIdByName(index: Index, name: string): string | undefined {
   return index.tags.get(normalizeAlias(name))
+}
+
+/**
+ * 按**地址**查块 id（`[[名字]]` 解析、`@` 补全、改名查重都走它）。
+ *
+ * 与 `findByAlias` 同一条口径（先序第一个赢），只是查表而不是遍历森林：
+ * 50000 块时遍历是 1.1ms，而 `@` 补全每敲一个字都要问一次。
+ *
+ * ⚠️ 返回的是 **id**，调用方要拿块得再 `find(id)`：索引存的是活引用，但
+ *    「地址 → id」是快照（改名会让它失效，而那一格由 `refreshTagsClaim` 修补）。
+ */
+export function blockIdByAlias(index: Index, name: string): string | undefined {
+  const want = normalizeAlias(name)
+  if (want === '') return undefined
+  return index.aliases.get(want)
 }
 
 /* ------------------------------------------------------------ 查询 */
