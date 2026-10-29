@@ -633,18 +633,29 @@ await check('A17 父块的竖线在本行换行后不断：自身延续段 ＋ �
   assert(r.lineX === r.markerX, `自己的线应与自己的块标在同一 x：线 ${r.lineX} vs 块标 ${r.markerX}`)
 
   /**
-   * 折叠后子行不挂载 ⇒ 不留悬空的一段线。
+   * 折叠后子行不挂载 ⇒ 不留悬空的下段。
    * ⚠️ 用的是「折**自己**」（`toggleCollapse`，也就是点折叠三角），不是「折子块」那条：
-   *    折子块时父块仍展开、自身段仍然有意义；折自己才会让子行整体不挂载。
+   *    折子块时父块仍展开、下段仍然有意义；折自己才会让子行整体不挂载。
+   * ⚠️ 判据是「**下段**撤掉」，不是「节点消失」：节点现在总是生成（每颗块标都有，
+   *    叶子行只有上段），折叠只撤 `data-rail-below` —— 整段隐藏会让折叠那一行的
+   *    圆点上方也空掉，与同一列上下的留白不一致。
    */
   await page.evaluate((id) => window.__qua.__editor.toggleCollapse(id), target)
   await page.waitForTimeout(250)
   const folded = await page.evaluate((id) => {
     const el = document.querySelector(`.blk[data-block-id="${id}"]`)
-    return { collapsed: el?.dataset.collapsed === '1', hasSelf: Boolean(el?.querySelector(':scope > .rail-self')) }
+    const self = el?.querySelector(':scope > .rail-self')
+    return {
+      collapsed: el?.dataset.collapsed === '1',
+      hasSelf: Boolean(self),
+      railBelow: self?.dataset.railBelow ?? null,
+      // 下段是否真的画出来（伪元素的 content 不是 none）
+      belowDrawn: self ? getComputedStyle(self, '::after').content !== 'none' : false,
+    }
   }, target)
   assert(folded.collapsed, `前置：应已折叠：${JSON.stringify(folded)}`)
-  assert(!folded.hasSelf, `折叠（子行不挂载）时不该留一段悬空的自身线段：${JSON.stringify(folded)}`)
+  assert(!folded.belowDrawn && folded.railBelow === '0', `折叠（子行不挂载）时不该留悬空的下段：${JSON.stringify(folded)}`)
+  assert(folded.hasSelf, `折叠时节点仍在（上段要留着，否则这一行圆点上方会空）：${JSON.stringify(folded)}`)
 
   await ctx.close()
   return `换行 ${r.lines} 行（行高 ${r.rowH}px）时线仍连续：${r.segCount} 段、起点 ${r.startTop}（行顶 ${r.rowTop} / 块标中心 ${r.markerCenter}）、零豁口；折叠后自身段撤掉`
@@ -881,6 +892,99 @@ await check('A23b 根行同时带面包屑＋别名头（两个头）：偏移�
 
   await ctx.close()
   return `${r.length} 行两个头的根行：起点贴块标那一行的顶、穿过块标、零伸进头里（起点 ${r[0].startTop} / 头底 ${r[0].headBottom} / 行顶 ${r[0].contentTop} / 块标中心 ${r[0].markerCenter} / --head-rows ${r[0].headRows}）`
+})
+
+/* ---------------------------------------------------------------- A23d */
+
+await check('A23d 线与块标之间留白：上下各 --ui-rail-gap，且每颗块标的留白一致', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1200, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(150)
+
+  /**
+   * **判据**（用户要的形状）：线**不穿过圆点**，在圆点上下各留一段空隙。
+   *
+   * 为什么这是设计而不是细节：线贯穿时，圆点只是线上一个加粗的点，整列读起来是一条
+   * 长直线 —— 眼睛看到的是「一根柱子」，不是「一个点 ＋ 它的子树」。断开之后圆点独立、
+   * 线只表示子树的范围，两件事各说各的。
+   *
+   * 三条子判据：
+   *   ① 上段的下端点离块标中心 `--ui-rail-gap`；
+   *   ② 下段的上端点也离中心 `--ui-rail-gap`（所以两侧留白**相等**）；
+   *   ③ 同一列里**每颗**块标的留白都一样 —— 叶子行只有上段，但它上段的留白
+   *      必须与有子块的行相同（否则「有的点贴线、有的点离线远」）。
+   *
+   * ⚠️ ③ 是这条断言真正要钉的：叶子行没有下段，很容易被写成「不生成节点」，
+   *    那样叶子圆点上方就没人补那半行，留白宽度与有子块的行差出一大截（实测 12.5 vs 8.5）。
+   */
+  const r = await page.evaluate(() => {
+    const out = []
+    const gapToken = getComputedStyle(document.documentElement).getPropertyValue('--ui-rail-gap').trim()
+    for (const el of document.querySelectorAll('#editor .blk')) {
+      const self = el.querySelector(':scope > .rail-self')
+      const mk = el.querySelector(':scope > .left > .marker')
+      if (!self || !mk) continue
+      const sr = self.getBoundingClientRect()
+      const mr = mk.getBoundingClientRect()
+      const centerRel = mr.top + mr.height / 2 - sr.top
+      const above = getComputedStyle(self, '::before')
+      const below = getComputedStyle(self, '::after')
+      const aboveH = above.content === 'none' ? 0 : parseFloat(above.height)
+      const belowTop = below.content === 'none' ? null : parseFloat(below.top)
+      out.push({
+        id: el.dataset.blockId.slice(-4),
+        depth: Number(el.dataset.depth),
+        hasChildren: el.dataset.hasChildren === '1',
+        railAbove: self.dataset.railAbove,
+        railBelow: self.dataset.railBelow,
+        centerRel: +centerRel.toFixed(1),
+        aboveH: +aboveH.toFixed(1),
+        // 上段末端离中心的距离
+        aboveGap: +(centerRel - aboveH).toFixed(1),
+        // 下段起点离中心的距离（没有下段就是 null）
+        belowGap: belowTop === null ? null : +(belowTop - centerRel).toFixed(1),
+      })
+    }
+    return { rows: out, gapToken }
+  })
+
+  const rows = r.rows
+  assert(rows.length > 0, `应至少量到一行：${JSON.stringify(rows)}`)
+  const gap = parseFloat(r.gapToken)
+  assert(Number.isFinite(gap) && gap > 0, `--ui-rail-gap 必须是一个正的像素值，实际「${r.gapToken}」`)
+
+  // ① 上段留白 ＝ gap（只对有上段的行判）
+  const withAbove = rows.filter((x) => x.railAbove === '1')
+  assert(withAbove.length > 0, `应至少有一行画上段：${JSON.stringify(rows)}`)
+  const badAbove = withAbove.filter((x) => Math.abs(x.aboveGap - gap) > 0.6)
+  assert(badAbove.length === 0, `上段的末端应离块标中心 ${gap}px，实际：${JSON.stringify(badAbove)}`)
+
+  // ② 下段留白 ＝ gap
+  const withBelow = rows.filter((x) => x.railBelow === '1')
+  assert(withBelow.length > 0, `应至少有一行画下段：${JSON.stringify(rows)}`)
+  const badBelow = withBelow.filter((x) => Math.abs(x.belowGap - gap) > 0.6)
+  assert(badBelow.length === 0, `下段的起点应离块标中心 ${gap}px，实际：${JSON.stringify(badBelow)}`)
+  /**
+   * ③ 上下对称：只判**两段都画**的行。
+   *
+   * ⚠️ 不能把「只有下段」的行算进来：子树的第一行（或装载根）上方本来就没有线，
+   *    它的 `aboveGap` 是「从行首到中心」的整段（12.5px），不是「留白」——
+   *    拿它跟 4px 比，会把**正确的不画**判成不对称。
+   */
+  const both = withBelow.filter((x) => x.railAbove === '1')
+  assert(both.length > 0, `应至少有一行上下两段都画：${JSON.stringify(rows)}`)
+  const asym = both.filter((x) => Math.abs(x.aboveGap - x.belowGap) > 0.6)
+  assert(asym.length === 0, `上下留白必须相等（这是「距离对称」的全部意思）：${JSON.stringify(asym)}`)
+
+  // ④ 叶子行与有子块的行，上段留白一致
+  const leaves = rows.filter((x) => !x.hasChildren && x.railAbove === '1')
+  assert(leaves.length > 0, `假数据里应有「叶子行且画上段」的行（否则这条判据测不到 ④）：${JSON.stringify(rows)}`)
+  const leafDrift = leaves.filter((x) => Math.abs(x.aboveGap - gap) > 0.6)
+  assert(leafDrift.length === 0, `叶子行的上段留白也必须与有子块的行相同：${JSON.stringify(leafDrift)}`)
+
+  await ctx.close()
+  return `${rows.length} 行（${withAbove.length} 有上段、${withBelow.length} 有下段、${both.length} 两段都有、${leaves.length} 叶子行）：留白 ${gap}px、上下对称、叶子与有子块的行一致`
 })
 
 /* ---------------------------------------------------------------- A19 */

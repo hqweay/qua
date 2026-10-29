@@ -250,31 +250,74 @@
   width: var(--ui-rail-hit);
   cursor: pointer;
 }
-.blk .rail-self::before {
+.blk .rail-self::before,
+.blk .rail-self::after {
   content: '';
   position: absolute;
-  top: 0;
-  bottom: 0;
   left: 50%;
   width: 1px;
   transform: translateX(-0.5px);
   background: var(--ui-rail);
   transition: width 120ms ease, background-color 120ms ease;
 }
+/**
+ * 视觉线**在自己的块标处断开**，上下各留 `--ui-rail-gap`。
+ *
+ * 为什么断开：一条线贯穿整列时，圆点只是线上一个加粗的点 —— 线的重量压在块标上，
+ * 眼睛读到的是一条长直线而不是「一个点 ＋ 它的子树」。留白把两者分开：
+ * 圆点独立，线是「子树的范围」。
+ *
+ * 几何：块标中心恒在行首下方 `1lh / 2`（`.left` 的 `height: 1lh` ＋ 居中），
+ * 所以断开点就是 `1lh / 2`——上下两段各自从这里退让一个 gap。
+ *
+ * **两段各有各的准入**（由渲染层写 `data-rail-above`／`data-rail-below`）：
+ *   · 上段：同列上方确实有线（否则会悬空）；
+ *   · 下段：这一行有子块且未折叠（否则没有「往下延续」的东西）。
+ * 两个判据都**不能**从 CSS 推出来：它们问的是「这一行在树里的位置」，
+ * 而样式层只看得到这一行自己。
+ */
+.blk .rail-self::before,
+.blk .rail-self::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-0.5px);
+  background: var(--ui-rail);
+  transition: width 120ms ease, background-color 120ms ease;
+}
+.blk .rail-self[data-rail-above='1']::before {
+  top: 0;
+  height: calc(1lh / 2 - var(--ui-rail-gap));
+}
+.blk .rail-self[data-rail-below='1']::after {
+  top: calc(1lh / 2 + var(--ui-rail-gap));
+  bottom: 0;
+}
 /* 悬停/活动：与祖先段同一套反馈（同一条线，同一处可点） */
 .blk .rail-self:hover::before,
-.blk .rail-self.hot::before {
+.blk .rail-self:hover::after,
+.blk .rail-self.hot::before,
+.blk .rail-self.hot::after {
   width: 2px;
   background: var(--ui-rail-hot);
 }
 @media (prefers-reduced-motion: reduce) {
-  .blk .rail-self::before {
+  .blk .rail-self::before,
+  .blk .rail-self::after {
     transition: none;
   }
 }
-/* 折叠态不生成节点；主题若显式隐藏也认这个口径 */
-.blk[data-collapsed='1'] .rail-self {
-  display: none;
+/*
+ * 折叠态：**只撤下段**（子行不挂载 ⇒ 没有「往下延续」的去处），上段留着。
+ *
+ * ⚠️ 不能整段 `display: none`：叶子行只有上段，它自己永远不会被折叠，
+ *    但折叠的**父块**那一行也可能带别名头… 更关键的是「折叠态不生成节点」这条
+ *    旧口径现在不成立 —— 节点总是生成（两段的准入在 `data-rail-*` 上）。
+ *    整段隐藏会让折叠那一行的圆点上方也空掉，与同一列上下的留白不一致。
+ */
+.blk[data-collapsed='1'] .rail-self::after {
+  content: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .blk .rail::before {
