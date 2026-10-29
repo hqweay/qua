@@ -449,8 +449,15 @@ function commandDecls() {
     const head = end >= 0 ? src.slice(0, end) : ''
     const body = end >= 0 ? src.slice(end) : src
     body.split('\n').forEach((line, i) => {
-      // 只查「声明值」：`z-index: 70;` 这种裸数字；`var(--ui-z-*)` 与注释都不算
-      if (!/z-index\s*:\s*[0-9]/.test(line)) return
+      /**
+       * 只查**声明值**：`z-index: 70;` 这种裸数字。
+       *
+       * ⚠️ 必须先剥掉注释再判：注释里写「旧写法是 `z-index: 70;`」是**说明**，不是声明。
+       *    实测：不剥注释时，一条解释这条断言本身的注释会让它自己变红（假阳性）——
+       *    而假阳性的代价比漏报更贵：它教会人「这条断言会误报，忽略它」。
+       */
+      const code = line.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/, '')
+      if (!/z-index\s*:\s*[0-9]/.test(code)) return
       const lineNo = end >= 0 ? head.split('\n').length + i : i + 1
       hits.push(`${r}:${lineNo}  ${line.trim().slice(0, 70)}`)
     })
