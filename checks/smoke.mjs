@@ -12580,6 +12580,54 @@ await check('T158 查询源也能是表格：行＝冻结命中（不折叠祖�
   return `${table.rows.length} 行＝冻结命中；无「新建一行」；刷新后成员不变（${table.count}）`
 })
 
+/* ---------------------------------------------------------------- T159 */
+
+await check('T159 在一屏多根（日记流）上给某一天建表：会换屏到那一天，而不是「点了没生效」', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  // 等冷启动落定：默认落点是**今天**，装的是日记流（今日 ＋ 更早的天 ⇒ 多个根）
+  await page.waitForTimeout(1200)
+  const before = await page.evaluate(() => ({
+    roots: window.__qua.__editor.doc.roots.length,
+    active: window.__qua.snapshot().activeId,
+  }))
+  assert(before.roots > 1, `前置：冷启动应是一屏多根（日记流），实际 ${before.roots}`)
+
+  // 真鼠标：右点今天这一行的块标 → 视图… → 新建表格
+  await page.locator('#editor .blk[data-depth="0"] [data-drag-for]').first().click({ button: 'right' })
+  await page.waitForTimeout(300)
+  const rows = await page.evaluate(() =>
+    [...document.querySelectorAll('.layer-item')].map((e) => e.textContent?.replace(/\s+/g, ' ').trim()),
+  )
+  const at = rows.findIndex((r) => r.includes('视图'))
+  assert(at >= 0, `块菜单里应有「视图…」：${JSON.stringify(rows.slice(-4))}`)
+  await page.locator(`.layer-item[data-index="${at}"]`).click()
+  await page.waitForTimeout(260)
+  await page.locator('.layer-item', { hasText: '新建表格' }).first().click()
+  await page.waitForTimeout(800)
+
+  const after = await page.evaluate(() => ({
+    roots: window.__qua.__editor.doc.roots.map((b) => b.id),
+    viewRoot: window.__qua.__editor.doc.viewRootId ?? '',
+    view: Boolean(document.querySelector('.queryview:not([hidden])')),
+    rows: document.querySelectorAll('.tv-row').length,
+    active: window.__qua.snapshot().activeId,
+    activeView: window.__qua.__editor.doc.roots[0]?.props?._activeView ?? '',
+  }))
+  /**
+   * 三件事一起钉：① 屏幕真的换了（一屏多根时视图宿主没有落脚点 ⇒ 必须收成单根）；
+   * ② 表真的画出来了（用户可见的那一条）；③ 配置落在**被点的那一块**上。
+   */
+  assert(after.roots.length === 1, `建视图后应收成单根（否则视图宿主无处安放）：${JSON.stringify(after.roots)}`)
+  assert(after.roots[0] === before.active, `换屏的目标就是刚点的那一天：${after.roots[0]} vs ${before.active}`)
+  assert(after.viewRoot === after.roots[0], `视图宿主记着是谁的孩子让位了：${after.viewRoot}`)
+  assert(after.view && after.rows > 0, `表必须当场出现（不是只写了配置）：${JSON.stringify({ view: after.view, rows: after.rows })}`)
+  assert(after.activeView !== '', `_activeView 指向新视图：${after.activeView}`)
+
+  await ctx.close()
+  return `${before.roots} 根 → 1 根；表 ${after.rows} 行（点的是块菜单那条路）`
+})
+
 /**
  * **判定放在所有用例之后**：写在这里之前时，后面的用例（T136 起）即使红了也不会进
  * `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。

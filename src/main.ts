@@ -1200,6 +1200,9 @@ const app: App = {
     kb,
     run: runTx,
     reloadPage: () => pageDeps.reloadPage(),
+    rootIds: () => pageDeps.rootIds(),
+    // 换屏走导航那条路（会记历史、刷标题、把光标放到新屏第一行），不另写一份装载
+    openBlock: (id) => app.zoomTo(id),
     toast: (text, kind) => app.toast(text, kind),
   }),
   ...belongsToCommands({

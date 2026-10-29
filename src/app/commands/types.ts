@@ -234,5 +234,9 @@ export interface ViewConfigDeps {
   run: TxRun
   /** 重装当前这一屏（切视图、增删行之后要让屏幕跟上） */
   reloadPage: () => void
+  /** 这一屏现在装的是哪些根（判断「要不要换屏」：一屏多根时视图宿主根本不存在） */
+  rootIds: () => readonly string[]
+  /** 把某一块打开成**这一屏唯一的根**（给「在日记流里给某一天建表」这种跨屏的入口用） */
+  openBlock: (blockId: string) => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }

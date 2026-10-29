@@ -56,7 +56,21 @@ export function viewConfigCommands(
   d: ViewConfigDeps,
 ):
   Pick<App, 'addView' | 'setActiveView' | 'removeView' | 'renameActiveView' | 'viewInsertRow' | 'viewDeleteRow' | 'viewSetSort'> {
-  /** 换完视图要重装这一屏：正文的根行与段尾的视图宿主都得跟着换 */
+  /**
+   * 换完视图要让屏幕跟上：正文的根行与段尾的视图宿主都得跟着换。
+   *
+   * ⚠️ **只有「这一屏就是这一块」时重装才有效**。视图宿主挂在**段根**的段尾槽里，
+   *    而一屏多根（日记流、并排页）时没有任何段根是「这一块的视图」——
+   *    于是「给今天这一行建一张表」会把配置写进模型、屏幕却一动不动（点了没生效）。
+   *    所以这里分两路：已经是单根就重装；否则**把这一块打开**（换屏到它），
+   *    让「点了」总有可见结果。
+   */
+  const reveal = (blockId: string): void => {
+    const roots = d.rootIds()
+    if (roots.length === 1 && roots[0] === blockId) d.reloadPage()
+    else d.openBlock(blockId)
+  }
+  /** 只重装，不换屏（行操作：容器本来就是这一屏的根，才可能走到这些入口） */
   const after = (): void => d.reloadPage()
 
   return {
@@ -82,7 +96,7 @@ export function viewConfigCommands(
           writeViews(x, upsertView(readViews(x), view), id)
         }),
       )
-      after()
+      reveal(blockId)
       return id
     },
 
@@ -102,7 +116,7 @@ export function viewConfigCommands(
           writeViews(x, readViews(x), target === '' ? null : target)
         }),
       )
-      after()
+      reveal(blockId)
       return true
     },
 
@@ -121,7 +135,7 @@ export function viewConfigCommands(
           writeViews(x, removeView(readViews(x), viewId), fallback)
         }),
       )
-      after()
+      reveal(blockId)
       return true
     },
 
@@ -136,7 +150,7 @@ export function viewConfigCommands(
           writeViews(x, renameView(readViews(x), active.id, name))
         }),
       )
-      after()
+      reveal(blockId)
       return true
     },
 
