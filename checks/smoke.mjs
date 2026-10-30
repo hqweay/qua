@@ -13256,6 +13256,36 @@ await check('T169 重开之后露面还在：首帧也要有身体（事件表�
   return `重开后露面仍在，身体 ${after.rows} 行（首帧重画生效）`
 })
 
+await check('T170 粘贴为…的二级菜单不是空的：when 里的键必须真实存在', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await buildEmbedTree(page)
+  await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base.replace(/\/$/, '') })
+  await page.evaluate(({ src }) => navigator.clipboard.writeText(`((${src}))`), fx)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), fx.host)
+  await page.evaluate((id) => window.__qua.openBlockMenu(id), fx.host)
+  await page.waitForTimeout(250)
+  const first = await layerRows(page)
+  const at = first.findIndex((r) => r.label.includes('粘贴为'))
+  assert(at >= 0, `块菜单里有「粘贴为…」：${JSON.stringify(first.map((r) => r.label))}`)
+  await page.locator(`.layer-item[data-index="${at}"]`).click()
+  await page.waitForTimeout(250)
+  const menu = await layerRows(page)
+  assert(menu.length === 2, `二级菜单不是空的（两条）：${JSON.stringify(menu.map((r) => r.label))}`)
+  assert(
+    menu.some((r) => r.label.includes('镜像')) && menu.some((r) => r.label.includes('大纲表格')),
+    `两项都在：${JSON.stringify(menu.map((r) => r.label))}`,
+  )
+  const i = menu.findIndex((r) => r.label.includes('镜像'))
+  await page.locator(`.layer-item[data-index="${i}"]`).click()
+  await page.waitForTimeout(350)
+  const st = await embedState(page)
+  assert(st.embedId !== '' && st.state === 'ok' && st.rows.length === 3, `选了镜像之后露面出现（源＋两子块）：${JSON.stringify(st)}`)
+
+  await ctx.close()
+  return `粘贴为… 有 2 项；选镜像后露面出现（源在剪贴板里）`
+})
+
 /**
  * **判定放在所有用例之后**：写在这里之前时，后面的用例（T136 起）即使红了也不会进
  * `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。

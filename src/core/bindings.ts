@@ -161,8 +161,13 @@ export const BINDINGS: Binding[] = [
   { command: 'core.embed/insert', kind: 'menu', when: 'blockFocused', group: 'block/6-view', order: 20, layer: 'core', label: t('ui.embed.insert') },
   { command: 'core.embed/paste-menu', kind: 'menu', when: 'blockFocused', group: 'block/6-view', order: 30, layer: 'core', label: t('cmd.embed.paste-menu') },
   /* 「粘贴为…」的两档：同一个命令，只差一个看法（菜单动态项由装配层现画，绑定点只给选项） */
-  { command: 'core.embed/paste', kind: 'menu', when: 'editorFocus', group: 'embedPaste/1', order: 10, args: { view: 'mirror' }, layer: 'core', label: t('ui.embed.asMirror') },
-  { command: 'core.embed/paste', kind: 'menu', when: 'editorFocus', group: 'embedPaste/1', order: 20, args: { view: 'table' }, layer: 'core', label: t('ui.embed.asTable') },
+  /**
+   * ⚠️ 判据用 `blockFocused`（编辑器上下文里**有**这个键），不要用 `editorFocus`：
+   * 那个键根本不存在 ⇒ `when` 恒假 ⇒ 菜单弹出来是空的，而且不报错。
+   * 这两条只从块菜单的「粘贴为…」进来，那一刻块一定聚焦。
+   */
+  { command: 'core.embed/paste', kind: 'menu', when: 'blockFocused', group: 'embedPaste/1', order: 10, args: { view: 'mirror' }, layer: 'core', label: t('ui.embed.asMirror') },
+  { command: 'core.embed/paste', kind: 'menu', when: 'blockFocused', group: 'embedPaste/1', order: 20, args: { view: 'table' }, layer: 'core', label: t('ui.embed.asTable') },
 
   /* ================= 块选区菜单 ================= */
   { command: 'core.editor/delete-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 10, layer: 'core', keywords: [t('menu.kw.delete')] },
