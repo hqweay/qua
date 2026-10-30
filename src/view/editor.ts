@@ -240,6 +240,11 @@ export interface ViewEvents {
    * ⚠️ 未接 ⇒ 粘贴图片**什么都不做**，不退化成「把图当文本贴」——后者是另一种静默失败。
    */
   onPasteImage?: (file: File, point: { blockId: string; offset: number } | null) => Promise<void>
+  /**
+   * **复制报告**：`ids` 是这次复制涉及的块，`text` 是剪贴板里那段纯文本。
+   * 「粘贴为…」用它把「刚才复制的是哪一块」找回来（自定义剪贴板 MIME 在 Chromium 不可靠）。
+   */
+  onCopy?: (ids: readonly string[], text: string) => void
   /** 拖入文件被拒（v1 不做拖拽入图）：装配层给一句明确文案 */
   onDropFilesRejected?: () => void
   /** 悬停把手/圆点或右键 → 块菜单 */
@@ -2996,6 +3001,7 @@ export class BlockEditor {
        * ⚠️ 没有接 `onPasteImage` 的实例（测试/独立编辑器）**什么都不做**，
        *    不退回「把图片当文本贴」——那是另一种静默失败。
        */
+      onCopy: (ids, text) => this.events.onCopy?.(ids, text),
       onPasteImage: async (file, point) => {
         const from = this.caretBlock() ?? this.editBase?.id ?? null
         if (from) this.commitEdit(from)

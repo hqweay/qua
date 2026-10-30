@@ -1172,6 +1172,15 @@ function swapWorkspace(next: Workspace, save: boolean): void {
  *
  * ⚠️ 这里仍然是**唯一**拼装点：本文件持有 `ws`／`ed`／`registry`，工厂只拿到「能做什么」。
  */
+/**
+ * **同会话里「刚才复制的是哪一块」**：`copy` 事件报告，`粘贴为…` 用。
+ *
+ * 为什么不放剪贴板：自定义 MIME 在 Chromium 的 copy 事件里写不进去（实测读回只有
+ * text/plain + text/html）；改纯文本又会让外部应用看到协议串。文本对得上才用，
+ * 对不上就退回纯文本——宁可给一句实话，也不插错块。
+ */
+let copiedClip: { ids: string[]; text: string } | null = null
+
 const app: App = {
   get ed() {
     return ed
@@ -1490,8 +1499,19 @@ const app: App = {
       () => app.toast(t('err.clipboardFailed'), 'warn'),
     )
   },
-  /** 读剪贴板文本：命令层不直接碰浏览器全局（与 `copy` 对称） */
-  readText: () => navigator.clipboard?.readText?.() ?? Promise.resolve(''),
+  /**
+   * 读剪贴板文本：命令层不直接碰浏览器全局（与 `copy` 对称）。
+   *
+   * **同会话里复制过一块时**，把那段文本对一遍：对得上就补回 `((id))`，
+   * 「粘贴为…」不必要求用户先点「复制为块引用」。对不上（在别处复制过）就只给纯文本，
+   * 命令层会给一句「剪贴板里没有这一库的块」——不猜、不插错块。
+   */
+  readText: async () => {
+    const text = (await navigator.clipboard?.readText?.().catch(() => '')) ?? ''
+    if (text === '') return ''
+    if (copiedClip && copiedClip.text === text) return copiedClip.ids.map((id) => `((${id}))`).join('\n')
+    return text
+  },
   // 结构动作落在中心编辑器上：焦点可能在一面镜像的岛里，而露面块在正文里
   insertEmbed: (at, targetId, view) => mainEd.insertEmbedAfter(at, targetId, view),
   expandAtomToEmbed: (atomId, view) => mainEd.expandAtomToEmbed(atomId, view),
@@ -1690,6 +1710,9 @@ function viewEvents(editor: () => BlockEditor, change: ViewEvents['change'], via
      * 缺失/不可用**不开空 lightbox**，直接给详情（那里面说清为什么没有图）。
      */
     onAtomClick: (atom, el, mods) => handleAtomClick(atom, el, mods, via),
+    onCopy: (ids, text) => {
+      copiedClip = { ids: [...ids], text }
+    },
     /**
      * 粘贴图片：落点在事件里已经捕获，这里只管校验 → 入库 → 插 run。
      * 失败一律有文案（用户刚按了粘贴，「什么都没发生」是最糟的反馈）。

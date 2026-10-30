@@ -13261,7 +13261,22 @@ await check('T170 粘贴为…的二级菜单不是空的：when 里的键必须
   await page.evaluate(() => window.__qua.quiet(true))
   const fx = await buildEmbedTree(page)
   await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base.replace(/\/$/, '') })
-  await page.evaluate(({ src }) => navigator.clipboard.writeText(`((${src}))`), fx)
+  // **真实路径**：选中源块的正文 → ⌘C（copy 事件把「复制了哪一块」报告给装配层）
+  const sel = await page.evaluate((id) => {
+    const el = [...document.querySelectorAll(`.blk[data-block-id="${id}"]`)].find((x) => x.querySelector('.tx'))
+    const tx = el?.querySelector('.tx')
+    if (!tx) return false
+    tx.focus()
+    const r = document.createRange()
+    r.selectNodeContents(tx)
+    const s = document.getSelection()
+    s.removeAllRanges()
+    s.addRange(r)
+    return true
+  }, fx.src)
+  assert(sel, '选中源块的正文')
+  await page.keyboard.press(kbd('mod+c'))
+  await page.waitForTimeout(150)
   await page.evaluate((id) => window.__qua.focusBlock(id, 0), fx.host)
   await page.evaluate((id) => window.__qua.openBlockMenu(id), fx.host)
   await page.waitForTimeout(250)

@@ -135,6 +135,8 @@ export interface EditorBridge {
    * 会把图插到用户后来移到的地方。
    */
   onPasteImage: (file: File, point: { blockId: string; offset: number } | null) => Promise<void>
+  /** 复制事件报告「复制了哪几块、那段文本是什么」（给同会话的「粘贴为…」用） */
+  onCopy?: (ids: readonly string[], text: string) => void
   /** 拖入文件被拒（v1 不做拖拽入图）：装配层给一句明确文案 */
   onDropFilesRejected?: () => void
   /**
@@ -485,6 +487,22 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       br.emitTrigger(id)
     }
     br.onChange()
+  })
+
+  /**
+   * **复制时报告「这一次复制的是哪一块」**（给「粘贴为…」用）。
+   *
+   * 为什么不是自定义剪贴板 MIME：Chromium 在 `copy` 事件里 `setData` 的自定义类型
+   * **不会出现在读回的剪贴板里**（2026-10-30 实测：`navigator.clipboard.read()` 只有
+   * text/plain + text/html），写了等于没写。而改 `text/plain` 会让外部应用看到 `((id))`。
+   * ⇒ 只在**本次会话**里记一份「块 id + 那段文本」；粘贴为… 读回文本对得上才用，
+   *   对不上（用户在别处复制过）就退回纯文本并说一句实话。
+   */
+  on(c, 'copy', () => {
+    const sel = document.getSelection()
+    const id = br.blockOf(sel?.anchorNode ?? null) ?? br.caretBlock()
+    if (!id) return
+    br.onCopy?.([id], sel?.toString() ?? '')
   })
 
   /* ── 粘贴（多行 = 多块，**绝不把换行塞进一个块**）── */
