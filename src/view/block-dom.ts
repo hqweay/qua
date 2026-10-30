@@ -545,17 +545,6 @@ export function makeBlockEl(
     /** 这是一个「展开出来的上下文根」：行首给「收起上下文」 */
     contextBack?: boolean
     /**
-     * **上方同列是否有线**：决定 `.rail-self` 的**上段**画不画。
-     *
-     * 判据由调用方给（它才知道行的顺序）：**上一行的 depth ≥ 自己的 depth**。
-     * 含义是「这一列在它上面已经有块标」，于是上段能接上那条线；
-     * 反过来（自己是子树的第一行）上方什么都没有，画出来就是一截悬空的线。
-     *
-     * 不在这里按 `ancestors.length` 推：那是「有几个祖先」，不是「同列上方有没有块标」——
-     * 子树的第一颗子块同样有祖先，但它这一列是空的。
-     */
-    railAbove?: boolean
-    /**
      * **组件体的画法**（`ui/dock-widgets.ts` 的 `widgetBodyInDoc`）。`view` 不得 import `ui`
      * （arch-check [13]），而「一个组件长什么样」天然属于组件那一层 ⇒ 经这里注入。
      *
@@ -743,7 +732,8 @@ export function makeBlockEl(
   }
 
   /**
-   * **这一行自己的线**（`.rail-self`）：分上下两段（CSS 的 `::before`／`::after`）。
+   * **这一行自己的线**（`.rail-self`）：**只画块标下方那一段**（CSS 的 `::after`），
+   * 从块标下方 `--ui-rail-gap` 起、一路到行底，接上子行那批段。
    *
    * 为什么需要它：上面那批段是「**为了祖先**而画」的——一条线活在**子行**上。
    * 于是父块**自己那一行**没有属于它的线：块标底下到行底之间是空的，
@@ -753,22 +743,18 @@ export function makeBlockEl(
    *
    * **只在有子块且未折叠的行生成**：线的语义是**子树的范围**，叶子块没有子树
    * ⇒ 它不该碰线，圆点上下都不画。
-   * ⚠️ 曾经为了「留白一致」给叶子行也画上段，结果叶子圆点上方凭空多出一截线
-   *    （实测 8.5px）—— 那一截上方是空的，既不表示子树、也不表示「上方有东西」。
-   *    「留白一致」说的是**有子块的行上下留白相等**，不是「所有圆点都碰线」。
    *
-   * **两段各有各的准入**（都从块标处留白断开，见 `blocks.css`）：
-   *   · **上段**（行首 → 块标上方）：只在**同列上方确实有线**时画（`railAbove`）。
-   *     判据由调用方给：**上一个同列块标有子块**（它的下段连同子树一直延伸到这里）。
-   *     ⚠️ 缺这一条的形态：子树的第一颗圆点上方会**悬着一小截线**，它上面什么都没有。
-   *   · **下段**（块标下方 → 行底）：这个分支里恒画（`hasChildren && !folded` 就是它）。
+   * ⚠️ **没有「上段」**（2026-10-30 改，口径取 Logseq：线是 `.block-children` 的
+   *    `border-left`，**挂在父块标下面**，不穿过块标 —— `调研/界面/10` §3.3）。
+   *    带上段时两个后果用户都看见了：段首行（日记流的第二个日期）块标上方悬着一小截；
+   *    以及「线离上面那颗块标近、离下面那颗远」。去掉之后线的两端各自离块标 ≈ 半行。
    *
    * ⚠️ **不带 `.rail` 这个 class**：`.rail` 的口径是「深度 d 的行有 d 个**祖先**段」，
    *    而这个节点是「这一行**自己**的」。挂同一个 class 会让那条「数段数」的契约
    *    多算一段（`check` 里有一条按 `.rail` 计数，一挂就红）——名字不同是因为语义不同。
    * ⚠️ 它是 `.rails` 的**兄弟**、不是它的子节点：`.rails` 的 `overflow:hidden` 与
    *    `pointer-events:none` 是为「祖先段」定的，这个段要贴着自己的块标、且有自己的命中区。
-   * ⚠️ 纵向范围由 CSS 定（`top: 块标中心 ± gap`、`bottom: 0`），不在这里算像素：
+   * ⚠️ 纵向范围由 CSS 定（`top: 块标中心 ＋ gap`、`bottom: 0`），不在这里算像素：
    *    `1lh` 与 `--ui-bullet-size` 是 token，DOM 层不该知道它们的数值。
    */
   if (r.hasChildren && !folded) {
@@ -776,9 +762,6 @@ export function makeBlockEl(
     self.className = 'rail-self'
     self.setAttribute('aria-hidden', 'true')
     self.contentEditable = 'false'
-    self.dataset.railAbove = opts.railAbove ? '1' : '0'
-    // 这个分支就是「有子块且未折叠」⇒ 下段恒画
-    self.dataset.railBelow = '1'
     // 这一段是「自己的子树」，可点折子块
     self.dataset.foldLineFor = b.id
     self.title = t('ui.block.foldLine')

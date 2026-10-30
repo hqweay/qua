@@ -106,40 +106,6 @@ import {
 import { journalDateLabel, type SecLayout, type ShellCol } from '../core/index.ts'
 export type { SecLayout }
 
-/**
- * **这一行上方同列是否有线** —— `.rail-self` 上段的唯一准入判据。
- *
- * 判据是「**这一列上方确实有线接到这一行的行顶**」，不是「上面有没有块标」。
- * 两者不等价：上一个同 depth 的块标如果是**叶子**，它没有下段 ⇒ 那一列到它的行底就断了，
- * 于是这一行画出来的上段就是**悬空的一截**（上面什么都没有）。
- *
- * 三种情形（`prev` ＝ 上一行）：
- *
- * | `prev.depth` | 上方有线？ | 为什么 |
- * |---|---|---|
- * | **> 自己** | 有 | 自己是从更深回来；上方那些行里有指向自己这一列祖先的段，一直延伸到这里 |
- * | **== 自己** | **看 prev 有没有子块** | 有 ⇒ 它的下段连同子树铺满这一列；没有 ⇒ 它自己就断了 |
- * | **< 自己** | 无 | 自己是这棵子树的第一行，这一列上方还没有块标 |
- *
- * ⚠️ 不能简化成「`prev.depth ≥ 自己`」：漏掉 `== ` 那一格的分叉，叶子兄弟后面那颗
- *    有子块的圆点上方就会凭空多一截线。
- * ⚠️ 折叠的 `prev` 也没有下段（子行不挂载、下段撤掉）⇒ 同样无线。
- */
-export function railAboveOf(
-  rows: readonly { depth: number; hasChildren: boolean; block: { id: string } }[],
-  index: number,
-  folded?: Readonly<Record<string, true>>,
-): boolean {
-  if (index <= 0) return false
-  const prev = rows[index - 1]!
-  const cur = rows[index]!
-  if (prev.depth > cur.depth) return true
-  if (prev.depth < cur.depth) return false
-  // 同 depth：只有「上一个兄弟自己有子树」才把线铺到了这一列
-  if (!prev.hasChildren) return false
-  if (folded && folded[prev.block.id] === true) return false
-  return true
-}
 // 只取**类型**：`view` 拿不到实现，写入的落地方式归装配层（见 `Run`）
 import type { Op, Tx } from '../core/kb/types.ts'
 import type { AssetView } from '../core/assets.ts'
@@ -828,7 +794,7 @@ export class BlockEditor {
       slot.contentEditable = 'false'
       sec.appendChild(slot)
     }
-    for (const [i, r] of rows.entries()) {
+    for (const r of rows) {
       if (r.depth === 0 || sec === null) {
         // 新的一段之前，先摆按列序应出现在这里的空天格子（复盘兜底；column 下 shells 恒空）
         if (r.depth === 0) {
@@ -840,7 +806,7 @@ export class BlockEditor {
         sec.dataset.sec = r.depth === 0 ? r.block.id : ''
         this.container.appendChild(sec)
       }
-      sec.appendChild(this.makeBlockEl(r, gutters.get(r.block.id), railAboveOf(rows, i, this.doc.folded)))
+      sec.appendChild(this.makeBlockEl(r, gutters.get(r.block.id)))
     }
     if (tailComplete) closeSec()
     // 比所有已装段都更早的空天格子：追加在最后
@@ -889,18 +855,7 @@ export class BlockEditor {
       hidden: false,
       hasChildren: loc.block.children.length > 0,
     }
-    // 单行重画只有一行，直接按这一个块算 —— 不必为了一行去扫整批
-    // ⚠️ `railAbove` 仍要按**全量行序**算：单行重画时这一行可能正是子树的第一行，
-    //    漏算就会在它上面画出一截悬空的线（上段准入的唯一判据）。
-    const allRows = this.rows()
-    const at = allRows.findIndex((x) => x.block.id === id)
-    el.replaceWith(
-      this.makeBlockEl(
-        row,
-        gutterFieldsOf(row.block, this.store.blocks),
-        at > 0 ? railAboveOf(allRows, at, this.doc.folded) : undefined,
-      ),
-    )
+    el.replaceWith(this.makeBlockEl(row, gutterFieldsOf(row.block, this.store.blocks)))
     // 被换掉的那个元素带着 `data-caret` ⇒ 缓存与标记都要重来
     this.caretMarks = ''
     this.markCaret()
@@ -910,10 +865,8 @@ export class BlockEditor {
   /**
    * @param gutter 这一行的 gutter 字段，**由调用方算好**：`block-dom` 是渲染层，没有森林；
    *               让它自己去扫一遍全库就等于「每画一行扫一次」。批量路径只扫一次库。
-   * @param railAbove 上方同列是否有线（见 `makeBlockEl` 的 `railAbove`）。单行重画时
-   *                  也要算：这一行可能是子树的第一行，上段不该画。
    */
-  private makeBlockEl(r: VisibleRow, gutter: readonly GutterField[] | undefined, railAbove?: boolean): HTMLElement {
+  private makeBlockEl(r: VisibleRow, gutter: readonly GutterField[] | undefined): HTMLElement {
     // 引用解析走**共享 store** 的森林：引用目标可能在当前视图之外（另一页／另一天），
     // 只有整片森林能回答「它还在不在、现在叫什么」。
     const find = (id: string) => this.store.find(id)
@@ -940,7 +893,6 @@ export class BlockEditor {
         context: r.depth === 0 ? this.doc.contexts?.get(r.block.id) : undefined,
         // 展开出来的根才有「收起上下文」；没接回调就不画一个点了没反应的按钮
         contextBack: Boolean(this.onContextBack) && r.depth === 0 && (this.doc.expandedRoots?.has(r.block.id) ?? false),
-        railAbove,
         // 组件体由 UI 层画（`view` 不得 import `ui`）；没接 ⇒ 组件块在正文里退化成空行
         ...(this.events.widgetBody ? { widgetBody: this.events.widgetBody } : {}),
       },
