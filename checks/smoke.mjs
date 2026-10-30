@@ -5693,7 +5693,7 @@ await check(
 )
 
 await check(
-  'T67 `#新标签` + ⇧↵ 走**一笔**事务：删触发词 ＋ 建标签块 ＋ 物化记录（落当天）＋ 插 `flavor:#` 露面同批；一次撤销连记录与标签一起回滚、宿主 `_tags` 没被写',
+  'T67 `#新标签` + ⇧↵ 走**一笔**事务：删触发词 ＋ 建标签块 ＋ 物化记录（住森林顶层）＋ 插 `flavor:#` 露面同批；一次撤销连记录与标签一起回滚、宿主 `_tags` 没被写',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -5701,7 +5701,7 @@ await check(
 
     /**
      * 判据是「一次用户动作 ＝ 一笔事务」：删掉 `#zzz` 那几个字、按名字建出标签块、
-     * 物化一条记录（落当天）、在原位插一枚指向**记录**的露面 —— 四件事拆开落盘会留下
+     * 物化一条记录（住森林顶层）、在原位插一枚指向**记录**的露面 —— 四件事拆开落盘会留下
      * 「字删了、记录没建」「露面有了、归属没写」这类半批。它只能靠**同一笔**的 op 集合来证，
      * 界面全绿也可能已经是半批。
      *
@@ -5742,12 +5742,10 @@ await check(
       const runKinds = (c) => c.map((r) => (r.t === 'ref' && r.flavor === '#' ? 'tag' : r.t)).join(',')
       const live = ed.store.find(t.id)
       const ops = window.__qua.lastOps()
-      const tagOp = ops.find((o) => o.e === 'block' && o.op === 'upsert' && o.value?.parent === null)
-      const tagId = tagOp?.id ?? ''
       const atoms = window.__qua.atoms().filter((a) => a.blockId === t.id)
       const recordId = atoms[0]?.target?.id ?? ''
       const record = ed.store.find(recordId)
-      const day = ed.store.blocks.find((b) => b.props?._date)
+      const tagId = record?.props?._tags?.[0] ?? ''
       return {
         ops: ops.map((o) => ({
           e: o.e,
@@ -5762,7 +5760,7 @@ await check(
         tagAlias: ed.store.find(tagId)?.props?._aliases?.[0] ?? '',
         recordText: plain(record),
         recordTags: record?.props?._tags ?? [],
-        recordInToday: Boolean(day?.children.some((x) => x.id === recordId)),
+        recordIsRoot: ed.store.blocks.some((x) => x.id === recordId),
         text: plain(live),
         tags: live?.props?._tags ?? [],
         atoms: atoms.map((a) => ({ kind: a.kind, target: a.target?.id ?? '' })),
@@ -5772,11 +5770,13 @@ await check(
     const textOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.runs !== '' && o.parent === undefined)
     const blockOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert')
     const propOps = after.ops.filter((o) => o.e === 'prop')
-    const tagBlockOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent === null)
+    const topLevelOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.parent === null)
     const recordOps = after.ops.filter((o) => o.e === 'block' && o.op === 'upsert' && o.id === after.recordId)
     assert(textOps.length === 1, `宿主内容应恰写一次：${JSON.stringify(after.ops)}`)
     assert(textOps[0].id === before.id && textOps[0].runs.includes('tag'), `那一次已是露面：${JSON.stringify(textOps)}`)
-    assert(tagBlockOps.length === 1, `同一笔里应建出 1 个标签块：${JSON.stringify(after.ops)}`)
+    assert(topLevelOps.length === 2, `同一笔里应建出 1 个标签块 ＋ 1 条记录（都在顶层）：${JSON.stringify(after.ops)}`)
+    assert(topLevelOps.some((o) => o.id === after.tagId), `标签块应在顶层：${JSON.stringify(topLevelOps)}`)
+    assert(topLevelOps.some((o) => o.id === after.recordId), `记录应在顶层：${JSON.stringify(topLevelOps)}`)
     assert(recordOps.length === 1, `同一笔里应物化 1 条记录：${JSON.stringify(after.ops)}`)
     assert(blockOps.length === 3, `这一笔应恰好 3 条 block op（宿主内容 ＋ 标签块 ＋ 记录）：${JSON.stringify(after.ops)}`)
     assert(propOps.every((o) => o.id !== before.id), `提及不写**宿主**归属：${JSON.stringify(propOps)}`)
@@ -5791,7 +5791,7 @@ await check(
       after.recordTags.length === 1 && after.recordTags[0] === after.tagId,
       `记录自己应归属那个标签（不是宿主）：${JSON.stringify(after.recordTags)}`,
     )
-    assert(after.recordInToday, `记录应落在当天：位置是真实信息（这件事发生在哪天）`)
+    assert(after.recordIsRoot, `记录应落在森林顶层：位置不承载信息，出生时刻由 created 记着`)
     assert(after.text === `${before.text} `, `投影应是「前缀 ＋ 空格」（露面不进投影、占 1 格）：${JSON.stringify(after.text)}`)
     assert(
       after.atoms.length === 1 && after.atoms[0].kind === 'tag' && after.atoms[0].target === after.recordId,
@@ -5839,7 +5839,7 @@ await check(
     assert(back2 === before.text, `第二次撤销应回到输入前的正文「${before.text}」：${JSON.stringify(back2)}`)
 
     await ctx.close()
-    return `#zzz + ⇧↵ ⇒ 一笔 3 条 op（宿主内容带露面 ＋ 标签块 ＋ 落在当天的记录）、宿主 _tags 零写入；一次撤销连记录与标签一起回滚`
+    return `#zzz + ⇧↵ ⇒ 一笔 3 条 op（宿主内容带露面 ＋ 顶层标签块 ＋ 顶层记录）、宿主 _tags 零写入；一次撤销连记录与标签一起回滚`
   },
 )
 
@@ -9340,7 +9340,7 @@ await check(
      * 三种落点由**按键**区分，不由「选中的是哪一行」区分：
      *   · `↵` 行内标签：正文里那一格指向标签类，宿主不被归类；
      *   · `⌥↵` 块标签：写宿主 `_tags`，正文里不多出原子；
-     *   · `⇧↵` 新实例：建一条落在今天的记录，正文里那一格指向**记录**。
+     *   · `⇧↵` 新实例：建一条住森林顶层的记录，正文里那一格指向**记录**。
      * 同一套判据在「类行」上验一遍就够了；实例行上的 ⌥/⇧ 复用同一支。
      */
     const tagName = '快捷键甲'
@@ -9404,7 +9404,7 @@ await check(
     assert(chip.tags.length === 1 && chip.tags[0] === tagId, `⌥↵ 应写宿主 _tags：${JSON.stringify(chip.tags)}`)
     assert(chip.chips === 1, `⌥↵ 的样式应是行尾 chip（实底）：${chip.chips}`)
 
-    // ③ ⇧↵ = 新实例（不新建标签，记录落当天、自带归属）
+    // ③ ⇧↵ = 新实例（不新建标签，记录住森林顶层、自带归属）
     const objBlock = await focusNew()
     await page.waitForTimeout(80)
     await page.keyboard.type(`#${tagName}`)
@@ -9417,7 +9417,6 @@ await check(
       const atoms = window.__qua.atoms().filter((a) => a.blockId === t.id)
       const recordId = atoms[0]?.target?.id ?? ''
       const record = ed.store.find(recordId)
-      const day = ed.store.blocks.find((b) => b.props?._date)
       const tx = document.querySelector(`.blk[data-block-id="${t.id}"]`)
       return {
         atoms: atoms.map((a) => a.target?.id ?? ''),
@@ -9425,7 +9424,7 @@ await check(
         tags: ed.store.find(t.id)?.props?._tags ?? [],
         recordTags: record?.props?._tags ?? [],
         recordText: record ? record.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '',
-        inToday: Boolean(day?.children.some((x) => x.id === recordId)),
+        isRoot: ed.store.blocks.some((x) => x.id === recordId),
         tagCount: ed.store.blocks.filter((x) => (x.props?._lists ?? []).includes('tag')).length,
       }
     }, { id: objBlock })
@@ -9434,12 +9433,12 @@ await check(
     assert(obj.recordTags.length === 1 && obj.recordTags[0] === tagId, `记录应自带标签归属：${JSON.stringify(obj.recordTags)}`)
     assert(obj.recordText === tagName, `记录的正文应是键入名：${JSON.stringify(obj.recordText)}`)
     assert(obj.dom.tag === 0 && obj.dom.obj === 1, `⇧↵ 的样式应是实例（空心胶囊），不是行内标签：${JSON.stringify(obj.dom)}`)
-    assert(obj.inToday, '记录应落在当天')
+    assert(obj.isRoot, '记录应落在森林顶层')
     assert(obj.tags.length === 0, `⇧↵ 不该把宿主归类：${JSON.stringify(obj.tags)}`)
     assert(obj.tagCount === tagCountBefore, `⇧↵ 复用已有标签，不新建第二个：${tagCountBefore} → ${obj.tagCount}`)
 
     await ctx.close()
-    return `前缀#名 也能弹；↵ 行内标签（指向类）、⌥↵ 写宿主 _tags、⇧↵ 建落在当天的新实例`
+    return `前缀#名 也能弹；↵ 行内标签（指向类）、⌥↵ 写宿主 _tags、⇧↵ 建住森林顶层的新实例`
   },
 )
 

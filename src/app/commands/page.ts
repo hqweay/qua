@@ -83,7 +83,7 @@ export function pageCommands(d: PageDeps): Pick<
        * 重开就丢了；拆成「先建页、打开再补子块」则会存在只有页没处写字的半截状态。
        *
        * **落点是森林顶层**：页是长寿命对象，不是「某天发生的一件事」——它的诞生时刻
-       * 已经由 `created` 记着，不需要再挂到那一天下面。记录仍落当天（`core/obj.ts`）。
+       * 已经由 `created` 记着，不需要再挂到那一天下面。记录也住顶层（`core/obj.ts`）。
        */
       const p = mkPageBlock()
       d.insertBlock(p, null, d.kb.roots().length)

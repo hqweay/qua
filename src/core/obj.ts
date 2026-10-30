@@ -14,12 +14,13 @@
  *
  * ⚠️ 记录**没有地址**（v1）：正文是描述，不写 `_aliases`。地址意味着「可被 `[[ ]]` 按名找」，
  *    而记录的身份由「哪条引用指向它」给出；要提名/升格成页是另一个动词。
- * ⚠️ 记录**落在当天**（与页块同一条落点口径，见 `core/placement.ts`）：
- *    位置是真实信息（这件事发生在哪天），归类由 `props._tags` 表达。
+ * ⚠️ 记录**落在森林顶层**（与页块、标签块同一条口径）：
+ *    v1 曾落在当天（「位置是真实信息：这件事发生在哪天」），被推翻——出生时刻已经由块上的
+ *    `created` 记着，位置只是同一件事的第二份答案，还会让记录跟着某一天被搬、被折叠，
+ *    并逼着每条记录先物化一天。顶层位置对记录不承载信息，读路径一律按 id／`_tags` 找它。
  */
 import { mkBlock, type Block } from './model.ts'
 import { TAGS_PROP } from './tags.ts'
-import { daySlotInTx, insertInDayDirect, type BlockFinder } from './placement.ts'
 import type { Tx } from './kb/types.ts'
 
 /** 造一条记录（还没进树）：正文＝键入名（作描述），归属＝这个标签 */
@@ -27,28 +28,21 @@ export function mkObjRecord(name: string, tagId: string): Block {
   return mkBlock(name.trim(), { props: { [TAGS_PROP]: [tagId] } })
 }
 
-/** 事务内物化一条记录：落进当天，返回它（调用方拿 id 插引用 run） */
+/** 事务内物化一条记录：落进森林顶层，返回它（调用方拿 id 插引用 run） */
 export function createObjRecordInTx(
   tx: Tx,
-  find: BlockFinder,
+  roots: readonly Block[],
   name: string,
   tagId: string,
-  now: Date = new Date(),
 ): Block {
   const record = mkObjRecord(name, tagId)
-  const slot = daySlotInTx(tx, find, now)
-  tx.insert(record, slot.parentId, slot.index)
+  tx.insert(record, null, roots.length)
   return record
 }
 
 /** 无事务入口时的兜底：只给「没有 tx 的视图」用，正常写路径一律走 `createObjRecordInTx` */
-export function createObjRecordDirect(
-  forest: Block[],
-  name: string,
-  tagId: string,
-  now: Date = new Date(),
-): Block {
+export function createObjRecordDirect(forest: Block[], name: string, tagId: string): Block {
   const record = mkObjRecord(name, tagId)
-  insertInDayDirect(forest, record, now)
+  forest.push(record)
   return record
 }

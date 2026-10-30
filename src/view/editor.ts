@@ -40,7 +40,6 @@ import {
   hasTag,
   mkBlock,
   createObjRecordInTx,
-  findInForest,
   trashOf,
   dropMove,
   normSel,
@@ -350,7 +349,7 @@ interface EditBase {
  * 浮层选中之后的**落点**（由触发字符那一栏决定，不由行决定）。
  *
  * · `ref`：正文里插一枚指向它的引用（`flavor:'#'` 就是行内标签的露面）；
- * · `newObj`：同一笔里建出标签块（缺则建）＋ 建一条落在今天的记录，再插指向记录的露面；
+ * · `newObj`：同一笔里建出标签块（缺则建）＋ 建一条住森林顶层的记录，再插指向记录的露面；
  * · `tag`：**只归类**——抹掉触发词、把标签写进本块的 `_tags`（行尾出 chip）。
  */
 export type AcceptPick =
@@ -3243,7 +3242,7 @@ export class BlockEditor {
     if (!id || !loc) return false
     const pick = opts.pick
     const before = this.snap()
-    /** 这次是否往树上插了新块（记录）——真插了就整片重画（记录落在当天，可能就在当前视图里） */
+    /** 这次是否往树上插了新块（记录）——真插了就整片重画（索引／块数要跟上） */
     let createdBlock = false
 
     const apply = (tx: Tx, block: Block): boolean => {
@@ -3267,11 +3266,11 @@ export class BlockEditor {
       }
 
       /**
-       * 记录是**内容块**，落在当天。它没有地址：正文就是键入的名字（作描述），
-       * 身份由「哪条引用指向它」给出。
+       * 记录是**内容块**，住森林顶层（与页块、标签块同一条口径）。它没有地址：
+       * 正文就是键入的名字（作描述），身份由「哪条引用指向它」给出。
        */
       if (pick.kind === 'newObj' || (pick.kind === 'newTag' && pick.action === 'instance')) {
-        const record = createObjRecordInTx(tx, (bid) => findInForest(this.store.blocks, bid), pick.name, tagId!)
+        const record = createObjRecordInTx(tx, this.store.blocks, pick.name, tagId!)
         recordId = record.id
         createdBlock = true
       }
@@ -3314,7 +3313,7 @@ export class BlockEditor {
      * `other`（不可合并）：落点动作是**显式的一次选择**，不是打字的延续。
      */
     this.undo.record(before, 'other', Date.now())
-    // 插了新块 ⇒ 整片重画（记录落在当天，可能就在这个视图里）；只改这一行时仍走单行
+    // 插了新块 ⇒ 整片重画（索引／块数要跟上）；只改这一行时仍走单行
     if (createdBlock) this.renderAll()
     else this.renderBlock(id)
     // 光标：插了露面的落在它之后（1 格）；只归类的那一格已经没了，落在原处
