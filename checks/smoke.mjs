@@ -13717,6 +13717,11 @@ await check(
     }
     const onBook = await groupsOn(setup.a)
     const onMovie = await groupsOn(setup.b)
+    const rowName = await page.evaluate(
+      (propId) => document.querySelector(`.prop-row[data-prop-id="${propId}"] .prop-name`)?.textContent ?? '',
+      ids.movie,
+    )
+    assert(rowName.includes('冒烟评分 · #冒烟电影'), `属性行的名字也要带来源：${JSON.stringify(rowName)}`)
     const groupOf = (groups, label) => groups.find((g) => g.label === label)?.options ?? []
     assert(
       groupOf(onBook, '本标签').some((x) => x.includes('冒烟评分 · #冒烟书')) &&
