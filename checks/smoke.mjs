@@ -14558,7 +14558,10 @@ await check('T185 收藏：默认列表；加/摘一行不删块；顺序跟 `_i
       }
     }
     walk(window.__qua.__editor.store.blocks)
-    const box = flat.find((b) => b.props?._type === 'core/collection-widget')
+    // ⚠️ 按**名字**找刚建的那一个：种子里本来就有一份收藏演示（按类型找会拿到它）
+    const box = flat.find(
+      (b) => b.props?._type === 'core/collection-widget' && (b.props?._aliases ?? []).includes('冒烟收藏'),
+    )
     const items = flat.filter((b) => b.id !== box?.id && b.props?._type === undefined && b.children.length === 0).slice(0, 2)
     if (!box) return { id: '', items: [] }
     for (const it of items) window.__qua.invoke('core.collection/add', { collectionId: box.id, blockId: it.id })
@@ -14636,6 +14639,166 @@ await check('T185 收藏：默认列表；加/摘一行不删块；顺序跟 `_i
 
   await ctx.close()
   return `2 行 → 摘一条仍 ${afterRemove.blocks} 块 → 顺序跟 _items；删块后引用留着、那一行不出`
+})
+
+/**
+ * **四种布局**（看板／画廊／日历／导图）：换看法不重查；看板拖卡写的是**属性**。
+ *
+ * 这条钉两件最容易错的事：切布局时顺手又跑了一次查询（成员悄悄变了），
+ * 以及看板拖卡把它做成了 re-parent（结构被改，而用户以为只是换了个分组）。
+ */
+await check('T190 四种布局：切换不重查；看板拖卡写属性不换父子；导图只接子树', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    let found = ''
+    const walk = (list) => {
+      for (const b of list) {
+        if (!found && b.props?._query?.where) found = b.id
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return found
+  })
+  assert(qid !== '', '前置：种子里应有一个查询块')
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
+  await page.waitForTimeout(400)
+  // 换成「全库的任务」，才有多个可分组的值
+  await page.evaluate(
+    (id) =>
+      window.__qua.invoke('core.query/set-spec', {
+        owner: { kind: 'block', blockId: id },
+        spec: { where: { tag: '任务' }, scope: 'all' },
+      }),
+    qid,
+  )
+  await page.waitForTimeout(450)
+  const countOf = () => page.evaluate(() => document.querySelector('.queryview-count')?.textContent ?? '')
+  // ⚠️ 别叫 `base`：那是 harness 的站点地址，闭包里重名会撞 TDZ
+  const rowsBefore = await countOf()
+
+  const addView = async (kind) => {
+    await page.evaluate(
+      ({ id, k }) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: k }),
+      { id: qid, k: kind },
+    )
+    await page.waitForTimeout(450)
+  }
+
+  // ① 看板：列 ≥2（含「未设置」）；拖一张卡到另一列 ⇒ 只改那一格
+  await addView('board')
+  const board = await page.evaluate(() => ({
+    cols: [...document.querySelectorAll('.vb-col')].map((c) => c.dataset.value ?? ''),
+    cards: document.querySelectorAll('.vb-card').length,
+    unset: Boolean(document.querySelector('.vb-col[data-unset="1"]')),
+  }))
+  assert(board.cols.length >= 2, `看板应至少有一列（＋未设置）：${JSON.stringify(board)}`)
+  assert(board.cards > 0, `看板要画出卡：${JSON.stringify(board)}`)
+  assert(board.unset, `「未设置」那一列必须在（藏起来＝告诉用户这些不存在）：${JSON.stringify(board)}`)
+
+  const card = await page.evaluate(() => {
+    const el = document.querySelector('.vb-card')
+    return { id: el?.dataset.blockId ?? '', parent: window.__qua.__editor.store.find(el?.dataset.blockId ?? '') ? 'ok' : '' }
+  })
+  assert(card.id !== '', '前置：应有一张卡')
+  const parentBefore = await page.evaluate((id) => {
+    // 这一块在整片森林里的父（拖完必须一模一样）
+    let parent = ''
+    const walk = (list, p) => {
+      for (const b of list) {
+        if (b.id === id) parent = p ?? ''
+        walk(b.children, b.id)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks, null)
+    return parent
+  }, card.id)
+  const targetCol = await page.evaluate((own) => {
+    const col = [...document.querySelectorAll('.vb-col')].find((c) => (c.dataset.value ?? '') !== own)
+    return { value: col?.dataset.value ?? '', unset: col?.dataset.unset === '1' }
+  }, await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?.['_query'] ? '' : '', card.id))
+  void targetCol
+  const colValue = await page.evaluate(() => {
+    const cols = [...document.querySelectorAll('.vb-col')]
+    const withValue = cols.find((c) => c.dataset.unset !== '1' && c.dataset.value !== '')
+    return withValue?.dataset.value ?? ''
+  })
+  assert(colValue !== '', `前置：应有一列带值：${colValue}`)
+  const propId = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._views?.find((v) => v.id === window.__qua.__editor.store.find(id)?.props?._activeView)?.board?.groupBy ?? '', qid)
+  assert(propId !== '', '前置：看板应有分组列')
+  await page.evaluate(
+    ({ propId: pid, value, blockId }) => window.__qua.invoke('core.props/set-value', { blockId, propId: pid, value }),
+    { propId, value: colValue, blockId: card.id },
+  )
+  await page.waitForTimeout(400)
+  const afterDrag = await page.evaluate(({ id, q }) => {
+    let parent = ''
+    const walk = (list, p) => {
+      for (const b of list) {
+        if (b.id === id) parent = p ?? ''
+        walk(b.children, b.id)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks, null)
+    // ⚠️ 条件在**查询块**身上，不在卡上：拖卡不该让查询的条件发生任何变化
+    return { parent, where: JSON.stringify(window.__qua.__editor.store.find(q)?.props?._query?.where) }
+  }, { id: card.id, q: qid })
+  assert(afterDrag.parent === parentBefore, `拖卡不许换父子（那会改结构）：${parentBefore} → ${afterDrag.parent}`)
+  assert(afterDrag.where === '{"tag":"任务"}', `拖卡不许改条件：${afterDrag.where}`)
+
+  // ② 画廊：一格一卡
+  await addView('gallery')
+  const gallery = await page.evaluate(() => ({
+    cards: document.querySelectorAll('.vg-card').length,
+    cover: document.querySelectorAll('.vg-cover').length,
+  }))
+  assert(gallery.cards > 0 && gallery.cover === gallery.cards, `画廊一格一卡、每张都有封面位：${JSON.stringify(gallery)}`)
+
+  // ③ 日历：月网格 42 格、今天有描边
+  await addView('calendar')
+  const cal = await page.evaluate(() => ({
+    days: document.querySelectorAll('.vc-day').length,
+    today: document.querySelectorAll('.vc-day[data-today="1"]').length,
+  }))
+  assert(cal.days === 42, `月网格应有 42 格（6 周 × 7 天）：${JSON.stringify(cal)}`)
+  assert(cal.today === 1, `今天要有描边（一个月里只有一格）：${JSON.stringify(cal)}`)
+
+  // ④ 换看法不重查：条数一直是冻结出来的那一批
+  assert((await countOf()) === rowsBefore, `切换布局不该重查：${rowsBefore} → ${await countOf()}`)
+
+  // ⑤ 导图只接子树：给一页（children 源）建导图，节点数＝它的子树块数
+  const pageInfo = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    let size = 0
+    const walk = (list) => {
+      for (const b of list) {
+        size++
+        walk(b.children)
+      }
+    }
+    const page2 = window.__qua.__editor.store.blocks.find((b) => b.id === p.id)
+    if (page2) walk([page2])
+    return { id: p.id, size }
+  })
+  await page.waitForTimeout(350)
+  await page.evaluate(
+    (id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'mindmap' }),
+    pageInfo.id,
+  )
+  await page.waitForTimeout(500)
+  const mm = await page.evaluate(() => ({
+    nodes: document.querySelectorAll('.vm-node').length,
+    edges: document.querySelectorAll('.vm-edge').length,
+  }))
+  assert(mm.nodes === pageInfo.size, `导图的节点＝这一页的子树（${pageInfo.size}）：${JSON.stringify(mm)}`)
+  assert(mm.edges === mm.nodes - 1, `每个非根节点一条边：${JSON.stringify(mm)}`)
+
+  await ctx.close()
+  return `看板 ${board.cols.length} 列／画廊 ${gallery.cards} 卡／日历 42 格／导图 ${mm.nodes} 节点；条数始终 ${rowsBefore}`
 })
 
 /**

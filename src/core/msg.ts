@@ -470,6 +470,20 @@ export const MSG = {
   'ui.list.unlink': '从这一栏里摘掉（不删块）',
   'ui.list.add': '加一条',
   'ui.list.missing': '{n} 条（{gone} 条已删）',
+  /* 看板：按某一列的单值分组；拖卡＝写属性（不是 re-parent） */
+  'ui.board.needsGroup': '看板要选一列来分组（视图菜单里挑一列）',
+  'ui.board.unset': '未设置',
+  /* 画廊：封面是派生的（正文里第一张图） */
+  'ui.gallery.noCover': '没有封面',
+  /* 日历：按日期落在月网格里 */
+  'ui.calendar.needsDate': '日历要选一列日期（视图菜单里挑一列）',
+  'ui.calendar.undated': '没有日期的',
+  'ui.calendar.more': '还有 {n} 条',
+  'ui.calendar.prev': '上个月',
+  'ui.calendar.next': '下个月',
+  /* 思维导图：只接子树（命中集合不是树） */
+  'ui.mindmap.tooBig': '这棵树有 {n} 个节点，只画前 {cap} 个',
+  'ui.mindmap.empty': '这一块没有子块',
   'ui.view.kind.table': '表格',
   'ui.view.kind.list-table': '大纲表格',
   'ui.view.kind.board': '看板',

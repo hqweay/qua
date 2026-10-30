@@ -736,3 +736,246 @@ button.queryview-chip:hover {
   align-self: flex-start;
   margin-top: var(--ui-gap-1);
 }
+
+/* ---------------------------------------------------------------- 看板
+   按某一列的单值分组。卡拖到另一列＝**写那一格的值**，不是换父子。 */
+.vb {
+  display: flex;
+  gap: var(--ui-gap-3);
+  align-items: flex-start;
+  overflow-x: auto;
+  padding-bottom: var(--ui-gap-2);
+}
+.vb-col {
+  flex: 0 0 15rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+  padding: var(--ui-gap-2);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface-sunken);
+  min-height: 4rem;
+}
+.vb-col[data-drop-target='1'] {
+  outline: 1px dashed var(--ui-accent);
+}
+.vb-col-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-xs);
+}
+.vb-col-name {
+  flex: 1;
+  min-width: 0;
+}
+.vb-col-count {
+  color: var(--ui-text-tertiary);
+}
+.vb-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+}
+.vb-card {
+  padding: var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface);
+  cursor: pointer;
+}
+.vb-card:hover {
+  background: var(--ui-surface-raised);
+}
+.vb-card-title {
+  color: var(--ui-text);
+}
+.vb-card-field {
+  margin-top: var(--ui-gap-1);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+
+/* ---------------------------------------------------------------- 画廊 */
+.vg {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: var(--ui-gap-3);
+}
+.vg[data-size='s'] {
+  grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+}
+.vg[data-size='l'] {
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+}
+.vg-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+  padding: var(--ui-gap-2);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface-sunken);
+  cursor: pointer;
+  min-width: 0;
+}
+.vg-card:hover {
+  background: var(--ui-surface-raised);
+}
+.vg-cover {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--ui-radius-sm);
+  overflow: hidden;
+  background: var(--ui-surface);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-lg);
+}
+.vg-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.vg-card-title {
+  color: var(--ui-text);
+}
+.vg-card-field {
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+
+/* ---------------------------------------------------------------- 日历 */
+.vc {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+}
+.vc-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+}
+.vc-title {
+  font-weight: var(--ui-fw-medium);
+  color: var(--ui-text);
+  font-variant-numeric: tabular-nums;
+}
+.vc-nav {
+  padding: 0 var(--ui-gap-2);
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.vc-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--ui-gap-1);
+}
+.vc-day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+  min-height: 4.5rem;
+  padding: var(--ui-gap-1);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+  min-width: 0;
+}
+/* 前后补白：在格子外那几天仍然画（用户要看到「上月末」的那种连续感） */
+.vc-day[data-other='1'] {
+  opacity: 0.45;
+}
+/* 今天有描边：一个没有「当前」的网格里，第一眼要找的就是今天 */
+.vc-day[data-today='1'] {
+  outline: 1px solid var(--ui-accent);
+}
+.vc-day-num {
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.vc-item {
+  padding: 0 var(--ui-gap-1);
+  border: 0;
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+  font-size: var(--ui-fs-xs);
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.vc-more {
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-2xs);
+}
+.vc-undated {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  padding-top: var(--ui-gap-2);
+  border-top: 1px solid var(--ui-border-subtle);
+}
+.vc-undated-title {
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+
+/* ---------------------------------------------------------------- 思维导图
+   HTML 画节点（文字要在窄宽下省略）、SVG 画边。 */
+.vm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+  overflow: auto;
+}
+.vm-note {
+  margin: 0;
+  color: var(--ui-warn);
+  font-size: var(--ui-fs-xs);
+}
+.vm-canvas {
+  position: relative;
+  min-height: 12rem;
+  /* 根居中：整块从容器高的中线开始排（纵向坐标本来就是居中的） */
+  display: flex;
+  align-items: center;
+}
+.vm-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.vm-edge {
+  fill: none;
+  stroke: var(--ui-border);
+  stroke-width: 1;
+}
+.vm-node {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  height: calc(var(--ui-row-h) - 4px);
+  max-width: 9rem;
+  padding: 0 var(--ui-gap-2);
+  border: 0;
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+  color: var(--ui-text);
+  font-size: var(--ui-fs-sm);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.vm-node:hover {
+  background: var(--ui-surface-raised);
+}
+.vm-node[data-depth='0'] {
+  background: var(--ui-accent-soft);
+  font-weight: var(--ui-fw-medium);
+}

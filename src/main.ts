@@ -1332,12 +1332,26 @@ const app: App = {
      * **能建哪几种**（表只有 `STORED_KINDS_BY_SOURCE` 一张）：
      * 查询源没有结构映射表与导图 —— 命中集合不是树，没有「第 k 个孩子」可对齐。
      */
-    const addable = storedKindsFor(source).filter((k) => k === 'table' || k === 'list-table')
-    for (const kind of addable) {
+    const ICON: Record<string, string> = {
+      table: 'lucide:table',
+      'list-table': 'lucide:table-properties',
+      list: 'lucide:list',
+      board: 'lucide:columns-3',
+      gallery: 'lucide:layout-grid',
+      calendar: 'lucide:calendar',
+      mindmap: 'lucide:git-fork',
+    }
+    for (const kind of storedKindsFor(source)) {
       rows.push({
         id: `view/add/${kind}`,
-        label: kind === 'table' ? t('ui.view.addTable') : t('ui.view.addListTable'),
-        icon: kind === 'list-table' ? 'lucide:table-properties' : 'lucide:table',
+        // 「新建表格」/「新建大纲表格」是既有叫法（菜单里点了就是**建**一张）；其余按 kind 名
+        label:
+          kind === 'table'
+            ? t('ui.view.addTable')
+            : kind === 'list-table'
+              ? t('ui.view.addListTable')
+              : t(`ui.view.kind.${kind}` as 'ui.view.kind.table'),
+        icon: ICON[kind] ?? 'lucide:square',
         group: 'view/9-add',
       })
     }

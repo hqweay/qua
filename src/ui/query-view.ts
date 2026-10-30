@@ -44,6 +44,7 @@ import {
   frozenStale,
   readViewSet,
   defaultKindFor,
+  todayISO,
   type Block,
   type BlockStore,
   type FrozenResult,
@@ -63,7 +64,11 @@ import { BlockEditor, type Run } from '../view/editor.ts'
 import { BlockCell } from './block-cell.ts'
 import { EditableBlock } from './editable-block.ts'
 import { queryChips } from './query-builder.ts'
+import { ViewBoard } from './view-board.ts'
+import { ViewCalendar } from './view-calendar.ts'
+import { ViewGallery } from './view-gallery.ts'
 import { ViewList } from './view-list.ts'
+import { ViewMindmap } from './view-mindmap.ts'
 
 /** 默认看法的临时 id（不落盘：它代表「这一份源没有激活视图」这件事本身） */
 const DEFAULT_VIEW_ID = 'view-default'
@@ -124,6 +129,10 @@ export interface ViewHostDeps {
   tagName?: (id: string) => string
   /** 可选的属性定义（构建器的字段下拉；按显示名排好，`ui` 不扫森林） */
   fields: () => readonly { id: string; label: string }[]
+  /** 某一列的**选项**（`select` 的看板分组列；其余属性给空表） */
+  choices?: (propId: string) => readonly { id: string; label: string }[]
+  /** 今天（本地日）：日历的「今天描边」要钉得住 */
+  today?: () => string
 }
 
 export interface ViewHostEls {
@@ -209,6 +218,11 @@ export class ViewHost {
   private listTable: ViewListTable | null = null
   /** 记录列表分支（query／children／items 三种源都接） */
   private list: ViewList | null = null
+  /** 看板／画廊／日历／导图：各建各的实例（切走就 dispose） */
+  private board: ViewBoard | null = null
+  private gallery: ViewGallery | null = null
+  private calendar: ViewCalendar | null = null
+  private mindmap: ViewMindmap | null = null
   /** 这一屏现在画的是谁：`outline` 或激活视图的 id（变了才换分支） */
   private mode = ''
   private readonly cell: BlockCell
@@ -279,6 +293,14 @@ export class ViewHost {
     this.listTable = null
     this.list?.dispose()
     this.list = null
+    this.board?.dispose()
+    this.board = null
+    this.gallery?.dispose()
+    this.gallery = null
+    this.calendar?.dispose()
+    this.calendar = null
+    this.mindmap?.dispose()
+    this.mindmap = null
     this.cell.dispose()
   }
 
@@ -405,6 +427,10 @@ export class ViewHost {
     this.paintChrome(b, view)
     if (view?.kind === 'list-table') this.listTable?.render()
     else if (view?.kind === 'list') this.list?.render()
+    else if (view?.kind === 'board') this.board?.render()
+    else if (view?.kind === 'gallery') this.gallery?.render()
+    else if (view?.kind === 'calendar') this.calendar?.render()
+    else if (view?.kind === 'mindmap') this.mindmap?.render()
     else if (view?.kind === 'table') this.table?.sync()
     else if (view) this.paintBodyFallback()
     else this.render()
@@ -643,19 +669,12 @@ export class ViewHost {
      * 四条渲染器各建各的实例（切走就 dispose，不藏一台还在订阅的）：
      * `table`／`list-table`／`list`／（其余 kind 还没做，给一句实话）。
      */
-    const want =
-      view.kind === 'table'
-        ? 'table'
-        : view.kind === 'list-table'
-          ? 'listTable'
-          : view.kind === 'list'
-            ? 'list'
-            : 'none'
+    const want = view.kind
     if (want !== 'table') {
       this.table?.dispose()
       this.table = null
     }
-    if (want !== 'listTable') {
+    if (want !== 'list-table') {
       this.listTable?.dispose()
       this.listTable = null
     }
@@ -663,9 +682,85 @@ export class ViewHost {
       this.list?.dispose()
       this.list = null
     }
+    if (want !== 'board') {
+      this.board?.dispose()
+      this.board = null
+    }
+    if (want !== 'gallery') {
+      this.gallery?.dispose()
+      this.gallery = null
+    }
+    if (want !== 'calendar') {
+      this.calendar?.dispose()
+      this.calendar = null
+    }
+    if (want !== 'mindmap') {
+      this.mindmap?.dispose()
+      this.mindmap = null
+    }
     this.els.table.hidden = false
-    if (want === 'none') {
-      this.paintBodyFallback()
+    if (want === 'board') {
+      if (!this.board) {
+        this.board = new ViewBoard({
+          store: this.deps.store,
+          records: () => this.records(),
+          view: () => this.view ?? view,
+          fieldLabel: (id) => this.deps.fields().find((f) => f.id === id)?.label ?? id.slice(-6),
+          choices: (id) => this.deps.choices?.(id) ?? [],
+          setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
+          clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
+          projectTitle: (r, into) => this.deps.project(r.block, into),
+          openBlock: (id) => this.deps.openBlock(id),
+        })
+        this.els.table.replaceChildren(this.board.root)
+      }
+      this.board.render()
+      return
+    }
+    if (want === 'gallery') {
+      if (!this.gallery) {
+        this.gallery = new ViewGallery({
+          store: this.deps.store,
+          records: () => this.records(),
+          view: () => this.view ?? view,
+          projectTitle: (r, into) => this.deps.project(r.block, into),
+          openBlock: (id) => this.deps.openBlock(id),
+        })
+        this.els.table.replaceChildren(this.gallery.root)
+      }
+      this.gallery.render()
+      return
+    }
+    if (want === 'calendar') {
+      if (!this.calendar) {
+        this.calendar = new ViewCalendar({
+          store: this.deps.store,
+          records: () => this.records(),
+          view: () => this.view ?? view,
+          projectTitle: (r, into) => this.deps.project(r.block, into),
+          openBlock: (id) => this.deps.openBlock(id),
+          today: () => this.deps.today?.() ?? todayISO(),
+        })
+        this.els.table.replaceChildren(this.calendar.root)
+      }
+      this.calendar.render()
+      return
+    }
+    if (want === 'mindmap') {
+      if (!this.mindmap) {
+        this.mindmap = new ViewMindmap({
+          store: this.deps.store,
+          root: () => {
+            const src = this.source
+            return src.kind === 'children' ? this.deps.kb.get(src.blockId) : undefined
+          },
+          view: () => this.view ?? view,
+          projectTitle: (b, into) => this.deps.project(b, into),
+          openBlock: (id) => this.deps.openBlock(id),
+        })
+        this.els.table.replaceChildren(this.mindmap.root)
+      }
+      this.mindmap.render()
       return
     }
     if (want === 'list') {
@@ -699,7 +794,7 @@ export class ViewHost {
       this.list.render()
       return
     }
-    if (want === 'listTable') {
+    if (want === 'list-table') {
       if (!this.listTable) {
         this.listTable = new ViewListTable({
           store: this.deps.store,

@@ -472,6 +472,17 @@ export function setupPanels(deps: PanelsDeps) {
         const labels = propDisplayLabels(kb.roots())
         return kb.propDefs().map((d) => ({ id: d.id, label: labels.get(d.id) ?? propLabel(d) }))
       },
+      /**
+       * 看板分组列的**选项**：`select` 的选项是定义块的直接子块（顺序＝children 顺序）。
+       * 其余属性没有固定值域 ⇒ 空表，列按「第一次出现」排。
+       */
+      choices: (propId) => {
+        const def = kb.get(propId)
+        if (!def) return []
+        return kb.children(propId).map((c) => ({ id: c.id, label: displayNameOf(c).trim() || shortId(c.id) }))
+      },
+      /* 日历的「今天」：由装配层钉住，别让渲染器自己 `new Date()`（截图与断言会漂） */
+      today: () => todayISO(),
     })
     return vh
   }

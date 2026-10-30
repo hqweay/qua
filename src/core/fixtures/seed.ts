@@ -18,12 +18,14 @@
  */
 import {
   declareField,
+  mkCollectionBlock,
   mkPropDef,
   mkTagBlock,
   shiftISO,
   TASK_STATUS_PROP_ID,
   todayISO,
   UI_POSITION_PROP,
+  setCollectionItems,
   type Block,
   type MountEntry,
 } from '../index.ts'
@@ -296,6 +298,19 @@ export function seedWorkspace(): Workspace {
   // 核心词汇（定义块 ＋ 标签块）先在森林顶层就位：`ensureTag` 要能找到 `任务` 并复用，
   // 否则种子会建出第二个同名标签；`[[ ]]` 的解析也要在这之后（标签同样占地址）。
   blocks.push(...coreVocabulary())
+  /**
+   * **收藏演示**：一块手选的引用（`_items`），不是一批被搬进来的东西。
+   *
+   * 它给「items 源 + 记录列表」这条路径一条看得见的落点：打开它默认就是**列表**，
+   * 而列表里的每一行仍然住在自己原来的位置（摘一行不删块）。
+   * 名字与条目都是**数据**（会进库、会导出、用户能改），所以住在这里而不是字典。
+   */
+  const fav = mkCollectionBlock('收藏 · 随手记')
+  setCollectionItems(fav, [p1.page.children[0]!.id, p2.page.children[0]!.id])
+  fav.created = SEED_AT
+  fav.modified = SEED_AT
+  blocks.push(fav)
+
   // 标签归属先落成 id（新标签块会在这时进森林），再解析 `[[ ]]`
   resolveSeedTags(blocks, built.flatMap((b) => b.pendingTags))
   resolveRefs(blocks, built)

@@ -46,6 +46,11 @@ function mkViewId(): string {
   return `v-${uuidv7Hex().slice(0, 16)}`
 }
 
+/** 库里第一个某种 kind 的属性定义（看板的分组列／日历的日期列先给一个能用的） */
+function firstDefOf(d: ViewConfigDeps, kind: string): string | undefined {
+  return d.kb.propDefs().find((def) => def.props?._kind === kind)?.id
+}
+
 /** 一个拥有者这一刻的源（写配置前先问：能不能建这种 kind，看的是源） */
 function sourceOfRef(d: ViewConfigDeps, owner: ViewOwnerRef): Source | null {
   const data = d.owners.read(owner)
@@ -110,6 +115,20 @@ export function viewConfigCommands(
       const view: ViewConfig = { id, kind }
       if (kind === 'table') {
         view.table = { columns: defaultColumnsForSource(source, d.kb) }
+      } else if (kind === 'board') {
+        /**
+         * 分组列先给一个**能分组**的：第一个 `select`（值域有限），
+         * 退到第一个 `checkbox`（真/假两列也说得通）。
+         * 都没有就空着 —— 界面会说「挑一列」，而不是给一个空白看板。
+         */
+        view.board = { groupBy: firstDefOf(d, 'select') ?? firstDefOf(d, 'checkbox') ?? '' }
+      } else if (kind === 'calendar') {
+        // 日期列：第一个 `date` 定义；任何块都可能有 `_date`（日记块）⇒ 退到它
+        view.calendar = { dateBy: firstDefOf(d, 'date') ?? '_date' }
+      } else if (kind === 'gallery') {
+        view.gallery = { cover: 'first-asset' }
+      } else if (kind === 'mindmap') {
+        view.mindmap = { direction: 'both' }
       }
       d.owners.write(owner, { views: upsertView(d.owners.read(owner)?.views ?? [], view), activeView: id })
       reveal(owner)
