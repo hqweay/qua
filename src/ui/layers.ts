@@ -84,6 +84,8 @@ const GROUP_TITLES: Record<string, string> = {
   'dbg/1-look': t('menu.group.debugLook'),
   'dbg/2-theme': t('menu.group.debugTheme'),
   'dbg/3-state': t('menu.group.debugState'),
+  'view/8-sort': t('menu.group.viewSort'),
+  'view/9-add': t('menu.group.viewAdd'),
 }
 
 export function groupTitle(g: string | undefined): string {

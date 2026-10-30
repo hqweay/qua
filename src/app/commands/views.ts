@@ -20,10 +20,12 @@ import {
   readViews,
   removeView,
   renameView,
+  STORED_VIEW_KINDS,
   upsertView,
+  withListSort,
   withSort,
   type Block,
-  type StoredViewKind,
+  type ListSort,
   type ViewConfig,
 } from '../../core/index.ts'
 import { uuidv7Hex } from '../../core/ids.ts'
@@ -31,8 +33,6 @@ import { refreshSpec } from '../../core/query-view.ts'
 import { t } from '../../core/msg.ts'
 import type { App } from '../../core/ports.ts'
 import type { ViewConfigDeps } from './types.ts'
-
-const STORED_KINDS: readonly StoredViewKind[] = ['table', 'board', 'gallery', 'calendar', 'mindmap']
 
 /** 视图 id：块 id 之外的**局部**标识（只在这个块的 `_views` 里有意义） */
 function mkVievId(): string {
@@ -83,9 +83,17 @@ export function viewConfigCommands(
     addView: (blockId, kindRaw) => {
       const b = d.kb.get(blockId)
       if (!b) return ''
-      const kind = STORED_KINDS.find((k) => k === kindRaw)
+      const kind = STORED_VIEW_KINDS.find((k) => k === kindRaw)
       if (!kind) {
         d.toast(t('ui.view.unknownKind'), 'warn')
+        return ''
+      }
+      /**
+       * 结构映射表把**层级**摊成列；查询结果是平的命中集合，没有「第 k 个孩子」可对齐。
+       * 写进去也读不回来（`canonicalViews` 会丢掉它），所以当场拒绝而不是留一个「点了没生效」。
+       */
+      if (kind === 'list-table' && isQueryBlock(b)) {
+        d.toast(t('ui.view.listNeedsTree'), 'warn')
         return ''
       }
       const id = mkVievId()
@@ -179,13 +187,14 @@ export function viewConfigCommands(
     },
 
     /**
-     * 表头排序。
+     * 排序。
      *
-     * 两种源的落点**不同**（这不是分支癖，是语义）：
-     *   · children 源：写 `activeView.table.sort` —— **只改显示序**，`children` 顺序一个字节不动；
+     * 三种源/视图的落点**各不相同**（这不是分支癖，是语义）：
+     *   · children ＋ 平表：写 `activeView.table.sort` —— **只改显示序**，`children` 顺序一个字节不动；
+     *   · children ＋ 结构映射表：写 `activeView.list.sort`，键是**第几格**（位置），不是列定义；
      *   · 查询源：写 `_query.sort` 并重算 —— 排序可能影响 `limit` 的成员，所以必须重查。
      *
-     * `dir === ''` ＝ 清掉这一列的排序（表头第三次点击的落点）。
+     * `dir === ''` ＝ 清掉这一格的排序（表头第三次点击的落点）。
      */
     viewSetSort: (blockId, by, dir) => {
       const b = d.kb.get(blockId)
@@ -205,6 +214,21 @@ export function viewConfigCommands(
       }
       const active = activeView(b)
       if (!active) return false
+      if (active.kind === 'list-table') {
+        // `by` 在这一档是**格序号**（命令面只有字符串参数，语义由视图种类决定）
+        const col = Number(by)
+        if (!Number.isInteger(col) || col < 0) return false
+        d.run((tx) =>
+          tx.patch(blockId, (x) => {
+            const cur = activeView(x)
+            if (!cur) return
+            const next: ListSort | undefined = direction === '' ? undefined : { col, dir: direction }
+            writeViews(x, upsertView(readViews(x), withListSort(cur, next)))
+          }),
+        )
+        after()
+        return true
+      }
       d.run((tx) =>
         tx.patch(blockId, (x) => {
           const cur = activeView(x)

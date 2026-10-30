@@ -24,6 +24,7 @@ import {
   displayNameOf,
   expandContexts,
   isQueryBlock,
+  listTableOf,
   readResult,
   readSpec,
   readViews,
@@ -45,6 +46,7 @@ import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
 import { BlockCell } from './block-cell.ts'
 import { EditableBlock } from './editable-block.ts'
+import { ViewListTable } from './view-list-table.ts'
 import { ViewTable } from './view-table.ts'
 
 export interface ViewHostDeps {
@@ -151,6 +153,8 @@ export class ViewHost {
   private outline: EditableBlock | null = null
   /** 表格分支 */
   private table: ViewTable | null = null
+  /** 结构映射表分支（行＝子块、格＝位置的另一种「怎么看」） */
+  private listTable: ViewListTable | null = null
   /** 这一屏现在画的是谁：`outline` 或激活视图的 id（变了才换分支） */
   private mode = ''
   private readonly cell: BlockCell
@@ -192,6 +196,7 @@ export class ViewHost {
         this.noteTouched(ids)
         // children 源是活的：子块的正文/属性变了，那一行要跟着变（按 blockId 局部修补）
         if (this.table) this.table.sync(ids)
+        if (this.listTable) this.listTable.render(ids)
       }
     })
   }
@@ -212,6 +217,8 @@ export class ViewHost {
     this.outline = null
     this.table?.dispose()
     this.table = null
+    this.listTable?.dispose()
+    this.listTable = null
     this.cell.dispose()
   }
 
@@ -259,7 +266,8 @@ export class ViewHost {
       return
     }
     this.paintChrome(b, view)
-    if (view) this.table?.sync()
+    if (view?.kind === 'list-table') this.listTable?.render()
+    else if (view) this.table?.sync()
     else this.render()
   }
 
@@ -279,7 +287,10 @@ export class ViewHost {
 
   private rowCount(): number {
     const b = this.deps.block()
-    return sourceOf(b).kind === 'query' ? (readResult(b) ?? []).length : this.deps.kb.children(b.id).length
+    if (sourceOf(b).kind === 'query') return (readResult(b) ?? []).length
+    // 结构映射表的行＝活着的直接子块（软删的不算一行），与渲染器同一份派生
+    if (activeView(b)?.kind === 'list-table') return listTableOf(b.id, this.deps.kb).rows.length
+    return this.deps.kb.children(b.id).length
   }
 
   private freeze(): void {
@@ -364,9 +375,13 @@ export class ViewHost {
     const add = document.createElement('button')
     add.type = 'button'
     add.className = 'qv-view-btn qv-view-add'
-    add.title = t('ui.view.kind.table')
+    add.title = t('ui.view.addView')
     add.textContent = '＋'
-    add.addEventListener('click', () => this.deps.invoke('core.view/add', { blockId: b.id, kind: 'table' }))
+    /**
+     * 不再是「一键加平表」：切换器旁边那颗 `＋` 现在是**新建视图的入口**，
+     * 与块菜单里的「视图…」同一个菜单（两种表都从那里建，入口只有一份）。
+     */
+    add.addEventListener('click', () => this.deps.invoke('core.view/menu', { blockId: b.id }))
     box.appendChild(add)
   }
 
@@ -375,6 +390,8 @@ export class ViewHost {
   private showOutline(): void {
     this.table?.dispose()
     this.table = null
+    this.listTable?.dispose()
+    this.listTable = null
     this.els.table.hidden = true
     this.els.table.replaceChildren()
     this.els.editor.hidden = false
@@ -410,11 +427,23 @@ export class ViewHost {
     this.outline = null
     this.els.editor.hidden = true
     this.els.editor.replaceChildren()
-    if (view.kind !== 'table') {
-      // 类型与数据形状先就位，渲染器随后（看板/画廊/日历/导图）；这里给一句实话而不是空屏
+    /**
+     * 两条渲染器：表格（行＝记录、列＝属性）与结构映射表（行＝一级子块、列＝位置）。
+     * 它们**不共用**布局：平表有固定行高与窗口化，结构映射表按内容排、不吃窗口化那套。
+     * 所以按 kind 各建各的实例，切走就 dispose（不藏一台还在订阅的）。
+     */
+    const want = view.kind === 'table' ? 'table' : view.kind === 'list-table' ? 'list' : 'none'
+    if (want !== 'table') {
       this.table?.dispose()
       this.table = null
-      this.els.table.hidden = false
+    }
+    if (want !== 'list') {
+      this.listTable?.dispose()
+      this.listTable = null
+    }
+    this.els.table.hidden = false
+    if (want === 'none') {
+      // 类型与数据形状先就位，渲染器随后（看板/画廊/日历/导图）；这里给一句实话而不是空屏
       this.els.table.replaceChildren()
       const p = document.createElement('p')
       p.className = 'tv-unsupported'
@@ -422,7 +451,22 @@ export class ViewHost {
       this.els.table.appendChild(p)
       return
     }
-    this.els.table.hidden = false
+    if (want === 'list') {
+      if (!this.listTable) {
+        this.listTable = new ViewListTable({
+          store: this.deps.store,
+          host: () => this.deps.block(),
+          view: () => activeView(this.deps.block()) ?? view,
+          kb: this.deps.kb,
+          cell: this.cell,
+          openBlock: (id) => this.deps.openBlock(id),
+          deleteRow: (rowId) => this.deps.invoke('core.view/delete-row', { rowId }),
+        })
+        this.els.table.replaceChildren(this.listTable.root)
+      }
+      this.listTable.render()
+      return
+    }
     if (!this.table) {
       this.table = new ViewTable({
         store: this.deps.store,

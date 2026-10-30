@@ -24,15 +24,18 @@ import {
   defaultColumns,
   isViewRoot,
   isViewsValue,
+  listTableOf,
   mkBlock,
   mkPropDef,
   ownFieldIds,
   readViews,
   resolveRows,
+  sortListRows,
   sortRecords,
   sourceOf,
   viewNameOf,
   visibleRows,
+  withListSort,
   withSort,
   type Block,
 } from '../src/core/index.ts'
@@ -306,4 +309,109 @@ test('ownFieldIds 是 defaultColumns 的输入：只认块自己的槽（不扫�
   const { root } = pageWith5()
   const ids = ownFieldIds(root.children[0]!)
   assert.equal(ids.length, 2, `第一行有两个属性：${JSON.stringify(ids)}`)
+})
+
+/* ------------------------------------------------------------ 大纲 → 表格（结构映射） */
+
+/** 一棵两层样例树：容器 + 3 个一级子块（第二个少一个孩子），第三个的孩子还带一层 */
+function listTree(): Block {
+  return mk('root', '产品', [
+    mk('r1', '名称', [mk('c11', '键盘'), mk('c12', '鼠标')]),
+    mk('r2', '价格', [mk('c21', '399')]),
+    mk('r3', '库存', [mk('c31', '12'), mk('c32', '40', [mk('d321', '备注')])]),
+  ])
+}
+
+test('listTableOf：行＝一级子块、第 k 格＝第 (k−1) 个孩子、列数＝max(孩子数)+1', () => {
+  const root = listTree()
+  const { kb } = kbOf([root])
+  const table = listTableOf('root', kb)
+  assert.equal(table.root?.id, 'root', '表标题＝容器自己（它不是一行）')
+  assert.deepEqual(
+    table.rows.map((r) => r.block.id),
+    ['r1', 'r2', 'r3'],
+    '行就是直接子块，顺序＝children 顺序',
+  )
+  assert.deepEqual(
+    table.rows[0]!.cells.map((c) => c?.block.id),
+    ['c11', 'c12'],
+    '第 2 格是第一个孩子、第 3 格是第二个孩子（按位置，不按名字）',
+  )
+  assert.equal(table.rows[1]!.cells.length, 1, '孩子少的行只有一格（其余是右侧空格）')
+  assert.equal(table.rows[1]!.cells[1], undefined, '空格不是「补到最后一列」')
+  assert.equal(table.columns, 3, '列数＝max(孩子数)+1：2 个孩子 ⇒ 3 列')
+  assert.equal(table.rows[2]!.cells[1]!.children.length, 1, '三级起只做「可展开」，不进主表列')
+})
+
+test('listTableOf：软删的子块不出行、也不占格（位置按活着的树对齐）', () => {
+  const root = listTree()
+  root.children[1] = { ...root.children[1]!, props: { _deletedAt: 5 } }
+  const { kb } = kbOf([root])
+  assert.deepEqual(
+    listTableOf('root', kb).rows.map((r) => r.block.id),
+    ['r1', 'r3'],
+    '被删的那一行跳过',
+  )
+  const grand = listTree()
+  grand.children[0] = {
+    ...grand.children[0]!,
+    children: [grand.children[0]!.children[0]!, { ...grand.children[0]!.children[1]!, props: { _deletedAt: 5 } }],
+  }
+  const { kb: kb2 } = kbOf([grand])
+  assert.deepEqual(
+    listTableOf('root', kb2).rows[0]!.cells.map((c) => c?.block.id),
+    ['c11'],
+    '被删的格也跳过（剩下的按位置重新排）',
+  )
+})
+
+test('sortListRows：只改显示序、空值最后、相等保持 children 顺序；children 顺序一个字节不动', () => {
+  const root = listTree()
+  const { kb } = kbOf([root])
+  const before = root.children.map((c) => c.id)
+  const rows = listTableOf('root', kb).rows
+  const sorted = sortListRows(rows, { col: 0, dir: 'asc' })
+  assert.equal(sorted.length, rows.length, '排序不增不减行')
+  assert.deepEqual(
+    [...sorted.map((r) => r.block.id)].sort(),
+    [...rows.map((r) => r.block.id)].sort(),
+    '排序只是换顺序，不是筛掉谁',
+  )
+  const empty = mk('root2', '容器', [mk('a', '有'), mk('b', ''), mk('c', '也有')])
+  const { kb: kb2 } = kbOf([empty])
+  assert.deepEqual(
+    sortListRows(listTableOf('root2', kb2).rows, { col: 0, dir: 'desc' }).map((r) => r.block.id),
+    ['a', 'c', 'b'],
+    '空值永远最后（降序也一样：它不是「最大值」）',
+  )
+  assert.deepEqual(root.children.map((c) => c.id), before, '排序不改 children 顺序')
+  const byPrice = sortListRows(rows, { col: 1, dir: 'asc' })
+  assert.equal(
+    byPrice[0]!.block.id,
+    'r3',
+    `按第 2 格（第一个孩子）升序：12 < 399 < 键盘：${byPrice.map((r) => r.block.id)}`,
+  )
+})
+
+test('canonicalViews：结构映射表只留排序（列是位置，不是配置）；查询源里丢弃', () => {
+  const views = canonicalViews([
+    { id: 'v', kind: 'list-table', list: { sort: { col: 2, dir: 'desc' } }, table: { columns: [{ key: 'title' }] } },
+  ])
+  assert.equal(views.length, 1)
+  assert.deepEqual(views[0]!.list?.sort, { col: 2, dir: 'desc' })
+  assert.equal(views[0]!.table, undefined, '结构映射表不该带着平表的列配置')
+  assert.equal(canonicalViews([{ id: 'v', kind: 'list-table' }], { kind: 'query', blockId: 'q' }).length, 0, '查询源没有层级可映射')
+  assert.deepEqual(withListSort({ id: 'v', kind: 'list-table' }, undefined).list, undefined, '取消排序＝删掉那一格')
+})
+
+test('visibleRows：结构映射表激活时整棵子树都不进正文（行与格都在表里）', () => {
+  const root = listTree()
+  const doc = { roots: [root], folded: {}, viewRootId: 'root' }
+  const rows = visibleRows(doc)
+  assert.deepEqual(
+    rows.map((r) => r.block.id),
+    ['root'],
+    '只画根行：一级子块（行）与二级子块（格）都不在正文里再画一遍',
+  )
+  assert.equal(rows[0]!.hasChildren, false, '子块在表里展开着 ⇒ 不给折叠三角')
 })

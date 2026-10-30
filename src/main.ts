@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  journalId, mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, activeView, readViews, viewNameOf, type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal, isQueryBlock,  journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, activeView, readViews, viewNameOf, type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { checkExternalUrl, rejectText } from './core/link.ts'
 import { BlockStore } from './core/store.ts'
@@ -1227,7 +1227,7 @@ const app: App = {
   openInDock: (id, side) => openWindow(side === 'left' ? 'left' : 'right', id),
 
   /**
-   * **块菜单里的「视图…」**：大纲 ＋ 这个块已有的视图 ＋「新建表格」。
+   * **块菜单里的「视图…」**：大纲 ＋ 这个块已有的视图 ＋「新建」（两种表）＋（结构映射表时）排序。
    *
    * 为什么是**动态菜单**而不是几条静态绑定：绑定表是静态的，而「这个块有哪些视图」
    * 是数据。菜单项由 `_views` 现画，选中之后仍走命令面（`core.view/*`）——
@@ -1249,11 +1249,37 @@ const app: App = {
       rows.push({
         id: `view//${v.id}`,
         label: viewNameOf(v, (k) => t(`ui.view.kind.${k}`)),
-        icon: 'lucide:table',
+        icon: v.kind === 'list-table' ? 'lucide:table-properties' : 'lucide:table',
         ...(active?.id === v.id ? { keyHint: t('ui.view.current') } : {}),
       })
     }
-    rows.push({ id: 'view/add/table', label: t('ui.view.addTable'), icon: 'lucide:plus', group: 'view/9-add' })
+    /**
+     * **结构映射表的排序**：这张表没有列头（第一行就是数据），所以排序入口放在这里，
+     * 按「第几格」列出来。键是位置不是列定义，用户看到的也就是「第 k 格」。
+     */
+    if (active?.kind === 'list-table') {
+      const cols = listTableOf(blockId, kb).columns
+      const cur = active.list?.sort
+      for (let col = 0; col < cols; col++) {
+        const on = cur?.col === col ? cur.dir : ''
+        rows.push({
+          id: `view/sort/${col}/${on}`,
+          label: col === 0 ? t('ui.view.sortBySelf') : t('ui.view.sortByCell', { n: String(col + 1) }),
+          icon: 'lucide:arrow-up-down',
+          group: 'view/8-sort',
+          ...(on ? { keyHint: on === 'desc' ? t('ui.view.sortDesc') : t('ui.view.sortAsc') } : {}),
+        })
+      }
+    }
+    rows.push({ id: 'view/add/table', label: t('ui.view.addTable'), icon: 'lucide:table', group: 'view/9-add' })
+    rows.push({
+      id: 'view/add/list-table',
+      label: t('ui.view.addListTable'),
+      icon: 'lucide:table-properties',
+      group: 'view/9-add',
+      // 结构映射要一棵树：查询块没有层级，菜单里就不给这一项（给了只会是一个空表）
+      ...(isQueryBlock(b) ? { disabled: true } : {}),
+    })
     const anchor = app.ed.blockEl(blockId)?.getBoundingClientRect() ?? null
     layers.openMenu({
       rows,
@@ -1264,7 +1290,12 @@ const app: App = {
         const id = String(row.id)
         if (id === 'view//outline') void registry.invoke('core.view/set-active', { blockId, viewId: '' }, 'menu')
         else if (id.startsWith('view//')) void registry.invoke('core.view/set-active', { blockId, viewId: id.slice('view//'.length) }, 'menu')
-        else if (id.startsWith('view/add/')) void registry.invoke('core.view/add', { blockId, kind: id.slice('view/add/'.length) }, 'menu')
+        else if (id.startsWith('view/sort/')) {
+          const [, , col, dir] = id.split('/')
+          // 升 → 降 → 取消（与平表表头同一套三次点击）
+          const next = dir === '' ? 'asc' : dir === 'asc' ? 'desc' : ''
+          void registry.invoke('core.view/set-sort', { blockId, by: col, dir: next }, 'menu')
+        } else if (id.startsWith('view/add/')) void registry.invoke('core.view/add', { blockId, kind: id.slice('view/add/'.length) }, 'menu')
       },
     })
   },

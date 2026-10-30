@@ -310,6 +310,7 @@ export const MSG = {
   /* -------------------------------------------------- 视图（一个块怎么看）
      口径：说「视图／表格／大纲」，不出现 `_views`/`QuerySpec` 这类存储名。 */
   'ui.view.kind.table': '表格',
+  'ui.view.kind.list-table': '大纲表格',
   'ui.view.kind.board': '看板',
   'ui.view.kind.gallery': '画廊',
   'ui.view.kind.calendar': '日历',
@@ -335,6 +336,17 @@ export const MSG = {
   'ui.view.editTitle': '点文字编辑这一块',
   'ui.view.openBlock': '打开这一块',
   'ui.view.addTable': '新建表格',
+  'ui.view.addListTable': '新建大纲表格',
+  'ui.view.addView': '新建视图…',
+  'ui.view.listNeedsTree': '大纲表格要有一棵大纲树（查询结果是平的）',
+  'ui.view.listTitle': '表标题',
+  'ui.view.moreItems': '＋{count} 项',
+  'ui.view.fewerItems': '收起',
+  'ui.view.moreItemsTitle': '展开这一格里的子块（不增加主表的列）',
+  'ui.view.sortBySelf': '按第 1 格（正文）排序',
+  'ui.view.sortByCell': '按第 {n} 格排序',
+  'ui.view.listEmpty': '这个块还没有子块',
+  'ui.view.listEmptyHint': '切回大纲写第一层，或点「新建一行」',
   'ui.view.current': '当前',
   'ui.view.noSource': '这个视图还没有内容来源',
   'ui.dock.resize': '拖动调整宽度；双击恢复默认',
@@ -413,6 +425,8 @@ export const MSG = {
   'menu.group.pickTag': '标签',
   'menu.group.instance': '实例',
   'menu.group.new': '新建',
+  'menu.group.viewSort': '排序',
+  'menu.group.viewAdd': '新建视图',
 
   /* ------------------------------------------------- 绑定表 label（menu.label.*） */
   'menu.label.toggleCollapse': '折叠 / 展开',

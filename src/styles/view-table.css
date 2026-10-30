@@ -316,3 +316,180 @@
   color: var(--ui-accent);
   cursor: pointer;
 }
+
+/* ---------------------------------------------------------- 结构映射表（大纲 → 表格）
+
+   行列由树推导：行＝容器的直接子块，第 k 格＝那一块的第 (k−1) 个直接子块。
+   ⚠️ 这一档**不用固定行高**：格里有长文与可展开的子树，平表那套 `--tv-row-h` 与窗口化不适用。
+   ⚠️ 第一行只做**视觉**表头（加粗 ＋ 吸顶）：数据上它和别的行一样，没有 thead。 */
+.lt {
+  --lt-gutter-w: 34px;
+  --lt-cols: repeat(1, minmax(160px, 1fr));
+  margin-top: var(--ui-gap-2);
+}
+.lt-caption {
+  padding: var(--ui-gap-2) 0;
+  font-weight: var(--ui-fw-medium);
+  color: var(--ui-text);
+}
+.lt-caption[data-empty-title='1'] {
+  color: var(--ui-text-tertiary);
+}
+.lt-scroll {
+  overflow: auto;
+  /* 表自己滚：长表不把整页拉长，横向滚动也只发生在表里 */
+  max-height: min(70vh, 720px);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface);
+}
+.lt-row {
+  display: grid;
+  grid-template-columns: var(--lt-gutter-w) var(--lt-cols);
+  /* 行高按内容：格里有长段落，居中会让「格与格之间对不齐」 */
+  align-items: stretch;
+  border-bottom: 1px solid var(--ui-border-subtle);
+}
+.lt-row:last-child {
+  border-bottom: 0;
+}
+/* 第一行：加粗 ＋ 吸顶。只改观感，不改数据 */
+.lt-row--head {
+  position: sticky;
+  top: 0;
+  z-index: var(--ui-z-sticky-head);
+  background: var(--ui-surface-sunken);
+  font-weight: var(--ui-fw-medium);
+}
+.lt-row--head .lt-cell,
+.lt-row--head .lt-gutter {
+  background: var(--ui-surface-sunken);
+}
+.lt-row:hover .lt-cell,
+.lt-row:hover .lt-gutter {
+  background: var(--ui-surface-sunken);
+}
+.lt-gutter {
+  position: sticky;
+  left: 0;
+  z-index: var(--ui-z-sticky-cell);
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  padding: var(--ui-gap-3) var(--ui-gap-2);
+  background: var(--ui-surface);
+}
+.lt-marker {
+  width: var(--ui-caret-size);
+  height: var(--ui-caret-size);
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-border);
+  cursor: pointer;
+  opacity: 0;
+}
+.lt-row:hover .lt-marker {
+  opacity: 1;
+}
+.lt-marker:hover {
+  background: var(--ui-text-tertiary);
+}
+.lt-del {
+  visibility: hidden;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.lt-row:hover .lt-del {
+  visibility: visible;
+}
+.lt-del:hover {
+  color: var(--ui-danger);
+}
+.lt-cell {
+  min-width: 0;
+  padding: var(--ui-gap-3) var(--ui-gap-4);
+  border-right: 1px solid var(--ui-border-subtle);
+  font-size: var(--ui-fs-md);
+}
+.lt-cell:last-child {
+  border-right: 0;
+}
+/* 第一格（行自己的正文）钉住：横向滚到右边时还知道这一行是谁 */
+.lt-cell--self {
+  position: sticky;
+  left: var(--lt-gutter-w);
+  z-index: var(--ui-z-sticky-cell);
+  background: var(--ui-surface);
+  border-right: 1px solid var(--ui-border-subtle);
+}
+/* 格里的正文按内容换行（平表的标题列是单行） */
+.lt-cell .tv-title-text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.lt-cell .tv-title-inner {
+  cursor: text;
+}
+/* 三级起：这一格里再摊开，不进主表列 */
+.lt-more {
+  margin-top: var(--ui-gap-2);
+  padding: 0 var(--ui-gap-3);
+  border: 0;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-surface-sunken);
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.lt-more:hover {
+  color: var(--ui-text);
+}
+.lt-sub {
+  margin-top: var(--ui-gap-2);
+  padding-left: var(--ui-gap-3);
+  border-left: 2px solid var(--ui-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+}
+.lt-sub-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ui-gap-2);
+}
+.lt-sub-marker {
+  flex: none;
+  width: var(--ui-caret-size);
+  height: var(--ui-caret-size);
+  margin-top: var(--ui-gap-2);
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-border);
+  cursor: pointer;
+  opacity: 0;
+}
+.lt-sub-item:hover .lt-sub-marker {
+  opacity: 1;
+}
+.lt-sub-body {
+  flex: 1;
+  min-width: 0;
+}
+.lt-empty {
+  padding: var(--ui-gap-5) var(--ui-gap-4);
+  color: var(--ui-text-tertiary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+}
+.lt-empty-hint {
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}

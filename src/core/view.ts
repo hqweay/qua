@@ -28,12 +28,18 @@ import type { SortKey } from './query.ts'
  * 为什么把它列进来：切换器的选项里有「大纲」，而用户看到的是一串同级的名字；
  * 但 `ViewConfig.kind` 收窄成 `Exclude<…,'outline'>`，于是「大纲」没有配置可存。
  */
-export type ViewKind = 'outline' | 'table' | 'board' | 'gallery' | 'calendar' | 'mindmap'
+export type ViewKind = 'outline' | 'table' | 'list-table' | 'board' | 'gallery' | 'calendar' | 'mindmap'
 
 /** 可落盘的视图种类（`outline` 不在其中） */
 export type StoredViewKind = Exclude<ViewKind, 'outline'>
 
-const STORED_KINDS: readonly StoredViewKind[] = ['table', 'board', 'gallery', 'calendar', 'mindmap']
+const STORED_KINDS: readonly StoredViewKind[] = ['table', 'list-table', 'board', 'gallery', 'calendar', 'mindmap']
+
+/**
+ * 可落盘的视图种类（**唯一一份**）：命令面与读路径都要判「这个 kind 认不认识」。
+ * 分两处各写一份的后果是「命令能写、读回来被丢掉」，也就是「点了没生效」。
+ */
+export const STORED_VIEW_KINDS: readonly StoredViewKind[] = STORED_KINDS
 
 /**
  * 一列。
@@ -67,6 +73,18 @@ export interface TableConfig {
 }
 
 /**
+ * 结构映射表的排序：**按第 k 格**（不是按属性列）。
+ *
+ * `col` 是位置（`0` ＝ 第 1 格＝行自己的正文，`k` ＝ 第 k 个孩子），与平表的 `SortKey.by`
+ * （属性定义 id 或保留键）刻意分开：那边排序的对象是**列定义**，这边是**位置**，
+ * 树一变位置的含义就变 —— 合成同一个键会让「这一列是什么意思」有两个答案。
+ */
+export interface ListSort {
+  col: number
+  dir: 'asc' | 'desc'
+}
+
+/**
  * 一个命名视图（`_views[]` 里的一项）。
  *
  * 只保留**这个 kind 自己的**子配置：table 视图不带着 board 配置走（两份配置迟早分叉）。
@@ -76,6 +94,8 @@ export interface ViewConfig {
   name?: string
   kind: StoredViewKind
   table?: TableConfig
+  /** 结构映射表：**只有排序**，没有列（列＝第 k 个孩子这个位置，不是配置） */
+  list?: { sort?: ListSort }
   board?: { groupBy: string; groupOrder?: string[]; cardFields?: string[]; showEmpty?: boolean }
   gallery?: { cover?: 'first-asset' | 'none'; cardFields?: string[]; size?: 's' | 'm' | 'l' }
   calendar?: { dateBy: string; showUndated?: boolean }
@@ -159,6 +179,14 @@ function tableOf(raw: unknown): TableConfig | undefined {
   return out
 }
 
+/** 结构映射表的排序配置：只认「第几格 ＋ 方向」，别的键一律丢掉 */
+function listSortOf(raw: unknown): ListSort | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const s = raw as Partial<ListSort>
+  if (!Number.isInteger(s.col) || (s.col as number) < 0) return undefined
+  return { col: s.col as number, dir: s.dir === 'desc' ? 'desc' : 'asc' }
+}
+
 /**
  * 逐项重建视图列表（与 `canonicalSpec` 同一条纪律）。
  *
@@ -181,7 +209,8 @@ export function canonicalViews(raw: unknown, source?: ViewSource): ViewConfig[] 
     if (!isStr(v.id) || seen.has(v.id)) continue
     const kind = v.kind
     if (typeof kind !== 'string' || !STORED_KINDS.includes(kind as StoredViewKind)) continue
-    if (source?.kind === 'query' && kind === 'mindmap') continue
+    // 查询源没有「层级」可映射：结构映射表只接 children 源（与导图同一条理由）
+    if (source?.kind === 'query' && (kind === 'mindmap' || kind === 'list-table')) continue
     const view: ViewConfig = { id: v.id, kind: kind as StoredViewKind }
     if (isStr(v.name)) view.name = v.name
     // **只留这个 kind 自己的那份**：别的 kind 的配置跟着一个不存在的 kind 走，
@@ -189,6 +218,9 @@ export function canonicalViews(raw: unknown, source?: ViewSource): ViewConfig[] 
     if (kind === 'table') {
       const table = tableOf(v.table)
       if (table) view.table = table
+    } else if (kind === 'list-table') {
+      const sort = listSortOf(v.list?.sort)
+      if (sort) view.list = { sort }
     } else if (kind === 'board') {
       const b = v.board
       if (b && typeof b === 'object' && isStr(b.groupBy)) {
@@ -467,6 +499,7 @@ function cloneView(v: ViewConfig): ViewConfig {
     if (v.table.sort) table.sort = v.table.sort.map((s) => ({ ...s }))
     out.table = table
   }
+  if (v.list) out.list = v.list.sort ? { sort: { ...v.list.sort } } : {}
   return out
 }
 
@@ -509,6 +542,21 @@ export function withColumns(view: ViewConfig, columns: readonly ViewColumn[]): V
   const next = cloneView(view)
   if (!next.table) next.table = { columns: [] }
   next.table.columns = columns.map((c) => ({ ...c }))
+  return next
+}
+
+/**
+ * 写结构映射表的排序（`undefined`／空 ⇒ 删掉那一格，回到 children 顺序）。
+ *
+ * 与 `withSort` 分开：那边的键是列定义，这边的键是**位置**（第几格）。
+ */
+export function withListSort(view: ViewConfig, sort: ListSort | undefined): ViewConfig {
+  const next = cloneView(view)
+  if (!sort) {
+    delete next.list
+    return next
+  }
+  next.list = { sort: { col: sort.col, dir: sort.dir } }
   return next
 }
 
