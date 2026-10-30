@@ -9,8 +9,10 @@ import {
   allTags,
   buildAdjacency,
   childrenIn,
+  choiceDisplayLabel,
   danglingOf,
   declaredFieldIds,
+  displayNameOf,
   fieldRows,
   findInForest,
   flatten,
@@ -327,6 +329,10 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
       const ws = deps.getWs()
       const b = findInForest(ws.blocks, blockId)
       if (!b) return []
+      const tagName = (id: string): string => {
+        const tag = findInForest(ws.blocks, id)
+        return tag ? displayNameOf(tag) || id.slice(-6) : id.slice(-6)
+      }
       return fieldRows(b, ws.blocks).map((r) => ({
         propId: r.propId,
         label: r.label,
@@ -334,6 +340,12 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
         value: r.value ?? null,
         filled: r.filled,
         sources: r.sources.map((s) => s.id),
+        // `select` 的两格：探针要能回答「这个块此刻能选什么」，而不是靠 DOM 反推
+        choices: (r.choices ?? []).map((c) => ({
+          id: c.id,
+          label: r.def ? choiceDisplayLabel(c, r.def, tagName) : '',
+        })),
+        currentChoiceLabel: r.currentChoiceLabel ?? null,
       }))
     },
     /** 直接上级／下级（诊断面；同一条边两个读法） */

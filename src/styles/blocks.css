@@ -1312,3 +1312,193 @@
   margin-top: var(--ui-gap-1);
   font-size: var(--ui-fs-xs);
 }
+
+/* ---------------------------------------------------------- 选项编辑器
+   选项是**属性定义块的子块**：这里只有一份列表（块树），没有第二份「选项目录」。
+   两个视角（属性定义页全量 / 标签页只看本标签）共用这一组样式。 */
+.choices-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+  margin-top: var(--ui-gap-2);
+  padding-top: var(--ui-gap-3);
+  border-top: var(--ui-sep) solid var(--ui-border-subtle);
+}
+.choices-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+}
+.choices-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--ui-gap-2);
+}
+.choices-title {
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-secondary);
+}
+.choices-hint {
+  font-size: var(--ui-fs-2xs);
+  line-height: 1.4;
+  color: var(--ui-text-tertiary);
+}
+.choices-list,
+.choices-hidden {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+}
+.choices-hidden {
+  padding-top: var(--ui-gap-2);
+  border-top: 1px dashed var(--ui-border-subtle);
+}
+.choice-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+}
+.choice-row {
+  --ui-row-gap: var(--ui-gap-2);
+  align-items: center;
+  font-size: var(--ui-fs-sm);
+}
+.choice-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.choice-name--static {
+  color: var(--ui-text);
+}
+.choice-scope {
+  font: inherit;
+  font-size: var(--ui-fs-2xs);
+  padding: 0 var(--ui-gap-2);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+  color: var(--ui-text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.choice-scope:disabled {
+  cursor: default;
+}
+.choice-scope[data-mode='only'],
+.choice-scope[data-mode='except'] {
+  color: var(--ui-accent);
+  border-color: var(--ui-accent);
+}
+.choice-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.choice-x {
+  background: none;
+  border: 0;
+  padding: 0 var(--ui-gap-1);
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.choice-x:hover:not(:disabled) {
+  color: var(--ui-text);
+}
+.choice-x:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.choice-scope-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+  padding: var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+}
+.choice-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-gap-1);
+}
+.choice-mode {
+  font: inherit;
+  font-size: var(--ui-fs-2xs);
+  padding: 0 var(--ui-gap-2);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  background: none;
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.choice-mode[data-on='1'] {
+  border-color: var(--ui-accent);
+  color: var(--ui-accent);
+  background: var(--ui-accent-soft);
+}
+.choice-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-1) var(--ui-gap-2);
+}
+.choice-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--ui-fs-2xs);
+  color: var(--ui-text-secondary);
+}
+.choice-restore {
+  font: inherit;
+  font-size: var(--ui-fs-2xs);
+}
+.choices-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  padding-top: var(--ui-gap-2);
+  border-top: 1px dashed var(--ui-border-subtle);
+}
+.choices-add .choice-add-name {
+  flex: 1 1 40%;
+  min-width: 6em;
+}
+.choices-add .choice-add-mode {
+  flex: 0 1 auto;
+  width: auto;
+}
+.choice-add-tags {
+  flex: 1 1 100%;
+}
+.choice-global-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--ui-fs-2xs);
+  color: var(--ui-text-secondary);
+}
+.choice-add {
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+}
+/* 标签「标签属性」段里每条 select 的选项入口（就地展开，不叠抽屉） */
+.props-tag-choice {
+  background: none;
+  border: 0;
+  padding: 0 var(--ui-gap-1);
+  font: inherit;
+  font-size: var(--ui-fs-2xs);
+  color: var(--ui-accent);
+  cursor: pointer;
+}
+.props-tag-choice:hover {
+  text-decoration: underline;
+}
+.fields-choices {
+  font: inherit;
+  font-size: var(--ui-fs-2xs);
+}

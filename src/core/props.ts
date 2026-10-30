@@ -174,9 +174,10 @@ export const CHOICE_SCOPE_PROP = '_choiceScope'
 /**
  * 把一格未知值读成三态作用域；`null` ＝ 形状不认识（命令层据此拒绝写入）。
  *
- * 归一化只做两件不承载语义的事：标签去重、`only`/`except` 的空集合退回 `all`
- * （「空集」与「所有人」是同一个答案，留两种写法就多一条要同步的判据）。
- * **悬空的标签 id 原样保留**：标签被删不等于作用域失效 —— 静默摘掉会让一个
+ * 归一化只做一件不承载语义的事：标签去重。**空集合保留**：编辑作用域时会经过
+ * 「刚切到 only、还没勾标签」的中间态，把它归一成 `all` 会让复选框整片禁用，
+ * 用户再也选不上标签。空集本身有明确含义（only ＝ 谁都看不见）。
+ * **悬空的标签 id 也原样保留**：标签被删不等于作用域失效 —— 静默摘掉会让一个
  * `only` 悄悄变成「所有人都能选」。
  */
 export function parseChoiceScope(raw: unknown): ChoiceScope | null {
@@ -186,7 +187,6 @@ export function parseChoiceScope(raw: unknown): ChoiceScope | null {
   if (v.mode !== 'only' && v.mode !== 'except') return null
   if (!Array.isArray(v.tags)) return null
   const tags = [...new Set(v.tags.filter((x): x is string => typeof x === 'string' && x !== ''))]
-  if (tags.length === 0) return { mode: 'all' }
   return { mode: v.mode, tags }
 }
 
@@ -356,7 +356,12 @@ export function choiceCells(
   const value = valueOf(block, propId)
   if (typeof value !== 'string' || value === '') return { choices }
   const current = choiceById(forest, value)
-  if (!current) return { choices }
+  /**
+   * **软删的选项不给名字**：值还在，但控件要说「选项已删除」——
+   * 显示一个已经不在候选里的旧名字，看起来像它仍然可选。
+   * 被作用域隐藏但仍活着的选项正相反：它只是此刻不提供选择，名字照常显示。
+   */
+  if (!current || isDeleted(current)) return { choices }
   const tagName = (id: string): string => {
     const tag = tagsById(forest).get(id)
     return tag ? displayNameOf(tag) : id.slice(-6)

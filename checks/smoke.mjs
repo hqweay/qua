@@ -13301,6 +13301,275 @@ await check('T170 粘贴为…的二级菜单不是空的：when 里的键必须
 })
 
 /**
+ * **选项是定义块的子块**：属性定义页加两条 ⇒ 成员块的下拉出现两项；
+ * 值存的是**选项块 id**（改名不改值）。
+ */
+await check(
+  'T171 select 定义页加选项 → 成员块下拉出现；值存 choice id；改名不改值',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const setup = await page.evaluate(() => {
+      const tag = window.__qua.allBlocks().find((b) => b.lists.includes('tag') && b.aliases.includes('任务'))
+      window.__qua.invoke('core.props/create-def', {
+        blockId: tag.id,
+        label: '冒烟状态',
+        kind: 'select',
+        target: 'declared',
+      })
+      const def = window.__qua.propDefs().find((d) => d.label === '冒烟状态')
+      const member = window.__qua.tagMembers(tag.id)[0] ?? ''
+      return { tagId: tag.id, defId: def?.id ?? '', memberId: member }
+    })
+    assert(setup.defId !== '' && setup.memberId !== '', `前置：定义与 #任务 的成员都应存在：${JSON.stringify(setup)}`)
+
+    // 打开定义块：属性卡里就是选项编辑器（全量视角）
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.defId)
+    await page.waitForSelector('.choices-editor')
+    const empty = await page.evaluate(() => ({
+      target: document.getElementById('inspect-card')?.dataset.targetBlockId ?? '',
+      rows: document.querySelectorAll('.choices-editor .choice-row').length,
+      note: document.querySelector('.choices-editor .props-empty')?.textContent ?? '',
+    }))
+    assert(empty.target === setup.defId, `属性卡此刻的主体应是要编辑的定义块：${JSON.stringify(empty)}`)
+    assert(empty.rows === 0 && empty.note.length > 0, `没有选项时给空态，而不是空下拉：${JSON.stringify(empty)}`)
+
+    for (const name of ['待办', '完成']) {
+      // 面板会随焦点变化重建：`fill` ＋ Playwright 的「等元素稳定」会和那次重建撞上
+      await page.evaluate((value) => {
+        const input = document.querySelector('.choices-add .choice-add-name')
+        if (!(input instanceof HTMLInputElement)) return
+        input.value = value
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        document.querySelector('.choices-add .choice-add')?.click()
+      }, name)
+      await page.waitForTimeout(220)
+    }
+    const added = await page.evaluate(() => {
+      const def = window.__qua.propDefs().find((d) => d.label === '冒烟状态')
+      const block = window.__qua.__editor.store.blocks.find((b) => b.id === def?.id)
+      return {
+        rows: document.querySelectorAll('.choices-editor .choice-row').length,
+        names: [...document.querySelectorAll('.choices-editor .choice-name')].map((e) => e.value),
+        kids: block?.children.length ?? -1,
+      }
+    })
+    assert(added.rows === 2 && added.kids === 2, `两条选项＝定义块的两个子块：${JSON.stringify(added)}`)
+    assert(JSON.stringify(added.names) === JSON.stringify(['待办', '完成']), `顺序＝插入顺序：${JSON.stringify(added.names)}`)
+
+    // 成员块：下拉里的项来自 choicesFor（空占位 ＋ 两条）
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.memberId)
+    await page.waitForTimeout(240)
+    const options = await page.evaluate((propId) => {
+      const sel = document.querySelector(`.prop-row[data-prop-id="${propId}"] select`)
+      return sel ? [...sel.options].map((o) => ({ value: o.value, text: o.textContent })) : null
+    }, setup.defId)
+    assert(options && options.length === 3, `成员块下拉＝空占位＋两条选项：${JSON.stringify(options)}`)
+
+    const pick = options[1]
+    await page.selectOption(`.prop-row[data-prop-id="${setup.defId}"] select`, pick.value)
+    await page.waitForTimeout(240)
+    const wrote = await page.evaluate(
+      (s) => window.__qua.fields(s.memberId).find((f) => f.propId === s.defId)?.value ?? null,
+      setup,
+    )
+    assert(wrote === pick.value, `值必须是选项块 id，不是选项名：${JSON.stringify({ wrote, pick })}`)
+
+    // 改名：只改选项块的正文，值零迁移
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.defId)
+    await page.waitForTimeout(240)
+    await page.evaluate(() => {
+      const input = document.querySelector('.choices-editor .choice-row .choice-name')
+      if (!(input instanceof HTMLInputElement)) return
+      input.value = '进行中'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('blur'))
+    })
+    await page.waitForTimeout(240)
+    const after = await page.evaluate((s) => {
+      const row = window.__qua.fields(s.memberId).find((f) => f.propId === s.defId)
+      return { value: row?.value ?? null, labels: row?.choices.map((c) => c.label) ?? [] }
+    }, setup)
+    assert(after.value === pick.value, `改名之后值还是同一个 id：${JSON.stringify({ after, pick })}`)
+    assert(after.labels.includes('进行中'), `选项名跟着变：${JSON.stringify(after.labels)}`)
+
+    await ctx.close()
+    return `定义页加 2 条 ⇒ 成员下拉 3 项；值＝choice id（${pick.value.slice(-6)}）；改名不改值`
+  },
+)
+
+/**
+ * **选项被软删**：值保留、控件显示「选项已删除」；恢复后显示回来。
+ *
+ * 这条同时钉住「删除不是清值」：清值是不可逆的第二个动作，不该藏在「删选项」里。
+ */
+await check(
+  'T171b 删掉被引用的选项 ⇒ 值还在、显示「选项已删除」；恢复 ⇒ 显示回来',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const setup = await page.evaluate(() => {
+      const tag = window.__qua.allBlocks().find((b) => b.lists.includes('tag') && b.aliases.includes('任务'))
+      window.__qua.invoke('core.props/create-def', {
+        blockId: tag.id,
+        label: '冒烟删除状态',
+        kind: 'select',
+        target: 'declared',
+      })
+      const def = window.__qua.propDefs().find((d) => d.label === '冒烟删除状态')
+      window.__qua.invoke('core.props/add-choice', { defId: def.id, label: '会被删的选项' })
+      // `invoke` 只回答 handled；新选项的 id 从模型的子块读（`def` 是活引用）
+      const live = window.__qua.__editor.store.blocks.find((b) => b.id === def.id)
+      const choiceId = live?.children[0]?.id ?? ''
+      const member = window.__qua.tagMembers(tag.id)[0] ?? ''
+      window.__qua.invoke('core.props/set-value', { blockId: member, propId: def.id, value: choiceId })
+      return { defId: def.id, choiceId, memberId: member }
+    })
+    assert(setup.choiceId !== '' && setup.memberId !== '', '前置：应有一条被引用的选项与一个成员块')
+
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.defId)
+    await page.waitForTimeout(240)
+    await page.evaluate((id) => document.querySelector(`.choice-item[data-choice-id="${id}"] [data-choice-delete]`)?.click(), setup.choiceId)
+    await page.waitForTimeout(260)
+
+    const deleted = await page.evaluate((s) => {
+      const row = window.__qua.fields(s.memberId).find((f) => f.propId === s.defId)
+      return { value: row?.value ?? null, choices: row?.choices.map((c) => c.id) ?? [], label: row?.currentChoiceLabel ?? null }
+    }, setup)
+    assert(deleted.value === setup.choiceId, `软删不清值：${JSON.stringify(deleted)}`)
+    assert(deleted.choices.length === 0, `软删的选项不进候选：${JSON.stringify(deleted.choices)}`)
+    assert(deleted.label === null, `软删的选项不再给名字（控件据此显示「选项已删除」）：${JSON.stringify(deleted)}`)
+
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.memberId)
+    await page.waitForTimeout(240)
+    const missing = await page.evaluate((propId) => {
+      const sel = document.querySelector(`.prop-row[data-prop-id="${propId}"] select`)
+      const o = sel?.querySelector('option[data-missing="1"]')
+      return { value: sel?.value ?? '', text: o?.textContent ?? '', missing: Boolean(o) }
+    }, setup.defId)
+    assert(missing.missing && missing.value === setup.choiceId, `当前值仍选中：${JSON.stringify(missing)}`)
+    assert(missing.text.includes('选项已删除'), `文案要说清它没了：${JSON.stringify(missing)}`)
+
+    await page.evaluate((id) => window.__qua.invoke('core.block/restore', { blockId: id }), setup.choiceId)
+    await page.waitForTimeout(260)
+    const restored = await page.evaluate((s) => {
+      const row = window.__qua.fields(s.memberId).find((f) => f.propId === s.defId)
+      return { value: row?.value ?? null, choices: row?.choices.map((c) => c.label) ?? [] }
+    }, setup)
+    assert(restored.value === setup.choiceId, `恢复后值仍指着它：${JSON.stringify(restored)}`)
+    assert(restored.choices.includes('会被删的选项'), `恢复后选项回到候选：${JSON.stringify(restored.choices)}`)
+
+    await ctx.close()
+    return `软删被引用的选项 ⇒ 值在、显示「选项已删除」；恢复 ⇒ 候选与显示都回来`
+  },
+)
+
+/**
+ * **选项（select）的可见范围与标签视角**
+ *
+ * 三件事一起钉：① 选项是定义块的子块（标签视角新增默认「只对本标签可见」）；
+ * ② 作用域是多标签并集过滤（`#甲` 看得到、`#乙` 看不到）；③ 标签视角**就地展开**，
+ * 不在抽屉上再叠一层抽屉。
+ */
+await check(
+  'T172 标签视角的选项：新增默认只对本标签可见；#甲 看得到、#乙 看不到；就地展开不叠 drawer',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const setup = await page.evaluate(() => {
+      const leaves = window.__qua.blocks().filter((b) => b.text.trim().length > 1)
+      const [a, b] = leaves
+      window.__qua.invoke('core.tags/add', { blockId: a.id, name: '冒烟甲' })
+      window.__qua.invoke('core.tags/add', { blockId: b.id, name: '冒烟乙' })
+      const all = window.__qua.allBlocks()
+      const tagA = all.find((x) => x.lists.includes('tag') && x.aliases.includes('冒烟甲'))
+      const tagB = all.find((x) => x.lists.includes('tag') && x.aliases.includes('冒烟乙'))
+      window.__qua.invoke('core.props/create-def', {
+        blockId: tagA.id,
+        label: '冒烟范围',
+        kind: 'select',
+        target: 'declared',
+      })
+      const def = window.__qua.propDefs().find((d) => d.label === '冒烟范围')
+      // 同一个定义也声明给 #乙：作用域只在「两边都有这一行」时才看得出差别
+      window.__qua.invoke('core.props/add-field', { blockId: tagB.id, propId: def.id, target: 'declared' })
+      window.__qua.invoke('core.props/add-choice', { defId: def.id, label: '全局项' })
+      return { a: a.id, b: b.id, tagA: tagA.id, tagB: tagB.id, defId: def.id }
+    })
+    assert(setup.defId !== '' && setup.a !== setup.b, `前置：两个块、两条标签、一条 select 定义：${JSON.stringify(setup)}`)
+    await page.waitForTimeout(320)
+
+    // 打开 #甲 的属性卡 → 标签属性段里那条 select 有「选项」入口
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.tagA)
+    await page.waitForSelector(`[data-declared-choices="${setup.defId}"]`)
+    await page.evaluate((propId) => document.querySelector(`[data-declared-choices="${propId}"]`)?.click(), setup.defId)
+    await page.waitForSelector('.choices-editor')
+    const opened = await page.evaluate(() => ({
+      drawers: document.querySelectorAll('.drawer').length,
+      inCard: Boolean(document.querySelector('.prop-declared .choices-editor')),
+      rows: document.querySelectorAll('.choices-editor .choice-row').length,
+    }))
+    assert(opened.drawers === 0, `标签视角就地展开，不叠 drawer：${JSON.stringify(opened)}`)
+    assert(opened.inCard && opened.rows === 1, `标签属性段里出现选项编辑器（含已有的全局项）：${JSON.stringify(opened)}`)
+
+    // 标签视角新增：缺省「只对本标签可见」
+    await page.evaluate(() => {
+      const input = document.querySelector('.choices-add .choice-add-name')
+      if (!(input instanceof HTMLInputElement)) return
+      input.value = '仅甲项'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      document.querySelector('.choices-add .choice-add')?.click()
+    })
+    await page.waitForTimeout(260)
+
+    const seen = await page.evaluate((s) => {
+      const rowOf = (id) => window.__qua.fields(id).find((f) => f.propId === s.defId)
+      return {
+        a: rowOf(s.a)?.choices.map((c) => c.label) ?? null,
+        b: rowOf(s.b)?.choices.map((c) => c.label) ?? null,
+      }
+    }, setup)
+    assert(
+      JSON.stringify(seen.a) === JSON.stringify(['全局项', '仅甲项']),
+      `#甲 的块看到全局项 ＋ 仅甲项：${JSON.stringify(seen.a)}`,
+    )
+    assert(
+      JSON.stringify(seen.b) === JSON.stringify(['全局项']),
+      `#乙 的块看不到「仅甲项」：${JSON.stringify(seen.b)}`,
+    )
+
+    // 块上的下拉与派生同一份：不是「面板里有、控件里没有」
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.a)
+    await page.waitForTimeout(220)
+    const dom = await page.evaluate((propId) => {
+      const sel = document.querySelector(`.prop-row[data-prop-id="${propId}"] select`)
+      return sel ? [...sel.options].map((o) => o.textContent) : null
+    }, setup.defId)
+    assert(dom && dom.includes('仅甲项') && dom.includes('全局项'), `块上下拉应列出两项：${JSON.stringify(dom)}`)
+
+    // 字段抽屉走**同一份组件**：抽屉里就地展开，仍然只有一层
+    await page.evaluate((id) => window.__qua.invoke('core.block/edit-fields', { blockId: id }), setup.tagA)
+    await page.waitForSelector('.drawer')
+    await page.evaluate(() => document.querySelector('[data-alias-field-choices]')?.click())
+    await page.waitForTimeout(220)
+    const drawer = await page.evaluate(() => ({
+      drawers: document.querySelectorAll('.drawer').length,
+      editors: document.querySelectorAll('.drawer .choices-editor').length,
+    }))
+    assert(drawer.drawers === 1 && drawer.editors === 1, `字段抽屉里同一份编辑器：${JSON.stringify(drawer)}`)
+
+    await ctx.close()
+    return `标签视角就地展开（0 层 drawer）；新增默认 only 本标签：甲 2 项 / 乙 1 项；块上下拉同步；字段抽屉同一组件`
+  },
+)
+
+/**
  * **判定放在所有用例之后**：写在这里之前时，后面的用例（T136 起）即使红了也不会进
  * `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。
  */

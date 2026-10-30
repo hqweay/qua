@@ -20,8 +20,19 @@
 import type { Block } from '../core/index.ts'
 import { plainText } from '../core/runs.ts'
 import type { Dangling, FieldRow, PropKind } from '../core/index.ts'
-import { choiceDisplayLabel, clockLabel, displayNameOf, declaredFieldIds, hasList, PROP_KINDS, propKindOf } from '../core/index.ts'
+import type { PropCreateMode } from '../core/ports.ts'
+import {
+  choiceDisplayLabel,
+  clockLabel,
+  displayNameOf,
+  declaredFieldIds,
+  hasList,
+  isPropDef,
+  PROP_KINDS,
+  propKindOf,
+} from '../core/index.ts'
 import { t } from '../core/msg.ts'
+import { ChoicesEditor, type ChoiceActions } from './choices-editor.ts'
 
 export interface PropertiesDeps {
   /**
@@ -60,12 +71,12 @@ export interface PropertiesDeps {
   clearValue: (b: Block, propId: string) => void
   /** 把已有属性加进**这一块自己的值槽**（`_ownProps`） */
   addOwnProp: (b: Block, propId: string) => void
-  /** 新建一条定义并加进**这一块自己的值槽** */
-  createOwnDef: (b: Block, label: string, kind: PropKind) => void
+  /** 新建一条定义并加进**这一块自己的值槽**（`mode: 'new'` ＝ 同名也新建） */
+  createOwnDef: (b: Block, label: string, kind: PropKind, mode?: PropCreateMode) => void
   /** 把已有属性**声明给成员**（标签属性／字段声明，写 `_fieldDefs`；只有页/标签能声明） */
   declareProp: (b: Block, propId: string) => void
   /** 新建一条定义并**声明给成员**（标签属性／字段声明） */
-  createDeclaredDef: (b: Block, label: string, kind: PropKind) => void
+  createDeclaredDef: (b: Block, label: string, kind: PropKind, mode?: PropCreateMode) => void
   /**
    * 页/标签**声明给成员**的那些属性定义（`_fieldDefs` 的活块）。
    *
@@ -106,6 +117,12 @@ export interface PropertiesDeps {
    * 由装配层注入（`kb.get` 是 O(1) 的索引读）：UI 不该为了一个名字去扫整片森林。
    */
   tagName: (id: string) => string
+  /** 按 id 取块（选项编辑器判「来源标签还在不在」） */
+  blockById: (id: string) => Block | undefined
+  /** 全部标签（选项作用域的勾选候选） */
+  allTags: () => readonly Block[]
+  /** 选项的写入口（命令；组件不直接改块） */
+  choices: ChoiceActions
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
@@ -241,6 +258,7 @@ export function makeCellEditor(
       o.value = current
       o.textContent = row.currentChoiceLabel ?? t('ui.props.choice.deleted')
       o.dataset.missing = '1'
+      o.title = row.currentChoiceLabel ? t('ui.props.choice.notInScope') : t('ui.props.choice.deleted')
       sel.appendChild(o)
     }
     sel.value = current
@@ -356,16 +374,53 @@ export class PropertiesPanel {
    * ⚠️ 不能是一个布尔：两个入口写的是两个槽，同时开着会让「点了哪个」变得不可知。
    */
   private formOpen: 'own' | 'declared' | null = null
+  /**
+   * 选项编辑器的两个实例（各自记住「哪个作用域面板展开着」）。
+   *
+   * 状态必须**在面板里**而不是组件 DOM 里：勾一个标签会写一次模型，
+   * 卡片随后整体重画 —— 状态存在 DOM 上就会被这次重画连根拔掉。
+   */
+  private readonly choicesFull: ChoicesEditor
+  private readonly choicesTag: ChoicesEditor
+  /** 标签视角打开的是哪条属性的选项（`chip` 上的「选项」按钮切换它） */
+  private tagChoices: { def: Block; owner: Block } | null = null
 
   constructor(els: PropertiesEls, deps: PropertiesDeps) {
     this.els = els
     this.deps = deps
+    const base = {
+      tagById: (id: string) => this.deps.blockById(id),
+      tags: () => this.deps.allTags(),
+      write: this.deps.choices,
+      tagName: (id: string) => this.deps.tagName(id),
+    }
+    this.choicesFull = new ChoicesEditor({
+      ...base,
+      // 全量视角：属性卡的主体**就是**那条 select 定义时才画
+      def: () => this.selectDef(),
+      focusTag: () => '',
+    })
+    this.choicesTag = new ChoicesEditor({
+      ...base,
+      def: () => this.tagChoices?.def,
+      // 页的字段段没有「标签作用域」可言（`_fieldDefs` 在页上还没有消费方）：走全量视角
+      focusTag: () => {
+        const open = this.tagChoices
+        return open && hasList(open.owner, 'tag') ? open.owner.id : ''
+      },
+    })
     this.els.add.textContent = t('ui.props.addShort')
     this.els.add.title = t('ui.props.add')
     this.els.add.addEventListener('click', () => {
       this.formOpen = this.formOpen === 'own' ? null : 'own'
       this.render()
     })
+  }
+
+  /** 主体是一条 `select` 定义时，属性卡里画它的选项编辑器 */
+  private selectDef(): Block | undefined {
+    const target = this.deps.target()
+    return target && isPropDef(target) && propKindOf(target) === 'select' ? target : undefined
   }
 
   render(): void {
@@ -441,6 +496,15 @@ export class PropertiesPanel {
      */
     if (hasList(target, 'page') || hasList(target, 'tag')) {
       this.els.body.appendChild(this.buildDeclared(target))
+    }
+
+    /**
+     * **select 定义的选项编辑器**：这条属性「能选什么」就是它自己的子块。
+     * 主体是定义块时画在这里（属性行之后、系统信息之前），改完立刻看得到。
+     */
+    if (this.selectDef()) {
+      this.choicesFull.render()
+      this.els.body.appendChild(this.choicesFull.root)
     }
 
     // 系统信息在**最后**：它是这一块的出生与改动记录，不是可编辑的数据
@@ -531,6 +595,25 @@ export class PropertiesPanel {
       chip.dataset.declaredPropId = def.id
       const text = document.createElement('span')
       text.textContent = `${plainText(def.content).trim() || def.id} · ${t(`ui.props.kind.${propKindOf(def)}`)}`
+      /**
+       * `select` 的一条声明带「选项」入口：选项是定义块的子块，而标签视角只该看
+       * 「对本标签可见」的那几条。**就地展开**在清单下面 —— 再开一层抽屉会让
+       * 「现在在改谁」要看两处抬头才知道。
+       */
+      if (propKindOf(def) === 'select') {
+        const opt = document.createElement('button')
+        opt.type = 'button'
+        opt.className = 'props-tag-choice'
+        opt.dataset.declaredChoices = def.id
+        opt.textContent = t('ui.props.choice.open')
+        opt.title = t('ui.props.choice.openTitle')
+        opt.addEventListener('click', () => {
+          const open = this.tagChoices
+          this.tagChoices = open && open.def.id === def.id && open.owner.id === target.id ? null : { def, owner: target }
+          this.render()
+        })
+        chip.append(opt)
+      }
       const del = document.createElement('button')
       del.type = 'button'
       del.className = 'props-tag-x'
@@ -541,6 +624,12 @@ export class PropertiesPanel {
       list.appendChild(chip)
     }
     section.appendChild(list)
+
+    const openChoices = this.tagChoices && this.tagChoices.owner.id === target.id ? this.tagChoices : null
+    if (openChoices) {
+      this.choicesTag.render()
+      section.appendChild(this.choicesTag.root)
+    }
 
     /**
      * 这一段的添加入口。`data-declare-add` 是给断言认「这是声明那一个，不是自己的值那一个」的。
@@ -764,7 +853,7 @@ export class PropertiesPanel {
       pick: string
       use: string
       onUse: (propId: string) => void
-      onCreate: (label: string, kind: PropKind) => void
+      onCreate: (label: string, kind: PropKind, mode?: PropCreateMode) => void
     },
   ): HTMLElement {
     const form = document.createElement('form')
@@ -857,7 +946,6 @@ export class PropertiesPanel {
       opts.onCreate(name, kind.value as PropKind)
       this.closeForm()
     })
-
     // 新建组整块占一行：它的三个控件只一起出现，不能和第一行的「用这个」混排
     const newGroup = document.createElement('div')
     newGroup.className = 'props-new-group'

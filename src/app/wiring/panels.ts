@@ -17,11 +17,16 @@ import {
   isJournal,
   isQueryBlock,
   journalDate,
+  normalizeAlias,
   parentsOf,
+  propKindOf,
+  propLabel,
   readSpec,
   todayISO,
   type Block,
+  type PropKind,
 } from '../../core/index.ts'
+import type { PropCreateMode, PropTarget } from '../../core/ports.ts'
 import { t } from '../../core/msg.ts'
 import type { RefClickHit, RefClickMods } from '../../view/editor-events.ts'
 import type { App, Registry } from '../../core/commands/index.ts'
@@ -190,6 +195,26 @@ export function setupPanels(deps: PanelsDeps) {
     })
   }
 
+  /**
+   * 新建属性定义，并按 `target` 挂到这一块上。
+   *
+   * `select` 是唯一「建完还必须再填东西」的类型（没有选项就是空下拉）：
+   * **新建**后把用户带到它的定义页，那里就是选项编辑器。复用已有定义不跳 ——
+   * 用户还在原来那一块上，而且那条定义已经有选项。
+   */
+  const createDef = (b: Block, label: string, kind: PropKind, target: PropTarget, mode?: PropCreateMode): void => {
+    const name = normalizeAlias(label)
+    const existed = kb.propDefs().some((d) => normalizeAlias(propLabel(d)) === name && propKindOf(d) === kind)
+    void deps
+      .getRegistry()
+      .invoke('core.props/create-def', { blockId: b.id, label, kind, target, ...(mode ? { mode } : {}) }, 'ui')
+    if (kind !== 'select') return
+    if (mode !== 'new' && existed) return
+    const def = kb.propDefs().find((d) => normalizeAlias(propLabel(d)) === name && propKindOf(d) === 'select')
+    if (!def) return
+    void deps.getRegistry().invoke('core.block/focus-block', { blockId: def.id }, 'ui')
+  }
+
   const propertiesPanel = new PropertiesPanel(
     {
       root: inspectCard,
@@ -243,12 +268,10 @@ export function setupPanels(deps: PanelsDeps) {
       // ⚠️ 两个去处显式声明（`target`），不按块类型猜：标签块既要有自己的值、又要声明给成员
       addOwnProp: (b, propId) =>
         void deps.getRegistry().invoke('core.props/add-field', { blockId: b.id, propId, target: 'own' }, 'ui'),
-      createOwnDef: (b, label, kind) =>
-        void deps.getRegistry().invoke('core.props/create-def', { blockId: b.id, label, kind, target: 'own' }, 'ui'),
+      createOwnDef: (b, label, kind, mode) => createDef(b, label, kind, 'own', mode),
       declareProp: (b, propId) =>
         void deps.getRegistry().invoke('core.props/add-field', { blockId: b.id, propId, target: 'declared' }, 'ui'),
-      createDeclaredDef: (b, label, kind) =>
-        void deps.getRegistry().invoke('core.props/create-def', { blockId: b.id, label, kind, target: 'declared' }, 'ui'),
+      createDeclaredDef: (b, label, kind, mode) => createDef(b, label, kind, 'declared', mode),
       declaredFields: (b) => [...kb.declaredFieldsOf(b.id)],
       undeclareField: (b, propId) => void deps.getRegistry().invoke('core.props/undeclare', { blockId: b.id, propId }, 'ui'),
       /**
@@ -269,6 +292,18 @@ export function setupPanels(deps: PanelsDeps) {
       tagName: (id) => {
         const b = kb.get(id)
         return b ? displayNameOf(b) : id.slice(-6)
+      },
+      blockById: (id) => kb.get(id),
+      allTags: () => [...kb.tags()],
+      choices: {
+        add: (defId, label, scope) => void deps.getRegistry().invoke('core.props/add-choice', { defId, label, scope }, 'ui'),
+        setLabel: (choiceId, label) =>
+          void deps.getRegistry().invoke('core.props/set-choice-label', { choiceId, label }, 'ui'),
+        move: (defId, choiceId, beforeId) =>
+          void deps.getRegistry().invoke('core.props/move-choice', { defId, choiceId, beforeId }, 'ui'),
+        setScope: (choiceId, scope) =>
+          void deps.getRegistry().invoke('core.props/set-choice-scope', { choiceId, scope }, 'ui'),
+        remove: (choiceId) => void deps.getRegistry().invoke('core.props/delete-choice', { choiceId }, 'ui'),
       },
     },
   )

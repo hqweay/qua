@@ -108,7 +108,7 @@ test('choiceVisible：all 处处可见；only 要命中；except 命中即隐藏
   assert.equal(choiceVisible(exceptA, ab), false, '多标签取并集：任一命中即隐藏')
 })
 
-test('choiceScopeOf：坏值回落 all；only/except 去重，空集合退回 all', () => {
+test('choiceScopeOf：坏值回落 all；only/except 去重，空集合保留（编辑中间态）', () => {
   assert.deepEqual(choiceScopeOf(choice('c', 'x')), { mode: 'all' }, '缺省 = 全局')
   assert.deepEqual(choiceScopeOf(choice('c', 'x', 'nope')), { mode: 'all' }, '形状不认识 ⇒ 全局')
   assert.deepEqual(choiceScopeOf(choice('c', 'x', { mode: 'only' })), { mode: 'all' })
@@ -116,7 +116,8 @@ test('choiceScopeOf：坏值回落 all；only/except 去重，空集合退回 al
     choiceScopeOf(choice('c', 'x', { mode: 'only', tags: ['tagA', 'tagA'] })),
     { mode: 'only', tags: ['tagA'] },
   )
-  assert.deepEqual(choiceScopeOf(choice('c', 'x', { mode: 'except', tags: [] })), { mode: 'all' })
+  assert.deepEqual(choiceScopeOf(choice('c', 'x', { mode: 'except', tags: [] })), { mode: 'except', tags: [] },
+    '空集合不被归一成 all：否则「刚切到 only」的中间态永远勾不上标签')
   assert.deepEqual(choiceScopeOf(choice('c', 'x', { mode: 'except', tags: ['gone'] })), {
     mode: 'except',
     tags: ['gone'],
@@ -226,6 +227,17 @@ test('fieldRows：select 行带 choices / currentChoiceLabel；当前值不可�
   assert.deepEqual(r2.choices?.map((c) => c.id), ['c1'], '不可见的选项不进候选')
   assert.equal(r2.currentChoiceLabel, '完成', '当前值不被隐藏：名字仍要拿得到')
   assert.equal(r2.value, 'c2', '值一个字节都没动')
+})
+
+test('fieldRows：值指向已软删的选项 ⇒ 不给名字（UI 显示「选项已删除」），值仍在', () => {
+  const gone = choice('c-gone', '已删')
+  gone.props = { ...gone.props, _deletedAt: 9 }
+  const def = selectDef('def', [choice('c1', '待办'), gone])
+  const block = blk('b', '一块', { def: 'c-gone' })
+  const row = fieldRows(block, [def]).find((r) => r.propId === 'def')!
+  assert.deepEqual(row.choices?.map((c) => c.id), ['c1'], '软删的选项不进候选')
+  assert.equal(row.currentChoiceLabel, undefined, '没有名字 ⇒ 控件说「选项已删除」')
+  assert.equal(row.value, 'c-gone', '值一个字节都没动')
 })
 
 /* ------------------------------------------------------------ 7. 新建定义 */

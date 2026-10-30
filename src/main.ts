@@ -1608,6 +1608,14 @@ const openFieldsEditor = (blockId: string, _anchor: HTMLElement | null): void =>
         write: (mutate) => writeProps(blockId, mutate),
         close: () => layers.closeDrawer(),
         toast: (text, kind) => app.toast(text, kind),
+        choices: {
+          add: (defId, label, scope) => void registry.invoke('core.props/add-choice', { defId, label, scope }, 'fields'),
+          setLabel: (choiceId, label) => void registry.invoke('core.props/set-choice-label', { choiceId, label }, 'fields'),
+          move: (defId, choiceId, beforeId) =>
+            void registry.invoke('core.props/move-choice', { defId, choiceId, beforeId }, 'fields'),
+          setScope: (choiceId, scope) => void registry.invoke('core.props/set-choice-scope', { choiceId, scope }, 'fields'),
+          remove: (choiceId) => void registry.invoke('core.props/delete-choice', { choiceId }, 'fields'),
+        },
       }),
   )
 }
