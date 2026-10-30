@@ -317,7 +317,7 @@ test('ownFieldIds 是 defaultColumns 的输入：只认块自己的槽（不扫�
 
 /* ------------------------------------------------------------ 大纲 → 表格（结构映射） */
 
-/** 一棵两层样例树：容器 + 3 个一级子块（第二个少一个孩子），第三个的孩子还带一层 */
+/** 一棵两层样例树：容器 ＋ 3 个直接子块（表头），它们的孩子就是各列的项 */
 function listTree(): Block {
   return mk('root', '产品', [
     mk('r1', '名称', [mk('c11', '键盘'), mk('c12', '鼠标')]),
@@ -326,75 +326,78 @@ function listTree(): Block {
   ])
 }
 
-test('listTableOf：行＝一级子块、第 k 格＝第 (k−1) 个孩子、列数＝max(孩子数)+1', () => {
+test('listTableOf：表头＝一级子块、一列＝它的孩子、行数＝max(每列项数)', () => {
   const root = listTree()
   const { kb } = kbOf([root])
   const table = listTableOf('root', kb)
-  assert.equal(table.root?.id, 'root', '表标题＝容器自己（它不是一行）')
+  assert.equal(table.root?.id, 'root', '表标题＝容器自己（它不是一列）')
   assert.deepEqual(
-    table.rows.map((r) => r.block.id),
+    table.columns.map((c) => c.id),
     ['r1', 'r2', 'r3'],
-    '行就是直接子块，顺序＝children 顺序',
+    '表头就是直接子块，顺序＝children 顺序',
+  )
+  assert.equal(table.rows.length, 2, '行数＝最长的那一列（名称 2 项 / 库存 2 项）')
+  assert.deepEqual(
+    table.rows[0]!.cells.map((c) => c?.block.id ?? null),
+    ['c11', 'c21', 'c31'],
+    '第 j 行＝每列各取第 j 项（按位置对齐，不按名字）',
   )
   assert.deepEqual(
-    table.rows[0]!.cells.map((c) => c?.block.id),
-    ['c11', 'c12'],
-    '第 2 格是第一个孩子、第 3 格是第二个孩子（按位置，不按名字）',
+    table.rows[1]!.cells.map((c) => c?.block.id ?? null),
+    ['c12', null, 'c32'],
+    '某一列少一项 ⇒ 那一格空着，别的列不错位',
   )
-  assert.equal(table.rows[1]!.cells.length, 1, '孩子少的行只有一格（其余是右侧空格）')
-  assert.equal(table.rows[1]!.cells[1], undefined, '空格不是「补到最后一列」')
-  assert.equal(table.columns, 3, '列数＝max(孩子数)+1：2 个孩子 ⇒ 3 列')
-  assert.equal(table.rows[2]!.cells[1]!.children.length, 1, '三级起只做「可展开」，不进主表列')
+  assert.equal(table.rows[1]!.cells[2]!.children.length, 1, '三级起只做「可展开」，不进主表列')
 })
 
-test('listTableOf：软删的子块不出行、也不占格（位置按活着的树对齐）', () => {
+test('listTableOf：软删的表头不出列、软删的项不占行（位置按活着的树对齐）', () => {
   const root = listTree()
   root.children[1] = { ...root.children[1]!, props: { _deletedAt: 5 } }
   const { kb } = kbOf([root])
+  const table = listTableOf('root', kb)
   assert.deepEqual(
-    listTableOf('root', kb).rows.map((r) => r.block.id),
+    table.columns.map((c) => c.id),
     ['r1', 'r3'],
-    '被删的那一行跳过',
+    '被删的表头不出列',
   )
+  assert.deepEqual(
+    table.rows.map((r) => r.cells.map((c) => c?.block.id ?? null)),
+    [
+      ['c11', 'c31'],
+      ['c12', 'c32'],
+    ],
+    '剩下的列按活着的树重新对齐',
+  )
+
   const grand = listTree()
   grand.children[0] = {
     ...grand.children[0]!,
     children: [grand.children[0]!.children[0]!, { ...grand.children[0]!.children[1]!, props: { _deletedAt: 5 } }],
   }
   const { kb: kb2 } = kbOf([grand])
-  assert.deepEqual(
-    listTableOf('root', kb2).rows[0]!.cells.map((c) => c?.block.id),
-    ['c11'],
-    '被删的格也跳过（剩下的按位置重新排）',
-  )
+  const t2 = listTableOf('root', kb2)
+  assert.equal(t2.rows[0]!.cells[0]!.block.id, 'c11', '被删的项跳过（剩下的按位置重新排）')
+  assert.equal(t2.rows[1]!.cells[0], null, '名称那一列只剩一项 ⇒ 第 2 行左侧空着')
 })
 
-test('sortListRows：只改显示序、空值最后、相等保持 children 顺序；children 顺序一个字节不动', () => {
+test('sortListRows：按第 k 列只改显示序、空值最后、相等保持 children 顺序；children 顺序一个字节不动', () => {
   const root = listTree()
   const { kb } = kbOf([root])
   const before = root.children.map((c) => c.id)
   const rows = listTableOf('root', kb).rows
-  const sorted = sortListRows(rows, { col: 0, dir: 'asc' })
+  const sorted = sortListRows(rows, { col: 0, dir: 'desc' })
   assert.equal(sorted.length, rows.length, '排序不增不减行')
   assert.deepEqual(
-    [...sorted.map((r) => r.block.id)].sort(),
-    [...rows.map((r) => r.block.id)].sort(),
-    '排序只是换顺序，不是筛掉谁',
+    sorted.map((r) => r.cells[0]!.block.id),
+    ['c12', 'c11'],
+    '按第 1 列（名称）降序：鼠标 在 键盘 前面（整行跟着走，别的列不错位）',
   )
-  const empty = mk('root2', '容器', [mk('a', '有'), mk('b', ''), mk('c', '也有')])
-  const { kb: kb2 } = kbOf([empty])
-  assert.deepEqual(
-    sortListRows(listTableOf('root2', kb2).rows, { col: 0, dir: 'desc' }).map((r) => r.block.id),
-    ['a', 'c', 'b'],
-    '空值永远最后（降序也一样：它不是「最大值」）',
-  )
+  assert.equal(sorted[0]!.cells[1], null, '整行一起搬：鼠标那一行在价格列本来就是空的')
+  assert.equal(sorted[0]!.cells[2]!.block.id, 'c32', '整行一起搬：同一行的库存仍是 40')
+  const byPrice = sortListRows(rows, { col: 1, dir: 'desc' })
+  assert.equal(byPrice[0]!.cells[1]!.block.id, 'c21', '有值的行在前')
+  assert.equal(byPrice[1]!.cells[1], null, '空值永远最后（降序也一样：它不是「最大值」）')
   assert.deepEqual(root.children.map((c) => c.id), before, '排序不改 children 顺序')
-  const byPrice = sortListRows(rows, { col: 1, dir: 'asc' })
-  assert.equal(
-    byPrice[0]!.block.id,
-    'r3',
-    `按第 2 格（第一个孩子）升序：12 < 399 < 键盘：${byPrice.map((r) => r.block.id)}`,
-  )
 })
 
 test('canonicalViews：结构映射表只留排序（列是位置，不是配置）；查询源里丢弃', () => {

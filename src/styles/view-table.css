@@ -319,11 +319,10 @@
 
 /* ---------------------------------------------------------- 结构映射表（大纲 → 表格）
 
-   行列由树推导：行＝容器的直接子块，第 k 格＝那一块的第 (k−1) 个直接子块。
+   第一行＝容器的**直接子块**（表头），一列＝那个子块的孩子（这一列的各项）。
    ⚠️ 这一档**不用固定行高**：格里有长文与可展开的子树，平表那套 `--tv-row-h` 与窗口化不适用。
-   ⚠️ 第一行只做**视觉**表头（加粗 ＋ 吸顶）：数据上它和别的行一样，没有 thead。 */
+   ⚠️「行」是位置元组（每列各取第 j 项），它没有自己的块；块操作挂在**格**上（悬停才出现）。 */
 .lt {
-  --lt-gutter-w: 34px;
   --lt-cols: repeat(1, minmax(160px, 1fr));
   margin-top: var(--ui-gap-2);
 }
@@ -345,7 +344,7 @@
 }
 .lt-row {
   display: grid;
-  grid-template-columns: var(--lt-gutter-w) var(--lt-cols);
+  grid-template-columns: var(--lt-cols);
   /* 行高按内容：格里有长段落，居中会让「格与格之间对不齐」 */
   align-items: stretch;
   border-bottom: 1px solid var(--ui-border-subtle);
@@ -353,7 +352,7 @@
 .lt-row:last-child {
   border-bottom: 0;
 }
-/* 第一行：加粗 ＋ 吸顶。只改观感，不改数据 */
+/* 第一行就是表头（容器的直接子块）：吸顶 ＋ 加粗。数据上没有第二条事实 */
 .lt-row--head {
   position: sticky;
   top: 0;
@@ -361,56 +360,15 @@
   background: var(--ui-surface-sunken);
   font-weight: var(--ui-fw-medium);
 }
-.lt-row--head .lt-cell,
-.lt-row--head .lt-gutter {
+.lt-row--head .lt-cell {
   background: var(--ui-surface-sunken);
 }
-.lt-row:hover .lt-cell,
-.lt-row:hover .lt-gutter {
+/* 悬停整行一起亮（扫读时还认得出「这一行是各列的第 j 项」）；表头不参与 */
+.lt-row:not(.lt-row--head):hover .lt-cell {
   background: var(--ui-surface-sunken);
-}
-.lt-gutter {
-  position: sticky;
-  left: 0;
-  z-index: var(--ui-z-sticky-cell);
-  display: flex;
-  align-items: center;
-  gap: var(--ui-gap-1);
-  padding: var(--ui-gap-3) var(--ui-gap-2);
-  background: var(--ui-surface);
-}
-.lt-marker {
-  width: var(--ui-caret-size);
-  height: var(--ui-caret-size);
-  padding: 0;
-  border: 0;
-  border-radius: var(--ui-radius-pill);
-  background: var(--ui-border);
-  cursor: pointer;
-  opacity: 0;
-}
-.lt-row:hover .lt-marker {
-  opacity: 1;
-}
-.lt-marker:hover {
-  background: var(--ui-text-tertiary);
-}
-.lt-del {
-  visibility: hidden;
-  border: 0;
-  background: none;
-  padding: 0;
-  font: inherit;
-  color: var(--ui-text-tertiary);
-  cursor: pointer;
-}
-.lt-row:hover .lt-del {
-  visibility: visible;
-}
-.lt-del:hover {
-  color: var(--ui-danger);
 }
 .lt-cell {
+  position: relative;
   min-width: 0;
   padding: var(--ui-gap-3) var(--ui-gap-4);
   border-right: 1px solid var(--ui-border-subtle);
@@ -419,13 +377,9 @@
 .lt-cell:last-child {
   border-right: 0;
 }
-/* 第一格（行自己的正文）钉住：横向滚到右边时还知道这一行是谁 */
-.lt-cell--self {
-  position: sticky;
-  left: var(--lt-gutter-w);
-  z-index: var(--ui-z-sticky-cell);
-  background: var(--ui-surface);
-  border-right: 1px solid var(--ui-border-subtle);
+/* 表头格右侧留出块操作的位置，文字不钻到按钮底下 */
+.lt-cell--head {
+  padding-right: calc(var(--ui-gap-7) + var(--ui-gap-4));
 }
 /* 格里的正文按内容换行（平表的标题列是单行） */
 .lt-cell .tv-title-text {
@@ -435,7 +389,69 @@
 .lt-cell .tv-title-inner {
   cursor: text;
 }
-/* 三级起：这一格里再摊开，不进主表列 */
+/* 空着的格：一个很淡的「—」。它是「这一列没有第 j 项」，不是渲染坏了 */
+.lt-cell--empty::after {
+  content: '—';
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+  opacity: 0.45;
+}
+/* 块操作：块标（打开这一块）／＋（加一项，仅表头）／×（删这一列/项）。
+   容器只管排；**可见性由每个动作自己的入口决定**：常显的只有「加一项」
+   —— 它是唯一「让表能继续长大、且没有别的入口」的动作；打开/删除是整理动作，悬停才出现。 */
+.lt-chrome {
+  position: absolute;
+  top: var(--ui-gap-1);
+  right: var(--ui-gap-2);
+  z-index: var(--ui-z-rail);
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+}
+.lt-marker,
+.lt-del {
+  visibility: hidden;
+}
+.lt-cell:hover .lt-marker,
+.lt-cell:hover .lt-del {
+  visibility: visible;
+}
+.lt-marker {
+  flex: none;
+  width: var(--ui-caret-size);
+  height: var(--ui-caret-size);
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-border);
+  cursor: pointer;
+}
+.lt-marker:hover {
+  background: var(--ui-text-tertiary);
+}
+.lt-add,
+.lt-del {
+  border: 0;
+  background: none;
+  padding: 0 var(--ui-gap-1);
+  font: inherit;
+  line-height: 1;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.lt-add {
+  opacity: 0.45;
+}
+.lt-cell:hover .lt-add {
+  opacity: 1;
+}
+.lt-add:hover {
+  color: var(--ui-text);
+}
+.lt-del:hover {
+  color: var(--ui-danger);
+}
+/* 三级起：这一项自己的孩子再摊开，不进主表列 */
 .lt-more {
   margin-top: var(--ui-gap-2);
   padding: 0 var(--ui-gap-3);

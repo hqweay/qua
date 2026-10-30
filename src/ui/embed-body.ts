@@ -7,7 +7,8 @@
  *
  * 两种看法各走各的路，但**共用同一个源**：
  *   · 镜像 ＝ 把源的整棵子树装进一台 `EditableBlock`（含源自己那一行，所以能就地改）；
- *   · 大纲表格 ＝ `ViewListTable`（行＝源的直接子块），与整屏那张表是同一个渲染器。
+ *   · 大纲表格 ＝ `ViewListTable`（表头＝源的直接子块，一列＝那个子块的孩子），
+ *     与整屏那张表是同一个渲染器。
  *
  * 深度 1 由构造固定：镜像里那台编辑器带 `embedBodies: false`，里面的露面块只画占位。
  * 这不是「用 visited 集合拦」——递归渲染的结果不能依赖遍历顺序。
@@ -128,7 +129,7 @@ function mountMirror(target: Block, into: HTMLElement, deps: EmbedBodyDeps): () 
   }
 }
 
-/** 大纲表格：行＝源的直接子块（与整屏那张表同一个渲染器） */
+/** 大纲表格：表头＝源的直接子块、一列＝那个子块的孩子（与整屏那张表同一个渲染器） */
 function mountTable(host: Block, target: Block, into: HTMLElement, deps: EmbedBodyDeps): () => void {
   const cell = new BlockCell({
     store: deps.store,
@@ -148,17 +149,20 @@ function mountTable(host: Block, target: Block, into: HTMLElement, deps: EmbedBo
   }
   const table = new ViewListTable({
     store: deps.store,
-    // 表的「容器」是**源**：行是它的直接子块（露面块自己只是宿主）
+    // 表的「容器」是**源**：表头是它的直接子块（露面块自己只是宿主）
     host: () => target,
     view: () => view,
     kb: deps.kb,
     cell,
+    // 嵌入是一行里的投影：源的名字在屏幕上没有第二处 ⇒ 用表标题说清楚它是哪棵树
+    showCaption: true,
     openBlock: deps.openBlock,
-    deleteRow: (rowId) => deps.invoke('core.view/delete-row', { rowId }, 'embed'),
+    insertItem: (columnId) => deps.invoke('core.view/new-row', { blockId: columnId }, 'embed'),
+    deleteBlock: (id) => deps.invoke('core.view/delete-row', { rowId: id }, 'embed'),
   })
   into.appendChild(table.root)
   table.render()
-  // 表的成员是活的：源里增删一行，这里跟着变（按 id 局部修补，不整表重搭）
+  // 表的成员是活的：源里增删一块，这里跟着变（按 id 局部修补，不整表重搭）
   const off = deps.store.subscribe((_source, ids) => {
     table.render(ids)
   })

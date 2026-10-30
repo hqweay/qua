@@ -155,7 +155,7 @@ export class ViewHost {
   private outline: EditableBlock | null = null
   /** 表格分支 */
   private table: ViewTable | null = null
-  /** 结构映射表分支（行＝子块、格＝位置的另一种「怎么看」） */
+  /** 结构映射表分支（表头＝直接子块、一列＝那个子块的孩子） */
   private listTable: ViewListTable | null = null
   /** 这一屏现在画的是谁：`outline` 或激活视图的 id（变了才换分支） */
   private mode = ''
@@ -290,7 +290,7 @@ export class ViewHost {
   private rowCount(): number {
     const b = this.deps.block()
     if (sourceOf(b).kind === 'query') return (readResult(b) ?? []).length
-    // 结构映射表的行＝活着的直接子块（软删的不算一行），与渲染器同一份派生
+    // 结构映射表的行＝各列的第 j 项（表头不占一行），与渲染器同一份派生
     if (activeView(b)?.kind === 'list-table') return listTableOf(b.id, this.deps.kb).rows.length
     return this.deps.kb.children(b.id).length
   }
@@ -338,6 +338,14 @@ export class ViewHost {
     this.els.count.textContent = query ? t('ui.query.count', { count: n }) : t('ui.view.count', { count: n })
     this.els.refresh.hidden = !query
     this.els.newRow.hidden = query
+    /**
+     * 这一颗 `＋` 在两种表里长的是**不同的东西**：平表加一行（＝一个直接子块），
+     * 结构映射表加一列（顶部多一个直接子块，它的孩子成为这一列的各项）。
+     * 文案跟着视图走，不另开按钮。
+     */
+    const list = view?.kind === 'list-table'
+    this.els.newRow.textContent = list ? t('ui.view.newColumn') : t('ui.view.newRow')
+    this.els.newRow.title = list ? t('ui.view.newColumnTitle') : t('ui.view.newRowTitle')
     this.paintStale()
     this.paintViews(b, view)
   }
@@ -430,7 +438,7 @@ export class ViewHost {
     this.els.editor.hidden = true
     this.els.editor.replaceChildren()
     /**
-     * 两条渲染器：表格（行＝记录、列＝属性）与结构映射表（行＝一级子块、列＝位置）。
+     * 两条渲染器：表格（行＝记录、列＝属性）与结构映射表（表头＝直接子块、一列＝它的孩子）。
      * 它们**不共用**布局：平表有固定行高与窗口化，结构映射表按内容排、不吃窗口化那套。
      * 所以按 kind 各建各的实例，切走就 dispose（不藏一台还在订阅的）。
      */
@@ -461,8 +469,12 @@ export class ViewHost {
           view: () => activeView(this.deps.block()) ?? view,
           kb: this.deps.kb,
           cell: this.cell,
+          // 段尾宿主：容器就是这一屏的根，页面标题已经在上面写着它 ⇒ 不再重复一句表标题
+          showCaption: false,
           openBlock: (id) => this.deps.openBlock(id),
-          deleteRow: (rowId) => this.deps.invoke('core.view/delete-row', { rowId }),
+          // 「加一项」就是往那一列（表头块）末尾插一个子块：与大纲里 ↵＋Tab 同一条写路径
+          insertItem: (columnId) => this.deps.invoke('core.view/new-row', { blockId: columnId }),
+          deleteBlock: (id) => this.deps.invoke('core.view/delete-row', { rowId: id }),
         })
         this.els.table.replaceChildren(this.listTable.root)
       }

@@ -1266,22 +1266,27 @@ const app: App = {
       })
     }
     /**
-     * **结构映射表的排序**：这张表没有列头（第一行就是数据），所以排序入口放在这里，
-     * 按「第几格」列出来。键是位置不是列定义，用户看到的也就是「第 k 格」。
+     * **结构映射表的排序**：第一行就是表头（容器的直接子块），所以排序入口按**列**列出来，
+     * 名字取那一块的显示名。排序只改显示序（行＝每列各取第 j 项的位置元组），
+     * `children` 顺序一个字节不动。
      */
     if (active?.kind === 'list-table') {
-      const cols = listTableOf(blockId, kb).columns
+      const table = listTableOf(blockId, kb)
       const cur = active.list?.sort
-      for (let col = 0; col < cols; col++) {
-        const on = cur?.col === col ? cur.dir : ''
+      table.columns.forEach((col, i) => {
+        const on = cur?.col === i ? cur.dir : ''
+        const name = displayNameOf(col).trim()
         rows.push({
-          id: `view/sort/${col}/${on}`,
-          label: col === 0 ? t('ui.view.sortBySelf') : t('ui.view.sortByCell', { n: String(col + 1) }),
+          id: `view/sort/${i}/${on}`,
+          label:
+            name === ''
+              ? t('ui.view.sortByColumnN', { n: String(i + 1) })
+              : t('ui.view.sortByColumn', { name }),
           icon: 'lucide:arrow-up-down',
           group: 'view/8-sort',
           ...(on ? { keyHint: on === 'desc' ? t('ui.view.sortDesc') : t('ui.view.sortAsc') } : {}),
         })
-      }
+      })
     }
     rows.push({ id: 'view/add/table', label: t('ui.view.addTable'), icon: 'lucide:table', group: 'view/9-add' })
     rows.push({

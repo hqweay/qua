@@ -173,7 +173,11 @@ export function viewConfigCommands(
     },
 
     /**
-     * 新建一行 ＝ 在容器**末尾**插入一个子块（结构 op，一次撤销）。
+     * 新建一个子块 ＝ 在容器**末尾**插入（结构 op，一次撤销）。
+     *
+     * 同一个入口在两种表里长成不同的东西：平表 ⇒ 多一行（行＝直接子块）；
+     * 结构映射表 ⇒ 多一列（表头＝直接子块，它的孩子是这一列的各项）。
+     * 也用它给某一列末尾加一项（`blockId` 传那一列的表头块）。
      *
      * 不继承容器的标签：标签是分类归属，不是父子关系（父子关系不是「像爸爸」）。
      */
@@ -201,7 +205,7 @@ export function viewConfigCommands(
      *
      * 三种源/视图的落点**各不相同**（这不是分支癖，是语义）：
      *   · children ＋ 平表：写 `activeView.table.sort` —— **只改显示序**，`children` 顺序一个字节不动；
-     *   · children ＋ 结构映射表：写 `activeView.list.sort`，键是**第几格**（位置），不是列定义；
+     *   · children ＋ 结构映射表：写 `activeView.list.sort`，键是**第几列**（位置），不是列定义；
      *   · 查询源：写 `_query.sort` 并重算 —— 排序可能影响 `limit` 的成员，所以必须重查。
      *
      * `dir === ''` ＝ 清掉这一格的排序（表头第三次点击的落点）。
@@ -225,7 +229,7 @@ export function viewConfigCommands(
       const active = activeView(b)
       if (!active) return false
       if (active.kind === 'list-table') {
-        // `by` 在这一档是**格序号**（命令面只有字符串参数，语义由视图种类决定）
+        // `by` 在这一档是**列序号**（命令面只有字符串参数，语义由视图种类决定）
         const col = Number(by)
         if (!Number.isInteger(col) || col < 0) return false
         d.run((tx) =>

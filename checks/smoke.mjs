@@ -12634,15 +12634,16 @@ await check('T159 在一屏多根（日记流）上给某一天建表：会换�
  * 不直接改模型）：
  *
  * ```
- * 页（容器 R）
- * ├ 名称 ├ 键盘
- * │      └ 鼠标
- * ├ 价格 ├ 399              ← 只有一个孩子：这一行右侧是空格
+ * 页（容器 R）      表头（第一行）＝直接子块；一列＝那个子块的孩子（各项）
+ * ├ 名称 ├ 键盘      ← 这一列的第 1 项
+ * │      └ 鼠标      ← 这一列的第 2 项
+ * ├ 价格 ├ 399       ← 只有一项：第 2 行这一列空着
  * └ 库存 ├ 12
- *        └ 40 └ 备注        ← 三级起：「＋N 项」可展开，不进主表列
+ *        └ 40 └ 备注  ← 三级起：「＋N 项」可展开，不进主表列
  * ```
  *
- * 返回每一行的 id 与每个格子的 id（断言按模型算，不写死种子内容）。
+ * 返回表头（rows）与每一格的 id（断言按模型算，不写死种子内容）。
+ * ⚠️ 名字沿用 rows（它是**表头**：三个直接子块），断言里别把它当「行」。
  */
 const buildListTree = (page) =>
   page.evaluate(() => {
@@ -12691,22 +12692,27 @@ const buildListTree = (page) =>
 const listState = (page) =>
   page.evaluate(() => {
     const lt = document.querySelector('.lt')
+    const cellsOf = (row) =>
+      [...row.querySelectorAll('.lt-cell')].map((c) => ({
+        col: c.dataset.col ?? '',
+        block: c.dataset.blockId ?? '',
+        head: c.classList.contains('lt-cell--head'),
+        empty: c.classList.contains('lt-cell--empty'),
+        more: c.querySelector('.lt-more')?.textContent ?? '',
+        subs: c.querySelectorAll('.lt-sub-item').length,
+      }))
+    const rows = [...document.querySelectorAll('.lt-row')]
+    const headRow = rows.find((r) => r.classList.contains('lt-row--head')) ?? null
     return {
       caption: document.querySelector('.lt-caption')?.textContent ?? '',
       cols: lt ? getComputedStyle(lt).getPropertyValue('--lt-cols').trim() : '',
-      rows: [...document.querySelectorAll('.lt-row')].map((r) => ({
-        id: r.dataset.blockId ?? '',
-        head: r.classList.contains('lt-row--head'),
-        headWeight: getComputedStyle(r).fontWeight,
-        headSticky: getComputedStyle(r).position === 'sticky',
-        cells: [...r.querySelectorAll('.lt-cell')].map((c) => ({
-          col: c.dataset.col ?? '',
-          block: c.dataset.blockId ?? '',
-          empty: c.classList.contains('lt-cell--empty'),
-          more: c.querySelector('.lt-more')?.textContent ?? '',
-          subs: c.querySelectorAll('.lt-sub-item').length,
-        })),
-      })),
+      head: headRow ? cellsOf(headRow) : [],
+      headWeight: headRow ? getComputedStyle(headRow).fontWeight : '',
+      headSticky: headRow ? getComputedStyle(headRow).position === 'sticky' : false,
+      rows: rows
+        .filter((r) => !r.classList.contains('lt-row--head'))
+        .map((r) => ({ index: r.dataset.row ?? '', cells: cellsOf(r) })),
+      empty: document.querySelector('.lt-empty')?.textContent ?? '',
       subs: [...document.querySelectorAll('.lt-sub-item')].map((s) => s.dataset.blockId ?? ''),
       rootBlks: document.querySelectorAll('#editor > .sec > .blk[data-block-id]').length,
     }
@@ -12728,14 +12734,29 @@ const listModel = (page, rid) =>
     const live = b.children.filter((c) => c.props?._deletedAt === undefined)
     return {
       title: b.props?._aliases?.[0] ?? text(b),
-      // 活着的子块（＝表的行）；软删的那一块仍在 children 里，但不占行
+      // 活着的直接子块（＝表的**列**／表头）；软删的那一块仍在 children 里，但不占列
       children: live.map((c) => c.id),
       allChildren: b.children.map((c) => c.id),
       rows: live.map((c) => ({ id: c.id, text: text(c), kids: c.children.map((g) => g.id), props: c.props ?? null })),
     }
   }, rid)
 
-await check('T160 大纲表格：行＝一级子块、第 k 格＝第 (k−1) 个孩子、列数＝max(孩子数)+1；正文只画根行', async () => {
+/** 从模型里读某一块的正文（不猜 DOM） */
+const blockText = (page, id) =>
+  page.evaluate((bid) => {
+    const walk = (l) => {
+      for (const x of l) {
+        if (x.id === bid) return x
+        const r = walk(x.children)
+        if (r) return r
+      }
+      return null
+    }
+    const b = walk(window.__qua.__editor.store.blocks)
+    return (b?.content ?? []).filter((r) => r.t === 'text').map((r) => r.v).join('')
+  }, id)
+
+await check('T160 大纲表格：表头＝容器的直接子块、一列＝它的孩子、行数＝最长的一列；正文只画根行', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const fx = await buildListTree(page)
@@ -12744,45 +12765,34 @@ await check('T160 大纲表格：行＝一级子块、第 k 格＝第 (k−1) �
   await page.waitForTimeout(450)
 
   const st = await listState(page)
-  assert(st.rows.length === model.children.length, `行数＝一级子块数：${st.rows.length} vs ${model.children.length}`)
+  const cols = model.children.length
+  assert(st.head.length === cols, `列数＝一级子块数：${st.head.length} vs ${cols}`)
   assert(
-    JSON.stringify(st.rows.map((r) => r.id)) === JSON.stringify(model.children),
-    `行序＝children 顺序：${JSON.stringify(st.rows.map((r) => r.id))} vs ${JSON.stringify(model.children)}`,
+    JSON.stringify(st.head.map((c) => c.block)) === JSON.stringify(model.children),
+    `表头就是一级子块、顺序＝children 顺序：${JSON.stringify(st.head.map((c) => c.block))} vs ${JSON.stringify(model.children)}`,
   )
-  assert(st.caption === model.title, `表标题＝容器名：${st.caption} vs ${model.title}`)
-  const cols = Math.max(...model.rows.map((r) => r.kids.length)) + 1
+  // 整屏打开时容器就是这一屏的根：页面标题已经写着它 ⇒ 不再重复一句表标题
+  assert(st.caption === '', `整屏不画重复的表标题：${st.caption}`)
+  assert(st.cols.startsWith(`repeat(${cols}`), `列数写在同一个变量里（与平表同一条约束）：${st.cols}`)
+  const height = Math.max(...model.rows.map((r) => r.kids.length))
+  assert(st.rows.length === height, `行数＝最长的一列（${height}）：${st.rows.length}`)
+  // 第 j 行＝每列各取第 j 项（按位置对齐，不按名字）
+  const want = [0, 1].map((j) => model.rows.map((r) => r.kids[j] ?? ''))
+  const got = st.rows.map((r) => r.cells.map((c) => c.block))
+  assert(JSON.stringify(got) === JSON.stringify(want), `第 j 行＝每列各取第 j 项：${JSON.stringify(got)} vs ${JSON.stringify(want)}`)
   assert(
-    st.rows.every((r) => r.cells.length === cols),
-    `列数＝max(孩子数)+1（每行都补齐同一组列）：${cols} vs ${JSON.stringify(st.rows.map((r) => r.cells.length))}`,
+    st.rows[1].cells[1].empty,
+    `某一列少一项 ⇒ 那一格空着，别的列不错位：${JSON.stringify(st.rows[1].cells)}`,
   )
-  assert(
-    st.cols.startsWith(`repeat(${cols}`),
-    `列数写在同一个变量里（与平表同一条约束）：${st.cols}`,
-  )
-  // 第 1 格＝那一块自己的正文；第 k 格＝它的第 (k−1) 个孩子（位置对齐）
-  assert(st.rows[0].cells[0].block === fx.rows[0], `第 1 格是行自己：${st.rows[0].cells[0].block}`)
-  assert(
-    st.rows[0].cells[1].block === fx.cells.c11 && st.rows[0].cells[2].block === fx.cells.c12,
-    `第 k 格按位置对上孩子：${JSON.stringify(st.rows[0].cells.map((c) => c.block))}`,
-  )
-  // 某行孩子少 ⇒ 右侧空格，其它行不错位
-  assert(
-    st.rows[1].cells[1].block === fx.cells.c21 && st.rows[1].cells[2].empty,
-    `孩子少的行右侧是空格（不补到最后一列）：${JSON.stringify(st.rows[1].cells)}`,
-  )
-  assert(
-    st.rows[2].cells[1].block === fx.cells.c31 && st.rows[2].cells[2].block === fx.cells.c32,
-    `别的行不受影响：${JSON.stringify(st.rows[2].cells.map((c) => c.block))}`,
-  )
-  assert(st.rootBlks === 1, `正文只画根行（行与格都不在正文里重复）：${st.rootBlks}`)
+  assert(st.rootBlks === 1, `正文只画根行（表头与各项都不在正文里重复）：${st.rootBlks}`)
 
   await ctx.close()
-  return `3 行 × ${cols} 列；行序＝children；第 k 格＝第 (k−1) 个孩子；孩子少的行右侧空格；正文只画根行`
+  return `${cols} 列 × ${height} 行；表头＝children；第 j 行＝各列第 j 项；价格列第 2 行空着；正文只画根行`
 })
 
 /* ---------------------------------------------------------------- T161 */
 
-await check('T161 大纲表格：新建一行⇒多一行；在某行第一个孩子前插孩子⇒那一行整行右移一格', async () => {
+await check('T161 大纲表格：新建一列⇒表头多一格（行数不变）；某一列前面插一项⇒只有那一列往下挪一格', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const fx = await buildListTree(page)
@@ -12790,54 +12800,55 @@ await check('T161 大纲表格：新建一行⇒多一行；在某行第一个�
   await page.waitForTimeout(450)
   const before = await listState(page)
 
-  // 新建一行＝容器末尾多一个子块（与平表同一个入口、同一条写路径）
+  // 抬头那颗 ＋ 在结构映射表里加的是**一列**：顶部多一个直接子块（与平表加一行同一个命令）
   await page.locator('.queryview-newrow').click()
   await page.waitForTimeout(400)
   const afterNew = await listState(page)
-  assert(afterNew.rows.length === before.rows.length + 1, `新建一行⇒多一行：${before.rows.length} → ${afterNew.rows.length}`)
+  assert(afterNew.head.length === before.head.length + 1, `新建一列⇒表头多一格：${before.head.length} → ${afterNew.head.length}`)
+  assert(afterNew.rows.length === before.rows.length, `新列还没有项⇒行数不变：${afterNew.rows.length}`)
+  assert(afterNew.head[afterNew.head.length - 1].block !== '', '新列的表头是一个真实的块（空正文）')
 
   /**
-   * 「在某行第一个孩子前插孩子」：用真实手势 —— 打开那一行（块）→ 在第一个孩子后面插一个块 →
-   * 与它换位（移到最前）→ 退出。回到表里时那一行应该**整行右移一格**。
+   * 在「名称」这一列的第一个项前面插一项：用真实手势 —— 打开那一列（块）→ 在第一个孩子后面
+   * 插一个块 → 与它换位（移到最前）→ 退出。回到表里时**只有这一列**往下挪一格。
    */
   await page.evaluate(
-    ({ row, firstKid }) => {
+    ({ col, firstKid }) => {
       const q = window.__qua
-      q.invoke('core.block/focus-block', { blockId: row })
+      q.invoke('core.block/focus-block', { blockId: col })
       q.focusBlock(firstKid, 0)
-      q.invoke('core.editor/insert-block', { text: '新列' })
+      q.invoke('core.editor/insert-block', { text: '新项' })
       q.invoke('core.editor/move-block-up')
     },
-    { row: fx.rows[0], firstKid: fx.cells.c11 },
+    { col: fx.rows[0], firstKid: fx.cells.c11 },
   )
   await page.waitForTimeout(250)
   await page.evaluate(() => window.__qua.invoke('core.block/zoom-out'))
   await page.waitForTimeout(450)
-  const shifted = await listState(page)
-  const row = shifted.rows.find((r) => r.id === fx.rows[0])
-  assert(row, `那一行还在：${JSON.stringify(shifted.rows.map((r) => r.id))}`)
+
+  const st = await listState(page)
+  assert(st.rows.length === before.rows.length + 1, `某一列多一项⇒多一行：${before.rows.length} → ${st.rows.length}`)
+  assert(st.head.length === afterNew.head.length, `列数不变（插的是项，不是列）：${st.head.length}`)
   assert(
-    row.cells[1].block !== fx.cells.c11 && row.cells[2].block === fx.cells.c11 && row.cells[3].block === fx.cells.c12,
-    `那一行整行右移一格（新孩子成为第 2 格，原第 2 格挪到第 3 格）：${JSON.stringify(row.cells.map((c) => c.block))}`,
+    st.rows[0].cells[0].block !== fx.cells.c11 &&
+      st.rows[1].cells[0].block === fx.cells.c11 &&
+      st.rows[2].cells[0].block === fx.cells.c12,
+    `名称列整列往下挪一格：${JSON.stringify(st.rows.map((r) => r.cells[0].block))}`,
   )
-  const other = shifted.rows.find((r) => r.id === fx.rows[1])
   assert(
-    other.cells[1].block === fx.cells.c21,
-    `别的行不错位（各自从第 2 格开始铺）：${JSON.stringify(other.cells.map((c) => c.block))}`,
+    st.rows[0].cells[1].block === fx.cells.c21 && st.rows[1].cells[1].empty && st.rows[2].cells[1].empty,
+    `别的列不错位（价格仍是它的第 1 项，底下空着）：${JSON.stringify(st.rows.map((r) => r.cells[1].block))}`,
   )
   const model = await listModel(page, fx.root)
-  assert(
-    model.rows.find((r) => r.id === fx.rows[0]).kids.length === 3,
-    `模型里那一行确实多了一个孩子：${JSON.stringify(model.rows[0].kids)}`,
-  )
+  assert(model.rows[0].kids.length === 3, `模型里名称那一列确实多了一项：${JSON.stringify(model.rows[0].kids)}`)
 
   await ctx.close()
-  return `新建一行 ${before.rows.length}→${afterNew.rows.length}；某行第一个孩子前插一个 ⇒ 该行由 [${fx.cells.c11},${fx.cells.c12}] 右移成三格；别的行不动`
+  return `新建一列 ${before.head.length}→${afterNew.head.length}；名称列插一项 ⇒ 3 行（只有这一列往下挪）；价格列跟着空两格`
 })
 
 /* ---------------------------------------------------------------- T162 */
 
-await check('T162 大纲表格：第一行只是视觉表头（加粗＋吸顶）；删掉它⇒新的第一行接替；数据上没有特殊字段', async () => {
+await check('T162 大纲表格：第一行就是表头（直接子块、加粗＋吸顶）；删掉一格⇒那一列与它的项一起消失；数据上没有表头字段', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const fx = await buildListTree(page)
@@ -12845,33 +12856,41 @@ await check('T162 大纲表格：第一行只是视觉表头（加粗＋吸顶�
   await page.waitForTimeout(450)
 
   const first = await listState(page)
-  assert(first.rows[0].head && !first.rows[1].head, `只有第一行带表头样式：${JSON.stringify(first.rows.map((r) => r.head))}`)
-  assert(Number(first.rows[0].headWeight) >= 600, `表头是加粗：${first.rows[0].headWeight}`)
-  assert(first.rows[0].headSticky && !first.rows[1].headSticky, '表头吸顶（滚动时留在上面）')
-  const m0 = await listModel(page, fx.root)
-  assert(m0.rows[0].props === null, `数据上没有任何「表头」字段（第一行连属性袋都没有）：${JSON.stringify(m0.rows[0].props)}`)
+  const before = await listModel(page, fx.root)
+  assert(first.headWeight !== '' && Number(first.headWeight) >= 600, `表头是加粗：${first.headWeight}`)
+  assert(first.headSticky, '表头吸顶（滚动时留在上面）')
+  assert(
+    JSON.stringify(first.head.map((c) => c.block)) === JSON.stringify(before.children),
+    `表头就是直接子块（不是「猜出来的第一行」）：${JSON.stringify(first.head.map((c) => c.block))}`,
+  )
+  assert(before.rows[0].props === null, `数据上没有任何「表头」字段：${JSON.stringify(before.rows[0].props)}`)
 
-  // 删掉第一行：新的第一行接替表头样式（不是「表头跟着被删的那一块走」）
-  const headRow = page.locator('.lt-row--head')
-  await headRow.hover()
-  await headRow.locator('.lt-del').click()
+  // 删掉第一列：软删那个直接子块 ⇒ 这一列与它的项一起从表里消失
+  const headCell = page.locator('.lt-cell--head').first()
+  await headCell.hover()
+  await headCell.locator('.lt-del').click()
   await page.waitForTimeout(450)
   const after = await listState(page)
-  assert(after.rows.length === first.rows.length - 1, `删行后少一行：${after.rows.length}`)
+  assert(after.head.length === first.head.length - 1, `删掉一格⇒少一列：${after.head.length}`)
   assert(
-    after.rows[0].id === first.rows[1].id && after.rows[0].head,
-    `新的第一行接替表头：${JSON.stringify(after.rows.map((r) => [r.id, r.head]))}`,
+    after.head[0].block === first.head[1].block,
+    `后面的列左移一格接替：${JSON.stringify(after.head.map((c) => c.block))}`,
+  )
+  assert(
+    after.rows.every((r) => r.cells[0].block !== fx.cells.c11 && r.cells[0].block !== fx.cells.c12),
+    `那一列的项也不在表里了：${JSON.stringify(after.rows.map((r) => r.cells[0].block))}`,
   )
   const m1 = await listModel(page, fx.root)
-  assert(m1.rows[0].id === first.rows[1].id, `模型里第一行就是原来的第二行：${m1.rows[0].id}`)
+  assert(m1.allChildren.length === before.allChildren.length, '软删不是搬走：被删的直接子块仍在 children 里（可撤销）')
+  assert(m1.children.length === before.children.length - 1, `活着的列少一个：${m1.children.length}`)
 
   await ctx.close()
-  return `第一行 加粗(${first.rows[0].headWeight})＋吸顶；删掉它 ⇒ ${first.rows[1].id} 接替；props 为空（无表头字段）`
+  return `表头 ${first.head.length} 列、加粗(${first.headWeight})＋吸顶；删一格 ⇒ 那一列与项一起消失；children 里那块还在（软删）`
 })
 
 /* ---------------------------------------------------------------- T163 */
 
-await check('T163 大纲表格：改第 k 格⇒写回第 (k−1) 个孩子；格里的子树「＋N 项」可展开、不占主表列', async () => {
+await check('T163 大纲表格：改格子⇒写回那一块（表头格写直接子块）；项下面的子树「＋N 项」可展开、不占主表列', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const fx = await buildListTree(page)
@@ -12879,109 +12898,107 @@ await check('T163 大纲表格：改第 k 格⇒写回第 (k−1) 个孩子；�
   await page.waitForTimeout(450)
   const before = await listState(page)
 
-  // 改第 2 格 ⇒ 写的是那一行的第 1 个孩子（不是行自己）
-  const cellSel = `.lt-row[data-block-id="${fx.rows[0]}"] .lt-cell[data-col="1"] .tv-title-inner`
-  await page.locator(cellSel).click()
+  // 改身体格 ⇒ 写的是那一列的那一项（不是表头那一块）
+  await page.locator(`.lt-cell[data-block-id="${fx.cells.c11}"] .tv-title-inner`).click()
   await page.waitForTimeout(220)
   const opened = await page.evaluate(() => ({
     overlays: document.querySelectorAll('.tv-edit').length,
     id: document.querySelector('.tv-edit')?.dataset.blockId ?? '',
   }))
-  assert(opened.overlays === 1 && opened.id === fx.cells.c11, `点第 2 格开的是那一个孩子：${JSON.stringify(opened)}`)
+  assert(opened.overlays === 1 && opened.id === fx.cells.c11, `点那一格开的是那一项：${JSON.stringify(opened)}`)
 
   await page.evaluate(() => window.__qua.quiet(false))
   await page.keyboard.type('X')
   await page.keyboard.press('Enter')
   await page.waitForTimeout(350)
-  const model = await listModel(page, fx.root)
-  const r1 = model.rows.find((r) => r.id === fx.rows[0])
-  const kid = await page.evaluate(
-    (id) => {
-      const walk = (l) => {
-        for (const x of l) {
-          if (x.id === id) return x
-          const r = walk(x.children)
-          if (r) return r
-        }
-        return null
-      }
-      const b = walk(window.__qua.__editor.store.blocks)
-      return (b.content ?? []).filter((r) => r.t === 'text').map((r) => r.v).join('')
-    },
-    fx.cells.c11,
-  )
-  assert(kid.includes('X'), `字进了第 2 格对应的孩子：${kid}`)
-  assert(!r1.text.includes('X'), `没有写到行自己身上：${r1.text}`)
+  const kid = await blockText(page, fx.cells.c11)
+  assert(kid.includes('X'), `字进了那一项：${kid}`)
+  const head = await blockText(page, fx.rows[0])
+  assert(!head.includes('X'), `没有写到表头那一块上：${head}`)
   const ops = await page.evaluate(() => window.__qua.lastOps())
-  assert(ops.length > 0 && ops.every((o) => o.id === fx.cells.c11), `这一笔只碰那一个孩子：${JSON.stringify(ops)}`)
+  assert(ops.length > 0 && ops.every((o) => o.id === fx.cells.c11), `这一笔只碰那一项：${JSON.stringify(ops)}`)
 
-  // 第 1 格：改的是行自己
-  await page.locator(`.lt-row[data-block-id="${fx.rows[0]}"] .lt-cell[data-col="0"] .tv-title-inner`).click()
+  // 表头格：改的是那一列自己（直接子块）
+  await page.locator(`.lt-cell--head[data-block-id="${fx.rows[0]}"] .tv-title-inner`).click()
   await page.waitForTimeout(220)
   await page.keyboard.type('Y')
   await page.keyboard.press('Enter')
   await page.waitForTimeout(350)
-  const m2 = await listModel(page, fx.root)
-  assert(
-    m2.rows.find((r) => r.id === fx.rows[0]).text.includes('Y'),
-    `第 1 格改写的是那一块自己的正文：${m2.rows.find((r) => r.id === fx.rows[0]).text}`,
-  )
+  const head2 = await blockText(page, fx.rows[0])
+  assert(head2.includes('Y'), `表头格改写的是那一块自己的正文：${head2}`)
 
-  // 三级起：第 k 格里的孩子收成「＋N 项」，展开不增加主表列
-  const moreSel = `.lt-row[data-block-id="${fx.rows[2]}"] .lt-cell[data-col="2"] .lt-more`
+  // 三级起：项自己的孩子收成「＋N 项」，展开不增加主表列
+  const moreSel = `.lt-cell[data-block-id="${fx.cells.c32}"] .lt-more`
   const moreText = await page.locator(moreSel).textContent()
-  assert(moreText.includes('1'), `格里有孩子时给「＋N 项」：${moreText}`)
+  assert(moreText.includes('1'), `项里有孩子时给「＋N 项」：${moreText}`)
   await page.locator(moreSel).click()
   await page.waitForTimeout(300)
   const ex = await listState(page)
-  assert(ex.subs.length === 1, `点开之后那一格里摊出一个子块：${JSON.stringify(ex.subs)}`)
-  assert(
-    ex.rows[2].cells.length === before.rows[2].cells.length,
-    `展开不增加主表列：${ex.rows[2].cells.length} vs ${before.rows[2].cells.length}`,
-  )
+  assert(ex.subs.length === 1, `点开之后那一格摊开一个子块：${JSON.stringify(ex.subs)}`)
+  assert(ex.head.length === before.head.length, `展开不增加主表列：${ex.head.length}`)
   assert(ex.cols === before.cols, `列数没变：${ex.cols}`)
 
-  // 行首块标：打开那一块（换中心）
-  await page.locator(`.lt-row[data-block-id="${fx.rows[1]}"] .lt-marker`).click()
+  // 表头块标：打开那一列的直接子块（换中心）。块标是 `visibility: hidden`，先悬停那一格
+  const headCell = page.locator(`.lt-cell--head[data-block-id="${fx.rows[1]}"]`)
+  await headCell.hover()
+  await headCell.locator('.lt-marker').click()
   await page.waitForTimeout(400)
   const active = await page.evaluate(() => window.__qua.snapshot().activeId)
-  assert(active === fx.rows[1], `点行首块标＝打开那个一级子块：${active} vs ${fx.rows[1]}`)
+  assert(active === fx.rows[1], `点表头块标＝打开那个一级子块：${active} vs ${fx.rows[1]}`)
 
   await ctx.close()
-  return `第 2 格写回 ${fx.cells.c11}（只碰它）；第 1 格写行自己；＋N 项展开 1 个子块、列数不变；块标打开 ${fx.rows[1]}`
+  return `身体格写回 ${fx.cells.c11}（只碰它）；表头格写那一列自己；＋N 项展开 1 个子块、列数不变；块标打开 ${fx.rows[1]}`
 })
 
 /* ---------------------------------------------------------------- T164 */
 
-await check('T164 大纲表格：按第 k 格排序⇒只改显示序，children 顺序一个字节不动', async () => {
+await check('T164 大纲表格：按某一列排序⇒只改显示序（整行搬），表头与 children 顺序一个字节不动', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const fx = await buildListTree(page)
   await page.evaluate((rid) => window.__qua.invoke('core.view/add', { blockId: rid, kind: 'list-table' }), fx.root)
   await page.waitForTimeout(450)
   const before = await listState(page)
-  assert(before.rows.length === 3, `前置：3 行：${before.rows.length}`)
+  assert(before.rows.length === 2, `前置：2 行：${before.rows.length}`)
 
-  // 排序入口：块菜单 → 视图… →「按第 2 格排序」（结构映射表没有列头，第一行是数据）
-  await page.evaluate((pid) => window.__qua.focusBlock(pid, 0), fx.root)
-  await page.evaluate((pid) => window.__qua.openBlockMenu(pid), fx.root)
-  await page.waitForTimeout(250)
-  const first = await layerRows(page)
-  const at = first.findIndex((r) => r.label.includes('视图'))
-  assert(at >= 0, `块菜单里有「视图…」：${JSON.stringify(first.map((r) => r.label))}`)
-  await page.locator(`.layer-item[data-index="${at}"]`).click()
-  await page.waitForTimeout(250)
-  const menu = await layerRows(page)
-  const sortAt = menu.findIndex((r) => r.label === '按第 2 格排序')
-  assert(sortAt >= 0, `视图菜单里有「按第 2 格排序」：${JSON.stringify(menu.map((r) => r.label))}`)
-  await page.locator(`.layer-item[data-index="${sortAt}"]`).click()
-  await page.waitForTimeout(450)
+  /** 打开「视图…」并点一条按列排序（菜单是动态的，按标签找） */
+  const sortByColumn = async (label) => {
+    await page.evaluate((pid) => window.__qua.focusBlock(pid, 0), fx.root)
+    await page.evaluate((pid) => window.__qua.openBlockMenu(pid), fx.root)
+    await page.waitForTimeout(250)
+    const first = await layerRows(page)
+    const at = first.findIndex((r) => r.label.includes('视图'))
+    assert(at >= 0, `块菜单里有「视图…」：${JSON.stringify(first.map((r) => r.label))}`)
+    await page.locator(`.layer-item[data-index="${at}"]`).click()
+    await page.waitForTimeout(250)
+    const menu = await layerRows(page)
+    const sortAt = menu.findIndex((r) => r.label === label)
+    assert(sortAt >= 0, `视图菜单按列名列出排序（${label}）：${JSON.stringify(menu.map((r) => r.label))}`)
+    await page.locator(`.layer-item[data-index="${sortAt}"]`).click()
+    await page.waitForTimeout(450)
+  }
 
-  const after = await listState(page)
-  // 第 2 格的值：键盘 / 399 / 12 ⇒ 升序 12 < 399 < 键盘（数值不退化成字典序）
+  await sortByColumn('按「名称」列排序')
+  const asc = await listState(page)
   assert(
-    JSON.stringify(after.rows.map((r) => r.id)) === JSON.stringify([fx.rows[2], fx.rows[1], fx.rows[0]]),
-    `按第 2 格升序：12 < 399 < 键盘：${JSON.stringify(after.rows.map((r) => r.id))}`,
+    asc.rows[0].cells[0].block === fx.cells.c11,
+    `升序：键盘 在前：${JSON.stringify(asc.rows.map((r) => r.cells[0].block))}`,
+  )
+
+  // 再点一次＝降序（菜单里这一项此刻标着「升序」，第三下取消）
+  await sortByColumn('按「名称」列排序')
+  const after = await listState(page)
+  assert(
+    JSON.stringify(after.rows.map((r) => r.cells[0].block)) === JSON.stringify([fx.cells.c12, fx.cells.c11]),
+    `按第 1 列降序：鼠标 在前：${JSON.stringify(after.rows.map((r) => r.cells[0].block))}`,
+  )
+  assert(
+    after.rows[0].cells[1].empty,
+    `整行一起搬（鼠标那一行在价格列是空的）：${JSON.stringify(after.rows[0].cells)}`,
+  )
+  assert(
+    JSON.stringify(after.head.map((c) => c.block)) === JSON.stringify(before.head.map((c) => c.block)),
+    '表头不参与排序（列序不动）',
   )
   const model = await listModel(page, fx.root)
   assert(
@@ -13001,11 +13018,11 @@ await check('T164 大纲表格：按第 k 格排序⇒只改显示序，children
     const active = (b.props?._views ?? []).find((v) => v.id === b.props?._activeView)
     return { kind: active?.kind, sort: active?.list?.sort, columns: active?.table?.columns }
   }, fx.root)
-  assert(cfg.kind === 'list-table' && cfg.sort?.col === 1, `排序写的是「第 2 格」：${JSON.stringify(cfg)}`)
+  assert(cfg.kind === 'list-table' && cfg.sort?.col === 0, `排序写的是第 1 列：${JSON.stringify(cfg)}`)
   assert(cfg.columns === undefined, `结构映射表不存列（列是位置）：${JSON.stringify(cfg.columns)}`)
 
   await ctx.close()
-  return `按第 2 格升序 ⇒ ${after.rows.map((r) => r.id).join(',')}；children 仍是 ${model.children.join(',')}；配置里没有列`
+  return `按「名称」列 升→降 ⇒ ${after.rows.map((r) => r.cells[0].block).join(',')}；表头不动；children 仍是 ${model.children.join(',')}；配置里没有列`
 })
 
 /* ---------------------------------------------------------------- T165–T167 露面（镜像／投影） */
@@ -13057,7 +13074,9 @@ const embedState = (page) =>
         text: x.querySelector('.tx')?.textContent ?? '',
       })),
       note: body?.querySelector('.embed-note')?.textContent ?? '',
-      tableRows: body?.querySelectorAll('.lt-row').length ?? 0,
+      tableCaption: body?.querySelector('.lt-caption')?.textContent ?? '',
+      tableHeads: body?.querySelectorAll('.lt-cell--head').length ?? 0,
+      tableRows: body?.querySelectorAll('.lt-row:not(.lt-row--head)').length ?? 0,
       nestedMirrors: body?.querySelectorAll('.embed-mirror').length ?? 0,
     }
   })
@@ -13131,7 +13150,7 @@ await check('T165 镜像：同一块在别处再露一次面；在镜像里改�
   return `镜像 3 行；岛里改字后模型＝…XYZ，两处 DOM 同步；移除露面只摘露面`
 })
 
-await check('T166 投影：同一块在这里看成大纲表格（行＝源的直接子块），源块不动', async () => {
+await check('T166 投影：同一块在这里看成大纲表格（表头＝源的直接子块），源块不动', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const fx = await buildEmbedTree(page)
@@ -13141,7 +13160,10 @@ await check('T166 投影：同一块在这里看成大纲表格（行＝源的�
   )
   await page.waitForTimeout(450)
   const st = await embedState(page)
-  assert(st.tableRows === 2, `表行＝源的直接子块（2 行）：${st.tableRows}`)
+  assert(st.tableHeads === 2, `表头＝源的直接子块（2 列）：${st.tableHeads}`)
+  // 嵌入是一行里的投影：源的名字在屏幕上没有第二处 ⇒ 表标题要有（与整屏那条相反）
+  assert(st.tableCaption === '源', `嵌入时画表标题（说明这是哪棵树）：${JSON.stringify(st.tableCaption)}`)
+  assert(st.tableRows === 0, `源的两个直接子块没有孩子 ⇒ 表头下没有内容行：${st.tableRows}`)
   const cfg = await page.evaluate((id) => {
     const find = (b) => (b.id === id ? b : b.children.map(find).find(Boolean) || null)
     const b = window.__qua.__editor.store.blocks.map(find).find(Boolean)
@@ -13159,7 +13181,7 @@ await check('T166 投影：同一块在这里看成大纲表格（行＝源的�
   assert((srcViews?.length ?? 0) === 0, `源上没有被凭空加一张视图：${JSON.stringify(srcViews)}`)
 
   await ctx.close()
-  return `表格 2 行；_activeView 在露面块上；源 _views 仍是空`
+  return `表格 2 列 0 行；_activeView 在露面块上；源 _views 仍是空`
 })
 
 await check('T167 深度 1：嵌入自己的子树只展开一层，里层只画占位（不递归）', async () => {

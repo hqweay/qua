@@ -74,9 +74,9 @@ export interface TableConfig {
 }
 
 /**
- * 结构映射表的排序：**按第 k 格**（不是按属性列）。
+ * 结构映射表的排序：**按第 k 列**（不是按属性列）。
  *
- * `col` 是位置（`0` ＝ 第 1 格＝行自己的正文，`k` ＝ 第 k 个孩子），与平表的 `SortKey.by`
+ * `col` 是列的位置（`0` ＝ 第一列＝表头的第一个直接子块），与平表的 `SortKey.by`
  * （属性定义 id 或保留键）刻意分开：那边排序的对象是**列定义**，这边是**位置**，
  * 树一变位置的含义就变 —— 合成同一个键会让「这一列是什么意思」有两个答案。
  */
@@ -95,7 +95,7 @@ export interface ViewConfig {
   name?: string
   kind: StoredViewKind
   table?: TableConfig
-  /** 结构映射表：**只有排序**，没有列（列＝第 k 个孩子这个位置，不是配置） */
+  /** 结构映射表：**只有排序**，没有列（列＝一个直接子块，不是配置） */
   list?: { sort?: ListSort }
   board?: { groupBy: string; groupOrder?: string[]; cardFields?: string[]; showEmpty?: boolean }
   gallery?: { cover?: 'first-asset' | 'none'; cardFields?: string[]; size?: 's' | 'm' | 'l' }
@@ -565,7 +565,7 @@ export function withColumns(view: ViewConfig, columns: readonly ViewColumn[]): V
 /**
  * 写结构映射表的排序（`undefined`／空 ⇒ 删掉那一格，回到 children 顺序）。
  *
- * 与 `withSort` 分开：那边的键是列定义，这边的键是**位置**（第几格）。
+ * 与 `withSort` 分开：那边的键是列定义，这边的键是**位置**（第几列）。
  */
 export function withListSort(view: ViewConfig, sort: ListSort | undefined): ViewConfig {
   const next = cloneView(view)
