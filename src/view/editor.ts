@@ -21,6 +21,8 @@ import {
   cloneSubtree,
   depthOf,
   DIVIDER_TYPE,
+  EMBED_PROP,
+  EMBED_TYPE,
   ensurePageInTx,
   flatten,
   hasIdentity,
@@ -48,11 +50,16 @@ import {
   setBlockType,
   siblingMove,
   isFolded,
+  isEmbedBlock,
   toggleChildrenCollapsed,
   toggleCollapsed,
   unfoldBlock,
+  refTitle,
+  refTokensIn,
   uuidv7Hex,
   visibleRows,
+  VIEWS_PROP,
+  ACTIVE_VIEW_PROP,
   writeBlockContent,
   walkForest,
   gutterFieldsOf,
@@ -187,6 +194,14 @@ export interface ViewOpts {
   /** 展开出来的上下文根行首的「收起上下文」＝收掉这一层，露出下一层 */
   onContextBack?: (rootId: string) => void
   /**
+   * **这一份装载里要不要展开露面块的身体**（镜像／投影）。
+   *
+   * 默认 `true`。露面块自己的身体由装配层画；那一层再遇到露面块时**只画占位**——
+   * 这是「深度 1」的**构造性截断**：不是运行时用 visited 集合拦（那会让渲染结果
+   * 依赖从哪开始遍历），而是「下一层根本没有展开这个动作」。
+   */
+  embedBodies?: boolean
+  /**
    * **段的排列**（视图配置轴，不是导航）：`column`（单列流，缺省）｜`row`（段横排）｜`grid`（折行网格）。
    * 只改「段怎么摆」，不改「段是什么」——DOM 形状对所有 layout 一致（见 `renderRows` 的 `.sec`）。
    */
@@ -264,6 +279,16 @@ export interface ViewEvents {
    *    与 `refClick` 同一条口径：缺入口就让它看得见地缺，不静默做成另一种东西。
    */
   widgetBody?: (block: Block, find: FindBlock | undefined, mode: 'summary' | 'full') => HTMLElement
+  /**
+   * **正文里露面块（镜像／投影）的身体**：由 UI 层画（`ui/embed-body.ts`）。
+   *
+   * 与 `widgetBody` 同一条分工：`view` 只交代「这儿有身体、归你画」，不 import `ui`。
+   * 返回一个卸载函数：身体里是另一台编辑器／一张表，**换 DOM 之前必须释放**
+   * （否则每次重排都留一份订阅，页面越用越慢且不报错）。
+   *
+   * ⚠️ 未接 ⇒ 露面块只画抬头、身体留空（看得见地缺）；不退化成一行普通文字。
+   */
+  embedBody?: (block: Block, into: HTMLElement) => (() => void) | void
   /**
    * **资产此刻的样子**（`view/asset-views.ts` 的 `assetViewOf`）。
    *
@@ -422,6 +447,10 @@ export class BlockEditor {
   /** 面包屑的就地展开／逐层收起；见 `ViewOpts` */
   private readonly onExpandContext: ViewOpts['onExpandContext']
   private readonly onContextBack: ViewOpts['onContextBack']
+  /** 露面块的身体能不能展开（深度 1 的构造性截断；见 `ViewOpts.embedBodies`） */
+  private readonly embedBodies: boolean
+  /** 已挂的露面身体 → 卸载函数（换 DOM 之前必须挨个调用） */
+  private readonly embedDisposers = new Map<string, () => void>()
   /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
   private readonly offStore: () => void
   private readonly unbind: () => void
@@ -434,6 +463,7 @@ export class BlockEditor {
     this.write = o.write
     this.onExpandContext = o.onExpandContext
     this.onContextBack = o.onContextBack
+    this.embedBodies = o.embedBodies !== false
     this.doc = o.doc
     this.setLayout(o.layout ?? 'column')
     /**
@@ -460,6 +490,7 @@ export class BlockEditor {
 
   /** 从文档里摘掉这个视图：退订 store、卸掉事件（否则游离容器还会继续被重画） */
   dispose(): void {
+    this.disposeAllEmbeds()
     this.offStore()
     this.unbind()
   }
@@ -508,7 +539,11 @@ export class BlockEditor {
      */
     const only = roots.length === 1 ? roots[0] : undefined
     this.doc = { ...this.doc, roots }
-    if (only && activeView(only)) this.doc.viewRootId = only.id
+    /**
+     * 露面块**从不**当整屏的视图根：它自己的身体由那一行画（见 `ViewEvents.embedBody`）。
+     * 让它当视图根会得到两个宿主（段尾一个、身体一个）——同一张表画两遍。
+     */
+    if (only && activeView(only) && !isEmbedBlock(only)) this.doc.viewRootId = only.id
     else delete this.doc.viewRootId
     // 焦点只算**本视图自己的**（里层编辑器是独立编辑岛，不是「我在编辑」）
     const focused = restoreSelection && this.ownFocus()
@@ -623,8 +658,24 @@ export class BlockEditor {
 
   /* ------------------------------------------------------------ 渲染 */
 
+  /**
+   * 这一行**归本编辑器**的元素。
+   *
+   * ⚠️ 为什么不能直接 `querySelector`：同一个块可能在同一屏出现两次（露面块把源装进自己
+   * 的身体里，而源也可能就在这一屏的原位）。身体是**编辑岛**（另一台编辑器 / 另一张表），
+   * 岛里的 `.blk` 也在这个容器里；按 id 取第一个会取到岛里那份，于是「改这一行」改到了
+   * 另一个实例上——不报错，只是看起来没反应。
+   *
+   * 判据是**岛根**：元素最近的编辑岛必须与本编辑器的岛相同（主编辑器不在任何岛里 ⇒ `null`）。
+   */
   blockEl(id: string): HTMLElement | null {
-    return this.container.querySelector<HTMLElement>(`.blk[data-block-id="${id}"]`)
+    const all = this.container.querySelectorAll<HTMLElement>(`.blk[data-block-id="${id}"]`)
+    if (all.length <= 1) return all[0] ?? null
+    const own = this.container.closest<HTMLElement>(`[${EDIT_ISLAND_ATTR}]`)
+    for (const el of all) {
+      if (el.closest(`[${EDIT_ISLAND_ATTR}]`) === own) return el
+    }
+    return all[0] ?? null
   }
 
   /**
@@ -721,6 +772,7 @@ export class BlockEditor {
      *    守卫放在这里才覆盖得住 `loadPage`／`reloadFromStore`／各命令路径。
      */
     if (this.deferWhileComposing()) return
+    this.disposeAllEmbeds()
     this.container.textContent = ''
     this.mounted.clear()
     this.rebuildAncestors()
@@ -855,6 +907,7 @@ export class BlockEditor {
       hidden: false,
       hasChildren: loc.block.children.length > 0,
     }
+    this.disposeEmbed(id)
     el.replaceWith(this.makeBlockEl(row, gutterFieldsOf(row.block, this.store.blocks)))
     // 被换掉的那个元素带着 `data-caret` ⇒ 缓存与标记都要重来
     this.caretMarks = ''
@@ -895,10 +948,36 @@ export class BlockEditor {
         contextBack: Boolean(this.onContextBack) && r.depth === 0 && (this.doc.expandedRoots?.has(r.block.id) ?? false),
         // 组件体由 UI 层画（`view` 不得 import `ui`）；没接 ⇒ 组件块在正文里退化成空行
         ...(this.events.widgetBody ? { widgetBody: this.events.widgetBody } : {}),
+        // 露面块的身体：这一层只认「有没有展开」；画什么由装配层给（见 `ViewEvents.embedBody`）
+        embedBody: (b, into) => {
+          if (!this.embedBodies) {
+            into.textContent = t('ui.embed.nested')
+            into.dataset.embedNested = '1'
+            return
+          }
+          if (!this.events.embedBody) {
+            into.textContent = t('ui.embed.broken')
+            return
+          }
+          const dispose = this.events.embedBody(b, into)
+          if (dispose) this.embedDisposers.set(b.id, dispose)
+        },
       },
     )
     this.mounted.add(r.block.id)
     return el
+  }
+
+  /** 摘掉某一行的露面身体（换 DOM 之前必须做，否则订阅会跟着旧节点留下） */
+  private disposeEmbed(id: string): void {
+    const d = this.embedDisposers.get(id)
+    if (!d) return
+    this.embedDisposers.delete(id)
+    d()
+  }
+
+  private disposeAllEmbeds(): void {
+    for (const id of [...this.embedDisposers.keys()]) this.disposeEmbed(id)
   }
 
   /* ------------------------------------------------------- DOM → 文本 */
@@ -2340,8 +2419,28 @@ export class BlockEditor {
    * @param typeId 目标类型（必须声明 `text:'readonly'`；可写的类型不该走这条路）
    */
   insertWidgetAfter(id: string, typeId: string): boolean {
-    const loc = locate(this.doc, id)
-    if (!loc) return false
+    return this.insertTypedAfter(id, typeId) !== null
+  }
+
+  /**
+   * 插入一块**没有正文的块**（组件块／分割线／露面块），返回它的 id（原地改类型时就是 `id` 自己）。
+   *
+   * `decorate` 在同一次事务里给新块补属性（露面的指针、看法）——分开写会变成两条 op、
+   * 两次撤销，而用户按的是一次「插入」。
+   */
+  private insertTypedAfter(
+    id: string,
+    typeId: string,
+    decorate?: (b: Block) => void,
+    prepare?: (tx: Tx, loc: Located) => void,
+  ): string | null {
+    /**
+     * 定位**先看本视图，再退回整片森林**：命令带的是块 id，而当前活动编辑器可能是
+     * 一面镜像的岛（它的 `doc.roots` 只有源那一棵）。只看本视图会让「在镜像里展开引用」
+     * 这类动作找不到宿主块——不报错，只是没反应。
+     */
+    const loc = locate(this.doc, id) ?? locate({ roots: this.store.blocks }, id)
+    if (!loc) return null
     const before = this.snap()
 
     /**
@@ -2353,23 +2452,27 @@ export class BlockEditor {
       // 原地改类型是一次属性写入：`_type` 一条 op，撤销一次回到「那行还是空白」。
       // 改类型也算一次改动 ⇒ 时刻并进同一笔（第二条 op）。
       this.write((tx) => {
+        prepare?.(tx, loc)
         tx.patch(loc.block.id, (b) => {
           setBlockType(b, typeId)
+          decorate?.(b)
           b.modified = Date.now()
         })
       })
       this.undo.record(before, 'structural', Date.now())
       this.renderAll()
       this.emitChange('struct', [loc.block.id])
-      return true
+      return loc.block.id
     }
 
     const widget = mkBlock('')
     setBlockType(widget, typeId)
+    decorate?.(widget)
     const empty = mkBlock('')
     // 两个块共用一笔（用户按的是一次「插入」）；落点与 `insertNear` 同一条规则：
     // section 根没有兄弟位，插成它的首两个子块
     const ok = this.write((tx) => {
+      prepare?.(tx, loc)
       if (loc.parent === null) {
         if (typeDeclOf(loc.block).children === 'none') return false
         tx.insert(widget, loc.block.id, 0)
@@ -2380,10 +2483,82 @@ export class BlockEditor {
       tx.insert(empty, loc.parent.id, loc.index + 2)
       return true
     })
-    if (!ok) return false
+    if (!ok) return null
     this.undo.record(before, 'structural', Date.now())
     this.renderAll()
     this.placeCaret(empty.id, 0)
+    this.emitChange('struct')
+    return widget.id
+  }
+
+  /**
+   * 在 `id` 下面插入一次**露面**（镜像／大纲表格），返回露面块的 id。
+   *
+   * 看法写在**露面块自己**的 `_views`／`_activeView` 上（见 `core/embed.ts`）：
+   * 在别处把它转成表格，源块一个字节都不动。
+   */
+  insertEmbedAfter(id: string, targetId: string, view: 'mirror' | 'table' = 'mirror'): string | null {
+    /**
+     * ⚠️ **不要**在这里判 `targetId === id`：那是最常见的一种用法——「在我这一块下面
+     * 再放一份这一块的镜像」。目标是自己不等于「露面指向自己」：露面块的 id 是新发的，
+     * 自指只可能来自坏数据（由 `resolveEmbed` 的 `self` 态兜）。
+     */
+    const viewId = view === 'table' ? `v-${uuidv7Hex().slice(0, 12)}` : ''
+    return this.insertTypedAfter(id, EMBED_TYPE, (b) => {
+      b.props = { ...(b.props ?? {}), [EMBED_PROP]: { block: targetId } }
+      if (viewId) {
+        b.props[VIEWS_PROP] = [{ id: viewId, kind: 'list-table' }]
+        b.props[ACTIVE_VIEW_PROP] = viewId
+      }
+    })
+  }
+
+  /**
+   * **把一枚行内引用就地展开成露面块**：摘掉那一枚原子，在它所在块的下面插一块。
+   *
+   * 为什么是「下面」而不是「在文字中间劈开」：劈开要把 marks／annos／子块归属按三条规则
+   * 各算一次（拆块那条路径），而这一步的用户意图只是「这一处引用要摊开看」——
+   * 摊开的东西放在这句话下面，是能一眼验证的落点；劈错一次却要撤销两回。
+   *
+   * 一次动作一笔事务：摘原子与插露面块共用一个撤销快照（用户按的是一次「展开」）。
+   */
+  expandAtomToEmbed(atomId: string, view: 'mirror' | 'table' = 'mirror'): string | null {
+    const hit = this.findRun(atomId)
+    if (!hit || hit.run.t !== 'ref' || !hit.run.to) return null
+    const hostId = hit.block.id
+    const targetId = hit.run.to
+    const viewId = view === 'table' ? `v-${uuidv7Hex().slice(0, 12)}` : ''
+    return this.insertTypedAfter(
+      hostId,
+      EMBED_TYPE,
+      (b) => {
+        b.props = { ...(b.props ?? {}), [EMBED_PROP]: { block: targetId } }
+        if (viewId) {
+          b.props[VIEWS_PROP] = [{ id: viewId, kind: 'list-table' }]
+          b.props[ACTIVE_VIEW_PROP] = viewId
+        }
+      },
+      (tx) => {
+        tx.patch(hostId, (b) => writeBlockContent(b, removeRunById(b.content, atomId)))
+      },
+    )
+  }
+
+  /**
+   * 移除一次露面（只删露面块；源与其它露面不动）。
+   *
+   * ⚠️ 走**整片森林**定位，不走 `this.doc`：命令可能从一面镜像里发起（活动编辑器是岛），
+   *    而要被摘掉的露面块在另一个视图里。按 `doc` 找会「找不到 ⇒ 什么都不做」。
+   *    删除仍然是一笔事务（产 op、能撤销），只是不再有「补一块落点」那套窗口语义——
+   *    露面块从不是装载根。
+   */
+  removeEmbed(hostId: string): boolean {
+    const b = this.store.find(hostId)
+    if (!b || !isEmbedBlock(b)) return false
+    const before = this.snap()
+    this.write((tx) => tx.remove(hostId))
+    this.undo.record(before, 'structural', Date.now())
+    this.renderAll()
     this.emitChange('struct')
     return true
   }
@@ -2669,6 +2844,7 @@ export class BlockEditor {
     if (ci < 0) ci = 0
     const from = Math.max(0, ci - this.radius)
     const to = Math.min(rows.length, ci + this.radius + 1)
+    this.disposeAllEmbeds()
     this.container.textContent = ''
     this.mounted.clear()
     // ⚠️ 祖先表对**全量** rows 算（上面已经拿到的就是全量可见行），
@@ -3141,6 +3317,32 @@ export class BlockEditor {
     return true
   }
 
+  /**
+   * 粘贴文本里的 `((block-id))` 变成**行内引用**（其余仍是文本）。
+   *
+   * 为什么只在这一处解析：`copy-selected-block-refs` 与外部文本都用这个记号，
+   * 而「文本 → run 序列」只有粘贴这一条路。解析不了的 id **原样保留成文本**——
+   * 那是用户复制来的字，不能因为目标不在这个库就把它吞掉。
+   */
+  private runsWithRefs(text: string): InlineRun[] {
+    const tokens = refTokensIn(text)
+    if (tokens.length === 0) return textRuns(text)
+    const out: InlineRun[] = []
+    let at = 0
+    for (const t of tokens) {
+      if (t.start > at) out.push(...textRuns(text.slice(at, t.start)))
+      const target = this.store.find(t.id)
+      if (!target) {
+        out.push(...textRuns(text.slice(t.start, t.end)))
+      } else {
+        out.push({ id: uuidv7Hex(), t: 'ref', to: t.id, label: refTitle(target) })
+      }
+      at = t.end
+    }
+    if (at < text.length) out.push(...textRuns(text.slice(at)))
+    return out
+  }
+
   /** 粘贴：多行 → 拆块（id 规则：首块保留原 id，其余新发）。纯文本插入，继承插入点的格式。 */
   pasteAt(id: string, offset: number, text: string): void {
     const lines = text.split('\n')
@@ -3148,7 +3350,7 @@ export class BlockEditor {
     if (!loc) return
     const before = this.snap()
     if (lines.length === 1) {
-      const next = spliceRuns(loc.block.content, offset, offset, lines[0]!)
+      const next = spliceRuns(loc.block.content, offset, offset, this.runsWithRefs(lines[0]!))
       this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
     } else {
       // 光标处切两半：首行接在左半后面，余下各成新块，**原右半接到最后一块尾部**
@@ -3297,7 +3499,9 @@ export class BlockEditor {
        * 或已经有激活视图（要能切回大纲）。叶子普通块没有可摊开的东西 ——
        * 给一个点了什么都没有的菜单项，用户只会以为是坏的。
        */
-      blockCanHaveView: Boolean(b && (isQueryBlock(b) || b.children.length > 0 || activeView(b) !== null)),
+      blockCanHaveView: Boolean(
+        b && (isQueryBlock(b) || isEmbedBlock(b) || b.children.length > 0 || activeView(b) !== null),
+      ),
       blockCollapsed: Boolean(b && isFolded(this.doc, b.id)),
       blockDone: b ? todoOf(b) === 'done' : false,
       marking: b ? this.marksAtSel().join('+') : '',

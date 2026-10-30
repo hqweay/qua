@@ -150,6 +150,7 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/insert-image', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 20, layer: 'core' },
   { command: 'core.editor/insert-link', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 25, layer: 'core' },
   { command: 'core.editor/copy-ref', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 30, layer: 'core' },
+  { command: 'core.editor/copy-block-ref', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 35, layer: 'core' },
   { command: 'core.anno/clear-marks', kind: 'menu', when: 'blockFocused && !selectionEmpty', group: 'block/5-mark', order: 50, layer: 'core' },
   /**
    * **视图**（一个块换个看法）：入口只在「有东西可摊开」的块上（查询块 / 有子块 / 已有视图）。
@@ -157,6 +158,11 @@ export const BINDINGS: Binding[] = [
    * 由装配层按当前的 `_views` 现画 —— 绑定表是静态的，装不下「每个块不一样」的项。
    */
   { command: 'core.view/menu', kind: 'menu', when: 'blockFocused && blockCanHaveView', group: 'block/6-view', order: 10, layer: 'core', label: t('menu.label.views'), keywords: ['view', 'table', 'grid', t('menu.kw.views')] },
+  { command: 'core.embed/insert', kind: 'menu', when: 'blockFocused', group: 'block/6-view', order: 20, layer: 'core', label: t('ui.embed.insert') },
+  { command: 'core.embed/paste-menu', kind: 'menu', when: 'blockFocused', group: 'block/6-view', order: 30, layer: 'core', label: t('cmd.embed.paste-menu') },
+  /* 「粘贴为…」的两档：同一个命令，只差一个看法（菜单动态项由装配层现画，绑定点只给选项） */
+  { command: 'core.embed/paste', kind: 'menu', when: 'editorFocus', group: 'embedPaste/1', order: 10, args: { view: 'mirror' }, layer: 'core', label: t('ui.embed.asMirror') },
+  { command: 'core.embed/paste', kind: 'menu', when: 'editorFocus', group: 'embedPaste/1', order: 20, args: { view: 'table' }, layer: 'core', label: t('ui.embed.asTable') },
 
   /* ================= 块选区菜单 ================= */
   { command: 'core.editor/delete-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 10, layer: 'core', keywords: [t('menu.kw.delete')] },

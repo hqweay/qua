@@ -14,6 +14,7 @@ import {
   ACTIVE_VIEW_PROP,
   activeView,
   defaultColumns,
+  isEmbedBlock,
   isQueryBlock,
   mkBlock,
   readSpec,
@@ -66,6 +67,15 @@ export function viewConfigCommands(
    *    让「点了」总有可见结果。
    */
   const reveal = (blockId: string): void => {
+    /**
+     * **露面块不换屏**：它是正文里的一行，不是「一个对象」。
+     * 按普通块那条 `openBlock` 会把用户从正文带走到一块空壳上（看起来像「点了视图就跳页」）。
+     * 换看法之后，身体由装载时重画那一段跟着换——重装当前屏就够了。
+     */
+    if (isEmbedBlock(d.kb.get(blockId))) {
+      d.reloadPage()
+      return
+    }
     const roots = d.rootIds()
     if (roots.length === 1 && roots[0] === blockId) d.reloadPage()
     else d.openBlock(blockId)

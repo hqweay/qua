@@ -15,6 +15,7 @@
  *    本刀只实现 `table`。
  */
 import { ACTIVE_VIEW_PROP, VIEWS_PROP, isDeleted, isQueryBlock, type Block, type BlockProps } from './model.ts'
+import { readEmbed } from './embed.ts'
 import type { KbClient } from './kb/types.ts'
 import { declaredFieldIds, ownFieldIds } from './props.ts'
 import { plainText } from './runs.ts'
@@ -299,6 +300,14 @@ export function isViewRoot(b: Block | undefined): boolean {
 export type ViewSource = { kind: 'query'; blockId: string } | { kind: 'children'; blockId: string }
 
 export function sourceOf(b: Block): ViewSource {
+  /**
+   * **露面的源是它指向的那一块，不是它自己**。
+   *
+   * 这一行就是「一次露面 ＝ 宿主 ＋ 源 ＋ 看法」的全部实现：宿主仍是 `b`（配置住在它身上），
+   * 源换成指针的目标。普通块没有指针 ⇒ 源就是自己，行为与以前一个字不差。
+   */
+  const embed = readEmbed(b)
+  if (embed) return { kind: 'children', blockId: embed.block }
   if (isQueryBlock(b)) return { kind: 'query', blockId: b.id }
   return { kind: 'children', blockId: b.id }
 }

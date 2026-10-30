@@ -32,6 +32,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.editor/insert-tag', title: t('cmd.editor.insert-tag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { tag: { type: 'string' } }, keywords: ['tag', t('menu.kw.tag')] },
   { name: 'core.editor/pick-tag', title: t('cmd.editor.pick-tag'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.inline'), keywords: ['tag', 'autocomplete', t('menu.kw.tag')] },
   { name: 'core.editor/copy-ref', title: t('cmd.editor.copy-ref'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), keywords: ['ref', 'quote', t('menu.kw.ref')] },
+  { name: 'core.editor/copy-block-ref', title: t('cmd.editor.copy-block-ref'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' } }, keywords: ['ref', 'copy', 'embed'] },
   { name: 'core.editor/delete-selected-blocks', title: t('cmd.editor.delete-selected-blocks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/copy-selected-blocks', title: t('cmd.editor.copy-selected-blocks'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/copy-selected-block-refs', title: t('cmd.editor.copy-selected-block-refs'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true },
@@ -141,6 +142,13 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.view/new-row', title: t('cmd.view.new-row'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' } }, keywords: ['row', 'insert', 'new'] },
   { name: 'core.view/delete-row', title: t('cmd.view.delete-row'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { rowId: { type: 'string' } }, keywords: ['row', 'delete', 'trash'] },
   { name: 'core.view/menu', title: t('cmd.view.menu'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' } }, keywords: ['view', 'menu', 'table'] },
+
+  /* ---- 露面（镜像／投影：同一块在别处再出现一次） ---- */
+  { name: 'core.embed/insert', title: t('cmd.embed.insert'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, targetId: { type: 'string' }, view: { type: 'string', enum: ['mirror', 'table'] } }, keywords: ['embed', 'mirror', 'reference', 'view'] },
+  { name: 'core.embed/from-atom', title: t('cmd.embed.from-atom'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { atomId: { type: 'string' }, view: { type: 'string', enum: ['mirror', 'table'] } }, keywords: ['expand', 'embed', 'mirror'] },
+  { name: 'core.embed/remove', title: t('cmd.embed.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' } }, keywords: ['embed', 'remove', 'unlink'] },
+  { name: 'core.embed/paste', title: t('cmd.embed.paste'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, targetId: { type: 'string' }, view: { type: 'string', enum: ['mirror', 'table'] } }, keywords: ['paste', 'embed', 'mirror'] },
+  { name: 'core.embed/paste-menu', title: t('cmd.embed.paste-menu'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['paste', 'embed', 'mirror'] },
 
   /* ---- 浮层 ---- */
   { name: 'core.command-palette/show', title: t('cmd.command-palette.show'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), keywords: ['palette', 'command', t('menu.kw.command')], tile: { icon: 'lucide:compass' } },

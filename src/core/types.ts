@@ -13,6 +13,7 @@
  * ⚠️ 依赖方向：本模块 → `model.ts`，单向。`model.ts` 是零依赖叶子，
  *    反过来 import 会成环（`blockTypeOf` 与 `DEFAULT_BLOCK_TYPE` 留在那里）。
  */
+import { EMBED_TYPE } from './embed.ts'
 import {
   DEFAULT_BLOCK_TYPE,
   blockTypeOf,
@@ -123,6 +124,14 @@ export const TYPE_DECLS: Record<string, TypeDecl> = {
       body: { kind: 'summary' },
     },
   },
+  /**
+   * **露面块**（镜像／投影）：它自己不写正文、不能有子块。
+   *
+   * 为什么 `children: 'none'`：它的孩子是谁这个问题有两个答案（`children` 还是源的子块），
+   * 所以数据上只留一个——子块归源，露面只画。
+   * 正文只读：那一行画的是「这次露面」的抬头与身体，不是用户写的字。
+   */
+  [EMBED_TYPE]: { id: EMBED_TYPE, children: 'none', text: 'readonly' },
 }
 
 /**

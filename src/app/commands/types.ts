@@ -142,7 +142,7 @@ export interface PageDeps {
    * 「选中之后做什么」换掉——**选择器本身只有一份**，两处各写一份就会出现
    * 两种候选集合（同一件事两个答案）。
    */
-  openRefPicker: (rows: Row[], onPick?: (row: Row) => void) => void
+  openRefPicker: (rows: Row[], onPick?: (row: Row) => void, title?: string) => void
   pageTitle: (b: Block) => string
   pageIcon: (b: Block) => string
 }

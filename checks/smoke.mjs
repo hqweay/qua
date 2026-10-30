@@ -13009,6 +13009,253 @@ await check('T164 大纲表格：按第 k 格排序⇒只改显示序，children
   return `按第 2 格升序 ⇒ ${after.rows.map((r) => r.id).join(',')}；children 仍是 ${model.children.join(',')}；配置里没有列`
 })
 
+/* ---------------------------------------------------------------- T165–T167 露面（镜像／投影） */
+
+/**
+ * 露面样例树（用命令面造，与真人敲键盘同一条路）：
+ *
+ * ```
+ * 页
+ * ├ 源          ← 被露面的那一块（有 2 个子块）
+ * │ ├ 子一
+ * │ └ 子二
+ * └ 这里放镜像  ← 宿主：在它下面插一次露面
+ * ```
+ */
+const buildEmbedTree = (page) =>
+  page.evaluate(() => {
+    const q = window.__qua
+    const inv = (name, args = {}) => q.invoke(name, args)
+    const sel = () => q.__editor.sel?.aBlock ?? ''
+    inv('core.page/new')
+    const root = q.__editor.doc.roots[0].id
+    const stub = q.__editor.doc.roots[0].children[0].id
+    inv('core.editor/insert-block', { text: '源' })
+    const src = sel()
+    inv('core.editor/insert-block', { text: '子一' })
+    const c1 = sel()
+    inv('core.editor/indent-block')
+    inv('core.editor/insert-block', { text: '子二' })
+    const c2 = sel()
+    q.focusBlock(src, 0)
+    inv('core.editor/insert-block', { text: '这里放镜像' })
+    const host = sel()
+    q.focusBlock(stub, 0)
+    inv('core.editor/delete-block')
+    return { root, src, c1, c2, host }
+  })
+
+/** 露面行与它身体里的行（DOM → 只读读数） */
+const embedState = (page) =>
+  page.evaluate(() => {
+    const el = document.querySelector('.blk[data-embed="1"]')
+    const body = el?.querySelector('.blk-embed-body')
+    return {
+      embedId: el?.dataset.blockId ?? '',
+      state: el?.dataset.embedState ?? '',
+      rows: [...(body?.querySelectorAll('.blk') ?? [])].map((x) => ({
+        id: x.dataset.blockId,
+        text: x.querySelector('.tx')?.textContent ?? '',
+      })),
+      note: body?.querySelector('.embed-note')?.textContent ?? '',
+      tableRows: body?.querySelectorAll('.lt-row').length ?? 0,
+      nestedMirrors: body?.querySelectorAll('.embed-mirror').length ?? 0,
+    }
+  })
+
+await check('T165 镜像：同一块在别处再露一次面；在镜像里改字，源与正文原位一起变', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await buildEmbedTree(page)
+  await page.evaluate(
+    ({ host, src }) => window.__qua.invoke('core.embed/insert', { blockId: host, targetId: src, view: 'mirror' }),
+    fx,
+  )
+  await page.waitForTimeout(300)
+  const st = await embedState(page)
+  assert(st.embedId !== '', '插了一次露面（.blk[data-embed] 存在）')
+  assert(st.state === 'ok', `源还在 ⇒ 状态 ok：${st.state}`)
+  assert(st.rows.length === 3, `镜像里是源＋两个子块：${JSON.stringify(st.rows)}`)
+  assert(st.rows[0].id === fx.src, `第一行就是源自己（能就地改）：${JSON.stringify(st.rows[0])}`)
+  // blockEl 的作用域：同一个 id 在这一屏有两份，正文那份不是岛里的
+  const scope = await page.evaluate((sid) => {
+    const el = window.__qua.__editor.blockEl(sid)
+    return { inIsland: Boolean(el?.closest('.blk-embed-body')), text: el?.querySelector('.tx')?.textContent }
+  }, fx.src)
+  assert(scope.inIsland === false, `blockEl 取到的是正文那份，不是岛里的：${JSON.stringify(scope)}`)
+
+  // 在镜像里（岛里）就地改源那一行
+  const typed = await page.evaluate((sid) => {
+    const rows = [...document.querySelectorAll(`.blk[data-block-id="${sid}"]`)]
+    const island = rows.find((x) => x.closest('.blk-embed-body'))
+    const tx = island?.querySelector('.tx')
+    if (!tx) return false
+    tx.focus()
+    const sel = document.getSelection()
+    const r = document.createRange()
+    r.selectNodeContents(tx)
+    r.collapse(false)
+    sel.removeAllRanges()
+    sel.addRange(r)
+    return true
+  }, fx.src)
+  assert(typed, '能聚焦到镜像里的源那一行')
+  await page.keyboard.type('XYZ')
+  await page.waitForTimeout(250)
+  const both = await page.evaluate((sid) => {
+    const find = (b) => (b.id === sid ? b : b.children.map(find).find(Boolean) || null)
+    const b = window.__qua.__editor.store.blocks.map(find).find(Boolean)
+    return {
+      model: b?.content.filter((r) => r.t === 'text').map((r) => r.v).join('') ?? '',
+      doms: [...document.querySelectorAll(`.blk[data-block-id="${sid}"]`)].map((x) => x.querySelector('.tx')?.textContent ?? ''),
+    }
+  }, fx.src)
+  assert(both.model.endsWith('XYZ'), `打进去的字落到源块上：${both.model}`)
+  assert(both.doms.length === 2 && both.doms.every((t) => t.endsWith('XYZ')), `两处 DOM 都看到同一份内容：${JSON.stringify(both.doms)}`)
+
+  // 只摘这一次露面：源一个字节不动
+  const removed = await page.evaluate((id) => {
+    window.__qua.invoke('core.embed/remove', { blockId: id })
+    return {
+      gone: !document.querySelector('.blk[data-embed="1"]'),
+      embedGone: !window.__qua.__editor.store.find(id),
+    }
+  }, st.embedId)
+  assert(removed.gone && removed.embedGone, `移除露面之后 DOM 与模型都没了：${JSON.stringify(removed)}`)
+  const srcAfter = await page.evaluate((sid) => {
+    const find = (b) => (b.id === sid ? b : b.children.map(find).find(Boolean) || null)
+    return Boolean(window.__qua.__editor.store.blocks.map(find).find(Boolean))
+  }, fx.src)
+  assert(srcAfter, '源块还在（摘的是这一次露面，不是源）')
+
+  await ctx.close()
+  return `镜像 3 行；岛里改字后模型＝…XYZ，两处 DOM 同步；移除露面只摘露面`
+})
+
+await check('T166 投影：同一块在这里看成大纲表格（行＝源的直接子块），源块不动', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await buildEmbedTree(page)
+  await page.evaluate(
+    ({ host, src }) => window.__qua.invoke('core.embed/insert', { blockId: host, targetId: src, view: 'table' }),
+    fx,
+  )
+  await page.waitForTimeout(450)
+  const st = await embedState(page)
+  assert(st.tableRows === 2, `表行＝源的直接子块（2 行）：${st.tableRows}`)
+  const cfg = await page.evaluate((id) => {
+    const find = (b) => (b.id === id ? b : b.children.map(find).find(Boolean) || null)
+    const b = window.__qua.__editor.store.blocks.map(find).find(Boolean)
+    const active = (b?.props?._views ?? []).find((v) => v.id === b?.props?._activeView)
+    return { kind: active?.kind, onHost: b?.id, source: b?.props?._embed?.block, root: window.__qua.__editor.doc.roots[0]?.id }
+  }, st.embedId)
+  assert(cfg.kind === 'list-table', `看法写在露面块自己身上：${JSON.stringify(cfg)}`)
+  assert(cfg.root === fx.root, `换看法不换屏（露面块不是「一个对象」）：${cfg.root} vs ${fx.root}`)
+  assert(cfg.source === fx.src, `指针指向源：${JSON.stringify(cfg)}`)
+  const srcViews = await page.evaluate((sid) => {
+    const find = (b) => (b.id === sid ? b : b.children.map(find).find(Boolean) || null)
+    const b = window.__qua.__editor.store.blocks.map(find).find(Boolean)
+    return b?.props?._views ?? []
+  }, fx.src)
+  assert((srcViews?.length ?? 0) === 0, `源上没有被凭空加一张视图：${JSON.stringify(srcViews)}`)
+
+  await ctx.close()
+  return `表格 2 行；_activeView 在露面块上；源 _views 仍是空`
+})
+
+await check('T167 深度 1：嵌入自己的子树只展开一层，里层只画占位（不递归）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await buildEmbedTree(page)
+  // 露面插在**源自己的子树里**（host 是源的子块）⇒ 镜像里会再遇到这次露面
+  await page.evaluate(
+    ({ c1, src }) => window.__qua.invoke('core.embed/insert', { blockId: c1, targetId: src, view: 'mirror' }),
+    fx,
+  )
+  await page.waitForTimeout(350)
+  const st = await embedState(page)
+  assert(st.nestedMirrors === 1, `只有外层这一面镜像：${st.nestedMirrors}`)
+  const nested = await page.evaluate((id) => {
+    const outer = document.querySelector(`.blk[data-block-id="${id}"]`)
+    const body = outer?.querySelector('.blk-embed-body')
+    const inner = body?.querySelector('.blk[data-embed="1"]')
+    return {
+      text: inner?.textContent?.slice(0, 40) ?? '',
+      islands: body?.querySelectorAll('.editable-block').length ?? 0,
+    }
+  }, st.embedId)
+  assert(nested.text.includes('嵌套的露面不展开'), `里面那一次只画占位：${nested.text}`)
+  assert(nested.islands === 1, `身体里只有一台编辑器（深度 1 的构造性截断）：${nested.islands}`)
+
+  await ctx.close()
+  return `嵌套只画占位；身体里只有一台编辑器`
+})
+
+await check('T168 悬空：源被删 ⇒ 说一句实话＋一个移除入口；露面块不连坐删除', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await buildEmbedTree(page)
+  // 露面在源**外面**（host 与源同级，露面挂在 host 下面）
+  await page.evaluate(
+    ({ host, src }) => window.__qua.invoke('core.embed/insert', { blockId: host, targetId: src, view: 'mirror' }),
+    fx,
+  )
+  await page.waitForTimeout(300)
+  const before = await embedState(page)
+  assert(before.state === 'ok', `前置：源还在 ⇒ ok：${before.state}`)
+  // 软删源：露面块不在源的子树里，所以仍然留在模型里
+  await page.evaluate((sid) => window.__qua.__editor.remove(sid), fx.src)
+  await page.waitForTimeout(300)
+  const after = await embedState(page)
+  assert(after.embedId === before.embedId, `露面块仍在原位（不连坐删除）：${after.embedId}`)
+  assert(after.state === 'dangling', `悬空态：${after.state}`)
+  assert(after.note !== '', `说得出一句实话：${after.note}`)
+  const btn = await page.evaluate(() => Boolean(document.querySelector('.blk-embed-body .embed-remove')))
+  assert(btn, '给一个「移除这次露面」的出口')
+  await page.evaluate(() => document.querySelector('.blk-embed-body .embed-remove')?.click())
+  await page.waitForTimeout(200)
+  const gone = await page.evaluate(() => !document.querySelector('.blk[data-embed="1"]'))
+  assert(gone, '点了之后露面块消失（只摘这一次露面）')
+
+  await ctx.close()
+  return `dangling（${after.note}）＋移除入口；源被删后露面块仍在`
+})
+
+await check('T169 重开之后露面还在：首帧也要有身体（事件表接上后必须重画一次）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await buildEmbedTree(page)
+  await page.evaluate(
+    ({ host, src }) => window.__qua.invoke('core.embed/insert', { blockId: host, targetId: src, view: 'mirror' }),
+    fx,
+  )
+  await page.waitForTimeout(300)
+  const id = await page.evaluate(() => document.querySelector('.blk[data-embed="1"]')?.dataset.blockId ?? '')
+  assert(id !== '', '前置：露面块在')
+  // 等落盘（localStorage 是防抖写）
+  await page.waitForTimeout(1200)
+  await page.reload({ waitUntil: 'load' })
+  await page.waitForFunction(() => Boolean(window.__qua), undefined, { timeout: 15_000 })
+  await page.waitForTimeout(400)
+  const after = await page.evaluate((eid) => {
+    const el = document.querySelector(`.blk[data-block-id="${eid}"]`)
+    const body = el?.querySelector('.blk-embed-body')
+    return {
+      dom: Boolean(el),
+      state: el?.dataset.embedState ?? '',
+      broken: body?.textContent?.includes('指针坏了') ?? false,
+      rows: body?.querySelectorAll('.blk').length ?? 0,
+    }
+  }, id)
+  assert(after.dom, '重开之后露面块还在（_embed 落库往返）')
+  assert(after.state === 'ok', `源还在 ⇒ state ok：${after.state}`)
+  assert(after.broken === false, `首帧就接上了身体，不是「指针坏了」：${JSON.stringify(after)}`)
+  assert(after.rows >= 3, `身体里是源＋两个子块：${after.rows}`)
+
+  await ctx.close()
+  return `重开后露面仍在，身体 ${after.rows} 行（首帧重画生效）`
+})
+
 /**
  * **判定放在所有用例之后**：写在这里之前时，后面的用例（T136 起）即使红了也不会进
  * `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。

@@ -127,6 +127,16 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     )
     return true
   },
+  /**
+   * 复制成**文本记号** `((block-id))`：粘贴时会被解析成行内引用，也能被「粘贴为…」读成露面源。
+   * 与 `copy-ref`（引文快照 JSON）分开：那个是给人看的引文，这个是给库内粘贴用的指针。
+   */
+  'core.editor/copy-block-ref': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    if (!id) return false
+    app.copy(`((${id}))`, t('ui.toast.blockRefCopied'))
+    return true
+  },
   'core.editor/delete-selected-blocks': (_a, app) => app.ed.deleteSelectedBlocks(),
   'core.editor/copy-selected-blocks': (_a, app) => {
     const text = app.ed.selectedBlocksText()

@@ -1283,3 +1283,32 @@
 .sec[data-shell]:hover .shell-row {
   background: var(--ui-bg-hover, var(--ui-bg-soft));
 }
+
+/*
+ * **露面块**（镜像／投影）：正文槽不参与排版，身体顶替它。
+ *
+ * 为什么 `.tx` 是 `display:none` 而不是删掉：`.tx` 是块 DOM 的契约（光标落点、
+ * 读回正文、`markCaret` 都按它找），删掉等于让这一行在一批既有路径里「不存在」。
+ * 这里只让它不参与排版——它仍然是这一行的正文槽，只是这一行没有用户写的字。
+ *
+ * 身体（`.blk-embed-body`）是**另一个编辑宿主**（岛）：它顶替 `.tx` 占住同一列，
+ * 里面那台编辑器再按自己的缩进画源块。于是「同一块在别处出现」在结构上就是
+ * 「这一行里住着另一份装载」，不是把 `.blk` 套进 `.tx`。
+ */
+.blk[data-embed='1'] > .tx {
+  display: none;
+}
+.blk-embed-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* 源被删／指针坏了：说一句实话 + 一个移除入口（不留一块什么都不画的空白） */
+.embed-note {
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-sm);
+  line-height: var(--ui-lh-tight);
+}
+.embed-remove {
+  margin-top: var(--ui-gap-1);
+  font-size: var(--ui-fs-xs);
+}

@@ -128,3 +128,23 @@ export function resolveRefs(
 export function danglingView(label: string, kind: 'tag' | 'obj' | 'page' = 'page'): RefView {
   return { label, state: 'dangling', kind }
 }
+
+/**
+ * 文本里的块引用记号 `((block-id))`。
+ *
+ * 为什么用文本记号而不是自定义剪贴板 MIME：粘贴要跨窗、跨应用、跨浏览器，
+ * 而 `text/plain` 是唯一到处都在的格式。自定义 MIME 只在同一个应用里活，
+ * 一旦用户在别处中转一次就丢了；`((id))` 至少在文本里看得见、可手写。
+ *
+ * 只认「括号里没有空白」的形状：正文里的普通括号不会因此被误认成引用。
+ */
+const REF_TOKEN = /\(\(([^()\s]{1,128})\)\)/g
+
+export function refTokensIn(text: string): { id: string; start: number; end: number }[] {
+  const out: { id: string; start: number; end: number }[] = []
+  for (const m of text.matchAll(REF_TOKEN)) {
+    const start = m.index ?? 0
+    out.push({ id: m[1]!, start, end: start + m[0].length })
+  }
+  return out
+}

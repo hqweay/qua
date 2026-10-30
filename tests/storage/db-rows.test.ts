@@ -462,3 +462,22 @@ test('probeOf：只在给定的 id 里找，找到就停（不做全库遍历的
   assert.equal(probe.get(b.id)?.id, b.id)
   assert.equal(probe.get(a.id), undefined, '没要求找的不在探测里（省掉一次遍历）')
 })
+
+test('露面指针 `_embed` 往返：一格单行 JSON（不拆行），装载回来仍是对象', () => {
+  const host = mkBlock('e1')
+  host.props = {
+    _type: 'core/view-embed',
+    _embed: { block: 'a1' },
+    _views: [{ id: 'v1', kind: 'list-table' }],
+    _activeView: 'v1',
+  }
+  const rows = workspaceToRowWrites(ws([host]))
+  const embedRows = rows.filter(
+    (r) => r.table === 'BlockProperty' && (r.key as { name?: string }).name === '_embed',
+  )
+  assert.equal(embedRows.length, 1, `一格指针只写一行：${JSON.stringify(embedRows)}`)
+  assert.equal((embedRows[0]!.values as { multi?: number }).multi, 0, '是单值，不是有序列表')
+  const back = roundTrip(ws([host]))
+  assert.deepEqual(back.blocks[0]?.props?._embed, { block: 'a1' }, '装载回来仍是指针对象')
+  assert.equal(back.blocks[0]?.props?._activeView, 'v1', '看法跟着露面块一起往返')
+})

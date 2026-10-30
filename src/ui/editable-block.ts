@@ -62,6 +62,13 @@ export interface EditableBlockDeps {
   area?: HTMLElement
   /** 外部变化到重载的防抖窗口。挂载区重查更贵（要跑查询），给 200 */
   debounceMs?: number
+  /**
+   * **这份装载里要不要展开露面块的身体**。默认 `true`。
+   *
+   * 镜像的身体本身是一份装载：它里面的露面块只画占位（深度 1 的构造性截断），
+   * 否则「A 的子树里嵌了 A」会递归渲染。
+   */
+  embedBodies?: boolean
   /** 面包屑的就地展开／逐层收起（省略则事件层退回 focusBlock） */
   onExpandContext?: (ancestorId: string, rowId: string) => void
   onContextBack?: (rootId: string) => void
@@ -176,6 +183,7 @@ export class EditableBlock {
         folded: {},
         ...(this.deps.viewRootId ? { viewRootId: this.deps.viewRootId } : {}),
       },
+      ...(this.deps.embedBodies === false ? { embedBodies: false } : {}),
       onExpandContext: this.deps.onExpandContext,
       onContextBack: this.deps.onContextBack,
     })

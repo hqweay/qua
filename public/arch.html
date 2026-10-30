@@ -181,7 +181,7 @@
   <span class="key">modified</span>: number     <span class="cmt">最后一次改动（只在编辑边界更新，并进内容那条 upsert）</span>
   <span class="key">annos?</span>: Anno[]       <span class="cmt">可引用区间：只在被引用时才存在（不写空数组）</span>
   <span class="key">props?</span>: {            <span class="cmt">属性袋：键＝定义块的 id，不是名字</span>
-    <span class="key">_type</span>?      <span class="cmt">封闭注册表：core/outline · core/divider · core/collection-widget</span>
+    <span class="key">_type</span>?      <span class="cmt">封闭注册表：core/outline · core/divider · core/collection-widget · core/view-embed</span>
     <span class="key">_icon</span>?      <span class="cmt">lucide:&lt;name&gt; 或字面文本</span>
     <span class="key">_date</span>?      <span class="cmt">有它 ⇒ 日记块（只读、全局一天一个）</span>
     <span class="key">_aliases</span>?   <span class="cmt">地址：0..N，首个是主名，全局唯一</span>
@@ -194,6 +194,9 @@
     <span class="key">_query</span>?     <span class="cmt">有它 ⇒ 查询视图块（值是 where 条件）</span>
     <span class="key">_queryResult</span>? <span class="cmt">冻结的查询结果（成员与顺序；只在刷新时改）</span>
     <span class="key">_mounts</span>?   <span class="cmt">块底挂载区的用户栏：{ label, spec }[]（tab 是一格数据，不是块）</span>
+    <span class="key">_views</span>?    <span class="cmt">视图配置（列/序/分组…）：这一块怎么看，换设备要一致</span>
+    <span class="key">_activeView</span>? <span class="cmt">当前激活的视图 id；缺席＝大纲（不补默认值）</span>
+    <span class="key">_embed</span>?    <span class="cmt">露面：{ block } 指针。源是派生的，看法仍住这块自己的 _views 上</span>
     <span class="key">_items</span>?    <span class="cmt">集合组件的引用列表：块 id[]（有序引用，不是 children —— 零级联）</span>
     <span class="key">_ownProps</span>? · <span class="key">_fieldDefs</span>? · <span class="key">_choices</span>? · <span class="key">_uiPosition</span>?
     <span class="key">[定义块 id]</span>: unknown  <span class="cmt">用户/插件定义的字段值</span>

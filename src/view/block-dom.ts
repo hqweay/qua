@@ -24,10 +24,12 @@ import {
   identityTags,
   inlineTagIdsOf,
   isJournal,
+  isEmbedBlock,
   journalDate,
   journalDateLabel,
   primaryAliasOf,
   prop,
+  resolveEmbed,
   tagIdsOf,
   typeDeclOf,
   widgetBodyHeightOf,
@@ -496,6 +498,7 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'blk-tags',
   'widget-body',
   'widget-row',
+  'blk-embed-body',
 ])
 
 /**
@@ -554,6 +557,14 @@ export function makeBlockEl(
      * 不传 ⇒ 组件块在正文里退化成空的 `.tx`（只读块本来就没有正文，数据一个字节不丢）。
      */
     widgetBody?: (b: Block, find: FindBlock | undefined, mode: 'summary' | 'full') => HTMLElement
+    /**
+     * **露面块的身体**（镜像／投影）：由 UI 层画，`view` 只给位置。
+     *
+     * 身体是**另一个编辑宿主**（岛）：它可能是另一台编辑器（镜像）或一张表（投影）。
+     * 由装配层接（`ViewEvents.embedBody`），这一层只负责「有这一格、归你画」。
+     * 不传 ⇒ 只画抬头，身体留空——看得见地缺，不退化成一行普通文字。
+     */
+    embedBody?: (b: Block, into: HTMLElement) => void
   },
 ): HTMLElement {
   const b = r.block
@@ -864,7 +875,27 @@ export function makeBlockEl(
    *    那个属性是**读数契约**（`view/dom-text.ts` 的四处都按它判），所以由这里兜一层：
    *    画法在 `ui`，契约在 `view`。
    */
-  if (widgetBodyOf(b) && opts.widgetBody) {
+  if (isEmbedBlock(b)) {
+    /**
+     * **露面块**：正文槽空着（它没有用户写的字），身体是另一个编辑宿主。
+     *
+     * 为什么身体**自成一格**（`.blk-embed-body`，`flex: 1 1 auto` 顶替 `.tx`）：
+     * 镜像要看起来就像那一块在这里，而不是「一块里塞了另一块」——把 `.blk` 套进 `.tx`
+     * 会同时踩中缩进（`--depth` 按 `.blk` 算）、块标位置与 `⌘A` 的三条既有判据。
+     * 身体是岛（`data-edit-island`）：里层焦点归里层，外层重排不打断正在打的字。
+     */
+    el.dataset.embed = '1'
+    el.dataset.embedState = resolveEmbed(b, opts.find ?? (() => undefined)).status
+    tx.dataset.embedSlot = '1'
+    tx.setAttribute('aria-hidden', 'true')
+    const body = document.createElement('div')
+    body.className = 'blk-embed-body'
+    body.contentEditable = 'false'
+    body.setAttribute(EDIT_ISLAND_ATTR, '1')
+    body.dataset.embedBodyFor = b.id
+    el.appendChild(body)
+    opts.embedBody?.(b, body)
+  } else if (widgetBodyOf(b) && opts.widgetBody) {
     const kind = widgetBodyOf(b)
     const h = widgetBodyHeightOf(b)
     const body = opts.widgetBody(b, opts.find, kind === 'summary' ? 'summary' : 'full')

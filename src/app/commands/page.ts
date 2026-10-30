@@ -6,8 +6,12 @@ import {
   DISPLAY_PROP,
   displayNameOf,
   FEED_INITIAL,
+  flatten,
   hasList,
   hasTag,
+  EMBED_PROP,
+  EMBED_TYPE,
+  isEmbedBlock,
   isJournal,
   isPropDefBlock,
   isQueryBlock,
@@ -20,6 +24,7 @@ import {
   primaryAliasOf,
   prop,
   tagIdsOf,
+  setBlockType,
   todayISO,
   uuidv7Hex,
   writeRename,
@@ -44,6 +49,7 @@ export function pageCommands(d: PageDeps): Pick<
   | 'renamePage'
   | 'focusTitle'
   | 'showRefPicker'
+  | 'showEmbedPicker'
   | 'insertTag'
   | 'extractToPage'
 > {
@@ -272,6 +278,44 @@ export function pageCommands(d: PageDeps): Pick<
       if (d.rootIds().some((rid) => d.kb.pathOf(ref.id).some((p) => p.id === rid))) d.focusBlock(ref.id, 1)
       d.toast(t('ui.toast.extractedToPage', { name }), 'ok')
       return true
+    },
+
+    /**
+     * **嵌入哪一块？**：候选是整片森林里的内容块（露面块自己也可以被再露面，但不含 `at` 自己）。
+     *
+     * 为什么不复用页/标签那份候选：那一份的判据是「有身份」（可被引用），
+     * 而露面的源可以是**任意内容块**（一棵大纲树的根通常没有地址）。两份候选的判据不同，
+     * 但**选择器本身**仍复用同一个（`openRefPicker`）——分叉的只有候选集合。
+     */
+    showEmbedPicker: (at) => {
+      const rows: Row[] = flatten({ roots: [...d.kb.roots()] })
+        .filter((b) => b.id !== at)
+        .map((b) => ({
+          id: `embed/${b.id}`,
+          label: d.pageTitle(b).trim() === '' ? t('ui.embed.untitled') : d.pageTitle(b),
+          icon: d.pageIcon(b),
+          group: isEmbedBlock(b) ? 'embed/2' : 'embed/1',
+          args: { blockId: at, targetId: b.id, view: 'mirror' },
+        }))
+      d.openRefPicker(
+        rows,
+        (row) => {
+          const { blockId, targetId } = row.args as { blockId: string; targetId: string }
+          const path = d.kb.pathOf(blockId)
+          const parent = path.length > 1 ? path[path.length - 2]! : null
+          const embed = mkBlock('')
+          setBlockType(embed, EMBED_TYPE)
+          embed.props = { ...(embed.props ?? {}), [EMBED_PROP]: { block: targetId } }
+          const index = parent ? d.kb.children(parent.id).findIndex((b) => b.id === blockId) + 1 : 0
+          // 一次插入一笔事务：落点与 `insertNear` 同一条规则（段根没有兄弟位 ⇒ 插成它的子块）
+          d.run((tx) => {
+            if (parent) tx.insert(embed, parent.id, index)
+            else tx.insert(embed, blockId, 0)
+          })
+          d.toast(t('ui.embed.inserted'))
+        },
+        t('ui.embed.pick'),
+      )
     },
 
     showRefPicker: () => {

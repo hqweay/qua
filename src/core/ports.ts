@@ -107,6 +107,19 @@ export interface App {
   /** 把焦点交给页名（**UI 归装配层**：命令只说「要改名」，不碰 `document` — 59 ） */
   focusTitle(): void
   showRefPicker(): void
+  /** 选一个块作为露面的源（锚在 `at` 那一行上）；插入位置也在 `at` 后面 */
+  showEmbedPicker(at: string): void
+  /** 读剪贴板文本（粘贴为… 用；命令层不直接碰浏览器全局） */
+  readText(): Promise<string>
+  /**
+   * **露面块的结构动作**：落在**中心编辑器**上，而不是「此刻焦点所在的那一台」。
+   *
+   * 为什么：焦点可能在一面镜像的岛里（它的装载只有源那一棵），而要被改的露面块
+   * 在正文里。用活动编辑器会「找不到 ⇒ 什么都没发生」，且不报错。
+   */
+  insertEmbed(at: string, targetId: string, view: 'mirror' | 'table'): string | null
+  expandAtomToEmbed(atomId: string, view: 'mirror' | 'table'): string | null
+  removeEmbed(blockId: string): boolean
   /**
    * **用系统浏览器打开一个外链**（`core.link/open` 的落点）。
    *

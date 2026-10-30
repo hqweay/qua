@@ -34,6 +34,7 @@ import { bindDockResize } from './ui/dock-resize.ts'
 import { mountDockSlot } from './ui/dock.ts'
 import { createIcon } from './view/icons.ts'
 import { widgetBodyInDoc } from './ui/dock-widgets.ts'
+import { mountEmbedBody } from './ui/embed-body.ts'
 import { renderAliasEditor } from './ui/alias-editor.ts'
 import { renderFieldsEditor } from './ui/fields-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, renderLinkComposer, type ObjFieldDeps, type PanelDeps } from './ui/panels.ts'
@@ -632,6 +633,8 @@ const panelDeps: PanelDeps = {
    */
   openLink: (id) => void registry.invoke('core.link/open', { atomId: id }, 'popover'),
   removeAtom: (id) => void registry.invoke('core.editor/remove-atom', { atomId: id }, 'popover'),
+  // 把这一枚引用摊开成块：与「粘贴为镜像／表格」同一条命令（看法写在露面块自己身上）
+  embedAtom: (atomId, view) => void registry.invoke('core.embed/from-atom', { atomId, view }, 'popover'),
   closePopover: () => layers.closePopover(),
   openPopover: (render, anchor) => layers.openPopover(render, anchor),
   openDrawer: (title, render) => layers.openDrawer(title, render),
@@ -1487,6 +1490,17 @@ const app: App = {
       () => app.toast(t('err.clipboardFailed'), 'warn'),
     )
   },
+  /** 读剪贴板文本：命令层不直接碰浏览器全局（与 `copy` 对称） */
+  readText: () => navigator.clipboard?.readText?.() ?? Promise.resolve(''),
+  // 结构动作落在中心编辑器上：焦点可能在一面镜像的岛里，而露面块在正文里
+  insertEmbed: (at, targetId, view) => mainEd.insertEmbedAfter(at, targetId, view),
+  expandAtomToEmbed: (atomId, view) => mainEd.expandAtomToEmbed(atomId, view),
+  removeEmbed: (blockId) => {
+    const ok = mainEd.removeEmbed(blockId)
+    // 焦点原本在那一面镜像里：它的宿主已经被摘掉，活动编辑器退回中心
+    if (ok && ed !== mainEd && !ed.container.isConnected) ed = mainEd
+    return ok
+  },
 
   /**
    * **备份并重建本地库**（只读态下唯一的出路）。
@@ -1694,6 +1708,29 @@ function viewEvents(editor: () => BlockEditor, change: ViewEvents['change'], via
      *    一起住在 `widgetBodyInDoc`。装配层只递「宿主能力」。
      */
     widgetBody: (block, find, mode) => widgetBodyInDoc(block, find, dockWidgetDeps(), mode),
+    /**
+     * **正文里的露面身体**（镜像／投影）：同一套分派在正文、挂载区、侧槽里都走这里。
+     *
+     * 身体里是另一台编辑器或一张表 ⇒ 返回卸载函数（外层换 DOM 之前必须调用）。
+     * `onFocus` 把「活动编辑器」切到里层：键位走命令层，认的是当前这一台。
+     */
+    embedBody: (block, into) =>
+      mountEmbedBody(block, into, {
+        store: blocks,
+        kb,
+        run,
+        wire: (ed2, change2) => wireViewEditor(ed2, change2, via),
+        onFocus: (next) => {
+          ed = next
+        },
+        onChange: (kind) => change?.(kind as 'text' | 'struct' | 'load'),
+        project: (b, el) => fillBlockText(el, b, (id) => blocks.find(id), assetViewOf, markAssetMissing),
+        refClick: (hit, el, mods) => handleRefClick(hit, mods, el),
+        onAtomClick: (atom, el, mods) => handleAtomClick(atom, el, mods, via),
+        openBlock: (id) => void registry.invoke('core.block/focus-block', { blockId: id }, via),
+        invoke: (name, args, v) => void registry.invoke(name, args, v ?? via),
+        toast: (text, kind) => app.toast(text, kind),
+      }),
     // 复盘空天格子里落笔：编辑器只报日期，物化那一天（幂等）与重装载归命令层
     shellWrite: (date) => void app.journalShellWrite(date),
     // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
@@ -1744,6 +1781,15 @@ ed.events = viewEvents(
   },
   'editor',
 )
+/**
+ * **首帧要在事件表接上之后重画一次**。
+ *
+ * 编辑器在构造时就画了第一帧（`doc: bootRoots`），而 `events` 是构造之后才赋上去的：
+ * 露面块的身体（`embedBody`）与组件体（`widgetBody`）这类**由装配层提供的画法**
+ * 在那一帧里是缺的。缺了不会报错，只会画成「这次露面的指针坏了」——而它**不会自己好**，
+ * 因为重画要等下一次模型变化。重开一个带露面的库，正好是第一帧就是终态的那种情况。
+ */
+ed.renderAll()
 /**
  * **撤销/重做产出的 op** 并进待落盘队列。
  *

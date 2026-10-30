@@ -9,6 +9,7 @@ import {
   displayNameOf,
   findInForest,
   findPath,
+  isEmbedBlock,
   isJournal,
   journalId,
   mkBlock,
@@ -171,7 +172,7 @@ export function setupPages(deps: PagesDeps) {
     const { renderMounts, renderProperties } = deps.getPanels()
     deps.setEd(mainEd)
     const only = roots.length === 1 ? roots[0] : undefined
-    const viewRootId = only && activeView(only) ? only.id : ''
+    const viewRootId = only && activeView(only) && !isEmbedBlock(only) ? only.id : ''
     // 正文视图的折叠态是**设备**那份；取当前视图持有的那一份（`device.folded` 只在落盘时同步，可能落后一步）
     mainEd.loadPage({ roots, folded: mainEd.doc.folded, ...(viewRootId ? { viewRootId } : {}) })
     // 装载之后才建挂载区：它按**段根**建实例，而段是 `loadPage` 造出来的
@@ -320,11 +321,11 @@ export function setupPages(deps: PagesDeps) {
     },
     ensureDockCard: (side, id) => deps.ensureDockCard(side, id),
     toast: (text, kind) => deps.getApp().toast(text, kind),
-    openRefPicker: (rows, onPick) =>
+    openRefPicker: (rows, onPick, title) =>
       layers.openMenu({
         rows,
         anchor: deps.getEd().caretRect(),
-        title: t('menu.title.refPicker'),
+        title: title ?? t('menu.title.refPicker'),
         searchable: true,
         focusSearch: true,
         emptyText: t('ui.refPicker.empty'),

@@ -56,6 +56,12 @@ export interface PanelDeps {
    */
   openLink: (runId: string) => void
   removeAtom: (id: string) => void
+  /**
+   * **把这一枚引用展开成露面块**（镜像／投影）。
+   *
+   * 浮层不碰结构：它只说「哪一枚、要哪一种看法」，摘原子与插块由命令层一笔事务做完。
+   */
+  embedAtom: (atomId: string, view: 'mirror' | 'table') => void
   closePopover: () => void
   /**
    * @param anchor 锚点：可以直接给矩形，也可以给**取矩形的函数**。
@@ -343,6 +349,29 @@ export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect | n
           else deps.openBlock(target.id)
         })
         row.appendChild(open)
+      }
+      /**
+       * **展开成一块**：镜像与大纲表格是同一个动作的两种看法（见 `core/embed.ts`）。
+       *
+       * 为什么放在引用浮层：用户此刻指着的就是「这一处引用」，摊开它是最少移动的一步。
+       * 浮层只报「哪一枚、哪种看法」；摘原子与插块由命令层一笔事务做完。
+       */
+      if (target && a.to) {
+        const mirror = document.createElement('button')
+        mirror.type = 'button'
+        mirror.textContent = t('ui.embed.asMirror')
+        mirror.addEventListener('click', () => {
+          deps.closePopover()
+          deps.embedAtom(a.id, 'mirror')
+        })
+        const table = document.createElement('button')
+        table.type = 'button'
+        table.textContent = t('ui.embed.asTable')
+        table.addEventListener('click', () => {
+          deps.closePopover()
+          deps.embedAtom(a.id, 'table')
+        })
+        row.append(mirror, table)
       }
       const del = document.createElement('button')
       del.type = 'button'
