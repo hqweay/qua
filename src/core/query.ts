@@ -144,11 +144,16 @@ export interface QueryHit {
 function walk(blocks: readonly Block[], fn: (b: Block, ancestors: Block[]) => void): void {
   walkForest(blocks, (b, ctx) => {
     /**
-     * **属性定义的子块是选项，不是内容行**：查询结果里出现一个选项，等于把
-     * 「这条属性能选什么」当成「库里有这几条内容」。选项只在属性卡的选项编辑器里露面。
+     * **属性定义的子树不是内容行**：它的子块是选项、选项的子块是说明 ——
+     * 把其中任何一层当查询结果，等于把「这条属性能选什么」当成「库里有这几条内容」。
+     *
+     * 判据用**祖先链**（不含自己）：`walkForest` 的 visitor 返回 `undefined` 不会剪枝，
+     * 只看直接父块会漏掉选项的子块。定义块自己**仍然可查** —— 它是一块有属性的块，
+     * `_kind`／`_type` 这类通用属性条件是「哪些定义是日期」的唯一问法。
      */
-    if (ctx.parent && isPropDefBlock(ctx.parent)) return
-    fn(b, ctx.path.slice(0, -1))
+    const ancestors = ctx.path.slice(0, -1)
+    if (ancestors.some(isPropDefBlock)) return
+    fn(b, ancestors)
   })
 }
 

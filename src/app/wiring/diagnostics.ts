@@ -346,6 +346,7 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
           label: r.def ? choiceDisplayLabel(c, r.def, tagName) : '',
         })),
         currentChoiceLabel: r.currentChoiceLabel ?? null,
+        currentChoiceDeleted: r.currentChoiceDeleted === true,
       }))
     },
     /** 直接上级／下级（诊断面；同一条边两个读法） */

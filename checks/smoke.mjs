@@ -13336,15 +13336,25 @@ await check(
     assert(empty.target === setup.defId, `属性卡此刻的主体应是要编辑的定义块：${JSON.stringify(empty)}`)
     assert(empty.rows === 0 && empty.note.length > 0, `没有选项时给空态，而不是空下拉：${JSON.stringify(empty)}`)
 
-    for (const name of ['待办', '完成']) {
-      // 面板会随焦点变化重建：`fill` ＋ Playwright 的「等元素稳定」会和那次重建撞上
-      await page.evaluate((value) => {
-        const input = document.querySelector('.choices-add .choice-add-name')
-        if (!(input instanceof HTMLInputElement)) return
-        input.value = value
-        input.dispatchEvent(new Event('input', { bubbles: true }))
-        document.querySelector('.choices-add .choice-add')?.click()
-      }, name)
+    for (const [name, viaEnter] of [
+      ['待办', false],
+      ['完成', true],
+    ]) {
+      // 面板会随焦点变化重建：`fill` ＋ Playwright 的「等元素稳定」会和那次重建撞上。
+      // 第二条走 Enter —— 只绑按钮 click、表单只 preventDefault 的话，按回车会静默什么都不加。
+      await page.evaluate(
+        ({ value, enter }) => {
+          const input = document.querySelector('.choices-add .choice-add-name')
+          if (!(input instanceof HTMLInputElement)) return
+          input.value = value
+          // 真实用法里焦点在输入框：Enter 才不会被全局键位当成「拆块」
+          input.focus()
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+          if (enter) input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+          else document.querySelector('.choices-add .choice-add')?.click()
+        },
+        { value: name, enter: viaEnter },
+      )
       await page.waitForTimeout(220)
     }
     const added = await page.evaluate(() => {
@@ -13475,21 +13485,27 @@ await check(
 
     const deleted = await page.evaluate((s) => {
       const row = window.__qua.fields(s.memberId).find((f) => f.propId === s.defId)
-      return { value: row?.value ?? null, choices: row?.choices.map((c) => c.id) ?? [], label: row?.currentChoiceLabel ?? null }
+      return {
+        value: row?.value ?? null,
+        choices: row?.choices.map((c) => c.id) ?? [],
+        label: row?.currentChoiceLabel ?? null,
+        deleted: row?.currentChoiceDeleted === true,
+      }
     }, setup)
     assert(deleted.value === setup.choiceId, `软删不清值：${JSON.stringify(deleted)}`)
     assert(deleted.choices.length === 0, `软删的选项不进候选：${JSON.stringify(deleted.choices)}`)
-    assert(deleted.label === null, `软删的选项不再给名字（控件据此显示「选项已删除」）：${JSON.stringify(deleted)}`)
+    assert(deleted.label === '会被删的选项' && deleted.deleted, `旧名留着并标「已删除」（用户才知道恢复哪条）：${JSON.stringify(deleted)}`)
 
     await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.memberId)
     await page.waitForTimeout(240)
     const missing = await page.evaluate((propId) => {
       const sel = document.querySelector(`.prop-row[data-prop-id="${propId}"] select`)
       const o = sel?.querySelector('option[data-missing="1"]')
-      return { value: sel?.value ?? '', text: o?.textContent ?? '', missing: Boolean(o) }
+      return { value: sel?.value ?? '', text: o?.textContent ?? '', missing: Boolean(o), deleted: o?.dataset.deleted ?? '' }
     }, setup.defId)
     assert(missing.missing && missing.value === setup.choiceId, `当前值仍选中：${JSON.stringify(missing)}`)
-    assert(missing.text.includes('选项已删除'), `文案要说清它没了：${JSON.stringify(missing)}`)
+    assert(missing.text.includes('会被删的选项') && missing.text.includes('已删除'), `旧名 ＋ 「已删除」：${JSON.stringify(missing)}`)
+    assert(missing.deleted === '1', `这一项要带 deleted 标记（不是「不在作用域」）：${JSON.stringify(missing)}`)
 
     await page.evaluate((id) => window.__qua.invoke('core.block/restore', { blockId: id }), setup.choiceId)
     await page.waitForTimeout(260)
@@ -13501,7 +13517,7 @@ await check(
     assert(restored.choices.includes('会被删的选项'), `恢复后选项回到候选：${JSON.stringify(restored.choices)}`)
 
     await ctx.close()
-    return `软删被引用的选项 ⇒ 值在、显示「选项已删除」；恢复 ⇒ 候选与显示都回来`
+    return `软删被引用的选项 ⇒ 值在、旧名＋「已删除」；恢复 ⇒ 候选与显示都回来`
   },
 )
 
@@ -13581,6 +13597,53 @@ await check(
       `#乙 的块看不到「仅甲项」：${JSON.stringify(seen.b)}`,
     )
 
+    /**
+     * **标签视角只准动本标签专属的选项**：全局项对所有标签生效，
+     * 这里不能改名、不能删除，只给「对本标签隐藏」。
+     */
+    const perms = await page.evaluate(() => {
+      const items = [...document.querySelectorAll('.choices-editor .choice-item')]
+      const byName = (label) =>
+        items.find((item) => item.querySelector('.choice-name')?.value === label) ?? null
+      const g = byName('全局项')
+      const l = byName('仅甲项')
+      return {
+        globalDelete: Boolean(g?.querySelector('[data-choice-delete]')),
+        globalReadonly: g?.querySelector('.choice-name')?.readOnly ?? null,
+        globalHide: Boolean(g?.querySelector('[data-choice-hide]')),
+        localDelete: Boolean(l?.querySelector('[data-choice-delete]')),
+        localReadonly: l?.querySelector('.choice-name')?.readOnly ?? null,
+      }
+    })
+    assert(
+      perms.globalDelete === false && perms.globalReadonly === true && perms.globalHide === true,
+      `全局项在标签视角只读，只给「对本标签隐藏」：${JSON.stringify(perms)}`,
+    )
+    assert(
+      perms.localDelete === true && perms.localReadonly === false,
+      `本标签专属的选项才可以改名/删除：${JSON.stringify(perms)}`,
+    )
+
+    // 隐藏只影响本标签：别的标签仍看得到；恢复后回来
+    await page.evaluate(() => document.querySelector('[data-choice-hide]')?.click())
+    await page.waitForTimeout(280)
+    const hidden = await page.evaluate((s) => {
+      const rowOf = (id) => window.__qua.fields(id).find((f) => f.propId === s.defId)
+      return {
+        hidden: [...document.querySelectorAll('.choices-hidden .choice-name')].map((e) => e.textContent),
+        a: rowOf(s.a)?.choices.map((c) => c.label) ?? null,
+        b: rowOf(s.b)?.choices.map((c) => c.label) ?? null,
+      }
+    }, setup)
+    assert(hidden.hidden.includes('全局项'), `隐藏后落进「已隐藏」区：${JSON.stringify(hidden)}`)
+    assert(!hidden.a.includes('全局项') && hidden.a.includes('仅甲项'), `#甲 不再看到全局项：${JSON.stringify(hidden.a)}`)
+    assert(hidden.b.includes('全局项'), `#乙 仍看得到全局项（隐藏只作用于本标签）：${JSON.stringify(hidden.b)}`)
+
+    await page.evaluate(() => document.querySelector('.choices-hidden .choice-restore')?.click())
+    await page.waitForTimeout(280)
+    const back = await page.evaluate((s) => window.__qua.fields(s.a).find((f) => f.propId === s.defId)?.choices.map((c) => c.label) ?? [], setup)
+    assert(back.includes('全局项'), `恢复后 #甲 又看得到全局项：${JSON.stringify(back)}`)
+
     // 块上的下拉与派生同一份：不是「面板里有、控件里没有」
     await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.a)
     await page.waitForTimeout(220)
@@ -13602,7 +13665,7 @@ await check(
     assert(drawer.drawers === 1 && drawer.editors === 1, `字段抽屉里同一份编辑器：${JSON.stringify(drawer)}`)
 
     await ctx.close()
-    return `标签视角就地展开（0 层 drawer）；新增默认 only 本标签：甲 2 项 / 乙 1 项；块上下拉同步；字段抽屉同一组件`
+    return `标签视角就地展开（0 层 drawer）；新增默认 only 本标签：甲 2 项 / 乙 1 项；全局项只读（隐藏/恢复）；块上下拉同步；字段抽屉同一组件`
   },
 )
 

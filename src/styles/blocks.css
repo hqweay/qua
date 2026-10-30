@@ -1370,6 +1370,24 @@
 }
 .choice-name--static {
   color: var(--ui-text);
+  background: transparent;
+  border-color: transparent;
+}
+/* 标签视角里「对本标签隐藏」：只影响这一个标签，不删选项 */
+.choice-hide {
+  font: inherit;
+  font-size: var(--ui-fs-2xs);
+  padding: 0 var(--ui-gap-2);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  background: none;
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.choice-hide:hover {
+  color: var(--ui-text);
+  border-color: var(--ui-border);
 }
 .choice-scope {
   font: inherit;

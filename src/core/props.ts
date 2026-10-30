@@ -22,7 +22,7 @@ import { displayNameOf } from './alias.ts'
 import { plainText, textRuns } from './runs.ts'
 import { walkForest } from './walk.ts'
 import { derivedId, uuidv7Hex } from './ids.ts'
-import { allTags, resolveTagIds, tagsById } from './tags.ts'
+import { allTags, resolveTagIds, tagIdsOf, tagsById } from './tags.ts'
 import { t } from './msg.ts'
 
 /**
@@ -209,23 +209,65 @@ export function choiceVisible(choice: Block, tagIds: ReadonlySet<string>): boole
 }
 
 /** 一块带着哪些标签 id（**标签页编辑时把自身算进去**：只看自己的选项） */
-function tagIdSetOf(block: Block, forest: readonly Block[]): Set<string> {
-  const out = new Set(resolveTagIds(block, tagsById(forest)).map((tag) => tag.id))
+function tagIdSetOf(block: Block, tagById: (id: string) => Block | undefined): Set<string> {
+  const out = new Set<string>()
+  for (const id of tagIdsOf(block)) if (tagById(id)) out.add(id)
   if (hasList(block, 'tag')) out.add(block.id)
   return out
 }
 
 /**
- * 这个块在某个属性上**能选**的选项（兄弟顺序）。
+ * **「这个块能选哪些选项」的唯一实现**（兄弟顺序）。
  *
  * 适用性来自块自己打着的标签（`_fieldDefs` 的声明），可见性来自每个选项的
- * `_choiceScope`；定义缺失或不是 `select` ⇒ 空数组（控件空态，不是崩）。
+ * `_choiceScope`。属性面板与表格都必须走这里 —— 两处各写一遍 filter 就会出现
+ * 「同一块在两个视图里能选的东西不一样」。
+ */
+export function choicesForDef(block: Block, def: Block, tagById: (id: string) => Block | undefined): Block[] {
+  if (propKindOf(def) !== 'select') return []
+  const tagIds = tagIdSetOf(block, tagById)
+  return choicesOf(def).filter((c) => choiceVisible(c, tagIds))
+}
+
+/**
+ * 这个块在某个属性上**能选**的选项（兄弟顺序）。
+ *
+ * 定义缺失或不是 `select` ⇒ 空数组（控件空态，不是崩）。
  */
 export function choicesFor(block: Block, propId: string, forest: readonly Block[]): Block[] {
   const def = findPropDef(forest, propId)
-  if (!def || propKindOf(def) !== 'select') return []
-  const tagIds = tagIdSetOf(block, forest)
-  return choicesOf(def).filter((c) => choiceVisible(c, tagIds))
+  if (!def) return []
+  const byId = tagsById(forest)
+  return choicesForDef(block, def, (id) => byId.get(id))
+}
+
+/**
+ * 读 `select` 行时要用的三件查找。
+ *
+ * 默认从整片森林现建；表格那种「一格一次」的调用方可以传一份**一次算好**的
+ * （`find` 要能找到软删的选项：当前值可能指向一条已删的），否则 N 个格子就是
+ * N 次全库扫。
+ */
+export interface ChoiceLookup {
+  /** 按 id 找块（**含软删**） */
+  find: (id: string) => Block | undefined
+  /** 按 id 找标签（作用域的名字） */
+  tagById: (id: string) => Block | undefined
+  /** 标签显示名（缺失时给短 id） */
+  tagName: (id: string) => string
+}
+
+/** 从森林建一份查找（一次扫；`find` 含软删的块） */
+export function choiceLookupOf(forest: readonly Block[]): ChoiceLookup {
+  const tags = tagsById(forest)
+  return {
+    find: (id) => choiceById(forest, id),
+    tagById: (id) => tags.get(id),
+    tagName: (id) => {
+      const tag = tags.get(id)
+      return tag ? displayNameOf(tag) : id.slice(-6)
+    },
+  }
 }
 
 /**
@@ -344,33 +386,28 @@ export function propDisplayLabels(forest: readonly Block[]): Map<string, string>
 }
 
 /**
- * `select` 行的两格派生（**属性面板与表格共用这一份**）。
+ * `select` 行的派生（**属性面板与表格共用这一份**）。
  *
  * `choices` 是「这个块此刻能选的」；`currentChoiceLabel` 是「值指向的那一个叫什么」
- * —— 即使它已被作用域隐藏或软删。两者分开，才做得到「当前值照常显示、不静默丢值」。
+ * —— 即使它已被作用域隐藏或软删（后者再带 `currentChoiceDeleted`，控件据此标「已删除」）。
+ * 两者分开，才做得到「当前值照常显示、不静默丢值」。
  */
 export function choiceCells(
   block: Block,
   propId: string,
   def: Block,
   forest: readonly Block[],
-): { choices: Block[]; currentChoiceLabel?: string } {
-  const tagIds = tagIdSetOf(block, forest)
-  const choices = choicesOf(def).filter((c) => choiceVisible(c, tagIds))
+  lookup?: ChoiceLookup,
+): Pick<FieldRow, 'choices' | 'currentChoiceLabel' | 'currentChoiceDeleted'> {
+  const look = lookup ?? choiceLookupOf(forest)
+  const choices = choicesForDef(block, def, look.tagById)
   const value = valueOf(block, propId)
   if (typeof value !== 'string' || value === '') return { choices }
-  const current = choiceById(forest, value)
-  /**
-   * **软删的选项不给名字**：值还在，但控件要说「选项已删除」——
-   * 显示一个已经不在候选里的旧名字，看起来像它仍然可选。
-   * 被作用域隐藏但仍活着的选项正相反：它只是此刻不提供选择，名字照常显示。
-   */
-  if (!current || isDeleted(current)) return { choices }
-  const tagName = (id: string): string => {
-    const tag = tagsById(forest).get(id)
-    return tag ? displayNameOf(tag) : id.slice(-6)
-  }
-  return { choices, currentChoiceLabel: choiceDisplayLabel(current, def, tagName) }
+  const current = look.find(value)
+  // 真没了（purge／值来自另一个库）：没有名字可显示，UI 用「选项已删除」兜底
+  if (!current) return { choices }
+  const currentChoiceLabel = choiceDisplayLabel(current, def, look.tagName)
+  return isDeleted(current) ? { choices, currentChoiceLabel, currentChoiceDeleted: true } : { choices, currentChoiceLabel }
 }
 
 /** 森林里全部属性定义（先序） */
@@ -517,6 +554,8 @@ export interface FieldRow {
    * 「选项已删除」——值本身不动，用户可显式清空。
    */
   currentChoiceLabel?: string
+  /** `select` 行：当前值指向的选项**已被软删**（控件显示旧名 ＋ 「已删除」标记） */
+  currentChoiceDeleted?: boolean
 }
 
 /**
@@ -533,12 +572,15 @@ export function fieldRows(block: Block, forest: readonly Block[]): FieldRow[] {
   const rows = new Map<string, FieldRow>()
   let order = 0
 
-  /** 同一份行派生里补 `select` 的两格：值控件的选项与当前值名字都从这里来 */
+  /** 同一份行派生里补 `select` 的几格：值控件的选项与当前值名字都从这里来 */
+  let look: ChoiceLookup | undefined
   const fill = (row: FieldRow): FieldRow => {
     if (!row.def || row.kind !== 'select') return row
-    const { choices, currentChoiceLabel } = choiceCells(block, row.propId, row.def, forest)
-    row.choices = choices
-    if (currentChoiceLabel !== undefined) row.currentChoiceLabel = currentChoiceLabel
+    look ??= choiceLookupOf(forest)
+    const cells = choiceCells(block, row.propId, row.def, forest, look)
+    row.choices = cells.choices
+    if (cells.currentChoiceLabel !== undefined) row.currentChoiceLabel = cells.currentChoiceLabel
+    if (cells.currentChoiceDeleted === true) row.currentChoiceDeleted = true
     return row
   }
 

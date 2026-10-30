@@ -98,7 +98,7 @@ export class ChoicesEditor {
     }
     const list = document.createElement('div')
     list.className = 'choices-list'
-    for (const [i, choice] of visible.entries()) list.appendChild(this.choiceItem(def, choice, i, visible, focusTag === ''))
+    for (const [i, choice] of visible.entries()) list.appendChild(this.choiceItem(def, choice, i, visible, focusTag))
     section.appendChild(list)
 
     if (focusTag !== '') {
@@ -146,7 +146,19 @@ export class ChoicesEditor {
 
   /* ---------------------------------------------------------- 行 */
 
-  private choiceItem(def: Block, choice: Block, index: number, siblings: Block[], full: boolean): HTMLElement {
+  /**
+   * 一行选项。
+   *
+   * **标签视角只准动「本标签专属」的选项**（`only` 且 tags 恰好是 `[focusTag]`）：
+   * 全局的、`except` 的、多标签共享的选项动一下会影响所有标签，那里只给
+   * 「对本标签隐藏」；改名/删除/排序是**属性定义页**的事（全量视角）。
+   */
+  private choiceItem(def: Block, choice: Block, index: number, siblings: Block[], focusTag: string): HTMLElement {
+    const full = focusTag === ''
+    const scope = choiceScopeOf(choice)
+    const localOnly = !full && scope.mode === 'only' && scope.tags.length === 1 && scope.tags[0] === focusTag
+    const editable = full || localOnly
+
     const item = document.createElement('div')
     item.className = 'choice-item'
     item.dataset.choiceId = choice.id
@@ -158,27 +170,34 @@ export class ChoicesEditor {
     name.className = 'prop-input choice-name'
     name.value = plainText(choice.content).trim()
     name.placeholder = t('ui.props.choice.name')
-    const commit = (): void => {
-      const next = name.value.trim()
-      if (next === '' || next === plainText(choice.content).trim()) {
-        name.value = plainText(choice.content).trim()
-        return
+    if (editable) {
+      const commit = (): void => {
+        const next = name.value.trim()
+        if (next === '' || next === plainText(choice.content).trim()) {
+          name.value = plainText(choice.content).trim()
+          return
+        }
+        this.deps.write.setLabel(choice.id, next)
       }
-      this.deps.write.setLabel(choice.id, next)
+      name.addEventListener('keydown', (e) => {
+        // 组合期只让输入法自己处理：Enter 常常是选词那一下
+        if (e.key !== 'Enter' || e.isComposing) return
+        e.preventDefault()
+        e.stopPropagation()
+        commit()
+        name.blur()
+      })
+      name.addEventListener('blur', commit)
+    } else {
+      name.readOnly = true
+      name.tabIndex = -1
+      name.classList.add('choice-name--static')
+      name.title = t('ui.props.choice.sharedReadonly')
     }
-    name.addEventListener('keydown', (e) => {
-      // 组合期只让输入法自己处理：Enter 常常是选词那一下
-      if (e.key !== 'Enter' || e.isComposing) return
-      e.preventDefault()
-      commit()
-      name.blur()
-    })
-    name.addEventListener('blur', commit)
 
     const badge = document.createElement('button')
     badge.type = 'button'
     badge.className = 'choice-scope'
-    const scope = choiceScopeOf(choice)
     badge.dataset.mode = scope.mode
     badge.textContent = this.scopeLabel(scope)
     if (full) {
@@ -210,15 +229,44 @@ export class ChoicesEditor {
       down.disabled = index >= siblings.length - 1
       controls.append(up, down)
     }
-    const del = this.iconButton('×', t('ui.props.choice.delete'), () => this.deps.write.remove(choice.id))
-    del.dataset.choiceDelete = '1'
-    controls.appendChild(del)
+    if (editable) {
+      const del = this.iconButton('×', t('ui.props.choice.delete'), () => this.deps.write.remove(choice.id))
+      del.dataset.choiceDelete = '1'
+      controls.appendChild(del)
+    } else {
+      const hide = document.createElement('button')
+      hide.type = 'button'
+      hide.className = 'choice-hide'
+      hide.dataset.choiceHide = '1'
+      hide.textContent = t('ui.props.choice.hideForTag')
+      hide.title = t('ui.props.choice.hideForTagTitle')
+      hide.addEventListener('click', (e) => {
+        e.preventDefault()
+        this.hideFromTag(choice, focusTag)
+      })
+      controls.appendChild(hide)
+    }
 
     row.append(name, badge, controls)
     item.appendChild(row)
 
     if (full && this.openScope === choice.id) item.appendChild(this.scopePanel(choice))
     return item
+  }
+
+  /** 「对本标签隐藏」：只改这一个标签能看到它这件事，不动别的标签 */
+  private hideFromTag(choice: Block, focusTag: string): void {
+    const scope = choiceScopeOf(choice)
+    if (scope.mode === 'all') {
+      this.deps.write.setScope(choice.id, { mode: 'except', tags: [focusTag] })
+      return
+    }
+    if (scope.mode === 'except') {
+      this.deps.write.setScope(choice.id, { mode: 'except', tags: [...scope.tags, focusTag] })
+      return
+    }
+    const tags = scope.tags.filter((id) => id !== focusTag)
+    this.deps.write.setScope(choice.id, tags.length === 0 ? { mode: 'all' } : { mode: 'only', tags })
   }
 
   private iconButton(text: string, title: string, onClick: () => void): HTMLButtonElement {
@@ -347,19 +395,26 @@ export class ChoicesEditor {
 
   /* ---------------------------------------------------------- 添加 */
 
+  /**
+   * 添加一行。
+   *
+   * **点击按钮与按 Enter 走同一条 `doAdd`**：只把按钮绑 click、表单只 `preventDefault`
+   * 的话，Enter 会触发一次什么都没做的 submit（用户看到的是「按回车没反应」）。
+   */
   private addForm(def: Block, focusTag: string): HTMLElement {
     const form = document.createElement('form')
     form.className = 'choices-add'
-    form.addEventListener('submit', (e) => e.preventDefault())
 
     const input = document.createElement('input')
     input.className = 'prop-input choice-add-name'
     input.placeholder = t('ui.props.choice.addPlaceholder')
 
     const add = document.createElement('button')
-    add.type = 'submit'
+    add.type = 'button'
     add.className = 'choice-add'
     add.textContent = t('ui.props.choice.addButton')
+
+    let doAdd: () => void = () => {}
 
     /**
      * 标签视角：新增缺省**只对本标签可见**；一个「全局可用」开关把这次新增改成全局。
@@ -372,66 +427,77 @@ export class ChoicesEditor {
       const label = document.createElement('label')
       label.className = 'choice-global-label'
       label.append(globalBox, document.createTextNode(` ${t('ui.props.choice.globalToggle')}`))
-      add.addEventListener('click', () => {
+      doAdd = (): void => {
         const name = input.value.trim()
         if (name === '') return
         const scope: ChoiceScope = globalBox.checked ? { mode: 'all' } : { mode: 'only', tags: [focusTag] }
         this.deps.write.add(def.id, name, scope)
         input.value = ''
         globalBox.checked = false
-      })
-      form.append(input, label, add)
-      return form
-    }
-
-    const mode = document.createElement('select')
-    mode.className = 'prop-input choice-add-mode'
-    for (const [value, key] of [
-      ['all', 'ui.props.choice.modeAll'],
-      ['only', 'ui.props.choice.modeOnly'],
-      ['except', 'ui.props.choice.modeExcept'],
-    ] as const) {
-      const o = document.createElement('option')
-      o.value = value
-      o.textContent = t(key)
-      mode.appendChild(o)
-    }
-    const tags = document.createElement('div')
-    tags.className = 'choice-tags choice-add-tags'
-    const picked = new Set<string>()
-    const paintTags = (): void => {
-      tags.replaceChildren()
-      tags.hidden = parseMode(mode.value) === 'all'
-      if (tags.hidden) return
-      for (const tag of this.deps.tags()) {
-        const lab = document.createElement('label')
-        lab.className = 'choice-tag'
-        const cb = document.createElement('input')
-        cb.type = 'checkbox'
-        cb.checked = picked.has(tag.id)
-        cb.addEventListener('change', () => {
-          if (cb.checked) picked.add(tag.id)
-          else picked.delete(tag.id)
-        })
-        lab.append(cb, document.createTextNode(` #${this.deps.tagName(tag.id)}`))
-        tags.appendChild(lab)
       }
-    }
-    mode.addEventListener('change', paintTags)
-    paintTags()
-
-    add.addEventListener('click', () => {
-      const name = input.value.trim()
-      if (name === '') return
-      const m = parseMode(mode.value)
-      this.deps.write.add(def.id, name, m === 'all' ? { mode: 'all' } : { mode: m, tags: [...picked] })
-      input.value = ''
-      picked.clear()
-      mode.value = 'all'
+      form.append(input, label, add)
+    } else {
+      const mode = document.createElement('select')
+      mode.className = 'prop-input choice-add-mode'
+      for (const [value, key] of [
+        ['all', 'ui.props.choice.modeAll'],
+        ['only', 'ui.props.choice.modeOnly'],
+        ['except', 'ui.props.choice.modeExcept'],
+      ] as const) {
+        const o = document.createElement('option')
+        o.value = value
+        o.textContent = t(key)
+        mode.appendChild(o)
+      }
+      const tags = document.createElement('div')
+      tags.className = 'choice-tags choice-add-tags'
+      const picked = new Set<string>()
+      const paintTags = (): void => {
+        tags.replaceChildren()
+        tags.hidden = parseMode(mode.value) === 'all'
+        if (tags.hidden) return
+        for (const tag of this.deps.tags()) {
+          const lab = document.createElement('label')
+          lab.className = 'choice-tag'
+          const cb = document.createElement('input')
+          cb.type = 'checkbox'
+          cb.checked = picked.has(tag.id)
+          cb.addEventListener('change', () => {
+            if (cb.checked) picked.add(tag.id)
+            else picked.delete(tag.id)
+          })
+          lab.append(cb, document.createTextNode(` #${this.deps.tagName(tag.id)}`))
+          tags.appendChild(lab)
+        }
+      }
+      mode.addEventListener('change', paintTags)
       paintTags()
-    })
 
-    form.append(input, mode, tags, add)
+      doAdd = (): void => {
+        const name = input.value.trim()
+        if (name === '') return
+        const m = parseMode(mode.value)
+        this.deps.write.add(def.id, name, m === 'all' ? { mode: 'all' } : { mode: m, tags: [...picked] })
+        input.value = ''
+        picked.clear()
+        mode.value = 'all'
+        paintTags()
+      }
+      form.append(input, mode, tags, add)
+    }
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault()
+      doAdd()
+    })
+    add.addEventListener('click', () => doAdd())
+    input.addEventListener('keydown', (e) => {
+      // 组合期只让输入法自己处理：Enter 常常是选词那一下
+      if (e.key !== 'Enter' || e.isComposing) return
+      e.preventDefault()
+      e.stopPropagation()
+      doAdd()
+    })
     return form
   }
 }

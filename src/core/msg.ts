@@ -200,6 +200,8 @@ export const MSG = {
   'ui.props.created': '新建属性「{label}」',
   /* 选项（select）：选项是定义块的子块，值存选项 id —— 改名不改值、删了可恢复 */
   'ui.props.choice.deleted': '选项已删除',
+  'ui.props.choice.deletedNamed': '{label}（已删除）',
+  'ui.props.choice.deletedTitle': '「{label}」已被删除；值仍保留，恢复选项后会显示回来',
   'ui.props.choice.notInScope': '不在当前选项里（切走再切回来不丢）',
   'ui.props.choice.scopeGlobal': '全局',
   'ui.props.choice.scopeOnly': '仅 {tags}',
@@ -222,6 +224,9 @@ export const MSG = {
   'ui.props.choice.hidden': '已隐藏',
   'ui.props.choice.hiddenHint': '这些选项排除了本标签；恢复＝不再排除本标签',
   'ui.props.choice.restore': '恢复',
+  'ui.props.choice.hideForTag': '对本标签隐藏',
+  'ui.props.choice.hideForTagTitle': '只对本标签隐藏；别的标签仍能看到',
+  'ui.props.choice.sharedReadonly': '这条选项对所有标签生效，去属性定义页改',
   'ui.props.choice.globalToggle': '全局可用',
   'ui.props.choice.otherTagsHint': '其他标签专属的选项在属性定义页查看',
   'ui.props.choice.sourceTagDeleted': '（来源标签已删除）',

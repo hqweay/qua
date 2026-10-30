@@ -230,25 +230,48 @@ test('fieldRows：select 行带 choices / currentChoiceLabel；当前值不可�
   assert.equal(r2.value, 'c2', '值一个字节都没动')
 })
 
-test('fieldRows：值指向已软删的选项 ⇒ 不给名字（UI 显示「选项已删除」），值仍在', () => {
+test('fieldRows：值指向已软删的选项 ⇒ 旧名 ＋ 「已删除」标记，值仍在', () => {
   const gone = choice('c-gone', '已删')
   gone.props = { ...gone.props, _deletedAt: 9 }
   const def = selectDef('def', [choice('c1', '待办'), gone])
   const block = blk('b', '一块', { def: 'c-gone' })
   const row = fieldRows(block, [def]).find((r) => r.propId === 'def')!
   assert.deepEqual(row.choices?.map((c) => c.id), ['c1'], '软删的选项不进候选')
-  assert.equal(row.currentChoiceLabel, undefined, '没有名字 ⇒ 控件说「选项已删除」')
+  assert.equal(row.currentChoiceLabel, '已删', '旧名要留着：用户才知道该恢复哪一条')
+  assert.equal(row.currentChoiceDeleted, true, '控件据此标「已删除」')
   assert.equal(row.value, 'c-gone', '值一个字节都没动')
 })
 
-test('查询不把选项当内容行：定义块下的子块不参与求值', () => {
-  const def = selectDef('def', [choice('c1', '待办')])
-  const host = blk('host', '正文里提到 待办 的一块')
-  const hits = runQuery({ where: { text: '待办' } }, { blocks: [def, host] })
+test('查询不把选项及其子块当内容行：schema 子树整棵不参与求值', () => {
+  const note = blk('c1-note', '待办说明')
+  const c1 = choice('c1', '待办')
+  c1.children = [note]
+  const def = selectDef('def', [c1])
+  const host = blk('host', '正文里提到 待办说明 的一块')
+  const hits = runQuery({ where: { text: '待办说明' } }, { blocks: [def, host] })
   assert.deepEqual(
     hits.map((h) => h.blockId),
     ['host'],
-    `选项是「这条属性能选什么」，不是库里的一条内容：${JSON.stringify(hits)}`,
+    `选项的子块也是说明，不是内容行：${JSON.stringify(hits)}`,
+  )
+  const optionHit = runQuery({ where: { text: '待办' } }, { blocks: [def, host] })
+  assert.deepEqual(
+    optionHit.map((h) => h.blockId),
+    ['host'],
+    `选项自己也不是内容行：${JSON.stringify(optionHit)}`,
+  )
+})
+
+test('choicesFor 与 FieldRow.choices 是同一份读法（属性面板与表格不会各算一套）', () => {
+  const def = selectDef('def', [choice('c1', '全局'), choice('c2', '仅 A', { mode: 'only', tags: ['tagA'] })])
+  const tagA = tagBlock('tagA', '任务')
+  tagA.props = { ...tagA.props, _fieldDefs: ['def'] }
+  const block = blk('b', '一块', { _tags: ['tagA'] })
+  const forest = [def, tagA, block]
+  assert.deepEqual(
+    fieldRows(block, forest).find((r) => r.propId === 'def')?.choices?.map((c) => c.id),
+    choicesFor(block, 'def', forest).map((c) => c.id),
+    '同一条属性、同一个块：两条读路径给出同一组选项',
   )
 })
 

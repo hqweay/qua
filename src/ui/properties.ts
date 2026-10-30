@@ -267,9 +267,14 @@ export function makeCellEditor(
     if (current !== '' && !choices.some((c) => c.id === current)) {
       const o = document.createElement('option')
       o.value = current
-      o.textContent = row.currentChoiceLabel ?? t('ui.props.choice.deleted')
+      const base = row.currentChoiceLabel ?? t('ui.props.choice.deleted')
+      // 软删的选项**保留旧名**再标「已删除」：用户才知道要恢复哪一条
+      o.textContent = row.currentChoiceDeleted ? t('ui.props.choice.deletedNamed', { label: base }) : base
       o.dataset.missing = '1'
-      o.title = row.currentChoiceLabel ? t('ui.props.choice.notInScope') : t('ui.props.choice.deleted')
+      if (row.currentChoiceDeleted) o.dataset.deleted = '1'
+      o.title = row.currentChoiceDeleted
+        ? t('ui.props.choice.deletedTitle', { label: base })
+        : t('ui.props.choice.notInScope')
       sel.appendChild(o)
     }
     sel.value = current

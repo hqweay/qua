@@ -15,8 +15,9 @@
  *   `>= 2000` **窗口化**（只挂可视范围 ± 若干行，用上下留白撑出滚动高度）。
  */
 import type { Block, BlockStore, ViewColumn, ViewConfig, ViewRecord } from '../core/index.ts'
-import { choicesOf, clockLabel, displayNameOf, hasValue, propDisplayLabels, propKindOf, propLabel } from '../core/index.ts'
-import { choiceCells, type FieldRow } from '../core/props.ts'
+import { choicesOf, clockLabel, displayNameOf, hasList, hasValue, propDisplayLabels, propKindOf, propLabel } from '../core/index.ts'
+import { choiceCells, type ChoiceLookup, type FieldRow } from '../core/props.ts'
+import { walkForest } from '../core/walk.ts'
 import { plainText } from '../core/runs.ts'
 import { t } from '../core/msg.ts'
 import { makeTagChipEl } from '../view/block-dom.ts'
@@ -107,6 +108,14 @@ export class ViewTable {
   private choiceRanks = new Map<string, Map<string, number>>()
   /** 列头文案（一次算好：同名属性带声明来源；仍重名带短 id） */
   private propLabels = new Map<string, string>()
+  /**
+   * 一格里要用的查找（**一次算好，不逐格扫库**）。
+   *
+   * `byId` 含软删的块：当前值可能指向一个已删的选项，控件要显示它的旧名。
+   * `tagById` 只收标签（作用域徽标的名字）。
+   */
+  private byId = new Map<string, Block>()
+  private tagById = new Map<string, Block>()
   private readonly ro: ResizeObserver | null
   private readonly onScroll = (): void => this.windowIfNeeded()
 
@@ -191,6 +200,7 @@ export class ViewTable {
     const declared = view.table?.columns ?? []
     this.cols = visibleColumns(declared.length > 0 ? declared : this.deps.defaults())
     this.rebuildChoiceRanks()
+    this.rebuildLookups()
     this.rows = this.sorted()
     void host
     this.compact = this.root.clientWidth > 0 && this.root.clientWidth < MIN_TABLE_W
@@ -215,7 +225,16 @@ export class ViewTable {
   /** 只按 blockId 修补动过的那几行（内容/属性变化走这条） */
   sync(ids?: readonly string[]): void {
     const view = this.deps.view()
-    this.rebuildChoiceRanks()
+    /**
+     * 查找表按**增量**修补：块的 id 稳定、对象是活引用 ⇒ 内容/删除都原地可见。
+     * 整库扫只在「没有 ids 的整批修补」与整表重排时做 —— 逐键重扫会把打字变成 O(整库)。
+     */
+    if (ids === undefined || ids.length === 0) {
+      this.rebuildChoiceRanks()
+      this.rebuildLookups()
+    } else {
+      for (const id of ids) this.rememberBlock(id)
+    }
     const sorted = this.sorted()
     const sameSeq =
       sorted.length === this.rows.length && sorted.every((r, i) => r.block.id === this.rows[i]!.block.id)
@@ -280,6 +299,40 @@ export class ViewTable {
       choicesOf(def).forEach((choice, i) => ranks.set(choice.id, i))
       this.choiceRanks.set(def.id, ranks)
     }
+  }
+
+  /** 格子里要用的查找：整片森林扫一次（含软删），之后每格只查表 */
+  private rebuildLookups(): void {
+    this.byId.clear()
+    this.tagById.clear()
+    walkForest(
+      this.deps.store.blocks,
+      (b) => {
+        this.byId.set(b.id, b)
+        if (hasList(b, 'tag')) this.tagById.set(b.id, b)
+      },
+      { includeDeleted: true },
+    )
+  }
+
+  /** 一格 `select` 的查找（`find` 含软删；名字走同一份标签表） */
+  private lookup(): ChoiceLookup {
+    return {
+      find: (id) => this.byId.get(id),
+      tagById: (id) => this.tagById.get(id),
+      tagName: (id) => {
+        const tag = this.tagById.get(id)
+        return tag ? displayNameOf(tag) : id.slice(-6)
+      },
+    }
+  }
+
+  /** 增量修补：把这一块放回查找表（新块要能查到；删掉的块对象仍在表里、只是带了删除标记） */
+  private rememberBlock(id: string): void {
+    const b = this.deps.store.find(id)
+    if (!b) return
+    this.byId.set(id, b)
+    if (hasList(b, 'tag')) this.tagById.set(id, b)
   }
 
   /**
@@ -561,7 +614,7 @@ export class ViewTable {
     box.className = 'tv-editor'
     if (!block) return box
     const def = this.deps.defs().find((d) => d.id === propId)
-    const row = cellRow(block, propId, def, this.deps.store.blocks)
+    const row = cellRow(block, propId, def, this.deps.store.blocks, this.lookup())
     const deps = {
       pickRef: this.deps.pickRef,
       refLabel: this.deps.refLabel,
@@ -615,7 +668,13 @@ export class ViewTable {
 }
 
 /** 一格属性需要的 `FieldRow`（派生不落库；与属性区同一份形状，只少来源与顺序） */
-function cellRow(block: Block, propId: string, def: Block | undefined, forest: readonly Block[]): FieldRow {
+function cellRow(
+  block: Block,
+  propId: string,
+  def: Block | undefined,
+  forest: readonly Block[],
+  lookup: ChoiceLookup,
+): FieldRow {
   const value = block.props?.[propId]
   const kind = def ? propKindOf(def) : 'text'
   const row: FieldRow = {
@@ -629,13 +688,14 @@ function cellRow(block: Block, propId: string, def: Block | undefined, forest: r
     order: 0,
   }
   /**
-   * `select` 的两格与 `fieldRows` 走**同一个**派生（`choiceCells`）：
+   * `select` 的派生与 `fieldRows` 走**同一个** `choiceCells`：
    * 表格与属性面板各算一套的话，同一条属性会在两处给出不同的可选项。
    */
   if (def && kind === 'select') {
-    const { choices, currentChoiceLabel } = choiceCells(block, propId, def, forest)
-    row.choices = choices
-    if (currentChoiceLabel !== undefined) row.currentChoiceLabel = currentChoiceLabel
+    const cells = choiceCells(block, propId, def, forest, lookup)
+    row.choices = cells.choices
+    if (cells.currentChoiceLabel !== undefined) row.currentChoiceLabel = cells.currentChoiceLabel
+    if (cells.currentChoiceDeleted === true) row.currentChoiceDeleted = true
   }
   return row
 }
