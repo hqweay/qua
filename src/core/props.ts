@@ -268,9 +268,11 @@ export function choiceDisplayLabel(choice: Block, def: Block, tagName: (id: stri
   const suffix =
     scope.mode === 'all'
       ? t('ui.props.choice.scopeAllSuffix')
-      : scope.mode === 'only'
-        ? t('ui.props.choice.scopeOnlySuffix', { tags })
-        : t('ui.props.choice.scopeExceptSuffix', { tags })
+      : tags === ''
+        ? t('ui.props.choice.scopeNoTagsSuffix')
+        : scope.mode === 'only'
+          ? t('ui.props.choice.scopeOnlySuffix', { tags })
+          : t('ui.props.choice.scopeExceptSuffix', { tags })
   const label = `${name}${suffix}`
   const again = choicesOf(def).filter((c) => {
     const sc = choiceScopeOf(c)
@@ -278,9 +280,11 @@ export function choiceDisplayLabel(choice: Block, def: Block, tagName: (id: stri
     const suf =
       sc.mode === 'all'
         ? t('ui.props.choice.scopeAllSuffix')
-        : sc.mode === 'only'
-          ? t('ui.props.choice.scopeOnlySuffix', { tags: tg })
-          : t('ui.props.choice.scopeExceptSuffix', { tags: tg })
+        : tg === ''
+          ? t('ui.props.choice.scopeNoTagsSuffix')
+          : sc.mode === 'only'
+            ? t('ui.props.choice.scopeOnlySuffix', { tags: tg })
+            : t('ui.props.choice.scopeExceptSuffix', { tags: tg })
     return `${plainText(c.content).trim() || c.id.slice(-6)}${suf}` === label
   })
   return again.length > 1 ? `${label}（${choice.id.slice(-6)}）` : label

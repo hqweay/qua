@@ -207,12 +207,15 @@ export function setupPanels(deps: PanelsDeps) {
   const createDef = (b: Block, label: string, kind: PropKind, target: PropTarget, mode?: PropCreateMode): void => {
     const name = normalizeAlias(label)
     const existed = kb.propDefs().some((d) => normalizeAlias(propLabel(d)) === name && propKindOf(d) === kind)
+    const before = new Set(kb.propDefs().map((d) => d.id))
     void deps
       .getRegistry()
       .invoke('core.props/create-def', { blockId: b.id, label, kind, target, ...(mode ? { mode } : {}) }, 'ui')
     if (kind !== 'select') return
     if (mode !== 'new' && existed) return
-    const def = kb.propDefs().find((d) => normalizeAlias(propLabel(d)) === name && propKindOf(d) === 'select')
+    const defs = kb.propDefs()
+    // 同名两义时「找到的」必须是**这一次新建的那一个**：按 id 集合比，不按名字猜
+    const def = defs.find((d) => !before.has(d.id) && normalizeAlias(propLabel(d)) === name)
     if (!def) return
     void deps.getRegistry().invoke('core.block/focus-block', { blockId: def.id }, 'ui')
   }

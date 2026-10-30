@@ -207,6 +207,8 @@ export const MSG = {
   'ui.props.choice.scopeAllSuffix': ' · 全局',
   'ui.props.choice.scopeOnlySuffix': ' · {tags}',
   'ui.props.choice.scopeExceptSuffix': ' · 除 {tags}',
+  'ui.props.choice.scopeNoTags': '（还没选标签）',
+  'ui.props.choice.scopeNoTagsSuffix': ' · （还没选标签）',
   'ui.props.choice.scopeInvalid': '选项的可见范围不合法',
   'ui.props.choice.title': '选项',
   'ui.props.choice.empty': '这个属性还没有选项',

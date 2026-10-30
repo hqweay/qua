@@ -237,6 +237,7 @@ export class ChoicesEditor {
   /** 作用域徽标的文案（三态；悬空标签要说出来，别让它看起来正常） */
   private scopeLabel(scope: ChoiceScope): string {
     if (scope.mode === 'all') return t('ui.props.choice.scopeGlobal')
+    if (scope.tags.length === 0) return t('ui.props.choice.scopeNoTags')
     const tags = scope.tags.map((id) => `#${this.deps.tagName(id)}`).join('、')
     const label =
       scope.mode === 'only' ? t('ui.props.choice.scopeOnly', { tags }) : t('ui.props.choice.scopeExcept', { tags })
