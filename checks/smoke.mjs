@@ -14535,6 +14535,110 @@ await check('T189 提升：local → 查询页（块 +1，栏变 linked）；转
 })
 
 /**
+ * **收藏（items 源）**：一批**引用**，不是一批被搬进来的东西。
+ *
+ * 三件事各钉一个静默错误：默认看法是列表（不是大纲）、摘一行不删块、
+ * 顺序＝`_items` 顺序（拖动改序只写这一格）。
+ */
+await check('T185 收藏：默认列表；加/摘一行不删块；顺序跟 `_items` 走', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(300)
+
+  const made = await page.evaluate(() => {
+    const fav = window.__qua.invoke('core.collection/create', { name: '冒烟收藏' })
+    void fav
+    // 找一个现成的集合块（`create` 会把它放进槽里，这里直接按类型找）
+    const flat = []
+    const walk = (list) => {
+      for (const b of list) {
+        flat.push(b)
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    const box = flat.find((b) => b.props?._type === 'core/collection-widget')
+    const items = flat.filter((b) => b.id !== box?.id && b.props?._type === undefined && b.children.length === 0).slice(0, 2)
+    if (!box) return { id: '', items: [] }
+    for (const it of items) window.__qua.invoke('core.collection/add', { collectionId: box.id, blockId: it.id })
+    window.__qua.invoke('core.block/focus-block', { blockId: box.id })
+    return { id: box.id, items: items.map((x) => x.id) }
+  })
+  assert(made.id !== '', '前置：应能建出一个收藏块')
+  assert(made.items.length === 2, `前置：应有两条可收藏的块：${JSON.stringify(made)}`)
+  await page.waitForTimeout(500)
+
+  // ① 默认看法是**列表**（不是大纲：一批手选的引用不是一棵树）
+  const listed = await page.evaluate(() => ({
+    rows: [...document.querySelectorAll('.vl-row')].map((r) => r.dataset.blockId ?? ''),
+    outline: document.querySelectorAll('.queryview-outline:not([hidden])').length,
+    add: Boolean(document.querySelector('.vl-add')),
+  }))
+  assert(listed.rows.length === 2, `收藏块打开就是列表（2 行）：${JSON.stringify(listed)}`)
+  assert(listed.outline === 0, `items 源没有大纲分支：${JSON.stringify(listed)}`)
+  assert(listed.add, '列表要能「加一条」（盘子里要能再放东西）')
+
+  // ② 摘一行：只摘引用，**块还在**
+  const before = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
+  await page.locator(`.vl-row[data-block-id="${made.items[0]}"] .vl-x`).click()
+  await page.waitForTimeout(400)
+  const afterRemove = await page.evaluate((id) => {
+    const box = window.__qua.__editor.store.find(id)
+    return {
+      items: Array.isArray(box?.props?._items) ? box.props._items.length : 0,
+      blocks: window.__qua.snapshot().totalBlocks,
+      rows: document.querySelectorAll('.vl-row').length,
+    }
+  }, made.id)
+  assert(afterRemove.items === 1, `摘掉一条引用：${JSON.stringify(afterRemove)}`)
+  assert(afterRemove.rows === 1, `列表跟着少一行：${JSON.stringify(afterRemove)}`)
+  assert(afterRemove.blocks === before, `摘引用**不删块**：${before} → ${afterRemove.blocks}`)
+
+  // ③ 顺序＝`_items` 顺序（拖动改序只写这一格）
+  await page.evaluate(
+    ({ id, items }) => window.__qua.invoke('core.collection/add', { collectionId: id, blockId: items[0] }),
+    { id: made.id, items: made.items },
+  )
+  await page.waitForTimeout(350)
+  const order = () =>
+    page.evaluate(() => [...document.querySelectorAll('.vl-row')].map((r) => r.dataset.blockId ?? ''))
+  const two = await order()
+  assert(two.length === 2, `加回来之后两行：${JSON.stringify(two)}`)
+  await page.evaluate(
+    // `to` 是**原列表**里的落点（先摘再插，往后拖时自己减一）⇒ 从 0 挪到末尾要写 2
+    ({ id, blockId }) => window.__qua.invoke('core.collection/move', { collectionId: id, blockId, to: 2 }),
+    { id: made.id, blockId: two[0] },
+  )
+  await page.waitForTimeout(400)
+  const moved = await order()
+  assert(moved[0] === two[1] && moved[1] === two[0], `顺序跟着 _items 变：${JSON.stringify([two, moved])}`)
+  const stored = await page.evaluate((id) => {
+    const box = window.__qua.__editor.store.find(id)
+    return Array.isArray(box?.props?._items) ? box.props._items : []
+  }, made.id)
+  assert(JSON.stringify(stored) === JSON.stringify(moved), `模型里的 _items 与屏幕上一致：${JSON.stringify([stored, moved])}`)
+
+  // ④ 引用指向的块被删 ⇒ 引用**保留**、那一行不出（块恢复后自己回来）
+  const ghost = moved[0]
+  await page.evaluate((id) => window.__qua.invoke('core.view/delete-row', { rowId: id }), ghost)
+  await page.waitForTimeout(450)
+  const withGhost = await page.evaluate((id) => {
+    const box = window.__qua.__editor.store.find(id)
+    return {
+      items: Array.isArray(box?.props?._items) ? box.props._items : [],
+      rows: [...document.querySelectorAll('.vl-row')].map((r) => r.dataset.blockId ?? ''),
+    }
+  }, made.id)
+  assert(withGhost.items.includes(ghost), '块被删了，**引用要留着**（它恢复后自己回来）')
+  assert(!withGhost.rows.includes(ghost), `解析不到的那条不出行：${JSON.stringify(withGhost)}`)
+  assert(withGhost.rows.length === withGhost.items.length - 1, `其余照常显示：${JSON.stringify(withGhost)}`)
+
+  await ctx.close()
+  return `2 行 → 摘一条仍 ${afterRemove.blocks} 块 → 顺序跟 _items；删块后引用留着、那一行不出`
+})
+
+/**
  * **判定放在所有用例之后**：写在这里之前时，后面的用例（T136 起）即使红了也不会进
  * `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。
  */

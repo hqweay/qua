@@ -657,3 +657,82 @@ button.queryview-chip:hover {
   justify-content: flex-end;
   gap: var(--ui-gap-2);
 }
+
+/* ---------------------------------------------------------------- 记录列表
+   一行一条记录（标题 ＋ 若干字段）。**没有缩进**：它的三种源里两种是平的一批，
+   一份「有时缩进有时不缩进」的列表会让「这一行在谁下面」变成不稳定的答案。 */
+.vl {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.vl-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+}
+.vl-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  min-width: 0;
+  padding: var(--ui-gap-1) var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+}
+.vl-row:hover {
+  background: var(--ui-surface-sunken);
+}
+/* 拖序的落点：整行左侧亮一道，而不是给一行描边（描边会让行看起来「变了大小」） */
+.vl-row[data-drop-target='1'] {
+  box-shadow: inset 2px 0 0 var(--ui-accent);
+}
+.vl-bullet {
+  flex: none;
+  width: var(--ui-bullet-size);
+  height: var(--ui-bullet-size);
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-border);
+  cursor: pointer;
+}
+.vl-bullet:hover {
+  background: var(--ui-accent);
+}
+.vl-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--ui-text);
+}
+/* 字段列：窄下来先挤它们（标题永远留得住） */
+.vl-field {
+  flex: 0 1 auto;
+  max-width: 10rem;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-sm);
+}
+.vl-x {
+  flex: none;
+  padding: 0 var(--ui-gap-1);
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+}
+.vl-row:hover .vl-x {
+  opacity: 1;
+}
+.vl-x:hover {
+  color: var(--ui-danger);
+}
+.vl-empty {
+  margin: 0;
+  padding: var(--ui-gap-3) var(--ui-gap-2);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-sm);
+}
+.vl-add {
+  align-self: flex-start;
+  margin-top: var(--ui-gap-1);
+}

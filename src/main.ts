@@ -1389,6 +1389,16 @@ const app: App = {
     }, anchor)
   },
 
+  /**
+   * 打开收藏的块选择器（列表视图/卡片上的「加一条」都走这里）。
+   *
+   * 锚点取当前光标的矩形：这一条命令是从面板或卡里发的，那里没有「按钮 rect」可言。
+   */
+  showCollectionPicker: (collectionId) => {
+    // 光标可能在面板里（没有 rect）：给一个零矩形，菜单贴在它旁边而不是不掉出来
+    showCollectionPicker(collectionId, app.ed.caretRect() ?? new DOMRect(0, 0, 0, 0))
+  },
+
   /* ---- 行内资产：入口（粘贴/选文件）与异步入库 ---- */
   /**
    * 选文件：隐藏的 `<input type=file>`。Electron 与 web 同一个入口——

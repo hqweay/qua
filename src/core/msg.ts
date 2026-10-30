@@ -464,6 +464,12 @@ export const MSG = {
   'ui.embed.emptySource': '源没有子块',
 
   'ui.view.kind.list': '列表',
+  /* 记录列表（`list`）：一行一条，没有缩进 —— 它的源里两种是平的一批 */
+  'ui.list.empty': '这一份源还没有记录',
+  'ui.list.open': '打开这一条',
+  'ui.list.unlink': '从这一栏里摘掉（不删块）',
+  'ui.list.add': '加一条',
+  'ui.list.missing': '{n} 条（{gone} 条已删）',
   'ui.view.kind.table': '表格',
   'ui.view.kind.list-table': '大纲表格',
   'ui.view.kind.board': '看板',
@@ -560,6 +566,7 @@ export const MSG = {
   'cmd.embed.paste': '粘贴为…',
   'cmd.embed.paste-menu': '粘贴为…',
   'cmd.collection.create': '新建收藏',
+  'cmd.collection.pick': '收藏：挑一块加进来',
   'cmd.collection.add': '收藏这个块',
   'cmd.collection.remove': '从收藏里移出',
   'cmd.collection.move': '在收藏里调整顺序',

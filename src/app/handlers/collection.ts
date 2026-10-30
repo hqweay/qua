@@ -26,6 +26,12 @@ export const COLLECTION_HANDLERS: Record<string, Handler> = {
     if (!collectionId || !blockId) return false
     return app.removeCollectionItem(collectionId, blockId)
   },
+  'core.collection/pick': (a, app) => {
+    const collectionId = S(a.collectionId)
+    if (!collectionId) return false
+    app.showCollectionPicker(collectionId)
+    return true
+  },
   'core.collection/move': (a, app) => {
     const collectionId = S(a.collectionId)
     const blockId = S(a.blockId)

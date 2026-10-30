@@ -24,6 +24,7 @@
 import {
   childrenRecords,
   defaultColumnsForSource,
+  fieldTextOf,
   displayNameOf,
   expandContexts,
   isQueryBlock,
@@ -42,6 +43,7 @@ import {
   freezeResult,
   frozenStale,
   readViewSet,
+  defaultKindFor,
   type Block,
   type BlockStore,
   type FrozenResult,
@@ -61,6 +63,10 @@ import { BlockEditor, type Run } from '../view/editor.ts'
 import { BlockCell } from './block-cell.ts'
 import { EditableBlock } from './editable-block.ts'
 import { queryChips } from './query-builder.ts'
+import { ViewList } from './view-list.ts'
+
+/** 默认看法的临时 id（不落盘：它代表「这一份源没有激活视图」这件事本身） */
+const DEFAULT_VIEW_ID = 'view-default'
 import { ViewListTable } from './view-list-table.ts'
 import { ViewTable } from './view-table.ts'
 
@@ -201,6 +207,8 @@ export class ViewHost {
   private table: ViewTable | null = null
   /** 结构映射表分支（表头＝直接子块、一列＝那个子块的孩子） */
   private listTable: ViewListTable | null = null
+  /** 记录列表分支（query／children／items 三种源都接） */
+  private list: ViewList | null = null
   /** 这一屏现在画的是谁：`outline` 或激活视图的 id（变了才换分支） */
   private mode = ''
   private readonly cell: BlockCell
@@ -245,6 +253,8 @@ export class ViewHost {
         // children/items 源是活的：子块的正文/属性变了，那一行要跟着变（按 blockId 局部修补）
         if (this.table) this.table.sync(ids)
         if (this.listTable) this.listTable.render(ids)
+        // 列表没有局部修补（它的行就是记录本身）：整表重画，反正只画看得见的那几行
+        if (this.list) this.list.render()
       }
     })
   }
@@ -267,6 +277,8 @@ export class ViewHost {
     this.table = null
     this.listTable?.dispose()
     this.listTable = null
+    this.list?.dispose()
+    this.list = null
     this.cell.dispose()
   }
 
@@ -328,6 +340,21 @@ export class ViewHost {
     return this.bound.view
   }
 
+  /**
+   * **这一份源的默认看法**（没有激活视图时用它画）。
+   *
+   * 它是一张**临时** `ViewConfig`（id 固定、不落盘）：`items` 源的默认是「列表」，
+   * 而列表需要一个 `kind` 才知道画成什么。写回库里的只有用户在切换器里**真的新建**的那些。
+   *
+   * ⚠️ `children`／`query` 的默认是**大纲**，那条分支不走这里（大纲没有配置可言）。
+   */
+  private defaultView(): ViewConfig | null {
+    if (this.bound.view) return this.bound.view
+    const src = this.source
+    if (defaultKindFor(src) !== 'list') return null
+    return { id: DEFAULT_VIEW_ID, kind: 'list' }
+  }
+
   /** 写配置时的拥有者（绑定 ⇒ 目标块；不是这一次的宿主） */
   private get writeOwner(): ViewOwnerRef {
     return this.bound.owner
@@ -355,7 +382,7 @@ export class ViewHost {
    */
   sync(force = false): void {
     const b = this.deps.host()
-    const view = this.view
+    const view = this.defaultView()
     const mode = view ? `${view.kind}:${view.id}` : `outline:${this.source.kind}`
     if (this.warned === false && viewsBroken(this.ownerBlock())) {
       this.warned = true
@@ -377,6 +404,7 @@ export class ViewHost {
     }
     this.paintChrome(b, view)
     if (view?.kind === 'list-table') this.listTable?.render()
+    else if (view?.kind === 'list') this.list?.render()
     else if (view?.kind === 'table') this.table?.sync()
     else if (view) this.paintBodyFallback()
     else this.render()
@@ -453,7 +481,8 @@ export class ViewHost {
     const n = this.rowCount()
     this.els.count.textContent = query ? t('ui.query.count', { count: n }) : t('ui.view.count', { count: n })
     this.els.refresh.hidden = !query
-    this.els.newRow.hidden = query
+    // items 源的行是「引用」，不是这里能长出来的子块 ⇒ 不给「新建一行」（列表自己有「加一条」）
+    this.els.newRow.hidden = query || src.kind === 'items'
     /**
      * 这一颗 `＋` 在两种表里长的是**不同的东西**：平表加一行（＝一个直接子块），
      * 结构映射表加一列（顶部多一个直接子块，它的孩子成为这一列的各项）。
@@ -599,6 +628,8 @@ export class ViewHost {
   }
 
   private showBody(view: ViewConfig): void {
+    // items 源才有行操作：`_items` 是「一批引用」，加/摘/拖都只写它
+    const itemsId = this.source.kind === 'items' ? this.source.blockId : ''
     this.outline?.dispose()
     this.outline = null
     this.els.editor.hidden = true
@@ -608,14 +639,29 @@ export class ViewHost {
      * 记录列表（M3）。它们**不共用**布局：平表有固定行高与窗口化，结构映射表按内容排。
      * 所以按 kind 各建各的实例，切走就 dispose（不藏一台还在订阅的）。
      */
-    const want = view.kind === 'table' ? 'table' : view.kind === 'list-table' ? 'list' : 'none'
+    /**
+     * 四条渲染器各建各的实例（切走就 dispose，不藏一台还在订阅的）：
+     * `table`／`list-table`／`list`／（其余 kind 还没做，给一句实话）。
+     */
+    const want =
+      view.kind === 'table'
+        ? 'table'
+        : view.kind === 'list-table'
+          ? 'listTable'
+          : view.kind === 'list'
+            ? 'list'
+            : 'none'
     if (want !== 'table') {
       this.table?.dispose()
       this.table = null
     }
-    if (want !== 'list') {
+    if (want !== 'listTable') {
       this.listTable?.dispose()
       this.listTable = null
+    }
+    if (want !== 'list') {
+      this.list?.dispose()
+      this.list = null
     }
     this.els.table.hidden = false
     if (want === 'none') {
@@ -623,6 +669,37 @@ export class ViewHost {
       return
     }
     if (want === 'list') {
+      if (!this.list) {
+        this.list = new ViewList({
+          store: this.deps.store,
+          records: () => this.records(),
+          view: () => this.view ?? view,
+          fieldLabel: (id) => this.deps.fields().find((f) => f.id === id)?.label ?? id.slice(-6),
+          projectTitle: (r, into) => this.deps.project(r.block, into),
+          project: (r, key, into) => {
+            into.textContent = fieldTextOf(r, key, (v) =>
+              typeof v === 'string' && this.deps.refLabel ? this.deps.refLabel(v) : null,
+            )
+          },
+          openBlock: (id) => this.deps.openBlock(id),
+          // items 源的三件事：加一条／摘一条／拖一下，都只写 `_items`
+          ...(itemsId !== ''
+            ? {
+                addItem: () => this.deps.invoke('core.collection/pick', { collectionId: itemsId }),
+                removeItem: (id: string) =>
+                  this.deps.invoke('core.collection/remove', { collectionId: itemsId, blockId: id }),
+                moveItem: (id: string, to: number) =>
+                  this.deps.invoke('core.collection/move', { collectionId: itemsId, blockId: id, to }),
+              }
+            : {}),
+          toast: (text, kind) => this.deps.toast?.(text, kind),
+        })
+        this.els.table.replaceChildren(this.list.root)
+      }
+      this.list.render()
+      return
+    }
+    if (want === 'listTable') {
       if (!this.listTable) {
         this.listTable = new ViewListTable({
           store: this.deps.store,

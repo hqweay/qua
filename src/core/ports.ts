@@ -396,6 +396,13 @@ export interface App {
   removeCollectionItem(collectionId: string, blockId: string): boolean
   /** 把一条引用移到新位置；`to` 是当前列表里的插入下标（含被拖项） */
   moveCollectionItem(collectionId: string, blockId: string, to: number): boolean
+  /**
+   * 打开「选一块加进收藏」的选择器（**纯 UI**，落在装配层）。
+   *
+   * 与 `addCollectionItem` 分开：那个要 blockId，而用户手里还没有 id ——
+   * 这一步是「从库里挑一块」，挑完再调 add。
+   */
+  showCollectionPicker(collectionId: string): void
   /* 浮层 / 提示 */
   toast(text: string, kind?: 'ok' | 'warn' | 'info'): void
   showMenu(req: MenuRequest): void

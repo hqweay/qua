@@ -650,6 +650,31 @@ export function visibleColumns(columns: readonly ViewColumn[]): ViewColumn[] {
   return columns.filter((c) => c.hidden !== true)
 }
 
+/**
+ * 一格的**纯文本**（列表／看板／画廊用；表格画的是 run，不走这里）。
+ *
+ * `resolve` 给「值是一个块 id」的列（`select` 的选项、`ref` 的目标）一次解析机会：
+ * 那些值按 id 直接显示是一串 hex，用户看不懂。解析不到就原样显示 ——
+ * **数据不静默消失**（「选项已删除」那种状态要看得见，而不是空白）。
+ */
+export function fieldTextOf(r: ViewRecord, key: string, resolve?: (value: unknown) => string | null): string {
+  if (key === TITLE_COLUMN) return r.title
+  if (key === TAGS_COLUMN) return r.tags.map((t) => plainText(t.content)).join(' ')
+  if (key === CHILDREN_COLUMN) return String(r.block.children.length)
+  if (key === CREATED_COLUMN || key === MODIFIED_COLUMN) {
+    const at = key === CREATED_COLUMN ? r.block.created : r.block.modified
+    return new Date(at).toLocaleDateString('zh-Hans-CN')
+  }
+  const v = r.values[key]
+  if (v === undefined || v === null) return ''
+  if (resolve) {
+    const hit = resolve(v)
+    if (hit !== null) return hit
+  }
+  if (Array.isArray(v)) return v.map((x) => String(x)).join(' ')
+  return typeof v === 'object' ? JSON.stringify(v) : String(v)
+}
+
 /* ------------------------------------------------------------ 排序 */
 
 /**
