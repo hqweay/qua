@@ -374,6 +374,8 @@ export interface App {
   viewSetSort(owner: ViewOwnerRef, viewId: string, by: string, dir: string): boolean
   /** 「视图…」菜单：列出默认看法 ＋ 已有视图 ＋ 新建…（**纯 UI**，落在装配层） */
   openViewMenu(owner: ViewOwnerRef): void
+  /** 打开**条件构建器**（一个浮层；草稿改在本地，点「应用」才写一次） */
+  openQueryBuilder(owner: ViewOwnerRef): void
   /**
    * 写**条件**（构建器／JSON 的落点）。
    *

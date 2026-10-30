@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, sourceOfOwner, storedKindsFor, type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, sourceOfOwner, storedKindsFor, propDisplayLabels, propLabel, type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { checkExternalUrl, rejectText } from './core/link.ts'
 import { BlockStore } from './core/store.ts'
@@ -46,6 +46,7 @@ import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupDocks } from './app/wiring/docks.ts'
 import { setupPanels } from './app/wiring/panels.ts'
 import { setupOwners } from './app/wiring/owners.ts'
+import { renderQueryBuilder } from './ui/query-builder.ts'
 import { setupChrome } from './app/wiring/chrome.ts'
 import { setupPages } from './app/wiring/pages.ts'
 import { setupDiagnostics } from './app/wiring/diagnostics.ts'
@@ -1358,6 +1359,34 @@ const app: App = {
         } else if (id.startsWith('view/add/')) void registry.invoke('core.view/add', { owner, kind: id.slice('view/add/'.length) }, 'menu')
       },
     })
+  },
+
+  /**
+   * **条件构建器**（一个浮层）。草稿改在本地、点「应用」才写一次 ——
+   * 边打字边写会把 ⌘Z 变成「一个字一步」。
+   *
+   * 字段下拉的候选由这里算好（`ui` 不扫森林）：属性定义 ＋ 显示名（同名带来源）。
+   */
+  openQueryBuilder: (owner) => {
+    const data = owners.read(owner)
+    if (!data?.query) {
+      app.toast(t('ui.query.noSpec'), 'warn')
+      return
+    }
+    const anchor =
+      owner.kind === 'block' ? (app.ed.blockEl(owner.blockId)?.getBoundingClientRect() ?? null) : app.ed.caretRect()
+    layers.openPopover((box) => {
+      renderQueryBuilder(box, {
+        spec: () => owners.read(owner)?.query ?? { where: { any: [] } },
+        fields: () => {
+          const labels = propDisplayLabels(kb.roots())
+          return kb.propDefs().map((d) => ({ id: d.id, label: labels.get(d.id) ?? propLabel(d) }))
+        },
+        apply: (spec) => void registry.invoke('core.query/set-spec', { owner, spec }, 'builder'),
+        close: () => layers.closePopover(),
+        toast: (text, kind) => app.toast(text, kind),
+      })
+    }, anchor)
   },
 
   /* ---- 行内资产：入口（粘贴/选文件）与异步入库 ---- */

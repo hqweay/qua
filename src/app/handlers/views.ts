@@ -54,6 +54,13 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
     if (!owner || !spec || typeof spec !== 'object' || !spec.where) return false
     return app.setQuerySpec(owner, spec)
   },
+  /** 打开条件构建器（纯 UI 浮层，落在装配层） */
+  'core.query/open-builder': (a, app) => {
+    const owner = ownerOrCur(a, app)
+    if (!owner) return false
+    app.openQueryBuilder(owner)
+    return true
+  },
   /** 新建查询页／页内查询块（内容对象） */
   'core.query/create': (a, app) => {
     const kind = S(a.kind, 'page')

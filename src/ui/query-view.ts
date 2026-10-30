@@ -60,6 +60,7 @@ import { t } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
 import { BlockCell } from './block-cell.ts'
 import { EditableBlock } from './editable-block.ts'
+import { queryChips } from './query-builder.ts'
 import { ViewListTable } from './view-list-table.ts'
 import { ViewTable } from './view-table.ts'
 
@@ -115,6 +116,8 @@ export interface ViewHostDeps {
   refLabel?: (targetId: string) => string
   /** 标签名解析（`select` 选项显示名里的 `#名`） */
   tagName?: (id: string) => string
+  /** 可选的属性定义（构建器的字段下拉；按显示名排好，`ui` 不扫森林） */
+  fields: () => readonly { id: string; label: string }[]
 }
 
 export interface ViewHostEls {
@@ -123,6 +126,8 @@ export interface ViewHostEls {
   count: HTMLElement
   /** 视图切换器（默认看法 ＋ 已有视图 ＋ 加一张） */
   views: HTMLElement
+  /** 条件 chip 条（查询源才有；点击＝打开构建器） */
+  filters: HTMLElement
   refresh: HTMLButtonElement
   newRow: HTMLButtonElement
   /** 「结果可能已过期」标记：只提示、不改列表（自动移除会让人正在读的那行凭空消失） */
@@ -151,6 +156,8 @@ export function createViewHostEls(): ViewHostEls {
   const stale = document.createElement('span')
   stale.className = 'queryview-stale'
   stale.hidden = true
+  const filters = document.createElement('div')
+  filters.className = 'queryview-filters'
   const views = document.createElement('div')
   views.className = 'queryview-views'
   const refresh = document.createElement('button')
@@ -160,7 +167,7 @@ export function createViewHostEls(): ViewHostEls {
   newRow.type = 'button'
   newRow.className = 'queryview-newrow'
   newRow.hidden = true
-  head.append(title, count, stale, views, refresh, newRow)
+  head.append(title, count, stale, filters, views, refresh, newRow)
 
   const body = document.createElement('div')
   body.className = 'queryview-body'
@@ -181,7 +188,7 @@ export function createViewHostEls(): ViewHostEls {
   body.append(editor, table)
 
   root.append(head, body)
-  return { root, title, count, views, refresh, newRow, stale, editor, table }
+  return { root, title, count, filters, views, refresh, newRow, stale, editor, table }
 }
 
 /** 一个「表面实例」的冻结结果（内存；不进 KB、不进撤销） */
@@ -456,7 +463,50 @@ export class ViewHost {
     this.els.newRow.textContent = list ? t('ui.view.newColumn') : t('ui.view.newRow')
     this.els.newRow.title = list ? t('ui.view.newColumnTitle') : t('ui.view.newRowTitle')
     this.paintStale()
+    this.paintFilters(b)
     this.paintViews(b, view)
+  }
+
+  /**
+   * **条件 chip 条**：把当前条件说成人话，点击打开构建器。
+   *
+   * 为什么要有它：一个查询块的抬头只写「3 条结果」时，用户不知道这 3 条是**按什么选的**。
+   * 条件是这个视图最要紧的一句话，它得在屏幕上，而不是藏在某个菜单里。
+   * 非查询源没有这一条（children／items 的「条件」就是树本身）。
+   */
+  private paintFilters(b: Block): void {
+    const box = this.els.filters
+    box.replaceChildren()
+    const spec = this.source.kind === 'query' ? this.source.spec : null
+    if (!spec) {
+      box.hidden = true
+      return
+    }
+    box.hidden = false
+    // 上下文：scope 决定「相对于谁」（这一块之下 / 全库）—— 它不在条件里，但影响结果
+    const ctx = document.createElement('button')
+    ctx.type = 'button'
+    ctx.className = 'queryview-chip queryview-chip--ctx'
+    ctx.textContent = spec.scope === 'all' ? t('ui.query.contextAll') : t('ui.query.context')
+    ctx.title = t('ui.query.edit')
+    ctx.addEventListener('click', () => this.deps.invoke('core.query/open-builder', { owner: this.writeOwner }))
+    box.appendChild(ctx)
+
+    for (const label of queryChips(spec, this.deps.fields())) {
+      const chip = document.createElement('span')
+      // 单行省略是**原语**（`primitives.css`），组件里不再抄一份几何
+      chip.className = 'queryview-chip ui-ellipsis'
+      chip.textContent = label
+      box.appendChild(chip)
+    }
+    const edit = document.createElement('button')
+    edit.type = 'button'
+    edit.className = 'queryview-chip queryview-chip--edit'
+    edit.textContent = '＋'
+    edit.title = t('ui.query.edit')
+    edit.addEventListener('click', () => this.deps.invoke('core.query/open-builder', { owner: this.writeOwner }))
+    box.appendChild(edit)
+    void b
   }
 
   /**

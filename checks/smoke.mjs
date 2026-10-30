@@ -14393,6 +14393,148 @@ await check('T187 稳定 id：摘掉第一栏之后，激活的是原来那一�
 })
 
 /**
+ * **条件构建器**：条件行与 JSON 是同一份数据的两种视图；应用一次＝一轮撤销。
+ *
+ * 这条钉的是「界面拼出来的条件必须与手写 JSON 逐字节相同」——不同的表现是
+ * 「界面上一行改完、结果没变」，而那时用户不会怀疑是翻译层丢了算子。
+ */
+await check('T188 构建器：JSON 与模型逐字节相同；改一行应用＝一轮撤销；chip 跟着变', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    let found = ''
+    const walk = (list) => {
+      for (const b of list) {
+        if (!found && b.props?._query?.where) found = b.id
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return found
+  })
+  assert(qid !== '', '前置：种子里应有一个查询块')
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
+  await page.waitForTimeout(450)
+
+  // 抬头上的条件 chip（查询源的「条件是什么」得在屏幕上）
+  const chips = await page.evaluate(() =>
+    [...document.querySelectorAll('.queryview-filters .queryview-chip')].map((e) => e.textContent ?? ''),
+  )
+  assert(chips.length > 0, `抬头应有条件 chip：${JSON.stringify(chips)}`)
+  assert(chips.some((c) => c.includes('未完成')), `种子里那条是「未完成的待办」：${JSON.stringify(chips)}`)
+
+  // 打开构建器
+  await page.locator('.queryview-chip--edit').click()
+  await page.waitForSelector('.qb')
+  await page.locator('.qb-tab[data-qb-tab="json"]').click()
+  await page.waitForTimeout(150)
+  const jsonText = await page.evaluate(() => document.querySelector('.qb-json')?.value ?? '')
+  const model = await page.evaluate((id) => JSON.stringify(window.__qua.__editor.store.find(id)?.props?._query), qid)
+  assert(jsonText.replace(/\s+/g, '') === model.replace(/\s+/g, ''), `JSON tab 必须就是模型那一份：\n${jsonText}\n${model}`)
+
+  // 回到条件行，把「未完成」改成「已完成」并应用
+  await page.locator('.qb-tab[data-qb-tab="rows"]').click()
+  await page.waitForTimeout(150)
+  await page.selectOption('.qb-row .qb-value', 'done')
+  await page.locator('.qb-apply').click()
+  await page.waitForTimeout(450)
+
+  const after = await page.evaluate((id) => ({
+    where: JSON.stringify(window.__qua.__editor.store.find(id)?.props?._query?.where),
+    chips: [...document.querySelectorAll('.queryview-filters .queryview-chip')].map((e) => e.textContent ?? ''),
+    open: Boolean(document.querySelector('.qb')),
+  }), qid)
+  assert(after.where === '{"todo":"done"}', `应用之后条件应是「已完成」：${after.where}`)
+  assert(after.open === false, '应用之后构建器应关闭')
+  assert(after.chips.some((c) => c.includes('已完成')), `chip 要跟着变：${JSON.stringify(after.chips)}`)
+
+  // 一轮撤销回到改之前（一次应用＝一笔事务，不是每敲一个字一步）
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(400)
+  const undone = await page.evaluate((id) => JSON.stringify(window.__qua.__editor.store.find(id)?.props?._query?.where), qid)
+  assert(undone === '{"todo":"todo"}', `一次 ⌘Z 就该回到原条件：${undone}`)
+
+  await ctx.close()
+  return `chip「未完成」→ 构建器 JSON 与模型同字节 → 应用后「已完成」→ 一次 ⌘Z 复原`
+})
+
+/**
+ * **提升／转本地**：local ⇄ 块 是**显式复制**，之后两条路各自演化。
+ *
+ * 这条钉的是「local tab 不是块」的另一半：需要命名/引用/共享时才建块，
+ * 而建出来的那一刻起，两边就是两个独立对象（没有隐藏同步）。
+ */
+await check('T189 提升：local → 查询页（块 +1，栏变 linked）；转本地：linked → local（块数不变）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(350)
+  const host = await page.evaluate(() => window.__qua.snapshot().activeId)
+  const before = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
+
+  // 建一栏 local
+  await page.evaluate((h) => {
+    window.__qua.invoke('core.mount/add-local', {
+      host: { kind: 'block', blockId: h },
+      label: '提升演示',
+      spec: { where: { todo: 'todo' }, scope: 'all' },
+    })
+  }, host)
+  await page.waitForTimeout(300)
+  const key = await page.evaluate(
+    () =>
+      [...document.querySelectorAll('#editor .mount .mount-tabwrap')].find(
+        (x) => (x.querySelector('.mount-tab')?.textContent ?? '') === '提升演示',
+      )?.dataset.tab ?? '',
+  )
+  assert(key !== '', '应有「提升演示」这一栏')
+
+  // 提升为查询页
+  await page.evaluate(
+    ({ h, tabId }) =>
+      window.__qua.invoke('core.mount/promote', {
+        host: { kind: 'block', blockId: h },
+        tabId,
+        target: 'page',
+      }),
+    { h: host, tabId: key },
+  )
+  await page.waitForTimeout(450)
+  const promoted = await page.evaluate((tabId) => {
+    const w = document.querySelector(`#editor .mount .mount-tabwrap[data-tab="${tabId}"]`)
+    return {
+      blocks: window.__qua.snapshot().totalBlocks,
+      kind: w?.dataset.kind ?? '',
+      label: w?.querySelector('.mount-tab')?.textContent ?? '',
+      pages: window.__qua.pages().map((p) => p.title),
+    }
+  }, key)
+  assert(promoted.blocks === before + 1, `提升要建出**一个**查询页：${before} → ${promoted.blocks}`)
+  assert(promoted.kind === 'linked', `提升后这一栏变成指针：${JSON.stringify(promoted)}`)
+  assert(promoted.label === '提升演示', `名字跟着走：${promoted.label}`)
+  assert(promoted.pages.includes('提升演示'), `页列表里要看得见它：${JSON.stringify(promoted.pages)}`)
+
+  // 转本地：块数不变（复制的是条件，不是块）
+  await page.evaluate(
+    ({ h, tabId }) =>
+      window.__qua.invoke('core.mount/detach', { host: { kind: 'block', blockId: h }, tabId }),
+    { h: host, tabId: key },
+  )
+  await page.waitForTimeout(400)
+  const detached = await page.evaluate((tabId) => {
+    const w = document.querySelector(`#editor .mount .mount-tabwrap[data-tab="${tabId}"]`)
+    return { blocks: window.__qua.snapshot().totalBlocks, kind: w?.dataset.kind ?? '' }
+  }, key)
+  assert(detached.kind === 'local', `转本地之后这一栏自己拥有配置：${JSON.stringify(detached)}`)
+  assert(detached.blocks === promoted.blocks, `转本地**不建块**：${promoted.blocks} → ${detached.blocks}`)
+
+  await ctx.close()
+  return `提升：块 ${before}→${promoted.blocks}、栏变 linked；转本地：块数不变、栏变 local`
+})
+
+/**
  * **判定放在所有用例之后**：写在这里之前时，后面的用例（T136 起）即使红了也不会进
  * `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。
  */

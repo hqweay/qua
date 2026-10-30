@@ -73,7 +73,7 @@ export type QueryNode =
    * 「有没有这一槽」是 `eq` 表达不出来的一个真问题：`未完成的任务` 是 `eq: false`，
    * `不是任务` 是 `exists: false` —— 拿 `eq: undefined` 冒充会把两者混成一个。
    */
-  | { prop: { id: string } & ({ eq: unknown } | { exists: boolean }) }
+  | { prop: { id: string } & PropOp }
   /** 某天（`YYYY-MM-DD`）的日记块**下面的块** */
   | { journal: string }
   /**
@@ -91,6 +91,38 @@ export type QueryNode =
   | { not: QueryNode }
 
 /** 一个排序键：按**属性 id** 取值升/降序（与属性条件同一个理由：键是 id，改名不影响语义） */
+/**
+ * 属性条件上的**一个算子**（`{prop:{id}}` 与它组合）。
+ *
+ * 为什么是「一个算子」而不是「一串算子」：多个算子写在同一条上时，
+ * `canonicalSpec` 要判 `and` 还是 `or`，而那个问题在**条件树**那一层已经有了答案
+ * （`all`／`any`）。在这里再造一个组合层，等于让同一件事有两种写法。
+ *
+ * 九个算子分三组，语义各不同：
+ *
+ * | 组 | 算子 | 判据 |
+ * |---|---|---|
+ * | 值比较 | `eq`／`neq`／`contains`／`gt`／`gte`／`lt`／`lte` | **有这一槽**才比（没有就是不匹配） |
+ * | 槽存在 | `exists` | 这一格在不在属性袋里（`false` ＝ 不是这种块） |
+ * | 空/非空 | `empty` | 值算不算空（`undefined`／`null`／`''`／`[]`） |
+ *
+ * ⚠️ `empty` 与 `exists` **必须分开**：`未填的任务` 是「有槽、值为空」，
+ *    `不是任务` 是「没有这一槽」。合成一个算子，就再也问不出前者。
+ * ⚠️ `neq` 只对**有槽**的块成立（与 `eq` 同一条口径）。「没有这一槽」也算「不等于」
+ *    的话，`neq` 会突然变成「绝大多数块」，而那不是用户想问的。
+ */
+export type PropOp =
+  | { eq: unknown }
+  | { neq: unknown }
+  /** 正文/值里含这一串（数组按任一元素判，其余按字符串化判） */
+  | { contains: string }
+  | { gt: unknown }
+  | { gte: unknown }
+  | { lt: unknown }
+  | { lte: unknown }
+  | { exists: boolean }
+  | { empty: boolean }
+
 export interface SortKey {
   by: string
   dir: 'asc' | 'desc'
@@ -314,14 +346,23 @@ function matches(node: QueryNode, b: Block, refs: ReadonlySet<string>, tags: Rea
   if ('text' in node) return plainText(b.content).includes(node.text)
   if ('prop' in node) {
     /**
-     * 先问「有没有这一槽」，再决定比值还是比存在性。
+     * 先问「有没有这一槽」，再决定比值、比存在性、还是判空。
+     *
      * 这样 `eq: false` 与「没填」是两件事，`eq: undefined` 也不会误命中所有块。
+     * **值比较这一类（含 `neq`）只对「有这一槽」的块成立** —— 否则 `neq`
+     * 会变成「绝大多数块」，而用户想问的是「这些值不是 A 的那几条」。
      */
     const props = b.props
     const has = props !== undefined && node.prop.id in props
-    if ('exists' in node.prop) return has === node.prop.exists
+    const op = node.prop
+    if ('exists' in op) return has === op.exists
+    const v = has ? props[node.prop.id] : undefined
+    if ('empty' in op) return isEmptyValue(v) === op.empty
     if (!has) return false
-    return Object.is(props[node.prop.id], node.prop.eq)
+    if ('eq' in op) return Object.is(v, op.eq)
+    if ('neq' in op) return !Object.is(v, op.neq)
+    if ('contains' in op) return valueContains(v, op.contains)
+    return compareOp(v, op)
   }
   // 剩下的只有 `{todo}`：三态判据在 `core/props.ts`，这里不另写一份
   return (todoOf(b) ?? 'none') === node.todo
@@ -330,6 +371,59 @@ function matches(node: QueryNode, b: Block, refs: ReadonlySet<string>, tags: Rea
 /** role 逐值分发到**既有唯一判据**，不另设第二份答案；进新值域时在此续支 */
 function roleMatches(role: 'journal', b: Block): boolean {
   return role === 'journal' ? isJournalBlock(b) : false
+}
+
+/**
+ * 值算不算「空」。
+ *
+ * 与 `exists` 分开：`empty:true` 匹配「有槽但没有值」**和**「根本没有这一槽」，
+ * 而 `exists:false` 只匹配后者。合成一个算子就再也问不出「未填的任务」。
+ */
+function isEmptyValue(v: unknown): boolean {
+  if (v === undefined || v === null || v === '') return true
+  return Array.isArray(v) && v.length === 0
+}
+
+/** 含这一串：数组按**任一元素**判（多值字段的常见问法），其余按字符串化判 */
+function valueContains(v: unknown, needle: string): boolean {
+  const want = needle.toLowerCase()
+  if (want === '') return false
+  if (Array.isArray(v)) return v.some((x) => String(x).toLowerCase().includes(want))
+  return String(v).toLowerCase().includes(want)
+}
+
+/**
+ * `gt`／`gte`／`lt`／`lte`。
+ *
+ * 数值按数值比（**不退化成字典序**：那样 10 会排在 9 前面），其余按字符串比。
+ * 一边是数字一边不是 ⇒ 按字符串比（属性值可能是 `"3"` 这种旧输入遗留）。
+ */
+function compareOp(v: unknown, op: { gt?: unknown; gte?: unknown; lt?: unknown; lte?: unknown }): boolean {
+  const bound = 'gt' in op ? op.gt : 'gte' in op ? op.gte : 'lt' in op ? op.lt : op.lte
+  const cmp = compareValues(v, bound)
+  // 比不了（类型不在同一个量纲上）⇒ **不匹配**：`true > 5` 不是一个有意义的答案，
+  // 而按字符串比会给它一个（`'true' > '5'`），于是勾选框会出现在「评分大于 5」的结果里。
+  if (cmp === null) return false
+  if ('gt' in op) return cmp > 0
+  if ('gte' in op) return cmp >= 0
+  if ('lt' in op) return cmp < 0
+  return cmp <= 0
+}
+
+/** 两个值比大小：两边都是数字按数值、都是字符串按本地化序；**其余返回 `null`（比不了）** */
+function compareValues(a: unknown, b: unknown): number | null {
+  if (typeof a === 'number' && typeof b === 'number') return a - b
+  // 属性值可能是 `"3"` 这种旧输入遗留：一边是数字串也按数值比
+  if (typeof a === 'string' && typeof b === 'string') {
+    return a.localeCompare(b, 'zh-Hans-CN', { numeric: true })
+  }
+  if (typeof a === 'number' && typeof b === 'string' && b.trim() !== '' && !Number.isNaN(Number(b))) {
+    return a - Number(b)
+  }
+  if (typeof b === 'number' && typeof a === 'string' && a.trim() !== '' && !Number.isNaN(Number(a))) {
+    return Number(a) - b
+  }
+  return null
 }
 
 /**

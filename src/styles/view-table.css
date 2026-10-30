@@ -511,3 +511,149 @@
   font-size: var(--ui-fs-xs);
   color: var(--ui-text-tertiary);
 }
+
+/* ---------------------------------------------------------------- 条件 chip 条
+   一个查询的抬头只写「3 条结果」时，用户不知道这 3 条是按什么选的。
+   条件是这个视图最要紧的一句话 ⇒ 它要在屏幕上，而不是藏在菜单里。 */
+.queryview-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+}
+.queryview-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 15rem;
+  padding: 0 var(--ui-gap-2);
+  border: 0;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-surface-sunken);
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-xs);
+}
+/* 上下文 chip 是「相对于谁」——它不在条件里，但决定结果，所以与条件视觉上分开 */
+.queryview-chip--ctx {
+  background: transparent;
+  color: var(--ui-text-tertiary);
+}
+button.queryview-chip {
+  cursor: pointer;
+}
+button.queryview-chip:hover {
+  background: var(--ui-surface-raised);
+}
+.queryview-chip--edit {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- 条件构建器 */
+.qb {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+  min-width: 22rem;
+  max-width: 34rem;
+}
+.qb-head {
+  display: flex;
+  gap: var(--ui-gap-1);
+}
+.qb-tab {
+  padding: var(--ui-gap-1) var(--ui-gap-3);
+  border: 0;
+  border-radius: var(--ui-radius-sm);
+  background: transparent;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-sm);
+  cursor: pointer;
+}
+.qb-tab[data-active='1'] {
+  background: var(--ui-surface-sunken);
+  color: var(--ui-text);
+}
+.qb-body {
+  min-height: 6rem;
+}
+.qb-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+}
+.qb-mode {
+  display: flex;
+  gap: var(--ui-gap-1);
+}
+.qb-mode-btn {
+  padding: var(--ui-gap-1) var(--ui-gap-2);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-pill);
+  background: transparent;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-xs);
+  cursor: pointer;
+}
+.qb-mode-btn[data-active='1'] {
+  border-color: var(--ui-accent);
+  color: var(--ui-accent);
+}
+.qb-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-1);
+}
+.qb-row-hint {
+  flex-basis: 100%;
+  padding-left: var(--ui-gap-1);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+/* 这一行还没填完 ⇒ 它不会被算进条件里。灰掉而不是藏着：用户要看见「这一条还没生效」 */
+.qb-row-hint[data-ok='0'] {
+  color: var(--ui-warn);
+}
+.qb-empty {
+  margin: 0;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-sm);
+}
+.qb-add {
+  align-self: flex-start;
+}
+.qb-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-gap-3);
+  padding-top: var(--ui-gap-2);
+  border-top: 1px solid var(--ui-border-subtle);
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-xs);
+}
+.qb-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+}
+.qb-del {
+  padding: 0 var(--ui-gap-1);
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.qb-del:hover {
+  color: var(--ui-danger);
+}
+.qb-json {
+  width: 100%;
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-fs-xs);
+  resize: vertical;
+}
+.qb-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ui-gap-2);
+}

@@ -148,8 +148,25 @@ export function canonicalSpec(spec: QuerySpec): QuerySpec {
     if ('ref' in n) return { ref: n.ref }
     if ('tag' in n) return { tag: n.tag }
     if ('text' in n) return { text: n.text }
-    // `eq` 与 `exists` 互斥：按**实际写了哪一个**原样带走，不补默认值（补了两种写法就不再等价）
-    if ('prop' in n) return { prop: 'exists' in n.prop ? { id: n.prop.id, exists: n.prop.exists } : { id: n.prop.id, eq: n.prop.eq } }
+    /**
+     * 属性条件**逐算子原样带走**，不补默认值（补了两种写法就不再等价）。
+     *
+     * ⚠️ 每加一个算子，这里必须加一支：漏掉的那一支会被静默丢掉，
+     *    表现是「条件看起来没变、结果却对不上」。
+     */
+    if ('prop' in n) {
+      const { id } = n.prop
+      const op = n.prop
+      if ('exists' in op) return { prop: { id, exists: op.exists } }
+      if ('empty' in op) return { prop: { id, empty: op.empty } }
+      if ('eq' in op) return { prop: { id, eq: op.eq } }
+      if ('neq' in op) return { prop: { id, neq: op.neq } }
+      if ('contains' in op) return { prop: { id, contains: op.contains } }
+      if ('gt' in op) return { prop: { id, gt: op.gt } }
+      if ('gte' in op) return { prop: { id, gte: op.gte } }
+      if ('lt' in op) return { prop: { id, lt: op.lt } }
+      return { prop: { id, lte: op.lte } }
+    }
     if ('todo' in n) return { todo: n.todo }
     if ('journal' in n) return { journal: n.journal }
     return { role: n.role }

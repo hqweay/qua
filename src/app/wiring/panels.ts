@@ -467,6 +467,11 @@ export function setupPanels(deps: PanelsDeps) {
         const b = kb.get(id)
         return b ? displayNameOf(b) : id.slice(-6)
       },
+      /** 构建器的字段下拉：属性定义 ＋ 显示名（同名带来源），一次算好 */
+      fields: () => {
+        const labels = propDisplayLabels(kb.roots())
+        return kb.propDefs().map((d) => ({ id: d.id, label: labels.get(d.id) ?? propLabel(d) }))
+      },
     })
     return vh
   }
@@ -563,53 +568,45 @@ export function setupPanels(deps: PanelsDeps) {
       onPick: (row) => {
         if (row.id === 'mount/local') openLocalComposer(host)
         else if (row.id === 'mount/linked') openLinkedPicker(host)
-        else void deps.getRegistry().invoke('core.query/create', { kind: 'page', name: '' }, 'mount')
+        else {
+          // 查询页是**内容对象**：建完就打开它，再把构建器指到它身上
+          void deps.getRegistry().invoke('core.query/create', { kind: 'page', name: t('ui.query.untitled') }, 'mount')
+          const page = deps.getWs().activeId
+          if (page !== '') {
+            void deps
+              .getRegistry()
+              .invoke('core.query/open-builder', { owner: { kind: 'block', blockId: page } }, 'mount')
+          }
+        }
       },
     })
   }
 
   /**
-   * **新建查询（local tab）**：最小 composer（栏名 ＋ 条件 JSON）。
+   * **新建查询（local tab）**：建一栏空条件的查询，然后**直接打开构建器**。
    *
-   * M2 会用正式构建器替换它，但**命令与数据形状不变**：它只写这一栏的 `spec`，
-   * 不建块（块数一个都不变）。
+   * 为什么不是先弹一个「名字 ＋ JSON」的表单：条件是这个功能的主语，
+   * 让用户在第一眼就看见「条件是什么」比让他先写一段 JSON 更接近这件事本身。
+   * 名字可以后改（`···` → 重命名），条件不能后猜。
+   *
+   * ⚠️ 仍然**不建块**：块数不变，⌘Z 可撤（建栏与应用条件是两笔，各自可撤）。
    */
   function openLocalComposer(host: Block): void {
     const mountHost: MountHost = isJournal(host) ? { kind: 'journal' } : { kind: 'block', blockId: host.id }
-    layers.openPopover((box) => {
-      box.className = 'mount-composer'
-      const name = document.createElement('input')
-      name.className = 'ui-input'
-      name.placeholder = t('ui.mount.newTabName')
-      name.value = t('ui.mount.localName')
-      const area = document.createElement('textarea')
-      area.className = 'ui-input mount-composer-spec'
-      area.rows = 6
-      area.value = JSON.stringify({ where: { todo: 'todo' } }, null, 2)
-      const hint = document.createElement('p')
-      hint.className = 'mount-composer-hint'
-      hint.textContent = t('ui.mount.specTitle')
-      const go = document.createElement('button')
-      go.type = 'button'
-      go.className = 'ui-btn'
-      go.textContent = t('ui.mount.addLocal')
-      go.addEventListener('click', () => {
-        let spec: unknown
-        try {
-          spec = JSON.parse(area.value)
-        } catch {
-          app.toast(t('ui.query.badJson'), 'warn')
-          return
-        }
-        void deps
-          .getRegistry()
-          .invoke('core.mount/add-local', { host: mountHost, label: name.value.trim(), spec }, 'mount')
-        layers.closePopover()
-        renderMounts()
-      })
-      box.append(hint, name, area, go)
-      name.focus()
-    }, deps.getEd().caretRect())
+    const before = new Set(owners.entriesOf(mountHost).map((e) => e.id))
+    void deps
+      .getRegistry()
+      .invoke(
+        'core.mount/add-local',
+        { host: mountHost, label: t('ui.mount.localName'), spec: { where: { any: [] } } },
+        'mount',
+      )
+    const added = owners.entriesOf(mountHost).find((e) => !before.has(e.id))
+    renderMounts()
+    if (!added) return
+    void deps
+      .getRegistry()
+      .invoke('core.query/open-builder', { owner: { kind: 'tab', host: mountHost, tabId: added.id } }, 'mount')
   }
 
   /** 挂一个已有的块（linked）：选块 ⇒ 写一根指针（条件与视图仍住在那一块上） */

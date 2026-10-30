@@ -155,6 +155,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.view/delete-row', title: t('cmd.view.delete-row'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { rowId: { type: 'string' } }, keywords: ['row', 'delete', 'trash'] },
   { name: 'core.view/menu', title: t('cmd.view.menu'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { owner: {} }, keywords: ['view', 'menu', 'table'] },
   { name: 'core.query/set-spec', title: t('cmd.query.set-spec'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { owner: {}, spec: {} }, keywords: ['query', 'condition', 'where', 'filter'] },
+  { name: 'core.query/open-builder', title: t('cmd.query.open-builder'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { owner: {} }, keywords: ['query', 'builder', 'condition', 'filter'] },
   { name: 'core.query/create', title: t('cmd.query.create'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { kind: { type: 'string', enum: ['page', 'block'] }, name: { type: 'string' }, spec: {}, parentId: { type: 'string' } }, keywords: ['query', 'page', 'new'] },
 
   /* ---- 露面（镜像／投影：同一块在别处再出现一次） ---- */
