@@ -229,6 +229,12 @@ export const MSG = {
   'ui.props.choice.tagHint': '只列 {tag} 看得到的选项',
   'ui.props.choice.open': '选项',
   'ui.props.choice.openTitle': '编辑这条属性可选的选项',
+  /* picker 的分组是 `_fieldDefs` 的派生视图：只分组、不隐藏（空下拉最容易被误读成「库里没有」） */
+  'ui.props.groupOwn': '本标签',
+  'ui.props.groupUndeclared': '未声明',
+  'ui.props.groupOther': '其他标签',
+  'ui.props.reuseNamed': '复用「{label}」（来自 {source}）',
+  'ui.props.createSameName': '新建同名属性',
   'ui.props.undeclaredSuffix': ' · 未声明',
   'ui.props.kind.text': '文本',
   'ui.props.kind.number': '数字',

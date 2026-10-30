@@ -28,8 +28,10 @@ import {
   declaredFieldIds,
   hasList,
   isPropDef,
+  normalizeAlias,
   PROP_KINDS,
   propKindOf,
+  propLabel,
 } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 import { ChoicesEditor, type ChoiceActions } from './choices-editor.ts'
@@ -121,6 +123,15 @@ export interface PropertiesDeps {
   blockById: (id: string) => Block | undefined
   /** 全部标签（选项作用域的勾选候选） */
   allTags: () => readonly Block[]
+  /**
+   * `propId → 显示名`（同名属性带声明来源，仍重名再带短 id）。
+   *
+   * 由装配层用 `propDisplayLabels` 一次算好：UI 逐行扫森林会把这个面板变成 O(n²)，
+   * 而且显示名会出现两种口径。
+   */
+  propLabels: () => ReadonlyMap<string, string>
+  /** `propId → 声明它的标签`（picker 的「本标签／未声明／其他标签」分组用） */
+  fieldDeclarations: () => ReadonlyMap<string, readonly Block[]>
   /** 选项的写入口（命令；组件不直接改块） */
   choices: ChoiceActions
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
@@ -306,7 +317,7 @@ export function makeFieldRow(
   row: FieldRow,
   target: Block,
   deps: FieldRowDeps,
-  opts: { labelCount?: ReadonlyMap<string, number>; showSource?: boolean } = {},
+  opts: { labelCount?: ReadonlyMap<string, number>; showSource?: boolean; labels?: ReadonlyMap<string, string> } = {},
 ): HTMLElement {
   const el = document.createElement('div')
   el.className = 'prop-row ui-row'
@@ -322,7 +333,9 @@ export function makeFieldRow(
     : t('ui.props.own')
   const duplicated = (opts.labelCount?.get(row.label) ?? 0) > 1
   const disambiguated = duplicated ? `${row.label}（${row.sources[0] ? displayNameOf(row.sources[0]) : t('ui.props.own')}）` : row.label
-  name.textContent = row.def ? disambiguated : t('ui.props.unknown', { id: deps.shortId(row.propId) })
+  // 有 `labels` 就用它（同名属性带声明来源；仍重名带短 id）——只在一个地方决定「这一行叫什么」
+  const shown = opts.labels?.get(row.propId) ?? disambiguated
+  name.textContent = row.def ? shown : t('ui.props.unknown', { id: deps.shortId(row.propId) })
   /**
    * **属性名指向定义块**。普通块上只画值控件：要改选项/类型，点名字去定义页，
    * 不在块上再开第三个编辑面（同一个东西三处可改＝三处都能不同步）。
@@ -473,9 +486,10 @@ export class PropertiesPanel {
     // 同名不同 propId 必须能区分（C4）：两行 label 一样时把来源带进显示名
     const labelCount = new Map<string, number>()
     for (const r of rows) labelCount.set(r.label, (labelCount.get(r.label) ?? 0) + 1)
+    const labels = this.deps.propLabels()
 
     for (const row of rows) {
-      this.els.body.appendChild(makeFieldRow(row, target, this.deps, { labelCount }))
+      this.els.body.appendChild(makeFieldRow(row, target, this.deps, { labelCount, labels }))
     }
 
     /**
@@ -594,7 +608,7 @@ export class PropertiesPanel {
       chip.className = 'props-tag'
       chip.dataset.declaredPropId = def.id
       const text = document.createElement('span')
-      text.textContent = `${plainText(def.content).trim() || def.id} · ${t(`ui.props.kind.${propKindOf(def)}`)}`
+      text.textContent = `${this.deps.propLabels().get(def.id) ?? (plainText(def.content).trim() || def.id)} · ${t(`ui.props.kind.${propKindOf(def)}`)}`
       /**
        * `select` 的一条声明带「选项」入口：选项是定义块的子块，而标签视角只该看
        * 「对本标签可见」的那几条。**就地展开**在清单下面 —— 再开一层抽屉会让
@@ -815,7 +829,7 @@ export class PropertiesPanel {
       pick: t('ui.props.pick'),
       use: t('ui.props.use'),
       onUse: (propId) => this.deps.addOwnProp(target, propId),
-      onCreate: (label, kind) => this.deps.createOwnDef(target, label, kind),
+      onCreate: (label, kind, mode) => this.deps.createOwnDef(target, label, kind, mode),
     })
   }
 
@@ -833,7 +847,7 @@ export class PropertiesPanel {
       pick: t(isTag ? 'ui.props.pickTagProp' : 'ui.props.pickPageField'),
       use: t('ui.props.useDeclared'),
       onUse: (propId) => this.deps.declareProp(target, propId),
-      onCreate: (label, kind) => this.deps.createDeclaredDef(target, label, kind),
+      onCreate: (label, kind, mode) => this.deps.createDeclaredDef(target, label, kind, mode),
     })
   }
 
@@ -843,6 +857,9 @@ export class PropertiesPanel {
    * 差异只有四处（槽 / 外层类名 / 两条按钮文案 / 两个回调），所以收成一份：
    * 「选已有 → 用这个」「新建 → 名字＋类型」这两个形态是同一个交互，
    * 分两份写就会出现「一个表单 Enter 能用、另一个不能」。
+   *
+   * **同名不是错**：输入已有同名同 kind 时，两个动作同时可见 ——
+   * 复用（默认，误复用可无损改回）与新建同名属性（另一个 `propId`，各自有值）。
    */
   private buildAddForm(
     target: Block,
@@ -884,8 +901,32 @@ export class PropertiesPanel {
      * 用户分不清「库里没有这条属性」与「本块已经有了」。
      */
     const defs = this.deps.defs()
+    const labels = this.deps.propLabels()
+    const declarations = this.deps.fieldDeclarations()
     const rows = new Set(this.deps.rows(target).map((r) => r.propId))
     const declared = hasList(target, 'page') || hasList(target, 'tag') ? new Set(declaredFieldIds(target)) : new Set<string>()
+
+    /**
+     * picker 分组：**本标签 / 未声明 / 其他标签**。
+     * 它只是 `_fieldDefs` 的分组视图，不是第二份归属；其他标签的属性**不隐藏**
+     * （藏起来会让下拉看起来是空的，用户以为库里没有那条属性）。
+     */
+    const ownTags =
+      opts.slot === 'declared' ? (hasList(target, 'page') || hasList(target, 'tag') ? [target] : []) : [...this.deps.tags(target)]
+    const ownIds = new Set(ownTags.map((tag) => tag.id))
+    const groupOf = (def: Block): 0 | 1 | 2 => {
+      const declaring = declarations.get(def.id) ?? []
+      if (declaring.some((tag) => ownIds.has(tag.id))) return 0
+      return declaring.length === 0 ? 1 : 2
+    }
+    const groupLabels = [t('ui.props.groupOwn'), t('ui.props.groupUndeclared'), t('ui.props.groupOther')]
+    const groups: HTMLOptGroupElement[] = groupLabels.map((label) => {
+      const g = document.createElement('optgroup')
+      g.label = label
+      return g
+    })
+    const shownOf = (def: Block): string => labels.get(def.id) ?? (plainText(def.content).trim() || def.id)
+
     for (const def of defs) {
       let mark = ''
       let disabled = false
@@ -903,10 +944,11 @@ export class PropertiesPanel {
       }
       const o = document.createElement('option')
       o.value = def.id
-      o.textContent = `${plainText(def.content).trim() || def.id} · ${t(`ui.props.kind.${propKindOf(def)}`)}${mark ? `（${mark}）` : ''}`
+      o.textContent = `${shownOf(def)} · ${t(`ui.props.kind.${propKindOf(def)}`)}${mark ? `（${mark}）` : ''}`
       o.disabled = disabled
-      pick.appendChild(o)
+      groups[groupOf(def)]!.appendChild(o)
     }
+    for (const g of groups) if (g.childElementCount > 0) pick.appendChild(g)
     const newOption = document.createElement('option')
     newOption.value = NEW_OPTION
     newOption.textContent = t('ui.props.newOption')
@@ -933,24 +975,84 @@ export class PropertiesPanel {
       o.textContent = t(`ui.props.kind.${k}`)
       kind.appendChild(o)
     }
-    const create = document.createElement('button')
-    create.type = 'submit'
-    create.className = 'props-create'
-    create.textContent = t('ui.props.create')
-    create.addEventListener('click', () => {
+
+    /**
+     * **AO4：同一个名字可以有两个 `propId`。**
+     *
+     * 默认复用（错了好改），但「新建同名属性」也必须当下可见 ——
+     * 藏进对话框的那一下会被当成「复用失败」，而用户真正要的是另一个定义。
+     */
+    const matchNow = (): Block | undefined => {
+      const name = normalizeAlias(label.value.trim())
+      if (name === '') return undefined
+      return defs.find((d) => propKindOf(d) === (kind.value as PropKind) && normalizeAlias(propLabel(d)) === name)
+    }
+    const ao4 = document.createElement('div')
+    ao4.className = 'props-ao4'
+    ao4.hidden = true
+    ao4.dataset.ao4 = '1'
+    const reuse = document.createElement('button')
+    reuse.type = 'button'
+    reuse.className = 'props-reuse'
+    reuse.dataset.ao4Reuse = '1'
+    const fresh = document.createElement('button')
+    fresh.type = 'button'
+    fresh.className = 'props-create-new'
+    fresh.dataset.ao4New = '1'
+    fresh.textContent = t('ui.props.createSameName')
+    ao4.append(reuse, fresh)
+
+    const commit = (mode: 'auto' | 'new'): void => {
       const name = label.value.trim()
       if (name === '') {
         this.deps.toast(t('ui.props.needLabel'), 'warn')
         return
       }
-      opts.onCreate(name, kind.value as PropKind)
+      const k = kind.value as PropKind
+      const match = matchNow()
+      opts.onCreate(name, k, mode === 'new' ? 'new' : match ? 'reuse' : undefined)
       this.closeForm()
+    }
+
+    const create = document.createElement('button')
+    create.type = 'submit'
+    create.className = 'props-create'
+    create.textContent = t('ui.props.create')
+    form.addEventListener('submit', (e) => {
+      e.preventDefault()
+      commit('auto')
     })
+
+    /** 名字/类型一变就重算：有同名同 kind ⇒ 两个动作，默认 Enter 走复用 */
+    const syncAo4 = (): void => {
+      const match = matchNow()
+      if (!match) {
+        ao4.hidden = true
+        create.hidden = false
+        return
+      }
+      const declaring = declarations.get(match.id) ?? []
+      const source = declaring.length > 0 ? declaring.map((tag) => `#${displayNameOf(tag)}`).join('、') : t('ui.props.own')
+      reuse.textContent = t('ui.props.reuseNamed', { label: shownOf(match), source })
+      ao4.hidden = false
+      create.hidden = true
+    }
+    reuse.addEventListener('click', () => commit('auto'))
+    fresh.addEventListener('click', () => commit('new'))
+    label.addEventListener('input', syncAo4)
+    kind.addEventListener('change', syncAo4)
+    label.addEventListener('keydown', (e) => {
+      // 组合期只让输入法自己处理（Enter 常常是选词那一下）
+      if (e.key !== 'Enter' || e.isComposing) return
+      e.preventDefault()
+      commit('auto')
+    })
+
     // 新建组整块占一行：它的三个控件只一起出现，不能和第一行的「用这个」混排
     const newGroup = document.createElement('div')
     newGroup.className = 'props-new-group'
     newGroup.hidden = true
-    newGroup.append(label, kind, create)
+    newGroup.append(label, kind, create, ao4)
 
     /** 形态跟着下拉走：占位空值两者都藏，选哨兵露新建组，选真实定义露「用这个」 */
     const syncShape = (): void => {
@@ -971,6 +1073,7 @@ export class PropertiesPanel {
     //    正是用户要的答案（本块已经有它，只是入口不在这个面板）。
     if (defs.length === 0) pick.value = NEW_OPTION
     syncShape()
+    syncAo4()
 
     for (const el of [pick, pickBtn, cancel, newGroup]) form.appendChild(el)
     return form

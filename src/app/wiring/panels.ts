@@ -10,6 +10,7 @@ import {
   blockLabel,
   buildAdjacency,
   danglingOf,
+  declaredFieldIds,
   displayNameOf,
   findByAlias,
   flatten,
@@ -19,6 +20,7 @@ import {
   journalDate,
   normalizeAlias,
   parentsOf,
+  propDisplayLabels,
   propKindOf,
   propLabel,
   readSpec,
@@ -295,6 +297,19 @@ export function setupPanels(deps: PanelsDeps) {
       },
       blockById: (id) => kb.get(id),
       allTags: () => [...kb.tags()],
+      // 显示名一次算好（同名属性带来源、仍重名带短 id）：UI 不逐行扫森林
+      propLabels: () => propDisplayLabels(kb.roots()),
+      fieldDeclarations: () => {
+        const map = new Map<string, Block[]>()
+        for (const tag of kb.tags()) {
+          for (const propId of declaredFieldIds(tag)) {
+            const list = map.get(propId)
+            if (list) list.push(tag)
+            else map.set(propId, [tag])
+          }
+        }
+        return map
+      },
       choices: {
         add: (defId, label, scope) => void deps.getRegistry().invoke('core.props/add-choice', { defId, label, scope }, 'ui'),
         setLabel: (choiceId, label) =>

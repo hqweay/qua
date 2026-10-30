@@ -13,9 +13,11 @@
  */
 import {
   declareField,
+  declaredFieldIds,
   displayNameOf,
   hasList,
   listsOf,
+  propDisplayLabels,
   propKindOf,
   undeclareField,
   type Block,
@@ -60,10 +62,13 @@ export function renderFieldsEditor(host: HTMLElement, deps: FieldsEditorDeps): v
       deps.close()
       return
     }
+    const owner: Block = b
 
     /* --------------------------------------------------------- 已声明 */
 
     const declared = deps.kb.declaredFieldsOf(b.id)
+    const labels = propDisplayLabels(deps.kb.roots())
+    const shownOf = (def: Block): string => labels.get(def.id) ?? (plainText(def.content).trim() || def.id)
     const declaredBox = document.createElement('div')
     declaredBox.className = 'fields-section'
     const declaredHead = document.createElement('div')
@@ -83,7 +88,7 @@ export function renderFieldsEditor(host: HTMLElement, deps: FieldsEditorDeps): v
       row.dataset.fieldId = def.id
       const label = document.createElement('span')
       label.className = 'fields-label ui-ellipsis ui-ellipsis-grow'
-      label.textContent = plainText(def.content).trim() || def.id
+      label.textContent = shownOf(def)
       const kind = document.createElement('span')
       kind.className = 'fields-kind'
       kind.textContent = t(`ui.props.kind.${propKindOf(def)}`)
@@ -158,13 +163,46 @@ export function renderFieldsEditor(host: HTMLElement, deps: FieldsEditorDeps): v
       empty.textContent = t('ui.alias.noCandidates')
       addBox.appendChild(empty)
     }
-    for (const def of candidates) {
+
+    /**
+     * 候选按 `_fieldDefs` 分三组（本标签／未声明／其他标签），是声明的**分组视图**。
+     * 其他标签的属性不隐藏：藏起来会让清单看起来是空的，用户以为库里没有那条属性。
+     */
+    const declarations = new Map<string, Block[]>()
+    for (const tag of deps.kb.tags()) {
+      for (const propId of declaredFieldIds(tag)) {
+        const list = declarations.get(propId)
+        if (list) list.push(tag)
+        else declarations.set(propId, [tag])
+      }
+    }
+    const ownTagId = hasList(b, 'tag') ? b.id : ''
+    const groupOf = (def: Block): 0 | 1 | 2 => {
+      const declaring = declarations.get(def.id) ?? []
+      if (ownTagId !== '' && declaring.some((tag) => tag.id === ownTagId)) return 0
+      return declaring.length === 0 ? 1 : 2
+    }
+    const groupTitles = [t('ui.props.groupOwn'), t('ui.props.groupUndeclared'), t('ui.props.groupOther')]
+    const buckets: Block[][] = [[], [], []]
+    for (const def of candidates) buckets[groupOf(def)]!.push(def)
+    for (const [i, bucket] of buckets.entries()) {
+      if (bucket.length === 0) continue
+      const head = document.createElement('div')
+      head.className = 'fields-group-title'
+      head.textContent = groupTitles[i]!
+      addBox.appendChild(head)
+      for (const def of bucket) addBox.appendChild(candidateRow(def))
+    }
+    host.appendChild(addBox)
+
+    /** 一行候选：名字用 `propDisplayLabels`（同名属性带来源），点它自己的按钮声明 */
+    function candidateRow(def: Block): HTMLElement {
       const row = document.createElement('div')
       row.className = 'fields-row ui-row'
       row.dataset.fieldId = def.id
       const label = document.createElement('span')
       label.className = 'fields-label ui-ellipsis ui-ellipsis-grow'
-      label.textContent = plainText(def.content).trim() || def.id
+      label.textContent = shownOf(def)
       const kind = document.createElement('span')
       kind.className = 'fields-kind'
       kind.textContent = t(`ui.props.kind.${propKindOf(def)}`)
@@ -179,13 +217,12 @@ export function renderFieldsEditor(host: HTMLElement, deps: FieldsEditorDeps): v
           deps.toast?.(t('ui.alias.needList'), 'warn')
           return
         }
-        deps.write(() => declareField(b, def.id))
+        deps.write(() => declareField(owner, def.id))
         draw()
       })
       row.append(label, kind, add)
-      addBox.appendChild(row)
+      return row
     }
-    host.appendChild(addBox)
   }
 
   draw()

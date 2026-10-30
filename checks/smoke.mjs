@@ -13395,8 +13395,45 @@ await check(
     assert(after.value === pick.value, `改名之后值还是同一个 id：${JSON.stringify({ after, pick })}`)
     assert(after.labels.includes('进行中'), `选项名跟着变：${JSON.stringify(after.labels)}`)
 
+    /**
+     * **新建 select 之后直接落在定义页**：否则用户得到一个空下拉，还得自己猜
+     * 「去哪加选项」。走 UI 的「新建」那条路（不是直接 invoke）。
+     */
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.memberId)
+    await page.waitForTimeout(220)
+    await page.evaluate(() => {
+      if (!document.querySelector('.props-form--own')) document.getElementById('properties-add')?.click()
+      const form = document.querySelector('.props-form--own')
+      const pick = form?.querySelector('.props-pick')
+      if (pick instanceof HTMLSelectElement) {
+        pick.value = '__new__'
+        pick.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+      const name = form?.querySelector('.props-new-group input.prop-input')
+      if (name instanceof HTMLInputElement) {
+        name.value = '冒烟导航'
+        name.dispatchEvent(new Event('input', { bubbles: true }))
+      }
+      const kind = form?.querySelector('.props-new-group select.prop-input')
+      if (kind instanceof HTMLSelectElement) {
+        kind.value = 'select'
+        kind.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+      form?.querySelector('.props-new-group input.prop-input')?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      )
+    })
+    await page.waitForTimeout(360)
+    const nav = await page.evaluate(() => ({
+      target: document.getElementById('inspect-card')?.dataset.targetBlockId ?? '',
+      editor: Boolean(document.querySelector('.choices-editor')),
+      defId: window.__qua.propDefs().find((d) => d.label === '冒烟导航')?.id ?? '',
+    }))
+    assert(nav.defId !== '', `UI 新建 select 定义应写进库：${JSON.stringify(nav)}`)
+    assert(nav.target === nav.defId && nav.editor, `新建 select 后应停在定义页（那里就是选项编辑器）：${JSON.stringify(nav)}`)
+
     await ctx.close()
-    return `定义页加 2 条 ⇒ 成员下拉 3 项；值＝choice id（${pick.value.slice(-6)}）；改名不改值`
+    return `定义页加 2 条 ⇒ 成员下拉 3 项；值＝choice id（${pick.value.slice(-6)}）；改名不改值；新建 select 落在定义页`
   },
 )
 
@@ -13566,6 +13603,138 @@ await check(
 
     await ctx.close()
     return `标签视角就地展开（0 层 drawer）；新增默认 only 本标签：甲 2 项 / 乙 1 项；块上下拉同步；字段抽屉同一组件`
+  },
+)
+
+/**
+ * **AO4 ＋ picker 分组**：同名两义用第二个 `propId`；下拉按 `_fieldDefs` 分组并带来源。
+ */
+await check(
+  'T173 AO4 新建同名属性：两个 propId 各自有值；picker 分组带来源（本标签／未声明／其他标签）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const setup = await page.evaluate(() => {
+      const leaves = window.__qua.blocks().filter((b) => b.text.trim().length > 1)
+      const [bookBlock, movieBlock] = leaves
+      window.__qua.invoke('core.tags/add', { blockId: bookBlock.id, name: '冒烟书' })
+      window.__qua.invoke('core.tags/add', { blockId: movieBlock.id, name: '冒烟电影' })
+      const all = window.__qua.allBlocks()
+      const book = all.find((x) => x.lists.includes('tag') && x.aliases.includes('冒烟书'))
+      const movie = all.find((x) => x.lists.includes('tag') && x.aliases.includes('冒烟电影'))
+      window.__qua.invoke('core.props/create-def', { blockId: book.id, label: '冒烟评分', kind: 'number', target: 'declared' })
+      const def = window.__qua.propDefs().find((d) => d.label === '冒烟评分')
+      return { a: bookBlock.id, b: movieBlock.id, bookId: book.id, movieId: movie.id, defId: def.id }
+    })
+    assert(setup.defId !== '', '前置：应有一条声明给 #冒烟书 的 number 定义')
+    await page.waitForTimeout(320)
+
+    // 在 #冒烟电影 的**声明**表单里输入同名同 kind ⇒ 两个动作同时可见
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.movieId)
+    await page.waitForTimeout(220)
+    await page.evaluate(() => document.querySelector('[data-declare-add]')?.click())
+    await page.waitForSelector('.props-form--declared')
+    await page.evaluate(() => {
+      const form = document.querySelector('.props-form--declared')
+      const pick = form?.querySelector('.props-pick')
+      if (pick instanceof HTMLSelectElement) {
+        pick.value = '__new__'
+        pick.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+      const name = form?.querySelector('.props-new-group input.prop-input')
+      if (name instanceof HTMLInputElement) {
+        name.value = '冒烟评分'
+        name.dispatchEvent(new Event('input', { bubbles: true }))
+      }
+      const kind = form?.querySelector('.props-new-group select.prop-input')
+      if (kind instanceof HTMLSelectElement) {
+        kind.value = 'number'
+        kind.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+    })
+    const ao4 = await page.evaluate(() => ({
+      hidden: document.querySelector('.props-ao4')?.hidden ?? null,
+      reuse: document.querySelector('[data-ao4-reuse]')?.textContent ?? '',
+      fresh: document.querySelector('[data-ao4-new]')?.textContent ?? '',
+      createHidden: document.querySelector('.props-create')?.hidden ?? null,
+    }))
+    assert(ao4.hidden === false, `输入同名同 kind 时 AO4 动作要出现：${JSON.stringify(ao4)}`)
+    assert(ao4.reuse.includes('复用「冒烟评分」（来自 #冒烟书）'), `复用动作带来源：${JSON.stringify(ao4.reuse)}`)
+    assert(ao4.fresh.includes('新建同名属性'), `第二个动作是新建同名属性：${JSON.stringify(ao4.fresh)}`)
+    assert(ao4.createHidden === true, `AO4 出现时不再有含混的「新建」：${JSON.stringify(ao4)}`)
+
+    await page.evaluate(() => document.querySelector('[data-ao4-new]')?.click())
+    await page.waitForTimeout(320)
+    const defs = await page.evaluate(
+      (s) =>
+        window.__qua
+          .propDefs()
+          .filter((d) => d.label === '冒烟评分')
+          .map((d) => ({ id: d.id, declaredBy: d.declaredBy })),
+      setup,
+    )
+    assert(defs.length === 2, `同名两义＝两个 propId：${JSON.stringify(defs)}`)
+    assert(
+      defs.some((d) => d.declaredBy.includes(setup.bookId)) && defs.some((d) => d.declaredBy.includes(setup.movieId)),
+      `两条定义各被一个标签声明：${JSON.stringify(defs)}`,
+    )
+
+    // 各写各的值：两个 propId 互不影响
+    const ids = await page.evaluate((s) => {
+      const all = window.__qua.propDefs().filter((d) => d.label === '冒烟评分')
+      const book = all.find((d) => d.declaredBy.includes(s.bookId))
+      const movie = all.find((d) => d.declaredBy.includes(s.movieId))
+      window.__qua.invoke('core.props/set-value', { blockId: s.a, propId: book.id, value: 5 })
+      window.__qua.invoke('core.props/set-value', { blockId: s.b, propId: movie.id, value: 9 })
+      return { book: book.id, movie: movie.id }
+    }, setup)
+    assert(ids.book !== ids.movie, '两个块用的是两个不同的 propId')
+
+    const values = await page.evaluate((s) => {
+      const rowOf = (id, propId) => window.__qua.fields(id).find((f) => f.propId === propId)
+      return { a: rowOf(s.a, s.book)?.value ?? null, b: rowOf(s.b, s.movie)?.value ?? null }
+    }, { ...setup, ...ids })
+    assert(values.a === 5 && values.b === 9, `两块的值互不影响：${JSON.stringify(values)}`)
+
+    // picker 分组：本标签 / 未声明 / 其他标签（不隐藏其他标签的属性）
+    const groupsOn = async (blockId) => {
+      await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), blockId)
+      await page.waitForTimeout(180)
+      // 表单开着就沿用（`formOpen` 跨主体保留）：再点一次「＋ 添加属性」会把它关掉
+      await page.evaluate(() => {
+        if (!document.querySelector('.props-form--own')) document.getElementById('properties-add')?.click()
+      })
+      await page.waitForSelector('.props-form--own')
+      return page.evaluate(() => {
+        const form = document.querySelector('.props-form--own')
+        return [...(form?.querySelectorAll('optgroup') ?? [])].map((g) => ({
+          label: g.label,
+          options: [...g.querySelectorAll('option')].map((o) => o.textContent ?? ''),
+        }))
+      })
+    }
+    const onBook = await groupsOn(setup.a)
+    const onMovie = await groupsOn(setup.b)
+    const groupOf = (groups, label) => groups.find((g) => g.label === label)?.options ?? []
+    assert(
+      groupOf(onBook, '本标签').some((x) => x.includes('冒烟评分 · #冒烟书')) &&
+        !groupOf(onBook, '本标签').some((x) => x.includes('冒烟评分 · #冒烟电影')),
+      `#冒烟书 的块：自己的属性在本标签组：${JSON.stringify(onBook)}`,
+    )
+    assert(
+      groupOf(onBook, '其他标签').some((x) => x.includes('冒烟评分 · #冒烟电影')),
+      `#冒烟书 的块：别的标签的专属属性落在其他标签组（不隐藏）：${JSON.stringify(onBook)}`,
+    )
+    assert(
+      groupOf(onMovie, '本标签').some((x) => x.includes('冒烟评分 · #冒烟电影')) &&
+        groupOf(onMovie, '其他标签').some((x) => x.includes('冒烟评分 · #冒烟书')),
+      `#冒烟电影 的块：分组镜像成立：${JSON.stringify(onMovie)}`,
+    )
+
+    await ctx.close()
+    return `AO4 两个 propId（值 5 / 9 互不影响）；picker 三组：本标签／未声明／其他标签，选项带来源`
   },
 )
 

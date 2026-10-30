@@ -368,6 +368,12 @@
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-xs);
 }
+/* 候选清单的分组标题：本标签／未声明／其他标签（`_fieldDefs` 的分组视图） */
+.fields-group-title {
+  margin: var(--ui-gap-3) 0 var(--ui-gap-1);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-2xs);
+}
 
 .drawer {
   position: fixed;

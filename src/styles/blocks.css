@@ -1502,3 +1502,25 @@
   font: inherit;
   font-size: var(--ui-fs-2xs);
 }
+
+/* 同名两义（AO4）：两个动作同时可见，默认 Enter 走复用 —— 不藏进对话框 */
+.props-ao4 {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-2);
+}
+.props-ao4[hidden],
+.props-new-group .props-create[hidden] {
+  display: none;
+}
+.props-ao4 .props-reuse {
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-accent);
+}
+.props-ao4 .props-create-new {
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+}

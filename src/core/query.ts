@@ -10,7 +10,7 @@
  * ⚠️ 接索引后本文件的签名不变：`evaluateQuery`（判定与顺序）由两条路径共用，
  *    索引路径见 `index-port.ts` 的 `queryByIndex`；`QuerySpec` 仍是那个 canonical JSON。
  */
-import { isJournalBlock, primaryAliasOf, type Block } from './model.ts'
+import { isJournalBlock, isPropDefBlock, primaryAliasOf, type Block } from './model.ts'
 import { plainText, refRunsOf } from './runs.ts'
 import { walkForest } from './walk.ts'
 import { findPath } from './tree.ts'
@@ -143,6 +143,11 @@ export interface QueryHit {
 
 function walk(blocks: readonly Block[], fn: (b: Block, ancestors: Block[]) => void): void {
   walkForest(blocks, (b, ctx) => {
+    /**
+     * **属性定义的子块是选项，不是内容行**：查询结果里出现一个选项，等于把
+     * 「这条属性能选什么」当成「库里有这几条内容」。选项只在属性卡的选项编辑器里露面。
+     */
+    if (ctx.parent && isPropDefBlock(ctx.parent)) return
     fn(b, ctx.path.slice(0, -1))
   })
 }

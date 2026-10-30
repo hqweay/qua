@@ -22,6 +22,7 @@ import {
   fieldRows,
   mkPropDef,
   propDisplayLabels,
+  runQuery,
   sortRecords,
 } from '../src/core/index.ts'
 import { plainText, textRuns } from '../src/core/runs.ts'
@@ -238,6 +239,17 @@ test('fieldRows：值指向已软删的选项 ⇒ 不给名字（UI 显示「选
   assert.deepEqual(row.choices?.map((c) => c.id), ['c1'], '软删的选项不进候选')
   assert.equal(row.currentChoiceLabel, undefined, '没有名字 ⇒ 控件说「选项已删除」')
   assert.equal(row.value, 'c-gone', '值一个字节都没动')
+})
+
+test('查询不把选项当内容行：定义块下的子块不参与求值', () => {
+  const def = selectDef('def', [choice('c1', '待办')])
+  const host = blk('host', '正文里提到 待办 的一块')
+  const hits = runQuery({ where: { text: '待办' } }, { blocks: [def, host] })
+  assert.deepEqual(
+    hits.map((h) => h.blockId),
+    ['host'],
+    `选项是「这条属性能选什么」，不是库里的一条内容：${JSON.stringify(hits)}`,
+  )
 })
 
 /* ------------------------------------------------------------ 7. 新建定义 */

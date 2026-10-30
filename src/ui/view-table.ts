@@ -15,7 +15,7 @@
  *   `>= 2000` **窗口化**（只挂可视范围 ± 若干行，用上下留白撑出滚动高度）。
  */
 import type { Block, BlockStore, ViewColumn, ViewConfig, ViewRecord } from '../core/index.ts'
-import { choicesOf, clockLabel, displayNameOf, hasValue, propKindOf, propLabel } from '../core/index.ts'
+import { choicesOf, clockLabel, displayNameOf, hasValue, propDisplayLabels, propKindOf, propLabel } from '../core/index.ts'
 import { choiceCells, type FieldRow } from '../core/props.ts'
 import { plainText } from '../core/runs.ts'
 import { t } from '../core/msg.ts'
@@ -105,6 +105,8 @@ export class ViewTable {
    * 每次整表重排前算一次：逐次比较里只查表。
    */
   private choiceRanks = new Map<string, Map<string, number>>()
+  /** 列头文案（一次算好：同名属性带声明来源；仍重名带短 id） */
+  private propLabels = new Map<string, string>()
   private readonly ro: ResizeObserver | null
   private readonly onScroll = (): void => this.windowIfNeeded()
 
@@ -359,6 +361,7 @@ export class ViewTable {
     this.head.hidden = false
     this.head.replaceChildren()
     this.head.classList.remove('tv-rows--compact')
+    this.propLabels = propDisplayLabels(this.deps.store.blocks)
     const cell = (cls: string): HTMLElement => {
       const el = document.createElement('div')
       el.className = `tv-cell ui-ellipsis ${cls}`
@@ -419,6 +422,8 @@ export class ViewTable {
     if (key === CHILDREN_COLUMN) return '#'
     if (key === CREATED_COLUMN) return t('ui.props.createdAt')
     if (key === MODIFIED_COLUMN) return t('ui.props.modifiedAt')
+    const shown = this.propLabels.get(key)
+    if (shown) return shown
     const def = this.deps.defs().find((d) => d.id === key)
     return def ? propLabel(def) : t('ui.view.columnMissing')
   }
