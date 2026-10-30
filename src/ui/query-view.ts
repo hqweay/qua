@@ -1,45 +1,59 @@
 /**
- * **视图宿主**：一个块的「怎么看」这一层。
+ * **视图宿主**：一个**拥有者**的「怎么看」这一层（center／mount 两种表面共用）。
  *
- * 两种源、一套壳（与 `core/view.ts` 的判据同一处）：
+ * 三种源、一套壳（与 `core/view.ts` 的判据同一处）：
  *
  * | 源 | 抬头 | 正文 |
  * |---|---|---|
- * | **查询块**（有 `_query`） | 名字 ＋ 条数 ＋ 「可能已过期」＋ 刷新 ＋ 视图切换 | 大纲＝一列命中；表格＝同一批命中 |
+ * | **query**（查询块／local tab） | 名字 ＋ 条数 ＋ 「可能已过期」＋ 刷新 ＋ 视图切换 | 大纲＝一列命中；表格＝同一批命中 |
  * | **children**（普通块，激活了视图） | 条数 ＋ 视图切换 ＋ 新建一行 | 表格（直接子块＝行）；切回大纲就没有这一层 |
+ * | **items**（收藏块） | 条数 ＋ 视图切换 ＋ 加一条 | 列表（默认）／表格…；没有大纲（它不是树） |
  *
- * 口径（为什么长这样）：
- *   · **冻结只属于查询源**：成员与顺序来自 `_queryResult`，只在「刷新」时变（D4）；
- *     内容按 id 现读（改字立即看得见）。children 源是**活的**——子块就是成员，结构变了就是变了。
+ * 四条口径（为什么长这样）：
+ *   · **配置在拥有者上**：这一层只经 `ViewOwnerStore` 读写，不知道配置住在
+ *     `props._views` 还是 `_mounts` 还是 prefs —— 那正是本次重构要收口的东西。
+ *   · **冻结只属于查询源，且冻结在**这一个实例**上**：成员与顺序只在「首次显示／条件变／
+ *     上下文变／点刷新」时重算；内容按 id 现读（改字立即看得见）。**不写块、不进撤销。**
  *   · **它只出现在「被打开的那一段」**：查询块的命中、普通块的子块，都不在正文里再画一遍
  *     （正文那边由 `Doc.viewRootId` 让位）。
- *   · **视图切换只写 `_activeView`**：不重查、不重装模型；重装一屏是装配层的事（`reloadPage`）。
+ *   · **同一个拥有者在两个表面各有一份冻结**：一个刷新，另一个仍是旧的 —— 那是表面状态，
+ *     不是内容版本。
  *
  * ⚠️ 大纲分支的 DOM 类名（`.queryview-editor` 里一列 `.blk`）是既有断言的契约，不要改。
  */
 import {
-  activeView,
   childrenRecords,
-  defaultColumns,
+  defaultColumnsForSource,
   displayNameOf,
   expandContexts,
   isQueryBlock,
+  itemsRecords,
   listTableOf,
-  readResult,
   readSpec,
-  readViews,
-  refreshSpec,
   resolveRows,
   resolveFrozen,
+  resolveBoundView,
   sourceOf,
   unfoldForContext,
   usesSelf,
   viewsBroken,
   viewNameOf,
+  droppedFrom,
+  freezeResult,
+  frozenStale,
+  readViewSet,
   type Block,
   type BlockStore,
+  type FrozenResult,
+  type QueryContext,
+  type Source,
+  type ViewBindingRef,
   type ViewConfig,
+  type ViewOwnerData,
+  type ViewOwnerRef,
+  type ViewOwnerStore,
   type ViewRecord,
+  type ViewSurface,
 } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
@@ -55,8 +69,30 @@ export interface ViewHostDeps {
   kb: KbClient
   /** 写入事务入口：执行者在装配层（见 `Run`） */
   write: Run
-  /** 宿主块（活引用）：读 `_query`／`_views`，写回也按它的 id */
-  block: () => Block
+  /**
+   * **视图配置的唯一接缝**。这一层不摸 `props._views`／`_mounts`／prefs，
+   * 全部经它 —— 「配置住哪」只有一个答案。
+   */
+  owners: ViewOwnerStore
+  /**
+   * 拥有者：视图配置住在谁身上。
+   *
+   * ⚠️ 给了 `binding` 时**以绑定为准**（拥有者由绑定解析出来）——
+   *    linked tab／露面只存「指向谁 ＋ 选了哪张视图」，自己不拥有配置。
+   */
+  owner: ViewOwnerRef
+  /** 绑定：这一次「在别处看一眼」的指针（linked tab／露面） */
+  binding?: ViewBindingRef
+  /**
+   * 显示的宿主块（活引用）。
+   *
+   * 三处用到它，都不是配置：抬头上的名字、children/items 源的容器、
+   * 以及「这一块是不是叶子块」（叶子没有可摊开的东西 ⇒ 不给视图切换器）。
+   */
+  host: () => Block
+  /** 求值的上下文：`$self` 指谁、`subtree` 锚在哪、结果剔除谁 */
+  context: QueryContext
+  surface: ViewSurface
   /** 发生写入之后要落盘 / 重画别的视图 */
   onChange: () => void
   /** 焦点进来 ⇒ 装配层把「活动编辑器」切过来（键位走命令层） */
@@ -85,7 +121,7 @@ export interface ViewHostEls {
   root: HTMLElement
   title: HTMLElement
   count: HTMLElement
-  /** 视图切换器（大纲 ＋ 已有视图 ＋ 加一个表格） */
+  /** 视图切换器（默认看法 ＋ 已有视图 ＋ 加一张） */
   views: HTMLElement
   refresh: HTMLButtonElement
   newRow: HTMLButtonElement
@@ -148,6 +184,7 @@ export function createViewHostEls(): ViewHostEls {
   return { root, title, count, views, refresh, newRow, stale, editor, table }
 }
 
+/** 一个「表面实例」的冻结结果（内存；不进 KB、不进撤销） */
 export class ViewHost {
   private readonly els: ViewHostEls
   private readonly deps: ViewHostDeps
@@ -169,6 +206,8 @@ export class ViewHost {
   private covers: ReadonlyMap<string, readonly string[]> = new Map()
   /** 配置坏了只提示一次（每次装载都弹一遍会盖住用户正在做的事） */
   private warned = false
+  /** **这一个表面实例**的冻结结果；条件/上下文变了才重算 */
+  private frozen: FrozenResult | null = null
 
   constructor(els: ViewHostEls, deps: ViewHostDeps) {
     this.els = els
@@ -177,7 +216,7 @@ export class ViewHost {
     this.els.refresh.addEventListener('click', () => this.refresh())
     this.els.newRow.textContent = t('ui.view.newRow')
     this.els.newRow.title = t('ui.view.newRowTitle')
-    this.els.newRow.addEventListener('click', () => this.deps.invoke('core.view/new-row', { blockId: this.deps.block().id }))
+    this.els.newRow.addEventListener('click', () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }))
     this.cell = new BlockCell({
       store: deps.store,
       write: deps.write,
@@ -190,13 +229,13 @@ export class ViewHost {
       openBlock: (id) => deps.openBlock(id),
     })
 
-    // ⚠️ 只点亮 stale，不重排列表（D4 的「不自动重算」）。
+    // ⚠️ 只点亮 stale，不重排列表（「不自动重算」）。
     // 拿不到「动过哪些块」就先不点亮：宁可少提示，也不要因为刷新顺带的重渲染误报。
     this.offStale = deps.store.subscribe((source, ids) => {
       if (source === this.outline?.ed) return
       if (ids && ids.length > 0) {
         this.noteTouched(ids)
-        // children 源是活的：子块的正文/属性变了，那一行要跟着变（按 blockId 局部修补）
+        // children/items 源是活的：子块的正文/属性变了，那一行要跟着变（按 blockId 局部修补）
         if (this.table) this.table.sync(ids)
         if (this.listTable) this.listTable.render(ids)
       }
@@ -225,60 +264,152 @@ export class ViewHost {
   }
 
   /**
-   * 首次装载（或宿主换了）：冻结一次（查询源）／直接画（children 源）。
+   * 这次渲染实际读的是**谁的**配置、以及**哪一张**视图。
    *
-   * 「没有冻结结果就求值一次」与「点刷新」走**同一个函数**，避免出现两套口径。
+   * 两条路：
+   *   · 没有绑定 ⇒ 拥有者就是 `deps.owner`，视图就是它的默认激活项；
+   *   · 有绑定 ⇒ 拥有者是绑定指向的那一块，视图按 `''`／`'outline'`／id 解出。
+   *
+   * ⚠️ 每次现读：配置可能被命令改过，缓存一份就等于承认「界面可以是旧的」。
    */
+  private get bound(): {
+    owner: ViewOwnerRef
+    data: ViewOwnerData
+    view: ViewConfig | null
+    /** 目标还在，但它那张视图没了（要给用户一句实话） */
+    degraded: boolean
+    /** 目标块本身没了（悬空） */
+    dangling: boolean
+  } {
+    const binding = this.deps.binding
+    if (binding) {
+      const target = this.deps.owners.readBinding(binding)
+      if (!target) return { owner: this.deps.owner, data: { views: [] }, view: null, degraded: false, dangling: true }
+      const data = this.deps.owners.read(target.owner) ?? { views: [] }
+      const r = resolveBoundView(target, data)
+      return { owner: target.owner, data, view: r.view, degraded: r.degraded, dangling: false }
+    }
+    const data = this.deps.owners.read(this.deps.owner) ?? { views: [] }
+    return {
+      owner: this.deps.owner,
+      data,
+      view: readViewSet(data).active,
+      degraded: false,
+      dangling: false,
+    }
+  }
+
+  /** 拥有者的当前配置（每次现读：它可能被命令改过） */
+  private get data(): ViewOwnerData {
+    return this.bound.data
+  }
+
+  /** 当前这一份源（**派生**：query／children／items） */
+  private get source(): Source {
+    const { owner, data } = this.bound
+    if (data.query) return { kind: 'query', spec: data.query }
+    if (owner.kind === 'block') {
+      const b = this.deps.kb.get(owner.blockId)
+      if (b) return sourceOf(b, (id) => this.deps.kb.get(id))
+      return { kind: 'children', blockId: owner.blockId }
+    }
+    return { kind: 'children', blockId: '' }
+  }
+
+  /** 当前这张视图（`null` ＝ 这一份源的默认看法） */
+  private get view(): ViewConfig | null {
+    return this.bound.view
+  }
+
+  /** 写配置时的拥有者（绑定 ⇒ 目标块；不是这一次的宿主） */
+  private get writeOwner(): ViewOwnerRef {
+    return this.bound.owner
+  }
+
+  /** 拥有者那一块（露面／linked tab 指的目标；local tab 没有块 ⇒ `undefined`） */
+  private ownerBlock(): Block | undefined {
+    const { owner } = this.bound
+    return owner.kind === 'block' ? this.deps.kb.get(owner.blockId) : undefined
+  }
+
+  /* ---------------------------------------------------------- 装载 */
+
+  /** 首次装载（或宿主换了） */
   mount(): void {
     this.staleIds.clear()
     this.warned = false
-    const b = this.deps.block()
-    if (isQueryBlock(b) && !readSpec(b)) {
-      this.renderEmpty(t('ui.query.noSpec'))
-      return
-    }
-    if (isQueryBlock(b) && !readResult(b)) {
-      this.freeze()
-      return
-    }
+    this.frozen = null
     this.sync(true)
   }
 
   /**
-   * 装配层在每次装载之后叫一次：**画法变了就换分支**（`_activeView` 被命令改过），
+   * 装配层在每次装载之后叫一次：**画法变了就换分支**（激活视图被命令改过），
    * 没变就只把数据对齐（不整表重排 —— 那是「滚动一下整表重建」的来源）。
    */
   sync(force = false): void {
-    const b = this.deps.block()
-    const view = activeView(b)
-    const mode = view ? `${view.kind}:${view.id}` : 'outline'
-    if (this.warned === false && viewsBroken(b)) {
+    const b = this.deps.host()
+    const view = this.view
+    const mode = view ? `${view.kind}:${view.id}` : `outline:${this.source.kind}`
+    if (this.warned === false && viewsBroken(this.ownerBlock())) {
       this.warned = true
       this.deps.toast?.(t('ui.view.broken'), 'warn')
     }
+    // 查询源：条件/上下文变了就重算冻结结果（不写块、不进撤销）
+    if (this.source.kind === 'query') this.ensureFrozen()
     if (force || mode !== this.mode) {
       this.mode = mode
       this.paintChrome(b, view)
-      if (!view) {
+      const kind = view?.kind ?? 'outline'
+      if (kind === 'outline') {
         this.showOutline()
         this.render()
       } else {
-        this.showTable(view)
+        this.showBody(view!)
       }
       return
     }
     this.paintChrome(b, view)
     if (view?.kind === 'list-table') this.listTable?.render()
-    else if (view) this.table?.sync()
+    else if (view?.kind === 'table') this.table?.sync()
+    else if (view) this.paintBodyFallback()
     else this.render()
   }
 
-  /** 刷新按钮：重算成员与顺序（D6：失败保留旧结果） */
+  /**
+   * 冻结结果：**只在四种情况下重算**。
+   *
+   * 条件变了（编辑/撤销 ⇒ `specKey` 变）会自动重算 ⇒ 不会出现「旧条件 ＋ 新结果」。
+   * ⚠️ 这里**不写块**：结果与 `modified` 无关，也不进撤销栈。
+   */
+  private ensureFrozen(): void {
+    const src = this.source
+    if (src.kind !== 'query') return
+    if (!frozenStale(this.frozen, src.spec, this.deps.context)) return
+    const before = this.frozen?.hits ?? []
+    this.frozen = freezeResult(src.spec, this.deps.kb, this.deps.context)
+    const dropped = droppedFrom(before, this.frozen.hits)
+    if (dropped.length > 0 && before.length > 0) {
+      this.deps.toast?.(t('ui.query.dropped', { count: dropped.length }), 'info')
+    }
+  }
+
+  /** 刷新按钮：**只重算这一个实例**（别的表面各自持有自己的那份，不受影响） */
   refresh(): void {
     this.els.refresh.disabled = true
     try {
-      this.freeze()
+      const src = this.source
+      if (src.kind !== 'query') return
+      const before = this.frozen?.hits ?? []
+      this.frozen = freezeResult(src.spec, this.deps.kb, this.deps.context)
+      const dropped = droppedFrom(before, this.frozen.hits)
+      // 刷新＝成员与顺序都换了：上一轮的上下文展开没有依据，从头来
+      this.expanded = new Set()
+      this.covers = new Map()
+      this.staleIds.clear()
+      if (dropped.length > 0) this.deps.toast?.(t('ui.query.dropped', { count: dropped.length }), 'info')
       this.deps.toast?.(t('ui.query.refreshed', { count: this.rowCount() }), 'ok')
+      this.deps.onChange()
+      this.sync(true)
     } catch (e) {
       // 保留旧结果 + 明确告知（不静默清空）
       this.deps.toast?.(t('ui.query.refreshFailed', { message: e instanceof Error ? e.message : String(e) }), 'warn')
@@ -288,49 +419,27 @@ export class ViewHost {
   }
 
   private rowCount(): number {
-    const b = this.deps.block()
-    if (sourceOf(b).kind === 'query') return (readResult(b) ?? []).length
+    const src = this.source
+    if (src.kind === 'query') return (this.frozen?.hits ?? []).length
     // 结构映射表的行＝各列的第 j 项（表头不占一行），与渲染器同一份派生
-    if (activeView(b)?.kind === 'list-table') return listTableOf(b.id, this.deps.kb).rows.length
-    return this.deps.kb.children(b.id).length
-  }
-
-  private freeze(): void {
-    const b = this.deps.block()
-    const spec = readSpec(b)
-    if (!spec) {
-      this.renderEmpty(t('ui.query.noSpec'))
-      return
+    // 结构映射表只接 children 源（要对齐「第 k 个孩子」，查询命中不是树）
+    if (this.view?.kind === 'list-table' && src.kind === 'children') {
+      return listTableOf(src.blockId, this.deps.kb).rows.length
     }
-    /**
-     * **写回必须走事务**：冻结结果与条件都是模型改动，直改活块不会产出 op
-     * ⇒ 落盘时这一笔被静默跳过（条件变了、库里还是旧的）。
-     */
-    const dropped = this.deps.write((tx) => {
-      let out: string[] = []
-      tx.patch(b.id, (x) => {
-        out = refreshSpec(x, spec, this.deps.kb).dropped
-      })
-      return out
-    })
-    if (dropped.length > 0) this.deps.toast?.(t('ui.query.dropped', { count: dropped.length }), 'info')
-    // 刷新＝成员与顺序都换了：上一轮的上下文展开没有依据，从头来
-    this.expanded = new Set()
-    this.covers = new Map()
-    this.staleIds.clear()
-    this.deps.onChange()
-    this.sync(true)
+    if (src.kind === 'items') return this.records().length
+    return src.kind === 'children' ? this.deps.kb.children(src.blockId).length : 0
   }
 
   /* ---------------------------------------------------------- 抬头 */
 
   private paintChrome(b: Block, view: ViewConfig | null): void {
     this.els.root.hidden = false
-    const query = sourceOf(b).kind === 'query'
+    const src = this.source
+    const query = src.kind === 'query'
     const name = displayNameOf(b).trim()
     /**
      * 查询源保留名字（它自己就是这张视图的标题）；
-     * children 源的根行就在上面，抬头再写一遍同一句就是重复。
+     * children/items 源的根行就在上面，抬头再写一遍同一句就是重复。
      */
     this.els.title.hidden = !query
     this.els.title.textContent = query ? (name === '' ? t('ui.query.untitled') : name) : ''
@@ -351,15 +460,16 @@ export class ViewHost {
   }
 
   /**
-   * 视图切换：**已保存的视图 ＋ 大纲 ＋ 「＋」**。
+   * 视图切换：**默认看法 ＋ 已保存的视图 ＋ 「＋」**。
    *
-   * 为什么不是「每种 kind 一个按钮」：一个块可以有**多个**同 kind 的视图（各自列/序不同），
-   * 按 kind 放按钮就表达不了「第 2 张表」。这里列的是这个块自己的视图实例。
+   * 为什么不是「每种 kind 一个按钮」：一个拥有者可以有**多个**同 kind 的视图（各自列/序不同），
+   * 按 kind 放按钮就表达不了「第 2 张表」。这里列的是这个拥有者自己的视图实例。
    */
   private paintViews(b: Block, view: ViewConfig | null): void {
     const box = this.els.views
     box.replaceChildren()
-    if (sourceOf(b).kind !== 'query' && b.children.length === 0 && !view) {
+    const src = this.source
+    if (src.kind !== 'query' && b.children.length === 0 && !view) {
       // 叶子块没有可摊开的东西：不给入口（点了只会看到空表）
       box.hidden = true
       return
@@ -374,11 +484,17 @@ export class ViewHost {
       el.addEventListener('click', onClick)
       return el
     }
-    box.appendChild(btn(t('ui.view.outline'), view === null, () => this.deps.invoke('core.view/set-active', { blockId: b.id, viewId: '' })))
-    for (const v of readViewsOf(b)) {
+    // 默认看法的名字按源给：items 源没有大纲（它不是树），它叫「列表」
+    const defaultLabel = src.kind === 'items' ? t('ui.view.kind.list') : t('ui.view.outline')
+    box.appendChild(
+      btn(defaultLabel, view === null, () =>
+        this.deps.invoke('core.view/set-active', { owner: this.writeOwner, viewId: '' }),
+      ),
+    )
+    for (const v of this.data.views) {
       box.appendChild(
         btn(viewNameOf(v, (k) => t(`ui.view.kind.${k}`)), view?.id === v.id, () =>
-          this.deps.invoke('core.view/set-active', { blockId: b.id, viewId: v.id }),
+          this.deps.invoke('core.view/set-active', { owner: this.writeOwner, viewId: v.id }),
         ),
       )
     }
@@ -391,7 +507,7 @@ export class ViewHost {
      * 不再是「一键加平表」：切换器旁边那颗 `＋` 现在是**新建视图的入口**，
      * 与块菜单里的「视图…」同一个菜单（两种表都从那里建，入口只有一份）。
      */
-    add.addEventListener('click', () => this.deps.invoke('core.view/menu', { blockId: b.id }))
+    add.addEventListener('click', () => this.deps.invoke('core.view/menu', { owner: this.writeOwner }))
     box.appendChild(add)
   }
 
@@ -432,14 +548,14 @@ export class ViewHost {
     return this.outline?.host ?? null
   }
 
-  private showTable(view: ViewConfig): void {
+  private showBody(view: ViewConfig): void {
     this.outline?.dispose()
     this.outline = null
     this.els.editor.hidden = true
     this.els.editor.replaceChildren()
     /**
-     * 两条渲染器：表格（行＝记录、列＝属性）与结构映射表（表头＝直接子块、一列＝它的孩子）。
-     * 它们**不共用**布局：平表有固定行高与窗口化，结构映射表按内容排、不吃窗口化那套。
+     * 三条渲染器：表格（行＝记录、列＝属性）、结构映射表（表头＝直接子块、一列＝它的孩子）、
+     * 记录列表（M3）。它们**不共用**布局：平表有固定行高与窗口化，结构映射表按内容排。
      * 所以按 kind 各建各的实例，切走就 dispose（不藏一台还在订阅的）。
      */
     const want = view.kind === 'table' ? 'table' : view.kind === 'list-table' ? 'list' : 'none'
@@ -453,27 +569,22 @@ export class ViewHost {
     }
     this.els.table.hidden = false
     if (want === 'none') {
-      // 类型与数据形状先就位，渲染器随后（看板/画廊/日历/导图）；这里给一句实话而不是空屏
-      this.els.table.replaceChildren()
-      const p = document.createElement('p')
-      p.className = 'tv-unsupported'
-      p.textContent = t('ui.view.unsupported')
-      this.els.table.appendChild(p)
+      this.paintBodyFallback()
       return
     }
     if (want === 'list') {
       if (!this.listTable) {
         this.listTable = new ViewListTable({
           store: this.deps.store,
-          host: () => this.deps.block(),
-          view: () => activeView(this.deps.block()) ?? view,
+          host: () => this.deps.host(),
+          view: () => this.view ?? view,
           kb: this.deps.kb,
           cell: this.cell,
           // 段尾宿主：容器就是这一屏的根，页面标题已经在上面写着它 ⇒ 不再重复一句表标题
           showCaption: false,
           openBlock: (id) => this.deps.openBlock(id),
           // 「加一项」就是往那一列（表头块）末尾插一个子块：与大纲里 ↵＋Tab 同一条写路径
-          insertItem: (columnId) => this.deps.invoke('core.view/new-row', { blockId: columnId }),
+          insertItem: (columnId) => this.deps.invoke('core.view/new-row', { owner: this.writeOwner, blockId: columnId }),
           deleteBlock: (id) => this.deps.invoke('core.view/delete-row', { rowId: id }),
         })
         this.els.table.replaceChildren(this.listTable.root)
@@ -484,15 +595,20 @@ export class ViewHost {
     if (!this.table) {
       this.table = new ViewTable({
         store: this.deps.store,
-        host: () => this.deps.block(),
-        view: () => activeView(this.deps.block()) ?? view,
+        host: () => this.deps.host(),
+        view: () => this.view ?? view,
         records: () => this.records(),
         defs: () => this.deps.kb.propDefs(),
-        defaults: () => defaultColumns(this.deps.block().id, this.deps.kb),
+        defaults: () =>
+          defaultColumnsForSource(this.source, this.deps.kb, {
+            hits: this.frozen?.hits ?? [],
+          }),
         setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
         clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
-        sort: (by, dir) => this.deps.invoke('core.view/set-sort', { blockId: this.deps.block().id, by, dir }),
-        insertRow: () => this.deps.invoke('core.view/new-row', { blockId: this.deps.block().id }),
+        // 表头排序写**视图的显示序**：不重查、不改 `_query.sort`（成员只由条件/上限决定）
+        sort: (by, dir) =>
+          this.deps.invoke('core.view/set-sort', { owner: this.writeOwner, viewId: this.view?.id ?? '', by, dir }),
+        insertRow: () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }),
         deleteRow: (rowId) => this.deps.invoke('core.view/delete-row', { rowId }),
         openBlock: (id) => this.deps.openBlock(id),
         cell: this.cell,
@@ -505,19 +621,26 @@ export class ViewHost {
     this.table.render()
   }
 
-  /** 行（派生）：查询源＝命中（不折叠祖先）；children 源＝直接子块 */
+  /** 类型与数据形状先就位，渲染器随后（列表/看板/画廊/日历/导图）；这里给一句实话而不是空屏 */
+  private paintBodyFallback(): void {
+    this.els.table.replaceChildren()
+    const p = document.createElement('p')
+    p.className = 'tv-unsupported'
+    p.textContent = t('ui.view.unsupported')
+    this.els.table.appendChild(p)
+  }
+
+  /** 行（派生）：query＝命中（不折叠祖先）；children＝直接子块；items＝`_items` 解析到的活块 */
   private records(): ViewRecord[] {
-    const b = this.deps.block()
-    if (sourceOf(b).kind === 'query') {
-      const frozen = readResult(b) ?? []
-      return resolveRows(frozen, this.deps.kb, { excludeId: b.id })
-    }
-    return childrenRecords(b.id, this.deps.kb)
+    const src = this.source
+    if (src.kind === 'query') return resolveRows(this.frozen?.hits ?? [], this.deps.kb)
+    if (src.kind === 'items') return itemsRecords(src.blockId, this.deps.kb)
+    return childrenRecords(src.blockId, this.deps.kb)
   }
 
   /* ---------------------------------------------------------- 大纲分支：查询结果 */
 
-  /** 抬头上的「结果可能已过期」：只是提示，不改列表（D4） */
+  /** 抬头上的「结果可能已过期」：只是提示，不改列表 */
   private paintStale(): void {
     const dirty = this.staleIds.size > 0
     this.els.stale.hidden = !dirty
@@ -527,13 +650,11 @@ export class ViewHost {
   /**
    * 外部告诉视图「这些块变了」⇒ 若其中有当前结果里的成员，点亮「结果可能已过期」。
    *
-   * ⚠️ 只点亮、**不重排**（D4）；真正移除发生在刷新时，并会 toast 说清移除了几条。
+   * ⚠️ 只点亮、**不重排**；真正移除发生在刷新时，并会 toast 说清移除了几条。
    */
   noteTouched(ids: readonly string[]): void {
-    const b = this.deps.block()
-    if (sourceOf(b).kind !== 'query') return
-    const frozen = readResult(b) ?? []
-    const inResult = new Set(frozen.map((h) => h.blockId))
+    if (this.source.kind !== 'query') return
+    const inResult = new Set((this.frozen?.hits ?? []).map((h) => h.blockId))
     let hit = false
     for (const id of ids) {
       if (inResult.has(id)) {
@@ -544,18 +665,19 @@ export class ViewHost {
     if (hit) this.paintStale()
   }
 
-  /** 按冻结结果渲染**当前活块**（D5：内容不冻） */
+  /** 按冻结结果渲染**当前活块**（内容不冻） */
   private render(focusHint?: string): void {
-    const b = this.deps.block()
-    // children 源没有大纲分支（关掉视图就没有这一层了）
-    if (sourceOf(b).kind !== 'query') return
+    const b = this.deps.host()
+    const src = this.source
+    // children/items 源没有大纲分支（它们的默认看法不是大纲）
+    if (src.kind !== 'query' && !isQueryBlock(b)) return
+    if (src.kind !== 'query') return
     this.paintStale()
-    const frozen = readResult(b)
-    if (!frozen) {
+    if (!this.frozen) {
       this.renderEmpty(t('ui.query.noSpec'))
       return
     }
-    const rows = resolveFrozen(frozen, (id) => this.deps.kb.pathOf(id))
+    const rows = resolveFrozen(this.frozen.hits, (id) => this.deps.kb.pathOf(id))
     this.els.root.hidden = false
     this.els.count.textContent = t('ui.query.count', { count: rows.length })
     if (rows.length === 0) {
@@ -618,9 +740,4 @@ export class ViewHost {
       host.dataset.emptyText = text
     }
   }
-}
-
-/** 这一块的视图列表（只读投影；写路径在命令层） */
-function readViewsOf(b: Block): ViewConfig[] {
-  return readViews(b)
 }

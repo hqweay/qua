@@ -13,6 +13,8 @@
  *    内建只保留一种「中性现代大纲」。观感要调就改 token，不再按皮肤分叉。
  */
 import type { SecLayout } from '../feed.ts'
+import type { MountEntry } from '../mount.ts'
+import { canonicalMountEntries } from '../mount.ts'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 
@@ -24,6 +26,17 @@ export interface Prefs {
    * 值域首版只认 `column`／`row`（grid 轴已定、入口未做）。
    */
   feedLayout: SecLayout
+  /**
+   * **日记面板的那几栏**（local／linked／derived；与 `feedLayout` 同层）。
+   *
+   * 为什么是设备状态而不是一个隐藏配置块：日记表面是**系统视图**，不是块 ——
+   * 它不可寻址、不进回收站、不参与复制。拿一个块当它的拥有者，
+   * 就是用一个不可寻址的对象存「这一台设备怎么看」，而 `feedLayout` 就在旁边。
+   *
+   * 代价（登记）：日记面板的 **local tab 不跨设备**（linked tab 的查询内容跟库走，会跨）。
+   * 要跨设备 ⇒ 把 local 提升为查询页/link，不需要新机制。
+   */
+  journalMounts: MountEntry[]
   /** 三槽的开关与宽度；入口条已作废 */
   dock: DockPrefs
   virtualize: boolean
@@ -100,6 +113,7 @@ export const DEFAULT_DOCK: DockPrefs = {
 export const DEFAULT_PREFS: Prefs = {
   theme: 'system',
   feedLayout: 'column',
+  journalMounts: [],
   dock: DEFAULT_DOCK,
   virtualize: false,
   radius: 12,
@@ -160,6 +174,8 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     ...p,
     // 段排列只认两档（grid 轴未开）：别的值一律回单列，不让坏形状进偏好
     feedLayout: p.feedLayout === 'row' ? 'row' : 'column',
+    // 日记面板的栏：逐项重建（坏项丢掉），与 `_mounts` 共用同一份判据
+    journalMounts: canonicalMountEntries(p.journalMounts),
     dock: {
       left,
       right,

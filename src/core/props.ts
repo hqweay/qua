@@ -492,13 +492,19 @@ export function declaredFieldIds(owner: Block): string[] {
 /**
  * 把一条属性声明到标签/页上，从此成为它的标签属性（幂等；追加到末尾 ＝ 显示顺序）。
  *
- * **只有页与标签能声明属性**：声明必须有自动获得方（标签的成员、页的子块），
- * 普通块没有 ⇒ 无消费方的声明是噪音。返回值说明有没有真的改动。
+ * **只有标签能声明属性**：声明必须有自动获得方 —— 标签的成员。
+ *
+ * ⚠️ **页不再能声明**（v29）。它曾经可以，但那一格写进去**没有任何消费方**：
+ *    页的子块并不会因此获得那些字段。一个能写、没人读的值比没有更糟 ——
+ *    用户会以为「声明了，成员就有这一格了」。继承是另一个设计
+ *    （要先定「页的子块」与「标签的成员」谁说了算），在定下来之前这一格不可写。
+ *
  * ⚠️ 判据是**露面**（`hasList`），不是「有名字」：一个有名内容块不该凭空获得
  *    「成员自动继承这些字段」的语义。
+ * 返回值说明有没有真的改动。
  */
 export function declareField(owner: Block, propId: string): boolean {
-  if (!hasList(owner, 'page') && !hasList(owner, 'tag')) return false
+  if (!hasList(owner, 'tag')) return false
   const ids = declaredFieldIds(owner)
   if (ids.includes(propId)) return false
   owner.props = { ...(owner.props ?? {}), [FIELD_DEFS_PROP]: [...ids, propId] }

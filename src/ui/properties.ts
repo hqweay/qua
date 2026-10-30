@@ -508,12 +508,17 @@ export class PropertiesPanel {
     if (this.formOpen === 'own') this.els.body.appendChild(this.buildForm(target, labels))
 
     /**
-     * **标签属性**（标签）／**字段声明**（页）：只有页/标签有。
+     * **标签属性**：只有标签有。
      *
      * 与上面那一段是两件事：那一段是「这一块自己的值」，这一段是「我的成员会有哪些格子」。
-     * 页/标签上点这一段自己的入口做的正是**声明**，所以不画这一段，那次点击就没有可见结果。
+     *
+     * ⚠️ **页不再有这一段**（v29）。页声明过 `_fieldDefs`，但**没有任何消费方**
+     * —— 子块不会因此获得那些字段，于是它只是「一个能写、没人读的值」。
+     * 一个写进去却永远不会生效的入口比没有入口更糟：用户会以为「声明了，
+     * 成员就有这一格了」。继承是另一个设计（需要先定「页的子块」与「标签的成员」
+     * 谁说了算），在定下来之前，这一格就不该可写。
      */
-    if (hasList(target, 'page') || hasList(target, 'tag')) {
+    if (hasList(target, 'tag')) {
       this.els.body.appendChild(this.buildDeclared(target, labels))
     }
 
@@ -578,25 +583,23 @@ export class PropertiesPanel {
    * ⚠️ 解除声明**不动值**：成员块上已有的值落回「本块自有」，重新声明后自动回来。
    */
   private buildDeclared(target: Block, labels: ReadonlyMap<string, string>): HTMLElement {
-    const isTag = hasList(target, 'tag')
+    // 走到这里只可能是标签（页那一段已移除，见 `render` 里的判据）
     const section = document.createElement('section')
     // `prop-declared` 是既有断言的选择器锚点（`.prop-declared [data-declared-prop-id]`），
     // `props-declared` 是这一段自己的名字（新的断言与样式用它）
     section.className = 'prop-declared props-declared props-section'
-    section.dataset.declaredSection = isTag ? 'tag' : 'page'
+    section.dataset.declaredSection = 'tag'
 
     const head = document.createElement('div')
     head.className = 'props-section-head'
     const title = document.createElement('span')
     title.className = 'props-section-title'
-    title.textContent = t(isTag ? 'ui.props.tagPropsTitle' : 'ui.props.pageFieldsTitle')
+    title.textContent = t('ui.props.tagPropsTitle')
     head.appendChild(title)
-    if (isTag) {
-      const hint = document.createElement('span')
-      hint.className = 'props-section-hint'
-      hint.textContent = t('ui.props.tagPropsHint')
-      head.appendChild(hint)
-    }
+    const hint = document.createElement('span')
+    hint.className = 'props-section-hint'
+    hint.textContent = t('ui.props.tagPropsHint')
+    head.appendChild(hint)
     section.appendChild(head)
 
     const list = document.createElement('div')
@@ -605,7 +608,7 @@ export class PropertiesPanel {
     if (defs.length === 0) {
       const empty = document.createElement('span')
       empty.className = 'props-empty'
-      empty.textContent = t(isTag ? 'ui.props.tagPropsEmpty' : 'ui.props.pageFieldsEmpty')
+      empty.textContent = t('ui.props.tagPropsEmpty')
       list.appendChild(empty)
     }
     for (const def of defs) {
@@ -658,8 +661,8 @@ export class PropertiesPanel {
     add.type = 'button'
     add.className = 'props-add props-declare-add'
     add.dataset.declareAdd = '1'
-    add.textContent = t(isTag ? 'ui.props.addTagProp' : 'ui.props.addPageField')
-    add.title = t(isTag ? 'ui.props.addTagPropTitle' : 'ui.props.addPageFieldTitle')
+    add.textContent = t('ui.props.addTagProp')
+    add.title = t('ui.props.addTagPropTitle')
     add.addEventListener('click', () => {
       this.formOpen = this.formOpen === 'declared' ? null : 'declared'
       this.render()

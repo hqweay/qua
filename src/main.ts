@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal, isQueryBlock,  journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, activeView, readViews, viewNameOf, type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, sourceOfOwner, storedKindsFor, type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { checkExternalUrl, rejectText } from './core/link.ts'
 import { BlockStore } from './core/store.ts'
@@ -45,13 +45,14 @@ import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupDocks } from './app/wiring/docks.ts'
 import { setupPanels } from './app/wiring/panels.ts'
+import { setupOwners } from './app/wiring/owners.ts'
 import { setupChrome } from './app/wiring/chrome.ts'
 import { setupPages } from './app/wiring/pages.ts'
 import { setupDiagnostics } from './app/wiring/diagnostics.ts'
 import { HANDLERS } from './app/handlers.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
 import { t } from './core/msg.ts'
-import { seedWorkspace } from './core/seed.ts'
+import { seedJournalMounts, seedWorkspace } from './core/seed.ts'
 import { createIdbAssetStore } from './core/storage/asset-idb.ts'
 import { createIpcAssetStore } from './core/storage/asset-ipc.ts'
 import { ensureSeedAssets } from './core/storage/seed-assets.ts'
@@ -160,6 +161,13 @@ const bootState = {
   notice: null as string | null,
 }
 let ws: Workspace = boot.status === 'ok' ? boot.ws : seedWorkspace()
+/**
+ * 种子库里那几栏演示查询：它们在**设备状态**里（日记面板是系统视图，不是块）。
+ *
+ * 只在「这一份库是刚种出来的」时给：旧库作废重 seed 也算一次全新开始，
+ * 而两个仓都空着的时候（第一次打开）更该看到那一栏。
+ */
+if (boot.status !== 'ok') device.prefs.journalMounts = seedJournalMounts()
 
 /**
  * **启动顺序**：先把种子资产的字节写进资产库，再拿一次全库索引，最后才渲染。
@@ -1181,6 +1189,29 @@ function swapWorkspace(next: Workspace, save: boolean): void {
  */
 let copiedClip: { ids: string[]; text: string } | null = null
 
+/**
+ * **视图配置的唯一接缝**（`ViewOwnerStore`）。
+ *
+ * 为什么在装配层：写要进事务（否则不产 op ⇒ 落盘时这一笔被静默跳过），
+ * 而日记那一半是设备状态 —— 它在 `core` 里根本没有写入口。
+ *
+ * ⚠️ `onChange` 引用**后建的** `panels`：这里只是把一个函数存下来，
+ *    真正调用都在模块初始化之后（TDZ 不会撞上）。
+ */
+const owners = setupOwners({
+  kb,
+  run: (fn) => runTx(fn).result,
+  prefs: () => prefs(),
+  scheduleDeviceSave: () => scheduleDeviceSave(),
+  scheduleSave: () => scheduleSave(),
+  onChange: () => {
+    panels?.renderMounts()
+    panels?.renderProperties()
+    scheduleSave()
+    scheduleBadge()
+  },
+})
+
 const app: App = {
   get ed() {
     return ed
@@ -1193,8 +1224,9 @@ const app: App = {
   ...moveCommands(pageDeps),
   ...mountCommands({
     kb,
-    write: writeProps,
+    owners,
     run: runTx,
+    activeId: () => ws.activeId,
     toast: (text, kind) => app.toast(text, kind),
   }),
   ...collectionCommands({
@@ -1210,11 +1242,15 @@ const app: App = {
   }),
   ...viewConfigCommands({
     kb,
+    owners,
     run: runTx,
     reloadPage: () => pageDeps.reloadPage(),
     rootIds: () => pageDeps.rootIds(),
+    activeId: () => ws.activeId,
     // 换屏走导航那条路（会记历史、刷标题、把光标放到新屏第一行），不另写一份装载
     openBlock: (id) => app.zoomTo(id),
+    // 新建查询页之后左槽要看得见它（页列表就在那一列里）
+    refreshList: () => renderDocks(),
     toast: (text, kind) => app.toast(text, kind),
   }),
   ...belongsToCommands({
@@ -1245,19 +1281,22 @@ const app: App = {
    * 是数据。菜单项由 `_views` 现画，选中之后仍走命令面（`core.view/*`）——
    * 于是撤销、落盘、审计只有一条路（与「菜单由绑定表渲染」同一条纪律的延伸）。
    */
-  openViewMenu: (blockId) => {
-    const b = blocks.find(blockId)
-    if (!b) return
-    const active = activeView(b)
+  openViewMenu: (owner) => {
+    const data = owners.read(owner)
+    if (!data) return
+    const host = owner.kind === 'block' ? blocks.find(owner.blockId) : undefined
+    const source = sourceOfOwner(owner, data, host)
+    const active = readViewSet(data).active
+    const defaultLabel = source.kind === 'items' ? t('ui.view.kind.list') : t('ui.view.outline')
     const rows: Row[] = [
       {
         id: 'view//outline',
-        label: t('ui.view.outline'),
+        label: defaultLabel,
         icon: 'lucide:list',
         ...(active ? {} : { keyHint: t('ui.view.current') }),
       },
     ]
-    for (const v of readViews(b)) {
+    for (const v of data.views) {
       rows.push({
         id: `view//${v.id}`,
         label: viewNameOf(v, (k) => t(`ui.view.kind.${k}`)),
@@ -1270,9 +1309,9 @@ const app: App = {
      * 名字取那一块的显示名。排序只改显示序（行＝每列各取第 j 项的位置元组），
      * `children` 顺序一个字节不动。
      */
-    if (active?.kind === 'list-table') {
-      const table = listTableOf(blockId, kb)
-      const cur = active.list?.sort
+    if (active?.kind === 'list-table' && source.kind === 'children') {
+      const table = listTableOf(source.blockId, kb)
+      const cur = active.listTable?.sort
       table.columns.forEach((col, i) => {
         const on = cur?.col === i ? cur.dir : ''
         const name = displayNameOf(col).trim()
@@ -1288,16 +1327,20 @@ const app: App = {
         })
       })
     }
-    rows.push({ id: 'view/add/table', label: t('ui.view.addTable'), icon: 'lucide:table', group: 'view/9-add' })
-    rows.push({
-      id: 'view/add/list-table',
-      label: t('ui.view.addListTable'),
-      icon: 'lucide:table-properties',
-      group: 'view/9-add',
-      // 结构映射要一棵树：查询块没有层级，菜单里就不给这一项（给了只会是一个空表）
-      ...(isQueryBlock(b) ? { disabled: true } : {}),
-    })
-    const anchor = app.ed.blockEl(blockId)?.getBoundingClientRect() ?? null
+    /**
+     * **能建哪几种**（表只有 `STORED_KINDS_BY_SOURCE` 一张）：
+     * 查询源没有结构映射表与导图 —— 命中集合不是树，没有「第 k 个孩子」可对齐。
+     */
+    const addable = storedKindsFor(source).filter((k) => k === 'table' || k === 'list-table')
+    for (const kind of addable) {
+      rows.push({
+        id: `view/add/${kind}`,
+        label: kind === 'table' ? t('ui.view.addTable') : t('ui.view.addListTable'),
+        icon: kind === 'list-table' ? 'lucide:table-properties' : 'lucide:table',
+        group: 'view/9-add',
+      })
+    }
+    const anchor = owner.kind === 'block' ? (app.ed.blockEl(owner.blockId)?.getBoundingClientRect() ?? null) : null
     layers.openMenu({
       rows,
       anchor,
@@ -1305,14 +1348,14 @@ const app: App = {
       searchable: false,
       onPick: (row) => {
         const id = String(row.id)
-        if (id === 'view//outline') void registry.invoke('core.view/set-active', { blockId, viewId: '' }, 'menu')
-        else if (id.startsWith('view//')) void registry.invoke('core.view/set-active', { blockId, viewId: id.slice('view//'.length) }, 'menu')
+        if (id === 'view//outline') void registry.invoke('core.view/set-active', { owner, viewId: '' }, 'menu')
+        else if (id.startsWith('view//')) void registry.invoke('core.view/set-active', { owner, viewId: id.slice('view//'.length) }, 'menu')
         else if (id.startsWith('view/sort/')) {
           const [, , col, dir] = id.split('/')
           // 升 → 降 → 取消（与平表表头同一套三次点击）
           const next = dir === '' ? 'asc' : dir === 'asc' ? 'desc' : ''
-          void registry.invoke('core.view/set-sort', { blockId, by: col, dir: next }, 'menu')
-        } else if (id.startsWith('view/add/')) void registry.invoke('core.view/add', { blockId, kind: id.slice('view/add/'.length) }, 'menu')
+          void registry.invoke('core.view/set-sort', { owner, viewId: active?.id ?? '', by: col, dir: next }, 'menu')
+        } else if (id.startsWith('view/add/')) void registry.invoke('core.view/add', { owner, kind: id.slice('view/add/'.length) }, 'menu')
       },
     })
   },
@@ -1519,6 +1562,11 @@ const app: App = {
   },
   // 结构动作落在中心编辑器上：焦点可能在一面镜像的岛里，而露面块在正文里
   insertEmbed: (at, targetId, view) => mainEd.insertEmbedAfter(at, targetId, view),
+  /** 改一次露面选的视图（看法住在源块的命名视图上，这里只动指针） */
+  setEmbedView: (blockId, view) => {
+    owners.setBindingView({ kind: 'embed', blockId }, view)
+    return true
+  },
   expandAtomToEmbed: (atomId, view) => mainEd.expandAtomToEmbed(atomId, view),
   removeEmbed: (blockId) => {
     const ok = mainEd.removeEmbed(blockId)
@@ -1755,6 +1803,7 @@ function viewEvents(editor: () => BlockEditor, change: ViewEvents['change'], via
         store: blocks,
         kb,
         run,
+        owners,
         wire: (ed2, change2) => wireViewEditor(ed2, change2, via),
         onFocus: (next) => {
           ed = next
@@ -1863,6 +1912,8 @@ const { renderMounts, renderProperties, scheduleProperties, pickRefValue } = set
   kb,
   app,
   layers,
+  owners,
+  journalMounts: () => prefs().journalMounts,
   shortId,
   activeBlock,
   run,

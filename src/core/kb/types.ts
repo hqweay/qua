@@ -110,10 +110,12 @@ export type Existence = 'present' | 'deleted' | 'purged'
  * 而落盘侧只能按软删解释 —— **撤销一次插入再重开，块会从回收站里冒出来**。
  * 一个格只能有一种地址，存在这一格也一样。
  *
- * ## 为什么 `_queryResult` 不进日志
+ * ## 为什么查询结果不进日志
  *
- * 它是「那次查询的冻结结果」，派生值；每次装载重算。写它不发 op，
- * 否则日志会记下一份会过期的缓存，而重放出来的状态与装载出来的不一致。
+ * 它是「这一个表面实例的冻结结果」，派生值；重开重算。曾经它住在块上
+ * （`_queryResult`）并以「不投影」的方式豁免日志 —— 而这正是问题的一半：
+ * 一个**本该是投影**的东西被迫进了内容层，于是它要么说谎（外部改了数据）、
+ * 要么让「刷新」变成一次可撤销的写。现在它根本不在模型里（见 `FrozenResult`）。
  *
  * ⚠️ **地址与露面走 `prop`，没有自己的 op 种类**（`_aliases`／`_lists` 各一条整袋值）。
  * 曾经有过 `alias`／`list` 两种「按项增量」的 op，它们与 `prop.set` **指向同一个格**：
@@ -277,7 +279,7 @@ export interface KbClient {
   /** 这一块当前的可引用区间（通常为空——anno 只在被引用时存在） */
   annosOf(id: string): readonly Anno[]
 
-  query(spec: QuerySpec, opts?: { scopeId?: string; selfId?: string }): QueryHit[]
+  query(spec: QuerySpec, opts?: { scopeId?: string; selfId?: string; excludeIds?: readonly string[] }): QueryHit[]
   backlinksOf(id: string): readonly BackrefSource[]
   /** 引用发生处的**块**（不是按页聚合）——反链 view block 的行；同一块多处引用各算一条 */
   backrefBlocksOf(id: string): readonly BackrefBlock[]

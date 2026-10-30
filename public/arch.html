@@ -191,12 +191,11 @@
     <span class="key">_belongsTo</span>? <span class="cmt">归属（filed-under）：子块 → 上级，任何块都能配、可多父</span>
     <span class="key">_deletedAt</span>? <span class="cmt">有它 ⇒ 这块被软删了（子树不可见是继承来的）</span>
     <span class="key">_kind</span>?      <span class="cmt">有它 ⇒ 属性定义块（种类是它自己的数据）</span>
-    <span class="key">_query</span>?     <span class="cmt">有它 ⇒ 查询视图块（值是 where 条件）</span>
-    <span class="key">_queryResult</span>? <span class="cmt">冻结的查询结果（成员与顺序；只在刷新时改）</span>
-    <span class="key">_mounts</span>?   <span class="cmt">块底挂载区的用户栏：{ label, spec }[]（tab 是一格数据，不是块）</span>
-    <span class="key">_views</span>?    <span class="cmt">视图配置（列/序/分组…）：这一块怎么看，换设备要一致</span>
-    <span class="key">_activeView</span>? <span class="cmt">当前激活的视图 id；缺席＝大纲（不补默认值）</span>
-    <span class="key">_embed</span>?    <span class="cmt">露面：{ block } 指针。源是派生的，看法仍住这块自己的 _views 上</span>
+    <span class="key">_query</span>?     <span class="cmt">有它 ⇒ 查询块（值＝where 条件）；结果按表面实例冻结，不在这里</span>
+    <span class="key">_mounts</span>?   <span class="cmt">块底那几栏：local（自己带 spec/views）/ linked（只有指针）</span>
+    <span class="key">_views</span>?    <span class="cmt">命名视图（列/序/分组…）：这一块怎么看，换设备要一致</span>
+    <span class="key">_activeView</span>? <span class="cmt">当前激活的视图 id；缺席＝这一份源的默认看法</span>
+    <span class="key">_embed</span>?    <span class="cmt">露面：{ block, view } 指针。看法住在**源块**的命名视图上</span>
     <span class="key">_items</span>?    <span class="cmt">集合组件的引用列表：块 id[]（有序引用，不是 children —— 零级联）</span>
     <span class="key">_ownProps</span>? · <span class="key">_fieldDefs</span>? · <span class="key">_choices</span>? · <span class="key">_uiPosition</span>?
     <span class="key">[定义块 id]</span>: unknown  <span class="cmt">用户/插件定义的字段值</span>

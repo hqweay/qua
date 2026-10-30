@@ -20,6 +20,9 @@ import type { CtxKeys } from './index.ts'
 import type { QuerySpec } from './query.ts'
 import type { ChoiceScope } from './props.ts'
 import type { SecLayout } from './feed.ts'
+import type { MountHost } from './mount.ts'
+import type { ViewConfig } from './view.ts'
+import type { ViewOwnerRef } from './view-owner.ts'
 
 export type Capability = 'read' | 'write' | 'admin' | 'plugin'
 export type FixtureName = 'seed' | 'empty' | 'sparse' | 'degraded' | 'boot'
@@ -248,16 +251,34 @@ export interface App {
   openAliasEditor(blockId: string, autofocus?: boolean): void
   /** 打开字段声明（页/标签能声明哪些属性）——纯 UI，落在装配层 */
   openFieldsEditor(blockId: string): void
+  /* 挂载区（块底面板）：写哪一格由 `MountHost` 判，命令层不自己判「是不是日记」 */
   /**
-   * **给这一块的挂载区加一栏查询**（写宿主上的 `_mounts`，不建块）。
+   * 加一栏 **local tab**：这一栏自己拥有条件与视图。**不建块**（块数一个都不变）。
    *
-   * `label` 是这一栏的名字（同一个宿主下必须唯一）。日记宿主写在**共享配置块**上，
-   * 没有就当场物化——那是那个内部块唯一的诞生入口。
-   * @returns 写进去了才 `true`（过去的日记天、重名、形状不合法都返回 `false`）
+   * 默认路径就是它：随手加一栏不该在树里多一个对象，也没有「删块 tab 怎么办」。
+   * @returns 新栏的稳定 id（写不进去 ⇒ `''`）
    */
-  addMountTab(hostId: string, label: string, spec: QuerySpec): boolean
-  /** 摘掉一栏用户 tab（`index` 是用户栏的序）。**不删任何块**——因为压根没有块 */
-  removeMountTab(hostId: string, index: number): boolean
+  addLocalTab(host: MountHost, label: string, spec: QuerySpec, views?: ViewConfig[], activeView?: string): string
+  /** 加一栏 **linked tab**：只存「指向哪一块 ＋ 哪张视图」，配置仍住在目标块上 */
+  addLinkedTab(host: MountHost, blockId: string, view?: string, label?: string): string
+  /** 摘一栏（`tabId` 是稳定 id，不是数组下标）。**不删任何块** */
+  removeMountTab(host: MountHost, tabId: string): boolean
+  /** 改栏名（local 的名字；linked 的覆盖文案） */
+  renameMountTab(host: MountHost, tabId: string, label: string): boolean
+  /** 换这一栏选的视图（local 写自己的默认视图；linked 只改指针） */
+  setMountTabView(host: MountHost, tabId: string, view: string): boolean
+  /**
+   * **提升**（local → 块）：复制条件与视图到一个新的查询页/查询块，
+   * 默认把这一栏改成指向它的 linked。复制之后是两个独立对象。
+   */
+  promoteMountTab(host: MountHost, tabId: string, target: 'page' | 'block', parentId?: string, link?: boolean): string
+  /**
+   * **转本地副本**（linked → local）。只有目标源是 **query** 时才成立：
+   * local tab 是「面板局部的一次查询」，children/items 的视图没有这个对应物。
+   */
+  detachMountTab(host: MountHost, tabId: string): boolean
+  /** **固定派生栏**（引用/同类/提及 → local）：把现算的条件变成一栏可编辑的查询 */
+  fixDerivedTab(host: MountHost, source: 'refs' | 'same' | 'mentions'): string
   /**
    * 写块的类型（`_type`）。
    *
@@ -326,30 +347,44 @@ export interface App {
    * 同一个块全局最多一个窗口（已在另一侧则移过来）。
    */
   openInDock(id: string, side?: 'left' | 'right'): void
-  /* 视图配置（一个块怎么看：`_views` / `_activeView`；视图不是实体） */
+  /* 视图配置（`_views` / `_activeView`；视图不是实体，配置住在**拥有者**上） */
   /**
    * 新建一个视图并设为激活，返回它的 id（空串＝没建）。
    *
    * 表格的列在这里算**一次**并写进配置：算完就不随结果漂移（否则列宽/列序会自己动）。
+   * `owner` 可以是块，也可以是 local tab —— 「配置住哪」由拥有者回答。
    */
-  addView(blockId: string, kind: string): string
-  /** 切换激活视图（`''` ＝ 大纲，删掉 `_activeView` 而不是存一个 outline） */
-  setActiveView(blockId: string, viewId: string): boolean
+  addView(owner: ViewOwnerRef, kind: string): string
+  /** 切换激活视图（`''` ＝ 这一份源的默认看法，删掉 `_activeView` 而不是存一个 outline） */
+  setActiveView(owner: ViewOwnerRef, viewId: string): boolean
   /** 删一个视图：只动配置，记录一个字节不碰；删的是激活那个就去相邻项 */
-  removeView(blockId: string, viewId: string): boolean
+  removeView(owner: ViewOwnerRef, viewId: string): boolean
   /** 给当前激活的视图改名（空名 ⇒ 回到按类型的默认名） */
-  renameActiveView(blockId: string, name: string): boolean
+  renameActiveView(owner: ViewOwnerRef, name: string): boolean
   /** 新建一行＝在容器末尾插一个子块（查询源没有这一行：它的行是命中） */
-  viewInsertRow(blockId: string): boolean
+  viewInsertRow(owner: ViewOwnerRef, blockId?: string): boolean
   /** 删除一行＝软删那个子块（可恢复） */
   viewDeleteRow(rowId: string): boolean
   /**
-   * 表头排序。children 源写 `activeView.table.sort`（只改显示序）；
-   * 查询源写 `_query.sort` 并重算（排序可能影响 `limit` 的成员）。`dir === ''` ＝ 清掉。
+   * **表头排序＝显示排序**：只写 `view.table.sort`（或结构映射表的 `listTable.sort`）。
+   *
+   * ⚠️ 不再写查询的成员顺序（`QuerySpec.sort`）：那是「取哪些、按什么序」，
+   *    由构建器编辑。点表头不该换一批行。`dir === ''` ＝ 清掉。
    */
-  viewSetSort(blockId: string, by: string, dir: string): boolean
-  /** 块菜单里的「视图…」：列出大纲 ＋ 已有视图 ＋ 新建表格（**纯 UI**，落在装配层） */
-  openViewMenu(blockId: string): void
+  viewSetSort(owner: ViewOwnerRef, viewId: string, by: string, dir: string): boolean
+  /** 「视图…」菜单：列出默认看法 ＋ 已有视图 ＋ 新建…（**纯 UI**，落在装配层） */
+  openViewMenu(owner: ViewOwnerRef): void
+  /**
+   * 写**条件**（构建器／JSON 的落点）。
+   *
+   * ⚠️ 只写条件，不写结果 —— 结果由每个表面实例自己冻结，
+   *    条件变了（⇒ `specKey` 变）那一处会自动重算，不会出现「旧条件 ＋ 新结果」。
+   */
+  setQuerySpec(owner: ViewOwnerRef, spec: QuerySpec): boolean
+  /** 新建查询页／页内查询块（内容对象：能被引用、能进回收站） */
+  createQuery(kind: 'page' | 'block', name: string, spec: QuerySpec, parentId?: string): string
+  /** 改一次露面选的视图（`core.embed/set-view` 的落点） */
+  setEmbedView(blockId: string, view: string): boolean
   /* 集合组件 */
   /** 新建一个集合块（森林顶层），返回它的 id；放进哪个槽由调用方决定 */
   createCollection(name?: string): string

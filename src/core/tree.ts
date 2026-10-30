@@ -25,6 +25,7 @@ import {
 import { canWriteText, typeDeclOf } from './types.ts'
 import { isEmptyContent, joinRuns, plainLen, sliceRuns, splitRuns, cloneRunsNewIds, textRuns } from './runs.ts'
 import { walkForest } from './walk.ts'
+import { cloneMountEntries, MOUNTS_PROP } from './mount.ts'
 export function locate(doc: Doc, id: string): Located | null {
   let found: Located | null = null
   walkForest(doc.roots, (b, ctx) => {
@@ -201,16 +202,14 @@ export function hasDescendant(doc: Doc, ancestorId: string, maybeChildId: string
  *    **完全不可见**：不报错、不崩，只是静静地多出一个引用不到的块。
  *    判据一句话：**凡是 `hasIdentity` 会认的，副本都不能是。**
  *
- * ⚠️ `_queryResult` 跟着 `_query` 一起剔：它是那次查询的冻结结果，副本没有条件可依，
- *    留着就是一个指向别处 block id 的死列表（刷新时会重新求值，不需要旧值）。
- *
  * ⚠️ `_belongsTo` 也剔除：它是「这一块归在谁下面」，而那条关系属于原件。
  *    留着就是一个潜伏值 —— 副本此刻没有 `tag` 列表，用不上它；一旦副本被加进
  *    标签列表，它就会生效，而它指向的父标签关系是原件的。
  *
- * ⚠️ `_mounts` 同样剔除：挂载区是**原件的看板配置**（挂哪几栏查询、端口叫什么）。
- *    副本拖着原件配好的看板，就是一个潜伏值——它此刻看着无关，一旦改动就会
- *    和原件共用同一份「我以为只属于那一块」的配置。
+ * ⚠️ `_mounts` **随副本走**（曾经剔除）：它是这一块的看板配置，属于**内容**而不是身份
+ *    ——副本带着原件配好的那几栏，正是「复制这块」该有的结果。
+ *    复制时 local 栏的 spec/views 深拷成独立对象（两份从此各自演化），
+ *    linked 栏只拷指针（它本来就指着同一个目标）。
  *    注意它**不让块变成身份块**：`hasIdentity` 不认它，副本该是内容块还是内容块。
  *
  * ⚠️ 代价：复制一个页，副本**失去 `page` 列表与全部名字**，于是它不再出现在页列表里，
@@ -225,8 +224,6 @@ const IDENTITY_PROPS: readonly string[] = [
   '_date',
   '_kind',
   '_query',
-  '_queryResult',
-  '_mounts',
 ]
 
 function contentProps(props: BlockProps): BlockProps | undefined {
@@ -241,6 +238,12 @@ function contentProps(props: BlockProps): BlockProps | undefined {
     delete out[VIEWS_PROP]
     delete out[ACTIVE_VIEW_PROP]
   }
+  /**
+   * 挂载区随块走，但**不能共享同一批条目对象**：浅拷 `props` 之后副本与原件
+   * 指的是同一个 `MountEntry`，改一栏会动两处。local 的 spec/views 因此深拷，
+   * linked 只拷指针（它本来就指着同一个目标）。
+   */
+  if (MOUNTS_PROP in out) out[MOUNTS_PROP] = cloneMountEntries(out[MOUNTS_PROP] as Parameters<typeof cloneMountEntries>[0])
   // 属性袋不留空壳：一块只有身份的块复制后不该留下 `{}`，否则「有没有属性」会有两份答案
   return Object.keys(out).length === 0 ? undefined : out
 }

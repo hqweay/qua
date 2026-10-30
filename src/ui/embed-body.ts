@@ -1,24 +1,31 @@
 /**
- * **露面块的身体**：镜像（一台嵌套编辑器）或投影（大纲表格）。
+ * **露面块的身体**：镜像（一台嵌套编辑器）或投影（源块上那张命名视图的渲染器）。
  *
  * 为什么身体必须是一个**编辑岛**：同一个块可能在同一屏出现两次（源在正文原位、
  * 这里又露面一次）。岛根把焦点与重排切成两个世界——外层编辑器不抢里层光标，
  * 里层打字也不触发外层重排（见 `ui/editable-block.ts` 与 `view/editor.ts` 的 `blockEl`）。
  *
- * 两种看法各走各的路，但**共用同一个源**：
- *   · 镜像 ＝ 把源的整棵子树装进一台 `EditableBlock`（含源自己那一行，所以能就地改）；
- *   · 大纲表格 ＝ `ViewListTable`（表头＝源的直接子块，一列＝那个子块的孩子），
- *     与整屏那张表是同一个渲染器。
+ * ## 一条判据：看法住在**源块**上，露面只存一次选择
+ *
+ * `_embed = { block, view }`：`view` 是 `''`（跟随源块的默认看法）／`'outline'`（强制大纲）／
+ * 源块 `_views` 里一张命名视图的 id。**露面块自己没有 `_views`。**
+ *
+ * 曾经露面块自己带一份配置，于是同一批块在正文、面板、中心各露一次 ⇒ 三份各自演化的
+ * 列与排序。要共享就都指向源块；要「这一次特别一点」就在源块上建一张命名视图并指向它 ——
+ * 两种需求都有出口，且只存在一份配置。
  *
  * 深度 1 由构造固定：镜像里那台编辑器带 `embedBodies: false`，里面的露面块只画占位。
  * 这不是「用 visited 集合拦」——递归渲染的结果不能依赖遍历顺序。
  */
 import {
-  activeView,
   isDeleted,
   resolveEmbed,
+  resolveBoundView,
+  readViewSet,
   type Block,
   type BlockStore,
+  type ViewConfig,
+  type ViewOwnerStore,
 } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import type { Tx } from '../core/kb/types.ts'
@@ -33,6 +40,8 @@ export interface EmbedBodyDeps {
   kb: KbClient
   /** 命令层的事务入口（撤销快照与重画归装配层） */
   run: <R>(fn: (tx: Tx) => R) => R
+  /** 视图配置的唯一接缝：这一层不摸 `props._views`，只问「这次露面选了哪张视图」 */
+  owners: ViewOwnerStore
   wire: (ed: BlockEditor, change: (kind: string) => void) => void
   onFocus: (ed: BlockEditor) => void
   onChange: (kind: string) => void
@@ -66,8 +75,19 @@ export function mountEmbedBody(host: Block, into: HTMLElement, deps: EmbedBodyDe
     return () => {}
   }
 
-  const view = activeView(host)
-  if (view && view.kind === 'list-table') return mountTable(host, target, into, deps)
+  /**
+   * 这一次露面选的那张视图：经绑定解析（`''` 跟随源、`'outline'` 强制大纲、其余是视图 id）。
+   *
+   * ⚠️ 目标那张视图没了 ⇒ **退回源块的默认看法并说一句实话**，不猜、也不偷偷改指针：
+   *    指针没坏（源还在），坏的只是那一张视图。
+   */
+  const binding = deps.owners.readBinding({ kind: 'embed', blockId: host.id })
+  const data = binding ? deps.owners.read(binding.owner) : null
+  const picked = binding && data ? resolveBoundView(binding, data) : { view: null, degraded: false }
+  const view: ViewConfig | null = picked.view ?? (data ? readViewSet(data).active : null)
+  if (picked.degraded) deps.toast?.(t('ui.mount.viewGone'), 'warn')
+
+  if (view && view.kind === 'list-table') return mountTable(target, view, into, deps)
   if (view) {
     // 别的看法（看板／画廊…）还没有渲染器：说清楚，不假装它是大纲
     into.dataset.embedState = 'norenderer'
@@ -130,7 +150,7 @@ function mountMirror(target: Block, into: HTMLElement, deps: EmbedBodyDeps): () 
 }
 
 /** 大纲表格：表头＝源的直接子块、一列＝那个子块的孩子（与整屏那张表同一个渲染器） */
-function mountTable(host: Block, target: Block, into: HTMLElement, deps: EmbedBodyDeps): () => void {
+function mountTable(target: Block, view: ViewConfig, into: HTMLElement, deps: EmbedBodyDeps): () => void {
   const cell = new BlockCell({
     store: deps.store,
     write: (fn) => deps.run(fn),
@@ -142,11 +162,6 @@ function mountTable(host: Block, target: Block, into: HTMLElement, deps: EmbedBo
     ...(deps.onAtomClick ? { onAtomClick: deps.onAtomClick } : {}),
     openBlock: deps.openBlock,
   })
-  const view = activeView(host)
-  if (!view) {
-    cell.dispose()
-    return () => {}
-  }
   const table = new ViewListTable({
     store: deps.store,
     // 表的「容器」是**源**：表头是它的直接子块（露面块自己只是宿主）
@@ -157,7 +172,8 @@ function mountTable(host: Block, target: Block, into: HTMLElement, deps: EmbedBo
     // 嵌入是一行里的投影：源的名字在屏幕上没有第二处 ⇒ 用表标题说清楚它是哪棵树
     showCaption: true,
     openBlock: deps.openBlock,
-    insertItem: (columnId) => deps.invoke('core.view/new-row', { blockId: columnId }, 'embed'),
+    insertItem: (columnId) =>
+      deps.invoke('core.view/new-row', { owner: { kind: 'block', blockId: target.id }, blockId: columnId }, 'embed'),
     deleteBlock: (id) => deps.invoke('core.view/delete-row', { rowId: id }, 'embed'),
   })
   into.appendChild(table.root)

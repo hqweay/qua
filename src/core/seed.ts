@@ -6,7 +6,7 @@
  * 下一轮删掉它时，调用方改成直连对应文件即可。
  */
 export { parseInline } from './fixtures/inline.ts'
-export { seedWorkspace, TASK_TAG_LABEL, TASK_STATUS_LABEL } from './fixtures/seed.ts'
+export { seedWorkspace, seedJournalMounts, TASK_TAG_LABEL, TASK_STATUS_LABEL } from './fixtures/seed.ts'
 export { degradedWorkspace, emptyWorkspace, sparseWorkspace } from './fixtures/states.ts'
 export { fixtureWorkspace } from './fixtures/index.ts'
 export { bootWorkspace } from './bootstrap.ts'

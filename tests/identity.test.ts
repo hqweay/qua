@@ -179,13 +179,30 @@ test('复制子树：派生身份也不带走——副本不能是日记／定�
   assert.equal(isPropDefBlock(dc), false, '副本不是字段定义')
 
   const q = mkBlock('我的查询')
-  q.props = { _query: { where: { kind: 'tag' } }, _queryResult: [{ blockId: 'x', path: [] }] }
+  // 视图配置跟着条件一起剔：没有源的视图配置没有意义
+  q.props = { _query: { where: { tag: 'x' } }, _views: [{ id: 'v1', kind: 'table' }], _activeView: 'v1' }
   const qc = cloneSubtree(q).block
   assert.equal(qc.props?._query, undefined, '副本不带 `_query`')
-  assert.equal(
-    qc.props?._queryResult,
-    undefined,
-    '副本不带 `_queryResult`：那次冻结的结果属于原件，留着就是指向别处 id 的死列表',
-  )
+  assert.equal(qc.props?._views, undefined, '副本不带 `_views`：没有源，那几张视图没有意义')
+  assert.equal(qc.props?._activeView, undefined, '副本不带 `_activeView`')
   assert.equal(isQueryBlock(qc), false, '副本不是查询视图')
+})
+
+test('复制子树：`_mounts` **随块走**（它是内容），但 local 栏的 spec 深拷成独立副本', () => {
+  // 判据：挂载区是「这一块配了哪几栏」，属于内容 —— 复制这块就该带着它。
+  // 但「复制」不等于「共享」：改副本那一栏的条件不该动到原件。
+  const host = mkBlock('宿主')
+  const spec = { where: { todo: 'todo' as const } }
+  host.props = {
+    _mounts: [
+      { id: 't-1', kind: 'local' as const, label: '我的', spec, views: [] },
+      { id: 't-2', kind: 'linked' as const, block: 'q-1', view: '' },
+    ],
+  }
+  const copy = cloneSubtree(host).block
+  const mounts = copy.props?._mounts as { kind: string; spec?: { where: unknown }; block?: string }[]
+  assert.equal(mounts.length, 2, '两栏都跟着走')
+  assert.notEqual(mounts[0]!.spec, spec, 'local 栏的 spec 深拷：改副本不该动原件')
+  assert.deepEqual(mounts[0]!.spec, spec, '内容一样')
+  assert.equal(mounts[1]!.block, 'q-1', 'linked 栏只拷指针（它本来就指着同一个目标）')
 })

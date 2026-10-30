@@ -12,7 +12,8 @@
 import { ALIASES_PROP, ACTIVE_VIEW_PROP, DISPLAY_PROP, LISTS_PROP, VIEWS_PROP, type Block, type Doc, type FoldState } from '../model.ts'
 import { LEGACY_ALIAS_PROP, normalizeAlias } from '../alias.ts'
 import { isMountsValue, MOUNTS_PROP } from '../mount.ts'
-import { isActiveViewValue, isViewsValue } from '../view.ts'
+import { canonicalViewRef, EMBED_PROP } from '../embed.ts'
+import { isActiveViewValue, isViewsValue, sourceConflicts } from '../view.ts'
 import { isAnno, isRun } from '../runs.ts'
 
 /**
@@ -92,8 +93,17 @@ import { isAnno, isRun } from '../runs.ts'
  *            旧的「选项名数组」退场。值空间的含义变了 ⇒ 旧库不能读成新库：
  *            同名旧值指向一个不存在的选项时显示「选项已删除」，看起来像丢数据。
  *            作废重 seed（旧库本来没有可用的 select 选项，代价为零）。
+ * v28 → v29：**拥有者模型**——查询条件/视图配置/挂载栏/露面指针统一归位。
+ *            · `_queryResult` 删除（结果改按表面实例冻结，不再入库）；
+ *            · `QuerySpec` 删顶层 `todo`（只留 `where:{todo}` 原子）；
+ *            · `_mounts` 从 `{label,spec}[]` 改成 `MountEntry[]`（local／linked／derived ＋ 稳定 id）；
+ *            · 日记面板的栏从**隐藏配置块**搬到 `Prefs.journalMounts`；
+ *            · `_embed` 从 `{block}` 改成 `ViewRef{block,view}`；露面块不再有自己的 `_views`；
+ *            · 视图 kind 新增 `list`，结构映射表的配置键从 `list` 改叫 `listTable`。
+ *            五条都是「同一件事有两处答案」或「派生值当内容」，没有一条能靠映射救回来
+ *            ⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 28
+export const WORKSPACE_VERSION = 29
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {
@@ -173,6 +183,12 @@ function isBlock(x: unknown): x is Block {
   const mounts = b.props[MOUNTS_PROP]
   if (mounts !== undefined && !isMountsValue(mounts)) return false
   /**
+   * 露面指针：`{ block, view }`。**只判块那一半**——`view` 缺席是「跟随默认看法」，
+   * 不是坏形状（读路径按 `''` 处理）；把缺席判成 corrupt 会让所有老老实实的露面打不开库。
+   */
+  const embed = b.props[EMBED_PROP]
+  if (embed !== undefined && canonicalViewRef(embed) === null) return false
+  /**
    * 视图配置：**这里只判容器形状**（是不是一份列表 / 是不是字符串）。
    * 逐项内容归 `canonicalViews` 逐条重建 —— 那里坏一项只丢一项、退回大纲；
    * 在这里按「一项坏了就整库 corrupt」处理，会让一个错键把整个库变成打不开。
@@ -184,6 +200,13 @@ function isBlock(x: unknown): x is Block {
   // 不变量：在列表里 ⇒ 至少有一个名字（不能出现在页/标签列表里却没有任何地址）。
   // 这里只拦「有列表、完全没有 _aliases」；别名数组本身的空/空串已在上面判 corrupt。
   if (Array.isArray(lists) && lists.length > 0 && !Array.isArray(aliases)) return false
+  /**
+   * 不变量：**源的声明互斥**（`_query`／`_items`／`_embed` 只许有一个）。
+   *
+   * 并存时 `sourceOf` 会悄悄选一个，而另一个「改了却不生效」—— 那是静默的，
+   * 用户只会看到「条件改了结果没变」。在落盘这一侧拦住，坏形状就进不了库。
+   */
+  if (sourceConflicts(b)) return false
   return true
 }
 

@@ -119,7 +119,8 @@ const layerRows = (page) =>
 /**
  * 点挂载区的某一栏。
  *
- * `kind`：`refs` / `same` / `mentions`，用户栏用 `user:<序>`（`data-tab` 上就是这么写的）。
+ * `key` ＝ 那一栏的**稳定 id**：内置栏就是来源名（`refs`／`same`／`mentions`），
+ * 用户栏是 `t-<hex>`。**不再是数组下标**——摘掉一栏之后下标会全体漂。
  * `.first()` 取第一个挂载区 —— feed 里一段一个，单根屏只有一个，用例里按需自证。
  */
 const mountTab = async (page, kind) => {
@@ -1835,19 +1836,24 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
   assert(!refreshed.stale, '刷新完不应再提示已过期')
   assert(!refreshed.hidden && refreshed.refresh.length > 0, '空结果也要保留抬头与刷新按钮（不是静默消失）')
 
-  // ⑤ 落盘：结果集入 KB（刷新只改 _queryResult，不 re-parent）
-  const frozen = await page.evaluate(() => {
+  // ⑤ 落盘：**只有条件入 KB**，结果不入（它按表面实例冻结，重开重算）
+  const frozen = await page.evaluate((qid2) => {
     const raw = localStorage.getItem(localStorage.key(0))
     const data = JSON.parse(raw).data
-    const q = data.blocks.flatMap(function flat(b) { return [b, ...b.children.flatMap(flat)] }).find((b) => Boolean(b.props?._query?.where))
-    return { hasQuery: Boolean(q?.props?._query), result: q?.props?._queryResult, children: q?.children?.length ?? -1 }
-  })
+    const q = data.blocks.flatMap(function flat(b) { return [b, ...b.children.flatMap(flat)] }).find((b) => b.id === qid2)
+    return {
+      hasQuery: Boolean(q?.props?._query),
+      // 任何一格叫 `_queryResult` 的东西都不该在库里（v29 起结果不是内容）
+      resultProps: Object.keys(q?.props ?? {}).filter((k) => k.toLowerCase().includes('result')),
+      children: q?.children?.length ?? -1,
+    }
+  }, qid)
   assert(frozen.hasQuery, '条件要落在 _query 上（AF5：查询块＝数据侧）')
-  assert(Array.isArray(frozen.result) && frozen.result.length === 0, '冻结结果要入 KB')
+  assert(frozen.resultProps.length === 0, `结果**不入库**（它是表面实例的投影）：${JSON.stringify(frozen.resultProps)}`)
   assert(frozen.children === 0, '刷新不许把结果 re-parent 成查询块的子块（AF2/AF3）')
 
   await ctx.close()
-  return `1 条 → 改字实时更新（成员不变）→ 不匹配仍保留 → 刷新后 ${refreshed.count}；结果集入 KB 且未 re-parent`
+  return `1 条 → 改字实时更新（成员不变）→ 不匹配仍保留 → 刷新后 ${refreshed.count}；只有条件入 KB、结果未 re-parent`
 })
 
 await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器改主名 ⇒ chip 跟着变；删除 ⇒ dangling', async () => {
@@ -9977,7 +9983,7 @@ await check('T124 详情浮层的「打开目标」读 Shift ⇒ 右槽窗口；
   return `浮层「打开目标」Shift+点开窗口；中心不动`
 })
 
-await check('T125 「新建属性」真的建出定义并当场出现那一行；页/标签上添加 ⇒ 卡片出现「标签属性 / 字段声明」段', async () => {
+await check('T125 「新建属性」真的建出定义并当场出现那一行；标签上两个入口各写各的槽、**页上没有声明段**', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -10034,20 +10040,46 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
    * 后来又踩了反面：两个表单共用 `rows ∪ declared` 去重 ⇒ 声明过的不能给自己加，
    * 自己有值的不能声明给成员。下面两头都要钉。
    */
-  const pageId = await page.evaluate(() => {
+  /**
+   * **页上不该再有「字段声明」段**（v29）。
+   *
+   * 页曾经能声明 `_fieldDefs`，但那一格**没有任何消费方**：子块不会因此获得那些字段。
+   * 一个能写、没人读的入口比没有更糟 —— 用户会以为「声明了，成员就有这一格了」。
+   * 这条与 `arch-check [31]` 是一对：那边钉代码里没有那条分支，这边钉界面上没有那个入口。
+   */
+  const pagePeek = await page.evaluate(() => {
     const p = window.__qua.allBlocks().find((b) => b.lists.includes('page') && !b.lists.includes('tag'))
     if (p) window.__qua.invoke('core.block/focus-block', { blockId: p.id })
     return p?.id ?? ''
   })
-  assert(pageId !== '', '假数据里应有页')
-  await page.waitForTimeout(200)
+  assert(pagePeek !== '', '假数据里应有页')
+  await page.waitForTimeout(250)
+  const pageSect = await page.evaluate(() => ({
+    declared: document.querySelectorAll('[data-declared-prop-id]').length,
+    add: document.querySelectorAll('[data-declare-add]').length,
+    section: document.querySelectorAll('.props-declared').length,
+  }))
+  assert(
+    pageSect.declared === 0 && pageSect.add === 0 && pageSect.section === 0,
+    `页上不该有「字段声明」段（写了也永远不生效）：${JSON.stringify(pageSect)}`,
+  )
+
+  /** 声明是**标签**的事：它的成员会继承，这条声明有获得方 */
+  const pageId = await page.evaluate(() => {
+    const t = window.__qua.allBlocks().find((b) => b.lists.includes('tag'))
+    if (t) window.__qua.invoke('core.block/focus-block', { blockId: t.id })
+    return t?.id ?? ''
+  })
+  assert(pageId !== '', '假数据里应有标签')
+  await page.waitForTimeout(250)
 
   const pageBefore = await page.evaluate(() => ({
     declared: [...document.querySelectorAll('[data-declared-prop-id]')].length,
     rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].length,
     text: document.querySelector('#properties-body')?.innerText ?? '',
   }))
-  assert(pageBefore.declared === 0, `前置：这一页一开始没有声明任何属性：${JSON.stringify(pageBefore)}`)
+  // 种子里 `#任务` 已经声明了「任务状态」：基线不一定是 0，断言要按 **+1** 走
+  assert(pageBefore.declared <= 1, `前置：这个标签的声明条数是种子里带来的：${JSON.stringify(pageBefore)}`)
 
   const pickId = await page.evaluate(() => window.__qua.propDefs().find((d) => d.label === '冒烟新属性')?.id ?? '')
 
@@ -10064,7 +10096,10 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
     declared: [...document.querySelectorAll('[data-declared-prop-id]')].length,
   }), pickId)
   assert(pageOwn.rows.includes(pickId), `自己的入口要加「这一块自己的」属性行：${JSON.stringify(pageOwn)}`)
-  assert(pageOwn.declared === 0, `自己的入口**不该**写声明清单（那是另一个槽）：${JSON.stringify(pageOwn)}`)
+  assert(
+    pageOwn.declared === pageBefore.declared,
+    `自己的入口**不该**写声明清单（那是另一个槽）：${JSON.stringify(pageOwn)}`,
+  )
 
   // ② 声明段自己的入口 ⇒ 只写声明，不给自己加行
   await page.evaluate(() => document.querySelector('[data-declare-add]')?.click())
@@ -10079,19 +10114,27 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
     text: document.querySelector('#properties-body')?.innerText ?? '',
     section: document.querySelector('.props-declared')?.dataset.declaredSection,
   }))
-  assert(pageAfter.declared.length === 1, `声明入口 ⇒ 声明段那一条要出现：${JSON.stringify(pageAfter)}`)
-  assert(pageAfter.declared[0] === pickId, `声明段要显示刚声明的那条定义：${JSON.stringify(pageAfter)}`)
-  assert(pageAfter.text.includes('字段声明'), `页上的这一段要叫「字段声明」，不能只靠 chip：${JSON.stringify(pageAfter.text)}`)
-  assert(pageAfter.section === 'page', `页上声明的段应标成 page：${JSON.stringify(pageAfter)}`)
+  assert(
+    pageAfter.declared.length === pageBefore.declared + 1,
+    `声明入口 ⇒ 声明段多一条：${JSON.stringify(pageAfter)}`,
+  )
+  assert(pageAfter.declared.includes(pickId), `声明段要显示刚声明的那条定义：${JSON.stringify(pageAfter)}`)
+  assert(pageAfter.text.includes('标签属性'), `标签上的这一段要叫「标签属性」，不能只靠 chip：${JSON.stringify(pageAfter.text)}`)
+  assert(pageAfter.section === 'tag', `标签上声明的段应标成 tag：${JSON.stringify(pageAfter)}`)
 
   // 解除声明：只摘清单，定义本身与别的块的声明都不动
-  await page.evaluate(() => document.querySelector('[data-declared-prop-id] .props-tag-x')?.click())
+  // ⚠️ 按 id 摘**刚声明的那一条**：种子里的 `#任务` 本来就有一条声明，
+  //    点「第一个」会摘掉别人（然后这条断言就会拿另一条的状态去判自己）
+  await page.evaluate(
+    (id) => document.querySelector(`[data-declared-prop-id="${id}"] .props-tag-x`)?.click(),
+    pickId,
+  )
   await page.waitForTimeout(300)
   const undeclared = await page.evaluate((id) => ({
     declared: [...document.querySelectorAll('[data-declared-prop-id]')].length,
     defStillThere: window.__qua.propDefs().some((d) => d.id === id),
   }), pickId)
-  assert(undeclared.declared === 0, `解除后声明段应清空：${JSON.stringify(undeclared)}`)
+  assert(undeclared.declared === pageBefore.declared, `解除后回到基线：${JSON.stringify(undeclared)}`)
   assert(undeclared.defStillThere, '解除声明不该删掉定义块本身')
 
   /**
@@ -10416,8 +10459,9 @@ await check('T129 挂载区：内置栏不可摘、用户栏可摘；摘掉一�
   const before = await mountTabsOf(page)
   const mine = before[0]
   assert(mine, '今天应有挂载区')
-  const builtin = mine.tabs.filter((t) => t.kind !== 'user')
-  const user = mine.tabs.filter((t) => t.kind === 'user')
+  // 三种栏：`derived`（内置，现算）／`local`（自己拥有配置）／`linked`（指针）
+  const builtin = mine.tabs.filter((t) => t.kind === 'derived')
+  const user = mine.tabs.filter((t) => t.kind === 'local' || t.kind === 'linked')
   assert(builtin.length >= 2, `内置栏应至少两栏（引用＋提及）：${JSON.stringify(builtin)}`)
   assert(builtin.every((t) => !t.removable), `内置栏不该有 ×：${JSON.stringify(builtin)}`)
   assert(user.length === 1 && user[0].removable, `用户栏要有 ×：${JSON.stringify(user)}`)
@@ -10426,7 +10470,10 @@ await check('T129 挂载区：内置栏不可摘、用户栏可摘；摘掉一�
   await page.locator(`#editor .mount .mount-tabwrap[data-tab="${user[0].key}"] .mount-x`).first().click()
   await page.waitForTimeout(350)
   const after = await mountTabsOf(page)
-  assert(!after[0].tabs.some((t) => t.kind === 'user'), `摘掉后用户栏应消失：${JSON.stringify(after[0].tabs)}`)
+  assert(
+    !after[0].tabs.some((t) => t.kind === 'local' || t.kind === 'linked'),
+    `摘掉后用户栏应消失：${JSON.stringify(after[0].tabs)}`,
+  )
   const blocksAfter = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
   assert(blocksAfter === blocksBefore, `摘一栏不该删任何块：${blocksBefore} → ${blocksAfter}`)
 
@@ -10553,10 +10600,11 @@ await check('T134 日记的自定义栏跟随今天：加一栏 ⇒ 推到明天
   const blocksBefore = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
 
   // ① 在今天的面板加一栏：条件用 `$self` 的日期侧面（不写死日期）
+  //    ⚠️ 日记宿主是 `{kind:'journal'}` —— 它的栏住**设备状态**，不在任何块上
   await page.evaluate(
     ({ label, date }) => {
       const spec = { where: { journal: '$self' } }
-      window.__qua.invoke('core.mount/add', { hostId: window.__qua.snapshot().activeId, label, spec })
+      window.__qua.invoke('core.mount/add-local', { host: { kind: 'journal' }, label, spec })
       void date
     },
     { label, date: day1 },
@@ -10607,7 +10655,7 @@ await check('T134 日记的自定义栏跟随今天：加一栏 ⇒ 推到明天
   const keyOf = async () =>
     page.evaluate(
       (label) =>
-        [...document.querySelectorAll('#editor .mount .mount-tabwrap[data-kind="user"]')].find(
+        [...document.querySelectorAll('#editor .mount .mount-tabwrap[data-kind="local"]')].find(
           (w) => (w.querySelector('.mount-tab')?.textContent ?? '') === label,
         )?.dataset.tab ?? '',
       label,
@@ -12537,22 +12585,21 @@ await check('T158 查询源也能是表格：行＝冻结命中（不折叠祖�
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
   await page.waitForTimeout(400)
 
-  // 冻结一次（打开查询块时触发），看几张命中
-  const hits = await page.evaluate((id) => {
-    const walk = (l) => {
-      for (const x of l) {
-        if (x.id === id) return x
-        const r = walk(x.children)
-        if (r) return r
-      }
-      return null
-    }
-    const b = walk(window.__qua.__editor.store.blocks)
-    return { frozen: (b.props?._queryResult ?? []).map((h) => h.blockId), views: (b.props?._views ?? []).length }
-  }, qid)
+  /**
+   * 冻结一次（打开查询块时触发），看几张命中。
+   *
+   * ⚠️ **读 DOM，不读块**：v29 起结果按**表面实例**冻结，块上没有任何一格记它
+   * （`_queryResult` 已删）。大纲分支的每一行就是这一批命中。
+   */
+  const hits = await page.evaluate(() => ({
+    frozen: [...document.querySelectorAll('.queryview-editor .blk[data-depth]')].map((e) => e.dataset.blockId ?? ''),
+  }))
   assert(hits.frozen.length > 0, `前置：查询应冻结出至少一条命中：${JSON.stringify(hits)}`)
 
-  await page.evaluate((id) => window.__qua.invoke('core.view/add', { blockId: id, kind: 'table' }), qid)
+  await page.evaluate(
+    (id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'table' }),
+    qid,
+  )
   await page.waitForTimeout(450)
   const table = await page.evaluate(() => ({
     rows: [...document.querySelectorAll('.tv-row')].map((r) => r.dataset.blockId ?? ''),
@@ -13016,7 +13063,7 @@ await check('T164 大纲表格：按某一列排序⇒只改显示序（整行�
     }
     const b = walk(window.__qua.__editor.store.blocks)
     const active = (b.props?._views ?? []).find((v) => v.id === b.props?._activeView)
-    return { kind: active?.kind, sort: active?.list?.sort, columns: active?.table?.columns }
+    return { kind: active?.kind, sort: active?.listTable?.sort, columns: active?.table?.columns }
   }, fx.root)
   assert(cfg.kind === 'list-table' && cfg.sort?.col === 0, `排序写的是第 1 列：${JSON.stringify(cfg)}`)
   assert(cfg.columns === undefined, `结构映射表不存列（列是位置）：${JSON.stringify(cfg.columns)}`)
@@ -13164,24 +13211,38 @@ await check('T166 投影：同一块在这里看成大纲表格（表头＝源�
   // 嵌入是一行里的投影：源的名字在屏幕上没有第二处 ⇒ 表标题要有（与整屏那条相反）
   assert(st.tableCaption === '源', `嵌入时画表标题（说明这是哪棵树）：${JSON.stringify(st.tableCaption)}`)
   assert(st.tableRows === 0, `源的两个直接子块没有孩子 ⇒ 表头下没有内容行：${st.tableRows}`)
+  /**
+   * **看法住在源块上，露面只存一次选择**（v29）。
+   *
+   * 曾经露面块自己带一份 `_views`，于是同一批块在正文、面板、中心各露一次
+   * 就得到三份各自演化的列与排序。现在：`_embed = {block, view}`，
+   * `view` 指向**源块**上的那张命名视图。
+   */
   const cfg = await page.evaluate((id) => {
     const find = (b) => (b.id === id ? b : b.children.map(find).find(Boolean) || null)
     const b = window.__qua.__editor.store.blocks.map(find).find(Boolean)
-    const active = (b?.props?._views ?? []).find((v) => v.id === b?.props?._activeView)
-    return { kind: active?.kind, onHost: b?.id, source: b?.props?._embed?.block, root: window.__qua.__editor.doc.roots[0]?.id }
+    return {
+      embed: b?.props?._embed,
+      hostViews: (b?.props?._views ?? []).length,
+      onHost: b?.id,
+      root: window.__qua.__editor.doc.roots[0]?.id,
+    }
   }, st.embedId)
-  assert(cfg.kind === 'list-table', `看法写在露面块自己身上：${JSON.stringify(cfg)}`)
   assert(cfg.root === fx.root, `换看法不换屏（露面块不是「一个对象」）：${cfg.root} vs ${fx.root}`)
-  assert(cfg.source === fx.src, `指针指向源：${JSON.stringify(cfg)}`)
-  const srcViews = await page.evaluate((sid) => {
-    const find = (b) => (b.id === sid ? b : b.children.map(find).find(Boolean) || null)
+  assert(cfg.embed?.block === fx.src, `指针指向源：${JSON.stringify(cfg)}`)
+  assert(cfg.hostViews === 0, `露面块**不存**看法（它是别人的一次露面）：${JSON.stringify(cfg)}`)
+  assert(typeof cfg.embed?.view === 'string' && cfg.embed.view !== '', `这次露面选了源上的一张视图：${JSON.stringify(cfg.embed)}`)
+  const srcViews = await page.evaluate((args) => {
+    const find = (b) => (b.id === args.sid ? b : b.children.map(find).find(Boolean) || null)
     const b = window.__qua.__editor.store.blocks.map(find).find(Boolean)
-    return b?.props?._views ?? []
-  }, fx.src)
-  assert((srcViews?.length ?? 0) === 0, `源上没有被凭空加一张视图：${JSON.stringify(srcViews)}`)
+    const views = b?.props?._views ?? []
+    return { views: views.map((v) => ({ id: v.id, kind: v.kind })), hit: views.some((v) => v.id === args.view) }
+  }, { sid: fx.src, view: cfg.embed.view })
+  assert(srcViews.hit, `指针指的必须是**源上真的存在**的那张视图：${JSON.stringify(srcViews)}`)
+  assert(srcViews.views.length === 1 && srcViews.views[0].kind === 'list-table', `源的命名视图是一张大纲表格：${JSON.stringify(srcViews.views)}`)
 
   await ctx.close()
-  return `表格 2 列 0 行；_activeView 在露面块上；源 _views 仍是空`
+  return `表格 2 列 0 行；_embed.view 指向源上那张 list-table；露面块自己不带 _views`
 })
 
 await check('T167 深度 1：嵌入自己的子树只展开一层，里层只画占位（不递归）', async () => {
@@ -13974,6 +14035,361 @@ await check('T177 滚动条沟常驻：#scroll 声明 scrollbar-gutter: stable�
   assert(g === 'stable', `#scroll 应常驻滚动条沟，实际 scrollbar-gutter=${g}`)
   await ctx.close()
   return 'scrollbar-gutter=stable'
+})
+
+/* ================================================================ 拥有者模型（v29） */
+
+/**
+ * **local tab**：面板局部的一次查询，**不建块**。
+ *
+ * 这是本次重构的默认路径。四条断言各钉一件用户看得见的事：
+ *   ① 加一栏 ⇒ 块数不变；
+ *   ② 它出现在 tab 条上，而且能切到表格；
+ *   ③ 刷新只影响**这一个** tab（同一个库的另一个表面不受影响）；
+ *   ④ 删一栏 ⇒ 块数仍不变，⌘Z 能回来。
+ */
+await check('T178 local tab：加一栏不建块；切表格；刷新只影响本栏；删栏 ⌘Z 回来', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(350)
+
+  const before = await page.evaluate(() => ({
+    blocks: window.__qua.snapshot().totalBlocks,
+    host: window.__qua.snapshot().activeId,
+  }))
+
+  const tabId = await page.evaluate((host) => {
+    // 一栏「全库的待办」：条件自己带着，不依赖宿主
+    const r = window.__qua.invoke('core.mount/add-local', {
+      host: { kind: 'block', blockId: host },
+      label: '全库待办',
+      spec: { where: { todo: 'todo' }, scope: 'all' },
+    })
+    return r === false ? '' : String(window.__qua.__editor.sel?.aBlock ?? '')
+  }, before.host)
+
+  const added = await page.evaluate(() => {
+    const m = document.querySelector('#editor .mount')
+    const w = [...m.querySelectorAll('.mount-tabwrap')].find((x) => (x.querySelector('.mount-tab')?.textContent ?? '') === '全库待办')
+    return { key: w?.dataset.tab ?? '', kind: w?.dataset.kind ?? '', removable: Boolean(w?.querySelector('.mount-x')) }
+  })
+  assert(added.key !== '', '加完应出现「全库待办」这一栏')
+  assert(added.kind === 'local', `它是 local 栏（自己拥有条件与视图）：${JSON.stringify(added)}`)
+  assert(added.removable, 'local 栏可摘（有 ×）')
+  void tabId
+
+  const afterAdd = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
+  assert(afterAdd === before.blocks, `加一栏**不建块**：${before.blocks} → ${afterAdd}`)
+
+  // 切到这一栏：它是「全库待办」，库里不止一条
+  await mountTab(page, added.key)
+  const rows = await mountRows(page)
+  assert(rows > 0, `这一栏应显示命中：${rows} 行`)
+
+  /**
+   * 给它加一张表格视图：**配置住在这一栏自己身上**（`_mounts` 里的 local 条目），
+   * 块上一个字节都不动。
+   */
+  await page.evaluate(
+    ({ host, tabId: id }) =>
+      window.__qua.invoke('core.view/add', { owner: { kind: 'tab', host: { kind: 'block', blockId: host }, tabId: id }, kind: 'table' }),
+    { host: before.host, tabId: added.key },
+  )
+  await page.waitForTimeout(400)
+  const tableRows = await page.evaluate(() => document.querySelectorAll('#editor .mount .mount-view .tv-row').length)
+  assert(tableRows > 0, `local 栏的表格要能画出命中：${tableRows} 行`)
+  const blocksAfterView = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
+  assert(blocksAfterView === before.blocks, `加视图也不建块：${before.blocks} → ${blocksAfterView}`)
+
+  // 删一栏：块数仍不变；⌘Z 把它带回来
+  await page.locator(`#editor .mount .mount-tabwrap[data-tab="${added.key}"] .mount-x`).first().click()
+  await page.waitForTimeout(350)
+  const gone = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
+  assert(gone === before.blocks, `摘一栏不删块：${before.blocks} → ${gone}`)
+  const stillThere = await page.evaluate(
+    () => [...document.querySelectorAll('#editor .mount .mount-tabwrap')].some((x) => (x.querySelector('.mount-tab')?.textContent ?? '') === '全库待办'),
+  )
+  assert(!stillThere, '摘掉之后这一栏应消失')
+
+  // ⌘Z 走命令层（认的是活动编辑器）：先把焦点放回正文，别停在刚按过的 × 上
+  await page.locator('#editor .sec .blk .tx').first().click()
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(450)
+  const back = await page.evaluate(
+    () => [...document.querySelectorAll('#editor .mount .mount-tab-wrap, #editor .mount .mount-tabwrap')].some((x) => (x.querySelector('.mount-tab')?.textContent ?? '') === '全库待办'),
+  )
+  assert(back, '⌘Z 应把那一栏带回来（它是可撤销的一次数据改动）')
+
+  await ctx.close()
+  return `加/删一栏块数恒为 ${before.blocks}；表格 ${tableRows} 行；⌘Z 可恢复`
+})
+
+/**
+ * **上下文是相对的**：同一份条件，在页面顶层的查询页看全库，挂在某一页的面板里只看那一页。
+ *
+ * 这条钉的是 `QueryContext` 的三件事分开给（`selfId`／`scopeId`／`excludeIds`）。
+ * 曾经「`$self` 指谁」与「结果剔除谁」是同一个字段，于是「想解析它，又不得不排除它」
+ * 这种形状根本表达不出来。
+ */
+await check('T182 上下文：同一份条件，顶层查询页看全库、挂在页上的栏只看那一页', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(300)
+
+  // 在两页各放一个带同一串字的块（探针）
+  const probe = await page.evaluate(() => {
+    const pages = window.__qua.pages()
+    const out = []
+    for (const p of pages.slice(0, 2)) {
+      window.__qua.invoke('core.page/open', { pageId: p.id })
+      const rows = window.__qua.__editor.rows().map((r) => r.block)
+      const spot = rows.find((b) => b.children.length === 0) ?? rows[0]
+      if (!spot) throw new Error(`前置：${p.title} 里没有可落的块`)
+      window.__qua.focusBlock(spot.id, 999)
+      window.__qua.invoke('core.editor/insert-block', { text: '上下文探针' })
+      out.push({ page: p.id, block: String(window.__qua.__editor.sel?.aBlock ?? '') })
+    }
+    return out
+  })
+  assert(probe.filter((x) => x.block).length === 2, `两页各应落下探针：${JSON.stringify(probe)}`)
+
+  // ① 顶层查询页：没有容器 ⇒ 整片森林
+  const queryPage = await page.evaluate(() =>
+    window.__qua.invoke('core.query/create', {
+      kind: 'page',
+      name: '上下文探针查询',
+      spec: { where: { text: '上下文探针' } },
+    }),
+  )
+  assert(queryPage !== false, '应能建出查询页')
+  await page.waitForTimeout(500)
+  const globalCount = await page.evaluate(() => document.querySelector('.queryview-count')?.textContent ?? '')
+  assert(globalCount.includes('2'), `顶层查询页应看到两页的探针（整库）：${globalCount}`)
+
+  // ② 同一份条件挂到第一页的面板上：锚点＝那一页 ⇒ 只看得到一条
+  await page.evaluate((host) => {
+    window.__qua.invoke('core.mount/add-local', {
+      host: { kind: 'block', blockId: host },
+      label: '本页探针',
+      spec: { where: { text: '上下文探针' } },
+    })
+  }, probe[0].page)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), probe[0].page)
+  await page.waitForTimeout(450)
+  const key = await page.evaluate(
+    () =>
+      [...document.querySelectorAll('#editor .mount .mount-tabwrap')].find(
+        (x) => (x.querySelector('.mount-tab')?.textContent ?? '') === '本页探针',
+      )?.dataset.tab ?? '',
+  )
+  assert(key !== '', '应有「本页探针」这一栏')
+  await mountTab(page, key)
+  const localRows = await mountRows(page)
+  assert(localRows === 1, `挂在页上的栏只看这一页（1 条），实际 ${localRows} 行：挂载区的锚点是宿主`)
+
+  await ctx.close()
+  return `顶层 ${globalCount}；挂在这一页上 ${localRows} 行（锚点＝宿主）`
+})
+
+/**
+ * **冻结是每个表面实例自己的事**：刷新一个，另一个不变；刷新**不写块**（不进撤销）。
+ *
+ * 曾经结果冻结进块上的 `_queryResult`：于是两个表面共享一份（谁刷新都改别人看到的），
+ * 而「刷新」这个读动作会写内容层（按一次 ⌘Z 撤的是上一次刷新）。
+ */
+await check('T183 冻结按实例：两个表面各持一份；刷新不动 modified、不进撤销', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  // 用种子里那一页的查询块
+  const qid = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    let found = ''
+    const walk = (list) => {
+      for (const b of list) {
+        if (!found && b.props?._query?.where) found = b.id
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return found
+  })
+  assert(qid !== '', '前置：种子里应有一个查询块')
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
+  await page.waitForTimeout(450)
+
+  const snap = () =>
+    page.evaluate((id) => {
+      const raw = window.__qua.__editor.store.find(id)
+      return {
+        modified: raw?.modified ?? 0,
+        count: document.querySelector('.queryview-count')?.textContent ?? '',
+        stale: !(document.querySelector('.queryview-stale')?.hidden ?? true),
+      }
+    }, qid)
+  const first = await snap()
+  assert(first.count.length > 0, '前置：查询应报出条数')
+
+  // 刷新：条数不变、`modified` 不变、没有 op
+  const opsBefore = await page.evaluate(() => JSON.stringify(window.__qua.lastOps()))
+  await page.locator('.queryview-refresh').click()
+  await page.waitForTimeout(400)
+  const after = await snap()
+  const opsAfter = await page.evaluate((prev) => {
+    const now = JSON.stringify(window.__qua.lastOps())
+    return { changed: now !== prev, now }
+  }, opsBefore)
+  assert(after.count === first.count, `数据没变 ⇒ 刷新后条数不变：${first.count} → ${after.count}`)
+  assert(after.modified === first.modified, `刷新**不写块**（modified 不变）：${first.modified} → ${after.modified}`)
+  assert(!opsAfter.changed, `刷新不该产出 op（不进撤销）：${opsAfter.now.slice(0, 120)}`)
+
+  /**
+   * **换一屏再回来**：冻结结果住在这个表面实例里，重开就该重算 ——
+   * 而块上仍然一个字节都没多（条件还是那份条件）。
+   */
+  await page.evaluate(() => window.__qua.invoke('core.journal/today', {}))
+  await page.waitForTimeout(350)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
+  await page.waitForTimeout(450)
+  const back = await snap()
+  assert(back.count === first.count, `重开重新求值 ⇒ 条数仍对得上：${back.count}`)
+  assert(back.modified === first.modified, `重开也不写块：${first.modified} → ${back.modified}`)
+
+  await ctx.close()
+  return `刷新：条数 ${first.count} 不变、modified 不变、零 op；重开重新求值`
+})
+
+/**
+ * **表头排序只改显示序**：`_query.sort` 一个字节不动，成员也不变。
+ *
+ * 曾经查询源的表头排序写 `_query.sort` 并重算 —— 于是「按这一列排一下」变成了
+ * 「换一批行」（`limit` 的成员跟着变），而用户以为自己只是换了个顺序。
+ */
+await check('T184 表头排序只改显示序：_query.sort 不变、成员不变', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    let found = ''
+    const walk = (list) => {
+      for (const b of list) {
+        if (!found && b.props?._query?.where) found = b.id
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return found
+  })
+  assert(qid !== '', '前置：种子里应有一个查询块')
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
+  await page.waitForTimeout(400)
+  // 种子里那条只命中 1 条；换成「全库的任务」，表里才有多行可排
+  await page.evaluate(
+    (id) =>
+      window.__qua.invoke('core.query/set-spec', {
+        owner: { kind: 'block', blockId: id },
+        spec: { where: { tag: '任务' }, scope: 'all' },
+      }),
+    qid,
+  )
+  await page.waitForTimeout(400)
+  await page.evaluate(
+    (id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'table' }),
+    qid,
+  )
+  await page.waitForTimeout(500)
+
+  const before = await page.evaluate((id) => {
+    const raw = window.__qua.__editor.store.find(id)
+    return {
+      sort: JSON.stringify(raw?.props?._query?.sort ?? null),
+      rows: [...document.querySelectorAll('.tv-row')].map((r) => r.dataset.blockId ?? ''),
+    }
+  }, qid)
+  assert(before.rows.length > 1, `前置：表格应有多行：${JSON.stringify(before.rows)}`)
+
+  // 点标题列的表头（第二下＝降序）
+  const head = page.locator('.tv-head [data-col="title"][data-sortable="1"]').first()
+  await head.click()
+  await page.waitForTimeout(300)
+  await head.click()
+  await page.waitForTimeout(400)
+
+  const after = await page.evaluate((id) => {
+    const raw = window.__qua.__editor.store.find(id)
+    const active = (raw?.props?._views ?? []).find((v) => v.id === raw?.props?._activeView)
+    return {
+      sort: JSON.stringify(raw?.props?._query?.sort ?? null),
+      viewSort: JSON.stringify(active?.table?.sort ?? null),
+      rows: [...document.querySelectorAll('.tv-row')].map((r) => r.dataset.blockId ?? ''),
+    }
+  }, qid)
+  assert(after.sort === before.sort, `查询的成员顺序不许被表头排序改写：${before.sort} → ${after.sort}`)
+  assert(after.viewSort !== null && after.viewSort !== 'null', `排序要写进**视图**的显示序：${after.viewSort}`)
+  assert(
+    JSON.stringify([...after.rows].sort()) === JSON.stringify([...before.rows].sort()),
+    `成员一条不多一条不少：${JSON.stringify(before.rows)} → ${JSON.stringify(after.rows)}`,
+  )
+
+  await ctx.close()
+  return `${before.rows.length} 行不变；_query.sort 不变；视图 sort=${after.viewSort}`
+})
+
+/**
+ * **稳定 id**：摘掉第一栏之后，激活的第二栏不漂。
+ *
+ * 用数组下标当键时，`user:1` 会在摘掉 `user:0` 之后指向原来那一栏 ——
+ * 用户看到的是「我摘了 A，界面跳到 B 上」，而且不报错。
+ */
+await check('T187 稳定 id：摘掉第一栏之后，激活的是原来那一栏（不漂）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(300)
+  const host = await page.evaluate(() => window.__qua.snapshot().activeId)
+
+  const keys = await page.evaluate((h) => {
+    const add = (label) =>
+      window.__qua.invoke('core.mount/add-local', {
+        host: { kind: 'block', blockId: h },
+        label,
+        spec: { where: { todo: 'todo' }, scope: 'all' },
+      })
+    add('甲栏')
+    add('乙栏')
+    return [...document.querySelectorAll('#editor .mount .mount-tabwrap[data-kind="local"]')].map((w) => ({
+      key: w.dataset.tab,
+      label: w.querySelector('.mount-tab')?.textContent ?? '',
+    }))
+  }, host)
+  assert(keys.length === 2, `应有两栏：${JSON.stringify(keys)}`)
+
+  await mountTab(page, keys[1].key)
+  const activeBefore = await page.evaluate(
+    () => document.querySelector('#editor .mount .mount-tabwrap[data-active="1"]')?.dataset.tab ?? '',
+  )
+  assert(activeBefore === keys[1].key, `前置：激活的是「乙栏」：${activeBefore}`)
+
+  await page.locator(`#editor .mount .mount-tabwrap[data-tab="${keys[0].key}"] .mount-x`).first().click()
+  await page.waitForTimeout(400)
+  const st = await page.evaluate(() => ({
+    active: document.querySelector('#editor .mount .mount-tabwrap[data-active="1"]')?.dataset.tab ?? '',
+    label: document.querySelector('#editor .mount .mount-tabwrap[data-active="1"] .mount-tab')?.textContent ?? '',
+    tabs: document.querySelectorAll('#editor .mount .mount-tabwrap').length,
+  }))
+  const labels = await page.evaluate(() =>
+    [...document.querySelectorAll('#editor .mount .mount-tab')].map((e) => e.textContent ?? ''),
+  )
+  assert(!labels.includes('甲栏'), `摘掉的那一栏应消失：${JSON.stringify(labels)}`)
+  assert(labels.includes('乙栏'), `另一栏应还在：${JSON.stringify(labels)}`)
+  assert(st.active === keys[1].key, `激活项应仍是「乙栏」的 id（不漂）：${JSON.stringify(st)}`)
+  assert(st.label === '乙栏', `界面上激活的也该是「乙栏」：${JSON.stringify(st)}`)
+
+  await ctx.close()
+  return `摘「甲栏」后激活仍是「乙栏」（id ${keys[1].key}）`
 })
 
 /**

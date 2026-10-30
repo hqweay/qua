@@ -101,7 +101,7 @@ export class ViewListTable {
    */
   render(ids?: readonly string[]): void {
     const table = listTableOf(this.deps.host().id, this.deps.kb)
-    const rows = sortListRows(table.rows, this.deps.view().list?.sort)
+    const rows = sortListRows(table.rows, this.deps.view().listTable?.sort)
     const title = table.root ? displayNameOf(table.root).trim() : ''
     // 展开集只留还在表里的项：块被删/搬走之后，那一格不再是「同一格」
     const live = new Set<string>()

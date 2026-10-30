@@ -12,6 +12,7 @@
  */
 import type { Block, SecLayout, ShellCol } from '../../core/index.ts'
 import type { KbClient, Op, Tx } from '../../core/kb/types.ts'
+import type { OwnerStore } from '../../app/wiring/owners.ts'
 import type { CheckEdgeResult, Dangling } from '../../core/hierarchy.ts'
 import type { ThemeMode, Workspace } from '../../core/workspace.ts'
 import type { Row } from '../../ui/layers.ts'
@@ -186,10 +187,16 @@ export interface CollectionDeps {
 /** 挂载区的宿主能力：写一格 `_mounts`（必要时先物化日记那份共享配置块） */
 export interface MountsDeps {
   kb: KbClient
-  /** 一次属性写入（撤销快照、落盘、重画都在装配层） */
-  write: (blockId: string, mutate: () => void) => void
-  /** 开一笔事务：给「物化配置块 ＋ 挂上第一栏」这种复合动作用（同一笔才不留半截） */
+  /**
+   * **视图配置的唯一接缝**（含「这一组条目住哪」：`_mounts` 还是设备状态）。
+   *
+   * 命令层因此不必自己判「是不是日记」—— 判两次就等于「这一栏写哪」有两个答案。
+   */
+  owners: OwnerStore
+  /** 开一笔事务（提升为查询页/查询块要插块，与改栏在同一笔才不留半截） */
   run: TxRun
+  /** 当前中心槽的对象（「页内查询块」的落点） */
+  activeId: () => string
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
@@ -230,13 +237,24 @@ export interface BelongsToDeps {
  */
 export interface ViewConfigDeps {
   kb: KbClient
+  /**
+   * **视图配置的唯一接缝**：`owner` 可以是块，也可以是 local tab。
+   *
+   * 命令层因此不必自己判「配置住在 `props._views` 还是 `_mounts` 里」——
+   * 判两次就会长出两份写路径，而两份不会一起更新。
+   */
+  owners: OwnerStore
   /** 开一笔事务：改配置／插行／软删行各是一次写，装配层负责撤销快照与落盘 */
   run: TxRun
   /** 重装当前这一屏（切视图、增删行之后要让屏幕跟上） */
   reloadPage: () => void
   /** 这一屏现在装的是哪些根（判断「要不要换屏」：一屏多根时视图宿主根本不存在） */
   rootIds: () => readonly string[]
+  /** 当前中心槽的对象（「页内查询块」的落点） */
+  activeId: () => string
   /** 把某一块打开成**这一屏唯一的根**（给「在日记流里给某一天建表」这种跨屏的入口用） */
   openBlock: (blockId: string) => void
+  /** 刷左槽的页列表（新建查询页之后要看得见它） */
+  refreshList: () => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }

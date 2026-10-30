@@ -18,7 +18,6 @@
  */
 import {
   declareField,
-  mkJournalMountsBlock,
   mkPropDef,
   mkTagBlock,
   shiftISO,
@@ -26,6 +25,7 @@ import {
   todayISO,
   UI_POSITION_PROP,
   type Block,
+  type MountEntry,
 } from '../index.ts'
 import { t } from '../msg.ts'
 import type { Workspace } from '../workspace.ts'
@@ -197,8 +197,7 @@ export function seedWorkspace(): Workspace {
      * **查询块**的演示样本：条件＝「本页之下、还没做完的待办」。
      *
      * ⚠️ 只是**数据侧**（A）：条件写在 `_query` 里，块的正文是它的名字。
-     * 结果集是**外源渲染**，刷新时只改这个块的 `_queryResult`（不 re-parent，A/A）。
-     * ⚠️ `_queryResult` 刻意**不预置**：第一次装载时求值（与「点刷新」走同一个函数），
+     * 结果是**每个表面实例**自己冻结的（内存里，重开重算），不预置 ——
      *   否则 seed 里写死一份结果，就永远测不出「冻结是求值产生的」这件事。
      */
     {
@@ -297,21 +296,6 @@ export function seedWorkspace(): Workspace {
   // 核心词汇（定义块 ＋ 标签块）先在森林顶层就位：`ensureTag` 要能找到 `任务` 并复用，
   // 否则种子会建出第二个同名标签；`[[ ]]` 的解析也要在这之后（标签同样占地址）。
   blocks.push(...coreVocabulary())
-  /**
-   * 日记的挂载区共享配置：一个**没有列表露面**的内部块（只按 id 找）。
-   *
-   * 种子里给它挂一栏演示查询，是为了让首次装载真的走一次「用户 tab」那条分支——
-   * 一份只在内置三栏上测过的实现，会在「有用户栏」时才暴露排序、空态、摘除的问题。
-   * 条件带 `$self`：它在今天求值时指今天，所以这一栏的名字与内容不必写死日期。
-   */
-  const todayTodos = t('ui.mount.demo.todayTodos')
-  const mountsBlock = mkJournalMountsBlock([
-    { label: todayTodos, spec: { where: { all: [{ journal: '$self' }, { todo: 'todo' }] } } },
-  ])
-  // 它也是**种子内容**（会进库、会导出）⇒ 与其它种子同一个固定时刻，理由同 `coreVocabulary`
-  mountsBlock.created = SEED_AT
-  mountsBlock.modified = SEED_AT
-  blocks.push(mountsBlock)
   // 标签归属先落成 id（新标签块会在这时进森林），再解析 `[[ ]]`
   resolveSeedTags(blocks, built.flatMap((b) => b.pendingTags))
   resolveRefs(blocks, built)
@@ -346,6 +330,29 @@ function filler(lines: readonly string[]): SeedBlock[] {
  */
 export const TASK_STATUS_LABEL = '任务状态'
 export const TASK_TAG_LABEL = '任务'
+
+/**
+ * **日记面板的演示栏**（`Prefs.journalMounts` 的种子）。
+ *
+ * 为什么不是库里的一块：日记表面是**系统视图**，不是块 —— 它不可寻址、不进回收站、
+ * 不参与复制。它的配置属于「这台设备怎么看」，与 `feedLayout` 同层。
+ * 曾经这里造一个**没有列表露面的内部块**来装它，那是拿一个不可寻址的块当拥有者。
+ *
+ * 种子里挂一栏演示查询，是为了让首次装载真的走一次「local tab」那条分支 ——
+ * 一份只在内置三栏上测过的实现，会在「有用户栏」时才暴露排序、空态、摘除的问题。
+ * 条件带 `$self`：它在今天求值时指今天，所以这一栏的名字与内容不必写死日期。
+ */
+export function seedJournalMounts(): MountEntry[] {
+  return [
+    {
+      id: 't-seed-today-todos',
+      kind: 'local',
+      label: t('ui.mount.demo.todayTodos'),
+      spec: { where: { all: [{ journal: '$self' }, { todo: 'todo' }] } },
+      views: [],
+    },
+  ]
+}
 
 function coreVocabulary(): Block[] {
   const taskStatus = mkPropDef(TASK_STATUS_LABEL, 'checkbox', { [UI_POSITION_PROP]: 'block-left' }, TASK_STATUS_PROP_ID)

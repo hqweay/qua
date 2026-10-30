@@ -44,10 +44,10 @@
  * | `_lists` | `BlockList` | 露面是集合 |
  * | `_display`／`_kind`／`_date`／`_query`／`_type` | `Block` 的列 | 每行渲染都读；升列后读一块不必再查属性表 |
  * | `_deletedAt` | `Block.deleted` | 软删标记：遍历过滤与回收站派生都要读它 |
- * | `_queryResult` | **不落库** | 它是「那次查询的冻结结果」，派生值；落盘会在条件变了之后说谎 |
  *
- * ⚠️ `_queryResult` 不落库 ⇒ 查询视图每次装载都要重算一次（`QueryView.mount` 本来就是
- * 「没有冻结结果就 freeze 一次」），所以这一格缺席是**预期形状**，不是丢数据。
+ * ⚠️ 曾经有一格 `_queryResult`（那次查询的冻结结果）。它已**从模型里删掉**：
+ *    结果改按**表面实例**冻结（内存里，重开重算），不再是块上的一格数据。
+ *    落盘侧因此没有「这一格缺席」这回事 —— 缺席是唯一形状。
  */
 import { ALIASES_PROP, DELETED_AT_PROP, DISPLAY_PROP, LISTS_PROP, type Block, type BlockList } from '../model.ts'
 import { META_KEYS } from '../library.ts'
@@ -116,7 +116,7 @@ const COLUMN_TO_PROP: Readonly<Record<string, string>> = Object.fromEntries(
 )
 
 /** 不进属性表的键（它们各有去处，见文件头的表） */
-const NOT_A_PROP = new Set<string>([ALIASES_PROP, LISTS_PROP, DELETED_AT_PROP, '_queryResult', ...Object.keys(COLUMN_PROPS)])
+const NOT_A_PROP = new Set<string>([ALIASES_PROP, LISTS_PROP, DELETED_AT_PROP, ...Object.keys(COLUMN_PROPS)])
 
 /**
  * 找块的探测（只在**结构写入**与 **anno 写入**上用到）。

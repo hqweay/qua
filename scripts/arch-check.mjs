@@ -1397,6 +1397,206 @@ function commandDecls() {
 }
 
 /* ═══════════════════════════════════════════════════════╗
+   ║ 32 · 拥有者模型：被删掉的旧形状不得复活                    ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  /**
+   * **一次破坏性重构之后，旧形状最容易以三种方式回来**，而这三种都不报错：
+   *   ① 有人「顺手加个缓存」把冻结结果又写回块上（`_queryResult`）——
+   *      于是「刷新」开始进撤销栈，而同一个查询在不同设备上结果能不一样；
+   *   ② 有人为了「日记也挂一栏」再造一个隐藏配置块（`journalMountsId`）——
+   *      那个块不可寻址、不进回收站，删了没有入口、备份里却多一块；
+   *   ③ 有人拿数组下标当 tab 的键（`user:<index>`）——摘掉第一栏之后，
+   *      激活项与冻结缓存全体漂到别一栏上。
+   *
+   * 判据走 AST（注释不算命中）：`_queryResult` / `journalMountsId` 是**字符串与标识符**，
+   * 而讲「为什么不用它」的注释必须留得住（被推翻的想法要留痕）。
+   */
+  const hits = []
+  const scan = (files) => {
+    for (const f of files) {
+      const r = rel(f)
+      const { sf } = tsFile(f)
+      const visit = (n) => {
+        if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateHead(n)) {
+          if (n.text === '_queryResult' || n.text.startsWith('user:')) {
+            const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
+            hits.push(`${r}:${line} 旧形状 \`${n.text.slice(0, 24)}\``)
+          }
+        }
+        if (ts.isIdentifier(n) && (n.text === 'QUERY_RESULT_PROP' || n.text === 'journalMountsId')) {
+          const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
+          hits.push(`${r}:${line} 旧符号 \`${n.text}\``)
+        }
+        // `spec.todo`：顶层 todo 与 `where:{todo}` 是同一件事的第二份表示
+        if (ts.isPropertyAccessExpression(n) && n.name.text === 'todo' && ts.isIdentifier(n.expression) && n.expression.text === 'spec') {
+          const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
+          hits.push(`${r}:${line} \`spec.todo\`（三态只由 where:{todo} 表达）`)
+        }
+        ts.forEachChild(n, visit)
+      }
+      visit(sf)
+    }
+  }
+  scan([...srcFiles, ...walk(join(ROOT, 'tests'), ['.ts']), ...walk(join(ROOT, 'checks'), ['.mjs'])])
+  add({
+    id: 32,
+    title: '拥有者模型：`_queryResult` / `journalMountsId` / `user:<index>` / `spec.todo` 都不得复活',
+    method:
+      'AST 扫 src/**/*.ts ＋ tests/**/*.ts ＋ checks/**/*.mjs 的字符串字面量（`_queryResult`／`user:` 前缀）、标识符（`QUERY_RESULT_PROP`／`journalMountsId`）、属性访问（`spec.todo`）',
+    scope: `src ＋ tests ＋ checks（${srcFiles.length} 个源文件 ＋ 测试与冒烟）`,
+    whitelist: '无 —— 结果按表面实例冻结、日记的栏住设备状态、tab 的键是稳定 id',
+    hits: hits.length,
+    detail: hits,
+    note: '注释不在 AST 里 ⇒ 讲「为什么删掉它」的记录不会被这条拦住',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
+   ║ 33 · 视图配置的写路径唯一                                  ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  /**
+   * 「配置住哪」必须只有一个答案。
+   *
+   * 允许碰 `_views`／`_activeView`／`_mounts` 的只有三处：
+   *   · `core/view-owner.ts`（拥有者/绑定的纯函数）；
+   *   · `core/mount.ts`（栏的编解码）；
+   *   · `app/wiring/owners.ts`（唯一实现：一笔事务或一次设备保存）。
+   * 其余地方（命令、UI、装配）都经 `ViewOwnerStore`。
+   *
+   * 为什么是 hard：第二处写路径不会「明显坏掉」——它会在读到 `_mounts` 是
+   * 日记宿主（设备状态）时静默写一个不存在的块，或者把 `_views` 写到 target 以外的块上。
+   */
+  const ALLOW = new Set(['src/core/view-owner.ts', 'src/core/mount.ts', 'src/app/wiring/owners.ts', 'src/core/model.ts', 'src/core/view.ts'])
+  const PROPS = new Set(['_views', '_activeView', '_mounts'])
+  const hits = []
+  for (const f of srcFiles) {
+    const r = rel(f)
+    if (ALLOW.has(r)) continue
+    const { sf } = tsFile(f)
+    const visit = (n) => {
+      // `x.props._views` 形状：属性访问链里出现被保护的键
+      if (ts.isPropertyAccessExpression(n) && PROPS.has(n.name.text)) {
+        const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
+        hits.push(`${r}:${line} 直接碰 \`${n.name.text}\` —— 走 ViewOwnerStore`)
+      }
+      // `props['_mounts']` 形状
+      if (ts.isElementAccessExpression(n) && n.argumentExpression && ts.isStringLiteral(n.argumentExpression) && PROPS.has(n.argumentExpression.text)) {
+        const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
+        hits.push(`${r}:${line} 直接碰 \`${n.argumentExpression.text}\` —— 走 ViewOwnerStore`)
+      }
+      ts.forEachChild(n, visit)
+    }
+    visit(sf)
+  }
+  add({
+    id: 33,
+    title: '视图配置的写路径唯一（`_views` / `_activeView` / `_mounts` 只经 ViewOwnerStore）',
+    method: 'AST 扫 src/**/*.ts 的属性访问与元素访问，命中被保护的三个键就记账（白名单按文件）',
+    scope: `src/**/*.ts（${srcFiles.length} 个文件）`,
+    whitelist: [...ALLOW].join(' · '),
+    hits: hits.length,
+    detail: hits,
+    note: '「配置住哪」有两个答案时不会报错：改一处、另一处不动，用户看到的是「点了没生效」',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
+   ║ 34 · 源 × kind 的兼容表只有一份                            ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  /**
+   * 哪些 kind 能落在哪种源上，只在 `core/view.ts` 的 `STORED_KINDS_BY_SOURCE` 里有一份。
+   *
+   * 渲染器各写一份分支的下场是「命令能写、读回来被丢掉」——也就是**点了没生效**，
+   * 而它看起来只是「这个视图不支持」。判据：`STORED_KINDS_BY_SOURCE` 这个声明只许出现一次。
+   */
+  const hits = []
+  let decls = 0
+  for (const f of srcFiles) {
+    const r = rel(f)
+    const { sf } = tsFile(f)
+    const visit = (n) => {
+      if (ts.isVariableDeclaration(n) && n.name.getText(sf) === 'STORED_KINDS_BY_SOURCE') {
+        decls++
+        if (r !== 'src/core/view.ts') {
+          const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
+          hits.push(`${r}:${line} 第二份兼容表`)
+        }
+      }
+      ts.forEachChild(n, visit)
+    }
+    visit(sf)
+  }
+  if (decls === 0) hits.push('src/core/view.ts 里找不到 `STORED_KINDS_BY_SOURCE`（本条断言的锚点丢了）')
+  add({
+    id: 34,
+    title: '源 × kind 的兼容表只有一份（`STORED_KINDS_BY_SOURCE`）',
+    method: 'AST 数 `STORED_KINDS_BY_SOURCE` 的变量声明，且只许在 `src/core/view.ts`',
+    scope: `src/**/*.ts（${srcFiles.length} 个文件；找到 ${decls} 处声明）`,
+    whitelist: 'src/core/view.ts（唯一一份）',
+    hits: hits.length,
+    detail: hits,
+    note: 'UI 的「能切哪几种」读同一张表：分两处写会得到「菜单里有、切过去空屏」',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
+   ║ 35 · 页的「字段声明」入口不存在                            ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  /**
+   * 页曾经能声明 `_fieldDefs`，但那一格**没有任何消费方**（子块不会因此获得那些字段）。
+   * v29 起：页不画那一段，`declareField(page)` 返回 false。
+   *
+   * 判据（两条，都是「这一格还能不能写」的直接体现）：
+   *   · `ui/properties.ts` 不再用页版本的标题（`ui.props.pageFieldsTitle`）；
+   *   · `core/props.ts` 的 `declareField` 里不再出现 `'page'` 这个列表值。
+   */
+  const hits = []
+  for (const [file, needle] of [
+    ['src/ui/properties.ts', 'ui.props.pageFieldsTitle'],
+    ['src/core/props.ts', 'page'],
+  ]) {
+    const f = join(ROOT, file)
+    if (!existsSync(f)) {
+      hits.push(`${file} 不存在（本条断言的锚点丢了）`)
+      continue
+    }
+    const { sf, src } = tsFile(f)
+    const at = src.indexOf(needle)
+    if (at < 0) continue
+    if (file.endsWith('props.ts')) {
+      // 只关心 `declareField` 函数体：别处（注释/其它函数）提 page 是正当的
+      const fn = src.indexOf('export function declareField')
+      const end = src.indexOf('\n}', fn)
+      if (fn >= 0 && at > fn && at < end) {
+        const line = sf.getLineAndCharacterOfPosition(at).line + 1
+        hits.push(`${file}:${line} \`declareField\` 里还有页分支`)
+      }
+      continue
+    }
+    const line = sf.getLineAndCharacterOfPosition(at).line + 1
+    hits.push(`${file}:${line} 还在渲染页的字段声明段`)
+  }
+  add({
+    id: 35,
+    title: '页的「字段声明」入口不存在（能写没人读的值不许留着）',
+    method: '文本查 `ui/properties.ts` 的页版标题、`core/props.ts` 的 `declareField` 里是否还有 page 分支',
+    scope: 'src/ui/properties.ts · src/core/props.ts',
+    whitelist: '无 —— 页的子块不会继承声明，所以那一格不该可写',
+    hits: hits.length,
+    detail: hits,
+    note: '继承是另一个设计（要先定「页的子块」与「标签的成员」谁说了算）；在那之前这一格不可写',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
    ║ 等内核（不假装在跑）                                     ║
    ╚═══════════════════════════════════════════════════════ */
 

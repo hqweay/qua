@@ -25,7 +25,8 @@
  *
  * 1. **存在是一个格、三个值**：`block.exist{present|deleted|purged}`。
  *    软删／恢复与「撤销一次插入」的清除不再共用一个词。
- * 2. **派生格不进日志**：`_queryResult` 不投影（每次装载重算）；
+ * 2. **派生格不进日志**：曾经有一格 `_queryResult`（那次查询的冻结结果）不投影，
+ *    现在它**根本不在模型里**——结果按表面实例冻结，重开重算。
  *    `_deletedAt` 不走 `prop`（它是 `exist` 在内存里的表示）。
  * 3. **新块从 op 里生出来**：`applyOps` 遇到位置 op 时若块不存在，就按 op 里的
  *    `created`／`modified`／`content` 造一块，再挂上去。**不需要 `source` 快照**。
@@ -35,7 +36,7 @@
  *
  * ⚠️ 本文件零 DOM、零持久化、零 store：它只吃森林与 op，所以能直接单测。
  */
-import { DELETED_AT_PROP, QUERY_RESULT_PROP, type Block } from '../model.ts'
+import { DELETED_AT_PROP, type Block } from '../model.ts'
 import { walkForest } from '../walk.ts'
 import type { Anno } from '../runs.ts'
 import type { Op } from './types.ts'
@@ -100,9 +101,15 @@ function deletedAtOf(cells: Pick<Block, 'props'> | undefined): number | undefine
   return typeof v === 'number' ? v : undefined
 }
 
-/** 哪些属性键**不是**普通 prop 格（各有各的地址） */
+/**
+ * 哪些属性键**不是**普通 prop 格（各有各的地址）。
+ *
+ * 目前只有删除标记：它是 `block.exist` 在内存里的表示，不是「这一格的值」。
+ * （曾经冻结的查询结果也在这里豁免；那一格已从模型里删掉——结果按表面实例冻结，
+ * 不再经过 op。）
+ */
 function isPropCell(name: string): boolean {
-  return name !== DELETED_AT_PROP && name !== QUERY_RESULT_PROP
+  return name !== DELETED_AT_PROP
 }
 
 /* ------------------------------------------------------------ 生成 op */

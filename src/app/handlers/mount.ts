@@ -1,25 +1,68 @@
 /**
- * 挂载区 handler：加一栏 / 摘一栏。
+ * 挂载区 handler：加/摘/改名/换视图/提升/转本地/固定派生。
  *
- * 命令面只做两件事：把 `label` 与 `spec` 收成形、把「写哪一格」交给门面
- * （日记写共享配置块这一条属于模型知识，不属于命令面）。
+ * 命令面只做参数归一 —— 「这一栏写哪一格」由 `MountHost` 判（块宿主写库、
+ * 日记宿主写设备状态），那是模型层的事，不属于命令面。
  */
 import type { Handler } from '../../core/ports.ts'
 import type { QuerySpec } from '../../core/query.ts'
-import { S } from './shared.ts'
+import { hostArg, S } from './shared.ts'
+
+/** 派生栏的三个来源（`derived` 栏没有配置，固定成 local 时才用到） */
+const SOURCES = ['refs', 'same', 'mentions'] as const
 
 export const MOUNT_HANDLERS: Record<string, Handler> = {
-  'core.mount/add': (a, app) => {
-    const hostId = S(a.hostId)
+  'core.mount/add-local': (a, app) => {
+    const host = hostArg(a.host)
     const label = S(a.label).trim()
     const spec = a.spec as QuerySpec | undefined
-    if (!hostId || !label || !spec || typeof spec !== 'object' || !spec.where) return false
-    return app.addMountTab(hostId, label, spec)
+    if (!host || !label || !spec || typeof spec !== 'object' || !spec.where) return false
+    const view = S(a.view)
+    return app.addLocalTab(host, label, spec, [], view) !== ''
+  },
+  'core.mount/add-linked': (a, app) => {
+    const host = hostArg(a.host)
+    const blockId = S(a.block)
+    if (!host || !blockId) return false
+    const label = S(a.label).trim()
+    return app.addLinkedTab(host, blockId, S(a.view), label === '' ? undefined : label) !== ''
   },
   'core.mount/remove': (a, app) => {
-    const hostId = S(a.hostId)
-    const index = typeof a.index === 'number' ? a.index : Number(a.index)
-    if (!hostId || !Number.isInteger(index)) return false
-    return app.removeMountTab(hostId, index)
+    const host = hostArg(a.host)
+    const tabId = S(a.tabId)
+    if (!host || !tabId) return false
+    return app.removeMountTab(host, tabId)
+  },
+  'core.mount/rename': (a, app) => {
+    const host = hostArg(a.host)
+    const tabId = S(a.tabId)
+    if (!host || !tabId) return false
+    return app.renameMountTab(host, tabId, S(a.label))
+  },
+  'core.mount/set-view': (a, app) => {
+    const host = hostArg(a.host)
+    const tabId = S(a.tabId)
+    if (!host || !tabId) return false
+    return app.setMountTabView(host, tabId, S(a.view))
+  },
+  'core.mount/promote': (a, app) => {
+    const host = hostArg(a.host)
+    const tabId = S(a.tabId)
+    const target = S(a.target, 'page')
+    if (!host || !tabId || (target !== 'page' && target !== 'block')) return false
+    const link = a.link === undefined ? true : a.link !== false
+    return app.promoteMountTab(host, tabId, target, S(a.parentId) || undefined, link) !== ''
+  },
+  'core.mount/detach': (a, app) => {
+    const host = hostArg(a.host)
+    const tabId = S(a.tabId)
+    if (!host || !tabId) return false
+    return app.detachMountTab(host, tabId)
+  },
+  'core.mount/fix-derived': (a, app) => {
+    const host = hostArg(a.host)
+    const source = S(a.source)
+    if (!host || !(SOURCES as readonly string[]).includes(source)) return false
+    return app.fixDerivedTab(host, source as (typeof SOURCES)[number]) !== ''
   },
 }

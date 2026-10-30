@@ -18,6 +18,7 @@ import { findTagByName, tagIdsOf, tagMemberIds } from './tags.ts'
 import { findJournalDay, journalDate, journalDays } from './journal.ts'
 import { displayTextOf } from './alias.ts'
 import { todoOf } from './props.ts'
+import type { KbClient } from './kb/types.ts'
 
 /* ------------------------------------------------------------ 条件形状 */
 
@@ -97,7 +98,13 @@ export interface SortKey {
 
 export type TodoFilter = 'todo' | 'done' | 'none'
 
-/** 整个查询：条件 ＋ 范围 ＋ 顺序。没有 `view: table | board` —— 首版只有大纲列表 */
+/**
+ * 整个查询：条件 ＋ 范围 ＋ 顺序。
+ *
+ * ⚠️ **没有顶层 `todo`**：三态只由 `where:{todo}` 表达。曾经两种写法并存，
+ *    于是同一条语义有两份表示，能同时写上并静默 AND —— 用户看到的是
+ *    「条件就写了这一条，结果却像两条」。
+ */
 export interface QuerySpec {
   where: QueryNode
   /**
@@ -105,33 +112,74 @@ export interface QuerySpec {
    * 根 Enter 建的子块只有渲染子树才看得见，否则就是「建了但看不见」（D8）。
    */
   scope?: 'subtree' | 'all'
-  todo?: TodoFilter
   /**
-   * 结果顺序：按键**依次**比较（写在前面的优先）。缺省＝森林先序。
+   * **成员顺序**：取哪些、按什么序（在 `limit` 之前生效）。
    *
-   * 排序是**稳定**的：同值的行保持森林先序；**缺槽的排最后**（与方向无关）——
-   * 「没有这一槽」不是一个小值，放进有序区会把缺槽的混进中间。
+   * ⚠️ 与「显示排序」是两件事：显示排序住在视图配置上（`ViewConfig.table.sort`），
+   *    点表头只改当前这批成员的显示序，**不重查**。写 `_query.sort` 会让
+   *    「按这一列排一下」变成「换一批行」。
    */
   sort?: SortKey[]
-  /** 取多少条；缺省不限 */
+  /** 取多少条（在排序之后截断，所以「取最新的 3 天」取得到）；缺省不限 */
   limit?: number
 }
 
 /* ------------------------------------------------------------ 求值 */
+
+/**
+ * **查询上下文**：一次求值相对什么。三件事分开给，不许合并。
+ *
+ * | 字段 | 回答 |
+ * |---|---|
+ * | `selfId` | 条件里的 `'$self'` 指谁 |
+ * | `scopeId` | `scope:'subtree'` 的锚点 |
+ * | `excludeIds` | 结果里剔除谁 |
+ *
+ * ⚠️ 为什么 `selfId` 不再顺带排除：那是两件事被塞进同一个字段的后果 ——
+ *    想解析 `$self`，就不得不把它从结果里去掉；而「查询块自己不该出现在自己的结果里」
+ *    与「宿主不该出现在挂载区里」是**各自独立**的两条规则，合并之后只能成对表达。
+ */
+export interface QueryContext {
+  selfId?: string
+  scopeId?: string
+  excludeIds?: readonly string[]
+}
+
+/** 上下文的**稳定串**（冻结结果的判据之一；顺序无关 ⇒ 排序后再拼） */
+export function contextKey(ctx: QueryContext): string {
+  const ex = [...new Set((ctx.excludeIds ?? []).filter((x) => typeof x === 'string' && x !== ''))].sort()
+  return JSON.stringify({ selfId: ctx.selfId ?? null, scopeId: ctx.scopeId ?? null, excludeIds: ex })
+}
+
+/**
+ * 按上下文求值。**只读**：不写块、不改 `_query`。
+ *
+ * 走读门面（索引路径），调用方不必持有整片森林。
+ */
+export function evaluateQuerySpec(
+  spec: QuerySpec,
+  kb: Pick<KbClient, 'query'>,
+  ctx: QueryContext,
+): QueryHit[] {
+  return kb.query(spec, { scopeId: ctx.scopeId, selfId: ctx.selfId, excludeIds: ctx.excludeIds })
+}
 
 export interface QueryRunInput {
   blocks: readonly Block[]
   /** 求值范围锚点：`scope: 'subtree'` 时只在这个块（含）之下找 */
   anchorId?: string
   /**
-   * **宿主块**：条件里的 `'$self'` 按它解析，且结果里**一律不含它**。
+   * **宿主块**：条件里的 `'$self'` 按它解析。
    *
-   * 两件事都随这个字段而来，因为它们是同一个位置的性质（「这一块下面挂的看板」）：
-   *   · `'$self'` 是相对条件 —— 离开宿主就没有指代，**不退回全库**（那是另一种查询）；
-   *   · 宿主自己一定满足「和我同标签」「正文提到我」这类条件，留在结果里只是噪声。
+   * ⚠️ **它不再顺带把自己从结果里剔除** —— 那是 `excludeIds` 的事。
+   *    曾经两件事都随这个字段而来，于是「想解析 `$self`，又不得不排除它」
+   *    这种形状无法表达（挂载区的宿主不进结果是位置性质，查询块自己不进结果是
+   *    另一条规则，两者曾经只能成对生效）。
    * 普通查询块不传它 ⇒ 条件里的 `$self` 解析不了 ⇒ 空结果（调用方给一行提示）。
    */
   selfId?: string
+  /** 结果里剔除这些块（`selfId` 之外的独立一条） */
+  excludeIds?: readonly string[]
 }
 
 /** 一条结果：块 id ＋ 它在森林里的路径（D8：可编辑列表必须给上下文，否则不知道这条住哪） */
@@ -170,12 +218,14 @@ export interface QueryEnv {
   /** 条件里第一个 `journal` 日期；没有 ⇒ `null`（此时它是普通组合，不当范围用） */
   journalDate: string | null
   /**
-   * 宿主块 id：求值时**一律跳过它**（见 `QueryRunInput.selfId`）。
+   * 结果里剔除这些块。
    *
-   * 它不进 spec，因为「看不见自己」是这个**位置**的性质（挂在这一块下面），
-   * 不是条件的性质：写进条件就成了「同一份条件在挂载区内外求值不同」。
+   * 它不进 spec，因为「看不见自己」是**位置**的性质（挂在这一块下面、或这就是
+   * 查询块自己），不是条件的性质：写进条件就成了「同一份条件换个地方求值结果不同」。
+   *
+   * ⚠️ 与 `selfId` 分开：那条只负责解析 `'$self'`，不再顺带排除。
    */
-  selfId?: string
+  excludeIds?: ReadonlySet<string>
 }
 
 /**
@@ -191,10 +241,9 @@ export function evaluateQuery(spec: QuerySpec, roots: readonly Block[], env: Que
   /** 收窄过的候选集（如 role:'journal' 走天表）里，同一块可能既当「后代」又当「候选根」被走到——一条结果只许出现一次 */
   const seen = new Set<string>()
   walk(roots, (b, ancestors) => {
-    if (env.selfId !== undefined && b.id === env.selfId) return
+    if (env.excludeIds?.has(b.id)) return
     if (env.journalDate && isJournalBlock(b)) return
     if (!matches(spec.where, b, env.refs, env.tags)) return
-    if (spec.todo && (todoOf(b) ?? 'none') !== spec.todo) return
     if (seen.has(b.id)) return
     seen.add(b.id)
     hits.push({ blockId: b.id, path: ancestors.map((a) => a.id), block: b })
@@ -310,7 +359,7 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
     refs: collectRefs(q.where, input.blocks),
     tags: collectTags(q.where, input.blocks),
     journalDate: firstJournal(q.where),
-    selfId: input.selfId,
+    ...(input.excludeIds && input.excludeIds.length > 0 ? { excludeIds: new Set(input.excludeIds) } : {}),
   }
   /** 范围：`subtree` ⇒ 只收 anchor 之下（含 anchor 自己）；`all` ⇒ 整片森林 */
   let roots: readonly Block[] = input.blocks

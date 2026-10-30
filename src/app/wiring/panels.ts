@@ -16,17 +16,21 @@ import {
   flatten,
   hasList,
   isJournal,
-  isQueryBlock,
+  isViewRoot,
   journalDate,
   normalizeAlias,
   parentsOf,
   propDisplayLabels,
   propKindOf,
   propLabel,
-  readSpec,
   todayISO,
   type Block,
+  type MountEntry,
+  type MountHost,
   type PropKind,
+  type QueryContext,
+  type ViewBindingRef,
+  type ViewOwnerRef,
 } from '../../core/index.ts'
 import type { PropCreateMode, PropTarget } from '../../core/ports.ts'
 import { t } from '../../core/msg.ts'
@@ -37,16 +41,22 @@ import type { Tx } from '../../core/kb/types.ts'
 import type { BlockStore } from '../../core/store.ts'
 import type { Workspace } from '../../core/workspace.ts'
 import type { Layers, Row } from '../../ui/layers.ts'
-import { MountArea } from '../../ui/mount-area.ts'
+import { MountArea, type ViewBodyHost } from '../../ui/mount-area.ts'
 import { PropertiesPanel } from '../../ui/properties.ts'
 import { createViewHostEls, ViewHost } from '../../ui/query-view.ts'
+ 
 import type { Chrome } from '../../ui/chrome.ts'
 import type { BlockEditor } from '../../view/editor.ts'
+import type { OwnerStore } from './owners.ts'
 
 export type PanelsDeps = {
   blocks: BlockStore
   kb: MemoryKb
   layers: Layers
+  /** 视图配置的唯一接缝（`ViewOwnerStore`） */
+  owners: OwnerStore
+  /** 日记面板的那一组（设备状态，由装配层从 prefs 取） */
+  journalMounts: () => readonly MountEntry[]
   app: App
   shortId: (id: string) => string
   activeBlock: () => Block
@@ -86,7 +96,7 @@ export type PanelsDeps = {
 }
 
 export function setupPanels(deps: PanelsDeps) {
-  const { blocks, kb, layers, app, shortId, run, syncSections, scheduleSave, scheduleBadge, refClick } = deps
+  const { blocks, kb, layers, app, owners, journalMounts, shortId, run, syncSections, scheduleSave, scheduleBadge, refClick } = deps
   const chrome = deps.getChrome()
   const mainEd = deps.getMainEd()
   /**
@@ -372,34 +382,66 @@ export function setupPanels(deps: PanelsDeps) {
    *   · **哪一段有挂载区**：单根（页 / zoom / 单日）＋ 日记流的每一段；
    *     N>1 的非日记（查询结果列表、多页并排）**没有**——那些屏上没有「一个对象」可言。
    *   · **实例按段根缓存**：段根不变就复用（切换/滚动不重建编辑器，撤销栈与选区都还在）。
-   *   · **查询块的结果视图**：被打开的那个查询块自己就是段根 ⇒ 那一段的槽里先放它的结果，
-   *     再放挂载区。页面里「底部单列一条查询结果」没有了（那是旧形状）。
+   *   · **查询块／收藏块的结果视图**：被打开的那一个自己就是段根 ⇒ 那一段的槽里先放它的结果，
+   *     再放挂载区。
    *
    * 日记流里**只有今天展开**：更早的天是一行摘要（`MountArea` 初始 `expanded`）。
    */
-  type MountInstance = { area: MountArea; query: ViewHost | null; queryHostId: string }
+  type MountInstance = { area: MountArea; view: ViewHost | null; viewHostId: string }
   const mountInstances = new Map<string, MountInstance>()
 
   /** 这一段该不该默认展开：日记只展开今天（「今天 = 你要写的那一天」） */
   const expandedFor = (host: Block): boolean => (isJournal(host) ? journalDate(host) === todayISO() : true)
 
   /**
+   * **求值的上下文**（`$self` 指谁、`subtree` 锚在哪、结果剔除谁）。
+   *
+   * 三条规则写在一处，因为它们曾经被塞进同一个 `selfId`：
+   *   · 查询块自己**不进**自己的结果（一张「所有任务」的表不该把自己算进去）；
+   *   · 挂载宿主**不进**结果（那是位置的性质，不是条件的性质）；
+   *   · `subtree` 的锚点是**它所在的容器**，不是它自己（查询块通常是个叶子）。
+   */
+  const contextFor = (ownerBlockId: string): QueryContext => {
+    const container = kb.parentOf(ownerBlockId)
+    return {
+      selfId: container?.id,
+      scopeId: container?.id,
+      excludeIds: [ownerBlockId],
+    }
+  }
+
+  /** 挂载区里一栏的上下文：宿主是 `$self`，锚点也是宿主 */
+  const tabContextFor = (host: Block, targetId?: string): QueryContext => ({
+    selfId: host.id,
+    scopeId: host.id,
+    excludeIds: targetId ? [host.id, targetId] : [host.id],
+  })
+
+  /**
    * **这一段要不要建视图宿主**。
    *
-   * 两条判据缺一不可：
-   *   · 查询块：它自己就是一张视图（不论激活哪种 kind）；
-   *   · 普通块：只有当它是**这一屏的视图根**（`Doc.viewRootId`）时才有 ——
-   *     否则「页里有子块」的每一条日记天都会在流里长出一张表（它在别的页里只是普通子块）。
+   * 判据（`isViewRoot`）：查询块／收藏块／激活了某张视图的块。
+   * 收藏块即使没有 `_activeView` 也要建 —— 它的默认看法是列表，不画出来
+   * 用户就只看到一行摘要，而 `_items` 里的东西一个都看不见。
    */
-  const wantsView = (host: Block): boolean => isQueryBlock(host) || mainEd.doc.viewRootId === host.id
+  const wantsView = (host: Block): boolean => isViewRoot(host)
 
-  function createView(host: Block): ViewHost {
+  /** 一个拥有者「显示的是哪一块」（center 表面：拥有者就是这一块） */
+  const blockOf = (owner: ViewOwnerRef): Block | undefined => (owner.kind === 'block' ? blocks.find(owner.blockId) : undefined)
+
+  function createView(owner: ViewOwnerRef, host: Block, binding?: ViewBindingRef): ViewHost {
     const hostId = host.id
+    const ownerBlock = blockOf(owner)
     const vh = new ViewHost(createViewHostEls(), {
       store: blocks,
       write: (fn) => run(fn, edOfMount(hostId)),
       kb,
-      block: () => blocks.find(hostId) ?? host,
+      owners,
+      owner,
+      ...(binding ? { binding } : {}),
+      host: () => blocks.find(hostId) ?? host,
+      context: binding ? tabContextFor(host, ownerBlock?.id) : contextFor(ownerBlock?.id ?? hostId),
+      surface: binding ? 'mount' : 'center',
       onChange: () => {
         syncSections()
         scheduleSave()
@@ -426,64 +468,163 @@ export function setupPanels(deps: PanelsDeps) {
         return b ? displayNameOf(b) : id.slice(-6)
       },
     })
-    void vh
     return vh
   }
 
   function createMount(host: Block): MountInstance {
     const hostId = host.id
-    const area = new MountArea(
-      {
-        store: blocks,
-        write: (fn) => run(fn, edOfMount(hostId)),
-        kb,
-        host: () => blocks.find(hostId),
-        onChange: () => {
-          syncSections()
-          scheduleSave()
-          scheduleBadge()
-        },
-        // 焦点进挂载区 ⇒ 活动编辑器就是那一个（键位走命令层，认的是它）
-        onFocus: (editor) => deps.setEd(editor),
-        // 与正文同一套事件（点引用/块标/右键菜单/`#`·`@` 补全），装配层只给这一份
-        wire: (editor, change) => deps.wireEditor(editor, change, 'mount'),
-        onAddTab: (id) => openMountPicker(id),
-        onRemoveTab: (id, index) => {
-          void deps.getRegistry().invoke('core.mount/remove', { hostId: id, index }, 'mount')
-          // 摘完当场重排：栏是模型里的一格，DOM 不会自己知道
-          renderMounts()
-        },
-        expanded: expandedFor(host),
+    const area = new MountArea({
+      store: blocks,
+      write: (fn) => run(fn, edOfMount(hostId)),
+      kb,
+      owners,
+      journalMounts: () => journalMounts(),
+      host: () => blocks.find(hostId),
+      onChange: () => {
+        syncSections()
+        scheduleSave()
+        scheduleBadge()
       },
-    )
-    const query = wantsView(host) ? createView(host) : null
-    return { area, query, queryHostId: query ? hostId : '' }
+      // 焦点进挂载区 ⇒ 活动编辑器就是那一个（键位走命令层，认的是它）
+      onFocus: (editor) => deps.setEd(editor),
+      // 与正文同一套事件（点引用/块标/右键菜单/`#`·`@` 补全），装配层只给这一份
+      wire: (editor, change) => deps.wireEditor(editor, change, 'mount'),
+      onAddTab: (id) => openMountPicker(id),
+      onRemoveTab: (mountHost, tabId) => {
+        void deps.getRegistry().invoke('core.mount/remove', { host: mountHost, tabId }, 'mount')
+        // 摘完当场重排：栏是模型/设备状态里的一格，DOM 不会自己知道
+        renderMounts()
+      },
+      /**
+       * 非大纲那一栏的视图体。拥有者随栏的种类变：
+       *   · local ⇒ 拥有者就是这一栏（配置住在它自己身上）；
+       *   · linked ⇒ 拥有者是**目标块**，视图选择走绑定（它只有一根指针）。
+       */
+      createView: (mountHostBlock, entry) => {
+        const mountHost: MountHost = isJournal(mountHostBlock)
+          ? { kind: 'journal' }
+          : { kind: 'block', blockId: mountHostBlock.id }
+        if (entry.kind === 'local') {
+          const owner: ViewOwnerRef = { kind: 'tab', host: mountHost, tabId: entry.id }
+          return asBody(createView(owner, mountHostBlock))
+        }
+        if (entry.kind === 'linked') {
+          const binding: ViewBindingRef = { kind: 'linked-tab', host: mountHost, tabId: entry.id }
+          const target = owners.readBinding(binding)
+          if (!target) return null
+          const targetBlock = blocks.find(target.owner.kind === 'block' ? target.owner.blockId : '')
+          return asBody(createView(target.owner, targetBlock ?? mountHostBlock, binding))
+        }
+        return null
+      },
+      expanded: expandedFor(host),
+    })
+    const view = wantsView(host) ? createView({ kind: 'block', blockId: host.id }, host) : null
+    return { area, view, viewHostId: view ? hostId : '' }
   }
 
   /** 挂载区里那个编辑器（写事务的 source）。焦点切过去之后 `ed` 就是它 */
   const edOfMount = (hostId: string) => mountInstances.get(hostId)?.area.blockEditor ?? undefined
 
+  /** 视图体（`ViewHost`）也实现 `ViewBodyHost`：`mount/sync/dispose` 都在它身上 */
+  const asBody = (vh: ViewHost): ViewBodyHost => ({
+    root: vh.root,
+    mount: () => vh.mount(),
+    sync: () => vh.sync(),
+    dispose: () => vh.dispose(),
+  })
+
   /**
-   * 「＋」：从**库里已保存的查询块**挑一个，把它的条件复制成一栏。
+   * 「＋」：**三种「新建」**，默认建 local tab（不建块）。
    *
-   * 为什么是复制条件而不是把查询块挂上来：挂载项不是库对象（没有身份、不能被引用），
-   * 而查询块是。让一格数据指着一个块，就带回孤儿与悬空 id 的老问题。
-   * 代价（登记在文档里）：条件在挂上那一刻定格，之后改查询块不会同步。
+   * | 入口 | 建什么 | 住哪 |
+   * |---|---|---|
+   * | 新建查询 | **local tab**（自己拥有条件与视图） | 宿主持有的那组条目 |
+   * | 挂一个已有的块 | **linked tab**（指针） | 同上 |
+   * | 新建查询页… | **查询页**（内容对象） | 页列表 |
+   *
+   * 默认是 local tab：随手加一栏，不在树/页列表里多一个对象，也没有
+   * 「删块 tab 怎么办」。需要命名/引用/共享时再提升。
    */
   function openMountPicker(hostId: string): void {
-    const rows: Row[] = []
-    for (const b of flatten({ roots: [...kb.roots()] })) {
-      const spec = readSpec(b)
-      if (!spec) continue
-      rows.push({
-        id: `query/${b.id}`,
-        label: displayNameOf(b).trim() || t('ui.query.untitled'),
-        hint: t('ui.mount.addHint'),
-        icon: 'lucide:list-filter',
-      })
-    }
+    const rows: Row[] = [
+      { id: 'mount/local', label: t('ui.mount.addLocal'), hint: t('ui.mount.addLocalHint'), icon: 'lucide:list-filter', group: 'mount/1' },
+      { id: 'mount/linked', label: t('ui.mount.addLinked'), hint: t('ui.mount.addLinkedHint'), icon: 'lucide:link', group: 'mount/1' },
+      { id: 'mount/page', label: t('ui.mount.addQueryPage'), icon: 'lucide:file-plus', group: 'mount/2' },
+    ]
     const host = blocks.find(hostId)
     if (!host) return
+    layers.openMenu({
+      rows,
+      anchor: deps.getEd().caretRect(),
+      title: t('ui.mount.addMenu'),
+      searchable: false,
+      emptyText: t('ui.mount.addEmpty'),
+      onPick: (row) => {
+        if (row.id === 'mount/local') openLocalComposer(host)
+        else if (row.id === 'mount/linked') openLinkedPicker(host)
+        else void deps.getRegistry().invoke('core.query/create', { kind: 'page', name: '' }, 'mount')
+      },
+    })
+  }
+
+  /**
+   * **新建查询（local tab）**：最小 composer（栏名 ＋ 条件 JSON）。
+   *
+   * M2 会用正式构建器替换它，但**命令与数据形状不变**：它只写这一栏的 `spec`，
+   * 不建块（块数一个都不变）。
+   */
+  function openLocalComposer(host: Block): void {
+    const mountHost: MountHost = isJournal(host) ? { kind: 'journal' } : { kind: 'block', blockId: host.id }
+    layers.openPopover((box) => {
+      box.className = 'mount-composer'
+      const name = document.createElement('input')
+      name.className = 'ui-input'
+      name.placeholder = t('ui.mount.newTabName')
+      name.value = t('ui.mount.localName')
+      const area = document.createElement('textarea')
+      area.className = 'ui-input mount-composer-spec'
+      area.rows = 6
+      area.value = JSON.stringify({ where: { todo: 'todo' } }, null, 2)
+      const hint = document.createElement('p')
+      hint.className = 'mount-composer-hint'
+      hint.textContent = t('ui.mount.specTitle')
+      const go = document.createElement('button')
+      go.type = 'button'
+      go.className = 'ui-btn'
+      go.textContent = t('ui.mount.addLocal')
+      go.addEventListener('click', () => {
+        let spec: unknown
+        try {
+          spec = JSON.parse(area.value)
+        } catch {
+          app.toast(t('ui.query.badJson'), 'warn')
+          return
+        }
+        void deps
+          .getRegistry()
+          .invoke('core.mount/add-local', { host: mountHost, label: name.value.trim(), spec }, 'mount')
+        layers.closePopover()
+        renderMounts()
+      })
+      box.append(hint, name, area, go)
+      name.focus()
+    }, deps.getEd().caretRect())
+  }
+
+  /** 挂一个已有的块（linked）：选块 ⇒ 写一根指针（条件与视图仍住在那一块上） */
+  function openLinkedPicker(host: Block): void {
+    const mountHost: MountHost = isJournal(host) ? { kind: 'journal' } : { kind: 'block', blockId: host.id }
+    const rows: Row[] = []
+    for (const b of flatten({ roots: [...kb.roots()] })) {
+      if (b.id === host.id) continue
+      rows.push({
+        id: `linked/${b.id}`,
+        label: displayNameOf(b).trim() || t('ui.query.untitled'),
+        hint: t('ui.mount.addLinkedHint'),
+        icon: 'lucide:link',
+      })
+    }
     if (rows.length === 0) {
       app.toast(t('ui.mount.addEmpty'), 'info')
       return
@@ -491,22 +632,15 @@ export function setupPanels(deps: PanelsDeps) {
     layers.openMenu({
       rows,
       anchor: deps.getEd().caretRect(),
-      title: t('ui.mount.add'),
+      title: t('ui.mount.pickLinked'),
       searchable: true,
       focusSearch: true,
       emptyText: t('ui.mount.addEmpty'),
       onPick: (row) => {
-        const id = String(row.id).slice('query/'.length)
-        const b = blocks.find(id)
-        const spec = b ? readSpec(b) : null
-        if (!b || !spec) return
-        void deps.getRegistry().invoke(
-          'core.mount/add',
-          { hostId, label: displayNameOf(b).trim() || t('ui.query.untitled'), spec },
-          'mount',
-        )
+        const id = String(row.id).slice('linked/'.length)
+        void deps.getRegistry().invoke('core.mount/add-linked', { host: mountHost, block: id }, 'mount')
         // 当场看见新栏：store 订阅在「焦点还在本视图里」时会跳过（同 × 那条理由）
-        mountInstances.get(hostId)?.area.render()
+        renderMounts()
       },
     })
   }
@@ -521,7 +655,6 @@ export function setupPanels(deps: PanelsDeps) {
     const roots = mainEd.doc.roots
     // N>1 且不是日记流 ⇒ 没有「一个对象」可挂（查询结果列表、多页并排）
     const allow = roots.length <= 1 || roots.every((r) => isJournal(r))
-    const seen = new Set<string>()
     if (allow) {
       for (const sec of mainEd.container.querySelectorAll<HTMLElement>('.sec')) {
         const hostId = sec.dataset.sec ?? ''
@@ -530,35 +663,40 @@ export function setupPanels(deps: PanelsDeps) {
         if (!slot) continue
         const host = blocks.find(hostId)
         if (!host) continue
-        seen.add(hostId)
         let inst = mountInstances.get(hostId)
         if (!inst) {
           inst = createMount(host)
           mountInstances.set(hostId, inst)
           // 新实例才装载一次（之后由它自己的 store 订阅跟进）
-          if (inst.query) {
-            inst.queryHostId = hostId
-            inst.query.mount()
+          if (inst.view) {
+            inst.viewHostId = hostId
+            inst.view.mount()
           }
-        } else if (inst.query && !wantsView(host)) {
+        } else if (inst.view && !wantsView(host)) {
           /**
-           * 切回大纲：**摘掉视图宿主**（连同它订阅的编辑器），别藏一台还在跟着 store 重画的。
+           * 切回默认看法：**摘掉视图宿主**（连同它订阅的编辑器），别藏一台还在跟着 store 重画的。
            * 段尾的挂载区留着 —— 它与视图是两件事。
            */
-          if (inst.query.editor && deps.getEd() === inst.query.editor) deps.setEd(deps.getMainEd())
-          inst.query.dispose()
-          inst.query.root.remove()
-          inst.query = null
-          inst.queryHostId = ''
-        } else if (!inst.query && wantsView(host)) {
-          inst.query = createView(host)
-          inst.queryHostId = hostId
-          inst.query.mount()
+          if (inst.view.editor && deps.getEd() === inst.view.editor) deps.setEd(deps.getMainEd())
+          inst.view.dispose()
+          inst.view.root.remove()
+          inst.view = null
+          inst.viewHostId = ''
+        } else if (!inst.view && wantsView(host)) {
+          inst.view = createView({ kind: 'block', blockId: host.id }, host)
+          inst.viewHostId = hostId
+          inst.view.mount()
         } else {
           // 已经在位：画法变了（切了视图/增删了行）就换分支，没变只对齐数据
-          inst.query?.sync()
+          inst.view?.sync()
+          /**
+           * **重排栏条**：加/摘一栏、换它的视图、改设备状态里的日记栏，都不会经过
+           * `EditableBlock` 的 store 订阅（那订阅盯的是块，而这几件事写在
+           * `_mounts`／`prefs` 上）。不补这一次，用户会看到「点了加、栏没出来」。
+           */
+          inst.area.refreshEntries()
         }
-        if (inst.query && inst.query.root.parentElement !== slot) slot.appendChild(inst.query.root)
+        if (inst.view && inst.view.root.parentElement !== slot) slot.appendChild(inst.view.root)
         if (inst.area.root.parentElement !== slot) slot.appendChild(inst.area.root)
       }
     }
@@ -572,17 +710,18 @@ export function setupPanels(deps: PanelsDeps) {
      */
     for (const [id, inst] of mountInstances) {
       if (roots.some((r) => r.id === id)) continue
-      for (const ed of [inst.area.blockEditor, inst.query ? inst.query.editor : null]) {
-        if (ed && deps.getEd() === ed) deps.setEd(deps.getMainEd())
+      for (const ed2 of [inst.area.blockEditor, inst.view ? inst.view.editor : null]) {
+        if (ed2 && deps.getEd() === ed2) deps.setEd(deps.getMainEd())
       }
-      inst.query?.dispose()
-      inst.query?.root.remove()
+      inst.view?.dispose()
+      inst.view?.root.remove()
       inst.area.dispose()
       inst.area.root.remove()
       mountInstances.delete(id)
     }
   }
 
+  // 首次装载：装配完就把每一段的挂载区放上去（之后由 loadPage / store 订阅跟进）
   renderMounts()
 
   return { renderMounts, renderProperties, scheduleProperties, pickRefValue }

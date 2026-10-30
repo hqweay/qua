@@ -74,12 +74,15 @@ test('③ 定义可被两个标签同时声明；删其一，定义仍在、另�
   assert.deepEqual(declaredFields(film, forest).map((d) => d.id), [def.id], '#电影 的声明仍有效')
 })
 
-test('只有页/标签能声明字段（D4）；普通块只能有值', () => {
+test('只有**标签**能声明字段；普通块与页都不行（页的声明没有消费方）', () => {
   const def = mkPropDef('评分')
   const plain: Block = { id: 'p', content: textRuns('普通块'), children: [] }
-  assert.equal(declareField(plain, def.id), false)
-  const page: Block = { id: 'pg', text: '页', children: [], props: { _aliases: ['页'], _lists: ['page'] } }
-  assert.equal(declareField(page, def.id), true)
+  assert.equal(declareField(plain, def.id), false, '普通块没有成员，声明没有获得方')
+  // ⚠️ 页曾能声明，但那一格**没有消费方**（子块不会因此获得那些字段）⇒ v29 起拒写
+  const page: Block = { id: 'pg', content: textRuns('页'), children: [], props: { _aliases: ['页'], _lists: ['page'] } }
+  assert.equal(declareField(page, def.id), false, '页不能声明：写了也永远不会生效')
+  const tag = mkTagBlock('任务')
+  assert.equal(declareField(tag, def.id), true, '标签的成员会继承它，这条声明有获得方')
 })
 
 test('声明给成员与块自有是两个槽：声明不长自己的行，自己的值不写声明', () => {

@@ -710,7 +710,7 @@ export function queryByIndex(
   index: Index,
   forest: readonly Block[],
   spec: QuerySpec,
-  opts: { anchorId?: string; selfId?: string } = {},
+  opts: { anchorId?: string; selfId?: string; excludeIds?: readonly string[] } = {},
 ): QueryHit[] {
   /**
    * `'$self'` 的解析与纯函数路径**共用同一份**（`resolveSelfSpec`），
@@ -723,7 +723,7 @@ export function queryByIndex(
     refs: refsByIndex(q.where, index),
     tags: tagsByIndex(q.where, index),
     journalDate: firstJournal(q.where),
-    selfId: opts.selfId,
+    ...(opts.excludeIds && opts.excludeIds.length > 0 ? { excludeIds: new Set(opts.excludeIds) } : {}),
   }
   let roots: readonly Block[] = forest
   if (q.scope !== 'all' && opts.anchorId) {

@@ -21,7 +21,7 @@ import {
   canonicalViews,
   childrenRecords,
   cloneSubtree,
-  defaultColumns,
+  defaultColumnsForSource,
   isViewRoot,
   isViewsValue,
   listTableOf,
@@ -33,6 +33,7 @@ import {
   sortListRows,
   sortRecords,
   sourceOf,
+  sourceConflicts,
   viewNameOf,
   visibleRows,
   withListSort,
@@ -102,9 +103,10 @@ test('readViews：逐项校验，坏项只丢这一项（不抛、不连坐）',
 })
 
 test('canonicalViews：只保留 kind 对应的那份子配置（table 不把 board 配置带走）', () => {
-  const views = canonicalViews([
-    { id: 'v', kind: 'table', table: { columns: [{ key: 'title' }] }, board: { groupBy: 'x' }, name: '表' },
-  ])
+  const views = canonicalViews(
+    [{ id: 'v', kind: 'table', table: { columns: [{ key: 'title' }] }, board: { groupBy: 'x' }, name: '表' }],
+    { kind: 'children', blockId: 'n' },
+  )
   assert.equal(views.length, 1)
   assert.equal(views[0]!.board, undefined, 'table 视图不该带着 board 配置')
   assert.deepEqual(views[0]!.table?.columns, [{ key: 'title' }])
@@ -172,10 +174,24 @@ test('viewNameOf：用户改过名用他的，没有就按 kind 给默认名', (
 
 /* ------------------------------------------------------------ 源与记录 */
 
-test('sourceOf：有 `_query` 就是查询源，否则是 children 源', () => {
+test('sourceOf：`_query` ⇒ 查询源；收藏块 ⇒ items 源；否则 children 源', () => {
   const q = mk('q', '', [], { _query: { where: { all: [] } } })
-  assert.deepEqual(sourceOf(q), { kind: 'query', blockId: 'q' })
+  assert.deepEqual(sourceOf(q), { kind: 'query', spec: { where: { all: [] } } })
   assert.deepEqual(sourceOf(mk('n', '普通')), { kind: 'children', blockId: 'n' })
+  // 收藏块（`core/collection-widget`）的源是手选的那一批引用，不是它的子块
+  const fav = { ...mk('f', '收藏'), props: { _type: 'core/collection-widget', _items: ['a', 'b'] } }
+  assert.deepEqual(sourceOf(fav), { kind: 'items', blockId: 'f' })
+})
+
+test('sourceOf：三种源声明互斥（`_query`／收藏块／`_embed` 只许有一个）', () => {
+  const q = mk('q', '', [], { _query: { where: { all: [] } } })
+  assert.equal(sourceConflicts(q), false, '只有一个源 ⇒ 不冲突')
+  const fav = { ...mk('f', '收藏'), props: { _type: 'core/collection-widget', _items: ['a'] } }
+  assert.equal(sourceConflicts(fav), false)
+  // 查询 ＋ 收藏 并存 ⇒ 冲突：`sourceOf` 会悄悄选一个，另一个「改了却不生效」
+  assert.equal(sourceConflicts({ ...fav, props: { ...fav.props, _query: { where: { all: [] } } } }), true)
+  // 露面指针 ＋ 查询 并存 ⇒ 同样冲突
+  assert.equal(sourceConflicts({ ...q, props: { ...q.props, _embed: { block: 'x', view: '' } } }), true)
 })
 
 test('childrenRecords：行＝直接子块，顺序＝children 顺序，容器自己不是一行', () => {
@@ -223,10 +239,10 @@ test('resolveRows：每条命中都是一行（父子同时命中不折叠）；
 
 /* ------------------------------------------------------------ 列 */
 
-test('defaultColumns：看子块实际拥有的属性（只取一次），一个都没有才给四列默认', () => {
+test('defaultColumnsForSource：children 源看子块实际拥有的属性（只取一次），一个都没有才给四列默认', () => {
   const { root, defs } = pageWith5()
   const { kb } = kbOf([root, ...defs])
-  const cols = defaultColumns('root', kb)
+  const cols = defaultColumnsForSource({ kind: 'children', blockId: 'root' }, kb)
   assert.equal(cols[0]!.key, 'title', '第一列永远是标题')
   const keys = cols.map((c) => c.key)
   assert.ok(keys.includes(defs[0]!.id), `子块的属性要进列：${JSON.stringify(keys)}`)
@@ -234,7 +250,7 @@ test('defaultColumns：看子块实际拥有的属性（只取一次），一个
 
   const empty = mk('e', '空容器', [mk('x', '没有属性')])
   const { kb: kb2 } = kbOf([empty])
-  const fallback = defaultColumns('e', kb2).map((c) => c.key)
+  const fallback = defaultColumnsForSource({ kind: 'children', blockId: 'e' }, kb2).map((c) => c.key)
   assert.deepEqual(fallback, ['title', 'tags', 'children', 'modified'], '没有属性 ⇒ title/tags/children/modified')
 })
 
@@ -401,14 +417,19 @@ test('sortListRows：按第 k 列只改显示序、空值最后、相等保持 c
 })
 
 test('canonicalViews：结构映射表只留排序（列是位置，不是配置）；查询源里丢弃', () => {
-  const views = canonicalViews([
-    { id: 'v', kind: 'list-table', list: { sort: { col: 2, dir: 'desc' } }, table: { columns: [{ key: 'title' }] } },
-  ])
+  const views = canonicalViews(
+    [{ id: 'v', kind: 'list-table', listTable: { sort: { col: 2, dir: 'desc' } }, table: { columns: [{ key: 'title' }] } }],
+    { kind: 'children', blockId: 'n' },
+  )
   assert.equal(views.length, 1)
-  assert.deepEqual(views[0]!.list?.sort, { col: 2, dir: 'desc' })
+  assert.deepEqual(views[0]!.listTable?.sort, { col: 2, dir: 'desc' })
   assert.equal(views[0]!.table, undefined, '结构映射表不该带着平表的列配置')
-  assert.equal(canonicalViews([{ id: 'v', kind: 'list-table' }], { kind: 'query', blockId: 'q' }).length, 0, '查询源没有层级可映射')
-  assert.deepEqual(withListSort({ id: 'v', kind: 'list-table' }, undefined).list, undefined, '取消排序＝删掉那一格')
+  assert.equal(
+    canonicalViews([{ id: 'v', kind: 'list-table' }], { kind: 'query', spec: { where: { any: [] } } }).length,
+    0,
+    '查询源没有层级可映射',
+  )
+  assert.deepEqual(withListSort({ id: 'v', kind: 'list-table' }, undefined).listTable, undefined, '取消排序＝删掉那一格')
 })
 
 test('visibleRows：结构映射表激活时整棵子树都不进正文（行与格都在表里）', () => {

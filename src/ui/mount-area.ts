@@ -1,26 +1,58 @@
 /**
- * **块的挂载区**：块底那一栏「引用／同类／提及 ＋ 用户配的查询」，一条 tab 条 ＋ 一个 body。
+ * **块的挂载区**：块底那一栏「引用／同类／提及 ＋ 用户挂的查询」，一条 tab 条 ＋ 一个 body。
  *
  * 三条口径落在这一层：
  *   · **一个编辑器，N 个 loader**：切 tab 只换 `loadPage` 的 roots。编辑器不重建，
  *     所以撤销栈与选区都不丢（重建一次，用户按 ⌘Z 就只能撤到「刚切过 tab」）。
- *   · **tab 不是块**：这一层不建块、不写 `children`。用户栏的增删交给装配层
- *     （`onAddTab` / `onRemoveTab`），因为「写到哪一格」是模型层的事。
- *   · **空 tab 仍在**：栏在、body 里一行说明。空是**状态**不是错误，把栏藏掉
+ *   · **tab 不是块**：`local` 栏自己拥有条件与视图（不建块），`linked` 栏只存
+ *     「指向哪一块 ＋ 哪张视图」，`derived` 栏每次现算。增删交给装配层的命令
+ *     （「写到哪一格」是模型层的事：块宿主写 `_mounts`、日记宿主写设备状态）。
+ *   · **空栏仍在**：栏在、body 里一行说明。空是**状态**不是错误，把栏藏掉
  *     会让用户以为「这块没有引用」，而真相是「还没有人引用它」。
  *
+ * ## 稳定 id
+ *
+ * 每栏有一个稳定 `id`（内置栏 `d-<source>`、用户栏 `t-<hex>`）；数组位只表示顺序。
+ * 激活项／展开栈／视图体都按 `id` 记 —— 用**数组下标**当下标的后果是
+ * 摘掉第一栏之后 active 与展开栈全体漂到别一栏上，而不报错。
+ *
  * 编辑器装配（建实例、订阅、防抖重载、聚焦冻结、离焦补做、事件表）全部在
- * `EditableBlock` 里；这一层只决定**装哪些根**（哪个 tab、展开到哪层、面包屑怎么给）。
+ * `EditableBlock` 里；这一层只决定**装哪些根**（哪一栏、展开到哪层、面包屑怎么给）。
  *
  * ⚠️ 与右槽的分工：右槽的 `backrefsCard` 是**页级派生卡**（读当前对象、跟着它走）。
  *    挂载区是「在这一块下面就地展开」。硬统一会得到两份各自记激活项的 tab 条。
- * ⚠️ 这里不碰命令、不认识浮层：`＋` 只回调装配层。
+ * ⚠️ 这里不碰命令、不认识浮层：`＋`／`×` 只回调装配层。
  */
-import { type Block, type BlockStore, type MountTab, mountTabsOf, canEditMounts, expandContexts, unfoldForContext } from '../core/index.ts'
+import {
+  canEditMounts,
+  derivedSpecOf,
+  displayNameOf,
+  expandContexts,
+  isJournal,
+  mountEntriesOf,
+  readViewSet,
+  resolveBoundView,
+  unfoldForContext,
+  type Block,
+  type BlockStore,
+  type MountEntry,
+  type MountHost,
+  type ViewOwnerStore,
+  type ViewConfig,
+  type QuerySpec,
+} from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t, type MsgId } from '../core/msg.ts'
 import { type BlockEditor, type Run } from '../view/editor.ts'
 import { EditableBlock } from './editable-block.ts'
+
+/** 非大纲那一栏的**视图体**（由装配层造：只有那里有完整依赖） */
+export interface ViewBodyHost {
+  root: HTMLElement
+  mount(): void
+  sync(): void
+  dispose(): void
+}
 
 export interface MountAreaDeps {
   store: BlockStore
@@ -28,6 +60,10 @@ export interface MountAreaDeps {
   write: Run
   /** 读门面：三栏的数据都按 id 取（反链查表、查询走索引、祖先链按 id 现读） */
   kb: KbClient
+  /** 视图配置的唯一接缝（读拥有者/绑定） */
+  owners: ViewOwnerStore
+  /** 日记宿主的那一组（设备状态；由装配层从 prefs 取） */
+  journalMounts: () => readonly MountEntry[]
   /** 宿主块（＝这一段段根）。段被换掉/收掉时由装配层丢弃实例 */
   host: () => Block | undefined
   /** 编辑器里的编辑：落盘 */
@@ -44,16 +80,20 @@ export interface MountAreaDeps {
   wire: (editor: BlockEditor, change: (kind: string) => void) => void
   /** 「＋」：由装配层弹一个选择器（本层不知道浮层长什么样） */
   onAddTab?: (hostId: string) => void
-  /** 「×」：摘掉一栏用户 tab（`index` 是**用户栏**的序，不是整条 tab 条的序） */
-  onRemoveTab?: (hostId: string, index: number) => void
+  /** 「×」：摘掉一栏（`tabId` 是**稳定 id**，不是数组下标） */
+  onRemoveTab?: (host: MountHost, tabId: string) => void
+  /**
+   * 这一栏非大纲时用的视图体（local／linked 栏可以有表格等看法）。
+   *
+   * 返回 `null` ⇒ 这一栏画大纲。由装配层造，因为「求值的上下文」与「写事务的 source」
+   * 只有那一层答得出来。
+   */
+  createView?: (host: Block, entry: MountEntry) => ViewBodyHost | null
   /**
    * 初始是否展开。日记流里只有今天展开，更早的天是一行摘要（一行 DOM ＋ 不建编辑器）。
    */
   expanded?: boolean
 }
-
-/** 一条 tab 的键：内置栏用 `kind`，用户栏用 `user:<序>` */
-const keyOf = (tab: MountTab, userIndex: number): string => (tab.kind === 'user' ? `user:${userIndex}` : tab.kind)
 
 /** 一栏装载什么：根块 ＋ 每个根行的面包屑（祖先链，不含自己） */
 interface MountRoots {
@@ -61,18 +101,16 @@ interface MountRoots {
   contexts: Map<string, readonly Block[]>
 }
 
-const BUILTIN_LABEL: Record<MountTab['kind'], MsgId | ''> = {
+const BUILTIN_LABEL: Record<'refs' | 'same' | 'mentions', MsgId> = {
   refs: 'ui.mount.refs',
   same: 'ui.mount.same',
   mentions: 'ui.mount.mentions',
-  user: '',
 }
 
-const EMPTY_TEXT: Record<MountTab['kind'], MsgId> = {
-  refs: 'ui.mount.empty.refs',
-  same: 'ui.mount.empty.same',
-  mentions: 'ui.mount.empty.mentions',
-  user: 'ui.mount.empty.user',
+const EMPTY_TEXT: Record<MountEntry['kind'], MsgId> = {
+  derived: 'ui.mount.empty.user',
+  local: 'ui.mount.empty.user',
+  linked: 'ui.mount.empty.user',
 }
 
 export class MountArea {
@@ -82,6 +120,8 @@ export class MountArea {
   private readonly tabsEl: HTMLElement
   private readonly bodyEl: HTMLElement
   private readonly editorEl: HTMLElement
+  /** 非大纲那一栏的视图体槽 */
+  private readonly viewEl: HTMLElement
   private readonly emptyEl: HTMLElement
   /** 折叠时那一行摘要（只有「引用 N」——同类／提及的计数要现算，折叠时不值得算） */
   private readonly summaryEl: HTMLButtonElement
@@ -90,19 +130,25 @@ export class MountArea {
    * 只该有一个编辑器），建了就一直复用（切 tab 不重建 ⇒ 撤销栈与选区都不丢）。
    */
   private readonly block: EditableBlock
-  private tabs: MountTab[] = []
-  /** 当前激活那一条的键；找不到（栏被摘掉了）就回落到第一条 */
+  private entries: MountEntry[] = []
+  /** 当前激活那一栏的 **id**；找不到（栏被摘掉了）就回落到第一栏 */
   private active = ''
   private open: boolean
   /**
-   * 每个 tab 的**上下文展开栈**（祖先 id）。视图状态，不落盘。
-   * 每个 tab 各记各的：在「引用」里展开的上下文不会突然出现在「同类」。
+   * 每栏的**上下文展开栈**（祖先 id），按 `id` 记。视图状态，不落盘。
+   * 每栏各记各的：在「引用」里展开的上下文不会突然出现在「同类」。
    */
   private readonly expandedByTab = new Map<string, Set<string>>()
   /** 上次装载的「上下文根 → 覆盖的命中行」；收起一层时用它算滚回哪 */
   private covers: ReadonlyMap<string, readonly string[]> = new Map()
   /** 这一段是谁；段落换人时清空展开状态 */
   private hostId = ''
+  /** 当前这一栏的视图体（非大纲时才有） */
+  private view: ViewBodyHost | null = null
+  /** 视图体对应哪一栏的哪张视图（变了才重建） */
+  private viewKey = ''
+  /** 上一次读到的那组条目的串（`refreshEntries` 用它判「要不要重排」） */
+  private entrySig = ''
 
   constructor(deps: MountAreaDeps) {
     this.deps = deps
@@ -127,6 +173,10 @@ export class MountArea {
     this.editorEl.className = 'mount-editor'
     this.editorEl.spellcheck = false
 
+    this.viewEl = document.createElement('div')
+    this.viewEl.className = 'mount-view'
+    this.viewEl.hidden = true
+
     this.emptyEl = document.createElement('p')
     this.emptyEl.className = 'mount-empty'
     this.emptyEl.hidden = true
@@ -139,7 +189,7 @@ export class MountArea {
       debounceMs: 200,
       // 冻结范围＝整片挂载区：焦点落在 tab 按钮上时，重排 tab 条同样会把正被按的那颗换掉
       area: this.root,
-      // 装载动作＝重画整片（tab 出现条件读维度存在性，内容变了栏可能增减）
+      // 装载动作＝重画整片（栏出现条件读维度存在性，内容变了栏可能增减）
       load: () => this.render(),
       wire: (editor, change) => deps.wire(editor, change),
       onChange: (kind) => deps.onChange(kind),
@@ -149,20 +199,38 @@ export class MountArea {
       onContextBack: (rootId) => this.collapse(rootId),
     })
 
-    this.bodyEl.append(this.emptyEl, this.block.root)
+    this.bodyEl.append(this.emptyEl, this.block.root, this.viewEl)
     this.root.append(this.summaryEl, this.tabsEl, this.bodyEl)
 
     this.render()
   }
 
-  /** 编辑器实例（折叠／空 tab 时可能还没有）。装配层用它判「活动编辑器」 */
+  /** 编辑器实例（折叠／空栏时可能还没有）。装配层用它判「活动编辑器」 */
   get blockEditor(): BlockEditor | null {
     return this.block.ed
   }
 
   /** 摘掉实例（装配层在段根换人时调）：退订 store、卸事件，别让游离容器继续被重画 */
   dispose(): void {
+    this.detachView()
     this.block.dispose()
+  }
+
+  /**
+   * **栏集合可能变了**（加/摘/改名/换视图/设备状态里的日记栏）：变了才重排。
+   *
+   * 为什么不直接 `render()`：那是整条 tab 条重建，会把焦点从用户正按的那颗按钮上
+   * 抽走（而这几件事多半正是点击触发的）。判据是**这一组条目本身**的串 ——
+   * 它比「上一次是谁在读」更接近事实：内容没变就不该动 DOM。
+   */
+  refreshEntries(): void {
+    const host = this.deps.host()
+    if (!host) return
+    const next = mountEntriesOf(host, this.deps.kb.roots(), { journalMounts: this.deps.journalMounts() })
+    const sig = JSON.stringify(next)
+    if (sig === this.entrySig) return
+    this.entrySig = sig
+    this.render()
   }
 
   /** 展开/收起（视图状态，不进库） */
@@ -170,6 +238,13 @@ export class MountArea {
     if (this.open === open) return
     this.open = open
     this.render()
+  }
+
+  /** 这一段的宿主（`MountHost` 是「这一栏写哪」的唯一判别器） */
+  private mountHost(): MountHost {
+    const host = this.deps.host()
+    if (!host) return { kind: 'block', blockId: '' }
+    return isJournal(host) ? { kind: 'journal' } : { kind: 'block', blockId: host.id }
   }
 
   render(focusHint?: string): void {
@@ -185,11 +260,12 @@ export class MountArea {
       this.covers = new Map()
     }
     this.root.hidden = false
-    this.tabs = mountTabsOf(host, this.deps.kb.roots())
+    this.entries = mountEntriesOf(host, this.deps.kb.roots(), { journalMounts: this.deps.journalMounts() })
+    this.entrySig = JSON.stringify(this.entries)
 
-    // 栏可能被摘掉：激活项不在了就回落到第一条，而不是留一个空 body
-    if (!this.tabs.some((tab, i) => keyOf(tab, this.userIndexAt(i)) === this.active)) this.active = this.tabs[0] ? keyOf(this.tabs[0], 0) : ''
-    const activeAt = this.activeIndex()
+    // 栏可能被摘掉：激活项不在了就回落到第一栏，而不是留一个空 body
+    if (!this.entries.some((e) => e.id === this.active)) this.active = this.entries[0]?.id ?? ''
+    const activeAt = this.entries.findIndex((e) => e.id === this.active)
 
     this.root.dataset.open = this.open ? '1' : '0'
     this.summaryEl.hidden = this.open
@@ -208,60 +284,45 @@ export class MountArea {
       this.showEmpty(t('ui.mount.empty.user'))
       return
     }
-    this.load(host, this.tabs[activeAt]!, focusHint)
+    this.load(host, this.entries[activeAt]!, focusHint)
   }
 
   /* ------------------------------------------------------------ tab 条 */
 
-  private userIndexAt(i: number): number {
-    // 用户栏的序＝它在 `_mounts` 数组里的位置；内置栏在前，所以「前面有几个 user」
-    let n = -1
-    for (let k = 0; k <= i; k++) if (this.tabs[k]!.kind === 'user') n++
-    return n
-  }
-
-  private activeIndex(): number {
-    return this.tabs.findIndex((tab, i) => keyOf(tab, this.userIndexAt(i)) === this.active)
-  }
-
   private renderTabs(host: Block, activeAt: number): void {
     this.tabsEl.textContent = ''
-    this.tabs.forEach((tab, i) => {
-      const userIndex = this.userIndexAt(i)
+    const hostRef = this.mountHost()
+    this.entries.forEach((entry, i) => {
       const wrap = document.createElement('div')
       wrap.className = 'mount-tabwrap'
-      wrap.dataset.tab = keyOf(tab, userIndex)
-      wrap.dataset.kind = tab.kind
+      wrap.dataset.tab = entry.id
+      wrap.dataset.kind = entry.kind
 
       const btn = document.createElement('button')
       btn.type = 'button'
       btn.className = 'mount-tab'
       btn.setAttribute('role', 'tab')
-      btn.dataset.tab = keyOf(tab, userIndex)
-      btn.textContent = tab.kind === 'user' ? (tab.label ?? '') : t(BUILTIN_LABEL[tab.kind] as MsgId)
-      btn.addEventListener('click', () => this.activate(keyOf(tab, userIndex)))
+      btn.dataset.tab = entry.id
+      btn.textContent = this.labelOf(entry)
+      btn.addEventListener('click', () => this.activate(entry.id))
       wrap.appendChild(btn)
 
-      // 内置三栏不可摘：它们不落盘，摘了也没有「摘掉」的落点；用户栏才有 ×
-      if (tab.kind === 'user' && this.deps.onRemoveTab) {
+      // 内置三栏不可摘：它们不落盘，摘了也没有「摘掉」的落点；local／linked 才有 ×
+      if ((entry.kind === 'local' || entry.kind === 'linked') && this.deps.onRemoveTab) {
         const x = document.createElement('button')
         x.type = 'button'
         x.className = 'mount-x'
         x.textContent = '×'
         x.title = t('ui.mount.remove')
-        x.dataset.tab = keyOf(tab, userIndex)
+        x.dataset.tab = entry.id
         x.addEventListener('click', (e) => {
           e.stopPropagation()
-          this.deps.onRemoveTab?.(host.id, userIndex)
-          /**
-           * 用户栏的下标是数组位：摘掉一栏之后，`user:1` 会变成另一栏。
-           * 展开栈按 tab 键记账，键全都会漂 ⇒ 整批清掉，宁可从收起态重来。
-           */
-          this.expandedByTab.clear()
-          this.covers = new Map()
+          this.deps.onRemoveTab?.(hostRef, entry.id)
           /**
            * 当场重画：焦点在这颗 × 上，而 store 订阅在「焦点在本视图里」时会**跳过**
            * （那是「打字时别把行抽走」的保护）。不补这一次，用户会看到「点了 × 没反应」。
+           *
+           * ⚠️ 不再整批清展开栈：键是**稳定 id**，摘掉一栏之后其余栏的键一个都不漂。
            */
           this.render()
         })
@@ -277,7 +338,7 @@ export class MountArea {
       add.type = 'button'
       add.className = 'mount-add'
       add.textContent = '＋'
-      add.title = t('ui.mount.add')
+      add.title = t('ui.mount.addMenu')
       add.addEventListener('click', () => this.deps.onAddTab?.(host.id))
       this.tabsEl.appendChild(add)
     }
@@ -292,27 +353,47 @@ export class MountArea {
     this.tabsEl.appendChild(collapse)
   }
 
-  private activate(key: string): void {
-    if (this.active === key) return
-    this.active = key
+  /**
+   * 一栏的 tab 文案。
+   *
+   * `linked` 栏缺省**叫目标的名字**（改了目标名就跟着变）—— 它只是一根指针，
+   * 自己不该有第二个名字；用户想改名才写 `label` 覆盖。
+   */
+  private labelOf(entry: MountEntry): string {
+    if (entry.kind === 'derived') return t(BUILTIN_LABEL[entry.source])
+    if (entry.kind === 'local') return entry.label
+    if (entry.label !== undefined && entry.label.trim() !== '') return entry.label
+    const target = this.deps.kb.get(entry.block)
+    if (!target) return t('ui.mount.dangling')
+    const name = displayNameOf(target).trim()
+    return name === '' ? t('ui.query.untitled') : name
+  }
+
+  private activate(id: string): void {
+    if (this.active === id) return
+    this.active = id
     const host = this.deps.host()
-    if (host) this.renderTabs(host, this.activeIndex())
-    if (host) {
-      const at = this.activeIndex()
-      if (at >= 0) this.load(host, this.tabs[at]!)
-    }
+    if (host) this.renderTabs(host, this.entries.findIndex((e) => e.id === this.active))
+    const entry = this.entries.find((e) => e.id === this.active)
+    if (host && entry) this.load(host, entry)
   }
 
   /* ------------------------------------------------------------ body */
 
-  private load(host: Block, tab: MountTab, focusHint?: string): void {
-    const base = this.rootsFor(host, tab)
-    const plan = expandContexts(base, this.expandedFor(this.active), (id) => this.deps.kb.pathOf(id), focusHint)
+  private load(host: Block, entry: MountEntry, focusHint?: string): void {
+    const view = this.viewOf(entry)
+    if (view) {
+      this.showView(host, entry, view)
+      return
+    }
+    this.detachView()
+    const base = this.rootsFor(host, entry)
+    const plan = expandContexts(base, this.expandedFor(entry.id), (id) => this.deps.kb.pathOf(id), focusHint)
     // 过期的展开 id 当场剪掉：下次再出现同 id 时不该「自己又展开」
-    this.expandedByTab.set(this.active, plan.expanded)
+    this.expandedByTab.set(entry.id, plan.expanded)
     this.covers = plan.covers
     if (plan.roots.length === 0) {
-      this.showEmpty(t(EMPTY_TEXT[tab.kind]))
+      this.showEmpty(t(EMPTY_TEXT[entry.kind]))
       // 空结果也保留这份视图的折叠态：它记的是「哪些行收着」，不是「这次有几行」
       this.block.ed?.loadPage({ roots: [], folded: this.block.ed.doc.folded })
       return
@@ -326,12 +407,79 @@ export class MountArea {
     if (plan.focusId) ed.reveal(plan.focusId)
   }
 
-  /** 当前 tab 的展开栈（懒建；每个 tab 一份） */
-  private expandedFor(key: string): Set<string> {
-    let set = this.expandedByTab.get(key)
+  /**
+   * 这一栏**现在选的是哪张视图**；`null` ＝ 大纲。
+   *
+   * `derived` 栏永远大纲（它没有配置——配置是「能不能编辑」的前提）。
+   */
+  private viewOf(entry: MountEntry): ViewConfig | null {
+    if (entry.kind === 'derived') return null
+    const hostRef = this.mountHost()
+    if (entry.kind === 'local') {
+      const data = this.deps.owners.read({ kind: 'tab', host: hostRef, tabId: entry.id })
+      return data ? readViewSet(data).active : null
+    }
+    const target = this.deps.owners.readBinding({ kind: 'linked-tab', host: hostRef, tabId: entry.id })
+    if (!target) return null
+    const data = this.deps.owners.read(target.owner)
+    if (!data) return null
+    return resolveBoundView(target, data).view
+  }
+
+  private showView(host: Block, entry: MountEntry, view: ViewConfig): void {
+    /**
+     * 大纲的岛根要**从文档里摘掉**，不能 dispose：
+     * `EditableBlock.dispose()` 是终态（退订＋卸事件），而摘掉只是为了让同一块
+     * 不在这一屏出现两份 `data-block-id`。切回大纲时再挂回去，撤销栈还在。
+     */
+    this.block.root.remove()
+    this.editorEl.hidden = true
+    this.emptyEl.hidden = true
+    this.viewEl.hidden = false
+    const key = `${entry.id}:${view.id}`
+    if (this.viewKey !== key) {
+      this.detachView()
+      const made = this.deps.createView?.(host, entry) ?? null
+      this.viewKey = key
+      this.view = made
+      if (made) {
+        this.viewEl.replaceChildren(made.root)
+        made.mount()
+        return
+      }
+    } else {
+      this.view?.sync()
+      return
+    }
+    // 装配层没给视图体（这一档还没做渲染器）⇒ 给一句实话而不是空屏
+    if (!this.view) {
+      this.viewEl.replaceChildren()
+      const p = document.createElement('p')
+      p.className = 'tv-unsupported'
+      p.textContent = t('ui.view.unsupported')
+      this.viewEl.appendChild(p)
+    }
+  }
+
+  private detachView(): void {
+    if (this.view) {
+      this.view.dispose()
+      this.view.root.remove()
+    }
+    this.view = null
+    this.viewKey = ''
+    this.viewEl.hidden = true
+    this.viewEl.replaceChildren()
+    // 摘掉视图体之后把大纲的岛根挂回去（编辑器实例一直还在）
+    if (this.block.root.parentElement !== this.bodyEl) this.bodyEl.insertBefore(this.block.root, this.viewEl)
+  }
+
+  /** 当前栏的展开栈（懒建；每栏一份，按稳定 id 记） */
+  private expandedFor(id: string): Set<string> {
+    let set = this.expandedByTab.get(id)
     if (!set) {
       set = new Set()
-      this.expandedByTab.set(key, set)
+      this.expandedByTab.set(id, set)
     }
     return set
   }
@@ -354,65 +502,76 @@ export class MountArea {
   }
 
   private showEmpty(text: string): void {
+    this.detachView()
     this.emptyEl.textContent = text
     this.emptyEl.hidden = false
     this.editorEl.hidden = true
     this.editorEl.dataset.empty = '1'
   }
 
+  /* ------------------------------------------------------------ 数据 */
+
   /**
    * 一栏的 roots（＋ 每个装载根的面包屑）。
    *
-   * 「引用」走索引的入向边表（与反链 footer 同一条数），其余走查询——
-   * 两条路都必须**剔除宿主自己**：它是位置的性质，不是条件的性质。
-   */
-  private rootsFor(host: Block, tab: MountTab): MountRoots {
-    if (tab.kind === 'refs') return this.refRoots(host)
-    /**
-     * `$self` 的解析**不在这里**：查询求值的第一步就按 `selfId` 解析（两条求值路径共用那一份）。
-     * 这里只声明「谁是宿主」，免得同一份条件在 UI 与 core 各解释一遍。
-     */
-    const hits = this.deps.kb.query(tab.spec, { selfId: host.id })
-    return this.topLevel(
-      hits.map((h) => ({
-        id: h.blockId,
-        // `QueryHit.path` 已经是「根 → 父」（不含自己），正是面包屑要的那一段
-        path: h.path.map((id) => this.deps.store.find(id)).filter((b): b is Block => b !== undefined),
-      })),
-    )
-  }
-
-  private refRoots(host: Block): MountRoots {
-    const sources = this.deps.kb
-      .backrefBlocksOf(host.id)
-      .filter((s) => s.blockId !== host.id)
-      // 路径只取一次：topLevel 判「祖先也在结果里」和面包屑用的是同一份
-      .map((s) => ({ id: s.blockId, path: this.deps.kb.pathOf(s.blockId).slice(0, -1) }))
-    return this.topLevel(sources)
-  }
-
-  /**
-   * 只留**最外层**命中：祖先也在结果里时，那一块会被祖先的子树渲染出来，
-   * 再单列一次就是同一个块出现两遍。顺序沿用命中顺序（查询的「冻结」需要它稳定）。
+   * 三种栏的**上下文**各不相同，写在这里是唯一的落点：
+   *   · `derived`（引用／同类／提及）问的是「谁跟我有关」⇒ **不给子树锚点**：
+   *     那些块本来就在别处，把它们关进宿主子树会让这一栏恒空；
+   *   · `local`／`linked` 是「这一块下面的…」⇒ 锚点＝宿主块（与中心查询块同一条口径：
+   *     它的锚点也是它所在的容器）。
    *
-   * `path` 是**祖先链（不含自己）**：它同时是「最外层」的判据与根行的面包屑。
+   * ⚠️ `excludeIds` 与 `selfId` **分开给**：`selfId` 只负责解析 `'$self'`，
+   *    剔除走 `excludeIds`。两者曾经是同一个字段，于是「想解析它，又不得不排除它」
+   *    这种形状无法表达。
    */
-  private topLevel(hits: readonly { id: string; path: readonly Block[] }[]): MountRoots {
-    const ids = new Set(hits.map((h) => h.id))
+  private rootsFor(host: Block, entry: MountEntry): MountRoots {
+    if (entry.kind === 'derived') {
+      const spec = derivedSpecOf(host, this.deps.kb.roots(), entry.source)
+      if (!spec) return { roots: [], contexts: new Map() }
+      const hits = this.deps.kb.query(spec, { selfId: host.id, excludeIds: [host.id] })
+      return this.topLevel(hits)
+    }
+    const hostRef = this.mountHost()
+    const excludeIds = [host.id]
+    if (entry.kind === 'linked') excludeIds.push(entry.block)
+    const spec = this.specFor(hostRef, entry)
+    if (!spec) return { roots: [], contexts: new Map() }
+    const hits = this.deps.kb.query(spec, { selfId: host.id, scopeId: host.id, excludeIds })
+    return this.topLevel(hits)
+  }
+
+  /** 一栏的条件：`local` 自己带着；`linked` 读目标块的 `_query`（**一份条件**） */
+  private specFor(hostRef: MountHost, entry: MountEntry): QuerySpec | null {
+    if (entry.kind === 'local') return entry.spec
+    const target = this.deps.owners.readBinding({ kind: 'linked-tab', host: hostRef, tabId: entry.id })
+    if (!target) return null
+    return this.deps.owners.read(target.owner)?.query ?? null
+  }
+
+  private topLevel(hits: readonly { blockId: string; path: string[] }[]): MountRoots {
+    const ids = new Set(hits.map((h) => h.blockId))
     const roots: Block[] = []
     const contexts = new Map<string, readonly Block[]>()
     for (const h of hits) {
-      if (h.path.some((p) => ids.has(p.id))) continue
-      const live = this.deps.store.find(h.id)
+      if (h.path.some((id) => ids.has(id))) continue
+      const live = this.deps.store.find(h.blockId)
       if (!live) continue
       roots.push(live)
       // 顶层根没有祖先 ⇒ 不画面包屑（它自己那一行已经有名字了）
-      if (h.path.length > 0) contexts.set(h.id, h.path)
+      if (h.path.length > 0) {
+        contexts.set(
+          h.blockId,
+          h.path.map((id) => this.deps.store.find(id)).filter((b): b is Block => b !== undefined),
+        )
+      }
     }
     return { roots, contexts }
   }
 
+  /** 「引用 N」：与展开态那一栏同一条口径（入向边表，剔除宿主自己） */
   private countRefs(host: Block): number {
-    return this.refRoots(host).roots.length
+    const ids = new Set<string>()
+    for (const s of this.deps.kb.backrefBlocksOf(host.id)) if (s.blockId !== host.id) ids.add(s.blockId)
+    return ids.size
   }
 }

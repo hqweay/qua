@@ -58,7 +58,8 @@ import {
   uuidv7Hex,
   visibleRows,
   VIEWS_PROP,
-  ACTIVE_VIEW_PROP,
+  canonicalViews,
+  upsertView,
   writeBlockContent,
   walkForest,
   gutterFieldsOf,
@@ -2498,8 +2499,12 @@ export class BlockEditor {
   /**
    * 在 `id` 下面插入一次**露面**（镜像／大纲表格），返回露面块的 id。
    *
-   * 看法写在**露面块自己**的 `_views`／`_activeView` 上（见 `core/embed.ts`）：
-   * 在别处把它转成表格，源块一个字节都不动。
+   * 露面块只存**一根指针**（`_embed = { block, view }`）—— 看法住在**源块**的命名视图上。
+   * 曾经露面块自己带一份 `_views`，于是同一批块在正文、面板、中心各露一次就得到三份
+   * 各自演化的列与排序。现在两种需求都有唯一出口：
+   *   · `mirror` ⇒ `view: ''`（跟随源块自己的默认看法，源改默认这里跟着改）；
+   *   · `table`  ⇒ 在源块上**建一张命名视图**并指向它（要给这一次露面一个特别看法，
+   *     做法就是在源上建一张视图，而不是在露面块上另存一份）。
    */
   insertEmbedAfter(id: string, targetId: string, view: 'mirror' | 'table' = 'mirror'): string | null {
     /**
@@ -2507,14 +2512,22 @@ export class BlockEditor {
      * 再放一份这一块的镜像」。目标是自己不等于「露面指向自己」：露面块的 id 是新发的，
      * 自指只可能来自坏数据（由 `resolveEmbed` 的 `self` 态兜）。
      */
-    const viewId = view === 'table' ? `v-${uuidv7Hex().slice(0, 12)}` : ''
-    return this.insertTypedAfter(id, EMBED_TYPE, (b) => {
-      b.props = { ...(b.props ?? {}), [EMBED_PROP]: { block: targetId } }
-      if (viewId) {
-        b.props[VIEWS_PROP] = [{ id: viewId, kind: 'list-table' }]
-        b.props[ACTIVE_VIEW_PROP] = viewId
-      }
-    })
+    const viewId = view === 'table' ? `v-${uuidv7Hex().slice(0, 16)}` : ''
+    return this.insertTypedAfter(
+      id,
+      EMBED_TYPE,
+      (b) => {
+        b.props = { ...(b.props ?? {}), [EMBED_PROP]: { block: targetId, view: viewId } }
+      },
+      // 建的那张视图写在**源**上，与插露面块同一笔（不留「有指针没视图」的半截）
+      viewId
+        ? (tx) =>
+            tx.patch(targetId, (t) => {
+              const views = canonicalViews(t.props?.[VIEWS_PROP], { kind: 'children', blockId: targetId })
+              t.props = { ...(t.props ?? {}), [VIEWS_PROP]: upsertView(views, { id: viewId, kind: 'list-table' }) }
+            })
+        : undefined,
+    )
   }
 
   /**
@@ -2531,19 +2544,21 @@ export class BlockEditor {
     if (!hit || hit.run.t !== 'ref' || !hit.run.to) return null
     const hostId = hit.block.id
     const targetId = hit.run.to
-    const viewId = view === 'table' ? `v-${uuidv7Hex().slice(0, 12)}` : ''
+    const viewId = view === 'table' ? `v-${uuidv7Hex().slice(0, 16)}` : ''
     return this.insertTypedAfter(
       hostId,
       EMBED_TYPE,
       (b) => {
-        b.props = { ...(b.props ?? {}), [EMBED_PROP]: { block: targetId } }
-        if (viewId) {
-          b.props[VIEWS_PROP] = [{ id: viewId, kind: 'list-table' }]
-          b.props[ACTIVE_VIEW_PROP] = viewId
-        }
+        b.props = { ...(b.props ?? {}), [EMBED_PROP]: { block: targetId, view: viewId } }
       },
       (tx) => {
         tx.patch(hostId, (b) => writeBlockContent(b, removeRunById(b.content, atomId)))
+        if (viewId) {
+          tx.patch(targetId, (t) => {
+            const views = canonicalViews(t.props?.[VIEWS_PROP], { kind: 'children', blockId: targetId })
+            t.props = { ...(t.props ?? {}), [VIEWS_PROP]: upsertView(views, { id: viewId, kind: 'list-table' }) }
+          })
+        }
       },
     )
   }
