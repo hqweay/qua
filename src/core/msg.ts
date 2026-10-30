@@ -211,6 +211,8 @@ export const MSG = {
   'ui.props.choice.scopeExceptSuffix': ' · 除 {tags}',
   'ui.props.choice.scopeNoTags': '（还没选标签）',
   'ui.props.choice.scopeNoTagsSuffix': ' · （还没选标签）',
+  'ui.props.choice.pruneScopes': '清理失效标签',
+  'ui.props.choice.pruneScopesTitle': '把已经删掉的来源标签从这条作用域里摘掉',
   'ui.props.choice.scopeInvalid': '选项的可见范围不合法',
   'ui.props.choice.title': '选项',
   'ui.props.choice.empty': '这个属性还没有选项',

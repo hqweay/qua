@@ -505,7 +505,7 @@ export class PropertiesPanel {
      * 现在 own 的行、按钮、表单在同一个位置，声明段另起一段（`buildDeclared`）。
      */
     this.els.body.appendChild(this.els.add)
-    if (this.formOpen === 'own') this.els.body.appendChild(this.buildForm(target))
+    if (this.formOpen === 'own') this.els.body.appendChild(this.buildForm(target, labels))
 
     /**
      * **标签属性**（标签）／**字段声明**（页）：只有页/标签有。
@@ -514,7 +514,7 @@ export class PropertiesPanel {
      * 页/标签上点这一段自己的入口做的正是**声明**，所以不画这一段，那次点击就没有可见结果。
      */
     if (hasList(target, 'page') || hasList(target, 'tag')) {
-      this.els.body.appendChild(this.buildDeclared(target))
+      this.els.body.appendChild(this.buildDeclared(target, labels))
     }
 
     /**
@@ -577,7 +577,7 @@ export class PropertiesPanel {
    *
    * ⚠️ 解除声明**不动值**：成员块上已有的值落回「本块自有」，重新声明后自动回来。
    */
-  private buildDeclared(target: Block): HTMLElement {
+  private buildDeclared(target: Block, labels: ReadonlyMap<string, string>): HTMLElement {
     const isTag = hasList(target, 'tag')
     const section = document.createElement('section')
     // `prop-declared` 是既有断言的选择器锚点（`.prop-declared [data-declared-prop-id]`），
@@ -613,7 +613,7 @@ export class PropertiesPanel {
       chip.className = 'props-tag'
       chip.dataset.declaredPropId = def.id
       const text = document.createElement('span')
-      text.textContent = `${this.deps.propLabels().get(def.id) ?? (plainText(def.content).trim() || def.id)} · ${t(`ui.props.kind.${propKindOf(def)}`)}`
+      text.textContent = `${labels.get(def.id) ?? (plainText(def.content).trim() || def.id)} · ${t(`ui.props.kind.${propKindOf(def)}`)}`
       /**
        * `select` 的一条声明带「选项」入口：选项是定义块的子块，而标签视角只该看
        * 「对本标签可见」的那几条。**就地展开**在清单下面 —— 再开一层抽屉会让
@@ -666,7 +666,7 @@ export class PropertiesPanel {
     })
     section.appendChild(add)
 
-    if (this.formOpen === 'declared') section.appendChild(this.buildDeclareForm(target))
+    if (this.formOpen === 'declared') section.appendChild(this.buildDeclareForm(target, labels))
     return section
   }
 
@@ -827,8 +827,8 @@ export class PropertiesPanel {
    *    全库一份，而「用这个」只吃一个 `propId`——选已有属性能配类型是假的。
    *    所以两件事分两行画：第一行选/复用，第二行（只在「新建」时出现）才是名字＋类型。
    */
-  private buildForm(target: Block): HTMLElement {
-    return this.buildAddForm(target, {
+  private buildForm(target: Block, labels: ReadonlyMap<string, string>): HTMLElement {
+    return this.buildAddForm(target, labels, {
       slot: 'own',
       className: 'props-form props-form--own',
       pick: t('ui.props.pick'),
@@ -844,9 +844,9 @@ export class PropertiesPanel {
    * 与 `buildForm` 的差别是「挂到哪个槽」、`slot` 的去重口径和文案；形状完全共用一份 ——
    * 两处各写一份表单迟早会长出两种键盘行为（Enter 提交 / Esc 取消 / 新建哨兵）。
    */
-  private buildDeclareForm(target: Block): HTMLElement {
+  private buildDeclareForm(target: Block, labels: ReadonlyMap<string, string>): HTMLElement {
     const isTag = hasList(target, 'tag')
-    return this.buildAddForm(target, {
+    return this.buildAddForm(target, labels, {
       slot: 'declared',
       className: 'props-form props-form--declared',
       pick: t(isTag ? 'ui.props.pickTagProp' : 'ui.props.pickPageField'),
@@ -868,6 +868,7 @@ export class PropertiesPanel {
    */
   private buildAddForm(
     target: Block,
+    labels: ReadonlyMap<string, string>,
     opts: {
       /** 这个表单写哪个槽：own ＝ `_ownProps`，declared ＝ `_fieldDefs` */
       slot: 'own' | 'declared'
@@ -906,7 +907,6 @@ export class PropertiesPanel {
      * 用户分不清「库里没有这条属性」与「本块已经有了」。
      */
     const defs = this.deps.defs()
-    const labels = this.deps.propLabels()
     const declarations = this.deps.fieldDeclarations()
     const rows = new Set(this.deps.rows(target).map((r) => r.propId))
     const declared = hasList(target, 'page') || hasList(target, 'tag') ? new Set(declaredFieldIds(target)) : new Set<string>()

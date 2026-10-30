@@ -15,6 +15,7 @@ import type { Block, ViewRecord } from '../src/core/index.ts'
 import {
   choiceById,
   choiceDisplayLabel,
+  choiceLookupOf,
   choiceScopeOf,
   choiceVisible,
   choicesFor,
@@ -273,6 +274,41 @@ test('choicesFor 与 FieldRow.choices 是同一份读法（属性面板与表格
     choicesFor(block, 'def', forest).map((c) => c.id),
     '同一条属性、同一个块：两条读路径给出同一组选项',
   )
+})
+
+test('软删的标签不提供作用域：only [已删标签] 不可见；except 也失效；恢复后回来', () => {
+  const cOnly = choice('c-only', '仅 A', { mode: 'only', tags: ['tagA'] })
+  const cExcept = choice('c-except', '除 A', { mode: 'except', tags: ['tagA'] })
+  const def = selectDef('def', [cOnly, cExcept])
+  const tagA = tagBlock('tagA', '任务')
+  tagA.props = { ...tagA.props, _deletedAt: 5 }
+  // 块上仍留着标签 id（摘标签不自动清值）；`_ownProps` 保证这一行还在
+  const block = blk('b', '一块', { _tags: ['tagA'], _ownProps: ['def'] })
+  const forest = [def, tagA, block]
+
+  const rowOf = (): Block[] => fieldRows(block, forest).find((r) => r.propId === 'def')!.choices ?? []
+  assert.deepEqual(
+    rowOf().map((c) => c.id),
+    ['c-except'],
+    '软删的标签不算作用域：only 不可见，except 也不再排除',
+  )
+
+  delete tagA.props!._deletedAt
+  assert.deepEqual(
+    rowOf().map((c) => c.id),
+    ['c-only'],
+    '标签恢复后：only 可见、except 重新排除',
+  )
+})
+
+test('choiceLookupOf：一趟扫，软删标签的名字仍解析得到（不是短 id）', () => {
+  const goneTag = tagBlock('tagA', '任务')
+  goneTag.props = { ...goneTag.props, _deletedAt: 1 }
+  const goneChoice = choice('c-gone', '旧选项')
+  goneChoice.props = { ...goneChoice.props, _deletedAt: 2 }
+  const look = choiceLookupOf([goneTag, goneChoice])
+  assert.equal(look.tagName('tagA'), '任务', '软删标签的旧名要能显示')
+  assert.equal(look.find('c-gone')?.id, 'c-gone', '软删的选项也要找得到（当前值显示旧名）')
 })
 
 /* ------------------------------------------------------------ 7. 新建定义 */

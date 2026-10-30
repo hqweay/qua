@@ -208,11 +208,20 @@ export function choiceVisible(choice: Block, tagIds: ReadonlySet<string>): boole
   return scope.mode === 'only' ? hit : !hit
 }
 
-/** 一块带着哪些标签 id（**标签页编辑时把自身算进去**：只看自己的选项） */
+/**
+ * 一块带着哪些标签 id（**标签页编辑时把自身算进去**：只看自己的选项）。
+ *
+ * **软删的标签不提供作用域**：块上仍留着它的 id（摘标签不自动清值），但它已经不再
+ * 是一格分类 —— 把它算进 tag 集会让 `only [已删标签]` 的选项继续可见。
+ * 这里拿到的是「含软删」的查找（表格要显示旧名），所以必须自己判一次。
+ */
 function tagIdSetOf(block: Block, tagById: (id: string) => Block | undefined): Set<string> {
   const out = new Set<string>()
-  for (const id of tagIdsOf(block)) if (tagById(id)) out.add(id)
-  if (hasList(block, 'tag')) out.add(block.id)
+  for (const id of tagIdsOf(block)) {
+    const tag = tagById(id)
+    if (tag && !isDeleted(tag)) out.add(id)
+  }
+  if (hasList(block, 'tag') && !isDeleted(block)) out.add(block.id)
   return out
 }
 
@@ -257,14 +266,24 @@ export interface ChoiceLookup {
   tagName: (id: string) => string
 }
 
-/** 从森林建一份查找（一次扫；`find` 含软删的块） */
+/** 从森林建一份查找：**一趟扫完**（`find`／`tagById` 都含软删的块） */
 export function choiceLookupOf(forest: readonly Block[]): ChoiceLookup {
-  const tags = tagsById(forest)
+  const byId = new Map<string, Block>()
+  const tagById = new Map<string, Block>()
+  walkForest(
+    forest,
+    (b) => {
+      byId.set(b.id, b)
+      // 软删的标签也收：它仍可能出现在某个选项的作用域里，名字要显示得出来（不是短 id）
+      if (hasList(b, 'tag')) tagById.set(b.id, b)
+    },
+    { includeDeleted: true },
+  )
   return {
-    find: (id) => choiceById(forest, id),
-    tagById: (id) => tags.get(id),
+    find: (id) => byId.get(id),
+    tagById: (id) => tagById.get(id),
     tagName: (id) => {
-      const tag = tags.get(id)
+      const tag = tagById.get(id)
       return tag ? displayNameOf(tag) : id.slice(-6)
     },
   }

@@ -353,6 +353,31 @@ export class ChoicesEditor {
       }
       box.appendChild(tags)
     }
+
+    /**
+     * **悬空的标签 id**（来源标签已删）不会出现在上面的勾选清单里：用户只能先切回
+     * 全局再切回来才清得掉。给一个显式入口，清掉的是「这一格里的失效引用」，
+     * 不是删标签、也不是把作用域悄悄升成全局。
+     */
+    const scopedTags = scope.mode === 'all' ? [] : scope.tags
+    const dangling = scopedTags.filter((id) => !this.deps.tagById(id))
+    if (dangling.length > 0) {
+      const prune = document.createElement('button')
+      prune.type = 'button'
+      prune.className = 'choice-prune'
+      prune.dataset.choicePrune = '1'
+      prune.textContent = t('ui.props.choice.pruneScopes')
+      prune.title = t('ui.props.choice.pruneScopesTitle')
+      prune.addEventListener('click', () => {
+        const tags = scopedTags.filter((id) => Boolean(this.deps.tagById(id)))
+        this.deps.write.setScope(
+          choice.id,
+          tags.length === 0 && scope.mode === 'except' ? { mode: 'all' } : { mode: scope.mode, tags },
+        )
+        this.render()
+      })
+      box.appendChild(prune)
+    }
     return box
   }
 
