@@ -77,6 +77,8 @@ export interface ViewHostDeps {
   /** `ref` 值的选择器（与属性区同一份） */
   pickRef?: (owner: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect) => void
   refLabel?: (targetId: string) => string
+  /** 标签名解析（`select` 选项显示名里的 `#名`） */
+  tagName?: (id: string) => string
 }
 
 export interface ViewHostEls {
@@ -484,6 +486,7 @@ export class ViewHost {
         cell: this.cell,
         ...(this.deps.pickRef ? { pickRef: this.deps.pickRef } : {}),
         ...(this.deps.refLabel ? { refLabel: this.deps.refLabel } : {}),
+        ...(this.deps.tagName ? { tagName: this.deps.tagName } : {}),
       })
       this.els.table.replaceChildren(this.table.root)
     }

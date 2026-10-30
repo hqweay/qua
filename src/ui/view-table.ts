@@ -15,8 +15,8 @@
  *   `>= 2000` **窗口化**（只挂可视范围 ± 若干行，用上下留白撑出滚动高度）。
  */
 import type { Block, BlockStore, ViewColumn, ViewConfig, ViewRecord } from '../core/index.ts'
-import { clockLabel, displayNameOf, hasValue, propKindOf, propLabel } from '../core/index.ts'
-import type { FieldRow } from '../core/props.ts'
+import { choicesOf, clockLabel, displayNameOf, hasValue, propKindOf, propLabel } from '../core/index.ts'
+import { choiceCells, type FieldRow } from '../core/props.ts'
 import { plainText } from '../core/runs.ts'
 import { t } from '../core/msg.ts'
 import { makeTagChipEl } from '../view/block-dom.ts'
@@ -31,6 +31,7 @@ import {
   defaultWidthOf,
   isSortableColumn,
   sortRecords,
+  sortValueOf,
   visibleColumns,
 } from '../core/view.ts'
 
@@ -58,6 +59,8 @@ export interface ViewTableDeps {
   /** `ref` 值的选择器（属性区那一份复用；省略 ＝ ref 列只读） */
   pickRef?: (owner: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect) => void
   refLabel?: (targetId: string) => string
+  /** 标签名解析（`select` 选项显示名里的 `#名`）；省略时显示短 id */
+  tagName?: (id: string) => string
 }
 
 /** 行高（px）：三档密度；窗口化按它算，所以必须固定 */
@@ -95,6 +98,13 @@ export class ViewTable {
   private winTo = -1
   /** 表头排序状态的形状（点第三次取消，所以要记住当前是升还是降） */
   private sortSig = ''
+  /**
+   * `select` 列的排序键：`propId → (choiceId → 兄弟顺序下标)`。
+   *
+   * 选项值的排序必须是「选项在定义里的顺序」，按 id 字典序排没有意义。
+   * 每次整表重排前算一次：逐次比较里只查表。
+   */
+  private choiceRanks = new Map<string, Map<string, number>>()
   private readonly ro: ResizeObserver | null
   private readonly onScroll = (): void => this.windowIfNeeded()
 
@@ -178,7 +188,8 @@ export class ViewTable {
     this.rowH = ROW_H[view.table?.rowHeight ?? 'cozy'] ?? ROW_H.cozy
     const declared = view.table?.columns ?? []
     this.cols = visibleColumns(declared.length > 0 ? declared : this.deps.defaults())
-    this.rows = sortRecords(this.deps.records(), view.table?.sort)
+    this.rebuildChoiceRanks()
+    this.rows = this.sorted()
     void host
     this.compact = this.root.clientWidth > 0 && this.root.clientWidth < MIN_TABLE_W
     this.virtual = !this.compact && this.rows.length >= VIRTUAL_FROM
@@ -202,7 +213,8 @@ export class ViewTable {
   /** 只按 blockId 修补动过的那几行（内容/属性变化走这条） */
   sync(ids?: readonly string[]): void {
     const view = this.deps.view()
-    const sorted = sortRecords(this.deps.records(), view.table?.sort)
+    this.rebuildChoiceRanks()
+    const sorted = this.sorted()
     const sameSeq =
       sorted.length === this.rows.length && sorted.every((r, i) => r.block.id === this.rows[i]!.block.id)
     if (!sameSeq) {
@@ -255,6 +267,36 @@ export class ViewTable {
 
   private sortSignature(view: ViewConfig): string {
     return JSON.stringify(view.table?.sort ?? [])
+  }
+
+  /** `select` 列的「选项 id → 兄弟顺序」；别的列不进这张表（排序仍走默认取值） */
+  private rebuildChoiceRanks(): void {
+    this.choiceRanks.clear()
+    for (const def of this.deps.defs()) {
+      if (propKindOf(def) !== 'select') continue
+      const ranks = new Map<string, number>()
+      choicesOf(def).forEach((choice, i) => ranks.set(choice.id, i))
+      this.choiceRanks.set(def.id, ranks)
+    }
+  }
+
+  /**
+   * 记录排序：`select` 列按**选项在定义里的顺序**，不按选项 id 的字典序。
+   *
+   * 不在列表里的值（选项被删 / 来自另一个库）按空值处理，排最后 ——
+   * 它没有「第几个」可言，硬给它一个位置会让读者以为那是它的顺序。
+   */
+  private sorted(): ViewRecord[] {
+    const sort = this.deps.view().table?.sort
+    if (this.choiceRanks.size === 0) return sortRecords(this.deps.records(), sort)
+    const ranks = this.choiceRanks
+    return sortRecords(this.deps.records(), sort, (r, key) => {
+      const map = ranks.get(key)
+      if (!map) return sortValueOf(r, key)
+      const value = r.values[key]
+      if (typeof value !== 'string' || value === '') return null
+      return map.get(value) ?? null
+    })
   }
 
   /* ---------------------------------------------------------- 搭 */
@@ -514,10 +556,12 @@ export class ViewTable {
     box.className = 'tv-editor'
     if (!block) return box
     const def = this.deps.defs().find((d) => d.id === propId)
-    const row = cellRow(block, propId, def)
-    const deps = this.deps.pickRef
-      ? { pickRef: this.deps.pickRef, refLabel: this.deps.refLabel ?? ((id: string) => id) }
-      : undefined
+    const row = cellRow(block, propId, def, this.deps.store.blocks)
+    const deps = {
+      pickRef: this.deps.pickRef,
+      refLabel: this.deps.refLabel,
+      tagName: this.deps.tagName,
+    }
     box.appendChild(
       makeCellEditor(
         row,
@@ -566,16 +610,27 @@ export class ViewTable {
 }
 
 /** 一格属性需要的 `FieldRow`（派生不落库；与属性区同一份形状，只少来源与顺序） */
-function cellRow(block: Block, propId: string, def: Block | undefined): FieldRow {
+function cellRow(block: Block, propId: string, def: Block | undefined, forest: readonly Block[]): FieldRow {
   const value = block.props?.[propId]
-  return {
+  const kind = def ? propKindOf(def) : 'text'
+  const row: FieldRow = {
     propId,
     label: def ? propLabel(def) || propId : propId,
-    kind: def ? propKindOf(def) : 'text',
+    kind,
     value,
     filled: hasValue(block, propId),
     def,
     sources: [],
     order: 0,
   }
+  /**
+   * `select` 的两格与 `fieldRows` 走**同一个**派生（`choiceCells`）：
+   * 表格与属性面板各算一套的话，同一条属性会在两处给出不同的可选项。
+   */
+  if (def && kind === 'select') {
+    const { choices, currentChoiceLabel } = choiceCells(block, propId, def, forest)
+    row.choices = choices
+    if (currentChoiceLabel !== undefined) row.currentChoiceLabel = currentChoiceLabel
+  }
+  return row
 }

@@ -57,11 +57,15 @@ const mk = (id: string, text: string, children: Block[] = [], props?: Record<str
 
 /** 一棵「页 + 5 个子块」的小树，子块带属性定义 id 的值 */
 function pageWith5(): { root: Block; defs: Block[] } {
+  // `select` 的值是**选项块 id**（选项＝定义块的子块），不是选项名
+  const todo = mk('c-todo', '待办')
+  const done = mk('c-done', '完成')
   const status = mkPropDef('状态', 'select')
+  status.children = [todo, done]
   const score = mkPropDef('评分', 'number')
   const rows = [
-    mk('r1', '一', [], { [status.id]: 'todo', [score.id]: 3 }),
-    mk('r2', '二', [], { [status.id]: 'done', [score.id]: 10 }),
+    mk('r1', '一', [], { [status.id]: todo.id, [score.id]: 3 }),
+    mk('r2', '二', [], { [status.id]: done.id, [score.id]: 10 }),
     mk('r3', '三', [], {}),
     mk('r4', '四', [], { [score.id]: 2 }),
     mk('r5', '五', [], { [score.id]: 9 }),

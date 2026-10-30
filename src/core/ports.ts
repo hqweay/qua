@@ -18,6 +18,7 @@ import type { BlockEditor } from '../view/editor.ts'
 import type { BindingKind } from './bindings.ts'
 import type { CtxKeys } from './index.ts'
 import type { QuerySpec } from './query.ts'
+import type { ChoiceScope } from './props.ts'
 import type { SecLayout } from './feed.ts'
 
 export type Capability = 'read' | 'write' | 'admin' | 'plugin'
@@ -34,6 +35,17 @@ export type PanelKind = 'context' | 'bindings' | 'shortcuts' | 'model'
  *    用「有没有 page/tag 露面」去猜会让标签块永远加不了自己的属性（真踩过）。
  */
 export type PropTarget = 'own' | 'declared'
+
+/**
+ * 新建属性时对「已有同名同 kind 的定义」怎么办。
+ *
+ * · `reuse`（缺省）——复用那条定义（误复用可以无损改回，误分槽要迁数据）；
+ * · `new`——跳过同名检查，新建**第二个 `propId`**（同名不同义是合法的：
+ *   身份是 id，不是名字）。
+ *
+ * kind 不同时永远不复用：类型住在定义块上、全库一份，复用等于把别人的类型改掉。
+ */
+export type PropCreateMode = 'reuse' | 'new'
 
 /** 命令声明（纯语义）：**没有 `key`／`context`／`host`**——落点归绑定表 */
 export interface CommandDecl {
@@ -177,7 +189,13 @@ export interface App {
    * `target` 必填、不许猜：写自己的值槽与写「成员的声明清单」是**两件事**，
    * 用「这个块有没有 page/tag 露面」去推断会让页/标签永远走不到「给自己加一条」。
    */
-  createPropDef(blockId: string, label: string, kind: string, target: PropTarget): string
+  createPropDef(
+    blockId: string,
+    label: string,
+    kind: string,
+    target: PropTarget,
+    mode?: PropCreateMode,
+  ): string
   /**
    * 把已有定义挂到块上：`own` ＝ 这一块自己的值槽，`declared` ＝ 声明给成员。
    *
@@ -186,6 +204,17 @@ export interface App {
   addProp(blockId: string, propId: string, target: PropTarget): void
   /** 解除声明（**定义块与成员块上的值都不动**） */
   undeclareProp(blockId: string, propId: string): void
+  /* 选项（`select`）：选项＝定义块的直接子块，值＝选项块 id */
+  /** 给定义加一个选项；返回新选项块的 id（空串＝没写）。`scope` 缺省全局 */
+  addChoice(defId: string, label: string, scope?: ChoiceScope): string
+  /** 改选项名（**零值迁移**：值存的是 id） */
+  setChoiceLabel(choiceId: string, label: string): void
+  /** 重排选项：把它移到 `beforeId` 之前（空串＝末尾） */
+  moveChoice(defId: string, choiceId: string, beforeId: string): void
+  /** 写选项的可见范围（三态；形状不认识则不写） */
+  setChoiceScope(choiceId: string, scope: ChoiceScope): void
+  /** 删一个选项（**普通软删**：值保留，恢复后自动解析回来） */
+  deleteChoice(choiceId: string): void
   /* 归属边（属于／包含；一条边存在子块的 `_belongsTo`，任何块都能配） */
   addBelongsTo(childId: string, parentId: string): boolean
   removeBelongsTo(childId: string, parentId: string): void

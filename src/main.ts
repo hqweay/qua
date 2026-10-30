@@ -1896,6 +1896,10 @@ objFieldDeps = {
     const b = kb.get(targetId)
     return b ? blockName(b) : t('ui.props.refMissing', { id: shortId(targetId) })
   },
+  tagName: (id) => {
+    const b = kb.get(id)
+    return b ? blockName(b) : id.slice(-6)
+  },
 }
 
 document.addEventListener('mousedown', (e) => {

@@ -17,11 +17,13 @@
  * ⚠️ `_fieldDefs` 里存的是 **ref（id）**，不是名字：改名零迁移，重名不撞车。
  * ⚠️ 本文件零 DOM：属性面板只消费这里的派生结果，写入通过命令。
  */
-import { hasList, isPropDefBlock, prop, type Block, type BlockProps, type TodoState } from './model.ts'
+import { isDeleted, hasList, isPropDefBlock, prop, type Block, type BlockProps, type TodoState } from './model.ts'
+import { displayNameOf } from './alias.ts'
 import { plainText, textRuns } from './runs.ts'
 import { walkForest } from './walk.ts'
 import { derivedId, uuidv7Hex } from './ids.ts'
-import { resolveTagIds, tagsById } from './tags.ts'
+import { allTags, resolveTagIds, tagsById } from './tags.ts'
+import { t } from './msg.ts'
 
 /**
  * 两个属性值是不是同一件事（**结构相等**：属性值可以是数组／对象，`Object.is` 不够）。
@@ -143,10 +145,223 @@ export function propKindOf(def: Block): PropKind {
   return isPropKind(k) ? k : 'text'
 }
 
-/** 定义的选项目录（select 用；`_choices` 是字符串数组） */
-export function propChoices(def: Block): string[] {
-  const raw = prop<unknown>(def, '_choices')
-  return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string') : []
+/* ------------------------------------------------------------ 选项（select） */
+
+/**
+ * **一个 `select` 属性能选哪些值 ＝ 定义块的直接子块。**
+ *
+ * 没有 `_choiceOf` 之类的新标记：父块是定义 ⇒ 它的直接子块就是选项。
+ * 角色由位置派生，与「外观按类型、chrome 按身份」同一条判据 ——
+ * 另存一份「这是选项」的声明，就会多出一份能与位置不一致的答案。
+ *
+ * 软删的选项不算：它们留在原位等恢复，但此刻不提供选择。
+ */
+export function choicesOf(def: Block): Block[] {
+  return def.children.filter((c) => !isDeleted(c))
+}
+
+/**
+ * 一个选项的可见范围（**唯一的可见性来源**）。
+ *
+ * 三态互斥，所以没有「既 only 又 except」的冲突态，也没有优先级规则。
+ * 缺省/坏值按 `all`：旧数据或手写数据不该让控件整片空掉。
+ */
+export type ChoiceScope = { mode: 'all' } | { mode: 'only'; tags: string[] } | { mode: 'except'; tags: string[] }
+
+/** 选项作用域住在选项块上（系统属性；形状见 `ChoiceScope`） */
+export const CHOICE_SCOPE_PROP = '_choiceScope'
+
+/**
+ * 把一格未知值读成三态作用域；`null` ＝ 形状不认识（命令层据此拒绝写入）。
+ *
+ * 归一化只做两件不承载语义的事：标签去重、`only`/`except` 的空集合退回 `all`
+ * （「空集」与「所有人」是同一个答案，留两种写法就多一条要同步的判据）。
+ * **悬空的标签 id 原样保留**：标签被删不等于作用域失效 —— 静默摘掉会让一个
+ * `only` 悄悄变成「所有人都能选」。
+ */
+export function parseChoiceScope(raw: unknown): ChoiceScope | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const v = raw as { mode?: unknown; tags?: unknown }
+  if (v.mode === 'all') return { mode: 'all' }
+  if (v.mode !== 'only' && v.mode !== 'except') return null
+  if (!Array.isArray(v.tags)) return null
+  const tags = [...new Set(v.tags.filter((x): x is string => typeof x === 'string' && x !== ''))]
+  if (tags.length === 0) return { mode: 'all' }
+  return { mode: v.mode, tags }
+}
+
+/** 选项的可见范围；坏值回落「所有用这个属性的块都能选它」 */
+export function choiceScopeOf(choice: Block): ChoiceScope {
+  return parseChoiceScope(prop<unknown>(choice, CHOICE_SCOPE_PROP)) ?? { mode: 'all' }
+}
+
+/**
+ * 这个选项对一组标签可见吗。
+ *
+ * 多标签取**并集**：`only` 任一命中即可见，`except` 任一命中即隐藏。
+ * 空标签集：`all` 可见、`only` 不可见、`except` 可见（没有要排除的）。
+ */
+export function choiceVisible(choice: Block, tagIds: ReadonlySet<string>): boolean {
+  const scope = choiceScopeOf(choice)
+  if (scope.mode === 'all') return true
+  const hit = scope.tags.some((id) => tagIds.has(id))
+  return scope.mode === 'only' ? hit : !hit
+}
+
+/** 一块带着哪些标签 id（**标签页编辑时把自身算进去**：只看自己的选项） */
+function tagIdSetOf(block: Block, forest: readonly Block[]): Set<string> {
+  const out = new Set(resolveTagIds(block, tagsById(forest)).map((tag) => tag.id))
+  if (hasList(block, 'tag')) out.add(block.id)
+  return out
+}
+
+/**
+ * 这个块在某个属性上**能选**的选项（兄弟顺序）。
+ *
+ * 适用性来自块自己打着的标签（`_fieldDefs` 的声明），可见性来自每个选项的
+ * `_choiceScope`；定义缺失或不是 `select` ⇒ 空数组（控件空态，不是崩）。
+ */
+export function choicesFor(block: Block, propId: string, forest: readonly Block[]): Block[] {
+  const def = findPropDef(forest, propId)
+  if (!def || propKindOf(def) !== 'select') return []
+  const tagIds = tagIdSetOf(block, forest)
+  return choicesOf(def).filter((c) => choiceVisible(c, tagIds))
+}
+
+/**
+ * 按 id 找选项块（**含软删**）：当前值可能指向一个已经不提供选择的选项，
+ * 控件仍要显示它的名字，而不是把值静默清掉。
+ */
+export function choiceById(forest: readonly Block[], choiceId: string): Block | undefined {
+  if (choiceId === '') return undefined
+  let hit: Block | undefined
+  walkForest(
+    forest,
+    (b) => {
+      if (b.id !== choiceId) return
+      hit = b
+      return false
+    },
+    { includeDeleted: true },
+  )
+  return hit
+}
+
+/** 同一属性下的选项是否重名（**同名不是错**：身份是 id，名字只是显示） */
+function duplicateChoiceName(def: Block, choice: Block): boolean {
+  const name = plainText(choice.content).trim()
+  const same = choicesOf(def).filter((c) => plainText(c.content).trim() === name)
+  return same.length > 1
+}
+
+/**
+ * **选项的显示名**（属性面板、表格、选项编辑器都只走这一个入口）。
+ *
+ * 选项名就是它自己的正文；同一属性下有同名选项时追加作用域，
+ * 仍重名再补短 id —— 两个同名选项必须能被指着说清楚是哪一条。
+ */
+export function choiceDisplayLabel(choice: Block, def: Block, tagName: (id: string) => string): string {
+  const name = plainText(choice.content).trim() || choice.id.slice(-6)
+  if (!duplicateChoiceName(def, choice)) return name
+  const scope = choiceScopeOf(choice)
+  const tags = scope.mode === 'all' ? '' : scope.tags.map((id) => `#${tagName(id)}`).join('、')
+  const suffix =
+    scope.mode === 'all'
+      ? t('ui.props.choice.scopeAllSuffix')
+      : scope.mode === 'only'
+        ? t('ui.props.choice.scopeOnlySuffix', { tags })
+        : t('ui.props.choice.scopeExceptSuffix', { tags })
+  const label = `${name}${suffix}`
+  const again = choicesOf(def).filter((c) => {
+    const sc = choiceScopeOf(c)
+    const tg = sc.mode === 'all' ? '' : sc.tags.map((id) => `#${tagName(id)}`).join('、')
+    const suf =
+      sc.mode === 'all'
+        ? t('ui.props.choice.scopeAllSuffix')
+        : sc.mode === 'only'
+          ? t('ui.props.choice.scopeOnlySuffix', { tags: tg })
+          : t('ui.props.choice.scopeExceptSuffix', { tags: tg })
+    return `${plainText(c.content).trim() || c.id.slice(-6)}${suf}` === label
+  })
+  return again.length > 1 ? `${label}（${choice.id.slice(-6)}）` : label
+}
+
+/**
+ * **属性显示名**（`propId → label`）：同名属性带声明来源。
+ *
+ * 同名不同 `propId` 是合法的（AO4）；不标来源时两行长得一模一样，用户分不出
+ * 改的是哪一个。来源是**派生的**（标签的 `_fieldDefs`），不是第二份存储。
+ * picker、属性卡、字段抽屉、表格列头都吃这一张表。
+ */
+export function propDisplayLabels(forest: readonly Block[]): Map<string, string> {
+  const defs = allPropDefs(forest)
+  const declaredBy = new Map<string, Block[]>()
+  for (const tag of allTags(forest)) {
+    for (const propId of declaredFieldIds(tag)) {
+      const list = declaredBy.get(propId)
+      if (list) list.push(tag)
+      else declaredBy.set(propId, [tag])
+    }
+  }
+  const byLabel = new Map<string, Block[]>()
+  for (const def of defs) {
+    const label = propLabel(def) || def.id
+    const list = byLabel.get(label)
+    if (list) list.push(def)
+    else byLabel.set(label, [def])
+  }
+  const out = new Map<string, string>()
+  for (const def of defs) {
+    const label = propLabel(def) || def.id
+    if ((byLabel.get(label) ?? []).length <= 1) {
+      out.set(def.id, label)
+      continue
+    }
+    const tags = declaredBy.get(def.id) ?? []
+    const source = tags.length > 0 ? ` · ${tags.map((tag) => `#${displayNameOf(tag)}`).join('、')}` : t('ui.props.undeclaredSuffix')
+    out.set(def.id, `${label}${source}`)
+  }
+  /**
+   * **追加来源后仍可能重名**：两个都未声明、或两个都被同一个标签声明。
+   * 显示名的作用是「用户指着它说清是哪一个」——同一张表里两个相同的名字，
+   * 那张表就没完成这件事。最后一步补短 id（id 是身份，显示名只是它的投影）。
+   */
+  const clashes = new Map<string, string[]>()
+  for (const [id, label] of out) {
+    const list = clashes.get(label)
+    if (list) list.push(id)
+    else clashes.set(label, [id])
+  }
+  for (const [label, ids] of clashes) {
+    if (ids.length <= 1) continue
+    for (const id of ids) out.set(id, `${label}（${id.slice(-6)}）`)
+  }
+  return out
+}
+
+/**
+ * `select` 行的两格派生（**属性面板与表格共用这一份**）。
+ *
+ * `choices` 是「这个块此刻能选的」；`currentChoiceLabel` 是「值指向的那一个叫什么」
+ * —— 即使它已被作用域隐藏或软删。两者分开，才做得到「当前值照常显示、不静默丢值」。
+ */
+export function choiceCells(
+  block: Block,
+  propId: string,
+  def: Block,
+  forest: readonly Block[],
+): { choices: Block[]; currentChoiceLabel?: string } {
+  const tagIds = tagIdSetOf(block, forest)
+  const choices = choicesOf(def).filter((c) => choiceVisible(c, tagIds))
+  const value = valueOf(block, propId)
+  if (typeof value !== 'string' || value === '') return { choices }
+  const current = choiceById(forest, value)
+  if (!current) return { choices }
+  const tagName = (id: string): string => {
+    const tag = tagsById(forest).get(id)
+    return tag ? displayNameOf(tag) : id.slice(-6)
+  }
+  return { choices, currentChoiceLabel: choiceDisplayLabel(current, def, tagName) }
 }
 
 /** 森林里全部属性定义（先序） */
@@ -279,6 +494,20 @@ export interface FieldRow {
   sources: Block[]
   /** 稳定排序键（声明的先后；同 propId 取最早那次） */
   order: number
+  /**
+   * `select` 行：这个块此刻能选的选项（`choicesFor` 的结果，兄弟顺序）。
+   *
+   * UI **不许**再读定义块上的任何「选项目录」——「这个块有哪些选项」只有这一个读法，
+   * 属性面板与表格都吃它。
+   */
+  choices?: Block[]
+  /**
+   * `select` 行：当前值对应的选项名（**即使它被作用域隐藏或已软删**）。
+   *
+   * 找不到（选项真的没了／值来自另一个库）时缺席，由 UI 用字典兜底
+   * 「选项已删除」——值本身不动，用户可显式清空。
+   */
+  currentChoiceLabel?: string
 }
 
 /**
@@ -295,6 +524,15 @@ export function fieldRows(block: Block, forest: readonly Block[]): FieldRow[] {
   const rows = new Map<string, FieldRow>()
   let order = 0
 
+  /** 同一份行派生里补 `select` 的两格：值控件的选项与当前值名字都从这里来 */
+  const fill = (row: FieldRow): FieldRow => {
+    if (!row.def || row.kind !== 'select') return row
+    const { choices, currentChoiceLabel } = choiceCells(block, row.propId, row.def, forest)
+    row.choices = choices
+    if (currentChoiceLabel !== undefined) row.currentChoiceLabel = currentChoiceLabel
+    return row
+  }
+
   for (const tag of resolveTagIds(block, tagsById(forest))) {
     for (const propId of declaredFieldIds(tag)) {
       const existing = rows.get(propId)
@@ -303,32 +541,38 @@ export function fieldRows(block: Block, forest: readonly Block[]): FieldRow[] {
         continue
       }
       const def = defs.get(propId)
-      rows.set(propId, {
+      rows.set(
         propId,
-        label: def ? propLabel(def) || propId : propId,
-        kind: def ? propKindOf(def) : 'text',
-        value: valueOf(block, propId),
-        filled: hasValue(block, propId),
-        def,
-        sources: [tag],
-        order: order++,
-      })
+        fill({
+          propId,
+          label: def ? propLabel(def) || propId : propId,
+          kind: def ? propKindOf(def) : 'text',
+          value: valueOf(block, propId),
+          filled: hasValue(block, propId),
+          def,
+          sources: [tag],
+          order: order++,
+        }),
+      )
     }
   }
 
   for (const propId of ownFieldIds(block)) {
     if (rows.has(propId)) continue
     const def = defs.get(propId)
-    rows.set(propId, {
+    rows.set(
       propId,
-      label: def ? propLabel(def) || propId : propId,
-      kind: def ? propKindOf(def) : 'text',
-      value: valueOf(block, propId),
-      filled: hasValue(block, propId),
-      def,
-      sources: [],
-      order: order++,
-    })
+      fill({
+        propId,
+        label: def ? propLabel(def) || propId : propId,
+        kind: def ? propKindOf(def) : 'text',
+        value: valueOf(block, propId),
+        filled: hasValue(block, propId),
+        def,
+        sources: [],
+        order: order++,
+      }),
+    )
   }
 
   return [...rows.values()].sort((a, b) => a.order - b.order)

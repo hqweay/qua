@@ -1,8 +1,8 @@
 /**
  * 属性 handler：值的写与清、字段定义的新建/加/摘。
  */
-import type { PropTarget } from '../../core/ports.ts'
-import type { Handler } from '../../core/ports.ts'
+import type { ChoiceScope } from '../../core/props.ts'
+import type { Handler, PropTarget } from '../../core/ports.ts'
 import { S } from './shared.ts'
 
 /**
@@ -36,7 +36,9 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
     const kind = S(a.kind, 'text')
     const target = propTargetOf(a.target)
     if (!label) return false
-    return app.createPropDef(blockId, label, kind, target) !== ''
+    // 同名两义：显式「新建同名属性」跳过同名复用；其它值一律按默认复用
+    const mode = a.mode === 'new' ? 'new' : 'reuse'
+    return app.createPropDef(blockId, label, kind, target, mode) !== ''
   },
   'core.props/add-field': (a, app) => {
     const blockId = S(a.blockId)
@@ -51,6 +53,40 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
     const propId = S(a.propId)
     if (!blockId || !propId) return false
     app.undeclareProp(blockId, propId)
+    return true
+  },
+  /* ---- 选项（select）：选项是定义块的直接子块，值存选项块 id ---- */
+  'core.props/add-choice': (a, app) => {
+    const defId = S(a.defId)
+    const label = S(a.label)
+    if (!defId || !label) return false
+    return app.addChoice(defId, label, a.scope as ChoiceScope | undefined) !== ''
+  },
+  'core.props/set-choice-label': (a, app) => {
+    const choiceId = S(a.choiceId)
+    const label = S(a.label)
+    if (!choiceId || !label) return false
+    app.setChoiceLabel(choiceId, label)
+    return true
+  },
+  'core.props/move-choice': (a, app) => {
+    const defId = S(a.defId)
+    const choiceId = S(a.choiceId)
+    if (!defId || !choiceId) return false
+    app.moveChoice(defId, choiceId, S(a.beforeId))
+    return true
+  },
+  'core.props/set-choice-scope': (a, app) => {
+    const choiceId = S(a.choiceId)
+    const scope = a.scope as ChoiceScope | undefined
+    if (!choiceId || !scope) return false
+    app.setChoiceScope(choiceId, scope)
+    return true
+  },
+  'core.props/delete-choice': (a, app) => {
+    const choiceId = S(a.choiceId)
+    if (!choiceId) return false
+    app.deleteChoice(choiceId)
     return true
   },
 }

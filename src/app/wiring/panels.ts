@@ -263,6 +263,13 @@ export function setupPanels(deps: PanelsDeps) {
         return name === '' ? shortId(b.id) : name
       },
       toast: (text, kind) => app.toast(text, kind),
+      /**
+       * 选项作用域徽标里的 `#名`：一次 O(1) 的索引读，UI 不扫森林。
+       */
+      tagName: (id) => {
+        const b = kb.get(id)
+        return b ? displayNameOf(b) : id.slice(-6)
+      },
     },
   )
 
@@ -359,6 +366,11 @@ export function setupPanels(deps: PanelsDeps) {
         if (!b) return t('ui.props.refMissing', { id: shortId(id) })
         const name = displayNameOf(b).trim()
         return name === '' ? shortId(b.id) : name
+      },
+      // 选项显示名里 `· #名` 的解析（`select` 单元格与属性区同一份口径）
+      tagName: (id) => {
+        const b = kb.get(id)
+        return b ? displayNameOf(b) : id.slice(-6)
       },
     })
     void vh

@@ -88,8 +88,12 @@ import { isAnno, isRun } from '../runs.ts'
  *            旧库没有这两格读出来就是「大纲」，本不必作废；加一版与 v11→v12 同一条理由：
  *            让**写路径只面对一种形状**（配置都由一处写、一处校验），
  *            读路径也就不必在「有没有这一格」上分叉。
+ * v27 → v28：`select` 的值从「选项名」改成**选项块 id**（选项＝定义块的子块），
+ *            旧的「选项名数组」退场。值空间的含义变了 ⇒ 旧库不能读成新库：
+ *            同名旧值指向一个不存在的选项时显示「选项已删除」，看起来像丢数据。
+ *            作废重 seed（旧库本来没有可用的 select 选项，代价为零）。
  */
-export const WORKSPACE_VERSION = 27
+export const WORKSPACE_VERSION = 28
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

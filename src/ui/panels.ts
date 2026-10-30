@@ -84,6 +84,8 @@ export interface ObjFieldDeps {
   clearValue: (recordId: string, propId: string) => void
   pickRef: FieldRowDeps['pickRef']
   refLabel: FieldRowDeps['refLabel']
+  /** 标签名解析（选项显示名的 `#名`）；省略时显示短 id */
+  tagName?: FieldRowDeps['tagName']
 }
 
 function escapeHtml(s: string): string {
@@ -145,6 +147,7 @@ function renderObjFields(
         },
         pickRef: fields.pickRef,
         refLabel: fields.refLabel,
+        ...(fields.tagName ? { tagName: fields.tagName } : {}),
       }
       for (const row of rows) {
         body.appendChild(

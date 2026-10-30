@@ -14,6 +14,7 @@ import {
   hasIdentity,
   isDeleted,
   isJournalBlock,
+  isPropDefBlock,
   mkBlock,
   writeBlockContent,
   type Block,
@@ -62,10 +63,17 @@ export interface VisibleRow {
  * `doc.viewRootId`（非大纲视图的宿主）的子块也在这里被摘掉：它们由视图宿主渲染，
  * 正文再画一遍就是同一批块出现两次。那一行的 `hasChildren` 也判成 false ——
  * 折叠三角要回答「点它能收起子块吗」，而此刻子块在别处展开着。
+ *
+ * ⚠️ **属性定义的子块是选项，不是内容行**：选项只在属性卡的选项编辑器里露面。
+ *    让它们进正文大纲，就会多出一批「能折叠、能拖、回车能拆块」的普通块，
+ *    而那些动作对「一个选项」没有意义。语义与视图宿主那条 `childless` 相同：
+ *    子树由别处渲染。
  */
 export function visibleRows(doc: Doc): VisibleRow[] {
   const out: VisibleRow[] = []
-  const viewRoot = doc.viewRootId
+  const childless = new Set<string>()
+  if (doc.viewRootId) childless.add(doc.viewRootId)
+  for (const b of flatten(doc)) if (isPropDefBlock(b)) childless.add(b.id)
   walkForest(
     doc.roots,
     (b, ctx) => {
@@ -73,10 +81,10 @@ export function visibleRows(doc: Doc): VisibleRow[] {
         block: b,
         depth: ctx.path.length - 1,
         hidden: ctx.hidden,
-        hasChildren: b.children.length > 0 && b.id !== viewRoot,
+        hasChildren: b.children.length > 0 && !childless.has(b.id),
       })
     },
-    { folded: doc.folded, ...(viewRoot ? { childless: new Set([viewRoot]) } : {}) },
+    { folded: doc.folded, ...(childless.size > 0 ? { childless } : {}) },
   )
   return out
 }

@@ -477,15 +477,23 @@ function compareAny(a: unknown, b: unknown): number {
  *   · 多键按声明序依次比较；
  *   · **稳定**：相等的行保持来源顺序（children 顺序），否则「排序后 children 顺序」
  *     这种断言永远说不清是稳定还是碰巧。
+ *
+ * `resolve` 给**排序键的取值**换一条来源（默认 `sortValueOf`）：`select` 列的值是
+ * 选项块 id，按 id 字典序排没有意义 —— 调用方传「id → 选项兄弟顺序」，
+ * 不在列表里的值返回 `null`（按空值排最后）。不传时行为与以前一个字不差。
  */
-export function sortRecords(records: readonly ViewRecord[], sort: readonly SortKey[] | undefined): ViewRecord[] {
+export function sortRecords(
+  records: readonly ViewRecord[],
+  sort: readonly SortKey[] | undefined,
+  resolve?: (r: ViewRecord, key: string) => unknown,
+): ViewRecord[] {
   const keys = (sort ?? []).filter((k) => isSortableColumn(k.by))
   if (keys.length === 0) return [...records]
   const indexed = records.map((r, i) => ({ r, i }))
   indexed.sort((x, y) => {
     for (const k of keys) {
-      const va = sortValueOf(x.r, k.by)
-      const vb = sortValueOf(y.r, k.by)
+      const va = resolve ? resolve(x.r, k.by) : sortValueOf(x.r, k.by)
+      const vb = resolve ? resolve(y.r, k.by) : sortValueOf(y.r, k.by)
       const ea = isEmpty(va)
       const eb = isEmpty(vb)
       if (ea && eb) continue

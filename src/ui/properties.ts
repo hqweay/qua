@@ -20,7 +20,7 @@
 import type { Block } from '../core/index.ts'
 import { plainText } from '../core/runs.ts'
 import type { Dangling, FieldRow, PropKind } from '../core/index.ts'
-import { clockLabel, displayNameOf, declaredFieldIds, hasList, PROP_KINDS, propKindOf } from '../core/index.ts'
+import { choiceDisplayLabel, clockLabel, displayNameOf, declaredFieldIds, hasList, PROP_KINDS, propKindOf } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 
 export interface PropertiesDeps {
@@ -100,6 +100,12 @@ export interface PropertiesDeps {
   pruneBelongs: (b: Block) => void
   /** 把一个块 id 变成人能读的名字（`ref` 值的显示） */
   refLabel: (targetId: string) => string
+  /**
+   * 标签块的显示名（选项作用域徽标里的 `#名`）。
+   *
+   * 由装配层注入（`kb.get` 是 O(1) 的索引读）：UI 不该为了一个名字去扫整片森林。
+   */
+  tagName: (id: string) => string
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
@@ -109,7 +115,20 @@ export interface PropertiesDeps {
  * 单独收窄是为了让「属性区」与「行内实例浮层」共用同一个行渲染器：
  * 后者不需要标签行、归属行、系统信息，只需要这一组回调。
  */
-export type FieldRowDeps = Pick<PropertiesDeps, 'shortId' | 'setValue' | 'clearValue' | 'pickRef' | 'refLabel'>
+export type FieldRowDeps = Pick<PropertiesDeps, 'shortId' | 'setValue' | 'clearValue' | 'pickRef' | 'refLabel'> & {
+  /** 标签名解析（选项显示名的 `#名`）；缺省显示短 id */
+  tagName?: (id: string) => string
+  /** 打开属性定义块（普通块的属性名可点：改选项去定义页，不在块上再开一个编辑面） */
+  openRef?: PropertiesDeps['openRef']
+}
+
+/**
+ * 值控件要的那一小撮能力：`ref` 要选择器与显示名，`select` 要标签名。
+ *
+ * 全都可以缺省：表格格子里没有属性区那套依赖时，控件退化成只读/短 id 显示，
+ * 而不是「点了报错」。
+ */
+export type CellEditorDeps = Partial<Pick<FieldRowDeps, 'pickRef' | 'refLabel' | 'tagName'>>
 
 export interface PropertiesEls {
   /** 卡片本身：`hidden` 与否表达「有没有主体」 */
@@ -135,7 +154,7 @@ export interface PropertiesEls {
 export function makeCellEditor(
   row: FieldRow,
   commit: (v: unknown) => void,
-  deps?: Pick<FieldRowDeps, 'pickRef' | 'refLabel'>,
+  deps?: CellEditorDeps,
   owner?: Block,
 ): HTMLElement {
   const kind = row.kind
@@ -179,33 +198,49 @@ export function makeCellEditor(
    * ⚠️ **不提供手打 id 的输入框**：32 位 hex 没人记得住，让它可编辑等于让人拼手速。
    *    值的形状仍然是「一个块 id」（模型层不变），只是入口换成了选择器。
    */
-  if (kind === 'ref' && deps && owner) {
+  if (kind === 'ref' && deps?.pickRef && owner) {
+    const pick = deps.pickRef
     const current = row.value === undefined || row.value === null ? '' : String(row.value)
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.className = 'prop-input prop-ref'
     btn.dataset.refId = current
-    btn.textContent = current === '' ? t('ui.props.pending') : deps.refLabel(current)
+    btn.textContent = current === '' ? t('ui.props.pending') : (deps.refLabel?.(current) ?? current)
     btn.addEventListener('click', () => {
-      deps.pickRef(owner, row.propId, current, (targetId) => send(targetId === '' ? undefined : targetId), btn.getBoundingClientRect())
+      pick(owner, row.propId, current, (targetId) => send(targetId === '' ? undefined : targetId), btn.getBoundingClientRect())
     })
     return btn
   }
   if (kind === 'select') {
     const sel = document.createElement('select')
     sel.className = 'prop-input'
-    const choices = Array.isArray(row.def?.props?._choices) ? (row.def!.props!._choices as string[]) : []
-    const opts = [...choices]
+    /**
+     * 选项只从 `row.choices` 来（派生好的一份）：UI 不认识「选项目录存在哪」，
+     * 也就不会出现「属性面板与表格各读一处、两处能不一致」。
+     */
+    const choices = row.choices ?? []
     const current = row.value === undefined || row.value === null ? '' : String(row.value)
-    if (current !== '' && !opts.includes(current)) opts.unshift(current)
+    const tagName = deps?.tagName ?? ((id: string) => id.slice(-6))
     const empty = document.createElement('option')
     empty.value = ''
     empty.textContent = t('ui.props.pending')
     sel.appendChild(empty)
-    for (const c of opts) {
+    for (const c of choices) {
       const o = document.createElement('option')
-      o.value = c
-      o.textContent = c
+      o.value = c.id
+      o.textContent = row.def ? choiceDisplayLabel(c, row.def, tagName) : plainText(c.content).trim() || c.id.slice(-6)
+      sel.appendChild(o)
+    }
+    /**
+     * **当前值不在可见选项里**（作用域隐藏 / 选项软删 / 值来自另一个库）时，
+     * 仍然画出来并保持选中：值在模型里还在，控件不许替用户把它丢掉。
+     * 用户可显式切走或清空 —— 那是他的动作，不是这一次渲染的副作用。
+     */
+    if (current !== '' && !choices.some((c) => c.id === current)) {
+      const o = document.createElement('option')
+      o.value = current
+      o.textContent = row.currentChoiceLabel ?? t('ui.props.choice.deleted')
+      o.dataset.missing = '1'
       sel.appendChild(o)
     }
     sel.value = current
@@ -270,6 +305,15 @@ export function makeFieldRow(
   const duplicated = (opts.labelCount?.get(row.label) ?? 0) > 1
   const disambiguated = duplicated ? `${row.label}（${row.sources[0] ? displayNameOf(row.sources[0]) : t('ui.props.own')}）` : row.label
   name.textContent = row.def ? disambiguated : t('ui.props.unknown', { id: deps.shortId(row.propId) })
+  /**
+   * **属性名指向定义块**。普通块上只画值控件：要改选项/类型，点名字去定义页，
+   * 不在块上再开第三个编辑面（同一个东西三处可改＝三处都能不同步）。
+   */
+  if (row.def && deps.openRef) {
+    name.dataset.refTo = row.def.id
+    name.title = t('ui.props.openDef')
+    name.addEventListener('click', (e) => deps.openRef!(row.def!.id, { shiftKey: e.shiftKey }))
+  }
   label.appendChild(name)
   if (opts.showSource !== false) {
     const src = document.createElement('span')

@@ -111,10 +111,16 @@ export type SystemPropId =
   // 视图配置（见 `core/view.ts`）：一个块怎么看，与它是什么是两件事
   | typeof VIEWS_PROP
   | typeof ACTIVE_VIEW_PROP
-  // 字段定义（prop-def）：kind / 选项目录 / 声明列表
+  // 字段定义（prop-def）：kind / 声明列表 / 选项的可见范围
   | '_kind'
-  | '_choices'
   | '_fieldDefs'
+  /**
+   * 一个**选项块**的可见范围（见 `core/props.ts` 的 `choiceScopeOf`）。
+   *
+   * 选项是定义块的直接子块，所以「它是选项」由位置回答；这一格只回答
+   * 「哪些标签的成员看得到它」。三态一个表达式，不做「按标签分槽的值」。
+   */
+  | '_choiceScope'
   // 自有属性槽：这一块自己登记了哪些属性（见 `core/props.ts` 的 `ownPropIds`）
   | '_ownProps'
   // 字段定义的**编辑位置**（见 `core/props.ts` 的 `uiPositionOf`）
