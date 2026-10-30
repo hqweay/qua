@@ -236,7 +236,7 @@ core ← view ← ui ← app ← host
 pnpm dev             # 开发：vite + electron（src/** 热更新；electron/*.ts 改动要重跑）
 pnpm dev:web         # 只起 vite → http://127.0.0.1:5180/
 pnpm gate            # ★ 唯一门禁（全量）：静态 + 单测 + 构建 + 冒烟 + 布局 + 真 Electron
-pnpm gate:web        # 同 gate，但不含 Electron（公开仓 CI 的 Linux job 用它）
+pnpm gate:web        # 同 gate，但不含 Electron（CI 的 Linux job 用它）
 pnpm gate:fast       # 日常小改动：按 git 改动只跑「碰得到的那几支」（不是收工门禁）
 pnpm arch:check      # 只跑架构静态断言（秒级）
 pnpm test:core       # 只跑纯 core 单测（node --test，零依赖）
