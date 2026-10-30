@@ -13664,8 +13664,49 @@ await check(
     }))
     assert(drawer.drawers === 1 && drawer.editors === 1, `字段抽屉里同一份编辑器：${JSON.stringify(drawer)}`)
 
+    /**
+     * **抽屉里的实例不订阅 store**：写入之后必须由编辑器自己重画，
+     * 否则加/删/改名/上下移都要关掉抽屉再打开才看得到。
+     */
+    const beforeCount = await page.evaluate(
+      () => document.querySelectorAll('.drawer .choices-editor .choice-item').length,
+    )
+    await page.evaluate(() => {
+      const input = document.querySelector('.drawer .choices-editor .choice-add-name')
+      if (!(input instanceof HTMLInputElement)) return
+      input.value = '抽屉新增'
+      input.focus()
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    })
+    await page.waitForTimeout(240)
+    const afterAdd = await page.evaluate(() => ({
+      names: [...document.querySelectorAll('.drawer .choices-editor .choice-name')].map((e) => e.value),
+      count: document.querySelectorAll('.drawer .choices-editor .choice-item').length,
+    }))
+    assert(
+      afterAdd.count === beforeCount + 1 && afterAdd.names.includes('抽屉新增'),
+      `不关抽屉就要看到新选项（写入后自绘）：${JSON.stringify(afterAdd)}`,
+    )
+
+    await page.evaluate(() => {
+      const item = [...document.querySelectorAll('.drawer .choices-editor .choice-item')].find(
+        (el) => el.querySelector('.choice-name')?.value === '抽屉新增',
+      )
+      item?.querySelector('[data-choice-delete]')?.click()
+    })
+    await page.waitForTimeout(240)
+    const afterDel = await page.evaluate(() => ({
+      names: [...document.querySelectorAll('.drawer .choices-editor .choice-name')].map((e) => e.value),
+      count: document.querySelectorAll('.drawer .choices-editor .choice-item').length,
+    }))
+    assert(
+      !afterDel.names.includes('抽屉新增') && afterDel.count === beforeCount,
+      `删掉后立刻消失（写入后自绘）：${JSON.stringify(afterDel)}`,
+    )
+
     await ctx.close()
-    return `标签视角就地展开（0 层 drawer）；新增默认 only 本标签：甲 2 项 / 乙 1 项；全局项只读（隐藏/恢复）；块上下拉同步；字段抽屉同一组件`
+    return `标签视角就地展开（0 层 drawer）；新增默认 only 本标签：甲 2 项 / 乙 1 项；全局项只读（隐藏/恢复）；块上下拉同步；字段抽屉同一组件且写入自绘`
   },
 )
 

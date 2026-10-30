@@ -15,9 +15,8 @@
  *   `>= 2000` **窗口化**（只挂可视范围 ± 若干行，用上下留白撑出滚动高度）。
  */
 import type { Block, BlockStore, ViewColumn, ViewConfig, ViewRecord } from '../core/index.ts'
-import { choicesOf, clockLabel, displayNameOf, hasList, hasValue, propDisplayLabels, propKindOf, propLabel } from '../core/index.ts'
-import { choiceCells, type ChoiceLookup, type FieldRow } from '../core/props.ts'
-import { walkForest } from '../core/walk.ts'
+import { choicesOf, clockLabel, displayNameOf, hasValue, propDisplayLabels, propKindOf, propLabel } from '../core/index.ts'
+import { choiceCells, ChoiceLookupIndex, type ChoiceLookup, type FieldRow } from '../core/props.ts'
 import { plainText } from '../core/runs.ts'
 import { t } from '../core/msg.ts'
 import { makeTagChipEl } from '../view/block-dom.ts'
@@ -111,11 +110,9 @@ export class ViewTable {
   /**
    * 一格里要用的查找（**一次算好，不逐格扫库**）。
    *
-   * `byId` 含软删的块：当前值可能指向一个已删的选项，控件要显示它的旧名。
-   * `tagById` 只收标签（作用域徽标的名字）。
+   * 含软删的块与标签：当前值可能指向一个已删的选项，控件要显示它的旧名。
    */
-  private byId = new Map<string, Block>()
-  private tagById = new Map<string, Block>()
+  private readonly lookupIndex = new ChoiceLookupIndex()
   private readonly ro: ResizeObserver | null
   private readonly onScroll = (): void => this.windowIfNeeded()
 
@@ -303,36 +300,17 @@ export class ViewTable {
 
   /** 格子里要用的查找：整片森林扫一次（含软删），之后每格只查表 */
   private rebuildLookups(): void {
-    this.byId.clear()
-    this.tagById.clear()
-    walkForest(
-      this.deps.store.blocks,
-      (b) => {
-        this.byId.set(b.id, b)
-        if (hasList(b, 'tag')) this.tagById.set(b.id, b)
-      },
-      { includeDeleted: true },
-    )
+    this.lookupIndex.rebuild(this.deps.store.blocks)
   }
 
   /** 一格 `select` 的查找（`find` 含软删；名字走同一份标签表） */
   private lookup(): ChoiceLookup {
-    return {
-      find: (id) => this.byId.get(id),
-      tagById: (id) => this.tagById.get(id),
-      tagName: (id) => {
-        const tag = this.tagById.get(id)
-        return tag ? displayNameOf(tag) : id.slice(-6)
-      },
-    }
+    return this.lookupIndex.lookup()
   }
 
-  /** 增量修补：把这一块放回查找表（新块要能查到；删掉的块对象仍在表里、只是带了删除标记） */
+  /** 增量修补：软删的旧对象留着（显示旧名），purge 的摘掉（不拿旧对象当「还在」） */
   private rememberBlock(id: string): void {
-    const b = this.deps.store.find(id)
-    if (!b) return
-    this.byId.set(id, b)
-    if (hasList(b, 'tag')) this.tagById.set(id, b)
+    this.lookupIndex.remember(id, (x) => this.deps.store.find(x))
   }
 
   /**

@@ -268,24 +268,61 @@ export interface ChoiceLookup {
 
 /** 从森林建一份查找：**一趟扫完**（`find`／`tagById` 都含软删的块） */
 export function choiceLookupOf(forest: readonly Block[]): ChoiceLookup {
-  const byId = new Map<string, Block>()
-  const tagById = new Map<string, Block>()
-  walkForest(
-    forest,
-    (b) => {
-      byId.set(b.id, b)
-      // 软删的标签也收：它仍可能出现在某个选项的作用域里，名字要显示得出来（不是短 id）
-      if (hasList(b, 'tag')) tagById.set(b.id, b)
-    },
-    { includeDeleted: true },
-  )
-  return {
-    find: (id) => byId.get(id),
-    tagById: (id) => tagById.get(id),
-    tagName: (id) => {
-      const tag = tagById.get(id)
-      return tag ? displayNameOf(tag) : id.slice(-6)
-    },
+  const idx = new ChoiceLookupIndex()
+  idx.rebuild(forest)
+  return idx.lookup()
+}
+
+/**
+ * **可增量修补**的选项查找表（表格按 blockId 局部修补行，不能每格扫全库）。
+ *
+ * 「软删」与「purge」在 `store.find` 眼里都是 `undefined`（索引看不见被删的块），
+ * 所以增量修补必须自己判：
+ *   · 表里那份**带删除标记** ⇒ 软删，留着（当前值要显示旧名 ＋ 「已删除」）；
+ *   · 表里那份没有删除标记、树里也找不到 ⇒ 已被 purge，必须摘掉 ——
+ *     否则当前值会拿一个已经不在树上的旧对象当「还在」，显示旧名而不是「选项已删除」。
+ */
+export class ChoiceLookupIndex {
+  private byId = new Map<string, Block>()
+  private tagById = new Map<string, Block>()
+
+  /** 整表重建（含软删的块与标签：名字要显示得出来） */
+  rebuild(forest: readonly Block[]): void {
+    this.byId.clear()
+    this.tagById.clear()
+    walkForest(
+      forest,
+      (b) => {
+        this.byId.set(b.id, b)
+        if (hasList(b, 'tag')) this.tagById.set(b.id, b)
+      },
+      { includeDeleted: true },
+    )
+  }
+
+  /** 增量：把这一块放回表里；软删的留着，purge 的摘掉 */
+  remember(id: string, find: (id: string) => Block | undefined): void {
+    const b = find(id)
+    if (b) {
+      this.byId.set(id, b)
+      if (hasList(b, 'tag')) this.tagById.set(id, b)
+      return
+    }
+    const old = this.byId.get(id)
+    if (old && isDeleted(old)) return
+    this.byId.delete(id)
+    this.tagById.delete(id)
+  }
+
+  lookup(): ChoiceLookup {
+    return {
+      find: (id) => this.byId.get(id),
+      tagById: (id) => this.tagById.get(id),
+      tagName: (id) => {
+        const tag = this.tagById.get(id)
+        return tag ? displayNameOf(tag) : id.slice(-6)
+      },
+    }
   }
 }
 

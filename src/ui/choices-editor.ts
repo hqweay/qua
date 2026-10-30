@@ -178,6 +178,7 @@ export class ChoicesEditor {
           return
         }
         this.deps.write.setLabel(choice.id, next)
+        this.render()
       }
       name.addEventListener('keydown', (e) => {
         // 组合期只让输入法自己处理：Enter 常常是选词那一下
@@ -216,7 +217,10 @@ export class ChoicesEditor {
       const up = this.iconButton('↑', t('ui.props.choice.moveUp'), () => {
         if (index === 0) return
         const before = siblings[index - 1]
-        if (before) this.deps.write.move(def.id, choice.id, before.id)
+        if (before) {
+          this.deps.write.move(def.id, choice.id, before.id)
+          this.render()
+        }
       })
       up.dataset.choiceMove = 'up'
       up.disabled = index === 0
@@ -224,13 +228,17 @@ export class ChoicesEditor {
         if (index >= siblings.length - 1) return
         const next = siblings[index + 2]
         this.deps.write.move(def.id, choice.id, next ? next.id : '')
+        this.render()
       })
       down.dataset.choiceMove = 'down'
       down.disabled = index >= siblings.length - 1
       controls.append(up, down)
     }
     if (editable) {
-      const del = this.iconButton('×', t('ui.props.choice.delete'), () => this.deps.write.remove(choice.id))
+      const del = this.iconButton('×', t('ui.props.choice.delete'), () => {
+        this.deps.write.remove(choice.id)
+        this.render()
+      })
       del.dataset.choiceDelete = '1'
       controls.appendChild(del)
     } else {
@@ -257,16 +265,15 @@ export class ChoicesEditor {
   /** 「对本标签隐藏」：只改这一个标签能看到它这件事，不动别的标签 */
   private hideFromTag(choice: Block, focusTag: string): void {
     const scope = choiceScopeOf(choice)
-    if (scope.mode === 'all') {
-      this.deps.write.setScope(choice.id, { mode: 'except', tags: [focusTag] })
-      return
+    let next: ChoiceScope
+    if (scope.mode === 'all') next = { mode: 'except', tags: [focusTag] }
+    else if (scope.mode === 'except') next = { mode: 'except', tags: [...scope.tags, focusTag] }
+    else {
+      const tags = scope.tags.filter((id) => id !== focusTag)
+      next = tags.length === 0 ? { mode: 'all' } : { mode: 'only', tags }
     }
-    if (scope.mode === 'except') {
-      this.deps.write.setScope(choice.id, { mode: 'except', tags: [...scope.tags, focusTag] })
-      return
-    }
-    const tags = scope.tags.filter((id) => id !== focusTag)
-    this.deps.write.setScope(choice.id, tags.length === 0 ? { mode: 'all' } : { mode: 'only', tags })
+    this.deps.write.setScope(choice.id, next)
+    this.render()
   }
 
   private iconButton(text: string, title: string, onClick: () => void): HTMLButtonElement {
@@ -411,6 +418,7 @@ export class ChoicesEditor {
         const scope = choiceScopeOf(choice)
         const tags = scope.mode === 'except' ? scope.tags.filter((id) => id !== focusTag) : []
         this.deps.write.setScope(choice.id, tags.length === 0 ? { mode: 'all' } : { mode: 'except', tags })
+        this.render()
       })
       row.append(name, restore)
       box.appendChild(row)
@@ -457,8 +465,7 @@ export class ChoicesEditor {
         if (name === '') return
         const scope: ChoiceScope = globalBox.checked ? { mode: 'all' } : { mode: 'only', tags: [focusTag] }
         this.deps.write.add(def.id, name, scope)
-        input.value = ''
-        globalBox.checked = false
+        this.render()
       }
       form.append(input, label, add)
     } else {
@@ -503,10 +510,7 @@ export class ChoicesEditor {
         if (name === '') return
         const m = parseMode(mode.value)
         this.deps.write.add(def.id, name, m === 'all' ? { mode: 'all' } : { mode: m, tags: [...picked] })
-        input.value = ''
-        picked.clear()
-        mode.value = 'all'
-        paintTags()
+        this.render()
       }
       form.append(input, mode, tags, add)
     }

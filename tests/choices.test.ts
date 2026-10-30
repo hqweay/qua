@@ -15,6 +15,7 @@ import type { Block, ViewRecord } from '../src/core/index.ts'
 import {
   choiceById,
   choiceDisplayLabel,
+  ChoiceLookupIndex,
   choiceLookupOf,
   choiceScopeOf,
   choiceVisible,
@@ -309,6 +310,28 @@ test('choiceLookupOf：一趟扫，软删标签的名字仍解析得到（不是
   const look = choiceLookupOf([goneTag, goneChoice])
   assert.equal(look.tagName('tagA'), '任务', '软删标签的旧名要能显示')
   assert.equal(look.find('c-gone')?.id, 'c-gone', '软删的选项也要找得到（当前值显示旧名）')
+})
+
+test('ChoiceLookupIndex：purge 后不返回旧对象；软删的旧对象留着（显示旧名）', () => {
+  const live = blk('c1', '选项')
+  const idx = new ChoiceLookupIndex()
+  idx.rebuild([live])
+  assert.equal(idx.lookup().find('c1')?.id, 'c1')
+
+  // purge：树里没有、`store.find` 也找不到；旧对象没有删除标记 ⇒ 必须摘掉
+  idx.remember('c1', () => undefined)
+  assert.equal(
+    idx.lookup().find('c1'),
+    undefined,
+    'purged 之后不能拿旧对象当「还在」（否则当前值显示旧名而不是「选项已删除」）',
+  )
+
+  // 软删：索引看不见它（`store.find` 返回 undefined），但旧对象带着删除标记 ⇒ 留着
+  const soft = { ...blk('c2', '软删'), props: { _deletedAt: 1 } }
+  const idx2 = new ChoiceLookupIndex()
+  idx2.rebuild([soft])
+  idx2.remember('c2', () => undefined)
+  assert.equal(idx2.lookup().find('c2')?.id, 'c2', '软删的旧对象要留着（当前值显示旧名 ＋「已删除」）')
 })
 
 /* ------------------------------------------------------------ 7. 新建定义 */
