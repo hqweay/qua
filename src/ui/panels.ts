@@ -495,7 +495,7 @@ export function openDrawerFor(deps: PanelDeps, kind: PanelKind): void {
     }
     deps.openDrawer(t('ui.drawer.contextTitle'), (host) => {
       const intro = document.createElement('p')
-      intro.style.color = 'var(--fg-mute)'
+      intro.style.color = 'var(--ui-text-tertiary)'
       intro.textContent = t('ui.drawer.contextIntro')
       host.appendChild(intro)
       const table = document.createElement('table')
@@ -521,7 +521,7 @@ export function openDrawerFor(deps: PanelDeps, kind: PanelKind): void {
   if (kind === 'bindings') {
     deps.openDrawer(t('ui.drawer.bindingsTitle'), (host) => {
       const intro = document.createElement('p')
-      intro.style.color = 'var(--fg-mute)'
+      intro.style.color = 'var(--ui-text-tertiary)'
       intro.textContent =
         t('ui.drawer.bindingsIntro1', { commands: COMMANDS.length, bindings: BINDINGS.length }) + t('ui.drawer.bindingsIntro2')
       host.appendChild(intro)
@@ -537,7 +537,7 @@ export function openDrawerFor(deps: PanelDeps, kind: PanelKind): void {
           const tr = document.createElement('tr')
           tr.innerHTML =
             `<td class="mono">${escapeHtml(b.key ? keyLabel(b.key, deps.isMac()) : (b.group ?? ''))}</td>` +
-            `<td>${escapeHtml(decl?.title ?? b.command)}<br><span class="mono" style="color:var(--fg-mute)">${escapeHtml(b.command)}</span></td>` +
+            `<td>${escapeHtml(decl?.title ?? b.command)}<br><span class="mono" style="color:var(--ui-text-tertiary)">${escapeHtml(b.command)}</span></td>` +
             `<td class="mono">${escapeHtml(b.when ?? t('ui.common.always'))}</td>` +
             `<td class="mono">${b.layer}</td>`
           table.appendChild(tr)
@@ -566,7 +566,7 @@ export function openDrawerFor(deps: PanelDeps, kind: PanelKind): void {
       h.textContent = t('ui.drawer.shortcutsNote1')
       host.appendChild(h)
       const p = document.createElement('p')
-      p.style.color = 'var(--fg-mute)'
+      p.style.color = 'var(--ui-text-tertiary)'
       p.textContent = t('ui.drawer.shortcutsNote2')
       host.appendChild(p)
     })
@@ -574,7 +574,7 @@ export function openDrawerFor(deps: PanelDeps, kind: PanelKind): void {
   }
   deps.openDrawer(t('ui.drawer.modelTitle'), (host) => {
     const p = document.createElement('p')
-    p.style.color = 'var(--fg-mute)'
+    p.style.color = 'var(--ui-text-tertiary)'
     p.textContent = t('ui.drawer.modelNote')
     host.appendChild(p)
     const pre = document.createElement('pre')

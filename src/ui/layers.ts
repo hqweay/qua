@@ -15,6 +15,7 @@ import { t } from '../core/msg.ts'
 import { renderIcon } from '../view/icons.ts'
 import { captureFocus, type FocusReturn } from './focus-return.ts'
 import { placeNear } from './place.ts'
+import { dismissFloating } from './overlay-dismiss.ts'
 
 export interface Row {
   id: string
@@ -602,7 +603,7 @@ export class Layers {
   /* ------------------------------------------------------------ 抽屉面板 */
 
   openDrawer(title: string, render: (host: HTMLElement) => void): void {
-    this.closeDrawer()
+    this.closeDrawer(false)
     const box = document.createElement('div')
     box.className = 'drawer'
     box.setAttribute('role', 'dialog')
@@ -625,10 +626,15 @@ export class Layers {
     this.drawerFocus = captureFocus()
   }
 
-  closeDrawer(): void {
+  closeDrawer(animate = true): void {
     const box = this.drawerEl
-    this.drawerEl?.remove()
     this.drawerEl = null
+    // 状态立即归零（drawerOpen/Esc 判据不再看它）；DOM 走完退场动画再摘。
+    // 紧接着要开下一张（openDrawer 先关再开）时不动画：两张同屏交叉滑没有意义。
+    if (box) {
+      if (animate) dismissFloating(box)
+      else box.remove()
+    }
     const fr = this.drawerFocus
     this.drawerFocus = null
     fr?.restore(box)

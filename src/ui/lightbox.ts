@@ -22,17 +22,21 @@ export interface LightboxOptions {
   subtitle?: string
 }
 
+import { dismissFloating } from './overlay-dismiss.ts'
+
 let current: HTMLElement | null = null
 
 function closeLightbox(): void {
   if (!current) return
   const el = current
   current = null
-  // 先把 src 摘掉：大图离开文档之前解除解码结果，避免合成层继续占着
-  const img = el.querySelector('img')
-  if (img) img.removeAttribute('src')
-  el.remove()
   document.removeEventListener('keydown', onKey, true)
+  // 状态立即归零（lightboxOpen/Esc 判据不再看它）；遮罩淡出走完再摘节点，
+  // 大图的 src 也在那时才清——淡出途中先把 src 摘掉，屏幕上会闪一帧空图。
+  dismissFloating(el, () => {
+    const img = el.querySelector('img')
+    if (img) img.removeAttribute('src')
+  })
 }
 
 function onKey(e: KeyboardEvent): void {

@@ -48,6 +48,12 @@
 #scroll {
   flex: 1;
   overflow: auto;
+  /*
+    经典滚动条的平台（Windows／Linux／接了鼠标的 mac）上，滚动条出现会把
+    内容区挤窄一截——整篇文档随之左右平移一下。`stable` 把这条沟**常驻**出来，
+    出现滚动条时内容不再动。Overlay 滚动条（mac 默认）本来不占布局，此声明无副作用。
+  */
+  scrollbar-gutter: stable;
   /* 上留白交给文档头（它自带 gap），底部留出「还能往下写」的气口 */
   padding: 0 0 var(--ui-gap-7);
 }
@@ -126,7 +132,7 @@
   display: block;
   min-height: var(--ui-gap-7);
   border-bottom: 1px solid transparent;
-  transition: border-color 120ms ease;
+  transition: border-color var(--ui-dur-1) ease;
 }
 #editor:hover::after {
   border-bottom-color: var(--ui-border);

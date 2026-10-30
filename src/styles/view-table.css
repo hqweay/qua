@@ -218,8 +218,10 @@
   font: inherit;
   color: inherit;
 }
+/* 焦点落点：格子上亮一圈内描边（格子的「框」就是它的边框，焦点必须能看见） */
 .tv-editor .prop-input:focus {
   outline: none;
+  box-shadow: inset 0 0 0 var(--ui-sep) var(--ui-accent);
 }
 .tv-tags {
   display: flex;

@@ -27,6 +27,16 @@ button {
   background: transparent;
   border: 0;
   cursor: pointer;
+  /*
+    hover/激活的底色与文字色走同一档时长淡入——**所有**按钮一处声明，
+    「点上去有没有回应」不再是逐个控件碰运气的事。只过渡颜色与透明度
+    （不动几何属性，虚拟化的行高不会跟着抖）。
+  */
+  transition:
+    background-color var(--ui-dur-1) ease,
+    color var(--ui-dur-1) ease,
+    border-color var(--ui-dur-1) ease,
+    opacity var(--ui-dur-1) ease;
 }
 /*
  * 图标（`view/icons.ts` 的内联 SVG）：**颜色继承文字**，尺寸只走 token。

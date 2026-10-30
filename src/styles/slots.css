@@ -449,7 +449,7 @@ body[data-dock-resizing='1'] * {
   align-items: center;
   justify-content: center;
   /* 固定图标槽宽：emoji/字面文本与 SVG 混用时页名仍然对齐 */
-  width: 18px;
+  width: var(--ui-icon-lg);
 }
 /* 单行省略 ＋ 占满剩余宽度 */
 .page-item .p-title {
@@ -524,6 +524,7 @@ button.ghost.wide {
   min-height: 26px;
   padding: 0 var(--ui-gap-1);
   border-radius: var(--ui-radius-sm);
+  transition: background-color var(--ui-dur-1) ease;
 }
 .trash-row:hover {
   background: var(--ui-bg-hover);

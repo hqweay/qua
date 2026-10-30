@@ -1,5 +1,29 @@
 /* ============================================================ 浮层 */
 
+/*
+  浮层的**进场**。菜单/信息浮层只淡入（`overlay-in` 是纯 opacity，不搬几何——
+  它们锚在某个位置上，动位置只会读成「飘」）；抽屉从边缘滑入。
+  退场不是这里的对称物：入场是「新元素带上 animation」自己会跑，
+  退场时元素马上要被摘掉，得由 `ui/overlay-dismiss.ts` 等它走完再摘。
+*/
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+@keyframes drawer-out {
+  to {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
 .layer {
   position: fixed;
   z-index: var(--ui-z-menu);
@@ -8,6 +32,7 @@
   border-radius: var(--ui-radius-md);
   box-shadow: var(--ui-shadow-pop);
   overflow: hidden;
+  animation: overlay-in var(--ui-dur-2) var(--ui-ease-out);
 }
 .layer-head {
   padding: var(--ui-gap-3) var(--ui-gap-4);
@@ -23,6 +48,10 @@
   padding: var(--ui-gap-4);
   background: transparent;
   outline: none;
+}
+/* 焦点落点：菜单搜索框没有边框可换色，就亮那条下分隔线（「我在这个框里」必须可见） */
+.layer-input:focus {
+  border-bottom-color: var(--ui-accent);
 }
 .layer-list {
   max-height: 44vh;
@@ -53,7 +82,7 @@
   cursor: default;
 }
 .layer-ico {
-  width: 18px;
+  width: var(--ui-icon-lg);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -141,6 +170,7 @@
   box-shadow: var(--ui-shadow-pop);
   padding: var(--ui-gap-4);
   font-size: var(--ui-fs-sm);
+  animation: overlay-in var(--ui-dur-2) var(--ui-ease-out);
 }
 .popover h4 {
   margin: 0 0 var(--ui-gap-3);
@@ -387,6 +417,12 @@
   background: var(--ui-surface-raised);
   border-left: 1px solid var(--ui-border);
   box-shadow: var(--ui-shadow-pop);
+  animation: drawer-in var(--ui-dur-2) var(--ui-ease-out);
+}
+/* 退场类由 `overlay-dismiss` 挂上；`forwards` 让它停在透明，等 JS 摘节点 */
+.drawer.is-out {
+  animation: drawer-out var(--ui-dur-1) ease forwards;
+  pointer-events: none;
 }
 .drawer-head {
   display: flex;
@@ -470,8 +506,11 @@
   padding: var(--ui-gap-3) var(--ui-gap-5);
   box-shadow: var(--ui-shadow-pop);
   font-size: var(--ui-fs-sm);
+  /* 长文案兜底：不封顶会折成一颗胖胶囊；封顶后允许折行（省略号会吃掉结果反馈本身） */
+  max-width: min(560px, calc(100vw - var(--ui-gap-6) * 2));
+  animation: overlay-in var(--ui-dur-2) var(--ui-ease-out);
   opacity: 1;
-  transition: opacity 0.4s ease, transform 0.4s ease;
+  transition: opacity var(--ui-dur-2) ease, transform var(--ui-dur-2) ease;
 }
 .toast-ok {
   border-color: var(--ui-ok);
@@ -524,6 +563,17 @@
   background: var(--ui-scrim);
   outline: none;
   cursor: zoom-out;
+  animation: overlay-in var(--ui-dur-2) var(--ui-ease-out);
+}
+/* 退场同抽屉：淡出后由 `overlay-dismiss` 摘节点（大图的 src 也在那时才清） */
+.lightbox.is-out {
+  animation: overlay-out var(--ui-dur-1) ease forwards;
+  pointer-events: none;
+}
+@keyframes overlay-out {
+  to {
+    opacity: 0;
+  }
 }
 .lightbox-figure {
   display: flex;
@@ -562,4 +612,17 @@
   opacity: 0.7;
   font-size: var(--ui-fs-xs);
   white-space: nowrap;
+}
+
+/*
+  减少动态：**横移退成纯淡入淡出，淡本身保留**——淡出/淡入是「这个东西在走」的
+  反馈，全删掉会让浮层看起来是闪烁；位移才是要免掉的那部分。
+*/
+@media (prefers-reduced-motion: reduce) {
+  .drawer {
+    animation-name: overlay-in;
+  }
+  .drawer.is-out {
+    animation-name: overlay-out;
+  }
 }

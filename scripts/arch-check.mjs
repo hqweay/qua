@@ -554,6 +554,64 @@ function commandDecls() {
 }
 
 /* ═══════════════════════════════════════════════════════╗
+   ║ 30 · 被引用的 CSS 变量必须有定义                        ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  /**
+   * 来由：`var(--ui-bg-hover)` 被三处引用却从未定义过——回收站行与空天格的
+   * hover 反馈、资产「不可用」态的颜色**静默失效**：声明回退成初始值，
+   * 不报错、不红、类型与单测都拦不住，只有把那行悬停上去的人眼能发现。
+   *
+   * 判据：`var(--x)` 的每一处引用，都能对应到一个定义——
+   *   · CSS 里的 `--x:`（token 段或组件自己的局部变量都算）；
+   *   · TS 字符串里的 `--x`（`setProperty('--x', …)` 那类运行时定义）。
+   * 两边都对不上 ⇒ 这条引用是悬空的。
+   *
+   * ⚠️ 必须先剥注释再判（与 `[28]` 同一条教训）：说明文字里提到变量名是**讲解**，
+   *    不是声明也不是引用；不剥的话，解释这条断言的注释会让它自己变红。
+   */
+  const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+
+  const defined = new Set()
+  for (const f of cssFiles) {
+    const src = stripComments(readFileSync(f, 'utf8'))
+    for (const m of src.matchAll(/(--[a-zA-Z][\w-]*)\s*:/g)) defined.add(m[1])
+  }
+  for (const f of srcFiles) {
+    const src = stripComments(tsFile(f).src)
+    // `setProperty('--x', …)` / 内联 `style="--x: …"` / cssText —— 引号或冒号两种写法都收
+    for (const m of src.matchAll(/['"`]--[a-zA-Z][\w-]*['"`]/g)) defined.add(m[0].slice(1, -1))
+    for (const m of src.matchAll(/(--[a-zA-Z][\w-]*)\s*:/g)) defined.add(m[1])
+  }
+
+  const hits = []
+  for (const f of cssFiles) {
+    const src = stripComments(readFileSync(f, 'utf8'))
+    for (const m of src.matchAll(/var\(\s*(--[a-zA-Z][\w-]*)/g)) {
+      if (!defined.has(m[1])) hits.push(`${rel(f)}  引用了未定义的 ${m[1]}`)
+    }
+  }
+  for (const f of srcFiles) {
+    const src = stripComments(tsFile(f).src)
+    for (const m of src.matchAll(/var\(\s*(--[a-zA-Z][\w-]*)/g)) {
+      if (!defined.has(m[1])) hits.push(`${rel(f)}  引用了未定义的 ${m[1]}`)
+    }
+  }
+
+  add({
+    id: 30,
+    title: '被引用的 `var(--…)` 必须有定义（悬空引用＝声明静默失效）',
+    method: '①CSS 与 TS 里收集定义（`--x:` 与引号包裹的 `--x`）；②收集 `var(--x` 引用；③引用 ∩ ¬定义 ＝命中',
+    scope: `src/**/*.css ＋ src/**/*.ts（共 ${cssFiles.length + srcFiles.length} 个文件）`,
+    whitelist: '定义可以是 CSS 局部变量或 TS 的运行时 `setProperty`；两处都没有才算悬空',
+    hits: hits.length,
+    detail: [...new Set(hits)],
+    note: '教训：`var(--x, fallback)` 里的 fallback 未定义时整个声明失效——回退不是保险，是同一颗雷',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
    ║ 额外（里能静态查的）                          ║
    ║   4  同名命令不可二次注册                                ║
    ║   2  主进程不得 import 数据层                            ║

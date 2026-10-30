@@ -131,6 +131,12 @@
 .blk[data-flash='1'] {
   animation: blk-flash 900ms ease-out;
 }
+/* 减少动态下不闪：跳转本身的「视口换了地方」就是反馈，闪只是它的放大器 */
+@media (prefers-reduced-motion: reduce) {
+  .blk[data-flash='1'] {
+    animation: none;
+  }
+}
 @keyframes blk-flash {
   from {
     background: var(--ui-accent-soft);
@@ -138,8 +144,7 @@
   to {
     background: transparent;
   }
-}
-.blk .left {
+}.blk .left {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -1144,7 +1149,7 @@
 .atom-file.unavailable {
   background: transparent;
   border: 1px dashed var(--ui-border);
-  color: var(--ui-fg-mute);
+  color: var(--ui-text-tertiary);
 }
 .asset-chip {
   display: inline-flex;
@@ -1279,9 +1284,10 @@
 .sec[data-shell] .shell-row {
   cursor: text;
   border-radius: var(--ui-radius-sm);
+  transition: background-color var(--ui-dur-1) ease;
 }
 .sec[data-shell]:hover .shell-row {
-  background: var(--ui-bg-hover, var(--ui-bg-soft));
+  background: var(--ui-bg-hover);
 }
 
 /*

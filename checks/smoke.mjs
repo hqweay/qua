@@ -972,9 +972,9 @@ await check('T5e 行内资产：左键开 lightbox（点图不关、Esc 关）�
   // ② 点图不关
   await page.locator('.lightbox-img').click()
   assert(await page.evaluate(() => Boolean(document.querySelector('.lightbox'))), '点图不该关掉 lightbox')
-  // ③ Esc 关
+  // ③ Esc 关（退场动画走完后节点摘掉——「关」的判据是节点离开文档，不是变透明）
   await page.keyboard.press('Escape')
-  assert(!(await page.evaluate(() => Boolean(document.querySelector('.lightbox')))), 'Esc 应关掉 lightbox')
+  await page.waitForSelector('.lightbox', { state: 'detached', timeout: 2000 })
 
   // ④ ⌥ ⇒ 详情（且不开 lightbox）
   await page.locator('#editor .atom-image').first().click({ modifiers: ['Alt'] })
@@ -13868,6 +13868,113 @@ await check(
     return `AO4 两个 propId（值 5 / 9 互不影响）；picker 三组：本标签／未声明／其他标签，选项带来源`
   },
 )
+
+/* -------------------------------------------------- 动效与状态词汇表 */
+
+/**
+ * 这一组的口径是「每个交互在它的状态下都有回应」：
+ * 浮层进场有过渡、退场把节点真摘掉、键盘焦点处处可见、悬停有底色、
+ * 滚动条出现不把文档挤得左右跳。它们全是 computed style 能判定的性质。
+ */
+await check('T174 浮层有进场动画；退场的节点真的离开文档（不是留一个隐形的）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.focus())
+  await page.keyboard.press(kbd('mod+p'))
+  const layerAnim = await page.evaluate(() => getComputedStyle(document.querySelector('.layer')).animationName)
+  assert(layerAnim !== 'none', `命令面板应有进场动画，实际 animation=${layerAnim}`)
+  await page.keyboard.press('Escape')
+  assert((await page.locator('.layer').count()) === 0, '菜单应立即关（菜单退场不拖泥带水）')
+
+  // 抽屉：进场有动画；Esc 退场走完后节点摘掉（waitForSelector 才是「关」的判据）
+  await page.evaluate(() => window.__qua.focus())
+  await page.keyboard.press(kbd('mod+p'))
+  await page.locator('.layer-input').fill('导出')
+  await page.locator('.layer-item').first().click()
+  await page.waitForSelector('.drawer')
+  const drawerAnim = await page.evaluate(() => getComputedStyle(document.querySelector('.drawer')).animationName)
+  assert(drawerAnim !== 'none', `抽屉应有进场动画，实际 animation=${drawerAnim}`)
+  await page.keyboard.press('Escape')
+  await page.waitForSelector('.drawer', { state: 'detached', timeout: 2000 })
+
+  await ctx.close()
+  return `面板/抽屉进场有动画；菜单瞬时关；抽屉退场走完节点摘掉`
+})
+
+await check('T175 键盘焦点处处可见：按钮亮 accent 环、菜单搜索框亮分隔线', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.focus())
+  await page.keyboard.press(kbd('mod+p'))
+  // ① 菜单搜索框自己的焦点语言：下分隔线换 accent（它没有边框可换）
+  const inputLine = await page.evaluate(() => getComputedStyle(document.querySelector('.layer-input')).borderBottomColor)
+  const accent = await page.evaluate(() => {
+    const p = document.createElement('span')
+    p.style.color = 'var(--ui-accent)'
+    document.body.appendChild(p)
+    const c = getComputedStyle(p).color
+    p.remove()
+    return c
+  })
+  assert(inputLine === accent, `搜索框聚焦应亮 accent 分隔线：${inputLine} ≠ accent ${accent}`)
+  await page.keyboard.press('Escape')
+  // ② 键盘落点必须有可见环：焦点交还编辑器后 blur 出来，再按 Tab——
+  //    **键盘移动焦点的那一下**才触发 :focus-visible（鼠标点击与 focus() 都不触发）。
+  //    ⚠️ 三条不能走的路（都实测过）：从日历格走（点格子＝「去那天写」，焦点被交给
+  //    编辑器）；在编辑器里 Tab（缩进绑定接管）；在命令面板里 Tab（移动高亮行接管）。
+  await page.evaluate(async () => {
+    document.activeElement?.blur?.()
+    await new Promise((r) => setTimeout(r, 120))
+  })
+  await page.keyboard.press('Tab')
+  const ring = await page.evaluate(() => {
+    const el = document.activeElement
+    const cs = getComputedStyle(el)
+    return { tag: el?.tagName, cls: el?.className, style: cs.outlineStyle, color: cs.outlineColor }
+  })
+  assert(ring.tag === 'BUTTON', `Tab 应落在按钮上：${JSON.stringify(ring)}`)
+  assert(ring.style === 'solid' && ring.color === accent, `键盘焦点应有 accent 环：${JSON.stringify(ring)}`)
+  await ctx.close()
+  return `搜索框亮分隔线；键盘落点的按钮环＝accent（不再是 UA 默认蓝）`
+})
+
+await check('T176 悬停有中性反馈：回收站行 hover 出底色（--ui-bg-hover 真的解析出颜色）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  const target = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const plain = (b) => b.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
+    const rootIds = new Set(ed.doc.roots.map((b) => b.id))
+    let hit = null
+    const walk = (list) => {
+      for (const b of list) {
+        if (!hit && !rootIds.has(b.id) && plain(b).length > 1) hit = b.id
+        walk(b.children)
+      }
+    }
+    walk(ed.doc.roots)
+    return hit
+  })
+  assert(target, '前置：应有可删的普通块')
+  await page.evaluate((id) => window.__qua.__editor.remove(id), target)
+  await page.waitForSelector('[data-card-id="trash"] [data-trash-row]')
+  await page.locator('[data-card-id="trash"] [data-trash-row]').first().hover()
+  // 底色有 120ms 的过渡：等它走完再读，读到的才是 hover 稳态
+  await page.waitForTimeout(250)
+  const bg = await page.evaluate(
+    () => getComputedStyle(document.querySelector('[data-card-id="trash"] [data-trash-row]')).backgroundColor,
+  )
+  assert(bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent', `悬停的行应有底色（此前这个变量从未定义过），实际 ${bg}`)
+  await ctx.close()
+  return `回收站行 hover 底色＝${bg}（悬空 token 已定义）`
+})
+
+await check('T177 滚动条沟常驻：#scroll 声明 scrollbar-gutter: stable（文档不随滚动条左右跳）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const g = await page.evaluate(() => getComputedStyle(document.querySelector('#scroll')).scrollbarGutter)
+  assert(g === 'stable', `#scroll 应常驻滚动条沟，实际 scrollbar-gutter=${g}`)
+  await ctx.close()
+  return 'scrollbar-gutter=stable'
+})
 
 /**
  * **判定放在所有用例之后**：写在这里之前时，后面的用例（T136 起）即使红了也不会进
