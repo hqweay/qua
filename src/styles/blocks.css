@@ -902,21 +902,14 @@
 
 /* ---------------------------------------------------------- 查询视图
    view block 的 placement：抬头（标题/条数/刷新）是 chrome，列表是共享 store 的活块。
-   现在它只出现在「被打开的那个查询块那一端」的段尾槽里（与挂载区同一个槽，在它上面）。 */
+   查询源的身体贴在自己那一行下面（行内体，任何位置——段根同此）；这份带
+   上分隔线的基样式现在只接 children/items 源的段尾视图根（收藏块／激活视图）。 */
 .queryview {
   margin-top: var(--ui-gap-6);
   padding-top: var(--ui-gap-3);
   border-top: 1px solid var(--ui-border-subtle);
 }
 .queryview[hidden] {
-  display: none;
-}
-/*
- * 查询块的身体被折叠（`Doc.folded`）：**只藏，不卸载** —— 冻结结果与滚动位置还在，
- * 展开是瞬间的。与 `hidden` 分开是因为 `ViewHost` 自己会在每次 paint 时
- * `root.hidden = false`；`data-folded` 不会被它覆盖。
- */
-.queryview[data-folded='1'] {
   display: none;
 }
 .queryview-head {
@@ -993,7 +986,15 @@
 .blk-view-body:focus-within {
   height: var(--view-body-focus);
 }
-/* 折叠态（与段根/窗口的视图体同一个 `data-folded` 契约）：只藏，不卸载 */
+/* 单根屏（整屏只有这一块）：身体自然高度、整屏滚 —— 定高的动机（别把正文里的
+   别人撑爆）在这里不成立。`data-natural-h` 由 `block-dom` 写，占位侧不读它
+   （单根屏只有一行，不存在窗口外的行）。 */
+.blk-view-body[data-natural-h='1'],
+.blk-view-body[data-natural-h='1']:focus-within {
+  height: auto;
+  overflow: visible;
+}
+/* 折叠态：只藏，不卸载（所有位置的查询身体都折这一格） */
 .blk-view-body[data-folded='1'] {
   display: none;
 }

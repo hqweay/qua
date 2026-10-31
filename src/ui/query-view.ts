@@ -375,20 +375,9 @@ export class ViewHost {
     })
   }
 
-  /** 视图宿主的根（装配层把它放进那一段的段尾槽） */
+  /** 视图宿主的根（装配层把它放进挂载点：行内体的容器／窗口的身体格） */
   get root(): HTMLElement {
     return this.els.root
-  }
-
-  /**
-   * **折起这个视图体**：只藏不卸载（冻结结果与滚动位置还在）。
-   *
-   * 折叠的判据（`Doc.folded`）在编辑器那一侧；这里只负责把结果落到 DOM，
-   * 与正文内联体用同一个 `data-folded` 契约（CSS 只认这一格）。
-   */
-  setFolded(folded: boolean): void {
-    if (folded) this.els.root.dataset.folded = '1'
-    else delete this.els.root.dataset.folded
   }
 
   /** 大纲分支的编辑器（没有就在；表格分支下是 `null`） */

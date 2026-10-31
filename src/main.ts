@@ -42,6 +42,7 @@ import type { RefClickHit, RefClickMods } from './view/editor-events.ts'
 import { collectionCommands, devCommands, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, zoomCommands } from './app/commands-impl.ts'
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
+import { createRowBodyCache } from './app/wiring/row-bodies.ts'
 import { setupDocks } from './app/wiring/docks.ts'
 import { setupPanels } from './app/wiring/panels.ts'
 import { setupOwners } from './app/wiring/owners.ts'
@@ -1851,6 +1852,15 @@ function viewEvents(
   inlineViewBodies = false,
 ): ViewEvents {
   const active = () => editor()
+  /**
+   * **行身体的实例缓存**（一台编辑器一份）：外来编辑会让整屏行重建，
+   * 行内查询体不能随之销毁重建 —— 冻结/stale/滚动都要跨重画活下来。
+   * 判据与实现见 `app/wiring/row-bodies.ts`。
+   */
+  const viewBodies = createRowBodyCache((block, into) => {
+    const vh = panels.mountBlockView(block, into, active, 'inline')
+    return { root: vh.root, dispose: () => { vh.dispose(); vh.root.remove() } }
+  })
   return {
     change,
     /**
@@ -1957,13 +1967,7 @@ function viewEvents(
      */
     ...(inlineViewBodies
       ? {
-          viewBody: (block: Block, into: HTMLElement) => {
-            const vh = panels.mountBlockView(block, into, active, 'inline')
-            return () => {
-              vh.dispose()
-              vh.root.remove()
-            }
-          },
+          viewBody: (block: Block, into: HTMLElement) => viewBodies(block, into),
         }
       : {}),
     // 复盘空天格子里落笔：编辑器只报日期，物化那一天（幂等）与重装载归命令层

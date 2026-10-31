@@ -1060,7 +1060,8 @@ export class BlockEditor {
         },
         /**
          * **正文里的查询体**：只有装配层接了画法、且这一份装载允许展开时才给。
-         * 「哪一行画」由 `block-dom` 的 `rowHasInlineViewBody` 判（子行才画，段根让位给段尾宿主）。
+         * 「哪一行画」由 `block-dom` 的 `rowHasInlineViewBody` 判（按源分派，
+         * 段根同此——聚焦后身体仍贴着自己那一行，不再让位段尾宿主）。
          */
         ...(this.events.viewBody
           ? {
