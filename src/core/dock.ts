@@ -81,6 +81,26 @@ export function dockKey(entry: DockEntry): string {
   }
 }
 
+/**
+ * 一张卡**此刻收着吗** —— 收起状态的**唯一**判据（渲染、槽头按钮、卡片菜单都问它）。
+ *
+ * 只有一条差于落盘的 `collapsedCards`：**单卡目标那一张此刻展开**。
+ * 理由与中心「聚焦即展开」同一条 —— 整槽只剩它一张时，收起它等于把「看」收成一颗头。
+ * 用户真要在单卡期间收起它 ⇒ `toggleCollapse` 退出单卡并写下这次收起
+ * （于是这里回到「收着」），以他这次为准。
+ *
+ * ⚠️ 不要再在各处直接读 `collapsedCards[key]`：那会让这条规则在渲染、槽头图标、
+ *    卡片菜单里各答一遍，漏一处就是「图标说收起、卡是展开的」。
+ */
+export function isCardCollapsed(
+  dock: { collapsedCards: Record<string, true>; solo: { left: string | null; right: string | null } },
+  side: 'left' | 'right',
+  key: string,
+): boolean {
+  if (dock.collapsedCards[key] !== true) return false
+  return dock.solo[side] !== key
+}
+
 export interface DerivedCardDecl {
   id: DerivedCardId
   /** 画廊里的图标（`lucide:<name>`，与命令声明的 `tile.icon` 同一套解析） */

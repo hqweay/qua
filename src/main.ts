@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  isWidgetBlock, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, DERIVED_CARDS, dockKey, type Block, type CtxKeys, type DerivedCardId, type TriggerChar } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  isWidgetBlock, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { checkExternalUrl, rejectText } from './core/link.ts'
 import { BlockStore } from './core/store.ts'
@@ -1791,8 +1791,12 @@ ed = new BlockEditor({
   blankArea: chrome.blankAreaEl,
   // 共享 store：块是活引用；marks/atoms/undo 也是共享的
   store: blocks,
-  // 折叠态是**设备**那份（`qua.device`）：换机器就是另一份，换库时由 `replaceWorkspace` 清空
+  /**
+   * 折叠态是**设备**那份（`qua.device`）：换机器就是另一份，换库时由 `replaceWorkspace` 清空。
+   * 中心是**聚焦面**：装载只剩一个根时，它自己的折叠在这一屏不生效（聚焦即展开）。
+   */
   doc: { roots: bootRoots, folded: device.folded },
+  focusSurface: true,
   /**
    * 写入事务入口。`mainEd` 是 `let`（焦点切到别的编辑器时它会变），所以这里
    * **现取**当前实例当 source，而不是把此刻的值焊进闭包。
@@ -2235,7 +2239,7 @@ function showCardMenu(side: 'left' | 'right', key: string, anchor: DOMRect): voi
     const w = kb.get(e.block)
     return w !== undefined && !isWidgetBlock(w)
   })
-  const anyExpanded = dock[side].cards.some((e) => !dock.collapsedCards[dockKey(e)])
+  const anyExpanded = dock[side].cards.some((e) => !isCardCollapsed(dock, side, dockKey(e)))
   const rows: Row[] = [
     { id: 'toggle', label: st.collapsed ? t('ui.dock.expandCard') : t('ui.dock.collapseCard') },
     { id: 'solo', label: st.solo ? t('ui.dock.unsoloCard') : t('ui.dock.soloCard') },

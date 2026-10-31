@@ -15677,6 +15677,112 @@ await check('T190 四种布局：切换不重查；看板拖卡写属性不换�
 })
 
 /**
+ * **聚焦即展开**：折起来的块被「聚焦」时展开，退出聚焦回到收着。
+ *
+ * 这条与侧槽单卡是同一条判据（`A27`）：**整屏只剩这一块时，它自己的折叠不生效**。
+ * 折叠表一个字节不动 —— 退出聚焦时那一块自然回到原来的折叠态，
+ * 不需要记「进来之前收没收」的快照。
+ *
+ * ⚠️ 判据要同时看**屏幕**与**落盘那份**：只看 `collapsed` 会在「把表删了」的实现上照样绿，
+ *    而那种实现退出聚焦之后恢复不了（用户原来的收起被这次查看吃掉了）。
+ * ⚠️ 反向验证：把 `foldStateOf` 的豁免去掉 ⇒ 这条立刻红（`rows` 会只剩 1 行）。
+ */
+await check('T198 聚焦即展开：zoom 进折着的块 ⇒ 展开；退回 ⇒ 回到收着（折叠表一个字节没动）', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const pair = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#editor .blk')].map((el) => ({
+      id: el.dataset.blockId,
+      depth: Number(el.dataset.depth),
+    }))
+    const i = rows.findIndex((r, k) => r.depth === 1 && rows[k + 1] && rows[k + 1].depth === 2)
+    return i >= 0 ? { parent: rows[i].id, child: rows[i + 1].id } : null
+  })
+  assert(pair, '前置：应有一对 depth-1/depth-2 父子块')
+
+  // ① 折起来
+  await page.evaluate((id) => window.__qua.__editor.toggleCollapse(id), pair.parent)
+  await page.waitForTimeout(200)
+  const folded = await page.evaluate(
+    ({ p, c }) => ({
+      table: window.__qua.__editor.doc.folded,
+      domCollapsed: document.querySelector(`.blk[data-block-id="${p}"]`)?.dataset.collapsed === '1',
+      childInDom: Boolean(document.querySelector(`.blk[data-block-id="${c}"]`)),
+    }),
+    { p: pair.parent, c: pair.child },
+  )
+  assert(folded.domCollapsed && !folded.childInDom, `前置：应已折叠（子行不挂载）：${JSON.stringify(folded)}`)
+  assert(folded.table[pair.parent] === true, `前置：折叠表里有它：${JSON.stringify(folded.table)}`)
+
+  // ② 点块标 zoom 进这个折着的块 ⇒ 展开（整屏只剩它）
+  const marker = await page.evaluate((id) => {
+    const m = document.querySelector(`.blk[data-block-id="${id}"] .left .marker`)
+    if (!m) return null
+    const r = m.getBoundingClientRect()
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+  }, pair.parent)
+  assert(marker, '前置：块标应在 DOM 里')
+  await page.mouse.click(marker.x, marker.y)
+  await page.waitForTimeout(400)
+  const zoomed = await page.evaluate(
+    ({ p, c }) => ({
+      roots: window.__qua.__editor.doc.roots.map((b) => b.id),
+      table: window.__qua.__editor.doc.folded,
+      domCollapsed: document.querySelector(`.blk[data-block-id="${p}"]`)?.dataset.collapsed === '1',
+      childInDom: Boolean(document.querySelector(`.blk[data-block-id="${c}"]`)),
+    }),
+    { p: pair.parent, c: pair.child },
+  )
+  assert(zoomed.roots.length === 1 && zoomed.roots[0] === pair.parent, `前置：应聚焦到那一块：${JSON.stringify(zoomed.roots)}`)
+  assert(!zoomed.domCollapsed, `聚焦即展开：这一行不该还挂着折叠标记：${JSON.stringify(zoomed)}`)
+  assert(zoomed.childInDom, `聚焦即展开：子行应看得见（否则「点了没反应」）：${JSON.stringify(zoomed)}`)
+  assert(zoomed.table[pair.parent] === true, `折叠表一个字节不许动（退出要能回来）：${JSON.stringify(zoomed.table)}`)
+
+  // ③ 退回 ⇒ 回到收着
+  await page.evaluate(() => window.__qua.invoke('core.block/zoom-out', {}, 'test'))
+  await page.waitForTimeout(400)
+  const back = await page.evaluate(
+    ({ p, c }) => ({
+      roots: window.__qua.__editor.doc.roots.length,
+      table: window.__qua.__editor.doc.folded,
+      domCollapsed: document.querySelector(`.blk[data-block-id="${p}"]`)?.dataset.collapsed === '1',
+      childInDom: Boolean(document.querySelector(`.blk[data-block-id="${c}"]`)),
+    }),
+    { p: pair.parent, c: pair.child },
+  )
+  assert(back.domCollapsed && !back.childInDom, `退回后应回到收着（不需要记快照）：${JSON.stringify(back)}`)
+  assert(back.table[pair.parent] === true, `退回后折叠表仍是同一份：${JSON.stringify(back.table)}`)
+
+  /**
+   * ④ 聚焦期间**自己折** ⇒ 以这次为准（不能「点了没反应」，也不能之后又自己弹开）。
+   */
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }, 'test'), pair.parent)
+  await page.waitForTimeout(400)
+  const opened = await page.evaluate((c) => Boolean(document.querySelector(`.blk[data-block-id="${c}"]`)), pair.child)
+  assert(opened, '前置：重新聚焦之后应展开着')
+  await page.evaluate((id) => {
+    const f = document.querySelector(`.blk[data-block-id="${id}"] > .left > .fold`)
+    f?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+  }, pair.parent)
+  await page.waitForTimeout(300)
+  const manual = await page.evaluate(
+    ({ p, c }) => ({
+      domCollapsed: document.querySelector(`.blk[data-block-id="${p}"]`)?.dataset.collapsed === '1',
+      childInDom: Boolean(document.querySelector(`.blk[data-block-id="${c}"]`)),
+      table: window.__qua.__editor.doc.folded,
+    }),
+    { p: pair.parent, c: pair.child },
+  )
+  assert(manual.domCollapsed && !manual.childInDom, `聚焦期间自己折 ⇒ 当场收起来（不是「点了没反应」）：${JSON.stringify(manual)}`)
+  assert(manual.table[pair.parent] === true, `这次折叠要落进折叠表：${JSON.stringify(manual.table)}`)
+
+  await ctx.close()
+  return `折叠 → 聚焦展开（子行回到 DOM）→ 退回收着；折叠表始终 ${JSON.stringify(Object.keys(zoomed.table))}；聚焦期间手动折当场生效`
+})
+
+/**
  * **判定放在所有用例之后**：写在这里之前时，后面的用例（T136 起）即使红了也不会进
  * `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。
  */

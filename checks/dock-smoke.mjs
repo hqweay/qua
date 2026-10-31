@@ -1757,23 +1757,44 @@ await check('A26 卡头交互：左键头部＝折叠/展开这张卡；右键�
 
 /* ---------------------------------------------------------------- A27 */
 
-await check('A27 单卡展开收着的卡（退出不收回）；面包屑点祖先段＝这张卡原地换看那个祖先', async () => {
+await check('A27 单卡期间目标展开、退出回到收着（与中心「聚焦即展开」同一条）；面包屑点祖先段＝这张卡原地换看那个祖先', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
 
-  // ① 收起反链卡 → 单卡：目标应被顺手展开；退出单卡：仍是展开的（不记第三态）
+  /**
+   * ① 收起反链卡 → 单卡：**这一张此刻展开**（槽里只剩它一颗头，「看」就落空）；
+   *    退出单卡：回到收着 —— 展开是叠在渲染上的一层，落盘的收起表一个字节没动。
+   *
+   * 为什么不是「退出仍展开」：那要靠「进入时把 `collapsedCards` 删掉」，
+   * 于是用户原来的收起**被这次查看吃掉了**（下次单卡前它已经不再是收着的）。
+   * 叠一层的好处是退出自动恢复，且不需要记「solo 前收没收」的第三态。
+   */
   const backrefs = page.locator('.dock-card[data-card-id="backrefs"]')
   await backrefs.locator('> .dock-card-head .dock-card-title').click() // 收起
   await page.waitForTimeout(100)
   assert((await backrefs.getAttribute('data-collapsed')) === '1', '前置：反链卡应收起')
+  const prefFolded = () => page.evaluate(() => window.__qua.snapshot().dock.collapsed)
+  assert((await prefFolded()).includes('backrefs'), '前置：收起态应落在设备状态里')
   await backrefs.locator('> .dock-card-head [data-dock-action="solo"]').click()
   await page.waitForTimeout(100)
   assert(await page.locator('#dock-right-stack[data-solo="1"]').count(), '应进入单卡')
-  assert(!(await backrefs.getAttribute('data-collapsed')), '单卡目标应被顺手展开')
+  assert(!(await backrefs.getAttribute('data-collapsed')), '单卡目标应展开（槽里只剩它一张）')
+  assert((await prefFolded()).includes('backrefs'), '单卡不该改落盘的收起表（退出才能恢复）')
   await backrefs.locator('> .dock-card-head [data-dock-action="solo"]').click()
   await page.waitForTimeout(100)
-  assert(!(await backrefs.getAttribute('data-collapsed')), '退出单卡后应保持展开（不收回）')
+  assert((await backrefs.getAttribute('data-collapsed')) === '1', '退出单卡应回到收着（叠加撤销）')
+
+  /**
+   * ①b 单卡期间**自己收起** ⇒ 以这次为准：退出单卡并收起来（不能「点了没反应」）。
+   */
+  await backrefs.locator('> .dock-card-head [data-dock-action="solo"]').click()
+  await page.waitForTimeout(100)
+  assert(!(await backrefs.getAttribute('data-collapsed')), '前置：单卡目标展开着')
+  await backrefs.locator('> .dock-card-head .dock-card-title').click() // 单卡期间点头部＝收起
+  await page.waitForTimeout(150)
+  assert(!(await page.locator('#dock-right-stack[data-solo="1"]').count()), '收起单卡目标应退出单卡')
+  assert((await backrefs.getAttribute('data-collapsed')) === '1', '单卡期间自己收起 ⇒ 真的收起来')
 
   // ② 上下文展开（与引用同一条机制）：窗口卡正文行首带祖先 trail，点一格把那个祖先
   //     装成卡的根（中心不动、`cards` 条目不动、不新增窗口），展开根行首有「收起上下文」

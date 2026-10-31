@@ -50,6 +50,8 @@ import {
   setBlockType,
   siblingMove,
   isFolded,
+  foldStateOf,
+  focusRootOf,
   isEmbedBlock,
   toggleChildrenCollapsed,
   toggleCollapsed,
@@ -214,6 +216,17 @@ export interface ViewOpts {
    * 依赖从哪开始遍历），而是「下一层根本没有展开这个动作」。
    */
   embedBodies?: boolean
+  /**
+   * **这一面是不是「一屏就是这一块」的聚焦面**（缺省 `false`）。
+   *
+   * 只有中心槽是：那里「装载只剩一个根」意味着**整屏**就是这一块，
+   * 把它收起来等于把整屏收成一行 ⇒ 它的折叠在这一屏不生效（见 `Doc.focusRootId`）。
+   *
+   * 侧槽窗口、挂载区、反链、查询结果不设：它们是「一个块装进一栏」，
+   * 一栏里还有别的卡/别的行，块自己折起来是正常的显示
+   * （槽卡的收起是**另一个轴**，走 `collapsedCards`，不是这张折叠表）。
+   */
+  focusSurface?: boolean
   /**
    * **段的排列**（视图配置轴，不是导航）：`column`（单列流，缺省）｜`row`（段横排）｜`grid`（折行网格）。
    * 只改「段怎么摆」，不改「段是什么」——DOM 形状对所有 layout 一致（见 `renderRows` 的 `.sec`）。
@@ -475,6 +488,8 @@ export class BlockEditor {
   private readonly onContextBack: ViewOpts['onContextBack']
   /** 露面块的身体能不能展开（深度 1 的构造性截断；见 `ViewOpts.embedBodies`） */
   private readonly embedBodies: boolean
+  /** 这一面是不是「一屏就是这一块」的聚焦面（见 `ViewOpts.focusSurface`） */
+  private readonly focusSurface: boolean
   /** 已挂的「行身体」（露面／查询）→ 卸载函数（换 DOM 之前必须挨个调用） */
   private readonly bodyDisposers = new Map<string, () => void>()
   /**
@@ -499,6 +514,7 @@ export class BlockEditor {
     this.onExpandContext = o.onExpandContext
     this.onContextBack = o.onContextBack
     this.embedBodies = o.embedBodies !== false
+    this.focusSurface = o.focusSurface === true
     this.doc = o.doc
     this.setLayout(o.layout ?? 'column')
     /**
@@ -509,6 +525,8 @@ export class BlockEditor {
      * `doc.roots` 重载成空 ——正文看起来被清空了，而块其实还在 store 里。
      */
     this.viewRootIds = o.doc.roots.map((b) => b.id)
+    // 冷启动也是一次装载（走构造参数，不经过 `loadPage`）⇒ 聚焦位同样按形状给上
+    this.syncFocusRoot()
     this.store = o.store ?? new BlockStore(o.doc.roots)
     this.offStore =
       o.autoReload === false
@@ -528,6 +546,34 @@ export class BlockEditor {
     this.disposeAllRowBodies()
     this.offStore()
     this.unbind()
+  }
+
+  /**
+   * **聚焦根随装载形状重算**。
+   *
+   * 为什么是「装载形状」而不是「哪个入口调的」：点块标 zoom、打开页、翻日单日、
+   * 单根查询块都只是「把一批根塞进中心」，形状相同 ⇒ 行为该相同；日记流（多段）
+   * 里收起某一天只是收起那一天，不该被这条豁免。
+   *
+   * @param keepChoice `true` ＝ 这一屏只是**重取同一批根**（`reloadFromStore` 那种）：
+   *   根没变就保留用户刚才的折叠选择（否则他刚折的那一下会在下一次重画时被悄悄展开）；
+   *   根变了（形状变了）仍然按新的装载给上。`false` ＝ 新的一次装载，一律重新给上。
+   */
+  private syncFocusRoot(keepChoice = false): void {
+    if (!this.focusSurface) {
+      delete this.doc.focusRootId
+      delete this.doc.focusRootOpen
+      return
+    }
+    const root = focusRootOf(this.doc.roots)
+    if (!root) {
+      delete this.doc.focusRootId
+      delete this.doc.focusRootOpen
+      return
+    }
+    const same = this.doc.focusRootId === root
+    this.doc.focusRootId = root
+    if (!keepChoice || !same) this.doc.focusRootOpen = true
   }
 
   /* ------------------------------------------------------------ 快照 */
@@ -591,6 +637,8 @@ export class BlockEditor {
      */
     if (only && activeView(only) && !isEmbedBlock(only)) this.doc.viewRootId = only.id
     else delete this.doc.viewRootId
+    // 同一批根的重取：保留用户在聚焦期间显式折的那一下（否则每次 store 变动都会弹开）
+    this.syncFocusRoot(true)
     // 焦点只算**本视图自己的**（里层编辑器是独立编辑岛，不是「我在编辑」）
     const focused = restoreSelection && this.ownFocus()
     this.renderAll()
@@ -987,7 +1035,7 @@ export class BlockEditor {
       {
         single: flatten(this.doc).length === 1,
         ancestors: this.ancestors.get(r.block.id) ?? [],
-        folded: this.doc.folded,
+        folded: foldStateOf(this.doc),
         gutter,
         find,
         // 只有装载根会带上下文：子行的位置已经由缩进表达
@@ -3523,6 +3571,13 @@ export class BlockEditor {
      */
     const ending = this.editBase?.id
     if (ending) this.commitEdit(ending)
+    /**
+     * **同一批根的重装**（切视图、撤销把装载形状换回来）不是一次新的「聚焦」：
+     * 用户在聚焦期间显式折过这一块的话，那一下要留着 —— 否则每次重画都把它弹开。
+     * 判据用根集合，不用调用方传什么标志：`reloadPage` 与「打开同一页」在根上是同一件事，
+     * 而后者本来就该按「重新装载」给上。
+     */
+    const sameRoots = this.doc.roots.length === doc.roots.length && this.doc.roots.every((b, i) => b.id === doc.roots[i]!.id)
     this.doc = doc
     // 换视图 ＝ 换了一份装载单位：上一行那个编辑期在这里结束，不能带到新页上
     this.editBase = null
@@ -3530,6 +3585,7 @@ export class BlockEditor {
     this.mouseSel = null
     this.container.classList.remove('blocksel-drag')
     this.viewRootIds = doc.roots.map((b) => b.id)
+    this.syncFocusRoot(sameRoots)
     // 换了装载单位：上一形态的空天格子不再成立（复盘入口装载后会重新 setShells）
     this.shells = []
     this.applySecCols()

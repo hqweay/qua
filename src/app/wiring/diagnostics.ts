@@ -24,6 +24,7 @@ import {
   listsOf,
   aliasesOf,
   fieldTableOf,
+  foldStateOf,
   membersOf,
   parentsOf,
   prop,
@@ -392,8 +393,11 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
         id: b.id,
         text: plainText(b.content),
         todo: todoOf(b, fields) ?? null,
-        // 诊断面的字段名保持 `collapsed`（冒烟按它断言）；值现在来自折叠表
-        collapsed: mainEd.doc.folded?.[b.id] === true,
+        /**
+         * 诊断面的字段名保持 `collapsed`（冒烟按它断言）；值来自**这一屏生效的**折叠表
+         * （`foldStateOf`：聚焦根自己不折 —— 断言要看「屏幕上的样子」而不是落盘的那份）。
+         */
+        collapsed: foldStateOf(mainEd.doc)[b.id] === true,
         children: b.children.length,
         // 角色进诊断面（journal 行是只读日期，测试要能把它挑出来）
         roles: identityTags(b),

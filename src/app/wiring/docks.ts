@@ -16,6 +16,7 @@ import {
   buildAdjacency,
   dockKey,
   findInForest,
+  isCardCollapsed,
   isWidgetBlock,
   pinDefaultFor,
   pruneEphemeralWindows,
@@ -149,7 +150,8 @@ export function setupDocks(deps: DocksDeps) {
   function cardStateFor(side: 'left' | 'right', id: string): DockCardState {
     const dock = deps.prefs().dock
     return {
-      collapsed: dock.collapsedCards[id] === true,
+      // 收起状态只有一份判据（单卡目标那一张此刻展开）；见 `isCardCollapsed`
+      collapsed: isCardCollapsed(dock, side, id),
       solo: dock.solo[side] === id,
       pinned: dock.pinnedCards[id] === true,
       onToggleCollapse: () => toggleCollapse(id),
@@ -162,8 +164,20 @@ export function setupDocks(deps: DocksDeps) {
 
   function toggleCollapse(id: string): void {
     const dock = deps.prefs().dock
-    if (dock.collapsedCards[id]) delete dock.collapsedCards[id]
+    /**
+     * **取反的是「屏幕上这一张现在收着没有」，不是落盘那一位。**
+     *
+     * 两者在单卡期间会分叉：收着的卡成了单卡目标时，渲染层豁免它（此刻展开）。
+     * 按落盘值取反 ⇒ 用户点「收起」，反而把键删掉变成展开（一次点了没反应）。
+     *
+     * 所以判据用 `isCardCollapsed`（唯一一份）；收起时顺带**退出单卡** ——
+     * 不退出去的话，单卡那一层会把这次收起再豁免掉。
+     */
+    const side = dock.solo.left === id ? 'left' : dock.solo.right === id ? 'right' : null
+    const visibleFolded = isCardCollapsed(dock, side ?? 'left', id)
+    if (visibleFolded) delete dock.collapsedCards[id]
     else dock.collapsedCards[id] = true
+    if (!visibleFolded && side) dock.solo[side] = null
     renderDocks()
     deps.scheduleDeviceSave()
     deps.scheduleBadge()
@@ -189,7 +203,7 @@ export function setupDocks(deps: DocksDeps) {
   function toggleFoldAll(side: 'left' | 'right'): void {
     const dock = deps.prefs().dock
     const keys = dock[side].cards.map(dockKey)
-    const anyExpanded = dock[side].cards.some((e) => !dock.collapsedCards[dockKey(e)])
+    const anyExpanded = dock[side].cards.some((e) => !isCardCollapsed(dock, side, dockKey(e)))
     if (anyExpanded) {
       for (const k of keys) dock.collapsedCards[k] = true
       dock.solo[side] = null
@@ -202,15 +216,19 @@ export function setupDocks(deps: DocksDeps) {
   }
 
   /**
-   * 单卡＝「只看这张卡」：进入时**顺手展开目标**——收着的卡进单卡，槽里只剩一颗头，
-   * 「看」就落空了。退出**不收回**（不记「solo 前收没收」的第三态）：退出后多半还要
-   * 就着这张卡继续用；要全收起来有「收起所有卡」。
+   * 单卡＝「只看这张卡」：槽里只剩它一张（同槽其它卡隐藏）。
+   *
+   * **收着的卡进单卡时，这一张此刻展开** —— 否则「看」落空（槽里只剩一颗头）。
+   * 但这个展开是**叠在渲染上的一层**，不写 `collapsedCards`：退出单卡自动回到收着，
+   * 不需要记「solo 前收没收」的第三态（与中心「聚焦即展开」同一条判据）。
+   *
+   * 用户在单卡期间**自己收起它** ⇒ 以这次为准（写进 `collapsedCards`，渲染时
+   * 单卡那一层看到「用户要收」就让位），退出单卡后也保持收着。
    */
   function toggleSolo(side: 'left' | 'right', id: string): void {
     const dock = deps.prefs().dock
     const entering = dock.solo[side] !== id
     dock.solo[side] = entering ? id : null
-    if (entering) delete dock.collapsedCards[id]
     renderDocks()
     deps.scheduleDeviceSave()
     deps.scheduleBadge()
@@ -399,7 +417,7 @@ export function setupDocks(deps: DocksDeps) {
    */
   function syncFoldAllButton(side: 'left' | 'right'): void {
     const dock = deps.prefs().dock
-    const anyExpanded = dock[side].cards.some((e) => !dock.collapsedCards[dockKey(e)])
+    const anyExpanded = dock[side].cards.some((e) => !isCardCollapsed(dock, side, dockKey(e)))
     const el = deps.getSlots()[side].foldAllEl
     const icon = anyExpanded ? 'lucide:chevrons-down-up' : 'lucide:chevrons-up-down'
     if (el.dataset.icon !== icon) renderIcon(el, icon, 'chevrons-down-up')

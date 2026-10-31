@@ -21,6 +21,7 @@ import {
   type Block,
   type BlockProps,
   type Doc,
+  type FoldState,
   type Located,
 } from './model.ts'
 import { canWriteText, typeDeclOf } from './types.ts'
@@ -86,7 +87,7 @@ export function visibleRows(doc: Doc): VisibleRow[] {
         hasChildren: b.children.length > 0 && !childless.has(b.id),
       })
     },
-    { folded: doc.folded, ...(childless.size > 0 ? { childless } : {}) },
+    { folded: foldStateOf(doc), ...(childless.size > 0 ? { childless } : {}) },
   )
   return out
 }
@@ -804,7 +805,48 @@ export function moveBlockTo(doc: Doc, id: string, targetId: string, pos: 'before
  * 而「块被删掉后残留的 id」只是一条没人读的键，不会让树显示错误。
  */
 export function isFolded(doc: Doc, id: string): boolean {
-  return doc.folded?.[id] === true
+  return focusExempt(doc, id) ? false : doc.folded?.[id] === true
+}
+
+/**
+ * 这一块**在聚焦豁免里**吗：这一屏只剩它一个根，而且用户还没在聚焦期间显式折过它。
+ *
+ * 判据只在「这一屏真的只有它」时成立：`focusRootId` 是装载时记下的，
+ * 而根集合可能之后变多（日记流下滚追加）——那时它已经不再是整屏的内容。
+ */
+function focusExempt(doc: Doc, id: string): boolean {
+  const focus = doc.focusRootId
+  return Boolean(focus) && focus === id && doc.focusRootOpen === true && doc.roots.length === 1 && doc.roots[0]!.id === focus
+}
+
+/**
+ * **这一屏里真正生效的折叠表**（渲染、Enter 落点、可见行都读这一份，不直接读 `doc.folded`）。
+ *
+ * 只有一条差：`focusRootId`（这一屏的聚焦根）**自己不折** —— 聚焦就是「只看这一块」，
+ * 把这一块收起来等于把整屏收成一行（而且折起来的块被聚焦时，子树不产出可见行，
+ * 看起来像「点了没反应」）。退出聚焦（换成别的装载）时这一位自然不在，
+ * 那一块回到原来的折叠态 ⇒ 不需要记快照。
+ *
+ * ⚠️ 这里**不改** `doc.folded`：聚焦只是「这一屏怎么看」，不是「用户改了折叠」。
+ * ⚠️ 用户在聚焦期间显式折它 ⇒ `writeFold` 清掉 `focusRootOpen`，以这次为准。
+ */
+export function foldStateOf(doc: Doc): FoldState {
+  const folded = doc.folded ?? {}
+  const focus = doc.focusRootId
+  if (!focus || !focusExempt(doc, focus) || folded[focus] !== true) return folded
+  const next = { ...folded }
+  delete next[focus]
+  return next
+}
+
+/**
+ * 这一屏的聚焦根（装载形状推出来的）：只有一个根 ⇒ 它就是整屏的内容。
+ *
+ * 判据落在**装载形状**上，不是某个入口的意图：点块标 zoom、打开页、翻日单日、
+ * 单根查询块都归这一条；日记流（多段）不受影响（收起一天只是收起那一天）。
+ */
+export function focusRootOf(roots: readonly Block[]): string | undefined {
+  return roots.length === 1 ? roots[0]!.id : undefined
 }
 
 /**
@@ -827,9 +869,14 @@ export function hasFoldable(b: Block | undefined): boolean {
  *
  * ⇒ 入口防：`v === true` 且既无子块也无身体 ⇒ 不记（保持「全展开」这个默认态）。
  *    `v === false` 永远放行：展开是用来**清**的，不该被同一条判断挡住。
+ *
+ * ⚠️ **显式折这一屏的聚焦根 ⇒ 以这次为准**：聚焦期间它默认展开（见 `foldStateOf`），
+ *    用户偏要折它时不能既写折叠表又被豁免掉（那会「点了没反应」）。
+ *    所以这里顺手清掉 `focusRootOpen`：这次折叠当场生效，同一屏之后的重装也保持。
  */
 function writeFold(doc: Doc, id: string, v: boolean): void {
   if (v && !hasFoldable(locate(doc, id)?.block)) return
+  if (v && doc.focusRootId === id) delete doc.focusRootOpen
   const folded = { ...(doc.folded ?? {}) }
   if (v) folded[id] = true
   else delete folded[id]
