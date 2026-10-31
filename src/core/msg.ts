@@ -387,6 +387,8 @@ export const MSG = {
   'ui.query.count': '{count} 条结果',
   'ui.query.topCount': '（{count} 个顶层）',
   'ui.query.refresh': '刷新',
+  'ui.query.foldAll': '全部收起',
+  'ui.query.unfoldAll': '全部展开',
   'ui.query.refreshed': '已刷新：{count} 条',
   'ui.query.refreshFailed': '刷新失败：{message}（已保留上次结果）',
   'ui.query.stale': '结果可能已过期',
