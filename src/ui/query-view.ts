@@ -46,6 +46,7 @@ import {
   defaultKindFor,
   todayISO,
   type Block,
+  type FoldState,
   type BlockStore,
   type FrozenResult,
   type QueryContext,
@@ -186,6 +187,11 @@ export interface ViewHostEls {
   /** 条件 chip 条（查询源才有；点击＝打开构建器） */
   filters: HTMLElement
   refresh: HTMLButtonElement
+  /**
+   * 「全部展开／全部收起」：**一个**按钮，文案随状态变。
+   * 非大纲视图下隐藏 —— 那里没有「行折叠」这回事，显示了就是骗人。
+   */
+  foldAll: HTMLButtonElement
   newRow: HTMLButtonElement
   /** 「结果可能已过期」标记：只提示、不改列表（自动移除会让人正在读的那行凭空消失） */
   stale: HTMLElement
@@ -223,11 +229,15 @@ export function createViewHostEls(): ViewHostEls {
   const refresh = document.createElement('button')
   refresh.type = 'button'
   refresh.className = 'queryview-refresh'
+  const foldAll = document.createElement('button')
+  foldAll.type = 'button'
+  foldAll.className = 'queryview-foldall'
+  foldAll.hidden = true
   const newRow = document.createElement('button')
   newRow.type = 'button'
   newRow.className = 'queryview-newrow'
   newRow.hidden = true
-  head.append(title, count, topCount, stale, filters, views, refresh, newRow)
+  head.append(title, count, topCount, stale, filters, views, refresh, foldAll, newRow)
 
   const body = document.createElement('div')
   body.className = 'queryview-body'
@@ -248,7 +258,7 @@ export function createViewHostEls(): ViewHostEls {
   body.append(editor, table)
 
   root.append(head, body)
-  return { root, head, title, count, topCount, filters, views, refresh, newRow, stale, editor, table }
+  return { root, head, title, count, topCount, filters, views, refresh, foldAll, newRow, stale, editor, table }
 }
 
 /** 一个「表面实例」的冻结结果（内存；不进 KB、不进撤销） */
@@ -286,6 +296,8 @@ export class ViewHost {
   private derivedSort: SortKey[] = []
   /** 派生栏的「整片重算」防抖计时器（成员可能新增，局部修补不够） */
   private derivedTimer: number | null = null
+  /** 这一屏的**顶层行**（`render` 时存下来：「全部收起」要有东西可收才有意义） */
+  private rows: readonly Block[] = []
 
   constructor(els: ViewHostEls, deps: ViewHostDeps) {
     this.els = els
@@ -311,6 +323,7 @@ export class ViewHost {
     this.els.newRow.textContent = t('ui.view.newRow')
     this.els.newRow.title = t('ui.view.newRowTitle')
     this.els.newRow.addEventListener('click', () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }))
+    this.els.foldAll.addEventListener('click', () => this.toggleFoldAll())
     this.cell = new BlockCell({
       store: deps.store,
       write: deps.write,
@@ -822,6 +835,7 @@ export class ViewHost {
     this.els.table.hidden = true
     this.els.table.replaceChildren()
     this.els.editor.hidden = false
+    this.syncFoldAll()
     if (!this.outline) {
       const host = document.createElement('div')
       host.className = 'queryview-editor'
@@ -855,6 +869,7 @@ export class ViewHost {
     this.outline?.dispose()
     this.outline = null
     this.els.editor.hidden = true
+    this.syncFoldAll()
     this.els.editor.replaceChildren()
     /**
      * 三条渲染器：表格（行＝记录、列＝属性）、结构映射表（表头＝直接子块、一列＝它的孩子）、
@@ -1128,6 +1143,7 @@ export class ViewHost {
       // 空结果里没有可展开的东西：收起栈也一起清掉
       this.expanded = new Set()
       this.covers = new Map()
+      this.rows = []
       // 空结果是**状态**不是错误：保留抬头（含刷新按钮），正文给一句实话。
       const spec = readSpec(b)
       const why = spec && usesSelf(spec.where) ? t('ui.mount.needsHost') : t('ui.query.empty')
@@ -1152,9 +1168,11 @@ export class ViewHost {
     )
     this.expanded = plan.expanded
     this.covers = plan.covers
+    this.rows = plan.roots
     const folded = unfoldForContext(this.outline?.ed?.doc.folded ?? {}, plan.covers, (id) => this.deps.kb.pathOf(id))
     this.outline?.ed?.loadPage({ roots: plan.roots, folded, contexts: plan.contexts, expandedRoots: plan.contextRoots })
     if (plan.focusId) this.outline?.ed?.reveal(plan.focusId)
+    this.syncFoldAll()
   }
 
   /** 普通点面包屑：把祖先装成这一栏的根（中心／历史不动） */
@@ -1170,14 +1188,62 @@ export class ViewHost {
     this.render(this.covers.get(rootId)?.[0])
   }
 
+  /* ------------------------------------------------------ 全部展开／全部收起 */
+
+  /** 顶层行里**有子块**的那些：只有它们折起来才有可见效果 */
+  private topFoldable(): string[] {
+    return this.rows.filter((b) => b.children.length > 0).map((b) => b.id)
+  }
+
+  /** 顶层行里还有展开着的吗（决定按钮此刻该说「收起」还是「展开」） */
+  private anyTopExpanded(): boolean {
+    const folded = this.outline?.ed?.doc.folded ?? {}
+    return this.topFoldable().some((id) => !folded[id])
+  }
+
+  /**
+   * **只作用于顶层行**（用户定：不递归到所有层——连嵌套块一起收掉不是他要的）。
+   *
+   * 直接写 `doc.folded` 再 `render()`，而不是循环 `toggleCollapse`：后者每行一次 `renderAll()`，
+   * 而 `doc.folded` 本来就是持久状态 —— 这么写之后用户手动展开某一行仍能叠加在上头。
+   *
+   * ⚠️ **不动上下文链**：`render()` 里的 `unfoldForContext` 会在这份基线上把覆盖到的祖先再展开一遍，
+   *    所以「收起全部」不会顺手收掉面包屑那几层 —— 那几层归上下文管，不归这个按钮管。
+   */
+  private toggleFoldAll(): void {
+    const ed = this.outline?.ed
+    if (!ed) return
+    const ids = this.topFoldable()
+    if (ids.length === 0) return
+    const next: FoldState = { ...ed.doc.folded }
+    if (this.anyTopExpanded()) for (const id of ids) next[id] = true
+    else for (const id of ids) delete next[id]
+    ed.doc.folded = next
+    this.render()
+  }
+
+  /**
+   * 按钮的**可见与文案**。非大纲视图下隐藏 —— 那里没有行折叠，
+   * 显示了就是一个点了没反应的按钮（比不显示更糟：用户会以为它坏了）。
+   */
+  private syncFoldAll(): void {
+    const on = !this.els.editor.hidden && this.topFoldable().length > 0
+    this.els.foldAll.hidden = !on
+    if (!on) return
+    this.els.foldAll.textContent = this.anyTopExpanded() ? t('ui.query.foldAll') : t('ui.query.unfoldAll')
+  }
+
   private renderEmpty(text: string): void {
     this.expanded = new Set()
     this.covers = new Map()
+    // 空态没有行可折：顶层行清空，按钮随之隐藏
+    this.rows = []
     this.els.root.hidden = false
     this.els.title.hidden = false
     this.els.title.textContent = text
     this.els.count.textContent = ''
     this.els.editor.hidden = false
+    this.syncFoldAll()
     const host = this.outlineHost
     if (host) {
       host.dataset.empty = '1'

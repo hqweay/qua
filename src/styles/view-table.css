@@ -36,6 +36,7 @@
 }
 /* 抬头右侧的三颗按钮挤在一行：切换器吃剩余空间，按钮各自只占自己那一格 */
 .queryview-refresh,
+.queryview-foldall,
 .queryview-newrow {
   margin-left: var(--ui-gap-3);
   background: none;
@@ -50,6 +51,7 @@
   font-weight: var(--ui-fw-medium);
 }
 .queryview-refresh:hover,
+.queryview-foldall:hover,
 .queryview-newrow:hover {
   color: var(--ui-text);
 }
@@ -58,6 +60,7 @@
   color: var(--ui-text-tertiary);
 }
 .queryview-newrow[hidden],
+.queryview-foldall[hidden],
 .queryview-refresh[hidden],
 .queryview-views[hidden] {
   display: none;
