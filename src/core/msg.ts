@@ -413,6 +413,8 @@ export const MSG = {
   'ui.query.builder.yes': '是',
   'ui.query.builder.no': '否',
   'ui.query.builder.tagHint': '标签名',
+  'ui.query.builder.noValue': '（还没填）',
+  'ui.query.choiceDeleted': '选项已删除',
   'ui.query.builder.textHint': '正文包含',
   'ui.query.builder.complex': '复合条件（用 JSON 编辑）',
   'ui.query.kind.todo': '待办',

@@ -711,7 +711,7 @@ export class ViewHost {
     ctx.addEventListener('click', () => this.deps.invoke('core.query/open-builder', { owner: this.writeOwner }))
     box.appendChild(ctx)
 
-    for (const label of queryChips(spec, this.deps.fields())) {
+    for (const label of queryChips(spec, this.deps.fields(), this.deps.choices)) {
       const chip = document.createElement('span')
       // 单行省略是**原语**（`primitives.css`），组件里不再抄一份几何
       chip.className = 'queryview-chip ui-ellipsis'

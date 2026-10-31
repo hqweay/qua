@@ -14,7 +14,7 @@
  */
 import { canonicalSpec } from './query-view.ts'
 import { isQuerySpec, type QueryNode, type QuerySpec } from './query.ts'
-import { TASK_STATUS_PROP_ID } from './props.ts'
+import { type PropKind, TASK_STATUS_PROP_ID } from './props.ts'
 
 /** 一行条件能表达的四种事情（其余形态走 JSON） */
 export type DraftKind = 'todo' | 'tag' | 'text' | 'prop'
@@ -25,6 +25,28 @@ export type DraftOp = 'eq' | 'neq' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte' | 
 export type TodoPreset = 'todo' | 'done' | 'none'
 
 export const DRAFT_OPS: readonly DraftOp[] = ['eq', 'neq', 'contains', 'gt', 'gte', 'lt', 'lte', 'exists', 'empty']
+
+/**
+ * `select` 只认这四个算子：值是选项块 id，大小比较与「包含」对它没有意义
+ * （`contains` 等 **multi-select** 来了再开，那时它判「数组任一元素」）。
+ */
+export const SELECT_OPS: readonly DraftOp[] = ['eq', 'neq', 'exists', 'empty']
+
+/**
+ * 这一行**能问**哪些算子（按字段 kind 收窄）。
+ *
+ * - **布尔**：没有未填态，`empty` 与 `exists:false` 是同一个答案 ⇒ 不给 `empty`；
+ * - **`select`**：只有「等于／不等于某一项」「有没有这一栏」「填了没填」这四个问法。
+ *
+ * ⚠️ 已经存下来的算子**永远留在下拉里**：收窄只决定「新加时不给什么」，
+ *    不许打开一次就悄悄把用户的条件改掉。
+ */
+export function opsFor(kind: PropKind | undefined, current: DraftOp | undefined): readonly DraftOp[] {
+  const cur = current ?? 'eq'
+  const allow: readonly DraftOp[] =
+    kind === 'checkbox' ? DRAFT_OPS.filter((o) => o !== 'empty') : kind === 'select' ? SELECT_OPS : DRAFT_OPS
+  return allow.includes(cur) ? allow : [...allow, cur]
+}
 
 /** 一行条件（表单里的那一行） */
 export interface DraftRow {

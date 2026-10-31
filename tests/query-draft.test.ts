@@ -14,6 +14,7 @@ import {
   draftOfSpec,
   literalOf,
   nodeOfRow,
+  opsFor,
   runQuery,
   specOfDraft,
   TASK_STATUS_PROP_ID,
@@ -204,4 +205,24 @@ test('算子与索引路径等价（同一份条件，两条路给同一结果�
   const where: QuerySpec['where'] = { any: [{ prop: { id: 'p', gt: 5 } }, { prop: { id: 'p', empty: true } }] }
   const pure = runQuery({ where, scope: 'all' }, { blocks }).map((h) => h.blockId)
   assert.deepEqual(pure, ['b', 'c'])
+})
+
+test('算子按字段 kind 收窄：select 不给大小比较，布尔不给「为空」', () => {
+  // select 的值是**选项块 id**：比大小、比包含都没有意义（`contains` 等 multi-select 来了再开）
+  assert.deepEqual([...opsFor('select', undefined)], ['eq', 'neq', 'exists', 'empty'])
+  assert.ok(!opsFor('select', undefined).includes('gt'))
+  assert.ok(!opsFor('select', undefined).includes('contains'))
+  // 布尔没有「未填」这一态：问「为空」与问「没有这一栏」是同一个答案 ⇒ 两个选项指向同一结果，不给
+  const boolOps = opsFor('checkbox', undefined)
+  assert.ok(!boolOps.includes('empty'))
+  assert.ok(boolOps.includes('exists'))
+  // 其余 kind 不受影响
+  assert.deepEqual([...opsFor('text', undefined)], [...DRAFT_OPS])
+})
+
+test('收窄不许悄悄改掉已存下来的算子（打开一次条件就变了＝静默改写）', () => {
+  const ops = opsFor('select', 'contains')
+  assert.ok(ops.includes('contains'), '已存的算子必须还在：不许打开一次就悄悄改掉用户的条件')
+  assert.equal(ops.indexOf('contains'), ops.length - 1, '补在末尾：前四个仍是这一类的正常问法')
+  assert.ok(opsFor('checkbox', 'empty').includes('empty'))
 })
