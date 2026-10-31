@@ -424,7 +424,7 @@ export const MSG = {
   'ui.query.todo.done': '已完成',
   'ui.query.todo.none': '不是任务',
   'ui.query.filter': '条件',
-  'ui.query.context': '相对：这一块之下',
+  'ui.query.context': '范围：这一块之下',
   'ui.query.contextAll': '范围：全库',
   'ui.query.edit': '编辑条件…',
   'ui.query.label.text': '正文含「{text}」',
@@ -625,6 +625,8 @@ export const MSG = {
   'menu.group.new': '新建',
   'menu.group.viewSort': '排序',
   'menu.group.viewAdd': '新建视图',
+  'menu.group.mount': '栏',
+  'menu.group.queryPage': '查询页',
 
   /* ------------------------------------------------- 绑定表 label（menu.label.*） */
   'menu.label.toggleCollapse': '折叠 / 展开',
