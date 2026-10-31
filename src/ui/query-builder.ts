@@ -12,10 +12,10 @@
  * ⚠️ 这里零命令、零模型写：`apply` 由装配层注入（它才是「一次动作一笔事务」的地方）。
  */
 import {
-  DRAFT_OPS,
   canonicalSpec,
   draftOfSpec,
   nodeOfRow,
+  opsFor,
   specOfDraft,
   type Block,
   type DraftOp,
@@ -37,6 +37,14 @@ export interface QueryBuilderDeps {
    * 两个选项指向同一个结果，就是在教用户两种写法。
    */
   fields: () => readonly { id: string; label: string; kind?: PropKind }[]
+  /**
+   * `select` 属性的**选项**（定义块的直接子块；顺序＝children 顺序）。
+   *
+   * 为什么必须接：值是**选项块 id**，不接这一格用户只能手输 id，而 id 在界面上无处可见。
+   * 取**全量并排除软删**（`choicesOf`）：查询是跨块的，不能按某一个块的可选范围收窄 ——
+   * 那是 `choicesForDef` 的事，它回答的是「这一块此刻能选什么」。
+   */
+  choices?: (propId: string) => readonly { id: string; label: string }[]
   /** 写条件（一次事务／一轮撤销） */
   apply: (spec: QuerySpec) => void
   /** 关掉浮层 */
@@ -75,6 +83,10 @@ export function renderQueryBuilder(box: HTMLElement, deps: QueryBuilderDeps): vo
   // 宿主是 `.popover` 壳（定位与层级都住在那个类上）：只能加自己的类，不能整个覆盖——
   // 覆盖掉壳类，浮层就失去了 position:fixed，整盒画到文档流末尾（屏幕外）。
   box.classList.add('qb')
+
+  /** 这一行选中的字段是什么 kind：它决定**能问哪些算子**与**值那一格长什么样** */
+  const fieldKind = (id: string | undefined): PropKind | undefined =>
+    id ? deps.fields().find((f) => f.id === id)?.kind : undefined
 
   const head = document.createElement('div')
   head.className = 'qb-head'
@@ -336,14 +348,8 @@ export function renderQueryBuilder(box: HTMLElement, deps: QueryBuilderDeps): vo
 
       const op = document.createElement('select')
       op.className = 'qb-op ui-input'
-      /**
-       * **布尔属性不提供「为空」**：它没有未填态，`empty` 与 `exists:false` 是同一个答案。
-       * 已经存下来的 `empty` 仍然显示（不许打开一次就悄悄改掉用户的条件）。
-       */
-      const kind = deps.fields().find((f) => f.id === (row.field ?? ''))?.kind
-      const ops =
-        kind === 'checkbox' && (row.op ?? 'eq') !== 'empty' ? DRAFT_OPS.filter((o) => o !== 'empty') : DRAFT_OPS
-      for (const id of ops) {
+      /** 算子按字段 kind 收窄（两条理由见 `opsFor`）；已存下来的算子不会被悄悄换掉 */
+      for (const id of opsFor(fieldKind(row.field), row.op)) {
         const o = document.createElement('option')
         o.value = id
         o.textContent = t(OP_TEXT[id])
@@ -378,6 +384,43 @@ export function renderQueryBuilder(box: HTMLElement, deps: QueryBuilderDeps): vo
         sel.appendChild(o)
       }
       sel.value = row.value ?? 'todo'
+      sel.addEventListener('change', () => {
+        row.value = sel.value
+        jsonText = null
+      })
+      el.appendChild(sel)
+    } else if (
+      row.kind === 'prop' &&
+      fieldKind(row.field) === 'select' &&
+      !(row.op === 'exists' || row.op === 'empty')
+    ) {
+      /**
+       * `select` 的值是**选项块 id** ⇒ 值那一格必须是选项下拉（存 id、显示名）。
+       * 用自由文本的话，用户得先知道 id 才写得出「优先级 ＝ 高」，而 id 在界面上无处可见。
+       */
+      const sel = document.createElement('select')
+      sel.className = 'qb-value ui-input'
+      const opts = deps.choices?.(row.field ?? '') ?? []
+      const current = row.value ?? ''
+      // 「这一行还没填」：不是条件的一项，只是让下拉有个空态可显示
+      const blank = document.createElement('option')
+      blank.value = ''
+      blank.textContent = t('ui.query.builder.noValue')
+      sel.appendChild(blank)
+      // 当前值不在候选里 ⇒ 多半已被软删：照旧显示并标出来，不许一次打开就悄悄改掉条件
+      if (current !== '' && !opts.some((c) => c.id === current)) {
+        const gone = document.createElement('option')
+        gone.value = current
+        gone.textContent = t('ui.query.choiceDeleted')
+        sel.appendChild(gone)
+      }
+      for (const c of opts) {
+        const o = document.createElement('option')
+        o.value = c.id
+        o.textContent = c.label
+        sel.appendChild(o)
+      }
+      sel.value = current
       sel.addEventListener('change', () => {
         row.value = sel.value
         jsonText = null
@@ -441,7 +484,13 @@ export function renderQueryBuilder(box: HTMLElement, deps: QueryBuilderDeps): vo
  * 文案住在这里而不是 `core/`：拼的是「字段名 ＋ 算子 ＋ 值」，字段名是**用户数据**
  * （属性定义的显示名）、算子那半截是 UI 词汇——两样都不是模型的事。
  */
-export function rowLabel(row: DraftRow, fieldName: (id: string) => string, opText: (op: DraftOp) => string): string {
+export function rowLabel(
+  row: DraftRow,
+  fieldName: (id: string) => string,
+  opText: (op: DraftOp) => string,
+  /** `select` 的值：选项块 id → 选项名。不接就只能把一串 id 显示给人看 */
+  choiceLabel?: (propId: string, valueId: string) => string | undefined,
+): string {
   if (row.kind === 'todo') {
     const v = row.value === 'done' ? 'done' : row.value === 'none' ? 'none' : 'todo'
     return t(v === 'done' ? 'ui.query.todo.done' : v === 'none' ? 'ui.query.todo.none' : 'ui.query.todo.todo')
@@ -452,18 +501,32 @@ export function rowLabel(row: DraftRow, fieldName: (id: string) => string, opTex
   const op: DraftOp = row.op ?? 'eq'
   if (op === 'exists') return t(row.value === 'false' ? 'ui.query.label.notExists' : 'ui.query.label.exists', { name })
   if (op === 'empty') return t(row.value === 'false' ? 'ui.query.label.notEmpty' : 'ui.query.label.empty', { name })
-  return t('ui.query.label.cmp', { name, op: opText(op), value: row.value ?? '' })
+  // 走到这里 `op` 已不是 `exists`／`empty`（上面两条已 return）：值那一格才有「选项名」可言
+  const raw = row.value ?? ''
+  const shown = choiceLabel
+    ? (choiceLabel(row.field ?? '', raw) ?? (raw === '' ? t('ui.query.builder.noValue') : raw))
+    : raw
+  return t('ui.query.label.cmp', { name, op: opText(op), value: shown })
 }
 
 /** 一条条件的**筛选 chip**（抬头那一行；点击打开构建器） */
-export function queryChips(spec: QuerySpec, fields: readonly { id: string; label: string }[]): string[] {
+export function queryChips(
+  spec: QuerySpec,
+  fields: readonly { id: string; label: string }[],
+  /** `select` 的值要显示**选项名**而不是一串块 id */
+  choices?: (propId: string) => readonly { id: string; label: string }[],
+): string[] {
   const draft = draftOfSpec(spec)
   if (draft.verbatim !== undefined) return [t('ui.query.builder.complex')]
+  const choiceLabel = choices
+    ? (propId: string, valueId: string) => choices(propId).find((c) => c.id === valueId)?.label
+    : undefined
   return draft.rows.map((row) =>
     rowLabel(
       row,
       (id) => fields.find((f) => f.id === id)?.label ?? id.slice(-6),
       (op) => t(OP_TEXT[op]),
+      choiceLabel,
     ),
   )
 }
