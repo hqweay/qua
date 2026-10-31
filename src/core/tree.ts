@@ -15,6 +15,7 @@ import {
   isDeleted,
   isJournalBlock,
   isPropDefBlock,
+  isQueryBlock,
   mkBlock,
   writeBlockContent,
   type Block,
@@ -807,18 +808,28 @@ export function isFolded(doc: Doc, id: string): boolean {
 }
 
 /**
- * 写折叠态 —— **只有有子块的块才可能有折叠态**。
+ * 这一行下面有没有**可收起的东西**：子块，或查询块的结果视图（身体）。
+ *
+ * 查询块没有 `children`（命中不是子块），但它有身体；折叠它折的是**结果视图**。
+ * 这条判据只回答「能不能折」，不回答「画在哪」（正文内联／段根／右槽窗口分别由渲染层决定）。
+ */
+export function hasFoldable(b: Block | undefined): boolean {
+  return Boolean(b && (b.children.length > 0 || isQueryBlock(b)))
+}
+
+/**
+ * 写折叠态 —— **只有有子块或身体（查询结果视图）的块才可能有折叠态**。
  *
  * 为什么这条判断放在写入口、而不是每次渲染再过滤一遍：
- * 折叠的意义是「把子树藏起来」。叶子块没有子树可藏，标成折叠就是**记录了一个不存在的事实**
- * —— 块标画出折叠环（「这里收着东西」），点开却什么都没有。而这条记录还会被存进设备状态的
- * 折叠表里，跟着跑到下一次打开。
+ * 折叠的意义是「把这一行下面的东西藏起来」。既没有子块也没有身体的块没有可藏的，
+ * 标成折叠就是**记录了一个不存在的事实** —— 块标画出折叠环（「这里收着东西」），
+ * 点开却什么都没有。而这条记录还会被存进设备状态的折叠表里，跟着跑到下一次打开。
  *
- * ⇒ 入口防：`v === true` 且没有子块 ⇒ 不记（保持「全展开」这个默认态）。
+ * ⇒ 入口防：`v === true` 且既无子块也无身体 ⇒ 不记（保持「全展开」这个默认态）。
  *    `v === false` 永远放行：展开是用来**清**的，不该被同一条判断挡住。
  */
 function writeFold(doc: Doc, id: string, v: boolean): void {
-  if (v && (locate(doc, id)?.block.children.length ?? 0) === 0) return
+  if (v && !hasFoldable(locate(doc, id)?.block)) return
   const folded = { ...(doc.folded ?? {}) }
   if (v) folded[id] = true
   else delete folded[id]
@@ -840,13 +851,13 @@ export function setCollapsed(doc: Doc, id: string, v: boolean): boolean {
 /**
  * 折 / 展**该块自己**（折叠三角、`mod+.`）。
  *
- * ⚠️ **无子块 ⇒ `false`**（什么都没变）：折叠是「把子树藏起来」，没有子树就没有这个动作。
+ * ⚠️ **既无子块也无身体 ⇒ `false`**（什么都没变）：折叠是「把这一行下面的东西藏起来」，
+ *    查询块的身体是结果视图，同样可折；两样都没有就没有这个动作。
  *    返回 `false` 让调用方跳过重渲染 —— 否则点一下会白画一屏，而屏幕上没有任何变化。
  */
 export function toggleCollapsed(doc: Doc, id: string): boolean {
   const loc = locate(doc, id)
-  if (!loc) return false
-  if (loc.block.children.length === 0) return false
+  if (!loc || !hasFoldable(loc.block)) return false
   writeFold(doc, id, !isFolded(doc, id))
   return true
 }

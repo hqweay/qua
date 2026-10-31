@@ -290,6 +290,11 @@ export class ViewHost {
   constructor(els: ViewHostEls, deps: ViewHostDeps) {
     this.els = els
     this.deps = deps
+    /**
+     * 表面进 DOM：`inline` 与 `center` 的差别只在几何/抬头去重（行上已经有块名），
+     * 渲染器、配置、冻结全是同一份。CSS 按这一格选「贴在这一行下面」。
+     */
+    this.els.root.dataset.surface = deps.surface
     // 派生栏的抬头由挂载区画（它要说清这一栏是什么）；这一层只借渲染器
     if (deps.derived) this.els.head.hidden = true
     this.els.refresh.textContent = t('ui.query.refresh')
@@ -326,6 +331,18 @@ export class ViewHost {
         return
       }
       if (ids && ids.length > 0) {
+        /**
+         * **拥有者自己的配置变了**（`_query`／`_views`／`_activeView`／名字）⇒ 重读重画。
+         *
+         * 段尾宿主原本靠装配层的 `renderMounts()` 补这一下；右槽窗口与正文内联体
+         * 没有那条路径 —— 订阅是它们唯一的回声。`sync()` 只在 spec/context 真变时
+         * 重查，改视图不会重冻成员。
+         */
+        const owner = this.bound.owner
+        if (owner.kind === 'block' && ids.includes(owner.blockId)) {
+          this.sync()
+          return
+        }
         this.noteTouched(ids)
         // children/items 源是活的：子块的正文/属性变了，那一行要跟着变（按 blockId 局部修补）
         if (this.table) this.table.sync(ids)
@@ -339,6 +356,17 @@ export class ViewHost {
   /** 视图宿主的根（装配层把它放进那一段的段尾槽） */
   get root(): HTMLElement {
     return this.els.root
+  }
+
+  /**
+   * **折起这个视图体**：只藏不卸载（冻结结果与滚动位置还在）。
+   *
+   * 折叠的判据（`Doc.folded`）在编辑器那一侧；这里只负责把结果落到 DOM，
+   * 与正文内联体用同一个 `data-folded` 契约（CSS 只认这一格）。
+   */
+  setFolded(folded: boolean): void {
+    if (folded) this.els.root.dataset.folded = '1'
+    else delete this.els.root.dataset.folded
   }
 
   /** 大纲分支的编辑器（没有就在；表格分支下是 `null`） */
@@ -588,8 +616,9 @@ export class ViewHost {
     /**
      * 查询源保留名字（它自己就是这张视图的标题）；
      * children/items 源的根行就在上面，抬头再写一遍同一句就是重复。
+     * **内联体也不写名字**：查询块那一行已经显示过它 —— 同一句话同屏两遍是噪声。
      */
-    this.els.title.hidden = !query
+    this.els.title.hidden = !query || this.deps.surface === 'inline' || this.deps.surface === 'dock'
     this.els.title.textContent = query ? (name === '' ? t('ui.query.untitled') : name) : ''
     const n = this.rowCount()
     this.els.count.textContent = query ? t('ui.query.count', { count: n }) : t('ui.view.count', { count: n })

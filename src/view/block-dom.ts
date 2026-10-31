@@ -21,6 +21,7 @@ import {
   blockLabel,
   blockTypeOf,
   displayNameOf,
+  hasQueryBody,
   identityTags,
   inlineTagIdsOf,
   isJournal,
@@ -101,17 +102,50 @@ export function applyWidgetHeights(el: HTMLElement, h: WidgetHeights | null): vo
 }
 
 /**
+ * **正文里查询块自己的身体**：静止/聚焦两档高度。
+ *
+ * 与 `WIDGET_H` 同一条纪律：视觉与虚拟化读同一个数（占位是在没有挂 DOM 的行上算的）。
+ * 查询结果可能很长 ⇒ 它是一个**定高窗口、内部滚动**：不把正文撑成几十行，
+ * 也不去量 DOM。聚焦档由 `:focus-within` 选，和组件体一致。
+ */
+export const VIEW_BODY_H = { rest: 168, focus: 320 } as const
+
+/**
+ * 查询体与上一行之间的 `row-gap`（＝`--ui-gap-1`）。
+ *
+ * 视觉走 token，虚拟化走这个数：占位是在没有挂 DOM 的行上算的，读不到 computed style。
+ * 和 `ALIAS_HEAD_H` 一样，两处是同一件事的两份数值；改 gap 时一起改。
+ */
+export const VIEW_BODY_GAP = 2
+
+export function applyViewBodyHeights(el: HTMLElement): void {
+  el.style.setProperty('--view-body-rest', CSS.px(VIEW_BODY_H.rest).toString())
+  el.style.setProperty('--view-body-focus', CSS.px(VIEW_BODY_H.focus).toString())
+}
+
+/**
+ * 这一行要不要把查询结果画在自己下面。
+ *
+ * **只有子行**：段根仍走段尾视图宿主（装配层的 `wantsView`），否则同一块会挂两台。
+ * 这条判据同时是递归的构造性截断：结果里的查询块作为根，不会再展开内联体。
+ */
+export function rowHasInlineViewBody(r: VisibleRow): boolean {
+  return r.depth > 0 && hasQueryBody(r.block)
+}
+
+/**
  * 这一行在虚拟化里占多高：有别名头（且不是显示文本）或面包屑就是两行以上。
  *
- * ⚠️ **内联组件体要算进来**：它占着 `.tx` 的位置却不占正文，高度由类型声明给
- *    （`widget.body.height.rest`）。按 `LINE_H` 算会让带组件行的文档滚动条系统性偏小。
+ * ⚠️ **内联组件体／查询体要算进来**：它们不占正文，高度由声明给。
+ *    按 `LINE_H` 算会让带这些行的文档滚动条系统性偏小。
  *    这里只读**静止档**：聚焦档只发生在窗口里的那一行上，而占位算的是窗口**之外**的行。
  */
-export function visibleRowHeight(b: Block, extraHeads = 0): number {
+export function visibleRowHeight(b: Block, extraHeads = 0, inlineBody = false): number {
   const aliasHead = aliasesOf(b).length > 0 && prop<string>(b, DISPLAY_PROP) !== 'text' ? 1 : 0
   const h = widgetBodyHeightOf(b)
   const body = h ? WIDGET_H[h.rest] : LINE_H
-  return body + (aliasHead + extraHeads) * ALIAS_HEAD_H
+  const extra = inlineBody ? VIEW_BODY_H.rest + VIEW_BODY_GAP : 0
+  return body + extra + (aliasHead + extraHeads) * ALIAS_HEAD_H
 }
 
 /** 格式 → 语义标签：粗体用 `strong` 之类，让复制出去也是对的 */
@@ -499,6 +533,7 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'widget-body',
   'widget-row',
   'blk-embed-body',
+  'blk-view-body',
 ])
 
 /**
@@ -565,10 +600,32 @@ export function makeBlockEl(
      * 不传 ⇒ 只画抬头，身体留空——看得见地缺，不退化成一行普通文字。
      */
     embedBody?: (b: Block, into: HTMLElement) => void
+    /**
+     * **查询块自己的身体**（贴在这一行下面，而不是等「打开」）。
+     *
+     * 与 `embedBody` 同一条分工：`view` 只交代「这一行有身体、归你画」，
+     * 画法（`ViewHost`）在装配层。行内体是另一个编辑宿主（岛），
+     * 高度由 `VIEW_BODY_H` 声明，所以虚拟化不用量 DOM。
+     *
+     * ⚠️ 只有 `rowHasInlineViewBody` 为真的行才调用；段根不在这里画
+     *    （它仍走段尾宿主，否则同一块会挂两台）。
+     */
+    viewBody?: (b: Block, into: HTMLElement) => void
   },
 ): HTMLElement {
   const b = r.block
   const folded = opts.folded?.[b.id] === true
+  /**
+   * 这一行能不能折：有子块，或**有身体**（查询块的结果视图）。
+   *
+   * `bodyFoldable` 只在「这个表面真的会把身体画出来」时为真（`opts.viewBody` 是否接上）：
+   * 查询结果列表里的命中行也是查询块，但那一层画的是**结果行**，不是它自己的位置；
+   * 给它一个折叠三角就是死控件。
+   */
+  const bodyFoldable = Boolean(opts.viewBody) && hasQueryBody(b)
+  const foldable = r.hasChildren || bodyFoldable
+  /** 这一行下面是否要画**内联**的身体（子行才画；段根让位给段尾/窗口的视图宿主） */
+  const inlineBody = Boolean(opts.viewBody) && rowHasInlineViewBody(r)
   /** gutter 上那个**二元开关**（本轮只认 checkbox；别的 kind 还没定怎么画） */
   const box = opts.gutter?.find((f) => f.kind === 'checkbox')
   /**
@@ -593,7 +650,7 @@ export function makeBlockEl(
    */
   const typeId = blockTypeOf(b)
   if (typeId !== DEFAULT_BLOCK_TYPE) el.dataset.type = typeId
-  if (folded) el.dataset.collapsed = '1'
+  if (folded && foldable) el.dataset.collapsed = '1'
   if (todo) el.dataset.todo = todo
   if (r.hasChildren) el.dataset.hasChildren = '1'
   // 角色进 DOM：页 / 日记作为**正文第一行**时靠它取样式。
@@ -788,9 +845,10 @@ export function makeBlockEl(
    * 静止态**完全看不到**，行悬停才淡入——常驻的折叠箭头会与块标抢空间，也让人分心。
    * 折叠态的可发现性由**块标自身的环**承担（D2 的明文口径），不靠常驻箭头。
    *
-   * ⚠️ 无子块时**不生成这个节点**（R2）——空行的三角是纯噪声。
+   * ⚠️ 既无子块也**无身体**时**不生成这个节点**（R2）——空行的三角是纯噪声。
+   *    查询块的身体（结果视图）同样可折，所以 `foldable` 不只等于 `hasChildren`。
    */
-  if (r.hasChildren) {
+  if (foldable) {
     const fold = document.createElement('span')
     fold.className = 'fold'
     fold.dataset.foldFor = b.id
@@ -968,5 +1026,32 @@ export function makeBlockEl(
    */
   const tags = makeTagsEl(b, opts.find)
   if (tags) el.appendChild(tags)
+
+  /**
+   * **正文里的查询体**：贴在 `.tx` 下面的一整格（不是塞进 `.tx`）。
+   *
+   * 为什么不塞进 `.tx`：查询块的 `.tx` 是它的**名字**；身体是另一个编辑宿主，
+   * 塞进去会让读数契约把表格当成正文。 `.blk` 用 `flex-wrap` 让这一格独占下一行，
+   * `margin-inline-start` 对齐 `.tx` 的起点（gutter ＋ gap）。
+   *
+   * ⚠️ 必须登记进 `ALLOWED_ROW_CHILDREN`：漏了它，第一次收光标就会当游离节点删掉。
+   */
+  if (inlineBody) {
+    el.dataset.viewBody = '1'
+    const body = document.createElement('div')
+    body.className = 'blk-view-body'
+    body.contentEditable = 'false'
+    body.setAttribute(EDIT_ISLAND_ATTR, '1')
+    body.dataset.viewBodyFor = b.id
+    applyViewBodyHeights(body)
+    /**
+     * 折叠时**只藏身体、不卸载**：ViewHost 的冻结结果与滚动位置还在，
+     * 展开是瞬间的；卸载会在每次折一下的时候重查一遍。
+     * 与段根/窗口的视图体共用 `data-folded` 这一格（CSS 只认它）。
+     */
+    if (folded) body.dataset.folded = '1'
+    el.appendChild(body)
+    opts.viewBody?.(b, body)
+  }
   return el
 }

@@ -1748,7 +1748,13 @@ editorEl.addEventListener('focusin', () => {
  * `change` 由调用方给：各自要刷的集合不同（正文还要刷空态提示与侧槽卡片）。
  * `editor` 传一个取值函数而不是实例：`ed` 是 `let`（焦点切走时会变）。
  */
-function viewEvents(editor: () => BlockEditor, change: ViewEvents['change'], via: string): ViewEvents {
+function viewEvents(
+  editor: () => BlockEditor,
+  change: ViewEvents['change'],
+  via: string,
+  /** 这一面是不是「块的真实位置」（正文/侧槽窗口）：只有它把查询结果画在自己行下 */
+  inlineViewBodies = false,
+): ViewEvents {
   const active = () => editor()
   return {
     change,
@@ -1843,6 +1849,25 @@ function viewEvents(editor: () => BlockEditor, change: ViewEvents['change'], via
         invoke: (name, args, v) => void registry.invoke(name, args, v ?? via),
         toast: (text, kind) => app.toast(text, kind),
       }),
+    /**
+     * **正文里的查询体**：与段尾宿主同一台 `ViewHost`，只是贴在查询块那一行下面。
+     *
+     * 只给「块的真实位置」这两种表面（正文、右槽窗口）：里层编辑器
+     * （挂载区／露面的镜像／查询结果自己）不挂这条 —— 那一层画的是**结果行**，
+     * 不是结果行自己的位置。深度 1 由**有没有这个回调**在构造上固定，
+     * 不是运行时用 visited 集合拦。
+     */
+    ...(inlineViewBodies
+      ? {
+          viewBody: (block: Block, into: HTMLElement) => {
+            const vh = panels.mountBlockView(block, into, active, 'inline')
+            return () => {
+              vh.dispose()
+              vh.root.remove()
+            }
+          },
+        }
+      : {}),
     // 复盘空天格子里落笔：编辑器只报日期，物化那一天（幂等）与重装载归命令层
     shellWrite: (date) => void app.journalShellWrite(date),
     // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
@@ -1870,9 +1895,17 @@ function viewEvents(editor: () => BlockEditor, change: ViewEvents['change'], via
  * 挂载区、查询结果、侧槽窗口都走它——事件表按落点挑几支的接法漏接不报错
  * （右键没菜单、`#` 不弹补全、撞名没提示），所以这里不存在「挑几支」的分支。
  */
-function wireViewEditor(editor: BlockEditor, change: ViewEvents['change'], via: string): void {
-  editor.events = viewEvents(() => editor, change, via)
+function wireViewEditor(
+  editor: BlockEditor,
+  change: ViewEvents['change'],
+  via: string,
+  /** 这个表面是不是「正文」：只有正文与右槽窗口渲染块的行内结果 */
+  inlineViewBodies = false,
+): void {
+  editor.events = viewEvents(() => editor, change, via, inlineViewBodies)
 }
+
+let panels: ReturnType<typeof setupPanels>
 
 ed.events = viewEvents(
   () => mainEd,
@@ -1892,16 +1925,9 @@ ed.events = viewEvents(
     if (kind === 'struct') panels?.renderMounts()
   },
   'editor',
+  // 正文这一台把查询结果画在自己行下；里层编辑器（`wireViewEditor`）默认不挂
+  true,
 )
-/**
- * **首帧要在事件表接上之后重画一次**。
- *
- * 编辑器在构造时就画了第一帧（`doc: bootRoots`），而 `events` 是构造之后才赋上去的：
- * 露面块的身体（`embedBody`）与组件体（`widgetBody`）这类**由装配层提供的画法**
- * 在那一帧里是缺的。缺了不会报错，只会画成「这次露面的指针坏了」——而它**不会自己好**，
- * 因为重画要等下一次模型变化。重开一个带露面的库，正好是第一帧就是终态的那种情况。
- */
-ed.renderAll()
 /**
  * **撤销/重做产出的 op** 并进待落盘队列。
  *
@@ -1932,9 +1958,15 @@ onAssetChange((hash) => {
   scheduleBadge()
 })
 
-let panels: ReturnType<typeof setupPanels>
 let diag: ReturnType<typeof setupDiagnostics>
-const { renderMounts, renderProperties, scheduleProperties, pickRefValue, openPropertiesDrawer } = setupPanels({
+const {
+  renderMounts,
+  renderProperties,
+  scheduleProperties,
+  pickRefValue,
+  openPropertiesDrawer,
+  mountBlockView,
+} = setupPanels({
   blocks,
   kb,
   app,
@@ -1971,7 +2003,23 @@ panels = {
   scheduleProperties,
   pickRefValue,
   openPropertiesDrawer,
+  mountBlockView,
 }
+/**
+ * **首帧要在事件表与画法都就位之后重画一次**。
+ *
+ * 编辑器在构造时就画了第一帧（`doc: bootRoots`），而 `events` 与 `panels` 都是
+ * 构造之后才赋上去的：露面体、组件体、查询内联体这些**由装配层提供的画法**
+ * 在那一帧里是缺的。缺了不会报错，只会画成「坏了」——而且**不会自己好**，
+ * 因为重画要等下一次模型变化。
+ *
+ * 为什么放在 `panels` 之后：`viewBody` 要拿 `panels.mountBlockView`；早于它，
+ * 这一行只能先记一笔「欠一次重画」，那就是同一件事的第二个补丁。
+ * `renderAll` 会重建 `.sec` 空槽，所以紧接一次 `renderMounts()` 把挂载区重新挂回去
+ * （实例仍在 `mountInstances` 里，不重建编辑器，撤销栈与选区都不丢）。
+ */
+ed.renderAll()
+renderMounts()
 
 /**
  * 行内实例的字段卡：只读写**记录块**的 props。
@@ -2306,7 +2354,12 @@ const dockWindowsDeps = (side: 'left' | 'right'): ConstructorParameters<typeof D
    * ⚠️ 必须整份接上：只手接几支（change/块标/右槽/引用）的做法漏接不报错——
    * 右键块菜单、`#`·`@` 补全、撞名提示这些在窗口里点了就是没反应。
    */
-  wire: (editor, change) => wireViewEditor(editor, change, 'dock'),
+  wire: (editor, change) => wireViewEditor(editor, change, 'dock', true),
+  /**
+   * 窗口里也是「正文」：根块是视图宿主就画它的源视图；行内的查询块也画结果。
+   * 与中心同一条规则，只是容器换了 —— 不是第二种窗口语义。
+   */
+  mountViewRoot: (block, into, source) => panels.mountBlockView(block, into, source, 'dock'),
   onFocus: (editor) => {
     ed = editor
     scheduleBadge()

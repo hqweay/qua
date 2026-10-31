@@ -226,8 +226,13 @@ export interface ViewOwnerStore {
 
 /* ------------------------------------------------------------ 表面 */
 
-/** 表面：一份配置**在哪儿**被看到。它只提供上下文与尺寸，不拥有配置 */
-export type ViewSurface = 'center' | 'mount' | 'embed' | 'dock'
+/**
+ * 表面：一份配置**在哪儿**被看到。它只提供上下文与尺寸，不拥有配置。
+ *
+ * `inline` 是「正文里查询块自己的身体」：同一台 `ViewHost`，只是贴在那一行下面。
+ * 它不是一个新实体 —— 拥有者仍是那一块，配置仍住它的 `_query`／`_views`。
+ */
+export type ViewSurface = 'center' | 'mount' | 'embed' | 'dock' | 'inline'
 
 /** 一个视图的指针（`''`／`'outline'`／视图 id）。绑定与露面共用这一个形状 */
 export type { ViewRef }

@@ -901,6 +901,14 @@
 .queryview[hidden] {
   display: none;
 }
+/*
+ * 查询块的身体被折叠（`Doc.folded`）：**只藏，不卸载** —— 冻结结果与滚动位置还在，
+ * 展开是瞬间的。与 `hidden` 分开是因为 `ViewHost` 自己会在每次 paint 时
+ * `root.hidden = false`；`data-folded` 不会被它覆盖。
+ */
+.queryview[data-folded='1'] {
+  display: none;
+}
 .queryview-head {
   display: flex;
   align-items: center;
@@ -949,6 +957,54 @@
   content: attr(data-empty-text);
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-sm);
+}
+
+/* ---------------------------------------------------------- 正文里的查询体（inline）
+
+   查询块摆在正文哪一行，结果就贴在哪一行下面（不是一个「打开后才出现」的段尾面板）。
+   它是**另一个编辑宿主**：内容和结果各行其道，外层编辑器不从这个身体里读正文。
+   高度由 `view/block-dom.ts` 的 `VIEW_BODY_H` 写进自定义属性（视觉与虚拟化同一个数）；
+   身体内部滚动 ⇒ 一条查询不会把正文撑成几十行。 */
+.blk[data-view-body='1'] {
+  flex-wrap: wrap;
+  /* 与 `VIEW_BODY_GAP` 同源：body 与上一行之间的缝 */
+  row-gap: var(--ui-gap-1);
+}
+.blk-view-body {
+  flex: 0 0 auto;
+  width: calc(100% - var(--ui-marker-slot) - var(--ui-gap-4));
+  /* 对齐 `.tx` 的起点：gutter 已由 `.blk` 的 padding 让出，这里只补 marker 槽 ＋ gap */
+  margin-inline-start: calc(var(--ui-marker-slot) + var(--ui-gap-4));
+  height: var(--view-body-rest);
+  min-width: 0;
+  overflow: hidden;
+}
+/* 聚焦档：与组件体同一条 `:focus-within` 口径（纯 CSS，不进库、不进撤销） */
+.blk-view-body:focus-within {
+  height: var(--view-body-focus);
+}
+/* 折叠态（与段根/窗口的视图体同一个 `data-folded` 契约）：只藏，不卸载 */
+.blk-view-body[data-folded='1'] {
+  display: none;
+}
+.blk-view-body > .queryview {
+  height: 100%;
+}
+.queryview[data-surface='inline'] {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+  display: flex;
+  flex-direction: column;
+}
+.queryview[data-surface='inline'] .queryview-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* 内联体自己滚；不再让里面的表再开一层滚动条 */
+  overflow: auto;
+}
+.queryview[data-surface='inline'] .tv-scroll {
+  max-height: none;
 }
 
 /* ---------------------------------------------------------- 挂载区（块底）

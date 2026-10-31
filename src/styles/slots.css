@@ -387,6 +387,14 @@
 .dock-window-editor {
   min-width: 0;
 }
+/* 窗口身体：根行编辑器 ＋（可选）根块的视图体；与中心的「根行 ＋ 段尾视图」同构 */
+.dock-window-body {
+  min-width: 0;
+}
+.queryview[data-surface='dock'] {
+  margin-top: var(--ui-gap-3);
+  padding-top: var(--ui-gap-2);
+}
 /* 一列块：**没有额外容器语义**，只是排一列 */
 .block-list {
   display: flex;

@@ -418,6 +418,21 @@ export function isViewRoot(b: Block | undefined): boolean {
   return isQueryBlock(b) || isCollectionBlock(b) || activeView(b) !== null
 }
 
+/**
+ * 这一块的身体是不是**它自己的结果视图**（贴在这一行下面，而不是等「打开」）。
+ *
+ * 判据只有一条：源是 query。查询的命中**不是 children**，所以就地画结果
+ * 不会出现「同一批块画两遍」；children 源的视图仍走「打开才渲染」那条口径
+ * （见 `设计-查询与视图.md` §7）。
+ *
+ * ⚠️ 它只回答「有没有身体」。**位置**由渲染层决定：段根仍走段尾宿主，
+ *    只有子行才内联（`view/block-dom.ts` 的 `rowHasInlineViewBody`）。
+ *    两边分开，是因为「这一块有没有结果视图」与「这一屏怎么摆」是两个问题。
+ */
+export function hasQueryBody(b: Block | undefined): boolean {
+  return isQueryBlock(b)
+}
+
 /* ------------------------------------------------------------ 源 */
 
 /**

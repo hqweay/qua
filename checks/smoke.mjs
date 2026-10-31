@@ -1315,23 +1315,34 @@ await check('T23 gutter 三件：块标与把手合并、三角悬停才现、�
   assert(Number(r.gripOpacity) < 0.05, `静止态抓手应不可见（hover 才换 grip），实际 opacity=${r.gripOpacity}`)
   assert(r.bulletSize === '5px' && r.caretSize === '11px', `token 取值应对齐设计稿（5px / 11px）：${r.bulletSize}/${r.caretSize}`)
 
-  // R2：无子块的行**不生成** `.fold` 节点（不是 visibility:hidden）
+  // R2：**既无子块也无身体**的行不生成 `.fold` 节点（不是 visibility:hidden）
   const foldOnLeaf = await page.evaluate(() => {
     const rows = [...document.querySelectorAll('#editor .blk')]
-    const leaves = rows.filter((el) => !el.dataset.hasChildren)
+    const leaves = rows.filter((el) => !el.dataset.hasChildren && el.dataset.viewBody !== '1')
+    const bodies = rows.filter((el) => el.dataset.viewBody === '1')
     return {
       leafCount: leaves.length,
       withFold: leaves.filter((el) => el.querySelector('.fold')).length,
       // 对照：有子块的行必须生成
       parentsWithFold: rows.filter((el) => el.dataset.hasChildren && el.querySelector('.fold')).length,
       parentCount: rows.filter((el) => el.dataset.hasChildren).length,
+      // 查询块的身体也可折：这一类行（没有 children）同样要有三角
+      bodyCount: bodies.length,
+      bodiesWithFold: bodies.filter((el) => el.querySelector('.fold')).length,
     }
   })
   assert(foldOnLeaf.leafCount > 0, '假数据里应有无子块的行')
-  assert(foldOnLeaf.withFold === 0, `无子块的行不该生成 .fold 节点（R2），实际 ${foldOnLeaf.withFold}/${foldOnLeaf.leafCount}`)
+  assert(
+    foldOnLeaf.withFold === 0,
+    `既无子块也无身体的行不该生成 .fold 节点（R2），实际 ${foldOnLeaf.withFold}/${foldOnLeaf.leafCount}`,
+  )
   assert(
     foldOnLeaf.parentsWithFold === foldOnLeaf.parentCount,
     `有子块的行都应生成 .fold：${foldOnLeaf.parentsWithFold}/${foldOnLeaf.parentCount}`,
+  )
+  assert(
+    foldOnLeaf.bodyCount > 0 && foldOnLeaf.bodiesWithFold === foldOnLeaf.bodyCount,
+    `有身体（查询结果）的行也要有折叠三角：${foldOnLeaf.bodiesWithFold}/${foldOnLeaf.bodyCount}`,
   )
 
   // 折叠态：**明显的环**（D2 的明文口径：折叠态不能只靠悬停件自明）
@@ -2276,6 +2287,182 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   return `引用 ${refsCount} 条（路径＋次数）→ 重开仍表格 → 固定为查询（${fixed.labels.join(' / ')}）→ 提及/同类各带命中词与共同标签`
 })
 
+await check('T195 查询在正文内联渲染：不打开就在原位出结果；打开后只有一台宿主', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    let found = ''
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.props?._query) {
+          found = b.id
+          return
+        }
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return found
+  })
+  assert(qid, '前置：这一页里应有一个查询块')
+  // 查询块在页尾：先把那一行滚进窗口（虚拟化时不在窗口里的行没有 DOM）
+  await page.evaluate((id) => window.__qua.__editor.reveal(id), qid)
+  await page.waitForTimeout(500)
+
+  const inline = await page.evaluate((id) => {
+    const row = document.querySelector(`.blk[data-block-id="${id}"]`)
+    const body = row?.querySelector(':scope > .blk-view-body')
+    const view = body?.querySelector('.queryview')
+    return {
+      depth: row?.dataset.depth ?? '',
+      hasBody: Boolean(body),
+      hasView: Boolean(view),
+      hidden: view?.hidden ?? true,
+      titleHidden: view?.querySelector('.queryview-title')?.hidden ?? false,
+      rows: [...(body?.querySelectorAll('.queryview-editor .blk .tx') ?? [])].map((e) => e.textContent ?? ''),
+      inMount: Boolean(body?.closest('.sec-mount')),
+    }
+  }, qid)
+  assert(inline.depth !== '0', `前置：查询块应是正文里的子行：${JSON.stringify(inline)}`)
+  assert(inline.hasBody && inline.hasView && !inline.hidden, `正文里应有可见的查询体：${JSON.stringify(inline)}`)
+  assert(inline.titleHidden, '内联体不重复块名（行上已经有一份）')
+  assert(inline.rows.length === 1, `不打开也应看到结果（本页 1 条待办）：${JSON.stringify(inline.rows)}`)
+  assert(!inline.inMount, '内联体必须在这一行下面，不是段尾挂载区')
+
+  /**
+   * **折叠折的是身体**：查询块没有 children，但结果视图是可折的东西。
+   * 折起来只藏身体（不卸载 ViewHost），展开后结果还在。
+   */
+  const foldState = () =>
+    page.evaluate((id) => {
+      const row = document.querySelector(`.blk[data-block-id="${id}"]`)
+      const body = row?.querySelector(':scope > .blk-view-body')
+      return {
+        collapsed: row?.dataset.collapsed === '1',
+        folded: body?.dataset.folded === '1',
+        rows: [...(body?.querySelectorAll('.queryview-editor .blk .tx') ?? [])].map((e) => e.textContent ?? ''),
+      }
+    }, qid)
+  const foldOnce = () =>
+    page.evaluate((id) => {
+      const fold = document.querySelector(`.blk[data-block-id="${id}"] > .left > .fold`)
+      if (!fold) return false
+      fold.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      return true
+    }, qid)
+  assert(await foldOnce(), '查询块行要有折叠三角（身体可折）')
+  await page.waitForTimeout(250)
+  const folded = await foldState()
+  assert(folded.collapsed && folded.folded, `折起来：行标记 collapsed、身体 data-folded：${JSON.stringify(folded)}`)
+  assert(folded.rows.length === 1, `折叠只藏身体、不卸载 ViewHost：${JSON.stringify(folded)}`)
+  assert(await foldOnce(), '再点一次展开')
+  await page.waitForTimeout(250)
+  const unfolded = await foldState()
+  assert(!unfolded.collapsed && !unfolded.folded, `展开后标记与身体都回来：${JSON.stringify(unfolded)}`)
+
+  // 打开它：这一块成为段根 ⇒ 段尾宿主接手，行内体必须让位（同屏只有一台）
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
+  await page.waitForTimeout(500)
+  const opened = await page.evaluate((id) => {
+    const row = document.querySelector(`.blk[data-block-id="${id}"]`)
+    const views = [...document.querySelectorAll('.queryview')].filter((v) => !v.hidden)
+    return {
+      inline: Boolean(row?.querySelector(':scope > .blk-view-body')),
+      views: views.length,
+      mountViews: views.filter((v) => v.closest('.sec-mount')).length,
+    }
+  }, qid)
+  assert(!opened.inline, '打开后行内体让位给段尾宿主')
+  assert(opened.views === 1 && opened.mountViews === 1, `打开后只应有一台视图宿主：${JSON.stringify(opened)}`)
+
+  // 段根也能折：折的是段尾那台视图体（同一份 Doc.folded，与内联体同一个语义）
+  const rootFold = await page.evaluate((id) => {
+    const fold = document.querySelector(`.blk[data-block-id="${id}"] > .left > .fold`)
+    fold?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    return Boolean(fold)
+  }, qid)
+  assert(rootFold, '段根的查询块也要有折叠三角')
+  await page.waitForTimeout(300)
+  const segmentFolded = await page.evaluate(() => {
+    const view = [...document.querySelectorAll('.queryview')].find((v) => !v.hidden)
+    return {
+      marked: view?.dataset.folded === '1',
+      display: view ? getComputedStyle(view).display : '',
+    }
+  })
+  assert(segmentFolded.marked && segmentFolded.display === 'none', `折段根 ⇒ 段尾视图体收起：${JSON.stringify(segmentFolded)}`)
+
+  await ctx.close()
+  return `内联 ${inline.rows.length} 条；打开后仍只有 1 台宿主`
+})
+
+await check('T196 查询块在右槽窗口也画结果：同一台 ViewHost；折叠收的是身体', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    let found = ''
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.props?._query) {
+          found = b.id
+          return
+        }
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return found
+  })
+  assert(qid, '前置：页里应有查询块')
+  await page.evaluate((id) => window.__qua.invoke('core.dock/open-block', { blockId: id, side: 'right' }), qid)
+  await page.waitForTimeout(600)
+
+  const dockState = () =>
+    page.evaluate((id) => {
+      const card = [...document.querySelectorAll('.dock-card')].find((c) => c.dataset.cardId === id)
+      const view = card?.querySelector('.queryview')
+      const row = card?.querySelector(`.blk[data-block-id="${id}"]`)
+      return {
+        card: Boolean(card),
+        view: Boolean(view),
+        hidden: view?.hidden ?? true,
+        folded: view?.dataset.folded === '1',
+        rows: [...(card?.querySelectorAll('.queryview-editor .blk .tx') ?? [])].map((e) => e.textContent ?? ''),
+        titleHidden: view?.querySelector('.queryview-title')?.hidden ?? false,
+        rowCollapsed: row?.dataset.collapsed === '1',
+      }
+    }, qid)
+  const first = await dockState()
+  assert(first.card && first.view && !first.hidden, `右槽窗口里应有查询视图：${JSON.stringify(first)}`)
+  assert(first.rows.length === 1, `右槽里不打开也应看到结果：${JSON.stringify(first.rows)}`)
+  assert(first.titleHidden, '卡头已有块名，窗口里的视图抬头不重复')
+
+  // 折叠：根行也是查询块（有身体）⇒ 三角可折；视图体跟着收，展开后同一份结果回来
+  const toggle = () =>
+    page.evaluate((id) => {
+      const card = [...document.querySelectorAll('.dock-card')].find((c) => c.dataset.cardId === id)
+      const fold = card?.querySelector(`.blk[data-block-id="${id}"] > .left > .fold`)
+      if (!fold) return false
+      fold.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      return true
+    }, qid)
+  assert(await toggle(), '窗口里的查询块根行要有折叠三角')
+  await page.waitForTimeout(300)
+  const folded = await dockState()
+  assert(folded.folded && folded.rowCollapsed, `折起来：视图体 data-folded、行 collapsed：${JSON.stringify(folded)}`)
+  assert(await toggle(), '再点一次展开')
+  await page.waitForTimeout(300)
+  const unfolded = await dockState()
+  assert(!unfolded.folded && !unfolded.rowCollapsed && unfolded.rows.length === 1, `展开后结果还在：${JSON.stringify(unfolded)}`)
+
+  await ctx.close()
+  return `右槽 ${first.rows.length} 条；折叠只藏视图体，展开后仍是同一份结果`
+})
+
 await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器改主名 ⇒ chip 跟着变；删除 ⇒ dangling', async () => {
   const { ctx, page } = await freshPage(browser, base)
   // 打开「产品设计 · 决策日志」：seed 里那一页有指向别处的 `[[..]]`
@@ -2701,7 +2888,7 @@ await check('T17 今日 journal：冷启动落在它、一天一个（幂等）�
 await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/块尾同级）、点空白建子块、只读行不落光标、折叠图标贴自己的块标', async () => {
   // ④ 要「最后一行下方的空白」是**真空白**：内容高度一旦顶满视口就没有可点的地方。
   // 给高一点的视口（与产品行为无关，只为让这条几何前置成立）。
-  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 1200 } })
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 1600 } })
   // ：冷启动是长日记流；本用例测的是单容器里的 Enter/空白语义 ⇒ 先打开第一页。
   await openFirstPage(page)
   const rows = () =>
@@ -4185,7 +4372,8 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
 
   const readRow = (id) =>
     page.evaluate((blockId) => {
-      const row = document.querySelector(`#editor .blk[data-block-id="${blockId}"]`)
+      // 只认**正文自己的行**：同一块也可能出现在正文内联的查询结果里（第二处露面）
+      const row = document.querySelector(`#editor > .sec > .blk[data-block-id="${blockId}"]`)
       const m = row?.querySelector(':scope > .left > .marker')
       const box = row?.querySelector(':scope > .left > .todo-box')
       const before = m ? getComputedStyle(m, '::before') : null
@@ -4229,7 +4417,7 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
   }
 
   // hover 只改块标的可见度（点换 grip），身份图标不该跟着动
-  await page.locator(`#editor .blk[data-block-id="${deep}"] > .left > .marker`).hover()
+  await page.locator(`#editor > .sec > .blk[data-block-id="${deep}"] > .left > .marker`).hover()
   const hovered = await readRow(deep)
   assert(
     hovered.boxW === '12px' && hovered.focusFor === deep,

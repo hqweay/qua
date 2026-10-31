@@ -26,6 +26,7 @@ import {
   ensurePageInTx,
   flatten,
   hasIdentity,
+  hasQueryBody,
   hasList,
   isJournal,
   isPropDefBlock,
@@ -122,7 +123,16 @@ import type { AssetView } from '../core/assets.ts'
 import { ensureTagInTx, tagLookupOf } from '../core/kb/ensure-tag.ts'
 // 用户可见文案一律走 t
 import { t } from '../core/msg.ts'
-import { ALLOWED_ROW_CHILDREN, EDIT_ISLAND_ATTR, LINE_H, fillBlockText, isReadonlyBlock, makeBlockEl, visibleRowHeight } from './block-dom.ts'
+import {
+  ALLOWED_ROW_CHILDREN,
+  EDIT_ISLAND_ATTR,
+  LINE_H,
+  fillBlockText,
+  isReadonlyBlock,
+  makeBlockEl,
+  rowHasInlineViewBody,
+  visibleRowHeight,
+} from './block-dom.ts'
 import { assetViewOf, markAssetMissing } from './asset-views.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
 import { bindEditorEvents, type RefClickHit, type RefClickMods, type TriggerQuery } from './editor-events.ts'
@@ -297,6 +307,14 @@ export interface ViewEvents {
    */
   embedBody?: (block: Block, into: HTMLElement) => (() => void) | void
   /**
+   * **正文里查询块的身体**：由装配层用同一台 `ViewHost` 画（surface＝`inline`）。
+   *
+   * 与 `embedBody` 同一条分工（`view` 不 import `ui`）与同一条生命周期纪律
+   * （返回卸载函数，换 DOM 前必须释放）。段根不走这里 —— 它仍由段尾宿主画，
+   * 否则同一块会挂两台视图宿主。
+   */
+  viewBody?: (block: Block, into: HTMLElement) => (() => void) | void
+  /**
    * **资产此刻的样子**（`view/asset-views.ts` 的 `assetViewOf`）。
    *
    * 为什么经事件表注入而不是让 `view` 直接拿资产库：`view` 不该知道字节存在哪
@@ -456,8 +474,8 @@ export class BlockEditor {
   private readonly onContextBack: ViewOpts['onContextBack']
   /** 露面块的身体能不能展开（深度 1 的构造性截断；见 `ViewOpts.embedBodies`） */
   private readonly embedBodies: boolean
-  /** 已挂的露面身体 → 卸载函数（换 DOM 之前必须挨个调用） */
-  private readonly embedDisposers = new Map<string, () => void>()
+  /** 已挂的「行身体」（露面／查询）→ 卸载函数（换 DOM 之前必须挨个调用） */
+  private readonly bodyDisposers = new Map<string, () => void>()
   /**
    * **字段读取表**（懒建）：判「这块是不是任务」要看标签声明（`todoOf`），
    * 逐块现建要扫两趟森林。任何一次模型写之后作废，下一次问到时重建一次。
@@ -506,7 +524,7 @@ export class BlockEditor {
 
   /** 从文档里摘掉这个视图：退订 store、卸掉事件（否则游离容器还会继续被重画） */
   dispose(): void {
-    this.disposeAllEmbeds()
+    this.disposeAllRowBodies()
     this.offStore()
     this.unbind()
   }
@@ -801,7 +819,7 @@ export class BlockEditor {
     if (this.deferWhileComposing()) return
     // 别的视图写进来（本实例的写入口已作废过）；重排之后重算一张表
     this.fieldTableCache = null
-    this.disposeAllEmbeds()
+    this.disposeAllRowBodies()
     this.container.textContent = ''
     this.mounted.clear()
     this.rebuildAncestors()
@@ -936,7 +954,7 @@ export class BlockEditor {
       hidden: false,
       hasChildren: loc.block.children.length > 0,
     }
-    this.disposeEmbed(id)
+    this.disposeRowBody(id)
     el.replaceWith(this.makeBlockEl(row, gutterFieldsOf(row.block, this.store.blocks)))
     // 被换掉的那个元素带着 `data-caret` ⇒ 缓存与标记都要重来
     this.caretMarks = ''
@@ -989,24 +1007,36 @@ export class BlockEditor {
             return
           }
           const dispose = this.events.embedBody(b, into)
-          if (dispose) this.embedDisposers.set(b.id, dispose)
+          if (dispose) this.bodyDisposers.set(b.id, dispose)
         },
+        /**
+         * **正文里的查询体**：只有装配层接了画法、且这一份装载允许展开时才给。
+         * 「哪一行画」由 `block-dom` 的 `rowHasInlineViewBody` 判（子行才画，段根让位给段尾宿主）。
+         */
+        ...(this.events.viewBody
+          ? {
+              viewBody: (b: Block, into: HTMLElement) => {
+                const dispose = this.events.viewBody!(b, into)
+                if (dispose) this.bodyDisposers.set(b.id, dispose)
+              },
+            }
+          : {}),
       },
     )
     this.mounted.add(r.block.id)
     return el
   }
 
-  /** 摘掉某一行的露面身体（换 DOM 之前必须做，否则订阅会跟着旧节点留下） */
-  private disposeEmbed(id: string): void {
-    const d = this.embedDisposers.get(id)
+  /** 摘掉某一行的身体（露面／查询；换 DOM 之前必须做，否则订阅会跟着旧节点留下） */
+  private disposeRowBody(id: string): void {
+    const d = this.bodyDisposers.get(id)
     if (!d) return
-    this.embedDisposers.delete(id)
+    this.bodyDisposers.delete(id)
     d()
   }
 
-  private disposeAllEmbeds(): void {
-    for (const id of [...this.embedDisposers.keys()]) this.disposeEmbed(id)
+  private disposeAllRowBodies(): void {
+    for (const id of [...this.bodyDisposers.keys()]) this.disposeRowBody(id)
   }
 
   /* ------------------------------------------------------- DOM → 文本 */
@@ -2273,9 +2303,43 @@ export class BlockEditor {
    *    代价明写：展开/收起之后按 `⌘Z` 撤的是**上一次内容改动**（与折叠无关）。
    */
   toggleCollapse(id: string): void {
+    const loc = locate(this.doc, id)
+    if (!loc) return
+    /**
+     * 查询块没有子块 ⇒ 折的是**身体**（结果视图）。只有「这个表面真的画身体」
+     * 时才允许折：查询结果列表里的命中行也是查询块，但那一层画的是结果行，
+     * 给它折一下没有任何可见效果。
+     */
+    const bodyOnly = loc.block.children.length === 0
+    if (bodyOnly && (!this.events.viewBody || !hasQueryBody(loc.block))) return
     if (!toggleCollapsed(this.doc, id)) return
+    /**
+     * 身体折起来**不重排整屏**：只改这一行的折叠标记与身体的 `data-folded`。
+     * 重排会重建 ViewHost（冻结结果与滚动位置都丢），而折一下并没有改变可见行集合。
+     */
+    if (bodyOnly) {
+      this.paintFold(id)
+      this.emitChange('struct')
+      return
+    }
     this.renderAll()
     this.emitChange('struct')
+  }
+
+  /** 把折叠态画到**已经挂着**的那一行上（不重建 DOM；查询身体折叠走这里） */
+  private paintFold(id: string): void {
+    const el = this.blockEl(id)
+    if (!el) return
+    const folded = isFolded(this.doc, id)
+    if (folded) el.dataset.collapsed = '1'
+    else delete el.dataset.collapsed
+    const fold = el.querySelector<HTMLElement>(':scope > .left > .fold')
+    if (fold) fold.title = folded ? t('ui.block.foldExpand') : t('ui.block.foldCollapse')
+    const body = el.querySelector<HTMLElement>(':scope > .blk-view-body')
+    if (body) {
+      if (folded) body.dataset.folded = '1'
+      else delete body.dataset.folded
+    }
   }
 
   /**
@@ -2887,7 +2951,7 @@ export class BlockEditor {
     if (ci < 0) ci = 0
     const from = Math.max(0, ci - this.radius)
     const to = Math.min(rows.length, ci + this.radius + 1)
-    this.disposeAllEmbeds()
+    this.disposeAllRowBodies()
     this.container.textContent = ''
     this.mounted.clear()
     // ⚠️ 祖先表对**全量** rows 算（上面已经拿到的就是全量可见行），
@@ -2895,13 +2959,20 @@ export class BlockEditor {
     this.rebuildAncestors()
     // 占位高度按**实际行高**累加：带别名头的行是两行，按 LINE_H 算会让长文档的
     // 滚动条与落点系统性偏小（越靠后偏得越多）。
+    /** 这一行在窗口外的占位高度（内联查询体折叠时不算身体） */
+    const rowH = (r: VisibleRow): number =>
+      visibleRowHeight(
+        r.block,
+        this.extraHeads(r),
+        Boolean(this.events.viewBody) && rowHasInlineViewBody(r) && !isFolded(this.doc, r.block.id),
+      )
     if (from > 0) {
-      const headH = rows.slice(0, from).reduce((n, r) => n + visibleRowHeight(r.block, this.extraHeads(r)), 0)
+      const headH = rows.slice(0, from).reduce((n, r) => n + rowH(r), 0)
       this.container.appendChild(this.placeholder(from, 'head', headH))
     }
     this.renderRows(rows.slice(from, to), to >= rows.length)
     if (to < rows.length) {
-      const tailH = rows.slice(to).reduce((n, r) => n + visibleRowHeight(r.block, this.extraHeads(r)), 0)
+      const tailH = rows.slice(to).reduce((n, r) => n + rowH(r), 0)
       this.container.appendChild(this.placeholder(rows.length - to, 'tail', tailH))
     }
     this.caretMarks = ''
@@ -3538,6 +3609,15 @@ export class BlockEditor {
       blockSelectionCount: this.blockSel?.ids.length ?? 0,
       blockType: b && todoOf(b, this.fieldTable()) ? 'todo' : 'paragraph',
       blockHasChildren: Boolean(b?.children.length),
+      /**
+       * 这一行有没有可折的东西：子块，或**身体**（查询块的结果视图）。
+       *
+       * 只在「这个表面真的画身体」时把查询块算进来 —— 查询结果列表里的命中行
+       * 不是它自己的位置，折它没有可见效果。
+       */
+      blockFoldable: Boolean(
+        b && (b.children.length > 0 || (this.events.viewBody && hasQueryBody(b))),
+      ),
       /**
        * 这一块值不值得给「视图…」入口：查询块（源＝命中），或**有子块**的容器，
        * 或已经有激活视图（要能切回大纲）。叶子普通块没有可摊开的东西 ——

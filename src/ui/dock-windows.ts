@@ -6,6 +6,8 @@
  *
  * 三件事：
  *   1. 用 `EditableBlock` 把**共享 store 里的活块**渲染成一张卡（不是拷贝）；
+ *      **根块是视图宿主时**（查询块／激活了视图的块）再挂一台 `ViewHost`——
+ *      与中心段尾同一条规则，窗口不是第二种表面语义；
  *   2. 卡头显示这个块的**名字**（身份；地址与「收起上下文」在正文行首，与引用同一条机制）；
  *   3. 卡片自己的折叠/单卡/常驻/拖拽由 `ui/dock.ts` 的统一卡壳提供，
  *      这里只提供 body 与关闭入口。
@@ -25,7 +27,16 @@
  *    离焦补做）。正文每敲一个键都会 `touch`，每键重画整槽会让侧槽跟着抖；
  *    聚焦在某个窗口里时冻结（用户正在这里打字）。
  */
-import { flatten, type Block, type BlockStore } from '../core/index.ts'
+import {
+  activeView,
+  flatten,
+  hasQueryBody,
+  isEmbedBlock,
+  isFolded,
+  isViewRoot,
+  type Block,
+  type BlockStore,
+} from '../core/index.ts'
 import { expandContexts, unfoldForContext } from '../core/context-expand.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
@@ -33,6 +44,7 @@ import type { BlockEditor, Run } from '../view/editor.ts'
 import { bindDropTarget } from '../view/dnd.ts'
 import { applyDockCardState, buildDockCard, type DockCardState } from './dock.ts'
 import { EditableBlock } from './editable-block.ts'
+import type { ViewHost } from './query-view.ts'
 
 export interface DockWindowsDeps {
   store: BlockStore
@@ -59,11 +71,18 @@ export interface DockWindowsDeps {
   onChange: () => void
   /** 这张卡的收起/单卡/拖拽状态（装配层按 prefs 现算） */
   cardState: (blockId: string) => DockCardState
+  /**
+   * **根块的视图体**（与中心同一条规则：`isViewRoot(block)` ⇒ 画它的源视图）。
+   *
+   * 不传 ⇒ 窗口只画大纲（旧行为）；装配层传 `panels.mountBlockView(…, 'dock')`。
+   * 返回 `ViewHost`：它有 `root`／`sync`／`dispose`，生命周期与这张卡一起。
+   */
+  mountViewRoot?: (block: Block, into: HTMLElement, source: () => BlockEditor | undefined) => ViewHost | null
 }
 
 export class DockWindows {
   private readonly deps: DockWindowsDeps
-  private readonly windows = new Map<string, { block: EditableBlock; card: HTMLElement }>()
+  private readonly windows = new Map<string, { block: EditableBlock; card: HTMLElement; view: ViewHost | null }>()
   /** 每张卡的上下文展开栈（运行时；块 id → 点过的祖先 id，可能嵌套） */
   private readonly expandedByCard = new Map<string, Set<string>>()
 
@@ -104,6 +123,15 @@ export class DockWindows {
     const host = document.createElement('div')
     host.className = 'dock-window-editor'
 
+    /**
+     * **根块是视图宿主 ⇒ 这一张卡也要画它的源视图**（与中心段尾同一条规则）。
+     *
+     * `viewRootId` 只在 children 源有激活视图时才设：让编辑器不把子块画一遍
+     * （表格由视图体画）。查询块的 children 本来就是空的，设不设都不重复；
+     * 不设是为了让根行仍按它自己的类型画。
+     */
+    const viewRootId = activeView(block) !== null && !isEmbedBlock(block) ? block.id : undefined
+
     const win = new EditableBlock({
       host,
       store: this.deps.store,
@@ -111,6 +139,7 @@ export class DockWindows {
       // 窗口不是「真实兄弟序」：点空白不建块、删段根不删块（只是同一批块的一个视图）。
       // roots 是「一个块一张卡」，构造时就知道；此后 `load` 只按 id 重取。
       initialRoots: [block],
+      ...(viewRootId ? { viewRootId } : {}),
       load: (ed, ids) => {
         if (!ed) return
         // 与己无关的变化不重画（拿得到 ids 时）；拿不到（结构操作）按全量重取
@@ -118,7 +147,11 @@ export class DockWindows {
         ed.reloadFromStore()
       },
       wire: (editor, change) => this.deps.wire(editor, change),
-      onChange: () => this.deps.onChange(),
+      // 折叠是视图状态，不进事务；但根块的视图体要跟着收/展
+      onChange: (kind) => {
+        if (kind === 'struct') this.applyViewFold(id)
+        this.deps.onChange()
+      },
       onFocus: (editor) => this.deps.onFocus(editor),
       // 行首 trail：普通点＝就地展开；展开根的「收起上下文」＝逐层退回（与引用同一条机制）
       onExpandContext: (ancestorId, rowId) => this.expand(id, ancestorId, rowId),
@@ -127,11 +160,22 @@ export class DockWindows {
     // 窗口建了就有编辑器（roots 构造时就知道，没有「先空着」的阶段）
     win.ensureEditor()
 
+    /**
+     * 身体 = 根行编辑器 ＋（可选）它的视图体。两者同一张卡、同一份 store；
+     * 视图体的写 source 是这台窗口编辑器（撤销/重画落在这一张卡里）。
+     */
+    const body = document.createElement('div')
+    body.className = 'dock-window-body'
+    body.appendChild(win.root)
+    const view = isViewRoot(block)
+      ? (this.deps.mountViewRoot?.(block, body, () => win.ed ?? undefined) ?? null)
+      : null
+
     const card = buildDockCard(
       {
         id,
         title: this.deps.label(id),
-        body: win.root,
+        body,
         draggable: true,
         // 只有窗口卡有「常驻」开关：派生卡／组件卡／命令小卡是槽的家具，永远保留
         pinnable: true,
@@ -141,11 +185,27 @@ export class DockWindows {
     )
     card.dataset.window = '1'
 
-    const w = { block: win, card }
+    const w = { block: win, card, view }
     this.windows.set(id, w)
+    this.applyViewFold(id)
     // 首装载带上祖先 trail：没有展开时它只是地址，展开后才出现「收起上下文」
     this.applyPlan(id)
     return w
+  }
+
+  /**
+   * 查询块折起来 ⇒ 根视图体跟着收（`Doc.folded` 是这台窗口编辑器自己的视图状态）。
+   *
+   * 与中心段尾同一条规则；`data-folded` 走 CSS `display:none`，不卸载 ViewHost，
+   * 展开时冻结结果与滚动位置还在。
+   */
+  private applyViewFold(id: string): void {
+    const w = this.windows.get(id)
+    if (!w?.view) return
+    const ed = w.block.ed
+    // 与中心同一条边界：只有**查询块的身体**跟 `Doc.folded`；children 源的激活视图不跟。
+    const body = hasQueryBody(this.deps.kb.get(id))
+    w.view.setFolded(Boolean(body && ed && isFolded(ed.doc, id)))
   }
 
   private dispose(id: string): void {
@@ -153,6 +213,8 @@ export class DockWindows {
     if (!w) return
     const ed = w.block.ed
     if (ed) this.deps.onDispose(ed)
+    w.view?.dispose()
+    w.view?.root.remove()
     w.block.dispose()
     w.card.remove()
     this.windows.delete(id)

@@ -111,7 +111,7 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/indent-block', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 30, layer: 'core' },
   { command: 'core.editor/outdent-block', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 40, layer: 'core' },
   { command: 'core.editor/toggle-todo', kind: 'menu', when: 'blockFocused', group: 'block/3-kind', order: 10, layer: 'core' },
-  { command: 'core.editor/toggle-collapse', kind: 'menu', when: 'blockFocused && blockHasChildren', group: 'block/3-kind', order: 20, layer: 'core', label: t('menu.label.toggleCollapse') },
+  { command: 'core.editor/toggle-collapse', kind: 'menu', when: 'blockFocused && blockFoldable', group: 'block/3-kind', order: 20, layer: 'core', label: t('menu.label.toggleCollapse') },
   // 露面：加/减一格标记（页/标签各自独立、可兼位；顺序无语义）
   { command: 'core.block/as-page', kind: 'menu', when: 'blockFocused && !blockHasPageRole', group: 'block/3-role', order: 10, layer: 'core' },
   { command: 'core.block/unpage', kind: 'menu', when: 'blockFocused && blockHasPageRole', group: 'block/3-role', order: 11, layer: 'core' },
@@ -189,7 +189,7 @@ export const BINDINGS: Binding[] = [
   // 外链：不带 `url` ⇒ 命令打开输入框（`App.showLinkComposer`）；带了 ⇒ 直接插
   { command: 'core.editor/insert-link', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 25, layer: 'core', label: t('menu.label.link'), keywords: ['link', 'url', t('menu.kw.link')], icon: 'lucide:link' },
   { command: 'core.editor/insert-tag', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 30, layer: 'core', label: t('menu.label.tag'), args: { tag: t('ui.arg.demoTag') }, keywords: ['tag', t('menu.kw.tag')], icon: 'lucide:hash' },
-  { command: 'core.editor/toggle-collapse', kind: 'slash', when: 'editorTextFocus && blockHasChildren', group: 'slash/3-structure', order: 10, layer: 'core', label: t('menu.label.toggleCollapse'), icon: 'lucide:chevron-down' },
+  { command: 'core.editor/toggle-collapse', kind: 'slash', when: 'editorTextFocus && blockFoldable', group: 'slash/3-structure', order: 10, layer: 'core', label: t('menu.label.toggleCollapse'), icon: 'lucide:chevron-down' },
   { command: 'core.editor/duplicate-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/3-structure', order: 20, layer: 'core', label: t('menu.label.duplicate'), icon: 'lucide:copy' },
   { command: 'core.editor/delete-block', kind: 'slash', when: 'editorTextFocus && !blockIsRoot', group: 'slash/3-structure', order: 30, layer: 'core', label: t('menu.label.delete'), icon: 'lucide:trash-2' },
 

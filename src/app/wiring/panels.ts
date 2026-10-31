@@ -17,8 +17,10 @@ import {
   displayNameOf,
   findByAlias,
   flatten,
+  hasQueryBody,
   hasList,
   findInForest,
+  isFolded,
   isJournal,
   isViewRoot,
   journalDate,
@@ -39,6 +41,7 @@ import {
   type QueryContext,
   type ViewBindingRef,
   type ViewOwnerRef,
+  type ViewSurface,
 } from '../../core/index.ts'
 import type { PropCreateMode, PropTarget } from '../../core/ports.ts'
 import { t } from '../../core/msg.ts'
@@ -520,12 +523,23 @@ export function setupPanels(deps: PanelsDeps) {
   /** 一个拥有者「显示的是哪一块」（center 表面：拥有者就是这一块） */
   const blockOf = (owner: ViewOwnerRef): Block | undefined => (owner.kind === 'block' ? blocks.find(owner.blockId) : undefined)
 
-  function createView(owner: ViewOwnerRef, host: Block, binding?: ViewBindingRef, derived?: DerivedMode): ViewHost {
+  function createView(
+    owner: ViewOwnerRef,
+    host: Block,
+    binding?: ViewBindingRef,
+    derived?: DerivedMode,
+    opts?: {
+      /** 表面只影响几何/抬头去重，不拥有配置（`inline`＝正文里查询块自己那一格） */
+      surface?: ViewSurface
+      /** 写事务的 source：内联体的编辑要用**拥有这一行的那台编辑器**（撤销/重画才对得上） */
+      source?: () => BlockEditor | undefined
+    },
+  ): ViewHost {
     const hostId = host.id
     const ownerBlock = blockOf(owner)
     const vh = new ViewHost(createViewHostEls(), {
       store: blocks,
-      write: (fn) => run(fn, edOfMount(hostId)),
+      write: (fn) => run(fn, opts?.source?.() ?? edOfMount(hostId)),
       kb,
       owners,
       owner,
@@ -542,7 +556,7 @@ export function setupPanels(deps: PanelsDeps) {
        */
       context:
         owner.kind === 'tab' || binding ? tabContextFor(host, ownerBlock?.id) : contextFor(ownerBlock?.id ?? hostId),
-      surface: owner.kind === 'tab' || binding ? 'mount' : 'center',
+      surface: opts?.surface ?? (owner.kind === 'tab' || binding ? 'mount' : 'center'),
       onChange: () => {
         syncSections()
         scheduleSave()
@@ -585,6 +599,26 @@ export function setupPanels(deps: PanelsDeps) {
       /* 日历的「今天」：由装配层钉住，别让渲染器自己 `new Date()`（截图与断言会漂） */
       today: () => todayISO(),
     })
+    return vh
+  }
+
+  /**
+   * **把一个块的源视图挂进一个容器**（正文行的内联体／侧槽窗口的根视图）。
+   *
+   * 与段尾宿主共用全部 deps：上下文仍按拥有者算（`$self`／scope 锚在它的容器），
+   * 配置仍住那一块；`surface` 只决定几何与抬头去重，`source` 决定写事务落在哪台编辑器。
+   * 调用方负责生命周期（`ViewHost` 有订阅与自己的编辑器）：
+   * 内联体在换 DOM 前 `dispose()`；窗口在拆卡时 `dispose()`。
+   */
+  function mountBlockView(
+    block: Block,
+    into: HTMLElement,
+    source: () => BlockEditor | undefined,
+    surface: 'inline' | 'dock',
+  ): ViewHost {
+    const vh = createView({ kind: 'block', blockId: block.id }, block, undefined, undefined, { surface, source })
+    into.appendChild(vh.root)
+    vh.mount()
     return vh
   }
 
@@ -928,6 +962,12 @@ export function setupPanels(deps: PanelsDeps) {
            */
           inst.area.refreshEntries()
         }
+        /**
+         * **查询块的折叠折的是身体**：段根那台 ViewHost 要跟着收起来。
+         * children 源的激活视图**不跟** `Doc.folded` —— 那条折叠是「子块收起」，
+         * 与「表格替换子块」不是同一件事（`viewRootId` 的注释里写过）。
+         */
+        if (inst.view && hasQueryBody(host)) inst.view.setFolded(isFolded(mainEd.doc, host.id))
         if (inst.view && inst.view.root.parentElement !== slot) slot.appendChild(inst.view.root)
         if (inst.area.root.parentElement !== slot) slot.appendChild(inst.area.root)
       }
@@ -956,5 +996,12 @@ export function setupPanels(deps: PanelsDeps) {
   // 首次装载：装配完就把每一段的挂载区放上去（之后由 loadPage / store 订阅跟进）
   renderMounts()
 
-  return { renderMounts, renderProperties, scheduleProperties, pickRefValue, openPropertiesDrawer }
+  return {
+    renderMounts,
+    renderProperties,
+    scheduleProperties,
+    pickRefValue,
+    openPropertiesDrawer,
+    mountBlockView,
+  }
 }
