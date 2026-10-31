@@ -22,6 +22,13 @@ import {
   childrenRecords,
   cloneSubtree,
   defaultColumnsForSource,
+  defaultWidthOf,
+  fieldTextOf,
+  MATCHED_COLUMN,
+  PATH_COLUMN,
+  REF_COUNT_COLUMN,
+  SHARED_TAGS_COLUMN,
+  sortValueOf,
   isViewRoot,
   isViewsValue,
   listTableOf,
@@ -39,6 +46,7 @@ import {
   withListSort,
   withSort,
   type Block,
+  type ViewRecord,
 } from '../src/core/index.ts'
 import { textRuns } from '../src/core/runs.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
@@ -254,8 +262,40 @@ test('defaultColumnsForSource：children 源看子块实际拥有的属性（只
   assert.deepEqual(fallback, ['title', 'tags', 'children', 'modified'], '没有属性 ⇒ title/tags/children/modified')
 })
 
-/* ------------------------------------------------------------ 排序 */
+test('保留列 path／refCount／matched／sharedTags：文本与排序值都认它们', () => {
+  const page = mk('p', '路线图')
+  const mid = mk('m', '第一季')
+  const rec: ViewRecord = {
+    block: mk('r', '做一件事', [], { created: 1000, modified: 2_000 }),
+    path: [page, mid],
+    title: '做一件事',
+    tags: [],
+    values: {},
+    derived: { [REF_COUNT_COLUMN]: 3, [MATCHED_COLUMN]: '做这件事', [SHARED_TAGS_COLUMN]: ['甲', '乙'] },
+  }
+  assert.equal(fieldTextOf(rec, PATH_COLUMN), '路线图 / 第一季', '路径＝祖先显示名拼接（不含自己）')
+  assert.equal(fieldTextOf(rec, REF_COUNT_COLUMN), '3', '引用次数按数转文本')
+  assert.equal(fieldTextOf(rec, MATCHED_COLUMN), '做这件事', '命中词原样')
+  assert.equal(fieldTextOf(rec, SHARED_TAGS_COLUMN), '甲 乙', '共同标签按空格连接')
+  assert.deepEqual(sortValueOf(rec, REF_COUNT_COLUMN), 3, '引用次数排序值是数字（不是串）')
 
+  // 没有派生值时给空串而不是 0：0 次引用与「这个源不提供这一列」是两件事
+  const bare: ViewRecord = { ...rec, derived: undefined }
+  assert.equal(fieldTextOf(bare, REF_COUNT_COLUMN), '')
+  assert.equal(fieldTextOf(bare, MATCHED_COLUMN), '')
+  assert.equal(fieldTextOf(bare, SHARED_TAGS_COLUMN), '')
+
+  // 引用次数按数值排（9 < 10；按串排会得到 10 < 9）
+  const nine = { ...bare, block: mk('n', '九'), derived: { [REF_COUNT_COLUMN]: 9 } }
+  const ten = { ...bare, block: mk('t', '十'), derived: { [REF_COUNT_COLUMN]: 10 } }
+  assert.deepEqual(
+    sortRecords([ten, nine], [{ by: REF_COUNT_COLUMN, dir: 'asc' }]).map((r) => r.block.id),
+    ['n', 't'],
+  )
+  assert.ok(defaultWidthOf(PATH_COLUMN) >= 140 && defaultWidthOf(REF_COUNT_COLUMN) >= 60, '保留列要有能看的默认宽度')
+})
+
+/* ------------------------------------------------------------ 排序 */
 test('sortRecords：number 按数值排（10 在 9 后面），空值永远最后', () => {
   const { root, defs } = pageWith5()
   const { kb } = kbOf([root, ...defs])

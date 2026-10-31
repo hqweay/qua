@@ -1877,6 +1877,394 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
   return `1 条 → 改字实时更新（成员不变）→ 不匹配仍保留 → 刷新后 ${refreshed.count}；只有条件入 KB、结果未 re-parent`
 })
 
+await check('T191 结果基数：父子同时命中时，大纲与表格的抬头数字一致（都＝命中条数）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(300)
+
+  /**
+   * 造一对「父子正文相同」的块：只有它们同时命中，才谈得上「大纲折叠、表格不折叠」。
+   * 走真实的编辑命令（不直接改森林）：插件式地先插一块、缩进成子块、再插一块、缩进成孙块。
+   */
+  const made = await page.evaluate(() => {
+    const rows = window.__qua.__editor.rows().map((r) => r.block)
+    const spot = rows.find((b) => b.children.length === 0 && !b.props?._query)
+    if (!spot) throw new Error('前置：这一页没有可落的块')
+    window.__qua.focusBlock(spot.id, 999)
+    window.__qua.invoke('core.editor/insert-block', { text: '基数探针' })
+    const parent = String(window.__qua.__editor.sel?.aBlock ?? '')
+    window.__qua.invoke('core.editor/indent-block', {})
+    window.__qua.focusBlock(parent, 999)
+    window.__qua.invoke('core.editor/insert-block', { text: '基数探针' })
+    const child = String(window.__qua.__editor.sel?.aBlock ?? '')
+    window.__qua.invoke('core.editor/indent-block', {})
+    return { parent, child }
+  })
+  assert(made.parent && made.child && made.parent !== made.child, `前置：应造出父子两块：${JSON.stringify(made)}`)
+  await page.waitForTimeout(300)
+
+  const qid = await page.evaluate(() => {
+    const ok = window.__qua.invoke('core.query/create', {
+      kind: 'page',
+      name: '基数探针查询',
+      spec: { where: { text: '基数探针' }, scope: 'all' },
+    })
+    if (!ok) throw new Error('建不出查询页')
+    return String(window.__qua.snapshot().activeId)
+  })
+  await page.waitForTimeout(500)
+
+  const read = () =>
+    page.evaluate(() => ({
+      count: document.querySelector('.queryview-count')?.textContent ?? '',
+      top: document.querySelector('.queryview-topcount')?.hidden === false
+        ? (document.querySelector('.queryview-topcount')?.textContent ?? '')
+        : '',
+      outlineRows: document.querySelectorAll('.queryview-editor .blk[data-depth="0"]').length,
+      tableRows: document.querySelectorAll('.tv-row').length,
+    }))
+
+  const outline = await read()
+  assert(outline.count.includes('2'), `大纲抬头的主数字＝命中条数 2：${outline.count}`)
+  assert(outline.outlineRows === 1, `大纲把父子折叠成一行：${outline.outlineRows}`)
+  assert(outline.top.includes('1'), `折叠程度用次要文案说：${JSON.stringify(outline.top)}`)
+
+  // 同一份结果换表格：主数字**不变**，只是不再折叠
+  await page.evaluate(
+    (id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'table' }),
+    qid,
+  )
+  await page.waitForTimeout(500)
+  const table = await read()
+  assert(table.count === outline.count, `同一查询在两种视图下的主数字必须一致：${outline.count} → ${table.count}`)
+  assert(table.tableRows === 2, `表格每条命中一行：${table.tableRows}`)
+  assert(table.top === '', '表格不折叠 ⇒ 没有次要文案')
+
+  await ctx.close()
+  return `hits=2：大纲 ${outline.outlineRows} 行＋「${outline.top}」、表格 ${table.tableRows} 行；抬头都是 ${table.count}`
+})
+
+await check('T192 在当前块里建查询块：落点是这一块的子块；一次撤销撤掉两块；构建器当场打开', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(300)
+  const root = await page.evaluate(() => window.__qua.snapshot().activeId)
+  const before = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
+
+  await page.evaluate((id) => window.__qua.invoke('core.query/insert', { blockId: id }), root)
+  await page.waitForTimeout(500)
+
+  const made = await page.evaluate((id) => {
+    const host = window.__qua.__editor.store.find(id)
+    const q = host?.children[0]
+    const caret = host?.children[1]
+    return {
+      qid: q?.id ?? '',
+      parent: q && host ? host.id : '',
+      hasQuery: Boolean(q?.props?._query),
+      caret: caret?.id ?? '',
+      caretChildren: caret?.children.length ?? -1,
+      blocks: window.__qua.snapshot().totalBlocks,
+      builder: Boolean(document.querySelector('.qb')),
+    }
+  }, root)
+  assert(made.hasQuery, `前置：新块应是查询块：${JSON.stringify(made)}`)
+  assert(made.parent === root, `查询块必须是**当前块的子块**（锚点才等于当前块）：${JSON.stringify(made)}`)
+  assert(made.caret !== '' && made.caret !== made.qid, '查询块后面要留一个空块做光标落点')
+  assert(made.caretChildren === 0, '落点是一个空块')
+  assert(made.blocks === before + 2, `一次建两块：${before} → ${made.blocks}`)
+  assert(made.builder, '建完当场打开构建器（不用再点一次）')
+
+  // 关掉构建器，把光标放回编辑器，一次 ⌘Z 应该把两块一起撤掉
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), made.qid)
+  await page.waitForTimeout(150)
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(500)
+  const undone = await page.evaluate(() => ({ blocks: window.__qua.snapshot().totalBlocks }))
+  assert(undone.blocks === before, `插块与落点空块要能一次撤销：${before} → ${undone.blocks}（应回到 ${before}）`)
+
+  await ctx.close()
+  return `查询块是当前块的子块；两块一起插、一次 ⌘Z 收回（${made.blocks} → ${undone.blocks}）`
+})
+
+await check('T193 提升为查询块：新块挂在宿主下；$self 结果不变；一次 ⌘Z 收回块与指针', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(300)
+
+  // 挑一个有文字的叶子块，把它打开成这一段（挂载区属于这一段）
+  const host = await page.evaluate(() => {
+    const rows = window.__qua.__editor.rows().map((r) => r.block)
+    const spot = rows.find((b) => b.children.length === 0 && r0Text(b) !== '')
+    function r0Text(b) {
+      return (b.content ?? []).filter((r) => r.t === 'text').map((r) => r.v).join('')
+    }
+    window.__qua.invoke('core.block/focus-block', { blockId: spot.id })
+    return { id: spot.id, text: r0Text(spot) }
+  })
+  assert(host.id !== '' && host.text !== '', `前置：要有一个有文字的叶子块：${JSON.stringify(host)}`)
+  await page.waitForTimeout(400)
+  const before = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
+
+  // 给它加一个**提到它正文**的子块：$self 的文本条件才有命中
+  const childId = await page.evaluate(
+    ({ id, text }) => {
+      window.__qua.invoke('core.view/new-row', { owner: { kind: 'block', blockId: id } })
+      const hostBlock = window.__qua.__editor.store.find(id)
+      const child = hostBlock?.children[0]
+      if (!child) return ''
+      window.__qua.focusBlock(child.id, 0)
+      return child.id
+    },
+    host,
+  )
+  assert(childId !== '', '前置：应能加一个子块')
+  await page.waitForTimeout(250)
+  await page.locator(`#editor .blk[data-block-id="${childId}"] .tx`).first().click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(host.text)
+  await page.waitForTimeout(400)
+
+  // 一栏 local：条件用「这一块的正文」（$self）
+  const tabId = await page.evaluate((id) => {
+    window.__qua.invoke('core.mount/add-local', {
+      host: { kind: 'block', blockId: id },
+      label: '本块自引用',
+      spec: { where: { text: '$self' } },
+    })
+    return [...document.querySelectorAll('#editor .mount .mount-tabwrap')].find(
+      (x) => (x.querySelector('.mount-tab')?.textContent ?? '') === '本块自引用',
+    )?.dataset.tab ?? ''
+  }, host.id)
+  assert(tabId !== '', '前置：应加出一栏 local 查询')
+  await page.waitForTimeout(300)
+  // 新栏缺省是表格；切回大纲数行（这一条钉的是锚点与结果，不是看法）
+  await page.evaluate(
+    ({ id, tabId }) =>
+      window.__qua.invoke('core.view/set-active', {
+        owner: { kind: 'tab', host: { kind: 'block', blockId: id }, tabId },
+        viewId: '',
+      }),
+    { id: host.id, tabId },
+  )
+  await mountTab(page, tabId)
+  await page.waitForTimeout(350)
+  const rowsBefore = await mountRows(page)
+  assert(rowsBefore > 0, `前置：这一栏应命中那条子块：${rowsBefore}`)
+
+  // 走「⋯」菜单的「提升为查询块…」——不是直接调命令
+  await page.locator(`#editor .mount .mount-tabwrap[data-tab="${tabId}"] .mount-more`).click()
+  await page.waitForSelector('.layer-item')
+  const labels = await page.evaluate(() => [...document.querySelectorAll('.layer-label')].map((e) => e.textContent ?? ''))
+  assert(labels.some((x) => x.includes('提升为查询块')), `⋯ 菜单里要有「提升为查询块…」：${JSON.stringify(labels)}`)
+  await page.locator('.layer-item', { hasText: '提升为查询块' }).first().click()
+  await page.waitForTimeout(500)
+
+  const promoted = await page.evaluate((id) => {
+    const hostBlock = window.__qua.__editor.store.find(id)
+    let qid = ''
+    let parent = ''
+    const walk = (list, p) => {
+      for (const b of list) {
+        if (b.props?._query && p === id) qid = b.id
+        if (b.id === qid) parent = p ?? ''
+        walk(b.children, b.id)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks, null)
+    return {
+      qid,
+      parent,
+      tabKind: document.querySelector('#editor .mount .mount-tabwrap[data-kind="linked"]')?.dataset.kind ?? '',
+      blocks: window.__qua.snapshot().totalBlocks,
+      childInHost: Boolean(hostBlock),
+    }
+  }, host.id)
+  assert(promoted.qid !== '', '提升应建出一个查询块')
+  assert(promoted.parent === host.id, `查询块的父块必须是宿主（$self 才指得回它）：${JSON.stringify(promoted)}`)
+  assert(promoted.tabKind === 'linked', '这一栏要改成指向新块的指针')
+  assert(promoted.blocks === before + 2, `提升只多一个查询块（原有子块也在）：${before} → ${promoted.blocks}`)
+
+  // 打开新查询块：$self 的结果应与提升前一致
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), promoted.qid)
+  await page.waitForTimeout(450)
+  const after = await page.evaluate(() => ({
+    count: document.querySelector('.queryview-count')?.textContent ?? '',
+    rows: document.querySelectorAll('.queryview-editor .blk[data-depth="0"]').length,
+  }))
+  assert(after.rows === rowsBefore, `$self 结果要与提升前一致：${rowsBefore} → ${after.rows}（${after.count}）`)
+
+  // 一次 ⌘Z：块回来、栏回到 local
+  await page.locator('.queryview-editor .blk .tx').first().click()
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(550)
+  const undone = await page.evaluate((id) => {
+    const hostBlock = window.__qua.__editor.store.find(id)
+    const mounts = Array.isArray(hostBlock?.props?._mounts) ? hostBlock.props._mounts : []
+    return { blocks: window.__qua.snapshot().totalBlocks, kinds: mounts.map((m) => m.kind) }
+  }, host.id)
+  assert(undone.blocks === before + 1, `一次撤销要删掉查询块（子块留着）：${before + 1} → ${undone.blocks}`)
+  assert(undone.kinds.includes('local'), `一次撤销也要把这一栏改回 local：${JSON.stringify(undone.kinds)}`)
+
+  await ctx.close()
+  return `提升后父块＝宿主、结果 ${rowsBefore} 条不变；一次 ⌘Z 收回块与指针（${undone.kinds.join(',')}）`
+})
+
+await check('T194 派生栏切表格：路径/引用次数/命中词/共同标签；重开仍是表格；固定为查询不抢内置栏', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const setup = await page.evaluate(() => {
+    const pages = window.__qua.pages()
+    const P = pages[0]
+    const Q = pages[1]
+    // ① 引用：在另一页的一条块里引用 P
+    window.__qua.invoke('core.page/open', { pageId: Q.id })
+    const rows = window.__qua.__editor.rows().map((r) => r.block).filter((x) => x.id !== Q.id && x.children.length === 0)
+    const refBy = rows[0]
+    const tagged = rows[1] ?? rows[0]
+    window.__qua.focusBlock(refBy.id, 999)
+    window.__qua.invoke('core.editor/insert-page-ref', { pageId: P.id })
+    // ② 提及：另一条块正文含 P 的名字（**不是**引用）
+    window.__qua.focusBlock(tagged.id, 999)
+    window.__qua.invoke('core.editor/insert-block', { text: `${P.title} 的提及探针` })
+    // ③ 同类：P 与被引用的那条块打同一个标签
+    window.__qua.invoke('core.tags/add', { blockId: P.id, name: '冒烟同类' })
+    window.__qua.invoke('core.tags/add', { blockId: tagged.id, name: '冒烟同类' })
+    return { P: P.id, refBy: refBy.id, tagged: tagged.id }
+  })
+  assert(setup.P !== '' && setup.refBy !== '', `前置：应能造出引用/提及/同类：${JSON.stringify(setup)}`)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.P)
+  await page.waitForTimeout(450)
+
+  const head = () =>
+    page.evaluate(() => ({
+      count: document.querySelector('.mount-derived-count')?.textContent ?? '',
+      active: document.querySelector('.mount-derived-view[data-active="1"]')?.dataset.kind ?? '',
+      why: document.querySelector('.mount-derived-why')?.textContent ?? '',
+    }))
+  const tableOf = () =>
+    page.evaluate(() => ({
+      rows: document.querySelectorAll('.mount-view .tv-row').length,
+      cols: [...document.querySelectorAll('.mount-view .tv-head [data-col]')].map((e) => e.dataset.col),
+      cells: [...document.querySelectorAll('.mount-view .tv-row [data-col]')].map((e) => e.textContent ?? ''),
+      // 派生栏没有拥有者：视图宿主自己的抬头（含刷新/新建视图/改名）不许露出来
+      qvHead: document.querySelector('.mount-view .queryview-head')?.hidden ?? false,
+    }))
+  const num = (s) => Number((s.match(/\d+/) ?? ['0'])[0])
+
+  // ① 引用栏 → 表格：路径与引用次数两列都在
+  await mountTab(page, 'refs')
+  const refsHead = await head()
+  const refsCount = num(refsHead.count)
+  assert(refsCount >= 1, `引用栏应有命中（造过一条引用）：${JSON.stringify(refsHead)}`)
+  await page.locator('.mount-derived-view[data-kind="table"]').click()
+  await page.waitForTimeout(450)
+  const refsTable = await tableOf()
+  assert(refsHead.active === 'outline', '前置：缺省是大纲')
+  assert(refsTable.rows === refsCount, `切表格不改变成员：${refsCount} → ${refsTable.rows}`)
+  assert(refsTable.cols.includes('path') && refsTable.cols.includes('refCount'), `引用表要有路径与次数：${JSON.stringify(refsTable.cols)}`)
+  assert(refsTable.cells.some((c) => /^\d+$/.test(c) && Number(c) >= 1), `引用次数要画出来：${JSON.stringify(refsTable.cells)}`)
+  assert(refsTable.qvHead === true, '派生栏的视图宿主不许画自己的抬头（没有拥有者）')
+
+  // ② 关掉重开：看法是设备状态，重开仍在
+  const reopened = await reopenPage(browser, ctx, base, page)
+  const page2 = reopened.page
+  await page2.waitForTimeout(350)
+  await page2.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.P)
+  await page2.waitForTimeout(450)
+  await mountTab(page2, 'refs')
+  const persisted = await page2.evaluate(() => ({
+    active: document.querySelector('.mount-derived-view[data-active="1"]')?.dataset.kind ?? '',
+    rows: document.querySelectorAll('.mount-view .tv-row').length,
+  }))
+  assert(persisted.active === 'table', `派生栏的看法要落设备状态（重开仍是表格）：${JSON.stringify(persisted)}`)
+  assert(persisted.rows === refsCount, `重开后成员一致：${refsCount} → ${persisted.rows}`)
+
+  // ③ 固定为查询：内置栏保留、新栏有个不重名的名字、看法跟着过去
+  await page2.locator('.mount-derived-more').click()
+  await page2.waitForSelector('.layer-item')
+  await page2.locator('.layer-item', { hasText: '固定为' }).first().click()
+  await page2.waitForTimeout(500)
+  const fixed = await page2.evaluate(() => ({
+    labels: [...document.querySelectorAll('#editor .mount .mount-tab')].map((e) => e.textContent ?? ''),
+    kinds: [...document.querySelectorAll('#editor .mount .mount-tabwrap')].map((w) => w.dataset.kind ?? ''),
+    rows: document.querySelectorAll('.mount-view .tv-row').length,
+    derivedHeadHidden: document.querySelector('.mount-derived-head')?.hidden ?? false,
+  }))
+  assert(fixed.labels.includes('引用'), `内置栏要保留：${JSON.stringify(fixed.labels)}`)
+  assert(fixed.labels.includes('引用（可编辑）'), `新栏不能和内建栏重名：${JSON.stringify(fixed.labels)}`)
+  assert(fixed.kinds.filter((k) => k === 'local').length === 1, `新栏是 local（自己拥有配置）：${JSON.stringify(fixed.kinds)}`)
+  assert(fixed.rows === refsCount, `固定后的查询与当前看法一致（同为表格、${refsCount} 行）：${fixed.rows}`)
+  assert(fixed.derivedHeadHidden, '切到 local 栏之后派生栏的抬头收起（它不再代表这一栏）')
+
+  // ④ 提及 / 同类：命中词与共同标签各自落在表里
+  await mountTab(page2, 'mentions')
+  await page2.locator('.mount-derived-view[data-kind="table"]').click()
+  await page2.waitForTimeout(450)
+  const mentions = await page2.evaluate(() => ({
+    count: Number((document.querySelector('.mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
+    rows: document.querySelectorAll('.mount-view .tv-row').length,
+    cols: [...document.querySelectorAll('.mount-view .tv-head [data-col]')].map((e) => e.dataset.col),
+    matched: [...document.querySelectorAll('.mount-view .tv-row [data-col="matched"]')].map((e) => e.textContent ?? ''),
+    why: document.querySelector('.mount-derived-why')?.textContent ?? '',
+  }))
+  assert(mentions.rows === mentions.count && mentions.rows >= 1, `提及栏表格与条数一致：${JSON.stringify(mentions)}`)
+  assert(mentions.cols.includes('matched'), `提及表要有命中词列：${JSON.stringify(mentions.cols)}`)
+  assert(mentions.matched.some((s) => s.trim() !== ''), `命中词要画出来：${JSON.stringify(mentions.matched)}`)
+  assert(mentions.why.includes('没有指向它'), `提及的说明要写清「不含引用」：${mentions.why}`)
+
+  await mountTab(page2, 'same')
+  await page2.locator('.mount-derived-view[data-kind="table"]').click()
+  await page2.waitForTimeout(450)
+  const same = await page2.evaluate(() => ({
+    count: Number((document.querySelector('.mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
+    rows: document.querySelectorAll('.mount-view .tv-row').length,
+    cols: [...document.querySelectorAll('.mount-view .tv-head [data-col]')].map((e) => e.dataset.col),
+    shared: [...document.querySelectorAll('.mount-view .tv-row [data-col="sharedTags"]')].map((e) => e.textContent ?? ''),
+  }))
+  assert(same.rows === same.count && same.rows >= 1, `同类栏表格与条数一致：${JSON.stringify(same)}`)
+  assert(same.cols.includes('sharedTags'), `同类表要有共同标签列：${JSON.stringify(same.cols)}`)
+  assert(same.shared.some((s) => s.includes('冒烟同类')), `共同标签要画出来：${JSON.stringify(same.shared)}`)
+
+  // ⑤ 派生栏不提供「新建视图 / 重命名 / 刷新」
+  const noOwner = await page2.evaluate(() => ({
+    addView: Boolean(document.querySelector('.mount-view .qv-view-add')),
+    refresh: Boolean(document.querySelector('.mount-view .queryview-refresh:not([hidden])')),
+    rename: [...document.querySelectorAll('.layer-label')].some((e) => (e.textContent ?? '').includes('重命名')),
+  }))
+  assert(!noOwner.addView, '派生栏不许有「新建视图」')
+  assert(!noOwner.refresh, '派生栏是 live 的：不许有刷新')
+  assert(!noOwner.rename, '派生栏不许改名')
+
+  // ⑥ live：现算的成员会跟着数据变（不冻成员、没有刷新按钮）
+  await mountTab(page2, 'refs')
+  await page2.locator('.mount-derived-view[data-kind="table"]').click()
+  await page2.waitForTimeout(400)
+  const beforeLive = await page2.evaluate(() => document.querySelectorAll('.mount-view .tv-row').length)
+  await page2.evaluate((pid) => {
+    // 在这一页里挑一条**还没引用过它**的块，插一枚指向它的引用
+    const rows = window.__qua.__editor.rows().map((r) => r.block)
+    const spot = rows.find((b) => b.id !== pid && b.children.length === 0)
+    window.__qua.focusBlock(spot.id, 999)
+    window.__qua.invoke('core.editor/insert-page-ref', { pageId: pid })
+  }, setup.P)
+  await page2.waitForTimeout(600)
+  const afterLive = await page2.evaluate(() => ({
+    rows: document.querySelectorAll('.mount-view .tv-row').length,
+    count: Number((document.querySelector('.mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
+  }))
+  assert(afterLive.rows === beforeLive + 1, `派生栏是 live 的：新增一处引用后成员当场 +1（${beforeLive} → ${afterLive.rows}）`)
+  assert(afterLive.count === afterLive.rows, `抬头条数与表行同一个数：${afterLive.count} vs ${afterLive.rows}`)
+
+  await reopened.ctx.close()
+  return `引用 ${refsCount} 条（路径＋次数）→ 重开仍表格 → 固定为查询（${fixed.labels.join(' / ')}）→ 提及/同类各带命中词与共同标签`
+})
+
 await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器改主名 ⇒ chip 跟着变；删除 ⇒ dangling', async () => {
   const { ctx, page } = await freshPage(browser, base)
   // 打开「产品设计 · 决策日志」：seed 里那一页有指向别处的 `[[..]]`
@@ -3487,6 +3875,10 @@ await check('T93 段排列：行序列包进 .sec；row 下段是列，点列空
    */
   const target = await page.evaluate(() => {
     const sec = document.querySelector('#editor > .sec')
+    const scroll = document.getElementById('scroll')
+    // 列底可能被挂载区（含派生栏抬头）顶出视口：先把落点滚进来再点
+    const need = sec.getBoundingClientRect().bottom + 24 - (window.innerHeight - 8)
+    if (need > 0) scroll.scrollTop += need
     const colRect = sec.getBoundingClientRect()
     return { x: Math.round(colRect.left + colRect.width / 2), y: Math.round(colRect.bottom + 24) }
   })
@@ -10528,6 +10920,10 @@ await check('T130 挂载区：点它不建块；它下面的空白仍能建块',
 
   // 同一屏、挂载区**之下**的空白仍应能建块（那条判据没有被一刀切掉）
   const blank = await page.evaluate(() => {
+    const scroll = document.getElementById('scroll')
+    const before = document.querySelector('#editor .mount').getBoundingClientRect()
+    const need = before.bottom + 40 - (window.innerHeight - 8)
+    if (need > 0) scroll.scrollTop += need
     const m = document.querySelector('#editor .mount').getBoundingClientRect()
     return { x: Math.round(m.left + m.width / 2), y: Math.round(m.bottom + 40) }
   })

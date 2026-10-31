@@ -16,6 +16,8 @@ import {
   canonicalSpec,
   canonicalViews,
   defaultColumnsForSource,
+  derivedColumns,
+  derivedListFields,
   derivedSpecOf,
   displayNameOf,
   journalDate,
@@ -26,6 +28,7 @@ import {
   todayISO,
   type MountEntry,
   type MountHost,
+  type QuerySpec,
   type Source,
   type ViewConfig,
 } from '../../core/index.ts'
@@ -68,7 +71,7 @@ export function mountCommands(
      * 没有激活视图时这一栏只有大纲分支，条件与范围（这一块之下/全库）的
      * 芯片住在视图抬头里 —— 缺了这张表，「范围只到宿主这一块」在屏幕上无处可看。
      */
-    addLocalTab: (host, label, spec, views, activeView) => {
+    addLocalTab: (host, label, spec, views, activeView, emptyView) => {
       if (!editable(host)) return ''
       const name = label.trim()
       if (name === '' || !spec || typeof spec !== 'object' || !spec.where) return ''
@@ -77,7 +80,7 @@ export function mountCommands(
       const list = canonicalViews(views ?? [], source)
       const entry: MountEntry = { id: mkTabId(), kind: 'local', label: name, spec: canon, views: list }
       let active = activeView !== undefined && activeView !== '' ? activeView : ''
-      if (list.length === 0) {
+      if (list.length === 0 && emptyView !== 'none') {
         // 列在第一次建表时算一次（与 `core.view/add` 同一条口径），之后不随结果漂移
         const view: ViewConfig = { id: mkViewId(), kind: 'table', table: { columns: defaultColumnsForSource(source, d.kb) } }
         entry.views = [view]
@@ -180,14 +183,31 @@ export function mountCommands(
           [LISTS_PROP]: ['page'],
         }
       }
+      /**
+       * **查询块**：默认挂到**宿主块**下面，不是「当前打开的那一页」。
+       *
+       * 查询块的求值锚点是它的容器：嵌在某一页里的 local 栏提升之后，
+       * 只有仍住在宿主下，「这一块 / 这一页之下」才会指回原来那个块。
+       * 默认用 `activeId()` 会让锚点静默变成当前页 —— 结果对不上，而没有任何一层报错。
+       */
+      const hostBlockId = host.kind === 'journal' ? d.kb.journalDay(todayISO())?.id : host.blockId
+      const parent = parentId !== undefined && parentId !== '' ? parentId : hostBlockId
+      /**
+       * **插块 ＋ 把这一栏改成 linked 在同一笔事务里**：否则一次提升要按两次撤销，
+       * 而且中途失败会留下「块建好了但这一栏还指着自己」的半截状态。
+       */
       d.run((tx) => {
         if (target === 'page') tx.insert(block, null, d.kb.roots().length)
-        else tx.insert(block, parentId ?? d.activeId(), Number.MAX_SAFE_INTEGER)
+        else tx.insert(block, parent ?? null, Number.MAX_SAFE_INTEGER)
+        if (link !== false) {
+          const linked: MountEntry = { id: entry.id, kind: 'linked', block: block.id, view: entry.activeView ?? '' }
+          d.owners.writeEntriesIn(
+            tx,
+            host,
+            entriesOf(host).map((e) => (e.id === tabId ? linked : e)),
+          )
+        }
       })
-      if (link !== false) {
-        const linked: MountEntry = { id: entry.id, kind: 'linked', block: block.id, view: entry.activeView ?? '' }
-        write(host, entriesOf(host).map((e) => (e.id === tabId ? linked : e)))
-      }
       d.toast(t('ui.mount.promoted'), 'ok')
       return block.id
     },
@@ -226,15 +246,36 @@ export function mountCommands(
     /**
      * **固定派生栏**（derived → local）：把「引用／同类／提及」那一栏的现算条件
      * 变成一栏可编辑的 local tab（内置栏保留）。
+     *
+     * 三条口径：
+     *   · 名字**不能和内置栏重名**（两个「引用」在 tab 条上分不出谁是谁）；
+     *   · 把**这一次的看法**一起带过去（列也跟着给：切过去看到的还是同一张表）；
+     *   · 大纲就真的是大纲 —— 不替用户补一张默认表格。
      */
-    fixDerivedTab: (host, source) => {
+    fixDerivedTab: (host, source, view) => {
       if (!editable(host)) return ''
       const hostBlock = host.kind === 'journal' ? d.kb.journalDay(todayISO()) : d.kb.get(host.blockId)
       if (!hostBlock) return ''
       const spec = derivedSpecOf(hostBlock, d.kb.roots(), source)
       if (!spec) return ''
-      const label = source === 'refs' ? t('ui.mount.refs') : source === 'same' ? t('ui.mount.same') : t('ui.mount.mentions')
-      return api.addLocalTab(host, label, spec, [], '')
+      /**
+       * 派生栏问的是「谁跟我有关」——那些块**不在宿主子树里**（所以派生栏不设子树锚点）。
+       * 固定成 local tab 后，这一栏的上下文会按宿主给 `scope:'subtree'` ⇒ 结果会变成 0。
+       * 所以把这一条**写明**成「全库」：跟着条件一起走，换个表面也是同一批成员。
+       */
+      const fixedSpec: QuerySpec = canonicalSpec({ ...spec, scope: 'all' })
+      const name = source === 'refs' ? t('ui.mount.refs') : source === 'same' ? t('ui.mount.same') : t('ui.mount.mentions')
+      const label = t('ui.mount.fixedLabel', { name })
+      if (view === 'list') {
+        const fixed: ViewConfig = { id: mkViewId(), kind: 'list', list: { fields: derivedListFields(source) } }
+        return api.addLocalTab(host, label, fixedSpec, [fixed], fixed.id)
+      }
+      if (view === 'table') {
+        const fixed: ViewConfig = { id: mkViewId(), kind: 'table', table: { columns: derivedColumns(source) } }
+        return api.addLocalTab(host, label, fixedSpec, [fixed], fixed.id)
+      }
+      // 大纲：不补默认表格（那会把用户选的看法换掉）
+      return api.addLocalTab(host, label, fixedSpec, [], '', 'none')
     },
   }
   return api

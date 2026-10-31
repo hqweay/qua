@@ -66,6 +66,13 @@ export type OwnerStore = ViewOwnerStore & {
   entriesOf: (host: MountHost) => MountEntry[]
   /** 整组写回（加/摘/改序用） */
   writeEntries: (host: MountHost, next: readonly MountEntry[]) => void
+  /**
+   * **同一笔事务里**整组写回（把「插块 ＋ 把这一栏改成指针」合成一次撤销）。
+   *
+   * 日记宿主是设备状态，没有事务可并 —— 它照常就地写并排一次设备落盘。
+   * 调用方负责在这次事务之外宣布变化（`onChange`），所以这里不重复宣布。
+   */
+  writeEntriesIn: (tx: Tx | null, host: MountHost, next: readonly MountEntry[]) => void
   /** 按稳定 id 找一栏 */
   entryOf: (host: MountHost, tabId: string) => MountEntry | undefined
 }
@@ -79,25 +86,33 @@ export function setupOwners(deps: OwnersDeps): OwnerStore {
     entriesOf(host).find((e) => e.id === tabId)
 
   /**
-   * 整组写回。
+   * 整组写回（**不带事务**：日记宿主是设备状态，块宿主由 `writeEntries` 包一层事务）。
    *
    * ⚠️ 空集合一律**删掉那一格**：留一个空数组会让「这一块有没有配过面板」有两份答案。
    */
-  const writeEntries = (host: MountHost, next: readonly MountEntry[]): void => {
+  const writeEntriesIn = (tx: Tx | null, host: MountHost, next: readonly MountEntry[]): void => {
     if (host.kind === 'journal') {
       deps.prefs().journalMounts = canonicalMountEntries(next)
       deps.scheduleDeviceSave()
+      return
+    }
+    if (!tx) return
+    tx.patch(host.blockId, (b) => {
+      const props = { ...(b.props ?? {}) }
+      if (next.length === 0) delete props[MOUNTS_PROP]
+      else props[MOUNTS_PROP] = canonicalMountEntries(next)
+      b.props = Object.keys(props).length === 0 ? undefined : props
+    })
+  }
+
+  /** 整组写回（自带一笔事务；命令层加/摘/改序都走这里） */
+  const writeEntries = (host: MountHost, next: readonly MountEntry[]): void => {
+    if (host.kind === 'journal') {
+      writeEntriesIn(null, host, next)
       deps.onChange()
       return
     }
-    deps.run((tx) => {
-      tx.patch(host.blockId, (b) => {
-        const props = { ...(b.props ?? {}) }
-        if (next.length === 0) delete props[MOUNTS_PROP]
-        else props[MOUNTS_PROP] = canonicalMountEntries(next)
-        b.props = Object.keys(props).length === 0 ? undefined : props
-      })
-    })
+    deps.run((tx) => writeEntriesIn(tx, host, next))
     deps.onChange()
   }
 
@@ -166,5 +181,5 @@ export function setupOwners(deps: OwnersDeps): OwnerStore {
     }
   }
 
-  return { read, write, readBinding, setBindingView, entriesOf, writeEntries, entryOf }
+  return { read, write, readBinding, setBindingView, entriesOf, writeEntries, writeEntriesIn, entryOf }
 }

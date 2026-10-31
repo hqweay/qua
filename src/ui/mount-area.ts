@@ -25,7 +25,7 @@
  */
 import {
   canEditMounts,
-  derivedSpecOf,
+  derivedRecordsOf,
   displayNameOf,
   expandContexts,
   isJournal,
@@ -33,8 +33,11 @@ import {
   readViewSet,
   resolveBoundView,
   unfoldForContext,
+  DERIVED_VIEW_KINDS,
   type Block,
   type BlockStore,
+  type DerivedSource,
+  type DerivedViewKind,
   type MountEntry,
   type MountHost,
   type ViewOwnerStore,
@@ -83,6 +86,20 @@ export interface MountAreaDeps {
   /** 「×」：摘掉一栏（`tabId` 是**稳定 id**，不是数组下标） */
   onRemoveTab?: (host: MountHost, tabId: string) => void
   /**
+   * 「⋯」：这一栏的更多动作（提升为查询块…／转为本地副本／固定为查询…／移除）。
+   *
+   * 菜单长什么样、每一项落到哪条命令，都归装配层 —— 这一层只知道「有这一颗按钮」。
+   */
+  onTabMenu?: (host: MountHost, entry: MountEntry, anchor: DOMRect) => void
+  /**
+   * 派生栏现在选了什么看法（**设备状态**：没有拥有者）。
+   *
+   * 由装配层现读 `Prefs`；这一层不碰偏好，也不写它 —— 写走 `setDerivedKind`。
+   */
+  derivedKind?: (host: Block, source: DerivedSource) => DerivedViewKind
+  /** 切派生栏的看法（装配层写设备状态并重画这一栏） */
+  setDerivedKind?: (host: Block, source: DerivedSource, kind: DerivedViewKind) => void
+  /**
    * 这一栏非大纲时用的视图体（local／linked 栏可以有表格等看法）。
    *
    * 返回 `null` ⇒ 这一栏画大纲。由装配层造，因为「求值的上下文」与「写事务的 source」
@@ -113,6 +130,20 @@ const EMPTY_TEXT: Record<MountEntry['kind'], MsgId> = {
   linked: 'ui.mount.empty.user',
 }
 
+/** 派生栏空态：三种来源各自说一句实话（「还没有人引用它」≠「条件没匹配」） */
+const DERIVED_EMPTY: Record<'refs' | 'same' | 'mentions', MsgId> = {
+  refs: 'ui.mount.empty.refs',
+  same: 'ui.mount.empty.same',
+  mentions: 'ui.mount.empty.mentions',
+}
+
+/** 派生栏的**只读**条件说明（它没有条件可编辑，也没有构建器落点） */
+const DERIVED_WHY: Record<'refs' | 'same' | 'mentions', MsgId> = {
+  refs: 'ui.mount.why.refs',
+  same: 'ui.mount.why.same',
+  mentions: 'ui.mount.why.mentions',
+}
+
 export class MountArea {
   readonly root: HTMLElement
   private readonly deps: MountAreaDeps
@@ -123,6 +154,13 @@ export class MountArea {
   /** 非大纲那一栏的视图体槽 */
   private readonly viewEl: HTMLElement
   private readonly emptyEl: HTMLElement
+  /**
+   * 派生栏的抬头：`引用 · 12 条  [大纲] [列表] [表格]  ⋯`。
+   *
+   * 为什么要它（而不是复用视图宿主那条抬头）：派生栏没有拥有者 —— 抬头里的
+   * 「这一栏是什么」是它唯一能说清自己的地方，而「切看法」写的是设备状态。
+   */
+  private readonly derivedHeadEl: HTMLElement
   /** 折叠时那一行摘要（只有「引用 N」——同类／提及的计数要现算，折叠时不值得算） */
   private readonly summaryEl: HTMLButtonElement
   /**
@@ -181,6 +219,10 @@ export class MountArea {
     this.emptyEl.className = 'mount-empty'
     this.emptyEl.hidden = true
 
+    this.derivedHeadEl = document.createElement('div')
+    this.derivedHeadEl.className = 'mount-derived-head'
+    this.derivedHeadEl.hidden = true
+
     this.block = new EditableBlock({
       host: this.editorEl,
       store: deps.store,
@@ -199,7 +241,7 @@ export class MountArea {
       onContextBack: (rootId) => this.collapse(rootId),
     })
 
-    this.bodyEl.append(this.emptyEl, this.block.root, this.viewEl)
+    this.bodyEl.append(this.derivedHeadEl, this.emptyEl, this.block.root, this.viewEl)
     this.root.append(this.summaryEl, this.tabsEl, this.bodyEl)
 
     this.render()
@@ -337,6 +379,24 @@ export class MountArea {
         })
         wrap.appendChild(x)
       }
+      /**
+       * 「⋯」对**三种栏都给**：local 能提升／移除，linked 能转本地／移除，
+       * derived 能固定成一条可编辑的查询。放在 × 之前 —— × 是「这一栏不要了」，
+       * 比它更危险的按钮不该更靠里。
+       */
+      if (this.deps.onTabMenu) {
+        const more = document.createElement('button')
+        more.type = 'button'
+        more.className = 'mount-more'
+        more.dataset.tab = entry.id
+        more.textContent = '⋯'
+        more.title = t('ui.mount.tabMenu')
+        more.addEventListener('click', (e) => {
+          e.stopPropagation()
+          this.deps.onTabMenu?.(hostRef, entry, more.getBoundingClientRect())
+        })
+        wrap.appendChild(more)
+      }
       if (i === activeAt) wrap.dataset.active = '1'
       this.tabsEl.appendChild(wrap)
     })
@@ -390,19 +450,59 @@ export class MountArea {
   /* ------------------------------------------------------------ body */
 
   private load(host: Block, entry: MountEntry, focusHint?: string): void {
+    if (entry.kind === 'derived') {
+      this.loadDerived(host, entry, focusHint)
+      return
+    }
+    this.derivedHeadEl.hidden = true
     const view = this.viewOf(entry)
     if (view) {
       this.showView(host, entry, view)
       return
     }
     this.detachView()
-    const base = this.rootsFor(host, entry)
+    this.loadOutline(entry, this.rootsFor(host, entry), focusHint)
+  }
+
+  /**
+   * 派生栏：**现算**一批记录（不冻结、不标 stale），抬头说明它是谁。
+   *
+   * 大纲走挂载区自己那一支（`.mount-editor` 的 DOM 是既有断言的契约）；
+   * 列表／表格借视图宿主的渲染器 —— 但那一台不画自己的抬头，也没有「＋」。
+   */
+  private loadDerived(host: Block, entry: Extract<MountEntry, { kind: 'derived' }>, focusHint?: string): void {
+    const records = derivedRecordsOf(host, this.deps.kb, entry.source)
+    const kind = this.deps.derivedKind?.(host, entry.source) ?? 'outline'
+    this.renderDerivedHead(host, entry, kind, records.length)
+    const view = this.viewOf(entry)
+    if (view) {
+      this.showView(host, entry, view)
+      return
+    }
+    this.detachView()
+    /**
+     * 大纲只画**顶层**（祖先与子孙同时命中时，子块由祖先那一行自己展开）：
+     * 计数仍按记录条数（与列表/表格同一个数字）。
+     */
+    const ids = new Set(records.map((r) => r.block.id))
+    const roots: Block[] = []
+    const contexts = new Map<string, readonly Block[]>()
+    for (const r of records) {
+      if (r.path.some((p) => ids.has(p.id))) continue
+      roots.push(r.block)
+      if (r.path.length > 0) contexts.set(r.block.id, r.path)
+    }
+    this.loadOutline(entry, { roots, contexts }, focusHint, DERIVED_EMPTY[entry.source])
+  }
+
+  /** 大纲装载（local／linked／派生共用的那一支） */
+  private loadOutline(entry: MountEntry, base: MountRoots, focusHint?: string, emptyText?: MsgId): void {
     const plan = expandContexts(base, this.expandedFor(entry.id), (id) => this.deps.kb.pathOf(id), focusHint)
     // 过期的展开 id 当场剪掉：下次再出现同 id 时不该「自己又展开」
     this.expandedByTab.set(entry.id, plan.expanded)
     this.covers = plan.covers
     if (plan.roots.length === 0) {
-      this.showEmpty(t(EMPTY_TEXT[entry.kind]))
+      this.showEmpty(t(emptyText ?? EMPTY_TEXT[entry.kind]))
       // 空结果也保留这份视图的折叠态：它记的是「哪些行收着」，不是「这次有几行」
       this.block.ed?.loadPage({ roots: [], folded: this.block.ed.doc.folded })
       return
@@ -419,10 +519,16 @@ export class MountArea {
   /**
    * 这一栏**现在选的是哪张视图**；`null` ＝ 大纲。
    *
-   * `derived` 栏永远大纲（它没有配置——配置是「能不能编辑」的前提）。
+   * `derived` 栏没有配置：它的看法是设备状态（`derivedKind`），缺省大纲。
+   * 列表／表格这两个看法仍然走视图宿主的渲染器，只是那一台不画抬头、也没有「＋」。
    */
   private viewOf(entry: MountEntry): ViewConfig | null {
-    if (entry.kind === 'derived') return null
+    if (entry.kind === 'derived') {
+      const host = this.deps.host()
+      if (!host) return null
+      const kind = this.deps.derivedKind?.(host, entry.source) ?? 'outline'
+      return kind === 'outline' ? null : { id: `derived:${kind}`, kind }
+    }
     const hostRef = this.mountHost()
     if (entry.kind === 'local') {
       const data = this.deps.owners.read({ kind: 'tab', host: hostRef, tabId: entry.id })
@@ -433,6 +539,61 @@ export class MountArea {
     const data = this.deps.owners.read(target.owner)
     if (!data) return null
     return resolveBoundView(target, data).view
+  }
+
+  /**
+   * 派生栏抬头：`引用 · 12 条  [大纲][列表][表格]  ⋯`。
+   *
+   * 主数字＝**记录条数**（与列表/表格同一个数）：大纲折叠只影响画几行，不改成员。
+   * 条件是一句**只读说明**（「指向这一块」）——它没有可编辑的条件，也没有构建器落点。
+   */
+  private renderDerivedHead(host: Block, entry: Extract<MountEntry, { kind: 'derived' }>, kind: DerivedViewKind, count: number): void {
+    const head = this.derivedHeadEl
+    head.hidden = false
+    head.replaceChildren()
+
+    const title = document.createElement('span')
+    title.className = 'mount-derived-title'
+    title.textContent = t(BUILTIN_LABEL[entry.source])
+    const num = document.createElement('span')
+    num.className = 'mount-derived-count'
+    num.textContent = t('ui.mount.count', { count })
+    const why = document.createElement('span')
+    why.className = 'mount-derived-why ui-ellipsis'
+    why.textContent = t(DERIVED_WHY[entry.source])
+    head.append(title, num, why)
+
+    const seg = document.createElement('div')
+    seg.className = 'mount-derived-views'
+    const labels: Record<DerivedViewKind, MsgId> = {
+      outline: 'ui.view.outline',
+      list: 'ui.view.kind.list',
+      table: 'ui.view.kind.table',
+    }
+    for (const k of DERIVED_VIEW_KINDS) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'mount-derived-view'
+      b.dataset.kind = k
+      if (k === kind) b.dataset.active = '1'
+      b.textContent = t(labels[k])
+      b.addEventListener('click', () => {
+        if (k === kind) return
+        this.deps.setDerivedKind?.(host, entry.source, k)
+      })
+      seg.appendChild(b)
+    }
+    head.appendChild(seg)
+
+    if (this.deps.onTabMenu) {
+      const more = document.createElement('button')
+      more.type = 'button'
+      more.className = 'mount-derived-more'
+      more.textContent = '⋯'
+      more.title = t('ui.mount.tabMenu')
+      more.addEventListener('click', () => this.deps.onTabMenu?.(this.mountHost(), entry, more.getBoundingClientRect()))
+      head.appendChild(more)
+    }
   }
 
   private showView(host: Block, entry: MountEntry, view: ViewConfig): void {
@@ -448,6 +609,8 @@ export class MountArea {
     const key = `${entry.id}:${view.id}`
     if (this.viewKey !== key) {
       this.detachView()
+      // detachView 会把槽藏起来（它同时负责回到大纲）；这里要把它重新露出来
+      this.viewEl.hidden = false
       const made = this.deps.createView?.(host, entry) ?? null
       this.viewKey = key
       this.view = made
@@ -523,23 +686,16 @@ export class MountArea {
   /**
    * 一栏的 roots（＋ 每个装载根的面包屑）。
    *
-   * 三种栏的**上下文**各不相同，写在这里是唯一的落点：
-   *   · `derived`（引用／同类／提及）问的是「谁跟我有关」⇒ **不给子树锚点**：
-   *     那些块本来就在别处，把它们关进宿主子树会让这一栏恒空；
-   *   · `local`／`linked` 是「这一块下面的…」⇒ 锚点＝宿主块（与中心查询块同一条口径：
-   *     它的锚点也是它所在的容器）。
+   * 只服务 `local`／`linked`：它们是「这一块下面的…」⇒ 锚点＝宿主块
+   * （与中心查询块同一条口径：它的锚点也是它所在的容器）。
+   * **派生栏不走这里**：它的记录由 `derivedRecordsOf` 现算（不给子树锚点 ——
+   * 那些块本来就在别处，关进宿主子树会让引用／提及栏恒空）。
    *
    * ⚠️ `excludeIds` 与 `selfId` **分开给**：`selfId` 只负责解析 `'$self'`，
    *    剔除走 `excludeIds`。两者曾经是同一个字段，于是「想解析它，又不得不排除它」
    *    这种形状无法表达。
    */
   private rootsFor(host: Block, entry: MountEntry): MountRoots {
-    if (entry.kind === 'derived') {
-      const spec = derivedSpecOf(host, this.deps.kb.roots(), entry.source)
-      if (!spec) return { roots: [], contexts: new Map() }
-      const hits = this.deps.kb.query(spec, { selfId: host.id, excludeIds: [host.id] })
-      return this.topLevel(hits)
-    }
     const hostRef = this.mountHost()
     const excludeIds = [host.id]
     if (entry.kind === 'linked') excludeIds.push(entry.block)

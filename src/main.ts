@@ -1941,6 +1941,8 @@ const { renderMounts, renderProperties, scheduleProperties, pickRefValue, openPr
   layers,
   owners,
   journalMounts: () => prefs().journalMounts,
+  prefs,
+  scheduleDeviceSave: () => scheduleDeviceSave(),
   shortId,
   activeBlock,
   run,

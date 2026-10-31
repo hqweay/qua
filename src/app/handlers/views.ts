@@ -69,6 +69,16 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
     const name = S(a.name)
     return app.createQuery(kind, name, spec, S(a.parentId) || undefined) !== ''
   },
+  /**
+   * 在当前块里建查询块（结构写交给门面），建完**当场打开构建器**：
+   * 空条件的查询不配一下就没有意义，让用户再点一次等于多一道无收益的门。
+   */
+  'core.query/insert': (a, app) => {
+    const id = app.insertQueryBlock(S(a.blockId) || undefined)
+    if (id === '') return false
+    app.openQueryBuilder({ kind: 'block', blockId: id })
+    return true
+  },
   'core.view/menu': (a, app) => {
     /**
      * 块菜单里这一条**不带参数**（绑定表是静态的，而菜单要的是「此刻聚焦的那一块」）。

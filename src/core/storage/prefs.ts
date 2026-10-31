@@ -13,8 +13,9 @@
  *    内建只保留一种「中性现代大纲」。观感要调就改 token，不再按皮肤分叉。
  */
 import type { SecLayout } from '../feed.ts'
-import type { MountEntry } from '../mount.ts'
-import { canonicalMountEntries } from '../mount.ts'
+import type { DerivedViewKind } from '../view.ts'
+import { DERIVED_VIEW_KINDS } from '../view.ts'
+import { canonicalMountEntries, type MountEntry } from '../mount.ts'
 import { canonicalDockEntries, dockKey, type DockEntry } from '../dock.ts'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
@@ -38,6 +39,14 @@ export interface Prefs {
    * 要跨设备 ⇒ 把 local 提升为查询页/link，不需要新机制。
    */
   journalMounts: MountEntry[]
+  /**
+   * **派生栏（引用／同类／提及）的看法**（设备状态）。
+   *
+   * 派生栏没有拥有者：它不拥有条件、也不拥有视图列表。给它造一个 owner 会把
+   * 「这一台设备怎么看这一栏」变成内容 —— 换个设备就跟着走，还会多一份能分叉的配置。
+   * 键的形状见 `mountViewKey`（块宿主带块 id、日记宿主不带）。
+   */
+  mountViews: Record<string, DerivedViewKind>
   /** 三槽的开关与宽度；入口条已作废 */
   dock: DockPrefs
   virtualize: boolean
@@ -131,6 +140,7 @@ export const DEFAULT_PREFS: Prefs = {
   theme: 'system',
   feedLayout: 'column',
   journalMounts: [],
+  mountViews: {},
   dock: DEFAULT_DOCK,
   virtualize: false,
   radius: 12,
@@ -202,6 +212,22 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     return typeof id === 'string' && id !== '' && cards.some((e) => dockKey(e) === id) ? id : null
   }
 
+  /**
+   * 派生栏的看法：逐格验形，**未知值丢掉**（不是回退成某个值）。
+   *
+   * 丢掉 = 那一格没有配置 ⇒ 大纲。写成 `'outline'` 会把「用户选过大纲」与
+   * 「没有过选择」混成同一件事，而后者将来改默认值时该跟着变。
+   */
+  const mountViews: Record<string, DerivedViewKind> = {}
+  if (p.mountViews && typeof p.mountViews === 'object' && !Array.isArray(p.mountViews)) {
+    for (const [k, v] of Object.entries(p.mountViews)) {
+      if (typeof k !== 'string' || k === '') continue
+      if (typeof v === 'string' && (DERIVED_VIEW_KINDS as readonly string[]).includes(v)) {
+        mountViews[k] = v as DerivedViewKind
+      }
+    }
+  }
+
   return {
     ...DEFAULT_PREFS,
     ...p,
@@ -209,6 +235,7 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     feedLayout: p.feedLayout === 'row' ? 'row' : 'column',
     // 日记面板的栏：逐项重建（坏项丢掉），与 `_mounts` 共用同一份判据
     journalMounts: canonicalMountEntries(p.journalMounts),
+    mountViews,
     dock: {
       // `legacyPinned` 只在归一内部用，不进落盘形状
       left: { open: left.open, width: left.width, cards: left.cards },

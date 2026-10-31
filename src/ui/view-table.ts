@@ -25,10 +25,15 @@ import { makeCellEditor } from './properties.ts'
 import {
   CHILDREN_COLUMN,
   CREATED_COLUMN,
+  MATCHED_COLUMN,
   MODIFIED_COLUMN,
+  PATH_COLUMN,
+  REF_COUNT_COLUMN,
+  SHARED_TAGS_COLUMN,
   TAGS_COLUMN,
   TITLE_COLUMN,
   defaultWidthOf,
+  fieldTextOf,
   isSortableColumn,
   sortRecords,
   sortValueOf,
@@ -453,6 +458,10 @@ export class ViewTable {
     if (key === CHILDREN_COLUMN) return '#'
     if (key === CREATED_COLUMN) return t('ui.props.createdAt')
     if (key === MODIFIED_COLUMN) return t('ui.props.modifiedAt')
+    if (key === PATH_COLUMN) return t('ui.view.col.path')
+    if (key === REF_COUNT_COLUMN) return t('ui.view.col.refCount')
+    if (key === MATCHED_COLUMN) return t('ui.view.col.matched')
+    if (key === SHARED_TAGS_COLUMN) return t('ui.view.col.sharedTags')
     const shown = this.propLabels.get(key)
     if (shown) return shown
     const def = this.deps.defs().find((d) => d.id === key)
@@ -576,6 +585,17 @@ export class ViewTable {
       const box = document.createElement('div')
       box.className = 'tv-time'
       box.textContent = clockLabel(key === CREATED_COLUMN ? r.block.created : r.block.modified)
+      return box
+    }
+    /**
+     * **保留键**里的只读列：路径与派生值（引用次数/命中词/共同标签）。
+     * 它们不是属性槽，走到 `propEditor` 只会拿到「已删除的属性」那一个空控件。
+     */
+    if (key === PATH_COLUMN || key === REF_COUNT_COLUMN || key === MATCHED_COLUMN || key === SHARED_TAGS_COLUMN) {
+      const box = document.createElement('div')
+      box.className = 'tv-plain ui-ellipsis'
+      box.textContent = fieldTextOf(r, key)
+      if (box.textContent === '') box.dataset.empty = '1'
       return box
     }
     return this.propEditor(r.block, key)

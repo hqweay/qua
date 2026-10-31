@@ -157,6 +157,7 @@ export const BINDINGS: Binding[] = [
    * 由装配层按当前的 `_views` 现画 —— 绑定表是静态的，装不下「每个块不一样」的项。
    */
   { command: 'core.view/menu', kind: 'menu', when: 'blockFocused && blockCanHaveView', group: 'block/6-view', order: 10, layer: 'core', label: t('menu.label.views'), keywords: ['view', 'table', 'grid', t('menu.kw.views')] },
+  { command: 'core.query/insert', kind: 'menu', when: 'blockFocused', group: 'block/6-view', order: 5, layer: 'core', label: t('cmd.query.insert'), keywords: ['query', 'filter', 'where'], icon: 'lucide:list-filter' },
   { command: 'core.embed/insert', kind: 'menu', when: 'blockFocused', group: 'block/6-view', order: 20, layer: 'core', label: t('ui.embed.insert') },
   { command: 'core.embed/paste-menu', kind: 'menu', when: 'blockFocused', group: 'block/6-view', order: 30, layer: 'core', label: t('cmd.embed.paste-menu') },
   /* 「粘贴为…」的两档：同一个命令，只差一个看法（菜单动态项由装配层现画，绑定点只给选项） */
@@ -181,6 +182,7 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-basic', order: 30, layer: 'core', label: t('menu.label.divider'), args: { type: 'divider' }, keywords: ['divider', 'hr', 'line', t('menu.kw.divider')], icon: 'lucide:minus' },
   // 收藏：正文里是一行摘要（body:'row'），点摘要打开那张卡
   { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-basic', order: 40, layer: 'core', label: t('menu.label.collection'), args: { type: 'collection' }, keywords: ['collection', 'widget', t('menu.kw.collection')], icon: 'lucide:list-tree' },
+  { command: 'core.query/insert', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-basic', order: 50, layer: 'core', label: t('cmd.query.insert'), keywords: ['query', 'filter', 'where'], icon: 'lucide:list-filter' },
   { command: 'core.editor/insert-page-ref', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 10, layer: 'core', label: t('menu.label.pageRef'), keywords: ['ref', 'link', t('menu.kw.ref')], icon: 'lucide:arrow-up-right' },
   // 斜杠菜单的「图片」是**真入口**（选文件）；不带 preset 才走 `App.pickImage()`
   { command: 'core.editor/insert-image', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 20, layer: 'core', label: t('menu.label.image'), keywords: ['image', 'asset', t('menu.kw.image')], icon: 'lucide:image' },

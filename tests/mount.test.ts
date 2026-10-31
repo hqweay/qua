@@ -18,7 +18,13 @@ import {
   cloneMountEntries,
   cloneSubtree,
   derivedEntriesOf,
+  derivedRecordsOf,
   derivedSpecOf,
+  fieldTextOf,
+  REF_COUNT_COLUMN,
+  MATCHED_COLUMN,
+  SHARED_TAGS_COLUMN,
+  PATH_COLUMN,
   derivedTabId,
   isMountsValue,
   mkTagBlock,
@@ -245,4 +251,50 @@ test('「同类」沿下级标签展开（算作）：#人物 的成员含只打
   const 演员WithEdge = { ...演员, props: { ...(演员.props ?? {}), _belongsTo: [人物.id] } }
   const same = derivedSpecOf(人物, [人物, 演员WithEdge], 'same')
   assert.deepEqual(same, { where: { any: [{ tag: '人物' }, { tag: '演员' }] } })
+})
+
+/* ------------------------------------------------------------ 派生栏的记录 */
+
+const { MemoryKb } = await import('../src/core/kb/memory.ts')
+const { BlockStore } = await import('../src/core/store.ts')
+
+test('派生栏记录：引用按**块**计次数（同一块引两处也只一行）；路径是祖先链', async () => {
+  const tag = mkTagBlock('项目')
+  const host = b('h', '被引用的块', { props: { _tags: [tag.id] } })
+  const page = b('page', '页面', { children: [host] })
+  const src = b('src', '引用它', { children: [] })
+  src.content.push({ id: 'r1', t: 'ref', to: 'h', label: '被引用的块' })
+  src.content.push({ id: 'r2', t: 'ref', to: 'h', label: '被引用的块' })
+  const store = new BlockStore([page, src, tag] as Block[])
+  const kb = new MemoryKb(store)
+
+  const refs = derivedRecordsOf(kb.get('h')!, kb, 'refs')
+  assert.equal(refs.length, 1, `一块引用两处也只一行（引用是块粒度）：${JSON.stringify(refs.map((r) => r.block.id))}`)
+  assert.equal(refs[0]!.block.id, 'src')
+  assert.equal(fieldTextOf(refs[0]!, REF_COUNT_COLUMN), '2', '同一块里的两处算**次数**')
+  assert.equal(fieldTextOf(refs[0]!, PATH_COLUMN), '', '顶层块没有可写的祖先路径')
+  // 不把宿主自己算进「谁引用了我」
+  assert.equal(refs.every((r) => r.block.id !== 'h'), true)
+
+  void derivedSpecOf
+})
+
+test('派生栏记录：提及填命中词、同类填共同标签；两者都不改块（零落盘）', async () => {
+  const tagA = mkTagBlock('项目')
+  const tagB = mkTagBlock('人物')
+  const host = b('h', '共同词', { props: { _tags: [tagA.id] } })
+  const mention = b('m', '这句里提到共同词', { props: { _tags: [tagA.id, tagB.id] } })
+  const store = new BlockStore([host, mention, tagA, tagB] as Block[])
+  const kb = new MemoryKb(store)
+
+  const mentions = derivedRecordsOf(kb.get('h')!, kb, 'mentions')
+  assert.deepEqual(mentions.map((r) => r.block.id), ['m'])
+  assert.equal(fieldTextOf(mentions[0]!, MATCHED_COLUMN), '共同词')
+
+  const same = derivedRecordsOf(kb.get('h')!, kb, 'same')
+  assert.equal(same.length, 1)
+  assert.equal(fieldTextOf(same[0]!, SHARED_TAGS_COLUMN), '项目', '只列交集（人物只有对面有）')
+
+  // 派生值不写回块：同一个 kb 再读，块上没有任何新属性
+  assert.deepEqual(Object.keys(kb.get('m')!.props ?? {}), ['_tags'])
 })

@@ -25,6 +25,7 @@ import {
   frozenStale,
   droppedFrom,
   resolveFrozen,
+  resolveRows,
   runQuery,
   resolveSelfSpec,
   usesSelf,
@@ -355,6 +356,23 @@ test('resolveFrozen：块被删了就不出；祖先也在结果里时只保留�
   const without = blocks.map((p) => ({ ...p, children: p.children.filter((c) => c.id !== 'd') }))
   const { kb: kb2 } = kbOf(without)
   assert.deepEqual(resolveFrozen(frozen.hits, (id) => kb2.pathOf(id)), [])
+})
+
+test('结果基数：父子同时命中时 hits=2、大纲折叠成 1、记录视图仍是 2（抬头主数字用 hits）', () => {
+  const parent = b('p', '共同词', { children: [b('c', '共同词')] })
+  const { kb } = kbOf([parent])
+  const frozen = freezeResult({ where: { text: '共同词' }, scope: 'all' }, kb, {})
+
+  assert.equal(frozen.hits.length, 2, '命中是两条（父与子各一条）')
+  assert.equal(resolveFrozen(frozen.hits, (id) => kb.pathOf(id)).length, 1, '大纲只画顶层（同一块不该出现两遍）')
+  assert.equal(resolveRows(frozen.hits, kb).length, 2, '记录视图每条命中一行')
+
+  /**
+   * 抬头的主数字必须与**冻结结果**同源：大纲里写 1、表格里写 2 的话，
+   * 同一个查询在同一块上会显示两个数。折叠程度另给一句次要文案。
+   */
+  const topLevel = resolveFrozen(frozen.hits, (id) => kb.pathOf(id)).length
+  assert.notEqual(topLevel, frozen.hits.length, '这一例必须真的折叠（否则断言没有验到东西）')
 })
 
 test('runQuery：属性条件按 propId 取值、Object.is 比较（未填与 false 分得开）', () => {

@@ -11,6 +11,9 @@ import {
   buildAdjacency,
   danglingOf,
   declaredFieldIds,
+  derivedColumns,
+  derivedListFields,
+  derivedRecordsOf,
   displayNameOf,
   findByAlias,
   flatten,
@@ -19,13 +22,17 @@ import {
   isJournal,
   isViewRoot,
   journalDate,
+  mountViewKey,
   normalizeAlias,
   parentsOf,
   propDisplayLabels,
   propKindOf,
   propLabel,
+  readMountView,
   todayISO,
   type Block,
+  type DerivedSource,
+  type DerivedViewKind,
   type MountEntry,
   type MountHost,
   type PropKind,
@@ -40,12 +47,13 @@ import type { App, Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { Tx } from '../../core/kb/types.ts'
 import type { BlockStore } from '../../core/store.ts'
-import type { Workspace } from '../../core/workspace.ts'
+import type { Prefs, Workspace } from '../../core/workspace.ts'
 import type { Layers, Row } from '../../ui/layers.ts'
 import { MountArea, type ViewBodyHost } from '../../ui/mount-area.ts'
 import { PropertiesPanel, type PropertiesDeps } from '../../ui/properties.ts'
+import type { DerivedMode } from '../../ui/query-view.ts'
 import { createViewHostEls, ViewHost } from '../../ui/query-view.ts'
- 
+
 import type { Chrome } from '../../ui/chrome.ts'
 import type { BlockEditor } from '../../view/editor.ts'
 import type { OwnerStore } from './owners.ts'
@@ -58,6 +66,10 @@ export type PanelsDeps = {
   owners: OwnerStore
   /** 日记面板的那一组（设备状态，由装配层从 prefs 取） */
   journalMounts: () => readonly MountEntry[]
+  /** 设备状态（派生栏的看法住这里；**不是**库内容） */
+  prefs: () => Prefs
+  /** 设备状态变了要落盘（`qua.device`，与库那条队列分开） */
+  scheduleDeviceSave: () => void
   app: App
   shortId: (id: string) => string
   activeBlock: () => Block
@@ -508,7 +520,7 @@ export function setupPanels(deps: PanelsDeps) {
   /** 一个拥有者「显示的是哪一块」（center 表面：拥有者就是这一块） */
   const blockOf = (owner: ViewOwnerRef): Block | undefined => (owner.kind === 'block' ? blocks.find(owner.blockId) : undefined)
 
-  function createView(owner: ViewOwnerRef, host: Block, binding?: ViewBindingRef): ViewHost {
+  function createView(owner: ViewOwnerRef, host: Block, binding?: ViewBindingRef, derived?: DerivedMode): ViewHost {
     const hostId = host.id
     const ownerBlock = blockOf(owner)
     const vh = new ViewHost(createViewHostEls(), {
@@ -518,6 +530,7 @@ export function setupPanels(deps: PanelsDeps) {
       owners,
       owner,
       ...(binding ? { binding } : {}),
+      ...(derived ? { derived } : {}),
       host: () => blocks.find(hostId) ?? host,
       /**
        * 求值上下文按**拥有者**分，不按「有没有绑定」：
@@ -575,6 +588,21 @@ export function setupPanels(deps: PanelsDeps) {
     return vh
   }
 
+  /**
+   * 派生栏切看法：写**设备状态**（不是 `_mounts`），并重画这一栏。
+   *
+   * 键按宿主分开（`block:<id>:<source>` / `journal:<source>`）：换块、跨天就是另一格。
+   * `outline` 是**删掉这一格**而不是写 `'outline'` —— 「没选过」与「选了默认」不是一回事。
+   */
+  function setDerivedKind(host: Block, source: DerivedSource, kind: DerivedViewKind): void {
+    const mountHost: MountHost = isJournal(host) ? { kind: 'journal' } : { kind: 'block', blockId: host.id }
+    const key = mountViewKey(mountHost, source)
+    if (kind === 'outline') delete deps.prefs().mountViews[key]
+    else deps.prefs().mountViews[key] = kind
+    deps.scheduleDeviceSave()
+    mountInstances.get(host.id)?.area.render()
+  }
+
   function createMount(host: Block): MountInstance {
     const hostId = host.id
     const area = new MountArea({
@@ -594,6 +622,12 @@ export function setupPanels(deps: PanelsDeps) {
       // 与正文同一套事件（点引用/块标/右键菜单/`#`·`@` 补全），装配层只给这一份
       wire: (editor, change) => deps.wireEditor(editor, change, 'mount'),
       onAddTab: (id) => openMountPicker(id),
+      onTabMenu: (mountHost, entry, anchor) => openMountTabMenu(mountHost, entry, anchor),
+      derivedKind: (hostBlock, source) => {
+        const mountHost: MountHost = isJournal(hostBlock) ? { kind: 'journal' } : { kind: 'block', blockId: hostBlock.id }
+        return readMountView(deps.prefs().mountViews, mountHost, source)
+      },
+      setDerivedKind: (hostBlock, source, kind) => setDerivedKind(hostBlock, source, kind),
       onRemoveTab: (mountHost, tabId) => {
         void deps.getRegistry().invoke('core.mount/remove', { host: mountHost, tabId }, 'mount')
         // 摘完当场重排：栏是模型/设备状态里的一格，DOM 不会自己知道
@@ -619,6 +653,30 @@ export function setupPanels(deps: PanelsDeps) {
           const targetBlock = blocks.find(target.owner.kind === 'block' ? target.owner.blockId : '')
           return asBody(createView(target.owner, targetBlock ?? mountHostBlock, binding))
         }
+        if (entry.kind === 'derived') {
+          /**
+           * **派生栏**：借用视图宿主的渲染器，但不给它拥有者。
+           * 看法来自设备状态、数据现算、抬头与「⋯」由挂载区画（那一台不画自己的抬头）。
+           */
+          const kind = readMountView(deps.prefs().mountViews, mountHost, entry.source)
+          if (kind === 'outline') return null
+          const explainKey =
+            entry.source === 'refs'
+              ? 'ui.mount.why.refs'
+              : entry.source === 'same'
+                ? 'ui.mount.why.same'
+                : 'ui.mount.why.mentions'
+          return asBody(
+            createView({ kind: 'block', blockId: mountHostBlock.id }, mountHostBlock, undefined, {
+              kind,
+              records: () => derivedRecordsOf(blocks.find(mountHostBlock.id) ?? mountHostBlock, kb, entry.source),
+              columns: derivedColumns(entry.source),
+              listFields: derivedListFields(entry.source),
+              setKind: (k) => setDerivedKind(mountHostBlock, entry.source, k),
+              explain: t(explainKey),
+            }),
+          )
+        }
         return null
       },
       expanded: expandedFor(host),
@@ -637,6 +695,82 @@ export function setupPanels(deps: PanelsDeps) {
     sync: () => vh.sync(),
     dispose: () => vh.dispose(),
   })
+
+  /**
+   * **一栏的「⋯」菜单**：local 能提升／移除，linked 能转本地／移除，derived 能固定成查询。
+   *
+   * 每一项都落到**已有命令**上：菜单只决定「有哪些动作」，写路径与撤销仍只有一条。
+   * 菜单是动态的（这一栏是什么种类的），所以它住装配层而不是绑定表。
+   */
+  function openMountTabMenu(mountHost: MountHost, entry: MountEntry, anchor: DOMRect): void {
+    const rows: Row[] = []
+    const derivedSource = entry.kind === 'derived' ? entry.source : null
+    if (entry.kind === 'local') {
+      rows.push({
+        id: 'mount/promote',
+        label: t('ui.mount.promoteToBlock'),
+        hint: t('ui.mount.promoteBlockHint'),
+        icon: 'lucide:list-filter',
+        group: 'mount/1-identity',
+      })
+    }
+    if (entry.kind === 'linked') {
+      rows.push({ id: 'mount/detach', label: t('ui.mount.detach'), icon: 'lucide:copy', group: 'mount/1-identity' })
+    }
+    if (entry.kind === 'derived') {
+      rows.push({
+        id: 'mount/fix',
+        label: t('ui.mount.fixDerived'),
+        hint: t('ui.mount.fixDerivedHint'),
+        icon: 'lucide:list-filter',
+        group: 'mount/1-identity',
+      })
+    }
+    if (entry.kind !== 'derived') {
+      rows.push({ id: 'mount/remove', label: t('ui.mount.remove'), icon: 'lucide:x', group: 'mount/9-remove' })
+    }
+    layers.openMenu({
+      rows,
+      anchor,
+      title: labelOfEntry(entry),
+      searchable: false,
+      onPick: (row) => {
+        const hostId = mountHost.kind === 'journal' ? '' : mountHost.blockId
+        if (row.id === 'mount/promote') {
+          void deps.getRegistry().invoke('core.mount/promote', { host: mountHost, tabId: entry.id, target: 'block' }, 'mount')
+        } else if (row.id === 'mount/remove') {
+          void deps.getRegistry().invoke('core.mount/remove', { host: mountHost, tabId: entry.id }, 'mount')
+        } else if (row.id === 'mount/detach') {
+          void deps.getRegistry().invoke('core.mount/detach', { host: mountHost, tabId: entry.id }, 'mount')
+        } else if (row.id === 'mount/fix') {
+          if (!derivedSource) return
+          const before = new Set(owners.entriesOf(mountHost).map((e) => e.id))
+          const view = readMountView(deps.prefs().mountViews, mountHost, derivedSource)
+          void deps
+            .getRegistry()
+            .invoke('core.mount/fix-derived', { host: mountHost, source: derivedSource, view }, 'mount')
+          const added = owners.entriesOf(mountHost).find((e) => !before.has(e.id))
+          renderMounts()
+          if (added) mountInstances.get(hostId)?.area.activateTab(added.id)
+          return
+        }
+        // 栏是模型/设备状态里的一格，DOM 不会自己知道（焦点还在菜单上）
+        renderMounts()
+      },
+    })
+  }
+
+  /** 这一栏此刻的显示名（菜单标题用；与 tab 条同一份判据） */
+  function labelOfEntry(entry: MountEntry): string {
+    if (entry.kind === 'derived') {
+      return t(entry.source === 'refs' ? 'ui.mount.refs' : entry.source === 'same' ? 'ui.mount.same' : 'ui.mount.mentions')
+    }
+    if (entry.kind === 'local') return entry.label
+    if (entry.label !== undefined && entry.label.trim() !== '') return entry.label
+    const target = kb.get(entry.block)
+    const name = target ? displayNameOf(target).trim() : ''
+    return name === '' ? t('ui.mount.dangling') : name
+  }
 
   /**
    * 「＋」：**三种「新建」**，默认建 local tab（不建块）。
