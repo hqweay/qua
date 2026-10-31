@@ -20,6 +20,7 @@ import {
   type Block,
   type DraftOp,
   type DraftRow,
+  type PropKind,
   type QueryDraft,
   type QuerySpec,
 } from '../core/index.ts'
@@ -28,8 +29,14 @@ import { t, type MsgId } from '../core/msg.ts'
 export interface QueryBuilderDeps {
   /** 当前条件（现读：它可能被命令改过） */
   spec: () => QuerySpec
-  /** 可选的属性定义（按显示名排好；由装配层给，`ui` 不扫森林） */
-  fields: () => readonly { id: string; label: string }[]
+  /**
+   * 可选的属性定义（按显示名排好；由装配层给，`ui` 不扫森林）。
+   *
+   * `kind` 决定**这一行能问哪些算子**：布尔属性没有「未填」这一态
+   * （`core/props.ts` 的 `readField`），对它问「为空」与问「没有这一栏」是同一个答案 ——
+   * 两个选项指向同一个结果，就是在教用户两种写法。
+   */
+  fields: () => readonly { id: string; label: string; kind?: PropKind }[]
   /** 写条件（一次事务／一轮撤销） */
   apply: (spec: QuerySpec) => void
   /** 关掉浮层 */
@@ -329,7 +336,14 @@ export function renderQueryBuilder(box: HTMLElement, deps: QueryBuilderDeps): vo
 
       const op = document.createElement('select')
       op.className = 'qb-op ui-input'
-      for (const id of DRAFT_OPS) {
+      /**
+       * **布尔属性不提供「为空」**：它没有未填态，`empty` 与 `exists:false` 是同一个答案。
+       * 已经存下来的 `empty` 仍然显示（不许打开一次就悄悄改掉用户的条件）。
+       */
+      const kind = deps.fields().find((f) => f.id === (row.field ?? ''))?.kind
+      const ops =
+        kind === 'checkbox' && (row.op ?? 'eq') !== 'empty' ? DRAFT_OPS.filter((o) => o !== 'empty') : DRAFT_OPS
+      for (const id of ops) {
         const o = document.createElement('option')
         o.value = id
         o.textContent = t(OP_TEXT[id])

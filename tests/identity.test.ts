@@ -47,7 +47,7 @@ test('canWriteText：字段定义／日记／查询的正文只读；页、标�
   const page = mkBlock('某一页')
   addList(page, 'page')
   const query = mkBlock('我的查询')
-  query.props = { _query: { where: { todo: 'todo' } } }
+  query.props = { _query: { where: { text: '待办' } } }
 
   assert.equal(canWriteText(tag), true, '标签的正文是描述，名字在 `_aliases`')
   assert.equal(canWriteText(schema), false)
@@ -192,7 +192,7 @@ test('复制子树：`_mounts` **随块走**（它是内容），但 local 栏�
   // 判据：挂载区是「这一块配了哪几栏」，属于内容 —— 复制这块就该带着它。
   // 但「复制」不等于「共享」：改副本那一栏的条件不该动到原件。
   const host = mkBlock('宿主')
-  const spec = { where: { todo: 'todo' as const } }
+  const spec = { where: { text: '待办' } }
   host.props = {
     _mounts: [
       { id: 't-1', kind: 'local' as const, label: '我的', spec, views: [] },

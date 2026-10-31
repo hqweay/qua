@@ -33,7 +33,7 @@ import { hasList, primaryAliasOf, prop, type Block } from './model.ts'
 import { tagIdsOf } from './tags.ts'
 import { descendantTagIds } from './tag-tree.ts'
 import type { QueryNode, QuerySpec } from './query.ts'
-import { findById } from './query.ts'
+import { findById, isQuerySpec } from './query.ts'
 import { canonicalViews, type ViewConfig } from './view.ts'
 
 /** `_mounts`：块宿主上的一格（有序） */
@@ -256,7 +256,14 @@ export function canonicalMountEntries(raw: unknown): MountEntry[] {
     if (e.kind === 'local') {
       const l = e as Partial<Extract<MountEntry, { kind: 'local' }>>
       if (typeof l.label !== 'string' || l.label.trim() === '') continue
-      if (!l.spec || typeof l.spec !== 'object' || Array.isArray(l.spec) || !('where' in l.spec)) continue
+      /**
+       * **条件读不出来 ⇒ 这一栏不出现**（不是「出现一个空结果」）。
+       *
+       * 设备状态里的 `journalMounts` 不跟着库作废（它是偏好），所以它可能带着旧版本的
+       * 条件形状 —— 那种栏求值只会静默空着。丢掉它，用户看到的是「少了一栏」，
+       * 而不是一条永远为空的查询。
+       */
+      if (!isQuerySpec(l.spec)) continue
       const id = stableId(l.id, seen, null)
       if (!id) continue
       seen.add(id)

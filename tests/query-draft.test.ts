@@ -16,6 +16,7 @@ import {
   nodeOfRow,
   runQuery,
   specOfDraft,
+  TASK_STATUS_PROP_ID,
   type Block,
   type QuerySpec,
 } from '../src/core/index.ts'
@@ -36,10 +37,10 @@ const bytes = (s: QuerySpec): string => JSON.stringify(specOfDraft(draftOfSpec(s
 
 test('草稿往返：拼回来的条件与手写 JSON 逐字节相等', () => {
   const cases: QuerySpec[] = [
-    { where: { todo: 'todo' } },
+    { where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } } },
     { where: { tag: '任务' } },
     { where: { text: '提到' } },
-    { where: { all: [{ todo: 'todo' }, { tag: '任务' }] }, scope: 'all' },
+    { where: { all: [{ prop: { id: TASK_STATUS_PROP_ID, eq: false } }, { tag: '任务' }] }, scope: 'all' },
     { where: { any: [{ tag: '甲' }, { text: '乙' }] } },
     { where: { prop: { id: 'p-1', eq: 'x' } } },
     { where: { prop: { id: 'p-1', neq: 'x' } } },
@@ -51,7 +52,7 @@ test('草稿往返：拼回来的条件与手写 JSON 逐字节相等', () => {
     { where: { prop: { id: 'p-1', exists: false } } },
     { where: { prop: { id: 'p-1', empty: true } } },
     { where: { tag: '任务' }, sort: [{ by: '_date', dir: 'desc' }], limit: 5 },
-    { where: { todo: 'done' }, scope: 'all', limit: 1 },
+    { where: { prop: { id: TASK_STATUS_PROP_ID, eq: true } }, scope: 'all', limit: 1 },
   ]
   for (const s of cases) {
     assert.equal(bytes(s), JSON.stringify(canonicalSpec(s)), `往返不该改一个字节：${JSON.stringify(s)}`)
@@ -59,10 +60,32 @@ test('草稿往返：拼回来的条件与手写 JSON 逐字节相等', () => {
 })
 
 test('草稿往返：单条件不包一层 all（`all:[x]` 与 `x` 不是同一个形状）', () => {
-  const one: QuerySpec = { where: { todo: 'todo' } }
-  assert.equal(bytes(one), '{"where":{"todo":"todo"}}')
-  const two: QuerySpec = { where: { all: [{ todo: 'todo' }, { tag: '任务' }] } }
-  assert.equal(bytes(two), '{"where":{"all":[{"todo":"todo"},{"tag":"任务"}]}}')
+  const task = JSON.stringify({ id: TASK_STATUS_PROP_ID, eq: false })
+  const one: QuerySpec = { where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } } }
+  assert.equal(bytes(one), `{"where":{"prop":${task}}}`)
+  const two: QuerySpec = { where: { all: [{ prop: { id: TASK_STATUS_PROP_ID, eq: false } }, { tag: '任务' }] } }
+  assert.equal(bytes(two), `{"where":{"all":[{"prop":${task}},{"tag":"任务"}]}}`)
+})
+
+test('「待办」那一行是**预设**：展开成属性条件，再按属性条件认回来', () => {
+  // 界面上仍有三个词（未完成／已完成／不是任务），但落进 `_query` 的只有 `{prop}` 一种形状
+  assert.deepEqual(nodeOfRow({ kind: 'todo', value: 'todo' }), { prop: { id: TASK_STATUS_PROP_ID, eq: false } })
+  assert.deepEqual(nodeOfRow({ kind: 'todo', value: 'done' }), { prop: { id: TASK_STATUS_PROP_ID, eq: true } })
+  assert.deepEqual(nodeOfRow({ kind: 'todo', value: 'none' }), { prop: { id: TASK_STATUS_PROP_ID, exists: false } })
+  // 反方向：同样的条件存进库之后，构建器上仍然显示成那一行（不变成两行「任务状态 = 是/否」）
+  for (const [node, value] of [
+    [{ prop: { id: TASK_STATUS_PROP_ID, eq: false } }, 'todo'],
+    [{ prop: { id: TASK_STATUS_PROP_ID, eq: true } }, 'done'],
+    [{ prop: { id: TASK_STATUS_PROP_ID, exists: false } }, 'none'],
+  ] as const) {
+    const draft = draftOfSpec({ where: node })
+    assert.deepEqual(draft.rows, [{ kind: 'todo', value }])
+    assert.equal(bytes({ where: node }), JSON.stringify({ where: node }), '往返逐字节相等')
+  }
+  // 任务状态的**别的**算子不是三态，仍按属性行显示
+  assert.deepEqual(draftOfSpec({ where: { prop: { id: TASK_STATUS_PROP_ID, empty: true } } }).rows, [
+    { kind: 'prop', field: TASK_STATUS_PROP_ID, op: 'empty', value: 'true' },
+  ])
 })
 
 test('拆不动就整份走 JSON：`not`、嵌套组合、`ref`／`journal`／`role`、多键排序', () => {
@@ -105,7 +128,7 @@ test('没填完的那一行不进条件（`nodeOfRow` 返回 null，而不是一
     rows: [{ kind: 'todo', value: 'todo' }, { kind: 'tag', value: '' }],
     scope: 'subtree',
   })
-  assert.equal(JSON.stringify(spec), '{"where":{"todo":"todo"}}')
+  assert.equal(JSON.stringify(spec), JSON.stringify({ where: nodeOfRow({ kind: 'todo', value: 'todo' }) }))
 })
 
 /* ------------------------------------------------------------ 字面量 */

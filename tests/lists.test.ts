@@ -80,7 +80,7 @@ function linesFor(block: Block, list: 'page' | 'tag'): string[] {
 test('日记／字段定义／查询视图的身份由数据推出，不存列表值', () => {
   const day: Block = { id: 'j', text: '', children: [], props: { _date: '2026-10-22' } }
   const def: Block = { id: 'd', text: '截止日', children: [], props: { _kind: 'date' } }
-  const query: Block = { id: 'q', text: '待办', children: [], props: { _query: { where: { todo: 'todo' } } } }
+  const query: Block = { id: 'q', text: '待办', children: [], props: { _query: { where: { text: '待办' } } } }
 
   assert.ok(isJournalBlock(day))
   assert.ok(isPropDefBlock(def))
@@ -106,7 +106,7 @@ test('身份判据看数据而不看列表值：有列表但没日期不算日�
 test('canWriteText：只拦日记／定义／查询／只读类型；页与标签的正文是描述，可写', () => {
   const day: Block = { id: 'j', text: '', children: [], props: { _date: '2026-10-22' } }
   const def: Block = { id: 'd', text: '截止日', children: [], props: { _kind: 'date' } }
-  const query: Block = { id: 'q', text: '待办', children: [], props: { _query: { where: { todo: 'todo' } } } }
+  const query: Block = { id: 'q', text: '待办', children: [], props: { _query: { where: { text: '待办' } } } }
   const tag = b()
   addList(tag, 'tag')
   const page = b()

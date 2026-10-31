@@ -204,9 +204,9 @@ export function seedWorkspace(): Workspace {
      */
     {
       text: '本页的待办',
-      // 条件只用「待办状态」：三态（做完／是任务但没填／不是任务）只有这一条条件分得开，
-      // 属性条件会漏掉「有槽未填」的那种。
-      props: { _icon: 'lucide:list-filter', _query: { where: { todo: 'todo' } } },
+      // 三态全部走属性条件（「未完成」＝ 任务状态 ＝ false）：
+      // 「有槽未填」与「靠标签声明拿到这一栏」的块也命中，不需要专用原子。
+      props: { _icon: 'lucide:list-filter', _query: { where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } } } },
     },
     { text: '关于「假数据」：这一页与别处一样可改；换库只换内容，不改形状。' },
   ])
@@ -363,7 +363,7 @@ export function seedJournalMounts(): MountEntry[] {
       id: 't-seed-today-todos',
       kind: 'local',
       label: t('ui.mount.demo.todayTodos'),
-      spec: { where: { all: [{ journal: '$self' }, { todo: 'todo' }] } },
+      spec: { where: { all: [{ journal: '$self' }, { prop: { id: TASK_STATUS_PROP_ID, eq: false } }] } },
       views: [],
     },
   ]

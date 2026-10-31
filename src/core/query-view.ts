@@ -23,7 +23,7 @@
  */
 import { mkBlock, type Block } from './model.ts'
 import { textRuns } from './runs.ts'
-import { contextKey, type QueryHit, type QueryContext, type QuerySpec } from './query.ts'
+import { contextKey, isQuerySpec, type QueryHit, type QueryContext, type QuerySpec } from './query.ts'
 import { canonicalViews, type ViewConfig } from './view.ts'
 import { withBlockOwnerData } from './view-owner.ts'
 import type { KbClient } from './kb/types.ts'
@@ -31,13 +31,16 @@ import type { KbClient } from './kb/types.ts'
 // 「是不是查询块」的判据只在 `model.ts` 一处（`isQueryBlock`），这里不重定义：
 // 两套判据会冒出「读不出条件的查询块」。桶出口已把那个定义转出去。
 
-/** 读出条件；`_query` 不是合法形状时返回 `null`（不猜、不修，交给调用方提示） */
+/**
+ * 读出条件；`_query` 不是合法形状时返回 `null`（不猜、不修，交给调用方提示）。
+ *
+ * ⚠️ 验形走 `isQuerySpec`（`core/query.ts`）：旧库里留着**已删的条件原子**时，
+ *    求值器只会「不命中」——那看起来和「确实没有结果」一模一样。返回 `null`
+ *    让表面显示「这条条件读不出来」，一句话指到条件上。
+ */
 export function readSpec(b: Block): QuerySpec | null {
   const raw = b.props?._query
-  if (!raw || typeof raw !== 'object') return null
-  const spec = raw as Partial<QuerySpec>
-  if (!spec.where || typeof spec.where !== 'object') return null
-  return spec as QuerySpec
+  return isQuerySpec(raw) ? raw : null
 }
 
 /* ------------------------------------------------------------ 冻结 */
@@ -167,7 +170,6 @@ export function canonicalSpec(spec: QuerySpec): QuerySpec {
       if ('lt' in op) return { prop: { id, lt: op.lt } }
       return { prop: { id, lte: op.lte } }
     }
-    if ('todo' in n) return { todo: n.todo }
     if ('journal' in n) return { journal: n.journal }
     return { role: n.role }
   }

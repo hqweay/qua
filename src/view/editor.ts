@@ -64,6 +64,7 @@ import {
   walkForest,
   gutterFieldsOf,
   gutterFieldsFor,
+  fieldTableOf,
   setValue,
   todoOf,
   TASK_STATUS_PROP_ID,
@@ -72,6 +73,7 @@ import {
   type Block,
   type CtxKeys,
   type Doc,
+  type FieldTable,
   type FindBlock,
   type GutterField,
   type Located,
@@ -456,6 +458,11 @@ export class BlockEditor {
   private readonly embedBodies: boolean
   /** 已挂的露面身体 → 卸载函数（换 DOM 之前必须挨个调用） */
   private readonly embedDisposers = new Map<string, () => void>()
+  /**
+   * **字段读取表**（懒建）：判「这块是不是任务」要看标签声明（`todoOf`），
+   * 逐块现建要扫两趟森林。任何一次模型写之后作废，下一次问到时重建一次。
+   */
+  private fieldTableCache: FieldTable | null = null
   /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
   private readonly offStore: () => void
   private readonly unbind: () => void
@@ -465,7 +472,11 @@ export class BlockEditor {
     this.blankArea = o.blankArea ?? o.container
     this.allowBlankCreate = o.allowBlankCreate !== false
     this.allowRootRemove = o.allowRootRemove !== false
-    this.write = o.write
+    // 写入口顺手作废那张派生表：标签声明／定义 kind 变了，下一次 `todoOf` 要重算
+    this.write = (fn) => {
+      this.fieldTableCache = null
+      return o.write(fn)
+    }
     this.onExpandContext = o.onExpandContext
     this.onContextBack = o.onContextBack
     this.embedBodies = o.embedBodies !== false
@@ -505,6 +516,17 @@ export class BlockEditor {
   snap(): Snap {
     // 快照是**整片森林**（store 的 blocks + marks + atoms），不是当前视图的拷贝
     return this.store.snap(this.sel)
+  }
+
+  /**
+   * 字段读取表（懒建，写后作废）。
+   *
+   * 判「这块是不是任务」要看**标签声明**（`#任务` 用 `declareField` 把这一栏给到成员），
+   * 而逐块现建要扫两趟森林 ⇒ 一张表摊到整屏／整条命令上。
+   */
+  private fieldTable(): FieldTable {
+    this.fieldTableCache ??= fieldTableOf(this.store.blocks)
+    return this.fieldTableCache
   }
 
   /**
@@ -777,6 +799,8 @@ export class BlockEditor {
      *    守卫放在这里才覆盖得住 `loadPage`／`reloadFromStore`／各命令路径。
      */
     if (this.deferWhileComposing()) return
+    // 别的视图写进来（本实例的写入口已作废过）；重排之后重算一张表
+    this.fieldTableCache = null
     this.disposeAllEmbeds()
     this.container.textContent = ''
     this.mounted.clear()
@@ -2354,7 +2378,7 @@ export class BlockEditor {
         this.placeCaret(loc.block.id, 0)
         return loc.block.id
       }
-      if (todoOf(loc.block) !== undefined) return null
+      if (todoOf(loc.block, this.fieldTable()) !== undefined) return null
       // 只落一个属性值、不动结构 ⇒ 一笔事务里正好 1 条 `prop.set`
       this.write((tx) => {
         tx.patch(loc.block.id, (b) => setValue(b, TASK_STATUS_PROP_ID, todo === 'done'))
@@ -3512,7 +3536,7 @@ export class BlockEditor {
         !isQueryBlock(b),
       blockSelection: this.blockSel !== null,
       blockSelectionCount: this.blockSel?.ids.length ?? 0,
-      blockType: b && todoOf(b) ? 'todo' : 'paragraph',
+      blockType: b && todoOf(b, this.fieldTable()) ? 'todo' : 'paragraph',
       blockHasChildren: Boolean(b?.children.length),
       /**
        * 这一块值不值得给「视图…」入口：查询块（源＝命中），或**有子块**的容器，
@@ -3523,7 +3547,7 @@ export class BlockEditor {
         b && (isQueryBlock(b) || isEmbedBlock(b) || b.children.length > 0 || activeView(b) !== null),
       ),
       blockCollapsed: Boolean(b && isFolded(this.doc, b.id)),
-      blockDone: b ? todoOf(b) === 'done' : false,
+      blockDone: b ? todoOf(b, this.fieldTable()) === 'done' : false,
       marking: b ? this.marksAtSel().join('+') : '',
       inTrash: false,
       composing: this.probe.isComposing,

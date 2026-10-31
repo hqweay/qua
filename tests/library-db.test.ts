@@ -101,7 +101,7 @@ test('v3 → v4：只建 assets 表，内容行原样留着（升级不该吞掉
   assert.equal(hasContent(first.db!), true)
   first.db!.close()
 
-  const r = openLibraryDb(file)
+  const r = openLibraryDb(file, { target: 4 })
   assert.equal(r.status, 'migrated', `v3 应当被迁移到 v4，实际 ${r.status}`)
   const db = r.db!
   const tables = (db.prepare("select name from sqlite_master where type='table'").all() as { name: string }[]).map((t) => t.name)
@@ -112,8 +112,21 @@ test('v3 → v4：只建 assets 表，内容行原样留着（升级不该吞掉
   db.close()
 })
 
-/* ------------------------------------------------------------ ② 偏小 ⇒ 迁移 */
+test('v4 → v5：查询条件换了形状 ⇒ 只丢内容（旧 `_query` 读不出来，不能留着静默空集）', () => {
+  const file = tmpDb()
+  const first = openLibraryDb(file, { target: 4 })
+  assert.equal(first.status, 'created')
+  applyRowWrites(first.db!, [blockRow('b1')])
+  assert.equal(hasContent(first.db!), true)
+  first.db!.close()
 
+  const r = openLibraryDb(file)
+  assert.equal(r.status, 'migrated', `v4 应当被迁移到当前版本，实际 ${r.status}`)
+  assert.equal(hasContent(r.db!), false, '内容随旧条件形状一起作废（渲染层会重新 seed）')
+  r.db!.close()
+})
+
+/* ------------------------------------------------------------ ② 偏小 ⇒ 迁移 */
 test('user_version 偏小 ⇒ migrate：旧形状退场、内容表建好、版本号升到当前', () => {
   const file = tmpDb()
   legacyDb(file, 1)

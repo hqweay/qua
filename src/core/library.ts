@@ -43,12 +43,14 @@ export const LIBRARY_FORMAT = 1
  * 旧的 op 历史按「升版作废」的纪律丢掉。v4 让**资产元信息回到库里**
  * （`assets` 表；`assets/` 目录只留字节），并且启动不再扫目录 —— 那一步的重建
  * 是一次性的 `reindex()`。
+ * v5 是**查询条件**的形状变了：`{todo}` 原子退场（三态改由属性条件表达），
+ * 库里存的 `_query` 带着它就读不出来了。条件住在内容里 ⇒ 只能连内容一起作废重 seed。
  *
  * **不写数据迁移**：原型不做旧数据迁移，旧库作废重 seed（`judgeDbVersion` 判到
  * `migrate` 时跑 `MIGRATIONS` 里那一步**只丢旧形状、不搬数据**的 DDL）。
  * `user_version` 只增不减。
  */
-export const DB_SCHEMA_VERSION = 4
+export const DB_SCHEMA_VERSION = 5
 
 /** `meta` 表里被代码解释的键（其余键归将来，不在这里登记）。 */
 export const META_KEYS = {

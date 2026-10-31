@@ -17,7 +17,7 @@ import { findPath } from './tree.ts'
 import { findTagByName, tagIdsOf, tagMemberIds } from './tags.ts'
 import { findJournalDay, journalDate, journalDays } from './journal.ts'
 import { displayTextOf } from './alias.ts'
-import { todoOf } from './props.ts'
+import { fieldTableOf, readField, type FieldTable } from './props.ts'
 import type { KbClient } from './kb/types.ts'
 
 /* ------------------------------------------------------------ 条件形状 */
@@ -28,9 +28,13 @@ import type { KbClient } from './kb/types.ts'
  *
  * ⚠️ **能用通用属性条件表达的，就别造专用键**：专用键每多一个，`canonicalSpec` 就要多一支，
  *    漏一处 = 条件存进 `_query` 时被静默丢掉（而丢掉的后果是「条件没变、结果却对不上」）。
- *    唯一的例外是 `{todo}`：它表达的是**三态**（做完／是任务但没填／不是任务），
- *    而属性条件只能问「有没有值」和「值等于什么」—— `eq:false` 不含「有槽未填」，
- *    `exists:false` 也不含。三种状态要靠两个条件的组合去拼，反而更难读（见那一条的注释）。
+ *
+ * ⚠️ **待办没有专用键**：三态用属性条件就能写全 ——
+ *    「不是任务」＝ `{prop:{id, exists:false}}`、「未完成」＝ `{prop:{id, eq:false}}`、
+ *    「已完成」＝ `{prop:{id, eq:true}}`。曾经有一个 `{todo}` 原子，理由是「有槽未填」
+ *    （屏幕上画着空心方框的块）用属性条件问不出来；那条理由的病根在**读通道**：
+ *    判「有没有这一栏」只看了值，漏了 `_ownProps` 与**标签声明**。
+ *    读侧归一之后（`core/props.ts` 的 `readField`）三态只剩一种写法，专用键就是第二份答案。
  *
  * 组合：`{ all: [...] }` / `{ any: [...] }` / `{ not: ... }`，可嵌套。
  * ⚠️ **不加 `mentions`**：未链接提及＝`text` 里出现某个词，那是全文检索的事，
@@ -44,34 +48,18 @@ export type QueryNode =
   /** 正文包含某串 */
   | { text: string }
   /**
-   * 待办状态（三态：未做完／做完／不是任务）。
-   *
-   * ⚠️ 值本身已经是**真实属性**（`core/props.ts` 的「任务状态」），这里保留专用条件键
-   *    是因为它表达的「三态」不是 `{ prop: { id, eq } }` 能直接写出来的：
-   *    `false`（是任务、没做完）与「没有这一槽」必须分开，而后者在所有属性条件里
-   *    都统一表示「不匹配」。要让用户说清「没有这个字段」，得给属性条件加一个
-   *    「不存在」的形态——没做之前，这一支留着更诚实。
-   */
-  /**
-   * 待办状态（三态：做完／是任务但没填／不是任务）。
-   *
-   * ⚠️ 为什么不用 `{prop}` 表达（两个条件组合也拼不出来，实测过）：
-   *    · 屏幕上画着空心方框的块**是待办**：它的槽位在、值还没填。
-   *    · `{prop:{id,eq:false}}` 只命中「点了但没做完」的那种，**漏掉**有槽未填的；
-   *    · `{prop:{id,exists:false}}` 会把「不是任务」和「有槽未填」混成一个。
-   *    ⇒ 三态写在 `core/props.ts` 的 `todoOf` 里，这里是它唯一的查询入口。
-   */
-  | { todo: TodoFilter }
-  /**
-   * 某属性**等于某值**，或**有没有这一槽**。
+   * 某属性**等于某值**，或**有没有这一栏**。
    *
    * 属性条件是**通用路径**：键是定义块的 id（不是名字），所以改显示名不影响查询语义；
    * 类型、日期这类身份位也是 `props` 里的槽，所以同一个条件能把它们都问到。
    * `Object.is` 让 `false` 与 `undefined`（未填）严格区分开。
    *
    * `eq` 与 `exists` **互斥**；同时给时按 `exists` 判（不猜）。
-   * 「有没有这一槽」是 `eq` 表达不出来的一个真问题：`未完成的任务` 是 `eq: false`，
-   * `不是任务` 是 `exists: false` —— 拿 `eq: undefined` 冒充会把两者混成一个。
+   * 「有没有这一栏」问的是 `core/props.ts` 的 `fieldDeclared`（值 ∪ 自有槽 ∪ 标签声明），
+   * 不是「值键在不在」—— 后者会让标签声明的字段、面板刚加的空槽从查询里消失。
+   *
+   * ⚠️ **布尔属性声明了就等于 `false`**（勾选框没有「未填」这一态）。所以
+   *    `{prop:{id, eq:false}}` 命中「点了但没做完」，也命中「一次都没点过、靠标签声明的」。
    */
   | { prop: { id: string } & PropOp }
   /** 某天（`YYYY-MM-DD`）的日记块**下面的块** */
@@ -102,13 +90,15 @@ export type QueryNode =
  *
  * | 组 | 算子 | 判据 |
  * |---|---|---|
- * | 值比较 | `eq`／`neq`／`contains`／`gt`／`gte`／`lt`／`lte` | **有这一槽**才比（没有就是不匹配） |
- * | 槽存在 | `exists` | 这一格在不在属性袋里（`false` ＝ 不是这种块） |
+ * | 值比较 | `eq`／`neq`／`contains`／`gt`／`gte`／`lt`／`lte` | **有这一栏**才比（没有就是不匹配） |
+ * | 栏存在 | `exists` | 值 ∪ 自有槽 ∪ 标签声明（`false` ＝ 这块没有这一栏） |
  * | 空/非空 | `empty` | 值算不算空（`undefined`／`null`／`''`／`[]`） |
  *
- * ⚠️ `empty` 与 `exists` **必须分开**：`未填的任务` 是「有槽、值为空」，
- *    `不是任务` 是「没有这一槽」。合成一个算子，就再也问不出前者。
- * ⚠️ `neq` 只对**有槽**的块成立（与 `eq` 同一条口径）。「没有这一槽」也算「不等于」
+ * ⚠️ `empty` 与 `exists` **必须分开**：文本字段「有这一栏、还没填」是前者的典型问法，
+ *    「这块没有这一栏」是后者。合成一个算子，就再也问不出前者。
+ * ⚠️ **布尔属性没有「未填」**：声明了就按 `false` 读（见 `core/props.ts` 的 `readField`）
+ *    ⇒ 对它而言 `empty:true` 只剩「这块没有这一栏」一种命中（与 `exists:false` 同义）。
+ * ⚠️ `neq` 只对**有这一栏**的块成立（与 `eq` 同一条口径）。「没有这一栏」也算「不等于」
  *    的话，`neq` 会突然变成「绝大多数块」，而那不是用户想问的。
  */
 export type PropOp =
@@ -128,14 +118,12 @@ export interface SortKey {
   dir: 'asc' | 'desc'
 }
 
-export type TodoFilter = 'todo' | 'done' | 'none'
-
 /**
  * 整个查询：条件 ＋ 范围 ＋ 顺序。
  *
- * ⚠️ **没有顶层 `todo`**：三态只由 `where:{todo}` 表达。曾经两种写法并存，
- *    于是同一条语义有两份表示，能同时写上并静默 AND —— 用户看到的是
- *    「条件就写了这一条，结果却像两条」。
+ * ⚠️ **没有顶层 `todo`**，也**没有 `{todo}` 原子**：三态由属性条件表达
+ *    （见 `QueryNode` 那一段）。曾经两种写法并存，于是同一条语义有两份表示，
+ *    能同时写上并静默 AND —— 用户看到的是「条件就写了这一条，结果却像两条」。
  */
 export interface QuerySpec {
   where: QueryNode
@@ -247,6 +235,11 @@ function walk(blocks: readonly Block[], fn: (b: Block, ancestors: Block[]) => vo
 export interface QueryEnv {
   refs: ReadonlySet<string>
   tags: ReadonlySet<string>
+  /**
+   * **字段读取表**：判「这块有没有这一栏」要看标签声明与定义 kind，
+   * 两条求值路径都必须给同一份（`core/props.ts` 的 `fieldTableOf`）。
+   */
+  fields: FieldTable
   /** 条件里第一个 `journal` 日期；没有 ⇒ `null`（此时它是普通组合，不当范围用） */
   journalDate: string | null
   /**
@@ -275,7 +268,7 @@ export function evaluateQuery(spec: QuerySpec, roots: readonly Block[], env: Que
   walk(roots, (b, ancestors) => {
     if (env.excludeIds?.has(b.id)) return
     if (env.journalDate && isJournalBlock(b)) return
-    if (!matches(spec.where, b, env.refs, env.tags)) return
+    if (!matches(spec.where, b, env)) return
     if (seen.has(b.id)) return
     seen.add(b.id)
     hits.push({ blockId: b.id, path: ancestors.map((a) => a.id), block: b })
@@ -333,39 +326,39 @@ export function refSourceIds(forest: readonly Block[], targetId: string): Set<st
  * ⚠️ 名字→标签块只解析一次（`collectTags`），不在 `matches` 里逐个块查，
  *    否则一次查询会退化成 O(块数 × 条件数) 次森林遍历。
  */
-function matches(node: QueryNode, b: Block, refs: ReadonlySet<string>, tags: ReadonlySet<string>): boolean {
+function matches(node: QueryNode, b: Block, env: QueryEnv): boolean {
   // ⚠️ `journal` **优先判**：它是「范围」不是「谓词」。若别的键也在同一个对象上（形状写歪了），
   //    先看 `all` 会让范围条件被当成空组合（恒真）——那种退化是静默的，测试也未必抓得住。
   if ('journal' in node) return true
-  if ('all' in node) return node.all.every((n) => matches(n, b, refs, tags))
-  if ('any' in node) return node.any.some((n) => matches(n, b, refs, tags))
-  if ('not' in node) return !matches(node.not, b, refs, tags)
+  if ('all' in node) return node.all.every((n) => matches(n, b, env))
+  if ('any' in node) return node.any.some((n) => matches(n, b, env))
+  if ('not' in node) return !matches(node.not, b, env)
   if ('role' in node) return roleMatches(node.role, b)
-  if ('ref' in node) return refs.has(b.id)
-  if ('tag' in node) return tags.has(b.id)
+  if ('ref' in node) return env.refs.has(b.id)
+  if ('tag' in node) return env.tags.has(b.id)
   if ('text' in node) return plainText(b.content).includes(node.text)
   if ('prop' in node) {
     /**
-     * 先问「有没有这一槽」，再决定比值、比存在性、还是判空。
+     * 先问「有没有这一栏」（值 ∪ 自有槽 ∪ 标签声明），再决定比值、比存在性、还是判空。
      *
-     * 这样 `eq: false` 与「没填」是两件事，`eq: undefined` 也不会误命中所有块。
-     * **值比较这一类（含 `neq`）只对「有这一槽」的块成立** —— 否则 `neq`
+     * 这样 `eq: false` 与「没有这一栏」是两件事，`eq: undefined` 也不会误命中所有块；
+     * 而「面板刚加的槽」与「靠标签声明拿到的字段」都被算成有 —— 它们屏幕上有方框。
+     * **值比较这一类（含 `neq`）只对「有这一栏」的块成立** —— 否则 `neq`
      * 会变成「绝大多数块」，而用户想问的是「这些值不是 A 的那几条」。
      */
-    const props = b.props
-    const has = props !== undefined && node.prop.id in props
     const op = node.prop
-    if ('exists' in op) return has === op.exists
-    const v = has ? props[node.prop.id] : undefined
+    const { declared, value: v } = readField(b, node.prop.id, env.fields)
+    if ('exists' in op) return declared === op.exists
     if ('empty' in op) return isEmptyValue(v) === op.empty
-    if (!has) return false
+    if (!declared) return false
     if ('eq' in op) return Object.is(v, op.eq)
     if ('neq' in op) return !Object.is(v, op.neq)
     if ('contains' in op) return valueContains(v, op.contains)
     return compareOp(v, op)
   }
-  // 剩下的只有 `{todo}`：三态判据在 `core/props.ts`，这里不另写一份
-  return (todoOf(b) ?? 'none') === node.todo
+  // 形状不认识（例如旧库里存过的已删原子）⇒ 不命中，不抛。
+  // 库里存的那份由 `readSpec` 先验形；能走到这里说明是调用方直接构造的 spec。
+  return false
 }
 
 /** role 逐值分发到**既有唯一判据**，不另设第二份答案；进新值域时在此续支 */
@@ -376,8 +369,9 @@ function roleMatches(role: 'journal', b: Block): boolean {
 /**
  * 值算不算「空」。
  *
- * 与 `exists` 分开：`empty:true` 匹配「有槽但没有值」**和**「根本没有这一槽」，
- * 而 `exists:false` 只匹配后者。合成一个算子就再也问不出「未填的任务」。
+ * 与 `exists` 分开：对**文本类**字段，`empty:true` 匹配「有这一栏但没有值」**和**
+ * 「根本没有这一栏」，而 `exists:false` 只匹配后者 —— 这是两个真问题。
+ * 对**布尔**属性不成立：声明了就按 `false` 读，所以 `empty:true` 只剩「没有这一栏」一种命中。
  */
 function isEmptyValue(v: unknown): boolean {
   if (v === undefined || v === null || v === '') return true
@@ -435,6 +429,61 @@ export function isExactRoleJournal(node: QueryNode): boolean {
   return 'role' in node && node.role === 'journal'
 }
 
+/** 属性条件上认得的算子（验形与 `PropOp` 保持同一张表） */
+const PROP_OP_KEYS = ['eq', 'neq', 'contains', 'gt', 'gte', 'lt', 'lte', 'exists', 'empty'] as const
+
+/**
+ * 落盘/外部送进来的条件**读不读得出来**。
+ *
+ * 为什么要验：条件语言的形状会变（例如 `{todo}` 原子退场）。旧字节里留着已删的原子时，
+ * 求值器只能「不命中」——界面上看起来只是「没有结果」，没有任何线索指向条件。
+ * 验形之后，调用方可以把这句话说出来（`readSpec` 返回 `null` ⇒ 那一栏走空态提示），
+ * 而不是让一条读不懂的条件悄悄变成空集。
+ *
+ * ⚠️ 只判**形状**，不判语义：未知的实参值（如 `{role:'page'}`）先放行，由 `roleMatches`
+ *    给「不命中」——将来扩值域时不至于把旧条件整条作废。
+ * ⚠️ `{prop}` 里有多个算子时放行（求值按 `exists` 优先，见 `PropOp` 的注释）：
+ *    那是一条写歪的条件，但它是**读得懂**的，不该被当成「坏了」。
+ */
+export function isQueryNode(raw: unknown): raw is QueryNode {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
+  const n = raw as Record<string, unknown>
+  if ('all' in n) return Array.isArray(n.all) && n.all.every(isQueryNode)
+  if ('any' in n) return Array.isArray(n.any) && n.any.every(isQueryNode)
+  if ('not' in n) return isQueryNode(n.not)
+  if ('ref' in n) return typeof n.ref === 'string'
+  if ('tag' in n) return typeof n.tag === 'string'
+  if ('text' in n) return typeof n.text === 'string'
+  if ('journal' in n) return typeof n.journal === 'string'
+  if ('role' in n) return typeof n.role === 'string'
+  if ('prop' in n) {
+    const p = n.prop
+    if (!p || typeof p !== 'object' || Array.isArray(p)) return false
+    const op = p as Record<string, unknown>
+    if (typeof op.id !== 'string' || op.id === '') return false
+    return PROP_OP_KEYS.some((k) => k in op)
+  }
+  return false
+}
+
+/** 一整份条件读不读得出来（`where` 是必填；`scope`／`sort`／`limit` 只判形状） */
+export function isQuerySpec(raw: unknown): raw is QuerySpec {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
+  const s = raw as Record<string, unknown>
+  if (!isQueryNode(s.where)) return false
+  if (s.scope !== undefined && s.scope !== 'subtree' && s.scope !== 'all') return false
+  if (s.limit !== undefined && typeof s.limit !== 'number') return false
+  if (s.sort !== undefined) {
+    if (!Array.isArray(s.sort)) return false
+    for (const k of s.sort) {
+      if (!k || typeof k !== 'object') return false
+      const key = k as Record<string, unknown>
+      if (typeof key.by !== 'string' || (key.dir !== 'asc' && key.dir !== 'desc')) return false
+    }
+  }
+  return true
+}
+
 /**
  * 求值一次。**纯函数**：同样的输入永远同样的输出顺序（按森林的先序），
  * 这样「冻结」只要保存输出的 `blockId[]` 就够了（D4：冻结成员与顺序）。
@@ -452,6 +501,7 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
   const env: QueryEnv = {
     refs: collectRefs(q.where, input.blocks),
     tags: collectTags(q.where, input.blocks),
+    fields: fieldTableOf(input.blocks),
     journalDate: firstJournal(q.where),
     ...(input.excludeIds && input.excludeIds.length > 0 ? { excludeIds: new Set(input.excludeIds) } : {}),
   }

@@ -23,6 +23,7 @@ import {
   journalDate,
   listsOf,
   aliasesOf,
+  fieldTableOf,
   membersOf,
   parentsOf,
   prop,
@@ -384,10 +385,12 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
       mainEd.removeRun(runId)
     },
     blocks() {
+      // 判「是不是任务」要看标签声明 ⇒ 整批共一张表，别逐块扫森林
+      const fields = fieldTableOf(deps.getWs().blocks)
       return flatten(mainEd.doc).map((b) => ({
         id: b.id,
         text: plainText(b.content),
-        todo: todoOf(b) ?? null,
+        todo: todoOf(b, fields) ?? null,
         // 诊断面的字段名保持 `collapsed`（冒烟按它断言）；值现在来自折叠表
         collapsed: mainEd.doc.folded?.[b.id] === true,
         children: b.children.length,

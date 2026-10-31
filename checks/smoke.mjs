@@ -14069,7 +14069,7 @@ await check('T178 local tab：加一栏不建块；切表格；刷新只影响�
     const r = window.__qua.invoke('core.mount/add-local', {
       host: { kind: 'block', blockId: host },
       label: '全库待办',
-      spec: { where: { todo: 'todo' }, scope: 'all' },
+      spec: { where: { tag: '任务' }, scope: 'all' },
     })
     return r === false ? '' : String(window.__qua.__editor.sel?.aBlock ?? '')
   }, before.host)
@@ -14374,7 +14374,7 @@ await check('T187 稳定 id：摘掉第一栏之后，激活的是原来那一�
       window.__qua.invoke('core.mount/add-local', {
         host: { kind: 'block', blockId: h },
         label,
-        spec: { where: { todo: 'todo' }, scope: 'all' },
+        spec: { where: { tag: '任务' }, scope: 'all' },
       })
     add('甲栏')
     add('乙栏')
@@ -14464,7 +14464,12 @@ await check('T188 构建器：JSON 与模型逐字节相同；改一行应用＝
     chips: [...document.querySelectorAll('.queryview-filters .queryview-chip')].map((e) => e.textContent ?? ''),
     open: Boolean(document.querySelector('.qb')),
   }), qid)
-  assert(after.where === '{"todo":"done"}', `应用之后条件应是「已完成」：${after.where}`)
+  // 三态在模型里是**属性条件**（`{prop:{id,eq}}`）：「待办」只是构建器那一行预设
+  const doneWhere = JSON.parse(after.where)
+  assert(
+    doneWhere?.prop?.eq === true && typeof doneWhere.prop.id === 'string',
+    `应用之后条件应是「已完成」＝ 任务状态 eq:true：${after.where}`,
+  )
   assert(after.open === false, '应用之后构建器应关闭')
   assert(after.chips.some((c) => c.includes('已完成')), `chip 要跟着变：${JSON.stringify(after.chips)}`)
 
@@ -14472,7 +14477,7 @@ await check('T188 构建器：JSON 与模型逐字节相同；改一行应用＝
   await page.keyboard.press(kbd('mod+z'))
   await page.waitForTimeout(400)
   const undone = await page.evaluate((id) => JSON.stringify(window.__qua.__editor.store.find(id)?.props?._query?.where), qid)
-  assert(undone === '{"todo":"todo"}', `一次 ⌘Z 就该回到原条件：${undone}`)
+  assert(JSON.parse(undone)?.prop?.eq === false, `一次 ⌘Z 就该回到原条件（未完成）：${undone}`)
 
   await ctx.close()
   return `chip「未完成」→ 构建器 JSON 与模型同字节 → 应用后「已完成」→ 一次 ⌘Z 复原`
@@ -14497,7 +14502,7 @@ await check('T189 提升：local → 查询页（块 +1，栏变 linked）；转
     window.__qua.invoke('core.mount/add-local', {
       host: { kind: 'block', blockId: h },
       label: '提升演示',
-      spec: { where: { todo: 'todo' }, scope: 'all' },
+      spec: { where: { tag: '任务' }, scope: 'all' },
     })
   }, host)
   await page.waitForTimeout(300)

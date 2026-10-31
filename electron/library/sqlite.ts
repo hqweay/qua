@@ -208,6 +208,23 @@ export const MIGRATIONS: Migration[] = [
       db.exec(BASE_DDL)
     },
   },
+  {
+    to: 5,
+    up: (db) => {
+      /**
+       * **查询条件换了形状**：`{todo}` 原子退场，三态改由属性条件表达
+       * （`{prop:{id, eq:false|true}}` / `{exists:false}`）。
+       *
+       * 条件住在块的 `_query` 里，是**内容**，不是一张能单独改的表 ⇒ 旧条件读不出来时
+       * 只会静默不命中（看起来像「这次真的没有结果」）。所以按原型纪律丢掉内容重 seed，
+       * 不写「把 `{todo}` 翻译成 `{prop}`」的迁移分支。
+       */
+      for (const t of DB_CONTENT_TABLES) db.exec(`drop table if exists ${t}`)
+      db.exec(`drop table if exists ${DB_TABLES.opLog}`)
+      db.exec(DDL)
+      db.prepare(`delete from ${DB_TABLES.meta} where key = ?`).run(META_KEYS.seq)
+    },
+  },
 ]
 
 export type OpenResult =

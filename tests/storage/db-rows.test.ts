@@ -77,8 +77,8 @@ function richBlock(id: string): Block {
       _belongsTo: ['p1'],
       _fieldDefs: ['d1', 'd2'],
       _ownProps: ['d3'],
-      _mounts: [{ id: 't-1', kind: 'local', label: '待办', spec: { where: { todo: 'todo' } }, views: [] }],
-      _query: { where: { todo: 'todo' } },
+      _mounts: [{ id: 't-1', kind: 'local', label: '待办', spec: { where: { text: '待办' } }, views: [] }],
+      _query: { where: { text: '待办' } },
       [MULTI_ID]: ['值一', '值二'],
       [SINGLE_ID]: '单值',
     },
@@ -113,10 +113,10 @@ test('往返：正文／annos／时刻／属性／地址／露面／树形，逐
   assert.equal(b.props?._icon, 'lucide:file')
   assert.equal(b.props?._type, 'outline')
   assert.equal(b.props?._date, '2026-10-28')
-  assert.deepEqual(b.props?._query, { where: { todo: 'todo' } }, '`_query` 升成列（JSON）')
+  assert.deepEqual(b.props?._query, { where: { text: '待办' } }, '`_query` 升成列（JSON）')
   assert.deepEqual(
     b.props?._mounts,
-    [{ id: 't-1', kind: 'local', label: '待办', spec: { where: { todo: 'todo' } }, views: [] }],
+    [{ id: 't-1', kind: 'local', label: '待办', spec: { where: { text: '待办' } }, views: [] }],
     '非字符串数组整份当一格 JSON',
   )
   assert.deepEqual(b.props?.['f'.repeat(32)], ['值一', '值二'], '用户字段的多值也要拆行、按 pos 回来')
@@ -125,7 +125,7 @@ test('往返：正文／annos／时刻／属性／地址／露面／树形，逐
 
 test('往返：查询结果**不在模型里**（派生值落盘会在条件变了之后说谎）', () => {
   // v29 起结果按表面实例冻结（内存），块上根本没有这一格：写入什么就只回来什么。
-  const withJunk: Block = { ...mkBlock('查询'), props: { _query: { where: { todo: 'todo' } } } }
+  const withJunk: Block = { ...mkBlock('查询'), props: { _query: { where: { text: '待办' } } } }
   const back = roundTrip(ws([withJunk]))
   const props = back.blocks[0]!.props ?? {}
   assert.deepEqual(
@@ -133,7 +133,7 @@ test('往返：查询结果**不在模型里**（派生值落盘会在条件变�
     [],
     '结果集不是内容：库里不该出现任何 `*result*` 的格',
   )
-  assert.deepEqual(props._query, { where: { todo: 'todo' } }, '条件仍在（它是内容）')
+  assert.deepEqual(props._query, { where: { text: '待办' } }, '条件仍在（它是内容）')
 })
 
 test('往返：软删标记是块上的时刻，不是独立记录', () => {

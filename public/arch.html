@@ -421,12 +421,11 @@
   <span class="key">limit?</span>: number          <span class="cmt">排序之后截断；缺省不限</span>
 <span class="pipe">}</span>
 
-<span class="cmt">── 七个原子 ＋ 三种组合（每个原子都必须在 canonicalSpec 里有一支） ──</span>
+<span class="cmt">── 六个原子 ＋ 三种组合（每个原子都必须在 canonicalSpec 里有一支） ──</span>
 <span class="key">{ ref: 块 id }</span>          <span class="cmt">反链的最小形态：只认 id，不认 label</span>
-<span class="key">{ tag: 标签 id }</span>         <span class="cmt">按归属边（_tags）判；名字解析不到＝空集</span>
+<span class="key">{ tag: 标签名 }</span>         <span class="cmt">按归属边（_tags）判；名字解析不到＝空集</span>
 <span class="key">{ text: 串 }</span>              <span class="cmt">正文投影包含；未链接提及走这里，不算反链</span>
-<span class="key">{ todo: 三态 }</span>           <span class="cmt">todo / done / none（有槽未填 ≠ 不是任务）</span>
-<span class="key">{ prop: { id, 算子 } }</span>  <span class="cmt">通用路径：键是定义块 id，改显示名不动语义</span>
+<span class="key">{ prop: { id, 算子 } }</span>  <span class="cmt">通用路径：键是定义块 id，改显示名不动语义；三态（未完成／已完成／不是任务）也走这里</span>
 <span class="key">{ journal: 'YYYY-MM-DD' }</span>  <span class="cmt">那一天的块<b>下面</b>（范围条件）</span>
 <span class="key">{ role: 'journal' }</span>      <span class="cmt">是日记块<b>本身</b>（成员条件）</span>
 <span class="key">{ all } / { any } / { not }</span>  <span class="cmt">可嵌套；能组合表达的，不另造专用键</span>
@@ -458,9 +457,11 @@
         </div>
       </div>
       <div class="note" style="margin-top:9px">
-        值比较：<b>有这一槽才比</b>，没有就是不匹配。<code>neq</code> 同一条口径——否则它会变成「绝大多数块」。
+        「有没有这一栏」只有一处判据：<b>值 ∪ 自有槽 ∪ 标签声明</b>（标签声明的字段块上一个字节都没有，屏幕上也照样画方框）。
+        值比较<b>有这一栏才比</b>，没有就是不匹配。<code>neq</code> 同一条口径——否则它会变成「绝大多数块」。
         <code>gt</code>／<code>lt</code> 只在<b>同一量纲</b>上比；比不了返回空 ⇒ 不匹配（按字符串比会让 <code>true &gt; 5</code> 成立）。
-        <br><b><code>empty</code> 与 <code>exists</code> 必须分开</b>：「未填的任务」是<b>有槽、值为空</b>，「不是任务」是<b>没有这一槽</b>；合成一个算子就再也问不出前者。
+        <br><b><code>empty</code> 与 <code>exists</code> 分开</b>：文本字段「有这一栏、还没填」与「没有这一栏」是两个真问题。
+        <b>布尔属性没有未填态</b>（声明了就按 <code>false</code> 读）⇒ 对它 <code>empty</code> 与 <code>exists:false</code> 同义，构建器不再给这个选项。
         九个算子必须逐支进 <code>canonicalSpec</code>，漏一支＝条件静默丢失。
       </div>
       <div class="hr"></div>
@@ -468,6 +469,7 @@
       <div class="struct" style="line-height:1.85"><span class="type">DraftRow</span>   <span class="pipe">{</span> kind: todo|tag|text|prop, field?, op?, value? <span class="pipe">}</span>
 <span class="type">QueryDraft</span> <span class="pipe">{</span> mode: all|any, rows[], scope, limit?, sort?, verbatim? <span class="pipe">}</span></div>
       <div class="note" style="margin-top:8px">
+        <code>kind:'todo'</code> 那一行是<b>预设</b>：它展开成 <code>{prop:{id,eq:false|true}}</code> / <code>{exists:false}</code>，落盘的只有一种形状 —— 界面留着三个词，模型里不多一个原子。
         <code>specOfDraft(draftOfSpec(s))</code> 与 <code>canonicalSpec(s)</code> <b>逐字节相等</b>（有单测）；两边各写一份转换，就一定会在某个算子上分叉。
         拆不成行的嵌套（<code>not</code> 里套 <code>any</code>）整块走 JSON，<b>不拆</b>——拆了再拼回来就不是它自己。一次「应用」＝一笔事务＝一轮撤销；JSON 解析失败<b>保留原文</b>，绝不静默清空。
       </div>

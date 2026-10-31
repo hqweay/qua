@@ -22,6 +22,7 @@ import {
   ensureTag,
   fieldIdsOf,
   fieldRows,
+  fieldTableOf,
   gutterFieldsFor,
   gutterFieldsOf,
   hasTag,
@@ -265,24 +266,50 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter）�
   for (const b of withValue) {
     assert.equal(hasTag(b, task!.id), true, `样本块应带 #任务 归属：${plainText(b.content)}`)
   }
-  assert.equal(withValue.filter((b) => todoOf(b) === 'done').length, 2, '完成与未完成各两条')
+  const fields = fieldTableOf(ws.blocks)
+  assert.equal(withValue.filter((b) => todoOf(b, fields) === 'done').length, 2, '完成与未完成各两条')
 })
 
-test('todoOf：true ⇒ done，false ⇒ todo，**有槽未填 ⇒ todo**，没槽 ⇒ undefined', () => {
+test('todoOf：true ⇒ done；false／有槽没填／**靠标签声明** ⇒ todo；没有这一栏 ⇒ undefined', () => {
+  const def = mkPropDef('任务状态', 'checkbox', {}, TASK_STATUS_PROP_ID)
+  const tag = mkTagBlock('任务')
+  declareField(tag, TASK_STATUS_PROP_ID)
   const done: Block = { id: 'd', text: '', children: [], props: { [TASK_STATUS_PROP_ID]: true } }
   const open: Block = { id: 'o', text: '', children: [], props: { [TASK_STATUS_PROP_ID]: false } }
   /** 刚在面板里加了「任务状态」、还没点过：槽位在，值不在 */
   const fresh: Block = { id: 'f', text: '', children: [], props: { [OWN_PROPS_PROP]: [TASK_STATUS_PROP_ID] } }
+  /** 打了 `#任务`：这一栏是**标签声明**给成员的，块上一个字节都没写 */
+  const tagged: Block = { id: 't', text: '', children: [], props: { _tags: [tag.id] } }
   const none: Block = { id: 'n', text: '', children: [] }
-  assert.equal(todoOf(done), 'done')
-  assert.equal(todoOf(open), 'todo', '「是任务、没做完」是**有值**的，不能并进缺失')
+  const fields = fieldTableOf([def, tag, done, open, fresh, tagged, none])
+  assert.equal(todoOf(done, fields), 'done')
+  assert.equal(todoOf(open, fields), 'todo', '「是任务、没做完」是**有值**的，不能并进缺失')
   /**
-   * ⚠️ 这一条是判据本身：**看槽位，不看值**。
-   *    漏了它，屏幕上会画空心方框（渲染看槽位），查询「未完成」却查不到（这里看值）——
-   *    同一个块两种答案。
+   * ⚠️ 这一条是判据本身：**看「有没有这一栏」，不看值**。
+   *    漏了它，屏幕上会画空心方框（渲染看声明），这里却当成不是任务 ——
+   *    同一个块两种答案，而且不报错。
    */
-  assert.equal(todoOf(fresh), 'todo', '有槽但没填 ＝ 刚挂上的任务，也是 todo')
-  assert.equal(todoOf(none), undefined)
+  assert.equal(todoOf(fresh, fields), 'todo', '有槽但没填 ＝ 刚挂上的任务，也是 todo')
+  assert.equal(todoOf(tagged, fields), 'todo', '标签声明了这一栏、一次没点过 ＝ 未完成（不是「不是任务」）')
+  assert.equal(todoOf(none, fields), undefined)
+})
+
+test('标签声明的字段：屏幕画方框与「模型里是任务」同一个判据（不许一处认、一处不认）', () => {
+  /**
+   * 这条钉的是这个 bug 的根：`#任务` 用 `declareField` 把「任务状态」给到成员，
+   * 块上一个字节都没写。渲染看的是「有没有这一栏」（画方框），模型若只看 `_ownProps`，
+   * 同一个块就是「屏幕上是未完成、查询里不是任务」——两边都不报错。
+   */
+  const def = mkPropDef('任务状态', 'checkbox', { [UI_POSITION_PROP]: 'block-left' }, TASK_STATUS_PROP_ID)
+  const tagBlock = mkTagBlock('任务')
+  declareField(tagBlock, TASK_STATUS_PROP_ID)
+  const host = tag(mkBlock('打上 #任务、一次没点过'), tagBlock.id)
+  const forest = [def, tagBlock, host]
+
+  const box = gutterFieldsFor([host], forest).get(host.id)?.find((f) => f.kind === 'checkbox')
+  assert.ok(box, '屏幕上应画出方框（成员自动获得这一栏）')
+  assert.equal(box!.filled, false, '一次没点过 ⇒ 空方框')
+  assert.equal(todoOf(host, fieldTableOf(forest)), 'todo', '同一个判据：它是未完成，不是「不是任务」')
 })
 
 test('批量 gutter 与逐行算**逐块等价**：批级只扫一次库，结果不许和单块路径分叉', () => {

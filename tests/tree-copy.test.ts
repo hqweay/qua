@@ -40,7 +40,7 @@ const mk = (id: string, text: string, props?: Record<string, unknown>): Block =>
 const copyOf = (b: Block): Block => cloneSubtree(b).block
 
 test('`_mounts` 随块走：local 的 spec 深拷（改副本不动原件），linked 只拷指针', () => {
-  const spec = { where: { todo: 'todo' as const } }
+  const spec = { where: { text: '待办' } }
   const entries: MountEntry[] = [
     { id: 't-1', kind: 'local', label: '我的', spec, views: [] },
     { id: 't-2', kind: 'linked', block: 'q-1', view: 'v-1' },
@@ -68,7 +68,7 @@ test('`_embed` 指针原样保留（副本仍是一次「指向那一块」的�
 })
 
 test('`_query` 不走（身份不可复制：两个同源查询块会互相打架）', () => {
-  const q = mk('q', '本页的待办', { _query: { where: { todo: 'todo' } } })
+  const q = mk('q', '本页的待办', { _query: { where: { text: '待办' } } })
   const copy = copyOf(q)
   assert.equal(copy.props?._query, undefined)
   assert.equal(plainText(copy.content), '本页的待办', '正文（名字）照抄')
@@ -76,7 +76,7 @@ test('`_query` 不走（身份不可复制：两个同源查询块会互相打�
 
 test('视图配置：查询块副本**一起剥**（没有源的视图没有意义）；普通块副本**留着**', () => {
   const q = mk('q', '查询', {
-    _query: { where: { todo: 'todo' } },
+    _query: { where: { text: '待办' } },
     [VIEWS_PROP]: [{ id: 'v-1', kind: 'table' }],
     [ACTIVE_VIEW_PROP]: 'v-1',
   })

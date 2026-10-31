@@ -38,7 +38,7 @@ const mk = (id: string, text: string, props?: Record<string, unknown>): Block =>
   ...(props ? { props } : {}),
 })
 
-const QUERY = { where: { todo: 'todo' as const } }
+const QUERY = { where: { text: '待办' } }
 const localTab = (over: Partial<Extract<MountEntry, { kind: 'local' }>> = {}): Extract<MountEntry, { kind: 'local' }> => ({
   id: 't-1',
   kind: 'local',

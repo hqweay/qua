@@ -17,6 +17,7 @@ import { walkForest } from './walk.ts'
 import { normalizeAlias } from './alias.ts'
 import { journalDate, isJournal } from './journal.ts'
 import { tagIdsOf } from './tags.ts'
+import { fieldTableOf } from './props.ts'
 import type { Op } from './kb/types.ts'
 import {
   evaluateQuery,
@@ -722,6 +723,7 @@ export function queryByIndex(
   const env: QueryEnv = {
     refs: refsByIndex(q.where, index),
     tags: tagsByIndex(q.where, index),
+    fields: fieldTableOf(forest),
     journalDate: firstJournal(q.where),
     ...(opts.excludeIds && opts.excludeIds.length > 0 ? { excludeIds: new Set(opts.excludeIds) } : {}),
   }

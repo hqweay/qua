@@ -102,8 +102,12 @@ import { isAnno, isRun } from '../runs.ts'
  *            · 视图 kind 新增 `list`，结构映射表的配置键从 `list` 改叫 `listTable`。
  *            五条都是「同一件事有两处答案」或「派生值当内容」，没有一条能靠映射救回来
  *            ⇒ 作废重 seed，不写迁移。
+ * v29 → v30：**查询条件**里 `{todo}` 原子退场（三态改由属性条件表达），
+ *            「有没有这一栏」改判「值 ∪ 自有槽 ∪ 标签声明」。
+ *            旧库的 `_query` 带着已删的原子 ⇒ 读不出来（`readSpec` 会说不合法，
+ *            求值器只会静默空集）⇒ 作废重 seed。
  */
-export const WORKSPACE_VERSION = 29
+export const WORKSPACE_VERSION = 30
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

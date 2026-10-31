@@ -13,7 +13,9 @@ import {
   canonicalSpec,
   findJournalDay,
   findTagByName,
+  declareField,
   hasTag,
+  mkPropDef,
   mkTagBlock,
   normalizeTag,
   OWN_PROPS_PROP,
@@ -141,8 +143,9 @@ test('runQuery：**有槽未填**的块按「未完成」命中（与渲染同�
   /**
    * 「刚在面板里加上任务状态、还没点过」那一档：槽位在、值不在。
    *
-   * 它必须是 `todo` —— 屏幕上画着空心方框（渲染看槽位），查询「未完成」若查不到它，
-   * 同一个块就有两种答案。这条与 `props.test.ts` 的 `todoOf` 那条配成一对。
+   * 它必须是「未完成」—— 屏幕上画着空心方框（渲染看的是「有没有这一栏」），
+   * 查询若查不到它，同一个块就有两种答案。判据只有一处：`core/props.ts` 的 `readField`
+   * （布尔属性声明了就等于 `false`）。这条与 `tests/props.test.ts` 的 `todoOf` 那条配成一对。
    */
   const fresh: Block = {
     id: 'fresh',
@@ -150,10 +153,12 @@ test('runQuery：**有槽未填**的块按「未完成」命中（与渲染同�
     children: [],
     props: { [OWN_PROPS_PROP]: [TASK_STATUS_PROP_ID], _tags: [] },
   }
-  const blocks = [...fixture().blocks, fresh]
-  const hits = runQuery({ where: { todo: 'todo' }, scope: 'all' }, { blocks })
+  // 判 kind 要有定义块：没有它「任务状态」只是一个悬空的槽位（渲染也不画方框）
+  const def = mkPropDef('任务状态', 'checkbox', {}, TASK_STATUS_PROP_ID)
+  const blocks = [def, ...fixture().blocks, fresh]
+  const hits = runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } }, scope: 'all' }, { blocks })
   assert.ok(hits.some((h) => h.blockId === 'fresh'), '有槽未填应命中「未完成」')
-  assert.ok(!hits.some((h) => h.blockId === 'j1b'), '没有槽的块仍不该命中')
+  assert.ok(!hits.some((h) => h.blockId === 'j1b'), '没有这一栏的块仍不该命中')
 })
 
 test('runQuery：journal 条件取那天的**子块**，不含只读日期行本身', () => {
@@ -225,15 +230,19 @@ test('canonicalSpec：role 条件与 sort 键要能存活下来（否则存进 _
 
 test('runQuery：all / any / not 组合', () => {
   const { blocks } = fixture()
-  const todoOnly = runQuery({ where: { all: [{ tag: 'todo' }, { todo: 'todo' }] }, scope: 'all' }, { blocks })
-  // ⚠️ `j1b` 只有标签、没有待办状态 ⇒ 不该命中 `all[tag, todo]`
+  const openTask = { prop: { id: TASK_STATUS_PROP_ID, eq: false } } as const
+  const todoOnly = runQuery({ where: { all: [{ tag: 'todo' }, openTask] }, scope: 'all' }, { blocks })
+  // ⚠️ `j1b` 只有标签、**这一栏也没人声明** ⇒ 不该命中 `all[tag, 未完成]`
   assert.deepEqual(todoOnly.map((h) => h.blockId), ['a', 'd1', 'e'])
 
   const notTag = runQuery({ where: { not: { tag: 'todo' } }, scope: 'all' }, { blocks })
   assert.ok(!notTag.some((h) => h.blockId === 'a'))
   assert.ok(notTag.some((h) => h.blockId === 'c'))
 
-  const either = runQuery({ where: { any: [{ ref: 'c' }, { todo: 'done' }] }, scope: 'all' }, { blocks })
+  const either = runQuery(
+    { where: { any: [{ ref: 'c' }, { prop: { id: TASK_STATUS_PROP_ID, eq: true } }] }, scope: 'all' },
+    { blocks },
+  )
   assert.deepEqual(either.map((h) => h.blockId), ['b', 'd'])
 })
 
@@ -265,7 +274,7 @@ test('索引路径与纯函数路径同解（ref/tag/journal 查表，判定与�
   assertSameHits({ where: { tag: 'todo' }, scope: 'all' }, blocks, { anchorId: 'p1' })
   assertSameHits({ where: { ref: 'c' }, scope: 'all' }, blocks)
   assertSameHits({ where: { journal: '2026-10-20' }, scope: 'all' }, blocks)
-  assertSameHits({ where: { all: [{ tag: 'todo' }, { todo: 'todo' }] }, scope: 'all' }, blocks)
+  assertSameHits({ where: { all: [{ tag: 'todo' }, { prop: { id: TASK_STATUS_PROP_ID, eq: false } }] }, scope: 'all' }, blocks)
   assertSameHits({ where: { text: '丙' }, scope: 'all' }, blocks)
   assertSameHits({ where: { tag: 'todo' }, scope: 'all', limit: 2 }, blocks)
   // 成员条件（索引路径查日期表收窄候选）＋ 排序轴
@@ -312,9 +321,13 @@ test('求值的上下文：`scopeId` 是锚点，缺省＝整片森林（不靠 
   // 实测踩到：查询块只存条件、不吃结果（A）⇒ 拿它当锚点的话 subtree 里只有它自己，永远 0 条
   const { blocks } = fixture()
   const { kb } = kbOf(blocks)
-  const hits = freezeResult({ where: { todo: 'todo' } }, kb, { scopeId: 'p1' }).hits
+  const hits = freezeResult({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } } }, kb, { scopeId: 'p1' }).hits
   assert.deepEqual(hits.map((h) => h.blockId), ['a', 'd1'], '只看 p1 这一页里的待办')
-  const all = freezeResult({ where: { todo: 'todo' }, scope: 'all' }, kb, { scopeId: 'p1' }).hits
+  const all = freezeResult(
+    { where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } }, scope: 'all' },
+    kb,
+    { scopeId: 'p1' },
+  ).hits
   assert.ok(all.length > hits.length, '`scope:"all"` 时不收窄')
 })
 
@@ -382,8 +395,11 @@ test('canonicalSpec：属性条件要能存活下来（否则存进 _query 就�
 })
 
 test('canonicalSpec：键序固定 ⇒ 同一条件的不同写法判为「没变」', () => {
-  const a: QuerySpec = { where: { all: [{ tag: 'x' }, { todo: 'todo' }] }, scope: 'all' }
-  const b2: QuerySpec = { scope: 'all', where: { all: [{ tag: 'x' }, { todo: 'todo' }] } } as QuerySpec
+  const a: QuerySpec = { where: { all: [{ tag: 'x' }, { prop: { id: 'p1', eq: false } }] }, scope: 'all' }
+  const b2: QuerySpec = {
+    scope: 'all',
+    where: { all: [{ tag: 'x' }, { prop: { id: 'p1', eq: false } }] },
+  } as QuerySpec
   assert.equal(JSON.stringify(canonicalSpec(a)), JSON.stringify(canonicalSpec(b2)))
 
   const q = b('q', 'q', { props: { _query: canonicalSpec(a) } })
@@ -430,27 +446,64 @@ test('exists：问「有没有这一槽」，与 eq 是两件事；同时给时�
   assert.deepEqual(runQuery({ where: both }, { blocks }).map((h) => h.blockId), ['b'])
 })
 
-test('`{todo}` 不是 `{prop}` 的语法糖：三态里「有槽未填」只有它命中', () => {
+test('三态全部落在 `{prop}` 上：有槽没填、靠标签声明、显式 false 都是「未完成」', () => {
   /**
-   * 空心方框（槽位在、值没填）在屏幕上是「待办 · 没做完」，所以它必须被「未完成」查到。
-   * 这条同时是**不删 `{todo}`** 的理由：
-   *   · `{prop:{eq:false}}` 只命中「点了但没做」的那种（漏掉空方框）；
-   *   · `{prop:{exists:false}}` 把「不是任务」与「空方框」混成一个。
-   * 两个条件的组合也拼不出来（「声明过但没值」不是属性值能表达的）。
+   * 一块「屏幕上是空心方框」的待办有三种存法，它们必须是同一个答案：
+   *   · `_ownProps` 有槽、没有值（面板「加一条属性」）；
+   *   · 标签声明了这一栏、块上什么都没写（`#任务` 的成员）；
+   *   · 值显式是 `false`。
+   *
+   * 判据只有一处（`core/props.ts` 的 `readField`：布尔属性声明了就等于 `false`），
+   * 所以三条**单节点**条件就够：`eq:false` / `eq:true` / `exists:false`。
    */
-  const untouched = b('u', '空方框', { props: { [OWN_PROPS_PROP]: [TASK_STATUS_PROP_ID] } })
+  const def = mkPropDef('任务状态', 'checkbox', {}, TASK_STATUS_PROP_ID)
+  const tag = mkTagBlock('任务')
+  declareField(tag, TASK_STATUS_PROP_ID)
+  const untouched = b('u', '有槽没填', { props: { [OWN_PROPS_PROP]: [TASK_STATUS_PROP_ID] } })
+  const tagged = b('t', '靠标签声明', { props: { _tags: [tag.id] } })
   const falseVal = b('f', '点了没做', task(false))
   const done = b('d', '做完了', task(true))
-  const blocks = [untouched, falseVal, done]
+  const plain = b('p', '不是任务')
+  const blocks = [def, tag, untouched, tagged, falseVal, done, plain]
+  /** 定义块与标签块自己也没有这一栏：问「不是任务」时会出现，断言里排除掉 */
+  const notDef = (ids: string[]) => ids.filter((id) => id !== def.id && id !== tag.id)
 
-  assert.deepEqual(runQuery({ where: { todo: 'todo' }, scope: 'all' }, { blocks }).map((h) => h.blockId), ['u', 'f'])
   assert.deepEqual(
     runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } }, scope: 'all' }, { blocks }).map((h) => h.blockId),
-    ['f'],
-    '属性条件漏掉空方框 —— 这就是 `{todo}` 存在的理由',
+    ['u', 't', 'f'],
+    '「未完成」＝ 这一栏在、值不是 true（三种存法一个答案）',
   )
-  assert.deepEqual(runQuery({ where: { todo: 'done' }, scope: 'all' }, { blocks }).map((h) => h.blockId), ['d'])
-  assert.deepEqual(runQuery({ where: { todo: 'none' }, scope: 'all' }, { blocks }).map((h) => h.blockId), [])
+  assert.deepEqual(
+    runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: true } }, scope: 'all' }, { blocks }).map((h) => h.blockId),
+    ['d'],
+    '「已完成」＝ 值 true',
+  )
+  assert.deepEqual(
+    notDef(
+      runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, exists: false } }, scope: 'all' }, { blocks }).map(
+        (h) => h.blockId,
+      ),
+    ),
+    ['p'],
+    '「不是任务」＝ 这一栏不在（有槽没填、靠标签声明都在，所以都不算）',
+  )
+  // 两条求值路径同解：索引路径也要认「标签声明」这一半（它只换了环境怎么来）
+  const open: QuerySpec = { where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } }, scope: 'all' }
+  assert.deepEqual(queryByIndex(rebuild(blocks), blocks, open, {}).map((h) => h.blockId), ['u', 't', 'f'])
+})
+
+test('readSpec：读不出的条件返回 null（旧库里已删的原子不许静默变成空集）', () => {
+  /**
+   * 条件语言的形状会变（`{todo}` 原子就是这样退场的）。旧字节里留着它时，
+   * 求值器只能「不命中」——那看起来和「确实没有结果」一模一样，没有任何线索。
+   * 读条件时验形，界面才能说一句「这条条件读不出来」。
+   */
+  const legacy = b('q', '旧查询', { props: { _query: { where: { todo: 'todo' } } } })
+  assert.equal(readSpec(legacy), null)
+  assert.equal(specChanged(legacy, { where: { tag: 'x' } }), true, '读不出来 ⇒ 当成「变了」，不让冻结沿用旧结果')
+  // 认得形状的照常读出来
+  const ok = b('q2', '新查询', { props: { _query: { where: { prop: { id: 'p', eq: false } } } } })
+  assert.deepEqual(readSpec(ok), { where: { prop: { id: 'p', eq: false } } })
 })
 
 test('canonicalSpec：`exists` 要能存活下来（漏了这一支 = 存进 _query 就被丢掉）', () => {

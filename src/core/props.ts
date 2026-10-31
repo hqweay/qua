@@ -76,28 +76,98 @@ export function uiPositionOf(def: Block | undefined): UiPosition {
 export const TASK_STATUS_PROP_ID = derivedId('prop', 'core/task-status')
 
 /**
+ * **一次算好的字段读取表**：谁声明了哪些属性、每个属性是什么 kind。
+ *
+ * 为什么要一张表：判断「这块有没有这一栏」要同时看三处 —— 块上的值、块的
+ * `_ownProps`（自有槽）、**它打的标签上的 `_fieldDefs`**。前两处住在块上，
+ * 第三处要沿标签查；逐块现查就是每次全库扫一遍。调用方**建一次、传下去**。
+ *
+ * ⚠️ 建一张表要扫两趟森林（标签块、定义块）。放在循环里调就会退化成 O(n²) ——
+ *    与 `gutterFieldsOf` 那条警告同因。
+ */
+export interface FieldTable {
+  /** 标签块 id → 它声明的属性 id（有序） */
+  byTag: ReadonlyMap<string, readonly string[]>
+  /** 属性 id → kind（来自定义块） */
+  kinds: ReadonlyMap<string, PropKind>
+}
+
+/** 从森林建一份字段读取表（标签声明 ＋ 定义 kind 各扫一趟） */
+export function fieldTableOf(forest: readonly Block[]): FieldTable {
+  const byTag = new Map<string, readonly string[]>()
+  for (const tag of allTags(forest)) byTag.set(tag.id, declaredFieldIds(tag))
+  const kinds = new Map<string, PropKind>()
+  for (const def of allPropDefs(forest)) kinds.set(def.id, propKindOf(def))
+  return { byTag, kinds }
+}
+
+/**
+ * **「这一块有没有这一栏」的唯一判据**（值 ≥ 自有槽 ≥ 标签声明）。
+ *
+ * 三处来源是**同一个问题的三种存储形态**，不是三个问题：
+ *   · 有值（含 `false`）：写过的块；
+ *   · `_ownProps`：面板「加一条属性」只登记槽、不写值；
+ *   · 标签的 `_fieldDefs`：成员自动获得这一栏，块上什么都不写（成员是动态的）。
+ *
+ * ⚠️ 只认前两处就会出现「屏幕上一个空心方框、查询说这块没有这一栏」——
+ *    `gutterFields`（画方框）读的是本函数，查询的 `exists` 也必须读它。
+ */
+export function fieldDeclared(block: Block, propId: string, table: FieldTable): boolean {
+  if (block.props !== undefined && propId in block.props) return true
+  if (ownPropIds(block).includes(propId)) return true
+  for (const tagId of tagIdsOf(block)) {
+    if (table.byTag.get(tagId)?.includes(propId) === true) return true
+  }
+  return false
+}
+
+/** 读一格字段的结果：`declared` 说有没有这一栏，`value` 说值是什么 */
+export interface FieldRead {
+  declared: boolean
+  value: unknown
+}
+
+/**
+ * 读一格字段。**布尔属性没有「未填」这一态**：声明了就等价于 `false`。
+ *
+ * 为什么这条规则必须在这里、而不是在各写路径上「声明时补写 false」：
+ * 标签声明的属性**落不到成员块上**（成员是动态的，且每来一个新成员都要补写一遍）。
+ * 写路径只能覆盖自有槽；读侧归一才覆盖两种来源。写路径也不必造一个用户没做过的值 ——
+ * 数据里「没点过」仍然是没点过，**解释**上是未完成。
+ */
+export function readField(block: Block, propId: string, table: FieldTable): FieldRead {
+  const has = block.props !== undefined && propId in block.props
+  if (has) return { declared: true, value: block.props?.[propId] }
+  const declared = fieldDeclared(block, propId, table)
+  const bool = table.kinds.get(propId) === 'checkbox'
+  return { declared, value: declared && bool ? false : undefined }
+}
+
+/**
  * 「任务状态」的派生读法：**值就是属性槽**，没有第二份块字段。
  *
  * 三态与旧的 `'todo' | 'done' | 无` 对得上：
  *   · `true` ⇒ `'done'`（做完了）；
- *   · `false` ⇒ `'todo'`（**是任务、还没做完**）；
- *   · **有槽但没值** ⇒ 也是 `'todo'`（**刚挂上、还没点过的那一下**）；
- *   · 没有这一槽 ⇒ `undefined`（这块压根不是任务）。
+ *   · 其余任何已声明形态 ⇒ `'todo'`（**是任务、还没做完**）——`false`、没点过、
+ *     以及**靠标签声明拿到这一栏但一次都没点过**的块；
+ *   · 没有这一栏 ⇒ `undefined`（这块压根不是任务）。
  *
- * ⚠️ **判据是「有没有这一槽」，不是「有没有值」。** 这是 `e4cb946`（槽位说有没有、
- *    `props[propId]` 说值是什么）之后最容易踩的一处：槽位与值是两个问题。
- *    把「未填」并进 `undefined` 会让**刚加上的任务立刻不算任务** —— 屏幕上有一个空心方框
- *    （渲染看的是槽位），查询「未完成」却查不到它（这里看的是值），同一个块两种答案。
+ * ⚠️ **判据是「有没有这一栏」（`readField`），不是「有没有值」。** 把「未填」并进
+ *    `undefined` 会让刚挂上的任务立刻不算任务 —— 屏幕上画着空心方框、查询查不到它。
  *
- * 为什么 `false` 与「未填」都算 `'todo'`、而不并进缺失：那样「还没做完」与「不是任务」
- * 会变成同一个状态，而「按任务筛选」要的正是它们分开 —— 所以三态在值上，不在类型里。
+ * ⚠️ 必须传 `FieldTable`：只认 `_ownProps` 会漏掉**标签声明**那一半，而「任务」这个
+ *    种子标签正是用 `declareField` 把这一栏给到成员的。那种块屏幕上是未完成、模型里
+ *    却不是任务 —— 同一个块两种答案，且没有任何一层报错。
  */
-export function todoOf(block: Block): TodoState | undefined {
-  const v = valueOf(block, TASK_STATUS_PROP_ID)
-  if (v === true) return 'done'
-  // 槽位在 ⇒ 它是任务：`false` 是「点了但没做完」，`undefined` 是「还没点过」，两者都是 todo
-  if (v === false || ownPropIds(block).includes(TASK_STATUS_PROP_ID)) return 'todo'
-  return undefined
+export function todoOf(block: Block, table: FieldTable): TodoState | undefined {
+  /**
+   * 定义块没了 ⇒ **不是任务**（与渲染一致：gutter 上没有定义就不画方框）。
+   * 这里必须问 kind，而不是只看「有没有这一栏」：一条悬空的槽位无法说明它是勾选框。
+   */
+  if (table.kinds.get(TASK_STATUS_PROP_ID) !== 'checkbox') return undefined
+  const { declared, value } = readField(block, TASK_STATUS_PROP_ID, table)
+  if (!declared) return undefined
+  return value === true ? 'done' : 'todo'
 }
 
 export type PropKind = 'text' | 'number' | 'date' | 'checkbox' | 'select' | 'ref' | 'url'

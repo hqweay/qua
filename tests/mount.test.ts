@@ -41,7 +41,7 @@ const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({
   ...extra,
 })
 
-const spec: QuerySpec = { where: { todo: 'todo' } }
+const spec: QuerySpec = { where: { text: '待办' } }
 const local = (id: string, label: string, s: QuerySpec = spec): MountEntry => ({
   id,
   kind: 'local',

@@ -13,13 +13,16 @@
  *    而用户看到的是「我什么都没改，条件却变了」。那种情况在界面上整块显示为 JSON。
  */
 import { canonicalSpec } from './query-view.ts'
-import type { QueryNode, QuerySpec } from './query.ts'
+import { isQuerySpec, type QueryNode, type QuerySpec } from './query.ts'
+import { TASK_STATUS_PROP_ID } from './props.ts'
 
 /** 一行条件能表达的四种事情（其余形态走 JSON） */
 export type DraftKind = 'todo' | 'tag' | 'text' | 'prop'
-
 /** 属性条件的算子（与 `PropOp` 一一对应；`empty` 与 `exists` 是两件事） */
 export type DraftOp = 'eq' | 'neq' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'empty'
+
+/** 「待办」这一行预设的三种取值（**不是条件原子**，只活在这一层，展开成 `{prop}`） */
+export type TodoPreset = 'todo' | 'done' | 'none'
 
 export const DRAFT_OPS: readonly DraftOp[] = ['eq', 'neq', 'contains', 'gt', 'gte', 'lt', 'lte', 'exists', 'empty']
 
@@ -53,14 +56,25 @@ export interface QueryDraft {
 
 /* ------------------------------------------------------------ spec → 草稿 */
 
-/** 一个叶子节点能不能变成一行 */
+/**
+ * 一个叶子节点能不能变成一行。
+ *
+ * ⚠️ **「待办」这一行是属性条件的预设，不是另一个条件原子**：它展开成的是
+ *    `{prop:{id: 任务状态, eq:false|true}}` / `{exists:false}`。这样界面上仍有
+ *    「未完成／已完成／不是任务」三个词，但落进 `_query` 的只有一种形状 ——
+ *    否则同一个语义就有两份 JSON，`specKey` 判不出「条件没变」。
+ */
 function rowOf(node: QueryNode): DraftRow | null {
-  if ('todo' in node) return { kind: 'todo', value: node.todo }
   if ('tag' in node) return { kind: 'tag', value: node.tag }
   if ('text' in node) return { kind: 'text', value: node.text }
   if ('prop' in node) {
     const op = node.prop
     const id = node.prop.id
+    if (id === TASK_STATUS_PROP_ID) {
+      if ('eq' in op && op.eq === true) return { kind: 'todo', value: 'done' }
+      if ('eq' in op && op.eq === false) return { kind: 'todo', value: 'todo' }
+      if ('exists' in op && op.exists === false) return { kind: 'todo', value: 'none' }
+    }
     if ('eq' in op) return { kind: 'prop', field: id, op: 'eq', value: literalText(op.eq) }
     if ('neq' in op) return { kind: 'prop', field: id, op: 'neq', value: literalText(op.neq) }
     if ('contains' in op) return { kind: 'prop', field: id, op: 'contains', value: op.contains }
@@ -143,8 +157,11 @@ export function literalOf(text: string): unknown {
 /** 一行 → 叶子节点；`field` 缺失 ⇒ `null`（这一行还没填完，应用到条件里没有意义） */
 export function nodeOfRow(row: DraftRow): QueryNode | null {
   if (row.kind === 'todo') {
-    const v = row.value === 'done' || row.value === 'none' ? row.value : 'todo'
-    return { todo: v }
+    // 「待办」是属性条件的预设（见 `rowOf`）：三态全部落在 `{prop}` 上
+    const v: TodoPreset = row.value === 'done' || row.value === 'none' ? row.value : 'todo'
+    if (v === 'done') return { prop: { id: TASK_STATUS_PROP_ID, eq: true } }
+    if (v === 'none') return { prop: { id: TASK_STATUS_PROP_ID, exists: false } }
+    return { prop: { id: TASK_STATUS_PROP_ID, eq: false } }
   }
   if (row.kind === 'tag') return row.value && row.value !== '' ? { tag: row.value } : null
   if (row.kind === 'text') return row.value && row.value !== '' ? { text: row.value } : null
@@ -173,7 +190,10 @@ export function nodeOfRow(row: DraftRow): QueryNode | null {
 export function specOfDraft(draft: QueryDraft): QuerySpec {
   if (draft.verbatim !== undefined) {
     try {
-      return canonicalSpec(JSON.parse(draft.verbatim) as QuerySpec)
+      const parsed: unknown = JSON.parse(draft.verbatim)
+      // JSON tab 是手写的 ⇒ 先验形：认不出的形状退回「没有条件」，不让它落进 `_query`
+      if (isQuerySpec(parsed)) return canonicalSpec(parsed)
+      return { where: { any: [] }, scope: draft.scope === 'all' ? 'all' : 'subtree' }
     } catch {
       return { where: { any: [] }, scope: draft.scope === 'all' ? 'all' : 'subtree' }
     }
