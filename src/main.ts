@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  isWidgetBlock, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, DERIVED_CARDS, dockKey, type Block, type CtxKeys, type DerivedCardId, type TriggerChar } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  isWidgetBlock, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, DERIVED_CARDS, dockKey, type Block, type CtxKeys, type DerivedCardId, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { checkExternalUrl, rejectText } from './core/link.ts'
 import { BlockStore } from './core/store.ts'
@@ -1213,6 +1213,69 @@ const owners = setupOwners({
   },
 })
 
+/**
+ * **露面的「视图…」菜单**：编辑的是**这一次露面的指针**（`_embed.view`），不是源块的配置。
+ *
+ * 三格直译 `core/embed.ts` 的三个取值：
+ *   · **跟随源**（`''`）—— 源换默认看法，这里跟着换；菜单上写明「当前：表格」，
+ *     否则它和「固定为大纲」在界面上分不出差别；
+ *   · **固定为大纲**（`'outline'`）—— 源换看法时这一处不变；
+ *   · **源上的某张命名视图**（视图 id）—— 要「这一次特别一点」就建一张命名视图并指过去。
+ *
+ * ⚠️ 露面块**没有自己的 `_views`**：写进它身上没有任何读路径会看到（`isViewRoot` 排除露面块），
+ *    那就是「点了没生效」。所以同一个「视图…」入口在露面块上必须走这里。
+ */
+function openEmbedViewMenu(host: Block): void {
+  const ref = readEmbed(host)
+  const target = ref ? blocks.find(ref.block) : undefined
+  if (!ref || !target) return
+  const data = owners.read({ kind: 'block', blockId: target.id })
+  const active = data ? readViewSet(data).active : null
+  const curLabel = active ? viewNameOf(active, (k) => t(`ui.view.kind.${k}`)) : t('ui.view.outline')
+  const rows: Row[] = [
+    {
+      id: 'embed/follow',
+      label: t('ui.embed.followSource', { name: curLabel }),
+      icon: 'lucide:link',
+      ...(ref.view === '' ? { keyHint: t('ui.view.current') } : {}),
+    },
+    {
+      id: 'embed/outline',
+      label: t('ui.embed.pinOutline'),
+      icon: 'lucide:list',
+      ...(ref.view === OUTLINE_VIEW ? { keyHint: t('ui.view.current') } : {}),
+    },
+  ]
+  for (const v of data?.views ?? []) {
+    rows.push({
+      id: `embed/view/${v.id}`,
+      label: viewNameOf(v, (k) => t(`ui.view.kind.${k}`)),
+      icon: v.kind === 'list-table' ? 'lucide:table-properties' : 'lucide:table',
+      group: 'embed/views',
+      ...(ref.view === v.id ? { keyHint: t('ui.view.current') } : {}),
+    })
+  }
+  rows.push({ id: 'embed/new', label: t('ui.embed.newView'), icon: 'lucide:plus', group: 'embed/9-new' })
+  rows.push({ id: 'embed/open', label: t('ui.embed.openSource'), icon: 'lucide:external-link', group: 'embed/9-new' })
+  layers.openMenu({
+    rows,
+    anchor: app.ed.blockEl(host.id)?.getBoundingClientRect() ?? null,
+    title: t('menu.label.views'),
+    searchable: false,
+    onPick: (row) => {
+      const id = String(row.id)
+      if (id === 'embed/follow') void registry.invoke('core.embed/set-view', { blockId: host.id, view: '' }, 'menu')
+      else if (id === 'embed/outline') void registry.invoke('core.embed/set-view', { blockId: host.id, view: OUTLINE_VIEW }, 'menu')
+      else if (id.startsWith('embed/view/'))
+        void registry.invoke('core.embed/set-view', { blockId: host.id, view: id.slice('embed/view/'.length) }, 'menu')
+      // 「在源上新建视图…」打开的是**源**的那一份菜单：建完它会成为源的默认看法，
+      // 跟随态的露面当场跟着换；要钉住就再从本菜单选一次（一张视图只有一份配置）。
+      else if (id === 'embed/new') app.openViewMenu({ kind: 'block', blockId: target.id })
+      else if (id === 'embed/open') void registry.invoke('core.block/focus-block', { blockId: target.id }, 'menu')
+    },
+  })
+}
+
 const app: App = {
   get ed() {
     return ed
@@ -1290,6 +1353,18 @@ const app: App = {
    * 于是撤销、落盘、审计只有一条路（与「菜单由绑定表渲染」同一条纪律的延伸）。
    */
   openViewMenu: (owner) => {
+    /**
+     * **露面块不拥有视图配置**：`_embed = { block, view }` 只有一格选择。
+     * 同一个「视图…」入口在露面块上编辑的是**那根指针**（跟随源／大纲／源的命名视图）——
+     * 写它的 `_views` 不会被任何读路径看到（`isViewRoot` 排除露面块），那就是「点了没生效」。
+     */
+    if (owner.kind === 'block') {
+      const embed = blocks.find(owner.blockId)
+      if (embed && isEmbedBlock(embed)) {
+        openEmbedViewMenu(embed)
+        return
+      }
+    }
     const data = owners.read(owner)
     if (!data) return
     const host = owner.kind === 'block' ? blocks.find(owner.blockId) : undefined
@@ -1840,20 +1915,23 @@ function viewEvents(
     embedBody: (block, into) =>
       mountEmbedBody(block, into, {
         store: blocks,
-        kb,
         run,
-        owners,
         wire: (ed2, change2) => wireViewEditor(ed2, change2, via),
         onFocus: (next) => {
           ed = next
         },
         onChange: (kind) => change?.(kind as 'text' | 'struct' | 'load'),
-        project: (b, el) => fillBlockText(el, b, (id) => blocks.find(id), assetViewOf, markAssetMissing),
-        refClick: (hit, el, mods) => handleRefClick(hit, mods, el),
-        onAtomClick: (atom, el, mods) => handleAtomClick(atom, el, mods, via),
-        openBlock: (id) => void registry.invoke('core.block/focus-block', { blockId: id }, via),
+        // 投影＝同一台 ViewHost（surface 'embed'），绑定的是**这一次露面**
+        mountView: (hostBlock, target, el) => {
+          const vh = panels.mountEmbedView(hostBlock, target, el, active)
+          return () => {
+            vh.dispose()
+            vh.root.remove()
+          }
+        },
+        // 判据翻转（镜像 ⇄ 投影）只能靠重画那一行：身体是这一行的 DOM
+        repaint: (id) => repaintBlock(id),
         invoke: (name, args, v) => void registry.invoke(name, args, v ?? via),
-        toast: (text, kind) => app.toast(text, kind),
       }),
     /**
      * **正文里的查询体**：与段尾宿主同一台 `ViewHost`，只是贴在查询块那一行下面。
@@ -1972,6 +2050,7 @@ const {
   pickRefValue,
   openPropertiesDrawer,
   mountBlockView,
+  mountEmbedView,
   viewShown,
 } = setupPanels({
   blocks,
@@ -2011,6 +2090,7 @@ panels = {
   pickRefValue,
   openPropertiesDrawer,
   mountBlockView,
+  mountEmbedView,
   viewShown,
 }
 /**

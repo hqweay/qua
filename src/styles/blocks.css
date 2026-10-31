@@ -1437,6 +1437,37 @@
   flex: 1 1 auto;
   min-width: 0;
 }
+/* 投影（源的结果视图）：高度由 `VIEW_BODY_H` 声明（`view/block-dom.ts` 写自定义属性），
+   与正文行内体读同一个数 —— 视觉与虚拟化各算一遍，滚动条就会系统性偏小。
+   镜像（那棵子树）是内容高，不写这一格。 */
+.blk-embed-body[data-embed-body='view'] {
+  height: var(--view-body-rest);
+  min-height: 0;
+  overflow: hidden;
+}
+/* 聚焦档：与行内体/组件体同一条 `:focus-within` 口径（纯 CSS，不进库、不进撤销） */
+.blk-embed-body[data-embed-body='view']:focus-within {
+  height: var(--view-body-focus);
+}
+.blk-embed-body > .queryview {
+  height: 100%;
+}
+.queryview[data-surface='embed'] {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+  display: flex;
+  flex-direction: column;
+}
+.queryview[data-surface='embed'] .queryview-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* 投影自己滚；不再让里面的表再开一层滚动条 */
+  overflow: auto;
+}
+.queryview[data-surface='embed'] .tv-scroll {
+  max-height: none;
+}
 /* 源被删／指针坏了：说一句实话 + 一个移除入口（不留一块什么都不画的空白） */
 .embed-note {
   color: var(--ui-text-tertiary);

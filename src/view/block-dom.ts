@@ -21,6 +21,7 @@ import {
   blockLabel,
   blockTypeOf,
   displayNameOf,
+  embedBodyOf,
   hasQueryBody,
   identityTags,
   inlineTagIdsOf,
@@ -140,12 +141,22 @@ export function rowHasInlineViewBody(r: VisibleRow): boolean {
  *    按 `LINE_H` 算会让带这些行的文档滚动条系统性偏小。
  *    这里只读**静止档**：聚焦档只发生在窗口里的那一行上，而占位算的是窗口**之外**的行。
  */
-export function visibleRowHeight(b: Block, extraHeads = 0, inlineBody = false): number {
+export function visibleRowHeight(b: Block, extraHeads = 0, viewBody = false): number {
   const aliasHead = aliasesOf(b).length > 0 && prop<string>(b, DISPLAY_PROP) !== 'text' ? 1 : 0
   const h = widgetBodyHeightOf(b)
   const body = h ? WIDGET_H[h.rest] : LINE_H
-  const extra = inlineBody ? VIEW_BODY_H.rest + VIEW_BODY_GAP : 0
+  const extra = viewBody ? VIEW_BODY_H.rest + VIEW_BODY_GAP : 0
   return body + extra + (aliasHead + extraHeads) * ALIAS_HEAD_H
+}
+
+/**
+ * 这一行的露面身体是不是**投影**（源的结果视图）：高度由 `VIEW_BODY_H` 声明，
+ * 与行内体读同一个数 —— 两处各算一遍，长文档的滚动条就会系统性偏小。
+ *
+ * ⚠️ 镜像（那棵子树）**不是**这里的一种：它的高度是内容高，没有「一档」可言。
+ */
+export function rowHasEmbedViewBody(b: Block, find: FindBlock): boolean {
+  return isEmbedBlock(b) && embedBodyOf(b, find) === 'view'
 }
 
 /** 格式 → 语义标签：粗体用 `strong` 之类，让复制出去也是对的 */
@@ -951,6 +962,14 @@ export function makeBlockEl(
     body.contentEditable = 'false'
     body.setAttribute(EDIT_ISLAND_ATTR, '1')
     body.dataset.embedBodyFor = b.id
+    /**
+     * 身体是**投影**（源的结果视图）⇒ 高度由声明给，与正文行内体同一个数：
+     * 视觉与虚拟化必须读同一个值。镜像（那棵子树）是内容高，不写这一格。
+     */
+    if (embedBodyOf(b, opts.find ?? (() => undefined)) === 'view') {
+      body.dataset.embedBody = 'view'
+      applyViewBodyHeights(body)
+    }
     el.appendChild(body)
     opts.embedBody?.(b, body)
   } else if (widgetBodyOf(b) && opts.widgetBody) {

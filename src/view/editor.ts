@@ -130,6 +130,7 @@ import {
   fillBlockText,
   isReadonlyBlock,
   makeBlockEl,
+  rowHasEmbedViewBody,
   rowHasInlineViewBody,
   visibleRowHeight,
 } from './block-dom.ts'
@@ -2959,12 +2960,19 @@ export class BlockEditor {
     this.rebuildAncestors()
     // 占位高度按**实际行高**累加：带别名头的行是两行，按 LINE_H 算会让长文档的
     // 滚动条与落点系统性偏小（越靠后偏得越多）。
-    /** 这一行在窗口外的占位高度（内联查询体折叠时不算身体） */
+    /**
+     * 这一行在窗口外的占位高度。
+     *
+     * 「有没有视图体」有两种：正文里查询块的行内体（折叠时不算身体），
+     * 与**露面块里的投影**（源的结果视图）。两者高度都来自 `VIEW_BODY_H` ——
+     * 少算一处，带这种行的文档滚动条就系统性偏小。
+     */
     const rowH = (r: VisibleRow): number =>
       visibleRowHeight(
         r.block,
         this.extraHeads(r),
-        Boolean(this.events.viewBody) && rowHasInlineViewBody(r) && !isFolded(this.doc, r.block.id),
+        (Boolean(this.events.viewBody) && rowHasInlineViewBody(r) && !isFolded(this.doc, r.block.id)) ||
+          (Boolean(this.events.embedBody) && rowHasEmbedViewBody(r.block, (id) => this.store.find(id))),
       )
     if (from > 0) {
       const headH = rows.slice(0, from).reduce((n, r) => n + rowH(r), 0)

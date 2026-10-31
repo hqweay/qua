@@ -27,6 +27,17 @@ export const EMBED_HANDLERS: Record<string, Handler> = {
     return true
   },
 
+  /**
+   * 改一次露面选的看法：`''`（跟随源）／`'outline'`（固定大纲）／源上的视图 id。
+   *
+   * 只动**指针**，不动源的配置 —— 看法住在源块，露面只记「这一次看哪张」。
+   * 指向一张不存在的视图由读路径报降级（`resolveBoundView`），这里不预判。
+   */
+  'core.embed/set-view': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    if (!id) return false
+    return app.setEmbedView(id, S(a.view))
+  },
   'core.embed/remove': (a, app) => {
     const id = S(a.blockId) || curBlock(app)
     if (!id) return false

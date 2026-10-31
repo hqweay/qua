@@ -16,6 +16,7 @@ import {
   FOLLOW_VIEW,
   OUTLINE_VIEW,
   bindingOfEmbed,
+  embedBodyOf,
   isEmbedBlock,
   isViewRoot,
   mkBlock,
@@ -86,6 +87,49 @@ test('sourceOf：深度 1 构造性截断——露面指向露面时不再往下
   const find = (id: string): Block | undefined => (id === 'i' ? inner : id === 'a' ? mk('a', '源') : undefined)
   // 目标自己又是露面 ⇒ 停在 `o`（露面体里不再展开露面）
   assert.deepEqual(sourceOf(outer, find), { kind: 'children', blockId: 'o' })
+})
+
+/* ------------------------------------------------------------ 身体由谁画 */
+
+/**
+ * **露面身体的分派**（`embedBodyOf`）：树（镜像）还是视图（投影）。
+ *
+ * 这一格曾经是第二套渲染器表（镜像／大纲表格／「还没有渲染器」），而查询源的露面
+ * 三条路都画不出结果 —— 结果不是 children。判据收进模型之后，这几条断言就是它的边界。
+ */
+test('embedBodyOf：查询源 ⇒ 投影（结果不是 children，没有树可镜像）', () => {
+  const q = mk('q', '', [], { _query: { where: { any: [] } } })
+  const find = (id: string): Block | undefined => (id === 'q' ? q : undefined)
+  assert.equal(embedBodyOf(embed('e', 'q'), find), 'view')
+  // 强制大纲也不改变这一点：query 源的「大纲」是命中的大纲，仍由视图画
+  assert.equal(embedBodyOf(embed('e', 'q', OUTLINE_VIEW), find), 'view')
+})
+
+test('embedBodyOf：children 源没选视图 ⇒ 镜像（那棵子树就是身体）', () => {
+  const tree = mk('a', '源', [mk('k1', '子'), mk('k2', '子')])
+  const find = (id: string): Block | undefined => (id === 'a' ? tree : undefined)
+  assert.equal(embedBodyOf(embed('e', 'a'), find), 'mirror')
+  assert.equal(embedBodyOf(embed('e', 'a', OUTLINE_VIEW), find), 'mirror')
+})
+
+test('embedBodyOf：children 源选了一张视图 / 源自己激活了视图 ⇒ 投影', () => {
+  const views = [{ id: 'v-1', kind: 'table' as const }]
+  const tree = mk('a', '源', [mk('k1', '子')], { _views: views })
+  const find = (id: string): Block | undefined => (id === 'a' ? tree : undefined)
+  // 指着一张命名视图 ⇒ 视图（哪怕源自己还是默认看法）
+  assert.equal(embedBodyOf(embed('e', 'a', 'v-1'), find), 'view')
+  // 跟随源 ＋ 源激活了视图 ⇒ 视图
+  const active = mk('a', '源', [mk('k1', '子')], { _views: views, _activeView: 'v-1' })
+  const find2 = (id: string): Block | undefined => (id === 'a' ? active : undefined)
+  assert.equal(embedBodyOf(embed('e', 'a'), find2), 'view')
+  // 跟随源 ＋ 源没有激活视图 ⇒ 树
+  assert.equal(embedBodyOf(embed('e', 'a'), find), 'mirror')
+})
+
+test('embedBodyOf：指针坏了／源没了 ⇒ 不是视图（身体是一句实话，按一行算高）', () => {
+  const find = (): Block | undefined => undefined
+  assert.equal(embedBodyOf(embed('e', 'gone'), find), 'mirror')
+  assert.equal(embedBodyOf(mk('p', '普通块'), find), 'mirror')
 })
 
 /* ------------------------------------------------------------ 解析 */
