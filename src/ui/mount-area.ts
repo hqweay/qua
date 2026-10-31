@@ -44,6 +44,7 @@ import {
   type ViewConfig,
   type QuerySpec,
 } from '../core/index.ts'
+import type { FoldState } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t, type MsgId } from '../core/msg.ts'
 import { type BlockEditor, type Run } from '../view/editor.ts'
@@ -179,6 +180,11 @@ export class MountArea {
   private readonly expandedByTab = new Map<string, Set<string>>()
   /** 上次装载的「上下文根 → 覆盖的命中行」；收起一层时用它算滚回哪 */
   private covers: ReadonlyMap<string, readonly string[]> = new Map()
+  /**
+   * 哪些派生栏已经播过「关联型默认折叠」（**按栏记**：一个编辑器 N 个 loader，
+   * 切 tab 只换 roots、编辑器不重建，所以 `doc.folded` 是几栏共用的）。
+   */
+  private readonly foldSeeded = new Set<string>()
   /** 这一段是谁；段落换人时清空展开状态 */
   private hostId = ''
   /** 当前这一栏的视图体（非大纲时才有） */
@@ -511,6 +517,23 @@ export class MountArea {
     this.emptyEl.hidden = true
     this.editorEl.hidden = false
     delete this.editorEl.dataset.empty
+    /**
+     * **关联型引用默认折叠**（派生栏专用）：引用／提及／同类这三栏的每一行都是
+     * 「因为一条边而出现」—— `[[引用]]`、`#标签`，**全是关联型**，不是靠祖先带进来的
+     * （那种叫传递型，得等「命中块的子孙也进结果」才有）。
+     * 虎鲸的口径正是：关联型默认折叠（只给那一行），传递型默认展开（好看出属于哪一片）。
+     *
+     * ⚠️ **只播种一次**（按栏记）：用户手动展开某一行以后不许再覆盖 ——
+     *    否则每次重画都把人刚展开的又折回去。
+     * ⚠️ **必须写回 `doc.folded`**：挂载区会重画，只在返回值里播种会
+     *    「闪一下折着、随即又展开」。
+     */
+    if (entry.kind === 'derived' && !this.foldSeeded.has(entry.id)) {
+      this.foldSeeded.add(entry.id)
+      const seeded: FoldState = { ...(ed.doc.folded ?? {}) }
+      for (const b of plan.roots) if (b.children.length > 0) seeded[b.id] = true
+      ed.doc.folded = seeded
+    }
     const folded = unfoldForContext(ed.doc.folded, plan.covers, (id) => this.deps.kb.pathOf(id))
     ed.loadPage({ roots: plan.roots, folded, contexts: plan.contexts, expandedRoots: plan.contextRoots })
     if (plan.focusId) ed.reveal(plan.focusId)

@@ -15892,6 +15892,63 @@ await check('T198 聚焦即展开：zoom 进折着的块 ⇒ 展开；退回 ⇒
   return `折叠 → 聚焦展开（子行回到 DOM）→ 退回收着；折叠表始终 ${JSON.stringify(Object.keys(zoomed.table))}；聚焦期间手动折当场生效`
 })
 
+await check('T199 关联型引用默认折叠：派生栏只给那一行，展开才见上下文', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  // ① 造一条「引用了 P 的块」，并给它一个子块 —— 没有子块就无所谓折叠
+  const made = await page.evaluate(() => {
+    const pages = window.__qua.pages()
+    const P = pages[0]
+    const Q = pages[1]
+    window.__qua.invoke('core.page/open', { pageId: Q.id })
+    const rows = window.__qua.__editor.rows().map((r) => r.block).filter((x) => x.id !== Q.id && x.children.length === 0)
+    const refBy = rows[0]
+    window.__qua.focusBlock(refBy.id, 999)
+    window.__qua.invoke('core.editor/insert-page-ref', { pageId: P.id })
+    // 子块**不引用** P：它只是上下文（虎鲸叫传递型，靠展开才看得到）
+    window.__qua.invoke('core.editor/insert-block', { text: '这行没引用，只是上下文' })
+    window.__qua.invoke('core.editor/indent-block', {})
+    return { P: P.id, refBy: refBy.id }
+  })
+  assert(made.P && made.refBy, `前置：应造出引用与它的子块：${JSON.stringify(made)}`)
+
+  // ② 回到 P：引用栏（派生，默认大纲）出现；那一行**默认折着**
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), made.P)
+  await page.waitForTimeout(450)
+  await mountTab(page, 'refs')
+  await page.waitForTimeout(300)
+
+  const row = () =>
+    page.evaluate((id) => {
+      const host = document.querySelector('#editor .mount .mount-editor')
+      const el = host?.querySelector(`[data-block-id="${id}"]`)
+      return {
+        present: Boolean(el),
+        collapsed: el?.dataset.collapsed === '1',
+        rows: host?.querySelectorAll('[data-block-id]').length ?? 0,
+        html: host?.innerHTML.slice(0, 300) ?? '(无 mount-editor)',
+      }
+    }, made.refBy)
+
+  const first = await row()
+  assert(first.present, `前置：引用栏里应出现引用了 P 的那一行：${JSON.stringify(first)}`)
+  assert(first.collapsed, `关联型引用默认折叠：那一行应带 data-collapsed，实际 ${JSON.stringify(first)}`)
+
+  // ③ 点开 ⇒ 上下文（那个没引用的子块）才出现
+  // 三角的点击是委托出去的：JS 的 el.click() 打不中，走真实点击
+  await page
+    .locator(`#editor .mount .mount-editor [data-block-id="${made.refBy}"] > .left > .fold`)
+    .first()
+    .click()
+  await page.waitForTimeout(400)
+  const opened = await row()
+  assert(!opened.collapsed, `点开之后不该还是折着：${JSON.stringify(opened)}`)
+  assert(opened.rows > first.rows, `展开后才见得到上下文：${first.rows} → ${opened.rows}`)
+
+  await ctx.close()
+  return `默认折着（关联型）→ 展开后才见上下文：${first.rows} → ${opened.rows} 行`
+})
+
 /**
  * **判定放在所有用例之后**：写在这里之前时，后面的用例（T136 起）即使红了也不会进
  * `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。
