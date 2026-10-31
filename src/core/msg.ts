@@ -385,8 +385,11 @@ export const MSG = {
   'ui.mount.nonQuery': '这一栏的目标不是查询，不能转为本地副本',
   'ui.mount.fixDerived': '固定为一栏查询',
   'ui.mount.fixDerivedHint': '把这一栏变成可编辑的查询，内置栏仍然保留',
+  'ui.mount.fixedLabel': '{name}（可编辑）',
   'ui.mount.tabMenu': '这一栏的更多动作',
-  'ui.mount.promoteToBlock': '提升为查询块…',
+  'ui.mount.why.refs': '指向这一块',
+  'ui.mount.why.same': '与这一块同标签',
+  'ui.mount.why.mentions': '正文含这一块，且没有指向它',  'ui.mount.promoteToBlock': '提升为查询块…',
   'ui.mount.promoteBlockHint': '挂到这一块下，条件里的「这一块」仍然指它',
   'ui.query.untitled': '未命名查询',
   'ui.query.count': '{count} 条结果',
@@ -477,6 +480,10 @@ export const MSG = {
   'ui.embed.emptySource': '源没有子块',
 
   'ui.view.kind.list': '列表',
+  'ui.view.col.path': '路径',
+  'ui.view.col.refCount': '引用次数',
+  'ui.view.col.matched': '命中词',
+  'ui.view.col.sharedTags': '共同标签',
   /* 记录列表（`list`）：一行一条，没有缩进 —— 它的源里两种是平的一批 */
   'ui.list.empty': '这一份源还没有记录',
   'ui.list.open': '打开这一条',

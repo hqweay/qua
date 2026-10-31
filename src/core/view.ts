@@ -39,6 +39,18 @@ export type ViewKind = 'outline' | 'list' | 'table' | 'list-table' | 'board' | '
 /** 可落盘的视图种类（`outline` 不在其中） */
 export type StoredViewKind = Exclude<ViewKind, 'outline'>
 
+/**
+ * **派生栏**（引用／同类／提及）能选的看法。
+ *
+ * 派生栏没有拥有者：它不拥有条件、也不拥有视图配置，所以这份选择是**设备状态**
+ * （存 `Prefs`），不是 `_views`。本轮只开三种 —— 大纲／列表／表格；
+ * 看板要分组列、日历要日期列，而派生栏的那两列没有可配置的落点。
+ */
+export type DerivedViewKind = 'outline' | Extract<StoredViewKind, 'list' | 'table'>
+
+/** 派生栏允许的看法（**唯一一份**：prefs 归一与 UI 的切换器都读它） */
+export const DERIVED_VIEW_KINDS: readonly DerivedViewKind[] = ['outline', 'list', 'table']
+
 const STORED_KINDS: readonly StoredViewKind[] = ['list', 'table', 'list-table', 'board', 'gallery', 'calendar', 'mindmap']
 
 /**

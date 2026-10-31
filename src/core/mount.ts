@@ -32,9 +32,24 @@ import { displayTextOf } from './alias.ts'
 import { hasList, primaryAliasOf, prop, type Block } from './model.ts'
 import { tagIdsOf } from './tags.ts'
 import { descendantTagIds } from './tag-tree.ts'
+import { plainText } from './runs.ts'
 import type { QueryNode, QuerySpec } from './query.ts'
 import { findById, isQuerySpec } from './query.ts'
-import { canonicalViews, type ViewConfig } from './view.ts'
+import {
+  canonicalViews,
+  MATCHED_COLUMN,
+  MODIFIED_COLUMN,
+  PATH_COLUMN,
+  REF_COUNT_COLUMN,
+  resolveRows,
+  SHARED_TAGS_COLUMN,
+  TITLE_COLUMN,
+  type DerivedViewKind,
+  type ViewColumn,
+  type ViewConfig,
+  type ViewRecord,
+} from './view.ts'
+import type { KbClient } from './kb/types.ts'
 
 /** `_mounts`：块宿主上的一格（有序） */
 export const MOUNTS_PROP = '_mounts'
@@ -114,6 +129,32 @@ export function sameHost(a: MountHost, b: MountHost): boolean {
   return a.blockId === b.blockId
 }
 
+/* ------------------------------------------------------------ 派生栏的看法 */
+
+/**
+ * 派生栏的视图选择（**设备状态**，与 `_mounts` 无关）。
+ *
+ * 为什么不是拥有者配置：派生栏没有条件、没有视图列表，它「谁跟我有关」是现算的。
+ * 给它一份 `_views` 就等于给一个没有 owner 的东西造 owner —— 第二真相。
+ */
+export type MountViews = Readonly<Record<string, DerivedViewKind>>
+
+/**
+ * 一格派生栏的设备状态键。
+ *
+ * 形状 `block:<宿主块 id>:<来源>` / `journal:<来源>`：宿主换了（换块、跨天）就是另一格，
+ * 与挂载区「每段各记各的」同一条口径。
+ */
+export function mountViewKey(host: MountHost, source: DerivedSource): string {
+  return host.kind === 'journal' ? `journal:${source}` : `block:${host.blockId}:${source}`
+}
+
+/** 这一格选了什么（缺省大纲；未知值在 `normalizePrefs` 那一层已经丢掉了） */
+export function readMountView(views: MountViews | undefined, host: MountHost, source: DerivedSource): DerivedViewKind {
+  const v = views?.[mountViewKey(host, source)]
+  return v === 'list' || v === 'table' ? v : 'outline'
+}
+
 /**
  * 内置三栏的条件。它们**只用已有的条件原子**，`'$self'` 是值位上的哨兵——
  * 不给条件语言加 `mentions` 这类专用键：那会把名字解析偷偷塞进条件语言，
@@ -172,6 +213,68 @@ function sameSpecOf(host: Block, forest: readonly Block[]): QuerySpec | null {
   }
   if (nodes.length === 0) return null
   return { where: nodes.length === 1 ? nodes[0]! : { any: nodes } }
+}
+
+/**
+ * 派生栏的**一行**：来源块 ＋ 这一栏特有的派生列。
+ *
+ * 三条口径：
+ *   · 上下文沿用挂载区那一条：`selfId`＝宿主、**不给子树锚点**、`excludeIds` 含宿主。
+ *     给派生栏传子树锚点会让引用／提及恒空（那些块本来就在别处）。
+ *   · 引用是**块粒度**（谁引用了我），不按「第几处引用」拆行；
+ *   · 派生值不进 `props`、不落盘：`refCount`／`matched`／`sharedTags` 都是这次读出来的。
+ */
+export function derivedRecordsOf(host: Block, kb: KbClient, source: DerivedSource): ViewRecord[] {
+  const spec = derivedSpecOf(host, kb.roots(), source)
+  if (!spec) return []
+  const hits = kb.query(spec, { selfId: host.id, excludeIds: [host.id] })
+  const rows = resolveRows(hits, kb)
+  if (source === 'refs') {
+    const counts = new Map<string, number>()
+    for (const s of kb.backrefBlocksOf(host.id)) if (s.blockId !== host.id) counts.set(s.blockId, s.count)
+    return rows.map((r) => {
+      const n = counts.get(r.block.id)
+      return n === undefined ? r : { ...r, derived: { refCount: n } }
+    })
+  }
+  if (source === 'mentions') {
+    const word = displayTextOf(host)
+    if (word === '') return rows
+    return rows.map((r) => (r.title.includes(word) ? { ...r, derived: { matched: word } } : r))
+  }
+  const own = new Set(kb.tagsOf(host.id).map((t) => plainText(t.content)))
+  return rows.map((r) => {
+    const shared = r.tags.map((t) => plainText(t.content)).filter((name) => own.has(name))
+    return shared.length === 0 ? r : { ...r, derived: { sharedTags: shared } }
+  })
+}
+
+/**
+ * 派生栏切到表格时的**默认列**（临时构造，不落盘：派生栏没有 `_views`）。
+ *
+ * 三种来源各自最要紧的那一列不同：引用看次数、提及看命中词、同类看共同标签；
+ * 路径与修改时间是它们共有的「这条在哪、什么时候动过」。
+ */
+export function derivedColumns(source: DerivedSource): ViewColumn[] {
+  const tail =
+    source === 'refs' ? REF_COUNT_COLUMN : source === 'mentions' ? MATCHED_COLUMN : SHARED_TAGS_COLUMN
+  return [
+    { key: TITLE_COLUMN, width: 260 },
+    { key: PATH_COLUMN, width: 220 },
+    { key: tail, width: tail === MATCHED_COLUMN ? 150 : 110 },
+    { key: MODIFIED_COLUMN, width: 150 },
+  ]
+}
+
+/**
+ * 派生栏切到列表时的字段（同样临时构造）。
+ *
+ * 列表只放两列：位置与「这一栏特有的那一列」—— 列表本来就是更瘦的一张表。
+ */
+export function derivedListFields(source: DerivedSource): string[] {
+  const special =
+    source === 'refs' ? REF_COUNT_COLUMN : source === 'mentions' ? MATCHED_COLUMN : SHARED_TAGS_COLUMN
+  return [PATH_COLUMN, special]
 }
 
 /* ------------------------------------------------------------ 读 */

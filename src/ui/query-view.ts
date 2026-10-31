@@ -51,6 +51,9 @@ import {
   type QueryContext,
   type Source,
   type ViewBindingRef,
+  type ViewColumn,
+  type DerivedViewKind,
+  type SortKey,
   type ViewConfig,
   type ViewOwnerData,
   type ViewOwnerRef,
@@ -59,7 +62,7 @@ import {
   type ViewSurface,
 } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
-import { t } from '../core/msg.ts'
+import { t, type MsgId } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
 import { BlockCell } from './block-cell.ts'
 import { EditableBlock } from './editable-block.ts'
@@ -69,11 +72,23 @@ import { ViewCalendar } from './view-calendar.ts'
 import { ViewGallery } from './view-gallery.ts'
 import { ViewList } from './view-list.ts'
 import { ViewMindmap } from './view-mindmap.ts'
+import { ViewListTable } from './view-list-table.ts'
+import { ViewTable } from './view-table.ts'
 
 /** 默认看法的临时 id（不落盘：它代表「这一份源没有激活视图」这件事本身） */
 const DEFAULT_VIEW_ID = 'view-default'
-import { ViewListTable } from './view-list-table.ts'
-import { ViewTable } from './view-table.ts'
+
+/** 保留列在列表里的字段名（属性列走 `deps.fields()`） */
+const RESERVED_FIELD_LABEL: Record<string, MsgId> = {
+  tags: 'ui.props.tagsTitle',
+  children: 'ui.view.childrenCount',
+  created: 'ui.props.createdAt',
+  modified: 'ui.props.modifiedAt',
+  path: 'ui.view.col.path',
+  refCount: 'ui.view.col.refCount',
+  matched: 'ui.view.col.matched',
+  sharedTags: 'ui.view.col.sharedTags',
+}
 
 export interface ViewHostDeps {
   store: BlockStore
@@ -133,10 +148,35 @@ export interface ViewHostDeps {
   choices?: (propId: string) => readonly { id: string; label: string }[]
   /** 今天（本地日）：日历的「今天描边」要钉得住 */
   today?: () => string
+  /**
+   * **派生栏模式**（引用／同类／提及）：没有拥有者，只借用这一层的渲染器。
+   *
+   * 三件事因此不同：
+   *   · 看法来自设备状态（由装配层现读现传），不是 `_views`；
+   *   · 数据是**现算**的（只读关系视图）：不冻结、不显示刷新、不标 stale；
+   *   · 抬头由挂载区画（它要给出「这一栏是什么」的只读说明），这一层不画自己的抬头。
+   */
+  derived?: DerivedMode
+}
+
+export interface DerivedMode {
+  /** 本轮只开列表与表格（大纲走挂载区自己的那一支） */
+  kind: 'list' | 'table'
+  /** 现算的一批记录（已带派生列） */
+  records: () => ViewRecord[]
+  /** 表格列 / 列表字段：**临时构造**，不落盘 */
+  columns: ViewColumn[]
+  listFields: string[]
+  /** 切看法写哪（设备状态；由装配层落地） */
+  setKind: (kind: DerivedViewKind) => void
+  /** 表头的只读说明（「指向这一块」这类） */
+  explain: string
 }
 
 export interface ViewHostEls {
   root: HTMLElement
+  /** 抬头整条（派生栏由挂载区画抬头，这一条要藏起来） */
+  head: HTMLElement
   title: HTMLElement
   count: HTMLElement
   /** 大纲折叠时会少画几行：主数字仍是命中数，这里补一句「M 个顶层」 */
@@ -208,7 +248,7 @@ export function createViewHostEls(): ViewHostEls {
   body.append(editor, table)
 
   root.append(head, body)
-  return { root, title, count, topCount, filters, views, refresh, newRow, stale, editor, table }
+  return { root, head, title, count, topCount, filters, views, refresh, newRow, stale, editor, table }
 }
 
 /** 一个「表面实例」的冻结结果（内存；不进 KB、不进撤销） */
@@ -242,10 +282,16 @@ export class ViewHost {
   private warned = false
   /** **这一个表面实例**的冻结结果；条件/上下文变了才重算 */
   private frozen: FrozenResult | null = null
+  /** 派生栏在这一屏内的显示排序（表面状态：不进库、不同步） */
+  private derivedSort: SortKey[] = []
+  /** 派生栏的「整片重算」防抖计时器（成员可能新增，局部修补不够） */
+  private derivedTimer: number | null = null
 
   constructor(els: ViewHostEls, deps: ViewHostDeps) {
     this.els = els
     this.deps = deps
+    // 派生栏的抬头由挂载区画（它要说清这一栏是什么）；这一层只借渲染器
+    if (deps.derived) this.els.head.hidden = true
     this.els.refresh.textContent = t('ui.query.refresh')
     this.els.refresh.addEventListener('click', () => this.refresh())
     this.els.newRow.textContent = t('ui.view.newRow')
@@ -267,6 +313,18 @@ export class ViewHost {
     // 拿不到「动过哪些块」就先不点亮：宁可少提示，也不要因为刷新顺带的重渲染误报。
     this.offStale = deps.store.subscribe((source, ids) => {
       if (source === this.outline?.ed) return
+      /**
+       * 派生栏是**只读关系视图**：新引用/新提及/新标签都可能让成员增减，
+       * 只按 id 修补已有行不够 ⇒ 防抖整片重算（不冻结、不标 stale）。
+       */
+      if (this.deps.derived) {
+        if (this.derivedTimer !== null) clearTimeout(this.derivedTimer)
+        this.derivedTimer = window.setTimeout(() => {
+          this.derivedTimer = null
+          this.sync(true)
+        }, 120)
+        return
+      }
       if (ids && ids.length > 0) {
         this.noteTouched(ids)
         // children/items 源是活的：子块的正文/属性变了，那一行要跟着变（按 blockId 局部修补）
@@ -290,6 +348,8 @@ export class ViewHost {
 
   dispose(): void {
     this.offStale()
+    if (this.derivedTimer !== null) clearTimeout(this.derivedTimer)
+    this.derivedTimer = null
     this.outline?.dispose()
     this.outline = null
     this.table?.dispose()
@@ -350,8 +410,9 @@ export class ViewHost {
     return this.bound.data
   }
 
-  /** 当前这一份源（**派生**：query／children／items） */
+  /** 这一份源（**派生**：query／children／items；派生栏走现算记录，不建源） */
   private get source(): Source {
+    if (this.deps.derived) return { kind: 'children', blockId: this.deps.host().id }
     const { owner, data } = this.bound
     if (data.query) return { kind: 'query', spec: data.query }
     if (owner.kind === 'block') {
@@ -364,7 +425,24 @@ export class ViewHost {
 
   /** 当前这张视图（`null` ＝ 这一份源的默认看法） */
   private get view(): ViewConfig | null {
+    if (this.deps.derived) return this.derivedView()
     return this.bound.view
+  }
+
+  /**
+   * 派生栏的临时视图配置：**只有渲染需要的两样**（列／字段 ＋ 这一屏的排序）。
+   *
+   * 不落盘、不复制：派生栏没有 `_views`。排序也只在这一次露面里活着（切走就回原序）——
+   * 承认「派生栏的排序是设备状态」会顺手给它造一份配置，而它本来什么都没有。
+   */
+  private derivedView(): ViewConfig {
+    const d = this.deps.derived!
+    if (d.kind === 'list') return { id: 'derived:list', kind: 'list', list: { fields: [...d.listFields] } }
+    return {
+      id: 'derived:table',
+      kind: 'table',
+      table: { columns: d.columns.map((c) => ({ ...c })), ...(this.derivedSort.length > 0 ? { sort: this.derivedSort } : {}) },
+    }
   }
 
   /**
@@ -376,6 +454,7 @@ export class ViewHost {
    * ⚠️ `children`／`query` 的默认是**大纲**，那条分支不走这里（大纲没有配置可言）。
    */
   private defaultView(): ViewConfig | null {
+    if (this.deps.derived) return this.derivedView()
     if (this.bound.view) return this.bound.view
     const src = this.source
     if (defaultKindFor(src) !== 'list') return null
@@ -416,7 +495,8 @@ export class ViewHost {
       this.deps.toast?.(t('ui.view.broken'), 'warn')
     }
     // 查询源：条件/上下文变了就重算冻结结果（不写块、不进撤销）
-    if (this.source.kind === 'query') this.ensureFrozen()
+    // 派生栏是**只读关系视图**：不冻结、不标 stale —— 它每次都是现算的
+    if (!this.deps.derived && this.source.kind === 'query') this.ensureFrozen()
     if (force || mode !== this.mode) {
       this.mode = mode
       this.paintChrome(b, view)
@@ -485,6 +565,7 @@ export class ViewHost {
   }
 
   private rowCount(): number {
+    if (this.deps.derived) return this.deps.derived.records().length
     const src = this.source
     if (src.kind === 'query') return (this.frozen?.hits ?? []).length
     // 结构映射表的行＝各列的第 j 项（表头不占一行），与渲染器同一份派生
@@ -500,8 +581,9 @@ export class ViewHost {
 
   private paintChrome(b: Block, view: ViewConfig | null): void {
     this.els.root.hidden = false
+    const derived = this.deps.derived
     const src = this.source
-    const query = src.kind === 'query'
+    const query = !derived && src.kind === 'query'
     const name = displayNameOf(b).trim()
     /**
      * 查询源保留名字（它自己就是这张视图的标题）；
@@ -515,7 +597,8 @@ export class ViewHost {
     if (!query || view !== null) this.els.topCount.hidden = true
     this.els.refresh.hidden = !query
     // items 源的行是「引用」，不是这里能长出来的子块 ⇒ 不给「新建一行」（列表自己有「加一条」）
-    this.els.newRow.hidden = query || src.kind === 'items'
+    // 派生栏是只读关系视图 ⇒ 也不给新建/改名/刷新
+    this.els.newRow.hidden = Boolean(derived) || query || src.kind === 'items'
     /**
      * 这一颗 `＋` 在两种表里长的是**不同的东西**：平表加一行（＝一个直接子块），
      * 结构映射表加一列（顶部多一个直接子块，它的孩子成为这一列的各项）。
@@ -539,6 +622,18 @@ export class ViewHost {
   private paintFilters(b: Block): void {
     const box = this.els.filters
     box.replaceChildren()
+    /**
+     * 派生栏的「条件」是**只读说明**：它不是用户配的条件，也没有可编辑的落点
+     * （点开构建器只会得到一份不属于它的条件）。所以要留下一句话，但不做成按钮。
+     */
+    if (this.deps.derived) {
+      box.hidden = false
+      const chip = document.createElement('span')
+      chip.className = 'queryview-chip ui-ellipsis'
+      chip.textContent = this.deps.derived.explain
+      box.appendChild(chip)
+      return
+    }
     const spec = this.source.kind === 'query' ? this.source.spec : null
     if (!spec) {
       box.hidden = true
@@ -580,6 +675,11 @@ export class ViewHost {
   private paintViews(b: Block, view: ViewConfig | null): void {
     const box = this.els.views
     box.replaceChildren()
+    // 派生栏的看法切换器在挂载区抬头（这一层没有拥有者，不该画「＋新建视图」）
+    if (this.deps.derived) {
+      box.hidden = true
+      return
+    }
     const src = this.source
     if (src.kind !== 'query' && b.children.length === 0 && !view) {
       // 叶子块没有可摊开的东西：不给入口（点了只会看到空表）
@@ -776,7 +876,11 @@ export class ViewHost {
           store: this.deps.store,
           records: () => this.records(),
           view: () => this.view ?? view,
-          fieldLabel: (id) => this.deps.fields().find((f) => f.id === id)?.label ?? id.slice(-6),
+          fieldLabel: (id) => {
+            const reserved = RESERVED_FIELD_LABEL[id]
+            if (reserved) return t(reserved)
+            return this.deps.fields().find((f) => f.id === id)?.label ?? id.slice(-6)
+          },
           projectTitle: (r, into) => this.deps.project(r.block, into),
           project: (r, key, into) => {
             into.textContent = fieldTextOf(r, key, (v) =>
@@ -829,14 +933,22 @@ export class ViewHost {
         records: () => this.records(),
         defs: () => this.deps.kb.propDefs(),
         defaults: () =>
+          this.deps.derived?.columns.map((c) => ({ ...c })) ??
           defaultColumnsForSource(this.source, this.deps.kb, {
             hits: this.frozen?.hits ?? [],
           }),
         setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
         clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
         // 表头排序写**视图的显示序**：不重查、不改 `_query.sort`（成员只由条件/上限决定）
-        sort: (by, dir) =>
-          this.deps.invoke('core.view/set-sort', { owner: this.writeOwner, viewId: this.view?.id ?? '', by, dir }),
+        // 派生栏没有可写的配置：排序只在这一屏内生效（切走回原序，不留第二真相）
+        sort: (by, dir) => {
+          if (this.deps.derived) {
+            this.derivedSort = dir === '' ? [] : [{ by, dir: dir === 'desc' ? 'desc' : 'asc' }]
+            this.sync(true)
+            return
+          }
+          this.deps.invoke('core.view/set-sort', { owner: this.writeOwner, viewId: this.view?.id ?? '', by, dir })
+        },
         insertRow: () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }),
         deleteRow: (rowId) => this.deps.invoke('core.view/delete-row', { rowId }),
         openBlock: (id) => this.deps.openBlock(id),
@@ -861,6 +973,7 @@ export class ViewHost {
 
   /** 行（派生）：query＝命中（不折叠祖先）；children＝直接子块；items＝`_items` 解析到的活块 */
   private records(): ViewRecord[] {
+    if (this.deps.derived) return this.deps.derived.records()
     const src = this.source
     if (src.kind === 'query') return resolveRows(this.frozen?.hits ?? [], this.deps.kb)
     if (src.kind === 'items') return itemsRecords(src.blockId, this.deps.kb)

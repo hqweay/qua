@@ -1010,6 +1010,19 @@
 .mount-x:hover {
   color: var(--ui-danger);
 }
+/* 「⋯」：这一栏的更多动作（提升／转本地／固定为查询／移除）。与 × 同一档的按钮 */
+.mount-more {
+  background: none;
+  border: 0;
+  padding: 0 var(--ui-gap-2);
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+  line-height: 1;
+}
+.mount-more:hover {
+  color: var(--ui-text);
+}
 .mount-add {
   background: none;
   border: 0;
@@ -1023,6 +1036,56 @@
 }
 .mount-body {
   margin-top: var(--ui-gap-2);
+}
+/* 派生栏抬头：这一栏是什么 ＋ 条数 ＋ 三种看法 ＋ 更多。
+   它没有拥有者，所以这颗抬头只做「说明 ＋ 切看法」，没有刷新/新建/改名。 */
+.mount-derived-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ui-gap-2);
+  margin-bottom: var(--ui-gap-1);
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+.mount-derived-head[hidden] {
+  display: none;
+}
+.mount-derived-title {
+  color: var(--ui-text-secondary);
+  font-weight: 600;
+}
+.mount-derived-count,
+.mount-derived-why {
+  color: var(--ui-text-tertiary);
+}
+.mount-derived-why {
+  max-width: 24em;
+}
+.mount-derived-views {
+  display: flex;
+  gap: var(--ui-gap-1);
+  margin-left: auto;
+}
+.mount-derived-view,
+.mount-derived-more {
+  background: none;
+  border: 0;
+  padding: 0 var(--ui-gap-2);
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+  border-radius: var(--ui-radius-sm);
+  line-height: 1.6;
+}
+.mount-derived-view:hover,
+.mount-derived-more:hover {
+  color: var(--ui-text);
+  background: var(--ui-surface-sunken);
+}
+.mount-derived-view[data-active='1'] {
+  color: var(--ui-text);
+  background: var(--ui-surface-sunken);
 }
 .mount-editor {
   min-height: var(--ui-line-h);

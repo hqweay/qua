@@ -63,6 +63,7 @@ export const MOUNT_HANDLERS: Record<string, Handler> = {
     const host = hostArg(a.host)
     const source = S(a.source)
     if (!host || !(SOURCES as readonly string[]).includes(source)) return false
-    return app.fixDerivedTab(host, source as (typeof SOURCES)[number]) !== ''
+    const view = S(a.view)
+    return app.fixDerivedTab(host, source as (typeof SOURCES)[number], view === 'list' || view === 'table' ? view : 'outline') !== ''
   },
 }

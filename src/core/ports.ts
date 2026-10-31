@@ -21,7 +21,7 @@ import type { QuerySpec } from './query.ts'
 import type { ChoiceScope } from './props.ts'
 import type { SecLayout } from './feed.ts'
 import type { MountHost } from './mount.ts'
-import type { ViewConfig } from './view.ts'
+import type { ViewConfig, DerivedViewKind } from './view.ts'
 import type { ViewOwnerRef } from './view-owner.ts'
 
 export type Capability = 'read' | 'write' | 'admin' | 'plugin'
@@ -258,7 +258,21 @@ export interface App {
    * 默认路径就是它：随手加一栏不该在树里多一个对象，也没有「删块 tab 怎么办」。
    * @returns 新栏的稳定 id（写不进去 ⇒ `''`）
    */
-  addLocalTab(host: MountHost, label: string, spec: QuerySpec, views?: ViewConfig[], activeView?: string): string
+  /**
+   * 加一栏 **local tab**。
+   *
+   * `emptyView` 只在「没给任何视图」时决定是否补一张默认表格：
+   * 新建栏补（否则条件/范围芯片没有落点），把一次现有看法固定下来时不补
+   * （用户选的就是大纲，补一张表等于替他换了个看法）。
+   */
+  addLocalTab(
+    host: MountHost,
+    label: string,
+    spec: QuerySpec,
+    views?: ViewConfig[],
+    activeView?: string,
+    emptyView?: 'table' | 'none',
+  ): string
   /** 加一栏 **linked tab**：只存「指向哪一块 ＋ 哪张视图」，配置仍住在目标块上 */
   addLinkedTab(host: MountHost, blockId: string, view?: string, label?: string): string
   /** 摘一栏（`tabId` 是稳定 id，不是数组下标）。**不删任何块** */
@@ -278,7 +292,7 @@ export interface App {
    */
   detachMountTab(host: MountHost, tabId: string): boolean
   /** **固定派生栏**（引用/同类/提及 → local）：把现算的条件变成一栏可编辑的查询 */
-  fixDerivedTab(host: MountHost, source: 'refs' | 'same' | 'mentions'): string
+  fixDerivedTab(host: MountHost, source: 'refs' | 'same' | 'mentions', view?: DerivedViewKind): string
   /**
    * 写块的类型（`_type`）。
    *

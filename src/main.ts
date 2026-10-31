@@ -1969,6 +1969,8 @@ const { renderMounts, renderProperties, scheduleProperties, pickRefValue } = set
   layers,
   owners,
   journalMounts: () => prefs().journalMounts,
+  prefs,
+  scheduleDeviceSave: () => scheduleDeviceSave(),
   shortId,
   activeBlock,
   run,
