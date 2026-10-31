@@ -391,6 +391,14 @@ export interface App {
   setQuerySpec(owner: ViewOwnerRef, spec: QuerySpec): boolean
   /** 新建查询页／页内查询块（内容对象：能被引用、能进回收站） */
   createQuery(kind: 'page' | 'block', name: string, spec: QuerySpec, parentId?: string): string
+  /**
+   * **在这一块里建一个查询块**（`core.query/insert` 的落点）。
+   *
+   * 查询块的求值锚点是**它的容器**，所以「查这一块」只能把它建成这一块的**子块**；
+   * 这一块容不下子块（叶子／组件块）⇒ 插到它后面，锚点退化成它的父块。
+   * 结构写与「留一个可编辑空块做落点」在同一笔事务里 ⇒ 一次撤销。
+   */
+  insertQueryBlock(blockId?: string): string
   /** 改一次露面选的视图（`core.embed/set-view` 的落点） */
   setEmbedView(blockId: string, view: string): boolean
   /* 集合组件 */

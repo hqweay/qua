@@ -83,6 +83,12 @@ export interface MountAreaDeps {
   /** 「×」：摘掉一栏（`tabId` 是**稳定 id**，不是数组下标） */
   onRemoveTab?: (host: MountHost, tabId: string) => void
   /**
+   * 「⋯」：这一栏的更多动作（提升为查询块…／转为本地副本／固定为查询…／移除）。
+   *
+   * 菜单长什么样、每一项落到哪条命令，都归装配层 —— 这一层只知道「有这一颗按钮」。
+   */
+  onTabMenu?: (host: MountHost, entry: MountEntry, anchor: DOMRect) => void
+  /**
    * 这一栏非大纲时用的视图体（local／linked 栏可以有表格等看法）。
    *
    * 返回 `null` ⇒ 这一栏画大纲。由装配层造，因为「求值的上下文」与「写事务的 source」
@@ -336,6 +342,24 @@ export class MountArea {
           this.render()
         })
         wrap.appendChild(x)
+      }
+      /**
+       * 「⋯」对**三种栏都给**：local 能提升／移除，linked 能转本地／移除，
+       * derived 能固定成一条可编辑的查询。放在 × 之前 —— × 是「这一栏不要了」，
+       * 比它更危险的按钮不该更靠里。
+       */
+      if (this.deps.onTabMenu) {
+        const more = document.createElement('button')
+        more.type = 'button'
+        more.className = 'mount-more'
+        more.dataset.tab = entry.id
+        more.textContent = '⋯'
+        more.title = t('ui.mount.tabMenu')
+        more.addEventListener('click', (e) => {
+          e.stopPropagation()
+          this.deps.onTabMenu?.(hostRef, entry, more.getBoundingClientRect())
+        })
+        wrap.appendChild(more)
       }
       if (i === activeAt) wrap.dataset.active = '1'
       this.tabsEl.appendChild(wrap)

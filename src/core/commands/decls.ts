@@ -159,6 +159,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.query/set-spec', title: t('cmd.query.set-spec'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { owner: {}, spec: {} }, keywords: ['query', 'condition', 'where', 'filter'] },
   { name: 'core.query/open-builder', title: t('cmd.query.open-builder'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { owner: {} }, keywords: ['query', 'builder', 'condition', 'filter'] },
   { name: 'core.query/create', title: t('cmd.query.create'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { kind: { type: 'string', enum: ['page', 'block'] }, name: { type: 'string' }, spec: {}, parentId: { type: 'string' } }, keywords: ['query', 'page', 'new'] },
+  { name: 'core.query/insert', title: t('cmd.query.insert'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' } }, keywords: ['query', 'filter', 'insert', 'where'] },
 
   /* ---- 露面（镜像／投影：同一块在别处再出现一次） ---- */
   { name: 'core.embed/insert', title: t('cmd.embed.insert'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, targetId: { type: 'string' }, view: { type: 'string', enum: ['mirror', 'table'] } }, keywords: ['embed', 'mirror', 'reference', 'view'] },

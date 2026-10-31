@@ -180,14 +180,31 @@ export function mountCommands(
           [LISTS_PROP]: ['page'],
         }
       }
+      /**
+       * **查询块**：默认挂到**宿主块**下面，不是「当前打开的那一页」。
+       *
+       * 查询块的求值锚点是它的容器：嵌在某一页里的 local 栏提升之后，
+       * 只有仍住在宿主下，「这一块 / 这一页之下」才会指回原来那个块。
+       * 默认用 `activeId()` 会让锚点静默变成当前页 —— 结果对不上，而没有任何一层报错。
+       */
+      const hostBlockId = host.kind === 'journal' ? d.kb.journalDay(todayISO())?.id : host.blockId
+      const parent = parentId !== undefined && parentId !== '' ? parentId : hostBlockId
+      /**
+       * **插块 ＋ 把这一栏改成 linked 在同一笔事务里**：否则一次提升要按两次撤销，
+       * 而且中途失败会留下「块建好了但这一栏还指着自己」的半截状态。
+       */
       d.run((tx) => {
         if (target === 'page') tx.insert(block, null, d.kb.roots().length)
-        else tx.insert(block, parentId ?? d.activeId(), Number.MAX_SAFE_INTEGER)
+        else tx.insert(block, parent ?? null, Number.MAX_SAFE_INTEGER)
+        if (link !== false) {
+          const linked: MountEntry = { id: entry.id, kind: 'linked', block: block.id, view: entry.activeView ?? '' }
+          d.owners.writeEntriesIn(
+            tx,
+            host,
+            entriesOf(host).map((e) => (e.id === tabId ? linked : e)),
+          )
+        }
       })
-      if (link !== false) {
-        const linked: MountEntry = { id: entry.id, kind: 'linked', block: block.id, view: entry.activeView ?? '' }
-        write(host, entriesOf(host).map((e) => (e.id === tabId ? linked : e)))
-      }
       d.toast(t('ui.mount.promoted'), 'ok')
       return block.id
     },

@@ -515,6 +515,7 @@ export function setupPanels(deps: PanelsDeps) {
       // 与正文同一套事件（点引用/块标/右键菜单/`#`·`@` 补全），装配层只给这一份
       wire: (editor, change) => deps.wireEditor(editor, change, 'mount'),
       onAddTab: (id) => openMountPicker(id),
+      onTabMenu: (mountHost, entry, anchor) => openMountTabMenu(mountHost, entry, anchor),
       onRemoveTab: (mountHost, tabId) => {
         void deps.getRegistry().invoke('core.mount/remove', { host: mountHost, tabId }, 'mount')
         // 摘完当场重排：栏是模型/设备状态里的一格，DOM 不会自己知道
@@ -558,6 +559,79 @@ export function setupPanels(deps: PanelsDeps) {
     sync: () => vh.sync(),
     dispose: () => vh.dispose(),
   })
+
+  /**
+   * **一栏的「⋯」菜单**：local 能提升／移除，linked 能转本地／移除，derived 能固定成查询。
+   *
+   * 每一项都落到**已有命令**上：菜单只决定「有哪些动作」，写路径与撤销仍只有一条。
+   * 菜单是动态的（这一栏是什么种类的），所以它住装配层而不是绑定表。
+   */
+  function openMountTabMenu(mountHost: MountHost, entry: MountEntry, anchor: DOMRect): void {
+    const rows: Row[] = []
+    const derivedSource = entry.kind === 'derived' ? entry.source : null
+    if (entry.kind === 'local') {
+      rows.push({
+        id: 'mount/promote',
+        label: t('ui.mount.promoteToBlock'),
+        hint: t('ui.mount.promoteBlockHint'),
+        icon: 'lucide:list-filter',
+        group: 'mount/1-identity',
+      })
+    }
+    if (entry.kind === 'linked') {
+      rows.push({ id: 'mount/detach', label: t('ui.mount.detach'), icon: 'lucide:copy', group: 'mount/1-identity' })
+    }
+    if (entry.kind === 'derived') {
+      rows.push({
+        id: 'mount/fix',
+        label: t('ui.mount.fixDerived'),
+        hint: t('ui.mount.fixDerivedHint'),
+        icon: 'lucide:list-filter',
+        group: 'mount/1-identity',
+      })
+    }
+    if (entry.kind !== 'derived') {
+      rows.push({ id: 'mount/remove', label: t('ui.mount.remove'), icon: 'lucide:x', group: 'mount/9-remove' })
+    }
+    layers.openMenu({
+      rows,
+      anchor,
+      title: labelOfEntry(entry),
+      searchable: false,
+      onPick: (row) => {
+        const hostId = mountHost.kind === 'journal' ? '' : mountHost.blockId
+        if (row.id === 'mount/promote') {
+          void deps.getRegistry().invoke('core.mount/promote', { host: mountHost, tabId: entry.id, target: 'block' }, 'mount')
+        } else if (row.id === 'mount/remove') {
+          void deps.getRegistry().invoke('core.mount/remove', { host: mountHost, tabId: entry.id }, 'mount')
+        } else if (row.id === 'mount/detach') {
+          void deps.getRegistry().invoke('core.mount/detach', { host: mountHost, tabId: entry.id }, 'mount')
+        } else if (row.id === 'mount/fix') {
+          if (!derivedSource) return
+          const before = new Set(owners.entriesOf(mountHost).map((e) => e.id))
+          void deps.getRegistry().invoke('core.mount/fix-derived', { host: mountHost, source: derivedSource }, 'mount')
+          const added = owners.entriesOf(mountHost).find((e) => !before.has(e.id))
+          renderMounts()
+          if (added) mountInstances.get(hostId)?.area.activateTab(added.id)
+          return
+        }
+        // 栏是模型/设备状态里的一格，DOM 不会自己知道（焦点还在菜单上）
+        renderMounts()
+      },
+    })
+  }
+
+  /** 这一栏此刻的显示名（菜单标题用；与 tab 条同一份判据） */
+  function labelOfEntry(entry: MountEntry): string {
+    if (entry.kind === 'derived') {
+      return t(entry.source === 'refs' ? 'ui.mount.refs' : entry.source === 'same' ? 'ui.mount.same' : 'ui.mount.mentions')
+    }
+    if (entry.kind === 'local') return entry.label
+    if (entry.label !== undefined && entry.label.trim() !== '') return entry.label
+    const target = kb.get(entry.block)
+    const name = target ? displayNameOf(target).trim() : ''
+    return name === '' ? t('ui.mount.dangling') : name
+  }
 
   /**
    * 「＋」：**三种「新建」**，默认建 local tab（不建块）。
