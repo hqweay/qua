@@ -252,11 +252,23 @@ const NAME = { smoke: '浏览器冒烟' }
 function fastPlan(paths) {
   const hit = new Set()
   const unknown = []
+  /** 只改了 `tests/*.test.ts` ⇒ 可以只跑这几个文件，不必跑全部 713 条 */
+  const testFiles = []
+  let coreSrc = false
   for (const p of paths) {
     if (/^(docs\/|\.github\/)/.test(p) || /\.md$/.test(p) || /^(LICENSE|\.gitattributes|\.gitignore)$/.test(p)) hit.add('docs')
     else if (p.startsWith('electron/')) hit.add('electron')
-    else if (p.startsWith('tests/') || p.startsWith('src/core/')) hit.add('core')
-    else if (p.startsWith('src/') || p === 'index.html') hit.add('web')
+    else if (p.startsWith('tests/')) {
+      hit.add('core')
+      if (/\.test\.ts$/.test(p)) testFiles.push(p)
+    } else if (p.startsWith('src/core/')) {
+      hit.add('core')
+      coreSrc = true
+    } else if (p.startsWith('src/') || p === 'index.html') hit.add('web')
+    // 一个测试文件只影响它自己那一支：改一条冒烟用例不该付全套门禁的价。
+    // `scripts/harness.mjs` 被冒烟与布局共用（Electron 那套自己起壳，不用它）。
+    else if (p === 'checks/smoke.mjs' || p === 'checks/dock-smoke.mjs' || p === 'scripts/harness.mjs') hit.add('web')
+    else if (p === 'checks/electron-smoke.mjs') hit.add('electron')
     else if (p.startsWith('checks/') || p.startsWith('scripts/')) hit.add('meta')
     else if (/^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|vite\.config\.ts|tsconfig[\w.]*\.json|\.node-version|\.npmrc)$/.test(p)) hit.add('meta')
     else unknown.push(p)
@@ -265,7 +277,7 @@ function fastPlan(paths) {
   const full = unknown.length > 0 || hit.has('meta')
   const why = unknown.length ? `认不出的路径：${unknown.join('、')}` : hit.has('meta') ? '改动落在门禁／构建自身' : ''
   const areas = [...hit].map((a) => AREA[a] ?? a)
-  if (full) return assemble({ paths, areas, full, why, ...FULL })
+  if (full) return assemble({ paths, areas, full, why, testFiles: [], ...FULL })
 
   const web = hit.has('web')
   const electron = hit.has('electron')
@@ -274,6 +286,8 @@ function fastPlan(paths) {
     areas,
     full: false,
     why,
+    // 改了 `src/core/` 就不知道哪几个测试文件覆盖它 ⇒ 全跑；只改测试文件才收窄
+    testFiles: coreSrc ? [] : testFiles,
     base: hit.has('core') || web || electron ? FULL.base : [],
     // Electron 冒烟读的是 dist/index.html ⇒ 也要 build:test；但它不在 Chrome 里跑，与 view 改动互不相干
     build: [...(web || electron ? ['build:test'] : []), ...(electron ? ['build:electron'] : [])],
@@ -309,7 +323,7 @@ if (FAST) {
     }
   }
   if (paths === null) {
-    plan = assemble({ paths: [], areas: [], full: true, why: '取不到 git 改动（不是 git 仓库？）', ...FULL })
+    plan = assemble({ paths: [], areas: [], full: true, why: '取不到 git 改动（不是 git 仓库？）', testFiles: [], ...FULL })
   } else {
     plan = fastPlan(paths)
   }
@@ -317,6 +331,7 @@ if (FAST) {
   console.log(`\n${C.bold(`门禁 · ${label}`)}${plan.why ? C.dim(` —— ${plan.why}`) : ''}`)
   console.log(`  改动：${plan.paths.length ? plan.paths.join('  ') : '（无）'}`)
   console.log(`  沾到的面：${plan.areas.length ? plan.areas.join(' ／ ') : '（无）'}`)
+  if (plan.testFiles?.length) console.log(`  单测只跑：${plan.testFiles.join('  ')}`)
   if (plan.skipped.length) console.log(`  跳过：${plan.skipped.join(' · ')}`)
   if (!plan.full) console.log(`  ${C.yellow('⚠ fast 不是收工门禁 —— 跳过的那几步都可能被这次改动弄红；收工前跑 pnpm gate')}`)
 } else {
@@ -332,8 +347,26 @@ if (NO_ELECTRON) {
   buildKeys = buildKeys.filter((k) => k !== 'build:electron')
 }
 
+/**
+ * 取一步的命令。
+ *
+ * 唯一带参数的一步是 `test:core`：`--fast` 判出「只改了测试文件」时只跑那几个文件
+ *   （`pnpm test:one <文件…>`），否则跑全部 700 多条。判据在 `fastPlan()`：
+ *   动了 `src/core/` 就不知道哪几个测试覆盖它，那种情况一律全跑。
+ */
+function stepFor(key) {
+  if (key === 'test:core' && plan?.testFiles?.length) {
+    const files = plan.testFiles
+    return {
+      label: `test:core（${files.length} 个文件）`,
+      run: () => spawnStep('pnpm', ['-s', 'run', 'test:one', ...files]),
+    }
+  }
+  return { ...STEPS[key] }
+}
+
 if (PLAN_ONLY) {
-  const show = (K) => (K.length ? K.join(' · ') : '（跳过）')
+  const show = (K) => (K.length ? K.map((k) => stepFor(k).label).join(' · ') : '（跳过）')
   console.log(`  ① 静态与单测：${show(baseKeys)}`)
   console.log(`  ② 构建：${show(buildKeys)}`)
   console.log(`  ③ 冒烟 · 布局 · Electron：${show(afterKeys)}\n`)
@@ -346,17 +379,17 @@ function finish(failWhy) {
 }
 
 if (baseKeys.length) {
-  const ok = await runGroup('① 静态与单测（并发）', baseKeys.map((k) => ({ ...STEPS[k] })))
+  const ok = await runGroup('① 静态与单测（并发）', baseKeys.map(stepFor))
   if (!ok) finish('① 红了，构建与冒烟都没跑（省下的是几十秒，不是几十条断言）')
 }
 
 if (buildKeys.length) {
-  const ok = await runGroup('② 构建（并发）', buildKeys.map((k) => ({ ...STEPS[k] })))
+  const ok = await runGroup('② 构建（并发）', buildKeys.map(stepFor))
   if (!ok) finish('② 红了，没有可信产物，冒烟不跑')
 }
 
 if (afterKeys.length) {
-  const ok = await runGroup('③ 冒烟 · 布局 · Electron（并发）', afterKeys.map((k) => ({ ...STEPS[k] })), BROWSER)
+  const ok = await runGroup('③ 冒烟 · 布局 · Electron（并发）', afterKeys.map(stepFor), BROWSER)
   if (!ok) finish('见上面的 ✗')
 }
 

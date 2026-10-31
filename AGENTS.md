@@ -121,10 +121,12 @@ core ← view ← ui ← app ← host
 > **node 必须是 26.x**（`.node-version` 钉住；旧版会让 rollup 原生模块 dlopen 失败）。
 
 ```bash
-pnpm gate           # ★ 唯一门禁（全量）：静态 + 单测 + 构建 + 冒烟 + 布局 + 真 Electron
-pnpm gate:fast      # 按 git 改动跳到「碰得到的那几支」——日常小改动用它，收工仍要 gate
-pnpm gate:web       # 同 gate，但不含 Electron（CI 的 Linux job 用这个）
+pnpm gate           # ★ 收工门禁（全量）：静态 + 单测 + 构建 + 冒烟 + 布局 + 真 Electron（~190s）
+pnpm gate:fast      # 按 git 改动跳到「碰得到的那几支」，并逐条列出跳过了什么
 pnpm gate:fast --plan   # 只打「这次会跑哪些 / 跳过哪些」，不真跑
+pnpm test:one tests/x.test.ts   # 只跑这几个单测文件（~0.2s）
+QUA_SMOKE_ONLY="T187" pnpm check:smoke   # 只跑名字含这个子串的冒烟用例（~5s，要先构建）
+pnpm gate:web       # 同 gate，但不含 Electron（CI 的 Linux job 用这个）
 pnpm dev            # vite + electron 一起起（src/** 热更新；electron/*.ts 改动要重跑）
 pnpm dev:web        # 只起 vite → http://127.0.0.1:5180/
 pnpm arch:check     # 只跑架构静态断言（秒级）
@@ -137,14 +139,32 @@ pnpm build:mac      # 打包 .app
 pnpm gate:bundle    # gate ＋ 打包产物冒烟（慢，单列）
 ```
 
-**改完必须 `pnpm gate` 全绿才能算收工**（当前基线：arch **28/28** · test:core **706/706** ·
+### 2.1 三档：迭代用内环，收工只认外环
+
+| 档 | 什么时候跑 | 命令 | 实测 |
+|---|---|---|---|
+| **内环** | 每改完一处、自己还没把握 | `pnpm test:one tests/x.test.ts`<br>`QUA_SMOKE_ONLY="T187" pnpm check:smoke` | **0.2–5s** |
+| **中环** | 一个逻辑单元做完，准备进下一步 | `pnpm gate:fast`（可加 `-- <路径>`） | core／文档 ~10s；**web 改动仍 ~180s** |
+| **外环** | 提交前 / 一轮收工 / 交结果 | `pnpm gate` | **~190s** |
+
+- **收工只认外环。** 内环与中环只会少跑、不会多跑，**跳过的面不报错**——
+  它们的用途是「快点知道刚改的那一处对不对」，不是「证明没弄坏别的」。
+- **中环对 UI 改动收益有限**：它只跳掉 electron，而冒烟本身（~177s）就是瓶颈。
+  改交互时用内环的 `QUA_SMOKE_ONLY` 跑覆盖它的那几条，别指望 fast 档。
+- **越界清单（动这些就直接全量）**：种子内容（`fixtures/seed.ts`）、
+  `WORKSPACE_VERSION` / `DB_SCHEMA_VERSION`、命令表与键位表、`styles/tokens.css`、
+  `scripts/**`、一次横跨三层以上的改动。
+- **红了先收窄再全量**：内环红 = 刚改的那一处错，直接修；全量红 = 先 `--plan` 定面、
+  再 `QUA_SMOKE_ONLY` 收窄，最后才重跑全量——反了就是拿 190s 换一次定位。
+
+**收工必须 `pnpm gate` 全绿**（当前基线：arch **28/28** · test:core **706/706** ·
 浏览器冒烟 **201/201** · dock **22/22** · electron **13/13**）。
 
 - **`gate` 是编排出来的，不是一条 `&&` 链**（`scripts/gate.mjs`）：彼此独立的检查按产物依赖分三段、
   段内**并发**，冒烟那些用例**按序切片**成几片同时跑。快的来源是并发，不是少跑——断言一条没动。
 - **`gate:fast` 不是收工门禁。** 它按 `git diff` 判面（core／web／electron／文档），跳过碰不到的，
   并且**逐条列出跳过了什么**。判不出的路径一律按全量，所以它只会少跑、不会猜。
-  拿不准时看一眼 `pnpm gate:fast --plan`。
+  只改测试文件时它会收窄到「只跑那几个文件」。拿不准时看一眼 `pnpm gate:fast --plan`。
 - `build:electron` 是门禁必需的一环——少它 `check:electron` 会拿旧 `main.cjs` **假绿**（真踩过）。
 - 门禁里的浏览器步骤一律 `QUA_NO_DEV=1`：验的是**构建产物**，不去连 5180 上可能属于
   **另一棵树**的 dev server（并行车道里真踩过）。
@@ -153,7 +173,8 @@ pnpm gate:bundle    # gate ＋ 打包产物冒烟（慢，单列）
   落盘重开 / 主题只换 token / 三个降级形态不溢出 / 虚拟化 / IME 组合守卫 / 块选区 /
   空块里敲拼音（T141）/ 挂载区里 ↵ 的落点（T142）。
 - `pnpm check:electron` 的证据原文落在 `.cache/etest/electron-smoke.log`（每次跑覆盖）。
-- 单跑冒烟时 `QUA_SMOKE_SHARD=i/N` 可只跑第 i 片（分片口径落在 `check()` 里，见 `checks/smoke.mjs`）。
+- 单跑冒烟时 `QUA_SMOKE_SHARD=i/N` 可只跑第 i 片（分片口径落在 `check()` 里，见 `checks/smoke.mjs`）；
+  `QUA_SMOKE_ONLY=<名字子串>` 再叠一层，只跑覆盖这次改动的那几条。
 
 
 ### 已知的偶发失败
