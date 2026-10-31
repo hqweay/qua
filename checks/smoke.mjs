@@ -564,8 +564,19 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
   await page.waitForTimeout(250)
   assert(!(await page.evaluate(() => Boolean(document.querySelector('.drawer')))), 'Esc 关掉抽屉')
 
+  // 外点关闭的分界：**离开上下文才关**。点正文（块行/气口）＝还在与抽屉同一件事里，不关；
+  // 点别的表面（槽卡）＝明确的离开动作 ⇒ 收起。
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), b)
+  await page.waitForSelector('.props-drawer')
+  await page.locator(`.blk[data-block-id="${b}"] > .tx`).click()
+  await page.waitForTimeout(150)
+  assert(await page.evaluate(() => Boolean(document.querySelector('.drawer'))), '点正文不关（还在上下文里）')
+  await page.locator('#dock-left .dock-card[data-card-id="belongs"] .dock-card-title').click()
+  await page.waitForTimeout(250)
+  assert(!(await page.evaluate(() => Boolean(document.querySelector('.drawer')))), '点别的表面（槽卡）＝离开 ⇒ 关')
+
   await ctx.close()
-  return `页＝主体；光标 A→B 主体不变、正文不跳（top ${geoA.top}）；卡在右槽不在正文；点外侧不收起；zoom 后主体＝A 且开关一字未变（${dockBefore}）；槽关着时 zoom 不自动开、卡不可见；「看属性」开抽屉不动槽、钉在 B、toggle 可收、Esc 可关`
+  return `页＝主体；光标 A→B 主体不变、正文不跳（top ${geoA.top}）；卡在右槽不在正文；点外侧不收起；zoom 后主体＝A 且开关一字未变（${dockBefore}）；槽关着时 zoom 不自动开、卡不可见；「看属性」开抽屉不动槽、钉在 B、toggle 可收、Esc 可关、点正文不关/点槽卡关`
 })
 
 await check('T2 Enter 拆块 ／ Backspace 合并 ／ Tab 缩进 ／ Shift+Tab 还原', async () => {

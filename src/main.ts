@@ -2009,6 +2009,26 @@ document.addEventListener('mousedown', (e) => {
 })
 
 /**
+ * 抽屉的外点关闭，判据是**「离开了抽屉所属的上下文」**，不是「点在了外面」：
+ *
+ * · 点**正文上下文**（`#doc`：块行、气口、挂载区、查询视图，以及从正文点出来的
+ *   气泡/划选条/toast）＝还在与抽屉同一件事里——模糊点击也安全，不关；
+ * · 点**别的表面**（槽卡、槽头、抬头 chrome）＝明确的离开动作 ⇒ 收起。
+ *   抽屉挡着的那一侧不该靠猜心思收回，但「去了别的表面」不是猜的。
+ * · 抽屉自己与从它弹出的菜单/选择器（`.layer`）不算外面。
+ *
+ * ⚠️ 不 preventDefault／不 stopPropagation：mousedown 的其它链路（折叠、拖拽、
+ *    toggle 按钮）照常走——入口按钮在正文里，这里不关、随后的 click 才轮到 toggle。
+ */
+document.addEventListener('mousedown', (e) => {
+  const el = e.target as HTMLElement
+  if (!layers.drawerOpen()) return
+  if (el.closest?.('.drawer') || el.closest?.('.layer')) return
+  if (el.closest?.('#doc') || el.closest?.('.popover') || el.closest?.('.selbar') || el.closest?.('.toasts')) return
+  layers.closeDrawer()
+})
+
+/**
  * 行头两个入口的**唯一**委托点：`block-dom` 只写 `data-alias-action`。
  * 放在 document 上是因为别名头会随整行重渲染被换掉，绑在按钮上会绑到已经死掉的节点。
  */
