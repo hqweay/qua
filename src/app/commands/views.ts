@@ -70,13 +70,15 @@ export function viewConfigCommands(
   | 'insertQueryBlock'
 > {
   /**
-   * 换完视图要让屏幕跟上：正文的根行与段尾的视图宿主都得跟着换。
+   * 换完视图要让屏幕跟上。
    *
-   * ⚠️ **只有「这一屏就是这一块」时重装才有效**。视图宿主挂在**段根**的段尾槽里，
-   *    而一屏多根（日记流、并排页）时没有任何段根是「这一块的视图」——
-   *    于是「给今天这一行建一张表」会把配置写进模型、屏幕却一动不动（点了没生效）。
-   *    所以这里分两路：已经是单根就重装；否则**把这一块打开**（换屏到它），
-   *    让「点了」总有可见结果。
+   * 三条判据，按「谁在画这一块」分：
+   *   · **整屏唯一的根** ⇒ 装载形状变了（正文只画根行 / 恢复子树）⇒ 重装这一屏；
+   *   · **已经有表面在画它**（正文里的内联体、侧槽窗口的卡、挂载区的栏）⇒ 那台视图宿主
+   *     自己订阅了拥有者的配置，就地重画。**不换屏、不动光标**：切个看法不该把用户
+   *     正在读/写的位置换掉，更不该把这一块放大成整屏；
+   *   · **没有表面在画它**（收藏块、children 源的激活视图只在打开时才画）⇒ 把这一块打开，
+   *     否则配置写进了模型、屏幕一动不动（点了没生效）。
    */
   const reveal = (owner: ViewOwnerRef): void => {
     if (owner.kind !== 'block') {
@@ -85,8 +87,25 @@ export function viewConfigCommands(
       return
     }
     const roots = d.rootIds()
-    if (roots.length === 1 && roots[0] === owner.blockId) d.reloadPage()
-    else d.openBlock(owner.blockId)
+    if (roots.length === 1 && roots[0] === owner.blockId) {
+      d.reloadPage()
+      return
+    }
+    /**
+     * **它自己是这一屏的一个根**（日记流的一天、并排的一页）：装载形状与换屏都归中心编辑器，
+     * 而「给这一天建一张表」本来就是要看见那一屏 —— 照旧打开它。
+     */
+    if (roots.includes(owner.blockId)) {
+      d.openBlock(owner.blockId)
+      return
+    }
+    /**
+     * **它是这一屏里的一行，且已经有表面在画它的身体**（正文内联体／侧槽窗口的卡／挂载区的栏）
+     * ⇒ 那台视图宿主自己订阅了拥有者的配置，就地重画就够。
+     * **不换屏、不动光标**：切个看法不该把用户正在读/写的位置换掉，更不该把这一行放大成整屏。
+     */
+    if (d.viewShown(owner.blockId)) return
+    d.openBlock(owner.blockId)
   }
   /** 只重装，不换屏（行操作：容器本来就是这一屏的根，才可能走到这些入口） */
   const after = (): void => d.reloadPage()

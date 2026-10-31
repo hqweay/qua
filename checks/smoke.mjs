@@ -2382,6 +2382,40 @@ await check('T195 查询在正文内联渲染：不打开就在原位出结果�
   const unfolded = await foldState()
   assert(!unfolded.collapsed && !unfolded.folded, `展开后标记与身体都回来：${JSON.stringify(unfolded)}`)
 
+  /**
+   * **切看法是就地重画**：查询块是页里的一行，身体就画在这一行下面
+   * ⇒ 新建／切换视图都**不换屏、不动光标**（那一块不该被放大成整屏）。
+   */
+  const switchState = () =>
+    page.evaluate((id) => {
+      const body = document.querySelector(`.blk[data-block-id="${id}"] > .blk-view-body`)
+      return {
+        roots: window.__qua.__editor.doc.roots.map((b) => b.id),
+        caret: window.__qua.__editor.caretBlock(),
+        active: [...(body?.querySelectorAll('.qv-view-btn') ?? [])]
+          .filter((b) => b.dataset.active === '1')
+          .map((b) => b.textContent),
+        table: Boolean(body?.querySelector('.tv-rows')),
+      }
+    }, qid)
+  const pageRow = await page.evaluate(() => window.__qua.__editor.doc.roots[0]?.id ?? '')
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), pageRow)
+  await page.waitForTimeout(150)
+  const beforeSwitch = await switchState()
+  assert(beforeSwitch.caret === pageRow && beforeSwitch.roots[0] === pageRow, `前置：光标在页那一行：${JSON.stringify(beforeSwitch)}`)
+  await page.evaluate((id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'table' }), qid)
+  await page.waitForTimeout(450)
+  const added = await switchState()
+  assert(added.roots.length === 1 && added.roots[0] === pageRow, `新建视图不换屏（页还是这一屏）：${JSON.stringify(added.roots)}`)
+  assert(added.caret === pageRow, `新建视图不动光标：${JSON.stringify(added.caret)}`)
+  assert(added.active.join() === '表格' && added.table, `内联体当场换成表格：${JSON.stringify(added)}`)
+  await page.locator(`.blk[data-block-id="${qid}"] .qv-view-btn`, { hasText: '大纲' }).first().click()
+  await page.waitForTimeout(450)
+  const backToOutline = await switchState()
+  assert(backToOutline.roots[0] === pageRow, `切回大纲也不换屏：${JSON.stringify(backToOutline.roots)}`)
+  assert(backToOutline.caret === pageRow, `切回大纲不动光标：${JSON.stringify(backToOutline.caret)}`)
+  assert(backToOutline.active.join() === '大纲' && !backToOutline.table, `内联体当场换回大纲：${JSON.stringify(backToOutline)}`)
+
   // 打开它：这一块成为段根 ⇒ 段尾宿主接手，行内体必须让位（同屏只有一台）
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
   await page.waitForTimeout(500)
@@ -2478,6 +2512,41 @@ await check('T196 查询块在右槽窗口也画结果：同一台 ViewHost；�
   await page.waitForTimeout(300)
   const unfolded = await dockState()
   assert(!unfolded.folded && !unfolded.rowCollapsed && unfolded.rows.length === 1, `展开后结果还在：${JSON.stringify(unfolded)}`)
+
+  /**
+   * **右槽里切看法也是就地重画**：中心不动。
+   *
+   * 判据必须让「画它的只有这张卡」成立 —— 先把中心换到别的一块，
+   * 否则页里那台内联体也在画同一个拥有者，这条就测不出右槽那一条路。
+   */
+  const centerBefore = await page.evaluate(() => {
+    const other = window.__qua.allBlocks().find((b) => b.id !== window.__qua.snapshot().activeId && !b.props?._query)
+    if (other) window.__qua.invoke('core.block/focus-block', { blockId: other.id })
+    return {
+      roots: window.__qua.__editor.doc.roots.map((b) => b.id),
+      activeId: window.__qua.snapshot().activeId,
+    }
+  })
+  await page.waitForTimeout(500)
+  assert(centerBefore.roots.join() !== qid, `前置：中心已不是这一块（右槽才是它唯一的表面）：${JSON.stringify(centerBefore.roots)}`)
+  await page.evaluate((id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'table' }), qid)
+  await page.waitForTimeout(450)
+  const centerAfter = await page.evaluate((id) => {
+    const card = [...document.querySelectorAll('.dock-card')].find((c) => c.dataset.cardId === id)
+    return {
+      roots: window.__qua.__editor.doc.roots.map((b) => b.id),
+      activeId: window.__qua.snapshot().activeId,
+      tabs: [...(card?.querySelectorAll('.qv-view-btn') ?? [])]
+        .filter((b) => b.dataset.active === '1')
+        .map((b) => b.textContent),
+      table: Boolean(card?.querySelector('.tv-rows')),
+    }
+  }, qid)
+  assert(
+    centerAfter.roots.join() === centerBefore.roots.join() && centerAfter.activeId === centerBefore.activeId,
+    `右槽里切看法不该换屏：${JSON.stringify([centerBefore, centerAfter])}`,
+  )
+  assert(centerAfter.tabs.join() === '表格' && centerAfter.table, `右槽里当场换成表格：${JSON.stringify(centerAfter)}`)
 
   await ctx.close()
   return `右槽 ${first.rows.length} 条；折叠只藏视图体，展开后仍是同一份结果`

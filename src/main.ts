@@ -1247,6 +1247,12 @@ const app: App = {
     run: runTx,
     reloadPage: () => pageDeps.reloadPage(),
     rootIds: () => pageDeps.rootIds(),
+    /**
+     * 这一块的视图身体此刻有没有被某个表面画着（正文内联体／段尾宿主／侧槽窗口／挂载区）。
+     * 有 ⇒ 切视图是就地重画，不换屏、不动光标。
+     * ⚠️ 引用后建的 `panels`：这里只存函数，真正调用都在装配之后。
+     */
+    viewShown: (blockId) => panels?.viewShown(blockId) ?? false,
     activeId: () => ws.activeId,
     // 换屏走导航那条路（会记历史、刷标题、把光标放到新屏第一行），不另写一份装载
     openBlock: (id) => app.zoomTo(id),
@@ -1966,6 +1972,7 @@ const {
   pickRefValue,
   openPropertiesDrawer,
   mountBlockView,
+  viewShown,
 } = setupPanels({
   blocks,
   kb,
@@ -2004,6 +2011,7 @@ panels = {
   pickRefValue,
   openPropertiesDrawer,
   mountBlockView,
+  viewShown,
 }
 /**
  * **首帧要在事件表与画法都就位之后重画一次**。
