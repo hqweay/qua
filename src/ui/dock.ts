@@ -42,7 +42,7 @@ export interface DockCard {
   draggable?: boolean
   /** 没有内容：保留位置但隐藏 */
   hidden?: boolean
-  /** 给一颗「常驻」开关（重启保留 vs 只留本会话）；只有窗口卡给——家具没有这件事 */
+  /** 给一颗「常驻」开关（重启保留 vs 重启即清）；只有窗口卡给——家具没有这件事 */
   pinnable?: boolean
 }
 
@@ -301,7 +301,7 @@ function soloButton(): HTMLButtonElement {
   return btn
 }
 
-/** 常驻开关：pin 了重启保留，没 pin 只留本会话。视觉口径与关闭键一致（未 pin 低对比） */
+/** 常驻开关：pin 了重启保留，没 pin 重启即清。视觉口径与关闭键一致（未 pin 低对比） */
 function pinButton(): HTMLButtonElement {
   const btn = document.createElement('button')
   btn.type = 'button'

@@ -226,7 +226,7 @@ export function setupDocks(deps: DocksDeps) {
    * 打开会把这一侧的单卡退出——单卡是「只看一张」，加一张与它矛盾。
    *
    * pin 的缺省由**进入动作**决定（`pinDefaultFor`）：拖进来＝钉住（常驻），
-   * 打开来看＝只留本会话。组件块是家具，两种入口都常驻。
+   * 打开来看＝重启即清。组件块是家具，两种入口都常驻。
    */
   function openWindow(side: 'left' | 'right', blockId: string, action: WindowEntryAction = 'view'): void {
     if (!findInForest(deps.getWs().blocks, blockId)) return
