@@ -17,7 +17,7 @@
  */
 import { ACTIVE_VIEW_PROP, VIEWS_PROP, isDeleted, isQueryBlock, type Block, type BlockProps } from './model.ts'
 import { displayNameOf } from './alias.ts'
-import { readEmbed } from './embed.ts'
+import { OUTLINE_VIEW, readEmbed } from './embed.ts'
 import { collectionItems, isCollectionBlock } from './collection.ts'
 import { uuidv7Hex } from './ids.ts'
 import type { KbClient } from './kb/types.ts'
@@ -477,6 +477,36 @@ export function sourceOf(b: Block, find?: (id: string) => Block | undefined): So
   // 露面块自己没有 `_views`（看法住在源块上），所以这一支只在「这次露面指向谁」
   // 这件事上被用到；解析不到目标 ⇒ 一片空 children（由渲染层给一句实话）。
   return { kind: 'children', blockId: b.id }
+}
+
+/**
+ * 一次露面的身体该由**谁**来画：树（镜像）还是视图（投影）。
+ *
+ * 判据只有一条，且是从 `sourceOf` 推出来的：**身体就是源在「这一张看法」下的身体**。
+ *   · 源是 children 且这一次没选视图（源自己也没激活视图）⇒ 身体就是那棵子树
+ *     ⇒ **镜像**（一台可编辑的岛编辑器）；
+ *   · 其余（query／items 源，或选了一张视图）⇒ 身体是一张结果视图
+ *     ⇒ **投影**（`ViewHost`，与正文行内体/段尾/侧窗同一台渲染器）。
+ *
+ * ⚠️ 曾经这里有**第二套渲染器表**（镜像／大纲表格／「还没有渲染器」）：查询源的露面
+ *    两条路都画不出结果（结果不是 children）。凡是「同一件事的第二份实现」，早晚会
+ *    在某一种源上漏掉一格，而漏掉不报错。
+ * ⚠️ 这是**纯判据**：渲染层按它选画法，`visibleRowHeight` 按它算占位，两边共用一个答案。
+ */
+export type EmbedBodyKind = 'mirror' | 'view'
+
+export function embedBodyOf(host: Block, find: (id: string) => Block | undefined): EmbedBodyKind {
+  const ref = readEmbed(host)
+  const target = ref ? find(ref.block) : undefined
+  // 指针坏了／源没了：身体是一句实话（不是视图），按一行算
+  if (!ref || !target) return 'mirror'
+  const src = sourceOf(target, find)
+  // 强制大纲：children 源就是那棵树；query／items 源没有树可摊，走视图的大纲分支
+  if (ref.view === OUTLINE_VIEW) return src.kind === 'children' ? 'mirror' : 'view'
+  // 指着一张命名视图 ⇒ 一定是视图
+  if (ref.view !== '') return 'view'
+  // 跟随源：源自己激活了视图 ⇒ 视图；否则看源的种类
+  return src.kind === 'children' && activeView(target) === null ? 'mirror' : 'view'
 }
 
 /**

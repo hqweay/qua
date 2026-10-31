@@ -2552,6 +2552,130 @@ await check('T196 查询块在右槽窗口也画结果：同一台 ViewHost；�
   return `右槽 ${first.rows.length} 条；折叠只藏视图体，展开后仍是同一份结果`
 })
 
+await check('T197 露面的身体由源决定：查询块露面出结果；$self 跟着放它的地方；看法住在指针里', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await page.evaluate(() => {
+    let found = ''
+    const walk = (b) => {
+      if (b.props?._query) return b.id
+      for (const c of b.children) {
+        const r = walk(c)
+        if (r) return r
+      }
+      return null
+    }
+    for (const b of window.__qua.__editor.store.blocks) {
+      const r = walk(b)
+      if (r) {
+        found = r
+        break
+      }
+    }
+    return found
+  })
+  assert(qid, '前置：种子库里有查询块')
+
+  const projState = () =>
+    page.evaluate(() => {
+      const el = document.querySelector('.blk[data-embed="1"]')
+      const body = el?.querySelector('.blk-embed-body')
+      const view = body?.querySelector('.queryview')
+      return {
+        id: el?.dataset.blockId ?? '',
+        kind: body?.dataset.embedBody ?? '',
+        note: body?.querySelector('.embed-note')?.textContent ?? '',
+        view: Boolean(view),
+        titleHidden: view?.querySelector('.queryview-title')?.hidden ?? true,
+        title: view?.querySelector('.queryview-title')?.textContent ?? '',
+        count: view?.querySelector('.queryview-count')?.textContent ?? '',
+        tabs: [...(view?.querySelectorAll('.qv-view-btn') ?? [])].map((b) => b.textContent),
+        chips: view?.querySelector('.queryview-filters')?.hidden ?? null,
+        rows: [...(view?.querySelectorAll('.queryview-editor .blk .tx') ?? [])].map((e) => e.textContent),
+        table: Boolean(body?.querySelector('.tv-rows')),
+        height: body ? getComputedStyle(body).height : '',
+      }
+    })
+  const activeViewOf = (pid) =>
+    page.evaluate((id) => {
+      const find = (l) => {
+        for (const x of l) {
+          if (x.id === id) return x
+          const r = find(x.children ?? [])
+          if (r) return r
+        }
+        return null
+      }
+      return find(window.__qua.__editor.store.blocks)?.props?._activeView ?? ''
+    }, pid)
+
+  // ① 在源所在的页里露面它：身体是**投影** —— 有结果、有名字、只有一颗「看法」
+  await page.evaluate((id) => {
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    const first = window.__qua.__editor.doc.roots[0]
+    window.__qua.invoke('core.embed/insert', { blockId: first.id, targetId: id, view: 'mirror' })
+  }, qid)
+  await page.waitForTimeout(450)
+  const a = await projState()
+  assert(a.view && a.kind === 'view', `查询块露面 ⇒ 身体是投影（不再是一行空壳）：${JSON.stringify({ view: a.view, kind: a.kind })}`)
+  assert(a.note === '', `不再说「这个看法还没有渲染器」：${JSON.stringify(a.note)}`)
+  assert(a.titleHidden === false && a.title !== '', `投影抬头写名字（露面行没有第二个名字可看）：${JSON.stringify(a)}`)
+  assert(a.count.includes('1'), `锚在源所在的页 ⇒ ${a.count}`)
+  assert(a.tabs.join() === '看法', `投影只有一颗「看法」，不是 tab 条（tab 会写源、连坐所有跟随者）：${JSON.stringify(a.tabs)}`)
+  assert(a.chips === true, `投影不画条件条（那一行占一扇 168px 的窗太贵，条件属于源块）：${JSON.stringify(a.chips)}`)
+  assert(a.height.includes('168'), `投影高度由 VIEW_BODY_H 声明（视觉与虚拟化同一个数）：${a.height}`)
+
+  // ② 跟随源：源建一张表格并激活 ⇒ 露面当场跟着换（同一台 ViewHost 自己订阅）
+  await page.evaluate((id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'table' }), qid)
+  await page.waitForTimeout(450)
+  const b = await projState()
+  assert(b.table, `跟随源：源激活表格后这一处也成了表格：${JSON.stringify(b)}`)
+  const pinned = await activeViewOf(qid)
+  assert(pinned !== '', `推给露面看一根指针之前，源要先有一张激活视图：${pinned}`)
+
+  // ③ 把这一处**钉**在大纲：源仍是表格，这一处回命中大纲 —— 一次选择写的是指针
+  await page.evaluate((eid) => window.__qua.invoke('core.embed/set-view', { blockId: eid, view: 'outline' }), a.id)
+  await page.waitForTimeout(450)
+  const c = await projState()
+  assert(c.rows.length === 1 && !c.table, `钉大纲：这一处回命中大纲，源自己仍是表格：${JSON.stringify({ rows: c.rows.length, table: c.table })}`)
+  assert((await activeViewOf(qid)) !== '', `钉一次不写源：源的 _activeView 仍是 ${await activeViewOf(qid)}`)
+
+  // ④ 回到跟随：表格回来（同一条入口的三格里第三格，「跟随」与「钉」是两个意图）
+  await page.evaluate((eid) => window.__qua.invoke('core.embed/set-view', { blockId: eid, view: '' }), a.id)
+  await page.waitForTimeout(450)
+  const d = await projState()
+  assert(d.table, `跟随态与钉态是两回事：这一处回到跟随（源现在是表格）：${JSON.stringify({ table: d.table })}`)
+
+  // ⑤ 同一个查询露面到**另一页**：$self 跟着放它的地方走
+  await page.evaluate((id) => {
+    // 种子 id 每次随机 ⇒ 按**页名**找，不写死 id
+    const p2 = window.__qua.pages().find((x) => (x.title ?? '') === '输入面笔记')
+    window.__qua.invoke('core.page/open', { pageId: p2.id })
+    const first = window.__qua.__editor.doc.roots[0]
+    window.__qua.invoke('core.embed/insert', { blockId: first.id, targetId: id, view: 'mirror' })
+  }, qid)
+  await page.waitForTimeout(500)
+  const e = await projState()
+  assert(e.count.includes('0'), `换个地方放：$self 解析到那一页（那一页没有待办）：${e.count}`)
+
+  // ⑥ 回到源页：查询块自己的结果没变（锚点不跟露面走，是露面自己带上下文）
+  await page.evaluate((id) => {
+    const p1 = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p1.id })
+    window.__qua.__editor.reveal(id)
+  }, qid)
+  await page.waitForTimeout(500)
+  const inline = await page.evaluate((id) => {
+    const view = document.querySelector(`.blk[data-block-id="${id}"] .blk-view-body .queryview`)
+    return view?.querySelector('.queryview-count')?.textContent ?? ''
+  }, qid)
+  assert(inline.includes('1'), `源自己那一屏还是 ${inline}（上下文是表面的，不是查询的）`)
+
+  await ctx.close()
+  return `投影出结果；指针三态（跟随/钉大纲/跟随）；$self 跟着放它的地方`
+})
+
 await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器改主名 ⇒ chip 跟着变；删除 ⇒ dangling', async () => {
   const { ctx, page } = await freshPage(browser, base)
   // 打开「产品设计 · 决策日志」：seed 里那一页有指向别处的 `[[..]]`
@@ -13479,7 +13603,7 @@ const listState = (page) =>
     const rows = [...document.querySelectorAll('.lt-row')]
     const headRow = rows.find((r) => r.classList.contains('lt-row--head')) ?? null
     return {
-      caption: document.querySelector('.lt-caption')?.textContent ?? '',
+      captionEl: document.querySelector('.lt-caption') === null ? 'none' : 'exists',
       cols: lt ? getComputedStyle(lt).getPropertyValue('--lt-cols').trim() : '',
       head: headRow ? cellsOf(headRow) : [],
       headWeight: headRow ? getComputedStyle(headRow).fontWeight : '',
@@ -13547,7 +13671,7 @@ await check('T160 大纲表格：表头＝容器的直接子块、一列＝它�
     `表头就是一级子块、顺序＝children 顺序：${JSON.stringify(st.head.map((c) => c.block))} vs ${JSON.stringify(model.children)}`,
   )
   // 整屏打开时容器就是这一屏的根：页面标题已经写着它 ⇒ 不再重复一句表标题
-  assert(st.caption === '', `整屏不画重复的表标题：${st.caption}`)
+  assert(st.captionEl === 'none', `整屏不画重复的表标题（那一格根本没有 caption）：${st.captionEl}`)
   assert(st.cols.startsWith(`repeat(${cols}`), `列数写在同一个变量里（与平表同一条约束）：${st.cols}`)
   const height = Math.max(...model.rows.map((r) => r.kids.length))
   assert(st.rows.length === height, `行数＝最长的一列（${height}）：${st.rows.length}`)
@@ -13849,7 +13973,6 @@ const embedState = (page) =>
         text: x.querySelector('.tx')?.textContent ?? '',
       })),
       note: body?.querySelector('.embed-note')?.textContent ?? '',
-      tableCaption: body?.querySelector('.lt-caption')?.textContent ?? '',
       tableHeads: body?.querySelectorAll('.lt-cell--head').length ?? 0,
       tableRows: body?.querySelectorAll('.lt-row:not(.lt-row--head)').length ?? 0,
       nestedMirrors: body?.querySelectorAll('.embed-mirror').length ?? 0,
@@ -13936,8 +14059,14 @@ await check('T166 投影：同一块在这里看成大纲表格（表头＝源�
   await page.waitForTimeout(450)
   const st = await embedState(page)
   assert(st.tableHeads === 2, `表头＝源的直接子块（2 列）：${st.tableHeads}`)
-  // 嵌入是一行里的投影：源的名字在屏幕上没有第二处 ⇒ 表标题要有（与整屏那条相反）
-  assert(st.tableCaption === '源', `嵌入时画表标题（说明这是哪棵树）：${JSON.stringify(st.tableCaption)}`)
+  // 嵌入是一行里的投影：源的名字在屏幕上没有第二处 ⇒ 抬头要写名字（与整屏那条相反
+  // —— 段根的表不写名字，因为那一行自己就是它）。名字现在走 viewhost 的抬头这一格。
+  const title = await page.evaluate(() => {
+    const el = document.querySelector('.blk[data-embed="1"]')
+    const view = el?.querySelector('.blk-embed-body .queryview')
+    return { hidden: view?.querySelector('.queryview-title')?.hidden ?? true, text: view?.querySelector('.queryview-title')?.textContent ?? '' }
+  })
+  assert(title.hidden === false && title.text === '源', `投影抬头写源的名字（说明这是哪棵树）：${JSON.stringify(title)}`)
   assert(st.tableRows === 0, `源的两个直接子块没有孩子 ⇒ 表头下没有内容行：${st.tableRows}`)
   /**
    * **看法住在源块上，露面只存一次选择**（v29）。

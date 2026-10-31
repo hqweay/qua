@@ -1,5 +1,10 @@
 /**
- * **露面块的身体**：镜像（一台嵌套编辑器）或投影（源块上那张命名视图的渲染器）。
+ * **露面块的身体**：源块在「这一张看法」下的身体。
+ *
+ * 判据不在这里 —— 它是 `core/view.ts` 的 `embedBodyOf`（纯函数，纯模型）：
+ *   · 源是 children 且这一次没选视图 ⇒ **镜像**：一台可编辑的岛编辑器（那棵子树）；
+ *   · 其余（query／items 源，或选了一张视图）⇒ **投影**：一台 `ViewHost`，
+ *     与正文行内体、段尾宿主、侧槽窗口**同一台渲染器**。
  *
  * 为什么身体必须是一个**编辑岛**：同一个块可能在同一屏出现两次（源在正文原位、
  * 这里又露面一次）。岛根把焦点与重排切成两个世界——外层编辑器不抢里层光标，
@@ -14,51 +19,52 @@
  * 列与排序。要共享就都指向源块；要「这一次特别一点」就在源块上建一张命名视图并指向它 ——
  * 两种需求都有出口，且只存在一份配置。
  *
- * 深度 1 由构造固定：镜像里那台编辑器带 `embedBodies: false`，里面的露面块只画占位。
- * 这不是「用 visited 集合拦」——递归渲染的结果不能依赖遍历顺序。
+ * ## 为什么这里**不该**有自己的渲染器表
+ *
+ * 曾经这里按「镜像／大纲表格／其它 ⇒ 还没有渲染器」分三路。三路里没有一格是「源是查询」：
+ * 查询的命中不是 children，于是查询块的露面要么画出一行空壳、要么说「还没有渲染器」——
+ * 而渲染器明明有。判据一旦落在这层，加一种源或一种 kind 就要在两处各改一次。
+ *
+ * 深度 1 由构造固定：镜像里那台编辑器带 `embedBodies: false`，投影那台 `ViewHost`
+ * 的内层编辑器不带 `viewBody` —— 里面的露面/查询块只画占位，不递归。
  */
 import {
+  embedBodyOf,
   isDeleted,
   resolveEmbed,
-  resolveBoundView,
-  readViewSet,
   type Block,
   type BlockStore,
-  type ViewConfig,
-  type ViewOwnerStore,
 } from '../core/index.ts'
-import type { KbClient } from '../core/kb/types.ts'
 import type { Tx } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import type { BlockEditor } from '../view/editor.ts'
-import { BlockCell, type AtomHit, type CellClickMods, type RefHit } from './block-cell.ts'
 import { EditableBlock } from './editable-block.ts'
-import { ViewListTable } from './view-list-table.ts'
 
 export interface EmbedBodyDeps {
   store: BlockStore
-  kb: KbClient
   /** 命令层的事务入口（撤销快照与重画归装配层） */
   run: <R>(fn: (tx: Tx) => R) => R
-  /** 视图配置的唯一接缝：这一层不摸 `props._views`，只问「这次露面选了哪张视图」 */
-  owners: ViewOwnerStore
   wire: (ed: BlockEditor, change: (kind: string) => void) => void
   onFocus: (ed: BlockEditor) => void
   onChange: (kind: string) => void
-  project: (block: Block, into: HTMLElement) => void
-  refClick: (hit: RefHit, el: HTMLElement, mods: CellClickMods) => void
-  onAtomClick?: (atom: AtomHit, el: HTMLElement, mods: CellClickMods) => void
-  openBlock: (blockId: string) => void
+  /**
+   * 画**投影**：由装配层给一台 `ViewHost`（`surface: 'embed'`，绑定点是这一次露面）。
+   * 这一层不认识视图配置，也不该认识 —— 认识一次就会长出第二份判据。
+   */
+  mountView: (host: Block, target: Block, into: HTMLElement) => () => void
+  /** 重画某一**行**：判据翻转（镜像 ⇄ 投影）时用 */
+  repaint: (blockId: string) => void
+  /** 命令面（只说「移除这次露面」） */
   invoke: (name: string, args: Record<string, unknown>, via?: string) => void
-  toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
 /**
  * 给一个露面块装身体。返回卸载函数——**换 DOM 之前必须调用**（里层是另一台编辑器／
- * 一张订阅 store 的表；不卸载就会每次重排留一份订阅）。
+ * 一张订阅 store 的视图；不卸载就会每次重排留一份订阅）。
  */
 export function mountEmbedBody(host: Block, into: HTMLElement, deps: EmbedBodyDeps): () => void {
-  const res = resolveEmbed(host, (id) => deps.store.find(id))
+  const find = (id: string): Block | undefined => deps.store.find(id)
+  const res = resolveEmbed(host, find)
   if (res.status !== 'ok') {
     into.dataset.embedState = res.status
     into.appendChild(noteEl(res.status))
@@ -75,29 +81,26 @@ export function mountEmbedBody(host: Block, into: HTMLElement, deps: EmbedBodyDe
     return () => {}
   }
 
-  /**
-   * 这一次露面选的那张视图：经绑定解析（`''` 跟随源、`'outline'` 强制大纲、其余是视图 id）。
-   *
-   * ⚠️ 目标那张视图没了 ⇒ **退回源块的默认看法并说一句实话**，不猜、也不偷偷改指针：
-   *    指针没坏（源还在），坏的只是那一张视图。
-   */
-  const binding = deps.owners.readBinding({ kind: 'embed', blockId: host.id })
-  const data = binding ? deps.owners.read(binding.owner) : null
-  const picked = binding && data ? resolveBoundView(binding, data) : { view: null, degraded: false }
-  const view: ViewConfig | null = picked.view ?? (data ? readViewSet(data).active : null)
-  if (picked.degraded) deps.toast?.(t('ui.mount.viewGone'), 'warn')
+  const kind = embedBodyOf(host, find)
+  const body = kind === 'view' ? deps.mountView(host, target, into) : mountMirror(target, into, deps)
 
-  if (view && view.kind === 'list-table') return mountTable(target, view, into, deps)
-  if (view) {
-    // 别的看法（看板／画廊…）还没有渲染器：说清楚，不假装它是大纲
-    into.dataset.embedState = 'norenderer'
-    const note = document.createElement('div')
-    note.className = 'embed-note'
-    note.textContent = t('ui.embed.noRenderer')
-    into.appendChild(note)
-    return () => {}
+  /**
+   * **判据会翻**：`_embed.view === ''` 是「跟随源」，源自己换到某张视图之后，
+   * 这一处的身体要从树变成视图（源撤掉激活视图则反过来）。
+   *
+   * 指针自己的变化不需要这里管：写 `_embed` 会按块重画这一行。
+   * 但**源的变化不会重画露面那一行** —— 于是「跟随源」这句承诺只在重开之后才成立。
+   */
+  const off = deps.store.subscribe((_source, ids) => {
+    if (ids && ids.length > 0 && !ids.includes(target.id)) return
+    const now = deps.store.find(host.id)
+    if (!now) return
+    if (embedBodyOf(now, find) !== kind) deps.repaint(host.id)
+  })
+  return () => {
+    off()
+    body()
   }
-  return mountMirror(target, into, deps)
 }
 
 function noteEl(status: 'self' | 'dangling' | 'broken'): HTMLElement {
@@ -146,45 +149,5 @@ function mountMirror(target: Block, into: HTMLElement, deps: EmbedBodyDeps): () 
   return () => {
     island.dispose()
     island.root.remove()
-  }
-}
-
-/** 大纲表格：表头＝源的直接子块、一列＝那个子块的孩子（与整屏那张表同一个渲染器） */
-function mountTable(target: Block, view: ViewConfig, into: HTMLElement, deps: EmbedBodyDeps): () => void {
-  const cell = new BlockCell({
-    store: deps.store,
-    write: (fn) => deps.run(fn),
-    wire: deps.wire,
-    onFocus: deps.onFocus,
-    onChange: deps.onChange,
-    project: deps.project,
-    refClick: deps.refClick,
-    ...(deps.onAtomClick ? { onAtomClick: deps.onAtomClick } : {}),
-    openBlock: deps.openBlock,
-  })
-  const table = new ViewListTable({
-    store: deps.store,
-    // 表的「容器」是**源**：表头是它的直接子块（露面块自己只是宿主）
-    host: () => target,
-    view: () => view,
-    kb: deps.kb,
-    cell,
-    // 嵌入是一行里的投影：源的名字在屏幕上没有第二处 ⇒ 用表标题说清楚它是哪棵树
-    showCaption: true,
-    openBlock: deps.openBlock,
-    insertItem: (columnId) =>
-      deps.invoke('core.view/new-row', { owner: { kind: 'block', blockId: target.id }, blockId: columnId }, 'embed'),
-    deleteBlock: (id) => deps.invoke('core.view/delete-row', { rowId: id }, 'embed'),
-  })
-  into.appendChild(table.root)
-  table.render()
-  // 表的成员是活的：源里增删一块，这里跟着变（按 id 局部修补，不整表重搭）
-  const off = deps.store.subscribe((_source, ids) => {
-    table.render(ids)
-  })
-  return () => {
-    off()
-    table.dispose()
-    cell.dispose()
   }
 }

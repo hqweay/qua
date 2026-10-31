@@ -336,14 +336,6 @@
   --lt-cols: repeat(1, minmax(160px, 1fr));
   margin-top: var(--ui-gap-2);
 }
-.lt-caption {
-  padding: var(--ui-gap-2) 0;
-  font-weight: var(--ui-fw-medium);
-  color: var(--ui-text);
-}
-.lt-caption[data-empty-title='1'] {
-  color: var(--ui-text-tertiary);
-}
 .lt-scroll {
   overflow: auto;
   /* 表自己滚：长表不把整页拉长，横向滚动也只发生在表里 */

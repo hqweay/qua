@@ -512,6 +512,20 @@ export function setupPanels(deps: PanelsDeps) {
   })
 
   /**
+   * **露面（投影）的上下文**：锚在**露面块所在的容器**，结果里剔除露面块自己与源块。
+   *
+   * 与「这一块自己」和「挂载栏的宿主」都不同，理由只有一条：露面的位置是**这一次露面**
+   * 给的 —— 同一个查询块投影到另一页，「本页的待办」就该是那一页的待办（这也是
+   * 「把查询块当模板用」的全部实现）。剔除露面块自己是为了不让投影出现在自己的结果里。
+   *
+   * ⚠️ 镜像（children 源）不走这里：那棵子树没有 `$self` 可言。
+   */
+  const embedContextFor = (hostId: string, targetId: string): QueryContext => {
+    const container = kb.parentOf(hostId)
+    return { selfId: container?.id, scopeId: container?.id, excludeIds: [hostId, targetId] }
+  }
+
+  /**
    * **这一段要不要建视图宿主**。
    *
    * 判据（`isViewRoot`）：查询块／收藏块／激活了某张视图的块。
@@ -555,7 +569,11 @@ export function setupPanels(deps: PanelsDeps) {
        *     「这一块之下」就是那一页之下；顶层没有容器 ⇒ 不设锚点（整库）。
        */
       context:
-        owner.kind === 'tab' || binding ? tabContextFor(host, ownerBlock?.id) : contextFor(ownerBlock?.id ?? hostId),
+        binding?.kind === 'embed'
+          ? embedContextFor(binding.blockId, hostId)
+          : owner.kind === 'tab' || binding
+            ? tabContextFor(host, ownerBlock?.id)
+            : contextFor(ownerBlock?.id ?? hostId),
       surface: opts?.surface ?? (owner.kind === 'tab' || binding ? 'mount' : 'center'),
       onChange: () => {
         syncSections()
@@ -617,6 +635,34 @@ export function setupPanels(deps: PanelsDeps) {
     surface: 'inline' | 'dock',
   ): ViewHost {
     const vh = createView({ kind: 'block', blockId: block.id }, block, undefined, undefined, { surface, source })
+    into.appendChild(vh.root)
+    vh.mount()
+    return vh
+  }
+
+  /**
+   * **把一个块的结果视图挂成「一次露面的身体」**（`surface: 'embed'`）。
+   *
+   * 与行内体同一台 `ViewHost`、同一份 deps；差在**绑定点**：这一次露面只存
+   * 「指向谁 ＋ 选了哪张看法」（`_embed`），所以拥有者仍是源块、配置仍住源块，
+   * 这一层只是把「这一次的选择」作为 binding 传进去（`resolveBoundView` 解它）。
+   *
+   * ⚠️ 上下文按**露面块**算（`embedContextFor`），不按源块：投影的 `$self`
+   *    是「放它的地方」。这是「露面」与「镜像」在语义上唯一的分界。
+   */
+  function mountEmbedView(
+    host: Block,
+    target: Block,
+    into: HTMLElement,
+    source: () => BlockEditor | undefined,
+  ): ViewHost {
+    const vh = createView(
+      { kind: 'block', blockId: target.id },
+      target,
+      { kind: 'embed', blockId: host.id },
+      undefined,
+      { surface: 'embed', source },
+    )
     into.appendChild(vh.root)
     vh.mount()
     return vh
@@ -1018,6 +1064,7 @@ export function setupPanels(deps: PanelsDeps) {
     pickRefValue,
     openPropertiesDrawer,
     mountBlockView,
+    mountEmbedView,
     viewShown,
   }
 }

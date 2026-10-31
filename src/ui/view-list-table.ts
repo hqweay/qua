@@ -19,7 +19,6 @@
  * 是「一张人读得完的表」；真到几千行时该补的是按父 id 失效的结构缓存，而不是把窗口化硬套上来。
  */
 import {
-  displayNameOf,
   listTableOf,
   sortListRows,
   type Block,
@@ -46,21 +45,12 @@ export interface ViewListTableDeps {
   insertItem: (columnId: string) => void
   /** 删除一列／一项＝软删那一块（可恢复；命令是 `core.view/delete-row`） */
   deleteBlock: (blockId: string) => void
-  /**
-   * 要不要画表标题（＝容器名）。
-   *
-   * 判据是「这个名字是不是已经在上面一行了」，而这件事**只有挂载点知道**：
-   * 整屏的视图宿主挂在段尾，容器就是这一屏的根（页面标题已经写着它）⇒ 不画；
-   * 嵌入是一行里的投影，源的名字在屏幕上没有第二处 ⇒ 画。
-   */
-  showCaption?: boolean
 }
 
 const CELLS_MIN = 160
 
 export class ViewListTable {
   readonly root: HTMLElement
-  private readonly caption: HTMLElement
   private readonly scroll: HTMLElement
   private readonly grid: HTMLElement
   private readonly deps: ViewListTableDeps
@@ -77,15 +67,12 @@ export class ViewListTable {
     this.deps = deps
     this.root = document.createElement('div')
     this.root.className = 'lt'
-    this.caption = document.createElement('div')
-    this.caption.className = 'lt-caption'
     this.scroll = document.createElement('div')
     this.scroll.className = 'lt-scroll'
     this.grid = document.createElement('div')
     this.grid.className = 'lt-grid'
     this.scroll.appendChild(this.grid)
-    if (deps.showCaption === false) this.root.append(this.scroll)
-    else this.root.append(this.caption, this.scroll)
+    this.root.append(this.scroll)
   }
 
   dispose(): void {
@@ -102,14 +89,12 @@ export class ViewListTable {
   render(ids?: readonly string[]): void {
     const table = listTableOf(this.deps.host().id, this.deps.kb)
     const rows = sortListRows(table.rows, this.deps.view().listTable?.sort)
-    const title = table.root ? displayNameOf(table.root).trim() : ''
     // 展开集只留还在表里的项：块被删/搬走之后，那一格不再是「同一格」
     const live = new Set<string>()
     for (const r of rows) for (const c of r.cells) if (c) live.add(c.block.id)
     for (const id of [...this.expanded]) if (!live.has(id)) this.expanded.delete(id)
 
     const shape = JSON.stringify({
-      title: this.deps.showCaption === false ? '' : title,
       columns: table.columns.map((c) => c.id),
       rows: rows.map((r) => r.cells.map((c) => c?.block.id ?? '')),
       expanded: [...this.expanded],
@@ -118,7 +103,7 @@ export class ViewListTable {
     this.columns = table.columns
     if (shape !== this.shape) {
       this.shape = shape
-      this.buildAll(title)
+      this.buildAll()
       return
     }
     if (ids && ids.length > 0) this.patch(ids)
@@ -127,11 +112,9 @@ export class ViewListTable {
 
   /* ---------------------------------------------------------- 搭 */
 
-  private buildAll(title: string): void {
+  private buildAll(): void {
     this.bodies.clear()
     this.root.dataset.empty = this.columns.length === 0 ? '1' : '0'
-    this.caption.textContent = title === '' ? t('ui.page.untitled') : title
-    this.caption.dataset.emptyTitle = title === '' ? '1' : '0'
     this.root.style.setProperty(
       '--lt-cols',
       `repeat(${Math.max(1, this.columns.length)}, minmax(${CELLS_MIN}px, 1fr))`,

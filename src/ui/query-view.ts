@@ -531,6 +531,15 @@ export class ViewHost {
       this.warned = true
       this.deps.toast?.(t('ui.view.broken'), 'warn')
     }
+    /**
+     * **这一次露面指的那张视图没了**：退回源的默认看法，但要说一句实话 ——
+     * 静默退回等于「我选的表格怎么变成大纲了」，而用户没有任何线索能找回那次选择。
+     * （linked 栏走同一条路：它也是一根指针。）
+     */
+    if (this.warned === false && this.bound.degraded) {
+      this.warned = true
+      this.deps.toast?.(t('ui.mount.viewGone'), 'warn')
+    }
     // 查询源：条件/上下文变了就重算冻结结果（不写块、不进撤销）
     // 派生栏是**只读关系视图**：不冻结、不标 stale —— 它每次都是现算的
     if (!this.deps.derived && this.source.kind === 'query') this.ensureFrozen()
@@ -627,8 +636,15 @@ export class ViewHost {
      * children/items 源的根行就在上面，抬头再写一遍同一句就是重复。
      * **内联体也不写名字**：查询块那一行已经显示过它 —— 同一句话同屏两遍是噪声。
      */
-    this.els.title.hidden = !query || this.deps.surface === 'inline' || this.deps.surface === 'dock'
-    this.els.title.textContent = query ? (name === '' ? t('ui.query.untitled') : name) : ''
+    /**
+     * **露面（投影）总是写名字**：那一行自己的正文槽是空的（露面块不写正文），
+     * 名字没有第二处可显示 —— 不写的话这张表/这份结果就没有抬头。
+     * 内联体与侧窗不写：那一行上已经有块名了（同一句话同屏两遍是噪声）。
+     */
+    const embed = this.deps.surface === 'embed'
+    this.els.title.hidden = embed ? false : !query || this.deps.surface === 'inline' || this.deps.surface === 'dock'
+    this.els.title.textContent =
+      embed || query ? (name === '' ? t('ui.query.untitled') : name) : ''
     const n = this.rowCount()
     this.els.count.textContent = query ? t('ui.query.count', { count: n }) : t('ui.view.count', { count: n })
     // 大纲折叠的次要文案由 `render()` 现算（它才知道这一屏画了几行）；其余分支没有折叠
@@ -660,6 +676,14 @@ export class ViewHost {
   private paintFilters(b: Block): void {
     const box = this.els.filters
     box.replaceChildren()
+    /**
+     * **投影不画条件条**：它是一扇 168px 高的窗，条件那一条要占掉一整行；而条件属于源块
+     * （点开构建器改的是所有人的查询）—— 一扇窗里给出一个「改所有人」的入口太远。
+     */
+    if (this.deps.surface === 'embed') {
+      box.hidden = true
+      return
+    }
     /**
      * 派生栏的「条件」是**只读说明**：它不是用户配的条件，也没有可编辑的落点
      * （点开构建器只会得到一份不属于它的条件）。所以要留下一句话，但不做成按钮。
@@ -716,6 +740,33 @@ export class ViewHost {
     // 派生栏的看法切换器在挂载区抬头（这一层没有拥有者，不该画「＋新建视图」）
     if (this.deps.derived) {
       box.hidden = true
+      return
+    }
+    /**
+     * **露面（投影）只有一颗「看法」**，不是一排 tab。三条理由都在「tab 在这里必然错一半」：
+     *   · tab 写的是**拥有者**（源块）的 `_activeView`（见 `writeOwner`），而这一次露面
+     *     可能正钉在另一张视图上 ⇒ 点了没生效；
+     *   · 就算没钉住，点一下也会连带改掉源的默认看法与所有「跟随」的露面 ——
+     *     一扇窗不该有这么大的杀伤半径；
+     *   · `_embed.view` 是**三格**（跟随源／固定大纲／某张命名视图），tab 条只能表达「一组」。
+     * 所以这里只给入口，三格由 `core.view/menu` 在露面块上翻成 `_embed` 的菜单。
+     */
+    if (this.deps.surface === 'embed') {
+      const embedId = this.deps.binding?.kind === 'embed' ? this.deps.binding.blockId : ''
+      if (embedId === '') {
+        box.hidden = true
+        return
+      }
+      box.hidden = false
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'qv-view-btn'
+      btn.textContent = t('ui.embed.viewChoice')
+      btn.title = t('ui.embed.viewChoiceHint')
+      btn.addEventListener('click', () =>
+        this.deps.invoke('core.view/menu', { owner: { kind: 'block', blockId: embedId } }),
+      )
+      box.appendChild(btn)
       return
     }
     const src = this.source
@@ -951,8 +1002,6 @@ export class ViewHost {
           view: () => this.view ?? view,
           kb: this.deps.kb,
           cell: this.cell,
-          // 段尾宿主：容器就是这一屏的根，页面标题已经在上面写着它 ⇒ 不再重复一句表标题
-          showCaption: false,
           openBlock: (id) => this.deps.openBlock(id),
           // 「加一项」就是往那一列（表头块）末尾插一个子块：与大纲里 ↵＋Tab 同一条写路径
           insertItem: (columnId) => this.deps.invoke('core.view/new-row', { owner: this.writeOwner, blockId: columnId }),
