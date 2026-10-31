@@ -52,6 +52,8 @@ function depsOf(blocks: Block[]): {
     run: <R,>(fn: (tx: Tx) => R) => kb.tx(fn),
     reloadPage: () => {},
     rootIds: () => [],
+    // 没有表面在画它（这一层不碰 DOM）⇒ 切视图之后按「打开它」那条路走，这里是空操作
+    viewShown: () => false,
     activeId: () => 'root',
     openBlock: () => {},
     refreshList: () => {},
@@ -95,6 +97,68 @@ test('addView(board)：有分组字段时照常建，并把分组列写进配置
   )
 })
 
+/* ------------------------------------------------------------ 切看法之后「要不要换屏」 */
+
+/**
+ * 切完看法「屏幕怎么跟上」的判据（`reveal`）。
+ *
+ * 这条判据两头都能静默失效：一头是把用户正在读的那一屏换成「整屏只有这一块」
+ * （还顺手把光标放进那一块）；另一头是什么都不做（点了没生效）。两条都不报错，
+ * 所以用注入的两个空操作把「它到底走了哪条路」钉住。
+ */
+function revealDeps(opts: { roots: readonly string[]; shown: boolean }): { d: ViewConfigDeps; calls: string[] } {
+  const page = mkBlock('页')
+  page.id = 'page'
+  const q = mkBlock('')
+  q.id = 'q'
+  q.props = { _query: { where: { any: [] } } }
+  page.children = [q]
+  const { kb } = kbOf([page])
+  const { owners } = fakeOwners()
+  const calls: string[] = []
+  const d: ViewConfigDeps = {
+    kb,
+    owners,
+    run: <R,>(fn: (tx: Tx) => R) => kb.tx(fn),
+    reloadPage: () => calls.push('reload'),
+    rootIds: () => opts.roots,
+    viewShown: () => opts.shown,
+    activeId: () => 'page',
+    openBlock: (id) => calls.push(`open:${id}`),
+    refreshList: () => {},
+    toast: () => {},
+  }
+  return { d, calls }
+}
+
+test('setActiveView：身体已经被某个表面画着 ⇒ 就地重画，不换屏、不动光标', () => {
+  const { d, calls } = revealDeps({ roots: ['page'], shown: true })
+  const app = viewConfigCommands(d)
+  assert.equal(app.setActiveView({ kind: 'block', blockId: 'q' }, ''), true)
+  assert.deepEqual(calls, [], `有表面在画它就不该换屏／打开：${JSON.stringify(calls)}`)
+})
+
+test('setActiveView：没有表面在画它 ⇒ 打开它（不打开就永远看不到结果）', () => {
+  const { d, calls } = revealDeps({ roots: ['page'], shown: false })
+  const app = viewConfigCommands(d)
+  assert.equal(app.setActiveView({ kind: 'block', blockId: 'q' }, ''), true)
+  assert.deepEqual(calls, ['open:q'], `没有表面在画它 ⇒ 打开它：${JSON.stringify(calls)}`)
+})
+
+test('setActiveView：它是整屏唯一的根 ⇒ 重装这一屏（正文只画根行 ⇄ 恢复子树）', () => {
+  const { d, calls } = revealDeps({ roots: ['q'], shown: true })
+  const app = viewConfigCommands(d)
+  assert.equal(app.setActiveView({ kind: 'block', blockId: 'q' }, ''), true)
+  assert.deepEqual(calls, ['reload'], `单根 ⇒ 重装（装载形状变了）：${JSON.stringify(calls)}`)
+})
+
+test('setActiveView：它是这一屏的多个根之一 ⇒ 照旧打开它（「给这一天建张表」要看那一屏）', () => {
+  const { d, calls } = revealDeps({ roots: ['q', 'other'], shown: true })
+  const app = viewConfigCommands(d)
+  assert.equal(app.setActiveView({ kind: 'block', blockId: 'q' }, ''), true)
+  assert.deepEqual(calls, ['open:q'], `多根之一 ⇒ 打开它：${JSON.stringify(calls)}`)
+})
+
 /* ------------------------------------------------------------ 在当前块里建查询块 */
 
 function pageWithChild(): { kb: MemoryKb; store: BlockStore; page: Block; child: Block } {
@@ -122,6 +186,7 @@ function insertDeps(blocks: { kb: MemoryKb; store: BlockStore }, runCount = { n:
     },
     reloadPage: () => {},
     rootIds: () => [],
+    viewShown: () => false,
     activeId: () => 'page',
     openBlock: () => {},
     refreshList: () => {},

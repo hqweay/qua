@@ -993,6 +993,21 @@ export function setupPanels(deps: PanelsDeps) {
     }
   }
 
+  /**
+   * **这一块的视图身体此刻有没有被某个表面画着**。
+   *
+   * 切视图只写拥有者的配置；屏幕跟上靠**每一台 ViewHost 自己订阅**。
+   * 于是「要不要顺手把这一块打开」的判据就是这一句：没有表面在画它
+   * （收藏块、children 源的激活视图只在打开时才画）⇒ 不打开就永远看不到结果。
+   *
+   * 判据落在 DOM 上（那台宿主的根带 `data-view-owner`），不维护「哪些块正被画着」的登记表：
+   * 登记表漏一次 dispose 就会永远说「画着」，而它不报错，只表现为「切了视图没反应」。
+   */
+  function viewShown(blockId: string): boolean {
+    if (blockId === '') return false
+    return Boolean(document.querySelector(`.queryview[data-view-owner="${blockId}"]`))
+  }
+
   // 首次装载：装配完就把每一段的挂载区放上去（之后由 loadPage / store 订阅跟进）
   renderMounts()
 
@@ -1003,5 +1018,6 @@ export function setupPanels(deps: PanelsDeps) {
     pickRefValue,
     openPropertiesDrawer,
     mountBlockView,
+    viewShown,
   }
 }

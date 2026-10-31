@@ -295,6 +295,15 @@ export class ViewHost {
      * 渲染器、配置、冻结全是同一份。CSS 按这一格选「贴在这一行下面」。
      */
     this.els.root.dataset.surface = deps.surface
+    /**
+     * 这一台宿主画的是**哪个拥有者**的身体。
+     *
+     * 用途只有一处：切视图之后，装配层要回答「此刻有没有表面在画它」——
+     * 有就**就地重画**（每个 ViewHost 都订阅拥有者的配置），没有才把这一块打开。
+     * 认 DOM 里这一格、不另建一张「哪些块正被画着」的登记表：登记表漏一次 dispose
+     * 就会永远说「画着」，而它不报错，只表现为「切了视图，点了没反应」。
+     */
+    if (deps.owner.kind === 'block') this.els.root.dataset.viewOwner = deps.owner.blockId
     // 派生栏的抬头由挂载区画（它要说清这一栏是什么）；这一层只借渲染器
     if (deps.derived) this.els.head.hidden = true
     this.els.refresh.textContent = t('ui.query.refresh')
