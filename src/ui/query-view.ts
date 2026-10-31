@@ -139,6 +139,8 @@ export interface ViewHostEls {
   root: HTMLElement
   title: HTMLElement
   count: HTMLElement
+  /** 大纲折叠时会少画几行：主数字仍是命中数，这里补一句「M 个顶层」 */
+  topCount: HTMLElement
   /** 视图切换器（默认看法 ＋ 已有视图 ＋ 加一张） */
   views: HTMLElement
   /** 条件 chip 条（查询源才有；点击＝打开构建器） */
@@ -168,6 +170,9 @@ export function createViewHostEls(): ViewHostEls {
   title.className = 'queryview-title'
   const count = document.createElement('span')
   count.className = 'queryview-count'
+  const topCount = document.createElement('span')
+  topCount.className = 'queryview-topcount'
+  topCount.hidden = true
   const stale = document.createElement('span')
   stale.className = 'queryview-stale'
   stale.hidden = true
@@ -182,7 +187,7 @@ export function createViewHostEls(): ViewHostEls {
   newRow.type = 'button'
   newRow.className = 'queryview-newrow'
   newRow.hidden = true
-  head.append(title, count, stale, filters, views, refresh, newRow)
+  head.append(title, count, topCount, stale, filters, views, refresh, newRow)
 
   const body = document.createElement('div')
   body.className = 'queryview-body'
@@ -203,7 +208,7 @@ export function createViewHostEls(): ViewHostEls {
   body.append(editor, table)
 
   root.append(head, body)
-  return { root, title, count, filters, views, refresh, newRow, stale, editor, table }
+  return { root, title, count, topCount, filters, views, refresh, newRow, stale, editor, table }
 }
 
 /** 一个「表面实例」的冻结结果（内存；不进 KB、不进撤销） */
@@ -506,6 +511,8 @@ export class ViewHost {
     this.els.title.textContent = query ? (name === '' ? t('ui.query.untitled') : name) : ''
     const n = this.rowCount()
     this.els.count.textContent = query ? t('ui.query.count', { count: n }) : t('ui.view.count', { count: n })
+    // 大纲折叠的次要文案由 `render()` 现算（它才知道这一屏画了几行）；其余分支没有折叠
+    if (!query || view !== null) this.els.topCount.hidden = true
     this.els.refresh.hidden = !query
     // items 源的行是「引用」，不是这里能长出来的子块 ⇒ 不给「新建一行」（列表自己有「加一条」）
     this.els.newRow.hidden = query || src.kind === 'items'
@@ -901,7 +908,22 @@ export class ViewHost {
     }
     const rows = resolveFrozen(this.frozen.hits, (id) => this.deps.kb.pathOf(id))
     this.els.root.hidden = false
-    this.els.count.textContent = t('ui.query.count', { count: rows.length })
+    /**
+     * **主数字永远是冻结结果（hits）的条数**，不是这一屏画出来的行数。
+     *
+     * 大纲会把「祖先与子孙同时命中」折叠成祖先一行（那是对的：同一块不该出现两遍），
+     * 但折叠是**画法**，不是成员变了。曾经这里用 `rows.length` 覆盖抬头 ⇒
+     * 同一个查询在大纲里写 1、在表格里写 2 —— 同一件事两个答案。
+     * 折叠程度另给一句次要文案，主数字不动。
+     */
+    const hits = this.frozen.hits.length
+    this.els.count.textContent = t('ui.query.count', { count: hits })
+    if (rows.length !== hits) {
+      this.els.topCount.hidden = false
+      this.els.topCount.textContent = t('ui.query.topCount', { count: rows.length })
+    } else {
+      this.els.topCount.hidden = true
+    }
     if (rows.length === 0) {
       // 空结果里没有可展开的东西：收起栈也一起清掉
       this.expanded = new Set()

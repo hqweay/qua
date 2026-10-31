@@ -16,6 +16,7 @@
  *    `ui/view-*.ts` 才决定画成表还是列表。
  */
 import { ACTIVE_VIEW_PROP, VIEWS_PROP, isDeleted, isQueryBlock, type Block, type BlockProps } from './model.ts'
+import { displayNameOf } from './alias.ts'
 import { readEmbed } from './embed.ts'
 import { collectionItems, isCollectionBlock } from './collection.ts'
 import { uuidv7Hex } from './ids.ts'
@@ -184,6 +185,22 @@ export const TAGS_COLUMN = 'tags' as const
 export const CHILDREN_COLUMN = 'children' as const
 export const CREATED_COLUMN = 'created' as const
 export const MODIFIED_COLUMN = 'modified' as const
+/**
+ * **路径列**：这一条记录在树里的位置（祖先的显示名拼接）。
+ *
+ * 为什么是保留键而不是属性：位置不是数据，是「这条记录在哪」的投影。
+ * 同一批命中出现在面板里时，没有它读者分不清两条同名记录各属于哪一页。
+ */
+export const PATH_COLUMN = 'path' as const
+/**
+ * 派生列：值来自**这一次表面的数据**（引用次数／命中词／共同标签），不进 `props`、不落盘。
+ *
+ * 为什么允许 `ViewRecord` 带一个派生袋而不是把这些做成属性：一个块被引用几次
+ * 是关系的事实，不是它自己的数据；写进属性就等于承认「复制一份会过期」。
+ */
+export const REF_COUNT_COLUMN = 'refCount' as const
+export const MATCHED_COLUMN = 'matched' as const
+export const SHARED_TAGS_COLUMN = 'sharedTags' as const
 
 /*
  * 保留列键＝上面这五个常量（其余列键一律是属性定义块 id）。
@@ -466,6 +483,12 @@ export interface ViewRecord {
   values: BlockProps
   /** 仅 items 源：这条在 `_items` 里的位置（拖动排序用） */
   itemIndex?: number
+  /**
+   * **派生的列**（`refCount`／`matched`／`sharedTags`）：由源适配器现算填进来。
+   *
+   * 它们不进 `props`、不落盘、不参与复制 —— 写进内容层就会在数据变了之后说谎。
+   */
+  derived?: Readonly<Record<string, unknown>>
 }
 
 function recordOf(block: Block, path: readonly Block[], kb: KbClient, itemIndex?: number): ViewRecord {
@@ -551,6 +574,10 @@ export function defaultWidthOf(key: string): number {
   if (key === CHILDREN_COLUMN) return 84
   if (key === CREATED_COLUMN || key === MODIFIED_COLUMN) return 150
   if (key === TAGS_COLUMN) return 160
+  if (key === PATH_COLUMN) return 220
+  if (key === REF_COUNT_COLUMN) return 96
+  if (key === MATCHED_COLUMN) return 150
+  if (key === SHARED_TAGS_COLUMN) return 160
   return 140
 }
 
@@ -657,6 +684,16 @@ export function visibleColumns(columns: readonly ViewColumn[]): ViewColumn[] {
   return columns.filter((c) => c.hidden !== true)
 }
 
+/** 一条记录在树里的位置：祖先的显示名拼接（空祖先跳过） */
+export function pathTextOf(r: ViewRecord): string {
+  const names: string[] = []
+  for (const b of r.path) {
+    const name = displayNameOf(b).trim()
+    if (name !== '') names.push(name)
+  }
+  return names.join(' / ')
+}
+
 /**
  * 一格的**纯文本**（列表／看板／画廊用；表格画的是 run，不走这里）。
  *
@@ -668,6 +705,19 @@ export function fieldTextOf(r: ViewRecord, key: string, resolve?: (value: unknow
   if (key === TITLE_COLUMN) return r.title
   if (key === TAGS_COLUMN) return r.tags.map((t) => plainText(t.content)).join(' ')
   if (key === CHILDREN_COLUMN) return String(r.block.children.length)
+  if (key === PATH_COLUMN) return pathTextOf(r)
+  if (key === REF_COUNT_COLUMN) {
+    const v = r.derived?.[REF_COUNT_COLUMN]
+    return typeof v === 'number' ? String(v) : ''
+  }
+  if (key === MATCHED_COLUMN) {
+    const v = r.derived?.[MATCHED_COLUMN]
+    return typeof v === 'string' ? v : ''
+  }
+  if (key === SHARED_TAGS_COLUMN) {
+    const v = r.derived?.[SHARED_TAGS_COLUMN]
+    return Array.isArray(v) ? v.map((x) => String(x)).join(' ') : ''
+  }
   if (key === CREATED_COLUMN || key === MODIFIED_COLUMN) {
     const at = key === CREATED_COLUMN ? r.block.created : r.block.modified
     return new Date(at).toLocaleDateString('zh-Hans-CN')
@@ -696,6 +746,13 @@ export function sortValueOf(r: ViewRecord, key: string): unknown {
   if (key === CREATED_COLUMN) return r.block.created
   if (key === MODIFIED_COLUMN) return r.block.modified
   if (key === TAGS_COLUMN) return r.tags.map((t) => plainText(t.content)).join(' ')
+  if (key === PATH_COLUMN) return pathTextOf(r)
+  // 派生列按**数**排（引用次数 9 < 10；按串排会得到 10 < 9），其余按显示文本
+  if (key === REF_COUNT_COLUMN) {
+    const v = r.derived?.[REF_COUNT_COLUMN]
+    return typeof v === 'number' ? v : undefined
+  }
+  if (key === MATCHED_COLUMN || key === SHARED_TAGS_COLUMN) return fieldTextOf(r, key)
   return r.values[key]
 }
 

@@ -113,9 +113,17 @@ export function viewConfigCommands(
         /**
          * 分组列先给一个**能分组**的：第一个 `select`（值域有限），
          * 退到第一个 `checkbox`（真/假两列也说得通）。
-         * 都没有就空着 —— 界面会说「挑一列」，而不是给一个空白看板。
+         *
+         * ⚠️ 一个都没有 ⇒ **当场拒绝**，不写库：`canonicalViews` 会把
+         * `groupBy:''` 的看板当坏项丢掉，用户看到的是「点了新建看板，什么也没发生」。
+         * 不如明说「先有一个分组字段」。
          */
-        view.board = { groupBy: firstDefOf(d, 'select') ?? firstDefOf(d, 'checkbox') ?? '' }
+        const groupBy = firstDefOf(d, 'select') ?? firstDefOf(d, 'checkbox')
+        if (!groupBy) {
+          d.toast(t('ui.view.boardNeedsField'), 'warn')
+          return ''
+        }
+        view.board = { groupBy }
       } else if (kind === 'calendar') {
         // 日期列：第一个 `date` 定义；任何块都可能有 `_date`（日记块）⇒ 退到它
         view.calendar = { dateBy: firstDefOf(d, 'date') ?? '_date' }

@@ -1856,6 +1856,74 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
   return `1 条 → 改字实时更新（成员不变）→ 不匹配仍保留 → 刷新后 ${refreshed.count}；只有条件入 KB、结果未 re-parent`
 })
 
+await check('T191 结果基数：父子同时命中时，大纲与表格的抬头数字一致（都＝命中条数）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(300)
+
+  /**
+   * 造一对「父子正文相同」的块：只有它们同时命中，才谈得上「大纲折叠、表格不折叠」。
+   * 走真实的编辑命令（不直接改森林）：插件式地先插一块、缩进成子块、再插一块、缩进成孙块。
+   */
+  const made = await page.evaluate(() => {
+    const rows = window.__qua.__editor.rows().map((r) => r.block)
+    const spot = rows.find((b) => b.children.length === 0 && !b.props?._query)
+    if (!spot) throw new Error('前置：这一页没有可落的块')
+    window.__qua.focusBlock(spot.id, 999)
+    window.__qua.invoke('core.editor/insert-block', { text: '基数探针' })
+    const parent = String(window.__qua.__editor.sel?.aBlock ?? '')
+    window.__qua.invoke('core.editor/indent-block', {})
+    window.__qua.focusBlock(parent, 999)
+    window.__qua.invoke('core.editor/insert-block', { text: '基数探针' })
+    const child = String(window.__qua.__editor.sel?.aBlock ?? '')
+    window.__qua.invoke('core.editor/indent-block', {})
+    return { parent, child }
+  })
+  assert(made.parent && made.child && made.parent !== made.child, `前置：应造出父子两块：${JSON.stringify(made)}`)
+  await page.waitForTimeout(300)
+
+  const qid = await page.evaluate(() => {
+    const ok = window.__qua.invoke('core.query/create', {
+      kind: 'page',
+      name: '基数探针查询',
+      spec: { where: { text: '基数探针' }, scope: 'all' },
+    })
+    if (!ok) throw new Error('建不出查询页')
+    return String(window.__qua.snapshot().activeId)
+  })
+  await page.waitForTimeout(500)
+
+  const read = () =>
+    page.evaluate(() => ({
+      count: document.querySelector('.queryview-count')?.textContent ?? '',
+      top: document.querySelector('.queryview-topcount')?.hidden === false
+        ? (document.querySelector('.queryview-topcount')?.textContent ?? '')
+        : '',
+      outlineRows: document.querySelectorAll('.queryview-editor .blk[data-depth="0"]').length,
+      tableRows: document.querySelectorAll('.tv-row').length,
+    }))
+
+  const outline = await read()
+  assert(outline.count.includes('2'), `大纲抬头的主数字＝命中条数 2：${outline.count}`)
+  assert(outline.outlineRows === 1, `大纲把父子折叠成一行：${outline.outlineRows}`)
+  assert(outline.top.includes('1'), `折叠程度用次要文案说：${JSON.stringify(outline.top)}`)
+
+  // 同一份结果换表格：主数字**不变**，只是不再折叠
+  await page.evaluate(
+    (id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'table' }),
+    qid,
+  )
+  await page.waitForTimeout(500)
+  const table = await read()
+  assert(table.count === outline.count, `同一查询在两种视图下的主数字必须一致：${outline.count} → ${table.count}`)
+  assert(table.tableRows === 2, `表格每条命中一行：${table.tableRows}`)
+  assert(table.top === '', '表格不折叠 ⇒ 没有次要文案')
+
+  await ctx.close()
+  return `hits=2：大纲 ${outline.outlineRows} 行＋「${outline.top}」、表格 ${table.tableRows} 行；抬头都是 ${table.count}`
+})
+
 await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器改主名 ⇒ chip 跟着变；删除 ⇒ dangling', async () => {
   const { ctx, page } = await freshPage(browser, base)
   // 打开「产品设计 · 决策日志」：seed 里那一页有指向别处的 `[[..]]`
