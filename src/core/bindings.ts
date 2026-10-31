@@ -119,15 +119,14 @@ export const BINDINGS: Binding[] = [
   { command: 'core.block/extract-to-page', kind: 'palette', when: 'blockCanExtractPage', layer: 'core' },
   { command: 'core.block/as-tag', kind: 'menu', when: 'blockFocused && !blockHasTagRole', group: 'block/3-role', order: 20, layer: 'core' },
   { command: 'core.block/untag', kind: 'menu', when: 'blockFocused && blockHasTagRole', group: 'block/3-role', order: 21, layer: 'core' },
-  // 别名/字段是「名字层」的配置，不属于任何具体列表：任何聚焦块都能打开
+  // 别名是「名字层」的配置，不属于任何具体列表：任何聚焦块都能打开
   { command: 'core.block/edit-aliases', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 30, layer: 'core' },
-  { command: 'core.block/edit-fields', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 31, layer: 'core' },
   // zoom：进子树的入口挂在块菜单。**叶子块也给**（修订：
   // 块标左键＝聚焦是一贯行为：若叶子不给，点击结果会时 zoom 时不 zoom）
   { command: 'core.block/focus-block', kind: 'menu', when: 'blockFocused', group: 'block/3-kind', order: 30, layer: 'core', keywords: ['zoom', t('menu.kw.zoom')] },
-  // 显式入口：把「看这一块的属性」做成一次点击。它是**视图命令**（可以动槽开关），
-  // 与 zoom 这种导航动作分家 —— 导航永远不替用户改侧栏的开关。
-  { command: 'core.block/inspect', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 32, layer: 'core' },
+  // 显式入口：把「看这一块的属性」做成一次点击。落点是属性抽屉——不换中心、
+  // 不动槽（侧槽开关只归 core.dock/*），能力不依赖任何面板是否在场。
+  { command: 'core.block/inspect', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 31, layer: 'core' },
   { command: 'core.dock/open-block', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 33, layer: 'core' },
   /**
    * 退回上一级：**最外层时不给入口**（`when` 挡住），不是点了没反应。

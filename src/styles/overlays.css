@@ -439,6 +439,10 @@
   padding: var(--ui-gap-5);
   font-size: var(--ui-fs-sm);
 }
+/* 属性抽屉：面板的 title 槽不画（「是谁」已经写在抽屉抬头），只占位给组件形状 */
+.props-drawer-title {
+  display: none;
+}
 .drawer-body h5 {
   margin: var(--ui-gap-5) 0 var(--ui-gap-3);
   font-size: var(--ui-fs-xs);

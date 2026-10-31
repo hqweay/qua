@@ -36,7 +36,6 @@ import { createIcon } from './view/icons.ts'
 import { widgetBodyInDoc } from './ui/dock-widgets.ts'
 import { mountEmbedBody } from './ui/embed-body.ts'
 import { renderAliasEditor } from './ui/alias-editor.ts'
-import { renderFieldsEditor } from './ui/fields-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, renderLinkComposer, type ObjFieldDeps, type PanelDeps } from './ui/panels.ts'
 import { openImageLightbox } from './ui/lightbox.ts'
 import type { RefClickHit, RefClickMods } from './view/editor-events.ts'
@@ -1534,7 +1533,7 @@ const app: App = {
   addBlockRole: (blockId, role) => addBlockRole(blockId, role),
   removeBlockRole: (blockId, role) => removeBlockRole(blockId, role),
   openAliasEditor: (blockId, autofocus) => openAliasEditor(blockId, ed.caretRect(), autofocus),
-  openFieldsEditor: (blockId) => openFieldsEditor(blockId, null),
+  openPropertiesDrawer: (blockId) => panels.openPropertiesDrawer(blockId),
   setBlockType: (blockId, typeId) => applyBlockType(blockId, typeId),
 
   // 导航历史（中心槽走到哪）；与 undo/redo 的模型快照栈无关
@@ -1698,33 +1697,6 @@ const openAliasEditor = (blockId: string, anchor: HTMLElement | DOMRect | null, 
       }),
     // 元素锚点会跟着那一颗按钮走（行随重渲染被换掉时由 `anchorOf` 兜住「不在了」）
     anchor === null ? null : anchor instanceof HTMLElement ? anchorOf(anchor) : anchor,
-  )
-}
-
-/**
- * 字段声明抽屉。**不用锚点**：抽屉贴着窗口右缘整高铺开，锚点对它没有意义
- * （它不是「指向某一处」的浮层，是一个面板）。所以这里收 `_anchor` 只为签名一致。
- */
-const openFieldsEditor = (blockId: string, _anchor: HTMLElement | null): void => {
-  if (!findInForest(ws.blocks, blockId)) return
-  layers.openDrawer(
-    t('ui.alias.fieldsTitle'),
-    (host) =>
-      renderFieldsEditor(host, {
-        kb,
-        block: () => findInForest(ws.blocks, blockId),
-        write: (mutate) => writeProps(blockId, mutate),
-        close: () => layers.closeDrawer(),
-        toast: (text, kind) => app.toast(text, kind),
-        choices: {
-          add: (defId, label, scope) => void registry.invoke('core.props/add-choice', { defId, label, scope }, 'fields'),
-          setLabel: (choiceId, label) => void registry.invoke('core.props/set-choice-label', { choiceId, label }, 'fields'),
-          move: (defId, choiceId, beforeId) =>
-            void registry.invoke('core.props/move-choice', { defId, choiceId, beforeId }, 'fields'),
-          setScope: (choiceId, scope) => void registry.invoke('core.props/set-choice-scope', { choiceId, scope }, 'fields'),
-          remove: (choiceId) => void registry.invoke('core.props/delete-choice', { choiceId }, 'fields'),
-        },
-      }),
   )
 }
 
@@ -1962,7 +1934,7 @@ onAssetChange((hash) => {
 
 let panels: ReturnType<typeof setupPanels>
 let diag: ReturnType<typeof setupDiagnostics>
-const { renderMounts, renderProperties, scheduleProperties, pickRefValue } = setupPanels({
+const { renderMounts, renderProperties, scheduleProperties, pickRefValue, openPropertiesDrawer } = setupPanels({
   blocks,
   kb,
   app,
@@ -1996,6 +1968,7 @@ panels = {
   renderProperties,
   scheduleProperties,
   pickRefValue,
+  openPropertiesDrawer,
 }
 
 /**
@@ -2043,7 +2016,7 @@ document.addEventListener('click', (e) => {
   const row = action.closest<HTMLElement>('.blk[data-block-id]')
   const blockId = row?.dataset.blockId
   if (!blockId) return
-  if (action.dataset.aliasAction === 'fields') openFieldsEditor(blockId, action)
+  if (action.dataset.aliasAction === 'props') panels.openPropertiesDrawer(blockId)
   else openAliasEditor(blockId, action)
 })
 

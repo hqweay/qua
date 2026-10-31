@@ -16,7 +16,7 @@ import type { PageDeps } from './types.ts'
  *   · 退回＝把当前对象换成祖先（与 zoom in **同一个动作**，只是目标不同）。
  * ⚠️ zoom **不跟随**左右槽（它们的内容显式钉住）。
  */
-export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut' | 'inspectBlock'> {
+export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut'> {
   /**
    * 把中心槽指向任意块（**整库按 id 解析**，不只是顶层）。
    *
@@ -66,19 +66,6 @@ export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut' | 'ins
       // 已经是最外层（页 / journal 本身就是顶层块）⇒ 没有可退的
       if (path.length <= 1) return
       open(path[0]!.id)
-    },
-    /**
-     * 「看属性」＝ spot 这一块 ＋ 确保右槽开着。
-     *
-     * 只多做一件事（开槽），但这件多出来的事正是它与 `zoomTo` 的分界：
-     * 用户点的是「看属性」，所以打开旁栏是他**要**的；而点块标要的是「换屏」，
-     * 那时替他拉开侧栏就是替他做了一个他没要求的决定。
-     */
-    inspectBlock: (id) => {
-      open(id)
-      // 承诺是「看属性」：属性卡若被关掉，只开个槽就是假成功（开了个空列）
-      d.ensureDockCard('right', 'inspect')
-      d.openDock('right')
     },
   }
 }

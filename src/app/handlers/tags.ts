@@ -39,12 +39,6 @@ export const TAGS_HANDLERS: Record<string, Handler> = {
     app.openAliasEditor(id)
     return true
   },
-  'core.block/edit-fields': (a, app) => {
-    const id = S(a.blockId) || curBlock(app)
-    if (!id) return false
-    app.openFieldsEditor(id)
-    return true
-  },
   'core.block/set-type': (a, app) => {
     const id = S(a.blockId) || curBlock(app)
     const type = S(a.type)

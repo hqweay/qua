@@ -655,7 +655,7 @@ export function makeBlockEl(
   }
 
   /**
-   * **别名头**：这一行显示的名字（主别名叶子），以及两个入口（别名与露面 / 字段声明）。
+   * **别名头**：这一行显示的名字（主别名叶子），以及两个入口（别名与露面 / 属性）。
    *
    * ⚠️ 它住在 `.blk` 里、**`.tx` 外**：编辑器把 `.tx` 的文字读回模型（`readText`），
    *    名字一旦进了 `.tx`，改描述就会变成改名 —— 地址与描述必须各在自己的槽里。
@@ -688,13 +688,13 @@ export function makeBlockEl(
     config.appendChild(createIcon('sliders-horizontal', 'sm'))
     head.appendChild(config)
 
-    const fields = document.createElement('button')
-    fields.type = 'button'
-    fields.className = 'blk-alias-btn'
-    fields.dataset.aliasAction = 'fields'
-    fields.title = t('ui.alias.fields')
-    fields.appendChild(createIcon('list-tree', 'sm'))
-    head.appendChild(fields)
+    const props = document.createElement('button')
+    props.type = 'button'
+    props.className = 'blk-alias-btn'
+    props.dataset.aliasAction = 'props'
+    props.title = t('ui.block.properties')
+    props.appendChild(createIcon('panel-right', 'sm'))
+    head.appendChild(props)
     el.appendChild(head)
   }
 

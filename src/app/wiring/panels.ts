@@ -15,6 +15,7 @@ import {
   findByAlias,
   flatten,
   hasList,
+  findInForest,
   isJournal,
   isViewRoot,
   journalDate,
@@ -42,7 +43,7 @@ import type { BlockStore } from '../../core/store.ts'
 import type { Workspace } from '../../core/workspace.ts'
 import type { Layers, Row } from '../../ui/layers.ts'
 import { MountArea, type ViewBodyHost } from '../../ui/mount-area.ts'
-import { PropertiesPanel } from '../../ui/properties.ts'
+import { PropertiesPanel, type PropertiesDeps } from '../../ui/properties.ts'
 import { createViewHostEls, ViewHost } from '../../ui/query-view.ts'
  
 import type { Chrome } from '../../ui/chrome.ts'
@@ -230,49 +231,47 @@ export function setupPanels(deps: PanelsDeps) {
     void deps.getRegistry().invoke('core.block/focus-block', { blockId: def.id }, 'ui')
   }
 
-  const propertiesPanel = new PropertiesPanel(
-    {
-      root: inspectCard,
-      title: chrome.inspectCardTitleEl,
-      body: chrome.propertiesBodyEl,
-      add: chrome.propertiesAddEl,
+  /**
+   * 属性面板的**读写回调只做一份**：检视卡与属性抽屉是同一份内容的两个宿主
+   * （一个跟焦点、常驻右槽；一个显式点出、钉在打开时那块上）。
+   * 宿主之间只差两件事：`target`（画哪一块）与 `repaint`（写入后刷哪一个实例）。
+   */
+  const makePropertiesDeps = (target: () => Block | null | undefined, repaint: () => void): PropertiesDeps => ({
+    target,
+    rows: (b) => [...kb.fieldsOf(b.id)],
+    // 标签（分类归属）与标签属性（字段声明）是两件事：这一行走 `props._tags`
+    tags: (b) => [...kb.tagsOf(b.id)],
+    // 归属（filed-under）：任何块都有这一行；跨类的那条边只在这里看得见
+    belongsTo: (b) => parentsOf(b, adj()),
+    belongsDangling: (b) => danglingOf(b, adj()),
+    addBelong: (b, name) => {
+      // 入口收窄：候选只给页与标签（模型不查露面，这是 UI 的取舍）
+      const parent = findByAlias(deps.getWs().blocks, name, (x) => hasList(x, 'page') || hasList(x, 'tag'))
+      if (!parent) {
+        app.toast(t('ui.belongs.notFound', { name }), 'warn')
+        return
+      }
+      void deps.getRegistry().invoke('core.belongs-to/add', { childId: b.id, parentId: parent.id }, 'ui')
+      repaint()
     },
-    {
-      target: () => subject(),
-      rows: (b) => [...kb.fieldsOf(b.id)],
-      // 标签（分类归属）与标签属性（字段声明）是两件事：这一行走 `props._tags`
-      tags: (b) => [...kb.tagsOf(b.id)],
-      // 归属（filed-under）：任何块都有这一行；跨类的那条边只在这里看得见
-      belongsTo: (b) => parentsOf(b, adj()),
-      belongsDangling: (b) => danglingOf(b, adj()),
-      addBelong: (b, name) => {
-        // 入口收窄：候选只给页与标签（模型不查露面，这是 UI 的取舍）
-        const parent = findByAlias(deps.getWs().blocks, name, (x) => hasList(x, 'page') || hasList(x, 'tag'))
-        if (!parent) {
-          app.toast(t('ui.belongs.notFound', { name }), 'warn')
-          return
-        }
-        void deps.getRegistry().invoke('core.belongs-to/add', { childId: b.id, parentId: parent.id }, 'ui')
-        propertiesPanel.render()
-      },
-      removeBelong: (b, parentId) => {
-        void deps.getRegistry().invoke('core.belongs-to/remove', { childId: b.id, parentId }, 'ui')
-        propertiesPanel.render()
-      },
-      pruneBelongs: (b) => {
-        void deps.getRegistry().invoke('core.belongs-to/prune', { childId: b.id }, 'ui')
-        propertiesPanel.render()
-      },
-      // 挂/摘之后**面板自己重画**：这一行显示的就是刚改的那份 `_tags`，
-      // 等下一次选区变化才刷会让「加完没反应」
-      addTag: (b, name) => {
-        void deps.getRegistry().invoke('core.tags/add', { blockId: b.id, name }, 'ui')
-        propertiesPanel.render()
-      },
-      removeTag: (b, tagId) => {
-        void deps.getRegistry().invoke('core.tags/remove', { blockId: b.id, tagId }, 'ui')
-        propertiesPanel.render()
-      },
+    removeBelong: (b, parentId) => {
+      void deps.getRegistry().invoke('core.belongs-to/remove', { childId: b.id, parentId }, 'ui')
+      repaint()
+    },
+    pruneBelongs: (b) => {
+      void deps.getRegistry().invoke('core.belongs-to/prune', { childId: b.id }, 'ui')
+      repaint()
+    },
+    // 挂/摘之后**面板自己重画**：这一行显示的就是刚改的那份 `_tags`，
+    // 等下一次选区变化才刷会让「加完没反应」
+    addTag: (b, name) => {
+      void deps.getRegistry().invoke('core.tags/add', { blockId: b.id, name }, 'ui')
+      repaint()
+    },
+    removeTag: (b, tagId) => {
+      void deps.getRegistry().invoke('core.tags/remove', { blockId: b.id, tagId }, 'ui')
+      repaint()
+    },
       // 属性区里的标签名也是「指向标签块的一处露面」，与正文 chip 同一条口径
       // 属性区里的标签名也是「指向标签块的一处露面」，与正文 chip 同一条口径
       openRef: (to, mods) => refClick({ to }, { altKey: false, ...mods }),
@@ -333,8 +332,79 @@ export function setupPanels(deps: PanelsDeps) {
           void deps.getRegistry().invoke('core.props/set-choice-scope', { choiceId, scope }, 'ui'),
         remove: (choiceId) => void deps.getRegistry().invoke('core.props/delete-choice', { choiceId }, 'ui'),
       },
+  })
+
+  const propertiesPanel = new PropertiesPanel(
+    {
+      root: inspectCard,
+      title: chrome.inspectCardTitleEl,
+      body: chrome.propertiesBodyEl,
+      add: chrome.propertiesAddEl,
     },
+    makePropertiesDeps(() => subject(), () => propertiesPanel.render()),
   )
+
+  /* ------------------------------------------------------------ 属性抽屉 */
+
+  /**
+   * **属性抽屉**：显式点出的任务面，宿主是 `layers.openDrawer`（整高右滑，看完即走）。
+   *
+   * 与检视卡共用同一份 `PropertiesPanel` 与写入回调（上面 `makePropertiesDeps`），
+   * 差别只在主体与生命周期：检视卡画「这一屏是谁」（跟焦点换内容）；
+   * 抽屉**钉在打开时那一块上**——不跟焦点、不换中心、不动槽（这正是它与
+   * 「看属性＝开右槽」旧口径的分界）。
+   *
+   * ⚠️ 抽屉抬头已经写着「是谁」：面板的 title 槽给一个空元素占位（面板不写它）。
+   * ⚠️ 钉住的块被删 ⇒ 整张抽屉关掉（`renderDrawer` 的判据），不留一个空壳。
+   */
+  let drawerBlockId: string | null = null
+  let drawerPanel: PropertiesPanel | null = null
+
+  /** 库一变就跟着刷（与检视卡同一条通知、同鲜度）；抽屉已被关掉就顺手清状态 */
+  function renderDrawer(): void {
+    if (!layers.drawerOpen()) {
+      drawerPanel = null
+      drawerBlockId = null
+      return
+    }
+    if (!drawerPanel) return
+    const b = drawerBlockId ? findInForest(deps.getWs().blocks, drawerBlockId) : undefined
+    if (!b) {
+      layers.closeDrawer()
+      drawerPanel = null
+      drawerBlockId = null
+      return
+    }
+    drawerPanel.render()
+  }
+
+  const openPropertiesDrawer = (blockId: string): void => {
+    const b = findInForest(deps.getWs().blocks, blockId)
+    if (!b) return
+    drawerBlockId = blockId
+    layers.openDrawer(blockLabel(b), (host) => {
+      const root = document.createElement('div')
+      root.className = 'props-drawer'
+      const titleEl = document.createElement('span')
+      titleEl.className = 'props-drawer-title'
+      const body = document.createElement('div')
+      body.className = 'properties-body'
+      const add = document.createElement('button')
+      add.type = 'button'
+      add.className = 'props-add'
+      root.append(titleEl, body, add)
+      const panel = new PropertiesPanel(
+        { root, title: titleEl, body, add },
+        makePropertiesDeps(
+          () => (drawerBlockId ? findInForest(deps.getWs().blocks, drawerBlockId) : null),
+          () => panel.render(),
+        ),
+      )
+      drawerPanel = panel
+      host.appendChild(root)
+      panel.render()
+    })
+  }
 
   function renderProperties(): void {
     renderInspectTitle(subject())
@@ -357,6 +427,7 @@ export function setupPanels(deps: PanelsDeps) {
     propertyTimer = window.setTimeout(() => {
       propertyTimer = null
       renderProperties()
+      renderDrawer()
     }, 60)
   }
 
@@ -743,5 +814,5 @@ export function setupPanels(deps: PanelsDeps) {
   // 首次装载：装配完就把每一段的挂载区放上去（之后由 loadPage / store 订阅跟进）
   renderMounts()
 
-  return { renderMounts, renderProperties, scheduleProperties, pickRefValue }
+  return { renderMounts, renderProperties, scheduleProperties, pickRefValue, openPropertiesDrawer }
 }

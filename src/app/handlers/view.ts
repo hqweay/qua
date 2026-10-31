@@ -45,15 +45,16 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     return true
   },
   /**
-   * 看属性：与 zoom 同一条换落点路径，外加「确保右槽开着」。
+   * 看属性：打开属性抽屉（钉在这一块上的任务面）。
    *
-   * ⚠️ 它是**视图命令**，所以可以动槽开关。导航动作（zoom / 打开页 / 点链接）
-   *    一律不碰它 —— 那条分界由 T1b 钉住（zoom 之后 `dock.right.open` 一字不变）。
+   * ⚠️ **不动槽、不换中心**：显式入口的落点是抽屉，不是右槽——能力不依赖
+   *    任何面板是否在场。侧槽开关只归 `core.dock/*`（zoom 之后 `dock.right.open`
+   *    一字不变，这条分界由 T1b 钉住；「看属性」同样不碰它）。
    */
   'core.block/inspect': (a, app) => {
     const id = typeof a.blockId === 'string' && a.blockId !== '' ? a.blockId : app.ed.caretBlock()
     if (!id) return false
-    app.inspectBlock(id)
+    app.openPropertiesDrawer(id)
     return true
   },
 
