@@ -20,7 +20,7 @@ import {
   hasQueryBody,
   hasList,
   findInForest,
-  isFolded,
+  foldStateOf,
   isJournal,
   isViewRoot,
   journalDate,
@@ -1013,7 +1013,7 @@ export function setupPanels(deps: PanelsDeps) {
          * children 源的激活视图**不跟** `Doc.folded` —— 那条折叠是「子块收起」，
          * 与「表格替换子块」不是同一件事（`viewRootId` 的注释里写过）。
          */
-        if (inst.view && hasQueryBody(host)) inst.view.setFolded(isFolded(mainEd.doc, host.id))
+        if (inst.view && hasQueryBody(host)) inst.view.setFolded(foldStateOf(mainEd.doc)[host.id] === true)
         if (inst.view && inst.view.root.parentElement !== slot) slot.appendChild(inst.view.root)
         if (inst.area.root.parentElement !== slot) slot.appendChild(inst.area.root)
       }

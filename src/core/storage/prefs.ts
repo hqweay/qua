@@ -98,6 +98,11 @@ export interface DockPrefs {
    * 单卡（只看这一张）：每侧独立。`null` ＝ 不单卡。
    *
    * 目标不可见时**不生效**（照常显示其它卡）；状态保留，目标回来时自动再生效。
+   *
+   * ⚠️ 单卡**不改 `collapsedCards`**：收着的卡进单卡时「这一张此刻展开」是叠在
+   *    渲染上的一层（与中心「聚焦即展开」同一条判据），退出单卡自动回到收着 ——
+   *    所以不需要记「solo 前收没收」那种快照。判据只有一份：`core/dock.ts` 的
+   *    `isCardCollapsed`。
    */
   solo: { left: string | null; right: string | null }
 }
