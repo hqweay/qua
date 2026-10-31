@@ -28,6 +28,39 @@ import type { MsgId } from './msg.ts'
 /** 命令小卡的 key 前缀；只有「扁平 key」这一层用它，`DockEntry` 自己不存前缀 */
 export const DOCK_CMD_PREFIX = 'cmd:'
 
+/**
+ * 一个块窗口进槽的**动作**。
+ *
+ * pin 的缺省跟着动作走，不跟着槽走：**拖进来（钉）＝常驻，打开来看（Shift+点／命令）＝只留本会话**。
+ * 为什么不在读取路径上按槽推缺省：那会让每次重画都要查一遍槽规则；
+ * 在写入口（两个动作）各写一次初值，读路径只看卡上自己的 pin 位，零分支。
+ * 左槽只有拖入一个入口 ⇒ 「左槽窗口默认常驻」是这条规则的推论，不是另一条规则。
+ */
+export type WindowEntryAction = 'drop' | 'view'
+
+export function pinDefaultFor(action: WindowEntryAction): boolean {
+  return action === 'drop'
+}
+
+/**
+ * 重启清理：**非 pin 的块窗口卡不留到下一次启动**（窗口是「打开来看」的临时上下文，
+ * 重启还全在，攒几轮就是一列没人看的旧窗口）；pin 了的是用户明说要留的，保留。
+ *
+ * 组件块（类型声明了 widget）、派生卡、命令小卡是**槽的家具**——布局的一部分，
+ * 不属于「打开的东西」，一律不受影响。组件块由调用方传判据（这里不依赖块模型）。
+ */
+export function pruneEphemeralWindows(
+  cards: readonly DockEntry[],
+  pinned: Readonly<Record<string, true>>,
+  isWidget: (blockId: string) => boolean,
+): DockEntry[] {
+  return cards.filter((e) => {
+    if (e.kind !== 'block') return true
+    if (isWidget(e.block)) return true
+    return pinned[dockKey(e)] === true
+  })
+}
+
 /** 宿主现算的派生卡（闭集；画廊、渲染、旧字节解析共用这一份） */
 export type DerivedCardId = 'inspect' | 'belongs' | 'backrefs' | 'trash' | 'calendar'
 

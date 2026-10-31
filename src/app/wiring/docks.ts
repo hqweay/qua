@@ -7,8 +7,8 @@
  *   · 卡壳、收起、单卡、关闭、拖拽由 `ui/dock` 提供；
  *   · 这里不认识块的内容，也不碰 DOM 的具体长相。
  *
- * 三个状态轴**正交**（不要互相推导）：
- *   位置 `cards` ／ 收起 `collapsedCards` ／ 单卡 `solo[side]`。
+ * 四个状态轴**正交**（不要互相推导）：
+ *   位置 `cards` ／ 收起 `collapsedCards` ／ 常驻 `pinnedCards` ／ 单卡 `solo[side]`。
  */
 import {
   belongsToTree,
@@ -17,9 +17,12 @@ import {
   dockKey,
   findInForest,
   isWidgetBlock,
+  pinDefaultFor,
+  pruneEphemeralWindows,
   widgetSlotHeightOf,
   type DerivedCardId,
   type DockEntry,
+  type WindowEntryAction,
 } from '../../core/index.ts'
 import { t } from '../../core/msg.ts'
 import type { Registry } from '../../core/commands/index.ts'
@@ -42,6 +45,7 @@ import { calendarCard } from '../../ui/calendar-card.ts'
 import { widgetBody, widgetTitle, type WidgetDeps } from '../../ui/dock-widgets.ts'
 import { BelongsTree } from '../../ui/belongs-tree.ts'
 import { applyWidgetHeights } from '../../view/block-dom.ts'
+import { renderIcon } from '../../view/icons.ts'
 import { bindDropTarget, setDragCard } from '../../view/dnd.ts'
 import { bindWindowDrop } from '../../ui/dock-windows.ts'
 
@@ -65,6 +69,8 @@ export type DocksDeps = {
   inspectCard: () => HTMLElement
   /** 集合卡的块选择器（锚在「选择块」按钮上） */
   pickBlock: (collectionId: string, anchor: DOMRect) => void
+  /** 右键卡头：卡片菜单（行与动作归装配入口——它有浮层与命令面；这里只给时机与锚） */
+  showCardMenu: (side: 'left' | 'right', key: string, anchor: DOMRect) => void
 }
 
 /** 卡片落点：插到哪一张之前/之后；`null` ＝ 末尾 */
@@ -145,8 +151,11 @@ export function setupDocks(deps: DocksDeps) {
     return {
       collapsed: dock.collapsedCards[id] === true,
       solo: dock.solo[side] === id,
+      pinned: dock.pinnedCards[id] === true,
       onToggleCollapse: () => toggleCollapse(id),
       onToggleSolo: () => toggleSolo(side, id),
+      onTogglePin: () => togglePin(id),
+      onHeadMenu: (anchor) => deps.showCardMenu(side, id, anchor),
       onDragStart: (e) => setDragCard(e.dataTransfer, id),
     }
   }
@@ -160,9 +169,48 @@ export function setupDocks(deps: DocksDeps) {
     deps.scheduleBadge()
   }
 
+  /** 常驻开关：pin 是卡上自己的一位（全局 key），跨槽移动后跟着卡走 */
+  function togglePin(id: string): void {
+    const dock = deps.prefs().dock
+    if (dock.pinnedCards[id]) delete dock.pinnedCards[id]
+    else dock.pinnedCards[id] = true
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+  }
+
+  /**
+   * 收起这一槽的**所有卡**（再点＝展开所有）。
+   *
+   * 折叠全部与单卡不能同时成立（「只看一张」和「都收起来」是矛盾态），所以收起时退出单卡。
+   * 只动本槽卡片的键：`collapsedCards` 是全局表，别槽的收起状态不受牵连。
+   * 小卡没有 body，收起对它没有可见效果——键写了也无妨，展开时一并清掉。
+   */
+  function toggleFoldAll(side: 'left' | 'right'): void {
+    const dock = deps.prefs().dock
+    const keys = dock[side].cards.map(dockKey)
+    const anyExpanded = dock[side].cards.some((e) => !dock.collapsedCards[dockKey(e)])
+    if (anyExpanded) {
+      for (const k of keys) dock.collapsedCards[k] = true
+      dock.solo[side] = null
+    } else {
+      for (const k of keys) delete dock.collapsedCards[k]
+    }
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+  }
+
+  /**
+   * 单卡＝「只看这张卡」：进入时**顺手展开目标**——收着的卡进单卡，槽里只剩一颗头，
+   * 「看」就落空了。退出**不收回**（不记「solo 前收没收」的第三态）：退出后多半还要
+   * 就着这张卡继续用；要全收起来有「收起所有卡」。
+   */
   function toggleSolo(side: 'left' | 'right', id: string): void {
     const dock = deps.prefs().dock
-    dock.solo[side] = dock.solo[side] === id ? null : id
+    const entering = dock.solo[side] !== id
+    dock.solo[side] = entering ? id : null
+    if (entering) delete dock.collapsedCards[id]
     renderDocks()
     deps.scheduleDeviceSave()
     deps.scheduleBadge()
@@ -173,11 +221,14 @@ export function setupDocks(deps: DocksDeps) {
   /**
    * 在右槽打开一个块：**确保打开并定位**，不是 toggle。
    *
-   * 同一个块全局最多一个窗口：已在另一侧 ⇒ 移过来（状态按 id 跟着走）；
+   * 同一个块全局最多一个窗口：已在另一侧 ⇒ 移过来（状态按 id 跟着走，pin 也在内）；
    * 已在本侧 ⇒ 不改顺序，只滚到它。
    * 打开会把这一侧的单卡退出——单卡是「只看一张」，加一张与它矛盾。
+   *
+   * pin 的缺省由**进入动作**决定（`pinDefaultFor`）：拖进来＝钉住（常驻），
+   * 打开来看＝只留本会话。组件块是家具，两种入口都常驻。
    */
-  function openWindow(side: 'left' | 'right', blockId: string): void {
+  function openWindow(side: 'left' | 'right', blockId: string, action: WindowEntryAction = 'view'): void {
     if (!findInForest(deps.getWs().blocks, blockId)) return
     const dock = deps.prefs().dock
     const other = side === 'left' ? 'right' : 'left'
@@ -192,6 +243,8 @@ export function setupDocks(deps: DocksDeps) {
       const at = lastWindowIndex(dock[side].cards)
       dock[side].cards.splice(at + 1, 0, entry)
     }
+    const block = deps.kb.get(blockId)
+    if (pinDefaultFor(action) || (block && isWidgetBlock(block))) dock.pinnedCards[key] = true
     if (!dock[side].open) {
       dock[side].open = true
       deps.applyChrome()
@@ -215,9 +268,67 @@ export function setupDocks(deps: DocksDeps) {
     if (i < 0) return
     dock[side].cards.splice(i, 1)
     if (dock.solo[side] === key) dock.solo[side] = null
+    // pin 是「这一次露面」的属性：关掉就结束。留着的话，下次用「打开来看」重开
+    // 会因为旧 pin 位还在而违背进入动作的缺省（拖入才常驻）。
+    delete dock.pinnedCards[key]
     renderDocks()
     deps.scheduleDeviceSave()
     deps.scheduleBadge()
+  }
+
+  /**
+   * 关掉**这一槽的窗口卡**（「关闭其他窗口」＝除一张之外，kind 是 block 的都是窗口：
+   * 组件块也是 block 条目，但它有渲染器、算家具——这里用一个判据分清）。
+   *
+   * 为什么只动窗口：派生卡／组件卡／命令小卡是槽的家具（重启也保留的那部分），
+   * 「关掉窗口」的心智是「清掉打开来看的东西」，不该把布局一并清掉。
+   * 家具要关，每张卡自己的 ✕ 就是入口。
+   */
+  function isWindowEntry(side: 'left' | 'right', key: string): boolean {
+    const dock = deps.prefs().dock
+    const entry = dock[side].cards.find((e) => dockKey(e) === key)
+    if (!entry || entry.kind !== 'block') return false
+    const b = deps.kb.get(entry.block)
+    return b !== undefined && !isWidgetBlock(b)
+  }
+
+  /** 单摘一批：清 solo／pin／收起键，与 closeCard 同一条路，但一次可以摘多张 */
+  function removeWindows(side: 'left' | 'right', keep: string | null): number {
+    const dock = deps.prefs().dock
+    const before = dock[side].cards.length
+    const removed: string[] = []
+    dock[side].cards = dock[side].cards.filter((e) => {
+      const k = dockKey(e)
+      if (e.kind !== 'block') return true
+      const b = deps.kb.get(e.block)
+      if (b !== undefined && isWidgetBlock(b)) return true
+      if (k === keep) return true
+      removed.push(k)
+      return false
+    })
+    if (dock[side].cards.length === before) return 0
+    if (dock.solo[side] !== null && !dock[side].cards.some((e) => dockKey(e) === dock.solo[side])) {
+      dock.solo[side] = null
+    }
+    for (const k of removed) {
+      delete dock.pinnedCards[k]
+      delete dock.collapsedCards[k]
+    }
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+    return before - dock[side].cards.length
+  }
+
+  /** 关闭其他窗口（保留 `key` 这一张；家具不受影响） */
+  function closeOtherWindows(side: 'left' | 'right', key: string): boolean {
+    if (!isWindowEntry(side, key)) return false
+    return removeWindows(side, key) > 0
+  }
+
+  /** 关闭全部窗口（这一槽的；家具不受影响） */
+  function closeAllWindows(side: 'left' | 'right'): boolean {
+    return removeWindows(side, null) > 0
   }
 
   /** 最后一个块窗口的下标；没有窗口 ⇒ -1（新窗口插到槽顶） */
@@ -238,12 +349,62 @@ export function setupDocks(deps: DocksDeps) {
 
   /* ------------------------------------------------------------ 重画 */
 
+  /**
+   * 启动清理（每个启动段只跑一次）：非 pin 的块窗口卡不留到这一轮。
+   *
+   * 判据在 `pruneEphemeralWindows`（core 纯函数，这里供它块模型知识：组件块是家具）。
+   * 顺手清掉指向被清卡的 solo 与收起键——留着的都是不再指任何东西的垃圾。
+   * 挂在首次重画上而不是装配体里：装配早于持久化段，那里拿不到保存入口；
+   * 首次重画时依赖都已就位，清完当场落盘。清过了就不再动（幂等）。
+   */
+  let pruned = false
+  function pruneOnBoot(): void {
+    if (pruned) return
+    pruned = true
+    const dock = deps.prefs().dock
+    const isWidget = (id: string) => {
+      const b = deps.kb.get(id)
+      return b !== undefined && isWidgetBlock(b)
+    }
+    const removed = new Set<string>()
+    for (const side of ['left', 'right'] as const) {
+      const before = dock[side].cards
+      const after = pruneEphemeralWindows(before, dock.pinnedCards, isWidget)
+      if (after.length === before.length) continue
+      for (const e of before) if (!after.includes(e)) removed.add(dockKey(e))
+      dock[side].cards = after
+    }
+    if (removed.size === 0) return
+    for (const side of ['left', 'right'] as const) {
+      if (dock.solo[side] !== null && removed.has(dock.solo[side]!)) dock.solo[side] = null
+    }
+    for (const k of removed) delete dock.collapsedCards[k]
+    deps.scheduleDeviceSave()
+  }
+
   function renderDocks(): void {
+    pruneOnBoot()
     ensureCardDrops()
     ensureTileCols()
     const { left, right } = deps.getSlots()
     renderSlot('left', left)
     renderSlot('right', right)
+    syncFoldAllButton('left')
+    syncFoldAllButton('right')
+  }
+
+  /**
+   * 槽头「收起所有／展开所有」的图标随状态翻面：有展开的卡 ⇒ 收起全部，全收着 ⇒ 展开全部。
+   * 单卡下其它卡是隐藏的不是收起的——此时仍然是「收起全部」（点它顺带退出单卡）。
+   */
+  function syncFoldAllButton(side: 'left' | 'right'): void {
+    const dock = deps.prefs().dock
+    const anyExpanded = dock[side].cards.some((e) => !dock.collapsedCards[dockKey(e)])
+    const el = deps.getSlots()[side].foldAllEl
+    const icon = anyExpanded ? 'lucide:chevrons-down-up' : 'lucide:chevrons-up-down'
+    if (el.dataset.icon !== icon) renderIcon(el, icon, 'chevrons-down-up')
+    el.title = anyExpanded ? t('ui.dock.foldAll') : t('ui.dock.unfoldAll')
+    el.setAttribute('aria-label', el.title)
   }
 
   function renderSlot(side: 'left' | 'right', slot: DockSlotEls): void {
@@ -452,8 +613,9 @@ export function setupDocks(deps: DocksDeps) {
     const { left, right } = deps.getSlots()
     if (!left?.stack || !right?.stack) return
     dropsBound = true
-    bindWindowDrop(left.root, (id) => deps.kb.get(id) !== undefined, (id) => openWindow('left', id))
-    bindWindowDrop(right.root, (id) => deps.kb.get(id) !== undefined, (id) => openWindow('right', id))
+    // 拖进来＝钉住（pin 缺省常驻）；Shift+点／命令打开＝看一眼（不 pin，重启即清）
+    bindWindowDrop(left.root, (id) => deps.kb.get(id) !== undefined, (id) => openWindow('left', id, 'drop'))
+    bindWindowDrop(right.root, (id) => deps.kb.get(id) !== undefined, (id) => openWindow('right', id, 'drop'))
     bindCardStack(left.stack, 'left')
     bindCardStack(right.stack, 'right')
   }
@@ -561,11 +723,70 @@ export function setupDocks(deps: DocksDeps) {
     deps.scheduleBadge()
   }
 
+  /**
+   * 把一张窗口卡**原地**换成看它的一个祖先（点卡头面包屑的一段）。
+   *
+   * 「原地」是这张卡的导航，不是开新窗：`cards` 里的位置不动，
+   * pin／收起／单卡都跟着卡走（换的只是「这张卡看谁」）。
+   * 目标已经有窗口 ⇒ 不动清单，滚到那张（同一块全局最多一个窗口）。
+   */
+  function navigateWindow(side: 'left' | 'right', fromId: string, toBlockId: string): void {
+    if (!findInForest(deps.getWs().blocks, toBlockId)) return
+    const dock = deps.prefs().dock
+    const toKey = dockKey({ kind: 'block', block: toBlockId })
+    const existing = findSide(toKey)
+    if (existing) {
+      reveal(existing, toBlockId)
+      return
+    }
+    const fromKey = dockKey({ kind: 'block', block: fromId })
+    const i = dock[side].cards.findIndex((e) => dockKey(e) === fromKey)
+    if (i < 0) return
+    dock[side].cards[i] = { kind: 'block', block: toBlockId }
+    if (dock.pinnedCards[fromKey]) {
+      dock.pinnedCards[toKey] = true
+      delete dock.pinnedCards[fromKey]
+    }
+    if (dock.collapsedCards[fromKey]) {
+      dock.collapsedCards[toKey] = true
+      delete dock.collapsedCards[fromKey]
+    }
+    if (dock.solo[side] === fromKey) dock.solo[side] = toKey
+    renderDocks()
+    reveal(side, toBlockId)
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+  }
+
   /** 卡头标题：窗口显示块的**路径**（父 > 父），不重复正文 */
   function windowLabel(id: string): string {
     const path = kb.pathOf(id)
     if (path.length === 0) return ''
     return path.map(blockLabel).join(' / ')
+  }
+
+  /**
+   * 把一个块已打开的窗口**移到它那一槽窗口组的最前**（「置顶」）。
+   *
+   * 置顶是一个动作不是状态：位置住在 `cards` 的序里，pin（常驻）是另一位，两者正交。
+   * 窗口组从第一张块卡算起——命令小卡聚在前面，置顶不该把一张窗口插进小卡那一排。
+   * 目标没有开着的窗口 ⇒ false（命令面板里这条对当前块不可用）。
+   */
+  function topWindow(blockId: string): boolean {
+    const side = findSide(dockKey({ kind: 'block', block: blockId }))
+    if (!side) return false
+    const dock = deps.prefs().dock
+    const cards = dock[side].cards
+    const i = cards.findIndex((e) => e.kind === 'block' && e.block === blockId)
+    if (i < 0) return false
+    const firstWindow = cards.findIndex((e) => e.kind === 'block')
+    const entry = cards.splice(i, 1)[0]!
+    cards.splice(firstWindow < 0 ? cards.length : firstWindow, 0, entry)
+    renderDocks()
+    reveal(side, blockId)
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+    return true
   }
 
   /**
@@ -597,7 +818,15 @@ export function setupDocks(deps: DocksDeps) {
     closeCard,
     addTile,
     addDerived,
-    /** 卡片状态/标题给窗口管理器用（窗口卡由它自己建） */
+    toggleFoldAll,
+    topWindow,
+    closeOtherWindows,
+    closeAllWindows,
+    navigateWindow,
+    /** 窗口卡面包屑要的祖先链（id ＋ 显示名，逐段可点） */
+    crumbs: (blockId: string): { id: string; label: string }[] =>
+      kb.pathOf(blockId).map((b) => ({ id: b.id, label: blockLabel(b) })),
+    /** 卡头状态/标题给窗口管理器用（窗口卡由它自己建） */
     cardStateFor,
     windowLabel,
     /**

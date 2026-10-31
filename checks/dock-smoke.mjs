@@ -1580,16 +1580,20 @@ await check('A24 卡头右侧同构：每张卡都是「单卡／关闭」两格
 
   const columns = { left: { close: new Set(), solo: new Set() }, right: { close: new Set(), solo: new Set() } }
   for (const c of m) {
-    // 卡头只有三颗：收起（最左）＋ 单卡 ＋ 关闭。**不许有「本卡专属动作」**：
-    // 多一颗就会把那一列图标推歪，而卡头是跨卡扫视的区域。
-    const right = c.btns.filter((b) => b.action !== 'collapse')
+    // 卡头：收起（最左）＋ 常驻（仅窗口卡，紧挨收起）＋ 单卡 ＋ 关闭。
+    // 常驻放左侧是有意的：solo／关闭的 x 是跨卡对齐的列不变量，右侧多一颗就会把家具卡推歪。
+    // **不许有「本卡专属动作」**：同理，作用于内容的动作长在 body 里。
+    const right = c.btns.filter((b) => b.action !== 'collapse' && b.action !== 'pin')
     assert(
-      c.btns.length === 3 && right.length === 2,
-      `${c.id}（${c.kind}）：卡头应只有 收起／单卡／关闭 三颗，实际 ${JSON.stringify(c.btns)}`,
+      right.length === 2 && (c.kind === 'window' ? c.btns.length === 4 : c.btns.length === 3),
+      `${c.id}（${c.kind}）：卡头应有 收起${c.kind === 'window' ? '／常驻' : ''}／单卡／关闭，实际 ${JSON.stringify(c.btns)}`,
     )
     const close = right.find((b) => b.action === 'close')
     const solo = right.find((b) => b.action === 'solo')
-    assert(close && solo, `${c.id}：右侧应是单卡 ＋ 关闭：${JSON.stringify(c.btns)}`)
+    const pin = right.find((b) => b.action === 'pin') ?? c.btns.find((b) => b.action === 'pin')
+    assert(close && solo, `${c.id}：右侧应有单卡＋关闭：${JSON.stringify(c.btns)}`)
+    assert(c.kind !== 'window' || pin, `${c.id}：窗口卡必须有常驻开关：${JSON.stringify(c.btns)}`)
+    assert(c.kind === 'window' || !pin, `${c.id}：家具卡不给常驻开关：${JSON.stringify(c.btns)}`)
     // 判据是「看得见的最右一颗贴内容区右缘」：关闭若靠 opacity 藏起来仍占位，
     // 它左边那颗（单卡）就会离右缘差一格——一列卡看下来是一条虚的边。
     assert(close.op > 0, `${c.id}：关闭不能靠「透明但仍占位」隐藏：${JSON.stringify(close)}`)
@@ -1617,6 +1621,203 @@ await check('A24 卡头右侧同构：每张卡都是「单卡／关闭」两格
 
   await ctx.close()
   return `${m.length} 张卡（${[...new Set(m.map((c) => c.kind))].join('/')}）：左槽关闭 x=${[...columns.left.close][0]}、右槽 x=${[...columns.right.close][0]}；关闭右缘＝内容区右缘`
+})
+
+/* ---------------------------------------------------------------- A25 */
+
+await check('A25 常驻：Shift+点开的窗口重启即清、pin 过的保留；置顶移到窗口组最前；槽头有收起全部', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  // 开两个窗口（Shift+点＝「看一眼」，缺省不 pin），把第二个 pin 住
+  const ids = await page.evaluate(() =>
+    window.__qua
+      .blocks()
+      .filter((x) => !x.todo && x.text.length > 2)
+      .slice(0, 2)
+      .map((x) => x.id),
+  )
+  assert(ids.length === 2, `前置：应有两个可开的块：${JSON.stringify(ids)}`)
+  for (const id of ids) {
+    // 窗口里可能装着同块的镜像（父子块开窗），主编辑器那份在 DOM 前面——点它，不点岛里的
+    await page.locator(`.blk[data-block-id="${id}"] > .left > .marker`).first().click({ modifiers: ['Shift'] })
+    await page.waitForTimeout(120)
+  }
+  let snap = await page.evaluate(() => window.__qua.snapshot().dock)
+  assert(!snap.pinned.includes(ids[0]) && !snap.pinned.includes(ids[1]), `Shift+点开的窗口缺省不 pin：${JSON.stringify(snap.pinned)}`)
+
+  // 卡头常驻开关：点第二张窗口卡的 pin，aria-pressed 翻 true、prefs 落键
+  const pinBtn = page.locator(`.dock-card[data-card-id="${ids[1]}"] > .dock-card-head [data-dock-action="pin"]`)
+  assert(await pinBtn.count(), '窗口卡应有常驻开关')
+  assert((await pinBtn.getAttribute('aria-pressed')) === 'false', '缺省未 pin')
+  await pinBtn.click()
+  await page.waitForTimeout(120)
+  assert((await pinBtn.getAttribute('aria-pressed')) === 'true', '点击后应翻成已 pin')
+  snap = await page.evaluate(() => window.__qua.snapshot().dock)
+  assert(snap.pinned.includes(ids[1]), `pin 应写进 prefs：${JSON.stringify(snap.pinned)}`)
+
+  // 置顶：把 ids[0] 的窗口移到窗口组最前（在 ids[1] 之前）
+  await page.evaluate((id) => window.__qua.invoke('core.dock/top-window', { blockId: id }), ids[0])
+  const order = await page.evaluate(
+    () => [...document.querySelectorAll('#dock-right-stack > .dock-card[data-window]')].map((c) => c.dataset.cardId),
+  )
+  assert(order.indexOf(ids[0]) < order.indexOf(ids[1]), `置顶后 ids[0] 应在 ids[1] 之前：${JSON.stringify(order)}`)
+
+  // 槽头「收起所有卡」：两槽骨架里都有按钮，点右槽的 ⇒ 全部收起 + 退出单卡
+  for (const side of ['left', 'right']) {
+    assert(await page.locator(`#dock-${side} .dock-head .dock-foldall`).count(), `${side} 槽头应有收起全部按钮`)
+  }
+  await page.click('#dock-right .dock-head .dock-foldall')
+  await page.waitForTimeout(120)
+  const folded = await page.evaluate(
+    () => [...document.querySelectorAll('#dock-right-stack > .dock-card')].filter((c) => c.dataset.collapsed === '1').length,
+  )
+  const rightCards = await page.evaluate(() => document.querySelectorAll('#dock-right-stack > .dock-card').length)
+  assert(folded === rightCards && rightCards > 0, `收起全部后每张卡都该是收起态：${folded}/${rightCards}`)
+
+  // 重启（同页 reload ＝ 同一份设备状态重新走启动段）：未 pin 的窗口清掉，pin 过的回来
+  await page.reload()
+  await page.waitForTimeout(400)
+  snap = await page.evaluate(() => window.__qua.snapshot().dock)
+  const winIds = await page.evaluate(() =>
+    [...document.querySelectorAll('#dock-right-stack > .dock-card[data-window]')].map((c) => c.dataset.cardId),
+  )
+  assert(!winIds.includes(ids[0]), `未 pin 的窗口重启后应清掉：${JSON.stringify(winIds)}`)
+  assert(winIds.includes(ids[1]), `pin 过的窗口重启后应保留：${JSON.stringify(winIds)}`)
+  assert(snap.pinned.includes(ids[1]), `pin 位重启后还在：${JSON.stringify(snap.pinned)}`)
+
+  await ctx.close()
+  return `开两窗 → pin 其一 → 置顶另一窗 → 收起全部 → reload：未 pin 消失、pin 保留（${ids[1].slice(0, 6)}…）`
+})
+
+/* ---------------------------------------------------------------- A26 */
+
+await check('A26 卡头交互：左键头部＝折叠/展开这张卡；右键头部＝卡片菜单，「关闭其他窗口」只动窗口', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const id = await page.evaluate(
+    () => window.__qua.blocks().find((x) => !x.todo && x.text.length > 2)?.id ?? '',
+  )
+  assert(id, '前置：应有一个可开的块')
+  // 左键头部（标题区，不落在按钮上）＝折叠
+  const title = page.locator(`.dock-card[data-card-id="backrefs"] > .dock-card-head .dock-card-title`)
+  await title.click()
+  await page.waitForTimeout(120)
+  let collapsed = await page.evaluate(
+    () => document.querySelector('.dock-card[data-card-id="backrefs"]')?.dataset.collapsed,
+  )
+  assert(collapsed === '1', `左键头部应收起这张卡：${collapsed}`)
+  await title.click()
+  await page.waitForTimeout(120)
+  collapsed = await page.evaluate(
+    () => document.querySelector('.dock-card[data-card-id="backrefs"]')?.dataset.collapsed,
+  )
+  assert(!collapsed, `再点应展开：${collapsed}`)
+
+  // 开两个窗口，右键其中一个的头 → 菜单里「关闭其他窗口」把另一张清掉，家具卡不动
+  const ids = await page.evaluate(() =>
+    window.__qua
+      .blocks()
+      .filter((x) => !x.todo && x.text.length > 2)
+      .slice(0, 2)
+      .map((x) => x.id),
+  )
+  for (const wid of ids) {
+    await page.locator(`.blk[data-block-id="${wid}"] > .left > .marker`).first().click({ modifiers: ['Shift'] })
+    await page.waitForTimeout(120)
+  }
+  await page.locator(`.dock-card[data-card-id="${ids[0]}"] > .dock-card-head .dock-card-title`).click({
+    button: 'right',
+  })
+  await page.waitForTimeout(150)
+  const menu = await page.evaluate(() =>
+    [...document.querySelectorAll('.layer-list > .layer-item > .layer-label')].map((r) => r.textContent?.trim() ?? ''),
+  )
+  assert(
+    menu.some((t) => t.includes('关闭其他窗口')) && menu.some((t) => t.includes('在正文中打开')),
+    `卡片菜单应有关闭其他/在正文打开：${JSON.stringify(menu)}`,
+  )
+  await page.getByText('关闭其他窗口').click()
+  await page.waitForTimeout(150)
+  const winIds = await page.evaluate(
+    () => [...document.querySelectorAll('#dock-right-stack > .dock-card[data-window]')].map((c) => c.dataset.cardId),
+  )
+  assert(!winIds.includes(ids[1]) && winIds.includes(ids[0]), `应只剩右键的那张窗口：${JSON.stringify(winIds)}`)
+  const derived = await page.evaluate(
+    () => [...document.querySelectorAll('#dock-right-stack > .dock-card')].filter((c) => !c.dataset.window).length,
+  )
+  assert(derived > 0, '家具卡（派生卡）不应被关闭其他窗口波及')
+
+  await ctx.close()
+  return `左键头部折叠/展开 ✓；右键菜单关闭其他窗口：窗口 ${JSON.stringify(winIds)}、家具卡 ${derived} 张保留`
+})
+
+/* ---------------------------------------------------------------- A27 */
+
+await check('A27 单卡展开收着的卡（退出不收回）；面包屑点祖先段＝这张卡原地换看那个祖先', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  // ① 收起反链卡 → 单卡：目标应被顺手展开；退出单卡：仍是展开的（不记第三态）
+  const backrefs = page.locator('.dock-card[data-card-id="backrefs"]')
+  await backrefs.locator('> .dock-card-head .dock-card-title').click() // 收起
+  await page.waitForTimeout(100)
+  assert((await backrefs.getAttribute('data-collapsed')) === '1', '前置：反链卡应收起')
+  await backrefs.locator('> .dock-card-head [data-dock-action="solo"]').click()
+  await page.waitForTimeout(100)
+  assert(await page.locator('#dock-right-stack[data-solo="1"]').count(), '应进入单卡')
+  assert(!(await backrefs.getAttribute('data-collapsed')), '单卡目标应被顺手展开')
+  await backrefs.locator('> .dock-card-head [data-dock-action="solo"]').click()
+  await page.waitForTimeout(100)
+  assert(!(await backrefs.getAttribute('data-collapsed')), '退出单卡后应保持展开（不收回）')
+
+  // ② 面包屑：开一个有**祖先**的子块窗口（depth-2 子／depth-1 父；顶层块没有祖先，
+  //     展开态回落成名字是另一条口径），点祖先段 → 这张卡原地换看祖先（位置不变、不新增窗口）
+  const pair = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#editor .blk')]
+    for (let i = 1; i < rows.length; i++) {
+      if (Number(rows[i].dataset.depth) === 2 && Number(rows[i - 1].dataset.depth) === 1) {
+        return { child: rows[i].dataset.blockId, parent: rows[i - 1].dataset.blockId }
+      }
+    }
+    return null
+  })
+  assert(pair, '前置：应有一对 depth-2/depth-1 父子块')
+  await page.locator(`.blk[data-block-id="${pair.child}"] > .left > .marker`).first().click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(150)
+  const seg = page.locator(`.dock-card[data-card-id="${pair.child}"] .dock-crumbs-seg`, { hasText: /.+/ }).last()
+  assert(await seg.count(), '窗口卡标题应是面包屑（祖先段可点）')
+  await seg.click()
+  await page.waitForTimeout(150)
+  const winIds = await page.evaluate(
+    () => [...document.querySelectorAll('#dock-right-stack .dock-card[data-window]')].map((c) => c.dataset.cardId),
+  )
+  assert(!winIds.includes(pair.child) && winIds.includes(pair.parent), `原地导航应换成祖先块：${JSON.stringify(winIds)}`)
+  assert(
+    winIds.filter((x) => x === pair.parent).length === 1,
+    `不应额外多开一张窗口：${JSON.stringify(winIds)}`,
+  )
+
+  // ③ 头部分层：收着 ⇒ 本体（块名，无面包屑段）；展开 ⇒ 地址（祖先段可点）
+  const head = page.locator(`.dock-card[data-card-id="${pair.parent}"] > .dock-card-head .dock-card-title`)
+  await head.click() // 收起这张卡
+  await page.waitForTimeout(120)
+  const collapsedTitle = await head.evaluate((el) => ({
+    text: el.textContent ?? '',
+    segs: el.querySelectorAll('.dock-crumbs-seg').length,
+  }))
+  assert(collapsedTitle.segs === 0 && collapsedTitle.text.length > 0, `收起时头部应是块名本体：${JSON.stringify(collapsedTitle)}`)
+  await head.click() // 展开
+  await page.waitForTimeout(120)
+  const expandedSegs = await head.evaluate((el) => el.querySelectorAll('.dock-crumbs-seg').length)
+  assert(expandedSegs >= 1, `展开时头部应是可点的祖先链：${expandedSegs}`)
+
+  await ctx.close()
+  return `单卡展开/退出保持 ✓；面包屑：子 ${pair.child.slice(-6)} 原地换成父 ${pair.parent.slice(-6)}；头部分层 ✓`
 })
 
 /* ---------------------------------------------------------------- 不适用项 */

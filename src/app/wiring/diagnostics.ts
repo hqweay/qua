@@ -276,6 +276,7 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
           left: { open: prefs().dock.left.open, width: prefs().dock.left.width, cards: prefs().dock.left.cards.map(dockKey) },
           right: { open: prefs().dock.right.open, width: prefs().dock.right.width, cards: prefs().dock.right.cards.map(dockKey) },
           collapsed: [...Object.keys(prefs().dock.collapsedCards)],
+          pinned: [...Object.keys(prefs().dock.pinnedCards)],
           solo: { ...prefs().dock.solo },
         },
         // 导航历史（不是 undo 栈）：给断言看「能退到哪 / 能进到哪」

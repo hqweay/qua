@@ -50,6 +50,7 @@ function assertDefaults(p: Prefs): void {
       ],
     },
     collapsedCards: {},
+    pinnedCards: {},
     solo: { left: null, right: null },
   })
 }
@@ -149,6 +150,47 @@ test('device: 旧设备状态的 `pins` 只在 `cards` 缺失时并入一次（�
     { kind: 'derived', card: 'calendar' },
     { kind: 'block', block: 'a' },
   ])
+})
+
+test('device: 旧 `pins` 并进来的块窗口就是已 pin（重启清理不碰它们）；缺字段 ⇒ 空 pin 表', async () => {
+  resetMemoryLocalStorage()
+  const legacy = freshKey()
+  await createLocalStorageAdapter(legacy).commit({
+    changes: [],
+    payload: JSON.stringify({ prefs: { dock: { left: { open: true, pins: ['a'] } } } }),
+    savedAt: 1,
+  })
+  const loaded = await store(legacy).load()
+  assert.deepEqual(loaded.prefs.dock.pinnedCards, { a: true })
+
+  // 没有 `pins` 也没有 `pinnedCards` 的旧字节 ⇒ 空 pin 表（非 pin 窗口交给启动清理）
+  const bare = freshKey()
+  await createLocalStorageAdapter(bare).commit({
+    changes: [],
+    payload: JSON.stringify({ prefs: { theme: 'light' } }),
+    savedAt: 1,
+  })
+  assert.deepEqual((await store(bare).load()).prefs.dock.pinnedCards, {})
+})
+
+test('device: `pinnedCards` 存了再读原样回来；坏形状（非 true 值／非对象）丢掉', async () => {
+  resetMemoryLocalStorage()
+  const key = freshKey()
+  const s = store(key)
+  const saved = await s.save({
+    prefs: { ...DEFAULT_PREFS, dock: { ...DEFAULT_PREFS.dock, pinnedCards: { b1: true } } },
+    folded: {},
+  })
+  assert.equal(saved.ok, true)
+  assert.deepEqual((await s.load()).prefs.dock.pinnedCards, { b1: true })
+
+  const bad = freshKey()
+  await createLocalStorageAdapter(bad).commit({
+    changes: [],
+    payload: JSON.stringify({ prefs: { dock: { pinnedCards: { b1: false, b2: 'yes', '': true } } } }),
+    savedAt: 1,
+  })
+  assert.deepEqual((await store(bad).load()).prefs.dock.pinnedCards, {})
 })
 
 test('device: 一个 id 不留在两个槽（左先到先得）；solo 指向不在本槽的 id ⇒ 清空', async () => {

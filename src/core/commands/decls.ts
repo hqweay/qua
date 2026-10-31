@@ -144,6 +144,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.dock/toggle-left', title: t('cmd.dock.toggle-left'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dock', 'left', 'panel'] },
   { name: 'core.dock/toggle-right', title: t('cmd.dock.toggle-right'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dock', 'right', 'panel'] },
   { name: 'core.dock/open-block', title: t('cmd.dock.open-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, side: { type: 'string' } }, keywords: ['dock', 'open', 'window', 'sidebar'] },
+  { name: 'core.dock/top-window', title: t('cmd.dock.topWindow'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dock', 'pin', 'top', 'window', 'sidebar'] },
   { name: 'core.view/toggle-virtualize', title: t('cmd.view.toggle-virtualize'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { on: { type: 'boolean' }, radius: { type: 'integer' } }, keywords: ['virtual', 'window', 'DOM'] },
 
   /* ---- 视图配置（块怎么看：表格/看板/…；大纲 ＝ 没有激活视图） ---- */

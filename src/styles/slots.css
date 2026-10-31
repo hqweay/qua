@@ -86,6 +86,13 @@
   overflow-x: hidden; /* 槽内禁横向 */
   display: grid;
   grid-template-columns: repeat(var(--dock-tile-cols, 4), minmax(var(--ui-tile-min), 1fr));
+  /*
+   * 行必须显式按**内容**取值（max-content），不能用缺省的 auto：
+   * 容器定高时，auto 轨道被「塞满容器」的分配行为拿走，卡异步长高（窗口编辑器装载、
+   * 树渲染都晚于首次排版）后行不跟着重算——卡溢出行框，多张卡就叠在一起。
+   * 显式 max-content 让行严格等于卡高，多出的高度交给上面的 overflow-y 滚动。
+   */
+  grid-auto-rows: max-content;
   align-content: start;
   gap: var(--ui-gap-3);
   padding: var(--ui-gap-3);
@@ -280,6 +287,34 @@
 .dock-card-title {
   flex: 1;
 }
+/*
+ * 窗口卡的标题按**折叠态**分层（两层各干一件事，头部永远没有重复信息）：
+ *   收着 ⇒ 本体（块名，普通文本）；展开 ⇒ 地址（祖先链逐段可点，点了原地换看那个祖先）。
+ * 展开态没有祖先（顶层块）⇒ 回落成名字。
+ * 段是 flex item 且允许各自收缩：超长的段自己出省略号——整条链始终在场、
+ * 最近的祖先（最右）永远可点；整行截断会把最右段裁没，点了没有落点。
+ */
+.dock-card-title.dock-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+}
+.dock-crumbs-seg {
+  /* 截断几何归 `.ui-ellipsis` 原语（单行省略），这里只管伸缩与配色 */
+  flex: 0 1 auto;
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  border-radius: var(--ui-radius-sm);
+}
+.dock-crumbs-seg:hover {
+  color: var(--ui-text);
+  background: var(--ui-accent-soft);
+}
 .dock-card-body {
   padding: 0 var(--ui-gap-2) var(--ui-gap-3);
 }
@@ -321,6 +356,19 @@
 .dock-card:focus-within > .dock-card-head [data-dock-action='close'],
 .dock-card-head [data-dock-action='close']:hover,
 .dock-card-head [data-dock-action='close']:focus-visible {
+  opacity: 1;
+}
+/*
+ * 常驻开关与关闭键同一条对比度口径：未 pin 低对比（它不是当前要紧的事），
+ * pin 了常驻满对比——「这张卡重启还在」必须扫一眼就看得到。
+ */
+.dock-card-head [data-dock-action='pin'][aria-pressed='false'] {
+  opacity: 0.45;
+}
+.dock-card:hover > .dock-card-head [data-dock-action='pin'][aria-pressed='false'],
+.dock-card:focus-within > .dock-card-head [data-dock-action='pin'][aria-pressed='false'],
+.dock-card-head [data-dock-action='pin'][aria-pressed='false']:hover,
+.dock-card-head [data-dock-action='pin'][aria-pressed='false']:focus-visible {
   opacity: 1;
 }
 

@@ -347,6 +347,12 @@ export interface App {
    * 同一个块全局最多一个窗口（已在另一侧则移过来）。
    */
   openInDock(id: string, side?: 'left' | 'right'): void
+  /**
+   * **把一个块已打开的窗口置顶**（移到它那一槽窗口组的最前，并滚到它）。
+   *
+   * 置顶是动作不是状态：位置住 `cards` 的序，常驻（pin）是另一位。目标没开着的窗口 ⇒ false。
+   */
+  topWindow(id: string): boolean
   /* 视图配置（`_views` / `_activeView`；视图不是实体，配置住在**拥有者**上） */
   /**
    * 新建一个视图并设为激活，返回它的 id（空串＝没建）。

@@ -77,6 +77,15 @@ export interface DockPrefs {
    */
   collapsedCards: Record<string, true>
   /**
+   * 常驻的窗口卡（**只记 pin 了**的）。pin 的卡重启保留；没 pin 的块窗口卡重启即清
+   * （`pruneEphemeralWindows`）。按卡片实例 key 存（与 `collapsedCards` 同一口径），
+   * 跨槽移动后状态跟着卡走。
+   *
+   * 只作用于**窗口卡**：派生卡／命令小卡／组件卡是槽的家具，永远保留，
+   * 所以没有 pin 位（它们的入口也不会写这张表，UI 不给它们 pin 开关）。
+   */
+  pinnedCards: Record<string, true>
+  /**
    * 单卡（只看这一张）：每侧独立。`null` ＝ 不单卡。
    *
    * 目标不可见时**不生效**（照常显示其它卡）；状态保留，目标回来时自动再生效。
@@ -114,6 +123,7 @@ export const DEFAULT_DOCK: DockPrefs = {
     ],
   },
   collapsedCards: {},
+  pinnedCards: {},
   solo: { left: null, right: null },
 }
 
@@ -148,13 +158,21 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
       ? slot.pins.filter((id): id is string => typeof id === 'string' && id !== '')
       : []
 
-  const pick = (slot: Partial<DockSlotPrefs> | undefined, fallback: DockSlotPrefs, pins: string[]): DockSlotPrefs => {
+  const pick = (
+    slot: Partial<DockSlotPrefs> | undefined,
+    fallback: DockSlotPrefs,
+    pins: string[],
+  ): DockSlotPrefs & { legacyPinned: string[] } => {
     // `cards` 缺失 ⇒ 默认布局 ＋ 旧 `pins`；存在就只认它（逐项归一，坏项丢掉）
-    const cards = canonicalDockEntries(Array.isArray(slot?.cards) ? slot.cards : [...fallback.cards, ...pins])
+    const hasCards = Array.isArray(slot?.cards)
+    const cards = canonicalDockEntries(hasCards ? slot!.cards : [...fallback.cards, ...pins])
     return {
       open: typeof slot?.open === 'boolean' ? slot.open : fallback.open,
       width: typeof slot?.width === 'number' && Number.isFinite(slot.width) ? slot.width : null,
       cards,
+      // 旧「钉住清单」是今天 pin 的前身：被钉住的窗口重启清理不碰。
+      // 只在它真的并进 cards 时认（`cards` 一旦存在就只认它，旧 pins 整体作废）。
+      legacyPinned: hasCards ? [] : pins,
     }
   }
 
@@ -171,6 +189,14 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
   if (dock?.collapsedCards && typeof dock.collapsedCards === 'object' && !Array.isArray(dock.collapsedCards)) {
     for (const [k, v] of Object.entries(dock.collapsedCards)) if (v === true && k !== '') collapsedCards[k] = true
   }
+  const pinnedCards: Record<string, true> = {}
+  if (dock?.pinnedCards && typeof dock.pinnedCards === 'object' && !Array.isArray(dock.pinnedCards)) {
+    for (const [k, v] of Object.entries(dock.pinnedCards)) if (v === true && k !== '') pinnedCards[k] = true
+  }
+  // 旧钉住清单并进来的块窗口＝已 pin（表里只留真的在 cards 里的键）
+  for (const id of [...left.legacyPinned, ...right.legacyPinned]) {
+    if (left.cards.some((e) => dockKey(e) === id) || right.cards.some((e) => dockKey(e) === id)) pinnedCards[id] = true
+  }
   const solo = (side: 'left' | 'right', cards: DockEntry[]): string | null => {
     const id = dock?.solo?.[side]
     return typeof id === 'string' && id !== '' && cards.some((e) => dockKey(e) === id) ? id : null
@@ -184,9 +210,11 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     // 日记面板的栏：逐项重建（坏项丢掉），与 `_mounts` 共用同一份判据
     journalMounts: canonicalMountEntries(p.journalMounts),
     dock: {
-      left,
-      right,
+      // `legacyPinned` 只在归一内部用，不进落盘形状
+      left: { open: left.open, width: left.width, cards: left.cards },
+      right: { open: right.open, width: right.width, cards: right.cards },
       collapsedCards,
+      pinnedCards,
       solo: { left: solo('left', left.cards), right: solo('right', right.cards) },
     },
     railOpen: undefined,

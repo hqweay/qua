@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, DERIVED_CARDS, dockKey, type Block, type CtxKeys, type DerivedCardId, type TriggerChar } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  isWidgetBlock, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, DERIVED_CARDS, dockKey, type Block, type CtxKeys, type DerivedCardId, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { checkExternalUrl, rejectText } from './core/link.ts'
 import { BlockStore } from './core/store.ts'
@@ -329,7 +329,7 @@ function uiCtx(): CtxKeys {
 
 /* ------------------------------------------------------------ 槽内容 */
 
-const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, windowLabel, setWindows, widgetDeps: dockWidgetDeps } = setupDocks({
+const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, windowLabel, setWindows, toggleFoldAll, topWindow, closeOtherWindows, closeAllWindows, navigateWindow, crumbs: dockCrumbs, widgetDeps: dockWidgetDeps } = setupDocks({
   kb,
   prefs,
   applyChrome: () => applyChrome(),
@@ -341,6 +341,7 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, w
   // 检视卡在面板分片里创建并挂进右槽堆叠；这里只在重画时取它（它必须已经在文档里）
   inspectCard: () => chrome.inspectCardEl,
   pickBlock: (collectionId, anchor) => showCollectionPicker(collectionId, anchor),
+  showCardMenu: (side, key, anchor) => showCardMenu(side, key, anchor),
 })
 
 const { chrome, editorEl, applyChrome, resolvedTheme, dockMinWidth, dockMaxWidth, badge, scheduleBadge, markBooted } = setupChrome({
@@ -1274,6 +1275,7 @@ const app: App = {
   }),
   removeAtom: (runId) => ed.removeRun(runId),
   openInDock: (id, side) => openWindow(side === 'left' ? 'left' : 'right', id),
+  topWindow: (id) => topWindow(id),
 
   /**
    * **块菜单里的「视图…」**：大纲 ＋ 这个块已有的视图 ＋「新建」（两种表）＋（结构映射表时）排序。
@@ -2083,6 +2085,77 @@ function paintStaticCopy(): void {
 }
 
 /**
+ * 卡头右键菜单：**这张卡**的动作（折叠／只看／常驻／置顶／在正文打开）＋
+ * 这一槽的批量动作（关闭其他/全部窗口、收起/展开全部）。
+ *
+ * 动态菜单：行按这张卡此刻的状态现画（与「视图…」菜单同一条纪律——
+ * 菜单项是数据现画的，选中之后写路径仍走命令面／装配层的同一处入口）。
+ * 关闭类动作只数**窗口卡**：派生卡／组件卡／命令小卡是家具，有自己的 ✕。
+ */
+function showCardMenu(side: 'left' | 'right', key: string, anchor: DOMRect): void {
+  const st = cardStateFor(side, key)
+  const dock = prefs().dock
+  const entry = dock[side].cards.find((e) => dockKey(e) === key)
+  const b = entry?.kind === 'block' ? kb.get(entry.block) : undefined
+  const isWindow = b !== undefined && !isWidgetBlock(b)
+  const blockId = b?.id ?? ''
+  const windows = dock[side].cards.filter((e) => {
+    if (e.kind !== 'block') return false
+    const w = kb.get(e.block)
+    return w !== undefined && !isWidgetBlock(w)
+  })
+  const anyExpanded = dock[side].cards.some((e) => !dock.collapsedCards[dockKey(e)])
+  const rows: Row[] = [
+    { id: 'toggle', label: st.collapsed ? t('ui.dock.expandCard') : t('ui.dock.collapseCard') },
+    { id: 'solo', label: st.solo ? t('ui.dock.unsoloCard') : t('ui.dock.soloCard') },
+    ...(isWindow
+      ? [
+          { id: 'pin', label: st.pinned ? t('ui.dock.unpinCard') : t('ui.dock.pinCard') },
+          { id: 'top', label: t('cmd.dock.topWindow') },
+          { id: 'focus', label: t('ui.dock.focusInEditor') },
+        ]
+      : []),
+    { id: 'closeOthers', label: t('ui.dock.closeOtherWindows'), disabled: windows.length <= 1 },
+    { id: 'closeAll', label: t('ui.dock.closeAllWindows'), disabled: windows.length === 0 },
+    { id: 'foldAll', label: anyExpanded ? t('ui.dock.foldAll') : t('ui.dock.unfoldAll') },
+  ]
+  layers.openMenu({
+    rows,
+    anchor,
+    searchable: false,
+    emptyText: t('ui.dock.tileGalleryEmpty'),
+    onPick: (row) => {
+      switch (row.id) {
+        case 'toggle':
+          st.onToggleCollapse()
+          return
+        case 'solo':
+          st.onToggleSolo()
+          return
+        case 'pin':
+          st.onTogglePin?.()
+          return
+        case 'top':
+          void registry.invoke('core.dock/top-window', { blockId }, 'dock')
+          return
+        case 'focus':
+          void registry.invoke('core.block/focus-block', { blockId }, 'dock')
+          return
+        case 'closeOthers':
+          closeOtherWindows(side, key)
+          return
+        case 'closeAll':
+          closeAllWindows(side)
+          return
+        case 'foldAll':
+          toggleFoldAll(side)
+          return
+      }
+    },
+  })
+}
+
+/**
  * 「添加组件」画廊：复用命令面板的列表/搜索/键盘。
  *
  * 两类条目共用一张列表：
@@ -2196,20 +2269,24 @@ const dockLeft = mountDockSlot($('dock-left'), {
   title: t('ui.dock.leftTitle'),
   addLabel: t('ui.dock.addTile'),
   collapseLabel: t('ui.dock.collapseLeft'),
+  foldAllLabel: t('ui.dock.foldAll'),
   resizeLabel: t('ui.dock.resize'),
   icon: 'lucide:chevron-left',
   onAdd: () => showWidgetGallery('left'),
   onCollapse: () => registry.invoke('core.dock/toggle-left', {}, 'dock'),
+  onFoldAll: () => toggleFoldAll('left'),
 })
 const dockRight = mountDockSlot($('dock-right'), {
   side: 'right',
   title: t('ui.dock.rightTitle'),
   addLabel: t('ui.dock.addTile'),
   collapseLabel: t('ui.dock.collapseRight'),
+  foldAllLabel: t('ui.dock.foldAll'),
   resizeLabel: t('ui.dock.resize'),
   icon: 'lucide:chevron-right',
   onAdd: () => showWidgetGallery('right'),
   onCollapse: () => registry.invoke('core.dock/toggle-right', {}, 'dock'),
+  onFoldAll: () => toggleFoldAll('right'),
 })
 
 /**
@@ -2227,6 +2304,9 @@ const dockWindowsDeps = (side: 'left' | 'right'): ConstructorParameters<typeof D
   write: (fn) => run(fn, ed),
   kb,
   label: windowLabel,
+  // 卡头面包屑：祖先链逐段可点，点了这张卡原地换看那个祖先
+  crumbs: (blockId) => dockCrumbs(blockId),
+  onCrumb: (fromId, toBlockId) => navigateWindow(side, fromId, toBlockId),
   onClose: (blockId) => closeCard(side, blockId),
   /**
    * 窗口编辑器也接**整份** `viewEvents`（与挂载区/查询结果同一条口径）。

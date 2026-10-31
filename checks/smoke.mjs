@@ -4434,7 +4434,7 @@ await check('T47 槽内连续输入不被整槽重画打断；⌘Z 在槽里回�
   return `逐键输入保持连续；⌘Z 后正文与槽同时回滚`
 })
 
-await check('T48 祖先和后代都打开 ⇒ 两张窗口都显示（窗口是显式的）；清单随 prefs 落盘，重开后仍在', async () => {
+await check('T48 祖先和后代都打开 ⇒ 两张窗口都显示（窗口是显式的）；pin 过的清单随 prefs 落盘，重开后仍在', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -4479,6 +4479,11 @@ await check('T48 祖先和后代都打开 ⇒ 两张窗口都显示（窗口是�
   assert(leftId, '应能找到一个不在右槽里的块，用来验左槽窗口')
   await dragBlockToDock(page, leftId, 'left')
   await page.waitForTimeout(400)
+  // 常驻口径：Shift+点开的窗口重启即清——要原样回来就 pin 住（拖进左槽那张已由动作 pin 过）
+  for (const wid of [nested.child, nested.parent]) {
+    await page.locator(`.dock-card[data-card-id="${wid}"] > .dock-card-head [data-dock-action="pin"]`).click()
+  }
+  await page.waitForTimeout(140)
   const saved = await dockState(page)
   const reopened = await reopenPage(browser, ctx, base, page)
   await reopened.page.waitForTimeout(220)

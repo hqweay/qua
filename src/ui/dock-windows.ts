@@ -34,6 +34,10 @@ export interface DockWindowsDeps {
   write: Run
   /** 卡头标题：这个块的路径（显示名由装配层算，UI 不认识地址规则） */
   label: (blockId: string) => string
+  /** 面包屑的祖先链（id ＋ 显示名，含这一块自己）；UI 只逐段画，不认地址规则 */
+  crumbs: (blockId: string) => { id: string; label: string }[]
+  /** 点了面包屑的一段：这张卡原地换成看那个祖先（装配层判「已在别处开着」） */
+  onCrumb: (fromId: string, toBlockId: string) => void
   /** 关闭窗口（**不删块**） */
   onClose: (blockId: string) => void
   /**
@@ -77,16 +81,56 @@ export class DockWindows {
       const block = this.deps.kb.get(id)
       if (!block) continue
       const w = this.ensure(id, block)
-      const title = w.card.querySelector<HTMLElement>('.dock-card-title')
-      if (title) {
-        const text = this.deps.label(id)
-        if (title.textContent !== text) title.textContent = text
-        title.title = text
-      }
-      applyDockCardState(w.card, this.deps.cardState(id))
+      const state = this.deps.cardState(id)
+      this.syncTitle(w.card, id, state.collapsed === true)
+      applyDockCardState(w.card, state)
       out.set(id, w.card)
     }
     return out
+  }
+
+  /**
+   * 卡头标题按**卡的折叠态**分层，两层各自只干一件事：
+   *   · 收着 ⇒ **本体**（这一块的名字）：头是收起卡唯一的信息源，答案「这是谁」；
+   *   · 展开 ⇒ **地址**（祖先链逐段可点，点了原地换看那个祖先）：正文已经显示是谁了，
+   *     头专职导航——这样头部永远没有重复信息（收起时没正文，展开时没本体）。
+   * 展开态没有祖先（顶层块）⇒ 回落成名字，头不留空。
+   * 只在真的变了时重建：头部不是编辑器，重建安全，但没必要每键一次重画一遍。
+   */
+  private syncTitle(card: HTMLElement, id: string, collapsed: boolean): void {
+    const title = card.querySelector<HTMLElement>('.dock-card-title')
+    if (!title) return
+    const crumbs = this.deps.crumbs(id)
+    const self = crumbs[crumbs.length - 1]
+    const ancestors = crumbs.slice(0, -1)
+    const key = `${collapsed ? 'c' : 'e'}:${crumbs.map((c) => c.id).join('>')}`
+    if (title.dataset.crumbs === key) return
+    title.dataset.crumbs = key
+    title.textContent = ''
+    if (collapsed || ancestors.length === 0) {
+      title.classList.remove('dock-crumbs')
+      title.textContent = self?.label ?? ''
+      title.title = self?.label ?? ''
+      return
+    }
+    title.classList.add('dock-crumbs')
+    title.title = ''
+    for (const c of ancestors) {
+      const seg = document.createElement('button')
+      seg.type = 'button'
+      // 截断形状走「单行省略」原语（primitives.css 唯一定义处）；这里只管颜色与伸缩
+      seg.className = 'dock-crumbs-seg ui-ellipsis'
+      seg.textContent = c.label
+      seg.title = c.label
+      seg.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.deps.onCrumb(id, c.id)
+      })
+      title.appendChild(seg)
+      title.appendChild(document.createTextNode(' / '))
+    }
+    // 末尾的分隔线去掉：地址链到此为止，后面是正文自己的事
+    title.lastChild?.remove()
   }
 
   private ensure(id: string, block: Block): { block: EditableBlock; card: HTMLElement } {
@@ -122,6 +166,8 @@ export class DockWindows {
         title: this.deps.label(id),
         body: win.root,
         draggable: true,
+        // 只有窗口卡有「常驻」开关：派生卡／组件卡／命令小卡是槽的家具，永远保留
+        pinnable: true,
         close: { title: t('ui.dock.closeWindow'), onClick: () => this.deps.onClose(id) },
       },
       this.deps.cardState(id),

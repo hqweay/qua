@@ -35,13 +35,15 @@ export interface DockCard {
    *
    * 卡头是**跨卡扫视**的一块区域：多一颗按钮，那一列的图标就会错开，而用户扫的是一列卡，
    * 不是一张卡。所以作用于**内容**的动作（回到本月、清空回收站…）长在 body 里、
-   * 贴着它作用的那件东西；卡头只留「这张卡」的三个控件（收起／单卡／关闭），每张卡同构。
+   * 贴着它作用的那件东西；卡头只留「这张卡」的控件（收起／单卡／常驻／关闭），每张卡同构。
    */
   body: HTMLElement
   /** 是否可拖（缺省 true） */
   draggable?: boolean
   /** 没有内容：保留位置但隐藏 */
   hidden?: boolean
+  /** 给一颗「常驻」开关（重启保留 vs 只留本会话）；只有窗口卡给——家具没有这件事 */
+  pinnable?: boolean
 }
 
 export interface DockCardAction {
@@ -122,8 +124,14 @@ export interface DockCardState {
   collapsed: boolean
   /** 这张卡就是当前单卡目标 */
   solo: boolean
+  /** 这张卡常驻（重启保留）；只有窗口卡有这一位 */
+  pinned?: boolean
   onToggleCollapse: () => void
   onToggleSolo: () => void
+  /** 缺省（不可 pin 的卡）没有回调，按钮也不会画出来 */
+  onTogglePin?: () => void
+  /** 右键卡头：卡片菜单（折叠／只看／关闭其他…）。锚给菜单定位用 */
+  onHeadMenu?: (anchor: DOMRect) => void
   onDragStart?: (e: DragEvent) => void
 }
 
@@ -140,6 +148,13 @@ export interface DockSlotEls {
    * 拖动行为由 `ui/dock-resize` 接线，槽在这里只负责「有这个节点」。
    */
   resizeEl: HTMLElement
+  /**
+   * 槽头的「收起所有卡／展开所有卡」按钮。
+   *
+   * 折叠全部是**作用于整槽**的动作（与「添加组件」同位），所以住槽头不住卡头；
+   * 图标随状态翻面（有展开的卡 ⇒ 收起全部，全收着 ⇒ 展开全部），由装配层在重画时写。
+   */
+  foldAllEl: HTMLButtonElement
 }
 
 /** 取一个槽的三块 DOM（抬头／标题／堆叠），并做一次存在性断言 */
@@ -148,9 +163,10 @@ export function dockSlotEls(root: HTMLElement): DockSlotEls {
   const titleEl = head?.querySelector<HTMLElement>('.dock-title')
   const stack = root.querySelector<HTMLElement>(':scope > .dock-stack')
   const resizeEl = root.querySelector<HTMLElement>(':scope > .dock-resize')
-  if (!head || !titleEl || !stack || !resizeEl) // 开发者可见的骨架断言（不是用户文案）：与 console.* 同一口径，用英文
-  throw new Error('dock: incomplete slot skeleton (need .dock-head / .dock-title / .dock-stack / .dock-resize)')
-  return { root, head, titleEl, stack, resizeEl }
+  const foldAllEl = head?.querySelector<HTMLButtonElement>('.dock-foldall')
+  if (!head || !titleEl || !stack || !resizeEl || !foldAllEl) // 开发者可见的骨架断言（不是用户文案）：与 console.* 同一口径，用英文
+  throw new Error('dock: incomplete slot skeleton (need .dock-head / .dock-title / .dock-stack / .dock-resize / .dock-foldall)')
+  return { root, head, titleEl, stack, resizeEl, foldAllEl }
 }
 
 const ACTION_ATTR = 'data-dock-action'
@@ -180,13 +196,17 @@ export function buildDockCard(card: DockCard, state: DockCardState): HTMLElement
     cardStates.get(el)?.onDragStart?.(e)
   })
 
+  // 常驻放在**左侧**（紧挨收起）：solo／关闭的 x 是跨卡对齐的（A24 的列不变量），
+  // pin 插在右侧会把家具卡的这两颗推去别的列；插在左边，错位只发生在「卡状态」簇内。
   head.appendChild(collapseButton())
+  if (card.pinnable) head.appendChild(pinButton())
   const title = document.createElement('span')
   title.className = 'dock-card-title ui-ellipsis ui-ellipsis-grow'
   title.textContent = card.title
   head.appendChild(title)
   head.appendChild(soloButton())
   if (card.close) head.appendChild(actionButton({ label: 'lucide:x', ...card.close }))
+  bindHeadToggle(head)
 
   const body = document.createElement('div')
   body.className = 'dock-card-body'
@@ -195,6 +215,27 @@ export function buildDockCard(card: DockCard, state: DockCardState): HTMLElement
   el.append(head, body)
   applyDockCardState(el, state)
   return el
+}
+
+/**
+ * 卡头的**点**与**右键**：左键头部空白（标题）＝折叠/展开，右键＝卡片菜单。
+ *
+ * 头上的按钮各有各的动作，点它们不算「点头」；拖动是 dragstart，与 click 互斥
+ * （拖过的松手不触发 click）。两张来路不同的卡（build／decorate）共用这一份绑定。
+ */
+function bindHeadToggle(head: HTMLElement): void {
+  if (head.dataset.headBound === '1') return
+  head.dataset.headBound = '1'
+  head.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('button')) return
+    const card = head.closest<HTMLElement>('.dock-card')
+    if (card) cardStates.get(card)?.onToggleCollapse()
+  })
+  head.addEventListener('contextmenu', (e) => {
+    e.preventDefault()
+    const card = head.closest<HTMLElement>('.dock-card')
+    if (card) cardStates.get(card)?.onHeadMenu?.(head.getBoundingClientRect())
+  })
 }
 
 /**
@@ -224,6 +265,7 @@ export function decorateDockCard(el: HTMLElement, card: DockCard, state: DockCar
       cardStates.get(el)?.onDragStart?.(e)
     })
   }
+  bindHeadToggle(head)
   applyDockCardState(el, state)
 }
 
@@ -255,6 +297,22 @@ function soloButton(): HTMLButtonElement {
     e.stopPropagation()
     const card = btn.closest<HTMLElement>('.dock-card')
     if (card) cardStates.get(card)?.onToggleSolo()
+  })
+  return btn
+}
+
+/** 常驻开关：pin 了重启保留，没 pin 只留本会话。视觉口径与关闭键一致（未 pin 低对比） */
+function pinButton(): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'dock-btn dock-card-btn'
+  btn.dataset.dockAction = 'pin'
+  btn.setAttribute('aria-pressed', 'false')
+  renderIcon(btn, 'lucide:pin-off', 'pin')
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const card = btn.closest<HTMLElement>('.dock-card')
+    if (card) cardStates.get(card)?.onTogglePin?.()
   })
   return btn
 }
@@ -299,6 +357,13 @@ export function applyDockCardState(el: HTMLElement, state: DockCardState): void 
     solo.title = state.solo ? t('ui.dock.unsoloCard') : t('ui.dock.soloCard')
     const icon = state.solo ? 'lucide:minimize-2' : 'lucide:maximize-2'
     if (solo.dataset.icon !== icon) renderIcon(solo, icon, 'maximize-2')
+  }
+  const pin = el.querySelector<HTMLButtonElement>(`:scope > .dock-card-head [${ACTION_ATTR}="pin"]`)
+  if (pin) {
+    pin.setAttribute('aria-pressed', state.pinned ? 'true' : 'false')
+    pin.title = state.pinned ? t('ui.dock.unpinCard') : t('ui.dock.pinCard')
+    const icon = state.pinned ? 'lucide:pin' : 'lucide:pin-off'
+    if (pin.dataset.icon !== icon) renderIcon(pin, icon, 'pin')
   }
 }
 
@@ -364,10 +429,12 @@ export function mountDockSlot(
     title: string
     addLabel: string
     collapseLabel: string
+    foldAllLabel: string
     resizeLabel: string
     icon: string
     onAdd: () => void
     onCollapse: () => void
+    onFoldAll: () => void
   },
 ): DockSlotEls {
   const els = dockSlotEls(root)
@@ -379,6 +446,11 @@ export function mountDockSlot(
     add.title = opts.addLabel
     add.addEventListener('click', opts.onAdd)
   }
+  // 图标与标题随状态翻面（收起全部 ⇄ 展开全部），由装配层在重画时写；这里只绑一次动作
+  renderIcon(els.foldAllEl, 'lucide:chevrons-down-up', 'chevrons-down-up')
+  els.foldAllEl.setAttribute('aria-label', opts.foldAllLabel)
+  els.foldAllEl.title = opts.foldAllLabel
+  els.foldAllEl.addEventListener('click', opts.onFoldAll)
   const btn = els.head.querySelector<HTMLButtonElement>('.dock-collapse')
   if (btn) {
     renderIcon(btn, opts.icon, 'chevron-left')

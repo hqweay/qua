@@ -89,6 +89,12 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     app.openInDock(id, a.side === 'left' ? 'left' : 'right')
     return true
   },
+  // 置顶当前块已打开的窗口；目标没开窗口 ⇒ false（面板里这条对它不可用）
+  'core.dock/top-window': (a, app) => {
+    const id = typeof a.blockId === 'string' && a.blockId !== '' ? a.blockId : curBlock(app)
+    if (!id) return false
+    return app.topWindow(id)
+  },
   'core.view/toggle-virtualize': (a, app) => {
     const on = typeof a.on === 'boolean' ? a.on : !app.ed.virtualize
     app.setVirtualize(on, typeof a.radius === 'number' ? a.radius : 12)
