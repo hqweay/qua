@@ -4,8 +4,9 @@
  * 两件事分开，各有唯一一份答案：
  *   · `hasQueryBody` —— 这一块有没有「结果身体」（只有查询源有；命中不是 children，
  *     所以就地画不会与正文重复）；
- *   · `rowHasInlineViewBody` —— 这一屏**画不画**它（只有子行画；段根仍走段尾宿主，
- *     否则同一块会挂两台视图宿主）。
+ *   · `rowHasInlineViewBody` —— 这一行画不画它：**按源分派**，有身体就画，
+ *     段根同此（聚焦后身体仍贴着自己那一行；段尾/窗口根宿主只接 children/items 源，
+ *     再建一台就是同一块挂两台）。
  *
  * 高度也要在这里钉：视觉与虚拟化共用 `VIEW_BODY_H`，占位高度少算一档，
  * 长文档的滚动条会系统性偏小（与组件体同一条教训）。
@@ -38,8 +39,8 @@ test('hasQueryBody：只有查询源有结果身体；普通块没有（children
   assert.equal(hasQueryBody(mkBlock('形状歪的', { props: { _query: { nope: true } } })), false, '判据与 readSpec 同源：读不出条件就不是查询块')
 })
 
-test('rowHasInlineViewBody：子行才内联；段根让位给段尾视图宿主', () => {
-  assert.equal(rowHasInlineViewBody(row(0)), false, '段根仍走段尾宿主，不能同时挂两台')
+test('rowHasInlineViewBody：按源分派——查询块就画，段根同此（不再让位段尾宿主）', () => {
+  assert.equal(rowHasInlineViewBody(row(0)), true, '段根也画：聚焦后身体仍贴着自己那一行')
   assert.equal(rowHasInlineViewBody(row(1)), true)
   assert.equal(rowHasInlineViewBody(row(2)), true)
   assert.equal(rowHasInlineViewBody(row(1, mkBlock('普通块'))), false, '只有查询块有身体')

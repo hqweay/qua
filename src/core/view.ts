@@ -425,9 +425,10 @@ export function isViewRoot(b: Block | undefined): boolean {
  * 不会出现「同一批块画两遍」；children 源的视图仍走「打开才渲染」那条口径
  * （见 `设计-查询与视图.md` §7）。
  *
- * ⚠️ 它只回答「有没有身体」。**位置**由渲染层决定：段根仍走段尾宿主，
- *    只有子行才内联（`view/block-dom.ts` 的 `rowHasInlineViewBody`）。
- *    两边分开，是因为「这一块有没有结果视图」与「这一屏怎么摆」是两个问题。
+ * ⚠️ 它只回答「有没有身体」。**位置**由渲染层决定（`view/block-dom.ts` 的
+ *    `rowHasInlineViewBody`：有身体就画在自己行下，段根同此——聚焦后身体
+ *    仍贴着自己那一行）。两边分开，是因为「这一块有没有结果视图」与
+ *    「这一屏怎么摆」是两个问题。
  */
 export function hasQueryBody(b: Block | undefined): boolean {
   return isQueryBlock(b)

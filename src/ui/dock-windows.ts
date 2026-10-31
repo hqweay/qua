@@ -32,7 +32,6 @@ import {
   flatten,
   hasQueryBody,
   isEmbedBlock,
-  isFolded,
   isViewRoot,
   type Block,
   type BlockStore,
@@ -147,11 +146,8 @@ export class DockWindows {
         ed.reloadFromStore()
       },
       wire: (editor, change) => this.deps.wire(editor, change),
-      // 折叠是视图状态，不进事务；但根块的视图体要跟着收/展
-      onChange: (kind) => {
-        if (kind === 'struct') this.applyViewFold(id)
-        this.deps.onChange()
-      },
+      // 折叠是视图状态，不进事务（查询身体的收/展走行自己的 `data-folded`，编辑器画）
+      onChange: () => this.deps.onChange(),
       onFocus: (editor) => this.deps.onFocus(editor),
       // 行首 trail：普通点＝就地展开；展开根的「收起上下文」＝逐层退回（与引用同一条机制）
       onExpandContext: (ancestorId, rowId) => this.expand(id, ancestorId, rowId),
@@ -163,11 +159,15 @@ export class DockWindows {
     /**
      * 身体 = 根行编辑器 ＋（可选）它的视图体。两者同一张卡、同一份 store；
      * 视图体的写 source 是这台窗口编辑器（撤销/重画落在这一张卡里）。
+     *
+     * **查询源的身体不走这里**：它画在根行自己下面（`rowHasInlineViewBody`，
+     * 与正文同一条路）；窗口根宿主只接 children/items 源的视图根 ——
+     * 再建一台就是同一块挂两台。
      */
     const body = document.createElement('div')
     body.className = 'dock-window-body'
     body.appendChild(win.root)
-    const view = isViewRoot(block)
+    const view = isViewRoot(block) && !hasQueryBody(block)
       ? (this.deps.mountViewRoot?.(block, body, () => win.ed ?? undefined) ?? null)
       : null
 
@@ -187,25 +187,9 @@ export class DockWindows {
 
     const w = { block: win, card, view }
     this.windows.set(id, w)
-    this.applyViewFold(id)
     // 首装载带上祖先 trail：没有展开时它只是地址，展开后才出现「收起上下文」
     this.applyPlan(id)
     return w
-  }
-
-  /**
-   * 查询块折起来 ⇒ 根视图体跟着收（`Doc.folded` 是这台窗口编辑器自己的视图状态）。
-   *
-   * 与中心段尾同一条规则；`data-folded` 走 CSS `display:none`，不卸载 ViewHost，
-   * 展开时冻结结果与滚动位置还在。
-   */
-  private applyViewFold(id: string): void {
-    const w = this.windows.get(id)
-    if (!w?.view) return
-    const ed = w.block.ed
-    // 与中心同一条边界：只有**查询块的身体**跟 `Doc.folded`；children 源的激活视图不跟。
-    const body = hasQueryBody(this.deps.kb.get(id))
-    w.view.setFolded(Boolean(body && ed && isFolded(ed.doc, id)))
   }
 
   private dispose(id: string): void {

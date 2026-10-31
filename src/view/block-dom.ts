@@ -127,11 +127,15 @@ export function applyViewBodyHeights(el: HTMLElement): void {
 /**
  * 这一行要不要把查询结果画在自己下面。
  *
- * **只有子行**：段根仍走段尾视图宿主（装配层的 `wantsView`），否则同一块会挂两台。
- * 这条判据同时是递归的构造性截断：结果里的查询块作为根，不会再展开内联体。
+ * **按源分派**：有结果身体（`hasQueryBody`）就画，段根也不例外 —— 聚焦后查询块是
+ * 这一屏唯一的根，身体仍贴着它自己那一行，与它在正文里子行时是同一种画法
+ * （同一个 ViewHost、同一套折叠与高度档）。
+ *
+ * 递归的**构造性截断**不在这条判据上：结果里的查询块由**里层编辑器**画，
+ * 而那一层（挂载区／镜像／查询结果／单元格）在构造上没有 `viewBody` 回调。
  */
 export function rowHasInlineViewBody(r: VisibleRow): boolean {
-  return r.depth > 0 && hasQueryBody(r.block)
+  return hasQueryBody(r.block)
 }
 
 /**
@@ -618,8 +622,8 @@ export function makeBlockEl(
      * 画法（`ViewHost`）在装配层。行内体是另一个编辑宿主（岛），
      * 高度由 `VIEW_BODY_H` 声明，所以虚拟化不用量 DOM。
      *
-     * ⚠️ 只有 `rowHasInlineViewBody` 为真的行才调用；段根不在这里画
-     *    （它仍走段尾宿主，否则同一块会挂两台）。
+     * ⚠️ 只有 `rowHasInlineViewBody` 为真的行才调用（按源分派，段根同此）；
+     *    结果行／里层编辑器在构造上没有这个回调，深度由此截断。
      */
     viewBody?: (b: Block, into: HTMLElement) => void
   },
@@ -635,7 +639,7 @@ export function makeBlockEl(
    */
   const bodyFoldable = Boolean(opts.viewBody) && hasQueryBody(b)
   const foldable = r.hasChildren || bodyFoldable
-  /** 这一行下面是否要画**内联**的身体（子行才画；段根让位给段尾/窗口的视图宿主） */
+  /** 这一行下面是否要画**行内**的身体（按源分派：有结果身体就画，段根同此） */
   const inlineBody = Boolean(opts.viewBody) && rowHasInlineViewBody(r)
   /** gutter 上那个**二元开关**（本轮只认 checkbox；别的 kind 还没定怎么画） */
   const box = opts.gutter?.find((f) => f.kind === 'checkbox')
@@ -1064,9 +1068,15 @@ export function makeBlockEl(
     body.dataset.viewBodyFor = b.id
     applyViewBodyHeights(body)
     /**
+     * **单根屏**（整屏只有这一块）：定高的动机——「别把正文里的别人撑爆」——
+     * 在这里不成立 ⇒ 身体自然高度、整屏滚（CSS 按这一格放开 `height`）。
+     * 虚拟化占位不用跟着改：单根屏只有一行，不存在「窗口外的行」。
+     */
+    if (opts.single) body.dataset.naturalH = '1'
+    /**
      * 折叠时**只藏身体、不卸载**：ViewHost 的冻结结果与滚动位置还在，
      * 展开是瞬间的；卸载会在每次折一下的时候重查一遍。
-     * 与段根/窗口的视图体共用 `data-folded` 这一格（CSS 只认它）。
+     * 所有位置（正文子行／聚焦单根／窗口根行）折的都是这一格 `data-folded`。
      */
     if (folded) body.dataset.folded = '1'
     el.appendChild(body)

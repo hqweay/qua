@@ -1764,8 +1764,8 @@ await check('T11 主题三档 = 真 token 切换（DOM 形状不变；皮肤已�
 await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、刷新按钮才改成员', async () => {
   const { ctx, page } = await freshPage(browser, base)
   /**
-   * **点开那个查询块本身**才看结果：查询视图挂在「被打开的那一块」那一段的段尾
-   * （页面底部不再单列一条结果）。这也是它现在的唯一落点。
+   * **点开那个查询块本身**才看结果（它成为这一屏唯一的根）：结果身体贴在
+   * 它自己那一行下面 —— 与它在正文里子行时是同一种画法。
    */
   const qid = await page.evaluate(() => {
     const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
@@ -2416,40 +2416,58 @@ await check('T195 查询在正文内联渲染：不打开就在原位出结果�
   assert(backToOutline.caret === pageRow, `切回大纲不动光标：${JSON.stringify(backToOutline.caret)}`)
   assert(backToOutline.active.join() === '大纲' && !backToOutline.table, `内联体当场换回大纲：${JSON.stringify(backToOutline)}`)
 
-  // 打开它：这一块成为段根 ⇒ 段尾宿主接手，行内体必须让位（同屏只有一台）
+  /**
+   * 打开它（聚焦成单根）：身体**仍画在自己行下**（按源分派，段根同子行）——
+   * 段尾不再有第二台，行内体也不再「让位」。
+   */
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
   await page.waitForTimeout(500)
   const opened = await page.evaluate((id) => {
     const row = document.querySelector(`.blk[data-block-id="${id}"]`)
+    const body = row?.querySelector(':scope > .blk-view-body')
     const views = [...document.querySelectorAll('.queryview')].filter((v) => !v.hidden)
+    // 定高档的数就写在身体自己身上（`applyViewBodyHeights`）；自然高度＝不等于它
+    const rest = body ? parseFloat(getComputedStyle(body).getPropertyValue('--view-body-rest')) : 0
     return {
-      inline: Boolean(row?.querySelector(':scope > .blk-view-body')),
+      inline: Boolean(body),
+      natural: body?.dataset.naturalH === '1',
+      h: body ? parseFloat(getComputedStyle(body).height) : 0,
+      rest,
       views: views.length,
       mountViews: views.filter((v) => v.closest('.sec-mount')).length,
     }
   }, qid)
-  assert(!opened.inline, '打开后行内体让位给段尾宿主')
-  assert(opened.views === 1 && opened.mountViews === 1, `打开后只应有一台视图宿主：${JSON.stringify(opened)}`)
+  assert(opened.inline, '打开后身体仍在自己行下（行内体，不再让位段尾）')
+  assert(
+    opened.natural && Math.abs(opened.h - opened.rest) > 1,
+    `单根屏的身体按内容撑开（不走定高档）：${JSON.stringify(opened)}`,
+  )
+  assert(opened.views === 1 && opened.mountViews === 0, `打开后只应有一台视图宿主、且不在段尾：${JSON.stringify(opened)}`)
 
-  // 段根也能折：折的是段尾那台视图体（同一份 Doc.folded，与内联体同一个语义）
+  // 单根也能折：折的是自己行下那台视图体（同一份 Doc.folded，与正文子行同一个语义）
   const rootFold = await page.evaluate((id) => {
     const fold = document.querySelector(`.blk[data-block-id="${id}"] > .left > .fold`)
     fold?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
     return Boolean(fold)
   }, qid)
-  assert(rootFold, '段根的查询块也要有折叠三角')
+  assert(rootFold, '单根的查询块也要有折叠三角')
   await page.waitForTimeout(300)
-  const segmentFolded = await page.evaluate(() => {
-    const view = [...document.querySelectorAll('.queryview')].find((v) => !v.hidden)
+  const segmentFolded = await page.evaluate((id) => {
+    const row = document.querySelector(`.blk[data-block-id="${id}"]`)
+    const body = row?.querySelector(':scope > .blk-view-body')
     return {
-      marked: view?.dataset.folded === '1',
-      display: view ? getComputedStyle(view).display : '',
+      rowCollapsed: row?.dataset.collapsed === '1',
+      marked: body?.dataset.folded === '1',
+      display: body ? getComputedStyle(body).display : '',
     }
-  })
-  assert(segmentFolded.marked && segmentFolded.display === 'none', `折段根 ⇒ 段尾视图体收起：${JSON.stringify(segmentFolded)}`)
+  }, qid)
+  assert(
+    segmentFolded.rowCollapsed && segmentFolded.marked && segmentFolded.display === 'none',
+    `折单根 ⇒ 行内视图体收起（只藏不卸载）：${JSON.stringify(segmentFolded)}`,
+  )
 
   await ctx.close()
-  return `内联 ${inline.rows.length} 条；打开后仍只有 1 台宿主`
+  return `内联 ${inline.rows.length} 条；打开后仍只有 1 台宿主（在行下）`
 })
 
 await check('T196 查询块在右槽窗口也画结果：同一台 ViewHost；折叠收的是身体', async () => {
@@ -2480,11 +2498,12 @@ await check('T196 查询块在右槽窗口也画结果：同一台 ViewHost；�
       const card = [...document.querySelectorAll('.dock-card')].find((c) => c.dataset.cardId === id)
       const view = card?.querySelector('.queryview')
       const row = card?.querySelector(`.blk[data-block-id="${id}"]`)
+      const body = row?.querySelector(':scope > .blk-view-body')
       return {
         card: Boolean(card),
         view: Boolean(view),
         hidden: view?.hidden ?? true,
-        folded: view?.dataset.folded === '1',
+        folded: body?.dataset.folded === '1',
         rows: [...(card?.querySelectorAll('.queryview-editor .blk .tx') ?? [])].map((e) => e.textContent ?? ''),
         titleHidden: view?.querySelector('.queryview-title')?.hidden ?? false,
         rowCollapsed: row?.dataset.collapsed === '1',

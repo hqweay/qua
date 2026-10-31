@@ -20,7 +20,6 @@ import {
   hasQueryBody,
   hasList,
   findInForest,
-  foldStateOf,
   isJournal,
   isViewRoot,
   journalDate,
@@ -528,11 +527,13 @@ export function setupPanels(deps: PanelsDeps) {
   /**
    * **这一段要不要建视图宿主**。
    *
-   * 判据（`isViewRoot`）：查询块／收藏块／激活了某张视图的块。
+   * 判据按**源**分：只有 children/items 源的视图根（收藏块、激活了某张视图的块）
+   * 才走段尾宿主。**查询源的身体一律画在自己行下**（`rowHasInlineViewBody`）——
+   * 段尾再来一台就是同一块挂两台。
    * 收藏块即使没有 `_activeView` 也要建 —— 它的默认看法是列表，不画出来
    * 用户就只看到一行摘要，而 `_items` 里的东西一个都看不见。
    */
-  const wantsView = (host: Block): boolean => isViewRoot(host)
+  const wantsView = (host: Block): boolean => isViewRoot(host) && !hasQueryBody(host)
 
   /** 一个拥有者「显示的是哪一块」（center 表面：拥有者就是这一块） */
   const blockOf = (owner: ViewOwnerRef): Block | undefined => (owner.kind === 'block' ? blocks.find(owner.blockId) : undefined)
@@ -1008,12 +1009,6 @@ export function setupPanels(deps: PanelsDeps) {
            */
           inst.area.refreshEntries()
         }
-        /**
-         * **查询块的折叠折的是身体**：段根那台 ViewHost 要跟着收起来。
-         * children 源的激活视图**不跟** `Doc.folded` —— 那条折叠是「子块收起」，
-         * 与「表格替换子块」不是同一件事（`viewRootId` 的注释里写过）。
-         */
-        if (inst.view && hasQueryBody(host)) inst.view.setFolded(foldStateOf(mainEd.doc)[host.id] === true)
         if (inst.view && inst.view.root.parentElement !== slot) slot.appendChild(inst.view.root)
         if (inst.area.root.parentElement !== slot) slot.appendChild(inst.area.root)
       }
