@@ -553,12 +553,19 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
   }))
   assert(pinned.activeId === a && pinned.target === b && pinned.drawer, `焦点走到 A，抽屉仍钉在 B：${JSON.stringify(pinned)}`)
 
+  // **toggle**：同一块的入口再点一次＝收起；再点一次＝再开（开关语义，不是「点了没反应」）
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), b)
+  await page.waitForTimeout(250)
+  assert(!(await page.evaluate(() => Boolean(document.querySelector('.drawer')))), '同一块再点一次＝收起（toggle）')
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), b)
+  await page.waitForSelector('.props-drawer')
+
   await page.keyboard.press('Escape')
   await page.waitForTimeout(250)
   assert(!(await page.evaluate(() => Boolean(document.querySelector('.drawer')))), 'Esc 关掉抽屉')
 
   await ctx.close()
-  return `页＝主体；光标 A→B 主体不变、正文不跳（top ${geoA.top}）；卡在右槽不在正文；点外侧不收起；zoom 后主体＝A 且开关一字未变（${dockBefore}）；槽关着时 zoom 不自动开、卡不可见；「看属性」开抽屉不动槽、钉在 B、Esc 可关`
+  return `页＝主体；光标 A→B 主体不变、正文不跳（top ${geoA.top}）；卡在右槽不在正文；点外侧不收起；zoom 后主体＝A 且开关一字未变（${dockBefore}）；槽关着时 zoom 不自动开、卡不可见；「看属性」开抽屉不动槽、钉在 B、toggle 可收、Esc 可关`
 })
 
 await check('T2 Enter 拆块 ／ Backspace 合并 ／ Tab 缩进 ／ Shift+Tab 还原', async () => {

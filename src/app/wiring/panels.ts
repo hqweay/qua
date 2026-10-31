@@ -381,6 +381,14 @@ export function setupPanels(deps: PanelsDeps) {
   const openPropertiesDrawer = (blockId: string): void => {
     const b = findInForest(deps.getWs().blocks, blockId)
     if (!b) return
+    // **同一块上再点一次＝收起**（toggle）：入口按钮就是这张抽屉的开关，
+    // 「点了没反应」（先关再开同内容）在用户眼里等于坏了。另一块＝换内容。
+    if (drawerBlockId === blockId && layers.drawerOpen()) {
+      layers.closeDrawer()
+      drawerBlockId = null
+      drawerPanel = null
+      return
+    }
     drawerBlockId = blockId
     layers.openDrawer(blockLabel(b), (host) => {
       const root = document.createElement('div')
