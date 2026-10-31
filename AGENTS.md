@@ -233,6 +233,7 @@ pnpm gate:bundle    # gate ＋ 打包产物冒烟（慢，单列）
 | 加动画 | 先过 §1.12 的频率表（键盘发起／每天上百次 ⇒ 不动画）；UI 动效 ≤300ms；只动 `transform`／`opacity` | `transition: all`；给 `width`／`height`／`padding` 加 transition；动作挂在 `transitionend` 上 |
 | 每帧写一个值（拖拽、跟手） | 直接写到受益的那个元素（`el.style.transform`） | 写在公共祖先的 CSS 变量上（继承 ⇒ 整棵子树重算，先跑 `checks/probe-dock-var.mjs` 看代价） |
 | 改「一个块长成哪几行」 | 只改 `src/core/storage/db-rows.ts`（编码唯一落点） | 在主进程里写块语义（`[2+]` 会拦，且会有两份定义） |
+| 给某行加一种「身体」（露面体/内联体/组件体…） | 新增 `data-*` 身份格 ＋ 同一个高度来源：视觉 CSS 与虚拟化占位（`visibleRowHeight`）都读它 | 两处各算一遍（漏掉占位 ⇒ 带这种行的长文档滚动条系统性偏小，且不报错） |
 | 想走一遍块树 | 用 `src/core/walk.ts` 的 `walkForest`（先序，带 `path`／`hidden`，返回 `false` 即停） | 自己写递归走 `children`（`arch-check [22]` 会拦） |
 | 想再渲染一列**可编辑**块 | 用 `ui/editable-block.ts` 的 `EditableBlock`：建实例＋订阅＋焦点＋事件表＋重载全在它里面（`load` 给装载动作、`wire` 给**整份** `viewEvents`、`area` 给冻结范围） | 再手抄一份 `new BlockEditor({…})`＋订阅＋防抖；只接一半事件表（漏了不报错：点引用不跳、右键没菜单）；自己再叠一份组件级防抖（两条重载路径会把 `click` 弄丢） |
 | 里层编辑器里**打字对、但 ↵／⌘A／Tab 跑偏** | 先查**活动编辑器 `app.ed` 是谁**（验法：⌘A 看选区落在哪个宿主）。打字走**事件层**（各编辑器绑自己的 container），键位走**命令层**（`app.ed`）——两者能各错各的 | 去改事件层。挂载区的 DOM 嵌在 `#editor` 里，`focusin` **会冒泡** ⇒ 正文那条无条件 `ed = mainEd` 会把里层 `onFocus` 刚切好的活动编辑器覆盖回去（真踩过，见 T142） |
