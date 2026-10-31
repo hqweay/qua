@@ -114,6 +114,40 @@ core ← view ← ui ← app ← host
 
 **不写映射/兼容分支**（例：`_icon` 从 emoji 改成 `lucide:<name>` 就是这么办的）。
 
+### 1.12 动效：频率决定有没有，命令的那条路上没有动效
+
+| 用户一天见几次 | 结论 |
+|---|---|
+| 上百次（⌘K 面板、块菜单、斜杠菜单、Tab/↵、列表 hover） | **不动画** |
+| 几十次（hover、折叠展开） | 删掉，或压到几乎看不见 |
+| 偶尔（抽屉、toast、确认框） | 正常动画 |
+| 罕见／第一次（引导、成功反馈） | 允许讨好 |
+
+- **为什么**：在这个频率上任何时长都被读作**延迟**。qua 是每天开八小时的工具，不是展示页——
+  同口径的现成答案是 Raycast 的面板没有开关动画。
+- **入场慢、退场快**（`styles/overlays.css` 已经是这条：入 `--ui-dur-2`，出 `--ui-dur-1`）。
+  用户在**决定**时可以慢，系统在**回应**时必须快；别改回对称。
+- **UI 动效 ≤ 300ms**：按压反馈 100–160ms · tooltip／小弹层 125–200ms · 下拉 150–250ms · 抽屉 200–500ms。
+  已有 `--ui-dur-*` token 就别再造一条曲线的数值。
+- **只动 `transform` 与 `opacity`**：`width`／`height`／`padding`／`margin`／`top`／`left` 每帧都要走
+  layout＋paint＋composite，前两者不用。想「变宽」时先问一句 `scale()`／`opacity` 能不能表达同一件事。
+- **焦点迁移不等动画**：浮层收起把焦点还给编辑器这类动作，不许挂在 `transitionend`／`animationend` 上。
+- **`prefers-reduced-motion` ≠ 全关**：保留 opacity／颜色这类**帮助理解**的过渡，去掉位移与缩放
+  （现有多处已这么写，新写的照做）。
+- **每帧写的值不许写在公共祖先的 CSS 变量上**。CSS 变量是**继承**的 ⇒ 改祖先一个变量 = 整棵子树重算样式。
+  `--dock-*-w` 必须住在 `#app`（`#app` 自己的 `grid-template-columns` 在读它，`shell.css:93`），
+  于是拖槽宽的每一帧都在付这笔钱。**已实测**（`checks/probe-dock-var.mjs`，headless Electron）：
+
+  | 写法（每帧一次，同一份几何变化） | 1.2k 节点 | 13k 节点 | 随规模 |
+  |---|---|---|---|
+  | 写 `#app` 上的继承变量（现状 `ui/dock.ts:497`） | **2.6ms** | **12.7ms** | +0.84ms / 1000 节点 |
+  | 同一个变量注册成 `inherits: false`（`@property`） | 77μs | 28μs | 不涨 |
+  | 直接写 `#app` 的 `grid-template-columns` | 12μs | 15μs | 不涨 |
+
+  ⇒ 外推到 10k 节点约 **10ms/帧**、50k 约 43ms/帧，已经把 120Hz 的 8ms 预算吃完；
+  而 **`inherits: false` 这一个是白拿的**（`shell.css:97/99` 是全仓唯一的消费点，没有后代在继承它）。
+  动这条线之前先重跑那个探针——数会随 CSS 复杂度变。
+
 ---
 
 ## 2 命令
@@ -157,7 +191,7 @@ pnpm gate:bundle    # gate ＋ 打包产物冒烟（慢，单列）
 - **红了先收窄再全量**：内环红 = 刚改的那一处错，直接修；全量红 = 先 `--plan` 定面、
   再 `QUA_SMOKE_ONLY` 收窄，最后才重跑全量——反了就是拿 190s 换一次定位。
 
-**收工必须 `pnpm gate` 全绿**（当前基线：arch **28/28** · test:core **737/737** ·
+**收工必须 `pnpm gate` 全绿**（当前基线：arch **28/28** · test:core **741/741** ·
 浏览器冒烟 **207/207** · dock **25/25** · electron **13/13**）。
 
 - **`gate` 是编排出来的，不是一条 `&&` 链**（`scripts/gate.mjs`）：彼此独立的检查按产物依赖分三段、
@@ -196,6 +230,8 @@ pnpm gate:bundle    # gate ＋ 打包产物冒烟（慢，单列）
 | `view` 想用 UI 组件 | 从 `ui` 层拿，不反向 import | `view` import `ui` |
 | 全局状态/选区 | 进 `core`（模型持有选区） | 散在 `view` 的局部变量 |
 | 改落盘口径 | `DB_SCHEMA_VERSION`／`WORKSPACE_VERSION` 加一、旧库作废 | 写搬数据的迁移/兼容分支 |
+| 加动画 | 先过 §1.12 的频率表（键盘发起／每天上百次 ⇒ 不动画）；UI 动效 ≤300ms；只动 `transform`／`opacity` | `transition: all`；给 `width`／`height`／`padding` 加 transition；动作挂在 `transitionend` 上 |
+| 每帧写一个值（拖拽、跟手） | 直接写到受益的那个元素（`el.style.transform`） | 写在公共祖先的 CSS 变量上（继承 ⇒ 整棵子树重算，先跑 `checks/probe-dock-var.mjs` 看代价） |
 | 改「一个块长成哪几行」 | 只改 `src/core/storage/db-rows.ts`（编码唯一落点） | 在主进程里写块语义（`[2+]` 会拦，且会有两份定义） |
 | 想走一遍块树 | 用 `src/core/walk.ts` 的 `walkForest`（先序，带 `path`／`hidden`，返回 `false` 即停） | 自己写递归走 `children`（`arch-check [22]` 会拦） |
 | 想再渲染一列**可编辑**块 | 用 `ui/editable-block.ts` 的 `EditableBlock`：建实例＋订阅＋焦点＋事件表＋重载全在它里面（`load` 给装载动作、`wire` 给**整份** `viewEvents`、`area` 给冻结范围） | 再手抄一份 `new BlockEditor({…})`＋订阅＋防抖；只接一半事件表（漏了不报错：点引用不跳、右键没菜单）；自己再叠一份组件级防抖（两条重载路径会把 `click` 弄丢） |
