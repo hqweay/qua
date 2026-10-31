@@ -193,8 +193,14 @@ export interface EditorBridge {
    * ⚠️ 未接 ⇒ 什么都不做（与 `refClick` 同一条口径：缺入口就让它看得见地缺）。
    */
   onAtomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: RefClickMods) => void
-  /** 打开块菜单（悬停把手/圆点或右键）*/
-  onBlockMenu: (blockId: string, rect: DOMRect) => void
+  /**
+   * 打开块菜单（悬停把手/圆点或右键）。
+   *
+   * `appearanceHost` ＝ 这次右键落在一个**露面行**上（投影行的绑源块标，
+   * 或镜像岛里的源那一行）：菜单开在**源**上，装配层会附「移除这次露面」——
+   * 露面行自己的 chrome 已交给源（块标绑源），摘露面的出口就跟着走同一条路。
+   */
+  onBlockMenu: (blockId: string, rect: DOMRect, appearanceHost?: string) => void
   /**
    * **跨块拖选**：在 `.tx` 内按下 / 移动 / 松开。
    * 事件层只报坐标；「是否切成块选区」的判定在编辑器里（单块内仍是原生文本选择）。
@@ -734,10 +740,34 @@ export function bindEditorEvents(br: EditorBridge): () => void {
   })
 
   on(c, 'contextmenu', (e: MouseEvent) => {
-    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-block-id]')
+    const target = e.target as HTMLElement
+    const el = target.closest<HTMLElement>('[data-block-id]')
     if (!el?.dataset.blockId) return
     e.preventDefault()
-    br.onBlockMenu(el.dataset.blockId, new DOMRect(e.clientX, e.clientY, 0, 0))
+    const rect = new DOMRect(e.clientX, e.clientY, 0, 0)
+    /**
+     * **右键落在块标上 ⇒ 菜单开在块标绑定的那一块**。普通行两者同 id（行为不变）；
+     * 投影行的绑源块标不同 id ⇒ 菜单开在源上，附「移除这次露面」。
+     */
+    const marker = target.closest<HTMLElement>('[data-focus-for]')
+    const rowId = marker?.closest<HTMLElement>('.blk[data-block-id]')?.dataset.blockId
+    if (marker?.dataset.focusFor && rowId && rowId !== marker.dataset.focusFor) {
+      br.onBlockMenu(marker.dataset.focusFor, rect, rowId)
+      return
+    }
+    /**
+     * **镜像岛里的源那一行**：岛首行就是露面行的 chrome，右键它 ＝ 右键这次露面
+     * ⇒ 同样附「移除这次露面」。岛内更深的行是源子树自己的内容，菜单照旧、不加段。
+     */
+    const body = target.closest<HTMLElement>('.blk-embed-body')
+    if (body?.dataset.embedBodyFor) {
+      const first = body.querySelector<HTMLElement>('.blk[data-depth="0"]')
+      if (first?.dataset.blockId && first.dataset.blockId === el.dataset.blockId) {
+        br.onBlockMenu(el.dataset.blockId, rect, body.dataset.embedBodyFor)
+        return
+      }
+    }
+    br.onBlockMenu(el.dataset.blockId, rect)
   })
 
   /* ── gutter 上的三个动作：折叠三角 / 导轨 / 待办方框 ── */

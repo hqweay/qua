@@ -101,6 +101,13 @@ export interface MenuRequest {
   prefix?: string
   query?: string
   ctx?: CtxKeys
+  /**
+   * **调用方现算的追加项**（排在绑定解析出的行之后）。菜单的主体来自绑定表
+   * （静态声明 ＋ `when` 过滤）；少数入口的**参数**只有打开那一刻才知道
+   * （例如「移除这次露面」的露面块 id）——它们不是声明，不该为了传一个 id
+   * 去发明一条假的 ctx 键。
+   */
+  extraRows?: MenuRow[]
   /** 每一项点击前先跑（例如斜杠菜单要先抹掉 `/查询词`） */
   before?: () => void
   /** 覆盖默认行为（演示状态菜单等） */

@@ -595,7 +595,10 @@ function showMenu(req: MenuRequest): void {
     return
   }
   if (req.kind === 'menu') {
-    const rows = rowsFromBindings(resolveBindings('menu', ctx, { prefix: req.prefix }), keyHints())
+    const rows = [
+      ...rowsFromBindings(resolveBindings('menu', ctx, { prefix: req.prefix }), keyHints()),
+      ...(req.extraRows ?? []),
+    ]
     layers.openMenu({
       rows,
       anchor: req.anchor,
@@ -1977,7 +1980,7 @@ function viewEvents(
     focusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, via),
     // Shift+点块标 ⇒ 在右槽打开一个窗口（已在别处则移过去；已在本侧则定位）
     openInDock: (blockId) => openWindow('right', blockId),
-    blockMenu: (blockId, rect) => {
+    blockMenu: (blockId, rect, appearanceHost) => {
       const ed = active()
       // 命中**已选中的块**（且多块）⇒ 多块菜单；否则清块选区，走原单块菜单
       if (ed.inBlockSelection(blockId) && ed.blockSelectionCount() > 1) {
@@ -1985,8 +1988,28 @@ function viewEvents(
         return
       }
       ed.clearBlockSelection()
-      ed.sel = { aBlock: blockId, aOff: ed.sel?.aBlock === blockId ? (ed.sel?.aOff ?? 0) : 0, hBlock: blockId, hOff: ed.sel?.aBlock === blockId ? (ed.sel?.hOff ?? 0) : 0 }
-      showMenu({ kind: 'menu', prefix: 'block/', anchor: rect, title: t('menu.title.block') })
+      ed.sel = { aBlock: blockId, aOff: ed.sel?.aBlock === blockId ? (ed.sel?.aOff ?? 0) : 0, hBlock: blockId, hOff: ed.sel?.aBlock === blockId ? (ed.sel?.aOff ?? 0) : 0 }
+      showMenu({
+        kind: 'menu',
+        prefix: 'block/',
+        anchor: rect,
+        title: t('menu.title.block'),
+        // 右键落在露面行上（投影行的绑源块标／镜像岛里的源行）：菜单开在源上，
+        // 附「移除这次露面」——露面块 id 只有打开这一刻才知道，走现算追加项
+        ...(appearanceHost
+          ? {
+              extraRows: [
+                {
+                  id: 'appearance-remove',
+                  label: t('ui.embed.remove'),
+                  hint: t('ui.embed.removeHint'),
+                  command: 'core.embed/remove',
+                  args: { blockId: appearanceHost },
+                },
+              ],
+            }
+          : {}),
+      })
     },
   }
 }

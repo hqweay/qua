@@ -273,8 +273,12 @@ export interface ViewEvents {
   onCopy?: (ids: readonly string[], text: string) => void
   /** 拖入文件被拒（v1 不做拖拽入图）：装配层给一句明确文案 */
   onDropFilesRejected?: () => void
-  /** 悬停把手/圆点或右键 → 块菜单 */
-  blockMenu?: (blockId: string, rect: DOMRect) => void
+  /**
+   * 悬停把手/圆点或右键 → 块菜单。
+   * `appearanceHost` ＝ 右键落在露面行上（见 `ViewEvents.onBlockMenu`）：菜单开在源上，
+   * 装配层据此附「移除这次露面」。
+   */
+  blockMenu?: (blockId: string, rect: DOMRect, appearanceHost?: string) => void
   /**
    * **左键点块标**：聚焦/zoom 到这个块。
    * 装配层把它接到 `core.block/focus-block`（面包屑那一格是同一个命令）。
@@ -3283,7 +3287,7 @@ export class BlockEditor {
         if (shiftKey) this.events.openInDock?.(id)
         else this.events.focusBlock?.(id)
       },
-      onBlockMenu: (id, rect) => this.events.blockMenu?.(id, rect),
+      onBlockMenu: (id, rect, appearanceHost) => this.events.blockMenu?.(id, rect, appearanceHost),
       // 左键点块标 ＝ 聚焦/zoom。这也是**离开这一行**：先把当前行的编辑交出去
       // （判据是「上一个块 ≠ 这个块」；点自己那一行的块标不算离开）
       focusBlock: (id) => {

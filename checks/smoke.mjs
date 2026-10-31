@@ -15949,6 +15949,165 @@ await check('T199 关联型引用默认折叠：派生栏只给那一行，展�
   return `默认折着（关联型）→ 展开后才见上下文：${first.rows} → ${opened.rows} 行`
 })
 
+await check(
+  'T200 露面行的块标回左边且绑源：镜像＝岛首行顶到块标列（宿主行无 chrome）；投影＝画绑源块标；'
+  + '右键源行菜单带「移除这次露面」；查询块块标是漏斗',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    const fx = await buildEmbedTree(page)
+
+    /* ── 镜像：宿主行没有 chrome；岛首行＝源，块标绑源，且与普通行同一列 ── */
+    await page.evaluate(
+      ({ host, src }) => window.__qua.invoke('core.embed/insert', { blockId: host, targetId: src, view: 'mirror' }),
+      fx,
+    )
+    await page.waitForTimeout(300)
+    const mirror = await page.evaluate((sid) => {
+      const row = document.querySelector('.blk[data-embed="1"]')
+      const body = row?.querySelector('.blk-embed-body')
+      const first = body?.querySelector('.blk[data-depth="0"]')
+      const mk = first?.querySelector(':scope > .left > .marker')
+      return {
+        hostChrome: Boolean(row?.querySelector(':scope > .left')),
+        bodyKind: body?.dataset.embedBody ?? '',
+        firstId: first?.dataset.blockId ?? '',
+        focusFor: mk?.dataset.focusFor ?? '',
+        dragFor: mk?.dataset.dragFor ?? '',
+      }
+    }, fx.src)
+    assert(mirror.hostChrome === false, `镜像行不该有宿主 chrome（岛首行就是这一行）：${JSON.stringify(mirror)}`)
+    assert(mirror.bodyKind === 'mirror', `镜像身体带 mirror 身份格：${mirror.bodyKind}`)
+    assert(
+      mirror.firstId === fx.src && mirror.focusFor === fx.src && mirror.dragFor === fx.src,
+      `岛首行＝源，它的块标绑源：${JSON.stringify(mirror)}`,
+    )
+    // 几何：岛首行的块标与宿主行（普通行）的块标同一列——镜像不再是「一行里嵌着另一份装载」
+    const align = await page.evaluate((hid) => {
+      const hostMk = document.querySelector(`.blk[data-block-id="${hid}"] > .left > .marker`)
+      const islandMk = document.querySelector('.blk[data-embed="1"] .blk-embed-body .blk[data-depth="0"] > .left > .marker')
+      if (!hostMk || !islandMk) return null
+      const a = hostMk.getBoundingClientRect()
+      const b = islandMk.getBoundingClientRect()
+      return { dx: Math.abs(a.left + a.width / 2 - (b.left + b.width / 2)) }
+    }, fx.host)
+    assert(align !== null && align.dx <= 2, `岛首行块标与普通行块标同一列：dx=${align?.dx}`)
+
+    /* ── 右键岛里的源行 ⇒ 菜单开在源上且带露面段；岛内深层行不带 ── */
+    const ctxMenu = (sid, inIsland) =>
+      page.evaluate(
+        ({ sid, inIsland }) => {
+          const el = inIsland
+            ? [...document.querySelectorAll(`.blk[data-block-id="${sid}"]`)].find((x) => x.closest('.blk-embed-body'))
+            : document.querySelector(`.blk[data-block-id="${sid}"]`)
+          el?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+          return [...document.querySelectorAll('.layer-item .layer-label')].map((r) => r.textContent)
+        },
+        { sid, inIsland },
+      )
+    const srcMenu = await ctxMenu(fx.src, true)
+    assert(srcMenu.some((t) => t?.includes('移除这次露面')), `右键源行菜单应含「移除这次露面」：${JSON.stringify(srcMenu)}`)
+    await page.keyboard.press('Escape')
+    const deepMenu = await ctxMenu(fx.c1, true)
+    assert(
+      !deepMenu.some((t) => t?.includes('移除这次露面')),
+      `右键岛内深层行不该带露面段（它是源子树自己的内容）：${JSON.stringify(deepMenu)}`,
+    )
+    await page.keyboard.press('Escape')
+
+    // 点「移除这次露面」：只摘露面，源与子树一个字节不动
+    const embedId = await page.evaluate(() => document.querySelector('.blk[data-embed="1"]')?.dataset.blockId ?? '')
+    await ctxMenu(fx.src, true)
+    await page.waitForTimeout(150)
+    const mirrorRemoved = await page.evaluate((eid) => {
+      const item = [...document.querySelectorAll('.layer-item')].find((r) =>
+        r.querySelector('.layer-label')?.textContent?.includes('移除这次露面'),
+      )
+      item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
+      const find = (b) => (b.id === eid ? b : b.children.map(find).find(Boolean) || null)
+      return {
+        gone: !document.querySelector('.blk[data-embed="1"]'),
+        modelGone: !window.__qua.__editor.store.find(eid),
+      }
+    }, embedId)
+    assert(
+      mirrorRemoved.gone && mirrorRemoved.modelGone,
+      `点露面段 ⇒ 露面没了（DOM＋模型）：${JSON.stringify(mirrorRemoved)}`,
+    )
+    const srcAfterMirror = await page.evaluate((sid) => {
+      const find = (b) => (b.id === sid ? b : b.children.map(find).find(Boolean) || null)
+      return Boolean(window.__qua.__editor.store.blocks.map(find).find(Boolean))
+    }, fx.src)
+    assert(srcAfterMirror, '源块还在（摘的是露面，不是源）')
+
+    /* ── 投影：chrome（绑源块标）在身体前面；右键块标 ⇒ 菜单开在源上＋露面段 ── */
+    await page.evaluate(
+      ({ host, src }) => window.__qua.invoke('core.embed/insert', { blockId: host, targetId: src, view: 'table' }),
+      fx,
+    )
+    await page.waitForTimeout(450)
+    const proj = await page.evaluate((sid) => {
+      const row = document.querySelector('.blk[data-embed="1"]')
+      const kids = row ? [...row.children].map((c) => c.className.split(' ')[0]) : []
+      const mk = row?.querySelector(':scope > .left > .marker')
+      return {
+        order: kids,
+        focusFor: mk?.dataset.focusFor ?? '',
+        dragFor: mk?.dataset.dragFor ?? '',
+        bodyKind: row?.querySelector(':scope > .blk-embed-body')?.dataset.embedBody ?? '',
+      }
+    }, fx.src)
+    assert(
+      proj.order.indexOf('left') < proj.order.indexOf('blk-embed-body'),
+      `投影行 chrome 在身体前面（块标回左边）：${JSON.stringify(proj.order)}`,
+    )
+    assert(proj.focusFor === fx.src && proj.dragFor === fx.src, `投影行块标绑源：${JSON.stringify(proj)}`)
+    assert(proj.bodyKind === 'view', `投影身体身份格不变：${proj.bodyKind}`)
+    const projId = await page.evaluate(() => document.querySelector('.blk[data-embed="1"]')?.dataset.blockId ?? '')
+    const projMenu = await page.evaluate((sid) => {
+      const row = document.querySelector('.blk[data-embed="1"]')
+      row?.querySelector(':scope > .left > .marker')?.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true }),
+      )
+      return [...document.querySelectorAll('.layer-item .layer-label')].map((r) => r.textContent)
+    }, fx.src)
+    assert(
+      projMenu.some((t) => t?.includes('移除这次露面')),
+      `右键投影行绑源块标 ⇒ 菜单带露面段：${JSON.stringify(projMenu)}`,
+    )
+    await page.waitForTimeout(150)
+    const projRemoved = await page.evaluate((eid) => {
+      const item = [...document.querySelectorAll('.layer-item')].find((r) =>
+        r.querySelector('.layer-label')?.textContent?.includes('移除这次露面'),
+      )
+      item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
+      const find = (b) => (b.id === eid ? b : b.children.map(find).find(Boolean) || null)
+      return {
+        gone: !document.querySelector('.blk[data-embed="1"]'),
+        modelGone: !window.__qua.__editor.store.find(eid),
+      }
+    }, projId)
+    assert(projRemoved.gone && projRemoved.modelGone, `投影的露面段也能摘掉：${JSON.stringify(projRemoved)}`)
+
+    /* ── 查询块：块标是漏斗（类型进形状）── */
+    const funnel = await page.evaluate(() => {
+      const root = window.__qua.snapshot().activeId
+      window.__qua.invoke('core.query/insert', { blockId: root })
+      const host = window.__qua.__editor.store.find(root)
+      const qid = host?.children.find((c) => c.props?._query)?.id ?? ''
+      const mk = document.querySelector(`.blk[data-block-id="${qid}"] > .left > .marker`)
+      return { qid, isFunnel: Boolean(mk?.classList.contains('marker-query')), ico: Boolean(mk?.querySelector('.marker-ico .ico')) }
+    })
+    assert(
+      funnel.qid !== '' && funnel.isFunnel && funnel.ico,
+      `查询块块标是漏斗：${JSON.stringify(funnel)}`,
+    )
+
+    await ctx.close()
+    return `镜像无宿主 chrome、岛首行块标同列绑源；投影 chrome 在身体前、绑源；两种露面右键都带「移除这次露面」；查询块标漏斗`
+  },
+)
+
 /**
  * **判定放在所有用例之后**：写在这里之前时，后面的用例（T136 起）即使红了也不会进
  * `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。

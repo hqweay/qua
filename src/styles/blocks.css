@@ -1438,6 +1438,61 @@
   flex: 1 1 auto;
   min-width: 0;
 }
+/*
+ * **镜像：岛首行就是这一行**。岛内 depth-0 行的块标本落在「身体起点 ＋ 岛自己的
+ * gutter」——比宿主行的块标列远一个 gutter；把身体左移一个 gutter，岛首行的块标
+ * 就落进宿主行的块标列，正文起点与普通行完全一致 ⇒ 镜像在几何上不再是
+ * 「一行里嵌了另一份装载」，而是「那一块就在这里」（岛内更深的行按同一个
+ * indent 阶梯自然对齐外层网格）。
+ */
+.blk-embed-body[data-embed-body='mirror'] {
+  margin-left: calc(-1 * var(--ui-blk-gutter));
+}
+/*
+ * **岛首行与宿主行同一字号**：深度判据是岛内的相对深度（源在岛里是根），
+ * 字号得跟着宿主行走——镜像嵌在子块里时首行不该放大成顶层字。
+ */
+.blk[data-embed='1'] .blk-embed-body .blk[data-depth='0'] {
+  font-size: inherit;
+}
+/*
+ * **露面行的块标是空心的**：两处——投影行的绑源块标（宿主行自己的 chrome）、
+ * 镜像行岛首行的那颗块标（源行的块标顶上来的那一颗）。空心说的是同一句话：
+ * 「这一行的身体不是一份独立内容」。
+ */
+.blk[data-embed='1'] > .left .marker::before,
+.blk[data-embed='1'] .blk-embed-body .blk[data-depth='0'] > .left .marker::before {
+  background: transparent;
+  border: 1px solid var(--ui-text-tertiary);
+  width: calc(var(--ui-bullet-size) + 2px);
+  height: calc(var(--ui-bullet-size) + 2px);
+}
+/*
+ * **祖先导轨要留在岛上面**：镜像行的身体左移之后盖住了宿主行左缘的 gutter 区，
+ * DOM 里 `.rails` 在前 ⇒ 会被岛行盖住。导轨是 chrome，chrome 保持可点：
+ * 抬一层（岛行自己不设层），点击祖先导轨折祖先的判据在镜像行上不失效。
+ */
+.blk .rails {
+  z-index: var(--ui-z-rail);
+}
+/*
+ * **查询块的块标是漏斗**：类型进形状（形状优先——暗色主题靠深浅区分不可靠）。
+ * 图标与点互斥；悬停时照旧让位给抓手——「任何块标悬停＝把手」这一条不变。
+ */
+.blk .marker .marker-ico {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ui-text-tertiary);
+  opacity: 0.7;
+}
+.blk .marker.marker-query::before {
+  opacity: 0;
+}
+.blk .marker.marker-query:hover .marker-ico {
+  opacity: 0;
+}
 /* 投影（源的结果视图）：高度由 `VIEW_BODY_H` 声明（`view/block-dom.ts` 写自定义属性），
    与正文行内体读同一个数 —— 视觉与虚拟化各算一遍，滚动条就会系统性偏小。
    镜像（那棵子树）是内容高，不写这一格。 */

@@ -27,6 +27,7 @@ import {
   inlineTagIdsOf,
   isJournal,
   isEmbedBlock,
+  isQueryBlock,
   journalDate,
   journalDateLabel,
   primaryAliasOf,
@@ -851,9 +852,29 @@ export function makeBlockEl(
     el.appendChild(self)
   }
 
-  const left = document.createElement('span')
-  left.className = 'left'
-  left.contentEditable = 'false'
+  /**
+   * **露面行的 chrome 归属**：块标回左边，且绑定到它正在呈现的那一块。
+   *
+   *   · 普通行（含查询行）＝`own`：块标绑行自己；
+   *   · 投影行＝`sourceMarker`：宿主行画一颗**绑源**的块标——身体是表，
+   *     里面没有「源的那一行」可以顶上来，chrome 只能由宿主行出；
+   *   · 镜像行＝`island`：宿主行**不画** gutter——岛首行（源自己那一行）的块标、
+   *     折叠三角、导轨就是这一行的 chrome，身体左移一个 gutter 对齐块标列（CSS）。
+   *
+   * 为什么块标绑源：露面就是「这一块又出现一次」，行上 chrome 说「聚焦／拖动」
+   * 指的是它正在呈现的那一块；宿主块自己从不当整屏的视图根，它的块标没有独立语义。
+   */
+  const embedRes = isEmbedBlock(b) ? resolveEmbed(b, opts.find ?? (() => undefined)) : null
+  const embedKind = embedRes ? embedBodyOf(b, opts.find ?? (() => undefined)) : null
+  const embedChrome: 'own' | 'sourceMarker' | 'island' =
+    !embedRes ? 'own' : embedKind === 'view' ? 'sourceMarker' : 'island'
+  const markerTargetId = embedChrome === 'sourceMarker' && embedRes?.status === 'ok' ? embedRes.target.id : b.id
+
+  const left = embedChrome === 'island' ? null : document.createElement('span')
+  if (left) {
+    left.className = 'left'
+    left.contentEditable = 'false'
+  }
 
   /**
    * 折叠箭头（D2）：**悬停才现**，且**绝对定位不占位**。
@@ -863,7 +884,7 @@ export function makeBlockEl(
    * ⚠️ 既无子块也**无身体**时**不生成这个节点**（R2）——空行的三角是纯噪声。
    *    查询块的身体（结果视图）同样可折，所以 `foldable` 不只等于 `hasChildren`。
    */
-  if (foldable) {
+  if (left && foldable) {
     const fold = document.createElement('span')
     fold.className = 'fold'
     fold.dataset.foldFor = b.id
@@ -885,19 +906,35 @@ export function makeBlockEl(
    * ⚠️ 这三条行为**不随身份变化**。让待办方框顶替块标，等于让「这块是任务」
    *    这一条属性吃掉「点它聚焦」这件事：同样是块标，点下去的结果却取决于块的属性，
    *    而这区别不写在任何地方。身份因此只作为**后缀**出现，见下面 `.identity`。
+   *
+   * ⚠️ 绑定与形状分离：`data-focus-for`／`data-drag-for` 指到 `markerTargetId`
+   *    （普通行＝自己，投影行＝源）——行为对「这一块」不变，只是「这一块」是谁由行决定。
    */
-  const marker = document.createElement('span')
-  marker.className = 'marker bullet handle'
-  marker.dataset.focusFor = b.id
-  // 抓手图标：**悬停才现**（块标 hover 时把点换成 grip）
-  const grip = document.createElement('span')
-  grip.className = 'grip'
-  grip.appendChild(createIcon('grip-vertical', 'sm'))
-  marker.appendChild(grip)
-  marker.title = t('ui.block.focusHint')
-  marker.draggable = true
-  marker.dataset.dragFor = b.id
-  left.appendChild(marker)
+  const marker = left ? document.createElement('span') : null
+  if (left && marker) {
+    marker.className = 'marker bullet handle'
+    marker.dataset.focusFor = markerTargetId
+    // 抓手图标：**悬停才现**（块标 hover 时把点换成 grip）
+    const grip = document.createElement('span')
+    grip.className = 'grip'
+    grip.appendChild(createIcon('grip-vertical', 'sm'))
+    marker.appendChild(grip)
+    marker.title = t('ui.block.focusHint')
+    marker.draggable = true
+    marker.dataset.dragFor = markerTargetId
+    /**
+     * **查询块的块标是漏斗**：类型进形状（形状优先，颜色在暗色主题下不可靠）。
+     * 图标与点互斥（CSS），悬停时都让位给抓手——「任何块标悬停＝把手」这一条不变。
+     */
+    if (isQueryBlock(b)) {
+      marker.classList.add('marker-query')
+      const qico = document.createElement('span')
+      qico.className = 'marker-ico'
+      qico.appendChild(createIcon('list-filter', 'sm'))
+      marker.appendChild(qico)
+    }
+    left.appendChild(marker)
+  }
 
   /**
    * **身份图标**：挂在块标**之后**的附加信息，不占用块标本身。
@@ -908,14 +945,14 @@ export function makeBlockEl(
    * ⚠️ 「方框」这个身份图标同时是待办的点击入口（`data-todo-for`）——
    *    它自己 `cursor:pointer`，与块标各占一块命中区，互不遮挡。
    */
-  if (roles.includes('tag')) {
+  if (left && roles.includes('tag')) {
     const tagMark = document.createElement('span')
     tagMark.className = 'identity tag-mark'
     tagMark.appendChild(createIcon('hash', 'sm'))
     tagMark.title = t('ui.tag.mark')
     left.appendChild(tagMark)
   }
-  if (box) {
+  if (left && box) {
     /**
      * 待办：`true` 画勾选、`false` 画空心 —— 差别只在图标与 `.blk` 上的 `data-todo`，
      * 身份元素本身不增删（「点一下填上」不该让 DOM 结构换掉）。
@@ -948,6 +985,10 @@ export function makeBlockEl(
    *    那个属性是**读数契约**（`view/dom-text.ts` 的四处都按它判），所以由这里兜一层：
    *    画法在 `ui`，契约在 `view`。
    */
+  /** 露面行的身体（构建后不立即挂：它的落位要排在自己的 chrome 之后，见末尾） */
+  let embedBodyEl: HTMLElement | null = null
+  /** 身体接进文档之后才执行的挂载（岛编辑器／ViewHost 的构造会量 DOM） */
+  let embedMount: (() => void) | null = null
   if (isEmbedBlock(b)) {
     /**
      * **露面块**：正文槽空着（它没有用户写的字），身体是另一个编辑宿主。
@@ -958,7 +999,7 @@ export function makeBlockEl(
      * 身体是岛（`data-edit-island`）：里层焦点归里层，外层重排不打断正在打的字。
      */
     el.dataset.embed = '1'
-    el.dataset.embedState = resolveEmbed(b, opts.find ?? (() => undefined)).status
+    el.dataset.embedState = embedRes!.status
     tx.dataset.embedSlot = '1'
     tx.setAttribute('aria-hidden', 'true')
     const body = document.createElement('div')
@@ -968,14 +1009,17 @@ export function makeBlockEl(
     body.dataset.embedBodyFor = b.id
     /**
      * 身体是**投影**（源的结果视图）⇒ 高度由声明给，与正文行内体同一个数：
-     * 视觉与虚拟化必须读同一个值。镜像（那棵子树）是内容高，不写这一格。
+     * 视觉与虚拟化必须读同一个值。镜像（那棵子树）是内容高，但岛首行要
+     * **顶到 gutter 列**（CSS 按 `data-embed-body='mirror'` 左移一个 gutter）。
      */
-    if (embedBodyOf(b, opts.find ?? (() => undefined)) === 'view') {
+    if (embedKind === 'view') {
       body.dataset.embedBody = 'view'
       applyViewBodyHeights(body)
+    } else {
+      body.dataset.embedBody = 'mirror'
     }
-    el.appendChild(body)
-    opts.embedBody?.(b, body)
+    embedBodyEl = body
+    embedMount = () => opts.embedBody?.(b, body)
   } else if (widgetBodyOf(b) && opts.widgetBody) {
     const kind = widgetBodyOf(b)
     const h = widgetBodyHeightOf(b)
@@ -1036,7 +1080,18 @@ export function makeBlockEl(
     tx.dataset.ph = opts.single ? t('ui.block.placeholderFirst') : t('ui.block.placeholderEmpty')
   }
 
-  el.append(left, tx)
+  if (embedBodyEl) {
+    /**
+     * 露面行的 DOM 序＝视觉序：投影行**先 chrome 后身体**（块标回左边）；
+     * 镜像行没有宿主 chrome——岛首行就是这一行，块标列由 CSS 对齐。
+     */
+    if (left) el.append(left, embedBodyEl, tx)
+    else el.append(embedBodyEl, tx)
+    // 身体接进文档之后再画：岛编辑器／ViewHost 的构造会量 DOM
+    embedMount?.()
+  } else {
+    el.append(left!, tx)
+  }
 
   /**
    * **标签槽**：挂在正文槽**之后**（行右端），是 `.blk` 的直接子节点。
