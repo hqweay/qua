@@ -372,6 +372,7 @@
  * · 悬停：点换成 grip，并浮一个 18px 圆底；
  * · **已折叠**：点外加一圈 2px 实心环—— 折叠态不能只靠箭头，
  *   箭头是悬停件——常驻箭头是反例，占位又会与块标抢空间。
+ *   环只在**静止态**占位，悬停时让位给 grip（见本节末尾：两者塞不进同一块像素）。
  */
 .blk .marker {
   position: relative;
@@ -416,11 +417,20 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .blk .marker::before,
-  .blk .marker .grip {
+  .blk .marker .grip,
+  .blk[data-collapsed='1'] .marker::after {
     transition: none;
   }
 }
-/* 已折叠：**明显的环**（2px 实心 tertiary，13px 外径） */
+/*
+ * 已折叠：**明显的环**（2px 实心 tertiary，13px 外径）
+ *
+ * ⚠️ 环与抓手抢的是同一块像素：环内径 9px，抓手图标 12px ⇒ 两者同时在场时，
+ *    抓手的六个点会压在内缘上（看起来像重影，不是两种状态）。
+ *    ⇒ 悬停时**环让位给抓手**：折叠态的可发现性由**静止态**的环承担，
+ *      悬停这一刻还有左侧那颗已转 90° 的三角在说「这块是收起的」。
+ *    这也是「一个悬停语言」：悬停任何一颗块标，它就变成可拖的把手。
+ */
 .blk[data-collapsed='1'] .marker::after {
   content: '';
   position: absolute;
@@ -428,10 +438,10 @@
   height: var(--ui-marker-ring-size);
   border-radius: var(--ui-radius-pill);
   border: var(--ui-marker-ring) solid var(--ui-text-tertiary);
+  transition: opacity 120ms ease;
 }
-/* 折叠态的环也要能被看见：点不因悬停消失（环才是「这里折叠了」的信号） */
-.blk[data-collapsed='1'] .marker:hover::before {
-  opacity: 0.6;
+.blk[data-collapsed='1'] .marker:hover::after {
+  opacity: 0;
 }
 /* 拖动中：整行变淡（`editor.ts` 加 `.drag-src`） */
 .blk.drag-src {

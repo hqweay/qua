@@ -1355,8 +1355,28 @@ await check('T23 gutter 三件：块标与把手合并、三角悬停才现、�
   assert(parseFloat(ring.width) >= 2, `折叠态块标应有 ≥2px 的环（D2），实际 ${ring.width}`)
   assert(ring.style === 'solid', `环应是实线，实际 ${ring.style}`)
 
+  /*
+   * 悬停折叠块：**环与点让位给抓手**。
+   * 环内径 9px、抓手 12px ⇒ 两者同时在场时抓手的点会压在环的内缘上（叠影，不是两种状态）。
+   * 断言量的是「谁在场」，不是某个像素：环退场、抓手入场、点跟着退场。
+   */
+  await page.locator('#editor .blk[data-collapsed="1"] .marker').first().hover()
+  await page.waitForTimeout(220) // 让 120ms 的淡入淡出走完
+  const hovered = await page.evaluate(() => {
+    const marker = document.querySelector('#editor .blk[data-collapsed="1"] .marker')
+    const num = (v) => Number.parseFloat(v) || 0
+    return {
+      ring: num(getComputedStyle(marker, '::after').opacity),
+      dot: num(getComputedStyle(marker, '::before').opacity),
+      grip: num(getComputedStyle(marker.querySelector('.grip')).opacity),
+    }
+  })
+  assert(hovered.ring < 0.05, `悬停折叠块时环应退场（与抓手塞不进同一块像素），实际 opacity=${hovered.ring}`)
+  assert(hovered.dot < 0.05, `悬停时那颗点也要退场（它与抓手同中心，会变成重影），实际 opacity=${hovered.dot}`)
+  assert(hovered.grip > 0.5, `悬停折叠块时应露出抓手（一个悬停语言），实际 opacity=${hovered.grip}`)
+
   await ctx.close()
-  return `marker=${r.markerClasses}（${r.markerW}）｜三角 absolute/opacity ${r.foldOpacity}｜无子块不生成 .fold（${foldOnLeaf.leafCount} 行）｜折叠态环 ${ring.width} ${ring.style}`
+  return `marker=${r.markerClasses}（${r.markerW}）｜三角 absolute/opacity ${r.foldOpacity}｜无子块不生成 .fold（${foldOnLeaf.leafCount} 行）｜折叠态环 ${ring.width} ${ring.style}｜悬停让位 环${hovered.ring}/点${hovered.dot}→抓手${hovered.grip}`
 })
 
 await check('T24 可点导轨：深度 d 行有 d 段、点第 k 段折该祖先的直接子块（不折自己）、再点展开', async () => {
