@@ -82,9 +82,13 @@ function literalText(v: unknown): string {
 /**
  * 一份条件 → 草稿。
  *
- * 拆不动（`not`、嵌套组合、`journal`／`ref`／`role`）⇒ `verbatim` 带上原样的 canonical JSON，
- * 界面改用 JSON 编辑。**不猜**：把「拆不动」显示成「拆了一半」，等于让用户在一次
- * 无关的编辑里丢掉剩下的条件。
+ * 拆不动（`not`、嵌套组合、`journal`／`ref`／`role`、`all:[]`）⇒ `verbatim` 带上原样的
+ * canonical JSON，界面改用 JSON 编辑。**不猜**：把「拆不动」显示成「拆了一半」，
+ * 等于让用户在一次无关的编辑里丢掉剩下的条件。
+ *
+ * ⚠️ `any:[]`（恒假）**不在**「拆不动」里：它就是「还没有条件」，拆成零行草稿
+ *    往返逐字节相等；留在 verbatim 里，条件行的每次修改都会被原样吞掉 ——
+ *    新建栏拿到的正是这份空条件，那就永远配不起来。
  */
 export function draftOfSpec(spec: QuerySpec): QueryDraft {
   const where = spec.where
@@ -96,10 +100,12 @@ export function draftOfSpec(spec: QuerySpec): QueryDraft {
     ...(spec.sort && spec.sort.length === 1 ? { sort: { by: spec.sort[0]!.by, dir: spec.sort[0]!.dir } } : {}),
   }
   const leaves = 'all' in where ? where.all : 'any' in where ? where.any : [where]
-  if (('all' in where || 'any' in where) && leaves.length === 0) {
-    // 空组合（`all:[]` 恒真／`any:[]` 恒假）—— 它有意义，别拆成「零行 all」
+  if ('all' in where && leaves.length === 0) {
+    // `all:[]` 恒真：零行草稿拼回来是 `any:[]`（恒假），一拆就翻语义 —— 原样走 JSON
     return { ...base, verbatim: JSON.stringify(canonicalSpec(spec), null, 2) }
   }
+  // `any:[]`（恒假）就是「还没有条件」：拆成零行草稿往返逐字节相等，
+  // 新建栏的空条件才能从条件行开始配 —— 留在 verbatim 里，条件行的修改会被原样吞掉
   if (spec.sort && spec.sort.length > 1) {
     return { ...base, verbatim: JSON.stringify(canonicalSpec(spec), null, 2) }
   }

@@ -65,7 +65,9 @@ export function renderQueryBuilder(box: HTMLElement, deps: QueryBuilderDeps): vo
   let jsonText: string | null = draft.verbatim ?? null
 
   box.replaceChildren()
-  box.className = 'qb'
+  // 宿主是 `.popover` 壳（定位与层级都住在那个类上）：只能加自己的类，不能整个覆盖——
+  // 覆盖掉壳类，浮层就失去了 position:fixed，整盒画到文档流末尾（屏幕外）。
+  box.classList.add('qb')
 
   const head = document.createElement('div')
   head.className = 'qb-head'

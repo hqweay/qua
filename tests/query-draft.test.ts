@@ -81,12 +81,17 @@ test('拆不动就整份走 JSON：`not`、嵌套组合、`ref`／`journal`／`r
   }
 })
 
-test('空组合是**有意义**的：`all:[]` 恒真、`any:[]` 恒假，都不拆成「零行」', () => {
-  for (const where of [{ all: [] }, { any: [] }]) {
-    const draft = draftOfSpec({ where } as QuerySpec)
-    assert.ok(draft.verbatim !== undefined, `空组合不该被拆成零行：${JSON.stringify(where)}`)
-    assert.equal(JSON.stringify(specOfDraft(draft)), JSON.stringify(canonicalSpec({ where } as QuerySpec)))
-  }
+test('空组合：`all:[]` 恒真拆不得（零行会把它翻成恒假）；`any:[]` ＝ 零行草稿（往返无损）', () => {
+  const allEmpty: QuerySpec = { where: { all: [] } }
+  assert.ok(draftOfSpec(allEmpty).verbatim !== undefined, '`all:[]` 不该被拆成零行（零行拼回来是恒假）')
+  assert.equal(JSON.stringify(specOfDraft(draftOfSpec(allEmpty))), JSON.stringify(canonicalSpec(allEmpty)))
+  // `any:[]` 就是「还没有条件」：拆成零行草稿，拼回来逐字节相等 —— 新建栏的空条件才能从条件行配起
+  const anyEmpty: QuerySpec = { where: { any: [] } }
+  const draft = draftOfSpec(anyEmpty)
+  assert.equal(draft.verbatim, undefined, '`any:[]` 要拆成零行草稿（否则条件行的修改被吞掉）')
+  assert.equal(draft.mode, 'any')
+  assert.deepEqual(draft.rows, [])
+  assert.equal(JSON.stringify(specOfDraft(draft)), JSON.stringify(canonicalSpec(anyEmpty)))
   // 真的零行 ⇒ `{any:[]}`（**不匹配任何块**）：空条件等于「没有结果」，不是「整个库」
   assert.equal(JSON.stringify(specOfDraft({ mode: 'all', rows: [], scope: 'subtree' })), '{"where":{"any":[]}}')
 })
