@@ -723,41 +723,6 @@ export function setupDocks(deps: DocksDeps) {
     deps.scheduleBadge()
   }
 
-  /**
-   * 把一张窗口卡**原地**换成看它的一个祖先（点卡头面包屑的一段）。
-   *
-   * 「原地」是这张卡的导航，不是开新窗：`cards` 里的位置不动，
-   * pin／收起／单卡都跟着卡走（换的只是「这张卡看谁」）。
-   * 目标已经有窗口 ⇒ 不动清单，滚到那张（同一块全局最多一个窗口）。
-   */
-  function navigateWindow(side: 'left' | 'right', fromId: string, toBlockId: string): void {
-    if (!findInForest(deps.getWs().blocks, toBlockId)) return
-    const dock = deps.prefs().dock
-    const toKey = dockKey({ kind: 'block', block: toBlockId })
-    const existing = findSide(toKey)
-    if (existing) {
-      reveal(existing, toBlockId)
-      return
-    }
-    const fromKey = dockKey({ kind: 'block', block: fromId })
-    const i = dock[side].cards.findIndex((e) => dockKey(e) === fromKey)
-    if (i < 0) return
-    dock[side].cards[i] = { kind: 'block', block: toBlockId }
-    if (dock.pinnedCards[fromKey]) {
-      dock.pinnedCards[toKey] = true
-      delete dock.pinnedCards[fromKey]
-    }
-    if (dock.collapsedCards[fromKey]) {
-      dock.collapsedCards[toKey] = true
-      delete dock.collapsedCards[fromKey]
-    }
-    if (dock.solo[side] === fromKey) dock.solo[side] = toKey
-    renderDocks()
-    reveal(side, toBlockId)
-    deps.scheduleDeviceSave()
-    deps.scheduleBadge()
-  }
-
   /** 卡头标题：窗口显示块的**路径**（父 > 父），不重复正文 */
   function windowLabel(id: string): string {
     const path = kb.pathOf(id)
@@ -822,10 +787,6 @@ export function setupDocks(deps: DocksDeps) {
     topWindow,
     closeOtherWindows,
     closeAllWindows,
-    navigateWindow,
-    /** 窗口卡面包屑要的祖先链（id ＋ 显示名，逐段可点） */
-    crumbs: (blockId: string): { id: string; label: string }[] =>
-      kb.pathOf(blockId).map((b) => ({ id: b.id, label: blockLabel(b) })),
     /** 卡头状态/标题给窗口管理器用（窗口卡由它自己建） */
     cardStateFor,
     windowLabel,

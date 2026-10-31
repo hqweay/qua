@@ -287,34 +287,6 @@
 .dock-card-title {
   flex: 1;
 }
-/*
- * 窗口卡的标题按**折叠态**分层（两层各干一件事，头部永远没有重复信息）：
- *   收着 ⇒ 本体（块名，普通文本）；展开 ⇒ 地址（祖先链逐段可点，点了原地换看那个祖先）。
- * 展开态没有祖先（顶层块）⇒ 回落成名字。
- * 段是 flex item 且允许各自收缩：超长的段自己出省略号——整条链始终在场、
- * 最近的祖先（最右）永远可点；整行截断会把最右段裁没，点了没有落点。
- */
-.dock-card-title.dock-crumbs {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-gap-1);
-  min-width: 0;
-}
-.dock-crumbs-seg {
-  /* 截断几何归 `.ui-ellipsis` 原语（单行省略），这里只管伸缩与配色 */
-  flex: 0 1 auto;
-  appearance: none;
-  border: 0;
-  background: none;
-  padding: 0;
-  font: inherit;
-  color: var(--ui-text-tertiary);
-  border-radius: var(--ui-radius-sm);
-}
-.dock-crumbs-seg:hover {
-  color: var(--ui-text);
-  background: var(--ui-accent-soft);
-}
 .dock-card-body {
   padding: 0 var(--ui-gap-2) var(--ui-gap-3);
 }

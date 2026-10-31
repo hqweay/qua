@@ -6,9 +6,16 @@
  *
  * 三件事：
  *   1. 用 `EditableBlock` 把**共享 store 里的活块**渲染成一张卡（不是拷贝）；
- *   2. 卡头显示这个块的**路径**（父 > 父），不是重复正文；
- *   3. 卡片自己的折叠/单卡/拖拽由 `ui/dock.ts` 的统一卡壳提供，
+ *   2. 卡头显示这个块的**名字**（身份；地址与「收起上下文」在正文行首，与引用同一条机制）；
+ *   3. 卡片自己的折叠/单卡/常驻/拖拽由 `ui/dock.ts` 的统一卡壳提供，
  *      这里只提供 body 与关闭入口。
+ *
+ * ## 上下文展开（与挂载区/查询视图同一条机制）
+ *
+ * 卡的 doc 永远带着**祖先链 trail**（`.blk-context`，行首）：点一格把那个祖先装成卡的根
+ * ——原地看更大的子树，中心／历史／`cards` 条目都不动。展开出来的根行首有「↩ 收起上下文」，
+ * **逐层退回**（内层留在栈里）。展开栈是**运行时视图状态**（不落盘、不进 `cards`）：
+ * 窗口是谁由 `cards` 说，这一刻往上看了几层是视图的事——与引用展开同一条口径。
  *
  * ⚠️ **每个窗口一个编辑器实例**：一个编辑器只能排一列块，给不出「这一窗口的头/尾」。
  *    多实例共享同一个 `BlockStore`（undo 也是全局的），所以「槽里改、正文同步」。
@@ -19,6 +26,7 @@
  *    聚焦在某个窗口里时冻结（用户正在这里打字）。
  */
 import { flatten, type Block, type BlockStore } from '../core/index.ts'
+import { expandContexts, unfoldForContext } from '../core/context-expand.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import type { BlockEditor, Run } from '../view/editor.ts'
@@ -32,12 +40,8 @@ export interface DockWindowsDeps {
   kb: KbClient
   /** 写入事务入口：执行者在装配层，这里只原样转给每个窗口编辑器（见 `Run`） */
   write: Run
-  /** 卡头标题：这个块的路径（显示名由装配层算，UI 不认识地址规则） */
+  /** 卡头标题：这个块的显示名（身份，永远只有这一个） */
   label: (blockId: string) => string
-  /** 面包屑的祖先链（id ＋ 显示名，含这一块自己）；UI 只逐段画，不认地址规则 */
-  crumbs: (blockId: string) => { id: string; label: string }[]
-  /** 点了面包屑的一段：这张卡原地换成看那个祖先（装配层判「已在别处开着」） */
-  onCrumb: (fromId: string, toBlockId: string) => void
   /** 关闭窗口（**不删块**） */
   onClose: (blockId: string) => void
   /**
@@ -60,6 +64,8 @@ export interface DockWindowsDeps {
 export class DockWindows {
   private readonly deps: DockWindowsDeps
   private readonly windows = new Map<string, { block: EditableBlock; card: HTMLElement }>()
+  /** 每张卡的上下文展开栈（运行时；块 id → 点过的祖先 id，可能嵌套） */
+  private readonly expandedByCard = new Map<string, Set<string>>()
 
   constructor(deps: DockWindowsDeps) {
     this.deps = deps
@@ -81,56 +87,14 @@ export class DockWindows {
       const block = this.deps.kb.get(id)
       if (!block) continue
       const w = this.ensure(id, block)
-      const state = this.deps.cardState(id)
-      this.syncTitle(w.card, id, state.collapsed === true)
-      applyDockCardState(w.card, state)
+      // 头＝身份（块名）：改名后跟着走（只改文本，不重建头）
+      const title = w.card.querySelector<HTMLElement>('.dock-card-title')
+      const name = this.deps.label(id)
+      if (title && title.textContent !== name) title.textContent = name
+      applyDockCardState(w.card, this.deps.cardState(id))
       out.set(id, w.card)
     }
     return out
-  }
-
-  /**
-   * 卡头标题按**卡的折叠态**分层，两层各自只干一件事：
-   *   · 收着 ⇒ **本体**（这一块的名字）：头是收起卡唯一的信息源，答案「这是谁」；
-   *   · 展开 ⇒ **地址**（祖先链逐段可点，点了原地换看那个祖先）：正文已经显示是谁了，
-   *     头专职导航——这样头部永远没有重复信息（收起时没正文，展开时没本体）。
-   * 展开态没有祖先（顶层块）⇒ 回落成名字，头不留空。
-   * 只在真的变了时重建：头部不是编辑器，重建安全，但没必要每键一次重画一遍。
-   */
-  private syncTitle(card: HTMLElement, id: string, collapsed: boolean): void {
-    const title = card.querySelector<HTMLElement>('.dock-card-title')
-    if (!title) return
-    const crumbs = this.deps.crumbs(id)
-    const self = crumbs[crumbs.length - 1]
-    const ancestors = crumbs.slice(0, -1)
-    const key = `${collapsed ? 'c' : 'e'}:${crumbs.map((c) => c.id).join('>')}`
-    if (title.dataset.crumbs === key) return
-    title.dataset.crumbs = key
-    title.textContent = ''
-    if (collapsed || ancestors.length === 0) {
-      title.classList.remove('dock-crumbs')
-      title.textContent = self?.label ?? ''
-      title.title = self?.label ?? ''
-      return
-    }
-    title.classList.add('dock-crumbs')
-    title.title = ''
-    for (const c of ancestors) {
-      const seg = document.createElement('button')
-      seg.type = 'button'
-      // 截断形状走「单行省略」原语（primitives.css 唯一定义处）；这里只管颜色与伸缩
-      seg.className = 'dock-crumbs-seg ui-ellipsis'
-      seg.textContent = c.label
-      seg.title = c.label
-      seg.addEventListener('click', (e) => {
-        e.stopPropagation()
-        this.deps.onCrumb(id, c.id)
-      })
-      title.appendChild(seg)
-      title.appendChild(document.createTextNode(' / '))
-    }
-    // 末尾的分隔线去掉：地址链到此为止，后面是正文自己的事
-    title.lastChild?.remove()
   }
 
   private ensure(id: string, block: Block): { block: EditableBlock; card: HTMLElement } {
@@ -156,6 +120,9 @@ export class DockWindows {
       wire: (editor, change) => this.deps.wire(editor, change),
       onChange: () => this.deps.onChange(),
       onFocus: (editor) => this.deps.onFocus(editor),
+      // 行首 trail：普通点＝就地展开；展开根的「收起上下文」＝逐层退回（与引用同一条机制）
+      onExpandContext: (ancestorId, rowId) => this.expand(id, ancestorId, rowId),
+      onContextBack: (rootId) => this.collapse(id, rootId),
     })
     // 窗口建了就有编辑器（roots 构造时就知道，没有「先空着」的阶段）
     win.ensureEditor()
@@ -176,6 +143,8 @@ export class DockWindows {
 
     const w = { block: win, card }
     this.windows.set(id, w)
+    // 首装载带上祖先 trail：没有展开时它只是地址，展开后才出现「收起上下文」
+    this.applyPlan(id)
     return w
   }
 
@@ -187,6 +156,52 @@ export class DockWindows {
     w.block.dispose()
     w.card.remove()
     this.windows.delete(id)
+    this.expandedByCard.delete(id)
+  }
+
+  /** 当前卡的展开栈（懒建） */
+  private expandedFor(id: string): Set<string> {
+    let set = this.expandedByCard.get(id)
+    if (!set) {
+      set = new Set()
+      this.expandedByCard.set(id, set)
+    }
+    return set
+  }
+
+  /** 点 trail 一格：把那个祖先装成卡的根，中心／历史／`cards` 都不动 */
+  private expand(id: string, ancestorId: string, rowId: string): void {
+    if (!ancestorId) return
+    this.expandedFor(id).add(ancestorId)
+    this.applyPlan(id, rowId || undefined)
+  }
+
+  /** 「收起上下文」：只收这一层；内层还留在栈里，下一次重算会浮出来 */
+  private collapse(id: string, rootId: string): void {
+    const set = this.expandedFor(id)
+    if (!set.delete(rootId)) return
+    this.applyPlan(id)
+  }
+
+  /**
+   * 按当前展开栈重算装载根并换页（`expandContexts` 是纯函数，与挂载区/查询同一份）。
+   * 过期的展开 id 在 plan 里被剪掉——「下次再出现同 id 时不该自己又展开」。
+   */
+  private applyPlan(id: string, focusHint?: string): void {
+    const ed = this.windows.get(id)?.block.ed
+    const block = this.deps.store.find(id)
+    if (!ed || !block) return
+    const trail = this.deps.kb.pathOf(id).slice(0, -1)
+    const plan = expandContexts(
+      { roots: [block], contexts: new Map([[id, trail]]) },
+      this.expandedFor(id),
+      (bid) => this.deps.kb.pathOf(bid),
+      focusHint,
+    )
+    this.expandedByCard.set(id, plan.expanded)
+    const folded = unfoldForContext(ed.doc.folded, plan.covers, (bid) => this.deps.kb.pathOf(bid))
+    ed.loadPage({ roots: plan.roots, folded, contexts: plan.contexts, expandedRoots: plan.contextRoots })
+    if (plan.focusId) ed.reveal(plan.focusId)
   }
 }
 

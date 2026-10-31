@@ -1775,8 +1775,8 @@ await check('A27 单卡展开收着的卡（退出不收回）；面包屑点祖
   await page.waitForTimeout(100)
   assert(!(await backrefs.getAttribute('data-collapsed')), '退出单卡后应保持展开（不收回）')
 
-  // ② 面包屑：开一个有**祖先**的子块窗口（depth-2 子／depth-1 父；顶层块没有祖先，
-  //     展开态回落成名字是另一条口径），点祖先段 → 这张卡原地换看祖先（位置不变、不新增窗口）
+  // ② 上下文展开（与引用同一条机制）：窗口卡正文行首带祖先 trail，点一格把那个祖先
+  //     装成卡的根（中心不动、`cards` 条目不动、不新增窗口），展开根行首有「收起上下文」
   const pair = await page.evaluate(() => {
     const rows = [...document.querySelectorAll('#editor .blk')]
     for (let i = 1; i < rows.length; i++) {
@@ -1789,35 +1789,42 @@ await check('A27 单卡展开收着的卡（退出不收回）；面包屑点祖
   assert(pair, '前置：应有一对 depth-2/depth-1 父子块')
   await page.locator(`.blk[data-block-id="${pair.child}"] > .left > .marker`).first().click({ modifiers: ['Shift'] })
   await page.waitForTimeout(150)
-  const seg = page.locator(`.dock-card[data-card-id="${pair.child}"] .dock-crumbs-seg`, { hasText: /.+/ }).last()
-  assert(await seg.count(), '窗口卡标题应是面包屑（祖先段可点）')
-  await seg.click()
+  const card = page.locator(`.dock-card[data-card-id="${pair.child}"]`)
+  // 正文行首 trail：最后一格＝最近的祖先（父）
+  const cell = card.locator('.blk-context .blk-context-cell').last()
+  assert(await cell.count(), '窗口卡正文行首应有祖先 trail（与引用同一条）')
+  await cell.click()
   await page.waitForTimeout(150)
-  const winIds = await page.evaluate(
-    () => [...document.querySelectorAll('#dock-right-stack .dock-card[data-window]')].map((c) => c.dataset.cardId),
-  )
-  assert(!winIds.includes(pair.child) && winIds.includes(pair.parent), `原地导航应换成祖先块：${JSON.stringify(winIds)}`)
-  assert(
-    winIds.filter((x) => x === pair.parent).length === 1,
-    `不应额外多开一张窗口：${JSON.stringify(winIds)}`,
-  )
+  const state = await page.evaluate((child) => {
+    const winCard = document.querySelector(`.dock-card[data-card-id="${child}"]`)
+    const root = winCard?.querySelector('.blk[data-depth="0"]')
+    return {
+      winIds: [...document.querySelectorAll('#dock-right-stack .dock-card[data-window]')].map((c) => c.dataset.cardId),
+      rootId: root?.dataset.blockId,
+      hasTrail: !!winCard?.querySelector('.blk[data-depth="0"] .blk-context'),
+      hasBack: !!winCard?.querySelector('.blk-context-back'),
+    }
+  }, pair.child)
+  assert(state.rootId === pair.parent, `点 trail 一格应把父块装成卡的根：${JSON.stringify(state)}`)
+  assert(state.winIds.includes(pair.child) && state.winIds.length === 1, `cards 条目不该动、不该多开窗：${JSON.stringify(state.winIds)}`)
+  assert(state.hasTrail && state.hasBack, `展开根应有 trail 与「收起上下文」：${JSON.stringify(state)}`)
 
-  // ③ 头部分层：收着 ⇒ 本体（块名，无面包屑段）；展开 ⇒ 地址（祖先段可点）
-  const head = page.locator(`.dock-card[data-card-id="${pair.parent}"] > .dock-card-head .dock-card-title`)
-  await head.click() // 收起这张卡
-  await page.waitForTimeout(120)
-  const collapsedTitle = await head.evaluate((el) => ({
-    text: el.textContent ?? '',
-    segs: el.querySelectorAll('.dock-crumbs-seg').length,
-  }))
-  assert(collapsedTitle.segs === 0 && collapsedTitle.text.length > 0, `收起时头部应是块名本体：${JSON.stringify(collapsedTitle)}`)
-  await head.click() // 展开
-  await page.waitForTimeout(120)
-  const expandedSegs = await head.evaluate((el) => el.querySelectorAll('.dock-crumbs-seg').length)
-  assert(expandedSegs >= 1, `展开时头部应是可点的祖先链：${expandedSegs}`)
+  // ③ 收起上下文：逐层退回——退一层回到原来的块；头始终只是名字（身份）
+  await page.locator(`.dock-card[data-card-id="${pair.child}"] .blk-context-back`).click()
+  await page.waitForTimeout(150)
+  const back = await page.evaluate((child) => {
+    const winCard = document.querySelector(`.dock-card[data-card-id="${child}"]`)
+    return {
+      rootId: winCard?.querySelector('.blk[data-depth="0"]')?.dataset.blockId,
+      hasBack: !!winCard?.querySelector('.blk-context-back'),
+      headText: winCard?.querySelector('.dock-card-head .dock-card-title')?.textContent ?? '',
+    }
+  }, pair.child)
+  assert(back.rootId === pair.child && !back.hasBack, `收起上下文应退回原来的块：${JSON.stringify(back)}`)
+  assert(back.headText.length > 0, `头部应始终是块名（身份）：${JSON.stringify(back)}`)
 
   await ctx.close()
-  return `单卡展开/退出保持 ✓；面包屑：子 ${pair.child.slice(-6)} 原地换成父 ${pair.parent.slice(-6)}；头部分层 ✓`
+  return `单卡展开/退出保持 ✓；上下文展开：子 ${pair.child.slice(-6)} 原地展开到父 ${pair.parent.slice(-6)}、收起退回 ✓；卡片条目不动 ✓`
 })
 
 /* ---------------------------------------------------------------- 不适用项 */

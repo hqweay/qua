@@ -329,7 +329,7 @@ function uiCtx(): CtxKeys {
 
 /* ------------------------------------------------------------ 槽内容 */
 
-const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, windowLabel, setWindows, toggleFoldAll, topWindow, closeOtherWindows, closeAllWindows, navigateWindow, crumbs: dockCrumbs, widgetDeps: dockWidgetDeps } = setupDocks({
+const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, windowLabel, setWindows, toggleFoldAll, topWindow, closeOtherWindows, closeAllWindows, widgetDeps: dockWidgetDeps } = setupDocks({
   kb,
   prefs,
   applyChrome: () => applyChrome(),
@@ -2304,9 +2304,6 @@ const dockWindowsDeps = (side: 'left' | 'right'): ConstructorParameters<typeof D
   write: (fn) => run(fn, ed),
   kb,
   label: windowLabel,
-  // 卡头面包屑：祖先链逐段可点，点了这张卡原地换看那个祖先
-  crumbs: (blockId) => dockCrumbs(blockId),
-  onCrumb: (fromId, toBlockId) => navigateWindow(side, fromId, toBlockId),
   onClose: (blockId) => closeCard(side, blockId),
   /**
    * 窗口编辑器也接**整份** `viewEvents`（与挂载区/查询结果同一条口径）。
