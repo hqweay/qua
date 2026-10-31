@@ -85,7 +85,7 @@ test('dock: 派生卡目录的 id 唯一（画廊与渲染分支共用这一份�
 
 /* ---------------- pin（常驻） ---------------- */
 
-test('dock: pin 缺省跟着进入动作走——拖入（钉）＝常驻，打开来看＝只留本会话', () => {
+test('dock: pin 缺省跟着进入动作走——拖入（钉）＝常驻，打开来看＝不常驻', () => {
   assert.equal(pinDefaultFor('drop'), true)
   assert.equal(pinDefaultFor('view'), false)
 })
