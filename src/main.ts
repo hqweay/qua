@@ -6,7 +6,7 @@
  * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, sourceOfOwner, storedKindsFor, propDisplayLabels, propLabel, type Block, type CtxKeys, type TriggerChar } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, sourceOfOwner, storedKindsFor, propDisplayLabels, propLabel, DERIVED_CARDS, dockKey, type Block, type CtxKeys, type DerivedCardId, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { checkExternalUrl, rejectText } from './core/link.ts'
 import { BlockStore } from './core/store.ts'
@@ -2092,22 +2092,17 @@ function paintStaticCopy(): void {
  */
 function showWidgetGallery(side: 'left' | 'right'): void {
   const cards = prefs().dock[side].cards
-  const taken = new Set(cards.filter((id) => id.startsWith('cmd:')))
+  const taken = new Set(cards.filter((e) => e.kind === 'cmd').map(dockKey))
   /**
-   * **派生卡的目录**：固定 id ＋ 标题 ＋ 图标 ＋ 一个显式的 `derived` 标记。
+   * **派生卡的目录**在 `core/dock.ts` 的 `DERIVED_CARDS`（与渲染分支同一份）：
+   * 这里只把它翻成画廊行。派生卡和「带 `tile` 的命令」并列在同一张画廊里，
+   * 是因为它们的 ✕ 只摘露面、**加回来只有这一处入口**。
    *
-   * 为什么它们要和「带 `tile` 的命令」并列在同一张画廊里：派生卡**没有关闭按钮**
-   * （关掉就没有再加回来的入口），所以「加回来」必须有一个地方。
-   * 不带 `derived` 标记的话，`onPick` 只能靠「id 里有没有点号」去猜它是命令还是卡片 ——
-   * 那是用字符串形状代替类型，而猜错的表现是「点了没反应」。
+   * 行 id 带一个画廊内部的 `derived:` 前缀——它**不进 `cards`**（那里存的是 `DockEntry`），
+   * 只是「这一行选中的是派生卡」的本地标记；前缀到条目 id 的映射放在 `derivedRows` 里，
+   * `onPick` 查表，不靠字符串切分。
    */
-  const DERIVED: { id: string; label: string; icon: string }[] = [
-    { id: 'calendar', label: t('ui.cal.title'), icon: 'lucide:calendar' },
-    { id: 'belongs', label: t('ui.belongs.treeTitle'), icon: 'lucide:list-tree' },
-    { id: 'inspect', label: t('ui.dock.inspect'), icon: 'lucide:sliders-horizontal' },
-    { id: 'backrefs', label: t('ui.dock.backRefs'), icon: 'lucide:corner-up-left' },
-    { id: 'trash', label: t('ui.dock.trash'), icon: 'lucide:trash-2' },
-  ]
+  const derivedRows = new Map<string, DerivedCardId>()
   const rows: Row[] = [
     ...registry
       .list()
@@ -2121,14 +2116,18 @@ function showWidgetGallery(side: 'left' | 'right'): void {
         command: d.name,
         keyHint: keyHints().get(d.name),
       })),
-    ...DERIVED.filter((d) => !cards.includes(d.id)).map((d) => ({
-      id: `derived:${d.id}`,
-      label: d.label,
-      hint: '',
-      icon: d.icon,
-      group: `palette/${t('menu.cat.widget')}`,
-      keyHint: undefined,
-    })),
+    ...DERIVED_CARDS.filter((d) => !cards.some((e) => e.kind === 'derived' && e.card === d.id)).map((d) => {
+      const id = `derived:${d.id}`
+      derivedRows.set(id, d.id)
+      return {
+        id,
+        label: t(d.label),
+        hint: '',
+        icon: d.icon,
+        group: `palette/${t('menu.cat.widget')}`,
+        keyHint: undefined,
+      }
+    }),
     {
       id: 'new-collection',
       label: t('ui.widget.newCollection'),
@@ -2151,9 +2150,9 @@ function showWidgetGallery(side: 'left' | 'right'): void {
         void registry.invoke('core.collection/create', { side }, 'dock')
         return
       }
-      // `derived:` 前缀是**画廊内部的判据**，不进 `cards`（那里存的是裸 id）
-      if (row.id.startsWith('derived:')) {
-        addDerived(side, row.id.slice('derived:'.length))
+      const derived = derivedRows.get(row.id)
+      if (derived) {
+        addDerived(side, derived)
         return
       }
       if (row.command) addTile(side, row.command)

@@ -21,7 +21,7 @@ import { cardNote } from './card-parts.ts'
 
 /** 一块卡：标题条 + 内容；`hidden` 只表示「没有内容」，不表示「用户收起了」 */
 export interface DockCard {
-  /** 稳定 id：块 id（窗口）或派生卡 id（`belongs`／`calendar`／`inspect`／`backrefs`／`trash`） */
+  /** 稳定 key（`dockKey`）：块 id／派生卡 id／`cmd:<命令>`——身份，不是种类 */
   id: string
   /** 块卡标题；空串 ＝ 不画标题文字（仍保留头，因为动作住在这里） */
   title: string
@@ -59,7 +59,7 @@ export interface DockCardAction {
  * 宿主只画这个格子，动作归调用方（通常是一条命令）。
  */
 export interface DockTile {
-  /** 稳定 id：`cmd:<命令名>` */
+  /** 稳定 key（`dockKey`）：`cmd:<命令名>` */
   id: string
   title: string
   /** 图标名（`lucide:<name>`）；未知名字由 renderIcon 降级成占位 */

@@ -29,23 +29,30 @@
 槽的设备状态仍然只有一条有序列表：
 
 ```ts
+type DockEntry =
+  | { kind: 'block'; block: string }          // 一个块的一次露面（窗口卡；组件块同一条）
+  | { kind: 'derived'; card: DerivedCardId }  // 宿主现算的派生卡
+  | { kind: 'cmd'; command: string }          // 一个命令的小卡
+
 interface DockSlotPrefs {
   open: boolean
   width: number | null
-  cards: string[]   // 有序
+  cards: DockEntry[]   // 有序
 }
 ```
 
-`cards` 里的字符串分三种：
+**种类由 `kind` 说，不由字符串形状猜**：写入口按 `kind` 构造、渲染按 `kind` 穷举。
+加一种来源＝编译期错误，而不是「那种卡不出现」。
 
-| 条目形状 | 解析成 | 尺寸 | 有没有块 |
+| 条目 | 尺寸 | 有没有块 | 身份（`dockKey`） |
 |---|---|---|---|
-| `cmd:<命令名>` | **小卡**：一个命令的快捷方式 | small | 没有 |
-| 32 位块 id | 一个块的一次露面（窗口卡；以后也可以是组件块） | large | 有 |
-| `belongs`／`inspect`／`backrefs`／`trash` | 宿主现算的派生卡 | large | 没有 |
+| `block` | large | 有 | 块 id |
+| `derived`（`inspect`／`belongs`／`backrefs`／`trash`／`calendar`） | large | 没有 | 派生卡 id |
+| `cmd` | small | 没有 | `cmd:<命令名>` |
 
-`cmd:` 不是块，所以**同一个命令可以同时出现在左右两槽**；块 id 仍然全局最多一张窗口
-（同一个块不会在两边各开一份）。
+`cmd` 不是块，所以**同一个命令可以同时出现在左右两槽**；块仍然全局最多一张窗口
+（同一个块不会在两边各开一份）。DOM 的 `data-card-id`、收起／单卡表、拖拽载荷
+仍用扁平 key——换一串会让用户已折叠／已单卡的卡静默复位。
 
 ---
 
@@ -182,7 +189,7 @@ _depth?: number
 |---|---|---|---|---|
 | 命令／类型不可用 | 占位瓦片 | 占位卡／未知类型降级 | 块缺失不渲染 | 不渲染 |
 | 插件卸载 | 占位 | 数据保留，重新启用恢复 | — | — |
-| 从槽移除 | 移除字符串（无块） | 移出 `cards`，块留着 | 移出 `cards`，块不动 | 移出 `cards` |
+| 从槽移除 | 移除条目（无块） | 移出 `cards`，块留着 | 移出 `cards`，块不动 | 移出 `cards` |
 | 再打开 | 画廊「动作」 | 画廊「已保存的组件」 | 搜索／Shift+点 | 画廊「系统」 |
 
 `collapsedCards`／`solo` 只对 large 有意义；small 没有折叠／单卡，只有移除。

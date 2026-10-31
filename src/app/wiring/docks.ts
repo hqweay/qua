@@ -14,9 +14,12 @@ import {
   belongsToTree,
   blockLabel,
   buildAdjacency,
+  dockKey,
   findInForest,
   isWidgetBlock,
   widgetSlotHeightOf,
+  type DerivedCardId,
+  type DockEntry,
 } from '../../core/index.ts'
 import { t } from '../../core/msg.ts'
 import type { Registry } from '../../core/commands/index.ts'
@@ -39,7 +42,7 @@ import { calendarCard } from '../../ui/calendar-card.ts'
 import { widgetBody, widgetTitle, type WidgetDeps } from '../../ui/dock-widgets.ts'
 import { BelongsTree } from '../../ui/belongs-tree.ts'
 import { applyWidgetHeights } from '../../view/block-dom.ts'
-import { bindDropTarget, isBlockId, setDragCard } from '../../view/dnd.ts'
+import { bindDropTarget, setDragCard } from '../../view/dnd.ts'
 import { bindWindowDrop } from '../../ui/dock-windows.ts'
 
 export type DocksDeps = {
@@ -178,20 +181,22 @@ export function setupDocks(deps: DocksDeps) {
     if (!findInForest(deps.getWs().blocks, blockId)) return
     const dock = deps.prefs().dock
     const other = side === 'left' ? 'right' : 'left'
-    const oi = dock[other].cards.indexOf(blockId)
+    const entry: DockEntry = { kind: 'block', block: blockId }
+    const key = dockKey(entry)
+    const oi = dock[other].cards.findIndex((e) => dockKey(e) === key)
     if (oi >= 0) {
       dock[other].cards.splice(oi, 1)
-      if (dock.solo[other] === blockId) dock.solo[other] = null
+      if (dock.solo[other] === key) dock.solo[other] = null
     }
-    if (!dock[side].cards.includes(blockId)) {
+    if (!dock[side].cards.some((e) => dockKey(e) === key)) {
       const at = lastWindowIndex(dock[side].cards)
-      dock[side].cards.splice(at + 1, 0, blockId)
+      dock[side].cards.splice(at + 1, 0, entry)
     }
     if (!dock[side].open) {
       dock[side].open = true
       deps.applyChrome()
     }
-    if (dock.solo[side] !== null && dock.solo[side] !== blockId) dock.solo[side] = null
+    if (dock.solo[side] !== null && dock.solo[side] !== key) dock.solo[side] = null
     renderDocks()
     reveal(side, blockId)
     deps.scheduleDeviceSave()
@@ -204,20 +209,20 @@ export function setupDocks(deps: DocksDeps) {
    * 三者的差别只在内容从哪来（块 / 组件 / 宿主现算），「关掉」的语义是同一个：
    * 这块数据还在库里，只是这一槽不再显示它。所以不叫 `closeWindow`。
    */
-  function closeCard(side: 'left' | 'right', id: string): void {
+  function closeCard(side: 'left' | 'right', key: string): void {
     const dock = deps.prefs().dock
-    const i = dock[side].cards.indexOf(id)
+    const i = dock[side].cards.findIndex((e) => dockKey(e) === key)
     if (i < 0) return
     dock[side].cards.splice(i, 1)
-    if (dock.solo[side] === id) dock.solo[side] = null
+    if (dock.solo[side] === key) dock.solo[side] = null
     renderDocks()
     deps.scheduleDeviceSave()
     deps.scheduleBadge()
   }
 
   /** 最后一个块窗口的下标；没有窗口 ⇒ -1（新窗口插到槽顶） */
-  function lastWindowIndex(cards: readonly string[]): number {
-    for (let i = cards.length - 1; i >= 0; i--) if (isBlockId(cards[i]!)) return i
+  function lastWindowIndex(cards: readonly DockEntry[]): number {
+    for (let i = cards.length - 1; i >= 0; i--) if (cards[i]!.kind === 'block') return i
     return -1
   }
 
@@ -247,53 +252,51 @@ export function setupDocks(deps: DocksDeps) {
      * 窗口管理器只收**内容块**：组件块（类型声明了 widget）由下面的 renderer 画，
      * 不能再建一个 `BlockEditor` —— 那会得到一张「窗口卡」和一张「组件卡」抢同一个 id。
      */
-    const contentIds = cards.filter((id) => {
-      if (!isBlockId(id)) return false
-      return !isWidgetBlock(deps.kb.get(id))
-    })
+    const contentIds = cards.flatMap((e) =>
+      e.kind === 'block' && !isWidgetBlock(deps.kb.get(e.block)) ? [e.block] : [],
+    )
     const winCards = windows ? windows[side].sync(contentIds) : new Map<string, HTMLElement>()
     const entries: DockCardEntry[] = []
-    for (const id of cards) {
-      // ⚠️ 先认 `cmd:` 再认块 id：`isBlockId` 的类型守卫把 else 分支收成 `never`，
-      //    反过来写会让 `id.startsWith` 在类型层报错（运行时其实没事）。
-      if (id.startsWith('cmd:')) {
-        entries.push({ id, el: actionTile(side, id), size: 'small' })
+    for (const card of cards) {
+      // 种类由 `kind` 说，不由字符串形状猜：改 id 生成方案也不会让某种卡整片消失
+      const key = dockKey(card)
+      if (card.kind === 'cmd') {
+        entries.push({ id: key, el: actionTile(side, card.command), size: 'small' })
         continue
       }
-      if (isBlockId(id)) {
-        const block = deps.kb.get(id)
-        if (block && isWidgetBlock(block)) {
-          const body = widgetBody(block, widgetDeps)
-          const el = buildDockCard(
-            {
-              id,
-              title: widgetTitle(block),
-              body,
-              draggable: true,
-              close: { title: t('ui.dock.closeWidget'), onClick: () => closeCard(side, id) },
-            },
-            cardStateFor(side, id),
-          )
-          el.dataset.widget = '1'
-          /**
-           * **卡的两个高度**：静止（`rest`）与被聚焦（`focus`）。
-           *
-           * 与正文里的组件体读同一份声明、同一个数值表（`applyWidgetHeights`）：
-           * 「同一张卡在槽里和正文里长得不一样高」会让人以为是两份配置。
-           * 切档同样是纯 CSS（`:focus-within`）——卡里一有焦点就长开，焦点离开就收回。
-           * ⚠️ 高度挂在**卡根**上（自定义属性向下继承，`.dock-card-body` 自己读）：
-           *    挂在内容元素上，卡壳那一层读不到。
-           */
-          applyWidgetHeights(el, widgetSlotHeightOf(block))
-          entries.push({ id, el, size: 'large' })
-          continue
-        }
-        const el = winCards.get(id)
-        if (el) entries.push({ id, el, size: 'large' })
+      if (card.kind === 'derived') {
+        entries.push({ ...derivedCard(side, card.card), size: 'large' })
         continue
       }
-      const card = derivedCard(side, id)
-      if (card) entries.push({ ...card, size: 'large' })
+      const block = deps.kb.get(card.block)
+      if (block && isWidgetBlock(block)) {
+        const body = widgetBody(block, widgetDeps)
+        const el = buildDockCard(
+          {
+            id: key,
+            title: widgetTitle(block),
+            body,
+            draggable: true,
+            close: { title: t('ui.dock.closeWidget'), onClick: () => closeCard(side, key) },
+          },
+          cardStateFor(side, key),
+        )
+        el.dataset.widget = '1'
+        /**
+         * **卡的两个高度**：静止（`rest`）与被聚焦（`focus`）。
+         *
+         * 与正文里的组件体读同一份声明、同一个数值表（`applyWidgetHeights`）：
+         * 「同一张卡在槽里和正文里长得不一样高」会让人以为是两份配置。
+         * 切档同样是纯 CSS（`:focus-within`）——卡里一有焦点就长开，焦点离开就收回。
+         * ⚠️ 高度挂在**卡根**上（自定义属性向下继承，`.dock-card-body` 自己读）：
+         *    挂在内容元素上，卡壳那一层读不到。
+         */
+        applyWidgetHeights(el, widgetSlotHeightOf(block))
+        entries.push({ id: key, el, size: 'large' })
+        continue
+      }
+      const el = winCards.get(card.block)
+      if (el) entries.push({ id: key, el, size: 'large' })
     }
     renderDockStack(slot.stack, entries, t('ui.dock.empty'), deps.prefs().dock.solo[side])
     syncTileCols(slot.stack)
@@ -349,23 +352,23 @@ export function setupDocks(deps: DocksDeps) {
   }
 
   /**
-   * 小卡：`cmd:<命令名>` → 44px 动作格。
+   * 小卡：一条命令 → 44px 动作格。
    *
    * 命令不可用（产品构建裁掉、插件卸载）时**保留位置**，画成占位格：
    * 从 cards 里删掉会让整排 reflow，用户会以为自己的布局丢了。
    */
-  function actionTile(side: 'left' | 'right', id: string): HTMLElement {
-    const name = id.slice('cmd:'.length)
-    const decl = deps.getRegistry().decl(name)
+  function actionTile(side: 'left' | 'right', command: string): HTMLElement {
+    const id = dockKey({ kind: 'cmd', command })
+    const decl = deps.getRegistry().decl(command)
     const ok = Boolean(decl?.tile) && decl?.hidden !== true
     const tile: DockTile = {
       id,
       title: ok ? decl!.title : t('ui.dock.tileMissing'),
       icon: ok ? decl!.tile!.icon : 'lucide:circle-help',
       missing: !ok,
-      close: { title: t('ui.dock.removeTile'), onClick: () => removeTile(side, id) },
+      close: { title: t('ui.dock.removeTile'), onClick: () => removeTile(side, command) },
       onClick: () => {
-        if (ok) void deps.getRegistry().invoke(name, {}, 'tile')
+        if (ok) void deps.getRegistry().invoke(command, {}, 'tile')
       },
       onDragStart: (e) => setDragCard(e.dataTransfer, id),
     }
@@ -377,10 +380,11 @@ export function setupDocks(deps: DocksDeps) {
     const decl = deps.getRegistry().decl(command)
     if (!decl?.tile || decl.hidden) return
     const dock = deps.prefs().dock
-    const id = `cmd:${command}`
-    if (dock[side].cards.includes(id)) return
-    const lastTile = dock[side].cards.reduce((at, card, i) => (card.startsWith('cmd:') ? i : at), -1)
-    dock[side].cards.splice(lastTile + 1, 0, id)
+    const entry: DockEntry = { kind: 'cmd', command }
+    const key = dockKey(entry)
+    if (dock[side].cards.some((e) => dockKey(e) === key)) return
+    const lastTile = dock[side].cards.reduce((at, card, i) => (card.kind === 'cmd' ? i : at), -1)
+    dock[side].cards.splice(lastTile + 1, 0, entry)
     if (!dock[side].open) {
       dock[side].open = true
       deps.applyChrome()
@@ -391,9 +395,10 @@ export function setupDocks(deps: DocksDeps) {
   }
 
   /** 移出小卡：只动 cards，不碰命令本身 */
-  function removeTile(side: 'left' | 'right', id: string): void {
+  function removeTile(side: 'left' | 'right', command: string): void {
     const dock = deps.prefs().dock
-    const at = dock[side].cards.indexOf(id)
+    const key = dockKey({ kind: 'cmd', command })
+    const at = dock[side].cards.findIndex((e) => dockKey(e) === key)
     if (at < 0) return
     dock[side].cards.splice(at, 1)
     renderDocks()
@@ -408,25 +413,35 @@ export function setupDocks(deps: DocksDeps) {
    * 「添加组件」画廊能列派生卡（`addDerived`）之后就不成立了。回程既然存在，
    * 就该给去程；否则「我不想看归属树」只能靠拖走或换个槽，而那是另一件事。
    */
-  function derivedCard(side: 'left' | 'right', id: string): DockCardEntry | null {
-    const close = { title: t('ui.dock.closeCard'), onClick: () => closeCard(side, id) }
-    if (id === 'inspect') {
-      const el = deps.inspectCard()
-      decorateDockCard(el, { id, title: '', body: el, close }, cardStateFor(side, id))
-      return { id, el }
+  function derivedCard(side: 'left' | 'right', card: DerivedCardId): DockCardEntry {
+    const close = { title: t('ui.dock.closeCard'), onClick: () => closeCard(side, card) }
+    // 卡的 id／状态键／关闭目标都取 `card` 本身，不从 spec 再读一遍：
+    // 三处各读一个字段，一旦某个 spec 的 id 与目录不一致，就是「点 × 关错卡」。
+    const finish = (spec: DockCard): DockCardEntry => ({
+      id: card,
+      el: buildDockCard({ ...spec, id: card, close }, cardStateFor(side, card)),
+    })
+    // 穷举：`DERIVED_CARDS` 加一张、这里没接 ⇒ 编译期红（早先是三元链，漏了只是「点了没反应」）
+    switch (card) {
+      case 'inspect': {
+        const el = deps.inspectCard()
+        decorateDockCard(el, { id: card, title: '', body: el, close }, cardStateFor(side, card))
+        return { id: card, el }
+      }
+      case 'belongs':
+        return finish(belongsTree.card())
+      case 'backrefs':
+        return finish(backrefsCard(dockDeps))
+      case 'trash':
+        return finish(trashCard(dockDeps))
+      case 'calendar':
+        return finish(
+          calendarCard({
+            kb,
+            openDate: (date) => void deps.getRegistry().invoke('core.journal/today', { date }, 'dock'),
+          }),
+        )
     }
-    const spec: DockCard | null =
-      id === 'belongs'
-        ? belongsTree.card()
-        : id === 'backrefs'
-          ? backrefsCard(dockDeps)
-          : id === 'trash'
-            ? trashCard(dockDeps)
-            : id === 'calendar'
-              ? calendarCard({ kb, openDate: (date) => void deps.getRegistry().invoke('core.journal/today', { date }, 'dock') })
-              : null
-    if (!spec) return null
-    return { id: spec.id, el: buildDockCard({ ...spec, close }, cardStateFor(side, spec.id)) }
   }
 
   /* ------------------------------------------------------------ 卡片拖拽 */
@@ -504,10 +519,10 @@ export function setupDocks(deps: DocksDeps) {
     return { targetId: best!.el.dataset.cardId ?? null, place: before ? 'before' : 'after' }
   }
 
-  function findSide(id: string): 'left' | 'right' | null {
+  function findSide(key: string): 'left' | 'right' | null {
     const dock = deps.prefs().dock
-    if (dock.left.cards.includes(id)) return 'left'
-    if (dock.right.cards.includes(id)) return 'right'
+    if (dock.left.cards.some((e) => dockKey(e) === key)) return 'left'
+    if (dock.right.cards.some((e) => dockKey(e) === key)) return 'right'
     return null
   }
 
@@ -515,26 +530,28 @@ export function setupDocks(deps: DocksDeps) {
    * 移动一张卡（槽内排序或跨槽）。
    *
    * 先摘再找落点：同一槽里往后拖时，目标下标会因为自己先被摘掉而左移一格。
+   * 拖拽载荷里是**扁平 key**（`data-card-id`），不是条目本身 ⇒ 按 key 找条目再搬。
    */
-  function moveCard(from: 'left' | 'right', to: 'left' | 'right', id: string, at: CardDrop): void {
-    if (at.targetId === id) return
+  function moveCard(from: 'left' | 'right', to: 'left' | 'right', key: string, at: CardDrop): void {
+    if (at.targetId === key) return
     const dock = deps.prefs().dock
     const src = dock[from].cards
     const dst = dock[to].cards
-    const i = src.indexOf(id)
+    const i = src.findIndex((e) => dockKey(e) === key)
     if (i < 0) return
-    if (from !== to && dst.includes(id)) return
+    if (from !== to && dst.some((e) => dockKey(e) === key)) return
+    const entry = src[i]!
     src.splice(i, 1)
 
     let index = dst.length
     if (at.targetId) {
-      const ti = dst.indexOf(at.targetId)
+      const ti = dst.findIndex((e) => dockKey(e) === at.targetId)
       if (ti >= 0) index = at.place === 'before' ? ti : ti + 1
     }
-    dst.splice(index, 0, id)
+    dst.splice(index, 0, entry)
 
-    if (dock.solo[from] === id) dock.solo[from] = null
-    if (dock.solo[to] !== null && dock.solo[to] !== id) dock.solo[to] = null
+    if (dock.solo[from] === key) dock.solo[from] = null
+    if (dock.solo[to] !== null && dock.solo[to] !== key) dock.solo[to] = null
     if (!dock[to].open) {
       dock[to].open = true
       deps.applyChrome()
@@ -556,13 +573,15 @@ export function setupDocks(deps: DocksDeps) {
    *
    * 为什么它必须存在：派生卡的 ✕ 只是把卡从 `cards` 里摘掉（与窗口卡同一条路），
    * 摘掉之后**加回来只有这一处入口**——「添加组件」画廊。没有它，✕ 就是单向陷阱。
-   * ⚠️ 与 `addTile` 分开：小卡是 `cmd:<命令>`，派生卡是固定 id，两者落进 `cards`
-   *    的形状不同，混成一个会让「加回来的是哪一种」取决于字符串前缀。
+   * ⚠️ 与 `addTile` 分开：两者落进 `cards` 的 `kind` 不同，混成一个会让
+   *    「加回来的是哪一种」取决于字符串前缀。
    */
-  function addDerived(side: 'left' | 'right', id: string): void {
+  function addDerived(side: 'left' | 'right', card: DerivedCardId): void {
     const dock = deps.prefs().dock
-    if (dock[side].cards.includes(id)) return
-    dock[side].cards.push(id)
+    const entry: DockEntry = { kind: 'derived', card }
+    const key = dockKey(entry)
+    if (dock[side].cards.some((e) => dockKey(e) === key)) return
+    dock[side].cards.push(entry)
     if (!dock[side].open) {
       dock[side].open = true
       deps.applyChrome()

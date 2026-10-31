@@ -13,6 +13,7 @@ import {
   danglingOf,
   declaredFieldIds,
   displayNameOf,
+  dockKey,
   fieldRows,
   findInForest,
   flatten,
@@ -271,8 +272,8 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
          * 断言要能区分「落盘了没有」与「页面里渲染了没有」。
          */
         dock: {
-          left: { open: prefs().dock.left.open, width: prefs().dock.left.width, cards: [...prefs().dock.left.cards] },
-          right: { open: prefs().dock.right.open, width: prefs().dock.right.width, cards: [...prefs().dock.right.cards] },
+          left: { open: prefs().dock.left.open, width: prefs().dock.left.width, cards: prefs().dock.left.cards.map(dockKey) },
+          right: { open: prefs().dock.right.open, width: prefs().dock.right.width, cards: prefs().dock.right.cards.map(dockKey) },
           collapsed: [...Object.keys(prefs().dock.collapsedCards)],
           solo: { ...prefs().dock.solo },
         },

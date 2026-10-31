@@ -15,6 +15,7 @@
 import type { SecLayout } from '../feed.ts'
 import type { MountEntry } from '../mount.ts'
 import { canonicalMountEntries } from '../mount.ts'
+import { canonicalDockEntries, dockKey, type DockEntry } from '../dock.ts'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 
@@ -55,16 +56,14 @@ export interface DockSlotPrefs {
   /**
    * 这一槽的 Widget，**有序**。
    *
-   * 三种 id 混在同一个列表里：
-   *   · 块 id（32 位 hex）＝ 一个块的一次露面（窗口卡；以后也可以是组件块）；
-   *   · 派生卡 id（`belongs`／`inspect`／`backrefs`／`trash`／`calendar`）＝ 宿主现算的视图卡；
-   *   · `cmd:<命令名>` ＝ 一个**小卡**：没有块，点击执行这条命令。
+   * 每项是一个 `DockEntry`：块露面（窗口／组件卡）、派生卡、或 `cmd:` 小卡。
+   * **种类由 `kind` 说，不由字符串形状猜**（见 `core/dock.ts` 顶部）。
    *
    * 它只是**视图状态**：块仍然只有森林里那一份，这里存的是「看哪几个、怎么排」。
    * 隐藏的卡也留在这里（位置是布局，可用性是内容）；删块/撤销不会污染清单。
-   * `cmd:` 条目不是块，所以同一个命令可以同时出现在左右两槽；块 id 仍全局最多一张。
+   * `cmd` 条目不是块，所以同一个命令可以同时出现在左右两槽；块仍全局最多一张。
    */
-  cards: string[]
+  cards: DockEntry[]
 }
 
 export interface DockPrefs {
@@ -97,15 +96,23 @@ export const DEFAULT_DOCK: DockPrefs = {
     open: true,
     width: null,
     cards: [
-      'cmd:core.journal/today',
-      'cmd:core.page/new',
-      'cmd:core.command-palette/show',
-      'cmd:core.journal/prev',
-      'calendar',
-      'belongs',
+      { kind: 'cmd', command: 'core.journal/today' },
+      { kind: 'cmd', command: 'core.page/new' },
+      { kind: 'cmd', command: 'core.command-palette/show' },
+      { kind: 'cmd', command: 'core.journal/prev' },
+      { kind: 'derived', card: 'calendar' },
+      { kind: 'derived', card: 'belongs' },
     ],
   },
-  right: { open: true, width: null, cards: ['inspect', 'backrefs', 'trash'] },
+  right: {
+    open: true,
+    width: null,
+    cards: [
+      { kind: 'derived', card: 'inspect' },
+      { kind: 'derived', card: 'backrefs' },
+      { kind: 'derived', card: 'trash' },
+    ],
+  },
   collapsedCards: {},
   solo: { left: null, right: null },
 }
@@ -140,11 +147,10 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     Array.isArray(slot?.pins)
       ? slot.pins.filter((id): id is string => typeof id === 'string' && id !== '')
       : []
-  const ids = (v: unknown): string[] =>
-    Array.isArray(v) ? [...new Set(v.filter((id): id is string => typeof id === 'string' && id !== ''))] : []
 
   const pick = (slot: Partial<DockSlotPrefs> | undefined, fallback: DockSlotPrefs, pins: string[]): DockSlotPrefs => {
-    const cards = Array.isArray(slot?.cards) ? ids(slot.cards) : ids([...fallback.cards, ...pins])
+    // `cards` 缺失 ⇒ 默认布局 ＋ 旧 `pins`；存在就只认它（逐项归一，坏项丢掉）
+    const cards = canonicalDockEntries(Array.isArray(slot?.cards) ? slot.cards : [...fallback.cards, ...pins])
     return {
       open: typeof slot?.open === 'boolean' ? slot.open : fallback.open,
       width: typeof slot?.width === 'number' && Number.isFinite(slot.width) ? slot.width : null,
@@ -154,19 +160,20 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
 
   const left = pick(dock?.left, DEFAULT_DOCK.left, legacyPins(dock?.left))
   const right = pick(dock?.right, DEFAULT_DOCK.right, legacyPins(dock?.right))
-  // 一个块全局最多一张窗口：同一个块 id（或派生卡）不留在两边。
+  // 一个块全局最多一张窗口：同一个块/派生卡不留在两边。
   // 左槽先到先得——默认布局里左槽是导航位，冲突时保留它更符合直觉。
-  // `cmd:` 不是块，同一个命令可以两槽都有（它没有窗口状态可冲突）。
-  const leftSet = new Set(left.cards.filter((id) => !id.startsWith('cmd:')))
-  right.cards = right.cards.filter((id) => id.startsWith('cmd:') || !leftSet.has(id))
+  // `cmd` 不是块，同一个命令可以两槽都有（它没有窗口状态可冲突）。
+  const shared = (e: DockEntry): boolean => e.kind !== 'cmd'
+  const leftKeys = new Set(left.cards.filter(shared).map(dockKey))
+  right.cards = right.cards.filter((e) => !shared(e) || !leftKeys.has(dockKey(e)))
 
   const collapsedCards: Record<string, true> = {}
   if (dock?.collapsedCards && typeof dock.collapsedCards === 'object' && !Array.isArray(dock.collapsedCards)) {
     for (const [k, v] of Object.entries(dock.collapsedCards)) if (v === true && k !== '') collapsedCards[k] = true
   }
-  const solo = (side: 'left' | 'right', cards: string[]): string | null => {
+  const solo = (side: 'left' | 'right', cards: DockEntry[]): string | null => {
     const id = dock?.solo?.[side]
-    return typeof id === 'string' && id !== '' && cards.includes(id) ? id : null
+    return typeof id === 'string' && id !== '' && cards.some((e) => dockKey(e) === id) ? id : null
   }
 
   return {
