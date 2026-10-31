@@ -15676,6 +15676,97 @@ await check('T190 四种布局：切换不重查；看板拖卡写属性不换�
   return `看板 ${board.cols.length} 列／画廊 ${gallery.cards} 卡／日历 42 格／导图 ${mm.nodes} 节点；条数始终 ${rowsBefore}`
 })
 
+await check('T197 全部收起／全部展开：一个按钮、文案随状态变；只作用于顶层行；非大纲视图下隐藏', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  // ① 打开「产品设计」页里那个查询块（条件＝本页之下未完成的待办）
+  const qid = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    let found = ''
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.props?._query) {
+          found = b.id
+          return
+        }
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return found
+  })
+  assert(qid, '前置：这一页里应有一个查询块')
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
+  await page.waitForTimeout(320)
+
+  const shot = () =>
+    page.evaluate(() => {
+      const root = document.querySelector('.queryview')
+      const btn = root?.querySelector('.queryview-foldall')
+      return {
+        rows: [...(root?.querySelectorAll('.queryview-editor .blk[data-block-id]') ?? [])].map(
+          (e) => e.dataset.blockId ?? '',
+        ),
+        btnVisible: Boolean(btn) && !btn?.hidden,
+        btnText: btn?.textContent ?? '',
+      }
+    })
+
+  const before = await shot()
+  assert(before.rows.length >= 1, `前置：查询应有命中：${JSON.stringify(before.rows)}`)
+  /**
+   * 种子里命中的待办**没有子块**，而按钮只在「顶层行里有子块」时才出现
+   * ⇒ 先给命中块造一个子块，再回到查询块刷新，才谈得上断言这个按钮。
+   */
+  assert(!before.btnVisible, `前置：命中还没有子块 ⇒ 按钮这时应当隐藏：${JSON.stringify(before)}`)
+  const hit = before.rows[0] ?? ''
+  await page.evaluate((id) => {
+    window.__qua.focusBlock(id, 999)
+    window.__qua.invoke('core.editor/insert-block', { text: '折叠探针' })
+    window.__qua.invoke('core.editor/indent-block', {})
+  }, hit)
+  await page.waitForTimeout(240)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
+  await page.waitForTimeout(320)
+  await page.locator('.queryview-refresh').click()
+  await page.waitForTimeout(360)
+
+  // ② 顶层行有了子块 ⇒ 按钮出现，且此刻说「全部收起」（因为都还展开着）
+  const armed = await shot()
+  assert(armed.btnVisible, `顶层行有子块 ⇒ 按钮应出现：${JSON.stringify(armed)}`)
+  assert(armed.btnText.includes('收起'), `都展开着 ⇒ 应说「全部收起」：${armed.btnText}`)
+  assert(armed.rows.length >= 2, `顶层行与它的子块都该画出来：${JSON.stringify(armed.rows)}`)
+
+  // ③ 点一下 ⇒ 顶层行折起来（子块不再画），按钮改口说「全部展开」
+  await page.locator('.queryview-foldall').click()
+  await page.waitForTimeout(320)
+  const folded = await shot()
+  assert(folded.rows.length === 1, `收起后只剩顶层行那一排：${JSON.stringify(folded.rows)}`)
+  assert(folded.btnText.includes('展开'), `都收着 ⇒ 应说「全部展开」：${folded.btnText}`)
+
+  // ④ 再点一下 ⇒ 回到全部展开（同一个按钮，文案跟着变回来）
+  await page.locator('.queryview-foldall').click()
+  await page.waitForTimeout(320)
+  const back = await shot()
+  assert(
+    JSON.stringify(back.rows) === JSON.stringify(armed.rows),
+    `再点一次应还原：${JSON.stringify(back.rows)} vs ${JSON.stringify(armed.rows)}`,
+  )
+  assert(back.btnText.includes('收起'), `展开着 ⇒ 又说回「全部收起」：${back.btnText}`)
+
+  // ⑤ 切到表格 ⇒ 那里没有行折叠，按钮必须隐藏（显示了就是点了没反应的按钮）
+  await page.evaluate(
+    (id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'table' }),
+    qid,
+  )
+  await page.waitForTimeout(450)
+  const table = await shot()
+  assert(!table.btnVisible, '表格视图没有行折叠 ⇒ 按钮必须隐藏')
+
+  await ctx.close()
+  return `${armed.rows.length} 行 → 收起 ${folded.rows.length} 行 → 还原；「${armed.btnText}」⇄「${folded.btnText}」；表格下隐藏`
+})
+
 /**
  * **聚焦即展开**：折起来的块被「聚焦」时展开，退出聚焦回到收着。
  *
