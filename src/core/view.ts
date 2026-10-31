@@ -18,6 +18,7 @@
 import { ACTIVE_VIEW_PROP, VIEWS_PROP, isDeleted, isQueryBlock, type Block, type BlockProps } from './model.ts'
 import { readEmbed } from './embed.ts'
 import { collectionItems, isCollectionBlock } from './collection.ts'
+import { uuidv7Hex } from './ids.ts'
 import type { KbClient } from './kb/types.ts'
 import { declaredFieldIds, ownFieldIds } from './props.ts'
 import { plainText } from './runs.ts'
@@ -168,6 +169,12 @@ export function readViewSet(set: ViewSet): { views: ViewConfig[]; active: ViewCo
 export function resolveView(set: ViewSet, viewId: string): ViewConfig | null {
   if (viewId === '' || viewId === 'outline') return null
   return set.views.find((v) => v.id === viewId) ?? null
+}
+
+/** 视图 id：块 id 之外的**局部**标识（只在这个拥有者的 `_views` 里有意义） */
+export function mkViewId(): string {
+  // 16 位＝时间前缀 ＋ 序号：同一毫秒里建两张视图不能撞 id（撞了会「切视图没生效」）
+  return `v-${uuidv7Hex().slice(0, 16)}`
 }
 
 /* ------------------------------------------------------------ 保留列键 */

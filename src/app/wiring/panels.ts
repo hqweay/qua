@@ -440,8 +440,17 @@ export function setupPanels(deps: PanelsDeps) {
       owner,
       ...(binding ? { binding } : {}),
       host: () => blocks.find(hostId) ?? host,
-      context: binding ? tabContextFor(host, ownerBlock?.id) : contextFor(ownerBlock?.id ?? hostId),
-      surface: binding ? 'mount' : 'center',
+      /**
+       * 求值上下文按**拥有者**分，不按「有没有绑定」：
+       *   · tab 拥有者（local）与绑定（linked）都是挂载表面 ⇒ 锚点＝**宿主块自己**；
+       *     顶层宿主（日记的天、顶层页）没有父块，「锚在父块」会静默变成整库——
+       *     同一栏的大纲分支锚在宿主，两张看法会给出两份结果。
+       *   · 块拥有者（center 查询块）锚在它所在的容器：查询块住在哪一页，
+       *     「这一块之下」就是那一页之下；顶层没有容器 ⇒ 不设锚点（整库）。
+       */
+      context:
+        owner.kind === 'tab' || binding ? tabContextFor(host, ownerBlock?.id) : contextFor(ownerBlock?.id ?? hostId),
+      surface: owner.kind === 'tab' || binding ? 'mount' : 'center',
       onChange: () => {
         syncSections()
         scheduleSave()
@@ -615,6 +624,8 @@ export function setupPanels(deps: PanelsDeps) {
     const added = owners.entriesOf(mountHost).find((e) => !before.has(e.id))
     renderMounts()
     if (!added) return
+    // 新栏当场切过去：建了不看，「点了没生效」的另一种长相（激活的是这一栏自己的表格视图）
+    mountInstances.get(host.id)?.area.activateTab(added.id)
     void deps
       .getRegistry()
       .invoke('core.query/open-builder', { owner: { kind: 'tab', host: mountHost, tabId: added.id } }, 'mount')

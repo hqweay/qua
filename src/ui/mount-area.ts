@@ -240,6 +240,15 @@ export class MountArea {
     this.render()
   }
 
+  /**
+   * 从装配层点名激活某一栏（新建栏之后跳过去看它）。
+   * 栏不在这份条目里就什么都不做 —— 那是「这一栏已经不在了」，不是静默失败。
+   */
+  activateTab(tabId: string): void {
+    if (!this.entries.some((e) => e.id === tabId)) return
+    this.activate(tabId)
+  }
+
   /** 这一段的宿主（`MountHost` 是「这一栏写哪」的唯一判别器） */
   private mountHost(): MountHost {
     const host = this.deps.host()

@@ -10663,6 +10663,11 @@ await check('T134 日记的自定义栏跟随今天：加一栏 ⇒ 推到明天
   const myKey = await keyOf()
   assert(myKey !== '', `应有「${label}」那一栏`)
   await mountTab(page, myKey)
+  // 新栏缺省带一张表格（视图抬头才长得出条件/范围芯片）；这一段验的是**大纲求值**，先切回大纲
+  await page.evaluate((id) => {
+    window.__qua.invoke('core.view/set-active', { owner: { kind: 'tab', host: { kind: 'journal' }, tabId: id }, viewId: '' })
+  }, myKey)
+  await page.waitForTimeout(350)
   const rows = await page.evaluate((hostId) => {
     const ids = [...document.querySelectorAll('#editor .mount-editor .blk')].map((e) => e.dataset.blockId)
     let host = null
@@ -14084,6 +14089,11 @@ await check('T178 local tab：加一栏不建块；切表格；刷新只影响�
 
   // 切到这一栏：它是「全库待办」，库里不止一条
   await mountTab(page, added.key)
+  // 新栏缺省带一张表格；先切回大纲再数行（下面还会显式建一张表，钉「配置住在这一栏」）
+  await page.evaluate(({ host, id }) => {
+    window.__qua.invoke('core.view/set-active', { owner: { kind: 'tab', host: { kind: 'block', blockId: host }, tabId: id }, viewId: '' })
+  }, { host: before.host, id: added.key })
+  await page.waitForTimeout(350)
   const rows = await mountRows(page)
   assert(rows > 0, `这一栏应显示命中：${rows} 行`)
 
@@ -14186,6 +14196,14 @@ await check('T182 上下文：同一份条件，顶层查询页看全库、挂�
   )
   assert(key !== '', '应有「本页探针」这一栏')
   await mountTab(page, key)
+  // 新栏缺省带一张表格；这一段钉的是**锚点**（大纲分支），先切回大纲再数行
+  await page.evaluate((host) => {
+    const id = [...document.querySelectorAll('#editor .mount .mount-tabwrap')].find(
+      (x) => (x.querySelector('.mount-tab')?.textContent ?? '') === '本页探针',
+    )?.dataset.tab
+    window.__qua.invoke('core.view/set-active', { owner: { kind: 'tab', host: { kind: 'block', blockId: host }, tabId: id }, viewId: '' })
+  }, probe[0].page)
+  await page.waitForTimeout(350)
   const localRows = await mountRows(page)
   assert(localRows === 1, `挂在页上的栏只看这一页（1 条），实际 ${localRows} 行：挂载区的锚点是宿主`)
 

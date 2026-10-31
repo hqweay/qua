@@ -20,6 +20,7 @@ import {
   isQueryBlock,
   mkBlock,
   mkQueryBlock,
+  mkViewId,
   readViewSet,
   removeView,
   renameView,
@@ -35,16 +36,9 @@ import {
   type ViewConfig,
   type ViewOwnerRef,
 } from '../../core/index.ts'
-import { uuidv7Hex } from '../../core/ids.ts'
 import { t } from '../../core/msg.ts'
 import type { App } from '../../core/ports.ts'
 import type { ViewConfigDeps } from './types.ts'
-
-/** 视图 id：块 id 之外的**局部**标识（只在这个拥有者的 `_views` 里有意义） */
-function mkViewId(): string {
-  // 16 位＝时间前缀 ＋ 序号：同一毫秒里建两张视图不能撞 id（撞了会「切视图没生效」）
-  return `v-${uuidv7Hex().slice(0, 16)}`
-}
 
 /** 库里第一个某种 kind 的属性定义（看板的分组列／日历的日期列先给一个能用的） */
 function firstDefOf(d: ViewConfigDeps, kind: string): string | undefined {

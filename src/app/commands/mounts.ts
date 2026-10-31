@@ -15,15 +15,19 @@ import {
   ALIASES_PROP,
   canonicalSpec,
   canonicalViews,
+  defaultColumnsForSource,
   derivedSpecOf,
   displayNameOf,
   journalDate,
   LISTS_PROP,
   mkQueryBlock,
   mkTabId,
+  mkViewId,
   todayISO,
   type MountEntry,
   type MountHost,
+  type Source,
+  type ViewConfig,
 } from '../../core/index.ts'
 import { t } from '../../core/msg.ts'
 import type { App } from '../../core/ports.ts'
@@ -59,22 +63,27 @@ export function mountCommands(
     /**
      * 加一栏 **local**：这一栏自己拥有条件与视图。**不建块。**
      *
-     * 默认给一张**表格**视图并设为激活 —— 那是「新建一栏」时的选择，
+     * 一条视图都没给时默认配一张**表格**并设为激活 —— 那是「新建一栏」时的选择，
      * 不是「所有查询缺省都是表格」（块查询的缺省仍是大纲）。
+     * 没有激活视图时这一栏只有大纲分支，条件与范围（这一块之下/全库）的
+     * 芯片住在视图抬头里 —— 缺了这张表，「范围只到宿主这一块」在屏幕上无处可看。
      */
     addLocalTab: (host, label, spec, views, activeView) => {
       if (!editable(host)) return ''
       const name = label.trim()
       if (name === '' || !spec || typeof spec !== 'object' || !spec.where) return ''
       const canon = canonicalSpec(spec)
-      const entry: MountEntry = {
-        id: mkTabId(),
-        kind: 'local',
-        label: name,
-        spec: canon,
-        views: canonicalViews(views ?? [], { kind: 'query', spec: canon }),
+      const source: Source = { kind: 'query', spec: canon }
+      const list = canonicalViews(views ?? [], source)
+      const entry: MountEntry = { id: mkTabId(), kind: 'local', label: name, spec: canon, views: list }
+      let active = activeView !== undefined && activeView !== '' ? activeView : ''
+      if (list.length === 0) {
+        // 列在第一次建表时算一次（与 `core.view/add` 同一条口径），之后不随结果漂移
+        const view: ViewConfig = { id: mkViewId(), kind: 'table', table: { columns: defaultColumnsForSource(source, d.kb) } }
+        entry.views = [view]
+        active = view.id
       }
-      if (activeView !== undefined && activeView !== '') entry.activeView = activeView
+      if (active !== '') entry.activeView = active
       write(host, [...entriesOf(host), entry])
       return entry.id
     },
