@@ -19,9 +19,9 @@ import { dirname, join } from 'node:path'
 
 const ROOT = join(import.meta.dirname, '..', '..')
 /**
- * 蓝本住在主仓（qua 的上一级）。正体 checkout 里就是 `ROOT/..`；worktree 里
- * 中间多一层 `.worktrees/<名>`，相对层数对不上——从 `ROOT` 一路向上找第一份，
- * 都没有时按旧口径给出路径（让报错落在熟悉的 ENOENT 上）。
+ * 蓝本住在 checkout 的**上一级**（与 `qua/` 并排的那份映射表文档）。正体布局下
+ * 就是 `ROOT/..`；worktree 布局中间多一层 `.worktrees/<名>`，相对层数对不上——
+ * 从 `ROOT` 一路向上找第一份，都没有时按旧口径给出路径（报错落在熟悉的 ENOENT 上）。
  */
 const BLUEPRINT = process.env.QUA_BLUEPRINT ?? findBlueprint()
 function findBlueprint(): string {
