@@ -12887,6 +12887,69 @@ await check('T150 派生卡也能关：关掉即离开槽（模型不动）；�
   return `归属卡关掉→画廊加回来（模型 0 变化）；检视卡关掉→「看属性」开抽屉不复活卡，卡从画廊回`
 })
 
+/**
+ * **检视卡在多根屏上的空态是「不画」，但加卡这个动作不能静默。**
+ *
+ * 设计不变（92.1：多根屏没有单一对象 ⇒ 属性区收起）：卡仍在 `cards` 里，
+ * 只是按主体隐藏。用户会在「日记流」上点添加之后看到「什么都没有」——
+ * 真正的缺陷是**反馈缺失**，不是「卡不该收起」。
+ * 这一条同时钉住：「先说原因」在添加之前，「给一句反馈」在添加之后，
+ * 打开一个页之后卡出现。
+ */
+await check('T202 检视卡在多根屏：画廊先说原因、添加给反馈、卡按主体收起；打开页后出现', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  // 不 quiet：这一条要验给用户的那句话
+  await openFirstPage(page)
+
+  // ① 页里可见 ⇒ 先关掉（回程从画廊开始）
+  await page.locator('#dock-right .dock-card[data-card-id="inspect"] [data-dock-action="close"]').click()
+  await page.waitForTimeout(140)
+  const closed = await page.evaluate(() => window.__qua.snapshot().dock.right.cards)
+  assert(!closed.includes('inspect'), `前置：检视卡已关掉：${JSON.stringify(closed)}`)
+
+  // ② 切到日记流（多根屏）
+  const jid = await page.evaluate(() => {
+    const j = window.__qua.allBlocks().find((b) => b.roles?.includes('journal'))?.id ?? ''
+    if (j) window.__qua.invoke('core.page/open', { pageId: j })
+    return j
+  })
+  assert(jid, '前置：应有今日 journal 块')
+  await page.waitForTimeout(300)
+  const roots = await page.evaluate(() => window.__qua.__editor.doc.roots.length)
+  assert(roots > 1, `前置：日记流是多根屏：${roots}`)
+
+  // ③ 画廊在**添加之前**说清它为什么暂时不可见
+  await page.locator('#dock-right .dock-add').click()
+  await page.waitForTimeout(160)
+  const rows = await layerRows(page)
+  const at = rows.findIndex((r) => r.label === '检视卡')
+  assert(at >= 0, `多根屏上画廊仍应列出检视卡：${JSON.stringify(rows.map((r) => r.label))}`)
+  assert(rows[at].hint.includes('没有单一对象'), `添加之前先说原因：${JSON.stringify(rows[at])}`)
+
+  // ④ 添加：落进 cards，按主体收起；必须给一句反馈
+  await page.locator(`.layer-item[data-index="${at}"]`).click()
+  await page.waitForTimeout(250)
+  const added = await page.evaluate(() => ({
+    cards: window.__qua.snapshot().dock.right.cards,
+    hidden: document.getElementById('inspect-card')?.hidden === true,
+    toast: [...document.querySelectorAll('.toast')].map((x) => x.textContent ?? '').join(' | '),
+  }))
+  assert(added.cards.includes('inspect'), `加进来应落进 cards：${JSON.stringify(added)}`)
+  assert(added.hidden, `多根屏上仍按主体收起（92.1 不变）：${JSON.stringify(added)}`)
+  assert(added.toast.includes('已加入槽里'), `添加不能静默成功：${JSON.stringify(added)}`)
+
+  // ⑤ 打开一个页 ⇒ 有单一主体，卡出现
+  await openFirstPage(page)
+  const shown = await page.evaluate(() => ({
+    hidden: document.getElementById('inspect-card')?.hidden === true,
+    title: document.getElementById('inspect-card-title')?.textContent ?? '',
+  }))
+  assert(!shown.hidden && shown.title !== '', `打开一个页后卡出现并认主体：${JSON.stringify(shown)}`)
+
+  await ctx.close()
+  return `多根屏：画廊说明 → 添加反馈 → 卡按主体收起；打开页后出现`
+})
+
 /* ---------------------------------------------------------------- T151 */
 
 /**
