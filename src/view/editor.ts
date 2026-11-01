@@ -29,6 +29,8 @@ import {
   hasQueryBody,
   hasList,
   isJournal,
+  journalDate,
+  todayISO,
   isPropDefBlock,
   isQueryBlock,
   indentMove,
@@ -3898,6 +3900,11 @@ export class BlockEditor {
         !(hasList(b, 'tag') && !hasList(b, 'page')) &&
         !isPropDefBlock(b) &&
         !isQueryBlock(b),
+      /**
+       * 这一块是**可以删的日记天**：今天不行 —— 今天在冷启动会被物化回来
+       * （它是落点，不是「恰好存在的一天」），给它一个「删了又回来」的入口只会像坏了。
+       */
+      blockCanDeleteJournal: b !== undefined && isJournal(b) && journalDate(b) !== todayISO(),
       blockSelection: this.blockSel !== null,
       blockSelectionCount: this.blockSel?.ids.length ?? 0,
       blockType: b && todoOf(b, this.fieldTable()) ? 'todo' : 'paragraph',

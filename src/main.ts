@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar, trashOf } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { canWriteText } from './core/types.ts'
 import { hasTag, tagIdsOf } from './core/tags.ts'
@@ -216,8 +216,13 @@ if (bootState.readOnly) console.warn('[boot] read-only prototype state:', boot.s
  * ⚠️ 这两条**会写模型**（幂等物化），所以要在装配编辑器之前做，且落盘一次。
  */
 const activeStillExists = Boolean(findInForest(ws.blocks, ws.activeId))
-const hadToday = Boolean(findInForest(ws.blocks, journalId(todayISO())))
 const todayId = journalId(todayISO())
+const hadToday = Boolean(findInForest(ws.blocks, todayId))
+/**
+ * 今天的块可能是**软删**状态（用户删过这一天）。它还在数组原位（id 由日期确定性派生），
+ * 所以冷启动不能 `insert` 一个新的：那会得到两个同 id 的块，之后按 id 的读只看得到先序第一个。
+ */
+const todayTomb = trashOf(ws.blocks).some((b) => b.id === todayId)
 
 /**
  * **共享 block store**（下一层）：块/anchors/undo 只有一份；
@@ -249,9 +254,13 @@ const kb = new MemoryKb(blocks)
  */
 const bootOps: Op[] = []
 const bootFeed = feedDays(ws.blocks, FEED_INITIAL)
-if (!hadToday || bootFeed.some((d) => !hasLiveChildren(d))) {
+if (!hadToday || todayTomb || bootFeed.some((d) => !hasLiveChildren(d))) {
   const r = kb.tx((tx) => {
-    if (!hadToday) tx.insert(mkJournalBlock(todayISO()), null, 0)
+    if (!hadToday) {
+      // 删过就复活原块（同 id、同位置），不要新建第二个今天
+      if (todayTomb) tx.restore(todayId)
+      else tx.insert(mkJournalBlock(todayISO()), null, 0)
+    }
     for (const day of feedDays(ws.blocks, FEED_INITIAL)) {
       if (!hasLiveChildren(day)) tx.insert(mkBlock(''), day.id, 0)
     }
