@@ -2021,7 +2021,14 @@ function viewEvents(
         return
       }
       ed.clearBlockSelection()
-      ed.sel = { aBlock: blockId, aOff: ed.sel?.aBlock === blockId ? (ed.sel?.aOff ?? 0) : 0, hBlock: blockId, hOff: ed.sel?.aBlock === blockId ? (ed.sel?.aOff ?? 0) : 0 }
+      /**
+       * **真光标放进目标块**，而不是只把模型选区指过去：块菜单的命令落点是
+       * 「当前光标块」（`curBlock` ⇒ `caretBlock()` ⇒ `sel.aBlock`），而菜单关闭时
+       * 焦点归还会把打开前快照的 DOM 选区还原回来、选区同步跟着把 `sel` 冲回
+       * 原光标块 —— 只写模型的那次赋值活不到命令执行。光标真的落在目标块上，
+       * 快照与归还就都围着它转，菜单项无论怎么触发都打在同一块上。
+       */
+      ed.placeCaret(blockId, ed.sel?.aBlock === blockId ? (ed.sel?.aOff ?? 0) : 0)
       showMenu({
         kind: 'menu',
         prefix: 'block/',

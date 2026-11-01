@@ -16611,6 +16611,75 @@ const fail = results.filter((r) => !r.ok && !r.known).length
  *    而真正的原因是「这一片的用例其实已经跑完了，只是答案没被记下来」。
  *    关浏览器失败不该吞掉结果。
  */
+await check('T206 右键块标开菜单：菜单项打在**块标绑定的那一块**上，与光标当前在哪块无关', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  /** 两行正文块：A 放光标，B 右键它的块标 */
+  const ids = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#editor .blk')].filter((r) => r.querySelector(':scope > .tx'))
+    return { A: rows[2]?.dataset.blockId ?? '', B: rows[5]?.dataset.blockId ?? '' }
+  })
+  assert(ids.A !== '' && ids.B !== '', `前置：应有两行正文块：${JSON.stringify(ids)}`)
+
+  const bTodo = () =>
+    page.evaluate((b) => document.querySelector(`.blk[data-block-id="${b}"]`)?.dataset.todo ?? null, ids.B)
+  assert((await bTodo()) === null, '前置：B 本来不是任务')
+
+  // ① 光标真实落进 A 的正文（不是走命令，是点进去——光标在这块就是这次要防的干扰源）
+  await page.evaluate((a) => {
+    const tx = document.querySelector(`.blk[data-block-id="${a}"] .tx`)
+    tx.scrollIntoView({ block: 'center' })
+    const r = tx.getBoundingClientRect()
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+  }, ids.A).then(({ x, y }) => page.mouse.click(x, y))
+  await page.waitForTimeout(150)
+  assert(
+    await page.evaluate((a) => window.__qua.__editor.caretBlock?.() === a, ids.A),
+    '前置：光标应已在 A',
+  )
+
+  // ② 右键 B 的块标 ⇒ 菜单开在 B（binds 源的那一套由别的用例管）
+  await page.evaluate((b) => {
+    const mk = document.querySelector(`.blk[data-block-id="${b}"] [data-focus-for]`)
+    mk.scrollIntoView({ block: 'center' })
+    mk.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  }, ids.B)
+  await page.waitForTimeout(150)
+
+  /**
+   * **核心判据**：激活「切换待办」之后变任务的必须是 B。
+   * 菜单打开时模型选区被指到 B，但菜单关闭时的焦点归还会把 DOM 选区还原回
+   * 打开前的光标块 —— 若落点只住在「打开那一刻的 sel」上，命令就会打到 A
+   * （或谁也不打）。所以目标块必须经得起「归还」这一步。
+   */
+  await page.evaluate(() => {
+    const item = [...document.querySelectorAll('.layer .layer-item')].find((x) => x.textContent.includes('切换待办'))
+    if (!item) throw new Error('块菜单应有「切换待办」')
+    item.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForTimeout(200)
+  assert((await bTodo()) === 'todo', `菜单项应打在块标绑定的块（B）上，B 应变成任务`)
+  assert(
+    await page.evaluate((a) => {
+      const row = document.querySelector(`.blk[data-block-id="${a}"]`)
+      return row?.dataset.todo ?? null
+    }, ids.A) === null,
+    'A 不该被顺带改到',
+  )
+  assert(
+    await page.evaluate((b) => window.__qua.__editor.caretBlock?.() === b, ids.B),
+    '菜单走完光标应落在目标块上（与「点块标＝聚焦」同一族语义）',
+  )
+
+  // 还原：B 摘回普通（同一条写路径的逆），不给别的用例留脏状态
+  await page.evaluate(() => window.__qua.invoke('core.editor/clear-todo'))
+  await page.waitForTimeout(150)
+  assert((await bTodo()) === null, '收尾：B 应回到普通块')
+
+  await ctx.close()
+  return `光标在 A、右键 B 块标：切换待办落在 B 上；A 不动；光标收在 B`
+})
 
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
