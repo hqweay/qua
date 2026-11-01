@@ -35,6 +35,35 @@ import type { Row } from '../../ui/layers.ts'
 import { rootsFor, rootsForMany, takenWhere } from './roots.ts'
 import type { PageDeps } from './types.ts'
 
+/**
+ * 删除一个**身份块**（页／标签），返回它是否真的被删。
+ *
+ * 三条判据都在这里，调用方（页／标签）只决定「能不能删」：
+ *   · **整棵子树一起软删**——身份块的内容跟着它走，不是只摘露面位；
+ *   · **正被装载在中心视图里 ⇒ 先换到邻页再删**：删除后 `walkForest` 会跳过它，
+ *     留着一个已删的根只会得到一片空白（点它还会「打开即没」）；
+ *   · 删除走 `removeBlock`（事务 ＋ 撤销快照），所以 ⌘Z 能把整棵子树找回来。
+ */
+export function dropIdentity(d: PageDeps, id: string): boolean {
+  const before = d.kb.pages()
+  const i = before.findIndex((p) => p.id === id)
+  const loaded = d.activeId() === id || d.rootIds().includes(id)
+  d.removeBlock(id)
+  if (loaded) {
+    // 落点必须是**页**（删的可能是标签，也可能邻位没有页）
+    const rest = d.kb.pages()
+    const p = rest[Math.min(i < 0 ? 0 : i, rest.length - 1)] ?? rest[0]
+    if (p) {
+      d.setActiveId(p.id, { restore: 'none' })
+      d.loadPage(rootsFor(p))
+    }
+  }
+  d.refreshList()
+  d.refreshTitle()
+  d.saveNow()
+  return true
+}
+
 /** 页命令（页名＝块正文，所以「改名」就是改块） */
 export function pageCommands(d: PageDeps): Pick<
   App,
@@ -136,17 +165,7 @@ export function pageCommands(d: PageDeps): Pick<
       }
       const i = before.findIndex((p) => p.id === id)
       if (i < 0) return
-      d.removeBlock(id)
-      // 落点必须是**页**（删的可能是 journal，邻位也可能是 journal）
-      const rest = pages()
-      const p = rest[Math.min(i, rest.length - 1)] ?? rest[0]
-      if (p) {
-        d.setActiveId(p.id, { restore: 'none' })
-        d.loadPage(rootsFor(p))
-      }
-      d.refreshList()
-      d.refreshTitle()
-      d.saveNow()
+      dropIdentity(d, id)
       d.toast(t('ui.toast.pageDeleted'))
     },
 

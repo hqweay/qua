@@ -75,6 +75,7 @@ export const MSG = {
   'cmd.block.extract-to-page': '提取为页',
   'cmd.block.as-tag': '标记为标签',
   'cmd.block.untag': '取消标签标记',
+  'cmd.tag.delete': '删除标签',
   'cmd.block.edit-aliases': '别名与露面…',
   'cmd.anno.toggle-bold': '加粗',
   'cmd.anno.toggle-italic': '斜体',
@@ -94,7 +95,7 @@ export const MSG = {
   'cmd.page.next': '下一页',
   'cmd.page.prev': '上一页',
   'cmd.page.rename': '重命名当前页面',
-  'cmd.page.delete': '删除当前页面',
+  'cmd.page.delete': '删除页面',
 
   /* ---- 日记 ---- */
   'cmd.journal.today': '回到今日',
@@ -311,6 +312,8 @@ export const MSG = {
   'ui.role.removeTagTitle': '「{tag}」还被 {members} 个块打着',
   'ui.role.removeTagContinue': '继续（值不会丢，会变成「本块自有」）',
   'ui.role.declarations': '{count} 个标签属性会失效；重新标记为标签后自动恢复',
+  'ui.role.deleteTagTitle': '「{tag}」还被 {members} 个块打着',
+  'ui.role.deleteTagContinue': '继续删除（这些块上的标签会消失，恢复标签后自动接回）',
   'ui.role.cancel': '取消',
   'ui.toast.pageRoleAdded': '已标记为页：{name}',
   'ui.toast.pageRoleRemoved': '已取消页标记：{name}（仍可打开、仍可被引用）',
@@ -963,6 +966,7 @@ export const MSG = {
   'ui.move.refuseSame': '它已经在这个容器里了',
   'ui.move.refuseJournal': '日记那一行不搬家（它代表的是某一天）',
   'ui.toast.pageDeleted': '已删除页面',
+  'ui.toast.tagDeleted': '已删除标签',
   'ui.toast.keepOnePage': '至少留一页',
   'ui.toast.journalReadonly': '日记的日期是只读的（要改只能删了重建）',
   'ui.toast.refCopied': '已复制引用（实体 id ＋ 引文快照 exact/prefix/suffix）',

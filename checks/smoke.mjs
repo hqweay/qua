@@ -16896,6 +16896,97 @@ await check(
   },
 )
 
+await check(
+  'T211 页/标签的块菜单都有删除：删页换到邻页且不留在空白；删标签在有人用时要确认，成员上的归属保留（恢复时接回）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+
+    // ---- 页：新建一页 → 右键它的块标 → 菜单里有「删除页面」
+    await page.evaluate(() => window.__qua.invoke('core.page/new'))
+    await page.waitForTimeout(150)
+    const ids = await page.evaluate(() => {
+      const root = window.__qua.__editor.doc.roots[0]
+      return { pageId: root.id, pages: window.__qua.pages().length }
+    })
+    const pageMenu = await page.evaluate((id) => {
+      const el = document.querySelector(`.blk[data-block-id="${id}"] .handle`)
+      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+      return [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? '')
+    }, ids.pageId)
+    assert(
+      pageMenu.includes('删除页面'),
+      `页块的块菜单应有「删除页面」：${JSON.stringify(pageMenu)}`,
+    )
+    await page.locator('.layer-item', { hasText: '删除页面' }).first().click()
+    await page.waitForTimeout(200)
+    const afterPage = await page.evaluate(
+      (t) => ({
+        pages: window.__qua.pages().length,
+        deletedAlive: window.__qua.blocks().some((b) => b.id === t.pageId),
+        roots: window.__qua.__editor.doc.roots.map((r) => r.id),
+        emptyScreen: document.querySelectorAll('.blk').length === 0,
+      }),
+      ids,
+    )
+    assert(afterPage.pages === ids.pages - 1, `页列表应少一项：${ids.pages} → ${afterPage.pages}`)
+    assert(!afterPage.deletedAlive, '删掉的页不该还出现在可见读里')
+    assert(
+      afterPage.roots.length > 0 && !afterPage.roots.includes(ids.pageId) && !afterPage.emptyScreen,
+      `删掉正装载的页 ⇒ 应换到邻页（不是留一片空白）：${JSON.stringify(afterPage)}`,
+    )
+
+    // ---- 标签：造一个「有人用」的标签 → 右键 → 确认 → 删除
+    const tagSetup = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const root = ed.doc.roots[0]
+      const member = ed.insertBlockAfter(root.id, '成员块')
+      const tag = ed.insertBlockAfter(member, '待删标签')
+      window.__qua.invoke('core.block/as-tag', { blockId: tag })
+      window.__qua.focusBlock(member, 0)
+      window.__qua.invoke('core.editor/insert-tag', { tag: '待删标签' })
+      return { member, tag, members: window.__qua.tagMembers(tag).length }
+    })
+    assert(tagSetup.members === 1, `前置：标签应有 1 个成员：${JSON.stringify(tagSetup)}`)
+
+    const tagMenu = await page.evaluate((id) => {
+      const el = document.querySelector(`.blk[data-block-id="${id}"] .handle`)
+      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+      return [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? '')
+    }, tagSetup.tag)
+    assert(
+      tagMenu.includes('删除标签'),
+      `标签块的块菜单应有「删除标签」：${JSON.stringify(tagMenu)}`,
+    )
+    await page.locator('.layer-item', { hasText: '删除标签' }).first().click()
+    await page.waitForTimeout(120)
+    const confirm = await page.locator('.layer').innerText()
+    assert(confirm.includes('还被 1 个块打着'), `有人用时删除要先说清影响：${JSON.stringify(confirm)}`)
+    await page.locator('.layer-item', { hasText: '继续删除' }).first().click()
+    await page.waitForTimeout(200)
+    const afterTag = await page.evaluate(
+      (t) => {
+        const bs = window.__qua.blocks()
+        const member = bs.find((b) => b.id === t.member)
+        return {
+          tagGone: !bs.some((b) => b.id === t.tag),
+          memberTags: member?.tags ?? [],
+          members: window.__qua.tagMembers(t.tag).length,
+        }
+      },
+      tagSetup,
+    )
+    assert(afterTag.tagGone, '删掉的标签不该还出现在可见读里')
+    assert(
+      afterTag.memberTags.includes(tagSetup.tag),
+      `成员上的归属**不摘**（恢复标签时自动接回）：${JSON.stringify(afterTag)}`,
+    )
+
+    await ctx.close()
+    return `删页 ⇒ 换到邻页不留空白；删标签 ⇒ 有人用时确认，成员归属保留 1 条`
+  },
+)
+
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
   await writeFile(REPORT, JSON.stringify({ total: seq, cases: results, known: known.map((r) => r.name) }))

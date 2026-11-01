@@ -33,6 +33,14 @@ export const TAGS_HANDLERS: Record<string, Handler> = {
     const id = S(a.blockId) || curBlock(app)
     return id ? app.removeBlockRole(id, 'tag') : false
   },
+  /**
+   * 删除标签块：与「取消标签」是两条轴。
+   * 取消只摘露面位（块与内容都还在）；删除连块带子树一起软删，回收站可恢复。
+   */
+  'core.tag/delete': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    return id ? app.deleteTag(id) : false
+  },
   'core.block/edit-aliases': (a, app) => {
     const id = S(a.blockId) || curBlock(app)
     if (!id) return false

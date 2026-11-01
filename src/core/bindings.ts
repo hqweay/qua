@@ -128,9 +128,12 @@ export const BINDINGS: Binding[] = [
   // 露面：加/减一格标记（页/标签各自独立、可兼位；顺序无语义）
   { command: 'core.block/as-page', kind: 'menu', when: 'blockFocused && !blockHasPageRole', group: 'block/3-role', order: 10, layer: 'core' },
   { command: 'core.block/unpage', kind: 'menu', when: 'blockFocused && blockHasPageRole', group: 'block/3-role', order: 11, layer: 'core' },
+  // 与「取消页」是两条轴：取消只摘露面位（块和内容都还在），删除连子树一起软删（回收站可恢复）
+  { command: 'core.page/delete', kind: 'menu', when: 'blockFocused && blockHasPageRole', group: 'block/3-role', order: 13, layer: 'core' },
   { command: 'core.block/extract-to-page', kind: 'menu', when: 'blockFocused && blockCanExtractPage', group: 'block/3-role', order: 12, layer: 'core' },
   { command: 'core.block/as-tag', kind: 'menu', when: 'blockFocused && !blockHasTagRole', group: 'block/3-role', order: 20, layer: 'core' },
   { command: 'core.block/untag', kind: 'menu', when: 'blockFocused && blockHasTagRole', group: 'block/3-role', order: 21, layer: 'core' },
+  { command: 'core.tag/delete', kind: 'menu', when: 'blockFocused && blockHasTagRole', group: 'block/3-role', order: 22, layer: 'core' },
   // 别名是「名字层」的配置，不属于任何具体列表：任何聚焦块都能打开
   { command: 'core.block/edit-aliases', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 30, layer: 'core' },
   // zoom：进子树的入口挂在块菜单。**叶子块也给**（修订：
