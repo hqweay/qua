@@ -462,6 +462,48 @@ test('增量写：模型里的块不在树上 ⇒ 连它的子表行一起清掉
   assert.equal(writes.filter((w) => w.table === 'Block' && w.op === 'upsert').length, 0, '不许插入一个只有落点的空块')
 })
 
+test('增量写：同批「整块写 ＋ 属性写」⇒ 属性写跳过（它的先删后写会把整块写铺好的行删掉）', async () => {
+  /**
+   * 实测踩过的形状：同一笔事务里**建记录**（位置 op ⇒ 整块写，含 `_tags` 行）
+   * ＋ genesis 的 `prop.set _tags`（先删后写）。dedupe 只去完全相同的写：
+   * 两条一样的 upsert 去掉一条，「删」却留下来 ⇒ 落库顺序成了「先写后删」，
+   * 读回来 `_tags` 没了——实例的胶囊样式重开就退化成行内标签，且不报错。
+   * 整块写读的是**事务后的模型**（最终值），属性增量写对这种块是重复动作，整个跳过。
+   */
+  const { MemoryKb } = await import('../../src/core/kb/memory.ts')
+  const { BlockStore } = await import('../../src/core/store.ts')
+  const { createObjRecordInTx } = await import('../../src/core/obj.ts')
+
+  const tag = mkBlock('玩具')
+  tag.props = { _aliases: ['玩具'], _lists: ['tag'] }
+  const host = mkBlock('')
+  const blocks: Block[] = [tag, host]
+  const r = new MemoryKb(new BlockStore(blocks)).tx((tx) => {
+    const record = createObjRecordInTx(tx, blocks, 'switch 2', tag.id)
+    tx.patch(host.id, (x) => {
+      x.content = [{ id: 'r1', t: 'ref', to: record.id, flavor: '#', label: 'switch 2' }] as never
+      x.modified = 4242
+    })
+  })
+
+  const w = ws(blocks)
+  const d = mkdtempSync(join(tmpdir(), 'qua-rows-'))
+  dirs.push(d)
+  const opened = openLibraryDb(join(d, 'qua.db'))
+  assert.equal(opened.status, 'created')
+  const db = opened.db!
+  try {
+    applyRowWrites(db, workspaceToRowWrites(w))
+    applyRowWrites(db, rowWritesFor(w, r.ops))
+    const back = rowsToWorkspace(readContentRows(db))
+    const record = back.blocks.find((x) => x.id === r.ops[0]!.id)
+    assert.ok(record, '记录行应在')
+    assert.deepEqual(record?.props?._tags, [tag.id], `_tags 要活过增量落库（${JSON.stringify(record?.props)}）`)
+  } finally {
+    db.close()
+  }
+})
+
 /* ------------------------------------------------------------ 探测 */
 
 test('probeOf：只在给定的 id 里找，找到就停（不做全库遍历的拷贝）', () => {

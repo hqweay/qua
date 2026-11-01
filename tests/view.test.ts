@@ -182,23 +182,16 @@ test('viewNameOf：用户改过名用他的，没有就按 kind 给默认名', (
 
 /* ------------------------------------------------------------ 源与记录 */
 
-test('sourceOf：`_query` ⇒ 查询源；收藏块 ⇒ items 源；否则 children 源', () => {
+test('sourceOf：`_query` ⇒ 查询源；否则 children 源', () => {
   const q = mk('q', '', [], { _query: { where: { all: [] } } })
   assert.deepEqual(sourceOf(q), { kind: 'query', spec: { where: { all: [] } } })
   assert.deepEqual(sourceOf(mk('n', '普通')), { kind: 'children', blockId: 'n' })
-  // 收藏块（`core/collection-widget`）的源是手选的那一批引用，不是它的子块
-  const fav = { ...mk('f', '收藏'), props: { _type: 'core/collection-widget', _items: ['a', 'b'] } }
-  assert.deepEqual(sourceOf(fav), { kind: 'items', blockId: 'f' })
 })
 
-test('sourceOf：三种源声明互斥（`_query`／收藏块／`_embed` 只许有一个）', () => {
+test('sourceOf：两种源声明互斥（`_query`／`_embed` 只许有一个）', () => {
   const q = mk('q', '', [], { _query: { where: { all: [] } } })
   assert.equal(sourceConflicts(q), false, '只有一个源 ⇒ 不冲突')
-  const fav = { ...mk('f', '收藏'), props: { _type: 'core/collection-widget', _items: ['a'] } }
-  assert.equal(sourceConflicts(fav), false)
-  // 查询 ＋ 收藏 并存 ⇒ 冲突：`sourceOf` 会悄悄选一个，另一个「改了却不生效」
-  assert.equal(sourceConflicts({ ...fav, props: { ...fav.props, _query: { where: { all: [] } } } }), true)
-  // 露面指针 ＋ 查询 并存 ⇒ 同样冲突
+  // 露面指针 ＋ 查询 并存 ⇒ 冲突：`sourceOf` 会悄悄选一个，另一个「改了却不生效」
   assert.equal(sourceConflicts({ ...q, props: { ...q.props, _embed: { block: 'x', view: '' } } }), true)
 })
 

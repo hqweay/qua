@@ -43,7 +43,8 @@ export type RowPick =
   | { kind: 'tag'; id: string; name: string }
   | { kind: 'newTag'; name: string }
   | { kind: 'newPage'; name: string }
-  | { kind: 'instance'; id: string; name: string; tag: string }
+  | { kind: 'instance'; id: string; name: string; tag: string; tagId: string }
+  | { kind: 'newObj'; name: string; tagId?: string; tag: string }
   | { kind: 'page'; id: string; name: string }
   | { kind: 'block'; id: string; name: string }
 

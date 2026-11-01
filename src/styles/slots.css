@@ -184,86 +184,6 @@
   color: var(--ui-text);
   background: var(--ui-accent-soft);
 }
-/* 集合卡：一组**引用**行；拖进来＝加一条引用，× 只摘引用 */
-.collection-list {
-  min-height: 28px;
-  border-radius: var(--ui-radius-sm);
-}
-.collection-list[data-drop='1'] {
-  box-shadow: inset 0 0 0 2px var(--ui-accent);
-}
-.collection-list > .dock-empty {
-  padding: var(--ui-gap-2);
-  color: var(--ui-text-tertiary);
-  font-size: var(--ui-fs-xs);
-}
-.collection-row {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-gap-2);
-  min-height: 24px;
-}
-.collection-grip {
-  width: 14px;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--ui-text-tertiary);
-  cursor: grab;
-  opacity: 0;
-}
-.collection-row:hover .collection-grip,
-.collection-grip:focus-visible {
-  opacity: 1;
-}
-.collection-grip:active {
-  cursor: grabbing;
-}
-.collection-row > .page-item {
-  flex: 1;
-  min-width: 0;
-}
-.collection-add {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-gap-2);
-  width: 100%;
-  padding: var(--ui-gap-2);
-  color: var(--ui-text-tertiary);
-  font-size: var(--ui-fs-xs);
-  border-radius: var(--ui-radius-sm);
-}
-.collection-add:hover {
-  background: var(--ui-accent-soft);
-  color: var(--ui-text);
-}
-.collection-x {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--ui-radius-sm);
-  color: var(--ui-text-tertiary);
-  opacity: 0;
-}
-.collection-row:hover .collection-x,
-.collection-x:focus-visible {
-  opacity: 1;
-}
-.collection-x:hover {
-  background: var(--ui-accent-soft);
-  color: var(--ui-text);
-}
-.collection-missing {
-  flex: 1;
-  min-width: 0;
-  color: var(--ui-text-tertiary);
-  font-size: var(--ui-fs-xs);
-}
-
 /*
  * 块卡头：卡片**自己的 chrome**，不是「块」——块在 body 里由 `block-renderers` 画。
  * 头是卡片的**拖源**：整头可拖（按钮除外），拖的是「这张卡」，不是块。
@@ -290,23 +210,6 @@
 .dock-card-body {
   padding: 0 var(--ui-gap-2) var(--ui-gap-3);
 }
-/*
- * **组件卡的两个高度**：静止（`--widget-h-rest`）与被聚焦（`--widget-h-focus`）。
- *
- * 变量由 `view/block-dom.ts` 的 `applyWidgetHeights` 挂上（与正文里的组件体同一份声明、
- * 同一个数值表）；切档是纯 CSS 的 `:focus-within` —— 卡里一有焦点就长开，离开就收回。
- * 高度加在**卡的身体**而不是内容上：卡头（标题/收起/单卡/关闭）必须始终在场，
- * 被内容撑走之后用户就没有出口了。
- * 没有挂高度（没声明 `slot.height`）⇒ `auto`，按内容自然高（旧行为不变）。
- */
-.dock-card[data-widget='1'] > .dock-card-body {
-  height: var(--widget-h-rest, auto);
-  overflow: auto;
-}
-.dock-card[data-widget='1']:focus-within > .dock-card-body {
-  height: var(--widget-h-focus, auto);
-}
-
 /* 卡头的按钮比槽头小一档：一排要放收起/动作/单卡/关闭 */
 .dock-card-btn {
   width: 20px;

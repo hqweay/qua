@@ -16,7 +16,6 @@ import { tagIdsOf } from './tags.ts'
 import { propKindOf, type PropKind } from './props.ts'
 import { readEmbed } from './embed.ts'
 import { parentIdsOf } from './hierarchy.ts'
-import { collectionItems } from './collection.ts'
 import { walkForest } from './walk.ts'
 
 /**
@@ -39,7 +38,6 @@ export type RelationKind =
   | 'tag'
   | 'tagMention'
   | 'belongsTo'
-  | 'item'
 
 /** 「引用」只收这三类；标签归属是分类，不是引用。 */
 export type RefKind = Extract<RelationKind, 'inline' | 'property' | 'embed'>
@@ -103,9 +101,6 @@ export function relationEdgesOfBlock(block: Block, propKinds: ReadonlyMap<string
   if (embed) out.push({ from: block.id, to: embed.block, kind: 'embed', view: embed.view })
 
   for (const parentId of parentIdsOf(block)) out.push({ from: block.id, to: parentId, kind: 'belongsTo' })
-  for (const [pos, itemId] of collectionItems(block).entries()) {
-    out.push({ from: block.id, to: itemId, kind: 'item', pos })
-  }
   return out
 }
 

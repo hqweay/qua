@@ -92,7 +92,7 @@ function blueprintMappedProps(): Set<string> {
  * （`shape.ts` 把 `_roles` 判成 corrupt、`alias.ts` 读 `_alias` 的旧形状）。
  * 它们不该有落点——要求有落点反而会诱导人建一个只为兼容而存在的列。
  */
-const HISTORICAL = new Set(['_parentTags', '_roles', '_hide', '_page', '_template', '_label', '_refcount', '_alias'])
+const HISTORICAL = new Set(['_parentTags', '_roles', '_hide', '_page', '_template', '_label', '_refcount', '_alias', '_items'])
 
 test('落库映射：代码里会写的每一个系统属性，都在蓝本 §5 有落点', () => {
   const code = codeSystemProps()
@@ -122,14 +122,12 @@ test('落库映射：映射表里列的系统属性，代码里都还在（不�
   assert.deepEqual(dead, [], `映射表里这些键代码已经不写了（要么删掉那一行，要么它本该还在）：${dead.join(', ')}`)
 })
 
-test('落库映射：`_items` 与 `_mounts` 必须有落点（它们曾被漏掉）', () => {
+test('落库映射：`_mounts` 必须有落点（它曾被漏掉）', () => {
   /**
-   * 这两格是**审查抓出来的真实漏项**，单独钉一条：它们都不是「普通属性」——
-   * `_items` 是有序引用（要 `pos` ＋ 指向边），`_mounts` 是非 ref 的结构化值（只能进 `value` 列当 JSON）。
-   * 当成普通属性写进 `BlockProperty` 也不会报错，只是装载回来时顺序/结构会不对。
+   * 这格是**审查抓出来的真实漏项**，单独钉一条：它不是「普通属性」——
+   * `_mounts` 是非 ref 的结构化值（只能进 `value` 列当 JSON）。
+   * 当成普通属性写进 `BlockProperty` 也不会报错，只是装载回来时结构会不对。
    */
   const mapped = blueprintMappedProps()
-  for (const key of ['_items', '_mounts']) {
-    assert.ok(mapped.has(key), `${key} 在蓝本 §5 里没有落点`)
-  }
+  assert.ok(mapped.has('_mounts'), '`_mounts` 在蓝本 §5 里没有落点')
 })

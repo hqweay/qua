@@ -9,8 +9,6 @@ import {
   flatten,
   hasList,
   hasTag,
-  EMBED_PROP,
-  EMBED_TYPE,
   isEmbedBlock,
   isJournal,
   isPropDefBlock,
@@ -24,7 +22,6 @@ import {
   primaryAliasOf,
   prop,
   tagIdsOf,
-  setBlockType,
   todayISO,
   uuidv7Hex,
   writeRename,
@@ -300,27 +297,13 @@ export function pageCommands(d: PageDeps): Pick<
           label: d.pageTitle(b).trim() === '' ? t('ui.embed.untitled') : d.pageTitle(b),
           icon: d.pageIcon(b),
           group: isEmbedBlock(b) ? 'embed/2' : 'embed/1',
+          command: 'core.embed/insert',
           args: { blockId: at, targetId: b.id, view: 'mirror' },
         }))
-      d.openRefPicker(
-        rows,
-        (row) => {
-          const { blockId, targetId } = row.args as { blockId: string; targetId: string }
-          const path = d.kb.pathOf(blockId)
-          const parent = path.length > 1 ? path[path.length - 2]! : null
-          const embed = mkBlock('')
-          setBlockType(embed, EMBED_TYPE)
-          embed.props = { ...(embed.props ?? {}), [EMBED_PROP]: { block: targetId } }
-          const index = parent ? d.kb.children(parent.id).findIndex((b) => b.id === blockId) + 1 : 0
-          // 一次插入一笔事务：落点与 `insertNear` 同一条规则（段根没有兄弟位 ⇒ 插成它的子块）
-          d.run((tx) => {
-            if (parent) tx.insert(embed, parent.id, index)
-            else tx.insert(embed, blockId, 0)
-          })
-          d.toast(t('ui.embed.inserted'))
-        },
-        t('ui.embed.pick'),
-      )
+      // 选中后由选择器的默认分发把 `core.embed/insert` 跑完。不许在这里手写插入：
+      // 那是同一次插入的第二份实现，而且它不重排 —— 露面行要等下一次全量重画才出现，
+      // 看起来就是「点了嵌入没反应」。
+      d.openRefPicker(rows, undefined, t('ui.embed.pick'))
     },
 
     showRefPicker: () => {

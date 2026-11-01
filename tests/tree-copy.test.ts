@@ -6,7 +6,6 @@
  * | 格 | 走吗 | 为什么 |
  * |---|---|---|
  * | `_mounts` | **走**（local 深拷、linked 只拷指针） | 它是「这块配了哪几栏」，属于内容 |
- * | `_items` | **走** | 收藏里那一批引用是这一块的内容 |
  * | `_embed` | **走**（指针原样） | 副本仍是一次「指向那一块」的露面 |
  * | `_query` | **不走** | 它是身份（「这是一个查询」），两个同源查询块会互相打架 |
  * | `_views`／`_activeView` | **查询块不走**／普通块走 | 没有源的视图配置没有意义 |
@@ -18,7 +17,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   ACTIVE_VIEW_PROP,
-  COLLECTION_PROP,
   EMBED_PROP,
   MOUNTS_PROP,
   VIEWS_PROP,
@@ -55,11 +53,6 @@ test('`_mounts` 随块走：local 的 spec 深拷（改副本不动原件），l
   assert.notEqual(local.spec, spec, '但是两份：改副本的条件不该动到原件')
   assert.equal(local.id, 't-1', 'id 是「这一栏」的身份，复制内容不换它')
   assert.deepEqual(linked, { id: 't-2', kind: 'linked', block: 'q-1', view: 'v-1' }, 'linked 只有指针，没有可深拷的')
-})
-
-test('`_items` 随块走（收藏里那一批引用是内容）', () => {
-  const fav = mk('f', '收藏', { _type: 'core/collection-widget', [COLLECTION_PROP]: ['a', 'b'] })
-  assert.deepEqual(copyOf(fav).props?.[COLLECTION_PROP], ['a', 'b'])
 })
 
 test('`_embed` 指针原样保留（副本仍是一次「指向那一块」的露面）', () => {

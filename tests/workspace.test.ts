@@ -139,7 +139,6 @@ test('parseWorkspace: 系统键的值形状（v31 起与写路径同一批判据
   const cases: { key: string; bad: unknown; good: unknown }[] = [
     { key: '_tags', bad: '任务', good: ['t1'] },
     { key: '_belongsTo', bad: 42, good: ['p1'] },
-    { key: '_items', bad: 42, good: ['b2'] },
     { key: '_date', bad: '2026/10/24', good: '2026-10-24' },
     { key: '_kind', bad: 'bogus', good: 'text' },
     { key: '_icon', bad: '', good: 'lucide:calendar' },

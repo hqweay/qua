@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  isWidgetBlock, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { canWriteText } from './core/types.ts'
 import { hasTag, tagIdsOf } from './core/tags.ts'
@@ -30,19 +30,18 @@ import {
   type PanelKind,
 } from './core/commands/index.ts'
 import { Layers, paletteRows, rowsFromBindings, type PickMods, type Row } from './ui/layers.ts'
-import { createTriggers } from './app/retrieval/triggers.ts'
+import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from './app/retrieval/triggers.ts'
 import { dispatchKey, installKeydown, type DispatchEnv } from './core/dispatch.ts'
 import { DockWindows } from './ui/dock-windows.ts'
 import { bindDockResize } from './ui/dock-resize.ts'
 import { mountDockSlot } from './ui/dock.ts'
 import { createIcon } from './view/icons.ts'
-import { widgetBodyInDoc } from './ui/dock-widgets.ts'
 import { mountEmbedBody } from './ui/embed-body.ts'
 import { renderAliasEditor } from './ui/alias-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, renderLinkComposer, type ObjFieldDeps, type PanelDeps } from './ui/panels.ts'
 import { openImageLightbox } from './ui/lightbox.ts'
 import type { AtomMenuHit, RefClickHit, RefClickMods } from './view/editor-events.ts'
-import { collectionCommands, devCommands, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, zoomCommands } from './app/commands-impl.ts'
+import { devCommands, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, zoomCommands } from './app/commands-impl.ts'
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { createRowBodyCache } from './app/wiring/row-bodies.ts'
@@ -277,6 +276,8 @@ let mainEd: BlockEditor
 let registry: Registry
 /** 现在开着的是哪个触发字符的浮层（`null` ＝ 没开）；`lastQuery` 是上次列的查询词 */
 let triggerCh: TriggerChar | null = null
+/** `#` 第二段（成员搜索）锚定的标签；null ＝ 不在第二段。开着的浮层由 `openMemberStage` 管 */
+let stageTag: MemberTagRef | null = null
 let lastQuery = ''
 /** 截图/自检时静音 toast（产品行为不变，只是不弹提示） */
 let quiet = false
@@ -333,7 +334,7 @@ function uiCtx(): CtxKeys {
 
 /* ------------------------------------------------------------ 槽内容 */
 
-const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, windowLabel, setWindows, toggleFoldAll, topWindow, closeOtherWindows, closeAllWindows, widgetDeps: dockWidgetDeps } = setupDocks({
+const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, windowLabel, setWindows, toggleFoldAll, topWindow, closeOtherWindows, closeAllWindows } = setupDocks({
   kb,
   prefs,
   applyChrome: () => applyChrome(),
@@ -344,7 +345,6 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, w
   getSlots: () => ({ left: dockLeft, right: dockRight }),
   // 检视卡在面板分片里创建并挂进右槽堆叠；这里只在重画时取它（它必须已经在文档里）
   inspectCard: () => chrome.inspectCardEl,
-  pickBlock: (collectionId, anchor) => showCollectionPicker(collectionId, anchor),
   showCardMenu: (side, key, anchor) => showCardMenu(side, key, anchor),
 })
 
@@ -428,14 +428,16 @@ LIBRARY_BRIDGE?.onFlush?.(async () => {
  * ⚠️ 森林是**现取**的（`() => ws.blocks`）：换库之后这里必须看到新库。
  * ⚠️ `#` 有三枚徽标（`↵`／`⌥↵`／`⇧↵`）：三种落点由按键区分，不由行区分。
  */
-const triggers = createTriggers({
+const triggerDeps: TriggerDeps = {
   forest: () => ws.blocks,
   ctx: uiCtx,
   keyHints,
   shortcutHint: `↵ ${isMac() ? '⌥↵' : 'Alt+↵'} ${isMac() ? '⇧↵' : 'Shift+↵'}`,
   // `@` 候选排除「正在打字的这一块」：它自己的正文含着查询词，点它＝引用自己
   selfBlockId: () => ed.caretBlock() ?? ed.sel?.aBlock ?? null,
-})
+}
+
+const triggers = createTriggers(triggerDeps)
 
 /**
  * 划选气泡：**选区存在就在它上方浮一排格式按钮，选区塌了就消失**。
@@ -500,6 +502,37 @@ function openTrigger(ch: TriggerChar, query: string, anchor: DOMRect | null, tit
 }
 
 /**
+ * **`#` 的第二段：成员搜索**（⇧↵ 选中一个标签后进入）。
+ *
+ * 与第一段（`openTrigger`）的分工：第一段的查询词是**块内文本**（打字继续进 `.tx`），
+ * 第二段的查询词住**浮层自己的输入框**（`focusSearch`＋`onQuery`）——`#` 触发词不能含空格，
+ * 「标签名 ＋ 成员搜索」没法共用同一段正文；也不该共用：第二段是**浮层的状态**，
+ * 关掉就回到打字（块内 `#玩具` 原样保留，触发判据还活着，继续打字自动重开第一段）。
+ *
+ * 落点仍走 `pickRow` ⇒ `acceptTrigger` 同一笔事务：抹掉 `#玩具`、（需要时）建记录、插露面。
+ */
+function openMemberStage(tag: MemberTagRef): void {
+  stageTag = tag
+  triggerCh = null
+  layers.openMenu({
+    rows: memberRows(tag, '', triggerDeps),
+    anchor: ed.caretRect(),
+    title: t('ui.retrieval.memberTitle', { name: tag.name }),
+    searchable: true,
+    focusSearch: true,
+    emptyText: t('ui.retrieval.memberEmpty'),
+    onPick: (row, mods) => {
+      stageTag = null
+      pickRow('#', row, mods)
+    },
+    onQuery: (q) => layers.setRows(memberRows(tag, q, triggerDeps)),
+    onClose: () => {
+      stageTag = null
+    },
+  })
+}
+
+/**
  * **选中之后做什么**：浮层只报「选中了谁 ＋ 按了什么键」，落点在这里决定。
  *
  * 这条分叉是拍板过的：同一条 `#名` 行按 `↵` 是「插进正文」（`ref` 露面，不写归属），
@@ -536,12 +569,13 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
 
   /**
    * `#` 的三种落点**只看按键**，不看选中的是哪一栏：
-   *   · `⇧↵` ⇒ 为这个标签建一条住森林顶层的新实例（不管当前行是类还是已有实例）；
+   *   · `⇧↵` ⇒ **进入成员搜索**（第二段浮层：该标签的成员 ＋「新建实例『输入文本』」）；
+   *     「立即建一条实例」由第二段的新建行覆盖，名字终于由输入文本给；
    *   · `⌥↵` ⇒ 把标签归到本块（写宿主 `_tags`，行尾出 chip）；
    *   · `↵`   ⇒ 行内标签：实例行引用那条记录、标签类行引用类块。
    *
-   * 新建标签行也是这样：行只是**目标**（名字还不存在），三种键各给一个落点；
-   * 标签块在同一笔事务里建出来（`acceptTrigger` 的 `newTag` 分支）。
+   * 新建标签行是例外：`⇧↵` 仍就地建标签＋建**同名**实例——
+   * 那条路上名字就是用户打的字，没有「标签名冒充实例名」的分叉。
    */
   if (pick.kind === 'newTag') {
     const action = mods.shiftKey ? 'instance' : mods.altKey ? 'assign' : 'inline'
@@ -549,16 +583,25 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
     return
   }
 
+  if (ch === '#' && mods.shiftKey && (pick.kind === 'tag' || pick.kind === 'instance')) {
+    openMemberStage(pick.kind === 'tag' ? { tagId: pick.id, name: pick.name } : { tagId: pick.tagId, name: pick.tag })
+    return
+  }
+
   const tagName = pick.kind === 'instance' ? pick.tag : pick.kind === 'tag' ? pick.name : ''
-  if (ch === '#' && tagName !== '') {
-    if (mods.shiftKey) {
-      ed.acceptTrigger({ ch, pick: { kind: 'newObj', name: tagName } })
-      return
-    }
-    if (mods.altKey) {
-      ed.acceptTrigger({ ch, pick: { kind: 'tag', name: tagName } })
-      return
-    }
+  if (ch === '#' && tagName !== '' && mods.altKey) {
+    ed.acceptTrigger({ ch, pick: { kind: 'tag', name: tagName } })
+    return
+  }
+
+  /**
+   * 第二段的新建实例行：名字＝用户在浮层里输入的文本，标签＝第二段锚定的那一个。
+   * （tagId 直用、失效不做——判据在 `acceptTrigger`，这里只传话。）
+   */
+  if (pick.kind === 'newObj') {
+    if (!pick.tagId) return
+    ed.acceptTrigger({ ch, pick: { kind: 'newObj', name: pick.name, tagId: pick.tagId } })
+    return
   }
 
   /**
@@ -1446,11 +1489,6 @@ const app: App = {
     activeId: () => ws.activeId,
     toast: (text, kind) => app.toast(text, kind),
   }),
-  ...collectionCommands({
-    kb,
-    write: writeProps,
-    run: runTx,
-  }),
   ...propsCommands({
     kb,
     write: writeProps,
@@ -1523,7 +1561,7 @@ const app: App = {
     const host = owner.kind === 'block' ? blocks.find(owner.blockId) : undefined
     const source = sourceOfOwner(owner, data, host)
     const active = readViewSet(data).active
-    const defaultLabel = source.kind === 'items' ? t('ui.view.kind.list') : t('ui.view.outline')
+    const defaultLabel = t('ui.view.outline')
     const rows: Row[] = [
       {
         id: 'view//outline',
@@ -1646,16 +1684,6 @@ const app: App = {
         toast: (text, kind) => app.toast(text, kind),
       })
     }, anchor)
-  },
-
-  /**
-   * 打开收藏的块选择器（列表视图/卡片上的「加一条」都走这里）。
-   *
-   * 锚点取当前光标的矩形：这一条命令是从面板或卡里发的，那里没有「按钮 rect」可言。
-   */
-  showCollectionPicker: (collectionId) => {
-    // 光标可能在面板里（没有 rect）：给一个零矩形，菜单贴在它旁边而不是不掉出来
-    showCollectionPicker(collectionId, app.ed.caretRect() ?? new DOMRect(0, 0, 0, 0))
   },
 
   /* ---- 行内资产：入口（粘贴/选文件）与异步入库 ---- */
@@ -1978,7 +2006,7 @@ mainEd = ed
  * 焦点在正文 → 活动编辑器＝正文；焦点在里层编辑岛时由那一层自己切
  * （挂载区的 `onFocus`／右槽窗口的 `onFocus`）。
  *
- * ⚠️ **`focusin` 会冒泡，所以这里必须让位**：挂载区／组件体的 DOM 都**嵌在 `#editor` 里**，
+ * ⚠️ **`focusin` 会冒泡，所以这里必须让位**：挂载区／露面体的 DOM 都**嵌在 `#editor` 里**，
  *    里层的 `focusin` 先跑（把 `ed` 切成挂载区），冒泡到这儿再无条件改回正文 ⇒
  *    里层那一次等于没发生，`ed` 永远停在正文。
  *
@@ -2038,6 +2066,9 @@ function viewEvents(
      * 换成另一个字符（或从关闭状态敲下）才重新打开。
      */
     triggerQuery: (hit, rect) => {
+      // 第二段（成员搜索）开着：行由浮层自己的输入框驱动，编辑器这边的上报一律忽略
+      //（此刻焦点在浮层，正文不该有输入；这条守卫防的是浮层被阶段一的状态机夺走）
+      if (stageTag) return
       if (hit === null) {
         if (triggerCh) {
           triggerCh = null
@@ -2082,15 +2113,6 @@ function viewEvents(
     },
     /** 拖入文件：v1 不做，但必须给一句明确的话（而不是「拖进来什么都没发生」） */
     onDropFilesRejected: () => app.toast(t('ui.asset.dropUnsupported'), 'warn'),
-    /**
-     * 正文里的组件体（`ui/dock-widgets.ts` 画，`view` 只留契约）。
-     *
-     * ⚠️ `find` 传的是共享 store 的那一个：摘要要数「还有几条活着」，
-     *    而集合里的块可能在当前视图之外（另一页／另一天），只有整片森林答得出来。
-     * ⚠️ 这里**不判**静止档是摘要还是完整 UI —— 那是类型声明的事，判据与画法
-     *    一起住在 `widgetBodyInDoc`。装配层只递「宿主能力」。
-     */
-    widgetBody: (block, find, mode) => widgetBodyInDoc(block, find, dockWidgetDeps(), mode),
     /**
      * **正文里的露面身体**（镜像／投影）：同一套分派在正文、挂载区、侧槽里都走这里。
      *
@@ -2323,7 +2345,7 @@ panels = {
  * **首帧要在事件表与画法都就位之后重画一次**。
  *
  * 编辑器在构造时就画了第一帧（`doc: bootRoots`），而 `events` 与 `panels` 都是
- * 构造之后才赋上去的：露面体、组件体、查询内联体这些**由装配层提供的画法**
+ * 构造之后才赋上去的：露面体、查询内联体这些**由装配层提供的画法**
  * 在那一帧里是缺的。缺了不会报错，只会画成「坏了」——而且**不会自己好**，
  * 因为重画要等下一次模型变化。
  *
@@ -2454,13 +2476,9 @@ function showCardMenu(side: 'left' | 'right', key: string, anchor: DOMRect): voi
   const dock = prefs().dock
   const entry = dock[side].cards.find((e) => dockKey(e) === key)
   const b = entry?.kind === 'block' ? kb.get(entry.block) : undefined
-  const isWindow = b !== undefined && !isWidgetBlock(b)
+  const isWindow = entry?.kind === 'block'
   const blockId = b?.id ?? ''
-  const windows = dock[side].cards.filter((e) => {
-    if (e.kind !== 'block') return false
-    const w = kb.get(e.block)
-    return w !== undefined && !isWidgetBlock(w)
-  })
+  const windows = dock[side].cards.filter((e) => e.kind === 'block')
   const anyExpanded = dock[side].cards.some((e) => !isCardCollapsed(dock, side, dockKey(e)))
   const rows: Row[] = [
     { id: 'toggle', label: st.collapsed ? t('ui.dock.expandCard') : t('ui.dock.collapseCard') },
@@ -2517,8 +2535,8 @@ function showCardMenu(side: 'left' | 'right', key: string, anchor: DOMRect): voi
  *
  * 两类条目共用一张列表：
  *   · 带 `tile` 的命令 → `cmd:<命令名>` 小卡；
- *   · 「新建收藏」→ 一个 `core/collection-widget` 块，建完直接开进这一槽。
- * 命令是**策展过的**集合（不是所有命令）；集合则是一个真正的组件块。
+ *   · 派生卡（目录在 `core/dock.ts` 的 `DERIVED_CARDS`）。
+ * 命令是**策展过的**集合（不是所有命令）。
  */
 function showWidgetGallery(side: 'left' | 'right'): void {
   const cards = prefs().dock[side].cards
@@ -2559,14 +2577,6 @@ function showWidgetGallery(side: 'left' | 'right'): void {
         keyHint: undefined,
       }
     }),
-    {
-      id: 'new-collection',
-      label: t('ui.widget.newCollection'),
-      hint: '',
-      icon: 'lucide:list-tree',
-      group: `palette/${t('menu.cat.widget')}`,
-      keyHint: undefined,
-    },
   ].sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label))
   layers.openMenu({
     rows,
@@ -2577,10 +2587,6 @@ function showWidgetGallery(side: 'left' | 'right'): void {
     placeholder: t('ui.palette.placeholder'),
     emptyText: t('ui.dock.tileGalleryEmpty'),
     onPick: (row) => {
-      if (row.id === 'new-collection') {
-        void registry.invoke('core.collection/create', { side }, 'dock')
-        return
-      }
       const derived = derivedRows.get(row.id)
       if (derived) {
         addDerived(side, derived)
@@ -2593,37 +2599,6 @@ function showWidgetGallery(side: 'left' | 'right'): void {
         return
       }
       if (row.command) addTile(side, row.command)
-    },
-  })
-}
-
-/**
- * 集合卡的块选择器：列出还没在收藏里的块，选中即加一条引用。
- * 复用命令面板的列表/搜索/键盘；锚在「选择块」按钮上。
- */
-function showCollectionPicker(collectionId: string, anchor: DOMRect): void {
-  const collection = findInForest(ws.blocks, collectionId)
-  const taken = new Set(collectionItems(collection))
-  const rows: Row[] = flatten({ roots: ws.blocks })
-    .filter((b) => b.id !== collectionId && !taken.has(b.id))
-    .map((b) => ({
-      id: b.id,
-      label: displayNameOf(b).trim() || plainText(b.content).trim() || t('ui.page.untitled'),
-      hint: shortId(b.id),
-      icon: prop<string>(b, '_icon') ?? 'lucide:file',
-      group: `palette/${t('menu.cat.page')}`,
-    }))
-  layers.openMenu({
-    rows,
-    anchor,
-    title: t('ui.widget.pickBlock'),
-    searchable: true,
-    focusSearch: true,
-    placeholder: t('ui.palette.placeholder'),
-    emptyText: t('ui.widget.pickBlockEmpty'),
-    onPick: (row) => {
-      void registry.invoke('core.collection/add', { collectionId, blockId: row.id }, 'dock')
-      renderDocks()
     },
   })
 }

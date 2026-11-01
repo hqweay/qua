@@ -20,7 +20,7 @@
 /**
  * 卡里的一列块。
  *
- * @param extra 额外的类名（例如集合卡的 `collection-list` 带拖放落点样式）
+ * @param extra 额外的类名（例如拖放落点那一档自带的样式）
  */
 export function cardList(extra = ''): HTMLElement {
   const el = document.createElement('div')

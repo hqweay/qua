@@ -4,7 +4,7 @@
  * 四条判据（与模型层的「数据只回答是什么」同源）：
  *   · **视图不是新实体**：配置住在拥有者的两个系统属性里（`_views`／`_activeView`），
  *     不造视图块、不引入 `_type`。旧库没有这两格 ⇒ 读作「这一种源的默认看法」。
- *   · **源是派生的**：块的源按 `_query` → `_items` → `_embed` → children 依次判（见 `sourceOf`），
+ *   · **源是派生的**：块的源按 `_query` → `_embed` → children 依次判（见 `sourceOf`），
  *     不存 `_source`，因为「它是什么」已经由数据回答了。
  *   · **配置入 KB、状态外挂**：列/序/行高是「这个视图是什么」⇒ 进库；
  *     滚动/选中/当前行/**冻结的查询结果**是「我此刻看到哪」⇒ 表面实例状态，这里一概不碰。
@@ -19,7 +19,6 @@ import { ACTIVE_VIEW_PROP, VIEWS_PROP, isDeleted, isQueryBlock, type Block, type
 import { displayNameOf } from './alias.ts'
 import { OUTLINE_VIEW, readEmbed } from './embed.ts'
 import { t } from './msg.ts'
-import { collectionItems, isCollectionBlock } from './collection.ts'
 import { uuidv7Hex } from './ids.ts'
 import type { KbClient } from './kb/types.ts'
 import { declaredFieldIds, ownFieldIds } from './props.ts'
@@ -63,10 +62,9 @@ export const STORED_VIEW_KINDS: readonly StoredViewKind[] = STORED_KINDS
 /**
  * **源 × kind 的兼容表（唯一一份）**。
  *
- * 三条形状上的理由，不是口味：
+ * 两条形状上的理由，不是口味：
  *   · query 源的命中是一组平的行，**没有「第 k 个孩子」可对齐** ⇒ 不接 `list-table`；
  *     导图要画一整棵子树，而命中集合不是树 ⇒ 不接 `mindmap`；
- *   · items 源是**手选的一批引用**，不是树 ⇒ 同样不接 `list-table`／`mindmap`；
  *   · 只有 children 是树，所以只有它两种都接。
  *
  * `canonicalViews` 与 UI 的「能切哪几种」都读这一张表。
@@ -74,7 +72,6 @@ export const STORED_VIEW_KINDS: readonly StoredViewKind[] = STORED_KINDS
 export const STORED_KINDS_BY_SOURCE: Record<Source['kind'], readonly StoredViewKind[]> = {
   query: ['list', 'table', 'board', 'gallery', 'calendar'],
   children: ['list', 'table', 'list-table', 'board', 'gallery', 'calendar', 'mindmap'],
-  items: ['list', 'table', 'board', 'gallery', 'calendar'],
 }
 
 /** 这一份源能落盘的视图种类 */
@@ -84,12 +81,9 @@ export function storedKindsFor(source: Source): readonly StoredViewKind[] {
 
 /**
  * 这一份源在**没有激活视图**时的默认看法。
- *
- * items 源的默认是 `list` 而不是大纲：收藏不是一棵树，画成大纲等于凭空造出
- * 「第一项是第二项的父」这种关系。
  */
-export function defaultKindFor(source: Source): ViewKind {
-  return source.kind === 'items' ? 'list' : 'outline'
+export function defaultKindFor(_source: Source): ViewKind {
+  return 'outline'
 }
 
 /**
@@ -378,7 +372,7 @@ export function readViews(b: Block | undefined): ViewConfig[] {
 /**
  * 激活的视图。
  *
- * `null` ＝ 这一份源的默认看法（`defaultKindFor`：children/query 是**大纲**，items 是**列表**）——
+ * `null` ＝ 这一份源的默认看法（`defaultKindFor` 恒为**大纲**）——
  * 不猜、不回退到第一项：配置坏了就退回最原始的那一种看法，而不是把用户塞进另一张视图。
  */
 export function activeView(b: Block | undefined): ViewConfig | null {
@@ -402,13 +396,10 @@ export function viewsBroken(b: Block | undefined): boolean {
 }
 
 /**
- * 这一块**是不是「一个视图的宿主」**：查询块、收藏块，或激活了某个非默认视图的块。
+ * 这一块**是不是「一个视图的宿主」**：查询块，或激活了某个非默认视图的块。
  *
  * 装配层用它决定「这一段的段尾要不要建视图宿主」——写成一处，
- * 免得「查询块」「收藏块」「普通块带视图」各自在装配层里判一遍（早晚分叉）。
- *
- * ⚠️ **收藏块即使没有 `_activeView` 也要建宿主**：它的默认看法是列表，不画出来
- *    用户就只看到一行「N 条」的摘要，而 `_items` 里的东西一个都看不到。
+ * 免得「查询块」「普通块带视图」各自在装配层里判一遍（早晚分叉）。
  */
 export function isViewRoot(b: Block | undefined): boolean {
   if (!b) return false
@@ -418,7 +409,7 @@ export function isViewRoot(b: Block | undefined): boolean {
    * 建一台「读不到配置」的视图宿主（空屏）。
    */
   if (readEmbed(b) !== null) return false
-  return isQueryBlock(b) || isCollectionBlock(b) || activeView(b) !== null
+  return isQueryBlock(b) || activeView(b) !== null
 }
 
 /**
@@ -448,25 +439,22 @@ export function hasQueryBody(b: Block | undefined): boolean {
 export type Source =
   | { kind: 'query'; spec: QuerySpec }
   | { kind: 'children'; blockId: string }
-  | { kind: 'items'; blockId: string }
 
 /**
  * **块的源优先级（唯一一份）**：
  *
  * 1. `_query` 存在 ⇒ **query**（查询页/查询块）；
- * 2. `isCollectionBlock(b)` ⇒ **items**（`_items`）；
- * 3. `_embed` 存在 ⇒ **目标块的源**（深度 1；目标不存在 ⇒ children 空容器）；
- * 4. 否则 ⇒ **children**（直接子块）。
+ * 2. `_embed` 存在 ⇒ **目标块的源**（深度 1；目标不存在 ⇒ children 空容器）；
+ * 3. 否则 ⇒ **children**（直接子块）。
  *
- * ⚠️ 三种「源的声明」**互斥**（`_query`／`_items`／`_embed` 只能有一个，见 `sourceConflicts`）：
- *    一个块不能同时是「查询」「收藏」「露面指针」。允许并存就会出现
+ * ⚠️ 两种「源的声明」**互斥**（`_query`／`_embed` 只能有一个，见 `sourceConflicts`）：
+ *    一个块不能同时是「查询」与「露面指针」。允许并存就会出现
  *    「改了 `_query` 却发现它根本不是源」这种静默的不生效。
  *
  * ⚠️ **露面的源是它指向的那一块，不是它自己**：露面块只是指针 ＋ 一次看法选择。
  */
 export function sourceOf(b: Block, find?: (id: string) => Block | undefined): Source {
   if (isQueryBlock(b)) return { kind: 'query', spec: (b.props?._query ?? { where: { any: [] } }) as QuerySpec }
-  if (isCollectionBlock(b)) return { kind: 'items', blockId: b.id }
   const embed = readEmbed(b)
   if (embed && embed.block !== b.id && find) {
     const target = find(embed.block)
@@ -489,7 +477,7 @@ export function sourceOf(b: Block, find?: (id: string) => Block | undefined): So
  * 判据只有一条，且是从 `sourceOf` 推出来的：**身体就是源在「这一张看法」下的身体**。
  *   · 源是 children 且这一次没选视图（源自己也没激活视图）⇒ 身体就是那棵子树
  *     ⇒ **镜像**（一台可编辑的岛编辑器）；
- *   · 其余（query／items 源，或选了一张视图）⇒ 身体是一张结果视图
+ *   · 其余（query 源，或选了一张视图）⇒ 身体是一张结果视图
  *     ⇒ **投影**（`ViewHost`，与正文行内体/段尾/侧窗同一台渲染器）。
  *
  * ⚠️ 曾经这里有**第二套渲染器表**（镜像／大纲表格／「还没有渲染器」）：查询源的露面
@@ -505,7 +493,7 @@ export function embedBodyOf(host: Block, find: (id: string) => Block | undefined
   // 指针坏了／源没了：身体是一句实话（不是视图），按一行算
   if (!ref || !target) return 'mirror'
   const src = sourceOf(target, find)
-  // 强制大纲：children 源就是那棵树；query／items 源没有树可摊，走视图的大纲分支
+  // 强制大纲：children 源就是那棵树；query 源没有树可摊，走视图的大纲分支
   if (ref.view === OUTLINE_VIEW) return src.kind === 'children' ? 'mirror' : 'view'
   // 指着一张命名视图 ⇒ 一定是视图
   if (ref.view !== '') return 'view'
@@ -520,8 +508,7 @@ export function embedBodyOf(host: Block, find: (id: string) => Block | undefined
  * 「什么算冲突」就会有两个答案，而冲突的块读起来是「静默不生效」。
  */
 export function sourceConflicts(b: Block): boolean {
-  const n =
-    (isQueryBlock(b) ? 1 : 0) + (isCollectionBlock(b) ? 1 : 0) + (readEmbed(b) !== null ? 1 : 0)
+  const n = (isQueryBlock(b) ? 1 : 0) + (readEmbed(b) !== null ? 1 : 0)
   return n > 1
 }
 
@@ -535,15 +522,13 @@ export function sourceConflicts(b: Block): boolean {
  */
 export interface ViewRecord {
   block: Block
-  /** 从根到父（不含自己）；children 为 `[容器]`；query 为命中祖先；items 为 `[收藏块]` 或 `[]` */
+  /** 从根到父（不含自己）；children 为 `[容器]`；query 为命中祖先 */
   path: readonly Block[]
   /** 正文的纯文本投影（排序与紧凑列表用；表里画的是 run，不是这个） */
   title: string
   tags: readonly Block[]
   /** 属性袋的只读视图（按列键取值用；不拷一份 Map：5k 行不值得） */
   values: BlockProps
-  /** 仅 items 源：这条在 `_items` 里的位置（拖动排序用） */
-  itemIndex?: number
   /**
    * **派生的列**（`refCount`／`matched`／`sharedTags`）：由源适配器现算填进来。
    *
@@ -552,14 +537,13 @@ export interface ViewRecord {
   derived?: Readonly<Record<string, unknown>>
 }
 
-function recordOf(block: Block, path: readonly Block[], kb: KbClient, itemIndex?: number): ViewRecord {
+function recordOf(block: Block, path: readonly Block[], kb: KbClient): ViewRecord {
   return {
     block,
     path,
     title: plainText(block.content),
     tags: [...kb.tagsOf(block.id)],
     values: block.props ?? {},
-    ...(itemIndex === undefined ? {} : { itemIndex }),
   }
 }
 
@@ -604,26 +588,6 @@ export function resolveRows(
     const path = kb.pathOf(hit.blockId)
     out.push(recordOf(b, path.slice(0, -1), kb))
   }
-  return out
-}
-
-/**
- * items 源：`_items` 解析到的**活块**（悬空跳过），顺序＝`_items` 顺序。
- *
- * ⚠️ 悬空项**不出行**，但引用本身保留（删块不摘引用，块恢复后自己回来）——
- *    「有几条指向已删块」由摘要（`collectionSummary`）明说，不由这里静默隐藏。
- */
-export function itemsRecords(blockId: string, kb: KbClient): ViewRecord[] {
-  const owner = kb.get(blockId)
-  if (!owner) return []
-  const items = collectionItems(owner)
-  const path = [owner]
-  const out: ViewRecord[] = []
-  items.forEach((id, i) => {
-    const b = kb.get(id)
-    if (!b || isDeleted(b)) return
-    out.push(recordOf(b, path, kb, i))
-  })
   return out
 }
 
@@ -706,14 +670,13 @@ function columnsFromSpec(spec: QuerySpec, kb: KbClient): ViewColumn[] {
 /**
  * **第一次切到这张视图时的默认列**（**只算一次**，算完由命令层写进配置）。
  *
- * 三份源各有各的问法：
+ * 两份源各有各的问法：
  *   · **query**：先看条件里的标签声明与属性条件，再看前若干条命中的自有属性；
- *   · **children**：看前几个直接子块实际拥有的属性 ＋ 标签声明；
- *   · **items**：看前几条 `_items` 的自有属性 ＋ 标签声明。
+ *   · **children**：看前几个直接子块实际拥有的属性 ＋ 标签声明。
  * 一个都没有 ⇒ 退回 `title`／`tags`／`children`／`modified` 四列。
  *
  * ⚠️ 之后**不随结果自动变**：列宽/列序会随结果漂移，那比列少更烦人。
- * ⚠️ 这是**唯一入口**：不要在各渲染器里各算一套（那会得到三份默认列）。
+ * ⚠️ 这是**唯一入口**：不要在各渲染器里各算一套（那会得到两份默认列）。
  */
 export function defaultColumnsForSource(
   source: Source,
@@ -724,12 +687,6 @@ export function defaultColumnsForSource(
   if (source.kind === 'children') {
     const root = kb.get(source.blockId)
     return columnsFromBlocks(root ? [...kb.children(source.blockId)].filter((b) => !isDeleted(b)) : [], kb, limit)
-  }
-  if (source.kind === 'items') {
-    const owner = kb.get(source.blockId)
-    const items = owner ? collectionItems(owner) : []
-    const blocks = items.map((id) => kb.get(id)).filter((b): b is Block => b !== undefined && !isDeleted(b))
-    return columnsFromBlocks(blocks.slice(0, limit + 1), kb, limit)
   }
   // query：条件优先，命中兜底
   const fromSpec = columnsFromSpec(source.spec, kb)

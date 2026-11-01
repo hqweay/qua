@@ -5,7 +5,7 @@
  * 只经 `App` 门面改状态（`app.ed.*`），不碰 DOM。
  */
 import { t } from '../../core/msg.ts'
-import { COLLECTION_TYPE, checkExternalUrl, rejectText } from '../../core/index.ts'
+import { checkExternalUrl, rejectText } from '../../core/index.ts'
 import { MISSING_ASSET_HASH, SEED_ASSET_HASH } from '../../core/fixtures/assets.ts'
 import type { Handler } from '../../core/ports.ts'
 import { curBlock, S } from './shared.ts'
@@ -112,9 +112,14 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     if (!id) return false
     const text = S(a.text, '')
     const type = S(a.type, 'paragraph')
-    // 分割线／组件块没有正文可落光标：插入动作自己负责在它下面留一个落点
+    // 分割线没有正文可落光标：插入动作自己负责在它下面留一个落点
     if (type === 'divider') return app.ed.insertDividerAfter(id)
-    if (type === 'collection') return app.ed.insertWidgetAfter(id, COLLECTION_TYPE)
+    /**
+     * 只认这两种写正文的类型。**未知类型不降级成段落**：命令面的 `enum` 只是元数据，
+     * `invoke` 不会按它校验——放过去就会「插了一行普通文字」，
+     * 而用户以为那个类型还在（删掉的入口不该变成另一种东西）。
+     */
+    if (type !== 'paragraph' && type !== 'todo') return false
     const todo = type === 'todo' ? ('todo' as const) : undefined
     app.ed.insertBlockAfter(id, text, todo)
     return true

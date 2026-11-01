@@ -426,6 +426,17 @@ export function rowWritesFor(
         break
       }
       case 'prop': {
+        /**
+         * **同批已整块写过的块，属性增量写整个跳过**：整块写（同批的位置 op）是从
+         * **事务后的模型**铺的行，本来就是这一格的最终值。
+         *
+         * 不跳过的后果是一格静默消失（实测：同一笔事务里建记录＋写 `_tags`）——
+         * 整块写先铺了 upsert，属性写自己的「先删后写」跟在后面，而 dedupe 只去
+         * **完全相同**的写：两条一样的 upsert 去掉一条，「删」却留下来 ⇒
+         * 落到盘上的顺序成了「先写后删」，行没了。读回来这块就没有这个属性，
+         * 而且没有任何一层报错。
+         */
+        if (structural.has(op.block)) break
         if (op.op === 'delete') {
           out.push({ table: 'BlockProperty', op: 'delete', key: { block: op.block, name: op.name } })
           out.push(...columnWrites(op.block, op.name, undefined))

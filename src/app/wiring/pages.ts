@@ -660,7 +660,15 @@ export function setupPages(deps: PagesDeps) {
         onPick:
           onPick ??
           ((row) => {
-            deps.getRegistry().invoke('core.editor/insert-page-ref', { pageId: (row.args as { pageId: string }).pageId }, 'menu', uiCtx())
+            /**
+             * 行自带 `command` ＋ `args` 就分发那条命令；没带 `command` 的行
+             * （页/标签引用候选）按引用插入这条走。分发而不是在调用方手写插入：
+             * 命令路径里有撤销快照与重排，手写的那份只写模型不画 —— 「点了没反应」。
+             */
+            const args = (row.args ?? {}) as Record<string, unknown>
+            deps
+              .getRegistry()
+              .invoke(row.command ?? 'core.editor/insert-page-ref', args, 'menu', uiCtx())
           }),
       }),
     pageTitle,

@@ -218,58 +218,6 @@ const dragTile = (page, { from, to, id, before }) =>
     { from, to, id, before },
   )
 
-/** 真的走一遍 HTML5 DnD：块标 dragstart（`application/x-qua-block` = 块 id）→ 集合卡 body dragover → drop */
-const dragBlockToCollection = (page, blockId, cardId) =>
-  page.evaluate(
-    ({ id, cardId }) => {
-      const marker = document.querySelector(`.blk[data-block-id="${id}"] .marker`)
-      const body = document.querySelector(`#dock-right .dock-card[data-card-id="${cardId}"] .collection-list`)
-      if (!marker || !body) return null
-      const dt = new DataTransfer()
-      const rect = body.getBoundingClientRect()
-      const ev = (type) =>
-        new DragEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          dataTransfer: dt,
-          clientX: rect.left + 8,
-          clientY: rect.top + 8,
-        })
-      marker.dispatchEvent(ev('dragstart'))
-      body.dispatchEvent(ev('dragover'))
-      const hot = body.dataset.drop === '1'
-      body.dispatchEvent(ev('drop'))
-      marker.dispatchEvent(ev('dragend'))
-      return { hot }
-    },
-    { id: blockId, cardId },
-  )
-
-/** 真的走一遍 HTML5 DnD：集合项手柄 dragstart（`ITEM_MIME`）→ 集合 body dragover → drop */
-const dragCollectionItem = (page, cardId, itemId, toIndex) =>
-  page.evaluate(
-    ({ cardId, itemId, toIndex }) => {
-      const card = document.querySelector(`#dock-right .dock-card[data-card-id="${cardId}"]`)
-      const grip = card?.querySelector(`.collection-row[data-item-id="${itemId}"] .collection-grip`)
-      const list = card?.querySelector('.collection-list')
-      if (!grip || !list) return null
-      const rows = [...list.querySelectorAll(':scope > .collection-row')]
-      const target = rows[toIndex] ?? null
-      const rect = target ? target.getBoundingClientRect() : list.getBoundingClientRect()
-      const y = target ? rect.top + 2 : rect.bottom - 2
-      const dt = new DataTransfer()
-      const ev = (type) =>
-        new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: rect.left + 8, clientY: y })
-      grip.dispatchEvent(ev('dragstart'))
-      list.dispatchEvent(ev('dragover'))
-      const hot = list.dataset.drop === '1'
-      list.dispatchEvent(ev('drop'))
-      grip.dispatchEvent(ev('dragend'))
-      return { hot }
-    },
-    { cardId, itemId, toIndex },
-  )
-
 /** 真的走一遍 HTML5 DnD：块标 dragstart（`application/x-qua-block` = 块 id）→ 槽 dragover → drop */
 const dragBlockToDock = (page, blockId, side) =>
   page.evaluate(
@@ -1580,6 +1528,18 @@ await check('T9 块菜单与斜杠菜单**都是绑定表的渲染结果**（同
   await page.keyboard.type('/')
   const slashRows = await page.locator('.layer-item').count()
   assert(slashRows >= 5, `斜杠菜单应有条目，实际 ${slashRows}`)
+  /**
+   * **「收藏」不是一种可插入的内容**（它的入口只有槽）。
+   *
+   * 这一条是**反向断言**：删掉一个入口之后，最容易发生的回归不是它被加回来，
+   * 而是「菜单里没了、命令面还留着」——那会让同一个动作有两个答案。
+   * 命令面那一半在 T139 里钉。
+   */
+  const slashLabels = await page.locator('.layer .layer-item').allInnerTexts()
+  assert(
+    !slashLabels.some((t) => t.includes('收藏')),
+    `斜杠菜单不该有「收藏」：${JSON.stringify(slashLabels)}`,
+  )
   await page.keyboard.type('图')
   const filteredRows = await page.locator('.layer-item').count()
   assert(filteredRows >= 1 && filteredRows <= slashRows, `斜杠应随打字过滤：${slashRows} → ${filteredRows}`)
@@ -10412,7 +10372,7 @@ await check(
 )
 
 await check(
-  'T114 `#` 的三种落点只看按键：↵ 行内标签 / ⌥↵ 块标签 / ⇧↵ 新实例；`#` 紧接正文也能弹',
+  'T114 `#` 的三种落点只看按键：↵ 行内标签 / ⌥↵ 块标签 / ⇧↵ 成员搜索（新实例以输入文本命名）；`#` 紧接正文也能弹',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -10422,7 +10382,7 @@ await check(
      * 三种落点由**按键**区分，不由「选中的是哪一行」区分：
      *   · `↵` 行内标签：正文里那一格指向标签类，宿主不被归类；
      *   · `⌥↵` 块标签：写宿主 `_tags`，正文里不多出原子；
-     *   · `⇧↵` 新实例：建一条住森林顶层的记录，正文里那一格指向**记录**。
+     *   · `⇧↵` 进成员搜索（第二段）；新实例由第二段的「新建实例」行落——名字＝输入文本。
      * 同一套判据在「类行」上验一遍就够了；实例行上的 ⌥/⇧ 复用同一支。
      */
     const tagName = '快捷键甲'
@@ -10486,45 +10446,59 @@ await check(
     assert(chip.tags.length === 1 && chip.tags[0] === tagId, `⌥↵ 应写宿主 _tags：${JSON.stringify(chip.tags)}`)
     assert(chip.chips === 1, `⌥↵ 的样式应是行尾 chip（实底）：${chip.chips}`)
 
-    // ③ ⇧↵ = 新实例（不新建标签，记录住森林顶层、自带归属）
+    // ③ ⇧↵ = 进成员搜索；「新建实例」行的名字＝输入文本（记录住森林顶层、自带归属）
     const objBlock = await focusNew()
     await page.waitForTimeout(80)
     await page.keyboard.type(`#${tagName}`)
     await page.waitForTimeout(220)
     await page.keyboard.press('Shift+Enter')
     await page.waitForTimeout(260)
+    const stage = await page.evaluate(() => ({
+      title: document.querySelector('.layer .layer-head')?.textContent ?? '',
+      focused: document.activeElement?.className?.includes('layer-input') ?? false,
+    }))
+    assert(stage.title.includes(tagName) && stage.title.includes('成员'), `⇧↵ 应进成员搜索：${stage.title}`)
+    assert(stage.focused, '第二段焦点应在浮层输入框')
+    const newName = '甲一实例'
+    await page.keyboard.type(newName)
+    await page.waitForTimeout(200)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(260)
 
-    const obj = await page.evaluate((t) => {
-      const ed = window.__qua.__editor
-      const atoms = window.__qua.atoms().filter((a) => a.blockId === t.id)
-      const recordId = atoms[0]?.target?.id ?? ''
-      const record = ed.store.find(recordId)
-      const tx = document.querySelector(`.blk[data-block-id="${t.id}"]`)
-      return {
-        atoms: atoms.map((a) => a.target?.id ?? ''),
-        dom: { tag: tx?.querySelectorAll('.atom-tag').length ?? -1, obj: tx?.querySelectorAll('.atom-obj').length ?? -1 },
-        tags: ed.store.find(t.id)?.props?._tags ?? [],
-        recordTags: record?.props?._tags ?? [],
-        recordText: record ? record.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '',
-        isRoot: ed.store.blocks.some((x) => x.id === recordId),
-        tagCount: ed.store.blocks.filter((x) => (x.props?._lists ?? []).includes('tag')).length,
-      }
-    }, { id: objBlock })
+    const obj = await page.evaluate(
+      ({ t, tagName, newName }) => {
+        const ed = window.__qua.__editor
+        const atoms = window.__qua.atoms().filter((a) => a.blockId === t)
+        const recordId = atoms[0]?.target?.id ?? ''
+        const record = ed.store.find(recordId)
+        const tx = document.querySelector(`.blk[data-block-id="${t}"]`)
+        return {
+          atoms: atoms.map((a) => a.target?.id ?? ''),
+          dom: { tag: tx?.querySelectorAll('.atom-tag').length ?? -1, obj: tx?.querySelectorAll('.atom-obj').length ?? -1 },
+          tags: ed.store.find(t)?.props?._tags ?? [],
+          recordTags: record?.props?._tags ?? [],
+          recordText: record ? record.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '',
+          isRoot: ed.store.blocks.some((x) => x.id === recordId),
+          tagCount: ed.store.blocks.filter((x) => (x.props?._lists ?? []).includes('tag')).length,
+          tagName,
+          newName,
+        }
+      },
+      { t: objBlock, tagName, newName },
+    )
 
-    assert(obj.atoms.length === 1 && obj.atoms[0] !== tagId, `⇧↵ 应插指向**新记录**的实例：${JSON.stringify(obj)}`)
+    assert(obj.atoms.length === 1 && obj.atoms[0] !== tagId, `新建行应插指向**新记录**的实例：${JSON.stringify(obj)}`)
     assert(obj.recordTags.length === 1 && obj.recordTags[0] === tagId, `记录应自带标签归属：${JSON.stringify(obj.recordTags)}`)
-    assert(obj.recordText === tagName, `记录的正文应是键入名：${JSON.stringify(obj.recordText)}`)
-    assert(obj.dom.tag === 0 && obj.dom.obj === 1, `⇧↵ 的样式应是实例（空心胶囊），不是行内标签：${JSON.stringify(obj.dom)}`)
+    assert(obj.recordText === obj.newName, `记录的正文应是**输入文本**，不是标签名：${JSON.stringify(obj.recordText)}`)
+    assert(obj.dom.tag === 0 && obj.dom.obj === 1, `新建的样式应是实例（空心胶囊），不是行内标签：${JSON.stringify(obj.dom)}`)
     assert(obj.isRoot, '记录应落在森林顶层')
-    assert(obj.tags.length === 0, `⇧↵ 不该把宿主归类：${JSON.stringify(obj.tags)}`)
-    assert(obj.tagCount === tagCountBefore, `⇧↵ 复用已有标签，不新建第二个：${tagCountBefore} → ${obj.tagCount}`)
+    assert(obj.tags.length === 0, `落点不该把宿主归类：${JSON.stringify(obj.tags)}`)
+    assert(obj.tagCount === tagCountBefore, `复用已有标签，不新建第二个：${tagCountBefore} → ${obj.tagCount}`)
 
     await ctx.close()
-    return `前缀#名 也能弹；↵ 行内标签（指向类）、⌥↵ 写宿主 _tags、⇧↵ 建住森林顶层的新实例`
+    return `前缀#名 也能弹；↵ 行内标签（指向类）、⌥↵ 写宿主 _tags、⇧↵ 进成员搜索且新实例以输入文本命名`
   },
 )
-
-
 
 
 await check(
@@ -11923,333 +11897,73 @@ await check('T136 小卡：点击走命令面；可加/可移；同排可拖序'
   return `4 张小卡；点击 via=tile；右槽可加/可移；同排拖序 ${order.cards[0]} → ${order.cards[1]}`
 })
 
-/* ---------------------------------------------------------------- T137 */
-
-await check('T137 收藏卡：新建 ⇒ 槽里出现组件卡；拖块进来＝加引用；× 只摘引用不删块', async () => {
-  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
-  await page.evaluate(() => window.__qua.quiet(true))
-
-  await page.locator('#dock-right-add').click()
-  await page.waitForTimeout(120)
-  const gallery = await page.evaluate(() => ({
-    title: document.querySelector('.layer-head')?.textContent ?? '',
-    hasNew: [...document.querySelectorAll('.layer .layer-item')].some((el) => el.textContent?.includes('新建收藏')),
-  }))
-  assert(gallery.hasNew, `画廊应列出「新建收藏」：${JSON.stringify(gallery)}`)
-
-  await page.locator('.layer .layer-item', { hasText: '新建收藏' }).click()
-  await page.waitForTimeout(200)
-  const made = await page.evaluate(() => {
-    const cards = window.__qua.snapshot().dock.right.cards
-    const collection = window.__qua.allBlocks().find((b) => b.aliases.includes('收藏'))
-    const card = collection
-      ? document.querySelector(`#dock-right .dock-card[data-card-id="${collection.id}"]`)
-      : null
-    return {
-      cards,
-      collection: collection ? { id: collection.id, aliases: collection.aliases } : null,
-      card: card ? { widget: card.dataset.widget === '1', title: card.querySelector('.dock-card-title')?.textContent ?? '' } : null,
-      blocks: window.__qua.allBlocks().length,
-    }
-  })
-  assert(made.collection, `新建收藏应真的建出一个块：${JSON.stringify(made)}`)
-  assert(made.card?.widget === true && made.card.title.includes('收藏'), `槽里应出现组件卡：${JSON.stringify(made)}`)
-  assert(made.cards.includes(made.collection.id), `卡片 id 应在右槽清单里：${JSON.stringify(made)}`)
-
-  // 找一个当前视图里的块（它的块标在 DOM 里），拖进收藏
-  const target = await page.evaluate(() => {
-    const row = document.querySelector('#editor .blk[data-depth="1"][data-block-id]') ?? document.querySelector('#editor .blk[data-block-id]')
-    return row ? { id: row.dataset.blockId, text: row.querySelector('.tx')?.textContent ?? '' } : null
-  })
-  assert(target, '当前视图里应有一个可拖的块')
-
-  const dragged = await dragBlockToCollection(page, target.id, made.collection.id)
-  assert(dragged?.hot === true, `拖进收藏应亮落点：${JSON.stringify(dragged)}`)
-  await page.waitForTimeout(200)
-  const added = await page.evaluate((cid) => {
-    const rows = [...document.querySelectorAll(`#dock-right .dock-card[data-card-id="${cid}"] .collection-row`)]
-    return { rows: rows.length, text: rows[0]?.textContent ?? '', blocks: window.__qua.allBlocks().length }
-  }, made.collection.id)
-  assert(added.rows === 1, `收藏里应出现一行：${JSON.stringify(added)}`)
-  assert(added.blocks === made.blocks, `收藏只加引用，块数不变：${made.blocks} → ${added.blocks}`)
-
-  // × 只摘引用：行消失、块仍在、块数不变
-  await page.locator(`#dock-right .dock-card[data-card-id="${made.collection.id}"] .collection-x`).first().click()
-  await page.waitForTimeout(150)
-  const removed = await page.evaluate(({ cid, id }) => ({
-    rows: document.querySelectorAll(`#dock-right .dock-card[data-card-id="${cid}"] .collection-row`).length,
-    blockStill: window.__qua.allBlocks().some((b) => b.id === id),
-    blocks: window.__qua.allBlocks().length,
-  }), { cid: made.collection.id, id: target.id })
-  assert(removed.rows === 0, `× 后行应消失：${JSON.stringify(removed)}`)
-  assert(removed.blockStill, `× 只摘引用，块必须还在：${JSON.stringify(removed)}`)
-  assert(removed.blocks === made.blocks, `× 不删块：${made.blocks} → ${removed.blocks}`)
-
-  await ctx.close()
-  return `新建收藏 ⇒ 右槽组件卡；拖入 1 行（块数不变）；× 只摘引用（块仍在）`
-})
-
-/* ---------------------------------------------------------------- T138 */
-
-await check('T138 收藏卡：选择块可加两条；拖手柄换序只动引用，块数不变', async () => {
-  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
-  await page.evaluate(() => window.__qua.quiet(true))
-
-  await page.locator('#dock-right-add').click()
-  await page.waitForTimeout(100)
-  await page.locator('.layer .layer-item', { hasText: '新建收藏' }).click()
-  await page.waitForTimeout(200)
-  const cid = await page.evaluate(() => {
-    const c = window.__qua.allBlocks().find((b) => b.aliases.includes('收藏'))
-    return c?.id ?? ''
-  })
-  assert(cid !== '', '前置：应已建出收藏块')
-  const before = await page.evaluate(() => window.__qua.allBlocks().length)
-
-  // 用「选择块」加两条：每次点按钮 → 点选择器第一行
-  for (let i = 0; i < 2; i++) {
-    await page.locator(`#dock-right .dock-card[data-card-id="${cid}"] .collection-add`).click()
-    await page.waitForTimeout(100)
-    await page.locator('.layer .layer-item').first().click()
-    await page.waitForTimeout(150)
-  }
-  const two = await page.evaluate((cid) => {
-    const rows = [...document.querySelectorAll(`#dock-right .dock-card[data-card-id="${cid}"] .collection-row`)]
-    return { ids: rows.map((r) => r.dataset.itemId), blocks: window.__qua.allBlocks().length }
-  }, cid)
-  assert(two.ids.length === 2, `应加进两条引用：${JSON.stringify(two)}`)
-  assert(two.blocks === before, `选择块只加引用，块数不变：${before} → ${two.blocks}`)
-
-  // 把第二条拖到第一条前面
-  const dragged = await dragCollectionItem(page, cid, two.ids[1], 0)
-  assert(dragged?.hot === true, `拖手柄应亮落点：${JSON.stringify(dragged)}`)
-  await page.waitForTimeout(200)
-  const after = await page.evaluate((cid) => {
-    const rows = [...document.querySelectorAll(`#dock-right .dock-card[data-card-id="${cid}"] .collection-row`)]
-    return { ids: rows.map((r) => r.dataset.itemId), blocks: window.__qua.allBlocks().length }
-  }, cid)
-  assert(after.ids[0] === two.ids[1] && after.ids[1] === two.ids[0], `拖序应换位：${JSON.stringify({ before: two.ids, after: after.ids })}`)
-  assert(after.blocks === before, `拖序只动引用，块数不变：${before} → ${after.blocks}`)
-
-  await ctx.close()
-  return `选择块加 2 条（块数不变）；拖序 ${two.ids.join(',')} → ${after.ids.join(',')}`
-})
-
-/* ---------------------------------------------------------------- T139 */
-
 /**
- * 正文露面 `body: 'row'`：一块组件在正文里是一行**只读摘要**。
+ * **删掉的入口不许悄悄降级**：`insert-block` 不认 `collection` 这个类型。
  *
- * 三条必须一起断言，只测「画出来了」会让另外两条照样绿：
- *   ① 摘要**不进正文**（读数契约）：打字、刷新之后块的 content 仍为空 ——
- *      否则一次 `readRuns` 就把「收藏 3 条 打开」写成真正文，组件行从此消失；
- *   ② 点它＝打开那张卡（Shift ＝ 换目的地，不换动作）；
- *   ③ 摘要**与槽里那张卡共享配置**：加一条引用，两处同时变。
+ * 为什么这条必须单独钉：命令面的 enum 只是**元数据**，`invoke` 不会按它校验；
+ * 未知类型若落进 `insertBlockAfter(id, text)`，用户会得到**一行普通文字**——
+ * 看起来「插进去了」，模型里却没有任何东西说这个入口已经没了。
+ *
+ * 斜杠菜单那一半在 T9 里钉（菜单里没有「收藏」）：两处分开，才知道是哪一半漏了。
  */
-await check('T139 正文里的组件行：只读摘要不进正文；点它打开卡；与槽里共享配置', async () => {
+await check('T139 删掉的插入入口不降级：`insert-block{type:collection}` 不被处理、不多出块', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
   await page.evaluate(() => window.__qua.quiet(true))
 
-  // 在一个普通块后面插一个收藏（走命令面，与斜杠菜单同一条路）
+  // 先聚焦一个可写块：否则 handler 会在「没有当前块」上早退，这条断言就白绿了
   await page.evaluate(() => {
     const first = window.__qua.blocks().find((r) => r.roles.length === 0)
     window.__qua.focusBlock(first.id, 0)
   })
   await page.waitForTimeout(120)
-  const inserted = await page.evaluate(() => window.__qua.invoke('core.editor/insert-block', { type: 'collection' }))
-  assert(inserted?.handled === true, `插入收藏应被处理：${JSON.stringify(inserted)}`)
-  await page.waitForTimeout(200)
 
-  const cid = await page.evaluate(() => document.querySelector('#editor [data-widget-body]')?.dataset.widgetBody ?? '')
-  assert(cid !== '', '正文里应出现组件体')
-
-  const shape = await page.evaluate((id) => {
-    const body = document.querySelector(`#editor [data-widget-body]`)
-    const blk = body?.closest('.blk')
-    const tx = body?.closest('.tx')
-    return {
-      type: blk?.dataset.type ?? '',
-      sameBlock: blk?.dataset.blockId === id,
-      editable: body?.contentEditable,
-      readonly: tx?.dataset.readonly ?? null,
-      text: body?.textContent ?? '',
-      // 静止档：摘要（声明 `rest: 'summary'`）
-      height: body?.dataset.widgetHeight ?? '',
-      isIsland: body?.dataset.editIsland ?? '',
-    }
-  }, cid)
-  assert(shape.type === 'core/collection-widget' && shape.sameBlock, `组件体应挂在组件块自己的行上：${JSON.stringify(shape)}`)
-  assert(shape.editable === 'false' && shape.readonly === '1', `组件体不可编辑：${JSON.stringify(shape)}`)
-  /**
-   * **静止档 ＝ 摘要**（声明 `rest: 'summary'`）：这一格现在只有一行高，
-   * 且它是**编辑岛**（本视图的重排判据按这一格认它，见 `EDIT_ISLAND_ATTR`）。
-   */
-  assert(shape.height === 'summary', `静止档应是摘要：${JSON.stringify(shape)}`)
-  assert(shape.isIsland === '1', `组件体必须标成编辑岛（否则里层打字时会被重排掉）：${JSON.stringify(shape)}`)
-
-  /**
-   * ① **读数契约**：摘要不进正文。
-   *
-   * ⚠️ 为什么这里**直接调 `readRuns`** 而不是「打字再看 content」：组件行的 `.tx` 是
-   *    `data-readonly`，`syncFromDom` 那条路根本走不到它身上 —— 只测「打字不污染」
-   *    会是一条**恒绿**的断言（删掉 `isWidgetRow` 的读数分支它照样过，实测过）。
-   *    真正会把摘要写进正文的是 `readRuns` 本身（别的收光标路径会经过它），
-   *    所以断言要打在**读数层**：让它读这一行的 `.tx`，结果必须是空。
-   */
-  const readBack = await page.evaluate((id) => {
-    const tx = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
-    return { runs: window.__qua.readRuns(tx), txText: tx?.textContent ?? '' }
-  }, cid)
-  assert(
-    readBack.runs.length === 0,
-    `读数必须跳过组件行（摘要不是正文）：${JSON.stringify(readBack)}`,
+  const before = await page.evaluate(() => ({
+    blocks: window.__qua.allBlocks().length,
+    text: window.__qua.allBlocks().map((b) => b.text).join('\n'),
+  }))
+  const rejected = await page.evaluate(() =>
+    window.__qua.invoke('core.editor/insert-block', { type: 'collection' }),
   )
-  assert(readBack.txText.includes('收藏'), `组件行确实画在 .tx 里（否则上面那条也没验到东西）：${JSON.stringify(readBack)}`)
+  await page.waitForTimeout(150)
+  const after = await page.evaluate(() => ({
+    blocks: window.__qua.allBlocks().length,
+    text: window.__qua.allBlocks().map((b) => b.text).join('\n'),
+  }))
 
-  // 刷新（重新读库）之后：正文仍为空、行还在
-  await page.reload()
-  await page.waitForTimeout(400)
-  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), cid)
-  await page.waitForTimeout(300)
-  const clean = await page.evaluate((id) => ({
-    text: window.__qua.allBlocks().find((b) => b.id === id)?.text ?? null,
-    rowStill: Boolean(document.querySelector('#editor [data-widget-body]')),
-  }), cid)
-  assert(clean.text === '', `刷新后正文仍应为空：${JSON.stringify(clean)}`)
-  assert(clean.rowStill, `刷新后组件行仍应画出来：${JSON.stringify(clean)}`)
-
-  // ③ 与槽里那张卡共享配置：加一条引用 ⇒ 两处同时变
-  /**
-   * ⚠️ 先在**别的**视图里挑一个块再加引用：此刻中心已经 zoom 到那个收藏块，
-   *    `blocks()` 读的是**当前页的子树** —— 在这一屏里找「另一个块」只能找到它自己
-   *    （`r.id !== id` 过滤后为空 ⇒ 拿到 undefined）。
-   */
-  await page.evaluate(() => window.__qua.invoke('core.journal/today', {}))
-  await page.waitForTimeout(250)
-  const shared = await page.evaluate((id) => {
-    const other = window.__qua.blocks().find((r) => r.id !== id && r.roles.length === 0)
-    window.__qua.invoke('core.collection/add', { collectionId: id, blockId: other.id })
-    return { otherId: other.id }
-  }, cid)
-  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), cid)
-  await page.waitForTimeout(300)
-  const shown = await page.evaluate((id) => ({
-    row: document.querySelector('#editor [data-widget-body]')?.textContent ?? '',
-    count: window.__qua.snapshot().dock.right.cards.length,
-  }), cid)
-  // 摘要应报「1 条」；配置是块上那一格 `_items`，槽里那张卡读的是同一格（见 T137）
-  assert(/1\s*条/.test(shown.row), `正文摘要应跟着引用条数变：${JSON.stringify({ shared, shown })}`)
-
-  // ② 点组件行 ＝ 打开那张卡（中心换成这一块）
-  await page.evaluate(() => window.__qua.invoke('core.journal/today', {}))
-  await page.waitForTimeout(300)
-  const beforeClick = await page.evaluate(() => window.__qua.snapshot().activeId)
-  await page.locator('#editor [data-widget-body]').first().click()
-  await page.waitForTimeout(400)
-  const afterClick = await page.evaluate((id) => ({
-    activeId: window.__qua.snapshot().activeId,
-    last: window.__qua.snapshot().lastCommand,
-  }), cid)
-  assert(afterClick.activeId === cid, `点组件行应把中心换成这一块：${JSON.stringify({ beforeClick, afterClick })}`)
-
-  // ② Shift+点 ＝ 右槽，中心不动
-  await page.evaluate(() => window.__qua.invoke('core.journal/today', {}))
-  await page.waitForTimeout(300)
-  const beforeShift = await page.evaluate(() => window.__qua.snapshot().activeId)
-  const box = await page.locator('#editor [data-widget-body]').first().boundingBox()
-  await page.keyboard.down('Shift')
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
-  await page.keyboard.up('Shift')
-  await page.waitForTimeout(400)
-  const afterShift = await page.evaluate(({ id, beforeId }) => ({
-    inRight: window.__qua.snapshot().dock.right.cards.includes(id),
-    centerStill: window.__qua.snapshot().activeId === beforeId,
-  }), { id: cid, beforeId: beforeShift })
-  assert(afterShift.inRight, `Shift+点应在右槽开窗：${JSON.stringify(afterShift)}`)
-  assert(afterShift.centerStill, `Shift+点不该换中心：${JSON.stringify(afterShift)}`)
+  assert(rejected?.handled === false, `未知类型应不被处理：${JSON.stringify(rejected)}`)
+  assert(after.blocks === before.blocks, `不该多出一个块：${before.blocks} → ${after.blocks}`)
+  assert(after.text === before.text, `不该多出一行正文（类型不认 ⇒ 不降级成段落）：${JSON.stringify({ before: before.text, after: after.text })}`)
 
   await ctx.close()
-  return `只读摘要（content 仍为空）· 点开卡 · Shift 开右槽且中心不动 · 加一条引用后摘要＝「${shown.row.trim()}」`
+  return `insert-block{type:collection} ⇒ handled=false，块数与正文都没变`
 })
 
-/* ---------------------------------------------------------------- T140 */
-
 /**
- * **组件卡的两个高度**：静止一档、被聚焦一档，切档是纯 CSS 的 `:focus-within`。
- *
- * 为什么必须真量尺寸：这一格的全部内容就是「两张高度」，只断言「变量挂上了」
- * 会让「CSS 没读那两个变量」照样绿（实测过的同类：断言打在配置上，渲染分支删掉它也过）。
- * 所以要量**卡身体的像素高度**，并且**两次**：聚焦前、聚焦后。
- *
- * 另有一条必须一起钉：切档**不改模型**（它是视图状态，与折叠态同一条口径）。
+ * **收藏整套退场，两个面都不许留残根**（164）：命令面不再认 `core.collection/*`，
+ * 「添加组件」画廊里没有收藏——「命令面还在但画廊没了」会让同一个能力有两个答案。
+ * 插入那一半在 T139 里钉（未知类型不降级）：两处分开，才知道是哪一半漏了。
  */
-await check('T140 组件卡的两个高度：聚焦前＝静止档、聚焦后＝聚焦档；切档不改模型', async () => {
+await check('T186 收藏退场：命令面不认 core.collection/*；画廊里没有收藏', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
   await page.evaluate(() => window.__qua.quiet(true))
 
-  // 新建一个收藏并开进右槽（走命令面，与「添加组件」同一条路）
-  const cid = await page.evaluate(() =>
-    window.__qua.invoke('core.collection/create', { name: '两个高度', side: 'right' }),
+  const rejected = await page.evaluate(() =>
+    window.__qua.invoke('core.collection/create', { name: '不该建出来', side: 'right' }),
   )
-  assert(cid?.handled === true, `新建收藏应被处理：${JSON.stringify(cid)}`)
-  await page.waitForTimeout(400)
+  assert(rejected?.handled === false, `收藏命令应已退场（handled=false）：${JSON.stringify(rejected)}`)
 
-  const card = '#dock-right .dock-card[data-widget="1"]'
-  const readHeights = () =>
-    page.evaluate((sel) => {
-      const el = document.querySelector(sel)
-      const body = el?.querySelector('.dock-card-body')
-      if (!el || !body) return null
-      return {
-        restVar: el.style.getPropertyValue('--widget-h-rest').trim(),
-        focusVar: el.style.getPropertyValue('--widget-h-focus').trim(),
-        height: Math.round(body.getBoundingClientRect().height),
-        tier: el.dataset.widgetHeight ?? '',
-      }
-    }, card)
-
-  const before = await readHeights()
-  assert(before !== null, '右槽里应出现组件卡')
-  /**
-   * 静止档：变量在场、卡身体真的**有界**（`compact` ＝ 96px 的内容高，含上下留白会略大）。
-   * 用「≤ 一张普通大卡的高度」判，不写死像素：像素值随 padding 变，那是样式的事。
-   */
-  assert(before.restVar !== '' && before.focusVar !== '', `两个高度都要挂上：${JSON.stringify(before)}`)
-  assert(before.tier === 'compact', `静止档应是 compact：${JSON.stringify(before)}`)
-
-  // 聚焦卡里的一个可聚焦元素（「选择块」那颗按钮）⇒ 卡身体切到 focus 档
-  await page.locator(`${card} .collection-add`).first().focus()
-  await page.waitForTimeout(200)
-  const after = await readHeights()
+  await page.locator('#dock-right-add').click()
+  await page.waitForTimeout(120)
+  const gallery = await page.evaluate(() => ({
+    labels: [...document.querySelectorAll('.layer .layer-item')].map((el) => el.textContent ?? ''),
+  }))
   assert(
-    after.height > before.height,
-    `聚焦后卡应变高（两个高度真的在起作用）：${JSON.stringify({ before, after })}`,
+    !gallery.labels.some((t) => t.includes('收藏')),
+    `画廊不该有「收藏」：${JSON.stringify(gallery.labels)}`,
   )
-
-  /**
-   * 切档**不改模型**：高度是视图状态（与折叠态同一条口径），不是块上的字段。
-   * 判据是「块数不变 ＋ 卡里画出的条目行数不变」——`_items` 不在诊断面上，
-   * 但「画出来的行数」正是它的一处投影，且顺手钉住了「长开之后内容也还在」。
-   */
-  const snapModel = () =>
-    page.evaluate((sel) => ({
-      count: window.__qua.allBlocks().length,
-      rows: document.querySelectorAll(`${sel} .collection-row`).length,
-    }), card)
-  const model = await snapModel()
-  // 让焦点离开（点卡头）⇒ 收回静止档
-  await page.locator(`${card} .dock-card-head`).first().click()
-  await page.waitForTimeout(250)
-  const modelAfter = await snapModel()
-  const shrunk = await readHeights()
-  assert(
-    modelAfter.count === model.count && modelAfter.rows === model.rows,
-    `切高度档不该改模型：${JSON.stringify({ model, modelAfter })}`,
-  )
-  assert(shrunk.height <= before.height + 1, `焦点离开后应收回静止档：${JSON.stringify({ before, shrunk })}`)
 
   await ctx.close()
-  return `静止 ${before.height}px → 聚焦 ${after.height}px；块数与 _items 都没变`
+  return 'core.collection/* ⇒ handled=false；画廊无收藏'
 })
 
 /**
@@ -12861,9 +12575,16 @@ await check('T145c 行内对象转文本：引用/行内标签/外链都能取�
     const hostId = window.__qua.blocks()[0].id
     window.__qua.focusBlock(hostId, 0)
     const ed = window.__qua.__editor
+    // 新实例的落点要带 tagId（实例名与标签名是两个名字，落点层不许按名重解析）
+    // ⇒ 先落一个「新建标签」物化标签块，再用它的 id 落一次「新建实例」
     ed.editBlock(hostId, 0, 0, '#')
     ed.placeCaret(hostId, 1)
-    const ok = ed.acceptTrigger({ ch: '#', pick: { kind: 'newObj', name: '对象测试标签' } })
+    ed.acceptTrigger({ ch: '#', pick: { kind: 'newTag', name: '对象测试标签', action: 'inline' } })
+    const tagId = ed.store.blocks.find((x) => (x.props?._aliases ?? []).includes('对象测试标签'))?.id ?? ''
+    const len = ed.store.find(hostId).content.length
+    ed.editBlock(hostId, len, len, '#')
+    ed.placeCaret(hostId, len + 1)
+    const ok = ed.acceptTrigger({ ch: '#', pick: { kind: 'newObj', name: '对象测试标签', tagId } })
     const atom = window.__qua.atoms().filter((a) => a.blockId === hostId && a.kind === 'tag').at(-1)
     return { ok, hostId, runId: atom?.id ?? '', recordId: atom?.target?.id ?? '' }
   })
@@ -14761,6 +14482,40 @@ await check('T169 重开之后露面还在：首帧也要有身体（事件表�
   return `重开后露面仍在，身体 ${after.rows} 行（首帧重画生效）`
 })
 
+await check('T207 嵌入选择器：选中目标 ⇒ 露面行当场出现在正文（选择完成必须走命令那条会重排的路）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await buildEmbedTree(page)
+  // 走**选择器**这条入口：不带 targetId ⇒ 打开「嵌入哪一块？」候选
+  await page.evaluate((host) => window.__qua.invoke('core.embed/insert', { blockId: host }), fx.host)
+  await page.waitForFunction(() => document.querySelectorAll('.layer-item').length > 0, null, { timeout: 2000 })
+  const pickable = await page.evaluate(
+    () => [...document.querySelectorAll('.layer-item .layer-label')].filter((e) => e.textContent === '源').length,
+  )
+  assert(pickable === 1, `候选里只有一行「源」：${pickable}`)
+  // 点候选行（行在 mousedown 上选中）⇒ 默认分发按行声明的命令把插入跑完
+  await page.evaluate(() => {
+    const item = [...document.querySelectorAll('.layer-item')].find(
+      (r) => r.querySelector('.layer-label')?.textContent === '源',
+    )
+    item.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForTimeout(250)
+  // 关键断言：**不做任何聚焦/重开**，露面行已经紧跟着宿主行出现在正文里
+  const st = await embedState(page)
+  assert(st.embedId !== '', '选中后露面行当场出现（不等下一次重画）')
+  assert(st.state === 'ok', `源还在 ⇒ 状态 ok：${st.state}`)
+  assert(st.rows.length === 3, `镜像里是源＋两个子块：${JSON.stringify(st.rows)}`)
+  const next = await page.evaluate((host) => {
+    const hostEl = document.querySelector(`.blk[data-block-id="${host}"]`)
+    return { nextIsEmbed: hostEl?.nextElementSibling?.dataset.embed === '1' }
+  }, fx.host)
+  assert(next.nextIsEmbed, '露面行落在宿主块的下一行')
+
+  await ctx.close()
+  return `选择器选「源」⇒ 露面行当场落在宿主下一行，身体 ${st.rows.length} 行`
+})
+
 await check('T170 粘贴为…的二级菜单不是空的：when 里的键必须真实存在', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
@@ -15975,112 +15730,6 @@ await check('T189 提升：local → 查询页（块 +1，栏变 linked）；转
   return `提升：块 ${before}→${promoted.blocks}、栏变 linked；转本地：块数不变、栏变 local`
 })
 
-/**
- * **收藏（items 源）**：一批**引用**，不是一批被搬进来的东西。
- *
- * 三件事各钉一个静默错误：默认看法是列表（不是大纲）、摘一行不删块、
- * 顺序＝`_items` 顺序（拖动改序只写这一格）。
- */
-await check('T185 收藏：默认列表；加/摘一行不删块；顺序跟 `_items` 走', async () => {
-  const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__qua.quiet(true))
-  await openFirstPage(page)
-  await page.waitForTimeout(300)
-
-  const made = await page.evaluate(() => {
-    const fav = window.__qua.invoke('core.collection/create', { name: '冒烟收藏' })
-    void fav
-    // 找一个现成的集合块（`create` 会把它放进槽里，这里直接按类型找）
-    const flat = []
-    const walk = (list) => {
-      for (const b of list) {
-        flat.push(b)
-        walk(b.children)
-      }
-    }
-    walk(window.__qua.__editor.store.blocks)
-    // ⚠️ 按**名字**找刚建的那一个：种子里本来就有一份收藏演示（按类型找会拿到它）
-    const box = flat.find(
-      (b) => b.props?._type === 'core/collection-widget' && (b.props?._aliases ?? []).includes('冒烟收藏'),
-    )
-    const items = flat.filter((b) => b.id !== box?.id && b.props?._type === undefined && b.children.length === 0).slice(0, 2)
-    if (!box) return { id: '', items: [] }
-    for (const it of items) window.__qua.invoke('core.collection/add', { collectionId: box.id, blockId: it.id })
-    window.__qua.invoke('core.block/focus-block', { blockId: box.id })
-    return { id: box.id, items: items.map((x) => x.id) }
-  })
-  assert(made.id !== '', '前置：应能建出一个收藏块')
-  assert(made.items.length === 2, `前置：应有两条可收藏的块：${JSON.stringify(made)}`)
-  await page.waitForTimeout(500)
-
-  // ① 默认看法是**列表**（不是大纲：一批手选的引用不是一棵树）
-  const listed = await page.evaluate(() => ({
-    rows: [...document.querySelectorAll('.vl-row')].map((r) => r.dataset.blockId ?? ''),
-    outline: document.querySelectorAll('.queryview-outline:not([hidden])').length,
-    add: Boolean(document.querySelector('.vl-add')),
-  }))
-  assert(listed.rows.length === 2, `收藏块打开就是列表（2 行）：${JSON.stringify(listed)}`)
-  assert(listed.outline === 0, `items 源没有大纲分支：${JSON.stringify(listed)}`)
-  assert(listed.add, '列表要能「加一条」（盘子里要能再放东西）')
-
-  // ② 摘一行：只摘引用，**块还在**
-  const before = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
-  await page.locator(`.vl-row[data-block-id="${made.items[0]}"] .vl-x`).click()
-  await page.waitForTimeout(400)
-  const afterRemove = await page.evaluate((id) => {
-    const box = window.__qua.__editor.store.find(id)
-    return {
-      items: Array.isArray(box?.props?._items) ? box.props._items.length : 0,
-      blocks: window.__qua.snapshot().totalBlocks,
-      rows: document.querySelectorAll('.vl-row').length,
-    }
-  }, made.id)
-  assert(afterRemove.items === 1, `摘掉一条引用：${JSON.stringify(afterRemove)}`)
-  assert(afterRemove.rows === 1, `列表跟着少一行：${JSON.stringify(afterRemove)}`)
-  assert(afterRemove.blocks === before, `摘引用**不删块**：${before} → ${afterRemove.blocks}`)
-
-  // ③ 顺序＝`_items` 顺序（拖动改序只写这一格）
-  await page.evaluate(
-    ({ id, items }) => window.__qua.invoke('core.collection/add', { collectionId: id, blockId: items[0] }),
-    { id: made.id, items: made.items },
-  )
-  await page.waitForTimeout(350)
-  const order = () =>
-    page.evaluate(() => [...document.querySelectorAll('.vl-row')].map((r) => r.dataset.blockId ?? ''))
-  const two = await order()
-  assert(two.length === 2, `加回来之后两行：${JSON.stringify(two)}`)
-  await page.evaluate(
-    // `to` 是**原列表**里的落点（先摘再插，往后拖时自己减一）⇒ 从 0 挪到末尾要写 2
-    ({ id, blockId }) => window.__qua.invoke('core.collection/move', { collectionId: id, blockId, to: 2 }),
-    { id: made.id, blockId: two[0] },
-  )
-  await page.waitForTimeout(400)
-  const moved = await order()
-  assert(moved[0] === two[1] && moved[1] === two[0], `顺序跟着 _items 变：${JSON.stringify([two, moved])}`)
-  const stored = await page.evaluate((id) => {
-    const box = window.__qua.__editor.store.find(id)
-    return Array.isArray(box?.props?._items) ? box.props._items : []
-  }, made.id)
-  assert(JSON.stringify(stored) === JSON.stringify(moved), `模型里的 _items 与屏幕上一致：${JSON.stringify([stored, moved])}`)
-
-  // ④ 引用指向的块被删 ⇒ 引用**保留**、那一行不出（块恢复后自己回来）
-  const ghost = moved[0]
-  await page.evaluate((id) => window.__qua.invoke('core.view/delete-row', { rowId: id }), ghost)
-  await page.waitForTimeout(450)
-  const withGhost = await page.evaluate((id) => {
-    const box = window.__qua.__editor.store.find(id)
-    return {
-      items: Array.isArray(box?.props?._items) ? box.props._items : [],
-      rows: [...document.querySelectorAll('.vl-row')].map((r) => r.dataset.blockId ?? ''),
-    }
-  }, made.id)
-  assert(withGhost.items.includes(ghost), '块被删了，**引用要留着**（它恢复后自己回来）')
-  assert(!withGhost.rows.includes(ghost), `解析不到的那条不出行：${JSON.stringify(withGhost)}`)
-  assert(withGhost.rows.length === withGhost.items.length - 1, `其余照常显示：${JSON.stringify(withGhost)}`)
-
-  await ctx.close()
-  return `2 行 → 摘一条仍 ${afterRemove.blocks} 块 → 顺序跟 _items；删块后引用留着、那一行不出`
-})
 
 /**
  * **四种布局**（看板／画廊／日历／导图）：换看法不重查；看板拖卡写的是**属性**。
@@ -16938,6 +16587,119 @@ await check('T206 右键块标开菜单：菜单项打在**块标绑定的那一
   return `光标在 A、右键 B 块标：切换待办落在 B 上；A 不动；光标收在 B`
 })
 
+await check('T208 两段式实例选择：⇧↵ 进成员搜索，新实例的名字由输入文本给（一笔事务）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  // 前置：标签「玩具」＋两条成员（一条含 switch 字样、一条不含），标签块物化在顶层
+  const setup = await page.evaluate(() => {
+    const inv = (name, args = {}) => window.__qua.invoke(name, args)
+    const sel = () => window.__qua.__editor.sel?.aBlock ?? ''
+    inv('core.page/new')
+    const page0 = window.__qua.__editor.doc.roots[0]
+    inv('core.editor/insert-block', { text: 'switch 主机' })
+    const m1 = sel()
+    inv('core.tags/add', { blockId: m1, name: '玩具' })
+    inv('core.editor/insert-block', { text: '塞尔达传说' })
+    const m2 = sel()
+    inv('core.tags/add', { blockId: m2, name: '玩具' })
+    inv('core.editor/insert-block', { text: '占位' })
+    const host = sel()
+    return { host, toyTag: window.__qua.__editor.store.blocks.find((b) => (b.props?._aliases ?? []).includes('玩具'))?.id ?? '' }
+  })
+  assert(setup.toyTag !== '', '前置：玩具标签块应在')
+  await page.evaluate((h) => window.__qua.focusBlock(h, 9999), setup.host)
+  await page.keyboard.type(' #玩具')
+  await page.waitForTimeout(200)
+  assert((await page.locator('.layer-item').count()) > 0, '前置：# 应弹出检索浮层')
+
+  // ① ⇧↵（当前行无论是成员行还是标签行）⇒ 第二段：成员搜索
+  await page.keyboard.press('Shift+Enter')
+  await page.waitForTimeout(250)
+  const stage = await page.evaluate(() => ({
+    title: document.querySelector('.layer .layer-head')?.textContent ?? '',
+    hasInput: Boolean(document.querySelector('.layer .layer-input')),
+    focused: document.activeElement?.className?.includes('layer-input') ?? false,
+    rows: [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent),
+  }))
+  assert(stage.title.includes('玩具') && stage.title.includes('成员'), `第二段标题要说是谁的成员：${stage.title}`)
+  assert(stage.focused, '第二段焦点应在浮层自己的输入框（查询词不进正文）')
+  assert(stage.rows.length === 2, `两条成员都应列出：${JSON.stringify(stage.rows)}`)
+
+  // ② 输入 switch 2：成员无命中，出现「新建实例」行，名字就是输入文本
+  await page.keyboard.type('switch 2')
+  await page.waitForTimeout(200)
+  const filtered = await page.evaluate(() => ({
+    rows: [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent),
+  }))
+  assert(
+    filtered.rows.length === 1 && filtered.rows[0].includes('新建实例') && filtered.rows[0].includes('switch 2'),
+    `无命中 ⇒ 只剩新建行，名字＝输入文本：${JSON.stringify(filtered.rows)}`,
+  )
+
+  // ③ ↵ 新建：同一笔事务（抹 #玩具 ＋ 顶层建记录＋归玩具 ＋ 插 #switch 2 提及）
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(250)
+  const after = await page.evaluate(
+    ({ host, toyTag }) => {
+      const ed = window.__qua.__editor
+      const plain = (b) => (b ? b.content.map((r) => (r.t === 'text' ? r.v : r.t === 'ref' ? `<${r.flavor ?? ''}${r.label}>` : r.t)).join('') : '')
+      const hostBlock = ed.store.find(host)
+      const refRun = hostBlock?.content.find((r) => r.t === 'ref')
+      const record = ed.store.blocks.find((b) => b !== hostBlock && plain(b) === 'switch 2')
+      return {
+        overlayClosed: !document.querySelector('.layer'),
+        text: plain(hostBlock),
+        refLabel: refRun?.label ?? '',
+        refFlavor: refRun?.flavor ?? '',
+        recordText: record ? plain(record) : '',
+        recordTags: record?.props?._tags ?? [],
+        recordTopLevel: record ? ed.store.blocks.some((b) => b.id === record.id) : false,
+        hostTags: hostBlock?.props?._tags ?? [],
+        ops: window.__qua.lastOps().map((o) => o.e),
+      }
+    },
+    { host: setup.host, toyTag: setup.toyTag },
+  )
+  assert(after.overlayClosed, '落点后浮层应关')
+  assert(after.refFlavor === '#', `提及要带 # 风味：${JSON.stringify(after)}`)
+  assert(after.refLabel === 'switch 2', `引用名字＝输入文本：${after.refLabel}`)
+  assert(after.text.includes('<#switch 2>'), `正文应出现 #switch 2 原子：${after.text}`)
+  assert(after.recordText === 'switch 2' && after.recordTopLevel, `记录住森林顶层：${JSON.stringify({ recordText: after.recordText, recordTopLevel: after.recordTopLevel })}`)
+  assert(after.recordTags.includes(setup.toyTag), '记录归到玩具')
+  assert(!after.hostTags.includes(setup.toyTag), '提及不写宿主归属（提及 ≠ 归类）')
+  assert(after.ops.includes('block') && after.ops.includes('prop'), `一笔事务应同时含块与属性 op：${JSON.stringify(after.ops)}`)
+
+  // ④ Esc 退出第二段：正文 #玩具 原样保留，继续打字自动重开第一段
+  await page.evaluate((h) => window.__qua.focusBlock(h, 9999), setup.host)
+  await page.keyboard.type(' #玩具')
+  await page.waitForTimeout(200)
+  await page.keyboard.press('Shift+Enter')
+  await page.waitForTimeout(250)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  const esc = await page.evaluate((h) => {
+    const ed = window.__qua.__editor
+    const b = ed.store.find(h)
+    const plain = (x) => x.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
+    return { closed: !document.querySelector('.layer'), text: plain(b) }
+  }, setup.host)
+  assert(esc.closed, 'Esc 应关掉第二段')
+  assert(esc.text.includes('#玩具'), `Esc 后触发词原样保留：${JSON.stringify(esc)}`)
+
+  // ⑤ 选中已有成员：↵ 直接插那条记录的提及（第二段的成员行落点与第一段同形）
+  await page.keyboard.type('x')
+  await page.waitForTimeout(200)
+  const reopened = await page.evaluate(() => document.querySelectorAll('.layer-item').length)
+  assert(reopened > 0, '继续打字应重开第一段（触发判据还活着）')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(150)
+
+  await ctx.close()
+  return `⇧↵ 进成员搜索（2 成员）；switch 2 新建为顶层记录归玩具，正文插 #switch 2；Esc 回到打字`
+})
+
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
   await writeFile(REPORT, JSON.stringify({ total: seq, cases: results, known: known.map((r) => r.name) }))
@@ -16949,8 +16711,6 @@ try {
   console.error(`关浏览器失败（结果已写完，不影响判定）：${e?.message ?? e}`)
 }
 if (server) server.close()
-
-
 
 
 if (!REPORT) {

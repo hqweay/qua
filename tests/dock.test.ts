@@ -90,18 +90,16 @@ test('dock: pin 缺省跟着进入动作走——拖入（钉）＝常驻，打�
   assert.equal(pinDefaultFor('view'), false)
 })
 
-test('dock: 重启清理——非 pin 的块窗口卡清掉，pin 的与组件块保留', () => {
+test('dock: 重启清理——非 pin 的块窗口卡清掉，pin 的保留', () => {
   const cards = [
     { kind: 'block', block: 'ephemeral' },
     { kind: 'block', block: 'pinned' },
-    { kind: 'block', block: 'widget' },
     { kind: 'derived', card: 'backrefs' },
     { kind: 'cmd', command: 'core.page/new' },
   ] as const
-  const out = pruneEphemeralWindows(cards, { pinned: true }, (id) => id === 'widget')
+  const out = pruneEphemeralWindows(cards, { pinned: true })
   assert.deepEqual(out, [
     { kind: 'block', block: 'pinned' },
-    { kind: 'block', block: 'widget' },
     { kind: 'derived', card: 'backrefs' },
     { kind: 'cmd', command: 'core.page/new' },
   ])
@@ -113,18 +111,16 @@ test('dock: 重启清理——全 pin 时原样返回（含派生卡/命令卡�
     { kind: 'derived', card: 'calendar' },
     { kind: 'cmd', command: 'x' },
   ] as const
-  assert.deepEqual(pruneEphemeralWindows(cards, { b1: true }, () => false), [...cards])
+  assert.deepEqual(pruneEphemeralWindows(cards, { b1: true }), [...cards])
 })
 
-test('dock: 重启清理——空 pin 表 ⇒ 只剩家具（派生卡/命令卡/组件块）', () => {
+test('dock: 重启清理——空 pin 表 ⇒ 只剩家具（派生卡/命令卡）', () => {
   const cards = [
     { kind: 'block', block: 'b1' },
-    { kind: 'block', block: 'w' },
     { kind: 'derived', card: 'calendar' },
     { kind: 'cmd', command: 'x' },
   ] as const
-  assert.deepEqual(pruneEphemeralWindows(cards, {}, (id) => id === 'w'), [
-    { kind: 'block', block: 'w' },
+  assert.deepEqual(pruneEphemeralWindows(cards, {}), [
     { kind: 'derived', card: 'calendar' },
     { kind: 'cmd', command: 'x' },
   ])

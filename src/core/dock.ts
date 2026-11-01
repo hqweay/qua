@@ -46,17 +46,14 @@ export function pinDefaultFor(action: WindowEntryAction): boolean {
  * 重启清理：**非 pin 的块窗口卡不留到下一次启动**（窗口是「打开来看」的临时上下文，
  * 重启还全在，攒几轮就是一列没人看的旧窗口）；pin 了的是用户明说要留的，保留。
  *
- * 组件块（类型声明了 widget）、派生卡、命令小卡是**槽的家具**——布局的一部分，
- * 不属于「打开的东西」，一律不受影响。组件块由调用方传判据（这里不依赖块模型）。
+ * 派生卡、命令小卡是**槽的家具**——布局的一部分，不属于「打开的东西」，一律不受影响。
  */
 export function pruneEphemeralWindows(
   cards: readonly DockEntry[],
   pinned: Readonly<Record<string, true>>,
-  isWidget: (blockId: string) => boolean,
 ): DockEntry[] {
   return cards.filter((e) => {
     if (e.kind !== 'block') return true
-    if (isWidget(e.block)) return true
     return pinned[dockKey(e)] === true
   })
 }
