@@ -237,6 +237,29 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   'core.editor/set-anchor': (a, app) => app.ed.setRunAnchor(S(a.atomId), S(a.text)),
 
   /**
+   * **改一枚外链**：显示文字与地址一起写。
+   *
+   * 地址先过白名单（与插入、打开共用 `core/link.ts`）：非法地址不写模型，
+   * 但**给一句话**——静默拒绝会让用户以为自己没按到。
+   */
+  'core.editor/set-link': (a, app) => {
+    const id = S(a.atomId)
+    if (!id) return false
+    const hit = app.ed.findRun(id)
+    if (!hit || hit.run.t !== 'link') return false
+    const chk = checkExternalUrl(a.url === undefined ? hit.run.url : S(a.url))
+    if (!chk.ok) {
+      app.toast(rejectText(chk), 'warn')
+      return true
+    }
+    const text = a.text === undefined ? hit.run.v : S(a.text)
+    return app.ed.setRunLink(id, { url: chk.url, text })
+  },
+
+  /** 行内对象 → 纯文本：字留在原处，取消的是它作为一个对象的身份 */
+  'core.editor/atom-to-text': (a, app) => app.ed.runToText(S(a.atomId)),
+
+  /**
    * 打开一枚外链：`atomId` ⇒ 去正文里读它**此刻**的 url（run 是唯一事实源，
    * 浮层上显示的那一份是它的投影）。点与浮层的「打开」按钮共用这一条命令。
    */

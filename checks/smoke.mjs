@@ -12745,6 +12745,146 @@ await check('T145b 右键行内对象：引用/标签各有自己的菜单，锚
   return `右键引用 → 行内对象菜单（改锚文本直落输入框／清除／删除）；右键 chip → 摘归属（_tags 清零、chip 消失）`
 })
 
+await check('T145c 行内对象转文本：引用/行内标签/外链都能取消对象身份；外链可改文字与地址', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+  const pickRow = async (label) => {
+    await page.evaluate((text) => {
+      const item = [...document.querySelectorAll('.layer-item')].find((el) => el.textContent?.includes(text))
+      item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    }, label)
+    await page.waitForTimeout(180)
+  }
+  const openMenuAt = (selector) =>
+    page.evaluate((sel) => {
+      const el = document.querySelector(sel)
+      if (!el) return { rows: [], missing: true }
+      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 140 }))
+      return { rows: [...document.querySelectorAll('.layer-item .layer-label')].map((x) => x.textContent), missing: false }
+    }, selector)
+
+  // ① 普通引用 → 文本：取它**此刻显示的名字**，原子消失、字留下
+  const ref = await seedPageRef(page)
+  const refLabel = await page.evaluate(
+    (id) => window.__qua.atoms().find((a) => a.id === id)?.label ?? '',
+    ref.runId,
+  )
+  const refMenu = await openMenuAt(`#editor [data-atom-id="${ref.runId}"]`)
+  assert(refMenu.rows.includes('转换为文本'), `引用菜单应有「转换为文本」：${JSON.stringify(refMenu.rows)}`)
+  await pickRow('转换为文本')
+  const refText = await page.evaluate(
+    ({ id, runId }) => ({
+      atom: document.querySelector(`#editor [data-atom-id="${runId}"]`) !== null,
+      text: window.__qua.blocks().find((b) => b.id === id)?.text ?? '',
+      allText: window.__qua.__editor.store.find(id).content.every((r) => r.t === 'text'),
+    }),
+    { id: ref.blockId, runId: ref.runId },
+  )
+  assert(refText.atom === false, `转文本后不应再有原子：${JSON.stringify(refText)}`)
+  assert(refText.allText, `整段应只剩 text run：${JSON.stringify(refText)}`)
+  assert(refText.text.includes(refLabel), `字应留在原处（${refLabel}）：${JSON.stringify(refText)}`)
+
+  // ② 行内 # 提及 → 文本：保留 `#名字`（`#` 是它此刻的写法）
+  const tag = await page.evaluate(() => {
+    const hostId = window.__qua.blocks()[0].id
+    window.__qua.invoke('core.tags/add', { blockId: hostId, name: '转文本标签' })
+    const b = window.__qua.__editor.store.blocks.find(
+      (x) => x.props?._lists?.includes('tag') && x.props?._aliases?.[0] === '转文本标签',
+    )
+    window.__qua.focusBlock(hostId, 0)
+    const runId = window.__qua.__editor.insertRef({ to: b.id, label: '转文本标签', flavor: '#' })
+    return { hostId, runId }
+  })
+  await page.waitForTimeout(120)
+  await openMenuAt(`#editor [data-atom-id="${tag.runId}"]`)
+  await pickRow('转换为文本')
+  const tagText = await page.evaluate(
+    ({ id, runId }) => ({
+      atom: document.querySelector(`#editor [data-atom-id="${runId}"]`) !== null,
+      text: window.__qua.blocks().find((b) => b.id === id)?.text ?? '',
+    }),
+    { id: tag.hostId, runId: tag.runId },
+  )
+  assert(tagText.atom === false, `行内标签转文本后不应再有原子：${JSON.stringify(tagText)}`)
+  assert(tagText.text.includes('#转文本标签'), `应留下 \`#名字\` 的字：${JSON.stringify(tagText)}`)
+
+  // ③ 外链：右键「编辑链接…」⇒ 同一个详情浮层里的两个输入框；显示文字与地址一起改
+  const link = await page.evaluate(() => {
+    const hostId = window.__qua.blocks()[0].id
+    window.__qua.focusBlock(hostId, 0)
+    window.__qua.invoke('core.editor/insert-link', { url: 'https://example.com/old', text: '旧名字' })
+    const atom = window.__qua.atoms().filter((a) => a.blockId === hostId && a.kind === 'link').at(-1)
+    return { hostId, runId: atom?.id ?? '' }
+  })
+  assert(link.runId, '前置：外链应插进正文')
+  const linkMenu = await openMenuAt(`#editor [data-atom-id="${link.runId}"]`)
+  assert(linkMenu.rows.includes('编辑链接…'), `外链菜单应有编辑入口：${JSON.stringify(linkMenu.rows)}`)
+  await pickRow('编辑链接…')
+  const linkFields = await page.evaluate((runId) => {
+    const text = document.querySelector(`.popover [data-link-text="${runId}"]`)
+    const url = document.querySelector(`.popover [data-link-url="${runId}"]`)
+    return { text: text?.value ?? null, url: url?.value ?? null, focused: document.activeElement?.dataset?.linkText === runId }
+  }, link.runId)
+  assert(linkFields.text === '旧名字' && linkFields.url === 'https://example.com/old', `浮层应预填当前值：${JSON.stringify(linkFields)}`)
+  assert(linkFields.focused, `右键编辑应直落输入框：${JSON.stringify(linkFields)}`)
+  await page.locator(`.popover [data-link-text="${link.runId}"]`).fill('新名字')
+  await page.locator(`.popover [data-link-url="${link.runId}"]`).fill('https://example.com/new')
+  await page.locator(`.popover form[data-link-for="${link.runId}"] button[type="submit"]`).click()
+  await page.waitForTimeout(180)
+  const linkAfter = await page.evaluate(
+    ({ id, runId }) => {
+      const r = window.__qua.__editor.store.find(id).content.find((x) => x.id === runId)
+      return { v: r?.v, url: r?.url, dom: document.querySelector(`#editor [data-atom-id="${runId}"]`)?.textContent ?? '' }
+    },
+    { id: link.hostId, runId: link.runId },
+  )
+  assert(linkAfter.v === '新名字' && linkAfter.url === 'https://example.com/new', `两个键都应写回：${JSON.stringify(linkAfter)}`)
+  assert(linkAfter.dom.includes('新名字'), `行内应显示新文字：${linkAfter.dom}`)
+
+  // ④ 外链 → 文本：留下显示文字，链接身份消失
+  await page.keyboard.press('Escape')
+  const linkMenu2 = await openMenuAt(`#editor [data-atom-id="${link.runId}"]`)
+  assert(linkMenu2.rows.includes('转换为文本'), `外链菜单也应有「转换为文本」：${JSON.stringify(linkMenu2.rows)}`)
+  await pickRow('转换为文本')
+  const linkText = await page.evaluate(
+    ({ id, runId }) => ({
+      atom: document.querySelector(`#editor [data-atom-id="${runId}"]`) !== null,
+      text: window.__qua.blocks().find((b) => b.id === id)?.text ?? '',
+    }),
+    { id: link.hostId, runId: link.runId },
+  )
+  assert(linkText.atom === false, `外链转文本后不应再有原子：${JSON.stringify(linkText)}`)
+  assert(linkText.text.includes('新名字'), `应留下显示文字：${JSON.stringify(linkText)}`)
+
+  // ⑤ 行内实例（obj）：右键「配置属性…」⇒ 打开**记录块的字段卡**（值写记录，不写宿主）
+  const obj = await page.evaluate(() => {
+    const hostId = window.__qua.blocks()[0].id
+    window.__qua.focusBlock(hostId, 0)
+    const ed = window.__qua.__editor
+    ed.editBlock(hostId, 0, 0, '#')
+    ed.placeCaret(hostId, 1)
+    const ok = ed.acceptTrigger({ ch: '#', pick: { kind: 'newObj', name: '对象测试标签' } })
+    const atom = window.__qua.atoms().filter((a) => a.blockId === hostId && a.kind === 'tag').at(-1)
+    return { ok, hostId, runId: atom?.id ?? '', recordId: atom?.target?.id ?? '' }
+  })
+  assert(obj.ok && obj.runId && obj.recordId, `前置：应物化一条实例记录并插入提及：${JSON.stringify(obj)}`)
+  const objMenu = await openMenuAt(`#editor [data-atom-id="${obj.runId}"]`)
+  assert(objMenu.rows.includes('配置属性…'), `实例菜单应有配置入口：${JSON.stringify(objMenu.rows)}`)
+  await pickRow('配置属性…')
+  const fieldCard = await page.evaluate(
+    (recordId) => ({
+      card: document.querySelector(`.popover [data-obj-fields-of="${recordId}"]`) !== null,
+      title: document.querySelector('.popover h4')?.textContent ?? '',
+    }),
+    obj.recordId,
+  )
+  assert(fieldCard.card, `应打开这条记录的字段卡（data-obj-fields-of=记录 id）：${JSON.stringify(fieldCard)}`)
+  assert(fieldCard.title.includes('对象测试标签'), `卡片标题应是这条记录：${JSON.stringify(fieldCard)}`)
+
+  await ctx.close()
+  return `引用→名字、#提及→#名字、外链→显示文字；外链两键一次写回（旧值预填、右键直落输入框）；实例右键直开记录字段卡`
+})
+
 await check('T146 锚文本：目标被删 ⇒ dangling 仍显示 anchor（`anchor ?? label`，不是空白）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)

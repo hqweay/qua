@@ -10,7 +10,7 @@ import './styles.css'
 import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  isWidgetBlock, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { canWriteText } from './core/types.ts'
-import { hasTag } from './core/tags.ts'
+import { hasTag, tagIdsOf } from './core/tags.ts'
 import { checkExternalUrl, rejectText } from './core/link.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
@@ -644,6 +644,8 @@ const panelDeps: PanelDeps = {
    * 走命令而不是直接调编辑器，是为了让 HTTP／CLI 面也能改它，且撤销与落盘照旧。
    */
   setAnchor: (runId, text) => void registry.invoke('core.editor/set-anchor', { atomId: runId, text }, 'popover'),
+  /** 外链的显示文字与地址一起写（一条命令、一条事务、一次撤销） */
+  setLink: (runId, text, url) => void registry.invoke('core.editor/set-link', { atomId: runId, text, url }, 'popover'),
   /**
    * **打开外链**：与点正文里那一枚走**同一条命令**（`core.link/open`）。
    * 两处入口不会分叉成「一个能开、一个不能开」。
@@ -672,12 +674,23 @@ let objFieldDeps: ObjFieldDeps | undefined
  *
  * `el.isConnected === false` ⇒ 返回 `null`，浮层自己会关掉（指向不存在的东西比没有更糟）。
  */
-const anchorOf = (el: HTMLElement) => () => (el.isConnected ? el.getBoundingClientRect() : null)
+const anchorOf = (el: HTMLElement) => () => {
+  /**
+   * 锚点元素可能已经被**重画**摘掉（改锚文本／改链接都会 `renderBlock`，原子是重建的）。
+   * 此时按 atom id 找**当前那一枚**：同一个浮层还在改，不该因为一次写回就自己关掉。
+   * 找不到才返回 `null`（目标真的没了 —— 那时关掉浮层是对的）。
+   */
+  const live =
+    el.isConnected || !el.dataset.atomId
+      ? el
+      : document.querySelector<HTMLElement>(`[data-atom-id="${el.dataset.atomId}"]`)
+  return live?.isConnected ? live.getBoundingClientRect() : null
+}
 
 const showAtomPopover = (
   a: RunWithId,
   anchor: DOMRect | null | (() => DOMRect | null),
-  opts?: { focusAnchor?: boolean },
+  opts?: { focus?: 'anchor' | 'link' },
 ): void => panelPopover(panelDeps, a, anchor, objFieldDeps, opts)
 
 /**
@@ -802,6 +815,8 @@ const openDrawerFor = (kind: PanelKind): void => panelDrawer(panelDeps, kind)
  * 但「命令只回答模型动作」这条是同一件事的边界）。写动作仍然全部走命令。
  */
 const ATOM_ROW_EDIT_ANCHOR = 'atom/edit-anchor'
+const ATOM_ROW_EDIT_LINK = 'atom/edit-link'
+const ATOM_ROW_FIELDS = 'atom/fields'
 const ATOM_ROW_DETAILS = 'atom/details'
 
 /**
@@ -830,11 +845,15 @@ function handleAtomMenu(hit: AtomMenuHit, el: HTMLElement, rect: DOMRect): void 
     if (writable) add('atom/remove-tag', t('ui.atomMenu.removeTag'), 'core.tags/remove', { blockId: hit.blockId, tagId: hit.tagId }, 'lucide:x')
   } else if (run?.t === 'ref') {
     const isMention = run.flavor === '#'
+    const targetBlock = target ? findInForest(ws.blocks, target) : undefined
+    /** 目标是一条实例记录（带归属）⇒ 它的字段可以在这张卡里就地改（102） */
+    const isObj = targetBlock !== undefined && tagIdsOf(targetBlock).length > 0
     if (target) {
       add('atom/open', t('ui.popover.openPage'), 'core.block/focus-block', { blockId: target }, 'lucide:arrow-up-right')
       add('atom/open-dock', t('cmd.dock.open-block'), 'core.dock/open-block', { blockId: target, side: 'right' }, 'lucide:panel-right')
     }
-    if (!isMention && writable) {
+    if (isObj) rows.push({ id: ATOM_ROW_FIELDS, label: t('ui.atomMenu.fields'), icon: 'lucide:list' })
+    if (!isMention && !isObj && writable) {
       rows.push({ id: ATOM_ROW_EDIT_ANCHOR, label: t('ui.atomMenu.editAnchor'), icon: 'lucide:pencil' })
       if (run.anchor !== undefined) {
         add('atom/clear-anchor', t('ui.atomMenu.clearAnchor'), 'core.editor/set-anchor', { atomId: run.id, text: '' }, 'lucide:rotate-ccw')
@@ -845,12 +864,17 @@ function handleAtomMenu(hit: AtomMenuHit, el: HTMLElement, rect: DOMRect): void 
       add('atom/remove-tag-inline', t('ui.atomMenu.removeTag'), 'core.tags/remove', { blockId: hit.blockId, tagId: target }, 'lucide:tag')
     }
     if (writable) {
+      add('atom/to-text', t('ui.atomMenu.toText'), 'core.editor/atom-to-text', { atomId: run.id }, 'lucide:type')
       const label = isMention ? t('ui.atomMenu.removeMention') : t('ui.atomMenu.removeRef')
       add('atom/remove', label, 'core.editor/remove-atom', { atomId: run.id }, 'lucide:trash-2')
     }
   } else if (run?.t === 'link') {
     add('atom/open-link', t('ui.atomMenu.openLink'), 'core.link/open', { atomId: run.id }, 'lucide:external-link')
-    if (writable) add('atom/remove', t('ui.atomMenu.removeAtom'), 'core.editor/remove-atom', { atomId: run.id }, 'lucide:trash-2')
+    if (writable) {
+      rows.push({ id: ATOM_ROW_EDIT_LINK, label: t('ui.atomMenu.editLink'), icon: 'lucide:pencil' })
+      add('atom/to-text', t('ui.atomMenu.toText'), 'core.editor/atom-to-text', { atomId: run.id }, 'lucide:type')
+      add('atom/remove', t('ui.atomMenu.removeAtom'), 'core.editor/remove-atom', { atomId: run.id }, 'lucide:trash-2')
+    }
   } else if (run?.t === 'asset') {
     rows.push({ id: ATOM_ROW_DETAILS, label: t('ui.atomMenu.details'), icon: 'lucide:info' })
     if (writable) add('atom/remove', t('ui.atomMenu.removeAtom'), 'core.editor/remove-atom', { atomId: run.id }, 'lucide:trash-2')
@@ -867,7 +891,19 @@ function handleAtomMenu(hit: AtomMenuHit, el: HTMLElement, rect: DOMRect): void 
       if (row.id === ATOM_ROW_EDIT_ANCHOR) {
         if (run?.t !== 'ref') return
         // 与 ⌥ 点击开的是**同一个浮层**（锚文本只有一个写入口）；焦点直接落在输入框
-        showAtomPopover(run, anchorOf(el), { focusAnchor: true })
+        showAtomPopover(run, anchorOf(el), { focus: 'anchor' })
+        return
+      }
+      if (row.id === ATOM_ROW_EDIT_LINK) {
+        if (run?.t !== 'link') return
+        // 同一个详情浮层（编辑行就在里面）；焦点落在显示文字那一格
+        showAtomPopover(run, anchorOf(el), { focus: 'link' })
+        return
+      }
+      if (row.id === ATOM_ROW_FIELDS) {
+        if (run?.t !== 'ref') return
+        // 记录字段卡：与 ⌥ 点击实例是同一个浮层；值仍写记录块，不写宿主/run（102）
+        showAtomPopover(run, anchorOf(el))
         return
       }
       if (row.id === ATOM_ROW_DETAILS) {
