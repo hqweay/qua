@@ -148,7 +148,14 @@ export function canonicalSpec(spec: QuerySpec): QuerySpec {
     if ('all' in n) return { all: n.all.map(node) }
     if ('any' in n) return { any: n.any.map(node) }
     if ('not' in n) return { not: node(n.not) }
-    if ('ref' in n) return { ref: n.ref }
+    if ('ref' in n) {
+      if (typeof n.ref === 'string') return { ref: n.ref }
+      const kinds =
+        n.ref.kind === undefined
+          ? undefined
+          : [...new Set(typeof n.ref.kind === 'string' ? [n.ref.kind] : n.ref.kind)].sort()
+      return { ref: { to: n.ref.to, ...(kinds === undefined ? {} : { kind: kinds }) } }
+    }
     if ('tag' in n) return { tag: n.tag }
     if ('text' in n) return { text: n.text }
     /**

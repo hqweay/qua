@@ -17,12 +17,13 @@
  * ⚠️ 本文件零 DOM、零持久化：op 只是被**算出来**，谁来落盘由上层决定。
  */
 import { backrefBlocks, backrefsOf, type BackrefBlock, type BackrefSource } from '../backrefs.ts'
+import type { RelationEdge } from '../relations.ts'
 import { aliasesOf, DELETED_AT_PROP, hasList, isDeleted, type Block } from '../model.ts'
 import { findInForest, trashOf } from '../tree.ts'
 import { walkForest } from '../walk.ts'
 import { findTagByName, tagsOf as tagsOfBlock } from '../tags.ts'
 import { findJournalDay } from '../journal.ts'
-import { blockIdByAlias, indexPathOf, queryByIndex } from '../index-port.ts'
+import { blockIdByAlias, indexPathOf, queryByIndex, relationsFrom, relationsTo } from '../index-port.ts'
 import {
   allPropDefs,
   declaredFields,
@@ -220,6 +221,14 @@ export class MemoryKb implements KbClient {
 
   backrefBlocksOf(id: string): readonly BackrefBlock[] {
     return backrefBlocks({ blocks: this.store.blocks, targetId: id, index: this.store.index })
+  }
+
+  relationsTo(id: string): readonly RelationEdge[] {
+    return relationsTo(this.store.index, id)
+  }
+
+  relationsFrom(id: string): readonly RelationEdge[] {
+    return relationsFrom(this.store.index, id)
   }
 
   /* ------------------------------------------------------------ 写面 */

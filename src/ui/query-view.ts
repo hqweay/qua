@@ -87,6 +87,8 @@ const RESERVED_FIELD_LABEL: Record<string, MsgId> = {
   modified: 'ui.props.modifiedAt',
   path: 'ui.view.col.path',
   refCount: 'ui.view.col.refCount',
+  relKinds: 'ui.view.col.relKinds',
+  via: 'ui.view.col.via',
   matched: 'ui.view.col.matched',
   sharedTags: 'ui.view.col.sharedTags',
 }

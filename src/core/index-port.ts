@@ -11,18 +11,27 @@
  *    谁认领哪个名字）与**内容里指向谁**（边）——按 op 修补的正是这两部分（`applyOps`）。
  * ⚠️ 本文件零 DOM、零持久化：它只吃森林，所以能直接单测。
  */
-import { aliasesOf, ALIASES_PROP, hasList, isDeleted, LISTS_PROP, type Block } from './model.ts'
-import { refRunsOf } from './runs.ts'
+import { aliasesOf, ALIASES_PROP, hasList, isDeleted, isPropDefBlock, LISTS_PROP, type Block } from './model.ts'
 import { walkForest } from './walk.ts'
 import { normalizeAlias } from './alias.ts'
 import { journalDate, isJournal } from './journal.ts'
-import { tagIdsOf } from './tags.ts'
-import { fieldTableOf } from './props.ts'
+import { fieldTableOf, propKindOf, type PropKind } from './props.ts'
+import {
+  collectPropKinds,
+  relationEdgeKey,
+  relationEdgesOfBlock,
+  REFERENCE_KINDS,
+  type RefKind,
+  type RelationEdge,
+  type RelationKind,
+} from './relations.ts'
 import type { Op } from './kb/types.ts'
 import {
   evaluateQuery,
   firstJournal,
   isExactRoleJournal,
+  refKindsOf,
+  refTargetOf,
   resolveSelfSpec,
   usesSelf,
   type QueryEnv,
@@ -32,13 +41,13 @@ import {
 } from './query.ts'
 
 /**
- * 一份索引。六张表各答一类问题，**全是派生**：
+ * 一份索引。各表各答一类问题，**全是派生**：
  *
  * | 表 | 答什么 | 谁在用 |
  * |---|---|---|
  * | `blocks` | 这个 id 现在是哪一块、叫什么 | 引用解析（`resolveRef`） |
- * | `incoming` | 谁引用它、引用了几次 | 反链 |
- * | `tagMembers` | 谁打了这个标签（**从块上的 `_tags` 建**，同块多次只算一次） | 标签成员 |
+ * | `relations` / `outgoing` | 谁指向谁、以什么 kind | 反链、标签成员、属性引用、关系面板 |
+ * | `propKinds` | 哪些字段定义是 `ref`（决定属性值算不算关系） | 关系边提取 |
  * | `tags` / `journals` | 按名字/日期找块 | 标签解析、日记条件 |
  * | `rootOf` | 这块住在哪个顶层根 | 反链按来源根聚合 |
  * | `parentOf` | 这块的**树父**（`null` ＝ 森林顶层） | 面包屑／路径：沿父链向上 O(depth) |
@@ -47,23 +56,17 @@ export interface Index {
   /** 块 id → 块（**活引用**） */
   blocks: Map<string, Block>
   /**
-   * 入向边：targetId → (源块 id → **引用数**)。
+   * 入向关系：targetId → 指向它的边。
    *
-   * ⚠️ 只算**引用**（`[[名]]`）：标签是块级归属，不进这张表（它没有位点，也就没有边数）。
-   *    标签的成员关系在 `tagMembers`，两张表不要合并。
-   * ⚠️ 值是**计数**不是集合：反链要显示「这一页共有几处指向我」，
-   *    同一块里引用两次就是两条边。用 `Set` 会把它压成 1（行为会悄悄变）。
+   * ⚠️ 关系有 kind：`inline`／`property`／`embed`／`tag`／`tagMention`／`belongsTo`／`item`。
+   *    不要再把「标签归属」和「正文引用」合成一张无 kind 的计数表——那会让
+   *    「谁归我管」和「谁指向我」变成同一个答案。
    */
-  incoming: Map<string, Map<string, number>>
-  /**
-   * 标签成员：tagBlockId → 打这个标签的块 id。
-   *
-   * ⚠️ 与 `incoming` 分开存，是因为语义不同：一个 `[[标签块]]` 的**引用**不是「打了这个标签」。
-   *    合并成一张表会让「引用到标签块」凭空变成一条成员关系。
-   * ⚠️ 这里是**集合**：同一块打两次同一标签只算一个成员（成员关系不是次数）。
-   * ⚠️ 数据源是**块上的 `_tags`**（不是原子）：所以只有块变化才需要重算这张表。
-   */
-  tagMembers: Map<string, Set<string>>
+  relations: Map<string, RelationEdge[]>
+  /** 出向关系：sourceId → 它发出的边（同一条 `RelationEdge` 对象，用于增量重算） */
+  outgoing: Map<string, RelationEdge[]>
+  /** 字段定义 id → kind（只登记 `ref` 时用来判属性值算不算关系） */
+  propKinds: Map<string, PropKind>
   /**
    * 标签名表：规范化标签名 → 标签块 id。
    *
@@ -95,27 +98,19 @@ export interface Index {
    *    不再为每条反链／每个查询结果各走一遍整片森林。
    */
   parentOf: Map<string, string | null>
-  /**
-   * 内部簿记：引用 run id → 它此刻贡献的那条边（**不进 fingerprint**）。
-   *
-   * 为什么必须有它：`incoming` 的单位是「target → (源块 → 次数)」，不按 run id 键控——
-   * 一条引用**改了指向**时，摘掉旧边需要知道它原来指哪，而 op 只带新值。
-   * 全量重建天然有这个信息（重扫所有块的内容）；增量路径靠这张表补齐。
-   */
-  edgeByAnno: Map<string, { target: string; source: string }>
 }
 
 function emptyIndex(): Index {
   return {
     blocks: new Map(),
-    incoming: new Map(),
-    tagMembers: new Map(),
+    relations: new Map(),
+    outgoing: new Map(),
+    propKinds: new Map(),
     tags: new Map(),
     aliases: new Map(),
     journals: new Map(),
     rootOf: new Map(),
     parentOf: new Map(),
-    edgeByAnno: new Map(),
   }
 }
 
@@ -128,41 +123,62 @@ function emptyIndex(): Index {
 export function rebuild(forest: readonly Block[]): Index {
   const idx = emptyIndex()
 
-  // ① 块表 / 标签表 / 日记表 / 根表 / 成员表 / 入向边（一次先序遍历；与增量修补同一口径）。
-  //    边从块内容里的引用 run 提取——只有引用（无 flavor）；行内标签（flavor '#'）
-  //    是归属的露面，不是指向边，不进 `incoming`。
+  /**
+   * 先收定义 kind，再收边：字段定义块可能住在后面的顶层根里，
+   * 边提取时 `propKinds` 必须已经知道哪些属性是 `ref`。
+   */
+  idx.propKinds = collectPropKinds(forest)
+
+  // 块表 / 标签表 / 日记表 / 根表 / 关系边（一次先序遍历；与增量修补同一口径）。
   // ⚠️ 遍历默认跳过被删的子树（原位软删：被删的块对索引不可见）。
   for (const b of forest) indexSubtree(idx, b, b.id, null)
 
   return idx
 }
 
-/** 把一条引用累加进 `incoming`（`delta` 负值＝摘边；计数到 0 就把空壳摘干净） */
-function bump(idx: Index, target: string, source: string, delta: 1 | -1): void {
-  if (delta > 0) {
-    const perSource = idx.incoming.get(target)
-    if (perSource) perSource.set(source, (perSource.get(source) ?? 0) + 1)
-    else idx.incoming.set(target, new Map([[source, 1]]))
-    return
-  }
-  const perSource = idx.incoming.get(target)
-  if (!perSource) return
-  const n = (perSource.get(source) ?? 0) - 1
-  if (n > 0) perSource.set(source, n)
-  else {
-    perSource.delete(source)
-    if (perSource.size === 0) idx.incoming.delete(target)
-  }
+/** 把一条关系边挂进两张表（同一条对象，两个方向共用） */
+function addEdge(idx: Index, e: RelationEdge): void {
+  const byTarget = idx.relations.get(e.to)
+  if (byTarget) byTarget.push(e)
+  else idx.relations.set(e.to, [e])
+  const bySource = idx.outgoing.get(e.from)
+  if (bySource) bySource.push(e)
+  else idx.outgoing.set(e.from, [e])
 }
 
-/** 把一块内容里的引用 run 累加进 `incoming`（登记簿记，增量的旧边摘除靠它） */
-function addEdgesOfBlock(idx: Index, block: Block): void {
-  for (const r of refRunsOf(block.content)) {
-    if (r.flavor === '#') continue
-    const target = r.to
-    if (!target) continue
-    idx.edgeByAnno.set(r.id, { target, source: block.id })
-    bump(idx, target, block.id, 1)
+/** 摘掉一个源块的全部出向边（内容/属性变了就整块重算；块级边数很小） */
+function removeOutgoing(idx: Index, source: string): void {
+  const edges = idx.outgoing.get(source)
+  if (!edges || edges.length === 0) return
+  const touched = new Set<string>()
+  for (const e of edges) touched.add(e.to)
+  for (const target of touched) {
+    const list = idx.relations.get(target)
+    if (!list) continue
+    const next = list.filter((e) => e.from !== source)
+    if (next.length > 0) idx.relations.set(target, next)
+    else idx.relations.delete(target)
+  }
+  idx.outgoing.delete(source)
+}
+
+/** 重算一个块的全部出向关系（内容或任一关系型属性变了都走这里） */
+function refreshRelations(idx: Index, blockId: string): void {
+  const live = idx.blocks.get(blockId)
+  if (!live) return
+  removeOutgoing(idx, blockId)
+  for (const e of relationEdgesOfBlock(live, idx.propKinds)) addEdge(idx, e)
+}
+
+/**
+ * 全量重算关系边（只用于**低频且影响面大**的改动：字段定义的 kind 改了/定义块被删）。
+ * 正常打字/改标签/改属性只走 `refreshRelations`，成本与这一块的边数有关。
+ */
+function refreshAllRelations(idx: Index): void {
+  idx.relations.clear()
+  idx.outgoing.clear()
+  for (const b of idx.blocks.values()) {
+    for (const e of relationEdgesOfBlock(b, idx.propKinds)) addEdge(idx, e)
   }
 }
 
@@ -175,16 +191,17 @@ function addEdgesOfBlock(idx: Index, block: Block): void {
  *
  * 修补的正确性靠两件事：
  *   · **索引持有的是活引用**——「摘掉旧条目」要的旧状态，很多就记在索引自己的表里
- *     （名字表里谁认领这个名字、成员表里这块在哪些集合里），从表里反查即可，不需要 op 带旧值；
- *   · **引用边的旧指向记在 `edgeByAnno`**（见 Index 的簿记注释）——op 只带新值时从簿记摘旧边。
+ *     （名字表里谁认领这个名字、关系表里这块发过哪些边），从表里反查即可，不需要 op 带旧值；
+ *   · **关系边按源块整块重算**（`refreshRelations`）——op 只带新值时也能得到与全量一致的边，
+ *     因为边提取只读活块的内容/属性，不依赖旧边。
  *
  * 与 `rebuild` 的口径对齐点（逐条对过，改任何一边都要回头查另一边）：
  *   · 名字表：先序第一个认领者赢 ⇒ 增量加名时「表里已有人就不抢」；
  *     摘块时受影响的名字**重扫森林**找下一个认领者（被删的块无权认领）；
  *   · 日期表：rebuild 是先序**最后一个**赢 ⇒ 摘块重扫同样取最后一个；
- *   · 成员表：集合语义，同块打两次同标签只算一个；
- *   · 入向边：数据源是**原子数组**，但只算**可见源块**的——
- *     删块把「源在这个子树里」的边一起摘（恢复时随子树重建），与 rebuild 同口径。
+ *   · 成员表：`tag` 边是集合语义，同块打两次同一标签只算一个；
+ *   · 关系边：数据源是**可见源块**的内容/属性——删块把「源在这个子树里」的边一起摘
+ *     （恢复时随子树重建），与 rebuild 同口径。
  *
  * 找不到块（op 引用的 id 既不在索引也不在森林）⇒ 跳过该 op：op 序列是事实陈述，
  * 不是「必须可执行」的指令；等式测试会把任何因此产生的分叉抓出来。
@@ -209,17 +226,31 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
         break
       case 'prop':
         /**
-         * 哪个属性槽喂哪张表：地址/露面 → 名字表；归属 → 成员表；日期 → 日记表；
-         * 其余不进索引。
+         * 哪个属性槽喂哪张表：地址/露面 → 名字表；日期 → 日记表；
+         * 其余关系型属性 → 关系表（`refreshRelations` 会重算这一块的全部出向边）。
          *
          * ⚠️ **存在（`_deletedAt`）不走 `prop`**：它是 `block.exist` 这一格。
          *    曾经它确实在这里，而那时「软删」与「清除」共用一个 `block.delete`，
          *    撤销一次插入再重开会让块从回收站冒出来 —— 一个格只能有一种地址。
          */
-        if (fresh.has(op.block) && (op.name === ALIASES_PROP || op.name === LISTS_PROP || op.name === '_tags' || op.name === '_date')) break
-        if (op.name === ALIASES_PROP || op.name === LISTS_PROP) refreshTagsClaim(index, op.block, forest)
-        else if (op.name === '_tags') refreshTagMembership(index, op.block)
-        else if (op.name === '_date') refreshJournalClaim(index, op.block)
+        if (fresh.has(op.block) && (op.name === ALIASES_PROP || op.name === LISTS_PROP || op.name === '_tags' || op.name === '_date' || op.name === '_kind')) break
+        if (op.name === ALIASES_PROP || op.name === LISTS_PROP) {
+          refreshTagsClaim(index, op.block, forest)
+          refreshRelations(index, op.block)
+        } else if (op.name === '_date') {
+          refreshJournalClaim(index, op.block)
+          refreshRelations(index, op.block)
+        } else if (op.name === '_kind') {
+          /**
+           * 字段定义从/到 `ref` 时，所有使用该字段的块都要重算边。
+           * 这是低频动作（改 schema），用一次全量重算换掉「漏刷新一条边」的静默错误。
+           */
+          const def = index.blocks.get(op.block)
+          if (def && isPropDefBlock(def)) index.propKinds.set(def.id, propKindOf(def))
+          refreshAllRelations(index)
+        } else {
+          refreshRelations(index, op.block)
+        }
         break
       // `anno` 是按需物化的可引用区间，不是指向边：边只从引用 run 提取
     }
@@ -228,9 +259,9 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
 }
 
 /**
- * 块 upsert：`content` ⇒ 重算这块的指向边（引用 run 增删/改向都在内容里）；
+ * 块 upsert：`content` ⇒ 重算这块的关系边（引用 run 增删/改向都在内容里）；
  * `parent` ⇒ 挪位/新进。`blocks` 里是活引用，块自己的内容变化不用回头改表，
- * 需要动的只有**以 run id 键控的边簿记**。
+ * 需要动的只有**以源块为单位的出向边**。
  */
 function applyBlockUpsert(
   index: Index,
@@ -240,13 +271,8 @@ function applyBlockUpsert(
 ): void {
   const known = index.blocks.get(id)
   if (value.content !== undefined && known) {
-    // 摘旧边（簿记里 source 是这块的全部条目），再按新内容加回来
-    for (const [rid, edge] of [...index.edgeByAnno]) {
-      if (edge.source !== id) continue
-      bump(index, edge.target, edge.source, -1)
-      index.edgeByAnno.delete(rid)
-    }
-    addEdgesOfBlock(index, known)
+    // 内容变了 ⇒ 这一块的出向边整块重算（含正文 ref run 与 `#` 提及）
+    refreshRelations(index, id)
   }
   if (value.parent === undefined) return
   const parent = value.parent
@@ -287,6 +313,7 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[]): v
    */
   const names = new Set<string>()
   const dates = new Set<string>()
+  let droppedPropKind = false
   walkForest(
     [block],
     (b) => {
@@ -295,6 +322,7 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[]): v
         if (name !== '') names.add(name)
       }
       if (isJournal(b)) dates.add(journalDate(b))
+      if (index.propKinds.delete(b.id)) droppedPropKind = true
     },
     { includeDeleted: true },
   )
@@ -339,15 +367,12 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[]): v
     const heir = lastJournalClaimant(forest, d)
     if (heir) index.journals.set(d, heir)
   }
-  // 成员表：把退场的块从所有集合里摘掉
-  for (const members of index.tagMembers.values()) {
-    for (const bid of gone) members.delete(bid)
-  }
-  // 入向边：源在退场子树里的边一起摘（恢复时随子树重建）
-  for (const [aid, edge] of [...index.edgeByAnno]) {
-    if (!goneSet.has(edge.source)) continue
-    bump(index, edge.target, edge.source, -1)
-    index.edgeByAnno.delete(aid)
+  // 关系边：源在退场子树里的边一起摘（恢复时随子树重建）。
+  // 字段定义退场 ⇒ 所有使用它的属性值都不再算关系，走一次全量重算（低频）。
+  if (droppedPropKind) {
+    refreshAllRelations(index)
+  } else {
+    for (const bid of gone) removeOutgoing(index, bid)
   }
 }
 
@@ -417,18 +442,6 @@ function firstAddressClaimant(forest: readonly Block[], name: string): string | 
     return false
   })
   return hit
-}
-
-/** 重算一个块对**成员表**的归属（数据源是活块上的 `_tags`） */
-function refreshTagMembership(index: Index, blockId: string): void {
-  const live = index.blocks.get(blockId)
-  if (!live) return
-  for (const members of index.tagMembers.values()) members.delete(blockId)
-  for (const tagId of tagIdsOf(live)) {
-    const members = index.tagMembers.get(tagId)
-    if (members) members.add(blockId)
-    else index.tagMembers.set(tagId, new Set([blockId]))
-  }
 }
 
 /** 重算一个块对**日期表**的认领（口径与 rebuild 相同：无条件覆盖＝先序最后一个赢） */
@@ -502,10 +515,18 @@ function refreshVisibility(index: Index, blockId: string, forest: readonly Block
    */
   const rootId = parentId === null ? blockId : (index.rootOf.get(parentId) ?? blockId)
   indexSubtree(index, block, rootId, parentId)
-  // 名字/日期/成员：入场后要重新认领（被删期间它们无权认领，见 `rebuild` 的同一口径）
+  /**
+   * 恢复的子树里如果带字段定义，别处使用该字段的属性值也要重新变成关系边
+   * （它们退场时 `propKinds` 被摘掉了）。低频动作，走一次全量重算。
+   */
+  let hasPropDef = false
+  walkForest([block], (b) => {
+    if (isPropDefBlock(b)) hasPropDef = true
+  })
+  if (hasPropDef) refreshAllRelations(index)
+  // 名字/日期：入场后要重新认领（被删期间它们无权认领，见 `rebuild` 的同一口径）
   refreshTagsClaim(index, blockId, forest)
   refreshJournalClaim(index, blockId)
-  refreshTagMembership(index, blockId)
 }
 
 function reindexSubtreeRoot(index: Index, root: Block, rootId: string): void {
@@ -565,6 +586,11 @@ function walkSubtreeIncludingDeleted(root: Block): string[] {
 
 /** 把一棵子树写进索引（与 `rebuild` 同一口径：先序；`rootId` ＝ 它所在的顶层块） */
 function indexSubtree(index: Index, root: Block, rootId: string, parentId: string | null): void {
+  /**
+   * **两趟**：先把块/名字/日期/定义 kind 都写进去，再收关系边。
+   * 关系边要读 `propKinds`，而字段定义块可能就在这棵子树里、甚至排在使用者后面。
+   */
+  const visited: Block[] = []
   walkForest([root], (b, ctx) => {
     index.blocks.set(b.id, b)
     index.rootOf.set(b.id, rootId)
@@ -573,14 +599,7 @@ function indexSubtree(index: Index, root: Block, rootId: string, parentId: strin
      * 后代从走查里拿。两者只有一个来源，不另传一张父表。
      */
     index.parentOf.set(b.id, ctx.parent?.id ?? parentId)
-    // 指向边：数据源是块内容里的引用 run（可见源块，遍历口径与块表同一条）
-    addEdgesOfBlock(index, b)
-    // 标签成员（数据源是块上的 `_tags`）
-    for (const tagId of tagIdsOf(b)) {
-      const members = index.tagMembers.get(tagId)
-      if (members) members.add(b.id)
-      else index.tagMembers.set(tagId, new Set([b.id]))
-    }
+    if (isPropDefBlock(b)) index.propKinds.set(b.id, propKindOf(b))
     /**
      * 地址表：**每一个**别名都是一个地址（一个块可以有多个名字）。
      * 重复时先序第一个赢（与「先序第一个命中」同一个口径，不随机覆盖）。
@@ -598,7 +617,12 @@ function indexSubtree(index: Index, root: Block, rootId: string, parentId: strin
       const d = journalDate(b)
       if (d !== '') index.journals.set(d, b.id)
     }
+    visited.push(b)
   })
+  for (const b of visited) {
+    removeOutgoing(index, b.id)
+    for (const e of relationEdgesOfBlock(b, index.propKinds)) addEdge(index, e)
+  }
 }
 
 /* ------------------------------------------------------------ 查询 */
@@ -612,16 +636,15 @@ function indexSubtree(index: Index, root: Block, rootId: string, parentId: strin
 export function fingerprint(index: Index): string {
   const sortedKeys = (m: Map<string, unknown>): string[] => [...m.keys()].sort()
   const flat = (m: Map<string, string | null>): unknown => [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-  const counts = (m: Map<string, Map<string, number>>): unknown =>
+  const edgeMap = (m: Map<string, RelationEdge[]>): unknown =>
     [...m.entries()]
-      .map(([k, v]) => [k, [...v.entries()].sort((a, b) => a[0].localeCompare(b[0]))] as const)
+      .map(([k, edges]) => [k, edges.map(relationEdgeKey).sort()] as const)
       .sort((a, b) => a[0].localeCompare(b[0]))
-  const sets = (m: Map<string, Set<string>>): unknown =>
-    [...m.entries()].map(([k, v]) => [k, [...v].sort()] as const).sort((a, b) => a[0].localeCompare(b[0]))
   return JSON.stringify({
     blocks: sortedKeys(index.blocks),
-    incoming: counts(index.incoming),
-    tagMembers: sets(index.tagMembers),
+    relations: edgeMap(index.relations),
+    outgoing: edgeMap(index.outgoing),
+    propKinds: [...index.propKinds.entries()].sort((a, b) => a[0].localeCompare(b[0])),
     tags: flat(index.tags),
     aliases: flat(index.aliases),
     journals: flat(index.journals),
@@ -660,19 +683,68 @@ export function indexPathOf(index: Index, id: string): Block[] {
   return out.reverse()
 }
 
-/** 谁引用它（`[[名]]`）—— 反链的源块清单（标签成员见 `tagMemberIdsOf`） */
-export function incomingIds(index: Index, targetId: string): string[] {
-  return [...(index.incoming.get(targetId)?.keys() ?? [])]
+/** 指向某个目标的所有关系边（入向；UI 按 kind 过滤） */
+export function relationsTo(index: Index, targetId: string): readonly RelationEdge[] {
+  return index.relations.get(targetId) ?? []
 }
 
-/** 某个源块指向目标**几次**（同一块里多处引用各算一条边） */
-export function incomingCount(index: Index, targetId: string, sourceId: string): number {
-  return index.incoming.get(targetId)?.get(sourceId) ?? 0
+/** 某个源块发出的所有关系边（出向） */
+export function relationsFrom(index: Index, sourceId: string): readonly RelationEdge[] {
+  return index.outgoing.get(sourceId) ?? []
 }
 
-/** 谁打了这个标签 —— 「标签的成员列表」 */
+/** 谁引用它（默认只算 `inline`／`property`／`embed`）—— 反链的源块清单 */
+export function incomingIds(
+  index: Index,
+  targetId: string,
+  kinds: readonly RefKind[] = REFERENCE_KINDS,
+): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const e of index.relations.get(targetId) ?? []) {
+    if (!(kinds as readonly RelationKind[]).includes(e.kind)) continue
+    if (seen.has(e.from)) continue
+    seen.add(e.from)
+    out.push(e.from)
+  }
+  return out
+}
+
+/** 某个源块指向目标**几次**（同一块里多处引用各算一条边；属性/嵌入各算一次） */
+export function incomingCount(
+  index: Index,
+  targetId: string,
+  sourceId: string,
+  kinds: readonly RefKind[] = REFERENCE_KINDS,
+): number {
+  let n = 0
+  for (const e of index.relations.get(targetId) ?? []) {
+    if (e.from !== sourceId) continue
+    if (!(kinds as readonly RelationKind[]).includes(e.kind)) continue
+    n += e.count ?? 1
+  }
+  return n
+}
+
+/** 谁打了这个标签 —— 「标签的成员列表」（只认 `tag` 边，不认正文里的 `#名` 提及） */
 export function tagMemberIdsOf(index: Index, tagId: string): string[] {
-  return [...(index.tagMembers.get(tagId) ?? [])]
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const e of index.relations.get(tagId) ?? []) {
+    if (e.kind !== 'tag' || seen.has(e.from)) continue
+    seen.add(e.from)
+    out.push(e.from)
+  }
+  return out
+}
+
+/** 某个目标上每种关系出现了几次（UI 的 kind chips 用；`inline` 按出现次数计） */
+export function relationKindCounts(index: Index, targetId: string): Map<RelationKind, number> {
+  const out = new Map<RelationKind, number>()
+  for (const e of index.relations.get(targetId) ?? []) {
+    out.set(e.kind, (out.get(e.kind) ?? 0) + (e.count ?? 1))
+  }
+  return out
 }
 
 /** 按规范化名字找标签块 id */
@@ -757,7 +829,9 @@ function refsByIndex(node: QueryNode, index: Index): Set<string> {
     if ('all' in n) n.all.forEach(visit)
     else if ('any' in n) n.any.forEach(visit)
     else if ('not' in n) visit(n.not)
-    else if ('ref' in n) for (const id of incomingIds(index, n.ref)) out.add(id)
+    else if ('ref' in n) {
+      for (const id of incomingIds(index, refTargetOf(n.ref), refKindsOf(n.ref))) out.add(id)
+    }
   }
   visit(node)
   return out

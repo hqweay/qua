@@ -18,6 +18,7 @@
 import { ACTIVE_VIEW_PROP, VIEWS_PROP, isDeleted, isQueryBlock, type Block, type BlockProps } from './model.ts'
 import { displayNameOf } from './alias.ts'
 import { OUTLINE_VIEW, readEmbed } from './embed.ts'
+import { t } from './msg.ts'
 import { collectionItems, isCollectionBlock } from './collection.ts'
 import { uuidv7Hex } from './ids.ts'
 import type { KbClient } from './kb/types.ts'
@@ -211,6 +212,8 @@ export const PATH_COLUMN = 'path' as const
  * 是关系的事实，不是它自己的数据；写进属性就等于承认「复制一份会过期」。
  */
 export const REF_COUNT_COLUMN = 'refCount' as const
+export const REL_KINDS_COLUMN = 'relKinds' as const
+export const VIA_COLUMN = 'via' as const
 export const MATCHED_COLUMN = 'matched' as const
 export const SHARED_TAGS_COLUMN = 'sharedTags' as const
 
@@ -634,6 +637,8 @@ export function defaultWidthOf(key: string): number {
   if (key === TAGS_COLUMN) return 160
   if (key === PATH_COLUMN) return 220
   if (key === REF_COUNT_COLUMN) return 96
+  if (key === REL_KINDS_COLUMN) return 180
+  if (key === VIA_COLUMN) return 120
   if (key === MATCHED_COLUMN) return 150
   if (key === SHARED_TAGS_COLUMN) return 160
   return 140
@@ -768,6 +773,15 @@ export function fieldTextOf(r: ViewRecord, key: string, resolve?: (value: unknow
     const v = r.derived?.[REF_COUNT_COLUMN]
     return typeof v === 'number' ? String(v) : ''
   }
+  if (key === REL_KINDS_COLUMN) {
+    const v = r.derived?.[REL_KINDS_COLUMN]
+    return Array.isArray(v) ? v.map((x) => String(x)).join(' · ') : ''
+  }
+  if (key === VIA_COLUMN) {
+    if (r.derived?.viaDirect === true) return t('ui.mount.via.direct')
+    const v = r.derived?.viaTags
+    return Array.isArray(v) ? v.map((x) => `#${String(x)}`).join(' · ') : ''
+  }
   if (key === MATCHED_COLUMN) {
     const v = r.derived?.[MATCHED_COLUMN]
     return typeof v === 'string' ? v : ''
@@ -810,7 +824,9 @@ export function sortValueOf(r: ViewRecord, key: string): unknown {
     const v = r.derived?.[REF_COUNT_COLUMN]
     return typeof v === 'number' ? v : undefined
   }
-  if (key === MATCHED_COLUMN || key === SHARED_TAGS_COLUMN) return fieldTextOf(r, key)
+  if (key === REL_KINDS_COLUMN || key === VIA_COLUMN || key === MATCHED_COLUMN || key === SHARED_TAGS_COLUMN) {
+    return fieldTextOf(r, key)
+  }
   return r.values[key]
 }
 

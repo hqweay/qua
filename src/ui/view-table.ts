@@ -29,8 +29,10 @@ import {
   MODIFIED_COLUMN,
   PATH_COLUMN,
   REF_COUNT_COLUMN,
+  REL_KINDS_COLUMN,
   SHARED_TAGS_COLUMN,
   TAGS_COLUMN,
+  VIA_COLUMN,
   TITLE_COLUMN,
   defaultWidthOf,
   fieldTextOf,
@@ -460,6 +462,8 @@ export class ViewTable {
     if (key === MODIFIED_COLUMN) return t('ui.props.modifiedAt')
     if (key === PATH_COLUMN) return t('ui.view.col.path')
     if (key === REF_COUNT_COLUMN) return t('ui.view.col.refCount')
+    if (key === REL_KINDS_COLUMN) return t('ui.view.col.relKinds')
+    if (key === VIA_COLUMN) return t('ui.view.col.via')
     if (key === MATCHED_COLUMN) return t('ui.view.col.matched')
     if (key === SHARED_TAGS_COLUMN) return t('ui.view.col.sharedTags')
     const shown = this.propLabels.get(key)
@@ -591,7 +595,14 @@ export class ViewTable {
      * **保留键**里的只读列：路径与派生值（引用次数/命中词/共同标签）。
      * 它们不是属性槽，走到 `propEditor` 只会拿到「已删除的属性」那一个空控件。
      */
-    if (key === PATH_COLUMN || key === REF_COUNT_COLUMN || key === MATCHED_COLUMN || key === SHARED_TAGS_COLUMN) {
+    if (
+      key === PATH_COLUMN ||
+      key === REF_COUNT_COLUMN ||
+      key === REL_KINDS_COLUMN ||
+      key === VIA_COLUMN ||
+      key === MATCHED_COLUMN ||
+      key === SHARED_TAGS_COLUMN
+    ) {
       const box = document.createElement('div')
       box.className = 'tv-plain ui-ellipsis'
       box.textContent = fieldTextOf(r, key)
