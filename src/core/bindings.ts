@@ -1,11 +1,13 @@
 /**
- * 绑定表—— **一个机制五处复用**：
- * 键位（keymap）／块菜单（menu）／斜杠（slash）／**划选气泡（selection）**／命令面板（palette）。
+ * 绑定表—— **一个机制四处复用**：
+ * 键位（keymap）／块菜单（menu）／斜杠（slash）／**划选气泡（selection）**。
+ * 命令面板**不在这张表里**：它枚举命令表本身（必须列出不带任何绑定的命令），
+ * 键位提示从 keymap 绑定取——所以这里没有 `palette` 这一档。
  *
  * ⚠️ 菜单/气泡**不是手写组件**，它们只是 `resolveBindings(kind, ctx)` 的渲染结果。
  * ⚠️ 绑定表**不进 HTTP／MCP／CLI 面**——机器接口只认命令与 `expose`。
  *
- * 关于 `selection`：2026-10-19 撤掉顶部工具栏（chrome 极弱＝中性现代的口径），
+ * 关于 `selection`：撤掉顶部工具栏（chrome 极弱＝中性现代的口径）后，
  * 「加粗/斜体/高亮/代码」这类**作用于选区**的命令改由**划选文本时浮出的气泡**承载——
  * 它们的 `when` 一律带 `!selectionEmpty`，所以光标状态下气泡根本不会出现。
  */
@@ -14,11 +16,10 @@ import { evalWhen, evalWhenSafe } from './when.ts'
 import { t } from './msg.ts'
 import type { CtxKeys } from './index.ts'
 
-export type BindingKind = 'keymap' | 'menu' | 'slash' | 'selection' | 'palette'
+export type BindingKind = 'keymap' | 'menu' | 'slash' | 'selection'
 export type Layer = 'core' | 'plugin' | 'user'
 
 export interface Binding {
-  /** 命令名（`*` 只用于 palette 的「全部命令」） */
   command: string
   kind: BindingKind
   /** 抽象修饰键：`mod` ＝ Cmd(mac) / Ctrl(其它)，渲染按平台 */
@@ -104,8 +105,7 @@ export const BINDINGS: Binding[] = [
   { command: 'core.journal/review', kind: 'keymap', key: 'mod+shift+r', args: { days: 3 }, when: '!editorTextFocus', layer: 'core' },
   { command: 'core.journal/review', kind: 'keymap', key: 'mod+alt+shift+r', args: { days: 7 }, when: '!editorTextFocus', layer: 'core' },
   { command: 'core/bindings/list', kind: 'keymap', key: 'mod+shift+?', when: '', layer: 'core' },
-  // 层次序演示：user 层加一条**额外**键位（不改核心口径，只加不改，「用户永远能盖过」）
-  { command: 'core.editor/toggle-todo', kind: 'keymap', key: 'mod+shift+t', when: 'editorTextFocus', layer: 'user' },
+  // user 层真实在用的键位（层次序由单测覆盖；不另设演示别名——那是用户可见的重复键）
   { command: 'core.view/toggle-virtualize', kind: 'keymap', key: 'mod+shift+v', when: '', layer: 'user' },
 
   /* ================= 块菜单（悬停左侧拖动把手 / 圆点或右键） ================= */
@@ -116,12 +116,19 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/indent-block', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 30, layer: 'core' },
   { command: 'core.editor/outdent-block', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 40, layer: 'core' },
   { command: 'core.editor/toggle-todo', kind: 'menu', when: 'blockFocused', group: 'block/3-kind', order: 10, layer: 'core' },
+  /**
+   * 与上面那条**成对**出现：`toggle-todo` 在「是任务」时只翻值，翻不出「不是任务」这一态
+   * （见 `editor.clearTodo`），所以「变回去」必须是独立一条。
+   *
+   * 判据用 `blockType`（`core/view/editor.ts` 的 `ctxKeys`，只取 `todo`／`paragraph` 两值）：
+   * 不是任务的块上不显示 —— 一条「点了什么都不会发生」的菜单项比没有更糟。
+   */
+  { command: 'core.editor/clear-todo', kind: 'menu', when: 'blockFocused && blockType == "todo"', group: 'block/3-kind', order: 15, layer: 'core' },
   { command: 'core.editor/toggle-collapse', kind: 'menu', when: 'blockFocused && blockFoldable', group: 'block/3-kind', order: 20, layer: 'core', label: t('menu.label.toggleCollapse') },
   // 露面：加/减一格标记（页/标签各自独立、可兼位；顺序无语义）
   { command: 'core.block/as-page', kind: 'menu', when: 'blockFocused && !blockHasPageRole', group: 'block/3-role', order: 10, layer: 'core' },
   { command: 'core.block/unpage', kind: 'menu', when: 'blockFocused && blockHasPageRole', group: 'block/3-role', order: 11, layer: 'core' },
   { command: 'core.block/extract-to-page', kind: 'menu', when: 'blockFocused && blockCanExtractPage', group: 'block/3-role', order: 12, layer: 'core' },
-  { command: 'core.block/extract-to-page', kind: 'palette', when: 'blockCanExtractPage', layer: 'core' },
   { command: 'core.block/as-tag', kind: 'menu', when: 'blockFocused && !blockHasTagRole', group: 'block/3-role', order: 20, layer: 'core' },
   { command: 'core.block/untag', kind: 'menu', when: 'blockFocused && blockHasTagRole', group: 'block/3-role', order: 21, layer: 'core' },
   // 别名是「名字层」的配置，不属于任何具体列表：任何聚焦块都能打开
@@ -147,8 +154,6 @@ export const BINDINGS: Binding[] = [
    * 这个跨容器。身份块不给入口：它们不参与组织，搬它们没有意义（位置不承载信息）。
    */
   { command: 'core.block/move-to', kind: 'menu', when: 'blockFocused && !blockIsRoot', group: 'block/2-structure', order: 30, layer: 'core' },
-  { command: 'core.block/move-to', kind: 'palette', when: 'blockFocused', layer: 'core' },
-  { command: 'core.block/zoom-out', kind: 'palette', when: '!blockIsRoot', layer: 'core' },
   { command: 'core.editor/pick-tag', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 5, layer: 'core' },
   { command: 'core.editor/insert-page-ref', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 10, layer: 'core' },
   { command: 'core.editor/insert-image', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 20, layer: 'core' },
@@ -195,6 +200,12 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/insert-link', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 25, layer: 'core', label: t('menu.label.link'), keywords: ['link', 'url', t('menu.kw.link')], icon: 'lucide:link' },
   { command: 'core.editor/insert-tag', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 30, layer: 'core', label: t('menu.label.tag'), args: { tag: t('ui.arg.demoTag') }, keywords: ['tag', t('menu.kw.tag')], icon: 'lucide:hash' },
   { command: 'core.editor/toggle-collapse', kind: 'slash', when: 'editorTextFocus && blockFoldable', group: 'slash/3-structure', order: 10, layer: 'core', label: t('menu.label.toggleCollapse'), icon: 'lucide:chevron-down' },
+  /**
+   * 斜杠里的「取消待办」：`/待办` 把这一行变成任务之后，同一个入口能把它变回去 ——
+   * 只在这一块真是任务时出现（同菜单那条判据），否则斜杠列表里永远挂着一个空动作。
+   * 图标复用「虚线方框」：它是「这个方框可以被拿掉」的现成说法，不新增图标数据。
+   */
+  { command: 'core.editor/clear-todo', kind: 'slash', when: 'editorTextFocus && blockType == "todo"', group: 'slash/3-structure', order: 15, layer: 'core', icon: 'lucide:square-dashed' },
   { command: 'core.editor/duplicate-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/3-structure', order: 20, layer: 'core', label: t('menu.label.duplicate'), icon: 'lucide:copy' },
   { command: 'core.editor/delete-block', kind: 'slash', when: 'editorTextFocus && !blockIsRoot', group: 'slash/3-structure', order: 30, layer: 'core', label: t('menu.label.delete'), icon: 'lucide:trash-2' },
 
@@ -205,9 +216,6 @@ export const BINDINGS: Binding[] = [
   { command: 'core.anno/toggle-code', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 40, layer: 'core', icon: 'lucide:code', label: t('menu.label.code') },
   { command: 'core.anno/clear-marks', kind: 'selection', when: 'editorTextFocus && !selectionEmpty && marking', group: 'sel/1-mark', order: 50, layer: 'core', icon: 'lucide:eraser', label: t('menu.label.clearMarks') },
   { command: 'core.editor/copy-ref', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/2-ref', order: 10, layer: 'core', icon: 'lucide:quote', label: t('menu.label.copyRef') },
-
-  /* ================= 命令面板：`*` ＝ 全部命令 ================= */
-  { command: '*', kind: 'palette', when: '', layer: 'core' },
 ]
 
 /* --------------------------------------------------------- 键位匹配 */

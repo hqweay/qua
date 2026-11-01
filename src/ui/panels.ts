@@ -525,7 +525,7 @@ export function openDrawerFor(deps: PanelDeps, kind: PanelKind): void {
       intro.textContent =
         t('ui.drawer.bindingsIntro1', { commands: COMMANDS.length, bindings: BINDINGS.length }) + t('ui.drawer.bindingsIntro2')
       host.appendChild(intro)
-      for (const kind of ['keymap', 'menu', 'slash', 'selection', 'palette'] as const) {
+      for (const kind of ['keymap', 'menu', 'slash', 'selection'] as const) {
         const rows = BINDINGS.filter((b) => b.kind === kind)
         const h = document.createElement('h5')
         h.textContent = `${kind}（${rows.length}）`

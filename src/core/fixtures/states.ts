@@ -28,7 +28,7 @@ export function degradedWorkspace(): Workspace {
   const long = mkPage('超长标题 · A Very Long Page Title That Keeps Going And Going Until Both The Rail And The Breadcrumb Have To Truncate It', 'lucide:triangle-alert', [
     { text: '超长块（' + longParagraph().length + ' 字，单块）：' + longParagraph() },
     { text: '全英文无空格断点：' + LONG_EN },
-    { text: '超长标题的页面在左栏里也要能活：' + 'A Very Long Page Title That Keeps Going And Going '.repeat(3) },
+    { text: '超长标题的页面在左槽里也要能活：' + 'A Very Long Page Title That Keeps Going And Going '.repeat(3) },
     { text: '缺失资产（**资产不可用是状态不是错误**）：![[丢失的截图.png]]' },
     { text: '空块（既无文字也无子块）——上面这行下面还有一个：' },
     { text: '' },
