@@ -122,6 +122,8 @@ export const MSG = {
   'ui.dock.closeWidget': '关闭卡片（组件本身不删）',
   'ui.dock.closeCard': '关闭这张卡；需要时在「添加组件」里加回来',
   'ui.dock.inspect': '检视卡',
+  'ui.dock.inspectNoSubject': '当前屏没有单一对象；打开一个页或块后显示',
+  'ui.dock.inspectAdded': '已加入槽里；当前屏没有单一对象，打开一个页或块后显示',
   'ui.dock.addTile': '添加组件',
   'ui.dock.removeTile': '从槽里移出（命令本身不动）',
   'ui.dock.tileMissing': '这个命令已不可用',
