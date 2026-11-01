@@ -4681,8 +4681,8 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
 
-  // 深缩进：把一个第 3 层的块标成待办
-  const deep = await page.evaluate(() => {
+  // 深缩进：把一个第 3 层的块标成待办；**加身份之前**先留一个正文左缘的底（下面量对齐用）
+  const added = await page.evaluate(() => {
     const ed = window.__qua.__editor
     const plain = (x) => x.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
     const walk = (b, d) => {
@@ -4694,10 +4694,13 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
       return null
     }
     const b = walk(ed.doc.roots[0], 0)
+    const row = document.querySelector(`#editor > .sec > .blk[data-block-id="${b.id}"]`)
+    const leftBefore = row?.querySelector(':scope > .tx')?.getBoundingClientRect().left ?? -1
     window.__qua.focusBlock(b.id, 0)
     window.__qua.invoke('core.editor/toggle-todo')
-    return b.id
+    return { id: b.id, leftBefore }
   })
+  const deep = added.id
 
   const readRow = (id) =>
     page.evaluate((blockId) => {
@@ -4725,6 +4728,29 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
   assert(deepRow.before !== 'none', `待办行的块标仍应画圆点（::before content=${deepRow.before}）`)
   assert(deepRow.boxClasses.includes('todo-box'), `方框应在身份图标上：${deepRow.boxClasses}`)
   assert(deepRow.boxW === '12px', `方框应正常画出来：${deepRow.boxW}`)
+
+  /**
+   * **方框站在「内容列」的起点上**（2026-11-01 用户给的参考图：方框左缘 ＝ 普通块正文左缘）。
+   *
+   * 判据取「**这一块自己**加身份之前的 `.tx` 左缘」——那一列就是内容列：
+   *   · 它把「这一块从普通变成任务」前后钉在一起，不依赖 `--ui-gap-4` 的具体数值
+   *     （改版面色是合法改动，量死 42px 会把它判成红）；
+   *   · 不拿隔壁行去比：跨深度比没有意义，比同深度的邻行又会被「那一行恰有别名头／面包屑」搅乱，
+   *     而这条只跟它自己比。
+   * 不成立时屏幕上有两根「内容列」竖线 —— 方框虚插在正文左缘的左边。
+   */
+  const colAfter = await page.evaluate((id) => {
+    const row = document.querySelector(`#editor > .sec > .blk[data-block-id="${id}"]`)
+    return {
+      box: row?.querySelector(':scope > .left > .todo-box')?.getBoundingClientRect().left ?? -1,
+      text: row?.querySelector(':scope > .tx')?.getBoundingClientRect().left ?? -1,
+    }
+  }, deep)
+  assert(
+    added.leftBefore > 0 && Math.abs(colAfter.box - added.leftBefore) < 0.5,
+    `方框左缘应落在正文列上：加身份前的正文 ${added.leftBefore} → 方框 ${colAfter.box}`,
+  )
+  assert(colAfter.text > colAfter.box, `方框不能压在正文上：方框 ${colAfter.box}／正文 ${colAfter.text}`)
 
   // 假数据里已有的 todo / done 两态都带身份图标，且块标不因此换形状
   const all = await page.evaluate(() =>
@@ -4755,6 +4781,91 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
 
   await ctx.close()
   return `todo/done/深缩进（depth ${deepRow.depth}）三种：块标恒为圆点＋可聚焦，方框在身份图标上（.ico ${deepRow.boxW}）`
+})
+
+await check('T205 取消待办：摘掉这一栏就真的不是任务了（`/待办` 的逆；标签声明的另说）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  const pid = await page.evaluate(() => window.__qua.propDefs().find((d) => d.label === '任务状态')?.id ?? '')
+  assert(pid !== '', '库里应自带「任务状态」定义')
+
+  /** 读一行：DOM 的三态标记 ＋ 模型里这一栏在不在（值／自有槽分开看） */
+  const read = (id) =>
+    page.evaluate(
+      ({ id, pid }) => {
+        const row = document.querySelector(`#editor > .sec > .blk[data-block-id="${id}"]`)
+        const b = window.__qua.__editor.store.find(id)
+        const props = b?.props ?? {}
+        return {
+          todo: row?.dataset.todo ?? null,
+          box: Boolean(row?.querySelector(':scope > .left > .todo-box')),
+          hasValue: Object.prototype.hasOwnProperty.call(props, pid),
+          slot: Array.isArray(props._ownProps) && props._ownProps.includes(pid),
+        }
+      },
+      { id, pid },
+    )
+
+  // 前置：一行普通文本块（不是任务）
+  const target = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('#editor .sec > .blk')].find(
+      (el) => !el.hasAttribute('data-todo') && (el.querySelector(':scope > .tx')?.textContent ?? '').trim().length > 4,
+    )
+    return row?.dataset.blockId ?? ''
+  })
+  assert(target !== '', '前置：应有一行普通文本块')
+
+  const before = await read(target)
+  assert(before.todo === null && before.hasValue === false && before.slot === false, `前置：这块本来不是任务：${JSON.stringify(before)}`)
+
+  // 变成任务（与斜杠菜单同一条写路径：只落这一栏，不动块的种类）
+  await page.evaluate((id) => {
+    window.__qua.focusBlock(id, 0)
+    window.__qua.invoke('core.editor/toggle-todo')
+  }, target)
+  await page.waitForTimeout(150)
+  const made = await read(target)
+  assert(made.todo === 'todo' && made.box && made.hasValue, `切换待办之后应成为任务：${JSON.stringify(made)}`)
+
+  /**
+   * **核心判据**：`clear-todo` 摘的是**这一栏**，不是把值翻成 `false`。
+   * 反过来说，若它只是 `setValue(false)`，`hasValue` 仍为真、方框照旧 —— 这就是本条要抓的错解。
+   */
+  await page.evaluate(() => window.__qua.invoke('core.editor/clear-todo'))
+  await page.waitForTimeout(150)
+  const cleared = await read(target)
+  assert(cleared.todo === null, `取消待办之后不该再是任务：${JSON.stringify(cleared)}`)
+  assert(cleared.box === false, `取消待办之后方框应消失：${JSON.stringify(cleared)}`)
+  assert(cleared.hasValue === false && cleared.slot === false, `这一栏应整条摘掉（值与自有槽都不留）：${JSON.stringify(cleared)}`)
+
+  // 一步撤销回到「是任务」：摘栏是**一次**可撤销的写入，不是拆成两笔
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForTimeout(150)
+  const undone = await read(target)
+  assert(undone.todo === 'todo' && undone.box, `撤销一步就该回到任务态：${JSON.stringify(undone)}`)
+
+  /**
+   * **标签声明那一支**：种子里的待办都打了 `#任务`，那个标签 `declareField` 了「任务状态」。
+   * ⇒ 摘掉这一块自己的值与槽之后，`todoOf` 仍判它是任务（判据是「有没有这一栏」，不是「有没有值」）。
+   * 这不是 bug，是模型：状态来自标签。要钉住的是「它不会崩、也不假装摘干净了」。
+   */
+  const tagged = await page.evaluate((id) => {
+    const row = [...document.querySelectorAll('#editor .sec > .blk[data-todo]')].find(
+      (el) => el.dataset.blockId !== id,
+    )
+    return row?.dataset.blockId ?? ''
+  }, target)
+  assert(tagged !== '', '前置：种子里应还有一条带任务状态的行（来自 #任务 的声明）')
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), tagged)
+  await page.evaluate(() => window.__qua.invoke('core.editor/clear-todo'))
+  await page.waitForTimeout(150)
+  const byTag = await read(tagged)
+  assert(byTag.hasValue === false, `标签声明的行：自己的值仍应被清掉：${JSON.stringify(byTag)}`)
+  assert(byTag.todo === 'todo' && byTag.box, `标签声明的行：摘完仍应显示为任务（状态来自标签）：${JSON.stringify(byTag)}`)
+
+  await ctx.close()
+  return `普通块：切换待办 → 取消待办（栏整条摘掉、可一步撤销）；#任务 成员：值清掉、状态仍来自标签`
 })
 
 await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling 弹详情；图片左键 lightbox', async () => {
@@ -4827,24 +4938,32 @@ await check('T15 角标：块数 / DOM 节点数 / 主题 / composing 都在', a
   /**
    * 首屏的行内图片是异步到位的（文件占位 → 真图会换掉几个节点），而角标是**按 rAF 刷新**
    * 的派生读数。判据是「资产落定之后，角标跟得上当前快照」——等它收敛，而不是读一帧快照
-   * 赌那一帧恰好是新的（分两次 evaluate 更会变成时序竞态，真踩过）。
+   * 赌那一帧恰好是新的。
+   *
+   * ⚠️ **必须「同一帧取两个数」**：原先的写法是「先等到对上，再 evaluate 取一次」，
+   *    而中间那一帧 DOM 还会变（真图换占位 ⇒ 节点数 -5）⇒ 断言读到的是**另一帧**的数，
+   *    874/879 照样不相等。这不是偶发，是判据本身跨了帧：把「对上的那一帧」存下来再断言它，
+   *    跟「等一会儿应该就好了」不是一回事（后者是放松，前者是把同一个瞬间钉住）。
    */
   await page.waitForFunction(
     () => {
       const imgs = [...document.querySelectorAll('#editor .atom-image img')]
       const settled = imgs.length === 0 || imgs.every((im) => im.naturalWidth > 0)
+      const badge = document.getElementById('badge')?.innerText ?? ''
       const s = window.__qua.snapshot()
-      return settled && (document.getElementById('badge')?.innerText ?? '').includes(String(s.domNodes))
+      const ok = settled && badge.includes(String(s.blocks)) && badge.includes(String(s.domNodes))
+      // 对上的这一帧留档：断言读它，不再另取一次（见上）
+      if (ok) window.__badgeSample = { badge, blocks: s.blocks, domNodes: s.domNodes }
+      return ok
     },
     null,
     { timeout: 8000 },
   )
-  const { badge, s } = await page.evaluate(() => ({
-    badge: document.getElementById('badge')?.innerText ?? '',
-    s: window.__qua.snapshot(),
-  }))
-  assert(badge.includes(String(s.blocks)), `角标应含块数 ${s.blocks}：${badge}`)
-  assert(badge.includes(String(s.domNodes)), `角标应含 DOM 节点数 ${s.domNodes}：${badge}`)
+  const sample = await page.evaluate(() => window.__badgeSample ?? null)
+  assert(sample, '角标没等到「块数与 DOM 节点数同一帧对得上」的那一帧')
+  const badge = sample.badge
+  assert(badge.includes(String(sample.blocks)), `角标应含块数 ${sample.blocks}：${badge}`)
+  assert(badge.includes(String(sample.domNodes)), `角标应含 DOM 节点数 ${sample.domNodes}：${badge}`)
   assert(/主题/.test(badge), `角标应含主题：${badge}`)
   assert(badge.includes('composing'), `角标应含 composing：${badge}`)
   await page.evaluate(() => window.__qua.badgePanel(true))
@@ -16492,6 +16611,7 @@ const fail = results.filter((r) => !r.ok && !r.known).length
  *    而真正的原因是「这一片的用例其实已经跑完了，只是答案没被记下来」。
  *    关浏览器失败不该吞掉结果。
  */
+
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
   await writeFile(REPORT, JSON.stringify({ total: seq, cases: results, known: known.map((r) => r.name) }))
