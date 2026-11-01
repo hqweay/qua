@@ -14,6 +14,7 @@
  *   2. **键位一个都不在这里处理**——全部交给绑定表，这里只碰「输入与拖拽」。
  */
 import { bindDropTarget, setDragBlock, zoneHint } from './dnd.ts'
+import { EDIT_ISLAND_ATTR } from './block-dom.ts'
 import type { TriggerChar } from '../core/trigger.ts'
 import type { RunWithId } from '../core/runs.ts'
 import type { Content } from '../core/runs.ts'
@@ -298,14 +299,44 @@ function setHotRail(root: HTMLElement, ancestorId: string, on: boolean): void {
 export function bindEditorEvents(br: EditorBridge): () => void {
   const c = br.container
   const off: (() => void)[] = []
+  /**
+   * **岛界**：本编辑器的容器若住在某个岛根里，那颗岛根就是「自己的地盘」；
+   * 主编辑器（不在任何岛里）的地盘为 null。委托到容器上的事件若发生在
+   * **别人的岛**里，一律不接——岛内事件归岛（里层编辑器绑了同一套处理器），
+   * 外层再接一遍就是双投：两边各折一次、各开一次菜单，且外层的重排会把
+   * 里层刚做的（视图私有的）状态冲掉。
+   */
+  const ownIsland = c.closest(`[${EDIT_ISLAND_ATTR}]`)
+  /**
+   * 岛根要在**派发时**判定（`composedPath()` 是派发那一刻的快照）：
+   * 处理过程中里层编辑器可能同步重排、把事件目标换成一棵新子树——
+   * 那时 `target.closest()` 会得到 null（目标已被拆出文档），岛界就漏了。
+   */
+  const inForeignIsland = (ev: Event): boolean => {
+    for (const node of ev.composedPath()) {
+      if (node instanceof Element && node.hasAttribute(EDIT_ISLAND_ATTR)) return node !== ownIsland
+    }
+    return false
+  }
   const on = <K extends keyof HTMLElementEventMap>(
     target: HTMLElement | Document,
     type: K | string,
     fn: (e: never) => void,
-    opts?: AddEventListenerOptions,
+    opts?: AddEventListenerOptions & { /** 岛内事件也照常接（语义本来就是「岛里发生的事，离开时收尾」） */ foreignOk?: boolean },
   ): void => {
-    target.addEventListener(type, fn as EventListener, opts)
-    off.push(() => target.removeEventListener(type, fn as EventListener, opts))
+    /**
+     * 只给**委托到容器**的处理器加岛界（document／window 级的全局机械——按下期间
+     * 冻结重排、选区同步——对所有编辑器都要照常跑，不筛）。
+     */
+    const listener: EventListener =
+      target === c && !opts?.foreignOk
+        ? (ev: Event): void => {
+            if (inForeignIsland(ev)) return
+            fn(ev as never)
+          }
+        : (fn as EventListener)
+    target.addEventListener(type, listener, opts)
+    off.push(() => target.removeEventListener(type, listener, opts))
   }
 
   /**
@@ -411,11 +442,18 @@ export function bindEditorEvents(br: EditorBridge): () => void {
    * （搬 DOM 会把它们的光标扔掉，见 `BlockEditor.reloadFromStore`）。等焦点真的离开，
    * 那些推迟的重排在这里一次补上——否则「在挂载区里删掉一行」之后正文会停在旧形状。
    */
-  on(c, 'focusout', () => {
-    // ⚠️ 排到 `armFlush`（200ms）而不是 `setTimeout(…, 0)`：焦点变化常常发生在**按下**那一瞬，
-    //    0 毫秒就补一次重排会把正在被按的按钮换掉 ⇒ `click` 不派发（实测）。
-    br.armFlush()
-  })
+  on(
+    c,
+    'focusout',
+    () => {
+      // ⚠️ 排到 `armFlush`（200ms）而不是 `setTimeout(…, 0)`：焦点变化常常发生在**按下**那一瞬，
+      //    0 毫秒就补一次重排会把正在被按的按钮换掉 ⇒ `click` 不派发（实测）。
+      br.armFlush()
+    },
+    // ⚠️ **不加岛界**：这条的语义就是「岛里发生的事，焦点离开时收尾」——
+    //    岛内编辑期间本视图欠下的结构重排，靠它补上（漏接 ⇒ 正文停在旧形状）。
+    { foreignOk: true },
+  )
 
   /* ── 输入与组合（**不打断 IME**）────────────────────── */
   on(c, 'input', (e: InputEvent) => {
