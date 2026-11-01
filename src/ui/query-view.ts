@@ -28,7 +28,6 @@ import {
   displayNameOf,
   expandContexts,
   isQueryBlock,
-  itemsRecords,
   listTableOf,
   readSpec,
   resolveRows,
@@ -623,7 +622,6 @@ export class ViewHost {
     if (this.view?.kind === 'list-table' && src.kind === 'children') {
       return listTableOf(src.blockId, this.deps.kb).rows.length
     }
-    if (src.kind === 'items') return this.records().length
     return src.kind === 'children' ? this.deps.kb.children(src.blockId).length : 0
   }
 
@@ -654,9 +652,8 @@ export class ViewHost {
     // 大纲折叠的次要文案由 `render()` 现算（它才知道这一屏画了几行）；其余分支没有折叠
     if (!query || view !== null) this.els.topCount.hidden = true
     this.els.refresh.hidden = !query
-    // items 源的行是「引用」，不是这里能长出来的子块 ⇒ 不给「新建一行」（列表自己有「加一条」）
-    // 派生栏是只读关系视图 ⇒ 也不给新建/改名/刷新
-    this.els.newRow.hidden = Boolean(derived) || query || src.kind === 'items'
+    // 派生栏是只读关系视图 ⇒ 不给新建/改名/刷新
+    this.els.newRow.hidden = Boolean(derived) || query
     /**
      * 这一颗 `＋` 在两种表里长的是**不同的东西**：平表加一行（＝一个直接子块），
      * 结构映射表加一列（顶部多一个直接子块，它的孩子成为这一列的各项）。
@@ -789,8 +786,8 @@ export class ViewHost {
       el.addEventListener('click', onClick)
       return el
     }
-    // 默认看法的名字按源给：items 源没有大纲（它不是树），它叫「列表」
-    const defaultLabel = src.kind === 'items' ? t('ui.view.kind.list') : t('ui.view.outline')
+    // 默认看法是大纲
+    const defaultLabel = t('ui.view.outline')
     box.appendChild(
       btn(defaultLabel, view === null, () =>
         this.deps.invoke('core.view/set-active', { owner: this.writeOwner, viewId: '' }),
@@ -855,8 +852,6 @@ export class ViewHost {
   }
 
   private showBody(view: ViewConfig): void {
-    // items 源才有行操作：`_items` 是「一批引用」，加/摘/拖都只写它
-    const itemsId = this.source.kind === 'items' ? this.source.blockId : ''
     this.outline?.dispose()
     this.outline = null
     this.els.editor.hidden = true
@@ -983,17 +978,6 @@ export class ViewHost {
             )
           },
           openBlock: (id) => this.deps.openBlock(id),
-          // items 源的三件事：加一条／摘一条／拖一下，都只写 `_items`
-          ...(itemsId !== ''
-            ? {
-                addItem: () => this.deps.invoke('core.collection/pick', { collectionId: itemsId }),
-                removeItem: (id: string) =>
-                  this.deps.invoke('core.collection/remove', { collectionId: itemsId, blockId: id }),
-                moveItem: (id: string, to: number) =>
-                  this.deps.invoke('core.collection/move', { collectionId: itemsId, blockId: id, to }),
-              }
-            : {}),
-          toast: (text, kind) => this.deps.toast?.(text, kind),
         })
         this.els.table.replaceChildren(this.list.root)
       }
@@ -1069,7 +1053,6 @@ export class ViewHost {
     if (this.deps.derived) return this.deps.derived.records()
     const src = this.source
     if (src.kind === 'query') return resolveRows(this.frozen?.hits ?? [], this.deps.kb)
-    if (src.kind === 'items') return itemsRecords(src.blockId, this.deps.kb)
     return childrenRecords(src.blockId, this.deps.kb)
   }
 

@@ -50,20 +50,18 @@ const localTab = (over: Partial<Extract<MountEntry, { kind: 'local' }>> = {}): E
 
 /* ------------------------------------------------------------ 缺省看法 */
 
-test('defaultKindFor：children/query 的缺省是**大纲**，items 的是**列表**（它不是树）', () => {
+test('defaultKindFor：缺省恒为**大纲**', () => {
   assert.equal(defaultKindFor({ kind: 'children', blockId: 'a' }), 'outline')
   assert.equal(defaultKindFor({ kind: 'query', spec: QUERY }), 'outline')
-  assert.equal(defaultKindFor({ kind: 'items', blockId: 'f' }), 'list', '一批手选的引用画成大纲＝凭空造父子')
 })
 
 test('storedKindsFor：结构映射表与导图只接 children（命中集合没有「第 k 个孩子」）', () => {
   assert.ok(storedKindsFor({ kind: 'children', blockId: 'a' }).includes('list-table'))
   assert.ok(storedKindsFor({ kind: 'children', blockId: 'a' }).includes('mindmap'))
-  for (const src of [{ kind: 'query' as const, spec: QUERY }, { kind: 'items' as const, blockId: 'f' }]) {
-    assert.ok(!storedKindsFor(src).includes('list-table'), `${src.kind} 不该有结构映射表`)
-    assert.ok(!storedKindsFor(src).includes('mindmap'), `${src.kind} 不该有导图`)
-    assert.ok(storedKindsFor(src).includes('list'), `${src.kind} 有记录列表`)
-  }
+  const src = { kind: 'query' as const, spec: QUERY }
+  assert.ok(!storedKindsFor(src).includes('list-table'), 'query 不该有结构映射表')
+  assert.ok(!storedKindsFor(src).includes('mindmap'), 'query 不该有导图')
+  assert.ok(storedKindsFor(src).includes('list'), 'query 有记录列表')
 })
 
 /* ------------------------------------------------------------ 读：拥有者 */

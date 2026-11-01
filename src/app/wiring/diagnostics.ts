@@ -545,8 +545,8 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
     /**
      * 自检用：**让读数层读一个 `.tx`**（DOM → run 序列）。
      *
-     * 为什么要开这个口子：「摘要／装饰不进正文」这类契约，落点是 `view/dom-text.ts`
-     * 的 `readRuns`。组件行的 `.tx` 是只读的，任何「打字再看 content」的测法都
+     * 为什么要开这个口子：「标签 chip 不进正文」这类契约，落点是 `view/dom-text.ts`
+     * 的 `readRuns`。而 chip 所在的 `.tx` 不可编辑，任何「打字再看 content」的测法都
      * **走不到**那条路（实测：删掉读数分支，断言照样绿）——只有直接调读数层才验得到。
      */
     readRuns: (tx: HTMLElement) => {

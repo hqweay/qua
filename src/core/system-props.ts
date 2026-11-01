@@ -11,7 +11,7 @@
  *   · **落盘校验**（`storage/shape.ts`）：冷启动读盘，坏形状判 corrupt（不是所有键都上落盘闸，
  *     见下）。同一份判据保证「写不进的读不出、读得出的写得过」，不会出现两档严格度。
  *
- * 判据本体住在各领域模块（alias/model/tags/hierarchy/collection/journal/props/query/view/mount/embed）——
+ * 判据本体住在各领域模块（alias/model/tags/hierarchy/journal/props/query/view/mount/embed）——
  * 本文件**只做表**，不写第二份判据。
  *
  * ## 刻意不上落盘闸的两个键
@@ -36,7 +36,6 @@ import { isAliasesValue } from './alias.ts'
 import { isDisplayValue, isIconValue, isListsValue } from './model.ts'
 import { TAGS_PROP, isTagRefList } from './tags.ts'
 import { BELONGS_TO_PROP, isBelongsToRefs } from './hierarchy.ts'
-import { COLLECTION_PROP, isCollectionRefList } from './collection.ts'
 import { isJournalDate } from './journal.ts'
 import {
   CHOICE_SCOPE_PROP,
@@ -70,7 +69,6 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   _query: isQuerySpec,
   [VIEWS_PROP]: isViewsValue,
   [ACTIVE_VIEW_PROP]: isActiveViewValue,
-  [COLLECTION_PROP]: isCollectionRefList,
   [EMBED_PROP]: (v) => canonicalViewRef(v) !== null,
   // 字段定义（props.ts）
   _kind: isPropKind,

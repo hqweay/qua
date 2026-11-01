@@ -16,7 +16,6 @@ import { canonicalViewRef, EMBED_PROP } from '../embed.ts'
 import { isActiveViewValue, isViewsValue, sourceConflicts } from '../view.ts'
 import { isAnno, isRun } from '../runs.ts'
 import { BELONGS_TO_PROP, isBelongsToRefs } from '../hierarchy.ts'
-import { COLLECTION_PROP, isCollectionRefList } from '../collection.ts'
 import { isJournalDate } from '../journal.ts'
 import { TAGS_PROP, isTagRefList } from '../tags.ts'
 import {
@@ -125,7 +124,7 @@ import {
  *            收端 `validate`、读侧这里三处共用；「什么算坏只能有一个答案」）。
  *            旧库若带历史脏值，会从「静默回落」变成「判 corrupt」⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 31
+export const WORKSPACE_VERSION = 32
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {
@@ -217,8 +216,6 @@ function isBlock(x: unknown): x is Block {
   if (tags !== undefined && !isTagRefList(tags)) return false
   const belongsTo = b.props[BELONGS_TO_PROP]
   if (belongsTo !== undefined && !isBelongsToRefs(belongsTo)) return false
-  const items = b.props[COLLECTION_PROP]
-  if (items !== undefined && !isCollectionRefList(items)) return false
   const date = b.props['_date']
   if (date !== undefined && !isJournalDate(date)) return false
   const icon = b.props[ICON_PROP]

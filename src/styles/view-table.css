@@ -714,30 +714,11 @@ button.queryview-chip:hover {
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-sm);
 }
-.vl-x {
-  flex: none;
-  padding: 0 var(--ui-gap-1);
-  border: 0;
-  background: transparent;
-  color: var(--ui-text-tertiary);
-  cursor: pointer;
-  opacity: 0;
-}
-.vl-row:hover .vl-x {
-  opacity: 1;
-}
-.vl-x:hover {
-  color: var(--ui-danger);
-}
 .vl-empty {
   margin: 0;
   padding: var(--ui-gap-3) var(--ui-gap-2);
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-sm);
-}
-.vl-add {
-  align-self: flex-start;
-  margin-top: var(--ui-gap-1);
 }
 
 /* ---------------------------------------------------------------- 看板

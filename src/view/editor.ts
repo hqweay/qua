@@ -78,7 +78,6 @@ import {
   type CtxKeys,
   type Doc,
   type FieldTable,
-  type FindBlock,
   type GutterField,
   type Located,
   type MovePlan,
@@ -341,21 +340,9 @@ export interface ViewEvents {
   /** 重新挂载窗口后（虚拟化） */
   mounted?: () => void
   /**
-   * **正文里组件体的画法**（`ui/dock-widgets.ts` 的 `widgetBodyInDoc`）。
-   *
-   * 为什么经事件表注入而不是让 `view` 直接 import：`view` 不得 import `ui`
-   * （arch-check [13]），而「一块组件长什么样」属于组件那一层。
-   * 画**多大**由 `block-dom` 按类型声明（`widget.height`）决定，这一格只给「画什么」。
-   *
-   * ⚠️ 未接 ⇒ 组件块在正文里是**空的 `.tx`**（只读块本来就没有正文），
-   *    不退化成「画一行普通文字」——那会把组件当成正文，而组件不是用户写的内容。
-   *    与 `refClick` 同一条口径：缺入口就让它看得见地缺，不静默做成另一种东西。
-   */
-  widgetBody?: (block: Block, find: FindBlock | undefined, mode: 'summary' | 'full') => HTMLElement
-  /**
    * **正文里露面块（镜像／投影）的身体**：由 UI 层画（`ui/embed-body.ts`）。
    *
-   * 与 `widgetBody` 同一条分工：`view` 只交代「这儿有身体、归你画」，不 import `ui`。
+   * `view` 只交代「这儿有身体、归你画」，不 import `ui`。
    * 返回一个卸载函数：身体里是另一台编辑器／一张表，**换 DOM 之前必须释放**
    * （否则每次重排都留一份订阅，页面越用越慢且不报错）。
    *
@@ -431,7 +418,7 @@ interface EditBase {
  */
 export type AcceptPick =
   | { kind: 'ref'; to: string; label: string; flavor?: '#' }
-  | { kind: 'newObj'; name: string }
+  | { kind: 'newObj'; name: string; tagId: string }
   | { kind: 'newPage'; name: string }
   /** 新标签是**目标**；三种键各给一个落点（`inline` 行内 / `assign` 块标签 / `instance` 新实例） */
   | { kind: 'newTag'; name: string; action: 'inline' | 'assign' | 'instance' }
@@ -700,12 +687,12 @@ export class BlockEditor {
     if (!active) return false
     if (active === this.container) return true
     if (!this.container.contains(active)) return false
-    // 焦点在**另一个编辑宿主**的子树里（挂载区、正文里的组件体）⇒ 不算「本视图在编辑」
+    // 焦点在**另一个编辑宿主**的子树里（挂载区、露面行的身体）⇒ 不算「本视图在编辑」
     return !active.closest(`[${EDIT_ISLAND_ATTR}]`) && !active.isContentEditable
   }
 
   /**
-   * 焦点是不是在本视图里那些**别的编辑宿主**上（挂载区／查询视图／正文里的组件体）。
+   * 焦点是不是在本视图里那些**别的编辑宿主**上（挂载区／查询视图／露面行的身体）。
    *
    * ⚠️ 判据不能只是「焦点在里层编辑器上」：点一下挂载区抬头那颗刷新按钮，
    *    焦点落到按钮上——那一刻**也不是**本视图在编辑。只判可编辑元素的话，
@@ -718,7 +705,7 @@ export class BlockEditor {
     return this.container.contains(active) && Boolean(active.closest(`[${EDIT_ISLAND_ATTR}]`))
   }
 
-  /** 有没有**另一台**编辑宿主正拿着焦点（挂载区／查询视图／组件体里的输入框） */
+  /** 有没有**另一台**编辑宿主正拿着焦点（挂载区／查询视图／露面体里的输入框） */
   private nestedEditorActive(): boolean {
     const active = document.activeElement as HTMLElement | null
     if (!active || active === this.container) return false
@@ -961,12 +948,12 @@ export class BlockEditor {
       // 它不是「可点空白建块」的地方：挂载区自己有点击语义，落到建块上就是静默多一个空块
       slot.dataset.noEmptyCreate = '1'
       /**
-       * **编辑岛标记**（`.sec-mount` 与正文里的组件体共用这一格）。
+       * **编辑岛标记**（`.sec-mount` 与露面行的身体共用这一格）。
        *
        * 为什么需要一个标记而不是按类名判：本视图里有几处要回答「焦点现在是不是
        * **在别人的地盘**上」（`ownFocus`／`focusInMount`／`nestedEditorActive`）。
        * 按 `.sec-mount` 这个**类名**判，就等于「只有挂载区算别人的地盘」——
-       * 正文里的组件体（`.widget-body`）同样嵌在本视图里、同样有自己的焦点，
+       * 露面行的身体（镜像／投影）同样嵌在本视图里、同样有自己的焦点，
        * 类名一换，那三处全部判错，而且是静默的：
        *   · `ownFocus` 判成「我在编辑」⇒ `restoreSel()` 把光标从里层抢回来；
        *   · `focusInMount` 判成「没有里层」⇒ 每次 store 变化都全量重排 ⇒
@@ -1084,8 +1071,6 @@ export class BlockEditor {
         context: r.depth === 0 ? this.doc.contexts?.get(r.block.id) : undefined,
         // 展开出来的根才有「收起上下文」；没接回调就不画一个点了没反应的按钮
         contextBack: Boolean(this.onContextBack) && r.depth === 0 && (this.doc.expandedRoots?.has(r.block.id) ?? false),
-        // 组件体由 UI 层画（`view` 不得 import `ui`）；没接 ⇒ 组件块在正文里退化成空行
-        ...(this.events.widgetBody ? { widgetBody: this.events.widgetBody } : {}),
         // 露面块的身体：这一层只认「有没有展开」；画什么由装配层给（见 `ViewEvents.embedBody`）
         embedBody: (b, into) => {
           if (!this.embedBodies) {
@@ -2608,38 +2593,33 @@ export class BlockEditor {
     return b.id
   }
 
-  /** 插入一个**分割线**：它只是「没有正文的块」里的一种，实现见 `insertWidgetAfter` */
+  /**
+   * 插入一个**分割线**：它是「没有正文的块」。
+   *
+   * 为什么它不是 `insertBlockAfter`：这类块的 `.tx` 里没有可写正文，插进去之后
+   * 用户会看到「多了一行，但光标消失了」。所以插入动作自己负责在下面留一个空块当落点
+   * （判据与形状见 `insertTypedAfter`）。
+   */
   insertDividerAfter(id: string): boolean {
-    return this.insertWidgetAfter(id, DIVIDER_TYPE)
+    return this.insertTypedAfter(id, DIVIDER_TYPE) !== null
   }
 
   /**
-   * **插入一个没有正文的块**（组件块／分割线），共用一个形状。
+   * 插入一块**没有正文的块**（分割线／露面块），返回它的 id（原地改类型时就是 `id` 自己）。
    *
-   * 为什么两者是同一个动作：它们的共同点不是「长什么样」，而是**「插完之后光标要落哪」
-   * 这个问题没有现成答案** —— 这类块的 `.tx` 里没有可写正文，插进去之后用户会看到
-   * 「多了一行，但光标消失了」。所以两支都要在下面留一个空块当落点。
-   *
-   * 分两支，判据是**插入点本身是不是一个空块**（与分割线同一条规则）：
-   *   · 空块 ⇒ 它**原地变成**这个类型（不新建）—— 用户在一行空白里要一个组件，
-   *     得到的就是那一行变成组件，而不是组件 + 多出来的空行；
+   * 分两支，判据是**插入点本身是不是一个空块**：
+   *   · 空块 ⇒ 它**原地变成**这个类型（不新建）—— 用户在一行空白里要一个分隔线，
+   *     得到的就是那一行变成分隔线，而不是分隔线 + 多出来的空行；
    *   · 有内容 ⇒ 在它下面**新建**，并留一个空块给光标。
    *
    * ⚠️ 改类型那一支**不新建块**，所以撤销一次就回到「那行还是空白」。
    * ⚠️ 新建那一支**两个块共用一个撤销快照**：用户按的是一次「插入」，
    *    撤销一次该回到按下之前，而不是先撤光标再撤组件。
    *
-   * @param typeId 目标类型（必须声明 `text:'readonly'`；可写的类型不该走这条路）
-   */
-  insertWidgetAfter(id: string, typeId: string): boolean {
-    return this.insertTypedAfter(id, typeId) !== null
-  }
-
-  /**
-   * 插入一块**没有正文的块**（组件块／分割线／露面块），返回它的 id（原地改类型时就是 `id` 自己）。
-   *
    * `decorate` 在同一次事务里给新块补属性（露面的指针、看法）——分开写会变成两条 op、
    * 两次撤销，而用户按的是一次「插入」。
+   *
+   * @param typeId 目标类型（必须声明 `text:'readonly'`；可写的类型不该走这条路）
    */
   private insertTypedAfter(
     id: string,
@@ -3400,16 +3380,6 @@ export class BlockEditor {
         if (from) this.commitEdit(from)
         this.events.onAtomClick?.(atom, el, mods)
       },
-      /**
-       * 点了正文里的组件行：先交出当前行的编辑期——理由与 `focusBlock` 完全相同
-       * （点 `contenteditable=false` 不派发 `focusout`，不显式提交则修改时间停在上一处）。
-       */
-      onWidgetRowClick: (id, shiftKey) => {
-        const from = this.caretBlock() ?? this.editBase?.id ?? null
-        if (from && from !== id) this.commitEdit(from)
-        if (shiftKey) this.events.openInDock?.(id)
-        else this.events.focusBlock?.(id)
-      },
       onBlockMenu: (id, rect, appearanceHost) => this.events.blockMenu?.(id, rect, appearanceHost),
       onAtomMenu: (hit, el, rect) => this.events.atomMenu?.(hit, el, rect),
       // 左键点块标 ＝ 聚焦/zoom。这也是**离开这一行**：先把当前行的编辑交出去
@@ -3549,11 +3519,21 @@ export class BlockEditor {
       let recordId: string | null = null
       let pageId: string | null = null
 
-      const needTag = pick.kind === 'tag' || pick.kind === 'newObj' || pick.kind === 'newTag'
+      const needTag = pick.kind === 'tag' || pick.kind === 'newTag'
       if (needTag) {
         const tag = ensureTagInTx(tagLookupOf(this.store.blocks), pick.name, tx)
         if (!tag) return false
         tagId = tag.id
+      }
+      if (pick.kind === 'newObj') {
+        /**
+         * 新实例的标签由**浮层打开那一刻的 tagId** 给（第二段成员搜索锚定的就是它），
+         * 不再按名字重解析：实例名与标签名是两个名字，按名解析会把实例名当成标签名。
+         * 打开到按下之间标签可能被摘身份 ⇒ 找不回就整体不做，不猜一个落点。
+         */
+        const tagBlock = this.store.find(pick.tagId)
+        if (!tagBlock || !hasList(tagBlock, 'tag')) return false
+        tagId = tagBlock.id
       }
 
       if (pick.kind === 'newPage') {

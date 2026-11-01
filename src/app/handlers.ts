@@ -13,7 +13,6 @@
  *    改成变量再 spread 会让断言数不到（数到 0 也照样报过 —— 断言空转比红更危险）。
  */
 import type { Handler } from '../core/ports.ts'
-import { COLLECTION_HANDLERS } from './handlers/collection.ts'
 import { EMBED_HANDLERS } from './handlers/embed.ts'
 import { STRUCT_HANDLERS } from './handlers/block.ts'
 import { DEV_HANDLERS } from './handlers/dev.ts'
@@ -31,7 +30,6 @@ export const HANDLERS: Record<string, Handler> = {
   ...STRUCT_HANDLERS,
   ...PROPS_HANDLERS,
   ...MOUNT_HANDLERS,
-  ...COLLECTION_HANDLERS,
   ...EMBED_HANDLERS,
   ...TAGS_HANDLERS,
   ...PAGE_HANDLERS,

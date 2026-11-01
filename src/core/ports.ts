@@ -433,22 +433,6 @@ export interface App {
   insertQueryBlock(blockId?: string): string
   /** 改一次露面选的视图（`core.embed/set-view` 的落点） */
   setEmbedView(blockId: string, view: string): boolean
-  /* 集合组件 */
-  /** 新建一个集合块（森林顶层），返回它的 id；放进哪个槽由调用方决定 */
-  createCollection(name?: string): string
-  /** 往集合里加一条引用：块必须存在，且不能是集合自己；重复加入是 no-op */
-  addCollectionItem(collectionId: string, blockId: string): boolean
-  /** 从集合里摘一条引用：只摘引用，不删块；摘不存在的项返回 false */
-  removeCollectionItem(collectionId: string, blockId: string): boolean
-  /** 把一条引用移到新位置；`to` 是当前列表里的插入下标（含被拖项） */
-  moveCollectionItem(collectionId: string, blockId: string, to: number): boolean
-  /**
-   * 打开「选一块加进收藏」的选择器（**纯 UI**，落在装配层）。
-   *
-   * 与 `addCollectionItem` 分开：那个要 blockId，而用户手里还没有 id ——
-   * 这一步是「从库里挑一块」，挑完再调 add。
-   */
-  showCollectionPicker(collectionId: string): void
   /* 浮层 / 提示 */
   toast(text: string, kind?: 'ok' | 'warn' | 'info'): void
   showMenu(req: MenuRequest): void

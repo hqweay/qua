@@ -36,6 +36,10 @@ import { resolveBindings } from '../../core/bindings.ts'
 import { t } from '../../core/msg.ts'
 import { TRIGGER_QUERY_MAX, type TriggerChar } from '../../core/trigger.ts'
 import { rowsFromBindings, type Row } from '../../ui/layers.ts'
+// 第二段（成员搜索）的判据住在 `member-rows.ts`（纯函数，可单测）；这里只取成员上限常量，
+// 并把形状转发给装配层（`main.ts` 从这里拿 `memberRows`，与 `createTriggers` 同一个门面）。
+import { INSTANCE_CAP } from './member-rows.ts'
+export { INSTANCE_CAP, memberRows, type MemberTagRef } from './member-rows.ts'
 
 /** 源能问到的东西：整片森林（现取）与浮层要用到的上下文键 */
 export interface TriggerDeps {
@@ -109,8 +113,6 @@ function matchesName(b: Block, want: string): boolean {
  *    · 空正文的成员多半是「刚被 chip 归类、还没写字」的宿主块 —— 引用它会显示「无标题」，
  *      这不是用户想提及的对象。正在打字的这一块也排除（引用自己没有意义）。
  */
-const INSTANCE_CAP = 20
-
 function instanceRows(tags: readonly Block[], want: string, deps: TriggerDeps): Row[] {
   if (want === '') return []
   const byId = new Map(tags.map((tag) => [tag.id, tag]))
@@ -125,7 +127,7 @@ function instanceRows(tags: readonly Block[], want: string, deps: TriggerDeps): 
     const ids = tagIdsOf(b).filter((id) => matched.has(id))
     if (ids.length === 0) return
     const label = displayNameOf(b).trim() || t('ui.page.untitled')
-    // 实例行也带着「它属于哪个标签」：⌥↵ 归类、⇧↵ 再建一条实例都要用到这个名字
+    // 实例行也带着「它属于哪个标签」：⌥↵ 归类、⇧↵ 进成员搜索都要用到这个名字
     const owner = byId.get(ids[0]!)
     const tagName = owner ? primaryAliasOf(owner) || displayNameOf(owner) : ''
     hits.push({
@@ -137,13 +139,18 @@ function instanceRows(tags: readonly Block[], want: string, deps: TriggerDeps): 
         icon: 'lucide:square-dashed',
         group: 'retrieval/1-instance',
         keyHint: deps.shortcutHint,
-        pick: { kind: 'instance', id: b.id, name: label, tag: tagName },
+        pick: { kind: 'instance', id: b.id, name: label, tag: tagName, tagId: ids[0]! },
       },
     })
   })
   // 最近的在前：同一段文字可能有很多次出现，用户更可能想引用刚记下的那一条
   return hits.sort((a, b) => b.modified - a.modified).slice(0, INSTANCE_CAP).map((h) => h.row)
 }
+
+/* -------------------------------------------------- 成员搜索（`#` 的第二段）*/
+
+// 判据住在 `member-rows.ts`（纯函数，可单测）；这里只转发装配层要用的形状。
+// （import／export 都在文件头，`tagRows` 不经过它——成员搜索由装配层直接问 member-rows。）
 
 function tagRows(query: string, deps: TriggerDeps): Row[] {
   const forest = deps.forest()

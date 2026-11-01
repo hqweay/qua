@@ -2,7 +2,7 @@
  * 侧槽装配：**槽＝一列卡片**（窗口 ＋ 派生卡），以及它们的三件视图状态。
  *
  * 这一层只做「按 `cards` 顺序取卡、把状态接到卡上、把用户的动作落成 prefs」：
- *   · 卡片内容由 `DockWindows`（窗口）、`widgetBody`（组件）与 `dock-content`
+ *   · 卡片内容由 `DockWindows`（窗口）与 `dock-content`
  *     （归属树／日历／反链／回收站／检视卡）提供；
  *   · 卡壳、收起、单卡、关闭、拖拽由 `ui/dock` 提供；
  *   · 这里不认识块的内容，也不碰 DOM 的具体长相。
@@ -17,10 +17,8 @@ import {
   dockKey,
   findInForest,
   isCardCollapsed,
-  isWidgetBlock,
   pinDefaultFor,
   pruneEphemeralWindows,
-  widgetSlotHeightOf,
   type DerivedCardId,
   type DockEntry,
   type WindowEntryAction,
@@ -43,9 +41,7 @@ import {
 } from '../../ui/dock.ts'
 import { backrefsCard, trashCard, type DockContentDeps } from '../../ui/dock-content.ts'
 import { calendarCard } from '../../ui/calendar-card.ts'
-import { widgetBody, widgetTitle, type WidgetDeps } from '../../ui/dock-widgets.ts'
 import { BelongsTree } from '../../ui/belongs-tree.ts'
-import { applyWidgetHeights } from '../../view/block-dom.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { bindDropTarget, setDragCard } from '../../view/dnd.ts'
 import { bindWindowDrop } from '../../ui/dock-windows.ts'
@@ -68,8 +64,6 @@ export type DocksDeps = {
    * 这里只在重画时取它、给它补卡壳（收起/单卡/拖拽）。
    */
   inspectCard: () => HTMLElement
-  /** 集合卡的块选择器（锚在「选择块」按钮上） */
-  pickBlock: (collectionId: string, anchor: DOMRect) => void
   /** 右键卡头：卡片菜单（行与动作归装配入口——它有浮层与命令面；这里只给时机与锚） */
   showCardMenu: (side: 'left' | 'right', key: string, anchor: DOMRect) => void
 }
@@ -100,31 +94,6 @@ export function setupDocks(deps: DocksDeps) {
       void deps.getRegistry().invoke('core.block/restore', { blockId: id }, 'dock')
       renderDocks()
     },
-  }
-
-  /**
-   * 组件卡的宿主能力：读门面、打开、以及「加/摘引用」两条写路径。
-   * 写走命令面；写完在这里补一次重画（集合卡不是编辑器，没有自己的 change 事件）。
-   */
-  const widgetDeps: WidgetDeps = {
-    kb,
-    activeId: () => deps.getWs().activeId,
-    open: (id) => dockDeps.openPage(id),
-    openInDock: (id) => openWindow('right', id),
-    addItem: (collectionId, blockId) => {
-      void deps.getRegistry().invoke('core.collection/add', { collectionId, blockId }, 'dock')
-      renderDocks()
-    },
-    removeItem: (collectionId, blockId) => {
-      void deps.getRegistry().invoke('core.collection/remove', { collectionId, blockId }, 'dock')
-      renderDocks()
-    },
-    moveItem: (collectionId, blockId, to) => {
-      void deps.getRegistry().invoke('core.collection/move', { collectionId, blockId, to }, 'dock')
-      renderDocks()
-    },
-    pickBlock: (collectionId, anchor) => deps.pickBlock(collectionId, anchor),
-    untitledLabel: t('ui.page.untitled'),
   }
 
   /**
@@ -261,8 +230,7 @@ export function setupDocks(deps: DocksDeps) {
       const at = lastWindowIndex(dock[side].cards)
       dock[side].cards.splice(at + 1, 0, entry)
     }
-    const block = deps.kb.get(blockId)
-    if (pinDefaultFor(action) || (block && isWidgetBlock(block))) dock.pinnedCards[key] = true
+    if (pinDefaultFor(action)) dock.pinnedCards[key] = true
     if (!dock[side].open) {
       dock[side].open = true
       deps.applyChrome()
@@ -303,11 +271,8 @@ export function setupDocks(deps: DocksDeps) {
    * 家具要关，每张卡自己的 ✕ 就是入口。
    */
   function isWindowEntry(side: 'left' | 'right', key: string): boolean {
-    const dock = deps.prefs().dock
-    const entry = dock[side].cards.find((e) => dockKey(e) === key)
-    if (!entry || entry.kind !== 'block') return false
-    const b = deps.kb.get(entry.block)
-    return b !== undefined && !isWidgetBlock(b)
+    const entry = deps.prefs().dock[side].cards.find((e) => dockKey(e) === key)
+    return entry?.kind === 'block'
   }
 
   /** 单摘一批：清 solo／pin／收起键，与 closeCard 同一条路，但一次可以摘多张 */
@@ -318,8 +283,6 @@ export function setupDocks(deps: DocksDeps) {
     dock[side].cards = dock[side].cards.filter((e) => {
       const k = dockKey(e)
       if (e.kind !== 'block') return true
-      const b = deps.kb.get(e.block)
-      if (b !== undefined && isWidgetBlock(b)) return true
       if (k === keep) return true
       removed.push(k)
       return false
@@ -370,7 +333,7 @@ export function setupDocks(deps: DocksDeps) {
   /**
    * 启动清理（每个启动段只跑一次）：非 pin 的块窗口卡不留到这一轮。
    *
-   * 判据在 `pruneEphemeralWindows`（core 纯函数，这里供它块模型知识：组件块是家具）。
+   * 判据在 `pruneEphemeralWindows`（core 纯函数）。
    * 顺手清掉指向被清卡的 solo 与收起键——留着的都是不再指任何东西的垃圾。
    * 挂在首次重画上而不是装配体里：装配早于持久化段，那里拿不到保存入口；
    * 首次重画时依赖都已就位，清完当场落盘。清过了就不再动（幂等）。
@@ -380,14 +343,10 @@ export function setupDocks(deps: DocksDeps) {
     if (pruned) return
     pruned = true
     const dock = deps.prefs().dock
-    const isWidget = (id: string) => {
-      const b = deps.kb.get(id)
-      return b !== undefined && isWidgetBlock(b)
-    }
     const removed = new Set<string>()
     for (const side of ['left', 'right'] as const) {
       const before = dock[side].cards
-      const after = pruneEphemeralWindows(before, dock.pinnedCards, isWidget)
+      const after = pruneEphemeralWindows(before, dock.pinnedCards)
       if (after.length === before.length) continue
       for (const e of before) if (!after.includes(e)) removed.add(dockKey(e))
       dock[side].cards = after
@@ -427,13 +386,7 @@ export function setupDocks(deps: DocksDeps) {
 
   function renderSlot(side: 'left' | 'right', slot: DockSlotEls): void {
     const cards = deps.prefs().dock[side].cards
-    /**
-     * 窗口管理器只收**内容块**：组件块（类型声明了 widget）由下面的 renderer 画，
-     * 不能再建一个 `BlockEditor` —— 那会得到一张「窗口卡」和一张「组件卡」抢同一个 id。
-     */
-    const contentIds = cards.flatMap((e) =>
-      e.kind === 'block' && !isWidgetBlock(deps.kb.get(e.block)) ? [e.block] : [],
-    )
+    const contentIds = cards.flatMap((e) => (e.kind === 'block' ? [e.block] : []))
     const winCards = windows ? windows[side].sync(contentIds) : new Map<string, HTMLElement>()
     const entries: DockCardEntry[] = []
     for (const card of cards) {
@@ -445,33 +398,6 @@ export function setupDocks(deps: DocksDeps) {
       }
       if (card.kind === 'derived') {
         entries.push({ ...derivedCard(side, card.card), size: 'large' })
-        continue
-      }
-      const block = deps.kb.get(card.block)
-      if (block && isWidgetBlock(block)) {
-        const body = widgetBody(block, widgetDeps)
-        const el = buildDockCard(
-          {
-            id: key,
-            title: widgetTitle(block),
-            body,
-            draggable: true,
-            close: { title: t('ui.dock.closeWidget'), onClick: () => closeCard(side, key) },
-          },
-          cardStateFor(side, key),
-        )
-        el.dataset.widget = '1'
-        /**
-         * **卡的两个高度**：静止（`rest`）与被聚焦（`focus`）。
-         *
-         * 与正文里的组件体读同一份声明、同一个数值表（`applyWidgetHeights`）：
-         * 「同一张卡在槽里和正文里长得不一样高」会让人以为是两份配置。
-         * 切档同样是纯 CSS（`:focus-within`）——卡里一有焦点就长开，焦点离开就收回。
-         * ⚠️ 高度挂在**卡根**上（自定义属性向下继承，`.dock-card-body` 自己读）：
-         *    挂在内容元素上，卡壳那一层读不到。
-         */
-        applyWidgetHeights(el, widgetSlotHeightOf(block))
-        entries.push({ id: key, el, size: 'large' })
         continue
       }
       const el = winCards.get(card.block)
@@ -808,14 +734,6 @@ export function setupDocks(deps: DocksDeps) {
     /** 卡头状态/标题给窗口管理器用（窗口卡由它自己建） */
     cardStateFor,
     windowLabel,
-    /**
-     * 正文里的组件体要的宿主能力（与槽里的卡**同一份** `widgetDeps`）。
-     *
-     * 为什么不另建一份：正文里的组件与槽里的卡是**同一个组件的两个露面**，
-     * 「加一条引用」这类动作写的是同一格 `_items`。两份 deps 会长出两套「写完重画谁」，
-     * 于是「在正文里加一条，槽里的卡没跟上」。
-     */
-    widgetDeps: (): WidgetDeps => widgetDeps,
     /** 窗口管理器由装配入口在槽挂载之后创建，再交回给这一节 */
     setWindows: (next: { left: DockWindows; right: DockWindows }) => {
       windows = next

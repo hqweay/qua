@@ -124,8 +124,6 @@ export type SystemPropId =
   // 视图配置（见 `core/view.ts`）：一个块怎么看，与它是什么是两件事
   | typeof VIEWS_PROP
   | typeof ACTIVE_VIEW_PROP
-  // 集合组件的有序引用（见 `core/collection.ts`）：集合自己的内容，复制跟着走
-  | '_items'
   // 露面指针（见 `core/embed.ts`）：同一块在别处再出现一次
   | '_embed'
   // 字段定义（prop-def）：kind / 声明列表 / 选项的可见范围
