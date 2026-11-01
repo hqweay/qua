@@ -5143,6 +5143,17 @@ await check('T25 块标左键 = 聚焦/zoom：点一下进子树，右键才开�
   })
   const menuLabels = await page.evaluate(() => [...document.querySelectorAll('.layer-item .layer-label')].map((r) => r.textContent))
   assert(menuLabels.length >= 8, `右键应打开块菜单：${JSON.stringify(menuLabels)}`)
+  /**
+   * ②b **点正文别处 ⇒ 菜单自己关**（不必再找 Esc）。
+   * 判据用正文里的块行（`.blk`）：它曾经是「点外面不关」的例外，
+   * 而正文几乎全是它 ⇒ 菜单会一直挡着，用户点一下想继续写却关不掉。
+   */
+  const closedByClick = await page.evaluate(() => {
+    const el = document.querySelector('#editor .blk[data-depth="0"] .tx') ?? document.querySelector('#editor .blk .tx')
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    return document.querySelectorAll('.layer').length
+  })
+  assert(closedByClick === 0, `点正文别处应关闭块菜单，实际还剩 ${closedByClick} 个浮层`)
   await page.keyboard.press('Escape')
 
   // ③ 点顶层自己（depth 0）的块标 ⇒ 仍是 zoom 语义（Breadcrumb 空 ⇒ 视图不变，但不开菜单）
@@ -5156,7 +5167,7 @@ await check('T25 块标左键 = 聚焦/zoom：点一下进子树，右键才开�
   assert(selfClick.after === selfClick.before, `点顶层块标（＝zoom 到自己）不该改变装载：${JSON.stringify(selfClick)}`)
 
   await ctx.close()
-  return `左键点 ${target.id.slice(-6)} → zoom 收窄到 ${zoomed.here} 块（面包屑「${zoomed.trail.join(' › ')}」，无菜单）；右键 → 块菜单 ${menuLabels.length} 项`
+  return `左键点 ${target.id.slice(-6)} → zoom 收窄到 ${zoomed.here} 块（面包屑「${zoomed.trail.join(' › ')}」，无菜单）；右键 → 块菜单 ${menuLabels.length} 项；点正文别处自动关`
 })
 
 await check('T22 首行即当前对象：页块正文（描述）可编辑、在首行按 Enter 不自环', async () => {
@@ -12626,6 +12637,112 @@ await check('T145 锚文本：清空 ⇒ 回到现算名（空串＝删键，不
 
   await ctx.close()
   return `清锚文本：键被删掉、行内回到现算名（${cleared.label}）`
+})
+
+await check('T145b 右键行内对象：引用/标签各有自己的菜单，锚文本入口同一浮层且直落输入框', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+  const setup = await seedPageRef(page)
+
+  /** 右键一枚原子/一块 chip，返回菜单标题与行标签（同一份读法，两个用例共用） */
+  const openMenuAt = (selector) =>
+    page.evaluate((sel) => {
+      const el = document.querySelector(sel)
+      if (!el) return { title: '', rows: [], missing: true }
+      el.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 240, clientY: 160 }),
+      )
+      return {
+        title: document.querySelector('.layer .layer-head')?.textContent ?? '',
+        rows: [...document.querySelectorAll('.layer-item .layer-label')].map((x) => x.textContent),
+      }
+    }, selector)
+  const pickMenuRow = async (text) => {
+    await page.evaluate((label) => {
+      const item = [...document.querySelectorAll('.layer-item')].find((el) =>
+        el.textContent?.includes(label),
+      )
+      item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    }, text)
+    await page.waitForTimeout(180)
+  }
+
+  // ① 右键那枚引用 ⇒ **行内对象**菜单（不是块菜单：它不该出现「删除块」这类项）
+  const refMenu = await openMenuAt(`#editor [data-atom-id="${setup.runId}"]`)
+  assert(!refMenu.missing, '前置：引用的 DOM 应在编辑区里')
+  assert(refMenu.title === '行内对象', `右键引用应开行内对象菜单：${JSON.stringify(refMenu)}`)
+  assert(refMenu.rows.includes('修改显示名…'), `引用菜单应有锚文本入口：${JSON.stringify(refMenu.rows)}`)
+  assert(refMenu.rows.includes('删除这处引用'), `引用菜单应能删这一处：${JSON.stringify(refMenu.rows)}`)
+  assert(!refMenu.rows.includes('删除块'), `别让块菜单抢了这枚原子：${JSON.stringify(refMenu.rows)}`)
+
+  // ② 点「修改显示名…」⇒ 与 ⌥ 点击**同一个浮层**，且焦点直接落在输入框
+  await pickMenuRow('修改显示名…')
+  const focused = await page.evaluate((runId) => {
+    const a = document.activeElement
+    return {
+      popover: document.querySelectorAll('.popover').length,
+      tag: a?.tagName ?? '',
+      anchorFor: a instanceof HTMLElement ? (a.dataset.anchorInput ?? '') : '',
+      runId,
+    }
+  }, setup.runId)
+  assert(focused.popover === 1, `应打开同一个锚文本浮层：${JSON.stringify(focused)}`)
+  assert(
+    focused.tag === 'INPUT' && focused.anchorFor === focused.runId,
+    `焦点应直落锚文本输入框（右键入口少一步点击）：${JSON.stringify(focused)}`,
+  )
+  await page.keyboard.type('右键写的名字')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(180)
+  const written = await page.evaluate(
+    ({ id, runId }) => ({
+      anchor: window.__qua.__editor.store.find(id).content.find((r) => r.id === runId)?.anchor,
+      dom: document.querySelector(`#editor [data-atom-id="${runId}"]`)?.textContent ?? '',
+    }),
+    { id: setup.blockId, runId: setup.runId },
+  )
+  assert(written.anchor === '右键写的名字', `右键入口应写到同一枚 run：${JSON.stringify(written)}`)
+  assert(written.dom.includes('右键写的名字'), `行内应显示新名字：${written.dom}`)
+
+  // ③ 已有锚文本时，菜单多一条「恢复默认显示名」；点了 ⇒ 键被删掉
+  await page.keyboard.press('Escape')
+  const anchoredMenu = await openMenuAt(`#editor [data-atom-id="${setup.runId}"]`)
+  assert(anchoredMenu.rows.includes('恢复默认显示名'), `有锚文本时应给清除项：${JSON.stringify(anchoredMenu.rows)}`)
+  await pickMenuRow('恢复默认显示名')
+  const cleared = await page.evaluate(
+    ({ id, runId }) => {
+      const r = window.__qua.__editor.store.find(id).content.find((x) => x.id === runId)
+      return { hasKey: r !== undefined && 'anchor' in r, label: window.__qua.atoms().find((a) => a.id === runId)?.label ?? '' }
+    },
+    { id: setup.blockId, runId: setup.runId },
+  )
+  assert(cleared.hasKey === false, `清除应删键（不是留空串）：${JSON.stringify(cleared)}`)
+  assert(cleared.label.length > 0, `清除后回到现算名：${JSON.stringify(cleared)}`)
+
+  // ④ 标签 chip ＝ **归属**：菜单给的是「从本块摘除标签」，点了归属消失、chip 消失
+  const tagged = await page.evaluate((blockId) => {
+    window.__qua.invoke('core.tags/add', { blockId, name: '右键测试标签' })
+    return blockId
+  }, setup.blockId)
+  await page.waitForTimeout(180)
+  const chipMenu = await openMenuAt(`.blk[data-block-id="${tagged}"] .blk-tags .tag-chip`)
+  assert(!chipMenu.missing, '前置：加了标签后应画出 chip')
+  assert(chipMenu.title === '行内对象', `右键 chip 也应开自己的菜单：${JSON.stringify(chipMenu)}`)
+  assert(chipMenu.rows.includes('从本块摘除标签'), `chip 菜单应能摘归属：${JSON.stringify(chipMenu.rows)}`)
+  assert(!chipMenu.rows.includes('删除这处引用'), `chip 没有 run，不该出现删引用：${JSON.stringify(chipMenu.rows)}`)
+  await pickMenuRow('从本块摘除标签')
+  const tagGone = await page.evaluate(
+    (blockId) => ({
+      tags: window.__qua.__editor.store.find(blockId)?.props?._tags ?? [],
+      chips: document.querySelectorAll(`.blk[data-block-id="${blockId}"] .blk-tags .tag-chip`).length,
+    }),
+    tagged,
+  )
+  assert(tagGone.tags.length === 0, `摘标签应改归属（_tags）：${JSON.stringify(tagGone)}`)
+  assert(tagGone.chips === 0, `摘了归属后 chip 应消失：${JSON.stringify(tagGone)}`)
+
+  await ctx.close()
+  return `右键引用 → 行内对象菜单（改锚文本直落输入框／清除／删除）；右键 chip → 摘归属（_tags 清零、chip 消失）`
 })
 
 await check('T146 锚文本：目标被删 ⇒ dangling 仍显示 anchor（`anchor ?? label`，不是空白）', async () => {

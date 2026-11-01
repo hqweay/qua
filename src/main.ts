@@ -9,6 +9,8 @@
 import './styles.css'
 import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  isWidgetBlock, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
+import { canWriteText } from './core/types.ts'
+import { hasTag } from './core/tags.ts'
 import { checkExternalUrl, rejectText } from './core/link.ts'
 import { BlockStore } from './core/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
@@ -39,7 +41,7 @@ import { mountEmbedBody } from './ui/embed-body.ts'
 import { renderAliasEditor } from './ui/alias-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, renderLinkComposer, type ObjFieldDeps, type PanelDeps } from './ui/panels.ts'
 import { openImageLightbox } from './ui/lightbox.ts'
-import type { RefClickHit, RefClickMods } from './view/editor-events.ts'
+import type { AtomMenuHit, RefClickHit, RefClickMods } from './view/editor-events.ts'
 import { collectionCommands, devCommands, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, zoomCommands } from './app/commands-impl.ts'
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
@@ -672,8 +674,11 @@ let objFieldDeps: ObjFieldDeps | undefined
  */
 const anchorOf = (el: HTMLElement) => () => (el.isConnected ? el.getBoundingClientRect() : null)
 
-const showAtomPopover = (a: RunWithId, anchor: DOMRect | null | (() => DOMRect | null)): void =>
-  panelPopover(panelDeps, a, anchor, objFieldDeps)
+const showAtomPopover = (
+  a: RunWithId,
+  anchor: DOMRect | null | (() => DOMRect | null),
+  opts?: { focusAnchor?: boolean },
+): void => panelPopover(panelDeps, a, anchor, objFieldDeps, opts)
 
 /**
  * 一枚 run 的**当前模型对象**（点击时 DOM 上只有 id，载荷要现查）。
@@ -788,6 +793,92 @@ function handleRefClick(ref: RefClickHit, mods: RefClickMods, el?: HTMLElement):
    */
 }
 const openDrawerFor = (kind: PanelKind): void => panelDrawer(panelDeps, kind)
+
+/**
+ * 行内对象右键菜单里那两条**不是命令**的行。
+ *
+ * 判据：它们打开的是 UI 面（锚文本浮层、资产详情），不写模型 ⇒ 不发明一条
+ * 「命令里弹浮层」的命令（命令层不该知道浮层长什么样，`arch [18]` 只管 DOM，
+ * 但「命令只回答模型动作」这条是同一件事的边界）。写动作仍然全部走命令。
+ */
+const ATOM_ROW_EDIT_ANCHOR = 'atom/edit-anchor'
+const ATOM_ROW_DETAILS = 'atom/details'
+
+/**
+ * **右键一枚行内对象**：按它的身份现算一组动作。
+ *
+ * 三类身份各有一条不许合并的差别（见 `AtomMenuHit`）：
+ *   · `tagId`＝块级标签 chip，它是**归属**（`props._tags`）⇒ 摘掉的是归属；
+ *   · `flavor:'#'` 的 ref＝正文里的**提及** ⇒ 删掉的只是这次提及，归属不动；
+ *   · 普通 ref／link／asset＝行内原子本身 ⇒ 删的是这一枚。
+ * 这三件事在界面上必须是**三个不同的词**；用一个「移除标签」同时兜住，
+ * 用户会以为删字摘了标签（模型里没有），或者摘了归属却发现正文里还留着。
+ */
+function handleAtomMenu(hit: AtomMenuHit, el: HTMLElement, rect: DOMRect): void {
+  const host = findInForest(ws.blocks, hit.blockId)
+  const writable = host !== undefined && canWriteText(host)
+  const run = hit.runId ? findRunOrNull(hit.runId) : null
+  const target = hit.to !== undefined && hit.to !== '' && findInForest(ws.blocks, hit.to) ? hit.to : undefined
+  const rows: Row[] = []
+  const add = (id: string, label: string, command: string, args: Record<string, unknown>, icon: string): void => {
+    rows.push({ id, label, command, args, icon })
+  }
+
+  if (hit.tagId) {
+    // chip ＝ 归属：打开标签 / 从本块摘掉这一格归属（摘归属不删正文里的任何字）
+    if (target) add('atom/open-tag', t('ui.popover.openPage'), 'core.block/focus-block', { blockId: target }, 'lucide:arrow-up-right')
+    if (writable) add('atom/remove-tag', t('ui.atomMenu.removeTag'), 'core.tags/remove', { blockId: hit.blockId, tagId: hit.tagId }, 'lucide:x')
+  } else if (run?.t === 'ref') {
+    const isMention = run.flavor === '#'
+    if (target) {
+      add('atom/open', t('ui.popover.openPage'), 'core.block/focus-block', { blockId: target }, 'lucide:arrow-up-right')
+      add('atom/open-dock', t('cmd.dock.open-block'), 'core.dock/open-block', { blockId: target, side: 'right' }, 'lucide:panel-right')
+    }
+    if (!isMention && writable) {
+      rows.push({ id: ATOM_ROW_EDIT_ANCHOR, label: t('ui.atomMenu.editAnchor'), icon: 'lucide:pencil' })
+      if (run.anchor !== undefined) {
+        add('atom/clear-anchor', t('ui.atomMenu.clearAnchor'), 'core.editor/set-anchor', { atomId: run.id, text: '' }, 'lucide:rotate-ccw')
+      }
+    }
+    // 行内 # 是**提及**：只有当这块本来就有这份归属时，才多给一条「摘归属」
+    if (isMention && writable && target && host && hasTag(host, target)) {
+      add('atom/remove-tag-inline', t('ui.atomMenu.removeTag'), 'core.tags/remove', { blockId: hit.blockId, tagId: target }, 'lucide:tag')
+    }
+    if (writable) {
+      const label = isMention ? t('ui.atomMenu.removeMention') : t('ui.atomMenu.removeRef')
+      add('atom/remove', label, 'core.editor/remove-atom', { atomId: run.id }, 'lucide:trash-2')
+    }
+  } else if (run?.t === 'link') {
+    add('atom/open-link', t('ui.atomMenu.openLink'), 'core.link/open', { atomId: run.id }, 'lucide:external-link')
+    if (writable) add('atom/remove', t('ui.atomMenu.removeAtom'), 'core.editor/remove-atom', { atomId: run.id }, 'lucide:trash-2')
+  } else if (run?.t === 'asset') {
+    rows.push({ id: ATOM_ROW_DETAILS, label: t('ui.atomMenu.details'), icon: 'lucide:info' })
+    if (writable) add('atom/remove', t('ui.atomMenu.removeAtom'), 'core.editor/remove-atom', { atomId: run.id }, 'lucide:trash-2')
+  }
+
+  if (rows.length === 0) return
+  showMenu({
+    kind: 'menu',
+    prefix: 'atom/',
+    anchor: rect,
+    title: t('menu.title.atom'),
+    extraRows: rows,
+    onPick: (row) => {
+      if (row.id === ATOM_ROW_EDIT_ANCHOR) {
+        if (run?.t !== 'ref') return
+        // 与 ⌥ 点击开的是**同一个浮层**（锚文本只有一个写入口）；焦点直接落在输入框
+        showAtomPopover(run, anchorOf(el), { focusAnchor: true })
+        return
+      }
+      if (row.id === ATOM_ROW_DETAILS) {
+        if (run?.t !== 'asset') return
+        showAssetDetails(run.id, run.asset, el)
+        return
+      }
+      if (row.command) void registry.invoke(row.command, (row.args as Record<string, unknown>) ?? {}, 'menu')
+    },
+  })
+}
 
 /* ------------------------------------------------------------ 键位派发（接线） */
 
@@ -1941,6 +2032,8 @@ function viewEvents(
      * 缺失/不可用**不开空 lightbox**，直接给详情（那里面说清为什么没有图）。
      */
     onAtomClick: (atom, el, mods) => handleAtomClick(atom, el, mods, via),
+    /** 右键一枚行内对象：引用改锚文本、标签摘归属、图看详情——三类身份三组动作 */
+    atomMenu: (hit, el, rect) => handleAtomMenu(hit, el, rect),
     onCopy: (ids, text) => {
       copiedClip = { ids: [...ids], text }
     },

@@ -290,7 +290,23 @@ export interface LinkComposerDeps {
   toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
-export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect | null | (() => DOMRect | null), fields?: ObjFieldDeps): void {
+export function showAtomPopover(
+  deps: PanelDeps,
+  a: RunWithId,
+  rect: DOMRect | null | (() => DOMRect | null),
+  fields?: ObjFieldDeps,
+  opts?: {
+    /**
+     * 打开后把焦点放进锚文本输入框。
+     *
+     * 入口来自右键菜单的「修改显示名…」：用户是**为了改它**才点的这一项，
+     * 再让他自己点一下输入框就多了一步。⌥ 点击的详情浮层不传它 ——
+     * 那个入口的主语是「看看这是什么」，抢焦点会盖掉诊断信息。
+     */
+    focusAnchor?: boolean
+  },
+): void {
+  let focusAnchor: HTMLInputElement | null = null
   deps.openPopover((host) => {
     if (a.t === 'ref') {
       const target = a.to ? deps.findBlock(a.to) : undefined
@@ -340,6 +356,7 @@ export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect | n
        *    就地打字改不动它，也不该改得动。
        */
       const anchorBox = a.flavor === '#' ? null : anchorRow(a, view.label, deps)
+      if (opts?.focusAnchor && anchorBox) focusAnchor = anchorBox.querySelector('input')
       const row = document.createElement('div')
       row.className = 'row'
       if (target) {
@@ -384,7 +401,12 @@ export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect | n
         deps.removeAtom(a.id)
       })
       row.appendChild(del)
-      if (anchorBox) host.append(h, dl, anchorBox, note, row)
+      /**
+       * 锚文本在前、诊断在后：这一层浮层的**主语**是「这一处引用」，而
+       * `atomId / target / state / flavor` 是排查用的细节。把输入框压在四行诊断表
+       * 下面，等于让每个想改名字的人都先读一遍内部字段。
+       */
+      if (anchorBox) host.append(h, anchorBox, row, dl, note)
       else host.append(h, dl, note, row)
       return
     }
@@ -476,6 +498,11 @@ export function showAtomPopover(deps: PanelDeps, a: RunWithId, rect: DOMRect | n
     row.appendChild(del)
     host.append(h, dl, note, row)
   }, rect)
+  /**
+   * 等这一帧挂好再聚焦：`openPopover` 里的 render 是同步跑的，但浮层的位置
+   * 在 append 之后才由 `placePopover` 写；先焦点后落位会让浏览器按旧位置滚一下。
+   */
+  if (opts?.focusAnchor) requestAnimationFrame(() => focusAnchor?.focus())
 }
 
 export function openDrawerFor(deps: PanelDeps, kind: PanelKind): void {
