@@ -519,8 +519,11 @@
   藏掉之后，空行就是一条干净的空行 ＋ 光标。
   ⚠️ 判据是「这一行有光标」（`data-caret`，由 `view/editor.ts` 的 `markCaret()` 打），
      不是「编辑器有焦点」——整片容器共用一个焦点，CSS 分不出是哪一行。
+  ⚠️ **只读投影不适用**（`data-ph-readonly`，journal 的日期）：那一行本来就打不了字，
+     光标放进去只是为了把块菜单的命令指向它；照旧藏掉会让日期**当场消失**，
+     用户看到的是「右键一下，这一天的日期没了」。
 */
-.blk[data-caret='1'] .tx[data-ph]::before {
+.blk[data-caret='1'] .tx[data-ph]:not([data-ph-readonly])::before {
   content: none;
 }
 /*

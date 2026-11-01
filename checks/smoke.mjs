@@ -17018,9 +17018,20 @@ await check(
     const dayMenu = await page.evaluate(() => {
       const el = document.querySelector('.blk .handle')
       el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-      return [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? '')
+      const labels = [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? '')
+      /**
+       * 右键只是把块菜单的落点指到这一块（`placeCaret`），**不能改变它的样子**：
+       * 日期的只读投影是 `::before`，若按「有光标就藏占位」处理，日期会当场消失。
+       */
+      const tx = document.querySelector('.blk[data-caret="1"] .tx')
+      const ph = tx ? getComputedStyle(tx, '::before').content : ''
+      return { labels, ph }
     })
-    assert(dayMenu.includes('删除这一天'), `过去的日记天应有「删除这一天」：${JSON.stringify(dayMenu)}`)
+    assert(dayMenu.labels.includes('删除这一天'), `过去的日记天应有「删除这一天」：${JSON.stringify(dayMenu.labels)}`)
+    assert(
+      dayMenu.ph !== 'none' && dayMenu.ph !== '' && dayMenu.ph !== 'normal',
+      `右键日记块标（块菜单打开、光标指到这一块）时日期投影必须还在：${JSON.stringify(dayMenu.ph)}`,
+    )
     await page.locator('.layer-item', { hasText: '删除这一天' }).first().click()
     await page.waitForTimeout(200)
 
