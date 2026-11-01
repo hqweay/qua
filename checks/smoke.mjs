@@ -12806,13 +12806,24 @@ await check('T150 派生卡也能关：关掉即离开槽（模型不动）；�
   await openFirstPage(page)
 
   const dockState = () =>
-    page.evaluate(() => ({
-      left: window.__qua.snapshot().dock.left.cards,
-      right: window.__qua.snapshot().dock.right.cards,
-      belongs: Boolean(document.querySelector('#dock-left .dock-card[data-card-id="belongs"]')),
-      inspect: Boolean(document.querySelector('#dock-right .dock-card[data-card-id="inspect"]')),
-      blocks: window.__qua.allBlocks().length,
-    }))
+    page.evaluate(() => {
+      /**
+       * 「在槽里」＝**看得见**，不是「DOM 里有个节点」。
+       * 检视卡是静态节点，带 `hidden` 启动保护；它回到 `cards` 之后若没显式显形，
+       * 节点、内容、`data-card-id` 全都在，`display:none` —— 断言只看 Boolean 会假绿。
+       */
+      const visible = (sel) => {
+        const el = document.querySelector(sel)
+        return Boolean(el) && !el.hidden && getComputedStyle(el).display !== 'none'
+      }
+      return {
+        left: window.__qua.snapshot().dock.left.cards,
+        right: window.__qua.snapshot().dock.right.cards,
+        belongs: visible('#dock-left .dock-card[data-card-id="belongs"]'),
+        inspect: visible('#dock-right .dock-card[data-card-id="inspect"]'),
+        blocks: window.__qua.allBlocks().length,
+      }
+    })
 
   const before = await dockState()
   assert(before.left.includes('belongs') && before.belongs, `前置：默认左槽有归属卡：${JSON.stringify(before)}`)
@@ -16137,6 +16148,58 @@ await check(
     return `镜像无宿主 chrome、岛首行块标同列绑源；投影 chrome 在身体前、绑源；两种露面右键都带「移除这次露面」；查询块标漏斗`
   },
 )
+
+await check('T201 岛界：点镜像行的折叠三角只折这一次露面（岛内），不折源；再点可逆', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await buildEmbedTree(page)
+  await page.evaluate(
+    ({ host, src }) => window.__qua.invoke('core.embed/insert', { blockId: host, targetId: src, view: 'mirror' }),
+    fx,
+  )
+  await page.waitForTimeout(300)
+
+  const clickFold = () =>
+    page.evaluate(() => {
+      document
+        .querySelector('.blk[data-embed="1"] .blk-embed-body .blk[data-depth="0"] > .left > .fold')
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    })
+
+  await clickFold()
+  await page.waitForTimeout(200)
+  const folded = await page.evaluate((sid) => {
+    const body = document.querySelector('.blk-embed-body')
+    return {
+      islandCollapsed: [...(body?.querySelectorAll('.blk[data-collapsed="1"]') ?? [])].map((b) => b.dataset.blockId),
+      mainFoldedSrc: Boolean(window.__qua.__editor.doc.folded[sid]),
+      outerSrcCollapsed: [...document.querySelectorAll(`.blk[data-block-id="${sid}"][data-collapsed="1"]`)].some(
+        (b) => !b.closest('.blk-embed-body'),
+      ),
+    }
+  }, fx.src)
+  assert(
+    folded.islandCollapsed.includes(fx.src) && !folded.mainFoldedSrc && !folded.outerSrcCollapsed,
+    `点镜像行的三角 ⇒ 折的是岛内这一次露面，源的折叠态一个字节不动：${JSON.stringify(folded)}`,
+  )
+
+  await clickFold()
+  await page.waitForTimeout(200)
+  const unfolded = await page.evaluate((sid) => {
+    const body = document.querySelector('.blk-embed-body')
+    return {
+      islandCollapsed: [...(body?.querySelectorAll('.blk[data-collapsed="1"]') ?? [])].map((b) => b.dataset.blockId),
+      mainFoldedSrc: Boolean(window.__qua.__editor.doc.folded[sid]),
+    }
+  }, fx.src)
+  assert(
+    unfolded.islandCollapsed.length === 0 && !unfolded.mainFoldedSrc,
+    `再点展开，仍是视图私有的（外层依旧没折）：${JSON.stringify(unfolded)}`,
+  )
+
+  await ctx.close()
+  return `点镜像行三角 ⇒ 岛内折/展可逆；源与外层折叠态不动`
+})
 
 /**
  * **判定放在所有用例之后**：写在这里之前时，后面的用例（T136 起）即使红了也不会进
