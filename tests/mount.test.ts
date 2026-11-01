@@ -2,7 +2,7 @@
  * **挂载区**（块底的 tab 条）的模型测试。
  *
  * 这里钉的是五件在界面上看不出对错的事：
- *   ① 内置三栏是**派生**的：给宿主打一个标签，「同类」当场出现（不是缓存、不是落盘）；
+ *   ① 内置栏是**派生**的：给宿主打一个标签，「同类」当场出现（不是缓存、不是落盘）；
  *   ② **local tab 不是块**：它只是宿主那组条目里的一条（块宿主写 `_mounts`），
  *      摘掉一栏不会带走任何块；
  *   ③ 形状坏掉时**读路径不抛**（落盘那一侧判 corrupt，读只当没有）；
@@ -225,32 +225,32 @@ test('cloneMountEntries：local 深拷、linked 只拷指针、id 保持（栏�
 })
 
 /**
- * **标签块的「同类」＝ 它的成员**。
+ * **标签块的「成员」＝ 它的成员**，与普通块的「同类」是两个问题。
  *
- * 打开一个标签要看的是「这一支下面有哪些块」——那正是标签页 footer 原来的成员列表。
- * 标签块自己没有 `_tags`（它就是那条轴），所以这条口径必须显式并进去，否则
- * 「成员」这个读法会随着 footer 一起消失（不报错，只是没地方看）。
+ * 打开一个标签要看的是「这一支下面有哪些块」；它自己不是「和谁同标签」。
+ * 标签页因此先落「成员」，不再先落一个通常为空的「引用」。
  */
-test('标签块的「同类」用的是它自己的名字：条件＝{tag: 主名}', () => {
+test('标签块的「成员」用的是它自己的名字：条件＝{tag: 主名}', () => {
   const tag = mkTagBlock('人物')
-  const same = derivedSpecOf(tag, [tag], 'same')
-  assert.deepEqual(same, { where: { tag: '人物' } }, '只有一个标签时就是它自己那一条')
+  const members = derivedSpecOf(tag, [tag], 'members')
+  assert.deepEqual(members, { where: { tag: '人物' } }, '只有一个标签时就是它自己那一条')
+  assert.deepEqual(SOURCES(derivedEntriesOf(tag, [tag])), ['members', 'refs', 'mentions'], '成员第一')
 })
 
-test('兼位块（既带标签又是标签）：两条轴并进同一个条件（any）', () => {
+test('兼位块（既带标签又是标签）：成员与同类各答各的', () => {
   const a = mkTagBlock('甲')
   const both = { ...mkTagBlock('丙'), props: { _aliases: ['丙'], _lists: ['tag'], _tags: [a.id] } }
-  const same = derivedSpecOf(both, [a, both], 'same')
-  assert.deepEqual(same, { where: { any: [{ tag: '$self' }, { tag: '丙' }] } }, '两个来源都在：一个条件两半')
+  assert.deepEqual(derivedSpecOf(both, [a, both], 'members'), { where: { tag: '丙' } })
+  assert.deepEqual(derivedSpecOf(both, [a, both], 'same'), { where: { tag: '$self' } })
 })
 
-test('「同类」沿下级标签展开（算作）：#人物 的成员含只打 #演员 的块', () => {
+test('「成员」沿下级标签展开（算作）：#人物 的成员含只打 #演员 的块', () => {
   const 人物 = mkTagBlock('人物')
   const 演员 = mkTagBlock('演员')
   // 归属边：演员 归在 人物 下（任何块都能配，这条边住在子块上）
   const 演员WithEdge = { ...演员, props: { ...(演员.props ?? {}), _belongsTo: [人物.id] } }
-  const same = derivedSpecOf(人物, [人物, 演员WithEdge], 'same')
-  assert.deepEqual(same, { where: { any: [{ tag: '人物' }, { tag: '演员' }] } })
+  const members = derivedSpecOf(人物, [人物, 演员WithEdge], 'members')
+  assert.deepEqual(members, { where: { any: [{ tag: '人物' }, { tag: '演员' }] } })
 })
 
 /* ------------------------------------------------------------ 派生栏的记录 */

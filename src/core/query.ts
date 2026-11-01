@@ -11,13 +11,14 @@
  *    索引路径见 `index-port.ts` 的 `queryByIndex`；`QuerySpec` 仍是那个 canonical JSON。
  */
 import { isJournalBlock, isPropDefBlock, primaryAliasOf, type Block } from './model.ts'
-import { plainText, refRunsOf } from './runs.ts'
+import { plainText } from './runs.ts'
 import { walkForest } from './walk.ts'
 import { findPath } from './tree.ts'
 import { findTagByName, tagIdsOf, tagMemberIds } from './tags.ts'
 import { findJournalDay, journalDate, journalDays } from './journal.ts'
 import { displayTextOf } from './alias.ts'
 import { fieldTableOf, readField, type FieldTable } from './props.ts'
+import { isRefKind, relationEdgesOfForest, REFERENCE_KINDS, type RefKind, type RelationKind } from './relations.ts'
 import type { KbClient } from './kb/types.ts'
 
 /* ------------------------------------------------------------ 条件形状 */
@@ -40,9 +41,33 @@ import type { KbClient } from './kb/types.ts'
  * ⚠️ **不加 `mentions`**：未链接提及＝`text` 里出现某个词，那是全文检索的事，
  *    塞进这里会让「引用」与「文本匹配」变成同一个东西，反链语义当场糊掉。
  */
+/**
+ * `ref` 的值位：字符串＝默认的全部引用 kind；对象＝可收窄到某几类。
+ *
+ * `inline` 是正文里的 `[[ ]]`，`property` 是 `kind:'ref'` 的属性值，`embed` 是露面。
+ * 标签归属**不在**这里：它是分类（`tag`），不是引用。
+ */
+export interface RefTarget {
+  to: string
+  kind?: RefKind | readonly RefKind[]
+}
+
+/** 条件里的 ref 目标 id（字符串与对象两态只有一个读法） */
+export function refTargetOf(ref: string | RefTarget): string {
+  return typeof ref === 'string' ? ref : ref.to
+}
+
+/** 条件里的 ref kind（缺省＝全部引用 kind） */
+export function refKindsOf(ref: string | RefTarget): readonly RefKind[] {
+  if (typeof ref === 'string') return REFERENCE_KINDS
+  if (ref.kind === undefined) return REFERENCE_KINDS
+  if (typeof ref.kind === 'string') return [ref.kind]
+  return ref.kind
+}
+
 export type QueryNode =
   /** 直接指向 `targetId` 的块（反链的最小形态：只认 id，不认 label） */
-  | { ref: string }
+  | { ref: string | RefTarget }
   /** 带某个标签的块：按**归属边**判定（见 `matches`），名字解析不到就是空集 */
   | { tag: string }
   /** 正文包含某串 */
@@ -304,15 +329,22 @@ function cmpValues(a: unknown, b: unknown): number {
   return sa < sb ? -1 : sa > sb ? 1 : 0
 }
 
-/** 指向 `targetId` 的引用 run 所在的块 id 集合（**一条指向边的另一端**，与渲染无关） */
-export function refSourceIds(forest: readonly Block[], targetId: string): Set<string> {
+/**
+ * 指向 `targetId` 的引用来源块（**一条指向边的另一端**，与渲染无关）。
+ *
+ * 与索引路径共用 `relationEdgesOfForest` 的提取口径：正文引用／属性引用／嵌入
+ * 都算「引用」，标签归属与 `#名` 提及不算。纯函数路径是索引路径的参照实现。
+ */
+export function refSourceIds(
+  forest: readonly Block[],
+  targetId: string,
+  kinds: readonly RefKind[] = REFERENCE_KINDS,
+): Set<string> {
   const out = new Set<string>()
-  walkForest(forest, (b) => {
-    for (const r of refRunsOf(b.content)) {
-      // 行内标签（flavor '#'）是归属的露面，不是指向边——与索引的 `incoming` 同一口径
-      if (r.flavor === undefined && r.to === targetId) out.add(b.id)
-    }
-  })
+  const allowed = new Set<RelationKind>(kinds)
+  for (const e of relationEdgesOfForest(forest).edges) {
+    if (e.to === targetId && allowed.has(e.kind)) out.add(e.from)
+  }
   return out
 }
 
@@ -451,7 +483,16 @@ export function isQueryNode(raw: unknown): raw is QueryNode {
   if ('all' in n) return Array.isArray(n.all) && n.all.every(isQueryNode)
   if ('any' in n) return Array.isArray(n.any) && n.any.every(isQueryNode)
   if ('not' in n) return isQueryNode(n.not)
-  if ('ref' in n) return typeof n.ref === 'string'
+  if ('ref' in n) {
+    if (typeof n.ref === 'string') return true
+    const r = n.ref
+    if (!r || typeof r !== 'object' || Array.isArray(r)) return false
+    const ref = r as Partial<RefTarget>
+    if (typeof ref.to !== 'string' || ref.to === '') return false
+    if (ref.kind === undefined) return true
+    if (typeof ref.kind === 'string') return isRefKind(ref.kind)
+    return Array.isArray(ref.kind) && ref.kind.every((k) => isRefKind(k))
+  }
   if ('tag' in n) return typeof n.tag === 'string'
   if ('text' in n) return typeof n.text === 'string'
   if ('journal' in n) return typeof n.journal === 'string'
@@ -537,7 +578,7 @@ export function usesSelf(node: QueryNode): boolean {
   if ('all' in node) return node.all.some(usesSelf)
   if ('any' in node) return node.any.some(usesSelf)
   if ('not' in node) return usesSelf(node.not)
-  if ('ref' in node) return node.ref === SELF
+  if ('ref' in node) return refTargetOf(node.ref) === SELF
   if ('tag' in node) return node.tag === SELF
   if ('text' in node) return node.text === SELF
   if ('journal' in node) return node.journal === SELF
@@ -573,7 +614,10 @@ export function resolveSelfSpec(spec: QuerySpec, host: Block, forest: readonly B
     if ('all' in n) return { all: n.all.map(node) }
     if ('any' in n) return { any: n.any.map(node) }
     if ('not' in n) return { not: node(n.not) }
-    if ('ref' in n) return { ref: n.ref === SELF ? host.id : n.ref }
+    if ('ref' in n) {
+      const to = refTargetOf(n.ref) === SELF ? host.id : refTargetOf(n.ref)
+      return typeof n.ref === 'string' ? { ref: to } : { ref: { ...n.ref, to } }
+    }
     if ('journal' in n) {
       if (n.journal !== SELF) return { journal: n.journal }
       const date = journalDate(host)
@@ -609,7 +653,9 @@ function collectRefs(node: QueryNode, forest: readonly Block[]): Set<string> {
     if ('all' in n) n.all.forEach(visit)
     else if ('any' in n) n.any.forEach(visit)
     else if ('not' in n) visit(n.not)
-    else if ('ref' in n) for (const id of refSourceIds(forest, n.ref)) out.add(id)
+    else if ('ref' in n) {
+      for (const id of refSourceIds(forest, refTargetOf(n.ref), refKindsOf(n.ref))) out.add(id)
+    }
   }
   visit(node)
   return out

@@ -264,7 +264,14 @@ export function mountCommands(
        * 所以把这一条**写明**成「全库」：跟着条件一起走，换个表面也是同一批成员。
        */
       const fixedSpec: QuerySpec = canonicalSpec({ ...spec, scope: 'all' })
-      const name = source === 'refs' ? t('ui.mount.refs') : source === 'same' ? t('ui.mount.same') : t('ui.mount.mentions')
+      const name =
+        source === 'refs'
+          ? t('ui.mount.refs')
+          : source === 'members'
+            ? t('ui.mount.members')
+            : source === 'same'
+              ? t('ui.mount.same')
+              : t('ui.mount.mentions')
       const label = t('ui.mount.fixedLabel', { name })
       if (view === 'list') {
         const fixed: ViewConfig = { id: mkViewId(), kind: 'list', list: { fields: derivedListFields(source) } }

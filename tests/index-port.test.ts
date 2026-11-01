@@ -94,7 +94,7 @@ const refOf = (store: BlockStore, blockId: string, runId: string): RefRun => {
 
 /* ------------------------------------------------------------ 基本形状 */
 
-test('rebuild：五张表都建起来（块 / 入向边 / 标签成员 / 名字与日期）', () => {
+test('rebuild：各表都建起来（块 / 关系边 / 标签成员 / 名字与日期）', () => {
   const { forest } = fixture()
   const idx = rebuild(forest)
 
@@ -497,14 +497,15 @@ test('applyOps：流里引用不存在的块 ⇒ 跳过该 op（索引不退化�
   assert.equal(next, idx, '没有可修补的东西就别换对象')
 })
 
-test('applyOps：只有指向边变化 ⇒ 其它四张表是同一个引用（真的没被重建）', () => {
+test('applyOps：只有指向边变化 ⇒ 其它表是同一个引用（真的没被重建）', () => {
   const { store, kb, idx } = kbFixture()
+  const beforeMembers = tagMemberIdsOf(idx, 't1').sort()
   const next = txStep(kb, store, idx, (tx) => {
     tx.patch('c', (x) => writeBlockContent(x, [...x.content, ref('e7', 't2')]))
   })
   assert.equal(next.blocks, idx.blocks, '块表原样保留（活引用不换）')
   assert.equal(next.tags, idx.tags, '名字表原样保留')
   assert.equal(next.rootOf, idx.rootOf, '根表原样保留')
-  assert.equal(next.tagMembers, idx.tagMembers, '标签成员来自块 ⇒ 内容变了不用重算')
+  assert.deepEqual(tagMemberIdsOf(next, 't1').sort(), beforeMembers, '标签成员不变（内容变了不碰 tag 边）')
   assert.deepEqual(incomingIds(next, 't2'), ['c'], '新边要算进来')
 })

@@ -1141,6 +1141,28 @@
 .mount-derived-why {
   max-width: 24em;
 }
+.mount-derived-kinds {
+  display: flex;
+  gap: var(--ui-gap-1);
+}
+.mount-derived-kind {
+  background: none;
+  border: 0;
+  padding: 0 var(--ui-gap-2);
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+  border-radius: var(--ui-radius-sm);
+  line-height: 1.6;
+}
+.mount-derived-kind:hover {
+  color: var(--ui-text);
+  background: var(--ui-surface-sunken);
+}
+.mount-derived-kind[data-active='1'] {
+  color: var(--ui-text);
+  background: var(--ui-surface-sunken);
+}
 .mount-derived-views {
   display: flex;
   gap: var(--ui-gap-1);

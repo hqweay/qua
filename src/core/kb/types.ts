@@ -19,6 +19,7 @@
 import type { BackrefBlock, BackrefSource } from '../backrefs.ts'
 import type { GutterField, FieldRow } from '../props.ts'
 import type { QueryHit, QuerySpec } from '../query.ts'
+import type { RelationEdge } from '../relations.ts'
 import type { Block, BlockList } from '../model.ts'
 import type { Anno, Run } from '../runs.ts'
 
@@ -283,6 +284,10 @@ export interface KbClient {
   backlinksOf(id: string): readonly BackrefSource[]
   /** 引用发生处的**块**（不是按页聚合）——反链 view block 的行；同一块多处引用各算一条 */
   backrefBlocksOf(id: string): readonly BackrefBlock[]
+  /** 指向这一块的全部关系边（引用／属性／嵌入／标签／提及…）；UI 按 kind 过滤 */
+  relationsTo(id: string): readonly RelationEdge[]
+  /** 这一块发出的全部关系边（出向；关系面板的方向切换用） */
+  relationsFrom(id: string): readonly RelationEdge[]
 
   /**
    * 写入口：成功返回 `{ ops, changes }`；抛错 ⇒ 整批回滚并重抛（不返回半批）。

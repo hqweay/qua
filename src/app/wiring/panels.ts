@@ -744,9 +744,11 @@ export function setupPanels(deps: PanelsDeps) {
           const explainKey =
             entry.source === 'refs'
               ? 'ui.mount.why.refs'
-              : entry.source === 'same'
-                ? 'ui.mount.why.same'
-                : 'ui.mount.why.mentions'
+              : entry.source === 'members'
+                ? 'ui.mount.why.members'
+                : entry.source === 'same'
+                  ? 'ui.mount.why.same'
+                  : 'ui.mount.why.mentions'
           return asBody(
             createView({ kind: 'block', blockId: mountHostBlock.id }, mountHostBlock, undefined, {
               kind,
@@ -844,7 +846,15 @@ export function setupPanels(deps: PanelsDeps) {
   /** 这一栏此刻的显示名（菜单标题用；与 tab 条同一份判据） */
   function labelOfEntry(entry: MountEntry): string {
     if (entry.kind === 'derived') {
-      return t(entry.source === 'refs' ? 'ui.mount.refs' : entry.source === 'same' ? 'ui.mount.same' : 'ui.mount.mentions')
+      return t(
+        entry.source === 'refs'
+          ? 'ui.mount.refs'
+          : entry.source === 'members'
+            ? 'ui.mount.members'
+            : entry.source === 'same'
+              ? 'ui.mount.same'
+              : 'ui.mount.mentions',
+      )
     }
     if (entry.kind === 'local') return entry.label
     if (entry.label !== undefined && entry.label.trim() !== '') return entry.label

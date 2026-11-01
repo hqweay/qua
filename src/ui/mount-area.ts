@@ -42,6 +42,7 @@ import {
   type MountHost,
   type ViewOwnerStore,
   type ViewConfig,
+  type ViewRecord,
   type QuerySpec,
 } from '../core/index.ts'
 import type { FoldState } from '../core/index.ts'
@@ -119,8 +120,9 @@ interface MountRoots {
   contexts: Map<string, readonly Block[]>
 }
 
-const BUILTIN_LABEL: Record<'refs' | 'same' | 'mentions', MsgId> = {
+const BUILTIN_LABEL: Record<DerivedSource, MsgId> = {
   refs: 'ui.mount.refs',
+  members: 'ui.mount.members',
   same: 'ui.mount.same',
   mentions: 'ui.mount.mentions',
 }
@@ -132,15 +134,17 @@ const EMPTY_TEXT: Record<MountEntry['kind'], MsgId> = {
 }
 
 /** 派生栏空态：三种来源各自说一句实话（「还没有人引用它」≠「条件没匹配」） */
-const DERIVED_EMPTY: Record<'refs' | 'same' | 'mentions', MsgId> = {
+const DERIVED_EMPTY: Record<DerivedSource, MsgId> = {
   refs: 'ui.mount.empty.refs',
+  members: 'ui.mount.empty.members',
   same: 'ui.mount.empty.same',
   mentions: 'ui.mount.empty.mentions',
 }
 
 /** 派生栏的**只读**条件说明（它没有条件可编辑，也没有构建器落点） */
-const DERIVED_WHY: Record<'refs' | 'same' | 'mentions', MsgId> = {
+const DERIVED_WHY: Record<DerivedSource, MsgId> = {
   refs: 'ui.mount.why.refs',
+  members: 'ui.mount.why.members',
   same: 'ui.mount.why.same',
   mentions: 'ui.mount.why.mentions',
 }
@@ -191,6 +195,8 @@ export class MountArea {
   private view: ViewBodyHost | null = null
   /** 视图体对应哪一栏的哪张视图（变了才重建） */
   private viewKey = ''
+  /** 引用栏的 kind 过滤（大纲专用设备状态；切到表格时由「类型」列承担同一件事） */
+  private refKind: 'all' | 'inline' | 'property' | 'embed' = 'all'
   /** 上一次读到的那组条目的串（`refreshEntries` 用它判「要不要重排」） */
   private entrySig = ''
 
@@ -315,6 +321,7 @@ export class MountArea {
       this.hostId = host.id
       this.expandedByTab.clear()
       this.covers = new Map()
+      this.refKind = 'all'
     }
     this.root.hidden = false
     this.entries = mountEntriesOf(host, this.deps.kb.roots(), { journalMounts: this.deps.journalMounts() })
@@ -330,9 +337,18 @@ export class MountArea {
     this.bodyEl.hidden = !this.open
 
     if (!this.open) {
-      // 折叠只给「引用 N」：另两栏要算一遍查询，一行摘要不值得
-      const refs = this.countRefs(host)
-      this.summaryEl.textContent = `${t('ui.mount.refs')} ${t('ui.mount.count', { count: refs })}`
+      /**
+       * 折叠摘要跟**第一栏**走：标签页的第一栏是「成员」，普通块是「引用」。
+       * 不写死「引用 N」——那会让标签页折叠时显示一个通常为 0 的数字，
+       * 而它真正的成员在另一栏。
+       */
+      const first = this.entries[0]
+      if (first?.kind === 'derived') {
+        const count = derivedRecordsOf(host, this.deps.kb, first.source).length
+        this.summaryEl.textContent = `${t(BUILTIN_LABEL[first.source])} ${t('ui.mount.count', { count })}`
+      } else {
+        this.summaryEl.textContent = t('ui.mount.expand')
+      }
       return
     }
 
@@ -477,9 +493,20 @@ export class MountArea {
    * 列表／表格借视图宿主的渲染器 —— 但那一台不画自己的抬头，也没有「＋」。
    */
   private loadDerived(host: Block, entry: Extract<MountEntry, { kind: 'derived' }>, focusHint?: string): void {
-    const records = derivedRecordsOf(host, this.deps.kb, entry.source)
+    const all = derivedRecordsOf(host, this.deps.kb, entry.source)
     const kind = this.deps.derivedKind?.(host, entry.source) ?? 'outline'
-    this.renderDerivedHead(host, entry, kind, records.length)
+    /**
+     * kind 过滤只作用于**大纲**：列表/表格走视图宿主的记录源，那里用「类型」列
+     * 承担同一件事。否则会出现「抬头条数是过滤后的、表里是全部」的假数字。
+     */
+    const records =
+      entry.source === 'refs' && kind === 'outline' && this.refKind !== 'all'
+        ? all.filter((r) => {
+            const keys = r.derived?.relKindKeys
+            return Array.isArray(keys) && keys.includes(this.refKind)
+          })
+        : all
+    this.renderDerivedHead(host, entry, kind, records.length, all)
     const view = this.viewOf(entry)
     if (view) {
       this.showView(host, entry, view)
@@ -498,7 +525,11 @@ export class MountArea {
       roots.push(r.block)
       if (r.path.length > 0) contexts.set(r.block.id, r.path)
     }
-    this.loadOutline(entry, { roots, contexts }, focusHint, DERIVED_EMPTY[entry.source])
+    const empty =
+      entry.source === 'refs' && this.refKind !== 'all'
+        ? 'ui.mount.empty.refsKind'
+        : DERIVED_EMPTY[entry.source]
+    this.loadOutline(entry, { roots, contexts }, focusHint, empty)
   }
 
   /** 大纲装载（local／linked／派生共用的那一支） */
@@ -570,7 +601,13 @@ export class MountArea {
    * 主数字＝**记录条数**（与列表/表格同一个数）：大纲折叠只影响画几行，不改成员。
    * 条件是一句**只读说明**（「指向这一块」）——它没有可编辑的条件，也没有构建器落点。
    */
-  private renderDerivedHead(host: Block, entry: Extract<MountEntry, { kind: 'derived' }>, kind: DerivedViewKind, count: number): void {
+  private renderDerivedHead(
+    host: Block,
+    entry: Extract<MountEntry, { kind: 'derived' }>,
+    kind: DerivedViewKind,
+    count: number,
+    all: readonly ViewRecord[] = [],
+  ): void {
     const head = this.derivedHeadEl
     head.hidden = false
     head.replaceChildren()
@@ -585,6 +622,43 @@ export class MountArea {
     why.className = 'mount-derived-why ui-ellipsis'
     why.textContent = t(DERIVED_WHY[entry.source])
     head.append(title, num, why)
+
+    /**
+     * 引用栏的 kind 过滤：只用**这次已经取到的记录**统计（不再扫一遍库），
+     * 且只在大纲显示——表格/列表用「类型」列承担同一件事，避免两处筛选各说各的。
+     */
+    if (entry.source === 'refs' && kind === 'outline' && all.length > 0) {
+      const counts = new Map<'inline' | 'property' | 'embed', number>()
+      for (const r of all) {
+        const keys = r.derived?.relKindKeys
+        if (!Array.isArray(keys)) continue
+        for (const k of keys) {
+          if (k !== 'inline' && k !== 'property' && k !== 'embed') continue
+          counts.set(k, (counts.get(k) ?? 0) + 1)
+        }
+      }
+      const kinds = document.createElement('div')
+      kinds.className = 'mount-derived-kinds'
+      const add = (key: 'all' | 'inline' | 'property' | 'embed', label: string, n: number): void => {
+        const b = document.createElement('button')
+        b.type = 'button'
+        b.className = 'mount-derived-kind'
+        b.dataset.kind = key
+        if (this.refKind === key) b.dataset.active = '1'
+        b.textContent = n > 0 ? `${label} ${n}` : label
+        b.addEventListener('click', () => {
+          if (this.refKind === key) return
+          this.refKind = key
+          this.render()
+        })
+        kinds.appendChild(b)
+      }
+      add('all', t('ui.mount.kind.all'), all.length)
+      add('inline', t('ui.mount.kind.inline'), counts.get('inline') ?? 0)
+      add('property', t('ui.mount.kind.property'), counts.get('property') ?? 0)
+      add('embed', t('ui.mount.kind.embed'), counts.get('embed') ?? 0)
+      head.appendChild(kinds)
+    }
 
     const seg = document.createElement('div')
     seg.className = 'mount-derived-views'
@@ -756,10 +830,4 @@ export class MountArea {
     return { roots, contexts }
   }
 
-  /** 「引用 N」：与展开态那一栏同一条口径（入向边表，剔除宿主自己） */
-  private countRefs(host: Block): number {
-    const ids = new Set<string>()
-    for (const s of this.deps.kb.backrefBlocksOf(host.id)) if (s.blockId !== host.id) ids.add(s.blockId)
-    return ids.size
-  }
 }

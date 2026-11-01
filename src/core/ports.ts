@@ -15,7 +15,6 @@
  * 唯一放行的是 `DOMRect`，因为「菜单挂在哪个矩形旁边」是**命令参数的形状**，不是 DOM 操作。
  */
 import type { BlockEditor } from '../view/editor.ts'
-import type { BindingKind } from './bindings.ts'
 import type { CtxKeys } from './index.ts'
 import type { QuerySpec } from './query.ts'
 import type { ChoiceScope } from './props.ts'
@@ -95,7 +94,8 @@ export interface MenuRow {
 }
 
 export interface MenuRequest {
-  kind: BindingKind
+  /** 打开哪一种浮层——**不是绑定种类**（面板枚举命令表，不经绑定表） */
+  kind: 'palette' | 'menu' | 'slash'
   anchor: DOMRect | null
   title?: string
   prefix?: string
@@ -304,8 +304,8 @@ export interface App {
    * local tab 是「面板局部的一次查询」，children/items 的视图没有这个对应物。
    */
   detachMountTab(host: MountHost, tabId: string): boolean
-  /** **固定派生栏**（引用/同类/提及 → local）：把现算的条件变成一栏可编辑的查询 */
-  fixDerivedTab(host: MountHost, source: 'refs' | 'same' | 'mentions', view?: DerivedViewKind): string
+  /** **固定派生栏**（引用/成员/同类/提及 → local）：把现算的条件变成一栏可编辑的查询 */
+  fixDerivedTab(host: MountHost, source: 'refs' | 'members' | 'same' | 'mentions', view?: DerivedViewKind): string
   /**
    * 写块的类型（`_type`）。
    *

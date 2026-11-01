@@ -4,8 +4,9 @@
  * 判据：右槽默认显示「谁指向了当前对象」。这是对**指向边**的一次查询，
  * 不是某个组件的事。所以算法住在这里、可脱离 DOM 单测；渲染在 `ui/`。
  *
- * ⚠️ 指向边的数据源是块内容里的引用 run——引用与标签露面都是边。
- *   **算法本身不关心边存在哪**：从 `core/index-port.ts` 的索引里查，形状不变。
+ * ⚠️ 「反链」只数**引用**（`inline`／`property`／`embed`）：标签归属是分类，
+ *   在关系表里是另一种 kind，不能混进「谁引用我」。算法本身不关心边存在哪：
+ *   从 `core/index-port.ts` 的关系索引里查，形状不变。
  * ⚠️ 指向不存在的目标（`dangling`）**不算**入向边，但也**不许静默**——
  *   由调用方在界面上呈现（这里只返回能解析的）。
  */
@@ -45,7 +46,7 @@ export function backrefsOf(input: BackrefInput): BackrefSource[] {
   const { blocks, targetId } = input
   const idx = input.index ?? rebuild(blocks)
 
-  // 1) **查表**拿到所有指向目标的源块（引用与标签都是指向边，索引里已经合并）
+  // 1) **查表**拿到所有引用目标的源块（只取引用 kind；标签归属不算反链）
   const sources = incomingIds(idx, targetId)
   if (sources.length === 0) return []
 

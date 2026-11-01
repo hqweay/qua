@@ -2314,6 +2314,66 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   return `引用 ${refsCount} 条（路径＋次数）→ 重开仍表格 → 固定为查询（${fixed.labels.join(' / ')}）→ 提及/同类各带命中词与共同标签`
 })
 
+await check('T194b 引用含属性引用：kind 过滤可切；标签页默认落「成员」', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const setup = await page.evaluate(() => {
+    const pages = window.__qua.pages()
+    const P = pages[0]
+    const Q = pages[1]
+    window.__qua.invoke('core.page/open', { pageId: Q.id })
+    const row = window.__qua.__editor.rows().map((r) => r.block).find((b) => b.id !== Q.id && b.children.length === 0)
+    // 造一条**只**带属性引用的新块（避开种子内容里已有的正文引用）
+    window.__qua.focusBlock(row.id, 999)
+    window.__qua.invoke('core.editor/insert-block', { text: '属性引用源' })
+    const src = window.__qua.blocks().find((b) => b.text === '属性引用源')
+    if (src) window.__qua.invoke('core.props/create-def', { blockId: src.id, label: '负责人', kind: 'ref', target: 'own' })
+    const def = window.__qua.propDefs().find((d) => d.label === '负责人')
+    if (def && src) window.__qua.invoke('core.props/set-value', { blockId: src.id, propId: def.id, value: P.id })
+    return { P: P.id, src: src?.id ?? '', def: def?.id ?? '' }
+  })
+  assert(setup.def, '前置：应建出 ref 字段')
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.P)
+  await page.waitForTimeout(400)
+  await mountTab(page, 'refs')
+  const initial = await page.evaluate(() => ({
+    count: Number((document.querySelector('.mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
+    chips: [...document.querySelectorAll('.mount-derived-kind')].map((e) => e.textContent ?? ''),
+    rows: document.querySelectorAll('.mount-editor .blk').length,
+  }))
+  assert(initial.count >= 1 && initial.rows >= 1, `属性引用应进「引用」栏：${JSON.stringify(initial)}`)
+  assert(initial.chips.some((x) => x.includes('属性')), `应有「属性」过滤 chip：${JSON.stringify(initial.chips)}`)
+  const has = (id) => !!document.querySelector(`.mount-editor .blk[data-block-id="${id}"]`)
+  assert(await page.evaluate(has, setup.src), '属性引用源应在「全部」里')
+  await page.locator('.mount-derived-kind[data-kind="inline"]').click()
+  await page.waitForTimeout(250)
+  assert(!(await page.evaluate(has, setup.src)), '切到「正文」后，只靠属性引用的源不该再出现')
+  await page.locator('.mount-derived-kind[data-kind="all"]').click()
+  await page.waitForTimeout(250)
+  assert(await page.evaluate(has, setup.src), '切回「全部」后属性引用源回来')
+  await page.locator('.mount-derived-view[data-kind="table"]').click()
+  await page.waitForTimeout(450)
+  const table = await page.evaluate(() => ({
+    kinds: [...document.querySelectorAll('.mount-view .tv-row [data-col="relKinds"]')].map((e) => e.textContent ?? ''),
+  }))
+  assert(table.kinds.some((x) => x.includes('属性') && x.includes('负责人')), `表格的类型列要写清属性名：${JSON.stringify(table.kinds)}`)
+
+  const tag = await page.evaluate(() => window.__qua.allBlocks().find((b) => b.roles?.includes('tag') && b.text === '任务')?.id ?? '')
+  assert(tag, '假数据里应有 #任务')
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), tag)
+  await page.waitForTimeout(350)
+  const tagPage = await page.evaluate(() => ({
+    active: document.querySelector('.mount-tabwrap[data-active="1"]')?.dataset.tab ?? '',
+    labels: [...document.querySelectorAll('.mount-tab')].map((e) => e.textContent ?? ''),
+    rows: document.querySelectorAll('.mount-editor .blk').length,
+  }))
+  assert(tagPage.active === 'members', `标签页默认落「成员」：${JSON.stringify(tagPage)}`)
+  assert(tagPage.rows >= 1, `成员栏应有成员：${JSON.stringify(tagPage)}`)
+
+  await ctx.close()
+  return `属性引用进引用栏（${initial.count} 条）· kind 过滤切到正文为空 · 表格类型列带「属性·负责人」· 标签页首栏成员`
+})
+
 await check('T195 查询在正文内联渲染：不打开就在原位出结果；打开后只有一台宿主', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
@@ -5643,10 +5703,10 @@ await check('T52 归属边：属于在属性区、成员含算作、禁环、悬
   assert(deep.includes(ids.b), `#人物 的成员应含只打 #演员 的块（算作）：${JSON.stringify(deep)}`)
   assert(deep.includes(ids.a), '#人物 也应含双打的块')
 
-  // 打开 #人物：成员收成了挂载区的「同类」栏（关系区已撤到属性区）
+  // 打开 #人物：成员收成了挂载区的「成员」栏（关系区已撤到属性区）
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), tags['人物'])
   await page.waitForTimeout(250)
-  await mountTab(page, 'same')
+  await mountTab(page, 'members')
   const ui = await page.evaluate(() => ({
     tabs: [...document.querySelectorAll('#editor .mount .mount-tab')].map((e) => e.textContent),
     hasRelations: !!document.querySelector('.tagpanel-relations, [data-tag-relations]'),
@@ -5654,7 +5714,7 @@ await check('T52 归属边：属于在属性区、成员含算作、禁环、悬
   }))
   assert(ui.tabs.some((x) => x.includes('引用')), `打开任何块都该有「引用」栏：${JSON.stringify(ui.tabs)}`)
   assert(!ui.hasRelations, '「属于／包含」不该还留在标签面板里（它们对任何块都能配 ⇒ 住属性区）')
-  assert(ui.members >= 2, `「同类」栏应渲染出成员块：${ui.members}`)
+  assert(ui.members >= 2, `「成员」栏应渲染出成员块：${ui.members}`)
 
   // 算作 ≠ 拥有字段：给 #人物 声明一个字段，只打 #演员 的 B 不获得它
   await page.evaluate(
@@ -10822,9 +10882,9 @@ await check('T123 标签页成员块标的 Shift ⇒ 右槽窗口；中心不动
   assert(tag, '假数据里应有 #任务')
   await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), tag)
   await page.waitForTimeout(220)
-  await mountTab(page, 'same')
+  await mountTab(page, 'members')
   const markers = await page.evaluate(() => document.querySelectorAll('#editor .mount .blk .marker').length)
-  assert(markers > 0, '「同类」栏的成员编辑器应有块标')
+  assert(markers > 0, '「成员」栏的成员编辑器应有块标')
   const before = await page.evaluate(() => ({
     cards: window.__qua.snapshot().dock.right.cards,
     active: window.__qua.snapshot().activeId,

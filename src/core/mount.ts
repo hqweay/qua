@@ -33,17 +33,21 @@ import { hasList, primaryAliasOf, prop, type Block } from './model.ts'
 import { tagIdsOf } from './tags.ts'
 import { descendantTagIds } from './tag-tree.ts'
 import { plainText } from './runs.ts'
-import type { QueryNode, QuerySpec } from './query.ts'
+import type { QueryHit, QueryNode, QuerySpec } from './query.ts'
 import { findById, isQuerySpec } from './query.ts'
+import { isRefKind, REFERENCE_KINDS, type RefKind } from './relations.ts'
+import { t } from './msg.ts'
 import {
   canonicalViews,
   MATCHED_COLUMN,
   MODIFIED_COLUMN,
   PATH_COLUMN,
   REF_COUNT_COLUMN,
+  REL_KINDS_COLUMN,
   resolveRows,
   SHARED_TAGS_COLUMN,
   TITLE_COLUMN,
+  VIA_COLUMN,
   type DerivedViewKind,
   type ViewColumn,
   type ViewConfig,
@@ -64,8 +68,14 @@ export const MOUNTS_PROP = '_mounts'
  */
 export type MountHost = { kind: 'block'; blockId: string } | { kind: 'journal' }
 
-/** 内置三栏的来源（**宿主现算**，没有配置） */
-export type DerivedSource = 'refs' | 'same' | 'mentions'
+/**
+ * 内置四栏的来源（**宿主现算**，没有配置）。
+ *
+ * `refs`／`mentions` 是任何宿主都有的问题；`members` 只属于标签块（谁归我管），
+ * `same` 只属于带 `_tags` 的块（谁和我同类）。后两者**不再合并**：
+ * 「我的成员」与「和我同标签的块」是两个问题，合并会让标签页的「同类」名不副实。
+ */
+export type DerivedSource = 'refs' | 'members' | 'same' | 'mentions'
 
 /**
  * 一栏。
@@ -164,25 +174,24 @@ const SPEC_REFS: QuerySpec = { where: { ref: '$self' } }
 const SPEC_MENTIONS: QuerySpec = { where: { all: [{ text: '$self' }, { not: { ref: '$self' } }] } }
 
 /**
- * 这一块的**内置三栏**（不落盘，每次现算）。
+ * 这一块的**内置栏**（不落盘，每次现算）。
  *
- * 出现条件只读**身份**（带着标签吗、有没有可读文本），不读内容：
+ * 出现条件只读**身份**（是不是标签块、带着标签吗、有没有可读文本），不读内容：
  * 于是 tab 条在你打字时不会变——否则每敲一个字整条就重排一次。
- * 日记的 tab 条因此恒为「引用 ＋ 提及」：它有日期投影（可读文本非空），但没有标签。
+ *
+ * 顺序按宿主类型：
+ *   · 标签块：成员（第一）→ 引用 → 同类（如果它自己也带标签）→ 提及；
+ *   · 普通块：引用 → 同类（有 `_tags`）→ 提及；
+ *   · 日记：引用 → 提及。
+ * 标签页不再先落一个通常为空的「引用」：成员才是它的主问题。
  */
 export function derivedEntriesOf(host: Block, forest: readonly Block[]): MountEntry[] {
-  const out: MountEntry[] = [{ id: derivedTabId('refs'), kind: 'derived', source: 'refs' }]
-  /**
-   * 「同类」＝ 与这一块**同一条分类轴**的块。
-   *
-   * 两个来源合成同一栏，因为它们是同一个问题的两种问法：
-   *   · 普通块：它带着哪些标签（`_tags`）⇒ 同标签的块；
-   *   · **标签块自己**：它就是那条轴 ⇒ 它的成员（「这一支下面有哪些块」）。
-   * 少了后一边，打开一个标签就再也看不到它的成员了（成员列表原来的落点是标签页 footer）。
-   * ⚠️ 标签块用**自己的主名**当条件（派生时现算，改名自动跟上）；它没有 `_tags`，
-   *    所以 `{tag:'$self'}` 对它永远是空集，必须把这一支显式并进去。
-   */
-  if (sameSpecOf(host, forest) !== null) out.push({ id: derivedTabId('same'), kind: 'derived', source: 'same' })
+  const out: MountEntry[] = []
+  if (hasList(host, 'tag') && memberSpecOf(host, forest) !== null) {
+    out.push({ id: derivedTabId('members'), kind: 'derived', source: 'members' })
+  }
+  out.push({ id: derivedTabId('refs'), kind: 'derived', source: 'refs' })
+  if (sameSpecOf(host) !== null) out.push({ id: derivedTabId('same'), kind: 'derived', source: 'same' })
   if (displayTextOf(host) !== '') out.push({ id: derivedTabId('mentions'), kind: 'derived', source: 'mentions' })
   return out
 }
@@ -191,28 +200,32 @@ export function derivedEntriesOf(host: Block, forest: readonly Block[]): MountEn
 export function derivedSpecOf(host: Block, forest: readonly Block[], source: DerivedSource): QuerySpec | null {
   if (source === 'refs') return SPEC_REFS
   if (source === 'mentions') return SPEC_MENTIONS
-  return sameSpecOf(host, forest)
+  if (source === 'members') return memberSpecOf(host, forest)
+  return sameSpecOf(host)
 }
 
 /**
- * 「同类」的条件；两个来源都空 ⇒ `null`（这一栏根本不出现）。
+ * 「成员」＝ 标签块自己的成员（含下级标签，口径只在 `core/tag-tree.ts` 一份）。
  *
- * ⚠️ 标签那一支要**沿下级标签展开**（「算作」）：`#人物` 的成员含只打 `#演员` 的块。
- *    这条口径只在 `core/tag-tree.ts` 里有一份（`descendantTagIds`）——在这里另写一遍
- *    「沿归属边往下走」就会出现两种「谁算这一支的成员」。
+ * 标签块没有 `_tags`，`{tag:'$self'}` 对它永远是空集，所以这一支用**自己的主名**
+ * 现算条件（改名自动跟上）；只有标签块才有这一栏。
  */
-function sameSpecOf(host: Block, forest: readonly Block[]): QuerySpec | null {
-  const nodes: QueryNode[] = []
-  if (tagIdsOf(host).length > 0) nodes.push({ tag: '$self' })
-  if (hasList(host, 'tag')) {
-    for (const id of descendantTagIds(host.id, forest)) {
-      const tag = findById(forest, id)
-      const name = tag ? primaryAliasOf(tag).trim() : ''
-      if (name !== '') nodes.push({ tag: name })
-    }
+function memberSpecOf(host: Block, forest: readonly Block[]): QuerySpec | null {
+  if (!hasList(host, 'tag')) return null
+  const names = new Set<string>()
+  for (const id of descendantTagIds(host.id, forest)) {
+    const tag = findById(forest, id)
+    const name = tag ? primaryAliasOf(tag).trim() : ''
+    if (name !== '') names.add(name)
   }
-  if (nodes.length === 0) return null
+  if (names.size === 0) return null
+  const nodes: QueryNode[] = [...names].map((name) => ({ tag: name }))
   return { where: nodes.length === 1 ? nodes[0]! : { any: nodes } }
+}
+
+/** 「同类」＝ 与这一块有共同标签的块；没有 `_tags` ⇒ 这一栏根本不出现。 */
+function sameSpecOf(host: Block): QuerySpec | null {
+  return tagIdsOf(host).length > 0 ? { where: { tag: '$self' } } : null
 }
 
 /**
@@ -229,24 +242,105 @@ export function derivedRecordsOf(host: Block, kb: KbClient, source: DerivedSourc
   if (!spec) return []
   const hits = kb.query(spec, { selfId: host.id, excludeIds: [host.id] })
   const rows = resolveRows(hits, kb)
-  if (source === 'refs') {
-    const counts = new Map<string, number>()
-    for (const s of kb.backrefBlocksOf(host.id)) if (s.blockId !== host.id) counts.set(s.blockId, s.count)
-    return rows.map((r) => {
-      const n = counts.get(r.block.id)
-      return n === undefined ? r : { ...r, derived: { refCount: n } }
-    })
-  }
-  if (source === 'mentions') {
-    const word = displayTextOf(host)
-    if (word === '') return rows
-    return rows.map((r) => (r.title.includes(word) ? { ...r, derived: { matched: word } } : r))
-  }
+  if (source === 'refs') return refRecords(host, kb, rows)
+  if (source === 'members') return memberRecords(host, kb, rows)
+  if (source === 'mentions') return mentionRecords(host, kb)
   const own = new Set(kb.tagsOf(host.id).map((t) => plainText(t.content)))
   return rows.map((r) => {
     const shared = r.tags.map((t) => plainText(t.content)).filter((name) => own.has(name))
     return shared.length === 0 ? r : { ...r, derived: { sharedTags: shared } }
   })
+}
+
+/** 引用行：一个来源块一行，带**次数**与**关系 kind**（正文／属性·字段名／嵌入） */
+function refRecords(host: Block, kb: KbClient, rows: readonly ViewRecord[]): ViewRecord[] {
+  const bySource = new Map<string, { count: number; kinds: Set<RefKind>; props: Set<string> }>()
+  for (const e of kb.relationsTo(host.id)) {
+    if (!isRefKind(e.kind)) continue
+    const acc = bySource.get(e.from) ?? { count: 0, kinds: new Set<RefKind>(), props: new Set<string>() }
+    acc.count += e.count ?? 1
+    acc.kinds.add(e.kind)
+    if (e.kind === 'property' && e.propId) acc.props.add(e.propId)
+    bySource.set(e.from, acc)
+  }
+  if (bySource.size === 0) return [...rows]
+  const names = propNamesOf(kb)
+  return rows.map((r) => {
+    const m = bySource.get(r.block.id)
+    if (!m) return r
+    const labels: string[] = []
+    for (const kind of REFERENCE_KINDS) {
+      if (!m.kinds.has(kind)) continue
+      if (kind === 'property') {
+        const props = [...m.props].map((id) => names.get(id) ?? '').filter((x) => x !== '')
+        if (props.length === 0) labels.push(t('ui.mount.kind.property'))
+        for (const p of props) labels.push(t('ui.mount.kind.propertyWith', { name: p }))
+      } else {
+        labels.push(t(kind === 'inline' ? 'ui.mount.kind.inline' : 'ui.mount.kind.embed'))
+      }
+    }
+    return { ...r, derived: { refCount: m.count, relKinds: labels, relKindKeys: REFERENCE_KINDS.filter((k) => m.kinds.has(k)) } }
+  })
+}
+
+/** 成员行：标签块自己的成员；`viaTags` 为空＝直接成员，否则是经由的下级标签 */
+function memberRecords(host: Block, kb: KbClient, rows: readonly ViewRecord[]): ViewRecord[] {
+  const selfName = primaryAliasOf(host).trim()
+  const allowed = new Set<string>()
+  for (const id of descendantTagIds(host.id, kb.roots())) {
+    const tag = kb.get(id)
+    const name = tag ? primaryAliasOf(tag).trim() : ''
+    if (name !== '') allowed.add(name)
+  }
+  return rows.map((r) => {
+    const names = r.tags.map((x) => plainText(x.content).trim()).filter((n) => allowed.has(n))
+    if (names.includes(selfName)) return { ...r, derived: { viaDirect: true } }
+    return names.length === 0 ? r : { ...r, derived: { viaTags: names } }
+  })
+}
+
+/**
+ * 提及行：正文文本命中（`{text} ∧ not {ref}`）＋ 行内 `#名` 提及。
+ *
+ * 两者合成一行；`matched` 记命中的词／标签。标签提及是**提及**，不是引用，
+ * 也不是成员：它只回答「正文里提到了我」。
+ */
+function mentionRecords(host: Block, kb: KbClient): ViewRecord[] {
+  const word = displayTextOf(host)
+  const textHits = word === '' ? [] : kb.query(SPEC_MENTIONS, { selfId: host.id, excludeIds: [host.id] })
+  const byBlock = new Map<string, Set<string>>()
+  for (const h of textHits) {
+    const set = byBlock.get(h.blockId) ?? new Set<string>()
+    set.add(word)
+    byBlock.set(h.blockId, set)
+  }
+  const tagWord = word === '' ? '' : `#${word}`
+  for (const e of kb.relationsTo(host.id)) {
+    if (e.kind !== 'tagMention' || e.from === host.id) continue
+    const set = byBlock.get(e.from) ?? new Set<string>()
+    set.add(tagWord)
+    byBlock.set(e.from, set)
+  }
+  const hits: QueryHit[] = []
+  for (const blockId of byBlock.keys()) {
+    const path = kb.pathOf(blockId)
+    if (path.length === 0) continue
+    hits.push({ blockId, path: path.slice(0, -1).map((b) => b.id) })
+  }
+  const rows = resolveRows(hits, kb)
+  return rows.map((r) => {
+    const words = byBlock.get(r.block.id)
+    return words && words.size > 0 ? { ...r, derived: { matched: [...words].join(' · ') } } : r
+  })
+}
+
+function propNamesOf(kb: KbClient): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const def of kb.propDefs()) {
+    const name = primaryAliasOf(def).trim() || plainText(def.content).trim()
+    if (name !== '') out.set(def.id, name)
+  }
+  return out
 }
 
 /**
@@ -256,12 +350,21 @@ export function derivedRecordsOf(host: Block, kb: KbClient, source: DerivedSourc
  * 路径与修改时间是它们共有的「这条在哪、什么时候动过」。
  */
 export function derivedColumns(source: DerivedSource): ViewColumn[] {
-  const tail =
-    source === 'refs' ? REF_COUNT_COLUMN : source === 'mentions' ? MATCHED_COLUMN : SHARED_TAGS_COLUMN
+  const special =
+    source === 'refs'
+      ? [REL_KINDS_COLUMN, REF_COUNT_COLUMN]
+      : source === 'members'
+        ? [VIA_COLUMN]
+        : source === 'mentions'
+          ? [MATCHED_COLUMN]
+          : [SHARED_TAGS_COLUMN]
   return [
     { key: TITLE_COLUMN, width: 260 },
     { key: PATH_COLUMN, width: 220 },
-    { key: tail, width: tail === MATCHED_COLUMN ? 150 : 110 },
+    ...special.map((key) => ({
+      key,
+      width: key === MATCHED_COLUMN ? 150 : key === REL_KINDS_COLUMN ? 180 : key === SHARED_TAGS_COLUMN ? 160 : 120,
+    })),
     { key: MODIFIED_COLUMN, width: 150 },
   ]
 }
@@ -273,7 +376,13 @@ export function derivedColumns(source: DerivedSource): ViewColumn[] {
  */
 export function derivedListFields(source: DerivedSource): string[] {
   const special =
-    source === 'refs' ? REF_COUNT_COLUMN : source === 'mentions' ? MATCHED_COLUMN : SHARED_TAGS_COLUMN
+    source === 'refs'
+      ? REL_KINDS_COLUMN
+      : source === 'members'
+        ? VIA_COLUMN
+        : source === 'mentions'
+          ? MATCHED_COLUMN
+          : SHARED_TAGS_COLUMN
   return [PATH_COLUMN, special]
 }
 
@@ -349,7 +458,7 @@ export function canonicalMountEntries(raw: unknown): MountEntry[] {
     const e = item as Partial<MountEntry> & { kind?: string }
     if (e.kind === 'derived') {
       const source = (e as { source?: unknown }).source
-      if (source !== 'refs' && source !== 'same' && source !== 'mentions') continue
+      if (source !== 'refs' && source !== 'members' && source !== 'same' && source !== 'mentions') continue
       const id = stableId(e.id, seen, derivedTabId(source))
       if (!id) continue
       seen.add(id)
@@ -435,7 +544,7 @@ export function isMountsValue(raw: unknown): boolean {
     const e = item as { kind?: unknown }
     if (e.kind === 'derived') {
       const source = (item as { source?: unknown }).source
-      if (source !== 'refs' && source !== 'same' && source !== 'mentions') return false
+      if (source !== 'refs' && source !== 'members' && source !== 'same' && source !== 'mentions') return false
       continue
     }
     if (e.kind === 'local') {
