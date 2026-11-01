@@ -116,10 +116,12 @@ export function setupChrome(deps: ChromeDeps) {
    * ⚠️ **组件自持 DOM**：装配入口里不再出现那些元素的 `getElementById`。
    * ⚠️ 皮肤/主题那两个开关**不在这里**：撤出顶栏，挪进调试菜单。
    */
-  const chrome = createChrome((blockId, shiftKey) => {
-    // 面包屑一格 ＝「聚焦到这个祖先」；Shift+点 ＝ 同一个「打开」，换到右槽
-    if (shiftKey) deps.openInDock(blockId)
-    else deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'chrome')
+  const chrome = createChrome((blockId, shiftKey, newTab) => {
+    // 面包屑一格 ＝「回到这个祖先」；Shift+点＝开右槽；⌘/Ctrl+点＝开新 tab
+    if (newTab) deps.getRegistry().invoke('core.block/focus-block', { blockId, newTab: true }, 'chrome')
+    else if (shiftKey) deps.openInDock(blockId)
+    // 普通点击是**返回**：用这个视图最后一次的位置，而不是从顶部重开
+    else deps.getRegistry().invoke('core.block/focus-block', { blockId, restore: true }, 'chrome')
   })
 
   const editorEl = chrome.editorEl

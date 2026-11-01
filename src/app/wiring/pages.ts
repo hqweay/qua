@@ -6,7 +6,10 @@
  */
 import {
   activeView,
+  blockLabel,
   displayNameOf,
+  FEED_INITIAL,
+  FEED_SPEC,
   findInForest,
   findPath,
   isEmbedBlock,
@@ -14,7 +17,11 @@ import {
   journalId,
   mkBlock,
   prop,
+  todayISO,
   type Block,
+  type Doc,
+  type SecLayout,
+  type ShellCol,
 } from '../../core/index.ts'
 import { t } from '../../core/msg.ts'
 import type { Registry } from '../../core/commands/index.ts'
@@ -25,7 +32,8 @@ import type { Prefs, Workspace } from '../../core/workspace.ts'
 import type { Layers } from '../../ui/layers.ts'
 import type { Chrome } from '../../ui/chrome.ts'
 import { isReadonlyBlock } from '../../view/block-dom.ts'
-import type { BlockEditor } from '../../view/editor.ts'
+import type { BlockEditor, ViewState } from '../../view/editor.ts'
+import { rootsFor, rootsForMany } from '../commands/roots.ts'
 import type { PageDeps } from '../commands-impl.ts'
 
 export type PagesDeps = {
@@ -63,7 +71,12 @@ export type PagesDeps = {
   prefs: () => Prefs
   /** 把某张派生卡放回槽（关掉之后「看属性」还能把它放回来）；由装配层接到 `addDerived` */
   ensureDockCard: (side: 'left' | 'right', id: 'inspect' | 'belongs' | 'backrefs' | 'trash' | 'calendar') => void
+  /** tab 条是 UI：状态变化时把「有哪些 tab／哪个活跃／叫什么」交给装配层重画 */
+  onTabsChanged?: (tabs: readonly TabInfo[]) => void
 }
+
+/** 一条 tab 的显示信息（UI 只读，不改 tab 状态） */
+export type TabInfo = { id: string; title: string; active: boolean }
 
 export function setupPages(deps: PagesDeps) {
   const {
@@ -88,15 +101,76 @@ export function setupPages(deps: PagesDeps) {
    *   · undo 管**数据**（块树/锚点/原子的快照）；
    *   · 这里管**走到哪**（打开页、点链接、zoom、面包屑都算一次导航）。
    *
+   * **每个 tab 一份历史**；`nav` 是当前 tab 的那一份（tab 切换时重新指向）。
    * 左右槽显式钉住、不跟随导航，所以历史只记中心槽的 `activeId`。
    * `lock` 用来区分「用户导航」与「历史本身在回放」——后者不能再入栈。
    *
    * ⚠️ **同一个 id 可以有两种形态**：今天的 journal 既可能以「日记流入口」打开，
    *    也可能以「只看这一天」聚焦。历史只存 id 会把两者压成一种（回退后 feed 消失），
    *    所以每一项都带 `feed` 这个视图形态。
+   * ⚠️ **每一项还带离开那一刻的 `ViewState`**：历史回放要回到当时的位置，
+   *    不能读「这个视图现在的最新位置」——那会把旧历史点污染成最后一次访问的位置。
    */
-  type NavPoint = { id: string; feed: boolean }
-  const nav = { back: [] as NavPoint[], forward: [] as NavPoint[], lock: false }
+  type NavPoint = { id: string; feed: boolean; state?: ViewState }
+  type TabNav = { back: NavPoint[]; forward: NavPoint[] }
+  /**
+   * **一个 tab ＝ 一份保存的视图**（不是一台并行编辑器）：
+   * `doc` 是装载单位（roots／folded／contexts／expandedRoots／viewRootId），
+   * `state` 是位置（视口锚＋选区），`viewStates` 是「在这个 tab 里访问过的视图 →
+   * 离开时最后的位置」，`nav` 是这个 tab 自己的前进/后退。
+   */
+  type TabState = {
+    id: string
+    activeId: string
+    feed: boolean
+    doc: Doc
+    shells: readonly ShellCol[]
+    layout: SecLayout
+    state: ViewState
+    viewStates: Map<string, ViewState>
+    nav: TabNav
+  }
+  const emptyViewState = (): ViewState => ({ scroll: null, sel: null })
+  const tabs: TabState[] = []
+  let activeTabId = ''
+  let tabsReady = false
+  let tabSeq = 0
+  /**
+   * 一次性恢复请求：`setActiveId` 把「这次是返回」落在这里，`loadRoots` 取走即清。
+   * 不放进公开命令参数——`ViewState` 是视图内部状态，外部调用者不该构造它。
+   */
+  let pendingRestore: { state: ViewState; focus: boolean; fallbackCaret: boolean } | null = null
+  /** `pendingRestore` 是历史快照（优先于「视图最后位置」）；由 `loadRoots` 消费 */
+  let pendingFromHistory = false
+  /** 本次装载已经恢复了位置 ⇒ 跳过调用方随后的 `focusFirstBlock`（否则会先闪到顶部） */
+  let skipNextFocus = false
+  const nav: { back: NavPoint[]; forward: NavPoint[]; lock: boolean } = { back: [], forward: [], lock: false }
+
+  const viewKey = (id: string, feed: boolean, viewRootId?: string): string =>
+    `${feed ? 'feed' : 'block'}:${id}:${viewRootId && viewRootId !== '' ? viewRootId : 'outline'}`
+  /** 这个块当前激活的非大纲视图根 id（没有就 ''）；与 `loadRoots` 的派生规则同源 */
+  const activeViewRootId = (id: string): string => {
+    const b = kb.get(id)
+    return b && activeView(b) && !isEmbedBlock(b) ? b.id : ''
+  }
+  const currentTab = (): TabState | undefined => tabs.find((x) => x.id === activeTabId)
+
+  const tabTitle = (tab: TabState): string => {
+    const b = kb.get(tab.activeId)
+    const base = b ? blockLabel(b) : t('ui.page.untitled')
+    return tab.feed ? `${base} · ${t('ui.tabs.feed')}` : base
+  }
+  const listTabs = (): TabInfo[] =>
+    tabs.map((tab) => ({ id: tab.id, title: tabTitle(tab), active: tab.id === activeTabId }))
+  const emitTabs = (): void => {
+    deps.onTabsChanged?.(listTabs())
+  }
+  function syncNav(): void {
+    const tab = currentTab()
+    if (!tab) return
+    nav.back = tab.nav.back
+    nav.forward = tab.nav.forward
+  }
 
   /** 当前中心视图是不是「日记流入口」（多段且全是 journal） */
   function isFeedView(): boolean {
@@ -105,6 +179,199 @@ export function setupPages(deps: PagesDeps) {
     const roots = mainEd.doc.roots
     return roots.length > 1 && roots.every((b) => isJournal(b))
   }
+
+  /** 第一个 tab 用启动时已经装载好的那台编辑器；之后由 tab 条/命令新建。 */
+  function initTabs(): void {
+    if (tabsReady) return
+    const mainEd = deps.getMainEd()
+    if (!mainEd) return
+    tabsReady = true
+    const tab: TabState = {
+      id: `tab-${++tabSeq}`,
+      activeId: deps.getWs().activeId || (mainEd.doc.roots[0]?.id ?? ''),
+      feed: isFeedView(),
+      doc: mainEd.doc,
+      shells: mainEd.shellCols,
+      layout: mainEd.layout,
+      state: mainEd.captureViewState(),
+      viewStates: new Map(),
+      nav: { back: [], forward: [] },
+    }
+    tabs.push(tab)
+    activeTabId = tab.id
+    syncNav()
+    emitTabs()
+  }
+
+  /** 保存当前 tab 的 Doc／shells／layout／位置；导航与切 tab 共用这一处 */
+  function captureActive(): ViewState | null {
+    const mainEd = deps.getMainEd()
+    const tab = currentTab()
+    if (!mainEd || !tab) return null
+    const state = mainEd.captureViewState()
+    tab.doc = mainEd.doc
+    tab.shells = mainEd.shellCols
+    tab.layout = mainEd.layout
+    tab.state = state
+    tab.viewStates.set(viewKey(tab.activeId, tab.feed, mainEd.doc.viewRootId), state)
+    return state
+  }
+
+  /** 一个目标视图的装载单位（新 tab 用；与 `loadRoots` 同一条派生规则） */
+  function makeTab(id: string, feed: boolean): TabState | null {
+    const b = kb.get(id)
+    if (!b) return null
+    const mainEd = deps.getMainEd()
+    const feedDays =
+      feed && isJournal(b)
+        ? kb
+            .query({ ...FEED_SPEC, limit: FEED_INITIAL })
+            .map((h) => kb.get(h.blockId))
+            .filter((x): x is Block => x !== undefined)
+        : []
+    const roots = feed && isJournal(b) ? rootsForMany(feedDays) : rootsFor(b)
+    materializeEditableRoots(roots)
+    const only = roots.length === 1 ? roots[0] : undefined
+    const viewRootId = only && activeView(only) && !isEmbedBlock(only) ? only.id : ''
+    const doc: Doc = {
+      roots,
+      // 每个 tab 自己的一份折叠表：共用一个对象会让一个 tab 的折叠串到另一个 tab
+      folded: { ...mainEd.doc.folded },
+      ...(viewRootId ? { viewRootId } : {}),
+    }
+    return {
+      id: `tab-${++tabSeq}`,
+      activeId: id,
+      feed,
+      doc,
+      shells: [],
+      layout: feed ? deps.prefs().feedLayout : 'column',
+      state: emptyViewState(),
+      viewStates: new Map(),
+      nav: { back: [], forward: [] },
+    }
+  }
+
+  /** 把一份 tab 装载进中心编辑器（切 tab 与新 tab 共用） */
+  function loadTab(tab: TabState): void {
+    const mainEd = deps.getMainEd()
+    deps.setEd(mainEd)
+    deps.getWs().activeId = tab.activeId
+    mainEd.loadPage(tab.doc)
+    mainEd.setLayout(tab.layout)
+    if (tab.shells.length > 0) mainEd.setShells(tab.shells)
+    mainEd.restoreViewState(tab.state, { focus: true, fallbackCaret: true })
+    tab.doc = mainEd.doc
+    const { renderMounts, renderProperties } = deps.getPanels()
+    renderMounts()
+    renderProperties()
+    deps.getChrome().renderTitle(activeBlock(), activeTrail())
+    deps.renderDocks()
+    deps.scheduleSave()
+    deps.scheduleBadge()
+    syncNav()
+    emitTabs()
+  }
+
+  function activateTab(id: string): boolean {
+    initTabs()
+    if (id === activeTabId) return false
+    const tab = tabs.find((x) => x.id === id)
+    if (!tab) return false
+    captureActive()
+    activeTabId = tab.id
+    syncNav()
+    loadTab(tab)
+    return true
+  }
+
+  /** 新 tab 打开一个目标视图；同一个视图已经开着就切过去（一个视图只开一张 tab） */
+  function openInNewTab(id: string, feed = false): boolean {
+    initTabs()
+    const existing = tabs.find((tab) => tab.activeId === id && tab.feed === feed)
+    if (existing) return activateTab(existing.id)
+    const tab = makeTab(id, feed)
+    if (!tab) return false
+    captureActive()
+    tabs.push(tab)
+    activeTabId = tab.id
+    syncNav()
+    loadTab(tab)
+    return true
+  }
+
+  function newTab(): boolean {
+    initTabs()
+    const today = journalId(todayISO())
+    const todayBlock = kb.get(today)
+    const targetId = todayBlock ? today : (currentTab()?.activeId ?? '')
+    const targetFeed = todayBlock ? true : Boolean(currentTab()?.feed)
+    if (!targetId) return false
+    // `+` 总是开一张新 tab（浏览器同一条直觉）；⌘+点击才按视图去重
+    const tab = makeTab(targetId, targetFeed)
+    if (!tab) return false
+    captureActive()
+    tabs.push(tab)
+    activeTabId = tab.id
+    syncNav()
+    loadTab(tab)
+    return true
+  }
+
+  function closeTab(id?: string): boolean {
+    initTabs()
+    const target = id ?? activeTabId
+    const idx = tabs.findIndex((x) => x.id === target)
+    if (idx < 0) return false
+    const wasActive = target === activeTabId
+    tabs.splice(idx, 1)
+    if (tabs.length === 0) {
+      activeTabId = ''
+      const today = journalId(todayISO())
+      const tab = makeTab(kb.get(today) ? today : deps.getWs().activeId, Boolean(kb.get(today)))
+      if (!tab) {
+        emitTabs()
+        return false
+      }
+      tabs.push(tab)
+      activeTabId = tab.id
+      syncNav()
+      loadTab(tab)
+      return true
+    }
+    if (wasActive) {
+      const next = tabs[Math.min(idx, tabs.length - 1)]!
+      activeTabId = ''
+      activateTab(next.id)
+    } else {
+      emitTabs()
+    }
+    return true
+  }
+
+  function cycleTab(dir: -1 | 1): boolean {
+    initTabs()
+    if (tabs.length < 2) return false
+    const at = tabs.findIndex((x) => x.id === activeTabId)
+    if (at < 0) return false
+    const next = tabs[(at + dir + tabs.length) % tabs.length]!
+    return activateTab(next.id)
+  }
+
+  function resetTabs(): void {
+    tabs.length = 0
+    activeTabId = ''
+    tabsReady = false
+    tabSeq = 0
+    pendingRestore = null
+    pendingFromHistory = false
+    skipNextFocus = false
+    nav.back = []
+    nav.forward = []
+    nav.lock = false
+    emitTabs()
+  }
+
 
   /**
    * 「当前对象」＝ 中心槽持有的那个块（只有中心槽有这个概念）。
@@ -166,6 +433,7 @@ export function setupPages(deps: PagesDeps) {
    */
   function loadRoots(roots: Block[]): void {
     const mainEd = deps.getMainEd()
+    const tab = currentTab()
     // 装载边界：空 journal 天在这里补首子块（经事务、一条 op）——
     // 所有「打开」命令共用的唯一归一落点，`rootsFor`／命令层只选择、不写库
     materializeEditableRoots(roots)
@@ -173,11 +441,33 @@ export function setupPages(deps: PagesDeps) {
     deps.setEd(mainEd)
     const only = roots.length === 1 ? roots[0] : undefined
     const viewRootId = only && activeView(only) && !isEmbedBlock(only) ? only.id : ''
-    // 正文视图的折叠态是**设备**那份；取当前视图持有的那一份（`device.folded` 只在落盘时同步，可能落后一步）
-    mainEd.loadPage({ roots, folded: mainEd.doc.folded, ...(viewRootId ? { viewRootId } : {}) })
+    // 折叠态是**视图**的一份：当前 tab 的那份（拿不到 tab 时退回编辑器手上的那份）
+    const folded = tab ? { ...tab.doc.folded } : mainEd.doc.folded
+    mainEd.loadPage({ roots, folded, ...(viewRootId ? { viewRootId } : {}) })
+    if (tab) tab.doc = mainEd.doc
     // 装载之后才建挂载区：它按**段根**建实例，而段是 `loadPage` 造出来的
     renderMounts()
     renderProperties()
+    /**
+     * **返回类导航**在这里恢复位置：`pendingRestore` 由 `setActiveId`／`historyGo`
+     * 在装载前放下，这里取走即清。恢复过就跳过调用方随后的 `focusFirstBlock`——
+     * 否则会先闪到顶部再跳回，用户看到的是「回顶部了一下」。
+     */
+    const restore = pendingRestore
+    pendingRestore = null
+    pendingFromHistory = false
+    if (restore) {
+      mainEd.restoreViewState(restore.state, { focus: restore.focus, fallbackCaret: restore.fallbackCaret })
+      skipNextFocus = true
+      // 调用方若接着调 `focusFirstBlock`（同一条命令同步路径），它会看到这一拍；
+      // 若没有调（左槽打开页），这一拍后清掉，别让标记留到下一次无关的聚焦。
+      queueMicrotask(() => {
+        skipNextFocus = false
+      })
+    } else {
+      skipNextFocus = false
+    }
+    emitTabs()
   }
 
   /**
@@ -236,15 +526,45 @@ export function setupPages(deps: PagesDeps) {
       /**
        * **记录导航历史**：只有「真的换了落点（或视图形态）」且旧落点还在森林里才记。
        * 历史回放期间 `nav.lock` 为真 ⇒ 不再入栈，否则前进/后退会自己套自己。
+       *
+       * 位置状态在这里捕获（旧视图还在屏幕上）：
+       *   · 历史点存**快照**（回放时要回到离开那一刻）；
+       *   · 当前 tab 的 `viewStates` 也存一份（直接返回时用它最后一次的位置）。
        */
+      initTabs()
+      const tab = currentTab()
       const feed = view?.feed === true
-      const sameView = feed === isFeedView()
       const ws = deps.getWs()
-      if (!nav.lock && (id !== ws.activeId || !sameView) && findInForest(ws.blocks, ws.activeId)) {
-        nav.back.push({ id: ws.activeId, feed: isFeedView() })
+      const fromId = tab?.activeId ?? ws.activeId
+      const fromFeed = tab?.feed ?? isFeedView()
+      const sameView = feed === fromFeed
+      if (!nav.lock && tab && (id !== fromId || !sameView) && findInForest(ws.blocks, fromId)) {
+        const state = captureActive() ?? emptyViewState()
+        nav.back.push({ id: fromId, feed: fromFeed, state })
         nav.forward = []
       }
+      /**
+       * 恢复意图：
+       *   · `'saved'` ＝ 回到这个视图的最后位置（面包屑／左槽页／翻日）；
+       *   · `'none'`  ＝ 明确从顶部开始（新建页）；
+       *   · 省略       ＝ 不动 `pendingRestore`（历史回放已经放好了快照）。
+       */
+      if (view?.restore === 'saved' && tab) {
+        if (!pendingFromHistory) {
+          const saved = tab.viewStates.get(viewKey(id, feed, activeViewRootId(id)))
+          pendingRestore = saved
+            ? { state: saved, focus: view.focusRestore !== false, fallbackCaret: view.fallbackCaret === true }
+            : null
+        }
+      } else if (view?.restore === 'none') {
+        if (!pendingFromHistory) pendingRestore = null
+      }
+      if (tab) {
+        tab.activeId = id
+        tab.feed = feed
+      }
       ws.activeId = id
+      emitTabs()
     },
     rootIds: () => deps.getMainEd().doc.roots.map((b) => b.id),
     // 日记流装载的视图配置：偏好只读（写入走 core.journal/feed-layout），编辑器由装配层持有
@@ -282,6 +602,14 @@ export function setupPages(deps: PagesDeps) {
     refreshList: () => renderDocks(),
     refreshTitle: () => deps.getChrome().renderTitle(activeBlock(), activeTrail()),
     focusFirstBlock: () => {
+      /**
+       * 本次装载已经恢复了位置 ⇒ 不要再把光标放回首块（那会先闪到顶部，
+       * 并且把「只滚没点」的返回变成「光标被拽到页首」）。
+       */
+      if (skipNextFocus) {
+        skipNextFocus = false
+        return
+      }
       const mainEd = deps.getMainEd()
       /**
        * 首行是**当前对象自己**（页／日记／被聚焦块都是正文第一行）。
@@ -347,20 +675,39 @@ export function setupPages(deps: PagesDeps) {
    * ⚠️ 回放期间 `nav.lock` 必须为真，否则 `setActiveId` 会把这次回放又记成一条新历史。
    */
   function historyGo(dir: 'back' | 'forward'): boolean {
+    initTabs()
+    const tab = currentTab()
+    if (!tab) return false
     const from = dir === 'back' ? nav.back : nav.forward
     const to = dir === 'back' ? nav.forward : nav.back
     while (from.length > 0) {
       const point = from.pop()!
-      const feed = isFeedView()
+      const feed = tab.feed
       // 同 id 但形态不同（feed ↔ 单日）也是一次真实导航，不能跳过
-      if (point.id === deps.getWs().activeId && point.feed === feed) continue
+      if (point.id === tab.activeId && point.feed === feed) continue
       if (!findInForest(deps.getWs().blocks, point.id)) continue // 目标在历史里被删了：跳过，别把人送到空处
-      to.push({ id: deps.getWs().activeId, feed })
+      const state = captureActive() ?? emptyViewState()
+      to.push({ id: tab.activeId, feed, state })
+      /**
+       * 历史点带回离开那一刻的 `state`：
+       *   · 有选区 ⇒ 回放时把焦点与光标一起交回正文；
+       *   · 只是浏览（`sel === null`）⇒ 只回视口，不凭空造光标，也不抢焦点。
+       * 没有 `state` 的旧历史点退回旧行为（`focusFirstBlock`）。
+       */
+      pendingRestore = point.state
+        ? { state: point.state, focus: Boolean(point.state.sel), fallbackCaret: false }
+        : null
+      pendingFromHistory = true
       nav.lock = true
       try {
         void deps.getRegistry().invoke('core.block/focus-block', { blockId: point.id, feed: point.feed }, 'history')
       } finally {
         nav.lock = false
+        // 目标无效／命令早退时没有 loadRoots 消费它：别把「历史恢复」的意图留给下一次导航
+        if (pendingFromHistory) {
+          pendingFromHistory = false
+          pendingRestore = null
+        }
       }
       scheduleBadge()
       return true
@@ -368,5 +715,28 @@ export function setupPages(deps: PagesDeps) {
     return false
   }
 
-  return { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEditableRoot, materializeEditableRoots }
+  return {
+    pageDeps,
+    activeBlock,
+    activeTrail,
+    pageTitle,
+    nav,
+    historyGo,
+    firstEditableRoot,
+    materializeEditableRoots,
+    // —— tab（装配层画 tab 条、命令层开/关/切换）——
+    initTabs,
+    resetTabs,
+    listTabs,
+    activateTab,
+    openInNewTab,
+    newTab,
+    closeTab,
+    nextTab: () => cycleTab(1),
+    prevTab: () => cycleTab(-1),
+    canGoBack: () => nav.back.length > 0,
+    canGoForward: () => nav.forward.length > 0,
+    /** 块改名/切换后 tab 标题要跟上（装配层的 change 钩子调它） */
+    refreshTabs: emitTabs,
+  }
 }

@@ -16264,6 +16264,154 @@ await check('T201 岛界：点镜像行的折叠三角只折这一次露面（�
   return `点镜像行三角 ⇒ 岛内折/展可逆；源与外层折叠态不动`
 })
 
+await check('T203 返回恢复位置：历史/面包屑/左槽回原位置；点块标仍是去目标', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const aid = await pageByTitle(page, '产品设计')
+  await page.waitForTimeout(250)
+  const pick = await page.evaluate(() => {
+    const bs = window.__qua.blocks().filter((b) => b.id !== window.__qua.snapshot().activeId && b.text?.length > 1)
+    return { mid: bs[Math.floor(bs.length / 2)]?.id ?? '', target: bs[bs.length - 1]?.id ?? '' }
+  })
+  assert(pick.mid && pick.target, `前置：页里至少两块可编辑：${JSON.stringify(pick)}`)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 2), pick.mid)
+  await page.evaluate(() => {
+    const s = document.getElementById('scroll')
+    s.scrollTop = 80
+  })
+  await page.waitForTimeout(120)
+  const saved = await page.evaluate(() => ({
+    scrollTop: document.getElementById('scroll').scrollTop,
+    caret: window.__qua.__editor.caretBlock(),
+    off: window.__qua.__editor.sel?.aOff ?? 0,
+  }))
+  const read = () =>
+    page.evaluate(() => ({
+      activeId: window.__qua.snapshot().activeId,
+      scrollTop: document.getElementById('scroll').scrollTop,
+      caret: window.__qua.__editor.caretBlock(),
+      off: window.__qua.__editor.sel?.aOff ?? 0,
+    }))
+  const restored = (got, withCaret) =>
+    got.activeId === aid &&
+    Math.abs(got.scrollTop - saved.scrollTop) <= 2 &&
+    (!withCaret || (got.caret === saved.caret && got.off === saved.off))
+
+  // ① 历史后退：快照回到离开那一刻
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), pick.target)
+  await page.waitForTimeout(220)
+  await page.evaluate(() => window.__qua.invoke('core.history/back', {}))
+  await page.waitForTimeout(320)
+  const hist = await read()
+  assert(restored(hist, true), `⌘[ 应回到离开那一刻的视口与光标：${JSON.stringify({ saved, hist })}`)
+
+  // ② 面包屑：回到这个祖先，用它的最后位置
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), pick.target)
+  await page.waitForTimeout(220)
+  await page.locator('#crumbs-trail .crumb').first().click()
+  await page.waitForTimeout(320)
+  const crumb = await read()
+  assert(restored(crumb, true), `面包屑应回到祖先的最后位置：${JSON.stringify({ saved, crumb })}`)
+
+  // ③ 左槽打开页：同一份位置（焦点留在导航处，不抢回正文）
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), pick.target)
+  await page.waitForTimeout(220)
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), aid)
+  await page.waitForTimeout(320)
+  const side = await read()
+  assert(side.activeId === aid && Math.abs(side.scrollTop - saved.scrollTop) <= 4, `左槽打开页应回到最后位置：${JSON.stringify({ saved, side })}`)
+
+  // ④ 点块标是「去这一块」，不是「回到那边」：目标块的顶部，光标在目标
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), pick.mid)
+  await page.waitForTimeout(320)
+  const tgt = await read()
+  assert(
+    tgt.activeId === pick.mid && tgt.scrollTop === 0 && tgt.caret === pick.mid,
+    `点块标应去目标块（从它的顶部），不套用页的旧位置：${JSON.stringify(tgt)}`,
+  )
+
+  await ctx.close()
+  return `历史/面包屑/左槽都回 ${saved.scrollTop}px；目标块从顶部开始`
+})
+
+await check('T204 tab：新建/切换/关闭；每个 tab 各自的位置与历史', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const aid = await pageByTitle(page, '产品设计')
+  await page.waitForTimeout(250)
+  const pick = await page.evaluate(() => {
+    const bs = window.__qua.blocks().filter((b) => b.id !== window.__qua.snapshot().activeId && b.text?.length > 1)
+    return { mid: bs[Math.floor(bs.length / 2)]?.id ?? '', target: bs[bs.length - 1]?.id ?? '' }
+  })
+  await page.evaluate((id) => window.__qua.focusBlock(id, 2), pick.mid)
+  await page.evaluate(() => {
+    const s = document.getElementById('scroll')
+    s.scrollTop = 80
+  })
+  await page.waitForTimeout(150)
+  const saved = await page.evaluate(() => ({
+    activeId: window.__qua.snapshot().activeId,
+    scrollTop: document.getElementById('scroll').scrollTop,
+    caret: window.__qua.__editor.caretBlock(),
+    off: window.__qua.__editor.sel?.aOff ?? 0,
+  }))
+  const tabState = () =>
+    page.evaluate(() => ({
+      activeId: window.__qua.snapshot().activeId,
+      scrollTop: document.getElementById('scroll').scrollTop,
+      caret: window.__qua.__editor.caretBlock(),
+      off: window.__qua.__editor.sel?.aOff ?? 0,
+      tabs: [...document.querySelectorAll('#center-tabs .center-tab')].map((x) => ({
+        title: x.querySelector('.center-tab-title')?.textContent ?? '',
+        active: x.dataset.active === '1',
+      })),
+    }))
+
+  // ① 新建 tab（今日）：当前 tab 的位置被存档，新 tab 从自己的顶部开始
+  await page.evaluate(() => window.__qua.invoke('core.tab/new', {}))
+  await page.waitForTimeout(400)
+  const fresh = await tabState()
+  assert(fresh.tabs.length === 2 && fresh.tabs[1].active, `新建 tab 应出现并成为活跃：${JSON.stringify(fresh)}`)
+  assert(fresh.activeId !== aid, `新 tab 不应该是同一个视图：${JSON.stringify(fresh)}`)
+  assert(fresh.scrollTop === 0, `新 tab 从自己的顶部开始：${JSON.stringify(fresh)}`)
+
+  // ② 切回 tab 1：它自己的位置/光标原样回来
+  await page.locator('#center-tabs .center-tab').first().click()
+  await page.waitForTimeout(400)
+  const back = await tabState()
+  assert(
+    back.activeId === aid &&
+      Math.abs(back.scrollTop - saved.scrollTop) <= 2 &&
+      back.caret === saved.caret &&
+      back.off === saved.off,
+    `切回 tab 应恢复它自己的位置：${JSON.stringify({ saved, back })}`,
+  )
+
+  // ③ 每个 tab 自己的历史：在 tab 1 里导航再后退，仍回到 tab 1 的位置
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), pick.target)
+  await page.waitForTimeout(220)
+  await page.evaluate(() => window.__qua.invoke('core.history/back', {}))
+  await page.waitForTimeout(320)
+  const hist = await tabState()
+  assert(
+    hist.activeId === aid && Math.abs(hist.scrollTop - saved.scrollTop) <= 2 && hist.caret === saved.caret,
+    `tab 1 的历史应回到 tab 1 的位置：${JSON.stringify(hist)}`,
+  )
+
+  // ④ 在当前 tab 之外开一块（新 tab），关掉它回到相邻 tab
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id, newTab: true }), pick.target)
+  await page.waitForTimeout(400)
+  const extra = await tabState()
+  assert(extra.tabs.length === 3 && extra.activeId === pick.target, `⌘+点/命令应开新 tab 到目标块：${JSON.stringify(extra)}`)
+  await page.evaluate(() => window.__qua.invoke('core.tab/close', {}))
+  await page.waitForTimeout(350)
+  const closed = await tabState()
+  assert(closed.tabs.length === 2 && closed.activeId !== pick.target, `关当前 tab 后应落到相邻 tab：${JSON.stringify(closed)}`)
+
+  await ctx.close()
+  return `2→3→2 tab；切回恢复 ${saved.scrollTop}px 与光标；每 tab 历史独立`
+})
+
 /**
  * **判定放在所有用例之后**：写在这里之前时，后面的用例（T136 起）即使红了也不会进
  * `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。

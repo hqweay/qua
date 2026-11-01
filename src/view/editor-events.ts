@@ -46,6 +46,9 @@ function clipboardImageFiles(dt: DataTransfer | null): File[] {
 export interface RefClickMods {
   altKey: boolean
   shiftKey: boolean
+  /** ⌘/Ctrl+点＝在新 tab 打开（浏览器同一条手势） */
+  metaKey?: boolean
+  ctrlKey?: boolean
 }
 
 /**
@@ -217,6 +220,8 @@ export interface EditorBridge {
    *    把两者合成一个入口就永远只能实现其中一种。
    */
   focusBlock: (blockId: string) => void
+  /** ⌘/Ctrl+左键点块标/面包屑 ＝ 在新 tab 打开这一块（不换当前 tab） */
+  openInNewTab?: (blockId: string) => void
   /** Shift+左键点块标（待办行的方框也是块标）＝ 在右槽钉住 / 取消钉住 */
   openInDock: (blockId: string) => void
   /**
@@ -663,7 +668,9 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       if (e.shiftKey) {
         br.openInDock(ancestor)
       } else if (e.metaKey || e.ctrlKey) {
-        br.focusBlock(ancestor)
+        // ⌘/Ctrl+点面包屑＝在新 tab 回到这个祖先
+        if (br.openInNewTab) br.openInNewTab(ancestor)
+        else br.focusBlock(ancestor)
       } else if (br.expandContext) {
         const rowEl = path.find(
           (n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('blk') && n.dataset.blockId !== undefined,
@@ -711,6 +718,8 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       br.onRefClick({ to: refEl.dataset.refTo, ...(refEl.dataset.atomId ? { runId: refEl.dataset.atomId } : {}) }, refEl, {
         altKey: e.altKey,
         shiftKey: e.shiftKey,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
       })
       e.preventDefault()
       return
@@ -768,9 +777,14 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     const marker = path.find((n): n is HTMLElement => n instanceof HTMLElement && 'focusFor' in n.dataset)
     if (marker?.dataset.focusFor) {
       // Shift+左键 ⇒ 钉到右槽（同一个入口可逆：已钉住则取消）
+      // ⌘/Ctrl+左键 ⇒ 在新 tab 打开（浏览器同一条手势）；普通左键＝当前 tab 聚焦
       if (e.shiftKey) {
         e.preventDefault()
         br.openInDock(marker.dataset.focusFor)
+      } else if (e.metaKey || e.ctrlKey) {
+        e.preventDefault()
+        if (br.openInNewTab) br.openInNewTab(marker.dataset.focusFor)
+        else br.focusBlock(marker.dataset.focusFor)
       } else {
         br.focusBlock(marker.dataset.focusFor)
       }

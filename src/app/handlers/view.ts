@@ -13,14 +13,22 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     // 缺省目标是**光标所在块**（块菜单就是这么调的：它不传 args）
     const id = typeof a.blockId === 'string' && a.blockId !== '' ? a.blockId : app.ed.caretBlock()
     if (!id) return false
+    // `newTab` 来自修饰键点击（⌘+click）：开一张新 tab，不换当前 tab 的落点
+    if (a.newTab === true) return app.openInNewTab(id, a.feed === true)
     // `feed` 只来自历史回放：普通块标/面包屑/引用点击不带它，一律单块聚焦
-    app.zoomTo(id, a.feed === true)
+    // `restore` 只来自面包屑/历史这类「返回」入口：用这个视图最后一次的位置
+    app.zoomTo(id, a.feed === true, a.restore === true ? 'saved' : undefined)
     return true
   },
   'core.block/zoom-out': (_a, app) => {
     app.zoomOut()
     return true
   },
+  /* ---- tab ---- */
+  'core.tab/new': (_a, app) => app.newTab(),
+  'core.tab/close': (_a, app) => app.closeTab(),
+  'core.tab/next': (_a, app) => app.nextTab(),
+  'core.tab/prev': (_a, app) => app.prevTab(),
   /**
    * 移动到…：先选块（光标 / 选区），再弹目标选择器。
    *

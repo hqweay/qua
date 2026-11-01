@@ -60,7 +60,7 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
      *    （按「流的第一段」去设在库里留着更早的未打开天时会把人送到那一天）。
      * ⚠️ 空天补首子块是**装载边界**的事（经事务进库），打开这里只选择、不写库。
      */
-    d.setActiveId(id, { feed: false })
+    d.setActiveId(id, { feed: false, restore: 'saved', focusRestore: true, fallbackCaret: true })
     d.loadPage(b ? rootsFor(b) : [])
     d.refreshList()
     d.refreshTitle()
@@ -88,7 +88,13 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
      *    未打开的一天（它不是今天），按下「回今日」人却停在昨天，是很怪的落点。
      *    装载顺序不变（按日期降序），只是当前对象归今天。
      */
-    d.setActiveId(anchorId, { feed: true })
+    d.setActiveId(anchorId, {
+      feed: true,
+      // 普通「回今日/前一天」是返回（用最后位置）；复盘带参＝一次新的视图（从顶部）
+      restore: opts ? 'none' : 'saved',
+      focusRestore: true,
+      fallbackCaret: true,
+    })
     // 流的形态＝「date 在顶、更早存在的天往下」：选天是查询的事，「怎么排」是装载的事
     let dayBlocks = d
       .kb.query({ ...FEED_SPEC, limit: days })

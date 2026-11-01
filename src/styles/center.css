@@ -45,6 +45,78 @@
   color: var(--ui-text-tertiary);
   user-select: none;
 }
+/* ---------------------------------------------------------- 中心槽 tab 条
+   一个 tab ＝ 一份保存的视图（Doc + 位置 + 自己的历史）。条在 `#scroll` 之外，
+   不随正文滚走；横向溢出时自己滚。 */
+.center-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  min-height: 30px;
+  padding: var(--ui-gap-1) var(--ui-gap-3);
+  border-bottom: 1px solid var(--ui-border-subtle);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.center-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  flex: 0 0 auto;
+  max-width: 220px;
+  height: 24px;
+  padding: 0 var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-xs);
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+}
+.center-tab:hover {
+  background: var(--ui-surface-sunken);
+}
+.center-tab[data-active='1'] {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+.center-tab-title {
+  min-width: 0;
+}
+.center-tab-close,
+.center-tab-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-radius-sm);
+  background: none;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.center-tab-close {
+  opacity: 0;
+}
+.center-tab:hover .center-tab-close,
+.center-tab[data-active='1'] .center-tab-close,
+.center-tab-close:focus-visible {
+  opacity: 1;
+}
+.center-tab-close:hover,
+.center-tab-add:hover {
+  background: var(--ui-bg-hover);
+  color: var(--ui-text);
+}
+.center-tab-add {
+  flex: 0 0 auto;
+}
+
 #scroll {
   flex: 1;
   overflow: auto;

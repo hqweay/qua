@@ -105,6 +105,12 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.history/back', title: t('cmd.history.back'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.history'), keywords: ['back', 'history', 'navigate'] },
   { name: 'core.history/forward', title: t('cmd.history.forward'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.history'), keywords: ['forward', 'history', 'navigate'] },
 
+  /* ---- tab（一个 tab 一份保存的视图） ---- */
+  { name: 'core.tab/new', title: t('cmd.tab.new'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['tab', 'new'] },
+  { name: 'core.tab/close', title: t('cmd.tab.close'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['tab', 'close'] },
+  { name: 'core.tab/next', title: t('cmd.tab.next'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['tab', 'next'] },
+  { name: 'core.tab/prev', title: t('cmd.tab.prev'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['tab', 'prev'] },
+
   /* ---- 页面 ---- */
   { name: 'core.page/new', title: t('cmd.page.new'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.page'), tile: { icon: 'lucide:plus' } },
   { name: 'core.page/open', title: t('cmd.page.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.page'), args: { pageId: { type: 'string' } } },
@@ -121,7 +127,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.journal/feed-layout', title: t('cmd.journal.feed-layout'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { layout: { type: 'string' } }, keywords: ['layout', 'feed', 'column', 'row'] },
 
   /* ---- zoom（zoom 是视图配置，不是新对象，也不引入焦点栈） ---- */
-  { name: 'core.block/focus-block', title: t('cmd.block.focus-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' } }, keywords: ['zoom', 'focus', t('menu.kw.zoom')] },
+  { name: 'core.block/focus-block', title: t('cmd.block.focus-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, feed: { type: 'boolean' }, restore: { type: 'boolean' }, newTab: { type: 'boolean' } }, keywords: ['zoom', 'focus', t('menu.kw.zoom')] },
   { name: 'core.block/inspect', title: t('cmd.block.inspect'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['props', 'property', 'inspect'] },
   { name: 'core.block/zoom-out', title: t('cmd.block.zoom-out'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['zoom', 'out', 'back'] },
   { name: 'core.block/move-to', title: t('cmd.block.move-to'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' }, targetId: { type: 'string' } }, keywords: ['move', 'move to', t('menu.kw.move')] },

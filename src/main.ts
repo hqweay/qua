@@ -48,7 +48,8 @@ import { setupPanels } from './app/wiring/panels.ts'
 import { setupOwners } from './app/wiring/owners.ts'
 import { renderQueryBuilder } from './ui/query-builder.ts'
 import { setupChrome } from './app/wiring/chrome.ts'
-import { setupPages } from './app/wiring/pages.ts'
+import { setupPages, type TabInfo } from './app/wiring/pages.ts'
+import { renderCenterTabs as paintCenterTabs } from './ui/center-tabs.ts'
 import { setupDiagnostics } from './app/wiring/diagnostics.ts'
 import { HANDLERS } from './app/handlers.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
@@ -320,8 +321,8 @@ function uiCtx(): CtxKeys {
     journalView: isJournal(activeBlock()),
     journalDate: isJournal(activeBlock()) ? (prop<string>(activeBlock(), '_date') ?? '') : '',
     // 导航历史是否可走：键位表的 `when` 与命令面板的可用态都读这两个键
-    canGoBack: nav.back.length > 0,
-    canGoForward: nav.forward.length > 0,
+    canGoBack: canGoBack(),
+    canGoForward: canGoForward(),
     isMac: isMac(),
   }
   return ctx
@@ -774,6 +775,7 @@ function handleRefClick(ref: RefClickHit, mods: RefClickMods, el?: HTMLElement):
   const target = ref.to !== '' && findInForest(ws.blocks, ref.to) ? ref.to : undefined
   if (target && (!mods.altKey || !ref.run)) {
     if (mods.shiftKey) openWindow('right', target)
+    else if (mods.metaKey || mods.ctrlKey) app.openInNewTab(target)
     else void registry.invoke('core.block/focus-block', { blockId: target }, 'editor')
     return
   }
@@ -807,7 +809,7 @@ const dispatchEnv: DispatchEnv = {
 
 installKeydown(dispatchEnv, { editorEl })
 
-const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEditableRoot, materializeEditableRoots } = setupPages({
+const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEditableRoot, materializeEditableRoots, initTabs, resetTabs, activateTab, openInNewTab, newTab, closeTab, nextTab, prevTab, canGoBack, canGoForward, refreshTabs } = setupPages({
   kb,
   blocks,
   txRun,
@@ -835,7 +837,26 @@ const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEdit
   prefs: () => prefs(),
   // 「看属性」承诺的是内容而不是一列空槽：卡被关掉之后由这一条放回来
   ensureDockCard: (side, id) => addDerived(side, id),
+  onTabsChanged: (tabs) => renderCenterTabs(tabs),
 })
+
+/**
+ * 中心槽的 tab 条：状态在 `pages`，这里只把只读列表画出来。
+ * 切 tab / 关闭 / 新建都走同一条 `pages` 入口，UI 不自己改状态。
+ */
+function renderCenterTabs(tabs: readonly TabInfo[]): void {
+  paintCenterTabs(chrome.centerTabsEl, tabs, {
+    activate: (id) => {
+      activateTab(id)
+    },
+    close: (id) => {
+      closeTab(id)
+    },
+    create: () => {
+      newTab()
+    },
+  })
+}
 /* ------------------------------------------------------------ 属性写入 / 摘标签提示 */
 
 /**
@@ -1140,9 +1161,8 @@ function openExternalUrl(raw: string): boolean {
  */
 function swapWorkspace(next: Workspace, save: boolean): void {
   ws = next
-  // 换库 ⇒ 旧落点全部失效；历史留着只会把用户送到「上一份演示数据」的 id
-  nav.back = []
-  nav.forward = []
+  // 换库 ⇒ 旧落点全部失效；tab/历史留着只会把用户送到「上一份演示数据」的 id
+  resetTabs()
   /**
    * **旧库的 op 不能落到新库**：它们说的是「旧库里那块长这样」，带过河就是脏写。
    * 换库本来就是「整体换一份」，落盘会按整类提交（新库的 op 从零开始攒）。
@@ -1176,6 +1196,7 @@ function swapWorkspace(next: Workspace, save: boolean): void {
   mainEd.loadPage({ roots, folded: device.folded }, { blockId: caret?.id ?? '', off: 0 })
   renderMounts()
   chrome.renderEmptyHint(activeBlock().children)
+  initTabs()
   if (save) saveNow()
   scheduleBadge()
 }
@@ -1635,6 +1656,13 @@ const app: App = {
   historyBack: () => historyGo('back'),
   historyForward: () => historyGo('forward'),
 
+  // tab：一个 tab 一份保存的视图（Doc + 位置 + 自己的历史）
+  openInNewTab: (id, feed) => openInNewTab(id, feed),
+  newTab: () => newTab(),
+  closeTab: (id) => closeTab(id),
+  nextTab: () => nextTab(),
+  prevTab: () => prevTab(),
+
   ...viewCommands({
     prefs: () => prefs(),
     applyChrome,
@@ -1978,6 +2006,8 @@ function viewEvents(
     // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
     // 所以「点块标进去」与「点面包屑出来」共用一套语义，没有第二种入口。
     focusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, via),
+    // ⌘/Ctrl+点块标／面包屑＝在新 tab 打开（不换当前 tab）
+    openInNewTab: (blockId) => void app.openInNewTab(blockId),
     // Shift+点块标 ⇒ 在右槽打开一个窗口（已在别处则移过去；已在本侧则定位）
     openInDock: (blockId) => openWindow('right', blockId),
     blockMenu: (blockId, rect, appearanceHost) => {
@@ -2032,6 +2062,19 @@ function wireViewEditor(
 
 let panels: ReturnType<typeof setupPanels>
 
+/**
+ * tab 标题的刷新是**去抖**的：正文每敲一个字都会 `change`，而 tab 条重建会
+ * 把 hover/焦点从上面摘掉。只有标题真的变了才值得重画，60ms 的延迟用户看不出来。
+ */
+let tabsTimer: number | null = null
+function scheduleTabs(): void {
+  if (tabsTimer !== null) window.clearTimeout(tabsTimer)
+  tabsTimer = window.setTimeout(() => {
+    tabsTimer = null
+    refreshTabs()
+  }, 60)
+}
+
 ed.events = viewEvents(
   () => mainEd,
   (kind) => {
@@ -2039,6 +2082,7 @@ ed.events = viewEvents(
     scheduleSave()
     chrome.renderEmptyHint(activeBlock().children)
     renderDocks() // 块数变了要更新
+    scheduleTabs()
     scheduleBadge()
     /**
      * **结构变化要重排段与视图宿主**。
@@ -2053,6 +2097,8 @@ ed.events = viewEvents(
   // 正文这一台把查询结果画在自己行下；里层编辑器（`wireViewEditor`）默认不挂
   true,
 )
+// 启动时的第一张 tab ＝ 已经装载好的这一屏；tab 条从这里开始画
+initTabs()
 /**
  * **撤销/重做产出的 op** 并进待落盘队列。
  *
