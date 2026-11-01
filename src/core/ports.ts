@@ -341,7 +341,19 @@ export interface App {
    * `feed` 只由历史回放使用：还原「当时看的是日记流」这一形态；
    * 普通聚焦永远只装目标块自己。
    */
-  zoomTo(id: string, feed?: boolean): void
+  zoomTo(id: string, feed?: boolean, restore?: 'saved' | 'none'): void
+  /**
+   * **在一个新 tab 打开块/页**（⌘+点击引用/块标、命令面）。
+   *
+   * 同一个视图已经开着 ⇒ 切到那一张 tab，不重复开（一个视图只开一张 tab）。
+   */
+  openInNewTab(id: string, feed?: boolean): boolean
+  /** 新 tab（今日）；今日已经开着就切过去 */
+  newTab(): boolean
+  /** 关 tab（省略 id ＝ 当前）；关掉最后一张会补一张今日 */
+  closeTab(id?: string): boolean
+  nextTab(): boolean
+  prevTab(): boolean
   /** 退回该容器所在的顶层块（面包屑的「根」） */
   zoomOut(): void
   /**

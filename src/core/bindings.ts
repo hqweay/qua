@@ -70,6 +70,11 @@ export const BINDINGS: Binding[] = [
   // 导航前进/后退（中心槽走到哪）：与 undo/redo 的模型快照栈是两套，键也不同
   { command: 'core.history/back', kind: 'keymap', key: 'mod+[', when: 'canGoBack', layer: 'core' },
   { command: 'core.history/forward', kind: 'keymap', key: 'mod+]', when: 'canGoForward', layer: 'core' },
+  // tab：一个 tab 一份保存的视图。⌘T 新建（今日）；⇧⌘[/] 前后切换；⇧⌘W 关闭（⌘W 是关窗口）
+  { command: 'core.tab/new', kind: 'keymap', key: 'mod+t', when: '', layer: 'core' },
+  { command: 'core.tab/prev', kind: 'keymap', key: 'mod+shift+[', when: '', layer: 'core' },
+  { command: 'core.tab/next', kind: 'keymap', key: 'mod+shift+]', when: '', layer: 'core' },
+  { command: 'core.tab/close', kind: 'keymap', key: 'mod+shift+w', when: '', layer: 'core' },
   // `when` 为空 ⇒ 总是可用：命令面板是键盘可达性的兜底
   { command: 'core.command-palette/show', kind: 'keymap', key: 'mod+p', when: '', layer: 'core' },
   { command: 'core.command-palette/show', kind: 'keymap', key: 'mod+shift+p', when: '', layer: 'core' },

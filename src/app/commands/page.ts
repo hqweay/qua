@@ -87,7 +87,7 @@ export function pageCommands(d: PageDeps): Pick<
        */
       const p = mkPageBlock()
       d.insertBlock(p, null, d.kb.roots().length)
-      d.setActiveId(p.id)
+      d.setActiveId(p.id, { restore: 'none' })
       d.loadPage(rootsFor(p))
       d.refreshList()
       d.refreshTitle()
@@ -112,7 +112,12 @@ export function pageCommands(d: PageDeps): Pick<
        *    装载顺序由一份 QuerySpec 字面量负责（今日在顶 ＋ 存在的更早的天）。
        */
       const isTodayEntry = isJournal(p) && journalDate(p) === todayISO()
-      d.setActiveId(isTodayEntry ? journalId(todayISO()) : id, { feed: isTodayEntry })
+      d.setActiveId(isTodayEntry ? journalId(todayISO()) : id, {
+        feed: isTodayEntry,
+        restore: 'saved',
+        // 左槽打开页：恢复位置，但焦点留在左槽（用户是点导航来的）
+        focusRestore: false,
+      })
       const feedDays = isTodayEntry
         ? d
             .kb.query({ ...FEED_SPEC, limit: FEED_INITIAL })
@@ -139,7 +144,7 @@ export function pageCommands(d: PageDeps): Pick<
       const rest = pages()
       const p = rest[Math.min(i, rest.length - 1)] ?? rest[0]
       if (p) {
-        d.setActiveId(p.id)
+        d.setActiveId(p.id, { restore: 'none' })
         d.loadPage(rootsFor(p))
       }
       d.refreshList()

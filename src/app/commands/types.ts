@@ -76,7 +76,22 @@ export interface PageDeps {
    * 同一个 journal id 既可以从「回到今日」以「今日日记流」打开，也可以从块标以「只看这一天」聚焦。
    * 历史回放要记住的是「当时是哪一种」，所以它得跟着落点一起入栈。
    */
-  setActiveId: (id: string, view?: { feed?: boolean }) => void
+  setActiveId: (
+    id: string,
+    view?: {
+      feed?: boolean
+      /**
+       * 这次是不是**返回**：
+       *   · `'saved'` ＝ 用这个视图最后一次的位置；`'none'` ＝ 从顶部；
+       *   · 省略 ＝ 不改恢复意图（历史回放已经放好了快照）。
+       */
+      restore?: 'saved' | 'none'
+      /** 恢复位置时是否把焦点交回正文（左槽打开页＝false；历史/面包屑＝true） */
+      focusRestore?: boolean
+      /** 没有保存选区时，把光标放到锚点块首（翻日/回今日这类「要能立刻打字」的入口） */
+      fallbackCaret?: boolean
+    },
+  ) => void
   /**
    * 中心编辑器**此刻装载的根 id**。
    * 单块聚焦时恰好是一个、且等于当前对象；日记流时是多段。

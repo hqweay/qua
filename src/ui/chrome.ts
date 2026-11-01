@@ -61,6 +61,8 @@ export interface Chrome {
    */
   inspectCardEl: HTMLElement
   inspectCardTitleEl: HTMLElement
+  /** 中心槽 tab 条（纯容器；内容由 `ui/center-tabs.ts` 画） */
+  centerTabsEl: HTMLElement
   propertiesBodyEl: HTMLElement
   propertiesAddEl: HTMLButtonElement
   /** 右槽的堆叠容器：检视卡在装配时挂进去（它必须先在文档里，重画才认得它） */
@@ -83,7 +85,7 @@ function must<T extends HTMLElement>(id: string): T {
   return el as T
 }
 
-export function createChrome(onCrumb?: (blockId: string, shiftKey: boolean) => void): Chrome {
+export function createChrome(onCrumb?: (blockId: string, shiftKey: boolean, newTab: boolean) => void): Chrome {
   // —— 自持的 DOM（装配层不再看得到它们）——
   /** 面包屑（2026-10-20）：**只有这一条**，不再兼任「页名／标题」 */
   const trailEl = must('crumbs-trail')
@@ -93,6 +95,7 @@ export function createChrome(onCrumb?: (blockId: string, shiftKey: boolean) => v
   const noticeEl = must('boot-notice')
   const inspectCardEl = must('inspect-card')
   const inspectCardTitleEl = must('inspect-card-title')
+  const centerTabsEl = must('center-tabs')
   const propertiesBodyEl = must('properties-body')
   const propertiesAddEl = must<HTMLButtonElement>('properties-add')
   const dockRightStackEl = must('dock-right-stack')
@@ -141,7 +144,7 @@ export function createChrome(onCrumb?: (blockId: string, shiftKey: boolean) => v
     el.dataset.blockId = b.id
     // journal 的「名字」是日期的只读投影；其余走显示名（主名叶子 > 正文，空则兜底）
     el.textContent = blockLabel(b)
-    el.addEventListener('click', (e) => onCrumb?.(b.id, e.shiftKey))
+    el.addEventListener('click', (e) => onCrumb?.(b.id, e.shiftKey, e.metaKey || e.ctrlKey))
     return el
   }
 
@@ -173,6 +176,7 @@ export function createChrome(onCrumb?: (blockId: string, shiftKey: boolean) => v
     blankAreaEl: scrollEl,
     inspectCardEl,
     inspectCardTitleEl,
+    centerTabsEl,
     propertiesBodyEl,
     propertiesAddEl,
     dockRightStackEl,

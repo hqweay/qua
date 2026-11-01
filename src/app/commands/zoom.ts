@@ -1,7 +1,7 @@
 /**
  * zoom 命令：把中心槽的「当前对象」换成任意块，以及退回祖先。
  */
-import { FEED_INITIAL, FEED_SPEC, isJournal } from '../../core/index.ts'
+import { FEED_INITIAL, FEED_SPEC, hasList, isJournal } from '../../core/index.ts'
 import type { App } from '../../core/ports.ts'
 import type { Block } from '../../core/model.ts'
 import { rootsFor, rootsForMany } from './roots.ts'
@@ -23,7 +23,7 @@ export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut'> {
    * `feed` 只给**历史回放**用：它要还原「当时看的是日记流」这件事，而单看 id 分不出来。
    * 普通聚焦（块标 / 面包屑 / 引用）永远是 `feed = false`：**只装这一块**。
    */
-  const open = (id: string, feed = false): void => {
+  const open = (id: string, feed = false, restore?: 'saved' | 'none'): void => {
     const b = d.kb.get(id)
     if (!b) return
     /**
@@ -38,7 +38,14 @@ export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut'> {
     if (!feed && roots.length === 1 && roots[0] === id) return
 
     d.flush()
-    d.setActiveId(id, { feed })
+    /**
+     * **返回类目标用「最后位置」**：页／日记是「你去过的地方」，再打开它应该回到上次那里；
+     * 普通块是「去这一块」，从它的顶部开始（`zoomOut` 显式传 `'saved'`）。
+     * 入口已经明确给了 `restore` 就不覆盖（历史回放 / 面包屑 / 新建页）。
+     */
+    const mode =
+      restore ?? (hasList(b, 'page') || isJournal(b) ? 'saved' : 'none')
+    d.setActiveId(id, { feed, restore: mode })
     const feedDays =
       feed && isJournal(b)
         ? d
@@ -54,18 +61,19 @@ export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut'> {
   }
 
   return {
-    zoomTo: (id, feed) => {
+    zoomTo: (id, feed, restore) => {
       /**
        * 叶子块也能 zoom：`scope: subtree` **含块自身**，叶子就是「只看这一块」——
        * 若叶子不给 zoom，点击行为会**时 zoom 时不 zoom**，用户没法预测一次点击的结果。
        */
-      open(id, feed === true)
+      open(id, feed === true, restore)
     },
     zoomOut: () => {
       const path = d.kb.pathOf(d.activeId())
       // 已经是最外层（页 / journal 本身就是顶层块）⇒ 没有可退的
       if (path.length <= 1) return
-      open(path[0]!.id)
+      // 退回祖先＝回到那个视图：用它的最后位置，而不是从顶部重开
+      open(path[0]!.id, false, 'saved')
     },
   }
 }

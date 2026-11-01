@@ -118,6 +118,27 @@ import {
 import { journalDateLabel, type SecLayout, type ShellCol } from '../core/index.ts'
 export type { SecLayout }
 
+/**
+ * **视口锚**：顶部那一块 ＋ 它相对滚动容器顶的偏移。
+ *
+ * `delta` 可为负（块顶已被滚出视口）；`top` 只在锚点块被删／找不到时兜底。
+ * 不存纯像素：上方插入／删除后，同一像素会落到别的块上。
+ */
+export interface ScrollAnchor {
+  blockId: string
+  delta: number
+  top: number
+}
+
+/**
+ * **一个视图的位置状态**（纯视图状态，不入库）：
+ * 视口锚 ＋ 模型选区（为空＝用户只是浏览，没点块）。
+ */
+export interface ViewState {
+  scroll: ScrollAnchor | null
+  sel: Sel | null
+}
+
 // 只取**类型**：`view` 拿不到实现，写入的落地方式归装配层（见 `Run`）
 import type { Op, Tx } from '../core/kb/types.ts'
 import type { AssetView } from '../core/assets.ts'
@@ -284,6 +305,8 @@ export interface ViewEvents {
    * 装配层把它接到 `core.block/focus-block`（面包屑那一格是同一个命令）。
    */
   focusBlock?: (blockId: string) => void
+  /** ⌘/Ctrl+左键点块标／面包屑 ＝ 在新 tab 打开（不换当前 tab） */
+  openInNewTab?: (blockId: string) => void
   /**
    * **Shift+左键点块标**：在右槽打开这个块（已打开则定位；不在则移过去）。
    *
@@ -3298,6 +3321,8 @@ export class BlockEditor {
       // Shift+左键点块标 ＝ 在右槽打开；事件层只报「打开谁」，落点由装配层决定
       // ⚠️ 没接就不做事（不再退化成中心 zoom：那会让缺入口看起来像成功）
       openInDock: (id) => this.events.openInDock?.(id),
+      // ⌘/Ctrl+左键点块标／面包屑 ＝ 在新 tab 打开（不换当前 tab）
+      openInNewTab: (id) => this.events.openInNewTab?.(id),
       /**
        * 面包屑普通点击 ＝ 这一栏就地展开上下文。也是一次编辑边界（与 focusBlock 同理）：
        * 点击 `contenteditable=false` 的按钮不会派发 `focusout`。
@@ -3634,6 +3659,90 @@ export class BlockEditor {
       this.blankArea.scrollTop = scrollTop
     }
     this.events.change?.('load')
+  }
+
+  /**
+   * **捕获这一屏的位置**：视口锚（顶部那一块 ＋ 它相对滚动容器顶的偏移）＋ 模型选区。
+   *
+   * 为什么存块锚点而不是 `scrollTop`：上方插入／删除／图片加载都会让同一像素落到别处；
+   * 块 id ＋ 相对偏移在内容变化后仍指回「我当时看到的那一块」。
+   * 只读：不改模型、不重排、不写库。
+   */
+  captureViewState(): ViewState {
+    return { scroll: this.captureScrollAnchor(), sel: this.sel ? { ...this.sel } : null }
+  }
+
+  private captureScrollAnchor(): ScrollAnchor | null {
+    const area = this.blankArea
+    const top = area.getBoundingClientRect().top
+    for (const r of this.rows()) {
+      const el = this.blockEl(r.block.id)
+      if (!el) continue
+      const rect = el.getBoundingClientRect()
+      // 顶部那一块＝第一个「底边还在视口内」的行；它可能有一部分被滚出视口（delta 可为负）
+      if (rect.bottom <= top) continue
+      return { blockId: r.block.id, delta: rect.top - top, top: area.scrollTop }
+    }
+    return area.scrollTop > 0 ? { blockId: '', delta: 0, top: area.scrollTop } : null
+  }
+
+  /**
+   * **恢复这一屏的位置**。调用方必须在目标 `loadPage`／`renderAll` 之后调用。
+   *
+   * @param focus 是否把焦点交回正文（左槽打开页＝false；历史/面包屑＝true）
+   * @param fallbackCaret 没有保存选区时，把光标放到锚点块的块首（切 tab 用；
+   *   只滚没点的视图不该在返回时凭空造光标，所以默认 false）
+   */
+  restoreViewState(state: ViewState, opts: { focus?: boolean; fallbackCaret?: boolean } = {}): void {
+    const focus = opts.focus === true
+    const sel = state.sel
+    const known = sel ? flatten(this.doc).some((b) => b.id === sel.aBlock) : false
+    if (sel && known) {
+      this.sel = { ...sel }
+      if (focus) {
+        this.container.focus()
+        this.restoreSel()
+      }
+    } else if (focus) {
+      this.container.focus()
+      if (opts.fallbackCaret) {
+        const anchor = state.scroll?.blockId
+        const target =
+          anchor && flatten(this.doc).some((b) => b.id === anchor) ? anchor : (this.rows()[0]?.block.id ?? '')
+        if (target) this.placeCaret(target, 0)
+      }
+    }
+    this.restoreScrollAnchor(state.scroll)
+    this.events.selChange?.()
+  }
+
+  private restoreScrollAnchor(s: ScrollAnchor | null): void {
+    const area = this.blankArea
+    if (!s) {
+      // 保存的位置就是顶部（或新 tab 没有位置）⇒ 显式回到顶部；
+      // 不写这一句会继承上一个视图的 scrollTop。
+      area.scrollTop = 0
+      return
+    }
+    if (s.blockId) {
+      // 虚拟化：锚点可能在窗口外 ⇒ 先把窗口中心移过去，让它挂上
+      if (this.virtualize && !this.blockEl(s.blockId)) this.applyWindow(s.blockId)
+      const el = this.blockEl(s.blockId)
+      if (el) {
+        const top = area.getBoundingClientRect().top
+        const cur = el.getBoundingClientRect().top - top
+        area.scrollTop += cur - s.delta
+        return
+      }
+    }
+    // 锚点块被删／折叠／空屏：用捕获时的像素位置兜底，夹在合法范围内
+    const max = Math.max(0, area.scrollHeight - area.clientHeight)
+    area.scrollTop = Math.min(Math.max(0, s.top), max)
+  }
+
+  /** 复盘空天格子属于**这一份视图**，切 tab 时随 `Doc` 一起保存/恢复 */
+  get shellCols(): readonly ShellCol[] {
+    return this.shells
   }
 
   ctxKeys(): CtxKeys {
