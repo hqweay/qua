@@ -41,6 +41,22 @@ export function normalizeAlias(name: string): string {
 }
 
 /**
+ * `_aliases` 的形状判据（**读路径与落盘校验共用同一份**，`storage/shape.ts` 也吃它）：
+ * 非空数组、全非空串、规范化后两两不相交（同一块不许有两个相同地址）。
+ */
+export function isAliasesValue(v: unknown): boolean {
+  if (!Array.isArray(v) || v.length === 0) return false
+  if (!v.every((a) => typeof a === 'string' && a.trim() !== '')) return false
+  const seen = new Set<string>()
+  for (const a of v as string[]) {
+    const n = normalizeAlias(a)
+    if (n === '' || seen.has(n)) return false
+    seen.add(n)
+  }
+  return true
+}
+
+/**
  * 名字的**叶子段**（原始大小写，用于显示）。
  *
  * 显示只取最后一段：`A/B` 这一行头要显示 `B`（全名仍用于解析）。

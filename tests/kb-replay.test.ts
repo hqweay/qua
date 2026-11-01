@@ -126,7 +126,8 @@ test('⑥ 父必须先出现：残缺日志抛错，不静默落到顶层', () =
           at: 1,
         },
       ]),
-    /missing parent/,
+    // 收端门（validate 的规则①）先于构建器拦下：同一件事，报错来自更前面的那道闸
+    /parent "missing-parent" does not exist/,
     '父不在树上是日志残缺，不是「当顶层」的许可',
   )
 })

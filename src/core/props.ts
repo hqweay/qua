@@ -37,6 +37,11 @@ function sameValue(a: unknown, b: unknown): boolean {
 /** 声明列表的系统属性（有序 ref 列表；pos ＝ 数组下标） */
 export const FIELD_DEFS_PROP = '_fieldDefs'
 
+/** `_fieldDefs` 的形状判据（读路径与落盘校验共用同一份）：非空字符串数组（ref＝定义块 id，悬空合法） */
+export function isFieldDefRefs(v: unknown): boolean {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string' && x !== '')
+}
+
 /**
  * **一个属性在哪儿被顺手改**（定义块上的系统属性）。
  *
@@ -53,6 +58,11 @@ export const FIELD_DEFS_PROP = '_fieldDefs'
 export type UiPosition = 'block-left' | 'panel'
 
 export const UI_POSITION_PROP = '_uiPosition'
+
+/** `_uiPosition` 的形状判据（读路径与落盘校验共用同一份）：两值之一（缺省 `panel` 不落盘） */
+export function isUiPositionValue(v: unknown): boolean {
+  return v === 'block-left' || v === 'panel'
+}
 
 /** 定义块声明的编辑位置（缺省 `panel`：没写就是「要展开填」的那一类） */
 export function uiPositionOf(def: Block | undefined): UiPosition {
@@ -604,6 +614,11 @@ export function declaredFields(owner: Block, forest: readonly Block[]): Block[] 
 
 /** 自有属性槽的系统属性（有序 ref 列表；pos ＝ 数组下标） */
 export const OWN_PROPS_PROP = '_ownProps'
+
+/** `_ownProps` 的形状判据（读路径与落盘校验共用同一份）：非空字符串数组（槽位的 propId，悬空合法） */
+export function isOwnPropSlots(v: unknown): boolean {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string' && x !== '')
+}
 
 /** 这一块自己登记了哪些属性（**有没有**，与**有没有值**是两个问题） */
 export function ownPropIds(block: Block): string[] {

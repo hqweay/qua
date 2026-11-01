@@ -145,6 +145,14 @@ export function tagIdsOf(block: Block): string[] {
 }
 
 /**
+ * `_tags` 的形状判据（读路径与落盘校验共用同一份）：非空字符串数组。
+ * **悬空的标签 id 合法**——删标签不摘引用（软删要能自愈），形状只回答「是不是 id 列表」。
+ */
+export function isTagRefList(v: unknown): boolean {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string' && x !== '')
+}
+
+/**
  * 给块加一个标签（**幂等**；追加到末尾 ＝ 顺序就是用户打的先后）。
  *
  * @returns 真的写进去了才 `true`；已经有这个标签 ⇒ `false` 且一个字节不动

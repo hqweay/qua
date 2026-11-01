@@ -14,11 +14,27 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 const ROOT = join(import.meta.dirname, '..', '..')
-const BLUEPRINT = join(ROOT, '..', '落库蓝本.md')
+/**
+ * 蓝本住在主仓（qua 的上一级）。正体 checkout 里就是 `ROOT/..`；worktree 里
+ * 中间多一层 `.worktrees/<名>`，相对层数对不上——从 `ROOT` 一路向上找第一份，
+ * 都没有时按旧口径给出路径（让报错落在熟悉的 ENOENT 上）。
+ */
+const BLUEPRINT = process.env.QUA_BLUEPRINT ?? findBlueprint()
+function findBlueprint(): string {
+  let dir = ROOT
+  for (let i = 0; i < 6; i++) {
+    const p = join(dir, '落库蓝本.md')
+    if (existsSync(p)) return p
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return join(ROOT, '..', '落库蓝本.md')
+}
 
 /** 代码里**真的会出现**的系统属性键：`*_PROP` 常量 ＋ 直接写的字面量（`'_kind'` 这类） */
 function codeSystemProps(): Map<string, string> {

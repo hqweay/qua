@@ -36,6 +36,14 @@ import { displayNameOf } from './alias.ts'
 export const BELONGS_TO_PROP = '_belongsTo'
 
 /**
+ * `_belongsTo` 的形状判据（读路径与落盘校验共用同一份）：非空字符串数组（上级 id，有序）。
+ * **悬空的上级 id 合法**——删上级不级联（子块上的 ref 留着，悬空可见、可清理）。
+ */
+export function isBelongsToRefs(v: unknown): boolean {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string' && x !== '')
+}
+
+/**
  * 一张森林的**边图邻接表**。
  *
  * 两张表：`byId`（活块表）与 `kids`（边图反向索引）。再加一个 `present`

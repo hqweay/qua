@@ -9,12 +9,25 @@
  * 适配器只负责**字节的进与出**（见 `local-storage.ts` 的信封）；
  * 「这些字节是不是一份能打开的库」归这里。
  */
-import { ALIASES_PROP, ACTIVE_VIEW_PROP, DISPLAY_PROP, LISTS_PROP, VIEWS_PROP, type Block, type Doc, type FoldState } from '../model.ts'
-import { LEGACY_ALIAS_PROP, normalizeAlias } from '../alias.ts'
+import { ACTIVE_VIEW_PROP, ALIASES_PROP, DISPLAY_PROP, ICON_PROP, LISTS_PROP, VIEWS_PROP, isDisplayValue, isIconValue, isListsValue, type Block, type Doc, type FoldState } from '../model.ts'
+import { isAliasesValue, LEGACY_ALIAS_PROP } from '../alias.ts'
 import { isMountsValue, MOUNTS_PROP } from '../mount.ts'
 import { canonicalViewRef, EMBED_PROP } from '../embed.ts'
 import { isActiveViewValue, isViewsValue, sourceConflicts } from '../view.ts'
 import { isAnno, isRun } from '../runs.ts'
+import { BELONGS_TO_PROP, isBelongsToRefs } from '../hierarchy.ts'
+import { COLLECTION_PROP, isCollectionRefList } from '../collection.ts'
+import { isJournalDate } from '../journal.ts'
+import { TAGS_PROP, isTagRefList } from '../tags.ts'
+import {
+  FIELD_DEFS_PROP,
+  OWN_PROPS_PROP,
+  UI_POSITION_PROP,
+  isFieldDefRefs,
+  isOwnPropSlots,
+  isPropKind,
+  isUiPositionValue,
+} from '../props.ts'
 
 /**
  * 落盘形状的版本；**只在显式作废旧库时加一**（原型不做迁移，旧库直接作废重 seed）。
@@ -106,8 +119,13 @@ import { isAnno, isRun } from '../runs.ts'
  *            「有没有这一栏」改判「值 ∪ 自有槽 ∪ 标签声明」。
  *            旧库的 `_query` 带着已删的原子 ⇒ 读不出来（`readSpec` 会说不合法，
  *            求值器只会静默空集）⇒ 作废重 seed。
+ * v30 → v31：**系统键值形状上落盘闸**——9 个键（`_tags`／`_belongsTo`／`_items`／`_date`／
+ *            `_kind`／`_icon`／`_fieldDefs`／`_ownProps`／`_uiPosition`）冷启动改用与写路径
+ *            同一批谓词判 corrupt（判据收进 `core/system-props.ts` 一张表，写侧 op 发看点、
+ *            收端 `validate`、读侧这里三处共用；「什么算坏只能有一个答案」）。
+ *            旧库若带历史脏值，会从「静默回落」变成「判 corrupt」⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 30
+export const WORKSPACE_VERSION = 31
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {
@@ -158,28 +176,16 @@ function isBlock(x: unknown): x is Block {
   // 旧形状不静默读：v13 的 `_roles` / `_alias` 在新模型里没有对应物
   if (LEGACY_ROLES_PROP in b.props || LEGACY_ALIAS_PROP in b.props) return false
 
+  // 空数组与「没有这一格」是两种写法，留着就会让「有没有名字」有两份答案；
+  // 别名还必须规范化后两两不相交（同一块不许有两个相同地址）——判据与读路径共用（`alias.ts`）
   const aliases = b.props[ALIASES_PROP]
-  if (aliases !== undefined) {
-    // 空数组与「没有这一格」是两种写法，留着就会让「有没有名字」有两份答案
-    if (!Array.isArray(aliases) || aliases.length === 0) return false
-    if (!aliases.every((a) => typeof a === 'string' && a.trim() !== '')) return false
-    // 块内别名必须两两不相交（规范化后）：否则同一块有两个相同的地址
-    const seen = new Set<string>()
-    for (const a of aliases as string[]) {
-      const n = normalizeAlias(a)
-      if (n === '' || seen.has(n)) return false
-      seen.add(n)
-    }
-  }
+  if (aliases !== undefined && !isAliasesValue(aliases)) return false
 
   const lists = b.props[LISTS_PROP]
-  if (lists !== undefined) {
-    if (!Array.isArray(lists) || !lists.every((l) => l === 'page' || l === 'tag')) return false
-    if (new Set(lists).size !== lists.length) return false
-  }
+  if (lists !== undefined && !isListsValue(lists)) return false
 
   const display = b.props[DISPLAY_PROP]
-  if (display !== undefined && display !== 'alias' && display !== 'text') return false
+  if (display !== undefined && !isDisplayValue(display)) return false
   /**
    * 挂载区配置：形状判据与**读路径**共用一份（`core/mount.ts` 的 `isMountsValue`）——
    * 读路径那边坏了只当没有，落盘这边坏了判 corrupt，但「什么算坏」只能有一个答案。
@@ -201,9 +207,34 @@ function isBlock(x: unknown): x is Block {
   if (views !== undefined && !isViewsValue(views)) return false
   const activeView = b.props[ACTIVE_VIEW_PROP]
   if (activeView !== undefined && !isActiveViewValue(activeView)) return false
+  /**
+   * —— 以下键的形状判据与**写路径共用同一份**（`core/system-props.ts` 的登记表，
+   *    谓词住在各领域模块）。v31 起「什么算坏」只有一个答案：写侧在 op 发看点拒，
+   *    读侧在这里判 corrupt。`_query` 不在此列（条件读不出是已设计的降级态，宽容读）、
+   *    `_type` 不在此列（开放值域，读侧降级是设计）。
+   */
+  const tags = b.props[TAGS_PROP]
+  if (tags !== undefined && !isTagRefList(tags)) return false
+  const belongsTo = b.props[BELONGS_TO_PROP]
+  if (belongsTo !== undefined && !isBelongsToRefs(belongsTo)) return false
+  const items = b.props[COLLECTION_PROP]
+  if (items !== undefined && !isCollectionRefList(items)) return false
+  const date = b.props['_date']
+  if (date !== undefined && !isJournalDate(date)) return false
+  const icon = b.props[ICON_PROP]
+  if (icon !== undefined && !isIconValue(icon)) return false
+  const kind = b.props['_kind']
+  if (kind !== undefined && !isPropKind(kind)) return false
+  const fieldDefs = b.props[FIELD_DEFS_PROP]
+  if (fieldDefs !== undefined && !isFieldDefRefs(fieldDefs)) return false
+  const ownProps = b.props[OWN_PROPS_PROP]
+  if (ownProps !== undefined && !isOwnPropSlots(ownProps)) return false
+  const uiPosition = b.props[UI_POSITION_PROP]
+  if (uiPosition !== undefined && !isUiPositionValue(uiPosition)) return false
   // 不变量：在列表里 ⇒ 至少有一个名字（不能出现在页/标签列表里却没有任何地址）。
   // 这里只拦「有列表、完全没有 _aliases」；别名数组本身的空/空串已在上面判 corrupt。
-  if (Array.isArray(lists) && lists.length > 0 && !Array.isArray(aliases)) return false
+  const listsCell = b.props[LISTS_PROP]
+  if (Array.isArray(listsCell) && listsCell.length > 0 && !Array.isArray(b.props[ALIASES_PROP])) return false
   /**
    * 不变量：**源的声明互斥**（`_query`／`_items`／`_embed` 只许有一个）。
    *

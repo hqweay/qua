@@ -48,6 +48,29 @@ export const DISPLAY_PROP = '_display' as const
 export type DisplayMode = 'alias' | 'text'
 
 /**
+ * 图标（`lucide:<name>` 或字面文本）。写侧不认识的名字**不拒绝**：
+ * 图标值域只放宽不收紧（别的版本或插件写的名字，读侧画不出来就退回默认）。
+ */
+export const ICON_PROP = '_icon' as const
+
+/** `_lists` 的形状判据（读路径与落盘校验共用同一份）：值 ∈ {page,tag}、无重复 */
+export function isListsValue(v: unknown): boolean {
+  if (!Array.isArray(v)) return false
+  if (!v.every((l) => l === 'page' || l === 'tag')) return false
+  return new Set(v).size === v.length
+}
+
+/** `_display` 的形状判据（读路径与落盘校验共用同一份） */
+export function isDisplayValue(v: unknown): boolean {
+  return v === 'alias' || v === 'text'
+}
+
+/** `_icon` 的形状判据：非空字符串。值域刻意宽松（名字集会长大，格式不承载身份） */
+export function isIconValue(v: unknown): boolean {
+  return typeof v === 'string' && v.trim() !== ''
+}
+
+/**
  * 删除时间戳（毫秒）。有它 ＝ 这个块被删了（**原位软删**）。
  *
  * 删除**不摘树**：块带着整棵子树留在原位，只是遍历（`walkForest`）默认不进被删子树，
@@ -91,7 +114,7 @@ export function isDeleted(b: Block): boolean {
  */
 export type SystemPropId =
   | '_type'
-  | '_icon'
+  | typeof ICON_PROP
   | '_date'
   // 地址与露面（语义见文件顶部的「列表」说明；存储位在这里）
   | typeof ALIASES_PROP
@@ -101,6 +124,10 @@ export type SystemPropId =
   // 视图配置（见 `core/view.ts`）：一个块怎么看，与它是什么是两件事
   | typeof VIEWS_PROP
   | typeof ACTIVE_VIEW_PROP
+  // 集合组件的有序引用（见 `core/collection.ts`）：集合自己的内容，复制跟着走
+  | '_items'
+  // 露面指针（见 `core/embed.ts`）：同一块在别处再出现一次
+  | '_embed'
   // 字段定义（prop-def）：kind / 声明列表 / 选项的可见范围
   | '_kind'
   | '_fieldDefs'

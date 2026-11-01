@@ -1597,6 +1597,112 @@ function commandDecls() {
 }
 
 /* ═══════════════════════════════════════════════════════╗
+   ║ 36 · 系统键登记表：`SystemPropId` 与判据表一一对应          ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  /**
+   * **系统键总清单没有第二份答案**：`model.ts` 的 `SystemPropId` 联合与
+   * `core/system-props.ts` 的 `SYSTEM_PROP_CHECKS` 必须是同一个集合。
+   * 这张表是「键 → 常量 → 判据」的唯一入口——漏登记的键会掉进 `BlockProperty`
+   * 行还能跑（更难发现），漏判据的键在收端等于不设防。
+   *
+   * 判据走 AST（注释不算命中）：联合成员收字符串字面量与 `typeof X_PROP`
+   * （后者在 core 全域解析常量的字符串初值）；登记表的键收字面量与计算键
+   * （计算键用同一张常量表解析）。两侧都对这份白名单——加键＝改这里的一次显式动作，
+   * 与 [27] 的四槽白名单同一性质。
+   */
+  const MODEL = join(ROOT, 'src/core/model.ts')
+  const REGISTRY = join(ROOT, 'src/core/system-props.ts')
+  const EXPECTED = new Set([
+    '_type', '_icon', '_date', '_aliases', '_lists', '_display', '_query', '_views', '_activeView',
+    '_items', '_embed', '_kind', '_fieldDefs', '_choiceScope', '_ownProps', '_uiPosition',
+    '_belongsTo', '_tags', '_mounts', '_deletedAt',
+  ])
+  const hits = []
+  const unionKeys = new Set()
+  const registryKeys = new Set()
+  if (!existsSync(MODEL) || !existsSync(REGISTRY)) {
+    hits.push('锚点文件丢了：`src/core/model.ts` 或 `src/core/system-props.ts` 不存在')
+  } else {
+    // 常量名 → 字符串初值：core 全域的 `export const X_PROP = '_x'`（登记表的计算键跨模块取值）
+    const consts = new Map()
+    for (const f of srcFiles) {
+      if (!f.endsWith('.ts')) continue
+      const body = readFileSync(f, 'utf8')
+      for (const m of body.matchAll(/export const (\w+_PROP)\s*=\s*'(_\w+)'/g)) consts.set(m[1], m[2])
+    }
+
+    const { sf } = tsFile(MODEL)
+    for (const st of sf.statements) {
+      if (!ts.isVariableStatement(st)) continue
+      for (const d of st.declarationList.declarations) {
+        if (!ts.isIdentifier(d.name) || !d.initializer || !ts.isStringLiteral(d.initializer)) continue
+        consts.set(d.name.text, d.initializer.text)
+      }
+    }
+    for (const st of sf.statements) {
+      if (!ts.isTypeAliasDeclaration(st) || st.name.text !== 'SystemPropId') continue
+      if (!ts.isUnionTypeNode(st.type)) {
+        hits.push('`SystemPropId` 不再是联合类型——本条断言的解析前提没了')
+        break
+      }
+      for (const m of st.type.types) {
+        if (ts.isLiteralTypeNode(m) && ts.isStringLiteral(m.literal)) {
+          unionKeys.add(m.literal.text)
+        } else if (ts.isTypeQueryNode(m) && ts.isIdentifier(m.exprName)) {
+          // `typeof X_PROP` 在类型位是 TypeQuery，不是 TypeReference
+          const name = m.exprName.getText(sf)
+          const v = consts.get(name)
+          if (v === undefined) hits.push(`\`SystemPropId\` 的 \`typeof ${name}\` 解析不到字符串初值`)
+          else unionKeys.add(v)
+        } else {
+          hits.push(`\`SystemPropId\` 出现解析不了的成员形状：\`${m.getText(sf)}\``)
+        }
+      }
+    }
+
+    const { sf: rsf } = tsFile(REGISTRY)
+    for (const st of rsf.statements) {
+      if (!ts.isVariableStatement(st)) continue
+      const decl = st.declarationList.declarations.find((d) => ts.isIdentifier(d.name) && d.name.text === 'SYSTEM_PROP_CHECKS')
+      if (!decl?.initializer || !ts.isObjectLiteralExpression(decl.initializer)) continue
+      for (const p of decl.initializer.properties) {
+        if (!ts.isPropertyAssignment(p)) continue
+        if (ts.isStringLiteral(p.name)) {
+          registryKeys.add(p.name.text)
+        } else if (ts.isIdentifier(p.name)) {
+          // `_type`／`_date` 这类键名本身就是合法标识符，解析成 Identifier 而不是字符串字面量
+          registryKeys.add(p.name.text)
+        } else if (ts.isComputedPropertyName(p.name) && ts.isIdentifier(p.name.expression)) {
+          const v = consts.get(p.name.expression.text)
+          if (v === undefined) hits.push(`登记表的计算键 \`${p.name.expression.text}\` 解析不到字符串初值`)
+          else registryKeys.add(v)
+        } else {
+          hits.push(`登记表出现解析不了的键形状：\`${p.name.getText(rsf)}\``)
+        }
+      }
+    }
+
+    for (const k of unionKeys) if (!EXPECTED.has(k)) hits.push(`\`SystemPropId\` 多出未登记的键 \`${k}\` —— 加键要先过 system-props.ts 与本条白名单`)
+    for (const k of EXPECTED) if (!unionKeys.has(k)) hits.push(`\`SystemPropId\` 少了登记的键 \`${k}\``)
+    for (const k of registryKeys) if (!EXPECTED.has(k)) hits.push(`登记表多出未登记的键 \`${k}\``)
+    for (const k of EXPECTED) if (!registryKeys.has(k)) hits.push(`登记表少了键 \`${k}\`（收端对它不设防）`)
+  }
+  add({
+    id: 36,
+    title: '系统键登记表：`SystemPropId` 与 `SYSTEM_PROP_CHECKS` 一一对应，键只有这一份清单',
+    method:
+      'AST 提取 `model.ts` 的 `SystemPropId` 联合（`typeof X` 经 core 全域常量表解析）与 `system-props.ts` 登记表的对象键，对同一份白名单双向比对',
+    scope: `src/core/model.ts（${unionKeys.size} 个成员） · src/core/system-props.ts（${registryKeys.size} 格）`,
+    whitelist: `${[...EXPECTED].sort().join(' / ')} —— 加键＝改这份白名单的一次显式动作`,
+    hits: hits.length,
+    detail: hits,
+    note: '判据本体在各领域模块；登记表是「键 → 判据」的唯一入口，收端与落盘闸都吃它——漏登记的键在收端等于不设防',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
    ║ 等内核（不假装在跑）                                     ║
    ╚═══════════════════════════════════════════════════════ */
 
