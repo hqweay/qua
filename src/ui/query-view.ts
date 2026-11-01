@@ -27,6 +27,7 @@ import {
   fieldTextOf,
   displayNameOf,
   expandContexts,
+  hasLiveChildren,
   isQueryBlock,
   listTableOf,
   readSpec,
@@ -771,7 +772,7 @@ export class ViewHost {
       return
     }
     const src = this.source
-    if (src.kind !== 'query' && b.children.length === 0 && !view) {
+    if (src.kind !== 'query' && !hasLiveChildren(b) && !view) {
       // 叶子块没有可摊开的东西：不给入口（点了只会看到空表）
       box.hidden = true
       return
@@ -1166,7 +1167,7 @@ export class ViewHost {
 
   /** 顶层行里**有子块**的那些：只有它们折起来才有可见效果 */
   private topFoldable(): string[] {
-    return this.rows.filter((b) => b.children.length > 0).map((b) => b.id)
+    return this.rows.filter((b) => hasLiveChildren(b)).map((b) => b.id)
   }
 
   /** 顶层行里还有展开着的吗（决定按钮此刻该说「收起」还是「展开」） */

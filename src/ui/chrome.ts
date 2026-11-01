@@ -16,7 +16,7 @@
  * ⇒ 于是这个组件**不再需要任何宿主能力**（没有按钮要 invoke、没有档位要读），
  *   构造参数也随之为空。
  */
-import { blockLabel, type Block } from '../core/index.ts'
+import { blockLabel, hasLiveChildren, type Block } from '../core/index.ts'
 import { plainText } from '../core/runs.ts'
 import { t } from '../core/msg.ts'
 
@@ -150,7 +150,7 @@ export function createChrome(onCrumb?: (blockId: string, shiftKey: boolean, newT
 
   function renderEmptyHint(roots: Block[]): void {
     const first = roots[0]
-    const empty = roots.length <= 1 && plainText(first?.content ?? []) === '' && (first?.children.length ?? 0) === 0
+    const empty = roots.length <= 1 && plainText(first?.content ?? []) === '' && (!first || !hasLiveChildren(first))
     emptyHintEl.hidden = !empty
     if (empty) emptyHintEl.innerHTML = t('ui.emptyHint')
   }

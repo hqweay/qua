@@ -21,7 +21,9 @@ import {
   findJournalDay,
   findPath,
   flatten,
+  hasLiveChildren,
   journalDays,
+  liveChildren,
   locate,
   pathTo,
   visibleRows,
@@ -128,4 +130,32 @@ test('整片森林口径：嵌在子树里的标签／journal 也走得到', () 
     ['2026-10-22'],
   )
   assert.equal(findJournalDay(forest, '2026-10-22')?.id, 'b1')
+})
+
+/**
+ * 「有没有子块」只有一份判据：**活着的**直接子块（软删的不算）。
+ *
+ * 删除是原位软删 —— 块带着子树留在 `children` 里只写一格 `_deletedAt`。拿
+ * `children.length` 判「有没有子块」的地方于是会在删空之后答错，而且不报错：
+ * 可写容器不补落笔格（打不了字）、折叠标记说有子块（点下去没反应）、
+ * 点空白复用「末尾空块」抓到一个看不见的块（静默无操作）。
+ */
+test('liveChildren／hasLiveChildren：软删的子块不算「有子块」，但仍在 children 里', () => {
+  const dead = { ...mk('dead', ''), props: { _deletedAt: 1 } }
+  const alive = mk('alive', '')
+  const b = mk('b', '', [dead, alive])
+
+  assert.equal(b.children.length, 2, '软删的块原位留着（树不塌）')
+  assert.deepEqual(ids(liveChildren(b)), ['alive'])
+  assert.equal(hasLiveChildren(b), true)
+
+  const onlyDead = mk('x', '', [mk('d1', ''), { ...mk('d2', ''), props: { _deletedAt: 1 } }])
+  onlyDead.children[0] = { ...onlyDead.children[0]!, props: { _deletedAt: 2 } }
+  assert.equal(onlyDead.children.length, 2, 'children 里还有两格')
+  assert.deepEqual(liveChildren(onlyDead), [], '但没有一格是活着的')
+  assert.equal(hasLiveChildren(onlyDead), false)
+
+  // 可见行与折叠标记跟同一份判据走：全删空的块不再「有子块」
+  const rows = visibleRows({ roots: [onlyDead] })
+  assert.equal(rows[0]?.hasChildren, false, '删空之后不该再画折叠标记')
 })

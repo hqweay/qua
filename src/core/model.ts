@@ -108,6 +108,25 @@ export function isDeleted(b: Block): boolean {
 }
 
 /**
+ * **活着的子块**：直接子块里没有被软删的那些。
+ *
+ * 为什么「有没有子块」不能读 `children.length`：删除是**原位软删**——块带着子树留在
+ * `children` 里，只写一格 `_deletedAt`。于是「模型说有一个孩子」与「屏幕上一行都没有」
+ * 可以同时成立，而拿 `children.length` 当判据的每一处都会在那一刻答错，并且不报错：
+ *   · 空容器不补落笔格 ⇒ 那一天再也打不了字（删掉最后一个子块之后就是它）；
+ *   · 「复用末尾空块」抓到一个看不见的块 ⇒ 点空白建块静默无操作（落光标找不到节点）；
+ *   · 折叠标记说「这里有子块」⇒ 点下去什么也不发生。
+ * ⇒ 问「有没有子块」一律走这里，判据只有一份。
+ */
+export function liveChildren(b: Block): Block[] {
+  return b.children.filter((c) => !isDeleted(c))
+}
+
+export function hasLiveChildren(b: Block): boolean {
+  return b.children.some((c) => !isDeleted(c))
+}
+
+/**
  * 系统属性 id。
  * ⚠️ **`_` 前缀 ＝ 保留区**：用户与插件不得定义，core 定义且不随插件卸载消失。
  * 这里只列当前用到的。
@@ -506,23 +525,6 @@ export function prop<T = unknown>(b: Block, id: SystemPropId | string): T | unde
 /** 写一条属性（返回新块，**不改入参**；块是不可变替换的，事务快照靠它） */
 export function withProp(b: Block, id: SystemPropId | string, value: unknown): Block {
   return { ...b, props: { ...(b.props ?? {}), [id]: value } }
-}
-
-/* ---------------------------------------------------------------- 可写容器 */
-
-/**
- * 冷启动的预仓库归一：**journal 天至少要有一个子块**。
- *
- * 空容器 ⇒ 编辑器里一个块都没有 ⇒ **没有地方可以落光标** ⇒ 用户看到的是
- * 「打开了却打不了字」（实机复现过：全新一天的 journal）。
- *
- * ⚠️ 只许在**仓库构建之前**用：此刻还没有 store／事务，补的块随冷启动后的整库落盘
- *   一起进盘。运行时的结构写必须经事务产 op（补块的唯一落点在装配层的装载边界）——
- *   「打开」是读动作，读的时候改模型会让 op 序列缺一段、换库后那块没有行可落。
- */
-export function ensureFirstBlock(children: Block[]): Block[] {
-  if (children.length === 0) children.push(mkBlock(''))
-  return children
 }
 
 /* ---------------------------------------------------------------- journal */

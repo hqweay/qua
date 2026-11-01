@@ -12,7 +12,9 @@ import {
   LISTS_PROP,
   VIEWS_PROP,
   hasIdentity,
+  hasLiveChildren,
   isDeleted,
+  liveChildren,
   isJournalBlock,
   isPropDefBlock,
   isQueryBlock,
@@ -84,7 +86,7 @@ export function visibleRows(doc: Doc): VisibleRow[] {
         block: b,
         depth: ctx.path.length - 1,
         hidden: ctx.hidden,
-        hasChildren: b.children.length > 0 && !childless.has(b.id),
+        hasChildren: hasLiveChildren(b) && !childless.has(b.id),
       })
     },
     { folded: foldStateOf(doc), ...(childless.size > 0 ? { childless } : {}) },
@@ -372,7 +374,7 @@ export function enterKind(doc: Doc, id: string, offset: number): 'split' | 'chil
   const len = plainLen(loc.block.content)
   if (len === 0 && canOutdent(doc, loc.parent)) return 'outdent'
   if (offset < len) return 'split'
-  const expandedWithChildren = loc.block.children.length > 0 && !isFolded(doc, id)
+  const expandedWithChildren = hasLiveChildren(loc.block) && !isFolded(doc, id)
   return expandedWithChildren ? 'child' : 'sibling'
 }
 
@@ -856,7 +858,7 @@ export function focusRootOf(roots: readonly Block[]): string | undefined {
  * 这条判据只回答「能不能折」，不回答「画在哪」（正文内联／段根／右槽窗口分别由渲染层决定）。
  */
 export function hasFoldable(b: Block | undefined): boolean {
-  return Boolean(b && (b.children.length > 0 || isQueryBlock(b)))
+  return Boolean(b && (hasLiveChildren(b) || isQueryBlock(b)))
 }
 
 /**
@@ -934,7 +936,7 @@ export function toggleCollapsed(doc: Doc, id: string): boolean {
 export function toggleChildrenCollapsed(doc: Doc, id: string): boolean | null {
   const loc = locate(doc, id)
   if (!loc) return null
-  const foldable = loc.block.children.filter((c) => c.children.length > 0)
+  const foldable = liveChildren(loc.block).filter((c) => hasLiveChildren(c))
   if (foldable.length === 0) return null
   const anyOpen = foldable.some((c) => !isFolded(doc, c.id))
   for (const c of foldable) writeFold(doc, c.id, anyOpen)
