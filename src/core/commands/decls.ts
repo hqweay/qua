@@ -67,6 +67,8 @@ export const COMMANDS: CommandDecl[] = [
    * 入口只有 ⌥ 浮层那一个输入框，所以不进命令面板（与 `remove-atom` 同一条口径）。
    */
   { name: 'core.editor/set-anchor', title: t('cmd.editor.set-anchor'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { atomId: { type: 'string' }, text: { type: 'string' } }, keywords: ['anchor', 'alias', t('menu.kw.ref')], hidden: true },
+  { name: 'core.editor/set-link', title: t('cmd.editor.set-link'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { atomId: { type: 'string' }, text: { type: 'string' }, url: { type: 'string' } }, keywords: ['link', 'url', 'edit', t('menu.kw.link')], hidden: true },
+  { name: 'core.editor/atom-to-text', title: t('cmd.editor.atom-to-text'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { atomId: { type: 'string' } }, keywords: ['unlink', 'text', t('menu.kw.ref')], hidden: true },
 
   /* ---- 行内格式（run 上的属性） ---- */
   { name: 'core.anno/toggle-bold', title: t('cmd.anno.toggle-bold'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['bold', 'strong', 'b'] },

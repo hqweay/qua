@@ -50,6 +50,8 @@ export interface PanelDeps {
    *    本文件只负责把「用户想让这一处叫什么」交出去。
    */
   setAnchor: (runId: string, text: string) => void
+  /** 改一枚外链的显示文字与地址（同样走命令、一条事务） */
+  setLink: (runId: string, text: string, url: string) => void
   /**
    * **打开一枚外链**（被点/按了「打开」）。由装配层走同一个命令 ⇒
    * 点 atomic 与点这个按钮是同一条路径，不会有一个能开另一个不开。
@@ -282,6 +284,55 @@ function anchorRow(a: { id: string; anchor?: string }, resolvedLabel: string, de
   return box
 }
 
+/**
+ * 外链的**原地编辑行**：显示文字 ＋ 地址 ＋ 保存。
+ *
+ * 与锚文本行同一套提交时机（回车／失焦改值），差别是它有两个键：
+ * 一起提交才不会有「地址改了、文字没改」的半批（撤销要一次回滚一整枚）。
+ *
+ * 地址合法性不在本文件判：命令入口会过 `core/link.ts` 的白名单并给一句话；
+ * 这里只把两个值如实交出去，不悄悄改写用户输入。
+ */
+function linkRow(a: { id: string; v: string; url: string }, deps: PanelDeps): HTMLElement {
+  const box = document.createElement('form')
+  box.className = 'popover-anchor'
+  box.dataset.linkFor = a.id
+  const text = document.createElement('input')
+  text.className = 'popover-anchor-input ui-field'
+  text.dataset.linkText = a.id
+  text.type = 'text'
+  text.value = a.v
+  text.placeholder = t('ui.link.textPlaceholder')
+  text.title = t('ui.link.editText')
+  text.spellcheck = false
+  const url = document.createElement('input')
+  url.className = 'popover-anchor-input ui-field'
+  url.dataset.linkUrl = a.id
+  url.type = 'text'
+  url.value = a.url
+  url.placeholder = t('ui.link.urlPlaceholder')
+  url.title = t('ui.link.editUrl')
+  url.spellcheck = false
+  const submit = document.createElement('button')
+  submit.type = 'submit'
+  submit.className = 'ui-btn'
+  submit.textContent = t('ui.link.apply')
+  const note = document.createElement('div')
+  note.className = 'popover-note'
+  note.textContent = t('ui.link.editNote')
+  const commit = (): void => {
+    deps.setLink(a.id, text.value, url.value)
+  }
+  box.addEventListener('submit', (e) => {
+    e.preventDefault()
+    commit()
+  })
+  text.addEventListener('change', commit)
+  url.addEventListener('change', commit)
+  box.append(text, url, submit, note)
+  return box
+}
+
 /** 外链输入框的宿主能力（装配层注入；本文件不认识「怎么写进正文」） */
 export interface LinkComposerDeps {
   /** 真的写进去（校验已过）；由装配层走命令，浮层自己不碰模型 */
@@ -297,16 +348,16 @@ export function showAtomPopover(
   fields?: ObjFieldDeps,
   opts?: {
     /**
-     * 打开后把焦点放进锚文本输入框。
+     * 打开后把焦点放进哪一类输入框。
      *
-     * 入口来自右键菜单的「修改显示名…」：用户是**为了改它**才点的这一项，
+     * 入口来自右键菜单的「修改显示名…／编辑链接…」：用户是**为了改它**才点的，
      * 再让他自己点一下输入框就多了一步。⌥ 点击的详情浮层不传它 ——
      * 那个入口的主语是「看看这是什么」，抢焦点会盖掉诊断信息。
      */
-    focusAnchor?: boolean
+    focus?: 'anchor' | 'link'
   },
 ): void {
-  let focusAnchor: HTMLInputElement | null = null
+  let focusEl: HTMLInputElement | null = null
   deps.openPopover((host) => {
     if (a.t === 'ref') {
       const target = a.to ? deps.findBlock(a.to) : undefined
@@ -356,7 +407,7 @@ export function showAtomPopover(
        *    就地打字改不动它，也不该改得动。
        */
       const anchorBox = a.flavor === '#' ? null : anchorRow(a, view.label, deps)
-      if (opts?.focusAnchor && anchorBox) focusAnchor = anchorBox.querySelector('input')
+      if (opts?.focus === 'anchor' && anchorBox) focusEl = anchorBox.querySelector('input')
       const row = document.createElement('div')
       row.className = 'row'
       if (target) {
@@ -426,6 +477,8 @@ export function showAtomPopover(
         dd.textContent = v
         dl.append(dt, dd)
       }
+      const edit = linkRow(a, deps)
+      if (opts?.focus === 'link') focusEl = edit.querySelector('input')
       const row = document.createElement('div')
       row.className = 'row'
       /**
@@ -449,7 +502,11 @@ export function showAtomPopover(
         deps.removeAtom(a.id)
       })
       row.append(open, del)
-      host.append(h, dl, row)
+      /**
+       * 编辑行在前、诊断在后：与引用那一条同一条理由 —— 打开这一层是为了改它，
+       * 不是为了看 `atomId`。
+       */
+      host.append(h, edit, row, dl)
       return
     }
     const h = document.createElement('h4')
@@ -502,7 +559,7 @@ export function showAtomPopover(
    * 等这一帧挂好再聚焦：`openPopover` 里的 render 是同步跑的，但浮层的位置
    * 在 append 之后才由 `placePopover` 写；先焦点后落位会让浏览器按旧位置滚一下。
    */
-  if (opts?.focusAnchor) requestAnimationFrame(() => focusAnchor?.focus())
+  if (opts?.focus) requestAnimationFrame(() => focusEl?.focus())
 }
 
 export function openDrawerFor(deps: PanelDeps, kind: PanelKind): void {

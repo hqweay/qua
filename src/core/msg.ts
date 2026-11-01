@@ -51,6 +51,8 @@ export const MSG = {
   'cmd.link.open': '打开这个外链',
   'cmd.editor.remove-atom': '删除行内原子',
   'cmd.editor.set-anchor': '设置这一处引用的显示名（锚文本）',
+  'cmd.editor.set-link': '修改链接的显示文字与地址',
+  'cmd.editor.atom-to-text': '转换为文本',
   'cmd.props.set-value': '设置属性值',
   'cmd.props.clear-value': '删除属性值',
   'cmd.props.create-def': '新建属性',
@@ -761,6 +763,11 @@ export const MSG = {
   'ui.link.textPlaceholder': '显示的名字（可留空）',
   'ui.link.composerNote': '只收 http / https；显示名留空就显示地址本身。',
   'ui.link.insert': '插入',
+  'ui.link.editTitle': '编辑外链',
+  'ui.link.editText': '显示文字',
+  'ui.link.editUrl': '链接地址',
+  'ui.link.editNote': '只改这一枚链接；正文里的其它内容不动。显示名留空就显示地址本身。',
+  'ui.link.apply': '保存',
 
   /* ------------------------------------------------------------ 通用小词 */
   'ui.common.none': '（无）',
@@ -911,6 +918,9 @@ export const MSG = {
   'ui.popover.deleteRef': '删除这个引用',
   /* 行内对象右键菜单：三类身份各用各的词（提及 ≠ 归属 ≠ 原子本身） */
   'ui.atomMenu.editAnchor': '修改显示名…',
+  'ui.atomMenu.editLink': '编辑链接…',
+  'ui.atomMenu.fields': '配置属性…',
+  'ui.atomMenu.toText': '转换为文本',
   'ui.atomMenu.clearAnchor': '恢复默认显示名',
   'ui.atomMenu.removeRef': '删除这处引用',
   'ui.atomMenu.removeMention': '删除这次提及',

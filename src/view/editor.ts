@@ -90,6 +90,7 @@ import {
   type UndoKind,
   type VisibleRow,
 } from '../core/index.ts'
+import { resolveRef } from '../core/ref.ts'
 import {
   clearMarks as clearRunsMarks,
   fromProjection,
@@ -3016,6 +3017,63 @@ export class BlockEditor {
     const before = this.snap()
     // 不强迫光标：这个动作来自浮层，此刻用户的焦点在浮层里，抢回来就是一次焦点跳变
     this.commitContent(hit.block.id, next, before, 'other')
+    return true
+  }
+
+  /**
+   * **改一枚外链**（显示文字与地址一起写）。
+   *
+   * 为什么两个键一起收：它们都是这枚 run 的内容，用户在一次编辑里改完；
+   * 分两条命令会让撤销栈出现「地址改了、文字没改」的半批。
+   *
+   * 显示文字留空 ⇒ 落回地址本身（与插入路径同一条口径：看不见的链接等于不存在）。
+   * 地址的合法性**不在这里判**：白名单住在 `core/link.ts`，命令入口先过它。
+   */
+  setRunLink(runId: string, next: { url: string; text: string }): boolean {
+    const hit = this.findRun(runId)
+    if (!hit || hit.run.t !== 'link') return false
+    const url = next.url.trim()
+    const text = next.text.trim() === '' ? url : next.text.trim()
+    if (hit.run.url === url && hit.run.v === text) return false
+    const patched: LinkRun = { ...hit.run, url, v: text }
+    const nextContent = hit.block.content.map((r) => (r.t === 'link' && r.id === runId ? patched : r))
+    const before = this.snap()
+    this.commitContent(hit.block.id, nextContent, before, 'other')
+    return true
+  }
+
+  /**
+   * **把一枚行内对象变成纯文本**（取消引用／标签／链接，字留在原处）。
+   *
+   * 取的是**用户此刻看到的字**：普通引用＝解析后的名字、行内 `#`＝`#名字`
+   * （`#` 是它此刻的写法，不是装饰）、外链＝显示文字、资产＝文件名快照。
+   * 格式（粗体等）跟着搬过去——用户删掉的是「它是个对象」，不是「它的样式」。
+   *
+   * ⚠️ 一次调用一轮撤销（整段内容一条 `block.upsert`）；不做「先删再插」两笔，
+   *    那样中间态会丢掉光标位置，也会让一次动作看起来像两次。
+   */
+  runToText(runId: string): boolean {
+    const hit = this.findRun(runId)
+    if (!hit) return false
+    const run = hit.run
+    let text = ''
+    if (run.t === 'ref') {
+      const view = resolveRef((id) => this.store.find(id), run)
+      text = run.flavor === '#' ? `#${view.label}` : view.label
+    } else if (run.t === 'link') {
+      text = run.v
+    } else {
+      text = run.label ?? run.asset.slice(0, 8)
+    }
+    if (text === '') return false
+    const next: InlineRun = {
+      t: 'text',
+      v: text,
+      ...('marks' in run && run.marks && run.marks.length > 0 ? { marks: run.marks } : {}),
+    }
+    const nextContent = hit.block.content.map((r) => (r.t !== 'text' && r.id === runId ? next : r))
+    const before = this.snap()
+    this.commitContent(hit.block.id, nextContent, before, 'other')
     return true
   }
 
