@@ -37,7 +37,7 @@ export const COMMANDS: CommandDecl[] = [
    * ⚠️ 打了「声明这一栏」的标签的块，摘完仍会显示成未完成 —— 那是标签给的，不是这一块的。
    *    调用方（handler）据此给一句解释，而不是静默。
    */
-  { name: 'core.editor/clear-todo', title: t('cmd.editor.clear-todo'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['todo', 'untodo', '取消待办'] },
+  { name: 'core.editor/clear-todo', title: t('cmd.editor.clear-todo'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['todo', 'untodo', t('menu.kw.untodo')] },
   { name: 'core.editor/insert-block', title: t('cmd.editor.insert-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { type: { type: 'string', enum: ['paragraph', 'todo', 'divider', 'collection'] }, text: { type: 'string' } }, keywords: ['insert', 'new block'] },
   { name: 'core.editor/clear-block', title: t('cmd.editor.clear-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor') },
   { name: 'core.editor/insert-tag', title: t('cmd.editor.insert-tag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { tag: { type: 'string' } }, keywords: ['tag', t('menu.kw.tag')] },

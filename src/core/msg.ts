@@ -710,6 +710,8 @@ export const MSG = {
   'menu.kw.command': '命令',
   'menu.kw.paragraph': '正文',
   'menu.kw.divider': '分隔',
+  // 「取消待办」的检索词：中文输入也要能被搜到（`/` 里打「取消」）
+  'menu.kw.untodo': '取消待办',
   'menu.label.collection': '收藏',
   'menu.kw.collection': '收藏',
   'menu.label.views': '视图…',
