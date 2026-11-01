@@ -104,11 +104,12 @@ export function applyWidgetHeights(el: HTMLElement, h: WidgetHeights | null): vo
 }
 
 /**
- * **正文里查询块自己的身体**：静止/聚焦两档高度。
+ * **正文里查询块自己的身体**：静止/聚焦两档**封顶**。
  *
  * 与 `WIDGET_H` 同一条纪律：视觉与虚拟化读同一个数（占位是在没有挂 DOM 的行上算的）。
- * 查询结果可能很长 ⇒ 它是一个**定高窗口、内部滚动**：不把正文撑成几十行，
- * 也不去量 DOM。聚焦档由 `:focus-within` 选，和组件体一致。
+ * 查询结果可能很长 ⇒ 超过这一档就封顶、内部滚动：不把正文撑成几十行，也不去量 DOM。
+ * 内容装得下时身体按内容高（不预留空白）；聚焦档由 `:focus-within` 抬**上限**，
+ * 装得下就不长 —— 否则「点一下结果、整块忽然变高」只是多出一片空白。
  */
 export const VIEW_BODY_H = { rest: 168, focus: 320 } as const
 
@@ -144,7 +145,9 @@ export function rowHasInlineViewBody(r: VisibleRow): boolean {
  *
  * ⚠️ **内联组件体／查询体要算进来**：它们不占正文，高度由声明给。
  *    按 `LINE_H` 算会让带这些行的文档滚动条系统性偏小。
- *    这里只读**静止档**：聚焦档只发生在窗口里的那一行上，而占位算的是窗口**之外**的行。
+ *    这里只读**静止档的封顶值**：身体多数时候比它矮（内容高），占位因此是**上限估计**
+ *    （宁可高估留白，也别低估让滚动条偏小）；聚焦档只发生在窗口里的那一行上，
+ *    而占位算的是窗口**之外**的行。
  */
 export function visibleRowHeight(b: Block, extraHeads = 0, viewBody = false): number {
   const aliasHead = aliasesOf(b).length > 0 && prop<string>(b, DISPLAY_PROP) !== 'text' ? 1 : 0

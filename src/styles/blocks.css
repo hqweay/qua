@@ -966,8 +966,12 @@
 
    查询块摆在正文哪一行，结果就贴在哪一行下面（不是一个「打开后才出现」的段尾面板）。
    它是**另一个编辑宿主**：内容和结果各行其道，外层编辑器不从这个身体里读正文。
-   高度由 `view/block-dom.ts` 的 `VIEW_BODY_H` 写进自定义属性（视觉与虚拟化同一个数）；
-   身体内部滚动 ⇒ 一条查询不会把正文撑成几十行。 */
+   高度由 `view/block-dom.ts` 的 `VIEW_BODY_H` 写进自定义属性（视觉与虚拟化同一个数）。
+
+   高度是**内容高，封顶一档**（不是固定一档）：结果少时身体就只占内容那么高，
+   不预留一片空白；结果多到超过一档才封顶、内部滚动 —— 一条查询仍不会把正文撑成
+   几十行。`height: auto` ＋ `max-height` 是这件事的 CSS 表达；身体因此必须是
+   flex 列（`.queryview` 才能收缩到封顶高度以内，让 `.queryview-body` 自己滚）。 */
 .blk[data-view-body='1'] {
   flex-wrap: wrap;
   /* 与 `VIEW_BODY_GAP` 同源：body 与上一行之间的缝 */
@@ -978,20 +982,24 @@
   width: calc(100% - var(--ui-marker-slot) - var(--ui-gap-4));
   /* 对齐 `.tx` 的起点：gutter 已由 `.blk` 的 padding 让出，这里只补 marker 槽 ＋ gap */
   margin-inline-start: calc(var(--ui-marker-slot) + var(--ui-gap-4));
-  height: var(--view-body-rest);
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  max-height: var(--view-body-rest);
   min-width: 0;
   overflow: hidden;
 }
-/* 聚焦档：与组件体同一条 `:focus-within` 口径（纯 CSS，不进库、不进撤销） */
+/* 聚焦档：与组件体同一条 `:focus-within` 口径（纯 CSS，不进库、不进撤销）。
+   它抬的是**上限**，不是高度：内容本来就装得下时不长，只有「还有更多可看」才长开。 */
 .blk-view-body:focus-within {
-  height: var(--view-body-focus);
+  max-height: var(--view-body-focus);
 }
 /* 单根屏（整屏只有这一块）：身体自然高度、整屏滚 —— 定高的动机（别把正文里的
    别人撑爆）在这里不成立。`data-natural-h` 由 `block-dom` 写，占位侧不读它
    （单根屏只有一行，不存在窗口外的行）。 */
 .blk-view-body[data-natural-h='1'],
 .blk-view-body[data-natural-h='1']:focus-within {
-  height: auto;
+  max-height: none;
   overflow: visible;
 }
 /* 折叠态：只藏，不卸载（所有位置的查询身体都折这一格） */
@@ -999,7 +1007,11 @@
   display: none;
 }
 .blk-view-body > .queryview {
-  height: 100%;
+  /* 身体高是「内容高、封顶一档」：这一层跟着内容走，但允许被压到上限以内
+     （`min-height: 0` 是 flex 子项能收缩到内容高以下的前提，否则它会把身体撑破）。 */
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
 }
 .queryview[data-surface='inline'] {
   margin-top: 0;
