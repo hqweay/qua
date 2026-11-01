@@ -39,6 +39,8 @@ import {
   mergeIntoPrevPlan,
   prevPlaceholder,
   hasTag,
+  hasLiveChildren,
+  liveChildren,
   mkBlock,
   createObjRecordInTx,
   trashOf,
@@ -538,7 +540,11 @@ export class BlockEditor {
     // 写入口顺手作废那张派生表：标签声明／定义 kind 变了，下一次 `todoOf` 要重算
     this.write = (fn) => {
       this.fieldTableCache = null
-      return o.write(fn)
+      return o.write((tx) => {
+        const r = fn(tx)
+        this.keepWritableSlots(tx)
+        return r
+      })
     }
     this.onExpandContext = o.onExpandContext
     this.onContextBack = o.onContextBack
@@ -1030,7 +1036,7 @@ export class BlockEditor {
       block: loc.block,
       depth: depthOf(this.doc, id),
       hidden: false,
-      hasChildren: loc.block.children.length > 0,
+      hasChildren: hasLiveChildren(loc.block),
     }
     this.disposeRowBody(id)
     el.replaceWith(this.makeBlockEl(row, gutterFieldsOf(row.block, this.store.blocks)))
@@ -2373,6 +2379,26 @@ export class BlockEditor {
   }
 
   /**
+   * **可写容器至少留一格**（在写出口归一，不挂在某个删除入口上）。
+   *
+   * journal 的日期行是只读的：一天一旦没有**看得见**的子块，屏幕上就没有任何能落光标
+   * 的地方（「打得开却打不了字」），而删除恰恰能造出这个状态——删掉的是块，活下来的
+   * 是一天。所以任何一次写之后，装载进来的 journal 段若没有活着的子块，就在**同一笔**
+   * 事务里补一个空块：与那次删除同一条撤销，`⌘Z` 一次回到删之前。
+   *
+   * 为什么在写出口而不是删除入口：删除不止一条路（删块／跨块删／合并／以后新增的路径），
+   * 逐个补必然漏一处，而漏了不报错——只是那个入口又变回「点了没反应」。
+   * 这里只有一个漏斗；开销与**装载窗口的段数**成正比（每段一次 `some()`，命中即短路），
+   * 与库体量无关。
+   */
+  private keepWritableSlots(tx: Tx): void {
+    for (const r of this.doc.roots) {
+      if (!isJournal(r) || hasLiveChildren(r)) continue
+      tx.insert(mkBlock(''), r.id, 0)
+    }
+  }
+
+  /**
    * 折 / 展一块（点三角、`mod+.`）。
    *
    * ⚠️ **不进撤销栈**：折叠是「这一行此刻怎么显示」，不是内容改动。
@@ -2387,7 +2413,7 @@ export class BlockEditor {
      * 时才允许折：查询结果列表里的命中行也是查询块，但那一层画的是结果行，
      * 给它折一下没有任何可见效果。
      */
-    const bodyOnly = loc.block.children.length === 0
+    const bodyOnly = !hasLiveChildren(loc.block)
     if (bodyOnly && (!this.events.viewBody || !hasQueryBody(loc.block))) return
     if (!toggleCollapsed(this.doc, id)) return
     /**
@@ -2534,7 +2560,7 @@ export class BlockEditor {
     const loc = locate(this.doc, id)
     if (!loc) return null
     const before = this.snap()
-    const blank = isEmptyContent(loc.block.content) && loc.block.children.length === 0 && canWriteText(loc.block)
+    const blank = isEmptyContent(loc.block.content) && !hasLiveChildren(loc.block) && canWriteText(loc.block)
     if (blank && text === '') {
       /**
        * 空块 ＋ 无正文：
@@ -2641,7 +2667,7 @@ export class BlockEditor {
      * 判据要**两块都空**：正文为空、且没有子块。有子块的块不能变成组件 ——
      * 那会把子树藏进一行摘要后面（组件块不许有子块，子块看不见）。
      */
-    if (isEmptyContent(loc.block.content) && loc.block.children.length === 0 && canWriteText(loc.block)) {
+    if (isEmptyContent(loc.block.content) && !hasLiveChildren(loc.block) && canWriteText(loc.block)) {
       // 原地改类型是一次属性写入：`_type` 一条 op，撤销一次回到「那行还是空白」。
       // 改类型也算一次改动 ⇒ 时刻并进同一笔（第二条 op）。
       this.write((tx) => {
@@ -3222,9 +3248,12 @@ export class BlockEditor {
      * 判据收紧到「空文本且空子树」——空标题但带子块的块不当作可复用空块。
      * ⚠️ 复用支**模型不动、撤销不记**（与 `insertBlockAfter` 的空块支同一条口径）：
      *    记了就会吃掉一次 ⌘Z——按一次「什么都不变」的动作，退一步却退到上一次改动之前。
+     * ⚠️ 「末尾那块」只能从**活着的**子块里取：软删的块还在 `children` 里，按长度取会
+     *    拿到一个屏幕上不存在的块 ⇒ `placeCaret` 找不到节点、静默返回 ⇒ 点了完全没反应。
      */
-    const lastChild = root.children[root.children.length - 1]
-    const emptyTail = lastChild && isEmptyContent(lastChild.content) && lastChild.children.length === 0 ? lastChild : null
+    const tail = liveChildren(root)
+    const lastChild = tail[tail.length - 1]
+    const emptyTail = lastChild && isEmptyContent(lastChild.content) && !hasLiveChildren(lastChild) ? lastChild : null
     const child = emptyTail ?? mkBlock('')
     if (!emptyTail) {
       this.write((tx) => tx.insert(child, root.id, root.children.length))
@@ -3281,7 +3310,10 @@ export class BlockEditor {
         await this.events.onPasteImage?.(file, point)
       },
       onDropFilesRejected: () => this.events.onDropFilesRejected?.(),
-      hasChildren: (id) => Boolean(locate(this.doc, id)?.block.children.length),
+      hasChildren: (id) => {
+        const loc = locate(this.doc, id)
+        return loc !== null && hasLiveChildren(loc.block)
+      },
 
       acceptDrag: (id) => {
         const loc = locate(this.doc, id)
@@ -3869,7 +3901,7 @@ export class BlockEditor {
       blockSelection: this.blockSel !== null,
       blockSelectionCount: this.blockSel?.ids.length ?? 0,
       blockType: b && todoOf(b, this.fieldTable()) ? 'todo' : 'paragraph',
-      blockHasChildren: Boolean(b?.children.length),
+      blockHasChildren: Boolean(b && hasLiveChildren(b)),
       /**
        * 这一行有没有可折的东西：子块，或**身体**（查询块的结果视图）。
        *
@@ -3877,7 +3909,7 @@ export class BlockEditor {
        * 不是它自己的位置，折它没有可见效果。
        */
       blockFoldable: Boolean(
-        b && (b.children.length > 0 || (this.events.viewBody && hasQueryBody(b))),
+        b && (hasLiveChildren(b) || (this.events.viewBody && hasQueryBody(b))),
       ),
       /**
        * 这一块值不值得给「视图…」入口：查询块（源＝命中），或**有子块**的容器，
@@ -3885,7 +3917,7 @@ export class BlockEditor {
        * 给一个点了什么都没有的菜单项，用户只会以为是坏的。
        */
       blockCanHaveView: Boolean(
-        b && (isQueryBlock(b) || isEmbedBlock(b) || b.children.length > 0 || activeView(b) !== null),
+        b && (isQueryBlock(b) || isEmbedBlock(b) || hasLiveChildren(b) || activeView(b) !== null),
       ),
       blockCollapsed: Boolean(b && isFolded(this.doc, b.id)),
       blockDone: b ? todoOf(b, this.fieldTable()) === 'done' : false,

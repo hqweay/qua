@@ -15,7 +15,7 @@
  *   `>= 2000` **窗口化**（只挂可视范围 ± 若干行，用上下留白撑出滚动高度）。
  */
 import type { Block, BlockStore, ViewColumn, ViewConfig, ViewRecord } from '../core/index.ts'
-import { choicesOf, clockLabel, displayNameOf, hasValue, propDisplayLabels, propKindOf, propLabel } from '../core/index.ts'
+import { choicesOf, clockLabel, displayNameOf, hasValue, liveChildren, propDisplayLabels, propKindOf, propLabel } from '../core/index.ts'
 import { choiceCells, ChoiceLookupIndex, type ChoiceLookup, type FieldRow } from '../core/props.ts'
 import { plainText } from '../core/runs.ts'
 import { t } from '../core/msg.ts'
@@ -582,7 +582,7 @@ export class ViewTable {
     if (key === CHILDREN_COLUMN) {
       const box = document.createElement('div')
       box.className = 'tv-count'
-      box.textContent = String(r.block.children.length)
+      box.textContent = String(liveChildren(r.block).length)
       return box
     }
     if (key === CREATED_COLUMN || key === MODIFIED_COLUMN) {

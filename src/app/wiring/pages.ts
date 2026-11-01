@@ -12,9 +12,11 @@ import {
   FEED_SPEC,
   findInForest,
   findPath,
+  hasLiveChildren,
   isEmbedBlock,
   isJournal,
   journalId,
+  liveChildren,
   mkBlock,
   prop,
   todayISO,
@@ -404,23 +406,25 @@ export function setupPages(deps: PagesDeps) {
    */
   function firstEditableRoot(first: Block | undefined): Block | null {
     if (!first) return null
-    return isReadonlyBlock(first) ? (first.children[0] ?? null) : first
+    return isReadonlyBlock(first) ? (liveChildren(first)[0] ?? null) : first
   }
 
   /**
-   * **装载边界的可编辑保证**：被装进中心编辑器的 journal 天至少要有一个子块——
+   * **装载边界的可编辑保证**：被装进中心编辑器的 journal 天至少要有一个**看得见**的子块——
    * 日期行只读，没有子块就没有可落光标的地方（「打得开却打不了字」）。
    *
    * 这是**写库**，不是渲染兜底：渲染兜底会让「看到的块」与「库里的块」分叉，
    * 补的块经事务真的进库（一条 `insert`，op 里报它自己的落点）。
-   * 所有装载入口共用这一个落点（`loadPage`／日记流增量／演示换库）；
-   * 「新建」一类造数据的路径不走这里——它们在创建时就该把子块带上（同一笔插入）。
-   * 冷启动在仓库构建之前、走不了事务，仍由模型层归一（`ensureFirstBlock`）。
+   * 所有装载入口共用这一个落点（`loadPage`／日记流增量／演示换库）。
+   *
+   * ⚠️ 判据是 `hasLiveChildren`，不是 `children.length`：删除是原位软删，块还挂在
+   *    `children` 里 ⇒ 用长度判，删空过的天**永远**补不回来（打开一次也补不回来）。
+   *    运行时的另一半（删除那一刻就补）在编辑器写入口，见 `BlockEditor` 的落笔格守卫。
    */
   function materializeEditableRoots(roots: readonly Block[]): void {
     for (const r of roots) {
       const mainEd = deps.getMainEd()
-      if (isJournal(r) && r.children.length === 0) run((tx) => tx.insert(mkBlock(''), r.id, 0), mainEd)
+      if (isJournal(r) && !hasLiveChildren(r)) run((tx) => tx.insert(mkBlock(''), r.id, 0), mainEd)
     }
   }
 

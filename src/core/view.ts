@@ -15,7 +15,7 @@
  * ⚠️ 行／记录层与「怎么画」分开：这里只回答「有哪些记录、按什么序」，
  *    `ui/view-*.ts` 才决定画成表还是列表。
  */
-import { ACTIVE_VIEW_PROP, VIEWS_PROP, isDeleted, isQueryBlock, type Block, type BlockProps } from './model.ts'
+import { ACTIVE_VIEW_PROP, VIEWS_PROP, isDeleted, isQueryBlock, liveChildren, type Block, type BlockProps } from './model.ts'
 import { displayNameOf } from './alias.ts'
 import { OUTLINE_VIEW, readEmbed } from './embed.ts'
 import { t } from './msg.ts'
@@ -724,7 +724,7 @@ export function pathTextOf(r: ViewRecord): string {
 export function fieldTextOf(r: ViewRecord, key: string, resolve?: (value: unknown) => string | null): string {
   if (key === TITLE_COLUMN) return r.title
   if (key === TAGS_COLUMN) return r.tags.map((t) => plainText(t.content)).join(' ')
-  if (key === CHILDREN_COLUMN) return String(r.block.children.length)
+  if (key === CHILDREN_COLUMN) return String(liveChildren(r.block).length)
   if (key === PATH_COLUMN) return pathTextOf(r)
   if (key === REF_COUNT_COLUMN) {
     const v = r.derived?.[REF_COUNT_COLUMN]
@@ -771,7 +771,7 @@ export function fieldTextOf(r: ViewRecord, key: string, resolve?: (value: unknow
  */
 export function sortValueOf(r: ViewRecord, key: string): unknown {
   if (key === TITLE_COLUMN) return r.title
-  if (key === CHILDREN_COLUMN) return r.block.children.length
+  if (key === CHILDREN_COLUMN) return liveChildren(r.block).length
   if (key === CREATED_COLUMN) return r.block.created
   if (key === MODIFIED_COLUMN) return r.block.modified
   if (key === TAGS_COLUMN) return r.tags.map((t) => plainText(t.content)).join(' ')

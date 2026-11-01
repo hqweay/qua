@@ -28,6 +28,7 @@ import {
   derivedRecordsOf,
   displayNameOf,
   expandContexts,
+  hasLiveChildren,
   isJournal,
   mountEntriesOf,
   readViewSet,
@@ -562,7 +563,7 @@ export class MountArea {
     if (entry.kind === 'derived' && !this.foldSeeded.has(entry.id)) {
       this.foldSeeded.add(entry.id)
       const seeded: FoldState = { ...(ed.doc.folded ?? {}) }
-      for (const b of plan.roots) if (b.children.length > 0) seeded[b.id] = true
+      for (const b of plan.roots) if (hasLiveChildren(b)) seeded[b.id] = true
       ed.doc.folded = seeded
     }
     const folded = unfoldForContext(ed.doc.folded, plan.covers, (id) => this.deps.kb.pathOf(id))

@@ -16700,6 +16700,194 @@ await check('T208 两段式实例选择：⇧↵ 进成员搜索，新实例的�
   return `⇧↵ 进成员搜索（2 成员）；switch 2 新建为顶层记录归玩具，正文插 #switch 2；Esc 回到打字`
 })
 
+/**
+ * **可写容器至少一格**：journal 的日期行只读，一天没有看得见的子块就**没有地方落光标**
+ * （「打得开却打不了字」）。删除恰恰能造出这个状态，所以补格发生在写出口：删与补是同一笔。
+ *
+ * 这条断言在旧实现上必然红：删除是**原位软删**，块还在 `children` 里 ⇒
+ *   · `children.length` 说「有一个孩子」，屏幕上却一行都没有；
+ *   · 「点空白复用末尾空块」抓到那个看不见的块 ⇒ `placeCaret` 找不到节点、静默返回；
+ *   · 装载边界也判 `children.length === 0` ⇒ 重开一次也补不回来。
+ */
+await check(
+  'T209 删掉 journal 天最后一个子块 ⇒ 同一笔事务补一格并落光标（能直接打字）；⌘Z 一次回到删之前；重开不再补第二格；存量「子块全软删」的天打开即修',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    const date = '2027-06-02'
+    await page.evaluate((d) => window.__qua.invoke('core.journal/today', { date: d }), date)
+    await page.waitForTimeout(250)
+
+    /** 天的子块（含软删的）、光标块、屏幕上的行、最近一笔事务的 op */
+    const read = (d) =>
+      page.evaluate((dt) => {
+        const ed = window.__qua.__editor
+        const day = ed.store.blocks.find((b) => b.props?._date === dt)
+        return {
+          dayId: day?.id ?? '',
+          kids: (day?.children ?? []).map((b) => ({ id: b.id, deleted: Boolean(b.props?._deletedAt) })),
+          sel: ed.sel?.aBlock ?? '',
+          rows: [...document.querySelectorAll('#editor .blk')].map((el) => el.dataset.blockId ?? ''),
+          ops: window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, parent: o.value?.parent })),
+        }
+      }, d)
+
+    const before = await read(date)
+    assert(
+      before.kids.length === 1 && !before.kids[0].deleted,
+      `前置：空天应有一格可写：${JSON.stringify(before.kids)}`,
+    )
+    const only = before.kids[0].id
+
+    // 删掉唯一那一格
+    await page.evaluate((id) => window.__qua.focusBlock(id, 0), only)
+    await page.evaluate(() => window.__qua.invoke('core.editor/delete-block'))
+    await page.waitForTimeout(250)
+    const after = await read(date)
+    const live = after.kids.filter((k) => !k.deleted)
+    assert(live.length === 1, `删完之后应仍有恰好一格可写（而不是零格）：${JSON.stringify(after.kids)}`)
+    const fresh = live[0].id
+    assert(fresh !== only, `补的应是一块新块（旧的那块进回收站）：${JSON.stringify(after.kids)}`)
+    assert(after.sel === fresh, `光标应落在补出来的那一格：${JSON.stringify({ sel: after.sel, fresh })}`)
+    assert(
+      after.rows.filter((id) => id !== after.dayId).length === 1,
+      `屏幕上应有一行可写的子块（日期行之外）：${JSON.stringify(after.rows)}`,
+    )
+    // 同**一笔**事务：删（exist）＋ 补（upsert），一次 ⌘Z 就能整笔回退
+    assert(
+      after.ops.length === 2 &&
+        after.ops.some((o) => o.e === 'block' && o.op === 'exist') &&
+        after.ops.some((o) => o.e === 'block' && o.op === 'upsert' && o.parent === after.dayId),
+      `删除与补格应同属一笔事务（exist ＋ upsert{parent:天块}）：${JSON.stringify(after.ops)}`,
+    )
+
+    // 一次 ⌘Z：回到删之前（旧块回来、补的那格消失）
+    await page.keyboard.press(kbd('mod+z'))
+    await page.waitForTimeout(300)
+    const undone = await read(date)
+    const liveBack = undone.kids.filter((k) => !k.deleted)
+    assert(
+      liveBack.length === 1 && liveBack[0].id === only,
+      `一次撤销应整笔回到删之前（只剩原来那一格）：${JSON.stringify(undone.kids)}`,
+    )
+
+    // 再删一次，然后**直接打字**：补出来的那格是真的能写，不是「看得见、打不进」
+    await page.evaluate((id) => window.__qua.focusBlock(id, 0), only)
+    await page.evaluate(() => window.__qua.invoke('core.editor/delete-block'))
+    await page.waitForTimeout(250)
+    await page.keyboard.type('甲')
+    await page.waitForTimeout(250)
+    const typed = await page.evaluate((dt) => {
+      const st = window.__qua.__editor.store
+      const day = st.blocks.find((b) => b.props?._date === dt)
+      return (day?.children ?? [])
+        .filter((b) => !b.props?._deletedAt)
+        .map((b) => (b.content ?? []).filter((r) => r.t === 'text').map((r) => r.v).join(''))
+    }, date)
+    assert(typed.length === 1 && typed[0] === '甲', `补出来的那一格应能直接打字：${JSON.stringify(typed)}`)
+
+    // 重开这一天：已有的活子块 ⇒ 零补格（别每次打开都多一块）
+    const beforeReopen = await page.evaluate(() => window.__qua.lastOps())
+    await page.evaluate((d) => window.__qua.invoke('core.journal/today', { date: d }), date)
+    await page.waitForTimeout(250)
+    const reopened = await page.evaluate((dt) => {
+      const st = window.__qua.__editor.store
+      const day = st.blocks.find((b) => b.props?._date === dt)
+      return {
+        live: (day?.children ?? []).filter((b) => !b.props?._deletedAt).length,
+        ops: window.__qua.lastOps(),
+      }
+    }, date)
+    assert(reopened.live === 1, `重开不该补第二格：${JSON.stringify(reopened)}`)
+    assert(
+      reopened.ops.length === beforeReopen.length && reopened.ops.every((o, i) => o.id === beforeReopen[i].id),
+      `重开零事务（已有活子块就不补）：${JSON.stringify({ before: beforeReopen.length, after: reopened.ops.length })}`,
+    )
+
+    // 存量库：天在库里、子块全被软删（旧实现留下的状态）⇒ 打开这一次就修好
+    const repaired = await page.evaluate((dt) => {
+      window.__qua.forceForest((forest) => {
+        const day = forest.find((b) => b.props?._date === dt)
+        for (const k of day?.children ?? []) k.props = { ...(k.props ?? {}), _deletedAt: Date.now() }
+      })
+      return window.__qua.invoke('core.journal/today', { date: dt })
+    }, date)
+    await page.waitForTimeout(250)
+    const legacy = await page.evaluate((dt) => {
+      const st = window.__qua.__editor.store
+      const day = st.blocks.find((b) => b.props?._date === dt)
+      return {
+        live: (day?.children ?? []).filter((b) => !b.props?._deletedAt).length,
+        ops: window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op })),
+      }
+    }, date)
+    assert(legacy.live === 1, `存量「子块全软删」的天打开后应补回一格：${JSON.stringify({ repaired, legacy })}`)
+    assert(
+      legacy.ops.length === 1 && legacy.ops[0].e === 'block' && legacy.ops[0].op === 'upsert',
+      `补格应走事务（一条 upsert）：${JSON.stringify(legacy.ops)}`,
+    )
+
+    await ctx.close()
+    return `删空 ⇒ 同笔 [exist ＋ upsert] 补一格、光标在内、能直接打字；一次 ⌘Z 整笔回退；重开零事务；存量软删天打开即补`
+  },
+)
+
+/**
+ * **「点空白建块」不能抓到看不见的块**。
+ *
+ * 复用末尾空块那条支按 `children` 取「最后一块」——软删的块还在数组里，取到的正是它，
+ * 于是 `placeCaret` 找不到节点、静默返回：用户看到的是「点了完全没有反应」。
+ * 判据同样只能看**活着的**子块（与 T209 同一个 `liveChildren`）。
+ */
+await check(
+  'T210 journal 天末尾有一块被软删的空块 ⇒ 点末尾空白仍能新建（沿用「活着的」子块判据，不抓软删块去落光标）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    const date = '2027-06-04'
+    await page.evaluate((d) => window.__qua.invoke('core.journal/today', { date: d }), date)
+    await page.waitForTimeout(250)
+
+    // 铺两块：[甲, 空]，再把末尾那块删掉 ⇒ children 里留下一块软的、一块活的
+    await page.keyboard.type('甲')
+    await page.waitForTimeout(150)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(200)
+    await page.evaluate(() => window.__qua.invoke('core.editor/delete-block'))
+    await page.waitForTimeout(250)
+
+    const staged = await page.evaluate((dt) => {
+      const st = window.__qua.__editor.store
+      const day = st.blocks.find((b) => b.props?._date === dt)
+      const kids = (day?.children ?? []).map((b) => ({ id: b.id, deleted: Boolean(b.props?._deletedAt) }))
+      return { kids, live: kids.filter((k) => !k.deleted).length }
+    }, date)
+    assert(
+      staged.kids.length === 2 && staged.live === 1 && staged.kids[1].deleted,
+      `前置：末尾应留一块软删的空块：${JSON.stringify(staged)}`,
+    )
+
+    // 走「点空白建块」同一个判据（真鼠标落点的连通性由 T26 钉着；这里验的是**取哪一块**）
+    const built = await page.evaluate(() => window.__qua.__editor.clickEmptyArea(99999))
+    await page.waitForTimeout(300)
+    assert(built === true, '点空白应被这一支接住（而不是静默返回）')
+
+    const after = await page.evaluate((dt) => {
+      const ed = window.__qua.__editor
+      const st = ed.store
+      const day = st.blocks.find((b) => b.props?._date === dt)
+      const kids = (day?.children ?? []).map((b) => ({ id: b.id, deleted: Boolean(b.props?._deletedAt) }))
+      return { kids, live: kids.filter((k) => !k.deleted).length, sel: ed.sel?.aBlock ?? '' }
+    }, date)
+    assert(after.live === 2, `点末尾空白应新建一格（而不是抓软删块去落光标）：${JSON.stringify(after)}`)
+    const fresh = after.kids.filter((k) => !k.deleted).pop()
+    assert(fresh && after.sel === fresh.id, `光标应落到新建的那一格：${JSON.stringify({ sel: after.sel, fresh })}`)
+
+    await ctx.close()
+    return `末尾留一块软删空块 ⇒ 点空白仍新建一格并落光标（live 1→2）`
+  },
+)
+
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
   await writeFile(REPORT, JSON.stringify({ total: seq, cases: results, known: known.map((r) => r.name) }))

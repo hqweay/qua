@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { canWriteText } from './core/types.ts'
 import { hasTag, tagIdsOf } from './core/tags.ts'
@@ -243,14 +243,17 @@ const kb = new MemoryKb(blocks)
  *
  * 没有这一步时，这两块只在内存里「凭空出现」，第一笔落盘要靠 `ensure` 整块补；
  * 日志里则完全缺了它们，`replay(log)` 永远对不上装载出来的库。
+ *
+ * ⚠️ 「有没有子块」判 `hasLiveChildren`：删除是原位软删，块还挂在 `children` 里，
+ *    用长度判会让「删空过的天」每次冷启动都补不回来。
  */
 const bootOps: Op[] = []
 const bootFeed = feedDays(ws.blocks, FEED_INITIAL)
-if (!hadToday || bootFeed.some((d) => d.children.length === 0)) {
+if (!hadToday || bootFeed.some((d) => !hasLiveChildren(d))) {
   const r = kb.tx((tx) => {
     if (!hadToday) tx.insert(mkJournalBlock(todayISO()), null, 0)
     for (const day of feedDays(ws.blocks, FEED_INITIAL)) {
-      if (day.children.length === 0) tx.insert(mkBlock(''), day.id, 0)
+      if (!hasLiveChildren(day)) tx.insert(mkBlock(''), day.id, 0)
     }
   })
   bootOps.push(...r.ops)
