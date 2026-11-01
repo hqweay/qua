@@ -9,6 +9,7 @@
 import { ICON_PROP, isJournalBlock, prop, type Block } from './model.ts'
 import { derivedId } from './ids.ts'
 import { walkForest } from './walk.ts'
+import { plainText } from './runs.ts'
 export function todayISO(now: Date = new Date()): string {
   const y = now.getFullYear()
   const m = String(now.getMonth() + 1).padStart(2, '0')
@@ -84,6 +85,26 @@ export function journalDays(blocks: readonly Block[]): Block[] {
 /** 某一天的 journal 块（**唯一口径**：与 `journalDays` 同一片森林、同一个「先序第一个」） */
 export function findJournalDay(blocks: readonly Block[], date: string): Block | undefined {
   return journalDays(blocks).find((b) => journalDate(b) === date)
+}
+
+/**
+ * 这一天有没有**真正写过东西**（正文里有非空文字）。
+ *
+ * 判据是**整棵子树**，不是日期块自己的 `content`：日期的正文恒为空（它是 `_date` 的只读投影），
+ * 内容都住子块。装载边界会给每天补一个空首子块，所以「有子块」不代表「有内容」。
+ *
+ * 用途：删除一天时决定要不要提醒；查询侧「真正写过东西的天」也应当走这一份判据
+ * （不要各自再写一遍「遍历子块看文本」）。
+ */
+export function journalHasContent(b: Block): boolean {
+  if (plainText(b.content).trim() !== '') return true
+  let has = false
+  walkForest(b.children, (x) => {
+    if (plainText(x.content).trim() === '') return
+    has = true
+    return false
+  })
+  return has
 }
 
 /** 日记流的首屏/增量/上限（首屏 3 天、每次加 5 天；上限先兜住 DOM） */

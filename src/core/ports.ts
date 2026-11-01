@@ -334,6 +334,11 @@ export interface App {
   journalReview(days: number): void
   /** 在复盘的空天格子里落笔：物化那一天、按同一参数重开、光标落进那一天 */
   journalShellWrite(date: string): void
+  /**
+   * 删除一天（软删，回收站可恢复）。再打开这一天会**复活同一块**；
+   * 今天删不掉（冷启动会把它物化回来）。
+   */
+  deleteJournal(id: string): boolean
   /** 设定日记流的段排列（设备偏好；复盘的排列切换入口将来接这里） */
   journalFeedLayout(layout: SecLayout): void
   /* zoom（块可任意 zoom in；zoom 是视图配置，不是新对象） */

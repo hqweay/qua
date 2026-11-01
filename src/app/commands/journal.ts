@@ -15,6 +15,7 @@ import {
   type ShellCol,
 } from '../../core/index.ts'
 import type { App } from '../../core/ports.ts'
+import { t } from '../../core/msg.ts'
 import { rootsFor, rootsForMany } from './roots.ts'
 import type { PageDeps } from './types.ts'
 
@@ -31,11 +32,21 @@ import type { PageDeps } from './types.ts'
  * · **只读**：日期只进 `_date`，不进 `text`；这里没有任何写 `_date` 的分支。
  * · **不引入焦点栈**：翻日/回流只是把中心槽的「当前对象」换一块或换一串（同口径）。
  */
-export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journalShift' | 'journalReview' | 'journalShellWrite'> {
-  /** 幂等物化：库里没有这一天的块才创建（排在最前）；经事务产 op——「块在库里」要有行可落 */
+export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journalShift' | 'journalReview' | 'journalShellWrite' | 'deleteJournal'> {
+  /**
+   * 幂等物化：库里没有这一天的**活块**才创建（一点 op）。
+   *
+   * ⚠️ 删掉的同一天会以软删块留在原位，而 id 由日期确定性派生 ⇒ 再打开必须
+   *    **复活那一块**。新建会得到两个同 id 的块，之后所有按 id 的读都只看得到先序第一个。
+   */
   const ensure = (date: string): string => {
     const id = journalId(date)
-    if (!d.kb.get(id)) d.insertBlock(mkJournalBlock(date), null, 0)
+    if (d.kb.get(id)) return id
+    if (d.kb.trash().some((b) => b.id === id)) {
+      d.run((tx) => tx.restore(id))
+      return id
+    }
+    d.insertBlock(mkJournalBlock(date), null, 0)
     return id
   }
 
@@ -167,6 +178,28 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
     journalShellWrite: (date) => {
       ensure(date)
       openFeed(todayISO(), { days: lastReview?.days ?? FEED_INITIAL, layout: 'row', focusDate: date })
+    },
+    /**
+     * 删除一天。与页/标签同一套：**软删**（回收站可恢复），再打开这一天会**复活同一块**
+     * （`ensure` 认 id，见那里的注释）。
+     *
+     * 两条前置：
+     *   · **今天不让删** —— 冷启动会把今天物化回来（它是落点），入口只会在下一次启动时
+     *     「删了又回来」，那比不给更糟；
+     *   · 删的是**正装载着的那一天** ⇒ 删完回日记流，别让中心留着一个已删的根。
+     */
+    deleteJournal: (id) => {
+      const b = d.kb.get(id)
+      if (!b || !isJournal(b) || journalDate(b) === todayISO()) return false
+      const loaded = d.activeId() === id || d.rootIds().includes(id)
+      d.removeBlock(id)
+      if (loaded) openFeed(todayISO())
+      else {
+        d.refreshList()
+        d.saveNow()
+      }
+      d.toast(t('ui.toast.journalDeleted'))
+      return true
     },
   }
 }

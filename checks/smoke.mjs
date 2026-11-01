@@ -16987,6 +16987,90 @@ await check(
   },
 )
 
+await check(
+  'T212 日记天可以删：软删后从日记流消失；再打开同一天复活**同一块**（不新建第二个同 id 块）；今天不给删',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+
+    // 今天永远在 ⇒ 块菜单里不该出现「删除这一天」
+    const todayMenu = await page.evaluate(() => {
+      const el = document.querySelector('.blk .handle')
+      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+      return [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? '')
+    })
+    assert(
+      !todayMenu.includes('删除这一天'),
+      `今天不该有「删除这一天」（冷启动会物化回来）：${JSON.stringify(todayMenu)}`,
+    )
+    await page.keyboard.press('Escape')
+
+    // 打开一个过去的空天 → 它是真实块（一天一个，id 由日期派生）
+    const DATE = '2020-01-02'
+    await page.evaluate((d) => window.__qua.invoke('core.journal/today', { date: d }), DATE)
+    await page.waitForTimeout(150)
+    const day = await page.evaluate(() => {
+      const root = window.__qua.__editor.doc.roots[0]
+      return { id: root.id, date: root.props?._date ?? '' }
+    })
+    assert(day.id && day.date === DATE, `前置：应落在这一天的块上：${JSON.stringify(day)}`)
+
+    const dayMenu = await page.evaluate(() => {
+      const el = document.querySelector('.blk .handle')
+      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+      return [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? '')
+    })
+    assert(dayMenu.includes('删除这一天'), `过去的日记天应有「删除这一天」：${JSON.stringify(dayMenu)}`)
+    await page.locator('.layer-item', { hasText: '删除这一天' }).first().click()
+    await page.waitForTimeout(200)
+
+    const after = await page.evaluate((t) => {
+      const store = window.__qua.__editor.store
+      const seen = []
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === t.id) seen.push({ deleted: Boolean(b.props?._deletedAt) })
+          walk(b.children)
+        }
+      }
+      walk(store.blocks)
+      return {
+        visible: Boolean(store.find(t.id)),
+        versions: seen,
+        feedHasDay: window.__qua.blocks().some((b) => b.id === t.id),
+      }
+    }, day)
+    assert(!after.visible && !after.feedHasDay, `删掉的日记天不该还可见：${JSON.stringify(after)}`)
+    assert(after.versions.length === 1 && after.versions[0].deleted, `应原位软删（仍留在库里）：${JSON.stringify(after.versions)}`)
+
+    // 再打开同一天 ⇒ 复活同一块（不是新建第二个同 id 块）
+    await page.evaluate((d) => window.__qua.invoke('core.journal/today', { date: d }), DATE)
+    await page.waitForTimeout(200)
+    const back = await page.evaluate((t) => {
+      const store = window.__qua.__editor.store
+      let versions = 0
+      let deleted = null
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === t.id) {
+            versions++
+            deleted = Boolean(b.props?._deletedAt)
+          }
+          walk(b.children)
+        }
+      }
+      walk(store.blocks)
+      return { root: window.__qua.__editor.doc.roots[0]?.id ?? '', versions, deleted }
+    }, day)
+    assert(back.root === day.id, `打开同一天应落回原来的块：${JSON.stringify(back)}`)
+    assert(back.versions === 1, `复活不能建出第二个同 id 块：${JSON.stringify(back)}`)
+    assert(back.deleted === false, `复活后删除标记应摘掉：${JSON.stringify(back)}`)
+
+    await ctx.close()
+    return `今天无删除项；过去的天软删后消失、再打开复活同一块（versions=1）`
+  },
+)
+
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
   await writeFile(REPORT, JSON.stringify({ total: seq, cases: results, known: known.map((r) => r.name) }))

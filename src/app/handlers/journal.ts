@@ -5,7 +5,7 @@
  * 形态差异全部由门面里的 `journalToday` / `journalShift` 决定。
  */
 import type { Handler } from '../../core/ports.ts'
-import { S } from './shared.ts'
+import { curBlock, S } from './shared.ts'
 
 export const JOURNAL_HANDLERS: Record<string, Handler> = {
   /* ---- 日记 ---- */
@@ -34,5 +34,9 @@ export const JOURNAL_HANDLERS: Record<string, Handler> = {
     // ⚠️ 不能只认 `activePageId()`：右键一个**没打开**的页时它们不是同一块。
     app.deletePage(S(a.blockId) || app.activePageId())
     return true
+  },
+  'core.journal/delete': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    return id ? app.deleteJournal(id) : false
   },
 }

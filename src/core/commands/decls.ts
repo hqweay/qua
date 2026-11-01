@@ -133,6 +133,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.journal/next', title: t('cmd.journal.next'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), keywords: ['journal', 'next', 'tomorrow'] },
   { name: 'core.journal/review', title: t('cmd.journal.review'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { days: { type: 'number' } }, keywords: ['review', 'retro', 'days'] },
   { name: 'core.journal/feed-layout', title: t('cmd.journal.feed-layout'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { layout: { type: 'string' } }, keywords: ['layout', 'feed', 'column', 'row'] },
+  { name: 'core.journal/delete', title: t('cmd.journal.delete'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { blockId: { type: 'string' } }, keywords: ['journal', 'delete', 'day'] },
 
   /* ---- zoom（zoom 是视图配置，不是新对象，也不引入焦点栈） ---- */
   { name: 'core.block/focus-block', title: t('cmd.block.focus-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, feed: { type: 'boolean' }, restore: { type: 'boolean' }, newTab: { type: 'boolean' } }, keywords: ['zoom', 'focus', t('menu.kw.zoom')] },
