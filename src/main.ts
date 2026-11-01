@@ -41,7 +41,7 @@ import { renderAliasEditor } from './ui/alias-editor.ts'
 import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, renderLinkComposer, type ObjFieldDeps, type PanelDeps } from './ui/panels.ts'
 import { openImageLightbox } from './ui/lightbox.ts'
 import type { AtomMenuHit, RefClickHit, RefClickMods } from './view/editor-events.ts'
-import { devCommands, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, zoomCommands } from './app/commands-impl.ts'
+import { devCommands, dropIdentity, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, zoomCommands } from './app/commands-impl.ts'
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { createRowBodyCache } from './app/wiring/row-bodies.ts'
@@ -1807,6 +1807,46 @@ const app: App = {
 
   addBlockRole: (blockId, role) => addBlockRole(blockId, role),
   removeBlockRole: (blockId, role) => removeBlockRole(blockId, role),
+  /**
+   * 删除标签块。与「取消标签」是**两条轴**：取消只摘 `tag` 露面位（块与内容都还在），
+   * 删除连块带子树一起软删（回收站可恢复）。
+   *
+   * **不要求「先把引用摘干净」**：归属是一格标签 id，目标不在了读路径直接跳过
+   * （`resolveTagIds`），恢复标签时旧归属自动接回 —— 这是软删 ＋ 同地址复活的一部分。
+   * 但**用着它的时候要明说**：删完这些块上的标签会消失（与「取消标签」同一份确认形状），
+   * 否则用户只会看到一堆 chip 一起没了。
+   */
+  deleteTag: (blockId) => {
+    const b = findInForest(ws.blocks, blockId)
+    if (!b || !hasList(b, 'tag')) return false
+    const members = tagMemberIds(b.id, ws.blocks).size
+    const declarations = declaredFieldIds(b).length
+    const drop = (): boolean => {
+      dropIdentity(pageDeps, b.id)
+      app.toast(t('ui.toast.tagDeleted'))
+      return true
+    }
+    if (members === 0 && declarations === 0) return drop()
+    layers.openMenu({
+      title: t('ui.role.deleteTagTitle', { tag: blockName(b), members }),
+      rows: [
+        {
+          id: 'role/delete',
+          label: t('ui.role.deleteTagContinue'),
+          hint: declarations > 0 ? t('ui.role.declarations', { count: declarations }) : '',
+          group: 'role/1',
+        },
+        { id: 'role/cancel', label: t('ui.role.cancel'), group: 'role/2' },
+      ],
+      anchor: ed.caretRect(),
+      searchable: false,
+      focusSearch: false,
+      onPick: (row) => {
+        if (row.id === 'role/delete') drop()
+      },
+    })
+    return true
+  },
   openAliasEditor: (blockId, autofocus) => openAliasEditor(blockId, ed.caretRect(), autofocus),
   openPropertiesDrawer: (blockId) => panels.openPropertiesDrawer(blockId),
   setBlockType: (blockId, typeId) => applyBlockType(blockId, typeId),

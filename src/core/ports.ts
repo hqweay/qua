@@ -125,6 +125,8 @@ export interface App {
   newPage(): void
   openPage(id: string): void
   deletePage(id: string): void
+  /** 删除标签块（整棵子树软删，回收站可恢复）；不是「取消标签」——那是摘露面位 */
+  deleteTag(id: string): boolean
   renamePage(id: string, title: string): void
   /** 把焦点交给页名（**UI 归装配层**：命令只说「要改名」，不碰 `document` — 59 ） */
   focusTitle(): void

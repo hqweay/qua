@@ -5,6 +5,7 @@
  * 形态差异全部由门面里的 `journalToday` / `journalShift` 决定。
  */
 import type { Handler } from '../../core/ports.ts'
+import { S } from './shared.ts'
 
 export const JOURNAL_HANDLERS: Record<string, Handler> = {
   /* ---- 日记 ---- */
@@ -28,8 +29,10 @@ export const JOURNAL_HANDLERS: Record<string, Handler> = {
     app.journalFeedLayout(a.layout === 'row' ? 'row' : 'column')
     return true
   },
-  'core.page/delete': (_a, app) => {
-    app.deletePage(app.activePageId())
+  'core.page/delete': (a, app) => {
+    // 块菜单带着被右键的那一块；命令面板走「当前对象」。
+    // ⚠️ 不能只认 `activePageId()`：右键一个**没打开**的页时它们不是同一块。
+    app.deletePage(S(a.blockId) || app.activePageId())
     return true
   },
 }
