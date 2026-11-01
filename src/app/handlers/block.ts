@@ -53,8 +53,9 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     app.ed.toggleCollapse(id)
     return true
   },
-  'core.editor/toggle-children-collapse': (_a, app) => {
-    const id = curBlock(app)
+  'core.editor/toggle-children-collapse': (a, app) => {
+    // 导轨点击带着显式 blockId（它不改光标，目标块不一定是聚焦块）；键位／面板走聚焦块
+    const id = typeof a.blockId === 'string' && a.blockId !== '' ? a.blockId : curBlock(app)
     if (!id) return false
     app.ed.toggleChildrenCollapse(id)
     return true
@@ -91,6 +92,20 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     if (!id) return false
     app.ed.toggleTodo(id)
     return true
+  },
+  /**
+   * 「取消待办」：摘掉这一块的任务状态（`toggleTodo` 的反向，见 `editor.clearTodo`）。
+   *
+   * ⚠️ 返回值分三种，但**命令只回答「做没做」**：`none`（本来就不是任务）＝ false，
+   *    另外两种都改过模型 ＝ true。牌子只在「摘了但它还在」时打一句 ——
+   *    那种情况是标签声明给的，静默就会变成「点了没反应」。
+   */
+  'core.editor/clear-todo': (_a, app) => {
+    const id = curBlock(app)
+    if (!id) return false
+    const r = app.ed.clearTodo(id)
+    if (r === 'declared') app.toast(t('ui.todo.declaredByTag'), 'info')
+    return r !== 'none'
   },
   'core.editor/insert-block': (a, app) => {
     const id = curBlock(app)

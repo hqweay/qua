@@ -3,7 +3,8 @@
  *
  * 这里**没有一处手写的键位分支**：document 上只有一个 dispatcher，它做的事是
  *   `resolveKey(事件, 上下文键)` → `registry.invoke(命令, 参数, 'keymap')`
- * 菜单 / 斜杠 / 工具栏 / 命令面板同样只是 `resolveBindings(kind, ctx)` 的渲染结果。
+ * 菜单 / 斜杠 / 划选气泡同样只是 `resolveBindings(kind, ctx)` 的渲染结果；
+ * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
 import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, collectionItems, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, isJournal,  isWidgetBlock, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar } from './core/index.ts'
@@ -2006,6 +2007,8 @@ function viewEvents(
     // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
     // 所以「点块标进去」与「点面包屑出来」共用一套语义，没有第二种入口。
     focusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, via),
+    // 点导轨段 ＝ 折叠/展开子块，走同一条命令（键位 ⌘. 折的是自己，这是它的兄弟档）
+    childrenCollapse: (blockId) => void registry.invoke('core.editor/toggle-children-collapse', { blockId }, via),
     // ⌘/Ctrl+点块标／面包屑＝在新 tab 打开（不换当前 tab）
     openInNewTab: (blockId) => void app.openInNewTab(blockId),
     // Shift+点块标 ⇒ 在右槽打开一个窗口（已在别处则移过去；已在本侧则定位）

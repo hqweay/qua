@@ -91,7 +91,12 @@ type Node =
 
 class Parser {
   private p = 0
-  constructor(private toks: Tok[]) {}
+  // 不用参数属性（`constructor(private toks)`）：node --test 的 strip-only 模式不认，
+  // 绑定表被数据面单测 import 时会在这里炸。
+  private toks: Tok[]
+  constructor(toks: Tok[]) {
+    this.toks = toks
+  }
 
   private peek(): Tok {
     return this.toks[this.p]!

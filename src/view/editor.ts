@@ -69,6 +69,7 @@ import {
   gutterFieldsFor,
   fieldTableOf,
   setValue,
+  clearValue,
   todoOf,
   TASK_STATUS_PROP_ID,
   typeDeclOf,
@@ -305,6 +306,12 @@ export interface ViewEvents {
    * 装配层把它接到 `core.block/focus-block`（面包屑那一格是同一个命令）。
    */
   focusBlock?: (blockId: string) => void
+  /**
+   * **点导轨段**：折叠／展开直接子块。装配层把它接到
+   * `core.editor/toggle-children-collapse`（显式 blockId——导轨点击不改光标，
+   * 目标块不一定是聚焦块）。未接的实例（岛编辑器没有命令面）保持直调本编辑器。
+   */
+  childrenCollapse?: (blockId: string) => void
   /** ⌘/Ctrl+左键点块标／面包屑 ＝ 在新 tab 打开（不换当前 tab） */
   openInNewTab?: (blockId: string) => void
   /**
@@ -2470,6 +2477,34 @@ export class BlockEditor {
     this.emitChange('struct', [id])
   }
 
+  /**
+   * **摘掉这一块的任务状态**（`core.editor/clear-todo`）：`toggleTodo` 的逆。
+   *
+   * 为什么不能只靠 `toggleTodo` 连着点：它翻的是**值**（`true` ⇄ `false`），
+   * 而「这块不是任务」说的是**这一栏根本不存在**（`undefined`，见 `todoOf` 的三态）。
+   * 值翻到 `false` 仍然是「是任务、没做完」—— 屏幕上还画着空心方框。
+   * 所以退出的动作必须是摘栏：值连同自有槽一起删（`clearValue`）。
+   *
+   * ⚠️ **两种来源只有一种能摘**：这一栏可能来自这块自己的槽，也可能来自
+   *    某个标签的**字段声明**（种子里的 `#任务` 就是）。`clearValue` 只动前者，
+   *    所以摘完要**再读一次**判据 —— 还剩下就返回 `'declared'`，
+   *    由调用方解释「它来自标签」，而不是让用户对着一个没变化的方框猜。
+   */
+  clearTodo(id: string): 'cleared' | 'declared' | 'none' {
+    const loc = locate(this.doc, id)
+    if (!loc) return 'none'
+    if (todoOf(loc.block, this.fieldTable()) === undefined) return 'none'
+    const before = this.snap()
+    this.write((tx) => tx.patch(id, (b) => clearValue(b, TASK_STATUS_PROP_ID)))
+    this.undo.record(before, 'structural', Date.now())
+    this.renderAll()
+    this.emitChange('struct', [id])
+    // 字段读取表是懒建的派生表：上面这一笔可能改了「哪些标签声明了这一栏」之外的形状，
+    // 但值／槽变了 ⇒ 重新定位再问一次，别读改之前那个 `loc`
+    const after = locate(this.doc, id)
+    return after && todoOf(after.block, this.fieldTable()) !== undefined ? 'declared' : 'cleared'
+  }
+
   /** 整块换成一段纯文本（清除所有格式与原子；命令/测试用） */
   setText(id: string, text: string): void {
     const loc = locate(this.doc, id)
@@ -3342,7 +3377,9 @@ export class BlockEditor {
           }
         : undefined,
       toggleCollapse: (id) => this.toggleCollapse(id),
-      toggleChildrenCollapse: (id) => this.toggleChildrenCollapse(id),
+      // 装配层接了 childrenCollapse ⇒ 走命令（via 记录真实入口）；没接（岛）保持直调
+      toggleChildrenCollapse: (id) =>
+        this.events.childrenCollapse ? this.events.childrenCollapse(id) : this.toggleChildrenCollapse(id),
       toggleTodo: (id) => this.toggleTodo(id),
       blankArea: this.blankArea,
       clickEmptyArea: (y, x) => this.clickEmptyArea(y, x),

@@ -46,7 +46,10 @@ export class Registry {
   }
 
   /**
-   * 调用唯一入口。`via` 只用于诊断（'keymap' | 'menu' | 'slash' | 'selection' | 'palette' | 'chrome' | 'api'）。
+   * 调用唯一入口。`via` 是**自由诊断标签**，不是枚举：主值与绑定面同形
+   * （'keymap' | 'menu' | 'slash' | 'selection'），另有 'chrome' / 'api' 与
+   * 各装配点的细分标签（'dock' / 'ui' / 'popover' / …）；可带后缀表拦截，
+   * 如 'keymap(blocked:composing)'。
    * **组合期（composing）⇒ 键位来源的调用零触发**（组合期守卫）。
    */
   invoke(name: string, args: Record<string, unknown> = {}, via = 'api', ctx?: CtxKeys): InvokeResult {

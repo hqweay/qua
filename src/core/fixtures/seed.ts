@@ -283,13 +283,13 @@ export function seedWorkspace(): Workspace {
     'How I Learned to Stop Worrying and Love the Block-Based Document Model in Personal Knowledge Tools',
     'lucide:book-open',
     [
-      { text: '超长标题的降级：面包屑、左栏、引用选择器三处都要能截断而不破版' },
+      { text: '超长标题的降级：面包屑、左槽、引用选择器三处都要能截断而不破版' },
       { text: 'English-only page. **Anchors** carry a `blockId`; a *quote snapshot* can relocate them later.' },
     ],
   )
 
   const p5 = mkPage('', 'lucide:file', [
-    { text: '无标题页：左栏、面包屑、引用 chip 都要有兜底文案' },
+    { text: '无标题页：左槽、面包屑、引用 chip 都要有兜底文案' },
     { text: '引用一个无标题页：[[ ]]' },
   ])
 

@@ -75,11 +75,6 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     app.setTheme(S(a.mode, 'system'))
     return true
   },
-  // 旧的 toggle-rail 保留为**左槽的别名**（命令面板与老键位不失效）；新名字是 core.dock/*
-  'core.view/toggle-rail': (_a, app) => {
-    app.toggleDock('left')
-    return true
-  },
   'core.dock/toggle-left': (_a, app) => {
     app.toggleDock('left')
     return true
