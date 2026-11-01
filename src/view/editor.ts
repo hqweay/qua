@@ -3085,9 +3085,57 @@ export class BlockEditor {
     return true
   }
 
-  /** 删掉一枚行内原子（显式动作；只动那一格，文本不受影响） */
-  removeRun(runId: string): void {
+  /**
+   * **修一枚 dangling 引用**（块菜单/原子菜单的「恢复／重建」都走这里）。
+   *
+   * 引用按 **id** 指人，所以「修」有两条路，顺序不能反：
+   *   · 目标还在**回收站** ⇒ 恢复那一块（同一 id 回来 ⇒ **所有**指向它的引用一起复原，
+   *     内容也回来）；这时另建一个同名块是没有用的：新块 id 不同，这一枚仍然指不到。
+   *   · 目标真的没了（或被永久清除、或种子里的假地址）⇒ 按**可见名**找到或新建一块
+   *     （`#` 建标签，其余建页），再把**这一枚**的 `to` 指过去。别的引用若也指着旧 id，
+   *     下次修到它时会按同名收敛到同一块。
+   *
+   * @returns 修了什么；`none` ＝ 不是引用 / 已经能解析 / 连名字都没有（没有可用来重建的东西）
+   */
+  repairRef(runId: string): 'restored' | 'repointed' | 'none' {
     const hit = this.findRun(runId)
+    if (!hit || hit.run.t !== 'ref') return 'none'
+    const run = hit.run
+    const to = run.to ?? ''
+    if (to !== '' && this.store.find(to)) return 'none'
+    const label = (run.anchor ?? run.label ?? '').trim()
+    const before = this.snap()
+    let mode: 'restored' | 'repointed' | 'none' = 'none'
+    const ok = this.write((tx) => {
+      if (to !== '' && trashOf(this.store.blocks).some((b) => b.id === to)) {
+        tx.restore(to)
+        mode = 'restored'
+        return true
+      }
+      if (label === '') return false
+      // 重建要改**宿主块**的 run（`to` 指过去）：只读行（journal 日期等）不写
+      if (!canWriteText(hit.block)) return false
+      const lookup = tagLookupOf(this.store.blocks)
+      const target = run.flavor === '#' ? ensureTagInTx(lookup, label, tx) : ensurePageInTx(lookup, label, tx)
+      if (!target) return false
+      tx.patch(hit.block.id, (b) =>
+        writeBlockContent(
+          b,
+          b.content.map((r) => (r.t === 'ref' && r.id === runId ? { ...r, to: target.id } : r)),
+        ),
+      )
+      mode = 'repointed'
+      return true
+    })
+    if (!ok) return 'none'
+    this.undo.record(before, 'other', Date.now())
+    this.renderAll()
+    this.emitChange('struct')
+    return mode
+  }
+
+  /** 删掉一枚行内原子（显式动作；只动那一格，文本不受影响） */
+  removeRun(runId: string): void {    const hit = this.findRun(runId)
     if (!hit) return
     const before = this.snap()
     const next = removeRunById(hit.block.content, runId)

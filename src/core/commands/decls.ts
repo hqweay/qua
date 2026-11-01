@@ -62,6 +62,7 @@ export const COMMANDS: CommandDecl[] = [
   // 打开一枚外链：点与 ⌥ 浮层的「打开」共用这一条（`atomId` ⇒ 去正文里读它此刻的 url）
   { name: 'core.link/open', title: t('cmd.link.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.inline'), args: { atomId: { type: 'string' } }, keywords: ['link', 'open', t('menu.kw.link')], hidden: true },
   { name: 'core.editor/remove-atom', title: t('cmd.editor.remove-atom'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { atomId: { type: 'string' } }, keywords: ['remove atom'], hidden: true },
+  { name: 'core.editor/repair-ref', title: t('cmd.editor.repair-ref'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { atomId: { type: 'string' } }, keywords: ['repair', 'dangling', t('menu.kw.ref')], hidden: true },
   /**
    * 锚文本（这一处引用显示什么）：写空串 ＝ 删掉这个键 ⇒ 回到「跟随目标现算」。
    * 入口只有 ⌥ 浮层那一个输入框，所以不进命令面板（与 `remove-atom` 同一条口径）。

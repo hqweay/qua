@@ -75,6 +75,18 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     return true
   },
   /**
+   * 修一枚 dangling 引用：回收站里有目标 ⇒ 恢复；真没了 ⇒ 建同名块并把这一枚指过去。
+   * 两条都在 `BlockEditor.repairRef` 里，判据只有那一份（菜单只负责显示哪一句文案）。
+   */
+  'core.editor/repair-ref': (a, app) => {
+    const id = S(a.atomId)
+    if (!id) return false
+    const r = app.ed.repairRef(id)
+    if (r === 'restored') app.toast(t('ui.toast.refRestored'))
+    else if (r === 'repointed') app.toast(t('ui.toast.refRebuilt'))
+    return r !== 'none'
+  },
+  /**
    * 从回收站恢复一块（回收站卡的「恢复」按钮与命令面板共用这一条）。
    *
    * 判据：恢复**不改变「它是哪一块」**——只摘掉删除标记，块回到原位。
