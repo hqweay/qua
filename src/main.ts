@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar, trashOf } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar, trashOf, refTitle } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { canWriteText } from './core/types.ts'
 import { hasTag, tagIdsOf } from './core/tags.ts'
@@ -906,6 +906,20 @@ function handleAtomMenu(hit: AtomMenuHit, el: HTMLElement, rect: DOMRect): void 
     if (target) {
       add('atom/open', t('ui.popover.openPage'), 'core.block/focus-block', { blockId: target }, 'lucide:arrow-up-right')
       add('atom/open-dock', t('cmd.dock.open-block'), 'core.dock/open-block', { blockId: target, side: 'right' }, 'lucide:panel-right')
+    }
+    /**
+     * **dangling ⇒ 一句话修好**（引用按 id 指人，所以先恢复、后重建）：
+     *  · 目标在回收站 ⇒ 恢复同一块：所有指向它的引用一起复原，内容也回来；
+     *  · 真没了 ⇒ 按可见名建一块，并把**这一枚**的 `to` 指过去。
+     * 两条的判据都在 `BlockEditor.repairRef`，这里只决定显示哪一句文案。
+     */
+    if (!target && writable) {
+      const tomb = run.to !== undefined && run.to !== '' ? trashOf(ws.blocks).find((b) => b.id === run.to) : undefined
+      const label = (run.anchor ?? run.label ?? '').trim() || (tomb ? refTitle(tomb) : '')
+      if (label !== '') {
+        if (tomb) add('atom/repair', t('ui.atomMenu.restoreTarget', { name: label }), 'core.editor/repair-ref', { atomId: run.id }, 'lucide:rotate-ccw')
+        else add('atom/repair', t('ui.atomMenu.rebuildTarget', { name: label }), 'core.editor/repair-ref', { atomId: run.id }, 'lucide:plus')
+      }
     }
     if (isObj) rows.push({ id: ATOM_ROW_FIELDS, label: t('ui.atomMenu.fields'), icon: 'lucide:list' })
     if (!isMention && !isObj && writable) {

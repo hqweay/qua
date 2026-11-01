@@ -17082,6 +17082,104 @@ await check(
   },
 )
 
+await check(
+  'T213 dangling 引用一键修复：目标在回收站 ⇒ 恢复同一块；真没了 ⇒ 新建同名块并把这一处指过去',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+
+    // 种子页里有一条**没有 to** 的悬空引用（[[这份页面还没写]]）
+    const host = await page.evaluate(() => {
+      const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+      window.__qua.invoke('core.page/open', { pageId: p.id })
+      return p.id
+    })
+    await page.waitForTimeout(200)
+    const ghosts = await page.evaluate(() => {
+      // ⚠️ `atoms()` 读的是**整库**；DOM 里的只有当前这一页 ⇒ 按 doc 的块 id 收窄
+      const here = new Set(window.__qua.blocks().map((b) => b.id))
+      return window.__qua
+        .atoms()
+        .filter((a) => a.state === 'dangling' && here.has(a.blockId))
+        .map((a) => ({ id: a.id, label: a.label, to: a.target }))
+    })
+    const ghost = ghosts.find((a) => a.label.includes('这份页面还没写'))
+    assert(ghost, `前置：种子里应有一条悬空引用：${JSON.stringify(ghosts)}`)
+
+    const opened = await page.evaluate((id) => {
+      const el = document.querySelector(`.atom[data-atom-id="${id}"]`)
+      if (!el) return false
+      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+      return true
+    }, ghost.id)
+    assert(opened, `前置：dangling 的 chip 应挂在 DOM 里（${ghost.id}）`)
+    await page.waitForSelector('.layer-item')
+    let rows = await page.locator('.layer-item .layer-label').allInnerTexts()
+    assert(
+      rows.some((x) => x.includes('新建同名块')),
+      `没有目标 id 的 dangling 应给「新建同名块」：${JSON.stringify(rows)}`,
+    )
+    await page.locator('.layer-item', { hasText: '新建同名块' }).first().click()
+    await page.waitForTimeout(250)
+    const rebuilt = await page.evaluate((atomId) => {
+      const a = window.__qua.atoms().find((x) => x.id === atomId)
+      return { state: a?.state, label: a?.label, pages: window.__qua.pages().map((p) => p.title) }
+    }, ghost.id)
+    assert(rebuilt.state === 'resolved', `重建后这一枚应能解析：${JSON.stringify(rebuilt)}`)
+    assert(
+      rebuilt.pages.includes('这份页面还没写'),
+      `应真的建出同名页（不是只把 chip 画成已解析）：${JSON.stringify(rebuilt.pages)}`,
+    )
+
+    // 目标被删（进回收站）⇒ 菜单应给「恢复」，恢复的是**同一块**（id 不变）
+    await page.evaluate((id) => void window.__qua.invoke('core.page/open', { pageId: id }), host)
+    await page.waitForTimeout(150)
+    const live = await page.evaluate((hostId) => {
+      // 挑一条**在这一页里**、引到**别的页**的引用：删目标不会连宿主一起删
+      const here = new Set(window.__qua.blocks().map((b) => b.id))
+      const a = window.__qua
+        .atoms()
+        .find((x) => x.state === 'resolved' && x.target && here.has(x.blockId) && x.target.id !== hostId)
+      return a ? { atomId: a.id, targetId: a.target.id, label: a.label } : null
+    }, host)
+    assert(live, '前置：宿主页上应有一条能解析的引用')
+    await page.evaluate((id) => void window.__qua.invoke('core.page/delete', { blockId: id }), live.targetId)
+    await page.waitForTimeout(150)
+    await page.evaluate((id) => void window.__qua.invoke('core.page/open', { pageId: id }), host)
+    await page.waitForTimeout(200)
+    const gone = await page.evaluate((id) => window.__qua.atoms().find((x) => x.id === id)?.state ?? '', live.atomId)
+    assert(gone === 'dangling', `目标删掉后应变成 dangling：${gone}`)
+
+    const opened2 = await page.evaluate((id) => {
+      const el = document.querySelector(`.atom[data-atom-id="${id}"]`)
+      if (!el) return false
+      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+      return true
+    }, live.atomId)
+    assert(opened2, `前置：目标删除后 chip 仍应在 DOM 里（${live.atomId}）`)
+    await page.waitForSelector('.layer-item')
+    rows = await page.locator('.layer-item .layer-label').allInnerTexts()
+    assert(
+      rows.some((x) => x.includes('恢复「')),
+      `回收站里有目标时应给「恢复」而不是新建：${JSON.stringify(rows)}`,
+    )
+    await page.locator('.layer-item', { hasText: '恢复「' }).first().click()
+    await page.waitForTimeout(250)
+    const back = await page.evaluate(
+      (t) => {
+        const a = window.__qua.atoms().find((x) => x.id === t.atomId)
+        return { state: a?.state, targetId: a?.target?.id ?? '', sameId: a?.target?.id === t.targetId }
+      },
+      live,
+    )
+    assert(back.state === 'resolved', `恢复后应能解析：${JSON.stringify(back)}`)
+    assert(back.sameId, `恢复的应是**同一块**（id 不变）：${JSON.stringify(back)}`)
+
+    await ctx.close()
+    return `无 to 的 dangling ⇒ 建同名块并指过去；目标在回收站 ⇒ 恢复同一 id`
+  },
+)
+
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
   await writeFile(REPORT, JSON.stringify({ total: seq, cases: results, known: known.map((r) => r.name) }))
