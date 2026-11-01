@@ -65,6 +65,32 @@ export interface RefClickHit {
 }
 
 /**
+ * 右键落在**一枚行内对象**上（引用／行内标签／外链／图片／块级标签 chip）。
+ *
+ * 为什么它必须与 `onBlockMenu` 分开：同一个 `.blk` 里，右键块标、右键正文里的
+ * `#标签`、右键行尾的标签 chip 是三件不同的事。事件层只回答「落点是谁」，
+ * 菜单里列什么由装配层按这个身份现算（引用能改锚文本，标签能摘归属，图能看详情）。
+ *
+ * ⚠️ `runId` 与 `tagId` 是**两种身份**，不能互相兜底：
+ *    · `runId` —— 正文里的一枚原子（带 `flavor:'#'` 时是**提及**，不写 `_tags`）；
+ *    · `tagId` —— 标签 chip，它是**归属**（`props._tags`），没有 run。
+ *    把 chip 当 run 去删，会把「摘标签」做成「删了显示它的一行字」而归属还在。
+ */
+export interface AtomMenuHit {
+  /** 这枚露面住在哪一块（chip 的归属也写在这一块上） */
+  blockId: string
+  /** 行内原子自己的 id；chip 没有 */
+  runId?: string
+  /** 行内原子的种类（`ref`／`link`／`asset`，来自渲染层写下的 `data-atom-kind`） */
+  kind?: string
+  /** 指向的目标块（引用／行内标签／chip 都有） */
+  to?: string
+  /** 块级标签 chip 的标签 id（归属，没有 run） */
+  tagId?: string
+}
+
+
+/**
  * 浮层要的「此刻在敲什么」。
  *
  * ⚠️ 只报**触发字符与查询词**，不带偏移：抹掉这段字的偏移由编辑器自己算
@@ -197,6 +223,13 @@ export interface EditorBridge {
    * ⚠️ 未接 ⇒ 什么都不做（与 `refClick` 同一条口径：缺入口就让它看得见地缺）。
    */
   onAtomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: RefClickMods) => void
+  /**
+   * **右键一枚行内对象**：引用／行内标签／外链／图片／标签 chip 各自的菜单。
+   *
+   * `el` 是落点元素（浮层的锚点），`rect` 是右键那一刻的指针位置。
+   * ⚠️ 未接 ⇒ 退回块菜单（不是「点了没反应」）：事件层只少一个分流，不少一个菜单。
+   */
+  onAtomMenu?: (hit: AtomMenuHit, el: HTMLElement, rect: DOMRect) => void
   /**
    * 打开块菜单（悬停把手/圆点或右键）。
    *
@@ -797,6 +830,48 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     if (!el?.dataset.blockId) return
     e.preventDefault()
     const rect = new DOMRect(e.clientX, e.clientY, 0, 0)
+    /**
+     * **右键落在一枚行内对象上 ⇒ 开它自己的菜单**（不是块菜单）。
+     *
+     * 判据与 `click` 那一支同源：用 `composedPath()`，因为菜单动作会重渲染，
+     * `target.closest()` 在重渲染之后可能已经不在树上（与面包屑同一条实测理由）。
+     * 顺序：chip 先于原子 —— chip 有 `data-tag-id` 但**没有** `data-atom-id`，
+     * 而原子反过来；两条不会同时命中，写反只会让读者以为 chip 靠原子那条路工作。
+     */
+    const path = e.composedPath()
+    if (br.onAtomMenu) {
+      const chip = path.find(
+        (n): n is HTMLElement => n instanceof HTMLElement && n.dataset.tagId !== undefined,
+      )
+      if (chip?.dataset.tagId) {
+        br.onAtomMenu(
+          {
+            blockId: el.dataset.blockId,
+            tagId: chip.dataset.tagId,
+            ...(chip.dataset.refTo ? { to: chip.dataset.refTo } : {}),
+          },
+          chip,
+          rect,
+        )
+        return
+      }
+      const atom = path.find(
+        (n): n is HTMLElement => n instanceof HTMLElement && n.dataset.atomId !== undefined,
+      )
+      if (atom?.dataset.atomId) {
+        br.onAtomMenu(
+          {
+            blockId: el.dataset.blockId,
+            runId: atom.dataset.atomId,
+            kind: atom.dataset.atomKind ?? '',
+            ...(atom.dataset.refTo ? { to: atom.dataset.refTo } : {}),
+          },
+          atom,
+          rect,
+        )
+        return
+      }
+    }
     /**
      * **右键落在块标上 ⇒ 菜单开在块标绑定的那一块**。普通行两者同 id（行为不变）；
      * 投影行的绑源块标不同 id ⇒ 菜单开在源上，附「移除这次露面」。

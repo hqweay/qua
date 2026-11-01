@@ -160,7 +160,7 @@ import {
 } from './block-dom.ts'
 import { assetViewOf, markAssetMissing } from './asset-views.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
-import { bindEditorEvents, type RefClickHit, type RefClickMods, type TriggerQuery } from './editor-events.ts'
+import { bindEditorEvents, type AtomMenuHit, type RefClickHit, type RefClickMods, type TriggerQuery } from './editor-events.ts'
 
 export interface Probe {
   isComposing: boolean
@@ -279,6 +279,13 @@ export interface ViewEvents {
    * ⚠️ 未接 ⇒ 事件层退回详情浮层（旧行为），不让点击看起来像没发生。
    */
   onAtomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: RefClickMods) => void
+  /**
+   * **右键一枚行内对象**（引用／行内标签／外链／图片／标签 chip）。
+   *
+   * 与 `blockMenu` 分开：右键块标是「对这块做什么」，右键一枚原子是「对这一处做什么」。
+   * 未接 ⇒ 事件层退回块菜单（不是没反应）。身份判据见 `AtomMenuHit`。
+   */
+  atomMenu?: (hit: AtomMenuHit, el: HTMLElement, rect: DOMRect) => void
   /**
    * **粘贴进来一份图片字节**（v1 只取第一张）。
    *
@@ -3346,6 +3353,7 @@ export class BlockEditor {
         else this.events.focusBlock?.(id)
       },
       onBlockMenu: (id, rect, appearanceHost) => this.events.blockMenu?.(id, rect, appearanceHost),
+      onAtomMenu: (hit, el, rect) => this.events.atomMenu?.(hit, el, rect),
       // 左键点块标 ＝ 聚焦/zoom。这也是**离开这一行**：先把当前行的编辑交出去
       // （判据是「上一个块 ≠ 这个块」；点自己那一行的块标不算离开）
       focusBlock: (id) => {

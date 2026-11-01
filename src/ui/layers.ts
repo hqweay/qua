@@ -205,7 +205,13 @@ export class Layers {
       if (!this.open) return
       const t = e.target as Node
       if (this.el?.contains(t) || this.popEl?.contains(t)) return
-      if ((t as HTMLElement).closest?.('.blk')) return
+      /**
+       * **点任何别处都关**（含正文里的块行）。
+       *
+       * 早先这里放过 `.blk`：菜单开着时点正文不算「点到外面」。结果是菜单只能靠
+       * Esc／选项／点空白关掉，而正文本身几乎全是 `.blk` —— 用户想「点一下别处继续写」
+       * 时菜单一直挡着，还得再找一次 Esc。菜单是一次性动作面板，不是常驻面板。
+       */
       this.closeMenu()
     })
     /**

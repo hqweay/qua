@@ -723,6 +723,7 @@ export const MSG = {
   'menu.title.palette': '命令面板 · 一切命令可搜、可无绑定执行',
   'menu.title.palettePlain': '命令面板',
   'menu.title.block': '块菜单',
+  'menu.title.atom': '行内对象',
   'menu.title.blockSel': '块选择',
   'menu.title.slash': '斜杠命令',
   'menu.title.slashFilter': '斜杠命令 · 继续打字可过滤',
@@ -908,6 +909,15 @@ export const MSG = {
   // 引用与标签共用：目标可以是任意块（不只是顶层页）
   'ui.popover.openPage': '打开目标',
   'ui.popover.deleteRef': '删除这个引用',
+  /* 行内对象右键菜单：三类身份各用各的词（提及 ≠ 归属 ≠ 原子本身） */
+  'ui.atomMenu.editAnchor': '修改显示名…',
+  'ui.atomMenu.clearAnchor': '恢复默认显示名',
+  'ui.atomMenu.removeRef': '删除这处引用',
+  'ui.atomMenu.removeMention': '删除这次提及',
+  'ui.atomMenu.removeAtom': '删除这一枚',
+  'ui.atomMenu.removeTag': '从本块摘除标签',
+  'ui.atomMenu.openLink': '打开链接',
+  'ui.atomMenu.details': '查看详情',
   'ui.popover.deleteTag': '删除这个标签',
   'ui.popover.assetHash': '资产 hash（内容寻址）',
   'ui.popover.size': '尺寸',
