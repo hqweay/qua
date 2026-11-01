@@ -1540,6 +1540,14 @@ await check('T9 块菜单与斜杠菜单**都是绑定表的渲染结果**（同
     !slashLabels.some((t) => t.includes('收藏')),
     `斜杠菜单不该有「收藏」：${JSON.stringify(slashLabels)}`,
   )
+  /**
+   * **「正文块」与 ↵ 是同一个动作**：`insert-block{type:paragraph}` 就是在当前块后建一个普通块。
+   * 反向断言，免得以后又把它加回来——那会让斜杠里多一条零信息量的入口。
+   */
+  assert(
+    !slashLabels.some((t) => t.includes('正文块')),
+    `斜杠菜单不该有「正文块」（等价于 ↵）：${JSON.stringify(slashLabels)}`,
+  )
   await page.keyboard.type('图')
   const filteredRows = await page.locator('.layer-item').count()
   assert(filteredRows >= 1 && filteredRows <= slashRows, `斜杠应随打字过滤：${slashRows} → ${filteredRows}`)

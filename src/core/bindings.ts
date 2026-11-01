@@ -186,7 +186,7 @@ export const BINDINGS: Binding[] = [
   { command: 'core.selection/clear', kind: 'menu', when: 'blockSelection', group: 'blockSel/2-clear', order: 10, layer: 'core' },
 
   /* ================= 斜杠菜单（输入 `/`） ================= */
-  { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-basic', order: 10, layer: 'core', label: t('menu.label.paragraph'), args: { type: 'paragraph' }, keywords: ['text', 'paragraph', t('menu.kw.paragraph')], icon: 'lucide:pilcrow' },
+  // 没有「正文块」：插一个普通块就是按 ↵，斜杠里再列一遍等于把同一个动作说两遍
   { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-basic', order: 20, layer: 'core', label: t('menu.label.todo'), args: { type: 'todo' }, keywords: ['todo', 'task'], icon: 'lucide:square' },
   // 分割线：没有正文的块，插完光标要落到它下面那一行（见 insertDividerAfter）
   { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-basic', order: 30, layer: 'core', label: t('menu.label.divider'), args: { type: 'divider' }, keywords: ['divider', 'hr', 'line', t('menu.kw.divider')], icon: 'lucide:minus' },

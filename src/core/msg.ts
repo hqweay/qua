@@ -651,7 +651,6 @@ export const MSG = {
 
   /* ------------------------------------------------- 绑定表 label（menu.label.*） */
   'menu.label.toggleCollapse': '折叠 / 展开',
-  'menu.label.paragraph': '正文块',
   'menu.label.todo': '待办',
   'menu.label.divider': '分割线',
   'menu.label.pageRef': '引用页面（行内原子）',
@@ -683,7 +682,6 @@ export const MSG = {
   'menu.kw.link': '链接',
   'menu.kw.background': '背景',
   'menu.kw.command': '命令',
-  'menu.kw.paragraph': '正文',
   'menu.kw.divider': '分隔',
   // 「取消待办」的检索词：中文输入也要能被搜到（`/` 里打「取消」）
   'menu.kw.untodo': '取消待办',
