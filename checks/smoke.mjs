@@ -2352,6 +2352,36 @@ await check('T195 查询在正文内联渲染：不打开就在原位出结果�
   assert(!inline.inMount, '内联体必须在这一行下面，不是段尾挂载区')
 
   /**
+   * **高度是「内容高，封顶一档」**：结果少时身体只占内容那么高，不预留空白；
+   * 点进结果后 `:focus-within` 只抬**上限**，装得下就不长 —— 否则点一下整块忽然
+   * 变高，多出来的仍是一片空白（用户报的那个观感）。
+   */
+  const bodyHeight = () =>
+    page.evaluate((id) => {
+      const body = document.querySelector(`.blk[data-block-id="${id}"] > .blk-view-body`)
+      return {
+        h: body ? body.getBoundingClientRect().height : 0,
+        cap: body ? parseFloat(getComputedStyle(body).maxHeight) : 0,
+        focus: body?.matches(':focus-within') ?? false,
+      }
+    }, qid)
+  const restBody = await bodyHeight()
+  assert(
+    restBody.h > 0 && restBody.h < restBody.cap - 20,
+    `结果装得下时身体按内容高、不预留一档空白：${JSON.stringify(restBody)}`,
+  )
+  await page.locator(`.blk[data-block-id="${qid}"] .blk-view-body .queryview-editor .blk .tx`).first().click()
+  await page.waitForTimeout(200)
+  const focusBody = await bodyHeight()
+  assert(focusBody.focus, `前置：点进结果后焦点在身体里：${JSON.stringify(focusBody)}`)
+  assert(
+    Math.abs(focusBody.h - restBody.h) < 1,
+    `内容装得下时聚焦只抬上限、不改变高度：${JSON.stringify({ restBody, focusBody })}`,
+  )
+  await page.evaluate(() => window.__qua.focusBlock(window.__qua.__editor.doc.roots[0].id, 0))
+  await page.waitForTimeout(150)
+
+  /**
    * **折叠折的是身体**：查询块没有 children，但结果视图是可折的东西。
    * 折起来只藏身体（不卸载 ViewHost），展开后结果还在。
    */
