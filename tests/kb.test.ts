@@ -533,7 +533,9 @@ test('索引随 tx 增量修补：任意一批写之后，增量结果与全量�
   // 一串覆盖全部 op 形态的写：正文 / 属性 / 别名 / 露面 / 归属 / 日期 / 锚点 / 插入 / 移动 / 删除
   const writes: ((tx: Parameters<Parameters<typeof kb.tx>[0]>[0]) => void)[] = [
     (tx) => tx.patch('c1', (b) => { writeBlockContent(b, textRuns('改过的正文')) }),
-    (tx) => tx.setProp('c1', '_date', '2026-10-24'),
+    // `_date` 给 c2 不给 c1：c1 后面还要改正文，而带上 `_date` 它就是日记块——
+    // 日记行的正文是受保护的（内容闸会在发看点拦），这条写入序列得是合法的
+    (tx) => tx.setProp('c2', '_date', '2026-10-24'),
     (tx) => tx.setAliases('p2', ['页面二', '别名二']),
     (tx) => tx.setLists('c1', ['page']),
     (tx) => tx.setTags('c2', ['t1', 't1']),

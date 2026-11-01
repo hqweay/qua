@@ -6,7 +6,7 @@
  *    再存一个标记就是同一件事的第二份答案，而两份可以不一致。
  */
 
-import { isJournalBlock, prop, type Block } from './model.ts'
+import { ICON_PROP, isJournalBlock, prop, type Block } from './model.ts'
 import { derivedId } from './ids.ts'
 import { walkForest } from './walk.ts'
 export function todayISO(now: Date = new Date()): string {
@@ -14,6 +14,17 @@ export function todayISO(now: Date = new Date()): string {
   const m = String(now.getMonth() + 1).padStart(2, '0')
   const d = String(now.getDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
+}
+
+/**
+ * `_date` 的形状判据：`YYYY-MM-DD`。
+ *
+ * 这是唯一一个「格式错了会**改变身份**」的系统键——journal 的 id 由日期确定性派生，
+ * 日记流/索引/落库排序全都按这一格分组。别处都能宽容，这里不能：坏日期会让
+ * 「同一天」分裂成多天，而派生 id 与内容脱钩后没有路径能把它拉回来。
+ */
+export function isJournalDate(v: unknown): boolean {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
 }
 
 /** 日期加减天数（走本地日历：跨月/跨年/夏令时都交给 `Date`） */
@@ -89,7 +100,7 @@ export function mkJournalBlock(date: string): Block {
     children: [],
     created: now,
     modified: now,
-    props: { _date: date, _icon: 'lucide:calendar' },
+    props: { _date: date, [ICON_PROP]: 'lucide:calendar' },
   }
 }
 

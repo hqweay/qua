@@ -127,6 +127,35 @@ test('parseWorkspace: `_display` 只认 `alias` / `text` ⇒ 别的值判 corrup
   assert.equal(parseWorkspace(bad(1)).status, 'corrupt')
 })
 
+test('parseWorkspace: 系统键的值形状（v31 起与写路径同一批判据）⇒ 坏值 corrupt、合法值放行', () => {
+  /**
+   * 每键一行：坏值 ⇒ corrupt；**紧跟着的合法值 ⇒ ok**——防「这条分支永远红」的假绿
+   * （判据写错成「什么都是 corrupt」时，只有合法值那一半能抓住它）。
+   * 判据与写路径共用（`core/system-props.ts`）；悬空 id 合法、`_date` 格式错了会改变身份。
+   * `_query` 不在表里（条件读不出是已设计的降级态，宽容读）、`_type` 不在（开放值域）。
+   */
+  const withProp = (key: string, value: unknown): string =>
+    valid({ blocks: [blk({ props: { [key]: value } })] })
+  const cases: { key: string; bad: unknown; good: unknown }[] = [
+    { key: '_tags', bad: '任务', good: ['t1'] },
+    { key: '_belongsTo', bad: 42, good: ['p1'] },
+    { key: '_items', bad: 42, good: ['b2'] },
+    { key: '_date', bad: '2026/10/24', good: '2026-10-24' },
+    { key: '_kind', bad: 'bogus', good: 'text' },
+    { key: '_icon', bad: '', good: 'lucide:calendar' },
+    { key: '_fieldDefs', bad: 42, good: ['some-prop-id'] },
+    { key: '_ownProps', bad: 42, good: ['some-prop-id'] },
+    { key: '_uiPosition', bad: 'center', good: 'block-left' },
+  ]
+  for (const { key, bad: badValue, good } of cases) {
+    assert.equal(parseWorkspace(withProp(key, badValue)).status, 'corrupt', `${key} 的坏值必须判 corrupt`)
+    assert.equal(parseWorkspace(withProp(key, good)).status, 'ok', `${key} 的合法值必须放行`)
+  }
+  // `_query` 的宽容是**登记过的**：条件读不出来 ⇒ 块降级，但库照常打开
+  assert.equal(parseWorkspace(withProp('_query', 'garbage')).status, 'ok', '_query 读侧维持宽容（已设计的降级态）')
+  assert.equal(parseWorkspace(withProp('_type', '不认识的类型')).status, 'ok', '_type 开放值域（读侧降级是设计）')
+})
+
 test('parseWorkspace: 旧键 `_roles` / `_alias` 一律判 corrupt（不静默读旧形状）', () => {
   const roles = valid({ blocks: [blk({ props: { _roles: ['page'] } })] })
   assert.deepEqual(parseWorkspace(roles), { status: 'corrupt', reason: 'shape' })

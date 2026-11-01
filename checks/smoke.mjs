@@ -1112,7 +1112,14 @@ await check('T5g 行内资产：选文件走隐藏 input；拖入文件被拦住
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.invoke('core.page.open', { pageId: window.__qua.pages()[0].id }))
   await page.waitForTimeout(300)
-  await page.evaluate(() => window.__qua.focusBlock(window.__qua.blocks()[0].id, 0))
+  /**
+   * ⚠️ 落点要挑**真正文块**：默认落点是今日日记流，`blocks()[0]` 是日记日期行——
+   *    它的正文是受保护的（内容闸会拒），选文件/粘贴必须落在可写块上。
+   */
+  await page.evaluate(() => {
+    const target = window.__qua.blocks().find((b) => !(b.roles ?? []).includes('journal'))
+    window.__qua.focusBlock(target.id, 0)
+  })
 
   // ① 选文件：真 PNG 走 `filechooser`（字节由 node 侧给，不落临时文件）
   const b64 =
@@ -1180,7 +1187,7 @@ await check('T5h 行内资产：关掉重开，图还在（workspace ＋ Indexed
      *    而挂载区的块在重开之后不一定还在当前视图里 —— 那样断言验的是「视图没装」，
      *    不是「资产还在不在」。
      */
-    const target = window.__qua.blocks()[0]
+    const target = window.__qua.blocks().find((b) => !(b.roles ?? []).includes('journal'))
     const blk = document.querySelector(`#editor .blk[data-block-id="${target.id}"]`)
     window.__qua.focusBlock(target.id, 0)
     const atomsBefore = window.__qua.snapshot().atoms

@@ -18,6 +18,11 @@ import { COLLECTION_TYPE } from './types.ts'
 /** `_items`：集合块上的一格（有序引用） */
 export const COLLECTION_PROP = '_items'
 
+/** `_items` 的形状判据（读路径与落盘校验共用同一份）：非空字符串数组；悬空 id 合法（零级联） */
+export function isCollectionRefList(v: unknown): boolean {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string' && x !== '')
+}
+
 /** 读一格 `_items`：形状不合法就当作空（不抛、不修） */
 export function collectionItems(b: Block | undefined): string[] {
   const raw = b?.props?.[COLLECTION_PROP]

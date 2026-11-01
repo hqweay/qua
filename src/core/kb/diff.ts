@@ -39,7 +39,10 @@
 import { DELETED_AT_PROP, type Block } from '../model.ts'
 import { walkForest } from '../walk.ts'
 import type { Anno } from '../runs.ts'
+import { canWriteText } from '../types.ts'
+import { systemPropViolation } from '../system-props.ts'
 import type { Op } from './types.ts'
+import { validate } from './validate.ts'
 
 /* ------------------------------------------------------------ 格与落点 */
 
@@ -159,6 +162,16 @@ function propOps(id: string, before: Record<string, unknown> | undefined, after:
   for (const name of Object.keys(b)) {
     if (!isPropCell(name)) continue
     if (name in a && same(a[name], b[name])) continue
+    /**
+     * **系统键的值在发看点校验**：tx 里的任何属性写——`setProp`、各专用方法、
+     * `patch` 的就地改——最终都从这里变成 op，在这里判一次就没有「哪条写路径忘了校验」
+     * 这回事（完备性由构造保证的同一句话，也覆盖校验）。抛错走事务的逆序回滚；
+     * `diff`（撤销）比的是两份合法状态，不会触发。
+     */
+    if (name.startsWith('_')) {
+      const why = systemPropViolation(name, b[name])
+      if (why) throw new Error(`kb: block "${id}": ${why}`)
+    }
     out.push({ e: 'prop', block: id, name, op: 'set', value: snapshotValue(b[name]), at: stamp })
   }
   for (const name of Object.keys(a)) {
@@ -216,6 +229,17 @@ function existingBlockOps(old: BlockCells, block: Block, placement?: Placement):
   const contentChanged = !same(old.content, block.content)
   const timeChanged = old.modified !== block.modified
   if (contentChanged) {
+    /**
+     * **内容闸**：身份块（日记／字段定义／查询）与 `text:'readonly'` 类型的正文是
+     * **名字或投影**，不是内容。判据只有一条（`canWriteText`），漏斗只有一处——
+     * 全部内容写路径（打字、粘贴、锚文本、overlay 写回……）都经 `tx.patch` 走到这里，
+     * 在发看点判一次，就没有「哪个程序化入口忘了判」这回事。
+     * 判的是**改前**的属性袋：同一事务里「先摘身份再写字」也要拦。
+     * 新块不走这里（`newBlockOps`——`mkBlock` 造出来的块还没有身份）。
+     */
+    if (!canWriteText({ ...block, props: old.props })) {
+      throw new Error(`kb: block "${block.id}": content is protected (journal/prop-def/query/readonly text)`)
+    }
     out.push({
       e: 'block',
       id: block.id,
@@ -362,6 +386,19 @@ export function diffTouched(touched: Iterable<TouchedBlock>): Op[] {
  * @param ops    `diff`／`diffTouched` 的输出，或 `op_log` 里的历史
  */
 export function applyOps(forest: Block[], ops: readonly Op[]): void {
+  /**
+   * **收端门**：这批 op 先验再吃，违规抛错、森林一个字节不动（校验只读）。
+   *
+   * 本地 tx 产出的 op 在发看点已经验过（`propOps`／正文闸），这里拦的是
+   * **不是本地产出的流**——撤销/回放的日志（`store.restore`）、将来的远端 op 流。
+   * 同一个函数（`validate`）服务两条路：发侧拦「这次能不能写」，收端拦「这批能不能应用」。
+   */
+  const violations = validate(forest, ops)
+  if (violations.length > 0) {
+    const v = violations[0]!
+    throw new Error(`kb: op batch rejected at #${v.index} (${v.blockId ?? '—'}): ${v.reason}`)
+  }
+
   /**
    * **空森林 ⇒ 走构建器**：`replay` 与「从日志重建整库」都从这里过。
    *
