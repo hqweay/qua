@@ -564,6 +564,7 @@ export const MSG = {
   'ui.view.openBlock': '打开这一块',
   'ui.view.addTable': '新建表格',
   'ui.view.addListTable': '新建大纲表格',
+  'ui.view.addKind': '新建{kind}',
   'ui.view.addView': '新建视图…',
   'ui.view.listNeedsTree': '大纲表格要有一棵大纲树（查询结果是平的）',
   'ui.view.listTitle': '表标题',

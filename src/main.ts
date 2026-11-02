@@ -1694,13 +1694,14 @@ const app: App = {
     for (const kind of storedKindsFor(source)) {
       rows.push({
         id: `view/add/${kind}`,
-        // 「新建表格」/「新建大纲表格」是既有叫法（菜单里点了就是**建**一张）；其余按 kind 名
+        // 建的行一律「新建 X」：裸 kind 名读起来像「切过去」，点下去却是建——
+        // 重复视图就是这么攒出来的。上方「已有视图」各叫各的名字（建时就给了默认名）。
         label:
           kind === 'table'
             ? t('ui.view.addTable')
             : kind === 'list-table'
               ? t('ui.view.addListTable')
-              : t(`ui.view.kind.${kind}` as 'ui.view.kind.table'),
+              : t('ui.view.addKind', { kind: t(`ui.view.kind.${kind}` as 'ui.view.kind.table') }),
         icon: ICON[kind] ?? 'lucide:square',
         group: 'view/9-add',
       })
