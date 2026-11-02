@@ -120,7 +120,7 @@ import {
   type Run as InlineRun,
   type RunWithId,
 } from '../core/runs.ts'
-import { journalDateLabel, type SecLayout, type ShellCol } from '../core/index.ts'
+import { journalDateLabel, type OpenPlace, type SecLayout, type ShellCol } from '../core/index.ts'
 export type { SecLayout }
 
 /**
@@ -323,19 +323,13 @@ export interface ViewEvents {
    * 目标块不一定是聚焦块）。未接的实例（岛编辑器没有命令面）保持直调本编辑器。
    */
   childrenCollapse?: (blockId: string) => void
-  /** ⌘/Ctrl+左键点块标／面包屑 ＝ 在新 tab 打开（不换当前 tab） */
-  openInNewTab?: (blockId: string) => void
   /**
-   * **Shift+左键点块标**：在右槽打开这个块（已打开则定位；不在则移过去）。
+   * **打开一个块**：`place` 已把 Shift／⌘/Ctrl 翻译好（中心／右槽／新 tab）。
    *
-   * 单独一个回调而不是在事件层看 `shiftKey` 调 `focusBlock`：事件层不该知道
-   * 「右槽」与「窗口」这层语义，它只负责把修饰键翻译成另一个动作。
-   *
-   * ⚠️ 未接的独立/测试实例**什么都不做**，不再退化为中心 zoom——
-   *    那是上一版的 bug：反链 footer／查询／标签面板的 Shift+点看起来有反应，
-   *    其实只是把中心换成了同一个块。生产装配的每个编辑器都必须接它（冒烟逐入口钉住）。
+   * 事件层只报落点，不认识「侧槽」「tab」这些具体语义；生产装配统一接到
+   * `App.openBlock`，独立/测试实例未接时非中心落点什么都不做（不退化为中心 zoom）。
    */
-  openInDock?: (blockId: string) => void
+  openBlock?: (blockId: string, place: OpenPlace) => void
   /**
    * 模型选区变了（**划选气泡的驱动**，2026-10-19）。
    * 只有这里知道「选区到底变了没有」——气泡不能靠猜，否则每次按键都会重建 DOM。
@@ -382,7 +376,7 @@ export interface ViewEvents {
    * **在空天格子里落笔**（复盘兜底）：装配层物化那一天并重装载。
    * 编辑器只报日期——「造块进库」是命令层的事，视图不写库。
    */
-  shellWrite?: (date: string) => void
+  shellWrite?: (date: string, place?: OpenPlace) => void
   /**
    * **一次改名被拒**（编辑边界上撞到已有地址，正文已回滚）。
    *
@@ -3259,7 +3253,7 @@ export class BlockEditor {
    * ⚠️ 段与段之间的「缝」暂不单独建块（见 `待定-日记流.md`）；首版只认全局底部（column）
    *    与列内底部（row/grid）。
    */
-  clickEmptyArea(clientY: number, clientX = 0): boolean {
+  clickEmptyArea(clientY: number, clientX = 0, place: OpenPlace = 'center'): boolean {
     if (!this.allowBlankCreate) return false
     this.clearBlockSelection()
     const rows = this.rows()
@@ -3272,7 +3266,7 @@ export class BlockEditor {
       })
       // 点中的是空天格子：落笔物化那一天（与点格子本体同一条出口）
       if (sec?.dataset.shell) {
-        this.events.shellWrite?.(sec.dataset.shell)
+        this.events.shellWrite?.(sec.dataset.shell, place)
         return true
       }
       secId = sec?.dataset.sec ?? ''
@@ -3337,7 +3331,7 @@ export class BlockEditor {
       updateMouseSelect: (x, y) => this.updateMouseSelect(x, y),
       endMouseSelect: () => this.endMouseSelect(),
       hasBlockSelection: () => this.hasBlockSelection(),
-      onShellActivate: (date) => this.events.shellWrite?.(date),
+      onShellActivate: (date, place) => this.events.shellWrite?.(date, place),
       emitTrigger: (id) => this.emitTrigger(id),
       dropTrigger: (id) => this.dropTrigger(id),
       insertPlainText: (id, _off, text) => this.pasteAt(id, _off, text),
@@ -3471,11 +3465,9 @@ export class BlockEditor {
         if (from && from !== id) this.commitEdit(from)
         this.events.focusBlock?.(id)
       },
-      // Shift+左键点块标 ＝ 在右槽打开；事件层只报「打开谁」，落点由装配层决定
+      // 打开落点（Shift／⌘）由装配层分流；事件层只把 place 交上去
       // ⚠️ 没接就不做事（不再退化成中心 zoom：那会让缺入口看起来像成功）
-      openInDock: (id) => this.events.openInDock?.(id),
-      // ⌘/Ctrl+左键点块标／面包屑 ＝ 在新 tab 打开（不换当前 tab）
-      openInNewTab: (id) => this.events.openInNewTab?.(id),
+      openBlock: (id, place) => this.events.openBlock?.(id, place),
       /**
        * 面包屑普通点击 ＝ 这一栏就地展开上下文。也是一次编辑边界（与 focusBlock 同理）：
        * 点击 `contenteditable=false` 的按钮不会派发 `focusout`。
@@ -3500,7 +3492,7 @@ export class BlockEditor {
         this.events.childrenCollapse ? this.events.childrenCollapse(id) : this.toggleChildrenCollapse(id),
       toggleTodo: (id) => this.toggleTodo(id),
       blankArea: this.blankArea,
-      clickEmptyArea: (y, x) => this.clickEmptyArea(y, x),
+      clickEmptyArea: (y, x, place) => this.clickEmptyArea(y, x, place),
       onChange: () => this.emitChange('text'),
       onMounted: () => this.events.mounted?.(),
       flushPendingReload: () => this.flushPendingReload(),

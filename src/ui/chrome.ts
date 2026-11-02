@@ -16,7 +16,7 @@
  * ⇒ 于是这个组件**不再需要任何宿主能力**（没有按钮要 invoke、没有档位要读），
  *   构造参数也随之为空。
  */
-import { blockLabel, hasLiveChildren, type Block } from '../core/index.ts'
+import { blockLabel, hasLiveChildren, openPlaceOf, type Block, type OpenPlace } from '../core/index.ts'
 import { plainText } from '../core/runs.ts'
 import { t } from '../core/msg.ts'
 
@@ -85,7 +85,7 @@ function must<T extends HTMLElement>(id: string): T {
   return el as T
 }
 
-export function createChrome(onCrumb?: (blockId: string, shiftKey: boolean, newTab: boolean) => void): Chrome {
+export function createChrome(onCrumb?: (blockId: string, place: OpenPlace) => void): Chrome {
   // —— 自持的 DOM（装配层不再看得到它们）——
   /** 面包屑（2026-10-20）：**只有这一条**，不再兼任「页名／标题」 */
   const trailEl = must('crumbs-trail')
@@ -144,7 +144,7 @@ export function createChrome(onCrumb?: (blockId: string, shiftKey: boolean, newT
     el.dataset.blockId = b.id
     // journal 的「名字」是日期的只读投影；其余走显示名（主名叶子 > 正文，空则兜底）
     el.textContent = blockLabel(b)
-    el.addEventListener('click', (e) => onCrumb?.(b.id, e.shiftKey, e.metaKey || e.ctrlKey))
+    el.addEventListener('click', (e) => onCrumb?.(b.id, openPlaceOf(e)))
     return el
   }
 

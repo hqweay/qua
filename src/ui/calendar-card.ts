@@ -15,7 +15,7 @@
  *
  * ⚠️ 这一层不认 `registry`／`ws`：能力由 `CalendarDeps` 收进来（与 `dock-content` 同一口径）。
  */
-import { todayISO } from '../core/index.ts'
+import { openPlaceOf, todayISO, type OpenPlace } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { renderIcon } from '../view/icons.ts'
@@ -24,8 +24,13 @@ import type { DockCard } from './dock.ts'
 export interface CalendarDeps {
   /** 读门面：只用来问「库里存在哪几天」 */
   kb: KbClient
-  /** 去某一天（`YYYY-MM-DD`）。由装配层接到 `core.journal/today` 的 `date` 参数 */
-  openDate: (date: string) => void
+  /**
+   * 去某一天（`YYYY-MM-DD`）。`place` 由修饰键算：中心／右槽／新 tab。
+   *
+   * ⚠️ 空白天在库里还没有块；物化（含从回收站复活）由 `core.journal/open` 那一处做，
+   *    日历不自己拼 `journalId` —— 否则会出现第二份「哪天是哪个块」的答案。
+   */
+  openDate: (date: string, place?: OpenPlace) => void
 }
 
 /**
@@ -156,7 +161,7 @@ export function calendarCard(deps: CalendarDeps): DockCard {
         cell.appendChild(dot)
       }
 
-      cell.addEventListener('click', () => deps.openDate(date))
+      cell.addEventListener('click', (e) => deps.openDate(date, openPlaceOf(e)))
       grid.appendChild(cell)
     }
   }

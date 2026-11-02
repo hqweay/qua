@@ -18,17 +18,20 @@
  * ⚠️ 这不是「视图类型系统」（29 那套要独立布局状态才升格）。它只是**最小的渲染分派**，
  * 目的是让「槽里是块、块由渲染器画」这个形状现在就在，而不是等视图系统落地才做。
  */
-import { blockTypeOf, DEFAULT_BLOCK_TYPE, DIVIDER_TYPE, displayNameOf, isJournal, journalDate, journalDateLabel, prop, type Block } from '../core/index.ts'
+import { blockTypeOf, DEFAULT_BLOCK_TYPE, DIVIDER_TYPE, displayNameOf, isJournal, journalDate, journalDateLabel, openPlaceOf, prop, type Block, type OpenPlace } from '../core/index.ts'
 import { renderIcon } from '../view/icons.ts'
 
 /** 渲染一个块时能拿到的东西（后续会加：上下文键、命令执行、订阅） */
 export interface BlockRenderCtx {
   /** 块是否处于「当前对象」状态（中心槽持有） */
   isActive: (id: string) => boolean
-  /** 点一下这个块：页块 ＝ 打开它；其余 ＝ 聚焦它的子树 */
-  onActivate: (block: Block) => void
-  /** Shift+点：同一个「打开」，换到右槽（打开一张窗口） */
-  onOpenInDock: (block: Block) => void
+  /**
+   * 点一下这个块：落点由 `place` 说（中心／右槽／新 tab），行只负责读修饰键。
+   *
+   * 合并成一个回调而不是「onActivate＋onOpenInDock」：两份入口各写一次判断，
+   * 就会出现「这行认 Shift、那行不认 ⌘」这类漂移（实测过）。
+   */
+  onOpen: (block: Block, place: OpenPlace) => void
   /** 空页名时的兜底文案 */
   untitledLabel: string
 }
@@ -40,10 +43,7 @@ export interface BlockRenderCtx {
  * 只要有一个漏了 Shift，用户看到的就是「这一行能开窗口、那一行不能」。
  */
 function bindRowClick(row: HTMLElement, b: Block, ctx: BlockRenderCtx): void {
-  row.addEventListener('click', (e) => {
-    if (e.shiftKey) ctx.onOpenInDock(b)
-    else ctx.onActivate(b)
-  })
+  row.addEventListener('click', (e) => ctx.onOpen(b, openPlaceOf(e)))
 }
 
 export interface BlockRenderer {

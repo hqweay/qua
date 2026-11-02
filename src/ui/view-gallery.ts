@@ -7,7 +7,7 @@
  *   · **没有图也要有格子**：给它一个占位（首字／图标），否则「这张卡没图」
  *     看起来像「这张卡坏了」——而它只是还没配图。
  */
-import { TITLE_COLUMN, fieldTextOf, sortRecords, type BlockStore, type ViewConfig, type ViewRecord } from '../core/index.ts'
+import { TITLE_COLUMN, fieldTextOf, openPlaceOf, sortRecords, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 import { assetViewOf } from '../view/asset-views.ts'
 
@@ -16,7 +16,7 @@ export interface ViewGalleryDeps {
   records: () => ViewRecord[]
   view: () => ViewConfig | null
   projectTitle: (record: ViewRecord, into: HTMLElement) => void
-  openBlock: (blockId: string) => void
+  openBlock: (blockId: string, place?: OpenPlace) => void
 }
 
 /** 一张卡最多显示几个字段（再多就不是「看一眼」而是表格了） */
@@ -94,7 +94,7 @@ export class ViewGallery {
       card.appendChild(row)
     }
 
-    card.addEventListener('click', () => this.deps.openBlock(r.block.id))
+    card.addEventListener('click', (e) => this.deps.openBlock(r.block.id, openPlaceOf(e)))
     return card
   }
 }

@@ -19,6 +19,7 @@ import type { TriggerChar } from '../core/trigger.ts'
 import type { RunWithId } from '../core/runs.ts'
 import type { Content } from '../core/runs.ts'
 import { isCommittedTextInput } from '../core/ime.ts'
+import { openPlaceOf, type OpenPlace } from '../core/open.ts'
 
 /**
  * 剪贴板里的图片文件（只认 `image/*` 的 item）。
@@ -253,10 +254,11 @@ export interface EditorBridge {
    *    把两者合成一个入口就永远只能实现其中一种。
    */
   focusBlock: (blockId: string) => void
-  /** ⌘/Ctrl+左键点块标/面包屑 ＝ 在新 tab 打开这一块（不换当前 tab） */
-  openInNewTab?: (blockId: string) => void
-  /** Shift+左键点块标（待办行的方框也是块标）＝ 在右槽钉住 / 取消钉住 */
-  openInDock: (blockId: string) => void
+  /**
+   * 打开一个块：`place` 已把 Shift／⌘/Ctrl 翻译好，事件层不再认识侧槽与 tab。
+   * 省略 ⇒ 非中心落点什么都不做（与「缺入口就让它看得见地缺」同一条）。
+   */
+  openBlock?: (blockId: string, place: OpenPlace) => void
   /**
    * **面包屑普通点击 ＝ 就地展开上下文**；`rowId` 是这一格所在的行。
    * 省略 ⇒ 事件层退回 `focusBlock`（不是所有编辑器都有「一栏可装载的根」）。
@@ -280,9 +282,9 @@ export interface EditorBridge {
    * ⚠️ 返回 false 表示「这里不该由我处理」（例如点中的其实是个块）——调用方据此
    *    决定是否 preventDefault。**不返回布尔就无法区分「没建」与「建了」**。
    */
-  clickEmptyArea: (clientY: number, clientX: number) => boolean
-  /** 点进空天格子（复盘兜底）：物化那一天由装配层负责，事件层只报日期 */
-  onShellActivate: (date: string) => void
+  clickEmptyArea: (clientY: number, clientX: number, place: OpenPlace) => boolean
+  /** 点进空天格子（复盘兜底）：物化那天归装配层；`place` 已翻译好修饰键 */
+  onShellActivate: (date: string, place: OpenPlace) => void
   /** 勾选 / 取消待办（点方框）*/
   toggleTodo: (blockId: string) => void
   /** 任何模型变化 */
@@ -665,7 +667,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       (n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('sec') && n.dataset.shell !== undefined,
     )
     if (shellSec?.dataset.shell) {
-      br.onShellActivate(shellSec.dataset.shell)
+      br.onShellActivate(shellSec.dataset.shell, openPlaceOf(e))
       e.preventDefault()
       return
     }
@@ -687,12 +689,10 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     const crumbEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.crumbFor !== undefined)
     if (crumbEl?.dataset.crumbFor) {
       const ancestor = crumbEl.dataset.crumbFor
-      if (e.shiftKey) {
-        br.openInDock(ancestor)
-      } else if (e.metaKey || e.ctrlKey) {
-        // ⌘/Ctrl+点面包屑＝在新 tab 回到这个祖先
-        if (br.openInNewTab) br.openInNewTab(ancestor)
-        else br.focusBlock(ancestor)
+      const place = openPlaceOf(e)
+      if (place !== 'center') {
+        // Shift＝右槽；⌘/Ctrl＝新 tab。落点由装配层分流，事件层只报 place
+        br.openBlock?.(ancestor, place)
       } else if (br.expandContext) {
         const rowEl = path.find(
           (n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('blk') && n.dataset.blockId !== undefined,
@@ -765,7 +765,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     if (!inBlock && !inCrumb) {
       // 块选区刚拖出来时，mouseup 后的 click 可能落在空白区 ⇒ 不能当成「点空白建块」
       if (br.hasBlockSelection()) return
-      if (br.clickEmptyArea(e.clientY, e.clientX)) e.preventDefault()
+      if (br.clickEmptyArea(e.clientY, e.clientX, openPlaceOf(e))) e.preventDefault()
       return
     }
 
@@ -778,15 +778,11 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     if (marker?.dataset.focusFor) {
       // Shift+左键 ⇒ 钉到右槽（同一个入口可逆：已钉住则取消）
       // ⌘/Ctrl+左键 ⇒ 在新 tab 打开（浏览器同一条手势）；普通左键＝当前 tab 聚焦
-      if (e.shiftKey) {
+      const place = openPlaceOf(e)
+      if (place === 'center') br.focusBlock(marker.dataset.focusFor)
+      else {
         e.preventDefault()
-        br.openInDock(marker.dataset.focusFor)
-      } else if (e.metaKey || e.ctrlKey) {
-        e.preventDefault()
-        if (br.openInNewTab) br.openInNewTab(marker.dataset.focusFor)
-        else br.focusBlock(marker.dataset.focusFor)
-      } else {
-        br.focusBlock(marker.dataset.focusFor)
+        br.openBlock?.(marker.dataset.focusFor, place)
       }
     }
   })
@@ -921,7 +917,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     if (todo?.dataset.todoFor) {
       e.preventDefault()
       // 方框的动作是「切换完成」，不是「打开」——Shift 不改变它。
-      // 「在右槽打开」的入口是块标/行/引用，统一由装配层的 openInDock 承担。
+      // 「在右槽打开」的入口是块标/行/引用，统一由装配层的 `App.openBlock` 承担。
       br.toggleTodo(todo.dataset.todoFor)
     }
   })

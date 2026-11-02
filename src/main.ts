@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar, trashOf, refTitle } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, openPlaceOf, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar, trashOf, refTitle } from './core/index.ts'
 import { plainText, type RunWithId } from './core/runs.ts'
 import { canWriteText } from './core/types.ts'
 import { hasTag, tagIdsOf } from './core/tags.ts'
@@ -390,6 +390,8 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, w
       state: () => cardStateFor(side, 'backrefs'),
       onClose: () => closeCard(side, 'backrefs'),
     }),
+  // 左槽行／日历日期的「打开」都经这一条；具体落点策略只在 App.openBlock 一份
+  openBlock: (id, place, opts) => app.openBlock(id, place, opts),
 })
 
 const { chrome, editorEl, applyChrome, resolvedTheme, dockMinWidth, dockMaxWidth, badge, scheduleBadge, markBooted } = setupChrome({
@@ -404,7 +406,7 @@ const { chrome, editorEl, applyChrome, resolvedTheme, dockMinWidth, dockMaxWidth
   getWs: () => ws,
   getMainEd: () => mainEd,
   getRegistry: () => registry,
-  openInDock: (blockId) => openWindow('right', blockId),
+  openBlock: (blockId, place) => app.openBlock(blockId, place, { restore: 'saved' }),
 })
 
 /**
@@ -722,10 +724,8 @@ const panelDeps: PanelDeps = {
   roots: () => mainEd.doc.roots,
   // ⚠️ 必须查**整片森林**：引用的目标可能是嵌套块，只查顶层会让「打开目标」凭空消失
   findBlock: (id) => findInForest(ws.blocks, id),
-  // 引用目标可以是任意深度的块 ⇒ 走 zoom 那条命令，而不是只认顶层页的 `core.page/open`
-  openBlock: (id) => void registry.invoke('core.block/focus-block', { blockId: id }, 'popover'),
-  // Shift+点「打开目标」＝在右槽打开一张窗口（中心不换）
-  openInDock: (id) => openWindow('right', id),
+  // 引用目标可以是任意深度的块 ⇒ 落点交给唯一路由（中心 zoom／右槽／新 tab）
+  openBlock: (id, place) => app.openBlock(id, place),
   /**
    * **锚文本**：写进这一枚 run（一条事务 ⇒ 一次撤销）。
    * 走命令而不是直接调编辑器，是为了让 HTTP／CLI 面也能改它，且撤销与落盘照旧。
@@ -880,9 +880,7 @@ function handleAtomClick(
 function handleRefClick(ref: RefClickHit, mods: RefClickMods, el?: HTMLElement): void {
   const target = ref.to !== '' && findInForest(ws.blocks, ref.to) ? ref.to : undefined
   if (target && (!mods.altKey || !ref.run)) {
-    if (mods.shiftKey) openWindow('right', target)
-    else if (mods.metaKey || mods.ctrlKey) app.openInNewTab(target)
-    else void registry.invoke('core.block/focus-block', { blockId: target }, 'editor')
+    app.openBlock(target, openPlaceOf(mods))
     return
   }
   if (ref.run && el) showAtomPopover(ref.run, anchorOf(el))
@@ -1066,6 +1064,7 @@ const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEdit
   prefs: () => prefs(),
   // 「看属性」承诺的是内容而不是一列空槽：卡被关掉之后由这一条放回来
   ensureDockCard: (side, id) => addDerived(side, id),
+  openInDock: (id) => openWindow('right', id),
   onTabsChanged: (tabs) => renderCenterTabs(tabs),
 })
 
@@ -1592,6 +1591,26 @@ const app: App = {
   }),
   removeAtom: (runId) => ed.removeRun(runId),
   openInDock: (id, side) => openWindow(side === 'left' ? 'left' : 'right', id),
+  /**
+   * **所有「点一下就打开」的入口共用这一条路由**（`place` 由 `openPlaceOf` 算）。
+   *
+   * 它不新增导航语义，只把已有三种落点组合起来：
+   *   · dock  → `openInDock`（不换中心、不入历史）
+   *   · tab   → `openInNewTab`
+   *   · center→ 内容面 `zoomTo`（聚焦）；导航面 `openPage`（不抢焦点）
+   */
+  openBlock: (id, place = 'center', opts) => {
+    if (place === 'dock') {
+      app.openInDock(id, 'right')
+      return
+    }
+    if (place === 'tab') {
+      app.openInNewTab(id, opts?.feed === true)
+      return
+    }
+    if (opts?.center === 'keep') app.openPage(id)
+    else app.zoomTo(id, opts?.feed, opts?.restore)
+  },
   topWindow: (id) => topWindow(id),
 
   /**
@@ -2263,17 +2282,18 @@ function viewEvents(
           viewBody: (block: Block, into: HTMLElement) => viewBodies(block, into),
         }
       : {}),
-    // 复盘空天格子里落笔：编辑器只报日期，物化那一天（幂等）与重装载归命令层
-    shellWrite: (date) => void app.journalShellWrite(date),
+    // 复盘空天格子里落笔：中心＝物化并回到这一屏；Shift/⌘＝同一天开右槽/新 tab
+    shellWrite: (date, place) => {
+      if (place && place !== 'center') void app.openJournal(date, place)
+      else void app.journalShellWrite(date)
+    },
     // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
     // 所以「点块标进去」与「点面包屑出来」共用一套语义，没有第二种入口。
     focusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, via),
     // 点导轨段 ＝ 折叠/展开子块，走同一条命令（键位 ⌘. 折的是自己，这是它的兄弟档）
     childrenCollapse: (blockId) => void registry.invoke('core.editor/toggle-children-collapse', { blockId }, via),
-    // ⌘/Ctrl+点块标／面包屑＝在新 tab 打开（不换当前 tab）
-    openInNewTab: (blockId) => void app.openInNewTab(blockId),
-    // Shift+点块标 ⇒ 在右槽打开一个窗口（已在别处则移过去；已在本侧则定位）
-    openInDock: (blockId) => openWindow('right', blockId),
+    // 块标／面包屑的打开：落点（Shift＝右槽，⌘/Ctrl＝新 tab，普通＝中心）由唯一路由分流
+    openBlock: (blockId, place) => app.openBlock(blockId, place),
     blockMenu: (blockId, rect, appearanceHost) => {
       const ed = active()
       // 命中**已选中的块**（且多块）⇒ 多块菜单；否则清块选区，走原单块菜单
@@ -2439,7 +2459,7 @@ const {
   getMainEd: () => mainEd,
   getRegistry: () => registry,
   getChrome: () => chrome,
-  openInDock: (blockId) => openWindow('right', blockId),
+  openBlock: (blockId, place) => app.openBlock(blockId, place),
 })
 panels = {
   renderMounts,

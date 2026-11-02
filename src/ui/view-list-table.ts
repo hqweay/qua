@@ -20,11 +20,13 @@
  */
 import {
   listTableOf,
+  openPlaceOf,
   sortListRows,
   type Block,
   type BlockStore,
   type ListTableItem,
   type ListTableRow,
+  type OpenPlace,
   type ViewConfig,
 } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
@@ -40,7 +42,7 @@ export interface ViewListTableDeps {
   kb: KbClient
   /** 格子：run 投影 ＋ 一台按需浮层编辑器（与平表同一台组件） */
   cell: BlockCell
-  openBlock: (blockId: string) => void
+  openBlock: (blockId: string, place?: OpenPlace) => void
   /** 往某一列（表头块）末尾插一项：写在那个块下面，与大纲里敲 ↵＋Tab 同一条路 */
   insertItem: (columnId: string) => void
   /** 删除一列／一项＝软删那一块（可恢复；命令是 `core.view/delete-row`） */
@@ -231,7 +233,7 @@ export class ViewListTable {
     open.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
-      this.deps.openBlock(block.id)
+      this.deps.openBlock(block.id, openPlaceOf(e))
     })
     box.appendChild(open)
 
@@ -295,7 +297,7 @@ export class ViewListTable {
       marker.addEventListener('click', (e) => {
         e.preventDefault()
         e.stopPropagation()
-        this.deps.openBlock(child.id)
+        this.deps.openBlock(child.id, openPlaceOf(e))
       })
       const body = document.createElement('div')
       body.className = 'lt-sub-body'

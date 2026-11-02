@@ -12,7 +12,7 @@
  * 为什么不给 `list` 加缩进：它的两种源里只有 children 是树，query 命中是**平的一批**。
  * 一份「有时缩进有时不缩进」的列表会让「这一行在谁的下面」变成一个不稳定的答案。
  */
-import { TITLE_COLUMN, sortRecords, type BlockStore, type ViewConfig, type ViewRecord } from '../core/index.ts'
+import { TITLE_COLUMN, openPlaceOf, sortRecords, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 
 export interface ViewListDeps {
@@ -27,7 +27,7 @@ export interface ViewListDeps {
   projectTitle: (record: ViewRecord, into: HTMLElement) => void
   /** 某一列的值投影（与表格同一份口径） */
   project: (record: ViewRecord, key: string, into: HTMLElement) => void
-  openBlock: (blockId: string) => void
+  openBlock: (blockId: string, place?: OpenPlace) => void
 }
 
 /** 一条记录最多显示几个字段：再多就不是「看一眼」而是表格了 */
@@ -87,7 +87,7 @@ export class ViewList {
       bullet.type = 'button'
       bullet.className = 'vl-bullet'
       bullet.title = t('ui.list.open')
-      bullet.addEventListener('click', () => this.deps.openBlock(r.block.id))
+      bullet.addEventListener('click', (e) => this.deps.openBlock(r.block.id, openPlaceOf(e)))
       row.appendChild(bullet)
 
       const title = document.createElement('span')
