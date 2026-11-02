@@ -21,7 +21,7 @@ import {
   toggleCollapsed,
   type VisibleRow,
 } from '../src/core/index.ts'
-import { VIEW_BODY_GAP, VIEW_BODY_H, rowHasInlineViewBody, visibleRowHeight } from '../src/view/block-dom.ts'
+import { VIEW_BODY_GAP, VIEW_BODY_H, rowHasInlineViewBody, visibleRowHeight } from '../src/view/editor/block-dom.ts'
 
 const query = (): ReturnType<typeof mkBlock> => mkBlock('本页的待办', { props: { _query: { where: { any: [] } } } })
 

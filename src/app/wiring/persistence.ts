@@ -13,7 +13,7 @@ import { diff } from '../../core/kb/diff.ts'
 import type { DeviceState, DeviceStore, Workspace, WorkspaceStore } from '../../core/infra/workspace.ts'
 import type { Layers } from '../../ui/overlay/layers.ts'
 import type { Chrome } from '../../ui/chrome/chrome.ts'
-import type { BlockEditor } from '../../view/editor.ts'
+import type { BlockEditor } from '../../view/editor/editor.ts'
 
 export type PersistenceDeps = {
   store: WorkspaceStore

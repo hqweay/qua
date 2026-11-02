@@ -9,8 +9,8 @@
  *   `.left`（gutter）与标签 chip（`data-tag-id`）**永远不参与读数**。
  * ⚠️ 这条不变量是选区与光标能活下来的前提：读数与渲染对不上，偏移就会当场错位。
  */
-import type { MarkType, RefRun, Run, RunWithId } from '../core/model/runs.ts'
-import { normalizeRuns } from '../core/model/runs.ts'
+import type { MarkType, RefRun, Run, RunWithId } from '../../core/model/runs.ts'
+import { normalizeRuns } from '../../core/model/runs.ts'
 /** 格式包装元素的 class 前缀（`mk-bold` 这类）与格式种类的对照——渲染与读回共用这一份 */
 const MARK_CLASS: Record<string, MarkType> = {
   'mk-bold': 'bold',

@@ -44,7 +44,7 @@ import {
 } from '../../core/index.ts'
 import type { PropCreateMode, PropTarget } from '../../core/infra/ports.ts'
 import { t } from '../../core/infra/msg.ts'
-import type { RefClickHit, RefClickMods } from '../../view/editor-events.ts'
+import type { RefClickHit, RefClickMods } from '../../view/editor/editor-events.ts'
 import type { App, Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { Tx } from '../../core/kb/types.ts'
@@ -57,7 +57,7 @@ import type { DerivedMode } from '../../ui/query/query-view.ts'
 import { createViewHostEls, ViewHost } from '../../ui/query/query-view.ts'
 
 import type { Chrome } from '../../ui/chrome/chrome.ts'
-import type { BlockEditor } from '../../view/editor.ts'
+import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { OwnerStore } from './owners.ts'
 
 export type PanelsDeps = {

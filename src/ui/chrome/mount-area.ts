@@ -48,7 +48,7 @@ import {
 import type { FoldState } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
-import { type BlockEditor, type Run } from '../../view/editor.ts'
+import { type BlockEditor, type Run } from '../../view/editor/editor.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
 
 /** 非大纲那一栏的**视图体**（由装配层造：只有那里有完整依赖） */

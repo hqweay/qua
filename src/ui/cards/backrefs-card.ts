@@ -18,7 +18,7 @@ import { derivedRecordsOf, type Block, type BlockStore } from '../../core/index.
 import { expandContexts, unfoldForContext } from '../../core/views/context-expand.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
-import type { BlockEditor, Run } from '../../view/editor.ts'
+import type { BlockEditor, Run } from '../../view/editor/editor.ts'
 import { buildDockCard, applyDockCardState, type DockCardState } from '../dock/dock.ts'
 import { cardNote } from '../chrome/card-parts.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'

@@ -12,7 +12,7 @@ import type { Prefs, Workspace } from '../../core/infra/workspace.ts'
 import { createBadge, type BadgeSnapshot } from '../../ui/chrome/badge.ts'
 import { createChrome } from '../../ui/chrome/chrome.ts'
 import { applyDockVisibility, applyDockWidth } from '../../ui/dock/dock.ts'
-import type { BlockEditor } from '../../view/editor.ts'
+import type { BlockEditor } from '../../view/editor/editor.ts'
 
 export type ChromeDeps = {
   prefs: () => Prefs

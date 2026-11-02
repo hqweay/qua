@@ -36,7 +36,7 @@ import {
   type Block,
   type CtxKeys,
 } from '../../core/index.ts'
-import { readRuns } from '../../view/dom-text.ts'
+import { readRuns } from '../../view/editor/dom-text.ts'
 import { assetRowCount, assetViewOf, assetsAvailable } from '../../view/asset-views.ts'
 import { t } from '../../core/infra/msg.ts'
 import { walkForest } from '../../core/model/walk.ts'
@@ -47,7 +47,7 @@ import type { LoadedWorkspace, Prefs, ThemeMode, Workspace, WorkspaceStore } fro
 import { createBadge } from '../../ui/chrome/badge.ts'
 import type { Layers, Row } from '../../ui/overlay/layers.ts'
 import type { Chrome } from '../../ui/chrome/chrome.ts'
-import type { BlockEditor } from '../../view/editor.ts'
+import type { BlockEditor } from '../../view/editor/editor.ts'
 
 export type DiagnosticsDeps = {
   /** 测试面开关：构建时由 env 决定（dev server 恒开，产物要显式带 flag） */

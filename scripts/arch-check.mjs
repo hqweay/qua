@@ -742,7 +742,7 @@ function commandDecls() {
     const lines = src.split('\n')
     for (const lit of literalsOf(sf)) {
       if (!COLOR_LIT.test(lit.text) && !LENGTH_LIT.test(lit.text)) continue
-      const inThumb = r === 'src/view/block-dom.ts' && SVG_URI_WL.test(lit.text)
+      const inThumb = r === 'src/view/editor/block-dom.ts' && SVG_URI_WL.test(lit.text)
       // 主进程不是渲染层：没有 CSS、也 import 不到 token ⇒ 窗口底色只能由 shell 给
       const inShellBg = r === 'electron/main.ts' && /backgroundColor\s*:/.test(lines[lit.line - 1] ?? '')
       const row = `${r}:${lit.line}  ${JSON.stringify(lit.text.slice(0, 60))}`
@@ -791,7 +791,7 @@ function commandDecls() {
     title: '禁颜色 / 间距字面量（TS 组件代码里一个都不许有；styles/tokens.css 的 token 段是唯一允许处）',
     method: `①AST 扫 TS 字符串与模板片段里的 #hex／rgb()/hsl() 与 px/rem/em/pt/vh/vw；②styles/tokens.css 按 /* @token:begin */…/* @token:end */ 切段，其它分片整份扫，段外只查颜色字面量（门禁 4 的口径）`,
     scope: `src/**/*.ts · electron/**/*.ts（${codeFiles.length} 个文件）· src/**/*.css 的非 token 段（token 段 ${tokenLines} 行，仅 styles/tokens.css）`,
-    whitelist: `src/core/infra/msg.ts · src/core/fixtures/** ＋ src/core/infra/bootstrap.ts（假数据口袋里没有样式）· view/editor.ts 的 \`thumbUri\` 内联 SVG 数据 URI 取色（${wl.filter((x) => x.startsWith('src/view/editor.ts')).length} 处：data URI 里的 SVG 读不到页面 CSS 变量，颜色又是按内容 hash **算**出来的，不是设计 token）· electron/main.ts 的 \`BrowserWindow.backgroundColor\`（${wl.filter((x) => x.startsWith('electron/')).length} 处：主进程没有 CSS，首帧前的窗口底色只能由 shell 给）`,
+    whitelist: `src/core/infra/msg.ts · src/core/fixtures/** ＋ src/core/infra/bootstrap.ts（假数据口袋里没有样式）· view/editor.ts 的 \`thumbUri\` 内联 SVG 数据 URI 取色（${wl.filter((x) => x.startsWith('src/view/editor/editor.ts')).length} 处：data URI 里的 SVG 读不到页面 CSS 变量，颜色又是按内容 hash **算**出来的，不是设计 token）· electron/main.ts 的 \`BrowserWindow.backgroundColor\`（${wl.filter((x) => x.startsWith('electron/')).length} 处：主进程没有 CSS，首帧前的窗口底色只能由 shell 给）`,
     hits: hits.length + cssHits.length,
     detail: [...hits, ...cssHits],
     note: wl.length ? `白名单明细：${wl.join('｜')}` : '',
