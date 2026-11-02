@@ -8,9 +8,18 @@ release
 # 本仓库沙箱把 $HOME/Library/Caches 判为不可写 ⇒ 下载缓存必须落在仓内（见 ELECTRON-备忘.md）
 .cache
 .pnpm-store
-# 截图产物不入库；**README 头图例外**（它必须随仓库走，否则 README 在 GitHub 上是破图）
+# 截图产物不入库；**README 引用的那几张例外**（它们必须随仓库走，否则 README 在 GitHub 上是破图）
 shots/*.png
 !shots/readme-hero.png
+!shots/readme-page.png
+!shots/overlay-命令面板.png
+!shots/overlay-斜杠菜单.png
+!shots/view-表格.png
+!shots/view-看板.png
+!shots/query-条件树.png
+!shots/embed-大纲表格.png
+!shots/dock-窗口卡.png
+!shots/theme-暗色.png
 
 # 并行开发车道（`git worktree add .worktrees/<lane>`）：子树里是另一份检出，不入本仓
 .worktrees/
