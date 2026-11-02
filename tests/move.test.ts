@@ -14,6 +14,7 @@ import assert from 'node:assert/strict'
 import {
   applyMove,
   dropMove,
+  dropMoveExternal,
   flatten,
   indentMove,
   locate,
@@ -21,6 +22,7 @@ import {
   siblingMove,
   type MovePlan,
 } from '../src/core/tree.ts'
+import { DIVIDER_TYPE } from '../src/core/types.ts'
 import type { Block, Doc } from '../src/core/model.ts'
 
 const mk = (id: string, text = '', children: Block[] = []): Block => ({ id, text, children })
@@ -129,4 +131,71 @@ test('applyMove 自环守卫：目标是自己或自己的后代 ⇒ false，且
   assert.equal(applyMove(doc, 'c1', { parentId: 'c1', index: 0 }), false)
   assert.equal(applyMove(doc, 'c1', { parentId: 'g1', index: 0 }), false)
   assert.equal(JSON.stringify(doc.roots), snapshot)
+})
+
+/* -------------------------------------------------- 跨容器拖拽（dropMoveExternal） */
+
+/** 窗口卡的 doc：roots 只挂卡根；被拖块不在 doc 里（真实场景里由 store 现取） */
+function cardDoc(): { doc: Doc; dragged: Block } {
+  const mkb = (id: string, children: Block[] = [], props?: Record<string, unknown>): Block => ({
+    id,
+    content: [],
+    children,
+    created: 0,
+    modified: 0,
+    ...(props ? { props } : {}),
+  })
+  return {
+    doc: { roots: [mkb('card', [mkb('r1'), mkb('r2')])] },
+    dragged: mkb('out', [mkb('k1')]),
+  }
+}
+
+test('跨容器拖拽 inside / 空白处：落进孩子末尾；空白处进最后一个根（与 doc 内同口径）', () => {
+  const { doc, dragged } = cardDoc()
+  assert.deepEqual(dropMoveExternal(doc, dragged, 'card', 'inside'), { parentId: 'card', index: 2 })
+  assert.deepEqual(dropMoveExternal(doc, dragged, 'r1', 'inside'), { parentId: 'r1', index: 0 })
+  assert.deepEqual(dropMoveExternal(doc, dragged, null, 'after'), { parentId: 'card', index: 2 })
+})
+
+test('跨容器拖拽 before/after：外部位移没有 shift（被拖块不在目标列表里）', () => {
+  const { doc, dragged } = cardDoc()
+  assert.deepEqual(dropMoveExternal(doc, dragged, 'r2', 'before'), { parentId: 'card', index: 1 })
+  assert.deepEqual(dropMoveExternal(doc, dragged, 'r2', 'after'), { parentId: 'card', index: 2 })
+})
+
+test('跨容器拖拽拒绝：拖到自己 / 目标在自己的子树里 / 目标不在 doc', () => {
+  // 「卡根＝被拖块的子块」是真会发生的：卡正显示着被拖块的后代。
+  // 自环守卫走 store 现取的那份子树，doc 级查不到这条边。
+  const mkb = (id: string, children: Block[] = []): Block => ({ id, content: [], children, created: 0, modified: 0 })
+  const inner = mkb('c', [mkb('c1')])
+  const doc: Doc = { roots: [inner] }
+  const dragged = mkb('out', [inner])
+  assert.equal(dropMoveExternal(doc, dragged, 'out', 'inside'), null, '拖到自己')
+  assert.equal(dropMoveExternal(doc, dragged, 'c', 'inside'), null, '目标在被拖块的子树里 ⇒ 自环')
+  assert.equal(dropMoveExternal(doc, dragged, 'c1', 'after'), null, '同上，before/after 也一样')
+  const plain = cardDoc()
+  assert.equal(dropMoveExternal(plain.doc, plain.dragged, '没有这一块', 'after'), null)
+})
+
+test('跨容器拖拽：目标是 doc 根（卡根）⇒ before/after 折算成「进它里面」——它没有兄弟位', () => {
+  const { doc, dragged } = cardDoc()
+  assert.deepEqual(dropMoveExternal(doc, dragged, 'card', 'before'), { parentId: 'card', index: 2 })
+  assert.deepEqual(dropMoveExternal(doc, dragged, 'card', 'after'), { parentId: 'card', index: 2 })
+  assert.deepEqual(dropMoveExternal(doc, dragged, 'card', 'inside'), { parentId: 'card', index: 2 })
+})
+
+test('跨容器拖拽：目标是不许有子块的类型 ⇒ inside 拒绝，before/after 仍可以', () => {
+  const mkb = (id: string, children: Block[] = [], props?: Record<string, unknown>): Block => ({
+    id,
+    content: [],
+    children,
+    created: 0,
+    modified: 0,
+    ...(props ? { props } : {}),
+  })
+  const doc: Doc = { roots: [mkb('card', [mkb('div', [], { _type: DIVIDER_TYPE })])] }
+  const dragged = mkb('out')
+  assert.equal(dropMoveExternal(doc, dragged, 'div', 'inside'), null)
+  assert.deepEqual(dropMoveExternal(doc, dragged, 'div', 'after'), { parentId: 'card', index: 1 })
 })

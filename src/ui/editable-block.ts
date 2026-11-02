@@ -18,6 +18,7 @@
  */
 import { type Block, type BlockStore } from '../core/index.ts'
 import { EDIT_ISLAND_ATTR } from '../view/block-dom.ts'
+import { bindPressFreeze } from '../view/editor-events.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
 
 /** 补做被冻结的重载的间隔：够 `click` 派发完（mouseup 之后同一任务里还有它），又仍在用户眼里是「立刻」 */
@@ -128,24 +129,18 @@ export class EditableBlock {
 
     /**
      * 指针按下期间不重载。绑在 document 上（捕获）：按下后拖出本区域再抬起也要放开，
-     * 否则一次「按下-拖走-松手」就把这片永远冻住。抬起推迟一拍——`click` 紧跟在
-     * `mouseup` 的同一个任务里，立刻放开会在它之前把 DOM 换掉。
+     * 否则一次「按下-拖走-松手」就把这片永远冻住。放开路径（含原生拖拽收走指针的
+     * `pointercancel`／`dragend`）与延迟一拍的道理见 `bindPressFreeze`。
      */
-    const down = (): void => {
-      this.pointerDown = true
-    }
-    const up = (): void => {
-      window.setTimeout(() => {
+    this.offPointer = bindPressFreeze(
+      () => {
+        this.pointerDown = true
+      },
+      () => {
         this.pointerDown = false
         if (this.pending) this.armFlush()
-      }, 0)
-    }
-    document.addEventListener('pointerdown', down, { capture: true })
-    document.addEventListener('pointerup', up, { capture: true })
-    this.offPointer = () => {
-      document.removeEventListener('pointerdown', down, { capture: true })
-      document.removeEventListener('pointerup', up, { capture: true })
-    }
+      },
+    )
 
     /**
      * 焦点离开这片区域：补一次欠下的重载。挂载区原来的行为是「离开必重画」，

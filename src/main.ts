@@ -369,7 +369,7 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, w
     new BackrefsCard({
       store: blocks,
       kb,
-      write: (fn) => run(fn, ed),
+      write: (fn, source) => run(fn, source ?? ed),
       target: () => ws.activeId,
       wire: (editor, change) => wireViewEditor(editor, change, 'dock', true),
       onFocus: (editor) => {
@@ -2132,10 +2132,10 @@ ed = new BlockEditor({
   doc: { roots: bootRoots, folded: device.folded },
   focusSurface: true,
   /**
-   * 写入事务入口。`mainEd` 是 `let`（焦点切到别的编辑器时它会变），所以这里
-   * **现取**当前实例当 source，而不是把此刻的值焊进闭包。
+   * 写入事务入口。source 由**编辑器自己**注入（见 `Run`）；`mainEd` 只是兜底
+   * （编辑器外的直写，比如迁移期）。
    */
-  write: (fn) => run(fn, mainEd),
+  write: (fn, source) => run(fn, source ?? mainEd),
 })
 mainEd = ed
 /**
@@ -2773,11 +2773,11 @@ const dockRight = mountDockSlot($('dock-right'), {
 const dockWindowsDeps = (side: 'left' | 'right'): ConstructorParameters<typeof DockWindows>[0] => ({
   store: blocks,
   /**
-   * 窗口里的编辑器按**块**各一个实例，组件不把它们吐出来；但点进窗口里编辑时
-   * `onFocus` 会把 `ed` 切到那一个。所以取「当前活动编辑器」，
-   * 只有在焦点不在任何窗口里时才会落到别处 —— 那种情况下窗口里也不会有人正在写。
+   * source 由**发起写的那台窗口编辑器**自己注入（见 `Run`）——不是「活动编辑器」：
+   * 从正文拖块进卡的落手不经过焦点，活动编辑器还在正文，拿它当 source 会让
+   * 正文把这次通知当成自己写的，跳过重画。
    */
-  write: (fn) => run(fn, ed),
+  write: (fn, source) => run(fn, source ?? ed),
   kb,
   label: windowLabel,
   onClose: (blockId) => closeCard(side, blockId),
