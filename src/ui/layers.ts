@@ -125,6 +125,11 @@ export interface MenuOpts {
   rows: Row[]
   anchor: DOMRect | null
   title?: string
+  /**
+   * 浮层期望宽度（px）。缺省 430 是命令面板/块菜单的宽度；
+   * 贴着按钮的下拉（视图切换）要窄一些，否则一颗 80px 的按钮弹出一整条 430 的菜单。
+   */
+  width?: number
   searchable?: boolean
   /** 斜杠菜单要保持编辑器焦点（打字继续过滤）⇒ false */
   focusSearch?: boolean
@@ -422,7 +427,7 @@ export class Layers {
    */
   private place(box: HTMLElement, anchor: DOMRect | null): void {
     const pad = 8
-    const w = Math.min(430, window.innerWidth - pad * 2)
+    const w = Math.min(this.opts?.width ?? 430, window.innerWidth - pad * 2)
     box.style.width = `${w}px`
     const at = placeNear({
       boxW: w,
