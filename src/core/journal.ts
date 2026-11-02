@@ -7,7 +7,7 @@
  */
 
 import { ICON_PROP, isJournalBlock, prop, type Block } from './model.ts'
-import { derivedId } from './ids.ts'
+import { derivedId, pad } from './ids.ts'
 import { walkForest } from './walk.ts'
 import { plainText } from './runs.ts'
 export function todayISO(now: Date = new Date()): string {
@@ -164,6 +164,5 @@ export function clockLabel(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return ''
   const d = new Date(ms)
   const day = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }).format(d)
-  const p = (n: number): string => String(n).padStart(2, '0')
-  return `${day} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  return `${day} ${pad(d.getHours(), 2)}:${pad(d.getMinutes(), 2)}:${pad(d.getSeconds(), 2)}`
 }
