@@ -1848,6 +1848,107 @@ await check('A27 单卡期间目标展开、退出回到收着（与中心「聚
   return `单卡展开/退出保持 ✓；上下文展开：子 ${pair.child.slice(-6)} 原地展开到父 ${pair.parent.slice(-6)}、收起退回 ✓；卡片条目不动 ✓`
 })
 
+/* ---------------------------------------------------------------- A28 */
+
+await check('A28 日记段与面板有可见的分层：段间留白/分隔线，查询与挂载区从正文里浮出来', async () => {
+  /**
+   * 两条观感各钉一条**可量**的判据：
+   *   ① 日记流里「一天」是段，不是连续正文：段间要有留白与分隔线（阅读时不会把两天读成一天）；
+   *   ② 查询结果与段尾挂载区是**面板**：有底色/圆角/内边距，不是又一行正文。
+   * 只钉机制（非透明底色 ＋ 圆角 ＋ 留白），不钉具体色值——换主题时这条仍然成立。
+   */
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.waitForTimeout(250)
+
+  const feed = await page.evaluate(() => {
+    const secs = [...document.querySelectorAll('#editor .sec')].filter((s) =>
+      s.querySelector(':scope > .blk[data-depth="0"][data-role~="journal"]'),
+    )
+    return secs.map((s, i) => {
+      const cs = getComputedStyle(s)
+      const r = s.getBoundingClientRect()
+      const head = s.querySelector(':scope > .blk[data-depth="0"][data-role~="journal"]')
+      return {
+        i,
+        display: cs.display,
+        borderTop: parseFloat(cs.borderTopWidth),
+        padTop: parseFloat(cs.paddingTop),
+        marginTop: parseFloat(cs.marginTop),
+        top: r.top,
+        bottom: r.bottom,
+        headOffset: head ? head.getBoundingClientRect().top - r.top : 0,
+      }
+    })
+  })
+  assert(feed.length >= 2, `前置：日记流应有 ≥2 天，实际 ${feed.length}`)
+  const later = feed.filter((s) => s.i > 0)
+  assert(
+    later.every((s) => s.display === 'block' && s.borderTop >= 1 && s.padTop >= 8 && s.marginTop >= 16),
+    `日记段要是一个盒子：段间留白 ≥16、线下留白 ≥8、分隔线 ≥1：${JSON.stringify(feed)}`,
+  )
+  for (let i = 1; i < feed.length; i++) {
+    const gap = feed[i].top - feed[i - 1].bottom
+    assert(gap >= 16, `上一天的内容与下一天的段首之间应有留白：第 ${i} 段只有 ${gap}px`)
+  }
+  assert(feed[0].borderTop === 0, '第一天在顶部，不该凭空多一条分隔线')
+
+  const panels = await page.evaluate(() => {
+    const mount = document.querySelector('#editor .sec .mount')
+    const read = (el) => {
+      if (!el) return null
+      const cs = getComputedStyle(el)
+      return {
+        bg: cs.backgroundColor,
+        radius: parseFloat(cs.borderTopLeftRadius),
+        padTop: parseFloat(cs.paddingTop),
+        padInline: parseFloat(cs.paddingLeft),
+      }
+    }
+    return { mount: read(mount) }
+  })
+  const isPanel = (p) => p && p.bg !== 'rgba(0, 0, 0, 0)' && p.radius > 0 && p.padTop > 0 && p.padInline > 0
+  assert(isPanel(panels.mount), `段尾挂载区应是一块面板（底色/圆角/内边距）：${JSON.stringify(panels.mount)}`)
+
+  // 正文内联的查询体：抬一层面板，别和手写正文同一条底
+  const qid = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    let found = ''
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.props?._query) {
+          found = b.id
+          return
+        }
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return found
+  })
+  assert(qid, '前置：应有一个查询块')
+  await page.evaluate((id) => window.__qua.__editor.reveal(id), qid)
+  await page.waitForTimeout(450)
+  const inline = await page.evaluate((id) => {
+    const v = document.querySelector(`.blk[data-block-id="${id}"] .blk-view-body .queryview[data-surface="inline"]`)
+    if (!v) return null
+    const cs = getComputedStyle(v)
+    return {
+      bg: cs.backgroundColor,
+      radius: parseFloat(cs.borderTopLeftRadius),
+      padTop: parseFloat(cs.paddingTop),
+      padInline: parseFloat(cs.paddingLeft),
+      rowOutside: !v.contains(document.querySelector(`.blk[data-block-id="${id}"] > .tx`)),
+    }
+  }, qid)
+  assert(isPanel(inline), `内联查询体应是一块面板（底色/圆角/内边距）：${JSON.stringify(inline)}`)
+  assert(inline.rowOutside, '面板裹的是「结果」，查询块自己那一行仍在正文里')
+
+  await ctx.close()
+  return `日记流 ${feed.length} 段（段间 ${feed[1].top - feed[0].bottom}px＋分隔线）；挂载区与内联查询体均为面板（圆角 ${panels.mount.radius}px）`
+})
+
 /* ---------------------------------------------------------------- 不适用项 */
 
 skip('A5／A6 布局型块的列数降级与右栏转覆盖', '当前实现还没有「布局型块（表格/看板/白板）」与 minW 类型声明；右栏转覆盖按宽度口径回扫后标为后置')
