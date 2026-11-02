@@ -165,6 +165,7 @@ import { assetViewOf, markAssetMissing } from '../asset-views.ts'
 import { DeferredFlush } from './deferred-flush.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
 import { Drag } from "./drag.ts"
+import { EmbedBodies } from "./embed-bodies.ts"
 import { BlockSelection } from "./block-selection.ts"
 import { bindEditorEvents, type AtomMenuHit, type RefClickHit, type RefClickMods, type TriggerQuery } from './editor-events.ts'
 
@@ -516,12 +517,10 @@ export class BlockEditor {
   /** 面包屑的就地展开／逐层收起；见 `ViewOpts` */
   private readonly onExpandContext: ViewOpts['onExpandContext']
   private readonly onContextBack: ViewOpts['onContextBack']
-  /** 露面块的身体能不能展开（深度 1 的构造性截断；见 `ViewOpts.embedBodies`） */
-  private readonly embedBodies: boolean
+  /** 行身体（露面／查询）的挂载与回收，都在协作对象里 */
+  readonly embeds: EmbedBodies
   /** 这一面是不是「一屏就是这一块」的聚焦面（见 `ViewOpts.focusSurface`） */
   private readonly focusSurface: boolean
-  /** 已挂的「行身体」（露面／查询）→ 卸载函数（换 DOM 之前必须挨个调用） */
-  private readonly bodyDisposers = new Map<string, () => void>()
   /**
    * **字段读取表**（懒建）：判「这块是不是任务」要看标签声明（`todoOf`），
    * 逐块现建要扫两趟森林。任何一次模型写之后作废，下一次问到时重建一次。
@@ -550,7 +549,7 @@ export class BlockEditor {
     }
     this.onExpandContext = o.onExpandContext
     this.onContextBack = o.onContextBack
-    this.embedBodies = o.embedBodies !== false
+    this.embeds = new EmbedBodies(this, o.embedBodies !== false)
     this.focusSurface = o.focusSurface === true
     this.doc = o.doc
     this.setLayout(o.layout ?? 'column')
@@ -580,7 +579,7 @@ export class BlockEditor {
 
   /** 从文档里摘掉这个视图：退订 store、卸掉事件（否则游离容器还会继续被重画） */
   dispose(): void {
-    this.disposeAllRowBodies()
+    this.embeds.disposeAll()
     this.offStore()
     this.unbind()
   }
@@ -901,7 +900,7 @@ export class BlockEditor {
     if (this.deferWhileComposing()) return
     // 别的视图写进来（本实例的写入口已作废过）；重排之后重算一张表
     this.fieldTableCache = null
-    this.disposeAllRowBodies()
+    this.embeds.disposeAll()
     this.container.textContent = ''
     this.mounted.clear()
     this.rebuildAncestors()
@@ -1038,7 +1037,7 @@ export class BlockEditor {
       hidden: false,
       hasChildren: hasLiveChildren(loc.block),
     }
-    this.disposeRowBody(id)
+    this.embeds.disposeRow(id)
     el.replaceWith(this.makeBlockEl(row, gutterFieldsOf(row.block, this.store.blocks)))
     this.repaintOverlays()
   }
@@ -1075,19 +1074,7 @@ export class BlockEditor {
         // 展开出来的根才有「收起上下文」；没接回调就不画一个点了没反应的按钮
         contextBack: Boolean(this.onContextBack) && r.depth === 0 && (this.doc.expandedRoots?.has(r.block.id) ?? false),
         // 露面块的身体：这一层只认「有没有展开」；画什么由装配层给（见 `ViewEvents.embedBody`）
-        embedBody: (b, into) => {
-          if (!this.embedBodies) {
-            into.textContent = t('ui.embed.nested')
-            into.dataset.embedNested = '1'
-            return
-          }
-          if (!this.events.embedBody) {
-            into.textContent = t('ui.embed.broken')
-            return
-          }
-          const dispose = this.events.embedBody(b, into)
-          if (dispose) this.bodyDisposers.set(b.id, dispose)
-        },
+        embedBody: (b, into) => this.embeds.attach(b, into),
         /**
          * **正文里的查询体**：只有装配层接了画法、且这一份装载允许展开时才给。
          * 「哪一行画」由 `block-dom` 的 `rowHasInlineViewBody` 判（按源分派，
@@ -1095,28 +1082,13 @@ export class BlockEditor {
          */
         ...(this.events.viewBody
           ? {
-              viewBody: (b: Block, into: HTMLElement) => {
-                const dispose = this.events.viewBody!(b, into)
-                if (dispose) this.bodyDisposers.set(b.id, dispose)
-              },
+              viewBody: (b: Block, into: HTMLElement) => this.embeds.attachViewBody(b, into),
             }
           : {}),
       },
     )
     this.mounted.add(r.block.id)
     return el
-  }
-
-  /** 摘掉某一行的身体（露面／查询；换 DOM 之前必须做，否则订阅会跟着旧节点留下） */
-  private disposeRowBody(id: string): void {
-    const d = this.bodyDisposers.get(id)
-    if (!d) return
-    this.bodyDisposers.delete(id)
-    d()
-  }
-
-  private disposeAllRowBodies(): void {
-    for (const id of [...this.bodyDisposers.keys()]) this.disposeRowBody(id)
   }
 
   /* ------------------------------------------------------- DOM → 文本 */
@@ -2940,7 +2912,7 @@ export class BlockEditor {
     if (ci < 0) ci = 0
     const from = Math.max(0, ci - this.radius)
     const to = Math.min(rows.length, ci + this.radius + 1)
-    this.disposeAllRowBodies()
+    this.embeds.disposeAll()
     this.container.textContent = ''
     this.mounted.clear()
     // ⚠️ 祖先表对**全量** rows 算（上面已经拿到的就是全量可见行），
