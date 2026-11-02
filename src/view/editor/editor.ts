@@ -46,8 +46,6 @@ import {
   mkBlock,
   createObjRecordInTx,
   trashOf,
-  dropMove,
-  dropMoveExternal,
   normSel,
   outdentMove,
   tagIdsOf,
@@ -166,6 +164,7 @@ import {
 import { assetViewOf, markAssetMissing } from '../asset-views.ts'
 import { DeferredFlush } from './deferred-flush.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
+import { Drag } from "./drag.ts"
 import { BlockSelection } from "./block-selection.ts"
 import { bindEditorEvents, type AtomMenuHit, type RefClickHit, type RefClickMods, type TriggerQuery } from './editor-events.ts'
 
@@ -468,8 +467,8 @@ export class BlockEditor {
    */
   private ancestors = new Map<string, string[]>()
 
-  private dragId: string | null = null
-  private dropEl: HTMLElement | null = null
+  /** 块拖拽：字段与落手逻辑在协作对象里，这里只是持有它 */
+  readonly drag = new Drag(this)
   /** 块级选区（跨块整块选择）：字段与方法都在协作对象里，这里只是持有它 */
   readonly bsel = new BlockSelection(this)
   /**
@@ -1235,7 +1234,7 @@ export class BlockEditor {
    */
   reclaimCaret(): boolean {
     // 拖拽 / 块拖选进行中：此刻的 DOM 选区不是「插入点」，别去动它
-    if (this.dragId !== null || this.bsel.mouseSel?.active) return false
+    if (this.drag.active || this.bsel.mouseSel?.active) return false
     /**
      * **焦点在表单控件里 ⇒ 那次输入不是正文**。
      *
@@ -2057,7 +2056,8 @@ export class BlockEditor {
    * ⚠️ 事务里**只**开移动那一笔：`applyMove` 与 `tx.move` 是同一件事实的两种落地，
    *    都写一次就等于同一件事记两遍。
    */
-  private structuralMove(
+  /** 拖拽协作对象的统一落手也走这里；签名不动，只是不再私有 */
+  structuralMove(
     id: string,
     plan: MovePlan | null,
     o: { unfoldId?: string | null; caretAt?: { id: string; off: number } } = {},
@@ -3126,62 +3126,14 @@ export class BlockEditor {
         // store 里存在即接——自环、类型不许有子块等守卫留在 `dropDrag`／`dropMoveExternal`
         return this.store.find(id) !== undefined
       },
-      beginDrag: (id) => {
-        this.dragId = id
-        this.container.classList.add('dragging')
-        this.blockEl(id)?.classList.add('drag-src')
-      },
-      showDropTarget: (el, zone) => {
-        this.setDropEl(el)
-        if (!el) {
-          this.container.classList.add('drop-end')
-          return
-        }
-        this.container.classList.remove('drop-end')
-        if (zone) el.dataset.drop = zone
-      },
+      beginDrag: (id) => this.drag.begin(id),
+      showDropTarget: (el, zone) => this.drag.showDropTarget(el, zone),
       /**
        * 落点报上来的块 id 是**载荷里那一个**（不是「我认得刚才那次拖拽」）——
        * 这样从侧槽／面板／任何组件拖过来的块都能落进正文。
        */
-      dropDrag: (draggedId, targetId, zone) => {
-        const id = draggedId
-        if (!id) return
-        const loc = locate(this.doc, id)
-        if (!loc) {
-          // 别的露面拖来的块：store 现取本体，落点走跨容器口径（守卫在那边各归各位）
-          const dragged = this.store.find(id)
-          if (!dragged) return
-          const plan = dropMoveExternal(this.doc, dragged, targetId, zone)
-          this.endDrag()
-          this.structuralMove(id, plan, {
-            unfoldId: zone === 'inside' ? (plan?.parentId ?? null) : null,
-            caretAt: { id, off: 0 },
-          })
-          return
-        }
-        // 段根（页／天／查询记录）不是内容块：不参与拖拽。
-        // 日记流的分段顺序是真实日期序，查询列表是视图序——都不是「可拖的兄弟序」。
-        if (loc.parent === null) return
-        /**
-         * 落点只由 `dropMove` 算（空白处算「最后一个根的最后一位」）。
-         * 目标若也是段根，只接受 inside —— before/after 会给它造出一个没有家的兄弟。
-         */
-        if (targetId) {
-          const targetLoc = locate(this.doc, targetId)
-          if (!targetLoc || (targetLoc.parent === null && zone !== 'inside')) {
-            this.endDrag()
-            return
-          }
-        }
-        const plan = dropMove(this.doc, id, targetId, zone)
-        this.endDrag()
-        this.structuralMove(id, plan, {
-          unfoldId: zone === 'inside' ? (plan?.parentId ?? null) : null,
-          caretAt: { id, off: this.sel?.aOff ?? 0 },
-        })
-      },
-      endDrag: () => this.endDrag(),
+      dropDrag: (draggedId, targetId, zone) => this.drag.drop(draggedId, targetId, zone),
+      endDrag: () => this.drag.end(),
 
       composing: () => this.probe.isComposing,
       noteComposition: (step) => {
@@ -3270,20 +3222,6 @@ export class BlockEditor {
     })
   }
 
-  private setDropEl(el: HTMLElement | null): void {
-    if (this.dropEl && this.dropEl !== el) delete this.dropEl.dataset.drop
-    this.dropEl = el
-  }
-
-  private endDrag(): void {
-    const id = this.dragId
-    this.dragId = null
-    this.container.classList.remove('dragging', 'drop-end')
-    if (this.dropEl) delete this.dropEl.dataset.drop
-    this.dropEl = null
-    for (const el of Array.from(this.container.querySelectorAll<HTMLElement>('.blk[data-drop]'))) delete el.dataset.drop
-    if (id) this.blockEl(id)?.classList.remove('drag-src')
-  }
 
   /**
    * 此刻光标前有没有一个**正在输入的触发词**（`/`／`#`／`@`）。
