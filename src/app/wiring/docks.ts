@@ -75,6 +75,16 @@ export type DocksDeps = {
    * 那些在装配入口的初始化顺序里晚于本节的构造；按需建（卡第一次出现时）才拿得到。
    */
   createBackrefsCard: (side: 'left' | 'right') => BackrefsCard
+  /**
+   * 打开一个块的唯一路由（左槽行、日历日期共用）。
+   *
+   * 槽不自己判断「右槽／新 tab」：那套策略只有 `App.openBlock` 一份；这里只转交。
+   */
+  openBlock: (
+    id: string,
+    place: import('../../core/index.ts').OpenPlace,
+    opts?: import('../../core/index.ts').OpenOpts,
+  ) => void
 }
 
 /** 卡片落点：插到哪一张之前/之后；`null` ＝ 末尾 */
@@ -134,8 +144,7 @@ export function setupDocks(deps: DocksDeps) {
   const belongsTree = new BelongsTree({
     rows: (face) => belongsToTree(buildAdjacency(deps.getWs().blocks), face),
     activeId: () => deps.getWs().activeId,
-    open: (id) => void deps.getRegistry().invoke('core.page/open', { pageId: id }, 'menu'),
-    openInDock: (id) => openWindow('right', id),
+    open: (id, place) => deps.openBlock(id, place ?? 'center', { center: 'keep' }),
     untitled: t('ui.page.untitled'),
     refresh: () => renderDocks(),
     link: (childId, parentId) => {
@@ -593,7 +602,8 @@ export function setupDocks(deps: DocksDeps) {
         return finish(
           calendarCard({
             kb,
-            openDate: (date) => void deps.getRegistry().invoke('core.journal/today', { date }, 'dock'),
+            openDate: (date, place) =>
+              void deps.getRegistry().invoke('core.journal/open', { date, place: place ?? 'center' }, 'dock'),
           }),
         )
     }

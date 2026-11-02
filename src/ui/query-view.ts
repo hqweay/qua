@@ -47,6 +47,7 @@ import {
   todayISO,
   type Block,
   type FoldState,
+  type OpenPlace,
   type BlockStore,
   type FrozenResult,
   type QueryContext,
@@ -168,7 +169,7 @@ export interface ViewHostDeps {
   refClick: (hit: { to: string; runId?: string }, el: HTMLElement, mods: { altKey: boolean; shiftKey: boolean }) => void
   onAtomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: { altKey: boolean; shiftKey: boolean }) => void
   /** 打开一块（行首块标 / 紧凑列表） */
-  openBlock: (blockId: string) => void
+  openBlock: (blockId: string, place?: OpenPlace) => void
   /** `ref` 值的选择器（与属性区同一份） */
   pickRef?: (owner: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect) => void
   refLabel?: (targetId: string) => string
@@ -372,7 +373,7 @@ export class ViewHost {
       project: (b, into) => deps.project(b, into),
       refClick: (hit, el, mods) => deps.refClick(hit, el, mods),
       ...(deps.onAtomClick ? { onAtomClick: deps.onAtomClick } : {}),
-      openBlock: (id) => deps.openBlock(id),
+      openBlock: (id, place) => deps.openBlock(id, place),
     })
 
     // ⚠️ 只点亮 stale，不重排列表（「不自动重算」）。
@@ -1053,7 +1054,7 @@ export class ViewHost {
           setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
           clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
           projectTitle: (r, into) => this.deps.project(r.block, into),
-          openBlock: (id) => this.deps.openBlock(id),
+          openBlock: (id, place) => this.deps.openBlock(id, place),
         })
         this.els.table.replaceChildren(this.board.root)
       }
@@ -1067,7 +1068,7 @@ export class ViewHost {
           records: () => this.records(),
           view: () => this.view ?? view,
           projectTitle: (r, into) => this.deps.project(r.block, into),
-          openBlock: (id) => this.deps.openBlock(id),
+          openBlock: (id, place) => this.deps.openBlock(id, place),
         })
         this.els.table.replaceChildren(this.gallery.root)
       }
@@ -1081,7 +1082,7 @@ export class ViewHost {
           records: () => this.records(),
           view: () => this.view ?? view,
           projectTitle: (r, into) => this.deps.project(r.block, into),
-          openBlock: (id) => this.deps.openBlock(id),
+          openBlock: (id, place) => this.deps.openBlock(id, place),
           today: () => this.deps.today?.() ?? todayISO(),
         })
         this.els.table.replaceChildren(this.calendar.root)
@@ -1099,7 +1100,7 @@ export class ViewHost {
           },
           view: () => this.view ?? view,
           projectTitle: (b, into) => this.deps.project(b, into),
-          openBlock: (id) => this.deps.openBlock(id),
+          openBlock: (id, place) => this.deps.openBlock(id, place),
         })
         this.els.table.replaceChildren(this.mindmap.root)
       }
@@ -1123,7 +1124,7 @@ export class ViewHost {
               typeof v === 'string' && this.deps.refLabel ? this.deps.refLabel(v) : null,
             )
           },
-          openBlock: (id) => this.deps.openBlock(id),
+          openBlock: (id, place) => this.deps.openBlock(id, place),
         })
         this.els.table.replaceChildren(this.list.root)
       }
@@ -1138,7 +1139,7 @@ export class ViewHost {
           view: () => this.view ?? view,
           kb: this.deps.kb,
           cell: this.cell,
-          openBlock: (id) => this.deps.openBlock(id),
+          openBlock: (id, place) => this.deps.openBlock(id, place),
           // 「加一项」就是往那一列（表头块）末尾插一个子块：与大纲里 ↵＋Tab 同一条写路径
           insertItem: (columnId) => this.deps.invoke('core.view/new-row', { owner: this.writeOwner, blockId: columnId }),
           deleteBlock: (id) => this.deps.invoke('core.view/delete-row', { rowId: id }),
@@ -1174,7 +1175,7 @@ export class ViewHost {
         },
         insertRow: () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }),
         deleteRow: (rowId) => this.deps.invoke('core.view/delete-row', { rowId }),
-        openBlock: (id) => this.deps.openBlock(id),
+        openBlock: (id, place) => this.deps.openBlock(id, place),
         cell: this.cell,
         ...(this.deps.pickRef ? { pickRef: this.deps.pickRef } : {}),
         ...(this.deps.refLabel ? { refLabel: this.deps.refLabel } : {}),

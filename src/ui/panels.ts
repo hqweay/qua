@@ -7,7 +7,7 @@
  * ⚠️ 组件自持 DOM：这里不 `getElementById`，所有元素都建在传进来的 `host` 上。
  * ⚠️ 分层：本文件在 `ui` 层，只依赖 core 的类型与函数，**不 import view/装配层**。
  */
-import type { Block, CtxKeys, FieldRow } from '../core/index.ts'
+import { openPlaceOf, type Block, type CtxKeys, type FieldRow, type OpenPlace } from '../core/index.ts'
 import type { RunWithId } from '../core/runs.ts'
 import { resolveRef } from '../core/ref.ts'
 import { checkExternalUrl, rejectText } from '../core/link.ts'
@@ -36,13 +36,11 @@ export interface PanelDeps {
    */
   findBlock: (id: string) => Block | undefined
   /**
-   * 打开目标块（走 `core.block/focus-block`）。
+   * 打开目标块：落点由装配层的唯一路由分流（中心／右槽／新 tab）。
    *
-   * ⚠️ 与 `core.page/open` 的区别：后者只认顶层页，而引用可以指向嵌套块。
+   * 浮层只把修饰键翻译成 `place`，不认识侧槽与 tab 这些具体落点。
    */
-  openBlock: (id: string) => void
-  /** Shift+点「打开目标」：在右槽打开（中心不换） */
-  openInDock: (id: string) => void
+  openBlock: (id: string, place?: OpenPlace) => void
   /**
    * **改一枚引用的锚文本**（这一处显示什么）。
    *
@@ -174,9 +172,9 @@ function renderObjFields(
     const open = document.createElement('button')
     open.type = 'button'
     open.textContent = t('ui.popover.openObject')
-    open.addEventListener('click', () => {
+    open.addEventListener('click', (e) => {
       deps.closePopover()
-      deps.openBlock(target.id)
+      deps.openBlock(target.id, openPlaceOf(e))
     })
     const del = document.createElement('button')
     del.type = 'button'
@@ -416,8 +414,7 @@ export function showAtomPopover(
         open.textContent = t('ui.popover.openPage')
         open.addEventListener('click', (e) => {
           deps.closePopover()
-          if (e.shiftKey) deps.openInDock(target.id)
-          else deps.openBlock(target.id)
+          deps.openBlock(target.id, openPlaceOf(e))
         })
         row.appendChild(open)
       }

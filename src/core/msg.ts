@@ -100,6 +100,7 @@ export const MSG = {
 
   /* ---- 日记 ---- */
   'cmd.journal.today': '回到今日',
+  'cmd.journal.open': '打开某一天',
   'cmd.journal.prev': '前一天',
   'cmd.journal.next': '后一天',
   'cmd.journal.review': '复盘最近几天（横向并排）',

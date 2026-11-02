@@ -32,7 +32,7 @@ import type { PageDeps } from './types.ts'
  * · **只读**：日期只进 `_date`，不进 `text`；这里没有任何写 `_date` 的分支。
  * · **不引入焦点栈**：翻日/回流只是把中心槽的「当前对象」换一块或换一串（同口径）。
  */
-export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journalShift' | 'journalReview' | 'journalShellWrite' | 'deleteJournal'> {
+export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journalShift' | 'journalReview' | 'journalShellWrite' | 'deleteJournal' | 'openJournal'> {
   /**
    * 幂等物化：库里没有这一天的**活块**才创建（一点 op）。
    *
@@ -164,6 +164,20 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
       const from = b && isJournal(b) ? journalDate(b) : todayISO()
       // 单日模式：翻到相邻的一天（流里的「翻一天」是另一种动作）
       openBlock(ensure(shiftISO(from, days)))
+    },
+    /**
+     * 打开某一天：先**幂等物化**，再按落点分流。
+     *
+     * 为什么不是「先算 journalId 再 openBlock」：没写过的天在库里没有块，
+     * 而打开窗口要求目标可解析；物化（含从回收站复活）只该由日记命令做一次。
+     * 缺口：`center` 沿用「点日期＝只装这一天」的既有时序（落光标）。
+     */
+    openJournal: (date, place = 'center') => {
+      if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)) return
+      const id = ensure(date)
+      if (place === 'dock') d.openInDock(id)
+      else if (place === 'tab') d.openInNewTab(id)
+      else openBlock(id)
     },
     /** 复盘＝带参的日记流：同 spec 换 `days`，首版横排（三天／周各成一屏） */
     journalReview: (days) => {

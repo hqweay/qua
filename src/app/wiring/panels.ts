@@ -97,8 +97,8 @@ export type PanelsDeps = {
   getMainEd: () => BlockEditor
   getRegistry: () => Registry
   getChrome: () => Chrome
-  /** Shift+点任意可打开的行/块标/原子：在右槽打开（窗口） */
-  openInDock: (blockId: string) => void
+  /** 打开一个块：落点由装配层的唯一路由分流（中心／右槽／新 tab） */
+  openBlock: (blockId: string, place?: import('../../core/index.ts').OpenPlace) => void
   /**
    * **把一块的正文投影进一个容器**（run/marks/引用/图片都在）。
    *
@@ -588,7 +588,7 @@ export function setupPanels(deps: PanelsDeps) {
       project: (b, into) => deps.project(b, into),
       refClick: (hit, el, mods) => deps.refClick(hit, mods, el),
       ...(deps.atomClick ? { onAtomClick: (atom, el, mods) => deps.atomClick!(atom, el, mods) } : {}),
-      openBlock: (id) => void deps.getRegistry().invoke('core.block/focus-block', { blockId: id }, 'queryview'),
+      openBlock: (id, place) => deps.openBlock(id, place),
       pickRef: (b, propId, current, onPick, anchor) => pickRefValue(b, propId, current, onPick, anchor),
       refLabel: (id) => {
         const b = kb.get(id)

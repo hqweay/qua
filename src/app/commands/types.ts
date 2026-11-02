@@ -129,6 +129,14 @@ export interface PageDeps {
   /** 把光标放到当前页首块 */
   focusFirstBlock: () => void
   /**
+   * 在侧槽打开一个块（不换中心、不入历史）。
+   *
+   * 日记「Shift+点日期」要用它：跳转与打开是两件事，`openJournal` 只负责先物化再分流。
+   */
+  openInDock: (id: string) => void
+  /** 在新 tab 打开一个块/页（⌘+点的落点；同一个视图已开着就切过去） */
+  openInNewTab: (id: string, feed?: boolean) => boolean
+  /**
    * 把光标放到指定的块（`focusFirstBlock` 的精确版）。
    *
    * 提取为页后要落到原位置留下的那枚引用上；块不在当前视图时 `placeCaret` 是空操作，

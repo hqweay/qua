@@ -28,8 +28,8 @@ export type ChromeDeps = {
   /** 角标启动时编辑器尚未装配；诊断快照只在装配完成后被调 */
   getMainEd: () => BlockEditor
   getRegistry: () => Registry
-  /** Shift+点面包屑：在右槽打开这个祖先 */
-  openInDock: (blockId: string) => void
+  /** 点面包屑：落点由唯一路由分流（普通＝返回；Shift＝右槽；⌘/Ctrl＝新 tab） */
+  openBlock: (blockId: string, place: import('../../core/index.ts').OpenPlace) => void
   /** DOM 统计（证据源在诊断分片；它晚于本节装配，现取） */
   getDomStats: () => { blocks: number; domBlocks: number; domNodes: number }
 }
@@ -116,12 +116,9 @@ export function setupChrome(deps: ChromeDeps) {
    * ⚠️ **组件自持 DOM**：装配入口里不再出现那些元素的 `getElementById`。
    * ⚠️ 皮肤/主题那两个开关**不在这里**：撤出顶栏，挪进调试菜单。
    */
-  const chrome = createChrome((blockId, shiftKey, newTab) => {
-    // 面包屑一格 ＝「回到这个祖先」；Shift+点＝开右槽；⌘/Ctrl+点＝开新 tab
-    if (newTab) deps.getRegistry().invoke('core.block/focus-block', { blockId, newTab: true }, 'chrome')
-    else if (shiftKey) deps.openInDock(blockId)
-    // 普通点击是**返回**：用这个视图最后一次的位置，而不是从顶部重开
-    else deps.getRegistry().invoke('core.block/focus-block', { blockId, restore: true }, 'chrome')
+  const chrome = createChrome((blockId, place) => {
+    // 面包屑一格 ＝「回到这个祖先」：普通＝返回上次位置；Shift＝右槽；⌘/Ctrl＝新 tab
+    deps.openBlock(blockId, place)
   })
 
   const editorEl = chrome.editorEl

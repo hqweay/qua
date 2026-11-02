@@ -13,6 +13,16 @@ export const JOURNAL_HANDLERS: Record<string, Handler> = {
     app.journalToday(typeof a.date === 'string' ? a.date : undefined)
     return true
   },
+  /**
+   * 打开某一天（日历 / 复盘空天格子）。`place` 缺省中心——与点日期同义。
+   * ⚠️ 物化在 `openJournal` 里（`ensure` 只有那一处），handler 只校验日期形状。
+   */
+  'core.journal/open': (a, app) => {
+    const date = typeof a.date === 'string' ? a.date : ''
+    if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)) return false
+    app.openJournal(date, a.place === 'dock' ? 'dock' : a.place === 'tab' ? 'tab' : 'center')
+    return true
+  },
   'core.journal/prev': (_a, app) => {
     app.journalShift(-1)
     return true

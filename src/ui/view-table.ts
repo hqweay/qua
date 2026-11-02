@@ -14,7 +14,8 @@
  *   `< 300` 全量挂；`300–2000` 全量挂但行上 `content-visibility: auto`；
  *   `>= 2000` **窗口化**（只挂可视范围 ± 若干行，用上下留白撑出滚动高度）。
  */
-import type { Block, BlockStore, ViewColumn, ViewConfig, ViewRecord } from '../core/index.ts'
+import type { Block, BlockStore, OpenPlace, ViewColumn, ViewConfig, ViewRecord } from '../core/index.ts'
+import { openPlaceOf } from '../core/index.ts'
 import { choicesOf, clockLabel, displayNameOf, hasValue, liveChildren, propDisplayLabels, propKindOf, propLabel } from '../core/index.ts'
 import { choiceCells, ChoiceLookupIndex, type ChoiceLookup, type FieldRow } from '../core/props.ts'
 import { plainText } from '../core/runs.ts'
@@ -60,7 +61,7 @@ export interface ViewTableDeps {
   sort: (by: string, dir: string) => void
   insertRow: () => void
   deleteRow: (rowId: string) => void
-  openBlock: (blockId: string) => void
+  openBlock: (blockId: string, place?: OpenPlace) => void
   /** 标题格（投影 ＋ 单块编辑器浮层） */
   cell: BlockCell
   /** `ref` 值的选择器（属性区那一份复用；省略 ＝ ref 列只读） */
@@ -378,7 +379,7 @@ export class ViewTable {
         tag.textContent = `#${displayNameOf(r.tags[0]!)}`
         row.appendChild(tag)
       }
-      row.addEventListener('click', () => this.deps.openBlock(r.block.id))
+      row.addEventListener('click', (e) => this.deps.openBlock(r.block.id, openPlaceOf(e)))
       list.appendChild(row)
     }
     this.body.appendChild(list)
@@ -390,7 +391,7 @@ export class ViewTable {
     open.type = 'button'
     open.className = 'tv-compact-open'
     open.textContent = t('ui.view.openCenter')
-    open.addEventListener('click', () => this.deps.openBlock(this.deps.host().id))
+    open.addEventListener('click', (e) => this.deps.openBlock(this.deps.host().id, openPlaceOf(e)))
     foot.append(hint, open)
     this.body.appendChild(foot)
   }
@@ -521,7 +522,7 @@ export class ViewTable {
     marker.setAttribute('aria-label', t('ui.view.openBlock'))
     marker.addEventListener('click', (e) => {
       e.preventDefault()
-      this.deps.openBlock(r.block.id)
+      this.deps.openBlock(r.block.id, openPlaceOf(e))
     })
     gutter.appendChild(marker)
     row.appendChild(gutter)

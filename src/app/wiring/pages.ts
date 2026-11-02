@@ -73,6 +73,8 @@ export type PagesDeps = {
   prefs: () => Prefs
   /** 把某张派生卡放回槽（关掉之后「看属性」还能把它放回来）；由装配层接到 `addDerived` */
   ensureDockCard: (side: 'left' | 'right', id: 'inspect' | 'belongs' | 'backrefs' | 'trash' | 'calendar') => void
+  /** 在右槽打开一个块（日记的 Shift+点日期要用；不换中心、不入历史） */
+  openInDock: (id: string) => void
   /** tab 条是 UI：状态变化时把「有哪些 tab／哪个活跃／叫什么」交给装配层重画 */
   onTabsChanged?: (tabs: readonly TabInfo[]) => void
 }
@@ -630,6 +632,8 @@ export function setupPages(deps: PagesDeps) {
       editorEl.focus()
       if (target) mainEd.placeCaret(target.id, 0)
     },
+    openInDock: (id) => deps.openInDock(id),
+    openInNewTab: (id, feed) => openInNewTab(id, feed),
     focusBlock: (blockId, offset = 0) => {
       const mainEd = deps.getMainEd()
       deps.setEd(mainEd)

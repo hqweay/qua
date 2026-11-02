@@ -17609,6 +17609,117 @@ await check('T214 结果面字号：引用栏／查询块里的正文行与正�
   return `正文/引用/查询：${bodyFs}/${refs.fs}/${query.fs}`
 })
 
+/**
+ * **Shift+点是全局手势**，不是某几个入口的特例：日历、查询的每种看法、浮层里的「打开」
+ * 都应该走同一条路由（右槽窗口），且中心与历史一个字节都不动。
+ *
+ * 覆盖三类最容易漏的入口：
+ *   · 日历日期格（**空白天还要先物化**，否则 openWindow 会静默拒绝）；
+ *   · 查询结果的非大纲看法（卡片／行首 bullet／表格块标）；
+ *   · 普通点仍回中心（不因加了 Shift 分叉而改变默认）。
+ */
+await check('T215 Shift+点日历／查询各看法的打开入口 ⇒ 右槽窗口；中心与历史不动', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const state = () =>
+    page.evaluate(() => ({
+      active: window.__qua.snapshot().activeId,
+      nav: window.__qua.snapshot().nav,
+      cards: window.__qua.snapshot().dock.right.cards,
+    }))
+  /**
+   * 点一次并断言「右槽里有这一块」。
+   *
+   * ⚠️ 不能只断言「多了一张卡」：同一块被第二个看法再次打开时，`openWindow` 只定位、
+   *    不新增（同一个块全局最多一张窗口）——那是正确行为，而不是「没打开」。
+   */
+  const shiftOpen = async (selector, why, idSelector = '') => {
+    const before = await state()
+    const el = page.locator(selector).first()
+    assert((await el.count()) > 0, `前置：${why}应有可点元素`)
+    const target = await el.evaluate(
+      (node, idSel) => (idSel ? (node.closest(idSel)?.dataset.blockId ?? '') : (node.dataset.blockId ?? '')),
+      idSelector,
+    )
+    await el.click({ modifiers: ['Shift'] })
+    await page.waitForTimeout(220)
+    const after = await state()
+    if (target) assert(after.cards.includes(target), `${why}：Shift+点后右槽应有这一块 ${target.slice(-6)}：${JSON.stringify(after.cards)}`)
+    else {
+      const added = after.cards.filter((id) => !before.cards.includes(id) && /^[0-9a-f]{32}$/.test(id))
+      assert(added.length === 1, `${why}：Shift+点应开一张窗口：${JSON.stringify({ before: before.cards, after: after.cards })}`)
+    }
+    assert(after.active === before.active, `${why}：Shift+点不换中心：${before.active} → ${after.active}`)
+    assert(JSON.stringify(after.nav) === JSON.stringify(before.nav), `${why}：Shift+点不入历史`)
+  }
+
+  // ① 日历：已写过的一天 ⇒ 直接开那一天
+  await shiftOpen(
+    '.dock-card[data-card-id="calendar"] .cal-cell[data-written="1"]:not([data-today="1"])',
+    '日历（已写天）',
+  )
+  // ② 日历：空白天 ⇒ 物化那一天再开右槽（窗口要求目标可解析）
+  const blankDate = await page.evaluate(
+    () =>
+      document.querySelector(
+        '.dock-card[data-card-id="calendar"] .cal-cell:not(.cal-pad):not([data-written="1"]):not([data-today="1"])',
+      )?.dataset.date ?? '',
+  )
+  assert(blankDate !== '', '前置：日历应有空白天可点')
+  await shiftOpen(`.dock-card[data-card-id="calendar"] .cal-cell[data-date="${blankDate}"]`, '日历（空白天）')
+  const wrote = await page.evaluate(
+    (date) =>
+      document.querySelector(`.dock-card[data-card-id="calendar"] .cal-cell[data-date="${date}"]`)?.dataset.written === '1',
+    blankDate,
+  )
+  assert(wrote, `空白天 ${blankDate} 的 Shift+点应物化那一天（日历出现内容点），而不是静默失败`)
+
+  // ③ 查询结果的四种非大纲看法：同一份 `openBlock(id, place)`
+  const qid = await openSeedQuery(page)
+  assert(qid !== '', '前置：种子里应有一个查询块')
+  await page.evaluate(
+    (id) =>
+      window.__qua.invoke('core.query/set-spec', {
+        owner: { kind: 'block', blockId: id },
+        spec: { where: { tag: '任务' }, scope: 'all' },
+      }),
+    qid,
+  )
+  await page.waitForTimeout(450)
+  const addView = async (kind) => {
+    await page.evaluate(
+      ({ id, k }) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: k }),
+      { id: qid, k: kind },
+    )
+    await page.waitForTimeout(450)
+  }
+  await addView('board')
+  await shiftOpen('.vb-card[data-block-id]', '看板卡')
+  await addView('gallery')
+  await shiftOpen('.vg-card[data-block-id]', '画廊卡')
+  await addView('list')
+  await shiftOpen('.vl-bullet', '列表行首', '.vl-row')
+  await addView('table')
+  await shiftOpen('.tv-marker', '表格块标', '.tv-row')
+
+  // ④ 普通点仍回中心（默认没有分叉）
+  const beforePlain = await state()
+  await page.locator('.tv-title-text').first().click()
+  await page.waitForTimeout(200)
+  const afterPlain = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activeId,
+    cards: window.__qua.snapshot().dock.right.cards,
+  }))
+  assert(afterPlain.active === beforePlain.active, `普通点标题格应只进编辑、不换中心：${beforePlain.active} → ${afterPlain.active}`)
+  assert(
+    JSON.stringify(afterPlain.cards) === JSON.stringify(beforePlain.cards),
+    '普通点标题格不该开右槽窗口',
+  )
+
+  await ctx.close()
+  return `日历（已写/空白）+ 看板/画廊/列表/表格的 Shift 都开右槽；中心与历史不动`
+})
+
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
   await writeFile(REPORT, JSON.stringify({ total: seq, cases: results, known: known.map((r) => r.name) }))
