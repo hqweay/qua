@@ -11,6 +11,7 @@
  */
 import { isJournalDate, openPlaceOf, sortRecords, todayISO, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../core/index.ts'
 import { t } from '../core/msg.ts'
+import { viewNote } from './view-note.ts'
 
 export interface ViewCalendarDeps {
   store: BlockStore
@@ -43,10 +44,7 @@ export class ViewCalendar {
     const key = view?.calendar?.dateBy ?? ''
     this.root.replaceChildren()
     if (key === '') {
-      const hint = document.createElement('p')
-      hint.className = 'tv-unsupported'
-      hint.textContent = t('ui.calendar.needsDate')
-      this.root.appendChild(hint)
+      this.root.appendChild(viewNote(t('ui.calendar.needsDate')))
       return
     }
 

@@ -10,6 +10,7 @@
 import { TITLE_COLUMN, fieldTextOf, openPlaceOf, sortRecords, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 import { assetViewOf } from '../view/asset-views.ts'
+import { viewNote } from './view-note.ts'
 
 export interface ViewGalleryDeps {
   store: BlockStore
@@ -41,10 +42,7 @@ export class ViewGallery {
     const records = sortRecords(this.deps.records(), view?.table?.sort)
     this.root.replaceChildren()
     if (records.length === 0) {
-      const empty = document.createElement('p')
-      empty.className = 'tv-unsupported'
-      empty.textContent = t('ui.list.empty')
-      this.root.appendChild(empty)
+      this.root.appendChild(viewNote(t('ui.list.empty')))
       return
     }
     for (const r of records) this.root.appendChild(this.card(r, view))
