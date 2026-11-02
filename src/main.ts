@@ -7,10 +7,8 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, openPlaceOf, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type CtxKeys, type TriggerChar, trashOf, refTitle } from './core/index.ts'
-import { plainText, type RunWithId } from './core/model/runs.ts'
-import { canWriteText } from './core/model/types.ts'
-import { hasTag, tagIdsOf } from './core/identity/tags.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type CtxKeys, type TriggerChar, trashOf } from './core/index.ts'
+import { plainText } from './core/model/runs.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
 import { BlockStore } from './core/model/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
@@ -27,7 +25,6 @@ import {
   Registry,
   type App,
     type MenuRequest,
-  type PanelKind,
 } from './core/commands/index.ts'
 import { Layers, paletteRows, rowsFromBindings, type PickMods, type Row } from './ui/overlay/layers.ts'
 import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from './app/retrieval/triggers.ts'
@@ -38,9 +35,7 @@ import { mountDockSlot } from './ui/dock/dock.ts'
 import { createIcon } from './view/icons.ts'
 import { mountEmbedBody } from './ui/block-ui/embed-body.ts'
 import { renderAliasEditor } from './ui/block-ui/alias-editor.ts'
-import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, renderLinkComposer, type ObjFieldDeps, type PanelDeps } from './ui/overlay/panels.ts'
-import { openImageLightbox } from './ui/overlay/lightbox.ts'
-import type { AtomMenuHit, RefClickHit, RefClickMods } from './view/editor/editor-events.ts'
+import { renderLinkComposer, type ObjFieldDeps } from './ui/overlay/panels.ts'
 import { devCommands, dropIdentity, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, zoomCommands } from './app/commands-impl.ts'
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
@@ -48,6 +43,7 @@ import { createRowBodyCache } from './app/wiring/row-bodies.ts'
 import { setupDocks } from './app/wiring/docks.ts'
 import { setupCardMenus } from './app/wiring/dock-menus.ts'
 import { setupPanels } from './app/wiring/panels.ts'
+import { setupAtomPopovers } from './app/wiring/atom-popovers.ts'
 import { setupOwners } from './app/wiring/owners.ts'
 import { QueryTree } from './ui/query/query-tree.ts'
 import { setupChrome } from './app/wiring/chrome.ts'
@@ -61,8 +57,7 @@ import { seedJournalMounts, seedWorkspace } from './core/infra/seed.ts'
 import { createIdbAssetStore } from './core/storage/asset-idb.ts'
 import { createIpcAssetStore } from './core/storage/asset-ipc.ts'
 import { ensureSeedAssets } from './core/storage/seed-assets.ts'
-import { assetMetaOf, assetViewOf, assetsAvailable, loadAssetIndex, markAssetMissing, onAssetChange, primeAsset, useAssetStore } from './view/asset-views.ts'
-import type { AssetView } from './core/infra/assets.ts'
+import { assetViewOf, assetsAvailable, loadAssetIndex, markAssetMissing, onAssetChange, primeAsset, useAssetStore } from './view/asset-views.ts'
 import {
   IMAGE_MIME_ALLOWLIST,
   MAX_IMAGE_BYTES,
@@ -711,311 +706,32 @@ function showMenu(req: MenuRequest): void {
   if (req.kind === 'slash') openTrigger('/', req.query ?? '', req.anchor, req.title ?? t('menu.title.slashFilter'))
 }
 
-/* ------------------------------------------------------------ 浮层（转发到 ui/panels） */
-
-/**
- * 面板依赖：这里是**唯一**把 `ws`/`ed`/`registry` 交给 UI 组件的地方。
- * ⚠️ 这样 UI 组件不需要认识这些具体对象，装配层也不必知道面板里画什么。
- */
-const panelDeps: PanelDeps = {
-  ctx: () => uiCtx(),
-  isMac: () => isMac(),
-  shortId,
-  decl: (name) => registry.decl(name),
-  page: () => activeBlock(),
-  roots: () => mainEd.doc.roots,
-  // ⚠️ 必须查**整片森林**：引用的目标可能是嵌套块，只查顶层会让「打开目标」凭空消失
-  findBlock: (id) => findInForest(ws.blocks, id),
-  // 引用目标可以是任意深度的块 ⇒ 落点交给唯一路由（中心 zoom／右槽／新 tab）
-  openBlock: (id, place) => app.openBlock(id, place),
-  /**
-   * **锚文本**：写进这一枚 run（一条事务 ⇒ 一次撤销）。
-   * 走命令而不是直接调编辑器，是为了让 HTTP／CLI 面也能改它，且撤销与落盘照旧。
-   */
-  setAnchor: (runId, text) => void registry.invoke('core.editor/set-anchor', { atomId: runId, text }, 'popover'),
-  /** 外链的显示文字与地址一起写（一条命令、一条事务、一次撤销） */
-  setLink: (runId, text, url) => void registry.invoke('core.editor/set-link', { atomId: runId, text, url }, 'popover'),
-  /**
-   * **打开外链**：与点正文里那一枚走**同一条命令**（`core.link/open`）。
-   * 两处入口不会分叉成「一个能开、一个不能开」。
-   */
-  openLink: (id) => void registry.invoke('core.link/open', { atomId: id }, 'popover'),
-  removeAtom: (id) => void registry.invoke('core.editor/remove-atom', { atomId: id }, 'popover'),
-  // 把这一枚引用摊开成块：与「粘贴为镜像／表格」同一条命令（看法写在露面块自己身上）
-  embedAtom: (atomId, view) => void registry.invoke('core.embed/from-atom', { atomId, view }, 'popover'),
-  closePopover: () => layers.closePopover(),
-  openPopover: (render, anchor) => layers.openPopover(render, anchor),
-  openDrawer: (title, render) => layers.openDrawer(title, render),
-}
+/* ------------------------------------------------ 浮层（装配在 wiring/atom-popovers） */
 
 /**
  * 实例字段卡需要的读写能力（`setupPanels` 之后才有 `pickRef`，所以先留变量）。
  * ⚠️ 值只写记录块：`setValue` 收的是 recordId，浮层拿不到宿主块。
  */
 let objFieldDeps: ObjFieldDeps | undefined
+let popovers: ReturnType<typeof setupAtomPopovers>
 
-/**
- * 浮层的锚点：**取矩形的函数**，不是快照。
- *
- * 为什么：浮层要跟着锚点走。桌面端拖窗口边、滚动正文都是日常动作，而一个矩形快照
- * 记不住自己指向谁 —— 滚动 300px 之后锚点早已跑开、浮层留在原地（实测相距 308px），
- * 且不报错。传函数则每次重算都对着当前那处。
- *
- * `el.isConnected === false` ⇒ 返回 `null`，浮层自己会关掉（指向不存在的东西比没有更糟）。
- */
-const anchorOf = (el: HTMLElement) => () => {
-  /**
-   * 锚点元素可能已经被**重画**摘掉（改锚文本／改链接都会 `renderBlock`，原子是重建的）。
-   * 此时按 atom id 找**当前那一枚**：同一个浮层还在改，不该因为一次写回就自己关掉。
-   * 找不到才返回 `null`（目标真的没了 —— 那时关掉浮层是对的）。
-   */
-  const live =
-    el.isConnected || !el.dataset.atomId
-      ? el
-      : document.querySelector<HTMLElement>(`[data-atom-id="${el.dataset.atomId}"]`)
-  return live?.isConnected ? live.getBoundingClientRect() : null
-}
+/** 行内对象浮层/右键菜单/露面点击的唯一口径；deps 全是活引用（app/registry/ws 都晚于此处初始化） */
+popovers = setupAtomPopovers({
+  uiCtx,
+  isMac,
+  shortId,
+  getRegistry: () => registry,
+  getActiveBlock: () => activeBlock(),
+  getMainEd: () => mainEd,
+  getWs: () => ws,
+  openBlockRoute: (id, place) => app.openBlock(id, place),
+  layers,
+  getEd: () => ed,
+  toast: (msg, kind) => app.toast(msg, kind),
+  showMenu,
+  objFieldDeps: () => objFieldDeps,
+})
 
-const showAtomPopover = (
-  a: RunWithId,
-  anchor: DOMRect | null | (() => DOMRect | null),
-  opts?: { focus?: 'anchor' | 'link' },
-): void => panelPopover(panelDeps, a, anchor, objFieldDeps, opts)
-
-/**
- * 一枚 run 的**当前模型对象**（点击时 DOM 上只有 id，载荷要现查）。
- *
- * 为什么不从 DOM 反推：DOM 上只有显示用的快照（hash、label），
- * 而「删这一枚」需要 run id 与它所在块的模型对象；查不到就说明它已经被删了。
- */
-function findRunOrNull(runId: string): RunWithId | null {
-  return ed.findRun(runId)?.run ?? null
-}
-
-/**
- * **资产详情浮层**（`⌥` 点击 / 缺失与不可用时的默认动作）。
- *
- * 与图片 lightbox 分开：lightbox 只回答「这张图长什么样」，
- * 这里回答「这份字节是什么、在不在、能不能删掉这一枚」。
- * 两者都会出现在同一枚原子上，但**不该合成一个**：缺失的图没有大图可看。
- */
-function showAssetDetails(runId: string, _hash: string, el: HTMLElement): void {
-  const run = findRunOrNull(runId)
-  if (run?.t === 'asset') {
-    showAtomPopover(run, anchorOf(el))
-    return
-  }
-  // 模型里已经没有了（刚被删）：不弹一个操作不了的空浮层
-  app.toast(t('ui.asset.runGone'), 'warn')
-}
-
-/**
- * 打开 lightbox。副标题是「尺寸 · 字节 · hash 短码」——
- * 三样都能帮人确认「这是我以为的那张图」。
- */
-function openLightbox(hash: string, view: AssetView, el: HTMLElement): void {
-  const run = findRunOrNull(el.dataset.atomId ?? '')
-  const meta = assetMetaOf(hash)
-  const label = (run?.t === 'asset' ? run.label : undefined) ?? t('ui.asset.unnamed')
-  const dims = view.w && view.h ? `${view.w}×${view.h}` : meta?.w && meta.h ? `${meta.w}×${meta.h}` : ''
-  const size = meta ? formatBytes(meta.size) : ''
-  const parts = [dims, size, hash.slice(0, 8)].filter((x) => x !== '')
-  openImageLightbox({ url: view.url ?? '', label, subtitle: parts.join(' · ') })
-}
-
-/**
- * **点一枚非引用的行内对象**（图片 / 外链）：默认动作 or `⌥` 详情。
- *
- * 正文、挂载区、查询结果、表格标题格**共用这一份**：分开写就会出现
- * 「正文里点图能开、表里点图没反应」这种只在某处复现的差别。
- */
-function handleAtomClick(
-  atom: { runId: string; kind: string; hash?: string },
-  el: HTMLElement,
-  mods: { altKey: boolean; shiftKey: boolean },
-  via: string,
-): void {
-  if (atom.kind === 'link') {
-    // 外链：**左键＝打开**，⌥ ＝ 看详情（与图片同款分工：默认动作 / 详情）
-    if (!mods.altKey) {
-      void registry.invoke('core.link/open', { atomId: atom.runId }, via)
-      return
-    }
-    showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), anchorOf(el))
-    return
-  }
-  if (atom.kind !== 'asset' || !atom.hash) {
-    // 将来别的行内对象：先给详情（它们的「打开」还没做，别假装做了）
-    if (atom.runId) showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), anchorOf(el))
-    return
-  }
-  const view = assetViewOf(atom.hash)
-  if (!mods.altKey && view.state === 'ready' && (view.mime ?? '').startsWith('image/')) {
-    openLightbox(atom.hash, view, el)
-    return
-  }
-  showAssetDetails(atom.runId, atom.hash, el)
-}
-
-/** 字节数的人话形式（详情浮层与 lightbox 共用一份，免得两处各算一套） */function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
-}
-
-/**
- * **「指向某块的露面」被点**的唯一口径（正文 / 反链 footer / 查询结果 / 标签成员 /
- * 侧槽窗口 / 属性区，全部共用）。
- *
- * · 左键 ⇒ 打开目标块（`focus-block`，嵌套块也能进）；
- * · **Shift+左键** ⇒ 同一个「打开」，换到右槽（一张窗口）；中心不换、历史不记；
- * · `⌥` 点击 ⇒ 弹详情浮层（诊断信息、删除引用都还在那里）；
- * · 图片 / 外链 / dangling / 目标缺失 ⇒ 只弹浮层，**不静默失败**。
- *
- * ⚠️ 判据是 `ref.run` 有没有，不是「这是不是原子」：详情浮层要一枚 run 才有内容可看可删。
- *    块级标签 chip 与属性区的标签名只有归属、没有 run —— 对它们 `⌥` 不构成第二件事，
- *    所以退回左键那一种（而不是「按了没反应」）。
- * ⚠️ 判断「目标可解析」用 `findInForest`，不是看解析状态：状态是快照，
- *    目标可能在这之后被删掉。
- * ⚠️ `el` 只是浮层的**锚点**，可省：没有 run 的露面（chip／属性区）永远不弹浮层。
- */
-function handleRefClick(ref: RefClickHit, mods: RefClickMods, el?: HTMLElement): void {
-  const target = ref.to !== '' && findInForest(ws.blocks, ref.to) ? ref.to : undefined
-  if (target && (!mods.altKey || !ref.run)) {
-    app.openBlock(target, openPlaceOf(mods))
-    return
-  }
-  if (ref.run && el) showAtomPopover(ref.run, anchorOf(el))
-  /**
-   * 剩下的两种情形都不做事，且都不假装成功：
-   *   · 没有 run（chip／属性区）且目标不在了 ⇒ 没有可弹的内容；
-   *   · 有 run 但没给锚点 ⇒ 调用方明确表示不弹浮层。
-   */
-}
-const openDrawerFor = (kind: PanelKind): void => panelDrawer(panelDeps, kind)
-
-/**
- * 行内对象右键菜单里那两条**不是命令**的行。
- *
- * 判据：它们打开的是 UI 面（锚文本浮层、资产详情），不写模型 ⇒ 不发明一条
- * 「命令里弹浮层」的命令（命令层不该知道浮层长什么样，`arch [18]` 只管 DOM，
- * 但「命令只回答模型动作」这条是同一件事的边界）。写动作仍然全部走命令。
- */
-const ATOM_ROW_EDIT_ANCHOR = 'atom/edit-anchor'
-const ATOM_ROW_EDIT_LINK = 'atom/edit-link'
-const ATOM_ROW_FIELDS = 'atom/fields'
-const ATOM_ROW_DETAILS = 'atom/details'
-
-/**
- * **右键一枚行内对象**：按它的身份现算一组动作。
- *
- * 三类身份各有一条不许合并的差别（见 `AtomMenuHit`）：
- *   · `tagId`＝块级标签 chip，它是**归属**（`props._tags`）⇒ 摘掉的是归属；
- *   · `flavor:'#'` 的 ref＝正文里的**提及** ⇒ 删掉的只是这次提及，归属不动；
- *   · 普通 ref／link／asset＝行内原子本身 ⇒ 删的是这一枚。
- * 这三件事在界面上必须是**三个不同的词**；用一个「移除标签」同时兜住，
- * 用户会以为删字摘了标签（模型里没有），或者摘了归属却发现正文里还留着。
- */
-function handleAtomMenu(hit: AtomMenuHit, el: HTMLElement, rect: DOMRect): void {
-  const host = findInForest(ws.blocks, hit.blockId)
-  const writable = host !== undefined && canWriteText(host)
-  const run = hit.runId ? findRunOrNull(hit.runId) : null
-  const target = hit.to !== undefined && hit.to !== '' && findInForest(ws.blocks, hit.to) ? hit.to : undefined
-  const rows: Row[] = []
-  const add = (id: string, label: string, command: string, args: Record<string, unknown>, icon: string): void => {
-    rows.push({ id, label, command, args, icon })
-  }
-
-  if (hit.tagId) {
-    // chip ＝ 归属：打开标签 / 从本块摘掉这一格归属（摘归属不删正文里的任何字）
-    if (target) add('atom/open-tag', t('ui.popover.openPage'), 'core.block/focus-block', { blockId: target }, 'lucide:arrow-up-right')
-    if (writable) add('atom/remove-tag', t('ui.atomMenu.removeTag'), 'core.tags/remove', { blockId: hit.blockId, tagId: hit.tagId }, 'lucide:x')
-  } else if (run?.t === 'ref') {
-    const isMention = run.flavor === '#'
-    const targetBlock = target ? findInForest(ws.blocks, target) : undefined
-    /** 目标是一条实例记录（带归属）⇒ 它的字段可以在这张卡里就地改（102） */
-    const isObj = targetBlock !== undefined && tagIdsOf(targetBlock).length > 0
-    if (target) {
-      add('atom/open', t('ui.popover.openPage'), 'core.block/focus-block', { blockId: target }, 'lucide:arrow-up-right')
-      add('atom/open-dock', t('cmd.dock.open-block'), 'core.dock/open-block', { blockId: target, side: 'right' }, 'lucide:panel-right')
-    }
-    /**
-     * **dangling ⇒ 一句话修好**（引用按 id 指人，所以先恢复、后重建）：
-     *  · 目标在回收站 ⇒ 恢复同一块：所有指向它的引用一起复原，内容也回来；
-     *  · 真没了 ⇒ 按可见名建一块，并把**这一枚**的 `to` 指过去。
-     * 两条的判据都在 `BlockEditor.repairRef`，这里只决定显示哪一句文案。
-     */
-    if (!target && writable) {
-      const tomb = run.to !== undefined && run.to !== '' ? trashOf(ws.blocks).find((b) => b.id === run.to) : undefined
-      const label = (run.anchor ?? run.label ?? '').trim() || (tomb ? refTitle(tomb) : '')
-      if (label !== '') {
-        if (tomb) add('atom/repair', t('ui.atomMenu.restoreTarget', { name: label }), 'core.editor/repair-ref', { atomId: run.id }, 'lucide:rotate-ccw')
-        else add('atom/repair', t('ui.atomMenu.rebuildTarget', { name: label }), 'core.editor/repair-ref', { atomId: run.id }, 'lucide:plus')
-      }
-    }
-    if (isObj) rows.push({ id: ATOM_ROW_FIELDS, label: t('ui.atomMenu.fields'), icon: 'lucide:list' })
-    if (!isMention && !isObj && writable) {
-      rows.push({ id: ATOM_ROW_EDIT_ANCHOR, label: t('ui.atomMenu.editAnchor'), icon: 'lucide:pencil' })
-      if (run.anchor !== undefined) {
-        add('atom/clear-anchor', t('ui.atomMenu.clearAnchor'), 'core.editor/set-anchor', { atomId: run.id, text: '' }, 'lucide:rotate-ccw')
-      }
-    }
-    // 行内 # 是**提及**：只有当这块本来就有这份归属时，才多给一条「摘归属」
-    if (isMention && writable && target && host && hasTag(host, target)) {
-      add('atom/remove-tag-inline', t('ui.atomMenu.removeTag'), 'core.tags/remove', { blockId: hit.blockId, tagId: target }, 'lucide:tag')
-    }
-    if (writable) {
-      add('atom/to-text', t('ui.atomMenu.toText'), 'core.editor/atom-to-text', { atomId: run.id }, 'lucide:type')
-      const label = isMention ? t('ui.atomMenu.removeMention') : t('ui.atomMenu.removeRef')
-      add('atom/remove', label, 'core.editor/remove-atom', { atomId: run.id }, 'lucide:trash-2')
-    }
-  } else if (run?.t === 'link') {
-    add('atom/open-link', t('ui.atomMenu.openLink'), 'core.link/open', { atomId: run.id }, 'lucide:external-link')
-    if (writable) {
-      rows.push({ id: ATOM_ROW_EDIT_LINK, label: t('ui.atomMenu.editLink'), icon: 'lucide:pencil' })
-      add('atom/to-text', t('ui.atomMenu.toText'), 'core.editor/atom-to-text', { atomId: run.id }, 'lucide:type')
-      add('atom/remove', t('ui.atomMenu.removeAtom'), 'core.editor/remove-atom', { atomId: run.id }, 'lucide:trash-2')
-    }
-  } else if (run?.t === 'asset') {
-    rows.push({ id: ATOM_ROW_DETAILS, label: t('ui.atomMenu.details'), icon: 'lucide:info' })
-    if (writable) add('atom/remove', t('ui.atomMenu.removeAtom'), 'core.editor/remove-atom', { atomId: run.id }, 'lucide:trash-2')
-  }
-
-  if (rows.length === 0) return
-  showMenu({
-    kind: 'menu',
-    prefix: 'atom/',
-    anchor: rect,
-    title: t('menu.title.atom'),
-    extraRows: rows,
-    onPick: (row) => {
-      if (row.id === ATOM_ROW_EDIT_ANCHOR) {
-        if (run?.t !== 'ref') return
-        // 与 ⌥ 点击开的是**同一个浮层**（锚文本只有一个写入口）；焦点直接落在输入框
-        showAtomPopover(run, anchorOf(el), { focus: 'anchor' })
-        return
-      }
-      if (row.id === ATOM_ROW_EDIT_LINK) {
-        if (run?.t !== 'link') return
-        // 同一个详情浮层（编辑行就在里面）；焦点落在显示文字那一格
-        showAtomPopover(run, anchorOf(el), { focus: 'link' })
-        return
-      }
-      if (row.id === ATOM_ROW_FIELDS) {
-        if (run?.t !== 'ref') return
-        // 记录字段卡：与 ⌥ 点击实例是同一个浮层；值仍写记录块，不写宿主/run（102）
-        showAtomPopover(run, anchorOf(el))
-        return
-      }
-      if (row.id === ATOM_ROW_DETAILS) {
-        if (run?.t !== 'asset') return
-        showAssetDetails(run.id, run.asset, el)
-        return
-      }
-      if (row.command) void registry.invoke(row.command, (row.args as Record<string, unknown>) ?? {}, 'menu')
-    },
-  })
-}
 
 /* ------------------------------------------------------------ 键位派发（接线） */
 
@@ -2012,7 +1728,7 @@ const app: App = {
     triggerCh = null
     layers.closeAll()
   },
-  showPanel: (kind) => openDrawerFor(kind),
+  showPanel: (kind) => popovers.openDrawerFor(kind),
   copy: (text, label) => {
     void navigator.clipboard?.writeText(text).then(
       () => app.toast(label ?? t('ui.toast.copied')),
@@ -2114,7 +1830,7 @@ const openAliasEditor = (blockId: string, anchor: HTMLElement | DOMRect | null, 
         autofocus,
       }),
     // 元素锚点会跟着那一颗按钮走（行随重渲染被换掉时由 `anchorOf` 兜住「不在了」）
-    anchor === null ? null : anchor instanceof HTMLElement ? anchorOf(anchor) : anchor,
+    anchor === null ? null : anchor instanceof HTMLElement ? popovers.anchorOf(anchor) : anchor,
   )
 }
 
@@ -2226,7 +1942,7 @@ function viewEvents(
       }
       openTrigger(hit.ch, hit.query, rect)
     },
-    refClick: (ref, mods, el) => handleRefClick(ref, mods, el),
+    refClick: (ref, mods, el) => popovers.handleRefClick(ref, mods, el),
     /**
      * **资产此刻的样子**：所有编辑器实例共用这一个函数，于是同一张图在
      * 正文／挂载区／查询结果／侧槽里长得一样（同一份答案，不是四份实现）。
@@ -2237,9 +1953,9 @@ function viewEvents(
      * 非引用的行内对象被点：图片默认开 lightbox，`⌥` 才看详情；
      * 缺失/不可用**不开空 lightbox**，直接给详情（那里面说清为什么没有图）。
      */
-    onAtomClick: (atom, el, mods) => handleAtomClick(atom, el, mods, via),
+    onAtomClick: (atom, el, mods) => popovers.handleAtomClick(atom, el, mods, via),
     /** 右键一枚行内对象：引用改锚文本、标签摘归属、图看详情——三类身份三组动作 */
-    atomMenu: (hit, el, rect) => handleAtomMenu(hit, el, rect),
+    atomMenu: (hit, el, rect) => popovers.handleAtomMenu(hit, el, rect),
     onCopy: (ids, text) => {
       copiedClip = { ids: [...ids], text }
     },
@@ -2455,10 +2171,10 @@ const {
   syncSections,
   scheduleSave,
   scheduleBadge,
-  refClick: handleRefClick,
+  refClick: popovers.handleRefClick,
   // 表格标题列画的是**块的样子**：投影与正文同一条路（run/marks/引用/图片）
   project: (b, into) => fillBlockText(into, b, (id) => blocks.find(id), assetViewOf, markAssetMissing),
-  atomClick: (atom, el, mods) => handleAtomClick(atom, el, mods, 'table'),
+  atomClick: (atom, el, mods) => popovers.handleAtomClick(atom, el, mods, 'table'),
   // 挂载区/查询结果接的是**同一份**事件表（差别只在「装载谁」）
   wireEditor: (editor, change, via) => wireViewEditor(editor, change, via),
   getWs: () => ws,
@@ -2698,7 +2414,7 @@ diag = setupDiagnostics({
   nav,
   uiCtx,
   showMenu,
-  openDrawerFor,
+  openDrawerFor: popovers.openDrawerFor,
   firstEditableRoot,
   stateMenuBtn,
   getWs: () => ws,
