@@ -31,7 +31,7 @@ import {
   type Block,
 } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 
 export interface AliasEditorDeps {
   /** 读门面：查重（这个地址现在归谁）按名现取 */

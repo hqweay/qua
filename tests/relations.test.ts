@@ -20,8 +20,8 @@ import {
 } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { textRuns, type RefRun } from '../src/core/model/runs.ts'
-import { derivedSpecOf } from '../src/core/mount.ts'
-import { queryByIndex } from '../src/core/index-port.ts'
+import { derivedSpecOf } from '../src/core/views/mount.ts'
+import { queryByIndex } from '../src/core/infra/index-port.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({
   id,

@@ -16,14 +16,14 @@
  *
  * ⚠️ 本文件零 DOM、零持久化：op 只是被**算出来**，谁来落盘由上层决定。
  */
-import { backrefBlocks, backrefsOf, type BackrefBlock, type BackrefSource } from '../backrefs.ts'
-import type { RelationEdge } from '../relations.ts'
+import { backrefBlocks, backrefsOf, type BackrefBlock, type BackrefSource } from '../relations/backrefs.ts'
+import type { RelationEdge } from '../relations/relations.ts'
 import { aliasesOf, DELETED_AT_PROP, hasList, isDeleted, type Block } from '../model/model.ts'
 import { findInForest, trashOf } from '../model/tree.ts'
 import { walkForest } from '../model/walk.ts'
-import { findTagByName, tagsOf as tagsOfBlock } from '../tags.ts'
-import { findJournalDay } from '../journal.ts'
-import { blockIdByAlias, indexPathOf, queryByIndex, relationsFrom, relationsTo } from '../index-port.ts'
+import { findTagByName, tagsOf as tagsOfBlock } from '../identity/tags.ts'
+import { findJournalDay } from '../identity/journal.ts'
+import { blockIdByAlias, indexPathOf, queryByIndex, relationsFrom, relationsTo } from '../infra/index-port.ts'
 import {
   allPropDefs,
   declaredFields,
@@ -33,8 +33,8 @@ import {
   type GutterField,
   setValue,
   clearValue,
-} from '../props.ts'
-import type { QueryHit, QuerySpec } from '../query.ts'
+} from '../props/props.ts'
+import type { QueryHit, QuerySpec } from '../query/query.ts'
 import type { BlockStore } from '../model/store.ts'
 import { changesOf } from './changes.ts'
 import { cellsOf, diffTouched, type BeforeBlock, type Placement, type TouchedBlock } from './diff.ts'

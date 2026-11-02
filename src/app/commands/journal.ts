@@ -14,8 +14,8 @@ import {
   type SecLayout,
   type ShellCol,
 } from '../../core/index.ts'
-import type { App } from '../../core/ports.ts'
-import { t } from '../../core/msg.ts'
+import type { App } from '../../core/infra/ports.ts'
+import { t } from '../../core/infra/msg.ts'
 import { rootsFor, rootsForMany } from './roots.ts'
 import type { PageDeps } from './types.ts'
 

@@ -4,8 +4,8 @@
  * 命令面只做参数归一 —— 「这一栏写哪一格」由 `MountHost` 判（块宿主写库、
  * 日记宿主写设备状态），那是模型层的事，不属于命令面。
  */
-import type { Handler } from '../../core/ports.ts'
-import type { QuerySpec } from '../../core/query.ts'
+import type { Handler } from '../../core/infra/ports.ts'
+import type { QuerySpec } from '../../core/query/query.ts'
 import { hostArg, S } from './shared.ts'
 
 /** 派生栏的三个来源（`derived` 栏没有配置，固定成 local 时才用到） */

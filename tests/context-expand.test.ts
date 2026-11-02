@@ -6,7 +6,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { expandContexts, unfoldForContext, type ContextBase } from '../src/core/context-expand.ts'
+import { expandContexts, unfoldForContext, type ContextBase } from '../src/core/views/context-expand.ts'
 import { findPath } from '../src/core/model/tree.ts'
 import type { Block } from '../src/core/model/model.ts'
 

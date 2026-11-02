@@ -42,14 +42,14 @@ import {
   type ViewOwnerRef,
   type ViewSurface,
 } from '../../core/index.ts'
-import type { PropCreateMode, PropTarget } from '../../core/ports.ts'
-import { t } from '../../core/msg.ts'
+import type { PropCreateMode, PropTarget } from '../../core/infra/ports.ts'
+import { t } from '../../core/infra/msg.ts'
 import type { RefClickHit, RefClickMods } from '../../view/editor-events.ts'
 import type { App, Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { Tx } from '../../core/kb/types.ts'
 import type { BlockStore } from '../../core/model/store.ts'
-import type { Prefs, Workspace } from '../../core/workspace.ts'
+import type { Prefs, Workspace } from '../../core/infra/workspace.ts'
 import type { Layers, Row } from '../../ui/layers.ts'
 import { MountArea, type ViewBodyHost } from '../../ui/mount-area.ts'
 import { PropertiesPanel, type PropertiesDeps } from '../../ui/properties.ts'

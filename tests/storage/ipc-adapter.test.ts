@@ -10,7 +10,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { WORKSPACE_VERSION } from '../../src/core/workspace.ts'
+import { WORKSPACE_VERSION } from '../../src/core/infra/workspace.ts'
 import { createIpcAdapter, IPC_BACKEND, withVersion, type LibraryBridge } from '../../src/core/storage/ipc-adapter.ts'
 import type { RawLibraryRows } from '../../src/core/storage/db-rows.ts'
 

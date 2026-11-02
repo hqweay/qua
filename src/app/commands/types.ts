@@ -13,8 +13,8 @@
 import type { Block, SecLayout, ShellCol } from '../../core/index.ts'
 import type { KbClient, Op, Tx } from '../../core/kb/types.ts'
 import type { OwnerStore } from '../wiring/owners.ts'
-import type { CheckEdgeResult, Dangling } from '../../core/hierarchy.ts'
-import type { ThemeMode, Workspace } from '../../core/workspace.ts'
+import type { CheckEdgeResult, Dangling } from '../../core/relations/hierarchy.ts'
+import type { ThemeMode, Workspace } from '../../core/infra/workspace.ts'
 import type { Row } from '../../ui/layers.ts'
 
 /** 与编辑器同一个事务入口形状（`Run`）：一次用户动作 ＝ 一笔 */

@@ -5,7 +5,7 @@
  * 这里只把一份只读列表画出来，把点击交给 handler。
  * 一个视图只开一张 tab（按视图键去重）由状态层保证，不在这里猜。
  */
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import { renderIcon } from '../view/icons.ts'
 
 export interface CenterTabInfo {

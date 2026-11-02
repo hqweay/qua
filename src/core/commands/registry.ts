@@ -3,8 +3,8 @@
  * **不 import handlers** —— 处理器由装配层注入，core 只认 `Handler` 端口。
  */
 import type { CtxKeys } from '../model/undo.ts'
-import { t } from '../msg.ts'
-import type { App, CommandDecl, Handler } from '../ports.ts'
+import { t } from '../infra/msg.ts'
+import type { App, CommandDecl, Handler } from '../infra/ports.ts'
 import { COMMANDS } from './decls.ts'
 
 /* ------------------------------------------------------------ 注册表 */

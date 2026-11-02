@@ -19,7 +19,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkBlock } from '../../src/core/model/model.ts'
-import { WORKSPACE_VERSION, type Workspace } from '../../src/core/workspace.ts'
+import { WORKSPACE_VERSION, type Workspace } from '../../src/core/infra/workspace.ts'
 import { createWorkspaceStore } from '../../src/core/storage/index.ts'
 import { rowWritesFor } from '../../src/core/storage/db-rows.ts'
 import type { CommitBatch, StoragePort } from '../../src/core/storage/port.ts'

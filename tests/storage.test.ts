@@ -15,7 +15,7 @@ import {
   createWorkspaceStore,
   WORKSPACE_VERSION,
   type Workspace,
-} from '../src/core/workspace.ts'
+} from '../src/core/infra/workspace.ts'
 import { installMemoryLocalStorage, peekMemoryLocalStorage, resetMemoryLocalStorage } from './storage/test-local-storage.ts'
 
 const KEY = 'qua-test'

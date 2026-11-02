@@ -1,8 +1,8 @@
 /**
  * 演示 handler：换夹具、输入法组合期自检、整库重置。
  */
-import { t } from '../../core/msg.ts'
-import type { Handler } from '../../core/ports.ts'
+import { t } from '../../core/infra/msg.ts'
+import type { Handler } from '../../core/infra/ports.ts'
 import { S } from './shared.ts'
 
 export const DEV_HANDLERS: Record<string, Handler> = {

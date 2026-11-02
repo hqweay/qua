@@ -29,9 +29,9 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 // 文案字典与 renderer **共用同一份**（`src/core/msg.ts` 是零依赖叶子）。菜单是用户可见文案，
 // 所以连「相」都走 t('app.name')，不在这里硬编码。
-import { t } from '../src/core/msg'
-import { ASSET_SCHEME, isAssetHash } from '../src/core/assets.ts'
-import { libraryId } from '../src/core/library.ts'
+import { t } from '../src/core/infra/msg'
+import { ASSET_SCHEME, isAssetHash } from '../src/core/infra/assets.ts'
+import { libraryId } from '../src/core/identity/library.ts'
 import { loadRegistry } from './library/registry.ts'
 import { LibraryManager } from './library/windows.ts'
 

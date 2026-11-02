@@ -11,7 +11,7 @@
  *     静默截断会让用户以为「这棵树就这么大」，而那是最容易搞错的一件事。
  */
 import { walkForest } from '../core/model/walk.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import { viewNote } from './view-note.ts'
 import { openPlaceOf, type Block, type OpenPlace } from '../core/index.ts'
 import type { BlockStore, ViewConfig } from '../core/index.ts'

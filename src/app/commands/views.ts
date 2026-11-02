@@ -36,8 +36,8 @@ import {
   type ViewConfig,
   type ViewOwnerRef,
 } from '../../core/index.ts'
-import { t } from '../../core/msg.ts'
-import type { App } from '../../core/ports.ts'
+import { t } from '../../core/infra/msg.ts'
+import type { App } from '../../core/infra/ports.ts'
 import type { ViewConfigDeps } from './types.ts'
 
 /** 库里第一个某种 kind 的属性定义（看板的分组列／日历的日期列先给一个能用的） */

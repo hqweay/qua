@@ -9,7 +9,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createDeviceStore, createLocalStorageAdapter, DEFAULT_DOCK, DEFAULT_PREFS, DEVICE_KEY, normalizePrefs, type Prefs } from '../src/core/workspace.ts'
+import { createDeviceStore, createLocalStorageAdapter, DEFAULT_DOCK, DEFAULT_PREFS, DEVICE_KEY, normalizePrefs, type Prefs } from '../src/core/infra/workspace.ts'
 import { installMemoryLocalStorage, peekMemoryLocalStorage, resetMemoryLocalStorage } from './storage/test-local-storage.ts'
 
 installMemoryLocalStorage()

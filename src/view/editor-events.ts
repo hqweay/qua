@@ -15,11 +15,11 @@
  */
 import { bindDropTarget, setDragBlock, zoneHint } from './dnd.ts'
 import { EDIT_ISLAND_ATTR } from './block-dom.ts'
-import type { TriggerChar } from '../core/trigger.ts'
+import type { TriggerChar } from '../core/infra/trigger.ts'
 import type { RunWithId } from '../core/model/runs.ts'
 import type { Content } from '../core/model/runs.ts'
-import { isCommittedTextInput } from '../core/ime.ts'
-import { openPlaceOf, type OpenPlace } from '../core/open.ts'
+import { isCommittedTextInput } from '../core/infra/ime.ts'
+import { openPlaceOf, type OpenPlace } from '../core/views/open.ts'
 
 /**
  * **「按下期间不换 DOM」的指针接线**：按下 → 冻结；放开 → 延迟一拍。

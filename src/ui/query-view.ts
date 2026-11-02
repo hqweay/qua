@@ -65,7 +65,7 @@ import {
   type PropKind,
 } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
-import { t, type MsgId } from '../core/msg.ts'
+import { t, type MsgId } from '../core/infra/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
 import { renderIcon } from '../view/icons.ts'
 import { BlockCell } from './block-cell.ts'

@@ -2,7 +2,7 @@
  * zoom 命令：把中心槽的「当前对象」换成任意块，以及退回祖先。
  */
 import { FEED_INITIAL, FEED_SPEC, hasList, isJournal } from '../../core/index.ts'
-import type { App } from '../../core/ports.ts'
+import type { App } from '../../core/infra/ports.ts'
 import type { Block } from '../../core/model/model.ts'
 import { rootsFor, rootsForMany } from './roots.ts'
 import type { PageDeps } from './types.ts'

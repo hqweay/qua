@@ -4,7 +4,7 @@
  * 页与日记分开成两个文件：它们共用「换当前对象」这条能力，但判据不同——
  * 页是枚举与环绕，日记是日期算术。混在一起，两套判据会互相冒充。
  */
-import type { Handler } from '../../core/ports.ts'
+import type { Handler } from '../../core/infra/ports.ts'
 import { S } from './shared.ts'
 
 export const PAGE_HANDLERS: Record<string, Handler> = {

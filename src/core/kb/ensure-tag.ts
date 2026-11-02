@@ -11,9 +11,9 @@
  * ⚠️ 只报告「变了什么」：同名标签已经在库里 ⇒ 一条 op 都不发（`setLists`／`setProp`
  *    也不该被调用，否则每敲一次同一个标签都会写一遍归属）。
  */
-import { findByAlias } from '../alias.ts'
+import { findByAlias } from '../identity/alias.ts'
 import { DISPLAY_PROP, listsOf, prop, type Block } from '../model/model.ts'
-import { findTagByName, mkTagBlock, normalizeTag } from '../tags.ts'
+import { findTagByName, mkTagBlock, normalizeTag } from '../identity/tags.ts'
 import type { KbClient, Tx } from './types.ts'
 
 /**

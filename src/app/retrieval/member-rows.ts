@@ -20,7 +20,7 @@ import {
   tagIdsOf,
   walkForest,
 } from '../../core/index.ts'
-import { t } from '../../core/msg.ts'
+import { t } from '../../core/infra/msg.ts'
 import type { Block } from '../../core/index.ts'
 import type { Row } from '../../ui/layers.ts'
 

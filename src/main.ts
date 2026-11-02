@@ -10,8 +10,8 @@ import './styles.css'
 import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, openPlaceOf, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar, trashOf, refTitle } from './core/index.ts'
 import { plainText, type RunWithId } from './core/model/runs.ts'
 import { canWriteText } from './core/model/types.ts'
-import { hasTag, tagIdsOf } from './core/tags.ts'
-import { checkExternalUrl, rejectText } from './core/link.ts'
+import { hasTag, tagIdsOf } from './core/identity/tags.ts'
+import { checkExternalUrl, rejectText } from './core/relations/link.ts'
 import { BlockStore } from './core/model/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
 import type { Op } from './core/kb/types.ts'
@@ -21,7 +21,7 @@ import {
   BINDINGS,
   keyLabel,
   resolveBindings,
-} from './core/bindings.ts'
+} from './core/infra/bindings.ts'
 import {
   COMMANDS,
   Registry,
@@ -31,7 +31,7 @@ import {
 } from './core/commands/index.ts'
 import { Layers, paletteRows, rowsFromBindings, type PickMods, type Row } from './ui/layers.ts'
 import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from './app/retrieval/triggers.ts'
-import { dispatchKey, installKeydown, type DispatchEnv } from './core/dispatch.ts'
+import { dispatchKey, installKeydown, type DispatchEnv } from './core/infra/dispatch.ts'
 import { DockWindows } from './ui/dock-windows.ts'
 import { BackrefsCard } from './ui/backrefs-card.ts'
 import { bindDockResize } from './ui/dock-resize.ts'
@@ -56,19 +56,19 @@ import { renderCenterTabs as paintCenterTabs } from './ui/center-tabs.ts'
 import { setupDiagnostics } from './app/wiring/diagnostics.ts'
 import { HANDLERS } from './app/handlers.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
-import { t } from './core/msg.ts'
-import { seedJournalMounts, seedWorkspace } from './core/seed.ts'
+import { t } from './core/infra/msg.ts'
+import { seedJournalMounts, seedWorkspace } from './core/infra/seed.ts'
 import { createIdbAssetStore } from './core/storage/asset-idb.ts'
 import { createIpcAssetStore } from './core/storage/asset-ipc.ts'
 import { ensureSeedAssets } from './core/storage/seed-assets.ts'
 import { assetMetaOf, assetViewOf, assetsAvailable, loadAssetIndex, markAssetMissing, onAssetChange, primeAsset, useAssetStore } from './view/asset-views.ts'
-import type { AssetView } from './core/assets.ts'
+import type { AssetView } from './core/infra/assets.ts'
 import {
   IMAGE_MIME_ALLOWLIST,
   MAX_IMAGE_BYTES,
   sniffImageMime,
   type AssetMeta,
-} from './core/assets.ts'
+} from './core/infra/assets.ts'
 import { createIpcAdapter, type LibraryBridge } from './core/storage/ipc-adapter.ts'
 import {
   createDeviceStore,
@@ -78,7 +78,7 @@ import {
   STORAGE_KEY,
   type Prefs,
   type Workspace,
-} from './core/workspace.ts'
+} from './core/infra/workspace.ts'
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 

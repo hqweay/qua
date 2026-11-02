@@ -1,8 +1,8 @@
 /**
  * 属性 handler：值的写与清、字段定义的新建/加/摘。
  */
-import type { ChoiceScope } from '../../core/props.ts'
-import type { Handler, PropTarget } from '../../core/ports.ts'
+import type { ChoiceScope } from '../../core/props/props.ts'
+import type { Handler, PropTarget } from '../../core/infra/ports.ts'
 import { S } from './shared.ts'
 
 /**

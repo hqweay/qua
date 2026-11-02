@@ -14,7 +14,7 @@ import type { Block } from '../src/core/index.ts'
 import type { Op } from '../src/core/kb/types.ts'
 import { BlockStore, fingerprint, mkBlock, mkPropDef, mkTagBlock, rebuild, setValue, TASK_STATUS_PROP_ID, writeBlockContent } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
-import { seedWorkspace } from '../src/core/seed.ts'
+import { seedWorkspace } from '../src/core/infra/seed.ts'
 import { plainText, textRuns, type Anno, type RefRun } from '../src/core/model/runs.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({

@@ -10,7 +10,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkBlock, type Block } from '../../src/core/model/model.ts'
-import { WORKSPACE_VERSION, type Workspace } from '../../src/core/workspace.ts'
+import { WORKSPACE_VERSION, type Workspace } from '../../src/core/infra/workspace.ts'
 import {
   positionsOf,
   probeOf,
@@ -472,7 +472,7 @@ test('增量写：同批「整块写 ＋ 属性写」⇒ 属性写跳过（它�
    */
   const { MemoryKb } = await import('../../src/core/kb/memory.ts')
   const { BlockStore } = await import('../../src/core/model/store.ts')
-  const { createObjRecordInTx } = await import('../../src/core/obj.ts')
+  const { createObjRecordInTx } = await import('../../src/core/identity/obj.ts')
 
   const tag = mkBlock('玩具')
   tag.props = { _aliases: ['玩具'], _lists: ['tag'] }

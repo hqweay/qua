@@ -32,7 +32,7 @@ import {
   type TreeRowKind,
   isJournalDate,
 } from '../core/index.ts'
-import { t, type MsgId } from '../core/msg.ts'
+import { t, type MsgId } from '../core/infra/msg.ts'
 
 export interface QueryTreeDeps {
   /** 当前条件（现读：可能被命令／撤销改过） */

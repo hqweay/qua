@@ -15,7 +15,7 @@
  */
 import { displayTextOf } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import type { DockCard } from './dock.ts'
 import { cardList, cardNote, emptyCardList } from './card-parts.ts'
 

@@ -25,12 +25,12 @@ import {
   type SecLayout,
   type ShellCol,
 } from '../../core/index.ts'
-import { t } from '../../core/msg.ts'
+import { t } from '../../core/infra/msg.ts'
 import type { Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { Tx, Change, Op } from '../../core/kb/types.ts'
 import type { BlockStore } from '../../core/model/store.ts'
-import type { Prefs, Workspace } from '../../core/workspace.ts'
+import type { Prefs, Workspace } from '../../core/infra/workspace.ts'
 import type { Layers } from '../../ui/layers.ts'
 import type { Chrome } from '../../ui/chrome.ts'
 import { isReadonlyBlock } from '../../view/block-dom.ts'

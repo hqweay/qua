@@ -7,8 +7,8 @@
  * 需要一个可读出口」。将来应当整体降级成一个可关的诊断插件。
  */
 import { flatten, type CtxKeys } from '../core/index.ts'
-import { t } from '../core/msg.ts'
-import type { MsgId } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
+import type { MsgId } from '../core/infra/msg.ts'
 
 export interface BadgeSnapshot {
   /** 模型里的块数 */

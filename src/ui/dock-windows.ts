@@ -36,9 +36,9 @@ import {
   type Block,
   type BlockStore,
 } from '../core/index.ts'
-import { expandContexts, unfoldForContext } from '../core/context-expand.ts'
+import { expandContexts, unfoldForContext } from '../core/views/context-expand.ts'
 import type { KbClient } from '../core/kb/types.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import type { BlockEditor, Run } from '../view/editor.ts'
 import { bindDropTarget } from '../view/dnd.ts'
 import { applyDockCardState, buildDockCard, type DockCardState } from './dock.ts'

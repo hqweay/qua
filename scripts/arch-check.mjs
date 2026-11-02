@@ -177,7 +177,7 @@ const INDEX_HTML = join(ROOT, 'index.html')
   // 假数据按**目录前缀**豁免：种子内容拆到 `fixtures/` 下的多个文件之后，逐文件登记会
   // 在下一次拆分时静默失效（新文件立刻变成裸中文命中）。`bootstrap.ts` 是首屏那几行内容，
   // 不属于夹具目录，所以单列。
-  const WL_FILES = new Set(['src/core/msg.ts', 'src/core/bootstrap.ts'])
+  const WL_FILES = new Set(['src/core/infra/msg.ts', 'src/core/infra/bootstrap.ts'])
   const WL_PREFIXES = ['src/core/fixtures/']
   const hits = []
   let whitelisted = 0
@@ -214,7 +214,7 @@ const INDEX_HTML = join(ROOT, 'index.html')
     title: '不得有裸中文字符串字面量（文案一律走 msg.ts）',
     method: 'TypeScript AST 遍历 StringLiteral / 模板片段（注释不进 AST）；CSS 与 index.html 去注释后逐行扫',
     scope: 'src/**/*.ts · src/**/*.css · electron/**/*.ts · index.html',
-    whitelist: `注释 · src/core/msg.ts（字典本身）· src/core/fixtures/** ＋ src/core/bootstrap.ts（假数据与首屏内容）· console.* 日志实参（本仓命中 ${whitelisted} 处，开发者日志不是用户文案）· checks/** + scripts/**（测试与脚本，不在扫描范围）`,
+    whitelist: `注释 · src/core/infra/msg.ts（字典本身）· src/core/fixtures/** ＋ src/core/infra/bootstrap.ts（假数据与首屏内容）· console.* 日志实参（本仓命中 ${whitelisted} 处，开发者日志不是用户文案）· checks/** + scripts/**（测试与脚本，不在扫描范围）`,
     hits: hits.length,
     detail: hits,
   })
@@ -643,14 +643,14 @@ function commandDecls() {
    * 主进程准入 —— **白名单**，不是黑名单。
    *
    * 为什么改成白名单（原先是一条禁 `workspace|seed|core|commands` 的正则）：
-   * 那条正则实测**放行** `core/query.ts`、`core/kb/types.ts`、`view/editor.ts`、`app/handlers.ts`
+   * 那条正则实测**放行** `core/query/query.ts`、`core/kb/types.ts`、`view/editor.ts`、`app/handlers.ts`
    * —— 也就是说「块语义搬进主进程」这件事，门禁不会红。而 `[13]` 对 `electron/` 零约束
    * （它被映射成 `host`，是层序最后一层 ⇒ 什么都不算越界）。两条加起来等于**主进程没有任何边界**。
    *
    * 判据不是「哪些 import 危险」（黑名单永远列不全），而是**主进程该做什么**：
    * 窗口／会话／DB／fs／路径／菜单。块语义、查询、渲染一律不许。
    * ⇒ 白名单只放三样：`node:*`（fs/sqlite/path）、`electron`（壳本体）、
-   *   以及两个**零依赖叶子**：`src/core/msg.ts`（纯文案字典）与 `src/core/library.ts`
+   *   以及两个**零依赖叶子**：`src/core/infra/msg.ts`（纯文案字典）与 `src/core/identity/library.ts`
    *   （库身份/版本判据，两个进程共读同一份口径，故必须零依赖）。
    */
   const ALLOWED = [
@@ -660,15 +660,15 @@ function commandDecls() {
     // ⚠️ 必须排除 `..`：`../../src/core/model/walk.ts` 也能被「允许任意相对路径」的正则放过，
     //    那样这条断言就形同虚设（实测踩到过）。
     /^\.\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+(\.ts)?$/,
-    /^(\.\.\/)+src\/core\/msg(\.ts)?$/,
-    /^(\.\.\/)+src\/core\/library(\.ts)?$/,
+    /^(\.\.\/)+src\/core\/infra\/msg(\.ts)?$/,
+    /^(\.\.\/)+src\/core\/identity\/library(\.ts)?$/,
     /**
-     * `src/core/assets.ts` 是第三个零依赖叶子：只有「字节 → 类型／后缀／地址」的纯函数
+     * `src/core/infra/assets.ts` 是第三个零依赖叶子：只有「字节 → 类型／后缀／地址」的纯函数
      * （嗅探、`extOf`、`sha256Hex`、`assetUrl`），没有块语义、没有 DOM、没有存储。
      * 主进程需要它是因为**同一条协议的两端必须用同一份判据**：
      * 后缀由入库那侧算、地址由协议那侧认，各写一份就是「两份答案」。
      */
-    /^(\.\.\/)+src\/core\/assets(\.ts)?$/,
+    /^(\.\.\/)+src\/core\/infra\/assets(\.ts)?$/,
   ]
   const hits = []
   for (const f of electronFiles) {
@@ -687,12 +687,12 @@ function commandDecls() {
   }
   add({
     id: '2+',
-    title: '主进程准入白名单：只许 node:* / electron / core/msg / core/library / core/assets（块语义、查询、渲染一律不许）',
+    title: '主进程准入白名单：只许 node:* / electron / core/infra/msg / core/identity/library / core/infra/assets（块语义、查询、渲染一律不许）',
     method:
-      'AST 遍历 electron/**/*.ts 的 import/export-from，**白名单**逐条比：`node:*`／`electron`／`src/core/msg`／`src/core/library`／`src/core/assets`；其余一律命中',
+      'AST 遍历 electron/**/*.ts 的 import/export-from，**白名单**逐条比：`node:*`／`electron`／`src/core/infra/msg`／`src/core/identity/library`／`src/core/infra/assets`；其余一律命中',
     scope: `electron/**/*.ts（${electronFiles.length} 个文件：${electronFiles.map(rel).join(' · ')}）`,
     whitelist:
-      '`node:*`（fs／sqlite／path）· `electron`（壳本体）· `./x.ts`（主进程自己目录内）· `src/core/msg`（纯文案字典）· `src/core/library`（库身份与版本判据，零依赖、两进程共读）· `src/core/assets`（字节→类型/后缀/地址的纯函数，同一份判据给协议两端）',
+      '`node:*`（fs／sqlite／path）· `electron`（壳本体）· `./x.ts`（主进程自己目录内）· `src/core/infra/msg`（纯文案字典）· `src/core/identity/library`（库身份与版本判据，零依赖、两进程共读）· `src/core/infra/assets`（字节→类型/后缀/地址的纯函数，同一份判据给协议两端）',
     hits: hits.length,
     detail: hits,
     note: '为什么是白名单：黑名单版本实测放行 core/query、core/kb/types、view/editor、app/handlers —— 「块语义搬进主进程」时门禁不会红，而那时块语义已经有两个实现',
@@ -705,17 +705,17 @@ function commandDecls() {
 
 {
   // 换键 ＝ 用户已存的库静默消失。把值钉死在这里：真要换，必须先改这条断言并写迁移。
-  // 2026-10-20：`STORAGE_KEY` 随 StoragePort 拆分留在导出面 `src/core/workspace.ts`，断言路径不变。
+  // 2026-10-20：`STORAGE_KEY` 随 StoragePort 拆分留在导出面 `src/core/infra/workspace.ts`，断言路径不变。
   // 2026-10-20 公开整理：旧键是内部阶段的值，公开版定为 `qua.workspace`（原型不做旧数据迁移，旧库显式作废重 seed）。
   const FROZEN = 'qua.workspace'
-  const ws = readFileSync(join(ROOT, 'src/core/workspace.ts'), 'utf8')
+  const ws = readFileSync(join(ROOT, 'src/core/infra/workspace.ts'), 'utf8')
   const m = /export const STORAGE_KEY = '([^']+)'/.exec(ws)
   const got = m ? m[1] : '(没找到 STORAGE_KEY)'
   add({
     id: 'key',
     title: '不可逆项：localStorage 键名固定为 `qua.workspace`（换键＝静默丢数据）',
-    method: '正则取 `src/core/workspace.ts` 的 `STORAGE_KEY` 字面量，与钉死的值逐字比较',
-    scope: 'src/core/workspace.ts',
+    method: '正则取 `src/core/infra/workspace.ts` 的 `STORAGE_KEY` 字面量，与钉死的值逐字比较',
+    scope: 'src/core/infra/workspace.ts',
     whitelist: '无 —— 要换键必须先改这条断言并写迁移（不许悄悄改）',
     hits: got === FROZEN ? 0 : 1,
     detail: got === FROZEN ? [] : [`STORAGE_KEY = ${got} ≠ ${FROZEN}`],
@@ -729,7 +729,7 @@ function commandDecls() {
 
 {
   // ① TS/组件代码：颜色 + 长度都不许有
-  const TS_WL_FILES = new Set(['src/core/msg.ts', 'src/core/bootstrap.ts'])
+  const TS_WL_FILES = new Set(['src/core/infra/msg.ts', 'src/core/infra/bootstrap.ts'])
   const TS_WL_PREFIXES = ['src/core/fixtures/']
   // 内联 SVG 数据 URI 的取色：data URI 里的 SVG 看不见页面 CSS 变量（不是"懒得抽"）
   const SVG_URI_WL = /hsl\(|rgba\(/
@@ -791,7 +791,7 @@ function commandDecls() {
     title: '禁颜色 / 间距字面量（TS 组件代码里一个都不许有；styles/tokens.css 的 token 段是唯一允许处）',
     method: `①AST 扫 TS 字符串与模板片段里的 #hex／rgb()/hsl() 与 px/rem/em/pt/vh/vw；②styles/tokens.css 按 /* @token:begin */…/* @token:end */ 切段，其它分片整份扫，段外只查颜色字面量（门禁 4 的口径）`,
     scope: `src/**/*.ts · electron/**/*.ts（${codeFiles.length} 个文件）· src/**/*.css 的非 token 段（token 段 ${tokenLines} 行，仅 styles/tokens.css）`,
-    whitelist: `src/core/msg.ts · src/core/fixtures/** ＋ src/core/bootstrap.ts（假数据口袋里没有样式）· view/editor.ts 的 \`thumbUri\` 内联 SVG 数据 URI 取色（${wl.filter((x) => x.startsWith('src/view/editor.ts')).length} 处：data URI 里的 SVG 读不到页面 CSS 变量，颜色又是按内容 hash **算**出来的，不是设计 token）· electron/main.ts 的 \`BrowserWindow.backgroundColor\`（${wl.filter((x) => x.startsWith('electron/')).length} 处：主进程没有 CSS，首帧前的窗口底色只能由 shell 给）`,
+    whitelist: `src/core/infra/msg.ts · src/core/fixtures/** ＋ src/core/infra/bootstrap.ts（假数据口袋里没有样式）· view/editor.ts 的 \`thumbUri\` 内联 SVG 数据 URI 取色（${wl.filter((x) => x.startsWith('src/view/editor.ts')).length} 处：data URI 里的 SVG 读不到页面 CSS 变量，颜色又是按内容 hash **算**出来的，不是设计 token）· electron/main.ts 的 \`BrowserWindow.backgroundColor\`（${wl.filter((x) => x.startsWith('electron/')).length} 处：主进程没有 CSS，首帧前的窗口底色只能由 shell 给）`,
     hits: hits.length + cssHits.length,
     detail: [...hits, ...cssHits],
     note: wl.length ? `白名单明细：${wl.join('｜')}` : '',
@@ -888,7 +888,7 @@ function commandDecls() {
 
 {
   // 71.5 第 1 条：「localStorage 只允许出现在**一个适配器文件**里」。
-  // 上一版就是散在 `core/workspace.ts` 里，于是上层顺手把「同步全量 save」当成了契约。
+  // 上一版就是散在 `core/infra/workspace.ts` 里，于是上层顺手把「同步全量 save」当成了契约。
   const ADAPTER = 'src/core/storage/local-storage.ts'
   const hits = []
   for (const f of srcFiles) {
@@ -955,9 +955,9 @@ function commandDecls() {
   const ROLES_IMPL = 'src/core/model/model.ts'
   // 查询条件的实现与序列化：这两处读的 `.role` 是条件原子的键，不是块的列表判定
   const QUERY_LANG = new Set([
-    'src/core/query.ts',
-    'src/core/query-view.ts',
-    'src/core/query-tree.ts',
+    'src/core/query/query.ts',
+    'src/core/query/query-view.ts',
+    'src/core/query/query-tree.ts',
     'src/ui/query-tree.ts',
   ])
   const hits = []
@@ -1004,7 +1004,7 @@ function commandDecls() {
     title: '列表判定只走 `hasList`（禁读单值 `.role` 与裸 `.roles`）',
     method: `AST 扫 src/**/*.ts 的 \`x.role\`／\`x.roles\` 属性访问、\`x["role"]\` 元素访问、\`const { role } = …\` 解构；\`el.dataset.role\` 豁免（DOM 属性，不是块的列表判定）`,
     scope: `src/**/*.ts（${srcFiles.length} 个文件）`,
-    whitelist: `\`el.dataset.role\`（写入 DOM 供 CSS 选择，承的是身份**外观**契约）· \`${ROLES_IMPL}\`（列表集合的唯一实现处）· 查询条件原子的键（\`{ role: 'journal' }\`，读的是 QueryNode 形状不是块）：src/core/query.ts ＋ src/core/query-view.ts · 列表**写入**请走 \`addList\`／\`removeList\``,
+    whitelist: `\`el.dataset.role\`（写入 DOM 供 CSS 选择，承的是身份**外观**契约）· \`${ROLES_IMPL}\`（列表集合的唯一实现处）· 查询条件原子的键（\`{ role: 'journal' }\`，读的是 QueryNode 形状不是块）：src/core/query/query.ts ＋ src/core/query/query-view.ts · 列表**写入**请走 \`addList\`／\`removeList\``,
     hits: hits.length,
     detail: hits,
     note: '为什么必须机检：列表住进属性袋之后，裸读 `.roles` 恒 `undefined`，表现是「所有块都成了无露面」——页、标签、日记的身份判据同时翻转，类型检查也看不出来',
@@ -1467,15 +1467,15 @@ function commandDecls() {
    * 「配置住哪」必须只有一个答案。
    *
    * 允许碰 `_views`／`_activeView`／`_mounts` 的只有三处：
-   *   · `core/view-owner.ts`（拥有者/绑定的纯函数）；
-   *   · `core/mount.ts`（栏的编解码）；
+   *   · `core/views/view-owner.ts`（拥有者/绑定的纯函数）；
+   *   · `core/views/mount.ts`（栏的编解码）；
    *   · `app/wiring/owners.ts`（唯一实现：一笔事务或一次设备保存）。
    * 其余地方（命令、UI、装配）都经 `ViewOwnerStore`。
    *
    * 为什么是 hard：第二处写路径不会「明显坏掉」——它会在读到 `_mounts` 是
    * 日记宿主（设备状态）时静默写一个不存在的块，或者把 `_views` 写到 target 以外的块上。
    */
-  const ALLOW = new Set(['src/core/view-owner.ts', 'src/core/mount.ts', 'src/app/wiring/owners.ts', 'src/core/model/model.ts', 'src/core/view.ts'])
+  const ALLOW = new Set(['src/core/views/view-owner.ts', 'src/core/views/mount.ts', 'src/app/wiring/owners.ts', 'src/core/model/model.ts', 'src/core/views/view.ts'])
   const PROPS = new Set(['_views', '_activeView', '_mounts'])
   const hits = []
   for (const f of srcFiles) {
@@ -1515,7 +1515,7 @@ function commandDecls() {
 
 {
   /**
-   * 哪些 kind 能落在哪种源上，只在 `core/view.ts` 的 `STORED_KINDS_BY_SOURCE` 里有一份。
+   * 哪些 kind 能落在哪种源上，只在 `core/views/view.ts` 的 `STORED_KINDS_BY_SOURCE` 里有一份。
    *
    * 渲染器各写一份分支的下场是「命令能写、读回来被丢掉」——也就是**点了没生效**，
    * 而它看起来只是「这个视图不支持」。判据：`STORED_KINDS_BY_SOURCE` 这个声明只许出现一次。
@@ -1528,7 +1528,7 @@ function commandDecls() {
     const visit = (n) => {
       if (ts.isVariableDeclaration(n) && n.name.getText(sf) === 'STORED_KINDS_BY_SOURCE') {
         decls++
-        if (r !== 'src/core/view.ts') {
+        if (r !== 'src/core/views/view.ts') {
           const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
           hits.push(`${r}:${line} 第二份兼容表`)
         }
@@ -1537,13 +1537,13 @@ function commandDecls() {
     }
     visit(sf)
   }
-  if (decls === 0) hits.push('src/core/view.ts 里找不到 `STORED_KINDS_BY_SOURCE`（本条断言的锚点丢了）')
+  if (decls === 0) hits.push('src/core/views/view.ts 里找不到 `STORED_KINDS_BY_SOURCE`（本条断言的锚点丢了）')
   add({
     id: 34,
     title: '源 × kind 的兼容表只有一份（`STORED_KINDS_BY_SOURCE`）',
-    method: 'AST 数 `STORED_KINDS_BY_SOURCE` 的变量声明，且只许在 `src/core/view.ts`',
+    method: 'AST 数 `STORED_KINDS_BY_SOURCE` 的变量声明，且只许在 `src/core/views/view.ts`',
     scope: `src/**/*.ts（${srcFiles.length} 个文件；找到 ${decls} 处声明）`,
-    whitelist: 'src/core/view.ts（唯一一份）',
+    whitelist: 'src/core/views/view.ts（唯一一份）',
     hits: hits.length,
     detail: hits,
     note: 'UI 的「能切哪几种」读同一张表：分两处写会得到「菜单里有、切过去空屏」',
@@ -1561,12 +1561,12 @@ function commandDecls() {
    *
    * 判据（两条，都是「这一格还能不能写」的直接体现）：
    *   · `ui/properties.ts` 不再用页版本的标题（`ui.props.pageFieldsTitle`）；
-   *   · `core/props.ts` 的 `declareField` 里不再出现 `'page'` 这个列表值。
+   *   · `core/props/props.ts` 的 `declareField` 里不再出现 `'page'` 这个列表值。
    */
   const hits = []
   for (const [file, needle] of [
     ['src/ui/properties.ts', 'ui.props.pageFieldsTitle'],
-    ['src/core/props.ts', 'page'],
+    ['src/core/props/props.ts', 'page'],
   ]) {
     const f = join(ROOT, file)
     if (!existsSync(f)) {
@@ -1592,8 +1592,8 @@ function commandDecls() {
   add({
     id: 35,
     title: '页的「字段声明」入口不存在（能写没人读的值不许留着）',
-    method: '文本查 `ui/properties.ts` 的页版标题、`core/props.ts` 的 `declareField` 里是否还有 page 分支',
-    scope: 'src/ui/properties.ts · src/core/props.ts',
+    method: '文本查 `ui/properties.ts` 的页版标题、`core/props/props.ts` 的 `declareField` 里是否还有 page 分支',
+    scope: 'src/ui/properties.ts · src/core/props/props.ts',
     whitelist: '无 —— 页的子块不会继承声明，所以那一格不该可写',
     hits: hits.length,
     detail: hits,
@@ -1608,7 +1608,7 @@ function commandDecls() {
 {
   /**
    * **系统键总清单没有第二份答案**：`model.ts` 的 `SystemPropId` 联合与
-   * `core/system-props.ts` 的 `SYSTEM_PROP_CHECKS` 必须是同一个集合。
+   * `core/props/system-props.ts` 的 `SYSTEM_PROP_CHECKS` 必须是同一个集合。
    * 这张表是「键 → 常量 → 判据」的唯一入口——漏登记的键会掉进 `BlockProperty`
    * 行还能跑（更难发现），漏判据的键在收端等于不设防。
    *
@@ -1618,7 +1618,7 @@ function commandDecls() {
    * 与 [27] 的四槽白名单同一性质。
    */
   const MODEL = join(ROOT, 'src/core/model/model.ts')
-  const REGISTRY = join(ROOT, 'src/core/system-props.ts')
+  const REGISTRY = join(ROOT, 'src/core/props/system-props.ts')
   const EXPECTED = new Set([
     '_type', '_icon', '_date', '_aliases', '_lists', '_display', '_query', '_views', '_activeView',
     '_embed', '_kind', '_fieldDefs', '_choiceScope', '_ownProps', '_uiPosition',
@@ -1628,7 +1628,7 @@ function commandDecls() {
   const unionKeys = new Set()
   const registryKeys = new Set()
   if (!existsSync(MODEL) || !existsSync(REGISTRY)) {
-    hits.push('锚点文件丢了：`src/core/model/model.ts` 或 `src/core/system-props.ts` 不存在')
+    hits.push('锚点文件丢了：`src/core/model/model.ts` 或 `src/core/props/system-props.ts` 不存在')
   } else {
     // 常量名 → 字符串初值：core 全域的 `export const X_PROP = '_x'`（登记表的计算键跨模块取值）
     const consts = new Map()
@@ -1699,7 +1699,7 @@ function commandDecls() {
     title: '系统键登记表：`SystemPropId` 与 `SYSTEM_PROP_CHECKS` 一一对应，键只有这一份清单',
     method:
       'AST 提取 `model.ts` 的 `SystemPropId` 联合（`typeof X` 经 core 全域常量表解析）与 `system-props.ts` 登记表的对象键，对同一份白名单双向比对',
-    scope: `src/core/model/model.ts（${unionKeys.size} 个成员） · src/core/system-props.ts（${registryKeys.size} 格）`,
+    scope: `src/core/model/model.ts（${unionKeys.size} 个成员） · src/core/props/system-props.ts（${registryKeys.size} 格）`,
     whitelist: `${[...EXPECTED].sort().join(' / ')} —— 加键＝改这份白名单的一次显式动作`,
     hits: hits.length,
     detail: hits,
@@ -1779,7 +1779,7 @@ if (hardRed) {
 console.log('')
 
 /* 顺带当作一次「文件真的存在」的体检：这三个是 msg / 主题 / token 段的落点 */
-for (const p of ['src/core/msg.ts', 'src/styles.css', 'index.html']) {
+for (const p of ['src/core/infra/msg.ts', 'src/styles.css', 'index.html']) {
   if (!existsSync(join(ROOT, p))) {
     console.log(C.red(`缺少 ${p}`))
     process.exit(1)

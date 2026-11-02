@@ -4,7 +4,7 @@
  * 「今日是落点，不是特例代码路径」——这里不给今天写任何分支，
  * 形态差异全部由门面里的 `journalToday` / `journalShift` 决定。
  */
-import type { Handler } from '../../core/ports.ts'
+import type { Handler } from '../../core/infra/ports.ts'
 import { curBlock, S } from './shared.ts'
 
 export const JOURNAL_HANDLERS: Record<string, Handler> = {

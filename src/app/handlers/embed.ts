@@ -6,9 +6,9 @@
  *   · 一次动作一笔事务（`insertEmbedAfter`／`expandAtomToEmbed` 内部已合并）；
  *   · 看法写在**露面块自己**身上（`_views`／`_activeView`），绝不改源。
  */
-import { t } from '../../core/msg.ts'
-import { refTokensIn } from '../../core/ref.ts'
-import type { Handler } from '../../core/ports.ts'
+import { t } from '../../core/infra/msg.ts'
+import { refTokensIn } from '../../core/relations/ref.ts'
+import type { Handler } from '../../core/infra/ports.ts'
 import { curBlock, S } from './shared.ts'
 
 export const EMBED_HANDLERS: Record<string, Handler> = {

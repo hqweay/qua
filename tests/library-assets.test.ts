@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createFolderAssetStore } from '../electron/library/assets.ts'
 import { openLibraryDb, type Db } from '../electron/library/sqlite.ts'
-import { DB_TABLES } from '../src/core/library.ts'
+import { DB_TABLES } from '../src/core/identity/library.ts'
 
 const dirs: string[] = []
 /** 一个「库目录」：`qua.db` ＋ 空的 `assets/` */

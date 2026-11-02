@@ -4,7 +4,7 @@
  * 它们与满态种子（`seed.ts`）分开：这三种态是**验收用的极端形状**，
  * 定义的是「一屏看完时必须不出什么事」，改动它们不该被当成改种子内容。
  */
-import type { Workspace } from '../workspace.ts'
+import type { Workspace } from '../infra/workspace.ts'
 import { forest, longParagraph, LONG_EN, mkPage, resolveRefs } from './build.ts'
 
 /**

@@ -43,9 +43,9 @@ import {
   type VisibleRow,
 } from '../core/index.ts'
 import { MARK_TYPES, isEmptyContent, plainText, refRunsOf, type AssetRun, type MarkType, type RunWithId } from '../core/model/runs.ts'
-import type { AssetView } from '../core/assets.ts'
-import { t } from '../core/msg.ts'
-import { danglingView, refTitle, resolveRefs } from '../core/ref.ts'
+import type { AssetView } from '../core/infra/assets.ts'
+import { t } from '../core/infra/msg.ts'
+import { danglingView, refTitle, resolveRefs } from '../core/relations/ref.ts'
 import { createIcon } from './icons.ts'
 
 /** 行高：与 CSS 的 `--ui-line-h` 必须一致（虚拟化算占位高度要用） */

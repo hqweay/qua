@@ -8,7 +8,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { COMMANDS } from '../src/core/commands/decls.ts'
-import { BINDINGS } from '../src/core/bindings.ts'
+import { BINDINGS } from '../src/core/infra/bindings.ts'
 
 const visible = COMMANDS.filter((c) => !c.hidden)
 

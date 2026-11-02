@@ -15,9 +15,9 @@
  *    「当前对象换了」时主动换一次装载，不叠第二条重载路径。
  */
 import { derivedRecordsOf, type Block, type BlockStore } from '../core/index.ts'
-import { expandContexts, unfoldForContext } from '../core/context-expand.ts'
+import { expandContexts, unfoldForContext } from '../core/views/context-expand.ts'
 import type { KbClient } from '../core/kb/types.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import type { BlockEditor, Run } from '../view/editor.ts'
 import { buildDockCard, applyDockCardState, type DockCardState } from './dock.ts'
 import { cardNote } from './card-parts.ts'

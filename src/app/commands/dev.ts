@@ -1,10 +1,10 @@
 /**
  * 演示与诊断命令：换库、虚拟化开关、输入法组合期自检。
  */
-import type { MsgId } from '../../core/msg.ts'
-import { t } from '../../core/msg.ts'
-import { fixtureWorkspace } from '../../core/seed.ts'
-import type { App, FixtureName } from '../../core/ports.ts'
+import type { MsgId } from '../../core/infra/msg.ts'
+import { t } from '../../core/infra/msg.ts'
+import { fixtureWorkspace } from '../../core/infra/seed.ts'
+import type { App, FixtureName } from '../../core/infra/ports.ts'
 import type { DevDeps } from './types.ts'
 
 const STATE_LABEL: Record<FixtureName, MsgId> = {

@@ -3,8 +3,8 @@
  *
  * 这里只表达意图——真正换 token、开浮层、画面板都由门面交装配层落地。
  */
-import { t } from '../../core/msg.ts'
-import type { Handler } from '../../core/ports.ts'
+import { t } from '../../core/infra/msg.ts'
+import type { Handler } from '../../core/infra/ports.ts'
 import { curBlock, S } from './shared.ts'
 
 export const VIEW_HANDLERS: Record<string, Handler> = {

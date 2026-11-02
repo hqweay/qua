@@ -13,9 +13,9 @@
  * ⚠️ 拖入＝**加边**（`_belongsTo`），不是把块搬到这棵树里：树是位置，边是关系。
  *    同一个手势落到正文行是「移动」、落到侧槽是「打开窗口」—— 含义由落点说，悬停时就贴出来。
  */
-import type { BelongsRow } from '../core/hierarchy.ts'
+import type { BelongsRow } from '../core/relations/hierarchy.ts'
 import { displayNameOf, type Block, type BlockList } from '../core/index.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import { renderBlock, type BlockRenderCtx } from './block-renderers.ts'
 import { cardList, cardNote } from './card-parts.ts'
 import type { DockCard } from './dock.ts'

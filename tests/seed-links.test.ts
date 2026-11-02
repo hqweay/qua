@@ -11,7 +11,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseInline, seedWorkspace } from '../src/core/seed.ts'
+import { parseInline, seedWorkspace } from '../src/core/infra/seed.ts'
 import { plainText, walkForest, checkExternalUrl, type Run } from '../src/core/index.ts'
 
 const CANONICAL = [

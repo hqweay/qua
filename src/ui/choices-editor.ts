@@ -26,7 +26,7 @@ import {
   type Block,
   type ChoiceScope,
 } from '../core/index.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 
 /** 写入口（由装配层实现成命令；组件只声明「发生了什么」） */
 export interface ChoiceActions {

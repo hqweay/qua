@@ -9,7 +9,7 @@
  *     「未设置」那一列让「还没填」的东西看得见 —— 藏起来等于告诉用户「这些不存在」。
  */
 import { fieldTextOf, openPlaceOf, sortRecords, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../core/index.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import { viewNote } from './view-note.ts'
 
 export interface ViewBoardDeps {

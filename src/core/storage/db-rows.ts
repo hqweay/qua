@@ -50,7 +50,7 @@
  *    落盘侧因此没有「这一格缺席」这回事 —— 缺席是唯一形状。
  */
 import { ALIASES_PROP, DELETED_AT_PROP, DISPLAY_PROP, LISTS_PROP, type Block, type BlockList } from '../model/model.ts'
-import { META_KEYS } from '../library.ts'
+import { META_KEYS } from '../identity/library.ts'
 import type { Op } from '../kb/types.ts'
 import type { Workspace } from './shape.ts'
 import { walkForest } from '../model/walk.ts'

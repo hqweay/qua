@@ -4,10 +4,10 @@
  * 判据：它们动的是**编辑器里的那几块**，落点都是「当前块」。
  * 只经 `App` 门面改状态（`app.ed.*`），不碰 DOM。
  */
-import { t } from '../../core/msg.ts'
+import { t } from '../../core/infra/msg.ts'
 import { checkExternalUrl, rejectText } from '../../core/index.ts'
 import { MISSING_ASSET_HASH, SEED_ASSET_HASH } from '../../core/fixtures/assets.ts'
-import type { Handler } from '../../core/ports.ts'
+import type { Handler } from '../../core/infra/ports.ts'
 import { curBlock, S } from './shared.ts'
 
 export const STRUCT_HANDLERS: Record<string, Handler> = {

@@ -12,7 +12,7 @@
  *    所以域文件里每个 handler 必须保持 `'core.x/y': (args, app) => …` 的字面量形状；
  *    改成变量再 spread 会让断言数不到（数到 0 也照样报过 —— 断言空转比红更危险）。
  */
-import type { Handler } from '../core/ports.ts'
+import type { Handler } from '../core/infra/ports.ts'
 import { EMBED_HANDLERS } from './handlers/embed.ts'
 import { STRUCT_HANDLERS } from './handlers/block.ts'
 import { DEV_HANDLERS } from './handlers/dev.ts'

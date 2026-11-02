@@ -12,11 +12,11 @@
  * ⚠️ **不再有 `skin`**（2026-10-20）：甲／乙／丙三套内建皮肤整体删除，
  *    内建只保留一种「中性现代大纲」。观感要调就改 token，不再按皮肤分叉。
  */
-import type { SecLayout } from '../feed.ts'
-import type { DerivedViewKind } from '../view.ts'
-import { DERIVED_VIEW_KINDS } from '../view.ts'
-import { canonicalMountEntries, type MountEntry } from '../mount.ts'
-import { canonicalDockEntries, dockKey, type DockEntry } from '../dock.ts'
+import type { SecLayout } from '../query/feed.ts'
+import type { DerivedViewKind } from '../views/view.ts'
+import { DERIVED_VIEW_KINDS } from '../views/view.ts'
+import { canonicalMountEntries, type MountEntry } from '../views/mount.ts'
+import { canonicalDockEntries, dockKey, type DockEntry } from '../views/dock.ts'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 

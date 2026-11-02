@@ -54,9 +54,9 @@ function collect() {
   else problems.push('读不到 WORKSPACE_VERSION（src/core/storage/shape.ts）')
 
   // DB_SCHEMA_VERSION（库的唯一 schema 版本，`PRAGMA user_version`）
-  const mDbVer = /export const DB_SCHEMA_VERSION = (\d+)/.exec(read('src/core/library.ts'))
+  const mDbVer = /export const DB_SCHEMA_VERSION = (\d+)/.exec(read('src/core/identity/library.ts'))
   if (mDbVer) vals.DB_SCHEMA_VERSION = mDbVer[1]
-  else problems.push('读不到 DB_SCHEMA_VERSION（src/core/library.ts）')
+  else problems.push('读不到 DB_SCHEMA_VERSION（src/core/identity/library.ts）')
 
   // core 模块数（只算 .ts 与 .tsx，不看测试）
   try {

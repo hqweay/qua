@@ -17,7 +17,7 @@
  */
 import { openPlaceOf, todayISO, type OpenPlace } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import { renderIcon } from '../view/icons.ts'
 import type { DockCard } from './dock.ts'
 

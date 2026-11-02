@@ -5,8 +5,8 @@
  * ⚠️ 参数收成**拥有者**（`owner`），不是块 id：视图配置可以住在块上，也可以住在
  *    local tab 上 —— 「住哪」由拥有者回答，handler 不猜。
  */
-import type { Handler } from '../../core/ports.ts'
-import type { QuerySpec } from '../../core/query.ts'
+import type { Handler } from '../../core/infra/ports.ts'
+import type { QuerySpec } from '../../core/query/query.ts'
 import { ownerOrCur, S } from './shared.ts'
 
 export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {

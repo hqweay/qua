@@ -17,8 +17,8 @@
  *    把它们放进 target 会让「移动到…」变成两个动词混在一个入口里。
  */
 import { displayNameOf, hasList, isJournal, type Block } from '../../core/index.ts'
-import { t } from '../../core/msg.ts'
-import type { App } from '../../core/ports.ts'
+import { t } from '../../core/infra/msg.ts'
+import type { App } from '../../core/infra/ports.ts'
 import type { Row } from '../../ui/layers.ts'
 import type { PageDeps } from './types.ts'
 

@@ -11,8 +11,8 @@
  * （属性区的「属于」、归属树面板的拖入）各自只列页与标签。
  */
 import { displayNameOf, parentIdsOf, removeEdge, appendEdge } from '../../core/index.ts'
-import { t } from '../../core/msg.ts'
-import type { App } from '../../core/ports.ts'
+import { t } from '../../core/infra/msg.ts'
+import type { App } from '../../core/infra/ports.ts'
 import type { BelongsToDeps } from './types.ts'
 
 export function belongsToCommands(

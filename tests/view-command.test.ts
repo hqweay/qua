@@ -14,7 +14,7 @@ import type { ViewConfigDeps } from '../src/app/commands/types.ts'
 import type { ViewConfig } from '../src/core/index.ts'
 import type { OwnerStore } from '../src/app/wiring/owners.ts'
 import type { Tx } from '../src/core/kb/types.ts'
-import type { ViewOwnerData } from '../src/core/view-owner.ts'
+import type { ViewOwnerData } from '../src/core/views/view-owner.ts'
 
 const kbOf = (blocks: Block[]): { kb: MemoryKb; store: BlockStore } => {
   const store = new BlockStore(blocks)

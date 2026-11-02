@@ -23,7 +23,7 @@ import {
   removeList,
   whereOf,
 } from '../src/core/index.ts'
-import { t } from '../src/core/msg.ts'
+import { t } from '../src/core/infra/msg.ts'
 
 const b = (): Block => mkBlock('一块')
 
