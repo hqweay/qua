@@ -10,6 +10,7 @@
  */
 import { fieldTextOf, openPlaceOf, sortRecords, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../core/index.ts'
 import { t } from '../core/msg.ts'
+import { viewNote } from './view-note.ts'
 
 export interface ViewBoardDeps {
   store: BlockStore
@@ -59,10 +60,7 @@ export class ViewBoard {
     const key = view?.board?.groupBy ?? ''
     this.root.replaceChildren()
     if (key === '') {
-      const hint = document.createElement('p')
-      hint.className = 'tv-unsupported'
-      hint.textContent = t('ui.board.needsGroup')
-      this.root.appendChild(hint)
+      this.root.appendChild(viewNote(t('ui.board.needsGroup')))
       return
     }
 

@@ -12,6 +12,7 @@
  */
 import { walkForest } from '../core/walk.ts'
 import { t } from '../core/msg.ts'
+import { viewNote } from './view-note.ts'
 import { openPlaceOf, type Block, type OpenPlace } from '../core/index.ts'
 import type { BlockStore, ViewConfig } from '../core/index.ts'
 
@@ -57,10 +58,7 @@ export class ViewMindmap {
       nodes.push({ block: b, depth: ctx.path.length - 1, parent: ctx.parent ?? undefined })
     })
     if (nodes.length <= 1) {
-      const empty = document.createElement('p')
-      empty.className = 'tv-unsupported'
-      empty.textContent = t('ui.mindmap.empty')
-      this.root.appendChild(empty)
+      this.root.appendChild(viewNote(t('ui.mindmap.empty')))
       return
     }
 
