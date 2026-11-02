@@ -9,7 +9,6 @@ import type { QuerySpec } from '../../core/query.ts'
 import { hostArg, S } from './shared.ts'
 
 /** 派生栏的三个来源（`derived` 栏没有配置，固定成 local 时才用到） */
-const SOURCES = ['refs', 'same', 'mentions'] as const
 
 export const MOUNT_HANDLERS: Record<string, Handler> = {
   'core.mount/add-local': (a, app) => {
@@ -37,12 +36,5 @@ export const MOUNT_HANDLERS: Record<string, Handler> = {
     const tabId = S(a.tabId)
     if (!host || !tabId) return false
     return app.setMountTabView(host, tabId, S(a.view))
-  },
-  'core.mount/fix-derived': (a, app) => {
-    const host = hostArg(a.host)
-    const source = S(a.source)
-    if (!host || !(SOURCES as readonly string[]).includes(source)) return false
-    const view = S(a.view)
-    return app.fixDerivedTab(host, source as (typeof SOURCES)[number], view === 'list' || view === 'table' ? view : 'outline') !== ''
   },
 }

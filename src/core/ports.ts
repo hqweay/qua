@@ -20,7 +20,7 @@ import type { QuerySpec } from './query.ts'
 import type { ChoiceScope } from './props.ts'
 import type { SecLayout } from './feed.ts'
 import type { MountHost } from './mount.ts'
-import type { ViewConfig, DerivedViewKind } from './view.ts'
+import type { ViewConfig } from './view.ts'
 import type { ViewOwnerRef } from './view-owner.ts'
 import type { OpenOpts, OpenPlace } from './open.ts'
 
@@ -296,7 +296,6 @@ export interface App {
   /** 换这一栏选的视图（配置在 local tab 自己身上） */
   setMountTabView(host: MountHost, tabId: string, view: string): boolean
   /** **固定派生栏**（引用/成员/同类/提及 → local）：把现算的条件变成一栏可编辑的查询 */
-  fixDerivedTab(host: MountHost, source: 'refs' | 'members' | 'same' | 'mentions', view?: DerivedViewKind): string
   /**
    * 写块的类型（`_type`）。
    *

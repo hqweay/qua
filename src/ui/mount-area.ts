@@ -98,12 +98,6 @@ export interface MountAreaDeps {
    */
   openViewMenu?: (host: MountHost, tabId: string, anchor: DOMRect) => void
   /**
-   * 「⋯」：派生栏的更多动作（固定为一条可编辑的 local 查询）。
-   *
-   * 菜单长什么样、每一项落到哪条命令，都归装配层 —— 这一层只知道「有这一颗按钮」。
-   */
-  onTabMenu?: (host: MountHost, entry: Extract<MountEntry, { kind: 'derived' }>, anchor: DOMRect) => void
-  /**
    * 派生栏现在选了什么看法（**设备状态**：没有拥有者）。
    *
    * 由装配层现读 `Prefs`；这一层不碰偏好，也不写它 —— 写走 `setDerivedKind`。
@@ -421,24 +415,6 @@ export class MountArea {
         })
         wrap.appendChild(x)
       }
-      /**
-       * 「⋯」只对 **derived** 给：把它固定成一条可编辑的 local 查询。
-       * local 的动作只有「摘掉」，那已经由 × 表达；再给一个只重复它的菜单是噪音。
-       * 放在 × 之前 —— × 是「这一栏不要了」，比它更危险的按钮不该更靠里。
-       */
-      if (entry.kind === 'derived' && this.deps.onTabMenu) {
-        const more = document.createElement('button')
-        more.type = 'button'
-        more.className = 'mount-more'
-        more.dataset.tab = entry.id
-        more.textContent = '⋯'
-        more.title = t('ui.mount.tabMenu')
-        more.addEventListener('click', (e) => {
-          e.stopPropagation()
-          this.deps.onTabMenu?.(hostRef, entry, more.getBoundingClientRect())
-        })
-        wrap.appendChild(more)
-      }
       if (i === activeAt) wrap.dataset.active = '1'
       this.tabsEl.appendChild(wrap)
     })
@@ -720,15 +696,6 @@ export class MountArea {
     }
     head.appendChild(seg)
 
-    if (this.deps.onTabMenu) {
-      const more = document.createElement('button')
-      more.type = 'button'
-      more.className = 'mount-derived-more'
-      more.textContent = '⋯'
-      more.title = t('ui.mount.tabMenu')
-      more.addEventListener('click', () => this.deps.onTabMenu?.(this.mountHost(), entry, more.getBoundingClientRect()))
-      head.appendChild(more)
-    }
   }
 
   private showView(host: Block, entry: MountEntry, view: ViewConfig): void {
