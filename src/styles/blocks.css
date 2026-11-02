@@ -738,6 +738,18 @@
 .prop-check {
   accent-color: var(--ui-accent);
 }
+/* 勾选框 ＋ 它的只读说明（值本身只由方框改；文字说的是「这一格现在是什么」） */
+.prop-check-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  cursor: pointer;
+}
+.prop-check-text {
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-sm);
+  white-space: nowrap;
+}
 .prop-clear {
   background: none;
   border: 0;

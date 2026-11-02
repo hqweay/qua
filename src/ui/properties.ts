@@ -218,6 +218,23 @@ export function makeCellEditor(
     box.checked = row.value === true
     box.indeterminate = row.value === undefined || row.value === null
     box.addEventListener('change', () => send(box.checked))
+    /**
+     * **格子里要有字**：勾选框是**值**的控件，而这一格读起来是「谁 · 什么值」。
+     * 只画一个方框时，表格列里看见的是「□ □」、看板列头看见的是 `false`／`true` ——
+     * 读者得先知道方框属于哪个字段才认得出它。
+     *
+     * 所以二元值给一段**只读**的说明文字（「已完成／未完成」），它不参与编辑：
+     * 改值仍然只有方框这一处。没有值（`undefined`）时不给字——那正是「未填」。
+     */
+    if (row.value === true || row.value === false) {
+      const l = document.createElement('label')
+      l.className = 'prop-check-row'
+      const text = document.createElement('span')
+      text.className = 'prop-check-text'
+      text.textContent = row.value === true ? t('ui.props.checkboxOn') : t('ui.props.checkboxOff')
+      l.append(box, text)
+      return l
+    }
     return box
   }
   /**
