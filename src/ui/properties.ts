@@ -19,6 +19,7 @@
  */
 import type { Block } from '../core/index.ts'
 import { plainText } from '../core/runs.ts'
+import { onCommitKeys } from './keys.ts'
 import type { Dangling, FieldRow, PropKind } from '../core/index.ts'
 import type { PropCreateMode } from '../core/ports.ts'
 import {
@@ -757,13 +758,13 @@ export class PropertiesPanel {
     const input = document.createElement('input')
     input.className = 'prop-input props-tag-input'
     input.placeholder = t('ui.belongs.placeholder')
-    input.addEventListener('keydown', (e) => {
-      if (e.key !== 'Enter') return
-      e.preventDefault()
-      const parentName = input.value.trim()
-      if (parentName === '') return
-      this.deps.addBelong(target, parentName)
-      input.value = ''
+    onCommitKeys(input, {
+      commit: () => {
+        const parentName = input.value.trim()
+        if (parentName === '') return
+        this.deps.addBelong(target, parentName)
+        input.value = ''
+      },
     })
     value.appendChild(input)
 
@@ -821,13 +822,13 @@ export class PropertiesPanel {
     const input = document.createElement('input')
     input.className = 'prop-input props-tag-input'
     input.placeholder = t('ui.props.tagPlaceholder')
-    input.addEventListener('keydown', (e) => {
-      if (e.key !== 'Enter') return
-      e.preventDefault()
-      const tagName = input.value.trim()
-      if (tagName === '') return
-      this.deps.addTag(target, tagName)
-      input.value = ''
+    onCommitKeys(input, {
+      commit: () => {
+        const tagName = input.value.trim()
+        if (tagName === '') return
+        this.deps.addTag(target, tagName)
+        input.value = ''
+      },
     })
     value.appendChild(input)
 
@@ -1066,12 +1067,7 @@ export class PropertiesPanel {
     fresh.addEventListener('click', () => commit('new'))
     label.addEventListener('input', syncAo4)
     kind.addEventListener('change', syncAo4)
-    label.addEventListener('keydown', (e) => {
-      // 组合期只让输入法自己处理（Enter 常常是选词那一下）
-      if (e.key !== 'Enter' || e.isComposing) return
-      e.preventDefault()
-      commit('auto')
-    })
+    onCommitKeys(label, { commit: () => commit('auto') })
 
     // 新建组整块占一行：它的三个控件只一起出现，不能和第一行的「用这个」混排
     const newGroup = document.createElement('div')
