@@ -195,6 +195,10 @@ export const MSG = {
   'ui.props.cancel': '取消',
   'ui.props.clear': '删除这个值',
   'ui.props.openDef': '打开这条属性的定义（改类型/选项）',
+  /* 勾选框属性只有两种值，而一个方框在表格列里读不出「这一格是什么」——
+     两句只读说明文字跟在方框后面，值本身仍只由方框改。 */
+  'ui.props.checkboxOn': '已完成',
+  'ui.props.checkboxOff': '未完成',
   'ui.props.needLabel': '属性名不能为空',
   /* ⚠️ 「标签属性」＝ 这个标签声明了哪些属性；它**不向下继承**——没打这个标签的块一个都没有。
      所以文案里不能写「被继承」 */
