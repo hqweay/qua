@@ -121,7 +121,14 @@ try {
   }
 
   exitCode = await new Promise((done) => {
-    const child = spawn('pnpm', ['-s', 'run', ...gateArgs], { cwd: wt, stdio: 'inherit' })
+    /**
+     * worktree 建在临时目录，checkout 的上一级不是真实 checkout——落库映射测试要读的
+     * 蓝本文档（与 qua/ 并排）在那里不存在。测试自己认 `QUA_BLUEPRINT`，这里把真实
+     * checkout 的路径递过去；独立 clone（旁边没有蓝本）时不设，让测试走自己的兜底。
+     */
+    const blueprint = join(ROOT, '..', '落库蓝本.md')
+    const env = existsSync(blueprint) ? { ...process.env, QUA_BLUEPRINT: blueprint } : process.env
+    const child = spawn('pnpm', ['-s', 'run', ...gateArgs], { cwd: wt, stdio: 'inherit', env })
     child.on('error', (e) => {
       console.error(e.message)
       done(127)
