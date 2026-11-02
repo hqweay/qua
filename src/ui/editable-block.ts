@@ -18,6 +18,7 @@
  */
 import { type Block, type BlockStore } from '../core/index.ts'
 import { EDIT_ISLAND_ATTR } from '../view/block-dom.ts'
+import { DeferredFlush } from '../view/deferred-flush.ts'
 import { bindPressFreeze } from '../view/editor-events.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
 
@@ -94,7 +95,7 @@ export class EditableBlock {
   /** 防抖重载的计时器 */
   private timer: number | null = null
   /** 补做被冻结重载的计时器 */
-  private flushTimer: number | null = null
+  private readonly flusher = new DeferredFlush(() => this.flush(), FLUSH_MS)
   /** 欠一次重载：被冻结（聚焦/按下/组合期），或自己的编辑让「这一栏装谁」过期了 */
   private pending = false
   private pointerDown = false
@@ -198,7 +199,7 @@ export class EditableBlock {
     this.offStore()
     this.offPointer()
     if (this.timer !== null) window.clearTimeout(this.timer)
-    if (this.flushTimer !== null) window.clearTimeout(this.flushTimer)
+    this.flusher.dispose()
     this.editor?.dispose()
     this.editor = null
   }
@@ -225,11 +226,7 @@ export class EditableBlock {
 
   /** 排一次「补做被冻结的重载」。计时器而不是 focusout：焦点可能只是从行挪到本区域的按钮上，从未离开 */
   private armFlush(): void {
-    if (this.flushTimer !== null) window.clearTimeout(this.flushTimer)
-    this.flushTimer = window.setTimeout(() => {
-      this.flushTimer = null
-      this.flush()
-    }, FLUSH_MS)
+    this.flusher.arm()
   }
 
   private flush(): void {
