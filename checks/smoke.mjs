@@ -187,7 +187,7 @@ const mountTab = async (page, kind) => {
 }
 
 /** 挂载区里的行（只在**激活栏**的 body 里） */
-const mountRows = (page) => page.evaluate(() => document.querySelectorAll('#editor .mount .mount-editor .blk').length)
+const mountRows = (page) => page.evaluate(() => document.querySelectorAll('#editor .mount .mount-editor .blk, #editor .mount .queryview-editor .blk').length)
 
 /** 让一个标签块先存在（走命令面，不经过打字路径）：返回它的 id */
 const seedTag = (page, name) =>
@@ -2569,11 +2569,12 @@ await check('T216 挂载栏本地查询：切到「大纲」后仍能切回；�
       const m = document.querySelector('#editor .mount')
       return {
         current: m?.querySelector('.qv-view-current-label')?.textContent ?? '',
-        viewBar: Boolean(m?.querySelector('.mount-viewbar:not([hidden]) .qv-view-current')),
+        headVisible: !(m?.querySelector('.queryview-head')?.hidden ?? true),
+        chip: m?.querySelector('.queryview-filters .queryview-chip')?.textContent ?? '',
         titleHidden: m?.querySelector('.queryview-title')?.hidden ?? true,
         count: m?.querySelector('.queryview-count')?.textContent ?? '',
         table: Boolean(m?.querySelector('.tv-rows')),
-        outlineRows: m?.querySelectorAll('.mount-editor .blk').length ?? 0,
+        outlineRows: m?.querySelectorAll('.queryview-editor .blk').length ?? 0,
       }
     })
 
@@ -2587,15 +2588,16 @@ await check('T216 挂载栏本地查询：切到「大纲」后仍能切回；�
   assert(table.count.includes('条结果'), `条数仍要留着：${JSON.stringify(table)}`)
 
   /**
-   * **切到「大纲」之后仍要能切回去**：大纲分支不是视图宿主，抬头会整台消失；
-   * 挂载栏补一颗同款下拉（`.mount-viewbar`），否则用户被锁在大纲里。
+   * **切到「大纲」之后仍要能切回去**：大纲也归视图宿主，抬头整台都在
+   * （同右侧一颗下拉）——顺带，条件 chip 在大纲里也出现了（旧形状没有）。
    */
   await switchView(page, '#editor .mount', '大纲')
   const outline = await mountState()
   assert(!outline.table && outline.outlineRows >= 0, `切到大纲：视图体应撤掉：${JSON.stringify(outline)}`)
-  assert(outline.viewBar && outline.current === '大纲', `大纲分支必须留下视图下拉：${JSON.stringify(outline)}`)
+  assert(outline.headVisible && outline.current === '大纲', `大纲仍由视图宿主画抬头：${JSON.stringify(outline)}`)
+  assert(outline.chip.includes('条件') || outline.chip !== '', `大纲也要有条件 chip（可点开改条件）：${JSON.stringify(outline)}`)
 
-  await switchView(page, '#editor .mount .mount-viewbar', '表格')
+  await switchView(page, '#editor .mount', '表格')
   const back = await mountState()
   assert(back.current === '表格' && back.table, `从大纲能切回表格：${JSON.stringify(back)}`)
 
@@ -12022,7 +12024,7 @@ await check('T134 日记的自定义栏跟随今天：加一栏 ⇒ 推到明天
   }, myKey)
   await page.waitForTimeout(350)
   const rows = await page.evaluate((hostId) => {
-    const ids = [...document.querySelectorAll('#editor .mount-editor .blk')].map((e) => e.dataset.blockId)
+    const ids = [...document.querySelectorAll('#editor .mount .queryview-editor .blk')].map((e) => e.dataset.blockId)
     let host = null
     const walk = (list) => {
       for (const b of list) {

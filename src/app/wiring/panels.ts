@@ -706,7 +706,6 @@ export function setupPanels(deps: PanelsDeps) {
       wire: (editor, change) => deps.wireEditor(editor, change, 'mount'),
       onAddTab: (id) => addLocalQueryTab(id),
       // 大纲分支的切换下拉：与视图宿主那条同一个菜单（装配层现画行，这里只给锚点）
-      openViewMenu: (host, tabId, anchor) => app.openViewMenu({ kind: 'tab', host, tabId }, anchor),
       derivedKind: (hostBlock, source) => {
         const mountHost: MountHost = isJournal(hostBlock) ? { kind: 'journal' } : { kind: 'block', blockId: hostBlock.id }
         return readMountView(deps.prefs().mountViews, mountHost, source)

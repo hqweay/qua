@@ -44,13 +44,11 @@ import {
   type ViewOwnerStore,
   type ViewConfig,
   type ViewRecord,
-  type QuerySpec,
 } from '../core/index.ts'
 import type { FoldState } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t, type MsgId } from '../core/msg.ts'
 import { type BlockEditor, type Run } from '../view/editor.ts'
-import { renderIcon } from '../view/icons.ts'
 import { EditableBlock } from './editable-block.ts'
 
 /** 非大纲那一栏的**视图体**（由装配层造：只有那里有完整依赖） */
@@ -89,14 +87,6 @@ export interface MountAreaDeps {
   onAddTab?: (hostId: string) => void
   /** 「×」：摘掉一栏（`tabId` 是**稳定 id**，不是数组下标） */
   onRemoveTab?: (host: MountHost, tabId: string) => void
-  /**
-   * 一次**视图切换**的下拉（贴着按钮弹出「视图…」菜单）。
-   *
-   * 为什么挂载区也接这一颗：大纲分支用的是挂载区自己的编辑器（`.mount-editor`），
-   * 它不是视图宿主，所以切到「大纲」时视图宿主的抬头与切换器会整条消失——
-   * 用户只剩一条路：再也切不回表格。这里给大纲分支补同一个入口。
-   */
-  openViewMenu?: (host: MountHost, tabId: string, anchor: DOMRect) => void
   /**
    * 派生栏现在选了什么看法（**设备状态**：没有拥有者）。
    *
@@ -169,13 +159,6 @@ export class MountArea {
    * 「这一栏是什么」是它唯一能说清自己的地方，而「切看法」写的是设备状态。
    */
   private readonly derivedHeadEl: HTMLElement
-  /**
-   * 大纲分支的**视图切换条**（只在 local 查询栏、且当前是默认看法时出现）。
-   *
-   * 非大纲时由视图宿主画自己的抬头；大纲时视图宿主根本不在，抬头与切换器也就没了。
-   * 这一条是补回来的那一颗入口，不是第二套抬头：它只有一个按钮。
-   */
-  private readonly viewBarEl: HTMLElement
   /** 折叠时那一行摘要（只有「引用 N」——同类／提及的计数要现算，折叠时不值得算） */
   private readonly summaryEl: HTMLButtonElement
   /**
@@ -201,10 +184,18 @@ export class MountArea {
   private readonly foldSeeded = new Set<string>()
   /** 这一段是谁；段落换人时清空展开状态 */
   private hostId = ''
-  /** 当前这一栏的视图体（非大纲时才有） */
+  /** 现挂在视图槽里的那一个（local 栏按栏缓存；派生栏现造现弃） */
   private view: ViewBodyHost | null = null
-  /** 视图体对应哪一栏的哪张视图（变了才重建） */
-  private viewKey = ''
+  /** 现造现弃的那一个（派生栏）：detach 时要 dispose；local 的在缓存里，只摘不弃 */
+  private ownedView: ViewBodyHost | null = null
+  /**
+   * **local 栏的视图宿主，按栏缓存**（含大纲）。
+   *
+   * 大纲归了视图宿主之后，一栏一个实例：切 tab 不重建 ⇒ 面包屑展开栈、冻结结果、
+   * 条件树草稿各栏各持，来回切不丢；同一栏里切看法也不换实例
+   * （`mount()` ⇒ `sync()` 自会按激活视图换分支）。段落换人／栏被摘掉时成批弃。
+   */
+  private readonly tabViews = new Map<string, ViewBodyHost>()
   /** 引用栏的 kind 过滤（大纲专用设备状态；切到表格时由「类型」列承担同一件事） */
   private refKind: 'all' | 'inline' | 'property' | 'embed' = 'all'
   /** 上一次读到的那组条目的串（`refreshEntries` 用它判「要不要重排」） */
@@ -245,10 +236,6 @@ export class MountArea {
     this.derivedHeadEl.className = 'mount-derived-head'
     this.derivedHeadEl.hidden = true
 
-    this.viewBarEl = document.createElement('div')
-    this.viewBarEl.className = 'mount-viewbar'
-    this.viewBarEl.hidden = true
-
     this.block = new EditableBlock({
       host: this.editorEl,
       store: deps.store,
@@ -267,7 +254,7 @@ export class MountArea {
       onContextBack: (rootId) => this.collapse(rootId),
     })
 
-    this.bodyEl.append(this.derivedHeadEl, this.viewBarEl, this.emptyEl, this.block.root, this.viewEl)
+    this.bodyEl.append(this.derivedHeadEl, this.emptyEl, this.block.root, this.viewEl)
     this.root.append(this.summaryEl, this.tabsEl, this.bodyEl)
 
     this.render()
@@ -281,6 +268,8 @@ export class MountArea {
   /** 摘掉实例（装配层在段根换人时调）：退订 store、卸事件，别让游离容器继续被重画 */
   dispose(): void {
     this.detachView()
+    for (const v of this.tabViews.values()) v.dispose()
+    this.tabViews.clear()
     this.block.dispose()
   }
 
@@ -330,16 +319,27 @@ export class MountArea {
       this.root.hidden = true
       return
     }
-    // 段落换人：上一段的展开栈没有意义
+    // 段落换人：上一段的展开栈与各栏的视图宿主都没有意义
     if (this.hostId !== host.id) {
       this.hostId = host.id
       this.expandedByTab.clear()
       this.covers = new Map()
       this.refKind = 'all'
+      for (const v of this.tabViews.values()) v.dispose()
+      this.tabViews.clear()
     }
     this.root.hidden = false
     this.entries = mountEntriesOf(host, this.deps.kb.roots(), { journalMounts: this.deps.journalMounts() })
     this.entrySig = JSON.stringify(this.entries)
+    // 栏被摘掉：它的视图宿主一起退（订阅还挂着的话，游离容器会被白重画）
+    if (this.tabViews.size > 0) {
+      const alive = new Set(this.entries.map((e) => e.id))
+      for (const [id, v] of this.tabViews) {
+        if (alive.has(id)) continue
+        v.dispose()
+        this.tabViews.delete(id)
+      }
+    }
 
     // 栏可能被摘掉：激活项不在了就回落到第一栏，而不是留一个空 body
     if (!this.entries.some((e) => e.id === this.active)) this.active = this.entries[0]?.id ?? ''
@@ -458,61 +458,19 @@ export class MountArea {
 
   private load(host: Block, entry: MountEntry, focusHint?: string): void {
     if (entry.kind === 'derived') {
-      this.viewBarEl.hidden = true
       this.loadDerived(host, entry, focusHint)
       return
     }
+    /**
+     * local 栏**整台都归视图宿主**（大纲也不例外）：抬头（条数/条件/切换/刷新）
+     * 由宿主统一画在右侧，条件 chip 与条件树处处可改。
+     * 过去大纲走挂载区自己的编辑器，「大纲改不了条件」与「切换下拉忽左忽右」
+     * 是同一个根因——两台身体各画各的。
+     */
     this.derivedHeadEl.hidden = true
-    const view = this.viewOf(entry)
-    this.paintViewBar(entry, view)
-    if (view) {
-      this.showView(host, entry, view)
-      return
-    }
-    this.detachView()
-    this.loadOutline(entry, this.rootsFor(host, entry), focusHint)
+    this.showView(host, entry)
   }
 
-  /**
-   * 大纲分支的视图切换条：**只在 local 查询栏、且当前是默认看法**时出现。
-   *
-   * 非大纲时视图宿主自己有一条抬头（条数、条件、切换、刷新）；大纲时它整台都不在，
-   * 这一条把「切回去」的入口补上。两处用的是同一个下拉（菜单由装配层现画）。
-   */
-  private paintViewBar(entry: MountEntry, view: ViewConfig | null): void {
-    this.viewBarEl.replaceChildren()
-    if (entry.kind !== 'local' || view !== null || !this.deps.openViewMenu) {
-      this.viewBarEl.hidden = true
-      return
-    }
-    this.viewBarEl.hidden = false
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = 'qv-view-btn qv-view-current mount-view-current'
-    btn.title = t('ui.view.switchHint')
-    btn.setAttribute('aria-haspopup', 'menu')
-    const prefix = document.createElement('span')
-    prefix.className = 'qv-view-prefix'
-    prefix.textContent = t('ui.view.label')
-    const label = document.createElement('span')
-    label.className = 'qv-view-current-label'
-    label.textContent = t('ui.view.outline')
-    const caret = document.createElement('span')
-    caret.className = 'qv-view-caret'
-    renderIcon(caret, 'lucide:chevron-down', 'chevron-down')
-    btn.append(prefix, label, caret)
-    btn.addEventListener('click', () =>
-      this.deps.openViewMenu?.(this.mountHost(), entry.id, btn.getBoundingClientRect()),
-    )
-    this.viewBarEl.appendChild(btn)
-  }
-
-  /**
-   * 派生栏：**现算**一批记录（不冻结、不标 stale），抬头说明它是谁。
-   *
-   * 大纲走挂载区自己那一支（`.mount-editor` 的 DOM 是既有断言的契约）；
-   * 列表／表格借视图宿主的渲染器 —— 但那一台不画自己的抬头，也没有「＋」。
-   */
   private loadDerived(host: Block, entry: Extract<MountEntry, { kind: 'derived' }>, focusHint?: string): void {
     const all = derivedRecordsOf(host, this.deps.kb, entry.source)
     const kind = this.deps.derivedKind?.(host, entry.source) ?? 'outline'
@@ -530,7 +488,7 @@ export class MountArea {
     this.renderDerivedHead(host, entry, kind, records.length, all)
     const view = this.viewOf(entry)
     if (view) {
-      this.showView(host, entry, view)
+      this.showView(host, entry)
       return
     }
     this.detachView()
@@ -698,8 +656,7 @@ export class MountArea {
 
   }
 
-  private showView(host: Block, entry: MountEntry, view: ViewConfig): void {
-    this.viewBarEl.hidden = true
+  private showView(host: Block, entry: MountEntry): void {
     /**
      * 大纲的岛根要**从文档里摘掉**，不能 dispose：
      * `EditableBlock.dispose()` 是终态（退订＋卸事件），而摘掉只是为了让同一块
@@ -709,40 +666,47 @@ export class MountArea {
     this.editorEl.hidden = true
     this.emptyEl.hidden = true
     this.viewEl.hidden = false
-    const key = `${entry.id}:${view.id}`
-    if (this.viewKey !== key) {
+    if (entry.kind === 'local') {
+      // 按栏缓存：切 tab／切看法都不换实例（`mount()` ⇒ `sync()` 自会按激活视图换分支）
+      let made = this.tabViews.get(entry.id) ?? null
+      if (!made) {
+        made = this.deps.createView?.(host, entry) ?? null
+        if (made) this.tabViews.set(entry.id, made)
+      }
+      this.view = made
+      this.ownedView = null
+      if (made) {
+        if (made.root.parentElement !== this.viewEl) this.viewEl.replaceChildren(made.root)
+        made.mount()
+        return
+      }
+    } else {
+      // 派生栏：看法（kind）烤在实例里，现造现弃
       this.detachView()
-      // detachView 会把槽藏起来（它同时负责回到大纲）；这里要把它重新露出来
       this.viewEl.hidden = false
       const made = this.deps.createView?.(host, entry) ?? null
-      this.viewKey = key
       this.view = made
+      this.ownedView = made
       if (made) {
         this.viewEl.replaceChildren(made.root)
         made.mount()
         return
       }
-    } else {
-      this.view?.sync()
-      return
     }
     // 装配层没给视图体（这一档还没做渲染器）⇒ 给一句实话而不是空屏
-    if (!this.view) {
-      this.viewEl.replaceChildren()
-      const p = document.createElement('p')
-      p.className = 'tv-unsupported'
-      p.textContent = t('ui.view.unsupported')
-      this.viewEl.appendChild(p)
-    }
+    this.viewEl.replaceChildren()
+    const p = document.createElement('p')
+    p.className = 'tv-unsupported'
+    p.textContent = t('ui.view.unsupported')
+    this.viewEl.appendChild(p)
   }
 
   private detachView(): void {
-    if (this.view) {
-      this.view.dispose()
-      this.view.root.remove()
-    }
+    // 派生栏的实例是现造现弃的；local 栏的实例按栏缓存着，摘下来就行
+    this.ownedView?.dispose()
+    this.ownedView = null
+    if (this.view) this.view.root.remove()
     this.view = null
-    this.viewKey = ''
     this.viewEl.hidden = true
     this.viewEl.replaceChildren()
     // 摘掉视图体之后把大纲的岛根挂回去（编辑器实例一直还在）
@@ -785,49 +749,5 @@ export class MountArea {
   }
 
   /* ------------------------------------------------------------ 数据 */
-
-  /**
-   * 一栏的 roots（＋ 每个装载根的面包屑）。
-   *
-   * 只服务 `local`：它是「这一块下面的…」⇒ 锚点＝宿主块
-   * （与中心查询块同一条口径：它的锚点也是它所在的容器）。
-   * **派生栏不走这里**：它的记录由 `derivedRecordsOf` 现算（不给子树锚点 ——
-   * 那些块本来就在别处，关进宿主子树会让引用／提及栏恒空）。
-   *
-   * ⚠️ `excludeIds` 与 `selfId` **分开给**：`selfId` 只负责解析 `'$self'`，
-   *    剔除走 `excludeIds`。两者曾经是同一个字段，于是「想解析它，又不得不排除它」
-   *    这种形状无法表达。
-   */
-  private rootsFor(host: Block, entry: MountEntry): MountRoots {
-    const spec = this.specFor(entry)
-    if (!spec) return { roots: [], contexts: new Map() }
-    const hits = this.deps.kb.query(spec, { selfId: host.id, scopeId: host.id, excludeIds: [host.id] })
-    return this.topLevel(hits)
-  }
-
-  /** 一栏的条件：local 自己带着（面板查询不指向任何块） */
-  private specFor(entry: MountEntry): QuerySpec | null {
-    return entry.kind === 'local' ? entry.spec : null
-  }
-
-  private topLevel(hits: readonly { blockId: string; path: string[] }[]): MountRoots {
-    const ids = new Set(hits.map((h) => h.blockId))
-    const roots: Block[] = []
-    const contexts = new Map<string, readonly Block[]>()
-    for (const h of hits) {
-      if (h.path.some((id) => ids.has(id))) continue
-      const live = this.deps.store.find(h.blockId)
-      if (!live) continue
-      roots.push(live)
-      // 顶层根没有祖先 ⇒ 不画面包屑（它自己那一行已经有名字了）
-      if (h.path.length > 0) {
-        contexts.set(
-          h.blockId,
-          h.path.map((id) => this.deps.store.find(id)).filter((b): b is Block => b !== undefined),
-        )
-      }
-    }
-    return { roots, contexts }
-  }
 
 }
