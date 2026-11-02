@@ -16,6 +16,7 @@
  *
  * 输入框只在**失焦/Enter** 才提交：逐字符写会把 IME 的组合中间态写成正文。
  */
+import { onCommitKeys } from './keys.ts'
 import {
   choiceScopeOf,
   choiceVisible,
@@ -180,13 +181,12 @@ export class ChoicesEditor {
         this.deps.write.setLabel(choice.id, next)
         this.render()
       }
-      name.addEventListener('keydown', (e) => {
-        // 组合期只让输入法自己处理：Enter 常常是选词那一下
-        if (e.key !== 'Enter' || e.isComposing) return
-        e.preventDefault()
-        e.stopPropagation()
-        commit()
-        name.blur()
+      onCommitKeys(name, {
+        stop: true,
+        commit: () => {
+          commit()
+          name.blur()
+        },
       })
       name.addEventListener('blur', commit)
     } else {
@@ -520,13 +520,7 @@ export class ChoicesEditor {
       doAdd()
     })
     add.addEventListener('click', () => doAdd())
-    input.addEventListener('keydown', (e) => {
-      // 组合期只让输入法自己处理：Enter 常常是选词那一下
-      if (e.key !== 'Enter' || e.isComposing) return
-      e.preventDefault()
-      e.stopPropagation()
-      doAdd()
-    })
+    onCommitKeys(input, { stop: true, commit: doAdd })
     return form
   }
 }
