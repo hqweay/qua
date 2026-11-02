@@ -1,15 +1,20 @@
 /* ---------------------------------------------------------------- 条件树
-   就地展开的「组 ＋ 叶子行」：缩进与竖线复用块编辑器的 token，
-   所以它看起来是正文的一部分，不是嵌进来的一张表单。 */
+   就地展开的「组 ＋ 叶子行」：缩进与竖线复用块编辑器的 token。
+
+   它是一块**卡片**：条件与结果回答两个问题（「选哪些」与「选出来什么」），
+   同底色会让它们连成一片。卡片给一层边框与内边距，把条件从结果区里分出来。 */
 .queryview-tree {
-  border-top: 1px solid var(--ui-border-subtle);
-  padding: var(--ui-gap-1) var(--ui-gap-3) var(--ui-gap-2);
+  margin: var(--ui-gap-2) 0 var(--ui-gap-1);
+  padding: var(--ui-gap-2) var(--ui-gap-3) var(--ui-gap-3);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface);
 }
 
 .qt {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-gap-1);
+  gap: var(--ui-gap-2);
   min-width: 0;
 }
 
@@ -17,26 +22,30 @@
   display: flex;
   align-items: center;
   gap: var(--ui-gap-2);
-  min-height: var(--ui-row-h);
+  min-height: 24px;
   font-size: var(--ui-fs-xs);
   color: var(--ui-text-tertiary);
 }
 .qt-title {
   color: var(--ui-text-secondary);
+  font-weight: var(--ui-fw-medium);
 }
 .qt-count {
   font-variant-numeric: tabular-nums;
 }
 .qt-close {
   margin-left: auto;
-  padding: 0 var(--ui-gap-1);
+  height: 24px;
+  padding: 0 var(--ui-gap-2);
   border: 0;
+  border-radius: var(--ui-radius-sm);
   background: transparent;
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-xs);
   cursor: pointer;
 }
 .qt-close:hover {
+  background: var(--ui-bg-hover);
   color: var(--ui-text);
 }
 
@@ -49,35 +58,50 @@
 .qt-group-head {
   display: flex;
   align-items: center;
-  gap: var(--ui-gap-1);
-  min-height: var(--ui-row-h);
+  gap: var(--ui-gap-2);
+  min-height: 24px;
   padding-left: var(--ui-gap-2);
   font-size: var(--ui-fs-xs);
 }
-/* 组头只放短词：且／或 ＋ 非。长句在树上重复 N 次就是噪声 */
+/* 组头只放短词：且／或 ＋ 非。长句在树上重复 N 次就是噪声。
+   「且／或」是一个**看得见的下拉**（保留原生箭头）：它是控件，不是一段紫字。 */
 .qt-mode {
-  appearance: none;
-  border: 0;
-  border-radius: var(--ui-radius-sm);
-  background: transparent;
-  color: var(--ui-accent);
-  font: inherit;
+  height: 22px;
   padding: 0 var(--ui-gap-1);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface);
+  color: var(--ui-text-secondary);
+  font: inherit;
   cursor: pointer;
 }
 .qt-mode:hover {
-  background: var(--ui-surface-raised);
+  border-color: var(--ui-border);
 }
+/* 「非」是一枚开关：勾上时整枚变强调色，而不是只有一个 12px 的小方框 */
 .qt-not {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--ui-gap-1);
+  height: 22px;
+  padding: 0 var(--ui-gap-2);
+  border-radius: var(--ui-radius-pill);
   color: var(--ui-text-secondary);
   font-size: var(--ui-fs-xs);
   cursor: pointer;
 }
+.qt-not:hover {
+  background: var(--ui-bg-hover);
+}
+.qt-not:has(input:checked) {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
 .qt-not input {
+  width: 13px;
+  height: 13px;
   margin: 0;
+  accent-color: var(--ui-accent);
 }
 
 /* 每级缩进 = --ui-indent；竖线用伪元素画，不占布局（否则缩进会多 1px） */
@@ -97,6 +121,13 @@
   bottom: 2px;
   width: 1px;
   background: var(--ui-rail);
+}
+/* 空条件没有组头，也就没有「子项」：竖线与缩进都没有指代对象，去掉 */
+.qt-group[data-qt-empty-root='1'] > .qt-children {
+  margin-left: 0;
+}
+.qt-group[data-qt-empty-root='1'] > .qt-children::before {
+  display: none;
 }
 
 .qt-row {
@@ -134,13 +165,23 @@
 .qt-sort-col,
 .qt-sort-dir {
   max-width: 16rem;
-  height: calc(var(--ui-row-h) - 4px);
-  padding: 0 var(--ui-gap-1);
-  border: 1px solid var(--ui-border);
+  height: 26px;
+  padding: 0 var(--ui-gap-2);
+  border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-sm);
   background: var(--ui-surface);
   color: var(--ui-text);
   font-size: var(--ui-fs-sm);
+}
+.qt-value:focus-visible,
+.qt-kind:focus-visible,
+.qt-field:focus-visible,
+.qt-op:focus-visible,
+.qt-scope:focus-visible,
+.qt-limit:focus-visible,
+.qt-sort-col:focus-visible,
+.qt-sort-dir:focus-visible {
+  border-color: var(--ui-accent);
 }
 .qt-value.ui-input {
   width: auto;
@@ -238,20 +279,48 @@
   color: var(--ui-text);
 }
 
+/*
+  选项是一组**字段**，不是一句话：标签在上、控件在下，三项按内容宽排。
+  旧写法把标签和控件挤在同一行，控件宽窄不一（限数框被拉成一整条），
+  读起来像一张没对齐的表单。
+*/
 .qt-opts {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: var(--ui-gap-3);
-  padding: var(--ui-gap-2) var(--ui-gap-2) 0;
+  align-items: flex-end;
+  gap: var(--ui-gap-2) var(--ui-gap-5);
+  padding-top: var(--ui-gap-2);
   border-top: 1px solid var(--ui-border-subtle);
   color: var(--ui-text-secondary);
-  font-size: var(--ui-fs-xs);
 }
 .qt-opt {
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ui-gap-1);
+}
+.qt-opt-label {
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-2xs);
+}
+.qt-opt-controls {
+  display: flex;
   align-items: center;
   gap: var(--ui-gap-1);
+}
+.qt-opt--limit .qt-limit {
+  width: 5.5em;
+  max-width: 5.5em;
+}
+.qt-opt--sort .qt-sort-col {
+  width: 9em;
+}
+.qt-opt--sort .qt-sort-dir {
+  width: 5em;
+}
+.qt-sort-dir:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .qt-foot {
   display: flex;
@@ -263,23 +332,19 @@
   cursor: not-allowed;
 }
 
-/* 空态：图标 40px ＋ 标题 ＋ 一句 ＋ 一个主动作（不只一句「没有结果」） */
+/* 空态：标题 ＋ 一句实话 ＋ 一个主动作（不摆一张占位的图） */
 .qt-empty {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: var(--ui-gap-1);
-  padding: var(--ui-gap-3) var(--ui-gap-2);
+  padding: var(--ui-gap-2) var(--ui-gap-2);
   color: var(--ui-text-tertiary);
-}
-.qt-empty-icon svg {
-  width: 40px;
-  height: 40px;
 }
 .qt-empty-title {
   color: var(--ui-text);
   font-size: var(--ui-fs-sm);
-  font-weight: 500;
+  font-weight: var(--ui-fw-medium);
 }
 .qt-empty-hint {
   font-size: var(--ui-fs-xs);

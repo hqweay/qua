@@ -1620,7 +1620,7 @@ const app: App = {
    * 是数据。菜单项由 `_views` 现画，选中之后仍走命令面（`core.view/*`）——
    * 于是撤销、落盘、审计只有一条路（与「菜单由绑定表渲染」同一条纪律的延伸）。
    */
-  openViewMenu: (owner) => {
+  openViewMenu: (owner, dropdownAnchor) => {
     /**
      * **露面块不拥有视图配置**：`_embed = { block, view }` 只有一格选择。
      * 同一个「视图…」入口在露面块上编辑的是**那根指针**（跟随源／大纲／源的命名视图）——
@@ -1705,10 +1705,17 @@ const app: App = {
         group: 'view/9-add',
       })
     }
-    const anchor = owner.kind === 'block' ? (app.ed.blockEl(owner.blockId)?.getBoundingClientRect() ?? null) : null
+    /**
+     * 下拉（来自抬头那颗「当前看法」按钮）自带锚点；块菜单那条入口没有，
+     * 退回「聚焦块的块标」——两条路打开的是同一份菜单。
+     */
+    const anchor =
+      dropdownAnchor ??
+      (owner.kind === 'block' ? (app.ed.blockEl(owner.blockId)?.getBoundingClientRect() ?? null) : null)
     layers.openMenu({
       rows,
       anchor,
+      ...(dropdownAnchor ? { width: 260 } : {}),
       title: t('menu.label.views'),
       searchable: false,
       onPick: (row) => {
