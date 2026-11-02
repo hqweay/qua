@@ -1119,17 +1119,6 @@
 .mount-body {
   margin-top: var(--ui-gap-2);
 }
-/*
-  大纲分支的视图切换条：只有一颗下拉。
-  非大纲时视图宿主自带抬头（条数/条件/切换/刷新），这一条只在**大纲**时补位——
-  所以它没有自己的标题与统计，只负责「切回去」。
-*/
-.mount-viewbar {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-gap-2);
-  margin-bottom: var(--ui-gap-2);
-}
 /* 派生栏抬头：这一栏是什么 ＋ 条数 ＋ 三种看法 ＋ 更多。
    它没有拥有者，所以这颗抬头只做「说明 ＋ 切看法」，没有刷新/新建/改名。 */
 .mount-derived-head {
