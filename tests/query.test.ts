@@ -29,11 +29,13 @@ import {
   runQuery,
   resolveSelfSpec,
   usesSelf,
+  isQueryNode,
   specChanged,
   queryByIndex,
   rebuild,
   BlockStore,
   TASK_STATUS_PROP_ID,
+  type QueryNode,
   type QuerySpec,
 } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
@@ -86,6 +88,16 @@ function fixture() {
   const d = forest[0]!.children.find((x) => x.id === 'd')!
   d.content.push({ id: 'at1', t: 'ref', to: 'c', label: '丙' })
   return { blocks: [...forest, todo], todo }
+}
+
+/**
+ * 「在某一天下面」：某个祖先既是日记块、日期又等于那一天。
+ *
+ * 方向（`up`）与条件（`all[role, prop]`）是正交两轴 ⇒ 它可以进 `any`／`not`，
+ * 也不改变候选集；天自己不会入选（自己的祖先链里没有自己）。
+ */
+function dayPath(date: string): QueryNode {
+  return { up: { all: [{ role: 'journal' }, { prop: { id: '_date', eq: date } }] } }
 }
 
 test('标签按**归属**判定（不扫文本）：正文里写 #todo 不成标签', () => {
@@ -162,11 +174,11 @@ test('runQuery：**有槽未填**的块按「未完成」命中（与渲染同�
   assert.ok(!hits.some((h) => h.blockId === 'j1b'), '没有这一栏的块仍不该命中')
 })
 
-test('runQuery：journal 条件取那天的**子块**，不含只读日期行本身', () => {
+test('runQuery：路径条件（up）取那天的**子块**，不含只读日期行本身', () => {
   const { blocks } = fixture()
   assert.ok(findJournalDay(blocks, '2026-10-20'))
-  // ⚠️ 一个 node 只能是一种形态：写成 `{ journal, all: [] }` 会被 `'all' in node` 先命中（恒真）
-  const hits = runQuery({ where: { journal: '2026-10-20' }, scope: 'all' }, { blocks })
+  // 「在某一天下面」是纯谓词：某个祖先既是日记块、日期又等于那一天
+  const hits = runQuery({ where: dayPath('2026-10-20'), scope: 'all' }, { blocks })
   assert.deepEqual(hits.map((h) => h.blockId), ['j1a', 'j1b'], '日期行 j1 不该在结果里')
 })
 
@@ -274,7 +286,7 @@ test('索引路径与纯函数路径同解（ref/tag/journal 查表，判定与�
   assertSameHits({ where: { tag: 'todo' } }, blocks)
   assertSameHits({ where: { tag: 'todo' }, scope: 'all' }, blocks, { anchorId: 'p1' })
   assertSameHits({ where: { ref: 'c' }, scope: 'all' }, blocks)
-  assertSameHits({ where: { journal: '2026-10-20' }, scope: 'all' }, blocks)
+  assertSameHits({ where: dayPath('2026-10-20'), scope: 'all' }, blocks)
   assertSameHits({ where: { all: [{ tag: 'todo' }, { prop: { id: TASK_STATUS_PROP_ID, eq: false } }] }, scope: 'all' }, blocks)
   assertSameHits({ where: { text: '丙' }, scope: 'all' }, blocks)
   assertSameHits({ where: { tag: 'todo' }, scope: 'all', limit: 2 }, blocks)
@@ -567,7 +579,7 @@ test('U3 同一个带 $self 的 spec：纯路径与索引路径结果相等', ()
     selfId: j.id,
   })
   assertSameHits({ where: { tag: '$self' }, scope: 'all' }, blocks, { selfId: host.id })
-  assertSameHits({ where: { journal: '$self' }, scope: 'all' }, blocks, { selfId: j.id })
+  assertSameHits({ where: dayPath('$self'), scope: 'all' }, blocks, { selfId: j.id })
   assertSameHits({ where: { ref: '$self' }, scope: 'all' }, blocks, { selfId: j.id })
 })
 
@@ -576,7 +588,7 @@ test('U4 selfId 缺省 ＋ spec 含 $self ⇒ 空结果（不退回全库）', (
   // 若「解析不了」退化成「条件被忽略」，这里会返回整库
   assert.deepEqual(runQuery({ where: { ref: '$self' }, scope: 'all' }, { blocks }), [])
   assert.deepEqual(runQuery({ where: { text: '$self' }, scope: 'all' }, { blocks }), [])
-  assert.deepEqual(runQuery({ where: { journal: '$self' }, scope: 'all' }, { blocks }), [])
+  assert.deepEqual(runQuery({ where: dayPath('$self'), scope: 'all' }, { blocks }), [])
   // 不含 `$self` 的条件不受影响：没有宿主也照常求值
   assert.equal(runQuery({ where: { tag: '项目' }, scope: 'all' }, { blocks }).length, 2)
 })
@@ -593,10 +605,10 @@ test('U5 {tag:$self} 命中同标签的块；「不含宿主自己」是 `exclud
   )
 })
 
-test('U6 {journal:$self} 等价于写死那一天的日期', () => {
+test('U6 路径条件里的 $self 等价于写死那一天的日期', () => {
   const { blocks, j } = selfFixture()
-  const viaSelf = runQuery({ where: { journal: '$self' }, scope: 'all' }, { blocks, selfId: j.id })
-  const literal = runQuery({ where: { journal: '2026-10-26' }, scope: 'all' }, { blocks })
+  const viaSelf = runQuery({ where: dayPath('$self'), scope: 'all' }, { blocks, selfId: j.id })
+  const literal = runQuery({ where: dayPath('2026-10-26'), scope: 'all' }, { blocks })
   assert.deepEqual(viaSelf, literal)
   assert.deepEqual(viaSelf.map((h) => h.blockId), ['j1a', 'j1b'])
 })
@@ -630,9 +642,9 @@ test('U6c 宿主的可读文本为空 ⇒ 提及是空集（空串不能当值�
   assert.deepEqual(runQuery({ where: { text: '$self' }, scope: 'all' }, { blocks: withBare, selfId: bare.id }), [])
 })
 
-test('U6d 宿主没有日期 ⇒ {journal:$self} 是空集（不是「全部日记」）', () => {
+test('U6d 宿主没有日期 ⇒ 路径里的 $self 是空集（不是「全部日记」）', () => {
   const { blocks, host } = selfFixture()
-  assert.deepEqual(runQuery({ where: { journal: '$self' }, scope: 'all' }, { blocks, selfId: host.id }), [])
+  assert.deepEqual(runQuery({ where: dayPath('$self'), scope: 'all' }, { blocks, selfId: host.id }), [])
 })
 
 test('resolveSelfSpec：不改入参，且嵌套组合里的 $self 也解析', () => {
@@ -651,4 +663,222 @@ test('宿主自己不进结果：靠 `excludeIds`，**不靠** `selfId` 顺带�
   assert.deepEqual(runQuery(spec, { blocks, excludeIds: [host.id] }).map((h) => h.blockId), ['s1'])
   // ⚠️ 只给 selfId 时**不再**顺带剔除：`$self` 的解析与「结果剔除谁」是两条独立规则
   assert.deepEqual(runQuery(spec, { blocks, selfId: host.id }).map((h) => h.blockId), [host.id, same.id])
+})
+
+/* ------------------------------------------------------------ 方向原子（is／up／down／near） */
+
+/**
+ * 两天各有一批子块 ＋ 一个不在任何一天的块 ＋ 一条三层链。
+ *
+ * 这组数据同时覆盖四件事：`up` 能区分两天（旧范围原子只认第一个）、
+ * `down` 能沿子树走、`near` 是三者之并、`is` 不改变候选集。
+ */
+function pathFixture() {
+  const forest: Block[] = [
+    b('j1', '', {
+      props: { _date: '2026-10-20' },
+      children: [b('j1a', '甲那天的记录'), b('j1b', '甲那天的第二条')],
+    }),
+    b('j2', '', { props: { _date: '2026-10-21' }, children: [b('j2a', '乙那天的记录')] }),
+    b('loose', '不在任何一天'),
+    b('deep1', '深层一', { children: [b('deep2', '深层二', { children: [b('deep3', '深层目标')] })] }),
+  ]
+  return { blocks: forest }
+}
+
+const hitIds = (spec: QuerySpec, blocks: Block[], opts: { selfId?: string } = {}): string[] =>
+  runQuery(spec, { blocks, ...opts }).map((h) => h.blockId)
+
+test('A1 路径条件可组合：any 里两天各一支，两天的子块都在', () => {
+  const { blocks } = pathFixture()
+  assert.deepEqual(hitIds({ where: { any: [dayPath('2026-10-20'), dayPath('2026-10-21')] }, scope: 'all' }, blocks), [
+    'j1a',
+    'j1b',
+    'j2a',
+  ])
+})
+
+test('A2 any 里路径与别的条件并集（路径不再吞掉其它分支）', () => {
+  const { blocks } = pathFixture()
+  assert.deepEqual(hitIds({ where: { any: [dayPath('2026-10-20'), { text: '不在任何一天' }] }, scope: 'all' }, blocks), [
+    'j1a',
+    'j1b',
+    'loose',
+  ])
+})
+
+test('A3 not 路径：非空，且不含那一天的子块', () => {
+  const { blocks } = pathFixture()
+  const ids = hitIds({ where: { not: dayPath('2026-10-20') }, scope: 'all' }, blocks)
+  assert.ok(ids.length > 0, '否定条件不该是空集')
+  assert.equal(ids.includes('j1a'), false)
+  assert.equal(ids.includes('j1b'), false)
+  assert.ok(ids.includes('loose'))
+  assert.ok(ids.includes('j2a'))
+})
+
+test('A4 新形状与旧 journal 语义逐条相等：命中那天的子块、日期行自己不在结果里', () => {
+  const { blocks } = pathFixture()
+  const day = findJournalDay(blocks, '2026-10-20')
+  assert.ok(day)
+  const expected = day.children.map((c) => c.id)
+  assert.deepEqual(hitIds({ where: dayPath('2026-10-20'), scope: 'all' }, blocks), expected)
+  assert.equal(expected.includes('j1'), false)
+})
+
+test('A5 {down} 命中「子树里有它」的祖先，不含自己', () => {
+  const { blocks } = pathFixture()
+  assert.deepEqual(hitIds({ where: { down: { text: '深层目标' } }, scope: 'all' }, blocks), ['deep1', 'deep2'])
+})
+
+test('A6 {near} ＝ 自己 ∪ 祖先 ∪ 子孙（三处都命中同一条件）', () => {
+  const { blocks } = pathFixture()
+  const c: QueryNode = { text: '深层二' }
+  const all = hitIds({ where: { text: '' }, scope: 'all' }, blocks)
+  const up = new Set(hitIds({ where: { up: c }, scope: 'all' }, blocks))
+  const down = new Set(hitIds({ where: { down: c }, scope: 'all' }, blocks))
+  const self = new Set(hitIds({ where: c, scope: 'all' }, blocks))
+  assert.deepEqual(new Set([...up, ...down, ...self]), new Set(['deep1', 'deep2', 'deep3']), '三支都要有命中')
+  assert.deepEqual(
+    hitIds({ where: { near: c }, scope: 'all' }, blocks),
+    all.filter((id) => up.has(id) || down.has(id) || self.has(id)),
+    'near 是三者之并，顺序仍按森林先序',
+  )
+})
+
+test('A7 方向原子可嵌套：{up:{down:…}} 有结果且不重复', () => {
+  /**
+   * ⚠️ 必须让「某个祖先」与「直接父块」给出不同答案，否则这条断言在
+   * 「只看直接父块」的实现下也是绿的（反向验证会抓不住）。
+   *
+   *   gp
+   *     parent
+   *       b        ← b 的直接父块子树里没有 X，但祖父的子树里有
+   *     other
+   *       x（X）   ← X 在 b 的叔伯分支里
+   */
+  const blocks: Block[] = [
+    b('gp', '祖父', {
+      children: [
+        b('parent', '父', { children: [b('b', '孙')] }),
+        b('other', '旁支', { children: [b('x', '深层目标')] }),
+      ],
+    }),
+  ]
+  const ids = hitIds({ where: { up: { down: { text: '深层目标' } } }, scope: 'all' }, blocks)
+  assert.deepEqual(ids, ['parent', 'b', 'other', 'x'])
+  assert.equal(new Set(ids).size, ids.length, '同一块只许出现一次')
+})
+
+test('A8 any 里路径条件换顺序结果不变（不再「只取第一个日期」）', () => {
+  const { blocks } = pathFixture()
+  const a = hitIds({ where: { any: [dayPath('2026-10-20'), dayPath('2026-10-21')] }, scope: 'all' }, blocks)
+  const swapped = hitIds({ where: { any: [dayPath('2026-10-21'), dayPath('2026-10-20')] }, scope: 'all' }, blocks)
+  assert.deepEqual(a, swapped)
+  assert.deepEqual(a, ['j1a', 'j1b', 'j2a'])
+})
+
+test('A9 canonicalSpec：四个新原子逐支存活（漏一支＝存进 _query 就被丢掉）', () => {
+  const spec: QuerySpec = {
+    where: {
+      all: [
+        { is: 'x' },
+        { up: { text: '甲' } },
+        { down: { tag: 'todo' } },
+        { near: { not: { ref: 'r' } } },
+      ],
+    },
+    scope: 'all',
+  }
+  assert.deepEqual(canonicalSpec(spec), spec)
+  assert.equal(
+    JSON.stringify(canonicalSpec({ where: { up: { tag: 'x' } } })),
+    '{"where":{"up":{"tag":"x"}}}',
+    '方向原子要原样带走，不能落成别的支',
+  )
+})
+
+test('A10 isQueryNode：四个新原子验形通过、畸形拒绝；旧 journal 原子已不合法', () => {
+  assert.equal(isQueryNode({ is: 'x' }), true)
+  assert.equal(isQueryNode({ is: '' }), false, '空 id 永远命中不了，读出来就是坏条件')
+  assert.equal(isQueryNode({ is: 1 }), false)
+  assert.equal(isQueryNode({ up: { text: 'x' } }), true)
+  assert.equal(isQueryNode({ up: 'x' }), false)
+  assert.equal(isQueryNode({ down: { tag: 'x' } }), true)
+  assert.equal(isQueryNode({ down: [] }), false)
+  assert.equal(isQueryNode({ near: { not: { ref: 'x' } } }), true)
+  assert.equal(isQueryNode({ near: null }), false)
+  assert.equal(isQueryNode({ journal: '2026-10-20' }), false, '退场的范围原子不许被当成合法条件')
+})
+
+test('A11 索引路径与纯函数路径同解：方向原子也逐条相等', () => {
+  const { blocks } = pathFixture()
+  assertSameHits({ where: { any: [dayPath('2026-10-20'), dayPath('2026-10-21')] }, scope: 'all' }, blocks)
+  assertSameHits({ where: { not: dayPath('2026-10-20') }, scope: 'all' }, blocks)
+  assertSameHits({ where: { down: { text: '深层目标' } }, scope: 'all' }, blocks)
+  assertSameHits({ where: { near: { text: '深层二' } }, scope: 'all' }, blocks)
+  assertSameHits({ where: { up: { down: { text: '深层目标' } } }, scope: 'all' }, blocks)
+  assertSameHits({ where: { is: 'deep2' }, scope: 'all' }, blocks)
+})
+
+test('A12 {down} 一次求值是线性的：深度 5 的 1000 块 < 5ms，深链上每块只走一次', () => {
+  const spec: QuerySpec = { where: { down: { text: '深层目标' } }, scope: 'all' }
+  /** 门禁并发会让单次抖动 ⇒ 先热一次，再取三次里最好的一次 */
+  const bestOf3 = (blocks: Block[]): number => {
+    runQuery(spec, { blocks })
+    let best = Number.POSITIVE_INFINITY
+    for (let i = 0; i < 3; i++) {
+      const t0 = performance.now()
+      runQuery(spec, { blocks })
+      best = Math.min(best, performance.now() - t0)
+    }
+    return best
+  }
+
+  // ① 计划里的形状：1000 块、深度 5
+  const shallow: Block[] = []
+  for (let i = 0; i < 200; i++) {
+    let node = b(`l${i}-5`, '深层目标')
+    for (let d = 4; d >= 1; d--) node = b(`l${i}-${d}`, '链', { children: [node] })
+    shallow.push(node)
+  }
+  const shallowMs = bestOf3(shallow)
+  assert.ok(shallowMs < 5, `1000 块深度 5 的 {down} 求值应 < 5ms，实测 ${shallowMs.toFixed(2)}ms`)
+
+  /**
+   * ② 真正暴露「逐候选各走一遍子树」的形状：一条 1000 深的链。
+   *
+   * 不能只看耗时 —— 候选遍历本身就要为每条命中拷一次祖先路径，深链上那是 O(n²)，
+   * 会把 `down` 的实现代价盖住。这里数**读了几次子块表与正文**：
+   * 记忆化实现每块各一次；逐候选重走子树会读 O(n²) 次。
+   */
+  let childReads = 0
+  let textReads = 0
+  let deep = b('c-999', '深层目标')
+  Object.defineProperty(deep, 'content', {
+    get: () => {
+      textReads += 1
+      return textRuns('深层目标')
+    },
+  })
+  for (let i = 998; i >= 0; i--) {
+    const child = deep
+    const kids = [child]
+    deep = b(`c-${i}`, '链')
+    Object.defineProperty(deep, 'children', {
+      get: () => {
+        childReads += 1
+        return kids
+      },
+    })
+    Object.defineProperty(deep, 'content', {
+      get: () => {
+        textReads += 1
+        return textRuns('链')
+      },
+    })
+  }
+  runQuery(spec, { blocks: [deep] })
+  assert.ok(childReads <= 5000, `子块表被读了 ${childReads} 次（逐候选重走子树会是 O(n²)）`)
+  assert.ok(textReads <= 5000, `正文条件被读了 ${textReads} 次（每块只该判一次）`)
 })

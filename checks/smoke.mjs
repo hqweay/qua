@@ -11665,7 +11665,9 @@ await check('T134 日记的自定义栏跟随今天：加一栏 ⇒ 推到明天
   //    ⚠️ 日记宿主是 `{kind:'journal'}` —— 它的栏住**设备状态**，不在任何块上
   await page.evaluate(
     ({ label, date }) => {
-      const spec = { where: { journal: '$self' } }
+      const spec = {
+        where: { up: { all: [{ role: 'journal' }, { prop: { id: '_date', eq: '$self' } }] } },
+      }
       window.__qua.invoke('core.mount/add-local', { host: { kind: 'journal' }, label, spec })
       void date
     },

@@ -124,7 +124,7 @@ import {
  *            收端 `validate`、读侧这里三处共用；「什么算坏只能有一个答案」）。
  *            旧库若带历史脏值，会从「静默回落」变成「判 corrupt」⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 32
+export const WORKSPACE_VERSION = 33
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

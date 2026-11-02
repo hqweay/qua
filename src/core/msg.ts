@@ -455,6 +455,26 @@ export const MSG = {
   'ui.query.label.empty': '{name} 为空',
   'ui.query.label.notEmpty': '{name} 非空',
   'ui.query.label.cmp': '{name} {op} {value}',
+  /* 条件树的词：方向与条件是两轴，组头只留短词（长句在树上重复 N 次就是噪声） */
+  'ui.query.kind.path': '路径',
+  'ui.query.kind.is': '就是这一块',
+  'ui.query.kind.role': '角色',
+  'ui.query.role.journal': '日记',
+  'ui.query.group.and': '且',
+  'ui.query.group.or': '或',
+  'ui.query.group.not': '非',
+  'ui.query.group.addAnd': '再加一个「且」组',
+  'ui.query.group.addOr': '再加一个「或」组',
+  'ui.query.group.addNot': '再加一个「非」组',
+  'ui.query.up': '上级满足',
+  'ui.query.down': '下级满足',
+  'ui.query.near': '自身或上下级满足',
+  'ui.query.relative.today': '今天',
+  'ui.query.relative.offset': '今天 {n} 天',
+  'ui.query.usePageDate': '按本页日期',
+  'ui.query.jsonOnly': '这条条件只能用 JSON 编辑（树上还表达不了）',
+  'ui.query.tree.add': '加一条条件',
+  'ui.query.empty.action': '改成全库',
 
   /* -------------------------------------------------- 视图（一个块怎么看）
      口径：说「视图／表格／大纲」，不出现 `_views`/`QuerySpec` 这类存储名。 */

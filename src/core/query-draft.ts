@@ -118,7 +118,7 @@ function literalText(v: unknown): string {
 /**
  * 一份条件 → 草稿。
  *
- * 拆不动（`not`、嵌套组合、`journal`／`ref`／`role`、`all:[]`）⇒ `verbatim` 带上原样的
+ * 拆不动（`not`、嵌套组合、`is`／`up`／`down`／`near`／`ref`／`role`、`all:[]`）⇒ `verbatim` 带上原样的
  * canonical JSON，界面改用 JSON 编辑。**不猜**：把「拆不动」显示成「拆了一半」，
  * 等于让用户在一次无关的编辑里丢掉剩下的条件。
  *

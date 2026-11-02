@@ -89,12 +89,15 @@ test('「待办」那一行是**预设**：展开成属性条件，再按属性�
   ])
 })
 
-test('拆不动就整份走 JSON：`not`、嵌套组合、`ref`／`journal`／`role`、多键排序', () => {
+test('拆不动就整份走 JSON：`not`、嵌套组合、`is`／`up`／`down`／`near`／`ref`／`role`、多键排序', () => {
   const hard: QuerySpec[] = [
     { where: { not: { tag: '任务' } } },
     { where: { all: [{ any: [{ tag: 'a' }, { tag: 'b' }] }] } },
     { where: { ref: 'x' } },
-    { where: { journal: '2026-10-26' } },
+    { where: { is: 'x' } },
+    { where: { up: { text: 'x' } } },
+    { where: { down: { tag: 'x' } } },
+    { where: { near: { ref: 'x' } } },
     { where: { role: 'journal' } },
     { where: { tag: '任务' }, sort: [{ by: 'a', dir: 'asc' }, { by: 'b', dir: 'desc' }] },
   ]
