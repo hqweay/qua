@@ -164,6 +164,7 @@ import {
   visibleRowHeight,
 } from './block-dom.ts'
 import { assetViewOf, markAssetMissing } from './asset-views.ts'
+import { DeferredFlush } from './deferred-flush.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
 import { bindEditorEvents, type AtomMenuHit, type RefClickHit, type RefClickMods, type TriggerQuery } from './editor-events.ts'
 
@@ -736,11 +737,7 @@ export class BlockEditor {
    * （那时重排会打断输入），一旦焦点离开编辑岛就补上。
    */
   private armFlush(): void {
-    if (this.pendingTimer !== null) window.clearTimeout(this.pendingTimer)
-    this.pendingTimer = window.setTimeout(() => {
-      this.pendingTimer = null
-      this.flushPendingReload()
-    }, 200)
+    this.flusher.arm()
   }
 
   setPointerDown(down: boolean): void {
@@ -1304,7 +1301,7 @@ export class BlockEditor {
    */
   private pendingReload = false
   /** 推迟重排的补做计时器（见 `deferReload`） */
-  private pendingTimer: number | null = null
+  private readonly flusher = new DeferredFlush(() => this.flushPendingReload())
   /** 指针是否按着（按下期间不重排，否则按钮的 `click` 会被搬走） */
   private pointerDown = false
 
