@@ -1045,10 +1045,7 @@ export class BlockEditor {
     }
     this.disposeRowBody(id)
     el.replaceWith(this.makeBlockEl(row, gutterFieldsOf(row.block, this.store.blocks)))
-    // 被换掉的那个元素带着 `data-caret` ⇒ 缓存与标记都要重来
-    this.caretMarks = ''
-    this.markCaret()
-    this.paintBlockSel()
+    this.repaintOverlays()
   }
 
   /**
@@ -1304,6 +1301,13 @@ export class BlockEditor {
   private readonly flusher = new DeferredFlush(() => this.flushPendingReload())
   /** 指针是否按着（按下期间不重排，否则按钮的 `click` 会被搬走） */
   private pointerDown = false
+
+  /** 行元素被换过 ⇒ `data-caret` 跟着旧元素丢了：缓存作废，光标标记与块选区漆层重打 */
+  private repaintOverlays(): void {
+    this.caretMarks = ''
+    this.markCaret()
+    this.paintBlockSel()
+  }
 
   private markCaret(): void {
     const id = this.sel?.aBlock ?? ''
@@ -1805,20 +1809,17 @@ export class BlockEditor {
   }
 
   undoStep(): void {
-    this.editBase = null
-    const r = this.store.undo(this, this.sel)
-    if (!r) return
-    // 撤销产出的 op 与一次普通编辑同路：交回装配层，并进待落盘队列（增量写盘）
-    this.events.undoOps?.(r.ops)
-    this.sel = r.sel
-    this.reloadFromStore(false)
-    this.restoreSel()
-    this.emitChange('struct')
+    this.undoRedoStep('undo')
   }
 
   redoStep(): void {
+    this.undoRedoStep('redo')
+  }
+
+  /** 撤销/重做同一支：产出的 op 与一次普通编辑同路（交回装配层，并进待落盘队列） */
+  private undoRedoStep(dir: 'undo' | 'redo'): void {
     this.editBase = null
-    const r = this.store.redo(this, this.sel)
+    const r = dir === 'undo' ? this.store.undo(this, this.sel) : this.store.redo(this, this.sel)
     if (!r) return
     this.events.undoOps?.(r.ops)
     this.sel = r.sel
@@ -1886,6 +1887,17 @@ export class BlockEditor {
    * 整块内容比较（不是「这一笔改了没有」）保证这件事**幂等**：没有边界外改动时，
    * 内容与时间都不动，一笔事务都不产生。
    */
+  /**
+   * 「离开这一行」的编辑边界：先把当前行的正文改动当改名交出去。
+   * 点击 `contenteditable=false` 的元素（块标、引用、原子、按钮）不派发 `focusout`，
+   * 不显式提交则修改时间停在上一处——六个入口（粘贴图片/引用/原子/聚焦/上下文展开与回退）
+   * 走的是同一条边界，所以收成一处；`except` 供「点的是自己那一行」的调用方排除自己。
+   */
+  private commitLeavingLine(except?: string): void {
+    const from = this.caretBlock() ?? this.editBase?.id ?? null
+    if (from && from !== except) this.commitEdit(from)
+  }
+
   commitEdit(id: string): { ok: true } | { ok: false; conflict: Block } {
     const base = this.editBase
     if (!base || base.id !== id) return { ok: true }
@@ -2789,12 +2801,29 @@ export class BlockEditor {
     if (!s) return
     const ranges = selToTextRanges(this.doc, s)
     if (ranges.length === 0) return
+    this.markTx(s, ranges, 'single', (next, r) => (r.start >= r.end ? next : toggleRunMark(next, type, r.start, r.end)))
+  }
+
+  /**
+   * 对选区命中的每段正文应用一次 run 级改动（加格式/清格式同一条骨架）：
+   * 快照 → 逐块 patch content → 记撤销 → 重排 → 还原选区 → 广播。
+   *
+   * ⚠️ 还原的是**整段选区**（不是光标）：塌成光标的话「加完粗再点一次取消」
+   *    做不到，划选气泡也会立刻消失。`rerender='single'` 给「只碰一段」的调用方
+   *    省一次整树重排；多段与清格式一律整树。
+   */
+  private markTx(
+    s: Sel,
+    ranges: readonly { blockId: string; start: number; end: number }[],
+    rerender: 'single' | 'all',
+    op: (next: InlineRun[], r: { blockId: string; start: number; end: number }) => InlineRun[],
+  ): void {
     const before = this.snap()
     const apply = (blockId: string, content: readonly InlineRun[]): InlineRun[] => {
       let next: InlineRun[] = [...content]
       for (const r of ranges) {
-        if (r.blockId !== blockId || r.start >= r.end) continue
-        next = toggleRunMark(next, type, r.start, r.end)
+        if (r.blockId !== blockId) continue
+        next = op(next, r)
       }
       return next
     }
@@ -2806,10 +2835,8 @@ export class BlockEditor {
       }
     })
     this.undo.record(before, 'mark', Date.now())
-    if (ranges.length === 1) this.renderBlock(ranges[0]!.blockId)
+    if (rerender === 'single' && ranges.length === 1) this.renderBlock(ranges[0]!.blockId)
     else this.renderAll()
-    // ⚠️ 还原**整段选区**（不是光标）：否则加完粗选区就塌了，
-    //    「再点一次取消」做不到，划选气泡也会立刻消失。
     this.placeRange(s)
     this.emitChange('text')
   }
@@ -2833,27 +2860,7 @@ export class BlockEditor {
     if (!s) return
     const ranges = selToTextRanges(this.doc, s)
     if (ranges.length === 0) return
-    const before = this.snap()
-    const apply = (blockId: string, content: readonly InlineRun[]): InlineRun[] => {
-      let next: InlineRun[] = [...content]
-      for (const r of ranges) {
-        if (r.blockId !== blockId) continue
-        next = clearRunsMarks(next, r.start, r.end)
-      }
-      return next
-    }
-    const touched = [...new Set(ranges.map((r) => r.blockId))]
-    this.write((tx) => {
-      for (const bid of touched) {
-        const b = this.store.find(bid)
-        if (b) tx.patch(bid, (bb) => writeBlockContent(bb, apply(bid, bb.content)))
-      }
-    })
-    this.undo.record(before, 'mark', Date.now())
-    this.renderAll()
-    // 同上：清格式也要保住选区（清完还能接着改别的格式）
-    this.placeRange(s)
-    this.emitChange('text')
+    this.markTx(s, ranges, 'all', (next, r) => clearRunsMarks(next, r.start, r.end))
   }
 
   /* --------------------------------------------------------- 行内原子 */
@@ -3195,9 +3202,7 @@ export class BlockEditor {
       const tailH = rows.slice(to).reduce((n, r) => n + rowH(r), 0)
       this.container.appendChild(this.placeholder(rows.length - to, 'tail', tailH))
     }
-    this.caretMarks = ''
-    this.markCaret()
-    this.paintBlockSel()
+    this.repaintOverlays()
     this.events.mounted?.()
   }
 
@@ -3335,8 +3340,7 @@ export class BlockEditor {
        */
       onCopy: (ids, text) => this.events.onCopy?.(ids, text),
       onPasteImage: async (file, point) => {
-        const from = this.caretBlock() ?? this.editBase?.id ?? null
-        if (from) this.commitEdit(from)
+        this.commitLeavingLine()
         await this.events.onPasteImage?.(file, point)
       },
       onDropFilesRejected: () => this.events.onDropFilesRejected?.(),
@@ -3443,8 +3447,7 @@ export class BlockEditor {
        * ⚠️ `runId` → 真的 run 在这一层换（它持有 store），事件层只认 DOM 上的字符串。
        */
       onRefClick: (ref, el, mods) => {
-        const from = this.caretBlock() ?? this.editBase?.id ?? null
-        if (from) this.commitEdit(from)
+        this.commitLeavingLine()
         const run = ref.runId ? this.findRun(ref.runId)?.run : undefined
         this.events.refClick?.({ to: ref.to, ...(run ? { run } : {}) }, mods, el)
       },
@@ -3453,8 +3456,7 @@ export class BlockEditor {
        * 点击 `contenteditable=false` 的元素不派发 `focusout`，不显式提交则修改时间停在上一处。
        */
       onAtomClick: (atom, el, mods) => {
-        const from = this.caretBlock() ?? this.editBase?.id ?? null
-        if (from) this.commitEdit(from)
+        this.commitLeavingLine()
         this.events.onAtomClick?.(atom, el, mods)
       },
       onBlockMenu: (id, rect, appearanceHost) => this.events.blockMenu?.(id, rect, appearanceHost),
@@ -3462,8 +3464,7 @@ export class BlockEditor {
       // 左键点块标 ＝ 聚焦/zoom。这也是**离开这一行**：先把当前行的编辑交出去
       // （判据是「上一个块 ≠ 这个块」；点自己那一行的块标不算离开）
       focusBlock: (id) => {
-        const from = this.caretBlock() ?? this.editBase?.id ?? null
-        if (from && from !== id) this.commitEdit(from)
+        this.commitLeavingLine(id)
         this.events.focusBlock?.(id)
       },
       // 打开落点（Shift／⌘）由装配层分流；事件层只把 place 交上去
@@ -3475,15 +3476,13 @@ export class BlockEditor {
        */
       expandContext: this.onExpandContext
         ? (ancestorId, rowId) => {
-            const from = this.caretBlock() ?? this.editBase?.id ?? null
-            if (from) this.commitEdit(from)
+            this.commitLeavingLine()
             this.onExpandContext?.(ancestorId, rowId)
           }
         : undefined,
       contextBack: this.onContextBack
         ? (rootId) => {
-            const from = this.caretBlock() ?? this.editBase?.id ?? null
-            if (from) this.commitEdit(from)
+            this.commitLeavingLine()
             this.onContextBack?.(rootId)
           }
         : undefined,
