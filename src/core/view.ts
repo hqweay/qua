@@ -655,6 +655,9 @@ function columnsFromSpec(spec: QuerySpec, kb: KbClient): ViewColumn[] {
     if ('all' in node && Array.isArray(node.all)) return node.all.forEach(visit)
     if ('any' in node && Array.isArray(node.any)) return node.any.forEach(visit)
     if ('not' in node) return visit(node.not)
+    if ('up' in node) return visit(node.up)
+    if ('down' in node) return visit(node.down)
+    if ('near' in node) return visit(node.near)
     if (typeof node.tag === 'string') {
       const tag = kb.findTag(node.tag)
       if (tag) for (const id of declaredFieldIds(tag)) push(id)

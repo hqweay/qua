@@ -28,7 +28,6 @@ import {
 import type { Op } from './kb/types.ts'
 import {
   evaluateQuery,
-  firstJournal,
   isExactRoleJournal,
   refKindsOf,
   refTargetOf,
@@ -796,7 +795,6 @@ export function queryByIndex(
     refs: refsByIndex(q.where, index),
     tags: tagsByIndex(q.where, index),
     fields: fieldTableOf(forest),
-    journalDate: firstJournal(q.where),
     ...(opts.excludeIds && opts.excludeIds.length > 0 ? { excludeIds: new Set(opts.excludeIds) } : {}),
   }
   let roots: readonly Block[] = forest
@@ -804,22 +802,17 @@ export function queryByIndex(
     const anchor = index.blocks.get(opts.anchorId)
     if (anchor) roots = [anchor]
   }
-  if (env.journalDate) {
-    const dayId = index.journals.get(env.journalDate)
-    roots = dayId ? (index.blocks.get(dayId)?.children ?? []) : []
-  }
   /**
-   * 成员条件的白拿：**日期表就是这条条件的候选集**（一天一个、O(天数)），不用全库逐块判定。
-   * 仅限 where 顶层就是 `{ role: 'journal' }` 本身、且没有范围条件与锚点时——
-   * 嵌进组合里的 role 是普通谓词，收窄会把其它分支的候选丢掉。
-   * 与纯函数路径（走 `journalDays`）的等式由测试钉住。
+   * 成员条件的候选集：顶层就是 `{role:'journal'}` 时，日期表就是「库里有哪些天」
+   * （一天一个、O(天数)），不用全库逐块判定。它与纯函数路径的 `journalDays` 同口径，
+   * 等式由测试钉住；不是范围条件，判定不做特殊处理。
    */
-  if (isExactRoleJournal(q.where) && !env.journalDate && roots === forest) {
+  if (isExactRoleJournal(q.where) && roots === forest) {
     roots = [...index.journals.values()]
       .map((id) => index.blocks.get(id))
       .filter((b): b is Block => b !== undefined)
   }
-  return evaluateQuery(q, roots, env)
+  return evaluateQuery(q, roots, env, forest)
 }
 
 /** `ref` 条件的目标块集合 —— 查**入向边表**，不再扫 atoms */
@@ -829,6 +822,9 @@ function refsByIndex(node: QueryNode, index: Index): Set<string> {
     if ('all' in n) n.all.forEach(visit)
     else if ('any' in n) n.any.forEach(visit)
     else if ('not' in n) visit(n.not)
+    else if ('up' in n) visit(n.up)
+    else if ('down' in n) visit(n.down)
+    else if ('near' in n) visit(n.near)
     else if ('ref' in n) {
       for (const id of incomingIds(index, refTargetOf(n.ref), refKindsOf(n.ref))) out.add(id)
     }
@@ -844,6 +840,9 @@ function tagsByIndex(node: QueryNode, index: Index): Set<string> {
     if ('all' in n) n.all.forEach(visit)
     else if ('any' in n) n.any.forEach(visit)
     else if ('not' in n) visit(n.not)
+    else if ('up' in n) visit(n.up)
+    else if ('down' in n) visit(n.down)
+    else if ('near' in n) visit(n.near)
     else if ('tag' in n) {
       const tagId = tagIdByName(index, n.tag)
       if (tagId) for (const id of tagMemberIdsOf(index, tagId)) out.add(id)

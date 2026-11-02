@@ -177,7 +177,10 @@ export function canonicalSpec(spec: QuerySpec): QuerySpec {
       if ('lt' in op) return { prop: { id, lt: op.lt } }
       return { prop: { id, lte: op.lte } }
     }
-    if ('journal' in n) return { journal: n.journal }
+    if ('is' in n) return { is: n.is }
+    if ('up' in n) return { up: node(n.up) }
+    if ('down' in n) return { down: node(n.down) }
+    if ('near' in n) return { near: node(n.near) }
     return { role: n.role }
   }
   const out: QuerySpec = { where: node(spec.where) }

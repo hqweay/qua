@@ -341,7 +341,7 @@ export const TASK_TAG_LABEL = '任务'
  *
  * 种子里挂一栏演示查询，是为了让首次装载真的走一次「local tab」那条分支 ——
  * 一份只在内置三栏上测过的实现，会在「有用户栏」时才暴露排序、空态、摘除的问题。
- * 条件带 `$self`：它在今天求值时指今天，所以这一栏的名字与内容不必写死日期。
+ * 条件里的日期用 `$self`：它在今天求值时指今天，所以这一栏的名字与内容不必写死日期。
  */
 export function seedJournalMounts(): MountEntry[] {
   return [
@@ -349,7 +349,15 @@ export function seedJournalMounts(): MountEntry[] {
       id: 't-seed-today-todos',
       kind: 'local',
       label: t('ui.mount.demo.todayTodos'),
-      spec: { where: { all: [{ journal: '$self' }, { prop: { id: TASK_STATUS_PROP_ID, eq: false } }] } },
+      spec: {
+        where: {
+          all: [
+            // 「这一天下面」＝ 某个祖先既是日记块、日期又等于宿主那一天（`$self` 解析成宿主的 `_date`）
+            { up: { all: [{ role: 'journal' }, { prop: { id: '_date', eq: '$self' } }] } },
+            { prop: { id: TASK_STATUS_PROP_ID, eq: false } },
+          ],
+        },
+      },
       views: [],
     },
   ]

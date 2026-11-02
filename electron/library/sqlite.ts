@@ -225,6 +225,23 @@ export const MIGRATIONS: Migration[] = [
       db.prepare(`delete from ${DB_TABLES.meta} where key = ?`).run(META_KEYS.seq)
     },
   },
+  {
+    to: 6,
+    up: (db) => {
+      /**
+       * **查询条件换了形状**：`{journal:日期}` 范围原子退场，「在某一天下面」改由
+       * `{up:{all:[{role:'journal'},{prop:{_date,eq}}]}}` 表达。
+       *
+       * 条件住在块的 `_query` 与设备的 `_mounts` 里，是**内容** ⇒ 旧条件读不出来时
+       * 只会静默不命中（看起来像「这次真的没有结果」）。按原型纪律丢掉内容重 seed，
+       * 不写「把旧原子翻译成新形状」的迁移分支。
+       */
+      for (const t of DB_CONTENT_TABLES) db.exec(`drop table if exists ${t}`)
+      db.exec(`drop table if exists ${DB_TABLES.opLog}`)
+      db.exec(DDL)
+      db.prepare(`delete from ${DB_TABLES.meta} where key = ?`).run(META_KEYS.seq)
+    },
+  },
 ]
 
 export type OpenResult =

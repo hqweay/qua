@@ -15,7 +15,7 @@ import { plainText } from './runs.ts'
 import { walkForest } from './walk.ts'
 import { findPath } from './tree.ts'
 import { findTagByName, tagIdsOf, tagMemberIds } from './tags.ts'
-import { findJournalDay, journalDate, journalDays } from './journal.ts'
+import { journalDays } from './journal.ts'
 import { displayTextOf } from './alias.ts'
 import { fieldTableOf, readField, type FieldTable } from './props.ts'
 import { isRefKind, relationEdgesOfForest, REFERENCE_KINDS, type RefKind, type RelationKind } from './relations.ts'
@@ -87,14 +87,32 @@ export type QueryNode =
    *    `{prop:{id, eq:false}}` 命中「点了但没做完」，也命中「一次都没点过、靠标签声明的」。
    */
   | { prop: { id: string } & PropOp }
-  /** 某天（`YYYY-MM-DD`）的日记块**下面的块** */
-  | { journal: string }
+  /**
+   * **就是这一块**（身份判定，不是成员判定）。
+   *
+   * 与 `ref` 的分工：`ref` 问「谁引用了它」，这一条问「它自己」。
+   */
+  | { is: string }
+  /**
+   * **存在一个祖先**满足这个条件（祖先链**不含自己**）。
+   *
+   * 方向是独立的一轴，不是另一种组：任意条件都能套进任意方向，
+   * 所以「上级匹配所有／任一」「链条里匹配」不必各造一个组。
+   * 「在某一天下面」＝ `{up:{all:[{role:'journal'},{prop:{id:'_date',eq:'2026-10-20'}}]}}`；
+   * 天自己不会入选——它的祖先链里没有自己。
+   */
+  | { up: QueryNode }
+  /** **存在一个子孙**满足这个条件（子树不含自己） */
+  | { down: QueryNode }
+  /** 自己／祖先／子孙 **任一处**满足这个条件 */
+  | { near: QueryNode }
   /**
    * **是某种东西**的块本身（成员条件）。
    *
-   * ⚠️ 与 `journal` 的分工写死：**范围条件把 journal 块当容器**（钻进那天下面找），
-   *    **成员条件把它当结果**（天自己入选）。所以「journal 块不当结果」的排除规则
-   *    只挂在范围条件上（见 `evaluateQuery` 的 `env.journalDate`），`role` 不触发它。
+   * ⚠️ 与方向原子的分工写死：`{up}`／`{down}` 问的是**位置**（谁在谁下面），
+   *    `{role:'journal'}` 问的是**身份**（这块是不是日记）。所以「某一天下面」
+   *    不再是 `{journal:日期}`，而是 `{up:{all:[{role:'journal'},{prop:{_date,eq}}]}}`：
+   *    方向与条件正交之后，它可进 `any`／`not`，也不偷换候选集。
    * ⚠️ 逐值分发到**既有唯一判据**，不另设第二份答案：journal 的判据只有「`_date` 在不在」。
    *    值域首版只实现 `journal`（有日期表可查）；`page`／`tag` 留轴，进值域时在此续支。
    */
@@ -251,7 +269,7 @@ function walk(blocks: readonly Block[], fn: (b: Block, ancestors: Block[]) => vo
 }
 
 /**
- * 谓词环境：`ref`／`tag` 条件已经**按条件收好**的块 id 集合（外加 `journal` 范围条件）。
+ * 谓词环境：`ref`／`tag` 条件已经**按条件收好**的块 id 集合。
  *
  * 为什么单独立一份：求值有两条路 —— 纯函数路径从森林收集，
  * 索引路径从 `IndexPort` 的表里查表；**判定与顺序只有一份**（`evaluateQuery`），
@@ -265,8 +283,6 @@ export interface QueryEnv {
    * 两条求值路径都必须给同一份（`core/props.ts` 的 `fieldTableOf`）。
    */
   fields: FieldTable
-  /** 条件里第一个 `journal` 日期；没有 ⇒ `null`（此时它是普通组合，不当范围用） */
-  journalDate: string | null
   /**
    * 结果里剔除这些块。
    *
@@ -285,15 +301,22 @@ export interface QueryEnv {
  * ⚠️ 顺序是契约的一部分（「冻结」保存的是输出的 `blockId[]`）：缺省按森林先序，
  *    索引的插入顺序在挪位之后会漂移，不能拿来当序；`sort` 是 spec 的一部分，
  *    同值时稳定排序保留森林先序。
+ * ⚠️ `forest` 是**位置事实的来源**：候选集可以被 `roots` 收窄（锚点／范围），
+ *    但 `{up}` 要看得见锚点上面的祖先、`{down}` 要看得见整棵子树——两者不是一回事。
  */
-export function evaluateQuery(spec: QuerySpec, roots: readonly Block[], env: QueryEnv): QueryHit[] {
+export function evaluateQuery(
+  spec: QuerySpec,
+  roots: readonly Block[],
+  env: QueryEnv,
+  forest: readonly Block[] = roots,
+): QueryHit[] {
+  const matcher = createMatcher(forest, env)
   const hits: { blockId: string; path: string[]; block: Block }[] = []
-  /** 收窄过的候选集（如 role:'journal' 走天表）里，同一块可能既当「后代」又当「候选根」被走到——一条结果只许出现一次 */
+  /** 收窄过的候选集里，同一块可能既当「后代」又当「候选根」被走到——一条结果只许出现一次 */
   const seen = new Set<string>()
   walk(roots, (b, ancestors) => {
     if (env.excludeIds?.has(b.id)) return
-    if (env.journalDate && isJournalBlock(b)) return
-    if (!matches(spec.where, b, env)) return
+    if (!matcher.matches(spec.where, b)) return
     if (seen.has(b.id)) return
     seen.add(b.id)
     hits.push({ blockId: b.id, path: ancestors.map((a) => a.id), block: b })
@@ -349,48 +372,176 @@ export function refSourceIds(
 }
 
 /**
- * 标签条件：**按边判定**，不扫文本。
+ * 方向原子的求值器。
  *
- * ⚠️ 标签＝指向标签块的边，**判定只在 `core/tags.ts` 里发生**（`tagMemberIds`）。
- *    不要在正文上再扫一遍 `#tag`：那会得到「看起来是标签的文本」与「真的是一条边」
- *    两套答案 —— 两条路径对同一个块说法不一，改名也不同步。
+ * `{up}`／`{down}`／`{near}` 把「条件」与「方向」拆成两轴之后，判定不再只关于这一块，
+ * 而是关于「它和它的位置」：
+ *   · `up` 需要祖先链（O(深度)，沿父指针向上）；
+ *   · `down` 需要「子树里有没有」——**不许对每个候选块各走一遍子树**（那是 O(n²)）。
+ *     这里按 (条件节点, 块) 记忆化：一次求值里每对只算一次，总量仍是 O(条件数 × 块数)。
  *
- * ⚠️ 名字→标签块只解析一次（`collectTags`），不在 `matches` 里逐个块查，
- *    否则一次查询会退化成 O(块数 × 条件数) 次森林遍历。
+ * 「可见树」与 `walk` 同一口径：属性定义的子树不是内容行，不进祖先／子孙判定。
+ * ⚠️ 记忆化以**条件节点对象**为键：同一份条件里两个写法相同的条件各算一次。
+ *    条件树很小，这不是问题；拿结构串当键反而会把 `canonicalSpec` 的口径拖进来。
  */
-function matches(node: QueryNode, b: Block, env: QueryEnv): boolean {
-  // ⚠️ `journal` **优先判**：它是「范围」不是「谓词」。若别的键也在同一个对象上（形状写歪了），
-  //    先看 `all` 会让范围条件被当成空组合（恒真）——那种退化是静默的，测试也未必抓得住。
-  if ('journal' in node) return true
-  if ('all' in node) return node.all.every((n) => matches(n, b, env))
-  if ('any' in node) return node.any.some((n) => matches(n, b, env))
-  if ('not' in node) return !matches(node.not, b, env)
-  if ('role' in node) return roleMatches(node.role, b)
-  if ('ref' in node) return env.refs.has(b.id)
-  if ('tag' in node) return env.tags.has(b.id)
-  if ('text' in node) return plainText(b.content).includes(node.text)
-  if ('prop' in node) {
-    /**
-     * 先问「有没有这一栏」（值 ∪ 自有槽 ∪ 标签声明），再决定比值、比存在性、还是判空。
-     *
-     * 这样 `eq: false` 与「没有这一栏」是两件事，`eq: undefined` 也不会误命中所有块；
-     * 而「面板刚加的槽」与「靠标签声明拿到的字段」都被算成有 —— 它们屏幕上有方框。
-     * **值比较这一类（含 `neq`）只对「有这一栏」的块成立** —— 否则 `neq`
-     * 会变成「绝大多数块」，而用户想问的是「这些值不是 A 的那几条」。
-     */
-    const op = node.prop
-    const { declared, value: v } = readField(b, node.prop.id, env.fields)
-    if ('exists' in op) return declared === op.exists
-    if ('empty' in op) return isEmptyValue(v) === op.empty
-    if (!declared) return false
-    if ('eq' in op) return Object.is(v, op.eq)
-    if ('neq' in op) return !Object.is(v, op.neq)
-    if ('contains' in op) return valueContains(v, op.contains)
-    return compareOp(v, op)
+interface Matcher {
+  matches(node: QueryNode, block: Block): boolean
+}
+
+function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher {
+  /** 位置事实（祖先／子孙）**按需**建：纯 `tag`／`text` 查询不该为方向原子付一次全树遍历 */
+  interface VisibleTree {
+    byId: Map<string, Block>
+    parentOf: Map<string, string | null>
+    childrenOf: Map<string, Block[]>
   }
-  // 形状不认识（例如旧库里存过的已删原子）⇒ 不命中，不抛。
-  // 库里存的那份由 `readSpec` 先验形；能走到这里说明是调用方直接构造的 spec。
-  return false
+  let tree: VisibleTree | undefined
+  const visibleTree = (): VisibleTree => {
+    if (tree) return tree
+    const byId = new Map<string, Block>()
+    const parentOf = new Map<string, string | null>()
+    const childrenOf = new Map<string, Block[]>()
+    walkForest(forest, (b, ctx) => {
+      if (ctx.path.slice(0, -1).some(isPropDefBlock)) return
+      byId.set(b.id, b)
+      const parent = ctx.parent
+      if (parent && byId.has(parent.id)) {
+        parentOf.set(b.id, parent.id)
+        const siblings = childrenOf.get(parent.id)
+        if (siblings) siblings.push(b)
+        else childrenOf.set(parent.id, [b])
+      } else {
+        parentOf.set(b.id, null)
+      }
+    })
+    tree = { byId, parentOf, childrenOf }
+    return tree
+  }
+
+  /** (节点 → 块 id → 判定)；`downMemo` 单列，理由同 `down` 的两趟：子树判定与自身判定不是一回事 */
+  const hitMemo = new Map<QueryNode, Map<string, boolean>>()
+  const downMemo = new Map<QueryNode, Map<string, boolean>>()
+  /** 正在算的 (节点, 块)：挡条件树里的环（JSON 构造不出，代码直接构造可能） */
+  const busy = new Set<string>()
+  const nodeIds = new WeakMap<object, number>()
+  let nextNodeId = 0
+  const keyOf = (node: QueryNode, blockId: string): string => {
+    let id = nodeIds.get(node)
+    if (id === undefined) {
+      id = nextNodeId
+      nextNodeId += 1
+      nodeIds.set(node, id)
+    }
+    return `${id}:${blockId}`
+  }
+  const readMemo = (
+    memo: Map<QueryNode, Map<string, boolean>>,
+    node: QueryNode,
+    blockId: string,
+  ): boolean | undefined => memo.get(node)?.get(blockId)
+  const writeMemo = (
+    memo: Map<QueryNode, Map<string, boolean>>,
+    node: QueryNode,
+    blockId: string,
+    value: boolean,
+  ): void => {
+    const forNode = memo.get(node)
+    if (forNode) forNode.set(blockId, value)
+    else memo.set(node, new Map([[blockId, value]]))
+  }
+
+  /** 存在一个祖先满足条件（祖先链不含自己） */
+  const hasAncestor = (node: QueryNode, blockId: string): boolean => {
+    const { byId, parentOf } = visibleTree()
+    let cur = parentOf.get(blockId) ?? null
+    while (cur !== null) {
+      const parent = byId.get(cur)
+      if (parent && matches(node, parent)) return true
+      cur = parentOf.get(cur) ?? null
+    }
+    return false
+  }
+
+  /** 存在一个子孙满足条件（子树不含自己） */
+  const hasDescendant = (node: QueryNode, blockId: string): boolean => {
+    const memoized = readMemo(downMemo, node, blockId)
+    if (memoized !== undefined) return memoized
+    const { childrenOf } = visibleTree()
+    const key = `d${keyOf(node, blockId)}`
+    if (busy.has(key)) return false
+    busy.add(key)
+    let hit = false
+    for (const child of childrenOf.get(blockId) ?? []) {
+      if (matches(node, child) || hasDescendant(node, child.id)) {
+        hit = true
+        break
+      }
+    }
+    busy.delete(key)
+    writeMemo(downMemo, node, blockId, hit)
+    return hit
+  }
+
+  const matches = (node: QueryNode, block: Block): boolean => {
+    const memoized = readMemo(hitMemo, node, block.id)
+    if (memoized !== undefined) return memoized
+    const key = `m${keyOf(node, block.id)}`
+    if (busy.has(key)) return false
+    busy.add(key)
+    const result = compute(node, block)
+    busy.delete(key)
+    writeMemo(hitMemo, node, block.id, result)
+    return result
+  }
+
+  const compute = (node: QueryNode, block: Block): boolean => {
+    if ('all' in node) return node.all.every((n) => matches(n, block))
+    if ('any' in node) return node.any.some((n) => matches(n, block))
+    if ('not' in node) return !matches(node.not, block)
+    if ('is' in node) return block.id === node.is
+    if ('up' in node) return hasAncestor(node.up, block.id)
+    if ('down' in node) return hasDescendant(node.down, block.id)
+    if ('near' in node) {
+      return matches(node.near, block) || hasAncestor(node.near, block.id) || hasDescendant(node.near, block.id)
+    }
+    if ('role' in node) return roleMatches(node.role, block)
+    if ('ref' in node) return env.refs.has(block.id)
+    /**
+     * 标签条件：**按边判定**，不扫文本。
+     *
+     * 标签＝指向标签块的边，判定只在 `core/tags.ts` 里发生（`tagMemberIds`）。
+     * 不要在正文上再扫一遍 `#tag`：那会得到「看起来是标签的文本」与「真的是一条边」
+     * 两套答案 —— 两条路径对同一个块说法不一，改名也不同步。
+     * 名字→标签块只解析一次（`collectTags`），不在逐块判定里查，
+     * 否则一次查询会退化成 O(块数 × 条件数) 次森林遍历。
+     */
+    if ('tag' in node) return env.tags.has(block.id)
+    if ('text' in node) return plainText(block.content).includes(node.text)
+    if ('prop' in node) {
+      /**
+       * 先问「有没有这一栏」（值 ∪ 自有槽 ∪ 标签声明），再决定比值、比存在性、还是判空。
+       *
+       * 这样 `eq: false` 与「没有这一栏」是两件事，`eq: undefined` 也不会误命中所有块；
+       * 而「面板刚加的槽」与「靠标签声明拿到的字段」都被算成有 —— 它们屏幕上有方框。
+       * **值比较这一类（含 `neq`）只对「有这一栏」的块成立** —— 否则 `neq`
+       * 会变成「绝大多数块」，而用户想问的是「这些值不是 A 的那几条」。
+       */
+      const op = node.prop
+      const { declared, value: v } = readField(block, node.prop.id, env.fields)
+      if ('exists' in op) return declared === op.exists
+      if ('empty' in op) return isEmptyValue(v) === op.empty
+      if (!declared) return false
+      if ('eq' in op) return Object.is(v, op.eq)
+      if ('neq' in op) return !Object.is(v, op.neq)
+      if ('contains' in op) return valueContains(v, op.contains)
+      return compareOp(v, op)
+    }
+    // 形状不认识（例如旧库里存过的已删原子）⇒ 不命中，不抛。
+    // 库里存的那份由 `readSpec` 先验形；能走到这里说明是调用方直接构造的 spec。
+    return false
+  }
+
+  return { matches }
 }
 
 /** role 逐值分发到**既有唯一判据**，不另设第二份答案；进新值域时在此续支 */
@@ -454,8 +605,11 @@ function compareValues(a: unknown, b: unknown): number | null {
 
 /**
  * where 的**顶层**就是 `{ role: 'journal' }` 本身（日记流形态）。
- * 只有这个形态允许把候选集收窄成「天」——嵌进组合里的 role 是普通谓词，
- * 收窄会把其它分支的候选丢掉（比如 `{ not: { role: 'journal' } }` 恰恰要非天的块）。
+ *
+ * 只有这个形态允许把候选集换成「库里有哪些天」：**一天一个**是身份口径
+ * （坏数据里同一天多块时只取先序第一个，与 `journalDays` 同源），不是范围。
+ * 嵌进组合里的 role 是普通谓词，收窄会把其它分支的候选丢掉
+ * （比如 `{ not: { role: 'journal' } }` 恰恰要非天的块）。
  */
 export function isExactRoleJournal(node: QueryNode): boolean {
   return 'role' in node && node.role === 'journal'
@@ -483,6 +637,10 @@ export function isQueryNode(raw: unknown): raw is QueryNode {
   if ('all' in n) return Array.isArray(n.all) && n.all.every(isQueryNode)
   if ('any' in n) return Array.isArray(n.any) && n.any.every(isQueryNode)
   if ('not' in n) return isQueryNode(n.not)
+  if ('is' in n) return typeof n.is === 'string' && n.is !== ''
+  if ('up' in n) return isQueryNode(n.up)
+  if ('down' in n) return isQueryNode(n.down)
+  if ('near' in n) return isQueryNode(n.near)
   if ('ref' in n) {
     if (typeof n.ref === 'string') return true
     const r = n.ref
@@ -495,7 +653,6 @@ export function isQueryNode(raw: unknown): raw is QueryNode {
   }
   if ('tag' in n) return typeof n.tag === 'string'
   if ('text' in n) return typeof n.text === 'string'
-  if ('journal' in n) return typeof n.journal === 'string'
   if ('role' in n) return typeof n.role === 'string'
   if ('prop' in n) {
     const p = n.prop
@@ -529,7 +686,6 @@ export function isQuerySpec(raw: unknown): raw is QuerySpec {
  * 求值一次。**纯函数**：同样的输入永远同样的输出顺序（按森林的先序），
  * 这样「冻结」只要保存输出的 `blockId[]` 就够了（D4：冻结成员与顺序）。
  *
- * ⚠️ `journal` 条件的「这一天是哪一块」不在本文件定义 —— 走 `journal.ts` 的 `findJournalDay`。
  * ⚠️ 索引路径（`index-port.ts` 的 `queryByIndex`）与环境收集方式不同、判定与顺序共用本函数。
  * ⚠️ `'$self'` 的解析只有一份（`resolveSelfSpec`），两条路径都在**求值第一行**调它。
  */
@@ -543,7 +699,6 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
     refs: collectRefs(q.where, input.blocks),
     tags: collectTags(q.where, input.blocks),
     fields: fieldTableOf(input.blocks),
-    journalDate: firstJournal(q.where),
     ...(input.excludeIds && input.excludeIds.length > 0 ? { excludeIds: new Set(input.excludeIds) } : {}),
   }
   /** 范围：`subtree` ⇒ 只收 anchor 之下（含 anchor 自己）；`all` ⇒ 整片森林 */
@@ -552,17 +707,12 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
   if (anchor) roots = [anchor]
 
   /**
-   * 成员条件的候选收窄：「库里有哪些天」的唯一口径（一天一个、先序第一个）就是候选集，
-   * 不用全库逐块判定。仅限顶层就是这个原子本身、且没有范围条件与锚点时。
+   * 成员条件的候选集：顶层就是 `{role:'journal'}` 时，「库里有哪些天」的**一天一个**
+   * 口径就是候选集（同一天多块的坏数据只取先序第一个）。
+   * 它不是范围条件：判定不做任何特殊处理，换掉的只是同一批块去掉重复后的集合。
    */
-  if (isExactRoleJournal(q.where) && !env.journalDate && !anchor) roots = journalDays(input.blocks)
-
-  /** `journal` 条件把范围再收一层：只取那天块里的**子块**（日期行是只读标题，不该出现在结果里） */
-  if (env.journalDate) {
-    const day = findJournalDay(input.blocks, env.journalDate)
-    roots = day ? day.children : []
-  }
-  return evaluateQuery(q, roots, env)
+  if (isExactRoleJournal(q.where) && !anchor) roots = journalDays(input.blocks)
+  return evaluateQuery(q, roots, env, input.blocks)
 }
 
 /* ------------------------------------------------------------ `$self`：相对条件 */
@@ -578,10 +728,14 @@ export function usesSelf(node: QueryNode): boolean {
   if ('all' in node) return node.all.some(usesSelf)
   if ('any' in node) return node.any.some(usesSelf)
   if ('not' in node) return usesSelf(node.not)
+  if ('up' in node) return usesSelf(node.up)
+  if ('down' in node) return usesSelf(node.down)
+  if ('near' in node) return usesSelf(node.near)
+  if ('is' in node) return node.is === SELF
   if ('ref' in node) return refTargetOf(node.ref) === SELF
   if ('tag' in node) return node.tag === SELF
   if ('text' in node) return node.text === SELF
-  if ('journal' in node) return node.journal === SELF
+  if ('prop' in node) return 'eq' in node.prop && node.prop.eq === SELF
   return false
 }
 
@@ -593,15 +747,19 @@ export const SELF = '$self'
  *
  * | 条件 | 解析成 |
  * |---|---|
+ * | `{is:'$self'}` | 宿主自己 |
  * | `{ref:'$self'}` | 指向宿主 id |
- * | `{journal:'$self'}` | 宿主的 `_date` |
  * | `{tag:'$self'}` | 宿主带的那几个标签（`any` 并集） |
  * | `{text:'$self'}` | 宿主的可读文本（`displayTextOf`） |
+ * | `{prop:{id, eq:'$self'}}` | 宿主**同一属性**的值（没有这一栏／值为空 ⇒ 永不命中） |
+ *
+ * 「在某一天下面」不再有专用值位：它是 `{up:{all:[{role:'journal'},{prop:{id:'_date',eq:'$self'}}]}}`
+ * —— 日期本身用通用属性条件问，`$self` 只回答「宿主那一格的值」。
  *
  * ⚠️ **解析只写这一处**：纯函数路径与索引路径在求值第一行调它。写第二份就会得到
  *    「同一个 tab 在两条路径下结果不同」，而那是不报错的。
- * ⚠️ 解析出**空值**（宿主的 `_date`／可读文本／标签都为空）⇒ 换成一条**永不命中**的条件，
- *    而不是把空串当成值去比 —— `{text:''}` 会命中所有块。
+ * ⚠️ 解析出**空值**（宿主没有这一栏／可读文本／标签为空）⇒ 换成一条**永不命中**的条件，
+ *    而不是把空串当成值去比 —— `{text:''}` 会命中所有块，`{eq:''}` 同理。
  * ⚠️ `{tag}` 要的是**名字**（`findTagByName` 的口径），而 `_tags` 存的是 id ⇒ 这里做一次
  *    「id → 主名」翻译；`resolveSelfSpec` 因此需要森林（标签块得先找得到）。
  */
@@ -610,18 +768,26 @@ export function resolveSelfSpec(spec: QuerySpec, host: Block, forest: readonly B
     .map((id) => findById(forest, id))
     .map((tag) => (tag ? primaryAliasOf(tag) : ''))
     .filter((name) => name.trim() !== '')
+  /** 字段表按需建：只有 `eq:'$self'` 需要它，普通条件不该为它付一次全库扫描 */
+  let fields: FieldTable | undefined
   const node = (n: QueryNode): QueryNode => {
     if ('all' in n) return { all: n.all.map(node) }
     if ('any' in n) return { any: n.any.map(node) }
     if ('not' in n) return { not: node(n.not) }
+    if ('up' in n) return { up: node(n.up) }
+    if ('down' in n) return { down: node(n.down) }
+    if ('near' in n) return { near: node(n.near) }
+    if ('is' in n) return { is: n.is === SELF ? host.id : n.is }
     if ('ref' in n) {
       const to = refTargetOf(n.ref) === SELF ? host.id : refTargetOf(n.ref)
       return typeof n.ref === 'string' ? { ref: to } : { ref: { ...n.ref, to } }
     }
-    if ('journal' in n) {
-      if (n.journal !== SELF) return { journal: n.journal }
-      const date = journalDate(host)
-      return date === '' ? NEVER : { journal: date }
+    if ('prop' in n) {
+      if (!('eq' in n.prop) || n.prop.eq !== SELF) return n
+      fields ??= fieldTableOf(forest)
+      const { declared, value } = readField(host, n.prop.id, fields)
+      if (!declared || value === undefined || value === null || value === '') return NEVER
+      return { prop: { id: n.prop.id, eq: value } }
     }
     if ('tag' in n) {
       if (n.tag !== SELF) return { tag: n.tag }
@@ -653,6 +819,9 @@ function collectRefs(node: QueryNode, forest: readonly Block[]): Set<string> {
     if ('all' in n) n.all.forEach(visit)
     else if ('any' in n) n.any.forEach(visit)
     else if ('not' in n) visit(n.not)
+    else if ('up' in n) visit(n.up)
+    else if ('down' in n) visit(n.down)
+    else if ('near' in n) visit(n.near)
     else if ('ref' in n) {
       for (const id of refSourceIds(forest, refTargetOf(n.ref), refKindsOf(n.ref))) out.add(id)
     }
@@ -673,6 +842,9 @@ function collectTags(node: QueryNode, forest: readonly Block[]): Set<string> {
     if ('all' in n) n.all.forEach(visit)
     else if ('any' in n) n.any.forEach(visit)
     else if ('not' in n) visit(n.not)
+    else if ('up' in n) visit(n.up)
+    else if ('down' in n) visit(n.down)
+    else if ('near' in n) visit(n.near)
     else if ('tag' in n) {
       const tag = findTagByName(forest, n.tag)
       if (tag) for (const id of tagMemberIds(tag.id, forest)) out.add(id)
@@ -680,26 +852,6 @@ function collectTags(node: QueryNode, forest: readonly Block[]): Set<string> {
   }
   visit(node)
   return out
-}
-
-/** 条件里第一个 `journal` 日期（索引路径要按它查日期表，所以导出共用） */
-export function firstJournal(node: QueryNode): string | null {
-  if ('all' in node) {
-    for (const n of node.all) {
-      const d = firstJournal(n)
-      if (d) return d
-    }
-    return null
-  }
-  if ('any' in node) {
-    for (const n of node.any) {
-      const d = firstJournal(n)
-      if (d) return d
-    }
-    return null
-  }
-  if ('not' in node) return firstJournal(node.not)
-  return 'journal' in node ? node.journal : null
 }
 
 /** 在森林里按 id 找块。复用 `tree.ts` 的 `findPath`（不另写一份遍历） */

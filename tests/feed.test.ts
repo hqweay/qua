@@ -71,8 +71,8 @@ test('等式：spec 求值（纯）＝ spec 求值（索引）＝ journalDays �
   assert.deepEqual(dates(fromIndex), dates(expected), '索引路径查日期表，结果必须与纯路径一致')
 })
 
-test('等式：FEED_SPEC 本身求出来的就是日记流（范围条件不掺进来）', () => {
-  // role 成员条件把**天当结果**：日期行自己入选；`journal: date` 范围条件才把天当容器
+test('等式：FEED_SPEC 本身求出来的就是日记流（路径条件不掺进来）', () => {
+  // role 成员条件把**天当结果**：日期行自己入选；「在某一天下面」是另一条路径条件（`up`）
   const blocks = [j('2026-10-20', [p('x', '今天的正文')]), j('2026-10-19')]
   assert.deepEqual(feedDays(blocks, ALL), [blocks[0], blocks[1]])
 })
