@@ -386,6 +386,21 @@ body[data-dock-resizing='1'] * {
 .page-item .p-title {
   flex: 1;
 }
+/*
+ * 反链卡一行的**来源路径**（`页 › 父`）：它是「这一句住哪」，不是这一行自己的名字。
+ * 与正文分开取一份宽度（最多半行），剩下的留给正文；两段都省略，窄槽里也不挤成一团。
+ */
+.page-item .p-ctx {
+  flex: 0 1 auto;
+  max-width: 50%;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+.page-item .p-ctx-sep {
+  flex: 0 0 auto;
+  margin: 0 var(--ui-gap-1);
+  opacity: 0.6;
+}
 /* 分割线在槽里的一行：壳仍是 `.page-item`，线自己撑满剩余宽度 */
 .page-item .divider-rule {
   flex: 1;
