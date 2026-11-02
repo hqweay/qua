@@ -11,6 +11,7 @@ import { MemoryKb } from '../src/core/kb/memory.ts'
 import { BlockStore } from '../src/core/store.ts'
 import { viewConfigCommands } from '../src/app/commands/views.ts'
 import type { ViewConfigDeps } from '../src/app/commands/types.ts'
+import type { ViewConfig } from '../src/core/index.ts'
 import type { OwnerStore } from '../src/app/wiring/owners.ts'
 import type { Tx } from '../src/core/kb/types.ts'
 import type { ViewOwnerData } from '../src/core/view-owner.ts'
@@ -92,6 +93,50 @@ test('addView(board)：有分组字段时照常建，并把分组列写进配置
     readViews({ ...root, props: { _views: views } }).length,
     1,
     'canonicalViews 认它',
+  )
+})
+
+test('addView：建视图就给默认名（kind 显示名，撞名加序号）——同 kind 多张从此分得开', () => {
+  const root = mkBlock('')
+  root.id = 'root'
+  const kb = kbOf([root]).kb
+  const writes: { owner: unknown; patch: Partial<ViewOwnerData> }[] = []
+  const held: ViewConfig[] = []
+  // 这条要**有状态**的假拥有者：默认名要撞得上「上一次建的」，read 必须回放写过的 views
+  const owners: OwnerStore = {
+    read: () => ({ views: held }),
+    write: (_owner, patch) => {
+      if (patch.views) held.splice(0, held.length, ...patch.views)
+      writes.push({ owner: _owner, patch })
+    },
+    readBinding: () => null,
+    setBindingView: () => {},
+    entriesOf: () => [],
+    writeEntries: () => {},
+    entryOf: () => undefined,
+  }
+  const d: ViewConfigDeps = {
+    kb,
+    owners,
+    run: <R,>(fn: (tx: Tx) => R) => kb.tx(fn),
+    reloadPage: () => {},
+    rootIds: () => [],
+    viewShown: () => false,
+    activeId: () => 'root',
+    openBlock: () => {},
+    refreshList: () => {},
+    toast: () => {},
+  }
+  const app = viewConfigCommands(d)
+
+  app.addView({ kind: 'block', blockId: 'root' }, 'table')
+  app.addView({ kind: 'block', blockId: 'root' }, 'table')
+  const views = writes.at(-1)!.patch.views ?? []
+  assert.equal(views.length, 2)
+  assert.deepEqual(
+    views.map((v) => v.name),
+    ['表格', '表格 2'],
+    '名字撞了就加序号，菜单里不再全叫一个名字',
   )
 })
 

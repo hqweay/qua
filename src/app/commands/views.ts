@@ -27,6 +27,7 @@ import {
   storedKindsFor,
   typeDeclOf,
   upsertView,
+  viewNameOf,
   withListSort,
   withSort,
   type Block,
@@ -150,6 +151,19 @@ export function viewConfigCommands(
         view.gallery = { cover: 'first-asset' }
       } else if (kind === 'mindmap') {
         view.mindmap = { direction: 'both' }
+      }
+      /**
+       * 建视图就给**默认名**（kind 显示名，撞名加序号）：`name` 字段一直在，此前无人填，
+       * 于是同 kind 多张在菜单里全叫一个名字，只能靠顺序猜。「表格」「表格 2」
+       * 从此分得开；改名入口另立，不在这里。
+       */
+      const taken = new Set(
+        (d.owners.read(owner)?.views ?? []).map((v) => viewNameOf(v, (k) => t(`ui.view.kind.${k}`))),
+      )
+      {
+        let name = t(`ui.view.kind.${kind}`)
+        for (let n = 2; taken.has(name); n++) name = `${t(`ui.view.kind.${kind}`)} ${n}`
+        view.name = name
       }
       d.owners.write(owner, { views: upsertView(d.owners.read(owner)?.views ?? [], view), activeView: id })
       reveal(owner)
