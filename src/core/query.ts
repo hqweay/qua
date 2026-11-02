@@ -587,7 +587,12 @@ function compareOp(v: unknown, op: { gt?: unknown; gte?: unknown; lt?: unknown; 
   return cmp <= 0
 }
 
-/** 两个值比大小：两边都是数字按数值、都是字符串按本地化序；**其余返回 `null`（比不了）** */
+/**
+ * 两个值比大小：两边都是数字按数值、都是字符串按本地化序；**其余返回 `null`（比不了）**。
+ *
+ * 与 `view.ts` 的 `compareAny` 同形不合并：那边「比不了」也得给个数（显示排序总要有个先后），
+ * 这边 `null` 是**契约**——查询拿它判「不匹配」（`true > 5` 不是有意义的结果，不能给数）。
+ */
 function compareValues(a: unknown, b: unknown): number | null {
   if (typeof a === 'number' && typeof b === 'number') return a - b
   // 属性值可能是 `"3"` 这种旧输入遗留：一边是数字串也按数值比

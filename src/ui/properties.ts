@@ -459,6 +459,17 @@ export class PropertiesPanel {
     return target && isPropDef(target) && propKindOf(target) === 'select' ? target : undefined
   }
 
+  /** chip 尾上的删除粒：声明、归属、标签三处同形，只有文案与动作不同 */
+  private tagDel(title: string, onClick: () => void): HTMLButtonElement {
+    const del = document.createElement('button')
+    del.type = 'button'
+    del.className = 'props-tag-x'
+    del.title = title
+    del.textContent = '×'
+    del.addEventListener('click', onClick)
+    return del
+  }
+
   render(): void {
     const target = this.deps.target()
     if (!target) {
@@ -654,12 +665,7 @@ export class PropertiesPanel {
         })
         chip.append(opt)
       }
-      const del = document.createElement('button')
-      del.type = 'button'
-      del.className = 'props-tag-x'
-      del.title = t('ui.props.undeclare')
-      del.textContent = '×'
-      del.addEventListener('click', () => this.deps.undeclareField(target, def.id))
+      const del = this.tagDel(t('ui.props.undeclare'), () => this.deps.undeclareField(target, def.id))
       chip.append(text, del)
       list.appendChild(chip)
     }
@@ -720,12 +726,7 @@ export class PropertiesPanel {
       const t0 = document.createElement('span')
       t0.textContent = text
       t0.title = title
-      const del = document.createElement('button')
-      del.type = 'button'
-      del.className = 'props-tag-x'
-      del.title = t('ui.belongs.remove')
-      del.textContent = '×'
-      del.addEventListener('click', () => this.deps.removeBelong(target, id))
+      const del = this.tagDel(t('ui.belongs.remove'), () => this.deps.removeBelong(target, id))
       el.append(t0, del)
       return el
     }
@@ -810,12 +811,7 @@ export class PropertiesPanel {
       text.className = 'props-tag-name'
       text.title = t('ui.chip.tagTitle', { label: name })
       text.addEventListener('click', (e) => this.deps.openRef(tag.id, { shiftKey: e.shiftKey }))
-      const del = document.createElement('button')
-      del.type = 'button'
-      del.className = 'props-tag-x'
-      del.title = t('ui.props.tagRemove')
-      del.textContent = '×'
-      del.addEventListener('click', () => this.deps.removeTag(target, tag.id))
+      const del = this.tagDel(t('ui.props.tagRemove'), () => this.deps.removeTag(target, tag.id))
       chip.append(text, del)
       value.appendChild(chip)
     }

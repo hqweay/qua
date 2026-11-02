@@ -94,6 +94,9 @@ function liveChildren(kb: KbClient, id: string): Block[] {
  *
  * ⚠️ 行是「每列各取第 j 项」的**位置元组**：按某一列排序会把整行（别的列的第 j 项）
  *    一起带走 —— 这与平表「按一列排序，行是记录」是同一条语义，不是把各列独立排序。
+ *
+ * 与平表的 `sortRecords`／`compareAny` 同骨架但不复用：这里值域是预取的**字符串**，
+ * 空判据是 `trim() === ''`（平表判「值存在」，空白格在这里已经算空）——差异是语义不是笔误，不硬并。
  */
 export function sortListRows(rows: readonly ListTableRow[], sort: ListSort | undefined): ListTableRow[] {
   if (!sort) return [...rows]
