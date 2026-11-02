@@ -204,7 +204,14 @@
 #editor::after {
   content: '';
   display: block;
-  min-height: var(--ui-gap-7);
+  /*
+    这一格有两个用途，共用同一段空白：
+    · 「还能往下写」的气口 ＋ 点空白建块的可发现性（悬停浮现一条极弱的线）；
+    · 段底挂载区的**生长缓冲**：面板是最后一块内容，视口滚到底沿时切栏，
+      面板变高先向下长进这段空白里——scrollTop 与面板顶边都不动，
+      缓冲吃满才真正撑长页面。太薄了缓冲就白设，取一屏里一整块面板的高度档。
+  */
+  min-height: 200px;
   border-bottom: 1px solid transparent;
   transition: border-color var(--ui-dur-1) ease;
 }
