@@ -250,7 +250,10 @@ const ORDER = ['core', 'view', 'ui', 'app', 'host']
     const r = rel(f)
     const from = layerOf(r)
     if (!from) {
-      unknown.push(r)
+      /** 未覆盖＝逃检：新文件不进任何层目录，这条断言对它就不存在。只进 note 的话，
+       *  拆分产生的新文件可以全部无声漂在层外（实测踩过）。环境声明文件除外。 */
+      if (r === 'src/vite-env.d.ts') unknown.push(r)
+      else hits.push(`${r}（不在任何层目录里——新文件必须落进 core/view/ui/app，或显式加入本断言）`)
       continue
     }
     const { sf } = tsFile(f)

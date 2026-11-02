@@ -150,8 +150,8 @@ pnpm gate
 2. **再问归属**：它属于数据层（`core`）、渲染（`view`）、组件（`ui`）、命令（`app`）还是装配（`main.ts`）？
    **放错层会被断言拦下来，这是好事。**
 3. **加命令就加声明**：命令表在 `src/core/commands/decls.ts`，`title` 必须走 `t()`；
-   键位是**数据**，加在 `src/core/bindings.ts`——**不要写 `if (e.key === …)` 硬分支**。
-4. **加文案就加字典项**：`src/core/msg.ts`，键名用 `区域.组件.用途`。
+   键位是**数据**，加在 `src/core/infra/bindings.ts`——**不要写 `if (e.key === …)` 硬分支**。
+4. **加文案就加字典项**：`src/core/infra/msg.ts`，键名用 `区域.组件.用途`。
 5. **写断言**：纯逻辑进 `tests/`；要真浏览器的进 `checks/smoke.mjs`。
    **断言写在测试名里**——失败时那句话就是你需要的全部上下文。
 

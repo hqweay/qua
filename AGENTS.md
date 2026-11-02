@@ -83,9 +83,9 @@ core ← view ← ui ← app ← host
 
 ### 1.7 用户可见文案一律走字典（`arch-check [11]`）
 
-- 所有用户能看到的字符串用 `t('id')`（`src/core/msg.ts`），**不写裸中文字面量**。
+- 所有用户能看到的字符串用 `t('id')`（`src/core/infra/msg.ts`），**不写裸中文字面量**。
 - 开发者日志（`console.*`、`throw new Error`）用英文，不受此限。
-- `src/core/seed.ts` 的假数据、`checks/**`、`scripts/**` 在白名单内。
+- `src/core/infra/seed.ts` 的假数据、`checks/**`、`scripts/**` 在白名单内。
 
 ### 1.8 颜色/间距只用语义 token（`arch-check [19]`）
 
@@ -245,9 +245,9 @@ pnpm gate:bundle    # gate ＋ 打包产物冒烟（慢，单列）
 
 | 想做 | 要 | 不要 |
 |---|---|---|
-| 加用户可见字符串 | `t('新id')` ＋ 在 `src/core/msg.ts` 加字典项 | 裸中文写在 `.ts` 里 |
+| 加用户可见字符串 | `t('新id')` ＋ 在 `src/core/infra/msg.ts` 加字典项 | 裸中文写在 `.ts` 里 |
 | 加颜色/间距 | 用 `--ui-*` token | `var(--c-*)`、写死 `#xxx`/`rgb()`（token 段外） |
-| 加键位 | 加到 `src/core/bindings.ts`（**数据**） | 写 `if (e.key === …)` 硬分支 |
+| 加键位 | 加到 `src/core/infra/bindings.ts`（**数据**） | 写 `if (e.key === …)` 硬分支 |
 | 加命令 | `commands/decls.ts` 声明 ＋ `capability`/`undoable` | handler 里直接改 UI 状态 |
 | 命令要碰 DOM | 走 `App` 门面 | handler 里 `document.xxx` |
 | `view` 想用 UI 组件 | 从 `ui` 层拿，不反向 import | `view` import `ui` |
@@ -257,7 +257,7 @@ pnpm gate:bundle    # gate ＋ 打包产物冒烟（慢，单列）
 | 每帧写一个值（拖拽、跟手） | 直接写到受益的那个元素（`el.style.transform`） | 写在公共祖先的 CSS 变量上（继承 ⇒ 整棵子树重算，先跑 `checks/probe-dock-var.mjs` 看代价） |
 | 改「一个块长成哪几行」 | 只改 `src/core/storage/db-rows.ts`（编码唯一落点） | 在主进程里写块语义（`[2+]` 会拦，且会有两份定义） |
 | 给某行加一种「身体」（露面体/内联体/组件体…） | 新增 `data-*` 身份格 ＋ 同一个高度来源：视觉 CSS 与虚拟化占位（`visibleRowHeight`）都读它 | 两处各算一遍（漏掉占位 ⇒ 带这种行的长文档滚动条系统性偏小，且不报错） |
-| 想走一遍块树 | 用 `src/core/walk.ts` 的 `walkForest`（先序，带 `path`／`hidden`，返回 `false` 即停） | 自己写递归走 `children`（`arch-check [22]` 会拦） |
+| 想走一遍块树 | 用 `src/core/model/walk.ts` 的 `walkForest`（先序，带 `path`／`hidden`，返回 `false` 即停） | 自己写递归走 `children`（`arch-check [22]` 会拦） |
 | 想再渲染一列**可编辑**块 | 用 `ui/editable-block.ts` 的 `EditableBlock`：建实例＋订阅＋焦点＋事件表＋重载全在它里面（`load` 给装载动作、`wire` 给**整份** `viewEvents`、`area` 给冻结范围） | 再手抄一份 `new BlockEditor({…})`＋订阅＋防抖；只接一半事件表（漏了不报错：点引用不跳、右键没菜单）；自己再叠一份组件级防抖（两条重载路径会把 `click` 弄丢） |
 | 里层编辑器里**打字对、但 ↵／⌘A／Tab 跑偏** | 先查**活动编辑器 `app.ed` 是谁**（验法：⌘A 看选区落在哪个宿主）。打字走**事件层**（各编辑器绑自己的 container），键位走**命令层**（`app.ed`）——两者能各错各的 | 去改事件层。挂载区的 DOM 嵌在 `#editor` 里，`focusin` **会冒泡** ⇒ 正文那条无条件 `ed = mainEd` 会把里层 `onFocus` 刚切好的活动编辑器覆盖回去（真踩过，见 T142） |
 | 空块的光标落点 | 落 `.tx` 的**元素 0 位**（`<br>` 之前） | 落到 `<br>` 之后——那儿不是 Chrome 认的稳定组合位，预编辑串插进去时 `<br>` 被摘掉、组合区间失焦 ⇒ 拼音**第一个字母被冻成正文**（打 `nihao` 得 `n你好`，见 T141） |
