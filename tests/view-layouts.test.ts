@@ -17,7 +17,7 @@ import {
   type ViewRecord,
 } from '../src/core/index.ts'
 import { textRuns } from '../src/core/model/runs.ts'
-import { dateOf, monthCells } from '../src/ui/view-calendar.ts'
+import { dateOf, monthCells } from '../src/ui/views/view-calendar.ts'
 
 const rec = (b: Block, values: Record<string, unknown> = {}): ViewRecord => ({
   block: b,

@@ -31,7 +31,7 @@ import { ensureTagInTx } from '../../core/kb/ensure-tag.ts'
 import { FEED_SPEC } from '../../core/query/feed.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { App } from '../../core/infra/ports.ts'
-import type { Row } from '../../ui/layers.ts'
+import type { Row } from '../../ui/overlay/layers.ts'
 import { rootsFor, rootsForMany, takenWhere } from './roots.ts'
 import type { PageDeps } from './types.ts'
 

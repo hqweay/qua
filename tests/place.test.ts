@@ -13,7 +13,7 @@
  */
 import { test } from 'node:test'
 import * as assert from 'node:assert/strict'
-import { placeNear, type Placement } from '../src/ui/place.ts'
+import { placeNear, type Placement } from '../src/ui/overlay/place.ts'
 
 const VW = 1440
 const VH = 900

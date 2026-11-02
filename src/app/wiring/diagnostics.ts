@@ -44,9 +44,9 @@ import { plainText, type MarkType, type RunWithId } from '../../core/model/runs.
 import { DISPLAY_PROP } from '../../core/index.ts'
 import type { App, FixtureName, MenuRequest, PanelKind, Registry } from '../../core/commands/index.ts'
 import type { LoadedWorkspace, Prefs, ThemeMode, Workspace, WorkspaceStore } from '../../core/infra/workspace.ts'
-import { createBadge } from '../../ui/badge.ts'
-import type { Layers, Row } from '../../ui/layers.ts'
-import type { Chrome } from '../../ui/chrome.ts'
+import { createBadge } from '../../ui/chrome/badge.ts'
+import type { Layers, Row } from '../../ui/overlay/layers.ts'
+import type { Chrome } from '../../ui/chrome/chrome.ts'
 import type { BlockEditor } from '../../view/editor.ts'
 
 export type DiagnosticsDeps = {

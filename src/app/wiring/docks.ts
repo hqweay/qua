@@ -27,7 +27,7 @@ import { t } from '../../core/infra/msg.ts'
 import type { Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { Workspace, Prefs } from '../../core/infra/workspace.ts'
-import type { DockWindows } from '../../ui/dock-windows.ts'
+import type { DockWindows } from '../../ui/dock/dock-windows.ts'
 import {
   buildDockCard,
   buildDockTile,
@@ -38,15 +38,15 @@ import {
   type DockCardState,
   type DockSlotEls,
   type DockTile,
-} from '../../ui/dock.ts'
-import { trashCard, type DockContentDeps } from '../../ui/dock-content.ts'
-import { emptyCardList } from '../../ui/card-parts.ts'
-import type { BackrefsCard } from '../../ui/backrefs-card.ts'
-import { calendarCard } from '../../ui/calendar-card.ts'
-import { BelongsTree } from '../../ui/belongs-tree.ts'
+} from '../../ui/dock/dock.ts'
+import { trashCard, type DockContentDeps } from '../../ui/dock/dock-content.ts'
+import { emptyCardList } from '../../ui/chrome/card-parts.ts'
+import type { BackrefsCard } from '../../ui/cards/backrefs-card.ts'
+import { calendarCard } from '../../ui/cards/calendar-card.ts'
+import { BelongsTree } from '../../ui/cards/belongs-tree.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { bindDropTarget, setDragCard } from '../../view/dnd.ts'
-import { bindWindowDrop } from '../../ui/dock-windows.ts'
+import { bindWindowDrop } from '../../ui/dock/dock-windows.ts'
 
 export type DocksDeps = {
   kb: MemoryKb
