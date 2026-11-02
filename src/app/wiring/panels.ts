@@ -562,8 +562,8 @@ export function setupPanels(deps: PanelsDeps) {
       ...(derived ? { derived } : {}),
       host: () => blocks.find(hostId) ?? host,
       /**
-       * 求值上下文按**拥有者**分，不按「有没有绑定」：
-       *   · tab 拥有者（local）与绑定（linked）都是挂载表面 ⇒ 锚点＝**宿主块自己**；
+       * 求值上下文按**拥有者**分：
+       *   · tab 拥有者（local）是挂载表面 ⇒ 锚点＝**宿主块自己**；
        *     顶层宿主（日记的天、顶层页）没有父块，「锚在父块」会静默变成整库——
        *     同一栏的大纲分支锚在宿主，两张看法会给出两份结果。
        *   · 块拥有者（center 查询块）锚在它所在的容器：查询块住在哪一页，
@@ -572,10 +572,10 @@ export function setupPanels(deps: PanelsDeps) {
       context:
         binding?.kind === 'embed'
           ? embedContextFor(binding.blockId, hostId)
-          : owner.kind === 'tab' || binding
+          : owner.kind === 'tab'
             ? tabContextFor(host, ownerBlock?.id)
             : contextFor(ownerBlock?.id ?? hostId),
-      surface: opts?.surface ?? (owner.kind === 'tab' || binding ? 'mount' : 'center'),
+      surface: opts?.surface ?? (owner.kind === 'tab' ? 'mount' : 'center'),
       onChange: () => {
         syncSections()
         scheduleSave()
@@ -704,7 +704,7 @@ export function setupPanels(deps: PanelsDeps) {
       onFocus: (editor) => deps.setEd(editor),
       // 与正文同一套事件（点引用/块标/右键菜单/`#`·`@` 补全），装配层只给这一份
       wire: (editor, change) => deps.wireEditor(editor, change, 'mount'),
-      onAddTab: (id) => openMountPicker(id),
+      onAddTab: (id) => addLocalQueryTab(id),
       // 大纲分支的切换下拉：与视图宿主那条同一个菜单（装配层现画行，这里只给锚点）
       openViewMenu: (host, tabId, anchor) => app.openViewMenu({ kind: 'tab', host, tabId }, anchor),
       onTabMenu: (mountHost, entry, anchor) => openMountTabMenu(mountHost, entry, anchor),
@@ -718,11 +718,7 @@ export function setupPanels(deps: PanelsDeps) {
         // 摘完当场重排：栏是模型/设备状态里的一格，DOM 不会自己知道
         renderMounts()
       },
-      /**
-       * 非大纲那一栏的视图体。拥有者随栏的种类变：
-       *   · local ⇒ 拥有者就是这一栏（配置住在它自己身上）；
-       *   · linked ⇒ 拥有者是**目标块**，视图选择走绑定（它只有一根指针）。
-       */
+      /** 非大纲那一栏的视图体：local ⇒ 拥有者就是这一栏（配置住在它自己身上） */
       createView: (mountHostBlock, entry) => {
         const mountHost: MountHost = isJournal(mountHostBlock)
           ? { kind: 'journal' }
@@ -730,13 +726,6 @@ export function setupPanels(deps: PanelsDeps) {
         if (entry.kind === 'local') {
           const owner: ViewOwnerRef = { kind: 'tab', host: mountHost, tabId: entry.id }
           return asBody(createView(owner, mountHostBlock))
-        }
-        if (entry.kind === 'linked') {
-          const binding: ViewBindingRef = { kind: 'linked-tab', host: mountHost, tabId: entry.id }
-          const target = owners.readBinding(binding)
-          if (!target) return null
-          const targetBlock = blocks.find(target.owner.kind === 'block' ? target.owner.blockId : '')
-          return asBody(createView(target.owner, targetBlock ?? mountHostBlock, binding))
         }
         if (entry.kind === 'derived') {
           /**
@@ -784,65 +773,37 @@ export function setupPanels(deps: PanelsDeps) {
   })
 
   /**
-   * **一栏的「⋯」菜单**：local 能提升／移除，linked 能转本地／移除，derived 能固定成查询。
+   * **派生栏的「⋯」菜单**：把这一栏固定成一条可编辑的 local 查询。
    *
    * 每一项都落到**已有命令**上：菜单只决定「有哪些动作」，写路径与撤销仍只有一条。
    * 菜单是动态的（这一栏是什么种类的），所以它住装配层而不是绑定表。
    */
-  function openMountTabMenu(mountHost: MountHost, entry: MountEntry, anchor: DOMRect): void {
-    const rows: Row[] = []
-    const derivedSource = entry.kind === 'derived' ? entry.source : null
-    if (entry.kind === 'local') {
-      rows.push({
-        id: 'mount/promote',
-        label: t('ui.mount.promoteToBlock'),
-        hint: t('ui.mount.promoteBlockHint'),
-        icon: 'lucide:list-filter',
-        group: 'mount/1-identity',
-      })
-    }
-    if (entry.kind === 'linked') {
-      rows.push({ id: 'mount/detach', label: t('ui.mount.detach'), icon: 'lucide:copy', group: 'mount/1-identity' })
-    }
-    if (entry.kind === 'derived') {
-      rows.push({
-        id: 'mount/fix',
-        label: t('ui.mount.fixDerived'),
-        hint: t('ui.mount.fixDerivedHint'),
-        icon: 'lucide:list-filter',
-        group: 'mount/1-identity',
-      })
-    }
-    if (entry.kind !== 'derived') {
-      rows.push({ id: 'mount/remove', label: t('ui.mount.remove'), icon: 'lucide:x', group: 'mount/9-remove' })
-    }
+  function openMountTabMenu(mountHost: MountHost, entry: Extract<MountEntry, { kind: 'derived' }>, anchor: DOMRect): void {
+    const source = entry.source
     layers.openMenu({
-      rows,
+      rows: [
+        {
+          id: 'mount/fix',
+          label: t('ui.mount.fixDerived'),
+          hint: t('ui.mount.fixDerivedHint'),
+          icon: 'lucide:list-filter',
+          group: 'mount/1-identity',
+        },
+      ],
       anchor,
       title: labelOfEntry(entry),
       searchable: false,
       onPick: (row) => {
+        if (row.id !== 'mount/fix') return
         const hostId = mountHost.kind === 'journal' ? '' : mountHost.blockId
-        if (row.id === 'mount/promote') {
-          void deps.getRegistry().invoke('core.mount/promote', { host: mountHost, tabId: entry.id, target: 'block' }, 'mount')
-        } else if (row.id === 'mount/remove') {
-          void deps.getRegistry().invoke('core.mount/remove', { host: mountHost, tabId: entry.id }, 'mount')
-        } else if (row.id === 'mount/detach') {
-          void deps.getRegistry().invoke('core.mount/detach', { host: mountHost, tabId: entry.id }, 'mount')
-        } else if (row.id === 'mount/fix') {
-          if (!derivedSource) return
-          const before = new Set(owners.entriesOf(mountHost).map((e) => e.id))
-          const view = readMountView(deps.prefs().mountViews, mountHost, derivedSource)
-          void deps
-            .getRegistry()
-            .invoke('core.mount/fix-derived', { host: mountHost, source: derivedSource, view }, 'mount')
-          const added = owners.entriesOf(mountHost).find((e) => !before.has(e.id))
-          renderMounts()
-          if (added) mountInstances.get(hostId)?.area.activateTab(added.id)
-          return
-        }
-        // 栏是模型/设备状态里的一格，DOM 不会自己知道（焦点还在菜单上）
+        const before = new Set(owners.entriesOf(mountHost).map((e) => e.id))
+        const view = readMountView(deps.prefs().mountViews, mountHost, source)
+        void deps
+          .getRegistry()
+          .invoke('core.mount/fix-derived', { host: mountHost, source, view }, 'mount')
+        const added = owners.entriesOf(mountHost).find((e) => !before.has(e.id))
         renderMounts()
+        if (added) mountInstances.get(hostId)?.area.activateTab(added.id)
       },
     })
   }
@@ -860,60 +821,21 @@ export function setupPanels(deps: PanelsDeps) {
               : 'ui.mount.mentions',
       )
     }
-    if (entry.kind === 'local') return entry.label
-    if (entry.label !== undefined && entry.label.trim() !== '') return entry.label
-    const target = kb.get(entry.block)
-    const name = target ? displayNameOf(target).trim() : ''
-    return name === '' ? t('ui.mount.dangling') : name
+    return entry.label
   }
 
   /**
-   * 「＋」：**三种「新建」**，默认建 local tab（不建块）。
+   * **「＋」＝新建一栏 local 查询**：不再弹菜单。
    *
-   * | 入口 | 建什么 | 住哪 |
-   * |---|---|---|
-   * | 新建查询 | **local tab**（自己拥有条件与视图） | 宿主持有的那组条目 |
-   * | 挂一个已有的块 | **linked tab**（指针） | 同上 |
-   * | 新建查询页… | **查询页**（内容对象） | 页列表 |
+   * 面板里的查询只属于这一块：不建块、不指向块、不提升。要一份可引用／可共享的查询，
+   * 写「查询块」（内容对象），那是正文里的事。只剩一个动作还留一层菜单，只是让用户多点一次。
    *
-   * 默认是 local tab：随手加一栏，不在树/页列表里多一个对象，也没有
-   * 「删块 tab 怎么办」。需要命名/引用/共享时再提升。
+   * 条件条在栏里，点一下就地展开。名字可以后改，条件不能后猜。
+   * ⚠️ **不建块**：块数不变，⌘Z 可撤（建栏与应用条件是两笔，各自可撤）。
    */
-  function openMountPicker(hostId: string): void {
-    const rows: Row[] = [
-      { id: 'mount/local', label: t('ui.mount.addLocal'), hint: t('ui.mount.addLocalHint'), icon: 'lucide:list-filter', group: 'mount/1' },
-      { id: 'mount/linked', label: t('ui.mount.addLinked'), hint: t('ui.mount.addLinkedHint'), icon: 'lucide:link', group: 'mount/1' },
-      { id: 'mount/page', label: t('ui.mount.addQueryPage'), icon: 'lucide:file-plus', group: 'mount/2' },
-    ]
+  function addLocalQueryTab(hostId: string): void {
     const host = blocks.find(hostId)
     if (!host) return
-    layers.openMenu({
-      rows,
-      anchor: deps.getEd().caretRect(),
-      title: t('ui.mount.addMenu'),
-      searchable: false,
-      emptyText: t('ui.mount.addEmpty'),
-      onPick: (row) => {
-        if (row.id === 'mount/local') openLocalComposer(host)
-        else if (row.id === 'mount/linked') openLinkedPicker(host)
-        else {
-          // 查询页是**内容对象**：建完就打开它，条件树在页面里就地展开
-          void deps.getRegistry().invoke('core.query/create', { kind: 'page', name: t('ui.query.untitled') }, 'mount')
-        }
-      },
-    })
-  }
-
-  /**
-   * **新建查询（local tab）**：建一栏空条件的查询；条件条在栏里，点一下就地展开。
-   *
-   * 为什么不是先弹一个「名字 ＋ JSON」的表单：条件是这个功能的主语，
-   * 让用户在第一眼就看见「条件是什么」比让他先写一段 JSON 更接近这件事本身。
-   * 名字可以后改（`···` → 重命名），条件不能后猜。
-   *
-   * ⚠️ 仍然**不建块**：块数不变，⌘Z 可撤（建栏与应用条件是两笔，各自可撤）。
-   */
-  function openLocalComposer(host: Block): void {
     const mountHost: MountHost = isJournal(host) ? { kind: 'journal' } : { kind: 'block', blockId: host.id }
     const before = new Set(owners.entriesOf(mountHost).map((e) => e.id))
     void deps
@@ -928,39 +850,6 @@ export function setupPanels(deps: PanelsDeps) {
     if (!added) return
     // 新栏当场切过去：建了不看，「点了没生效」的另一种长相（激活的是这一栏自己的表格视图）
     mountInstances.get(host.id)?.area.activateTab(added.id)
-  }
-
-  /** 挂一个已有的块（linked）：选块 ⇒ 写一根指针（条件与视图仍住在那一块上） */
-  function openLinkedPicker(host: Block): void {
-    const mountHost: MountHost = isJournal(host) ? { kind: 'journal' } : { kind: 'block', blockId: host.id }
-    const rows: Row[] = []
-    for (const b of flatten({ roots: [...kb.roots()] })) {
-      if (b.id === host.id) continue
-      rows.push({
-        id: `linked/${b.id}`,
-        label: displayNameOf(b).trim() || t('ui.query.untitled'),
-        hint: t('ui.mount.addLinkedHint'),
-        icon: 'lucide:link',
-      })
-    }
-    if (rows.length === 0) {
-      app.toast(t('ui.mount.addEmpty'), 'info')
-      return
-    }
-    layers.openMenu({
-      rows,
-      anchor: deps.getEd().caretRect(),
-      title: t('ui.mount.pickLinked'),
-      searchable: true,
-      focusSearch: true,
-      emptyText: t('ui.mount.addEmpty'),
-      onPick: (row) => {
-        const id = String(row.id).slice('linked/'.length)
-        void deps.getRegistry().invoke('core.mount/add-linked', { host: mountHost, block: id }, 'mount')
-        // 当场看见新栏：store 订阅在「焦点还在本视图里」时会跳过（同 × 那条理由）
-        renderMounts()
-      },
-    })
   }
 
   /**

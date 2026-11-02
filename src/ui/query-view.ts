@@ -139,10 +139,10 @@ export interface ViewHostDeps {
    * 拥有者：视图配置住在谁身上。
    *
    * ⚠️ 给了 `binding` 时**以绑定为准**（拥有者由绑定解析出来）——
-   *    linked tab／露面只存「指向谁 ＋ 选了哪张视图」，自己不拥有配置。
+   *    露面只存「指向谁 ＋ 选了哪张视图」，自己不拥有配置。
    */
   owner: ViewOwnerRef
-  /** 绑定：这一次「在别处看一眼」的指针（linked tab／露面） */
+  /** 绑定：这一次「在别处看一眼」的指针（露面／槽卡） */
   binding?: ViewBindingRef
   /**
    * 显示的宿主块（活引用）。
@@ -563,7 +563,7 @@ export class ViewHost {
     return this.bound.owner
   }
 
-  /** 拥有者那一块（露面／linked tab 指的目标；local tab 没有块 ⇒ `undefined`） */
+  /** 拥有者那一块（露面指的目标；local tab 没有块 ⇒ `undefined`） */
   private ownerBlock(): Block | undefined {
     const { owner } = this.bound
     return owner.kind === 'block' ? this.deps.kb.get(owner.blockId) : undefined
@@ -594,7 +594,6 @@ export class ViewHost {
     /**
      * **这一次露面指的那张视图没了**：退回源的默认看法，但要说一句实话 ——
      * 静默退回等于「我选的表格怎么变成大纲了」，而用户没有任何线索能找回那次选择。
-     * （linked 栏走同一条路：它也是一根指针。）
      */
     if (this.warned === false && this.bound.degraded) {
       this.warned = true

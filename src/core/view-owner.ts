@@ -18,7 +18,7 @@
  * | `tab`（只指 local） | 块宿主 `_mounts`／日记 `Prefs.journalMounts` | 不能 |
  * | `derived` | **没有配置**（宿主现算） | — |
  *
- * 而 **绑定**（linked tab／embed／dock 卡）只存「指向谁 ＋ 选了哪张视图」，
+ * 而 **绑定**（embed／dock 卡）只存「指向谁 ＋ 选了哪张视图」，
  * 不拥有任何配置。
  *
  * ⚠️ 命令与 UI 只经 `ViewOwnerStore`（实现在 `app/wiring/owners.ts`）读写视图配置；
@@ -36,8 +36,8 @@ import type { MountEntry, MountHost } from './mount.ts'
 /**
  * **拥有者**：谁持有「条件 ＋ 命名视图」这一份配置。
  *
- * ⚠️ `tab` 只指 **local tab**：linked tab 是绑定（它指着别人），不是拥有者。
- *    把两者合成一个 `{host, tabId}` 就会出现「改这一栏的条件，其实是改另一个块的」。
+ * ⚠️ `tab` 只指 **local tab**：它拥有自己的条件与视图，不指向任何块。
+ *    要共享一份查询就写查询块并 embed，不要把面板栏变成指针。
  */
 export type ViewOwnerRef =
   | { kind: 'block'; blockId: string }
@@ -80,7 +80,7 @@ export function ownerDataOfBlock(b: Block | undefined): ViewOwnerData {
   return out
 }
 
-/** 从一个 **local tab** 读出拥有者数据；不是 local ⇒ `null`（linked/derived 不拥有配置） */
+/** 从一个 **local tab** 读出拥有者数据；不是 local ⇒ `null`（derived 不拥有配置） */
 export function ownerDataOfTab(entry: MountEntry | undefined): ViewOwnerData | null {
   if (!entry || entry.kind !== 'local') return null
   const out: ViewOwnerData = { views: entry.views, query: entry.spec, label: entry.label }
@@ -136,12 +136,10 @@ export function sourceOfOwner(owner: ViewOwnerRef, data: ViewOwnerData, block?: 
  *
  * | 绑定 | 指针住在哪 |
  * |---|---|
- * | `linked-tab` | `_mounts`／`Prefs.journalMounts` 里的 `{block,view}` |
  * | `embed` | 露面块的 `props._embed` |
  * | `dock` | 设备状态里的卡片（本轮先只留接口，per-card view 后置） |
  */
 export type ViewBindingRef =
-  | { kind: 'linked-tab'; host: MountHost; tabId: string }
   | { kind: 'embed'; blockId: string }
   | { kind: 'dock'; side: 'left' | 'right'; cardId: string }
 
@@ -152,27 +150,11 @@ export interface BindingTarget {
   view: string
 }
 
-/** 从一个 **linked tab** 条目解析绑定 */
-export function bindingOfLinked(entry: MountEntry | undefined): BindingTarget | null {
-  if (!entry || entry.kind !== 'linked') return null
-  return { owner: { kind: 'block', blockId: entry.block }, view: entry.view }
-}
-
 /** 从一次**露面**解析绑定 */
 export function bindingOfEmbed(b: Block | undefined): BindingTarget | null {
   const ref = readEmbed(b)
   if (!ref || !b) return null
   return { owner: { kind: 'block', blockId: ref.block }, view: ref.view }
-}
-
-/** 改变一个绑定选的视图（返回新的 entry；不改入参） */
-export function withLinkedView(
-  entry: Extract<MountEntry, { kind: 'linked' }>,
-  view: string,
-): Extract<MountEntry, { kind: 'linked' }> {
-  const out: Extract<MountEntry, { kind: 'linked' }> = { id: entry.id, kind: 'linked', block: entry.block, view }
-  if (entry.label !== undefined) out.label = entry.label
-  return out
 }
 
 /**

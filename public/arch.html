@@ -231,7 +231,7 @@
     <span class="key">_deletedAt</span>? <span class="cmt">有它 ⇒ 这块被软删了（子树不可见是继承来的）</span>
     <span class="key">_kind</span>?      <span class="cmt">有它 ⇒ 属性定义块（种类是它自己的数据）</span>
     <span class="key">_query</span>?     <span class="cmt">有它 ⇒ 查询块（值＝where 条件）；结果按表面实例冻结，不在这里</span>
-    <span class="key">_mounts</span>?   <span class="cmt">块底那几栏：local（自己带 spec/views）/ linked（只有指针）</span>
+    <span class="key">_mounts</span>?   <span class="cmt">块底那几栏：local（自己带 spec/views）／derived（宿主现算）；不指向块</span>
     <span class="key">_views</span>?    <span class="cmt">命名视图（列/序/分组…）：这一块怎么看，换设备要一致</span>
     <span class="key">_activeView</span>? <span class="cmt">当前激活的视图 id；缺席＝这一份源的默认看法</span>
     <span class="key">_embed</span>?    <span class="cmt">露面：{ block, view } 指针。看法住在<b>源块</b>的命名视图上</span>
@@ -485,7 +485,6 @@
           <tbody>
             <tr><td>center 查询块</td><td class="m">parentOf(块)</td><td class="m">同一容器</td><td class="m">[查询块自己]</td></tr>
             <tr><td>mount local</td><td class="m">宿主块</td><td class="m">同左</td><td class="m">[宿主]</td></tr>
-            <tr><td>mount linked</td><td class="m">宿主块</td><td class="m">同左</td><td class="m">[宿主, 目标查询块]</td></tr>
             <tr><td>embed</td><td class="m">parentOf(露面块)</td><td class="m">同左</td><td class="m">[露面块, 目标查询块]</td></tr>
             <tr><td>dock 窗口</td><td class="m">parentOf(窗口块)</td><td class="m">同左</td><td class="m">[窗口块]</td></tr>
           </tbody>
@@ -567,8 +566,7 @@
   | { tab: local tabId }        <span class="cmt">只指 local</span>
 
 <span class="type">ViewBindingRef</span> <span class="pipe">=</span>
-  { linked-tab: host, tabId }
-  | { embed: blockId }
+  { embed: blockId }
   | { dock: side, cardId }</div>
       <table class="tbl" style="margin-top:10px">
         <thead><tr><th>谁</th><th>配置存哪</th><th>能被引用</th></tr></thead>
@@ -579,7 +577,7 @@
           <tr><td>binding</td><td class="m">{ block, view } 指针</td><td>指向别人</td></tr>
         </tbody>
       </table>
-      <div class="note" style="margin-top:9px">命令与 UI 只经 <code>ViewOwnerStore</code> 读写视图配置（arch [33]）：直接摸 <code>_views</code>／<code>_mounts</code>／<code>Prefs</code> 就是在造第二份真相。<b>提升／转本地是显式复制</b>——复制之后是两个独立对象，各自演化，没有隐藏同步。</div>
+      <div class="note" style="margin-top:9px">命令与 UI 只经 <code>ViewOwnerStore</code> 读写视图配置（arch [33]）：直接摸 <code>_views</code>／<code>_mounts</code>／<code>Prefs</code> 就是在造第二份真相。<b>面板 local 不提升、不转本地</b>；共享/复用一个查询块走 embed，不建指针。</div>
     </div>
   </div>
 
@@ -593,7 +591,7 @@
       <div class="step">
         <div class="k">表面 ②</div>
         <div class="v">mount · 块底挂载区</div>
-        <div class="d">每栏一个 entry，稳定 id：<b>local</b> 自己拥有 spec/views／<b>linked</b> 只有指针／<b>derived</b>（引用／同类／提及）宿主现算、无配置。local 不是块，不可被引用</div>
+        <div class="d">每栏一个 entry，稳定 id：<b>local</b> 自己拥有 spec/views／<b>derived</b>（引用／同类／提及）宿主现算、无配置。local 不是块、也不指向块，不可被引用；<code>＋</code> 直接建 local</div>
       </div>
       <div class="step">
         <div class="k">表面 ③</div>

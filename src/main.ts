@@ -1567,7 +1567,7 @@ const app: App = {
     activeId: () => ws.activeId,
     // 换屏走导航那条路（会记历史、刷标题、把光标放到新屏第一行），不另写一份装载
     openBlock: (id) => app.zoomTo(id),
-    // 新建查询页之后左槽要看得见它（页列表就在那一列里）
+    // 新建内容对象之后左槽要看得见它（页列表就在那一列里）
     refreshList: () => renderDocks(),
     toast: (text, kind) => app.toast(text, kind),
   }),

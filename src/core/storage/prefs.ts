@@ -29,14 +29,13 @@ export interface Prefs {
    */
   feedLayout: SecLayout
   /**
-   * **日记面板的那几栏**（local／linked／derived；与 `feedLayout` 同层）。
+   * **日记面板的那几栏**（local／derived；与 `feedLayout` 同层）。
    *
    * 为什么是设备状态而不是一个隐藏配置块：日记表面是**系统视图**，不是块 ——
    * 它不可寻址、不进回收站、不参与复制。拿一个块当它的拥有者，
    * 就是用一个不可寻址的对象存「这一台设备怎么看」，而 `feedLayout` 就在旁边。
    *
-   * 代价（登记）：日记面板的 **local tab 不跨设备**（linked tab 的查询内容跟库走，会跨）。
-   * 要跨设备 ⇒ 把 local 提升为查询页/link，不需要新机制。
+   * 代价（登记）：日记面板的 local 栏不跨设备；要跨设备/共享就写成查询块（内容对象）。
    */
   journalMounts: MountEntry[]
   /**

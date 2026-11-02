@@ -61,13 +61,11 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
     app.openQueryBuilder(owner)
     return true
   },
-  /** 新建查询页／页内查询块（内容对象） */
+  /** 新建查询块（内容对象） */
   'core.query/create': (a, app) => {
-    const kind = S(a.kind, 'page')
-    if (kind !== 'page' && kind !== 'block') return false
     const spec = (a.spec ?? { where: { any: [] } }) as QuerySpec
     const name = S(a.name)
-    return app.createQuery(kind, name, spec, S(a.parentId) || undefined) !== ''
+    return app.createQuery(name, spec, S(a.parentId) || undefined) !== ''
   },
   /**
    * 在当前块里建查询块（结构写交给门面）。新块当场出现条件条——

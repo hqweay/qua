@@ -209,7 +209,7 @@ export interface MountsDeps {
    * 命令层因此不必自己判「是不是日记」—— 判两次就等于「这一栏写哪」有两个答案。
    */
   owners: OwnerStore
-  /** 开一笔事务（提升为查询页/查询块要插块，与改栏在同一笔才不留半截） */
+  /** 开一笔事务（建查询块等结构写走这里） */
   run: TxRun
   /** 当前中心槽的对象（「页内查询块」的落点） */
   activeId: () => string
@@ -279,7 +279,7 @@ export interface ViewConfigDeps {
   activeId: () => string
   /** 把某一块打开成**这一屏唯一的根**（给「在日记流里给某一天建表」这种跨屏的入口用） */
   openBlock: (blockId: string) => void
-  /** 刷左槽的页列表（新建查询页之后要看得见它） */
+  /** 刷左槽的列表（新建内容对象之后要看得见它） */
   refreshList: () => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }

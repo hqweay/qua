@@ -1981,11 +1981,10 @@ await check('T191 结果基数：父子同时命中时，大纲与表格的抬�
 
   const qid = await page.evaluate(() => {
     const ok = window.__qua.invoke('core.query/create', {
-      kind: 'page',
       name: '基数探针查询',
       spec: { where: { text: '基数探针' }, scope: 'all' },
     })
-    if (!ok) throw new Error('建不出查询页')
+    if (!ok) throw new Error('建不出查询块')
     return String(window.__qua.snapshot().activeId)
   })
   await page.waitForTimeout(500)
@@ -2076,7 +2075,7 @@ await check('T192 在当前块里建查询块：落点是这一块的子块；�
   return `查询块是当前块的子块；两块一起插、一次 ⌘Z 收回（${made.blocks} → ${undone.blocks}）`
 })
 
-await check('T193 提升为查询块：新块挂在宿主下；$self 结果不变；一次 ⌘Z 收回块与指针', async () => {
+await check('T193 面板查询与查询块解耦：local 栏用 $self 出结果，但不建块、不指向块', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -2098,7 +2097,7 @@ await check('T193 提升为查询块：新块挂在宿主下；$self 结果不�
 
   // 给它加一个**提到它正文**的子块：$self 的文本条件才有命中
   const childId = await page.evaluate(
-    ({ id, text }) => {
+    ({ id }) => {
       window.__qua.invoke('core.view/new-row', { owner: { kind: 'block', blockId: id } })
       const hostBlock = window.__qua.__editor.store.find(id)
       const child = hostBlock?.children[0]
@@ -2142,62 +2141,24 @@ await check('T193 提升为查询块：新块挂在宿主下；$self 结果不�
   const rowsBefore = await mountRows(page)
   assert(rowsBefore > 0, `前置：这一栏应命中那条子块：${rowsBefore}`)
 
-  // 走「⋯」菜单的「提升为查询块…」——不是直接调命令
-  await page.locator(`#editor .mount .mount-tabwrap[data-tab="${tabId}"] .mount-more`).click()
-  await page.waitForSelector('.layer-item')
-  const labels = await page.evaluate(() => [...document.querySelectorAll('.layer-label')].map((e) => e.textContent ?? ''))
-  assert(labels.some((x) => x.includes('提升为查询块')), `⋯ 菜单里要有「提升为查询块…」：${JSON.stringify(labels)}`)
-  await page.locator('.layer-item', { hasText: '提升为查询块' }).first().click()
-  await page.waitForTimeout(500)
-
-  const promoted = await page.evaluate((id) => {
+  // 面板栏只拥有条件：宿主下没有多出查询块，也没有 linked 指针
+  const shape = await page.evaluate((id) => {
     const hostBlock = window.__qua.__editor.store.find(id)
-    let qid = ''
-    let parent = ''
-    const walk = (list, p) => {
-      for (const b of list) {
-        if (b.props?._query && p === id) qid = b.id
-        if (b.id === qid) parent = p ?? ''
-        walk(b.children, b.id)
-      }
-    }
-    walk(window.__qua.__editor.store.blocks, null)
-    return {
-      qid,
-      parent,
-      tabKind: document.querySelector('#editor .mount .mount-tabwrap[data-kind="linked"]')?.dataset.kind ?? '',
-      blocks: window.__qua.snapshot().totalBlocks,
-      childInHost: Boolean(hostBlock),
-    }
-  }, host.id)
-  assert(promoted.qid !== '', '提升应建出一个查询块')
-  assert(promoted.parent === host.id, `查询块的父块必须是宿主（$self 才指得回它）：${JSON.stringify(promoted)}`)
-  assert(promoted.tabKind === 'linked', '这一栏要改成指向新块的指针')
-  assert(promoted.blocks === before + 2, `提升只多一个查询块（原有子块也在）：${before} → ${promoted.blocks}`)
-
-  // 打开新查询块：$self 的结果应与提升前一致
-  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), promoted.qid)
-  await page.waitForTimeout(450)
-  const after = await page.evaluate(() => ({
-    count: document.querySelector('.queryview-count')?.textContent ?? '',
-    rows: document.querySelectorAll('.queryview-editor .blk[data-depth="0"]').length,
-  }))
-  assert(after.rows === rowsBefore, `$self 结果要与提升前一致：${rowsBefore} → ${after.rows}（${after.count}）`)
-
-  // 一次 ⌘Z：块回来、栏回到 local
-  await page.locator('.queryview-editor .blk .tx').first().click()
-  await page.keyboard.press(kbd('mod+z'))
-  await page.waitForTimeout(550)
-  const undone = await page.evaluate((id) => {
-    const hostBlock = window.__qua.__editor.store.find(id)
+    let queryChildren = 0
+    for (const child of hostBlock?.children ?? []) if (child.props?._query) queryChildren += 1
     const mounts = Array.isArray(hostBlock?.props?._mounts) ? hostBlock.props._mounts : []
-    return { blocks: window.__qua.snapshot().totalBlocks, kinds: mounts.map((m) => m.kind) }
+    return {
+      kinds: mounts.map((m) => m.kind),
+      queryChildren,
+      blocks: window.__qua.snapshot().totalBlocks,
+    }
   }, host.id)
-  assert(undone.blocks === before + 1, `一次撤销要删掉查询块（子块留着）：${before + 1} → ${undone.blocks}`)
-  assert(undone.kinds.includes('local'), `一次撤销也要把这一栏改回 local：${JSON.stringify(undone.kinds)}`)
+  assert(shape.queryChildren === 0, `面板查询不该建查询块：${JSON.stringify(shape)}`)
+  assert(!shape.kinds.includes('linked'), `面板查询不指向查询块：${JSON.stringify(shape.kinds)}`)
+  assert(shape.blocks === before + 1, `只多了一个子块（local 栏不建块）：${before} → ${shape.blocks}`)
 
   await ctx.close()
-  return `提升后父块＝宿主、结果 ${rowsBefore} 条不变；一次 ⌘Z 收回块与指针（${undone.kinds.join(',')}）`
+  return `local 栏 $self 命中 ${rowsBefore} 行；块数 ${before}→${shape.blocks}（只有一个子块）；kinds=${shape.kinds.join(',')}`
 })
 
 await check('T194 派生栏切表格：路径/引用次数/命中词/共同标签；重开仍是表格；固定为查询不抢内置栏', async () => {
@@ -11727,9 +11688,9 @@ await check('T129 挂载区：内置栏不可摘、用户栏可摘；摘掉一�
   const before = await mountTabsOf(page)
   const mine = before[0]
   assert(mine, '今天应有挂载区')
-  // 三种栏：`derived`（内置，现算）／`local`（自己拥有配置）／`linked`（指针）
+  // 两种栏：`derived`（内置，现算）／`local`（自己拥有配置，不指向块）
   const builtin = mine.tabs.filter((t) => t.kind === 'derived')
-  const user = mine.tabs.filter((t) => t.kind === 'local' || t.kind === 'linked')
+  const user = mine.tabs.filter((t) => t.kind === 'local')
   assert(builtin.length >= 2, `内置栏应至少两栏（引用＋提及）：${JSON.stringify(builtin)}`)
   assert(builtin.every((t) => !t.removable), `内置栏不该有 ×：${JSON.stringify(builtin)}`)
   assert(user.length === 1 && user[0].removable, `用户栏要有 ×：${JSON.stringify(user)}`)
@@ -11739,7 +11700,7 @@ await check('T129 挂载区：内置栏不可摘、用户栏可摘；摘掉一�
   await page.waitForTimeout(350)
   const after = await mountTabsOf(page)
   assert(
-    !after[0].tabs.some((t) => t.kind === 'local' || t.kind === 'linked'),
+    !after[0].tabs.some((t) => t.kind === 'local'),
     `摘掉后用户栏应消失：${JSON.stringify(after[0].tabs)}`,
   )
   const blocksAfter = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
@@ -15530,13 +15491,13 @@ await check('T178 local tab：加一栏不建块；切表格；刷新只影响�
 })
 
 /**
- * **上下文是相对的**：同一份条件，在页面顶层的查询页看全库，挂在某一页的面板里只看那一页。
+ * **上下文是相对的**：同一份条件，顶层查询块看全库，挂在某一页的面板里只看那一页。
  *
  * 这条钉的是 `QueryContext` 的三件事分开给（`selfId`／`scopeId`／`excludeIds`）。
  * 曾经「`$self` 指谁」与「结果剔除谁」是同一个字段，于是「想解析它，又不得不排除它」
  * 这种形状根本表达不出来。
  */
-await check('T182 上下文：同一份条件，顶层查询页看全库、挂在页上的栏只看那一页', async () => {
+await check('T182 上下文：同一份条件，顶层查询块看全库、挂在页上的栏只看那一页', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -15559,18 +15520,17 @@ await check('T182 上下文：同一份条件，顶层查询页看全库、挂�
   })
   assert(probe.filter((x) => x.block).length === 2, `两页各应落下探针：${JSON.stringify(probe)}`)
 
-  // ① 顶层查询页：没有容器 ⇒ 整片森林
-  const queryPage = await page.evaluate(() =>
+  // ① 顶层查询块：没有容器 ⇒ 整片森林
+  const queryBlock = await page.evaluate(() =>
     window.__qua.invoke('core.query/create', {
-      kind: 'page',
       name: '上下文探针查询',
       spec: { where: { text: '上下文探针' } },
     }),
   )
-  assert(queryPage !== false, '应能建出查询页')
+  assert(queryBlock !== false, '应能建出查询块')
   await page.waitForTimeout(500)
   const globalCount = await page.evaluate(() => document.querySelector('.queryview-count')?.textContent ?? '')
-  assert(globalCount.includes('2'), `顶层查询页应看到两页的探针（整库）：${globalCount}`)
+  assert(globalCount.includes('2'), `顶层查询块应看到两页的探针（整库）：${globalCount}`)
 
   // ② 同一份条件挂到第一页的面板上：锚点＝那一页 ⇒ 只看得到一条
   await page.evaluate((host) => {
@@ -15942,16 +15902,14 @@ await check('B1 条件树就地展开在抬头下一格；折叠后只剩一条 
   assert(folded.chips.length === 1, `折叠后只剩一条 chip：${JSON.stringify(folded.chips)}`)
 
   // 整屏打开一个查询（不是别人身体里的内联体）⇒ 条件树默认展开
-  const centerPage = await page.evaluate(() => {
+  const centerId = await page.evaluate(() => {
     window.__qua.invoke('core.query/create', {
-      kind: 'page',
       name: '默认展开查询',
       spec: { where: { tag: '任务' }, scope: 'all' },
     })
-    return window.__qua.pages().find((p) => (p.title ?? '').includes('默认展开查询'))?.id ?? ''
+    return String(window.__qua.snapshot().activeId)
   })
-  assert(centerPage !== '', '前置：应能建出一个查询页')
-  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), centerPage)
+  assert(centerId !== '', '前置：应能建出一个查询块')
   await page.waitForTimeout(600)
   const center = await page.evaluate(() => {
     const views = [...document.querySelectorAll('.queryview')].map((v) => ({
@@ -16133,77 +16091,33 @@ await check('B6 拆不动的形状显示只读 JSON ＋ 一句提示（不静默
 })
 
 /**
- * **提升／转本地**：local ⇄ 块 是**显式复制**，之后两条路各自演化。
+ * **挂载区的「＋」只建 local 查询**：不弹菜单、不建块、不产生 linked 指针。
  *
- * 这条钉的是「local tab 不是块」的另一半：需要命名/引用/共享时才建块，
- * 而建出来的那一刻起，两边就是两个独立对象（没有隐藏同步）。
+ * 这条钉的是「面板查询只属于这一块」：面板不能长出一条指向查询块的路，
+ * 查询块是内容层的事（`/查询` 或命令面板）。多于一个选项的菜单会让用户在
+ * 「local／linked／查询页」之间做一次本不该存在的选择。
  */
-await check('T189 提升：local → 查询页（块 +1，栏变 linked）；转本地：linked → local（块数不变）', async () => {
+await check('T189 挂载区的 + 直接建 local 查询：不弹菜单、不建块、不产生 linked', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
   await page.waitForTimeout(350)
-  const host = await page.evaluate(() => window.__qua.snapshot().activeId)
   const before = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
 
-  // 建一栏 local
-  await page.evaluate((h) => {
-    window.__qua.invoke('core.mount/add-local', {
-      host: { kind: 'block', blockId: h },
-      label: '提升演示',
-      spec: { where: { tag: '任务' }, scope: 'all' },
-    })
-  }, host)
-  await page.waitForTimeout(300)
-  const key = await page.evaluate(
-    () =>
-      [...document.querySelectorAll('#editor .mount .mount-tabwrap')].find(
-        (x) => (x.querySelector('.mount-tab')?.textContent ?? '') === '提升演示',
-      )?.dataset.tab ?? '',
-  )
-  assert(key !== '', '应有「提升演示」这一栏')
-
-  // 提升为查询页
-  await page.evaluate(
-    ({ h, tabId }) =>
-      window.__qua.invoke('core.mount/promote', {
-        host: { kind: 'block', blockId: h },
-        tabId,
-        target: 'page',
-      }),
-    { h: host, tabId: key },
-  )
-  await page.waitForTimeout(450)
-  const promoted = await page.evaluate((tabId) => {
-    const w = document.querySelector(`#editor .mount .mount-tabwrap[data-tab="${tabId}"]`)
-    return {
-      blocks: window.__qua.snapshot().totalBlocks,
-      kind: w?.dataset.kind ?? '',
-      label: w?.querySelector('.mount-tab')?.textContent ?? '',
-      pages: window.__qua.pages().map((p) => p.title),
-    }
-  }, key)
-  assert(promoted.blocks === before + 1, `提升要建出**一个**查询页：${before} → ${promoted.blocks}`)
-  assert(promoted.kind === 'linked', `提升后这一栏变成指针：${JSON.stringify(promoted)}`)
-  assert(promoted.label === '提升演示', `名字跟着走：${promoted.label}`)
-  assert(promoted.pages.includes('提升演示'), `页列表里要看得见它：${JSON.stringify(promoted.pages)}`)
-
-  // 转本地：块数不变（复制的是条件，不是块）
-  await page.evaluate(
-    ({ h, tabId }) =>
-      window.__qua.invoke('core.mount/detach', { host: { kind: 'block', blockId: h }, tabId }),
-    { h: host, tabId: key },
-  )
-  await page.waitForTimeout(400)
-  const detached = await page.evaluate((tabId) => {
-    const w = document.querySelector(`#editor .mount .mount-tabwrap[data-tab="${tabId}"]`)
-    return { blocks: window.__qua.snapshot().totalBlocks, kind: w?.dataset.kind ?? '' }
-  }, key)
-  assert(detached.kind === 'local', `转本地之后这一栏自己拥有配置：${JSON.stringify(detached)}`)
-  assert(detached.blocks === promoted.blocks, `转本地**不建块**：${promoted.blocks} → ${detached.blocks}`)
+  await page.locator('#editor .mount .mount-add').first().click()
+  await page.waitForTimeout(350)
+  const after = await page.evaluate(() => ({
+    blocks: window.__qua.snapshot().totalBlocks,
+    kinds: [...document.querySelectorAll('#editor .mount .mount-tabwrap')].map((w) => w.dataset.kind ?? ''),
+    layers: document.querySelectorAll('.layer').length,
+  }))
+  assert(after.layers === 0, `+ 不该再弹菜单：${JSON.stringify(after)}`)
+  assert(after.kinds.includes('local'), `+ 应直接加出一栏 local：${JSON.stringify(after.kinds)}`)
+  assert(!after.kinds.includes('linked'), `面板不再有 linked 栏：${JSON.stringify(after.kinds)}`)
+  assert(after.blocks === before, `新建一栏不建块：${before} → ${after.blocks}`)
 
   await ctx.close()
-  return `提升：块 ${before}→${promoted.blocks}、栏变 linked；转本地：块数不变、栏变 local`
+  return `+ 直接建 local；块数 ${before} 不变；无菜单、无 linked`
 })
 
 
@@ -17678,7 +17592,6 @@ await check('T214 结果面字号：引用栏／查询块里的正文行与正�
 
   await page.evaluate(() =>
     window.__qua.invoke('core.query/create', {
-      kind: 'page',
       name: '字号探针查询',
       spec: { where: { text: '引用' } },
     }),

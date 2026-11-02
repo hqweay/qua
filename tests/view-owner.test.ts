@@ -4,7 +4,7 @@
  * 这一层是「同一批块在两处各有一份配置」的**唯一解**。四条断言对应四种曾经真实发生过的错法：
  *   ① 读回来的配置不是写进去的那个（拥有者解析错）；
  *   ② 写一格把别的字段一起抹掉（`applyOwnerPatch` 整份替换）；
- *   ③ linked tab / 露面自己拥有配置（于是改一处另一处不动）；
+ *   ③ 露面自己拥有配置（于是改一处另一处不动）；
  *   ④ 缺省看法按 kind 猜（items 源画出「大纲」——一批引用被当成一棵树）。
  */
 import { test } from 'node:test'
@@ -12,7 +12,6 @@ import assert from 'node:assert/strict'
 import {
   applyOwnerPatch,
   bindingOfEmbed,
-  bindingOfLinked,
   canonicalMountEntries,
   defaultKindFor,
   ownerDataOfBlock,
@@ -22,7 +21,6 @@ import {
   sourceOfOwner,
   storedKindsFor,
   withBlockOwnerData,
-  withLinkedView,
   withTabOwnerData,
   type Block,
   type MountEntry,
@@ -80,15 +78,10 @@ test('ownerDataOfBlock：读 `_query`／`_views`／`_activeView`；查询块的�
   assert.equal(readViewSet(data).active?.kind, 'table')
 })
 
-test('ownerDataOfTab：只有 local 有配置；linked／derived 返回 null（它们不拥有）', () => {
+test('ownerDataOfTab：只有 local 有配置；derived 返回 null（它不拥有）', () => {
   const data = ownerDataOfTab(localTab())
   assert.ok(data)
   assert.equal(data!.query?.where !== undefined, true)
-  assert.equal(
-    ownerDataOfTab({ id: 't-2', kind: 'linked', block: 'q', view: '' }),
-    null,
-    'linked tab 只有指针，没有配置',
-  )
   assert.equal(ownerDataOfTab({ id: 'd-refs', kind: 'derived', source: 'refs' }), null, '内置栏没有配置')
 })
 
@@ -151,27 +144,10 @@ test('withTabOwnerData：写回 local 条目，id 与名字不丢；views 按 qu
 
 /* ------------------------------------------------------------ 绑定：只有指针 */
 
-test('bindingOfLinked：解析出「指向哪一块＋哪张视图」；不是 linked ⇒ null', () => {
-  const host = { kind: 'block' as const, blockId: 'h' }
-  assert.deepEqual(bindingOfLinked({ id: 't-1', kind: 'linked', block: 'q-1', view: 'v-9' }, host), {
-    owner: { kind: 'block', blockId: 'q-1' },
-    view: 'v-9',
-  })
-  assert.equal(bindingOfLinked(localTab(), host), null, 'local 栏不是绑定（它自己拥有配置）')
-})
-
 test('bindingOfEmbed：`_embed = {block, view}` 就是一次绑定的全部', () => {
   const b = mk('e', '', { _embed: { block: 'a', view: 'outline' } })
   assert.deepEqual(bindingOfEmbed(b), { owner: { kind: 'block', blockId: 'a' }, view: 'outline' })
   assert.equal(bindingOfEmbed(mk('n', '普通')), null)
-})
-
-test('withLinkedView：只换指针里的 view，目标与覆盖名不动', () => {
-  const entry = { id: 't-1', kind: 'linked' as const, block: 'q-1', view: '', label: '日报' }
-  const next = withLinkedView(entry, 'v-2')
-  assert.equal(next.block, 'q-1', '目标不动：这是「换这张视图」，不是「换指到谁」')
-  assert.equal(next.view, 'v-2')
-  assert.equal(next.label, '日报')
 })
 
 test('resolveBoundView：`outline`／`""`／具体 id 三种含义分开；id 没了要报降级', () => {
@@ -185,20 +161,17 @@ test('resolveBoundView：`outline`／`""`／具体 id 三种含义分开；id �
 
 /* ------------------------------------------------------------ 落盘形状 */
 
-test('canonicalMountEntries：三种 kind 的必填字段各自成立，坏项只丢这一项', () => {
+test('canonicalMountEntries：两种 kind 的必填字段各自成立，坏项只丢这一项', () => {
   const entries = canonicalMountEntries([
     { id: 't-1', kind: 'local', label: '甲', spec: QUERY, views: [] },
-    { id: 't-2', kind: 'linked', block: 'q-1' },
     { id: 'd-refs', kind: 'derived', source: 'refs' },
     { id: 't-3', kind: 'local', label: '', spec: QUERY }, // 空名字 ⇒ 丢
-    { id: 't-4', kind: 'linked', block: '' }, // 没目标 ⇒ 丢
+    { id: 't-4', kind: 'linked', block: 'q-1' }, // linked 已退场 ⇒ 丢
     { id: 'd-x', kind: 'derived', source: 'nope' }, // 未知来源 ⇒ 丢
   ])
   assert.deepEqual(
     entries.map((e) => e.id),
-    ['t-1', 't-2', 'd-refs'],
+    ['t-1', 'd-refs'],
     '坏项不连坐：一栏读不出来不该让整个挂载区消失',
   )
-  // `view` 缺席按「跟随目标」（它是「没选」，不是坏形状）
-  assert.equal((entries[1] as Extract<MountEntry, { kind: 'linked' }>).view, '')
 })

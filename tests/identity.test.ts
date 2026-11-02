@@ -196,13 +196,13 @@ test('复制子树：`_mounts` **随块走**（它是内容），但 local 栏�
   host.props = {
     _mounts: [
       { id: 't-1', kind: 'local' as const, label: '我的', spec, views: [] },
+      // 旧形状：linked 已经退场，读路径应丢掉它，而不是把指针也带进副本
       { id: 't-2', kind: 'linked' as const, block: 'q-1', view: '' },
     ],
   }
   const copy = cloneSubtree(host).block
   const mounts = copy.props?._mounts as { kind: string; spec?: { where: unknown }; block?: string }[]
-  assert.equal(mounts.length, 2, '两栏都跟着走')
+  assert.equal(mounts.length, 1, '只有 local 栏跟着走；linked 栏不再是合法形状')
   assert.notEqual(mounts[0]!.spec, spec, 'local 栏的 spec 深拷：改副本不该动原件')
   assert.deepEqual(mounts[0]!.spec, spec, '内容一样')
-  assert.equal(mounts[1]!.block, 'q-1', 'linked 栏只拷指针（它本来就指着同一个目标）')
 })

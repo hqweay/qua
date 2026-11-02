@@ -1,28 +1,20 @@
 /**
- * **挂载区**命令：加一栏／摘一栏／改名／换视图／提升／转本地／固定派生。
+ * **挂载区**命令：加一栏／摘一栏／改名／换视图／固定派生。
  *
- * 三条纪律：
- *   · **local tab 不建块**：加一栏＝给宿主持有的那组 `MountEntry` 追加一条；
+ * 两条纪律：
+ *   · **local tab 不建块、也不指向块**：加一栏＝给宿主持有的那组 `MountEntry` 追加一条；
  *     删一栏＝摘掉一条。块数一个都不变，`⌘Z` 可撤。
  *   · **写哪一格由 `MountHost` 判**（块宿主写 `props._mounts`、日记宿主写设备状态），
  *     命令层不自己判「是不是日记」—— 两处各判一次，「这一栏写哪」就有两个答案。
- *   · **linked tab 只有一根指针**：改它选的视图写指针；改条件/列写**目标块**
- *     （一份条件、一份视图配置）。
- *
- * `promote`／`detach` 是**显式复制**：复制之后是两个独立对象，没有隐藏同步。
  */
 import {
-  ALIASES_PROP,
   canonicalSpec,
   canonicalViews,
   defaultColumnsForSource,
   derivedColumns,
   derivedListFields,
   derivedSpecOf,
-  displayNameOf,
   journalDate,
-  LISTS_PROP,
-  mkQueryBlock,
   mkTabId,
   mkViewId,
   todayISO,
@@ -41,12 +33,9 @@ export function mountCommands(
 ): Pick<
   App,
   | 'addLocalTab'
-  | 'addLinkedTab'
   | 'removeMountTab'
   | 'renameMountTab'
   | 'setMountTabView'
-  | 'promoteMountTab'
-  | 'detachMountTab'
   | 'fixDerivedTab'
 > {
   const entriesOf = (host: MountHost): MountEntry[] => d.owners.entriesOf(host)
@@ -62,7 +51,7 @@ export function mountCommands(
   }
 
   /** 供本文件内部复用（「固定派生栏」就是「加一栏 local」） */
-  const api: Pick<App, 'addLocalTab' | 'addLinkedTab' | 'removeMountTab' | 'renameMountTab' | 'setMountTabView' | 'promoteMountTab' | 'detachMountTab' | 'fixDerivedTab'> = {
+  const api: Pick<App, 'addLocalTab' | 'removeMountTab' | 'renameMountTab' | 'setMountTabView' | 'fixDerivedTab'> = {
     /**
      * 加一栏 **local**：这一栏自己拥有条件与视图。**不建块。**
      *
@@ -91,19 +80,7 @@ export function mountCommands(
       return entry.id
     },
 
-    /** 加一栏 **linked**：只存「指向哪一块 ＋ 哪张视图」 */
-    addLinkedTab: (host, blockId, view, label) => {
-      if (!editable(host)) return ''
-      const target = d.kb.get(blockId)
-      if (!target) return ''
-      const entry: MountEntry = { id: mkTabId(), kind: 'linked', block: blockId, view: view ?? '' }
-      const name = label?.trim()
-      if (name !== undefined && name !== '') entry.label = name
-      write(host, [...entriesOf(host), entry])
-      return entry.id
-    },
-
-    /** 摘一栏：**不删任何块**（local 压根没有块；linked 只摘指针，目标块不动） */
+    /** 摘一栏：**不删任何块**（local 压根没有块） */
     removeMountTab: (host, tabId) => {
       const list = entriesOf(host)
       const next = list.filter((e) => e.id !== tabId)
@@ -112,134 +89,23 @@ export function mountCommands(
       return true
     },
 
-    /** 改名（只 local 有名字；linked 的名字是覆盖文案） */
+    /** 改名（只 local 有名字；derived 的名字由来源字典给） */
     renameMountTab: (host, tabId, label) => {
       const entry = entryOf(host, tabId)
-      if (!entry) return false
       const name = label.trim()
-      if (entry.kind === 'local') {
-        if (name === '') return false
-        write(host, entriesOf(host).map((e) => (e.id === tabId ? { ...e, label: name } : e)))
-        return true
-      }
-      if (entry.kind !== 'linked') return false
-      const next: MountEntry = { ...entry }
-      if (name === '') delete next.label
-      else next.label = name
-      write(host, entriesOf(host).map((e) => (e.id === tabId ? next : e)))
+      if (!entry || entry.kind !== 'local' || name === '') return false
+      write(host, entriesOf(host).map((e) => (e.id === tabId ? { ...e, label: name } : e)))
       return true
     },
 
-    /**
-     * 换这一栏选的视图。
-     *
-     * · `local` ⇒ 改它自己的 `_activeView`（配置在它身上）；
-     * · `linked` ⇒ 改**指针**（`owners.setBindingView`），目标块的视图列表一个字节不动。
-     */
+    /** 换这一栏选的视图（配置在 local tab 自己身上） */
     setMountTabView: (host, tabId, view) => {
       const entry = entryOf(host, tabId)
-      if (!entry) return false
-      if (entry.kind === 'local') {
-        const next: MountEntry = { ...entry }
-        if (view === '') delete next.activeView
-        else next.activeView = view
-        write(host, entriesOf(host).map((e) => (e.id === tabId ? next : e)))
-        return true
-      }
-      if (entry.kind !== 'linked') return false
-      d.owners.setBindingView({ kind: 'linked-tab', host, tabId }, view)
-      return true
-    },
-
-    /**
-     * **提升**（local → 块）：复制 `spec + views + activeView` 到一个新块，
-     * 默认把这一栏改成指向它的 linked。
-     *
-     * 为什么是复制而不是「把配置搬走」：搬走之后 local tab 就空了，
-     * 而用户要的是「这一栏现在有个可引用、可共享的身份」—— 两个对象各自独立，
-     * 之后改谁都不动另一个。
-     *
-     * ⚠️ 条件是**相对**的（`scope:'subtree'` 的锚点由表面给）：提升为**查询页**
-     *    会失去宿主上下文，UI 要先提示一句（见 `ui.mount.selfRel`）。
-     */
-    promoteMountTab: (host, tabId, target, parentId, link) => {
-      const entry = entryOf(host, tabId)
-      if (!entry || entry.kind !== 'local') return ''
-      const name = entry.label.trim() === '' ? t('ui.query.untitled') : entry.label.trim()
-      const block = mkQueryBlock({
-        name,
-        spec: entry.spec,
-        views: entry.views,
-        ...(entry.activeView ? { activeView: entry.activeView } : {}),
-        icon: 'lucide:list-filter',
-      })
-      if (target === 'page') {
-        /**
-         * **查询页**：进页列表（有地址与 `page` 露面），顶层 ⇒ 它的上下文是全库。
-         */
-        block.props = {
-          ...(block.props ?? {}),
-          [ALIASES_PROP]: [name],
-          [LISTS_PROP]: ['page'],
-        }
-      }
-      /**
-       * **查询块**：默认挂到**宿主块**下面，不是「当前打开的那一页」。
-       *
-       * 查询块的求值锚点是它的容器：嵌在某一页里的 local 栏提升之后，
-       * 只有仍住在宿主下，「这一块 / 这一页之下」才会指回原来那个块。
-       * 默认用 `activeId()` 会让锚点静默变成当前页 —— 结果对不上，而没有任何一层报错。
-       */
-      const hostBlockId = host.kind === 'journal' ? d.kb.journalDay(todayISO())?.id : host.blockId
-      const parent = parentId !== undefined && parentId !== '' ? parentId : hostBlockId
-      /**
-       * **插块 ＋ 把这一栏改成 linked 在同一笔事务里**：否则一次提升要按两次撤销，
-       * 而且中途失败会留下「块建好了但这一栏还指着自己」的半截状态。
-       */
-      d.run((tx) => {
-        if (target === 'page') tx.insert(block, null, d.kb.roots().length)
-        else tx.insert(block, parent ?? null, Number.MAX_SAFE_INTEGER)
-        if (link !== false) {
-          const linked: MountEntry = { id: entry.id, kind: 'linked', block: block.id, view: entry.activeView ?? '' }
-          d.owners.writeEntriesIn(
-            tx,
-            host,
-            entriesOf(host).map((e) => (e.id === tabId ? linked : e)),
-          )
-        }
-      })
-      d.toast(t('ui.mount.promoted'), 'ok')
-      return block.id
-    },
-
-    /**
-     * **转本地副本**（linked → local）：把目标的**条件 ＋ 整个视图集**复制进这一栏。
-     *
-     * ⚠️ 只有目标源是 **query** 时才成立：local tab 是「面板局部的一次查询」，
-     *    而 children／items 的视图挂在某个块上，没有「面板局部查询」这个对应物 ——
-     *    那种栏只能保持 linked 或移除。
-     */
-    detachMountTab: (host, tabId) => {
-      const entry = entryOf(host, tabId)
-      if (!entry || entry.kind !== 'linked') return false
-      const binding = d.owners.readBinding({ kind: 'linked-tab', host, tabId })
-      if (!binding) return false
-      const data = d.owners.read(binding.owner)
-      if (!data?.query) {
-        d.toast(t('ui.mount.nonQuery'), 'warn')
-        return false
-      }
-      const target = d.kb.get(entry.block)
-      const local: MountEntry = {
-        id: entry.id,
-        kind: 'local',
-        label: entry.label ?? (target ? displayNameOf(target).trim() || t('ui.query.untitled') : t('ui.query.untitled')),
-        spec: data.query,
-        views: canonicalViews(data.views, { kind: 'query', spec: data.query }),
-      }
-      if (data.activeView) local.activeView = data.activeView
-      write(host, entriesOf(host).map((e) => (e.id === tabId ? local : e)))
-      d.toast(t('ui.mount.detached'), 'ok')
+      if (!entry || entry.kind !== 'local') return false
+      const next: MountEntry = { ...entry }
+      if (view === '') delete next.activeView
+      else next.activeView = view
+      write(host, entriesOf(host).map((e) => (e.id === tabId ? next : e)))
       return true
     },
 
