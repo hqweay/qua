@@ -57,11 +57,9 @@ function weekdayIndex(y: number, m: number, d: number): number {
   return (jsDay + 6) % 7
 }
 
-const pad2 = (n: number): string => String(n).padStart(2, '0')
-
-/** 这一格的日期串（与 `journalDate` 同一种形状） */
+/** 这一格的日期串（与 `journalDate` 同一种形状——口径由 `todayISO` 一处给） */
 function isoOf(y: number, m: number, d: number): string {
-  return `${String(y)}-${pad2(m)}-${pad2(d)}`
+  return todayISO(new Date(y, m - 1, d))
 }
 
 export function calendarCard(deps: CalendarDeps): DockCard {

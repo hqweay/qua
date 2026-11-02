@@ -9,7 +9,7 @@
  *     它们在网格下方一列（`showUndated`），而「有日期但不在这个月」的条目完全不画
  *     —— 那是「翻到那个月」的事，不是「这一格装不下」。
  */
-import { openPlaceOf, sortRecords, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../core/index.ts'
+import { isJournalDate, openPlaceOf, sortRecords, todayISO, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 
 export interface ViewCalendarDeps {
@@ -155,7 +155,7 @@ export function dateOf(r: ViewRecord, key: string): string {
   const v = key === '_date' ? r.block.props?._date : r.values[key]
   if (typeof v !== 'string') return ''
   const s = v.slice(0, 10)
-  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ''
+  return isJournalDate(s) ? s : ''
 }
 
 /** 一个月的格子（含前后补白，六行封顶）：`YYYY-MM` → 周 × 7 个 `YYYY-MM-DD` */
@@ -171,17 +171,11 @@ export function monthCells(month: string): string[][] {
     const row: string[] = []
     for (let d = 0; d < WEEK; d++) {
       const cur = new Date(start.getFullYear(), start.getMonth(), start.getDate() + w * WEEK + d)
-      row.push(isoOf(cur))
+      row.push(todayISO(cur))
     }
     out.push(row)
   }
   return out
-}
-
-function isoOf(d: Date): string {
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  return `${d.getFullYear()}-${mm}-${dd}`
 }
 
 function shiftMonth(month: string, delta: number): string {
