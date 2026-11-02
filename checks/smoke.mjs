@@ -11019,14 +11019,25 @@ await check('T120 卡片拖拽：槽内排序、跨槽移动、一个块只留�
   return `槽内 b 到 a 前；跨槽 b→左（日历前）；Shift+点移回右且只有一张；再拖回左仍可读；检视卡右→左→右`
 })
 
-await check('T121 右槽反链卡的行走同一条 Shift：行 = 源页，开窗口；中心不动', async () => {
+await check('T121 右槽反链卡与正文同一份判据：一行 = 一个源块，带来源路径；Shift 开这个块', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
-  const rows = await page.evaluate(
-    () => document.querySelectorAll('#dock-right .dock-card[data-card-id="backrefs"] .page-item').length,
+  /**
+   * 第一页被「输入面笔记」里的**两块**分别引用 ⇒ 两行。
+   * 按来源根聚合（旧卡）时这里只有一行，而那个数字看不出「还有另一处」。
+   */
+  const rows = await page.evaluate(() =>
+    [...document.querySelectorAll('#dock-right .dock-card[data-card-id="backrefs"] .page-item')].map((el) => ({
+      id: el.dataset.blockId ?? '',
+      title: el.querySelector('.p-title')?.textContent ?? '',
+      ctx: el.querySelector('.p-ctx')?.textContent ?? '',
+    })),
   )
-  assert(rows > 0, '当前页的反链卡应有行')
+  assert(rows.length === 2, `反链卡应一行一个源块（本页有两块引用它）：${JSON.stringify(rows)}`)
+  assert(new Set(rows.map((r) => r.id)).size === 2, `两行应是两个不同的源块：${JSON.stringify(rows)}`)
+  assert(rows.every((r) => /^[0-9a-f]{32}$/.test(r.id)), `每行要带它指向的源块 id：${JSON.stringify(rows)}`)
+  assert(rows.every((r) => r.ctx.includes('输入面笔记')), `每行要带来源路径（页名）：${JSON.stringify(rows)}`)
   const before = await page.evaluate(() => ({
     cards: window.__qua.snapshot().dock.right.cards,
     active: window.__qua.snapshot().activeId,
@@ -11039,9 +11050,10 @@ await check('T121 右槽反链卡的行走同一条 Shift：行 = 源页，开�
   }))
   const added = after.cards.filter((id) => !before.cards.includes(id) && /^[0-9a-f]{32}$/.test(id))
   assert(added.length === 1, `反链行应开一张窗口：${JSON.stringify(after.cards)}`)
+  assert(added[0] === rows[0].id, `Shift+点开的是这个**源块**，不是它所在的页：${added[0]} vs ${rows[0].id}`)
   assert(after.active === before.active, `反链行 Shift+点不换中心：${before.active} → ${after.active}`)
   await ctx.close()
-  return `反链卡的行走 Shift 打开源页 ${added[0].slice(-6)}；中心不动`
+  return `两行 = 输入面笔记里两处源块；Shift+点开 ${rows[0].id.slice(-6)}；中心不动`
 })
 
 await check('T123 标签页成员块标的 Shift ⇒ 右槽窗口；中心不动', async () => {

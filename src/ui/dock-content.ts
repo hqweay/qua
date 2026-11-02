@@ -12,8 +12,7 @@
  * 一个专用角色 ＋ 内部一列块 id」冒充它 —— 但冒充出来的东西会被读成产品概念，还白占一个
  * 角色值；等真概念从模型里长出来时再进槽。
  */
-import { displayTextOf, type Block } from '../core/index.ts'
-import { textRuns } from '../core/runs.ts'
+import { derivedRecordsOf, displayTextOf } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
 import { renderBlock, type BlockRenderCtx } from './block-renderers.ts'
@@ -48,26 +47,24 @@ function ctx(deps: DockContentDeps): BlockRenderCtx {
 
 /**
  * 右槽：反链卡（结果总是存在，空时给一句空文案）
+ *
+ * **与正文的反链（挂载区的「引用」栏）同一份判据**：都走 `derivedRecordsOf(…, 'refs')`。
+ * 于是两处回答的是同一个问题——「谁指向我」，一行＝一个**源块**，不是按来源根聚合。
+ * 早先这里用 `backrefsOf`（按顶层根聚成一条），代价是同一页里两处引用只出现一行，
+ * 而那一行看不出「还有另一处」；同一个问题两个答案，迟早会被读成两个事实。
+ *
+ * 一行直接画**源块自己**（类型决定长相），并带上它的来源路径与引用次数：
+ * 卡片只有一列，省掉路径就分不清「同一句话住在哪一页」。
  */
 export function backrefsCard(deps: DockContentDeps): DockCard {
   const target = deps.activeId()
-  const sources = deps.kb.backlinksOf(target)
+  const host = deps.kb.get(target)
+  const records = host ? derivedRecordsOf(host, deps.kb, 'refs') : []
 
-  const list = sources.length === 0 ? emptyCardList(t('ui.dock.noBackRefs')) : cardList()
-  // 反链项**不是库里的块**，是查询结果：现造一行出来，靠 `props._icon` 拿箭头（大纲行已经读它）。
-  // 不给它挂角色 —— 角色说的是「这块在系统里担任什么机制位」，而它没有库身份，从不落盘。
-  // 时间戳只是为了让形状成立（`Block` 的必填字段）：这一行没有生命周期，现造现丢，
-  // 所以不去装成「它刚被创建」——给它一个固定的零值，一眼看出它不是库里的块。
-  for (const s of sources) {
-    const row: Block = {
-      id: s.rootId,
-      content: textRuns(s.text),
-      children: [],
-      created: 0,
-      modified: 0,
-      props: { _icon: 'lucide:corner-up-left' },
-    }
-    list.appendChild(renderBlock(row, ctx(deps)))
+  const list = records.length === 0 ? emptyCardList(t('ui.dock.noBackRefs')) : cardList()
+  for (const r of records) {
+    const count = typeof r.derived?.refCount === 'number' ? r.derived.refCount : undefined
+    list.appendChild(renderBlock(r.block, { ...ctx(deps), context: r.path, count }))
   }
 
   return { id: 'backrefs', title: t('ui.dock.backRefs'), body: list }

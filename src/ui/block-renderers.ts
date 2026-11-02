@@ -18,7 +18,7 @@
  * ⚠️ 这不是「视图类型系统」（29 那套要独立布局状态才升格）。它只是**最小的渲染分派**，
  * 目的是让「槽里是块、块由渲染器画」这个形状现在就在，而不是等视图系统落地才做。
  */
-import { blockTypeOf, DEFAULT_BLOCK_TYPE, DIVIDER_TYPE, displayNameOf, isJournal, journalDate, journalDateLabel, prop, type Block } from '../core/index.ts'
+import { blockLabel, blockTypeOf, DEFAULT_BLOCK_TYPE, DIVIDER_TYPE, displayNameOf, isJournal, journalDate, journalDateLabel, prop, type Block } from '../core/index.ts'
 import { renderIcon } from '../view/icons.ts'
 
 /** 渲染一个块时能拿到的东西（后续会加：上下文键、命令执行、订阅） */
@@ -31,6 +31,59 @@ export interface BlockRenderCtx {
   onOpenInDock: (block: Block) => void
   /** 空页名时的兜底文案 */
   untitledLabel: string
+  /**
+   * 行首的**来源路径**（祖先链，不含自己）。
+   *
+   * 只有「这一行来自库的任意深度」的表面才给（反链卡就是）：同一句话在好几处都有时，
+   * 读者得先知道它在哪。槽里的导航行（页列表／归属树）不给——它们的名字自己就够。
+   */
+  context?: readonly Block[]
+  /** 同一来源块被引用的次数；`>1` 才画。派生值，不落盘 */
+  count?: number
+}
+
+/** 行首来源路径：`页 › 父`；没有祖先就不画（顶层块自己已经够） */
+function contextEl(ctx: BlockRenderCtx): HTMLSpanElement | null {
+  const trail = ctx.context ?? []
+  if (trail.length === 0) return null
+  const el = document.createElement('span')
+  el.className = 'p-ctx ui-ellipsis'
+  for (const [i, a] of trail.entries()) {
+    if (i > 0) {
+      const sep = document.createElement('span')
+      sep.className = 'p-ctx-sep'
+      sep.setAttribute('aria-hidden', 'true')
+      sep.textContent = '›'
+      el.appendChild(sep)
+    }
+    const name = document.createElement('span')
+    name.textContent = blockLabel(a)
+    el.appendChild(name)
+  }
+  return el
+}
+
+/** 行尾的引用次数（同一源块被指多处时才画；不画「×1」这种没有信息量的徽标） */
+function countEl(ctx: BlockRenderCtx): HTMLSpanElement | null {
+  const n = ctx.count ?? 0
+  if (n <= 1) return null
+  const el = document.createElement('span')
+  el.className = 'p-count'
+  el.textContent = `×${n}`
+  return el
+}
+
+/** 一行的公共骨架：图标／来源路径／正文（名字）／次数。四种渲染器共用这一条顺序 */
+function appendRowParts(
+  row: HTMLElement,
+  parts: { ctx: BlockRenderCtx; icon?: HTMLElement | null; title: HTMLElement },
+): void {
+  const trail = contextEl(parts.ctx)
+  const count = countEl(parts.ctx)
+  if (parts.icon) row.appendChild(parts.icon)
+  if (trail) row.appendChild(trail)
+  row.appendChild(parts.title)
+  if (count) row.appendChild(count)
 }
 
 /**
@@ -40,6 +93,11 @@ export interface BlockRenderCtx {
  * 只要有一个漏了 Shift，用户看到的就是「这一行能开窗口、那一行不能」。
  */
 function bindRowClick(row: HTMLElement, b: Block, ctx: BlockRenderCtx): void {
+  /**
+   * 这一行**指向哪个块**要能读出来：反链卡一行不再是「聚合后的来源根」，而是某个
+   * 真实源块的露面，冒烟与探针按它取身份（不是从标题文字反推）。
+   */
+  row.dataset.blockId = b.id
   row.addEventListener('click', (e) => {
     if (e.shiftKey) ctx.onOpenInDock(b)
     else ctx.onActivate(b)
@@ -77,7 +135,7 @@ const outlineRenderer: BlockRenderer = {
     title.textContent = name === '' ? ctx.untitledLabel : name
     title.title = name
 
-    row.append(icon, title)
+    appendRowParts(row, { ctx, icon, title })
     bindRowClick(row, b, ctx)
     return row
   },
@@ -104,7 +162,7 @@ const journalRenderer: BlockRenderer = {
     const title = document.createElement('span')
     title.className = 'p-title ui-ellipsis ui-ellipsis-grow'
     title.textContent = journalDateLabel(journalDate(b))
-    row.append(icon, title)
+    appendRowParts(row, { ctx, icon, title })
     bindRowClick(row, b, ctx)
     return row
   },
@@ -144,7 +202,7 @@ const fallbackRenderer: BlockRenderer = {
     title.className = 'p-title ui-ellipsis ui-ellipsis-grow'
     const name = displayNameOf(b).trim()
     title.textContent = name === '' ? ctx.untitledLabel : name
-    row.append(title)
+    appendRowParts(row, { ctx, title })
     bindRowClick(row, b, ctx)
     return row
   },
