@@ -12,11 +12,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
-import { writeBlockContent } from '../src/core/model.ts'
+import { writeBlockContent } from '../src/core/model/model.ts'
 import { renameAlias, refTitle, resolveRef, resolveRefs, danglingView } from '../src/core/index.ts'
 import { displayTextOf } from '../src/core/alias.ts'
 import { journalDateLabel } from '../src/core/journal.ts'
-import { textRuns, type RefRun } from '../src/core/runs.ts'
+import { textRuns, type RefRun } from '../src/core/model/runs.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, content: textRuns(text), children: [], ...extra })
 const named = (id: string, alias: string, text = '', extra: Partial<Block> = {}): Block =>

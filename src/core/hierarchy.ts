@@ -22,8 +22,8 @@
  *    每条各自扫一遍森林就是 O(n) × 调用次数。一次建表（O(n+e)）之后，
  *    子项查询与祖先闭包都是表上的走查。
  */
-import { hasList, isDeleted, prop, type Block, type BlockList } from './model.ts'
-import { walkForest } from './walk.ts'
+import { hasList, isDeleted, prop, type Block, type BlockList } from './model/model.ts'
+import { walkForest } from './model/walk.ts'
 import { displayNameOf } from './alias.ts'
 
 /**

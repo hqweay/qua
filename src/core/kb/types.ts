@@ -20,8 +20,8 @@ import type { BackrefBlock, BackrefSource } from '../backrefs.ts'
 import type { GutterField, FieldRow } from '../props.ts'
 import type { QueryHit, QuerySpec } from '../query.ts'
 import type { RelationEdge } from '../relations.ts'
-import type { Block, BlockList } from '../model.ts'
-import type { Anno, Run } from '../runs.ts'
+import type { Block, BlockList } from '../model/model.ts'
+import type { Anno, Run } from '../model/runs.ts'
 
 /* ------------------------------------------------------------ 存储槽位 */
 

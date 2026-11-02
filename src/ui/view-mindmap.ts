@@ -10,7 +10,7 @@
  *   · **节点上限是软的**：超过就只画前 N 个并**说出来**。
  *     静默截断会让用户以为「这棵树就这么大」，而那是最容易搞错的一件事。
  */
-import { walkForest } from '../core/walk.ts'
+import { walkForest } from '../core/model/walk.ts'
 import { t } from '../core/msg.ts'
 import { viewNote } from './view-note.ts'
 import { openPlaceOf, type Block, type OpenPlace } from '../core/index.ts'

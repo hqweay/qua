@@ -22,8 +22,8 @@ import {
   uuidv7Hex,
   type Block,
 } from '../index.ts'
-import { refRunsOf, textRuns } from '../runs.ts'
-import { walkForest } from '../walk.ts'
+import { refRunsOf, textRuns } from '../model/runs.ts'
+import { walkForest } from '../model/walk.ts'
 import { WORKSPACE_VERSION, type PageBlock, type Workspace } from '../workspace.ts'
 import { parseInline, type SeedBlock } from './inline.ts'
 

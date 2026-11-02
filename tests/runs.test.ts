@@ -38,7 +38,7 @@ import {
   type AssetRun,
   type RefRun,
   type Run,
-} from '../src/core/runs.ts'
+} from '../src/core/model/runs.ts'
 
 const ref = (to: string, extra: Partial<RefRun> = {}): RefRun => ({
   id: `ref-${to}-${Math.random().toString(36).slice(2, 8)}`,

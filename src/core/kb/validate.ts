@@ -31,9 +31,9 @@
  *
  * ⚠️ 本文件零 DOM、零持久化：它只读森林，所以能直接单测。
  */
-import { walkForest } from '../walk.ts'
-import type { Block } from '../model.ts'
-import { canWriteText } from '../types.ts'
+import { walkForest } from '../model/walk.ts'
+import type { Block } from '../model/model.ts'
+import { canWriteText } from '../model/types.ts'
 import { systemPropViolation } from '../system-props.ts'
 import type { Op } from './types.ts'
 

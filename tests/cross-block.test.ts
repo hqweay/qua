@@ -12,9 +12,9 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { deleteBlockSpan, flatten } from '../src/core/tree.ts'
-import type { Block, Doc } from '../src/core/model.ts'
-import { plainText, textRuns } from '../src/core/runs.ts'
+import { deleteBlockSpan, flatten } from '../src/core/model/tree.ts'
+import type { Block, Doc } from '../src/core/model/model.ts'
+import { plainText, textRuns } from '../src/core/model/runs.ts'
 
 const mk = (id: string, text = '', children: Block[] = []): Block => ({ id, content: textRuns(text), children })
 

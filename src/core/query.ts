@@ -10,10 +10,10 @@
  * ⚠️ 接索引后本文件的签名不变：`evaluateQuery`（判定与顺序）由两条路径共用，
  *    索引路径见 `index-port.ts` 的 `queryByIndex`；`QuerySpec` 仍是那个 canonical JSON。
  */
-import { isJournalBlock, isPropDefBlock, primaryAliasOf, type Block } from './model.ts'
-import { plainText } from './runs.ts'
-import { walkForest } from './walk.ts'
-import { findPath } from './tree.ts'
+import { isJournalBlock, isPropDefBlock, primaryAliasOf, type Block } from './model/model.ts'
+import { plainText } from './model/runs.ts'
+import { walkForest } from './model/walk.ts'
+import { findPath } from './model/tree.ts'
 import { findTagByName, tagIdsOf, tagMemberIds } from './tags.ts'
 import { journalDays } from './journal.ts'
 import { displayTextOf } from './alias.ts'

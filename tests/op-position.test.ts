@@ -18,8 +18,8 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { MemoryKb } from '../src/core/kb/memory.ts'
-import { BlockStore } from '../src/core/store.ts'
-import { mkBlock, type Block } from '../src/core/model.ts'
+import { BlockStore } from '../src/core/model/store.ts'
+import { mkBlock, type Block } from '../src/core/model/model.ts'
 import type { Op } from '../src/core/kb/types.ts'
 
 const NOW = 1_700_000_000_000

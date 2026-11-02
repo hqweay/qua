@@ -12,7 +12,7 @@ import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
 import { hasList } from '../src/core/index.ts'
 import { seedWorkspace } from '../src/core/seed.ts'
-import { plainText, textRuns } from '../src/core/runs.ts'
+import { plainText, textRuns } from '../src/core/model/runs.ts'
 import {
   cleanableValues,
   declareField,

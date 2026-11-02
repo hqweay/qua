@@ -31,9 +31,9 @@ import {
   ICON_PROP,
   LISTS_PROP,
   VIEWS_PROP,
-} from './model.ts'
+} from './model/model.ts'
 import { isAliasesValue } from './alias.ts'
-import { isDisplayValue, isIconValue, isListsValue } from './model.ts'
+import { isDisplayValue, isIconValue, isListsValue } from './model/model.ts'
 import { TAGS_PROP, isTagRefList } from './tags.ts'
 import { BELONGS_TO_PROP, isBelongsToRefs } from './hierarchy.ts'
 import { isJournalDate } from './journal.ts'

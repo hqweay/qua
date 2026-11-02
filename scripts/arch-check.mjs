@@ -657,7 +657,7 @@ function commandDecls() {
     /^node:/,
     /^electron$/,
     // 主进程**自己目录内**的相对 import（`./assets.ts`／`./library/session.ts`）不是跨层边。
-    // ⚠️ 必须排除 `..`：`../../src/core/walk.ts` 也能被「允许任意相对路径」的正则放过，
+    // ⚠️ 必须排除 `..`：`../../src/core/model/walk.ts` 也能被「允许任意相对路径」的正则放过，
     //    那样这条断言就形同虚设（实测踩到过）。
     /^\.\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+(\.ts)?$/,
     /^(\.\.\/)+src\/core\/msg(\.ts)?$/,
@@ -952,7 +952,7 @@ function commandDecls() {
   // 裸读拿到的是 `undefined`，`(b.roles?.length ?? 0) === 0` 这种写法会静默恒真
   // ⇒ **所有块都成了「无露面」**，页/标签/日记的每一条身份判据同时翻转，一个红灯都没有。
   // ⇒ `.roles` 只许出现在模型实现里（唯一实现），别处一律走 `hasList`／`listsOf`／`identityTags`。
-  const ROLES_IMPL = 'src/core/model.ts'
+  const ROLES_IMPL = 'src/core/model/model.ts'
   // 查询条件的实现与序列化：这两处读的 `.role` 是条件原子的键，不是块的列表判定
   const QUERY_LANG = new Set([
     'src/core/query.ts',
@@ -1022,7 +1022,7 @@ function commandDecls() {
   // 可见性、顺序）都要同时改十几处，漏一处就是**静默的**「有的地方找得到、有的地方找不到」。
   // 实测过一次：日记流只看顶层、索引走整片森林 ⇒ 同一天两个答案。
   // ⇒ 递归只许出现在 `core/walk.ts` 的 `walkForest` 里，其余读路径由它派生。
-  const ONLY = 'src/core/walk.ts'
+  const ONLY = 'src/core/model/walk.ts'
   const hits = []
   for (const f of srcFiles) {
     const r = rel(f)
@@ -1082,7 +1082,7 @@ function commandDecls() {
       'AST 扫 src/**/*.ts 的函数（声明与 `const f = () => …`），命中条件是「自己递归走 children」：' +
       '① 自调用 `f(… .children …)`，或 ② `for (const x of ….children)` 且同函数里调用了自己',
     scope: `src/**/*.ts（${srcFiles.length} 个文件）`,
-    whitelist: '`src/core/walk.ts`（唯一入口 `walkForest`）· DOM 遍历（走 `childNodes`，不是块树）· `cloneSubtree` 的 `cp`（那是**造树**不是**走树**，且用的是 `.map` 不是循环）',
+    whitelist: '`src/core/model/walk.ts`（唯一入口 `walkForest`）· DOM 遍历（走 `childNodes`，不是块树）· `cloneSubtree` 的 `cp`（那是**造树**不是**走树**，且用的是 `.map` 不是循环）',
     hits: hits.length,
     detail: hits,
     note: '为什么必须机检：多写一处递归**不会报错**，只会让「哪些块算活着」多一份答案；分歧那天没人知道，直到某处功能静默失效（日记流与索引对同一天给出两个答案就是这么来的）',
@@ -1097,7 +1097,7 @@ function commandDecls() {
   // 块森林的持有者是 view/ 的编辑器与装配层（main.ts）。app/（命令）与 ui/（组件）
   // 只经注入的依赖面 / 读门面取数据——一旦它们直接 import 块存储，「换实现只改一个
   // 构造参数」就变成「重写每个调用方」。
-  const FORBIDDEN = /core\/(store|kb\/memory|kb\/index)\.ts$/
+  const FORBIDDEN = /core\/(model\/store|kb\/memory|kb\/index)\.ts$/
   const hits = []
   for (const f of codeFiles) {
     const r = rel(f)
@@ -1112,7 +1112,7 @@ function commandDecls() {
   add({
     id: 23,
     title: 'app／ui 不得 import 块存储（BlockStore／MemoryKb）——数据只经注入的依赖面与读门面',
-    method: `静态扫 src/app/**、src/ui/** 的 import，禁 core/store.ts、core/kb/memory.ts、core/kb/index.ts`,
+    method: `静态扫 src/app/**、src/ui/** 的 import，禁 core/model/store.ts、core/kb/memory.ts、core/kb/index.ts`,
     scope: `src/app/** · src/ui/**`,
     whitelist: 'src/view/**（编辑器就是 store 的持有者）· src/main.ts ＋ src/app/wiring/**（renderer 装配层：store 实例只在这里创建并注入）· core 内部自用',
     hits: hits.length,
@@ -1368,11 +1368,11 @@ function commandDecls() {
   // 移动／复制／撤销／软删每处都要维护，漏一处就静默分叉；取路径改走派生索引 `Index.parentOf`。
   // 白名单 ＝ 四个内容槽 ＋ 两个必填时间戳（创建／改动时刻，不可能缺席）＋ 按需物化的 `annos`。
   // 加任何新字段都要先改这里 —— 那正是本条存在的意义：让「顺手加个字段」变成一次显式动作。
-  const MODEL = join(ROOT, 'src/core/model.ts')
+  const MODEL = join(ROOT, 'src/core/model/model.ts')
   const ALLOWED = new Set(['id', 'content', 'children', 'created', 'modified', 'annos', 'props'])
   const hits = []
   let seen = 0
-  if (!existsSync(MODEL)) hits.push('src/core/model.ts 不存在（本条断言的锚点丢了）')
+  if (!existsSync(MODEL)) hits.push('src/core/model/model.ts 不存在（本条断言的锚点丢了）')
   else {
     const { sf } = tsFile(MODEL)
     for (const st of sf.statements) {
@@ -1383,7 +1383,7 @@ function commandDecls() {
         seen++
         if (!ALLOWED.has(name)) {
           const line = sf.getLineAndCharacterOfPosition(m.getStart(sf)).line + 1
-          hits.push(`src/core/model.ts:${line} \`Block.${name}\` 不在白名单 —— 父/序/正文只能是派生的第二份答案`)
+          hits.push(`src/core/model/model.ts:${line} \`Block.${name}\` 不在白名单 —— 父/序/正文只能是派生的第二份答案`)
         }
       }
     }
@@ -1392,8 +1392,8 @@ function commandDecls() {
     id: 27,
     title: '块只有四个内容槽：`Block` 不得长出 `parent` / `left` / `text` 这类第二份真相',
     method:
-      'AST 定位 `src/core/model.ts` 的 `interface Block`，逐个成员名对白名单（`id`/`content`/`children`/`created`/`modified`/`annos`/`props`）',
-    scope: `src/core/model.ts（${seen} 个成员）`,
+      'AST 定位 `src/core/model/model.ts` 的 `interface Block`，逐个成员名对白名单（`id`/`content`/`children`/`created`/`modified`/`annos`/`props`）',
+    scope: `src/core/model/model.ts（${seen} 个成员）`,
     whitelist: 'id / content / children / created / modified / annos / props —— 加字段＝改这条白名单的一次显式动作',
     hits: hits.length,
     detail: hits,
@@ -1475,7 +1475,7 @@ function commandDecls() {
    * 为什么是 hard：第二处写路径不会「明显坏掉」——它会在读到 `_mounts` 是
    * 日记宿主（设备状态）时静默写一个不存在的块，或者把 `_views` 写到 target 以外的块上。
    */
-  const ALLOW = new Set(['src/core/view-owner.ts', 'src/core/mount.ts', 'src/app/wiring/owners.ts', 'src/core/model.ts', 'src/core/view.ts'])
+  const ALLOW = new Set(['src/core/view-owner.ts', 'src/core/mount.ts', 'src/app/wiring/owners.ts', 'src/core/model/model.ts', 'src/core/view.ts'])
   const PROPS = new Set(['_views', '_activeView', '_mounts'])
   const hits = []
   for (const f of srcFiles) {
@@ -1617,7 +1617,7 @@ function commandDecls() {
    * （计算键用同一张常量表解析）。两侧都对这份白名单——加键＝改这里的一次显式动作，
    * 与 [27] 的四槽白名单同一性质。
    */
-  const MODEL = join(ROOT, 'src/core/model.ts')
+  const MODEL = join(ROOT, 'src/core/model/model.ts')
   const REGISTRY = join(ROOT, 'src/core/system-props.ts')
   const EXPECTED = new Set([
     '_type', '_icon', '_date', '_aliases', '_lists', '_display', '_query', '_views', '_activeView',
@@ -1628,7 +1628,7 @@ function commandDecls() {
   const unionKeys = new Set()
   const registryKeys = new Set()
   if (!existsSync(MODEL) || !existsSync(REGISTRY)) {
-    hits.push('锚点文件丢了：`src/core/model.ts` 或 `src/core/system-props.ts` 不存在')
+    hits.push('锚点文件丢了：`src/core/model/model.ts` 或 `src/core/system-props.ts` 不存在')
   } else {
     // 常量名 → 字符串初值：core 全域的 `export const X_PROP = '_x'`（登记表的计算键跨模块取值）
     const consts = new Map()
@@ -1699,7 +1699,7 @@ function commandDecls() {
     title: '系统键登记表：`SystemPropId` 与 `SYSTEM_PROP_CHECKS` 一一对应，键只有这一份清单',
     method:
       'AST 提取 `model.ts` 的 `SystemPropId` 联合（`typeof X` 经 core 全域常量表解析）与 `system-props.ts` 登记表的对象键，对同一份白名单双向比对',
-    scope: `src/core/model.ts（${unionKeys.size} 个成员） · src/core/system-props.ts（${registryKeys.size} 格）`,
+    scope: `src/core/model/model.ts（${unionKeys.size} 个成员） · src/core/system-props.ts（${registryKeys.size} 格）`,
     whitelist: `${[...EXPECTED].sort().join(' / ')} —— 加键＝改这份白名单的一次显式动作`,
     hits: hits.length,
     detail: hits,

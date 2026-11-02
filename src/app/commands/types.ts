@@ -12,7 +12,7 @@
  */
 import type { Block, SecLayout, ShellCol } from '../../core/index.ts'
 import type { KbClient, Op, Tx } from '../../core/kb/types.ts'
-import type { OwnerStore } from '../../app/wiring/owners.ts'
+import type { OwnerStore } from '../wiring/owners.ts'
 import type { CheckEdgeResult, Dangling } from '../../core/hierarchy.ts'
 import type { ThemeMode, Workspace } from '../../core/workspace.ts'
 import type { Row } from '../../ui/layers.ts'

@@ -22,7 +22,7 @@ import {
   mkBlock,
   prop,
   type Block,
-} from './model.ts'
+} from './model/model.ts'
 import { t } from './msg.ts'
 
 /** 一个空页块：正文空（描述）、名字进 `_aliases`、身份是 `_lists:['page']`。 */

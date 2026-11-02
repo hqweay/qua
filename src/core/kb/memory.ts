@@ -18,9 +18,9 @@
  */
 import { backrefBlocks, backrefsOf, type BackrefBlock, type BackrefSource } from '../backrefs.ts'
 import type { RelationEdge } from '../relations.ts'
-import { aliasesOf, DELETED_AT_PROP, hasList, isDeleted, type Block } from '../model.ts'
-import { findInForest, trashOf } from '../tree.ts'
-import { walkForest } from '../walk.ts'
+import { aliasesOf, DELETED_AT_PROP, hasList, isDeleted, type Block } from '../model/model.ts'
+import { findInForest, trashOf } from '../model/tree.ts'
+import { walkForest } from '../model/walk.ts'
 import { findTagByName, tagsOf as tagsOfBlock } from '../tags.ts'
 import { findJournalDay } from '../journal.ts'
 import { blockIdByAlias, indexPathOf, queryByIndex, relationsFrom, relationsTo } from '../index-port.ts'
@@ -35,11 +35,11 @@ import {
   clearValue,
 } from '../props.ts'
 import type { QueryHit, QuerySpec } from '../query.ts'
-import type { BlockStore } from '../store.ts'
+import type { BlockStore } from '../model/store.ts'
 import { changesOf } from './changes.ts'
 import { cellsOf, diffTouched, type BeforeBlock, type Placement, type TouchedBlock } from './diff.ts'
 import type { KbClient, PathEntry, Tx, TxOpts, TxResult } from './types.ts'
-import type { Anno } from '../runs.ts'
+import type { Anno } from '../model/runs.ts'
 
 /** 按含**被删块**的遍历找块（可见遍历看不见它们；恢复路径用） */
 function findIncludingDeleted(forest: readonly Block[], id: string): Block | undefined {

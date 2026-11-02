@@ -17,11 +17,11 @@
  * ⚠️ `_fieldDefs` 里存的是 **ref（id）**，不是名字：改名零迁移，重名不撞车。
  * ⚠️ 本文件零 DOM：属性面板只消费这里的派生结果，写入通过命令。
  */
-import { isDeleted, hasList, isPropDefBlock, prop, type Block, type BlockProps, type TodoState } from './model.ts'
+import { isDeleted, hasList, isPropDefBlock, prop, type Block, type BlockProps, type TodoState } from './model/model.ts'
 import { displayNameOf } from './alias.ts'
-import { plainText, textRuns } from './runs.ts'
-import { walkForest } from './walk.ts'
-import { derivedId, uuidv7Hex } from './ids.ts'
+import { plainText, textRuns } from './model/runs.ts'
+import { walkForest } from './model/walk.ts'
+import { derivedId, uuidv7Hex } from './model/ids.ts'
 import { allTags, resolveTagIds, tagIdsOf, tagsById } from './tags.ts'
 import { t } from './msg.ts'
 

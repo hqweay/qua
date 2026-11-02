@@ -13,9 +13,9 @@
  *    这是这条映射的固有代价，不是缺陷，因此这里不补「列数不一致」的提示。
  * ⚠️ 零 DOM、零写库：渲染由 `ui/view-list-table.ts` 负责，写由命令层在事务里做。
  */
-import { isDeleted, type Block } from './model.ts'
+import { isDeleted, type Block } from './model/model.ts'
 import type { KbClient } from './kb/types.ts'
-import { plainText } from './runs.ts'
+import { plainText } from './model/runs.ts'
 import type { ListSort } from './view.ts'
 
 /** 一列里的一项：某一列（表头块）的第 j 个孩子 ＋ 它自己的孩子（三级起只做「可展开」） */

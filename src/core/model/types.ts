@@ -13,7 +13,7 @@
  * ⚠️ 依赖方向：本模块 → `model.ts`，单向。`model.ts` 是零依赖叶子，
  *    反过来 import 会成环（`blockTypeOf` 与 `DEFAULT_BLOCK_TYPE` 留在那里）。
  */
-import { EMBED_TYPE } from './embed.ts'
+import { EMBED_TYPE } from '../embed.ts'
 import {
   DEFAULT_BLOCK_TYPE,
   blockTypeOf,

@@ -14,14 +14,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkBlock, mkPropDef, type Block } from '../src/core/index.ts'
-import { writeBlockContent } from '../src/core/model.ts'
-import { textRuns } from '../src/core/runs.ts'
+import { writeBlockContent } from '../src/core/model/model.ts'
+import { textRuns } from '../src/core/model/runs.ts'
 import { applyOps, diff, forestFingerprint } from '../src/core/kb/diff.ts'
 import { validate } from '../src/core/kb/validate.ts'
-import { BlockStore } from '../src/core/store.ts'
+import { BlockStore } from '../src/core/model/store.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { mkJournalBlock } from '../src/core/journal.ts'
-import { DIVIDER_TYPE, setBlockType } from '../src/core/types.ts'
+import { DIVIDER_TYPE, setBlockType } from '../src/core/model/types.ts'
 import type { Op } from '../src/core/kb/types.ts'
 
 function fixture(): { kb: MemoryKb; store: BlockStore; ids: string[] } {

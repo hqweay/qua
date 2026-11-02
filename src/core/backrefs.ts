@@ -12,7 +12,7 @@
  */
 import type { Block } from './index.ts'
 import { incomingCount, incomingIds, rebuild, type Index } from './index-port.ts'
-import { plainText } from './runs.ts'
+import { plainText } from './model/runs.ts'
 
 /** 一条反链：谁指向了我。`rootId` 是来源所在的顶层根（页／天／被 zoom 的根）*/
 export interface BackrefSource {

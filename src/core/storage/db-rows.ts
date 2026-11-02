@@ -49,11 +49,11 @@
  *    结果改按**表面实例**冻结（内存里，重开重算），不再是块上的一格数据。
  *    落盘侧因此没有「这一格缺席」这回事 —— 缺席是唯一形状。
  */
-import { ALIASES_PROP, DELETED_AT_PROP, DISPLAY_PROP, LISTS_PROP, type Block, type BlockList } from '../model.ts'
+import { ALIASES_PROP, DELETED_AT_PROP, DISPLAY_PROP, LISTS_PROP, type Block, type BlockList } from '../model/model.ts'
 import { META_KEYS } from '../library.ts'
 import type { Op } from '../kb/types.ts'
 import type { Workspace } from './shape.ts'
-import { walkForest } from '../walk.ts'
+import { walkForest } from '../model/walk.ts'
 
 /**
  * 库里读出来的库**没有** `version`：库的 schema 版本只有一个判据（`PRAGMA user_version`，

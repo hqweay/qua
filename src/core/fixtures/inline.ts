@@ -6,9 +6,9 @@
  * 单独一层是为了让「种子内容长什么样」与「内容怎么变成块」分开：
  * 换一批假数据不需要碰到解析器，改 DSL 也不需要碰任何一页的内容。
  */
-import { uuidv7Hex } from '../ids.ts'
+import { uuidv7Hex } from '../model/ids.ts'
 import { checkExternalUrl } from '../link.ts'
-import { normalizeRuns, textRuns, type AssetRun, type LinkRun, type MarkType, type RefRun, type Run } from '../runs.ts'
+import { normalizeRuns, textRuns, type AssetRun, type LinkRun, type MarkType, type RefRun, type Run } from '../model/runs.ts'
 import { MISSING_ASSET_HASH, SEED_ASSET_HASH } from './assets.ts'
 
 export interface SeedBlock {

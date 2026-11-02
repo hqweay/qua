@@ -11,8 +11,8 @@
  *    谁认领哪个名字）与**内容里指向谁**（边）——按 op 修补的正是这两部分（`applyOps`）。
  * ⚠️ 本文件零 DOM、零持久化：它只吃森林，所以能直接单测。
  */
-import { aliasesOf, ALIASES_PROP, hasList, isDeleted, isPropDefBlock, LISTS_PROP, type Block } from './model.ts'
-import { walkForest } from './walk.ts'
+import { aliasesOf, ALIASES_PROP, hasList, isDeleted, isPropDefBlock, LISTS_PROP, type Block } from './model/model.ts'
+import { walkForest } from './model/walk.ts'
 import { normalizeAlias } from './alias.ts'
 import { journalDate, isJournal } from './journal.ts'
 import { fieldTableOf, propKindOf, type PropKind } from './props.ts'

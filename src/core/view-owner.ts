@@ -25,7 +25,7 @@
  *    不许在各处直接摸 `props._views`／`_mounts`／`Prefs`（`arch-check` 钉住了这一条）。
  * ⚠️ 本文件只有类型与纯函数：读写发生在**装配层**，因为「一次动作一笔事务」在那里才做得到。
  */
-import { ACTIVE_VIEW_PROP, VIEWS_PROP, isQueryBlock, type Block } from './model.ts'
+import { ACTIVE_VIEW_PROP, VIEWS_PROP, isQueryBlock, type Block } from './model/model.ts'
 import { readEmbed, type ViewRef } from './embed.ts'
 import { canonicalViews, readViews, resolveView, sourceOf, type Source, type ViewConfig, type ViewSet } from './view.ts'
 import type { QuerySpec } from './query.ts'

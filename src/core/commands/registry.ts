@@ -2,7 +2,7 @@
  * 命令注册表：唯一调用入口 + 诊断日志。
  * **不 import handlers** —— 处理器由装配层注入，core 只认 `Handler` 端口。
  */
-import type { CtxKeys } from '../undo.ts'
+import type { CtxKeys } from '../model/undo.ts'
 import { t } from '../msg.ts'
 import type { App, CommandDecl, Handler } from '../ports.ts'
 import { COMMANDS } from './decls.ts'

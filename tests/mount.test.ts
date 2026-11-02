@@ -35,7 +35,7 @@ import {
   storedEntriesOf,
   type MountEntry,
 } from '../src/core/index.ts'
-import { textRuns } from '../src/core/runs.ts'
+import { textRuns } from '../src/core/model/runs.ts'
 import type { QuerySpec } from '../src/core/query.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({
@@ -255,7 +255,7 @@ test('「成员」沿下级标签展开（算作）：#人物 的成员含只打
 /* ------------------------------------------------------------ 派生栏的记录 */
 
 const { MemoryKb } = await import('../src/core/kb/memory.ts')
-const { BlockStore } = await import('../src/core/store.ts')
+const { BlockStore } = await import('../src/core/model/store.ts')
 
 test('派生栏记录：引用按**块**计次数（同一块引两处也只一行）；路径是祖先链', async () => {
   const tag = mkTagBlock('项目')

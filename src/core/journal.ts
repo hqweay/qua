@@ -6,10 +6,10 @@
  *    再存一个标记就是同一件事的第二份答案，而两份可以不一致。
  */
 
-import { ICON_PROP, isJournalBlock, prop, type Block } from './model.ts'
-import { derivedId, pad } from './ids.ts'
-import { walkForest } from './walk.ts'
-import { plainText } from './runs.ts'
+import { ICON_PROP, isJournalBlock, prop, type Block } from './model/model.ts'
+import { derivedId, pad } from './model/ids.ts'
+import { walkForest } from './model/walk.ts'
+import { plainText } from './model/runs.ts'
 export function todayISO(now: Date = new Date()): string {
   const y = now.getFullYear()
   const m = String(now.getMonth() + 1).padStart(2, '0')

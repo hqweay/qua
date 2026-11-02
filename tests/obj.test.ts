@@ -11,10 +11,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { aliasesOf, listsOf, tagIdsOf } from '../src/core/index.ts'
 import { createObjRecordDirect, createObjRecordInTx, mkObjRecord } from '../src/core/obj.ts'
-import { BlockStore } from '../src/core/store.ts'
+import { BlockStore } from '../src/core/model/store.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { journalId, mkJournalBlock } from '../src/core/journal.ts'
-import { plainText } from '../src/core/runs.ts'
+import { plainText } from '../src/core/model/runs.ts'
 
 test('mkObjRecord：正文＝键入名（描述）、归属＝标签、没有地址也没有露面', () => {
   const r = mkObjRecord(' 咖啡 ', 'tag-1')

@@ -13,7 +13,7 @@
  * ⚠️ 浮层是 `position: fixed` 贴在格子的屏幕矩形上：不参与表格布局 ⇒ 行高不变、
  *    窗口化不会被它打断。代价是滚动/改窗口尺寸时锚点会跑 —— 所以那两种事件直接提交并关掉。
  */
-import { plainLen } from '../core/runs.ts'
+import { plainLen } from '../core/model/runs.ts'
 import type { Block, BlockStore, OpenPlace } from '../core/index.ts'
 import { t } from '../core/msg.ts'
 import { EditableBlock } from './editable-block.ts'

@@ -25,13 +25,13 @@
  * ⚠️ 本文件零 DOM：`core` 不认识 tab 条长什么样，只回答「该有哪几栏、每栏是什么」。
  *    tab 上的字：local 用它自己的 label，derived 由 UI 按 `source` 查字典。
  */
-import { uuidv7Hex } from './ids.ts'
+import { uuidv7Hex } from './model/ids.ts'
 import { isJournal, journalDate, todayISO } from './journal.ts'
 import { displayTextOf } from './alias.ts'
-import { hasList, primaryAliasOf, prop, type Block } from './model.ts'
+import { hasList, primaryAliasOf, prop, type Block } from './model/model.ts'
 import { tagIdsOf } from './tags.ts'
 import { descendantTagIds } from './tag-tree.ts'
-import { plainText } from './runs.ts'
+import { plainText } from './model/runs.ts'
 import type { QueryHit, QueryNode, QuerySpec } from './query.ts'
 import { findById, isQuerySpec } from './query.ts'
 import { isRefKind, REFERENCE_KINDS, type RefKind } from './relations.ts'

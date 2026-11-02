@@ -16,9 +16,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MemoryKb } from '../src/core/kb/memory.ts'
-import { BlockStore } from '../src/core/store.ts'
-import { mkBlock, isDeleted, type Block } from '../src/core/model.ts'
-import { trashOf } from '../src/core/tree.ts'
+import { BlockStore } from '../src/core/model/store.ts'
+import { mkBlock, isDeleted, type Block } from '../src/core/model/model.ts'
+import { trashOf } from '../src/core/model/tree.ts'
 
 const NOW = 1_700_000_000_000
 const b = (id: string, children: Block[] = []): Block => ({

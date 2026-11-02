@@ -27,7 +27,7 @@ import {
   type Block,
   typeDeclOf,
 } from '../src/core/index.ts'
-import { textRuns } from '../src/core/runs.ts'
+import { textRuns } from '../src/core/model/runs.ts'
 
 const mk = (id: string, text: string, children: Block[] = [], props?: Record<string, unknown>): Block => ({
   id,

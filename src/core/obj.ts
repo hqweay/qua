@@ -19,7 +19,7 @@
  *    `created` 记着，位置只是同一件事的第二份答案，还会让记录跟着某一天被搬、被折叠，
  *    并逼着每条记录先物化一天。顶层位置对记录不承载信息，读路径一律按 id／`_tags` 找它。
  */
-import { mkBlock, type Block } from './model.ts'
+import { mkBlock, type Block } from './model/model.ts'
 import { TAGS_PROP } from './tags.ts'
 import type { Tx } from './kb/types.ts'
 

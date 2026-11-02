@@ -18,7 +18,7 @@
  * ⚠️ 组件不写模型：所有写入经注入的回调（由装配层转成命令）。
  */
 import type { Block } from '../core/index.ts'
-import { plainText } from '../core/runs.ts'
+import { plainText } from '../core/model/runs.ts'
 import { onCommitKeys } from './keys.ts'
 import type { Dangling, FieldRow, PropKind } from '../core/index.ts'
 import type { PropCreateMode } from '../core/ports.ts'

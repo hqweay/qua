@@ -9,12 +9,12 @@
  * 适配器只负责**字节的进与出**（见 `local-storage.ts` 的信封）；
  * 「这些字节是不是一份能打开的库」归这里。
  */
-import { ACTIVE_VIEW_PROP, ALIASES_PROP, DISPLAY_PROP, ICON_PROP, LISTS_PROP, VIEWS_PROP, isDisplayValue, isIconValue, isListsValue, type Block, type Doc, type FoldState } from '../model.ts'
+import { ACTIVE_VIEW_PROP, ALIASES_PROP, DISPLAY_PROP, ICON_PROP, LISTS_PROP, VIEWS_PROP, isDisplayValue, isIconValue, isListsValue, type Block, type Doc, type FoldState } from '../model/model.ts'
 import { isAliasesValue, LEGACY_ALIAS_PROP } from '../alias.ts'
 import { isMountsValue, MOUNTS_PROP } from '../mount.ts'
 import { canonicalViewRef, EMBED_PROP } from '../embed.ts'
 import { isActiveViewValue, isViewsValue, sourceConflicts } from '../view.ts'
-import { isAnno, isRun } from '../runs.ts'
+import { isAnno, isRun } from '../model/runs.ts'
 import { BELONGS_TO_PROP, isBelongsToRefs } from '../hierarchy.ts'
 import { isJournalDate } from '../journal.ts'
 import { TAGS_PROP, isTagRefList } from '../tags.ts'

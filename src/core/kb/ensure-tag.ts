@@ -12,7 +12,7 @@
  *    也不该被调用，否则每敲一次同一个标签都会写一遍归属）。
  */
 import { findByAlias } from '../alias.ts'
-import { DISPLAY_PROP, listsOf, prop, type Block } from '../model.ts'
+import { DISPLAY_PROP, listsOf, prop, type Block } from '../model/model.ts'
 import { findTagByName, mkTagBlock, normalizeTag } from '../tags.ts'
 import type { KbClient, Tx } from './types.ts'
 

@@ -30,7 +30,7 @@ import {
   type Block,
   type Doc,
 } from '../src/core/index.ts'
-import { plainText } from '../src/core/runs.ts'
+import { plainText } from '../src/core/model/runs.ts'
 
 const j = (date: string, children: Block[] = []): Block => ({
   id: `j-${date}`,

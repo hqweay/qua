@@ -120,7 +120,7 @@ import {
   type RefRun,
   type Run as InlineRun,
   type RunWithId,
-} from '../core/runs.ts'
+} from '../core/model/runs.ts'
 import { journalDateLabel, type OpenPlace, type SecLayout, type ShellCol } from '../core/index.ts'
 export type { SecLayout }
 
