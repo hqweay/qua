@@ -821,7 +821,7 @@ test('A11 索引路径与纯函数路径同解：方向原子也逐条相等', (
   assertSameHits({ where: { is: 'deep2' }, scope: 'all' }, blocks)
 })
 
-test('A12 {down} 一次求值是线性的：深度 5 的 1000 块 < 5ms，深链上每块只走一次', () => {
+test('A12 {down} 一次求值是线性的：深度 5 的 1000 块 < 200ms（粗守卫），深链上每块只走一次（精判据）', () => {
   const spec: QuerySpec = { where: { down: { text: '深层目标' } }, scope: 'all' }
   /** 门禁并发会让单次抖动 ⇒ 先热一次，再取三次里最好的一次 */
   const bestOf3 = (blocks: Block[]): number => {
@@ -843,7 +843,12 @@ test('A12 {down} 一次求值是线性的：深度 5 的 1000 块 < 5ms，深链
     shallow.push(node)
   }
   const shallowMs = bestOf3(shallow)
-  assert.ok(shallowMs < 5, `1000 块深度 5 的 {down} 求值应 < 5ms，实测 ${shallowMs.toFixed(2)}ms`)
+  /**
+   * 墙钟只做**粗守卫**：线性（~1ms）与「逐候选重走子树」的 O(n²)（百 ms 级）之间隔着两个数量级，
+   * 200ms 的阈值分辨得开；但墙钟受并发门禁／别的 agent 影响会抖（实测 5ms 的阈值在负载下炸成
+   * 474ms），所以「每块只走一次」这条**精判据**由下面②的读次数断言钉——它数的是访问次数，与负载无关。
+   */
+  assert.ok(shallowMs < 200, `1000 块深度 5 的 {down} 求值应 < 200ms（粗守卫），实测 ${shallowMs.toFixed(2)}ms`)
 
   /**
    * ② 真正暴露「逐候选各走一遍子树」的形状：一条 1000 深的链。

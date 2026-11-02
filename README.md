@@ -237,12 +237,13 @@ core ← view ← ui ← app ← host
 pnpm dev          # vite + electron 一起起；光标已在第一块，直接敲字
 pnpm dev:web      # 只起 vite → http://127.0.0.1:5180/
 pnpm gate         # ★ 收工门禁（全量）：静态 + 单测 + 构建 + 冒烟 + 布局 + 真 Electron
+pnpm gate:queued  # 同 gate，但文件锁串行＋在隔离 worktree 里构建已提交的 HEAD（多人/多任务共用一台机器）
 pnpm gate:fast    # 按 git 改动只跑「碰得到的那几支」，并逐条列出跳过了什么
 pnpm test:one tests/x.test.ts   # 内环：只跑这几个单测文件（~0.2s）
 ```
 
 **收工只认外环**：`pnpm gate` 全绿才算做完。当前基线：
-arch **29/29** · test:core **783/783** · 浏览器冒烟 **231/231** · dock **25/25** · electron **13/13**。
+arch **29/29** · test:core **785/785** · 浏览器冒烟 **236/236** · dock **26/26** · electron **13/13**。
 
 - 前置：**Node 26.x**（`.node-version` 钉住；旧版会让 rollup 原生模块 dlopen 失败）、pnpm 11.x。
 - `gate` 是**编排**出来的，不是一条 `&&` 链：彼此独立的检查按产物依赖分三段、段内并发，
