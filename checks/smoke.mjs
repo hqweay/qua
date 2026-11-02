@@ -140,6 +140,17 @@ const ensureTree = async (page) => {
   }
 }
 
+/**
+ * 切看法：点抬头那颗**下拉**，再点菜单里的一项。
+ * 下拉与块菜单共用同一份「视图…」菜单，所以这里只认菜单行、不认视图按钮。
+ */
+const switchView = async (page, scope, label) => {
+  await page.locator(`${scope} .qv-view-current`).first().click()
+  await page.waitForTimeout(180)
+  await page.locator('.layer .layer-item', { hasText: label }).first().click()
+  await page.waitForTimeout(400)
+}
+
 /** 点条件树里某个组的「加一条」→ 选一项（`group:all`／`row:text` …） */
 const qtAdd = async (page, groupSelector, pick) => {
   await page.locator(`${groupSelector} > .qt-children > [data-qt="add"]`).click()
@@ -2514,9 +2525,7 @@ await check('T195 查询在正文内联渲染：不打开就在原位出结果�
       return {
         roots: window.__qua.__editor.doc.roots.map((b) => b.id),
         caret: window.__qua.__editor.caretBlock(),
-        active: [...(body?.querySelectorAll('.qv-view-btn') ?? [])]
-          .filter((b) => b.dataset.active === '1')
-          .map((b) => b.textContent),
+        active: body?.querySelector('.qv-view-current-label')?.textContent ?? '',
         table: Boolean(body?.querySelector('.tv-rows')),
       }
     }, qid)
@@ -2530,13 +2539,12 @@ await check('T195 查询在正文内联渲染：不打开就在原位出结果�
   const added = await switchState()
   assert(added.roots.length === 1 && added.roots[0] === pageRow, `新建视图不换屏（页还是这一屏）：${JSON.stringify(added.roots)}`)
   assert(added.caret === pageRow, `新建视图不动光标：${JSON.stringify(added.caret)}`)
-  assert(added.active.join() === '表格' && added.table, `内联体当场换成表格：${JSON.stringify(added)}`)
-  await page.locator(`.blk[data-block-id="${qid}"] .qv-view-btn`, { hasText: '大纲' }).first().click()
-  await page.waitForTimeout(450)
+  assert(added.active === '表格' && added.table, `内联体当场换成表格：${JSON.stringify(added)}`)
+  await switchView(page, `.blk[data-block-id="${qid}"]`, '大纲')
   const backToOutline = await switchState()
   assert(backToOutline.roots[0] === pageRow, `切回大纲也不换屏：${JSON.stringify(backToOutline.roots)}`)
   assert(backToOutline.caret === pageRow, `切回大纲不动光标：${JSON.stringify(backToOutline.caret)}`)
-  assert(backToOutline.active.join() === '大纲' && !backToOutline.table, `内联体当场换回大纲：${JSON.stringify(backToOutline)}`)
+  assert(backToOutline.active === '大纲' && !backToOutline.table, `内联体当场换回大纲：${JSON.stringify(backToOutline)}`)
 
   /**
    * 打开它（聚焦成单根）：身体**仍画在自己行下**（按源分派，段根同子行）——
@@ -2590,6 +2598,87 @@ await check('T195 查询在正文内联渲染：不打开就在原位出结果�
 
   await ctx.close()
   return `内联 ${inline.rows.length} 条；打开后仍只有 1 台宿主（在行下）`
+})
+
+await check('T216 挂载栏本地查询：切到「大纲」后仍能切回；抬头不重复块名；空条件不摆组合方式', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const hostId = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    return p.id
+  })
+  await page.waitForTimeout(300)
+  await page.evaluate((hostId) => {
+    window.__qua.invoke('core.mount/add-local', {
+      host: { kind: 'block', blockId: hostId },
+      label: '新查询',
+      spec: { where: { any: [] }, scope: 'subtree' },
+    })
+  }, hostId)
+  await page.waitForTimeout(400)
+  await page.locator('#editor .mount .mount-tab', { hasText: '新查询' }).first().click()
+  await page.waitForTimeout(600)
+
+  const mountState = () =>
+    page.evaluate(() => {
+      const m = document.querySelector('#editor .mount')
+      return {
+        current: m?.querySelector('.qv-view-current-label')?.textContent ?? '',
+        viewBar: Boolean(m?.querySelector('.mount-viewbar:not([hidden]) .qv-view-current')),
+        titleHidden: m?.querySelector('.queryview-title')?.hidden ?? true,
+        count: m?.querySelector('.queryview-count')?.textContent ?? '',
+        table: Boolean(m?.querySelector('.tv-rows')),
+        outlineRows: m?.querySelectorAll('.mount-editor .blk').length ?? 0,
+      }
+    })
+
+  const table = await mountState()
+  assert(table.current === '表格' && table.table, `前置：新查询默认是一张表：${JSON.stringify(table)}`)
+  /**
+   * 挂载栏挂在块底下：块名已经在 tab 上，结果抬头不再重复一遍。
+   * 留下的是「条数」——那是这一栏自己的信息。
+   */
+  assert(table.titleHidden, `挂载栏不许再把块名写成第二行标题：${JSON.stringify(table)}`)
+  assert(table.count.includes('条结果'), `条数仍要留着：${JSON.stringify(table)}`)
+
+  /**
+   * **切到「大纲」之后仍要能切回去**：大纲分支不是视图宿主，抬头会整台消失；
+   * 挂载栏补一颗同款下拉（`.mount-viewbar`），否则用户被锁在大纲里。
+   */
+  await switchView(page, '#editor .mount', '大纲')
+  const outline = await mountState()
+  assert(!outline.table && outline.outlineRows >= 0, `切到大纲：视图体应撤掉：${JSON.stringify(outline)}`)
+  assert(outline.viewBar && outline.current === '大纲', `大纲分支必须留下视图下拉：${JSON.stringify(outline)}`)
+
+  await switchView(page, '#editor .mount .mount-viewbar', '表格')
+  const back = await mountState()
+  assert(back.current === '表格' && back.table, `从大纲能切回表格：${JSON.stringify(back)}`)
+
+  /**
+   * 空条件：根组没有子项时，不摆「且／或 ＋ 非」——那是在给不存在的子项选关系。
+   * 空态本身也不摆占位大图；选项是一组字段（标签在上、控件在下）。
+   */
+  await page.locator('#editor .mount .queryview-filters .queryview-chip').first().click()
+  await page.waitForTimeout(350)
+  const empty = await page.evaluate(() => {
+    const tree = document.querySelector('#editor .mount .queryview-tree')
+    const root = tree?.querySelector('.qt-group[data-qt-depth="0"]')
+    return {
+      rootHeadHidden: root?.querySelector('.qt-group-head')?.hidden ?? false,
+      emptyRoot: root?.dataset.qtEmptyRoot === '1',
+      icon: Boolean(tree?.querySelector('.qt-empty-icon')),
+      labels: [...(tree?.querySelectorAll('.qt-opt-label') ?? [])].map((e) => e.textContent ?? ''),
+      limit: tree?.querySelector('.qt-limit')?.getAttribute('placeholder') ?? '',
+    }
+  })
+  assert(empty.rootHeadHidden && empty.emptyRoot, `空条件不该显示组合方式：${JSON.stringify(empty)}`)
+  assert(!empty.icon, `空态不摆占位大图：${JSON.stringify(empty)}`)
+  assert(empty.labels.join() === '范围,最多,顺序', `选项要有可读的字段名：${JSON.stringify(empty.labels)}`)
+  assert(empty.limit === '不限', `限数无值时应说「不限」，不是一个空框：${JSON.stringify(empty.limit)}`)
+
+  await ctx.close()
+  return `默认表格；大纲仍可切回；挂载栏不重复块名；空条件隐藏组合头（${empty.labels.join(' / ')}）`
 })
 
 await check('T196 查询块在右槽窗口也画结果：同一台 ViewHost；折叠收的是身体', async () => {
@@ -2677,9 +2766,7 @@ await check('T196 查询块在右槽窗口也画结果：同一台 ViewHost；�
     return {
       roots: window.__qua.__editor.doc.roots.map((b) => b.id),
       activeId: window.__qua.snapshot().activeId,
-      tabs: [...(card?.querySelectorAll('.qv-view-btn') ?? [])]
-        .filter((b) => b.dataset.active === '1')
-        .map((b) => b.textContent),
+      tabs: [card?.querySelector('.qv-view-current-label')?.textContent ?? ''].filter(Boolean),
       table: Boolean(card?.querySelector('.tv-rows')),
     }
   }, qid)
@@ -13341,8 +13428,7 @@ await check('T151 平表：行＝直接子块、正文只画根行、切回大�
   assert(k2.all === k1.all, `删除是**软删**（块还在树上，可恢复）：${JSON.stringify(k2)}`)
 
   // 切回大纲：摘掉视图宿主、正文恢复子树，撤销栈原样（并且多出「切回大纲」这一步）
-  await page.locator('.qv-view-btn', { hasText: '大纲' }).first().click()
-  await page.waitForTimeout(400)
+  await switchView(page, '.queryview', '大纲')
   const outline = await viewState(page)
   assert(!outline.visible, '切回大纲后视图宿主应摘掉（不是藏一台还在订阅的）')
   assert(outline.rootBlks > 1, `切回大纲正文要重新装子树：${outline.rootBlks}`)

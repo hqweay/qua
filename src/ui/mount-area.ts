@@ -52,6 +52,7 @@ import type { FoldState } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t, type MsgId } from '../core/msg.ts'
 import { type BlockEditor, type Run } from '../view/editor.ts'
+import { renderIcon } from '../view/icons.ts'
 import { EditableBlock } from './editable-block.ts'
 
 /** 非大纲那一栏的**视图体**（由装配层造：只有那里有完整依赖） */
@@ -90,6 +91,14 @@ export interface MountAreaDeps {
   onAddTab?: (hostId: string) => void
   /** 「×」：摘掉一栏（`tabId` 是**稳定 id**，不是数组下标） */
   onRemoveTab?: (host: MountHost, tabId: string) => void
+  /**
+   * 一次**视图切换**的下拉（贴着按钮弹出「视图…」菜单）。
+   *
+   * 为什么挂载区也接这一颗：大纲分支用的是挂载区自己的编辑器（`.mount-editor`），
+   * 它不是视图宿主，所以切到「大纲」时视图宿主的抬头与切换器会整条消失——
+   * 用户只剩一条路：再也切不回表格。这里给大纲分支补同一个入口。
+   */
+  openViewMenu?: (host: MountHost, tabId: string, anchor: DOMRect) => void
   /**
    * 「⋯」：这一栏的更多动作（提升为查询块…／转为本地副本／固定为查询…／移除）。
    *
@@ -169,6 +178,13 @@ export class MountArea {
    * 「这一栏是什么」是它唯一能说清自己的地方，而「切看法」写的是设备状态。
    */
   private readonly derivedHeadEl: HTMLElement
+  /**
+   * 大纲分支的**视图切换条**（只在 local 查询栏、且当前是默认看法时出现）。
+   *
+   * 非大纲时由视图宿主画自己的抬头；大纲时视图宿主根本不在，抬头与切换器也就没了。
+   * 这一条是补回来的那一颗入口，不是第二套抬头：它只有一个按钮。
+   */
+  private readonly viewBarEl: HTMLElement
   /** 折叠时那一行摘要（只有「引用 N」——同类／提及的计数要现算，折叠时不值得算） */
   private readonly summaryEl: HTMLButtonElement
   /**
@@ -238,6 +254,10 @@ export class MountArea {
     this.derivedHeadEl.className = 'mount-derived-head'
     this.derivedHeadEl.hidden = true
 
+    this.viewBarEl = document.createElement('div')
+    this.viewBarEl.className = 'mount-viewbar'
+    this.viewBarEl.hidden = true
+
     this.block = new EditableBlock({
       host: this.editorEl,
       store: deps.store,
@@ -256,7 +276,7 @@ export class MountArea {
       onContextBack: (rootId) => this.collapse(rootId),
     })
 
-    this.bodyEl.append(this.derivedHeadEl, this.emptyEl, this.block.root, this.viewEl)
+    this.bodyEl.append(this.derivedHeadEl, this.viewBarEl, this.emptyEl, this.block.root, this.viewEl)
     this.root.append(this.summaryEl, this.tabsEl, this.bodyEl)
 
     this.render()
@@ -476,17 +496,53 @@ export class MountArea {
 
   private load(host: Block, entry: MountEntry, focusHint?: string): void {
     if (entry.kind === 'derived') {
+      this.viewBarEl.hidden = true
       this.loadDerived(host, entry, focusHint)
       return
     }
     this.derivedHeadEl.hidden = true
     const view = this.viewOf(entry)
+    this.paintViewBar(entry, view)
     if (view) {
       this.showView(host, entry, view)
       return
     }
     this.detachView()
     this.loadOutline(entry, this.rootsFor(host, entry), focusHint)
+  }
+
+  /**
+   * 大纲分支的视图切换条：**只在 local 查询栏、且当前是默认看法**时出现。
+   *
+   * 非大纲时视图宿主自己有一条抬头（条数、条件、切换、刷新）；大纲时它整台都不在，
+   * 这一条把「切回去」的入口补上。两处用的是同一个下拉（菜单由装配层现画）。
+   */
+  private paintViewBar(entry: MountEntry, view: ViewConfig | null): void {
+    this.viewBarEl.replaceChildren()
+    if (entry.kind !== 'local' || view !== null || !this.deps.openViewMenu) {
+      this.viewBarEl.hidden = true
+      return
+    }
+    this.viewBarEl.hidden = false
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'qv-view-btn qv-view-current mount-view-current'
+    btn.title = t('ui.view.switchHint')
+    btn.setAttribute('aria-haspopup', 'menu')
+    const prefix = document.createElement('span')
+    prefix.className = 'qv-view-prefix'
+    prefix.textContent = t('ui.view.label')
+    const label = document.createElement('span')
+    label.className = 'qv-view-current-label'
+    label.textContent = t('ui.view.outline')
+    const caret = document.createElement('span')
+    caret.className = 'qv-view-caret'
+    renderIcon(caret, 'lucide:chevron-down', 'chevron-down')
+    btn.append(prefix, label, caret)
+    btn.addEventListener('click', () =>
+      this.deps.openViewMenu?.(this.mountHost(), entry.id, btn.getBoundingClientRect()),
+    )
+    this.viewBarEl.appendChild(btn)
   }
 
   /**
@@ -697,6 +753,7 @@ export class MountArea {
   }
 
   private showView(host: Block, entry: MountEntry, view: ViewConfig): void {
+    this.viewBarEl.hidden = true
     /**
      * 大纲的岛根要**从文档里摘掉**，不能 dispose：
      * `EditableBlock.dispose()` 是终态（退订＋卸事件），而摘掉只是为了让同一块

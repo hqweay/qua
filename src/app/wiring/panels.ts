@@ -585,6 +585,8 @@ export function setupPanels(deps: PanelsDeps) {
       wire: (editor, change) => deps.wireEditor(editor, change, 'query'),
       toast: (text, kind) => app.toast(text, kind),
       invoke: (name, args) => void deps.getRegistry().invoke(name, args, 'queryview'),
+      // 视图切换是下拉：贴着按钮弹「视图…」菜单（行仍由装配层现画）
+      openViewMenu: (owner, anchor) => app.openViewMenu(owner, anchor),
       project: (b, into) => deps.project(b, into),
       refClick: (hit, el, mods) => deps.refClick(hit, mods, el),
       ...(deps.atomClick ? { onAtomClick: (atom, el, mods) => deps.atomClick!(atom, el, mods) } : {}),
@@ -703,6 +705,8 @@ export function setupPanels(deps: PanelsDeps) {
       // 与正文同一套事件（点引用/块标/右键菜单/`#`·`@` 补全），装配层只给这一份
       wire: (editor, change) => deps.wireEditor(editor, change, 'mount'),
       onAddTab: (id) => openMountPicker(id),
+      // 大纲分支的切换下拉：与视图宿主那条同一个菜单（装配层现画行，这里只给锚点）
+      openViewMenu: (host, tabId, anchor) => app.openViewMenu({ kind: 'tab', host, tabId }, anchor),
       onTabMenu: (mountHost, entry, anchor) => openMountTabMenu(mountHost, entry, anchor),
       derivedKind: (hostBlock, source) => {
         const mountHost: MountHost = isJournal(hostBlock) ? { kind: 'journal' } : { kind: 'block', blockId: hostBlock.id }

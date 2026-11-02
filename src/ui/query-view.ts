@@ -67,6 +67,7 @@ import {
 import type { KbClient } from '../core/kb/types.ts'
 import { t, type MsgId } from '../core/msg.ts'
 import { BlockEditor, type Run } from '../view/editor.ts'
+import { renderIcon } from '../view/icons.ts'
 import { BlockCell } from './block-cell.ts'
 import { EditableBlock } from './editable-block.ts'
 import { queryChips } from './query-builder.ts'
@@ -163,6 +164,13 @@ export interface ViewHostDeps {
   toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
   /** 命令面（切视图、排序、增删行、写一格的属性都走它：撤销/落盘只有一条路） */
   invoke: (name: string, args: Record<string, unknown>) => void
+  /**
+   * **打开「视图…」菜单**（下拉的落点）。
+   *
+   * `anchor` 只是浮层的落点：下拉要贴着那颗按钮，而不是居中。菜单的行仍由
+   * 装配层现画（大纲／已有视图／新建…），这一层不复制一份视图清单。
+   */
+  openViewMenu?: (owner: ViewOwnerRef, anchor: DOMRect) => void
   /** 标题列的投影（run/marks/引用/图片）——由装配层注入，`ui` 不拿整片森林 */
   project: (block: Block, into: HTMLElement) => void
   /** 点标题里的引用/原子（与正文同一条口径） */
@@ -499,11 +507,6 @@ export class ViewHost {
     }
   }
 
-  /** 拥有者的当前配置（每次现读：它可能被命令改过） */
-  private get data(): ViewOwnerData {
-    return this.bound.data
-  }
-
   /** 这一份源（**派生**：query／children／items；派生栏走现算记录，不建源） */
   private get source(): Source {
     if (this.deps.derived) return { kind: 'children', blockId: this.deps.host().id }
@@ -698,7 +701,15 @@ export class ViewHost {
      * 内联体与侧窗不写：那一行上已经有块名了（同一句话同屏两遍是噪声）。
      */
     const embed = this.deps.surface === 'embed'
-    this.els.title.hidden = embed ? false : !query || this.deps.surface === 'inline' || this.deps.surface === 'dock'
+    /**
+     * 抬头写不写名字：
+     *   · **挂载栏不写**：那一栏挂在块底下，栏的 tab 已经说明了它是谁；再写一遍块名
+     *     只会让「块内容 ＋ 条数」读成两行标题（新查询尤其明显）。
+     *   · **内联体／侧窗不写**：那一行上已经有块名了（同一句话同屏两遍是噪声）。
+     *   · **投影写**：露面块自己的正文槽是空的，名字没有第二处可显示。
+     */
+    this.els.title.hidden =
+      embed ? false : !query || this.deps.surface === 'inline' || this.deps.surface === 'dock' || this.deps.surface === 'mount'
     this.els.title.textContent =
       embed || query ? (name === '' ? t('ui.query.untitled') : name) : ''
     const n = this.rowCount()
@@ -877,15 +888,17 @@ export class ViewHost {
   }
 
   /**
-   * 视图切换：**默认看法 ＋ 已保存的视图 ＋ 「＋」**。
+   * 视图切换：**一个下拉**（当前看法 ＋ 其它视图 ＋ 新建…）。
    *
    * 为什么不是「每种 kind 一个按钮」：一个拥有者可以有**多个**同 kind 的视图（各自列/序不同），
-   * 按 kind 放按钮就表达不了「第 2 张表」。这里列的是这个拥有者自己的视图实例。
+   * 按 kind 放按钮就表达不了「第 2 张表」。
+   * 为什么不是「每个视图一颗按钮」：视图一多，抬头就变成一排等宽的 tab，抢走条数与刷新
+   * 的位置；而切换看法是低频动作，收进下拉更合适（菜单里同时给出「新建表格／列表…」）。
    */
   private paintViews(b: Block, view: ViewConfig | null): void {
     const box = this.els.views
     box.replaceChildren()
-    // 派生栏的看法切换器在挂载区抬头（这一层没有拥有者，不该画「＋新建视图」）
+    // 派生栏的看法切换器在挂载区抬头（这一层没有拥有者，不该画「新建视图」）
     if (this.deps.derived) {
       box.hidden = true
       return
@@ -924,40 +937,29 @@ export class ViewHost {
       return
     }
     box.hidden = false
-    const btn = (label: string, active: boolean, onClick: () => void): HTMLButtonElement => {
-      const el = document.createElement('button')
-      el.type = 'button'
-      el.className = 'qv-view-btn'
-      if (active) el.dataset.active = '1'
-      el.textContent = label
-      el.addEventListener('click', onClick)
-      return el
-    }
-    // 默认看法是大纲
-    const defaultLabel = t('ui.view.outline')
-    box.appendChild(
-      btn(defaultLabel, view === null, () =>
-        this.deps.invoke('core.view/set-active', { owner: this.writeOwner, viewId: '' }),
-      ),
-    )
-    for (const v of this.data.views) {
-      box.appendChild(
-        btn(viewNameOf(v, (k) => t(`ui.view.kind.${k}`)), view?.id === v.id, () =>
-          this.deps.invoke('core.view/set-active', { owner: this.writeOwner, viewId: v.id }),
-        ),
-      )
-    }
-    const add = document.createElement('button')
-    add.type = 'button'
-    add.className = 'qv-view-btn qv-view-add'
-    add.title = t('ui.view.addView')
-    add.textContent = '＋'
-    /**
-     * 不再是「一键加平表」：切换器旁边那颗 `＋` 现在是**新建视图的入口**，
-     * 与块菜单里的「视图…」同一个菜单（两种表都从那里建，入口只有一份）。
-     */
-    add.addEventListener('click', () => this.deps.invoke('core.view/menu', { owner: this.writeOwner }))
-    box.appendChild(add)
+    const current = view === null ? t('ui.view.outline') : viewNameOf(view, (k) => t(`ui.view.kind.${k}`))
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'qv-view-btn qv-view-current'
+    btn.dataset.viewCurrent = view?.id ?? ''
+    btn.title = t('ui.view.switchHint')
+    const label = document.createElement('span')
+    label.className = 'qv-view-current-label'
+    label.textContent = current
+    const caret = document.createElement('span')
+    caret.className = 'qv-view-caret'
+    renderIcon(caret, 'lucide:chevron-down', 'chevron-down')
+    btn.append(label, caret)
+    btn.addEventListener('click', () => {
+      /**
+       * 下拉＝**锚在这颗按钮下面的同一份「视图…」菜单**：大纲／已有视图／新建…
+       * 都只有一张表（`openViewMenu`），这里不另拼一份行。
+       * 拿不到宿主菜单时退回命令面（没有锚点，居中弹出）——仍然是同一条动作。
+       */
+      if (this.deps.openViewMenu) this.deps.openViewMenu(this.writeOwner, btn.getBoundingClientRect())
+      else this.deps.invoke('core.view/menu', { owner: this.writeOwner })
+    })
+    box.appendChild(btn)
   }
 
   /* ---------------------------------------------------------- 分支 */
