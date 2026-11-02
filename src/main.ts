@@ -33,6 +33,7 @@ import { Layers, paletteRows, rowsFromBindings, type PickMods, type Row } from '
 import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from './app/retrieval/triggers.ts'
 import { dispatchKey, installKeydown, type DispatchEnv } from './core/dispatch.ts'
 import { DockWindows } from './ui/dock-windows.ts'
+import { BackrefsCard } from './ui/backrefs-card.ts'
 import { bindDockResize } from './ui/dock-resize.ts'
 import { mountDockSlot } from './ui/dock.ts'
 import { createIcon } from './view/icons.ts'
@@ -358,6 +359,37 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, w
   // 检视卡在面板分片里创建并挂进右槽堆叠；这里只在重画时取它（它必须已经在文档里）
   inspectCard: () => chrome.inspectCardEl,
   showCardMenu: (side, key, anchor) => showCardMenu(side, key, anchor),
+  /**
+   * 反链卡：**一列真实的可编辑块**（与正文「引用」栏同一种东西），不是一列摘要行。
+   *
+   * 懒建：卡第一次出现时才建实例。工厂本身在装配早期传入，但真正调用发生在
+   * 首次重画——那时 `run`／`cardStateFor`／`closeCard` 都已就位。
+   */
+  createBackrefsCard: (side) =>
+    new BackrefsCard({
+      store: blocks,
+      kb,
+      write: (fn) => run(fn, ed),
+      target: () => ws.activeId,
+      wire: (editor, change) => wireViewEditor(editor, change, 'dock', true),
+      onFocus: (editor) => {
+        ed = editor
+        scheduleBadge()
+      },
+      onDispose: (editor) => {
+        if (ed !== editor) return
+        ed = mainEd
+        scheduleBadge()
+      },
+      // 卡内编辑：只落盘与刷角标，**不重画槽**（重画会打断这一行的输入）
+      onChange: () => {
+        syncSections()
+        scheduleSave()
+        scheduleBadge()
+      },
+      state: () => cardStateFor(side, 'backrefs'),
+      onClose: () => closeCard(side, 'backrefs'),
+    }),
 })
 
 const { chrome, editorEl, applyChrome, resolvedTheme, dockMinWidth, dockMaxWidth, badge, scheduleBadge, markBooted } = setupChrome({

@@ -39,7 +39,9 @@ import {
   type DockSlotEls,
   type DockTile,
 } from '../../ui/dock.ts'
-import { backrefsCard, trashCard, type DockContentDeps } from '../../ui/dock-content.ts'
+import { trashCard, type DockContentDeps } from '../../ui/dock-content.ts'
+import { emptyCardList } from '../../ui/card-parts.ts'
+import type { BackrefsCard } from '../../ui/backrefs-card.ts'
 import { calendarCard } from '../../ui/calendar-card.ts'
 import { BelongsTree } from '../../ui/belongs-tree.ts'
 import { renderIcon } from '../../view/icons.ts'
@@ -66,6 +68,13 @@ export type DocksDeps = {
   inspectCard: () => HTMLElement
   /** 右键卡头：卡片菜单（行与动作归装配入口——它有浮层与命令面；这里只给时机与锚） */
   showCardMenu: (side: 'left' | 'right', key: string, anchor: DOMRect) => void
+  /**
+   * 反链卡（可编辑块列）的**工厂**：由装配入口在依赖就绪后注入。
+   *
+   * 为什么是工厂而不是现成实例：这张卡的编辑器要接 `viewEvents`／活动编辑器／写事务，
+   * 那些在装配入口的初始化顺序里晚于本节的构造；按需建（卡第一次出现时）才拿得到。
+   */
+  createBackrefsCard: (side: 'left' | 'right') => BackrefsCard
 }
 
 /** 卡片落点：插到哪一张之前/之后；`null` ＝ 末尾 */
@@ -75,6 +84,30 @@ export function setupDocks(deps: DocksDeps) {
   const { kb } = deps
   /** 窗口管理器在槽挂载之后创建；重画早于它就跳过窗口、只画派生卡 */
   let windows: { left: DockWindows; right: DockWindows } | null = null
+  /**
+   * 反链卡**每个槽一份**（同一张卡可以同时出现在两槽）。
+   *
+   * 懒建：只有 `cards` 里有它时才建；从 `cards` 里摘掉就 dispose —— 一台 contenteditable
+   * 留在后台跟着每次编辑重查一次反链，是白付的账。
+   */
+  const backrefsCards = new Map<'left' | 'right', BackrefsCard>()
+
+  function ensureBackrefs(side: 'left' | 'right'): BackrefsCard {
+    let inst = backrefsCards.get(side)
+    if (!inst) {
+      inst = deps.createBackrefsCard(side)
+      backrefsCards.set(side, inst)
+    }
+    return inst
+  }
+
+  /** 这一槽没有反链卡了 ⇒ 把它的编辑器收掉（订阅、编辑器、卡壳一起） */
+  function dropBackrefs(side: 'left' | 'right'): void {
+    const inst = backrefsCards.get(side)
+    if (!inst) return
+    inst.dispose()
+    backrefsCards.delete(side)
+  }
 
   /**
    * 槽内容依赖：**清单形式**列出装配层交给 UI 的能力，UI 不认识 `ws`／`registry`。
@@ -82,10 +115,6 @@ export function setupDocks(deps: DocksDeps) {
    */
   const dockDeps: DockContentDeps = {
     kb,
-    activeId: () => deps.getWs().activeId,
-    // 共享索引由 store 缓存（懒重建）⇒ 反链不再每次扫全库 atoms ＋ 遍历森林
-    openPage: (id) => void deps.getRegistry().invoke('core.page/open', { pageId: id }, 'menu'),
-    openInDock: (id) => openWindow('right', id),
     /**
      * 回收站的「恢复」走命令面：撤销、落盘、索引失效三条路径只有一处入口。
      * 写完补一次重画——回收站卡不是编辑器，没有自己的 change 事件。
@@ -105,7 +134,7 @@ export function setupDocks(deps: DocksDeps) {
   const belongsTree = new BelongsTree({
     rows: (face) => belongsToTree(buildAdjacency(deps.getWs().blocks), face),
     activeId: () => deps.getWs().activeId,
-    open: (id) => dockDeps.openPage(id),
+    open: (id) => void deps.getRegistry().invoke('core.page/open', { pageId: id }, 'menu'),
     openInDock: (id) => openWindow('right', id),
     untitled: t('ui.page.untitled'),
     refresh: () => renderDocks(),
@@ -389,6 +418,8 @@ export function setupDocks(deps: DocksDeps) {
     const contentIds = cards.flatMap((e) => (e.kind === 'block' ? [e.block] : []))
     const winCards = windows ? windows[side].sync(contentIds) : new Map<string, HTMLElement>()
     const entries: DockCardEntry[] = []
+    /** 这一槽里有没有反链卡（没有就把它那台编辑器收掉） */
+    let hasBackrefs = false
     for (const card of cards) {
       // 种类由 `kind` 说，不由字符串形状猜：改 id 生成方案也不会让某种卡整片消失
       const key = dockKey(card)
@@ -397,12 +428,22 @@ export function setupDocks(deps: DocksDeps) {
         continue
       }
       if (card.kind === 'derived') {
+        /**
+         * 反链卡是**持久卡壳**（里面有一台 contenteditable）：每次重画只 `sync`，
+         * 不重建元素。其余派生卡是纯派生 DOM，照旧每次现造。
+         */
+        if (card.card === 'backrefs') {
+          hasBackrefs = true
+          entries.push({ id: key, el: ensureBackrefs(side).sync(), size: 'large' })
+          continue
+        }
         entries.push({ ...derivedCard(side, card.card), size: 'large' })
         continue
       }
       const el = winCards.get(card.block)
       if (el) entries.push({ id: key, el, size: 'large' })
     }
+    if (!hasBackrefs) dropBackrefs(side)
     renderDockStack(slot.stack, entries, t('ui.dock.empty'), deps.prefs().dock.solo[side])
     syncTileCols(slot.stack)
   }
@@ -536,7 +577,16 @@ export function setupDocks(deps: DocksDeps) {
       case 'belongs':
         return finish(belongsTree.card())
       case 'backrefs':
-        return finish(backrefsCard(dockDeps))
+        /**
+         * 正常路径在 `renderSlot` 里被**持久实例**接管（`ensureBackrefs`）；
+         * 走到这里只可能是装配早期（实例还没建出来的那一瞬）——
+         * 给一张空壳，下一次重画就有内容，不在这里再造第二种反链卡。
+         */
+        return finish({
+          id: 'backrefs',
+          title: t('ui.dock.backRefs'),
+          body: emptyCardList(t('ui.dock.noBackRefs')),
+        })
       case 'trash':
         return finish(trashCard(dockDeps))
       case 'calendar':

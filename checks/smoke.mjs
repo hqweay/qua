@@ -11019,41 +11019,95 @@ await check('T120 卡片拖拽：槽内排序、跨槽移动、一个块只留�
   return `槽内 b 到 a 前；跨槽 b→左（日历前）；Shift+点移回右且只有一张；再拖回左仍可读；检视卡右→左→右`
 })
 
-await check('T121 右槽反链卡与正文同一份判据：一行 = 一个源块，带来源路径；Shift 开这个块', async () => {
+await check('T121 右槽反链卡与正文「引用」栏同一种东西：一列可编辑源块，带面包屑', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
+  await page.waitForTimeout(350) // 反链卡首次装载（查询走索引，但仍走一次拍板）
+  const card = '#dock-right .dock-card[data-card-id="backrefs"]'
   /**
-   * 第一页被「输入面笔记」里的**两块**分别引用 ⇒ 两行。
-   * 按来源根聚合（旧卡）时这里只有一行，而那个数字看不出「还有另一处」。
+   * 第一页被「输入面笔记」里的**两块**分别引用 ⇒ 卡里两行真实块（不是按来源根聚合的摘要行）。
+   * 行首面包屑说明「这一句住哪」，与正文「引用」栏同一条机制。
    */
-  const rows = await page.evaluate(() =>
-    [...document.querySelectorAll('#dock-right .dock-card[data-card-id="backrefs"] .page-item')].map((el) => ({
-      id: el.dataset.blockId ?? '',
-      title: el.querySelector('.p-title')?.textContent ?? '',
-      ctx: el.querySelector('.p-ctx')?.textContent ?? '',
-    })),
+  const rows = await page.evaluate(
+    (sel) =>
+      [...document.querySelectorAll(`${sel} .blk[data-depth="0"]`)].map((el) => ({
+        id: el.dataset.blockId ?? '',
+        text: el.querySelector('.tx')?.textContent ?? '',
+        crumb: el.querySelector('.blk-context-cell')?.textContent ?? '',
+        crumbId: el.querySelector('.blk-context-cell')?.dataset.crumbFor ?? '',
+      })),
+    card,
   )
   assert(rows.length === 2, `反链卡应一行一个源块（本页有两块引用它）：${JSON.stringify(rows)}`)
   assert(new Set(rows.map((r) => r.id)).size === 2, `两行应是两个不同的源块：${JSON.stringify(rows)}`)
-  assert(rows.every((r) => /^[0-9a-f]{32}$/.test(r.id)), `每行要带它指向的源块 id：${JSON.stringify(rows)}`)
-  assert(rows.every((r) => r.ctx.includes('输入面笔记')), `每行要带来源路径（页名）：${JSON.stringify(rows)}`)
+  assert(rows.every((r) => /^[0-9a-f]{32}$/.test(r.id)), `每行要带源块 id：${JSON.stringify(rows)}`)
+  assert(rows.every((r) => r.crumb === '输入面笔记'), `每行要带来源路径（页名）：${JSON.stringify(rows)}`)
+
+  /**
+   * **卡里直接编辑**（不是点开某个页面）：点这一行的文本、在行尾敲一个字。
+   * 判据读**模型**（源块在另一页，正文里此刻没有它），再读同一行的 DOM。
+   */
+  const src = rows[0]
+  const rowTx = `${card} .blk[data-block-id="${src.id}"] > .tx`
+  await page.locator(rowTx).click({ position: { x: 12, y: 10 } })
+  await page.keyboard.press('End')
+  await page.keyboard.type('W')
+  await page.waitForTimeout(150)
+  const edited = await page.evaluate(
+    ({ id, tx }) => ({
+      model: window.__qua.allBlocks().find((b) => b.id === id)?.text ?? '',
+      dom: document.querySelector(tx)?.textContent ?? '',
+    }),
+    { id: src.id, tx: rowTx },
+  )
+  assert(edited.model.includes('W'), `卡里打字应直接写进模型：${JSON.stringify(edited)}`)
+  assert(edited.dom.includes('W'), `卡里那一行应立刻显示刚打的字：${JSON.stringify(edited)}`)
+
+  // 全局 undo（焦点还在卡里）：模型与卡里那一行一起回滚
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(200)
+  const undone = await page.evaluate(
+    ({ id, tx }) => ({
+      model: window.__qua.allBlocks().find((b) => b.id === id)?.text ?? '',
+      dom: document.querySelector(tx)?.textContent ?? '',
+    }),
+    { id: src.id, tx: rowTx },
+  )
+  assert(!undone.model.includes('W'), `卡里的 ⌘Z 应回滚模型：${JSON.stringify(undone)}`)
+  assert(!undone.dom.includes('W'), `卡里的 ⌘Z 应回滚这一行：${JSON.stringify(undone)}`)
+
+  /**
+   * 面包屑就地展开：点来源页，卡里装成那一页的子树（中心/历史不动）。
+   * 与正文「引用」栏/右槽窗口共用 `expandContexts`，不是卡片自己发明的第二套。
+   */
+  await page.locator(`${card} .blk-context-cell`).first().click()
+  await page.waitForTimeout(200)
+  const expanded = await page.evaluate((sel) => ({
+    roots: [...document.querySelectorAll(`${sel} .blk[data-depth="0"]`)].map((el) => el.dataset.blockId ?? ''),
+    back: Boolean(document.querySelector(`${sel} .blk-context-back`)),
+  }), card)
+  assert(expanded.roots.includes(rows[0].crumbId), `点面包屑应把来源页装成卡里的根：${JSON.stringify(expanded)}`)
+  assert(expanded.back, `展开出来的根应有「收起上下文」：${JSON.stringify(expanded)}`)
+
+  // Shift+点块标：打开**这个源块**的窗口，中心不动
   const before = await page.evaluate(() => ({
     cards: window.__qua.snapshot().dock.right.cards,
     active: window.__qua.snapshot().activeId,
   }))
-  await page.locator('#dock-right .dock-card[data-card-id="backrefs"] .page-item').first().click({ modifiers: ['Shift'] })
-  await page.waitForTimeout(120)
+  await page.locator(`${card} .blk[data-block-id="${src.id}"] > .left > .marker`).click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(150)
   const after = await page.evaluate(() => ({
     cards: window.__qua.snapshot().dock.right.cards,
     active: window.__qua.snapshot().activeId,
   }))
   const added = after.cards.filter((id) => !before.cards.includes(id) && /^[0-9a-f]{32}$/.test(id))
   assert(added.length === 1, `反链行应开一张窗口：${JSON.stringify(after.cards)}`)
-  assert(added[0] === rows[0].id, `Shift+点开的是这个**源块**，不是它所在的页：${added[0]} vs ${rows[0].id}`)
+  assert(added[0] === src.id, `Shift+点开的是这个源块：${added[0]} vs ${src.id}`)
   assert(after.active === before.active, `反链行 Shift+点不换中心：${before.active} → ${after.active}`)
+
   await ctx.close()
-  return `两行 = 输入面笔记里两处源块；Shift+点开 ${rows[0].id.slice(-6)}；中心不动`
+  return `卡里两行源块（面包屑「输入面笔记」）；直接编辑/⌘Z；面包屑就地展开；Shift 开源块`
 })
 
 await check('T123 标签页成员块标的 Shift ⇒ 右槽窗口；中心不动', async () => {
