@@ -707,7 +707,6 @@ export function setupPanels(deps: PanelsDeps) {
       onAddTab: (id) => addLocalQueryTab(id),
       // 大纲分支的切换下拉：与视图宿主那条同一个菜单（装配层现画行，这里只给锚点）
       openViewMenu: (host, tabId, anchor) => app.openViewMenu({ kind: 'tab', host, tabId }, anchor),
-      onTabMenu: (mountHost, entry, anchor) => openMountTabMenu(mountHost, entry, anchor),
       derivedKind: (hostBlock, source) => {
         const mountHost: MountHost = isJournal(hostBlock) ? { kind: 'journal' } : { kind: 'block', blockId: hostBlock.id }
         return readMountView(deps.prefs().mountViews, mountHost, source)
@@ -771,58 +770,6 @@ export function setupPanels(deps: PanelsDeps) {
     sync: () => vh.sync(),
     dispose: () => vh.dispose(),
   })
-
-  /**
-   * **派生栏的「⋯」菜单**：把这一栏固定成一条可编辑的 local 查询。
-   *
-   * 每一项都落到**已有命令**上：菜单只决定「有哪些动作」，写路径与撤销仍只有一条。
-   * 菜单是动态的（这一栏是什么种类的），所以它住装配层而不是绑定表。
-   */
-  function openMountTabMenu(mountHost: MountHost, entry: Extract<MountEntry, { kind: 'derived' }>, anchor: DOMRect): void {
-    const source = entry.source
-    layers.openMenu({
-      rows: [
-        {
-          id: 'mount/fix',
-          label: t('ui.mount.fixDerived'),
-          hint: t('ui.mount.fixDerivedHint'),
-          icon: 'lucide:list-filter',
-          group: 'mount/1-identity',
-        },
-      ],
-      anchor,
-      title: labelOfEntry(entry),
-      searchable: false,
-      onPick: (row) => {
-        if (row.id !== 'mount/fix') return
-        const hostId = mountHost.kind === 'journal' ? '' : mountHost.blockId
-        const before = new Set(owners.entriesOf(mountHost).map((e) => e.id))
-        const view = readMountView(deps.prefs().mountViews, mountHost, source)
-        void deps
-          .getRegistry()
-          .invoke('core.mount/fix-derived', { host: mountHost, source, view }, 'mount')
-        const added = owners.entriesOf(mountHost).find((e) => !before.has(e.id))
-        renderMounts()
-        if (added) mountInstances.get(hostId)?.area.activateTab(added.id)
-      },
-    })
-  }
-
-  /** 这一栏此刻的显示名（菜单标题用；与 tab 条同一份判据） */
-  function labelOfEntry(entry: MountEntry): string {
-    if (entry.kind === 'derived') {
-      return t(
-        entry.source === 'refs'
-          ? 'ui.mount.refs'
-          : entry.source === 'members'
-            ? 'ui.mount.members'
-            : entry.source === 'same'
-              ? 'ui.mount.same'
-              : 'ui.mount.mentions',
-      )
-    }
-    return entry.label
-  }
 
   /**
    * **「＋」＝新建一栏 local 查询**：不再弹菜单。

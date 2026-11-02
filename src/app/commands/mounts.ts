@@ -1,5 +1,5 @@
 /**
- * **挂载区**命令：加一栏／摘一栏／改名／换视图／固定派生。
+ * **挂载区**命令：加一栏／摘一栏／改名／换视图。
  *
  * 两条纪律：
  *   · **local tab 不建块、也不指向块**：加一栏＝给宿主持有的那组 `MountEntry` 追加一条；
@@ -11,20 +11,15 @@ import {
   canonicalSpec,
   canonicalViews,
   defaultColumnsForSource,
-  derivedColumns,
-  derivedListFields,
-  derivedSpecOf,
   journalDate,
   mkTabId,
   mkViewId,
   todayISO,
   type MountEntry,
   type MountHost,
-  type QuerySpec,
   type Source,
   type ViewConfig,
 } from '../../core/index.ts'
-import { t } from '../../core/msg.ts'
 import type { App } from '../../core/ports.ts'
 import type { MountsDeps } from './types.ts'
 
@@ -36,7 +31,6 @@ export function mountCommands(
   | 'removeMountTab'
   | 'renameMountTab'
   | 'setMountTabView'
-  | 'fixDerivedTab'
 > {
   const entriesOf = (host: MountHost): MountEntry[] => d.owners.entriesOf(host)
   const entryOf = (host: MountHost, tabId: string): MountEntry | undefined =>
@@ -51,7 +45,7 @@ export function mountCommands(
   }
 
   /** 供本文件内部复用（「固定派生栏」就是「加一栏 local」） */
-  const api: Pick<App, 'addLocalTab' | 'removeMountTab' | 'renameMountTab' | 'setMountTabView' | 'fixDerivedTab'> = {
+  const api: Pick<App, 'addLocalTab' | 'removeMountTab' | 'renameMountTab' | 'setMountTabView'> = {
     /**
      * 加一栏 **local**：这一栏自己拥有条件与视图。**不建块。**
      *
@@ -109,47 +103,6 @@ export function mountCommands(
       return true
     },
 
-    /**
-     * **固定派生栏**（derived → local）：把「引用／同类／提及」那一栏的现算条件
-     * 变成一栏可编辑的 local tab（内置栏保留）。
-     *
-     * 三条口径：
-     *   · 名字**不能和内置栏重名**（两个「引用」在 tab 条上分不出谁是谁）；
-     *   · 把**这一次的看法**一起带过去（列也跟着给：切过去看到的还是同一张表）；
-     *   · 大纲就真的是大纲 —— 不替用户补一张默认表格。
-     */
-    fixDerivedTab: (host, source, view) => {
-      if (!editable(host)) return ''
-      const hostBlock = host.kind === 'journal' ? d.kb.journalDay(todayISO()) : d.kb.get(host.blockId)
-      if (!hostBlock) return ''
-      const spec = derivedSpecOf(hostBlock, d.kb.roots(), source)
-      if (!spec) return ''
-      /**
-       * 派生栏问的是「谁跟我有关」——那些块**不在宿主子树里**（所以派生栏不设子树锚点）。
-       * 固定成 local tab 后，这一栏的上下文会按宿主给 `scope:'subtree'` ⇒ 结果会变成 0。
-       * 所以把这一条**写明**成「全库」：跟着条件一起走，换个表面也是同一批成员。
-       */
-      const fixedSpec: QuerySpec = canonicalSpec({ ...spec, scope: 'all' })
-      const name =
-        source === 'refs'
-          ? t('ui.mount.refs')
-          : source === 'members'
-            ? t('ui.mount.members')
-            : source === 'same'
-              ? t('ui.mount.same')
-              : t('ui.mount.mentions')
-      const label = t('ui.mount.fixedLabel', { name })
-      if (view === 'list') {
-        const fixed: ViewConfig = { id: mkViewId(), kind: 'list', list: { fields: derivedListFields(source) } }
-        return api.addLocalTab(host, label, fixedSpec, [fixed], fixed.id)
-      }
-      if (view === 'table') {
-        const fixed: ViewConfig = { id: mkViewId(), kind: 'table', table: { columns: derivedColumns(source) } }
-        return api.addLocalTab(host, label, fixedSpec, [fixed], fixed.id)
-      }
-      // 大纲：不补默认表格（那会把用户选的看法换掉）
-      return api.addLocalTab(host, label, fixedSpec, [], '', 'none')
-    },
   }
   return api
 }

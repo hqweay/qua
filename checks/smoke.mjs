@@ -2161,7 +2161,7 @@ await check('T193 面板查询与查询块解耦：local 栏用 $self 出结果�
   return `local 栏 $self 命中 ${rowsBefore} 行；块数 ${before}→${shape.blocks}（只有一个子块）；kinds=${shape.kinds.join(',')}`
 })
 
-await check('T194 派生栏切表格：路径/引用次数/命中词/共同标签；重开仍是表格；固定为查询不抢内置栏', async () => {
+await check('T194 派生栏切表格：路径/引用次数/命中词/共同标签；重开仍是表格', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const setup = await page.evaluate(() => {
@@ -2231,24 +2231,7 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   assert(persisted.active === 'table', `派生栏的看法要落设备状态（重开仍是表格）：${JSON.stringify(persisted)}`)
   assert(persisted.rows === refsCount, `重开后成员一致：${refsCount} → ${persisted.rows}`)
 
-  // ③ 固定为查询：内置栏保留、新栏有个不重名的名字、看法跟着过去
-  await page2.locator('.mount-derived-more').click()
-  await page2.waitForSelector('.layer-item')
-  await page2.locator('.layer-item', { hasText: '固定为' }).first().click()
-  await page2.waitForTimeout(500)
-  const fixed = await page2.evaluate(() => ({
-    labels: [...document.querySelectorAll('#editor .mount .mount-tab')].map((e) => e.textContent ?? ''),
-    kinds: [...document.querySelectorAll('#editor .mount .mount-tabwrap')].map((w) => w.dataset.kind ?? ''),
-    rows: document.querySelectorAll('.mount-view .tv-row').length,
-    derivedHeadHidden: document.querySelector('.mount-derived-head')?.hidden ?? false,
-  }))
-  assert(fixed.labels.includes('引用'), `内置栏要保留：${JSON.stringify(fixed.labels)}`)
-  assert(fixed.labels.includes('引用（可编辑）'), `新栏不能和内建栏重名：${JSON.stringify(fixed.labels)}`)
-  assert(fixed.kinds.filter((k) => k === 'local').length === 1, `新栏是 local（自己拥有配置）：${JSON.stringify(fixed.kinds)}`)
-  assert(fixed.rows === refsCount, `固定后的查询与当前看法一致（同为表格、${refsCount} 行）：${fixed.rows}`)
-  assert(fixed.derivedHeadHidden, '切到 local 栏之后派生栏的抬头收起（它不再代表这一栏）')
-
-  // ④ 提及 / 同类：命中词与共同标签各自落在表里
+  // ③ 提及 / 同类：命中词与共同标签各自落在表里
   await mountTab(page2, 'mentions')
   await page2.locator('.mount-derived-view[data-kind="table"]').click()
   await page2.waitForTimeout(450)
@@ -2308,7 +2291,7 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   assert(afterLive.count === afterLive.rows, `抬头条数与表行同一个数：${afterLive.count} vs ${afterLive.rows}`)
 
   await reopened.ctx.close()
-  return `引用 ${refsCount} 条（路径＋次数）→ 重开仍表格 → 固定为查询（${fixed.labels.join(' / ')}）→ 提及/同类各带命中词与共同标签`
+  return `引用 ${refsCount} 条（路径＋次数）→ 重开仍表格 → 提及/同类各带命中词与共同标签`
 })
 
 await check('T194b 引用含属性引用：kind 过滤可切；标签页默认落「成员」', async () => {
