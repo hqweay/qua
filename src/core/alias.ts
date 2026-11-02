@@ -15,10 +15,10 @@
  *    这条是地址模型最重要的一处分界：地址只有 `_aliases` 一个来源。若让正文也参与，
  *    那么「敲字」就变成了「重命名」—— 块尾回车、退格都会顺手改掉它的地址。
  */
-import { ALIASES_PROP, aliasesOf, listsOf, primaryAliasOf, type Block } from './model.ts'
+import { ALIASES_PROP, aliasesOf, listsOf, primaryAliasOf, type Block } from './model/model.ts'
 import { isJournal, journalDate, journalDateLabel } from './journal.ts'
-import { plainText } from './runs.ts'
-import { walkForest } from './walk.ts'
+import { plainText } from './model/runs.ts'
+import { walkForest } from './model/walk.ts'
 import { t } from './msg.ts'
 
 /** 旧落盘键（v13 及以前）。新代码**不读**它；形状校验把它判成 corrupt。 */

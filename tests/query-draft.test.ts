@@ -21,7 +21,7 @@ import {
   type Block,
   type QuerySpec,
 } from '../src/core/index.ts'
-import { textRuns } from '../src/core/runs.ts'
+import { textRuns } from '../src/core/model/runs.ts'
 
 const b = (id: string, text: string, props?: Record<string, unknown>): Block => ({
   id,

@@ -25,7 +25,7 @@
  *
  * 标签本身仍是**块**：名字住在 `_aliases`（`_lists` 里有 `tag`），归属存 id ⇒ 改名自动传播。
  */
-import { uuidv7Hex } from './ids.ts'
+import { uuidv7Hex } from './model/ids.ts'
 import {
   ALIASES_PROP,
   DISPLAY_PROP,
@@ -34,10 +34,10 @@ import {
   hasList,
   prop,
   type Block,
-} from './model.ts'
-import { walkForest } from './walk.ts'
+} from './model/model.ts'
+import { walkForest } from './model/walk.ts'
 import { findByAlias, normalizeAlias } from './alias.ts'
-import { refRunsOf, textRuns } from './runs.ts'
+import { refRunsOf, textRuns } from './model/runs.ts'
 
 /** 「这块带着哪些标签」的系统属性（有序 id 列表，pos ＝ 数组下标） */
 export const TAGS_PROP = '_tags'

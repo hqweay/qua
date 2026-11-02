@@ -21,9 +21,9 @@ import {
   outdentMove,
   siblingMove,
   type MovePlan,
-} from '../src/core/tree.ts'
-import { DIVIDER_TYPE } from '../src/core/types.ts'
-import type { Block, Doc } from '../src/core/model.ts'
+} from '../src/core/model/tree.ts'
+import { DIVIDER_TYPE } from '../src/core/model/types.ts'
+import type { Block, Doc } from '../src/core/model/model.ts'
 
 const mk = (id: string, text = '', children: Block[] = []): Block => ({ id, text, children })
 

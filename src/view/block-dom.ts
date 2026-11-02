@@ -42,7 +42,7 @@ import {
   type RefView,
   type VisibleRow,
 } from '../core/index.ts'
-import { MARK_TYPES, isEmptyContent, plainText, refRunsOf, type AssetRun, type MarkType, type RunWithId } from '../core/runs.ts'
+import { MARK_TYPES, isEmptyContent, plainText, refRunsOf, type AssetRun, type MarkType, type RunWithId } from '../core/model/runs.ts'
 import type { AssetView } from '../core/assets.ts'
 import { t } from '../core/msg.ts'
 import { danglingView, refTitle, resolveRefs } from '../core/ref.ts'

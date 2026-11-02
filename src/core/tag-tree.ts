@@ -13,10 +13,10 @@
  *   · 只收带 `tag` 露面的下级：归属边能连任何块，但「成员」说的仍然是
  *     「打了这个标签的块」—— 内容块之间的一条边不该让它凭空变成某个标签的成员。
  */
-import { hasList, type Block } from './model.ts'
+import { hasList, type Block } from './model/model.ts'
 import { buildAdjacency, descendantIds, type Adjacency } from './hierarchy.ts'
 import { tagMemberIds } from './tags.ts'
-import { walkForest } from './walk.ts'
+import { walkForest } from './model/walk.ts'
 
 /**
  * 下级**标签** id（含自己）——「算作」的成员从这里来。

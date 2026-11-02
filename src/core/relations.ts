@@ -10,13 +10,13 @@
  * `_items`是收藏、`_belongsTo`是归属。按形状猜「凡是一个块 id 就是引用」会把
  * 这些关系混成一锅，且不报错。
  */
-import { isPropDefBlock, type Block } from './model.ts'
-import { refRunsOf } from './runs.ts'
+import { isPropDefBlock, type Block } from './model/model.ts'
+import { refRunsOf } from './model/runs.ts'
 import { tagIdsOf } from './tags.ts'
 import { propKindOf, type PropKind } from './props.ts'
 import { readEmbed } from './embed.ts'
 import { parentIdsOf } from './hierarchy.ts'
-import { walkForest } from './walk.ts'
+import { walkForest } from './model/walk.ts'
 
 /**
  * 关系种类。

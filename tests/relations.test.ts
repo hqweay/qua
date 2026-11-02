@@ -19,7 +19,7 @@ import {
   type Block,
 } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
-import { textRuns, type RefRun } from '../src/core/runs.ts'
+import { textRuns, type RefRun } from '../src/core/model/runs.ts'
 import { derivedSpecOf } from '../src/core/mount.ts'
 import { queryByIndex } from '../src/core/index-port.ts'
 

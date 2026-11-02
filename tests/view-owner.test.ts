@@ -25,7 +25,7 @@ import {
   type Block,
   type MountEntry,
 } from '../src/core/index.ts'
-import { textRuns } from '../src/core/runs.ts'
+import { textRuns } from '../src/core/model/runs.ts'
 
 const mk = (id: string, text: string, props?: Record<string, unknown>): Block => ({
   id,

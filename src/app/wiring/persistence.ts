@@ -7,7 +7,7 @@
 import { t } from '../../core/msg.ts'
 import type { FoldState } from '../../core/index.ts'
 import type { Op, Tx, Change } from '../../core/kb/types.ts'
-import type { BlockStore } from '../../core/store.ts'
+import type { BlockStore } from '../../core/model/store.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import { diff } from '../../core/kb/diff.ts'
 import type { DeviceState, DeviceStore, Workspace, WorkspaceStore } from '../../core/workspace.ts'

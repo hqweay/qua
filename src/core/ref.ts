@@ -17,7 +17,7 @@
  */
 import { t } from './msg.ts'
 import { displayTextOf } from './alias.ts'
-import { hasList, type Block } from './model.ts'
+import { hasList, type Block } from './model/model.ts'
 import { tagIdsOf } from './tags.ts'
 
 /** 解析结果：**显示名 ＋ 还能不能解析到**（`dangling` 不是错误，是状态） */

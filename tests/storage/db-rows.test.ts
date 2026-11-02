@@ -9,7 +9,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkBlock, type Block } from '../../src/core/model.ts'
+import { mkBlock, type Block } from '../../src/core/model/model.ts'
 import { WORKSPACE_VERSION, type Workspace } from '../../src/core/workspace.ts'
 import {
   positionsOf,
@@ -471,7 +471,7 @@ test('增量写：同批「整块写 ＋ 属性写」⇒ 属性写跳过（它�
    * 整块写读的是**事务后的模型**（最终值），属性增量写对这种块是重复动作，整个跳过。
    */
   const { MemoryKb } = await import('../../src/core/kb/memory.ts')
-  const { BlockStore } = await import('../../src/core/store.ts')
+  const { BlockStore } = await import('../../src/core/model/store.ts')
   const { createObjRecordInTx } = await import('../../src/core/obj.ts')
 
   const tag = mkBlock('玩具')

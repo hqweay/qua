@@ -15,7 +15,7 @@
  *
  * 上层**不该**再 import `localStorage`、也不该假定「写库是一次同步调用」。
  */
-import type { Block } from './model.ts'
+import type { Block } from './model/model.ts'
 
 export { DEFAULT_DOCK, DEFAULT_PREFS, normalizePrefs } from './storage/prefs.ts'
 export type { DockPrefs, DockSlotPrefs, Prefs, ThemeMode } from './storage/prefs.ts'

@@ -16,9 +16,9 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkBlock, writeBlockContent } from '../src/core/model.ts'
-import { textRuns } from '../src/core/runs.ts'
-import { BlockStore } from '../src/core/store.ts'
+import { mkBlock, writeBlockContent } from '../src/core/model/model.ts'
+import { textRuns } from '../src/core/model/runs.ts'
+import { BlockStore } from '../src/core/model/store.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 
 function fixture(): { kb: MemoryKb; store: BlockStore; ids: string[] } {

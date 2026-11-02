@@ -13,7 +13,7 @@
  *     收起外层时它会重新浮出来（一层层退回）；
  *   · **去重**：某个祖先覆盖了多个命中时，那些命中不再单列，否则同一块出现两遍。
  */
-import type { Block, FoldState } from './model.ts'
+import type { Block, FoldState } from './model/model.ts'
 
 export interface ContextBase {
   /** 最外层命中（已经去过重） */

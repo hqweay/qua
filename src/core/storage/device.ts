@@ -16,7 +16,7 @@
  *    适配器只认字节，不认识「这是库还是偏好」—— 所以这里**不碰 `localStorage`**，
  *    只把 JSON 交给端口（`arch-check [20]` 要求 `localStorage` 只出现在 `local-storage.ts`）。
  */
-import type { FoldState } from '../model.ts'
+import type { FoldState } from '../model/model.ts'
 import type { Change, CommitBatch, StoragePort } from './port.ts'
 import { normalizePrefs, type Prefs } from './prefs.ts'
 

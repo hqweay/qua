@@ -10,8 +10,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { FEED_SPEC, feedDays, findById, journalDate, journalDays, queryByIndex, rebuild } from '../src/core/index.ts'
-import type { Block } from '../src/core/model.ts'
-import { textRuns } from '../src/core/runs.ts'
+import type { Block } from '../src/core/model/model.ts'
+import { textRuns } from '../src/core/model/runs.ts'
 
 const j = (date: string, children: Block[] = []): Block => ({
   id: `j-${date}`,

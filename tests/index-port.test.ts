@@ -22,10 +22,10 @@ import {
   tagMemberIdsOf,
   type Index,
 } from '../src/core/index.ts'
-import type { Block } from '../src/core/model.ts'
-import { writeBlockContent } from '../src/core/model.ts'
-import { plainText, textRuns, type RefRun } from '../src/core/runs.ts'
-import { BlockStore } from '../src/core/store.ts'
+import type { Block } from '../src/core/model/model.ts'
+import { writeBlockContent } from '../src/core/model/model.ts'
+import { plainText, textRuns, type RefRun } from '../src/core/model/runs.ts'
+import { BlockStore } from '../src/core/model/store.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import type { Tx } from '../src/core/kb/types.ts'
 

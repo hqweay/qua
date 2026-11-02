@@ -12,7 +12,7 @@
  *    （`journal.ts` 与装载边界）；查询永不写库。
  */
 import { FEED_INITIAL } from './journal.ts'
-import type { Block } from './model.ts'
+import type { Block } from './model/model.ts'
 import { findById, runQuery, type QuerySpec } from './query.ts'
 
 /** 日记流的来源字面量：`_date` 降序（今日在顶）、只取**存在的**天、首屏 `FEED_INITIAL` 段 */

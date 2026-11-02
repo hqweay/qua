@@ -8,10 +8,10 @@
  * ⚠️ 分层：本文件在 `ui` 层，只依赖 core 的类型与函数，**不 import view/装配层**。
  */
 import { openPlaceOf, type Block, type CtxKeys, type FieldRow, type OpenPlace } from '../core/index.ts'
-import type { RunWithId } from '../core/runs.ts'
+import type { RunWithId } from '../core/model/runs.ts'
 import { resolveRef } from '../core/ref.ts'
 import { checkExternalUrl, rejectText } from '../core/link.ts'
-import { plainText } from '../core/runs.ts'
+import { plainText } from '../core/model/runs.ts'
 import { COMMANDS } from '../core/commands/index.ts'
 import { BINDINGS, keyLabel, keymapRows, referencedKeys } from '../core/bindings.ts'
 import { assetMetaOf, assetViewOf } from '../view/asset-views.ts'

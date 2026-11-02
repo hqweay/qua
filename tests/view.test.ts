@@ -48,9 +48,9 @@ import {
   type Block,
   type ViewRecord,
 } from '../src/core/index.ts'
-import { textRuns } from '../src/core/runs.ts'
+import { textRuns } from '../src/core/model/runs.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
-import { BlockStore } from '../src/core/store.ts'
+import { BlockStore } from '../src/core/model/store.ts'
 import { parseWorkspace, WORKSPACE_VERSION } from '../src/core/storage/shape.ts'
 
 /* ------------------------------------------------------------ 夹具 */

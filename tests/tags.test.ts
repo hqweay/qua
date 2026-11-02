@@ -14,8 +14,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
-import { plainText, textRuns } from '../src/core/runs.ts'
-import { writeBlockContent } from '../src/core/model.ts'
+import { plainText, textRuns } from '../src/core/model/runs.ts'
+import { writeBlockContent } from '../src/core/model/model.ts'
 import {
   addTagId,
   allTags,
@@ -190,7 +190,7 @@ test('⑥d edgeSourceIds：引用与**行内标签**都算指向边（改名要�
     { id: 'a', content: [ { id: 'e1', t: 'ref' as const, to: 't1', label: 'x' } ], children: [] },
     { id: 'b', content: [ { id: 'e2', t: 'asset' as const, asset: 'h' } ], children: [] },
     { id: 'c', content: [ ...textRuns('前'), { id: 'e3', t: 'ref' as const, to: 't2', flavor: '#' as const, label: '设计' } ], children: [] },
-  ] as unknown as import('../src/core/model.ts').Block[]
+  ] as unknown as import('../src/core/model/model.ts').Block[]
   assert.deepEqual([...edgeSourceIds(blocks, 't1')], ['a'])
   assert.deepEqual([...edgeSourceIds(blocks, 't2')], ['c'], '行内标签的显示名也是解析出来的 ⇒ 改名要重画')
   assert.deepEqual([...edgeSourceIds(blocks, 'p.png')], [], '图片不指块，天然不是指向边')
@@ -207,7 +207,7 @@ test('⑥e inlineTagIdsOf：按出现位置排序、同块去重、只认带 # �
       { id: 't3', t: 'ref' as const, to: 'tag-a', flavor: '#' as const, label: '甲' },
     ],
     children: [],
-  } as unknown as import('../src/core/model.ts').Block
+  } as unknown as import('../src/core/model/model.ts').Block
   assert.deepEqual(inlineTagIdsOf(b), ['tag-a', 'tag-b'], '按位置排；同名的第二枚不重复；普通引用不算露面')
 })
 

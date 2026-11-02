@@ -15,14 +15,14 @@
  * ⚠️ 行／记录层与「怎么画」分开：这里只回答「有哪些记录、按什么序」，
  *    `ui/view-*.ts` 才决定画成表还是列表。
  */
-import { ACTIVE_VIEW_PROP, VIEWS_PROP, isDeleted, isQueryBlock, liveChildren, type Block, type BlockProps } from './model.ts'
+import { ACTIVE_VIEW_PROP, VIEWS_PROP, isDeleted, isQueryBlock, liveChildren, type Block, type BlockProps } from './model/model.ts'
 import { displayNameOf } from './alias.ts'
 import { OUTLINE_VIEW, readEmbed } from './embed.ts'
 import { t } from './msg.ts'
-import { uuidv7Hex } from './ids.ts'
+import { uuidv7Hex } from './model/ids.ts'
 import type { KbClient } from './kb/types.ts'
 import { declaredFieldIds, ownFieldIds } from './props.ts'
-import { plainText } from './runs.ts'
+import { plainText } from './model/runs.ts'
 import type { QuerySpec, SortKey } from './query.ts'
 
 /* ------------------------------------------------------------ 类型 */

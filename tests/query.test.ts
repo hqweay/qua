@@ -39,7 +39,7 @@ import {
   type QuerySpec,
 } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
-import { plainText, textRuns } from '../src/core/runs.ts'
+import { plainText, textRuns } from '../src/core/model/runs.ts'
 import { journalDateLabel } from '../src/core/journal.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({

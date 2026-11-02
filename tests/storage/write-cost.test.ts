@@ -18,7 +18,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkBlock } from '../../src/core/model.ts'
+import { mkBlock } from '../../src/core/model/model.ts'
 import { WORKSPACE_VERSION, type Workspace } from '../../src/core/workspace.ts'
 import { createWorkspaceStore } from '../../src/core/storage/index.ts'
 import { rowWritesFor } from '../../src/core/storage/db-rows.ts'
@@ -97,9 +97,9 @@ test('门面：整份替换的行写入覆盖全部块（换库/撤销之后盘�
  * `workspaceToRowWrites` 把**整库**每一块都写一遍，行数随体量线性增长。
  */
 test('撤销：小库与大库的落盘行数**相同**（撤销不再整库重写）', async () => {
-  const { mkBlock, writeBlockContent } = await import('../../src/core/model.ts')
-  const { textRuns } = await import('../../src/core/runs.ts')
-  const { BlockStore } = await import('../../src/core/store.ts')
+  const { mkBlock, writeBlockContent } = await import('../../src/core/model/model.ts')
+  const { textRuns } = await import('../../src/core/model/runs.ts')
+  const { BlockStore } = await import('../../src/core/model/store.ts')
   const { MemoryKb } = await import('../../src/core/kb/memory.ts')
 
   /** 造一个 n 块的库，改中间一块的正文，然后撤销 —— 返回这批 op 的行写入条数 */

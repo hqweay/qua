@@ -7,8 +7,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { expandContexts, unfoldForContext, type ContextBase } from '../src/core/context-expand.ts'
-import { findPath } from '../src/core/tree.ts'
-import type { Block } from '../src/core/model.ts'
+import { findPath } from '../src/core/model/tree.ts'
+import type { Block } from '../src/core/model/model.ts'
 
 const mk = (id: string, children: Block[] = []): Block => ({ id, content: [], children, created: 0, modified: 0 })
 

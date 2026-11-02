@@ -12,10 +12,10 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkBlock, writeBlockContent } from '../src/core/model.ts'
-import { textRuns } from '../src/core/runs.ts'
+import { mkBlock, writeBlockContent } from '../src/core/model/model.ts'
+import { textRuns } from '../src/core/model/runs.ts'
 import { diff, forestFingerprint, replay } from '../src/core/kb/diff.ts'
-import { BlockStore } from '../src/core/store.ts'
+import { BlockStore } from '../src/core/model/store.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import type { Op } from '../src/core/kb/types.ts'
 

@@ -18,7 +18,7 @@ import type { Block, BlockStore, OpenPlace, ViewColumn, ViewConfig, ViewRecord }
 import { openPlaceOf } from '../core/index.ts'
 import { choicesOf, clockLabel, displayNameOf, hasValue, liveChildren, propDisplayLabels, propKindOf, propLabel } from '../core/index.ts'
 import { choiceCells, ChoiceLookupIndex, type ChoiceLookup, type FieldRow } from '../core/props.ts'
-import { plainText } from '../core/runs.ts'
+import { plainText } from '../core/model/runs.ts'
 import { t } from '../core/msg.ts'
 import { makeTagChipEl } from '../view/block-dom.ts'
 import type { BlockCell } from './block-cell.ts'

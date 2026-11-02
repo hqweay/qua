@@ -21,8 +21,8 @@
  *
  * ⚠️ 这层零 DOM：`freezeResult` 是纯读（走读门面），好让「冻结」这件事能被单测。
  */
-import { mkBlock, type Block } from './model.ts'
-import { textRuns } from './runs.ts'
+import { mkBlock, type Block } from './model/model.ts'
+import { textRuns } from './model/runs.ts'
 import { contextKey, isQuerySpec, type QueryHit, type QueryContext, type QuerySpec } from './query.ts'
 import { canonicalViews, type ViewConfig } from './view.ts'
 import { withBlockOwnerData } from './view-owner.ts'

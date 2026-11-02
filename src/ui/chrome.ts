@@ -17,7 +17,7 @@
  *   构造参数也随之为空。
  */
 import { blockLabel, hasLiveChildren, openPlaceOf, type Block, type OpenPlace } from '../core/index.ts'
-import { plainText } from '../core/runs.ts'
+import { plainText } from '../core/model/runs.ts'
 import { t } from '../core/msg.ts'
 
 export interface Chrome {

@@ -19,7 +19,7 @@
  *
  * 「源」＝ 指针指向的那一块；「宿主」＝ 这一次露面的那一块（它有自己的位置）。
  */
-import type { Block } from './model.ts'
+import type { Block } from './model/model.ts'
 
 /** 类型 id（`TYPE_DECLS` 里一行；`core/*` 保留给系统类型） */
 export const EMBED_TYPE = 'core/view-embed'

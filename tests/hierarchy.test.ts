@@ -33,8 +33,8 @@ import {
   type ForestWalker,
 } from '../src/core/index.ts'
 import { membersOf } from '../src/core/tag-tree.ts'
-import { walkForest } from '../src/core/walk.ts'
-import { DELETED_AT_PROP } from '../src/core/model.ts'
+import { walkForest } from '../src/core/model/walk.ts'
+import { DELETED_AT_PROP } from '../src/core/model/model.ts'
 
 /** 给块打一个标签（归属在块上：`props._tags`） */
 const tagBlock = (block: Block, tagId: string): void => {

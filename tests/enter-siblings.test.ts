@@ -15,10 +15,10 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { enterKind, flatten, insertFirstChild, insertSiblingAfter, locate, outdentBlock, splitBlockBefore, splitBlockIntoFirstChild } from '../src/core/tree.ts'
-import { writeBlockContent } from '../src/core/model.ts'
-import type { Block, Doc } from '../src/core/model.ts'
-import { plainText, textRuns } from '../src/core/runs.ts'
+import { enterKind, flatten, insertFirstChild, insertSiblingAfter, locate, outdentBlock, splitBlockBefore, splitBlockIntoFirstChild } from '../src/core/model/tree.ts'
+import { writeBlockContent } from '../src/core/model/model.ts'
+import type { Block, Doc } from '../src/core/model/model.ts'
+import { plainText, textRuns } from '../src/core/model/runs.ts'
 
 const mk = (id: string, text = '', children: Block[] = []): Block => ({ id, content: textRuns(text), children })
 

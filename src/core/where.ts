@@ -8,7 +8,7 @@
  * ⚠️ 这句话有两处要拼（编辑边界撞名、别名编辑器撞名）。两处各写一份，
  *    措辞就会分叉；这里只留一份，调用方只负责套模板。
  */
-import { hasList, type Block } from './model.ts'
+import { hasList, type Block } from './model/model.ts'
 import { t } from './msg.ts'
 
 export function whereOf(b: Block): string {

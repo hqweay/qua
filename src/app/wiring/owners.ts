@@ -37,7 +37,7 @@ import {
   type ViewOwnerStore,
 } from '../../core/view-owner.ts'
 import { EMBED_PROP, canonicalViewRef } from '../../core/embed.ts'
-import type { Block } from '../../core/model.ts'
+import type { Block } from '../../core/model/model.ts'
 import type { Prefs } from '../../core/storage/prefs.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { Tx } from '../../core/kb/types.ts'

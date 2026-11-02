@@ -27,9 +27,9 @@ import {
   runQuery,
   sortRecords,
 } from '../src/core/index.ts'
-import { plainText, textRuns } from '../src/core/runs.ts'
+import { plainText, textRuns } from '../src/core/model/runs.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
-import { BlockStore } from '../src/core/store.ts'
+import { BlockStore } from '../src/core/model/store.ts'
 import { propsCommands } from '../src/app/commands/props.ts'
 import type { PropsDeps } from '../src/app/commands/types.ts'
 

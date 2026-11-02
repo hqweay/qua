@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { toggleChildrenCollapsed, toggleCollapsed, visibleRows } from '../src/core/tree.ts'
-import type { Block, Doc } from '../src/core/model.ts'
+import { toggleChildrenCollapsed, toggleCollapsed, visibleRows } from '../src/core/model/tree.ts'
+import type { Block, Doc } from '../src/core/model/model.ts'
 
 const mk = (id: string, text = '', children: Block[] = []): Block => ({ id, text, children })
 
