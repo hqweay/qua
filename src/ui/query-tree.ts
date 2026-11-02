@@ -32,7 +32,6 @@ import {
   type TreeRowKind,
 } from '../core/index.ts'
 import { t, type MsgId } from '../core/msg.ts'
-import { renderIcon } from '../view/icons.ts'
 
 export interface QueryTreeDeps {
   /** 当前条件（现读：可能被命令／撤销改过） */
@@ -299,6 +298,15 @@ export class QueryTree {
     notLabel.append(not, notText)
 
     head.append(mode, notLabel)
+    /**
+     * **空条件不摆组合方式**：一条条件都没有时，「且／或」与「非」是在给不存在的
+     * 子项选关系，读起来像一句没说完的话。根组空的时候只留空态与「加一条」。
+     * 子组即使空也保留组头（它是用户刚建出来的东西，还要能删／设关系）。
+     */
+    if (depth === 0 && group.items.length === 0) {
+      head.hidden = true
+      el.dataset.qtEmptyRoot = '1'
+    }
     if (parent) {
       const del = buttonEl('×', 'qt-del', 'del')
       del.title = t('ui.query.builder.removeRow')
@@ -389,9 +397,6 @@ export class QueryTree {
     const wrap = document.createElement('div')
     wrap.className = 'qt-empty'
     wrap.dataset.qt = 'empty'
-    const icon = document.createElement('span')
-    icon.className = 'qt-empty-icon'
-    renderIcon(icon, 'lucide:list-filter', 'square')
     const title = document.createElement('strong')
     title.className = 'qt-empty-title'
     title.textContent = t('ui.query.tree.emptyTitle')
@@ -409,7 +414,7 @@ export class QueryTree {
       this.apply()
       this.paint()
     })
-    wrap.append(icon, title, hint, action)
+    wrap.append(title, hint, action)
     return wrap
   }
 
@@ -795,9 +800,16 @@ export class QueryTree {
     const row = document.createElement('div')
     row.className = 'qt-opts'
 
+    const labelOf = (text: string): HTMLSpanElement => {
+      const s = document.createElement('span')
+      s.className = 'qt-opt-label'
+      s.textContent = text
+      return s
+    }
+
     const scope = document.createElement('label')
     scope.className = 'qt-opt'
-    scope.append(document.createTextNode(t('ui.query.builder.scope')))
+    scope.append(labelOf(t('ui.query.builder.scope')))
     scope.append(
       selectEl(
         [
@@ -815,13 +827,14 @@ export class QueryTree {
     row.append(scope)
 
     const limit = document.createElement('label')
-    limit.className = 'qt-opt'
-    limit.append(document.createTextNode(t('ui.query.builder.limit')))
+    limit.className = 'qt-opt qt-opt--limit'
+    limit.append(labelOf(t('ui.query.builder.limit')))
     const limitInput = document.createElement('input')
     limitInput.type = 'number'
     limitInput.min = '0'
     limitInput.className = 'qt-limit ui-input'
     limitInput.dataset.qt = 'limit'
+    limitInput.placeholder = t('ui.query.builder.noLimit')
     limitInput.value = draft.limit === undefined ? '' : String(draft.limit)
     limitInput.addEventListener('input', () => {
       const n = Number(limitInput.value)
@@ -832,8 +845,8 @@ export class QueryTree {
     row.append(limit)
 
     const sort = document.createElement('label')
-    sort.className = 'qt-opt'
-    sort.append(document.createTextNode(t('ui.query.builder.sort')))
+    sort.className = 'qt-opt qt-opt--sort'
+    sort.append(labelOf(t('ui.query.builder.sort')))
     const fields = this.deps.fields()
     const col = selectEl(
       [{ value: '', label: t('ui.query.builder.sortNone') }, ...fields.map((f) => ({ value: f.id, label: f.label }))],
@@ -841,6 +854,8 @@ export class QueryTree {
       (next) => {
         draft.sort = next === '' ? undefined : { by: next, dir: draft.sort?.dir ?? 'asc' }
         if (next === '') delete draft.sort
+        // 没选排序列时方向没有意义；选了之后当场解锁（这个控件不重画整棵树）
+        dir.disabled = draft.sort === undefined
       },
       'qt-sort-col',
       'sort',
@@ -858,7 +873,11 @@ export class QueryTree {
       'qt-sort-dir',
       'sort-dir',
     )
-    sort.append(col, dir)
+    dir.disabled = draft.sort === undefined
+    const controls = document.createElement('span')
+    controls.className = 'qt-opt-controls'
+    controls.append(col, dir)
+    sort.append(controls)
     row.append(sort)
     return row
   }
