@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type CtxKeys, type TriggerChar, trashOf } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type CtxKeys, type TriggerChar, trashOf } from './core/index.ts'
 import { plainText } from './core/model/runs.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
 import { BlockStore } from './core/model/store.ts'
@@ -44,6 +44,7 @@ import { setupDocks } from './app/wiring/docks.ts'
 import { setupCardMenus } from './app/wiring/dock-menus.ts'
 import { setupPanels } from './app/wiring/panels.ts'
 import { setupAtomPopovers } from './app/wiring/atom-popovers.ts'
+import { setupFeed } from './app/wiring/feed.ts'
 import { setupOwners } from './app/wiring/owners.ts'
 import { QueryTree } from './ui/query/query-tree.ts'
 import { setupChrome } from './app/wiring/chrome.ts'
@@ -2438,67 +2439,13 @@ if (prefs().virtualize) mainEd.setVirtualize(true, prefs().radius)
 if (prefs().badgeOpen) badge.toggle(true)
 badge.update()
 
-/* ------------------------------------------------- 日记流下滚加载（P2） */
+/* ------------------------------------------------- 日记流下滚加载（wiring/feed） */
 
-/**
- * 滚到接近底部 ⇒ 追加 `FEED_STEP` 天**存在的**更早日记；不造空天，上限 `FEED_MAX`。
- * 只对**日记流**生效（roots 全是 journal 且 >1）；单日页不加载。
- *
- * ⚠️ 视图状态（加载到第几屏）不入库；这里用「已加载的 root id 集合」判断，避免索引漂移。
- * ⚠️ `appendRoots` 会重建 DOM；调用期间用 `appending` 挡住重入的 scroll 事件。
- */
-function appendMoreFeed(): boolean {
-  const roots = mainEd.doc.roots
-  /**
-   * ⚠️ **组合期不追加**（与 `appendRoots` 的守卫同一条理由）：这里必须在 `materializeEditableRoots`
-   *    **之前**返回——那一步会物化根并改模型，而渲染会被 `appendRoots` 推迟，两者就分叉了。
-   *    推迟到组合结束：用户下一次滚到底会再触发一次。
-   */
-  if (mainEd.probe.isComposing) return false
-  // 增量加载只在单列流成立：横排／网格的段数由打开它的入口定死，「往下滚」不是「要更旧的天」
-  if (mainEd.layout !== 'column') return false
-  if (roots.length <= 1 || !roots.every((r) => isJournal(r))) return false
-  const active = activeBlock()
-  if (!isJournal(active)) return false
-  if (roots.length >= FEED_MAX) return false
-  const loaded = new Set(roots.map((r) => r.id))
-  const limit = Math.min(roots.length + FEED_STEP, FEED_MAX)
-  const more = feedDays(ws.blocks, limit)
-    .filter((d) => !loaded.has(d.id))
-    .slice(0, limit - roots.length)
-  if (more.length === 0) return false
-  materializeEditableRoots(more)
-  mainEd.appendRoots(rootsForMany(more))
-  return true
-}
-
-{
-  let appending = false
-  chrome.blankAreaEl.addEventListener(
-    'scroll',
-    () => {
-      if (appending) return
-      const el = chrome.blankAreaEl
-      if (el.scrollTop + el.clientHeight < el.scrollHeight - 120) return
-      appending = true
-      try {
-        appendMoreFeed()
-      } finally {
-        appending = false
-      }
-    },
-    { passive: true },
-  )
-}
-
-markBooted()
-
-// 首屏填满：如果 3 天还撑不满视口（短日记），补到能滚为止 —— 否则「下滚加载」没有触发条件。
-// 教训：初始只装 1 条连第一屏都撑不满，用户不会去「加载更多」。
-requestAnimationFrame(() => {
-  for (let i = 0; i < 6; i++) {
-    const el = chrome.blankAreaEl
-    if (el.scrollHeight > el.clientHeight + 8) break
-    if (!appendMoreFeed()) break
-  }
+setupFeed({
+  blankAreaEl: chrome.blankAreaEl,
+  markBooted,
+  getMainEd: () => mainEd,
+  getWs: () => ws,
+  activeBlock,
+  materialize: materializeEditableRoots,
 })
