@@ -19,7 +19,7 @@
 import { displayNameOf, hasList, isJournal, type Block } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { App } from '../../core/infra/ports.ts'
-import type { Row } from '../../ui/layers.ts'
+import type { Row } from '../../ui/overlay/layers.ts'
 import type { PageDeps } from './types.ts'
 
 export function moveCommands(d: PageDeps): Pick<App, 'showMovePicker' | 'moveBlockTo'> {

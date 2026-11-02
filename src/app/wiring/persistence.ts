@@ -11,8 +11,8 @@ import type { BlockStore } from '../../core/model/store.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import { diff } from '../../core/kb/diff.ts'
 import type { DeviceState, DeviceStore, Workspace, WorkspaceStore } from '../../core/infra/workspace.ts'
-import type { Layers } from '../../ui/layers.ts'
-import type { Chrome } from '../../ui/chrome.ts'
+import type { Layers } from '../../ui/overlay/layers.ts'
+import type { Chrome } from '../../ui/chrome/chrome.ts'
 import type { BlockEditor } from '../../view/editor.ts'
 
 export type PersistenceDeps = {

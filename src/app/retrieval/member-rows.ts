@@ -22,7 +22,7 @@ import {
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { Block } from '../../core/index.ts'
-import type { Row } from '../../ui/layers.ts'
+import type { Row } from '../../ui/overlay/layers.ts'
 
 /** 实例／成员一栏的上限：不设的话浮层永远滚不到底（与第一段同一个数） */
 export const INSTANCE_CAP = 20

@@ -958,7 +958,7 @@ function commandDecls() {
     'src/core/query/query.ts',
     'src/core/query/query-view.ts',
     'src/core/query/query-tree.ts',
-    'src/ui/query-tree.ts',
+    'src/ui/query/query-tree.ts',
   ])
   const hits = []
   for (const f of srcFiles) {
@@ -1565,7 +1565,7 @@ function commandDecls() {
    */
   const hits = []
   for (const [file, needle] of [
-    ['src/ui/properties.ts', 'ui.props.pageFieldsTitle'],
+    ['src/ui/block-ui/properties.ts', 'ui.props.pageFieldsTitle'],
     ['src/core/props/props.ts', 'page'],
   ]) {
     const f = join(ROOT, file)
@@ -1593,7 +1593,7 @@ function commandDecls() {
     id: 35,
     title: '页的「字段声明」入口不存在（能写没人读的值不许留着）',
     method: '文本查 `ui/properties.ts` 的页版标题、`core/props/props.ts` 的 `declareField` 里是否还有 page 分支',
-    scope: 'src/ui/properties.ts · src/core/props/props.ts',
+    scope: 'src/ui/block-ui/properties.ts · src/core/props/props.ts',
     whitelist: '无 —— 页的子块不会继承声明，所以那一格不该可写',
     hits: hits.length,
     detail: hits,
