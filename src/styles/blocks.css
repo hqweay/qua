@@ -584,12 +584,23 @@
 }
 /*
   日记流：多天同屏时，每一天是一段，日期行是段头。
-  分割线画在**段**的深度 0 行上（`.sec` 包裹后行不再是容器的直接子元素，
-  `:first-child` 的旧判据失效）；只 column（单列流）画——row/grid 下段是列，
-  列头再画一条线是重复表达。只用 border-top（不写 padding/margin）——
-  不破坏「间距所有权归容器」。
+  只 column（单列流）给段盒——row/grid 下段已经是列，列间由容器的 gap 分开，
+  再画一条线就是重复表达。
+
+  ⚠️ **段的呼吸写在段（`.sec`）上，不写在块上**：块的 padding-block／margin 必须
+     为 0（间距所有权归容器）。`.sec` 缺省是 `display: contents`（零几何影响），
+     这里只把**日记段**变成真实盒子，其它段仍不占布局。
+  ⚠️ 段首留白是「一天」的边界，不是块间距：日期行离上一天的挂载区太近时，
+     两天的内容会读成同一段。线画在段顶，留白在线下——日期行因此仍贴着
+     自己那一天的内容，而不是飘在两段中间。
 */
-[data-layout='column'] .sec:not(:first-child) > .blk[data-depth='0'][data-role~='journal'] {
+#editor[data-layout='column'] .sec:has(> .blk[data-depth='0'][data-role~='journal']) {
+  display: block;
+}
+#editor[data-layout='column']
+  .sec:has(> .blk[data-depth='0'][data-role~='journal']):not(:first-child) {
+  margin-top: var(--ui-gap-6);
+  padding-top: var(--ui-gap-4);
   border-top: 1px solid var(--ui-border-subtle);
 }
 .blk.drag-src {
@@ -975,10 +986,19 @@
   min-height: 0;
   height: auto;
 }
+/*
+  **内联体是正文里的一块面板**，不是正文的续行：查询结果与手写正文同字号、同缩进、
+  同一条左边缘时，读者会把结果读成「这块自己的内容」。抬一层底色 ＋ 圆角 ＋ 边线，
+  让它和上面那一行（查询块本身）分成「问题」与「答案」两层。
+  ⚠️ 高度仍是「内容高、封顶一档」：内边距算在盒子内（全局 border-box），
+     `.queryview-body` 吃掉剩余高度并自己滚，不改变 `VIEW_BODY_H` 的口径。
+*/
 .queryview[data-surface='inline'] {
   margin-top: 0;
-  padding-top: 0;
-  border-top: 0;
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  background: var(--ui-surface-sunken);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
   display: flex;
   flex-direction: column;
 }
@@ -994,11 +1014,17 @@
 
 /* ---------------------------------------------------------- 挂载区（块底）
    一条 tab 条 ＋ 一个 body：箱子是块的 chrome，列表是共享 store 的活块（可原地编辑）。
-   与反链 footer 同一套分家方式（border-top + gap），不写块级 padding/margin。 */
+
+   **它是一块面板，不是正文的一行**：正文可以一直往下读，挂载区是「这一屏/这一天
+   下面另开的一栏」。所以它用底色 ＋ 圆角 ＋ 边线从正文里浮出来——只靠一条 border-top
+   时，读者分不清哪一行还是正文、哪一行已经是面板的身子了。
+   ⚠️ 间距仍归容器：块自己的 padding/margin 不变，这里是面板自己的内边距。 */
 .mount {
-  margin-top: var(--ui-gap-4);
-  padding-top: var(--ui-gap-2);
-  border-top: 1px solid var(--ui-border-subtle);
+  margin-top: var(--ui-gap-5);
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  background: var(--ui-surface-sunken);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
   font-size: var(--ui-fs-sm);
 }
 .mount[hidden] {
@@ -1024,10 +1050,12 @@
   color: var(--ui-text-secondary);
 }
 .mount-tabwrap:hover {
-  background: var(--ui-surface-sunken);
+  /* 悬停是中性反馈，用半透明覆盖：面板自身有底色，再铺一层同色就看不见了 */
+  background: var(--ui-bg-hover);
 }
 .mount-tabwrap[data-active='1'] {
-  background: var(--ui-surface-sunken);
+  /* 激活＝「我圈定了这一栏」，与页列表／中心 tab 用同一个语义色，不靠同色深浅 */
+  background: var(--ui-accent-soft);
   color: var(--ui-text);
 }
 .mount-tab {
@@ -1119,11 +1147,11 @@
 }
 .mount-derived-kind:hover {
   color: var(--ui-text);
-  background: var(--ui-surface-sunken);
+  background: var(--ui-bg-hover);
 }
 .mount-derived-kind[data-active='1'] {
   color: var(--ui-text);
-  background: var(--ui-surface-sunken);
+  background: var(--ui-accent-soft);
 }
 .mount-derived-views {
   display: flex;
@@ -1144,11 +1172,11 @@
 .mount-derived-view:hover,
 .mount-derived-more:hover {
   color: var(--ui-text);
-  background: var(--ui-surface-sunken);
+  background: var(--ui-bg-hover);
 }
 .mount-derived-view[data-active='1'] {
   color: var(--ui-text);
-  background: var(--ui-surface-sunken);
+  background: var(--ui-accent-soft);
 }
 .mount-editor {
   min-height: var(--ui-line-h);
