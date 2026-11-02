@@ -70,13 +70,12 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
     return app.createQuery(kind, name, spec, S(a.parentId) || undefined) !== ''
   },
   /**
-   * 在当前块里建查询块（结构写交给门面），建完**当场打开构建器**：
-   * 空条件的查询不配一下就没有意义，让用户再点一次等于多一道无收益的门。
+   * 在当前块里建查询块（结构写交给门面）。新块当场出现条件条——
+   * 内联体默认收起条件树（不撑爆结果区），点那一条就地在抬头下展开。
    */
   'core.query/insert': (a, app) => {
     const id = app.insertQueryBlock(S(a.blockId) || undefined)
     if (id === '') return false
-    app.openQueryBuilder({ kind: 'block', blockId: id })
     return true
   },
   'core.view/menu': (a, app) => {

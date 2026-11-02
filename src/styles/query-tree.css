@@ -1,0 +1,319 @@
+/* ---------------------------------------------------------------- 条件树
+   就地展开的「组 ＋ 叶子行」：缩进与竖线复用块编辑器的 token，
+   所以它看起来是正文的一部分，不是嵌进来的一张表单。 */
+.queryview-tree {
+  border-top: 1px solid var(--ui-border-subtle);
+  padding: var(--ui-gap-1) var(--ui-gap-3) var(--ui-gap-2);
+}
+
+.qt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+}
+
+.qt-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  min-height: var(--ui-row-h);
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+.qt-title {
+  color: var(--ui-text-secondary);
+}
+.qt-count {
+  font-variant-numeric: tabular-nums;
+}
+.qt-close {
+  margin-left: auto;
+  padding: 0 var(--ui-gap-1);
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+  cursor: pointer;
+}
+.qt-close:hover {
+  color: var(--ui-text);
+}
+
+.qt-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.qt-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  min-height: var(--ui-row-h);
+  padding-left: var(--ui-gap-2);
+  font-size: var(--ui-fs-xs);
+}
+/* 组头只放短词：且／或 ＋ 非。长句在树上重复 N 次就是噪声 */
+.qt-mode {
+  appearance: none;
+  border: 0;
+  border-radius: var(--ui-radius-sm);
+  background: transparent;
+  color: var(--ui-accent);
+  font: inherit;
+  padding: 0 var(--ui-gap-1);
+  cursor: pointer;
+}
+.qt-mode:hover {
+  background: var(--ui-surface-raised);
+}
+.qt-not {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-xs);
+  cursor: pointer;
+}
+.qt-not input {
+  margin: 0;
+}
+
+/* 每级缩进 = --ui-indent；竖线用伪元素画，不占布局（否则缩进会多 1px） */
+.qt-children {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: var(--ui-indent);
+  min-width: 0;
+}
+.qt-children::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 2px;
+  bottom: 2px;
+  width: 1px;
+  background: var(--ui-rail);
+}
+
+.qt-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  min-height: var(--ui-row-h);
+  padding-left: var(--ui-gap-2);
+  min-width: 0;
+}
+.qt-row[data-qt-incomplete='1'] {
+  outline: 1px dashed var(--ui-warn);
+  outline-offset: -1px;
+  border-radius: var(--ui-radius-sm);
+}
+.qt-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+}
+.qt-hash {
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-sm);
+}
+
+/* 叶子行控件按内容宽，不铺满 —— 一行条件要读成一句话，铺满就变表单 */
+.qt-value,
+.qt-kind,
+.qt-field,
+.qt-op,
+.qt-scope,
+.qt-limit,
+.qt-sort-col,
+.qt-sort-dir {
+  max-width: 16rem;
+  height: calc(var(--ui-row-h) - 4px);
+  padding: 0 var(--ui-gap-1);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  font-size: var(--ui-fs-sm);
+}
+.qt-value.ui-input {
+  width: auto;
+}
+.qt-kind,
+.qt-field,
+.qt-op,
+.qt-scope {
+  color: var(--ui-text-secondary);
+}
+.qt-ref {
+  cursor: pointer;
+  text-align: left;
+}
+.qt-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-sm);
+  cursor: pointer;
+}
+.qt-switch input {
+  margin: 0;
+}
+.qt-hint {
+  flex-basis: 100%;
+  padding-left: var(--ui-gap-1);
+  color: var(--ui-warn);
+  font-size: var(--ui-fs-xs);
+}
+.qt-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--ui-gap-2);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-surface-sunken);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+
+.qt-del {
+  padding: 0 var(--ui-gap-1);
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.qt-del:hover {
+  color: var(--ui-danger);
+}
+
+.qt-add {
+  align-self: flex-start;
+  padding: 0 var(--ui-gap-1);
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+  cursor: pointer;
+}
+.qt-add:hover {
+  color: var(--ui-accent);
+}
+
+/* 加一条：分「再组合 / 换一类」两段，不混成一长串 */
+.qt-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--ui-gap-1) 0 var(--ui-gap-1) var(--ui-gap-2);
+  padding: var(--ui-gap-2);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface);
+  max-width: 30rem;
+}
+.qt-picker-title {
+  margin-top: var(--ui-gap-1);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+.qt-pick {
+  padding: 2px var(--ui-gap-2);
+  border: 0;
+  border-radius: var(--ui-radius-sm);
+  background: transparent;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.qt-pick:hover {
+  background: var(--ui-surface-raised);
+  color: var(--ui-text);
+}
+
+.qt-opts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-3);
+  padding: var(--ui-gap-2) var(--ui-gap-2) 0;
+  border-top: 1px solid var(--ui-border-subtle);
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-xs);
+}
+.qt-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+}
+.qt-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--ui-gap-1);
+}
+.qt-apply[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 空态：图标 40px ＋ 标题 ＋ 一句 ＋ 一个主动作（不只一句「没有结果」） */
+.qt-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ui-gap-1);
+  padding: var(--ui-gap-3) var(--ui-gap-2);
+  color: var(--ui-text-tertiary);
+}
+.qt-empty-icon svg {
+  width: 40px;
+  height: 40px;
+}
+.qt-empty-title {
+  color: var(--ui-text);
+  font-size: var(--ui-fs-sm);
+  font-weight: 500;
+}
+.qt-empty-hint {
+  font-size: var(--ui-fs-xs);
+}
+.qt-empty-action {
+  margin-top: var(--ui-gap-1);
+}
+
+/* 拆不动的形状：只读 JSON ＋ 一句提示（不静默吞掉编辑） */
+.qt-jsononly {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+}
+.qt-jsonhint {
+  margin: 0;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+.qt-json {
+  max-height: 18rem;
+  margin: 0;
+  padding: var(--ui-gap-2);
+  overflow: auto;
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+  color: var(--ui-text-secondary);
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-fs-xs);
+  white-space: pre-wrap;
+}
+
+/* 弹层里同一棵树：给它一个可读的宽度（内联时跟容器走） */
+.popover.qt {
+  min-width: 24rem;
+  max-width: 34rem;
+}

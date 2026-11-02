@@ -601,10 +601,10 @@ export function setupPanels(deps: PanelsDeps) {
         const b = kb.get(id)
         return b ? displayNameOf(b) : id.slice(-6)
       },
-      /** 构建器的字段下拉：属性定义 ＋ 显示名（同名带来源），一次算好 */
+      /** 条件树的字段下拉：属性定义 ＋ 显示名（同名带来源）＋ kind（值控件按 kind 分派） */
       fields: () => {
         const labels = propDisplayLabels(kb.roots())
-        return kb.propDefs().map((d) => ({ id: d.id, label: labels.get(d.id) ?? propLabel(d) }))
+        return kb.propDefs().map((d) => ({ id: d.id, label: labels.get(d.id) ?? propLabel(d), kind: propKindOf(d) }))
       },
       /**
        * 看板分组列的**选项**：`select` 的选项是定义块的直接子块（顺序＝children 顺序）。
@@ -893,21 +893,15 @@ export function setupPanels(deps: PanelsDeps) {
         if (row.id === 'mount/local') openLocalComposer(host)
         else if (row.id === 'mount/linked') openLinkedPicker(host)
         else {
-          // 查询页是**内容对象**：建完就打开它，再把构建器指到它身上
+          // 查询页是**内容对象**：建完就打开它，条件树在页面里就地展开
           void deps.getRegistry().invoke('core.query/create', { kind: 'page', name: t('ui.query.untitled') }, 'mount')
-          const page = deps.getWs().activeId
-          if (page !== '') {
-            void deps
-              .getRegistry()
-              .invoke('core.query/open-builder', { owner: { kind: 'block', blockId: page } }, 'mount')
-          }
         }
       },
     })
   }
 
   /**
-   * **新建查询（local tab）**：建一栏空条件的查询，然后**直接打开构建器**。
+   * **新建查询（local tab）**：建一栏空条件的查询；条件条在栏里，点一下就地展开。
    *
    * 为什么不是先弹一个「名字 ＋ JSON」的表单：条件是这个功能的主语，
    * 让用户在第一眼就看见「条件是什么」比让他先写一段 JSON 更接近这件事本身。
@@ -930,9 +924,6 @@ export function setupPanels(deps: PanelsDeps) {
     if (!added) return
     // 新栏当场切过去：建了不看，「点了没生效」的另一种长相（激活的是这一栏自己的表格视图）
     mountInstances.get(host.id)?.area.activateTab(added.id)
-    void deps
-      .getRegistry()
-      .invoke('core.query/open-builder', { owner: { kind: 'tab', host: mountHost, tabId: added.id } }, 'mount')
   }
 
   /** 挂一个已有的块（linked）：选块 ⇒ 写一根指针（条件与视图仍住在那一块上） */

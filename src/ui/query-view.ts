@@ -61,6 +61,7 @@ import {
   type ViewOwnerStore,
   type ViewRecord,
   type ViewSurface,
+  type PropKind,
 } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t, type MsgId } from '../core/msg.ts'
@@ -68,6 +69,7 @@ import { BlockEditor, type Run } from '../view/editor.ts'
 import { BlockCell } from './block-cell.ts'
 import { EditableBlock } from './editable-block.ts'
 import { queryChips } from './query-builder.ts'
+import { QueryTree, treeSummary } from './query-tree.ts'
 import { ViewBoard } from './view-board.ts'
 import { ViewCalendar } from './view-calendar.ts'
 import { ViewGallery } from './view-gallery.ts'
@@ -78,6 +80,33 @@ import { ViewTable } from './view-table.ts'
 
 /** 默认看法的临时 id（不落盘：它代表「这一份源没有激活视图」这件事本身） */
 const DEFAULT_VIEW_ID = 'view-default'
+
+/**
+ * 条件树开没开：**设备状态，不落盘、不进 KB**。
+ *
+ * 它回答「我此刻在看哪」，不是「这个查询是什么」——所以不进 `_query`/`_views`，
+ * 也不为它造一格持久化。键按拥有者＋表面分：同一份查询在正文与侧窗可以各开各的。
+ *
+ * 默认只在**整屏打开一个查询**时展开：内联体／挂载栏／侧窗都是别人的身体，
+ * 一进来就摊开条件会把正文或窄窗撑爆（结果区的「内容高、封顶一档」也会被条件树吃掉）。
+ * 那些落点收起成一条 chip，点一下照样就地展开。
+ */
+const treeOpen = new Map<string, boolean>()
+
+function surfaceDefaultsOpen(surface: ViewSurface, topLevel: boolean): boolean {
+  // 整屏打开的查询（顶层、没有容器）⇒ 展开；内联体／挂载栏／侧窗都是别人的身体 ⇒ 收起
+  return surface === 'center' || (surface === 'inline' && topLevel)
+}
+
+function treeKeyOf(owner: ViewOwnerRef, surface: ViewSurface): string {
+  if (owner.kind === 'block') return `block:${owner.blockId}|${surface}`
+  const host = owner.host.kind === 'block' ? owner.host.blockId : 'journal'
+  return `tab:${host}:${owner.tabId}|${surface}`
+}
+
+function isTreeOpen(owner: ViewOwnerRef, surface: ViewSurface, topLevel: boolean): boolean {
+  return treeOpen.get(treeKeyOf(owner, surface)) ?? surfaceDefaultsOpen(surface, topLevel)
+}
 
 /** 保留列在列表里的字段名（属性列走 `deps.fields()`） */
 const RESERVED_FIELD_LABEL: Record<string, MsgId> = {
@@ -145,8 +174,8 @@ export interface ViewHostDeps {
   refLabel?: (targetId: string) => string
   /** 标签名解析（`select` 选项显示名里的 `#名`） */
   tagName?: (id: string) => string
-  /** 可选的属性定义（构建器的字段下拉；按显示名排好，`ui` 不扫森林） */
-  fields: () => readonly { id: string; label: string }[]
+  /** 可选的属性定义（条件树的字段下拉；按显示名排好，`ui` 不扫森林） */
+  fields: () => readonly { id: string; label: string; kind?: PropKind }[]
   /** 某一列的**选项**（`select` 的看板分组列；其余属性给空表） */
   choices?: (propId: string) => readonly { id: string; label: string }[]
   /** 今天（本地日）：日历的「今天描边」要钉得住 */
@@ -186,8 +215,10 @@ export interface ViewHostEls {
   topCount: HTMLElement
   /** 视图切换器（默认看法 ＋ 已有视图 ＋ 加一张） */
   views: HTMLElement
-  /** 条件 chip 条（查询源才有；点击＝打开构建器） */
+  /** 条件 chip 条（查询源才有；收起时只剩一条摘要） */
   filters: HTMLElement
+  /** 条件树（就地展开；与抬头同属这一段，不是浮层） */
+  tree: HTMLElement
   refresh: HTMLButtonElement
   /**
    * 「全部展开／全部收起」：**一个**按钮，文案随状态变。
@@ -241,6 +272,10 @@ export function createViewHostEls(): ViewHostEls {
   newRow.hidden = true
   head.append(title, count, topCount, stale, filters, views, refresh, foldAll, newRow)
 
+  const tree = document.createElement('div')
+  tree.className = 'queryview-tree'
+  tree.hidden = true
+
   const body = document.createElement('div')
   body.className = 'queryview-body'
   /**
@@ -259,8 +294,8 @@ export function createViewHostEls(): ViewHostEls {
   table.hidden = true
   body.append(editor, table)
 
-  root.append(head, body)
-  return { root, head, title, count, topCount, filters, views, refresh, foldAll, newRow, stale, editor, table }
+  root.append(head, tree, body)
+  return { root, head, tree, title, count, topCount, filters, views, refresh, foldAll, newRow, stale, editor, table }
 }
 
 /** 一个「表面实例」的冻结结果（内存；不进 KB、不进撤销） */
@@ -285,6 +320,8 @@ export class ViewHost {
   private readonly cell: BlockCell
   /** 查询视图自己的 stale 订阅（只点亮提示、不重排——冻结成员是 D4） */
   private readonly offStale: () => void
+  /** 条件树（查询源；懒建，收起只隐藏不清空草稿） */
+  private treeUi: QueryTree | null = null
   private staleIds = new Set<string>()
   /** 上下文展开栈（祖先 id）；刷新时清空，外部编辑重画时保留 */
   private expanded = new Set<string>()
@@ -341,7 +378,21 @@ export class ViewHost {
     // ⚠️ 只点亮 stale，不重排列表（「不自动重算」）。
     // 拿不到「动过哪些块」就先不点亮：宁可少提示，也不要因为刷新顺带的重渲染误报。
     this.offStale = deps.store.subscribe((source, ids) => {
-      if (source === this.outline?.ed) return
+      /**
+       * **自己的编辑器发起的编辑**：正文行已经局部重画，这里不再整片重排。
+       *
+       * ⚠️ 例外是**撤销**：条件树的应用写在 `_query` 里，撤销时 `source` 正是
+       *    这台大纲编辑器（`app.ed.undoStep()`）⇒ 若在这里直接 return，
+       *    条件已经回滚、冻结结果却还是新的（「⌘Z 之后结果没变」）。
+       *    判据不靠「是不是撤销」，而靠**条件真的变没变**：名字/正文的编辑不会让
+       *    `frozenStale` 为真，所以正常打字仍然不重排。
+       */
+      if (source === this.outline?.ed) {
+        if (this.source.kind === 'query' && frozenStale(this.frozen, this.source.spec, this.deps.context)) {
+          this.sync()
+        }
+        return
+      }
       /**
        * 派生栏是**只读关系视图**：新引用/新提及/新标签都可能让成员增减，
        * 只按 id 修补已有行不够 ⇒ 防抖整片重算（不冻结、不标 stale）。
@@ -391,6 +442,7 @@ export class ViewHost {
     this.offStale()
     if (this.derivedTimer !== null) clearTimeout(this.derivedTimer)
     this.derivedTimer = null
+    this.treeUi = null
     this.outline?.dispose()
     this.outline = null
     this.table?.dispose()
@@ -665,15 +717,15 @@ export class ViewHost {
     this.els.newRow.title = list ? t('ui.view.newColumnTitle') : t('ui.view.newRowTitle')
     this.paintStale()
     this.paintFilters(b)
+    this.paintTree()
     this.paintViews(b, view)
   }
 
   /**
-   * **条件 chip 条**：把当前条件说成人话，点击打开构建器。
+   * **条件条**：条件树展开时它让位；收起之后只剩**一条**摘要 chip。
    *
-   * 为什么要有它：一个查询块的抬头只写「3 条结果」时，用户不知道这 3 条是**按什么选的**。
-   * 条件是这个视图最要紧的一句话，它得在屏幕上，而不是藏在某个菜单里。
-   * 非查询源没有这一条（children／items 的「条件」就是树本身）。
+   * 为什么不是始终一排 chip：条件树已经把每一条都摊开了，抬头再抄一遍就是同屏两遍。
+   * 收起态的一条 chip 回答「这一屏是按什么选的」，点它再把树展开。
    */
   private paintFilters(b: Block): void {
     const box = this.els.filters
@@ -703,8 +755,24 @@ export class ViewHost {
       box.hidden = true
       return
     }
+    if (this.treeAllowed() && isTreeOpen(this.writeOwner, this.deps.surface, this.treeTopLevel())) {
+      // 树摊开时抬头不再重复条件
+      box.hidden = true
+      return
+    }
     box.hidden = false
-    // 上下文：scope 决定「相对于谁」（这一块之下 / 全库）—— 它不在条件里，但影响结果
+    if (this.treeAllowed()) {
+      const summary = document.createElement('button')
+      summary.type = 'button'
+      summary.className = 'queryview-chip'
+      summary.dataset.queryChip = 'summary'
+      summary.textContent = treeSummary(spec)
+      summary.title = spec.scope === 'all' ? t('ui.query.contextAll') : t('ui.query.context')
+      summary.addEventListener('click', () => this.openTree())
+      box.appendChild(summary)
+      return
+    }
+    // 没有内联树的面（投影／窄窗）：沿用一排 chip，入口仍走构建器命令
     const ctx = document.createElement('button')
     ctx.type = 'button'
     ctx.className = 'queryview-chip queryview-chip--ctx'
@@ -728,6 +796,83 @@ export class ViewHost {
     edit.addEventListener('click', () => this.deps.invoke('core.query/open-builder', { owner: this.writeOwner }))
     box.appendChild(edit)
     void b
+  }
+
+  /** 条件树能不能落在这里（投影／派生栏没有可编辑的落点） */
+  private treeAllowed(): boolean {
+    if (this.deps.derived) return false
+    if (this.deps.surface === 'embed') return false
+    return this.source.kind === 'query'
+  }
+
+  /**
+   * 这块查询是不是**整屏的根**（没有容器）。
+   *
+   * 判据用求值上下文：`contextFor` 对顶层拥有者给 `selfId/scopeId = undefined`，
+   * 嵌在页面里的查询块给它的父页。与 `surface` 分开：内联体在两种落点用的是同一个
+   * surface（几何相同），「默认展开」只属于前者。
+   */
+  private treeTopLevel(): boolean {
+    return this.deps.context.selfId === undefined && this.deps.context.scopeId === undefined
+  }
+
+  private openTree(): void {
+    treeOpen.set(treeKeyOf(this.writeOwner, this.deps.surface), true)
+    this.repaintChrome()
+  }
+
+  private closeTree(): void {
+    treeOpen.set(treeKeyOf(this.writeOwner, this.deps.surface), false)
+    this.repaintChrome()
+  }
+
+  /** 只重画抬头与条件树，不重建正文（打开/收起条件不该重置滚动与表格） */
+  private repaintChrome(): void {
+    this.paintChrome(this.deps.host(), this.defaultView())
+  }
+
+  /**
+   * 应用条件之后把焦点交回正文。
+   *
+   * 为什么必须做：撤销的键位挂在 `editorTextFocus` 上；焦点留在「应用」按钮上时，
+   * 用户按 ⌘Z 想撤掉刚应用的条件，按键却进不了编辑器。树仍常驻，再点一下就能继续改。
+   */
+  private refocusBody(): void {
+    this.outline?.ed?.container.focus()
+  }
+
+  /**
+   * 条件树：**就地展开**在抬头下一格。收起只是隐藏 DOM，草稿还在组件里；
+   * 与旧弹层的区别写在这里：不是「点一下看一下」，而是和正文共用同一条竖线与缩进。
+   */
+  private paintTree(): void {
+    const box = this.els.tree
+    if (!this.treeAllowed()) {
+      box.hidden = true
+      return
+    }
+    const spec = this.source.kind === 'query' ? this.source.spec : null
+    if (!spec) {
+      box.hidden = true
+      return
+    }
+    if (!this.treeUi) {
+      this.treeUi = new QueryTree(box, {
+        spec: () => (this.source.kind === 'query' ? this.source.spec : { where: { any: [] } }),
+        fields: () => this.deps.fields(),
+        choices: (propId) => this.deps.choices?.(propId) ?? [],
+        ...(this.ownerBlock() ? { owner: this.ownerBlock() } : {}),
+        ...(this.deps.pickRef ? { pickRef: this.deps.pickRef } : {}),
+        ...(this.deps.refLabel ? { refLabel: this.deps.refLabel } : {}),
+        apply: (next) => this.deps.invoke('core.query/set-spec', { owner: this.writeOwner, spec: next }),
+        afterApply: () => this.refocusBody(),
+        close: () => this.closeTree(),
+        inline: true,
+      })
+    }
+    const open = isTreeOpen(this.writeOwner, this.deps.surface, this.treeTopLevel())
+    box.hidden = !open
+    if (open) this.treeUi.render()
   }
 
   /**

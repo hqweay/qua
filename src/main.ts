@@ -48,7 +48,7 @@ import { createRowBodyCache } from './app/wiring/row-bodies.ts'
 import { setupDocks } from './app/wiring/docks.ts'
 import { setupPanels } from './app/wiring/panels.ts'
 import { setupOwners } from './app/wiring/owners.ts'
-import { renderQueryBuilder } from './ui/query-builder.ts'
+import { QueryTree } from './ui/query-tree.ts'
 import { setupChrome } from './app/wiring/chrome.ts'
 import { setupPages, type TabInfo } from './app/wiring/pages.ts'
 import { renderCenterTabs as paintCenterTabs } from './ui/center-tabs.ts'
@@ -1675,10 +1675,10 @@ const app: App = {
   },
 
   /**
-   * **条件构建器**（一个浮层）。草稿改在本地、点「应用」才写一次 ——
-   * 边打字边写会把 ⌘Z 变成「一个字一步」。
+   * **条件树（弹层版）**：内联树之外的第二个入口（命令面／投影窗口）。
    *
-   * 字段下拉的候选由这里算好（`ui` 不扫森林）：属性定义 ＋ 显示名（同名带来源）。
+   * 它和正文里那棵树是**同一个组件**，不是第二套表单——草稿改在本地、点「应用」才写一次，
+   * 边打字边写会把 ⌘Z 变成「一个字一步」。
    */
   openQueryBuilder: (owner) => {
     const data = owners.read(owner)
@@ -1686,10 +1686,12 @@ const app: App = {
       app.toast(t('ui.query.noSpec'), 'warn')
       return
     }
+    const hostId = owner.kind === 'block' ? owner.blockId : owner.host.kind === 'block' ? owner.host.blockId : ''
+    const hostBlock = hostId === '' ? undefined : kb.get(hostId)
     const anchor =
       owner.kind === 'block' ? (app.ed.blockEl(owner.blockId)?.getBoundingClientRect() ?? null) : app.ed.caretRect()
     layers.openPopover((box) => {
-      renderQueryBuilder(box, {
+      const tree = new QueryTree(box, {
         spec: () => owners.read(owner)?.query ?? { where: { any: [] } },
         fields: () => {
           const labels = propDisplayLabels(kb.roots())
@@ -1705,10 +1707,20 @@ const app: App = {
           if (!def || propKindOf(def) !== 'select') return []
           return choicesOf(def).map((c) => ({ id: c.id, label: displayNameOf(c).trim() || shortId(c.id) }))
         },
-        apply: (spec) => void registry.invoke('core.query/set-spec', { owner, spec }, 'builder'),
+        ...(hostBlock ? { owner: hostBlock } : {}),
+        pickRef: (b, propId, current, onPick, rect) => pickRefValue(b, propId, current, onPick, rect),
+        refLabel: (targetId) => {
+          const target = kb.get(targetId)
+          return target ? displayNameOf(target).trim() || shortId(target.id) : t('ui.props.refMissing', { id: shortId(targetId) })
+        },
+        apply: (spec) => {
+          void registry.invoke('core.query/set-spec', { owner, spec }, 'builder')
+          layers.closePopover()
+        },
         close: () => layers.closePopover(),
-        toast: (text, kind) => app.toast(text, kind),
+        inline: false,
       })
+      tree.render(true)
     }, anchor)
   },
 
