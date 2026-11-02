@@ -169,28 +169,28 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     app.copy(`((${id}))`, t('ui.toast.blockRefCopied'))
     return true
   },
-  'core.editor/delete-selected-blocks': (_a, app) => app.ed.deleteSelectedBlocks(),
+  'core.editor/delete-selected-blocks': (_a, app) => app.ed.bsel.deleteSelectedBlocks(),
   'core.editor/copy-selected-blocks': (_a, app) => {
-    const text = app.ed.selectedBlocksText()
+    const text = app.ed.bsel.selectedBlocksText()
     if (!text) return false
     app.copy(text, t('ui.toast.blocksCopied'))
     return true
   },
   'core.editor/copy-selected-block-refs': (_a, app) => {
-    const text = app.ed.selectedBlockRefs()
+    const text = app.ed.bsel.selectedBlockRefs()
     if (!text) return false
     app.copy(text, t('ui.toast.blockRefsCopied'))
     return true
   },
   'core.selection/clear': (_a, app) => {
-    const had = app.ed.hasBlockSelection()
-    app.ed.clearBlockSelection()
+    const had = app.ed.bsel.hasBlockSelection()
+    app.ed.bsel.clearBlockSelection()
     return had
   },
-  'core.selection/select-all-blocks': (_a, app) => app.ed.selectAllBlocks(),
-  'core.selection/focus-first': (_a, app) => app.ed.focusFirstSelected(),
-  'core.selection/extend-up': (a, app) => app.ed.extendBlockSelection(Number(a.dir) === 1 ? 1 : -1),
-  'core.selection/extend-down': (a, app) => app.ed.extendBlockSelection(Number(a.dir) === -1 ? -1 : 1),
+  'core.selection/select-all-blocks': (_a, app) => app.ed.bsel.selectAllBlocks(),
+  'core.selection/focus-first': (_a, app) => app.ed.bsel.focusFirstSelected(),
+  'core.selection/extend-up': (a, app) => app.ed.bsel.extendBlockSelection(Number(a.dir) === 1 ? 1 : -1),
+  'core.selection/extend-down': (a, app) => app.ed.bsel.extendBlockSelection(Number(a.dir) === -1 ? -1 : 1),
 
   /* ---- 行内原子 ---- */
   'core.editor/insert-page-ref': (a, app) => {

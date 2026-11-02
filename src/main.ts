@@ -323,8 +323,8 @@ function uiCtx(): CtxKeys {
   const focusBlock = focusId ? findInForest(ws.blocks, focusId) : undefined
   const ctx: CtxKeys = {
     ...ed.ctxKeys(),
-    blockSelection: ed.hasBlockSelection(),
-    blockSelectionCount: ed.blockSelectionCount(),
+    blockSelection: ed.bsel.hasBlockSelection(),
+    blockSelectionCount: ed.bsel.blockSelectionCount(),
     paletteOpen: layers.open,
     drawerOpen: layers.drawerOpen(),
     popoverOpen: layers.popoverOpen(),
@@ -2305,11 +2305,11 @@ function viewEvents(
     blockMenu: (blockId, rect, appearanceHost) => {
       const ed = active()
       // 命中**已选中的块**（且多块）⇒ 多块菜单；否则清块选区，走原单块菜单
-      if (ed.inBlockSelection(blockId) && ed.blockSelectionCount() > 1) {
+      if (ed.bsel.inBlockSelection(blockId) && ed.bsel.blockSelectionCount() > 1) {
         showMenu({ kind: 'menu', prefix: 'blockSel/', anchor: rect, title: t('menu.title.blockSel') })
         return
       }
-      ed.clearBlockSelection()
+      ed.bsel.clearBlockSelection()
       /**
        * **真光标放进目标块**，而不是只把模型选区指过去：块菜单的命令落点是
        * 「当前光标块」（`curBlock` ⇒ `caretBlock()` ⇒ `sel.aBlock`），而菜单关闭时

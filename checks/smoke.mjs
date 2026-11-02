@@ -8653,7 +8653,7 @@ await check(
     const selCount = await page.evaluate(() => window.__qua.snapshot().blockSelectionCount)
     assert(selCount === 2, `拖选应选中 2 块：${selCount}`)
 
-    await page.evaluate(() => window.__qua.__editor.deleteSelectedBlocks())
+    await page.evaluate(() => window.__qua.__editor.bsel.deleteSelectedBlocks())
     await page.waitForTimeout(120)
     const ops = await opShape(page)
     assert(ops.length === 2, `删两个叶子应恰好 2 条 op：${JSON.stringify(ops)}`)
