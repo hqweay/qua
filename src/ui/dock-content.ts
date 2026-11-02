@@ -1,32 +1,27 @@
 /**
- * 两个侧槽的**派生卡**：归属树／反链／回收站。
+ * 两个侧槽的**派生卡**：回收站。
  *
  * 这里只产「一张卡的内容」，不负责排槽、不负责卡片的头/折叠/单卡——
  * 那些是 `ui/dock.ts` 的事。原先这些函数各自排一整槽，导致槽的顺序只能写死在
  * 两个函数里；拆成「产卡」之后，装配层才能按 `cards` 列表把窗口与派生卡混排。
  *
+ * ⚠️ 反链卡不在这里：它要**直接渲染并编辑源块**（与正文的「引用」栏同一种东西），
+ *    所以它是一台 `EditableBlock`，住在 `ui/backrefs-card.ts`。这里只放「一行只读」的卡。
  * ⚠️ 这里**不认 `ws`／`ed`／`registry`**，只认下面这个 `DockContentDeps`。
- * ⚠️ 渲染一律走 `renderBlock`：槽只排一列，块由类型决定长相（角色只叠 chrome）。
  *
  * 没有「我选的一组块」这种卡：那个概念（用户自己命名的分组）还没有载体。曾用「普通块 ＋
  * 一个专用角色 ＋ 内部一列块 id」冒充它 —— 但冒充出来的东西会被读成产品概念，还白占一个
  * 角色值；等真概念从模型里长出来时再进槽。
  */
-import { derivedRecordsOf, displayTextOf } from '../core/index.ts'
+import { displayTextOf } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
 import { t } from '../core/msg.ts'
-import { renderBlock, type BlockRenderCtx } from './block-renderers.ts'
 import type { DockCard } from './dock.ts'
 import { cardList, cardNote, emptyCardList } from './card-parts.ts'
 
 export interface DockContentDeps {
-  /** 读门面：反链源根、回收站项都按 id 取数 */
+  /** 读门面：回收站项按 id 取数 */
   kb: KbClient
-  activeId: () => string
-  /** 打开某个根（页/天/被 zoom 的根；反链项给的是来源根 id）——中心槽 */
-  openPage: (id: string) => void
-  /** 在右槽打开某个块（Shift+点行／块标） */
-  openInDock: (id: string) => void
   /**
    * 从回收站恢复一块（走命令面，不在这里直接改模型）。
    *
@@ -36,39 +31,6 @@ export interface DockContentDeps {
   restoreBlock: (id: string) => void
 }
 
-function ctx(deps: DockContentDeps): BlockRenderCtx {
-  return {
-    isActive: (id) => id === deps.activeId(),
-    onActivate: (b) => deps.openPage(b.id),
-    onOpenInDock: (b) => deps.openInDock(b.id),
-    untitledLabel: t('ui.page.untitled'),
-  }
-}
-
-/**
- * 右槽：反链卡（结果总是存在，空时给一句空文案）
- *
- * **与正文的反链（挂载区的「引用」栏）同一份判据**：都走 `derivedRecordsOf(…, 'refs')`。
- * 于是两处回答的是同一个问题——「谁指向我」，一行＝一个**源块**，不是按来源根聚合。
- * 早先这里用 `backrefsOf`（按顶层根聚成一条），代价是同一页里两处引用只出现一行，
- * 而那一行看不出「还有另一处」；同一个问题两个答案，迟早会被读成两个事实。
- *
- * 一行直接画**源块自己**（类型决定长相），并带上它的来源路径与引用次数：
- * 卡片只有一列，省掉路径就分不清「同一句话住在哪一页」。
- */
-export function backrefsCard(deps: DockContentDeps): DockCard {
-  const target = deps.activeId()
-  const host = deps.kb.get(target)
-  const records = host ? derivedRecordsOf(host, deps.kb, 'refs') : []
-
-  const list = records.length === 0 ? emptyCardList(t('ui.dock.noBackRefs')) : cardList()
-  for (const r of records) {
-    const count = typeof r.derived?.refCount === 'number' ? r.derived.refCount : undefined
-    list.appendChild(renderBlock(r.block, { ...ctx(deps), context: r.path, count }))
-  }
-
-  return { id: 'backrefs', title: t('ui.dock.backRefs'), body: list }
-}
 
 /**
  * 右槽：**回收站**卡（派生）。

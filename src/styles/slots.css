@@ -210,6 +210,17 @@
 .dock-card-body {
   padding: 0 var(--ui-gap-2) var(--ui-gap-3);
 }
+/*
+ * 反链卡里是**一台真编辑器**（`.blk` 行 ＋ 面包屑），不是卡片自带的一列按钮。
+ * 行距与最小高度沿用挂载区那一档；字号阶梯的「根」在结果面上不放大（见 blocks.css）。
+ */
+.dock-backlinks-editor {
+  min-height: var(--ui-line-h);
+  outline: none;
+}
+.dock-backlinks-editor[hidden] {
+  display: none;
+}
 /* 卡头的按钮比槽头小一档：一排要放收起/动作/单卡/关闭 */
 .dock-card-btn {
   width: 20px;
@@ -385,21 +396,6 @@ body[data-dock-resizing='1'] * {
 /* 单行省略 ＋ 占满剩余宽度 */
 .page-item .p-title {
   flex: 1;
-}
-/*
- * 反链卡一行的**来源路径**（`页 › 父`）：它是「这一句住哪」，不是这一行自己的名字。
- * 与正文分开取一份宽度（最多半行），剩下的留给正文；两段都省略，窄槽里也不挤成一团。
- */
-.page-item .p-ctx {
-  flex: 0 1 auto;
-  max-width: 50%;
-  color: var(--ui-text-tertiary);
-  font-size: var(--ui-fs-xs);
-}
-.page-item .p-ctx-sep {
-  flex: 0 0 auto;
-  margin: 0 var(--ui-gap-1);
-  opacity: 0.6;
 }
 /* 分割线在槽里的一行：壳仍是 `.page-item`，线自己撑满剩余宽度 */
 .page-item .divider-rule {
