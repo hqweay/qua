@@ -10,12 +10,10 @@ import { mkBlock, mkPropDef, readViews, type Block } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { BlockStore } from '../src/core/store.ts'
 import { viewConfigCommands } from '../src/app/commands/views.ts'
-import { mountCommands } from '../src/app/commands/mounts.ts'
-import type { ViewConfigDeps, MountsDeps } from '../src/app/commands/types.ts'
+import type { ViewConfigDeps } from '../src/app/commands/types.ts'
 import type { OwnerStore } from '../src/app/wiring/owners.ts'
 import type { Tx } from '../src/core/kb/types.ts'
 import type { ViewOwnerData } from '../src/core/view-owner.ts'
-import type { MountEntry } from '../src/core/mount.ts'
 
 const kbOf = (blocks: Block[]): { kb: MemoryKb; store: BlockStore } => {
   const store = new BlockStore(blocks)
@@ -228,52 +226,4 @@ test('insertQueryBlock：容不下子块的块（组件块／查询块自己）�
   const again = app.insertQueryBlock(id)
   assert.equal(fixture.kb.parentOf(again)?.id, 'page')
   assert.equal(fixture.kb.get(id)!.children.length, 0)
-})
-
-/* ------------------------------------------------------------ 提升为查询块 */
-
-test('promote：查询块默认挂到**宿主块**下，且插块与改指针是同一笔事务', () => {
-  const host = mkBlock('宿主')
-  host.id = 'host'
-  const page = mkBlock('页')
-  page.id = 'page'
-  page.children = [host]
-  const { kb } = kbOf([page])
-
-  const before: MountEntry = { id: 't1', kind: 'local', label: '本块引用', spec: { where: { text: '$self' } }, views: [] }
-  let entries: MountEntry[] = [before]
-  const owners: OwnerStore = {
-    read: () => ({ views: [] }),
-    write: () => {},
-    readBinding: () => null,
-    setBindingView: () => {},
-    entriesOf: () => entries,
-    writeEntries: (_h, next) => {
-      entries = [...next]
-    },
-    writeEntriesIn: (_tx, _h, next) => {
-      entries = [...next]
-    },
-    entryOf: (_h, id) => entries.find((e) => e.id === id),
-  }
-  let runs = 0
-  const d: MountsDeps = {
-    kb,
-    owners,
-    run: <R,>(fn: (tx: Tx) => R) => {
-      runs += 1
-      return kb.tx(fn)
-    },
-    activeId: () => 'page',
-    toast: () => {},
-  }
-  const app = mountCommands(d)
-
-  const blockId = app.promoteMountTab({ kind: 'block', blockId: 'host' }, 't1', 'block')
-  assert.notEqual(blockId, '', '应建出查询块')
-  assert.equal(kb.parentOf(blockId)?.id, 'host', '默认落点是宿主块，不是当前打开的那一页')
-  assert.equal(runs, 1, '插块 ＋ 改指针合成一笔事务（一次撤销）')
-  const linked = entries[0]!
-  assert.equal(linked.kind, 'linked')
-  assert.equal(linked.kind === 'linked' ? linked.block : '', blockId, '这一栏改成指向新块')
 })

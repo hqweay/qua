@@ -26,11 +26,9 @@ import {
 import {
   applyOwnerPatch,
   bindingOfEmbed,
-  bindingOfLinked,
   ownerDataOfBlock,
   ownerDataOfTab,
   withBlockOwnerData,
-  withLinkedView,
   withTabOwnerData,
   type BindingTarget,
   type ViewBindingRef,
@@ -59,7 +57,7 @@ export type OwnersDeps = {
 
 /**
  * 命令层拿到的那一半：除了读写视图配置，还要能**整组写回那几栏**
- * （加/摘/提升/转本地都要动这一组，而不是只动一格配置）。
+ * （加/摘/改名都要动这一组，而不是只动一格配置）。
  */
 export type OwnerStore = ViewOwnerStore & {
   /** 这一宿主持有的那几栏（**存下来的**；内置栏由 `core/mount.ts` 现算） */
@@ -155,19 +153,12 @@ export function setupOwners(deps: OwnersDeps): OwnerStore {
   }
 
   const readBinding = (binding: ViewBindingRef): BindingTarget | null => {
-    if (binding.kind === 'linked-tab') return bindingOfLinked(entryOf(binding.host, binding.tabId))
     if (binding.kind === 'embed') return bindingOfEmbed(deps.kb.get(binding.blockId))
     // dock 卡的「选哪张视图」本轮还没有落点（语义已对，形状后置）⇒ 诚实地没有绑定
     return null
   }
 
   const setBindingView = (binding: ViewBindingRef, view: string): void => {
-    if (binding.kind === 'linked-tab') {
-      const entry = entryOf(binding.host, binding.tabId)
-      if (!entry || entry.kind !== 'linked') return
-      replaceEntry(binding.host, binding.tabId, withLinkedView(entry, view))
-      return
-    }
     if (binding.kind === 'embed') {
       const b: Block | undefined = deps.kb.get(binding.blockId)
       const ref = canonicalViewRef(b?.props?.[EMBED_PROP])

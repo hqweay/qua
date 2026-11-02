@@ -5,7 +5,7 @@
  *
  * | 格 | 走吗 | 为什么 |
  * |---|---|---|
- * | `_mounts` | **走**（local 深拷、linked 只拷指针） | 它是「这块配了哪几栏」，属于内容 |
+ * | `_mounts` | **走**（local 深拷） | 它是「这块配了哪几栏」，属于内容 |
  * | `_embed` | **走**（指针原样） | 副本仍是一次「指向那一块」的露面 |
  * | `_query` | **不走** | 它是身份（「这是一个查询」），两个同源查询块会互相打架 |
  * | `_views`／`_activeView` | **查询块不走**／普通块走 | 没有源的视图配置没有意义 |
@@ -37,22 +37,21 @@ const mk = (id: string, text: string, props?: Record<string, unknown>): Block =>
 
 const copyOf = (b: Block): Block => cloneSubtree(b).block
 
-test('`_mounts` 随块走：local 的 spec 深拷（改副本不动原件），linked 只拷指针', () => {
+test('`_mounts` 随块走：local 的 spec 深拷（改副本不动原件）；linked 栏已退场', () => {
   const spec = { where: { text: '待办' } }
   const entries: MountEntry[] = [
     { id: 't-1', kind: 'local', label: '我的', spec, views: [] },
-    { id: 't-2', kind: 'linked', block: 'q-1', view: 'v-1' },
+    // 旧形状：读路径丢掉它，不把指针带进副本
+    { id: 't-2', kind: 'linked', block: 'q-1', view: 'v-1' } as unknown as MountEntry,
   ]
   const host = mk('h', '宿主', { [MOUNTS_PROP]: entries })
   const copy = copyOf(host)
   const got = copy.props?.[MOUNTS_PROP] as MountEntry[]
-  assert.equal(got.length, 2, '两栏都跟着走')
+  assert.equal(got.length, 1, '只有 local 栏跟着走')
   const local = got[0] as Extract<MountEntry, { kind: 'local' }>
-  const linked = got[1] as Extract<MountEntry, { kind: 'linked' }>
   assert.deepEqual(local.spec, spec, '内容一样')
   assert.notEqual(local.spec, spec, '但是两份：改副本的条件不该动到原件')
   assert.equal(local.id, 't-1', 'id 是「这一栏」的身份，复制内容不换它')
-  assert.deepEqual(linked, { id: 't-2', kind: 'linked', block: 'q-1', view: 'v-1' }, 'linked 只有指针，没有可深拷的')
 })
 
 test('`_embed` 指针原样保留（副本仍是一次「指向那一块」的露面）', () => {

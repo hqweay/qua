@@ -242,6 +242,21 @@ export const MIGRATIONS: Migration[] = [
       db.prepare(`delete from ${DB_TABLES.meta} where key = ?`).run(META_KEYS.seq)
     },
   },
+  {
+    to: 7,
+    up: (db) => {
+      /**
+       * **挂载区只拥有本地查询**：`_mounts` 的 `kind` 从三态（derived／local／linked）
+       * 收到两态（derived／local）。旧 linked 栏不是合法形状；留着会让整格 `_mounts`
+       * 读不出来（连 local 栏一起静默消失）。按原型纪律丢掉内容重 seed，
+       * 不写「把 linked 转成本地」的迁移分支。
+       */
+      for (const t of DB_CONTENT_TABLES) db.exec(`drop table if exists ${t}`)
+      db.exec(`drop table if exists ${DB_TABLES.opLog}`)
+      db.exec(DDL)
+      db.prepare(`delete from ${DB_TABLES.meta} where key = ?`).run(META_KEYS.seq)
+    },
+  },
 ]
 
 export type OpenResult =

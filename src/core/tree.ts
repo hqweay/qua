@@ -212,8 +212,7 @@ export function hasDescendant(doc: Doc, ancestorId: string, maybeChildId: string
  *
  * ⚠️ `_mounts` **随副本走**（曾经剔除）：它是这一块的看板配置，属于**内容**而不是身份
  *    ——副本带着原件配好的那几栏，正是「复制这块」该有的结果。
- *    复制时 local 栏的 spec/views 深拷成独立对象（两份从此各自演化），
- *    linked 栏只拷指针（它本来就指着同一个目标）。
+ *    复制时 local 栏的 spec/views 深拷成独立对象（两份从此各自演化）。
  *    注意它**不让块变成身份块**：`hasIdentity` 不认它，副本该是内容块还是内容块。
  *
  * ⚠️ 代价：复制一个页，副本**失去 `page` 列表与全部名字**，于是它不再出现在页列表里，
@@ -244,8 +243,7 @@ function contentProps(props: BlockProps): BlockProps | undefined {
   }
   /**
    * 挂载区随块走，但**不能共享同一批条目对象**：浅拷 `props` 之后副本与原件
-   * 指的是同一个 `MountEntry`，改一栏会动两处。local 的 spec/views 因此深拷，
-   * linked 只拷指针（它本来就指着同一个目标）。
+   * 指的是同一个 `MountEntry`，改一栏会动两处。local 的 spec/views 因此深拷。
    */
   if (MOUNTS_PROP in out) out[MOUNTS_PROP] = cloneMountEntries(out[MOUNTS_PROP] as Parameters<typeof cloneMountEntries>[0])
   // 属性袋不留空壳：一块只有身份的块复制后不该留下 `{}`，否则「有没有属性」会有两份答案

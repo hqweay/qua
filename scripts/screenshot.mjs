@@ -130,14 +130,12 @@ const taskPage = async (p, kinds) => {
   const TASK_STATUS = await p.evaluate(() => window.__qua.propDefs()[0].id)
   await p.evaluate((propId) =>
     window.__qua.invoke('core.query/create', {
-      kind: 'page',
       name: '任务总览',
       spec: { where: { all: [{ tag: '任务' }, { prop: { id: propId, eq: false } }] }, scope: 'all' },
     }),
     TASK_STATUS,
   )
-  const id = await p.evaluate(() => window.__qua.pages().find((x) => x.title === '任务总览').id)
-  await p.evaluate((pid) => window.__qua.invoke('core.page/open', { pageId: pid }), id)
+  const id = await p.evaluate(() => String(window.__qua.snapshot().activeId))
   await p.waitForTimeout(120)
   for (const kind of kinds) {
     await p.evaluate(

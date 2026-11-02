@@ -123,8 +123,11 @@ import {
  *            同一批谓词判 corrupt（判据收进 `core/system-props.ts` 一张表，写侧 op 发看点、
  *            收端 `validate`、读侧这里三处共用；「什么算坏只能有一个答案」）。
  *            旧库若带历史脏值，会从「静默回落」变成「判 corrupt」⇒ 作废重 seed，不写迁移。
+ * v33 → v34：**挂载区只拥有本地查询**——删 `linked` 栏与 `promote/detach`；
+ *            面板查询不再指向查询块，查询页退场（查询块是唯一内容形态）。
+ *            `_mounts` 的 `kind` 从三态变两态 ⇒ 旧库带 linked 项读不出来 ⇒ 作废重 seed。
  */
-export const WORKSPACE_VERSION = 33
+export const WORKSPACE_VERSION = 34
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

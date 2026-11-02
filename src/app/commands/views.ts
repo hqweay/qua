@@ -13,10 +13,8 @@
  * ⚠️ 这里不碰 DOM：切换视图之后要让屏幕跟上，走注入的 `reloadPage`（装配层的重装入口）。
  */
 import {
-  ALIASES_PROP,
   canonicalSpec,
   defaultColumnsForSource,
-  LISTS_PROP,
   isQueryBlock,
   mkBlock,
   mkQueryBlock,
@@ -282,25 +280,24 @@ export function viewConfigCommands(
     },
 
     /**
-     * 建一个**查询页／页内查询块**（内容对象）。
+     * 建一个**查询块**（内容对象）。
      *
-     * 与 local tab 的分工：查询页/查询块能被 `[[ ]]` 引用、能进回收站、能多处共享；
+     * 与 local tab 的分工：查询块能被 `[[ ]]` 引用、能进回收站、能多处 embed；
      * local tab 只是「这一块下面的一栏」。需要命名/引用/共享时才建它。
+     *
+     * 默认落**森林顶层**（与页同一条口径）：它是内容对象，没有容器 ⇒ 上下文是全库。
+     * 要放进某一页里就地看，走 `core.query/insert`（当前块的子块／紧跟其后）。
      *
      * ⚠️ **查询块是叶子**：不给它「加子块」的入口（children 不是 query 源），
      *    否则用户会看到「加了但看不见」。
      */
-    createQuery: (kind, name, spec, parentId) => {
-      if (kind !== 'page' && kind !== 'block') return ''
+    createQuery: (name, spec, parentId) => {
       if (!spec || typeof spec !== 'object' || !spec.where) return ''
       const label = name.trim() === '' ? t('ui.query.untitled') : name.trim()
       const block = mkQueryBlock({ name: label, spec, icon: 'lucide:list-filter' })
-      if (kind === 'page') {
-        block.props = { ...(block.props ?? {}), [ALIASES_PROP]: [label], [LISTS_PROP]: ['page'] }
-      }
       d.run((tx) => {
-        if (kind === 'page') tx.insert(block, null, d.kb.roots().length)
-        else tx.insert(block, parentId ?? d.activeId(), Number.MAX_SAFE_INTEGER)
+        if (parentId === undefined) tx.insert(block, null, d.kb.roots().length)
+        else tx.insert(block, parentId, Number.MAX_SAFE_INTEGER)
       })
       d.refreshList()
       reveal({ kind: 'block', blockId: block.id })

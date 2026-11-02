@@ -289,24 +289,12 @@ export interface App {
     activeView?: string,
     emptyView?: 'table' | 'none',
   ): string
-  /** 加一栏 **linked tab**：只存「指向哪一块 ＋ 哪张视图」，配置仍住在目标块上 */
-  addLinkedTab(host: MountHost, blockId: string, view?: string, label?: string): string
   /** 摘一栏（`tabId` 是稳定 id，不是数组下标）。**不删任何块** */
   removeMountTab(host: MountHost, tabId: string): boolean
-  /** 改栏名（local 的名字；linked 的覆盖文案） */
+  /** 改栏名（只有 local 有名字） */
   renameMountTab(host: MountHost, tabId: string, label: string): boolean
-  /** 换这一栏选的视图（local 写自己的默认视图；linked 只改指针） */
+  /** 换这一栏选的视图（配置在 local tab 自己身上） */
   setMountTabView(host: MountHost, tabId: string, view: string): boolean
-  /**
-   * **提升**（local → 块）：复制条件与视图到一个新的查询页/查询块，
-   * 默认把这一栏改成指向它的 linked。复制之后是两个独立对象。
-   */
-  promoteMountTab(host: MountHost, tabId: string, target: 'page' | 'block', parentId?: string, link?: boolean): string
-  /**
-   * **转本地副本**（linked → local）。只有目标源是 **query** 时才成立：
-   * local tab 是「面板局部的一次查询」，children/items 的视图没有这个对应物。
-   */
-  detachMountTab(host: MountHost, tabId: string): boolean
   /** **固定派生栏**（引用/成员/同类/提及 → local）：把现算的条件变成一栏可编辑的查询 */
   fixDerivedTab(host: MountHost, source: 'refs' | 'members' | 'same' | 'mentions', view?: DerivedViewKind): string
   /**
@@ -445,8 +433,8 @@ export interface App {
    *    条件变了（⇒ `specKey` 变）那一处会自动重算，不会出现「旧条件 ＋ 新结果」。
    */
   setQuerySpec(owner: ViewOwnerRef, spec: QuerySpec): boolean
-  /** 新建查询页／页内查询块（内容对象：能被引用、能进回收站） */
-  createQuery(kind: 'page' | 'block', name: string, spec: QuerySpec, parentId?: string): string
+  /** 新建查询块（内容对象：能被引用、能进回收站） */
+  createQuery(name: string, spec: QuerySpec, parentId?: string): string
   /**
    * **在这一块里建一个查询块**（`core.query/insert` 的落点）。
    *

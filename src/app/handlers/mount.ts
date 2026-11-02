@@ -1,5 +1,5 @@
 /**
- * 挂载区 handler：加/摘/改名/换视图/提升/转本地/固定派生。
+ * 挂载区 handler：加/摘/改名/换视图/固定派生。
  *
  * 命令面只做参数归一 —— 「这一栏写哪一格」由 `MountHost` 判（块宿主写库、
  * 日记宿主写设备状态），那是模型层的事，不属于命令面。
@@ -20,13 +20,6 @@ export const MOUNT_HANDLERS: Record<string, Handler> = {
     const view = S(a.view)
     return app.addLocalTab(host, label, spec, [], view) !== ''
   },
-  'core.mount/add-linked': (a, app) => {
-    const host = hostArg(a.host)
-    const blockId = S(a.block)
-    if (!host || !blockId) return false
-    const label = S(a.label).trim()
-    return app.addLinkedTab(host, blockId, S(a.view), label === '' ? undefined : label) !== ''
-  },
   'core.mount/remove': (a, app) => {
     const host = hostArg(a.host)
     const tabId = S(a.tabId)
@@ -44,20 +37,6 @@ export const MOUNT_HANDLERS: Record<string, Handler> = {
     const tabId = S(a.tabId)
     if (!host || !tabId) return false
     return app.setMountTabView(host, tabId, S(a.view))
-  },
-  'core.mount/promote': (a, app) => {
-    const host = hostArg(a.host)
-    const tabId = S(a.tabId)
-    const target = S(a.target, 'page')
-    if (!host || !tabId || (target !== 'page' && target !== 'block')) return false
-    const link = a.link === undefined ? true : a.link !== false
-    return app.promoteMountTab(host, tabId, target, S(a.parentId) || undefined, link) !== ''
-  },
-  'core.mount/detach': (a, app) => {
-    const host = hostArg(a.host)
-    const tabId = S(a.tabId)
-    if (!host || !tabId) return false
-    return app.detachMountTab(host, tabId)
   },
   'core.mount/fix-derived': (a, app) => {
     const host = hostArg(a.host)

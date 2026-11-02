@@ -4,8 +4,8 @@
  * 三条口径落在这一层：
  *   · **一个编辑器，N 个 loader**：切 tab 只换 `loadPage` 的 roots。编辑器不重建，
  *     所以撤销栈与选区都不丢（重建一次，用户按 ⌘Z 就只能撤到「刚切过 tab」）。
- *   · **tab 不是块**：`local` 栏自己拥有条件与视图（不建块），`linked` 栏只存
- *     「指向哪一块 ＋ 哪张视图」，`derived` 栏每次现算。增删交给装配层的命令
+ *   · **tab 不是块**：`local` 栏自己拥有条件与视图（不建块、也不指向块），
+ *     `derived` 栏每次现算。增删交给装配层的命令
  *     （「写到哪一格」是模型层的事：块宿主写 `_mounts`、日记宿主写设备状态）。
  *   · **空栏仍在**：栏在、body 里一行说明。空是**状态**不是错误，把栏藏掉
  *     会让用户以为「这块没有引用」，而真相是「还没有人引用它」。
@@ -28,13 +28,11 @@
 import {
   canEditMounts,
   derivedRecordsOf,
-  displayNameOf,
   expandContexts,
   hasLiveChildren,
   isJournal,
   mountEntriesOf,
   readViewSet,
-  resolveBoundView,
   unfoldForContext,
   DERIVED_VIEW_KINDS,
   type Block,
@@ -100,11 +98,11 @@ export interface MountAreaDeps {
    */
   openViewMenu?: (host: MountHost, tabId: string, anchor: DOMRect) => void
   /**
-   * 「⋯」：这一栏的更多动作（提升为查询块…／转为本地副本／固定为查询…／移除）。
+   * 「⋯」：派生栏的更多动作（固定为一条可编辑的 local 查询）。
    *
    * 菜单长什么样、每一项落到哪条命令，都归装配层 —— 这一层只知道「有这一颗按钮」。
    */
-  onTabMenu?: (host: MountHost, entry: MountEntry, anchor: DOMRect) => void
+  onTabMenu?: (host: MountHost, entry: Extract<MountEntry, { kind: 'derived' }>, anchor: DOMRect) => void
   /**
    * 派生栏现在选了什么看法（**设备状态**：没有拥有者）。
    *
@@ -114,7 +112,7 @@ export interface MountAreaDeps {
   /** 切派生栏的看法（装配层写设备状态并重画这一栏） */
   setDerivedKind?: (host: Block, source: DerivedSource, kind: DerivedViewKind) => void
   /**
-   * 这一栏非大纲时用的视图体（local／linked 栏可以有表格等看法）。
+   * 这一栏非大纲时用的视图体（local 栏可以有表格等看法）。
    *
    * 返回 `null` ⇒ 这一栏画大纲。由装配层造，因为「求值的上下文」与「写事务的 source」
    * 只有那一层答得出来。
@@ -142,7 +140,6 @@ const BUILTIN_LABEL: Record<DerivedSource, MsgId> = {
 const EMPTY_TEXT: Record<MountEntry['kind'], MsgId> = {
   derived: 'ui.mount.empty.user',
   local: 'ui.mount.empty.user',
-  linked: 'ui.mount.empty.user',
 }
 
 /** 派生栏空态：三种来源各自说一句实话（「还没有人引用它」≠「条件没匹配」） */
@@ -403,8 +400,8 @@ export class MountArea {
       btn.addEventListener('click', () => this.activate(entry.id))
       wrap.appendChild(btn)
 
-      // 内置三栏不可摘：它们不落盘，摘了也没有「摘掉」的落点；local／linked 才有 ×
-      if ((entry.kind === 'local' || entry.kind === 'linked') && this.deps.onRemoveTab) {
+      // 内置派生栏不可摘：它们不落盘，摘了也没有「摘掉」的落点；local 才有 ×
+      if (entry.kind === 'local' && this.deps.onRemoveTab) {
         const x = document.createElement('button')
         x.type = 'button'
         x.className = 'mount-x'
@@ -425,11 +422,11 @@ export class MountArea {
         wrap.appendChild(x)
       }
       /**
-       * 「⋯」对**三种栏都给**：local 能提升／移除，linked 能转本地／移除，
-       * derived 能固定成一条可编辑的查询。放在 × 之前 —— × 是「这一栏不要了」，
-       * 比它更危险的按钮不该更靠里。
+       * 「⋯」只对 **derived** 给：把它固定成一条可编辑的 local 查询。
+       * local 的动作只有「摘掉」，那已经由 × 表达；再给一个只重复它的菜单是噪音。
+       * 放在 × 之前 —— × 是「这一栏不要了」，比它更危险的按钮不该更靠里。
        */
-      if (this.deps.onTabMenu) {
+      if (entry.kind === 'derived' && this.deps.onTabMenu) {
         const more = document.createElement('button')
         more.type = 'button'
         more.className = 'mount-more'
@@ -452,7 +449,7 @@ export class MountArea {
       add.type = 'button'
       add.className = 'mount-add'
       add.textContent = '＋'
-      add.title = t('ui.mount.addMenu')
+      add.title = t('ui.mount.addLocalHint')
       add.addEventListener('click', () => this.deps.onAddTab?.(host.id))
       this.tabsEl.appendChild(add)
     }
@@ -467,20 +464,9 @@ export class MountArea {
     this.tabsEl.appendChild(collapse)
   }
 
-  /**
-   * 一栏的 tab 文案。
-   *
-   * `linked` 栏缺省**叫目标的名字**（改了目标名就跟着变）—— 它只是一根指针，
-   * 自己不该有第二个名字；用户想改名才写 `label` 覆盖。
-   */
+  /** 一栏的 tab 文案：local 用它自己的 label，derived 由来源字典给 */
   private labelOf(entry: MountEntry): string {
-    if (entry.kind === 'derived') return t(BUILTIN_LABEL[entry.source])
-    if (entry.kind === 'local') return entry.label
-    if (entry.label !== undefined && entry.label.trim() !== '') return entry.label
-    const target = this.deps.kb.get(entry.block)
-    if (!target) return t('ui.mount.dangling')
-    const name = displayNameOf(target).trim()
-    return name === '' ? t('ui.query.untitled') : name
+    return entry.kind === 'derived' ? t(BUILTIN_LABEL[entry.source]) : entry.label
   }
 
   private activate(id: string): void {
@@ -591,7 +577,7 @@ export class MountArea {
     this.loadOutline(entry, { roots, contexts }, focusHint, empty)
   }
 
-  /** 大纲装载（local／linked／派生共用的那一支） */
+  /** 大纲装载（local／派生共用的那一支） */
   private loadOutline(entry: MountEntry, base: MountRoots, focusHint?: string, emptyText?: MsgId): void {
     const plan = expandContexts(base, this.expandedFor(entry.id), (id) => this.deps.kb.pathOf(id), focusHint)
     // 过期的展开 id 当场剪掉：下次再出现同 id 时不该「自己又展开」
@@ -643,15 +629,8 @@ export class MountArea {
       return kind === 'outline' ? null : { id: `derived:${kind}`, kind }
     }
     const hostRef = this.mountHost()
-    if (entry.kind === 'local') {
-      const data = this.deps.owners.read({ kind: 'tab', host: hostRef, tabId: entry.id })
-      return data ? readViewSet(data).active : null
-    }
-    const target = this.deps.owners.readBinding({ kind: 'linked-tab', host: hostRef, tabId: entry.id })
-    if (!target) return null
-    const data = this.deps.owners.read(target.owner)
-    if (!data) return null
-    return resolveBoundView(target, data).view
+    const data = this.deps.owners.read({ kind: 'tab', host: hostRef, tabId: entry.id })
+    return data ? readViewSet(data).active : null
   }
 
   /**
@@ -843,7 +822,7 @@ export class MountArea {
   /**
    * 一栏的 roots（＋ 每个装载根的面包屑）。
    *
-   * 只服务 `local`／`linked`：它们是「这一块下面的…」⇒ 锚点＝宿主块
+   * 只服务 `local`：它是「这一块下面的…」⇒ 锚点＝宿主块
    * （与中心查询块同一条口径：它的锚点也是它所在的容器）。
    * **派生栏不走这里**：它的记录由 `derivedRecordsOf` 现算（不给子树锚点 ——
    * 那些块本来就在别处，关进宿主子树会让引用／提及栏恒空）。
@@ -853,21 +832,15 @@ export class MountArea {
    *    这种形状无法表达。
    */
   private rootsFor(host: Block, entry: MountEntry): MountRoots {
-    const hostRef = this.mountHost()
-    const excludeIds = [host.id]
-    if (entry.kind === 'linked') excludeIds.push(entry.block)
-    const spec = this.specFor(hostRef, entry)
+    const spec = this.specFor(entry)
     if (!spec) return { roots: [], contexts: new Map() }
-    const hits = this.deps.kb.query(spec, { selfId: host.id, scopeId: host.id, excludeIds })
+    const hits = this.deps.kb.query(spec, { selfId: host.id, scopeId: host.id, excludeIds: [host.id] })
     return this.topLevel(hits)
   }
 
-  /** 一栏的条件：`local` 自己带着；`linked` 读目标块的 `_query`（**一份条件**） */
-  private specFor(hostRef: MountHost, entry: MountEntry): QuerySpec | null {
-    if (entry.kind === 'local') return entry.spec
-    const target = this.deps.owners.readBinding({ kind: 'linked-tab', host: hostRef, tabId: entry.id })
-    if (!target) return null
-    return this.deps.owners.read(target.owner)?.query ?? null
+  /** 一栏的条件：local 自己带着（面板查询不指向任何块） */
+  private specFor(entry: MountEntry): QuerySpec | null {
+    return entry.kind === 'local' ? entry.spec : null
   }
 
   private topLevel(hits: readonly { blockId: string; path: string[] }[]): MountRoots {

@@ -5,13 +5,12 @@
  * 它回答的是「这一块的看板配了哪几栏」，不是「这一块有哪些子块」——
  * 所以它不进 `children`（那会污染子树读路径：反链来源根、折叠三角、`⌘A`、子树复制）。
  *
- * ## 三类 tab：来源与身份
+ * ## 两类 tab：来源与身份
  *
  * | 种类 | 存哪 | 有配置吗 | 为什么 |
  * |---|---|---|---|
  * | `derived`（引用／同类／提及） | **不存**，每次按宿主现算 | 没有 | 存下来的引用永远不会长；存下来的标签列表会过期 |
  * | `local` | 宿主块 `_mounts`／日记 `Prefs.journalMounts` | **自己拥有** spec ＋ views | 随手加一栏不该在树里多一个对象；删 tab＝删这份查询，⌘Z 可撤 |
- * | `linked` | 同上 | **没有**，只有 `{block,view}` 指针 | 条件/视图只有一份真相；共享就是共享 |
  *
  * ## 两条纪律
  *
@@ -19,12 +18,12 @@
  *    激活项／展开栈／冻结缓存／收起状态都按 `id` 记。用 `user:<index>` 当下标的后果是
  *    删掉第一栏之后，active 与冻结全体漂到别一栏上，而不报错。
  *
- * ⚠️ **local tab 不是块**：它没有身份、不能被引用、不能被单独打开。要引用一份查询，
- *    那是「查询块」（一个内容对象）的事，与这里是两个问题 —— 那条路是 `promote`（显式复制）。
+ * ⚠️ **local tab 不是块，也不指向块**：它没有身份、不能被引用、不能被单独打开。
+ *    要一份能被引用／共享的查询，写「查询块」（内容对象）；两者共用同一套条件与视图，
+ *    但拥有者不同 —— 面板里的查询只属于这一块，查询块属于树。
  *
  * ⚠️ 本文件零 DOM：`core` 不认识 tab 条长什么样，只回答「该有哪几栏、每栏是什么」。
- *    tab 上的字：local 用它自己的 label，linked 用目标名（可被 label 覆盖），
- *    derived 由 UI 按 `source` 查字典。
+ *    tab 上的字：local 用它自己的 label，derived 由 UI 按 `source` 查字典。
  */
 import { uuidv7Hex } from './ids.ts'
 import { isJournal, journalDate, todayISO } from './journal.ts'
@@ -93,14 +92,13 @@ export type MountEntry =
       views: ViewConfig[]
       activeView?: string
     }
-  | { id: string; kind: 'linked'; block: string; view: string; label?: string }
 
 /**
  * 复制随块走的那几栏（**整块拷贝用**）。
  *
  * · `local` 的 `spec`／`views` **深拷成独立对象**：复制之后原件与副本各自演化，
- *   共享同一份配置就是「改一个动两个」——要共享请用 linked（显式指针），不要靠拷贝悄悄共享。
- * · `linked`／`derived` 只拷指针：它们本来就不拥有配置。
+ *   共享同一份配置就是「改一个动两个」——要共享请 embed 一个查询块，不要靠拷贝悄悄共享。
+ * · `derived` 只拷指针：它本来就不拥有配置。
  * · **`id` 不变**：复制的是内容，而「这一栏是这一栏」是它的身份；换 id 会让
  *   副本上「激活的是哪一栏」失去依据。
  */
@@ -440,9 +438,8 @@ export function readMounts(b: Block | undefined): MountEntry[] {
  * 逐项重建栏列表（与 `canonicalSpec`／`canonicalViews` 同一条纪律）。
  *
  * 判据与后果：
- *   · `kind` 不在三态里 ⇒ **丢掉该项**；
+ *   · `kind` 不在两态里 ⇒ **丢掉该项**；
  *   · `local` 缺 `label`/`spec` ⇒ 丢；`views` 按 **query 源**校验（local 的源永远是 query）；
- *   · `linked` 缺 `block` ⇒ 丢；`view` 缺省 `''`（跟随目标的默认看法）；
  *   · `id` 缺失／重复 ⇒ **补一个或丢掉**：id 是激活项与冻结缓存的键，
  *     两条同名 id 会让「切到这一栏」落到别一栏上而不报错。
  *
@@ -489,22 +486,6 @@ export function canonicalMountEntries(raw: unknown): MountEntry[] {
       }
       if (typeof l.activeView === 'string' && l.activeView !== '') entry.activeView = l.activeView
       out.push(entry)
-      continue
-    }
-    if (e.kind === 'linked') {
-      const l = e as Partial<Extract<MountEntry, { kind: 'linked' }>>
-      if (typeof l.block !== 'string' || l.block.trim() === '') continue
-      const id = stableId(l.id, seen, null)
-      if (!id) continue
-      seen.add(id)
-      const entry: Extract<MountEntry, { kind: 'linked' }> = {
-        id,
-        kind: 'linked',
-        block: l.block,
-        view: typeof l.view === 'string' ? l.view : '',
-      }
-      if (typeof l.label === 'string' && l.label.trim() !== '') entry.label = l.label.trim()
-      out.push(entry)
     }
   }
   return out
@@ -534,7 +515,7 @@ function stableId(id: unknown, seen: ReadonlySet<string>, fallback: string | nul
 /**
  * `_mounts` 这个值的**形状判据**（读路径与落盘校验共用这一份）。
  *
- * 判据与 `_aliases` 同款严格度：数组、每项是对象、`kind` 在三态里、各态的必填字段齐全。
+ * 判据与 `_aliases` 同款严格度：数组、每项是对象、`kind` 在两态里、各态的必填字段齐全。
  * 「这一项还能不能用」由 `canonicalMountEntries` 逐条重建，这里只判「这坨字节能不能读」。
  */
 export function isMountsValue(raw: unknown): boolean {
@@ -552,11 +533,6 @@ export function isMountsValue(raw: unknown): boolean {
       if (typeof l.label !== 'string' || l.label.trim() === '') return false
       if (!l.spec || typeof l.spec !== 'object' || Array.isArray(l.spec)) return false
       if (!('where' in (l.spec as object))) return false
-      continue
-    }
-    if (e.kind === 'linked') {
-      const l = item as { block?: unknown }
-      if (typeof l.block !== 'string' || l.block.trim() === '') return false
       continue
     }
     return false

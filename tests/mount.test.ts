@@ -211,17 +211,16 @@ test('canonicalMountEntries：`local` 的 views 按 **query 源**校验（面板
   assert.deepEqual(e.views, [], '结构映射表要一棵树，而 local 栏只有命中集合')
 })
 
-test('cloneMountEntries：local 深拷、linked 只拷指针、id 保持（栏的身份不变）', () => {
-  const linked: MountEntry = { id: 't-2', kind: 'linked', block: 'q-1', view: '' }
-  const src = [local('t-1', '甲'), linked]
+test('cloneMountEntries：local 深拷、id 保持；linked 栏已退场（不是合法形状）', () => {
+  const src = [local('t-1', '甲')]
   const copy = cloneMountEntries(src)
-  assert.deepEqual(
-    copy.map((e) => e.id),
-    ['t-1', 't-2'],
-    'id 是「这一栏」的身份：复制内容不该换掉它',
-  )
+  assert.deepEqual(copy.map((e) => e.id), ['t-1'], 'id 是「这一栏」的身份：复制内容不该换掉它')
   assert.notEqual((copy[0] as Extract<MountEntry, { kind: 'local' }>).spec, spec, 'local 的 spec 深拷')
-  assert.equal((copy[1] as Extract<MountEntry, { kind: 'linked' }>).block, 'q-1', 'linked 只拷指针')
+  assert.equal(
+    isMountsValue([{ id: 't-2', kind: 'linked', block: 'q-1', view: '' }]),
+    false,
+    '面板查询不指向查询块：linked 栏不再是合法形状',
+  )
 })
 
 /**
