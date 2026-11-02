@@ -1789,6 +1789,21 @@ export class BlockEditor {
     this.emitChange(kind === 'structural' ? 'struct' : 'text')
   }
 
+  /**
+   * 结构操作的**同一笔收尾**：记撤销 → 整树重排 → 落光标 → 广播。
+   *
+   * 与 `tx` 的分工：`tx` 管「原位改、光标不动」；结构操作把光标落到**新位置**
+   * （新块、保留块、并合点），还常带「改动涉及哪些块」的提示——那两个自由度
+   * 就是这里仅有的参数。快照与 `write` 留在调用方：写前的校验与准备各不相同，
+   * 硬收进来只是把分叉改成参数汤（run 级的 `commitContent` 是同一判据收的）。
+   */
+  private structTail(before: Snap, caret?: { id: string; off: number } | null, ids?: readonly string[]): void {
+    this.undo.record(before, 'structural', Date.now())
+    this.renderAll()
+    if (caret) this.placeCaret(caret.id, caret.off)
+    this.emitChange('struct', ids)
+  }
+
   undoStep(): void {
     this.editBase = null
     const r = this.store.undo(this, this.sel)
@@ -2095,10 +2110,7 @@ export class BlockEditor {
 
     const out = this.write((tx) => this.splitTx(tx, id, offset, cut))
     if (!out) return
-    this.undo.record(before, 'structural', Date.now())
-    this.renderAll()
-    if (out.caret) this.placeCaret(out.caret.id, out.caret.off)
-    this.emitChange('struct')
+    this.structTail(before, out.caret ?? null)
   }
 
   /**
@@ -2195,10 +2207,7 @@ export class BlockEditor {
     const placeholder = prevPlaceholder(this.doc, id)
     if (placeholder) {
       this.write((tx) => tx.remove(placeholder.removed))
-      this.undo.record(before, 'structural', Date.now())
-      this.renderAll()
-      this.placeCaret(id, 0)
-      this.emitChange('struct')
+      this.structTail(before, { id, off: 0 })
       return
     }
     const plan = mergeIntoPrevPlan(this.doc, id)
@@ -2216,10 +2225,7 @@ export class BlockEditor {
       tx.patch(plan.removed, (b) => writeBlockContent(b, []))
       tx.remove(plan.removed)
     })
-    this.undo.record(before, 'structural', Date.now())
-    this.renderAll()
-    this.placeCaret(plan.kept, plan.at)
-    this.emitChange('struct')
+    this.structTail(before, { id: plan.kept, off: plan.at })
   }
 
   /** Backspace：块首合并到上一块；否则交给原生删除 */
@@ -2283,11 +2289,7 @@ export class BlockEditor {
       tx.patch(id, (x) => (x.modified = Date.now()))
     })
     if (o.unfoldId) unfoldBlock(this.doc, o.unfoldId)
-    this.undo.record(before, 'structural', Date.now())
-    this.renderAll()
-    if (o.caretAt) this.placeCaret(o.caretAt.id, o.caretAt.off)
-    else if (this.sel) this.placeCaret(this.sel.aBlock, this.sel.aOff)
-    this.emitChange('struct')
+    this.structTail(before, o.caretAt ?? (this.sel ? { id: this.sel.aBlock, off: this.sel.aOff } : null))
   }
 
   duplicate(id: string): string | null {
@@ -2297,10 +2299,7 @@ export class BlockEditor {
     // 克隆自带内容（原子已换新 id——复制的是内容不是身份），没有第二份锚点要搬
     const { block } = cloneSubtree(loc.block)
     this.write((tx) => tx.insert(block, loc.parent?.id ?? null, loc.index + 1))
-    this.undo.record(before, 'structural', Date.now())
-    this.renderAll()
-    this.placeCaret(block.id, 0)
-    this.emitChange('struct')
+    this.structTail(before, { id: block.id, off: 0 })
     return block.id
   }
 
@@ -2325,9 +2324,7 @@ export class BlockEditor {
     this.write((tx) => {
       tx.restore(id)
     })
-    this.undo.record(before, 'structural', Date.now())
-    this.renderAll()
-    this.emitChange('struct')
+    this.structTail(before)
     return true
   }
 
@@ -2377,10 +2374,7 @@ export class BlockEditor {
     }
     const after = flatten(this.doc)
     const caret = after[Math.min(idx, after.length - 1)]!
-    this.undo.record(before, 'structural', Date.now())
-    this.renderAll()
-    this.placeCaret(caret.id, 0)
-    this.emitChange('struct')
+    this.structTail(before, { id: caret.id, off: 0 })
   }
 
   /**
@@ -2496,9 +2490,7 @@ export class BlockEditor {
     this.write((tx) => {
       tx.patch(id, (b) => setValue(b, propId, next))
     })
-    this.undo.record(before, 'structural', Date.now())
-    this.renderAll()
-    this.emitChange('struct', [id])
+    this.structTail(before, null, [id])
   }
 
   /**
@@ -2520,9 +2512,7 @@ export class BlockEditor {
     if (todoOf(loc.block, this.fieldTable()) === undefined) return 'none'
     const before = this.snap()
     this.write((tx) => tx.patch(id, (b) => clearValue(b, TASK_STATUS_PROP_ID)))
-    this.undo.record(before, 'structural', Date.now())
-    this.renderAll()
-    this.emitChange('struct', [id])
+    this.structTail(before, null, [id])
     // 字段读取表是懒建的派生表：上面这一笔可能改了「哪些标签声明了这一栏」之外的形状，
     // 但值／槽变了 ⇒ 重新定位再问一次，别读改之前那个 `loc`
     const after = locate(this.doc, id)
@@ -2583,10 +2573,7 @@ export class BlockEditor {
       this.write((tx) => {
         tx.patch(loc.block.id, (b) => setValue(b, TASK_STATUS_PROP_ID, todo === 'done'))
       })
-      this.undo.record(before, 'structural', Date.now())
-      this.renderAll()
-      this.placeCaret(loc.block.id, 0)
-      this.emitChange('struct', [loc.block.id])
+      this.structTail(before, { id: loc.block.id, off: 0 }, [loc.block.id])
       return loc.block.id
     }
     const b = mkBlock(text)
@@ -2617,10 +2604,7 @@ export class BlockEditor {
       return true
     })
     if (!ok) return null
-    this.undo.record(before, 'structural', Date.now())
-    this.renderAll()
-    this.placeCaret(b.id, 0)
-    this.emitChange('struct')
+    this.structTail(before, { id: b.id, off: 0 })
     return b.id
   }
 
@@ -2683,9 +2667,7 @@ export class BlockEditor {
           b.modified = Date.now()
         })
       })
-      this.undo.record(before, 'structural', Date.now())
-      this.renderAll()
-      this.emitChange('struct', [loc.block.id])
+      this.structTail(before, null, [loc.block.id])
       return loc.block.id
     }
 
@@ -2708,10 +2690,7 @@ export class BlockEditor {
       return true
     })
     if (!ok) return null
-    this.undo.record(before, 'structural', Date.now())
-    this.renderAll()
-    this.placeCaret(empty.id, 0)
-    this.emitChange('struct')
+    this.structTail(before, { id: empty.id, off: 0 })
     return widget.id
   }
 
@@ -2795,9 +2774,7 @@ export class BlockEditor {
     if (!b || !isEmbedBlock(b)) return false
     const before = this.snap()
     this.write((tx) => tx.remove(hostId))
-    this.undo.record(before, 'structural', Date.now())
-    this.renderAll()
-    this.emitChange('struct')
+    this.structTail(before)
     return true
   }
 
