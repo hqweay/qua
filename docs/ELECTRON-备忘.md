@@ -354,7 +354,7 @@ FATAL:content/browser/gpu/gpu_data_manager_impl_private.cc:417] GPU process isn'
 - ⇒ **现状**：组合期被卸载 ⇒ 提交落点漂移（落到别的块）；预编辑串本身没留残渣，但**用户敲的字去了不该去的地方**。
   这就是四件账④说的「两段式」必须存在的理由：**预编辑/已提交必须分两个状态**，
   卸载时要么把预编辑挂起、要么禁止卸载正在组合的块。
-  当前实现只做到了 `compositionend` 后补渲染（`src/view/editor.ts`），**没有处理「组合中块被卸载」**。
+  当前实现只做到了 `compositionend` 后补渲染（`src/view/editor/editor.ts`），**没有处理「组合中块被卸载」**。
 
 ---
 
@@ -530,6 +530,6 @@ Qua/
   `prefers-color-scheme` 是否跟随系统（当前环境测不出，见 1.5）；
   `dmg` 目标下中文 `artifactName` 是否有坑（见 2.3）；
   **在别的 macOS 版本/别的机器上首次打开**（Gatekeeper 拦截的实际表现）。
-- **存档（顺带发现，不属于本次范围）**：`localStorage` 的键是 `qua.workspace`（`src/core/workspace.ts`），
+- **存档（顺带发现，不属于本次范围）**：`localStorage` 的键是 `qua.workspace`（`src/core/infra/workspace.ts`），
   **改名时故意没动它**——换键等于把已有数据静默丢掉。它在 Chromium profile 里，位置：
   `<userData>/Local Storage/leveldb/`。将来换 DbClient 时一并处理。

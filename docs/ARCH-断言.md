@@ -59,11 +59,11 @@ pnpm arch:check   # 只跑静态那一层（秒级）
 | 表 | 文件 | 说明 |
 |---|---|---|
 | **命令表** | `src/core/commands/decls.ts` `COMMANDS` | 纯语义：`name/title/args/capability/undoable/version`。**没有 key、没有 context、没有 host** |
-| **绑定表** | `src/core/bindings.ts` `BINDINGS` | `{command, kind: keymap\|menu\|slash\|toolbar\|palette, key?, when?, args?, group?, order?, layer}`，一个机制五处复用 |
-| **上下文键** | `src/view/editor.ts` `ctxKeys()` ＋ `src/main.ts` `uiCtx()` | 开放键空间；`composing` 也是一个键（不是一个 if） |
+| **绑定表** | `src/core/infra/bindings.ts` `BINDINGS` | `{command, kind: keymap\|menu\|slash\|toolbar\|palette, key?, when?, args?, group?, order?, layer}`，一个机制五处复用 |
+| **上下文键** | `src/view/editor/editor.ts` `ctxKeys()` ＋ `src/main.ts` `uiCtx()` | 开放键空间；`composing` 也是一个键（不是一个 if） |
 
 - `resolveKey()`：**从下往上求值，第一条 `key` ＋ `when` 都匹配的胜出**；层次序 `user > plugin > core`。
-- `resolveBindings(kind, ctx, {prefix, query})`：菜单/斜杠/工具栏/命令面板**都是它的渲染结果**（`src/ui/layers.ts` 一个渲染器）。
+- `resolveBindings(kind, ctx, {prefix, query})`：菜单/斜杠/工具栏/命令面板**都是它的渲染结果**（`src/ui/overlay/layers.ts` 一个渲染器）。
 - 命令面板列的是**命令表的全部命令**（51 条，其中大部分没有任何键位）——这就是键盘可达性的兜底。
 
 ### 核心模块的来源（**不许退化的部分**）
@@ -88,7 +88,7 @@ pnpm arch:check   # 只跑静态那一层（秒级）
    解析不到就是 `dangling`（不静默错指）。删掉它一定是显式动作——不会「删字顺手吃掉」；
 3. 结构操作：缩进/取消缩进/兄弟交换/拖拽挂载（带循环守卫）/复制子树（全部发新 id）/折叠/待办。
 
-**视图层**（`src/view/editor.ts`）沿用同一套输入面原型的形状：单一 `contenteditable` 容器 ＋ **扁平块级 DOM ＋ `data-depth` ＋ padding 缩进**
+**视图层**（`src/view/editor/editor.ts`）沿用同一套输入面原型的形状：单一 `contenteditable` 容器 ＋ **扁平块级 DOM ＋ `data-depth` ＋ padding 缩进**
 （DOM 层级会与窗口化虚拟化打架），组合期不重渲染该块、`compositionend` 后补渲染。
 本层**一个键位都不处理**：document 上只有一个 dispatcher，它做的是
 `resolveKey(事件, 上下文键)` → `registry.invoke(命令, 参数, 'keymap')`。
@@ -162,7 +162,7 @@ pnpm arch:check   # 只跑静态那一层（秒级）
   `index.html` 与 CSS 去注释后逐行扫。
 - **扫描范围**：`src/**/*.ts`、`src/**/*.css`、`electron/**/*.ts`、`index.html`。
 - **白名单与理由**：
-  - `src/core/msg.ts` —— 字典本身；`src/core/seed.ts` —— 假数据（笔记正文不是 UI 文案）；
+  - `src/core/infra/msg.ts` —— 字典本身；`src/core/infra/seed.ts` —— 假数据（笔记正文不是 UI 文案）；
   - **`console.*` 的实参**（本仓 7 处）—— 开发者日志，不是用户可见文案；把它们塞进 i18n 字典
     会让字典变成杂物间。判定是按 AST 找 `console.log/warn/...` 的实参位置，不是行级猜测。
   - `checks/**`、`scripts/**` —— 测试与脚本，本来就不该被「用户文案」的纪律约束（也不在扫描范围）。
@@ -180,7 +180,7 @@ pnpm arch:check   # 只跑静态那一层（秒级）
   （`src/core/**`、`src/view/**`、`src/ui/**`、`src/main.ts`、`electron/*`）。
   目录没落地的阶段，**映射表就是那条约定**；将来拆目录时，这张表删掉、换成按目录判。
   `src/main.ts` 单列为 `app`（renderer 装配入口，四层里没有它）。
-- **白名单：类型导入**（`import type`）。本仓只有一条：`src/core/ports.ts` → `src/view/editor.ts` 的
+- **白名单：类型导入**（`import type`）。本仓只有一条：`src/core/infra/ports.ts` → `src/view/editor/editor.ts` 的
   `BlockEditor` 类型（`App.ed` 要它）。`import type` 在编译期就被擦掉，运行时零耦合；
   要连它也禁，得把 `App` 门面从 `ports.ts` 挪出去 —— 那是另一件事（记在 §5 第 1 条旁边）。
 - **现状**：`view` 里没有 React（一条都没有），`core` 没有反向 import（除上面那条类型边），
@@ -231,7 +231,7 @@ AST 遍历 `electron/**/*.ts`，按**白名单**判：只放行 `node:*`／`elec
    视觉，**不在本轮**（本轮的任务是「TS/组件里的字面量清零」；CSS 里先卡住颜色，长度如实记账）。
    这条欠账要消失，得单独排一轮「token 化全量 CSS」，不是顺手能干的。
 - **白名单与理由**：
-  - `src/core/msg.ts` / `src/core/seed.ts`（里面没有样式）；
+  - `src/core/infra/msg.ts` / `src/core/infra/seed.ts`（里面没有样式）；
   - （原 `thumbUri` 的 SVG 取色白名单已随资产层落地删除：那张程序生成的渐变图不再是「真图」的替身。）
   - `electron/main.ts` 的 `BrowserWindow.backgroundColor`：主进程**没有 CSS**，首帧前的窗口底色
     只能由 shell 给（现在是 `nativeTheme.shouldUseDarkColors ? 暗 : 亮`，避免暗色系统上先闪一帧白）。
@@ -281,7 +281,7 @@ AST 遍历 `electron/**/*.ts`，按**白名单**判：只放行 `node:*`／`elec
   多一份答案；分歧那天没人知道，直到某处功能静默失效。实测过一次：日记流只看顶层、索引走整片森林
   ⇒ 同一天两个答案。
 - **白名单与理由**：
-  - **`src/core/walk.ts`** —— 唯一入口 `walkForest` 本身（它就是那处递归）。
+  - **`src/core/model/walk.ts`** —— 唯一入口 `walkForest` 本身（它就是那处递归）。
   - **DOM 遍历不算**：它们走 `childNodes`（`for (const c of Array.from(n.childNodes))`），
     表达式里没有 `.children`，天然不命中。
   - **`cloneSubtree` 的 `cp` 不算**：它用 `x.children.map(cp)` —— 那是**造树**不是**走树**
@@ -301,7 +301,7 @@ AST 遍历 `electron/**/*.ts`，按**白名单**判：只放行 `node:*`／`elec
   所以把它写回来时类型检查与既有单测都不会喊；只有真编辑几轮之后才会显形
   （「删字顺手吃掉原子」「插在端点处多吞一个字」）。这条断言的作用是让「写回来」当场变红。
 - **白名单：无**——那些名字对应的机制已被序列语义与块上归属取代，没有正当用途。
-- **反证**：在 `src/core/runs.ts` 末尾加一行 `export const mapAtoms = 1` ⇒ 立刻红；
+- **反证**：在 `src/core/model/runs.ts` 末尾加一行 `export const mapAtoms = 1` ⇒ 立刻红；
   删掉即回绿。
 - **资产那一半**：`ImageRun` / `thumbUri` 也在同一张禁用名单里，另外单扫
   「`t:` 的值是 `'image'`」——那是**不需要标识符**的复活方式（写个字面量就成立），
@@ -321,7 +321,7 @@ AST 遍历 `electron/**/*.ts`，按**白名单**判：只放行 `node:*`／`elec
 
 ### `[27]` 块形状只有四个内容槽
 
-- **检查方式**：AST 读 `src/core/model.ts` 的 `interface Block`，成员名必须都在白名单里
+- **检查方式**：AST 读 `src/core/model/model.ts` 的 `interface Block`，成员名必须都在白名单里
   （`id`／`content`／`children`／`created`／`modified`／`annos`／`props`）。加字段就要改白名单，
   **那是一次显式动作**，不会顺手发生。
 - **为什么是硬断言**：`parent`／`left` 一旦进块，就和 `children` 成了并列的两份父子关系。
