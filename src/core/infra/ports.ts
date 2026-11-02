@@ -2,7 +2,7 @@
  * 端口声明（**只有类型，零运行时代码**）。
  *
  * 为什么单独一个文件：`App` 是「命令 ↔ 装配层」之间的**唯一契约**，但它原先住在 `commands.ts` 里，
- * 于是 `commands.ts` 必须 `import type { BlockEditor } from '../../view/editor.ts'` —— 一条 **core → view** 的
+ * 于是 `commands.ts` 必须 `import type { BlockEditor } from '../../view/editor/editor.ts'` —— 一条 **core → view** 的
  * 层级反向边，只能靠 `arch-check [13]` 的白名单放行。
  *
  * 把契约提到这里之后：
@@ -14,7 +14,7 @@
  * 命令不知道 UI ——这里不许出现任何 DOM 类型（`HTMLElement`／`KeyboardEvent` …）；
  * 唯一放行的是 `DOMRect`，因为「菜单挂在哪个矩形旁边」是**命令参数的形状**，不是 DOM 操作。
  */
-import type { BlockEditor } from '../../view/editor.ts'
+import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { CtxKeys } from '../index.ts'
 import type { QuerySpec } from '../query/query.ts'
 import type { ChoiceScope } from '../props/props.ts'

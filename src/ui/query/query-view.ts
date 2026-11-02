@@ -66,7 +66,7 @@ import {
 } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
-import { BlockEditor, type Run } from '../../view/editor.ts'
+import { BlockEditor, type Run } from '../../view/editor/editor.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { BlockCell } from '../block-ui/block-cell.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'

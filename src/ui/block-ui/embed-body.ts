@@ -37,7 +37,7 @@ import {
 } from '../../core/index.ts'
 import type { Tx } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
-import type { BlockEditor } from '../../view/editor.ts'
+import type { BlockEditor } from '../../view/editor/editor.ts'
 import { EditableBlock } from './editable-block.ts'
 
 export interface EmbedBodyDeps {

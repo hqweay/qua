@@ -20,7 +20,7 @@ import { choicesOf, clockLabel, displayNameOf, hasValue, liveChildren, propDispl
 import { choiceCells, ChoiceLookupIndex, type ChoiceLookup, type FieldRow } from '../../core/props/props.ts'
 import { plainText } from '../../core/model/runs.ts'
 import { t } from '../../core/infra/msg.ts'
-import { makeTagChipEl } from '../../view/block-dom.ts'
+import { makeTagChipEl } from '../../view/editor/block-dom.ts'
 import type { BlockCell } from '../block-ui/block-cell.ts'
 import { makeCellEditor } from '../block-ui/properties.ts'
 import {

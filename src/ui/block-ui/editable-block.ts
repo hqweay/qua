@@ -17,10 +17,10 @@
  * 「装什么」归消费者（`load`）：挂载区＝重查一栏、查询视图＝解冻结果、窗口＝按 id 重取。
  */
 import { type Block, type BlockStore } from '../../core/index.ts'
-import { EDIT_ISLAND_ATTR } from '../../view/block-dom.ts'
-import { DeferredFlush } from '../../view/deferred-flush.ts'
-import { bindPressFreeze } from '../../view/editor-events.ts'
-import { BlockEditor, type Run } from '../../view/editor.ts'
+import { EDIT_ISLAND_ATTR } from '../../view/editor/block-dom.ts'
+import { DeferredFlush } from '../../view/editor/deferred-flush.ts'
+import { bindPressFreeze } from '../../view/editor/editor-events.ts'
+import { BlockEditor, type Run } from '../../view/editor/editor.ts'
 
 /** 补做被冻结的重载的间隔：够 `click` 派发完（mouseup 之后同一任务里还有它），又仍在用户眼里是「立刻」 */
 const FLUSH_MS = 200

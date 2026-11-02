@@ -93,8 +93,8 @@ import {
   type TriggerHit,
   type UndoKind,
   type VisibleRow,
-} from '../core/index.ts'
-import { resolveRef } from '../core/relations/ref.ts'
+} from '../../core/index.ts'
+import { resolveRef } from '../../core/relations/ref.ts'
 import {
   clearMarks as clearRunsMarks,
   fromProjection,
@@ -120,8 +120,8 @@ import {
   type RefRun,
   type Run as InlineRun,
   type RunWithId,
-} from '../core/model/runs.ts'
-import { journalDateLabel, type OpenPlace, type SecLayout, type ShellCol } from '../core/index.ts'
+} from '../../core/model/runs.ts'
+import { journalDateLabel, type OpenPlace, type SecLayout, type ShellCol } from '../../core/index.ts'
 export type { SecLayout }
 
 /**
@@ -146,12 +146,12 @@ export interface ViewState {
 }
 
 // 只取**类型**：`view` 拿不到实现，写入的落地方式归装配层（见 `Run`）
-import type { Op, Tx } from '../core/kb/types.ts'
-import type { AssetView } from '../core/infra/assets.ts'
+import type { Op, Tx } from '../../core/kb/types.ts'
+import type { AssetView } from '../../core/infra/assets.ts'
 // 标签块的「找到或创建」有两种落地（直写 / 事务），判据只有一份
-import { ensureTagInTx, tagLookupOf } from '../core/kb/ensure-tag.ts'
+import { ensureTagInTx, tagLookupOf } from '../../core/kb/ensure-tag.ts'
 // 用户可见文案一律走 t
-import { t } from '../core/infra/msg.ts'
+import { t } from '../../core/infra/msg.ts'
 import {
   ALLOWED_ROW_CHILDREN,
   EDIT_ISLAND_ATTR,
@@ -163,7 +163,7 @@ import {
   rowHasInlineViewBody,
   visibleRowHeight,
 } from './block-dom.ts'
-import { assetViewOf, markAssetMissing } from './asset-views.ts'
+import { assetViewOf, markAssetMissing } from '../asset-views.ts'
 import { DeferredFlush } from './deferred-flush.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
 import { bindEditorEvents, type AtomMenuHit, type RefClickHit, type RefClickMods, type TriggerQuery } from './editor-events.ts'

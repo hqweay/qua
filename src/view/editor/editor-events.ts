@@ -13,13 +13,13 @@
  *   1. **组合期（IME composing）不重渲染该块**——否则会打断输入法，`compositionend` 后才补渲染；
  *   2. **键位一个都不在这里处理**——全部交给绑定表，这里只碰「输入与拖拽」。
  */
-import { bindDropTarget, setDragBlock, zoneHint } from './dnd.ts'
+import { bindDropTarget, setDragBlock, zoneHint } from '../dnd.ts'
 import { EDIT_ISLAND_ATTR } from './block-dom.ts'
-import type { TriggerChar } from '../core/infra/trigger.ts'
-import type { RunWithId } from '../core/model/runs.ts'
-import type { Content } from '../core/model/runs.ts'
-import { isCommittedTextInput } from '../core/infra/ime.ts'
-import { openPlaceOf, type OpenPlace } from '../core/views/open.ts'
+import type { TriggerChar } from '../../core/infra/trigger.ts'
+import type { RunWithId } from '../../core/model/runs.ts'
+import type { Content } from '../../core/model/runs.ts'
+import { isCommittedTextInput } from '../../core/infra/ime.ts'
+import { openPlaceOf, type OpenPlace } from '../../core/views/open.ts'
 
 /**
  * **「按下期间不换 DOM」的指针接线**：按下 → 冻结；放开 → 延迟一拍。

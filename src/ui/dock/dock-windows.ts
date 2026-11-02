@@ -39,7 +39,7 @@ import {
 import { expandContexts, unfoldForContext } from '../../core/views/context-expand.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
-import type { BlockEditor, Run } from '../../view/editor.ts'
+import type { BlockEditor, Run } from '../../view/editor/editor.ts'
 import { bindDropTarget } from '../../view/dnd.ts'
 import { applyDockCardState, buildDockCard, type DockCardState } from './dock.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
