@@ -4,7 +4,18 @@
  */
 
 let seq = 0
-const HEX = (n: number, w: number) => n.toString(16).padStart(w, '0')
+
+/**
+ * 定宽补零（默认十进制，id 的 hex 段传 16）——「定宽串」只此一个产地。
+ *
+ * ⚠️ `library.ts` 里还有一份同形的局部 `pad`：它是 arch-check 钉死的零依赖叶子
+ *    （主进程要 import 它拼表名，不许带进任何 core 语义），那份拷贝是这条契约的代价。
+ */
+export function pad(n: number, w: number, radix = 10): string {
+  return n.toString(radix).padStart(w, '0')
+}
+
+const HEX = (n: number, w: number) => pad(n, w, 16)
 
 export function uuidv7Hex(now: number = Date.now()): string {
   /**
