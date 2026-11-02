@@ -11535,7 +11535,7 @@ await check('T127 挂载区：切 tab 只换 roots，编辑器不重建（原地
   await mountTab(page, 'refs')
   assert((await page.textContent(row)).includes('X'), '切走再切回，那一行还在（编辑器没被重建）')
 
-  await page.locator(row).first().click()
+  await page.locator(row).first().click({ position: { x: 12, y: 10 } })
   await page.keyboard.press(kbd('mod+z'))
   await page.waitForTimeout(220)
   assert(!(await page.textContent(row)).includes('X'), '⌘Z 仍能撤掉那一笔（撤销栈没被切 tab 清掉）')
@@ -12899,7 +12899,9 @@ await check('T148 一源三视：挂载区里改字 ⇒ 正文与右槽窗口都
 
   // ① 在挂载区那一处改字：自己那一行立即变（自己的编辑路径），正文与窗口要在防抖窗口后跟上
   const row = `#editor .mount .mount-editor .blk[data-block-id="${ids.b}"] .tx`
-  await page.locator(row).first().click()
+  // 点左端第一行的**纯文字**处：整行盒子居中可能落在行内原子（引用 chip）上，
+  // 那会打开目标页而不是把光标放进这一行（字号一改换行位置就变，曾经踩到）。
+  await page.locator(row).first().click({ position: { x: 12, y: 10 } })
   await page.keyboard.press('End')
   await page.keyboard.type('X')
   await page.waitForTimeout(500)
@@ -12909,7 +12911,7 @@ await check('T148 一源三视：挂载区里改字 ⇒ 正文与右槽窗口都
   assert(edited.dock.includes('X'), `右槽窗口里的同一块应当跟上：${JSON.stringify(edited)}`)
 
   // ② 一次 ⌘Z（焦点还在挂载区）：三处一起回滚
-  await page.locator(row).first().click()
+  await page.locator(row).first().click({ position: { x: 12, y: 10 } })
   await page.keyboard.press(kbd('mod+z'))
   await page.waitForTimeout(500)
   const undone = await readThree()
@@ -17493,6 +17495,53 @@ await check(
     return `无 to 的 dangling ⇒ 建同名块并指过去；目标在回收站 ⇒ 恢复同一 id`
   },
 )
+
+/**
+ * **结果面不是一屏**：查询／引用结果里的「根行」只是这一份装载的深 0，
+ * 不该拿到正文第一层（页／日记）的放大字号。否则同一句话在正文里是 13.5px，
+ * 换到引用栏或查询块里就变成 15.5px——字号跟着**相对深度**走，而不是跟着内容。
+ */
+await check('T214 结果面字号：引用栏／查询块里的正文行与正文同档，不因相对深度放大', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => x.title.includes('输入面笔记'))
+    if (!p) throw new Error('seed page missing')
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+  })
+  await page.waitForTimeout(350)
+  const bodyFs = await page.evaluate(() => {
+    const tx = document.querySelector('#editor .blk[data-depth="1"] > .tx')
+    return tx ? getComputedStyle(tx).fontSize : ''
+  })
+  assert(bodyFs, '前置：正文里应有子块行可测')
+
+  await mountTab(page, 'refs')
+  const refs = await page.evaluate(() => {
+    const tx = document.querySelector('#editor .mount .mount-editor .blk[data-depth="0"] > .tx')
+    return tx ? { fs: getComputedStyle(tx).fontSize, text: (tx.textContent ?? '').trim().slice(0, 20) } : null
+  })
+  assert(refs, '前置：引用栏应有结果行')
+  assert(refs.fs === bodyFs, `引用栏正文应与正文同字号：${refs.fs} vs ${bodyFs}（${refs.text}）`)
+
+  await page.evaluate(() =>
+    window.__qua.invoke('core.query/create', {
+      kind: 'page',
+      name: '字号探针查询',
+      spec: { where: { text: '引用' } },
+    }),
+  )
+  await page.waitForTimeout(500)
+  const query = await page.evaluate(() => {
+    const tx = document.querySelector('.queryview .blk[data-depth="0"] > .tx')
+    return tx ? { fs: getComputedStyle(tx).fontSize, text: (tx.textContent ?? '').trim().slice(0, 20) } : null
+  })
+  assert(query, '前置：查询块应有结果行')
+  assert(query.fs === bodyFs, `查询结果正文应与正文同字号：${query.fs} vs ${bodyFs}（${query.text}）`)
+
+  await ctx.close()
+  return `正文/引用/查询：${bodyFs}/${refs.fs}/${query.fs}`
+})
 
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
