@@ -32,6 +32,7 @@
     "gate": "node scripts/gate.mjs",
     "gate:web": "node scripts/gate.mjs --no-electron",
     "gate:fast": "node scripts/gate.mjs --fast",
+    "gate:queued": "node scripts/gate-queued.mjs",
     "gate:bundle": "pnpm gate && pnpm check:bundle"
   },
   "devDependencies": {
