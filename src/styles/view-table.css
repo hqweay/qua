@@ -23,7 +23,8 @@
   cursor: pointer;
 }
 .qv-view-btn:hover {
-  background: var(--ui-surface-sunken);
+  /* 查询体可能落在面板底色上（正文内联），同色 hover 会消失 ⇒ 用半透明覆盖 */
+  background: var(--ui-bg-hover);
   color: var(--ui-text);
 }
 .qv-view-btn[data-active='1'] {

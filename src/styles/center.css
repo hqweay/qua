@@ -150,6 +150,8 @@
   **段的排列**：每个 section 根的行序列被包进 `.sec`（段边界是 DOM 的一层，见 editor 的
   `renderRows`）。缺省（column，单列流）下 `.sec` 是 `display: contents`——零几何影响，
   只是给「分割线归段」一个判定点；`row`／`grid` 才给段真正的盒子。
+  ⚠️ 例外：单列流的**日记段**需要一个盒子承载段间留白与分隔线（见 `blocks.css`）——
+     留白归容器，块自己仍不许带 padding/margin。
 
   ⚠️ `row`／`grid` 不虚拟化（装配层负责）：段要有完整的盒子才能当列用。
   ⚠️ grid 的列数由段数推导：`--sec-cols` 由编辑器写（`applySecCols`）。
