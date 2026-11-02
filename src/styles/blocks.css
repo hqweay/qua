@@ -1018,10 +1018,16 @@
    **它是一块面板，不是正文的一行**：正文可以一直往下读，挂载区是「这一屏/这一天
    下面另开的一栏」。所以它用底色 ＋ 圆角 ＋ 边线从正文里浮出来——只靠一条 border-top
    时，读者分不清哪一行还是正文、哪一行已经是面板的身子了。
-   ⚠️ 间距仍归容器：块自己的 padding/margin 不变，这里是面板自己的内边距。 */
+   ⚠️ 间距仍归容器：块自己的 padding/margin 不变，这里是面板自己的内边距。
+
+   **对齐要跟着正文的竖线走**：卡片外缘落在块标列（`--ui-blk-gutter`）——
+   不然卡片独自凸在文档左缘，页面上没有任何元素共享那条边，看起来就是「没对齐」。
+   内边距取温和档：body 里住着表格这类宽视图，内缩的每一像素都从它的可用宽度里扣，
+   宽度不足时表格会整台降级成紧凑形态。 */
 .mount {
-  margin-top: var(--ui-gap-5);
-  padding: var(--ui-gap-2) var(--ui-gap-3);
+  margin-top: var(--ui-gap-6);
+  margin-inline: var(--ui-blk-gutter);
+  padding: var(--ui-gap-4);
   background: var(--ui-surface-sunken);
   border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-md);

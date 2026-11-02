@@ -191,7 +191,9 @@ export async function reopenPage(browser, ctx, base, page) {
   await new Promise((r) => setTimeout(r, 120))
   const state = await ctx.storageState()
   await ctx.close()
-  const next = await browser.newContext({ storageState: state })
+  // 视口要跟 freshPage 同档：不传会落到 Playwright 缺省（1280×720），
+  // 「关掉重开」就变成「换了个更小的窗口」，凡是量几何的断言两轮就对不上。
+  const next = await browser.newContext({ storageState: state, viewport: { width: 1440, height: 900 } })
   return openPage(browser, next, base)
 }
 
