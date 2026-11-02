@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, openPlaceOf, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, DERIVED_CARDS, dockKey, isCardCollapsed, type Block, type CtxKeys, type DerivedCardId, type TriggerChar, trashOf, refTitle } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, FEED_MAX, FEED_STEP, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, openPlaceOf, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type CtxKeys, type TriggerChar, trashOf, refTitle } from './core/index.ts'
 import { plainText, type RunWithId } from './core/model/runs.ts'
 import { canWriteText } from './core/model/types.ts'
 import { hasTag, tagIdsOf } from './core/identity/tags.ts'
@@ -34,7 +34,6 @@ import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from 
 import { dispatchKey, installKeydown, type DispatchEnv } from './core/infra/dispatch.ts'
 import { DockWindows } from './ui/dock/dock-windows.ts'
 import { BackrefsCard } from './ui/cards/backrefs-card.ts'
-import { bindDockResize } from './ui/dock/dock-resize.ts'
 import { mountDockSlot } from './ui/dock/dock.ts'
 import { createIcon } from './view/icons.ts'
 import { mountEmbedBody } from './ui/block-ui/embed-body.ts'
@@ -47,6 +46,7 @@ import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { createRowBodyCache } from './app/wiring/row-bodies.ts'
 import { setupDocks } from './app/wiring/docks.ts'
+import { setupCardMenus } from './app/wiring/dock-menus.ts'
 import { setupPanels } from './app/wiring/panels.ts'
 import { setupOwners } from './app/wiring/owners.ts'
 import { QueryTree } from './ui/query/query-tree.ts'
@@ -347,6 +347,8 @@ function uiCtx(): CtxKeys {
 
 /* ------------------------------------------------------------ 槽内容 */
 
+/** 卡头菜单／画廊／窗口卡依赖／槽宽拖拽的家什；赋值在 panels/app 之后（见那一节的注释） */
+let menus: ReturnType<typeof setupCardMenus>
 const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, windowLabel, setWindows, toggleFoldAll, topWindow, closeOtherWindows, closeAllWindows } = setupDocks({
   kb,
   prefs,
@@ -358,7 +360,7 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, w
   getSlots: () => ({ left: dockLeft, right: dockRight }),
   // 检视卡在面板分片里创建并挂进右槽堆叠；这里只在重画时取它（它必须已经在文档里）
   inspectCard: () => chrome.inspectCardEl,
-  showCardMenu: (side, key, anchor) => showCardMenu(side, key, anchor),
+  showCardMenu: (side, key, anchor) => menus.showCardMenu(side, key, anchor),
   /**
    * 反链卡：**一列真实的可编辑块**（与正文「引用」栏同一种东西），不是一列摘要行。
    *
@@ -2602,144 +2604,43 @@ function paintStaticCopy(): void {
 }
 
 /**
- * 卡头右键菜单：**这张卡**的动作（折叠／只看／常驻／置顶／在正文打开）＋
- * 这一槽的批量动作（关闭其他/全部窗口、收起/展开全部）。
- *
- * 动态菜单：行按这张卡此刻的状态现画（与「视图…」菜单同一条纪律——
- * 菜单项是数据现画的，选中之后写路径仍走命令面／装配层的同一处入口）。
- * 关闭类动作只数**窗口卡**：派生卡／组件卡／命令小卡是家具，有自己的 ✕。
+ * 侧槽的家什（卡头菜单／组件画廊／窗口卡依赖／槽宽拖拽）收在 `wiring/dock-menus.ts`。
+ * 这里只装配：deps 一半来自 setupDocks 的返回（状态的家在那边），一半是装配层活引用。
+ * 赋值晚于 panels/app 的初始化；更早的引用（setupDocks 的回调、槽的 onAdd）都是
+ * 箭头闭包，点击时才取 `menus`。
  */
-function showCardMenu(side: 'left' | 'right', key: string, anchor: DOMRect): void {
-  const st = cardStateFor(side, key)
-  const dock = prefs().dock
-  const entry = dock[side].cards.find((e) => dockKey(e) === key)
-  const b = entry?.kind === 'block' ? kb.get(entry.block) : undefined
-  const isWindow = entry?.kind === 'block'
-  const blockId = b?.id ?? ''
-  const windows = dock[side].cards.filter((e) => e.kind === 'block')
-  const anyExpanded = dock[side].cards.some((e) => !isCardCollapsed(dock, side, dockKey(e)))
-  const rows: Row[] = [
-    { id: 'toggle', label: st.collapsed ? t('ui.dock.expandCard') : t('ui.dock.collapseCard') },
-    { id: 'solo', label: st.solo ? t('ui.dock.unsoloCard') : t('ui.dock.soloCard') },
-    ...(isWindow
-      ? [
-          { id: 'pin', label: st.pinned ? t('ui.dock.unpinCard') : t('ui.dock.pinCard') },
-          { id: 'top', label: t('cmd.dock.topWindow') },
-          { id: 'focus', label: t('ui.dock.focusInEditor') },
-        ]
-      : []),
-    { id: 'closeOthers', label: t('ui.dock.closeOtherWindows'), disabled: windows.length <= 1 },
-    { id: 'closeAll', label: t('ui.dock.closeAllWindows'), disabled: windows.length === 0 },
-    { id: 'foldAll', label: anyExpanded ? t('ui.dock.foldAll') : t('ui.dock.unfoldAll') },
-  ]
-  layers.openMenu({
-    rows,
-    anchor,
-    searchable: false,
-    emptyText: t('ui.dock.tileGalleryEmpty'),
-    onPick: (row) => {
-      switch (row.id) {
-        case 'toggle':
-          st.onToggleCollapse()
-          return
-        case 'solo':
-          st.onToggleSolo()
-          return
-        case 'pin':
-          st.onTogglePin?.()
-          return
-        case 'top':
-          void registry.invoke('core.dock/top-window', { blockId }, 'dock')
-          return
-        case 'focus':
-          void registry.invoke('core.block/focus-block', { blockId }, 'dock')
-          return
-        case 'closeOthers':
-          closeOtherWindows(side, key)
-          return
-        case 'closeAll':
-          closeAllWindows(side)
-          return
-        case 'foldAll':
-          toggleFoldAll(side)
-          return
-      }
-    },
-  })
-}
-
-/**
- * 「添加组件」画廊：复用命令面板的列表/搜索/键盘。
- *
- * 两类条目共用一张列表：
- *   · 带 `tile` 的命令 → `cmd:<命令名>` 小卡；
- *   · 派生卡（目录在 `core/dock.ts` 的 `DERIVED_CARDS`）。
- * 命令是**策展过的**集合（不是所有命令）。
- */
-function showWidgetGallery(side: 'left' | 'right'): void {
-  const cards = prefs().dock[side].cards
-  const taken = new Set(cards.filter((e) => e.kind === 'cmd').map(dockKey))
-  /**
-   * **派生卡的目录**在 `core/dock.ts` 的 `DERIVED_CARDS`（与渲染分支同一份）：
-   * 这里只把它翻成画廊行。派生卡和「带 `tile` 的命令」并列在同一张画廊里，
-   * 是因为它们的 ✕ 只摘露面、**加回来只有这一处入口**。
-   *
-   * 行 id 带一个画廊内部的 `derived:` 前缀——它**不进 `cards`**（那里存的是 `DockEntry`），
-   * 只是「这一行选中的是派生卡」的本地标记；前缀到条目 id 的映射放在 `derivedRows` 里，
-   * `onPick` 查表，不靠字符串切分。
-   */
-  const derivedRows = new Map<string, DerivedCardId>()
-  const rows: Row[] = [
-    ...registry
-      .list()
-      .filter((d) => d.tile && !d.hidden && !taken.has(`cmd:${d.name}`))
-      .map((d) => ({
-        id: d.name,
-        label: d.title,
-        hint: d.name,
-        icon: d.tile!.icon,
-        group: `palette/${d.category}`,
-        command: d.name,
-        keyHint: keyHints().get(d.name),
-      })),
-    ...DERIVED_CARDS.filter((d) => !cards.some((e) => e.kind === 'derived' && e.card === d.id)).map((d) => {
-      const id = `derived:${d.id}`
-      derivedRows.set(id, d.id)
-      return {
-        id,
-        label: t(d.label),
-        // 检视卡的主体是「这一屏唯一的那一块」：多根屏上加进来也看不见 —— 先说清为什么
-        hint: d.id === 'inspect' && ed.doc.roots.length !== 1 ? t('ui.dock.inspectNoSubject') : '',
-        icon: d.icon,
-        group: `palette/${t('menu.cat.widget')}`,
-        keyHint: undefined,
-      }
-    }),
-  ].sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label))
-  layers.openMenu({
-    rows,
-    anchor: null,
-    title: t('ui.dock.tileGallery'),
-    searchable: true,
-    focusSearch: true,
-    placeholder: t('ui.palette.placeholder'),
-    emptyText: t('ui.dock.tileGalleryEmpty'),
-    onPick: (row) => {
-      const derived = derivedRows.get(row.id)
-      if (derived) {
-        addDerived(side, derived)
-        /**
-         * 检视卡在多根屏上是**按主体收起**的（这一屏没有「一个东西」可言）：加进来
-         * 也不会出现在槽里。不弹一句，用户看到的就是「点了添加，什么都没有」——
-         * 加卡这个动作本身必须是诚实的。
-         */
-        if (derived === 'inspect' && ed.doc.roots.length !== 1) app.toast(t('ui.dock.inspectAdded'), 'info')
-        return
-      }
-      if (row.command) addTile(side, row.command)
-    },
-  })
-}
+menus = setupCardMenus({
+  cardStateFor,
+  closeCard,
+  windowLabel,
+  addTile,
+  addDerived,
+  toggleFoldAll,
+  closeOtherWindows,
+  closeAllWindows,
+  kb,
+  prefs,
+  getRegistry: () => registry,
+  layers,
+  keyHints,
+  getEd: () => ed,
+  setEd: (next) => {
+    ed = next
+  },
+  getMainEd: () => mainEd,
+  store: blocks,
+  run,
+  wireEditor: wireViewEditor,
+  mountViewRoot: panels.mountBlockView,
+  syncSections,
+  scheduleSave,
+  scheduleBadge,
+  applyChrome,
+  scheduleDeviceSave,
+  toast: (msg, kind) => app.toast(msg, kind),
+  dockMinWidth,
+  dockMaxWidth,
+})
 
 const dockLeft = mountDockSlot($('dock-left'), {
   side: 'left',
@@ -2749,7 +2650,7 @@ const dockLeft = mountDockSlot($('dock-left'), {
   foldAllLabel: t('ui.dock.foldAll'),
   resizeLabel: t('ui.dock.resize'),
   icon: 'lucide:chevron-left',
-  onAdd: () => showWidgetGallery('left'),
+  onAdd: () => menus.showWidgetGallery('left'),
   onCollapse: () => registry.invoke('core.dock/toggle-left', {}, 'dock'),
   onFoldAll: () => toggleFoldAll('left'),
 })
@@ -2761,85 +2662,18 @@ const dockRight = mountDockSlot($('dock-right'), {
   foldAllLabel: t('ui.dock.foldAll'),
   resizeLabel: t('ui.dock.resize'),
   icon: 'lucide:chevron-right',
-  onAdd: () => showWidgetGallery('right'),
+  onAdd: () => menus.showWidgetGallery('right'),
   onCollapse: () => registry.invoke('core.dock/toggle-right', {}, 'dock'),
   onFoldAll: () => toggleFoldAll('right'),
 })
 
-/**
- * 窗口：每个侧槽一个管理器，按块 id 建一张卡（卡里是**真实块**的编辑器，共享 store）。
- *
- * 依赖一律是读函数（库会被整体替换，传值会拿到过期快照）。
- */
-const dockWindowsDeps = (side: 'left' | 'right'): ConstructorParameters<typeof DockWindows>[0] => ({
-  store: blocks,
-  /**
-   * source 由**发起写的那台窗口编辑器**自己注入（见 `Run`）——不是「活动编辑器」：
-   * 从正文拖块进卡的落手不经过焦点，活动编辑器还在正文，拿它当 source 会让
-   * 正文把这次通知当成自己写的，跳过重画。
-   */
-  write: (fn, source) => run(fn, source ?? ed),
-  kb,
-  label: windowLabel,
-  onClose: (blockId) => closeCard(side, blockId),
-  /**
-   * 窗口编辑器也接**整份** `viewEvents`（与挂载区/查询结果同一条口径）。
-   *
-   * ⚠️ 必须整份接上：只手接几支（change/块标/右槽/引用）的做法漏接不报错——
-   * 右键块菜单、`#`·`@` 补全、撞名提示这些在窗口里点了就是没反应。
-   */
-  wire: (editor, change) => wireViewEditor(editor, change, 'dock', true),
-  /**
-   * 窗口里也是「正文」：根块是视图宿主就画它的源视图；行内的查询块也画结果。
-   * 与中心同一条规则，只是容器换了 —— 不是第二种窗口语义。
-   */
-  mountViewRoot: (block, into, source) => panels.mountBlockView(block, into, source, 'dock'),
-  onFocus: (editor) => {
-    ed = editor
-    scheduleBadge()
-  },
-  /** 窗口被拆掉时，别让 `ed` 指着一个已经 dispose 的编辑器 */
-  onDispose: (editor) => {
-    if (ed !== editor) return
-    ed = mainEd
-    scheduleBadge()
-  },
-  // 窗口内编辑：只落盘与刷角标，**不重画槽**（重画会打断这一行的输入）
-  onChange: () => {
-    syncSections()
-    scheduleSave()
-    scheduleBadge()
-  },
-  cardState: (blockId) => cardStateFor(side, blockId),
-})
-
 setWindows({
-  left: new DockWindows(dockWindowsDeps('left')),
-  right: new DockWindows(dockWindowsDeps('right')),
+  left: new DockWindows(menus.dockWindowsDeps('left')),
+  right: new DockWindows(menus.dockWindowsDeps('right')),
 })
 
-/** 手柄宽度：起拖取**当前渲染宽度**（存的是 null 时也不能让槽先跳一下） */
-const bindResize = (side: 'left' | 'right', slot: typeof dockLeft): void => {
-  bindDockResize({
-    side,
-    handle: slot.resizeEl,
-    width: () => slot.root.getBoundingClientRect().width,
-    min: dockMinWidth,
-    max: () => dockMaxWidth(side),
-    onResize: (width) => {
-      prefs().dock[side].width = width
-      applyChrome()
-      scheduleDeviceSave()
-    },
-    onReset: () => {
-      prefs().dock[side].width = null
-      applyChrome()
-      scheduleDeviceSave()
-    },
-  })
-}
-bindResize('left', dockLeft)
-bindResize('right', dockRight)
+menus.bindResize('left', dockLeft)
+menus.bindResize('right', dockRight)
 diag = setupDiagnostics({
   DEV_SURFACE,
   store,
