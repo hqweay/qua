@@ -554,7 +554,7 @@ export function setupPanels(deps: PanelsDeps) {
     const ownerBlock = blockOf(owner)
     const vh = new ViewHost(createViewHostEls(), {
       store: blocks,
-      write: (fn) => run(fn, opts?.source?.() ?? edOfMount(hostId)),
+      write: (fn, source) => run(fn, source ?? opts?.source?.() ?? edOfMount(hostId)),
       kb,
       owners,
       owner,
@@ -690,7 +690,7 @@ export function setupPanels(deps: PanelsDeps) {
     const hostId = host.id
     const area = new MountArea({
       store: blocks,
-      write: (fn) => run(fn, edOfMount(hostId)),
+      write: (fn, source) => run(fn, source ?? edOfMount(hostId)),
       kb,
       owners,
       journalMounts: () => journalMounts(),

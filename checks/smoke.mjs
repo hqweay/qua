@@ -5543,6 +5543,141 @@ await check('T46 从正文块标拖进左槽 ⇒ 钉住并渲染；在槽里编�
   return `同块两处：槽内打字 ⇒ 正文含「槽内附加」；正文打字 ⇒ 槽内同步（${mirror.slice(0, 12)}…）`
 })
 
+await check('T217 从正文拖块到卡片堆栈的空隙 ⇒ 窗口卡插到那张卡旁边（不再只能追加到末尾）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  const ids = await page.evaluate(() => {
+    const bs = window.__qua.blocks().filter((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)
+    return { a: bs[0].id, b: bs[1].id, c: bs[2].id }
+  })
+  // 先钉两张进右槽：清单里它们按拖入顺序相邻
+  const d1 = await dragBlockToDock(page, ids.a, 'right')
+  const d2 = await dragBlockToDock(page, ids.b, 'right')
+  assert(d1?.hot && d2?.hot, '两次拖入都应高亮')
+  await page.waitForTimeout(160)
+  const seeded = await dockState(page)
+  const ia = seeded.pref.right.cards.indexOf(ids.a)
+  const ib = seeded.pref.right.cards.indexOf(ids.b)
+  assert(ia >= 0 && ib === ia + 1, `两张卡应按拖入顺序相邻：${JSON.stringify(seeded.pref.right.cards)}`)
+
+  // 第三块拖到 b 的卡片左半边 ⇒ 指示线亮在 b 上，松手后 c 插在 b 之前
+  const r = await page.evaluate(
+    ({ a, b, c }) => {
+      const marker = document.querySelector(`.blk[data-block-id="${c}"] .marker`)
+      const card = document.querySelector(`#dock-right .dock-card[data-card-id="${b}"]`)
+      const stack = document.querySelector('#dock-right .dock-stack')
+      if (!marker || !card || !stack) return null
+      const rect = card.getBoundingClientRect()
+      const dt = new DataTransfer()
+      const ev = (type) =>
+        new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: rect.left + 2, clientY: rect.top + rect.height / 2 })
+      marker.dispatchEvent(ev('dragstart'))
+      stack.dispatchEvent(ev('dragover'))
+      const marked = card.dataset.dropBefore === '1'
+      const hint = document.querySelector('.dnd-hint')?.textContent ?? ''
+      stack.dispatchEvent(ev('drop'))
+      marker.dispatchEvent(ev('dragend'))
+      return { marked, hint }
+    },
+    ids,
+  )
+  assert(r, '正文块标、b 的卡片与右槽堆栈都应存在')
+  assert(r.marked, `块载荷拖到卡片旁应亮 before 指示线：${JSON.stringify(r)}`)
+  assert(r.hint.includes('在这里打开'), `堆栈落点的提示是「在这里打开」：${JSON.stringify(r.hint)}`)
+  await page.waitForTimeout(160)
+  const after = await dockState(page)
+  const ic = after.pref.right.cards.indexOf(ids.c)
+  assert(ic === ib, `c 应插在 b 之前（b 右移一格）：${JSON.stringify(after.pref.right.cards)}`)
+  assert(after.pref.pinned.includes(ids.c), `拖进来应常驻：${JSON.stringify(after.pref.pinned)}`)
+  const domOrder = after.rows.right.indexOf(ids.a) < after.rows.right.indexOf(ids.c) && after.rows.right.indexOf(ids.c) < after.rows.right.indexOf(ids.b)
+  assert(domOrder, `DOM 顺序应跟着清单走：${JSON.stringify(after.rows.right)}`)
+  await ctx.close()
+  return `按位置插入：清单 [a,c,b]、c 常驻、DOM 同序`
+})
+
+await check('T218 从正文拖块到某张窗口卡的正文区 ⇒ 移进那张卡的子树；真实指针序列下正文实时刷新', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  const ids = await page.evaluate(() => {
+    const bs = window.__qua.blocks().filter((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)
+    const root = bs.find((x) => x.children > 0)?.id ?? ''
+    // 源块不能已经在卡根的子树里（那会是自环，落点该拒收）
+    const src = bs
+      .filter((x) => x.children === 0 && x.id !== root)
+      .find((x) => !document.querySelector(`.blk[data-block-id="${root}"] .blk[data-block-id="${x.id}"]`))?.id ?? ''
+    return { root, src }
+  })
+  assert(ids.root && ids.src && ids.root !== ids.src, `应有带孩子的卡根与一个不在它子树里的源块：${JSON.stringify(ids)}`)
+  const pin = await dragBlockToDock(page, ids.root, 'right')
+  assert(pin?.hot, '卡根拖入右槽应高亮')
+  await page.waitForTimeout(160)
+
+  /**
+   * 真实用户的一次拖拽里，指针在拖拽开始就被浏览器收走（`pointercancel`），
+   * `pointerup` 不会来——这里按同样顺序派发，钉住「松手即刷新」而不是
+   * 「点一下别处才补画」。
+   */
+  const r = await page.evaluate(
+    ({ root, src }) => {
+      document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }))
+      const marker = document.querySelector(`.blk[data-block-id="${src}"] .marker`)
+      const row = document.querySelector(`#dock-right .dock-card[data-card-id="${root}"] .blk[data-block-id="${root}"]`)
+      if (!marker || !row) return null
+      const rect = row.getBoundingClientRect()
+      const dt = new DataTransfer()
+      const ev = (type) =>
+        new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: rect.left + 40, clientY: rect.top + rect.height / 2 })
+      marker.dispatchEvent(ev('dragstart'))
+      document.dispatchEvent(new Event('pointercancel'))
+      row.dispatchEvent(ev('dragover'))
+      const hot = { zone: row.dataset.drop ?? '', hint: document.querySelector('.dnd-hint')?.textContent ?? '' }
+      row.dispatchEvent(ev('drop'))
+      marker.dispatchEvent(ev('dragend'))
+      const ops = window.__qua
+        .lastOps()
+        .filter((o) => o.e === 'block' && o.op === 'upsert' && o.id === src)
+        .map((o) => o.value)
+      return { hot, ops }
+    },
+    ids,
+  )
+  assert(r, '正文块标与卡根的行都应存在')
+  assert(r.hot.zone === 'inside', `悬停在卡根行中部应亮 inside：${JSON.stringify(r.hot)}`)
+  assert(r.hot.hint.includes('移进'), `卡片正文区的提示要说「移进…」（inside）：${JSON.stringify(r.hot.hint)}`)
+  assert(
+    r.ops.some((v) => v?.parent === ids.root),
+    `落手应真的一条事务写树（upsert.parent = 卡根）：${JSON.stringify(r.ops)}`,
+  )
+  await page.waitForTimeout(450)
+  const dom = await page.evaluate(
+    ({ root, src }) => {
+      // 正文是扁平行 ＋ data-depth（缩进不用 DOM 层级）⇒ 结构真刷新与否要看**行序**：
+      // src 的行应搬到 root 子树可见范围的**最后**（它是新挂的最后一个孩子），且全页只有这一行
+      const rows = [...document.querySelectorAll('#editor .blk[data-block-id]')]
+      const iR = rows.findIndex((r) => r.dataset.blockId === root)
+      const rd = Number(rows[iR]?.dataset.depth ?? -99)
+      const sub = []
+      for (let i = iR + 1; i < rows.length; i++) {
+        if (Number(rows[i].dataset.depth) <= rd) break
+        sub.push(rows[i].dataset.blockId)
+      }
+      return {
+        main: sub[sub.length - 1] === src && rows.filter((r) => r.dataset.blockId === src).length === 1,
+        card:
+          document.querySelector(`#dock-right .dock-card[data-card-id="${root}"] .blk[data-block-id="${src}"]`) !==
+          null,
+      }
+    },
+    ids,
+  )
+  assert(dom.main, `正文应实时显示块已进卡根的子树（不用聚焦别处再回来看）：${JSON.stringify(dom)}`)
+  assert(dom.card, `卡里应渲染新进来的子块：${JSON.stringify(dom)}`)
+  await ctx.close()
+  return `移进卡片子树：inside 提示、一条 upsert{parent:卡根}；松手即正文/卡两处同构`
+})
+
 await check('T47 槽内连续输入不被整槽重画打断；⌘Z 在槽里回滚的是**全局共享**的那一份', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))

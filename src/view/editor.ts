@@ -47,6 +47,7 @@ import {
   createObjRecordInTx,
   trashOf,
   dropMove,
+  dropMoveExternal,
   normSel,
   outdentMove,
   tagIdsOf,
@@ -183,9 +184,16 @@ export interface Probe {
  * 方法内要拿新块的 id 去放光标），而「怎么开事务、失败怎么回滚、op 交给谁攒」
  * 都是装配层的决定。`view` 只 import **类型**，不 import 实现 —— 层向内，`core ← view` 成立。
  *
+ * `source` ＝ 发起这次写的编辑器（**编辑器自己注入**，装配层的闭包只转发，缺省即没有）：
+ * store 的订阅者据此判「发起的视图自己已经渲染过」，跳过自己的重画。
+ *
+ * ⚠️ 不能由装配层拿「活动编辑器」当 source：跨表面拖拽（从正文拖块进侧槽卡）落手时
+ * 焦点从未进过那张卡，活动编辑器还是正文 —— 于是正文把这次通知当成自己写的，跳过
+ * 重画，界面停在拖拽前（实测：模型已动、两个表面都不动，点一下别处才补画）。
+ *
  * 省略 ⇒ 编辑器照旧直改活块（迁移期的兜底，不是终点）。
  */
-export type Run = <R>(fn: (tx: Tx) => R) => R
+export type Run = <R>(fn: (tx: Tx) => R, source?: unknown) => R
 
 export interface ViewOpts {
   container: HTMLElement
@@ -534,13 +542,16 @@ export class BlockEditor {
     this.allowBlankCreate = o.allowBlankCreate !== false
     this.allowRootRemove = o.allowRootRemove !== false
     // 写入口顺手作废那张派生表：标签声明／定义 kind 变了，下一次 `todoOf` 要重算
-    this.write = (fn) => {
+    this.write = (fn, source) => {
       this.fieldTableCache = null
+      // 发起写的编辑器就是自己（见 `Run` 的 source 口径）：不注入的话，装配层的
+      // 「活动编辑器」兜底会把跨表面的一笔写记到别的编辑器头上，那台就跳过重画，
+      // 界面停在拖拽前。
       return o.write((tx) => {
         const r = fn(tx)
         this.keepWritableSlots(tx)
         return r
-      })
+      }, source ?? this)
     }
     this.onExpandContext = o.onExpandContext
     this.onContextBack = o.onContextBack
@@ -3362,7 +3373,11 @@ export class BlockEditor {
 
       acceptDrag: (id) => {
         const loc = locate(this.doc, id)
-        return loc !== null && loc.parent !== null
+        // 本文档的内容块：段根（页／天／查询记录）不参与拖拽
+        if (loc) return loc.parent !== null
+        // 别的露面拖来的块（store 是共享的，任何露面的正文区都是结构落点）：
+        // store 里存在即接——自环、类型不许有子块等守卫留在 `dropDrag`／`dropMoveExternal`
+        return this.store.find(id) !== undefined
       },
       beginDrag: (id) => {
         this.dragId = id
@@ -3386,7 +3401,18 @@ export class BlockEditor {
         const id = draggedId
         if (!id) return
         const loc = locate(this.doc, id)
-        if (!loc) return
+        if (!loc) {
+          // 别的露面拖来的块：store 现取本体，落点走跨容器口径（守卫在那边各归各位）
+          const dragged = this.store.find(id)
+          if (!dragged) return
+          const plan = dropMoveExternal(this.doc, dragged, targetId, zone)
+          this.endDrag()
+          this.structuralMove(id, plan, {
+            unfoldId: zone === 'inside' ? (plan?.parentId ?? null) : null,
+            caretAt: { id, off: 0 },
+          })
+          return
+        }
         // 段根（页／天／查询记录）不是内容块：不参与拖拽。
         // 日记流的分段顺序是真实日期序，查询列表是视图序——都不是「可拖的兄弟序」。
         if (loc.parent === null) return

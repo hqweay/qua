@@ -22,6 +22,39 @@ import { isCommittedTextInput } from '../core/ime.ts'
 import { openPlaceOf, type OpenPlace } from '../core/open.ts'
 
 /**
+ * **「按下期间不换 DOM」的指针接线**：按下 → 冻结；放开 → 延迟一拍。
+ *
+ * ⚠️ 放开必须听三样：`pointerup` 之外，**原生拖拽开始后指针被浏览器收走，
+ * `pointerup` 不会来**（`pointercancel` 取而代之；`dragend` 兜底不是所有引擎
+ * 都发 `pointercancel` 的情形）。只听 up 的话「按下」永远放不开：拖拽之后的
+ * 每次外部变化都被当成「按下期间」欠着不画，界面停在拖拽前，点一下别处才补
+ * （实测：从正文拖块进侧槽窗口，模型已动、两个视图都不动）。
+ *
+ * ⚠️ 放开**不能立刻做**：`pointerup` 之后紧跟着 `mouseup` 与 `click`（同一个任务）。
+ *    `mouseup` 那条路会提交一次编辑 ⇒ `store.touch` ⇒ 别的视图重排 DOM ⇒
+ *    正在被按的元素被换掉 ⇒ 浏览器**不派发 `click`**（实测：挂载区里的块标/文本点上去没反应）。
+ *    ⇒ 放开推到下一拍，让 `click` 先派发完。
+ *
+ * 谁在用：编辑器（`br.setPointerDown`）与可编辑块列（自己的冻结位）——
+ * 同一条判据的两处接线，收成一份，免得一边补了 `pointercancel` 另一边还冻着。
+ */
+export function bindPressFreeze(onDown: () => void, onRelease: () => void): () => void {
+  const release = (): void => {
+    window.setTimeout(onRelease, 0)
+  }
+  document.addEventListener('pointerdown', onDown, { capture: true })
+  document.addEventListener('pointerup', release, { capture: true })
+  document.addEventListener('pointercancel', release, { capture: true })
+  document.addEventListener('dragend', release, { capture: true })
+  return () => {
+    document.removeEventListener('pointerdown', onDown, { capture: true })
+    document.removeEventListener('pointerup', release, { capture: true })
+    document.removeEventListener('pointercancel', release, { capture: true })
+    document.removeEventListener('dragend', release, { capture: true })
+  }
+}
+
+/**
  * 剪贴板里的图片文件（只认 `image/*` 的 item）。
  *
  * 为什么不看 `clipboardData.files`：它在某些平台上是空的（只有 items 里有），
@@ -377,19 +410,10 @@ export function bindEditorEvents(br: EditorBridge): () => void {
    * 实测：同一颗刷新按钮，真鼠标点击不触发、脚本 `.click()` 触发。
    * ⇒ 按下期间只记「该重排了」，抬起后再补（`flushPendingReload`）。
    */
-  on(document, 'pointerdown', () => br.setPointerDown(true), { capture: true })
-  on(
-    document,
-    'pointerup',
-    /**
-     * ⚠️ **不在这里立刻放开**：`pointerup` 之后紧跟着 `mouseup` 与 `click`（同一个任务）。
-     *    `mouseup` 那条路会提交一次编辑 ⇒ `store.touch` ⇒ 别的视图重排 DOM ⇒
-     *    正在被按的元素被换掉 ⇒ 浏览器**不派发 `click`**（实测：挂载区里的块标/文本点上去没反应）。
-     *    ⇒ 放开推到下一拍，让 `click` 先派发完。
-     */
-    () => window.setTimeout(() => br.setPointerDown(false), 0),
-    { capture: true },
-  )
+  /**
+   * 「按下期间不换 DOM」的指针接线（帮手见 `bindPressFreeze`）。
+   */
+  off.push(bindPressFreeze(() => br.setPointerDown(true), () => br.setPointerDown(false)))
 
   /* ── 选区 ───────────────────────────────────────────── */
   on(document, 'selectionchange', () => {

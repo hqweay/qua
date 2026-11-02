@@ -790,6 +790,45 @@ export function dropMove(
   return { parentId: tgt.parent?.id ?? null, index: tgt.index - shift + (pos === 'after' ? 1 : 0) }
 }
 
+/**
+ * 跨容器拖拽的落点：被拖块**不在这份 doc 里**（从正文拖进侧槽窗口、从一张卡拖进另一张）。
+ *
+ * store 是共享的，`tx.move` 按 id 写全局——所以这里只算「落在哪」，被拖块本体由
+ * 调用方从 store 现取（`dragged`）。三条守卫与 doc 内路径各归各位：
+ *   · 自环走**被拖块自己的子树**：目标可能是「显示着被拖块后代的卡」（卡根＝它的子块），
+ *     doc 级查不到这条边，必须用 store 那份查；
+ *   · 目标是 doc 根（窗口卡的根行）⇒ before/after 折算成「进它里面」——它的 doc 内
+ *     父亲是 null 但真实父亲在别处，给它造兄弟会插到森林顶层；
+ *   · 外部位移没有 shift：被拖块不在目标列表里，摘掉自己不会让目标前移。
+ */
+export function dropMoveExternal(
+  doc: Doc,
+  dragged: Block,
+  targetId: string | null,
+  pos: 'before' | 'after' | 'inside',
+): MovePlan | null {
+  if (targetId === null) {
+    const root = doc.roots[doc.roots.length - 1]
+    if (!root || typeDeclOf(root).children === 'none') return null
+    return { parentId: root.id, index: root.children.length }
+  }
+  if (dragged.id === targetId) return null
+  if (descendants(dragged).some((b) => b.id === targetId)) return null
+  const tgt = locate(doc, targetId)
+  if (!tgt) return null
+  if (pos === 'inside') {
+    if (typeDeclOf(tgt.block).children === 'none') return null
+    return { parentId: tgt.block.id, index: tgt.block.children.length }
+  }
+  if (!tgt.parent) {
+    // doc 根（如窗口卡的根行）没有「兄弟位」可给：before/after 的意图只能是「进它里面」。
+    // 事件层对无孩子目标的 inside 也会折算成 after 传过来，这里一并收进 inside。
+    if (typeDeclOf(tgt.block).children === 'none') return null
+    return { parentId: tgt.block.id, index: tgt.block.children.length }
+  }
+  return { parentId: tgt.parent.id, index: tgt.index + (pos === 'after' ? 1 : 0) }
+}
+
 /** 拖拽挂载：把 id 挂到 target 的 before/after/inside（自带循环守卫） */
 export function moveBlockTo(doc: Doc, id: string, targetId: string, pos: 'before' | 'after' | 'inside'): boolean {
   const plan = dropMove(doc, id, targetId, pos)

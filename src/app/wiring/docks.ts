@@ -253,7 +253,7 @@ export function setupDocks(deps: DocksDeps) {
    * pin 的缺省由**进入动作**决定（`pinDefaultFor`）：拖进来＝钉住（常驻），
    * 打开来看＝重启即清。组件块是家具，两种入口都常驻。
    */
-  function openWindow(side: 'left' | 'right', blockId: string, action: WindowEntryAction = 'view'): void {
+  function openWindow(side: 'left' | 'right', blockId: string, action: WindowEntryAction = 'view', at?: CardDrop): void {
     if (!findInForest(deps.getWs().blocks, blockId)) return
     const dock = deps.prefs().dock
     const other = side === 'left' ? 'right' : 'left'
@@ -265,8 +265,13 @@ export function setupDocks(deps: DocksDeps) {
       if (dock.solo[other] === key) dock.solo[other] = null
     }
     if (!dock[side].cards.some((e) => dockKey(e) === key)) {
-      const at = lastWindowIndex(dock[side].cards)
-      dock[side].cards.splice(at + 1, 0, entry)
+      // 拖到某张卡旁 ⇒ 插它前/后（与 `moveCard` 同一落点口径）；没给位置 ⇒ 追加到窗口组末尾
+      let index = lastWindowIndex(dock[side].cards) + 1
+      if (at?.targetId) {
+        const ti = dock[side].cards.findIndex((e) => dockKey(e) === at.targetId)
+        if (ti >= 0) index = at.place === 'before' ? ti : ti + 1
+      }
+      dock[side].cards.splice(index, 0, entry)
     }
     if (pinDefaultFor(action)) dock.pinnedCards[key] = true
     if (!dock[side].open) {
@@ -617,34 +622,67 @@ export function setupDocks(deps: DocksDeps) {
     const { left, right } = deps.getSlots()
     if (!left?.stack || !right?.stack) return
     dropsBound = true
+    for (const side of ['left', 'right'] as const) {
+      const slot = deps.getSlots()[side]
+      /**
+       * 落点是嵌套的（槽根 → 卡片堆栈 → 卡片正文区），内层亮起时外层不会自己收：
+       * `dragleave` 的「还在自己容器里就不算离开」判定会把外层的高亮留在原地，
+       * 于是「卡片指示线」和「正文三区线」会同时亮。捕获期统一清一次，
+       * 谁在内层谁重画——三份高亮因此互斥。
+       *
+       * ⚠️ 必须先于下面的落点绑定注册：事件落在槽根自己时，目标阶段按注册顺序跑，
+       *    后清会把绑定刚标上的高亮擦掉。
+       */
+      slot.root.addEventListener(
+        'dragover',
+        () => {
+          delete slot.root.dataset.dropPin
+          clearCardDropMarks()
+        },
+        true,
+      )
+      bindCardStack(slot.stack, side)
+    }
     // 拖进来＝钉住（pin 缺省常驻）；Shift+点／命令打开＝看一眼（不 pin，重启即清）
     bindWindowDrop(left.root, (id) => deps.kb.get(id) !== undefined, (id) => openWindow('left', id, 'drop'))
     bindWindowDrop(right.root, (id) => deps.kb.get(id) !== undefined, (id) => openWindow('right', id, 'drop'))
-    bindCardStack(left.stack, 'left')
-    bindCardStack(right.stack, 'right')
   }
 
   function bindCardStack(stack: HTMLElement, side: 'left' | 'right'): void {
+    /** 两种载荷共用的落点指示：离指针最近的那张卡，前/后各亮一条线（拖到自己那格不亮） */
+    const markAt = (draggedKey: string, e: DragEvent): void => {
+      clearCardDropMarks()
+      const at = cardDrop(e, stack)
+      if (at.targetId && at.targetId !== draggedKey) {
+        const el = stack.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(at.targetId)}"]`)
+        if (el) el.dataset[at.place === 'before' ? 'dropBefore' : 'dropAfter'] = '1'
+      } else if (!at.targetId) stack.dataset.dropEnd = '1'
+    }
     bindDropTarget(stack, {
       kind: 'card',
       effect: 'move',
       targetId: () => null,
       accept: (id) => findSide(id) !== null,
       hint: () => t('ui.dnd.moveCard'),
-      mark: (id, e) => {
-        clearCardDropMarks()
-        const at = cardDrop(e, stack)
-        if (at.targetId && at.targetId !== id) {
-          const el = stack.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(at.targetId)}"]`)
-          if (el) el.dataset[at.place === 'before' ? 'dropBefore' : 'dropAfter'] = '1'
-        } else if (!at.targetId) stack.dataset.dropEnd = '1'
-      },
+      mark: (id, e) => markAt(id, e),
       unmark: clearCardDropMarks,
       onDrop: (id, _target, e) => {
         const from = findSide(id)
         if (!from) return
         moveCard(from, side, id, cardDrop(e, stack))
       },
+    })
+    // 块载荷拖到卡片之间 ⇒ 在那张卡旁边开一张窗口卡。落在卡片**正文区**是另一层
+    // 落点（编辑器三区，内层赢）：含义是移进那张卡的子树，两种含义靠悬停提示区分。
+    bindDropTarget(stack, {
+      kind: 'block',
+      effect: 'copy',
+      targetId: () => null,
+      accept: (id) => deps.kb.get(id) !== undefined,
+      hint: () => t('ui.dnd.pin'),
+      mark: (id, e) => markAt(id, e),
+      unmark: clearCardDropMarks,
+      onDrop: (id, _target, e) => openWindow(side, id, 'drop', cardDrop(e, stack)),
     })
   }
 
