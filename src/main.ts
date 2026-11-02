@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type CtxKeys, type TriggerChar, trashOf } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type TriggerChar, trashOf } from './core/index.ts'
 import { plainText } from './core/model/runs.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
 import { BlockStore } from './core/model/store.ts'
@@ -16,8 +16,6 @@ import type { Op } from './core/kb/types.ts'
 import { BlockEditor, type ViewEvents } from './view/editor/editor.ts'
 import { fillBlockText } from './view/editor/block-dom.ts'
 import {
-  BINDINGS,
-  keyLabel,
   resolveBindings,
 } from './core/infra/bindings.ts'
 import {
@@ -28,7 +26,6 @@ import {
 } from './core/commands/index.ts'
 import { Layers, paletteRows, rowsFromBindings, type PickMods, type Row } from './ui/overlay/layers.ts'
 import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from './app/retrieval/triggers.ts'
-import { dispatchKey, installKeydown, type DispatchEnv } from './core/infra/dispatch.ts'
 import { DockWindows } from './ui/dock/dock-windows.ts'
 import { BackrefsCard } from './ui/cards/backrefs-card.ts'
 import { mountDockSlot } from './ui/dock/dock.ts'
@@ -45,6 +42,8 @@ import { setupCardMenus } from './app/wiring/dock-menus.ts'
 import { setupPanels } from './app/wiring/panels.ts'
 import { setupAtomPopovers } from './app/wiring/atom-popovers.ts'
 import { setupFeed } from './app/wiring/feed.ts'
+import { installDispatch, setupKeys } from './app/wiring/keys.ts'
+import { dispatchKey } from './core/infra/dispatch.ts'
 import { setupOwners } from './app/wiring/owners.ts'
 import { QueryTree } from './ui/query/query-tree.ts'
 import { setupChrome } from './app/wiring/chrome.ts'
@@ -302,44 +301,17 @@ const prefs = (): Prefs => device.prefs
 
 /* ------------------------------------------------------------ 键位提示 */
 
-function keyHints(): Map<string, string> {
-  const m = new Map<string, string>()
-  for (const b of BINDINGS) {
-    if (b.kind !== 'keymap' || !b.key) continue
-    if (!m.has(b.command)) m.set(b.command, keyLabel(b.key, isMac()))
-  }
-  return m
-}
-
-/* ------------------------------------------------------------ 上下文键 */
-
-/** 编辑器上下文键 ＋ 界面上下文键（同一张 when 用的键空间，：开放、可扩展） */
-function uiCtx(): CtxKeys {
-  const focusId = ed.sel?.aBlock ?? ed.caretBlock()
-  const focusBlock = focusId ? findInForest(ws.blocks, focusId) : undefined
-  const ctx: CtxKeys = {
-    ...ed.ctxKeys(),
-    blockSelection: ed.bsel.hasBlockSelection(),
-    blockSelectionCount: ed.bsel.blockSelectionCount(),
-    paletteOpen: layers.open,
-    drawerOpen: layers.drawerOpen(),
-    popoverOpen: layers.popoverOpen(),
-    // ⚠️ 「页数」只数 `page` 列表（journal 也是一块，但它不是页 —— ）
-    pageCount: flatten({ roots: ws.blocks }).filter((b) => hasList(b, 'page')).length,
-    pageTitleEmpty: pageTitle(activeBlock()).trim() === '',
-    // 块菜单里的露面开关（只看**当前聚焦块**；顺序无语义，只有「在不在」）
-    blockHasPageRole: hasList(focusBlock, 'page'),
-    blockHasTagRole: hasList(focusBlock, 'tag'),
-    // 日记：`journalView` 是**真上下文键**（不是 if），`journalDate` 供前后翻日用
-    journalView: isJournal(activeBlock()),
-    journalDate: isJournal(activeBlock()) ? (prop<string>(activeBlock(), '_date') ?? '') : '',
-    // 导航历史是否可走：键位表的 `when` 与命令面板的可用态都读这两个键
-    canGoBack: canGoBack(),
-    canGoForward: canGoForward(),
-    isMac: isMac(),
-  }
-  return ctx
-}
+/** 提示表与上下文键收在 wiring/keys；pages 分片的四件晚于此处 ⇒ getter，运行时现取 */
+const { keyHints, uiCtx } = setupKeys({
+  getEd: () => ed,
+  getWs: () => ws,
+  layers,
+  isMac,
+  pageTitle: (b) => pageTitle(b),
+  activeBlock: () => activeBlock(),
+  canGoBack: () => canGoBack(),
+  canGoForward: () => canGoForward(),
+})
 
 /* ------------------------------------------------------------ 槽内容 */
 
@@ -736,24 +708,16 @@ popovers = setupAtomPopovers({
 
 /* ------------------------------------------------------------ 键位派发（接线） */
 
-/**
- * 派发的环境。**这里只有接线，没有逻辑**（逻辑在 `dispatch.ts`）。
- * `trace` 写回编辑器的探针队列 ——那是「按键命中追踪」诊断的数据源。
- */
-const dispatchEnv: DispatchEnv = {
-  ctx: uiCtx,
+/** 按键派发的接线在 wiring/keys（逻辑在 core/infra/dispatch）；trace 写回探针队列 */
+const dispatchEnv = installDispatch({
+  uiCtx,
   isMac,
-  invoke: (name, args, ctx) => registry.invoke(name, args, 'keymap', ctx).handled,
-  layerOpen: () => layers.anyOpen(),
-  trace: (tr) => {
-    if (!ed.probe.traced) return
-    ed.probe.keyTrace.push(tr)
-    if (ed.probe.keyTrace.length > 40) ed.probe.keyTrace.shift()
-    scheduleBadge()
-  },
-}
-
-installKeydown(dispatchEnv, { editorEl })
+  getEd: () => ed,
+  getRegistry: () => registry,
+  layers,
+  scheduleBadge,
+  editorEl,
+})
 
 const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEditableRoot, materializeEditableRoots, initTabs, resetTabs, activateTab, openInNewTab, newTab, closeTab, nextTab, prevTab, canGoBack, canGoForward, refreshTabs } = setupPages({
   kb,
