@@ -860,6 +860,18 @@
 .queryview[hidden] {
   display: none;
 }
+/*
+ * **结果面里的根行不放大**：字号阶梯的「根块 lg」说的是**正文屏幕**里的第一层
+ * （页／日记作为第一行时是这一屏的身份，比正文大一档）。
+ *
+ * 查询与引用结果不是一屏，是一列**行**：它们没有「标题」这一层。岛内的深度是
+ * **相对深度**（每份装载的根都是 depth 0），这一条只能按表面兜——否则同一块
+ * 在正文里是 13.5px，换一处露面就变成 15.5px。
+ */
+.mount .blk[data-depth='0'],
+.queryview .blk[data-depth='0'] {
+  font-size: var(--ui-fs-md);
+}
 .queryview-head {
   display: flex;
   align-items: center;
