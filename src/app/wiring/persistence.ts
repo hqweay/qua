@@ -4,13 +4,13 @@
  * store／deviceStore 的实例由装配入口创建并注入；这里不认识 `ws` 的当前值
  * （换库会整体替换），一律经 getter 现取。
  */
-import { t } from '../../core/msg.ts'
+import { t } from '../../core/infra/msg.ts'
 import type { FoldState } from '../../core/index.ts'
 import type { Op, Tx, Change } from '../../core/kb/types.ts'
 import type { BlockStore } from '../../core/model/store.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import { diff } from '../../core/kb/diff.ts'
-import type { DeviceState, DeviceStore, Workspace, WorkspaceStore } from '../../core/workspace.ts'
+import type { DeviceState, DeviceStore, Workspace, WorkspaceStore } from '../../core/infra/workspace.ts'
 import type { Layers } from '../../ui/layers.ts'
 import type { Chrome } from '../../ui/chrome.ts'
 import type { BlockEditor } from '../../view/editor.ts'

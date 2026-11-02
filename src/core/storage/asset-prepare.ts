@@ -10,7 +10,7 @@
  * `createImageBitmap` ⇒ 尺寸读不出（`undefined`），守卫自然跳过——
  * 断言只关心 hash 与嗅探，不依赖尺寸。
  */
-import { MAX_IMAGE_PIXELS, sha256Hex, sniffImageMime } from '../assets.ts'
+import { MAX_IMAGE_PIXELS, sha256Hex, sniffImageMime } from '../infra/assets.ts'
 
 /** 一份已通过入库前检查的字节（两个 `put` 实现共用的中间形状）。 */
 export interface PreparedAsset {

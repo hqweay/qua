@@ -6,9 +6,9 @@
  * 冷启动态（`boot`）借道 `core/bootstrap.ts`：它描述的是「第一次打开看到什么」，
  * 不是一组假数据样张。
  */
-import { bootWorkspace } from '../bootstrap.ts'
-import type { FixtureName } from '../ports.ts'
-import type { Workspace } from '../workspace.ts'
+import { bootWorkspace } from '../infra/bootstrap.ts'
+import type { FixtureName } from '../infra/ports.ts'
+import type { Workspace } from '../infra/workspace.ts'
 import { degradedWorkspace, emptyWorkspace, sparseWorkspace } from './states.ts'
 import { seedWorkspace } from './seed.ts'
 

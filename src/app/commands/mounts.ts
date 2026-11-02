@@ -20,7 +20,7 @@ import {
   type Source,
   type ViewConfig,
 } from '../../core/index.ts'
-import type { App } from '../../core/ports.ts'
+import type { App } from '../../core/infra/ports.ts'
 import type { MountsDeps } from './types.ts'
 
 export function mountCommands(

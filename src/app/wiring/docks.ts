@@ -23,10 +23,10 @@ import {
   type DockEntry,
   type WindowEntryAction,
 } from '../../core/index.ts'
-import { t } from '../../core/msg.ts'
+import { t } from '../../core/infra/msg.ts'
 import type { Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
-import type { Workspace, Prefs } from '../../core/workspace.ts'
+import type { Workspace, Prefs } from '../../core/infra/workspace.ts'
 import type { DockWindows } from '../../ui/dock-windows.ts'
 import {
   buildDockCard,

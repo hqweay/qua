@@ -4,11 +4,11 @@
  * 主题只记账不变色：颜色由 CSS 的 `@media (prefers-color-scheme: dark)` ＋
  * `light-dark()` 决定，JS 这边一行切类都不做。
  */
-import { darkQuery, resolveTheme } from '../../core/theme.ts'
+import { darkQuery, resolveTheme } from '../../core/infra/theme.ts'
 import type { CtxKeys } from '../../core/index.ts'
 import { flatten } from '../../core/index.ts'
 import type { Registry } from '../../core/commands/index.ts'
-import type { Prefs, Workspace } from '../../core/workspace.ts'
+import type { Prefs, Workspace } from '../../core/infra/workspace.ts'
 import { createBadge, type BadgeSnapshot } from '../../ui/badge.ts'
 import { createChrome } from '../../ui/chrome.ts'
 import { applyDockVisibility, applyDockWidth } from '../../ui/dock.ts'

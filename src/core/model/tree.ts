@@ -29,7 +29,7 @@ import {
 import { canWriteText, typeDeclOf } from './types.ts'
 import { isEmptyContent, joinRuns, plainLen, sliceRuns, splitRuns, cloneRunsNewIds, textRuns } from './runs.ts'
 import { walkForest } from './walk.ts'
-import { cloneMountEntries, MOUNTS_PROP } from '../mount.ts'
+import { cloneMountEntries, MOUNTS_PROP } from '../views/mount.ts'
 export function locate(doc: Doc, id: string): Located | null {
   let found: Located | null = null
   walkForest(doc.roots, (b, ctx) => {

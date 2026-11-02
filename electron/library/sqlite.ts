@@ -40,7 +40,7 @@ import {
   META_KEYS,
   judgeDbVersion,
   type DbVersionVerdict,
-} from '../../src/core/library.ts'
+} from '../../src/core/identity/library.ts'
 
 export type Db = DatabaseSync
 

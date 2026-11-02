@@ -17,9 +17,9 @@
 import type { Block, BlockStore, OpenPlace, ViewColumn, ViewConfig, ViewRecord } from '../core/index.ts'
 import { openPlaceOf } from '../core/index.ts'
 import { choicesOf, clockLabel, displayNameOf, hasValue, liveChildren, propDisplayLabels, propKindOf, propLabel } from '../core/index.ts'
-import { choiceCells, ChoiceLookupIndex, type ChoiceLookup, type FieldRow } from '../core/props.ts'
+import { choiceCells, ChoiceLookupIndex, type ChoiceLookup, type FieldRow } from '../core/props/props.ts'
 import { plainText } from '../core/model/runs.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import { makeTagChipEl } from '../view/block-dom.ts'
 import type { BlockCell } from './block-cell.ts'
 import { makeCellEditor } from './properties.ts'
@@ -41,7 +41,7 @@ import {
   sortRecords,
   sortValueOf,
   visibleColumns,
-} from '../core/view.ts'
+} from '../core/views/view.ts'
 
 export interface ViewTableDeps {
   store: BlockStore

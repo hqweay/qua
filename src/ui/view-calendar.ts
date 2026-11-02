@@ -10,7 +10,7 @@
  *     —— 那是「翻到那个月」的事，不是「这一格装不下」。
  */
 import { isJournalDate, openPlaceOf, sortRecords, todayISO, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../core/index.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import { viewNote } from './view-note.ts'
 
 export interface ViewCalendarDeps {

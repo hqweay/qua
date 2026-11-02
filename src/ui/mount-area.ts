@@ -47,7 +47,7 @@ import {
 } from '../core/index.ts'
 import type { FoldState } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
-import { t, type MsgId } from '../core/msg.ts'
+import { t, type MsgId } from '../core/infra/msg.ts'
 import { type BlockEditor, type Run } from '../view/editor.ts'
 import { EditableBlock } from './editable-block.ts'
 

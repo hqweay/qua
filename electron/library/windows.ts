@@ -21,7 +21,7 @@
  */
 import { BrowserWindow, app, ipcMain, type WebContents } from 'electron'
 import { join } from 'node:path'
-import { DB_SCHEMA_VERSION, type LibraryEntry } from '../../src/core/library.ts'
+import { DB_SCHEMA_VERSION, type LibraryEntry } from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
 import { loadContent, openSession, saveContent, type OpenFailure, type RepoSession } from './session.ts'
 import { readSeq, type RowWrite } from './sqlite.ts'

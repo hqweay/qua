@@ -15,8 +15,8 @@ import {
   checkExternalUrl,
   rejectText,
   schemeLabelOf,
-} from '../src/core/link.ts'
-import { MSG } from '../src/core/msg.ts'
+} from '../src/core/relations/link.ts'
+import { MSG } from '../src/core/infra/msg.ts'
 
 test('① 白名单只有 http / https 两个协议', () => {
   assert.deepEqual([...EXTERNAL_URL_SCHEMES], ['http:', 'https:'])

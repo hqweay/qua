@@ -27,8 +27,8 @@ import {
   type Block,
   type MountEntry,
 } from '../index.ts'
-import { t } from '../msg.ts'
-import type { Workspace } from '../workspace.ts'
+import { t } from '../infra/msg.ts'
+import type { Workspace } from '../infra/workspace.ts'
 import { forest, longParagraph, LONG_EN, mkJournal, mkPage, resolveRefs, resolveSeedTags, SEED_AT } from './build.ts'
 import type { SeedBlock } from './inline.ts'
 

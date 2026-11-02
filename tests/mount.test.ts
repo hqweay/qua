@@ -36,7 +36,7 @@ import {
   type MountEntry,
 } from '../src/core/index.ts'
 import { textRuns } from '../src/core/model/runs.ts'
-import type { QuerySpec } from '../src/core/query.ts'
+import type { QuerySpec } from '../src/core/query/query.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({
   id,

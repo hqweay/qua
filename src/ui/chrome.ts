@@ -18,7 +18,7 @@
  */
 import { blockLabel, hasLiveChildren, openPlaceOf, type Block, type OpenPlace } from '../core/index.ts'
 import { plainText } from '../core/model/runs.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 
 export interface Chrome {
   /**

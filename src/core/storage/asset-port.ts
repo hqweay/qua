@@ -21,7 +21,7 @@
  *   3. **缺失是状态**：索引里没有 ⇒ `missing`；库打不开 ⇒ `unavailable`。
  *      两者不是一件事（前者去找文件，后者去修存储），别压成一个。
  */
-import type { AssetMeta } from '../assets.ts'
+import type { AssetMeta } from '../infra/assets.ts'
 
 export interface AssetStorePort {
   /**

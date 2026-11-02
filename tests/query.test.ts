@@ -40,7 +40,7 @@ import {
 } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { plainText, textRuns } from '../src/core/model/runs.ts'
-import { journalDateLabel } from '../src/core/journal.ts'
+import { journalDateLabel } from '../src/core/identity/journal.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({
   id,

@@ -9,14 +9,14 @@
  */
 import { openPlaceOf, type Block, type CtxKeys, type FieldRow, type OpenPlace } from '../core/index.ts'
 import type { RunWithId } from '../core/model/runs.ts'
-import { resolveRef } from '../core/ref.ts'
-import { checkExternalUrl, rejectText } from '../core/link.ts'
+import { resolveRef } from '../core/relations/ref.ts'
+import { checkExternalUrl, rejectText } from '../core/relations/link.ts'
 import { plainText } from '../core/model/runs.ts'
 import { COMMANDS } from '../core/commands/index.ts'
-import { BINDINGS, keyLabel, keymapRows, referencedKeys } from '../core/bindings.ts'
+import { BINDINGS, keyLabel, keymapRows, referencedKeys } from '../core/infra/bindings.ts'
 import { assetMetaOf, assetViewOf } from '../view/asset-views.ts'
-import { t } from '../core/msg.ts'
-import type { CommandDecl, PanelKind } from '../core/ports.ts'
+import { t } from '../core/infra/msg.ts'
+import type { CommandDecl, PanelKind } from '../core/infra/ports.ts'
 import { makeFieldRow, type FieldRowDeps } from './properties.ts'
 
 /** 面板要用到的宿主能力（装配层注入；本文件不认识 `ws`/`ed`/`registry` 这些具体对象） */

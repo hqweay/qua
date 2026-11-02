@@ -21,7 +21,7 @@ import type { Block } from '../core/index.ts'
 import { plainText } from '../core/model/runs.ts'
 import { onCommitKeys } from './keys.ts'
 import type { Dangling, FieldRow, PropKind } from '../core/index.ts'
-import type { PropCreateMode } from '../core/ports.ts'
+import type { PropCreateMode } from '../core/infra/ports.ts'
 import {
   choiceDisplayLabel,
   clockLabel,
@@ -34,7 +34,7 @@ import {
   propKindOf,
   propLabel,
 } from '../core/index.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import { ChoicesEditor, type ChoiceActions } from './choices-editor.ts'
 
 export interface PropertiesDeps {

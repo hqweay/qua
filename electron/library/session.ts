@@ -38,7 +38,7 @@ import {
   serializeManifest,
   type LibraryEntry,
   type LibraryManifest,
-} from '../../src/core/library.ts'
+} from '../../src/core/identity/library.ts'
 import { createFolderAssetStore, type AssetStore } from './assets.ts'
 import {
   applyRowWrites,

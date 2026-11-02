@@ -1,10 +1,10 @@
 /**
  * 视图命令：主题三档与槽开关。
  */
-import { nextTheme } from '../../core/theme.ts'
+import { nextTheme } from '../../core/infra/theme.ts'
 import type { SecLayout } from '../../core/index.ts'
-import type { ThemeMode } from '../../core/workspace.ts'
-import type { App } from '../../core/ports.ts'
+import type { ThemeMode } from '../../core/infra/workspace.ts'
+import type { App } from '../../core/infra/ports.ts'
 import type { ViewDeps } from './types.ts'
 
 export function viewCommands(d: ViewDeps): Pick<App, 'setTheme' | 'toggleTheme' | 'toggleDock' | 'journalFeedLayout'> {

@@ -23,7 +23,7 @@ import {
   serializeRegistry,
   type AppRegistry,
   type LibraryEntry,
-} from '../../src/core/library.ts'
+} from '../../src/core/identity/library.ts'
 
 export interface RegistryIo {
   /** 注册表文件路径（`<dataRoot>/app.json`） */

@@ -27,7 +27,7 @@ import {
   parseRegistry,
   serializeRegistry,
   type AppRegistry,
-} from '../src/core/library.ts'
+} from '../src/core/identity/library.ts'
 
 /* ------------------------------------------------------------ ① 库 id 的形状 */
 

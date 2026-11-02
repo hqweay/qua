@@ -24,7 +24,7 @@ import {
 } from '../index.ts'
 import { refRunsOf, textRuns } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
-import { WORKSPACE_VERSION, type PageBlock, type Workspace } from '../workspace.ts'
+import { WORKSPACE_VERSION, type PageBlock, type Workspace } from '../infra/workspace.ts'
 import { parseInline, type SeedBlock } from './inline.ts'
 
 /* --------------------------------------------------------------- 构建 */

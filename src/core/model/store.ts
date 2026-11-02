@@ -17,7 +17,7 @@ import { UndoStack, type Snap, type UndoKind } from './undo.ts'
 import type { Block } from './model.ts'
 import type { Op } from '../kb/types.ts'
 import type { Sel } from './selection.ts'
-import { applyOps as patchIndex, lookupBlock, rebuild, type Index } from '../index-port.ts'
+import { applyOps as patchIndex, lookupBlock, rebuild, type Index } from '../infra/index-port.ts'
 import { applyOps, diff } from '../kb/diff.ts'
 import { changesOf } from '../kb/changes.ts'
 

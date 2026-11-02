@@ -15,7 +15,7 @@
  *      不要用同一个 `hidden` 表达两件事——那会让「没有主体」和「收起了」变成同一个值。
  */
 
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import { renderIcon } from '../view/icons.ts'
 import { cardNote } from './card-parts.ts'
 

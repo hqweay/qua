@@ -4,7 +4,7 @@
  * 「这块是什么」用角色（`as-page` / `as-tag`），「这一块归在谁下面」用归属边
  * （`core.belongs-to/*`）——两件事，两个区段。
  */
-import type { Handler } from '../../core/ports.ts'
+import type { Handler } from '../../core/infra/ports.ts'
 import { curBlock, S } from './shared.ts'
 
 export const TAGS_HANDLERS: Record<string, Handler> = {

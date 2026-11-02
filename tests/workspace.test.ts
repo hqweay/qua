@@ -7,10 +7,10 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseWorkspace, WORKSPACE_VERSION, type Workspace } from '../src/core/workspace.ts'
+import { parseWorkspace, WORKSPACE_VERSION, type Workspace } from '../src/core/infra/workspace.ts'
 import { mkBlock, type Block } from '../src/core/index.ts'
-import { seedWorkspace } from '../src/core/seed.ts'
-import { bootWorkspace } from '../src/core/bootstrap.ts'
+import { seedWorkspace } from '../src/core/infra/seed.ts'
+import { bootWorkspace } from '../src/core/infra/bootstrap.ts'
 import { degradedWorkspace, emptyWorkspace, sparseWorkspace } from '../src/core/fixtures/states.ts'
 
 const valid = (patch: Record<string, unknown> = {}): string =>

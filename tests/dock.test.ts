@@ -12,7 +12,7 @@ import {
   DERIVED_CARDS,
   pinDefaultFor,
   pruneEphemeralWindows,
-} from '../src/core/dock.ts'
+} from '../src/core/views/dock.ts'
 
 test('dock: 三种条目的扁平 key 各自唯一（身份，不是种类）', () => {
   assert.equal(dockKey({ kind: 'block', block: 'b1' }), 'b1')

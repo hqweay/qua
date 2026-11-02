@@ -19,8 +19,8 @@ import {
   type Block,
 } from '../../core/index.ts'
 import { textRuns } from '../../core/model/runs.ts'
-import { t } from '../../core/msg.ts'
-import type { App, PropCreateMode, PropTarget } from '../../core/ports.ts'
+import { t } from '../../core/infra/msg.ts'
+import type { App, PropCreateMode, PropTarget } from '../../core/infra/ports.ts'
 import type { PropsDeps } from './types.ts'
 
 export function propsCommands(

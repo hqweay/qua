@@ -5,7 +5,7 @@
  *   通过扫描 `handlers.ts` 里**对象字面量**的属性来定位每个 handler。转口若也写成对象字面量，
  *   88 个 handler 会被数两遍。合并只留 `handlers.ts` 一处。
  */
-import type { App } from '../../core/ports.ts'
+import type { App } from '../../core/infra/ports.ts'
 import type { MountHost, ViewOwnerRef } from '../../core/index.ts'
 
 export const S = (v: unknown, d = ''): string => (typeof v === 'string' ? v : d)

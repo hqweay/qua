@@ -22,7 +22,7 @@ import {
   readMounts,
   type MountEntry,
   type MountHost,
-} from '../../core/mount.ts'
+} from '../../core/views/mount.ts'
 import {
   applyOwnerPatch,
   bindingOfEmbed,
@@ -35,8 +35,8 @@ import {
   type ViewOwnerData,
   type ViewOwnerRef,
   type ViewOwnerStore,
-} from '../../core/view-owner.ts'
-import { EMBED_PROP, canonicalViewRef } from '../../core/embed.ts'
+} from '../../core/views/view-owner.ts'
+import { EMBED_PROP, canonicalViewRef } from '../../core/views/embed.ts'
 import type { Block } from '../../core/model/model.ts'
 import type { Prefs } from '../../core/storage/prefs.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'

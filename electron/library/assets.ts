@@ -44,8 +44,8 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { extOf, sniffImageDims, sniffImageMime, type AssetMeta } from '../../src/core/assets.ts'
-import { DB_TABLES } from '../../src/core/library.ts'
+import { extOf, sniffImageDims, sniffImageMime, type AssetMeta } from '../../src/core/infra/assets.ts'
+import { DB_TABLES } from '../../src/core/identity/library.ts'
 import type { Db } from './sqlite.ts'
 
 export interface AssetStore {

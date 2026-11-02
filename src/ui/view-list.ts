@@ -13,7 +13,7 @@
  * 一份「有时缩进有时不缩进」的列表会让「这一行在谁的下面」变成一个不稳定的答案。
  */
 import { TITLE_COLUMN, openPlaceOf, sortRecords, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../core/index.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 
 export interface ViewListDeps {
   store: BlockStore

@@ -16,7 +16,7 @@
  * 非 `ok` ⇒ **reject**。「库本身打不开」必须让 `loadAssetIndex()` 把整个库标成
  * `unavailable`（用户看到「资产库不可用」，而不是一片假装没有图的空白）。
  */
-import { assetUrl, type AssetMeta } from '../assets.ts'
+import { assetUrl, type AssetMeta } from '../infra/assets.ts'
 import type { AssetStorePort } from './asset-port.ts'
 import { prepareAssetBlob } from './asset-prepare.ts'
 import type { LibraryBridge } from './ipc-adapter.ts'

@@ -8,7 +8,7 @@
  *     看起来像「这张卡坏了」——而它只是还没配图。
  */
 import { TITLE_COLUMN, fieldTextOf, openPlaceOf, sortRecords, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../core/index.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import { assetViewOf } from '../view/asset-views.ts'
 import { viewNote } from './view-note.ts'
 

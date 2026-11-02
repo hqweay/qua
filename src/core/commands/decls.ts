@@ -5,9 +5,9 @@
  * 键位／菜单／斜杠／工具栏／命令面板全都是**绑定表**（`core/bindings.ts`）的渲染结果。
  * 命令面板列的是**本表的全部命令**，与有没有键位无关。
  */
-import type { CommandDecl } from '../ports.ts'
+import type { CommandDecl } from '../infra/ports.ts'
 // ⚠️ 三个收敛点之一：命令表的 `title` / `category` / `keywords` **一律走 t**
-import { t } from '../msg.ts'
+import { t } from '../infra/msg.ts'
 
 
 /* ---------------------------------------------------------- 命令表本体 */

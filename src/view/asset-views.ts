@@ -19,7 +19,7 @@
  *   3. **索引是唯一真相**：`mime/w/h` 都从这里来 —— 首帧就能画对，不靠「先画占位、
  *      等字节回来再重画」。
  */
-import type { AssetMeta, AssetView } from '../core/assets.ts'
+import type { AssetMeta, AssetView } from '../core/infra/assets.ts'
 import type { AssetStorePort } from '../core/storage/asset-port.ts'
 
 /** 资产库打不开：所有资产都是 `unavailable`（不是「没有这份资产」）。 */

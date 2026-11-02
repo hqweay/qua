@@ -34,7 +34,7 @@
 import { walkForest } from '../model/walk.ts'
 import type { Block } from '../model/model.ts'
 import { canWriteText } from '../model/types.ts'
-import { systemPropViolation } from '../system-props.ts'
+import { systemPropViolation } from '../props/system-props.ts'
 import type { Op } from './types.ts'
 
 /** 一条非法：给人看的一句话 ＋ 定位（哪个 op、哪一块） */

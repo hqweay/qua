@@ -30,7 +30,7 @@ import {
   type ViewConfig,
 } from '../core/index.ts'
 import type { KbClient } from '../core/kb/types.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import type { BlockCell } from './block-cell.ts'
 
 export interface ViewListTableDeps {

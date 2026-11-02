@@ -1,0 +1,168 @@
+/**
+ * 日记：只读日期 `_date` + 一天一个的确定性 id。
+ * 日期**不进 text**；模型层没有写 `_date` 的路径。
+ *
+ * ⚠️ 它**不是列表值**：「是不是日记」由 `_date` 在不在决定（`isJournalBlock`）。
+ *    再存一个标记就是同一件事的第二份答案，而两份可以不一致。
+ */
+
+import { ICON_PROP, isJournalBlock, prop, type Block } from '../model/model.ts'
+import { derivedId, pad } from '../model/ids.ts'
+import { walkForest } from '../model/walk.ts'
+import { plainText } from '../model/runs.ts'
+export function todayISO(now: Date = new Date()): string {
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+/**
+ * `_date` 的形状判据：`YYYY-MM-DD`。
+ *
+ * 这是唯一一个「格式错了会**改变身份**」的系统键——journal 的 id 由日期确定性派生，
+ * 日记流/索引/落库排序全都按这一格分组。别处都能宽容，这里不能：坏日期会让
+ * 「同一天」分裂成多天，而派生 id 与内容脱钩后没有路径能把它拉回来。
+ */
+export function isJournalDate(v: unknown): boolean {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
+}
+
+/** 日期加减天数（走本地日历：跨月/跨年/夏令时都交给 `Date`） */
+export function shiftISO(date: string, days: number): string {
+  const [y, m, d] = date.split('-').map(Number)
+  return todayISO(new Date(y!, (m ?? 1) - 1, (d ?? 1) + days))
+}
+
+/**
+ * `(本地日) → id`：**确定性派生**（`derivedId('journal', date)`）。
+ *
+ * ⚠️ 取舍：以前这个 id 的**前 12 位是本地零点的毫秒时间戳**、尾部塞日期数字 ——
+ *    看上去像「能在 id 里读出日期」。那条可读性不是任何代码依赖的东西（日期的事实源是
+ *    `_date`），换来的是「id 的形状与其它 id 不一致」。改成名字哈希之后，
+ *    「同一天同一个 id」这条不变量改由 `derivedId` 的纯函数性保证（同样不依赖时钟），
+ *    而 id 与其它块 id 是同一类形状，落库/导出/调试看到的东西一致。
+ *    旧的 id 形状不迁移：落盘版本一换，旧库重新 seed（原型不做兼容）。
+ *
+ * ⚠️ 这是「一天一个」的实现载体，不是新实体（仍然只是块）。
+ */
+export function journalId(date: string): string {
+  return derivedId('journal', date)
+}
+
+export function journalDate(b: Block): string {
+  return prop<string>(b, '_date') ?? ''
+}
+
+/**
+ * ⚠️ 返回 **boolean** 而不是类型谓词：`b is Block` 会把 `if` 的 else 分支收窄成 `never`
+ * （`Block` 减 `Block`），于是「非 journal」那条路一行都写不出来。
+ */
+export function isJournal(b: Block | undefined): boolean {
+  return isJournalBlock(b)
+}
+
+/**
+ * **库里有哪些天、各自是哪一块**（唯一口径）。
+ *
+ * 两件事必须只在**这一处**定义：
+ *   · **走整片森林**，不是只看顶层。索引与引用解析都是整片森林口径；只看顶层，
+ *     一个被嵌进子树的 journal 就会「索引认得它、日记流看不见」——同一天两个答案。
+ *   · **同一天有多个块时取先序第一个**（与日期索引一致）。「一天一个」是口径，
+ *     多出来的那些是坏数据，不该让两条读路径各答一半。
+ *
+ * ⚠️ 与「journal 必须在顶层」不冲突：那条是入口守卫，落地后这里只剩一个候选。
+ */
+export function journalDays(blocks: readonly Block[]): Block[] {
+  const byDate = new Map<string, Block>()
+  walkForest(blocks, (b) => {
+    const d = isJournal(b) ? journalDate(b) : ''
+    if (d !== '' && !byDate.has(d)) byDate.set(d, b)
+  })
+  return [...byDate.values()]
+}
+
+/** 某一天的 journal 块（**唯一口径**：与 `journalDays` 同一片森林、同一个「先序第一个」） */
+export function findJournalDay(blocks: readonly Block[], date: string): Block | undefined {
+  return journalDays(blocks).find((b) => journalDate(b) === date)
+}
+
+/**
+ * 这一天有没有**真正写过东西**（正文里有非空文字）。
+ *
+ * 判据是**整棵子树**，不是日期块自己的 `content`：日期的正文恒为空（它是 `_date` 的只读投影），
+ * 内容都住子块。装载边界会给每天补一个空首子块，所以「有子块」不代表「有内容」。
+ *
+ * 用途：删除一天时决定要不要提醒；查询侧「真正写过东西的天」也应当走这一份判据
+ * （不要各自再写一遍「遍历子块看文本」）。
+ */
+export function journalHasContent(b: Block): boolean {
+  if (plainText(b.content).trim() !== '') return true
+  let has = false
+  walkForest(b.children, (x) => {
+    if (plainText(x.content).trim() === '') return
+    has = true
+    return false
+  })
+  return has
+}
+
+/** 日记流的首屏/增量/上限（首屏 3 天、每次加 5 天；上限先兜住 DOM） */
+export const FEED_INITIAL = 3
+export const FEED_STEP = 5
+export const FEED_MAX = 30
+
+/** 一个还没进库的日记块（`blocks` 里没有时才造它） */
+export function mkJournalBlock(date: string): Block {
+  const now = Date.now()
+  return {
+    id: journalId(date),
+    content: [],
+    children: [],
+    created: now,
+    modified: now,
+    props: { _date: date, [ICON_PROP]: 'lucide:calendar' },
+  }
+}
+
+/**
+ * 冷启动的模型归一：**保证「今天」的 journal 块在场**，并返回它的 id。
+ *
+ * ⚠️ 判据：冷启动落在今日是**默认内容**，不是「看存储里恰好有什么」——
+ *   旧形状的库（没有 journal）升级上来也必须能直接进今日，否则用户找不到入口。
+ * ⚠️ 这里只保证**块在场**；「块可编辑」（首子块）由创建／装载边界的路径保证，
+ *   两者不能合成一件事——物化日期与补正文首块是两个时刻。
+ */
+export function ensureTodayJournal(blocks: Block[], now: Date = new Date()): string {
+  const date = todayISO(now)
+  const id = journalId(date)
+  if (!blocks.some((b) => b.id === id)) blocks.unshift(mkJournalBlock(date))
+  return id
+}
+
+/** 日记日期的人类显示（只读投影；不是 `text`，也不可编辑） */
+export function journalDateLabel(date: string): string {
+  const [y, m, d] = date.split('-').map(Number)
+  if (!y || !m || !d) return date
+  return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' }).format(
+    new Date(y, m - 1, d),
+  )
+}
+
+/** 块的「页名」＝它的正文（**中间没有页标题**，页名就是那个块的文本） */
+
+/**
+ * **时刻的人类显示**（墙钟毫秒 → 本地时间可读串）。
+ *
+ * 为什么不引日期库：本仓零运行时依赖，而这里只要「某年某月某日 时:分」。
+ * 为什么用手写补零而不用 `toLocaleString`：后者在不同平台上对「时:分」的补零、
+ * 分隔符并不一致（`9:05` / `09:05`），只读段里的两行会跟着系统变样；
+ * 而断言要能钉住。**年/月/日走系统的中文长格式**（与日记日期同一套写法），
+ * 时分秒自己拼 —— 一处格式，两处用同一口径。
+ */
+export function clockLabel(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return ''
+  const d = new Date(ms)
+  const day = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }).format(d)
+  return `${day} ${pad(d.getHours(), 2)}:${pad(d.getMinutes(), 2)}:${pad(d.getSeconds(), 2)}`
+}

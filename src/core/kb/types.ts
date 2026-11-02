@@ -16,10 +16,10 @@
  *
  * ⚠️ 本文件只有类型与常量，零运行时依赖、零 DOM。
  */
-import type { BackrefBlock, BackrefSource } from '../backrefs.ts'
-import type { GutterField, FieldRow } from '../props.ts'
-import type { QueryHit, QuerySpec } from '../query.ts'
-import type { RelationEdge } from '../relations.ts'
+import type { BackrefBlock, BackrefSource } from '../relations/backrefs.ts'
+import type { GutterField, FieldRow } from '../props/props.ts'
+import type { QueryHit, QuerySpec } from '../query/query.ts'
+import type { RelationEdge } from '../relations/relations.ts'
 import type { Block, BlockList } from '../model/model.ts'
 import type { Anno, Run } from '../model/runs.ts'
 

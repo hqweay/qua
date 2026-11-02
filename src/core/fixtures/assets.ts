@@ -11,7 +11,7 @@
  *
  * ⚠️ 同一份字节可以被多枚 run 引用（不同 `label`）：这正是内容寻址要演示的去重。
  */
-import { MAX_IMAGE_BYTES, isAssetHash } from '../assets.ts'
+import { MAX_IMAGE_BYTES, isAssetHash } from '../infra/assets.ts'
 
 /** 样本 PNG（96×60，纯色块画的「草图」）：base64 而非二进制文件，夹具才能同步 import。 */
 const SEED_ASSET_PNG_BASE64 =

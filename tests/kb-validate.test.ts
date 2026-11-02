@@ -20,7 +20,7 @@ import { applyOps, diff, forestFingerprint } from '../src/core/kb/diff.ts'
 import { validate } from '../src/core/kb/validate.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
-import { mkJournalBlock } from '../src/core/journal.ts'
+import { mkJournalBlock } from '../src/core/identity/journal.ts'
 import { DIVIDER_TYPE, setBlockType } from '../src/core/model/types.ts'
 import type { Op } from '../src/core/kb/types.ts'
 

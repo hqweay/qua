@@ -10,14 +10,14 @@
  * 「这些字节是不是一份能打开的库」归这里。
  */
 import { ACTIVE_VIEW_PROP, ALIASES_PROP, DISPLAY_PROP, ICON_PROP, LISTS_PROP, VIEWS_PROP, isDisplayValue, isIconValue, isListsValue, type Block, type Doc, type FoldState } from '../model/model.ts'
-import { isAliasesValue, LEGACY_ALIAS_PROP } from '../alias.ts'
-import { isMountsValue, MOUNTS_PROP } from '../mount.ts'
-import { canonicalViewRef, EMBED_PROP } from '../embed.ts'
-import { isActiveViewValue, isViewsValue, sourceConflicts } from '../view.ts'
+import { isAliasesValue, LEGACY_ALIAS_PROP } from '../identity/alias.ts'
+import { isMountsValue, MOUNTS_PROP } from '../views/mount.ts'
+import { canonicalViewRef, EMBED_PROP } from '../views/embed.ts'
+import { isActiveViewValue, isViewsValue, sourceConflicts } from '../views/view.ts'
 import { isAnno, isRun } from '../model/runs.ts'
-import { BELONGS_TO_PROP, isBelongsToRefs } from '../hierarchy.ts'
-import { isJournalDate } from '../journal.ts'
-import { TAGS_PROP, isTagRefList } from '../tags.ts'
+import { BELONGS_TO_PROP, isBelongsToRefs } from '../relations/hierarchy.ts'
+import { isJournalDate } from '../identity/journal.ts'
+import { TAGS_PROP, isTagRefList } from '../identity/tags.ts'
 import {
   FIELD_DEFS_PROP,
   OWN_PROPS_PROP,
@@ -26,7 +26,7 @@ import {
   isOwnPropSlots,
   isPropKind,
   isUiPositionValue,
-} from '../props.ts'
+} from '../props/props.ts'
 
 /**
  * 落盘形状的版本；**只在显式作废旧库时加一**（原型不做迁移，旧库直接作废重 seed）。

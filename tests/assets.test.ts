@@ -19,7 +19,7 @@ import {
   sha256Hex,
   sniffImageDims,
   sniffImageMime,
-} from '../src/core/assets.ts'
+} from '../src/core/infra/assets.ts'
 import {
   MISSING_ASSET_HASH,
   SEED_ASSET_H,

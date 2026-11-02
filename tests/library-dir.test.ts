@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { DB_FILE, LIBRARY_KIND, MANIFEST_FILE, META_KEYS, serializeManifest, libraryId } from '../src/core/library.ts'
+import { DB_FILE, LIBRARY_KIND, MANIFEST_FILE, META_KEYS, serializeManifest, libraryId } from '../src/core/identity/library.ts'
 import {
   findLibrary,
   libraryDir,

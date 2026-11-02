@@ -32,7 +32,7 @@ import {
   removeEdge,
   type ForestWalker,
 } from '../src/core/index.ts'
-import { membersOf } from '../src/core/tag-tree.ts'
+import { membersOf } from '../src/core/identity/tag-tree.ts'
 import { walkForest } from '../src/core/model/walk.ts'
 import { DELETED_AT_PROP } from '../src/core/model/model.ts'
 

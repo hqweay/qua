@@ -8,10 +8,10 @@
  *   它锚在选区上方、常驻在选区存在期间（不是按 Esc 才关），且**不能抢焦点**——
  *   一抢焦点原生选区就塌了，加粗就加到了空选区上。
  */
-import { keyLabel, type Binding } from '../core/bindings.ts'
+import { keyLabel, type Binding } from '../core/infra/bindings.ts'
 import { DECL_BY_NAME, type CommandDecl } from '../core/commands/index.ts'
 // ⚠️ 三个收敛点之三：UI 组件的文案一律走 t
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import { renderIcon } from '../view/icons.ts'
 import { captureFocus, type FocusReturn } from './focus-return.ts'
 import { placeNear } from './place.ts'

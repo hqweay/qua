@@ -17,7 +17,7 @@
  *
  * 放 `view/` 的理由：碰 DOM ⇒ 不是 `core`；要被 `ui/` 用（侧槽），而 `ui → view` 是允许方向。
  */
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 
 /** 块载荷的 MIME：只有它能被当成「拖的是一个块」 */
 export const BLOCK_MIME = 'application/x-qua-block'

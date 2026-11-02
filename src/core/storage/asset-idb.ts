@@ -23,7 +23,7 @@
  *    于是一次「关掉重开」之后每张图都读不出字节 —— 表现为「图全丢了」，而库里 key 还在。
  *    `ArrayBuffer` 两个方向都原样往返；`urlOf()` 再按 mime 包回 `Blob` 建地址。
  */
-import type { AssetMeta } from '../assets.ts'
+import type { AssetMeta } from '../infra/assets.ts'
 import { prepareAssetBlob } from './asset-prepare.ts'
 import type { AssetStorePort } from './asset-port.ts'
 

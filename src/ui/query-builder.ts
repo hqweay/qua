@@ -15,7 +15,7 @@ import {
   type DraftRow,
   type QuerySpec,
 } from '../core/index.ts'
-import { t, type MsgId } from '../core/msg.ts'
+import { t, type MsgId } from '../core/infra/msg.ts'
 
 const OP_TEXT: Record<DraftOp, MsgId> = {
   eq: 'ui.query.op.eq',

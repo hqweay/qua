@@ -11,7 +11,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
 import { hasList } from '../src/core/index.ts'
-import { seedWorkspace } from '../src/core/seed.ts'
+import { seedWorkspace } from '../src/core/infra/seed.ts'
 import { plainText, textRuns } from '../src/core/model/runs.ts'
 import {
   cleanableValues,

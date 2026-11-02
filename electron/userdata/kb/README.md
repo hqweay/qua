@@ -2,7 +2,7 @@
 
 ## 现状：数据在 localStorage 里，**不在这里**
 
-v1 的持久化仍然是 `localStorage`（`src/core/workspace.ts`，键 `qua.workspace`）。
+v1 的持久化仍然是 `localStorage`（`src/core/infra/workspace.ts`，键 `qua.workspace`）。
 它落在 Chromium 的 profile 目录里，也就是：
 
 ```
@@ -26,4 +26,4 @@ kb/
 
 现在的写入是一句 `localStorage.setItem(键, JSON.stringify(workpace))`；
 将来换成内核事务 `ctx.tx.run(...)`——**调用点的形状（一次提交一整份 workspace）不变**，
-变的是背后的实现。见 `src/core/workspace.ts` 顶部的注释与 app 根 `README.md` 的 `TODO: 换 DbClient`。
+变的是背后的实现。见 `src/core/infra/workspace.ts` 顶部的注释与 app 根 `README.md` 的 `TODO: 换 DbClient`。

@@ -14,8 +14,8 @@ import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
 import { writeBlockContent } from '../src/core/model/model.ts'
 import { renameAlias, refTitle, resolveRef, resolveRefs, danglingView } from '../src/core/index.ts'
-import { displayTextOf } from '../src/core/alias.ts'
-import { journalDateLabel } from '../src/core/journal.ts'
+import { displayTextOf } from '../src/core/identity/alias.ts'
+import { journalDateLabel } from '../src/core/identity/journal.ts'
 import { textRuns, type RefRun } from '../src/core/model/runs.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, content: textRuns(text), children: [], ...extra })

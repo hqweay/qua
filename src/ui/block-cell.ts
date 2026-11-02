@@ -15,7 +15,7 @@
  */
 import { plainLen } from '../core/model/runs.ts'
 import type { Block, BlockStore, OpenPlace } from '../core/index.ts'
-import { t } from '../core/msg.ts'
+import { t } from '../core/infra/msg.ts'
 import { EditableBlock } from './editable-block.ts'
 import type { Run, BlockEditor } from '../view/editor.ts'
 import { offsetIn } from '../view/dom-text.ts'

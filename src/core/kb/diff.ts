@@ -40,7 +40,7 @@ import { DELETED_AT_PROP, type Block } from '../model/model.ts'
 import { walkForest } from '../model/walk.ts'
 import type { Anno } from '../model/runs.ts'
 import { canWriteText } from '../model/types.ts'
-import { systemPropViolation } from '../system-props.ts'
+import { systemPropViolation } from '../props/system-props.ts'
 import type { Op } from './types.ts'
 import { validate } from './validate.ts'
 

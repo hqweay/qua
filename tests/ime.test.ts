@@ -12,7 +12,7 @@
  */
 import { test } from 'node:test'
 import * as assert from 'node:assert/strict'
-import { isCommittedTextInput } from '../src/core/ime.ts'
+import { isCommittedTextInput } from '../src/core/infra/ime.ts'
 
 const ev = (inputType: string, isComposing: boolean) => ({ inputType, isComposing }) as InputEvent
 
