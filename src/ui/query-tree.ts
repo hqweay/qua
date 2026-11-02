@@ -30,6 +30,7 @@ import {
   type TreeLeaf,
   type TreeRow,
   type TreeRowKind,
+  isJournalDate,
 } from '../core/index.ts'
 import { t, type MsgId } from '../core/msg.ts'
 
@@ -648,7 +649,7 @@ export class QueryTree {
       return sel
     }
     if (kind === 'date') {
-      if (row.value !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(row.value)) return this.relativeInput(row)
+      if (row.value !== '' && !isJournalDate(row.value)) return this.relativeInput(row)
       const input = document.createElement('input')
       input.type = 'date'
       input.className = 'qt-value'
@@ -762,7 +763,7 @@ export class QueryTree {
       )
       return out
     }
-    if (row.date !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(row.date)) {
+    if (row.date !== '' && !isJournalDate(row.date)) {
       const wrap = document.createElement('span')
       wrap.className = 'qt-inline'
       const input = document.createElement('input')
