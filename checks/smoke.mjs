@@ -101,6 +101,53 @@ const openFirstPage = (page) =>
   page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
 
 /**
+ * 打开种子里那个查询块（`产品设计` 页里的 `_query`），返回它的 id。
+ *
+ * 条件树的用例都从「一个真的查询块」出发：空壳 DOM 测不出 `$self`／冻结／撤销这些装配。
+ */
+const openSeedQuery = async (page) => {
+  const qid = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    let found = ''
+    const walk = (list) => {
+      for (const b of list) {
+        if (!found && b.props?._query?.where) found = b.id
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return found
+  })
+  if (qid) {
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
+    await page.waitForTimeout(450)
+  }
+  return qid
+}
+
+/**
+ * 保证条件树是展开的：整屏打开查询时默认展开；内联体／挂载栏默认收起（不撑爆结果区），
+ * 点一下那条摘要 chip 就地展开。测试不关心这一层几何，只关心树本身。
+ */
+const ensureTree = async (page) => {
+  const open = await page.evaluate(() => document.querySelector('.queryview-tree')?.hidden === false)
+  if (open) return
+  const chip = page.locator('.queryview-filters [data-query-chip="summary"]').first()
+  if ((await chip.count()) > 0) {
+    await chip.click()
+    await page.waitForTimeout(250)
+  }
+}
+
+/** 点条件树里某个组的「加一条」→ 选一项（`group:all`／`row:text` …） */
+const qtAdd = async (page, groupSelector, pick) => {
+  await page.locator(`${groupSelector} > .qt-children > [data-qt="add"]`).click()
+  await page.locator(`[data-qt="${pick}"]`).click()
+  await page.waitForTimeout(250)
+}
+
+/**
  * 检索浮层的行读点：**标签 / 右侧按键徽标 / 是不是当前那一行**。
  *
  * 浮层是同一个组件（`Layers.openMenu`），所以三个触发字符共用这一个读法；
@@ -1962,7 +2009,7 @@ await check('T191 结果基数：父子同时命中时，大纲与表格的抬�
   return `hits=2：大纲 ${outline.outlineRows} 行＋「${outline.top}」、表格 ${table.tableRows} 行；抬头都是 ${table.count}`
 })
 
-await check('T192 在当前块里建查询块：落点是这一块的子块；一次撤销撤掉两块；构建器当场打开', async () => {
+await check('T192 在当前块里建查询块：落点是这一块的子块；一次撤销撤掉两块；条件条当场出现', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -1984,7 +2031,7 @@ await check('T192 在当前块里建查询块：落点是这一块的子块；�
       caret: caret?.id ?? '',
       caretChildren: caret?.children.length ?? -1,
       blocks: window.__qua.snapshot().totalBlocks,
-      builder: Boolean(document.querySelector('.qb')),
+      chip: Boolean(document.querySelector('.queryview-filters .queryview-chip')),
     }
   }, root)
   assert(made.hasQuery, `前置：新块应是查询块：${JSON.stringify(made)}`)
@@ -1992,11 +2039,21 @@ await check('T192 在当前块里建查询块：落点是这一块的子块；�
   assert(made.caret !== '' && made.caret !== made.qid, '查询块后面要留一个空块做光标落点')
   assert(made.caretChildren === 0, '落点是一个空块')
   assert(made.blocks === before + 2, `一次建两块：${before} → ${made.blocks}`)
-  assert(made.builder, '建完当场打开构建器（不用再点一次）')
+  assert(made.chip, `建完当场看到条件条（不用再点一次）：${JSON.stringify(made)}`)
+  // 内联体默认收起条件树（不撑爆结果区）；点 chip 就地在抬头下展开
+  await page
+    .locator(`.blk[data-block-id="${made.qid}"] .blk-view-body .queryview-filters [data-query-chip="summary"]`)
+    .click()
+  await page.waitForTimeout(250)
+  assert(
+    await page.evaluate(
+      (id) => Boolean(document.querySelector(`.blk[data-block-id="${id}"] .blk-view-body .queryview-tree.qt`)),
+      made.qid,
+    ),
+    '点条件 chip 应在正文里就地展开条件树（不是弹层）',
+  )
 
-  // 关掉构建器，把光标放回编辑器，一次 ⌘Z 应该把两块一起撤掉
-  await page.keyboard.press('Escape')
-  await page.waitForTimeout(200)
+  // 把光标放回编辑器，一次 ⌘Z 应该把两块一起撤掉
   await page.evaluate((id) => window.__qua.focusBlock(id, 0), made.qid)
   await page.waitForTimeout(150)
   await page.keyboard.press(kbd('mod+z'))
@@ -15599,7 +15656,7 @@ await check('T187 稳定 id：摘掉第一栏之后，激活的是原来那一�
  * 这条钉的是「界面拼出来的条件必须与手写 JSON 逐字节相同」——不同的表现是
  * 「界面上一行改完、结果没变」，而那时用户不会怀疑是翻译层丢了算子。
  */
-await check('T188 构建器：JSON 与模型逐字节相同；改一行应用＝一轮撤销；chip 跟着变', async () => {
+await check('T188 条件树：就地展开、拆成一行一句话；应用一次＝一轮撤销；收起只剩一条 chip', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const qid = await page.evaluate(() => {
@@ -15618,52 +15675,307 @@ await check('T188 构建器：JSON 与模型逐字节相同；改一行应用＝
   assert(qid !== '', '前置：种子里应有一个查询块')
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
   await page.waitForTimeout(450)
+  await ensureTree(page)
 
-  // 抬头上的条件 chip（查询源的「条件是什么」得在屏幕上）
-  const chips = await page.evaluate(() =>
-    [...document.querySelectorAll('.queryview-filters .queryview-chip')].map((e) => e.textContent ?? ''),
-  )
-  assert(chips.length > 0, `抬头应有条件 chip：${JSON.stringify(chips)}`)
-  assert(chips.some((c) => c.includes('未完成')), `种子里那条是「未完成的待办」：${JSON.stringify(chips)}`)
+  /**
+   * ① **就地展开**：不是弹层。树在抬头下一格，条件读成一行一句话；
+   *    抬头那排 chip 让位（同一句话不该同屏两遍）。
+   */
+  const open = await page.evaluate(() => {
+    const root = document.querySelector('.queryview')
+    const tree = root?.querySelector('.queryview-tree')
+    return {
+      treeVisible: Boolean(tree) && tree?.hidden === false,
+      groups: root?.querySelectorAll('.queryview-tree .qt-group').length ?? 0,
+      rows: [...(root?.querySelectorAll('.queryview-tree .qt-row') ?? [])].map((e) => e.textContent ?? ''),
+      chipsHidden: root?.querySelector('.queryview-filters')?.hidden ?? null,
+      popover: Boolean(document.querySelector('.popover .qt')),
+      oldForm: document.querySelectorAll('.qb-row, .qb-mode, [data-qb-row]').length,
+      modeText: [...(root?.querySelectorAll('.queryview-tree .qt-mode option') ?? [])].map((e) => e.textContent ?? ''),
+      notSwitch: Boolean(root?.querySelector('.queryview-tree .qt-not input[type="checkbox"]')),
+    }
+  })
+  assert(open.treeVisible, `条件树应在抬头下就地展开（不是弹层）：${JSON.stringify(open)}`)
+  assert(open.groups >= 1 && open.rows.length > 0, `树上要有组与叶子行：${JSON.stringify(open)}`)
+  assert(open.rows.some((r) => r.includes('未完成')), `叶子行要读成人话：${JSON.stringify(open.rows)}`)
+  assert(open.chipsHidden === true, `树展开时抬头不再重复条件 chip：${JSON.stringify(open)}`)
+  assert(!open.popover, '正常打开查询块时不该出现条件弹层')
+  assert(open.oldForm === 0, `旧三列表单必须已经不存在：${open.oldForm}`)
+  assert(open.modeText.includes('且') && open.modeText.includes('或'), `组头是短词「且／或」：${JSON.stringify(open.modeText)}`)
+  assert(!open.modeText.some((t) => t.includes('全部满足') || t.includes('任一满足')), `组头不许是长句：${JSON.stringify(open.modeText)}`)
+  assert(open.notSwitch, '组头要有「非」开关')
 
-  // 打开构建器
-  await page.locator('.queryview-chip--edit').click()
-  await page.waitForSelector('.qb')
-  await page.locator('.qb-tab[data-qb-tab="json"]').click()
-  await page.waitForTimeout(150)
-  const jsonText = await page.evaluate(() => document.querySelector('.qb-json')?.value ?? '')
-  const model = await page.evaluate((id) => JSON.stringify(window.__qua.__editor.store.find(id)?.props?._query), qid)
-  assert(jsonText.replace(/\s+/g, '') === model.replace(/\s+/g, ''), `JSON tab 必须就是模型那一份：\n${jsonText}\n${model}`)
-
-  // 回到条件行，把「未完成」改成「已完成」并应用
-  await page.locator('.qb-tab[data-qb-tab="rows"]').click()
-  await page.waitForTimeout(150)
-  await page.selectOption('.qb-row .qb-value', 'done')
-  await page.locator('.qb-apply').click()
+  // ② 改一行（未完成 → 已完成）并应用：条件写进模型，树仍常驻
+  await page.selectOption('.queryview-tree .qt-row[data-qt-row="todo"] [data-qt="todo"]', 'done')
+  await page.locator('.queryview-tree [data-qt="apply"]').click()
   await page.waitForTimeout(450)
-
   const after = await page.evaluate((id) => ({
     where: JSON.stringify(window.__qua.__editor.store.find(id)?.props?._query?.where),
-    chips: [...document.querySelectorAll('.queryview-filters .queryview-chip')].map((e) => e.textContent ?? ''),
-    open: Boolean(document.querySelector('.qb')),
+    treeVisible: document.querySelector('.queryview-tree')?.hidden === false,
+    applied: document.querySelector('.queryview-tree [data-qt="apply"]')?.disabled === false,
   }), qid)
-  // 三态在模型里是**属性条件**（`{prop:{id,eq}}`）：「待办」只是构建器那一行预设
   const doneWhere = JSON.parse(after.where)
   assert(
     doneWhere?.prop?.eq === true && typeof doneWhere.prop.id === 'string',
     `应用之后条件应是「已完成」＝ 任务状态 eq:true：${after.where}`,
   )
-  assert(after.open === false, '应用之后构建器应关闭')
-  assert(after.chips.some((c) => c.includes('已完成')), `chip 要跟着变：${JSON.stringify(after.chips)}`)
+  assert(after.treeVisible, '应用之后树仍常驻（不是点一次开一次）')
 
-  // 一轮撤销回到改之前（一次应用＝一笔事务，不是每敲一个字一步）
+  // ③ 应用之后焦点交回正文（否则 ⌘Z 进不了编辑器）；一次撤销回到改之前
+  const focused = await page.evaluate(() => ({
+    inEditor: Boolean(document.activeElement?.closest('#editor, .queryview-editor')),
+    tag: document.activeElement?.tagName ?? '',
+  }))
+  assert(focused.inEditor, `应用之后焦点应回到正文，⌘Z 才有落点：${JSON.stringify(focused)}`)
   await page.keyboard.press(kbd('mod+z'))
-  await page.waitForTimeout(400)
+  await page.waitForTimeout(450)
   const undone = await page.evaluate((id) => JSON.stringify(window.__qua.__editor.store.find(id)?.props?._query?.where), qid)
   assert(JSON.parse(undone)?.prop?.eq === false, `一次 ⌘Z 就该回到原条件（未完成）：${undone}`)
 
+  // ④ 收起：只剩一条 chip，点它再展开（再应用一次「已完成」，让收起态有内容可看）
+  await page.selectOption('.queryview-tree .qt-row[data-qt-row="todo"] [data-qt="todo"]', 'done')
+  await page.locator('.queryview-tree [data-qt="apply"]').click()
+  await page.waitForTimeout(350)
+  await page.locator('.queryview-tree [data-qt="close"]').click()
+  await page.waitForTimeout(250)
+  const collapsed = await page.evaluate(() => ({
+    treeHidden: document.querySelector('.queryview-tree')?.hidden ?? false,
+    chips: [...(document.querySelectorAll('.queryview-filters .queryview-chip') ?? [])].map((e) => e.textContent ?? ''),
+  }))
+  assert(collapsed.treeHidden, `收起后树要隐藏：${JSON.stringify(collapsed)}`)
+  assert(collapsed.chips.length === 1, `收起后只剩一条 chip：${JSON.stringify(collapsed.chips)}`)
+  assert(collapsed.chips[0].includes('条件'), `那条 chip 要说清「这是条件」：${JSON.stringify(collapsed.chips)}`)
+  await page.locator('.queryview-filters [data-query-chip="summary"]').click()
+  await page.waitForTimeout(250)
+  assert(await page.evaluate(() => document.querySelector('.queryview-tree')?.hidden === false), '点 chip 应重新展开条件树')
+
   await ctx.close()
-  return `chip「未完成」→ 构建器 JSON 与模型同字节 → 应用后「已完成」→ 一次 ⌘Z 复原`
+  return `树就地展开（${open.rows.length} 行）→ 应用「已完成」→ 收起只剩 1 条 chip → 一次 ⌘Z 复原`
+})
+
+/* ---------------------------------------------------------------- 条件树（B1–B6） */
+
+await check('B1 条件树就地展开在抬头下一格；折叠后只剩一条 chip', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await openSeedQuery(page)
+  assert(qid !== '', '前置：种子里应有一个查询块')
+
+  await ensureTree(page)
+  const open = await page.evaluate(() => {
+    const root = document.querySelector('.queryview')
+    const tree = root?.querySelector('.queryview-tree')
+    return {
+      treeVisible: Boolean(tree) && tree?.hidden === false,
+      directlyUnderHead: tree?.previousElementSibling?.classList.contains('queryview-head') ?? false,
+      groups: root?.querySelectorAll('.queryview-tree .qt-group').length ?? 0,
+      popover: Boolean(document.querySelector('.popover')),
+      chipsHidden: root?.querySelector('.queryview-filters')?.hidden ?? null,
+    }
+  })
+  assert(open.treeVisible && open.groups > 0, `树要在抬头下就地展开：${JSON.stringify(open)}`)
+  assert(open.directlyUnderHead, `树要贴在抬头下一格，不是别处：${JSON.stringify(open)}`)
+  assert(!open.popover, '默认不是弹层')
+  assert(open.chipsHidden === true, '树展开时抬头不重复条件 chip')
+
+  await page.locator('.queryview-tree [data-qt="close"]').click()
+  await page.waitForTimeout(250)
+  const folded = await page.evaluate(() => ({
+    treeHidden: document.querySelector('.queryview-tree')?.hidden ?? false,
+    chips: [...document.querySelectorAll('.queryview-filters .queryview-chip')].map((e) => e.textContent ?? ''),
+  }))
+  assert(folded.treeHidden, '折叠后树要隐藏')
+  assert(folded.chips.length === 1, `折叠后只剩一条 chip：${JSON.stringify(folded.chips)}`)
+
+  // 整屏打开一个查询（不是别人身体里的内联体）⇒ 条件树默认展开
+  const centerPage = await page.evaluate(() => {
+    window.__qua.invoke('core.query/create', {
+      kind: 'page',
+      name: '默认展开查询',
+      spec: { where: { tag: '任务' }, scope: 'all' },
+    })
+    return window.__qua.pages().find((p) => (p.title ?? '').includes('默认展开查询'))?.id ?? ''
+  })
+  assert(centerPage !== '', '前置：应能建出一个查询页')
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), centerPage)
+  await page.waitForTimeout(600)
+  const center = await page.evaluate(() => {
+    const views = [...document.querySelectorAll('.queryview')].map((v) => ({
+      surface: v.dataset.surface ?? '',
+      hidden: v.hidden,
+      tree: Boolean(v.querySelector('.queryview-tree.qt')),
+      treeHidden: v.querySelector('.queryview-tree')?.hidden ?? true,
+    }))
+    return { views, active: window.__qua.snapshot().activeId }
+  })
+  assert(
+    center.views.some((v) => !v.hidden && v.tree && !v.treeHidden),
+    `整屏查询默认展开条件树：${JSON.stringify(center)}`,
+  )
+
+  await ctx.close()
+  return '抬头下就地展开；折叠后只剩 1 条 chip；整屏查询默认展开'
+})
+
+await check('B2 树上加嵌套组 → 结果变 → 一次 ⌘Z 全部回滚', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await openSeedQuery(page)
+  assert(qid !== '', '前置：种子里应有一个查询块')
+
+  await ensureTree(page)
+  const countOf = async () =>
+    Number(((await page.textContent('.queryview-count')) ?? '').match(/\d+/)?.[0] ?? '0')
+  const before = await countOf()
+  assert(before === 1, `前置：这条查询应命中 1 条（实际 ${before}）`)
+
+  const root = '.queryview-tree .qt-group[data-qt-depth="0"]'
+  await qtAdd(page, root, 'group:all')
+  const nested = '.queryview-tree .qt-group[data-qt-depth="1"]'
+  assert((await page.locator(nested).count()) === 1, '应出现一个嵌套的「且」组')
+  await qtAdd(page, nested, 'row:text')
+  await page
+    .locator(`${nested} .qt-row[data-qt-row="text"] [data-qt="value"]`)
+    .fill('不存在的词')
+  await page.waitForTimeout(250)
+  await page.locator('.queryview-tree [data-qt="apply"]').click()
+  await page.waitForTimeout(450)
+  const after = await countOf()
+  assert(after === 0, `嵌套组要改变结果（加上「正文含不存在的词」后应为 0，实际 ${after}）`)
+
+  // 应用之后焦点回到正文 ⇒ 一次 ⌘Z 把整次应用回滚（不是逐字撤销）
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(450)
+  const undone = await countOf()
+  const where = await page.evaluate(
+    (id) => JSON.stringify(window.__qua.__editor.store.find(id)?.props?._query?.where),
+    qid,
+  )
+  assert(undone === before, `一次 ⌘Z 要回到 ${before} 条（实际 ${undone}）`)
+  assert(JSON.parse(where)?.prop?.eq === false, `条件也要回滚：${where}`)
+
+  await ctx.close()
+  return `加嵌套组：${before} → ${after}；一次 ⌘Z → ${undone}`
+})
+
+await check('B3 旧三列表单已不存在；命令入口打开的也是同一棵条件树', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await openSeedQuery(page)
+  assert(qid !== '', '前置：种子里应有一个查询块')
+
+  await ensureTree(page)
+  const oldForm = await page.evaluate(
+    () => document.querySelectorAll('.qb-row, .qb-mode, .qb-tab, .qb-json, [data-qb-row], [data-qb-mode]').length,
+  )
+  assert(oldForm === 0, `旧三列表单的类名与 data-* 都不该在 DOM 里：${oldForm}`)
+
+  await page.evaluate(
+    (id) => window.__qua.invoke('core.query/open-builder', { owner: { kind: 'block', blockId: id } }),
+    qid,
+  )
+  await page.waitForTimeout(700)
+  const pop = await page.evaluate(() => ({
+    popovers: document.querySelectorAll('.popover').length,
+    tree: Boolean(document.querySelector('.popover.qt')),
+    old: document.querySelectorAll('.popover .qb-row, .popover .qb-mode, .popover .qb-tab').length,
+    groups: document.querySelectorAll('.popover .qt-group').length,
+    text: (document.querySelector('.popover')?.textContent ?? '').slice(0, 160),
+  }))
+  assert(pop.tree && pop.groups > 0, `命令入口打开的应是同一棵树：${JSON.stringify(pop)}`)
+  assert(pop.old === 0, '弹层里也不许出现旧三列表单')
+  await page.keyboard.press('Escape')
+
+  await ctx.close()
+  return '正文与命令入口都是条件树；旧表单类名 0 命中'
+})
+
+await check('B4 组头是「且／或」短词 ＋「非」开关，不是长句下拉', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await openSeedQuery(page)
+  assert(qid !== '', '前置：种子里应有一个查询块')
+
+  await ensureTree(page)
+  const st = await page.evaluate(() => {
+    const root = document.querySelector('.queryview-tree .qt-group[data-qt-depth="0"]')
+    const head = root?.querySelector('.qt-group-head')
+    return {
+      modes: [...(root?.querySelectorAll('.qt-mode option') ?? [])].map((e) => e.textContent ?? ''),
+      not: Boolean(root?.querySelector('.qt-not input[type="checkbox"]')),
+      head: head?.textContent ?? '',
+    }
+  })
+  assert(st.modes.includes('且') && st.modes.includes('或'), `组头只有短词「且／或」：${JSON.stringify(st.modes)}`)
+  assert(!st.modes.some((t) => t.includes('全部满足') || t.includes('任一满足')), `不许长句下拉：${JSON.stringify(st.modes)}`)
+  assert(!/全部满足|任一满足/.test(st.head), `组头文本也不许长句：${st.head}`)
+  assert(st.not, '每层要有「非」开关')
+
+  await ctx.close()
+  return `组头：${st.modes.join(' / ')} ＋ 非`
+})
+
+await check('B5 每级缩进正好等于 --ui-indent（量真实 rect）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await openSeedQuery(page)
+  assert(qid !== '', '前置：种子里应有一个查询块')
+
+  await ensureTree(page)
+  const root = '.queryview-tree .qt-group[data-qt-depth="0"]'
+  await qtAdd(page, root, 'group:all')
+  await qtAdd(page, '.queryview-tree .qt-group[data-qt-depth="1"]', 'group:any')
+  await page.waitForTimeout(200)
+  const st = await page.evaluate(() => {
+    const at = (d) =>
+      document.querySelector(`.queryview-tree .qt-group[data-qt-depth="${d}"]`)?.getBoundingClientRect().left ?? NaN
+    const indent = Number.parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--ui-indent').trim() || '0',
+    )
+    return { d0: at(0), d1: at(1), d2: at(2), indent }
+  })
+  assert(Number.isFinite(st.d0) && Number.isFinite(st.d1) && Number.isFinite(st.d2), `要能量到三级组：${JSON.stringify(st)}`)
+  assert(Math.abs(st.d1 - st.d0 - st.indent) < 0.5, `一级缩进应＝${st.indent}px：${JSON.stringify(st)}`)
+  assert(Math.abs(st.d2 - st.d1 - st.indent) < 0.5, `二级缩进应＝${st.indent}px：${JSON.stringify(st)}`)
+
+  await ctx.close()
+  return `每级 ${st.indent}px：${st.d0} → ${st.d1} → ${st.d2}`
+})
+
+await check('B6 拆不动的形状显示只读 JSON ＋ 一句提示（不静默吞掉编辑）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await openSeedQuery(page)
+  assert(qid !== '', '前置：种子里应有一个查询块')
+
+  await ensureTree(page)
+  // `near` 是合法条件，但树上还没有值位 ⇒ 应该整份走只读 JSON
+  await page.evaluate(
+    (id) =>
+      window.__qua.invoke('core.query/set-spec', {
+        owner: { kind: 'block', blockId: id },
+        spec: { where: { near: { text: '产品' } }, scope: 'all' },
+      }),
+    qid,
+  )
+  await page.waitForTimeout(500)
+  const st = await page.evaluate(() => ({
+    jsonOnly: Boolean(document.querySelector('.queryview-tree .qt-jsononly')),
+    hint: document.querySelector('.queryview-tree .qt-jsonhint')?.textContent ?? '',
+    json: document.querySelector('.queryview-tree pre[data-qt="json"]')?.textContent ?? '',
+    editable: document.querySelectorAll('.queryview-tree textarea, .queryview-tree [contenteditable="true"]').length,
+    apply: Boolean(document.querySelector('.queryview-tree [data-qt="apply"]')),
+    rows: document.querySelectorAll('.queryview-tree .qt-row').length,
+  }))
+  assert(st.jsonOnly, `应显示只读 JSON 逃生口：${JSON.stringify(st)}`)
+  assert(st.hint.includes('JSON'), `要有一句「只能用 JSON 编辑」：${st.hint}`)
+  assert(st.json.includes('"near"'), `JSON 要是模型那一份：${st.json}`)
+  assert(st.editable === 0, '逃生口是只读的（不许出现可编辑 textarea/contenteditable）')
+  assert(!st.apply, '只读 JSON 下不该有「应用」按钮')
+  assert(st.rows === 0, '拆不动就不假装拆成行')
+
+  await ctx.close()
+  return 'near 形状：只读 JSON ＋ 提示；0 行、0 可编辑控件、无应用'
 })
 
 /**

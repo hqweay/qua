@@ -954,7 +954,12 @@ function commandDecls() {
   // ⇒ `.roles` 只许出现在模型实现里（唯一实现），别处一律走 `hasList`／`listsOf`／`identityTags`。
   const ROLES_IMPL = 'src/core/model.ts'
   // 查询条件的实现与序列化：这两处读的 `.role` 是条件原子的键，不是块的列表判定
-  const QUERY_LANG = new Set(['src/core/query.ts', 'src/core/query-view.ts'])
+  const QUERY_LANG = new Set([
+    'src/core/query.ts',
+    'src/core/query-view.ts',
+    'src/core/query-tree.ts',
+    'src/ui/query-tree.ts',
+  ])
   const hits = []
   for (const f of srcFiles) {
     const r = rel(f)
