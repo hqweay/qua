@@ -57,32 +57,17 @@
 
 ## 概念澄清
 
-### 角色 `backref` 是做什么的
+### 反链的两个落点（2026-11-03 校订）
 
-- 它是 `Role` 联合类型的一个值（`src/core/model.ts`），与 `page`／`journal`／`tag` 同级的**纯声明**，不携带任何专属数据字段。
-- 只在**右槽反链面板**（`src/ui/dock-content.ts` 的 `renderBackrefsInto`）里被用上：查出「谁引用了当前块」后，把每条结果**临时构造成一个块**渲染：
-  ```ts
-  const row: Block = { id: s.pageId, text: s.text, children: [], roles: ['backref'] }
-  ```
-- 作用只有一个：**标记「这一行是反链结果，不是真块」**，让渲染层（`src/ui/block-renderers.ts` 的 `backRefRenderer`）用「带箭头的一行 / `page-item backref-item`」样式画它，而不是当成可编辑内容块。
-- 这些 `backref` 块是每次渲染时现造的，**从不写进 `workspace.blocks`**、不进持久化；刷新即消失、再查再生成。
+- 现在只有**两个落点**，判据同源（都走 `derivedRecordsOf`），不是两套实现：
+  - **右槽反链卡**：`ui/cards/backrefs-card.ts`，一列真实可编辑块，跟着当前对象走。
+  - **块底挂载区的「引用」栏**：`ui/chrome/mount-area.ts`，在那一块下面就地展开，一台 `EditableBlock`、N 个 loader。
+- 查询本体在 `core/relations/backrefs.ts`：`backrefsOf` 给根级摘要，`backrefBlocks` 给可编辑视图。
+- **已退场的旧形状**：角色联合里的 `backref`、渲染期现造的临时块（`roles:['backref']`）、
+  底部独立的反链 footer（`BacklinksView`）——它们属于早期形状；角色轴已拆成地址＋露面，
+  两个面已收成同一种东西（见 `docs/模型-一切皆块.md`）。
+- 路径对照（原文 → 现在）：`src/core/model.ts` → `src/core/model/model.ts`（已无 `Role`）、
+  `src/ui/dock-content.ts` → `src/ui/dock/dock-content.ts`、
+  `src/ui/block-renderers.ts` → `src/ui/block-ui/block-renderers.ts`、
+  `src/ui/backlinks.ts` → 无对应（底部 footer 已退场）。
 
-一句话：`backref` 是反链面板里那一行引用来源的**展示标记角色**，本身不携带数据、不入库，纯粹是查询结果的展示外壳。
-
-### 底部反链 footer 与右槽反链面板的区别（两套实现）
-
-底部那个反链 panel 是 `src/ui/backlinks.ts` 的 `BacklinksView`，当前放在正文区下方当 footer。它和右侧槽的反链面板（上一节那个）是**两套机制**：
-
-| | 右槽反链面板 | 底部反链 footer |
-|---|---|---|
-| 实现 | `renderBackrefsInto`（`dock-content.ts`） | `BacklinksView`（`backlinks.ts`） |
-| 数据来源 | `backrefsOf` → 现造的临时块，带 `roles:['backref']` | `backrefBlocks` → **库里真实的源块**（活引用，不拷贝） |
-| 用 `backref` 角色吗 | 用 | **不用**，直接 `loadPage` 真实块 |
-| 能否编辑 | 不能（只读的一行链接） | **能原地编辑**，写回共享 store |
-| 编辑后同步 | 纯展示 | 别的视图收 `touch` 同步 |
-
-- 底部 footer **不使用 `backref` 角色**：它用 `backrefBlocks` 查出「引用了当前块的真实源块」，去掉「祖先也在结果里」的重复项（`backlinks.ts` 的 `findPath` 去重），再 `loadPage({ roots }, …)` 装进一个**普通 `BlockEditor` 实例**渲染。
-- 该 footer 编辑器构造时关掉了「点空白建块」和「删段根」（`allowBlankCreate:false, allowRootRemove:false`），因为它只是受控视图。
-- `backlinks.ts` 顶注预告了下一步：底部 footer 与将来右槽会**共用同一个 `BacklinksView`**，靠槽来排布；右槽届时也会变成「可编辑的真实源块」，而非现在那种「`backref` 角色的只读行」。
-
-一句话：底部反链 footer = 把引用源的真实块装进普通编辑器、可原地编辑的视图；它不用 `backref` 角色（那是右槽只读面板的展示标记）。
