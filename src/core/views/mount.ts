@@ -38,6 +38,7 @@ import { isRefKind, REFERENCE_KINDS, type RefKind } from '../relations/relations
 import { t } from '../infra/msg.ts'
 import {
   canonicalViews,
+  cloneViews,
   MATCHED_COLUMN,
   MODIFIED_COLUMN,
   PATH_COLUMN,
@@ -105,7 +106,7 @@ export type MountEntry =
 export function cloneMountEntries(entries: readonly MountEntry[]): MountEntry[] {
   return canonicalMountEntries(entries).map((e) =>
     e.kind === 'local'
-      ? { ...e, spec: JSON.parse(JSON.stringify(e.spec)) as QuerySpec, views: e.views.map((v) => ({ ...v })) }
+      ? { ...e, spec: JSON.parse(JSON.stringify(e.spec)) as QuerySpec, views: cloneViews(e.views) }
       : e,
   )
 }

@@ -36,7 +36,7 @@ export const PAGE_HANDLERS: Record<string, Handler> = {
     return true
   },
   // ⚠️ 命令不知道 UI：这里**只表达意图**，焦点/选区由装配层的 `app.focusTitle` 负责。
-  //    底座轮记的「handler 越界碰 DOM」就是这里——`scripts/arch-check.mjs` 的 §17 现在会拦它。
+  //    「handler 越界碰 DOM」就是这里——`scripts/arch-check.mjs` 的 [18] 现在会拦它。
   'core.page/rename': (_a, app) => {
     app.focusTitle()
     return true

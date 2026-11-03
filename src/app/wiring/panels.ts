@@ -584,6 +584,7 @@ export function setupPanels(deps: PanelsDeps) {
       invoke: (name, args) => void deps.getRegistry().invoke(name, args, 'queryview'),
       // 视图切换是下拉：贴着按钮弹「视图…」菜单（行仍由装配层现画）
       openViewMenu: (owner, anchor) => app.openViewMenu(owner, anchor),
+      openSlice: (owner, viewId, anchor) => app.openViewSlice(owner, viewId, anchor),
       project: (b, into) => deps.project(b, into),
       refClick: (hit, el, mods) => deps.refClick(hit, mods, el),
       ...(deps.atomClick ? { onAtomClick: (atom, el, mods) => deps.atomClick!(atom, el, mods) } : {}),

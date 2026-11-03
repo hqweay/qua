@@ -580,6 +580,12 @@ button.queryview-chip:hover {
 .queryview-chip--edit {
   font-variant-numeric: tabular-nums;
 }
+/* 切片与基础条件**分开画**：虚线边框表示「这是一层叠加」，不是另一份基础条件 */
+.queryview-chip--slice {
+  border: 1px dashed var(--ui-border-subtle);
+  background: transparent;
+  color: var(--ui-text-tertiary);
+}
 
 /* ---------------------------------------------------------------- 记录列表
    一行一条记录（标题 ＋ 若干字段）。**没有缩进**：它的三种源里两种是平的一批，

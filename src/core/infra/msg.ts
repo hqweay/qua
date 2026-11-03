@@ -1,5 +1,5 @@
 /**
- * 文案字典（§2）—— **id → 文案的扁平映射**。
+ * 文案字典—— **id → 文案的扁平映射**。
  *
  * 三条纪律（由 `scripts/arch-check.mjs` 的断言 11 兜住）：
  *   1. **一切用户可见文案走 `t()`**：命令 `title`／绑定表 `label`＋`keywords`／UI 组件／错误提示；
@@ -579,6 +579,19 @@ export const MSG = {
   'ui.view.deleteItem': '删除这一项',
   'ui.view.current': '当前',
   'ui.view.noSource': '这个视图还没有内容来源',
+  'ui.view.slice': '切片',
+  'ui.view.sliceChip': '切片：{text}',
+  'ui.view.sliceHint': '这一张视图在基础条件之上再排除的块',
+  'ui.view.sliceAdd': '加切片…',
+  'ui.view.sliceEdit': '编辑切片…',
+  'ui.view.sliceClear': '清除切片',
+  'ui.view.sliceOnlyQuery': '切片只能加在查询视图上',
+  'ui.view.rename': '重命名这一视图…',
+  'ui.view.renameTitle': '重命名视图',
+  'ui.view.renamePlaceholder': '视图名',
+  'ui.view.renameApply': '保存',
+  'ui.view.renameCancel': '取消',
+  'ui.view.remove': '删除这一视图',
   'ui.dock.resize': '拖动调整宽度；双击恢复默认',
   'ui.dock.backRefs': '反链',
   'ui.dock.noBackRefs': '还没有块指向这里',
@@ -615,6 +628,7 @@ export const MSG = {
   'cmd.view.remove': '删除视图',
   'cmd.view.rename': '重命名视图',
   'cmd.view.set-sort': '按列排序',
+  'cmd.view.set-filter': '设置视图切片',
   'cmd.view.new-row': '新建一行',
   'cmd.view.delete-row': '删除这一行',
   'cmd.view.menu': '视图…',
@@ -664,6 +678,7 @@ export const MSG = {
   'menu.group.pickTag': '标签',
   'menu.group.instance': '实例',
   'menu.group.new': '新建',
+  'menu.group.viewManage': '当前视图',
   'menu.group.viewSort': '排序',
   'menu.group.viewAdd': '新建视图',
 

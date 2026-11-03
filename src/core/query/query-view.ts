@@ -23,7 +23,14 @@
  */
 import { mkBlock, type Block } from '../model/model.ts'
 import { textRuns } from '../model/runs.ts'
-import { contextKey, isQuerySpec, type QueryHit, type QueryContext, type QuerySpec } from './query.ts'
+import {
+  canonicalNode,
+  contextKey,
+  isQuerySpec,
+  type QueryHit,
+  type QueryContext,
+  type QuerySpec,
+} from './query.ts'
 import { canonicalViews, type ViewConfig } from '../views/view.ts'
 import { withBlockOwnerData } from '../views/view-owner.ts'
 import type { KbClient } from '../kb/types.ts'
@@ -51,12 +58,15 @@ export function readSpec(b: Block): QuerySpec | null {
  * 它住在内存里（`ViewHost`／`MountArea` 的每一栏／`EmbedBody`／dock 卡），
  * 不进 KB、不进撤销、不改 `modified`。
  *
- * 两个键回答「什么时候该重算」：
- *   · `specKey` —— 条件被编辑／撤销了 ⇒ 自动重算（不会出现「旧条件 ＋ 新结果」）；
+ * 三个键回答「什么时候该重算」：
+ *   · `specKey` —— 条件（基础 ∩ 切片）被编辑／撤销了 ⇒ 自动重算；
+ *   · `viewKey` —— 换了一张视图 ⇒ 重算（切片住在视图上，换视图本就是换条件）；
  *   · `contextKey` —— 换宿主／换表面了 ⇒ 同一份条件天然得到另一套结果（`$self` 的定义）。
  */
 export interface FrozenResult {
   specKey: string
+  /** 这一份冻结属于哪张视图（`''` ＝ 源的默认看法）；视图一换就要重算 */
+  viewKey: string
   contextKey: string
   hits: QueryHit[]
 }
@@ -72,18 +82,33 @@ export function specKeyOf(spec: QuerySpec): string {
  * 与条件编辑分开：条件由 builder／`core.query/set-spec` 写进 `_query`（那是内容、可撤销）；
  * 这里只是「按当前条件算一遍」。
  */
-export function freezeResult(spec: QuerySpec, kb: Pick<KbClient, 'query'>, ctx: QueryContext): FrozenResult {
+export function freezeResult(
+  spec: QuerySpec,
+  kb: Pick<KbClient, 'query'>,
+  ctx: QueryContext,
+  viewKey = '',
+): FrozenResult {
   return {
     specKey: specKeyOf(spec),
+    viewKey,
     contextKey: contextKey(ctx),
     hits: kb.query(spec, { selfId: ctx.selfId, excludeIds: ctx.excludeIds }),
   }
 }
 
-/** 条件或上下文变了吗（变了就该重算，不用等用户点刷新） */
-export function frozenStale(frozen: FrozenResult | null, spec: QuerySpec, ctx: QueryContext): boolean {
+/** 条件、视图或上下文变了吗（变了就该重算，不用等用户点刷新） */
+export function frozenStale(
+  frozen: FrozenResult | null,
+  spec: QuerySpec,
+  ctx: QueryContext,
+  viewKey = '',
+): boolean {
   if (!frozen) return true
-  return frozen.specKey !== specKeyOf(spec) || frozen.contextKey !== contextKey(ctx)
+  return (
+    frozen.specKey !== specKeyOf(spec) ||
+    frozen.viewKey !== viewKey ||
+    frozen.contextKey !== contextKey(ctx)
+  )
 }
 
 /**
@@ -134,56 +159,14 @@ export function resolveFrozen(
 /* ------------------------------------------------------------ canonical */
 
 /**
- * 条件的 canonical 形状：**键序固定**。
+ * 一整份条件的 canonical 形状：`where` 走 `canonicalNode`（**唯一一份**，在 `query.ts`），
+ * 这里只补 `sort`／`limit` 两格。
  *
  * 为什么要它：`_query` 要进 KB、要能比较「条件变没变」（冻结的 `specKey` 就是它）。
  * `JSON.stringify` 的键序跟对象字面量写法绑定，改一次写的顺序就会假装「条件变了」。
- *
- * ⚠️ **每一种 `QueryNode` 都要在这里有一支**，否则存进 `_query` 时会被静默丢掉。
- *    丢掉的后果不是报错，而是「条件看起来没变、结果却对不上」——所以这一支必须与
- *    `query.ts` 的联合类型逐条对齐，加一个新原子时两边一起加。
  */
 export function canonicalSpec(spec: QuerySpec): QuerySpec {
-  const node = (n: QuerySpec['where']): QuerySpec['where'] => {
-    if ('all' in n) return { all: n.all.map(node) }
-    if ('any' in n) return { any: n.any.map(node) }
-    if ('not' in n) return { not: node(n.not) }
-    if ('ref' in n) {
-      if (typeof n.ref === 'string') return { ref: n.ref }
-      const kinds =
-        n.ref.kind === undefined
-          ? undefined
-          : [...new Set(typeof n.ref.kind === 'string' ? [n.ref.kind] : n.ref.kind)].sort()
-      return { ref: { to: n.ref.to, ...(kinds === undefined ? {} : { kind: kinds }) } }
-    }
-    if ('tag' in n) return { tag: n.tag }
-    if ('text' in n) return { text: n.text }
-    /**
-     * 属性条件**逐算子原样带走**，不补默认值（补了两种写法就不再等价）。
-     *
-     * ⚠️ 每加一个算子，这里必须加一支：漏掉的那一支会被静默丢掉，
-     *    表现是「条件看起来没变、结果却对不上」。
-     */
-    if ('prop' in n) {
-      const { id } = n.prop
-      const op = n.prop
-      if ('exists' in op) return { prop: { id, exists: op.exists } }
-      if ('empty' in op) return { prop: { id, empty: op.empty } }
-      if ('eq' in op) return { prop: { id, eq: op.eq } }
-      if ('neq' in op) return { prop: { id, neq: op.neq } }
-      if ('contains' in op) return { prop: { id, contains: op.contains } }
-      if ('gt' in op) return { prop: { id, gt: op.gt } }
-      if ('gte' in op) return { prop: { id, gte: op.gte } }
-      if ('lt' in op) return { prop: { id, lt: op.lt } }
-      return { prop: { id, lte: op.lte } }
-    }
-    if ('is' in n) return { is: n.is }
-    if ('up' in n) return { up: node(n.up) }
-    if ('down' in n) return { down: node(n.down) }
-    if ('near' in n) return { near: node(n.near) }
-    return { role: n.role }
-  }
-  const out: QuerySpec = { where: node(spec.where) }
+  const out: QuerySpec = { where: canonicalNode(spec.where) }
   if (spec.sort && spec.sort.length > 0) out.sort = spec.sort.map((k) => ({ by: k.by, dir: k.dir }))
   if (typeof spec.limit === 'number') out.limit = spec.limit
   return out

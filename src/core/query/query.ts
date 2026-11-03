@@ -683,6 +683,57 @@ export function isQuerySpec(raw: unknown): raw is QuerySpec {
 }
 
 /**
+ * 条件的**canonical 形状**：键序固定、同一语义只有一种写法。
+ *
+ * 为什么单一来源：`_query` 与视图切片（`_views[].filter`）都要进 KB、都要能比较
+ * 「条件变没变」（冻结的 `specKey` 就是它）。两份 canonical 会让同一份条件的键序
+ * 随对象字面量写法漂移，于是「改一次写的顺序」就被判成「条件变了」。
+ *
+ * ⚠️ **每一种 `QueryNode` 都要在这里有一支**，否则存进 `_query`／`_views` 时会被静默丢掉。
+ *    丢掉的后果不是报错，而是「条件看起来没变、结果却对不上」——所以这一支必须与
+ *    上面的联合类型逐条对齐，加一个新原子时两处一起加。
+ */
+export function canonicalNode(n: QueryNode): QueryNode {
+  if ('all' in n) return { all: n.all.map(canonicalNode) }
+  if ('any' in n) return { any: n.any.map(canonicalNode) }
+  if ('not' in n) return { not: canonicalNode(n.not) }
+  if ('ref' in n) {
+    if (typeof n.ref === 'string') return { ref: n.ref }
+    const kinds =
+      n.ref.kind === undefined
+        ? undefined
+        : [...new Set(typeof n.ref.kind === 'string' ? [n.ref.kind] : n.ref.kind)].sort()
+    return { ref: { to: n.ref.to, ...(kinds === undefined ? {} : { kind: kinds }) } }
+  }
+  if ('tag' in n) return { tag: n.tag }
+  if ('text' in n) return { text: n.text }
+  /**
+   * 属性条件**逐算子原样带走**，不补默认值（补了两种写法就不再等价）。
+   *
+   * ⚠️ 每加一个算子，这里必须加一支：漏掉的那一支会被静默丢掉，
+   *    表现是「条件看起来没变、结果却对不上」。
+   */
+  if ('prop' in n) {
+    const { id } = n.prop
+    const op = n.prop
+    if ('exists' in op) return { prop: { id, exists: op.exists } }
+    if ('empty' in op) return { prop: { id, empty: op.empty } }
+    if ('eq' in op) return { prop: { id, eq: op.eq } }
+    if ('neq' in op) return { prop: { id, neq: op.neq } }
+    if ('contains' in op) return { prop: { id, contains: op.contains } }
+    if ('gt' in op) return { prop: { id, gt: op.gt } }
+    if ('gte' in op) return { prop: { id, gte: op.gte } }
+    if ('lt' in op) return { prop: { id, lt: op.lt } }
+    return { prop: { id, lte: op.lte } }
+  }
+  if ('is' in n) return { is: n.is }
+  if ('up' in n) return { up: canonicalNode(n.up) }
+  if ('down' in n) return { down: canonicalNode(n.down) }
+  if ('near' in n) return { near: canonicalNode(n.near) }
+  return { role: n.role }
+}
+
+/**
  * 求值一次。**纯函数**：同样的输入永远同样的输出顺序（按森林的先序），
  * 这样「冻结」只要保存输出的 `blockId[]` 就够了（D4：冻结成员与顺序）。
  *

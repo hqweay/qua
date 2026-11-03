@@ -17843,6 +17843,220 @@ await check('T215 Shift+点日历／查询各看法的打开入口 ⇒ 右槽窗
   return `日历（已写/空白）+ 看板/画廊/列表/表格的 Shift 都开右槽；中心与历史不动`
 })
 
+/**
+ * **切片是叠加，不是替换**：一份视图的结果 ＝ 基础条件 ∩ 它自己的切片。
+ *
+ * 入口住在既有的「视图…」菜单里（按名列出 ＋ 改名／切片／删除），
+ * 也有第二条路：抬头的切片 chip 直接点开同一台浮层。
+ * 切片编辑复用同一棵条件树，但**不画** `limit`／`sort`
+ * ——那两格在视图配置里另有位置，画出来却存不进去就是「点了没生效」。
+ * **空树 ＝ 没有切片**：删光条件再应用要删键，而不是留一条恒假条件。
+ */
+await check('T219 视图切片：基础条件 ∩ 切片；菜单按名列出并可改名/编辑/删除', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(300)
+
+  // 两块只差一个字：切片靠这一个字区分
+  const made = await page.evaluate(() => {
+    const rows = window.__qua.__editor.rows().map((r) => r.block)
+    const spot = rows.find((b) => b.children.length === 0 && !b.props?._query)
+    if (!spot) throw new Error('前置：这一页没有可落的块')
+    window.__qua.focusBlock(spot.id, 999)
+    window.__qua.invoke('core.editor/insert-block', { text: '切片甲探针' })
+    const a = String(window.__qua.__editor.sel?.aBlock ?? '')
+    window.__qua.focusBlock(a, 999)
+    window.__qua.invoke('core.editor/insert-block', { text: '切片乙探针' })
+    const b = String(window.__qua.__editor.sel?.aBlock ?? '')
+    return { a, b }
+  })
+  assert(made.a && made.b && made.a !== made.b, `前置：应造出两块：${JSON.stringify(made)}`)
+  await page.waitForTimeout(350)
+
+  const qid = await page.evaluate(() => {
+    const ok = window.__qua.invoke('core.query/create', {
+      name: '切片查询',
+      spec: { where: { text: '切片' } },
+    })
+    if (!ok) throw new Error('建不出查询块')
+    return String(window.__qua.snapshot().activeId)
+  })
+  await page.waitForTimeout(500)
+
+  const owner = { kind: 'block', blockId: qid }
+  const addView = async (kind) => {
+    await page.evaluate(
+      ({ o, k }) => void window.__qua.invoke('core.view/add', { owner: o, kind: k }),
+      { o: owner, k: kind },
+    )
+    await page.waitForTimeout(450)
+  }
+  const renameActive = async (name) => {
+    await page.evaluate(
+      ({ o, n }) => void window.__qua.invoke('core.view/rename', { owner: o, name: n }),
+      { o: owner, n: name },
+    )
+    await page.waitForTimeout(350)
+  }
+
+  // 两张视图：列表（只看基础条件）与表格（再叠一片「甲」）
+  await addView('list')
+  await renameActive('全部')
+  await addView('table')
+  await renameActive('只看甲')
+
+  const views = await page.evaluate((id) => {
+    const b = window.__qua.__editor.store.find(id)
+    return (b?.props?._views ?? []).map((v) => ({ id: v.id, name: v.name ?? '', kind: v.kind, hasFilter: Boolean(v.filter) }))
+  }, qid)
+  assert(views.length === 2, `前置：应有两张视图：${JSON.stringify(views)}`)
+  const plain = views.find((v) => v.name === '全部')
+  const sliced = views.find((v) => v.name === '只看甲')
+  assert(plain && sliced, `前置：两张视图应带名字：${JSON.stringify(views)}`)
+  assert(!plain.hasFilter && !sliced.hasFilter, `前置：还没写切片：${JSON.stringify(views)}`)
+
+  // 写切片：基础条件 `text:切片` ∩ `text:甲`
+  await page.evaluate(
+    ({ id, vid }) =>
+      void window.__qua.invoke('core.view/set-filter', {
+        owner: { kind: 'block', blockId: id },
+        viewId: vid,
+        filter: { text: '甲' },
+      }),
+    { id: qid, vid: sliced.id },
+  )
+  await page.waitForTimeout(500)
+
+  /** 抬头主数字（`{count} 条结果`） */
+  const count = async () => {
+    const txt = (await page.textContent('.queryview-count')) ?? ''
+    const m = txt.match(/\d+/)
+    return m ? Number(m[0]) : -1
+  }
+
+  // 当前仍在「只看甲」⇒ 1 条；切回「全部」⇒ 2 条（切片没有替换基础条件）
+  const slicedCount = await count()
+  assert(slicedCount === 1, `切片视图应只剩 1 条（基础 ∩ 切片）：${slicedCount}`)
+  await switchView(page, '.queryview', '全部')
+  const plainCount = await count()
+  assert(plainCount === 2, `无切片视图应仍是 2 条（基础条件照旧）：${plainCount}`)
+
+  // 回到带切片的那张，检查抬头 chip：切片与基础条件分开画
+  await switchView(page, '.queryview', '只看甲')
+  await page.waitForTimeout(400)
+  const chips = await page.evaluate(() => {
+    const s = document.querySelector('.queryview-filters [data-query-chip="slice"]')
+    return {
+      slice: s ? s.textContent : '',
+      tag: s ? s.tagName : '',
+      base: document.querySelector('.queryview-filters [data-query-chip="summary"]')?.textContent ?? '',
+    }
+  })
+  assert(chips.slice.includes('切片'), `抬头应有单独的切片 chip：${JSON.stringify(chips)}`)
+  assert(!chips.slice.includes('切片甲探针'), `切片 chip 只描述切片，不把基础条件抄进来：${chips.slice}`)
+  assert(chips.tag === 'BUTTON', `切片 chip 必须可点（基础条件那颗就是按钮）：${JSON.stringify(chips)}`)
+
+  // 菜单：按名列出 ＋ 当前视图的管理行
+  await page.locator('.queryview .qv-view-current').first().click()
+  await page.waitForTimeout(250)
+  let rows = await layerRows(page)
+  assert(rows.some((r) => r.label === '全部'), `菜单按名列出无切片视图：${JSON.stringify(rows.map((r) => r.label))}`)
+  const slicedRows = rows.filter((r) => r.label === '只看甲')
+  assert(slicedRows.length === 1, `菜单按名列出带切片视图：${JSON.stringify(rows.map((r) => r.label))}`)
+  assert(slicedRows[0].hint.includes('切片'), `带切片的视图行要标出「切片」：${JSON.stringify(slicedRows[0])}`)
+  assert(rows.some((r) => r.label === '重命名这一视图…'), `管理入口：改名：${JSON.stringify(rows.map((r) => r.label))}`)
+  assert(rows.some((r) => r.label === '编辑切片…'), `管理入口：编辑切片：${JSON.stringify(rows.map((r) => r.label))}`)
+  assert(rows.some((r) => r.label === '删除这一视图'), `管理入口：删除：${JSON.stringify(rows.map((r) => r.label))}`)
+
+  // 编辑切片：同一棵条件树，但没有 limit／sort 那一排（切片只是 QueryNode）
+  await page.locator('.layer-item', { hasText: '编辑切片…' }).first().click()
+  await page.waitForTimeout(400)
+  const tree = await page.evaluate(() => {
+    const value = document.querySelector('.popover .qt-row[data-qt-row="text"] [data-qt="value"]')
+    return {
+      open: Boolean(document.querySelector('.popover.qt')),
+      options: document.querySelectorAll('.popover .qt-opts, .popover .qt-opt-label').length,
+      value: value ? value.value : '',
+    }
+  })
+  assert(tree.open, `编辑切片应打开同一棵条件树：${JSON.stringify(tree)}`)
+  assert(tree.options === 0, `切片树不该有 limit/sort 那一排（存不进去）：${JSON.stringify(tree)}`)
+  assert(tree.value === '甲', `切片树应预填现值：${JSON.stringify(tree)}`)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(250)
+
+  // 另一端入口：点抬头切片 chip 就地改（同一台浮层，不必绕进菜单）
+  await page.locator('.queryview-filters [data-query-chip="slice"]').first().click()
+  await page.waitForTimeout(400)
+  const viaChip = await page.evaluate(() => ({
+    open: Boolean(document.querySelector('.popover.qt')),
+    value: document.querySelector('.popover .qt-row[data-qt-row="text"] [data-qt="value"]')?.value ?? '',
+  }))
+  assert(viaChip.open && viaChip.value === '甲', `点 chip 应打开同一棵条件树并预填：${JSON.stringify(viaChip)}`)
+
+  // **空树 ＝ 没有切片**：删掉唯一一行再应用 ⇒ `filter` 键消失、结果回到 2 条
+  await page.locator('.popover .qt-row[data-qt-row="text"] .qt-del').first().click()
+  await page.waitForTimeout(200)
+  await page.locator('.popover .qt-apply').first().click()
+  await page.waitForTimeout(500)
+  const cleared = await page.evaluate((id) => {
+    const b = window.__qua.__editor.store.find(id)
+    const v = (b?.props?._views ?? []).find((x) => x.name === '只看甲')
+    return {
+      hasFilter: Boolean(v?.filter),
+      keys: Object.keys(v ?? {}),
+      count: document.querySelector('.queryview-count')?.textContent ?? '',
+      chip: Boolean(document.querySelector('.queryview-filters [data-query-chip="slice"]')),
+    }
+  }, qid)
+  assert(cleared.hasFilter === false && !cleared.keys.includes('filter'), `空树应用 ⇒ 切片键应删掉：${JSON.stringify(cleared)}`)
+  assert((cleared.count.match(/\d+/)?.[0] ?? '') === '2', `清掉切片后结果回到 2 条：${JSON.stringify(cleared)}`)
+  assert(cleared.chip === false, `没有切片就不再画切片 chip：${JSON.stringify(cleared)}`)
+
+  // 改名：同一份菜单里的输入框，落盘走命令面
+  await page.locator('.queryview .qv-view-current').first().click()
+  await page.waitForTimeout(250)
+  await page.locator('.layer-item', { hasText: '重命名这一视图…' }).first().click()
+  await page.waitForTimeout(300)
+  const prompt = await page.evaluate(() => {
+    const input = document.querySelector('[data-name-prompt]')
+    return { there: Boolean(input), value: input ? input.value : '' }
+  })
+  assert(prompt.there, `重命名应弹出输入框：${JSON.stringify(prompt)}`)
+  assert(prompt.value === '只看甲', `输入框预填当前名：${JSON.stringify(prompt)}`)
+  await page.locator('[data-name-prompt]').fill('甲视图')
+  await page.locator('.popover button[type="submit"]').first().click()
+  await page.waitForTimeout(450)
+  const renamed = await page.evaluate((id) => {
+    const b = window.__qua.__editor.store.find(id)
+    const names = (b?.props?._views ?? []).map((v) => v.name ?? '')
+    return { names, current: document.querySelector('.qv-view-current-label')?.textContent ?? '' }
+  }, qid)
+  assert(renamed.names.includes('甲视图'), `改名应写进模型：${JSON.stringify(renamed)}`)
+  assert(!renamed.names.includes('只看甲'), `旧名应消失：${JSON.stringify(renamed)}`)
+  assert(renamed.current === '甲视图', `抬头应立即显示新名：${JSON.stringify(renamed)}`)
+
+  // 删除激活视图：回落到相邻那张（无切片），结果回到 2 条
+  await page.locator('.queryview .qv-view-current').first().click()
+  await page.waitForTimeout(250)
+  await page.locator('.layer-item', { hasText: '删除这一视图' }).first().click()
+  await page.waitForTimeout(450)
+  const after = await page.evaluate((id) => {
+    const b = window.__qua.__editor.store.find(id)
+    return {
+      names: (b?.props?._views ?? []).map((v) => v.name ?? ''),
+      active: b?.props?._activeView ?? '',
+      count: document.querySelector('.queryview-count')?.textContent ?? '',
+    }
+  }, qid)
+  assert(after.names.length === 1 && after.names[0] === '全部', `删完只剩无切片那张：${JSON.stringify(after)}`)
+  assert((after.count.match(/\d+/)?.[0] ?? '') === '2', `删掉激活视图后回落相邻视图＝2 条：${JSON.stringify(after)}`)
+
+  await ctx.close()
+  return `基础∩切片：${plainCount}→${slicedCount}；菜单按名列出、上行标「切片」；chip 可点；空树应用删键回 2 条；改名/删除都落盘`
+})
+
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
   await writeFile(REPORT, JSON.stringify({ total: seq, cases: results, known: known.map((r) => r.name) }))

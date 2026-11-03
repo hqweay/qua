@@ -6,7 +6,7 @@
  *    local tab 上 —— 「住哪」由拥有者回答，handler 不猜。
  */
 import type { Handler } from '../../core/infra/ports.ts'
-import type { QuerySpec } from '../../core/query/query.ts'
+import { isQueryNode, type QueryNode, type QuerySpec } from '../../core/query/query.ts'
 import { ownerOrCur, S } from './shared.ts'
 
 export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
@@ -36,6 +36,16 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
     const by = S(a.by)
     if (!owner || !by) return false
     return app.viewSetSort(owner, S(a.viewId), by, S(a.dir))
+  },
+  /** 写一张视图的切片；显式 `null` ＝ 清掉，缺参 ＝ 拒绝（不能把「没传」当成清空） */
+  'core.view/set-filter': (a, app) => {
+    const owner = ownerOrCur(a, app)
+    const viewId = S(a.viewId)
+    if (!owner || !viewId) return false
+    const raw = a.filter
+    if (raw === undefined) return false
+    if (raw !== null && !isQueryNode(raw)) return false
+    return app.setViewFilter(owner, viewId, raw as QueryNode | null)
   },
   'core.view/new-row': (a, app) => {
     const owner = ownerOrCur(a, app)

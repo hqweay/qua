@@ -16,7 +16,7 @@
  */
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { CtxKeys } from '../index.ts'
-import type { QuerySpec } from '../query/query.ts'
+import type { QueryNode, QuerySpec } from '../query/query.ts'
 import type { ChoiceScope } from '../props/props.ts'
 import type { SecLayout } from '../query/feed.ts'
 import type { MountHost } from '../views/mount.ts'
@@ -421,6 +421,14 @@ export interface App {
    *    由构建器编辑。点表头不该换一批行。`dir === ''` ＝ 清掉。
    */
   viewSetSort(owner: ViewOwnerRef, viewId: string, by: string, dir: string): boolean
+  /**
+   * 写一张视图的**切片**：与源的基础条件 AND 叠加（不替换），`null` ＝ 清掉。
+   *
+   * 只对 query 源有效；别的源当场拒绝（写进去也会被读路径丢掉）。
+   */
+  setViewFilter(owner: ViewOwnerRef, viewId: string, filter: QueryNode | null): boolean
+  /** 打开**切片构建器**：与「视图… → 编辑切片…」同一台浮层（点抬头 chip 也走这里） */
+  openViewSlice(owner: ViewOwnerRef, viewId: string, anchor?: DOMRect | null): void
   /** 「视图…」菜单：列出默认看法 ＋ 已有视图 ＋ 新建…（**纯 UI**，落在装配层） */
   openViewMenu(owner: ViewOwnerRef, anchor?: DOMRect | null): void
   /** 打开**条件构建器**（一个浮层；草稿改在本地，点「应用」才写一次） */
