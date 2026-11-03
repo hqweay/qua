@@ -31,6 +31,14 @@ export const MOUNT_HANDLERS: Record<string, Handler> = {
     if (!host || !tabId) return false
     return app.renameMountTab(host, tabId, S(a.label))
   },
+  /** 挪一栏：`place` 只认 before／after，别的一律当 before（参数面不做枚举校验） */
+  'core.mount/move': (a, app) => {
+    const host = hostArg(a.host)
+    const tabId = S(a.tabId)
+    const targetId = S(a.targetId)
+    if (!host || !tabId || !targetId) return false
+    return app.moveMountTab(host, tabId, targetId, a.place === 'after' ? 'after' : 'before')
+  },
   'core.mount/set-view': (a, app) => {
     const host = hostArg(a.host)
     const tabId = S(a.tabId)

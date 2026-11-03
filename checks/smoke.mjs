@@ -18312,6 +18312,105 @@ await check('T221 挂载区的查询栏可以改名：双击 → 输入 → 落�
 })
 
 
+await check('T222 挂载区的查询栏可以拖拽换序：落点亮插入线、松手即换位、拖到自己那格不算', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.evaluate(() => window.__qua.loadState('seed'))
+  await page.waitForTimeout(300)
+  const pageId = await page.evaluate(() => {
+    const p = window.__qua.pages()[0]
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    return p.id
+  })
+  await page.waitForTimeout(400)
+  // 造三栏（另有一栏演示查询时也够用：只按 local 的条数取）
+  for (let i = 0; i < 3; i++) {
+    const n = await page.locator('#editor .mount .mount-tabwrap[data-kind="local"]').count()
+    if (n >= 3) break
+    await page.locator('#editor .mount .mount-add').first().click()
+    await page.waitForTimeout(300)
+  }
+
+  const order = () =>
+    page.evaluate(
+      (id) => ({
+        dom: [...document.querySelectorAll('#editor .mount .mount-tabwrap[data-kind="local"]')].map((w) => w.dataset.tab),
+        model: (window.__qua.__editor.store.find(id)?.props?._mounts ?? []).map((e) => e.id),
+      }),
+      pageId,
+    )
+  const before = await order()
+  assert(before.dom.length >= 3, `前置：至少要三栏才谈得上换序：${JSON.stringify(before)}`)
+
+  /* ① 拖到另一栏的**左半边** ⇒ 悬停期亮「前插入线」，松手后它排到那一栏前面 */
+  const drag = await page.evaluate(() => {
+    const wraps = [...document.querySelectorAll('#editor .mount .mount-tabwrap[data-kind="local"]')]
+    const src = wraps[wraps.length - 1]
+    const tgt = wraps[0]
+    const srcBtn = src.querySelector('.mount-tab')
+    const dt = new DataTransfer()
+    const r = tgt.getBoundingClientRect()
+    const mk = (type, x) =>
+      new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: r.top + r.height / 2 })
+    srcBtn.dispatchEvent(mk('dragstart', r.left + 2))
+    tgt.dispatchEvent(mk('dragover', r.left + 2))
+    const hover = {
+      before: tgt.dataset.dropBefore ?? '',
+      after: tgt.dataset.dropAfter ?? '',
+      dragging: src.dataset.dragging ?? '',
+    }
+    tgt.dispatchEvent(mk('drop', r.left + 2))
+    srcBtn.dispatchEvent(mk('dragend', r.left + 2))
+    return { hover, srcId: src.dataset.tab, tgtId: tgt.dataset.tab }
+  })
+  assert(drag.hover.before === '1' && drag.hover.after === '', `左半边应亮「插在前面」：${JSON.stringify(drag.hover)}`)
+  assert(drag.hover.dragging === '1', `拖动中的那一栏要淡出（可被看见）：${JSON.stringify(drag.hover)}`)
+  await page.waitForTimeout(450)
+
+  const moved = await order()
+  assert(moved.dom[0] === drag.srcId, `DOM 上应排到最前：${JSON.stringify(moved)}`)
+  assert(moved.model[0] === drag.srcId, `模型里那一格也要换位（不是只挪 DOM）：${JSON.stringify(moved)}`)
+  assert(moved.dom.length === before.dom.length && moved.model.length === before.model.length, '换序不增不减')
+
+  /* ② 拖到**自己那格** ⇒ 不接受（不高亮、不写入） */
+  const self = await page.evaluate((id) => {
+    const wrap = document.querySelector(`#editor .mount .mount-tabwrap[data-tab="${id}"]`)
+    const btn = wrap.querySelector('.mount-tab')
+    const dt = new DataTransfer()
+    const r = wrap.getBoundingClientRect()
+    const mk = (type) =>
+      new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 2, clientY: r.top + r.height / 2 })
+    btn.dispatchEvent(mk('dragstart'))
+    wrap.dispatchEvent(mk('dragover'))
+    const marked = wrap.dataset.dropBefore ?? wrap.dataset.dropAfter ?? ''
+    wrap.dispatchEvent(mk('drop'))
+    btn.dispatchEvent(mk('dragend'))
+    return { marked }
+  }, drag.srcId)
+  assert(self.marked === '', `拖到自己那格不该亮落点：${JSON.stringify(self)}`)
+  await page.waitForTimeout(300)
+  const again = await order()
+  assert(
+    JSON.stringify(again.model) === JSON.stringify(moved.model),
+    `拖到自己那格不该改顺序：${JSON.stringify(moved.model)} → ${JSON.stringify(again.model)}`,
+  )
+
+  /* ③ 重开一页再看：顺序是**落盘的那一格**（不是只在内存里换了 DOM） */
+  await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[1].id }))
+  await page.waitForTimeout(350)
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId)
+  await page.waitForTimeout(450)
+  const persisted = await order()
+  assert(
+    JSON.stringify(persisted.dom) === JSON.stringify(again.dom),
+    `换序要落盘（重开仍是同一顺序）：${JSON.stringify(again.dom)} → ${JSON.stringify(persisted.dom)}`,
+  )
+
+  await ctx.close()
+  return `三栏 ⇒ 最后一栏拖到最前（悬停亮前插入线）；拖自己那格不亮也不写；重开顺序不变`
+})
+
+
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
   await writeFile(REPORT, JSON.stringify({ total: seq, cases: results, known: known.map((r) => r.name) }))

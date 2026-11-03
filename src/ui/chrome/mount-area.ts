@@ -50,6 +50,7 @@ import type { KbClient } from '../../core/kb/types.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
 import { type BlockEditor, type Run } from '../../view/editor/editor.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
+import { bindDropTarget, setDragTab } from '../../view/dnd.ts'
 
 /** 非大纲那一栏的**视图体**（由装配层造：只有那里有完整依赖） */
 export interface ViewBodyHost {
@@ -94,6 +95,13 @@ export interface MountAreaDeps {
    * —— 浮层贴着用户点的那个 tab，而不是屏幕中央（「改的是哪一个」由位置回答）。
    */
   onRenameTab?: (host: MountHost, tabId: string, anchor: DOMRect) => void
+  /**
+   * **拖拽换序**：把 `tabId` 挪到 `targetId` 的前／后。
+   *
+   * 顺序＝数组位（内置栏永远在前，见 `mountEntriesOf`），所以只有 local 栏能被拖、能当落点。
+   * 与改名同一个形状：这一层只报「谁挪到了谁旁边」，写哪一格与命令都在装配层。
+   */
+  onMoveTab?: (host: MountHost, tabId: string, targetId: string, place: 'before' | 'after') => void
   /**
    * 派生栏现在选了什么看法（**设备状态**：没有拥有者）。
    *
@@ -409,6 +417,42 @@ export class MountArea {
         btn.addEventListener('dblclick', (e) => {
           e.preventDefault()
           this.deps.onRenameTab?.(hostRef, entry.id, btn.getBoundingClientRect())
+        })
+      }
+      /**
+       * **拖拽换序**：只有 local 栏能被拖、能当落点 —— 内置栏的顺序是派生的，存不进去，
+       * 让它可拖会得到「拖完弹回去」。拖源报 id，落点答「落到我的前/后」。
+       */
+      if (entry.kind === 'local' && this.deps.onMoveTab) {
+        btn.draggable = true
+        btn.addEventListener('dragstart', (e) => {
+          setDragTab(e.dataTransfer, entry.id)
+          wrap.dataset.dragging = '1'
+        })
+        btn.addEventListener('dragend', () => {
+          delete wrap.dataset.dragging
+        })
+        const placeOf = (e: DragEvent): 'before' | 'after' => {
+          const r = wrap.getBoundingClientRect()
+          return e.clientX < r.left + r.width / 2 ? 'before' : 'after'
+        }
+        bindDropTarget(wrap, {
+          kind: 'tab',
+          effect: 'move',
+          targetId: () => entry.id,
+          // 拖到自己那格没有意义（模型层也会拒），这里连高亮都不亮
+          accept: (id) => id !== entry.id,
+          hint: () => t('ui.dnd.moveTab'),
+          mark: (_id, e) => {
+            wrap.dataset[placeOf(e) === 'before' ? 'dropBefore' : 'dropAfter'] = '1'
+          },
+          unmark: () => {
+            delete wrap.dataset.dropBefore
+            delete wrap.dataset.dropAfter
+          },
+          onDrop: (id, _target, e) => {
+            this.deps.onMoveTab?.(hostRef, id, entry.id, placeOf(e))
+          },
         })
       }
       wrap.appendChild(btn)

@@ -111,6 +111,36 @@ export function cloneMountEntries(entries: readonly MountEntry[]): MountEntry[] 
   )
 }
 
+/**
+ * **挪一栏**：把 `tabId` 挪到 `targetId` 的前／后。
+ *
+ * 只在**存下来的那几栏**里重排 —— 内置栏的顺序是派生的（成员 → 引用 → 同类 → 提及），
+ * 存不进去；`mountEntriesOf` 也永远把内置栏排在前面，所以用户栏的「最前」＝内置栏之后的第一格。
+ *
+ * 返回 `null` ＝ 什么都没变（同一个 id ／任一不在这一格里）—— 调用方据此判断「要不要写」，
+ * 不写就不该产生一次可撤销动作。
+ */
+export function moveMountEntry(
+  entries: readonly MountEntry[],
+  tabId: string,
+  targetId: string,
+  place: 'before' | 'after',
+): MountEntry[] | null {
+  if (tabId === targetId) return null
+  const from = entries.findIndex((e) => e.id === tabId)
+  if (from < 0) return null
+  if (!entries.some((e) => e.id === targetId)) return null
+  const next = [...entries]
+  const [moved] = next.splice(from, 1)
+  /**
+   * 目标下标必须按**摘掉之后**的数组重算：先按下标算好再 `splice` 会让「往后挪」差一格
+   * （摘掉源之后，目标的下标已经左移了一位）。
+   */
+  const at = next.findIndex((e) => e.id === targetId)
+  next.splice(place === 'before' ? at : at + 1, 0, moved!)
+  return next
+}
+
 /** 一个 tab 的稳定 id（数组位只表示顺序，所以身份必须另给一个） */
 export function mkTabId(): string {
   /**
