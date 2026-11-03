@@ -12,7 +12,6 @@ import {
   danglingOf,
   declaredFieldIds,
   derivedColumns,
-  derivedEntriesOf,
   derivedListFields,
   derivedRecordsOf,
   displayNameOf,
@@ -24,16 +23,13 @@ import {
   isJournal,
   isViewRoot,
   journalDate,
-  mountHostKey,
   mountHostOf,
   mountViewKey,
-  moveDerivedOrder,
   normalizeAlias,
   parentsOf,
   propDisplayLabels,
   propKindOf,
   propLabel,
-  readMountOrder,
   readMountView,
   todayISO,
   type Block,
@@ -715,8 +711,6 @@ export function setupPanels(deps: PanelsDeps) {
         return readMountView(deps.prefs().mountViews, mountHost, source)
       },
       setDerivedKind: (hostBlock, source, kind) => setDerivedKind(hostBlock, source, kind),
-      // 派生栏的顺序：同一份设备状态（`mountOrder`），缺的按规范序补齐
-      derivedOrder: (hostBlock) => readMountOrder(deps.prefs().mountOrder, mountHostOf(hostBlock)),
       onRemoveTab: (mountHost, tabId) => {
         void deps.getRegistry().invoke('core.mount/remove', { host: mountHost, tabId }, 'mount')
         // 摘完当场重排：栏是模型/设备状态里的一格，DOM 不会自己知道
@@ -753,22 +747,6 @@ export function setupPanels(deps: PanelsDeps) {
       onMoveTab: (mountHost, tabId, targetId, place) => {
         void deps.getRegistry().invoke('core.mount/move', { host: mountHost, tabId, targetId, place }, 'mount')
         // 顺序是那一格数组的顺序 ⇒ 写完整排一次（与摘掉同一条重排路径）
-        renderMounts()
-      },
-      /**
-       * **派生栏换序**：写设备状态（`Prefs.mountOrder`），不动 `_mounts`。
-       *
-       * `present` 取「宿主类型给的那一组」——不在这一台宿主上的来源（普通块上的成员）
-       * 不参与换位，但它在全序里的槽位被 `moveDerivedOrder` 原样保留。
-       */
-      onMoveDerived: (hostBlock, source, target, place) => {
-        const mountHost = mountHostOf(hostBlock)
-        const stored = readMountOrder(deps.prefs().mountOrder, mountHost)
-        const present = derivedEntriesOf(hostBlock).map((e) => e.source)
-        const next = moveDerivedOrder(stored, present, source, target, place)
-        if (!next) return
-        deps.prefs().mountOrder[mountHostKey(mountHost)] = next
-        deps.scheduleDeviceSave()
         renderMounts()
       },
       /** 非大纲那一栏的视图体：local ⇒ 拥有者就是这一栏（配置住在它自己身上） */

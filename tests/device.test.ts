@@ -85,25 +85,6 @@ test('device: 派生栏的看法是设备状态：坏键/坏值丢掉，允许�
   assert.deepEqual(normalizePrefs(undefined).mountViews, {}, '缺字段 ⇒ 空')
 })
 
-test('device: 派生栏的顺序是设备状态：逐项验形、去重、缺的按规范序补成全序', () => {
-  const p = normalizePrefs({
-    mountOrder: {
-      'block:b1': ['mentions', 'refs'],
-      journal: ['mentions', 'nope', 'mentions'],
-      '': ['refs'],
-      'block:b2': 'nope',
-    } as unknown as Prefs['mountOrder'],
-  })
-  assert.deepEqual(
-    p.mountOrder,
-    {
-      'block:b1': ['mentions', 'refs', 'members', 'same'],
-      journal: ['mentions', 'members', 'refs', 'same'],
-    },
-    '未知值/坏格丢掉；存过的在前，缺的按规范序补',
-  )
-  assert.deepEqual(normalizePrefs(undefined).mountOrder, {}, '缺字段 ⇒ 空（不落一格字节）')
-})
 
 test('device: 存了再读 ⇒ 主题／槽宽／钉住都原样回来', async () => {
   resetMemoryLocalStorage()

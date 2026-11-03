@@ -20,7 +20,6 @@ import {
   derivedEntriesOf,
   derivedRecordsOf,
   derivedSpecOf,
-  DERIVED_SOURCES,
   fieldTextOf,
   REF_COUNT_COLUMN,
   MATCHED_COLUMN,
@@ -32,13 +31,10 @@ import {
   mkTabId,
   MOUNTS_PROP,
   mountEntriesOf,
-  moveDerivedOrder,
   moveMountEntry,
-  readMountOrder,
   readMounts,
   storedEntriesOf,
   type MountEntry,
-  type MountHost,
 } from '../src/core/index.ts'
 import { textRuns } from '../src/core/model/runs.ts'
 import type { QuerySpec } from '../src/core/query/query.ts'
@@ -182,6 +178,16 @@ test('U10b 日记的栏住在设备状态里 ⇒ **库里一块都不多**（曾
   assert.equal(Object.keys(journal.props ?? {}).includes(MOUNTS_PROP), false, '日记块上不该有 `_mounts`')
 })
 
+test('U19 过去的日记天没有用户栏，但顺序跟着那条共享 tab 条（只留位置标记）', () => {
+  const { old, journal } = fixture()
+  const prefs: MountEntry[] = [
+    { id: 'mentions', kind: 'derived', source: 'mentions' },
+    { id: 'refs', kind: 'derived', source: 'refs' },
+  ]
+  assert.deepEqual(SOURCES(mountEntriesOf(old, { journalMounts: prefs, now: NOW })), ['mentions', 'refs'])
+  assert.deepEqual(SOURCES(mountEntriesOf(journal, { journalMounts: prefs, now: NOW })), ['mentions', 'refs'])
+})
+
 test('U11 日记的栏序列 ＝ 引用 ＋ 提及（它有日期投影、没有标签）', () => {
   const { journal, blocks } = fixture()
   assert.deepEqual(SOURCES(mountEntriesOf(journal, { now: NOW })), ['refs', 'mentions'])
@@ -196,6 +202,15 @@ test('普通块：三栏常驻（有标签、有可读文本都不再决定 tab 
     ['refs', 'same', 'mentions'],
     '既没标签也没可读文本 ⇒ 三栏仍在，由空态说原因',
   )
+})
+
+test('空态的前置：没有标签／没有可读文本时，那一栏的条件是 `null`（维度不存在）', () => {
+  const bare = b('bare', '   ')
+  assert.equal(derivedSpecOf(bare, [bare], 'same'), null, '没有 `_tags` ⇒ 同类没有维度')
+  assert.equal(derivedSpecOf(bare, [bare], 'mentions'), null, '没有可读文本 ⇒ 提及没有可搜的串')
+  const { host, blocks } = fixture()
+  assert.notEqual(derivedSpecOf(host, blocks, 'same'), null, '有标签 ⇒ 同类有维度')
+  assert.notEqual(derivedSpecOf(host, blocks, 'mentions'), null, '有名字 ⇒ 提及有维度')
 })
 
 test('内置栏的 id 是派生的：同一个宿主、同一个来源 ⇒ 同一个 id（刷新不漂）', () => {
@@ -311,6 +326,12 @@ test('派生栏记录：提及填命中词、同类填共同标签；两者都�
 function renameFixture(entries: MountEntry[]) {
   let list = [...entries]
   const writes: MountEntry[][] = []
+  /**
+   * 这一格是**内容**：命令的「整条 tab 条」从块上读（`mountEntriesOf`），
+   * 所以夹具必须把 `entries` 同步到块上、每次写入再写回去——只改 `owners` 的那份
+   * 会让「跨组换序」读到一条没有用户栏的列表。
+   */
+  const hostBlock = b('h', '宿主', { props: { [MOUNTS_PROP]: [...entries] } })
   const owners = {
     read: () => ({ views: [] }),
     write: () => {},
@@ -320,10 +341,11 @@ function renameFixture(entries: MountEntry[]) {
     writeEntries: (_host: unknown, next: readonly MountEntry[]) => {
       list = [...next]
       writes.push(list)
+      hostBlock.props = { ...(hostBlock.props ?? {}), [MOUNTS_PROP]: [...next] }
     },
     entryOf: (_host: unknown, id: string) => list.find((e) => e.id === id),
   }
-  const store = new BlockStore([b('h', '宿主')])
+  const store = new BlockStore([hostBlock])
   const kb = new MemoryKb(store)
   const commands = mountCommands({
     kb,
@@ -388,63 +410,75 @@ test('U13c 命令面：一次换序＝一条写入；没变化＝false 且零写
   assert.equal(f.writes.length, 1, '没变化不产生可撤销的空动作')
 })
 
-/* ------------------------------------------------------------ 派生栏的顺序（设备状态，不进 `_mounts`）*/
+/* ------------------------------------------------------------ 整条 tab 条的顺序（派生与用户栏可交错）*/
 
-test('U14 `readMountOrder`：存的在前、缺的按规范序补、未知值丢掉、去重', () => {
-  const h: MountHost = { kind: 'block', blockId: 'h' }
-  assert.deepEqual(readMountOrder(undefined, h), [...DERIVED_SOURCES], '没有那一格 ⇒ 规范序')
-  assert.deepEqual(
-    readMountOrder({ 'block:h': ['mentions', 'refs'] }, h),
-    ['mentions', 'refs', 'members', 'same'],
-    '存过的在前，缺的补在后面（全序）',
-  )
-  assert.deepEqual(
-    readMountOrder({ 'block:h': ['mentions', 'nope', 'mentions'] as never }, h),
-    ['mentions', 'members', 'refs', 'same'],
-    '未知值丢掉、重复只留一次',
-  )
-  assert.deepEqual(
-    readMountOrder({ journal: ['mentions', 'refs'] }, { kind: 'journal' }),
-    ['mentions', 'refs', 'members', 'same'],
-    '日记用同一个键族，只是宿主不带块 id',
-  )
-})
-
-test('U15 `moveDerivedOrder`：只换可见子集，不可见的来源原槽位不动', () => {
-  const full = [...DERIVED_SOURCES]
-  const normal = ['refs', 'same', 'mentions']
-
-  assert.deepEqual(
-    moveDerivedOrder(full, normal, 'mentions', 'refs', 'before'),
-    ['members', 'mentions', 'refs', 'same'],
-    '提及拖到引用前；「成员」这一格不动',
-  )
-  assert.deepEqual(
-    moveDerivedOrder(full, normal, 'refs', 'mentions', 'after'),
-    ['members', 'same', 'mentions', 'refs'],
-    '往后挪：目标下标按摘掉之后的数组算',
-  )
-  assert.equal(moveDerivedOrder(full, normal, 'refs', 'same', 'before'), null, '原位 ⇒ null（不写）')
-  assert.equal(moveDerivedOrder(full, normal, 'same', 'same', 'before'), null, '拖自己')
-  assert.equal(moveDerivedOrder(full, normal, 'members', 'refs', 'before'), null, '不在这一台宿主上')
-})
-
-test('U16 内置栏按设备顺序排；不在集合里的来源仍占着全序里的槽位', () => {
-  const { host, tag } = fixture()
-  const order = ['members', 'mentions', 'same', 'refs'] as const
-
-  assert.deepEqual(SOURCES(derivedEntriesOf(host, order)), ['mentions', 'same', 'refs'])
-  assert.deepEqual(
-    SOURCES(derivedEntriesOf(tag, order)),
-    ['members', 'mentions', 'same', 'refs'],
-    '标签块多出「成员」，按它在全序里的槽位出现（不需要插入规则）',
-  )
-})
-
-test('U17 派生栏换序**不写内容**：`_mounts` 一个字节都不变', () => {
+test('U14 合并：没标记＝派生在前；有标记＝数组位就是整条顺序（可交错）', () => {
   const { host } = fixture()
-  const before = JSON.stringify(host.props ?? {})
-  const order = moveDerivedOrder([...DERIVED_SOURCES], ['refs', 'same', 'mentions'], 'mentions', 'refs', 'before')
-  assert.ok(order)
-  assert.equal(JSON.stringify(host.props ?? {}), before, '顺序是设备状态，块上不该多出 `_mounts`')
+  assert.deepEqual(SOURCES(mountEntriesOf(host, { now: NOW })), ['refs', 'same', 'mentions'], '没拖过：内置在前')
+  host.props = {
+    ...(host.props ?? {}),
+    [MOUNTS_PROP]: [
+      local('t-1', '我的'),
+      { id: 'refs', kind: 'derived', source: 'refs' },
+      { id: 'mentions', kind: 'derived', source: 'mentions' },
+    ],
+  }
+  assert.deepEqual(
+    SOURCES(mountEntriesOf(host, { now: NOW })),
+    ['local', 'refs', 'mentions', 'same'],
+    '用户栏可以排在内置栏之前；没提到的 same 插在最后一个派生标记之后',
+  )
+})
+
+test('U15 标记指向的来源不存在 ⇒ 跳过但留住；来源回来时回原位', () => {
+  const host = b('h2', '块', {
+    props: {
+      [MOUNTS_PROP]: [
+        { id: 'members', kind: 'derived', source: 'members' },
+        { id: 'refs', kind: 'derived', source: 'refs' },
+      ],
+    },
+  })
+  assert.deepEqual(SOURCES(mountEntriesOf(host, { now: NOW })), ['refs', 'same', 'mentions'], '普通块没有成员：跳过')
+  host.props = { ...(host.props ?? {}), _lists: ['tag'] }
+  assert.deepEqual(
+    SOURCES(mountEntriesOf(host, { now: NOW })),
+    ['members', 'refs', 'same', 'mentions'],
+    '变成标签块：成员回第一位（标记一个字节没丢）',
+  )
+})
+
+test('U16 新出现的派生来源插在最后一个派生标记之后，不抢用户栏钉在最前的位置', () => {
+  const { host } = fixture()
+  host.props = {
+    ...(host.props ?? {}),
+    _tags: [],
+    [MOUNTS_PROP]: [local('t-1', '我的'), { id: 'refs', kind: 'derived', source: 'refs' }],
+  }
+  assert.deepEqual(
+    SOURCES(mountEntriesOf(host, { now: NOW })),
+    ['local', 'refs', 'same', 'mentions'],
+    'same 是新出现的（原先没标签）：落在 refs 之后，用户栏仍在最前',
+  )
+})
+
+test('U17 命令面：把用户栏拖到派生栏之前 ⇒ 整条列表物化进 `_mounts`（一次写入）', () => {
+  const f = renameFixture([local('t1', '我的')])
+  assert.equal(f.commands.moveMountTab({ kind: 'block', blockId: 'h' }, 't1', 'refs', 'before'), true)
+  assert.equal(f.writes.length, 1, '一次换序一笔写入')
+  assert.deepEqual(
+    SOURCES(f.list()),
+    ['local', 'refs', 'same', 'mentions'],
+    '用户栏排到引用前面（跨组）；顺序写进内容那一格',
+  )
+  assert.equal(f.commands.moveMountTab({ kind: 'block', blockId: 'h' }, 'mentions', 'refs', 'before'), true)
+  assert.deepEqual(SOURCES(f.list()), ['local', 'mentions', 'refs', 'same'], '已物化之后，再挪派生栏仍是整条列表')
+})
+
+test('U18 摘栏只认 local：派生标记不可摘（不是偷偷实现「隐藏内置栏」）', () => {
+  const f = renameFixture([local('t1', '我的'), { id: 'refs', kind: 'derived', source: 'refs' }])
+  assert.equal(f.commands.removeMountTab({ kind: 'block', blockId: 'h' }, 'refs'), false)
+  assert.equal(f.writes.length, 0, '拒绝 = 零写入')
+  assert.equal(f.commands.removeMountTab({ kind: 'block', blockId: 'h' }, 't1'), true)
+  assert.deepEqual(f.list().map((e) => e.id), ['refs'], '摘 local 只摘那一条，标记留着')
 })
