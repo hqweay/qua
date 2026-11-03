@@ -36,13 +36,18 @@ import {
   mkPropDef,
   ownFieldIds,
   readViews,
+  removeView,
+  renameView,
   resolveRows,
+  slicedSpec,
   sortListRows,
   sortRecords,
   sourceOf,
   sourceConflicts,
+  upsertView,
   viewNameOf,
   visibleRows,
+  withFilter,
   withListSort,
   withSort,
   type Block,
@@ -475,4 +480,80 @@ test('visibleRows：结构映射表激活时整棵子树都不进正文（行与
     '只画根行：一级子块（行）与二级子块（格）都不在正文里再画一遍',
   )
   assert.equal(rows[0]!.hasChildren, false, '子块在表里展开着 ⇒ 不给折叠三角')
+})
+
+/* ------------------------------------------------------------ 切片（视图级条件） */
+
+/** 小库：评分 3/10/—/2/9；基础条件与切片各取一半，交集只剩 r1 与 r5 */
+function slicedKb(): { kb: MemoryKb; score: string } {
+  const { root, defs } = pageWith5()
+  const score = defs[1]!.id
+  const { kb } = kbOf([root, ...defs])
+  return { kb, score }
+}
+
+const ids = (hits: readonly { blockId: string }[]): string[] => hits.map((h) => h.blockId).sort()
+
+test('slicedSpec：无切片 ⇒ 原样返回（空 filter 与「没有 filter」逐字相同）', () => {
+  const spec = { where: { tag: 'x' } }
+  assert.deepEqual(slicedSpec(spec, undefined), spec, 'undefined ＝ 没有切片')
+  assert.deepEqual(slicedSpec(spec, null), spec, 'null ＝ 清掉切片')
+  assert.equal(slicedSpec(spec, undefined).where, spec.where, '不叠加时连引用都不该换')
+})
+
+test('切片是 AND 叠加（∩），不是替换：结果 = 基础结果 ∩ 切片结果', () => {
+  const { kb, score } = slicedKb()
+  const base = { where: { prop: { id: score, gte: 3 } } }
+  const filter = { prop: { id: score, lt: 10 } }
+  const baseHits = ids(kb.query(base, {}))
+  const filterHits = ids(kb.query({ where: filter }, {}))
+  const sliced = ids(kb.query(slicedSpec(base, filter), {}))
+  assert.deepEqual(baseHits, ['r1', 'r2', 'r5'], `基础条件：${baseHits}`)
+  assert.deepEqual(filterHits, ['r1', 'r4', 'r5'], `切片：${filterHits}`)
+  assert.deepEqual(sliced, ['r1', 'r5'], `交集：${sliced}`)
+  assert.deepEqual(
+    sliced,
+    baseHits.filter((id) => filterHits.includes(id)),
+    '判据是集合交集本身，不是某个固定名单',
+  )
+  assert.deepEqual(ids(kb.query(base, {})), baseHits, '没有切片时结果与基础条件逐条相同')
+})
+
+test('canonicalViews：filter 只对 query 源保留；query 上原样深拷并 canonical 化', () => {
+  const q = mk('q', '查询', [], { _query: { where: { any: [] } } })
+  const raw = [{ id: 'v', kind: 'table', filter: { ref: { to: 'x', kind: ['embed', 'inline', 'inline'] } } }]
+  const kept = canonicalViews(raw, sourceOf(q))
+  assert.deepEqual(kept[0]!.filter, { ref: { to: 'x', kind: ['embed', 'inline'] } }, 'kind 去重并排序')
+  assert.notEqual(kept[0]!.filter, raw[0]!.filter, '不许共享同一棵条件树')
+  const dropped = canonicalViews(raw, sourceOf(mk('n', '普通')))
+  assert.equal(dropped[0]!.filter, undefined, 'children 源没有可叠加的条件 ⇒ 丢掉（免得「写了却不生效」）')
+  const invalid = canonicalViews([{ id: 'v', kind: 'table', filter: 'nope' }], sourceOf(q))
+  assert.equal(invalid[0]!.filter, undefined, '不是 QueryNode ⇒ 丢掉，不猜')
+})
+
+test('withFilter：写一格／清掉删键；不改原视图', () => {
+  const view = { id: 'v', kind: 'table', name: '本周' } as const
+  const set = withFilter(view, { tag: 'today' })
+  assert.deepEqual(set.filter, { tag: 'today' })
+  assert.equal(view.name, '本周', '原视图不被改')
+  assert.equal((set as { filter?: unknown }).filter !== undefined, true)
+  const cleared = withFilter(set, null)
+  assert.equal('filter' in cleared, false, '清掉是删键，不是留 undefined')
+})
+
+test('命名／删除：多切片各自带 filter，改名不丢切片，删一张不影响另一张', () => {
+  let views = canonicalViews(
+    [
+      { id: 'a', kind: 'table', name: '全部', filter: { prop: { id: 'p', eq: true } } },
+      { id: 'b', kind: 'table', name: '未完成', filter: { prop: { id: 'p', eq: false } } },
+    ],
+    { kind: 'query', spec: { where: { tag: 'x' } } },
+  )
+  views = renameView(views, 'b', ' 待办 ')
+  assert.deepEqual(views.map((v) => v.name), ['全部', '待办'], '改名只动那一张')
+  assert.deepEqual(views[1]!.filter, { prop: { id: 'p', eq: false } }, '改名不丢切片')
+  views = removeView(views, 'a')
+  assert.deepEqual(views.map((v) => v.id), ['b'], '删一张不连坐')
+  const again = upsertView(views, { id: 'b', kind: 'table', name: '待办' })
+  assert.equal('filter' in again[0]!, false, '整张替换时可按新配置清掉切片')
 })

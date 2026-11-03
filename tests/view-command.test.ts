@@ -10,6 +10,7 @@ import { mkBlock, mkPropDef, readViews, type Block } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { viewConfigCommands } from '../src/app/commands/views.ts'
+import { VIEW_CONFIG_HANDLERS } from '../src/app/handlers/views.ts'
 import type { ViewConfigDeps } from '../src/app/commands/types.ts'
 import type { ViewConfig } from '../src/core/index.ts'
 import type { OwnerStore } from '../src/app/wiring/owners.ts'
@@ -271,4 +272,100 @@ test('insertQueryBlock：容不下子块的块（组件块／查询块自己）�
   const again = app.insertQueryBlock(id)
   assert.equal(fixture.kb.parentOf(again)?.id, 'page')
   assert.equal(fixture.kb.get(id)!.children.length, 0)
+})
+
+test('setViewFilter：一次动作只写一次（一步撤销）；清掉删键；非查询源当场拒绝', () => {
+  const q = mkBlock('查询')
+  q.id = 'q'
+  q.props = {
+    _query: { where: { tag: 'x' } },
+    _views: [
+      { id: 'v1', kind: 'table', name: '全部' },
+      { id: 'v2', kind: 'table', name: '未完成' },
+    ],
+    _activeView: 'v1',
+  }
+  const kb = kbOf([q]).kb
+  const writes: { owner: unknown; patch: Partial<ViewOwnerData> }[] = []
+  const held = readViews(q)
+  const toasts: string[] = []
+  const owners: OwnerStore = {
+    read: () => ({ query: { where: { tag: 'x' } }, views: held, active: 'v1' }),
+    write: (_owner, patch) => {
+      if (patch.views) held.splice(0, held.length, ...patch.views)
+      writes.push({ owner: _owner, patch })
+    },
+    readBinding: () => null,
+    setBindingView: () => {},
+    entriesOf: () => [],
+    writeEntries: () => {},
+    entryOf: () => undefined,
+  }
+  const d: ViewConfigDeps = {
+    kb,
+    owners,
+    run: <R,>(fn: (tx: Tx) => R) => kb.tx(fn),
+    reloadPage: () => {},
+    rootIds: () => [],
+    viewShown: () => true,
+    activeId: () => 'q',
+    openBlock: () => {},
+    refreshList: () => {},
+    toast: (text) => toasts.push(text),
+  }
+  const app = viewConfigCommands(d)
+  const owner = { kind: 'block', blockId: 'q' } as const
+
+  assert.equal(app.setViewFilter(owner, 'v2', { prop: { id: 'p', eq: false } }), true)
+  assert.equal(writes.length, 1, '一条命令＝一次写（撤销只回一步）')
+  assert.deepEqual(writes[0]!.patch.views?.find((v) => v.id === 'v2')?.filter, {
+    prop: { id: 'p', eq: false },
+  })
+  assert.deepEqual(writes[0]!.patch.views?.find((v) => v.id === 'v1')?.filter, undefined, '只动那一张')
+
+  assert.equal(app.setViewFilter(owner, 'v2', null), true)
+  assert.equal(writes.length, 2, '清切片也是同一类一格写入')
+  assert.equal(
+    'filter' in (writes[1]!.patch.views?.find((v) => v.id === 'v2') ?? {}),
+    false,
+    '清掉是删键，不留空值',
+  )
+
+  // children 源：没有可叠加的条件 ⇒ 拒绝并提示（写进去也会被 canonicalViews 丢掉）
+  const plain = mkBlock('普通')
+  plain.id = 'n'
+  const plainWrites: unknown[] = []
+  const plainOwners: OwnerStore = {
+    ...owners,
+    read: () => ({ views: [] }),
+    write: (_owner, patch) => plainWrites.push(patch),
+  }
+  const app2 = viewConfigCommands({ ...d, owners: plainOwners })
+  assert.equal(app2.setViewFilter({ kind: 'block', blockId: 'n' }, 'v', { tag: 'y' }), false)
+  assert.equal(plainWrites.length, 0, '拒绝时一个字节都不写')
+  assert.equal(toasts.length, 1, '要说一句话')
+  assert.match(toasts[0]!, /切片/, `提示要指到切片：${toasts[0]}`)
+})
+
+test('set-filter 缺 filter 参数 ⇒ 拒绝且不产生写（不会静默清空切片）', () => {
+  const calls: unknown[][] = []
+  // handler 只做参数归一；这里用最小门面，只钉「缺参不往下走」这一条
+  const gate = {
+    setViewFilter: (...args: unknown[]) => {
+      calls.push(args)
+      return true
+    },
+  } as unknown as Parameters<(typeof VIEW_CONFIG_HANDLERS)[string]>[1]
+  const h = VIEW_CONFIG_HANDLERS['core.view/set-filter']!
+  const owner = { kind: 'block', blockId: 'q' } as const
+
+  assert.equal(h({ owner, viewId: 'v2' }, gate), false, '缺 filter 必须拒绝')
+  assert.equal(calls.length, 0, '拒绝时不调门面 ⇒ 不产生写')
+  assert.equal(h({ owner, viewId: 'v2', filter: undefined }, gate), false, '显式 undefined 也按缺参处理')
+  assert.equal(calls.length, 0)
+
+  // 只有显式 null 才是「清掉」，与「没传」分家
+  assert.equal(h({ owner, viewId: 'v2', filter: null }, gate), true)
+  assert.deepEqual(calls.at(-1), [owner, 'v2', null])
+  assert.equal(h({ owner, viewId: 'v2', filter: { tag: 'y' } }, gate), true)
 })

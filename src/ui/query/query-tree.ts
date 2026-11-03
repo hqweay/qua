@@ -52,6 +52,13 @@ export interface QueryTreeDeps {
   refLabel?: (targetId: string) => string
   /** 块选择器的宿主（排除自己） */
   owner?: Block
+  /**
+   * 显示「条数／排序」两格；缺省 `true`。
+   *
+   * 切片编辑用 `false`：切片只是 `QueryNode`，没有 `limit`／`sort` 的位置——
+   * 画出来却存不进去，等于「点了没生效」。
+   */
+  showOptions?: boolean
 }
 
 const ROW_KIND_TEXT: Record<TreeRowKind, MsgId> = {
@@ -210,7 +217,7 @@ export class QueryTree {
     const body = document.createElement('div')
     body.className = 'qt-body'
     body.append(this.groupEl(this.draft.root, 0, null, -1))
-    body.append(this.optionsEl(this.draft))
+    if (this.deps.showOptions !== false) body.append(this.optionsEl(this.draft))
     body.append(this.footEl())
     this.box.append(body)
     if (this.focusNew) {

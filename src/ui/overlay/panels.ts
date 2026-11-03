@@ -240,6 +240,64 @@ export function renderLinkComposer(host: HTMLElement, deps: LinkComposerDeps): v
   })
 }
 
+/** 单行名字输入（重命名视图等）：浮层里唯一的输入面 */
+export interface NamePromptDeps {
+  title: string
+  value: string
+  placeholder: string
+  submitText: string
+  cancelText: string
+  /** 空名**不提交**（提交空名等于「恢复默认名」是另一条语义，由调用方决定要不要给） */
+  onSubmit: (name: string) => void
+  onCancel: () => void
+}
+
+/**
+ * **单行名字输入**（回车提交、Esc／取消关闭）。
+ *
+ * 与 `renderLinkComposer` 同一条理由：浮层是「先 render 再 append」，
+ * 所以 focus 要等挂载之后（`queueMicrotask`），否则输入框还没进文档。
+ */
+export function renderNamePrompt(host: HTMLElement, deps: NamePromptDeps): void {
+  host.replaceChildren()
+  const h = document.createElement('h4')
+  h.textContent = deps.title
+  const form = document.createElement('form')
+  form.className = 'popover-anchor'
+  const input = document.createElement('input')
+  input.className = 'popover-anchor-input ui-field'
+  input.dataset.namePrompt = '1'
+  input.type = 'text'
+  input.value = deps.value
+  input.placeholder = deps.placeholder
+  input.spellcheck = false
+  const submit = document.createElement('button')
+  submit.type = 'submit'
+  submit.className = 'ui-btn'
+  submit.textContent = deps.submitText
+  const cancel = document.createElement('button')
+  cancel.type = 'button'
+  cancel.className = 'ui-btn ui-btn--ghost'
+  cancel.textContent = deps.cancelText
+  form.addEventListener('submit', (e) => {
+    e.preventDefault()
+    const name = input.value.trim()
+    if (name === '') {
+      input.focus()
+      return
+    }
+    deps.onSubmit(name)
+  })
+  cancel.addEventListener('click', deps.onCancel)
+  form.append(input, submit, cancel)
+  host.append(h, form)
+  queueMicrotask(() => {
+    if (!input.isConnected) return
+    input.focus()
+    input.select()
+  })
+}
+
 /**
  * 锚文本那一行：**输入框 ＋ 一句说明**。
  *

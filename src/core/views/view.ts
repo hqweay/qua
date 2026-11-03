@@ -23,7 +23,7 @@ import { uuidv7Hex } from '../model/ids.ts'
 import type { KbClient } from '../kb/types.ts'
 import { declaredFieldIds, ownFieldIds } from '../props/props.ts'
 import { plainText } from '../model/runs.ts'
-import type { QuerySpec, SortKey } from '../query/query.ts'
+import { canonicalNode, isQueryNode, type QueryNode, type QuerySpec, type SortKey } from '../query/query.ts'
 
 /* ------------------------------------------------------------ 类型 */
 
@@ -149,6 +149,16 @@ export interface ViewConfig {
   id: string
   name?: string
   kind: StoredViewKind
+  /**
+   * **这一张视图自己的切片**：一份条件，与源的**基础条件** AND 叠加。
+   *
+   * 「基础条件 ∩ 切片」是**叠加**不是替换：基础条件仍只有一份（住在源的 `_query`），
+   * 切片只回答「在这一张视图里再排除谁」。没有它 ⇒ 结果与只有基础条件时逐字相同。
+   *
+   * ⚠️ 只对 **query 源**有意义（`children`／`items` 没有可叠加的条件）；
+   *    `canonicalViews` 会按源把别处的这一格丢掉，免得「写进去了、却永远不生效」。
+   */
+  filter?: QueryNode
   table?: TableConfig
   /** 记录列表（不是大纲树、不是结构映射表） */
   list?: ListConfig
@@ -328,6 +338,8 @@ export function canonicalViews(raw: unknown, source: Source): ViewConfig[] {
     if (!allowed.includes(kind as StoredViewKind)) continue
     const view: ViewConfig = { id: v.id, kind: kind as StoredViewKind }
     if (isStr(v.name)) view.name = v.name
+    // 切片只对 query 源生效；别的源写进来也丢掉（否则「写进去了、却永远不生效」）
+    if (source.kind === 'query' && isQueryNode(v.filter)) view.filter = canonicalNode(v.filter)
     // **只留这个 kind 自己的那份**：别的 kind 的配置跟着一个不存在的 kind 走，
     // 切过去时是「上一份视图的残留」，而没人能说清它该不该生效
     if (kind === 'table') {
@@ -416,8 +428,7 @@ export function isViewRoot(b: Block | undefined): boolean {
  * 这一块的身体是不是**它自己的结果视图**（贴在这一行下面，而不是等「打开」）。
  *
  * 判据只有一条：源是 query。查询的命中**不是 children**，所以就地画结果
- * 不会出现「同一批块画两遍」；children 源的视图仍走「打开才渲染」那条口径
- * （见 `设计-查询与视图.md` §7）。
+ * 不会出现「同一批块画两遍」；children 源的视图仍走「打开才渲染」那条口径。
  *
  * ⚠️ 它只回答「有没有身体」。**位置**由渲染层决定（`view/block-dom.ts` 的
  *    `rowHasInlineViewBody`：有身体就画在自己行下，段根同此——聚焦后身体
@@ -848,6 +859,8 @@ export function sortRecords(
 
 function cloneView(v: ViewConfig): ViewConfig {
   const out: ViewConfig = { ...v }
+  // 切片是嵌套结构：浅拷贝会让两处配置共享同一棵条件树（改一处静默影响另一处）
+  if (v.filter) out.filter = canonicalNode(v.filter)
   if (v.table) {
     const table: TableConfig = { ...v.table, columns: v.table.columns.map((c) => ({ ...c })) }
     if (v.table.sort) table.sort = v.table.sort.map((s) => ({ ...s }))
@@ -894,6 +907,46 @@ export function withSort(view: ViewConfig, sort: readonly SortKey[] | undefined)
   if (!sort || sort.length === 0) delete next.table.sort
   else next.table.sort = sort.map((s) => ({ ...s }))
   return next
+}
+
+/**
+ * 写这一张视图的**切片**（`undefined` ／ `null` ＝ 清掉，回到「只有基础条件」）。
+ *
+ * 与 `withSort` 同一族：纯函数、整组替换一格，命令层一次 `owners.write` 落盘。
+ * 清掉时**删键**而不是留 `undefined`：空 filter 与没有 filter 必须只有一种写法。
+ */
+export function withFilter(view: ViewConfig, filter: QueryNode | null | undefined): ViewConfig {
+  const next = cloneView(view)
+  if (!filter) {
+    delete next.filter
+    return next
+  }
+  next.filter = canonicalNode(filter)
+  return next
+}
+
+/** 把一份条件与切片叠成**生效条件**：基础 ∩ 切片（AND，不替换；无切片 = 原样） */
+export function slicedSpec(spec: QuerySpec, filter: QueryNode | null | undefined): QuerySpec {
+  if (!filter) return spec
+  return { ...spec, where: { all: [spec.where, filter] } }
+}
+
+/**
+ * 把构建器返回的整份 spec 收成**切片**：只取 `where`。
+ *
+ * 空条件树（`{any: []}`）读作「没有切片」——它是模型语义，不是编辑器细节：
+ * 一份永远为真的切片与没有切片必须落到同一个形状，否则「加一片空条件」会多出一条
+ * 看起来生效、其实什么都不筛的配置。
+ */
+export function filterOfSpec(spec: QuerySpec): QueryNode | null {
+  const where = spec.where
+  if ('any' in where && where.any.length === 0) return null
+  return where
+}
+
+/** 深拷一组视图（缓存与活值之间不许共享嵌套配置） */
+export function cloneViews(views: readonly ViewConfig[]): ViewConfig[] {
+  return views.map(cloneView)
 }
 
 /** 写列（显隐/宽度/顺序）：整组替换，一次一条 `prop.set` */

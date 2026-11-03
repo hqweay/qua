@@ -319,6 +319,10 @@ test('冻结的判据：条件变了／上下文变了就要重算（不会出�
   assert.equal(frozenStale(frozen, b2, {}), true, '条件变了 ⇒ 重算')
   assert.equal(frozenStale(frozen, a, { excludeIds: ['a'] }), true, '上下文（剔除谁）变了 ⇒ 重算')
   assert.equal(frozenStale(null, a, {}), true, '还没有冻结过 ⇒ 算一次')
+  // 切片住在视图上：条件串一模一样，换了一张视图也必须重算
+  assert.equal(frozenStale(frozen, a, {}, ''), false, '默认看法与冻结时同一视图位')
+  assert.equal(frozenStale(frozen, a, {}, 'v2'), true, '换视图 ⇒ 重算（哪怕条件串相同）')
+  assert.equal(freezeResult(a, kb, {}, 'v1').viewKey, 'v1', '冻结结果记着自己属于哪张视图')
 })
 
 test('求值的上下文：范围住在条件里（`{up:{is}}`），上下文只管 `$self` 指谁', () => {

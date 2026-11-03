@@ -16,6 +16,7 @@ import {
   canonicalSpec,
   defaultColumnsForSource,
   isQueryBlock,
+  isQueryNode,
   mkBlock,
   mkQueryBlock,
   mkViewId,
@@ -28,6 +29,7 @@ import {
   typeDeclOf,
   upsertView,
   viewNameOf,
+  withFilter,
   withListSort,
   withSort,
   type Block,
@@ -65,6 +67,7 @@ export function viewConfigCommands(
   | 'viewInsertRow'
   | 'viewDeleteRow'
   | 'viewSetSort'
+  | 'setViewFilter'
   | 'setQuerySpec'
   | 'createQuery'
   | 'insertQueryBlock'
@@ -278,6 +281,33 @@ export function viewConfigCommands(
       const sort = direction === '' ? [] : [{ by, dir: direction as 'asc' | 'desc' }]
       d.owners.write(owner, { views: upsertView(data.views, withSort(view, sort)) })
       after()
+      return true
+    },
+
+    /**
+     * 写**这一张视图的切片**（基础条件 ∩ 切片里的后半句）。
+     *
+     * 与 `setQuerySpec` 的分工：那份基础条件全视图共享、住在源的 `_query`；
+     * 切片只属于一张视图、住在它的 `filter`。这里**不碰 `_query`**：
+     * 叠加是求值时的事（`slicedSpec`），不是把切片并进基础条件。
+     *
+     * `filter === null` ＝ 清掉切片（删键，不留空值）。
+     * 源不是 query ⇒ 当场拒绝并提示：children/items 没有可叠加的条件，
+     * 写进去会被 `canonicalViews` 丢掉（「点了没生效」）。
+     */
+    setViewFilter: (owner, viewId, filter) => {
+      const data = d.owners.read(owner)
+      if (!data) return false
+      const source = sourceOfRef(d, owner)
+      if (!source || source.kind !== 'query') {
+        d.toast(t('ui.view.sliceOnlyQuery'), 'warn')
+        return false
+      }
+      const view = resolveView(data, viewId)
+      if (!view) return false
+      if (filter !== null && !isQueryNode(filter)) return false
+      d.owners.write(owner, { views: upsertView(data.views, withFilter(view, filter)) })
+      reveal(owner)
       return true
     },
 

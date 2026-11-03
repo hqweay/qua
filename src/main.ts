@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type TriggerChar, trashOf } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec } from './core/index.ts'
 import { plainText } from './core/model/runs.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
 import { BlockStore } from './core/model/store.ts'
@@ -32,7 +32,7 @@ import { mountDockSlot } from './ui/dock/dock.ts'
 import { createIcon } from './view/icons.ts'
 import { mountEmbedBody } from './ui/block-ui/embed-body.ts'
 import { renderAliasEditor } from './ui/block-ui/alias-editor.ts'
-import { renderLinkComposer, type ObjFieldDeps } from './ui/overlay/panels.ts'
+import { renderLinkComposer, renderNamePrompt, type ObjFieldDeps } from './ui/overlay/panels.ts'
 import { devCommands, dropIdentity, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, zoomCommands } from './app/commands-impl.ts'
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
@@ -1212,6 +1212,58 @@ function openEmbedViewMenu(host: Block): void {
   })
 }
 
+/**
+ * **条件树弹层**（唯一一份）：基础条件（`core.query/set-spec`）与
+ * 视图切片（`core.view/set-filter`）共用同一台组件，只是 `spec` 的来源与落点不同。
+ */
+function openSpecPopover(opts: {
+  owner: ViewOwnerRef
+  anchor: DOMRect | null
+  spec: () => QuerySpec
+  showOptions?: boolean
+  onApply: (spec: QuerySpec) => void
+}): void {
+  const hostId =
+    opts.owner.kind === 'block'
+      ? opts.owner.blockId
+      : opts.owner.host.kind === 'block'
+        ? opts.owner.host.blockId
+        : ''
+  const hostBlock = hostId === '' ? undefined : kb.get(hostId)
+  layers.openPopover((box) => {
+    const tree = new QueryTree(box, {
+      spec: opts.spec,
+      fields: () => {
+        const labels = propDisplayLabels(kb.roots())
+        return kb.propDefs().map((d) => ({ id: d.id, label: labels.get(d.id) ?? propLabel(d), kind: propKindOf(d) }))
+      },
+      /**
+       * `select` 的选项：**定义块的直接子块，全量、排除软删**。
+       * 不按某一块的可选范围收窄（`choicesForDef`）—— 查询是跨块的，
+       * 同一个属性在不同块上「此刻能选什么」可以不一样。
+       */
+      choices: (propId) => {
+        const def = kb.get(propId)
+        if (!def || propKindOf(def) !== 'select') return []
+        return choicesOf(def).map((c) => ({ id: c.id, label: displayNameOf(c).trim() || shortId(c.id) }))
+      },
+      ...(hostBlock ? { owner: hostBlock } : {}),
+      pickRef: (b, propId, current, onPick, rect) => pickRefValue(b, propId, current, onPick, rect),
+      refLabel: (targetId) => {
+        const target = kb.get(targetId)
+        return target
+          ? displayNameOf(target).trim() || shortId(target.id)
+          : t('ui.props.refMissing', { id: shortId(targetId) })
+      },
+      apply: opts.onApply,
+      close: () => layers.closePopover(),
+      inline: false,
+      ...(opts.showOptions === false ? { showOptions: false } : {}),
+    })
+    tree.render(true)
+  }, opts.anchor)
+}
+
 const app: App = {
   get ed() {
     return ed
@@ -1335,8 +1387,30 @@ const app: App = {
         id: `view//${v.id}`,
         label: viewNameOf(v, (k) => t(`ui.view.kind.${k}`)),
         icon: v.kind === 'list-table' ? 'lucide:table-properties' : 'lucide:table',
+        ...(v.filter ? { hint: t('ui.view.slice') } : {}),
         ...(active?.id === v.id ? { keyHint: t('ui.view.current') } : {}),
       })
+    }
+    /**
+     * **当前视图的管理**：改名／切片／删除都住在这份菜单里。
+     *
+     * 不另造一个「视图设置」面板：这三件事都是那一张视图的配置，
+     * 用户已经在「视图…」里看见了它，入口就该在同一处。
+     */
+    if (active) {
+      rows.push({ id: 'view/rename', label: t('ui.view.rename'), icon: 'lucide:pencil', group: 'view/7-manage' })
+      if (source.kind === 'query') {
+        rows.push({
+          id: 'view/slice',
+          label: active.filter ? t('ui.view.sliceEdit') : t('ui.view.sliceAdd'),
+          icon: 'lucide:filter',
+          group: 'view/7-manage',
+        })
+        if (active.filter) {
+          rows.push({ id: 'view/slice-clear', label: t('ui.view.sliceClear'), icon: 'lucide:filter-x', group: 'view/7-manage' })
+        }
+      }
+      rows.push({ id: 'view/remove', label: t('ui.view.remove'), icon: 'lucide:trash-2', group: 'view/7-manage' })
     }
     /**
      * **结构映射表的排序**：第一行就是表头（容器的直接子块），所以排序入口按**列**列出来，
@@ -1411,7 +1485,50 @@ const app: App = {
           // 升 → 降 → 取消（与平表表头同一套三次点击）
           const next = dir === '' ? 'asc' : dir === 'asc' ? 'desc' : ''
           void registry.invoke('core.view/set-sort', { owner, viewId: active?.id ?? '', by: col, dir: next }, 'menu')
+        } else if (id === 'view/rename' && active) {
+          // 名字是这一张视图的配置：就在同一份菜单里改，走命令面落盘／可撤销
+          layers.openPopover(
+            (box) =>
+              renderNamePrompt(box, {
+                title: t('ui.view.renameTitle'),
+                value: active.name ?? '',
+                placeholder: t('ui.view.renamePlaceholder'),
+                submitText: t('ui.view.renameApply'),
+                cancelText: t('ui.view.renameCancel'),
+                onSubmit: (name) => {
+                  layers.closePopover()
+                  void registry.invoke('core.view/rename', { owner, name }, 'menu')
+                },
+                onCancel: () => layers.closePopover(),
+              }),
+            anchor,
+          )
+        } else if (id === 'view/slice' && active) {
+          app.openViewSlice(owner, active.id, anchor)
+        } else if (id === 'view/slice-clear' && active) {
+          void registry.invoke('core.view/set-filter', { owner, viewId: active.id, filter: null }, 'menu')
+        } else if (id === 'view/remove' && active) {
+          void registry.invoke('core.view/remove', { owner, viewId: active.id }, 'menu')
         } else if (id.startsWith('view/add/')) void registry.invoke('core.view/add', { owner, kind: id.slice('view/add/'.length) }, 'menu')
+      },
+    })
+  },
+
+  /**
+   * **切片构建器**：与「视图… → 编辑切片…」同一台浮层（抬头切片 chip 也走这里）。
+   *
+   * 切片没有「默认看法」那一份配置：`spec` 每次现读，视图被删了就退回空树；
+   * 点「应用」才写一次，空树收成 `null` ⇒ `withFilter` 删键。
+   */
+  openViewSlice: (owner, viewId, sliceAnchor) => {
+    openSpecPopover({
+      owner,
+      anchor: sliceAnchor ?? null,
+      spec: () => ({ where: owners.read(owner)?.views.find((v) => v.id === viewId)?.filter ?? { any: [] } }),
+      showOptions: false,
+      onApply: (spec) => {
+        void registry.invoke('core.view/set-filter', { owner, viewId, filter: filterOfSpec(spec) }, 'menu')
+        layers.closePopover()
       },
     })
   },
@@ -1428,42 +1545,17 @@ const app: App = {
       app.toast(t('ui.query.noSpec'), 'warn')
       return
     }
-    const hostId = owner.kind === 'block' ? owner.blockId : owner.host.kind === 'block' ? owner.host.blockId : ''
-    const hostBlock = hostId === '' ? undefined : kb.get(hostId)
     const anchor =
       owner.kind === 'block' ? (app.ed.blockEl(owner.blockId)?.getBoundingClientRect() ?? null) : app.ed.caretRect()
-    layers.openPopover((box) => {
-      const tree = new QueryTree(box, {
-        spec: () => owners.read(owner)?.query ?? { where: { any: [] } },
-        fields: () => {
-          const labels = propDisplayLabels(kb.roots())
-          return kb.propDefs().map((d) => ({ id: d.id, label: labels.get(d.id) ?? propLabel(d), kind: propKindOf(d) }))
-        },
-        /**
-         * `select` 的选项：**定义块的直接子块，全量、排除软删**。
-         * 不按某一块的可选范围收窄（`choicesForDef`）—— 查询是跨块的，
-         * 同一个属性在不同块上「此刻能选什么」可以不一样。
-         */
-        choices: (propId) => {
-          const def = kb.get(propId)
-          if (!def || propKindOf(def) !== 'select') return []
-          return choicesOf(def).map((c) => ({ id: c.id, label: displayNameOf(c).trim() || shortId(c.id) }))
-        },
-        ...(hostBlock ? { owner: hostBlock } : {}),
-        pickRef: (b, propId, current, onPick, rect) => pickRefValue(b, propId, current, onPick, rect),
-        refLabel: (targetId) => {
-          const target = kb.get(targetId)
-          return target ? displayNameOf(target).trim() || shortId(target.id) : t('ui.props.refMissing', { id: shortId(targetId) })
-        },
-        apply: (spec) => {
-          void registry.invoke('core.query/set-spec', { owner, spec }, 'builder')
-          layers.closePopover()
-        },
-        close: () => layers.closePopover(),
-        inline: false,
-      })
-      tree.render(true)
-    }, anchor)
+    openSpecPopover({
+      owner,
+      anchor,
+      spec: () => owners.read(owner)?.query ?? { where: { any: [] } },
+      onApply: (spec) => {
+        void registry.invoke('core.query/set-spec', { owner, spec }, 'builder')
+        layers.closePopover()
+      },
+    })
   },
 
   /* ---- 行内资产：入口（粘贴/选文件）与异步入库 ---- */

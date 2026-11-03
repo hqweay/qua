@@ -30,7 +30,6 @@ import {
   hasLiveChildren,
   isQueryBlock,
   listTableOf,
-  readSpec,
   resolveRows,
   resolveFrozen,
   resolveBoundView,
@@ -45,12 +44,14 @@ import {
   readViewSet,
   defaultKindFor,
   todayISO,
+  slicedSpec,
   type Block,
   type FoldState,
   type OpenPlace,
   type BlockStore,
   type FrozenResult,
   type QueryContext,
+  type QuerySpec,
   type Source,
   type ViewBindingRef,
   type ViewColumn,
@@ -171,6 +172,13 @@ export interface ViewHostDeps {
    * 装配层现画（大纲／已有视图／新建…），这一层不复制一份视图清单。
    */
   openViewMenu?: (owner: ViewOwnerRef, anchor: DOMRect) => void
+  /**
+   * **打开切片构建器**（抬头切片 chip 的落点）。
+   *
+   * 与「视图… → 编辑切片…」是同一台浮层：切片存在时任何视图都能就地改，
+   * 不必先绕进菜单。`anchor` 取 chip 的矩形，浮层贴着它弹。
+   */
+  openSlice?: (owner: ViewOwnerRef, viewId: string, anchor: DOMRect | null) => void
   /** 标题列的投影（run/marks/引用/图片）——由装配层注入，`ui` 不拿整片森林 */
   project: (block: Block, into: HTMLElement) => void
   /** 点标题里的引用/原子（与正文同一条口径） */
@@ -338,7 +346,7 @@ export class ViewHost {
   private covers: ReadonlyMap<string, readonly string[]> = new Map()
   /** 配置坏了只提示一次（每次装载都弹一遍会盖住用户正在做的事） */
   private warned = false
-  /** **这一个表面实例**的冻结结果；条件/上下文变了才重算 */
+  /** **这一个表面实例**的冻结结果；条件／视图／上下文变了才重算 */
   private frozen: FrozenResult | null = null
   /** 派生栏在这一屏内的显示排序（表面状态：不进库、不同步） */
   private derivedSort: SortKey[] = []
@@ -397,7 +405,8 @@ export class ViewHost {
        *    `frozenStale` 为真，所以正常打字仍然不重排。
        */
       if (source === this.outline?.ed) {
-        if (this.source.kind === 'query' && frozenStale(this.frozen, this.source.spec, this.deps.context)) {
+        const spec = this.effective
+        if (spec && frozenStale(this.frozen, spec, this.deps.context, this.viewKey)) {
           this.sync()
         }
         return
@@ -419,8 +428,8 @@ export class ViewHost {
          * **拥有者自己的配置变了**（`_query`／`_views`／`_activeView`／名字）⇒ 重读重画。
          *
          * 段尾宿主原本靠装配层的 `renderMounts()` 补这一下；右槽窗口与正文内联体
-         * 没有那条路径 —— 订阅是它们唯一的回声。`sync()` 只在 spec/context 真变时
-         * 重查，改视图不会重冻成员。
+         * 没有那条路径 —— 订阅是它们唯一的回声。`sync()` 只在条件／视图／上下文
+         * 真变时重查：换视图（`viewKey` 变）与切片编辑都会重冻成员。
          */
         const owner = this.bound.owner
         if (owner.kind === 'block' && ids.includes(owner.blockId)) {
@@ -527,6 +536,26 @@ export class ViewHost {
   }
 
   /**
+   * 这一屏**生效的条件** ＝ 基础条件 ∩ 切片（AND 叠加，切片不替换基础条件）。
+   *
+   * 基础条件只有一份（`_query`，条件树编辑的就是它）；切片住在当前视图上。
+   * 没有切片 ⇒ 原样返回，与只有基础条件时逐字相同。
+   */
+  private get effective(): QuerySpec | null {
+    const src = this.source
+    if (src.kind !== 'query') return null
+    return slicedSpec(src.spec, this.view?.filter)
+  }
+
+  /**
+   * 冻结键里的视图位：切片住在视图上 ⇒ 换一张视图必须重算，
+   * 哪怕两份条件串看起来一样（两张都无切片的视图也该各自冻各自的那一份）。
+   */
+  private get viewKey(): string {
+    return this.view?.id ?? ''
+  }
+
+  /**
    * 派生栏的临时视图配置：**只有渲染需要的两样**（列／字段 ＋ 这一屏的排序）。
    *
    * 不落盘、不复制：派生栏没有 `_views`。排序也只在这一次露面里活着（切走就回原序）——
@@ -627,17 +656,23 @@ export class ViewHost {
   }
 
   /**
-   * 冻结结果：**只在四种情况下重算**。
+   * 冻结结果：**只在五种情况下重算**。
    *
-   * 条件变了（编辑/撤销 ⇒ `specKey` 变）会自动重算 ⇒ 不会出现「旧条件 ＋ 新结果」。
-   * ⚠️ 这里**不写块**：结果与 `modified` 无关，也不进撤销栈。
+   *   · 还没有冻结（这一实例首次求值）；
+   *   · 基础条件变了（编辑／撤销 ⇒ `specKey` 变）；
+   *   · 切片变了（编辑这一张视图的 `filter` ⇒ `specKey` 也变，因为叠加在生效条件上）；
+   *   · 换视图（`viewKey` 变 ⇒ 同一份条件不同看法，成员可能不同）；
+   *   · 上下文变了（换宿主／换表面 ⇒ `contextKey` 变，`$self` 指向的根不同）。
+   *
+   * 于是不会出现「旧条件 ＋ 新结果」。⚠️ 这里**不写块**：结果与 `modified` 无关，
+   * 也不进撤销栈。
    */
   private ensureFrozen(): void {
-    const src = this.source
-    if (src.kind !== 'query') return
-    if (!frozenStale(this.frozen, src.spec, this.deps.context)) return
+    const spec = this.effective
+    if (!spec) return
+    if (!frozenStale(this.frozen, spec, this.deps.context, this.viewKey)) return
     const before = this.frozen?.hits ?? []
-    this.frozen = freezeResult(src.spec, this.deps.kb, this.deps.context)
+    this.frozen = freezeResult(spec, this.deps.kb, this.deps.context, this.viewKey)
     const dropped = droppedFrom(before, this.frozen.hits)
     if (dropped.length > 0 && before.length > 0) {
       this.deps.toast?.(t('ui.query.dropped', { count: dropped.length }), 'info')
@@ -648,10 +683,10 @@ export class ViewHost {
   refresh(): void {
     this.els.refresh.disabled = true
     try {
-      const src = this.source
-      if (src.kind !== 'query') return
+      const spec = this.effective
+      if (!spec) return
       const before = this.frozen?.hits ?? []
-      this.frozen = freezeResult(src.spec, this.deps.kb, this.deps.context)
+      this.frozen = freezeResult(spec, this.deps.kb, this.deps.context, this.viewKey)
       const dropped = droppedFrom(before, this.frozen.hits)
       // 刷新＝成员与顺序都换了：上一轮的上下文展开没有依据，从头来
       this.expanded = new Set()
@@ -766,9 +801,15 @@ export class ViewHost {
       box.hidden = true
       return
     }
+    const slice = this.sliceChip()
     if (this.treeAllowed() && isTreeOpen(this.writeOwner, this.deps.surface, this.treeTopLevel())) {
-      // 树摊开时抬头不再重复条件
-      box.hidden = true
+      // 树摊开时抬头不再重复**基础条件**；切片不在树里，仍要显式标出
+      if (slice) {
+        box.hidden = false
+        box.appendChild(slice)
+      } else {
+        box.hidden = true
+      }
       return
     }
     box.hidden = false
@@ -781,6 +822,7 @@ export class ViewHost {
       summary.title = t('ui.query.edit')
       summary.addEventListener('click', () => this.openTree())
       box.appendChild(summary)
+      if (slice) box.appendChild(slice)
       return
     }
     // 没有内联树的面（投影／窄窗）：只列条件 chip；编辑入口在行首的「＋」
@@ -791,6 +833,7 @@ export class ViewHost {
       chip.textContent = label
       box.appendChild(chip)
     }
+    if (slice) box.appendChild(slice)
     const edit = document.createElement('button')
     edit.type = 'button'
     edit.className = 'queryview-chip queryview-chip--edit'
@@ -799,6 +842,31 @@ export class ViewHost {
     edit.addEventListener('click', () => this.deps.invoke('core.query/open-builder', { owner: this.writeOwner }))
     box.appendChild(edit)
     void b
+  }
+
+  /**
+   * 抬头上的**切片**一格：与基础条件分开画，前缀写死「切片」。
+   *
+   * 合成一条 chip 会让「基础条件 ∩ 切片」看起来像一份条件；而用户改切片时
+   * 需要知道自己在改的是叠加层，不是那份人人共享的基础条件。
+   */
+  private sliceChip(): HTMLElement | null {
+    const filter = this.view?.filter
+    if (!filter) return null
+    const chip = document.createElement('button')
+    chip.type = 'button'
+    chip.className = 'queryview-chip queryview-chip--slice ui-ellipsis'
+    chip.dataset.queryChip = 'slice'
+    chip.textContent = t('ui.view.sliceChip', { text: treeSummary({ where: filter }) })
+    chip.title = t('ui.view.sliceHint')
+    // 基础条件那颗是按钮，这一颗也必须是按钮：切片存在时任何激活视图都能就地改，
+    // 不必先绕进「视图…」菜单（同一个落点，两条路）
+    const view = this.view
+    const owner = this.bound.owner
+    if (view && this.deps.openSlice) {
+      chip.addEventListener('click', () => this.deps.openSlice?.(owner, view.id, chip.getBoundingClientRect()))
+    }
+    return chip
   }
 
   /** 条件树能不能落在这里（投影／派生栏没有可编辑的落点） */
@@ -1259,7 +1327,8 @@ export class ViewHost {
       this.covers = new Map()
       this.rows = []
       // 空结果是**状态**不是错误：保留抬头（含刷新按钮），正文给一句实话。
-      const spec = readSpec(b)
+      // 判据用**生效条件**（基础 ∩ 切片）：切片里有 `$self` 时「离开宿主为空」同样成立
+      const spec = this.effective
       const why = spec && usesSelf(spec.where) ? t('ui.mount.needsHost') : t('ui.query.empty')
       // 空结果也保留本视图的折叠态：它记的是「哪些行收着」，不是「这次有几行」
       this.outline?.ed?.loadPage({ roots: [], folded: this.outline.ed.doc.folded })
