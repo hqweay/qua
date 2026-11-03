@@ -2367,8 +2367,17 @@ export class BlockEditor {
    * 条件种子按**新查询块的容器**给（`$self` 解析成它所在的那一层）：
    * 有容器 ⇒「这一处下面」；没有（森林顶层）⇒ 全库。
    */
-  insertQueryAfter(id: string): string | null {
-    const loc = locate(this.doc, id) ?? locate({ roots: this.store.blocks }, id)
+  insertQueryAfter(id?: string): string | null {
+    /**
+     * 缺省落点是**光标所在块**，不是「当前打开的那一屏」（`ws.activeId`）。
+     *
+     * 两者在日记流里一定不同：activeId 是**第一个**根（那一天的段头），光标却在最后一天的
+     * 某一行 ⇒ 按 activeId 建会把查询扔到整个流的顶部。这条口径与其它「插块」命令同源
+     * （`curBlock` 也是先取光标、再退回首行）。
+     */
+    const target = id !== undefined && id !== '' ? id : (this.caretBlock() ?? this.rows()[0]?.block.id ?? '')
+    if (target === '') return null
+    const loc = locate(this.doc, target) ?? locate({ roots: this.store.blocks }, target)
     if (!loc) return null
     const before = this.snap()
     const parentId = loc.parent?.id ?? null
