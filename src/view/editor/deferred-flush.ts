@@ -12,11 +12,13 @@
  */
 export class DeferredFlush {
   private timer: number | null = null
+  private readonly flush: () => void
+  private readonly ms: number
 
-  constructor(
-    private readonly flush: () => void,
-    private readonly ms = 200,
-  ) {}
+  constructor(flush: () => void, ms = 200) {
+    this.flush = flush
+    this.ms = ms
+  }
 
   /** 排一次补做（重复调用只保留最后一次） */
   arm(): void {

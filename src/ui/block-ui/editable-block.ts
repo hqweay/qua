@@ -16,14 +16,12 @@
  * （换 DOM 会打断正在发生的事）；冻结欠下的那次在离开之后补上。
  * 「装什么」归消费者（`load`）：挂载区＝重查一栏、查询视图＝解冻结果、窗口＝按 id 重取。
  */
-import { type Block, type BlockStore } from '../../core/index.ts'
+import { type Block, type BlockStore, isOwnEdit } from '../../core/index.ts'
 import { EDIT_ISLAND_ATTR } from '../../view/editor/block-dom.ts'
-import { DeferredFlush } from '../../view/editor/deferred-flush.ts'
 import { bindPressFreeze } from '../../view/editor/editor-events.ts'
+import { ReloadPolicy } from '../../view/editor/reload-policy.ts'
 import { BlockEditor, type Run } from '../../view/editor/editor.ts'
 
-/** 补做被冻结的重载的间隔：够 `click` 派发完（mouseup 之后同一任务里还有它），又仍在用户眼里是「立刻」 */
-const FLUSH_MS = 200
 /** 外部变化到重载的默认防抖窗口 */
 const DEBOUNCE_MS = 120
 
@@ -92,13 +90,14 @@ export class EditableBlock {
   private editor: BlockEditor | null = null
   private readonly offStore: () => void
   private readonly offPointer: () => void
-  /** 防抖重载的计时器 */
-  private timer: number | null = null
-  /** 补做被冻结重载的计时器 */
-  private readonly flusher = new DeferredFlush(() => this.flush(), FLUSH_MS)
-  /** 欠一次重载：被冻结（聚焦/按下/组合期），或自己的编辑让「这一栏装谁」过期了 */
-  private pending = false
-  private pointerDown = false
+  /**
+   * **外部变化之后要不要／什么时候重装这一栏**的那份状态机（欠账、合并、补做、指针）。
+   *
+   * 冻结判据在这里给：这一片只有自己一台编辑器，焦点落在区域里**任何东西**上都算
+   * 「有人在这」——包括挂载区连带的 tab 条（重排 tab 条同样会把正被按的那颗换掉）。
+   * 这与正文那份判据的域不同，所以各给各的，不并。
+   */
+  private readonly reloader: ReloadPolicy
 
   constructor(deps: EditableBlockDeps) {
     this.deps = deps
@@ -110,22 +109,19 @@ export class EditableBlock {
     this.root.appendChild(this.host)
     this.area = deps.area ?? this.root
 
+    this.reloader = new ReloadPolicy({
+      frozen: () => this.area.contains(document.activeElement) || this.editor?.probe.isComposing === true,
+      debounceMs: deps.debounceMs ?? DEBOUNCE_MS,
+      onReload: (ids) => this.deps.load(this.editor, ids),
+    })
+
     /**
      * **唯一的重载入口**：所有外部变化都从这一条路走。自己的编辑不算外部——
      * 那一行编辑器自己已经画过，但「这一栏装谁」可能因此过期（成员判定读内容），
-     * 所以记一笔欠的，等离开这里再补，不在打字途中重排。
+     * 所以仍记一笔欠的，等离开这里再补，不在打字途中重排。
      */
     this.offStore = deps.store.subscribe((source, ids) => {
-      if (source === this.editor) {
-        this.pending = true
-        return
-      }
-      if (this.frozen()) {
-        this.pending = true
-        this.armFlush()
-        return
-      }
-      this.schedule(ids)
+      this.reloader.touch(isOwnEdit(source, this.editor) ? undefined : ids)
     })
 
     /**
@@ -134,13 +130,8 @@ export class EditableBlock {
      * `pointercancel`／`dragend`）与延迟一拍的道理见 `bindPressFreeze`。
      */
     this.offPointer = bindPressFreeze(
-      () => {
-        this.pointerDown = true
-      },
-      () => {
-        this.pointerDown = false
-        if (this.pending) this.armFlush()
-      },
+      () => this.reloader.setPointerDown(true),
+      () => this.reloader.setPointerDown(false),
     )
 
     /**
@@ -150,7 +141,7 @@ export class EditableBlock {
      */
     this.area.addEventListener('focusout', () => {
       window.setTimeout(() => {
-        if (!this.area.contains(document.activeElement)) this.flush()
+        if (!this.area.contains(document.activeElement)) this.reloader.flush()
       }, 0)
     })
   }
@@ -198,44 +189,8 @@ export class EditableBlock {
   dispose(): void {
     this.offStore()
     this.offPointer()
-    if (this.timer !== null) window.clearTimeout(this.timer)
-    this.flusher.dispose()
+    this.reloader.dispose()
     this.editor?.dispose()
     this.editor = null
-  }
-
-  /** 此刻能不能安全换 DOM：区域里有焦点、指针按着、输入法组合中，都不能 */
-  private frozen(): boolean {
-    return this.area.contains(document.activeElement) || this.pointerDown || this.editor?.probe.isComposing === true
-  }
-
-  private schedule(ids?: readonly string[]): void {
-    if (this.timer !== null) window.clearTimeout(this.timer)
-    const wait = this.deps.debounceMs ?? DEBOUNCE_MS
-    this.timer = window.setTimeout(() => {
-      this.timer = null
-      if (this.frozen()) {
-        this.pending = true
-        this.armFlush()
-        return
-      }
-      this.pending = false
-      this.deps.load(this.editor, ids)
-    }, wait)
-  }
-
-  /** 排一次「补做被冻结的重载」。计时器而不是 focusout：焦点可能只是从行挪到本区域的按钮上，从未离开 */
-  private armFlush(): void {
-    this.flusher.arm()
-  }
-
-  private flush(): void {
-    if (this.frozen()) {
-      if (this.pending) this.armFlush()
-      return
-    }
-    if (!this.pending) return
-    this.pending = false
-    this.deps.load(this.editor, undefined)
   }
 }

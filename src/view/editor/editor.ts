@@ -77,6 +77,7 @@ import {
   TASK_STATUS_PROP_ID,
   typeDeclOf,
   canWriteText,
+  isOwnEdit,
   type Block,
   type CtxKeys,
   type Doc,
@@ -162,7 +163,7 @@ import {
   visibleRowHeight,
 } from './block-dom.ts'
 import { assetViewOf, markAssetMissing } from '../asset-views.ts'
-import { DeferredFlush } from './deferred-flush.ts'
+import { ReloadPolicy } from './reload-policy.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
 import { Drag } from "./drag.ts"
 import { EmbedBodies } from "./embed-bodies.ts"
@@ -569,7 +570,16 @@ export class BlockEditor {
         ? () => {}
         : this.store.subscribe((source?: unknown, ids?: readonly string[]) => {
             // 发起编辑的视图自己已经渲染过；其他视图按 root id 从 store 重取（共享对象，不拷贝块数据）
-            if (source !== this) this.reloadFromStore(true, ids)
+            if (isOwnEdit(source, this)) return
+            /**
+             * **冻结时仍按 id 画那几行**：别的视图改的正是屏幕上这些行，整片重排会打断
+             * 里层编辑岛里的事，但只换那一行不碰结构。组合期例外——连那一行也不换
+             * （输入法的预编辑串挂在它的文本节点上）。
+             */
+            if (!this.probe.isComposing && this.reloader.frozen() && ids && ids.length > 0) {
+              for (const id of ids) this.renderBlock(id)
+            }
+            this.reloader.touch(ids)
           })
     this.container.setAttribute('contenteditable', 'true')
     this.container.setAttribute('spellcheck', 'false')
@@ -582,6 +592,7 @@ export class BlockEditor {
     this.embeds.disposeAll()
     this.offStore()
     this.unbind()
+    this.reloader.dispose()
   }
 
   /**
@@ -638,20 +649,13 @@ export class BlockEditor {
    */
   reloadFromStore(restoreSelection = true, ids?: readonly string[]): void {
     /**
-     * **组合期不换 DOM**（见 `deferWhileComposing`）：记一笔「欠一次」就返回。
-     * ⚠️ 这条必须**先于**下面那两条分支判：`renderBlock` 自己也有守卫，但在这里早退
-     *    才能把 `renderAll`／`restoreSel` 一起推迟，而不是「重画了一半」。
+     * **冻结时不换 DOM**：组合期，或里层的编辑岛里正在发生别的事。
+     * 组合期连「按 id 画一行」也不做——预编辑串就挂在那一行的文本节点上（见 `deferWhileComposing`）；
+     * 其余冻结情形可以按 id 换那几行，结构重排记成欠账。
      */
-    if (this.deferWhileComposing()) return
-    /**
-     * **别的编辑器（嵌在本视图的段里）正在打字 ⇒ 只按 id 重画，不动结构。**
-     * 动结构 ＝ 把挂载区那棵子树搬一遍 ＝ 里层编辑器失焦、光标丢失。
-     * 全量重排记在 `pendingReload`，等焦点离开编辑岛再补（`flushPendingReload`）。
-     */
-    if (this.pointerDown || this.focusInMount()) {
-      if (ids && ids.length > 0) for (const id of ids) this.renderBlock(id)
-      this.pendingReload = true
-      this.armFlush()
+    if (this.reloader.frozen()) {
+      if (!this.probe.isComposing && ids && ids.length > 0) for (const id of ids) this.renderBlock(id)
+      this.reloader.touch()
       return
     }
     const roots = this.viewRootIds
@@ -705,19 +709,15 @@ export class BlockEditor {
    *    焦点落到按钮上——那一刻**也不是**本视图在编辑。只判可编辑元素的话，
    *    按钮按下与抬起之间本视图会重排一次，把按钮从指针下搬走 ⇒ 一次真点击变成「点了没反应」
    *    （实测：`page.mouse.click` 不触发，`.click()` 能触发）。
+   *    ⇒ 里层可编辑宿主，或**里层宿主里的任何东西**（输入框、按钮）都算「不在我这」。
+   *
+   * 这也是正文那份冻结判据的全部（见 `reloader`）：焦点在本容器**自己的行**上时
+   * 它可以随时重排，否则别的视图每改一次，正文就停在旧形状。
    */
-  private focusInMount(): boolean {
-    const active = document.activeElement as HTMLElement | null
-    if (!active || active === this.container) return false
-    return this.container.contains(active) && Boolean(active.closest(`[${EDIT_ISLAND_ATTR}]`))
-  }
-
-  /** 有没有**另一台**编辑宿主正拿着焦点（挂载区／查询视图／露面体里的输入框） */
   private nestedEditorActive(): boolean {
     const active = document.activeElement as HTMLElement | null
     if (!active || active === this.container) return false
     if (!this.container.contains(active)) return false
-    // 里层可编辑宿主，或**里层宿主里的任何东西**（输入框、按钮）都算「不在我这」
     return active.isContentEditable || Boolean(active.closest(`[${EDIT_ISLAND_ATTR}]`))
   }
 
@@ -730,18 +730,17 @@ export class BlockEditor {
    * （那时重排会打断输入），一旦焦点离开编辑岛就补上。
    */
   private armFlush(): void {
-    this.flusher.arm()
+    this.reloader.arm()
   }
 
   setPointerDown(down: boolean): void {
-    this.pointerDown = down
     /**
      * 抬起后补做被推迟的装载/重排。
      * ⚠️ **不能**用 `setTimeout(…, 0)`：`click` 不是在 mouseup 的同一个任务里派发的，
      *    0 毫秒的定时器会抢在它前面把 DOM 换掉 ⇒ 那颗按钮的 `click` 又被弄丢了。
-     *    走 `armFlush`（200ms）：远在 `click` 之后，而在用户眼里仍是「立刻」。
+     *    走补做（200ms）：远在 `click` 之后，而在用户眼里仍是「立刻」。
      */
-    if (!down && this.pendingReload) this.armFlush()
+    this.reloader.setPointerDown(down)
   }
 
   /**
@@ -760,26 +759,8 @@ export class BlockEditor {
    */
   private deferWhileComposing(): boolean {
     if (!this.probe.isComposing) return false
-    this.pendingReload = true
-    this.armFlush()
+    this.reloader.touch()
     return true
-  }
-
-  /** 补一次被推迟的结构重排（指针已抬起、焦点不在里层视图、且**不在组合期**之后才真的做） */
-  flushPendingReload(): void {
-    if (this.pointerDown) return
-    if (this.nestedEditorActive()) {
-      this.armFlush()
-      return
-    }
-    /**
-     * ⚠️ 组合期不能补：这条 200ms 的计时器很可能正好落在用户选词的那几秒里
-     *    （组合开始前刚发生过一次 `touch` 就会排上它）。
-     */
-    if (this.deferWhileComposing()) return
-    if (!this.pendingReload) return
-    this.pendingReload = false
-    this.reloadFromStore()
   }
 
   /* ------------------------------------------------------------ 渲染 */
@@ -1256,18 +1237,17 @@ export class BlockEditor {
   private caretMarks = ''
 
   /**
-   * 挂载区／查询视图这些**嵌在本视图里的**编辑器正在打字时，结构重排要推迟。
+   * **外部变化之后要不要／什么时候重排**的那份状态机（欠账、合并、补做、指针）。
    *
-   * 为什么：它们的 DOM 落在本视图的段里。一次 `renderAll` 会把那些节点搬一遍
-   * （`textContent=''` 之后重新 append）⇒ 里层编辑器当场失焦、光标没了，用户看到的是
-   * 「打一个字，光标跳走」（实测）。所以那时候只做「按 id 重画一行」，全量重排放到
-   * 焦点离开编辑岛之后补（见 `flushPendingReload`）。
+   * 冻结判据在这里给：正文只在焦点落进**里层编辑岛**（挂载区／查询视图／露面体的
+   * 编辑器是独立的编辑岛）、或输入法组合期时冻。本容器自己的行被换掉是安全的，
+   * 所以那不是「有人在这」——判成冻结的话，别的视图每改一次，正文就停在旧形状。
    */
-  private pendingReload = false
-  /** 推迟重排的补做计时器（见 `deferReload`） */
-  private readonly flusher = new DeferredFlush(() => this.flushPendingReload())
-  /** 指针是否按着（按下期间不重排，否则按钮的 `click` 会被搬走） */
-  private pointerDown = false
+  private readonly reloader = new ReloadPolicy({
+    frozen: () => this.nestedEditorActive() || this.probe.isComposing,
+    debounceMs: 0,
+    onReload: (ids) => this.reloadFromStore(true, ids),
+  })
 
   /** 行元素被换过 ⇒ `data-caret` 跟着旧元素丢了：缓存作废，光标标记与块选区漆层重打 */
   private repaintOverlays(): void {
@@ -3117,7 +3097,7 @@ export class BlockEditor {
          * **组合结束 ⇒ 把欠下的那次重排补上。**
          *
          * 没有这一步，组合期的守卫就成了死锁：`renderBlock`／`renderAll`／`applyWindow`
-         * 在组合期一律只记「欠一次」，而唯一会消费它的是 `flushPendingReload`（200ms 计时器）——
+         * 在组合期一律只记「欠一次」，而消费它的是补做计时器（200ms）——
          * 用户如果组合完就不再动，正文会**一直停在旧形状**（改了属性看不到、别的视图的改动
          * 也不显示）。所以「结束」这件事必须自己把账清掉。
          */
@@ -3188,8 +3168,8 @@ export class BlockEditor {
       clickEmptyArea: (y, x, place) => this.clickEmptyArea(y, x, place),
       onChange: () => this.emitChange('text'),
       onMounted: () => this.events.mounted?.(),
-      flushPendingReload: () => this.flushPendingReload(),
-      armFlush: () => this.armFlush(),
+      flushPendingReload: () => this.reloader.flush(),
+      armFlush: () => this.reloader.arm(),
       setPointerDown: (down) => this.setPointerDown(down),
     })
   }

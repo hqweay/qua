@@ -14,6 +14,7 @@ import { BlockStore } from './core/model/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
 import type { Op } from './core/kb/types.ts'
 import { BlockEditor, type ViewEvents } from './view/editor/editor.ts'
+import { editorRun } from './view/editor/editor-run.ts'
 import { fillBlockText } from './view/editor/block-dom.ts'
 import {
   resolveBindings,
@@ -339,7 +340,7 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, w
     new BackrefsCard({
       store: blocks,
       kb,
-      write: (fn, source) => run(fn, source ?? ed),
+      write: editorRun(run, () => ed),
       target: () => ws.activeId,
       wire: (editor, change) => wireViewEditor(editor, change, 'dock', true),
       onFocus: (editor) => {
@@ -1911,7 +1912,7 @@ ed = new BlockEditor({
    * 写入事务入口。source 由**编辑器自己**注入（见 `Run`）；`mainEd` 只是兜底
    * （编辑器外的直写，比如迁移期）。
    */
-  write: (fn, source) => run(fn, source ?? mainEd),
+  write: editorRun(run, () => mainEd),
 })
 mainEd = ed
 /**
