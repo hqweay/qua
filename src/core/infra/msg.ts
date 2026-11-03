@@ -395,9 +395,6 @@ export const MSG = {
   'ui.query.builder.empty': '还没有条件（空条件＝不匹配任何块）',
   'ui.query.builder.addRow': '加一条条件',
   'ui.query.builder.removeRow': '删掉这一条',
-  'ui.query.builder.scope': '范围',
-  'ui.query.builder.scopeSubtree': '这一块之下',
-  'ui.query.builder.scopeAll': '全库',
   'ui.query.builder.limit': '最多',
   'ui.query.builder.noLimit': '不限',
   'ui.query.builder.sort': '顺序',
@@ -427,8 +424,6 @@ export const MSG = {
   'ui.query.todo.done': '已完成',
   'ui.query.todo.none': '不是任务',
   'ui.query.filter': '条件',
-  'ui.query.context': '范围：这一块之下',
-  'ui.query.contextAll': '范围：全库',
   'ui.query.edit': '编辑条件…',
   'ui.query.label.text': '正文含「{text}」',
   'ui.query.label.noField': '（未填字段）',
@@ -439,6 +434,11 @@ export const MSG = {
   'ui.query.label.cmp': '{name} {op} {value}',
   /* 条件树的词：方向与条件是两轴，组头只留短词（长句在树上重复 N 次就是噪声） */
   'ui.query.kind.path': '路径',
+  'ui.query.tree.dirUp': '上级匹配',
+  'ui.query.tree.dirDown': '下级匹配',
+  'ui.query.tree.dirNear': '邻近匹配',
+  'ui.query.tree.selfBlock': '这一块',
+  'ui.query.tree.selfHint': '锚在宿主上（挂载栏＝这一栏挂在谁底下；正文＝所在的页）',
   'ui.query.kind.is': '就是这一块',
   'ui.query.kind.role': '角色',
   'ui.query.kind.ref': '引用',
@@ -449,7 +449,7 @@ export const MSG = {
   'ui.query.tree.changeKind': '换一类',
   'ui.query.tree.collapse': '收起条件',
   'ui.query.tree.emptyTitle': '还没有条件',
-  'ui.query.tree.emptyHint': '加一条条件，或改成全库看看',
+  'ui.query.tree.emptyHint': '还没有条件：结果就是全库。加一条条件收窄它。',
   'ui.query.tree.incomplete': '这一条还没填完',
   'ui.query.tree.pathDay': '某一天',
   'ui.query.tree.pathBlock': '某一块',
@@ -471,7 +471,6 @@ export const MSG = {
   'ui.query.usePageDate': '按本页日期',
   'ui.query.jsonOnly': '这条条件只能用 JSON 编辑（树上还表达不了）',
   'ui.query.tree.add': '加一条条件',
-  'ui.query.empty.action': '改成全库',
 
   /* -------------------------------------------------- 视图（一个块怎么看）
      口径：说「视图／表格／大纲」，不出现 `_views`/`QuerySpec` 这类存储名。 */

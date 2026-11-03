@@ -126,8 +126,11 @@ import {
  * v33 → v34：**挂载区只拥有本地查询**——删 `linked` 栏与 `promote/detach`；
  *            面板查询不再指向查询块，查询页退场（查询块是唯一内容形态）。
  *            `_mounts` 的 `kind` 从三态变两态 ⇒ 旧库带 linked 项读不出来 ⇒ 作废重 seed。
+ * v34 → v35：**查询范围收进方向轴**——`QuerySpec.scope` 退场，「这一块之下」改由
+ *            `{up:{is:$self}}` 表达。旧 `scope` 会被新读路径静默忽略 ⇒ 从子树悄悄变成
+ *            整库（不是报错，是给出另一份结果）⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 34
+export const WORKSPACE_VERSION = 35
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

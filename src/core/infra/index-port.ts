@@ -782,7 +782,7 @@ export function queryByIndex(
   index: Index,
   forest: readonly Block[],
   spec: QuerySpec,
-  opts: { anchorId?: string; selfId?: string; excludeIds?: readonly string[] } = {},
+  opts: { selfId?: string; excludeIds?: readonly string[] } = {},
 ): QueryHit[] {
   /**
    * `'$self'` 的解析与纯函数路径**共用同一份**（`resolveSelfSpec`），
@@ -797,22 +797,16 @@ export function queryByIndex(
     fields: fieldTableOf(forest),
     ...(opts.excludeIds && opts.excludeIds.length > 0 ? { excludeIds: new Set(opts.excludeIds) } : {}),
   }
-  let roots: readonly Block[] = forest
-  if (q.scope !== 'all' && opts.anchorId) {
-    const anchor = index.blocks.get(opts.anchorId)
-    if (anchor) roots = [anchor]
-  }
+  const roots: readonly Block[] = forest
   /**
    * 成员条件的候选集：顶层就是 `{role:'journal'}` 时，日期表就是「库里有哪些天」
    * （一天一个、O(天数)），不用全库逐块判定。它与纯函数路径的 `journalDays` 同口径，
    * 等式由测试钉住；不是范围条件，判定不做特殊处理。
    */
-  if (isExactRoleJournal(q.where) && roots === forest) {
-    roots = [...index.journals.values()]
-      .map((id) => index.blocks.get(id))
-      .filter((b): b is Block => b !== undefined)
-  }
-  return evaluateQuery(q, roots, env, forest)
+  const memberRoots = isExactRoleJournal(q.where)
+    ? [...index.journals.values()].map((id) => index.blocks.get(id)).filter((b): b is Block => b !== undefined)
+    : roots
+  return evaluateQuery(q, memberRoots, env, forest)
 }
 
 /** `ref` 条件的目标块集合 —— 查**入向边表**，不再扫 atoms */

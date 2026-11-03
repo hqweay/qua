@@ -18,7 +18,6 @@ import { findById, runQuery, type QuerySpec } from './query.ts'
 /** 日记流的来源字面量：`_date` 降序（今日在顶）、只取**存在的**天、首屏 `FEED_INITIAL` 段 */
 export const FEED_SPEC: QuerySpec = {
   where: { role: 'journal' },
-  scope: 'all',
   sort: [{ by: '_date', dir: 'desc' }],
   limit: FEED_INITIAL,
 }

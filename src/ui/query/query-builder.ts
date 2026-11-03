@@ -5,8 +5,8 @@
  *   · 抬头上的 chip（收起的树、投影窗口）；
  *   · 派生栏那一句只读说明（它不是用户配的条件，也没有可编辑的落点）。
  *
- * ⚠️ `draftOfSpec` 只表达**一层平铺行**：`is`／`up`／`down`／`near` 与嵌套组都拆不动，
- *    返回 `verbatim` ⇒ 这里显示「复合条件」。不要为了 chip 好看去硬拆——拆一半再拼回去
+ * ⚠️ `draftOfSpec` 只表达**一层平铺行**：嵌套组、方向的非 `{is:id}` 形状、带 kind 的 `ref`
+ *    都拆不动，返回 `verbatim` ⇒ 这里显示「复合条件」。不要为了 chip 好看去硬拆——拆一半再拼回去
  *    就会悄悄丢掉剩下的条件。
  */
 import {
@@ -41,7 +41,15 @@ export function rowLabel(
   opText: (op: DraftOp) => string,
   /** `select` 的值：选项块 id → 选项名。不接就只能把一串 id 显示给人看 */
   choiceLabel?: (propId: string, valueId: string) => string | undefined,
+  /** 方向行的目标块 id → 名字（`$self` 不需要它） */
+  refLabel?: (id: string) => string,
 ): string {
+  if (row.kind === 'path') {
+    const dir = row.dir ?? 'up'
+    const dirText = t(dir === 'down' ? 'ui.query.tree.dirDown' : dir === 'near' ? 'ui.query.tree.dirNear' : 'ui.query.tree.dirUp')
+    const target = row.value === '$self' ? t('ui.query.tree.selfBlock') : (refLabel?.(row.value ?? '') ?? row.value ?? '')
+    return `${dirText} · ${target}`
+  }
   if (row.kind === 'todo') {
     const v = row.value === 'done' ? 'done' : row.value === 'none' ? 'none' : 'todo'
     return t(v === 'done' ? 'ui.query.todo.done' : v === 'none' ? 'ui.query.todo.none' : 'ui.query.todo.todo')
@@ -66,6 +74,8 @@ export function queryChips(
   fields: readonly { id: string; label: string }[],
   /** `select` 的值要显示**选项名**而不是一串块 id */
   choices?: (propId: string) => readonly { id: string; label: string }[],
+  /** 方向行的目标块 id → 名字 */
+  refLabel?: (id: string) => string,
 ): string[] {
   const draft = draftOfSpec(spec)
   if (draft.verbatim !== undefined) return [t('ui.query.builder.complex')]
@@ -78,6 +88,7 @@ export function queryChips(
       (id) => fields.find((f) => f.id === id)?.label ?? id.slice(-6),
       (op) => t(OP_TEXT[op]),
       choiceLabel,
+      refLabel,
     ),
   )
 }

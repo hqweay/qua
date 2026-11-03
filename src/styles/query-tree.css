@@ -160,7 +160,6 @@
 .qt-kind,
 .qt-field,
 .qt-op,
-.qt-scope,
 .qt-limit,
 .qt-sort-col,
 .qt-sort-dir {
@@ -177,7 +176,6 @@
 .qt-kind:focus-visible,
 .qt-field:focus-visible,
 .qt-op:focus-visible,
-.qt-scope:focus-visible,
 .qt-limit:focus-visible,
 .qt-sort-col:focus-visible,
 .qt-sort-dir:focus-visible {
@@ -188,8 +186,7 @@
 }
 .qt-kind,
 .qt-field,
-.qt-op,
-.qt-scope {
+.qt-op {
   color: var(--ui-text-secondary);
 }
 .qt-ref {
@@ -348,9 +345,6 @@
 }
 .qt-empty-hint {
   font-size: var(--ui-fs-xs);
-}
-.qt-empty-action {
-  margin-top: var(--ui-gap-1);
 }
 
 /* 拆不动的形状：只读 JSON ＋ 一句提示（不静默吞掉编辑） */

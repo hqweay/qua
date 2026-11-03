@@ -151,6 +151,9 @@ const switchView = async (page, scope, label) => {
   await page.waitForTimeout(400)
 }
 
+/** 从条件树里取属性节点：缺省种子的方向条件会把它包在 `all` 里 */
+const propOf = (where) => where?.prop ?? where?.all?.find((n) => n?.prop)?.prop
+
 /** 点条件树里某个组的「加一条」→ 选一项（`group:all`／`row:text` …） */
 const qtAdd = async (page, groupSelector, pick) => {
   await page.locator(`${groupSelector} > .qt-children > [data-qt="add"]`).click()
@@ -1982,7 +1985,7 @@ await check('T191 结果基数：父子同时命中时，大纲与表格的抬�
   const qid = await page.evaluate(() => {
     const ok = window.__qua.invoke('core.query/create', {
       name: '基数探针查询',
-      spec: { where: { text: '基数探针' }, scope: 'all' },
+      spec: { where: { text: '基数探针' } },
     })
     if (!ok) throw new Error('建不出查询块')
     return String(window.__qua.snapshot().activeId)
@@ -2557,7 +2560,7 @@ await check('T216 挂载栏本地查询：切到「大纲」后仍能切回；�
     window.__qua.invoke('core.mount/add-local', {
       host: { kind: 'block', blockId: hostId },
       label: '新查询',
-      spec: { where: { any: [] }, scope: 'subtree' },
+      spec: { where: { any: [] } },
     })
   }, hostId)
   await page.waitForTimeout(400)
@@ -2620,7 +2623,7 @@ await check('T216 挂载栏本地查询：切到「大纲」后仍能切回；�
   })
   assert(empty.rootHeadHidden && empty.emptyRoot, `空条件不该显示组合方式：${JSON.stringify(empty)}`)
   assert(!empty.icon, `空态不摆占位大图：${JSON.stringify(empty)}`)
-  assert(empty.labels.join() === '范围,最多,顺序', `选项要有可读的字段名：${JSON.stringify(empty.labels)}`)
+  assert(empty.labels.join() === '最多,顺序', `选项要有可读的字段名（范围轴已并进条件）：${JSON.stringify(empty.labels)}`)
   assert(empty.limit === '不限', `限数无值时应说「不限」，不是一个空框：${JSON.stringify(empty.limit)}`)
 
   await ctx.close()
@@ -15544,7 +15547,7 @@ await check('T178 local tab：加一栏不建块；切表格；刷新只影响�
     const r = window.__qua.invoke('core.mount/add-local', {
       host: { kind: 'block', blockId: host },
       label: '全库待办',
-      spec: { where: { tag: '任务' }, scope: 'all' },
+      spec: { where: { tag: '任务' } },
     })
     return r === false ? '' : String(window.__qua.__editor.sel?.aBlock ?? '')
   }, before.host)
@@ -15611,13 +15614,14 @@ await check('T178 local tab：加一栏不建块；切表格；刷新只影响�
 })
 
 /**
- * **上下文是相对的**：同一份条件，顶层查询块看全库，挂在某一页的面板里只看那一页。
+ * **上下文是相对的**：同一份正文条件，顶层查询块看全库；再加一条 `{up:$self}`
+ * 挂到某一页的面板里，就只看那一页。
  *
- * 这条钉的是 `QueryContext` 的三件事分开给（`selfId`／`scopeId`／`excludeIds`）。
+ * 这条钉的是 `QueryContext` 的两件事分开给（`selfId`／`excludeIds`）。
  * 曾经「`$self` 指谁」与「结果剔除谁」是同一个字段，于是「想解析它，又不得不排除它」
  * 这种形状根本表达不出来。
  */
-await check('T182 上下文：同一份条件，顶层查询块看全库、挂在页上的栏只看那一页', async () => {
+await check('T182 上下文：同一份正文条件，顶层查询块看全库、加 {up:$self} 的页内栏只看那一页', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -15652,12 +15656,12 @@ await check('T182 上下文：同一份条件，顶层查询块看全库、挂�
   const globalCount = await page.evaluate(() => document.querySelector('.queryview-count')?.textContent ?? '')
   assert(globalCount.includes('2'), `顶层查询块应看到两页的探针（整库）：${globalCount}`)
 
-  // ② 同一份条件挂到第一页的面板上：锚点＝那一页 ⇒ 只看得到一条
+  // ② 同一份条件再加一条方向条件挂到第一页的面板上：{up:$self}＝那一页之下 ⇒ 只看得到一条
   await page.evaluate((host) => {
     window.__qua.invoke('core.mount/add-local', {
       host: { kind: 'block', blockId: host },
       label: '本页探针',
-      spec: { where: { text: '上下文探针' } },
+      spec: { where: { all: [{ text: '上下文探针' }, { up: { is: '$self' } }] } },
     })
   }, probe[0].page)
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), probe[0].page)
@@ -15670,7 +15674,7 @@ await check('T182 上下文：同一份条件，顶层查询块看全库、挂�
   )
   assert(key !== '', '应有「本页探针」这一栏')
   await mountTab(page, key)
-  // 新栏缺省带一张表格；这一段钉的是**锚点**（大纲分支），先切回大纲再数行
+  // 新栏缺省带一张表格；这一段钉的是**方向条件**（大纲分支），先切回大纲再数行
   await page.evaluate((host) => {
     const id = [...document.querySelectorAll('#editor .mount .mount-tabwrap')].find(
       (x) => (x.querySelector('.mount-tab')?.textContent ?? '') === '本页探针',
@@ -15679,10 +15683,10 @@ await check('T182 上下文：同一份条件，顶层查询块看全库、挂�
   }, probe[0].page)
   await page.waitForTimeout(350)
   const localRows = await mountRows(page)
-  assert(localRows === 1, `挂在页上的栏只看这一页（1 条），实际 ${localRows} 行：挂载区的锚点是宿主`)
+  assert(localRows === 1, `挂在页上的栏只看这一页（1 条），实际 ${localRows} 行：{up:$self} 的 $self 是宿主`)
 
   await ctx.close()
-  return `顶层 ${globalCount}；挂在这一页上 ${localRows} 行（锚点＝宿主）`
+  return `顶层（无方向条件）${globalCount}；{up:$self} 的栏 ${localRows} 行（$self＝宿主）`
 })
 
 /**
@@ -15783,7 +15787,7 @@ await check('T184 表头排序只改显示序：_query.sort 不变、成员不�
     (id) =>
       window.__qua.invoke('core.query/set-spec', {
         owner: { kind: 'block', blockId: id },
-        spec: { where: { tag: '任务' }, scope: 'all' },
+        spec: { where: { tag: '任务' } },
       }),
     qid,
   )
@@ -15848,7 +15852,7 @@ await check('T187 稳定 id：摘掉第一栏之后，激活的是原来那一�
       window.__qua.invoke('core.mount/add-local', {
         host: { kind: 'block', blockId: h },
         label,
-        spec: { where: { tag: '任务' }, scope: 'all' },
+        spec: { where: { tag: '任务' } },
       })
     add('甲栏')
     add('乙栏')
@@ -15948,9 +15952,9 @@ await check('T188 条件树：就地展开、拆成一行一句话；应用一�
     treeVisible: document.querySelector('.queryview-tree')?.hidden === false,
     applied: document.querySelector('.queryview-tree [data-qt="apply"]')?.disabled === false,
   }), qid)
-  const doneWhere = JSON.parse(after.where)
+  const doneProp = propOf(JSON.parse(after.where))
   assert(
-    doneWhere?.prop?.eq === true && typeof doneWhere.prop.id === 'string',
+    doneProp?.eq === true && typeof doneProp.id === 'string',
     `应用之后条件应是「已完成」＝ 任务状态 eq:true：${after.where}`,
   )
   assert(after.treeVisible, '应用之后树仍常驻（不是点一次开一次）')
@@ -15964,7 +15968,7 @@ await check('T188 条件树：就地展开、拆成一行一句话；应用一�
   await page.keyboard.press(kbd('mod+z'))
   await page.waitForTimeout(450)
   const undone = await page.evaluate((id) => JSON.stringify(window.__qua.__editor.store.find(id)?.props?._query?.where), qid)
-  assert(JSON.parse(undone)?.prop?.eq === false, `一次 ⌘Z 就该回到原条件（未完成）：${undone}`)
+  assert(propOf(JSON.parse(undone))?.eq === false, `一次 ⌘Z 就该回到原条件（未完成）：${undone}`)
 
   // ④ 收起：只剩一条 chip，点它再展开（再应用一次「已完成」，让收起态有内容可看）
   await page.selectOption('.queryview-tree .qt-row[data-qt-row="todo"] [data-qt="todo"]', 'done')
@@ -16025,7 +16029,7 @@ await check('B1 条件树就地展开在抬头下一格；折叠后只剩一条 
   const centerId = await page.evaluate(() => {
     window.__qua.invoke('core.query/create', {
       name: '默认展开查询',
-      spec: { where: { tag: '任务' }, scope: 'all' },
+      spec: { where: { tag: '任务' } },
     })
     return String(window.__qua.snapshot().activeId)
   })
@@ -16084,7 +16088,7 @@ await check('B2 树上加嵌套组 → 结果变 → 一次 ⌘Z 全部回滚', 
     qid,
   )
   assert(undone === before, `一次 ⌘Z 要回到 ${before} 条（实际 ${undone}）`)
-  assert(JSON.parse(where)?.prop?.eq === false, `条件也要回滚：${where}`)
+  assert(propOf(JSON.parse(where))?.eq === false, `条件也要回滚：${where}`)
 
   await ctx.close()
   return `加嵌套组：${before} → ${after}；一次 ⌘Z → ${undone}`
@@ -16181,12 +16185,12 @@ await check('B6 拆不动的形状显示只读 JSON ＋ 一句提示（不静默
   assert(qid !== '', '前置：种子里应有一个查询块')
 
   await ensureTree(page)
-  // `near` 是合法条件，但树上还没有值位 ⇒ 应该整份走只读 JSON
+  // `near:{text}` 是合法条件，但方向行只认 `{is:id}` ⇒ 应该整份走只读 JSON
   await page.evaluate(
     (id) =>
       window.__qua.invoke('core.query/set-spec', {
         owner: { kind: 'block', blockId: id },
-        spec: { where: { near: { text: '产品' } }, scope: 'all' },
+        spec: { where: { near: { text: '产品' } } },
       }),
     qid,
   )
@@ -16271,7 +16275,7 @@ await check('T190 四种布局：切换不重查；看板拖卡写属性不换�
     (id) =>
       window.__qua.invoke('core.query/set-spec', {
         owner: { kind: 'block', blockId: id },
-        spec: { where: { tag: '任务' }, scope: 'all' },
+        spec: { where: { tag: '任务' } },
       }),
     qid,
   )
@@ -17800,7 +17804,7 @@ await check('T215 Shift+点日历／查询各看法的打开入口 ⇒ 右槽窗
     (id) =>
       window.__qua.invoke('core.query/set-spec', {
         owner: { kind: 'block', blockId: id },
-        spec: { where: { tag: '任务' }, scope: 'all' },
+        spec: { where: { tag: '任务' } },
       }),
     qid,
   )

@@ -28,8 +28,11 @@ export type TreeRow =
   | { kind: 'ref'; target: string }
   | { kind: 'is'; target: string }
   | { kind: 'role'; role: 'journal' }
-  /** 路径：一个入口、两个值位（某一天／某一块） */
-  | { kind: 'path'; by: 'journal' | 'block'; date: string; blockId: string }
+  /**
+   * 路径（方向）行：`{up|down|near:{is:id}}` 或某一天（只有 `up` 有天的形状）。
+   * `dir` 缺省 `up`（旧草稿兼容读法：`dir in row === false` 视作 `'up'`）。
+   */
+  | { kind: 'path'; by: 'journal' | 'block'; dir?: 'up' | 'down' | 'near'; date: string; blockId: string }
 
 export type TreeRowKind = TreeRow['kind']
 
@@ -52,7 +55,7 @@ export interface TreeGroup {
 
 export type TreeNode = TreeGroup | TreeLeaf
 
-/** 整份草稿：树 ＋ 范围/上限/顺序（这三格不在条件里，但同一次应用一起写） */
+/** 整份草稿：树 ＋ 上限/顺序（这两格不在条件里，但同一次应用一起写） */
 export interface TreeDraft {
   /** 根永远是组：它承载根层的「且／或」与「非」 */
   root: TreeGroup
@@ -62,7 +65,6 @@ export interface TreeDraft {
    * `{all:[{tag:'a'}]}`，同一语义两种字节，`specKey` 会误判「条件变了」。
    */
   synthesizedRoot: boolean
-  scope: 'subtree' | 'all'
   limit?: number
   sort?: SortKey
 }
@@ -91,7 +93,7 @@ function literalText(v: unknown): string {
 /**
  * 一个条件节点 → 树节点；**形状不在可编辑范围内就返回 `null`**（调用方走只读 JSON）。
  *
- * 可编辑范围是**刻意收窄**的：`down`／`near`／嵌套方向／带 kind 的 `ref` 都还表达不了。
+ * 可编辑范围是**刻意收窄**的：方向的嵌套形状、带 kind 的 `ref` 都还表达不了。
  * 语言层不限制它们；限制只在这里（UI），所以把 spec 存进库、从别处改它们仍然合法。
  */
 export function treeNodeOf(node: QueryNode): TreeNode | null {
@@ -138,8 +140,9 @@ export function treeRowOf(node: QueryNode): TreeRow | null {
   }
   if ('is' in node) return { kind: 'is', target: node.is }
   if ('role' in node) return node.role === 'journal' ? { kind: 'role', role: 'journal' } : null
-  if ('up' in node) return pathRowOf(node.up)
-  if ('down' in node || 'near' in node) return null
+  if ('up' in node) return pathRowOf('up', node.up)
+  if ('down' in node) return pathRowOf('down', node.down)
+  if ('near' in node) return pathRowOf('near', node.near)
   if (!('prop' in node)) return null
 
   const op = node.prop
@@ -177,16 +180,17 @@ export function treeRowOf(node: QueryNode): TreeRow | null {
 }
 
 /**
- * `{up:…}` 的两种可编辑形状：`{up:{is:id}}`（某一块之下）与
- * `{up:{all:[{role:'journal'},{prop:{_date,eq:date}}]}}`（某一天之下）。
+ * 方向条件的可编辑形状：`{dir:{is:id}}`（某一块的上级/下级/邻近）与
+ * `{up:{all:[{role:'journal'},{prop:{_date,eq:date}}]}}`（某一天之下；只有 `up` 有天的形状）。
  *
  * ⚠️ 顺序写死：只认 `[role, _date]` 这一种。反过来的 `all` 语义相同但字节不同，
  *    重排会改 `specKey`；那种形状走 JSON，不在树上假装能编辑。
  */
-function pathRowOf(up: QueryNode): TreeRow | null {
-  if ('is' in up) return { kind: 'path', by: 'block', date: '', blockId: up.is }
-  if (!('all' in up) || up.all.length !== 2) return null
-  const [first, second] = up.all
+function pathRowOf(dir: 'up' | 'down' | 'near', node: QueryNode): TreeRow | null {
+  if ('is' in node) return { kind: 'path', by: 'block', dir, date: '', blockId: node.is }
+  if (dir !== 'up') return null
+  if (!('all' in node) || node.all.length !== 2) return null
+  const [first, second] = node.all
   if (!first || !second) return null
   if (!('role' in first) || first.role !== 'journal') return null
   if (!('prop' in second) || second.prop.id !== '_date') return null
@@ -201,7 +205,6 @@ export function treeOfSpec(spec: QuerySpec): TreeDraft | null {
 
   const where = spec.where
   const common = {
-    scope: spec.scope === 'all' ? ('all' as const) : ('subtree' as const),
     ...(typeof spec.limit === 'number' ? { limit: spec.limit } : {}),
     ...(spec.sort && spec.sort.length === 1 ? { sort: { ...spec.sort[0]! } } : {}),
   }
@@ -251,7 +254,9 @@ export function treeNodeOfRow(row: TreeRow): QueryNode | null {
   if (row.kind === 'role') return { role: row.role }
   if (row.kind === 'path') {
     if (row.by === 'block') {
-      return row.blockId === '' ? null : { up: { is: row.blockId } }
+      if (row.blockId === '') return null
+      const dir = row.dir ?? 'up'
+      return dir === 'down' ? { down: { is: row.blockId } } : dir === 'near' ? { near: { is: row.blockId } } : { up: { is: row.blockId } }
     }
     return row.date.trim() === ''
       ? null
@@ -331,7 +336,6 @@ export function specOfTree(draft: TreeDraft): QuerySpec {
     where = queryNodeOfTree(root) ?? { any: [] }
   }
   const out: QuerySpec = { where }
-  if (draft.scope === 'all') out.scope = 'all'
   if (draft.sort) out.sort = [{ by: draft.sort.by, dir: draft.sort.dir }]
   if (typeof draft.limit === 'number' && draft.limit > 0) out.limit = Math.floor(draft.limit)
   return canonicalSpec(out)

@@ -41,7 +41,7 @@ test('草稿往返：拼回来的条件与手写 JSON 逐字节相等', () => {
     { where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } } },
     { where: { tag: '任务' } },
     { where: { text: '提到' } },
-    { where: { all: [{ prop: { id: TASK_STATUS_PROP_ID, eq: false } }, { tag: '任务' }] }, scope: 'all' },
+    { where: { all: [{ prop: { id: TASK_STATUS_PROP_ID, eq: false } }, { tag: '任务' }] } },
     { where: { any: [{ tag: '甲' }, { text: '乙' }] } },
     { where: { prop: { id: 'p-1', eq: 'x' } } },
     { where: { prop: { id: 'p-1', neq: 'x' } } },
@@ -53,7 +53,7 @@ test('草稿往返：拼回来的条件与手写 JSON 逐字节相等', () => {
     { where: { prop: { id: 'p-1', exists: false } } },
     { where: { prop: { id: 'p-1', empty: true } } },
     { where: { tag: '任务' }, sort: [{ by: '_date', dir: 'desc' }], limit: 5 },
-    { where: { prop: { id: TASK_STATUS_PROP_ID, eq: true } }, scope: 'all', limit: 1 },
+    { where: { prop: { id: TASK_STATUS_PROP_ID, eq: true } }, limit: 1 },
   ]
   for (const s of cases) {
     assert.equal(bytes(s), JSON.stringify(canonicalSpec(s)), `往返不该改一个字节：${JSON.stringify(s)}`)
@@ -120,7 +120,7 @@ test('空组合：`all:[]` 恒真拆不得（零行会把它翻成恒假）；`a
   assert.deepEqual(draft.rows, [])
   assert.equal(JSON.stringify(specOfDraft(draft)), JSON.stringify(canonicalSpec(anyEmpty)))
   // 真的零行 ⇒ `{any:[]}`（**不匹配任何块**）：空条件等于「没有结果」，不是「整个库」
-  assert.equal(JSON.stringify(specOfDraft({ mode: 'all', rows: [], scope: 'subtree' })), '{"where":{"any":[]}}')
+  assert.equal(JSON.stringify(specOfDraft({ mode: 'all', rows: [] })), '{"where":{"any":[]}}')
 })
 
 test('没填完的那一行不进条件（`nodeOfRow` 返回 null，而不是一条永远命中的空条件）', () => {
@@ -130,7 +130,6 @@ test('没填完的那一行不进条件（`nodeOfRow` 返回 null，而不是一
   const spec = specOfDraft({
     mode: 'all',
     rows: [{ kind: 'todo', value: 'todo' }, { kind: 'tag', value: '' }],
-    scope: 'subtree',
   })
   assert.equal(JSON.stringify(spec), JSON.stringify({ where: nodeOfRow({ kind: 'todo', value: 'todo' }) }))
 })
@@ -162,7 +161,7 @@ test('九个算子各是各的意思（`empty` 与 `exists` 分得开）', () =>
     b('g', '庚', { p: ['x', 'y'] }),
   ]
   const ids = (where: QuerySpec['where']): string[] =>
-    runQuery({ where, scope: 'all' }, { blocks }).map((h) => h.blockId)
+    runQuery({ where }, { blocks }).map((h) => h.blockId)
 
   assert.deepEqual(ids({ prop: { id: 'p', eq: true } }), ['a'])
   // `neq` 只对**有槽**的块成立：c 没有这一槽，不是「不等于 true」
@@ -206,7 +205,7 @@ test('算子的每个分支都能被 `canonicalSpec` 带走（漏一支＝存进
 test('算子与索引路径等价（同一份条件，两条路给同一结果）', () => {
   const blocks: Block[] = [b('a', '甲', { p: 1 }), b('b', '乙', { p: 9 }), b('c', '丙', {})]
   const where: QuerySpec['where'] = { any: [{ prop: { id: 'p', gt: 5 } }, { prop: { id: 'p', empty: true } }] }
-  const pure = runQuery({ where, scope: 'all' }, { blocks }).map((h) => h.blockId)
+  const pure = runQuery({ where }, { blocks }).map((h) => h.blockId)
   assert.deepEqual(pure, ['b', 'c'])
 })
 

@@ -31,6 +31,7 @@ import {
   withListSort,
   withSort,
   type Block,
+  type QuerySpec,
   type ListSort,
   type Source,
   type ViewConfig,
@@ -321,9 +322,9 @@ export function viewConfigCommands(
     /**
      * **在当前块里建一个查询块**。
      *
-     * 落点不是审美问题：查询块的求值锚点是**它的容器**（`contextFor`：`$self` 与
-     * `scope` 都锚在父块上）。所以「查这一块」必须把它建成这一块的子块 ——
-     * 原地把当前块转成查询块会让锚点变成它的父块，正好相反。
+     * 落点不是审美问题：查询块条件里的 `$self` 解析成**它的容器**（`contextFor`），
+     * 「上级 · 这一块」那行跟着变。所以「查这一块」必须把它建成这一块的子块 ——
+     * 原地把当前块转成查询块会让 `$self` 变成它的父块，正好相反。
      *
      * | 当前块 | 落点 | 锚点 |
      * |---|---|---|
@@ -355,7 +356,10 @@ export function viewConfigCommands(
         const at = siblings.findIndex((b) => b.id === cur.id)
         index = at < 0 ? siblings.length : at + 1
       }
-      const query = mkQueryBlock({ name: '', spec: { where: { any: [] } }, icon: 'lucide:list-filter' })
+      // 有容器时旧口径是「锚在容器」（subtree 缺省）——范围轴并进方向轴后，
+      // 这条锚变成一行**可见可删**的条件：删掉它就是全库。顶层没有容器，仍是全库。
+      const seed: QuerySpec = parentId ? { where: { up: { is: '$self' } } } : { where: { any: [] } }
+      const query = mkQueryBlock({ name: '', spec: seed, icon: 'lucide:list-filter' })
       const caret = mkBlock('')
       d.run((tx) => {
         tx.insert(query, parentId, index)

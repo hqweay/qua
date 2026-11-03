@@ -63,7 +63,7 @@ export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut'> {
   return {
     zoomTo: (id, feed, restore) => {
       /**
-       * 叶子块也能 zoom：`scope: subtree` **含块自身**，叶子就是「只看这一块」——
+       * 叶子块也能 zoom：块视图**含块自身**，叶子就是「只看这一块」——
        * 若叶子不给 zoom，点击行为会**时 zoom 时不 zoom**，用户没法预测一次点击的结果。
        */
       open(id, feed === true, restore)

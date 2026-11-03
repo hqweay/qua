@@ -257,6 +257,20 @@ export const MIGRATIONS: Migration[] = [
       db.prepare(`delete from ${DB_TABLES.meta} where key = ?`).run(META_KEYS.seq)
     },
   },
+  {
+    to: 8,
+    up: (db) => {
+      /**
+       * **查询范围收进方向轴**：`QuerySpec.scope` 退场，旧 `_query` 里的
+       * `scope:'subtree'` 会被新读路径静默忽略 ⇒ 结果从「这一块之下」变成整库。
+       * 条件住在内容里，不能只改一张表；按原型纪律丢掉内容重 seed。
+       */
+      for (const t of DB_CONTENT_TABLES) db.exec(`drop table if exists ${t}`)
+      db.exec(`drop table if exists ${DB_TABLES.opLog}`)
+      db.exec(DDL)
+      db.prepare(`delete from ${DB_TABLES.meta} where key = ?`).run(META_KEYS.seq)
+    },
+  },
 ]
 
 export type OpenResult =

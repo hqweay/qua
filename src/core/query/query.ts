@@ -162,7 +162,12 @@ export interface SortKey {
 }
 
 /**
- * 整个查询：条件 ＋ 范围 ＋ 顺序。
+ * 整个查询：条件 ＋ 顺序。
+ *
+ * ⚠️ **没有「范围」**：原 `scope`（这一块之下／全库）已并进方向轴——
+ *    「这一块之下」＝条件 `{up:{is:'$self'}}`，「全库」＝没有这条。
+ *    两条轴答同一件事必漂移，且方向条件能表达范围表达不了的东西
+ *    （`{up:{tag:X}}`、`{not:{up:{is:X}}}`）。语义收窄一处：不再含锚块自己。
  *
  * ⚠️ **没有顶层 `todo`**，也**没有 `{todo}` 原子**：三态由属性条件表达
  *    （见 `QueryNode` 那一段）。曾经两种写法并存，于是同一条语义有两份表示，
@@ -170,11 +175,6 @@ export interface SortKey {
  */
 export interface QuerySpec {
   where: QueryNode
-  /**
-   * 从哪个容器往下找。缺省 `subtree`：
-   * 根 Enter 建的子块只有渲染子树才看得见，否则就是「建了但看不见」（D8）。
-   */
-  scope?: 'subtree' | 'all'
   /**
    * **成员顺序**：取哪些、按什么序（在 `limit` 之前生效）。
    *
@@ -195,7 +195,6 @@ export interface QuerySpec {
  * | 字段 | 回答 |
  * |---|---|
  * | `selfId` | 条件里的 `'$self'` 指谁 |
- * | `scopeId` | `scope:'subtree'` 的锚点 |
  * | `excludeIds` | 结果里剔除谁 |
  *
  * ⚠️ 为什么 `selfId` 不再顺带排除：那是两件事被塞进同一个字段的后果 ——
@@ -204,14 +203,13 @@ export interface QuerySpec {
  */
 export interface QueryContext {
   selfId?: string
-  scopeId?: string
   excludeIds?: readonly string[]
 }
 
 /** 上下文的**稳定串**（冻结结果的判据之一；顺序无关 ⇒ 排序后再拼） */
 export function contextKey(ctx: QueryContext): string {
   const ex = [...new Set((ctx.excludeIds ?? []).filter((x) => typeof x === 'string' && x !== ''))].sort()
-  return JSON.stringify({ selfId: ctx.selfId ?? null, scopeId: ctx.scopeId ?? null, excludeIds: ex })
+  return JSON.stringify({ selfId: ctx.selfId ?? null, excludeIds: ex })
 }
 
 /**
@@ -224,13 +222,11 @@ export function evaluateQuerySpec(
   kb: Pick<KbClient, 'query'>,
   ctx: QueryContext,
 ): QueryHit[] {
-  return kb.query(spec, { scopeId: ctx.scopeId, selfId: ctx.selfId, excludeIds: ctx.excludeIds })
+  return kb.query(spec, { selfId: ctx.selfId, excludeIds: ctx.excludeIds })
 }
 
 export interface QueryRunInput {
   blocks: readonly Block[]
-  /** 求值范围锚点：`scope: 'subtree'` 时只在这个块（含）之下找 */
-  anchorId?: string
   /**
    * **宿主块**：条件里的 `'$self'` 按它解析。
    *
@@ -669,12 +665,11 @@ export function isQueryNode(raw: unknown): raw is QueryNode {
   return false
 }
 
-/** 一整份条件读不读得出来（`where` 是必填；`scope`／`sort`／`limit` 只判形状） */
+/** 一整份条件读不读得出来（`where` 是必填；`sort`／`limit` 只判形状） */
 export function isQuerySpec(raw: unknown): raw is QuerySpec {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
   const s = raw as Record<string, unknown>
   if (!isQueryNode(s.where)) return false
-  if (s.scope !== undefined && s.scope !== 'subtree' && s.scope !== 'all') return false
   if (s.limit !== undefined && typeof s.limit !== 'number') return false
   if (s.sort !== undefined) {
     if (!Array.isArray(s.sort)) return false
@@ -706,18 +701,15 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
     fields: fieldTableOf(input.blocks),
     ...(input.excludeIds && input.excludeIds.length > 0 ? { excludeIds: new Set(input.excludeIds) } : {}),
   }
-  /** 范围：`subtree` ⇒ 只收 anchor 之下（含 anchor 自己）；`all` ⇒ 整片森林 */
-  let roots: readonly Block[] = input.blocks
-  const anchor = q.scope !== 'all' && input.anchorId ? findById(input.blocks, input.anchorId) : undefined
-  if (anchor) roots = [anchor]
+  const roots: readonly Block[] = input.blocks
 
   /**
    * 成员条件的候选集：顶层就是 `{role:'journal'}` 时，「库里有哪些天」的**一天一个**
    * 口径就是候选集（同一天多块的坏数据只取先序第一个）。
    * 它不是范围条件：判定不做任何特殊处理，换掉的只是同一批块去掉重复后的集合。
    */
-  if (isExactRoleJournal(q.where) && !anchor) roots = journalDays(input.blocks)
-  return evaluateQuery(q, roots, env, input.blocks)
+  const memberRoots = isExactRoleJournal(q.where) ? journalDays(input.blocks) : roots
+  return evaluateQuery(q, memberRoots, env, input.blocks)
 }
 
 /* ------------------------------------------------------------ `$self`：相对条件 */

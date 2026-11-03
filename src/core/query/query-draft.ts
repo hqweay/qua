@@ -17,7 +17,7 @@ import { isQuerySpec, type QueryNode, type QuerySpec } from './query.ts'
 import { type PropKind, TASK_STATUS_PROP_ID } from '../props/props.ts'
 
 /** 一行条件能表达的四种事情（其余形态走 JSON） */
-export type DraftKind = 'todo' | 'tag' | 'text' | 'prop'
+export type DraftKind = 'todo' | 'tag' | 'text' | 'prop' | 'path'
 /** 属性条件的算子（与 `PropOp` 一一对应；`empty` 与 `exists` 是两件事） */
 export type DraftOp = 'eq' | 'neq' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'empty'
 
@@ -55,16 +55,17 @@ export interface DraftRow {
   field?: string
   /** `prop` 才有；缺省 `eq` */
   op?: DraftOp
-  /** `todo` 用 `todo`／`done`／`none`；其余是字符串或数字字面量 */
+  /** `todo` 用 `todo`／`done`／`none`；`path` 是目标块 id（`$self`＝这一块）；其余是字符串或数字字面量 */
   value?: string
+  /** `path` 才有；缺省 `up` */
+  dir?: 'up' | 'down' | 'near'
 }
 
-/** 整份草稿：一层组合 ＋ 范围/上限/顺序 */
+/** 整份草稿：一层组合 ＋ 上限/顺序 */
 export interface QueryDraft {
   /** `all` ＝ 全部满足；`any` ＝ 任一满足 */
   mode: 'all' | 'any'
   rows: DraftRow[]
-  scope: 'subtree' | 'all'
   limit?: number
   sort?: { by: string; dir: 'asc' | 'desc' }
   /**
@@ -89,6 +90,20 @@ export interface QueryDraft {
 function rowOf(node: QueryNode): DraftRow | null {
   if ('tag' in node) return { kind: 'tag', value: node.tag }
   if ('text' in node) return { kind: 'text', value: node.text }
+  // 方向行只认 `{dir:{is:id}}` 这一种（某天的形状拆不动，走 verbatim）
+  if ('up' in node || 'down' in node || 'near' in node) {
+    if ('up' in node) {
+      const inner = node.up
+      if (inner && 'is' in inner && typeof inner.is === 'string') return { kind: 'path', dir: 'up', value: inner.is }
+    } else if ('down' in node) {
+      const inner = node.down
+      if (inner && 'is' in inner && typeof inner.is === 'string') return { kind: 'path', dir: 'down', value: inner.is }
+    } else {
+      const inner = node.near
+      if (inner && 'is' in inner && typeof inner.is === 'string') return { kind: 'path', dir: 'near', value: inner.is }
+    }
+    return null
+  }
   if ('prop' in node) {
     const op = node.prop
     const id = node.prop.id
@@ -118,7 +133,7 @@ function literalText(v: unknown): string {
 /**
  * 一份条件 → 草稿。
  *
- * 拆不动（`not`、嵌套组合、`is`／`up`／`down`／`near`／`ref`／`role`、`all:[]`）⇒ `verbatim` 带上原样的
+ * 拆不动（`not`、嵌套组合、方向的非 `{is:id}` 形状、带 kind 的 `ref`、`all:[]`）⇒ `verbatim` 带上原样的
  * canonical JSON，界面改用 JSON 编辑。**不猜**：把「拆不动」显示成「拆了一半」，
  * 等于让用户在一次无关的编辑里丢掉剩下的条件。
  *
@@ -131,7 +146,6 @@ export function draftOfSpec(spec: QuerySpec): QueryDraft {
   const base: QueryDraft = {
     mode: 'all',
     rows: [],
-    scope: spec.scope === 'all' ? 'all' : 'subtree',
     ...(typeof spec.limit === 'number' ? { limit: spec.limit } : {}),
     ...(spec.sort && spec.sort.length === 1 ? { sort: { by: spec.sort[0]!.by, dir: spec.sort[0]!.dir } } : {}),
   }
@@ -187,6 +201,11 @@ export function nodeOfRow(row: DraftRow): QueryNode | null {
   }
   if (row.kind === 'tag') return row.value && row.value !== '' ? { tag: row.value } : null
   if (row.kind === 'text') return row.value && row.value !== '' ? { text: row.value } : null
+  if (row.kind === 'path') {
+    if (!row.value || row.value === '') return null
+    const dir = row.dir ?? 'up'
+    return dir === 'down' ? { down: { is: row.value } } : dir === 'near' ? { near: { is: row.value } } : { up: { is: row.value } }
+  }
   const id = row.field ?? ''
   if (id === '') return null
   const op: DraftOp = row.op ?? 'eq'
@@ -215,9 +234,9 @@ export function specOfDraft(draft: QueryDraft): QuerySpec {
       const parsed: unknown = JSON.parse(draft.verbatim)
       // JSON tab 是手写的 ⇒ 先验形：认不出的形状退回「没有条件」，不让它落进 `_query`
       if (isQuerySpec(parsed)) return canonicalSpec(parsed)
-      return { where: { any: [] }, scope: draft.scope === 'all' ? 'all' : 'subtree' }
+      return { where: { any: [] } }
     } catch {
-      return { where: { any: [] }, scope: draft.scope === 'all' ? 'all' : 'subtree' }
+      return { where: { any: [] } }
     }
   }
   const nodes: QueryNode[] = []
@@ -227,7 +246,6 @@ export function specOfDraft(draft: QueryDraft): QuerySpec {
   }
   const where: QueryNode = nodes.length === 0 ? { any: [] } : nodes.length === 1 ? nodes[0]! : draft.mode === 'any' ? { any: nodes } : { all: nodes }
   const out: QuerySpec = { where }
-  if (draft.scope === 'all') out.scope = 'all'
   if (draft.sort) out.sort = [{ by: draft.sort.by, dir: draft.sort.dir }]
   if (typeof draft.limit === 'number' && draft.limit > 0) out.limit = Math.floor(draft.limit)
   return canonicalSpec(out)

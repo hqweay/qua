@@ -151,7 +151,7 @@ export interface ViewHostDeps {
    * 以及「这一块是不是叶子块」（叶子没有可摊开的东西 ⇒ 不给视图切换器）。
    */
   host: () => Block
-  /** 求值的上下文：`$self` 指谁、`subtree` 锚在哪、结果剔除谁 */
+  /** 求值的上下文：`$self` 指谁、结果剔除谁 */
   context: QueryContext
   surface: ViewSurface
   /** 发生写入之后要落盘 / 重画别的视图 */
@@ -778,21 +778,13 @@ export class ViewHost {
       summary.className = 'queryview-chip'
       summary.dataset.queryChip = 'summary'
       summary.textContent = treeSummary(spec)
-      summary.title = spec.scope === 'all' ? t('ui.query.contextAll') : t('ui.query.context')
+      summary.title = t('ui.query.edit')
       summary.addEventListener('click', () => this.openTree())
       box.appendChild(summary)
       return
     }
-    // 没有内联树的面（投影／窄窗）：沿用一排 chip，入口仍走构建器命令
-    const ctx = document.createElement('button')
-    ctx.type = 'button'
-    ctx.className = 'queryview-chip queryview-chip--ctx'
-    ctx.textContent = spec.scope === 'all' ? t('ui.query.contextAll') : t('ui.query.context')
-    ctx.title = t('ui.query.edit')
-    ctx.addEventListener('click', () => this.deps.invoke('core.query/open-builder', { owner: this.writeOwner }))
-    box.appendChild(ctx)
-
-    for (const label of queryChips(spec, this.deps.fields(), this.deps.choices)) {
+    // 没有内联树的面（投影／窄窗）：只列条件 chip；编辑入口在行首的「＋」
+    for (const label of queryChips(spec, this.deps.fields(), this.deps.choices, this.deps.refLabel)) {
       const chip = document.createElement('span')
       // 单行省略是**原语**（`primitives.css`），组件里不再抄一份几何
       chip.className = 'queryview-chip ui-ellipsis'
@@ -819,12 +811,12 @@ export class ViewHost {
   /**
    * 这块查询是不是**整屏的根**（没有容器）。
    *
-   * 判据用求值上下文：`contextFor` 对顶层拥有者给 `selfId/scopeId = undefined`，
+   * 判据用求值上下文：`contextFor` 对顶层拥有者给 `selfId = undefined`，
    * 嵌在页面里的查询块给它的父页。与 `surface` 分开：内联体在两种落点用的是同一个
    * surface（几何相同），「默认展开」只属于前者。
    */
   private treeTopLevel(): boolean {
-    return this.deps.context.selfId === undefined && this.deps.context.scopeId === undefined
+    return this.deps.context.selfId === undefined
   }
 
   private openTree(): void {

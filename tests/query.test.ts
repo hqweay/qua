@@ -127,28 +127,21 @@ test('runQuery：标签条件只命中带标签的块', () => {
   assert.deepEqual(hits.map((h) => h.blockId), ['a', 'b', 'd1', 'e', 'j1b'])
 })
 
-test('runQuery：scope 缺省＝subtree —— 只在锚点之下找（含锚点自己）', () => {
+test('runQuery：`{up:{is:$self}}` ＝「这一块之下」（原 scope:subtree 的条件形状）', () => {
   const { blocks } = fixture()
-  const hits = runQuery({ where: { tag: 'todo' } }, { blocks, anchorId: 'p1' })
+  const hits = runQuery({ where: { all: [{ up: { is: 'p1' } }, { tag: 'todo' }] } }, { blocks })
   assert.deepEqual(hits.map((h) => h.blockId), ['a', 'b', 'd1'], 'p2 与 journal 不该进来')
 })
 
-test('runQuery：scope 缺省（subtree）＋ 锚点不在森林里 ⇒ 退回整片森林（不炸）', () => {
-  // 查询块是**游离块**时（例如刚从 seed 里造出来、还没挂进森林）不该静默返回空结果
+test('runQuery：范围不再是轴——没有方向条件就是整片森林', () => {
   const { blocks } = fixture()
-  const hits = runQuery({ where: { tag: 'todo' } }, { blocks, anchorId: '不存在' })
-  assert.equal(hits.length, 5)
-})
-
-test('runQuery：scope=all 时不受锚点限制', () => {
-  const { blocks } = fixture()
-  const hits = runQuery({ where: { tag: 'todo' }, scope: 'all' }, { blocks, anchorId: 'p1' })
+  const hits = runQuery({ where: { tag: 'todo' } }, { blocks })
   assert.equal(hits.length, 5)
 })
 
 test('runQuery：ref 条件＝指向边（只认 atom 的 target id）', () => {
   const { blocks } = fixture()
-  const hits = runQuery({ where: { ref: 'c' }, scope: 'all' }, { blocks })
+  const hits = runQuery({ where: { ref: 'c' } }, { blocks })
   assert.deepEqual(hits.map((h) => h.blockId), ['d'])
 })
 
@@ -169,7 +162,7 @@ test('runQuery：**有槽未填**的块按「未完成」命中（与渲染同�
   // 判 kind 要有定义块：没有它「任务状态」只是一个悬空的槽位（渲染也不画方框）
   const def = mkPropDef('任务状态', 'checkbox', {}, TASK_STATUS_PROP_ID)
   const blocks = [def, ...fixture().blocks, fresh]
-  const hits = runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } }, scope: 'all' }, { blocks })
+  const hits = runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } } }, { blocks })
   assert.ok(hits.some((h) => h.blockId === 'fresh'), '有槽未填应命中「未完成」')
   assert.ok(!hits.some((h) => h.blockId === 'j1b'), '没有这一栏的块仍不该命中')
 })
@@ -178,17 +171,17 @@ test('runQuery：路径条件（up）取那天的**子块**，不含只读日期
   const { blocks } = fixture()
   assert.ok(findJournalDay(blocks, '2026-10-20'))
   // 「在某一天下面」是纯谓词：某个祖先既是日记块、日期又等于那一天
-  const hits = runQuery({ where: dayPath('2026-10-20'), scope: 'all' }, { blocks })
+  const hits = runQuery({ where: dayPath('2026-10-20') }, { blocks })
   assert.deepEqual(hits.map((h) => h.blockId), ['j1a', 'j1b'], '日期行 j1 不该在结果里')
 })
 
 test('runQuery：role 成员条件把**天当结果**（不触发「journal 不当结果」的排除规则）', () => {
   const { blocks } = fixture()
   // 排除规则只挂在范围条件（env.journalDate）上：role 命中的恰恰是日期行自己
-  const hits = runQuery({ where: { role: 'journal' }, scope: 'all' }, { blocks })
+  const hits = runQuery({ where: { role: 'journal' } }, { blocks })
   assert.deepEqual(hits.map((h) => h.blockId), ['j1'])
   // 嵌在组合里的 role 是普通谓词，逐块判定，结果同形
-  const inAny = runQuery({ where: { any: [{ role: 'journal' }] }, scope: 'all' }, { blocks })
+  const inAny = runQuery({ where: { any: [{ role: 'journal' }] } }, { blocks })
   assert.deepEqual(inAny.map((h) => h.blockId), ['j1'])
 })
 
@@ -203,7 +196,6 @@ test('runQuery：sort 按 spec 排序（先排序后 limit），稳定 ＋ 缺�
   const forest = [mk('a', '2026-01-03'), mk('b', '2026-01-01'), mk('c', '2026-01-02'), mk('d'), mk('e', '2026-01-01')]
   const spec = (sort: QuerySpec['sort'], limit?: number): QuerySpec => ({
     where: { text: '' },
-    scope: 'all',
     ...(sort ? { sort } : {}),
     ...(limit === undefined ? {} : { limit }),
   })
@@ -229,31 +221,30 @@ test('runQuery：sort 按 spec 排序（先排序后 limit），稳定 ＋ 缺�
 test('canonicalSpec：role 条件与 sort 键要能存活下来（否则存进 _query 就被丢掉）', () => {
   const spec: QuerySpec = {
     where: { role: 'journal' },
-    scope: 'all',
     sort: [{ by: '_date', dir: 'desc' }],
     limit: 3,
   }
   assert.deepEqual(canonicalSpec(spec), spec)
   assert.equal(
     JSON.stringify(canonicalSpec(spec)),
-    '{"where":{"role":"journal"},"scope":"all","sort":[{"by":"_date","dir":"desc"}],"limit":3}',
-    '键序固定（where → scope → sort → limit）',
+    '{"where":{"role":"journal"},"sort":[{"by":"_date","dir":"desc"}],"limit":3}',
+    '键序固定（where → sort → limit）',
   )
 })
 
 test('runQuery：all / any / not 组合', () => {
   const { blocks } = fixture()
   const openTask = { prop: { id: TASK_STATUS_PROP_ID, eq: false } } as const
-  const todoOnly = runQuery({ where: { all: [{ tag: 'todo' }, openTask] }, scope: 'all' }, { blocks })
+  const todoOnly = runQuery({ where: { all: [{ tag: 'todo' }, openTask] } }, { blocks })
   // ⚠️ `j1b` 只有标签、**这一栏也没人声明** ⇒ 不该命中 `all[tag, 未完成]`
   assert.deepEqual(todoOnly.map((h) => h.blockId), ['a', 'd1', 'e'])
 
-  const notTag = runQuery({ where: { not: { tag: 'todo' } }, scope: 'all' }, { blocks })
+  const notTag = runQuery({ where: { not: { tag: 'todo' } } }, { blocks })
   assert.ok(!notTag.some((h) => h.blockId === 'a'))
   assert.ok(notTag.some((h) => h.blockId === 'c'))
 
   const either = runQuery(
-    { where: { any: [{ ref: 'c' }, { prop: { id: TASK_STATUS_PROP_ID, eq: true } }] }, scope: 'all' },
+    { where: { any: [{ ref: 'c' }, { prop: { id: TASK_STATUS_PROP_ID, eq: true } }] } },
     { blocks },
   )
   assert.deepEqual(either.map((h) => h.blockId), ['b', 'd'])
@@ -261,7 +252,7 @@ test('runQuery：all / any / not 组合', () => {
 
 test('runQuery：limit 截断；结果顺序＝森林先序（可复现）', () => {
   const { blocks } = fixture()
-  const hits = runQuery({ where: { tag: 'todo' }, scope: 'all', limit: 2 }, { blocks })
+  const hits = runQuery({ where: { tag: 'todo' }, limit: 2 }, { blocks })
   assert.deepEqual(hits.map((h) => h.blockId), ['a', 'b'])
 })
 
@@ -284,22 +275,22 @@ function assertSameHits(spec: QuerySpec, blocks: Block[], opts: { anchorId?: str
 test('索引路径与纯函数路径同解（ref/tag/journal 查表，判定与顺序共用一份）', () => {
   const { blocks } = fixture()
   assertSameHits({ where: { tag: 'todo' } }, blocks)
-  assertSameHits({ where: { tag: 'todo' }, scope: 'all' }, blocks, { anchorId: 'p1' })
-  assertSameHits({ where: { ref: 'c' }, scope: 'all' }, blocks)
-  assertSameHits({ where: dayPath('2026-10-20'), scope: 'all' }, blocks)
-  assertSameHits({ where: { all: [{ tag: 'todo' }, { prop: { id: TASK_STATUS_PROP_ID, eq: false } }] }, scope: 'all' }, blocks)
-  assertSameHits({ where: { text: '丙' }, scope: 'all' }, blocks)
-  assertSameHits({ where: { tag: 'todo' }, scope: 'all', limit: 2 }, blocks)
+  assertSameHits({ where: { tag: 'todo' } }, blocks, { anchorId: 'p1' })
+  assertSameHits({ where: { ref: 'c' } }, blocks)
+  assertSameHits({ where: dayPath('2026-10-20') }, blocks)
+  assertSameHits({ where: { all: [{ tag: 'todo' }, { prop: { id: TASK_STATUS_PROP_ID, eq: false } }] } }, blocks)
+  assertSameHits({ where: { text: '丙' } }, blocks)
+  assertSameHits({ where: { tag: 'todo' }, limit: 2 }, blocks)
   // 成员条件（索引路径查日期表收窄候选）＋ 排序轴
-  assertSameHits({ where: { role: 'journal' }, scope: 'all' }, blocks)
-  assertSameHits({ where: { role: 'journal' }, scope: 'all', sort: [{ by: '_date', dir: 'desc' }] }, blocks)
+  assertSameHits({ where: { role: 'journal' } }, blocks)
+  assertSameHits({ where: { role: 'journal' }, sort: [{ by: '_date', dir: 'desc' }] }, blocks)
 })
 
 test('freezeResult：求值**不写块**（结果按表面实例冻结，不进库、不进撤销）', () => {
   const { blocks } = fixture()
   const { kb } = kbOf(blocks)
   const q = b('q', '查询：带 todo 的')
-  const spec: QuerySpec = { where: { tag: 'todo' }, scope: 'all' }
+  const spec: QuerySpec = { where: { tag: 'todo' } }
   const frozen = freezeResult(spec, kb, {})
   assert.equal(frozen.hits.length, 5)
   assert.equal(readSpec(q), null, '冻结一个结果不该写条件（条件由构建器写）')
@@ -321,33 +312,33 @@ test('freezeResult：求值**不写块**（结果按表面实例冻结，不进�
 test('冻结的判据：条件变了／上下文变了就要重算（不会出现「旧条件 ＋ 新结果」）', () => {
   const { blocks } = fixture()
   const { kb } = kbOf(blocks)
-  const a: QuerySpec = { where: { tag: 'todo' }, scope: 'all' }
+  const a: QuerySpec = { where: { tag: 'todo' } }
   const frozen = freezeResult(a, kb, {})
   assert.equal(frozenStale(frozen, a, {}), false, '同样的条件与上下文 ⇒ 不重算')
-  const b2: QuerySpec = { where: { tag: 'todo' }, scope: 'all', limit: 2 }
+  const b2: QuerySpec = { where: { tag: 'todo' }, limit: 2 }
   assert.equal(frozenStale(frozen, b2, {}), true, '条件变了 ⇒ 重算')
   assert.equal(frozenStale(frozen, a, { excludeIds: ['a'] }), true, '上下文（剔除谁）变了 ⇒ 重算')
   assert.equal(frozenStale(null, a, {}), true, '还没有冻结过 ⇒ 算一次')
 })
 
-test('求值的上下文：`scopeId` 是锚点，缺省＝整片森林（不靠 selfId 顺带）', () => {
+test('求值的上下文：范围住在条件里（`{up:{is}}`），上下文只管 `$self` 指谁', () => {
   // 实测踩到：查询块只存条件、不吃结果（A）⇒ 拿它当锚点的话 subtree 里只有它自己，永远 0 条
   const { blocks } = fixture()
   const { kb } = kbOf(blocks)
-  const hits = freezeResult({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } } }, kb, { scopeId: 'p1' }).hits
-  assert.deepEqual(hits.map((h) => h.blockId), ['a', 'd1'], '只看 p1 这一页里的待办')
-  const all = freezeResult(
-    { where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } }, scope: 'all' },
+  const hits = freezeResult(
+    { where: { all: [{ up: { is: '$self' } }, { prop: { id: TASK_STATUS_PROP_ID, eq: false } }] } },
     kb,
-    { scopeId: 'p1' },
+    { selfId: 'p1' },
   ).hits
-  assert.ok(all.length > hits.length, '`scope:"all"` 时不收窄')
+  assert.deepEqual(hits.map((h) => h.blockId), ['a', 'd1'], '只看 p1 这一页里的待办')
+  const all = freezeResult({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } } }, kb, { selfId: 'p1' }).hits
+  assert.ok(all.length > hits.length, '没有方向条件时是全库')
 })
 
 test('resolveFrozen：内容按 id 现读（冻的是成员，不是文字）', () => {
   const { blocks } = fixture()
   const { kb } = kbOf(blocks)
-  const frozen = freezeResult({ where: { tag: 'todo' }, scope: 'all' }, kb, {})
+  const frozen = freezeResult({ where: { tag: 'todo' } }, kb, {})
 
   // 改文字：冻结结果不变，但**读出来的是新文字**
   blocks[0]!.children[0]!.text = '甲已改名 #todo'
@@ -360,7 +351,7 @@ test('resolveFrozen：块被删了就不出；祖先也在结果里时只保留�
   const { blocks } = fixture()
   const { kb } = kbOf(blocks)
   // d 与 d1 都命中文本条件 ⇒ 父子同时命中
-  const frozen = freezeResult({ where: { text: '提到' }, scope: 'all' }, kb, {})
+  const frozen = freezeResult({ where: { text: '提到' } }, kb, {})
   const rows = resolveFrozen(frozen.hits, (id) => kb.pathOf(id))
   assert.deepEqual(rows.map((r) => r.block.id), ['d'], '子块由父块的子树渲染，不重复出一条')
 
@@ -373,7 +364,7 @@ test('resolveFrozen：块被删了就不出；祖先也在结果里时只保留�
 test('结果基数：父子同时命中时 hits=2、大纲折叠成 1、记录视图仍是 2（抬头主数字用 hits）', () => {
   const parent = b('p', '共同词', { children: [b('c', '共同词')] })
   const { kb } = kbOf([parent])
-  const frozen = freezeResult({ where: { text: '共同词' }, scope: 'all' }, kb, {})
+  const frozen = freezeResult({ where: { text: '共同词' } }, kb, {})
 
   assert.equal(frozen.hits.length, 2, '命中是两条（父与子各一条）')
   assert.equal(resolveFrozen(frozen.hits, (id) => kb.pathOf(id)).length, 1, '大纲只画顶层（同一块不该出现两遍）')
@@ -396,24 +387,24 @@ test('runQuery：属性条件按 propId 取值、Object.is 比较（未填与 fa
   const forest: Block[] = Object.entries(props).map(([id, p]) => b(id, id, { props: p }))
   const atoms: Atom[] = []
   assert.deepEqual(
-    runQuery({ where: { prop: { id: 'task', eq: true } }, scope: 'all' }, { blocks: forest }).map((h) => h.blockId),
+    runQuery({ where: { prop: { id: 'task', eq: true } } }, { blocks: forest }).map((h) => h.blockId),
     ['a'],
   )
   assert.deepEqual(
-    runQuery({ where: { prop: { id: 'task', eq: false } }, scope: 'all' }, { blocks: forest }).map((h) => h.blockId),
+    runQuery({ where: { prop: { id: 'task', eq: false } } }, { blocks: forest }).map((h) => h.blockId),
     ['b'],
     '属性不存在（c）不许被当成 false',
   )
   // `eq: undefined` 也匹配不到任何块：`c` 根本没有这一槽（不存在 ≠ 等于 undefined）
   assert.deepEqual(
-    runQuery({ where: { prop: { id: 'task', eq: undefined } }, scope: 'all' }, { blocks: forest }).map((h) => h.blockId),
+    runQuery({ where: { prop: { id: 'task', eq: undefined } } }, { blocks: forest }).map((h) => h.blockId),
     [],
   )
 })
 
 test('canonicalSpec：属性条件要能存活下来（否则存进 _query 就被丢掉）', () => {
-  const spec: QuerySpec = { where: { prop: { id: 'p1', eq: 'x' } }, scope: 'all' }
-  assert.deepEqual(canonicalSpec(spec), { where: { prop: { id: 'p1', eq: 'x' } }, scope: 'all' })
+  const spec: QuerySpec = { where: { prop: { id: 'p1', eq: 'x' } } }
+  assert.deepEqual(canonicalSpec(spec), { where: { prop: { id: 'p1', eq: 'x' } } })
   // 嵌套也要带上：属性条件常与标签条件组合
   const nested: QuerySpec = { where: { all: [{ tag: '任务' }, { not: { prop: { id: 'p1', eq: true } } }] } }
   assert.deepEqual(canonicalSpec(nested), { where: { all: [{ tag: '任务' }, { not: { prop: { id: 'p1', eq: true } } }] } })
@@ -425,16 +416,15 @@ test('canonicalSpec：属性条件要能存活下来（否则存进 _query 就�
 })
 
 test('canonicalSpec：键序固定 ⇒ 同一条件的不同写法判为「没变」', () => {
-  const a: QuerySpec = { where: { all: [{ tag: 'x' }, { prop: { id: 'p1', eq: false } }] }, scope: 'all' }
+  const a: QuerySpec = { where: { all: [{ tag: 'x' }, { prop: { id: 'p1', eq: false } }] } }
   const b2: QuerySpec = {
-    scope: 'all',
     where: { all: [{ tag: 'x' }, { prop: { id: 'p1', eq: false } }] },
   } as QuerySpec
   assert.equal(JSON.stringify(canonicalSpec(a)), JSON.stringify(canonicalSpec(b2)))
 
   const q = b('q', 'q', { props: { _query: canonicalSpec(a) } })
   assert.equal(specChanged(q, b2), false, '写法不同但语义相同 ⇒ 不该触发重算')
-  assert.equal(specChanged(q, { where: { tag: 'y' }, scope: 'all' }), true)
+  assert.equal(specChanged(q, { where: { tag: 'y' } }), true)
 })
 
 /* ------------------------------------------------- 属性条件是通用路径 */
@@ -499,18 +489,18 @@ test('三态全部落在 `{prop}` 上：有槽没填、靠标签声明、显式 
   const notDef = (ids: string[]) => ids.filter((id) => id !== def.id && id !== tag.id)
 
   assert.deepEqual(
-    runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } }, scope: 'all' }, { blocks }).map((h) => h.blockId),
+    runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } } }, { blocks }).map((h) => h.blockId),
     ['u', 't', 'f'],
     '「未完成」＝ 这一栏在、值不是 true（三种存法一个答案）',
   )
   assert.deepEqual(
-    runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: true } }, scope: 'all' }, { blocks }).map((h) => h.blockId),
+    runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: true } } }, { blocks }).map((h) => h.blockId),
     ['d'],
     '「已完成」＝ 值 true',
   )
   assert.deepEqual(
     notDef(
-      runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, exists: false } }, scope: 'all' }, { blocks }).map(
+      runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, exists: false } } }, { blocks }).map(
         (h) => h.blockId,
       ),
     ),
@@ -518,7 +508,7 @@ test('三态全部落在 `{prop}` 上：有槽没填、靠标签声明、显式 
     '「不是任务」＝ 这一栏不在（有槽没填、靠标签声明都在，所以都不算）',
   )
   // 两条求值路径同解：索引路径也要认「标签声明」这一半（它只换了环境怎么来）
-  const open: QuerySpec = { where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } }, scope: 'all' }
+  const open: QuerySpec = { where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } } }
   assert.deepEqual(queryByIndex(rebuild(blocks), blocks, open, {}).map((h) => h.blockId), ['u', 't', 'f'])
 })
 
@@ -575,27 +565,27 @@ function selfFixture() {
 
 test('U3 同一个带 $self 的 spec：纯路径与索引路径结果相等', () => {
   const { blocks, host, j } = selfFixture()
-  assertSameHits({ where: { all: [{ text: '$self' }, { not: { ref: '$self' } }] }, scope: 'all' }, blocks, {
+  assertSameHits({ where: { all: [{ text: '$self' }, { not: { ref: '$self' } }] } }, blocks, {
     selfId: j.id,
   })
-  assertSameHits({ where: { tag: '$self' }, scope: 'all' }, blocks, { selfId: host.id })
-  assertSameHits({ where: dayPath('$self'), scope: 'all' }, blocks, { selfId: j.id })
-  assertSameHits({ where: { ref: '$self' }, scope: 'all' }, blocks, { selfId: j.id })
+  assertSameHits({ where: { tag: '$self' } }, blocks, { selfId: host.id })
+  assertSameHits({ where: dayPath('$self') }, blocks, { selfId: j.id })
+  assertSameHits({ where: { ref: '$self' } }, blocks, { selfId: j.id })
 })
 
 test('U4 selfId 缺省 ＋ spec 含 $self ⇒ 空结果（不退回全库）', () => {
   const { blocks } = selfFixture()
   // 若「解析不了」退化成「条件被忽略」，这里会返回整库
-  assert.deepEqual(runQuery({ where: { ref: '$self' }, scope: 'all' }, { blocks }), [])
-  assert.deepEqual(runQuery({ where: { text: '$self' }, scope: 'all' }, { blocks }), [])
-  assert.deepEqual(runQuery({ where: dayPath('$self'), scope: 'all' }, { blocks }), [])
+  assert.deepEqual(runQuery({ where: { ref: '$self' } }, { blocks }), [])
+  assert.deepEqual(runQuery({ where: { text: '$self' } }, { blocks }), [])
+  assert.deepEqual(runQuery({ where: dayPath('$self') }, { blocks }), [])
   // 不含 `$self` 的条件不受影响：没有宿主也照常求值
-  assert.equal(runQuery({ where: { tag: '项目' }, scope: 'all' }, { blocks }).length, 2)
+  assert.equal(runQuery({ where: { tag: '项目' } }, { blocks }).length, 2)
 })
 
 test('U5 {tag:$self} 命中同标签的块；「不含宿主自己」是 `excludeIds` 的事', () => {
   const { blocks, host, same } = selfFixture()
-  const spec: QuerySpec = { where: { tag: '$self' }, scope: 'all' }
+  const spec: QuerySpec = { where: { tag: '$self' } }
   const hits = runQuery(spec, { blocks, selfId: host.id, excludeIds: [host.id] })
   assert.deepEqual(hits.map((h) => h.blockId), [same.id], '同类含宿主就只是噪声：它是位置的性质')
   // 只解析 `$self`、不剔除 ⇒ 宿主也在（两件独立的事，各由自己的参数说）
@@ -607,8 +597,8 @@ test('U5 {tag:$self} 命中同标签的块；「不含宿主自己」是 `exclud
 
 test('U6 路径条件里的 $self 等价于写死那一天的日期', () => {
   const { blocks, j } = selfFixture()
-  const viaSelf = runQuery({ where: dayPath('$self'), scope: 'all' }, { blocks, selfId: j.id })
-  const literal = runQuery({ where: dayPath('2026-10-26'), scope: 'all' }, { blocks })
+  const viaSelf = runQuery({ where: dayPath('$self') }, { blocks, selfId: j.id })
+  const literal = runQuery({ where: dayPath('2026-10-26') }, { blocks })
   assert.deepEqual(viaSelf, literal)
   assert.deepEqual(viaSelf.map((h) => h.blockId), ['j1a', 'j1b'])
 })
@@ -625,12 +615,12 @@ test('U6 路径条件里的 $self 等价于写死那一天的日期', () => {
 test('U6b 提及的边界：`#名` 是露面不是边（不被 not-ref 排除）；真引用我的块不算提及', () => {
   const { blocks, j, pointing, inline, literal } = selfFixture()
   // ① 只否指向边：行内 `#` 的那块还在，真引用我的那块被排除
-  const notRef = runQuery({ where: { not: { ref: '$self' } }, scope: 'all' }, { blocks, selfId: j.id }).map((h) => h.blockId)
+  const notRef = runQuery({ where: { not: { ref: '$self' } } }, { blocks, selfId: j.id }).map((h) => h.blockId)
   assert.equal(notRef.includes(inline.id), true, '行内 `#名` 不产生指向边 ⇒ 不被 not-ref 排除')
   assert.equal(notRef.includes(pointing.id), false, '真引用我的块被排除（它在引用那一栏）')
 
   // ② 提及＝文本里有 ＋ 没指向我
-  const mentions = { where: { all: [{ text: '$self' }, { not: { ref: '$self' } }] }, scope: 'all' as const }
+  const mentions = { where: { all: [{ text: '$self' }, { not: { ref: '$self' } }] } }
   const hits = runQuery(mentions, { blocks, selfId: j.id })
   assert.deepEqual(hits.map((h) => h.blockId), [literal.id])
   assert.equal(hits.map((h) => h.blockId).includes(inline.id), false, '`#名` 的 label 不在文本段里，不构成文本提及')
@@ -639,12 +629,12 @@ test('U6c 宿主的可读文本为空 ⇒ 提及是空集（空串不能当值�
   const { blocks } = selfFixture()
   const bare = b('bare', '   ')
   const withBare = [...blocks, bare]
-  assert.deepEqual(runQuery({ where: { text: '$self' }, scope: 'all' }, { blocks: withBare, selfId: bare.id }), [])
+  assert.deepEqual(runQuery({ where: { text: '$self' } }, { blocks: withBare, selfId: bare.id }), [])
 })
 
 test('U6d 宿主没有日期 ⇒ 路径里的 $self 是空集（不是「全部日记」）', () => {
   const { blocks, host } = selfFixture()
-  assert.deepEqual(runQuery({ where: dayPath('$self'), scope: 'all' }, { blocks, selfId: host.id }), [])
+  assert.deepEqual(runQuery({ where: dayPath('$self') }, { blocks, selfId: host.id }), [])
 })
 
 test('resolveSelfSpec：不改入参，且嵌套组合里的 $self 也解析', () => {
@@ -658,7 +648,7 @@ test('resolveSelfSpec：不改入参，且嵌套组合里的 $self 也解析', (
 
 test('宿主自己不进结果：靠 `excludeIds`，**不靠** `selfId` 顺带（两件事分开了）', () => {
   const { blocks, host, same } = selfFixture()
-  const spec: QuerySpec = { where: { tag: '项目' }, scope: 'all' }
+  const spec: QuerySpec = { where: { tag: '项目' } }
   // 「带项目标签的块」按条件本该含宿主；挂载区的位置性质把它剔掉
   assert.deepEqual(runQuery(spec, { blocks, excludeIds: [host.id] }).map((h) => h.blockId), ['s1'])
   // ⚠️ 只给 selfId 时**不再**顺带剔除：`$self` 的解析与「结果剔除谁」是两条独立规则
@@ -691,7 +681,7 @@ const hitIds = (spec: QuerySpec, blocks: Block[], opts: { selfId?: string } = {}
 
 test('A1 路径条件可组合：any 里两天各一支，两天的子块都在', () => {
   const { blocks } = pathFixture()
-  assert.deepEqual(hitIds({ where: { any: [dayPath('2026-10-20'), dayPath('2026-10-21')] }, scope: 'all' }, blocks), [
+  assert.deepEqual(hitIds({ where: { any: [dayPath('2026-10-20'), dayPath('2026-10-21')] } }, blocks), [
     'j1a',
     'j1b',
     'j2a',
@@ -700,7 +690,7 @@ test('A1 路径条件可组合：any 里两天各一支，两天的子块都在'
 
 test('A2 any 里路径与别的条件并集（路径不再吞掉其它分支）', () => {
   const { blocks } = pathFixture()
-  assert.deepEqual(hitIds({ where: { any: [dayPath('2026-10-20'), { text: '不在任何一天' }] }, scope: 'all' }, blocks), [
+  assert.deepEqual(hitIds({ where: { any: [dayPath('2026-10-20'), { text: '不在任何一天' }] } }, blocks), [
     'j1a',
     'j1b',
     'loose',
@@ -709,7 +699,7 @@ test('A2 any 里路径与别的条件并集（路径不再吞掉其它分支）'
 
 test('A3 not 路径：非空，且不含那一天的子块', () => {
   const { blocks } = pathFixture()
-  const ids = hitIds({ where: { not: dayPath('2026-10-20') }, scope: 'all' }, blocks)
+  const ids = hitIds({ where: { not: dayPath('2026-10-20') } }, blocks)
   assert.ok(ids.length > 0, '否定条件不该是空集')
   assert.equal(ids.includes('j1a'), false)
   assert.equal(ids.includes('j1b'), false)
@@ -722,25 +712,25 @@ test('A4 新形状与旧 journal 语义逐条相等：命中那天的子块、�
   const day = findJournalDay(blocks, '2026-10-20')
   assert.ok(day)
   const expected = day.children.map((c) => c.id)
-  assert.deepEqual(hitIds({ where: dayPath('2026-10-20'), scope: 'all' }, blocks), expected)
+  assert.deepEqual(hitIds({ where: dayPath('2026-10-20') }, blocks), expected)
   assert.equal(expected.includes('j1'), false)
 })
 
 test('A5 {down} 命中「子树里有它」的祖先，不含自己', () => {
   const { blocks } = pathFixture()
-  assert.deepEqual(hitIds({ where: { down: { text: '深层目标' } }, scope: 'all' }, blocks), ['deep1', 'deep2'])
+  assert.deepEqual(hitIds({ where: { down: { text: '深层目标' } } }, blocks), ['deep1', 'deep2'])
 })
 
 test('A6 {near} ＝ 自己 ∪ 祖先 ∪ 子孙（三处都命中同一条件）', () => {
   const { blocks } = pathFixture()
   const c: QueryNode = { text: '深层二' }
-  const all = hitIds({ where: { text: '' }, scope: 'all' }, blocks)
-  const up = new Set(hitIds({ where: { up: c }, scope: 'all' }, blocks))
-  const down = new Set(hitIds({ where: { down: c }, scope: 'all' }, blocks))
-  const self = new Set(hitIds({ where: c, scope: 'all' }, blocks))
+  const all = hitIds({ where: { text: '' } }, blocks)
+  const up = new Set(hitIds({ where: { up: c } }, blocks))
+  const down = new Set(hitIds({ where: { down: c } }, blocks))
+  const self = new Set(hitIds({ where: c }, blocks))
   assert.deepEqual(new Set([...up, ...down, ...self]), new Set(['deep1', 'deep2', 'deep3']), '三支都要有命中')
   assert.deepEqual(
-    hitIds({ where: { near: c }, scope: 'all' }, blocks),
+    hitIds({ where: { near: c } }, blocks),
     all.filter((id) => up.has(id) || down.has(id) || self.has(id)),
     'near 是三者之并，顺序仍按森林先序',
   )
@@ -765,15 +755,15 @@ test('A7 方向原子可嵌套：{up:{down:…}} 有结果且不重复', () => {
       ],
     }),
   ]
-  const ids = hitIds({ where: { up: { down: { text: '深层目标' } } }, scope: 'all' }, blocks)
+  const ids = hitIds({ where: { up: { down: { text: '深层目标' } } } }, blocks)
   assert.deepEqual(ids, ['parent', 'b', 'other', 'x'])
   assert.equal(new Set(ids).size, ids.length, '同一块只许出现一次')
 })
 
 test('A8 any 里路径条件换顺序结果不变（不再「只取第一个日期」）', () => {
   const { blocks } = pathFixture()
-  const a = hitIds({ where: { any: [dayPath('2026-10-20'), dayPath('2026-10-21')] }, scope: 'all' }, blocks)
-  const swapped = hitIds({ where: { any: [dayPath('2026-10-21'), dayPath('2026-10-20')] }, scope: 'all' }, blocks)
+  const a = hitIds({ where: { any: [dayPath('2026-10-20'), dayPath('2026-10-21')] } }, blocks)
+  const swapped = hitIds({ where: { any: [dayPath('2026-10-21'), dayPath('2026-10-20')] } }, blocks)
   assert.deepEqual(a, swapped)
   assert.deepEqual(a, ['j1a', 'j1b', 'j2a'])
 })
@@ -788,7 +778,6 @@ test('A9 canonicalSpec：四个新原子逐支存活（漏一支＝存进 _query
         { near: { not: { ref: 'r' } } },
       ],
     },
-    scope: 'all',
   }
   assert.deepEqual(canonicalSpec(spec), spec)
   assert.equal(
@@ -813,16 +802,16 @@ test('A10 isQueryNode：四个新原子验形通过、畸形拒绝；旧 journal
 
 test('A11 索引路径与纯函数路径同解：方向原子也逐条相等', () => {
   const { blocks } = pathFixture()
-  assertSameHits({ where: { any: [dayPath('2026-10-20'), dayPath('2026-10-21')] }, scope: 'all' }, blocks)
-  assertSameHits({ where: { not: dayPath('2026-10-20') }, scope: 'all' }, blocks)
-  assertSameHits({ where: { down: { text: '深层目标' } }, scope: 'all' }, blocks)
-  assertSameHits({ where: { near: { text: '深层二' } }, scope: 'all' }, blocks)
-  assertSameHits({ where: { up: { down: { text: '深层目标' } } }, scope: 'all' }, blocks)
-  assertSameHits({ where: { is: 'deep2' }, scope: 'all' }, blocks)
+  assertSameHits({ where: { any: [dayPath('2026-10-20'), dayPath('2026-10-21')] } }, blocks)
+  assertSameHits({ where: { not: dayPath('2026-10-20') } }, blocks)
+  assertSameHits({ where: { down: { text: '深层目标' } } }, blocks)
+  assertSameHits({ where: { near: { text: '深层二' } } }, blocks)
+  assertSameHits({ where: { up: { down: { text: '深层目标' } } } }, blocks)
+  assertSameHits({ where: { is: 'deep2' } }, blocks)
 })
 
 test('A12 {down} 一次求值是线性的：深度 5 的 1000 块 < 200ms（粗守卫），深链上每块只走一次（精判据）', () => {
-  const spec: QuerySpec = { where: { down: { text: '深层目标' } }, scope: 'all' }
+  const spec: QuerySpec = { where: { down: { text: '深层目标' } } }
   /** 门禁并发会让单次抖动 ⇒ 先热一次，再取三次里最好的一次 */
   const bestOf3 = (blocks: Block[]): number => {
     runQuery(spec, { blocks })

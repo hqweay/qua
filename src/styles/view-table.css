@@ -571,11 +571,6 @@
   color: var(--ui-text-secondary);
   font-size: var(--ui-fs-xs);
 }
-/* 上下文 chip 是「相对于谁」——它不在条件里，但决定结果，所以与条件视觉上分开 */
-.queryview-chip--ctx {
-  background: transparent;
-  color: var(--ui-text-tertiary);
-}
 button.queryview-chip {
   cursor: pointer;
 }
