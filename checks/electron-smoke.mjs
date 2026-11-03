@@ -91,6 +91,8 @@ const dumpMenu = ({ Menu }) => {
       type: i.type,
       // macOS 真正拿去和 NSMenu 对齐的键等价物：role 的默认加速键
       roleAccel: typeof i.getDefaultRoleAccelerator === 'function' ? i.getDefaultRoleAccelerator() : null,
+      // 自定义条目的加速键（role 之外唯一合法的键位声明处）
+      accel: i.accelerator ?? null,
       enabled: i.enabled,
       submenu: i.submenu ? walk(i.submenu.items) : null,
     }))
@@ -1210,6 +1212,161 @@ await check('E12 落库：块拆成行（没有整份 blob 表），打一个字
 
   await app.close()
   return `内容表 = ${tables.sort().join(',')}（无 workspace blob）；Block 行 ${rows}；插一个块只写 ${delta} 行`
+})
+
+
+/* ═══════════════════════════════════════════════════ E13 菜单「库」 */
+
+await check('E13 菜单「库」：新建库 ⇒ 新窗；最近的库随注册表重建并列出全部库', async () => {
+  const dir = join(CACHE, '13-menu-library')
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+  const first = await launch('menu-library', { userData: dir })
+  const app = first.app
+  const libA = await first.page.evaluate(() => window.qua.libraryInfo())
+  assert(libA?.status === 'ok', `启动后应当有一个库：${JSON.stringify(libA)}`)
+
+  const libBarOf = async () => {
+    const menu = await app.evaluate(dumpMenu)
+    return menu.find((m) => m.label === '库')
+  }
+  let libBar = await libBarOf()
+  assert(libBar, `菜单里应当有「库」一栏：${flatMenu(await app.evaluate(dumpMenu))}`)
+  const bar = libBar.submenu ?? []
+  const recent = bar.find((i) => i.label === '最近的库')
+  assert(recent && Array.isArray(recent.submenu), '「最近的库」应当是一个子菜单')
+  assert(recent.submenu.length === 1, `初始「最近的库」应当列出 1 个库：${JSON.stringify(recent.submenu)}`)
+  const newLib = bar.find((i) => i.label === '新建库…')
+  assert(newLib, '「新建库…」应当在「库」里')
+  assert(newLib.accel === 'CommandOrControl+Shift+N', `新建库的键应当住在菜单数据里（⌘⇧N），实际 ${newLib.accel}`)
+
+  // 触发菜单里的「新建库…」⇒ 新窗（一库一窗：新库必然是新窗）
+  const before = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
+  await app.evaluate(({ Menu, BrowserWindow }) => {
+    const item = Menu.getApplicationMenu().getMenuItemById('library-new')
+    item.click(item, BrowserWindow.getAllWindows()[0])
+  })
+  const pageB = await (async () => {
+    const t0 = Date.now()
+    while (Date.now() - t0 < 8000) {
+      const found = app.windows().find((p) => p !== first.page)
+      if (found) return found
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    return undefined
+  })()
+  assert(pageB, '点「新建库…」之后应当出现第二个窗口')
+  await pageB.waitForFunction(() => Boolean(window.__qua))
+  const after = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
+  assert(after === before + 1, `新建库应当新开一扇窗（${before} → ${after}）`)
+  const libB = await pageB.evaluate(() => window.qua.libraryInfo())
+  assert(libB?.status === 'ok' && libB.id !== libA.id, `新窗应当是一个**不同的**库：${JSON.stringify(libB)}`)
+
+  const list = await first.page.evaluate(() => window.qua.libraryList())
+  assert(list?.libraries?.length === 2, `libraryList 应当报两个库：${JSON.stringify(list?.libraries)}`)
+
+  // 菜单是**重建**过的：「最近的库」现在列出两个（不是启动那一刻的快照）
+  libBar = await libBarOf()
+  const recent2 = libBar.submenu.find((i) => i.label === '最近的库')
+  assert(recent2.submenu.length === 2, `新建之后「最近的库」应当列出 2 个库：${JSON.stringify(recent2.submenu)}`)
+
+  await app.close()
+  return `「库」菜单：新建库 ⇒ 新窗（${libA.id.slice(-6)} → ${libB.id.slice(-6)}）；libraryList = 2；最近的库重建后 = 2 条`
+})
+
+
+/* ═══════════════════════════════════════════════════ E14 每库状态 */
+
+/**
+ * 判据：**引用块 id 或指涉库布局的状态跟着库走**（折叠、槽开关……）。
+ * 库 A 里折过/关过的，库 B 与重启后的 B 都不能看见；切回 A、重启后的 A 各自恢复。
+ */
+await check('E14 每库状态：折叠/槽开关跟着库走；切库与重启后各自恢复', async () => {
+  const dir = join(CACHE, '14-lib-state')
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+  const first = await launch('lib-state', { userData: dir })
+  const app = first.app
+  const libA = await first.page.evaluate(() => window.qua.libraryInfo())
+  assert(libA?.status === 'ok', `启动后应当有一个库：${JSON.stringify(libA)}`)
+
+  // A：折一块（走生产命令路径）＋ 关左槽（同样是生产命令）
+  const foldId = await first.page.evaluate(() => {
+    const b = window.__qua.blocks()[0]
+    window.__qua.focusBlock(b.id, 0)
+    window.__qua.invoke('core.editor/toggle-collapse', {})
+    return b.id
+  })
+  await first.page.evaluate(() => window.__qua.invoke('core.dock/toggle-left', {}))
+  // 等设备侧防抖落盘（250ms 防抖 + 余量）
+  await new Promise((r) => setTimeout(r, 700))
+  const stA = await first.page.evaluate(() => ({
+    folded: window.__qua.__editor.doc.folded,
+    dock: document.body.dataset.dockLeft,
+  }))
+  assert(stA.dock === 'closed', `A 关了左槽：${stA.dock}`)
+  assert(stA.folded[foldId] === true, `A 的折叠应当落进编辑器状态：${JSON.stringify(stA.folded)}`)
+
+  // 新建库 B（走主进程库面，与菜单同一接线点）：新窗、状态是自己的
+  const LIB_B_ID = 'cc'.repeat(16)
+  const created = await first.page.evaluate((id) => window.qua.createLibrary(id, '库 B'), LIB_B_ID)
+  assert(created?.status === 'ok', `新建库 B 失败：${JSON.stringify(created)}`)
+  const pageB = await (async () => {
+    const t0 = Date.now()
+    while (Date.now() - t0 < 8000) {
+      const found = app.windows().find((p) => p !== first.page)
+      if (found) return found
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    return undefined
+  })()
+  assert(pageB, '新建库 B 应当新开一扇窗')
+  await pageB.waitForFunction(() => Boolean(window.__qua))
+  const stB = await pageB.evaluate(() => ({
+    folded: window.__qua.__editor.doc.folded,
+    dock: document.body.dataset.dockLeft,
+  }))
+  assert(stB.dock === 'open', `B 是新库：左槽默认开（A 的「关」不跟过来），实际 ${stB.dock}`)
+  assert(
+    Object.keys(stB.folded).length === 0,
+    `B 没有折叠：A 的折叠 id 不许指到 B 的行：${JSON.stringify(stB.folded)}`,
+  )
+
+  await app.close()
+
+  /* ---- 重启：恢复的是最后打开的 B；A 的状态必须还在 A 的库里 ---- */
+  const second = await launch('lib-state', { userData: dir })
+  const stB2 = await second.page.evaluate(async () => ({
+    id: (await window.qua.libraryInfo()).id,
+    folded: window.__qua.__editor.doc.folded,
+    dock: document.body.dataset.dockLeft,
+  }))
+  assert(stB2.id === LIB_B_ID, `重启应当恢复最后打开的库（B），实际 ${stB2.id?.slice(-6)}`)
+  assert(stB2.dock === 'open', `重启后 B：左槽仍是默认开，实际 ${stB2.dock}`)
+  assert(Object.keys(stB2.folded).length === 0, `重启后 B：仍然没有折叠：${JSON.stringify(stB2.folded)}`)
+
+  // 打开 A（新窗）：折叠与槽开关各自恢复
+  await second.page.evaluate((id) => window.qua.openLibrary(id), libA.id)
+  const pageA2 = await (async () => {
+    const t0 = Date.now()
+    while (Date.now() - t0 < 8000) {
+      const found = second.app.windows().find((p) => p !== second.page)
+      if (found) return found
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    return undefined
+  })()
+  assert(pageA2, '打开 A 应当新开一扇窗')
+  await pageA2.waitForFunction(() => Boolean(window.__qua))
+  const stA2 = await pageA2.evaluate(() => ({
+    folded: window.__qua.__editor.doc.folded,
+    dock: document.body.dataset.dockLeft,
+  }))
+  assert(stA2.dock === 'closed', `重启后 A：左槽仍是关的（跟着 A 库走），实际 ${stA2.dock}`)
+  assert(stA2.folded[foldId] === true, `重启后 A：折叠恢复：${JSON.stringify(stA2.folded)}`)
+
+  await second.app.close()
+  return `折叠/槽开关跟库走：B（新窗与重启）不受 A 影响；A 切回与重启后各自恢复（fold ${foldId.slice(-6)}）`
 })
 
 

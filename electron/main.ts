@@ -417,6 +417,40 @@ function buildMenu(): Menu {
       submenu: [{ role: 'close', label: t('menu.item.closeWindow') }],
     },
     {
+      /**
+       * 库的入口：一库一窗（切库＝开另一扇窗／聚焦已有），所以这里只有壳的动作
+       * ——开库与建库，没有「在当前窗口换内容」这种语义可给。
+       * 「最近的库」是**构建时快照**：注册表一变就得重建整份菜单（见 manager 的 onRegistryChanged）。
+       */
+      label: t('menu.bar.library'),
+      submenu: [
+        {
+          id: 'library-recent',
+          label: t('menu.item.recentLibraries'),
+          submenu: loadRegistry(REGISTRY_IO).registry.libraries.map((l) => ({
+            id: `library-open-${l.id}`,
+            label: l.name,
+            click: () => {
+              const r = manager.open(l.id)
+              if (r.status === 'failed') console.warn('[library] menu open failed', r.failure)
+            },
+          })),
+        },
+        { type: 'separator' },
+        {
+          id: 'library-new',
+          label: t('menu.item.newLibrary'),
+          // 键位住在菜单数据里（与 renderer 的键位表同一条纪律：不写在 handler 的按键分支上）。
+          // 「最近的库」挂不了键：菜单加速键只能落在可点击的条目上，子菜单项会被忽略。
+          accelerator: 'CommandOrControl+Shift+N',
+          click: () => {
+            const r = manager.create(libraryId(), t('library.defaultName'))
+            if (r.status === 'failed') console.warn('[library] menu create failed', r.failure)
+          },
+        },
+      ],
+    },
+    {
       label: t('menu.bar.edit'),
       submenu: [
         // ⚠️ **不放 `{ role: 'undo' }` / `{ role: 'redo' }`**：
@@ -460,6 +494,11 @@ const manager = new LibraryManager({
   createWindow: (libraryId, title) => createWindow(libraryId, title),
   readBounds: readState,
   writeBounds: (w) => scheduleWriteState(w),
+  /**
+   * 注册表一变就重建菜单：「最近的库」是构建时快照，不重建就永远停在启动那一刻。
+   * ⚠️ 延一拍再重建——重建可能发生在菜单条目的 click 处理里，当场换掉 NSMenu 不安全。
+   */
+  onRegistryChanged: () => setTimeout(() => Menu.setApplicationMenu(buildMenu()), 0),
 })
 
 manager.installIpc()

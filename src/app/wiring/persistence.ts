@@ -74,8 +74,8 @@ export function setupPersistence(deps: PersistenceDeps) {
     const ws = deps.getWs()
     ws.blocks = blocks.blocks
     /**
-     * 折叠态是**设备状态**（`qua.device`），所以它不再写回库：编辑器持的是 `doc.folded`
-     * （视图那份），落盘要的是 `device.folded`（这台设备那份）。
+     * 折叠态跟**库**走（写进库的 settings；装配层的设备 store 负责分流）：编辑器持的是
+     * `doc.folded`（视图那份），落盘要的是 `device.folded`（装配层持有的那一份）。
      * ⚠️ 编辑器还没装配时（读盘后的首次落盘）没有可写回的来源，保留 `device.folded` 原值。
      * ⚠️ 这里只**搬一次引用**（折叠表的每次改动都是新对象，见 `core/tree.ts` 的 `writeFold`），
      *    随后交给设备那条防抖队列（`saveDeviceNow`）：它与库那张写队列互不相干，
