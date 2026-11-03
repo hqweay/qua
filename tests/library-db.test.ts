@@ -12,9 +12,9 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { DB_CONTENT_TABLES, DB_SCHEMA_VERSION, DB_TABLES, META_KEYS } from '../src/core/identity/library.ts'
 import { mkBlock } from '../src/core/model/model.ts'
@@ -215,6 +215,63 @@ test('迁移失败 ⇒ 版本号与表一起回滚（不许留半迁移库）', 
   assert.equal(v, 1, '失败之后版本号必须还是旧的')
   assert.equal(tables.includes('t2'), false, '第一步建的表也要一起回滚（事务边界）')
   assert.equal(blob.length, 1, '旧数据必须还在')
+})
+
+/* ------------------------------------------------------------ ⑤ 迁移前快照 */
+
+test('迁移前快照：偏旧库打开 ⇒ backups/ 出现一份快照、主库升到当前、快照独立可开且仍是旧版本', () => {
+  const file = tmpDb()
+  legacyDb(file, 1)
+  const r = openLibraryDb(file)
+  assert.equal(r.status, 'migrated', `偏小必须走迁移，实际 ${r.status}`)
+  assert.equal(r.version, DB_SCHEMA_VERSION)
+  r.db!.close()
+
+  const backupDir = join(dirname(file), 'backups')
+  const snaps = existsSync(backupDir) ? readdirSync(backupDir) : []
+  assert.equal(snaps.length, 1, `应当恰好一份迁移前快照：${JSON.stringify(snaps)}`)
+  assert.match(snaps[0]!, /-before-migrate-v1\.db$/, `快照名要带上迁移前的旧版本号：${snaps[0]}`)
+
+  // 快照必须**独立可开**：不是 wal 里的半截影子，也不是主库的符号链接
+  const snap = new DatabaseSync(join(backupDir, snaps[0]!))
+  const v = (snap.prepare('pragma user_version').all()[0] as { user_version: number }).user_version
+  const blob = snap.prepare('select json from workspace where id = 1').all()
+  snap.close()
+  assert.equal(v, 1, `快照里的版本号应当还是迁移前的 1，实际 ${v}`)
+  assert.equal(blob.length, 1, '快照里应当留着迁移前的旧形状数据')
+})
+
+test('迁移前快照：目标文件已存在（占位）⇒ 不 crash，迁移照常完成（best-effort 的反向验证）', () => {
+  const file = tmpDb()
+  legacyDb(file, 1)
+  // 把时钟钉住，让快照目标的名字可预测，再占住那个位置
+  const fixed = 1700000000000
+  const realNow = Date.now
+  Date.now = () => fixed
+  try {
+    const backupDir = join(dirname(file), 'backups')
+    mkdirSync(backupDir, { recursive: true })
+    const placeholder = join(backupDir, `${fixed}-before-migrate-v1.db`)
+    writeFileSync(placeholder, 'not-a-db')
+    const r = openLibraryDb(file)
+    assert.equal(r.status, 'migrated', `快照失败不许挡迁移，实际 ${r.status}`)
+    assert.equal(r.version, DB_SCHEMA_VERSION)
+    r.db!.close()
+    assert.equal(readFileSync(placeholder, 'utf8'), 'not-a-db', '占位文件不许被覆盖')
+  } finally {
+    Date.now = realNow
+  }
+})
+
+test('迁移前快照：全新建库与版本正好 ⇒ 不产生快照（只在真的要动库时拍）', () => {
+  const file = tmpDb()
+  const first = openLibraryDb(file)
+  assert.equal(first.status, 'created')
+  first.db!.close()
+  const second = openLibraryDb(file)
+  assert.equal(second.status, 'ok')
+  second.db!.close()
+  assert.equal(existsSync(join(dirname(file), 'backups')), false, '没动库就不该有 backups/')
 })
 
 /* ------------------------------------------------------------ ④ 负向：seed 不覆盖 */

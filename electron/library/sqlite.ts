@@ -31,9 +31,10 @@
  * ⚠️ 这个文件在主进程里跑：`node:sqlite` 是同步 API，一次批量导入会卡 UI（已知代价）。
  */
 import { DatabaseSync } from 'node:sqlite'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import {
+  BACKUPS_DIR,
   DB_CONTENT_TABLES,
   DB_SCHEMA_VERSION,
   DB_TABLES,
@@ -317,6 +318,33 @@ function inTransaction<T>(db: Db, fn: () => T): T {
 }
 
 /**
+ * 迁移前给整库拍一份快照：`VACUUM INTO '<库目录>/backups/<epoch毫秒>-before-migrate-v<旧版本>.db'`。
+ *
+ * 为什么在这个时机：迁移是「把库改写成新形状」的唯一批量入口，快照就是它的回退面。
+ * 文件名带 epoch 毫秒（防撞——SQLite 语义是目标文件已存在即报错）与旧版本号（出事时一眼知道
+ * 快照是从哪一版拍下来的）。
+ *
+ * 为什么**只记 warn、继续迁移**（best-effort）：迁移表里的每一步目前都是「丢内容重 seed」的
+ * 主动作废——没有一步在搬运不可再生的数据。快照此刻是习惯与骨架，不是数据安全的承重墙；
+ * 为一份「没有消费者的备份」挡住打开库的路径，是净损失。
+ *
+ * ⚠️ **纪律切换的触发判据**（写在这一处，切换时别找不到）：**第一次出现「不丢内容的迁移」时**，
+ * 快照失败必须改为中止迁移——从那一步起，迁移动的就是不能重 seed 的真实内容，
+ * 这份快照从习惯变成唯一的回退面。
+ */
+function snapshotBeforeMigrate(db: Db, file: string, fromVersion: number): void {
+  const dir = join(dirname(file), BACKUPS_DIR)
+  try {
+    mkdirSync(dir, { recursive: true })
+    // VACUUM INTO 不吃参数绑定 ⇒ 只能拼字面量；路径里唯一要逃的字符是单引号（翻倍）
+    const target = join(dir, `${Date.now()}-before-migrate-v${fromVersion}.db`).replace(/'/g, "''")
+    db.exec(`vacuum into '${target}'`)
+  } catch (e) {
+    console.warn(`[library] snapshot before migration failed, continuing: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
+/**
  * 打开一个库文件。
  *
  * 顺序是判据的一部分：**先读版本，再决定要不要建/迁**。
@@ -364,8 +392,10 @@ export function openLibraryDb(
 
   if (verdict.status === 'ok') return { status: 'ok', db, version: found }
 
-  // 偏旧：按 `to` 升序跑（支持跨多版），每一步一个事务还是整段一个事务？
+  // 偏旧：**先拍快照再动库**（快照必须在迁移事务之外——VACUUM 不能在事务里跑），
+  // 然后按 `to` 升序跑（支持跨多版），每一步一个事务还是整段一个事务？
   // ⇒ **整段一个**：半迁移的库比慢一点严重得多，而 SQLite 的 DDL 事务是原子的。
+  snapshotBeforeMigrate(db, file, found)
   try {
     inTransaction(db, () => {
       const steps = migrations.filter((m) => m.to > found && m.to <= target).sort((a, b) => a.to - b.to)
