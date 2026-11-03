@@ -26,14 +26,12 @@ import {
   resolveView,
   sourceOfOwner,
   storedKindsFor,
-  typeDeclOf,
   upsertView,
   viewNameOf,
   withFilter,
   withListSort,
   withSort,
   type Block,
-  type QuerySpec,
   type ListSort,
   type Source,
   type ViewConfig,
@@ -70,7 +68,6 @@ export function viewConfigCommands(
   | 'setViewFilter'
   | 'setQuerySpec'
   | 'createQuery'
-  | 'insertQueryBlock'
 > {
   /**
    * 换完视图要让屏幕跟上。
@@ -331,7 +328,8 @@ export function viewConfigCommands(
      * local tab 只是「这一块下面的一栏」。需要命名/引用/共享时才建它。
      *
      * 默认落**森林顶层**（与页同一条口径）：它是内容对象，没有容器 ⇒ 上下文是全库。
-     * 要放进某一页里就地看，走 `core.query/insert`（当前块的子块／紧跟其后）。
+     * 要就地放一个（不命名、挂在当前位置）走 `core.query/insert`：空块原地变查询块，
+     * 有正文就建在它后面（见 `App.insertQueryBlock`）。
      *
      * ⚠️ **查询块是叶子**：不给它「加子块」的入口（children 不是 query 源），
      *    否则用户会看到「加了但看不见」。
@@ -347,57 +345,6 @@ export function viewConfigCommands(
       d.refreshList()
       reveal({ kind: 'block', blockId: block.id })
       return block.id
-    },
-
-    /**
-     * **在当前块里建一个查询块**。
-     *
-     * 落点不是审美问题：查询块条件里的 `$self` 解析成**它的容器**（`contextFor`），
-     * 「上级 · 这一块」那行跟着变。所以「查这一块」必须把它建成这一块的子块 ——
-     * 原地把当前块转成查询块会让 `$self` 变成它的父块，正好相反。
-     *
-     * | 当前块 | 落点 | 锚点 |
-     * |---|---|---|
-     * | 能容纳子块 | 末尾（森林顶层放首位，别沉到一页末尾） | 当前块 |
-     * | 叶子／组件块（含查询块自己） | 紧跟其后 | 当前块的父块（抬头据此显示「相对：…」） |
-     *
-     * 插完在它后面留一个空块：查询块是只读的，光标需要一个能落的地方。
-     * 两件事在同一笔事务里 ⇒ 一次 ⌘Z 同时撤掉。
-     */
-    insertQueryBlock: (blockId) => {
-      const curId = blockId !== undefined && blockId !== '' ? blockId : d.activeId()
-      const cur = d.kb.get(curId)
-      if (!cur) return ''
-      const parent = d.kb.parentOf(curId)
-      /**
-       * 「能容纳子块」只认类型声明 + 查询块自己：
-       * 查询块的 children 不是它的内容（源是命中），把「查这一块」建进去等于看不见。
-       */
-      const hostable = typeDeclOf(cur).children === 'content' && !isQueryBlock(cur)
-      let parentId: string | null
-      let index: number
-      if (hostable) {
-        parentId = cur.id
-        // 森林顶层块是「这一段」，查询块放首位才看得见（末尾会被整页内容埋掉）
-        index = parent ? cur.children.length : 0
-      } else {
-        parentId = parent?.id ?? null
-        const siblings: readonly Block[] = parent ? parent.children : d.kb.roots()
-        const at = siblings.findIndex((b) => b.id === cur.id)
-        index = at < 0 ? siblings.length : at + 1
-      }
-      // 有容器时旧口径是「锚在容器」（subtree 缺省）——范围轴并进方向轴后，
-      // 这条锚变成一行**可见可删**的条件：删掉它就是全库。顶层没有容器，仍是全库。
-      const seed: QuerySpec = parentId ? { where: { up: { is: '$self' } } } : { where: { any: [] } }
-      const query = mkQueryBlock({ name: '', spec: seed, icon: 'lucide:list-filter' })
-      const caret = mkBlock('')
-      d.run((tx) => {
-        tx.insert(query, parentId, index)
-        tx.insert(caret, parentId, index + 1)
-        return query.id
-      })
-      d.reloadPage()
-      return query.id
     },
   }
 }

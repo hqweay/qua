@@ -2037,7 +2037,7 @@ await check('T191 结果基数：父子同时命中时，大纲与表格的抬�
   return `hits=2：大纲 ${outline.outlineRows} 行＋「${outline.top}」、表格 ${table.tableRows} 行；抬头都是 ${table.count}`
 })
 
-await check('T192 在当前块里建查询块：落点是这一块的子块；一次撤销撤掉两块；条件条当场出现', async () => {
+await check('T192 当前块建查询块：空块原地转、有正文插在下一行；条件条当场出现；一次撤销收回', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -2045,8 +2045,12 @@ await check('T192 在当前块里建查询块：落点是这一块的子块；�
   const root = await page.evaluate(() => window.__qua.snapshot().activeId)
   const before = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
 
+  /*
+   * ① section 根（页／天）：它没有兄弟位，新块只能落成**首个子块**
+   *    —— 与「插入其他块」同一条规则（视觉上「根行之后」就是第一个子块）。
+   */
   await page.evaluate((id) => window.__qua.invoke('core.query/insert', { blockId: id }), root)
-  await page.waitForTimeout(500)
+  await page.waitForTimeout(400)
 
   const made = await page.evaluate((id) => {
     const host = window.__qua.__editor.store.find(id)
@@ -2054,19 +2058,20 @@ await check('T192 在当前块里建查询块：落点是这一块的子块；�
     const caret = host?.children[1]
     return {
       qid: q?.id ?? '',
-      parent: q && host ? host.id : '',
+      hostId: host?.id ?? '',
       hasQuery: Boolean(q?.props?._query),
       caret: caret?.id ?? '',
       caretChildren: caret?.children.length ?? -1,
+      caretHasQuery: Boolean(caret?.props?._query),
       blocks: window.__qua.snapshot().totalBlocks,
       chip: Boolean(document.querySelector('.queryview-filters .queryview-chip')),
     }
   }, root)
   assert(made.hasQuery, `前置：新块应是查询块：${JSON.stringify(made)}`)
-  assert(made.parent === root, `查询块必须是**当前块的子块**（锚点才等于当前块）：${JSON.stringify(made)}`)
+  assert(made.hostId === root, `section 根没有兄弟位 ⇒ 落成首个子块：${JSON.stringify(made)}`)
   assert(made.caret !== '' && made.caret !== made.qid, '查询块后面要留一个空块做光标落点')
-  assert(made.caretChildren === 0, '落点是一个空块')
-  assert(made.blocks === before + 2, `一次建两块：${before} → ${made.blocks}`)
+  assert(made.caretChildren === 0 && !made.caretHasQuery, '落点是一个空块（不是第二份查询）')
+  assert(made.blocks === before + 2, `一次建两块（查询 ＋ 落点）：${before} → ${made.blocks}`)
   assert(made.chip, `建完当场看到条件条（不用再点一次）：${JSON.stringify(made)}`)
   // 内联体默认收起条件树（不撑爆结果区）；点 chip 就地在抬头下展开
   await page
@@ -2081,16 +2086,69 @@ await check('T192 在当前块里建查询块：落点是这一块的子块；�
     '点条件 chip 应在正文里就地展开条件树（不是弹层）',
   )
 
-  // 把光标放回编辑器，一次 ⌘Z 应该把两块一起撤掉
-  await page.evaluate((id) => window.__qua.focusBlock(id, 0), made.qid)
+  /*
+   * ② **空块 ⇒ 原地变成查询块**（与「/待办」「/分割线」同一条口径）：
+   *    那一行就是查询块本身，不多出一个空行；只在它后面补一个落点。
+   */
+  const conv = await page.evaluate((id) => {
+    window.__qua.invoke('core.query/insert', { blockId: id })
+    const b = window.__qua.__editor.store.find(id)
+    return {
+      sameIsQuery: Boolean(b?.props?._query),
+      children: b?.children.length ?? -1,
+      sel: window.__qua.__editor.sel?.aBlock ?? '',
+      blocks: window.__qua.snapshot().totalBlocks,
+    }
+  }, made.caret)
+  assert(conv.sameIsQuery, `空块应**原地**变成查询块（id 不变）：${JSON.stringify(conv)}`)
+  assert(conv.children === 0, `原地转换不生成子块：${JSON.stringify(conv)}`)
+  assert(conv.blocks === made.blocks + 1, `原地转换只多一个落点空块：${made.blocks} → ${conv.blocks}`)
+  assert(conv.sel !== '' && conv.sel !== made.caret, `光标应落到新补的空块上：${JSON.stringify(conv)}`)
+
+  /*
+   * ③ **有正文 ⇒ 建在它下一行**（同级），不再变成它的子块 ——
+   *    这才是「和创建其他块一样」：用户在一句话里敲 `/查询`，查询出现在这句话**之后**。
+   */
+  const spot = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('#editor .blk')].find(
+      (b) => b.dataset.depth === '1' && b.querySelector('.tx') && b.querySelector('.tx').textContent.trim() !== '',
+    )
+    return row?.dataset.blockId ?? ''
+  })
+  assert(spot !== '', '前置：这一页应有带正文的普通块')
+  const sib = await page.evaluate((id) => {
+    const b = window.__qua.__editor.store.find(id)
+    const kidsBefore = b?.children.length ?? -1
+    window.__qua.invoke('core.query/insert', { blockId: id })
+    const after = window.__qua.__editor.store.find(id)
+    const sel = window.__qua.__editor.sel?.aBlock ?? ''
+    const selBlock = sel ? window.__qua.__editor.store.find(sel) : null
+    return {
+      kidsBefore,
+      kidsAfter: after?.children.length ?? -1,
+      sameIsQuery: Boolean(after?.props?._query),
+      blankSibling: Boolean(selBlock && !selBlock.props?._query && selBlock.children.length === 0),
+      blocks: window.__qua.snapshot().totalBlocks,
+    }
+  }, spot)
+  assert(!sib.sameIsQuery, `有正文的块自己不许被改掉：${JSON.stringify(sib)}`)
+  assert(sib.kidsAfter === sib.kidsBefore, `查询块不许再塞成当前块的子块：${sib.kidsBefore} → ${sib.kidsAfter}`)
+  assert(sib.blocks === conv.blocks + 2, `新块 ＋ 落点两块：${conv.blocks} → ${sib.blocks}`)
+  assert(sib.blankSibling, `插完光标落在新的空块上：${JSON.stringify(sib)}`)
+
+  // 一次 ⌘Z：把这一笔（查询 ＋ 落点）一起收回
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), spot)
   await page.waitForTimeout(150)
   await page.keyboard.press(kbd('mod+z'))
   await page.waitForTimeout(500)
   const undone = await page.evaluate(() => ({ blocks: window.__qua.snapshot().totalBlocks }))
-  assert(undone.blocks === before, `插块与落点空块要能一次撤销：${before} → ${undone.blocks}（应回到 ${before}）`)
+  assert(
+    undone.blocks === conv.blocks,
+    `插块与落点空块要能一次撤销：${sib.blocks} → ${undone.blocks}（应回到 ${conv.blocks}）`,
+  )
 
   await ctx.close()
-  return `查询块是当前块的子块；两块一起插、一次 ⌘Z 收回（${made.blocks} → ${undone.blocks}）`
+  return `根 ⇒ 首个子块（＋落点）；空块 ⇒ 原地转（＋1）；有正文 ⇒ 下一行（＋2、不加子块）；一次 ⌘Z 收回（${sib.blocks} → ${undone.blocks}）`
 })
 
 await check('T193 面板查询与查询块解耦：local 栏用 $self 出结果，但不建块、不指向块', async () => {

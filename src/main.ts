@@ -1270,6 +1270,15 @@ const app: App = {
     return ed
   },
 
+  /**
+   * **查询块的就地落点**（`core.query/insert` / 斜杠「插入查询块」）。
+   *
+   * 为什么住在这里、不在视图命令那一组：落点要问**编辑器**（这一行空不空、在哪个兄弟位），
+   * 插完还要把光标落到新留的空块上——视图命令只读写拥有者上的两个属性，碰不到这些。
+   * 判据与「插入其他块」共用一套（空块原地转、否则插到下一行）。
+   */
+  insertQueryBlock: (blockId) => ed.insertQueryAfter(blockId !== undefined && blockId !== '' ? blockId : ws.activeId) ?? '',
+
   ...pageCommands(pageDeps),
   // 日记与页共用同一份依赖（今日是落点，不是特例代码路径）
   ...journalCommands(pageDeps),

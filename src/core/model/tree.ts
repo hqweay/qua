@@ -407,7 +407,39 @@ export function insertSiblingAfter(doc: Doc, id: string): Block | null {
   return b
 }
 
-/** 把 id 块的口径插成它的**首个子块**的 `child` 分支 */
+/**
+ * **「在这一块之后插一个新东西」落在哪** —— 插块类动作（`/待办`、`/分割线`、`/查询`、
+ * 露面）的唯一判据。
+ *
+ * 三种落点：
+ *   · `replace`：这一行是空块 ⇒ **原地改**（不新建）。用户在一行空白里选「待办／分割线／查询」，
+ *     要的是那一行变成它，而不是「多出一个、原来那行还留在上面」；
+ *   · `first-child`：这一块是 section 根（页／天／被放大成整屏的块）⇒ 它没有兄弟位，
+ *     插成它的**首个子块**（视觉上「根行之后」就是第一个子块）；
+ *   · `after`：其余 ⇒ 插在它的**下一个兄弟位**。
+ *
+ * 返回 `null` ＝ 这里放不下一个新块（声明了 `children:'none'` 的容器）。
+ *
+ * ⚠️ 只算落点，不判断「该不该建」，也不决定空块那一支改成什么 —— 那是调用方（编辑器）的事。
+ *    放在 core 是因为「新块落在哪」只跟树有关，且这一条口径现在有三处调用点。
+ */
+export type InsertSite =
+  | { kind: 'replace' }
+  | { kind: 'first-child'; parentId: string }
+  | { kind: 'after'; parentId: string | null; index: number }
+
+export function insertSiteOf(loc: Located, opts: { blank: boolean }): InsertSite | null {
+  if (opts.blank) return { kind: 'replace' }
+  if (loc.parent === null) {
+    if (typeDeclOf(loc.block).children === 'none') return null
+    return { kind: 'first-child', parentId: loc.block.id }
+  }
+  return { kind: 'after', parentId: loc.parent.id, index: loc.index + 1 }
+}
+
+/**
+ * 把 id 块的口径插成它的**首个子块**的 `child` 分支
+ */
 export function insertFirstChild(doc: Doc, id: string): Block | null {
   const loc = locate(doc, id)
   if (!loc) return null
