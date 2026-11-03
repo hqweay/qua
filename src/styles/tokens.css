@@ -178,9 +178,16 @@
   --ui-rail-gap: 12px;
   --ui-rail: var(--ui-border-subtle);
   --ui-rail-hot: var(--ui-text-tertiary);
-  /* 折叠态块标的环：2px 实心环（折叠态不能只靠悬停件自明） */
-  --ui-marker-ring: 2px;
-  --ui-marker-ring-size: 13px;
+  /*
+    折叠态块标的**底盘**：一整块淡圆盘（不是环）。
+
+    环是一圈线，读作「被圈定／选中」；折叠要说的只是「这一块里还有东西」，
+    一圈 2px 实线比正文还抢眼 —— 扫一屏时每个收起的块都在喊。
+    圆盘只加一层底色，点仍是那颗点。取值口径是「看得见、但退到点后面」：
+    1em 见方（正好铺满块标槽的可用宽度）、三级文字的 12%。
+  */
+  --ui-marker-halo-size: 16px;
+  --ui-marker-halo: color-mix(in srgb, var(--ui-text-tertiary) 12%, transparent);
   --ui-font-body: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
   --ui-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
   /* 图标尺寸（view/icons.ts 的内联 SVG 只认这三档；颜色一律 currentColor） */
@@ -197,7 +204,8 @@
     现在是**语义排序**：读 `--ui-z-popover` 的人知道它是「浮层」，不需要知道它比谁大。
     取值之间留 10 的间隔，将来插一层不必重排全部。
   */
-  --ui-z-rail: 1; /* 行内装饰（导轨、折叠三角）：只压在本行内容之上 */
+  --ui-z-plate: 0; /* 行内件的**底板**（块标的底盘）：永远垫在自己的点与图标之下 */
+  --ui-z-rail: 1; /* 行内装饰（导轨、折叠三角、块标与抓手）：只压在本行内容之上 */
   --ui-z-sticky-cell: 2; /* 表里钉住的首列/行首格：横向滚动时压住同行的其它格 */
   --ui-z-sticky-head: 3; /* 表头：钉住的首列之上、正文之上（两向都要压住） */
   --ui-z-resize: 4; /* 侧槽宽度手柄：贴着槽边，要能按住 */

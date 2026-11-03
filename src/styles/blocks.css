@@ -343,6 +343,18 @@
   transition: opacity 120ms ease;
   z-index: var(--ui-z-rail);
 }
+/*
+ * 折叠态：三角**常驻**（0.55）。
+ *
+ * 收起之后块标只多一层很淡的底盘（见下面 `.marker::after`），光靠它说明
+ * 「这里有一堆东西、还能展回来」太轻；三角是静息态唯一把「可展开」说出口的件。
+ * 它绝对定位、不占位，常驻也不会把正文挤走（旧形状的丑来自「占位的槽」＋「常驻的 45% 淡影」，
+ * 不是来自「常驻」本身）。
+ * 悬停仍由下一条抬到 0.9 —— 顺序不能反：同特异性下后者赢，反过来悬停就抬不亮了。
+ */
+.blk[data-collapsed='1'] .fold {
+  opacity: 0.55;
+}
 .blk:hover .fold {
   opacity: 0.9;
 }
@@ -391,6 +403,8 @@
 .blk .marker::before {
   content: '';
   display: block;
+  position: relative;
+  z-index: var(--ui-z-rail);
   width: var(--ui-bullet-size);
   height: var(--ui-bullet-size);
   border-radius: var(--ui-radius-pill);
@@ -404,6 +418,7 @@
 }
 .blk .marker .grip {
   position: absolute;
+  z-index: var(--ui-z-rail);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -418,30 +433,37 @@
 @media (prefers-reduced-motion: reduce) {
   .blk .marker::before,
   .blk .marker .grip,
-  .blk[data-collapsed='1'] .marker::after {
+  .blk .marker::after {
     transition: none;
   }
 }
 /*
- * 已折叠：**明显的环**（2px 实心 tertiary，13px 外径）
+ * 块标的**底盘**：一块 1em 的淡圆盘。折叠态常驻，悬停时任何块标都浮起同一块。
  *
- * ⚠️ 环与抓手抢的是同一块像素：环内径 9px，抓手图标 12px ⇒ 两者同时在场时，
- *    抓手的六个点会压在内缘上（看起来像重影，不是两种状态）。
- *    ⇒ 悬停时**环让位给抓手**：折叠态的可发现性由**静止态**的环承担，
- *      悬停这一刻还有左侧那颗已转 90° 的三角在说「这块是收起的」。
- *    这也是「一个悬停语言」：悬停任何一颗块标，它就变成可拖的把手。
+ * 为什么是圆盘而不是环：环是一圈线，读作「被圈定」（选中／聚焦）；折叠要说的只是
+ * 「这一块里还有东西」。一圈 2px 实线比正文还重，收起的块一多，整屏都在被圈着。
+ * 圆盘只加一层底色 —— 点还是那颗点，状态靠「多了一层底盘 ＋ 常驻的三角」一起读。
+ *
+ * ⚠️ 底盘与抓手**可以同屏**（这正是它与环的分界）：环是一圈线，抓手压上去就是重影；
+ *    底盘只是一块底色，抓手浮在上面反而像一枚按钮。
+ * ⚠️ 层级：底盘在点与抓手**之下**（`--ui-z-plate` 垫底，点与抓手在 `--ui-z-rail`）。
+ *    伪元素 `::after` 天然排在最后，不给它压层级的话，那层半透明底色会盖在点和握手上
+ *    （下发灰、抓手变暗）。
  */
-.blk[data-collapsed='1'] .marker::after {
+.blk .marker::after {
   content: '';
   position: absolute;
-  width: var(--ui-marker-ring-size);
-  height: var(--ui-marker-ring-size);
+  z-index: var(--ui-z-plate);
+  width: var(--ui-marker-halo-size);
+  height: var(--ui-marker-halo-size);
   border-radius: var(--ui-radius-pill);
-  border: var(--ui-marker-ring) solid var(--ui-text-tertiary);
+  background: var(--ui-marker-halo);
+  opacity: 0;
   transition: opacity 120ms ease;
 }
-.blk[data-collapsed='1'] .marker:hover::after {
-  opacity: 0;
+.blk[data-collapsed='1'] .marker::after,
+.blk .marker:hover::after {
+  opacity: 1;
 }
 /* 拖动中：整行变淡（`editor.ts` 加 `.drag-src`） */
 .blk.drag-src {

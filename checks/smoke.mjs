@@ -1302,7 +1302,7 @@ await check('T6 折叠/展开：子树不挂 DOM，模型里 collapsed=true（DO
 
 /* ------------------------------------------------- ：块标 / 折叠 / 导轨 */
 
-await check('T23 gutter 三件：块标与把手合并、三角悬停才现、折叠态有环', async () => {
+await check('T23 gutter 三件：块标与把手合并、三角悬停才现、折叠态浮底盘＋三角常驻', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const r = await page.evaluate(() => {
@@ -1361,20 +1361,35 @@ await check('T23 gutter 三件：块标与把手合并、三角悬停才现、�
     `有身体（查询结果）的行也要有折叠三角：${foldOnLeaf.bodiesWithFold}/${foldOnLeaf.bodyCount}`,
   )
 
-  // 折叠态：**明显的环**（D2 的明文口径：折叠态不能只靠悬停件自明）
+  // 折叠态：**块标浮起一块淡底盘 ＋ 三角常驻**（折叠态不能只靠悬停件自明）
   await page.locator('.blk').first().locator('.fold').click({ force: true })
-  const ring = await page.evaluate(() => {
-    const marker = document.querySelector('#editor .blk[data-collapsed="1"] .marker')
-    const cs = getComputedStyle(marker, '::after')
-    return { width: cs.borderTopWidth, style: cs.borderTopStyle, color: cs.borderTopColor }
+  const collapsed = await page.evaluate(() => {
+    const blk = document.querySelector('#editor .blk[data-collapsed="1"]')
+    const marker = blk.querySelector('.marker')
+    const halo = getComputedStyle(marker, '::after')
+    const fold = getComputedStyle(blk.querySelector('.fold'))
+    const num = (v) => Number.parseFloat(v) || 0
+    return {
+      haloOpacity: num(halo.opacity),
+      haloW: num(halo.width),
+      haloBorder: num(halo.borderTopWidth),
+      haloBg: halo.backgroundColor,
+      foldOpacity: num(fold.opacity),
+    }
   })
-  assert(parseFloat(ring.width) >= 2, `折叠态块标应有 ≥2px 的环（D2），实际 ${ring.width}`)
-  assert(ring.style === 'solid', `环应是实线，实际 ${ring.style}`)
+  assert(collapsed.haloOpacity > 0.9, `折叠态块标应浮起底盘，实际 opacity=${collapsed.haloOpacity}`)
+  assert(collapsed.haloBorder === 0, `底盘不该是环（不该有边框），实际 ${collapsed.haloBorder}px`)
+  assert(collapsed.haloW >= 14, `底盘要铺满块标槽的可用宽度，实际 ${collapsed.haloW}px`)
+  assert(
+    collapsed.haloBg !== 'rgba(0, 0, 0, 0)' && collapsed.haloBg !== 'transparent',
+    `底盘要有底色，实际 ${collapsed.haloBg}`,
+  )
+  assert(collapsed.foldOpacity > 0.4, `折叠态三角应常驻（静息态的可展开提示），实际 opacity=${collapsed.foldOpacity}`)
 
   /*
-   * 悬停折叠块：**环与点让位给抓手**。
-   * 环内径 9px、抓手 12px ⇒ 两者同时在场时抓手的点会压在环的内缘上（叠影，不是两种状态）。
-   * 断言量的是「谁在场」，不是某个像素：环退场、抓手入场、点跟着退场。
+   * 悬停折叠块：**点让位给抓手**，底盘留着。
+   * 底盘与抓手可以同屏（底盘只是底色，压不出重影）；点与抓手不行 —— 两者同中心、同大小，
+   * 同时在场就是一团糊。断言量的是「谁在场」，不是某个像素。
    */
   await page.locator('#editor .blk[data-collapsed="1"] .marker').first().hover()
   await page.waitForTimeout(220) // 让 120ms 的淡入淡出走完
@@ -1382,17 +1397,17 @@ await check('T23 gutter 三件：块标与把手合并、三角悬停才现、�
     const marker = document.querySelector('#editor .blk[data-collapsed="1"] .marker')
     const num = (v) => Number.parseFloat(v) || 0
     return {
-      ring: num(getComputedStyle(marker, '::after').opacity),
+      halo: num(getComputedStyle(marker, '::after').opacity),
       dot: num(getComputedStyle(marker, '::before').opacity),
       grip: num(getComputedStyle(marker.querySelector('.grip')).opacity),
     }
   })
-  assert(hovered.ring < 0.05, `悬停折叠块时环应退场（与抓手塞不进同一块像素），实际 opacity=${hovered.ring}`)
-  assert(hovered.dot < 0.05, `悬停时那颗点也要退场（它与抓手同中心，会变成重影），实际 opacity=${hovered.dot}`)
+  assert(hovered.halo > 0.9, `悬停时底盘应保持（它不与抓手抢像素），实际 opacity=${hovered.halo}`)
+  assert(hovered.dot < 0.05, `悬停时那颗点要退场（它与抓手同中心，会变成重影），实际 opacity=${hovered.dot}`)
   assert(hovered.grip > 0.5, `悬停折叠块时应露出抓手（一个悬停语言），实际 opacity=${hovered.grip}`)
 
   await ctx.close()
-  return `marker=${r.markerClasses}（${r.markerW}）｜三角 absolute/opacity ${r.foldOpacity}｜无子块不生成 .fold（${foldOnLeaf.leafCount} 行）｜折叠态环 ${ring.width} ${ring.style}｜悬停让位 环${hovered.ring}/点${hovered.dot}→抓手${hovered.grip}`
+  return `marker=${r.markerClasses}（${r.markerW}）｜三角 absolute/opacity ${r.foldOpacity}｜无子块不生成 .fold（${foldOnLeaf.leafCount} 行）｜折叠态底盘 ${collapsed.haloW}px/${collapsed.haloBg}＋三角常驻 ${collapsed.foldOpacity}｜悬停让位 点${hovered.dot}→抓手${hovered.grip}（底盘 ${hovered.halo}）`
 })
 
 await check('T24 可点导轨：深度 d 行有 d 段、点第 k 段折该祖先的直接子块（不折自己）、再点展开', async () => {
@@ -9680,13 +9695,13 @@ await check(
  *
  * 事故形状（实机）：点一条竖线 ⇒ 折它的**直接子块**，整组一起写折叠态。
  * 组里那些自己没有子块的成员也被写了 `true` —— 它们没有子树可藏，
- * 块标却画出折叠环（「这里收着东西」），点开什么都没有。
+ * 块标却浮起折叠底盘（「这里收着东西」），点开什么都没有。
  * 而这条记录还会存进设备的折叠表，跟着跑到下一次打开。
  *
- * ⇒ 断言落在**三个面**：折叠表只含有子块的那些、叶子块不画折叠环、再点能完整展开。
+ * ⇒ 断言落在**三个面**：折叠表只含有子块的那些、叶子块不浮折叠底盘、再点能完整展开。
  */
 await check(
-  'T100 点竖线只折「有子块的」成员：叶子块不记折叠、不画折叠环，再点完整展开',
+  'T100 点竖线只折「有子块的」成员：叶子块不记折叠、不浮折叠底盘，再点完整展开',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -9739,28 +9754,29 @@ await check(
     const after = await page.evaluate((s) => {
       const folded = window.__qua.__editor.doc.folded ?? {}
       const has = (id) => folded[id] === true
-      const ringOf = (id) => {
+      // 底盘是「这块收着东西」的唯一常驻提示 ⇒ 判据是它亮没亮，不是有没有这个伪元素
+      const plateOf = (id) => {
         const el = document.querySelector(`#editor .blk[data-block-id="${id}"]`)
         if (!el) return 'missing'
         const cs = getComputedStyle(el.querySelector('.marker'), '::after')
-        return cs.content === 'none' ? 'none' : cs.borderTopWidth
+        return Number.parseFloat(cs.opacity) > 0.9 ? 'on' : 'off'
       }
       return {
-        withKids: s.withKids.map((id) => ({ id: id.slice(-4), folded: has(id), ring: ringOf(id) })),
-        leaves: s.leaves.map((id) => ({ id: id.slice(-4), folded: has(id), ring: ringOf(id) })),
+        withKids: s.withKids.map((id) => ({ id: id.slice(-4), folded: has(id), plate: plateOf(id) })),
+        leaves: s.leaves.map((id) => ({ id: id.slice(-4), folded: has(id), plate: plateOf(id) })),
         foldedCount: Object.keys(folded).length,
       }
     }, shape)
 
-    // ① 有子块的成员：折了，且画了折叠环
+    // ① 有子块的成员：折了，且浮起了底盘
     for (const k of after.withKids) {
       assert(k.folded, `有子块的成员应被折：${JSON.stringify(k)}`)
-      assert(k.ring !== 'none', `折了就该画折叠环：${JSON.stringify(k)}`)
+      assert(k.plate === 'on', `折了就该浮起底盘：${JSON.stringify(k)}`)
     }
-    // ② 叶子成员：不许被记成折叠，也不许画环（它没有子树可藏）
+    // ② 叶子成员：不许被记成折叠，也不许浮底盘（它没有子树可藏）
     for (const l of after.leaves) {
       assert(!l.folded, `叶子块不许被记成折叠（没有子树可藏）：${JSON.stringify(l)}`)
-      assert(l.ring === 'none', `叶子块不许画折叠环（那是「这里收着东西」的承诺）：${JSON.stringify(l)}`)
+      assert(l.plate === 'off', `叶子块不许浮折叠底盘（那是「这里收着东西」的承诺）：${JSON.stringify(l)}`)
     }
     assert(
       after.foldedCount === shape.withKids.length,
@@ -9778,7 +9794,7 @@ await check(
     assert(back.folded === 0, `展开后折叠表应为空：还剩 ${back.folded} 条`)
 
     await ctx.close()
-    return `${shape.withKids.length} 个有子块的成员被折、${shape.leaves.length} 个叶子不记折叠也不画环；再点恢复 ${back.rows} 行`
+    return `${shape.withKids.length} 个有子块的成员被折、${shape.leaves.length} 个叶子不记折叠也不浮底盘；再点恢复 ${back.rows} 行`
   },
 )
 
