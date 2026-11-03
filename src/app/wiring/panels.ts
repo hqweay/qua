@@ -12,6 +12,7 @@ import {
   danglingOf,
   declaredFieldIds,
   derivedColumns,
+  derivedEntriesOf,
   derivedListFields,
   derivedRecordsOf,
   displayNameOf,
@@ -23,19 +24,22 @@ import {
   isJournal,
   isViewRoot,
   journalDate,
+  mountHostKey,
+  mountHostOf,
   mountViewKey,
+  moveDerivedOrder,
   normalizeAlias,
   parentsOf,
   propDisplayLabels,
   propKindOf,
   propLabel,
+  readMountOrder,
   readMountView,
   todayISO,
   type Block,
   type DerivedSource,
   type DerivedViewKind,
   type MountEntry,
-  type MountHost,
   type PropKind,
   type QueryContext,
   type ViewBindingRef,
@@ -678,7 +682,7 @@ export function setupPanels(deps: PanelsDeps) {
    * `outline` 是**删掉这一格**而不是写 `'outline'` —— 「没选过」与「选了默认」不是一回事。
    */
   function setDerivedKind(host: Block, source: DerivedSource, kind: DerivedViewKind): void {
-    const mountHost: MountHost = isJournal(host) ? { kind: 'journal' } : { kind: 'block', blockId: host.id }
+    const mountHost = mountHostOf(host)
     const key = mountViewKey(mountHost, source)
     if (kind === 'outline') delete deps.prefs().mountViews[key]
     else deps.prefs().mountViews[key] = kind
@@ -707,10 +711,12 @@ export function setupPanels(deps: PanelsDeps) {
       onAddTab: (id) => addLocalQueryTab(id),
       // 大纲分支的切换下拉：与视图宿主那条同一个菜单（装配层现画行，这里只给锚点）
       derivedKind: (hostBlock, source) => {
-        const mountHost: MountHost = isJournal(hostBlock) ? { kind: 'journal' } : { kind: 'block', blockId: hostBlock.id }
+        const mountHost = mountHostOf(hostBlock)
         return readMountView(deps.prefs().mountViews, mountHost, source)
       },
       setDerivedKind: (hostBlock, source, kind) => setDerivedKind(hostBlock, source, kind),
+      // 派生栏的顺序：同一份设备状态（`mountOrder`），缺的按规范序补齐
+      derivedOrder: (hostBlock) => readMountOrder(deps.prefs().mountOrder, mountHostOf(hostBlock)),
       onRemoveTab: (mountHost, tabId) => {
         void deps.getRegistry().invoke('core.mount/remove', { host: mountHost, tabId }, 'mount')
         // 摘完当场重排：栏是模型/设备状态里的一格，DOM 不会自己知道
@@ -749,11 +755,25 @@ export function setupPanels(deps: PanelsDeps) {
         // 顺序是那一格数组的顺序 ⇒ 写完整排一次（与摘掉同一条重排路径）
         renderMounts()
       },
+      /**
+       * **派生栏换序**：写设备状态（`Prefs.mountOrder`），不动 `_mounts`。
+       *
+       * `present` 取「宿主类型给的那一组」——不在这一台宿主上的来源（普通块上的成员）
+       * 不参与换位，但它在全序里的槽位被 `moveDerivedOrder` 原样保留。
+       */
+      onMoveDerived: (hostBlock, source, target, place) => {
+        const mountHost = mountHostOf(hostBlock)
+        const stored = readMountOrder(deps.prefs().mountOrder, mountHost)
+        const present = derivedEntriesOf(hostBlock).map((e) => e.source)
+        const next = moveDerivedOrder(stored, present, source, target, place)
+        if (!next) return
+        deps.prefs().mountOrder[mountHostKey(mountHost)] = next
+        deps.scheduleDeviceSave()
+        renderMounts()
+      },
       /** 非大纲那一栏的视图体：local ⇒ 拥有者就是这一栏（配置住在它自己身上） */
       createView: (mountHostBlock, entry) => {
-        const mountHost: MountHost = isJournal(mountHostBlock)
-          ? { kind: 'journal' }
-          : { kind: 'block', blockId: mountHostBlock.id }
+        const mountHost = mountHostOf(mountHostBlock)
         if (entry.kind === 'local') {
           const owner: ViewOwnerRef = { kind: 'tab', host: mountHost, tabId: entry.id }
           return asBody(createView(owner, mountHostBlock))
@@ -815,7 +835,7 @@ export function setupPanels(deps: PanelsDeps) {
   function addLocalQueryTab(hostId: string): void {
     const host = blocks.find(hostId)
     if (!host) return
-    const mountHost: MountHost = isJournal(host) ? { kind: 'journal' } : { kind: 'block', blockId: host.id }
+    const mountHost = mountHostOf(host)
     const before = new Set(owners.entriesOf(mountHost).map((e) => e.id))
     void deps
       .getRegistry()

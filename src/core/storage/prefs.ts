@@ -15,7 +15,7 @@
 import type { SecLayout } from '../query/feed.ts'
 import type { DerivedViewKind } from '../views/view.ts'
 import { DERIVED_VIEW_KINDS } from '../views/view.ts'
-import { canonicalMountEntries, type MountEntry } from '../views/mount.ts'
+import { canonicalMountEntries, DERIVED_SOURCES, isDerivedSource, type DerivedSource, type MountEntry } from '../views/mount.ts'
 import { canonicalDockEntries, dockKey, type DockEntry } from '../views/dock.ts'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
@@ -46,6 +46,16 @@ export interface Prefs {
    * 键的形状见 `mountViewKey`（块宿主带块 id、日记宿主不带）。
    */
   mountViews: Record<string, DerivedViewKind>
+  /**
+   * **派生栏的顺序**（设备状态，与 `mountViews` 同一个家）。
+   *
+   * 键是宿主（`block:<id>` / `journal`），值是四个来源的全序。为什么不像 local 栏那样
+   * 写进 `_mounts`：派生栏没有内容列表，顺序是「这一屏怎么摆」（视图状态），不是内容；
+   * 而且它的看法已经在 `Prefs`，两个呈现面该在同一个家、同一套同步语义里。
+   *
+   * 缺的键＝规范序（`DERIVED_SOURCES`），所以「没拖过」不落一格字节。
+   */
+  mountOrder: Record<string, DerivedSource[]>
   /** 三槽的开关与宽度；入口条已作废 */
   dock: DockPrefs
   virtualize: boolean
@@ -145,6 +155,7 @@ export const DEFAULT_PREFS: Prefs = {
   feedLayout: 'column',
   journalMounts: [],
   mountViews: {},
+  mountOrder: {},
   dock: DEFAULT_DOCK,
   virtualize: false,
   radius: 12,
@@ -232,6 +243,24 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     }
   }
 
+  /**
+   * 派生栏的顺序：**逐项验形，未知值丢掉，缺的按规范序补齐**（存进来的永远是一个全序）。
+   *
+   * 补齐而不是「缺省用规范序、也不落盘」：一条半截的旧格（比如只有 `mentions`）如果原样
+   * 留着，读的时候会把其余来源都追加到末尾——「成员」就跑到最后一栏去了。归一这一层
+   * 直接把全序写死，读路径只负责按它排。
+   */
+  const mountOrder: Record<string, DerivedSource[]> = {}
+  if (p.mountOrder && typeof p.mountOrder === 'object' && !Array.isArray(p.mountOrder)) {
+    for (const [k, v] of Object.entries(p.mountOrder)) {
+      if (typeof k !== 'string' || k === '' || !Array.isArray(v)) continue
+      const order: DerivedSource[] = []
+      for (const s of v) if (isDerivedSource(s) && !order.includes(s)) order.push(s)
+      for (const s of DERIVED_SOURCES) if (!order.includes(s)) order.push(s)
+      mountOrder[k] = order
+    }
+  }
+
   return {
     ...DEFAULT_PREFS,
     ...p,
@@ -240,6 +269,7 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     // 日记面板的栏：逐项重建（坏项丢掉），与 `_mounts` 共用同一份判据
     journalMounts: canonicalMountEntries(p.journalMounts),
     mountViews,
+    mountOrder,
     dock: {
       // `legacyPinned` 只在归一内部用，不进落盘形状
       left: { open: left.open, width: left.width, cards: left.cards },
