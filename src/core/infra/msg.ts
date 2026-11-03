@@ -345,7 +345,11 @@ export const MSG = {
   'ui.mount.empty.refs': '还没有块引用它',
   'ui.mount.empty.members': '还没有块打着这个标签',
   'ui.mount.empty.same': '没有别的块与它共享标签',
+  /** 「同类」这一栏的**维度不存在**（这一块没有 `_tags`）——与「有标签但没同类的块」分开说 */
+  'ui.mount.empty.sameNoTags': '这一块还没有标签',
   'ui.mount.empty.mentions': '还没有块在正文里提到它',
+  /** 「提及」这一栏的**维度不存在**（没有可读文本可查）——不是「没人提到」 */
+  'ui.mount.empty.mentionsNoText': '这一块还没有名字或正文',
   'ui.mount.empty.user': '这个条件没有匹配到块',
   'ui.mount.needsHost': '这个查询需要一个宿主块（条件里的「这一块」指不到别处）',
   'ui.mount.remove': '摘掉这一栏',

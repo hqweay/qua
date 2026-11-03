@@ -18312,6 +18312,115 @@ await check('T221 挂载区的查询栏可以改名：双击 → 输入 → 落�
 })
 
 
+await check('T224 派生栏可拖拽换序：顺序住设备状态、`_mounts` 不动、跨组不接受、重开仍生效', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.evaluate(() => window.__qua.loadState('seed'))
+  await page.waitForTimeout(300)
+  const pageId = await page.evaluate(() => {
+    const p = window.__qua.pages()[0]
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    return p.id
+  })
+  await page.waitForTimeout(450)
+
+  const state = () =>
+    page.evaluate((id) => {
+      const host = window.__qua.__editor.store.find(id)
+      const device = JSON.parse(localStorage.getItem('qua.device') ?? '{}')
+      return {
+        derived: [...document.querySelectorAll('#editor .mount .mount-tabwrap[data-kind="derived"]')].map((w) => w.dataset.tab),
+        mounts: host?.props?._mounts ?? null,
+        order: device?.data?.prefs?.mountOrder?.[`block:${id}`] ?? null,
+      }
+    }, pageId)
+
+  const before = await state()
+  assert(
+    before.derived.includes('refs') && before.derived.includes('mentions'),
+    `前置：普通块的派生栏应有引用与提及：${JSON.stringify(before.derived)}`,
+  )
+
+  /* ① 拖「提及」到「引用」的左半边：DOM 换位，内容不动，顺序落设备状态 */
+  const hover = await page.evaluate(() => {
+    const wraps = [...document.querySelectorAll('#editor .mount .mount-tabwrap[data-kind="derived"]')]
+    const src = wraps.find((w) => w.dataset.tab === 'mentions')
+    const tgt = wraps.find((w) => w.dataset.tab === 'refs')
+    const dt = new DataTransfer()
+    const r = tgt.getBoundingClientRect()
+    const mk = (type, x) =>
+      new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: r.top + r.height / 2 })
+    src.querySelector('.mount-tab').dispatchEvent(mk('dragstart', r.left + 2))
+    tgt.dispatchEvent(mk('dragover', r.left + 2))
+    const marked = { before: tgt.dataset.dropBefore ?? '', after: tgt.dataset.dropAfter ?? '' }
+    tgt.dispatchEvent(mk('drop', r.left + 2))
+    src.querySelector('.mount-tab').dispatchEvent(mk('dragend', r.left + 2))
+    return marked
+  })
+  assert(hover.before === '1' && hover.after === '', `左半边应亮前插入线：${JSON.stringify(hover)}`)
+  await page.waitForTimeout(700)
+
+  const after = await state()
+  assert(after.derived[0] === 'mentions', `提及应排到最前：${JSON.stringify(after.derived)}`)
+  assert(
+    JSON.stringify(after.mounts) === JSON.stringify(before.mounts),
+    `派生栏换序不写内容（_mounts 一个字节不变）：${JSON.stringify({ before: before.mounts, after: after.mounts })}`,
+  )
+  assert(
+    Array.isArray(after.order) && after.order.indexOf('mentions') < after.order.indexOf('refs'),
+    `顺序应落设备状态（提及在引用之前）：${JSON.stringify(after.order)}`,
+  )
+
+  /* ② 加一栏用户查询，再把派生栏拖到它上面：跨组不接受（不亮、不写） */
+  await page.locator('#editor .mount .mount-add').first().click()
+  await page.waitForTimeout(500)
+  const cross = await page.evaluate(() => {
+    const local = document.querySelector('#editor .mount .mount-tabwrap[data-kind="local"]')
+    const src = document.querySelector('#editor .mount .mount-tabwrap[data-tab="refs"]')
+    const dt = new DataTransfer()
+    const r = local.getBoundingClientRect()
+    const mk = (type, x) =>
+      new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: r.top + r.height / 2 })
+    src.querySelector('.mount-tab').dispatchEvent(mk('dragstart', r.left + 2))
+    local.dispatchEvent(mk('dragover', r.left + 2))
+    const marked = { before: local.dataset.dropBefore ?? '', after: local.dataset.dropAfter ?? '' }
+    local.dispatchEvent(mk('drop', r.left + 2))
+    src.querySelector('.mount-tab').dispatchEvent(mk('dragend', r.left + 2))
+    return marked
+  })
+  assert(cross.before === '' && cross.after === '', `派生栏拖到用户栏上不该亮落点：${JSON.stringify(cross)}`)
+  await page.waitForTimeout(400)
+  const unchanged = await state()
+  assert(
+    unchanged.derived[0] === 'mentions' && JSON.stringify(unchanged.order) === JSON.stringify(after.order),
+    '跨组拖动不该改顺序',
+  )
+
+  /* ③ 维度不存在 ≠ 没这一栏：普通块没标签时切到「同类」，body 要说原因 */
+  await page.locator('#editor .mount .mount-tabwrap[data-tab="same"] .mount-tab').click()
+  await page.waitForTimeout(250)
+  const emptyText = await page.evaluate(
+    () => document.querySelector('#editor .mount .mount-empty')?.textContent ?? '',
+  )
+  assert(emptyText === '这一块还没有标签', `没标签时「同类」要说原因（不是「没有结果」）：${JSON.stringify(emptyText)}`)
+
+  /* ④ 重开：顺序来自设备状态，不是只换了 DOM */
+  await page.reload({ waitUntil: 'load' })
+  await page.waitForFunction(() => Boolean(window.__qua), null, { timeout: 10000 })
+  await page.waitForTimeout(600)
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId)
+  await page.waitForTimeout(500)
+  const reopened = await state()
+  assert(
+    JSON.stringify(reopened.derived) === JSON.stringify(after.derived),
+    `重开后顺序应不变：${JSON.stringify(after.derived)} → ${JSON.stringify(reopened.derived)}`,
+  )
+
+  await ctx.close()
+  return `提及拖到引用前 ⇒ DOM 换位；_mounts 一个字节没变；顺序落 Prefs.mountOrder；跨组不接受；重开仍生效`
+})
+
+
 await check('T222 挂载区的查询栏可以拖拽换序：落点亮插入线、松手即换位、拖到自己那格不算', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
