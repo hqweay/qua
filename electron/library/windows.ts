@@ -36,6 +36,11 @@ export interface LibraryManagerDeps {
   /** 读窗口位置记忆（主进程自己的 `window-state.json`） */
   readBounds: () => { x?: number; y?: number; width: number; height: number; maximized?: boolean }
   writeBounds: (win: BrowserWindow) => void
+  /**
+   * 注册表刚落了一次盘（开库／建库都会走到）。
+   * 「最近的库」这类**构建时快照**的消费者靠它重建自己，否则永远停在启动那一刻。
+   */
+  onRegistryChanged?: () => void
 }
 
 export interface OpenedLibrary {
@@ -97,6 +102,7 @@ export class LibraryManager {
 
     // 记「这次打开的是它」，并把名字写回注册表（库名以 manifest/DB 为准，注册表只缓存）
     saveRegistry(this.deps.io, markOpened(loaded.registry, id))
+    this.deps.onRegistryChanged?.()
 
     const win = this.deps.createWindow(id, entry.name)
     this.windows.set(id, win)
@@ -120,6 +126,7 @@ export class LibraryManager {
       id,
     )
     saveRegistry(this.deps.io, next)
+    this.deps.onRegistryChanged?.()
 
     const win = this.deps.createWindow(id, name)
     this.windows.set(id, win)

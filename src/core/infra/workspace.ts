@@ -23,8 +23,15 @@ export { pageDoc, parseWorkspace, WORKSPACE_VERSION } from '../storage/shape.ts'
 export type { ParseResult, Workspace } from '../storage/shape.ts'
 export { createWorkspaceStore, judge, WHOLE_LIBRARY_CHANGES } from '../storage/index.ts'
 export type { LoadedWorkspace, WorkspaceStore } from '../storage/index.ts'
-export { createDeviceStore, DEVICE_KEY } from '../storage/device.ts'
-export type { DeviceSaveResult, DeviceState, DeviceStore } from '../storage/device.ts'
+export { createDeviceStore, createLibrarySettingsPort, DEVICE_KEY, LIBRARY_STATE_KEY } from '../storage/device.ts'
+export type {
+  DeviceSaveResult,
+  DeviceState,
+  DeviceStore,
+  LibrarySettingsPort,
+  LibrarySettingsSource,
+  LibraryState,
+} from '../storage/device.ts'
 export type { Change, ChangeKind, CommitBatch, LoadResult, SaveResult, StoragePort } from '../storage/port.ts'
 export { createLocalStorageAdapter } from '../storage/local-storage.ts'
 

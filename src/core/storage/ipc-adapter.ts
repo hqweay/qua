@@ -45,6 +45,13 @@ export interface LibraryBridge {
    */
   assetIndex(): Promise<unknown>
   assetPut(bytes: ArrayBuffer, mime: string, dims?: { w?: number; h?: number }): Promise<unknown>
+
+  /**
+   * 库的 `settings` 表（跟库走的视图状态住这里）。回复形状归宿主，这里只当不透明值转发。
+   * 这个接口只有桌面宿主会实现（web 宿主根本没有库面），所以是必有格。
+   */
+  getSetting(key: string): Promise<unknown>
+  setSetting(key: string, value: string): Promise<unknown>
 }
 
 export const IPC_BACKEND = 'ipc-library'

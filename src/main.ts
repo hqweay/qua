@@ -69,6 +69,7 @@ import {
 import { createIpcAdapter, type LibraryBridge } from './core/storage/ipc-adapter.ts'
 import {
   createDeviceStore,
+  createLibrarySettingsPort,
   createLocalStorageAdapter,
   createWorkspaceStore,
   DEVICE_KEY,
@@ -118,10 +119,17 @@ const store = createWorkspaceStore(
   LIBRARY_BRIDGE ? createIpcAdapter(LIBRARY_BRIDGE) : createLocalStorageAdapter(STORAGE_KEY),
 )
 /**
- * **设备状态**（偏好）走它自己的键与端口实例：换库不带走它，库作废也不连累它。
+ * **设备状态**（偏好）走它自己的键与端口实例：库作废不连累它。
  * 两个端口各自持有一份写队列 —— 它们的字节落在两个键上，没有共同的写入顺序。
+ *
+ * 归属判据：**引用块 id 或指涉某个库布局的状态跟着库走；纯外观与设备能力留设备。**
+ * 桌面宿主有库面 ⇒ 折叠表／dock／露面视图／日记栏由设备 store 顺手写进**库的 settings 表**，
+ * 两个库各自一份、互不指涉；web 宿主没有库面（单库演示），全部暂住设备键，行为不变。
  */
-const deviceStore = createDeviceStore(createLocalStorageAdapter(DEVICE_KEY))
+const deviceStore = createDeviceStore(
+  createLocalStorageAdapter(DEVICE_KEY),
+  LIBRARY_BRIDGE?.getSetting ? createLibrarySettingsPort(LIBRARY_BRIDGE) : undefined,
+)
 
 /**
  * **资产库**：字节的唯一去处。与内容存储同一条分叉判据（`window.qua` 在不在）：
@@ -1082,8 +1090,10 @@ function swapWorkspace(next: Workspace, save: boolean): void {
    */
   clearPendingOps()
   /**
-   * **折叠态不能带过河**：旧库的块 id 在新库里不存在（或指到另一块），
-   * 留着只会让新库的行莫名其妙地折起来 ⇒ 换库即清空（设备那侧的偏好则保留）。
+   * **折叠态跟库走**（库的 settings 表）：换演示数据＝把这份库的内容整体换掉，
+   * 旧内容的块 id 在新内容里不存在（或指到另一块）⇒ 内存清空并照常落盘，
+   * 新内容从全展开开始。桌面版「切到另一个库」是另一扇窗、各读各的 settings，不经过这里；
+   * 这里只有同一库的演示切换。
    */
   device.folded = {}
   scheduleDeviceSave()
