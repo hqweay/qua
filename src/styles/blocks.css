@@ -1586,10 +1586,19 @@
   min-height: 0;
   height: auto;
 }
+/*
+  露面投影与行内体**同一套面板壳**（外观按类型、chrome 按身份）：查询块的壳是类型的样子，
+  露面改的只是身份标记（空心块标），不该顺手把类型的样子剥掉。投影行自己的正文槽是空的，
+  结果直接混在正文流里——大纲/列表视图下结果行与本页自己的块视觉相同，没有壳就没有
+  「这一团到哪结束」的线索。真镜像（children 源）不经过这里，也不该有壳：它是
+  「那一块就在这里」，加壳反而错。分界线：镜像无壳、投影有壳——与抬头判据同一条分界的两面。
+*/
 .queryview[data-surface='embed'] {
   margin-top: 0;
-  padding-top: 0;
-  border-top: 0;
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  background: var(--ui-surface-sunken);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
   display: flex;
   flex-direction: column;
 }
