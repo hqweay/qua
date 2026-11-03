@@ -205,11 +205,10 @@ export class MemoryKb implements KbClient {
 
   query(
     spec: QuerySpec,
-    opts: { scopeId?: string; selfId?: string; excludeIds?: readonly string[] } = {},
+    opts: { selfId?: string; excludeIds?: readonly string[] } = {},
   ): QueryHit[] {
     // 走索引：ref/tag/journal 查表，判定与顺序与纯函数路径共用一份
     return queryByIndex(this.store.index, this.store.blocks, spec, {
-      anchorId: opts.scopeId,
       selfId: opts.selfId,
       excludeIds: opts.excludeIds,
     })

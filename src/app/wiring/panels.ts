@@ -487,26 +487,24 @@ export function setupPanels(deps: PanelsDeps) {
   const expandedFor = (host: Block): boolean => (isJournal(host) ? journalDate(host) === todayISO() : true)
 
   /**
-   * **求值的上下文**（`$self` 指谁、`subtree` 锚在哪、结果剔除谁）。
+   * **求值的上下文**（`$self` 指谁、结果剔除谁）。
    *
    * 三条规则写在一处，因为它们曾经被塞进同一个 `selfId`：
    *   · 查询块自己**不进**自己的结果（一张「所有任务」的表不该把自己算进去）；
    *   · 挂载宿主**不进**结果（那是位置的性质，不是条件的性质）；
-   *   · `subtree` 的锚点是**它所在的容器**，不是它自己（查询块通常是个叶子）。
+   *   · `$self` 指查询块**所在的容器**，不是它自己（查询块通常是个叶子）。
    */
   const contextFor = (ownerBlockId: string): QueryContext => {
     const container = kb.parentOf(ownerBlockId)
     return {
       selfId: container?.id,
-      scopeId: container?.id,
       excludeIds: [ownerBlockId],
     }
   }
 
-  /** 挂载区里一栏的上下文：宿主是 `$self`，锚点也是宿主 */
+  /** 挂载区里一栏的上下文：宿主就是 `$self` */
   const tabContextFor = (host: Block, targetId?: string): QueryContext => ({
     selfId: host.id,
-    scopeId: host.id,
     excludeIds: targetId ? [host.id, targetId] : [host.id],
   })
 
@@ -521,7 +519,7 @@ export function setupPanels(deps: PanelsDeps) {
    */
   const embedContextFor = (hostId: string, targetId: string): QueryContext => {
     const container = kb.parentOf(hostId)
-    return { selfId: container?.id, scopeId: container?.id, excludeIds: [hostId, targetId] }
+    return { selfId: container?.id, excludeIds: [hostId, targetId] }
   }
 
   /**
@@ -563,11 +561,10 @@ export function setupPanels(deps: PanelsDeps) {
       host: () => blocks.find(hostId) ?? host,
       /**
        * 求值上下文按**拥有者**分：
-       *   · tab 拥有者（local）是挂载表面 ⇒ 锚点＝**宿主块自己**；
-       *     顶层宿主（日记的天、顶层页）没有父块，「锚在父块」会静默变成整库——
-       *     同一栏的大纲分支锚在宿主，两张看法会给出两份结果。
-       *   · 块拥有者（center 查询块）锚在它所在的容器：查询块住在哪一页，
-       *     「这一块之下」就是那一页之下；顶层没有容器 ⇒ 不设锚点（整库）。
+       *   · tab 拥有者（local）是挂载表面 ⇒ `$self`＝**宿主块自己**；
+       *     顶层宿主（日记的天、顶层页）也能当 `$self`，方向条件自己决定往下看多少。
+       *   · 块拥有者（center 查询块）`$self` 指它所在的容器：查询块住在哪一页，
+       *     `{up:{is:$self}}` 就是那一页之下；顶层没有容器 ⇒ `$self` 不可用（无条件即整库）。
        */
       context:
         binding?.kind === 'embed'
@@ -626,7 +623,7 @@ export function setupPanels(deps: PanelsDeps) {
   /**
    * **把一个块的源视图挂进一个容器**（正文行的内联体／侧槽窗口的根视图）。
    *
-   * 与段尾宿主共用全部 deps：上下文仍按拥有者算（`$self`／scope 锚在它的容器），
+   * 与段尾宿主共用全部 deps：上下文仍按拥有者算（`$self` 指它的容器），
    * 配置仍住那一块；`surface` 只决定几何与抬头去重，`source` 决定写事务落在哪台编辑器。
    * 调用方负责生命周期（`ViewHost` 有订阅与自己的编辑器）：
    * 内联体在换 DOM 前 `dispose()`；窗口在拆卡时 `dispose()`。
@@ -788,7 +785,7 @@ export function setupPanels(deps: PanelsDeps) {
       .getRegistry()
       .invoke(
         'core.mount/add-local',
-        { host: mountHost, label: t('ui.mount.localName'), spec: { where: { any: [] } } },
+        { host: mountHost, label: t('ui.mount.localName'), spec: { where: { up: { is: '$self' } } } },
         'mount',
       )
     const added = owners.entriesOf(mountHost).find((e) => !before.has(e.id))

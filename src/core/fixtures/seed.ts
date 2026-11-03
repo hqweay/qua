@@ -194,7 +194,7 @@ export function seedWorkspace(): Workspace {
     { text: '把「引用某段」的 UI 补上', tags: ['任务'], task: false },
     { text: '行内内容边界断言复跑通过', tags: ['任务', '证据'], task: true },
     /**
-     * **查询块**的演示样本：条件＝「本页之下、还没做完的待办」。
+     * **查询块**的演示样本：条件＝「本页之下、还没做完的待办」（`{up:{is:$self}}` ＋ 属性）。
      *
      * ⚠️ 只是**数据侧**（A）：条件写在 `_query` 里，块的正文是它的名字。
      * 结果是**每个表面实例**自己冻结的（内存里，重开重算），不预置 ——
@@ -204,7 +204,18 @@ export function seedWorkspace(): Workspace {
       text: '本页的待办',
       // 三态全部走属性条件（「未完成」＝ 任务状态 ＝ false）：
       // 「有槽未填」与「靠标签声明拿到这一栏」的块也命中，不需要专用原子。
-      props: { _icon: 'lucide:list-filter', _query: { where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } } } },
+      // 「本页之下」显式写成方向条件：范围轴退场后，缺省就是整库。
+      props: {
+        _icon: 'lucide:list-filter',
+        _query: {
+          where: {
+            all: [
+              { prop: { id: TASK_STATUS_PROP_ID, eq: false } },
+              { up: { is: '$self' } },
+            ],
+          },
+        },
+      },
     },
     { text: '关于「假数据」：这一页与别处一样可改；换库只换内容，不改形状。' },
   ])

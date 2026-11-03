@@ -99,7 +99,7 @@ test('身份判据看数据而不看列表值：有列表但没日期不算日�
   assert.equal(hasIdentity(empty), false)
 
   // 形状歪掉的 `_query` 也不是查询块（判据与读条件同源）
-  const badQuery: Block = { id: 'y', text: 'x', children: [], props: { _query: { scope: 'all' } } }
+  const badQuery: Block = { id: 'y', text: 'x', children: [], props: { _query: { where: 'not-a-node' } } }
   assert.equal(isQueryBlock(badQuery), false)
 })
 

@@ -22,7 +22,7 @@ const roundTrip = (spec: QuerySpec): void => {
   assert.equal(JSON.stringify(specOfTree(draft)), JSON.stringify(canonicalSpec(spec)), JSON.stringify(spec))
 }
 
-test('条件树往返：组／非／算子／待办预设／路径／引用都逐字节相等', () => {
+test('条件树往返：组／非／算子／待办预设／路径与方向／引用都逐字节相等', () => {
   const day = { up: { all: [{ role: 'journal' as const }, { prop: { id: '_date', eq: '2026-10-20' } }] } }
   const cases: QuerySpec[] = [
     { where: { tag: '任务' } },
@@ -42,7 +42,7 @@ test('条件树往返：组／非／算子／待办预设／路径／引用都�
     { where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } } },
     { where: { prop: { id: TASK_STATUS_PROP_ID, eq: true } } },
     { where: { prop: { id: TASK_STATUS_PROP_ID, exists: false } } },
-    { where: { all: [{ tag: '任务' }, { prop: { id: 'p-1', eq: false } }] }, scope: 'all', limit: 5 },
+    { where: { all: [{ tag: '任务' }, { prop: { id: 'p-1', eq: false } }] }, limit: 5 },
     { where: { any: [{ tag: '甲' }, { text: '乙' }] }, sort: [{ by: '_date', dir: 'desc' }] },
     { where: { not: { tag: '任务' } } },
     { where: { not: { all: [{ tag: '甲' }, { text: '乙' }] } } },
@@ -52,6 +52,9 @@ test('条件树往返：组／非／算子／待办预设／路径／引用都�
     { where: { all: [{ any: [{ tag: '甲' }] }] } },
     { where: day },
     { where: { up: { is: 'x' } } },
+    { where: { down: { is: 'x' } } },
+    { where: { near: { is: 'x' } } },
+    { where: { all: [{ down: { is: 'x' } }, { near: { is: 'y' } }] } },
     { where: { prop: { id: '_date', eq: '$self' } } },
   ]
   for (const spec of cases) roundTrip(spec)

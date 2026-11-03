@@ -328,7 +328,7 @@ export class QueryTree {
         child.kind === 'group' ? this.groupEl(child, depth + 1, group, i) : this.rowEl(child, group, i),
       )
     }
-    if (depth === 0 && group.items.length === 0) children.append(this.emptyEl(group))
+    if (depth === 0 && group.items.length === 0) children.append(this.emptyEl())
     const add = buttonEl(`＋ ${t('ui.query.tree.add')}`, 'qt-add', 'add')
     add.addEventListener('click', () => {
       this.pickerFor = this.pickerFor === group ? null : group
@@ -394,7 +394,7 @@ export class QueryTree {
     return picker
   }
 
-  private emptyEl(group: TreeGroup): HTMLElement {
+  private emptyEl(): HTMLElement {
     const wrap = document.createElement('div')
     wrap.className = 'qt-empty'
     wrap.dataset.qt = 'empty'
@@ -404,18 +404,7 @@ export class QueryTree {
     const hint = document.createElement('span')
     hint.className = 'qt-empty-hint'
     hint.textContent = t('ui.query.tree.emptyHint')
-    const action = buttonEl(t('ui.query.empty.action'), 'qt-empty-action ui-btn ui-btn--quiet', 'all')
-    action.addEventListener('click', () => {
-      if (!this.draft) return
-      group.mode = 'all'
-      group.not = false
-      group.items = []
-      this.draft.synthesizedRoot = false
-      this.draft.scope = 'all'
-      this.apply()
-      this.paint()
-    })
-    wrap.append(title, hint, action)
+    wrap.append(title, hint)
     return wrap
   }
 
@@ -717,7 +706,12 @@ export class QueryTree {
   }
 
   private refButton(current: string, onPick: (id: string) => void): HTMLElement {
-    const label = current === '' ? t('ui.query.tree.pickBlock') : (this.deps.refLabel?.(current) ?? current)
+    const label =
+      current === ''
+        ? t('ui.query.tree.pickBlock')
+        : current === '$self'
+          ? t('ui.query.tree.selfBlock')
+          : (this.deps.refLabel?.(current) ?? current)
     const b = buttonEl(label, 'qt-value qt-ref', 'ref')
     b.addEventListener('click', () => {
       const owner = this.deps.owner
@@ -748,6 +742,7 @@ export class QueryTree {
         row.by,
         (next) => {
           row.by = next === 'block' ? 'block' : 'journal'
+          if (row.by === 'journal') row.dir = 'up' // 天的形状只有「之上」一个方向
           this.paint()
         },
         'qt-path-by',
@@ -756,11 +751,35 @@ export class QueryTree {
     )
     if (row.by === 'block') {
       out.push(
+        selectEl(
+          [
+            { value: 'up', label: t('ui.query.tree.dirUp') },
+            { value: 'down', label: t('ui.query.tree.dirDown') },
+            { value: 'near', label: t('ui.query.tree.dirNear') },
+          ],
+          row.dir ?? 'up',
+          (next) => {
+            row.dir = next === 'up' ? undefined : (next as 'down' | 'near')
+            this.paint()
+          },
+          'qt-path-dir',
+          'path-dir',
+        ),
+      )
+      out.push(
         this.refButton(row.blockId, (id) => {
           row.blockId = id
           this.paint()
         }),
       )
+      // 「这一块」＝`$self`（宿主／所在容器）：随手查询的锚就住这一格里
+      const self = buttonEl(t('ui.query.tree.selfBlock'), 'qt-value qt-ref', 'ref-self')
+      self.title = t('ui.query.tree.selfHint')
+      self.addEventListener('click', () => {
+        row.blockId = '$self'
+        this.paint()
+      })
+      out.push(self)
       return out
     }
     if (row.date !== '' && !isJournalDate(row.date)) {
@@ -807,25 +826,6 @@ export class QueryTree {
       s.textContent = text
       return s
     }
-
-    const scope = document.createElement('label')
-    scope.className = 'qt-opt'
-    scope.append(labelOf(t('ui.query.builder.scope')))
-    scope.append(
-      selectEl(
-        [
-          { value: 'subtree', label: t('ui.query.builder.scopeSubtree') },
-          { value: 'all', label: t('ui.query.builder.scopeAll') },
-        ],
-        draft.scope,
-        (next) => {
-          draft.scope = next === 'all' ? 'all' : 'subtree'
-        },
-        'qt-scope',
-        'scope',
-      ),
-    )
-    row.append(scope)
 
     const limit = document.createElement('label')
     limit.className = 'qt-opt qt-opt--limit'

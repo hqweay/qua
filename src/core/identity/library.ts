@@ -36,7 +36,7 @@ export const LIBRARY_FORMAT = 1
  * `app.json.version` 判「注册表怎么读」、`WORKSPACE_VERSION` 是当前过渡期的载荷版本 ——
  * 三者都不判「这份数据能不能读」，只有这一格判。
  *
- * 为什么是 4：v1 是过渡形状——`workspace` 表里一整份库 JSON，每次编辑整份覆盖写
+ * 为什么是 8：v1 是过渡形状——`workspace` 表里一整份库 JSON，每次编辑整份覆盖写
  * （写成本随库体量线性增长）。v2 把块拆成 `Block`／`BlockProperty`／`BlockAlias`／`BlockList`
  * 四张表，一次编辑只写它动过的那几块的行。v3 是**日志即状态**：`op_log` 的 op 形状改成
  * 完整、可重放的格写入（`block.exist` 三态、genesis 带 `created`/内容），
@@ -45,12 +45,16 @@ export const LIBRARY_FORMAT = 1
  * 是一次性的 `reindex()`。
  * v5 是**查询条件**的形状变了：`{todo}` 原子退场（三态改由属性条件表达），
  * 库里存的 `_query` 带着它就读不出来了。条件住在内容里 ⇒ 只能连内容一起作废重 seed。
+ * v6 是 `{journal:日期}` 范围原子退场，改由 `{up:{all:[role,_date]}}` 表达；
+ * v7 是挂载区从三态收到两态（linked 退场）；
+ * v8 是 `QuerySpec.scope` 退场——旧 `scope` 会被新读路径静默忽略、从「这一块之下」
+ * 悄悄变成整库，所以同样整份作废重 seed。
  *
  * **不写数据迁移**：原型不做旧数据迁移，旧库作废重 seed（`judgeDbVersion` 判到
  * `migrate` 时跑 `MIGRATIONS` 里那一步**只丢旧形状、不搬数据**的 DDL）。
  * `user_version` 只增不减。
  */
-export const DB_SCHEMA_VERSION = 7
+export const DB_SCHEMA_VERSION = 8
 
 /** `meta` 表里被代码解释的键（其余键归将来，不在这里登记）。 */
 export const META_KEYS = {

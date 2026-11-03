@@ -76,7 +76,7 @@ export function freezeResult(spec: QuerySpec, kb: Pick<KbClient, 'query'>, ctx: 
   return {
     specKey: specKeyOf(spec),
     contextKey: contextKey(ctx),
-    hits: kb.query(spec, { scopeId: ctx.scopeId, selfId: ctx.selfId, excludeIds: ctx.excludeIds }),
+    hits: kb.query(spec, { selfId: ctx.selfId, excludeIds: ctx.excludeIds }),
   }
 }
 
@@ -184,7 +184,6 @@ export function canonicalSpec(spec: QuerySpec): QuerySpec {
     return { role: n.role }
   }
   const out: QuerySpec = { where: node(spec.where) }
-  if (spec.scope) out.scope = spec.scope
   if (spec.sort && spec.sort.length > 0) out.sort = spec.sort.map((k) => ({ by: k.by, dir: k.dir }))
   if (typeof spec.limit === 'number') out.limit = spec.limit
   return out
