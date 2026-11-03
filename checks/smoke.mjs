@@ -18226,6 +18226,92 @@ await check('T219 视图切片：基础条件 ∩ 切片；菜单按名列出并
   return `基础∩切片：${plainCount}→${slicedCount}；菜单按名列出、上行标「切片」；chip 可点；空树应用删键回 2 条；改名/删除都落盘`
 })
 
+await check('T221 挂载区的查询栏可以改名：双击 → 输入 → 落盘；空名字被挡住；块数不变', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.evaluate(() => window.__qua.loadState('seed'))
+  await page.waitForTimeout(300)
+  const pageId = await page.evaluate(() => {
+    const p = window.__qua.pages()[0]
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    return p.id
+  })
+  await page.waitForTimeout(450)
+
+  const before = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
+  await page.locator('#editor .mount .mount-add').first().click()
+  await page.waitForTimeout(450)
+
+  const local = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('#editor .mount .mount-tabwrap[data-kind="local"]')].map((w) => ({
+        key: w.dataset.tab,
+        label: w.querySelector('.mount-tab')?.textContent ?? '',
+        title: w.querySelector('.mount-tab')?.title ?? '',
+      })),
+    )
+  const first = (await local())[0]
+  assert(first?.key, `前置：「＋」应建出一栏 local 查询：${JSON.stringify(first)}`)
+  assert(first.title !== '', `这一栏要有一句「可以双击改名」的提示：${JSON.stringify(first)}`)
+
+  // 双击 ⇒ 贴着这一栏弹输入框，预填当前名字
+  await page.locator(`#editor .mount .mount-tabwrap[data-tab="${first.key}"] .mount-tab`).dblclick()
+  await page.waitForTimeout(300)
+  const prompt0 = await page.evaluate(() => {
+    const input = document.querySelector('[data-name-prompt]')
+    return {
+      open: Boolean(document.querySelector('.popover')),
+      value: input?.value ?? '',
+      anchorNearTab: (() => {
+        const tab = document.querySelector('#editor .mount .mount-tabwrap[data-kind="local"] .mount-tab')
+        const pop = document.querySelector('.popover')
+        if (!tab || !pop) return false
+        const t = tab.getBoundingClientRect()
+        const p = pop.getBoundingClientRect()
+        return Math.abs((p.left + p.right) / 2 - (t.left + t.right) / 2) < t.width + p.width
+      })(),
+    }
+  })
+  assert(prompt0.open, `双击应弹出改名输入框：${JSON.stringify(prompt0)}`)
+  assert(prompt0.value === first.label, `输入框要预填当前名字：${JSON.stringify(prompt0)}`)
+  assert(prompt0.anchorNearTab, `浮层应贴着那一栏（位置回答「改的是哪一个」）：${JSON.stringify(prompt0)}`)
+
+  // 空名字：挡住（浮层留在原地、名字不变）
+  await page.fill('[data-name-prompt]', '   ')
+  await page.locator('.popover button[type="submit"]').click()
+  await page.waitForTimeout(250)
+  const blank = await page.evaluate(() => ({
+    stillOpen: Boolean(document.querySelector('.popover')),
+    label: document.querySelector('#editor .mount .mount-tabwrap[data-kind="local"] .mount-tab')?.textContent ?? '',
+  }))
+  assert(blank.stillOpen && blank.label === first.label, `空名字不许落盘、也不许关掉浮层：${JSON.stringify(blank)}`)
+
+  // 真改名 ⇒ tab 上的字当场变；模型里那一格变；块数不变
+  await page.fill('[data-name-prompt]', '改过的名字')
+  await page.locator('.popover button[type="submit"]').click()
+  await page.waitForTimeout(450)
+  const after = await page.evaluate(({ key, pageId }) => {
+    const host = window.__qua.__editor.store.find(pageId)
+    const entries = host?.props?._mounts ?? []
+    const el = document.querySelector(`#editor .mount .mount-tabwrap[data-tab="${key}"] .mount-tab`)
+    return {
+      label: el?.textContent ?? '',
+      closed: !document.querySelector('.popover'),
+      model: entries.find((e) => e.id === key)?.label ?? '',
+      blocks: window.__qua.snapshot().totalBlocks,
+      keys: entries.map((e) => e.id),
+    }
+  }, { key: first.key, pageId: pageId })
+  assert(after.label === '改过的名字', `tab 上的字要当场变：${JSON.stringify(after)}`)
+  assert(after.closed, `提交后浮层应关掉：${JSON.stringify(after)}`)
+  assert(after.model === '改过的名字', `模型/设备状态里那一格也要变（不是只改 DOM）：${JSON.stringify(after)}`)
+  assert(after.blocks === before, `改名不该让任何块多出或消失：${before} → ${after.blocks}`)
+
+  await ctx.close()
+  return `双击弹框预填「${first.label}」；空名字挡住；改成「${after.label}」当场生效、块数 ${before}`
+})
+
+
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
   await writeFile(REPORT, JSON.stringify({ total: seq, cases: results, known: known.map((r) => r.name) }))

@@ -59,6 +59,7 @@ import { createViewHostEls, ViewHost } from '../../ui/query/query-view.ts'
 import type { Chrome } from '../../ui/chrome/chrome.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import { editorRun } from '../../view/editor/editor-run.ts'
+import { renderNamePrompt } from '../../ui/overlay/panels.ts'
 import type { OwnerStore } from './owners.ts'
 
 export type PanelsDeps = {
@@ -714,6 +715,34 @@ export function setupPanels(deps: PanelsDeps) {
         void deps.getRegistry().invoke('core.mount/remove', { host: mountHost, tabId }, 'mount')
         // 摘完当场重排：栏是模型/设备状态里的一格，DOM 不会自己知道
         renderMounts()
+      },
+      /**
+       * **改名**：浮层贴着那一栏弹，输入框里先填当前名字（改一半能看见原样）。
+       *
+       * 与 `core.view/rename` 同一条形状：输入 → 命令（可撤销、落盘只有一处）→ 当场重排。
+       * 空名字在 `renderNamePrompt` 里就挡住（提交按钮不响应），命令层再挡一次。
+       */
+      onRenameTab: (mountHost, tabId, anchor) => {
+        const cur = owners.entriesOf(mountHost).find((e) => e.id === tabId)
+        if (!cur || cur.kind !== 'local') return
+        layers.openPopover(
+          (box) =>
+            renderNamePrompt(box, {
+              title: t('ui.mount.rename'),
+              value: cur.label,
+              placeholder: t('ui.mount.newTabName'),
+              submitText: t('ui.mount.renameApply'),
+              cancelText: t('ui.mount.renameCancel'),
+              onSubmit: (label) => {
+                layers.closePopover()
+                void deps.getRegistry().invoke('core.mount/rename', { host: mountHost, tabId, label }, 'mount')
+                // 栏名是模型/设备状态里的一格，DOM 不会自己知道（与摘掉同一笔重排）
+                renderMounts()
+              },
+              onCancel: () => layers.closePopover(),
+            }),
+          anchor,
+        )
       },
       /** 非大纲那一栏的视图体：local ⇒ 拥有者就是这一栏（配置住在它自己身上） */
       createView: (mountHostBlock, entry) => {
