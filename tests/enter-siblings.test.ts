@@ -215,3 +215,35 @@ test('Enter 建块不搬 anchors：只加空块，既有块的 id/文本原样',
     assert.match(extra[0]!, /:$/, '多出来的应是空文本块')
   }
 })
+
+/* ---------------- 块首 Enter：原块保 id/正文/子树（多露面在看着这个 id） ---------------- */
+
+test('块首 Enter ⇒ 上方新建**空**块，原块 id/正文/子树一字不动', () => {
+  // 其他露面（镜像/查询结果/反链）按 id 看着这一块；把内容迁到新 id，
+  // 外部视图会落到一个空块上。块首 Enter 的正确形状：新块在上、是空的。
+  const doc = fixture()
+  assert.equal(enterKind(doc, 'a1', 0), 'split', '块首也是 split（左半为空 ⇒ 上方空块）')
+  const r = splitBlockBefore(doc, 'a1', 0)!
+  assert.equal(r.kept, 'a1', '原块保 id')
+  assert.equal(r.inserted !== 'a1', true, '新块是新 id')
+  const loc = locate(doc, 'a1')!
+  assert.equal(plainText(loc.block.content), 'a1', '原块正文不动')
+  assert.equal(loc.block.children[0]!.id, 'a11', '原块子树不动')
+  const above = locate(doc, r.inserted)!
+  assert.equal(plainText(above.block.content), '', '新块是空块')
+  assert.equal(above.parent!.id, 'a', '新块与原块同级，在上方')
+  assert.equal(above.index, locate(doc, 'a1')!.index - 1, '新块紧贴在原块之前')
+})
+
+test('section 根的块首 Enter ⇒ 只插空的首子块，根 id/正文不动', () => {
+  // 根的正文是名字/投影（页/日记），不能被搬空；调用方（editor.split）在块首
+  // 走「插空首子块」。core 侧的契约：offset=0 的拆分拒绝执行。
+  const doc = fixture()
+  assert.equal(splitBlockIntoFirstChild(doc, 'a', 0), null, 'offset=0 不许把根文本搬进子块')
+  // editor.split 对根不走 enterKind：parent === null 的分支在块首插**空的首子块**
+  // 模拟 editor.split 的根分支：插一个空首子块
+  const c = insertFirstChild(doc, 'a')!
+  assert.equal(plainText(doc.roots[0]!.content), 'abc', '根正文不动')
+  assert.equal(plainText(c.content), '', '新块是空的首子块')
+  assert.equal(doc.roots[0]!.children[1]!.id, 'a1', '既有首子块顺次后移且不丢')
+})
