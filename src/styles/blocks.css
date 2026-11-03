@@ -1565,20 +1565,26 @@
 .blk .marker.marker-query:hover .marker-ico {
   opacity: 0;
 }
-/* 投影（源的结果视图）：高度由 `VIEW_BODY_H` 声明（`view/block-dom.ts` 写自定义属性），
-   与正文行内体读同一个数 —— 视觉与虚拟化各算一遍，滚动条就会系统性偏小。
-   镜像（那棵子树）是内容高，不写这一格。 */
+/* 投影（源的结果视图）：高度与正文行内体同一条口径——**内容高，封顶一档**。
+   定高会让短结果也先占满 168（空白），聚焦再跳到 320（视觉弹一下）；改成 max-height 后，
+   装得下就按内容高，装不下才封顶内滚。虚拟化占位仍按 rest 上限估（窗口外的行量不到内容）。 */
 .blk-embed-body[data-embed-body='view'] {
-  height: var(--view-body-rest);
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  max-height: var(--view-body-rest);
   min-height: 0;
   overflow: hidden;
 }
-/* 聚焦档：与行内体同一条 `:focus-within` 口径（纯 CSS，不进库、不进撤销） */
+/* 聚焦档：与行内体同一条 `:focus-within` 口径（纯 CSS，不进库、不进撤销）。
+   抬的是**上限**，不是高度：短结果点进去不变。 */
 .blk-embed-body[data-embed-body='view']:focus-within {
-  height: var(--view-body-focus);
+  max-height: var(--view-body-focus);
 }
-.blk-embed-body > .queryview {
-  height: 100%;
+.blk-embed-body[data-embed-body='view'] > .queryview {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
 }
 .queryview[data-surface='embed'] {
   margin-top: 0;

@@ -15,7 +15,6 @@ import {
   hasLiveChildren,
   isDeleted,
   liveChildren,
-  isJournalBlock,
   isPropDefBlock,
   isQueryBlock,
   mkBlock,
@@ -516,22 +515,24 @@ export function mergeIntoPrev(doc: Doc, id: string): { kept: string; removed: st
  *
  * 场景：用户插了一条分割线，光标落在它下面的空块里，按退格想删掉那条线。
  * 上面那条合并不成立（前一块没有可写的正文），于是什么都不发生 —— 而用户的意图
- * 明确得不能再明确：删掉刚插进来的那条线。
+ * 明确得不能再明确：删掉刚插进来的那一块。
  *
- * 判据是**两块都空**：
+ * 判据是**两块都空**，且前一块**声明了**「可以被邻块退格删掉」：
  *   · 前一块的正文真的是空的（不是「正文在别处」）；
- *   · 当前块也是空的（非空时删前一块会把用户的字一起带走）。
+ *   · 当前块也是空的（非空时删前一块会把用户的字一起带走）；
+ *   · 前一块的类型声明了 `deleteOnBackspace` —— 只有占位型块（分割线）该开。
+ *     ⚠️ 「空 + 只读」不够：露面与查询块正好长这样，但它们删掉会丢掉一次露面/整个查询。
  *
  * ⚠️ **日记的日期行不在这一支**：它的正文恒空，但「内容」是 `_date` 的投影 ——
- *    那是「正文在别处」，不是「没有正文」。退格在日期行上仍然什么都不发生。
- *    区分两者的正是 `isJournalBlock`：它的只读来自投影，而占位型块的只读来自类型声明。
+ *    那是「正文在别处」，不是「没有正文」。日期行也不声明这个能力。
  */
 export function prevPlaceholder(doc: Doc, id: string): { removed: string } | null {
   const loc = locate(doc, id)
   if (!loc || !isEmptyContent(loc.block.content)) return null
   const prev = prevBlock(doc, id)
   if (!prev) return null
-  if (!isEmptyContent(prev.content) || isJournalBlock(prev) || canWriteText(prev)) return null
+  if (!isEmptyContent(prev.content)) return null
+  if (typeDeclOf(prev).deleteOnBackspace !== true) return null
   return { removed: prev.id }
 }
 
@@ -745,6 +746,23 @@ export function siblingMove(doc: Doc, id: string, delta: -1 | 1): MovePlan | nul
 export function moveSibling(doc: Doc, id: string, delta: -1 | 1): boolean {
   const plan = siblingMove(doc, id, delta)
   return plan ? applyMove(doc, id, plan) : false
+}
+
+/**
+ * 结构移动的落点是否还在**这一份装载的文档**之内。
+ *
+ * 查询结果/镜像的 `doc.roots` 是**结果集**（命中／源块），不是整片森林：
+ *   · 根本身不能搬（根列表是派生的，搬走/缩进/换位都会改变结果集）；
+ *   · 落点必须能在本视图里找到（反缩进到根的父亲、移动到窗口外都会在这里失败）。
+ *
+ * 纯判据，不碰 DOM：编辑器在 `structuralScope === 'roots'` 时用它把门，
+ * 命令层与拖拽共用同一个答案。
+ */
+export function moveStaysInside(doc: Doc, id: string, plan: MovePlan): boolean {
+  const loc = locate(doc, id)
+  if (!loc || loc.parent === null) return false
+  if (plan.parentId === null) return false
+  return locate(doc, plan.parentId) !== null
 }
 
 /** 复制块（含子树）：返回新块 id */

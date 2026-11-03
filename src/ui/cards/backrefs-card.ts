@@ -69,6 +69,8 @@ export class BackrefsCard {
       store: deps.store,
       write: deps.write,
       load: (ed, ids) => this.load(ed, ids),
+      // 反链的行是别处的块：根不能搬/并出这一栏（那会改到它真正的落点）
+      structuralScope: 'roots',
       wire: deps.wire,
       onChange: deps.onChange,
       onFocus: deps.onFocus,

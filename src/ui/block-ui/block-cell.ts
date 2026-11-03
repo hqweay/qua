@@ -17,6 +17,7 @@ import { plainLen } from '../../core/model/runs.ts'
 import type { Block, BlockStore, OpenPlace } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { EditableBlock } from './editable-block.ts'
+import { inputSession } from '../../view/editor/input-session.ts'
 import type { Run, BlockEditor } from '../../view/editor/editor.ts'
 import { offsetIn } from '../../view/editor/dom-text.ts'
 
@@ -194,6 +195,12 @@ export class BlockCell {
     // 贴在格子上（fixed ⇒ 不参与布局、行高不变）
     this.place(cell, root)
     document.body.appendChild(root)
+    /**
+     * **浮层的锚点是格子，不是浮层自己**：浮层挂在 body 上，父编辑器看不见它；
+     * 只有把「它覆盖的那一格」登记进输入会话，父编辑器才会在打字期间钉住这一行。
+     * 必须在 `host.focus()` 之前设：focusin 会立刻 `start`，那时要已经知道锚点。
+     */
+    inputSession.setOverlayAnchor(cell)
 
     const island = new EditableBlock({
       host,
@@ -202,6 +209,8 @@ export class BlockCell {
       // 只装这一块：它的 children 不归这里画（它们本来就不在表里）
       initialRoots: [block],
       viewRootId: blockId,
+      // 一格 = 一块：根只在这里编辑正文，不参与结果集/兄弟序
+      structuralScope: 'roots',
       // 编辑器自己跟随 store 时会把正在打的字换掉；这里只由本组件决定「何时重装」——
       // 而浮层的寿命只有一次编辑，根本不需要重装
       load: () => {},
@@ -223,6 +232,8 @@ export class BlockCell {
      * （实测：浮层开着，字母进了正文那一行）。
      */
     host.focus()
+    // focusin 已经会 start；这里显式再落一次，防「先 focus 后挂锚点」的顺序问题
+    inputSession.start(ed, cell)
     const textEl = host.querySelector<HTMLElement>(`.blk[data-block-id="${blockId}"] > .tx`)
     const off = point && textEl ? this.offsetAt(textEl, point) : plainLen(block.content)
     ed.placeCaret(blockId, off)
@@ -324,10 +335,14 @@ export class BlockCell {
 
   private close(): void {
     const cur = this.overlay
+    const anchor = this.anchorEl
     this.overlay = null
     this.paintAnchor(false)
     this.anchorEl = null
+    inputSession.clearOverlayAnchor(anchor ?? undefined)
     if (!cur) return
+    const ed = cur.island.ed
+    if (ed) inputSession.end(ed)
     cur.island.dispose()
     cur.root.remove()
   }

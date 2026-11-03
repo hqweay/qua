@@ -40,6 +40,7 @@ import {
   deleteBlockSpan,
   detectTrigger,
   mergeIntoPrevPlan,
+  moveStaysInside,
   prevPlaceholder,
   hasTag,
   hasLiveChildren,
@@ -96,6 +97,7 @@ import {
   type VisibleRow,
 } from '../../core/index.ts'
 import { resolveRef } from '../../core/relations/ref.ts'
+import { inputSession } from './input-session.ts'
 import {
   clearMarks as clearRunsMarks,
   fromProjection,
@@ -231,6 +233,19 @@ export interface ViewOpts {
   /** 是否允许删除 section 根；反链视图设为 false（删源块走命令面） */
   allowRootRemove?: boolean
   /**
+   * **结构动作能在哪一层寻址**（默认 `'document'`）。
+   *
+   * `'roots'`：这一屏的 `doc.roots` 是**结果集**（查询命中、镜像源）。每一棵根子树
+   * 内部照常可编辑（改字、建子块、删子块），但**根的列表本身是派生的**：
+   *   · 根不能被行首退格并进上一行（那会跨结果行合并，改坏数据）；
+   *   · 根不能被缩进／反缩进／上下换位（那会把结果行搬出可见集）；
+   *   · 移动的落点必须仍在当前 scope 内（窗口里 `locate` 得到）。
+   *
+   * 这不是「只读投影」：根自己的正文、属性、整棵子树都照常编辑 —— 只是不能把
+   * 「结果里有哪几行」当成可编辑的容器。
+   */
+  structuralScope?: 'document' | 'roots'
+  /**
    * 是否跟随共享 store **自动重载**（默认 true）。
    *
    * 槽里的钉住块要自己控制节奏：外部每次 store 变化都重画会让侧槽跟着正文每个按键抖动，
@@ -275,7 +290,7 @@ export interface ViewOpts {
 
 export interface ViewEvents {
   /** 任何模型变化（持久化 + 角标刷新）。格式/原子改动也是内容改动 ⇒ 归 `text` */
-  change?: (kind: 'text' | 'struct' | 'load') => void
+  change?: (kind: 'text' | 'struct' | 'view' | 'load') => void
   /** 光标前是不是在敲一个触发词（`/`／`#`／`@`）；`null` ＝ 这一段已经结束 */
   triggerQuery?: (hit: TriggerQuery | null, rect: DOMRect) => void
   /**
@@ -503,6 +518,8 @@ export class BlockEditor {
   blankArea: HTMLElement
   private allowBlankCreate: boolean
   private allowRootRemove: boolean
+  /** 结构动作的可寻址层（见 `ViewOpts.structuralScope`） */
+  private structuralScope: 'document' | 'roots'
   /** 段的排列（视图配置；`data-layout` 供 CSS 选择，见 `setLayout`）；装配层按它挡住只属单列的行为 */
   private _layout: SecLayout = 'column'
   /** 复盘的空天格子（纯视图兜底，不进库）；换页／换形态即清空 */
@@ -538,6 +555,7 @@ export class BlockEditor {
     this.blankArea = o.blankArea ?? o.container
     this.allowBlankCreate = o.allowBlankCreate !== false
     this.allowRootRemove = o.allowRootRemove !== false
+    this.structuralScope = o.structuralScope ?? 'document'
     // 写入口顺手作废那张派生表：标签声明／定义 kind 变了，下一次 `todoOf` 要重算
     this.write = (fn, source, opts) => {
       this.fieldTableCache = null
@@ -578,7 +596,7 @@ export class BlockEditor {
              * 里层编辑岛里的事，但只换那一行不碰结构。组合期例外——连那一行也不换
              * （输入法的预编辑串挂在它的文本节点上）。
              */
-            if (!this.probe.isComposing && this.reloader.frozen() && ids && ids.length > 0) {
+            if (!this.probe.isComposing && !inputSession.isComposing && this.reloader.frozen() && ids && ids.length > 0) {
               for (const id of ids) this.renderBlock(id)
             }
             this.reloader.touch(ids)
@@ -656,7 +674,7 @@ export class BlockEditor {
      * 其余冻结情形可以按 id 换那几行，结构重排记成欠账。
      */
     if (this.reloader.frozen()) {
-      if (!this.probe.isComposing && ids && ids.length > 0) for (const id of ids) this.renderBlock(id)
+      if (!this.probe.isComposing && !inputSession.isComposing && ids && ids.length > 0) for (const id of ids) this.renderBlock(id)
       this.reloader.touch()
       return
     }
@@ -717,6 +735,17 @@ export class BlockEditor {
    * 它可以随时重排，否则别的视图每改一次，正文就停在旧形状。
    */
   private nestedEditorActive(): boolean {
+    /**
+     * 自己的输入不算「里层」：本实例正在打字时，别的视图的变化该按 id 更新别的行，
+     * 整屏冻结会让正文停在旧形状。
+     */
+    if (inputSession.editor === this) return false
+    /**
+     * **浮层的锚点也算「有人在这」**：编辑浮层挂在 `document.body` 上，
+     * `container.contains(activeElement)` 对它恒为 false；不看锚点，父编辑器就会在
+     * 打一个字时重排整片，把浮层依附的那一行换掉。
+     */
+    if (inputSession.isAnchorInside(this.container)) return true
     const active = document.activeElement as HTMLElement | null
     if (!active || active === this.container) return false
     if (!this.container.contains(active)) return false
@@ -760,7 +789,7 @@ export class BlockEditor {
    * @returns `true` ＝ 已经记下「欠一次」，调用方**必须跳过这次换 DOM**。
    */
   private deferWhileComposing(): boolean {
-    if (!this.probe.isComposing) return false
+    if (!this.probe.isComposing && !inputSession.isComposing) return false
     this.reloader.touch()
     return true
   }
@@ -987,7 +1016,7 @@ export class BlockEditor {
    *            订阅方必须容忍 `ids === undefined`（那就是「不知道，按整体处理」）。
    */
   /** 协作对象（块选区删块）也要广播同一件事；对外仍是编辑器的口径 */
-  emitChange(kind: 'text' | 'struct' | 'load', ids?: readonly string[]): void {
+  emitChange(kind: 'text' | 'struct' | 'view' | 'load', ids?: readonly string[]): void {
     /**
      * ⚠️ **这里不发通知**：宣布者是事务的出口（`Kb.tx` → `store.apply`），
      * 它知道「变了哪几格」并能按 op 增量修补索引。
@@ -1246,7 +1275,7 @@ export class BlockEditor {
    * 所以那不是「有人在这」——判成冻结的话，别的视图每改一次，正文就停在旧形状。
    */
   private readonly reloader = new ReloadPolicy({
-    frozen: () => this.nestedEditorActive() || this.probe.isComposing,
+    frozen: () => this.nestedEditorActive() || this.probe.isComposing || inputSession.isComposing,
     debounceMs: 0,
     onReload: (ids) => this.reloadFromStore(true, ids),
   })
@@ -1975,6 +2004,16 @@ export class BlockEditor {
     const r = normSel(this.doc, s)
     if (r.startBlock !== r.endBlock) return false
     if (s.aOff !== 0 || s.hOff !== 0) return false
+    /**
+     * **根块的行首退格没有「上一块」**：`doc.roots` 是这一屏的边界，不是整片森林。
+     * 放它进 `mergeBack` 会让「第 2 个结果行」并进「第 1 个结果行的最后一个后代」——
+     * 跨结果行合并，正文被搬到另一棵子树里，而用户只按了一次退格。
+     *
+     * 判据是「这一块在**本视图**里是不是根」，不是「它在森林里有没有上一块」：
+     * 镜像的源块、查询命中、feed 里第二天，都在本视图里是根，退格只该吃掉。
+     */
+    const loc = locate(this.doc, s.aBlock)
+    if (!loc || loc.parent === null) return true
     const all = flatten(this.doc)
     const i = all.findIndex((x) => x.id === s.aBlock)
     /**
@@ -2005,6 +2044,17 @@ export class BlockEditor {
   }
 
   /**
+   * 这一笔结构移动的落点还在不在本视图的可寻址范围内。
+   *
+   * `structuralScope === 'document'` 时全放行（正文/页的真实位置）。
+   * `'roots'`（查询结果、镜像）时由 `moveStaysInside` 回答：根不搬、落点不出窗口。
+   */
+  private scopeAllowsMove(id: string, plan: MovePlan): boolean {
+    if (this.structuralScope !== 'roots') return true
+    return moveStaysInside(this.doc, id, plan)
+  }
+
+  /**
    * 结构移动的**统一落点管道**（缩进 / 反缩进 / 上下换位 / 拖拽）。
    *
    * 落点由 `core/tree.ts` 的 `*Move` 算（一个真相），这里只决定**谁来写**：
@@ -2023,6 +2073,7 @@ export class BlockEditor {
     o: { unfoldId?: string | null; caretAt?: { id: string; off: number } } = {},
   ): void {
     if (!plan) return
+    if (!this.scopeAllowsMove(id, plan)) return
     const before = this.snap()
     this.write((tx) => {
       tx.move(id, plan.parentId, plan.index)
@@ -2036,6 +2087,11 @@ export class BlockEditor {
   duplicate(id: string): string | null {
     const loc = locate(this.doc, id)
     if (!loc) return null
+    /**
+     * 结果集/镜像的根是派生的：复制根会插到窗口顶上（`parentId: null`），
+     * 那是一个刷新就消失的位置。根要复制，走源位置。
+     */
+    if (this.structuralScope === 'roots' && loc.parent === null) return null
     const before = this.snap()
     // 克隆自带内容（原子已换新 id——复制的是内容不是身份），没有第二份锚点要搬
     const { block } = cloneSubtree(loc.block)
@@ -2162,11 +2218,11 @@ export class BlockEditor {
      */
     if (bodyOnly) {
       this.paintFold(id)
-      this.emitChange('struct')
+      this.emitChange('view')
       return
     }
     this.renderAll()
-    this.emitChange('struct')
+    this.emitChange('view')
   }
 
   /** 把折叠态画到**已经挂着**的那一行上（不重建 DOM；查询身体折叠走这里） */
@@ -2199,7 +2255,7 @@ export class BlockEditor {
   toggleChildrenCollapse(id: string): void {
     if (toggleChildrenCollapsed(this.doc, id) === null) return
     this.renderAll()
-    this.emitChange('struct')
+    this.emitChange('view')
   }
 
   /**
@@ -3160,6 +3216,7 @@ export class BlockEditor {
         const was = this.probe.isComposing
         if (step === 'start') this.probe.isComposing = true
         if (step === 'end') this.probe.isComposing = false
+        if (step === 'start' || step === 'end') inputSession.noteComposition(this, step === 'start')
         this.probe.compositionSeq.push(step)
         /**
          * **组合结束 ⇒ 把欠下的那次重排补上。**

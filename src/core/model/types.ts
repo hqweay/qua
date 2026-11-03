@@ -49,6 +49,14 @@ export interface TypeDecl {
    * 现在全是 `false`；多行是给将来的代码块留的能力位。
    */
   multiline?: boolean
+  /**
+   * **在紧跟其后的空块行首按退格时，允许把这一块删掉。**
+   *
+   * 「正文空 + 只读」是**形状**，不是许可：露面与查询块正好长这样，但它们不是
+   * 「插入时补的那个光标位」的配对物，删掉会静默丢掉一次露面/一整个查询。
+   * 所以删除能力按类型显式声明，默认没有。
+   */
+  deleteOnBackspace?: boolean
 }
 
 /** 分割线的类型 id：出现在声明表、插入入口与渲染绑定三处，只写一份 */
@@ -62,7 +70,7 @@ export const DIVIDER_TYPE = 'core/divider'
  */
 export const TYPE_DECLS: Record<string, TypeDecl> = {
   [DEFAULT_BLOCK_TYPE]: { id: DEFAULT_BLOCK_TYPE, children: 'content', text: 'editable' },
-  [DIVIDER_TYPE]: { id: DIVIDER_TYPE, children: 'none', text: 'readonly' },
+  [DIVIDER_TYPE]: { id: DIVIDER_TYPE, children: 'none', text: 'readonly', deleteOnBackspace: true },
   /**
    * **露面块**（镜像／投影）：它自己不写正文、不能有子块。
    *

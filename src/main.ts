@@ -14,6 +14,7 @@ import { BlockStore } from './core/model/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
 import type { Op } from './core/kb/types.ts'
 import { BlockEditor, type ViewEvents } from './view/editor/editor.ts'
+import { inputSession } from './view/editor/input-session.ts'
 import { editorRun } from './view/editor/editor-run.ts'
 import { fillBlockText } from './view/editor/block-dom.ts'
 import {
@@ -1941,6 +1942,7 @@ mainEd = ed
 editorEl.addEventListener('focusin', () => {
   if (!mainEd.ownFocus()) return
   ed = mainEd
+  inputSession.start(mainEd)
 })
 
 /**
@@ -2049,7 +2051,7 @@ function viewEvents(
         onFocus: (next) => {
           ed = next
         },
-        onChange: (kind) => change?.(kind as 'text' | 'struct' | 'load'),
+        onChange: (kind) => change?.(kind as 'text' | 'struct' | 'view' | 'load'),
         // 投影＝同一台 ViewHost（surface 'embed'），绑定的是**这一次露面**
         mountView: (hostBlock, target, el) => {
           const vh = panels.mountEmbedView(hostBlock, target, el, active)

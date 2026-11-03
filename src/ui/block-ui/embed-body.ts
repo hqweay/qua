@@ -138,6 +138,8 @@ function mountMirror(target: Block, into: HTMLElement, deps: EmbedBodyDeps): () 
     initialRoots: [target],
     // 深度 1：这一份装载里不再展开露面块（构造性截断）
     embedBodies: false,
+    // 镜像的根是源块：根不能搬/并出这棵子树（外层兄弟不在这一屏里）
+    structuralScope: 'roots',
     load,
     wire: deps.wire,
     onChange: deps.onChange,

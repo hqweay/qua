@@ -2874,7 +2874,28 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
   assert(a.count.includes('1'), `锚在源所在的页 ⇒ ${a.count}`)
   assert(a.tabs.join() === '看法', `投影只有一颗「看法」，不是 tab 条（tab 会写源、连坐所有跟随者）：${JSON.stringify(a.tabs)}`)
   assert(a.chips === true, `投影不画条件条（那一行占一扇 168px 的窗太贵，条件属于源块）：${JSON.stringify(a.chips)}`)
-  assert(a.height.includes('168'), `投影高度由 VIEW_BODY_H 声明（视觉与虚拟化同一个数）：${a.height}`)
+  const shortH = Number.parseFloat(a.height)
+  assert(shortH > 0 && shortH <= 168, `短结果的投影按内容高、不预留空白：${a.height}`)
+
+  // ①b 聚焦短结果：上限抬了，但内容装得下 ⇒ 高度不跳（修「点进去弹一下」）
+  const firstRow = await page.evaluate(() => {
+    const tx = document.querySelector('.blk[data-embed="1"] .queryview-editor .blk .tx')
+    if (!tx) return null
+    const r = tx.getBoundingClientRect()
+    return { x: r.left + 4, y: r.top + r.height / 2 }
+  })
+  assert(firstRow, '投影大纲里有可点的一行')
+  await page.mouse.click(firstRow.x, firstRow.y)
+  await page.waitForTimeout(80)
+  const focused = await page.evaluate(() => {
+    const body = document.querySelector('.blk[data-embed="1"] .blk-embed-body')
+    return { height: body ? getComputedStyle(body).height : '', inBody: body?.matches(':focus-within') ?? false }
+  })
+  assert(focused.inBody, '点进投影的大纲，焦点确实在身体里')
+  assert(
+    Math.abs(Number.parseFloat(focused.height) - shortH) <= 1,
+    `短结果聚焦不跳高（上限抬了、高度不变）：${a.height} → ${focused.height}`,
+  )
 
   // ② 跟随源：源建一张表格并激活 ⇒ 露面当场跟着换（同一台 ViewHost 自己订阅）
   await page.evaluate((id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'table' }), qid)
@@ -2883,6 +2904,42 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
   assert(b.table, `跟随源：源激活表格后这一处也成了表格：${JSON.stringify(b)}`)
   const pinned = await activeViewOf(qid)
   assert(pinned !== '', `推给露面看一根指针之前，源要先有一张激活视图：${pinned}`)
+
+  // ②b 表格单元格浮层：打一个字不能把它撑掉（浮层挂在 body 上，父编辑器看不见它）
+  const cell = page.locator('.blk[data-embed="1"] .tv-row .tv-title-inner').first()
+  assert((await cell.count()) > 0, '投影的表格里有标题格可点')
+  await cell.click()
+  await page.waitForTimeout(150)
+  const cellOpen = await page.evaluate(() => {
+    const box = document.querySelector('.tv-edit')
+    return { open: Boolean(box), focus: Boolean(box?.contains(document.activeElement)) }
+  })
+  assert(cellOpen.open && cellOpen.focus, `表格单元格浮层打开且焦点在里面：${JSON.stringify(cellOpen)}`)
+  await page.keyboard.type('K')
+  await page.waitForTimeout(250)
+  const cellAfter = await page.evaluate(() => {
+    const box = document.querySelector('.tv-edit')
+    const id = box?.dataset.blockId ?? ''
+    const walk = (l) => {
+      for (const x of l) {
+        if (x.id === id) return x
+        const r = walk(x.children ?? [])
+        if (r) return r
+      }
+      return null
+    }
+    const b = id ? walk(window.__qua.__editor.store.blocks) : null
+    return {
+      open: Boolean(box),
+      focusInside: Boolean(box?.contains(document.activeElement)),
+      text: b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '',
+    }
+  })
+  assert(cellAfter.open, `打一个字浮层仍在（父编辑器没有整片重排）：${JSON.stringify(cellAfter)}`)
+  assert(cellAfter.focusInside, '打完字焦点仍在浮层里')
+  assert(cellAfter.text.includes('K'), `字进了模型：${cellAfter.text.slice(0, 20)}`)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
 
   // ③ 把这一处**钉**在大纲：源仍是表格，这一处回命中大纲 —— 一次选择写的是指针
   await page.evaluate((eid) => window.__qua.invoke('core.embed/set-view', { blockId: eid, view: 'outline' }), a.id)
@@ -18563,6 +18620,94 @@ await check('T223 查询块自身的文本（标题）可输入、可持久：�
 
   await ctx.close()
   return `查询块打字 ⇒ 跨防抖＋切页重画后模型与 DOM 都是「查询标题」；重开仍在`
+})
+
+await check('T225 嵌入的查询大纲里：组合期不换承载行；提交不漂、无残留预编辑', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await page.evaluate(() => {
+    let found = ''
+    const walk = (b) => {
+      if (b.props?._query) return b.id
+      for (const c of b.children) {
+        const r = walk(c)
+        if (r) return r
+      }
+      return null
+    }
+    for (const b of window.__qua.__editor.store.blocks) {
+      const r = walk(b)
+      if (r) {
+        found = r
+        break
+      }
+    }
+    return found
+  })
+  assert(qid, '前置：种子库里有查询块')
+  await page.evaluate((id) => {
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    const first = window.__qua.__editor.doc.roots[0]
+    window.__qua.invoke('core.embed/insert', { blockId: first.id, targetId: id, view: 'mirror' })
+  }, qid)
+  await page.waitForTimeout(450)
+
+  const row = await page.evaluate(() => {
+    const tx = document.querySelector('.blk[data-embed="1"] .queryview-editor .blk .tx')
+    const blk = tx?.closest('.blk')
+    if (!tx || !blk) return null
+    const r = tx.getBoundingClientRect()
+    return { id: blk.dataset.blockId, x: r.left + 8, y: r.top + r.height / 2 }
+  })
+  assert(row, '嵌入的查询大纲里有可写的一行')
+  await page.mouse.click(row.x, row.y)
+  await page.waitForTimeout(200)
+  const before = await page.evaluate((id) => {
+    const el = document.querySelector(`.blk[data-embed="1"] .queryview-editor .blk[data-block-id="${id}"]`)
+    const ed = window.__qua.activeEditor()
+    return { mounted: Boolean(el), caret: ed?.caretBlock() ?? null, inner: ed !== window.__qua.__editor }
+  }, row.id)
+  assert(before.mounted && before.inner, `焦点应落在嵌入里的那台编辑器：${JSON.stringify(before)}`)
+  assert(before.caret === row.id, `光标应在命中行上：${JSON.stringify(before)}`)
+
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Input.imeSetComposition', { text: 'zhong', selectionStart: 5, selectionEnd: 5 })
+  await page.waitForTimeout(250)
+  const mid = await page.evaluate((id) => {
+    const el = document.querySelector(`.blk[data-embed="1"] .queryview-editor .blk[data-block-id="${id}"]`)
+    const ed = window.__qua.activeEditor()
+    return { composing: ed?.probe?.isComposing ?? false, mounted: Boolean(el) }
+  }, row.id)
+  assert(mid.composing, `前置：组合期真的开始了：${JSON.stringify(mid)}`)
+
+  // 组合期让同一块再写一笔（待办状态）：外层/视图都不能因此换掉承载行
+  await page.evaluate(() => window.__qua.invoke('core.editor/toggle-todo'))
+  await page.waitForTimeout(250)
+  const mid2 = await page.evaluate((id) => {
+    const el = document.querySelector(`.blk[data-embed="1"] .queryview-editor .blk[data-block-id="${id}"]`)
+    const ed = window.__qua.activeEditor()
+    return { composing: ed?.probe?.isComposing ?? false, sameEl: Boolean(el) }
+  }, row.id)
+  assert(mid2.composing, `属性写入后仍在组合期：${JSON.stringify(mid2)}`)
+  assert(mid2.sameEl, `组合期 + 属性写入都不换承载行：${JSON.stringify(mid2)}`)
+
+  await cdp.send('Input.insertText', { text: '中' })
+  await page.waitForTimeout(350)
+  const after = await page.evaluate((id) => {
+    const all = window.__qua.blocks()
+    return {
+      composing: window.__qua.activeEditor()?.probe?.isComposing ?? false,
+      text: all.find((b) => b.id === id)?.text ?? '',
+      preeditLeft: all.filter((b) => b.text.includes('zhong')).length,
+    }
+  }, row.id)
+  assert(after.composing === false, `提交后组合态复位：${JSON.stringify(after)}`)
+  assert(after.text.includes('中'), `提交落在目标块：${JSON.stringify(after)}`)
+  assert(after.preeditLeft === 0, `没有残留预编辑串：${JSON.stringify(after)}`)
+
+  await ctx.close()
+  return `嵌入大纲里组合期承载行不换；属性写入也不换；提交落在目标块且无残留`
 })
 
 if (REPORT) {

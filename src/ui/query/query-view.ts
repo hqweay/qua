@@ -350,6 +350,16 @@ export class ViewHost {
   private warned = false
   /** **这一个表面实例**的冻结结果；条件／视图／上下文变了才重算 */
   private frozen: FrozenResult | null = null
+  /**
+   * 大纲里的**结构编辑**改过树：冻结结果与上下文展开栈都可能过期。
+   *
+   * 为什么不在每次按键上重算：查询结果是**冻结**的（不自动重算，否则打一个字
+   * 结果集就跳一下）。但「新建/删除/移动一个块」改变了树，下一次装载（失焦或
+   * 外部重画）必须按**刷新同一条口径**收口，否则屏幕会按旧结果解释新树
+   * （例如新块被并进上一棵命中子树里显示成子块）。刷新一次按钮就恢复正常，
+   * 说明差的正是这一步「按当前树重算」。
+   */
+  private structureDirty = false
   /** 派生栏在这一屏内的显示排序（表面状态：不进库、不同步） */
   private derivedSort: SortKey[] = []
   /** 派生栏的「整片重算」防抖（成员可能新增，局部修补不够） */
@@ -677,6 +687,25 @@ export class ViewHost {
     }
   }
 
+  /**
+   * 结构编辑的**编辑边界收口**：按当前树重算一次，并把上下文展开栈清掉。
+   *
+   * 与刷新按钮同一口径（少一句 toast）：树变了，旧的「哪些是命中、覆盖了哪几条」
+   * 就不再描述这一屏。只在**自己**的结构编辑之后、下一次装载时做——打字途中不动，
+   * 否则每敲一个字结果集都会重排。
+   */
+  private settleStructure(): void {
+    if (!this.structureDirty) return
+    this.structureDirty = false
+    this.expanded = new Set()
+    this.covers = new Map()
+    this.staleIds.clear()
+    // 与刷新同一条「按当前树重算」，但不报 toast：这是编辑边界的自动收口，
+    // 不是用户按了刷新。被覆盖的命中仍会由祖先子树渲染出来，不该说「不再满足」。
+    const spec = this.effective
+    if (spec) this.frozen = freezeResult(spec, this.deps.kb, this.deps.context, this.viewKey)
+  }
+
   /** 刷新按钮：**只重算这一个实例**（别的表面各自持有自己的那份，不受影响） */
   refresh(): void {
     this.els.refresh.disabled = true
@@ -690,6 +719,7 @@ export class ViewHost {
       this.expanded = new Set()
       this.covers = new Map()
       this.staleIds.clear()
+      this.structureDirty = false
       if (dropped.length > 0) this.deps.toast?.(t('ui.query.dropped', { count: dropped.length }), 'info')
       this.deps.toast?.(t('ui.query.refreshed', { count: this.rowCount() }), 'ok')
       this.deps.onChange()
@@ -1040,9 +1070,14 @@ export class ViewHost {
         write: this.deps.write,
         // 冻结范围＝整片视图：焦点落在刷新/视图按钮上时，重画抬头会把正被按的那颗换掉
         area: this.els.root,
+        // 查询结果的行是命中，不是「这一栏能长出块」：根只能往下长，不能并/搬出结果集
+        structuralScope: 'roots',
         load: () => this.render(),
         wire: (editor, change) => this.deps.wire(editor, change),
-        onChange: () => this.deps.onChange(),
+        onChange: (kind) => {
+          if (kind === 'struct') this.structureDirty = true
+          this.deps.onChange()
+        },
         onFocus: (editor) => this.deps.onFocus(editor),
         onExpandContext: (ancestorId, rowId) => this.expand(ancestorId, rowId),
         onContextBack: (rootId) => this.collapse(rootId),
@@ -1291,6 +1326,7 @@ export class ViewHost {
 
   /** 按冻结结果渲染**当前活块**（内容不冻） */
   private render(focusHint?: string): void {
+    this.settleStructure()
     const b = this.deps.host()
     const src = this.source
     // children/items 源没有大纲分支（它们的默认看法不是大纲）

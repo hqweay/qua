@@ -19,6 +19,7 @@
 import { type Block, type BlockStore, isOwnEdit } from '../../core/index.ts'
 import { EDIT_ISLAND_ATTR } from '../../view/editor/block-dom.ts'
 import { bindPressFreeze } from '../../view/editor/editor-events.ts'
+import { inputSession } from '../../view/editor/input-session.ts'
 import { ReloadPolicy } from '../../view/editor/reload-policy.ts'
 import { BlockEditor, type Run } from '../../view/editor/editor.ts'
 
@@ -55,6 +56,11 @@ export interface EditableBlockDeps {
   onChange: (kind: string) => void
   /** 获得焦点：装配层把「活动编辑器」切过来（键位走命令层，认的是它） */
   onFocus: (ed: BlockEditor) => void
+  /**
+   * 结构动作能在哪一层寻址（见 `ViewOpts.structuralScope`）。
+   * 反链/查询结果/镜像的根是派生的，传 `'roots'`；正文不传。
+   */
+  structuralScope?: 'document' | 'roots'
   /**
    * 冻结判据的范围，默认＝岛根。挂载区要连 tab 条一起算「有人在这」——
    * 焦点落在 tab 按钮上时重排 tab 条，同样会把正被按的那颗换掉。
@@ -110,7 +116,11 @@ export class EditableBlock {
     this.area = deps.area ?? this.root
 
     this.reloader = new ReloadPolicy({
-      frozen: () => this.area.contains(document.activeElement) || this.editor?.probe.isComposing === true,
+      frozen: () =>
+        this.area.contains(document.activeElement) ||
+        this.editor?.probe.isComposing === true ||
+        inputSession.isComposing ||
+        inputSession.isAnchorInside(this.area),
       debounceMs: deps.debounceMs ?? DEBOUNCE_MS,
       onReload: (ids) => this.deps.load(this.editor, ids),
     })
@@ -141,7 +151,10 @@ export class EditableBlock {
      */
     this.area.addEventListener('focusout', () => {
       window.setTimeout(() => {
-        if (!this.area.contains(document.activeElement)) this.reloader.flush()
+        if (this.area.contains(document.activeElement)) return
+        const ed = this.editor
+        if (ed) inputSession.end(ed)
+        this.reloader.flush()
       }, 0)
     })
   }
@@ -171,6 +184,7 @@ export class EditableBlock {
         ...(this.deps.viewRootId ? { viewRootId: this.deps.viewRootId } : {}),
       },
       ...(this.deps.embedBodies === false ? { embedBodies: false } : {}),
+      ...(this.deps.structuralScope ? { structuralScope: this.deps.structuralScope } : {}),
       onExpandContext: this.deps.onExpandContext,
       onContextBack: this.deps.onContextBack,
     })
@@ -178,7 +192,10 @@ export class EditableBlock {
       // `load` 是装载自己的回声，不是编辑；落盘该跳过它
       if (kind !== 'load') this.deps.onChange(kind)
     })
-    this.host.addEventListener('focusin', () => this.deps.onFocus(ed))
+    this.host.addEventListener('focusin', () => {
+      inputSession.start(ed)
+      this.deps.onFocus(ed)
+    })
     // 惰性判据：没有这一格就没有「编辑器已建」可读
     this.host.dataset.editor = '1'
     this.editor = ed
@@ -190,6 +207,8 @@ export class EditableBlock {
     this.offStore()
     this.offPointer()
     this.reloader.dispose()
+    const ed = this.editor
+    if (ed) inputSession.end(ed)
     this.editor?.dispose()
     this.editor = null
   }
