@@ -18710,6 +18710,136 @@ await check('T225 嵌入的查询大纲里：组合期不换承载行；提交�
   return `嵌入大纲里组合期承载行不换；属性写入也不换；提交落在目标块且无残留`
 })
 
+
+await check('T226 多露面的结构传播：镜像里建块，源当场长出来；宿主行原样保留；光标按可见性留下或回源', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  // ① 搭结构（同屏三处：主编辑器、镜像 B 的投影、源树）：
+  //    页 P ← 露面 B（→ 查询 A）；A 的容器 U 里有普通命中行 C1。
+  //    B 故意放在 A 的结果集之外（U 的孩子才是命中），避免「投影里的露面行再展开投影」套娃。
+  const ids = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    window.__qua.forceForest((forest) => {
+      const pageBlk = forest.find((b) => b.id === p.id)
+      const mk = (id, text) => ({ id, content: [{ t: 'text', v: text }], children: [], created: 1, modified: 1 })
+      const u = mk('T226U', '容器')
+      u.children.push(mk('T226C1', '命中行'))
+      pageBlk.children.unshift(u)
+    })
+    window.__qua.invoke('core.query/insert', { blockId: 'T226C1' })
+    // 种子里已有别的查询块 ⇒ 认**自己建的**这一个（U 的孩子里带 _query 的那块）
+    const walk = (list, hit) => {
+      for (const b of list) {
+        if (hit(b)) return b
+        const r = walk(b.children, hit)
+        if (r) return r
+      }
+      return null
+    }
+    const u = walk(window.__qua.__editor.store.blocks, (x) => x.id === 'T226U')
+    const a = u.children.find((x) => Boolean(x.props?._query))
+    window.__qua.invoke('core.embed/insert', { blockId: p.id, targetId: a.id, view: 'mirror' })
+    const b = walk(window.__qua.__editor.store.blocks, (x) => x.props?._embed?.block === a.id)
+    return { A: a.id, B: b.id, P: p.id }
+  })
+  await page.waitForTimeout(500)
+  assert(ids.A && ids.B, `前置：查询块与镜像都建出来：${JSON.stringify(ids)}`)
+
+  // ② 记下镜像宿主行与它里面**编辑岛宿主**的 DOM 引用：结构变化前后必须是同一个元素——
+  //    宿主行被换 = 输入锚点没保住；岛宿主没了 = 里层编辑器被整页重画销毁（正在输入的面死了）
+  await page.evaluate((B) => {
+    const row = document.querySelector(`.blk[data-block-id="${B}"]`)
+    row.__t226 = true
+    window.__t226row = row
+    window.__t226island = row.querySelector('.queryview-editor')
+  }, ids.B)
+  const projRows = await page.evaluate((B) => {
+    const rows = [...document.querySelectorAll(`.blk[data-block-id="${B}"] .queryview-editor .blk[data-block-id]`)]
+    return rows.map((el) => el.dataset.blockId)
+  }, ids.B)
+  assert(projRows.includes('T226C1'), `投影里有命中行 C1：${JSON.stringify(projRows)}`)
+
+  // ③ 可见路径：在镜像的投影里给 C1 按回车建 D（C1 在投影里是根 ⇒ 新块是它的首个子块）
+  const tx = page.locator(`.blk[data-block-id="${ids.B}"] .queryview-editor .blk[data-block-id="T226C1"] .tx`).first()
+  await tx.click()
+  await page.keyboard.press('End')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('D')
+  await page.waitForTimeout(450)
+  const d = await page.evaluate(() => window.__qua.activeEditor()?.caretBlock() ?? '')
+  assert(d && d !== 'T226C1', `Enter 后光标落在镜里新块上：${JSON.stringify(d)}`)
+  // —— 不等失焦，当场断言 ——
+  const vis = await page.evaluate(([B, D]) => {
+    const row = document.querySelector(`.blk[data-block-id="${B}"]`)
+    const dRows = [...document.querySelectorAll(`.blk[data-block-id="${D}"]`)]
+    return {
+      mainHasD: dRows.some((el) => !el.closest('[data-edit-island]')),
+      mirrorHasD: Boolean(row?.querySelector(`.blk[data-block-id="${D}"]`)),
+      sameRow: window.__t226row === row && Boolean(row?.isConnected) && Boolean(row?.__t226),
+      sameIsland: window.__t226island !== null && window.__t226island === row?.querySelector('.queryview-editor'),
+      activeIsland: window.__qua.activeEditor() !== window.__qua.__editor,
+      caretD: window.__qua.activeEditor()?.caretBlock() === D,
+    }
+  }, [ids.B, d])
+  assert(vis.mainHasD, `源树当场出现 D（主编辑器、非岛内）：${JSON.stringify(vis)}`)
+  assert(vis.sameRow, `镜像宿主行前后是同一个 DOM 元素（编辑器没被销毁重建）：${JSON.stringify(vis.sameRow)}`)
+  assert(vis.sameIsland, `镜像宿主行里的编辑岛还是原来那一台（身体没被重画摘掉）：${JSON.stringify(vis.sameIsland)}`)
+  assert(vis.mirrorHasD, `镜像里也看得到 D：${JSON.stringify(vis.mirrorHasD)}`)
+  assert(vis.activeIsland, `光标仍在镜像（活动编辑器不是主编辑器）：${JSON.stringify(vis.activeIsland)}`)
+  assert(vis.caretD, `光标就在 D 上：${JSON.stringify(vis.caretD)}`)
+
+  // ④ 不可见路径 ⇒ 回源：光标在镜像里，对**页块本身**执行「插入查询块」——
+  //    投影的装载根是页的直接孩子（命中），页块与它的孩子都不在镜像的 doc 里；
+  //    结构动作从镜像的编辑器发起，新块不在镜像的装载里 ⇒ 焦点回主编辑器
+  const back = await page.evaluate((P) => {
+    window.__qua.invoke('core.query/insert', { blockId: P })
+    return {
+      activeMain: window.__qua.activeEditor() === window.__qua.__editor,
+      caret: window.__qua.activeEditor()?.caretBlock() ?? '',
+    }
+  }, ids.P)
+  assert(back.activeMain, `不可见 ⇒ 光标回到主编辑器：${JSON.stringify(back)}`)
+  assert(back.caret && back.caret !== d, `光标落在源树新建的块上：${JSON.stringify(back.caret)}`)
+  const backVisible = await page.evaluate((caret) => {
+    const el = document.querySelector(`.blk[data-block-id="${caret}"]`)
+    return Boolean(el && !el.closest('[data-edit-island]'))
+  }, back.caret)
+  assert(backVisible, '回源落点在主编辑器里可见')
+
+  // ⑤ 回归：镜像里打字，源那一行跟着变，但**别的行还是原元素**（没有整页重画）
+  await page.evaluate((C1) => {
+    window.__t226u = [...document.querySelectorAll('.blk[data-block-id="T226U"]')].find(
+      (el) => !el.closest('[data-edit-island]'),
+    )
+  }, ids.B)
+  const tx2 = page.locator(`.blk[data-block-id="${ids.B}"] .queryview-editor .blk[data-block-id="T226C1"] .tx`).first()
+  await tx2.click()
+  await page.keyboard.press('End')
+  await page.keyboard.type('X')
+  await page.waitForTimeout(500)
+  const after = await page.evaluate((C1) => {
+    const uNow = [...document.querySelectorAll('.blk[data-block-id="T226U"]')].find(
+      (el) => !el.closest('[data-edit-island]'),
+    )
+    const c1Main = [...document.querySelectorAll(`.blk[data-block-id="${C1}"]`)].find(
+      (el) => !el.closest('[data-edit-island]'),
+    )
+    return {
+      uSame: window.__t226u === uNow,
+      c1Text: c1Main?.querySelector('.tx')?.textContent ?? '',
+      rowStill: window.__t226row === document.querySelector(`.blk[data-block-id="${window.__t226row.dataset.blockId}"]`),
+    }
+  }, 'T226C1')
+  assert(after.c1Text.includes('X'), `镜像里打字，源那一行的文本跟着变：${JSON.stringify(after.c1Text)}`)
+  assert(after.uSame, `文本编辑不触发整页重画（别的行还是原元素）：${JSON.stringify(after.uSame)}`)
+  assert(after.rowStill, `文本编辑也不换镜像宿主行：${JSON.stringify(after.rowStill)}`)
+
+  await ctx.close()
+  return `源当场出现 D；宿主行同一个元素；可见留镜、不可见回源；文本路径按行更新`
+})
+
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
   await writeFile(REPORT, JSON.stringify({ total: seq, cases: results, known: known.map((r) => r.name) }))

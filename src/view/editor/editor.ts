@@ -359,6 +359,14 @@ export interface ViewEvents {
    */
   openBlock?: (blockId: string, place: OpenPlace) => void
   /**
+   * **结构动作之后，光标落在了本视图看不见的块上**：把它送到能被看见的地方（源位置）。
+   *
+   * 判据是**按块**的，不是按表面：新块在当前编辑器的 `doc` 里找得到 ⇒ 留下（本地连续）；
+   * 找不到 ⇒ 回源。所有编辑器共用装配层的同一份实现（去主编辑器找，找不到再开真实位置）。
+   * ⚠️ 未接 ⇒ 不做任何兜底（光标留在看不见的块上——下次按键看起来像「没反应」）。
+   */
+  focusSource?: (blockId: string) => void
+  /**
    * 模型选区变了（**划选气泡的驱动**，2026-10-19）。
    * 只有这里知道「选区到底变了没有」——气泡不能靠猜，否则每次按键都会重建 DOM。
    */
@@ -588,9 +596,18 @@ export class BlockEditor {
     this.offStore =
       o.autoReload === false
         ? () => {}
-        : this.store.subscribe((source?: unknown, ids?: readonly string[]) => {
+        : this.store.subscribe((source?: unknown, ids?: readonly string[], structural?: boolean) => {
             // 发起编辑的视图自己已经渲染过；其他视图按 root id 从 store 重取（共享对象，不拷贝块数据）
             if (isOwnEdit(source, this)) return
+            /**
+             * **结构变化走保留锚点的整页重画**（见 `reloadStructural`）：树变了，行集合
+             * 本身变了，「按 id 换几行」挂不上新行。它必须当场传播——别的露面停在旧形状
+             * 的样子是「改了树，另一处不变，失焦才跳」。
+             */
+            if (structural) {
+              this.reloadFromStore(true, ids, true)
+              return
+            }
             /**
              * **冻结时仍按 id 画那几行**：别的视图改的正是屏幕上这些行，整片重排会打断
              * 里层编辑岛里的事，但只换那一行不碰结构。组合期例外——连那一行也不换
@@ -665,9 +682,18 @@ export class BlockEditor {
    * 从 store 重取本视图的 roots（按 id），并重渲染。
    * 不拷贝块数据：`doc.roots` 里就是 store 里的活块。
    *
+   * @param structural `true` ＝ 这批变化改了树的形状（插入/移动/删块）：走
+   *   **保留锚点的整页重画**（`reloadStructural`）——行集合本身变了，「按 id 换几行」
+   *   挂不上新行；并且**绕过「里层编辑岛有人」的冻结**：其他露面必须当场跟上，
+   *   「改了树、另一处失焦才变」就是那条旧路径的样子。
+   *
    * ⚠️ 其他视图收到 `touch` 时调用；不触发 `events.change`（否则会回写成“编辑”）。
    */
-  reloadFromStore(restoreSelection = true, ids?: readonly string[]): void {
+  reloadFromStore(restoreSelection = true, ids?: readonly string[], structural = false): void {
+    if (structural) {
+      this.reloadStructural()
+      return
+    }
     /**
      * **冻结时不换 DOM**：组合期，或里层的编辑岛里正在发生别的事。
      * 组合期连「按 id 画一行」也不做——预编辑串就挂在那一行的文本节点上（见 `deferWhileComposing`）；
@@ -678,6 +704,15 @@ export class BlockEditor {
       this.reloader.touch()
       return
     }
+    this.applyFreshRoots()
+    // 焦点只算**本视图自己的**（里层编辑器是独立编辑岛，不是「我在编辑」）
+    const focused = restoreSelection && this.ownFocus()
+    this.renderAll()
+    if (focused) this.restoreSel()
+  }
+
+  /** 重取 roots ＋ 换 `doc`（折叠表／`viewRootId` 的口径与非结构路径一致；见 `reloadFromStore`） */
+  private applyFreshRoots(): void {
     const roots = this.viewRootIds
       .map((id) => this.store.find(id))
       .filter((b): b is Block => Boolean(b))
@@ -699,10 +734,130 @@ export class BlockEditor {
     else delete this.doc.viewRootId
     // 同一批根的重取：保留用户在聚焦期间显式折的那一下（否则每次 store 变动都会弹开）
     this.syncFocusRoot(true)
-    // 焦点只算**本视图自己的**（里层编辑器是独立编辑岛，不是「我在编辑」）
-    const focused = restoreSelection && this.ownFocus()
-    this.renderAll()
-    if (focused) this.restoreSel()
+  }
+
+  /**
+   * **结构变化的重装：保留锚点行的整页重画。**
+   *
+   * 与文本路径的两处不同：
+   *   · **绕过「里层编辑岛有人」的冻结**（`nestedEditorActive`）——镜像里建了一个块，
+   *     源那一处要**当场**长出来；这正是旧路径的样子（冻结记欠账，失焦才补）要修的病。
+     *   · 组合期／指针按下仍然尊重：预编辑串冻成正文、正被按的按钮被搬走，都是比
+     *     「晚一拍重画」更糟的事故 ⇒ 记欠账（`pendingStructural`），解冻后按结构口径补。
+   */
+  private reloadStructural(): void {
+    if (this.probe.isComposing || inputSession.isComposing || this.reloader.pointerDownNow()) {
+      this.reloader.touch(undefined, true)
+      return
+    }
+    // 锚点要按**换 doc 之前**的那份树解析（要拿它旧的 parent 对比）
+    const anchor = this.resolveAnchorRow()
+    this.applyFreshRoots()
+    this.renderAllPreservingAnchor(anchor)
+    if (this.ownFocus() && this.sel) this.restoreSel()
+    /**
+     * 可见性兜底：外部结构变化把光标块移出了本视图 ⇒ 回源。只对**正在这台编辑器里
+     * 输入**的人兜底——别人留档的旧光标不该拖着屏幕跳。
+     */
+    this.ensureCaretVisible(undefined, true)
+  }
+
+  /**
+   * **输入锚点所在的行**（本编辑器名下的那颗 `.blk`），连同它旧的父块。
+   *
+   * 锚点来自输入会话（浮层/里层编辑器的锚点都可能嵌在本容器里）；从锚点向上找
+   * 最近的行时，**只认「岛根与本编辑器相同」的那一颗**：露面行的身体是另一台编辑器
+   * （另一个岛），里层的源行不属于本编辑器——保留它不会保住外层的宿主行。
+   * 锚点解析不出行（锚点就是容器自己等）⇒ 退回光标所在的行。
+   */
+  private resolveAnchorRow(): { id: string; parentId: string | null } | null {
+    const anchor = inputSession.anchorEl
+    let el: HTMLElement | null = null
+    if (anchor && this.container.contains(anchor)) {
+      const own = this.container.closest<HTMLElement>(`[${EDIT_ISLAND_ATTR}]`)
+      let node: HTMLElement | null = anchor
+      while (node && node !== this.container) {
+        if (node.classList.contains('blk') && node.dataset.blockId && node.closest(`[${EDIT_ISLAND_ATTR}]`) === own) {
+          el = node
+          break
+        }
+        node = node.parentElement
+      }
+    }
+    if (!el) el = this.sel?.aBlock ? this.blockEl(this.sel.aBlock) : null
+    const id = el?.dataset.blockId
+    if (!id) return null
+    const loc = locate(this.doc, id)
+    if (!loc) return null
+    return { id, parentId: loc.parent?.id ?? null }
+  }
+
+  /**
+   * **整页重画，但把输入锚点的那一行原样换回去。**
+   *
+   * 为什么不增量挂新行：结构变化是低频的，整页重画 + 换回一行足够便宜；增量挂载
+   * 要重新回答「插在哪、兄弟位怎么挪」这整组问题——性能真不够时再换，入口不变。
+   *
+   * 三种「不保留」（旧行的样子已经过期，硬保留只会把界面和模型继续分叉）：
+   *   · 锚点块不在新装载里（被删/移出结果集）⇒ 不保留；输入 owner 是本编辑器的话回源；
+   *   · 锚点块的 **parent 变了**（这次变化把它自己搬走了）⇒ 旧行的 `data-depth`/导轨是错的；
+   *   · 旧行不在 DOM 里（窗口化把它收走了等）⇒ 没有可保留的东西。
+   */
+  private renderAllPreservingAnchor(anchor: { id: string; parentId: string | null } | null): void {
+    if (!anchor) {
+      this.renderAll()
+      return
+    }
+    const loc = locate(this.doc, anchor.id)
+    if (!loc) {
+      if (inputSession.editor === this) this.events.focusSource?.(anchor.id)
+      this.renderAll()
+      return
+    }
+    if ((loc.parent?.id ?? null) !== anchor.parentId) {
+      this.renderAll()
+      return
+    }
+    const oldEl = this.blockEl(anchor.id)
+    if (!oldEl) {
+      this.renderAll()
+      return
+    }
+    // 重画会把旧行从树上摘下来一瞬（`textContent = ''`）：焦点若在旧行里（里层编辑岛
+    // 正在输入），那一刻就被Chrome交给 body，插回去也不会自己回来 —— 正在输入的表面
+    // 不能因为别人的一次结构编辑丢焦点 ⇒ 记下来，插回后原样请回去。
+    const active = document.activeElement
+    const focusInside = active !== null && oldEl.contains(active)
+    // 身体（里层编辑器/表格）挂在行上：重画期间既不能摘、也不能先挂一份新的
+    this.embeds.pin(anchor.id)
+    try {
+      this.renderAll()
+      const fresh = this.blockEl(anchor.id)
+      if (fresh && fresh !== oldEl) {
+        fresh.replaceWith(oldEl)
+        this.mounted.add(anchor.id)
+        if (focusInside) (active as HTMLElement).focus({ preventScroll: true })
+      }
+    } finally {
+      this.embeds.unpin()
+    }
+    // 旧行是原样换回的：光标标记与块选区漆层按换回后的 DOM 重打一遍
+    this.repaintOverlays()
+  }
+
+  /**
+   * **光标落在了本视图看不见的块上 ⇒ 回源**（`events.focusSource`，装配层接了才生效）。
+   *
+   * @param id 要查的那一块（缺省 ＝ 当前光标块）。
+   * @param gated `true` ＝ 只对「正在这台编辑器里输入」的人生效：重装路径带来的检查
+   *   不该被别的视图留档的旧光标触发（那会拖着屏幕乱跳）；结构动作自己的收尾
+   *   （`structTail`／`loadPage` 带了落点）是无条件的——动作刚发生，光标就是用户的注意力。
+   */
+  private ensureCaretVisible(id?: string | null, gated = false): void {
+    const target = id ?? this.caretBlock()
+    if (!target || locate(this.doc, target)) return
+    if (gated && inputSession.editor !== this && !this.ownFocus()) return
+    this.events.focusSource?.(target)
   }
 
   /**
@@ -1273,11 +1428,15 @@ export class BlockEditor {
    * 冻结判据在这里给：正文只在焦点落进**里层编辑岛**（挂载区／查询视图／露面体的
    * 编辑器是独立的编辑岛）、或输入法组合期时冻。本容器自己的行被换掉是安全的，
    * 所以那不是「有人在这」——判成冻结的话，别的视图每改一次，正文就停在旧形状。
+   *
+   * ⚠️ 结构变化的欠账补做时按 `frozenHard` 判（只有组合期挡得住）：结构必须当场传播，
+   * 「里层编辑岛有人」挡不住它——「改了树、另一处失焦才变」正是要修的病。
    */
   private readonly reloader = new ReloadPolicy({
     frozen: () => this.nestedEditorActive() || this.probe.isComposing || inputSession.isComposing,
+    frozenHard: () => this.probe.isComposing || inputSession.isComposing,
     debounceMs: 0,
-    onReload: (ids) => this.reloadFromStore(true, ids),
+    onReload: (ids, structural) => this.reloadFromStore(true, ids, structural === true),
   })
 
   /** 行元素被换过 ⇒ `data-caret` 跟着旧元素丢了：缓存作废，光标标记与块选区漆层重打 */
@@ -1557,6 +1716,10 @@ export class BlockEditor {
     this.renderAll()
     if (caret) this.placeCaret(caret.id, caret.off)
     this.emitChange('struct', ids)
+    // 可见性兜底：这一步结构动作之后，光标落在了本视图看不见的块上 ⇒ 回源。
+    // ⚠️ 看**该落的**那块，不是 `this.sel`：落点不可见时 `placeCaret` 落不下光标，
+    //    `sel` 还停在旧块上（旧块当然可见，判它就永远验不出「落空」）。
+    this.ensureCaretVisible(caret?.id)
   }
 
   undoStep(): void {
@@ -3564,6 +3727,8 @@ export class BlockEditor {
     // **不清 undo**——undo 是 store 全局的，加载反链/查询视图不能清掉正文的撤销栈。
     this.sel = caret ? { aBlock: caret.blockId, aOff: caret.off, hBlock: caret.blockId, hOff: caret.off } : null
     this.renderAll()
+    // 装载之后光标块不在这一屏里（刷新把结果重算了、落点不在新装载）⇒ 回源
+    this.ensureCaretVisible()
     this.events.change?.('load')
   }
 
