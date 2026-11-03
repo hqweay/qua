@@ -75,16 +75,11 @@ export type MountHost = { kind: 'block'; blockId: string } | { kind: 'journal' }
  * `same` 只属于非日记块（谁和我同类）。后两者**不再合并**：
  * 「我的成员」与「和我同标签的块」是两个问题，合并会让标签页的「同类」名不副实。
  *
- * **规范顺序**：这个数组同时是「没拖过时的默认序」。顺序的持久覆盖住
- * `Prefs.mountOrder`（设备状态）——派生栏没有 owner，它的看法与顺序都不进内容。
+ * **规范顺序**：这个数组同时是「没拖过时的默认序」。拖过的顺序住 `_mounts` 的数组位
+ * （整条 tab 条一条顺序）；派生栏没有配置，落进去的只是位置标记。
  */
 export const DERIVED_SOURCES = ['members', 'refs', 'same', 'mentions'] as const
 export type DerivedSource = (typeof DERIVED_SOURCES)[number]
-
-/** 一个值是不是内置来源（设备状态读入时逐项验形用） */
-export function isDerivedSource(v: unknown): v is DerivedSource {
-  return typeof v === 'string' && (DERIVED_SOURCES as readonly string[]).includes(v)
-}
 
 /**
  * 一栏。
@@ -123,8 +118,10 @@ export function cloneMountEntries(entries: readonly MountEntry[]): MountEntry[] 
 /**
  * **挪一栏**：把 `tabId` 挪到 `targetId` 的前／后。
  *
- * 只在**存下来的那几栏**里重排 —— 内置栏的顺序是派生的（成员 → 引用 → 同类 → 提及），
- * 存不进去；`mountEntriesOf` 也永远把内置栏排在前面，所以用户栏的「最前」＝内置栏之后的第一格。
+ * 传进来的是**整条 tab 条**（`mountEntriesOf` 的返回值），所以派生栏与用户栏可以互相越位；
+ * 派生栏没有配置，落进 `_mounts` 的只是一条位置标记（`{kind:'derived', source}`）。
+ * 命令层决定写哪一份：只动 local、且这一格还没有标记时，保持原来那几栏（不为了拖一栏
+ * local 就把内置栏物化进内容）；涉及派生栏时才把整条列表写回（首次换序＝物化）。
  *
  * 返回 `null` ＝ 什么都没变（同一个 id ／任一不在这一格里）—— 调用方据此判断「要不要写」，
  * 不写就不该产生一次可撤销动作。
@@ -213,67 +210,6 @@ export function readMountView(views: MountViews | undefined, host: MountHost, so
   return v === 'list' || v === 'table' ? v : 'outline'
 }
 
-/* ------------------------------------------------------------ 派生栏的顺序 */
-
-/**
- * 派生栏的顺序（**设备状态**，与 `mountViews` 同一个家）。
- *
- * 为什么不写 `_mounts`：派生栏没有内容列表，给它落一段顺序就是给一个没有 owner 的
- * 东西造内容；而它的「看法」已经住在 `Prefs`，把「顺序」拆去 KB 会让同一条栏的
- * 两个呈现面在两套同步语义里（换台设备看法跟着走、顺序不跟）。
- *
- * 值是一个**全序**（`DERIVED_SOURCES` 的排列）；缺的来源由 `readMountOrder` 按规范序补齐。
- */
-export type MountOrders = Readonly<Record<string, readonly DerivedSource[]>>
-
-/**
- * 这一台宿主的内置栏完整顺序：**存的在前，没提到的按规范序补齐**。
- *
- * 补齐而不是报错，是为了「以后加第五个来源」时旧格仍然能用；未知值丢掉（与
- * `Prefs.mountViews` 同一条纪律：坏形状不该让整条 tab 条消失）。
- */
-export function readMountOrder(orders: MountOrders | undefined, host: MountHost): DerivedSource[] {
-  const out: DerivedSource[] = []
-  for (const s of orders?.[mountHostKey(host)] ?? []) {
-    if (isDerivedSource(s) && !out.includes(s)) out.push(s)
-  }
-  for (const s of DERIVED_SOURCES) if (!out.includes(s)) out.push(s)
-  return out
-}
-
-/**
- * **挪一条内置栏**：把 `source` 挪到 `target` 的前／后。
- *
- * `stored` 必须是全序（`readMountOrder` 的返回值）：当前不出现的来源（比如普通块上的
- * 「成员」）**原槽位不动** —— 块以后变成标签时它就在它该在的位置，不需要「插在哪」的规则。
- * `present` 是这一台宿主现在有哪几个来源（按宿主类型），只有它们参与换位。
- *
- * 返回 `null` ＝ 没变化／任一项不在可见集合里 ⇒ 调用方不写（设备写入也不留空动作）。
- */
-export function moveDerivedOrder(
-  stored: readonly DerivedSource[],
-  present: readonly DerivedSource[],
-  source: DerivedSource,
-  target: DerivedSource,
-  place: 'before' | 'after',
-): DerivedSource[] | null {
-  if (source === target) return null
-  const visible = stored.filter((s) => present.includes(s))
-  if (!visible.includes(source) || !visible.includes(target)) return null
-  const from = visible.indexOf(source)
-  const next = [...visible]
-  next.splice(from, 1)
-  /**
-   * 目标下标必须按**摘掉之后**的数组重算：先按下标算好再 `splice` 会让「往后挪」差一格
-   * （与 `moveMountEntry` 同一条坑）。
-   */
-  const at = next.indexOf(target)
-  next.splice(place === 'before' ? at : at + 1, 0, source)
-  if (next.every((s, i) => s === visible[i])) return null
-  let i = 0
-  return stored.map((s) => (present.includes(s) ? next[i++]! : s))
-}
-
 /**
  * 内置三栏的条件。它们**只用已有的条件原子**，`'$self'` 是值位上的哨兵——
  * 不给条件语言加 `mentions` 这类专用键：那会把名字解析偷偷塞进条件语言，
@@ -294,34 +230,29 @@ const SPEC_MENTIONS: QuerySpec = { where: { all: [{ text: '$self' }, { not: { re
  *   · 普通块：引用 → 同类 → 提及；
  *   · 日记：引用 → 提及（日期身份不参与标签归属，不挂一个永远空的「同类」）。
  *
- * `order` 是设备状态里的全序（`Prefs.mountOrder`）；不传＝规范序。
- * 不在集合里的来源只是不显示，它在全序里的位置仍然保留。
+ * 这是**规范序**（没拖过时的默认）。拖过的顺序住 `_mounts`（宿主那一格 tab 列表）：
+ * 派生栏也是那条列表里的项，见 `mountEntriesOf` 的合并规则。
  */
-export function derivedEntriesOf(
-  host: Block,
-  order?: readonly DerivedSource[],
-): Extract<MountEntry, { kind: 'derived' }>[] {
+export function derivedEntriesOf(host: Block): Extract<MountEntry, { kind: 'derived' }>[] {
   const out: Extract<MountEntry, { kind: 'derived' }>[] = []
   if (hasList(host, 'tag')) out.push({ id: derivedTabId('members'), kind: 'derived', source: 'members' })
   out.push({ id: derivedTabId('refs'), kind: 'derived', source: 'refs' })
   if (!isJournal(host)) out.push({ id: derivedTabId('same'), kind: 'derived', source: 'same' })
   out.push({ id: derivedTabId('mentions'), kind: 'derived', source: 'mentions' })
-  if (!order) return out
-  /**
-   * 未知来源（理论上不会有：`readMountOrder` 补齐了全序）排在最后而不是 `-1`：
-   * 排序键落在数组外会让它跑到最前面，那种「莫名其妙插到第一」不报错。
-   */
-  const at = (s: DerivedSource): number => {
-    const i = order.indexOf(s)
-    return i < 0 ? DERIVED_SOURCES.length : i
-  }
-  return out.sort((a, b) => at(a.source) - at(b.source))
+  return out
 }
 
-/** 一栏内置项的条件（`derived` 栏没有配置，它只有这个） */
+/**
+ * 一栏内置项的条件（`derived` 栏没有配置，它只有这个）。
+ *
+ * 返回 `null` ＝ **这一栏的维度不存在**（不是「成员为空」）：没有标签就没有「同类」、
+ * 没有可读文本就没有「提及」。tab 仍然在（按宿主类型常驻），body 用这句话说原因。
+ * ⚠️ `mentions` 必须在这里判：`resolveSelfSpec` 会把空的 `$self` 文本变成 `NEVER`，
+ *    条件本身不会报「空」，UI 也就分不出「没人提到」与「没有名字可查」。
+ */
 export function derivedSpecOf(host: Block, forest: readonly Block[], source: DerivedSource): QuerySpec | null {
   if (source === 'refs') return SPEC_REFS
-  if (source === 'mentions') return SPEC_MENTIONS
+  if (source === 'mentions') return displayTextOf(host) === '' ? null : SPEC_MENTIONS
   if (source === 'members') return memberSpecOf(host, forest)
   return sameSpecOf(host)
 }
@@ -514,24 +445,43 @@ export interface MountReadOpts {
   /** 日记宿主的那一组（`Prefs.journalMounts`）：由装配层从设备状态取 */
   journalMounts?: readonly MountEntry[]
   now?: Date
-  /**
-   * 内置栏的顺序（`Prefs.mountOrder` 里这一台宿主的那一格）。
-   *
-   * 不传＝规范序。core 不认识「偏好」这个概念，只吃这个值：读门面不自己去摸设备状态，
-   * 与 `journalMounts` 同一条纪律。
-   */
-  derivedOrder?: readonly DerivedSource[]
 }
 
 /**
- * 这一块该有哪些 tab：**内置在前、用户项在后**。
+ * 这一块该有哪些 tab、按什么顺序。
+ *
+ * 一格 `_mounts` 有两种状态（**同一种形状**，不新增字段）：
+ *   · **没有派生标记** ⇒ 没拖过：内置按规范序在前，用户栏按数组位在后；
+ *   · **有派生标记** ⇒ 拖过：数组位就是**整条 tab 条**的顺序，派生与用户栏可以交错。
+ *
+ * 标记指向的来源当前不存在（普通块上的「成员」）⇒ 跳过但**留在数组里**；
+ * 重排之后才出现的来源（块刚被标成标签）⇒ 插在**最后一个派生标记之后**
+ * （没有派生前例就插到最前），不抢用户钉在最前面的查询。
  *
  * ⚠️ 日记只有**今天**这一块能读用户栏：过去的天没有用户栏，也不给「＋」——
  *    这是「只挂今日」的直接后果（与「按块各自一份」互斥，只能选一个）。
  */
 export function mountEntriesOf(host: Block, opts: MountReadOpts = {}): MountEntry[] {
+  const derived = derivedEntriesOf(host)
   const stored = storedEntriesOf(host, opts)
-  return [...derivedEntriesOf(host, opts.derivedOrder), ...stored]
+  const markers = stored.filter((e): e is Extract<MountEntry, { kind: 'derived' }> => e.kind === 'derived')
+  if (markers.length === 0) return [...derived, ...stored]
+  const bySource = new Map(derived.map((d) => [d.source, d]))
+  const out: MountEntry[] = []
+  for (const e of stored) {
+    if (e.kind === 'local') {
+      out.push(e)
+      continue
+    }
+    const d = bySource.get(e.source)
+    if (d) out.push(d)
+  }
+  const missing = derived.filter((d) => !markers.some((m) => m.source === d.source))
+  if (missing.length > 0) {
+    const last = out.reduce((at, e, i) => (e.kind === 'derived' ? i : at), -1)
+    out.splice(last + 1, 0, ...missing)
+  }
+  return out
 }
 
 /**
@@ -542,8 +492,15 @@ export function mountEntriesOf(host: Block, opts: MountReadOpts = {}): MountEntr
  */
 export function storedEntriesOf(host: Block, opts: MountReadOpts = {}): MountEntry[] {
   if (isJournal(host)) {
-    if (journalDate(host) !== todayISO(opts.now ?? new Date())) return []
-    return canonicalMountEntries(opts.journalMounts)
+    const all = canonicalMountEntries(opts.journalMounts)
+    /**
+     * 过去的日记天**没有用户栏**（那一栏只挂今天），但顺序是这条日记 tab 条共享的：
+     * 只留位置标记，让派生栏在每一天都按用户排过的顺序出现。用户栏本身仍然不出现。
+     */
+    if (journalDate(host) !== todayISO(opts.now ?? new Date())) {
+      return all.filter((e) => e.kind === 'derived')
+    }
+    return all
   }
   return readMounts(host)
 }

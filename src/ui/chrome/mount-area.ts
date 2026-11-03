@@ -97,20 +97,13 @@ export interface MountAreaDeps {
    */
   onRenameTab?: (host: MountHost, tabId: string, anchor: DOMRect) => void
   /**
-   * **拖拽换序（local 栏）**：把 `tabId` 挪到 `targetId` 的前／后。
+   * **拖拽换序**：把 `tabId` 挪到 `targetId` 的前／后。
    *
-   * 顺序＝数组位（`_mounts` / `Prefs.journalMounts`），写内容、可撤销。
+   * 顺序＝那一格数组的位次（`_mounts` / `Prefs.journalMounts`），写内容、可撤销。
+   * 派生栏与用户栏可以互相越位（派生栏落进去的只是一条位置标记）。
    * 与改名同一个形状：这一层只报「谁挪到了谁旁边」，写哪一格与命令都在装配层。
    */
   onMoveTab?: (host: MountHost, tabId: string, targetId: string, place: 'before' | 'after') => void
-  /**
-   * **拖拽换序（派生栏）**：同上，但写的是设备状态（`Prefs.mountOrder`），不是内容。
-   *
-   * 与 `onMoveTab` 分成两个回调，因为**写目标不同**：local 的列表是内容、派生栏的顺序
-   * 是这一屏的摆法。一个回调里按 kind 分叉会让「写到哪」在装配层再判一次；两个回调
-   * 让这一层只报「哪一条挪到了哪一条旁边」，kind 由它本来就知道的 entry 回答。
-   */
-  onMoveDerived?: (host: Block, source: DerivedSource, target: DerivedSource, place: 'before' | 'after') => void
   /**
    * 派生栏现在选了什么看法（**设备状态**：没有拥有者）。
    *
@@ -119,13 +112,6 @@ export interface MountAreaDeps {
   derivedKind?: (host: Block, source: DerivedSource) => DerivedViewKind
   /** 切派生栏的看法（装配层写设备状态并重画这一栏） */
   setDerivedKind?: (host: Block, source: DerivedSource, kind: DerivedViewKind) => void
-  /**
-   * 派生栏的**顺序**（设备状态，`Prefs.mountOrder` 里这一台宿主的那一格）。
-   *
-   * 与 `derivedKind` 同一个形状：这一层不碰偏好，只拿一个现成的全序去排。
-   * 缺省（或某一格缺失）由 core 的 `readMountOrder` 按规范序补齐。
-   */
-  derivedOrder?: (host: Block) => readonly DerivedSource[]
   /**
    * 这一栏非大纲时用的视图体（local 栏可以有表格等看法）。
    *
@@ -351,10 +337,7 @@ export class MountArea {
    * 不是同一份东西——「顺序变了但签名没变」会静默不重画。
    */
   private entriesFor(host: Block): MountEntry[] {
-    return mountEntriesOf(host, {
-      journalMounts: this.deps.journalMounts(),
-      derivedOrder: this.deps.derivedOrder?.(host),
-    })
+    return mountEntriesOf(host, { journalMounts: this.deps.journalMounts() })
   }
 
   render(focusHint?: string): void {
@@ -449,12 +432,11 @@ export class MountArea {
         })
       }
       /**
-       * **拖拽换序**：两组各排各的（派生栏永远在用户栏之前），所以落点只接受**同类**。
-       * 写目标按 kind 分：local 的列表是内容（命令、可撤销）；派生栏的顺序是设备状态
-       * （`Prefs.mountOrder`，与切看法同一条路）。拖源报 id，落点答「落到我的前/后」。
+       * **拖拽换序**：整条 tab 条一条顺序，所以派生栏与用户栏互为落点（可以互相越位）。
+       * 写哪一格由命令层按宿主判；这一层只报「谁挪到了谁旁边」。
+       * 过去的日记天不给拖：那一格是共享配置，改了会影响今天。
        */
-      const canDrag =
-        entry.kind === 'local' ? Boolean(this.deps.onMoveTab) : Boolean(this.deps.onMoveDerived)
+      const canDrag = Boolean(this.deps.onMoveTab) && canEditMounts(host)
       if (canDrag) {
         btn.draggable = true
         btn.addEventListener('dragstart', (e) => {
@@ -472,12 +454,8 @@ export class MountArea {
           kind: 'tab',
           effect: 'move',
           targetId: () => entry.id,
-          // 拖到自己那格没有意义（模型层也会拒），这里连高亮都不亮；跨组同样不接受。
-          accept: (id) => {
-            if (id === entry.id) return false
-            const from = this.entries.find((x) => x.id === id)
-            return from?.kind === entry.kind
-          },
+          // 拖到自己那格没有意义（模型层也会拒），这里连高亮都不亮。
+          accept: (id) => id !== entry.id,
           hint: () => t('ui.dnd.moveTab'),
           mark: (_id, e) => {
             wrap.dataset[placeOf(e) === 'before' ? 'dropBefore' : 'dropAfter'] = '1'
@@ -487,14 +465,8 @@ export class MountArea {
             delete wrap.dataset.dropAfter
           },
           onDrop: (id, _target, e) => {
-            const from = this.entries.find((x) => x.id === id)
-            if (!from || from.kind !== entry.kind) return
-            const place = placeOf(e)
-            if (entry.kind === 'derived' && from.kind === 'derived') {
-              this.deps.onMoveDerived?.(host, from.source, entry.source, place)
-            } else if (entry.kind === 'local' && from.kind === 'local') {
-              this.deps.onMoveTab?.(hostRef, from.id, entry.id, place)
-            }
+            if (id === entry.id) return
+            this.deps.onMoveTab?.(hostRef, id, entry.id, placeOf(e))
           },
         })
       }

@@ -14,6 +14,7 @@ import {
   journalDate,
   mkTabId,
   mkViewId,
+  mountEntriesOf,
   moveMountEntry,
   todayISO,
   type MountEntry,
@@ -38,6 +39,20 @@ export function mountCommands(
   const entryOf = (host: MountHost, tabId: string): MountEntry | undefined =>
     entriesOf(host).find((e) => e.id === tabId)
   const write = (host: MountHost, next: readonly MountEntry[]): void => d.owners.writeEntries(host, next)
+
+  /**
+   * 这一格**显示出来的**整条 tab 条（含内置栏）。与 UI 同一份合并规则：`mountEntriesOf`。
+   *
+   * 块宿主的 `_mounts` 从块上读；日记宿主把设备状态里那一组传进去（读路径不自己摸偏好）。
+   */
+  const fullEntriesOf = (host: MountHost): MountEntry[] => {
+    if (host.kind === 'journal') {
+      const day = d.kb.journalDay(todayISO())
+      return day ? mountEntriesOf(day, { journalMounts: entriesOf(host) }) : []
+    }
+    const b = d.kb.get(host.blockId)
+    return b ? mountEntriesOf(b) : []
+  }
 
   /** 这一栏能配吗（过去的日记天不给：那一栏没有落点） */
   const editable = (host: MountHost, now = new Date()): boolean => {
@@ -76,17 +91,23 @@ export function mountCommands(
       return entry.id
     },
 
-    /** 摘一栏：**不删任何块**（local 压根没有块） */
+    /**
+     * 摘一栏：**不删任何块**（local 压根没有块）。
+     *
+     * 只认 local：派生栏在那一格里如果有位置标记，摘掉它就是「隐藏内置栏」——
+     * 那是另一条能力，不在本轮偷偷实现。
+     */
     removeMountTab: (host, tabId) => {
-      const list = entriesOf(host)
-      const next = list.filter((e) => e.id !== tabId)
-      if (next.length === list.length) return false
-      write(host, next)
+      if (!editable(host)) return false
+      const entry = entryOf(host, tabId)
+      if (!entry || entry.kind !== 'local') return false
+      write(host, entriesOf(host).filter((e) => e.id !== tabId))
       return true
     },
 
     /** 改名（只 local 有名字；derived 的名字由来源字典给） */
     renameMountTab: (host, tabId, label) => {
+      if (!editable(host)) return false
       const entry = entryOf(host, tabId)
       const name = label.trim()
       if (!entry || entry.kind !== 'local' || name === '') return false
@@ -95,13 +116,22 @@ export function mountCommands(
     },
 
     /**
-     * 挪一栏（拖拽排序）：顺序＝**数组位**，所以这只是一次「换位」，不是新字段。
+     * 挪一栏（拖拽排序）：顺序＝**那一格数组的位次**，所以这只是一次「换位」，不是新字段。
      *
-     * 只动 local 那几栏：内置栏的顺序是派生的（`mountEntriesOf` 永远先给它们），
-     * 存进去也没有落点。没变化 ⇒ `false`（不产生可撤销的空动作）。
+     * 派生栏与用户栏可以互相越位：派生栏落进那一格的只是一条位置标记。只动 local、
+     * 且这一格还没有标记时，仍只重排原来那几栏（不为了拖一栏 local 就把内置栏物化）；
+     * 一旦涉及派生栏，整条列表写回（首次换序＝物化）。
+     *
+     * 没变化 ⇒ `false`（不产生可撤销的空动作）。
      */
     moveMountTab: (host, tabId, targetId, place) => {
-      const next = moveMountEntry(entriesOf(host), tabId, targetId, place)
+      if (!editable(host)) return false
+      const stored = entriesOf(host)
+      const full = fullEntriesOf(host)
+      const touched = (e: MountEntry): boolean => e.id === tabId || e.id === targetId
+      const involvesDerived = full.some((e) => e.kind === 'derived' && touched(e))
+      const hasMarkers = stored.some((e) => e.kind === 'derived')
+      const next = moveMountEntry(hasMarkers || involvesDerived ? full : stored, tabId, targetId, place)
       if (!next) return false
       write(host, next)
       return true
@@ -109,6 +139,7 @@ export function mountCommands(
 
     /** 换这一栏选的视图（配置在 local tab 自己身上） */
     setMountTabView: (host, tabId, view) => {
+      if (!editable(host)) return false
       const entry = entryOf(host, tabId)
       if (!entry || entry.kind !== 'local') return false
       const next: MountEntry = { ...entry }
