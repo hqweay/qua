@@ -4017,7 +4017,12 @@ await check('T57 日记流里 zoom 进某块再「后退」⇒ 回到**日记流
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await page.evaluate(() => window.__qua.loadState('seed'))
-  await page.waitForTimeout(260)
+  /**
+   * ⚠️ **等装载落定再量**：装载自己会把中心槽指到今日（过程中会先后走「单日 → 日记流」），
+   *    在它中间量根数会量到中间态 —— 那是**假绿**（断言以为是自己 zoom 出来的）。
+   */
+  await page.waitForFunction(() => window.__qua.__editor.doc.roots.length >= 2, undefined, { timeout: 5000 })
+  await page.waitForTimeout(120)
 
   const feedAtStart = await page.evaluate(() => ({
     roots: [...document.querySelectorAll('#editor > .sec > .blk')].filter((el) => el.dataset.depth === '0').length,
@@ -4030,6 +4035,8 @@ await check('T57 日记流里 zoom 进某块再「后退」⇒ 回到**日记流
   const zoomed = await page.evaluate(() => {
     const bs = window.__qua.blocks()
     const kid = bs.find((b) => !(b.roles?.length) && b.text.length > 2)
+    // **真 zoom**：`core.block/focus-block` 才是「把中心槽指向这一块」；
+    // `__qua.focusBlock` 只是把光标放过去（不动装载），用它量不出 zoom。
     window.__qua.invoke('core.block/focus-block', { blockId: kid.id })
     return { id: kid.id, depth: kid.children.length }
   })
@@ -17926,6 +17933,94 @@ await check('T215 Shift+点日历／查询各看法的打开入口 ⇒ 右槽窗
  * ——那两格在视图配置里另有位置，画出来却存不进去就是「点了没生效」。
  * **空树 ＝ 没有切片**：删光条件再应用要删键，而不是留一条恒假条件。
  */
+await check('T220 建查询块的缺省落点＝**光标所在块**（日记流里 activeId 是第一个根，不是它）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.waitForTimeout(300)
+
+  /*
+   * 日记流一屏多根：`activeId` 是**第一天的段头**，而光标在最后一天。
+   * 斜杠菜单/块菜单/命令面板都不带 `blockId` ⇒ 缺省落点若取 activeId，
+   * 查询块就会从屏幕底部飞到整个流的顶部（真踩过）。判据：按光标走。
+   */
+  const spot = await page.evaluate(() => {
+    const roots = window.__qua.__editor.doc.roots
+    const day = roots[roots.length - 1]
+    const kid = day.children.find((b) => (b.content ?? []).some((r) => r.t === 'text' && r.v.trim() !== ''))
+    if (!kid) return null
+    window.__qua.focusBlock(kid.id, 999)
+    return { firstRoot: roots[0].id, dayId: day.id, kidId: kid.id, kidIndex: day.children.findIndex((b) => b.id === kid.id) }
+  })
+  assert(spot && spot.dayId !== spot.firstRoot, `前置：日记流里应有「不是第一个根」的一天：${JSON.stringify(spot)}`)
+  await page.waitForTimeout(300)
+
+  const made = await page.evaluate((s) => {
+    window.__qua.invoke('core.query/insert', {})
+    /** 全库找所有查询块（含它们挂在谁下面、第几个）—— 只看某一天会漏掉「飞到第一个根」 */
+    const hits = []
+    const walk = (list, parentId) =>
+      list.forEach((b, i) => {
+        if (b.props?._query) hits.push({ id: b.id, parentId, index: i })
+        walk(b.children, b.id)
+      })
+    walk(window.__qua.__editor.doc.roots, '(root)')
+    return { hits, dayId: s.dayId }
+  }, spot)
+  const only = made.hits.length === 1 ? made.hits[0] : null
+  assert(only !== null, `这一屏应只多出一个查询块（飞到别处也算错）：${JSON.stringify(made)}`)
+  assert(only.parentId === made.dayId, `查询块要挂在光标所在的那一天下面：${JSON.stringify(made)}`)
+  assert(only.index === spot.kidIndex + 1, `要落在光标那一块的下一行（index ${spot.kidIndex + 1}）：${JSON.stringify(only)}`)
+  const madeCaret = await page.evaluate((m) => {
+    const day = (function find(list) {
+      for (const b of list) {
+        if (b.id === m.dayId) return b
+        const hit = find(b.children)
+        if (hit) return hit
+      }
+      return null
+    })(window.__qua.__editor.doc.roots)
+    return day.children[m.hits[0].index + 1]?.id ?? ''
+  }, made)
+
+  // 空块那一条也一样：① 留下的落点空块就是空块 ⇒ 光标在那儿再建，应**原地**变查询块
+  const conv = await page.evaluate((s) => {
+    const day = (function find(list) {
+      for (const b of list) {
+        if (b.id === s.dayId) return b
+        const hit = find(b.children)
+        if (hit) return hit
+      }
+      return null
+    })(window.__qua.__editor.doc.roots)
+    const blank = day.children.find((b) => b.id === s.caretId)
+    const kidsBefore = day.children.length
+    window.__qua.focusBlock(s.caretId, 999)
+    window.__qua.invoke('core.query/insert', {})
+    const after = (function find2(list) {
+      for (const b of list) {
+        if (b.id === s.dayId) return b
+        const hit = find2(b.children)
+        if (hit) return hit
+      }
+      return null
+    })(window.__qua.__editor.doc.roots)
+    return {
+      hadBlank: Boolean(blank),
+      tailIsQuery: Boolean(after.children.find((b) => b.id === s.caretId)?.props?._query),
+      kidsBefore,
+      kidsAfter: after.children.length,
+      movedToFirstRoot: Boolean(window.__qua.__editor.doc.roots[0].children.some((b) => b.props?._query)),
+    }
+  }, { dayId: spot.dayId, caretId: madeCaret })
+  assert(conv.hadBlank, '前置：① 应在查询块后面留过一个空块')
+  assert(conv.tailIsQuery, `那个空块应原地变成查询块（id 不变）：${JSON.stringify(conv)}`)
+  assert(conv.kidsAfter === conv.kidsBefore + 1, `原地转换只多一个落点空块：${JSON.stringify(conv)}`)
+  assert(!conv.movedToFirstRoot, `也不许跑到第一个根下面：${JSON.stringify(conv)}`)
+
+  await ctx.close()
+  return `光标在最后一天 ⇒ 查询落在它下一行（index ${only.index}）、落点空块原地转；第一个根没被碰`
+})
+
 await check('T219 视图切片：基础条件 ∩ 切片；菜单按名列出并可改名/编辑/删除', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
