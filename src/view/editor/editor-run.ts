@@ -12,5 +12,5 @@
 import type { BlockEditor, Run } from './editor.ts'
 
 export function editorRun(run: Run, fallback: () => BlockEditor | null | undefined): Run {
-  return (fn, source) => run(fn, source ?? fallback())
+  return (fn, source, opts) => run(fn, source ?? fallback(), opts)
 }

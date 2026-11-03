@@ -39,7 +39,7 @@
 import { DELETED_AT_PROP, type Block } from '../model/model.ts'
 import { walkForest } from '../model/walk.ts'
 import type { Anno } from '../model/runs.ts'
-import { canWriteText } from '../model/types.ts'
+import { canDirectEditText, canWriteText } from '../model/types.ts'
 import { systemPropViolation } from '../props/system-props.ts'
 import type { Op } from './types.ts'
 import { validate } from './validate.ts'
@@ -211,7 +211,12 @@ function newBlockOps(block: Block, placement: Placement): Op[] {
 }
 
 /** 已有块：位置（若动） ＋ 存在（若变） ＋ created/content/modified ＋ 属性 ＋ annos */
-function existingBlockOps(old: BlockCells, block: Block, placement?: Placement): Op[] {
+function existingBlockOps(
+  old: BlockCells,
+  block: Block,
+  placement?: Placement,
+  opts: { directEdit?: boolean } = {},
+): Op[] {
   const out: Op[] = []
   if (placement) out.push(positionOp(block, placement))
 
@@ -236,8 +241,11 @@ function existingBlockOps(old: BlockCells, block: Block, placement?: Placement):
      * 在发看点判一次，就没有「哪个程序化入口忘了判」这回事。
      * 判的是**改前**的属性袋：同一事务里「先摘身份再写字」也要拦。
      * 新块不走这里（`newBlockOps`——`mkBlock` 造出来的块还没有身份）。
+     *
+     * 唯一的例外是**直接编辑这一行**（`opts.directEdit`）：查询块的名字住在正文里、
+     * 它又没有别的改名入口 ⇒ 打字必须能写。结构写路径不带这个标记，仍被 `canWriteText` 挡住。
      */
-    if (!canWriteText({ ...block, props: old.props })) {
+    if (!canWriteText({ ...block, props: old.props }) && !(opts.directEdit && canDirectEditText(block))) {
       throw new Error(`kb: block "${block.id}": content is protected (journal/prop-def/query/readonly text)`)
     }
     out.push({
@@ -352,7 +360,7 @@ export function diff(from: readonly Block[], to: readonly Block[]): Op[] {
  * `touched` 的插入顺序就是输出顺序。`Tx.insert` 按子树先序登记，所以
  * **父 op 先于子 op** 这条性质由调用方保持；其它方法都只碰一块，顺序无歧义。
  */
-export function diffTouched(touched: Iterable<TouchedBlock>): Op[] {
+export function diffTouched(touched: Iterable<TouchedBlock>, opts: { directEdit?: boolean } = {}): Op[] {
   const ops: Op[] = []
   for (const t of touched) {
     if (t.before === null) {
@@ -364,7 +372,7 @@ export function diffTouched(touched: Iterable<TouchedBlock>): Op[] {
       t.beforePlacement !== undefined &&
       t.afterPlacement !== undefined &&
       (t.beforePlacement.parent !== t.afterPlacement.parent || t.beforePlacement.prev !== t.afterPlacement.prev)
-    ops.push(...existingBlockOps(t.before.cells, t.block, moved ? t.afterPlacement : undefined))
+    ops.push(...existingBlockOps(t.before.cells, t.block, moved ? t.afterPlacement : undefined, opts))
   }
   return ops
 }

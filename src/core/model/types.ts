@@ -99,6 +99,8 @@ export function typeDeclOf(b: Block): TypeDecl {
  * ⚠️ 住在类型模块而不是 `model.ts`：这条判据现在要看类型声明，而 `model.ts` 是
  *    零依赖叶子（依赖只能从这边指向它）。放在声明旁边也更顺：它本来就是声明里的一格。
  * ⚠️ **改名不走这条判据**：改名写的是 `_aliases`，它走 `core/alias.ts`。
+ * ⚠️ **查询块的正文就是它的名字，而它没有别名入口**：直接在这一行打字是它唯一的改名路径，
+ *    走 `canDirectEditText`；这条判据只管结构写路径（合并／拆分／程序化整段替换）。
  */
 export function canWriteText(b: Block): boolean {
   return (
@@ -107,6 +109,20 @@ export function canWriteText(b: Block): boolean {
     !isQueryBlock(b) &&
     typeDeclOf(b).text !== 'readonly'
   )
+}
+
+/**
+ * **这一行的正文能不能被「直接打字」写**（与 `canWriteText` 回答的是两件事）。
+ *
+ * `canWriteText` 管的是**内容写路径**（合并／拆分／程序化整段替换）——它们不该碰
+ * 「正文是名字」的块。但查询块的名字只住在正文里（它没有地址），用户要给查询起名字，
+ * 唯一入口就是在这一行打字。⇒ 把「直接编辑」单独放行，结构写路径仍被 `canWriteText` 挡住。
+ *
+ * 其余受保护块不在此列：日记的正文是日期投影（恒空），字段定义的正文是标签（改名走命令），
+ * 只读类型根本没有正文。
+ */
+export function canDirectEditText(b: Block): boolean {
+  return isQueryBlock(b)
 }
 
 /**
