@@ -243,7 +243,7 @@ pnpm test:one tests/x.test.ts   # 内环：只跑这几个单测文件（~0.2s�
 ```
 
 **收工只认外环**：`pnpm gate` 全绿才算做完。当前基线：
-arch **29/29** · test:core **785/785** · 浏览器冒烟 **236/236** · dock **26/26** · electron **13/13**。
+arch **29/29** · test:core **800/800** · 浏览器冒烟 **237/237** · dock **26/26** · electron **13/13**。
 
 - 前置：**Node 26.x**（`.node-version` 钉住；旧版会让 rollup 原生模块 dlopen 失败）、pnpm 11.x。
 - `gate` 是**编排**出来的，不是一条 `&&` 链：彼此独立的检查按产物依赖分三段、段内并发，
