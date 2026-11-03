@@ -1956,6 +1956,39 @@ editorEl.addEventListener('focusin', () => {
 })
 
 /**
+ * **结构动作之后的可见性兜底**（`ViewEvents.focusSource` 的唯一实现，所有编辑器共用）：
+ * 光标落在了发起视图看不见的块上 ⇒ 送到能被看见的地方。
+ *
+ * 判据是**按块**的，不按表面分叉：主编辑器里看得见 ⇒ 焦点回源位置（不走
+ * `core.block/focus-block`——那会 zoom，把用户从当前屏带走）；看不见但块还活着 ⇒
+ * 走同一条打开路由把真实位置开到中心，再把光标放过去。块已经没了（删掉）⇒ 不做任何事。
+ *
+ * ⚠️ 重入护栏：打开路由自己也会装载编辑器，装载路径上可能再触发一次兜底——
+ * 放开就是无限循环。护栏只拦「这一层」的重入，不拦正常的一次跳转。
+ */
+let seekingSource = false
+function focusSourceInMain(blockId: string): void {
+  if (seekingSource) return
+  seekingSource = true
+  try {
+    if (flatten(mainEd.doc).some((b) => b.id === blockId) && mainEd.blockEl(blockId)) {
+      // 换块聚焦是一次编辑边界（先交上一块再落光标），与诊断口的 focusBlock 同一条纪律
+      const prev = mainEd.sel?.aBlock
+      if (prev && prev !== blockId) mainEd.commitEdit(prev)
+      editorEl.focus()
+      mainEd.placeCaret(blockId, 0)
+      mainEd.blockEl(blockId)?.scrollIntoView({ block: 'nearest' })
+      return
+    }
+    if (!blocks.find(blockId)) return
+    app.openBlock(blockId, 'center')
+    mainEd.placeCaret(blockId, 0)
+  } finally {
+    seekingSource = false
+  }
+}
+
+/**
  * **一台视图编辑器的完整事件表**：正文、挂载区、查询结果**共用这一份**。
  *
  * 为什么收成一个函数：这些编辑器是同一种东西（`BlockEditor` ＋ 一份 roots），
@@ -2099,6 +2132,8 @@ function viewEvents(
     childrenCollapse: (blockId) => void registry.invoke('core.editor/toggle-children-collapse', { blockId }, via),
     // 块标／面包屑的打开：落点（Shift＝右槽，⌘/Ctrl＝新 tab，普通＝中心）由唯一路由分流
     openBlock: (blockId, place) => app.openBlock(blockId, place),
+    // 结构动作后光标不可见的兜底：所有编辑器共用同一份实现（判据在 focusSourceInMain）
+    focusSource: (blockId) => focusSourceInMain(blockId),
     blockMenu: (blockId, rect, appearanceHost) => {
       const ed = active()
       // 命中**已选中的块**（且多块）⇒ 多块菜单；否则清块选区，走原单块菜单

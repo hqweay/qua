@@ -24,10 +24,21 @@ export interface ReloadPolicyOpts {
    * 两处各判一次会让「抬起之后补做」的时机对不上。
    */
   frozen: () => boolean
+  /**
+   * **绝对不能换 DOM**的时刻（组合期；指针位由本策略自己持有）。
+   *
+   * 只给**结构变化**的欠账用：结构必须当场传播，域冻结（里层编辑岛有人在）
+   * 对它不生效——但组合期／指针按下仍然是硬前置（预编辑串冻成正文、正被按的
+   * 按钮被搬走，都比「晚一拍重画」糟）。不给 ⇒ 退回 `frozen`。
+   */
+  frozenHard?: () => boolean
   /** 外部变化到重载的合并窗口。`0` ＝ 同步重载 */
   debounceMs: number
-  /** 真正重载那一下。`ids` ＝ 这次动过的块（拿得到时；补做那一趟没有） */
-  onReload: (ids?: readonly string[]) => void
+  /**
+   * 真正重载那一下。`ids` ＝ 这次动过的块（拿得到时；补做那一趟没有）；
+   * `structural` ＝ 欠的那笔是不是结构变化（补做要走同一种重画）。
+   */
+  onReload: (ids?: readonly string[], structural?: boolean) => void
   /** 冻结期间欠下的那次补做的间隔（默认 200ms） */
   flushMs?: number
 }
@@ -41,6 +52,8 @@ const DEFAULT_FLUSH_MS = 200
 export class ReloadPolicy {
   /** 有一笔重载欠着：被冻结，或自己的编辑让装载内容过期了 */
   private pending = false
+  /** 欠的那笔里**有没有结构变化**：补做要走结构口径（域冻结对它不生效），见 `flush` */
+  private pendingStructural = false
   /** 指针按着：按下期间不换 DOM，否则正被按的按钮会在 `mouseup` 之前被搬走 */
   private pointerDown = false
   /** 合并窗口的计时器（`debounceMs === 0` 时不用） */
@@ -59,12 +72,23 @@ export class ReloadPolicy {
   }
 
   /**
+   * **只读指针位**：调用方要回答的不是「能不能换 DOM」（`frozen()`），而是
+   * 「指针是不是正按着」——按着时到达的变化只记欠账，不能当场做。
+   * 域判据（里层编辑岛等）仍归 `frozen()`，这里只交出本策略自己持有的那一位。
+   */
+  pointerDownNow(): boolean {
+    return this.pointerDown
+  }
+
+  /**
    * 一个变化到达：现在重载、合并一会儿，还是先欠着。
    *
    * 冻结时**不**把 `ids` 记下来：补做那一趟要么整片重装（不需要 id），要么由调用方
    * 在调这里之前已经按 id 画过那几行（正文的冻结分支就是这么做的）。
+   * `structural` ＝ 这笔是不是结构变化：欠账记账同一条，补做走结构口径（`flush`）。
    */
-  touch(ids?: readonly string[]): void {
+  touch(ids?: readonly string[], structural = false): void {
+    if (structural) this.pendingStructural = true
     if (this.frozen()) {
       this.pending = true
       this.flusher.arm()
@@ -72,7 +96,7 @@ export class ReloadPolicy {
     }
     if (this.opts.debounceMs <= 0) {
       this.pending = false
-      this.opts.onReload(ids)
+      this.opts.onReload(ids, structural)
       return
     }
     if (this.timer !== null) window.clearTimeout(this.timer)
@@ -85,7 +109,7 @@ export class ReloadPolicy {
         return
       }
       this.pending = false
-      this.opts.onReload(ids)
+      this.opts.onReload(ids, structural)
     }, this.opts.debounceMs)
   }
 
@@ -110,6 +134,10 @@ export class ReloadPolicy {
    *
    * 为什么需要它而不只靠补做计时器：计时器是为「焦点只是在这片区域**里面**挪动、
    * 从未离开」准备的；焦点真的离开了，就不该再等那 200ms。
+   *
+   * ⚠️ **结构变化的欠账按 `frozenHard` 判**（不给就退回 `frozen`）：结构必须当场传播，
+   * 「里层编辑岛有人在」挡不住它——镜像里建了块，源那一处失焦才长出来，正是要修的病。
+   * 组合期与指针位仍然是硬前置。非结构欠账照旧等域解冻。
    */
   flush(): void {
     /**
@@ -118,12 +146,15 @@ export class ReloadPolicy {
      */
     if (this.pointerDown) return
     if (!this.pending) return
-    if (this.opts.frozen()) {
+    const frozen = this.pendingStructural ? (this.opts.frozenHard ?? this.opts.frozen) : this.opts.frozen
+    if (frozen()) {
       this.flusher.arm()
       return
     }
     this.pending = false
-    this.opts.onReload()
+    const structural = this.pendingStructural
+    this.pendingStructural = false
+    this.opts.onReload(undefined, structural)
   }
 
   dispose(): void {

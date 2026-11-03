@@ -61,6 +61,14 @@ class InputSession {
     return this.owner
   }
 
+  /**
+   * 锚点元素（只读）。重画路径用它向上找「要保住的那一行」；别的判据
+   * （在不在这片容器里、覆不盖某节点）已有 `isAnchorInside`／`pinsNode`，不要绕过它们。
+   */
+  get anchorEl(): HTMLElement | null {
+    return this.anchor
+  }
+
   get isComposing(): boolean {
     return this.composing
   }

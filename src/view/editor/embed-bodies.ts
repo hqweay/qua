@@ -12,6 +12,14 @@ import type { BlockEditor } from './editor.ts'
 
 export class EmbedBodies {
   private readonly disposers = new Map<string, () => void>()
+  /**
+   * **整页重画时被保住的那一行**（结构变化后保留输入锚点行的重画路径）。
+   *
+   * 重画会把每一行的身体摘掉再重挂；被保住的那一行是**原元素原样换回**的，
+   * 它的身体（里层编辑器／表格）既不能被摘、也不能先挂一份新的——
+   * 摘了，浮层与正在输入的编辑器当场消失；挂了新的，旧行换回后留一份没人管的订阅。
+   */
+  private pinned: string | null = null
 
   constructor(
     private readonly ed: BlockEditor,
@@ -21,6 +29,7 @@ export class EmbedBodies {
 
   /** makeBlockEl 的 `embedBody` 钩子：嵌套截断／破态／真身体，挂上的回收函数记进表 */
   attach(b: Block, into: HTMLElement): void {
+    if (b.id === this.pinned) return
     if (!this.allowed) {
       into.textContent = t('ui.embed.nested')
       into.dataset.embedNested = '1'
@@ -36,6 +45,7 @@ export class EmbedBodies {
 
   /** makeBlockEl 的 `viewBody` 钩子（正文里的查询体；装配层没接就不进这个分支） */
   attachViewBody(b: Block, into: HTMLElement): void {
+    if (b.id === this.pinned) return
     const dispose = this.ed.events.viewBody!(b, into)
     if (dispose) this.disposers.set(b.id, dispose)
   }
@@ -49,6 +59,22 @@ export class EmbedBodies {
   }
 
   disposeAll(): void {
-    for (const id of [...this.disposers.keys()]) this.disposeRow(id)
+    for (const id of [...this.disposers.keys()]) {
+      if (id === this.pinned) continue
+      this.disposeRow(id)
+    }
+  }
+
+  /** 整页重画期间保住这一行的身体（`attach`／`disposeAll` 都跳过它） */
+  pin(id: string): void {
+    this.pinned = id
+  }
+
+  unpin(): void {
+    this.pinned = null
+  }
+
+  isPinned(id: string): boolean {
+    return this.pinned === id
   }
 }
