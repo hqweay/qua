@@ -256,6 +256,7 @@ test('「成员」沿下级标签展开（算作）：#人物 的成员含只打
 
 const { MemoryKb } = await import('../src/core/kb/memory.ts')
 const { BlockStore } = await import('../src/core/model/store.ts')
+const { mountCommands } = await import('../src/app/commands/mounts.ts')
 
 test('派生栏记录：引用按**块**计次数（同一块引两处也只一行）；路径是祖先链', async () => {
   const tag = mkTagBlock('项目')
@@ -296,4 +297,55 @@ test('派生栏记录：提及填命中词、同类填共同标签；两者都�
 
   // 派生值不写回块：同一个 kb 再读，块上没有任何新属性
   assert.deepEqual(Object.keys(kb.get('m')!.props ?? {}), ['_tags'])
+})
+
+/* ------------------------------------------------------------ 改名（`core.mount/rename`）*/
+
+/** 只记账的拥有者：条目住在内存里，写入被记下来（模型：块宿主 `_mounts`／日记宿主设备状态） */
+function renameFixture(entries: MountEntry[]) {
+  let list = [...entries]
+  const writes: MountEntry[][] = []
+  const owners = {
+    read: () => ({ views: [] }),
+    write: () => {},
+    readBinding: () => null,
+    setBindingView: () => {},
+    entriesOf: () => list,
+    writeEntries: (_host: unknown, next: readonly MountEntry[]) => {
+      list = [...next]
+      writes.push(list)
+    },
+    entryOf: (_host: unknown, id: string) => list.find((e) => e.id === id),
+  }
+  const store = new BlockStore([b('h', '宿主')])
+  const kb = new MemoryKb(store)
+  const commands = mountCommands({
+    kb,
+    owners: owners as never,
+    run: (<R,>(fn: (tx: never) => R) => ({ ops: [], result: fn(undefined as never) })) as never,
+    activeId: () => 'h',
+    toast: () => {},
+  })
+  return { commands, writes, list: () => list }
+}
+
+test('U12 改名：只改 local 栏的 label；一条写入；别的栏原样', () => {
+  const entries: MountEntry[] = [local('t1', '新查询'), local('t2', '另一栏'), { id: 'd-refs', kind: 'derived', source: 'refs' }]
+  const f = renameFixture(entries)
+  assert.equal(f.commands.renameMountTab({ kind: 'block', blockId: 'h' }, 't1', '  只看甲  '), true)
+  assert.equal(f.writes.length, 1, '一次动作一笔写入')
+  assert.deepEqual(
+    f.list().map((e) => (e.kind === 'local' ? e.label : e.id)),
+    ['只看甲', '另一栏', 'd-refs'],
+    '首尾空格去掉；顺序与别的栏不变',
+  )
+})
+
+test('U12b 改名拒绝三条：派生栏没有名字可改／空名字／不存在的 id —— 都不写', () => {
+  const entries: MountEntry[] = [local('t1', '新查询'), { id: 'd-refs', kind: 'derived', source: 'refs' }]
+  const f = renameFixture(entries)
+  assert.equal(f.commands.renameMountTab({ kind: 'block', blockId: 'h' }, 'd-refs', '乱改'), false, '派生栏的文案由来源字典给')
+  assert.equal(f.commands.renameMountTab({ kind: 'block', blockId: 'h' }, 't1', '   '), false, '空名字')
+  assert.equal(f.commands.renameMountTab({ kind: 'block', blockId: 'h' }, 'nope', '有名字'), false, '不存在的 id')
+  assert.equal(f.writes.length, 0, '拒绝 = 零写入（不产生可撤销的半截）')
 })

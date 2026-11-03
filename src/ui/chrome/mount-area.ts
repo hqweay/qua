@@ -88,6 +88,13 @@ export interface MountAreaDeps {
   /** 「×」：摘掉一栏（`tabId` 是**稳定 id**，不是数组下标） */
   onRemoveTab?: (host: MountHost, tabId: string) => void
   /**
+   * **双击改名**（只有 local 栏有名字；派生栏的名字由来源字典给）。
+   *
+   * 输入框在装配层弹：这一层不认识浮层、也不碰命令。`anchor` 是那一栏的矩形
+   * —— 浮层贴着用户点的那个 tab，而不是屏幕中央（「改的是哪一个」由位置回答）。
+   */
+  onRenameTab?: (host: MountHost, tabId: string, anchor: DOMRect) => void
+  /**
    * 派生栏现在选了什么看法（**设备状态**：没有拥有者）。
    *
    * 由装配层现读 `Prefs`；这一层不碰偏好，也不写它 —— 写走 `setDerivedKind`。
@@ -392,6 +399,18 @@ export class MountArea {
       btn.dataset.tab = entry.id
       btn.textContent = this.labelOf(entry)
       btn.addEventListener('click', () => this.activate(entry.id))
+      /**
+       * 改名只有 local 栏有：双击就地弹输入框（与浏览器标签页、其它编辑器同一套手势）。
+       * `title` 是给「不知道能双击」的人的唯一提示 —— 不另立一颗铅笔图标：
+       * 那一栏的 chrome 已经有两件（名字、×），再加一件会把 4 个字的宽度吃掉。
+       */
+      if (entry.kind === 'local' && this.deps.onRenameTab) {
+        btn.title = t('ui.mount.renameHint')
+        btn.addEventListener('dblclick', (e) => {
+          e.preventDefault()
+          this.deps.onRenameTab?.(hostRef, entry.id, btn.getBoundingClientRect())
+        })
+      }
       wrap.appendChild(btn)
 
       // 内置派生栏不可摘：它们不落盘，摘了也没有「摘掉」的落点；local 才有 ×
