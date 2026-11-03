@@ -115,8 +115,23 @@ const COLUMN_TO_PROP: Readonly<Record<string, string>> = Object.fromEntries(
   Object.entries(COLUMN_PROPS).map(([prop, col]) => [col, prop]),
 )
 
-/** 不进属性表的键（它们各有去处，见文件头的表） */
-const NOT_A_PROP = new Set<string>([ALIASES_PROP, LISTS_PROP, DELETED_AT_PROP, ...Object.keys(COLUMN_PROPS)])
+/**
+ * 系统属性的**具名落点**：除这些键之外的属性一律进 `BlockProperty`。
+ *
+ * 为什么这张表住在编码器身边而不是另写一份映射文档：文档会与代码分叉，
+ * 分叉的后果是**那一格在库里静默消失**（装载回来读不到，而且不报错）。
+ * 表里只列「不进属性表」的键；`NOT_A_PROP` 由它派生 ⇒「被排除」与「有去处」
+ * 永远是同一件事，不可能出现「排除了却没人负责」的键。
+ */
+export const STORAGE_PROP_HOMES: Readonly<Record<string, string>> = {
+  [ALIASES_PROP]: 'BlockAlias',
+  [LISTS_PROP]: 'BlockList',
+  [DELETED_AT_PROP]: 'Block.deleted',
+  ...Object.fromEntries(Object.entries(COLUMN_PROPS).map(([prop, col]) => [prop, `Block.${col}`])),
+}
+
+/** 不进属性表的键（它们各有具名去处，见 `STORAGE_PROP_HOMES`） */
+const NOT_A_PROP = new Set(Object.keys(STORAGE_PROP_HOMES))
 
 /**
  * 找块的探测（只在**结构写入**与 **anno 写入**上用到）。
