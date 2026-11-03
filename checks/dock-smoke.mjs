@@ -1072,6 +1072,11 @@ await check('A23d 线挂在块标下面：块标上方无线、下方留 --ui-ra
         id: el.dataset.blockId.slice(-4),
         depth: Number(el.dataset.depth),
         hasChildren: el.dataset.hasChildren === '1',
+        // 身体行（查询内联体／露面投影）的线画的是「身体这一层」：它没有 children
+        // 但有可折的下一层，不算「碰线的叶子」
+        hasBody:
+          el.dataset.viewBody === '1' ||
+          el.querySelector(':scope > .blk-embed-body[data-embed-body="view"]') !== null,
         hasRail: Boolean(self),
       }
       if (self) {
@@ -1097,13 +1102,13 @@ await check('A23d 线挂在块标下面：块标上方无线、下方留 --ui-ra
   const gap = parseFloat(r.gapToken)
   assert(Number.isFinite(gap) && gap > 0, `--ui-rail-gap 必须是一个正的像素值，实际「${r.gapToken}」`)
 
-  // ① 叶子行不碰线
-  const leaves = rows.filter((x) => !x.hasChildren)
+  // ① 叶子行不碰线（叶子＝没有子块也没有身体：查询块那条线画的是身体层，不算叶子）
+  const leaves = rows.filter((x) => !x.hasChildren && !x.hasBody)
   assert(leaves.length > 0, `假数据里应有叶子行（否则这条判据测不到）：${JSON.stringify(rows)}`)
   const leafRails = leaves.filter((x) => x.hasRail)
   assert(
     leafRails.length === 0,
-    `叶子块（没有子块）不该碰线 —— 线的语义是「子树的范围」，它圆点上下都该是空的：${JSON.stringify(leafRails)}`,
+    `叶子块（没有子块也没有身体）不该碰线 —— 线的语义是「下一层的范围」，它圆点上下都该是空的：${JSON.stringify(leafRails)}`,
   )
 
   const withRail = rows.filter((x) => x.hasRail)

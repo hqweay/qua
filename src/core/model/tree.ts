@@ -29,6 +29,7 @@ import { canWriteText, typeDeclOf } from './types.ts'
 import { isEmptyContent, joinRuns, plainLen, sliceRuns, splitRuns, cloneRunsNewIds, textRuns } from './runs.ts'
 import { walkForest } from './walk.ts'
 import { cloneMountEntries, MOUNTS_PROP } from '../views/mount.ts'
+import { isEmbedBlock } from '../views/embed.ts'
 export function locate(doc: Doc, id: string): Located | null {
   let found: Located | null = null
   walkForest(doc.roots, (b, ctx) => {
@@ -946,13 +947,16 @@ export function focusRootOf(roots: readonly Block[]): string | undefined {
 }
 
 /**
- * 这一行下面有没有**可收起的东西**：子块，或查询块的结果视图（身体）。
+ * 这一行下面有没有**可收起的东西**：子块，或查询块的结果视图（身体），或露面行的身体。
  *
  * 查询块没有 `children`（命中不是子块），但它有身体；折叠它折的是**结果视图**。
+ * 露面行同理——它的身体是「源在这一张看法下的身体」（镜像的子树／投影的结果视图），
+ * 严格说「那格身体可不可折」是渲染层的事（这一表面画不画它）；写入口只要回答
+ * 「下面有没有一格可藏的东西」，别让折叠表记一个不存在的事实。
  * 这条判据只回答「能不能折」，不回答「画在哪」（正文内联／段根／右槽窗口分别由渲染层决定）。
  */
 export function hasFoldable(b: Block | undefined): boolean {
-  return Boolean(b && (hasLiveChildren(b) || isQueryBlock(b)))
+  return Boolean(b && (hasLiveChildren(b) || isQueryBlock(b) || isEmbedBlock(b)))
 }
 
 /**

@@ -2475,31 +2475,26 @@ await check('T195 查询在正文内联渲染：不打开就在原位出结果�
   assert(!inline.inMount, '内联体必须在这一行下面，不是段尾挂载区')
 
   /**
-   * **高度是「内容高，封顶一档」**：结果少时身体只占内容那么高，不预留空白；
-   * 点进结果后 `:focus-within` 只抬**上限**，装得下就不长 —— 否则点一下整块忽然
-   * 变高，多出来的仍是一片空白（用户报的那个观感）。
+   * **高度是自然高**：身体随内容长——不封顶、不预留一档空白。紧凑性归折叠
+   * （三角／竖线都可折），不归上限；封顶档与单根屏豁免那一对特判已退场。
    */
   const bodyHeight = () =>
     page.evaluate((id) => {
       const body = document.querySelector(`.blk[data-block-id="${id}"] > .blk-view-body`)
       return {
         h: body ? body.getBoundingClientRect().height : 0,
-        cap: body ? parseFloat(getComputedStyle(body).maxHeight) : 0,
-        focus: body?.matches(':focus-within') ?? false,
+        cap: body ? getComputedStyle(body).maxHeight : '',
       }
     }, qid)
   const restBody = await bodyHeight()
-  assert(
-    restBody.h > 0 && restBody.h < restBody.cap - 20,
-    `结果装得下时身体按内容高、不预留一档空白：${JSON.stringify(restBody)}`,
-  )
+  assert(restBody.h > 0, `结果在原位可见（身体有真实高度）：${JSON.stringify(restBody)}`)
+  assert(restBody.cap === 'none', `身体不封顶（自然高，滚动归整页）：${JSON.stringify(restBody)}`)
   await page.locator(`.blk[data-block-id="${qid}"] .blk-view-body .queryview-editor .blk .tx`).first().click()
   await page.waitForTimeout(200)
   const focusBody = await bodyHeight()
-  assert(focusBody.focus, `前置：点进结果后焦点在身体里：${JSON.stringify(focusBody)}`)
   assert(
     Math.abs(focusBody.h - restBody.h) < 1,
-    `内容装得下时聚焦只抬上限、不改变高度：${JSON.stringify({ restBody, focusBody })}`,
+    `聚焦不改变高度（自然高没有「聚焦档」这一说）：${JSON.stringify({ restBody, focusBody })}`,
   )
   await page.evaluate(() => window.__qua.focusBlock(window.__qua.__editor.doc.roots[0].id, 0))
   await page.waitForTimeout(150)
@@ -2534,6 +2529,27 @@ await check('T195 查询在正文内联渲染：不打开就在原位出结果�
   await page.waitForTimeout(250)
   const unfolded = await foldState()
   assert(!unfolded.collapsed && !unfolded.folded, `展开后标记与身体都回来：${JSON.stringify(unfolded)}`)
+
+  /**
+   * **竖线也折身体**：查询行的线（`.rail-self`）折的是「下一层」＝结果视图。
+   * 可点件的判据是「**点完之后仍然存在**」：折了之后线还锚在行上（短段随行高缩），
+   * 再点同一条线展开 —— 折叠态摘线的话，竖线对查询块就成了单向的。
+   */
+  const railOnce = () =>
+    page.evaluate((id) => {
+      const rail = document.querySelector(`.blk[data-block-id="${id}"] > .rail-self`)
+      if (!rail) return false
+      rail.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      return true
+    }, qid)
+  assert(await railOnce(), '查询块行要有自己的线（身体的「下一层」也有导轨）')
+  await page.waitForTimeout(250)
+  const railFolded = await foldState()
+  assert(railFolded.collapsed && railFolded.folded, `点线折身体：${JSON.stringify(railFolded)}`)
+  assert(await railOnce(), '折了之后线仍在（短段锚在行上）——再点能展开')
+  await page.waitForTimeout(250)
+  const railUnfolded = await foldState()
+  assert(!railUnfolded.collapsed && !railUnfolded.folded, `再点同一条线展开：${JSON.stringify(railUnfolded)}`)
 
   /**
    * **切看法是就地重画**：查询块是页里的一行，身体就画在这一行下面
@@ -2576,22 +2592,16 @@ await check('T195 查询在正文内联渲染：不打开就在原位出结果�
     const row = document.querySelector(`.blk[data-block-id="${id}"]`)
     const body = row?.querySelector(':scope > .blk-view-body')
     const views = [...document.querySelectorAll('.queryview')].filter((v) => !v.hidden)
-    // 定高档的数就写在身体自己身上（`applyViewBodyHeights`）；自然高度＝不等于它
-    const rest = body ? parseFloat(getComputedStyle(body).getPropertyValue('--view-body-rest')) : 0
     return {
       inline: Boolean(body),
-      natural: body?.dataset.naturalH === '1',
       h: body ? parseFloat(getComputedStyle(body).height) : 0,
-      rest,
+      cap: body ? getComputedStyle(body).maxHeight : '',
       views: views.length,
       mountViews: views.filter((v) => v.closest('.sec-mount')).length,
     }
   }, qid)
   assert(opened.inline, '打开后身体仍在自己行下（行内体，不再让位段尾）')
-  assert(
-    opened.natural && Math.abs(opened.h - opened.rest) > 1,
-    `单根屏的身体按内容撑开（不走定高档）：${JSON.stringify(opened)}`,
-  )
+  assert(opened.cap === 'none' && opened.h > 0, `身体自然高（单根屏不再需要豁免特判）：${JSON.stringify(opened)}`)
   assert(opened.views === 1 && opened.mountViews === 0, `打开后只应有一台视图宿主、且不在段尾：${JSON.stringify(opened)}`)
 
   // 单根也能折：折的是自己行下那台视图体（同一份 Doc.folded，与正文子行同一个语义）
@@ -2897,6 +2907,61 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
     `短结果聚焦不跳高（上限抬了、高度不变）：${a.height} → ${focused.height}`,
   )
 
+  // ①c 投影的标题就地可编辑：点名字 → 单块编辑器 → 提交 ⇒ 写的就是源块的正文
+  const titleBox = await page.evaluate(() => {
+    const t = document.querySelector('.queryview[data-surface="embed"] .queryview-title')
+    const r = t?.getBoundingClientRect()
+    return r && r.height > 0 ? { x: r.left + 8, y: r.top + r.height / 2, text: t.textContent ?? '' } : null
+  })
+  assert(titleBox && titleBox.text !== '', `投影抬头有名字可点（BlockCell 画的是块的样子）：${JSON.stringify(titleBox)}`)
+  await page.mouse.click(titleBox.x, titleBox.y)
+  await page.waitForTimeout(250)
+  assert(await page.evaluate(() => Boolean(document.querySelector('body > .tv-edit'))), '点标题开了单块编辑器（表格标题格同一台）')
+  await page.keyboard.type('改')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(300)
+  const renamed = await page.evaluate((id) => {
+    const src = window.__qua.allBlocks().find((x) => x.id === id)
+    return {
+      srcText: src?.text ?? '',
+      title: document.querySelector('.queryview[data-surface="embed"] .queryview-title')?.textContent ?? '',
+      overlayGone: !document.querySelector('body > .tv-edit'),
+    }
+  }, qid)
+  assert(renamed.overlayGone, 'Enter 提交后编辑器收起')
+  assert(renamed.srcText.includes('改'), `投影标题编辑写到源块正文：${JSON.stringify(renamed)}`)
+  assert(renamed.title.includes('改'), `抬头名字跟着变（同一份正文，不是第二份名字）：${JSON.stringify(renamed)}`)
+
+  // ①d 投影行可折：三角与竖线都折身体那一格；折了行还在、线也还在、ViewHost 不卸载
+  const projFoldState = () =>
+    page.evaluate(() => {
+      const row = document.querySelector('.blk[data-embed="1"]')
+      const body = row?.querySelector(':scope > .blk-embed-body')
+      return {
+        collapsed: row?.dataset.collapsed === '1',
+        folded: body?.dataset.folded === '1',
+        rail: Boolean(row?.querySelector(':scope > .rail-self')),
+        viewMounted: Boolean(body?.querySelector('.queryview')),
+      }
+    })
+  const projFoldBy = (sel) =>
+    page.evaluate((s) => {
+      const row = document.querySelector('.blk[data-embed="1"]')
+      const el = row?.querySelector(s)
+      if (!el) return false
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      return true
+    }, sel)
+  assert((await projFoldState()).rail, '投影行有自己的线（源的结果视图是可折的「下一层」）')
+  assert(await projFoldBy(':scope > .left > .fold'), '投影行有折叠三角')
+  await page.waitForTimeout(200)
+  let pf = await projFoldState()
+  assert(pf.collapsed && pf.folded && pf.viewMounted, `折身体：行标记、身体 data-folded，ViewHost 只藏不卸：${JSON.stringify(pf)}`)
+  assert(await projFoldBy(':scope > .rail-self'), '折了之后线仍在（短段锚在行上）')
+  await page.waitForTimeout(200)
+  pf = await projFoldState()
+  assert(!pf.collapsed && !pf.folded && pf.viewMounted, `再点同一条线展开：${JSON.stringify(pf)}`)
+
   // ② 跟随源：源建一张表格并激活 ⇒ 露面当场跟着换（同一台 ViewHost 自己订阅）
   await page.evaluate((id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'table' }), qid)
   await page.waitForTimeout(450)
@@ -2980,7 +3045,7 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
   assert(inline.includes('1'), `源自己那一屏还是 ${inline}（上下文是表面的，不是查询的）`)
 
   await ctx.close()
-  return `投影出结果；指针三态（跟随/钉大纲/跟随）；$self 跟着放它的地方`
+  return `投影出结果；标题就地可编辑（改的是源）；三角与竖线都折身体（折后线仍在）；指针三态（跟随/钉大纲/跟随）；$self 跟着放它的地方`
 })
 
 await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器改主名 ⇒ chip 跟着变；删除 ⇒ dangling', async () => {
@@ -14759,6 +14824,66 @@ await check('T165 镜像：同一块在别处再露一次面；在镜像里改�
   assert(both.model.endsWith('XYZ'), `打进去的字落到源块上：${both.model}`)
   assert(both.doms.length === 2 && both.doms.every((t) => t.endsWith('XYZ')), `两处 DOM 都看到同一份内容：${JSON.stringify(both.doms)}`)
 
+  /**
+   * **点镜像里的竖线：折的是岛里的子块层，正文里源那一棵不动。**
+   *
+   * 折叠表是每台编辑器一份的视图实例态（`doc.folded` 各存各的）——镜像与源同屏时，
+   * 点线若走「活动编辑器」就会点了镜像的线、折了源（竖线互相干扰的病根）。
+   * 判据三条：岛里 c1 标记折叠、正文 c1 不标记；孙行只在岛里消失；
+   * 再点一次岛里展回来（可逆）。
+   * （前置补一个孙块：导轨折「有子块的子块」——整组都是叶子时点线不算操作。）
+   */
+  const gc = await page.evaluate((c1id) => {
+    window.__qua.focusBlock(c1id, 0)
+    window.__qua.invoke('core.editor/insert-block', { text: '孙' })
+    window.__qua.invoke('core.editor/indent-block')
+    return window.__qua.__editor.sel?.aBlock ?? ''
+  }, fx.c1)
+  assert(gc, '前置：c1 下应有孙块（否则导轨点击是空操作）')
+  const islandRailClick = () =>
+    page.evaluate((sid) => {
+      const islandRow = [...document.querySelectorAll(`.blk[data-block-id="${sid}"]`)].find((x) =>
+        x.closest('.blk-embed-body'),
+      )
+      const rail = islandRow?.querySelector(':scope > .rail-self')
+      if (!rail) return false
+      rail.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      return true
+    }, fx.src)
+  assert(await islandRailClick(), '镜像里源行有自己的线（岛里的导轨也画）')
+  await page.waitForTimeout(250)
+  const railSplit = await page.evaluate(({ c1, gc }) => {
+    const islandRow = [...document.querySelectorAll(`.blk[data-block-id="${c1}"]`)].find((x) =>
+      x.closest('.blk-embed-body'),
+    )
+    const outerEl = window.__qua.__editor.blockEl(c1)
+    const outerGc = window.__qua.__editor.blockEl(gc)
+    return {
+      islandCollapsed: islandRow?.dataset.collapsed === '1',
+      outerCollapsed: outerEl?.dataset.collapsed === '1',
+      islandGone: !islandRow?.closest('.blk-embed-body')?.querySelector(`.blk[data-block-id="${gc}"]`),
+      outerThere: Boolean(outerGc && !outerGc.closest('.blk-embed-body')),
+    }
+  }, { c1: fx.c1, gc })
+  assert(
+    railSplit.islandCollapsed && !railSplit.outerCollapsed,
+    `点镜像的线只折岛里那一棵：${JSON.stringify(railSplit)}`,
+  )
+  assert(
+    railSplit.islandGone && railSplit.outerThere,
+    `孙行只在岛里消失，正文里源的孩子还在：${JSON.stringify(railSplit)}`,
+  )
+  assert(await islandRailClick(), '岛里的线仍可点（再点展开）')
+  await page.waitForTimeout(250)
+  const railBack = await page.evaluate(({ c1, gc }) => {
+    const islandRow = [...document.querySelectorAll(`.blk[data-block-id="${c1}"]`)].find((x) => x.closest('.blk-embed-body'))
+    return {
+      islandCollapsed: islandRow?.dataset.collapsed === '1',
+      gcBack: Boolean(islandRow?.closest('.blk-embed-body')?.querySelector(`.blk[data-block-id="${gc}"]`)),
+    }
+  }, { c1: fx.c1, gc })
+  assert(!railBack.islandCollapsed && railBack.gcBack, `再点一次岛里展回来：${JSON.stringify(railBack)}`)
+
   // 只摘这一次露面：源一个字节不动
   const removed = await page.evaluate((id) => {
     window.__qua.invoke('core.embed/remove', { blockId: id })
@@ -14775,7 +14900,7 @@ await check('T165 镜像：同一块在别处再露一次面；在镜像里改�
   assert(srcAfter, '源块还在（摘的是这一次露面，不是源）')
 
   await ctx.close()
-  return `镜像 3 行；岛里改字后模型＝…XYZ，两处 DOM 同步；移除露面只摘露面`
+  return `镜像 3 行；岛里改字两处同步；点岛里的线只折岛里那棵（正文源不动、可逆）；移除露面只摘露面`
 })
 
 await check('T166 投影：同一块在这里看成大纲表格（表头＝源的直接子块），源块不动', async () => {

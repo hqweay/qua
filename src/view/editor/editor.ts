@@ -346,12 +346,6 @@ export interface ViewEvents {
    */
   focusBlock?: (blockId: string) => void
   /**
-   * **点导轨段**：折叠／展开直接子块。装配层把它接到
-   * `core.editor/toggle-children-collapse`（显式 blockId——导轨点击不改光标，
-   * 目标块不一定是聚焦块）。未接的实例（岛编辑器没有命令面）保持直调本编辑器。
-   */
-  childrenCollapse?: (blockId: string) => void
-  /**
    * **打开一个块**：`place` 已把 Shift／⌘/Ctrl 翻译好（中心／右槽／新 tab）。
    *
    * 事件层只报落点，不认识「侧槽」「tab」这些具体语义；生产装配统一接到
@@ -2368,12 +2362,11 @@ export class BlockEditor {
     const loc = locate(this.doc, id)
     if (!loc) return
     /**
-     * 查询块没有子块 ⇒ 折的是**身体**（结果视图）。只有「这个表面真的画身体」
-     * 时才允许折：查询结果列表里的命中行也是查询块，但那一层画的是结果行，
-     * 给它折一下没有任何可见效果。
+     * 查询块没有子块 ⇒ 折的是**身体**（结果视图）；露面投影行同理（折的是源的结果
+     * 视图那一格）。只有「这个表面真的画身体」时才允许折——否则点了没有任何可见效果。
      */
     const bodyOnly = !hasLiveChildren(loc.block)
-    if (bodyOnly && (!this.events.viewBody || !hasQueryBody(loc.block))) return
+    if (bodyOnly && !this.bodyFoldable(loc.block)) return
     if (!toggleCollapsed(this.doc, id)) return
     /**
      * 身体折起来**不重排整屏**：只改这一行的折叠标记与身体的 `data-folded`。
@@ -2397,7 +2390,7 @@ export class BlockEditor {
     else delete el.dataset.collapsed
     const fold = el.querySelector<HTMLElement>(':scope > .left > .fold')
     if (fold) fold.title = folded ? t('ui.block.foldExpand') : t('ui.block.foldCollapse')
-    const body = el.querySelector<HTMLElement>(':scope > .blk-view-body')
+    const body = el.querySelector<HTMLElement>(':scope > .blk-view-body, :scope > .blk-embed-body')
     if (body) {
       if (folded) body.dataset.folded = '1'
       else delete body.dataset.folded
@@ -2405,20 +2398,45 @@ export class BlockEditor {
   }
 
   /**
-   * **点导轨段 ⇒ 折 / 展该祖先的直接子块**（对 的修订）。
+   * **点导轨段 ⇒ 折 / 展该祖先的直接子块**。
    *
    * 与 `toggleCollapse`（点三角）分开：这条命令**不折那个祖先自己**。
    * 理由见 `core/tree.ts` 的 `toggleChildrenCollapsed`。
    *
+   * ⚠️ **必须落在行所属的这台编辑器上**（桥里的直调）：折叠表（`doc.folded`）
+   *    是**每台编辑器一份**的视图实例态——镜像岛与源同屏时是两个世界，
+   *    走「活动编辑器」就会点了镜像的线、折了源的子块。
    * ⚠️ 必须 `renderAll()`（不是 `renderBlock`）：折子块会改变**可见行集合**
    *    ⇒ 祖先表与整棵 DOM 都要重建（与 `toggleCollapse` 同形）。
-   * ⚠️ 无子块 ⇒ 核心函数返回 `null` ⇒ 这里直接返回。
    * ⚠️ **不进撤销栈**：与 `toggleCollapse` 同一条理由 —— 折叠不是内容。
    */
   toggleChildrenCollapse(id: string): void {
+    const loc = locate(this.doc, id)
+    if (!loc) return
+    /**
+     * 查询块／投影行没有子块，它们的「下一层」是**身体**（结果视图）：
+     * 点线与点三角同效——折身体，行自己不折（折完行还看得见，线也还在）。
+     */
+    if (!hasLiveChildren(loc.block)) {
+      if (this.bodyFoldable(loc.block)) this.toggleCollapse(id)
+      return
+    }
     if (toggleChildrenCollapsed(this.doc, id) === null) return
     this.renderAll()
     this.emitChange('view')
+  }
+
+  /**
+   * **这个表面会不会把这一块的身体画出来**（查询内联体，或露面的投影）。
+   *
+   * 折/展身体的所有入口（三角、导轨、菜单）都认这一份判据——查询结果列表里的
+   * 命中行也是查询块，但那一层画的是结果行，给它折一下没有任何可见效果。
+   */
+  private bodyFoldable(b: Block): boolean {
+    return (
+      (Boolean(this.events.viewBody) && hasQueryBody(b)) ||
+      (Boolean(this.events.embedBody) && rowHasEmbedViewBody(b, (id) => this.store.find(id)))
+    )
   }
 
   /**
@@ -3199,7 +3217,9 @@ export class BlockEditor {
         r.block,
         this.extraHeads(r),
         (Boolean(this.events.viewBody) && rowHasInlineViewBody(r) && !isFolded(this.doc, r.block.id)) ||
-          (Boolean(this.events.embedBody) && rowHasEmbedViewBody(r.block, (id) => this.store.find(id))),
+          (Boolean(this.events.embedBody) &&
+            rowHasEmbedViewBody(r.block, (id) => this.store.find(id)) &&
+            !isFolded(this.doc, r.block.id)),
       )
     if (from > 0) {
       const headH = rows.slice(0, from).reduce((n, r) => n + rowH(r), 0)
@@ -3448,9 +3468,14 @@ export class BlockEditor {
           }
         : undefined,
       toggleCollapse: (id) => this.toggleCollapse(id),
-      // 装配层接了 childrenCollapse ⇒ 走命令（via 记录真实入口）；没接（岛）保持直调
-      toggleChildrenCollapse: (id) =>
-        this.events.childrenCollapse ? this.events.childrenCollapse(id) : this.toggleChildrenCollapse(id),
+      /**
+       * **导轨点击直调行所属编辑器**：折叠表是每台编辑器一份的视图实例态。
+       * 镜像岛与源同屏时是两个世界——若走「活动编辑器」（命令层的 `app.ed`），
+       * 点镜像里的线就会折掉正文里源那一棵。命令
+       * `core.editor/toggle-children-collapse` 仍留给面板／键位入口：那条路径
+       * 本来就该作用于聚焦中的编辑器，语义不冲突。
+       */
+      toggleChildrenCollapse: (id) => this.toggleChildrenCollapse(id),
       toggleTodo: (id) => this.toggleTodo(id),
       blankArea: this.blankArea,
       clickEmptyArea: (y, x, place) => this.clickEmptyArea(y, x, place),
@@ -3899,14 +3924,12 @@ export class BlockEditor {
       blockType: b && todoOf(b, this.fieldTable()) ? 'todo' : 'paragraph',
       blockHasChildren: Boolean(b && hasLiveChildren(b)),
       /**
-       * 这一行有没有可折的东西：子块，或**身体**（查询块的结果视图）。
+       * 这一行有没有可折的东西：子块，或**身体**（查询块的结果视图／露面投影）。
        *
-       * 只在「这个表面真的画身体」时把查询块算进来 —— 查询结果列表里的命中行
+       * 只在「这个表面真的画身体」时把身体算进来 —— 查询结果列表里的命中行
        * 不是它自己的位置，折它没有可见效果。
        */
-      blockFoldable: Boolean(
-        b && (hasLiveChildren(b) || (this.events.viewBody && hasQueryBody(b))),
-      ),
+      blockFoldable: Boolean(b && (hasLiveChildren(b) || this.bodyFoldable(b))),
       /**
        * 这一块值不值得给「视图…」入口：查询块（源＝命中），或**有子块**的容器，
        * 或已经有激活视图（要能切回大纲）。叶子普通块没有可摊开的东西 ——

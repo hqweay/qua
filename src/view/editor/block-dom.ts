@@ -66,14 +66,14 @@ export const LINE_H = 30
 export const ALIAS_HEAD_H = 18
 
 /**
- * **正文里查询块自己的身体**：静止/聚焦两档**封顶**。
+ * **带身体行的占位估算值**（只给虚拟化档的窗口外行用）。
  *
- * 与 `VIEW_BODY_H` 自己的消费者同一条纪律：视觉与虚拟化读同一个数（占位是在没有挂 DOM 的行上算的）。
- * 查询结果可能很长 ⇒ 超过这一档就封顶、内部滚动：不把正文撑成几十行，也不去量 DOM。
- * 内容装得下时身体按内容高（不预留空白）；聚焦档由 `:focus-within` 抬**上限**，
- * 装得下就不长 —— 否则「点一下结果、整块忽然变高」只是多出一片空白。
+ * 身体本身是**自然高度**（内容多高就多高——紧凑性归折叠，不归封顶）：
+ * 没挂载的行量不到内容 ⇒ 占位只能估。这个数是「一份普通查询结果」的典型高度，
+ * 估**不准是已知的**：结果特别多的查询在虚拟化档会让滚动条偏小（宁可低估也不假封顶
+ * ——封顶是旧的视觉档，已经退场）。虚拟化是 opt-in（prefs），默认档全挂载、不经过这里。
  */
-export const VIEW_BODY_H = { rest: 168, focus: 320 } as const
+export const VIEW_BODY_H = 168
 
 /**
  * 查询体与上一行之间的 `row-gap`（＝`--ui-gap-1`）。
@@ -82,11 +82,6 @@ export const VIEW_BODY_H = { rest: 168, focus: 320 } as const
  * 和 `ALIAS_HEAD_H` 一样，两处是同一件事的两份数值；改 gap 时一起改。
  */
 export const VIEW_BODY_GAP = 2
-
-export function applyViewBodyHeights(el: HTMLElement): void {
-  el.style.setProperty('--view-body-rest', CSS.px(VIEW_BODY_H.rest).toString())
-  el.style.setProperty('--view-body-focus', CSS.px(VIEW_BODY_H.focus).toString())
-}
 
 /**
  * 这一行要不要把查询结果画在自己下面。
@@ -113,7 +108,7 @@ export function rowHasInlineViewBody(r: VisibleRow): boolean {
  */
 export function visibleRowHeight(b: Block, extraHeads = 0, viewBody = false): number {
   const aliasHead = aliasesOf(b).length > 0 && prop<string>(b, DISPLAY_PROP) !== 'text' ? 1 : 0
-  const extra = viewBody ? VIEW_BODY_H.rest + VIEW_BODY_GAP : 0
+  const extra = viewBody ? VIEW_BODY_H + VIEW_BODY_GAP : 0
   return LINE_H + extra + (aliasHead + extraHeads) * ALIAS_HEAD_H
 }
 
@@ -544,6 +539,7 @@ export function makeBlockEl(
    * 不传 ⇒ 不画标签槽（静态卡片没有森林可查，容忍没有 chip）。
    */
   opts: {
+    /** 这一屏只有这一块：空块的占位文案换成「第一句」的口径 */
     single: boolean
     ancestors?: readonly string[]
     folded?: FoldState
@@ -564,8 +560,8 @@ export function makeBlockEl(
      * **查询块自己的身体**（贴在这一行下面，而不是等「打开」）。
      *
      * 与 `embedBody` 同一条分工：`view` 只交代「这一行有身体、归你画」，
-     * 画法（`ViewHost`）在装配层。行内体是另一个编辑宿主（岛），
-     * 高度由 `VIEW_BODY_H` 声明，所以虚拟化不用量 DOM。
+     * 画法（`ViewHost`）在装配层。行内体是另一个编辑宿主（岛），高度是自然高
+     * （紧凑性归折叠）；只有虚拟化档的占位按 `VIEW_BODY_H` 估算。
      *
      * ⚠️ 只有 `rowHasInlineViewBody` 为真的行才调用（按源分派，段根同此）；
      *    结果行／里层编辑器在构造上没有这个回调，深度由此截断。
@@ -576,14 +572,28 @@ export function makeBlockEl(
   const b = r.block
   const folded = opts.folded?.[b.id] === true
   /**
-   * 这一行能不能折：有子块，或**有身体**（查询块的结果视图）。
+   * 露面行的**归属**先算（foldable／导轨／块标绑定都要用它）：
+   *   · 普通行（含查询行）＝`own`：块标绑行自己；
+   *   · 投影行＝`sourceMarker`：宿主行画一颗**绑源**的块标——身体是表，
+   *     里面没有「源的那一行」可以顶上来，chrome 只能由宿主行出；
+   *   · 镜像行＝`island`：宿主行**不画** gutter——岛首行（源自己那一行）的块标、
+   *     折叠三角、导轨就是这一行的 chrome，身体左移一个 gutter 对齐块标列（CSS）。
+   */
+  const embedRes = isEmbedBlock(b) ? resolveEmbed(b, opts.find ?? (() => undefined)) : null
+  const embedKind = embedRes ? embedBodyOf(b, opts.find ?? (() => undefined)) : null
+  const embedChrome: 'own' | 'sourceMarker' | 'island' =
+    !embedRes ? 'own' : embedKind === 'view' ? 'sourceMarker' : 'island'
+  const markerTargetId = embedChrome === 'sourceMarker' && embedRes?.status === 'ok' ? embedRes.target.id : b.id
+  /**
+   * 这一行能不能折：有子块，或**有身体**（查询块的结果视图／露面投影）。
    *
-   * `bodyFoldable` 只在「这个表面真的会把身体画出来」时为真（`opts.viewBody` 是否接上）：
+   * 身体只在「这个表面真的会画它」时可折（`opts.viewBody`／`opts.embedBody` 是否接上）：
    * 查询结果列表里的命中行也是查询块，但那一层画的是**结果行**，不是它自己的位置；
    * 给它一个折叠三角就是死控件。
    */
   const bodyFoldable = Boolean(opts.viewBody) && hasQueryBody(b)
-  const foldable = r.hasChildren || bodyFoldable
+  const embedBodyFoldable = Boolean(opts.embedBody) && embedKind === 'view'
+  const foldable = r.hasChildren || bodyFoldable || embedBodyFoldable
   /** 这一行下面是否要画**行内**的身体（按源分派：有结果身体就画，段根同此） */
   const inlineBody = Boolean(opts.viewBody) && rowHasInlineViewBody(r)
   /** gutter 上那个**二元开关**（本轮只认 checkbox；别的 kind 还没定怎么画） */
@@ -772,6 +782,12 @@ export function makeBlockEl(
    * **只在有子块且未折叠的行生成**：线的语义是**子树的范围**，叶子块没有子树
    * ⇒ 它不该碰线，圆点上下都不画。
    *
+   * ⚠️ **身体行（查询内联体／投影）是唯一的例外：折叠态也画**。普通块折叠后子行
+   *    不挂载，线没有去处 ⇒ 不画；身体行的「子树」是**身体那一格**（`display:none`
+   *    只藏不卸），行自己还看得见——而可点件的判据是「**点完之后仍然存在**」：
+   *    折了之后短段锚在行上（CSS 的 `bottom: 0` 随行高自动缩短），再点一次展开。
+   *    若折叠后把线摘掉，折查询块就只能靠悬停才出现的三角，竖线成了单向的。
+   *
    * ⚠️ **没有「上段」**（2026-10-30 改：线**挂在父块标下面**，不穿过块标 ——
    *    导轨 x 与父块标 x 对齐）。
    *    带上段时两个后果用户都看见了：段首行（日记流的第二个日期）块标上方悬着一小截；
@@ -785,12 +801,13 @@ export function makeBlockEl(
    * ⚠️ 纵向范围由 CSS 定（`top: 块标中心 ＋ gap`、`bottom: 0`），不在这里算像素：
    *    `1lh` 与 `--ui-bullet-size` 是 token，DOM 层不该知道它们的数值。
    */
-  if (r.hasChildren && !folded) {
+  const bodyRow = !r.hasChildren && (bodyFoldable || embedBodyFoldable)
+  if ((r.hasChildren || bodyRow) && (!folded || bodyRow)) {
     const self = document.createElement('span')
     self.className = 'rail-self'
     self.setAttribute('aria-hidden', 'true')
     self.contentEditable = 'false'
-    // 这一段是「自己的子树」，可点折子块
+    // 这一段是「自己的子树」（子块层，或身体那一层），可点折/展
     self.dataset.foldLineFor = b.id
     self.title = t('ui.block.foldLine')
     el.appendChild(self)
@@ -799,20 +816,10 @@ export function makeBlockEl(
   /**
    * **露面行的 chrome 归属**：块标回左边，且绑定到它正在呈现的那一块。
    *
-   *   · 普通行（含查询行）＝`own`：块标绑行自己；
-   *   · 投影行＝`sourceMarker`：宿主行画一颗**绑源**的块标——身体是表，
-   *     里面没有「源的那一行」可以顶上来，chrome 只能由宿主行出；
-   *   · 镜像行＝`island`：宿主行**不画** gutter——岛首行（源自己那一行）的块标、
-   *     折叠三角、导轨就是这一行的 chrome，身体左移一个 gutter 对齐块标列（CSS）。
-   *
    * 为什么块标绑源：露面就是「这一块又出现一次」，行上 chrome 说「聚焦／拖动」
    * 指的是它正在呈现的那一块；宿主块自己从不当整屏的视图根，它的块标没有独立语义。
+   * （三种归属的判据在上方 foldable 之前——foldable／导轨／块标绑定共用同一份。）
    */
-  const embedRes = isEmbedBlock(b) ? resolveEmbed(b, opts.find ?? (() => undefined)) : null
-  const embedKind = embedRes ? embedBodyOf(b, opts.find ?? (() => undefined)) : null
-  const embedChrome: 'own' | 'sourceMarker' | 'island' =
-    !embedRes ? 'own' : embedKind === 'view' ? 'sourceMarker' : 'island'
-  const markerTargetId = embedChrome === 'sourceMarker' && embedRes?.status === 'ok' ? embedRes.target.id : b.id
 
   const left = embedChrome === 'island' ? null : document.createElement('span')
   if (left) {
@@ -942,13 +949,14 @@ export function makeBlockEl(
     body.setAttribute(EDIT_ISLAND_ATTR, '1')
     body.dataset.embedBodyFor = b.id
     /**
-     * 身体是**投影**（源的结果视图）⇒ 高度由声明给，与正文行内体同一个数：
-     * 视觉与虚拟化必须读同一个值。镜像（那棵子树）是内容高，但岛首行要
-     * **顶到 gutter 列**（CSS 按 `data-embed-body='mirror'` 左移一个 gutter）。
+     * 身体是**投影**（源的结果视图）⇒ 可折（折/展都走这一行的折叠表）；
+     * 镜像（那棵子树）是内容高，但岛首行要**顶到 gutter 列**
+     * （CSS 按 `data-embed-body='mirror'` 左移一个 gutter）。
      */
     if (embedKind === 'view') {
       body.dataset.embedBody = 'view'
-      applyViewBodyHeights(body)
+      // 折叠只藏不卸（ViewHost 的冻结结果与滚动位置还在），与查询内联体同一条口径
+      if (folded) body.dataset.folded = '1'
     } else {
       body.dataset.embedBody = 'mirror'
     }
@@ -1036,13 +1044,6 @@ export function makeBlockEl(
     body.contentEditable = 'false'
     body.setAttribute(EDIT_ISLAND_ATTR, '1')
     body.dataset.viewBodyFor = b.id
-    applyViewBodyHeights(body)
-    /**
-     * **单根屏**（整屏只有这一块）：定高的动机——「别把正文里的别人撑爆」——
-     * 在这里不成立 ⇒ 身体自然高度、整屏滚（CSS 按这一格放开 `height`）。
-     * 虚拟化占位不用跟着改：单根屏只有一行，不存在「窗口外的行」。
-     */
-    if (opts.single) body.dataset.naturalH = '1'
     /**
      * 折叠时**只藏身体、不卸载**：ViewHost 的冻结结果与滚动位置还在，
      * 展开是瞬间的；卸载会在每次折一下的时候重查一遍。

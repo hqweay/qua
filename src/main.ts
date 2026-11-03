@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  findInForest, findByAlias, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, findByAlias, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec } from './core/index.ts'
 import { plainText } from './core/model/runs.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
 import { BlockStore } from './core/model/store.ts'
@@ -2015,6 +2015,55 @@ function viewEvents(
     const vh = panels.mountBlockView(block, into, active, 'inline')
     return { root: vh.root, dispose: () => { vh.dispose(); vh.root.remove() } }
   })
+  /**
+   * **露面身体的实例缓存**（与查询体同一条判据）：镜像的岛编辑器里住着这份装载
+   * **自己的折叠表**（视图实例态），投影的 ViewHost 有订阅与冻结结果——
+   * 行重画时重建一次就丢一次。缓存键是**「此刻该挂什么身体」的指纹**
+   * （指针状态 ＋ 种类 ＋ 指针值）：行重画而判据没变 ⇒ 同一把钥匙 ⇒ 身体整棵搬过去；
+   * 改指针、判据翻转（镜像 ⇄ 投影、跟随源换看法）、源被删（身体要换成一句实话）
+   * ⇒ 新钥匙 ⇒ 按缓存的延后一拍语义拆旧挂新。
+   */
+  const embedBodyCache = createRowBodyCache(
+    (block, into) => {
+      const holder = document.createElement('div')
+      holder.className = 'blk-embed-holder'
+      into.appendChild(holder)
+      const dispose = mountEmbedBody(block, holder, {
+        store: blocks,
+        run,
+        wire: (ed2, change2) => wireViewEditor(ed2, change2, via),
+        onFocus: (next) => {
+          ed = next
+        },
+        onChange: (kind) => change?.(kind as 'text' | 'struct' | 'view' | 'load'),
+        // 投影＝同一台 ViewHost（surface 'embed'），绑定的是**这一次露面**
+        mountView: (hostBlock, target, el) => {
+          const vh = panels.mountEmbedView(hostBlock, target, el, active)
+          return () => {
+            vh.dispose()
+            vh.root.remove()
+          }
+        },
+        // 判据翻转（镜像 ⇄ 投影）只能靠重画那一行：身体是这一行的 DOM
+        repaint: (id) => repaintBlock(id),
+        invoke: (name, args, v) => void registry.invoke(name, args, v ?? via),
+      })
+      return { root: holder, dispose }
+    },
+    (block) => {
+      const find = (id: string) => blocks.find(id)
+      const pointer = readEmbed(block)
+      const target = pointer ? find(pointer.block) : undefined
+      const status = resolveEmbed(block, find).status
+      return [
+        block.id,
+        status,
+        target && isDeleted(target) ? 'deleted' : '',
+        embedBodyOf(block, find),
+        pointer?.view ?? '',
+      ].join(':')
+    },
+  )
   return {
     change,
     /**
@@ -2081,32 +2130,13 @@ function viewEvents(
     /** 拖入文件：v1 不做，但必须给一句明确的话（而不是「拖进来什么都没发生」） */
     onDropFilesRejected: () => app.toast(t('ui.asset.dropUnsupported'), 'warn'),
     /**
-     * **正文里的露面身体**（镜像／投影）：同一套分派在正文、挂载区、侧槽里都走这里。
+     * **正文里的露面身体**（镜像／投影）：同一套分派在正文、挂载区、侧槽里都走这里
+     * （实例缓存见上方 `embedBodyCache`——身体跨行重画活下来）。
      *
      * 身体里是另一台编辑器或一张表 ⇒ 返回卸载函数（外层换 DOM 之前必须调用）。
      * `onFocus` 把「活动编辑器」切到里层：键位走命令层，认的是当前这一台。
      */
-    embedBody: (block, into) =>
-      mountEmbedBody(block, into, {
-        store: blocks,
-        run,
-        wire: (ed2, change2) => wireViewEditor(ed2, change2, via),
-        onFocus: (next) => {
-          ed = next
-        },
-        onChange: (kind) => change?.(kind as 'text' | 'struct' | 'view' | 'load'),
-        // 投影＝同一台 ViewHost（surface 'embed'），绑定的是**这一次露面**
-        mountView: (hostBlock, target, el) => {
-          const vh = panels.mountEmbedView(hostBlock, target, el, active)
-          return () => {
-            vh.dispose()
-            vh.root.remove()
-          }
-        },
-        // 判据翻转（镜像 ⇄ 投影）只能靠重画那一行：身体是这一行的 DOM
-        repaint: (id) => repaintBlock(id),
-        invoke: (name, args, v) => void registry.invoke(name, args, v ?? via),
-      }),
+    embedBody: (block, into) => embedBodyCache(block, into),
     /**
      * **正文里的查询体**：与段尾宿主同一台 `ViewHost`，只是贴在查询块那一行下面。
      *
@@ -2128,8 +2158,12 @@ function viewEvents(
     // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
     // 所以「点块标进去」与「点面包屑出来」共用一套语义，没有第二种入口。
     focusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, via),
-    // 点导轨段 ＝ 折叠/展开子块，走同一条命令（键位 ⌘. 折的是自己，这是它的兄弟档）
-    childrenCollapse: (blockId) => void registry.invoke('core.editor/toggle-children-collapse', { blockId }, via),
+    /**
+     * 点导轨段不再走命令层：折叠表是**每台编辑器一份**的视图实例态，
+     * 镜像岛与源同屏时走「活动编辑器」就会点了镜像的线、折了源——
+     * 编辑器桥直调行所属的那一台（见 `editor.ts` 的桥注释）。
+     * `core.editor/toggle-children-collapse` 仍是命令面（面板／键位），作用于聚焦编辑器。
+     */
     // 块标／面包屑的打开：落点（Shift＝右槽，⌘/Ctrl＝新 tab，普通＝中心）由唯一路由分流
     openBlock: (blockId, place) => app.openBlock(blockId, place),
     // 结构动作后光标不可见的兜底：所有编辑器共用同一份实现（判据在 focusSourceInMain）
