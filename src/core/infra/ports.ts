@@ -443,11 +443,11 @@ export interface App {
   /** 新建查询块（内容对象：能被引用、能进回收站） */
   createQuery(name: string, spec: QuerySpec, parentId?: string): string
   /**
-   * **在这一块里建一个查询块**（`core.query/insert` 的落点）。
+   * **在当前位置建一个查询块**（`core.query/insert` 的落点）。
    *
-   * 查询块的求值锚点是**它的容器**，所以「查这一块」只能把它建成这一块的**子块**；
-   * 这一块容不下子块（叶子／组件块）⇒ 插到它后面，锚点退化成它的父块。
-   * 结构写与「留一个可编辑空块做落点」在同一笔事务里 ⇒ 一次撤销。
+   * 落点与「插入其他块」同一套：**空块 ⇒ 原地变成查询块**；有正文 ⇒ 建在它**后面**
+   * （section 根没有兄弟位 ⇒ 首个子块）。两种落点都在后面留一个可编辑空块做落点，
+   * 结构写与落点空块在同一笔事务里 ⇒ 一次撤销。
    */
   insertQueryBlock(blockId?: string): string
   /** 改一次露面选的视图（`core.embed/set-view` 的落点） */

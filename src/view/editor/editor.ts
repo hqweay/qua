@@ -36,6 +36,7 @@ import {
   indentMove,
   enterKind,
   locate,
+  insertSiteOf,
   deleteBlockSpan,
   detectTrigger,
   mergeIntoPrevPlan,
@@ -44,6 +45,7 @@ import {
   hasLiveChildren,
   liveChildren,
   mkBlock,
+  mkQueryBlock,
   createObjRecordInTx,
   trashOf,
   normSel,
@@ -75,7 +77,6 @@ import {
   clearValue,
   todoOf,
   TASK_STATUS_PROP_ID,
-  typeDeclOf,
   canWriteText,
   isOwnEdit,
   type Block,
@@ -85,6 +86,7 @@ import {
   type GutterField,
   type Located,
   type MovePlan,
+  type QuerySpec,
   type Sel,
   type Snap,
   type TodoState,
@@ -2327,13 +2329,11 @@ export class BlockEditor {
      * 声明「不许有子块」的根在这里容纳不下一个新块：直接返回 `false`，
      * 事务里什么都没写 ⇒ 没有任何 op。
      */
+    const site = insertSiteOf(loc, { blank: false })
+    if (!site || site.kind === 'replace') return null
+    const at = site.kind === 'first-child' ? { parentId: site.parentId, index: 0 } : site
     const ok = this.write((tx) => {
-      if (loc.parent === null) {
-        if (typeDeclOf(loc.block).children === 'none') return false
-        tx.insert(b, loc.block.id, 0)
-        return true
-      }
-      tx.insert(b, loc.parent.id, loc.index + 1)
+      tx.insert(b, at.parentId, at.index)
       return true
     })
     if (!ok) return null
@@ -2350,6 +2350,62 @@ export class BlockEditor {
    */
   insertDividerAfter(id: string): boolean {
     return this.insertTypedAfter(id, DIVIDER_TYPE) !== null
+  }
+
+  /**
+   * 建一个**查询块**（`/查询` 的唯一落点），返回它的 id。
+   *
+   * 落点与「插入其他块」同一套，判据是**这一行本身空不空**：
+   *   · 空块 ⇒ **原地变成**查询块（不多出一行空行）—— 用户在一行空白里要一个查询，
+   *     要的就是那一行变成查询，而不是「多一个查询、原来那行还留在上面」；
+   *   · 有正文 ⇒ 在它**后面**新建同级块。section 根没有兄弟位，插成它的首个子块
+   *     （与 `insertBlockAfter` 同一条规则：视觉上「根行之后」就是第一个子块）。
+   *
+   * 查询块没有可写的正文（`canWriteText` 为假）⇒ 两种落点都要在它**后面**留一个空块当光标位，
+   * 否则插完光标悬空、下一句话没处落。
+   *
+   * 条件种子按**新查询块的容器**给（`$self` 解析成它所在的那一层）：
+   * 有容器 ⇒「这一处下面」；没有（森林顶层）⇒ 全库。
+   */
+  insertQueryAfter(id: string): string | null {
+    const loc = locate(this.doc, id) ?? locate({ roots: this.store.blocks }, id)
+    if (!loc) return null
+    const before = this.snap()
+    const parentId = loc.parent?.id ?? null
+    const seed: QuerySpec = parentId ? { where: { up: { is: '$self' } } } : { where: { any: [] } }
+    const blank = isEmptyContent(loc.block.content) && !hasLiveChildren(loc.block) && canWriteText(loc.block)
+    const query = mkQueryBlock({ name: '', spec: seed, icon: 'lucide:list-filter' })
+    const empty = mkBlock('')
+
+    /**
+     * 空块：**原地改**（正文本来就是空的，一个字节都不丢），只在后面补一个落点。
+     * 已有的属性（标签之类）留着 —— 换成查询不等于把它们删掉。
+     */
+    if (blank) {
+      const ok = this.write((tx) => {
+        tx.patch(loc.block.id, (b) => {
+          b.props = { ...(b.props ?? {}), ...(query.props ?? {}) }
+          b.modified = Date.now()
+        })
+        tx.insert(empty, parentId, loc.index + 1)
+        return true
+      })
+      if (!ok) return null
+      this.structTail(before, { id: empty.id, off: 0 }, [loc.block.id, empty.id])
+      return loc.block.id
+    }
+
+    const site = insertSiteOf(loc, { blank: false })
+    if (!site || site.kind === 'replace') return null
+    const at = site.kind === 'first-child' ? { parentId: site.parentId, index: 0 } : { parentId: site.parentId, index: site.index }
+    const ok = this.write((tx) => {
+      tx.insert(query, at.parentId, at.index)
+      tx.insert(empty, at.parentId, at.index + 1)
+      return true
+    })
+    if (!ok) return null
+    this.structTail(before, { id: empty.id, off: 0 }, [query.id, empty.id])
+    return query.id
   }
 
   /**
@@ -2410,16 +2466,13 @@ export class BlockEditor {
     const empty = mkBlock('')
     // 两个块共用一笔（用户按的是一次「插入」）；落点与 `insertNear` 同一条规则：
     // section 根没有兄弟位，插成它的首两个子块
+    const site = insertSiteOf(loc, { blank: false })
+    if (!site || site.kind === 'replace') return null
+    const at = site.kind === 'first-child' ? { parentId: site.parentId, index: 0 } : site
     const ok = this.write((tx) => {
       prepare?.(tx, loc)
-      if (loc.parent === null) {
-        if (typeDeclOf(loc.block).children === 'none') return false
-        tx.insert(widget, loc.block.id, 0)
-        tx.insert(empty, loc.block.id, 1)
-        return true
-      }
-      tx.insert(widget, loc.parent.id, loc.index + 1)
-      tx.insert(empty, loc.parent.id, loc.index + 2)
+      tx.insert(widget, at.parentId, at.index)
+      tx.insert(empty, at.parentId, at.index + 1)
       return true
     })
     if (!ok) return null
