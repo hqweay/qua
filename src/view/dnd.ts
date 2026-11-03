@@ -25,6 +25,9 @@ export const BLOCK_MIME = 'application/x-qua-block'
 /** 侧槽卡片载荷的 MIME：只有它能被当成「拖的是一张卡」（移动窗口/排序） */
 export const CARD_MIME = 'application/x-qua-dock-card'
 
+/** 挂载区 tab 载荷的 MIME：只有它能被当成「拖的是一栏查询」（排序） */
+export const TAB_MIME = 'application/x-qua-mount-tab'
+
 /** 拖到**外部应用**时的可读内容（不是给别人当块用的） */
 const TEXT_MIME = 'text/plain'
 
@@ -38,6 +41,7 @@ export function isBlockId(v: unknown): v is string {
 /** 此刻正在拖的那个块/那张卡（`dragover` 期间唯一可得的来源） */
 let draggingBlock: string | null = null
 let draggingCard: string | null = null
+let draggingTab: string | null = null
 
 /** 拖源：只报「我是谁」 */
 export function setDragBlock(dt: DataTransfer | null, id: string): void {
@@ -59,6 +63,15 @@ export function setDragCard(dt: DataTransfer | null, id: string): void {
   dt.effectAllowed = 'move'
 }
 
+/** 挂载区 tab 拖源：载荷只有 tab 的稳定 id（数组位只表示顺序，id 才是身份） */
+export function setDragTab(dt: DataTransfer | null, id: string): void {
+  draggingTab = id
+  if (!dt) return
+  dt.setData(TAB_MIME, id)
+  dt.setData(TEXT_MIME, id)
+  dt.effectAllowed = 'move'
+}
+
 /** 收掉这次的拖拽（`dragend`／`drop` 之后必须调，否则悬停期会读到脏值） */
 export function clearDragBlock(): void {
   draggingBlock = null
@@ -70,10 +83,16 @@ export function clearDragCard(): void {
   hideHint()
 }
 
+export function clearDragTab(): void {
+  draggingTab = null
+  hideHint()
+}
+
 /** 全局拖拽结束：三种载荷一起清（`dragend` 可能落在任何地方，甚至不来） */
 export function clearDrag(): void {
   draggingBlock = null
   draggingCard = null
+  draggingTab = null
   hideHint()
 }
 
@@ -85,6 +104,10 @@ export function currentDraggedCardId(): string | null {
   return draggingCard
 }
 
+export function currentDraggedTabId(): string | null {
+  return draggingTab
+}
+
 /** 载荷里是不是块（只按 MIME 判，不看内容） */
 export function hasBlockPayload(dt: DataTransfer | null): boolean {
   return dt?.types?.includes(BLOCK_MIME) ?? false
@@ -93,6 +116,11 @@ export function hasBlockPayload(dt: DataTransfer | null): boolean {
 /** 载荷里是不是卡片（只按 MIME 判，不看内容） */
 export function hasCardPayload(dt: DataTransfer | null): boolean {
   return dt?.types?.includes(CARD_MIME) ?? false
+}
+
+/** 载荷里是不是挂载区 tab（只按 MIME 判，不看内容） */
+export function hasTabPayload(dt: DataTransfer | null): boolean {
+  return dt?.types?.includes(TAB_MIME) ?? false
 }
 
 /**
@@ -109,6 +137,12 @@ export function draggedBlockId(dt: DataTransfer | null): string | null {
 /** 松手期：从载荷里读卡片 id（卡片 id 是块 id 或派生卡名，只验非空） */
 export function draggedCardId(dt: DataTransfer | null): string | null {
   const raw = dt?.getData(CARD_MIME) ?? ''
+  return raw === '' ? null : raw
+}
+
+/** 松手期：从载荷里读挂载区 tab 的 id（只验非空） */
+export function draggedTabId(dt: DataTransfer | null): string | null {
+  const raw = dt?.getData(TAB_MIME) ?? ''
   return raw === '' ? null : raw
 }
 
@@ -149,10 +183,10 @@ function hideHint(): void {
 
 export interface DropTargetOpts {
   /**
-   * 载荷种类：`block`（缺省）＝块 id；`card`＝侧槽卡片实例 id。
-   * 两种载荷分开判 MIME。
+   * 载荷种类：`block`（缺省）＝块 id；`card`＝侧槽卡片实例 id；
+   * `tab`＝挂载区那一栏的稳定 id。三种载荷分开判 MIME。
    */
-  kind?: 'block' | 'card'
+  kind?: 'block' | 'card' | 'tab'
   /**
    * 这一刻拖到这儿代表谁（`null` ＝ 不指向具体块）。
    *
@@ -185,10 +219,13 @@ export interface DropTargetOpts {
 export function bindDropTarget(el: HTMLElement, o: DropTargetOpts): () => void {
   const attr = o.attr ?? 'drop'
   const kind = o.kind ?? 'block'
-  const draggedNow = kind === 'card' ? currentDraggedCardId : currentDraggedId
-  const hasPayload = kind === 'card' ? hasCardPayload : hasBlockPayload
-  const readId = kind === 'card' ? draggedCardId : draggedBlockId
-  const clear = kind === 'card' ? clearDragCard : clearDragBlock
+  /** 三种载荷各自的四件：悬停期读谁、怎么判载荷、松手期怎么读、事后怎么清（一张表，不写三元链） */
+  const KINDS = {
+    block: { now: currentDraggedId, has: hasBlockPayload, read: draggedBlockId, clear: clearDragBlock },
+    card: { now: currentDraggedCardId, has: hasCardPayload, read: draggedCardId, clear: clearDragCard },
+    tab: { now: currentDraggedTabId, has: hasTabPayload, read: draggedTabId, clear: clearDragTab },
+  } as const
+  const { now: draggedNow, has: hasPayload, read: readId, clear } = KINDS[kind]
   const mark = (id: string, e: DragEvent): void => {
     if (o.mark) o.mark(id, e)
     else el.dataset[attr] = '1'

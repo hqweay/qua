@@ -293,6 +293,8 @@ export interface App {
   removeMountTab(host: MountHost, tabId: string): boolean
   /** 改栏名（只有 local 有名字） */
   renameMountTab(host: MountHost, tabId: string, label: string): boolean
+  /** 挪一栏（拖拽排序）：顺序＝数组位，只动 local 那几栏 */
+  moveMountTab(host: MountHost, tabId: string, targetId: string, place: 'before' | 'after'): boolean
   /** 换这一栏选的视图（配置在 local tab 自己身上） */
   setMountTabView(host: MountHost, tabId: string, view: string): boolean
   /** **固定派生栏**（引用/成员/同类/提及 → local）：把现算的条件变成一栏可编辑的查询 */

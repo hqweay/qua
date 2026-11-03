@@ -1093,6 +1093,19 @@
   background: var(--ui-accent-soft);
   color: var(--ui-text);
 }
+/*
+ * 拖拽换序：拖动中的那一栏淡出，落点画一条**左/右插入线**（tab 条是横排的，上下线会被误读成「换行」）。
+ * 与卡片/块的落点用同一个语义色，形状按排布方向选。
+ */
+.mount-tabwrap[data-dragging='1'] {
+  opacity: 0.4;
+}
+.mount-tabwrap[data-drop-before='1'] {
+  box-shadow: inset 2px 0 0 0 var(--ui-accent);
+}
+.mount-tabwrap[data-drop-after='1'] {
+  box-shadow: inset -2px 0 0 0 var(--ui-accent);
+}
 .mount-tab {
   background: none;
   border: 0;

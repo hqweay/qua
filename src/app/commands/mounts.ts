@@ -14,6 +14,7 @@ import {
   journalDate,
   mkTabId,
   mkViewId,
+  moveMountEntry,
   todayISO,
   type MountEntry,
   type MountHost,
@@ -30,6 +31,7 @@ export function mountCommands(
   | 'addLocalTab'
   | 'removeMountTab'
   | 'renameMountTab'
+  | 'moveMountTab'
   | 'setMountTabView'
 > {
   const entriesOf = (host: MountHost): MountEntry[] => d.owners.entriesOf(host)
@@ -45,7 +47,7 @@ export function mountCommands(
   }
 
   /** 供本文件内部复用（「固定派生栏」就是「加一栏 local」） */
-  const api: Pick<App, 'addLocalTab' | 'removeMountTab' | 'renameMountTab' | 'setMountTabView'> = {
+  const api: Pick<App, 'addLocalTab' | 'removeMountTab' | 'renameMountTab' | 'moveMountTab' | 'setMountTabView'> = {
     /**
      * 加一栏 **local**：这一栏自己拥有条件与视图。**不建块。**
      *
@@ -89,6 +91,19 @@ export function mountCommands(
       const name = label.trim()
       if (!entry || entry.kind !== 'local' || name === '') return false
       write(host, entriesOf(host).map((e) => (e.id === tabId ? { ...e, label: name } : e)))
+      return true
+    },
+
+    /**
+     * 挪一栏（拖拽排序）：顺序＝**数组位**，所以这只是一次「换位」，不是新字段。
+     *
+     * 只动 local 那几栏：内置栏的顺序是派生的（`mountEntriesOf` 永远先给它们），
+     * 存进去也没有落点。没变化 ⇒ `false`（不产生可撤销的空动作）。
+     */
+    moveMountTab: (host, tabId, targetId, place) => {
+      const next = moveMountEntry(entriesOf(host), tabId, targetId, place)
+      if (!next) return false
+      write(host, next)
       return true
     },
 

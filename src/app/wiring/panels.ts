@@ -744,6 +744,11 @@ export function setupPanels(deps: PanelsDeps) {
           anchor,
         )
       },
+      onMoveTab: (mountHost, tabId, targetId, place) => {
+        void deps.getRegistry().invoke('core.mount/move', { host: mountHost, tabId, targetId, place }, 'mount')
+        // 顺序是那一格数组的顺序 ⇒ 写完整排一次（与摘掉同一条重排路径）
+        renderMounts()
+      },
       /** 非大纲那一栏的视图体：local ⇒ 拥有者就是这一栏（配置住在它自己身上） */
       createView: (mountHostBlock, entry) => {
         const mountHost: MountHost = isJournal(mountHostBlock)

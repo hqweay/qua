@@ -31,6 +31,7 @@ import {
   mkTabId,
   MOUNTS_PROP,
   mountEntriesOf,
+  moveMountEntry,
   readMounts,
   storedEntriesOf,
   type MountEntry,
@@ -348,4 +349,36 @@ test('U12b 改名拒绝三条：派生栏没有名字可改／空名字／不存
   assert.equal(f.commands.renameMountTab({ kind: 'block', blockId: 'h' }, 't1', '   '), false, '空名字')
   assert.equal(f.commands.renameMountTab({ kind: 'block', blockId: 'h' }, 'nope', '有名字'), false, '不存在的 id')
   assert.equal(f.writes.length, 0, '拒绝 = 零写入（不产生可撤销的半截）')
+})
+
+/* ------------------------------------------------------------ 换序（`core.mount/move`）*/
+
+test('U13 换序：前/后都落在正确的那一格（含「往后挪」——目标下标要按摘掉之后的数组算）', () => {
+  const list: MountEntry[] = [local('a', 'A'), local('b', 'B'), local('c', 'C'), local('d', 'D')]
+  const ids = (x: MountEntry[] | null) => (x ?? []).map((e) => e.id)
+
+  assert.deepEqual(ids(moveMountEntry(list, 'd', 'a', 'before')), ['d', 'a', 'b', 'c'], '拖到最前')
+  assert.deepEqual(ids(moveMountEntry(list, 'd', 'a', 'after')), ['a', 'd', 'b', 'c'], '落在前一格之后')
+  assert.deepEqual(ids(moveMountEntry(list, 'a', 'c', 'after')), ['b', 'c', 'a', 'd'], '往后挪：落在 C 之后')
+  assert.deepEqual(ids(moveMountEntry(list, 'b', 'd', 'before')), ['a', 'c', 'b', 'd'], '往后挪：落在 D 之前')
+  assert.deepEqual(ids(list), ['a', 'b', 'c', 'd'], '原数组不被改（纯函数）')
+})
+
+test('U13b 换序拒绝：同一个 id／不存在的 id ⇒ null（没变化就不该写）', () => {
+  const list: MountEntry[] = [local('a', 'A'), local('b', 'B')]
+  assert.equal(moveMountEntry(list, 'a', 'a', 'after'), null)
+  assert.equal(moveMountEntry(list, 'a', 'nope', 'after'), null)
+  assert.equal(moveMountEntry(list, 'nope', 'a', 'before'), null)
+})
+
+test('U13c 命令面：一次换序＝一条写入；没变化＝false 且零写入', () => {
+  const entries: MountEntry[] = [local('a', 'A'), local('b', 'B'), local('c', 'C')]
+  const f = renameFixture(entries)
+  assert.equal(f.commands.moveMountTab({ kind: 'block', blockId: 'h' }, 'c', 'a', 'before'), true)
+  assert.equal(f.writes.length, 1, '一次换序一笔写入（一次撤销）')
+  assert.deepEqual(f.list().map((e) => e.id), ['c', 'a', 'b'])
+
+  assert.equal(f.commands.moveMountTab({ kind: 'block', blockId: 'h' }, 'a', 'a', 'before'), false)
+  assert.equal(f.commands.moveMountTab({ kind: 'block', blockId: 'h' }, 'a', 'nope', 'before'), false)
+  assert.equal(f.writes.length, 1, '没变化不产生可撤销的空动作')
 })
