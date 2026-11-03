@@ -18,6 +18,7 @@ import {
   flatten,
   indentMove,
   locate,
+  moveStaysInside,
   outdentMove,
   siblingMove,
   type MovePlan,
@@ -198,4 +199,22 @@ test('跨容器拖拽：目标是不许有子块的类型 ⇒ inside 拒绝，be
   const dragged = mkb('out')
   assert.equal(dropMoveExternal(doc, dragged, 'div', 'inside'), null)
   assert.deepEqual(dropMoveExternal(doc, dragged, 'div', 'after'), { parentId: 'card', index: 1 })
+})
+
+test('结果集/镜像的根不能搬：根不换位，深一层只在根子树内反缩进', () => {
+  const doc = fixture()
+  const rootPlan = siblingMove(doc, 'p', 1)
+  assert.ok(rootPlan)
+  assert.equal(moveStaysInside(doc, 'p', rootPlan), false, '根换位 = 改变结果集')
+
+  const c2Plan = indentMove(doc, 'c2')
+  assert.ok(c2Plan)
+  assert.equal(moveStaysInside(doc, 'c2', c2Plan), true, '子树内缩进')
+
+  const g1Plan = outdentMove(doc, 'g1')
+  assert.ok(g1Plan)
+  assert.equal(moveStaysInside(doc, 'g1', g1Plan), true, '深一层反缩进仍落在根子树内')
+
+  assert.equal(outdentMove(doc, 'c1'), null, '一级子块反缩进会离开根子树 ⇒ 它自己就没有落点')
+  assert.equal(moveStaysInside(doc, 'c1', { parentId: 'outside', index: 0 }), false, '落点不在窗口里')
 })

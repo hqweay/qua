@@ -556,6 +556,8 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
       return readRuns(tx, prev)
     },
     __editor: mainEd,
+    /** 当前活动编辑器（键位/命令认的那一台）；测试面用它读里层编辑器的组合态 */
+    activeEditor: () => deps.getEd(),
     __registry: registry,
     __layers: layers,
     /**

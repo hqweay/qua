@@ -263,6 +263,8 @@ export class MountArea {
       area: this.root,
       // 装载动作＝重画整片（栏出现条件读维度存在性，内容变了栏可能增减）
       load: () => this.render(),
+      // 挂载区的一行是查询/派生结果：根是派生的，只能往下编辑，不能当兄弟序搬
+      structuralScope: 'roots',
       wire: (editor, change) => deps.wire(editor, change),
       onChange: (kind) => deps.onChange(kind),
       onFocus: (editor) => deps.onFocus(editor),
