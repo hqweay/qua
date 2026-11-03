@@ -403,6 +403,21 @@ export class ViewHost {
       ...(deps.onAtomClick ? { onAtomClick: deps.onAtomClick } : {}),
       openBlock: (id, place) => deps.openBlock(id, place),
     })
+    /**
+     * **投影抬头的标题可点**（只有 `embed` 表面显示抬头名字）：点普通文字就地开一台
+     * 单块编辑器（改的就是源块的正文），点引用/原子照旧先导航 —— 与表格标题格
+     * 同一条 `BlockCell` 分派，不在这里另写一份「怎么进编辑」。
+     */
+    if (deps.surface === 'embed') {
+      this.els.title.addEventListener('click', (e) => {
+        this.cell.handleClick(
+          this.deps.host().id,
+          e.target as HTMLElement,
+          { altKey: e.altKey, shiftKey: e.shiftKey },
+          { x: e.clientX, y: e.clientY },
+        )
+      })
+    }
 
     // ⚠️ 只点亮 stale，不重排列表（「不自动重算」）。
     // 拿不到「动过哪些块」就先不点亮：宁可少提示，也不要因为刷新顺带的重渲染误报。
@@ -772,8 +787,20 @@ export class ViewHost {
      */
     this.els.title.hidden =
       embed ? false : !query || this.deps.surface === 'inline' || this.deps.surface === 'dock' || this.deps.surface === 'mount'
-    this.els.title.textContent =
-      embed || query ? (name === '' ? t('ui.query.untitled') : name) : ''
+    if (embed) {
+      /**
+       * **投影的标题就地可编辑**（它就是源块的正文）：露面行自己的正文槽是空的，
+       * 名字没有第二处可显示 —— 不可编辑的话，改个名只能去源所在的那一屏。
+       * 复用表格标题格的同一台按需编辑器（`BlockCell`）：点普通文字就地开一台
+       * 单块编辑器，引用/原子照旧先导航。名字为空时给一句占位（构造时挂的
+       * 点击监听落在抬头元素上，replaceChildren 不影响它）。
+       */
+      this.cell.render(b, this.els.title)
+      if (name === '') this.els.title.dataset.emptyText = t('ui.query.untitled')
+      else delete this.els.title.dataset.emptyText
+    } else {
+      this.els.title.textContent = query ? (name === '' ? t('ui.query.untitled') : name) : ''
+    }
     const n = this.rowCount()
     this.els.count.textContent = query ? t('ui.query.count', { count: n }) : t('ui.view.count', { count: n })
     // 大纲折叠的次要文案由 `render()` 现算（它才知道这一屏画了几行）；其余分支没有折叠
@@ -1457,8 +1484,12 @@ export class ViewHost {
     this.rows = []
     this.els.root.hidden = false
     this.els.title.hidden = false
-    this.els.title.textContent = text
-    this.els.count.textContent = ''
+    /**
+     * 投影的抬头是**可编辑的源块名**（paintChrome 刚画好）：空态的话放进条数那格说，
+     * 不抢标题 —— 抢了它，源的名字就没地方显示、也没法点了。
+     */
+    if (this.deps.surface !== 'embed') this.els.title.textContent = text
+    this.els.count.textContent = this.deps.surface === 'embed' ? text : ''
     this.els.editor.hidden = false
     this.syncFoldAll()
     const host = this.outlineHost

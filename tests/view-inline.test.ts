@@ -8,14 +8,16 @@
  *     段根同此（聚焦后身体仍贴着自己那一行；段尾/窗口根宿主只接 children/items 源，
  *     再建一台就是同一块挂两台）。
  *
- * 高度也要在这里钉：视觉与虚拟化共用 `VIEW_BODY_H`，占位高度少算一档，
- * 长文档的滚动条会系统性偏小（与组件体同一条教训）。
+ * 高度也要在这里钉：身体是**自然高**（紧凑性归折叠），占位只在虚拟化档用
+ * `VIEW_BODY_H` 估「一份普通查询结果」的典型高 —— 这一条钉的是「带身体的行
+ * 占位必须比纯名字行多算一截」，不是「身体被封顶在多少」。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   hasFoldable,
   hasQueryBody,
+  isEmbedBlock,
   isFolded,
   mkBlock,
   toggleCollapsed,
@@ -46,7 +48,7 @@ test('rowHasInlineViewBody：按源分派——查询块就画，段根同此（
   assert.equal(rowHasInlineViewBody(row(1, mkBlock('普通块'))), false, '只有查询块有身体')
 })
 
-test('hasFoldable：子块或查询身体；查询块的身体能折，纯叶子不能', () => {
+test('hasFoldable：子块或身体（查询结果／露面）；纯叶子不能', () => {
   const q = query()
   const doc = { roots: [q], folded: {} }
   assert.equal(hasFoldable(q), true, '查询块没有 children，但结果视图是可折的身体')
@@ -58,14 +60,18 @@ test('hasFoldable：子块或查询身体；查询块的身体能折，纯叶子
   const leaf = mkBlock('纯叶子')
   assert.equal(hasFoldable(leaf), false)
   assert.equal(toggleCollapsed({ roots: [leaf], folded: {} }, leaf.id), false, '没有子块也没有身体 ⇒ 不记一个不存在的事实')
+
+  const embed = mkBlock('', { props: { _embed: { block: q.id, view: '' } } })
+  assert.equal(isEmbedBlock(embed), true)
+  assert.equal(hasFoldable(embed), true, '露面行下面有一格身体（镜像的子树或投影的结果视图）⇒ 写入口不把它当叶子')
 })
 
-test('visibleRowHeight：内联查询体按静止档算进占位（视觉与虚拟化同一个数）', () => {
+test('visibleRowHeight：带身体的行占位多算「典型身体高 ＋ 缝」（虚拟化档的估算）', () => {
   const q = query()
   assert.equal(
     visibleRowHeight(q, 0, true) - visibleRowHeight(q, 0, false),
-    VIEW_BODY_H.rest + VIEW_BODY_GAP,
-    '占位必须比纯名字行多出「身体 ＋ 身体与名字之间的缝」',
+    VIEW_BODY_H + VIEW_BODY_GAP,
+    '占位必须比纯名字行多出「估算身体高 ＋ 身体与名字之间的缝」',
   )
-  assert.ok(VIEW_BODY_H.focus > VIEW_BODY_H.rest, '聚焦档要比静止档高，否则「点开看更多」没有落点')
+  assert.ok(VIEW_BODY_H > 0, '估算是正数：身体行至少要给出一行的量')
 })

@@ -29,6 +29,8 @@ export interface RowBody {
  */
 export function createRowBodyCache(
   mount: (block: Block, into: HTMLElement) => RowBody,
+  /** 缓存键（默认＝块 id）：身体的「形状」会变时把形状编进键里（如露面的镜像 ⇄ 投影） */
+  keyOf: (block: Block) => string = (b) => b.id,
 ): (block: Block, into: HTMLElement) => () => void {
   interface Entry {
     body: RowBody
@@ -36,10 +38,11 @@ export function createRowBodyCache(
   }
   const live = new Map<string, Entry>()
   return (block, into) => {
-    let e = live.get(block.id)
+    const key = keyOf(block)
+    let e = live.get(key)
     if (!e) {
       e = { body: mount(block, into), pending: false }
-      live.set(block.id, e)
+      live.set(key, e)
     } else {
       e.pending = false
       // 整棵搬（连同滚动位置／冻结结果／焦点子树），不重建
@@ -51,7 +54,7 @@ export function createRowBodyCache(
       entry.pending = true
       queueMicrotask(() => {
         if (!entry.pending) return // 这一轮行重建已经把它接回屏幕
-        live.delete(block.id)
+        live.delete(key)
         entry.body.dispose()
       })
     }
