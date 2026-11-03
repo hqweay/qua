@@ -19,7 +19,7 @@ import type { Op } from '../kb/types.ts'
 import type { Sel } from './selection.ts'
 import { applyOps as patchIndex, lookupBlock, rebuild, type Index } from '../infra/index-port.ts'
 import { applyOps, diff } from '../kb/diff.ts'
-import { changesOf } from '../kb/changes.ts'
+import { changesOf, structuralOf } from '../kb/changes.ts'
 
 /**
  * 订阅者收到的信号。
@@ -29,14 +29,18 @@ import { changesOf } from '../kb/changes.ts'
  * ⚠️ 拿不到精确 id 的调用方（续用旧的 `touch(this)`）就不传，订阅者必须容忍 `ids === undefined`。
  */
 /**
- * 订阅者收到的信号：**谁发起的**、**动过哪些块**。
+ * 订阅者收到的信号：**谁发起的**、**动过哪些块**、**是不是结构变化**。
+ *
+ * 第三参（`structural`）由 op 形状推导（`structuralOf`，单一判据）：
+ * 正文改动可以「按 id 局部替换」，树变了之后行集合本身变了 ⇒ 要整页重画。
+ * 订阅者可省略它（TS 允许多参函数被少参调用）；只有需要区分两类重画的视图用它。
  *
  * ⚠️ 曾经还有第三个参数 `forestReplaced`（「整片森林被换掉了」）：撤销那时
  * `JSON.parse` 换掉整片森林 ⇒ 各视图手里的块对象当场过期，必须靠这个旗标
  * 让它们「按 id 重取、并且不许推迟」。撤销改走 `applyOps`（原地写格、对象身份不变）之后，
  * **没有任何地方需要它了** —— 旗标存在的唯一原因是旧机制的实现细节。
  */
-export type StoreSubscriber = (source?: unknown, ids?: readonly string[]) => void
+export type StoreSubscriber = (source?: unknown, ids?: readonly string[], structural?: boolean) => void
 
 /**
  * **这一条通知是不是「我」发起的那笔编辑**。
@@ -94,15 +98,16 @@ export class BlockStore {
 
   /**
    * 通知其他视图：源视图自己已经渲染过；`source` 不参与重渲染。
-   * `ids` ＝ 这次动过的块（可选；见 `StoreSubscriber` 的说明）。
+   * `ids` ＝ 这次动过的块（可选）；`structural` ＝ 树的形状变没变（都从 op 推导，
+   * 见 `StoreSubscriber` 的说明）。
    *
    * ⚠️ **不是公开的宣布入口**：调用方不许自己宣布模型变了。
    * 唯一的宣布者是一次事务的出口（`Kb.apply`），因为只有它知道「变了哪几格」。
    * 自己宣布 ⇒ 索引会被无谓作废、订阅者会被通知两次（真踩过：打字每键两次全视图重载）。
    */
-  private notify(source?: unknown, ids?: readonly string[]): void {
+  private notify(source?: unknown, ids?: readonly string[], structural?: boolean): void {
     this.probe.notifyCount++
-    for (const fn of this.subs) fn(source, ids)
+    for (const fn of this.subs) fn(source, ids, structural)
   }
 
   /**
@@ -122,7 +127,7 @@ export class BlockStore {
   apply(ops: readonly Op[], source?: unknown): void {
     patchIndex(this.index, ops, this.blocks)
     const ids = [...new Set(changesOf(ops).map((c) => c.id))]
-    this.notify(source, ids)
+    this.notify(source, ids, structuralOf(ops))
   }
 
   /** 索引（**懒重建**）。任何改动之后第一次访问会重算一次，之后所有查询共用。 */
