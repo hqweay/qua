@@ -151,9 +151,15 @@ export interface Change {
   id: string
 }
 
-/** `tx` 的调用选项：目前只有「谁发起的」（见 `KbClient.tx`） */
+/** `tx` 的调用选项：谁发起的 ＋ 这一次是不是用户在一行里直接打字（见 `KbClient.tx`） */
 export interface TxOpts {
   source?: unknown
+  /**
+   * **这一次是「直接编辑这一行」**（打字／行内粘贴／行内删除），不是结构写路径
+   * （合并／拆分／程序化整段替换）。只有它能写 `canDirectEditText` 为真的块
+   * （查询块的名字住在正文里，而它没有别的改名入口）。
+   */
+  directEdit?: boolean
 }
 
 /** 一次事务的产出。失败时**什么都不返回**（没有「半批」这种形状） */

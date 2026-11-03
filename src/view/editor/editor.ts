@@ -198,7 +198,7 @@ export interface Probe {
  *
  * 省略 ⇒ 编辑器照旧直改活块（迁移期的兜底，不是终点）。
  */
-export type Run = <R>(fn: (tx: Tx) => R, source?: unknown) => R
+export type Run = <R>(fn: (tx: Tx) => R, source?: unknown, opts?: { directEdit?: boolean }) => R
 
 export interface ViewOpts {
   container: HTMLElement
@@ -539,7 +539,7 @@ export class BlockEditor {
     this.allowBlankCreate = o.allowBlankCreate !== false
     this.allowRootRemove = o.allowRootRemove !== false
     // 写入口顺手作废那张派生表：标签声明／定义 kind 变了，下一次 `todoOf` 要重算
-    this.write = (fn, source) => {
+    this.write = (fn, source, opts) => {
       this.fieldTableCache = null
       // 发起写的编辑器就是自己（见 `Run` 的 source 口径）：不注入的话，装配层的
       // 「活动编辑器」兜底会把跨表面的一笔写记到别的编辑器头上，那台就跳过重画，
@@ -548,7 +548,7 @@ export class BlockEditor {
         const r = fn(tx)
         this.keepWritableSlots(tx)
         return r
-      }, source ?? this)
+      }, source ?? this, opts)
     }
     this.onExpandContext = o.onExpandContext
     this.onContextBack = o.onContextBack
@@ -1763,9 +1763,15 @@ export class BlockEditor {
      *    但「要不要取」可以更早决定 —— 那正是这里省下来的。
      */
     const before = this.undo.willMerge(kind, at) ? null : this.snap()
-    this.write((tx) => {
-      tx.patch(id, (b) => writeBlockContent(b, next))
-    })
+    this.write(
+      (tx) => {
+        tx.patch(id, (b) => writeBlockContent(b, next))
+      },
+      undefined,
+      // 这是一行里的直接打字（含行内粘贴／删除）：查询块的标题只住在正文里，
+      // 没有别的改名入口 ⇒ 只有这条路径能写它；合并／拆分等结构路径仍被挡。
+      { directEdit: true },
+    )
     const caret = this.sel ? this.sel.aOff : null
     this.undo.record(before, kind, at)
     if (reRender) {

@@ -265,7 +265,7 @@ export class MemoryKb implements KbClient {
        * 每个 `Tx` 方法只改内存，不再各自 `ops.push` —— 完备性由构造保证：
        * 新加一个方法的人没有地方可以「忘记发 op」。
        */
-      const ops = diffTouched(touched.values())
+      const ops = diffTouched(touched.values(), { directEdit: opts.directEdit })
       const changes = changesOf(ops)
       /**
        * **宣布只在这里发生**：`store.apply` 是状态转移的唯一入口 ——

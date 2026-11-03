@@ -277,10 +277,14 @@ export function setupPersistence(deps: PersistenceDeps) {
    * 失败时把 `pendingOps` 截回进门时的长度：`kb.tx` 会把模型整批回滚，
    * 已经攒进去的 op 却不会自己消失 —— 不清掉就等于「内存退回去了、盘上却多了一批」。
    */
-  function txRun<R>(fn: (tx: Tx) => R, source?: unknown): { ops: Op[]; changes: Change[]; result: R } {
+  function txRun<R>(
+    fn: (tx: Tx) => R,
+    source?: unknown,
+    opts: { directEdit?: boolean } = {},
+  ): { ops: Op[]; changes: Change[]; result: R } {
     const n = pendingOps.length
     try {
-      const r = kb.tx(fn, { source })
+      const r = kb.tx(fn, { source, ...opts })
       pendingOps.push(...r.ops)
       lastOps = r.ops
       return r
@@ -291,8 +295,8 @@ export function setupPersistence(deps: PersistenceDeps) {
   }
 
   /** 命令与编辑器共用的入口形状（`Run`）：只要结果 */
-  function run<R>(fn: (tx: Tx) => R, source?: unknown): R {
-    return txRun(fn, source).result
+  function run<R>(fn: (tx: Tx) => R, source?: unknown, opts: { directEdit?: boolean } = {}): R {
+    return txRun(fn, source, opts).result
   }
 
   return {

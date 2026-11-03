@@ -18411,6 +18411,61 @@ await check('T222 挂载区的查询栏可以拖拽换序：落点亮插入线�
 })
 
 
+/**
+ * 查询块的正文是它的标题：直接打字可写、可持久。
+ *
+ * ⚠️ 用户报的现象是「打字后**过一会儿**消失」。消失不是重画慢，而是正文闸拒绝了这一笔
+ *    （每敲一个字抛一次 `content is protected`，模型整批回滚，DOM 只是暂时留着；
+ *    下一次真正重画（切页／刷新／重开）就把那一行拉回模型状态）。
+ *    所以这条**必须跨过时间窗**：输入 → 等过防抖 → 再触发一次重画 → 文本仍在 → 重开仍在。
+ */
+await check('T223 查询块自身的文本（标题）可输入、可持久：跨过防抖与一次重画后仍在', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  // 在今日流末尾建一个查询块（正文空 ⇒ 屏幕上就是占位「空块」）
+  const q = await page.evaluate(() => {
+    const root = window.__qua.snapshot().activeId
+    window.__qua.invoke('core.query/insert', { blockId: root })
+    const host = window.__qua.__editor.store.find(root)
+    const qid = host?.children.find((c) => c.props?._query)?.id ?? ''
+    return { root, qid }
+  })
+  assert(q.qid, `前置：应建出查询块：${JSON.stringify(q)}`)
+
+  // 真打字（走 contenteditable → syncFromDom，不是直接改模型）
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), q.qid)
+  await page.waitForTimeout(120)
+  await page.keyboard.type('查询标题', { delay: 20 })
+
+  // 跨过防抖（>250ms），再切到别的页、回今日流（一次一定会发生重画的动作）
+  await page.waitForTimeout(700)
+  const other = await page.evaluate(() => window.__qua.pages().map((p) => p.id).find(Boolean) ?? '')
+  if (other) {
+    await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), other)
+    await page.waitForTimeout(400)
+  }
+  await page.evaluate(() => window.__qua.invoke('core.journal/today'))
+  await page.waitForTimeout(500)
+
+  const after = await page.evaluate((id) => ({
+    model: window.__qua.blocks().find((b) => b.id === id)?.text ?? null,
+    dom: document.querySelector(`.blk[data-block-id="${id}"] .tx`)?.textContent ?? null,
+  }), q.qid)
+  assert(after.model === '查询标题', `模型里应是「查询标题」：${JSON.stringify(after)}`)
+  assert(after.dom === '查询标题', `重画后 DOM 仍是「查询标题」（不是被模型拉回）：${JSON.stringify(after)}`)
+
+  // 关页重开：落盘那份也在（收端重放不再拒绝查询块的正文 op）
+  await page.reload({ waitUntil: 'load' })
+  await page.waitForFunction(() => Boolean(window.__qua), null, { timeout: 10000 })
+  await page.waitForTimeout(500)
+  const persisted = await page.evaluate((id) => window.__qua.blocks().find((b) => b.id === id)?.text ?? null, q.qid)
+  assert(persisted === '查询标题', `重开后文本仍应在（已落盘）：${JSON.stringify(persisted)}`)
+
+  await ctx.close()
+  return `查询块打字 ⇒ 跨防抖＋切页重画后模型与 DOM 都是「查询标题」；重开仍在`
+})
+
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
   await writeFile(REPORT, JSON.stringify({ total: seq, cases: results, known: known.map((r) => r.name) }))

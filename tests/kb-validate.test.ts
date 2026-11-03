@@ -15,13 +15,14 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkBlock, mkPropDef, type Block } from '../src/core/index.ts'
 import { writeBlockContent } from '../src/core/model/model.ts'
-import { textRuns } from '../src/core/model/runs.ts'
+import { plainText, textRuns } from '../src/core/model/runs.ts'
 import { applyOps, diff, forestFingerprint } from '../src/core/kb/diff.ts'
 import { validate } from '../src/core/kb/validate.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { mkJournalBlock } from '../src/core/identity/journal.ts'
 import { DIVIDER_TYPE, setBlockType } from '../src/core/model/types.ts'
+import { mkQueryBlock } from '../src/core/query/query-view.ts'
 import type { Op } from '../src/core/kb/types.ts'
 
 function fixture(): { kb: MemoryKb; store: BlockStore; ids: string[] } {
@@ -139,6 +140,46 @@ test('正文闸：普通块照常可写（闸只拦身份与只读）', () => {
   kb.tx((tx) => tx.patch(ids[2]!, (b) => writeBlockContent(b, textRuns('普通内容'))))
 })
 
+/* -------------------------------------------- 查询块：正文即标题，直接打字可写 */
+
+test('正文闸：查询块的正文（标题）只许直接编辑写，结构写路径仍被拦', () => {
+  const { kb, store } = fixture()
+  const q = mkQueryBlock({ name: '', spec: { where: { all: [] } } })
+  kb.tx((tx) => tx.insert(q, null, 0))
+
+  // 不带「直接编辑」标记的同一笔（结构写路径）必须抛错并整批回滚
+  failsWithoutChange(
+    kb,
+    store,
+    () => kb.tx((tx) => tx.patch(q.id, (b) => writeBlockContent(b, textRuns('查询标题')))),
+    /content is protected/,
+  )
+
+  // 直接编辑（打字／行内粘贴／行内删除）放行，且只产出一条正文 op
+  const r = kb.tx((tx) => tx.patch(q.id, (b) => writeBlockContent(b, textRuns('查询标题'))), {
+    directEdit: true,
+  })
+  assert.equal(plainText(store.find(q.id)!.content), '查询标题')
+  assert.ok(
+    r.ops.some((op) => op.e === 'block' && op.id === q.id && op.op === 'upsert' && op.value.content !== undefined),
+    '直接编辑必须产生一条正文 op',
+  )
+})
+
+test('回放：查询块正文 op 应用后仍在（收端按直接改名接受）', () => {
+  const { kb } = fixture()
+  const q = mkQueryBlock({ name: '', spec: { where: { all: [] } } })
+  kb.tx((tx) => tx.insert(q, null, 0))
+  const r = kb.tx((tx) => tx.patch(q.id, (b) => writeBlockContent(b, textRuns('查询标题'))), {
+    directEdit: true,
+  })
+
+  // 同形森林（查询块正文还是空的）＋ 这一笔 op ⇒ 重放后正文在
+  const forest: Block[] = [{ ...q, content: textRuns('') }]
+  applyOps(forest, r.ops)
+  assert.equal(plainText(forest[0]!.content), '查询标题')
+})
+
 /* ------------------------------------------------------- 收端：op 流先验再吃 */
 
 test('收端：validate 对系统键坏值 / 未登记键 / 受保护正文各给一条违规', () => {
@@ -153,6 +194,13 @@ test('收端：validate 对系统键坏值 / 未登记键 / 受保护正文各�
   assert.match(violations[0]!.reason, /invalid value for system prop "_tags"/)
   assert.match(violations[1]!.reason, /unregistered system prop/)
   assert.match(violations[2]!.reason, /content is protected/)
+
+  // 查询块的正文是它的标题：收端按「直接改名」接受（其余受保护块仍拒，见上）
+  const query = mkQueryBlock({ name: '', spec: { where: { all: [] } } })
+  const queryViolations = validate([query], [
+    { e: 'block', id: query.id, op: 'upsert', value: { content: textRuns('查询标题') }, at: 1 },
+  ] as Op[])
+  assert.equal(queryViolations.length, 0)
 })
 
 test('收端：validate 保留结构判据（父存在 / 成环）', () => {
