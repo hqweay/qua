@@ -58,6 +58,7 @@ import { createViewHostEls, ViewHost } from '../../ui/query/query-view.ts'
 
 import type { Chrome } from '../../ui/chrome/chrome.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
+import { editorRun } from '../../view/editor/editor-run.ts'
 import type { OwnerStore } from './owners.ts'
 
 export type PanelsDeps = {
@@ -552,7 +553,7 @@ export function setupPanels(deps: PanelsDeps) {
     const ownerBlock = blockOf(owner)
     const vh = new ViewHost(createViewHostEls(), {
       store: blocks,
-      write: (fn, source) => run(fn, source ?? opts?.source?.() ?? edOfMount(hostId)),
+      write: editorRun(run, () => opts?.source?.() ?? edOfMount(hostId)),
       kb,
       owners,
       owner,
@@ -688,7 +689,7 @@ export function setupPanels(deps: PanelsDeps) {
     const hostId = host.id
     const area = new MountArea({
       store: blocks,
-      write: (fn, source) => run(fn, source ?? edOfMount(hostId)),
+      write: editorRun(run, () => edOfMount(hostId)),
       kb,
       owners,
       journalMounts: () => journalMounts(),

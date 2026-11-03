@@ -28,6 +28,7 @@ import {
   displayNameOf,
   expandContexts,
   hasLiveChildren,
+  isOwnEdit,
   isQueryBlock,
   listTableOf,
   resolveRows,
@@ -68,6 +69,7 @@ import {
 import type { KbClient } from '../../core/kb/types.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
 import { BlockEditor, type Run } from '../../view/editor/editor.ts'
+import { DeferredFlush } from '../../view/editor/deferred-flush.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { BlockCell } from '../block-ui/block-cell.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
@@ -350,8 +352,8 @@ export class ViewHost {
   private frozen: FrozenResult | null = null
   /** 派生栏在这一屏内的显示排序（表面状态：不进库、不同步） */
   private derivedSort: SortKey[] = []
-  /** 派生栏的「整片重算」防抖计时器（成员可能新增，局部修补不够） */
-  private derivedTimer: number | null = null
+  /** 派生栏的「整片重算」防抖（成员可能新增，局部修补不够） */
+  private readonly derivedFlush = new DeferredFlush(() => this.sync(true), 120)
   /** 这一屏的**顶层行**（`render` 时存下来：「全部收起」要有东西可收才有意义） */
   private rows: readonly Block[] = []
 
@@ -404,7 +406,7 @@ export class ViewHost {
        *    判据不靠「是不是撤销」，而靠**条件真的变没变**：名字/正文的编辑不会让
        *    `frozenStale` 为真，所以正常打字仍然不重排。
        */
-      if (source === this.outline?.ed) {
+      if (isOwnEdit(source, this.outline?.ed)) {
         const spec = this.effective
         if (spec && frozenStale(this.frozen, spec, this.deps.context, this.viewKey)) {
           this.sync()
@@ -416,11 +418,8 @@ export class ViewHost {
        * 只按 id 修补已有行不够 ⇒ 防抖整片重算（不冻结、不标 stale）。
        */
       if (this.deps.derived) {
-        if (this.derivedTimer !== null) clearTimeout(this.derivedTimer)
-        this.derivedTimer = window.setTimeout(() => {
-          this.derivedTimer = null
-          this.sync(true)
-        }, 120)
+        // 只换计时器：重算语义不动（整片重算，不冻结、不标 stale）
+        this.derivedFlush.arm()
         return
       }
       if (ids && ids.length > 0) {
@@ -458,8 +457,7 @@ export class ViewHost {
 
   dispose(): void {
     this.offStale()
-    if (this.derivedTimer !== null) clearTimeout(this.derivedTimer)
-    this.derivedTimer = null
+    this.derivedFlush.dispose()
     this.treeUi = null
     this.outline?.dispose()
     this.outline = null

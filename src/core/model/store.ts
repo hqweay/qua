@@ -38,6 +38,22 @@ import { changesOf } from '../kb/changes.ts'
  */
 export type StoreSubscriber = (source?: unknown, ids?: readonly string[]) => void
 
+/**
+ * **这一条通知是不是「我」发起的那笔编辑**。
+ *
+ * `source` 是发起写的那台编辑器（见 `Run` 的口径）。自己发起的编辑，本视图已经画过了；
+ * 再整片重载一次只会把正在发生的事打断（光标、组合期、正被按的按钮）。但「欠不欠
+ * 一次重装」是另一件事：可编辑块列的成员判定读内容，自己的编辑也会让它过期。
+ *
+ * ⚠️ 「我没有编辑器」不算「我发起的」：懒建的视图、表格分支下没有大纲时，一条没有
+ *    source 的写入（换库）仍是**别人的**变化，该跟。
+ * ⚠️ 它只回答这一句，不回答「结果要不要重算」——撤销时 source 正是自己，但条件
+ *    真的回滚了；那是调用方按「条件变没变」判的。
+ */
+export function isOwnEdit(source: unknown, mine: unknown): boolean {
+  return mine != null && source === mine
+}
+
 export class BlockStore {
   blocks: Block[]
   undoStack = new UndoStack()

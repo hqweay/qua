@@ -13,6 +13,7 @@ import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { BlockStore } from '../../core/model/store.ts'
 import type { Prefs } from '../../core/infra/workspace.ts'
 import type { Run, BlockEditor, ViewEvents } from '../../view/editor/editor.ts'
+import { editorRun } from '../../view/editor/editor-run.ts'
 import type { DockWindows } from '../../ui/dock/dock-windows.ts'
 import type { ViewHost } from '../../ui/query/query-view.ts'
 import type { DockCardState, DockSlotEls } from '../../ui/dock/dock.ts'
@@ -214,7 +215,7 @@ export function setupCardMenus(deps: DockMenusDeps) {
      * 从正文拖块进卡的落手不经过焦点，活动编辑器还在正文，拿它当 source 会让
      * 正文把这次通知当成自己写的，跳过重画。
      */
-    write: (fn, source) => deps.run(fn, source ?? deps.getEd()),
+    write: editorRun(deps.run, () => deps.getEd()),
     kb: deps.kb,
     label: deps.windowLabel,
     onClose: (blockId) => deps.closeCard(side, blockId),
