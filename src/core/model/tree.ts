@@ -1028,13 +1028,18 @@ export function toggleCollapsed(doc: Doc, id: string): boolean {
  * ⚠️ **整组只看「有子块的成员」**：叶子没有可折的东西，写不进折叠态（见 `writeFold`）。
  *    若把它们算进「还有开着的」，判定就会**永远**认为组没折完 —— 点一下之后再也展不开。
  *
+ * ⚠️ **可折的判据与写入口共用同一份**（`hasFoldable`）：有子块**或**有身体（查询结果视图／
+ *    露面身体）都算。曾经这里写的是 `hasLiveChildren` —— 于是「点父块的线」只折了有子块的
+ *    兄弟，**查询块那一格不动**，而用户看到的是「同一组里有的折了、有的没折」。两份判据
+ *    分开写必然漂移：`writeFold` 那边早就把身体算进去了。
+ *
  * @returns 本次意图：`true` ＝ 折了，`false` ＝ 展了；
  *          **没有可折叠的成员 ⇒ `null`**（调用方据此拒绝：不记撤销、不重画）
  */
 export function toggleChildrenCollapsed(doc: Doc, id: string): boolean | null {
   const loc = locate(doc, id)
   if (!loc) return null
-  const foldable = liveChildren(loc.block).filter((c) => hasLiveChildren(c))
+  const foldable = liveChildren(loc.block).filter((c) => hasFoldable(c))
   if (foldable.length === 0) return null
   const anyOpen = foldable.some((c) => !isFolded(doc, c.id))
   for (const c of foldable) writeFold(doc, c.id, anyOpen)
