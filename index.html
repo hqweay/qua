@@ -6,6 +6,8 @@
     <!--
       CSP：本地应用只需要自己的脚本、样式，以及 data: 与 blob: 两种图片。
       · style-src 的 'unsafe-inline' 用于首屏 color-scheme 兜底与 Vite 注入的样式；
+      · script-src 的 'wasm-unsafe-eval' 是分词 WASM 的唯一用途（不开放 JS eval）；
+      · worker-src 的 blob: 给 Vite 的 module worker 兜底（dev 下 worker 由 blob 引导）；
       · img-src 的 blob: 是**行内资产的唯一来源**：字节从资产库读出来是 Blob，
         经 `URL.createObjectURL` 变成 blob URL 才能给 <img>。少了它，真实图片会被
         浏览器静默拦下（console 里只有一条 error，页面上是一片空白）。
@@ -13,7 +15,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: qua-asset:; font-src 'self'; connect-src 'self' ws://127.0.0.1:5180; object-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: qua-asset:; font-src 'self'; connect-src 'self' ws://127.0.0.1:5180; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <!--
       首屏兜底：在 styles.css / main.ts 到位**之前**就按系统外观定色，冷启动不闪。

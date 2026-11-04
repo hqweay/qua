@@ -71,6 +71,16 @@ export class SearchIndexer implements FtsCommitSource {
     return this.map.size
   }
 
+  /** 重建期间有没有编辑被跳过（决定能不能标 ready） */
+  get dirtyDuringBuild(): boolean {
+    return this.dirtyDuringRebuild
+  }
+
+  /** 当前已分配的最后一个 rowid（重建时写进 meta） */
+  get currentRowid(): number {
+    return this.rowid
+  }
+
   /** 重建开始：整表清空由调用方做；这里只把状态与分配器归零 */
   beginRebuild(): void {
     this.rebuilding = true
