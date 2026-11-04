@@ -19,11 +19,16 @@ import {
   liveChildren,
   mkBlock,
   prop,
+  surfaceRefKey,
+  surfaceTitleOf,
   todayISO,
   type Block,
+  type DerivedCardId,
   type Doc,
   type SecLayout,
   type ShellCol,
+  type SurfaceRef,
+  type UtilityFaceId,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { UndoCapture } from '../../core/kb/scoped.ts'
@@ -83,6 +88,11 @@ export type PagesDeps = {
   openInDock: (id: string) => void
   /** tab 条是 UI：状态变化时把「有哪些 tab／哪个活跃／叫什么」交给装配层重画 */
   onTabsChanged?: (tabs: readonly TabInfo[]) => void
+  /**
+   * 中心前面现在是哪张**表面**（null ＝ 块编辑器）。表面 tab 的身体归表面宿主，
+   * tab 状态层只说「谁在前」；切回块 tab 时必须通知（编辑器重新可见）。
+   */
+  onSurface?: (ref: SurfaceRef | null) => void
 }
 
 /** 一条 tab 的显示信息（UI 只读，不改 tab 状态） */
@@ -124,12 +134,16 @@ export function setupPages(deps: PagesDeps) {
   type NavPoint = { id: string; feed: boolean; state?: ViewState }
   type TabNav = { back: NavPoint[]; forward: NavPoint[] }
   /**
-   * **一个 tab ＝ 一份保存的视图**（不是一台并行编辑器）：
+   * **一个块 tab ＝ 一份保存的视图**（不是一台并行编辑器）：
    * `doc` 是装载单位（roots／folded／contexts／expandedRoots／viewRootId），
    * `state` 是位置（视口锚＋选区），`viewStates` 是「在这个 tab 里访问过的视图 →
    * 离开时最后的位置」，`nav` 是这个 tab 自己的前进/后退。
+   *
+   * 表面 tab（派生/工具面）只有身份：**终点面**——没有 doc、没有位置、没有历史，
+   * 名字取自目录（固定名），按 kind 去重，关闭即回。
    */
-  type TabState = {
+  type BlockTabState = {
+    kind: 'block'
     id: string
     activeId: string
     feed: boolean
@@ -140,6 +154,10 @@ export function setupPages(deps: PagesDeps) {
     viewStates: Map<string, ViewState>
     nav: TabNav
   }
+  type SurfaceTabState =
+    | { kind: 'derived'; id: string; card: DerivedCardId }
+    | { kind: 'utility'; id: string; face: UtilityFaceId }
+  type TabState = BlockTabState | SurfaceTabState
   const emptyViewState = (): ViewState => ({ scroll: null, sel: null })
   const tabs: TabState[] = []
   let activeTabId = ''
@@ -165,7 +183,13 @@ export function setupPages(deps: PagesDeps) {
   }
   const currentTab = (): TabState | undefined => tabs.find((x) => x.id === activeTabId)
 
+  /** 一张表面 tab 的身份（读出口按 kind 分派；块 tab 不用它） */
+  const surfaceRefOf = (tab: SurfaceTabState): SurfaceRef =>
+    tab.kind === 'derived' ? { kind: 'derived', card: tab.card } : { kind: 'utility', face: tab.face }
+
   const tabTitle = (tab: TabState): string => {
+    // 表面 tab 的名字是目录里的**字典 id**（固定名）：这里取字；不在目录里才兜底
+    if (tab.kind !== 'block') return t(surfaceTitleOf(surfaceRefOf(tab)) ?? 'ui.page.untitled')
     const b = kb.get(tab.activeId)
     const base = b ? blockLabel(b) : t('ui.page.untitled')
     return tab.feed ? `${base} · ${t('ui.tabs.feed')}` : base
@@ -177,7 +201,12 @@ export function setupPages(deps: PagesDeps) {
   }
   function syncNav(): void {
     const tab = currentTab()
-    if (!tab) return
+    // 表面 tab 是终点面：没有自己的历史可接（前进/后退按钮与键位都归零）
+    if (!tab || tab.kind !== 'block') {
+      nav.back = []
+      nav.forward = []
+      return
+    }
     nav.back = tab.nav.back
     nav.forward = tab.nav.forward
   }
@@ -196,7 +225,8 @@ export function setupPages(deps: PagesDeps) {
     const mainEd = deps.getMainEd()
     if (!mainEd) return
     tabsReady = true
-    const tab: TabState = {
+    const tab: BlockTabState = {
+      kind: 'block',
       id: `tab-${++tabSeq}`,
       activeId: deps.getWs().activeId || (mainEd.doc.roots[0]?.id ?? ''),
       feed: isFeedView(),
@@ -213,11 +243,11 @@ export function setupPages(deps: PagesDeps) {
     emitTabs()
   }
 
-  /** 保存当前 tab 的 Doc／shells／layout／位置；导航与切 tab 共用这一处 */
+  /** 保存当前 tab 的 Doc／shells／layout／位置；导航与切 tab 共用这一处。表面 tab 没有可保存的 */
   function captureActive(): ViewState | null {
     const mainEd = deps.getMainEd()
     const tab = currentTab()
-    if (!mainEd || !tab) return null
+    if (!mainEd || !tab || tab.kind !== 'block') return null
     const state = mainEd.captureViewState()
     tab.doc = mainEd.doc
     tab.shells = mainEd.shellCols
@@ -250,6 +280,7 @@ export function setupPages(deps: PagesDeps) {
       ...(viewRootId ? { viewRootId } : {}),
     }
     return {
+      kind: 'block',
       id: `tab-${++tabSeq}`,
       activeId: id,
       feed,
@@ -262,10 +293,20 @@ export function setupPages(deps: PagesDeps) {
     }
   }
 
-  /** 把一份 tab 装载进中心编辑器（切 tab 与新 tab 共用） */
+  /** 把一份 tab 装载进中心（切 tab 与新 tab 共用）。块 tab 装编辑器；表面 tab 交给表面宿主 */
   function loadTab(tab: TabState): void {
     const mainEd = deps.getMainEd()
     deps.setEd(mainEd)
+    if (tab.kind !== 'block') {
+      // 终点面：编辑器保持上一份块视图原样（回来时原位恢复），身体归表面宿主
+      deps.onSurface?.(surfaceRefOf(tab))
+      deps.getChrome().renderTitle(activeBlock(), [])
+      deps.renderDocks()
+      syncNav()
+      emitTabs()
+      return
+    }
+    deps.onSurface?.(null)
     deps.getWs().activeId = tab.activeId
     mainEd.loadPage(tab.doc)
     mainEd.setLayout(tab.layout)
@@ -298,7 +339,7 @@ export function setupPages(deps: PagesDeps) {
   /** 新 tab 打开一个目标视图；同一个视图已经开着就切过去（一个视图只开一张 tab） */
   function openInNewTab(id: string, feed = false): boolean {
     initTabs()
-    const existing = tabs.find((tab) => tab.activeId === id && tab.feed === feed)
+    const existing = tabs.find((tab) => tab.kind === 'block' && tab.activeId === id && tab.feed === feed)
     if (existing) return activateTab(existing.id)
     const tab = makeTab(id, feed)
     if (!tab) return false
@@ -310,12 +351,36 @@ export function setupPages(deps: PagesDeps) {
     return true
   }
 
+  /**
+   * 打开一张**表面 tab**（派生/工具面）。按 kind 去重：同一张面全局只有一张，
+   * 已经开着 ⇒ 切过去。终点面：没有历史、没有位置，关闭即回。
+   * 能不能开由目录守卫（`isValidSurfaceRef`）说了算；这里不再验第二遍。
+   */
+  function openSurfaceTab(ref: SurfaceRef): boolean {
+    initTabs()
+    const key = surfaceRefKey(ref)
+    const existing = tabs.find((tab) => tab.kind !== 'block' && surfaceRefKey(surfaceRefOf(tab)) === key)
+    if (existing) return activateTab(existing.id)
+    captureActive()
+    const tab: SurfaceTabState =
+      ref.kind === 'derived'
+        ? { kind: 'derived', id: `tab-${++tabSeq}`, card: ref.card }
+        : { kind: 'utility', id: `tab-${++tabSeq}`, face: ref.face }
+    tabs.push(tab)
+    activeTabId = tab.id
+    syncNav()
+    loadTab(tab)
+    return true
+  }
+
   function newTab(): boolean {
     initTabs()
     const today = journalId(todayISO())
     const todayBlock = kb.get(today)
-    const targetId = todayBlock ? today : (currentTab()?.activeId ?? '')
-    const targetFeed = todayBlock ? true : Boolean(currentTab()?.feed)
+    const cur = currentTab()
+    const blockTab = cur?.kind === 'block' ? cur : undefined
+    const targetId = todayBlock ? today : (blockTab?.activeId ?? '')
+    const targetFeed = todayBlock ? true : Boolean(blockTab?.feed)
     if (!targetId) return false
     // `+` 总是开一张新 tab（浏览器同一条直觉）；⌘+点击才按视图去重
     const tab = makeTab(targetId, targetFeed)
@@ -379,6 +444,8 @@ export function setupPages(deps: PagesDeps) {
     nav.back = []
     nav.forward = []
     nav.lock = false
+    // 换库之后第一屏总是块视图：表面宿主要回到编辑器，别把旧面的身体留在中心
+    deps.onSurface?.(null)
     emitTabs()
   }
 
@@ -445,7 +512,8 @@ export function setupPages(deps: PagesDeps) {
    */
   function loadRoots(roots: Block[]): void {
     const mainEd = deps.getMainEd()
-    const tab = currentTab()
+    const cur = currentTab()
+    const tab = cur?.kind === 'block' ? cur : undefined
     // 装载边界：空 journal 天在这里补首子块（经事务、一条 op）——
     // 所有「打开」命令共用的唯一归一落点，`rootsFor`／命令层只选择、不写库
     materializeEditableRoots(roots)
@@ -544,7 +612,9 @@ export function setupPages(deps: PagesDeps) {
        *   · 当前 tab 的 `viewStates` 也存一份（直接返回时用它最后一次的位置）。
        */
       initTabs()
-      const tab = currentTab()
+      // 表面 tab 上没有「当前块」可换（换落点先回块 tab）；历史也只记块 tab 的
+      const cur = currentTab()
+      const tab = cur?.kind === 'block' ? cur : undefined
       const feed = view?.feed === true
       const ws = deps.getWs()
       const fromId = tab?.activeId ?? ws.activeId
@@ -701,7 +771,9 @@ export function setupPages(deps: PagesDeps) {
    */
   function historyGo(dir: 'back' | 'forward'): boolean {
     initTabs()
-    const tab = currentTab()
+    // 表面 tab 是终点面：没有历史可走（它的 nav 恒空）
+    const cur = currentTab()
+    const tab = cur?.kind === 'block' ? cur : undefined
     if (!tab) return false
     const from = dir === 'back' ? nav.back : nav.forward
     const to = dir === 'back' ? nav.forward : nav.back
@@ -755,6 +827,8 @@ export function setupPages(deps: PagesDeps) {
     listTabs,
     activateTab,
     openInNewTab,
+    /** 表面 tab（派生/工具面）：按 kind 去重、固定名、无历史 */
+    openSurfaceTab,
     newTab,
     closeTab,
     nextTab: () => cycleTab(1),

@@ -13,6 +13,7 @@ import { highlightSnippet } from './core/search/query.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
 import { BlockStore } from './core/model/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
+import { validSurfaceRef } from './core/index.ts'
 import type { Op } from './core/kb/types.ts'
 import { BlockEditor, type ViewEvents } from './view/editor/editor.ts'
 import { inputSession } from './view/editor/input-session.ts'
@@ -40,6 +41,7 @@ import { devCommands, dropIdentity, journalCommands, mountCommands, moveCommands
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupAxis } from './app/wiring/axis.ts'
+import { setupSurface } from './app/wiring/surface.ts'
 import { createRowBodyCache } from './app/wiring/row-bodies.ts'
 import { setupDocks } from './app/wiring/docks.ts'
 import { setupCardMenus } from './app/wiring/dock-menus.ts'
@@ -443,6 +445,17 @@ const axis = setupAxis({
 })
 
 /**
+ * 中心表面宿主：派生/工具面的 tab 身体住这里（与编辑器二选一可见）。
+ * 装配在 chrome 之后（要它的宿主元素）、pages 之前（tab 状态层要经由它切表面）。
+ */
+const surface = setupSurface({
+  kb,
+  getRegistry: () => registry,
+  renderDocks: () => renderDocks(),
+  getChrome: () => chrome,
+})
+
+/**
  * 持久化装配：库与设备两个写队列、防抖、事务收尾都收在这一节。
  * 它在 chrome 之后装配（保存失败要挂常驻告警），而持久化的函数没有更早的顶层调用
  * ——全是运行时触发，挪到这里是安全的。
@@ -788,7 +801,7 @@ const dispatchEnv = installDispatch({
   editorEl,
 })
 
-const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEditableRoot, materializeEditableRoots, initTabs, resetTabs, activateTab, openInNewTab, newTab, closeTab, nextTab, prevTab, canGoBack, canGoForward, refreshTabs } = setupPages({
+const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEditableRoot, materializeEditableRoots, initTabs, resetTabs, activateTab, openInNewTab, openSurfaceTab, newTab, closeTab, nextTab, prevTab, canGoBack, canGoForward, refreshTabs } = setupPages({
   kb,
   blocks,
   txRun,
@@ -818,7 +831,12 @@ const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEdit
   // 「看属性」承诺的是内容而不是一列空槽：卡被关掉之后由这一条放回来
   ensureDockCard: (side, id) => addDerived(side, id),
   openInDock: (id) => openWindow('right', id),
-  onTabsChanged: (tabs) => renderCenterTabs(tabs),
+  onTabsChanged: (tabs) => {
+    renderCenterTabs(tabs)
+    // 表面 tab 开着时库会变（恢复/删除走别处）：身体跟着重画，与槽里的同一张卡同拍
+    surface.refreshIfShown()
+  },
+  onSurface: (ref) => surface.show(ref),
 })
 
 /**
@@ -1809,6 +1827,12 @@ const app: App = {
 
   // tab：一个 tab 一份保存的视图（Doc + 位置 + 自己的历史）
   openInNewTab: (id, feed) => openInNewTab(id, feed),
+  // 表面 tab（派生/工具面）：目录守卫在这里，状态层不再验第二遍
+  openSurface: (ref) => {
+    const valid = validSurfaceRef(ref)
+    if (!valid) return false
+    return openSurfaceTab(valid)
+  },
   newTab: () => newTab(),
   closeTab: (id) => closeTab(id),
   nextTab: () => nextTab(),

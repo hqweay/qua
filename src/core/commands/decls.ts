@@ -116,6 +116,8 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.tab/close', title: t('cmd.tab.close'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['tab', 'close'] },
   { name: 'core.tab/next', title: t('cmd.tab.next'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['tab', 'next'] },
   { name: 'core.tab/prev', title: t('cmd.tab.prev'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['tab', 'prev'] },
+  // 表面 tab：把一张派生面/工具面放进中心（按 kind 去重；终点面，关闭即回）
+  { name: 'core.surface/open', title: t('cmd.surface.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { kind: { type: 'string', enum: ['derived', 'utility'] }, id: { type: 'string' } }, keywords: ['surface', 'panel', 'trash', t('menu.kw.surface')] },
 
   /* ---- 页面 ---- */
   { name: 'core.page/new', title: t('cmd.page.new'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.page'), tile: { icon: 'lucide:plus' } },

@@ -19616,6 +19616,80 @@ await check('T232 Esc 浮层优先于退档；档位期间手动开槽以他为�
   return '浮层优先；以他为准贯穿退出'
 })
 
+await check('T233 回收站在中心打开：卡留在槽里（同一份数据两个尺寸）；派生 tab 按 kind 去重；关闭即回编辑器；中心里可恢复', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  // 前置：开一页、删它的一个子块 ⇒ 回收站有一行（右槽默认布局里就有回收站卡）
+  await page.evaluate(() => {
+    window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id })
+    const blk = document.querySelector('#editor .blk[data-depth="1"]')
+    window.__qua.focusBlock(blk.dataset.blockId, 0)
+    window.__qua.invoke('core.editor/delete-block', {}, 'api')
+  })
+  await page.waitForTimeout(150)
+  const slotRows = await page.evaluate(() => document.querySelectorAll('#dock-right [data-trash-row]').length)
+  assert(slotRows >= 1, `前置：右槽回收站卡应有一行（${slotRows}）`)
+
+  const state = () =>
+    page.evaluate(() => ({
+      tabs: [...document.querySelectorAll('.center-tab')].map((t) => ({ title: t.title, active: t.dataset.active === '1' })),
+      surfaceVisible: !document.getElementById('center-surface').hidden,
+      scrollVisible: !document.getElementById('scroll').hidden,
+      surfaceRows: document.querySelectorAll('#center-surface [data-trash-row]').length,
+      slotRows: document.querySelectorAll('#dock-right [data-trash-row]').length,
+    }))
+
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'derived', id: 'trash' }, 'api'))
+  let now = await state()
+  assert(
+    now.tabs.some((t) => t.title === '回收站' && t.active),
+    `回收站应成为中心的活动 tab：${JSON.stringify(now.tabs)}`,
+  )
+  assert(now.surfaceVisible && now.surfaceRows >= 1, `中心表面应显示回收站行（${now.surfaceRows}）`)
+  assert(now.scrollVisible === false, '表面 tab 在前 ⇒ 编辑器让位')
+  assert(now.slotRows >= 1, `卡留在槽里——同一份数据两个尺寸（槽里 ${now.slotRows} 行）`)
+
+  // kind 去重：再开一次不产生第二张
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'derived', id: 'trash' }, 'api'))
+  now = await state()
+  assert(now.tabs.filter((t) => t.title === '回收站').length === 1, `同一张面全局一张 tab：${JSON.stringify(now.tabs)}`)
+
+  // 终点面：没有历史（前进/后退都不可用）；切走再切回，身体重新现算
+  const navable = await page.evaluate(() => window.__qua.ctxKeys())
+  assert(!navable.canGoBack && !navable.canGoForward, '终点面没有内部历史')
+  await page.keyboard.press(kbd('mod+t'))
+  await page.waitForTimeout(150)
+  now = await state()
+  assert(now.scrollVisible && !now.surfaceVisible, '切到块 tab ⇒ 编辑器回来')
+  await page.evaluate(() => {
+    const el = [...document.querySelectorAll('.center-tab')].find((t) => t.title === '回收站')
+    el.click()
+  })
+  await page.waitForTimeout(120)
+  now = await state()
+  assert(now.surfaceVisible && now.surfaceRows >= 1, '切回回收站 tab ⇒ 身体重新现算')
+
+  // 中心里恢复：行当场少一条（身体重画），槽里的卡同拍跟上
+  await page.evaluate(() => document.querySelector('#center-surface .trash-restore').click())
+  await page.waitForTimeout(150)
+  now = await state()
+  assert(now.surfaceRows === 0, `恢复后中心列表应清空（${now.surfaceRows}）`)
+  assert(now.slotRows === 0, `槽里的回收站卡同拍跟上（${now.slotRows}）`)
+
+  // 关闭即回：终点面关闭后不回「上一次的位置」，直接回到编辑器
+  await page.evaluate(() => {
+    const el = [...document.querySelectorAll('.center-tab')].find((t) => t.title === '回收站')
+    el.querySelector('.center-tab-close').click()
+  })
+  await page.waitForTimeout(120)
+  now = await state()
+  assert(now.scrollVisible && !now.surfaceVisible, `关闭表面 tab ⇒ 回编辑器（${JSON.stringify(now.tabs)}）`)
+
+  await ctx.close()
+  return '卡留在槽、kind 去重、终点面无历史、中心可恢复'
+})
+
 /**
  * **判定必须在所有用例之后**：这一段曾经写在中途，之后新增的用例（T206 起）即使红了
  * 也不会进 `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。

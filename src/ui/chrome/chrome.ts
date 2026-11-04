@@ -63,6 +63,11 @@ export interface Chrome {
   inspectCardTitleEl: HTMLElement
   /** 中心槽 tab 条（纯容器；内容由 `ui/center-tabs.ts` 画） */
   centerTabsEl: HTMLElement
+  /**
+   * **中心表面宿主**：派生/工具面的 tab 身体挂在这里，与 `#scroll` 二选一可见
+   * （块 tab 的内容住编辑器，不用它）。可见性的切换归表面宿主，不归 tab 条。
+   */
+  centerSurfaceEl: HTMLElement
   propertiesBodyEl: HTMLElement
   propertiesAddEl: HTMLButtonElement
   /** 右槽的堆叠容器：检视卡在装配时挂进去（它必须先在文档里，重画才认得它） */
@@ -96,6 +101,7 @@ export function createChrome(onCrumb?: (blockId: string, place: OpenPlace) => vo
   const inspectCardEl = must('inspect-card')
   const inspectCardTitleEl = must('inspect-card-title')
   const centerTabsEl = must('center-tabs')
+  const centerSurfaceEl = must('center-surface')
   const propertiesBodyEl = must('properties-body')
   const propertiesAddEl = must<HTMLButtonElement>('properties-add')
   const dockRightStackEl = must('dock-right-stack')
@@ -177,6 +183,7 @@ export function createChrome(onCrumb?: (blockId: string, place: OpenPlace) => vo
     inspectCardEl,
     inspectCardTitleEl,
     centerTabsEl,
+    centerSurfaceEl,
     propertiesBodyEl,
     propertiesAddEl,
     dockRightStackEl,

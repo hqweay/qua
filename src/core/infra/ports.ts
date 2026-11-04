@@ -365,6 +365,13 @@ export interface App {
   newTab(): boolean
   /** 关 tab（省略 id ＝ 当前）；关掉最后一张会补一张今日 */
   closeTab(id?: string): boolean
+  /**
+   * 打开一张**表面 tab**（派生面／工具面）。按 kind 去重：同一张面全局一张，已开 ⇒ 切过去。
+   *
+   * 表面是**终点面**：没有导航历史、没有位置恢复，关闭即回。id 能不能开由两张
+   * 目录（派生卡目录 ∧ 中心接得住的子集／工具面目录）守卫；不认识的 id 返回 `false`。
+   */
+  openSurface(ref: { kind: 'derived' | 'utility'; id: string }): boolean
   nextTab(): boolean
   prevTab(): boolean
   /** 退回该容器所在的顶层块（面包屑的「根」） */
