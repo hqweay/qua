@@ -159,6 +159,12 @@ export type SystemPropId =
   | '_ownProps'
   // 字段定义的**编辑位置**（见 `core/props.ts` 的 `uiPositionOf`）
   | '_uiPosition'
+  /**
+   * 字段定义的**缺省值**（见 `core/props.ts` 的 `readField`）：声明了这一栏却没填的块，
+   * 读侧按它取值（select 存选项块 id）。只对写了自己的缺省的定义生效——
+   * 没有 `_default` 的定义，未填仍是未填。
+   */
+  | '_default'
   // 归属边（算作）：子块 → 上级的有序 ref 列表（见 `core/hierarchy.ts`）
   | '_belongsTo'
   /**

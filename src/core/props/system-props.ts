@@ -39,9 +39,11 @@ import { BELONGS_TO_PROP, isBelongsToRefs } from '../relations/hierarchy.ts'
 import { isJournalDate } from '../identity/journal.ts'
 import {
   CHOICE_SCOPE_PROP,
+  DEFAULT_PROP,
   FIELD_DEFS_PROP,
   OWN_PROPS_PROP,
   UI_POSITION_PROP,
+  isDefaultValue,
   isFieldDefRefs,
   isOwnPropSlots,
   isPropKind,
@@ -76,6 +78,7 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   [CHOICE_SCOPE_PROP]: (v) => parseChoiceScope(v) !== null,
   [OWN_PROPS_PROP]: isOwnPropSlots,
   [UI_POSITION_PROP]: isUiPositionValue,
+  [DEFAULT_PROP]: isDefaultValue,
   // 归属与标签
   [BELONGS_TO_PROP]: isBelongsToRefs,
   [TAGS_PROP]: isTagRefList,

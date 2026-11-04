@@ -78,6 +78,8 @@ import {
   clearValue,
   todoOf,
   TASK_STATUS_PROP_ID,
+  TASK_STATUS_TODO_ID,
+  TASK_STATUS_DONE_ID,
   canWriteText,
   isOwnEdit,
   type Block,
@@ -2511,17 +2513,18 @@ export class BlockEditor {
   }
 
   /**
-   * **勾 / 取消勾选**这一行 gutter 上的那个二元开关。
+   * **勾 / 取消勾选**这一行 gutter 上那个任务开关。
    *
    * 写的是**属性值**，不是块字段：任务状态是一个真实字段（有定义块、能进查询、能导出），
    * 所以这里走 `setValue`。`gutterFieldsOf` 是唯一的「这一行有哪些 gutter 字段」来源，
    * 点方框与菜单命令共用它 ⇒ 两条入口不会对同一行给出不同答案。
    *
-   * 「未填」与「`false`」在这里都算**没勾**：一次点击就是打上勾，再点一次取消
-   * （`!current`，所以从「没有这一槽」点一下直接变已勾，不需要先填一个中间态）。
+   * 任务状态是 select（值＝选项块 id）：切换是**完成 ⇄ 未完成**的二元互换，
+   * 「进行中」不进快捷键 —— 它是显式意图，走属性编辑器或看板拖列去设。
+   * 同一行上别的 checkbox 字段仍是布尔翻转（「未填」也算没勾，一次点击就是打上勾）。
    *
    * ⚠️ 这一行**一个 gutter 字段都没有**时（例如从菜单对普通块按「切换待办」）：
-   *    落 `false` 而不是 `true`。落下去之后它就成了这一块的**自有字段**，
+   *    落「待办」而不是「完成」。落下去之后它就成了这一块的**自有字段**，
    *    gutter 上随即出现方框 —— 于是「先成为一个没做完的任务，再点才勾上」，
    *    与原来「第一次切换 ＝ 变成待办」的手感一致。
    */
@@ -2530,10 +2533,16 @@ export class BlockEditor {
     if (!loc) return
     const fields = gutterFieldsOf(loc.block, this.store.blocks)
     const field =
-      fields.find((f) => f.kind === 'checkbox' && f.propId === TASK_STATUS_PROP_ID) ??
-      fields.find((f) => f.kind === 'checkbox')
+      fields.find((f) => f.propId === TASK_STATUS_PROP_ID) ?? fields.find((f) => f.kind === 'checkbox')
     const propId = field?.propId ?? TASK_STATUS_PROP_ID
-    const next = field ? field.value !== true : false
+    let next: unknown
+    if (propId !== TASK_STATUS_PROP_ID) {
+      next = field ? field.value !== true : false
+    } else if (field === undefined) {
+      next = TASK_STATUS_TODO_ID
+    } else {
+      next = field.value === TASK_STATUS_DONE_ID ? TASK_STATUS_TODO_ID : TASK_STATUS_DONE_ID
+    }
     this.beginUndoEntry()
     // 切的是一个属性值：一笔 patch 正好 1 条 `prop.set`（与「插入待办」同一形状）
     this.write((tx) => {
@@ -2596,7 +2605,7 @@ export class BlockEditor {
    *
    * ⚠️ 「空块」的判据是**正文为空且没有子块**：有子块的块不能被改掉类型/值 ——
    *    那会让子树挂在一个用户没打算改的块下面。
-   * ⚠️ 待办这一支还要看**已经有值没有**：已经有任务状态的空块（`false` ＝
+   * ⚠️ 待办这一支还要看**已经有值没有**：已经是任务的空块（读出「待办」＝
    *    是任务但没做完）不该被「/待办」翻回未完成 —— 那是改值，不是插入。
    *    这一条与 `toggleTodo` 分工：那个是**切换**，这个是**插入**。
    */
@@ -2620,14 +2629,16 @@ export class BlockEditor {
       if (todoOf(loc.block, this.fieldTable()) !== undefined) return null
       // 只落一个属性值、不动结构 ⇒ 一笔事务里正好 1 条 `prop.set`
       this.write((tx) => {
-        tx.patch(loc.block.id, (b) => setValue(b, TASK_STATUS_PROP_ID, todo === 'done'))
+        tx.patch(loc.block.id, (b) =>
+          setValue(b, TASK_STATUS_PROP_ID, todo === 'done' ? TASK_STATUS_DONE_ID : TASK_STATUS_TODO_ID),
+        )
       })
       this.structTail({ id: loc.block.id, off: 0 }, [loc.block.id])
       return loc.block.id
     }
     const b = mkBlock(text)
     // 待办不是块的字段，是**任务状态属性**的一个值：这里落值，不落「块的种类」
-    if (todo) b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: todo === 'done' }
+    if (todo) b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: todo === 'done' ? TASK_STATUS_DONE_ID : TASK_STATUS_TODO_ID }
     /**
      * **落点只由 `tx.insert` 算**（它按整片森林取兄弟列表）。
      * 这里不能再顺手 `splice`/`unshift` 一下：那样同一件事就有两个计算者，

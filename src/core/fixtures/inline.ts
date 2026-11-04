@@ -15,7 +15,8 @@ export interface SeedBlock {
   text: string
   /**
    * 任务状态（**值是属性**，落进 `props[TASK_STATUS_PROP_ID]`）：
-   * `true` ＝ 做完了，`false` ＝ 是任务、还没做完。
+   * `true` ＝ 做完了，`false` ＝ 是任务、还没做完。落库是选项块 id
+   * （「完成／待办」，见 `build.ts`），布尔只是这份 DSL 的书写便利。
    *
    * 与正文里的 `#任务` 是两件事（值 ＋ 分类），本字段只管值；
    * 它们必须成对出现才有 entry：gutter 上那个方框由**标签声明**的字段决定。

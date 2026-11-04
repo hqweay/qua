@@ -1927,14 +1927,24 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
   assert(touched.rows.length === 1, `别的视图改字不许自动重排（D4）：${JSON.stringify(touched.rows)}`)
   assert(touched.stale, '结果里的块被别处改动 ⇒ 应当提示「可能已过期」')
 
-  // ③ 成员不冻（D4）：把它改成已完成 ⇒ 不再匹配，但**列表仍应留着**，等刷新再移除
+  // ③ 成员不冻（D4）：把它改成「完成」⇒ 不再匹配，但**列表仍应留着**，等刷新再移除
   //    ⚠️ 走属性写入而不是「当前活动编辑器的待办开关」：后者取决于焦点在谁身上，
-  //       而这个用例要验的是**查询的成员判定**，不是焦点派发。
-  const taskPropId = await page.evaluate(() => window.__qua.propDefs().find((p) => p.label === '任务状态')?.id ?? '')
-  assert(taskPropId, '前置：种子里应有「任务状态」字段定义')
+  //       而这个用例要验的是**查询的成员判定**，不是焦点派发。值是「完成」选项块 id。
+  const taskDef = await page.evaluate(() => {
+    for (const b of window.__qua.__editor.store.blocks ?? []) {
+      if (b.props?._kind === 'select' && JSON.stringify(b.content ?? []).includes('任务状态')) {
+        return {
+          id: b.id,
+          done: (b.children ?? []).find((c) => JSON.stringify(c.content ?? []).includes('完成'))?.id ?? '',
+        }
+      }
+    }
+    return { id: '', done: '' }
+  })
+  assert(taskDef.id !== '' && taskDef.done !== '', '前置：种子里应有「任务状态」定义（含「完成」选项）')
   await page.evaluate(
-    ({ id, propId }) => window.__qua.invoke('core.props/set-value', { blockId: id, propId, value: true }),
-    { id: targetId, propId: taskPropId },
+    ({ id, propId, value }) => window.__qua.invoke('core.props/set-value', { blockId: id, propId, value }),
+    { id: targetId, propId: taskDef.id, value: taskDef.done },
   )
   await page.waitForTimeout(200)
   const stillThere = await view()
@@ -6740,7 +6750,7 @@ await check(
   async () => {
     const { ctx, page } = await freshPage(browser, base)
 
-    // 核心词汇：`任务状态` 是勾选属性，`#任务` 声明它，所以种子里打了标签的块都已有这条属性
+    // 核心词汇：`任务状态` 是 select（值＝选项块 id），`#任务` 声明它，种子里打了标签的块都已有这条属性
     const target = await page.evaluate(() => {
       const def = window.__qua.propDefs().find((d) => d.label === '任务状态')
       const tag = window.__qua.allBlocks().find((b) => b.lists.includes('tag') && b.aliases.includes('任务'))
@@ -6764,32 +6774,37 @@ await check(
       const row = document.querySelector(`.prop-row[data-prop-id="${propId}"]`)
       return {
         rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
-        hasBox: Boolean(row?.querySelector('input.prop-check')),
+        hasSelect: Boolean(row?.querySelector('select.prop-input')),
         note: [...document.querySelectorAll('.props-empty')].map((x) => x.textContent),
       }
     }, target.defId)
     assert(panel.rows.includes(target.defId), `归 gutter 的属性也要在卡里出现（否则卡里改不了它）：${JSON.stringify(panel)}`)
-    assert(panel.hasBox === true, `卡里那一行要有自己的勾选控件：${JSON.stringify(panel)}`)
+    assert(panel.hasSelect === true, `卡里那一行要有自己的选择控件（select）：${JSON.stringify(panel)}`)
     assert(!panel.note.some((x) => x.includes('还没有块属性')), `已有属性时不能同时说「还没有块属性」：${JSON.stringify(panel)}`)
 
-    // 卡里勾一下 ⇒ 模型与左侧方框都要变（两个编辑面共写一份，不能一边改另一边不动）
-    await page.evaluate((propId) => {
-      const box = document.querySelector(`.prop-row[data-prop-id="${propId}"] input.prop-check`)
-      box.checked = true
-      box.dispatchEvent(new Event('change', { bubbles: true }))
+    // 卡里把值选成「完成」⇒ 模型与左侧方框都要变（两个编辑面共写一份，不能一边改另一边不动）
+    const doneId = await page.evaluate((defId) => {
+      const def = window.__qua.__editor.store.find(defId)
+      return (def?.children ?? []).find((c) => JSON.stringify(c.content ?? []).includes('完成'))?.id ?? ''
     }, target.defId)
+    assert(doneId !== '', '前置：任务状态定义应有「完成」选项')
+    await page.evaluate(({ propId, value }) => {
+      const sel = document.querySelector(`.prop-row[data-prop-id="${propId}"] select.prop-input`)
+      sel.value = value
+      sel.dispatchEvent(new Event('change', { bubbles: true }))
+    }, { propId: target.defId, value: doneId })
     await page.waitForTimeout(250)
-    const afterTick = await page.evaluate((id) => {
+    const afterTick = await page.evaluate(({ id, propId }) => {
       const blk = document.querySelector(`.blk[data-block-id="${id}"]`)
       const model = window.__qua.__editor.store.find(id)
       return {
-        value: model?.props?.[window.__qua.propDefs().find((d) => d.label === '任务状态')?.id],
+        value: model?.props?.[propId],
         todo: blk?.dataset.todo ?? null,
-        cardChecked: document.querySelector('.prop-row[data-prop-id] input.prop-check')?.checked ?? null,
+        cardValue: document.querySelector(`.prop-row[data-prop-id="${propId}"] select.prop-input`)?.value ?? null,
       }
-    }, target.blockId)
-    assert(afterTick.value === true, `卡里勾选要写进模型：${JSON.stringify(afterTick)}`)
-    assert(afterTick.todo === 'done', `卡里勾完，左侧方框也要跟着变成已完成：${JSON.stringify(afterTick)}`)
+    }, { id: target.blockId, propId: target.defId })
+    assert(afterTick.value === doneId, `卡里选择要写进模型：${JSON.stringify(afterTick)}`)
+    assert(afterTick.todo === 'done', `卡里选完「完成」，左侧方框也要跟着变成已完成：${JSON.stringify(afterTick)}`)
 
     await page.click('#properties-add')
     await page.waitForSelector('.props-form--own')
@@ -6802,7 +6817,7 @@ await check(
     assert(option.text.includes('已在块上'), `要写明为什么不可选：${JSON.stringify(option)}`)
 
     await ctx.close()
-    return `picker 保留「任务状态 · 勾选（已在块上）」且 disabled；卡里同一行可勾，左侧方框跟着变`
+    return `picker 保留「任务状态 · 选择（已在块上）」且 disabled；卡里同一行可选，左侧方框跟着变`
   },
 )
 
@@ -7108,8 +7123,17 @@ await check(
       return {
         skipped: false,
         ops: ops.map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, value: o.value })),
-        // 任务状态是一个属性槽；只验「槽建出来了、值是布尔」，不绑死属性键名
-        bools: Object.values(live?.props ?? {}).filter((v) => typeof v === 'boolean'),
+        // 任务状态是一个属性槽（select，值＝选项块 id）；不绑死属性键名，
+        // 选项 id 从定义块的子块现读（选项正文是种子内容，认字就行）
+        choices: (() => {
+          for (const b of ed.store.blocks ?? []) {
+            if (b.props?._kind === 'select' && JSON.stringify(b.content ?? []).includes('任务状态')) {
+              return (b.children ?? []).map((c) => ({ id: c.id, label: JSON.stringify(c.content ?? []) }))
+            }
+          }
+          return []
+        })(),
+        propValue: live?.props?.[ops.find((o) => o.e === 'prop' && o.op === 'set')?.name ?? ''],
       }
     })
     if (!todo.skipped) {
@@ -7127,7 +7151,11 @@ await check(
         structOps.length === 1 && Object.keys(structOps[0].value ?? {}).includes('modified'),
         `另一条只该是「记改动时刻」的 upsert（不带 parent/index）：${JSON.stringify(structOps)}`,
       )
-      assert(todo.bools.length === 1 && todo.bools[0] === false, `块上应落一个「未完成」的任务状态值：${JSON.stringify(todo.bools)}`)
+      const todoChoice = todo.choices.find((c) => c.label.includes('待办'))
+      assert(
+        todoChoice !== undefined && todo.propValue === todoChoice.id,
+        `块上应落一个「待办」选项 id：${JSON.stringify({ propValue: todo.propValue, choices: todo.choices })}`,
+      )
     }
 
     await ctx.close()
@@ -8570,9 +8598,19 @@ await check(
     const stampOps = ops.filter((o) => o.e === 'block' && o.op === 'upsert')
     assert(ops.length === 2, `切换待办应恰好 2 条 op（时刻 upsert ＋ prop.set）：${JSON.stringify(ops)}`)
     assert(stampOps.length === 1, `其中一条应是记时刻的 upsert：${JSON.stringify(ops)}`)
+    /** 任务状态是 select（值＝选项块 id）：首切（还不是任务）落「待办」选项 id，从定义块的子块现读 */
+    const todoId = await page.evaluate(() => {
+      for (const b of window.__qua.__editor.store.blocks ?? []) {
+        if (b.props?._kind === 'select' && JSON.stringify(b.content ?? []).includes('任务状态')) {
+          return (b.children ?? []).find((c) => JSON.stringify(c.content ?? []).includes('待办'))?.id
+        }
+      }
+      return ''
+    })
+    assert(todoId !== '', '前置：种子里应有任务状态定义（含「待办」选项）')
     assert(
-      propOps.length === 1 && propOps[0].block === target.id && propOps[0].value === false,
-      `另一条应是任务状态槽的 prop.set（首切＝未完成 false）：${JSON.stringify(ops)}`,
+      propOps.length === 1 && propOps[0].block === target.id && propOps[0].value === todoId,
+      `另一条应是任务状态槽的 prop.set（首切＝落「待办」选项）：${JSON.stringify(ops)}`,
     )
     const propName = propOps[0].name
 
@@ -8582,7 +8620,7 @@ await check(
     assert(!back || !(propName in back), `一次撤销应回到没有任务槽：${JSON.stringify(back)}`)
 
     await ctx.close()
-    return `toggleTodo ⇒ upsert{modified} ＋ prop.set{${propName}:false}；⌘Z 回无槽`
+    return `toggleTodo ⇒ upsert{modified} ＋ prop.set{${propName}:待办选项}；⌘Z 回无槽`
   },
 )
 
@@ -14119,6 +14157,34 @@ await check('T154 checkbox 三态分得开（未填／false／true）；点一�
   await page.evaluate(() => window.__qua.quiet(true))
   const id = await pageByTitle(page, '产品设计')
   await page.waitForTimeout(300)
+
+  // 种子不再自带 checkbox 字段（任务状态已升 select）：这里**造一个**——
+  // 声明给 #任务，本页的任务成员自动获得这一栏；两个成员各写 false／true，其余保持未填。
+  const setup = await page.evaluate((pid) => {
+    const tag = window.__qua.allBlocks().find((b) => b.lists.includes('tag') && b.aliases.includes('任务'))
+    if (!tag) return { error: 'no-tag' }
+    const members = new Set(window.__qua.tagMembers(tag.id))
+    const kids = window.__qua.__editor.store.find(pid)?.children ?? []
+    const targets = kids.filter((k) => members.has(k.id))
+    if (targets.length < 2) return { error: 'not-enough-members', n: targets.length }
+    const made = window.__qua.invoke('core.props/create-def', {
+      blockId: tag.id,
+      label: '已核对',
+      kind: 'checkbox',
+      target: 'declared',
+      mode: 'new',
+    })
+    return { made, first: targets[0].id, second: targets[1].id }
+  }, id)
+  assert(!setup.error, `前置：应能在本页任务成员上造 checkbox 字段：${JSON.stringify(setup)}`)
+  const defId = await page.evaluate(() => window.__qua.propDefs().find((d) => d.label === '已核对')?.id ?? '')
+  assert(defId !== '', `造完应能在定义清单里找到「已核对」：${JSON.stringify(setup.made)}`)
+  for (const [blockId, value] of [[setup.first, false], [setup.second, true]]) {
+    await page.evaluate(
+      ({ id: blockId, propId, value }) => window.__qua.invoke('core.props/set-value', { blockId, propId, value }),
+      { id: blockId, propId: defId, value },
+    )
+  }
   await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'table' }), id)
   await page.waitForTimeout(400)
 
@@ -16346,7 +16412,7 @@ await check('T188 条件树：就地展开、拆成一行一句话；应用一�
   })
   assert(open.treeVisible, `条件树应在抬头下就地展开（不是弹层）：${JSON.stringify(open)}`)
   assert(open.groups >= 1 && open.rows.length > 0, `树上要有组与叶子行：${JSON.stringify(open)}`)
-  assert(open.rows.some((r) => r.includes('未完成')), `叶子行要读成人话：${JSON.stringify(open.rows)}`)
+  assert(open.rows.some((r) => r.includes('任务状态')), `叶子行要读成人话（字段名可见）：${JSON.stringify(open.rows)}`)
   assert(open.chipsHidden === true, `树展开时抬头不再重复条件 chip：${JSON.stringify(open)}`)
   assert(!open.popover, '正常打开查询块时不该出现条件弹层')
   assert(open.oldForm === 0, `旧三列表单必须已经不存在：${open.oldForm}`)
@@ -16354,8 +16420,17 @@ await check('T188 条件树：就地展开、拆成一行一句话；应用一�
   assert(!open.modeText.some((t) => t.includes('全部满足') || t.includes('任一满足')), `组头不许是长句：${JSON.stringify(open.modeText)}`)
   assert(open.notSwitch, '组头要有「非」开关')
 
-  // ② 改一行（未完成 → 已完成）并应用：条件写进模型，树仍常驻
-  await page.selectOption('.queryview-tree .qt-row[data-qt-row="todo"] [data-qt="todo"]', 'done')
+  // 种子的条件是「任务状态 ≠ 完成」（值是选项块 id）：neq 的值就是「完成」的 id，
+  // 后面 ②④ 把它改成「＝ 完成」，③ 撤销回这一份。
+  const seedProp = propOf(JSON.parse(await page.evaluate((id) => JSON.stringify(window.__qua.__editor.store.find(id)?.props?._query?.where), qid)))
+  assert(typeof seedProp?.neq === 'string' && seedProp.neq !== '', `前置：种子查询应是「任务状态 ≠ 某选项」：${JSON.stringify(seedProp)}`)
+  const doneId = seedProp.neq
+
+  // ② 改一行（「≠ 完成」→「＝ 完成」）并应用：条件写进模型，树仍常驻
+  const propRow = '.queryview-tree .qt-row[data-qt-row="prop"]'
+  await page.selectOption(`${propRow} [data-qt="op"]`, 'eq')
+  await page.waitForTimeout(150)
+  await page.selectOption(`${propRow} [data-qt="value"]`, doneId)
   await page.locator('.queryview-tree [data-qt="apply"]').click()
   await page.waitForTimeout(450)
   const after = await page.evaluate((id) => ({
@@ -16365,8 +16440,8 @@ await check('T188 条件树：就地展开、拆成一行一句话；应用一�
   }), qid)
   const doneProp = propOf(JSON.parse(after.where))
   assert(
-    doneProp?.eq === true && typeof doneProp.id === 'string',
-    `应用之后条件应是「已完成」＝ 任务状态 eq:true：${after.where}`,
+    doneProp?.eq === doneId && typeof doneProp.id === 'string',
+    `应用之后条件应是「已完成」＝ 任务状态 eq:完成选项：${after.where}`,
   )
   assert(after.treeVisible, '应用之后树仍常驻（不是点一次开一次）')
 
@@ -16379,10 +16454,12 @@ await check('T188 条件树：就地展开、拆成一行一句话；应用一�
   await page.keyboard.press(kbd('mod+z'))
   await page.waitForTimeout(450)
   const undone = await page.evaluate((id) => JSON.stringify(window.__qua.__editor.store.find(id)?.props?._query?.where), qid)
-  assert(propOf(JSON.parse(undone))?.eq === false, `一次 ⌘Z 就该回到原条件（未完成）：${undone}`)
+  assert(propOf(JSON.parse(undone))?.neq === doneId, `一次 ⌘Z 就该回到原条件（≠ 完成）：${undone}`)
 
-  // ④ 收起：只剩一条 chip，点它再展开（再应用一次「已完成」，让收起态有内容可看）
-  await page.selectOption('.queryview-tree .qt-row[data-qt-row="todo"] [data-qt="todo"]', 'done')
+  // ④ 收起：只剩一条 chip，点它再展开（再应用一次「＝ 完成」，让收起态有内容可看）
+  await page.selectOption(`${propRow} [data-qt="op"]`, 'eq')
+  await page.waitForTimeout(150)
+  await page.selectOption(`${propRow} [data-qt="value"]`, doneId)
   await page.locator('.queryview-tree [data-qt="apply"]').click()
   await page.waitForTimeout(350)
   await page.locator('.queryview-tree [data-qt="close"]').click()
@@ -16475,6 +16552,10 @@ await check('B2 树上加嵌套组 → 结果变 → 一次 ⌘Z 全部回滚', 
     Number(((await page.textContent('.queryview-count')) ?? '').match(/\d+/)?.[0] ?? '0')
   const before = await countOf()
   assert(before === 1, `前置：这条查询应命中 1 条（实际 ${before}）`)
+  const where0 = await page.evaluate(
+    (id) => JSON.stringify(window.__qua.__editor.store.find(id)?.props?._query?.where),
+    qid,
+  )
 
   const root = '.queryview-tree .qt-group[data-qt-depth="0"]'
   await qtAdd(page, root, 'group:all')
@@ -16499,7 +16580,7 @@ await check('B2 树上加嵌套组 → 结果变 → 一次 ⌘Z 全部回滚', 
     qid,
   )
   assert(undone === before, `一次 ⌘Z 要回到 ${before} 条（实际 ${undone}）`)
-  assert(propOf(JSON.parse(where))?.eq === false, `条件也要回滚：${where}`)
+  assert(where === where0, `条件也要回滚：${where}`)
 
   await ctx.close()
   return `加嵌套组：${before} → ${after}；一次 ⌘Z → ${undone}`
