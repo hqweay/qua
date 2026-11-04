@@ -363,17 +363,18 @@
   </div>
 
   <div class="card pad" style="margin-top:18px">
-    <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">两个纯函数：变化代数的全部</b><i>撤销 / 导出 / 导入 / 同步收端 / 崩溃恢复 / 块历史，全是它们的组合</i></div>
+    <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">变化代数：状态 → op</b><i>撤销 / 导出 / 导入 / 同步收端 / 崩溃恢复 / 块历史，全由它派生</i></div>
     <div class="grid2">
       <div>
-        <div class="struct" style="line-height:1.9"><span class="key">diff</span>(a, b) <span class="pipe">→</span> Op[]      <span class="cmt">把「a 变成 b」表达成格写入</span>
-<span class="key">applyOps</span>(forest, ops, 目标)  <span class="cmt">原地写格，对象身份不变</span></div>
-        <div class="note" style="margin-top:9px"><b>四条性质</b>（每条都能单独证伪）：① <code>applyOps(a, diff(a,b))</code> 与 <code>b</code> <b>逐字节相等</b>；② <code>diff(x,x) == []</code>；③ 发射序＝目标森林<b>先序</b>（父 op 先于子 op）；④ 同一次 diff 跑两次<b>字节相同</b>（<code>at</code> 从目标森林派生，不取墙钟）。</div>
+        <div class="struct" style="line-height:1.9"><span class="key">diff</span>(a, b) <span class="pipe">→</span> Op[]      <span class="cmt">整片森林 a→b：首次落盘／重放／对账</span>
+<span class="key">scopedOps</span>(now, 条目一侧) <span class="pipe">→</span> Op[]  <span class="cmt">撤销/重做：只对 touched 块生成</span>
+<span class="key">applyOps</span>(forest, ops, lookup?)  <span class="cmt">原地写格；给 lookup 就不摊平整库</span></div>
+        <div class="note" style="margin-top:9px"><b>四条性质</b>（每条都能单独证伪）：① <code>applyOps(a, diff(a,b))</code> 与 <code>b</code> <b>逐字节相等</b>；② <code>diff(x,x) == []</code>；③ 发射序＝目标森林<b>先序</b>（父 op 先于子 op）；④ 同一次 diff 跑两次<b>字节相同</b>（<code>at</code> 从目标森林派生，不取墙钟）。<br><b><code>scopedOps</code> 的等式</b>：<code>applyOps(now, scopedOps(now, side))</code> 与 <code>side</code> 的 touched 子集<b>逐字节相等</b>；条目里只有 id／格／落点，没有整片森林。</div>
       </div>
       <div>
         <div class="kv">
-          <dt>撤销</dt><dd><code>applyOps(s, diff(s, 快照))</code> —— 与一次普通编辑<b>同一条路</b>，不再「清四表 + 整库重写」</dd>
-          <dt>索引</dt><dd>唯一的宣布者是事务出口 <code>store.apply(ops)</code>：按 op <b>增量修补</b>，不整库作废；订阅者只被通知一次</dd>
+          <dt>撤销</dt><dd>条目存这次事务 <b>touched 块的前态／后态</b>（深拷的格 ＋ 落点）＋ 选区。⌘Z ＝ <code>scopedOps(now, 条目前态)</code> → <code>applyOps(…, lookup)</code>；<b>首键与 ⌘Z 都不再碰整片森林</b>。仍是状态，不是逆 op；合并窗口内只更新上一条的 <code>after</code>（不新建条目、不取整库快照）</dd>
+          <dt>索引</dt><dd>唯一的宣布者是事务出口 <code>store.apply(ops)</code>：按 op <b>增量修补</b>，不整库作废；订阅者只被通知一次。两张含软删的表（<code>all</code>／<code>parentOfAll</code>）专供撤销读面——可见表看不见被软删的块，而恢复路径要找它们</dd>
           <dt>回滚</dt><dd>事务失败走<b>回滚日志</b>（O(动过的块)），不是整库快照。它不是逆 op：生命周期＝一个调用，不落盘、不进历史</dd>
         </div>
       </div>
@@ -381,6 +382,7 @@
     <div class="note" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)">
       <b>为什么 <code>applyOps</code> 必须原地写格</b>：索引存的是块的<b>活引用</b>。若替换块对象（CoW／<code>JSON.parse</code>），索引会<b>静默失效</b>——它手里那批对象当场过期，而没有任何一层会报错。
       ⇒ 这也是「撤销不再需要 <code>forestReplaced</code> 旗标」的原因：旗标存在的唯一理由是旧机制的实现细节。
+      <br><b>为什么撤销不能只缩快照</b>：若仍 <code>diff(整片森林, …)</code>，省掉的只有序列化，最大那一笔（摊平两份森林）一点没少。⇒ 条目带两侧，撤销/重做各自只对 touched 块生成 op；恢复父先于子、清除子先于父。
     </div>
   </div>
 </section>
