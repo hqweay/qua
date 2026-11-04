@@ -73,6 +73,9 @@ export class SearchFace {
     this.input.spellcheck = false
     this.input.addEventListener('input', () => this.setTerm(this.input.value))
     this.input.addEventListener('keydown', (e) => {
+      // 只认**裸键**：修饰键组合归命令层的键位表——这里抢了的话，
+      // 在面上按「进一档」这类带修饰的组合会变成「打开第一行结果」（真踩过）。
+      if (e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault()
         this.move(e.key === 'ArrowDown' ? 1 : -1)

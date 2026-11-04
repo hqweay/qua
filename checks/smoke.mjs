@@ -19746,6 +19746,16 @@ await check('T234 ⌘F 浮层「展开为面板」⇒ 中心搜索 tab：词随�
   now = await face()
   assert(now.tabs.filter((t) => t.title === '搜索').length === 1, `同一张面全局一张 tab：${JSON.stringify(now.tabs)}`)
 
+  // 带修饰的组合键在面上归命令层：⌘⇧↵ 进宽屏，面与 tab 原样；Esc 退档
+  await page.keyboard.press(kbd('mod+Shift+Enter'))
+  now = await face()
+  const axisAfterUp = await page.evaluate(() => document.body.dataset.axis ?? '')
+  assert(axisAfterUp === 'wide', `⌘⇧↵ 应进宽屏：${axisAfterUp}`)
+  assert(now.surfaceVisible && now.tabs.filter((t) => t.title === '搜索').length === 1, '⌘⇧↵ 进档不抢「打开」，面原样')
+  await page.keyboard.press('Escape')
+  const axisAfterDown = await page.evaluate(() => document.body.dataset.axis ?? '')
+  assert(axisAfterDown === '', `Esc 退档：${axisAfterDown}`)
+
   // 在面上点结果 ＝ 导航：终点面让位（tab 摘掉），导航落到块；esc 档位无关
   await page.evaluate((id) => document.querySelector(`#center-surface [data-search-row="${id}"] .search-row-open`).click(), probeId)
   await page.waitForTimeout(200)
