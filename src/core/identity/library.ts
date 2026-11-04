@@ -49,12 +49,15 @@ export const LIBRARY_FORMAT = 1
  * v7 是挂载区从三态收到两态（linked 退场）；
  * v8 是 `QuerySpec.scope` 退场——旧 `scope` 会被新读路径静默忽略、从「这一块之下」
  * 悄悄变成整库，所以同样整份作废重 seed。
+ * v9 是**全文检索的派生表**（`BlockFTS`／`BlockFTSMap`）：只加表、不搬内容，
+ * 索引由渲染层在开库后按分词器全量重建。它也是**第一次不丢内容的迁移**——
+ * 从这一版起，迁移前的快照失败必须中止迁移（迁移动的是不能再 seed 的真实内容）。
  *
  * **不写数据迁移**：原型不做旧数据迁移，旧库作废重 seed（`judgeDbVersion` 判到
  * `migrate` 时跑 `MIGRATIONS` 里那一步**只丢旧形状、不搬数据**的 DDL）。
  * `user_version` 只增不减。
  */
-export const DB_SCHEMA_VERSION = 8
+export const DB_SCHEMA_VERSION = 9
 
 /** `meta` 表里被代码解释的键（其余键归将来，不在这里登记）。 */
 export const META_KEYS = {
@@ -68,6 +71,17 @@ export const META_KEYS = {
   activeId: 'active_id',
   /** 上一次落盘时刻（墙钟毫秒）。只给人看（诊断面／「改到哪了」） */
   savedAt: 'saved_at',
+  /**
+   * 全文索引的构建状态：`pending`／`building`／`ready`。
+   *
+   * 它是**派生表的状态**，不是内容：丢了／坏了都能全量重建。
+   * 查询只在 `ready` 时走 FTS，否则降级扫描（用户不会因为索引没建完就搜不到东西）。
+   */
+  ftsState: 'fts_state',
+  /** 下一个可分配的 FTS rowid（单调递增；不复用 `Block.rowid`） */
+  ftsRowidSeq: 'fts_rowid_seq',
+  /** 建索引时用的分词器版本；与当前版本不一致 ⇒ 旧索引作废、全量重建 */
+  ftsTokenizer: 'fts_tokenizer',
 } as const
 
 /**
@@ -99,6 +113,15 @@ export const DB_TABLES = {
    * 而资产行描述的是**盘上的字节**，不该被一次内容替换连坐。
    */
   assets: 'assets',
+  /**
+   * 全文索引（FTS5 contentless）：派生表，不是第二真相。
+   *
+   * 它不进 `op_log`，也不参与重放：内容重建得出来，索引就重建得出来。
+   * `contentless_delete=1` 让删除／更新可以直接按 rowid 做（不需要回读旧 token）。
+   */
+  blockFts: 'BlockFTS',
+  /** 块 id ↔ 稳定 FTS rowid（不用 `Block.rowid`：隐式 rowid 在 VACUUM 下可能变） */
+  blockFtsMap: 'BlockFTSMap',
 } as const
 
 /** 内容表（**装载时整份读、换库时整份清**的那四张） */

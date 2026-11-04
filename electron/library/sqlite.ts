@@ -110,6 +110,34 @@ create index if not exists idx_BlockList_list on ${DB_TABLES.list}(list);
 `
 
 /**
+ * 全文索引的 DDL —— **派生表**，只在 v9 及之后存在。
+ *
+ * 为什么单列一份、不并进 `CONTENT_DDL`：历史上每次 `CONTENT_DDL` 都代表当时的内容形状，
+ * 把它往前面的迁移里加表会让「旧版本的库长什么样」失真。v9 之后新库与迁移都从这里建。
+ *
+ * 三列各司其职（详见 `core/search/tokenizer.ts`）：`seg` 词级、`chars` 逐字／子串、
+ * `pinyin` 音节。`content=''` ＋ `contentless_delete=1`：
+ *   · 不存正文列（100k 实测比 external content 省 41MB）；
+ *   · 删除／更新直接按 rowid（SQLite ≥ 3.43；本仓 node:sqlite 3.53 实测可用）。
+ *
+ * `BlockFTSMap` 把块 id 映射到一个**稳定整数**：`Block` 是 `id text primary key`，
+ * 隐式 rowid 在 VACUUM 下可能变，不能拿它当 FTS 身份。
+ */
+const FTS_DDL = `
+create virtual table if not exists ${DB_TABLES.blockFts} using fts5(
+  seg,
+  chars,
+  pinyin,
+  content='',
+  contentless_delete=1
+);
+create table if not exists ${DB_TABLES.blockFtsMap} (
+  block_id text primary key,
+  fts_rowid integer not null unique
+);
+`
+
+/**
  * 库级表（`settings`／`meta`／`op_log`）—— 与内容表分开：它们**换库不换形状**，
  * 从 v1 起就在这里（`workspace` 那张临时表才是 v1 的产物）。
  */
@@ -272,6 +300,21 @@ export const MIGRATIONS: Migration[] = [
       db.prepare(`delete from ${DB_TABLES.meta} where key = ?`).run(META_KEYS.seq)
     },
   },
+  {
+    to: 9,
+    up: (db) => {
+      /**
+       * **全文检索只加表，不动内容**：这是第一次「不丢内容」的迁移。
+       *
+       * 索引由渲染层在开库后建（它才有 `plainText` 与分词器；主进程不认识块语义）。
+       * `fts_state='pending'` 是给读路径的降级信号：建好之前搜索走扫描，
+       * 而不是让用户看到「搜不到」（空索引与「真的没有」必须可区分）。
+       */
+      db.exec(FTS_DDL)
+      writeMeta(db, META_KEYS.ftsState, 'pending')
+      writeMeta(db, META_KEYS.ftsRowidSeq, '0')
+    },
+  },
 ]
 
 export type OpenResult =
@@ -324,13 +367,17 @@ function inTransaction<T>(db: Db, fn: () => T): T {
  * 文件名带 epoch 毫秒（防撞——SQLite 语义是目标文件已存在即报错）与旧版本号（出事时一眼知道
  * 快照是从哪一版拍下来的）。
  *
- * 为什么**只记 warn、继续迁移**（best-effort）：迁移表里的每一步目前都是「丢内容重 seed」的
- * 主动作废——没有一步在搬运不可再生的数据。快照此刻是习惯与骨架，不是数据安全的承重墙；
- * 为一份「没有消费者的备份」挡住打开库的路径，是净损失。
+ * ## 从哪一版起「失败必须中止」
  *
- * ⚠️ **纪律切换的触发判据**（写在这一处，切换时别找不到）：**第一次出现「不丢内容的迁移」时**，
- * 快照失败必须改为中止迁移——从那一步起，迁移动的就是不能重 seed 的真实内容，
- * 这份快照从习惯变成唯一的回退面。
+ * 判据是**这一步迁移会不会动不能再 seed 的真实内容**：
+ *   · v1–v8 的迁移都是「旧形状作废、渲染层重新 seed」——没有不可再生数据，
+ *     快照失败只记 warn，不挡打开库的路径；
+ *   · **v8 → v9 是第一次只加表的迁移**（全文索引是派生表）。从这一版起，
+ *     迁移动的是用户不能再重新长出来的内容，快照从习惯变成唯一回退面
+ *     ⇒ 快照失败必须中止：半迁移库比「这次没打开」严重得多。
+ *
+ * 用 `fromVersion >= 8` 而不是只认 `to === 9`：将来 v10 若也是保内容迁移，
+ * 它会自然继承这条纪律；判据落在「从哪一版开始不再丢内容」，不是某一版号。
  */
 function snapshotBeforeMigrate(db: Db, file: string, fromVersion: number): void {
   const dir = join(dirname(file), BACKUPS_DIR)
@@ -340,7 +387,11 @@ function snapshotBeforeMigrate(db: Db, file: string, fromVersion: number): void 
     const target = join(dir, `${Date.now()}-before-migrate-v${fromVersion}.db`).replace(/'/g, "''")
     db.exec(`vacuum into '${target}'`)
   } catch (e) {
-    console.warn(`[library] snapshot before migration failed, continuing: ${e instanceof Error ? e.message : String(e)}`)
+    const message = e instanceof Error ? e.message : String(e)
+    if (fromVersion >= 8) {
+      throw new Error(`snapshot before migration failed (v${fromVersion}): ${message}`)
+    }
+    console.warn(`[library] snapshot before migration failed, continuing: ${message}`)
   }
 }
 
@@ -381,6 +432,13 @@ export function openLibraryDb(
     try {
       inTransaction(db, () => {
         db.exec(DDL)
+        // 新库按目标版本建：只有 v9 及之后才有全文索引表
+        if (target >= 9) {
+          db.exec(FTS_DDL)
+          // 新库也要一个明确的「索引还没建」状态：读路径据此走扫描，而不是相信空索引
+          writeMeta(db, META_KEYS.ftsState, 'pending')
+          writeMeta(db, META_KEYS.ftsRowidSeq, '0')
+        }
         setUserVersion(db, target)
       })
     } catch (e) {
@@ -395,7 +453,13 @@ export function openLibraryDb(
   // 偏旧：**先拍快照再动库**（快照必须在迁移事务之外——VACUUM 不能在事务里跑），
   // 然后按 `to` 升序跑（支持跨多版），每一步一个事务还是整段一个事务？
   // ⇒ **整段一个**：半迁移的库比慢一点严重得多，而 SQLite 的 DDL 事务是原子的。
-  snapshotBeforeMigrate(db, file, found)
+  try {
+    snapshotBeforeMigrate(db, file, found)
+  } catch (e) {
+    // 快照失败＝没有回退面：从「保内容迁移」起不再继续（承 `snapshotBeforeMigrate` 的纪律）
+    db.close()
+    return { status: 'migrate-failed', version: found, error: e }
+  }
   try {
     inTransaction(db, () => {
       const steps = migrations.filter((m) => m.to > found && m.to <= target).sort((a, b) => a.to - b.to)
@@ -433,19 +497,65 @@ export function readContentRows(db: Db): {
   props: Record<string, unknown>[]
   aliases: Record<string, unknown>[]
   lists: Record<string, unknown>[]
+  /**
+   * 块 id ↔ FTS rowid 的派生映射。
+   *
+   * 它与内容行一起读：渲染层要拿它决定「这次编辑该删/写哪个 rowid」。
+   * 只读不写（写入走 `RowWrite`），所以它不影响「内容表整份读」的口径。
+   */
+  ftsMap: { block_id: string; fts_rowid: number }[]
   meta: Record<string, string>
 } {
   const rows = (table: string): Record<string, unknown>[] =>
     db.prepare(`select * from ${table}`).all() as Record<string, unknown>[]
   const meta: Record<string, string> = {}
   for (const r of rows(DB_TABLES.meta) as { key: string; value: string }[]) meta[r.key] = r.value
+  // 旧目标版本的测试库可能还没有 v9 的表；读面按「没有就是空」处理，不炸
+  const hasFts = Boolean(
+    (db.prepare("select 1 as ok from sqlite_master where type='table' and name = ?").all(DB_TABLES.blockFtsMap) as unknown[])[0],
+  )
   return {
     blocks: rows(DB_TABLES.block),
     props: rows(DB_TABLES.property),
     aliases: rows(DB_TABLES.alias),
     lists: rows(DB_TABLES.list),
+    ftsMap: hasFts ? (rows(DB_TABLES.blockFtsMap) as { block_id: string; fts_rowid: number }[]) : [],
     meta,
   }
+}
+
+/* ------------------------------------------------------------ 全文检索（v9） */
+
+export interface FtsHit {
+  blockId: string
+  /** BM25 越小越相关；只用于排序，不是稳定分数 */
+  score: number
+}
+
+/**
+ * 一条 FTS 查询 —— **主进程仍是通用 SQL**：它只认表名与列名，不认识块语义。
+ *
+ * `match` 由渲染层编译（`core/search/query.ts`），这里只把它当参数绑定。
+ * 返回的 `block_id` 交给渲染层映射成块（路径、片段、是否软删都由它判）——
+ * 主进程不读 `Block.deleted`，也不拼「哪些块算内容」。
+ *
+ * 为什么查询多一次 join：`BlockFTSMap` 是稳定 rowid 的唯一来源，
+ * 100k 量级这次 join 可忽略；拿 `Block.rowid` 当身份会在 VACUUM 后错位。
+ */
+export function searchFts(db: Db, match: string, limit: number, offset = 0): FtsHit[] {
+  const n = Math.max(0, Math.min(200, Math.trunc(limit)))
+  const off = Math.max(0, Math.trunc(offset))
+  if (n === 0 || match.trim() === '') return []
+  return db
+    .prepare(
+      `select m.block_id as blockId, bm25(${DB_TABLES.blockFts}) as score
+         from ${DB_TABLES.blockFts}
+         join ${DB_TABLES.blockFtsMap} m on m.fts_rowid = ${DB_TABLES.blockFts}.rowid
+        where ${DB_TABLES.blockFts} match ?
+        order by rank
+        limit ? offset ?`,
+    )
+    .all(match, n, off) as unknown as FtsHit[]
 }
 
 /**
@@ -461,20 +571,31 @@ export function readContentRows(db: Db): {
  *   · `delete` —— 只给一部分主键 ＝ 删这一组的全部行。
  */
 export interface RowWrite {
-  table: 'Block' | 'BlockProperty' | 'BlockAlias' | 'BlockList' | 'meta'
+  table: 'Block' | 'BlockProperty' | 'BlockAlias' | 'BlockList' | 'meta' | 'BlockFTS' | 'BlockFTSMap'
   /**
    * `relink` ＝ **兄弟链维护**：`Block.left` 是「前一个兄弟」的 id，所以一个块换位置时
    * 有两个邻居要跟着改（旧位置的后继、新位置的后继），光写自己那一格会让链断掉 ——
    * 断链不会报错，只会在下次装载时把顺序排错。
    * 这两条改法只依赖 `left`／`parent` 两列，不需要块语义，所以留在主进程。
+   *
+   * `insert` 只给 FTS 用：contentless 表要**显式 rowid**（分配归渲染层的 `BlockFTSMap`），
+   * 通用 upsert 的列合并语义在这里没有意义。`clear` 是整表清空（重建索引的第一步）。
    */
-  op: 'upsert' | 'update' | 'delete' | 'relink'
+  op: 'upsert' | 'update' | 'delete' | 'relink' | 'insert' | 'clear'
   key: Record<string, string | number | null>
   values?: Record<string, string | number | null>
 }
 
 /** 主进程只允许写这几张表（渲染层送来的表名是**数据**，不能拿它拼任意 SQL） */
-const WRITABLE = new Set<string>(['Block', 'BlockProperty', 'BlockAlias', 'BlockList', 'meta'])
+const WRITABLE = new Set<string>([
+  'Block',
+  'BlockProperty',
+  'BlockAlias',
+  'BlockList',
+  'meta',
+  'BlockFTS',
+  'BlockFTSMap',
+])
 
 /**
  * 列名白名单：只允许出现 DDL 里真实存在的列。
@@ -488,11 +609,14 @@ const COLUMNS: Record<string, ReadonlySet<string>> = {
   BlockAlias: new Set(['block', 'pos', 'name']),
   BlockList: new Set(['block', 'list']),
   meta: new Set(['key', 'value']),
+  BlockFTS: new Set(['rowid', 'seg', 'chars', 'pinyin']),
+  BlockFTSMap: new Set(['block_id', 'fts_rowid']),
 }
 
 function sqlOf(w: RowWrite): string {
   if (!WRITABLE.has(w.table)) throw new Error(`row write: unknown table "${w.table}"`)
   const allowed = COLUMNS[w.table]!
+  if (w.op === 'clear') return `delete from ${w.table}`
   const keys = Object.keys(w.key)
   const vals = Object.keys(w.values ?? {})
   for (const c of [...keys, ...vals]) if (!allowed.has(c)) throw new Error(`row write: unknown column "${w.table}.${c}"`)
@@ -501,6 +625,15 @@ function sqlOf(w: RowWrite): string {
   if (w.op === 'delete') {
     // 只给一部分主键 ＝ 删这块的全部行（`{block}`），给全 ＝ 删那一行
     return `delete from ${w.table} where ${where}`
+  }
+  if (w.op === 'insert') {
+    /**
+     * FTS 表的显式 rowid 插入。`rowid` 是隐式列，可以出现在列清单里；
+     * contentless 表不接受「只给部分列」的 upsert 语义（它没有正文列可回读），
+     * 所以 insert 与 upsert 必须分开。
+     */
+    const cols = [...new Set([...keys, ...vals])]
+    return `insert into ${w.table} (${cols.join(', ')}) values (${cols.map(() => '?').join(', ')})`
   }
   if (w.op === 'update') {
     if (vals.length === 0) throw new Error(`row write: update ${w.table} with no values`)
