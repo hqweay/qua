@@ -1114,6 +1114,10 @@ export const MSG = {
   'menu.kw.fullscreen': '全屏',
   'ui.axis.exitWide': '退出宽屏（Esc）',
   'ui.axis.exitFull': '退出全屏（Esc）',
+
+  /* ------------------------------------------------------ 中心表面（派生/工具面 tab） */
+  'cmd.surface.open': '在中心打开表面',
+  'menu.kw.surface': '表面',
 } as const
 
 /** 回调 id 就是 MSG 的键 —— 写错一个 id 会在 `pnpm typecheck` 阶段就红 */

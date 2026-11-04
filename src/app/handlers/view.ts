@@ -29,6 +29,12 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
   'core.tab/close': (_a, app) => app.closeTab(),
   'core.tab/next': (_a, app) => app.nextTab(),
   'core.tab/prev': (_a, app) => app.prevTab(),
+  // 表面 tab（派生/工具面）：id 归两张目录守卫，不认识的在这里挡下
+  'core.surface/open': (a, app) => {
+    const id = typeof a.id === 'string' ? a.id : ''
+    if (!id) return false
+    return app.openSurface({ kind: a.kind === 'utility' ? 'utility' : 'derived', id })
+  },
   /**
    * 移动到…：先选块（光标 / 选区），再弹目标选择器。
    *

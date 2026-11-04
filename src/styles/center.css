@@ -117,6 +117,17 @@
   flex: 0 0 auto;
 }
 
+/*
+  中心表面宿主：派生/工具面 tab 的身体（与 #scroll 二选一可见，`hidden` 互斥）。
+  身体是「一张卡的内容」，没有卡壳——tab 条就是它的 chrome；滚动与留白与正文同档。
+*/
+.center-surface {
+  flex: 1;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: 0 var(--ui-doc-pad) var(--ui-gap-7);
+}
+
 #scroll {
   flex: 1;
   overflow: auto;
