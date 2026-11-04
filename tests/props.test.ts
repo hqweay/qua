@@ -19,6 +19,7 @@ import {
   declareOwnProp,
   declaredFieldIds,
   declaredFields,
+  DEFAULT_PROP,
   ensureTag,
   fieldIdsOf,
   fieldRows,
@@ -33,7 +34,11 @@ import {
   OWN_PROPS_PROP,
   ownPropIds,
   mkTagBlock,
+  readField,
+  TASK_STATUS_DONE_ID,
+  TASK_STATUS_DOING_ID,
   TASK_STATUS_PROP_ID,
+  TASK_STATUS_TODO_ID,
   todoOf,
   undeclareField,
   UI_POSITION_PROP,
@@ -244,13 +249,19 @@ test('gutterFieldsOf：收「定义归 gutter」的那些，**有没有值都收
   assert.equal(emptyRows[0]!.value, undefined)
 })
 
-test('种子库自带核心词汇：任务状态定义（顶层、归 gutter）＋ #任务 声明它', () => {
+test('种子库自带核心词汇：任务状态定义（顶层、归 gutter、select ＋ 缺省）＋ #任务 声明它', () => {
   const ws = seedWorkspace()
   const def = ws.blocks.find((b) => b.id === TASK_STATUS_PROP_ID)
   assert.ok(def, '定义块应在森林顶层（不在任何页的子树里）')
   assert.equal(plainText(def!.content), '任务状态')
-  assert.equal(def!.props?._kind, 'checkbox')
+  assert.equal(def!.props?._kind, 'select')
   assert.equal(uiPositionOf(def), 'block-left')
+  // 选项＝定义块的直接子块，id 是核心词汇（代码按 id 认「完成」，不按显示名）
+  assert.deepEqual(
+    (def!.children ?? []).map((c) => c.id),
+    [TASK_STATUS_TODO_ID, TASK_STATUS_DOING_ID, TASK_STATUS_DONE_ID],
+  )
+  assert.equal(def!.props?._default, TASK_STATUS_TODO_ID, '缺省读出「待办」：刚挂上的任务不用先点一格')
 
   const task = ws.blocks.find((b) => hasList(b, 'tag') && plainText(b.content) === '任务')
   assert.ok(task, '标签块应在森林顶层')
@@ -270,26 +281,34 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter）�
   assert.equal(withValue.filter((b) => todoOf(b, fields) === 'done').length, 2, '完成与未完成各两条')
 })
 
-test('todoOf：true ⇒ done；false／有槽没填／**靠标签声明** ⇒ todo；没有这一栏 ⇒ undefined', () => {
-  const def = mkPropDef('任务状态', 'checkbox', {}, TASK_STATUS_PROP_ID)
+test('todoOf：完成 ⇒ done；待办／进行中／有槽没填／**靠标签声明** ⇒ todo；没有这一栏 ⇒ undefined', () => {
+  const def = mkPropDef('任务状态', 'select', { [DEFAULT_PROP]: TASK_STATUS_TODO_ID }, TASK_STATUS_PROP_ID)
+  // 选项＝定义块的直接子块（值存选项块 id）；测试里不必是核心 id，判据只认传入的 DONE id
+  def.children = [
+    { id: TASK_STATUS_TODO_ID, text: '待办', children: [] },
+    { id: TASK_STATUS_DOING_ID, text: '进行中', children: [] },
+    { id: TASK_STATUS_DONE_ID, text: '完成', children: [] },
+  ] as Block[]
   const tag = mkTagBlock('任务')
   declareField(tag, TASK_STATUS_PROP_ID)
-  const done: Block = { id: 'd', text: '', children: [], props: { [TASK_STATUS_PROP_ID]: true } }
-  const open: Block = { id: 'o', text: '', children: [], props: { [TASK_STATUS_PROP_ID]: false } }
+  const done: Block = { id: 'd', text: '', children: [], props: { [TASK_STATUS_PROP_ID]: TASK_STATUS_DONE_ID } }
+  const open: Block = { id: 'o', text: '', children: [], props: { [TASK_STATUS_PROP_ID]: TASK_STATUS_TODO_ID } }
+  const doing: Block = { id: 'g', text: '', children: [], props: { [TASK_STATUS_PROP_ID]: TASK_STATUS_DOING_ID } }
   /** 刚在面板里加了「任务状态」、还没点过：槽位在，值不在 */
   const fresh: Block = { id: 'f', text: '', children: [], props: { [OWN_PROPS_PROP]: [TASK_STATUS_PROP_ID] } }
   /** 打了 `#任务`：这一栏是**标签声明**给成员的，块上一个字节都没写 */
   const tagged: Block = { id: 't', text: '', children: [], props: { _tags: [tag.id] } }
   const none: Block = { id: 'n', text: '', children: [] }
-  const fields = fieldTableOf([def, tag, done, open, fresh, tagged, none])
+  const fields = fieldTableOf([def, tag, done, open, doing, fresh, tagged, none])
   assert.equal(todoOf(done, fields), 'done')
   assert.equal(todoOf(open, fields), 'todo', '「是任务、没做完」是**有值**的，不能并进缺失')
+  assert.equal(todoOf(doing, fields), 'todo', '进行中也是「没做完」——派生读法只有两态，状态机不进这里')
   /**
    * ⚠️ 这一条是判据本身：**看「有没有这一栏」，不看值**。
    *    漏了它，屏幕上会画空心方框（渲染看声明），这里却当成不是任务 ——
    *    同一个块两种答案，而且不报错。
    */
-  assert.equal(todoOf(fresh, fields), 'todo', '有槽但没填 ＝ 刚挂上的任务，也是 todo')
+  assert.equal(todoOf(fresh, fields), 'todo', '有槽但没填 ＝ 刚挂上的任务（缺省读出「待办」），也是 todo')
   assert.equal(todoOf(tagged, fields), 'todo', '标签声明了这一栏、一次没点过 ＝ 未完成（不是「不是任务」）')
   assert.equal(todoOf(none, fields), undefined)
 })
@@ -300,16 +319,38 @@ test('标签声明的字段：屏幕画方框与「模型里是任务」同一�
    * 块上一个字节都没写。渲染看的是「有没有这一栏」（画方框），模型若只看 `_ownProps`，
    * 同一个块就是「屏幕上是未完成、查询里不是任务」——两边都不报错。
    */
-  const def = mkPropDef('任务状态', 'checkbox', { [UI_POSITION_PROP]: 'block-left' }, TASK_STATUS_PROP_ID)
+  const def = mkPropDef(
+    '任务状态',
+    'select',
+    { [UI_POSITION_PROP]: 'block-left', [DEFAULT_PROP]: TASK_STATUS_TODO_ID },
+    TASK_STATUS_PROP_ID,
+  )
   const tagBlock = mkTagBlock('任务')
   declareField(tagBlock, TASK_STATUS_PROP_ID)
   const host = tag(mkBlock('打上 #任务、一次没点过'), tagBlock.id)
   const forest = [def, tagBlock, host]
 
-  const box = gutterFieldsFor([host], forest).get(host.id)?.find((f) => f.kind === 'checkbox')
+  const box = gutterFieldsFor([host], forest).get(host.id)?.find((f) => f.propId === TASK_STATUS_PROP_ID)
   assert.ok(box, '屏幕上应画出方框（成员自动获得这一栏）')
   assert.equal(box!.filled, false, '一次没点过 ⇒ 空方框')
   assert.equal(todoOf(host, fieldTableOf(forest)), 'todo', '同一个判据：它是未完成，不是「不是任务」')
+})
+
+test('readField 的 `_default`：只对写了自己的缺省的定义生效；声明未填读缺省，别家未填仍是未填', () => {
+  const withDefault = mkPropDef('状态', 'select', { [DEFAULT_PROP]: 'choice-x' }, 'p-with')
+  const noDefault = mkPropDef('优先级', 'select', {}, 'p-no')
+  const tagBlock = mkTagBlock('组')
+  declareField(tagBlock, 'p-with')
+  declareField(tagBlock, 'p-no')
+  const member = tag(mkBlock('两个声明都拿到、一个值都没写'), tagBlock.id)
+  const fields = fieldTableOf([withDefault, noDefault, tagBlock, member])
+
+  const withRead = readField(member, 'p-with', fields)
+  assert.equal(withRead.declared, true)
+  assert.equal(withRead.value, 'choice-x', '声明了、没填 ⇒ 读缺省（查询／分组／todoOf 同一答案）')
+  const noRead = readField(member, 'p-no', fields)
+  assert.equal(noRead.declared, true)
+  assert.equal(noRead.value, undefined, '没有 `_default` 的定义：未填仍是未填（看板落「未设置」列）')
 })
 
 test('批量 gutter 与逐行算**逐块等价**：批级只扫一次库，结果不许和单块路径分叉', () => {

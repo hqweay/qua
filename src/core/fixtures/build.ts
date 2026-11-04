@@ -18,7 +18,9 @@ import {
   journalId,
   LISTS_PROP,
   mkBlock,
+  TASK_STATUS_DONE_ID,
   TASK_STATUS_PROP_ID,
+  TASK_STATUS_TODO_ID,
   uuidv7Hex,
   type Block,
 } from '../index.ts'
@@ -64,8 +66,13 @@ export function buildTree(
     const parsed = parseInline(s.text)
     const b = mkBlock(parsed.runs, { created: SEED_AT, modified: SEED_AT })
     for (const name of s.tags ?? []) out.pendingTags.push({ block: b, name })
-    // 任务状态是**真实属性**：它的键是定义块的 id，值与标签声明无关（声明只提供入口）
-    if (s.task !== undefined) b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: s.task }
+    // 任务状态是**真实属性**：键是定义块的 id，值是选项块 id（DSL 里的布尔只是书写便利，
+    // `false` 写成「待办」、`true` 写成「完成」；声明只提供入口，值与它无关）
+    if (s.task !== undefined)
+      b.props = {
+        ...(b.props ?? {}),
+        [TASK_STATUS_PROP_ID]: s.task ? TASK_STATUS_DONE_ID : TASK_STATUS_TODO_ID,
+      }
     if (s.props) b.props = { ...(b.props ?? {}), ...s.props }
     out.refs.push(...parsed.refs)
     b.children = buildTree(s.children ?? [], out)

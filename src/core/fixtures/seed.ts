@@ -18,10 +18,15 @@
  */
 import {
   declareField,
+  DEFAULT_PROP,
+  mkBlock,
   mkPropDef,
   mkTagBlock,
   shiftISO,
+  TASK_STATUS_DONE_ID,
+  TASK_STATUS_DOING_ID,
   TASK_STATUS_PROP_ID,
+  TASK_STATUS_TODO_ID,
   todayISO,
   UI_POSITION_PROP,
   type Block,
@@ -202,15 +207,15 @@ export function seedWorkspace(): Workspace {
      */
     {
       text: '本页的待办',
-      // 三态全部走属性条件（「未完成」＝ 任务状态 ＝ false）：
-      // 「有槽未填」与「靠标签声明拿到这一栏」的块也命中，不需要专用原子。
+      // 「未完成」＝ 有这一栏、值不是「完成」（`neq` 只对有这一栏的块成立）：
+      // 靠标签声明拿到这一栏的块由读侧缺省读出「待办」，一样命中，不需要专用原子。
       // 「本页之下」显式写成方向条件：范围轴退场后，缺省就是整库。
       props: {
         _icon: 'lucide:list-filter',
         _query: {
           where: {
             all: [
-              { prop: { id: TASK_STATUS_PROP_ID, eq: false } },
+              { prop: { id: TASK_STATUS_PROP_ID, neq: TASK_STATUS_DONE_ID } },
               { up: { is: '$self' } },
             ],
           },
@@ -342,6 +347,10 @@ function filler(lines: readonly string[]): SeedBlock[] {
  */
 export const TASK_STATUS_LABEL = '任务状态'
 export const TASK_TAG_LABEL = '任务'
+/** 任务状态三个选项的显示名（**种子内容**，不是界面文案；改显示名不动任何值，值认选项 id） */
+export const TASK_TODO_LABEL = '待办'
+export const TASK_DOING_LABEL = '进行中'
+export const TASK_DONE_LABEL = '完成'
 
 /**
  * **日记面板的演示栏**（`Prefs.journalMounts` 的种子）。
@@ -365,7 +374,7 @@ export function seedJournalMounts(): MountEntry[] {
           all: [
             // 「这一天下面」＝ 某个祖先既是日记块、日期又等于宿主那一天（`$self` 解析成宿主的 `_date`）
             { up: { all: [{ role: 'journal' }, { prop: { id: '_date', eq: '$self' } }] } },
-            { prop: { id: TASK_STATUS_PROP_ID, eq: false } },
+            { prop: { id: TASK_STATUS_PROP_ID, neq: TASK_STATUS_DONE_ID } },
           ],
         },
       },
@@ -375,13 +384,27 @@ export function seedJournalMounts(): MountEntry[] {
 }
 
 function coreVocabulary(): Block[] {
-  const taskStatus = mkPropDef(TASK_STATUS_LABEL, 'checkbox', { [UI_POSITION_PROP]: 'block-left' }, TASK_STATUS_PROP_ID)
+  // 任务状态是 select（待办／进行中／完成）：值存选项块 id，缺省读出「待办」——
+  // 刚挂上任务、还没填过的块，读侧就是「待办」，不需要先点一格才算任务。
+  // 选项块与定义块一样按核心词汇取**确定性 id**（`todoOf`／⌘↵／种子查询按 id 认「完成」）。
+  const taskStatus = mkPropDef(
+    TASK_STATUS_LABEL,
+    'select',
+    { [UI_POSITION_PROP]: 'block-left', [DEFAULT_PROP]: TASK_STATUS_TODO_ID },
+    TASK_STATUS_PROP_ID,
+  )
+  const choice = (label: string, id: string): Block => ({ ...mkBlock(label), id })
+  taskStatus.children = [
+    choice(TASK_TODO_LABEL, TASK_STATUS_TODO_ID),
+    choice(TASK_DOING_LABEL, TASK_STATUS_DOING_ID),
+    choice(TASK_DONE_LABEL, TASK_STATUS_DONE_ID),
+  ]
   const task = mkTagBlock(TASK_TAG_LABEL)
   task.props = { ...(task.props ?? {}), _icon: 'lucide:check-square' }
   declareField(task, TASK_STATUS_PROP_ID)
   // 它们也是**种子内容**（会进库、会导出）⇒ 与其它种子同一个固定时刻：
   // 留 `Date.now()` 会让这两块每次 seed 都跟别的内容差一年，而它们本该是同一份快照。
-  for (const b of [taskStatus, task]) {
+  for (const b of [taskStatus, task, ...taskStatus.children]) {
     b.created = SEED_AT
     b.modified = SEED_AT
   }

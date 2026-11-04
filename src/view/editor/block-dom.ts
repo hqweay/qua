@@ -17,6 +17,8 @@ import {
   DEFAULT_BLOCK_TYPE,
   DIVIDER_TYPE,
   DISPLAY_PROP,
+  TASK_STATUS_DONE_ID,
+  TASK_STATUS_PROP_ID,
   aliasesOf,
   blockLabel,
   blockTypeOf,
@@ -598,10 +600,12 @@ export function makeBlockEl(
   const foldable = r.hasChildren || bodyFoldable || embedBodyFoldable
   /** 这一行下面是否要画**行内**的身体（按源分派：有结果身体就画，段根同此） */
   const inlineBody = Boolean(opts.viewBody) && rowHasInlineViewBody(r)
-  /** gutter 上那个**二元开关**（本轮只认 checkbox；别的 kind 还没定怎么画） */
-  const box = opts.gutter?.find((f) => f.kind === 'checkbox')
+  /** gutter 上那个**任务开关**：任务状态字段优先（select，值是选项块 id），其余 checkbox 字段沿用二元画法 */
+  const box =
+    opts.gutter?.find((f) => f.propId === TASK_STATUS_PROP_ID) ?? opts.gutter?.find((f) => f.kind === 'checkbox')
   /**
-   * 待办三态：`true` ⇒ 做完了、`false`／未填 ⇒ 是任务但没做完、没有这一槽 ⇒ 不是任务。
+   * 待办三态：任务状态值＝「完成」选项 ⇒ 做完了；其余已声明形态（待办／进行中／未填）
+   * ⇒ 是任务但没做完；这一行没有任务字段（gutter 里也没有别的 checkbox）⇒ 不是任务。
    *
    * ⚠️ **未填要算「未完成」，不能算「不是任务」**：这个槽的准入判据是「这块有这条属性」
    *    而不是「这条属性有值」（见 `gutterFieldsOf`）—— 刚给它加上、还没点过的那一下，
@@ -610,7 +614,16 @@ export function makeBlockEl(
    *
    * ⚠️ `data-todo` 是 **CSS 与冒烟的契约**（删除线按它选），所以这里不换成属性名。
    */
-  const todo: 'todo' | 'done' | undefined = box ? (box.value === true ? 'done' : 'todo') : undefined
+  const todo: 'todo' | 'done' | undefined =
+    box === undefined
+      ? undefined
+      : box.propId === TASK_STATUS_PROP_ID
+        ? box.value === TASK_STATUS_DONE_ID
+          ? 'done'
+          : 'todo'
+        : box.value === true
+          ? 'done'
+          : 'todo'
   const el = document.createElement('div')
   el.className = 'blk'
   el.dataset.blockId = b.id

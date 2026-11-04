@@ -86,6 +86,29 @@ export function uiPositionOf(def: Block | undefined): UiPosition {
 export const TASK_STATUS_PROP_ID = derivedId('prop', 'core/task-status')
 
 /**
+ * 任务状态的三个**选项 id**（select 的选项＝定义块的直接子块，值存选项块 id）。
+ *
+ * 选项块与定义块一样是**核心词汇**：`todoOf`、⌘↵ 切换、种子查询都要按 id 认「完成」，
+ * 不能按正文认（显示名可改，改显示名不动任何值）。kind 前缀 `choice` 与定义块的
+ * `prop` 分域哈希，同名不撞。
+ */
+export const TASK_STATUS_TODO_ID = derivedId('choice', 'core/task-status/todo')
+export const TASK_STATUS_DOING_ID = derivedId('choice', 'core/task-status/doing')
+export const TASK_STATUS_DONE_ID = derivedId('choice', 'core/task-status/done')
+
+/**
+ * 定义块上的**缺省值**槽：声明了这一栏却没填的块，读侧按它取值（select 存选项块 id）。
+ * 没写这一槽的定义，未填仍是未填 —— 看板落「未设置」列、`empty` 照常可用。
+ * 归一发生在 `readField`（读侧），与布尔属性「声明即 `false`」是同一条原理。
+ */
+export const DEFAULT_PROP = '_default'
+
+/** `_default` 的值判据：缺省是**单个标量**（select 的选项 id 是字符串；数字/布尔字段是字面量）。 */
+export function isDefaultValue(v: unknown): boolean {
+  return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+}
+
+/**
  * **一次算好的字段读取表**：谁声明了哪些属性、每个属性是什么 kind。
  *
  * 为什么要一张表：判断「这块有没有这一栏」要同时看三处 —— 块上的值、块的
@@ -100,15 +123,22 @@ export interface FieldTable {
   byTag: ReadonlyMap<string, readonly string[]>
   /** 属性 id → kind（来自定义块） */
   kinds: ReadonlyMap<string, PropKind>
+  /** 属性 id → 缺省值（定义块写了 `_default` 才有；`readField` 对「已声明未填」按它取值） */
+  defaults: ReadonlyMap<string, unknown>
 }
 
-/** 从森林建一份字段读取表（标签声明 ＋ 定义 kind 各扫一趟） */
+/** 从森林建一份字段读取表（标签声明 ＋ 定义 kind／缺省值各扫一趟） */
 export function fieldTableOf(forest: readonly Block[]): FieldTable {
   const byTag = new Map<string, readonly string[]>()
   for (const tag of allTags(forest)) byTag.set(tag.id, declaredFieldIds(tag))
   const kinds = new Map<string, PropKind>()
-  for (const def of allPropDefs(forest)) kinds.set(def.id, propKindOf(def))
-  return { byTag, kinds }
+  const defaults = new Map<string, unknown>()
+  for (const def of allPropDefs(forest)) {
+    kinds.set(def.id, propKindOf(def))
+    const dflt = prop<unknown>(def, DEFAULT_PROP)
+    if (dflt !== undefined) defaults.set(def.id, dflt)
+  }
+  return { byTag, kinds, defaults }
 }
 
 /**
@@ -138,28 +168,35 @@ export interface FieldRead {
 }
 
 /**
- * 读一格字段。**布尔属性没有「未填」这一态**：声明了就等价于 `false`。
+ * 读一格字段。两类「没填过」在**读侧**归一：
  *
- * 为什么这条规则必须在这里、而不是在各写路径上「声明时补写 false」：
+ * · **布尔属性没有「未填」这一态**：声明了就等价于 `false`；
+ * · 定义写了**缺省值**（`_default`）的：声明了就按缺省读（select 是选项块 id）。
+ *
+ * 为什么归一必须在这里、而不是在各写路径上「声明时补写」：
  * 标签声明的属性**落不到成员块上**（成员是动态的，且每来一个新成员都要补写一遍）。
  * 写路径只能覆盖自有槽；读侧归一才覆盖两种来源。写路径也不必造一个用户没做过的值 ——
- * 数据里「没点过」仍然是没点过，**解释**上是未完成。
+ * 数据里「没点过」仍然是没点过，**解释**上由归一口径给出（布尔是未完成、带缺省的是缺省项）。
+ *
+ * ⚠️ 归一只对「没写过值」的块生效；没有缺省的定义，未填仍是未填（`undefined`）。
+ *    查询、看板分组、`todoOf` 都走这里 ⇒ 同一块在所有读法里是同一个答案。
  */
 export function readField(block: Block, propId: string, table: FieldTable): FieldRead {
   const has = block.props !== undefined && propId in block.props
   if (has) return { declared: true, value: block.props?.[propId] }
   const declared = fieldDeclared(block, propId, table)
-  const bool = table.kinds.get(propId) === 'checkbox'
-  return { declared, value: declared && bool ? false : undefined }
+  if (!declared) return { declared, value: undefined }
+  if (table.kinds.get(propId) === 'checkbox') return { declared, value: false }
+  return { declared, value: table.defaults.get(propId) }
 }
 
 /**
  * 「任务状态」的派生读法：**值就是属性槽**，没有第二份块字段。
  *
- * 三态与旧的 `'todo' | 'done' | 无` 对得上：
- *   · `true` ⇒ `'done'`（做完了）；
- *   · 其余任何已声明形态 ⇒ `'todo'`（**是任务、还没做完**）——`false`、没点过、
- *     以及**靠标签声明拿到这一栏但一次都没点过**的块；
+ * 它是 `select`（选项＝待办／进行中／完成），三态与值这样对上：
+ *   · 值＝「完成」选项 ⇒ `'done'`（做完了）；
+ *   · 其余任何已声明形态 ⇒ `'todo'`（**是任务、还没做完**）——待办、进行中、
+ *     以及**靠标签声明拿到这一栏还没填**的块（读侧缺省读出「待办」）；
  *   · 没有这一栏 ⇒ `undefined`（这块压根不是任务）。
  *
  * ⚠️ **判据是「有没有这一栏」（`readField`），不是「有没有值」。** 把「未填」并进
@@ -171,13 +208,14 @@ export function readField(block: Block, propId: string, table: FieldTable): Fiel
  */
 export function todoOf(block: Block, table: FieldTable): TodoState | undefined {
   /**
-   * 定义块没了 ⇒ **不是任务**（与渲染一致：gutter 上没有定义就不画方框）。
-   * 这里必须问 kind，而不是只看「有没有这一栏」：一条悬空的槽位无法说明它是勾选框。
+   * 定义块没了／不是 select ⇒ **不是任务**（与渲染一致：gutter 上没有定义就不画方框）。
+   * 这里必须问 kind，而不是只看「有没有这一栏」：一条悬空的槽位无法说明它是任务状态
+   * 这一栏（定义被删后值还在，拿别的 kind 的值来判会得到错误的答案）。
    */
-  if (table.kinds.get(TASK_STATUS_PROP_ID) !== 'checkbox') return undefined
+  if (table.kinds.get(TASK_STATUS_PROP_ID) !== 'select') return undefined
   const { declared, value } = readField(block, TASK_STATUS_PROP_ID, table)
   if (!declared) return undefined
-  return value === true ? 'done' : 'todo'
+  return value === TASK_STATUS_DONE_ID ? 'done' : 'todo'
 }
 
 export type PropKind = 'text' | 'number' | 'date' | 'checkbox' | 'select' | 'ref' | 'url'

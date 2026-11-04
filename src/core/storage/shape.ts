@@ -129,8 +129,11 @@ import {
  * v34 → v35：**查询范围收进方向轴**——`QuerySpec.scope` 退场，「这一块之下」改由
  *            `{up:{is:$self}}` 表达。旧 `scope` 会被新读路径静默忽略 ⇒ 从子树悄悄变成
  *            整库（不是报错，是给出另一份结果）⇒ 作废重 seed，不写迁移。
+ * v35 → v36：**任务状态从 checkbox 升 select**（待办／进行中／完成，值存选项块 id），
+ *            定义块新增 `_default` 读侧缺省（「已声明未填」按缺省读）。
+ *            旧库的布尔值对新判据（认「完成」选项 id）不再成立 ⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 35
+export const WORKSPACE_VERSION = 36
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {
