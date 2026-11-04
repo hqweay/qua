@@ -17,7 +17,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkBlock, writeBlockContent } from '../src/core/model/model.ts'
-import { textRuns } from '../src/core/model/runs.ts'
+import { plainText, textRuns } from '../src/core/model/runs.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 
@@ -88,129 +88,84 @@ test('连续 N 次事务 ⇒ 通知 N 次、重建 0 次（成本不随次数累
   assert.equal(store.probe.rebuildCount, rebuilds, 'N 次事务 ⇒ 0 次整库重建')
 })
 
-/* ------------------------------------------------------------ 撤销快照：合并时不许取 */
+/* ------------------------------------------------------------ 撤销条目：合并窗口与字节 */
 
 /**
- * **连续打字时不许取撤销快照**。
+ * **合并窗口内不新建条目，且撤销一次回到第一笔之前。**
  *
- * 判据用**序列化字节数**（不用耗时：耗时在并发门禁下会抖）。
- * 一次按键的撤销快照是 `JSON.stringify(整片森林)`；而连续打字时它会被合并进上一笔、
- * **取完就丢**。实测 50000 块时那一笔 10.2ms，而事务本身只有 0.55ms。
- *
- * 反证方式：把 `syncFromDom` 里的 `willMerge` 判断删掉（无条件 `this.snap()`），本条红。
+ * 判据是行为而不是实现：旧实现靠「合并时跳过整库快照」省时间；现在捕获只含 touched 的块，
+ * 无论合不合并都不会碰整片森林 —— 所以这里钉「一步」的语义，字节另有一条。
  */
-test('撤销快照：合并窗口内**不序列化整片森林**', () => {
+test('撤销条目：合并窗口内不新建条目，撤销一次回到第一笔之前', () => {
   const blocks = Array.from({ length: 200 }, (_, i) => mkBlock(`块${i}`))
   const store = new BlockStore(blocks)
+  const kb = new MemoryKb(store)
   const target = blocks[100]!
+  const t0 = 1_000_000
 
-  const orig = JSON.stringify
-  let total = 0
-  // eslint-disable-next-line no-global-assign
-  JSON.stringify = ((v: unknown, ...rest: unknown[]) => {
-    const out = (orig as (...a: unknown[]) => string | undefined)(v, ...rest)
-    total += typeof out === 'string' ? out.length : 0
-    return out
-  }) as typeof JSON.stringify
-  try {
-    const at = Date.now()
-    // 第一笔：会真的入栈 ⇒ 必须取快照
-    const first = store.undoStack.willMerge('insert', at) ? null : store.snap(null)
-    store.record(first, 'insert', at)
-    const afterFirst = total
-    assert.ok(afterFirst > 0, '第一笔必须取快照（否则撤销无内容可回）')
+  const first = kb.tx((tx) => tx.patch(target.id, (b) => writeBlockContent(b, textRuns('一'))))
+  store.record(first.undo, null, 'insert', t0)
+  const second = kb.tx((tx) => tx.patch(target.id, (b) => writeBlockContent(b, textRuns('一二'))))
+  store.record(second.undo, null, 'insert', t0 + 10)
 
-    // 第二笔（同一毫秒内、同类）⇒ 会被合并 ⇒ 不许再取
-    const second = store.undoStack.willMerge('insert', at) ? null : store.snap(null)
-    store.record(second, 'insert', at)
-    assert.equal(total, afterFirst, '合并窗口内不该再序列化一次整片森林')
-    assert.equal(store.undoStack.depth(), 1, '两笔合并成一格（撤销一次回到第一笔之前）')
-  } finally {
-    JSON.stringify = orig
-  }
+  assert.equal(store.undoStack.depth(), 1, '窗口内两笔合并成一格')
+  const r = store.undo('me', null)!
+  assert.equal(plainText(target.content), '块100', '撤销回到第一笔之前，而不是第二笔之前')
+  assert.ok(r.ops.length > 0)
 })
 
-test('撤销快照：超出合并窗口 ⇒ 照常入栈并取快照', () => {
+test('撤销条目：超出合并窗口 ⇒ 两笔各占一格', () => {
   const blocks = Array.from({ length: 50 }, (_, i) => mkBlock(`块${i}`))
   const store = new BlockStore(blocks)
+  const kb = new MemoryKb(store)
+  const target = blocks[25]!
   const t0 = 1_000_000
-  store.record(store.snap(null), 'insert', t0)
-  // 超出 1200ms 窗口 ⇒ 不合并
   const at = t0 + store.undoStack.mergeWindowMs + 1
-  assert.equal(store.undoStack.willMerge('insert', at), false, '超出窗口就不合并')
-  store.record(store.snap(null), 'insert', at)
-  assert.equal(store.undoStack.depth(), 2, '两笔各占一格')
+
+  const a = kb.tx((tx) => tx.patch(target.id, (b) => writeBlockContent(b, textRuns('一'))))
+  store.record(a.undo, null, 'insert', t0)
+  const b = kb.tx((tx) => tx.patch(target.id, (b) => writeBlockContent(b, textRuns('一二'))))
+  store.record(b.undo, null, 'insert', at)
+
+  assert.equal(store.undoStack.depth(), 2, '超出窗口就不合并，两笔各占一格')
 })
 
 /* ------------------------------------------------------------ 真实按键链路 */
 
 /**
- * **「用户按一下」那条完整链路的序列化字节，不随库体量增长。**
+ * **「用户按一下」的撤销条目字节，不随库体量增长**（首次按键与连续按键都一样）。
  *
- * 这条比上面那两条更靠近真实成本：真实按键是 `snap()` ＋ `tx()` ＋ `record()`，
- * 而**快照常常是最大的一笔**（实测 50000 块时占 95%）。
- *
- * 为什么用字节不用耗时：耗时在并发门禁下会抖（同一条断言先按耗时写过，两次红在
- * 不同负载上）；序列化字节数是**决定性**的，而它正是「整库序列化」的直接度量。
- *
- * 反证方式：把 `willMerge` 判断删掉（无条件 `this.snap()`），本条立刻红。
+ * 为什么用字节不用耗时：耗时在并发门禁下会抖；序列化字节数是**决定性**的。
+ * 旧实现在首次按键时序列化整片森林（100 → 10,000 块约大两个量级），
+ * 现在条目只含这一块的前后态。
  */
-test('真实按键链路：序列化字节在 100 块与 10,000 块的库上**相同**', () => {
-  const typeOnce = (n: number, merge: boolean): number => {
-    const blocks = Array.from({ length: n }, (_, i) => mkBlock(`块${i}`))
+test('真实按键链路：撤销条目字节在 100 块与 10,000 块的库上**相同**', () => {
+  /** @returns 第一笔、第二笔（合并窗口内）各自的条目字节 */
+  const bytes = (n: number): [number, number] => {
+    // 目标块的初始正文在两档库里**完全一样**：条目字节只该反映「动过的那一块」
+    const blocks = Array.from({ length: n }, (_, i) => mkBlock(i === Math.floor(n / 2) ? '目标块' : `块${i}`))
     const store = new BlockStore(blocks)
     const kb = new MemoryKb(store)
     const target = blocks[Math.floor(n / 2)]!
+    const t0 = 1_000_000
     // 预热：索引先建起来（首次重建不算进被测那一笔）
     store.index
-    kb.tx((tx) => tx.patch(target.id, (b) => writeBlockContent(b, textRuns('预热'))))
-    /**
-     * 造「上一笔」：合并窗口要有一条可合并的上一笔才生效。
-     * ⚠️ 不能 `clear()` —— 清空之后 `willMerge` 恒为 false，测的就不是合并路径了
-     *    （第一版这么写，断言当场红在 140 万字节上）。
-     */
-    store.undoStack.clear()
-    // 上一笔要**真的入栈**（`record` 只接受非 null 才 push）：给一份便宜的快照即可，
-    // 这里测的是「这一笔会不会取快照」，不是上一笔的内容。
-    store.record({ blocks: '[]', sel: 'null' }, 'insert', Date.now())
 
-    const orig = JSON.stringify
-    let total = 0
-    // eslint-disable-next-line no-global-assign
-    JSON.stringify = ((v: unknown, ...rest: unknown[]) => {
-      const out = (orig as (...a: unknown[]) => string | undefined)(v, ...rest)
-      total += typeof out === 'string' ? out.length : 0
-      return out
-    }) as typeof JSON.stringify
-    try {
-      const at = Date.now()
-      // 模拟真实按键：先问会不会合并，再决定要不要取快照
-      const before = merge && store.undoStack.willMerge('insert', at) ? null : store.snap(null)
-      kb.tx((tx) => tx.patch(target.id, (b) => writeBlockContent(b, textRuns('按键'))))
-      store.record(before, 'insert', at)
-    } finally {
-      JSON.stringify = orig
-    }
-    return total
+    const first = kb.tx((tx) => tx.patch(target.id, (b) => writeBlockContent(b, textRuns('一'))))
+    store.record(first.undo, null, 'insert', t0)
+    const second = kb.tx((tx) => tx.patch(target.id, (b) => writeBlockContent(b, textRuns('一二'))))
+    store.record(second.undo, null, 'insert', t0 + 10)
+    assert.equal(store.undoStack.depth(), 1, '同一窗口内两笔是一步')
+    return [JSON.stringify(first.undo).length, JSON.stringify(second.undo).length]
   }
 
-  // 连续打字（合并窗口命中）：快照被跳过 ⇒ 只剩这一块的内容
-  const small = typeOnce(100, true)
-  const large = typeOnce(10000, true)
-  assert.equal(
-    small,
+  const small = bytes(100)
+  const large = bytes(10_000)
+  assert.deepEqual(
     large,
-    `连续打字的序列化字节必须与库体量无关：100 块 ⇒ ${small} 字节，10000 块 ⇒ ${large} 字节。` +
-      `真实按键若仍无条件取撤销快照，10000 块会比 100 块大两个量级`,
+    small,
+    `撤销条目字节必须与库体量无关：100 块 ⇒ ${small.join('/')}，10000 块 ⇒ ${large.join('/')}。` +
+      `条目里若还带着整片森林，10000 块会比 100 块大两个量级`,
   )
-  assert.ok(small < 500, `一次连续打字只该序列化动过的那一块：实际 ${small} 字节`)
-
-  // 首次按键（必须入栈）：这一笔会包含整库快照 —— 那是撤销语义的必然代价，
-  // 断言只要求它**不爆炸**（与体量成比例，而不是平方）。
-  const firstSmall = typeOnce(100, false)
-  const firstLarge = typeOnce(10000, false)
-  assert.ok(
-    firstLarge < firstSmall * 200,
-    `首次按键的字节应随体量线性（约 100 倍），实际 ${firstSmall} → ${firstLarge}（可能是重复序列化）`,
-  )
+  assert.ok(small[1] < 500, `一次连续打字的条目只该序列化动过的那一块：实际 ${small[1]} 字节`)
 })

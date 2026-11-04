@@ -197,7 +197,7 @@ export class BlockSelection {
   deleteSelectedBlocks(): boolean {
     const roots = this.blockSelRoots().filter((b) => locate(this.ed.doc, b.id)?.parent !== null)
     if (roots.length === 0) return false
-    const before = this.ed.snap()
+    this.ed.beginUndoEntry()
     const flat = flatten(this.ed.doc)
     const firstIdx = Math.min(...roots.map((b) => flat.findIndex((x) => x.id === b.id)))
     // 落点先算好再动手：删除进行中再 locate，读的是一棵已经少了几块的树
@@ -209,7 +209,7 @@ export class BlockSelection {
     this.ed.write((tx) => {
       for (const loc of targets) tx.remove(loc.block.id)
     })
-    this.ed.undo.record(before, 'structural', Date.now())
+    this.ed.finishUndoEntry('structural')
     this.blockSel = null
     this.mouseSel = null
     this.ed.container.classList.remove('blocksel-drag')

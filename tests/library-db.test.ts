@@ -641,13 +641,14 @@ test('撤销一次插入后重开 ⇒ 块不进回收站（purged 删行，不�
   replaceContentRows(db, workspaceToRowWrites(wsOf()), { deviceId: dev, oplog: log(genesis) })
 
   // 插入一块并落盘
-  const snap = store.snap(null)
   const fresh = mkBlock('新', { created: 2, modified: 2 })
-  const ins = kb.tx((tx) => tx.insert(fresh, root.id, 0)).ops
+  const insTx = kb.tx((tx) => tx.insert(fresh, root.id, 0))
+  const ins = insTx.ops
   applyRowWrites(db, rowWritesFor(wsOf(), ins), { deviceId: dev, oplog: log(ins) })
 
   // ⌘Z：撤销一次插入 ⇒ `exist{purged}`
-  const undo = store.restore(snap).ops
+  store.record(insTx.undo, null, 'other', 1)
+  const undo = store.undo('me', null)!.ops
   applyRowWrites(db, rowWritesFor(wsOf(), undo), { deviceId: dev, oplog: log(undo) })
 
   const reloaded = rowsToWorkspace(readContentRows(db))

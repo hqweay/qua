@@ -839,9 +839,9 @@ function renderCenterTabs(tabs: readonly TabInfo[]): void {
  *    加属性看似「只是一条数据的改动」，但它同时是这一行外观的输入。
  */
 function writeProps(blockId: string, mutate: () => void): void {
-  const before = blocks.snap(ed.sel)
-  run((tx) => tx.patch(blockId, mutate), mainEd)
-  blocks.record(before, 'other', Date.now())
+  const sel = ed.sel
+  const r = txRun((tx) => tx.patch(blockId, mutate), mainEd)
+  blocks.record(r.undo, sel, 'other', Date.now())
   // 行自己：别名头 / 身份图标 / 类型外观 / gutter 标记都在这一行的 DOM 里
   repaintBlock(blockId)
   // 右槽的检视卡：属性行与「来源」都变了
@@ -993,9 +993,9 @@ function applyBlockType(blockId: string, typeId: string): boolean {
  * 而命令层只声明「发生了什么」。
  */
 const runTx: TxRun = (fn) => {
-  const before = blocks.snap(ed.sel)
+  const sel = ed.sel
   const r = txRun(fn, mainEd)
-  if (r.ops.length > 0) blocks.record(before, 'other', Date.now())
+  if (r.ops.length > 0) blocks.record(r.undo, sel, 'other', Date.now())
   for (const id of new Set(r.changes.filter((c) => c.kind === 'blocks').map((c) => c.id))) repaintBlock(id)
   scheduleProperties()
   scheduleSave()

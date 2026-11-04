@@ -69,10 +69,11 @@ test('③ 撤销产生的 op 在同一条流里：重放能走回快照', () => 
   const kb = new MemoryKb(store)
   const ops: Op[] = [...diff([], store.blocks)]
 
-  const snap = store.snap(null)
   const fresh = mkBlock('插进去的', at(201))
-  ops.push(...kb.tx((tx) => tx.insert(fresh, a.id, 0)).ops)
-  const undo = store.restore(snap)
+  const r = kb.tx((tx) => tx.insert(fresh, a.id, 0))
+  ops.push(...r.ops)
+  store.record(r.undo, null, 'other', 1)
+  const undo = store.undo('me', null)!
   ops.push(...undo.ops)
 
   assert.equal(store.find(fresh.id), undefined, '撤销把它清除了')
@@ -100,15 +101,16 @@ test('⑤ 软删与清除是两件事：软删留在树上，purged 真的消失
   const store = new BlockStore([a])
   const kb = new MemoryKb(store)
   const ops: Op[] = [...diff([], store.blocks)]
-  const beforeRemove = store.snap(null)
 
-  ops.push(...kb.tx((tx) => tx.remove(a.id)).ops)
+  const removed = kb.tx((tx) => tx.remove(a.id))
+  ops.push(...removed.ops)
   let r = replay(ops)
   assert.equal(r.length, 1, '软删不摘树')
   assert.equal(typeof r[0]!.props?._deletedAt, 'number', '软删标记在块上')
   assert.equal(forestFingerprint(r), forestFingerprint(store.blocks))
 
-  ops.push(...store.restore(beforeRemove).ops) // 撤销删除（回到没删的样子）
+  store.record(removed.undo, null, 'other', 1)
+  ops.push(...store.undo('me', null)!.ops) // 撤销删除（回到没删的样子）
   r = replay(ops)
   assert.equal(r[0]!.props?._deletedAt, undefined)
   same(store.blocks, ops)

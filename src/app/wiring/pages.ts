@@ -26,6 +26,7 @@ import {
   type ShellCol,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
+import type { UndoCapture } from '../../core/kb/scoped.ts'
 import type { Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { Tx, Change, Op } from '../../core/kb/types.ts'
@@ -41,7 +42,7 @@ import type { PageDeps } from '../commands-impl.ts'
 export type PagesDeps = {
   kb: MemoryKb
   blocks: BlockStore
-  txRun: <R>(fn: (tx: Tx) => R, source?: unknown) => { ops: Op[]; changes: Change[]; result: R }
+  txRun: <R>(fn: (tx: Tx) => R, source?: unknown) => { ops: Op[]; changes: Change[]; result: R; undo: UndoCapture }
   run: <R>(fn: (tx: Tx) => R, source?: unknown) => R
   syncSections: () => void
   saveNow: () => void
@@ -487,9 +488,9 @@ export function setupPages(deps: PagesDeps) {
     // 命令层开事务：装配层补撤销快照（零 op 的事务不记——没写东西就没有可撤销的），
     // 并重画这批改动碰到的行（标签 chip／别名头住在一行自己的 DOM 里，等整页重渲染就晚了）
     run: (fn) => {
-      const before = blocks.snap(deps.getEd().sel)
+      const sel = deps.getEd().sel
       const r = txRun(fn, deps.getMainEd())
-      if (r.ops.length > 0) blocks.record(before, 'other', Date.now())
+      if (r.ops.length > 0) blocks.record(r.undo, sel, 'other', Date.now())
       for (const id of new Set(r.changes.filter((c) => c.kind === 'blocks').map((c) => c.id))) repaintBlock(id)
       scheduleSave()
       scheduleBadge()
