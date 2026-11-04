@@ -68,24 +68,13 @@ test('草稿往返：单条件不包一层 all（`all:[x]` 与 `x` 不是同一�
   assert.equal(bytes(two), `{"where":{"all":[{"prop":${task}},{"tag":"任务"}]}}`)
 })
 
-test('「待办」那一行是**预设**：展开成属性条件，再按属性条件认回来', () => {
-  // 界面上仍有三个词（未完成／已完成／不是任务），但落进 `_query` 的只有 `{prop}` 一种形状
-  assert.deepEqual(nodeOfRow({ kind: 'todo', value: 'todo' }), { prop: { id: TASK_STATUS_PROP_ID, eq: false } })
-  assert.deepEqual(nodeOfRow({ kind: 'todo', value: 'done' }), { prop: { id: TASK_STATUS_PROP_ID, eq: true } })
-  assert.deepEqual(nodeOfRow({ kind: 'todo', value: 'none' }), { prop: { id: TASK_STATUS_PROP_ID, exists: false } })
-  // 反方向：同样的条件存进库之后，构建器上仍然显示成那一行（不变成两行「任务状态 = 是/否」）
-  for (const [node, value] of [
-    [{ prop: { id: TASK_STATUS_PROP_ID, eq: false } }, 'todo'],
-    [{ prop: { id: TASK_STATUS_PROP_ID, eq: true } }, 'done'],
-    [{ prop: { id: TASK_STATUS_PROP_ID, exists: false } }, 'none'],
-  ] as const) {
-    const draft = draftOfSpec({ where: node })
-    assert.deepEqual(draft.rows, [{ kind: 'todo', value }])
-    assert.equal(bytes({ where: node }), JSON.stringify({ where: node }), '往返逐字节相等')
-  }
-  // 任务状态的**别的**算子不是三态，仍按属性行显示
+test('任务状态的条件一律按属性行显示（没有第二套预设行）', () => {
+  // eq/exists/empty 与别的属性同一个形状，不认回成任何特殊行
   assert.deepEqual(draftOfSpec({ where: { prop: { id: TASK_STATUS_PROP_ID, empty: true } } }).rows, [
     { kind: 'prop', field: TASK_STATUS_PROP_ID, op: 'empty', value: 'true' },
+  ])
+  assert.deepEqual(draftOfSpec({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: false } } }).rows, [
+    { kind: 'prop', field: TASK_STATUS_PROP_ID, op: 'eq', value: 'false' },
   ])
 })
 
@@ -129,9 +118,9 @@ test('没填完的那一行不进条件（`nodeOfRow` 返回 null，而不是一
   assert.equal(nodeOfRow({ kind: 'prop', field: '', op: 'eq', value: 'x' }), null)
   const spec = specOfDraft({
     mode: 'all',
-    rows: [{ kind: 'todo', value: 'todo' }, { kind: 'tag', value: '' }],
+    rows: [{ kind: 'prop', field: 'p1', op: 'eq', value: 'v1' }, { kind: 'tag', value: '' }],
   })
-  assert.equal(JSON.stringify(spec), JSON.stringify({ where: nodeOfRow({ kind: 'todo', value: 'todo' }) }))
+  assert.equal(JSON.stringify(spec), JSON.stringify({ where: nodeOfRow({ kind: 'prop', field: 'p1', op: 'eq', value: 'v1' }) }))
 })
 
 /* ------------------------------------------------------------ 字面量 */

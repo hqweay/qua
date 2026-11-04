@@ -62,7 +62,6 @@ export interface QueryTreeDeps {
 }
 
 const ROW_KIND_TEXT: Record<TreeRowKind, MsgId> = {
-  todo: 'ui.query.kind.todo',
   tag: 'ui.query.kind.tag',
   text: 'ui.query.kind.text',
   prop: 'ui.query.kind.prop',
@@ -84,9 +83,8 @@ const OP_TEXT: Record<DraftOp, MsgId> = {
   empty: 'ui.query.op.empty',
 }
 
-/** 一行还没填完时给一个默认值：布尔没有「未填」态，其它留空由用户填 */
+/** 一行还没填完时给一个默认值：其它留空由用户填 */
 function defaultRow(kind: TreeRowKind, field: string): TreeRow {
-  if (kind === 'todo') return { kind: 'todo', value: 'todo' }
   if (kind === 'tag') return { kind: 'tag', value: '' }
   if (kind === 'text') return { kind: 'text', value: '' }
   if (kind === 'prop') return { kind: 'prop', field, op: 'eq', value: '' }
@@ -455,9 +453,6 @@ export class QueryTree {
     )
     el.append(kind)
     switch (row.kind) {
-      case 'todo':
-        el.append(this.todoControls(row))
-        break
       case 'tag':
       case 'text':
         el.append(this.textRowControls(row))
@@ -494,24 +489,6 @@ export class QueryTree {
     })
     el.append(del)
     return el
-  }
-
-  private todoControls(row: Extract<TreeRow, { kind: 'todo' }>): HTMLElement {
-    const sel = selectEl(
-      [
-        { value: 'todo', label: t('ui.query.todo.todo') },
-        { value: 'done', label: t('ui.query.todo.done') },
-        { value: 'none', label: t('ui.query.todo.none') },
-      ],
-      row.value,
-      (next) => {
-        row.value = next === 'done' || next === 'none' ? next : 'todo'
-        this.syncRow(sel, row)
-      },
-      'qt-value',
-      'todo',
-    )
-    return sel
   }
 
   private textRowControls(row: Extract<TreeRow, { kind: 'tag' | 'text' }>): HTMLElement {

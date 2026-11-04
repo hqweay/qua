@@ -14,15 +14,12 @@
  */
 import { canonicalSpec } from './query-view.ts'
 import { isQuerySpec, type QueryNode, type QuerySpec } from './query.ts'
-import { type PropKind, TASK_STATUS_PROP_ID } from '../props/props.ts'
+import { type PropKind } from '../props/props.ts'
 
-/** 一行条件能表达的四种事情（其余形态走 JSON） */
-export type DraftKind = 'todo' | 'tag' | 'text' | 'prop' | 'path'
+/** 一行条件能表达的事情（其余形态走 JSON） */
+export type DraftKind = 'tag' | 'text' | 'prop' | 'path'
 /** 属性条件的算子（与 `PropOp` 一一对应；`empty` 与 `exists` 是两件事） */
 export type DraftOp = 'eq' | 'neq' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'empty'
-
-/** 「待办」这一行预设的三种取值（**不是条件原子**，只活在这一层，展开成 `{prop}`） */
-export type TodoPreset = 'todo' | 'done' | 'none'
 
 export const DRAFT_OPS: readonly DraftOp[] = ['eq', 'neq', 'contains', 'gt', 'gte', 'lt', 'lte', 'exists', 'empty']
 
@@ -107,11 +104,6 @@ function rowOf(node: QueryNode): DraftRow | null {
   if ('prop' in node) {
     const op = node.prop
     const id = node.prop.id
-    if (id === TASK_STATUS_PROP_ID) {
-      if ('eq' in op && op.eq === true) return { kind: 'todo', value: 'done' }
-      if ('eq' in op && op.eq === false) return { kind: 'todo', value: 'todo' }
-      if ('exists' in op && op.exists === false) return { kind: 'todo', value: 'none' }
-    }
     if ('eq' in op) return { kind: 'prop', field: id, op: 'eq', value: literalText(op.eq) }
     if ('neq' in op) return { kind: 'prop', field: id, op: 'neq', value: literalText(op.neq) }
     if ('contains' in op) return { kind: 'prop', field: id, op: 'contains', value: op.contains }
@@ -192,13 +184,6 @@ export function literalOf(text: string): unknown {
 
 /** 一行 → 叶子节点；`field` 缺失 ⇒ `null`（这一行还没填完，应用到条件里没有意义） */
 export function nodeOfRow(row: DraftRow): QueryNode | null {
-  if (row.kind === 'todo') {
-    // 「待办」是属性条件的预设（见 `rowOf`）：三态全部落在 `{prop}` 上
-    const v: TodoPreset = row.value === 'done' || row.value === 'none' ? row.value : 'todo'
-    if (v === 'done') return { prop: { id: TASK_STATUS_PROP_ID, eq: true } }
-    if (v === 'none') return { prop: { id: TASK_STATUS_PROP_ID, exists: false } }
-    return { prop: { id: TASK_STATUS_PROP_ID, eq: false } }
-  }
   if (row.kind === 'tag') return row.value && row.value !== '' ? { tag: row.value } : null
   if (row.kind === 'text') return row.value && row.value !== '' ? { text: row.value } : null
   if (row.kind === 'path') {

@@ -50,10 +50,6 @@ export function rowLabel(
     const target = row.value === '$self' ? t('ui.query.tree.selfBlock') : (refLabel?.(row.value ?? '') ?? row.value ?? '')
     return `${dirText} · ${target}`
   }
-  if (row.kind === 'todo') {
-    const v = row.value === 'done' ? 'done' : row.value === 'none' ? 'none' : 'todo'
-    return t(v === 'done' ? 'ui.query.todo.done' : v === 'none' ? 'ui.query.todo.none' : 'ui.query.todo.todo')
-  }
   if (row.kind === 'tag') return `#${row.value ?? ''}`
   if (row.kind === 'text') return t('ui.query.label.text', { text: row.value ?? '' })
   const name = row.field ? fieldName(row.field) : t('ui.query.label.noField')

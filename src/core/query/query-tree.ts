@@ -14,14 +14,12 @@
  * ⚠️ 这里的「能不能表达」是**形状判据**，不是语义判据：空组 `all:[]`／`any:[]` 可表达，
  *    它们分别是恒真／恒假，拼回来不能换。
  */
-import { TASK_STATUS_PROP_ID } from '../props/props.ts'
-import type { DraftOp, TodoPreset } from './query-draft.ts'
+import type { DraftOp } from './query-draft.ts'
 import type { QueryNode, QuerySpec, SortKey } from './query.ts'
 import { canonicalSpec } from './query-view.ts'
 
-/** 叶子行能表达的几种条件（`todo` 是属性条件的预设，不是另一个原子） */
+/** 叶子行能表达的几种条件 */
 export type TreeRow =
-  | { kind: 'todo'; value: TodoPreset }
   | { kind: 'tag'; value: string }
   | { kind: 'text'; value: string }
   | { kind: 'prop'; field: string; op: DraftOp; value: string }
@@ -36,8 +34,8 @@ export type TreeRow =
 
 export type TreeRowKind = TreeRow['kind']
 
-/** 行种类下拉的顺序（与「加一条条件」的选择器分开：`todo` 只从已有条件认回来） */
-export const TREE_ROW_KINDS: readonly TreeRowKind[] = ['tag', 'prop', 'text', 'ref', 'path', 'role', 'is', 'todo']
+/** 行种类下拉的顺序（与「加一条条件」的选择器分开） */
+export const TREE_ROW_KINDS: readonly TreeRowKind[] = ['tag', 'prop', 'text', 'ref', 'path', 'role', 'is']
 
 export interface TreeLeaf {
   kind: 'leaf'
@@ -121,12 +119,7 @@ export function treeNodeOf(node: QueryNode): TreeNode | null {
   return row ? { kind: 'leaf', not: false, row } : null
 }
 
-/**
- * 一个**叶子**条件 → 一行。
- *
- * `todo` 是属性条件的预设（与旧构建器同一口径）：`任务状态 = true/false/exists:false`
- * 仍然显示成「已完成／未完成／不是任务」，落回 `_query` 的只有 `{prop}` 一种形状。
- */
+/** 一个**叶子**条件 → 一行。 */
 export function treeRowOf(node: QueryNode): TreeRow | null {
   if ('tag' in node) return { kind: 'tag', value: node.tag }
   if ('text' in node) return { kind: 'text', value: node.text }
@@ -150,11 +143,6 @@ export function treeRowOf(node: QueryNode): TreeRow | null {
   const keys = PROP_OP_KEYS.filter((k) => k in op)
   // 多个算子写在同一条上是「写歪但读得懂」；树只能表达一个 ⇒ 交给 JSON，别挑一个显示
   if (keys.length !== 1) return null
-  if (id === TASK_STATUS_PROP_ID) {
-    if ('eq' in op && op.eq === true) return { kind: 'todo', value: 'done' }
-    if ('eq' in op && op.eq === false) return { kind: 'todo', value: 'todo' }
-    if ('exists' in op && op.exists === false) return { kind: 'todo', value: 'none' }
-  }
   const key = keys[0]!
   switch (key) {
     case 'eq':
@@ -241,12 +229,6 @@ export function treeOfSpec(spec: QuerySpec): TreeDraft | null {
 
 /** 一行 → 叶子条件；没填完返回 `null`（UI 据此禁用「应用」） */
 export function treeNodeOfRow(row: TreeRow): QueryNode | null {
-  if (row.kind === 'todo') {
-    const v = row.value === 'done' || row.value === 'none' ? row.value : 'todo'
-    if (v === 'done') return { prop: { id: TASK_STATUS_PROP_ID, eq: true } }
-    if (v === 'none') return { prop: { id: TASK_STATUS_PROP_ID, exists: false } }
-    return { prop: { id: TASK_STATUS_PROP_ID, eq: false } }
-  }
   if (row.kind === 'tag') return row.value.trim() === '' ? null : { tag: row.value }
   if (row.kind === 'text') return row.value.trim() === '' ? null : { text: row.value }
   if (row.kind === 'ref') return row.target === '' ? null : { ref: row.target }
