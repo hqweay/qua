@@ -2846,8 +2846,9 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
         kind: body?.dataset.embedBody ?? '',
         note: body?.querySelector('.embed-note')?.textContent ?? '',
         view: Boolean(view),
+        // 名字在块标那一行（投影与正文里那个查询块同一形状），面板抬头不写它
         titleHidden: view?.querySelector('.queryview-title')?.hidden ?? true,
-        title: view?.querySelector('.queryview-title')?.textContent ?? '',
+        title: el?.querySelector('.embed-title-row')?.textContent ?? '',
         count: view?.querySelector('.queryview-count')?.textContent ?? '',
         tabs: [...(view?.querySelectorAll('.qv-view-btn') ?? [])].map((b) => b.textContent),
         chips: view?.querySelector('.queryview-filters')?.hidden ?? null,
@@ -2880,7 +2881,12 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
   const a = await projState()
   assert(a.view && a.kind === 'view', `查询块露面 ⇒ 身体是投影（不再是一行空壳）：${JSON.stringify({ view: a.view, kind: a.kind })}`)
   assert(a.note === '', `不再说「这个看法还没有渲染器」：${JSON.stringify(a.note)}`)
-  assert(a.titleHidden === false && a.title !== '', `投影抬头写名字（露面行没有第二个名字可看）：${JSON.stringify(a)}`)
+  /**
+   * **名字在块标那一行，不在面板抬头里**：投影与正文里那个查询块同一形状
+   * —— 露面行自己的正文槽是空的，名字只能落在这里；面板抬头不重复它。
+   */
+  assert(a.title !== '', `投影的名字占块标那一行：${JSON.stringify(a)}`)
+  assert(a.titleHidden === true, `面板抬头不再重复名字（同一句话同屏两遍是噪声）：${JSON.stringify(a)}`)
   assert(a.count.includes('1'), `锚在源所在的页 ⇒ ${a.count}`)
   assert(a.tabs.join() === '看法', `投影只有一颗「看法」，不是 tab 条（tab 会写源、连坐所有跟随者）：${JSON.stringify(a.tabs)}`)
   assert(a.chips === true, `投影不画条件条（那一行占一扇 168px 的窗太贵，条件属于源块）：${JSON.stringify(a.chips)}`)
@@ -2916,24 +2922,24 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
    * 看不见的首个子块）。
    */
   const titleBox = await page.evaluate(() => {
-    const t = document.querySelector('.queryview[data-surface="embed"] .queryview-title')
+    const t = document.querySelector('.blk[data-embed="1"] .embed-title-row')
     const r = t?.getBoundingClientRect()
     const tx = t?.querySelector('.tx')
     return r && r.height > 0 ? { x: r.left + 8, y: r.top + r.height / 2, text: t.textContent ?? '', live: Boolean(tx) } : null
   })
-  assert(titleBox && titleBox.text !== '', `投影抬头有名字：${JSON.stringify(titleBox)}`)
-  assert(titleBox.live, `抬头里就是一台编辑器（常驻可编辑，不是投影 + 浮层）：${JSON.stringify(titleBox)}`)
+  assert(titleBox && titleBox.text !== '', `投影的名字在块标那一行：${JSON.stringify(titleBox)}`)
+  assert(titleBox.live, `名字那一行里就是一台编辑器（常驻可编辑，不是投影 + 浮层）：${JSON.stringify(titleBox)}`)
   await page.mouse.click(titleBox.x, titleBox.y)
   await page.waitForTimeout(120)
   const inTitle = await page.evaluate(() => {
-    const t = document.querySelector('.queryview[data-surface="embed"] .queryview-title')
+    const t = document.querySelector('.blk[data-embed="1"] .embed-title-row')
     return {
       focusInside: Boolean(t?.contains(document.activeElement)),
       overlay: Boolean(document.querySelector('body > .tv-edit')),
       active: window.__qua.__editor ? document.activeElement?.className ?? '' : '',
     }
   })
-  assert(inTitle.focusInside && !inTitle.overlay, `点抬头就地进编辑、不弹浮层：${JSON.stringify(inTitle)}`)
+  assert(inTitle.focusInside && !inTitle.overlay, `点名字就地进编辑、不弹浮层：${JSON.stringify(inTitle)}`)
   const blocksBefore = await page.evaluate(() => window.__qua.allBlocks().length)
   /**
    * **连打几个字都落在抬头这一块上**。
@@ -2945,7 +2951,7 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
   await page.keyboard.type('改名')
   await page.waitForTimeout(200)
   const typed = await page.evaluate(() => {
-    const t = document.querySelector('.queryview[data-surface="embed"] .queryview-title')
+    const t = document.querySelector('.blk[data-embed="1"] .embed-title-row')
     return {
       text: t?.querySelector('.tx')?.textContent ?? '',
       caretInTitle: Boolean(t?.contains(document.activeElement)),
@@ -2971,9 +2977,9 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
     const src = window.__qua.allBlocks().find((x) => x.id === id)
     return {
       srcText: src?.text ?? '',
-      title: document.querySelector('.queryview[data-surface="embed"] .queryview-title')?.textContent ?? '',
+      title: document.querySelector('.blk[data-embed="1"] .embed-title-row')?.textContent ?? '',
       blocks: window.__qua.allBlocks().length,
-      stillThere: Boolean(document.querySelector('.queryview[data-surface="embed"] .queryview-title .tx')),
+      stillThere: Boolean(document.querySelector('.blk[data-embed="1"] .embed-title-row .tx')),
     }
   }, qid)
   assert(renamed.blocks === blocksBefore, `抬头里 ↵ 是敲完，不拆出看不见的块：${blocksBefore} → ${renamed.blocks}`)
@@ -2990,12 +2996,12 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
    *   · ⌘A 选中抬头里的字（不是整篇正文）；
    *   · 行首退格把字吃进上一块（并块）这件事**不发生在抬头里**。
    */
-  await page.locator('.queryview[data-surface="embed"] .queryview-title .tx').click()
+  await page.locator('.blk[data-embed="1"] .embed-title-row .tx').click()
   await page.waitForTimeout(120)
   await page.keyboard.press('ControlOrMeta+a')
   await page.waitForTimeout(120)
   const selectAll = await page.evaluate(() => {
-    const t = document.querySelector('.queryview[data-surface="embed"] .queryview-title')
+    const t = document.querySelector('.blk[data-embed="1"] .embed-title-row')
     const sel = document.getSelection()
     const anchor = sel?.anchorNode ?? null
     const el = anchor?.nodeType === 1 ? anchor : anchor?.parentElement
@@ -3027,7 +3033,7 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
    * 清空走**真实按键**：查询块的正文只有「直接打字」这一条写路径能写它
    * （`canWriteText` 挡住程序化整段替换）。
    */
-  await page.locator('.queryview[data-surface="embed"] .queryview-title .tx').click()
+  await page.locator('.blk[data-embed="1"] .embed-title-row .tx').click()
   await page.waitForTimeout(120)
   await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.press('Backspace')
@@ -3035,7 +3041,7 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
   await page.evaluate(() => window.__qua.focusBlock(window.__qua.__editor.doc.roots[0].id, 0))
   await page.waitForTimeout(300)
   const emptyTitle = await page.evaluate(() => {
-    const title = document.querySelector('.queryview[data-surface="embed"] .queryview-title')
+    const title = document.querySelector('.blk[data-embed="1"] .embed-title-row')
     const tx = title?.querySelector('.tx')
     return {
       ph: tx?.dataset.ph ?? '',
@@ -3048,16 +3054,28 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
     `名字为空时抬头说一句「${emptyTitle.ph}」：${JSON.stringify(emptyTitle)}`,
   )
 
-  // ①d 投影行可折：三角与竖线都折身体那一格；折了行还在、线也还在、ViewHost 不卸载
+  /**
+   * ①d 投影行可折：三角与竖线都折**面板**那一格；折了之后
+   * **名字那一行还在**（折的是「下一层」，不是这一块自己）、线还在、ViewHost 不卸载。
+   */
   const projFoldState = () =>
     page.evaluate(() => {
       const row = document.querySelector('.blk[data-embed="1"]')
       const body = row?.querySelector(':scope > .blk-embed-body')
+      const title = body?.querySelector('.embed-title-row')
+      const panel = body?.querySelector('.embed-panel')
+      const vis = (el) => Boolean(el && getComputedStyle(el).display !== 'none' && el.getClientRects().length > 0)
       return {
         collapsed: row?.dataset.collapsed === '1',
         folded: body?.dataset.folded === '1',
         rail: Boolean(row?.querySelector(':scope > .rail-self')),
         viewMounted: Boolean(body?.querySelector('.queryview')),
+        titleVisible: vis(title),
+        titleText: title?.textContent ?? '',
+        // 名字那一行仍在**块标那一行**（折起来不该把这一行挤走）
+        titleTop: title ? Math.round(title.getBoundingClientRect().top) : -1,
+        markerTop: row ? Math.round((row.querySelector(':scope > .left .marker')?.getBoundingClientRect().top ?? -1)) : -1,
+        panelVisible: vis(panel),
       }
     })
   const projFoldBy = (sel) =>
@@ -3072,11 +3090,15 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
   assert(await projFoldBy(':scope > .left > .fold'), '投影行有折叠三角')
   await page.waitForTimeout(200)
   let pf = await projFoldState()
-  assert(pf.collapsed && pf.folded && pf.viewMounted, `折身体：行标记、身体 data-folded，ViewHost 只藏不卸：${JSON.stringify(pf)}`)
+  assert(pf.collapsed && pf.folded && pf.viewMounted, `折面板：行标记、身体 data-folded，ViewHost 只藏不卸：${JSON.stringify(pf)}`)
+  assert(pf.titleVisible, `折叠时保留名字那一行（折的是下一层）：${JSON.stringify(pf)}`)
+  assert(pf.titleTop === pf.markerTop, `折起来名字仍与块标同一行：${JSON.stringify(pf)}`)
+  assert(!pf.panelVisible, `折叠时面板收起（结果那一格不占地方）：${JSON.stringify(pf)}`)
   assert(await projFoldBy(':scope > .rail-self'), '折了之后线仍在（短段锚在行上）')
   await page.waitForTimeout(200)
   pf = await projFoldState()
   assert(!pf.collapsed && !pf.folded && pf.viewMounted, `再点同一条线展开：${JSON.stringify(pf)}`)
+  assert(pf.panelVisible && pf.titleVisible, `展开之后面板与名字都在：${JSON.stringify(pf)}`)
 
   // ② 跟随源：源建一张表格并激活 ⇒ 露面当场跟着换（同一台 ViewHost 自己订阅）
   await page.evaluate((id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'table' }), qid)
@@ -15030,14 +15052,24 @@ await check('T166 投影：同一块在这里看成大纲表格（表头＝源�
   await page.waitForTimeout(450)
   const st = await embedState(page)
   assert(st.tableHeads === 2, `表头＝源的直接子块（2 列）：${st.tableHeads}`)
-  // 嵌入是一行里的投影：源的名字在屏幕上没有第二处 ⇒ 抬头要写名字（与整屏那条相反
-  // —— 段根的表不写名字，因为那一行自己就是它）。名字现在走 viewhost 的抬头这一格。
+  /**
+   * **投影跟正文里那个查询块同一形状**：名字占一行（块标旁），结果面板折在下一行。
+   * ⇒ 名字在 `.embed-title-row`，面板的抬头不再写它（同一句话同屏两遍是噪声）。
+   */
   const title = await page.evaluate(() => {
     const el = document.querySelector('.blk[data-embed="1"]')
+    const row = el?.querySelector('.embed-title-row')
     const view = el?.querySelector('.blk-embed-body .queryview')
-    return { hidden: view?.querySelector('.queryview-title')?.hidden ?? true, text: view?.querySelector('.queryview-title')?.textContent ?? '' }
+    return {
+      rowText: row?.textContent ?? '',
+      headHidden: view?.querySelector('.queryview-title')?.hidden ?? null,
+      titleLeft: row ? Math.round(row.getBoundingClientRect().left) : -1,
+      markerLeft: el ? Math.round((el.querySelector(':scope > .left .marker')?.getBoundingClientRect().left ?? -1)) : -1,
+    }
   })
-  assert(title.hidden === false && title.text === '源', `投影抬头写源的名字（说明这是哪棵树）：${JSON.stringify(title)}`)
+  assert(title.rowText === '源', `名字占块标那一行（说明这是哪棵树）：${JSON.stringify(title)}`)
+  assert(title.headHidden === true, `面板抬头不再重复名字：${JSON.stringify(title)}`)
+  assert(title.titleLeft > title.markerLeft, `名字在块标右边（同一行）：${JSON.stringify(title)}`)
   assert(st.tableRows === 0, `源的两个直接子块没有孩子 ⇒ 表头下没有内容行：${st.tableRows}`)
   /**
    * **看法住在源块上，露面只存一次选择**（v29）。

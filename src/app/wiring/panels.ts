@@ -548,6 +548,8 @@ export function setupPanels(deps: PanelsDeps) {
       surface?: ViewSurface
       /** 写事务的 source：内联体的编辑要用**拥有这一行的那台编辑器**（撤销/重画才对得上） */
       source?: () => BlockEditor | undefined
+      /** 名字画到哪（只有投影给：块标那一行；见 `ViewHostDeps.titleInto`） */
+      titleInto?: HTMLElement
     },
   ): ViewHost {
     const hostId = host.id
@@ -575,6 +577,7 @@ export function setupPanels(deps: PanelsDeps) {
             ? tabContextFor(host, ownerBlock?.id)
             : contextFor(ownerBlock?.id ?? hostId),
       surface: opts?.surface ?? (owner.kind === 'tab' ? 'mount' : 'center'),
+      ...(opts?.titleInto ? { titleInto: opts.titleInto } : {}),
       onChange: () => {
         syncSections()
         scheduleSave()
@@ -658,13 +661,14 @@ export function setupPanels(deps: PanelsDeps) {
     target: Block,
     into: HTMLElement,
     source: () => BlockEditor | undefined,
+    titleInto?: HTMLElement,
   ): ViewHost {
     const vh = createView(
       { kind: 'block', blockId: target.id },
       target,
       { kind: 'embed', blockId: host.id },
       undefined,
-      { surface: 'embed', source },
+      { surface: 'embed', source, ...(titleInto ? { titleInto } : {}) },
     )
     into.appendChild(vh.root)
     vh.mount()
