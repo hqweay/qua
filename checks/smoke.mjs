@@ -19690,6 +19690,184 @@ await check('T233 回收站在中心打开：卡留在槽里（同一份数据�
   return '卡留在槽、kind 去重、终点面无历史、中心可恢复'
 })
 
+/* ---------------------------------------------------------------- 搜索面 */
+
+/** 造一个带唯一词的块（搜索/命中/晋升都用它当探针） */
+const plantProbe = async (page, text) => {
+  await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
+  await page.waitForTimeout(150)
+  return page.evaluate((t) => {
+    const ed = window.__qua.__editor
+    return ed.insertBlockAfter(ed.doc.roots[0].id, t)
+  }, text)
+}
+
+await check('T234 ⌘F 浮层「展开为面板」⇒ 中心搜索 tab：词随打开带过去；面内命中与浮层同一批；kind 去重；导航让位可回来', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const probeId = await plantProbe(page, '搜索面探针XYZ')
+  assert(probeId, '前置：探针块要建出来')
+
+  // ⌘F 浮层：出结果 ＋「展开为面板」行
+  await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
+  await page.fill('.layer-input', '探针XYZ')
+  await page.waitForFunction(() => [...document.querySelectorAll('.layer-item')].some((e) => e.dataset.id === 'search/expand'), null, { timeout: 3000 })
+  const overlayIds = await page.evaluate(() =>
+    [...document.querySelectorAll('.layer-item')]
+      .map((e) => e.dataset.id)
+      .filter((id) => id.startsWith('search/') && id !== 'search/expand'),
+  )
+  assert(overlayIds.includes(`search/${probeId}`), `浮层应命中探针块：${JSON.stringify(overlayIds)}`)
+
+  // 展开 ⇒ 工具面 tab（kind 去重）；词随打开带过去；面内命中与浮层同一批
+  await page.locator('.layer-item[data-id="search/expand"]').click()
+  await page.waitForTimeout(200)
+  const face = () =>
+    page.evaluate(() => ({
+      tabs: [...document.querySelectorAll('.center-tab')].map((t) => ({ title: t.title, active: t.dataset.active === '1' })),
+      surfaceVisible: !document.getElementById('center-surface').hidden,
+      term: document.querySelector('.search-face-input')?.value ?? null,
+      rows: [...document.querySelectorAll('#center-surface [data-search-row]')].map((e) => e.dataset.searchRow),
+    }))
+  let now = await face()
+  assert(now.tabs.some((t) => t.title === '搜索' && t.active), `搜索应成为中心 tab：${JSON.stringify(now.tabs)}`)
+  assert(now.surfaceVisible && now.term === '探针XYZ', `词要随打开带过去：${JSON.stringify(now.term)}`)
+  assert(
+    now.rows.includes(probeId) && now.rows.length === overlayIds.length,
+    `面内命中与 ⌘F 一致：面 ${JSON.stringify(now.rows)} vs 浮层 ${JSON.stringify(overlayIds)}`,
+  )
+
+  // kind 去重：再展开一次不产生第二张搜索 tab
+  await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
+  await page.fill('.layer-input', '探针XYZ')
+  await page.waitForFunction(() => [...document.querySelectorAll('.layer-item')].some((e) => e.dataset.id === 'search/expand'), null, { timeout: 3000 })
+  await page.locator('.layer-item[data-id="search/expand"]').click()
+  await page.waitForTimeout(150)
+  now = await face()
+  assert(now.tabs.filter((t) => t.title === '搜索').length === 1, `同一张面全局一张 tab：${JSON.stringify(now.tabs)}`)
+
+  // 在面上点结果 ＝ 导航：终点面让位（tab 摘掉），导航落到块；esc 档位无关
+  await page.evaluate((id) => document.querySelector(`#center-surface [data-search-row="${id}"] .search-row-open`).click(), probeId)
+  await page.waitForTimeout(200)
+  now = await face()
+  assert(!now.surfaceVisible, '导航 ⇒ 编辑器回来')
+  assert(!now.tabs.some((t) => t.title === '搜索'), `导航离开终点面 ＝ 关闭它：${JSON.stringify(now.tabs)}`)
+  const onProbe = await page.evaluate(() => window.__qua.snapshot().activeId)
+  assert(onProbe === probeId, `导航应落到探针块：${onProbe}`)
+
+  await ctx.close()
+  return '展开带词、命中一致、kind 去重、导航让位'
+})
+
+await check('T235 晋升为查询块：{text} spec 与手建逐字节同、落森林顶层、走打开路由、一次 ⌘Z 回滚', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await plantProbe(page, '晋升探针ABC')
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
+  await page.fill('.search-face-input', '晋升探针ABC')
+  await page.waitForFunction(() => document.querySelectorAll('#center-surface [data-search-row]').length > 0, null, { timeout: 3000 })
+
+  await page.evaluate(() => document.querySelector('.search-face-promote').click())
+  await page.waitForTimeout(300)
+
+  // 晋升出的查询块：落森林顶层、走创建路径的打开路由；条件字节先抓下来（撤销后对照用）
+  const { promoted, promotedQueryJson, rootsHasPromoted, activeAfter } = await page.evaluate(() => {
+    const collect = () => {
+      const found = []
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.props?._query?.where?.text === '晋升探针ABC') found.push(b)
+          walk(b.children ?? [])
+        }
+      }
+      walk(window.__qua.__editor.store.blocks)
+      return found
+    }
+    const promotedBlock = collect()[0]
+    return {
+      promoted: promotedBlock?.id ?? '',
+      promotedQueryJson: promotedBlock ? JSON.stringify(promotedBlock.props._query) : '',
+      rootsHasPromoted: window.__qua.__editor.store.blocks.some((b) => b.id === promotedBlock?.id),
+      activeAfter: window.__qua.snapshot().activeId,
+    }
+  })
+  assert(promoted !== '', '晋升应建出查询块')
+  assert(rootsHasPromoted, '晋升的查询块落森林顶层')
+  assert(activeAfter === promoted, `创建路径的打开路由要生效（当前对象＝查询块）：${activeAfter}`)
+
+  // 一次 ⌘Z 回滚：晋升是唯一一笔（探针块还在）
+  await page.evaluate(() => window.__qua.focus())
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(200)
+  const afterUndo = await page.evaluate((pid) => window.__qua.__editor.store.blocks.some((b) => b.id === pid), promoted)
+  assert(!afterUndo, '一次 ⌘Z 应把晋升出的查询块整个撤掉')
+
+  // 与手建 {text} spec 逐字节同：撤销后手建一块同词的，条件字节对照
+  const manualJson = await page.evaluate(() => {
+    window.__qua.invoke('core.query/create', { name: '手工对照', spec: { where: { text: '晋升探针ABC' } } }, 'api')
+    let found = null
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.props?._query?.where?.text === '晋升探针ABC') found = b
+        walk(b.children ?? [])
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return found ? JSON.stringify(found.props._query) : ''
+  })
+  assert(manualJson === promotedQueryJson && manualJson !== '', `与手建 {text} spec 逐字节同：${promotedQueryJson} vs ${manualJson}`)
+
+  await ctx.close()
+  return 'spec 同源、顶层、打开路由、一笔撤销'
+})
+
+await check('T236 空态＝最近更新（非空且含最新改动的块）；无结果＝创建入口（同名已有不给）；复制引用走同一条命令', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const probeId = await plantProbe(page, '空态探针LMN')
+  await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base.replace(/\/$/, '') })
+
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
+  await page.waitForTimeout(150)
+  let now = await page.evaluate(() => ({
+    term: document.querySelector('.search-face-input')?.value ?? null,
+    groups: [...document.querySelectorAll('#center-surface .search-face-group')].map((e) => e.textContent),
+    rows: [...document.querySelectorAll('#center-surface [data-search-row]')].map((e) => e.dataset.searchRow),
+  }))
+  assert(now.term === '', '前置：面开着、词为空')
+  assert(now.groups.includes('最近更新'), `空态应给最近更新：${JSON.stringify(now.groups)}`)
+  assert(now.rows.length > 0 && now.rows.includes(probeId), `最近更新非空且含最新改动的块：${JSON.stringify(now.rows.slice(0, 5))}`)
+
+  // 无结果 ⇒ 创建入口；同名地址已存在 ⇒ 不给（复用不建第二个）
+  await page.fill('.search-face-input', '全新词QQ')
+  await page.waitForTimeout(250)
+  now = await page.evaluate(() => ({
+    create: document.querySelector('#center-surface .search-face-create')?.textContent ?? '',
+    rows: document.querySelectorAll('#center-surface [data-search-row]').length,
+  }))
+  assert(now.rows === 0 && now.create.includes('全新词QQ'), `无结果应给创建入口：${JSON.stringify(now)}`)
+  await page.evaluate(() => document.querySelector('#center-surface .search-face-create').click())
+  await page.waitForTimeout(250)
+  const created = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => x.title.includes('全新词QQ'))
+    return { found: Boolean(p), active: window.__qua.snapshot().activeId === p?.id, surfaceHidden: document.getElementById('center-surface').hidden }
+  })
+  assert(created.found && created.active, `创建入口应建页并当场打开：${JSON.stringify(created)}`)
+  assert(created.surfaceHidden, '创建后导航离开搜索面')
+
+  // 复制引用：走「复制块引用」同一条命令（剪贴板是块引用文本）
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
+  await page.fill('.search-face-input', '空态探针LMN')
+  await page.waitForFunction(() => document.querySelectorAll('#center-surface [data-search-row]').length > 0, null, { timeout: 3000 })
+  await page.evaluate(() => document.querySelector('#center-surface .search-row-copy').click())
+  await page.waitForTimeout(150)
+  const clip = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''))
+  assert(clip === `((${probeId}))`, `复制引用应得到块引用文本：${clip}`)
+
+  await ctx.close()
+  return '空态最近更新、创建入口、复制引用'
+})
+
 /**
  * **判定必须在所有用例之后**：这一段曾经写在中途，之后新增的用例（T206 起）即使红了
  * 也不会进 `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。

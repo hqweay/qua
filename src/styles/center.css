@@ -128,6 +128,141 @@
   padding: 0 var(--ui-doc-pad) var(--ui-gap-7);
 }
 
+/* ---------------------------------------------------------- 搜索面 */
+
+/* 输入行：词框占满、动作贴右；不放抬头——tab 名就是它的抬头（界面少字） */
+.search-face {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-3);
+  padding-top: var(--ui-gap-5);
+}
+.search-face-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+}
+.search-face-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface-raised);
+  color: var(--ui-text);
+}
+.search-face-input:focus {
+  outline: none;
+  border-color: var(--ui-accent);
+}
+.search-face-promote {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-tertiary);
+}
+.search-face-promote:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+.search-face-mode {
+  flex: 0 0 auto;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+  white-space: nowrap;
+}
+
+.search-face-list {
+  display: flex;
+  flex-direction: column;
+}
+.search-face-group {
+  padding: var(--ui-gap-2) 0 var(--ui-gap-1);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+.search-face-note {
+  padding: var(--ui-gap-3) 0;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-sm);
+}
+.search-face-create {
+  align-self: flex-start;
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-secondary);
+}
+.search-face-create:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+
+/* 结果行：命中片段 ＋ 住哪 一条线上，来路标注与复制引用贴右 */
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+}
+.search-row[data-active='1'] {
+  background: var(--ui-accent-soft);
+}
+.search-row-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--ui-gap-3);
+  padding: var(--ui-gap-1) var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+  text-align: start;
+}
+.search-row-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--ui-text);
+}
+.search-row-text mark {
+  background: transparent;
+  color: var(--ui-accent);
+  font-weight: 600;
+}
+.search-row-hint {
+  flex: 0 1 auto;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+.search-row-tail {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+}
+.search-row-via {
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+  white-space: nowrap;
+}
+.search-row-copy {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--ui-gap-1);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-tertiary);
+  opacity: 0;
+}
+.search-row:hover .search-row-copy,
+.search-row[data-active='1'] .search-row-copy,
+.search-row-copy:focus-visible {
+  opacity: 1;
+}
+.search-row-copy:hover {
+  background: var(--ui-bg-hover);
+  color: var(--ui-text);
+}
+
 #scroll {
   flex: 1;
   overflow: auto;
