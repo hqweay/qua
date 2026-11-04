@@ -47,10 +47,11 @@ test('compileMatch：多词之间是 AND，词内部是 OR', () => {
   assert.match(m, /chars : "应 用"/)
 })
 
-test('compileMatch：纯拉丁输入额外走拼音，星号在引号外', () => {
+test('compileMatch：纯拉丁输入额外走拼音，星号在引号外；与字面是 OR', () => {
   const m = compileMatch('bi ji')!
   assert.match(m, /pinyin : "bi ji"\*/)
   assert.doesNotMatch(m, /"\*"/, '星号不许写进引号里')
+  assert.match(m, /\) OR \(pinyin/, '拼音必须与字面 OR（否则正文没有拉丁词时永远不命中）')
 })
 
 test('compileMatch：空串/纯标点 ⇒ null（调用方给空结果，不查库）', () => {

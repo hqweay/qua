@@ -81,19 +81,24 @@ export function compileMatch(input: string): string | null {
     if (c !== '') clauses.push(c)
   }
   if (clauses.length === 0) return null
+  const literal = clauses.length === 1 ? clauses[0]! : clauses.map((c) => `(${c})`).join(' AND ')
 
   /**
-   * 纯拉丁输入额外走一支拼音：`"bi ji"*` 是「音节 bi 后面跟一个以 ji 开头的音节」。
+   * 纯拉丁输入**额外**走一支拼音：`"bi ji"*` 是「音节 bi 后面跟一个以 ji 开头的音节」。
    * 星号必须在引号**外**，写进引号里会被当成字面星号。
+   *
+   * ⚠️ 拼音与字面是 **OR**，不是 AND：用户输入 `ren kou` 时，正文里既没有
+   * 「ren」这个词、也没有「kou」；若与字面条件 AND 起来，拼音这一支永远不会被看到。
+   * 反过来，英文查询仍由字面那一支命中（拼音列里没有英文字母）。
    */
   if (!hasHan(raw)) {
     const syllables = terms
       .flatMap((term) => term.toLowerCase().match(/[a-z]+/g) ?? [])
       .filter((x) => x !== '')
-    if (syllables.length > 0) clauses.push(`pinyin : ${q(syllables.join(' '))}*`)
+    if (syllables.length > 0) return `(${literal}) OR (pinyin : ${q(syllables.join(' '))}*)`
   }
 
-  return clauses.length === 1 ? clauses[0]! : clauses.map((c) => `(${c})`).join(' AND ')
+  return literal
 }
 
 /**

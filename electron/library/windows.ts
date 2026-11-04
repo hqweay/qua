@@ -24,7 +24,7 @@ import { join } from 'node:path'
 import { DB_SCHEMA_VERSION, type LibraryEntry } from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
 import { loadContent, openSession, saveContent, type OpenFailure, type RepoSession } from './session.ts'
-import { readSeq, type RowWrite } from './sqlite.ts'
+import { readSeq, searchFts, type RowWrite } from './sqlite.ts'
 
 /** 关窗握手等 renderer 回话的上限。超时就强关——卡住比丢一句话更糟。 */
 const CLOSE_ACK_TIMEOUT_MS = 1500
@@ -349,9 +349,26 @@ export class LibraryManager {
       }
     })
 
-    /** 每库设置（窗口 bounds / 槽布局 / 折叠态） */
-    ipcMain.handle('qua:settings/get', (e, key: unknown) => {
+    /**
+     * 全文检索。`match` 是渲染层编译好的 FTS5 表达式（数据，不是代码）：
+     * 主进程只把它绑定进固定 SQL，不做块语义判断；软删过滤与片段都在渲染层。
+     */
+    ipcMain.handle('qua:search/query', (e, match: unknown, limit: unknown, offset: unknown) => {
       const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      if (typeof match !== 'string' || match.length === 0 || match.length > 4096) {
+        return { status: 'bad-args' }
+      }
+      try {
+        const hits = searchFts(s.db, match, Number(limit) || 50, Number(offset) || 0)
+        return { status: 'ok', hits }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
+      }
+    })
+
+    /** 每库设置（窗口 bounds / 槽布局 / 折叠态） */
+    ipcMain.handle('qua:settings/get', (e, key: unknown) => {      const s = sessionOf(e)
       if (!s || typeof key !== 'string') return { status: 'no-library' }
       const rows = s.db.prepare('select value from settings where key = ?').all(key) as { value: string }[]
       return rows[0] ? { status: 'ok', value: rows[0].value } : { status: 'empty' }
