@@ -132,8 +132,10 @@ import {
  * v35 → v36：**任务状态从 checkbox 升 select**（待办／进行中／完成，值存选项块 id），
  *            定义块新增 `_default` 读侧缺省（「已声明未填」按缺省读）。
  *            旧库的布尔值对新判据（认「完成」选项 id）不再成立 ⇒ 作废重 seed，不写迁移。
+ * v36 → v37：**分组键升为视图配置顶层位**（`groupBy`／`groupOrder`，记录视图共用），
+ *            看板配置不再自带 `groupBy`。旧库的看板配置形状换了位置 ⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 36
+export const WORKSPACE_VERSION = 37
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

@@ -16823,7 +16823,7 @@ await check('T190 四种布局：切换不重查；看板拖卡写属性不换�
     return withValue?.dataset.value ?? ''
   })
   assert(colValue !== '', `前置：应有一列带值：${colValue}`)
-  const propId = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._views?.find((v) => v.id === window.__qua.__editor.store.find(id)?.props?._activeView)?.board?.groupBy ?? '', qid)
+  const propId = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._views?.find((v) => v.id === window.__qua.__editor.store.find(id)?.props?._activeView)?.groupBy ?? '', qid)
   assert(propId !== '', '前置：看板应有分组列')
   await page.evaluate(
     ({ propId: pid, value, blockId }) => window.__qua.invoke('core.props/set-value', { blockId, propId: pid, value }),
@@ -19445,6 +19445,79 @@ await check('T229 聚焦一个有露面的查询块：段尾挂载区只搬进�
 
   await ctx.close()
   return `聚焦露面块与源查询块都成功；正文 1 个段尾槽，岛里的 .sec 没有抢走挂载区`
+})
+
+await check('T230 分组：入口按覆盖率给候选；按标签分堆一块进多列、列头是标签名、多值键禁拖', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const pid = await pageByTitle(page, '产品设计')
+  await page.waitForTimeout(300)
+
+  // 前置：给本页一个任务成员再挂第二个标签（一块两标签 ⇒ fan-out 的可验形态）。
+  // 直接写 `_tags`（系统槽收端认 ref 列表）：成员从「单标签」变「双标签」。
+  const prep = await page.evaluate((pid) => {
+    const tag = window.__qua.allBlocks().find((b) => b.lists.includes('tag') && b.aliases.includes('任务'))
+    const pageBlk = window.__qua.__editor.store.find(pid)
+    if (!tag || !pageBlk) return { error: 'no-fix' }
+    const member = (pageBlk.children ?? []).find((k) => (window.__qua.tagMembers(tag.id) ?? []).includes(k.id))
+    const other = window.__qua.allBlocks().find((b) => b.lists.includes('tag') && !b.aliases.includes('任务'))
+    if (!member || !other) return { error: 'no-member-or-second-tag' }
+    window.__qua.invoke('core.props/set-value', { blockId: member.id, propId: '_tags', value: [other.id, tag.id] })
+    return { member: member.id, other: other.id, otherName: other.aliases[0] ?? '' }
+  }, pid)
+  assert(!prep.error, `前置：应能造出一块双标签：${JSON.stringify(prep)}`)
+
+  // 建看板（自动挑第一个 select 分组），再用**抬头入口**把分组键切到「标签」
+  await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'board' }), pid)
+  await page.waitForTimeout(450)
+  const entry = await page.evaluate(() => {
+    const sel = document.querySelector('.queryview-group')
+    return {
+      visible: Boolean(sel) && sel?.hidden === false,
+      options: [...(sel?.options ?? [])].map((o) => o.textContent ?? ''),
+    }
+  })
+  assert(entry.visible, '记录视图应显示分组入口')
+  assert(
+    entry.options.some((o) => /（\d+／\d+）/.test(o)),
+    `候选要标覆盖率（几条／共几条）：${JSON.stringify(entry.options)}`,
+  )
+  assert(entry.options.some((o) => o.includes('多值')), `多值键要带尾注：${JSON.stringify(entry.options)}`)
+  await page.selectOption('.queryview-group', '_tags')
+  await page.waitForTimeout(450)
+
+  const board = await page.evaluate(({ member, otherName }) => ({
+    cols: [...document.querySelectorAll('.vb-col')].map((c) => ({
+      value: c.dataset.value ?? '',
+      name: c.querySelector('.vb-col-name')?.textContent ?? '',
+      count: c.querySelector('.vb-col-count')?.textContent ?? '',
+    })),
+    memberCols: [...document.querySelectorAll('.vb-col')].filter(
+      (c) => c.querySelector(`.vb-card[data-block-id="${member}"]`) !== null,
+    ).length,
+    draggable: document.querySelector(`.vb-card[data-block-id="${member}"]`)?.getAttribute('draggable') ?? null,
+    named: [...document.querySelectorAll('.vb-col-name')].filter((n) => n.textContent === otherName).length,
+  }), prep)
+  assert(board.cols.length >= 3, `按标签分堆至少两列＋未设置：${JSON.stringify(board.cols)}`)
+  assert(board.named >= 1, `列头要是标签名而不是块 id（${prep.otherName}）：${JSON.stringify(board.cols)}`)
+  assert(board.memberCols === 2, `双标签的块应进两个组（fan-out），实际 ${board.memberCols} 列`)
+  assert(board.draggable === 'false', `多值键的卡不可拖：${board.draggable}`)
+  const countsSum = board.cols.reduce((acc, c) => acc + Number(c.count || 0), 0)
+  assert(countsSum >= 2, `列头数字＝组内成员数：${JSON.stringify(board.cols)}`)
+
+  // 切回「不分组」：配置清掉，看板回「需要分组」的空态
+  await page.selectOption('.queryview-group', '')
+  await page.waitForTimeout(350)
+  const cleared = await page.evaluate(() => Boolean(document.querySelector('.vb .tv-unsupported')))
+  assert(cleared, '清掉分组后看板回到需要分组的空态')
+  const stored = await page.evaluate(
+    (pid) => window.__qua.__editor.store.find(pid)?.props?._views?.find((v) => v.kind === 'board')?.groupBy ?? '',
+    pid,
+  )
+  assert(stored === '', '清掉的分组不该留在配置里（删键，不留空串）')
+
+  await ctx.close()
+  return `入口标覆盖率；按标签分堆：双标签块进 2 列、列头是标签名、卡不可拖；清掉回空态`
 })
 
 /**

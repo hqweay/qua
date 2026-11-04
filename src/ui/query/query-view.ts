@@ -29,6 +29,7 @@ import {
   expandContexts,
   hasLiveChildren,
   isOwnEdit,
+  isMultiValueKey,
   isQueryBlock,
   listTableOf,
   resolveRows,
@@ -243,6 +244,11 @@ export interface ViewHostEls {
   topCount: HTMLElement
   /** 视图切换器（默认看法 ＋ 已有视图 ＋ 加一张） */
   views: HTMLElement
+  /**
+   * **分组**选择（记录视图才有）：候选＝这批结果里真正出现过的栏，按覆盖率排序。
+   * 换的是**视图配置**（`core.view/set-group`），不重查、不改成员。
+   */
+  group: HTMLSelectElement
   /** 条件 chip 条（查询源才有；收起时只剩一条摘要） */
   filters: HTMLElement
   /** 条件树（就地展开；与抬头同属这一段，不是浮层） */
@@ -292,6 +298,9 @@ export function createViewHostEls(): ViewHostEls {
   filters.className = 'queryview-filters'
   const views = document.createElement('div')
   views.className = 'queryview-views'
+  const group = document.createElement('select')
+  group.className = 'queryview-group'
+  group.hidden = true
   const refresh = document.createElement('button')
   refresh.type = 'button'
   refresh.className = 'queryview-refresh'
@@ -303,7 +312,7 @@ export function createViewHostEls(): ViewHostEls {
   newRow.type = 'button'
   newRow.className = 'queryview-newrow'
   newRow.hidden = true
-  head.append(title, count, topCount, stale, filters, views, refresh, foldAll, newRow)
+  head.append(title, count, topCount, stale, filters, views, group, refresh, foldAll, newRow)
 
   const tree = document.createElement('div')
   tree.className = 'queryview-tree'
@@ -328,7 +337,7 @@ export function createViewHostEls(): ViewHostEls {
   body.append(editor, table)
 
   root.append(head, tree, body)
-  return { root, head, tree, title, count, topCount, filters, views, refresh, foldAll, newRow, stale, editor, table }
+  return { root, head, tree, title, count, topCount, filters, views, group, refresh, foldAll, newRow, stale, editor, table }
 }
 
 /** 一个「表面实例」的冻结结果（内存；不进 KB、不进撤销） */
@@ -854,6 +863,65 @@ export class ViewHost {
     this.paintFilters(b)
     this.paintTree()
     this.paintViews(b, view)
+    this.paintGroup(view)
+  }
+
+  /**
+   * **分组选择**（记录视图才有）：候选＝这批结果里**真正出现过的栏**，按覆盖率排序，
+   * 覆盖率直接标在选项上（「12／20」）——只对这批结果有意义的栏才值得出现在前面。
+   * 候选范围 v1 ＝ 属性定义 ＋ `_tags`（按标签归属分堆）；多值键带「多值」尾注
+   * （它们能分组，但拖拽禁用——写路径只有单值有唯一动作）。
+   */
+  private paintGroup(view: ViewConfig | null): void {
+    const kind = view?.kind
+    const record = kind === 'list' || kind === 'table' || kind === 'board' || kind === 'gallery'
+    this.els.group.hidden = !record || !view
+    if (!record || !view) return
+    const records = this.records()
+    const total = records.length
+    const counts = new Map<string, number>()
+    for (const r of records) {
+      for (const [k, v] of Object.entries(r.values)) {
+        if (v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)) continue
+        counts.set(k, (counts.get(k) ?? 0) + 1)
+      }
+    }
+    const label = (key: string): string => {
+      if (key === '_tags') return t('ui.query.group.tagsKey')
+      return this.deps.fields().find((f) => f.id === key)?.label ?? key.slice(-6)
+    }
+    const options: HTMLOptionElement[] = []
+    const none = document.createElement('option')
+    none.value = ''
+    none.textContent = t('ui.query.group.none')
+    options.push(none)
+    for (const [key, n] of [...counts.entries()]
+      .filter(([k, n]) => n > 0 && (k === '_tags' || this.deps.fields().some((f) => f.id === k)))
+      .sort((a, b) => b[1] - a[1])) {
+      const o = document.createElement('option')
+      o.value = key
+      const multi = isMultiValueKey(key) ? t('ui.query.group.multi') : ''
+      o.textContent = `${label(key)}${multi}（${n}／${total}）`
+      options.push(o)
+    }
+    this.els.group.replaceChildren(...options)
+    this.els.group.value = view.groupBy ?? ''
+    if (this.els.group.value !== (view.groupBy ?? '')) {
+      // 存着的分组键不在候选里（这批结果没有这一栏了）⇒ 显示「无分组」，不悄悄改配置
+      this.els.group.value = ''
+    }
+    this.els.group.onchange = () => {
+      this.deps.invoke('core.view/set-group', {
+        owner: this.writeOwner,
+        viewId: view.id,
+        groupBy: this.els.group.value,
+      })
+    }
+  }
+
+  /** `_tags` 的组名解析：标签块的显示名（列头与选项都从这一份走） */
+  private tagChoices(): readonly { id: string; label: string }[] {
+    return this.deps.kb.tags().map((b) => ({ id: b.id, label: displayNameOf(b).trim() || b.id.slice(-6) }))
   }
 
   /**
@@ -1205,7 +1273,7 @@ export class ViewHost {
           records: () => this.records(),
           view: () => this.view ?? view,
           fieldLabel: (id) => this.deps.fields().find((f) => f.id === id)?.label ?? id.slice(-6),
-          choices: (id) => this.deps.choices?.(id) ?? [],
+          choices: (id) => (id === '_tags' ? this.tagChoices() : this.deps.choices?.(id) ?? []),
           setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
           clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
           projectTitle: (r, into) => this.deps.project(r.block, into),

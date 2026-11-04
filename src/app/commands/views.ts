@@ -29,6 +29,7 @@ import {
   upsertView,
   viewNameOf,
   withFilter,
+  withGroup,
   withListSort,
   withSort,
   type Block,
@@ -65,6 +66,7 @@ export function viewConfigCommands(
   | 'viewInsertRow'
   | 'viewDeleteRow'
   | 'viewSetSort'
+  | 'viewSetGroup'
   | 'setViewFilter'
   | 'setQuerySpec'
   | 'createQuery'
@@ -135,16 +137,15 @@ export function viewConfigCommands(
          * 分组列先给一个**能分组**的：第一个 `select`（值域有限），
          * 退到第一个 `checkbox`（真/假两列也说得通）。
          *
-         * ⚠️ 一个都没有 ⇒ **当场拒绝**，不写库：`canonicalViews` 会把
-         * `groupBy:''` 的看板当坏项丢掉，用户看到的是「点了新建看板，什么也没发生」。
-         * 不如明说「先有一个分组字段」。
+         * ⚠️ 一个都没有 ⇒ **当场拒绝**，不写库：没有分组的看板是「一堆没有列的卡」，
+         * 用户看到的是「点了新建看板，什么也没发生」。不如明说「先有一个分组字段」。
          */
         const groupBy = firstDefOf(d, 'select') ?? firstDefOf(d, 'checkbox')
         if (!groupBy) {
           d.toast(t('ui.view.boardNeedsField'), 'warn')
           return ''
         }
-        view.board = { groupBy }
+        view.groupBy = groupBy
       } else if (kind === 'calendar') {
         // 日期列：第一个 `date` 定义；任何块都可能有 `_date`（日记块）⇒ 退到它
         view.calendar = { dateBy: firstDefOf(d, 'date') ?? '_date' }
@@ -277,6 +278,22 @@ export function viewConfigCommands(
       if (view.kind !== 'table') return false
       const sort = direction === '' ? [] : [{ by, dir: direction as 'asc' | 'desc' }]
       d.owners.write(owner, { views: upsertView(data.views, withSort(view, sort)) })
+      after()
+      return true
+    },
+
+    /**
+     * 写**分组键**（记录视图共用位）：`groupBy === ''` ＝ 清掉分组。
+     *
+     * 分组是**视图配置**，不是查询的一部分：改它不重查、不换成员，只是这批记录
+     * 换一种摆法。`groupOrder` 由看板按声明序回填（用户拖序是另一批事）。
+     */
+    viewSetGroup: (owner, viewId, groupBy, groupOrder) => {
+      const data = d.owners.read(owner)
+      if (!data) return false
+      const view = resolveView(data, viewId)
+      if (!view) return false
+      d.owners.write(owner, { views: upsertView(data.views, withGroup(view, groupBy, groupOrder)) })
       after()
       return true
     },

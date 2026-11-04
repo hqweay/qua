@@ -8,7 +8,7 @@
  *   · **空列与「未设置」都在**。空列让「把这个状态的东西挪走」有落点；
  *     「未设置」那一列让「还没填」的东西看得见 —— 藏起来等于告诉用户「这些不存在」。
  */
-import { fieldTextOf, openPlaceOf, sortRecords, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../../core/index.ts'
+import { fieldTextOf, isMultiValueKey, openPlaceOf, sortRecords, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { viewNote } from './view-note.ts'
 
@@ -46,6 +46,8 @@ export class ViewBoard {
   readonly root: HTMLElement
   private readonly deps: ViewBoardDeps
   private dragging = ''
+  /** 本次 render 的键是不是多值（决定拖拽面：多值键禁拖，写路径只有单值有唯一动作） */
+  private multi = false
 
   constructor(deps: ViewBoardDeps) {
     this.deps = deps
@@ -57,29 +59,51 @@ export class ViewBoard {
 
   render(): void {
     const view = this.deps.view()
-    const key = view?.board?.groupBy ?? ''
+    const key = view?.groupBy ?? ''
     this.root.replaceChildren()
     if (key === '') {
       this.root.appendChild(viewNote(t('ui.board.needsGroup')))
       return
     }
+    /** 多值键（`_tags`）：一块进每个所属组，拖拽禁用（写路径只有单值有唯一动作） */
+    this.multi = isMultiValueKey(key)
 
     const records = sortRecords(this.deps.records(), view?.table?.sort)
     const declared = this.deps.choices(key)
-    /** 列的次序：声明过的选项按它的顺序；没声明过的按**第一次出现**的顺序；「未设置」永远最后 */
-    const order: string[] = declared.map((c) => `s:${c.id}`)
+    /**
+     * 列的次序：用户配置的组序在前（存原始值），其余声明选项按声明序，
+     * 没声明过的按**第一次出现**；「未设置」永远最后。
+     */
+    const order: string[] = []
+    for (const g of view?.groupOrder ?? []) {
+      const k = `s:${g}`
+      if (!order.includes(k)) order.push(k)
+    }
+    for (const c of declared) {
+      const k = `s:${c.id}`
+      if (!order.includes(k)) order.push(k)
+    }
     const buckets = new Map<string, ViewRecord[]>()
     /** 分组键 → 原始值（拖卡回去要写回**同类型**的那个值） */
     const rawOf = new Map<string, unknown>()
     for (const r of records) {
       const raw = r.values[key]
-      const id = keyOfValue(raw)
-      if (!buckets.has(id)) {
-        buckets.set(id, [])
-        rawOf.set(id, raw)
-        if (id !== UNSET && !order.includes(id)) order.push(id)
+      // 多值键：值是列表 ⇒ 记录**出现在每个所属组**（fan-out）；一个值都没有 ⇒「未设置」
+      const values = this.multi ? (Array.isArray(raw) ? raw : []) : [raw]
+      if (values.length === 0) {
+        if (!buckets.has(UNSET)) buckets.set(UNSET, [])
+        buckets.get(UNSET)!.push(r)
+        continue
       }
-      buckets.get(id)!.push(r)
+      for (const v of values) {
+        const id = keyOfValue(v)
+        if (!buckets.has(id)) {
+          buckets.set(id, [])
+          rawOf.set(id, v)
+          if (id !== UNSET && !order.includes(id)) order.push(id)
+        }
+        buckets.get(id)!.push(r)
+      }
     }
     if (view?.board?.showEmpty === true || buckets.size > 0) {
       for (const id of order) if (!buckets.has(id)) buckets.set(id, [])
@@ -105,13 +129,11 @@ export class ViewBoard {
     const name = document.createElement('span')
     name.className = 'vb-col-name ui-ellipsis'
     /**
-     * 列头文案：`select` 的值是**选项块 id**，得翻译成它的名字；
+     * 列头文案：`select`／`_tags` 的值是**块 id**，得翻译成它的名字；
      * 其余属性（文本／数字／日期）的值本身就是列名。
      */
     const label =
-      id === UNSET
-        ? t('ui.board.unset')
-        : (this.deps.choices(propId).find((c) => c.id === `s:${raw}`)?.label ?? String(raw))
+      id === UNSET ? t('ui.board.unset') : (this.deps.choices(propId).find((c) => c.id === raw)?.label ?? String(raw))
     name.textContent = label
     const count = document.createElement('span')
     count.className = 'vb-col-count'
@@ -127,24 +149,28 @@ export class ViewBoard {
     /**
      * 落点：整列接卡。`dragover` 必须 `preventDefault` 才有 `drop` ——
      * 少了它浏览器会把这次拖动当成「没有落点」，而用户看到的是「拖过去弹回去」。
+     * ⚠️ 多值键**不接拖**：把卡拖进某组是「写那格的值」，多值下没有唯一动作
+     * （加一个还是换一个？别的组里那张卡怎么办）——改归属走属性编辑器的显式动作。
      */
-    col.addEventListener('dragover', (e) => {
-      if (this.dragging === '') return
-      e.preventDefault()
-      col.dataset.dropTarget = '1'
-    })
-    col.addEventListener('dragleave', () => {
-      delete col.dataset.dropTarget
-    })
-    col.addEventListener('drop', (e) => {
-      delete col.dataset.dropTarget
-      if (this.dragging === '') return
-      e.preventDefault()
-      const blockId = this.dragging
-      this.dragging = ''
-      if (id === UNSET) this.deps.clearValue(blockId, propId)
-      else this.deps.setValue(blockId, propId, raw)
-    })
+    if (!this.multi) {
+      col.addEventListener('dragover', (e) => {
+        if (this.dragging === '') return
+        e.preventDefault()
+        col.dataset.dropTarget = '1'
+      })
+      col.addEventListener('dragleave', () => {
+        delete col.dataset.dropTarget
+      })
+      col.addEventListener('drop', (e) => {
+        delete col.dataset.dropTarget
+        if (this.dragging === '') return
+        e.preventDefault()
+        const blockId = this.dragging
+        this.dragging = ''
+        if (id === UNSET) this.deps.clearValue(blockId, propId)
+        else this.deps.setValue(blockId, propId, raw)
+      })
+    }
     return col
   }
 
@@ -152,7 +178,8 @@ export class ViewBoard {
     const card = document.createElement('div')
     card.className = 'vb-card'
     card.dataset.blockId = r.block.id
-    card.draggable = true
+    // 多值键的卡不拖：它同属多组，拖去某列的「写值」没有唯一动作（见 render 的注）
+    card.draggable = !this.multi
     const view = this.deps.view()
     const fields = (view?.board?.cardFields ?? []).slice(0, 3)
 

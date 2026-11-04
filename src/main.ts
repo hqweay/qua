@@ -1296,8 +1296,10 @@ function openSpecPopover(opts: {
        * `select` 的选项：**定义块的直接子块，全量、排除软删**。
        * 不按某一块的可选范围收窄（`choicesForDef`）—— 查询是跨块的，
        * 同一个属性在不同块上「此刻能选什么」可以不一样。
+       * `_tags` 不是定义：它按标签归属分组时的「选项」＝ 全部标签块（组名用显示名）。
        */
       choices: (propId) => {
+        if (propId === '_tags') return kb.tags().map((t) => ({ id: t.id, label: displayNameOf(t).trim() || shortId(t.id) }))
         const def = kb.get(propId)
         if (!def || propKindOf(def) !== 'select') return []
         return choicesOf(def).map((c) => ({ id: c.id, label: displayNameOf(c).trim() || shortId(c.id) }))
