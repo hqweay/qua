@@ -62,7 +62,8 @@ function findIncludingDeleted(forest: readonly Block[], id: string): Block | und
 /** 一层的兄弟列表；`null` 父 ⇒ 森林顶层 */
 function siblings(store: BlockStore, parentId: string | null): Block[] | undefined {
   if (parentId === null) return store.blocks
-  const p = findInForest(store.blocks, parentId)
+  // 同 `get`：索引优先，miss 退回遍历（批内刚建出来的父块还不在索引里）
+  const p = store.find(parentId) ?? findInForest(store.blocks, parentId)
   return p?.children
 }
 
@@ -92,12 +93,19 @@ export class MemoryKb implements KbClient {
 
   /* ------------------------------------------------------------ 读面 */
 
+  /**
+   * 按 id 取块：**先走索引（O(1)），miss 才退回全树可见遍历**。
+   *
+   * 为什么不能只信索引：事务是「先改内存、出口才修补索引」——同一笔里刚插入的块
+   * 还不在索引表里。为什么不能只走遍历：`Tx` 的每个方法都 `require` 一次，
+   * 而一次按键改的是第几块由用户决定（100k 库改中间一块 ≈ 1ms，全花在这次遍历上）。
+   */
   get(id: string): Block | undefined {
-    return findInForest(this.store.blocks, id)
+    return this.store.find(id) ?? findInForest(this.store.blocks, id)
   }
 
   children(id: string): readonly Block[] {
-    return findInForest(this.store.blocks, id)?.children ?? []
+    return this.get(id)?.children ?? []
   }
 
   roots(): readonly Block[] {
@@ -202,7 +210,7 @@ export class MemoryKb implements KbClient {
   }
 
   annosOf(id: string): readonly Anno[] {
-    return findInForest(this.store.blocks, id)?.annos ?? []
+    return this.get(id)?.annos ?? []
   }
 
   query(
