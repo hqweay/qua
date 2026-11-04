@@ -1118,6 +1118,23 @@ export const MSG = {
   /* ------------------------------------------------------ 中心表面（派生/工具面 tab） */
   'cmd.surface.open': '在中心打开表面',
   'menu.kw.surface': '表面',
+  'ui.surface.search': '搜索',
+
+  /* ------------------------------------------------------ 搜索面（中心 tab） */
+  'ui.search.expand': '展开为面板',
+  'ui.search.recents': '最近更新',
+  'ui.search.degraded': '索引还没建好——这次按正文扫描',
+  'ui.search.via': '经由{via}',
+  'ui.search.via.content': '正文',
+  'ui.search.via.alias': '别名',
+  'ui.search.via.tag': '标签',
+  'ui.search.via.prop': '属性',
+  'ui.search.via.link': '链接',
+  'ui.search.promote': '晋升为查询块',
+  'ui.search.copyRef': '复制引用',
+  'ui.search.open': '打开',
+  'ui.search.createPage': '新建页「{name}」',
+  'ui.search.results': '{count} 个结果',
 } as const
 
 /** 回调 id 就是 MSG 的键 —— 写错一个 id 会在 `pnpm typecheck` 阶段就红 */

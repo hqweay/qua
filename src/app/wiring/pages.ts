@@ -514,6 +514,8 @@ export function setupPages(deps: PagesDeps) {
     const mainEd = deps.getMainEd()
     const cur = currentTab()
     const tab = cur?.kind === 'block' ? cur : undefined
+    // 装载总是落进编辑器 ⇒ 表面（若在前）让位；表面不在前时这是一次幂等的空操作
+    deps.onSurface?.(null)
     // 装载边界：空 journal 天在这里补首子块（经事务、一条 op）——
     // 所有「打开」命令共用的唯一归一落点，`rootsFor`／命令层只选择、不写库
     materializeEditableRoots(roots)
@@ -612,7 +614,24 @@ export function setupPages(deps: PagesDeps) {
        *   · 当前 tab 的 `viewStates` 也存一份（直接返回时用它最后一次的位置）。
        */
       initTabs()
-      // 表面 tab 上没有「当前块」可换（换落点先回块 tab）；历史也只记块 tab 的
+      /**
+       * 表面 tab 上发起导航 ＝ 离开这张终点面：摘掉它，导航落到相邻的块 tab 上。
+       * （历史与位置都不保留——终点面没有「上次看到哪」。）
+       * 摘完一张块 tab 都不剩 ⇒ 当场按导航目标补一张（导航总要有地方落）。
+       */
+      const leaving = currentTab()
+      if (leaving && leaving.kind !== 'block') {
+        const at = tabs.indexOf(leaving)
+        tabs.splice(at, 1)
+        if (tabs.length === 0) {
+          const fallback = makeTab(id, view?.feed === true)
+          if (fallback) tabs.push(fallback)
+        }
+        const next = tabs[Math.min(at, Math.max(tabs.length - 1, 0))]
+        activeTabId = next ? next.id : ''
+        syncNav()
+      }
+      // 表面 tab 上没有「当前块」可换；历史也只记块 tab 的
       const cur = currentTab()
       const tab = cur?.kind === 'block' ? cur : undefined
       const feed = view?.feed === true

@@ -31,16 +31,18 @@ test('中心派生卡守卫：接得住的放行，槽绑定的持久卡与未�
   assert.equal(centerDerivedOpenable('nope'), false)
 })
 
-test('工具面目录是闭集：还没有行 ⇒ 一切 id 都不可开', () => {
-  assert.deepEqual(UTILITY_FACES, [], '目录行与它的渲染分支一起加；加行前守卫拒绝一切')
-  assert.equal(isUtilityFaceId('search'), false)
+test('工具面目录是闭集：已有一行（搜索）；清单外的 id 一律不认', () => {
+  assert.deepEqual(UTILITY_FACES.map((d) => d.id), ['search'])
+  assert.equal(isUtilityFaceId('search'), true)
+  assert.equal(isUtilityFaceId('widgets'), false)
   assert.equal(isUtilityFaceId(42), false)
 })
 
 test('表面守卫返回规范形态：派生＝card、工具＝face；不过与坏形状给 null', () => {
   assert.deepEqual(validSurfaceRef({ kind: 'derived', id: 'trash' }), { kind: 'derived', card: 'trash' })
   assert.equal(validSurfaceRef({ kind: 'derived', id: 'calendar' }), null, '中心接不住的卡不放行')
-  assert.equal(validSurfaceRef({ kind: 'utility', id: 'search' }), null, '工具面目录还没有行')
+  assert.deepEqual(validSurfaceRef({ kind: 'utility', id: 'search' }), { kind: 'utility', face: 'search' })
+  assert.equal(validSurfaceRef({ kind: 'utility', id: 'widgets' }), null, '目录外的工具面不放行')
   assert.equal(validSurfaceRef({ kind: 'widget', id: 'x' }), null)
   assert.equal(validSurfaceRef(null), null)
   assert.equal(validSurfaceRef({ kind: 'derived' }), null, '缺 id 不放行')
@@ -57,5 +59,6 @@ test('派生/工具按 kind 去重：同 kind 同 id 是同一张，kind 不同�
 test('表面 tab 的固定名取自目录（字典 id）；不在目录里的给 null', () => {
   assert.equal(surfaceTitleOf({ kind: 'derived', card: 'trash' }), 'ui.dock.trash')
   assert.equal(surfaceTitleOf({ kind: 'derived', card: 'calendar' }), 'ui.cal.title')
-  assert.equal(surfaceTitleOf({ kind: 'utility', face: 'search' }), null, '目录还没有行 ⇒ 没有名字可取')
+  assert.equal(surfaceTitleOf({ kind: 'utility', face: 'search' }), 'ui.surface.search')
+  assert.equal(surfaceTitleOf({ kind: 'utility', face: 'widgets' }), null, '目录外 ⇒ 没有名字可取')
 })

@@ -7,9 +7,8 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, findByAlias, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, findByAlias, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec } from './core/index.ts'
 import { plainText } from './core/model/runs.ts'
-import { highlightSnippet } from './core/search/query.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
 import { BlockStore } from './core/model/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
@@ -59,6 +58,7 @@ import { setupDiagnostics } from './app/wiring/diagnostics.ts'
 import { HANDLERS } from './app/handlers.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
 import { t } from './core/infra/msg.ts'
+import { ensurePageInTx } from './core/index.ts'
 import { seedJournalMounts, seedWorkspace } from './core/infra/seed.ts'
 import { createIdbAssetStore } from './core/storage/asset-idb.ts'
 import { createIpcAssetStore } from './core/storage/asset-ipc.ts'
@@ -73,6 +73,7 @@ import {
 import { createIpcAdapter, type LibraryBridge } from './core/storage/ipc-adapter.ts'
 import type { FtsCommitSource } from './core/storage/fts-port.ts'
 import { createSearchService, type SearchService } from './app/search/service.ts'
+import { describeHit, type HitView } from './app/search/hits.ts'
 import {
   createDeviceStore,
   createLibrarySettingsPort,
@@ -453,6 +454,33 @@ const surface = setupSurface({
   getRegistry: () => registry,
   renderDocks: () => renderDocks(),
   getChrome: () => chrome,
+  searchDeps: () => ({
+    kb,
+    // 引擎现取：索引状态会变（ready 才信 FTS，否则扫描降级——面自己把降级说明白）
+    query: (text, limit) => (search ?? { query: async () => ({ hits: [], mode: 'scan' as const }) }).query(text, limit),
+    // 行怎么说与 ⌘F 浮层同一份
+    describe: (hit, term) => describeHit(kb, hit, term),
+    openBlock: (id) => app.openBlock(id, 'center'),
+    // 晋升：把词写进 {text} 条件建查询块（与手建同一份创建路径，落森林顶层，一笔回滚）
+    promote: (term) => app.createQuery(term, { where: { text: term } }),
+    // 无结果的创建入口：找到或创建页（与引用浮层同一条创建路径），建好当场打开
+    createPage: (name) => {
+      const r = pageDeps.run((tx) => ensurePageInTx({ resolveAlias: (n) => kb.resolveAlias(n), roots: () => kb.roots() }, name, tx)?.id ?? '')
+      if (r.result !== '') app.openBlock(r.result, 'center')
+    },
+    copyRef: (id) => {
+      void registry.invoke('core.editor/copy-block-ref', { blockId: id }, 'surface')
+    },
+    // 空态「最近更新」：模型直取（修改时间倒序），不经过查询引擎
+    recents: (limit) => {
+      const alive = flatten({ roots: ws.blocks }).filter((b) => !isDeleted(b))
+      return alive
+        .sort((a, b) => b.modified - a.modified)
+        .slice(0, limit)
+        .map((b) => describeHit(kb, { blockId: b.id, score: 0 }, ''))
+        .filter((v): v is HitView => v !== null)
+    },
+  }),
 })
 
 /**
@@ -1900,6 +1928,8 @@ const app: App = {
     // 第一次打开搜索时把索引排上（启动期不抢 CPU；用户按下 ⌘F 是最可靠的「现在可以建」信号）
     search.start()
     let seq = 0
+    /** 当前词：结果行之外还有一颗「展开为面板」——选中那一刻要用它把词带过去 */
+    let term = ''
     const building = Boolean(LIBRARY_BRIDGE) && search.status() !== 'ready'
     // web 没有 SQLite：搜索仍可用，但必须让用户知道这是扫描降级（不是索引坏了）
     const title = building
@@ -1918,49 +1948,58 @@ const app: App = {
       emptyText: t('ui.search.needQuery'),
       onQuery: (q) => {
         const mine = ++seq
-        if (q.trim() === '') {
+        term = q.trim()
+        if (term === '') {
           layers.setEmptyText(t('ui.search.needQuery'))
           layers.setRows([])
           return
         }
         layers.setEmptyText(t('ui.search.empty'))
         void search!
-          .query(q, 50)
+          .query(term, 50)
           .then((r) => {
             if (mine !== seq || !layers.open) return
-            const rows = r.hits.flatMap((hit) => {
-              const b = kb.get(hit.blockId)
-              if (!b) return []
-              const text = plainText(b.content)
-              const parts =
-                text.trim() === ''
-                  ? [{ text: blockLabel(b) }]
-                  : highlightSnippet(text, q)
-              const trail = kb
-                .pathOf(b.id)
-                .slice(0, -1)
-                .map((x) => blockLabel(x))
-                .filter((x) => x !== '')
-              // 顶层块没有祖先：用它的名字当「住哪」，否则行里只剩一段正文，认不出出处
-              const hint = trail.length > 0 ? trail.join(' › ') : blockLabel(b)
+            const hits = r.hits.flatMap((hit) => {
+              const view = describeHit(kb, hit, term)
+              if (!view) return []
               return [
                 {
-                  id: `search/${b.id}`,
-                  label: parts.map((p) => p.text).join(''),
-                  parts,
-                  hint,
+                  id: `search/${view.blockId}`,
+                  label: view.parts.map((p) => p.text).join(''),
+                  parts: view.parts,
+                  hint: view.hint,
                   icon: 'lucide:file-text',
-                  args: { blockId: b.id },
+                  args: { blockId: view.blockId },
                 },
               ]
             })
-            layers.setRows(rows)
+            // 展开为面板：同一份搜索的另一个尺寸（中心 tab），词随打开带过去。
+            // 挂在**末尾**（第一行必须是最高命中——⌘F 打字后 ↵ 的语义是「打开」，被展开抢走就反了），
+            // 且只在**有命中**时给：无结果时浮层的「没有匹配项」是钉住的诚实口径，不让一颗动作行顶掉它
+            layers.setRows([
+              ...hits,
+              ...(hits.length > 0
+                ? [
+                    {
+                      id: 'search/expand',
+                      label: t('ui.search.expand'),
+                      icon: 'lucide:panel-right',
+                      hint: '',
+                    },
+                  ]
+                : []),
+            ])
           })
           .catch(() => {
             if (mine === seq) layers.setRows([])
           })
       },
       onPick: (row) => {
+        if (row.id === 'search/expand') {
+          surface.setPendingTerm(term)
+          app.openSurface({ kind: 'utility', id: 'search' })
+          return
+        }
         const id = (row.args as { blockId?: unknown } | undefined)?.blockId
         if (typeof id === 'string' && id !== '') app.openBlock(id, 'center')
       },

@@ -34,7 +34,9 @@ export interface UtilityFaceDecl {
 /**
  * 工具面目录：**表面目录唯一一份**。行与它的渲染分支一起加（渲染穷举会红）。
  */
-export const UTILITY_FACES: readonly UtilityFaceDecl[] = []
+export const UTILITY_FACES: readonly UtilityFaceDecl[] = [
+  { id: 'search', icon: 'lucide:search', label: 'ui.surface.search' },
+]
 
 export function isUtilityFaceId(v: unknown): v is UtilityFaceId {
   return typeof v === 'string' && UTILITY_FACES.some((d) => d.id === v)
