@@ -424,6 +424,12 @@ export interface App {
    */
   viewSetSort(owner: ViewOwnerRef, viewId: string, by: string, dir: string): boolean
   /**
+   * 写**分组键**（记录视图共用的顶层配置位）：`groupBy === ''` ＝ 清掉。
+   *
+   * 分组是视图配置，不是查询的一部分：改它不重查、不改成员，只是这批记录换一种摆法。
+   */
+  viewSetGroup(owner: ViewOwnerRef, viewId: string, groupBy: string, groupOrder?: readonly string[]): boolean
+  /**
    * 写一张视图的**切片**：与源的基础条件 AND 叠加（不替换），`null` ＝ 清掉。
    *
    * 只对 query 源有效；别的源当场拒绝（写进去也会被读路径丢掉）。

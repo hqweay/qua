@@ -24,6 +24,7 @@ import {
   defaultColumnsForSource,
   defaultWidthOf,
   fieldTextOf,
+  isMultiValueKey,
   MATCHED_COLUMN,
   PATH_COLUMN,
   REF_COUNT_COLUMN,
@@ -48,9 +49,11 @@ import {
   viewNameOf,
   visibleRows,
   withFilter,
+  withGroup,
   withListSort,
   withSort,
   type Block,
+  type ViewConfig,
   type ViewRecord,
 } from '../src/core/index.ts'
 import { textRuns } from '../src/core/model/runs.ts'
@@ -556,4 +559,37 @@ test('命名／删除：多切片各自带 filter，改名不丢切片，删一�
   assert.deepEqual(views.map((v) => v.id), ['b'], '删一张不连坐')
   const again = upsertView(views, { id: 'b', kind: 'table', name: '待办' })
   assert.equal('filter' in again[0]!, false, '整张替换时可按新配置清掉切片')
+})
+
+test('分组键是记录视图共用的顶层位：canonical 往返、清掉删键、多值判据只有一份', () => {
+  // 看板的分组住在顶层，board 子配置只剩卡片自己的东西；board 不带分组也合法（空看板）
+  const views = canonicalViews(
+    [
+      { id: 'a', kind: 'board', groupBy: '_tags', groupOrder: ['t2', 't1'], board: { showEmpty: true } },
+      { id: 'b', kind: 'board' },
+      { id: 'c', kind: 'table', groupBy: 'p1' },
+    ],
+    { kind: 'children', blockId: 'x' },
+  )
+  const board = views.find((v) => v.id === 'a')!
+  assert.equal(board.groupBy, '_tags', '分组键收顶层位')
+  assert.deepEqual(board.groupOrder, ['t2', 't1'])
+  assert.deepEqual(board.board, { showEmpty: true }, 'board 子配置不再带 groupBy')
+  const bare = views.find((v) => v.id === 'b')!
+  assert.equal(bare.groupBy, undefined, '没有分组的看板合法（不再是「丢掉整张」）')
+  const table = views.find((v) => v.id === 'c')!
+  assert.equal(table.groupBy, 'p1', '表格同样能带分组键（分节呈现待做，配置位先行）')
+
+  // withGroup：写一格／清掉删键（空配置不留「曾经分过」的痕迹）
+  const v0: ViewConfig = { id: 'v', kind: 'board' }
+  const grouped = withGroup(v0, 'p1', ['a', ''])
+  assert.equal(grouped.groupBy, 'p1')
+  assert.deepEqual(grouped.groupOrder, ['a'], '组序里的空串滤掉')
+  const cleared = withGroup(grouped, '')
+  assert.equal('groupBy' in cleared, false)
+  assert.equal('groupOrder' in cleared, false)
+
+  // 多值键判据：现阶段只有标签归属；同一份判据喂候选标注／分桶／拖拽三处
+  assert.equal(isMultiValueKey('_tags'), true)
+  assert.equal(isMultiValueKey('p1'), false)
 })

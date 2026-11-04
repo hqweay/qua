@@ -159,12 +159,20 @@ export interface ViewConfig {
    *    `canonicalViews` 会按源把别处的这一格丢掉，免得「写进去了、却永远不生效」。
    */
   filter?: QueryNode
+  /**
+   * **分组键**（记录视图共用）：看板＝列、表格＝分节、画廊＝分堆——
+   * 一个组、多种呈现，键不随视图种类各存一份。键＝列键（属性定义块 id 或保留键；
+   * `_tags` ＝ 按标签归属分堆）。分组按**当前值**实时导出，不是成员集合的第二份答案。
+   */
+  groupBy?: string
+  /** 组的呈现顺序（存**原始值**：select 是选项块 id、`_tags` 是标签块 id）。缺省＝声明序 ＋ 第一次出现，「未设置」恒最后。 */
+  groupOrder?: string[]
   table?: TableConfig
   /** 记录列表（不是大纲树、不是结构映射表） */
   list?: ListConfig
   /** 结构映射表：**只有排序**，没有列（列＝一个直接子块，不是配置） */
   listTable?: { sort?: ListSort }
-  board?: { groupBy: string; groupOrder?: string[]; cardFields?: string[]; showEmpty?: boolean }
+  board?: { cardFields?: string[]; showEmpty?: boolean }
   gallery?: { cover?: 'first-asset' | 'none'; cardFields?: string[]; size?: 's' | 'm' | 'l' }
   calendar?: { dateBy: string; showUndated?: boolean }
   mindmap?: { cardFields?: string[]; direction?: 'both' | 'right' }
@@ -340,6 +348,12 @@ export function canonicalViews(raw: unknown, source: Source): ViewConfig[] {
     if (isStr(v.name)) view.name = v.name
     // 切片只对 query 源生效；别的源写进来也丢掉（否则「写进去了、却永远不生效」）
     if (source.kind === 'query' && isQueryNode(v.filter)) view.filter = canonicalNode(v.filter)
+    // 分组键是记录视图共用的顶层位（大纲忽略它；写进去不报错、也不丢——换视图种类键还在）
+    if (isStr(v.groupBy)) view.groupBy = v.groupBy
+    if (Array.isArray(v.groupOrder)) {
+      const order = v.groupOrder.filter(isStr)
+      if (order.length > 0) view.groupOrder = order
+    }
     // **只留这个 kind 自己的那份**：别的 kind 的配置跟着一个不存在的 kind 走，
     // 切过去时是「上一份视图的残留」，而没人能说清它该不该生效
     if (kind === 'table') {
@@ -353,12 +367,10 @@ export function canonicalViews(raw: unknown, source: Source): ViewConfig[] {
       if (sort) view.listTable = { sort }
     } else if (kind === 'board') {
       const b = v.board
-      if (b && typeof b === 'object' && isStr(b.groupBy)) {
-        view.board = { groupBy: b.groupBy }
-        if (Array.isArray(b.groupOrder)) view.board.groupOrder = b.groupOrder.filter(isStr)
-        if (Array.isArray(b.cardFields)) view.board.cardFields = b.cardFields.filter(isStr)
-        if (b.showEmpty === true) view.board.showEmpty = true
-      } else continue
+      if (b && typeof b === 'object') {
+        if (Array.isArray(b.cardFields)) view.board = { cardFields: b.cardFields.filter(isStr) }
+        if (b.showEmpty === true) view.board = { ...(view.board ?? {}), showEmpty: true }
+      }
     } else if (kind === 'gallery') {
       view.gallery = { cover: v.gallery?.cover === 'none' ? 'none' : 'first-asset' }
     } else if (kind === 'calendar') {
@@ -907,6 +919,36 @@ export function withSort(view: ViewConfig, sort: readonly SortKey[] | undefined)
   if (!sort || sort.length === 0) delete next.table.sort
   else next.table.sort = sort.map((s) => ({ ...s }))
   return next
+}
+
+/**
+ * 写**分组键**（`''` ＝ 清掉，删键而不是留空串）。
+ *
+ * 分组是记录视图共用的配置位：换视图种类键跟着走（一个组、多种呈现）。
+ * `groupOrder` 只在给了分组时才有意义，清分组时一并删——空配置不留下「曾经分过」的痕迹。
+ */
+export function withGroup(view: ViewConfig, groupBy: string, groupOrder?: readonly string[]): ViewConfig {
+  const next = cloneView(view)
+  if (groupBy === '') {
+    delete next.groupBy
+    delete next.groupOrder
+    return next
+  }
+  next.groupBy = groupBy
+  const order = (groupOrder ?? []).filter((g) => typeof g === 'string' && g !== '')
+  if (order.length > 0) next.groupOrder = order
+  else delete next.groupOrder
+  return next
+}
+
+/**
+ * 这个分组键是不是**多值**（一块可以有多个值 ⇒ 记录进每个所属组、禁拖）。
+ *
+ * 现阶段唯一的多值键是标签归属（`_tags` 是 ref 列表）；将来字段声明多值
+ * （`_cardinality`）时在此续支，三处路由（候选标注／分桶 fan-out／拖拽禁用）吃同一份判据。
+ */
+export function isMultiValueKey(key: string): boolean {
+  return key === '_tags'
 }
 
 /**
