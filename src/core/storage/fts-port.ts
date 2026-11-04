@@ -16,7 +16,10 @@ export type FtsState = 'pending' | 'building' | 'ready'
 
 /** 从库里读出的索引状态（渲染层据此决定「直接用」还是「后台重建」） */
 export interface FtsLoadState {
-  /** 块 id → FTS rowid（只读快照；写入时复制） */
+  /**
+   * 索引行 → FTS rowid（只读快照；写入时复制）。
+   * 键是 `ftsRowKey(块 id, 来源)`——一块最多五行，一行一个来源。
+   */
   map: Map<string, number>
   state: FtsState
   rowidSeq: number

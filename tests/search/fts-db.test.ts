@@ -18,6 +18,7 @@ import { mkBlock } from '../../src/core/model/model.ts'
 import type { StoredWorkspace } from '../../src/core/storage/db-rows.ts'
 import { applyRowWrites, openLibraryDb, searchFts } from '../../electron/library/sqlite.ts'
 import { buildAllFtsWrites } from '../../src/core/search/rows.ts'
+import { ftsRowKey } from '../../src/core/search/sources.ts'
 import { compileMatch } from '../../src/core/search/query.ts'
 import { tokenizeText, type TokenizedText } from '../../src/core/search/tokenizer.ts'
 
@@ -41,11 +42,11 @@ test('端到端：词中字（人口）靠 chars phrase 召回，拼音前缀命
   const b = mkBlock('无关的一条', { created: 2, modified: 2 })
   const ws: StoredWorkspace = { blocks: [a, b], activeId: a.id, savedAt: 1 }
   const tokens = new Map<string, TokenizedText>([
-    [a.id, tokenize('人口密度很大的城市')],
-    [b.id, tokenize('无关的一条')],
+    [ftsRowKey(a.id, 'content'), tokenize('人口密度很大的城市')],
+    [ftsRowKey(b.id, 'content'), tokenize('无关的一条')],
   ])
   // 分词器把「人口密度」当整词（报告里的召回缺口），chars 列仍是逐字
-  assert.equal(tokens.get(a.id)!.seg, '人口密度 很大 的 城市')
+  assert.equal(tokens.get(ftsRowKey(a.id, 'content'))!.seg, '人口密度 很大 的 城市')
   const built = buildAllFtsWrites(ws, tokens)
   applyRowWrites(database, built.writes)
 
@@ -65,8 +66,8 @@ test('端到端：词中字（人口）靠 chars phrase 召回，拼音前缀命
   const next = buildAllFtsWrites(
     { blocks: [a2, b], activeId: a.id, savedAt: 2 },
     new Map([
-      [a.id, tokenize('换了一条正文')],
-      [b.id, tokenize('无关的一条')],
+      [ftsRowKey(a.id, 'content'), tokenize('换了一条正文')],
+      [ftsRowKey(b.id, 'content'), tokenize('无关的一条')],
     ]),
   )
   applyRowWrites(database, [
@@ -83,7 +84,7 @@ test('端到端：`chars : 笔记` 静默 0 —— 编译器的逐字 phrase 是
   const database = db()
   const a = mkBlock('这本笔记本很厚', { created: 1, modified: 1 })
   const ws: StoredWorkspace = { blocks: [a], activeId: a.id, savedAt: 1 }
-  const built = buildAllFtsWrites(ws, new Map([[a.id, tokenize('这本笔记本很厚')]]))
+  const built = buildAllFtsWrites(ws, new Map([[ftsRowKey(a.id, 'content'), tokenize('这本笔记本很厚')]]))
   applyRowWrites(database, built.writes)
 
   assert.deepEqual(

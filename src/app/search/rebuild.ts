@@ -7,7 +7,6 @@
  * 失败语义：**保留 pending／building**，查询继续走扫描。索引是派生数据，
  * 没有「必须建成功才能搜」的道理；下一次打开可以重来。
  */
-import { plainText } from '../../core/model/runs.ts'
 import { walkForest } from '../../core/model/walk.ts'
 import type { Block } from '../../core/model/model.ts'
 import type { RowWrite } from '../../core/storage/db-rows.ts'
@@ -67,7 +66,8 @@ async function rebuildOnce(deps: RebuildDeps): Promise<RebuildResult> {
 
   const ids: string[] = []
   walkForest(deps.forest(), (b) => {
-    if (plainText(b.content).trim() !== '') ids.push(b.id)
+    // 不按「有没有正文」筛：别名／标签／属性值同样成行，该不该建由文本计划逐来源判
+    ids.push(b.id)
   })
   const ws = { blocks: deps.forest(), activeId: '', savedAt: 0 }
 

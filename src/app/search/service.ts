@@ -12,6 +12,7 @@ import type { RowWrite } from '../../core/storage/db-rows.ts'
 import type { FtsState } from '../../core/storage/fts-port.ts'
 import { compileMatch, scanSearch } from '../../core/search/query.ts'
 import { FTS_TOKENIZER_VERSION } from '../../core/search/tokenizer.ts'
+import { FTS_SOURCES, type FtsSource } from '../../core/search/sources.ts'
 import { SearchIndexer, type SearchSnapshot, type TokenizeMany } from './indexer.ts'
 import { rebuildSearch } from './rebuild.ts'
 import { createTokenizerClient, type TokenizerClient } from './tokenizer-client.ts'
@@ -20,6 +21,13 @@ export interface SearchHit {
   blockId: string
   /** BM25 分数（越小越相关）；扫描降级时为 0 */
   score: number
+  /**
+   * 命中的**来路**（正文／别名／标签／属性／链接）。
+   *
+   * 扫描降级只搜正文 ⇒ 没有这一格；结果行渲染按有无它分支（有 ⇒ 可标「经由」）。
+   * 一块可以同时有多个来源命中——这里**按块去重**，保留分数最好的那一行的来路。
+   */
+  source?: FtsSource
 }
 
 export interface SearchResult {
@@ -176,18 +184,30 @@ export function createSearchService(deps: SearchDeps): SearchService {
       if (!match) return { hits: [], mode: 'fts' }
       try {
         const reply = (await bridge.search(match, n)) as
-          | { status?: string; hits?: { blockId?: unknown; score?: unknown }[] }
+          | { status?: string; hits?: { blockId?: unknown; source?: unknown; score?: unknown }[] }
           | null
         if (!reply || reply.status !== 'ok' || !Array.isArray(reply.hits)) return scan(text, n)
         const forest = deps.forest()
         const hits: SearchHit[] = []
+        const best = new Map<string, SearchHit>()
         for (const h of reply.hits) {
           if (typeof h.blockId !== 'string') continue
-          // 索引里可能还有刚被软删的块（删除那一批还没来得及落盘）⇒ 结果以模型为准
+          // 索引里可能还有刚软删的块（删除那一批还没来得及落盘）⇒ 结果以模型为准
           if (!findInForest(forest, h.blockId)) continue
-          hits.push({ blockId: h.blockId, score: typeof h.score === 'number' ? h.score : 0 })
-          if (hits.length >= n) break
+          const hit: SearchHit = {
+            blockId: h.blockId,
+            score: typeof h.score === 'number' ? h.score : 0,
+          }
+          if (typeof h.source === 'string' && FTS_SOURCES.includes(h.source as FtsSource)) {
+            hit.source = h.source as FtsSource
+          }
+          // 一块多来源命中只留一行：分数最好的赢（并列时先到的赢）
+          const prev = best.get(h.blockId)
+          if (prev && prev.score <= hit.score) continue
+          best.set(h.blockId, hit)
         }
+        // 去重后按分数重排：最好的那行不一定在游标第一次遇到这个块的位置上
+        hits.push(...[...best.values()].sort((a, b) => a.score - b.score).slice(0, n))
         return { hits, mode: 'fts' }
       } catch (err) {
         console.warn(`[search] fts query failed; falling back to scan: ${err instanceof Error ? err.message : String(err)}`)

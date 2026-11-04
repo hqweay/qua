@@ -108,7 +108,7 @@ while (inserted < N) {
       key: { rowid },
       values: { seg: token.seg, chars: token.chars, pinyin: token.pinyin },
     })
-    writes.push({ table: 'BlockFTSMap', op: 'upsert', key: { block_id: id }, values: { fts_rowid: rowid } })
+    writes.push({ table: 'BlockFTSMap', op: 'upsert', key: { block_id: id, source: 'content' }, values: { fts_rowid: rowid } })
   }
   applyRowWrites(db, writes)
   inserted += n

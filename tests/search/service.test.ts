@@ -127,3 +127,33 @@ test('重建后查询开始走 FTS（状态推进是查询路径的唯一开关�
   assert.equal(r.mode, 'fts')
   assert.equal(searched, 1)
 })
+
+test('命中带来源：一块多来源命中去重成一行，留分数最好的来路；扫描降级没有来路', async () => {
+  const blocks = forest()
+  const bridge = bridgeOf(async () => ({
+    status: 'ok',
+    hits: [
+      { blockId: blocks[0]!.id, source: 'alias', score: 3 },
+      { blockId: blocks[0]!.id, source: 'content', score: 1 },
+      { blockId: blocks[1]!.id, source: 'tag', score: 2 },
+    ],
+  }))
+  const svc = createSearchService({
+    bridge,
+    forest: () => blocks,
+    snapshot: { map: new Map(), state: 'ready', rowidSeq: 0, tokenizer: FTS_TOKENIZER_VERSION },
+    tokenizer: tokenizeManyWith(tokenize),
+  })
+  const r = await svc.query('笔记')
+  assert.equal(r.mode, 'fts')
+  assert.deepEqual(
+    r.hits.map((h) => `${h.blockId}|${h.source}`),
+    [`${blocks[0]!.id}|content`, `${blocks[1]!.id}|tag`],
+    '同一块只留一行，来路是分数最好的那一行',
+  )
+
+  const scanSvc = createSearchService({ bridge: null, forest: () => blocks, tokenizer: tokenizeManyWith(tokenize) })
+  const scanned = await scanSvc.query('笔记')
+  assert.equal(scanned.mode, 'scan')
+  assert.equal(scanned.hits[0]!.source, undefined, '扫描只搜正文，没有「经由」可言')
+})

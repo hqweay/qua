@@ -5,7 +5,7 @@
  *   ① 改正文 ⇒ 旧 rowid 先删、新行再插，映射跟着走；
  *   ② 软删一棵子树 ⇒ **整棵子树**摘索引（op 只落在根上，子树的不可见是继承的）；
  *   ③ 恢复 ⇒ 整棵子树重新进索引；
- *   ④ 增量走到头 ≡ 整库重建（A4），比较的是块 id → 三列内容，不是 rowid。
+ *   ④ 增量走到头 ≡ 整库重建（A4），比较的是 `块 id＋来源` → 三列内容，不是 rowid。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -18,6 +18,7 @@ import type { Op } from '../../src/core/kb/types.ts'
 import { WORKSPACE_VERSION, type Workspace } from '../../src/core/infra/workspace.ts'
 import type { RowWrite, StoredWorkspace } from '../../src/core/storage/db-rows.ts'
 import { buildAllFtsWrites } from '../../src/core/search/rows.ts'
+import { ftsRowKey } from '../../src/core/search/sources.ts'
 import { tokenizeText, type TokenizedText } from '../../src/core/search/tokenizer.ts'
 import { SearchIndexer, tokenizeManyWith } from '../../src/app/search/indexer.ts'
 import { createWorkspaceStore } from '../../src/core/storage/index.ts'
@@ -35,7 +36,7 @@ function tokensOf(ws: Workspace): Map<string, TokenizedText> {
   const out = new Map<string, TokenizedText>()
   const walk = (b: Block): void => {
     const text = b.content.map((r) => (r.t === 'text' ? r.v : '')).join('')
-    if (text.trim() !== '') out.set(b.id, tokenize(text))
+    if (text.trim() !== '') out.set(ftsRowKey(b.id, 'content'), tokenize(text))
     for (const c of b.children) walk(c)
   }
   for (const b of ws.blocks) walk(b)
@@ -48,10 +49,10 @@ function makeIndexer(): SearchIndexer {
   )
 }
 
-/** 把一批 FTS 行「应用」成块 id → 三列内容（模拟库里的最终状态） */
+/** 把一批 FTS 行「应用」成 `块 id＋来源` → 三列内容（模拟库里的最终状态） */
 function applyWrites(state: Map<string, TokenizedText>, writes: readonly RowWrite[]): Map<string, TokenizedText> {
   const byRow = new Map<number, TokenizedText>()
-  const idOfRow = new Map<number, string>()
+  const keyOfRow = new Map<number, string>()
   const out = new Map(state)
   for (const w of writes) {
     if (w.table === 'BlockFTS' && w.op === 'insert') {
@@ -65,21 +66,20 @@ function applyWrites(state: Map<string, TokenizedText>, writes: readonly RowWrit
   for (const w of writes) {
     if (w.table === 'BlockFTSMap' && w.op === 'upsert') {
       const row = Number(w.values!.fts_rowid)
-      const id = String(w.key.block_id)
-      idOfRow.set(row, id)
+      const key = ftsRowKey(String(w.key.block_id), w.key.source as 'content')
+      keyOfRow.set(row, key)
       const token = byRow.get(row)
-      if (token) out.set(id, token)
+      if (token) out.set(key, token)
     }
   }
   for (const w of writes) {
     if (w.table !== 'BlockFTSMap' || w.op !== 'delete') continue
-    const id = String(w.key.block_id)
-    out.delete(id)
+    out.delete(ftsRowKey(String(w.key.block_id), w.key.source as 'content'))
   }
-  // 被更新的块：旧映射先删、新映射后写，以最后一次为准
-  for (const [row, id] of idOfRow) {
+  // 被更新的行：旧映射先删、新映射后写，以最后一次为准
+  for (const [row, key] of keyOfRow) {
     const token = byRow.get(row)
-    if (token) out.set(id, token)
+    if (token) out.set(key, token)
   }
   return out
 }
@@ -124,8 +124,14 @@ test('软删：op 只落在根上，但整棵子树都要摘索引；恢复时�
   assert.equal(delOps.length, 1, '软删只有根一条 op（子树不可见是继承来的）')
   const plan = await indexer.plan(stored(wsOf(store.blocks)), delOps)
   assert.ok(plan)
-  const removed = plan!.writes.filter((w) => w.table === 'BlockFTSMap' && w.op === 'delete').map((w) => w.key.block_id)
-  assert.deepEqual([...removed].sort(), [child.id, grand.id, root.id].sort(), '整棵子树都要摘')
+  const removed = plan!.writes
+    .filter((w) => w.table === 'BlockFTSMap' && w.op === 'delete')
+    .map((w) => ftsRowKey(String(w.key.block_id), w.key.source as 'content'))
+  assert.deepEqual(
+    [...removed].sort(),
+    [root.id, child.id, grand.id].flatMap((id) => [ftsRowKey(id, 'content')]).sort(),
+    '整棵子树都要摘',
+  )
   plan!.apply()
   assert.equal(indexer.mapSize, 0)
 
@@ -152,7 +158,7 @@ test('清除：purged 只摘这一块（撤销插入时每块各一条 op）', a
   assert.equal(plan!.writes.filter((w) => w.table === 'BlockFTSMap' && w.op === 'delete').length, 1)
 })
 
-test('A4：增量走到头 ≡ 整库重建（按块 id → 三列内容比较，不看 rowid）', async () => {
+test('A4：增量走到头 ≡ 整库重建（按 `块 id＋来源` → 三列内容比较，不看 rowid）', async () => {
   const a = mkBlock('第一条笔记', { created: 1, modified: 1 })
   const b = mkBlock('第二条笔记 应用', { created: 2, modified: 2 })
   const store = new BlockStore([a, b])
@@ -176,13 +182,13 @@ test('A4：增量走到头 ≡ 整库重建（按块 id → 三列内容比较�
   state = applyWrites(state, plan!.writes)
   plan!.apply()
 
-  // 从空索引整库重建当前模型，应与增量走到的状态逐块相同
+  // 从空索引整库重建当前模型，应与增量走到的状态逐行相同
   const fresh = buildAllFtsWrites(stored(wsOf(store.blocks)), tokensOf(wsOf(store.blocks)))
   const rebuildState = applyWrites(new Map(), fresh.writes)
-  assert.deepEqual([...state.keys()].sort(), [...rebuildState.keys()].sort(), '命中的块集合必须一致')
-  for (const id of state.keys()) assert.deepEqual(state.get(id), rebuildState.get(id), `块 ${id} 的三列必须一致`)
-  assert.equal(state.has(b.id), false, '删掉的块不在索引里')
-  assert.match(state.get(a.id)!.seg, /第零/)
+  assert.deepEqual([...state.keys()].sort(), [...rebuildState.keys()].sort(), '命中的行集合必须一致')
+  for (const key of state.keys()) assert.deepEqual(state.get(key), rebuildState.get(key), `行 ${key} 的三列必须一致`)
+  assert.equal(state.has(ftsRowKey(b.id, 'content')), false, '删掉的块不在索引里')
+  assert.match(state.get(ftsRowKey(a.id, 'content'))!.seg, /第零/)
 })
 
 test('计划失败/未就绪：不写索引行，内容照常落盘', async () => {
