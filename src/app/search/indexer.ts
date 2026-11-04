@@ -7,13 +7,19 @@
 import type { Op } from '../../core/kb/types.ts'
 import type { StoredWorkspace } from '../../core/storage/db-rows.ts'
 import type { FtsCommitPlan, FtsCommitSource } from '../../core/storage/fts-port.ts'
+import type { FtsSource } from '../../core/search/sources.ts'
 import type { TokenizedText } from '../../core/search/tokenizer.ts'
-import { buildFtsWrites, ftsTargets, indexTexts } from '../../core/search/rows.ts'
+import { buildFtsWrites, ftsSourceTexts, ftsTargets } from '../../core/search/rows.ts'
+import { ftsRowKey, parseFtsRowKey } from '../../core/search/sources.ts'
 
 /** `pending`／`building` 时查询降级扫描；只有 `ready` 才相信索引 */
 export type FtsState = 'pending' | 'building' | 'ready'
 
 export interface SearchSnapshot {
+  /**
+   * 索引行 → FTS rowid。键是 `ftsRowKey(块 id, 来源)`（一行一个来源），
+   * 不是块 id——一块最多五行（正文／地址／标签／属性／链接各一行）。
+   */
   map: Map<string, number>
   state: FtsState
   rowidSeq: number
@@ -71,6 +77,11 @@ export class SearchIndexer implements FtsCommitSource {
     return this.map.size
   }
 
+  /** 诊断用：某个块的某个来源行现在有没有索引（键见 `ftsRowKey`） */
+  rowidOf(blockId: string, source: FtsSource): number | undefined {
+    return this.map.get(ftsRowKey(blockId, source))
+  }
+
   /** 重建期间有没有编辑被跳过（决定能不能标 ready） */
   get dirtyDuringBuild(): boolean {
     return this.dirtyDuringRebuild
@@ -108,7 +119,7 @@ export class SearchIndexer implements FtsCommitSource {
   }
 
   /**
-   * 重建的一批：分配 rowid 并产写行。与增量共用 `buildFtsWrites`。
+   * 重建的一批：算全来源文本、分配 rowid 并产写行。与增量共用 `buildFtsWrites`。
    *
    * 直接改内存映射（重建是独占过程，失败就整份作废，不存在「盘上有、内存没有」）。
    */
@@ -116,9 +127,21 @@ export class SearchIndexer implements FtsCommitSource {
     ws: StoredWorkspace,
     ids: ReadonlySet<string>,
   ): Promise<{ writes: ReturnType<typeof buildFtsWrites>['writes']; nextRowid: number }> {
-    const items = indexTexts(ws, ids)
+    const texts = ftsSourceTexts(ws, ids)
+    const items = texts.map((x) => ({ id: x.key, text: x.text }))
     const tokens = items.length > 0 ? await this.tokenize(items) : new Map<string, TokenizedText>()
-    const built = buildFtsWrites(ws, { index: new Set(items.map((x) => x.id)), remove: new Set() }, tokens, this.map, this.rowid)
+    const index = new Map<FtsSource, Set<string>>()
+    for (const { key } of texts) {
+      const parsed = parseFtsRowKey(key)
+      if (!parsed) continue
+      let set = index.get(parsed.source)
+      if (!set) {
+        set = new Set()
+        index.set(parsed.source, set)
+      }
+      set.add(parsed.blockId)
+    }
+    const built = buildFtsWrites({ index, remove: new Map() }, tokens, this.map, this.rowid)
     this.map = built.map
     this.rowid = built.nextRowid
     return { writes: built.writes, nextRowid: built.nextRowid }
@@ -143,9 +166,12 @@ export class SearchIndexer implements FtsCommitSource {
     const targets = ftsTargets(ws, ops)
     if (targets.index.size === 0 && targets.remove.size === 0) return null
 
-    const items = indexTexts(ws, targets.index)
+    const want = new Set<string>()
+    for (const ids of targets.index.values()) for (const id of ids) want.add(id)
+    const texts = ftsSourceTexts(ws, want)
+    const items = texts.map((x) => ({ id: x.key, text: x.text }))
     const tokens = items.length > 0 ? await this.tokenize(items) : new Map<string, TokenizedText>()
-    const built = buildFtsWrites(ws, targets, tokens, this.map, this.rowid)
+    const built = buildFtsWrites(targets, tokens, this.map, this.rowid)
     if (built.writes.length === 0) return null
     return {
       writes: built.writes,

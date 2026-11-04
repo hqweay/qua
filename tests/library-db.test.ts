@@ -123,14 +123,51 @@ test('v8 → v9：只加 FTS 表，内容行原样留着（第一次不丢内容
   first.db!.close()
 
   const r = openLibraryDb(file)
-  assert.equal(r.status, 'migrated', `v8 应当被迁移到 v9，实际 ${r.status}`)
+  assert.equal(r.status, 'migrated', `v8 应当被迁移到当前版本，实际 ${r.status}`)
   const db = r.db!
   const tables = (db.prepare("select name from sqlite_master where type='table'").all() as { name: string }[]).map((t) => t.name)
-  assert.ok(tables.includes(DB_TABLES.blockFts), `v9 应当建出 BlockFTS：${tables.join(',')}`)
-  assert.ok(tables.includes(DB_TABLES.blockFtsMap), `v9 应当建出 BlockFTSMap：${tables.join(',')}`)
-  assert.equal(hasContent(db), true, 'v9 不许清内容')
+  assert.ok(tables.includes(DB_TABLES.blockFts), `迁移后应当建出 BlockFTS：${tables.join(',')}`)
+  assert.ok(tables.includes(DB_TABLES.blockFtsMap), `迁移后应当建出 BlockFTSMap：${tables.join(',')}`)
+  assert.equal(hasContent(db), true, '迁移不许清内容')
   assert.equal(readMeta(db, META_KEYS.name), '我的库', '库级 meta 也不许动')
   assert.equal(readMeta(db, META_KEYS.ftsState), 'pending', '索引状态必须是 pending（渲染层会重建）')
+  db.close()
+})
+
+test('v9 → v10：索引行加来源维度＝两张派生表作废重建，内容与库级 meta 原样', () => {
+  const file = tmpDb()
+  const first = openLibraryDb(file, { target: 9 })
+  assert.equal(first.status, 'created')
+  applyRowWrites(first.db!, [blockRow('b1')])
+  writeMeta(first.db!, META_KEYS.name, '我的库')
+  // 建表 DDL 是共享的一份（永远当前形状）：要模拟「上一版代码留下的 v9 映射表」得手工换回去
+  first.db!.exec(`drop table ${DB_TABLES.blockFtsMap}`)
+  first.db!.exec(
+    `create table ${DB_TABLES.blockFtsMap} (block_id text primary key, fts_rowid integer not null unique)`,
+  )
+  // v9 形状的映射行（没有来源列）与一段旧索引
+  applyRowWrites(first.db!, [
+    { table: 'BlockFTS', op: 'insert', key: { rowid: 3 }, values: { seg: '旧索引', chars: '旧 索 引', pinyin: 'jiu suo yin' } },
+    { table: 'BlockFTSMap', op: 'upsert', key: { block_id: 'b1' }, values: { fts_rowid: 3 } },
+  ])
+  first.db!.close()
+
+  const r = openLibraryDb(file)
+  assert.equal(r.status, 'migrated', `v9 应当被迁移到当前版本，实际 ${r.status}`)
+  const db = r.db!
+  assert.equal(hasContent(db), true, '派生表作废不连累内容')
+  assert.equal(readMeta(db, META_KEYS.name), '我的库', '库级 meta 不许动')
+  assert.equal(readMeta(db, META_KEYS.ftsState), 'pending', '索引状态落回 pending（渲染层会重建）')
+  assert.deepEqual(searchFts(db, 'seg : "旧索引"', 10), [], '旧索引行不再出现')
+  assert.equal(readContentRows(db).ftsMap.length, 0, '旧映射行全部作废')
+  // 新形状：映射行带来源才写得进去；查询把它带回来
+  applyRowWrites(db, [
+    { table: 'BlockFTS', op: 'insert', key: { rowid: 1 }, values: { seg: '笔记', chars: '笔 记', pinyin: 'bi ji' } },
+    { table: 'BlockFTSMap', op: 'upsert', key: { block_id: 'b1', source: 'content' }, values: { fts_rowid: 1 } },
+  ])
+  const hits = searchFts(db, 'seg : "笔记"', 10)
+  assert.deepEqual(hits.map((h) => h.blockId), ['b1'])
+  assert.deepEqual(hits.map((h) => h.source), ['content'])
   db.close()
 })
 
@@ -454,7 +491,7 @@ test('FTS 行：显式 rowid 插入、查询、按 rowid 删除（contentless_de
   applyRowWrites(db, [
     blockRow('b1'),
     { table: 'BlockFTS', op: 'insert', key: { rowid: 7 }, values: { seg: '笔记 应用', chars: '笔 记 应 用', pinyin: 'bi ji ying yong' } },
-    { table: 'BlockFTSMap', op: 'upsert', key: { block_id: 'b1' }, values: { fts_rowid: 7 } },
+    { table: 'BlockFTSMap', op: 'upsert', key: { block_id: 'b1', source: 'content' }, values: { fts_rowid: 7 } },
   ])
 
   assert.deepEqual(searchFts(db, 'seg : "笔记"', 10).map((h) => h.blockId), ['b1'])
@@ -464,9 +501,38 @@ test('FTS 行：显式 rowid 插入、查询、按 rowid 删除（contentless_de
 
   applyRowWrites(db, [
     { table: 'BlockFTS', op: 'delete', key: { rowid: 7 } },
-    { table: 'BlockFTSMap', op: 'delete', key: { block_id: 'b1' } },
+    { table: 'BlockFTSMap', op: 'delete', key: { block_id: 'b1', source: 'content' } },
   ])
   assert.deepEqual(searchFts(db, 'seg : "笔记"', 10), [])
+  db.close()
+})
+
+test('FTS 行：来源是一等维度——同块多行互不干扰，查询可按来源过滤', () => {
+  const file = tmpDb()
+  const r = openLibraryDb(file)
+  const db = r.db!
+  applyRowWrites(db, [
+    { table: 'BlockFTS', op: 'insert', key: { rowid: 1 }, values: { seg: '正文提到 设计', chars: '正 文 提 到 设 计', pinyin: 'zheng wen ti dao she ji' } },
+    { table: 'BlockFTS', op: 'insert', key: { rowid: 2 }, values: { seg: '别名 设计', chars: '别 名 设 计', pinyin: 'bie ming she ji' } },
+    { table: 'BlockFTSMap', op: 'upsert', key: { block_id: 'b1', source: 'content' }, values: { fts_rowid: 1 } },
+    { table: 'BlockFTSMap', op: 'upsert', key: { block_id: 'b1', source: 'alias' }, values: { fts_rowid: 2 } },
+  ])
+
+  // 两个来源各一行，各带自己的来源标记
+  const hits = searchFts(db, 'seg : "设计"', 10)
+  assert.deepEqual(
+    hits.map((h) => h.source),
+    ['alias', 'content'],
+    '同一块的两个来源行都命中（BM25 分数短的那行在前，不是巧合）',
+  )
+  // 独立过滤：只搜别名行，正文行不出
+  assert.deepEqual(searchFts(db, 'seg : "设计"', 10, 0, 'alias').map((h) => h.source), ['alias'])
+  assert.deepEqual(searchFts(db, 'seg : "设计"', 10, 0, 'content').map((h) => h.source), ['content'])
+  assert.deepEqual(searchFts(db, 'seg : "设计"', 10, 0, 'tag'), [], '没有行属于这个来源就是空')
+
+  // 摘掉别名行：正文行原样（一行一行的独立维护）
+  applyRowWrites(db, [{ table: 'BlockFTSMap', op: 'delete', key: { block_id: 'b1', source: 'alias' } }])
+  assert.deepEqual(searchFts(db, 'seg : "设计"', 10).map((h) => h.source), ['content'], '别的来源行不许被连坐')
   db.close()
 })
 
@@ -476,7 +542,7 @@ test('FTS 行：clear 清空整表（重建索引的第一步），map 也一起
   const db = r.db!
   applyRowWrites(db, [
     { table: 'BlockFTS', op: 'insert', key: { rowid: 1 }, values: { seg: 'a', chars: 'a', pinyin: 'a' } },
-    { table: 'BlockFTSMap', op: 'upsert', key: { block_id: 'b1' }, values: { fts_rowid: 1 } },
+    { table: 'BlockFTSMap', op: 'upsert', key: { block_id: 'b1', source: 'content' }, values: { fts_rowid: 1 } },
   ])
   applyRowWrites(db, [
     { table: 'BlockFTS', op: 'clear', key: {} },

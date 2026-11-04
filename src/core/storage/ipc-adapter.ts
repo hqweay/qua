@@ -25,6 +25,7 @@ import { WORKSPACE_VERSION, type Workspace } from './shape.ts'
 import { META_KEYS } from '../identity/library.ts'
 import { rowsToWorkspace, type RawLibraryRows, type RowWrite } from './db-rows.ts'
 import type { FtsLoadState, FtsState } from './fts-port.ts'
+import { FTS_SOURCES, ftsRowKey, type FtsSource } from '../search/sources.ts'
 
 /** 主进程那一侧的最小面（`electron/preload.ts` 暴露的同名方法） */
 export interface LibraryBridge {
@@ -64,6 +65,11 @@ export interface LibraryBridge {
 
 export const IPC_BACKEND = 'ipc-library'
 
+/** 库里读出的来源标记 → 清单内的一格；不认识 ⇒ `null`（那一行丢掉，宁可重建） */
+function parseFtsRowKeySource(raw: unknown): FtsSource | null {
+  return typeof raw === 'string' && (FTS_SOURCES as readonly string[]).includes(raw) ? (raw as FtsSource) : null
+}
+
 /** 从库里读出来的库补回当前 `version`（装载用） */
 export function withVersion(stored: Omit<Workspace, 'version'>): Workspace {
   return { ...stored, version: WORKSPACE_VERSION }
@@ -78,8 +84,15 @@ export function createIpcAdapter(bridge: LibraryBridge): StoragePort {
     const raw = rows.meta[META_KEYS.ftsState]
     const state: FtsState = raw === 'ready' || raw === 'building' ? raw : 'pending'
     const seq = Number(rows.meta[META_KEYS.ftsRowidSeq] ?? 0)
+    // 映射键是「块 id ＋ 来源」；来源不认识的行整行丢（宁可重建，不猜它是什么）
+    const map = new Map<string, number>()
+    for (const r of rows.ftsMap ?? []) {
+      const source = parseFtsRowKeySource(r.source)
+      if (source === null) continue
+      map.set(ftsRowKey(r.block_id, source), Number(r.fts_rowid))
+    }
     return {
-      map: new Map((rows.ftsMap ?? []).map((r) => [r.block_id, Number(r.fts_rowid)] as const)),
+      map,
       state,
       rowidSeq: Number.isFinite(seq) && seq >= 0 ? seq : 0,
       tokenizer: rows.meta[META_KEYS.ftsTokenizer] ?? '',

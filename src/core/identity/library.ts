@@ -52,12 +52,14 @@ export const LIBRARY_FORMAT = 1
  * v9 是**全文检索的派生表**（`BlockFTS`／`BlockFTSMap`）：只加表、不搬内容，
  * 索引由渲染层在开库后按分词器全量重建。它也是**第一次不丢内容的迁移**——
  * 从这一版起，迁移前的快照失败必须中止迁移（迁移动的是不能再 seed 的真实内容）。
+ * v10 给索引行加了**来源维度**（正文／地址／标签／属性／链接各一行）：两张派生表
+ * 整个作废重建，内容一行不碰，状态落回 `pending`——派生数据丢得起，重建即可。
  *
  * **不写数据迁移**：原型不做旧数据迁移，旧库作废重 seed（`judgeDbVersion` 判到
  * `migrate` 时跑 `MIGRATIONS` 里那一步**只丢旧形状、不搬数据**的 DDL）。
  * `user_version` 只增不减。
  */
-export const DB_SCHEMA_VERSION = 9
+export const DB_SCHEMA_VERSION = 10
 
 /** `meta` 表里被代码解释的键（其余键归将来，不在这里登记）。 */
 export const META_KEYS = {

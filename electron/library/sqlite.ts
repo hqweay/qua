@@ -110,7 +110,7 @@ create index if not exists idx_BlockList_list on ${DB_TABLES.list}(list);
 `
 
 /**
- * 全文索引的 DDL —— **派生表**，只在 v9 及之后存在。
+ * 全文索引的 DDL —— **派生表**，只在 v9 及之后存在（v10 起映射行带来源）。
  *
  * 为什么单列一份、不并进 `CONTENT_DDL`：历史上每次 `CONTENT_DDL` 都代表当时的内容形状，
  * 把它往前面的迁移里加表会让「旧版本的库长什么样」失真。v9 之后新库与迁移都从这里建。
@@ -120,8 +120,9 @@ create index if not exists idx_BlockList_list on ${DB_TABLES.list}(list);
  *   · 不存正文列（100k 实测比 external content 省 41MB）；
  *   · 删除／更新直接按 rowid（SQLite ≥ 3.43；本仓 node:sqlite 3.53 实测可用）。
  *
- * `BlockFTSMap` 把块 id 映射到一个**稳定整数**：`Block` 是 `id text primary key`，
- * 隐式 rowid 在 VACUUM 下可能变，不能拿它当 FTS 身份。
+ * `BlockFTSMap` 把 `块 id ＋ 来源` 映射到一个**稳定整数**：一块的可搜文本不止正文
+ * （地址／标签／属性值／链接各一行），来源进主键才能一行一行独立维护；
+ * `fts_rowid` 仍然全局唯一。不用 `Block.rowid` 当身份：隐式 rowid 在 VACUUM 下可能变。
  */
 const FTS_DDL = `
 create virtual table if not exists ${DB_TABLES.blockFts} using fts5(
@@ -132,8 +133,10 @@ create virtual table if not exists ${DB_TABLES.blockFts} using fts5(
   contentless_delete=1
 );
 create table if not exists ${DB_TABLES.blockFtsMap} (
-  block_id text primary key,
-  fts_rowid integer not null unique
+  block_id text not null,
+  source text not null,
+  fts_rowid integer not null unique,
+  primary key (block_id, source)
 );
 `
 
@@ -310,6 +313,21 @@ export const MIGRATIONS: Migration[] = [
        * `fts_state='pending'` 是给读路径的降级信号：建好之前搜索走扫描，
        * 而不是让用户看到「搜不到」（空索引与「真的没有」必须可区分）。
        */
+      db.exec(FTS_DDL)
+      writeMeta(db, META_KEYS.ftsState, 'pending')
+      writeMeta(db, META_KEYS.ftsRowidSeq, '0')
+    },
+  },
+  {
+    to: 10,
+    up: (db) => {
+      /**
+       * **索引行加了来源维度**（正文／地址／标签／属性／链接各一行）——只动派生表：
+       * 两张索引表整个作废重建，内容表一行不碰，状态落回 `pending`，
+       * 渲染层开库后按当前分词器全量重铺。索引丢得起，内容丢不起。
+       */
+      db.exec(`drop table if exists ${DB_TABLES.blockFts}`)
+      db.exec(`drop table if exists ${DB_TABLES.blockFtsMap}`)
       db.exec(FTS_DDL)
       writeMeta(db, META_KEYS.ftsState, 'pending')
       writeMeta(db, META_KEYS.ftsRowidSeq, '0')
@@ -498,12 +516,12 @@ export function readContentRows(db: Db): {
   aliases: Record<string, unknown>[]
   lists: Record<string, unknown>[]
   /**
-   * 块 id ↔ FTS rowid 的派生映射。
+   * `块 id ＋ 来源` ↔ FTS rowid 的派生映射。
    *
    * 它与内容行一起读：渲染层要拿它决定「这次编辑该删/写哪个 rowid」。
    * 只读不写（写入走 `RowWrite`），所以它不影响「内容表整份读」的口径。
    */
-  ftsMap: { block_id: string; fts_rowid: number }[]
+  ftsMap: { block_id: string; source: string; fts_rowid: number }[]
   meta: Record<string, string>
 } {
   const rows = (table: string): Record<string, unknown>[] =>
@@ -519,7 +537,7 @@ export function readContentRows(db: Db): {
     props: rows(DB_TABLES.property),
     aliases: rows(DB_TABLES.alias),
     lists: rows(DB_TABLES.list),
-    ftsMap: hasFts ? (rows(DB_TABLES.blockFtsMap) as { block_id: string; fts_rowid: number }[]) : [],
+    ftsMap: hasFts ? (rows(DB_TABLES.blockFtsMap) as { block_id: string; source: string; fts_rowid: number }[]) : [],
     meta,
   }
 }
@@ -528,6 +546,8 @@ export function readContentRows(db: Db): {
 
 export interface FtsHit {
   blockId: string
+  /** 这一行命中来自哪个来源（正文／地址／标签／属性／链接；行按来源独立） */
+  source: string
   /** BM25 越小越相关；只用于排序，不是稳定分数 */
   score: number
 }
@@ -536,26 +556,30 @@ export interface FtsHit {
  * 一条 FTS 查询 —— **主进程仍是通用 SQL**：它只认表名与列名，不认识块语义。
  *
  * `match` 由渲染层编译（`core/search/query.ts`），这里只把它当参数绑定。
- * 返回的 `block_id` 交给渲染层映射成块（路径、片段、是否软删都由它判）——
+ * 返回的 `block_id` ＋ `source` 交给渲染层映射成块（路径、片段、是否软删都由它判）——
  * 主进程不读 `Block.deleted`，也不拼「哪些块算内容」。
+ *
+ * `source` 过滤可选：不给就所有来源一起排名。来源行互相独立，过滤只是 join 条件
+ * 多一个等值，不需要第二种查询形状。
  *
  * 为什么查询多一次 join：`BlockFTSMap` 是稳定 rowid 的唯一来源，
  * 100k 量级这次 join 可忽略；拿 `Block.rowid` 当身份会在 VACUUM 后错位。
  */
-export function searchFts(db: Db, match: string, limit: number, offset = 0): FtsHit[] {
+export function searchFts(db: Db, match: string, limit: number, offset = 0, source?: string): FtsHit[] {
   const n = Math.max(0, Math.min(200, Math.trunc(limit)))
   const off = Math.max(0, Math.trunc(offset))
   if (n === 0 || match.trim() === '') return []
-  return db
+  const rows = db
     .prepare(
-      `select m.block_id as blockId, bm25(${DB_TABLES.blockFts}) as score
+      `select m.block_id as blockId, m.source as source, bm25(${DB_TABLES.blockFts}) as score
          from ${DB_TABLES.blockFts}
          join ${DB_TABLES.blockFtsMap} m on m.fts_rowid = ${DB_TABLES.blockFts}.rowid
-        where ${DB_TABLES.blockFts} match ?
+        where ${DB_TABLES.blockFts} match ? ${source !== undefined ? 'and m.source = ?' : ''}
         order by rank
         limit ? offset ?`,
     )
-    .all(match, n, off) as unknown as FtsHit[]
+    .all(...(source !== undefined ? [match, source, n, off] : [match, n, off])) as unknown as FtsHit[]
+  return rows
 }
 
 /**
@@ -610,7 +634,7 @@ const COLUMNS: Record<string, ReadonlySet<string>> = {
   BlockList: new Set(['block', 'list']),
   meta: new Set(['key', 'value']),
   BlockFTS: new Set(['rowid', 'seg', 'chars', 'pinyin']),
-  BlockFTSMap: new Set(['block_id', 'fts_rowid']),
+  BlockFTSMap: new Set(['block_id', 'source', 'fts_rowid']),
 }
 
 function sqlOf(w: RowWrite): string {

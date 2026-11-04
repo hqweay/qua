@@ -71,8 +71,8 @@ export interface RawLibraryRows {
   props: Record<string, unknown>[]
   aliases: Record<string, unknown>[]
   lists: Record<string, unknown>[]
-  /** 派生索引的块 id ↔ rowid（v9 起；旧库／web 没有 ⇒ 空） */
-  ftsMap?: { block_id: string; fts_rowid: number }[]
+  /** 派生索引的 `块 id ＋ 来源` ↔ rowid（v10 起映射行带来源；旧库／web 没有 ⇒ 空） */
+  ftsMap?: { block_id: string; source?: string; fts_rowid: number }[]
   meta: Record<string, string>
 }
 
