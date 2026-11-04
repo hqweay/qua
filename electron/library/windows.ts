@@ -327,8 +327,9 @@ export class LibraryManager {
       const s = sessionOf(e)
       if (!s) return { ok: false, error: 'no-library' }
       if (!Array.isArray(writes)) return { ok: false, error: 'bad-args' }
-      const o = opts as { replace?: unknown; oplog?: unknown } | null
+      const o = opts as { replace?: unknown; oplog?: unknown; derived?: unknown } | null
       const replace = Boolean(o?.replace)
+      const derived = Boolean(o?.derived)
       /**
        * **变更流**（可选）：与行写入**同一个事务**追加进 `op_log`。
        * 校验它是不是数组，但不认识 op 的语义 —— 编码与形状归渲染层，
@@ -342,7 +343,7 @@ export class LibraryManager {
             .filter((x) => Number.isFinite(x.at) && x.opJson.length > 0)
         : []
       try {
-        const changed = saveContent(s, writes as RowWrite[], { replace, oplog })
+        const changed = saveContent(s, writes as RowWrite[], { replace, oplog, derived })
         return { ok: true, changed }
       } catch (err) {
         return { ok: false, error: String(err) }

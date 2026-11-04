@@ -90,7 +90,7 @@ export interface RepoSession {
    * 时间在 CI 上不稳，行数是确定的；而「行数随库体量增长」正是这次改造要消灭的形状。
    * 诊断面（`libraryInfo`）会把它报出去，自检脚本据此判「这一笔是不是整库重写」。
    */
-  writes: { rows: number; saves: number }
+  writes: { rows: number; ftsRows: number; saves: number }
   /** 关连接（最后一个窗口关掉时调）。关之前 checkpoint，让主库文件自包含。 */
   close(): void
 }
@@ -162,7 +162,7 @@ function makeSession(id: string, dir: string, db: Db, deviceId: string): RepoSes
     assets,
     windows: new Set<number>(),
     deviceId,
-    writes: { rows: 0, saves: 0 },
+    writes: { rows: 0, ftsRows: 0, saves: 0 },
     close: () => {
       try {
         // 关之前 checkpoint：WAL 里的内容回主库 ⇒「只拷 qua.db」也能读出完整数据。
@@ -256,7 +256,7 @@ export function loadContent(session: RepoSession): ReturnType<typeof readContent
 export function saveContent(
   session: RepoSession,
   writes: readonly RowWrite[],
-  opts: { replace?: boolean; oplog?: readonly { at: number; opJson: string }[] } = {},
+  opts: { replace?: boolean; oplog?: readonly { at: number; opJson: string }[]; derived?: boolean } = {},
 ): number {
   /**
    * **变更流与行写入同一个事务**（`applyRowWrites` 内部把它并进同一层事务）。
@@ -266,7 +266,12 @@ export function saveContent(
   const changed = opts.replace
     ? replaceContentRows(session.db, writes, { deviceId: session.deviceId, oplog: opts.oplog })
     : applyRowWrites(session.db, writes, { deviceId: session.deviceId, oplog: opts.oplog })
-  session.writes.rows += changed
+  /**
+   * **派生索引的构建成本单独记账**：它不是「一次用户动作写了多少行」。
+   * 同一个计数器里混进 100k 重建的 20 万行，会让「打一个字写几行」永远测不出来。
+   */
+  if (opts.derived) session.writes.ftsRows += changed
+  else session.writes.rows += changed
   session.writes.saves += 1
   return changed
 }

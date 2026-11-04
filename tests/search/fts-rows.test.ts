@@ -45,7 +45,6 @@ function makeIndexer(): SearchIndexer {
   return new SearchIndexer(
     { map: new Map(), state: 'ready', rowidSeq: 0, tokenizer: 't' },
     tokenizeManyWith(tokenize),
-    () => {},
   )
 }
 
@@ -219,7 +218,6 @@ test('提交失败 ⇒ 索引映射保持提交前（不能拿一个没落盘的
   const indexer = new SearchIndexer(
     { map: new Map(), state: 'ready', rowidSeq: 0, tokenizer: 't' },
     tokenizeManyWith(tokenize),
-    () => {},
   )
   const store = createWorkspaceStore(port, indexer)
   const a = mkBlock('笔记', { created: 1, modified: 1 })

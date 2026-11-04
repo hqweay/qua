@@ -128,7 +128,14 @@ let search: SearchService | undefined
 const ftsSource: FtsCommitSource = {
   plan: (w, ops) => (search ? search.indexer.plan(w, ops) : Promise.resolve(null)),
   onError: () => search?.indexer.onError(),
-  onReplace: () => search?.indexer.onReplace(),
+  /**
+   * 整份替换（种子／换库）落盘成功之后**才开始重建**：
+   * 索引必须对着已经写进库的那份内容建，否则随后到达的 replace 会把刚建好的表清掉。
+   */
+  onReplace: () => {
+    search?.indexer.onReplace()
+    search?.start()
+  },
 }
 
 const store = createWorkspaceStore(

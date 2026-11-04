@@ -29,7 +29,7 @@ export interface SearchResult {
 
 /** 只取搜索需要的那一格桥面（`LibraryBridge` 的子集，测试可以只实现它） */
 export interface SearchBridge {
-  save(writes: unknown[], opts?: { replace?: boolean; oplog?: unknown[] }): Promise<unknown>
+  save(writes: unknown[], opts?: { replace?: boolean; oplog?: unknown[]; derived?: boolean }): Promise<unknown>
   search?(match: string, limit: number, offset?: number): Promise<unknown>
 }
 
@@ -86,7 +86,7 @@ export function createSearchService(deps: SearchDeps): SearchService {
         return client.tokenize(items)
       }
 
-  const indexer = new SearchIndexer(snapshot, tokenize, () => start())
+  const indexer = new SearchIndexer(snapshot, tokenize)
   const canFts = Boolean(bridge?.search)
 
   function clearTimer(): void {
@@ -103,7 +103,7 @@ export function createSearchService(deps: SearchDeps): SearchService {
   async function saveWrites(writes: readonly RowWrite[]): Promise<{ ok: true } | { ok: false; error: unknown }> {
     if (!bridge) return { ok: false, error: 'no library' }
     try {
-      const r = (await bridge.save(writes as unknown[])) as { ok?: boolean; error?: unknown } | null
+      const r = (await bridge.save(writes as unknown[], { derived: true })) as { ok?: boolean; error?: unknown } | null
       return r && r.ok === true ? { ok: true } : { ok: false, error: r?.error ?? 'save failed' }
     } catch (error) {
       return { ok: false, error }

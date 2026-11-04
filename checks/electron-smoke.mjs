@@ -1377,23 +1377,42 @@ await check('E14 每库状态：折叠/槽开关跟着库走；切库与重启�
 
 await check('E15 全文检索：索引建好后 ⌘F 可搜、拼音可搜、编辑后增量进索引', async () => {
   const { app, page } = await launch('fts')
-  // 新库先 seed；启动期的写盘/重建可能被宿主按后台页推迟到第一次交互之后。
+  /** 等索引**稳定** ready：启动期的 seed 落盘可能把刚建好的索引再作废一次 */
+  const stableReady = async (timeout = 30000) => {
+    const t0 = Date.now()
+    let stable = 0
+    while (Date.now() - t0 < timeout) {
+      const st = await page.evaluate(() => window.__qua.search.status())
+      stable = st === 'ready' ? stable + 1 : 0
+      if (stable >= 2) return true
+      await page.waitForTimeout(300)
+    }
+    return false
+  }
+  const contentRows = async () => (await page.evaluate(() => window.qua.libraryInfo()))?.writes?.rows ?? 0
+
+  // 先让 seed 真正落盘：桌面壳在窗口还没显示时会把启动期的写盘/定时器推迟到第一次交互。
+  // 不先落盘就直接搜，随后的 replace 会把刚建好的索引清掉（这条在真机上不会发生）。
+  await page.evaluate(() => {
+    const b = window.__qua.blocks().find((x) => !x.roles.includes('journal')) ?? window.__qua.blocks()[0]
+    window.__qua.focusBlock(b.id, b.text.length)
+  })
+  await page.keyboard.type(' ')
+  await page.waitForFunction(
+    async () => (((await window.qua.libraryInfo())?.writes?.rows) ?? 0) > 0,
+    null,
+    { timeout: 15000 },
+  )
+
   // ⌘F 是真实的「现在开始用」信号：它既打开浮层，也把索引排上。
   await page.keyboard.press('Meta+f')
   await page.waitForSelector('.layer-input')
+  await page.waitForFunction(() => document.activeElement?.classList.contains('layer-input'))
   await page.keyboard.type('内容寻址')
   await page.waitForSelector('.layer-item')
 
-  // 等索引稳定 ready（可能经历「搜索触发的首建 + seed 落盘后的重建」两轮）
-  const t0 = Date.now()
-  let stable = 0
-  while (Date.now() - t0 < 30000) {
-    const st = await page.evaluate(() => window.__qua.search.status())
-    stable = st === 'ready' ? stable + 1 : 0
-    if (stable >= 2) break
-    await page.waitForTimeout(300)
-  }
-  if (stable < 2) {
+  // 等索引稳定（可能经历「搜索触发的首建 + seed 落盘后的重建」两轮）
+  if (!(await stableReady())) {
     const st = await page.evaluate(() => ({ status: window.__qua.search.status(), mode: window.__qua.search.mode() }))
     throw new Error(`索引没建好：${JSON.stringify(st)}（worker/WASM 没起来？）`)
   }
@@ -1402,6 +1421,7 @@ await check('E15 全文检索：索引建好后 ⌘F 可搜、拼音可搜、编
   // ① ⌘F 的结果行（上面已经等到）——再验一次身份与高亮
   await page.keyboard.press('Meta+f')
   await page.waitForSelector('.layer-input')
+  await page.waitForFunction(() => document.activeElement?.classList.contains('layer-input'))
   await page.keyboard.type('内容寻址')
   await page.waitForSelector('.layer-item')
   const first = await page.evaluate(() => ({
@@ -1427,22 +1447,25 @@ await check('E15 全文检索：索引建好后 ⌘F 可搜、拼音可搜、编
     return b.id
   })
   const unique = '量子检索词'
+  const rowsBefore = await contentRows()
   await page.keyboard.type(unique)
-  await page.waitForTimeout(800)
+  await page.waitForFunction(
+    async (n) => (((await window.qua.libraryInfo())?.writes?.rows) ?? 0) > n,
+    rowsBefore,
+    { timeout: 10000 },
+  ).catch(() => {})
   const typed = await page.evaluate(({ id, text }) => window.__qua.blocks().find((b) => b.id === id)?.text.includes(text), {
     id: target,
     text: unique,
   })
   assert(typed, '前置：新词必须真的落进目标块的正文（否则测的是输入没进去）')
 
-  // 索引可能正被「seed 落盘后的重建」重置；等它稳定到 ready 再断言增量写入
-  const t1 = Date.now()
-  while (Date.now() - t1 < 15000) {
-    const st = await page.evaluate(() => window.__qua.search.status())
-    if (st === 'ready') break
-    await page.waitForTimeout(300)
+  // 若索引被并发的 replace 重置成 pending，下一次查询会把重建排上（查询本身仍返回扫描结果）
+  await page.evaluate((text) => window.__qua.search.query(text, 5), unique)
+  if (!(await stableReady(15000))) {
+    const st = await page.evaluate(() => ({ status: window.__qua.search.status(), mode: window.__qua.search.mode() }))
+    throw new Error(`编辑之后索引没有回到 ready：${JSON.stringify(st)}`)
   }
-  await page.waitForTimeout(500)
   const hit = await page.evaluate((text) => window.__qua.search.query(text, 5), unique)
   assert(hit?.mode === 'fts', `索引 ready 之后新词查询应当走 FTS：${JSON.stringify(hit)}`)
   assert((hit?.hits ?? []).some((h) => h.blockId === target), `新词应命中刚编辑的块：${JSON.stringify(hit)}`)

@@ -45,19 +45,13 @@ export class SearchIndexer implements FtsCommitSource {
    */
   private dirtyWhileUnindexed = false
   private readonly tokenize: TokenizeMany
-  private readonly onNeedsRebuild: () => void
 
-  constructor(
-    snapshot: SearchSnapshot | undefined,
-    tokenize: TokenizeMany,
-    onNeedsRebuild: () => void,
-  ) {
+  constructor(snapshot: SearchSnapshot | undefined, tokenize: TokenizeMany) {
     this.map = new Map(snapshot?.map ?? [])
     this.rowid = snapshot?.rowidSeq ?? 0
     this.state = snapshot?.state ?? 'pending'
     this.tokenizer = snapshot?.tokenizer ?? ''
     this.tokenize = tokenize
-    this.onNeedsRebuild = onNeedsRebuild
   }
 
   /** 现在能不能相信 FTS（查询路径读它） */
@@ -143,10 +137,7 @@ export class SearchIndexer implements FtsCommitSource {
        * 索引没就绪时的编辑：这批不写索引，但必须记住「重建要覆盖它」。
        * 重建会按**当前**森林重铺，`beginRebuild` 会清掉这个标记。
        */
-      if (ops.length > 0) {
-        this.dirtyWhileUnindexed = true
-        this.onNeedsRebuild()
-      }
+      if (ops.length > 0) this.dirtyWhileUnindexed = true
       return null
     }
     const targets = ftsTargets(ws, ops)
@@ -182,6 +173,11 @@ export class SearchIndexer implements FtsCommitSource {
     this.state = 'pending'
     this.tokenizer = ''
     this.dirtyWhileUnindexed = false
-    this.onNeedsRebuild()
+    /**
+     * **不在这里自动重建**：整份替换通常是「种下一份新库」，此刻用户还没开始搜索；
+     * 后台建 100k 索引会和第一次打字抢同一批写库行数（诊断面的「一个字写几行」
+     * 会读到一个不属于这次输入的峰值）。索引在第一次搜索（`start()`）时再建，
+     * 期间查询走扫描，功能不缺。
+     */
   }
 }

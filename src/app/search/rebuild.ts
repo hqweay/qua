@@ -37,6 +37,19 @@ function meta(key: string, value: string): RowWrite {
 }
 
 export async function rebuildSearch(deps: RebuildDeps): Promise<RebuildResult> {
+  /**
+   * 一轮建完若发现「期间有编辑被跳过」，**当场再来一轮**（不挂在定时器上）：
+   * 桌面壳会把后台定时器冻住，挂 timer 的补建在窗口还没显示时会永远等不到。
+   * 连续两轮仍不干净才交回 pending，搜索继续扫描，下一次查询会再排。
+   */
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const r = await rebuildOnce(deps)
+    if (!r.ok || r.clean) return r
+  }
+  return { ok: true, clean: false }
+}
+
+async function rebuildOnce(deps: RebuildDeps): Promise<RebuildResult> {
   const { indexer } = deps
   indexer.beginRebuild()
 
