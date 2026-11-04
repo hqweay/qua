@@ -70,7 +70,8 @@ export function judge(r: LoadResult): LoadedWorkspace {
   if (r.status === 'storage-error') return { status: 'storage-error', error: r.error }
   if (r.status === 'incompatible') return { status: 'storage-error', error: new Error(r.reason) }
   if (r.status === 'empty') return { status: 'empty' }
-  return { ...parseWorkspace(r.raw), search: r.search }
+  const parsed = parseWorkspace(r.raw)
+  return r.search === undefined ? parsed : { ...parsed, search: r.search }
 }
 
 /**
