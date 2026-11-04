@@ -1846,11 +1846,17 @@ const app: App = {
     search.start()
     let seq = 0
     const building = Boolean(LIBRARY_BRIDGE) && search.status() !== 'ready'
+    // web 没有 SQLite：搜索仍可用，但必须让用户知道这是扫描降级（不是索引坏了）
+    const title = building
+      ? t('ui.search.titleBuilding')
+      : LIBRARY_BRIDGE
+        ? t('ui.search.title')
+        : t('ui.search.titleScan')
     layers.openMenu({
       rows: [],
       anchor: null,
       width: 620,
-      title: building ? t('ui.search.titleBuilding') : t('ui.search.title'),
+      title,
       searchable: true,
       focusSearch: true,
       placeholder: t('ui.search.placeholderBlock'),

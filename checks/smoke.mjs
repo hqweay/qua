@@ -19266,6 +19266,8 @@ await check('T228 ⌘F 搜索：输入正文词出结果、命中高亮、↵ �
   await page.keyboard.press('Meta+f')
   await page.waitForSelector('.layer-input')
   await page.waitForFunction(() => document.activeElement?.classList.contains('layer-input'))
+  const head = await page.locator('.layer-head').textContent()
+  assert(head?.includes('扫描'), `web 搜索要标明扫描降级：${head}`)
   const initial = await page.locator('.layer-empty').textContent()
   assert(initial?.includes('输入关键词'), `空输入先说怎么开始：${initial}`)
 
