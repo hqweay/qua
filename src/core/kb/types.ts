@@ -24,6 +24,22 @@ import type { Block, BlockList } from '../model/model.ts'
 import type { Anno, Run } from '../model/runs.ts'
 import type { UndoCapture } from './scoped.ts'
 
+/**
+ * **按 id 读一片森林**（撤销/校验的读面）：只回答「这块在不在、父是谁」，不摊平。
+ *
+ * 为什么单独一个端口：⌘Z 的作用域收窄后，若还拿 `Block[]` 摊平一遍整库，
+ * 省掉的只有序列化。索引里有一张含软删的「全部块」表，正好能 O(1) 回答这两问。
+ *
+ * ⚠️ `get` 必须**看得见被软删的块**（它们在树上的原位，恢复路径要找它们）。
+ *    `store.index.blocks` 是可见集，不能直接充当它；`Index.all` 才是。
+ */
+export interface ForestLookup {
+  /** 在树上（含软删）就返回块；不在树上返回 `undefined` */
+  get(id: string): Block | undefined
+  /** 这一块的树父；`null` ＝ 森林顶层。只对 `get` 得到的块调用 */
+  parentOf(id: string): string | null
+}
+
 /* ------------------------------------------------------------ 存储槽位 */
 
 /**

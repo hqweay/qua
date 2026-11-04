@@ -97,6 +97,19 @@ export interface Index {
    *    不再为每条反链／每个查询结果各走一遍整片森林。
    */
   parentOf: Map<string, string | null>
+  /**
+   * 块 id → 块（**含被软删的块**）。
+   *
+   * 与 `blocks` 的区别只有可见性：`blocks` 是「读路径看得见谁」（软删退场），
+   * 这张表是「树上有谁」。撤销的恢复路径要按 id 找回一个被软删的块，
+   * 而它已经不在 `blocks` 里了 —— 没有这张表，⌘Z 只能摊平整库再找。
+   *
+   * ⚠️ 它**不是**第二份内容真相：值仍是块的活引用，树形仍以 `children` 为准。
+   *    维护点与 `blocks` 同源：位置/清除/恢复走同一批函数。
+   */
+  all: Map<string, Block>
+  /** 块 id → 树父（**含被软删的块**）；与 `parentOf` 的可见集不同，其余口径相同 */
+  parentOfAll: Map<string, string | null>
 }
 
 function emptyIndex(): Index {
@@ -110,6 +123,8 @@ function emptyIndex(): Index {
     journals: new Map(),
     rootOf: new Map(),
     parentOf: new Map(),
+    all: new Map(),
+    parentOfAll: new Map(),
   }
 }
 
@@ -280,6 +295,7 @@ function applyBlockUpsert(
     // 挪位不改 props ⇒ 名字表/成员表都不动；`blocks` 里是活引用，也无事可做。
     // `parentOf` 只改**被移的这一块**：后代的父还是它自己，不需要重打。
     index.parentOf.set(id, parent)
+    index.parentOfAll.set(id, parent)
     reindexSubtreeRoot(index, known, rootId)
     return
   }
@@ -296,8 +312,12 @@ function applyBlockUpsert(
  * 但 rebuild 只数可见源块的原子，两条路必须同口径。名字表/日期表的接手者重扫
  * 森林时同样跳过被删子树（被删的块无权认领名字）。
  */
-function applyBlockDelete(index: Index, id: string, forest: readonly Block[]): void {
-  const block = index.blocks.get(id)
+function applyBlockDelete(index: Index, id: string, forest: readonly Block[], purge: boolean): void {
+  /**
+   * 软删过的块不在 `blocks` 里 —— 清除它时要到 `all` 里取（否则子树摘不掉，
+   * 索引会留下一个「已经不存在的 id」；而撤销会因此以为它还在）。
+   */
+  const block = index.blocks.get(id) ?? (purge ? index.all.get(id) : undefined)
   if (!block) return
   // ⚠️ 取子树要**含被删块**：执行到这里时根已被打上标记（tx 先改内存、后修补索引），
   //    默认遍历会把整棵子树跳过去——一张都摘不掉。退场的正是「这棵子树里的全部」。
@@ -372,6 +392,17 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[]): v
     refreshAllRelations(index)
   } else {
     for (const bid of gone) removeOutgoing(index, bid)
+  }
+  /**
+   * **清除**才从「树上有谁」里消失；软删只是从可见表退场。
+   * 这两件事共用一个函数，但条目不是同一件事 —— 混起来会让撤销找不到被软删的块
+   * （`all` 里没了 ⇒ 恢复路径以为是 genesis，落点又没记 ⇒ 直接抛错）。
+   */
+  if (purge) {
+    for (const bid of gone) {
+      index.all.delete(bid)
+      index.parentOfAll.delete(bid)
+    }
   }
 }
 
@@ -468,7 +499,7 @@ function refreshJournalClaim(index: Index, blockId: string): void {
  */
 function applyBlockExist(index: Index, id: string, state: 'present' | 'deleted' | 'purged', forest: readonly Block[]): void {
   if (state === 'purged') {
-    applyBlockDelete(index, id, forest)
+    applyBlockDelete(index, id, forest, true)
     return
   }
   // 幂等：已经在索引里（可见）的块再收到一次 present ⇒ 一个字节都不该动
@@ -501,8 +532,8 @@ function refreshVisibility(index: Index, blockId: string, forest: readonly Block
   )
   if (!block) return
   if (isDeleted(block)) {
-    // 变不可见 ⇒ 与「退场」走同一条路径（摘子树、退名字/日期/成员/边）
-    applyBlockDelete(index, blockId, forest)
+    // 变不可见 ⇒ 与「退场」走同一条路径（摘子树、退名字/日期/成员/边）；块仍在树上，`all` 不动
+    applyBlockDelete(index, blockId, forest, false)
     return
   }
   /**
@@ -622,6 +653,21 @@ function indexSubtree(index: Index, root: Block, rootId: string, parentId: strin
     removeOutgoing(index, b.id)
     for (const e of relationEdgesOfBlock(b, index.propKinds)) addEdge(index, e)
   }
+  /**
+   * **全部块表**（含被软删的）：与可见那趟分开走。
+   *
+   * 可见那趟按「软删子树整棵跳过」走（那是全仓唯一可见性判据）；而 `all` 要回答的是
+   * 「树上有谁」，所以必须 `includeDeleted`。合成一趟要在每次访问时判「祖先里有没有删的」，
+   * 那是 O(depth) × n；两趟各走各的更便宜，也保持两条口径都只有一句。
+   */
+  walkForest(
+    [root],
+    (b, ctx) => {
+      index.all.set(b.id, b)
+      index.parentOfAll.set(b.id, ctx.parent?.id ?? parentId)
+    },
+    { includeDeleted: true },
+  )
 }
 
 /* ------------------------------------------------------------ 查询 */
@@ -649,6 +695,8 @@ export function fingerprint(index: Index): string {
     journals: flat(index.journals),
     rootOf: flat(index.rootOf),
     parentOf: flat(index.parentOf),
+    all: sortedKeys(index.all),
+    parentOfAll: flat(index.parentOfAll),
   })
 }
 
