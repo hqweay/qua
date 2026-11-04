@@ -30,6 +30,11 @@ export type ChromeDeps = {
   getRegistry: () => Registry
   /** 点面包屑：落点由唯一路由分流（普通＝返回；Shift＝右槽；⌘/Ctrl＝新 tab） */
   openBlock: (blockId: string, place: import('../../core/index.ts').OpenPlace) => void
+  /**
+   * 这一侧槽**此刻**看得见吗（档位轴的 overlay 判据，纯判据在 core）。
+   * 槽的开关与宽度都按它画——档位强制收起的槽，prefs 里仍是开着的也不能露面。
+   */
+  axisSlotOpen: (side: 'left' | 'right') => boolean
   /** DOM 统计（证据源在诊断分片；它晚于本节装配，现取） */
   getDomStats: () => { blocks: number; domBlocks: number; domNodes: number }
 }
@@ -63,10 +68,10 @@ export function setupChrome(deps: ChromeDeps) {
   function applyChrome(): void {
     document.body.dataset.theme = prefs().theme
     document.body.dataset.themeMode = prefs().theme
-    applyDockVisibility({ left: prefs().dock.left.open, right: prefs().dock.right.open })
+    applyDockVisibility({ left: deps.axisSlotOpen('left'), right: deps.axisSlotOpen('right') })
     const appEl = deps.$('app')
-    applyDockWidth(appEl, 'left', prefs().dock.left.width, prefs().dock.left.open)
-    applyDockWidth(appEl, 'right', prefs().dock.right.width, prefs().dock.right.open)
+    applyDockWidth(appEl, 'left', prefs().dock.left.width, deps.axisSlotOpen('left'))
+    applyDockWidth(appEl, 'right', prefs().dock.right.width, deps.axisSlotOpen('right'))
   }
 
   /**

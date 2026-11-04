@@ -125,6 +125,40 @@ body[data-dock-right='closed'] #dock-right {
   border-left-width: 0;
 }
 
+/*
+  档位轴（body[data-axis]）：**叠在设备偏好上的一层**——进入不写 prefs，
+  退出自动回到进入前的样子，所以这里只管「这一档长什么样」，不管还原。
+  宽屏＝双槽收起（槽的可见性由装配层按档位判据写 data-dock-*，不在这里另写列宽）
+  ＋ 阅读/视图宽度上限放开；全屏＝再藏抬头与 tab 条，只剩内容与退出口。
+*/
+body[data-axis='wide'],
+body[data-axis='full'] {
+  --ui-editor-w: var(--ui-editor-w-wide);
+}
+body[data-axis='full'] #crumbs-trail,
+body[data-axis='full'] .center-tabs {
+  display: none;
+}
+/* 退出口：档位收起了槽与抬头之后，Esc 之外的鼠标回路只有这一颗 */
+.axis-exit {
+  position: fixed;
+  inset-block-start: var(--ui-gap-3);
+  inset-inline-end: var(--ui-gap-3);
+  z-index: var(--ui-z-notice);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: var(--ui-row-h);
+  block-size: var(--ui-row-h);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-tertiary);
+  background: var(--ui-surface-raised);
+  box-shadow: var(--ui-shadow-mid);
+}
+.axis-exit:hover {
+  color: var(--ui-text);
+}
+
 /* 启动级持久告警（数据只读 / 保存失败）：固定在中上，不参与三槽布局 */
 .boot-notice {
   position: fixed;

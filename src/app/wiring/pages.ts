@@ -72,6 +72,11 @@ export type PagesDeps = {
   getChrome: () => Chrome
   /** 槽开关是设备偏好：`openDock` 要先看它，已开就不再触发一次变更 */
   prefs: () => Prefs
+  /**
+   * 某一侧槽**此刻**看得见吗（档位轴的 overlay 判据，纯判据在 core）。
+   * 「确保开着」按它判——档位强制收起的槽，prefs 里开着也得重新开一次（顺带以他为准）。
+   */
+  dockOpen: (side: 'left' | 'right') => boolean
   /** 把某张派生卡放回槽（关掉之后「看属性」还能把它放回来）；由装配层接到 `addDerived` */
   ensureDockCard: (side: 'left' | 'right', id: 'inspect' | 'belongs' | 'backrefs' | 'trash' | 'calendar') => void
   /** 在右槽打开一个块（日记的 Shift+点日期要用；不换中心、不入历史） */
@@ -645,14 +650,17 @@ export function setupPages(deps: PagesDeps) {
       mainEd.placeCaret(blockId, offset)
     },
     /**
-     * 确保侧槽开着：已经开着就什么都不做（**不写 prefs**，也就不会把
+     * 确保侧槽开着：屏幕上已经开着就什么都不做（**不写 prefs**，也就不会把
      * 「没变化」记成一次设备变更）。
+     *
+     * 判据问的是「这一侧此刻看得见吗」而不是 prefs：档位强制收起的槽在 prefs 里
+     * 可能仍标着开，只看 prefs 会在这里早退（用户要的东西被档位压住，点了没反应）。
      *
      * 走命令而不是直接改 `prefs`：开槽要连带 `applyChrome`（列宽/边框/可见性）
      * 与设备落盘，那是 `core.dock/toggle-*` 那一份的职责，这里再写一遍就会分叉。
      */
     openDock: (side) => {
-      if (deps.prefs().dock[side].open) return
+      if (deps.dockOpen(side)) return
       void deps.getRegistry().invoke(side === 'left' ? 'core.dock/toggle-left' : 'core.dock/toggle-right', {}, 'view')
       deps.scheduleBadge()
     },

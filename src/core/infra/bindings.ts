@@ -98,6 +98,9 @@ export const BINDINGS: Binding[] = [
   // 三槽开关：`⌘⌥1` / `⌘⌥2` ——中心槽没有独立快捷键
   { command: 'core.dock/toggle-left', kind: 'keymap', key: 'mod+alt+1', when: '', layer: 'core' },
   { command: 'core.dock/toggle-right', kind: 'keymap', key: 'mod+alt+2', when: '', layer: 'core' },
+  // 档位轴：⇧⌘↵ 进一档（常规→宽屏→全屏，到顶不动）。Esc 退一档的绑定在键位段末尾——
+  // 它要让位给块选区清空（选区在场先清选区）；浮层在场时派发层不派发，浮层自己收，浮层天然优先。
+  { command: 'core.view/axis-up', kind: 'keymap', key: 'mod+shift+enter', when: '', layer: 'core' },
   // 今日三件：`⌘⇧D` 回今日（**避开编辑器的复制块**：`⌘⇧D` 在编辑器里归 duplicate）
   { command: 'core.journal/today', kind: 'keymap', key: 'mod+shift+d', when: '!editorTextFocus', layer: 'core' },
   // 前后翻日：**仅在 journal 视图且编辑器失焦时**生效的原文口径）
@@ -109,6 +112,9 @@ export const BINDINGS: Binding[] = [
   { command: 'core/bindings/list', kind: 'keymap', key: 'mod+shift+?', when: '', layer: 'core' },
   // user 层真实在用的键位（层次序由单测覆盖；不另设演示别名——那是用户可见的重复键）
   { command: 'core.view/toggle-virtualize', kind: 'keymap', key: 'mod+shift+v', when: '', layer: 'user' },
+  // Esc 的最后一层语义：档位轴退一档（常规时 `axisActive` 为假 ⇒ 不命中，Esc 落到关浮层那条）。
+  // 放在键位段末尾：解析自下而上，块选区清空（表内更早）先于它命中。
+  { command: 'core.view/axis-down', kind: 'keymap', key: 'escape', when: 'axisActive && !blockSelection', layer: 'core' },
 
   /* ================= 块菜单（悬停左侧拖动把手 / 圆点或右键） ================= */
   { command: 'core.editor/duplicate-block', kind: 'menu', when: 'blockFocused', group: 'block/1-basic', order: 20, layer: 'core' },

@@ -19520,6 +19520,102 @@ await check('T230 分组：入口按覆盖率给候选；按标签分堆一块�
   return `入口标覆盖率；按标签分堆：双标签块进 2 列、列头是标签名、卡不可拖；清掉回空态`
 })
 
+/* ---------------------------------------------------------------- 档位轴 */
+
+/** 档位与槽的可见性读数（DOM 是档位的唯一投影：档位本身不落盘，从 prefs 读不到） */
+const axisState = (page) =>
+  page.evaluate(() => ({
+    axis: document.body.dataset.axis ?? '',
+    left: document.body.dataset.dockLeft,
+    right: document.body.dataset.dockRight,
+    docW: Math.round(document.getElementById('doc').getBoundingClientRect().width),
+    exitHidden: document.querySelector('.axis-exit')?.hidden ?? true,
+  }))
+
+await check('T231 档位轴三档：⇧⌘↵ 进一档到全屏；宽屏收双槽、阅读宽度放开、切 tab 仍在全屏；Esc 两步还原原样', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  // 前置：进入前手动收起左槽（用户自己的设备状态——退出后要原样回来）
+  await page.evaluate(() => window.__qua.invoke('core.dock/toggle-left', {}, 'api'))
+  const before = await axisState(page)
+  assert(before.axis === '', '前置：常规档不写 data-axis')
+  assert(before.left === 'closed', '前置：左槽已手动收起')
+  assert(before.right === 'open', '前置：右槽开着')
+  assert(before.docW <= 760, `前置：常规档阅读宽度在档内（${before.docW}）`)
+
+  await page.keyboard.press(kbd('mod+Shift+Enter'))
+  let now = await axisState(page)
+  assert(now.axis === 'wide', `进一档 ⇒ 宽屏：${now.axis}`)
+  assert(now.left === 'closed' && now.right === 'closed', `宽屏收起双槽：${now.left}/${now.right}`)
+  assert(now.docW > 760, `宽屏放开阅读/视图宽度上限：${now.docW}`)
+  const wideW = now.docW
+  assert(now.exitHidden === false, '宽屏给退出口')
+
+  await page.keyboard.press(kbd('mod+Shift+Enter'))
+  now = await axisState(page)
+  assert(now.axis === 'full', `再进一档 ⇒ 全屏：${now.axis}`)
+  const hidden = await page.evaluate(() => ({
+    crumbs: getComputedStyle(document.getElementById('crumbs-trail')).display === 'none',
+    tabs: getComputedStyle(document.querySelector('.center-tabs')).display === 'none',
+  }))
+  assert(hidden.crumbs && hidden.tabs, '全屏再藏抬头与 tab 条（只剩内容与退出口）')
+
+  // 档位住窗口不住 tab：全屏中切 tab 仍在全屏
+  await page.keyboard.press(kbd('mod+t'))
+  await page.waitForTimeout(120)
+  now = await axisState(page)
+  assert(now.axis === 'full', `全屏中切 tab 仍在全屏：${now.axis}`)
+
+  await page.keyboard.press('Escape')
+  now = await axisState(page)
+  assert(now.axis === 'wide', `Esc 沿轴退一档 ⇒ 宽屏：${now.axis}`)
+
+  await page.keyboard.press('Escape')
+  now = await axisState(page)
+  assert(now.axis === '', `再退 ⇒ 常规：${now.axis}`)
+  assert(now.left === 'closed', `退出后原样：进前手动收过的左槽仍收着（${now.left}）`)
+  assert(now.right === 'open', `退出后原样：右槽回到开（${now.right}）`)
+  assert(now.exitHidden === true, '常规档没有退出口')
+  assert(now.docW <= 760, `常规档阅读宽度收回（${now.docW}）`)
+
+  await ctx.close()
+  return `两键进到全屏、Esc 两步还原；宽屏宽 ${before.docW}→${wideW}`
+})
+
+await check('T232 Esc 浮层优先于退档；档位期间手动开槽以他为准，退出后保持他的样子', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  await page.keyboard.press(kbd('mod+Shift+Enter'))
+  let now = await axisState(page)
+  assert(now.axis === 'wide', '前置：在宽屏档')
+
+  // 档位期间手动开左槽（⌘⌥1）：以他为准 ⇒ 这一刻就露面
+  await page.keyboard.press(kbd('mod+alt+1'))
+  now = await axisState(page)
+  assert(now.left === 'open', `档位期间开左槽 ⇒ 当场露面：${now.left}`)
+
+  // 浮层在场：Esc 先收浮层，档位一字不动
+  await page.evaluate(() => window.__qua.invoke('core.command-palette/show', {}, 'api'))
+  const opened = await page.evaluate(() => window.__qua.ctxKeys().paletteOpen)
+  assert(opened, '前置：命令面板已开')
+  await page.keyboard.press('Escape')
+  const after = await axisState(page)
+  assert(after.axis === 'wide', `Esc 先收浮层，档位不动：${after.axis}`)
+  const closed = await page.evaluate(() => !window.__qua.ctxKeys().paletteOpen)
+  assert(closed, '浮层已收')
+
+  // 无浮层：Esc 退档；用户在档位期间开过的左槽保持开（以他为准，不被还原吃掉）
+  await page.keyboard.press('Escape')
+  now = await axisState(page)
+  assert(now.axis === '', `无浮层时 Esc 退档：${now.axis}`)
+  assert(now.left === 'open', `退出后左槽保持他开的样子：${now.left}`)
+
+  await ctx.close()
+  return '浮层优先；以他为准贯穿退出'
+})
+
 /**
  * **判定必须在所有用例之后**：这一段曾经写在中途，之后新增的用例（T206 起）即使红了
  * 也不会进 `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。

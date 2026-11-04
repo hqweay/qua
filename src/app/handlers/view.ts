@@ -83,6 +83,15 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     app.toggleDock('right')
     return true
   },
+  /* ---- 档位轴（常规→宽屏→全屏；Esc 沿轴退一档）---- */
+  'core.view/axis-up': (_a, app) => {
+    app.axisStep(1)
+    return true
+  },
+  'core.view/axis-down': (_a, app) => {
+    app.axisStep(-1)
+    return true
+  },
   /**
    * 在侧槽打开一个块：**不换中心、不入历史**。
    * 缺省目标是光标所在块（块菜单不传 args）；`side` 缺省右槽（Shift+点的落点）。

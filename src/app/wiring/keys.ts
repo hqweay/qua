@@ -24,6 +24,8 @@ export interface KeysDeps {
   activeBlock: () => Block
   canGoBack: () => boolean
   canGoForward: () => boolean
+  /** 档位轴现在在哪一档（宽屏/全屏 ⇒ Esc 绑定的 `axisActive` 为真）；晚于本节装配 ⇒ getter */
+  axisActive: () => boolean
 }
 
 export function setupKeys(deps: KeysDeps) {
@@ -62,6 +64,8 @@ export function setupKeys(deps: KeysDeps) {
       // 导航历史是否可走：键位表的 `when` 与命令面板的可用态都读这两个键
       canGoBack: deps.canGoBack(),
       canGoForward: deps.canGoForward(),
+      // 档位轴在宽屏/全屏上（Esc 退一档绑定的 when；常规档为假 ⇒ Esc 归关浮层那条）
+      axisActive: deps.axisActive(),
       isMac: deps.isMac(),
     }
     return ctx
