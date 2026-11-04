@@ -3291,7 +3291,8 @@ export class BlockEditor {
     /** `row`/`grid`：先找列。列不存在（点在列缝／边距上）⇒ 不建块 */
     let secId = ''
     if (this.layout !== 'column') {
-      const sec = [...this.container.querySelectorAll<HTMLElement>('.sec')].find((el) => {
+      // 只认本编辑器自己的段：嵌套编辑岛（露面身体／挂载区／查询结果）里也有 `.sec`
+      const sec = [...this.container.querySelectorAll<HTMLElement>(':scope > .sec')].find((el) => {
         const r = el.getBoundingClientRect()
         return r.width > 0 && clientX >= r.left && clientX <= r.right
       })
