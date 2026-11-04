@@ -71,6 +71,8 @@ export interface RawLibraryRows {
   props: Record<string, unknown>[]
   aliases: Record<string, unknown>[]
   lists: Record<string, unknown>[]
+  /** 派生索引的块 id ↔ rowid（v9 起；旧库／web 没有 ⇒ 空） */
+  ftsMap?: { block_id: string; fts_rowid: number }[]
   meta: Record<string, string>
 }
 
@@ -81,11 +83,12 @@ export interface RawLibraryRows {
  * `upsert` 只给一部分列 ＝ 只改那几列（`on conflict do update set` 只覆盖给到的列）。
  */
 export interface RowWrite {
-  table: 'Block' | 'BlockProperty' | 'BlockAlias' | 'BlockList' | 'meta'
+  table: 'Block' | 'BlockProperty' | 'BlockAlias' | 'BlockList' | 'meta' | 'BlockFTS' | 'BlockFTSMap'
   /**
    * `upsert` 这一行可能还不存在（新块、新属性、新地址）；
    * `update` 这一行**必须已经存在**（改一个已存在块的正文／时刻／软删标记）；
    * `relink` 写这一块的位置，并**把兄弟链修好**（见 `chainRelink`）。
+   * `insert` 只给 FTS 用（contentless 需要显式 rowid）；`clear` 整表清空（重建索引）。
    *
    * 为什么必须分开 `update` 与 `upsert`：SQLite 的 `insert … on conflict do update`
    * **先校验 NOT NULL**，所以「只改一列」走 upsert 会撞 `NOT NULL constraint failed`（实测）。
@@ -96,7 +99,7 @@ export interface RowWrite {
    * 新位置的后继还指着你的前驱（你会被跳过）。两条都得改，且只有落库这一侧
    * 知道「谁接在谁后面」。见 `electron/library/sqlite.ts` 的 `relinkSql`。
    */
-  op: 'upsert' | 'update' | 'delete' | 'relink'
+  op: 'upsert' | 'update' | 'delete' | 'relink' | 'insert' | 'clear'
   key: Record<string, string | number | null>
   values?: Record<string, string | number | null>
 }
@@ -338,7 +341,21 @@ export function workspaceToRowWrites(ws: StoredWorkspace): RowWrite[] {
     // 被软删的块也在树里原位，它们的行必须一起写（否则恢复时那块没有行）
     { includeDeleted: true },
   )
-  return [...out, ...metaWrites(ws)]
+  /**
+   * **整份替换 ⇒ 索引作废**：清掉 FTS 与映射，状态落 `pending`。
+   *
+   * 为什么不在这里顺手重建：整份替换的入口是种子／换库，重建要分词（渲染层异步任务），
+   * 塞进这笔事务会让「打开一个库」变成一次同步的大计算。索引是派生表：
+   * 先标 pending（读路径据此降级扫描），后台再建。
+   */
+  return [
+    ...out,
+    { table: 'BlockFTS', op: 'clear', key: {} },
+    { table: 'BlockFTSMap', op: 'clear', key: {} },
+    { table: 'meta', op: 'upsert', key: { key: META_KEYS.ftsState }, values: { value: 'pending' } },
+    { table: 'meta', op: 'upsert', key: { key: META_KEYS.ftsRowidSeq }, values: { value: '0' } },
+    ...metaWrites(ws),
+  ]
 }
 
 /**

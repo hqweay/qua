@@ -34,6 +34,7 @@ import {
   readMeta,
   readSeq,
   replaceContentRows,
+  searchFts,
   writeMeta,
   type Migration,
   type RowWrite,
@@ -110,6 +111,61 @@ test('v3 → v4：只建 assets 表，内容行原样留着（升级不该吞掉
   const n = (db.prepare(`select count(*) as c from ${DB_TABLES.block}`).all() as { c: number }[])[0].c
   assert.equal(n, 1, '那一行块应当还在')
   db.close()
+})
+
+test('v8 → v9：只加 FTS 表，内容行原样留着（第一次不丢内容的迁移）', () => {
+  const file = tmpDb()
+  const first = openLibraryDb(file, { target: 8 })
+  assert.equal(first.status, 'created')
+  applyRowWrites(first.db!, [blockRow('b1')])
+  writeMeta(first.db!, META_KEYS.name, '我的库')
+  assert.equal(hasContent(first.db!), true)
+  first.db!.close()
+
+  const r = openLibraryDb(file)
+  assert.equal(r.status, 'migrated', `v8 应当被迁移到 v9，实际 ${r.status}`)
+  const db = r.db!
+  const tables = (db.prepare("select name from sqlite_master where type='table'").all() as { name: string }[]).map((t) => t.name)
+  assert.ok(tables.includes(DB_TABLES.blockFts), `v9 应当建出 BlockFTS：${tables.join(',')}`)
+  assert.ok(tables.includes(DB_TABLES.blockFtsMap), `v9 应当建出 BlockFTSMap：${tables.join(',')}`)
+  assert.equal(hasContent(db), true, 'v9 不许清内容')
+  assert.equal(readMeta(db, META_KEYS.name), '我的库', '库级 meta 也不许动')
+  assert.equal(readMeta(db, META_KEYS.ftsState), 'pending', '索引状态必须是 pending（渲染层会重建）')
+  db.close()
+})
+
+test('v8 → v9：迁移前快照失败 ⇒ 中止迁移（保内容迁移没有回退面就不许动库）', () => {
+  const file = tmpDb()
+  const first = openLibraryDb(file, { target: 8 })
+  assert.equal(first.status, 'created')
+  applyRowWrites(first.db!, [blockRow('keep-me')])
+  first.db!.close()
+
+  const fixed = 1700000000000
+  const realNow = Date.now
+  Date.now = () => fixed
+  try {
+    const backupDir = join(dirname(file), 'backups')
+    mkdirSync(backupDir, { recursive: true })
+    const placeholder = join(backupDir, `${fixed}-before-migrate-v8.db`)
+    writeFileSync(placeholder, 'not-a-db')
+
+    const r = openLibraryDb(file)
+    assert.equal(r.status, 'migrate-failed', `快照失败必须中止，实际 ${r.status}`)
+    assert.equal(r.version, 8, '失败后主库应当还是旧版本')
+
+    const db = new DatabaseSync(file)
+    const v = (db.prepare('pragma user_version').all()[0] as { user_version: number }).user_version
+    const blocks = db.prepare(`select id from ${DB_TABLES.block}`).all() as { id: string }[]
+    const tables = (db.prepare("select name from sqlite_master where type='table'").all() as { name: string }[]).map((t) => t.name)
+    db.close()
+    assert.equal(v, 8, '版本号不许前进')
+    assert.deepEqual(blocks.map((b) => b.id), ['keep-me'], '内容必须还在')
+    assert.equal(tables.includes(DB_TABLES.blockFts), false, '半迁移的 FTS 表不许留下')
+    assert.equal(readFileSync(placeholder, 'utf8'), 'not-a-db', '占位文件不许被覆盖')
+  } finally {
+    Date.now = realNow
+  }
 })
 
 test('v7 → v8：`QuerySpec.scope` 退场 ⇒ 旧条件形状作废（不能把子树查询静默读成整库）', () => {
@@ -307,11 +363,11 @@ test('负向断言：`created` 只建空表，不写任何块行（seed 是调�
 
 /* ------------------------------------------------------------ 形状：内容四张表 ＋ 库级三张 */
 
-test('v4 的表形状：四张内容表 ＋ settings／meta／op_log／assets（没有 blob 表）', () => {
+test('v9 的表形状：四张内容表 ＋ settings／meta／op_log／assets ＋ FTS 两表（没有 blob 表）', () => {
   const file = tmpDb()
   const r = openLibraryDb(file)
   const db = r.db!
-  const tables = (db.prepare("select name from sqlite_master where type='table' and name not like 'sqlite_%'").all() as {
+  const tables = (db.prepare("select name from sqlite_master where type='table' and name not like 'sqlite_%' and name not like 'BlockFTS\\_%' escape '\\'").all() as {
     name: string
   }[]).map((t) => t.name).sort()
   db.close()
@@ -321,6 +377,8 @@ test('v4 的表形状：四张内容表 ＋ settings／meta／op_log／assets（
       DB_TABLES.alias,
       DB_TABLES.assets,
       DB_TABLES.block,
+      DB_TABLES.blockFts,
+      DB_TABLES.blockFtsMap,
       DB_TABLES.list,
       DB_TABLES.meta,
       DB_TABLES.opLog,
@@ -384,6 +442,48 @@ test('整份替换：先清四张内容表再写（换库/种子/撤销之后）
   applyRowWrites(db, [blockRow('old')])
   replaceContentRows(db, [blockRow('new')])
   assert.deepEqual(readContentRows(db).blocks.map((b) => b.id), ['new'], '整份替换之后旧块必须不在')
+  db.close()
+})
+
+/* ------------------------------------------------------------ FTS 行（v9） */
+
+test('FTS 行：显式 rowid 插入、查询、按 rowid 删除（contentless_delete 可用）', () => {
+  const file = tmpDb()
+  const r = openLibraryDb(file)
+  const db = r.db!
+  applyRowWrites(db, [
+    blockRow('b1'),
+    { table: 'BlockFTS', op: 'insert', key: { rowid: 7 }, values: { seg: '笔记 应用', chars: '笔 记 应 用', pinyin: 'bi ji ying yong' } },
+    { table: 'BlockFTSMap', op: 'upsert', key: { block_id: 'b1' }, values: { fts_rowid: 7 } },
+  ])
+
+  assert.deepEqual(searchFts(db, 'seg : "笔记"', 10).map((h) => h.blockId), ['b1'])
+  assert.deepEqual(searchFts(db, 'chars : "笔 记"', 10).map((h) => h.blockId), ['b1'], '逐字 phrase 必须命中')
+  assert.deepEqual(searchFts(db, 'chars : "笔记"', 10), [], '整词写法是静默 0 —— 查询编译器不许产这种写法')
+  assert.deepEqual(searchFts(db, 'pinyin : "bi ji"*', 10).map((h) => h.blockId), ['b1'])
+
+  applyRowWrites(db, [
+    { table: 'BlockFTS', op: 'delete', key: { rowid: 7 } },
+    { table: 'BlockFTSMap', op: 'delete', key: { block_id: 'b1' } },
+  ])
+  assert.deepEqual(searchFts(db, 'seg : "笔记"', 10), [])
+  db.close()
+})
+
+test('FTS 行：clear 清空整表（重建索引的第一步），map 也一起清', () => {
+  const file = tmpDb()
+  const r = openLibraryDb(file)
+  const db = r.db!
+  applyRowWrites(db, [
+    { table: 'BlockFTS', op: 'insert', key: { rowid: 1 }, values: { seg: 'a', chars: 'a', pinyin: 'a' } },
+    { table: 'BlockFTSMap', op: 'upsert', key: { block_id: 'b1' }, values: { fts_rowid: 1 } },
+  ])
+  applyRowWrites(db, [
+    { table: 'BlockFTS', op: 'clear', key: {} },
+    { table: 'BlockFTSMap', op: 'clear', key: {} },
+  ])
+  assert.deepEqual(searchFts(db, 'seg : "a"', 10), [])
+  assert.equal(readContentRows(db).ftsMap.length, 0)
   db.close()
 })
 
