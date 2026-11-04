@@ -145,3 +145,48 @@ test('折叠表落在文档上：可见行按它算，块自己不受影响', ()
   assert.equal(hidden.get('a11'), true, '折叠块的子树不产出可见行')
   assert.equal(hidden.get('a2'), false)
 })
+
+/**
+ * **点父块的线，组里「只有身体」的成员也要一起折**。
+ *
+ * 事故形状（用户报）：一页里有几个子块，其中一个查询块（它没有 children，
+ * 结果是「身体」）；点父块前的竖线 ⇒ 有子块的兄弟折了、查询块那一格不动。
+ * 用户看到的是「同一组里有的折了、有的没折」。
+ *
+ * 根因是**同一个问题有两份答案**：写入口 `writeFold` 判「能不能折」用的是
+ * `hasFoldable`（子块 **或** 身体），而这里挑可折成员用的是 `hasLiveChildren`
+ * （只认子块）⇒ 身体类成员被静默排除。
+ *
+ * 判据：可折的成员＝`hasFoldable` 为真的那些；写不写得进去仍归 `writeFold`。
+ */
+test('点父块的线：只有身体（查询块）的成员也跟着折，与有子块的兄弟同向', () => {
+  const withKids = mk('k1', 'k1', [mk('k11', 'k11')])
+  const q = mk('q1', 'q1')
+  q.props = { _query: { where: { kind: 'any' } } }
+  const leaf = mk('l1', 'l1')
+  const parent = mk('p', 'p', [withKids, q, leaf])
+  const doc: Doc = { roots: [parent], folded: {} }
+
+  assert.equal(toggleChildrenCollapsed(doc, 'p'), true)
+  assert.equal(folded(doc, 'k1'), true, '有子块的成员被折')
+  assert.equal(folded(doc, 'q1'), true, '只有身体的成员也要折（否则组里一半折一半开）')
+  assert.equal(folded(doc, 'l1'), false, '真叶子没有可折的东西，仍写不进去')
+
+  // 可逆：再点一次，整组展回来
+  assert.equal(toggleChildrenCollapsed(doc, 'p'), false)
+  assert.deepEqual(doc.folded, {})
+})
+
+/** 组里只有「有身体」的成员也成立：不能因为「没有子块」就返回 null（那会让线点了没反应） */
+test('组里只有查询块（无 children）⇒ 仍然折得动（不是 null）', () => {
+  const q1 = mk('q1', 'q1')
+  q1.props = { _query: { where: { kind: 'any' } } }
+  const q2 = mk('q2', 'q2')
+  q2.props = { _query: { where: { kind: 'any' } } }
+  const parent = mk('p', 'p', [q1, q2])
+  const doc: Doc = { roots: [parent], folded: {} }
+
+  assert.equal(toggleChildrenCollapsed(doc, 'p'), true)
+  assert.equal(folded(doc, 'q1'), true)
+  assert.equal(folded(doc, 'q2'), true)
+})

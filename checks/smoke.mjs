@@ -19113,6 +19113,152 @@ await check('T226 多露面的结构传播：镜像里建块，源当场长出�
   return `源当场出现 D；宿主行同一个元素；可见留镜、不可见回源；文本路径按行更新`
 })
 
+/**
+ * **点父块的竖线 ⇒ 组里「只有身体」的成员（查询块／投影行）也一起折**。
+ *
+ * 事故形状（用户报）：一页里有几个子块，其中一个是查询块（它没有 children，
+ * 「下一层」是结果面板）；点父块前的竖线 ⇒ 有子块的兄弟折了、查询块那一格不动，
+ * 屏幕上就是「同一组里有的折了、有的没折」。
+ *
+ * 根因是**同一个问题有两份答案**：写入口判「能不能折」用 `hasFoldable`（子块或身体），
+ * 而挑可折成员用的是 `hasLiveChildren`（只认子块）⇒ 身体类成员被静默排除。
+ *
+ * 判据三条：折起来查询块的面板收、名字那一行还在（与上一轮的口径同一条）；
+ * 有子块的兄弟同时折；再点同一条线全部展回来（可逆）。
+ */
+await check('T227 点父块的竖线：查询块（无 children、有身体）也一起折；投影行同此；可逆', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  const fx = await page.evaluate(() => {
+    const q = window.__qua
+    const inv = (n, a = {}) => q.invoke(n, a)
+    const p = q.pages().find((x) => (x.title ?? '').includes('产品设计')) ?? q.pages()[0]
+    inv('core.page/open', { pageId: p.id })
+    const rows = q.__editor.rows()
+    const parent = rows[1]?.block
+    if (!parent) return null
+    // 父块下面造一个真子块（有子块 ⇒ 它会一起折），再插一个查询块（只有身体）
+    q.focusBlock(parent.id, 0)
+    inv('core.editor/insert-block', { text: '兄弟' })
+    const sibling = q.__editor.sel.aBlock
+    inv('core.editor/indent-block')
+    inv('core.editor/insert-block', { text: '兄弟的子' })
+    inv('core.editor/indent-block')
+    q.focusBlock(sibling, 0)
+    inv('core.query/insert', { blockId: sibling })
+    /**
+     * ⚠️ **不能读 `sel.aBlock`**：插入查询会顺手补一个空块当光标位，光标落在那儿。
+     * 要的是**刚建出来的那个查询块** ⇒ 按 `_query` 在父块子树里现找。
+     */
+    const findQ = (l) => {
+      for (const b of l) {
+        if (b.props?._query) return b
+        const r = findQ(b.children ?? [])
+        if (r) return r
+      }
+      return null
+    }
+    const qb = findQ([q.__editor.store.find(parent.id) ?? parent])
+    return { parent: parent.id, sibling, qid: qb?.id ?? '' }
+  })
+  assert(fx && fx.qid, `前置：父块下要有一个查询块：${JSON.stringify(fx)}`)
+  await page.waitForTimeout(450)
+
+  const state = () =>
+    page.evaluate(({ parent, sibling, qid }) => {
+      const vis = (el) => Boolean(el && getComputedStyle(el).display !== 'none' && el.getClientRects().length > 0)
+      const qrow = document.querySelector(`.blk[data-block-id="${qid}"]`)
+      const qbody = qrow?.querySelector(':scope > .blk-view-body')
+      const srow = document.querySelector(`.blk[data-block-id="${sibling}"]`)
+      const prow = document.querySelector(`.blk[data-block-id="${parent}"]`)
+      return {
+        qPanel: vis(qbody?.querySelector('.queryview')),
+        qFolded: qbody?.dataset.folded === '1',
+        siblingCollapsed: srow?.dataset.collapsed === '1',
+        parentCollapsed: prow?.dataset.collapsed === '1',
+        rail: Boolean(prow?.querySelector(':scope > .rail-self')),
+      }
+    }, fx)
+
+  const before = await state()
+  assert(before.rail, `父块有自己的线（可点折下一层）：${JSON.stringify(before)}`)
+  assert(before.qPanel && !before.qFolded, `前置：查询结果现在开着：${JSON.stringify(before)}`)
+
+  const byRail = () =>
+    page.evaluate((pid) => {
+      const prow = document.querySelector(`.blk[data-block-id="${pid}"]`)
+      const rail = prow?.querySelector(':scope > .rail-self')
+      if (!rail) return false
+      rail.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      return true
+    }, fx.parent)
+  assert(await byRail(), '父块的线可点')
+  await page.waitForTimeout(350)
+
+  const after = await state()
+  assert(!after.qPanel && after.qFolded, `点父块的线：查询块那一格也跟着折（不再「有的折有的不折」）：${JSON.stringify(after)}`)
+  assert(after.siblingCollapsed, `有子块的兄弟同时折：${JSON.stringify(after)}`)
+  assert(!after.parentCollapsed, `折的是下一层，父块自己不折（线还在，才能再点）：${JSON.stringify(after)}`)
+
+  assert(await byRail(), '同一条线仍可点（父块自己没折）')
+  await page.waitForTimeout(350)
+  const back = await state()
+  assert(back.qPanel && !back.qFolded && !back.siblingCollapsed, `再点一次整组展回来（可逆）：${JSON.stringify(back)}`)
+
+  /**
+   * **投影行（露面的查询块）同此**：它没有 `_query`，靠 `_embed` 才是「有身体」。
+   * 折起来面板收、名字那一行留着（与「折叠时保留 title」同一条口径）。
+   */
+  const proj = await page.evaluate(({ sibling, qid }) => {
+    /**
+     * ⚠️ 落点给**子块**而不是父块自己：`core.embed/insert` 是「插在目标块之后」，
+     * 给父块会得到一个**同级**的露面行 —— 折父块就折不到它（那是一次假绿）。
+     */
+    window.__qua.invoke('core.embed/insert', { blockId: sibling, targetId: qid, view: 'mirror' })
+    return true
+  }, fx)
+  assert(proj, '前置：在父块下放一次投影露面')
+  await page.waitForTimeout(500)
+  const projState = () =>
+    page.evaluate(() => {
+      const vis = (el) => Boolean(el && getComputedStyle(el).display !== 'none' && el.getClientRects().length > 0)
+      const row = document.querySelector('.blk[data-embed="1"]')
+      const body = row?.querySelector(':scope > .blk-embed-body')
+      const rows = window.__qua.__editor.rows()
+      const i = rows.findIndex((r) => r.block.id === (row?.dataset.blockId ?? ''))
+      return {
+        panel: vis(body?.querySelector('.embed-panel')),
+        title: vis(body?.querySelector('.embed-title-row')),
+        folded: body?.dataset.folded === '1',
+        depth: row?.dataset.depth ?? '',
+        parent: i > 0 ? (rows.slice(0, i).reverse().find((r) => r.depth === rows[i].depth - 1)?.block.id ?? '') : '',
+      }
+    })
+  const pBefore = await projState()
+  assert(pBefore.panel && pBefore.title, `前置：投影的面板与名字都在：${JSON.stringify(pBefore)}`)
+  const groupState = await page.evaluate(({ parent }) => {
+    const prow = document.querySelector(`.blk[data-block-id="${parent}"]`)
+    const rows = window.__qua.__editor.rows()
+    const i = rows.findIndex((r) => r.block.id === parent)
+    const kids = []
+    for (let k = i + 1; k < rows.length; k++) {
+      if (rows[k].depth <= rows[i].depth) break
+      if (rows[k].depth === rows[i].depth + 1) kids.push({ id: rows[k].block.id, query: Boolean(rows[k].block.props?._query), embed: Boolean(rows[k].block.props?._embed), kids: rows[k].block.children.length })
+    }
+    return { rail: Boolean(prow?.querySelector(':scope > .rail-self')), kids, folded: window.__qua.__editor.doc.folded ?? {} }
+  }, fx)
+  assert(await byRail(), `父块的线可点（投影也归这一组）：${JSON.stringify(groupState)}`)
+  await page.waitForTimeout(350)
+  const pAfter = await projState()
+  assert(pAfter.parent === fx.parent, `前置：投影住在父块下面（否则折父块折不到它）：${JSON.stringify(pAfter)}`)
+  assert(!pAfter.panel && pAfter.folded, `点父块的线：投影的面板也一起折：${JSON.stringify({ pAfter, groupState })}`)
+  assert(pAfter.title, `折起来名字那一行留着（与「折叠时保留 title」同一条口径）：${JSON.stringify(pAfter)}`)
+
+  await ctx.close()
+  return `父块的线：查询块与投影的面板一起折、名字留着、兄弟同折、可逆`
+})
+
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
   await writeFile(REPORT, JSON.stringify({ total: seq, cases: results, known: known.map((r) => r.name) }))
