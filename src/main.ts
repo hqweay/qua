@@ -39,6 +39,7 @@ import { renderLinkComposer, renderNamePrompt, type ObjFieldDeps } from './ui/ov
 import { devCommands, dropIdentity, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, zoomCommands } from './app/commands-impl.ts'
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
+import { setupAxis } from './app/wiring/axis.ts'
 import { createRowBodyCache } from './app/wiring/row-bodies.ts'
 import { setupDocks } from './app/wiring/docks.ts'
 import { setupCardMenus } from './app/wiring/dock-menus.ts'
@@ -358,6 +359,7 @@ const { keyHints, uiCtx } = setupKeys({
   activeBlock: () => activeBlock(),
   canGoBack: () => canGoBack(),
   canGoForward: () => canGoForward(),
+  axisActive: () => axis.mode() !== 'normal',
 })
 
 /* ------------------------------------------------------------ 槽内容 */
@@ -368,6 +370,9 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, w
   kb,
   prefs,
   applyChrome: () => applyChrome(),
+  /** 槽**此刻**看得见吗与「以他为准」的释放：都归档位轴那份判据 */
+  slotOpen: (side) => axis.slotOpen(side),
+  noteSlotChanged: (side) => axis.noteSlotChanged(side),
   getWs: () => ws,
   getRegistry: () => registry,
   scheduleDeviceSave: () => scheduleDeviceSave(),
@@ -423,7 +428,18 @@ const { chrome, editorEl, applyChrome, resolvedTheme, dockMinWidth, dockMaxWidth
   getWs: () => ws,
   getMainEd: () => mainEd,
   getRegistry: () => registry,
+  axisSlotOpen: (side) => axis.slotOpen(side),
   openBlock: (blockId, place) => app.openBlock(blockId, place, { restore: 'saved' }),
+})
+
+/**
+ * 档位轴（常规→宽屏→全屏）：状态只住窗口、不写 prefs。
+ * 装配在 chrome 之后（换档要经它重画），早于一切运行时调用（槽可见性判据都问它）。
+ */
+const axis = setupAxis({
+  prefs,
+  applyChrome: () => applyChrome(),
+  scheduleBadge: () => scheduleBadge(),
 })
 
 /**
@@ -798,6 +814,7 @@ const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEdit
   getRegistry: () => registry,
   getChrome: () => chrome,
   prefs: () => prefs(),
+  dockOpen: (side) => axis.slotOpen(side),
   // 「看属性」承诺的是内容而不是一列空槽：卡被关掉之后由这一条放回来
   ensureDockCard: (side, id) => addDerived(side, id),
   openInDock: (id) => openWindow('right', id),
@@ -1800,11 +1817,16 @@ const app: App = {
   ...viewCommands({
     prefs: () => prefs(),
     applyChrome,
+    axisSlotOpen: (side) => axis.slotOpen(side),
+    noteSlotChanged: (side) => axis.noteSlotChanged(side),
     renderDebugState: () => chrome.renderDebugState(),
     scheduleDeviceSave,
     scheduleBadge,
     toast: (text, kind) => app.toast(text, kind),
   }),
+
+  // 档位轴：进/退一档；状态住窗口，不写偏好
+  axisStep: (dir) => axis.step(dir),
 
   ...devCommands({
     replaceWorkspace: (next) => swapWorkspace(next, true),

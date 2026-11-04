@@ -175,6 +175,13 @@ export interface ViewDeps {
   /** 可直接改的偏好（装配层持有；设备状态，不进库） */
   prefs: () => { theme: ThemeMode; feedLayout: SecLayout; dock: { left: { open: boolean }; right: { open: boolean } } }
   applyChrome: () => void
+  /**
+   * 这一侧槽**此刻**看得见吗（档位轴的 overlay 判据）。
+   * 开关槽取反的是屏幕上的样子，不是落盘那一位——两者在档位期间会分叉。
+   */
+  axisSlotOpen: (side: 'left' | 'right') => boolean
+  /** 用户在档位期间手动动了某侧槽 ⇒ 以他为准（这一侧脱离档位的强制收起） */
+  noteSlotChanged: (side: 'left' | 'right') => void
   /** 主题变了要重画的东西（顶栏开关撤掉后＝重画调试菜单的勾选） */
   renderDebugState: () => void
   /** 偏好变了要落**设备**（`qua.device`），与库的落盘是两条路 */

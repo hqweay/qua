@@ -55,6 +55,13 @@ export type DocksDeps = {
   prefs: () => Prefs
   getRegistry: () => Registry
   applyChrome: () => void
+  /**
+   * 这一侧槽**此刻**看得见吗（档位轴的 overlay 判据，纯判据在 core）。
+   * 「确保开着」按它判：档位强制收起的槽在 prefs 里可能仍标着开，只看 prefs 会早退。
+   */
+  slotOpen: (side: 'left' | 'right') => boolean
+  /** 开进了一个档位强制收起的槽 ⇒ 以用户这次为准（这一侧脱离强制收起） */
+  noteSlotChanged: (side: 'left' | 'right') => void
   scheduleDeviceSave: () => void
   scheduleBadge: () => void
   /** 两个侧槽在启动段才挂载；重画时现取 */
@@ -274,8 +281,9 @@ export function setupDocks(deps: DocksDeps) {
       dock[side].cards.splice(index, 0, entry)
     }
     if (pinDefaultFor(action)) dock.pinnedCards[key] = true
-    if (!dock[side].open) {
+    if (!deps.slotOpen(side)) {
       dock[side].open = true
+      deps.noteSlotChanged(side)
       deps.applyChrome()
     }
     if (dock.solo[side] !== null && dock.solo[side] !== key) dock.solo[side] = null
@@ -545,8 +553,9 @@ export function setupDocks(deps: DocksDeps) {
     if (dock[side].cards.some((e) => dockKey(e) === key)) return
     const lastTile = dock[side].cards.reduce((at, card, i) => (card.kind === 'cmd' ? i : at), -1)
     dock[side].cards.splice(lastTile + 1, 0, entry)
-    if (!dock[side].open) {
+    if (!deps.slotOpen(side)) {
       dock[side].open = true
+      deps.noteSlotChanged(side)
       deps.applyChrome()
     }
     renderDocks()
@@ -756,8 +765,9 @@ export function setupDocks(deps: DocksDeps) {
 
     if (dock.solo[from] === key) dock.solo[from] = null
     if (dock.solo[to] !== null && dock.solo[to] !== key) dock.solo[to] = null
-    if (!dock[to].open) {
+    if (!deps.slotOpen(to)) {
       dock[to].open = true
+      deps.noteSlotChanged(to)
       deps.applyChrome()
     }
     renderDocks()
@@ -810,8 +820,9 @@ export function setupDocks(deps: DocksDeps) {
     const key = dockKey(entry)
     if (dock[side].cards.some((e) => dockKey(e) === key)) return
     dock[side].cards.push(entry)
-    if (!dock[side].open) {
+    if (!deps.slotOpen(side)) {
       dock[side].open = true
+      deps.noteSlotChanged(side)
       deps.applyChrome()
     }
     renderDocks()

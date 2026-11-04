@@ -1106,6 +1106,14 @@ export const MSG = {
   'menu.item.minimize': '最小化',
   'menu.item.zoom': '缩放',
   'menu.item.front': '前置全部窗口',
+
+  /* ------------------------------------------------------ 档位轴（宽屏／全屏） */
+  'cmd.view.axisUp': '进一档（宽屏 / 全屏）',
+  'cmd.view.axisDown': '退一档',
+  'menu.kw.wide': '宽屏',
+  'menu.kw.fullscreen': '全屏',
+  'ui.axis.exitWide': '退出宽屏（Esc）',
+  'ui.axis.exitFull': '退出全屏（Esc）',
 } as const
 
 /** 回调 id 就是 MSG 的键 —— 写错一个 id 会在 `pnpm typecheck` 阶段就红 */

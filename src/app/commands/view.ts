@@ -34,8 +34,14 @@ export function viewCommands(d: ViewDeps): Pick<App, 'setTheme' | 'toggleTheme' 
 
     /** 槽的开关归槽自己：`⌘⌥1/2` 与抬头按钮走同一条 */
     toggleDock: (side) => {
-      const slot = d.prefs().dock[side]
-      slot.open = !slot.open
+      /**
+       * 取反的是**屏幕上这一侧现在的样子**，不是落盘那一位——
+       * 两者在档位期间会分叉（档位强制收起的槽，prefs 里仍是开着的）。
+       * 按落盘值取反 ⇒ 用户按「开」，档位却把它按回去（一次点了没反应）。
+       * 档位在场时顺带让这一侧脱离强制收起：用户显式动了，以他这次为准。
+       */
+      d.prefs().dock[side].open = !d.axisSlotOpen(side)
+      d.noteSlotChanged(side)
       d.applyChrome()
       d.scheduleDeviceSave()
       d.scheduleBadge()
