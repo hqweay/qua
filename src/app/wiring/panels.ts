@@ -844,7 +844,18 @@ export function setupPanels(deps: PanelsDeps) {
     // N>1 且不是日记流 ⇒ 没有「一个对象」可挂（查询结果列表、多页并排）
     const allow = roots.length <= 1 || roots.every((r) => isJournal(r))
     if (allow) {
-      for (const sec of mainEd.container.querySelectorAll<HTMLElement>('.sec')) {
+      /**
+       * ⚠️ **只认正文自己的段**（`:scope > .sec`）。
+       *
+       * 裸 `.sec` 会扫进**嵌套编辑岛**里的段：投影抬头那台编辑器、挂载区、查询结果
+       * 都嵌在 `#editor` 里，它们也各自有 `.sec`，而 `data-sec` 是同一套块 id。
+       * 于是「聚焦一个露面块／它的源块」时，这一段会被当成正文的段，把**段尾挂载区
+       * 搬进它自己的身体里** ⇒ `appendChild` 抛「新子节点包含父节点」，整屏只画一半。
+       *
+       * 正文的段永远是 `container` 的直接子节点（`renderRows` 只 append 到 container）；
+       * 岛里的段隔着 `.mount-editor`／`.queryview-editor` 等宿主，不会命中这一条。
+       */
+      for (const sec of mainEd.container.querySelectorAll<HTMLElement>(':scope > .sec')) {
         const hostId = sec.dataset.sec ?? ''
         if (hostId === '') continue
         const slot = sec.querySelector<HTMLElement>(':scope > .sec-mount')

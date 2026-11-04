@@ -17430,13 +17430,6 @@ await check('T204 tab：新建/切换/关闭；每个 tab 各自的位置与历�
 })
 
 /**
- * **判定放在所有用例之后**：写在这里之前时，后面的用例（T136 起）即使红了也不会进
- * `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。
- */
-const known = results.filter((r) => !r.ok && r.known)
-const fail = results.filter((r) => !r.ok && !r.known).length
-
-/**
  * ⚠️ **报告先写，再关浏览器。** 反过来的话，机器被压死那一刻 Chrome 先死，
  *    `browser.close()` 抛出来，报告就永远没写 —— 编排端只能看到「这一片没留下报告」，
  *    而真正的原因是「这一片的用例其实已经跑完了，只是答案没被记下来」。
@@ -19301,6 +19294,85 @@ await check('T228 ⌘F 搜索：输入正文词出结果、命中高亮、↵ �
   await ctx.close()
   return `空态提示、命中高亮 ${first.marks} 处、↵ 打开 ${target.slice(-6)}、无结果与 Esc 都走通`
 })
+
+/* -------------------------------------------------------------- 聚焦与段尾槽 */
+
+await check('T229 聚焦一个有露面的查询块：段尾挂载区只搬进正文自己的段，不搬进嵌套编辑岛', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const setup = await page.evaluate(() => {
+    const q = window.__qua
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.props?._query) return b
+        const hit = walk(b.children ?? [])
+        if (hit) return hit
+      }
+      return null
+    }
+    const query = walk(q.__editor.store.blocks)
+    const pageOf = q.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    q.invoke('core.page/open', { pageId: pageOf.id })
+    const first = q.__editor.doc.roots[0]
+    q.invoke('core.embed/insert', { blockId: first.id, targetId: query.id, view: 'mirror' })
+    const findEmbed = (list) => {
+      for (const b of list) {
+        if (b.props?._embed) return b
+        const hit = findEmbed(b.children ?? [])
+        if (hit) return hit
+      }
+      return null
+    }
+    return { queryId: query.id, embedId: findEmbed(q.__editor.store.blocks)?.id ?? '' }
+  })
+  await page.waitForTimeout(450)
+  assert(setup.embedId !== '', '前置：查询镜像块已经插进去了')
+
+  /**
+   * 前置：这一屏确实有**投影抬头那台嵌套编辑器**（它也会长出自己的 `.sec`／`.sec-mount`）。
+   * 没有它，这条用例就碰不到那个坑——所以先断言它在，免得将来变成恒绿。
+   */
+  const pre = await page.evaluate(() => ({
+    embed: document.querySelectorAll('.blk[data-embed="1"]').length,
+    nestedSecs: document.querySelectorAll('.title-editor .sec').length,
+  }))
+  assert(pre.embed > 0 && pre.nestedSecs > 0, `前置：投影抬头里有一台嵌套编辑器（它也有 .sec）：${JSON.stringify(pre)}`)
+
+  /**
+   * 两条入口都走一遍：**聚焦露面块本身**（用户说的「查询镜像块」）与**聚焦它的源**。
+   * 这是同一个读取循环的两种命中——岛里的 `.sec` 与正文的段 `data-sec` 相同。
+   */
+  for (const [label, id] of [
+    ['露面块', setup.embedId],
+    ['源查询块', setup.queryId],
+  ]) {
+    const r = await page.evaluate((x) => window.__qua.invoke('core.block/focus-block', { blockId: x }), id)
+    await page.waitForTimeout(300)
+    assert(r.ok === true, `聚焦${label}不抛「appendChild 包含父节点」：${JSON.stringify(r)}`)
+
+    const after = await page.evaluate(() => ({
+      roots: window.__qua.__editor.doc.roots.map((b) => b.id),
+      topMounts: document.querySelectorAll('#editor > .sec > .sec-mount > section.mount').length,
+      mountsInsideMounts: document.querySelectorAll('section.mount section.mount').length,
+      mountsInsideIsland: document.querySelectorAll('.title-editor section.mount').length,
+    }))
+    assert(after.roots.length === 1 && after.roots[0] === id, `聚焦${label}：焦点对象就是这一块（${JSON.stringify(after.roots)}）`)
+    assert(after.topMounts === 1, `聚焦${label}：段尾挂载区挂在正文自己的段上（${JSON.stringify(after)}）`)
+    assert(after.mountsInsideMounts === 0, `聚焦${label}：挂载区不能搬进自己的子树（${JSON.stringify(after)}）`)
+    assert(after.mountsInsideIsland === 0, `聚焦${label}：嵌套编辑岛里的段不认领段尾挂载区（${JSON.stringify(after)}）`)
+  }
+
+  await ctx.close()
+  return `聚焦露面块与源查询块都成功；正文 1 个段尾槽，岛里的 .sec 没有抢走挂载区`
+})
+
+/**
+ * **判定必须在所有用例之后**：这一段曾经写在中途，之后新增的用例（T206 起）即使红了
+ * 也不会进 `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。
+ * 新增用例一律加在本段**之前**。
+ */
+const known = results.filter((r) => !r.ok && r.known)
+const fail = results.filter((r) => !r.ok && !r.known).length
 
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
