@@ -42,6 +42,18 @@ function walk(forest: Block[], states: readonly TouchedState[], opts: { directEd
   return ops
 }
 
+/**
+ * **生产路径**：读面用索引的「全部块」表（O(1)），op 应用后按同一批 op 修补索引。
+ * 与 `store.restore` 是同一对动作（先改森林、再 `store.apply`）。
+ */
+function walkIndexed(store: BlockStore, states: readonly TouchedState[], opts: { directEdit?: boolean } = {}): Op[] {
+  const lookup = store.undoLookup()
+  const ops = scopedOps(lookup, states, opts)
+  applyOps(store.blocks, ops, lookup)
+  store.apply(ops)
+  return ops
+}
+
 function setup(forest: Block[] = fixture()) {
   const store = new BlockStore(forest)
   const kb = new MemoryKb(store, { now: () => 5000 })
@@ -86,6 +98,38 @@ test('撤销一次软删：块一直在树上（三个存在态里的 deleted �
 
   walk(store.blocks, r.undo.after)
   assert.equal(forestFingerprint(store.blocks), afterFp, '重做删除 ⇒ 同一个标记值（不是重新取时钟）')
+})
+
+test('生产读面：索引的「全部块」表能找到被软删的块，撤销删除不必摊平整库', () => {
+  const { store, kb } = setup()
+  const beforeFp = forestFingerprint(store.blocks)
+  const r = kb.tx((tx) => tx.remove('b'))
+  const afterFp = forestFingerprint(store.blocks)
+
+  assert.equal(store.find('b'), undefined, '可见索引里找不到它')
+  assert.equal(store.undoLookup().get('b')?.id, 'b', '撤销读面找得到（否则会误判成 genesis）')
+  assert.equal(store.undoLookup().parentOf('b'), null, 'b 是顶层块')
+
+  walkIndexed(store, r.undo.before)
+  assert.equal(forestFingerprint(store.blocks), beforeFp)
+  assert.equal(store.find('b')?.id, 'b', '撤销后索引重新看得见它')
+
+  walkIndexed(store, r.undo.after)
+  assert.equal(forestFingerprint(store.blocks), afterFp)
+})
+
+test('生产读面：撤销插入时 purge 会从「全部块」表里消失，重做再长回来（同一个 id）', () => {
+  const { store, kb } = setup()
+  const sub = mk('n', '新块', { children: [mk('n1', '新的子块')] })
+  const r = kb.tx((tx) => tx.insert(sub, 'a', 0))
+  const afterFp = forestFingerprint(store.blocks)
+
+  walkIndexed(store, r.undo.before)
+  assert.equal(store.undoLookup().get('n'), undefined, 'purge 过的块不能留在全部块表里')
+  assert.equal(store.undoLookup().get('n1'), undefined)
+  walkIndexed(store, r.undo.after)
+  assert.equal(store.undoLookup().get('n')?.id, 'n', '重做用同一个 id 复活')
+  assert.equal(forestFingerprint(store.blocks), afterFp)
 })
 
 /* ------------------------------------------------------------ 位置 · 正文 · 属性 · annos */
@@ -263,6 +307,27 @@ test('directEdit：查询块正文的直接编辑能用同一个选项撤销；�
   assert.equal(forestFingerprint(store.blocks), beforeFp)
   walk(store.blocks, r.undo.after, { directEdit: r.undo.directEdit })
   assert.equal(forestFingerprint(store.blocks), afterFp)
+})
+
+test('applyOps：带 lookup 与不带 lookup 对同一批 op 得到逐字节相同的结果', () => {
+  const { store, kb } = setup()
+  const r = kb.tx((tx) => {
+    tx.patch('a', (b) => {
+      writeBlockContent(b, textRuns('改过'))
+      b.modified = 700
+    })
+    tx.move('a1', null, 2)
+    tx.setProp('b', 'x', 1)
+    tx.remove('c')
+  })
+  const ops = scopedOps(store.undoLookup(), r.undo.before)
+  assert.ok(ops.length > 0)
+
+  const fast = clone(store.blocks)
+  const slow = clone(store.blocks)
+  applyOps(fast, ops, lookupOf(fast))
+  applyOps(slow, ops)
+  assert.equal(forestFingerprint(fast), forestFingerprint(slow), '两条路径只是成本不同，结果必须相同')
 })
 
 /* ------------------------------------------------------------ 与库体量无关 */

@@ -41,7 +41,7 @@ import { walkForest } from '../model/walk.ts'
 import type { Anno } from '../model/runs.ts'
 import { canDirectEditText, canWriteText } from '../model/types.ts'
 import { systemPropViolation } from '../props/system-props.ts'
-import type { Op } from './types.ts'
+import type { Op, ForestLookup } from './types.ts'
 import { validate } from './validate.ts'
 
 /* ------------------------------------------------------------ 格与落点 */
@@ -395,8 +395,11 @@ export function diffTouched(touched: Iterable<TouchedBlock>, opts: { directEdit?
  *
  * @param forest 要改的森林（原地改）
  * @param ops    `diff`／`diffTouched` 的输出，或 `op_log` 里的历史
+ * @param lookup 可选的按 id 读面（**含软删**）。给了就只按批里出现的 id 问，
+ *               不再摊平整库 —— 撤销一次单块编辑的 ⌘Z 靠它从 O(整库) 变成 O(动过的块)。
+ *               必须是**同一份森林**的索引；批内新建的块由本地表接住，不依赖它。
  */
-export function applyOps(forest: Block[], ops: readonly Op[]): void {
+export function applyOps(forest: Block[], ops: readonly Op[], lookup?: ForestLookup): void {
   /**
    * **收端门**：这批 op 先验再吃，违规抛错、森林一个字节不动（校验只读）。
    *
@@ -404,7 +407,7 @@ export function applyOps(forest: Block[], ops: readonly Op[]): void {
    * **不是本地产出的流**——撤销/回放的日志（`store.restore`）、将来的远端 op 流。
    * 同一个函数（`validate`）服务两条路：发侧拦「这次能不能写」，收端拦「这批能不能应用」。
    */
-  const violations = validate(forest, ops)
+  const violations = validate(forest, ops, lookup)
   if (violations.length > 0) {
     const v = violations[0]!
     throw new Error(`kb: op batch rejected at #${v.index} (${v.blockId ?? '—'}): ${v.reason}`)
@@ -423,15 +426,25 @@ export function applyOps(forest: Block[], ops: readonly Op[]): void {
     return
   }
 
+  /**
+   * **批内的三张本地表**（只在有 lookup 时用）：索引是**批前**的快照，
+   * 不知道这一批刚造了谁、刚把谁挪到哪、刚清了谁。
+   */
+  const local: BatchLocal | undefined = lookup
+    ? { lookup, created: new Map(), placed: new Map(), purged: new Set() }
+    : undefined
+
   /** ① **清除**：块从树上消失（与软删是两件事）。 */
   for (const op of ops) {
-    if (op.e === 'block' && op.op === 'exist' && op.state === 'purged') removeFromTree(forest, op.id)
+    if (op.e !== 'block' || op.op !== 'exist' || op.state !== 'purged') continue
+    removeFromTree(forest, op.id, local)
+    local?.purged.add(op.id)
   }
 
   /** ② **位置与 genesis**：按 op 顺序逐条落（同父多条时，后一条依赖前一条已就位）。 */
   for (const op of ops) {
     if (op.e !== 'block' || op.op !== 'upsert' || op.value.parent === undefined) continue
-    let block = findAnywhere(forest, op.id)
+    let block = blockInBatch(forest, op.id, local)
     if (!block) {
       const created = op.value.created ?? 0
       block = {
@@ -441,20 +454,51 @@ export function applyOps(forest: Block[], ops: readonly Op[]): void {
         created,
         modified: op.value.modified ?? created,
       }
+      local?.created.set(block.id, block)
     }
     if (op.value.created !== undefined) block.created = op.value.created
     if (op.value.content !== undefined) block.content = op.value.content
     if (op.value.modified !== undefined) block.modified = op.value.modified
-    placeAt(forest, block, op.value.parent, op.value.prev ?? null)
+    placeAt(forest, block, op.value.parent, op.value.prev ?? null, local)
   }
 
   /** ③ **格**：正文／出生／时刻／属性／annos／存在（原地写，对象身份不变）。 */
   const byId = new Map<string, Block>()
-  walkForest(forest, (b) => void byId.set(b.id, b), { includeDeleted: true })
+  if (local) {
+    // 只收这一批 op 点到的 id：不做整库遍历，正是作用域收窄的意义
+    for (const op of ops) {
+      const id = op.e === 'block' ? op.id : op.block
+      if (byId.has(id)) continue
+      const b = blockInBatch(forest, id, local)
+      if (b) byId.set(id, b)
+    }
+  } else {
+    walkForest(forest, (b) => void byId.set(b.id, b), { includeDeleted: true })
+  }
   for (const op of ops) {
     if (op.e === 'block' && op.op === 'exist' && op.state === 'purged') continue
     applyCellOp(op, byId)
   }
+}
+
+/** `applyOps` 的批内本地表（lookup 是批前快照；见调用处的说明） */
+interface BatchLocal {
+  lookup: ForestLookup
+  /** 这一批新建的块（genesis 造出来的） */
+  created: Map<string, Block>
+  /** 这一批里落过位的块 → 父 id（`null` ＝ 顶层） */
+  placed: Map<string, string | null>
+  /** 这一批里被清除的块 */
+  purged: Set<string>
+}
+
+/** 批内的块：先看新建，再看（没被清除的）索引 */
+function blockInBatch(forest: readonly Block[], id: string, local: BatchLocal | undefined): Block | undefined {
+  if (!local) return findAnywhere(forest, id)
+  const fresh = local.created.get(id)
+  if (fresh) return fresh
+  if (local.purged.has(id)) return undefined
+  return local.lookup.get(id)
 }
 
 /**
@@ -618,8 +662,21 @@ function findAnywhere(forest: readonly Block[], id: string): Block | undefined {
  *
  * ⚠️ 走 `walkForest`（块树遍历的唯一入口，`arch-check [22]`）：自己不递归 `children`。
  *    先试顶层，再逐层试 —— 两次都只「找容器」，不边遍历边改结构。
+ *
+ * 给了批内本地表时走 O(1)/O(子块数) 的路径：父从表里拿，直接 `splice`。
+ * 找不到（批内新建后又被挪、或 lookup 与森林不同步）⇒ 退回全树找。
  */
-function removeFromTree(forest: Block[], id: string): void {
+function removeFromTree(forest: Block[], id: string, local?: BatchLocal): void {
+  if (local) {
+    const parentId = local.placed.has(id) ? local.placed.get(id)! : local.lookup.parentOf(id)
+    const parent = parentId === null ? null : (local.created.get(parentId) ?? local.lookup.get(parentId))
+    const siblings = parent ? parent.children : forest
+    const i = siblings.findIndex((b) => b.id === id)
+    if (i >= 0) {
+      siblings.splice(i, 1)
+      return
+    }
+  }
   const detach = (children: Block[]): boolean => {
     const i = children.findIndex((b) => b.id === id)
     if (i < 0) return false
@@ -646,11 +703,17 @@ function removeFromTree(forest: Block[], id: string): void {
  * ⚠️ 遍历一律走 `walkForest`（块树遍历的唯一入口，`arch-check [22]`）——
  *    这里要「改树」，所以先把「摘掉」与「找落点」拆成两次走，中间不改结构。
  */
-function placeAt(forest: Block[], block: Block, parentId: string | null, prev: string | null): void {
+function placeAt(
+  forest: Block[],
+  block: Block,
+  parentId: string | null,
+  prev: string | null,
+  local?: BatchLocal,
+): void {
   // 先摘（同一层内换位时，不摘会让下标算错）
-  removeFromTree(forest, block.id)
+  removeFromTree(forest, block.id, local)
 
-  const parent = parentId === null ? null : findAnywhere(forest, parentId)
+  const parent = parentId === null ? null : (local?.created.get(parentId) ?? local?.lookup.get(parentId) ?? findAnywhere(forest, parentId))
   if (parentId !== null && !parent) {
     throw new Error(`kb: replay: missing parent "${parentId}" for block "${block.id}"`)
   }
@@ -658,11 +721,12 @@ function placeAt(forest: Block[], block: Block, parentId: string | null, prev: s
 
   if (prev === null) {
     siblings.unshift(block)
-    return
+  } else {
+    const i = siblings.findIndex((b) => b.id === prev)
+    // 前兄弟不在了 ⇒ 落该层首位，与 `BlockPatch.prev` 同一条口径
+    siblings.splice(i < 0 ? 0 : i + 1, 0, block)
   }
-  const i = siblings.findIndex((b) => b.id === prev)
-  // 前兄弟不在了 ⇒ 落该层首位，与 `BlockPatch.prev` 同一条口径
-  siblings.splice(i < 0 ? 0 : i + 1, 0, block)
+  local?.placed.set(block.id, parentId)
 }
 
 /* ------------------------------------------------------------ 断言用 */

@@ -46,7 +46,7 @@
  */
 import type { Block } from '../model/model.ts'
 import { walkForest } from '../model/walk.ts'
-import type { Op } from './types.ts'
+import type { ForestLookup, Op } from './types.ts'
 import {
   cellsOf,
   existingBlockOps,
@@ -85,23 +85,6 @@ export interface UndoCapture {
    * 撤销/重做要带同一个选项，否则同一次写入在反向时会撞上内容闸。
    */
   directEdit: boolean
-}
-
-/**
- * `scopedOps` 只问「现在什么样」，不遍历森林。
- *
- * 为什么不直接收 `Block[]`：那会逼着每个调用方（包括 ⌘Z）摊平一遍整库——
- * 而作用域收窄的全部意义就是**不摊平**。索引／页缓存将来可以提供 O(1) 的实现。
- *
- * ⚠️ `get` 必须**看得见被软删的块**（它们在树上的原位，恢复路径要找它们）。
- *    `store.index` 今天只收可见块（`applyBlockDelete` 会把它们摘掉），所以它不能直接充当
- *    这个 lookup —— 接 store 时要么补一张「全部块」表，要么保留一趟含删遍历。
- */
-export interface ForestLookup {
-  /** 在树上（含软删）就返回块；不在树上返回 `undefined` */
-  get(id: string): Block | undefined
-  /** 这一块的树父；`null` ＝ 森林顶层。只对 `get` 得到的块调用 */
-  parentOf(id: string): string | null
 }
 
 /** 把一片森林摊成 lookup（**含被软删的块**）。没有索引时的实现，也是测试与非 store 路径的入口。 */

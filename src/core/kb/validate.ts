@@ -35,7 +35,7 @@ import { walkForest } from '../model/walk.ts'
 import type { Block } from '../model/model.ts'
 import { canDirectEditText, canWriteText } from '../model/types.ts'
 import { systemPropViolation } from '../props/system-props.ts'
-import type { Op } from './types.ts'
+import type { Op, ForestLookup } from './types.ts'
 
 /** 一条非法：给人看的一句话 ＋ 定位（哪个 op、哪一块） */
 export interface Violation {
@@ -52,8 +52,10 @@ export interface Violation {
  *
  * @param forest 应用前的森林（含被软删的块：位置 op 可能指向它们）
  * @param ops    待应用的一批
+ * @param lookup 可选的按 id 读面（索引的「全部块」表）；给了就**不摊平森林**。
+ *               调用方保证它与 `forest` 是同一份状态——撤销路径会传同一棵树上的索引。
  */
-export function validate(forest: readonly Block[], ops: readonly Op[]): Violation[] {
+export function validate(forest: readonly Block[], ops: readonly Op[], lookup?: ForestLookup): Violation[] {
   const out: Violation[] = []
 
   /**
@@ -77,6 +79,13 @@ export function validate(forest: readonly Block[], ops: readonly Op[]): Violatio
     }
     return { byId: byIdCache, parentOf: parentOfCache }
   }
+  /**
+   * 按 id 读面：给了 lookup 就逐点问（不摊平），否则退回一次性摊平。
+   * 两条路径回答的问题完全一样，只是成本不同。
+   */
+  const blockAt = (id: string): Block | undefined => (lookup ? lookup.get(id) : tables().byId.get(id))
+  const parentIdOf = (id: string): string | null =>
+    lookup ? lookup.parentOf(id) : (tables().parentOf.get(id) ?? null)
 
   /** 本批里新出现的块（父可能是同批的块 ⇒ 判父存在时要算上它们） */
   const introduced = new Set<string>()
@@ -88,12 +97,11 @@ export function validate(forest: readonly Block[], ops: readonly Op[]): Violatio
    *    拿它判会把「同批的父子」判错。父表按当前森林现算。
    */
   const isAncestorOf = (candidate: string, nodeId: string): boolean => {
-    const { parentOf } = tables()
     let cur: string | null = nodeId
     let guard = 0
     while (cur !== null && guard++ < 1024) {
       if (cur === candidate) return true
-      cur = parentOf.get(cur) ?? null
+      cur = parentIdOf(cur)
     }
     return false
   }
@@ -106,7 +114,7 @@ export function validate(forest: readonly Block[], ops: readonly Op[]): Violatio
          * 「块不存在」＝ 新块 genesis，内容随构造给定，不拦。
          */
         if (op.value.content !== undefined) {
-          const pre = tables().byId.get(op.id)
+          const pre = blockAt(op.id)
           /**
            * **收端没有来源信息**：一条正文 op 到不了结构写路径（写侧 `canWriteText` 已经挡住），
            * 能到达这里的查询块正文 op 只能是「直接改名」⇒ 按直接编辑放行。
@@ -118,7 +126,7 @@ export function validate(forest: readonly Block[], ops: readonly Op[]): Violatio
         }
         const parentId = op.value.parent
         if (parentId !== undefined) {
-          if (parentId !== null && !tables().byId.has(parentId) && !introduced.has(parentId)) {
+          if (parentId !== null && !blockAt(parentId) && !introduced.has(parentId)) {
             out.push({ index: i, blockId: op.id, reason: `parent "${parentId}" does not exist` })
             continue
           }

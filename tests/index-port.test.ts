@@ -27,6 +27,7 @@ import { writeBlockContent } from '../src/core/model/model.ts'
 import { plainText, textRuns, type RefRun } from '../src/core/model/runs.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
+import { applyOps as applyForestOps, diff } from '../src/core/kb/diff.ts'
 import type { Tx } from '../src/core/kb/types.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, content: textRuns(text), children: [], ...extra })
@@ -231,6 +232,34 @@ test('等式：移动子树走 tx ⇒ parentOf 只改被移的那一块', () => 
   assert.equal(next.parentOf.get('b'), 'p2', '被移的块换父')
   assert.equal(next.parentOf.get('b1'), 'b', '后代的父没变（它还是 b 的孩子）')
   assert.deepEqual(indexPathOf(next, 'b1').map((x) => x.id), ['p2', 'b', 'b1'])
+})
+
+test('all：软删只从可见表退场，块与它的子树仍留在「树上有谁」里', () => {
+  const { store, kb, idx } = kbFixture()
+  const next = txStep(kb, store, idx, (tx) => tx.remove('b'))
+  assert.equal(lookupBlock(next, 'b'), undefined, '可见表里没有它')
+  assert.equal(next.blocks.has('b'), false)
+  assert.equal(next.all.get('b')?.id, 'b', '全部块表里还在（恢复路径要按 id 找到它）')
+  assert.equal(next.parentOfAll.get('b'), 'p1', '父链仍是树上的真实父')
+  assert.equal(next.all.has('b1'), true, '子树跟着留在树上')
+  assert.equal(next.parentOfAll.get('b1'), 'b')
+})
+
+test('all：清除一个**已经软删过**的块 ⇒ 「树上有谁」里也必须消失', () => {
+  const { store, kb, idx } = kbFixture()
+  const soft = txStep(kb, store, idx, (tx) => tx.remove('b'))
+  assert.ok(soft.all.has('b'))
+  // 清除没有 Tx 入口（它只由撤销一次插入产生）：用 diff 造同一批 op
+  const target = JSON.parse(JSON.stringify(store.blocks)) as Block[]
+  const p1 = target.find((x) => x.id === 'p1')!
+  p1.children = p1.children.filter((x) => x.id !== 'b')
+  const ops = diff(store.blocks, target)
+  applyForestOps(store.blocks, ops, store.undoLookup())
+  const next = applyOps(soft, ops, store.blocks)
+  assert.equal(next.all.has('b'), false, '清除过的块不能留在全部块表里')
+  assert.equal(next.all.has('b1'), false, '子树一并消失')
+  assert.equal(next.parentOfAll.has('b'), false)
+  assert.equal(fingerprint(next), fingerprint(rebuild(store.blocks)), '增量仍与全量逐字节一致')
 })
 
 test('rootOf：page 只是露面，不是作用域——页嵌在天下时仍归天', () => {

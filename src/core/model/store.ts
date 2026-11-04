@@ -19,6 +19,7 @@ import type { Op } from '../kb/types.ts'
 import type { Sel } from './selection.ts'
 import { applyOps as patchIndex, lookupBlock, rebuild, type Index } from '../infra/index-port.ts'
 import { applyOps, diff } from '../kb/diff.ts'
+import type { ForestLookup } from '../kb/types.ts'
 import { changesOf, structuralOf } from '../kb/changes.ts'
 
 /**
@@ -139,6 +140,21 @@ export class BlockStore {
   /** 按 id 找块（整片森林；zoom 后当前对象可能在任意深度）—— 走索引，O(1) */
   find(id: string): Block | undefined {
     return lookupBlock(this.index, id)
+  }
+
+  /**
+   * **撤销的读面**：按 id 找块，**看得见被软删的块**（`Index.all`）。
+   *
+   * 为什么不复用 `find`：`index.blocks` 是可见集，软删的块在退场时就摘掉了；
+   * 撤销一次删除要按 id 找回它（否则会被当成「不存在」而走 genesis，落点又没记）。
+   * 返回的对象绑定**这一次**取到的索引：只用于紧接着的一批 op（同一棵树上同步跑）。
+   */
+  undoLookup(): ForestLookup {
+    const idx = this.index
+    return {
+      get: (id) => idx.all.get(id),
+      parentOf: (id) => idx.parentOfAll.get(id) ?? null,
+    }
   }
 
   /**
