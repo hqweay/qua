@@ -387,8 +387,12 @@ await check('E5 ⌘A 与 ⌘F 的当前行为（①② 的 Electron 现状）', 
   const afterF = await page.evaluate(() => ({
     logDelta: window.__qua.commandLog().length,
     anyFindUI: Boolean(document.querySelector('input[type=search], .find-bar, [class*=find]')),
+    searchOpen: Boolean(document.querySelector('.layer-input')),
+    lastCommand: window.__qua.snapshot().lastCommand?.name ?? '',
     domSel: String(document.getSelection()?.toString() ?? ''),
   }))
+  await page.keyboard.press('Escape')
+  await new Promise((r) => setTimeout(r, 120))
 
   // ⌘A
   await page.evaluate(() => window.__qua.focus())
@@ -412,7 +416,7 @@ await check('E5 ⌘A 与 ⌘F 的当前行为（①② 的 Electron 现状）', 
     }
   })
 
-  log(`      ⌘F：命令日志增量=${afterF.logDelta}（应当 0＝没有绑定）、出现查找 UI=${afterF.anyFindUI}、DOM 选区="${afterF.domSel}"`)
+  log(`      ⌘F：命令日志增量=${afterF.logDelta}（1＝走 core.search/open）、搜索浮层=${afterF.searchOpen}、DOM 选区="${afterF.domSel}"`)
   log(`      ⌘A：DOM rangeCount=${afterA.rangeCount}、跨 ${afterA.domBlocksSpanned} 个 .blk、DOM 文本长 ${afterA.domTextLen}、锚点在 #editor 内=${afterA.anchorInEditor}`)
   log(`      ⌘A：模型选区=${JSON.stringify(afterA.modelSel)}（仍是单块=${afterA.modelStillOneBlock}）、命令日志增量=${afterA.logDelta}`)
   log(`      起始状态：块数=${snapBefore.blocks}、虚拟化=${snapBefore.virtualize}、已挂 DOM=${snapBefore.domNodes} 节点`)
@@ -453,9 +457,10 @@ await check('E5 ⌘A 与 ⌘F 的当前行为（①② 的 Electron 现状）', 
     `      ⇒ ${deleted.blocks === n1 && deleted.texts.filter((t) => t === '').length === 0 ? '**「全选删除」几乎没生效**：16 块的 DOM 删除被模型丢弃，只剩锚点块被同步' : `模型变成 ${deleted.blocks} 块`}`,
   )
 
-  assert(afterF.logDelta - logBeforeF === 0, '⌘F 不该触发任何命令（本仓没有 find 绑定）')
+  assert(afterF.logDelta - logBeforeF === 1, '⌘F 应当走 core.search/open（恰好一条命令）')
+  assert(afterF.searchOpen, '⌘F 应当打开搜索浮层（原生菜单没有抢走）')
   assert(afterA.rangeCount >= 1 && afterA.domBlocksSpanned > 1, '⌘A 应当产生跨块的 DOM 选区')
-  return `⌘F＝零反应（无绑定、无查找 UI）；⌘A＝原生全选（DOM 跨 ${afterA.domBlocksSpanned} 块 / ${afterA.domTextLen} 字），模型选区不变（仍单块）；紧接打字${
+  return `⌘F＝core.search/open（搜索浮层打开、无系统查找 UI）；⌘A＝原生全选（DOM 跨 ${afterA.domBlocksSpanned} 块 / ${afterA.domTextLen} 字），模型选区不变（仍单块）；紧接打字${
     wiped ? '**整篇被覆盖成 1 块**' : '只动被覆盖的那一块'
   }`
 })
@@ -1369,6 +1374,84 @@ await check('E14 每库状态：折叠/槽开关跟着库走；切库与重启�
   return `折叠/槽开关跟库走：B（新窗与重启）不受 A 影响；A 切回与重启后各自恢复（fold ${foldId.slice(-6)}）`
 })
 
+
+await check('E15 全文检索：索引建好后 ⌘F 可搜、拼音可搜、编辑后增量进索引', async () => {
+  const { app, page } = await launch('fts')
+  // 新库先 seed；启动期的写盘/重建可能被宿主按后台页推迟到第一次交互之后。
+  // ⌘F 是真实的「现在开始用」信号：它既打开浮层，也把索引排上。
+  await page.keyboard.press('Meta+f')
+  await page.waitForSelector('.layer-input')
+  await page.keyboard.type('内容寻址')
+  await page.waitForSelector('.layer-item')
+
+  // 等索引稳定 ready（可能经历「搜索触发的首建 + seed 落盘后的重建」两轮）
+  const t0 = Date.now()
+  let stable = 0
+  while (Date.now() - t0 < 30000) {
+    const st = await page.evaluate(() => window.__qua.search.status())
+    stable = st === 'ready' ? stable + 1 : 0
+    if (stable >= 2) break
+    await page.waitForTimeout(300)
+  }
+  if (stable < 2) {
+    const st = await page.evaluate(() => ({ status: window.__qua.search.status(), mode: window.__qua.search.mode() }))
+    throw new Error(`索引没建好：${JSON.stringify(st)}（worker/WASM 没起来？）`)
+  }
+  await page.keyboard.press('Escape')
+
+  // ① ⌘F 的结果行（上面已经等到）——再验一次身份与高亮
+  await page.keyboard.press('Meta+f')
+  await page.waitForSelector('.layer-input')
+  await page.keyboard.type('内容寻址')
+  await page.waitForSelector('.layer-item')
+  const first = await page.evaluate(() => ({
+    id: document.querySelector('.layer-item')?.dataset.id ?? '',
+    text: document.querySelector('.layer-item')?.textContent ?? '',
+    marks: document.querySelectorAll('.layer-item mark').length,
+  }))
+  assert(first.id.startsWith('search/'), `结果行带块身份：${first.id}`)
+  assert(first.text.includes('内容寻址'), `结果片段包含查询词：${JSON.stringify(first.text)}`)
+  assert(first.marks > 0, '片段里有高亮')
+  await page.keyboard.press('Escape')
+
+  // ② 拼音前缀走 FTS（不是扫描：扫描不认识拼音）
+  const py = await page.evaluate(() => window.__qua.search.query('nei rong xun zhi', 20))
+  assert(py?.mode === 'fts', `拼音查询应当走 FTS：${JSON.stringify(py)}`)
+  assert((py?.hits ?? []).length > 0, `拼音应命中「内容寻址」：${JSON.stringify(py)}`)
+
+  // ③ 编辑正文 ⇒ 同一批事务里写索引；下一次查询能搜到新词
+  const target = await page.evaluate(() => {
+    // journal 的首行是只读日期；挑第一块可写正文
+    const b = window.__qua.blocks().find((x) => !x.roles.includes('journal')) ?? window.__qua.blocks()[0]
+    window.__qua.focusBlock(b.id, b.text.length)
+    return b.id
+  })
+  const unique = '量子检索词'
+  await page.keyboard.type(unique)
+  await page.waitForTimeout(800)
+  const typed = await page.evaluate(({ id, text }) => window.__qua.blocks().find((b) => b.id === id)?.text.includes(text), {
+    id: target,
+    text: unique,
+  })
+  assert(typed, '前置：新词必须真的落进目标块的正文（否则测的是输入没进去）')
+
+  // 索引可能正被「seed 落盘后的重建」重置；等它稳定到 ready 再断言增量写入
+  const t1 = Date.now()
+  while (Date.now() - t1 < 15000) {
+    const st = await page.evaluate(() => window.__qua.search.status())
+    if (st === 'ready') break
+    await page.waitForTimeout(300)
+  }
+  await page.waitForTimeout(500)
+  const hit = await page.evaluate((text) => window.__qua.search.query(text, 5), unique)
+  assert(hit?.mode === 'fts', `索引 ready 之后新词查询应当走 FTS：${JSON.stringify(hit)}`)
+  assert((hit?.hits ?? []).some((h) => h.blockId === target), `新词应命中刚编辑的块：${JSON.stringify(hit)}`)
+
+  const none = await page.evaluate(() => window.__qua.search.query('绝不存在的检索词xyz', 5))
+  assert((none?.hits ?? []).length === 0, `真没有就是空：${JSON.stringify(none)}`)
+  await app.close()
+  return `⌘F 出结果并高亮；拼音走 FTS；编辑「${unique}」后增量命中 ${target.slice(-6)}`
+})
 
 /* ═══════════════════════════════════════════════════ 汇总 */
 

@@ -79,6 +79,8 @@ export const BINDINGS: Binding[] = [
   // `when` 为空 ⇒ 总是可用：命令面板是键盘可达性的兜底
   { command: 'core.command-palette/show', kind: 'keymap', key: 'mod+p', when: '', layer: 'core' },
   { command: 'core.command-palette/show', kind: 'keymap', key: 'mod+shift+p', when: '', layer: 'core' },
+  // 全文检索：⌘F 是「找内容」，与 ⌘P「找命令」并列；菜单没有原生 Find role，不会抢
+  { command: 'core.search/open', kind: 'keymap', key: 'mod+f', when: '', layer: 'core' },
   { command: 'core.layer/close', kind: 'keymap', key: 'escape', when: '', layer: 'core' },
   /* ================= 块选区 =================
      ⚠️ 这些必须放在文本绑定**之后**：按键解析是**反向遍历、后出现者优先**。

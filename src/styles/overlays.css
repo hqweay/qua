@@ -94,6 +94,12 @@
 .layer-label {
   flex: 1;
 }
+/* 搜索结果里的命中词：只换底色，不换字重/字号（片段要能当正文读） */
+.layer-label mark {
+  background: var(--ui-accent-soft);
+  color: inherit;
+  border-radius: var(--ui-radius-sm);
+}
 .layer-hint {
   flex: 0 1 auto;
   color: var(--ui-text-tertiary);

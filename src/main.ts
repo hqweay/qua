@@ -7,8 +7,9 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, findByAlias, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec } from './core/index.ts'
+import { addAlias, addList, addressesOf,   allTags, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, findByAlias, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec } from './core/index.ts'
 import { plainText } from './core/model/runs.ts'
+import { highlightSnippet } from './core/search/query.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
 import { BlockStore } from './core/model/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
@@ -1832,6 +1833,78 @@ const app: App = {
   }),
 
   /* ---- 浮层与提示（装配层专有）---- */
+  /**
+   * 全文检索（⌘F）：输入正文关键词，结果是**块**。
+   *
+   * 结果行只带 `blockId`；打开仍走 `app.openBlock`（导航、历史、聚焦只有那一条路）。
+   * 查询是异步的（FTS 在主进程／worker 里），所以用序号挡住过期回复：
+   * 慢一拍的结果不能盖掉用户刚打出来的新一批。
+   */
+  openSearch: () => {
+    if (!search) return
+    // 第一次打开搜索时把索引排上（启动期不抢 CPU；用户按下 ⌘F 是最可靠的「现在可以建」信号）
+    search.start()
+    let seq = 0
+    const building = Boolean(LIBRARY_BRIDGE) && search.status() !== 'ready'
+    layers.openMenu({
+      rows: [],
+      anchor: null,
+      width: 620,
+      title: building ? t('ui.search.titleBuilding') : t('ui.search.title'),
+      searchable: true,
+      focusSearch: true,
+      placeholder: t('ui.search.placeholderBlock'),
+      emptyText: t('ui.search.needQuery'),
+      onQuery: (q) => {
+        const mine = ++seq
+        if (q.trim() === '') {
+          layers.setEmptyText(t('ui.search.needQuery'))
+          layers.setRows([])
+          return
+        }
+        layers.setEmptyText(t('ui.search.empty'))
+        void search!
+          .query(q, 50)
+          .then((r) => {
+            if (mine !== seq || !layers.open) return
+            const rows = r.hits.flatMap((hit) => {
+              const b = kb.get(hit.blockId)
+              if (!b) return []
+              const text = plainText(b.content)
+              const parts =
+                text.trim() === ''
+                  ? [{ text: blockLabel(b) }]
+                  : highlightSnippet(text, q)
+              const trail = kb
+                .pathOf(b.id)
+                .slice(0, -1)
+                .map((x) => blockLabel(x))
+                .filter((x) => x !== '')
+              // 顶层块没有祖先：用它的名字当「住哪」，否则行里只剩一段正文，认不出出处
+              const hint = trail.length > 0 ? trail.join(' › ') : blockLabel(b)
+              return [
+                {
+                  id: `search/${b.id}`,
+                  label: parts.map((p) => p.text).join(''),
+                  parts,
+                  hint,
+                  icon: 'lucide:file-text',
+                  args: { blockId: b.id },
+                },
+              ]
+            })
+            layers.setRows(rows)
+          })
+          .catch(() => {
+            if (mine === seq) layers.setRows([])
+          })
+      },
+      onPick: (row) => {
+        const id = (row.args as { blockId?: unknown } | undefined)?.blockId
+        if (typeof id === 'string' && id !== '') app.openBlock(id, 'center')
+      },
+    })
+  },
   toast: (text, kind = 'info') => {
     if (!quiet) layers.toast(text, kind)
   },
@@ -2609,6 +2682,7 @@ diag = setupDiagnostics({
   setQuiet: (v) => {
     quiet = v
   },
+  getSearch: () => search,
 })
 
 paintStaticCopy()

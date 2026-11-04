@@ -20,6 +20,11 @@ import { dismissFloating } from './overlay-dismiss.ts'
 export interface Row {
   id: string
   label: string
+  /**
+   * 带高亮的显示片段（可选）。有它时渲染 `parts`，`label` 只作无障碍/回退文本。
+   * 用结构化片段而不是 HTML：正文是用户内容，拼 HTML 就等于把转义责任散给每个调用方。
+   */
+  parts?: { text: string; mark?: boolean }[]
   hint?: string
   icon?: string
   group?: string
@@ -303,6 +308,16 @@ export class Layers {
     this.renderRows()
   }
 
+  /**
+   * 换空态文案（搜索框用：没输入时说「输入关键词」，输入了没命中才说「没有匹配项」）。
+   * 只改文案，不重排已有行；列表为空时立刻重画一次。
+   */
+  setEmptyText(text: string): void {
+    if (!this.opts) return
+    this.opts.emptyText = text
+    if (this.rows.length === 0) this.renderRows()
+  }
+
   private applyQuery(q: string): void {
     this.opts?.onQuery?.(q)
     if (!this.opts?.onQuery) {
@@ -337,6 +352,7 @@ export class Layers {
       item.type = 'button'
       item.className = 'layer-item'
       item.dataset.index = String(i)
+      item.dataset.id = r.id
       if (i === this.active) item.dataset.active = '1'
       if (r.disabled) item.disabled = true
       const ico = document.createElement('span')
@@ -346,7 +362,19 @@ export class Layers {
       else ico.textContent = '·'
       const label = document.createElement('span')
       label.className = 'layer-label ui-ellipsis ui-ellipsis-grow'
-      label.textContent = r.label
+      if (r.parts && r.parts.length > 0) {
+        for (const p of r.parts) {
+          if (p.mark === true) {
+            const mark = document.createElement('mark')
+            mark.textContent = p.text
+            label.appendChild(mark)
+          } else {
+            label.appendChild(document.createTextNode(p.text))
+          }
+        }
+      } else {
+        label.textContent = r.label
+      }
       const hint = document.createElement('span')
       hint.className = 'layer-hint ui-ellipsis'
       hint.textContent = r.hint ?? (r.keyHint ? '' : (r.command ?? ''))
