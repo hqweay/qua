@@ -7,6 +7,7 @@
 import { t } from '../../core/infra/msg.ts'
 import type { FoldState } from '../../core/index.ts'
 import type { Op, Tx, Change } from '../../core/kb/types.ts'
+import type { UndoCapture } from '../../core/kb/scoped.ts'
 import type { BlockStore } from '../../core/model/store.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import { diff } from '../../core/kb/diff.ts'
@@ -280,13 +281,18 @@ export function setupPersistence(deps: PersistenceDeps) {
   function txRun<R>(
     fn: (tx: Tx) => R,
     source?: unknown,
-    opts: { directEdit?: boolean } = {},
-  ): { ops: Op[]; changes: Change[]; result: R } {
+    opts: { directEdit?: boolean; capture?: (undo: UndoCapture) => void } = {},
+  ): { ops: Op[]; changes: Change[]; result: R; undo: UndoCapture } {
     const n = pendingOps.length
     try {
-      const r = kb.tx(fn, { source, ...opts })
+      const r = kb.tx(fn, { source, directEdit: opts.directEdit })
       pendingOps.push(...r.ops)
       lastOps = r.ops
+      /**
+       * **捕获交给调用方的收集器**（不在这里记撤销）：一次动作可能拆成几笔写，
+       * 什么时候算「一步」只有动作的发起者知道（编辑器的 `begin/finishUndoEntry`）。
+       */
+      opts.capture?.(r.undo)
       return r
     } catch (e) {
       pendingOps.length = n
@@ -295,7 +301,11 @@ export function setupPersistence(deps: PersistenceDeps) {
   }
 
   /** 命令与编辑器共用的入口形状（`Run`）：只要结果 */
-  function run<R>(fn: (tx: Tx) => R, source?: unknown, opts: { directEdit?: boolean } = {}): R {
+  function run<R>(
+    fn: (tx: Tx) => R,
+    source?: unknown,
+    opts: { directEdit?: boolean; capture?: (undo: UndoCapture) => void } = {},
+  ): R {
     return txRun(fn, source, opts).result
   }
 

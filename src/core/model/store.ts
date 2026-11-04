@@ -11,14 +11,17 @@
  *     行内内容与 annos 住块上 ⇒ 快照天然带全它们，没有第二份要拼装。
  *   · **宣布只有一个入口**：`apply(ops)`（事务的出口）。调用方不许自己发通知 ——
  *     否则索引会被无谓作废、订阅者会被通知两次（两者都不报错，只是变慢/抖动）。
- *   · 当前是整片森林 JSON 快照；接内核后换成 Tx/Changes ＋ 增量索引。
+ *   · **撤销条目只记这次事务动过的块**（前态／后态 ＋ 落点），不存整片森林；
+ *     撤销/重做只对那几块生成 op（`kb/scoped.ts`）。
  */
-import { UndoStack, type Snap, type UndoKind } from './undo.ts'
+import { UndoStack, type UndoKind } from './undo.ts'
 import type { Block } from './model.ts'
 import type { Op } from '../kb/types.ts'
 import type { Sel } from './selection.ts'
 import { applyOps as patchIndex, lookupBlock, rebuild, type Index } from '../infra/index-port.ts'
-import { applyOps, diff } from '../kb/diff.ts'
+import { applyOps } from '../kb/diff.ts'
+import type { UndoCapture } from '../kb/scoped.ts'
+import { scopedOps } from '../kb/scoped.ts'
 import type { ForestLookup } from '../kb/types.ts'
 import { changesOf, structuralOf } from '../kb/changes.ts'
 
@@ -169,42 +172,6 @@ export class BlockStore {
     this.idx = null
   }
 
-  /** 整片森林 ＋ 发起者的选区；这是 undo 的快照单位（行内内容住块上，随块走） */
-  snap(sel: Sel | null): Snap {
-    return {
-      blocks: JSON.stringify(this.blocks),
-      sel: JSON.stringify(sel),
-    }
-  }
-
-  /**
-   * **恢复快照**：把森林变成快照里那份，并把「怎么变」表达成一批 op 交回去。
-   *
-   * 这是撤销/重做唯一的落地方式（`diff` + `applyOps`）。它与一次普通编辑走**同一条路**：
-   * 产出 op ⇒ 装配层并进待落盘队列 ⇒ 增量写盘。所以 `⌘Z` 不再需要「清四表 + 整库重写」。
-   *
-   * 三条口径：
-   *   · **快照仍是唯一真相**：`diff` 只回答「怎么走」；op 本身是每格的绝对值，
-   *     所以 `applyOps` 不再需要把快照当「复活块的来源」。
-   *     这**不是逆 op** —— op 说的是「每一格现在是什么」，逆 op 是另一份正确性来源。
-   *   · **未动块的对象身份不变**（`applyOps` 原地写格）⇒ 索引只需按 op 修补，不必整库重建。
-   *   · `at` 从目标快照派生（`diff` 保证）⇒ 同一次撤销重放两次字节相同。
-   *
-   * @returns `{ ops, sel }`：`ops` 交给装配层落盘；`sel` 让发起者自己恢复选区。
-   */
-  restore(s: Snap, source?: unknown): { ops: Op[]; sel: Sel | null } {
-    const target = JSON.parse(s.blocks) as Block[]
-    const ops = diff(this.blocks, target)
-    // 原地改（保持数组身份：编辑器手里的引用不会失效）
-    applyOps(this.blocks, ops)
-    /**
-     * ⚠️ **按 op 修补索引，不作废**：`applyOps` 原地写格 ⇒ 未动块还是同一批对象。
-     * 曾经这里 `discardIndex()`，因为当时是 `splice` 换掉整片森林（对象全换了）。
-     */
-    this.apply(ops, source)
-    return { ops, sel: JSON.parse(s.sel) as Sel | null }
-  }
-
   /**
    * 整体换库：换数组引用，清 undo，通知所有视图（source 不传）。
    *
@@ -233,19 +200,43 @@ export class BlockStore {
     return this.replaced
   }
 
-  record(before: Snap, kind: UndoKind, at: number): boolean {
-    return this.undoStack.record(before, kind, at)
+  /** 记一笔撤销：捕获来自事务出口（`capture === null` ＝ 这次动作没写过）。 */
+  record(capture: UndoCapture | null, sel: Sel | null, kind: UndoKind, at: number): boolean {
+    return this.undoStack.record(capture, sel, kind, at)
   }
 
-  /** 撤销一步；返回「怎么变」的 op 与要恢复的选区（`null` ＝ 没有可撤的） */
+  /**
+   * 撤销一步：**只对条目里那几块**生成 op（不再有整库快照与整库 diff）。
+   *
+   * 三条口径没变，只是作用域变了：
+   *   · **状态仍是唯一真相**：`scopedOps` 回答「这几块该长成什么样」；op 是绝对值，
+   *     不是「怎么退回去」的指令；
+   *   · **未动块的对象身份不变**（`applyOps` 原地写格）⇒ 索引按 op 修补；
+   *   · `at` 从目标侧派生 ⇒ 同一次撤销重放两次字节相同。
+   *
+   * @returns `{ ops, sel }`：`ops` 交给装配层落盘；`sel` 让发起者自己恢复选区。
+   */
   undo(source: unknown, sel: Sel | null): { ops: Op[]; sel: Sel | null } | null {
-    const s = this.undoStack.undo(this.snap(sel))
-    return s ? this.restore(s, source) : null
+    const entry = this.undoStack.undo(sel)
+    if (!entry) return null
+    const lookup = this.undoLookup()
+    const ops = scopedOps(lookup, entry.before, { directEdit: entry.directEdit })
+    applyOps(this.blocks, ops, lookup)
+    this.apply(ops, source)
+    return { ops, sel: entry.sel }
   }
 
-  /** 重做一步；同 `undo` */
-  redo(source: unknown, sel: Sel | null): { ops: Op[]; sel: Sel | null } | null {
-    const s = this.undoStack.redo(this.snap(sel))
-    return s ? this.restore(s, source) : null
+  /** 重做一步；同 `undo`，目标侧换成条目的 `after` */
+  redo(source: unknown, _sel: Sel | null): { ops: Op[]; sel: Sel | null } | null {
+    /** 撤销那一刻的选区由栈在 `undo()` 时记下；没有就退回改动前的选区 */
+    const entry = this.undoStack.redo()
+    if (!entry) return null
+    const redoSel = entry.redoSel ?? entry.sel
+    delete entry.redoSel
+    const lookup = this.undoLookup()
+    const ops = scopedOps(lookup, entry.after, { directEdit: entry.directEdit })
+    applyOps(this.blocks, ops, lookup)
+    this.apply(ops, source)
+    return { ops, sel: redoSel }
   }
 }

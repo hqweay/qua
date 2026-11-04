@@ -26,7 +26,7 @@ import {
   type Located,
 } from './model.ts'
 import { canWriteText, typeDeclOf } from './types.ts'
-import { isEmptyContent, joinRuns, plainLen, sliceRuns, splitRuns, cloneRunsNewIds, textRuns } from './runs.ts'
+import { isEmptyContent, joinRuns, plainLen, sliceRuns, splitRuns, cloneRunsNewIds, textRuns, type Run } from './runs.ts'
 import { walkForest } from './walk.ts'
 import { cloneMountEntries, MOUNTS_PROP } from '../views/mount.ts'
 import { isEmbedBlock } from '../views/embed.ts'
@@ -590,10 +590,10 @@ export function replaceBlockRange(doc: Doc, fromId: string, toId: string, lines:
 }
 
 /**
- * **删掉一个跨块选区覆盖的内容**（`⌘A` 之后按删除、或在选中处打字）。
+ * 跨块删除的**计划**（纯函数：**不改模型**）。
  *
  * 语义与文本编辑器一致：选区从「首块 off0」到「末块 off1」，
- * 中间的整块连同子树一起没掉，剩下的**首尾拼成一块**（保首块的 id）。
+ * 中间的整块（含末块）连子树一起退场，剩下的**首尾拼成一块**（保首块的 id）。
  *
  * ```
  *   [AAAA]          ← 从第 2 个字起选
@@ -602,12 +602,25 @@ export function replaceBlockRange(doc: Doc, fromId: string, toId: string, lines:
  *   ⇒ [AA + CC]     ← 一块，id ＝ 首块的 id
  * ```
  *
+ * 为什么返回计划而不是直接改：这是**结构写**，必须经 `Tx` 才能进撤销条目、
+ * 才能落盘。旧实现直接 `writeBlockContent` ＋ `list.splice`，整片森林快照把
+ * 「没有 op」这件事盖住了 —— 换成按块记前态之后，那种直写会当场丢掉撤销。
+ *
  * ⚠️ **首尾是同一块时不在这里处理**：那是普通块内删除，走 `editBlock`。
  * ⚠️ **段根不删**（`roots` 里的块）：它是视图装载单位，删它只是让视图看不见
- *    （库里还在，刷新就回来）。遇到就停在前一个可删的位置。
- * ⚠️ 返回值是**光标的落点块 id**；`null` ＝ 这一处不该被当作跨块删除处理。
+ *    （库里还在，刷新就回来）。
+ * ⚠️ `null` ＝ 这一处不该被当作跨块删除处理。
  */
-export function deleteBlockSpan(doc: Doc, startId: string, startOff: number, endId: string, endOff: number): string | null {
+export interface BlockSpanPlan {
+  /** 拼接后的落点（保首块 id，撤销与锚点都靠它） */
+  headId: string
+  /** 首块前半 ＋ 末块后半 */
+  content: Run[]
+  /** 要退场的块（**从前往后**，含末块）；子树随各自的操作根一起走 */
+  removeIds: string[]
+}
+
+export function blockSpanPlan(doc: Doc, startId: string, startOff: number, endId: string, endOff: number): BlockSpanPlan | null {
   const all = flatten(doc)
   const i = all.findIndex((b) => b.id === startId)
   const j = all.findIndex((b) => b.id === endId)
@@ -649,11 +662,15 @@ export function deleteBlockSpan(doc: Doc, startId: string, startOff: number, end
    */
   if (!canWriteText(head) || !canWriteText(tail)) return null
 
-  // 首块前半 ＋ 末块后半：原子的归属按切点自然分家（要么整枚在前半、要么整枚在后半）
-  writeBlockContent(head, joinRuns(sliceRuns(head.content, 0, startOff), sliceRuns(tail.content, endOff, plainLen(tail.content))))
-  // 首块的子树保留（选区不含它们）；被删掉的那些块连子树一起消失
-  list.splice(from + 1, to - from)
-  return head.id
+  /**
+   * 首块前半 ＋ 末块后半：原子的归属按切点自然分家（要么整枚在前半、要么整枚在后半）。
+   * 首块的子树保留（选区不含它们）；被删掉的那些块连子树一起退场。
+   */
+  return {
+    headId: head.id,
+    content: joinRuns(sliceRuns(head.content, 0, startOff), sliceRuns(tail.content, endOff, plainLen(tail.content))),
+    removeIds: list.slice(from + 1, to + 1).map((b) => b.id),
+  }
 }
 
 /**

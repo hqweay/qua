@@ -109,9 +109,8 @@ test('撤销：小库与大库的落盘行数**相同**（撤销不再整库重�
     const kb = new MemoryKb(store)
     const target = blocks[Math.floor(n / 2)]!
 
-    const before = store.snap(null)
-    kb.tx((tx) => tx.patch(target.id, (b) => writeBlockContent(b, textRuns('改了'))))
-    store.record(before, 'other', Date.now())
+    const r0 = kb.tx((tx) => tx.patch(target.id, (b) => writeBlockContent(b, textRuns('改了'))))
+    store.record(r0.undo, null, 'other', Date.now())
 
     const r = store.undo('me', null)!
     // 撤销产出的 op 走同一条增量编码路径（`rowWritesFor`，不是 `workspaceToRowWrites`）

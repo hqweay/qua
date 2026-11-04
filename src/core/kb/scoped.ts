@@ -111,6 +111,38 @@ function copyCells(c: BlockCells): BlockCells {
 }
 
 /**
+ * 合并两侧状态：`before` 留**第一次**（撤销回到开始之前），`after` 用**最后一次**
+ * （重做回到停手那一刻）。同 id 只留一条；新 id 追加在后面（顺序由 `scopedOps` 按树深再排）。
+ *
+ * 导出给「一次动作拆成多笔写」的收集器用（编辑器／装配层），不给撤销栈之外的消费方。
+ */
+export function mergeStates(
+  prev: readonly TouchedState[],
+  next: readonly TouchedState[],
+  keep: 'first' | 'last',
+): TouchedState[] {
+  const out = new Map(prev.map((s) => [s.id, s]))
+  for (const s of next) {
+    if (keep === 'last' || !out.has(s.id)) out.set(s.id, s)
+  }
+  return [...out.values()]
+}
+
+/**
+ * 把一次动作里的多笔事务捕获合并成一条撤销条目。
+ *
+ * `directEdit` 用 **OR**：每一笔捕获都来自一次合法写入，反向把同一条内容写回去
+ * 不会比当初更宽松（日记/字段定义仍会被 `canDirectEditText` 挡住）。
+ */
+export function mergeCapture(prev: UndoCapture, next: UndoCapture): UndoCapture {
+  return {
+    before: mergeStates(prev.before, next.before, 'first'),
+    after: mergeStates(prev.after, next.after, 'last'),
+    directEdit: prev.directEdit || next.directEdit,
+  }
+}
+
+/**
  * **出口捕获**：把 `Tx` 的 touched 表变成撤销条目要的两侧状态。
  *
  * 为什么在出口深拷：`touched` 里的 `block` 是**活引用**，事务返回后它还会被下一次编辑改；

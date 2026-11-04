@@ -37,7 +37,7 @@ import {
   enterKind,
   locate,
   insertSiteOf,
-  deleteBlockSpan,
+  blockSpanPlan,
   detectTrigger,
   mergeIntoPrevPlan,
   moveStaysInside,
@@ -89,7 +89,6 @@ import {
   type MovePlan,
   type QuerySpec,
   type Sel,
-  type Snap,
   type TodoState,
   type TriggerChar,
   type TriggerHit,
@@ -150,6 +149,7 @@ export interface ViewState {
 
 // 只取**类型**：`view` 拿不到实现，写入的落地方式归装配层（见 `Run`）
 import type { Op, Tx } from '../../core/kb/types.ts'
+import { mergeCapture, type UndoCapture } from '../../core/kb/scoped.ts'
 import type { AssetView } from '../../core/infra/assets.ts'
 // 标签块的「找到或创建」有两种落地（直写 / 事务），判据只有一份
 import { ensureTagInTx, tagLookupOf } from '../../core/kb/ensure-tag.ts'
@@ -198,9 +198,23 @@ export interface Probe {
  * 焦点从未进过那张卡，活动编辑器还是正文 —— 于是正文把这次通知当成自己写的，跳过
  * 重画，界面停在拖拽前（实测：模型已动、两个表面都不动，点一下别处才补画）。
  *
- * 省略 ⇒ 编辑器照旧直改活块（迁移期的兜底，不是终点）。
+ * `opts.capture` ＝ 事务出口的撤销捕获（见下）；回报**结果**不变，调用点不必改形状。
  */
-export type Run = <R>(fn: (tx: Tx) => R, source?: unknown, opts?: { directEdit?: boolean }) => R
+export type Run = <R>(
+  fn: (tx: Tx) => R,
+  source?: unknown,
+  opts?: {
+    directEdit?: boolean
+    /**
+     * **事务出口的撤销捕获**（装配层在 `kb.tx` 返回后调）。
+     *
+     * 为什么是回调而不是让 `Run` 返回 `{result, undo}`：31 个写入口里有 8 个在用返回值，
+     * 改返回类型会把「只是想拿个布尔」的地方全部改一遍；回调只多一个可选参数，
+     * 收集器（一次动作可能拆成多笔写）也不必知道 `Run` 的形状。
+     */
+    capture?: (undo: UndoCapture) => void
+  },
+) => R
 
 export interface ViewOpts {
   container: HTMLElement
@@ -558,6 +572,10 @@ export class BlockEditor {
    * 逐块现建要扫两趟森林。任何一次模型写之后作废，下一次问到时重建一次。
    */
   private fieldTableCache: FieldTable | null = null
+  /** 当前动作的撤销捕获袋：`write` 的每个事务都会把出口捕获并进来（一次动作可能拆成多笔） */
+  private entryCap: UndoCapture | null = null
+  /** 当前动作开始时的选区（撤销后回到这里） */
+  private entrySel: Sel | null = null
   /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
   private readonly offStore: () => void
   private readonly unbind: () => void
@@ -574,11 +592,24 @@ export class BlockEditor {
       // 发起写的编辑器就是自己（见 `Run` 的 source 口径）：不注入的话，装配层的
       // 「活动编辑器」兜底会把跨表面的一笔写记到别的编辑器头上，那台就跳过重画，
       // 界面停在拖拽前。
-      return o.write((tx) => {
-        const r = fn(tx)
-        this.keepWritableSlots(tx)
-        return r
-      }, source ?? this, opts)
+      return o.write(
+        (tx) => {
+          const r = fn(tx)
+          this.keepWritableSlots(tx)
+          return r
+        },
+        source ?? this,
+        {
+          ...opts,
+          /**
+           * 事务出口的捕获并进**当前动作**的袋子：一次结构动作可能拆成几笔写，
+           * 而撤销要把它们当成一步（`mergeCapture`：before 留第一次、after 用最后一次）。
+           */
+          capture: (u) => {
+            this.entryCap = this.entryCap ? mergeCapture(this.entryCap, u) : u
+          },
+        },
+      )
     }
     this.onExpandContext = o.onExpandContext
     this.onContextBack = o.onContextBack
@@ -667,9 +698,24 @@ export class BlockEditor {
 
   /* ------------------------------------------------------------ 快照 */
 
-  snap(): Snap {
-    // 快照是**整片森林**（store 的 blocks + marks + atoms），不是当前视图的拷贝
-    return this.store.snap(this.sel)
+  /**
+   * **开始一个撤销条目**：清空捕获袋，并记下这一笔之前的选区。
+   *
+   * 之后的每次 `write` 都会把事务出口的捕获并进来 —— 不再有「取整片森林快照」这一步。
+   */
+  beginUndoEntry(): void {
+    this.entryCap = null
+    this.entrySel = this.sel
+  }
+
+  /**
+   * **收尾一个撤销条目**：把这一动作里所有事务的捕获交给撤销栈。
+   *
+   * `capture === null`（这一段没有开过事务）⇒ 不新建条目；合并窗口由栈判。
+   */
+  finishUndoEntry(kind: UndoKind, at = Date.now()): void {
+    this.undo.record(this.entryCap, this.entrySel, kind, at)
+    this.entryCap = null
   }
 
   /**
@@ -1699,10 +1745,10 @@ export class BlockEditor {
    * 所有命令都经此改模型，没有第二条写入路径。
    */
   tx(kind: UndoKind, fn: () => void, rerender: 'all' | 'block' | 'none' = 'all'): void {
-    const before = this.snap()
+    this.beginUndoEntry()
     const caret = this.sel
     fn()
-    this.undo.record(before, kind, Date.now())
+    this.finishUndoEntry(kind)
     if (rerender === 'all') this.renderAll()
     else if (rerender === 'block' && caret) this.renderBlock(caret.aBlock)
     if (caret) this.placeCaret(caret.aBlock, caret.aOff)
@@ -1717,8 +1763,8 @@ export class BlockEditor {
    * 就是这里仅有的参数。快照与 `write` 留在调用方：写前的校验与准备各不相同，
    * 硬收进来只是把分叉改成参数汤（run 级的 `commitContent` 是同一判据收的）。
    */
-  private structTail(before: Snap, caret?: { id: string; off: number } | null, ids?: readonly string[]): void {
-    this.undo.record(before, 'structural', Date.now())
+  private structTail(caret?: { id: string; off: number } | null, ids?: readonly string[]): void {
+    this.finishUndoEntry('structural')
     this.renderAll()
     if (caret) this.placeCaret(caret.id, caret.off)
     this.emitChange('struct', ids)
@@ -1755,10 +1801,10 @@ export class BlockEditor {
   editBlock(id: string, from: number, to: number, insert: string, kind: 'insert' | 'delete' = 'insert'): void {
     const loc = locate(this.doc, id)
     if (!loc) return
-    const before = this.snap()
+    this.beginUndoEntry()
     const next = spliceRuns(loc.block.content, from, to, insert)
     this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
-    this.undo.record(before, kind, Date.now())
+    this.finishUndoEntry(kind, Date.now())
     this.renderBlock(id)
     this.emitChange('text')
   }
@@ -1777,10 +1823,26 @@ export class BlockEditor {
     if (!s) return null
     const r = normSel(this.doc, s)
     if (r.startBlock === r.endBlock) return null
-    const before = this.snap()
-    const caretId = deleteBlockSpan(this.doc, r.startBlock, r.startOff, r.endBlock, r.endOff)
-    if (!caretId) return null
-    this.undo.record(before, 'delete', Date.now())
+    const plan = blockSpanPlan(this.doc, r.startBlock, r.startOff, r.endBlock, r.endOff)
+    if (!plan) return null
+    const caretId = plan.headId
+    this.beginUndoEntry()
+    /**
+     * **经事务落**：旧实现直接 `writeBlockContent` ＋ `splice` 兄弟列表，
+     * 靠整片森林快照兜底撤销。现在撤销只记 touched，直写会让这一次收拢整个丢掉。
+     *
+     * 被吃掉的块走**原位软删**（与合并同一口径），可恢复；正文先清空——
+     * 末块的字已经搬进首块，留着就是库里有两份同一句话。身份块（查询/日记）不碰正文。
+     */
+    this.write((tx) => {
+      tx.patch(plan.headId, (b) => writeBlockContent(b, plan.content))
+      for (const id of plan.removeIds) {
+        const b = this.store.find(id)
+        if (b && canWriteText(b)) tx.patch(id, (x) => writeBlockContent(x, []))
+        tx.remove(id)
+      }
+    })
+    this.finishUndoEntry('delete')
     const loc = locate(this.doc, caretId)
     this.sel = loc ? { aBlock: caretId, aOff: r.startOff, hBlock: caretId, hOff: r.startOff } : null
     this.renderAll()
@@ -1878,7 +1940,7 @@ export class BlockEditor {
     const b = this.store.find(blockId)
     if (!b) return false
     // 快照取在**建标签**之前：撤销这次挂标签时，顺手建出的标签块也该一起回滚
-    const before = this.snap()
+    this.beginUndoEntry()
     // 建标签块（可能）＋写归属是同一笔：拆开就会留下「只有标签、没有归属」的半批。
     // 名字为空／已挂 ⇒ 事务里什么都不写（零 op）
     const ok = this.write((tx) => {
@@ -1888,7 +1950,7 @@ export class BlockEditor {
       return true
     })
     if (!ok) return false
-    this.undo.record(before, 'other', Date.now())
+    this.finishUndoEntry('other', Date.now())
     if (locate(this.doc, blockId)) this.renderBlock(blockId)
     this.emitChange('text', [blockId])
     return true
@@ -1908,7 +1970,7 @@ export class BlockEditor {
     // 正文里的露面 ＝ 带 `#` 风味、指向这个标签的引用 run（整枚收，顺序无关）
     const hits = refRunsOf(b.content).filter((r) => r.flavor === '#' && r.to === tagId)
     if (hits.length === 0 && !hasTag(b, tagId)) return false
-    const before = this.snap()
+    this.beginUndoEntry()
     /**
      * ⚠️ 露面住在**块自己的内容**里 —— 与「这一块此刻画没画在屏上」无关。
      *    所以不按 `locate` 决定收不收：目标块不在本视图里时也要收，
@@ -1920,7 +1982,7 @@ export class BlockEditor {
       tx.patch(blockId, (bb) => writeBlockContent(bb, strip(bb.content)))
       tx.setTags(blockId, tagIdsOf(b).filter((t) => t !== tagId))
     })
-    this.undo.record(before, 'delete', Date.now())
+    this.finishUndoEntry('delete')
     if (loc) this.renderAll()
     this.emitChange('text', [blockId])
     return true
@@ -1960,7 +2022,7 @@ export class BlockEditor {
      * ⚠️ 顺序不许反：必须在 `write` **之前**取（快照记的是「要回到的那份」）；
      *    但「要不要取」可以更早决定 —— 那正是这里省下来的。
      */
-    const before = this.undo.willMerge(kind, at) ? null : this.snap()
+    this.beginUndoEntry()
     this.write(
       (tx) => {
         tx.patch(id, (b) => writeBlockContent(b, next))
@@ -1971,7 +2033,7 @@ export class BlockEditor {
       { directEdit: true },
     )
     const caret = this.sel ? this.sel.aOff : null
-    this.undo.record(before, kind, at)
+    this.finishUndoEntry(kind, at)
     if (reRender) {
       this.renderBlock(id)
       if (caret !== null) this.placeCaret(id, Math.min(caret, plainLen(loc.block.content)))
@@ -2033,7 +2095,7 @@ export class BlockEditor {
      * 拒绝时正文已回滚，拆点要收回到新正文长度之内（否则会按旧长度切开一行短文本）。
      */
     this.commitEdit(id)
-    const before = this.snap()
+    this.beginUndoEntry()
     const loc = locate(this.doc, id)
     if (!loc) return
     /**
@@ -2048,7 +2110,7 @@ export class BlockEditor {
 
     const out = this.write((tx) => this.splitTx(tx, id, offset, cut))
     if (!out) return
-    this.structTail(before, out.caret ?? null)
+    this.structTail(out.caret ?? null)
   }
 
   /**
@@ -2136,7 +2198,7 @@ export class BlockEditor {
     const all = flatten(this.doc)
     const i = all.findIndex((b) => b.id === id)
     if (i <= 0) return
-    const before = this.snap()
+    this.beginUndoEntry()
     /**
      * 先问「前一块是不是一条没有正文的占位线」：那种情况下这次退格的含义是
      * **删掉它**，而不是「把字并进去」（它没有字可并）。
@@ -2145,7 +2207,7 @@ export class BlockEditor {
     const placeholder = prevPlaceholder(this.doc, id)
     if (placeholder) {
       this.write((tx) => tx.remove(placeholder.removed))
-      this.structTail(before, { id, off: 0 })
+      this.structTail({ id, off: 0 })
       return
     }
     const plan = mergeIntoPrevPlan(this.doc, id)
@@ -2163,7 +2225,7 @@ export class BlockEditor {
       tx.patch(plan.removed, (b) => writeBlockContent(b, []))
       tx.remove(plan.removed)
     })
-    this.structTail(before, { id: plan.kept, off: plan.at })
+    this.structTail({ id: plan.kept, off: plan.at })
   }
 
   /** Backspace：块首合并到上一块；否则交给原生删除 */
@@ -2243,14 +2305,14 @@ export class BlockEditor {
   ): void {
     if (!plan) return
     if (!this.scopeAllowsMove(id, plan)) return
-    const before = this.snap()
+    this.beginUndoEntry()
     this.write((tx) => {
       tx.move(id, plan.parentId, plan.index)
       // 结构换位置也是一次改动：时刻若只跟着正文走，块会被搬到别处、时间停在原处
       tx.patch(id, (x) => (x.modified = Date.now()))
     })
     if (o.unfoldId) unfoldBlock(this.doc, o.unfoldId)
-    this.structTail(before, o.caretAt ?? (this.sel ? { id: this.sel.aBlock, off: this.sel.aOff } : null))
+    this.structTail(o.caretAt ?? (this.sel ? { id: this.sel.aBlock, off: this.sel.aOff } : null))
   }
 
   duplicate(id: string): string | null {
@@ -2261,11 +2323,11 @@ export class BlockEditor {
      * 那是一个刷新就消失的位置。根要复制，走源位置。
      */
     if (this.structuralScope === 'roots' && loc.parent === null) return null
-    const before = this.snap()
+    this.beginUndoEntry()
     // 克隆自带内容（原子已换新 id——复制的是内容不是身份），没有第二份锚点要搬
     const { block } = cloneSubtree(loc.block)
     this.write((tx) => tx.insert(block, loc.parent?.id ?? null, loc.index + 1))
-    this.structTail(before, { id: block.id, off: 0 })
+    this.structTail({ id: block.id, off: 0 })
     return block.id
   }
 
@@ -2277,7 +2339,7 @@ export class BlockEditor {
    * 用户按 ⌘Z 撤不回来，关掉应用还会丢。
    */
   restoreFromTrash(id: string): boolean {
-    const before = this.snap()
+    this.beginUndoEntry()
     /**
      * 恢复的是**被删的那个操作根**；它的祖先若也被删了，它仍然不可见
      * （不可见是继承来的）⇒ 这种情况如实返回 `false`，由调用方给文案。
@@ -2290,7 +2352,7 @@ export class BlockEditor {
     this.write((tx) => {
       tx.restore(id)
     })
-    this.structTail(before)
+    this.structTail()
     return true
   }
 
@@ -2313,7 +2375,7 @@ export class BlockEditor {
      */
     if (loc.parent === null && hasIdentity(loc.block)) return
     if (loc.parent === null && !this.allowRootRemove) return
-    const before = this.snap()
+    this.beginUndoEntry()
     const idx = flatten(this.doc).findIndex((b) => b.id === id)
     const wasRoot = loc.parent === null
     /**
@@ -2340,7 +2402,7 @@ export class BlockEditor {
     }
     const after = flatten(this.doc)
     const caret = after[Math.min(idx, after.length - 1)]!
-    this.structTail(before, { id: caret.id, off: 0 })
+    this.structTail({ id: caret.id, off: 0 })
   }
 
   /**
@@ -2475,12 +2537,12 @@ export class BlockEditor {
       fields.find((f) => f.kind === 'checkbox')
     const propId = field?.propId ?? TASK_STATUS_PROP_ID
     const next = field ? field.value !== true : false
-    const before = this.snap()
+    this.beginUndoEntry()
     // 切的是一个属性值：一笔 patch 正好 1 条 `prop.set`（与「插入待办」同一形状）
     this.write((tx) => {
       tx.patch(id, (b) => setValue(b, propId, next))
     })
-    this.structTail(before, null, [id])
+    this.structTail(null, [id])
   }
 
   /**
@@ -2500,9 +2562,9 @@ export class BlockEditor {
     const loc = locate(this.doc, id)
     if (!loc) return 'none'
     if (todoOf(loc.block, this.fieldTable()) === undefined) return 'none'
-    const before = this.snap()
+    this.beginUndoEntry()
     this.write((tx) => tx.patch(id, (b) => clearValue(b, TASK_STATUS_PROP_ID)))
-    this.structTail(before, null, [id])
+    this.structTail(null, [id])
     // 字段读取表是懒建的派生表：上面这一笔可能改了「哪些标签声明了这一栏」之外的形状，
     // 但值／槽变了 ⇒ 重新定位再问一次，别读改之前那个 `loc`
     const after = locate(this.doc, id)
@@ -2513,10 +2575,10 @@ export class BlockEditor {
   setText(id: string, text: string): void {
     const loc = locate(this.doc, id)
     if (!loc) return
-    const before = this.snap()
+    this.beginUndoEntry()
     const next = textRuns(text)
     this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
-    this.undo.record(before, 'insert', Date.now())
+    this.finishUndoEntry('insert')
     this.renderBlock(id)
     this.emitChange('text')
   }
@@ -2544,7 +2606,7 @@ export class BlockEditor {
   insertBlockAfter(id: string, text: string, todo?: TodoState): string | null {
     const loc = locate(this.doc, id)
     if (!loc) return null
-    const before = this.snap()
+    this.beginUndoEntry()
     const blank = isEmptyContent(loc.block.content) && !hasLiveChildren(loc.block) && canWriteText(loc.block)
     if (blank && text === '') {
       /**
@@ -2563,7 +2625,7 @@ export class BlockEditor {
       this.write((tx) => {
         tx.patch(loc.block.id, (b) => setValue(b, TASK_STATUS_PROP_ID, todo === 'done'))
       })
-      this.structTail(before, { id: loc.block.id, off: 0 }, [loc.block.id])
+      this.structTail({ id: loc.block.id, off: 0 }, [loc.block.id])
       return loc.block.id
     }
     const b = mkBlock(text)
@@ -2592,7 +2654,7 @@ export class BlockEditor {
       return true
     })
     if (!ok) return null
-    this.structTail(before, { id: b.id, off: 0 })
+    this.structTail({ id: b.id, off: 0 })
     return b.id
   }
 
@@ -2634,7 +2696,7 @@ export class BlockEditor {
     if (target === '') return null
     const loc = locate(this.doc, target) ?? locate({ roots: this.store.blocks }, target)
     if (!loc) return null
-    const before = this.snap()
+    this.beginUndoEntry()
     const parentId = loc.parent?.id ?? null
     const seed: QuerySpec = parentId ? { where: { up: { is: '$self' } } } : { where: { any: [] } }
     const blank = isEmptyContent(loc.block.content) && !hasLiveChildren(loc.block) && canWriteText(loc.block)
@@ -2655,7 +2717,7 @@ export class BlockEditor {
         return true
       })
       if (!ok) return null
-      this.structTail(before, { id: empty.id, off: 0 }, [loc.block.id, empty.id])
+      this.structTail({ id: empty.id, off: 0 }, [loc.block.id, empty.id])
       return loc.block.id
     }
 
@@ -2668,7 +2730,7 @@ export class BlockEditor {
       return true
     })
     if (!ok) return null
-    this.structTail(before, { id: empty.id, off: 0 }, [query.id, empty.id])
+    this.structTail({ id: empty.id, off: 0 }, [query.id, empty.id])
     return query.id
   }
 
@@ -2702,7 +2764,7 @@ export class BlockEditor {
      */
     const loc = locate(this.doc, id) ?? locate({ roots: this.store.blocks }, id)
     if (!loc) return null
-    const before = this.snap()
+    this.beginUndoEntry()
 
     /**
      * 空块 ⇒ 原地变类型。
@@ -2720,7 +2782,7 @@ export class BlockEditor {
           b.modified = Date.now()
         })
       })
-      this.structTail(before, null, [loc.block.id])
+      this.structTail(null, [loc.block.id])
       return loc.block.id
     }
 
@@ -2740,7 +2802,7 @@ export class BlockEditor {
       return true
     })
     if (!ok) return null
-    this.structTail(before, { id: empty.id, off: 0 })
+    this.structTail({ id: empty.id, off: 0 })
     return widget.id
   }
 
@@ -2822,9 +2884,9 @@ export class BlockEditor {
   removeEmbed(hostId: string): boolean {
     const b = this.store.find(hostId)
     if (!b || !isEmbedBlock(b)) return false
-    const before = this.snap()
+    this.beginUndoEntry()
     this.write((tx) => tx.remove(hostId))
-    this.structTail(before)
+    this.structTail()
     return true
   }
 
@@ -2856,7 +2918,7 @@ export class BlockEditor {
     rerender: 'single' | 'all',
     op: (next: InlineRun[], r: { blockId: string; start: number; end: number }) => InlineRun[],
   ): void {
-    const before = this.snap()
+    this.beginUndoEntry()
     const apply = (blockId: string, content: readonly InlineRun[]): InlineRun[] => {
       let next: InlineRun[] = [...content]
       for (const r of ranges) {
@@ -2872,7 +2934,7 @@ export class BlockEditor {
         if (b) tx.patch(bid, (bb) => writeBlockContent(bb, apply(bid, bb.content)))
       }
     })
-    this.undo.record(before, 'mark', Date.now())
+    this.finishUndoEntry('mark')
     if (rerender === 'single' && ranges.length === 1) this.renderBlock(ranges[0]!.blockId)
     else this.renderAll()
     this.placeRange(s)
@@ -2915,9 +2977,9 @@ export class BlockEditor {
    * ⚠️ `caret` 省略 ⇒ **不动光标**：从浮层里改东西时，用户的注意力在浮层上，
    *    把光标甩到别处等于抢一次焦点。
    */
-  private commitContent(id: string, next: readonly InlineRun[], before: Snap, undo: UndoKind, caret?: number): void {
+  private commitContent(id: string, next: readonly InlineRun[], undo: UndoKind, caret?: number): void {
     this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
-    this.undo.record(before, undo, Date.now())
+    this.finishUndoEntry(undo)
     this.renderBlock(id)
     if (caret !== undefined) this.placeCaret(id, caret)
     this.emitChange('text')
@@ -2933,9 +2995,9 @@ export class BlockEditor {
     const loc = locate(this.doc, id)
     if (!loc) return null
     const off = this.sel?.aOff ?? 0
-    const before = this.snap()
+    this.beginUndoEntry()
     const next = insertRunAt(loc.block.content, off, run)
-    this.commitContent(id, next, before, 'other', off + 1)
+    this.commitContent(id, next, 'other', off + 1)
     return run.id
   }
 
@@ -2980,7 +3042,7 @@ export class BlockEditor {
     if (!loc) return null
     const len = plainLen(loc.block.content)
     if (offset < 0 || offset > len) return null
-    const before = this.snap()
+    this.beginUndoEntry()
     const run: AssetRun = {
       id: uuidv7Hex(),
       t: 'asset',
@@ -2988,7 +3050,7 @@ export class BlockEditor {
       ...(snap?.label ? { label: snap.label } : {}),
     }
     const next = insertRunAt(loc.block.content, offset, run)
-    this.commitContent(blockId, next, before, 'other', offset + 1)
+    this.commitContent(blockId, next, 'other', offset + 1)
     return run.id
   }
 
@@ -3047,9 +3109,9 @@ export class BlockEditor {
       return text === '' ? rest : { ...rest, anchor: text }
     }
     const next: InlineRun[] = hit.block.content.map((r) => (r.t === 'ref' && r.id === runId ? patch(r) : r))
-    const before = this.snap()
+    this.beginUndoEntry()
     // 不强迫光标：这个动作来自浮层，此刻用户的焦点在浮层里，抢回来就是一次焦点跳变
-    this.commitContent(hit.block.id, next, before, 'other')
+    this.commitContent(hit.block.id, next, 'other')
     return true
   }
 
@@ -3070,8 +3132,8 @@ export class BlockEditor {
     if (hit.run.url === url && hit.run.v === text) return false
     const patched: LinkRun = { ...hit.run, url, v: text }
     const nextContent = hit.block.content.map((r) => (r.t === 'link' && r.id === runId ? patched : r))
-    const before = this.snap()
-    this.commitContent(hit.block.id, nextContent, before, 'other')
+    this.beginUndoEntry()
+    this.commitContent(hit.block.id, nextContent, 'other')
     return true
   }
 
@@ -3105,8 +3167,8 @@ export class BlockEditor {
       ...('marks' in run && run.marks && run.marks.length > 0 ? { marks: run.marks } : {}),
     }
     const nextContent = hit.block.content.map((r) => (r.t !== 'text' && r.id === runId ? next : r))
-    const before = this.snap()
-    this.commitContent(hit.block.id, nextContent, before, 'other')
+    this.beginUndoEntry()
+    this.commitContent(hit.block.id, nextContent, 'other')
     return true
   }
 
@@ -3129,7 +3191,7 @@ export class BlockEditor {
     const to = run.to ?? ''
     if (to !== '' && this.store.find(to)) return 'none'
     const label = (run.anchor ?? run.label ?? '').trim()
-    const before = this.snap()
+    this.beginUndoEntry()
     let mode: 'restored' | 'repointed' | 'none' = 'none'
     const ok = this.write((tx) => {
       if (to !== '' && trashOf(this.store.blocks).some((b) => b.id === to)) {
@@ -3153,7 +3215,7 @@ export class BlockEditor {
       return true
     })
     if (!ok) return 'none'
-    this.undo.record(before, 'other', Date.now())
+    this.finishUndoEntry('other', Date.now())
     this.renderAll()
     this.emitChange('struct')
     return mode
@@ -3162,10 +3224,10 @@ export class BlockEditor {
   /** 删掉一枚行内原子（显式动作；只动那一格，文本不受影响） */
   removeRun(runId: string): void {    const hit = this.findRun(runId)
     if (!hit) return
-    const before = this.snap()
+    this.beginUndoEntry()
     const next = removeRunById(hit.block.content, runId)
     this.write((tx) => tx.patch(hit.block.id, (b) => writeBlockContent(b, next)))
-    this.undo.record(before, 'delete', Date.now())
+    this.finishUndoEntry('delete')
     this.renderAll()
     this.emitChange('text')
   }
@@ -3316,7 +3378,7 @@ export class BlockEditor {
     const lastEl = last ? this.blockEl(last.block.id) : null
     if (lastEl && clientY < lastEl.getBoundingClientRect().bottom) return false
 
-    const before = this.snap()
+    this.beginUndoEntry()
     unfoldBlock(this.doc, root.id)
     /**
      * **复用末尾空块，不无中生有**：点底部若最后一段末尾已有一个空块（既无文字也无子块），
@@ -3333,7 +3395,7 @@ export class BlockEditor {
     const child = emptyTail ?? mkBlock('')
     if (!emptyTail) {
       this.write((tx) => tx.insert(child, root.id, root.children.length))
-      this.undo.record(before, 'structural', Date.now())
+      this.finishUndoEntry('structural', Date.now())
     }
     this.renderAll()
     this.placeCaret(child.id, 0)
@@ -3427,9 +3489,9 @@ export class BlockEditor {
       blockContent: (id) => locate(this.doc, id)?.block.content ?? [],
       restoreBlockContent: (id, content) => {
         if (!locate(this.doc, id)) return
-        const before = this.snap()
+        this.beginUndoEntry()
         this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, content)))
-        this.undo.record(before, 'delete', Date.now())
+        this.finishUndoEntry('delete')
         this.emitChange('text', [id])
       },
       /**
@@ -3569,7 +3631,7 @@ export class BlockEditor {
     const loc = id ? locate(this.doc, id) : null
     if (!id || !loc) return false
     const pick = opts.pick
-    const before = this.snap()
+    this.beginUndoEntry()
     /** 这次是否往树上插了新块（记录）——真插了就整片重画（索引／块数要跟上） */
     let createdBlock = false
 
@@ -3650,7 +3712,7 @@ export class BlockEditor {
      * 会被并成一步 —— 一次撤销就回到「输入前」，跳过落点那一格。所以这里一律记
      * `other`（不可合并）：落点动作是**显式的一次选择**，不是打字的延续。
      */
-    this.undo.record(before, 'other', Date.now())
+    this.finishUndoEntry('other')
     // 插了新块 ⇒ 整片重画（索引／块数要跟上）；只改这一行时仍走单行
     if (createdBlock) this.renderAll()
     else this.renderBlock(id)
@@ -3691,7 +3753,7 @@ export class BlockEditor {
     const lines = text.split('\n')
     const loc = locate(this.doc, id)
     if (!loc) return
-    const before = this.snap()
+    this.beginUndoEntry()
     if (lines.length === 1) {
       const next = spliceRuns(loc.block.content, offset, offset, this.runsWithRefs(lines[0]!))
       this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
@@ -3717,7 +3779,7 @@ export class BlockEditor {
         created.forEach((c, i) => tx.insert(c, parentId, baseIndex + i))
       })
     }
-    this.undo.record(before, 'insert', Date.now())
+    this.finishUndoEntry('insert')
     this.renderAll()
     this.placeCaret(id, offset + (lines[0]?.length ?? 0))
     this.emitChange('text')

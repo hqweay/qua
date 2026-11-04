@@ -1,13 +1,13 @@
 /**
- * 撤销栈与命令日志：快照式 undo，外加组合期守卫需要的调用日志。
+ * 撤销栈与命令日志：**条目式 undo**（两侧状态 ＋ 选区），外加组合期守卫需要的调用日志。
+ *
+ * 条目里只有「这次事务动过的块」的前态／后态（见 `kb/scoped.ts`），不再有整片森林。
+ * 撤销/重做只是把条目从一边搬到另一边：**两侧都在条目里**，所以搬家时不需要
+ * 现取一份「现在」的快照 —— 那正是旧实现每次 ⌘Z 都要付的第二笔整库序列化。
  */
 import type { Sel } from './selection.ts'
 import type { UndoCapture } from '../kb/scoped.ts'
-
-export interface Snap {
-  blocks: string
-  sel: string
-}
+import { mergeStates } from '../kb/scoped.ts'
 
 export type UndoKind = 'insert' | 'delete' | 'structural' | 'mark' | 'other'
 
@@ -24,11 +24,17 @@ export interface UndoEntry extends UndoCapture {
   sel: Sel | null
   kind: UndoKind
   at: number
+  /**
+   * **撤销那一刻**的选区（不是「改动之后」）：重做回到这里。
+   *
+   * 旧实现把这个值存在 `future` 栈的那份整库快照里；现在它只是一格，跟条目一起走。
+   */
+  redoSel?: Sel | null
 }
 
 export class UndoStack {
-  private past: { snap: Snap; kind: UndoKind; at: number }[] = []
-  private future: Snap[] = []
+  private past: UndoEntry[] = []
+  private future: UndoEntry[] = []
   /** 连续同类编辑的合并窗口（1200ms） */
   mergeWindowMs = 1200
 
@@ -42,46 +48,50 @@ export class UndoStack {
     this.past = []
     this.future = []
   }
-  /**
-   * **这一笔会不会被合并进上一笔**（只对 `insert`／`delete` 在 1200ms 内成立）。
-   *
-   * 为什么要问：合并时那份快照**根本不会入栈**，取它就是纯浪费 ——
-   * 而它是 `JSON.stringify(整片森林)`：实测 50000 块时 10.2ms，
-   * 而一次按键的事务本身只要 0.55ms。也就是说**连续打字的每一次按键，
-   * 95% 的时间花在一份取完就丢的快照上**。
-   *
-   * ⇒ 调用方在**改动之前**用 `kind`／`at` 问一句，会合并就跳过取快照。
-   */
-  willMerge(kind: UndoKind, at: number): boolean {
-    const last = this.past[this.past.length - 1]
-    return Boolean(last && last.kind === kind && (kind === 'insert' || kind === 'delete') && at - last.at <= this.mergeWindowMs)
-  }
 
-  record(before: Snap | null, kind: UndoKind, at: number): boolean {
+  /**
+   * 记一笔（`capture === null` ＝ 这次动作没有开过事务：不新建条目）。
+   *
+   * **合并窗口**只对 `insert`／`delete` 在 1200ms 内成立（连续打字/连删算一步）。
+   * 合并时**不新建条目**：`before` 保留第一次（撤销要回到开始打字之前），
+   * `after` 用最后一次（重做要回到停手那一刻）；`sel` 也保留第一次。
+   */
+  record(capture: UndoCapture | null, sel: Sel | null, kind: UndoKind, at: number): boolean {
     const last = this.past[this.past.length - 1]
     const mergeable =
-      last && last.kind === kind && (kind === 'insert' || kind === 'delete') && at - last.at <= this.mergeWindowMs
+      last !== undefined &&
+      last.kind === kind &&
+      (kind === 'insert' || kind === 'delete') &&
+      at - last.at <= this.mergeWindowMs
     this.future = []
-    if (mergeable || before === null) {
-      // 合并进上一笔：`before` 是 `null`（调用方已经问过 `willMerge`，省下了那份快照）
-      if (last) last.at = at
+    if (capture === null) return false
+    if (mergeable && last) {
+      last.before = mergeStates(last.before, capture.before, 'first')
+      last.after = mergeStates(last.after, capture.after, 'last')
+      last.directEdit = last.directEdit || capture.directEdit
+      last.at = at
       return false
     }
-    this.past.push({ snap: before, kind, at })
+    this.past.push({ ...capture, sel, kind, at })
     if (this.past.length > 500) this.past.shift()
     return true
   }
-  undo(current: Snap): Snap | null {
+
+  /** 撤销一步：条目搬进 `future`（不取「当前」快照——重做要的那一侧就在条目里） */
+  undo(sel: Sel | null): UndoEntry | null {
     const e = this.past.pop()
     if (!e) return null
-    this.future.push(current)
-    return e.snap
+    e.redoSel = sel
+    this.future.push(e)
+    return e
   }
-  redo(current: Snap): Snap | null {
-    const s = this.future.pop()
-    if (!s) return null
-    this.past.push({ snap: current, kind: 'other', at: Date.now() })
-    return s
+
+  /** 重做一步：条目搬回 `past` */
+  redo(): UndoEntry | null {
+    const e = this.future.pop()
+    if (!e) return null
+    this.past.push(e)
+    return e
   }
 }
 
