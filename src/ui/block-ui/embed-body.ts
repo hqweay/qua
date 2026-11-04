@@ -43,7 +43,7 @@ import { EditableBlock } from './editable-block.ts'
 
 export interface EmbedBodyDeps {
   store: BlockStore
-  /** 命令层的事务入口（撤销快照与重画归装配层） */
+  /** 命令层的事务入口（撤销条目与重画归装配层） */
   run: <R>(fn: (tx: Tx) => R) => R
   wire: (ed: BlockEditor, change: (kind: string) => void) => void
   onFocus: (ed: BlockEditor) => void

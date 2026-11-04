@@ -38,7 +38,7 @@ export interface AliasEditorDeps {
   kb: KbClient
   /** 当前正在编辑的块（每次现取；撤销/换库后旧引用可能已经不在森林里） */
   block: () => Block | undefined
-  /** 一次写入：撤销快照、索引修补、重画与落盘都在装配层那一条路上 */
+  /** 一次写入：撤销条目、索引修补、重画与落盘都在装配层那一条路上 */
   write: (mutate: () => void) => void
   /** 关闭浮层（保留给「块已经不存在」等退出路径） */
   close: () => void

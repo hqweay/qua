@@ -42,7 +42,7 @@ import type { PageDeps } from './types.ts'
  *   · **整棵子树一起软删**——身份块的内容跟着它走，不是只摘露面位；
  *   · **正被装载在中心视图里 ⇒ 先换到邻页再删**：删除后 `walkForest` 会跳过它，
  *     留着一个已删的根只会得到一片空白（点它还会「打开即没」）；
- *   · 删除走 `removeBlock`（事务 ＋ 撤销快照），所以 ⌘Z 能把整棵子树找回来。
+ *   · 删除走 `removeBlock`（事务 ＋ 撤销条目），所以 ⌘Z 能把整棵子树找回来。
  */
 export function dropIdentity(d: PageDeps, id: string): boolean {
   const before = d.kb.pages()

@@ -220,7 +220,7 @@ export type CheckEdgeResult =
 /**
  * **只检查**能不能加这条边（不写模型）。
  *
- * 与 `appendEdge` 分开，是为了让「被拒绝的写入」连一次撤销快照都不产生。
+ * 与 `appendEdge` 分开，是为了让「被拒绝的写入」连一条撤销条目都不产生。
  */
 export function checkEdge(child: Block, parent: Block, adj: Adjacency): CheckEdgeResult {
   if (child.id === parent.id) return { ok: false, reason: 'self' }

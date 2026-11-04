@@ -485,7 +485,7 @@ export function setupPages(deps: PagesDeps) {
    */
   const pageDeps: PageDeps = {
     kb,
-    // 命令层开事务：装配层补撤销快照（零 op 的事务不记——没写东西就没有可撤销的），
+    // 命令层开事务：装配层补撤销条目（零 op 的事务不记——没写东西就没有可撤销的），
     // 并重画这批改动碰到的行（标签 chip／别名头住在一行自己的 DOM 里，等整页重渲染就晚了）
     run: (fn) => {
       const sel = deps.getEd().sel
@@ -511,7 +511,7 @@ export function setupPages(deps: PagesDeps) {
        * 一次移动 = **一条** `block.upsert{parent,index}`（`tx.move` 就是这么发的）。
        * 拆成「先删后插」会让 ⌘Z 只回一半，也会让指向这块的引用在中间那一刻指向空。
        *
-       * ⚠️ 走 `pageDeps.run`（**带撤销快照**），不是注入的 `deps.run`：
+       * ⚠️ 走 `pageDeps.run`（**带撤销条目**），不是注入的 `deps.run`：
        *    后者只跑事务、不记快照 ⇒ 移动能成功但 ⌘Z 撤不回来。
        *    「搬了回不去」比「搬错了」更糟，而它不会报错，只在用户按 ⌘Z 时显形。
        */
@@ -520,7 +520,7 @@ export function setupPages(deps: PagesDeps) {
     // 打标签的落点：**当前光标那一块**（正文 vs 反链 footer 会切换 ⇒ 每次现取活动编辑器）
     caretBlockId: () => deps.getEd().caretBlock() ?? deps.getEd().rows()[0]?.block.id ?? null,
     /**
-     * 写块属性走装配层这一条路：撤销快照、索引失效、通知其他视图、重画这一行、落盘
+     * 写块属性走装配层这一条路：撤销条目、索引失效、通知其他视图、重画这一行、落盘
      * 都在 `writeProps` 那一处。这里只做转发。
      *
      * ⚠️ **不要再包一层补重画**：重画是「改这一块的属性」的固有部分（那一行的
@@ -672,7 +672,7 @@ export function setupPages(deps: PagesDeps) {
             /**
              * 行自带 `command` ＋ `args` 就分发那条命令；没带 `command` 的行
              * （页/标签引用候选）按引用插入这条走。分发而不是在调用方手写插入：
-             * 命令路径里有撤销快照与重排，手写的那份只写模型不画 —— 「点了没反应」。
+             * 命令路径里有撤销条目与重排，手写的那份只写模型不画 —— 「点了没反应」。
              */
             const args = (row.args ?? {}) as Record<string, unknown>
             deps

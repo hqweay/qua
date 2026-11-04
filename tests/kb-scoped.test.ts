@@ -35,7 +35,7 @@ function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T
 }
 
-/** 一次「撤销/重做」的完整落地：generator ＋ applyOps（与 `store.restore` 同一条路，跳过索引修补） */
+/** 一次「撤销/重做」的完整落地：generator ＋ applyOps（与 `store.undo` 同一条路，跳过索引修补） */
 function walk(forest: Block[], states: readonly TouchedState[], opts: { directEdit?: boolean } = {}): Op[] {
   const ops = scopedOps(lookupOf(forest), states, opts)
   applyOps(forest, ops)
@@ -44,7 +44,7 @@ function walk(forest: Block[], states: readonly TouchedState[], opts: { directEd
 
 /**
  * **生产路径**：读面用索引的「全部块」表（O(1)），op 应用后按同一批 op 修补索引。
- * 与 `store.restore` 是同一对动作（先改森林、再 `store.apply`）。
+ * 与 `store.undo` 是同一对动作（先改森林、再 `store.apply`）。
  */
 function walkIndexed(store: BlockStore, states: readonly TouchedState[], opts: { directEdit?: boolean } = {}): Op[] {
   const lookup = store.undoLookup()

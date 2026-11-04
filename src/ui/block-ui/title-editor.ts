@@ -27,7 +27,7 @@ export interface TitleEditorDeps {
   /** 装进哪（抬头那一格） */
   into: HTMLElement
   store: BlockStore
-  /** 写入事务入口（撤销快照与落盘归装配层） */
+  /** 写入事务入口（撤销条目与落盘归装配层） */
   write: Run
   /** 与正文**同一份**事件表（引用跳转、右键菜单、`#` 补全都在里面） */
   wire: (ed: BlockEditor, change: (kind: string) => void) => void
