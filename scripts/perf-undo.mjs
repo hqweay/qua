@@ -1,31 +1,29 @@
 #!/usr/bin/env node
 /**
- * 撤销快照的**改前读数**：100k 块下 `snap`／`restore`／`undo` 的耗时、
- * 序列化字节、以及撤销栈在不同深度上真正占住的内存。
- *
- * 为什么要一个可复算的脚本：撤销是**唯一**还跟着库体量走的交互路径，
- * 而它的成本分布在三处（快照序列化、整片森林 diff、op 应用），
- * 只测其中一处会得出「优化没生效」的错觉。
+ * 撤销的**可复算读数**（条目式撤销）：首键、⌘Z、条目字节、栈内存随深度的变化。
  *
  * 口径：
  *   · 库 ＝ 固定种子的合成森林（10k 个顶层块 × 9 个子块），每块一段中文、
  *     10% 有地址、20% 带标签 —— 只回答量级，不做内容评测；
- *   · 耗时取中位数（并发门禁下瞬时值会抖）；**字节数**才是与体量无关的判据；
- *   · 内存用 `--expose-gc` 强制回收后量 `heapUsed`；深度 100 在 100k 块上会占
- *     数 GB，所以那一条在小库上量、再按线性外推（脚本会同时打实测与估算）。
+ *   · 首键 ＝ `kb.tx(单块改写)` ＋ `store.record(捕获)`（真实按键的后半段；
+ *     前半段「取快照」已经不存在了）；
+ *   · ⌘Z ＝ `store.undo`（scoped op ＋ 索引修补）；
+ *   · 耗时取中位数；**字节数**才是「与库体量无关」的判据；
+ *   · 内存用 `--expose-gc` 强制回收后量 `heapUsed`。
+ *
+ * 历史对照（条目式撤销落地前的同一份 fixture）：
+ *   100k 块 · snap 41ms / 13.6MB · restore 237ms · 真实 ⌘Z 277ms · 栈 26MB/层。
  *
  * 用法：
  *   node --expose-gc scripts/perf-undo.mjs
  *   QUA_UNDO_N=10000 node scripts/perf-undo.mjs
  */
 import { BlockStore } from '../src/core/model/store.ts'
+import { MemoryKb } from '../src/core/kb/memory.ts'
 import { writeBlockContent } from '../src/core/model/model.ts'
 import { textRuns } from '../src/core/model/runs.ts'
-import { diff } from '../src/core/kb/diff.ts'
 
 const N = Math.max(10, Math.trunc(Number(process.env.QUA_UNDO_N ?? 100_000)) || 100_000)
-const SMALL_N = Math.max(10, Math.trunc(Number(process.env.QUA_UNDO_SMALL_N ?? 10_000)) || 10_000)
-const ROOTS = Math.max(1, Math.floor(N / 10))
 
 const FRAGMENTS = [
   '笔记应用是本地优先的双链笔记工具',
@@ -56,22 +54,22 @@ function buildForest(n) {
   const forest = []
   let made = 0
   for (let r = 0; r < roots && made < n; r++) {
-    const root = make(made++, roots)
-    for (let c = 0; c < 9 && made < n; c++) root.children.push(make(made++, roots))
+    const root = make(made++)
+    for (let c = 0; c < 9 && made < n; c++) root.children.push(make(made++))
     forest.push(root)
   }
   return forest
 
-  function make(i, rootCount) {
+  function make(i) {
     const text = FRAGMENTS[Math.floor(rand() * FRAGMENTS.length)]
     const block = {
       id: `b${String(i).padStart(7, '0')}`,
-      content: textRuns(`${text}。第${i}条。`),
+      content: textRuns(`${text}。第${String(i).padStart(7, '0')}条。`),
       children: [],
       created: 1_700_000_000_000 + i,
       modified: 1_700_000_000_000 + i,
     }
-    if (i % 10 === 0) block.props = { _aliases: [`名字-${i}`, `别名-${i}`], _lists: i % 20 === 0 ? ['page'] : [] }
+    if (i % 10 === 0) block.props = { _aliases: [`名字-${String(i).padStart(7, '0')}`, `别名-${String(i).padStart(7, '0')}`] }
     else if (i % 20 === 0) block.props = { _tags: ['t1'] }
     return block
   }
@@ -88,120 +86,82 @@ function stats(samples) {
 }
 
 function mb(bytes) {
-  return `${(bytes / 1024 / 1024).toFixed(1)}MB`
-}
-
-function selOf(store) {
-  const b = store.blocks[Math.floor(store.blocks.length / 2)]
-  return { aBlock: b.id, aOff: 0, hBlock: b.id, hOff: 0 }
-}
-
-/** 改一块正文（一次按键的形状）：替换数组 ＋ 改时刻 */
-function typeOnce(store) {
-  const b = store.blocks[Math.floor(store.blocks.length / 2)]
-  writeBlockContent(b, textRuns(`改过的正文 ${b.modified}`))
-  b.modified += 1
+  return `${(bytes / 1024 / 1024).toFixed(2)}MB`
 }
 
 const gc = globalThis.gc ?? (() => {})
 
-function measureRun(n, label) {
-  const forest = buildForest(n)
-  const store = new BlockStore(forest)
-  const sel = selOf(store)
-  // 索引是懒建的：先叫醒它，否则第一次 restore 会把整库重建算进来（真实路径里它早建好了）
-  store.find(sel.aBlock)
-  const snap = store.snap(sel)
-  const bytes = snap.blocks.length
+function measure(n, label) {
+  const store = new BlockStore(buildForest(n))
+  const kb = new MemoryKb(store)
+  const target = store.blocks[Math.floor(store.blocks.length / 2)]
+  // 目标块的初始正文固定：条目字节只该反映「动过的那一块」，不该随库大小换一段语料
+  writeBlockContent(target, textRuns('目标块'))
+  const sel = { aBlock: target.id, aOff: 0, hBlock: target.id, hOff: 0 }
+  // 索引是懒建的：先叫醒它（真实路径里它早建好了）
+  store.index
 
-  const snapSamples = []
-  for (let i = 0; i < 24; i++) {
-    const t = performance.now()
-    store.snap(sel)
-    snapSamples.push(performance.now() - t)
-  }
-
-  // 撤销一次 ＝ 取当前快照 ＋ 解析目标 ＋ diff ＋ applyOps（＋ 索引修补）
-  const undoStoreSamples = []
-  const restoreSamples = []
-  const parseSamples = []
-  const diffSamples = []
+  const keySamples = []
+  const undoMs = []
+  let entryBytes = 0
   for (let i = 0; i < 20; i++) {
-    const target = store.snap(sel)
-    typeOnce(store)
-    store.record(target, 'other', 0)
     let t = performance.now()
-    store.undo(undefined, sel)
-    undoStoreSamples.push(performance.now() - t)
-    // store.undo 之后状态回到快照；再走一次「只 restore」的拆解（目标另取一份）
-    const s2 = store.snap(sel)
-    typeOnce(store)
+    const r = kb.tx((tx) =>
+      tx.patch(target.id, (b) => {
+        writeBlockContent(b, textRuns(`改过的正文 ${i}`))
+        b.modified += 1
+      }),
+    )
+    store.record(r.undo, sel, 'other', 1_000_000 + i * 10)
+    keySamples.push(performance.now() - t)
+    entryBytes = JSON.stringify(r.undo).length
+
     t = performance.now()
-    const parsed = JSON.parse(s2.blocks)
-    parseSamples.push(performance.now() - t)
-    t = performance.now()
-    const ops = diff(store.blocks, parsed)
-    diffSamples.push(performance.now() - t)
-    t = performance.now()
-    store.restore(s2, undefined)
-    restoreSamples.push(performance.now() - t)
+    const u = store.undo(undefined, sel)
+    undoMs.push(performance.now() - t)
+    if (!u) throw new Error('undo produced no entry')
   }
 
-  const snapStats = stats(snapSamples)
-  const undoStats = stats(undoStoreSamples)
-  const restoreStats = stats(restoreSamples)
-  const parseStats = stats(parseSamples)
-  const diffStats = stats(diffSamples)
-
+  const key = stats(keySamples)
+  const undo = stats(undoMs)
   console.log(
-    `${label.padEnd(7)} blocks=${String(n).padStart(7)}  bytes=${String(bytes).padStart(9)} (${mb(bytes)})  ` +
-      `snap p50=${snapStats.p50.toFixed(2)}ms  undo p50=${undoStats.p50.toFixed(2)}ms  ` +
-      `restore p50=${restoreStats.p50.toFixed(2)}ms [parse ${parseStats.p50.toFixed(2)} ＋ diff ${diffStats.p50.toFixed(2)}]`,
+    `${label.padEnd(7)} blocks=${String(n).padStart(7)}  entry=${String(entryBytes).padStart(5)}B  ` +
+      `首键 p50=${key.p50.toFixed(3)}ms p95=${key.p95.toFixed(3)}ms  ⌘Z p50=${undo.p50.toFixed(3)}ms p95=${undo.p95.toFixed(3)}ms`,
   )
-  return { store, sel, bytes, snapStats, undoStats }
 }
 
-/** 栈深度：数「真的被留住」的字节（gc 后 heapUsed 差 ÷ 深度） */
+/** 栈深度：每条目改一块不同的块；gc 后量真正留住的内存 */
 function measureDepth(n, depth) {
-  const forest = buildForest(n)
-  const store = new BlockStore(forest)
-  const sel = selOf(store)
-  store.find(sel.aBlock)
+  const store = new BlockStore(buildForest(n))
+  const kb = new MemoryKb(store)
+  const sel = null
+  store.index
+  const roots = store.blocks
   gc()
   const base = process.memoryUsage().heapUsed
-  const kept = []
-  for (let i = 0; i <= depth; i++) kept.push(store.snap(sel))
-  gc()
-  const used = process.memoryUsage().heapUsed - base
-  const per = used / kept.length
-  return { used, per, kept: kept.length }
-}
-
-console.log(`node ${process.version}  gc=${globalThis.gc ? 'on' : 'off'}  N=${N}  roots=${ROOTS}`)
-console.log('')
-
-console.log('── 体量对照（同一份代码，三档库） ──')
-measureRun(100, 'small')
-measureRun(10_000, 'mid')
-const big = measureRun(N, 'big')
-
-console.log('')
-console.log('── 撤销栈内存（每层保留一份整片森林 JSON） ──')
-for (const depth of [1, 10]) {
-  if (!globalThis.gc) {
-    console.log(`depth=${String(depth).padEnd(3)}  skipped (run with --expose-gc)`)
-    continue
+  for (let i = 0; i < depth; i++) {
+    const b = roots[i % roots.length]
+    const r = kb.tx((tx) => tx.patch(b.id, (x) => void (x.modified += 1)))
+    store.record(r.undo, sel, 'other', 1_000_000 + i)
   }
-  const r = measureDepth(N, depth)
-  console.log(`depth=${String(depth).padEnd(3)}  实测 ${mb(r.used)}（${mb(r.per)}/层，${N} 块）`)
+  gc()
+  return { used: process.memoryUsage().heapUsed - base, depth }
 }
-if (globalThis.gc) {
-  const r = measureDepth(SMALL_N, 100)
-  const scaled = r.per * 100 * (N / SMALL_N)
-  console.log(
-    `depth=100  实测 ${mb(r.used)}（${SMALL_N} 块）  ⇒ ${N} 块估算 ${mb(scaled)}（${mb(r.per)}/层 × 100 × ${N}/${SMALL_N}）`,
-  )
-  console.log(`depth=1   ${N} 块的估算下界 ${mb(r.per * (N / SMALL_N))}`)
-}
+
+console.log(`node ${process.version}  gc=${globalThis.gc ? 'on' : 'off'}  N=${N}`)
 console.log('')
-console.log(`一次按键的撤销条目：现在 ${big.bytes} 字节（随库体量线性增长）`)
+console.log('── 体量对照（同一份代码，三档库） ──')
+measure(100, 'small')
+measure(10_000, 'mid')
+measure(N, 'big')
+
+console.log('')
+console.log('── 撤销栈内存（条目只含 touched，与库体量无关） ──')
+if (!globalThis.gc) {
+  console.log('skipped (run with --expose-gc)')
+} else {
+  for (const depth of [1, 10, 100, 400]) {
+    const r = measureDepth(N, depth)
+    console.log(`depth=${String(depth).padEnd(3)}  实测 ${mb(r.used)}（${mb(r.used / r.depth)}/层）`)
+  }
+}
