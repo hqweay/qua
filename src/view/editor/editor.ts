@@ -282,6 +282,14 @@ export interface ViewOpts {
    */
   focusSurface?: boolean
   /**
+   * **空块占位文案**（省略＝默认的「空块／写点什么…」）。
+   *
+   * 只在**没有字**的空块上出现，所以它同时是「这一行现在是不是空的」的一句人话。
+   * 抬头这类落点用它：那一行不是「一块空内容」，而是「这个名字还是空的」。
+   * ⚠️ 与虚拟化占位（`placeholder()` 那个方法）不是一件事，所以名字带 `empty`。
+   */
+  emptyPlaceholder?: string
+  /**
    * **段的排列**（视图配置轴，不是导航）：`column`（单列流，缺省）｜`row`（段横排）｜`grid`（折行网格）。
    * 只改「段怎么摆」，不改「段是什么」——DOM 形状对所有 layout 一致（见 `renderRows` 的 `.sec`）。
    */
@@ -543,6 +551,8 @@ export class BlockEditor {
   readonly embeds: EmbedBodies
   /** 这一面是不是「一屏就是这一块」的聚焦面（见 `ViewOpts.focusSurface`） */
   private readonly focusSurface: boolean
+  /** 空块占位（见 `ViewOpts.emptyPlaceholder`；省略＝默认） */
+  private readonly emptyPlaceholder: string | undefined
   /**
    * **字段读取表**（懒建）：判「这块是不是任务」要看标签声明（`todoOf`），
    * 逐块现建要扫两趟森林。任何一次模型写之后作废，下一次问到时重建一次。
@@ -574,6 +584,7 @@ export class BlockEditor {
     this.onContextBack = o.onContextBack
     this.embeds = new EmbedBodies(this, o.embedBodies !== false)
     this.focusSurface = o.focusSurface === true
+    this.emptyPlaceholder = o.emptyPlaceholder
     this.doc = o.doc
     this.setLayout(o.layout ?? 'column')
     /**
@@ -1236,6 +1247,7 @@ export class BlockEditor {
         contextBack: Boolean(this.onContextBack) && r.depth === 0 && (this.doc.expandedRoots?.has(r.block.id) ?? false),
         // 露面块的身体：这一层只认「有没有展开」；画什么由装配层给（见 `ViewEvents.embedBody`）
         embedBody: (b, into) => this.embeds.attach(b, into),
+        ...(this.emptyPlaceholder !== undefined ? { placeholder: this.emptyPlaceholder } : {}),
         /**
          * **正文里的查询体**：只有装配层接了画法、且这一份装载允许展开时才给。
          * 「哪一行画」由 `block-dom` 的 `rowHasInlineViewBody` 判（按源分派，

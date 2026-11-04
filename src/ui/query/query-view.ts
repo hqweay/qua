@@ -73,6 +73,7 @@ import { DeferredFlush } from '../../view/editor/deferred-flush.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { BlockCell } from '../block-ui/block-cell.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
+import { mountTitleEditor, type TitleEditor } from '../block-ui/title-editor.ts'
 import { queryChips } from './query-builder.ts'
 import { QueryTree, treeSummary } from './query-tree.ts'
 import { ViewBoard } from '../views/view-board.ts'
@@ -264,7 +265,12 @@ export function createViewHostEls(): ViewHostEls {
 
   const head = document.createElement('div')
   head.className = 'queryview-head'
-  const title = document.createElement('span')
+  /**
+   * 抬头那一格是 `div` 而不是 `span`：投影的抬头里装的是**一台块编辑器**
+   * （块级盒子）。块级盒子放进 inline 元素里，布局会按 inline 基线算，
+   * 名字换行时与相邻的条数对不齐。
+   */
+  const title = document.createElement('div')
   title.className = 'queryview-title'
   const count = document.createElement('span')
   count.className = 'queryview-count'
@@ -337,6 +343,14 @@ export class ViewHost {
   /** 这一屏现在画的是谁：`outline` 或激活视图的 id（变了才换分支） */
   private mode = ''
   private readonly cell: BlockCell
+  /**
+   * **投影抬头的常驻编辑器**（只有 `surface === 'embed'` 才有）。
+   *
+   * 它与 `cell` 是两种「改名字」的画法，各有各的落点：表格一屏几行、按需开浮层；
+   * 抬头只有一处、直接可写。抬头**不用** `cell` —— 同一个 `BlockCell` 实例的浮层
+   * 一次只开一台，而表格与抬头可能同屏。
+   */
+  private title: TitleEditor | null = null
   /** 查询视图自己的 stale 订阅（只点亮提示、不重排——冻结成员是 D4） */
   private readonly offStale: () => void
   /** 条件树（查询源；懒建，收起只隐藏不清空草稿） */
@@ -404,18 +418,23 @@ export class ViewHost {
       openBlock: (id, place) => deps.openBlock(id, place),
     })
     /**
-     * **投影抬头的标题可点**（只有 `embed` 表面显示抬头名字）：点普通文字就地开一台
-     * 单块编辑器（改的就是源块的正文），点引用/原子照旧先导航 —— 与表格标题格
-     * 同一条 `BlockCell` 分派，不在这里另写一份「怎么进编辑」。
+     * **投影抬头是常驻可编辑的一行名字**（只有 `embed` 表面显示抬头名字）。
+     *
+     * 它不是「点一下开浮层」：露面行的正文槽是空的，抬头是名字**唯一**的落点，
+     * 改个名不该先点一下。装载只有源块、子块不画（`viewRootId`）、↵ 是敲完
+     * —— 那三条判据都在 `mountTitleEditor` 里。
      */
     if (deps.surface === 'embed') {
-      this.els.title.addEventListener('click', (e) => {
-        this.cell.handleClick(
-          this.deps.host().id,
-          e.target as HTMLElement,
-          { altKey: e.altKey, shiftKey: e.shiftKey },
-          { x: e.clientX, y: e.clientY },
-        )
+      this.title = mountTitleEditor({
+        into: this.els.title,
+        store: deps.store,
+        write: deps.write,
+        wire: (ed, change) => deps.wire(ed, change),
+        onFocus: (ed) => deps.onFocus(ed),
+        onChange: () => deps.onChange(),
+        // 抬头画的是**源块**（拥有者）：露面块自己没有名字
+        block: () => this.ownerBlock(),
+        placeholder: t('ui.query.untitled'),
       })
     }
 
@@ -447,6 +466,12 @@ export class ViewHost {
         this.derivedFlush.arm()
         return
       }
+      /**
+       * **抬头那台编辑器自己的编辑**：它改的就是抬头正在显示的那份正文
+       * （源块的名字），屏幕上已经是对的 —— 再 `sync()` 一次只会把身体那份结果
+       * 整片重装一遍（每个字一次）。条件/视图的改动走命令层，`source` 不是它。
+       */
+      if (this.title && isOwnEdit(source, this.title.editor())) return
       if (ids && ids.length > 0) {
         /**
          * **拥有者自己的配置变了**（`_query`／`_views`／`_activeView`／名字）⇒ 重读重画。
@@ -500,6 +525,8 @@ export class ViewHost {
     this.calendar = null
     this.mindmap?.dispose()
     this.mindmap = null
+    this.title?.dispose()
+    this.title = null
     this.cell.dispose()
   }
 
@@ -787,20 +814,12 @@ export class ViewHost {
      */
     this.els.title.hidden =
       embed ? false : !query || this.deps.surface === 'inline' || this.deps.surface === 'dock' || this.deps.surface === 'mount'
-    if (embed) {
-      /**
-       * **投影的标题就地可编辑**（它就是源块的正文）：露面行自己的正文槽是空的，
-       * 名字没有第二处可显示 —— 不可编辑的话，改个名只能去源所在的那一屏。
-       * 复用表格标题格的同一台按需编辑器（`BlockCell`）：点普通文字就地开一台
-       * 单块编辑器，引用/原子照旧先导航。名字为空时给一句占位（构造时挂的
-       * 点击监听落在抬头元素上，replaceChildren 不影响它）。
-       */
-      this.cell.render(b, this.els.title)
-      if (name === '') this.els.title.dataset.emptyText = t('ui.query.untitled')
-      else delete this.els.title.dataset.emptyText
-    } else {
-      this.els.title.textContent = query ? (name === '' ? t('ui.query.untitled') : name) : ''
-    }
+    /**
+     * **投影的抬头不在这里写**：它是构造时挂上的常驻编辑器（`TitleEditor`）。
+     * 这里再写一次 `textContent` 就会把那一台正在打字的岛整个清掉。
+     * 名字为空时由那台编辑器的占位句说明，不另挂 `data-empty-text`。
+     */
+    if (!embed) this.els.title.textContent = query ? (name === '' ? t('ui.query.untitled') : name) : ''
     const n = this.rowCount()
     this.els.count.textContent = query ? t('ui.query.count', { count: n }) : t('ui.view.count', { count: n })
     // 大纲折叠的次要文案由 `render()` 现算（它才知道这一屏画了几行）；其余分支没有折叠
@@ -1485,8 +1504,8 @@ export class ViewHost {
     this.els.root.hidden = false
     this.els.title.hidden = false
     /**
-     * 投影的抬头是**可编辑的源块名**（paintChrome 刚画好）：空态的话放进条数那格说，
-     * 不抢标题 —— 抢了它，源的名字就没地方显示、也没法点了。
+     * 投影的抬头是**常驻可编辑的源块名**（构造时挂的 `TitleEditor`）：空态文案放进
+     * 条数那格说，不抢标题 —— 抢了它，源的名字就没地方显示、也没法写了。
      */
     if (this.deps.surface !== 'embed') this.els.title.textContent = text
     this.els.count.textContent = this.deps.surface === 'embed' ? text : ''

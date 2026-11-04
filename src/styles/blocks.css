@@ -918,18 +918,35 @@
 .queryview-title {
   font-weight: 600;
   color: var(--ui-text);
-  /* 投影的标题是「块的投影 ＋ 按需编辑」（`.tv-title-inner` 由 BlockCell 挂上）：
-     它住在抬头里，格子那套 `white-space: nowrap` 会把长名撑破抬头 ⇒ 这里放开换行 */
+  /*
+   * 投影的抬头是**常驻的一行可编辑名字**（`TitleEditor` 装一台单块编辑器进来）：
+   * 它是这一行唯一的名字落点，所以直接可写。抬头在 flex 行里，长名要能换行
+   * —— 格子那套 `white-space: nowrap` 会把长名撑破抬头。
+   */
   min-width: 0;
   overflow: hidden;
 }
-.queryview-title .tv-title-text {
-  white-space: normal;
+/*
+ * 抬头里那台编辑器：**只留正文那一格**。
+ *
+ * 块标、缩进、行高下限都是「正文屏幕里的一行块」的几何；抬头是一行名字，
+ * 带上它们会把抬头撑高、并在名字左边多出一颗没有语义的点。字号与字重跟着
+ * 抬头走（抬头是 fs-sm / 600，块默认是 fs-md / 常规）。
+ */
+.queryview-title .title-editor .blk {
+  padding-left: 0;
+  min-height: 0;
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: inherit;
+  color: inherit;
 }
-/* 空名字的投影：占位一句（BlockCell 的空块画的是 `<br>`，`:empty` 不成立） */
-.queryview-title[data-empty-text] .tv-title-text::before {
-  content: attr(data-empty-text);
-  color: var(--ui-text-tertiary);
+.queryview-title .title-editor .blk > .left {
+  display: none;
+}
+/* 名字为空时的占位就是「未命名查询」：占位只在没有字时出现，所以它同时是
+   「这个名字空不空」的一句人话 —— 不需要第二个判据去挂 `data-empty-text`。 */
+.queryview-title .title-editor .tx[data-ph]::before {
   font-weight: 400;
 }
 .queryview-count {

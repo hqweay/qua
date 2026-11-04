@@ -541,6 +541,8 @@ export function makeBlockEl(
   opts: {
     /** 这一屏只有这一块：空块的占位文案换成「第一句」的口径 */
     single: boolean
+    /** 空块占位（给了就盖过默认那两句；见 `ViewOpts.placeholder`） */
+    placeholder?: string
     ancestors?: readonly string[]
     folded?: FoldState
     gutter?: readonly GutterField[]
@@ -1000,7 +1002,7 @@ export function makeBlockEl(
     }
   } else if (isEmptyContent(b.content)) {
     // 空块的幽灵占位：CSS 生成内容，**不进 DOM 文本**
-    tx.dataset.ph = opts.single ? t('ui.block.placeholderFirst') : t('ui.block.placeholderEmpty')
+    tx.dataset.ph = opts.placeholder ?? (opts.single ? t('ui.block.placeholderFirst') : t('ui.block.placeholderEmpty'))
   }
 
   if (embedBodyEl) {

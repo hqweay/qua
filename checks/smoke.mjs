@@ -2907,17 +2907,64 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
     `短结果聚焦不跳高（上限抬了、高度不变）：${a.height} → ${focused.height}`,
   )
 
-  // ①c 投影的标题就地可编辑：点名字 → 单块编辑器 → 提交 ⇒ 写的就是源块的正文
+  /**
+   * ①c 投影的标题**常驻可编辑**：点名字直接进编辑（不再先弹浮层），
+   * 打进去的字写的就是源块正文；↵ 是「敲完」（不拆出块）。
+   *
+   * 判据三条一起看：抬头里就是一台编辑器（不是投影 + 浮层）、打进去的字在源块上、
+   * ↵ 之后**库里的块数没涨**（身份块的装载根 ↵ 若走到拆块那一支，会静默建一个
+   * 看不见的首个子块）。
+   */
   const titleBox = await page.evaluate(() => {
     const t = document.querySelector('.queryview[data-surface="embed"] .queryview-title')
     const r = t?.getBoundingClientRect()
-    return r && r.height > 0 ? { x: r.left + 8, y: r.top + r.height / 2, text: t.textContent ?? '' } : null
+    const tx = t?.querySelector('.tx')
+    return r && r.height > 0 ? { x: r.left + 8, y: r.top + r.height / 2, text: t.textContent ?? '', live: Boolean(tx) } : null
   })
-  assert(titleBox && titleBox.text !== '', `投影抬头有名字可点（BlockCell 画的是块的样子）：${JSON.stringify(titleBox)}`)
+  assert(titleBox && titleBox.text !== '', `投影抬头有名字：${JSON.stringify(titleBox)}`)
+  assert(titleBox.live, `抬头里就是一台编辑器（常驻可编辑，不是投影 + 浮层）：${JSON.stringify(titleBox)}`)
   await page.mouse.click(titleBox.x, titleBox.y)
-  await page.waitForTimeout(250)
-  assert(await page.evaluate(() => Boolean(document.querySelector('body > .tv-edit'))), '点标题开了单块编辑器（表格标题格同一台）')
-  await page.keyboard.type('改')
+  await page.waitForTimeout(120)
+  const inTitle = await page.evaluate(() => {
+    const t = document.querySelector('.queryview[data-surface="embed"] .queryview-title')
+    return {
+      focusInside: Boolean(t?.contains(document.activeElement)),
+      overlay: Boolean(document.querySelector('body > .tv-edit')),
+      active: window.__qua.__editor ? document.activeElement?.className ?? '' : '',
+    }
+  })
+  assert(inTitle.focusInside && !inTitle.overlay, `点抬头就地进编辑、不弹浮层：${JSON.stringify(inTitle)}`)
+  const blocksBefore = await page.evaluate(() => window.__qua.allBlocks().length)
+  /**
+   * **连打几个字都落在抬头这一块上**。
+   *
+   * 判据不是「承载行还是同一个节点」——主编辑器本来就在每个按键上重画那一行
+   * （`syncFromDom(reRender: true)` → `renderBlock`，光标由 `placeCaret` 恢复），
+   * 抬头这台同理。真正会坏的是**字进了别的块**或**光标被别处抢走**。
+   */
+  await page.keyboard.type('改名')
+  await page.waitForTimeout(200)
+  const typed = await page.evaluate(() => {
+    const t = document.querySelector('.queryview[data-surface="embed"] .queryview-title')
+    return {
+      text: t?.querySelector('.tx')?.textContent ?? '',
+      caretInTitle: Boolean(t?.contains(document.activeElement)),
+      caretBlock: window.__qua.__editor?.sel?.aBlock ?? '',
+    }
+  })
+  assert(typed.caretInTitle, `连打时焦点留在抬头里（不被别处抢走）：${JSON.stringify(typed)}`)
+  assert(typed.text.includes('改名'), `连打的字都进了抬头这一块：${JSON.stringify(typed)}`)
+  /**
+   * **一份真相**：抬头改的是源块正文 ⇒ 源在正文里的那一行也要跟着变。
+   * 两处 DOM 同时看（不是只信模型），否则「抬头是第二份名字」这类错法验不出来。
+   */
+  const bothPlaces = await page.evaluate((id) => ({
+    doms: [...document.querySelectorAll(`.blk[data-block-id="${id}"]`)].map((x) => x.querySelector('.tx')?.textContent ?? ''),
+  }), qid)
+  assert(
+    bothPlaces.doms.length >= 2 && bothPlaces.doms.every((t) => t.includes('改名')),
+    `抬头与正文那一处同时变（一份正文，不是两份名字）：${JSON.stringify(bothPlaces)}`,
+  )
   await page.keyboard.press('Enter')
   await page.waitForTimeout(300)
   const renamed = await page.evaluate((id) => {
@@ -2925,12 +2972,81 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
     return {
       srcText: src?.text ?? '',
       title: document.querySelector('.queryview[data-surface="embed"] .queryview-title')?.textContent ?? '',
-      overlayGone: !document.querySelector('body > .tv-edit'),
+      blocks: window.__qua.allBlocks().length,
+      stillThere: Boolean(document.querySelector('.queryview[data-surface="embed"] .queryview-title .tx')),
     }
   }, qid)
-  assert(renamed.overlayGone, 'Enter 提交后编辑器收起')
-  assert(renamed.srcText.includes('改'), `投影标题编辑写到源块正文：${JSON.stringify(renamed)}`)
-  assert(renamed.title.includes('改'), `抬头名字跟着变（同一份正文，不是第二份名字）：${JSON.stringify(renamed)}`)
+  assert(renamed.blocks === blocksBefore, `抬头里 ↵ 是敲完，不拆出看不见的块：${blocksBefore} → ${renamed.blocks}`)
+  assert(renamed.stillThere, '提交后抬头仍是可编辑的那一行（不是被收起的浮层）')
+  assert(renamed.srcText.includes('改名'), `投影标题编辑写到源块正文：${JSON.stringify(renamed)}`)
+  assert(renamed.title.includes('改名'), `抬头名字跟着变（同一份正文，不是第二份名字）：${JSON.stringify(renamed)}`)
+
+  /**
+   * ①c′ 抬头的键位落在**抬头这台编辑器**上（不是正文那一台）。
+   *
+   * 三层编辑岛（正文 → 投影身体 → 抬头）里，键位走命令层、认的是「活动编辑器」。
+   * `focusin` 会冒泡，正文那条无条件切回自己的判据（`main.ts`）是 T142 修过的坑——
+   * 抬头比身体更深一层，所以要**实测** ⌘A 与行首退格：
+   *   · ⌘A 选中抬头里的字（不是整篇正文）；
+   *   · 行首退格把字吃进上一块（并块）这件事**不发生在抬头里**。
+   */
+  await page.locator('.queryview[data-surface="embed"] .queryview-title .tx').click()
+  await page.waitForTimeout(120)
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.waitForTimeout(120)
+  const selectAll = await page.evaluate(() => {
+    const t = document.querySelector('.queryview[data-surface="embed"] .queryview-title')
+    const sel = document.getSelection()
+    const anchor = sel?.anchorNode ?? null
+    const el = anchor?.nodeType === 1 ? anchor : anchor?.parentElement
+    return {
+      inTitle: Boolean(t && anchor && t.contains(anchor)),
+      text: sel?.toString() ?? '',
+      blocks: window.__qua.allBlocks().length,
+    }
+  })
+  assert(selectAll.inTitle && selectAll.text !== '', `⌘A 落在抬头这一块（三层岛里活动编辑器选对了）：${JSON.stringify(selectAll)}`)
+  // 行首退格：抬头是这一屏的根 ⇒ 不许并进别处（并了就是「一次退格把名字吃没了」）
+  const beforeBs = await page.evaluate(() => ({
+    blocks: window.__qua.allBlocks().length,
+    name: window.__qua.allBlocks().find((x) => x.props?._query)?.text ?? '',
+  }))
+  await page.keyboard.press('ArrowLeft')
+  await page.keyboard.press('Backspace')
+  await page.waitForTimeout(200)
+  const afterBs = await page.evaluate(() => ({
+    blocks: window.__qua.allBlocks().length,
+    name: window.__qua.allBlocks().find((x) => x.props?._query)?.text ?? '',
+  }))
+  assert(afterBs.blocks === beforeBs.blocks, `抬头里行首退格不并块：${JSON.stringify([beforeBs, afterBs])}`)
+  assert(afterBs.name === beforeBs.name, `抬头里行首退格不改名字（根没有上一块可并）：${JSON.stringify([beforeBs, afterBs])}`)
+
+  /**
+   * ①c″ 空名字 ⇒ 抬头显示占位句（失焦时；有光标时占位按既有口径藏起来）。
+   *
+   * 清空走**真实按键**：查询块的正文只有「直接打字」这一条写路径能写它
+   * （`canWriteText` 挡住程序化整段替换）。
+   */
+  await page.locator('.queryview[data-surface="embed"] .queryview-title .tx').click()
+  await page.waitForTimeout(120)
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.press('Backspace')
+  await page.waitForTimeout(200)
+  await page.evaluate(() => window.__qua.focusBlock(window.__qua.__editor.doc.roots[0].id, 0))
+  await page.waitForTimeout(300)
+  const emptyTitle = await page.evaluate(() => {
+    const title = document.querySelector('.queryview[data-surface="embed"] .queryview-title')
+    const tx = title?.querySelector('.tx')
+    return {
+      ph: tx?.dataset.ph ?? '',
+      shown: tx ? getComputedStyle(tx, '::before').content : '',
+      text: title?.textContent ?? '',
+    }
+  })
+  assert(
+    emptyTitle.ph !== '' && emptyTitle.shown.includes(emptyTitle.ph),
+    `名字为空时抬头说一句「${emptyTitle.ph}」：${JSON.stringify(emptyTitle)}`,
+  )
 
   // ①d 投影行可折：三角与竖线都折身体那一格；折了行还在、线也还在、ViewHost 不卸载
   const projFoldState = () =>
