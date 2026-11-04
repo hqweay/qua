@@ -19259,6 +19259,47 @@ await check('T227 点父块的竖线：查询块（无 children、有身体）�
   return `父块的线：查询块与投影的面板一起折、名字留着、兄弟同折、可逆`
 })
 
+/* -------------------------------------------------------------- 全文检索 */
+
+await check('T228 ⌘F 搜索：输入正文词出结果、命中高亮、↵ 打开、Esc 关闭、无结果说人话', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.keyboard.press('Meta+f')
+  await page.waitForSelector('.layer-input')
+  await page.waitForFunction(() => document.activeElement?.classList.contains('layer-input'))
+  const initial = await page.locator('.layer-empty').textContent()
+  assert(initial?.includes('输入关键词'), `空输入先说怎么开始：${initial}`)
+
+  await page.keyboard.type('内容寻址')
+  await page.waitForSelector('.layer-item')
+  const first = await page.evaluate(() => {
+    const el = document.querySelector('.layer-item')
+    return {
+      id: el?.dataset.id ?? '',
+      text: el?.textContent ?? '',
+      marks: el?.querySelectorAll('mark').length ?? 0,
+    }
+  })
+  assert(first.id.startsWith('search/'), `结果行带块身份：${first.id}`)
+  assert(first.text.includes('内容寻址'), `结果片段包含查询词：${JSON.stringify(first.text)}`)
+  assert(first.marks > 0, '命中词在片段里高亮')
+  const target = first.id.slice('search/'.length)
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(250)
+  assert(!(await page.evaluate(() => Boolean(document.querySelector('.layer')))), '选中之后浮层关闭')
+  const active = await page.evaluate(() => window.__qua.snapshot().activeId)
+  assert(active === target, `↵ 打开的是这一条（不是「有反应但没换块」）：${active} vs ${target}`)
+
+  await page.keyboard.press('Meta+f')
+  await page.waitForSelector('.layer-input')
+  await page.keyboard.type('不存在的高频词xyz')
+  await page.waitForFunction(() => document.querySelector('.layer-empty')?.textContent?.includes('没有匹配项'))
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(120)
+  assert(!(await page.evaluate(() => Boolean(document.querySelector('.layer')))), 'Esc 关闭搜索')
+  await ctx.close()
+  return `空态提示、命中高亮 ${first.marks} 处、↵ 打开 ${target.slice(-6)}、无结果与 Esc 都走通`
+})
+
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）
   await writeFile(REPORT, JSON.stringify({ total: seq, cases: results, known: known.map((r) => r.name) }))

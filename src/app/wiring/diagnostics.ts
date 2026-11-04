@@ -84,6 +84,16 @@ export type DiagnosticsDeps = {
   getEd: () => BlockEditor
   setEd: (ed: BlockEditor) => void
   setQuiet: (v: boolean) => void
+  /** 搜索门面（自检用；产品路径不经过它） */
+  getSearch?: () => SearchProbe | undefined
+}
+
+/** 自检只读的那几格；用窄类型避免 diagnostics 依赖 app 层实现 */
+export interface SearchProbe {
+  status: () => string
+  mode: () => string
+  query: (text: string, limit?: number) => Promise<unknown>
+  rebuild: () => Promise<void>
 }
 
 
@@ -558,6 +568,13 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
     __editor: mainEd,
     /** 当前活动编辑器（键位/命令认的那一台）；测试面用它读里层编辑器的组合态 */
     activeEditor: () => deps.getEd(),
+    /** 搜索状态与查询（自检用；产品路径是 ⌘F 浮层） */
+    search: {
+      status: () => deps.getSearch?.()?.status() ?? 'pending',
+      mode: () => deps.getSearch?.()?.mode() ?? 'scan',
+      query: (text: string, limit = 20) => deps.getSearch?.()?.query(text, limit) ?? Promise.resolve({ hits: [], mode: 'scan' }),
+      rebuild: () => deps.getSearch?.()?.rebuild() ?? Promise.resolve(),
+    },
     __registry: registry,
     __layers: layers,
     /**
