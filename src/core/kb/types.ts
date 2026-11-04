@@ -22,6 +22,7 @@ import type { QueryHit, QuerySpec } from '../query/query.ts'
 import type { RelationEdge } from '../relations/relations.ts'
 import type { Block, BlockList } from '../model/model.ts'
 import type { Anno, Run } from '../model/runs.ts'
+import type { UndoCapture } from './scoped.ts'
 
 /* ------------------------------------------------------------ 存储槽位 */
 
@@ -296,11 +297,14 @@ export interface KbClient {
   relationsFrom(id: string): readonly RelationEdge[]
 
   /**
-   * 写入口：成功返回 `{ ops, changes }`；抛错 ⇒ 整批回滚并重抛（不返回半批）。
+   * 写入口：成功返回 `{ ops, changes, undo }`；抛错 ⇒ 整批回滚并重抛（不返回半批）。
    *
    * `opts.source` 是**发起这次写入的视图**，原样转给 `store.touch`（订阅者靠它跳过自己）。
    * 让调用方在事务里声明「我是谁」，比让每个调用点自己再 `touch` 一次安全：
    * 两次 `touch` 会让别的视图白渲染一遍，漏掉一次就让它们停在旧数据上。
+   *
+   * `undo` 是**这次事务动过的块**的前态／后态（已深拷）：撤销栈只存它，
+   * 不再存整片森林。它不影响落盘（`ops` 仍是唯一写入面），只回答「怎么退回去」。
    */
-  tx<R>(fn: (tx: Tx) => R, opts?: TxOpts): { ops: Op[]; changes: Change[]; result: R }
+  tx<R>(fn: (tx: Tx) => R, opts?: TxOpts): { ops: Op[]; changes: Change[]; result: R; undo: UndoCapture }
 }
