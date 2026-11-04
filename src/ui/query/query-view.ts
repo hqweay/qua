@@ -249,6 +249,10 @@ export interface ViewHostEls {
    * 换的是**视图配置**（`core.view/set-group`），不重查、不改成员。
    */
   group: HTMLSelectElement
+  /** **排序**按钮（查询源才有）：就地展开排序面板，编辑的是成员顺序（`spec.sort`，多键） */
+  sort: HTMLButtonElement
+  /** 排序面板：与条件树同一哲学的就地一行（不是浮层），打开时按当前 spec 现画 */
+  sortPanel: HTMLElement
   /** 条件 chip 条（查询源才有；收起时只剩一条摘要） */
   filters: HTMLElement
   /** 条件树（就地展开；与抬头同属这一段，不是浮层） */
@@ -301,6 +305,13 @@ export function createViewHostEls(): ViewHostEls {
   const group = document.createElement('select')
   group.className = 'queryview-group'
   group.hidden = true
+  const sort = document.createElement('button')
+  sort.type = 'button'
+  sort.className = 'queryview-sort'
+  sort.hidden = true
+  const sortPanel = document.createElement('div')
+  sortPanel.className = 'queryview-sortpanel'
+  sortPanel.hidden = true
   const refresh = document.createElement('button')
   refresh.type = 'button'
   refresh.className = 'queryview-refresh'
@@ -312,7 +323,7 @@ export function createViewHostEls(): ViewHostEls {
   newRow.type = 'button'
   newRow.className = 'queryview-newrow'
   newRow.hidden = true
-  head.append(title, count, topCount, stale, filters, views, group, refresh, foldAll, newRow)
+  head.append(title, count, topCount, stale, filters, views, group, sort, refresh, foldAll, newRow)
 
   const tree = document.createElement('div')
   tree.className = 'queryview-tree'
@@ -336,8 +347,26 @@ export function createViewHostEls(): ViewHostEls {
   table.hidden = true
   body.append(editor, table)
 
-  root.append(head, tree, body)
-  return { root, head, tree, title, count, topCount, filters, views, group, refresh, foldAll, newRow, stale, editor, table }
+  root.append(head, tree, sortPanel, body)
+  return {
+    root,
+    head,
+    tree,
+    title,
+    count,
+    topCount,
+    filters,
+    views,
+    group,
+    sort,
+    sortPanel,
+    refresh,
+    foldAll,
+    newRow,
+    stale,
+    editor,
+    table,
+  }
 }
 
 /** 一个「表面实例」的冻结结果（内存；不进 KB、不进撤销） */
@@ -419,6 +448,9 @@ export class ViewHost {
     if (deps.derived) this.els.head.hidden = true
     this.els.refresh.textContent = t('ui.query.refresh')
     this.els.refresh.addEventListener('click', () => this.refresh())
+    this.els.sort.textContent = t('ui.query.sort')
+    this.els.sort.title = t('ui.query.sortTitle')
+    this.els.sort.addEventListener('click', () => this.toggleSortPanel())
     this.els.newRow.textContent = t('ui.view.newRow')
     this.els.newRow.title = t('ui.view.newRowTitle')
     this.els.newRow.addEventListener('click', () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }))
@@ -849,6 +881,8 @@ export class ViewHost {
     // 大纲折叠的次要文案由 `render()` 现算（它才知道这一屏画了几行）；其余分支没有折叠
     if (!query || view !== null) this.els.topCount.hidden = true
     this.els.refresh.hidden = !query
+    this.els.sort.hidden = !query
+    if (!query) this.els.sortPanel.hidden = true
     // 派生栏是只读关系视图 ⇒ 不给新建/改名/刷新
     this.els.newRow.hidden = Boolean(derived) || query
     /**
@@ -922,6 +956,140 @@ export class ViewHost {
   /** `_tags` 的组名解析：标签块的显示名（列头与选项都从这一份走） */
   private tagChoices(): readonly { id: string; label: string }[] {
     return this.deps.kb.tags().map((b) => ({ id: b.id, label: displayNameOf(b).trim() || b.id.slice(-6) }))
+  }
+
+  /**
+   * **能排序的键**：保留键（与列键同名同义：创建／修改时间、日志日期、被引用几次、随机）
+   * ＋ 属性定义。保留键的取值与两条求值路径的排序实现在 `query.ts` 的 `applySort`，
+   * 这里只管把名字给人看。
+   */
+  private sortKeys(): readonly { id: string; label: string }[] {
+    return [
+      { id: 'created', label: t('ui.query.sortKey.created') },
+      { id: 'modified', label: t('ui.query.sortKey.modified') },
+      { id: '_date', label: t('ui.query.sortKey.date') },
+      { id: 'refCount', label: t('ui.query.sortKey.refCount') },
+      { id: 'random', label: t('ui.query.sortKey.random') },
+      ...this.deps.fields().map((f) => ({ id: f.id, label: f.label })),
+    ]
+  }
+
+  /** 排序面板就地展开／收起；展开时按当前 spec 现画（成员顺序＝多键，按数组序生效） */
+  private toggleSortPanel(): void {
+    const panel = this.els.sortPanel
+    if (!panel.hidden) {
+      panel.hidden = true
+      return
+    }
+    const spec = this.source.kind === 'query' ? this.source.spec : null
+    if (!spec) return
+    this.paintSortRows(spec, (spec.sort ?? []).map((s) => ({ ...s })))
+    panel.hidden = false
+  }
+
+  /**
+   * 排序面板的行：字段 ＋ 方向 ＋ 上移／下移／移除（次序即优先级）。
+   *
+   * 编辑的是**本地副本**，「应用」才走 `core.query/set-spec` 落盘——与条件树同一套
+   * 落盘与撤销路径；清空全部行 ＝ 删掉 `sort` 键（空数组不留「排过序」的痕迹）。
+   */
+  private paintSortRows(spec: QuerySpec, draft: SortKey[]): void {
+    const panel = this.els.sortPanel
+    panel.replaceChildren()
+    const repaint = (): void => this.paintSortRows(spec, draft)
+    const fields = this.sortKeys()
+    draft.forEach((s, i) => {
+      const row = document.createElement('div')
+      row.className = 'qsp-row'
+      const col = document.createElement('select')
+      col.className = 'qsp-field'
+      for (const f of fields) {
+        const o = document.createElement('option')
+        o.value = f.id
+        o.textContent = f.label
+        col.append(o)
+      }
+      col.value = s.by
+      col.onchange = () => {
+        draft[i] = { ...s, by: col.value }
+        repaint()
+      }
+      const dir = document.createElement('select')
+      dir.className = 'qsp-dir'
+      for (const [v, key] of [
+        ['asc', 'ui.view.sortAsc'],
+        ['desc', 'ui.view.sortDesc'],
+      ] as const) {
+        const o = document.createElement('option')
+        o.value = v
+        o.textContent = t(key)
+        dir.append(o)
+      }
+      dir.value = s.dir
+      dir.onchange = () => {
+        draft[i] = { ...s, dir: dir.value === 'desc' ? 'desc' : 'asc' }
+        repaint()
+      }
+      const ops = document.createElement('span')
+      ops.className = 'qsp-ops'
+      for (const [label, disabled, act] of [
+        ['↑', i === 0, (): void => {
+          ;[draft[i - 1], draft[i]] = [draft[i]!, draft[i - 1]!]
+        }],
+        ['↓', i === draft.length - 1, (): void => {
+          ;[draft[i + 1], draft[i]] = [draft[i]!, draft[i + 1]!]
+        }],
+        ['×', false, (): void => {
+          draft.splice(i, 1)
+        }],
+      ] as const) {
+        const b = document.createElement('button')
+        b.type = 'button'
+        b.textContent = label
+        b.disabled = disabled
+        b.addEventListener('click', () => {
+          act()
+          repaint()
+        })
+        ops.append(b)
+      }
+      row.append(col, dir, ops)
+      panel.append(row)
+    })
+    // 添加一行：只列还没在用的字段；选了当场落一行（方向缺省升序，行内可改）
+    const unused = fields.filter((f) => !draft.some((s) => s.by === f.id))
+    const add = document.createElement('select')
+    add.className = 'qsp-add'
+    const placeholder = document.createElement('option')
+    placeholder.value = ''
+    placeholder.textContent = t('ui.query.sortAdd')
+    add.append(placeholder)
+    for (const f of unused) {
+      const o = document.createElement('option')
+      o.value = f.id
+      o.textContent = f.label
+      add.append(o)
+    }
+    add.disabled = unused.length === 0
+    add.onchange = () => {
+      if (add.value === '') return
+      draft.push({ by: add.value, dir: 'asc' })
+      repaint()
+    }
+    panel.append(add)
+    const apply = document.createElement('button')
+    apply.type = 'button'
+    apply.className = 'qsp-apply ui-btn'
+    apply.textContent = t('ui.query.builder.apply')
+    apply.addEventListener('click', () => {
+      const next: QuerySpec = { ...spec }
+      if (draft.length > 0) next.sort = draft.map((s) => ({ ...s }))
+      else delete next.sort
+      this.deps.invoke('core.query/set-spec', { owner: this.writeOwner, spec: next })
+      panel.hidden = true
+      this.refocusBody()
+    })
+    panel.append(apply)
   }
 
   /**

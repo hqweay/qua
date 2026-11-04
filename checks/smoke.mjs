@@ -2716,7 +2716,7 @@ await check('T216 挂载栏本地查询：切到「大纲」后仍能切回；�
   })
   assert(empty.rootHeadHidden && empty.emptyRoot, `空条件不该显示组合方式：${JSON.stringify(empty)}`)
   assert(!empty.icon, `空态不摆占位大图：${JSON.stringify(empty)}`)
-  assert(empty.labels.join() === '最多,顺序', `选项要有可读的字段名（范围轴已并进条件）：${JSON.stringify(empty.labels)}`)
+  assert(empty.labels.join() === '最多', `选项要有可读的字段名（排序移去了抬头面板，选项行只剩上限）：${JSON.stringify(empty.labels)}`)
   assert(empty.limit === '不限', `限数无值时应说「不限」，不是一个空框：${JSON.stringify(empty.limit)}`)
 
   await ctx.close()

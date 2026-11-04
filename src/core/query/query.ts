@@ -159,6 +159,8 @@ export type PropOp =
 export interface SortKey {
   by: string
   dir: 'asc' | 'desc'
+  /** 只给 `by:'random'` 用：同一份种子 ⇒ 同一个「随机」序（成员顺序是冻结契约的一部分，每次刷新换一批就没法回访） */
+  seed?: number
 }
 
 /**
@@ -317,20 +319,34 @@ export function evaluateQuery(
     seen.add(b.id)
     hits.push({ blockId: b.id, path: ancestors.map((a) => a.id), block: b })
   })
-  applySort(hits, spec.sort)
+  applySort(hits, spec.sort, forest)
   const size = typeof spec.limit === 'number' ? Math.max(0, spec.limit) : hits.length
   return hits.slice(0, size).map(({ blockId, path }) => ({ blockId, path }))
 }
 
-/** 排序键可能不止一个：从最后一个键往前排，稳定排序让写在前面的键成为主键 */
-function applySort(hits: { block: Block }[], sort: readonly SortKey[] | undefined): void {
+/**
+ * 排序键可能不止一个：从最后一个键往前排，稳定排序让写在前面的键成为主键。
+ *
+ * 取值不只属性袋（保留键 H 批：能显示的列也要能排序）——`created`／`modified` 是块字段，
+ * `refCount` 是关系事实（引用几处是这一刻的派生，不进属性袋）、一次扫描整林现算，
+ * `random` 按 (块 id, 种子) 确定性散列——同一种子同一序，「随机抽 N 条」才回访得回来。
+ * `path`／`matched`／`sharedTags` 仍未接：按什么比要先有语义（path 是深度还是链上名字？）。
+ */
+function applySort(hits: { block: Block }[], sort: readonly SortKey[] | undefined, forest: readonly Block[]): void {
   if (!sort || sort.length === 0) return
+  const refCounts = sort.some((s) => s.by === 'refCount')
+    ? (() => {
+        const m = new Map<string, number>()
+        for (const e of relationEdgesOfForest(forest).edges) m.set(e.to, (m.get(e.to) ?? 0) + 1)
+        return m
+      })()
+    : undefined
   for (let i = sort.length - 1; i >= 0; i--) {
-    const { by, dir } = sort[i]!
+    const { by, dir, seed } = sort[i]!
     const sign = dir === 'desc' ? -1 : 1
     hits.sort((x, y) => {
-      const xv = x.block.props?.[by]
-      const yv = y.block.props?.[by]
+      const xv = sortValueOf(x.block, by, seed, refCounts)
+      const yv = sortValueOf(y.block, by, seed, refCounts)
       if (xv === undefined || yv === undefined) {
         if (xv === undefined && yv === undefined) return 0
         return xv === undefined ? 1 : -1
@@ -338,6 +354,25 @@ function applySort(hits: { block: Block }[], sort: readonly SortKey[] | undefine
       return sign * cmpValues(xv, yv)
     })
   }
+}
+
+/** 排序键的取值：属性键读属性袋，保留键读块字段与派生量（与保留列键同名同义） */
+function sortValueOf(b: Block, by: string, seed: number | undefined, refCounts: ReadonlyMap<string, number> | undefined): unknown {
+  if (by === 'created') return b.created
+  if (by === 'modified') return b.modified
+  if (by === 'refCount') return refCounts?.get(b.id) ?? 0
+  if (by === 'random') return randomOf(b.id, seed)
+  return b.props?.[by]
+}
+
+/** (块 id, 种子) → 确定性伪随机：fnv-1a 的 32 位折叠，不引第二份哈希实现 */
+function randomOf(id: string, seed: number | undefined): number {
+  let h = 2166136261 ^ (seed ?? 0)
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return h >>> 0
 }
 
 /** 值的原生比较：数值按大小、其余按字符串序（`_date` 这类 ISO 串字典序即时间序）。异型值不做承诺 */

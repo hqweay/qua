@@ -376,3 +376,64 @@
   min-width: 24rem;
   max-width: 34rem;
 }
+
+/* ---------------------------------------------------------------- 排序面板
+   与条件树同一张卡片语言：就地展开的一行，不是浮层。
+   成员顺序是多键，行序即优先级——↑／↓给唯一的确定性换位（拖序归观感轮）。 */
+.queryview-sortpanel {
+  margin: var(--ui-gap-1) 0 var(--ui-gap-2);
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+  font-size: var(--ui-fs-xs);
+}
+
+.qsp-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  min-width: 0;
+}
+
+.qsp-field {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.qsp-dir {
+  flex: 0 0 auto;
+}
+
+.qsp-ops {
+  display: flex;
+  gap: var(--ui-gap-1);
+  margin-inline-start: auto;
+}
+
+.qsp-ops button {
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface);
+  color: var(--ui-text-secondary);
+  min-width: 22px;
+  padding: 0 var(--ui-gap-1);
+  cursor: pointer;
+}
+
+.qsp-ops button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.qsp-add {
+  align-self: flex-start;
+  min-width: 0;
+}
+
+.qsp-apply {
+  align-self: flex-end;
+}
