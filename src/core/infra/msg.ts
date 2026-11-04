@@ -1135,6 +1135,9 @@ export const MSG = {
   'ui.search.open': '打开',
   'ui.search.createPage': '新建页「{name}」',
   'ui.search.results': '{count} 个结果',
+  'cmd.block.convert-mention': '把提及转成引用',
+  'ui.mount.mention.convert': '转成引用',
+  'ui.toast.mentionStale': '那一处的正文已经变了，没有转换',
 } as const
 
 /** 回调 id 就是 MSG 的键 —— 写错一个 id 会在 `pnpm typecheck` 阶段就红 */

@@ -193,6 +193,16 @@ export interface App {
    *    拆成两步又会让「建了标签但没写上归属」这种半截状态成为可能。
    */
   insertTag(tag: string): void
+  /**
+   * **把一处提及转成引用**（提及栏片段行的高亮按钮是唯一入口）。
+   *
+   * `start`/`end` 是 plain 偏移区间（渲染端从派生值里拿的）。写前复核那一区间
+   * 仍是目标**此刻**的名字：渲染与点击之间正文可能已经变了——复核不过就
+   * 一句实话，一个字节不写。转换是一条内容写，一次撤销。
+   *
+   * @returns 真的转换了才 `true`
+   */
+  convertMention(blockId: string, to: string, start: number, end: number): boolean
   /* 属性（属性是块第一公民；值在块上 `props[propId]`，一块一槽） */
   setPropValue(blockId: string, propId: string, value: unknown): void
   clearPropValue(blockId: string, propId: string): void

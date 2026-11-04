@@ -433,7 +433,8 @@ export function derivedColumns(source: DerivedSource): ViewColumn[] {
     { key: PATH_COLUMN, width: 220 },
     ...special.map((key) => ({
       key,
-      width: key === MATCHED_COLUMN ? 150 : key === REL_KINDS_COLUMN ? 180 : key === SHARED_TAGS_COLUMN ? 160 : 120,
+      // 命中列画的是片段（要能当正文读），比其它派生列宽一档
+      width: key === MATCHED_COLUMN ? 240 : key === REL_KINDS_COLUMN ? 180 : key === SHARED_TAGS_COLUMN ? 160 : 120,
     })),
     { key: MODIFIED_COLUMN, width: 150 },
   ]

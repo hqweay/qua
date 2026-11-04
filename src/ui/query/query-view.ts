@@ -25,6 +25,7 @@ import {
   childrenRecords,
   defaultColumnsForSource,
   fieldTextOf,
+  MATCHED_COLUMN,
   displayNameOf,
   expandContexts,
   hasLiveChildren,
@@ -84,6 +85,7 @@ import { ViewList } from '../views/view-list.ts'
 import { ViewMindmap } from '../views/view-mindmap.ts'
 import { ViewListTable } from '../views/view-list-table.ts'
 import { ViewTable } from '../views/view-table.ts'
+import { mentionDerivedOf, renderMentionField } from '../views/mention-field.ts'
 
 /** 默认看法的临时 id（不落盘：它代表「这一份源没有激活视图」这件事本身） */
 const DEFAULT_VIEW_ID = 'view-default'
@@ -1511,6 +1513,12 @@ export class ViewHost {
           },
           projectTitle: (r, into) => this.deps.project(r.block, into),
           project: (r, key, into) => {
+            // 提及栏的命中列画「片段 ＋ 转换按钮」；其余列仍是纯文本
+            const m = key === MATCHED_COLUMN ? mentionDerivedOf(r) : null
+            if (m) {
+              renderMentionField(into, m, (spot) => this.convertMention(r.block.id, spot))
+              return
+            }
             into.textContent = fieldTextOf(r, key, (v) =>
               typeof v === 'string' && this.deps.refLabel ? this.deps.refLabel(v) : null,
             )
@@ -1567,6 +1575,7 @@ export class ViewHost {
         insertRow: () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }),
         deleteRow: (rowId) => this.deps.invoke('core.view/delete-row', { rowId }),
         openBlock: (id, place) => this.deps.openBlock(id, place),
+        convertMention: (blockId, spot) => this.convertMention(blockId, spot),
         cell: this.cell,
         ...(this.deps.pickRef ? { pickRef: this.deps.pickRef } : {}),
         ...(this.deps.refLabel ? { refLabel: this.deps.refLabel } : {}),
@@ -1592,6 +1601,22 @@ export class ViewHost {
     const src = this.source
     if (src.kind === 'query') return resolveRows(this.frozen?.hits ?? [], this.deps.kb)
     return childrenRecords(src.blockId, this.deps.kb)
+  }
+
+  /**
+   * 提及栏片段行的「转成引用」（列表/表格的命中列共用）。
+   *
+   * 只在派生模式下有意义：派生栏的 host 就是提及的目标。走命令面——
+   * 一条内容写、一次撤销；区间复核与「没转成」的实话都在命令那一步。
+   */
+  private convertMention(blockId: string, spot: { start: number; end: number }): void {
+    if (!this.deps.derived) return
+    this.deps.invoke('core.block/convert-mention', {
+      blockId,
+      to: this.deps.host().id,
+      start: spot.start,
+      end: spot.end,
+    })
   }
 
   /* ---------------------------------------------------------- 大纲分支：查询结果 */

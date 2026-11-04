@@ -99,6 +99,9 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     app.toast(t('ui.toast.blockRestored'))
     return true
   },
+  // 提及栏片段行的按钮是唯一入口；区间复核与「没转成」的实话都在门面那一步
+  'core.block/convert-mention': (a, app) =>
+    app.convertMention(S(a.blockId), S(a.to), Number(a.start), Number(a.end)),
   'core.editor/toggle-todo': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false

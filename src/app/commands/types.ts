@@ -236,6 +236,14 @@ export interface PropsDeps {
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
+/** 提及转引用的宿主能力（判据在 relations 的 mention 一份；这里只读门面 ＋ 落一笔事务） */
+export interface MentionDeps {
+  kb: KbClient
+  /** 开一笔事务：一条内容写、一次撤销；撤销条目与落盘由装配层收 */
+  run: TxRun
+  toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
+}
+
 /** 归属边写入的宿主能力；森林扫描的派生由装配层按窄口注入（成环检查要全库） */
 export interface BelongsToDeps {
   kb: KbClient

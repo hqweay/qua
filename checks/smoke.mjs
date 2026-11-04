@@ -19878,6 +19878,86 @@ await check('T236 空态＝最近更新（非空且含最新改动的块）；�
   return '空态最近更新、创建入口、复制引用'
 })
 
+await check('T237 候选引用：片段行高亮名字出现处、一键转成引用——提及消失⇄引用出现，一次撤销换回来', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const setup = await page.evaluate(() => {
+    const pages = window.__qua.pages()
+    const P = pages[0]
+    const Q = pages[1]
+    // 在另一页插一条含 P 名字的纯文本（不是引用）：这就是提及栏里的「候选」
+    window.__qua.invoke('core.page/open', { pageId: Q.id })
+    const rows = window.__qua.__editor.rows().map((r) => r.block).filter((x) => x.id !== Q.id && x.children.length === 0)
+    window.__qua.focusBlock(rows[0].id, 999)
+    const probeText = `${P.title} 的候选引用探针`
+    window.__qua.invoke('core.editor/insert-block', { text: probeText })
+    const probe = window.__qua.allBlocks().find((x) => x.text === probeText)
+    return { P: P.id, probe: probe?.id ?? '', word: P.title, probeText }
+  })
+  assert(setup.probe !== '' && setup.word !== '', `前置：应能造出一条文本提及：${JSON.stringify(setup)}`)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.P)
+  await page.waitForTimeout(450)
+
+  // ① 提及栏 → 列表：命中格是片段，名字处是高亮按钮
+  await mountTab(page, 'mentions')
+  await page.locator('.mount-derived-view[data-kind="list"]').click()
+  await page.waitForTimeout(450)
+  const before = await page.evaluate((pid) => ({
+    probeRow: Boolean(document.querySelector(`.mount-view .vl-row[data-block-id="${pid}"]`)),
+    hitTexts: [...document.querySelectorAll(`.mount-view .vl-row[data-block-id="${pid}"] .mention-hit`)].map((e) => e.textContent ?? ''),
+    count: Number((document.querySelector('.mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
+    rows: document.querySelectorAll('.mount-view .vl-row').length,
+  }), setup.probe)
+  assert(before.probeRow, `提及栏应有探针那一行：${JSON.stringify(before)}`)
+  assert(before.hitTexts.length >= 1 && before.hitTexts.every((s) => s.includes(setup.word)), `片段行的名字处应是高亮按钮：${JSON.stringify(before)}`)
+
+  // ② 一键转换：恰好一条内容写；该条从提及消失、同时在引用栏出现
+  await page.locator(`.mount-view .vl-row[data-block-id="${setup.probe}"] .mention-hit`).first().click()
+  await page.waitForTimeout(650)
+  const ops = await page.evaluate(() => window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id })))
+  assert(ops.length === 1 && ops[0].e === 'block' && ops[0].op === 'upsert' && ops[0].id === setup.probe, `一次转换＝一条内容写：${JSON.stringify(ops)}`)
+  const after = await page.evaluate((pid) => ({
+    mentionsRow: Boolean(document.querySelector(`.mount-view .vl-row[data-block-id="${pid}"]`)),
+    srcText: window.__qua.allBlocks().find((x) => x.id === pid)?.text ?? '',
+  }), setup.probe)
+  assert(!after.mentionsRow, `转换后该条从提及消失：${JSON.stringify(after)}`)
+  assert(!after.srcText.includes(setup.word), `那一处纯文本换成了引用（投影里不再有名字）：${JSON.stringify(after)}`)
+
+  await mountTab(page, 'refs')
+  await page.locator('.mount-derived-view[data-kind="list"]').click()
+  await page.waitForTimeout(450)
+  const refs = await page.evaluate((pid) => ({
+    probeRow: Boolean(document.querySelector(`.mount-view .vl-row[data-block-id="${pid}"]`)),
+    rows: document.querySelectorAll('.mount-view .vl-row').length,
+  }), setup.probe)
+  assert(refs.probeRow, `同一关系索引里它换到引用栏：${JSON.stringify(refs)}`)
+
+  // ③ 一次撤销：换回提及
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForTimeout(650)
+  const undone = await page.evaluate((pid) => ({
+    srcText: window.__qua.allBlocks().find((x) => x.id === pid)?.text ?? '',
+  }), setup.probe)
+  assert(undone.srcText === setup.probeText, `一次撤销回到原文：${JSON.stringify(undone)}`)
+  await mountTab(page, 'mentions')
+  await page.locator('.mount-derived-view[data-kind="list"]').click()
+  await page.waitForTimeout(450)
+  const mentionsAgain = await page.evaluate((pid) => ({
+    probeRow: Boolean(document.querySelector(`.mount-view .vl-row[data-block-id="${pid}"]`)),
+  }), setup.probe)
+  assert(mentionsAgain.probeRow, `一次撤销后回到提及栏：${JSON.stringify(mentionsAgain)}`)
+  await mountTab(page, 'refs')
+  await page.locator('.mount-derived-view[data-kind="list"]').click()
+  await page.waitForTimeout(450)
+  const refsAgain = await page.evaluate((pid) => ({
+    probeRow: Boolean(document.querySelector(`.mount-view .vl-row[data-block-id="${pid}"]`)),
+  }), setup.probe)
+  assert(!refsAgain.probeRow, `一次撤销后引用栏没有它：${JSON.stringify(refsAgain)}`)
+
+  await ctx.close()
+  return `提及 ${before.rows} 行（片段高亮＋按钮）→ 一键转换提及消失/引用出现（1 op）→ ⌘Z 换回来`
+})
+
 /**
  * **判定必须在所有用例之后**：这一段曾经写在中途，之后新增的用例（T206 起）即使红了
  * 也不会进 `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。
