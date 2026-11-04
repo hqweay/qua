@@ -86,7 +86,7 @@ export function createSearchService(deps: SearchDeps): SearchService {
         return client.tokenize(items)
       }
 
-  const indexer = new SearchIndexer(snapshot, tokenize, () => schedule())
+  const indexer = new SearchIndexer(snapshot, tokenize, () => start())
   const canFts = Boolean(bridge?.search)
 
   function clearTimer(): void {
@@ -113,6 +113,14 @@ export function createSearchService(deps: SearchDeps): SearchService {
   function schedule(delay = 0): void {
     if (disposed || !bridge || !canFts) return
     if (inflight) return
+    /**
+     * 立即重建（不走定时器）：桌面壳在启动期可能把定时器与 worker 一起按后台页冻结，
+     * 等 `load`／用户第一次搜索再建，才不会出现「索引永远停在 pending」。
+     */
+    if (delay <= 0) {
+      void rebuild()
+      return
+    }
     if (timer !== null) clearTimeout(timer)
     timer = setTimeout(() => {
       timer = null
@@ -138,13 +146,32 @@ export function createSearchService(deps: SearchDeps): SearchService {
     return { hits: scanSearch(deps.forest(), text, limit).map((blockId) => ({ blockId, score: 0 })), mode: 'scan' }
   }
 
+  /**
+   * 「该建索引了」的**唯一入口**：等页面加载完再建。
+   *
+   * 为什么不等模块初始化就建：启动期渲染器还没真正活起来，worker 与定时器都可能
+   * 被宿主按后台页冻结（桌面壳里窗口还没 show）。等 `load` 之后建，代价只是
+   * 「第一次搜索先走扫描」，而索引仍在后台补齐。
+   */
+  function start(): void {
+    if (disposed || !bridge || !canFts) return
+    if (indexer.status === 'ready') return
+    const kick = (): void => schedule()
+    if (typeof document === 'undefined' || document.readyState === 'complete') kick()
+    else window.addEventListener('load', kick, { once: true })
+  }
+
   return {
     indexer,
 
     async query(text, limit = 50): Promise<SearchResult> {
       const n = Math.max(1, Math.min(200, Math.trunc(limit)))
       if (text.trim() === '') return { hits: [], mode: indexer.ready ? 'fts' : 'scan' }
-      if (!indexer.ready || !bridge?.search) return scan(text, n)
+      if (!indexer.ready || !bridge?.search) {
+        // 用户开始搜索了：这是最可靠的「渲染器已活」信号，顺手把索引排上
+        if (bridge && canFts) start()
+        return scan(text, n)
+      }
       const match = compileMatch(text)
       if (!match) return { hits: [], mode: 'fts' }
       try {
@@ -168,10 +195,7 @@ export function createSearchService(deps: SearchDeps): SearchService {
       }
     },
 
-    start() {
-      if (disposed || !bridge || !canFts) return
-      if (indexer.status !== 'ready') schedule()
-    },
+    start,
 
     rebuild,
 

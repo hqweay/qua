@@ -42,7 +42,7 @@ export default defineConfig({
    * worker 有自己的一份插件容器（Vite 6）；`?inline` 的 WASM 必须在**那一份**里也登记，
    * 否则 rollup 会把二进制当 JS 解析。
    */
-  worker: { plugins: () => [inlineWasm()] },
+  worker: { format: 'iife', plugins: () => [inlineWasm()] },
   // 固定端口 5180（README 写死的那个）
   server: { port: 5180, strictPort: true },
   preview: { port: 5180, strictPort: true },
