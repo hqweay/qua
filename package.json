@@ -70,5 +70,9 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false
     }
+  },
+  "dependencies": {
+    "jieba-wasm": "2.4.0",
+    "pinyin-pro": "3.29.5"
   }
 }
