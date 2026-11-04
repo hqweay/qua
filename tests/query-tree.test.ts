@@ -83,10 +83,17 @@ test('条件树：拆不动的形状返回 null（调用方走只读 JSON，不�
     { where: { ref: { to: 'x', kind: 'inline' } } },
     { where: { role: 'page' } },
     { where: { not: { not: { tag: 'x' } } } },
-    { where: { tag: 'x' }, sort: [{ by: 'a', dir: 'asc' }, { by: 'b', dir: 'desc' }] },
     { where: { prop: { id: 'p', eq: 1, neq: 2 } } },
   ]
   for (const spec of hard) assert.equal(treeOfSpec(spec as QuerySpec), null, JSON.stringify(spec))
+})
+
+test('多键排序拆得动：树草稿整组保全，拼回去逐字节相等（树自己不编辑它，抬头排序面板是唯一入口）', () => {
+  const multi: QuerySpec = { where: { tag: 'x' }, sort: [{ by: 'a', dir: 'asc' }, { by: 'b', dir: 'desc' }] }
+  const draft = treeOfSpec(multi)
+  assert.ok(draft, '多键排序不再把整份条件逼进 JSON')
+  assert.deepEqual(draft.sort, multi.sort)
+  assert.equal(JSON.stringify(specOfTree(draft)), JSON.stringify(canonicalSpec(multi)), '往返逐字节相等')
 })
 
 test('条件树：没填完的行要能被指出来（不静默丢掉刚敲的那一行）', () => {

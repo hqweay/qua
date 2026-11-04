@@ -880,3 +880,27 @@ test('A12 {down} 一次求值是线性的：深度 5 的 1000 块 < 200ms（粗�
   assert.ok(childReads <= 5000, `子块表被读了 ${childReads} 次（逐候选重走子树会是 O(n²)）`)
   assert.ok(textReads <= 5000, `正文条件被读了 ${textReads} 次（每块只该判一次）`)
 })
+
+test('runQuery：保留键能排序——created/modified 是块字段，refCount 是关系事实，random 按种子确定', () => {
+  const mk = (id: string, created: number, modified = created, refs: readonly string[] = []): Block => ({
+    id,
+    content: refs.map((to) => ({ t: 'ref', to })),
+    children: [],
+    created,
+    modified,
+  })
+  // a 被引用两次、b 一次、c 零次；created/modified 各不相同（可断言确定序）
+  const forest = [mk('a', 300), mk('b', 100), mk('c', 200), mk('r1', 1, 1, ['a', 'b']), mk('r2', 2, 2, ['a'])]
+  const spec = (sort: NonNullable<QuerySpec['sort']>): QuerySpec => ({ where: { text: '' }, sort })
+  const ids = (hits: { blockId: string }[]): string[] => hits.map((h) => h.blockId)
+  const all = ids(runQuery(spec([{ by: 'created', dir: 'asc' }]), { blocks: forest }))
+  assert.deepEqual(all.filter((x) => ['a', 'b', 'c'].includes(x)), ['b', 'c', 'a'], 'created 升序＝块字段')
+  const byRefs = ids(runQuery(spec([{ by: 'refCount', dir: 'desc' }]), { blocks: forest }))
+  assert.deepEqual(byRefs.filter((x) => ['a', 'b', 'c'].includes(x)), ['a', 'b', 'c'], 'refCount 降序＝被引用几次')
+  const byModified = ids(runQuery(spec([{ by: 'modified', dir: 'desc' }]), { blocks: forest }))
+  assert.deepEqual(byModified.filter((x) => ['a', 'b', 'c'].includes(x)), ['a', 'c', 'b'], 'modified 降序')
+  // random：同一种子同一序（冻结契约的一部分——「随机抽 N 条」要回访得回来）
+  const rand = ids(runQuery(spec([{ by: 'random', dir: 'asc', seed: 42 }]), { blocks: forest }))
+  const randAgain = ids(runQuery(spec([{ by: 'random', dir: 'asc', seed: 42 }]), { blocks: forest }))
+  assert.deepEqual(rand, randAgain, '同一种子同一序')
+})

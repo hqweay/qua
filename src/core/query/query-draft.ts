@@ -13,7 +13,7 @@
  *    而用户看到的是「我什么都没改，条件却变了」。那种情况在界面上整块显示为 JSON。
  */
 import { canonicalSpec } from './query-view.ts'
-import { isQuerySpec, type QueryNode, type QuerySpec } from './query.ts'
+import { isQuerySpec, type QueryNode, type QuerySpec, type SortKey } from './query.ts'
 import { type PropKind } from '../props/props.ts'
 
 /** 一行条件能表达的事情（其余形态走 JSON） */
@@ -52,7 +52,7 @@ export interface DraftRow {
   field?: string
   /** `prop` 才有；缺省 `eq` */
   op?: DraftOp
-  /** `todo` 用 `todo`／`done`／`none`；`path` 是目标块 id（`$self`＝这一块）；其余是字符串或数字字面量 */
+  /** `path` 是目标块 id（`$self`＝这一块）；其余是字符串或数字字面量 */
   value?: string
   /** `path` 才有；缺省 `up` */
   dir?: 'up' | 'down' | 'near'
@@ -64,7 +64,8 @@ export interface QueryDraft {
   mode: 'all' | 'any'
   rows: DraftRow[]
   limit?: number
-  sort?: { by: string; dir: 'asc' | 'desc' }
+  /** 成员顺序（多键，按数组序生效）；与 spec 的 `SortKey[]` 同形，整组替换 */
+  sort?: SortKey[]
   /**
    * 原样的 JSON 文本（**只在拆不成行时**有意义）。
    *
@@ -139,7 +140,7 @@ export function draftOfSpec(spec: QuerySpec): QueryDraft {
     mode: 'all',
     rows: [],
     ...(typeof spec.limit === 'number' ? { limit: spec.limit } : {}),
-    ...(spec.sort && spec.sort.length === 1 ? { sort: { by: spec.sort[0]!.by, dir: spec.sort[0]!.dir } } : {}),
+    ...(spec.sort && spec.sort.length > 0 ? { sort: spec.sort.map((s) => ({ ...s })) } : {}),
   }
   const leaves = 'all' in where ? where.all : 'any' in where ? where.any : [where]
   if ('all' in where && leaves.length === 0) {
@@ -148,9 +149,6 @@ export function draftOfSpec(spec: QuerySpec): QueryDraft {
   }
   // `any:[]`（恒假）就是「还没有条件」：拆成零行草稿往返逐字节相等，
   // 新建栏的空条件才能从条件行开始配 —— 留在 verbatim 里，条件行的修改会被原样吞掉
-  if (spec.sort && spec.sort.length > 1) {
-    return { ...base, verbatim: JSON.stringify(canonicalSpec(spec), null, 2) }
-  }
   const rows: DraftRow[] = []
   for (const leaf of leaves) {
     const row = rowOf(leaf)
@@ -231,7 +229,7 @@ export function specOfDraft(draft: QueryDraft): QuerySpec {
   }
   const where: QueryNode = nodes.length === 0 ? { any: [] } : nodes.length === 1 ? nodes[0]! : draft.mode === 'any' ? { any: nodes } : { all: nodes }
   const out: QuerySpec = { where }
-  if (draft.sort) out.sort = [{ by: draft.sort.by, dir: draft.sort.dir }]
+  if (draft.sort && draft.sort.length > 0) out.sort = draft.sort.map((s) => ({ ...s }))
   if (typeof draft.limit === 'number' && draft.limit > 0) out.limit = Math.floor(draft.limit)
   return canonicalSpec(out)
 }

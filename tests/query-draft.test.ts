@@ -88,13 +88,20 @@ test('拆不动就整份走 JSON：`not`、嵌套组合、`is`／`up`／`down`�
     { where: { down: { tag: 'x' } } },
     { where: { near: { ref: 'x' } } },
     { where: { role: 'journal' } },
-    { where: { tag: '任务' }, sort: [{ by: 'a', dir: 'asc' }, { by: 'b', dir: 'desc' }] },
   ]
   for (const s of hard) {
     const draft = draftOfSpec(s)
     assert.ok(draft.verbatim !== undefined, `这份条件拆不成条件行：${JSON.stringify(s)}`)
     assert.equal(bytes(s), JSON.stringify(canonicalSpec(s)), '拆不动也要原样回来')
   }
+})
+
+test('多键排序拆得动：草稿整组保全，拼回去逐字节相等', () => {
+  const multi: QuerySpec = { where: { tag: '任务' }, sort: [{ by: 'a', dir: 'asc' }, { by: 'b', dir: 'desc' }] }
+  const draft = draftOfSpec(multi)
+  assert.equal(draft.verbatim, undefined, '多键排序不再把整份条件逼进 JSON')
+  assert.deepEqual(draft.sort, multi.sort)
+  assert.equal(JSON.stringify(specOfDraft(draft)), JSON.stringify(canonicalSpec(multi)), '往返逐字节相等')
 })
 
 test('空组合：`all:[]` 恒真拆不得（零行会把它翻成恒假）；`any:[]` ＝ 零行草稿（往返无损）', () => {

@@ -829,41 +829,8 @@ export class QueryTree {
     limit.append(limitInput)
     row.append(limit)
 
-    const sort = document.createElement('label')
-    sort.className = 'qt-opt qt-opt--sort'
-    sort.append(labelOf(t('ui.query.builder.sort')))
-    const fields = this.deps.fields()
-    const col = selectEl(
-      [{ value: '', label: t('ui.query.builder.sortNone') }, ...fields.map((f) => ({ value: f.id, label: f.label }))],
-      draft.sort?.by ?? '',
-      (next) => {
-        draft.sort = next === '' ? undefined : { by: next, dir: draft.sort?.dir ?? 'asc' }
-        if (next === '') delete draft.sort
-        // 没选排序列时方向没有意义；选了之后当场解锁（这个控件不重画整棵树）
-        dir.disabled = draft.sort === undefined
-      },
-      'qt-sort-col',
-      'sort',
-    )
-    const dir = selectEl(
-      [
-        { value: 'asc', label: t('ui.view.sortAsc') },
-        { value: 'desc', label: t('ui.view.sortDesc') },
-      ],
-      draft.sort?.dir ?? 'asc',
-      (next) => {
-        if (!draft.sort) return
-        draft.sort = { by: draft.sort.by, dir: next === 'desc' ? 'desc' : 'asc' }
-      },
-      'qt-sort-dir',
-      'sort-dir',
-    )
-    dir.disabled = draft.sort === undefined
-    const controls = document.createElement('span')
-    controls.className = 'qt-opt-controls'
-    controls.append(col, dir)
-    sort.append(controls)
-    row.append(sort)
+    // 排序不在这里：成员顺序是抬头排序编辑器的格子（多键、按数组序生效），
+    // 条件树只管「取哪些」。`draft.sort` 原样随往返保全，不被这里吞掉。
     return row
   }
 

@@ -64,7 +64,8 @@ export interface TreeDraft {
    */
   synthesizedRoot: boolean
   limit?: number
-  sort?: SortKey
+  /** 成员顺序（多键，按数组序生效）；树不再编辑它（抬头排序编辑器是唯一入口），只随往返保全 */
+  sort?: SortKey[]
 }
 
 const PROP_OP_KEYS = ['eq', 'neq', 'contains', 'gt', 'gte', 'lt', 'lte', 'exists', 'empty'] as const
@@ -188,13 +189,10 @@ function pathRowOf(dir: 'up' | 'down' | 'near', node: QueryNode): TreeRow | null
 
 /** 一份条件 → 树草稿；拆不动返回 `null` */
 export function treeOfSpec(spec: QuerySpec): TreeDraft | null {
-  // 多键排序没有 UI 值位；保留形状只能走 JSON
-  if (spec.sort && spec.sort.length > 1) return null
-
   const where = spec.where
   const common = {
     ...(typeof spec.limit === 'number' ? { limit: spec.limit } : {}),
-    ...(spec.sort && spec.sort.length === 1 ? { sort: { ...spec.sort[0]! } } : {}),
+    ...(spec.sort && spec.sort.length > 0 ? { sort: spec.sort.map((s) => ({ ...s })) } : {}),
   }
 
   if ('all' in where || 'any' in where) {
@@ -318,7 +316,7 @@ export function specOfTree(draft: TreeDraft): QuerySpec {
     where = queryNodeOfTree(root) ?? { any: [] }
   }
   const out: QuerySpec = { where }
-  if (draft.sort) out.sort = [{ by: draft.sort.by, dir: draft.sort.dir }]
+  if (draft.sort && draft.sort.length > 0) out.sort = draft.sort.map((s) => ({ ...s }))
   if (typeof draft.limit === 'number' && draft.limit > 0) out.limit = Math.floor(draft.limit)
   return canonicalSpec(out)
 }
