@@ -5,6 +5,7 @@
  * 4MB WASM 的初始化代价。
  */
 import type { TokenizedText } from '../../core/search/tokenizer.ts'
+import ftsWorkerUrl from './fts-worker.ts?worker&url'
 
 export interface TokenizerClient {
   tokenize(items: readonly { id: string; text: string }[]): Promise<Map<string, TokenizedText>>
@@ -32,7 +33,7 @@ export function createTokenizerClient(): TokenizerClient {
   const ensure = (): Worker => {
     if (dead) throw new Error(dead)
     if (worker) return worker
-    worker = new Worker(new URL('./fts-worker.ts', import.meta.url), { type: 'module' })
+    worker = new Worker(ftsWorkerUrl, { name: 'fts' })
     worker.onmessage = (e: MessageEvent<Reply>) => {
       const msg = e.data
       const slot = waiting.get(msg.id)

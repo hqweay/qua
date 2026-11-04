@@ -38,6 +38,12 @@ export class SearchIndexer implements FtsCommitSource {
   /** 重建期间不接增量写：重建会整表重铺，增量插进来只会制造两份身份 */
   private rebuilding = false
   private dirtyDuringRebuild = false
+  /**
+   * 索引还没就绪时的编辑：这批被跳过了，但重建会读到**当前**森林，
+   * 所以只要在 `beginRebuild` 清掉它，重建成功就等于把这批补上了。
+   * 不记它就会出现「重建跑完、编辑没进索引、状态却是 ready」的静默漏。
+   */
+  private dirtyWhileUnindexed = false
   private readonly tokenize: TokenizeMany
   private readonly onNeedsRebuild: () => void
 
@@ -75,7 +81,6 @@ export class SearchIndexer implements FtsCommitSource {
   get dirtyDuringBuild(): boolean {
     return this.dirtyDuringRebuild
   }
-
   /** 当前已分配的最后一个 rowid（重建时写进 meta） */
   get currentRowid(): number {
     return this.rowid
@@ -85,6 +90,7 @@ export class SearchIndexer implements FtsCommitSource {
   beginRebuild(): void {
     this.rebuilding = true
     this.dirtyDuringRebuild = false
+    this.dirtyWhileUnindexed = false
     this.state = 'building'
     this.map = new Map()
     this.rowid = 0
@@ -94,7 +100,7 @@ export class SearchIndexer implements FtsCommitSource {
   /** 重建成功：`dirty` 表示期间有编辑被跳过 ⇒ 索引还差一批，不能标 ready */
   endRebuild(tokenizer: string, dirty: boolean): boolean {
     this.rebuilding = false
-    const clean = !dirty && !this.dirtyDuringRebuild
+    const clean = !dirty && !this.dirtyDuringRebuild && !this.dirtyWhileUnindexed
     this.state = clean ? 'ready' : 'pending'
     if (clean) this.tokenizer = tokenizer
     return clean
@@ -132,7 +138,17 @@ export class SearchIndexer implements FtsCommitSource {
       if (ops.length > 0) this.dirtyDuringRebuild = true
       return null
     }
-    if (this.state !== 'ready') return null
+    if (this.state !== 'ready') {
+      /**
+       * 索引没就绪时的编辑：这批不写索引，但必须记住「重建要覆盖它」。
+       * 重建会按**当前**森林重铺，`beginRebuild` 会清掉这个标记。
+       */
+      if (ops.length > 0) {
+        this.dirtyWhileUnindexed = true
+        this.onNeedsRebuild()
+      }
+      return null
+    }
     const targets = ftsTargets(ws, ops)
     if (targets.index.size === 0 && targets.remove.size === 0) return null
 
@@ -155,12 +171,17 @@ export class SearchIndexer implements FtsCommitSource {
   }
 
   onReplace(): void {
+    // 整份替换发生在重建途中：让当前重建走完（它写的是替换前的森林），
+    // 标脏之后下一轮重来。这里若直接重置映射/状态，会把正在分配的身份抽掉。
+    if (this.rebuilding) {
+      this.dirtyDuringRebuild = true
+      return
+    }
     this.map = new Map()
     this.rowid = 0
     this.state = 'pending'
     this.tokenizer = ''
-    this.rebuilding = false
-    this.dirtyDuringRebuild = false
+    this.dirtyWhileUnindexed = false
     this.onNeedsRebuild()
   }
 }
