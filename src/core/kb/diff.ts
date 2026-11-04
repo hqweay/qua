@@ -90,8 +90,11 @@ function same(a: unknown, b: unknown): boolean {
  * （`props.arr.push`，`patch` 是允许的）。只存引用的话，先落进队列的那条 op
  * 会被后来的就地修改改掉 —— 日志记的就不再是「当时是什么」。
  * 属性值都很小（id 列表／标量），深拷一次的代价远低于一条错账。
+ *
+ * 撤销条目的 cells 用的是同一个口径（`kb/scoped.ts`）：条目要活到下一次编辑之后，
+ * 而块上的 `props`／`annos` 可以被就地改 —— 记引用就等于记了个「以后会变」的值。
  */
-function snapshotValue(v: unknown): unknown {
+export function snapshotValue(v: unknown): unknown {
   if (v === null || typeof v !== 'object') return v
   return JSON.parse(JSON.stringify(v)) as unknown
 }
@@ -199,7 +202,7 @@ function annoOps(id: string, before: readonly Anno[] | undefined, after: readonl
 }
 
 /** 新块：genesis ＋ 存在（若一开始就是软删） ＋ 属性 ＋ annos */
-function newBlockOps(block: Block, placement: Placement): Op[] {
+export function newBlockOps(block: Block, placement: Placement): Op[] {
   const out: Op[] = [genesisOp(block, placement)]
   const deleted = deletedAtOf(block)
   if (deleted !== undefined) {
@@ -211,7 +214,7 @@ function newBlockOps(block: Block, placement: Placement): Op[] {
 }
 
 /** 已有块：位置（若动） ＋ 存在（若变） ＋ created/content/modified ＋ 属性 ＋ annos */
-function existingBlockOps(
+export function existingBlockOps(
   old: BlockCells,
   block: Block,
   placement?: Placement,

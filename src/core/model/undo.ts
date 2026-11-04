@@ -1,6 +1,8 @@
 /**
  * 撤销栈与命令日志：快照式 undo，外加组合期守卫需要的调用日志。
  */
+import type { Sel } from './selection.ts'
+import type { UndoCapture } from '../kb/scoped.ts'
 
 export interface Snap {
   blocks: string
@@ -8,6 +10,21 @@ export interface Snap {
 }
 
 export type UndoKind = 'insert' | 'delete' | 'structural' | 'mark' | 'other'
+
+/**
+ * 撤销栈里的条目：一次事务（或一次合并在同一窗口里的连续编辑）的**两侧状态**。
+ *
+ * 为什么两侧都存：撤销要回到 `before`、重做要回到 `after`。只存一侧就得在撤销时
+ * 现取一次「现在」的快照——那正是要消掉的那笔 O(整库)。
+ * 条目里**没有整片森林**：只有这次动过的块（id ＋ 深拷的格 ＋ 落点）。
+ *
+ * `sel` 是**改动之前**的选区（撤销后回到这里）；`kind`／`at` 只服务合并窗口。
+ */
+export interface UndoEntry extends UndoCapture {
+  sel: Sel | null
+  kind: UndoKind
+  at: number
+}
 
 export class UndoStack {
   private past: { snap: Snap; kind: UndoKind; at: number }[] = []

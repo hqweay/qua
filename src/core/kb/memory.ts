@@ -38,6 +38,8 @@ import type { QueryHit, QuerySpec } from '../query/query.ts'
 import type { BlockStore } from '../model/store.ts'
 import { changesOf } from './changes.ts'
 import { cellsOf, diffTouched, type BeforeBlock, type Placement, type TouchedBlock } from './diff.ts'
+import { captureOf } from './scoped.ts'
+import type { UndoCapture } from './scoped.ts'
 import type { KbClient, PathEntry, Tx, TxOpts, TxResult } from './types.ts'
 import type { Anno } from '../model/runs.ts'
 
@@ -253,7 +255,7 @@ export class MemoryKb implements KbClient {
    * 另一道 `validate(state, ops)` 服务**重放**（同步收端／`applyOps`）：对端的流必须先验再吃。
    * 两者不是重复：前者管「这次能不能写」，后者管「这批 op 能不能应用在别的库上」。
    */
-  tx<R>(fn: (tx: Tx) => R, opts: TxOpts = {}): TxResult & { result: R } {
+  tx<R>(fn: (tx: Tx) => R, opts: TxOpts = {}): TxResult & { result: R; undo: UndoCapture } {
     /** 动过的块：改前快照（新块为 `null`）＋ 改后落点。出口处一次性比出 op。 */
     const touched = new Map<string, TouchedBlock>()
     /** 回滚日志：逆序应用的「怎么退回去」 */
@@ -268,6 +270,14 @@ export class MemoryKb implements KbClient {
       const ops = diffTouched(touched.values(), { directEdit: opts.directEdit })
       const changes = changesOf(ops)
       /**
+       * **撤销捕获在出口取，且立刻深拷**（`captureOf` 里做）。
+       *
+       * `touched` 的 `block` 是活引用：事务返回后下一次编辑就会改它。
+       * 条目要是只记引用，⌘Z 拿到的是「后来那份」——与 `pendingOps` 那条 250ms 的坑同源。
+       * 成本只与 touched 有关，和库体量无关；这也正是收窄撤销作用域的前提。
+       */
+      const undo = captureOf(touched.values(), opts.directEdit === true)
+      /**
        * **宣布只在这里发生**：`store.apply` 是状态转移的唯一入口 ——
        * 它同时做「按 op 修补索引」与「通知订阅者」两件事。
        *
@@ -276,7 +286,7 @@ export class MemoryKb implements KbClient {
        * 调用方（编辑器／命令）**不得**再自己宣布（那会让这次修补白做）。
        */
       this.store.apply(ops, opts.source)
-      return { ops, changes, result }
+      return { ops, changes, result, undo }
     } catch (err) {
       // 逆序回滚：后做的先退（同一块被改两次时，先退第二次再退第一次）
       for (let i = rollback.length - 1; i >= 0; i--) rollback[i]!()
