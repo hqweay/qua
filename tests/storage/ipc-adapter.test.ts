@@ -105,6 +105,47 @@ test('load：桥抛错 ⇒ storage-error（读不到 ≠ 库坏了）', async ()
   assert.equal(r.status, 'storage-error')
 })
 
+test('load：带上索引状态（块 id ↔ rowid、状态、分词器版本）', async () => {
+  const { bridge } = fakeBridge({
+    status: 'ok',
+    rows: rows({
+      ftsMap: [
+        { block_id: 'b1', fts_rowid: 7 },
+        { block_id: 'b2', fts_rowid: 9 },
+      ],
+      meta: {
+        active_id: 'b1',
+        saved_at: '3',
+        fts_state: 'ready',
+        fts_rowid_seq: '9',
+        fts_tokenizer: 'tok-1',
+      },
+    }),
+  })
+  const r = await createIpcAdapter(bridge).load()
+  assert.equal(r.status, 'ok')
+  if (r.status !== 'ok') return
+  assert.equal(r.search?.state, 'ready')
+  assert.equal(r.search?.rowidSeq, 9)
+  assert.equal(r.search?.tokenizer, 'tok-1')
+  assert.deepEqual([...r.search!.map.entries()].sort(), [
+    ['b1', 7],
+    ['b2', 9],
+  ])
+})
+
+test('load：不认识的状态按 pending（宁可重建，也不相信一个读不懂的状态）', async () => {
+  const { bridge } = fakeBridge({
+    status: 'ok',
+    rows: rows({ meta: { active_id: 'b1', saved_at: '3', fts_state: 'weird' } }),
+  })
+  const r = await createIpcAdapter(bridge).load()
+  assert.equal(r.status, 'ok')
+  if (r.status !== 'ok') return
+  assert.equal(r.search?.state, 'pending')
+  assert.equal(r.search?.map.size, 0)
+})
+
 test('commit：送的是**行写入**（不是整份字节），`replace` 一起带过去', async () => {
   const { bridge, saves } = fakeBridge()
   const port = createIpcAdapter(bridge)

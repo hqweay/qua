@@ -21,6 +21,7 @@
 
 import type { Change, ChangeKind, Op } from '../kb/types.ts'
 import type { RowWrite } from './db-rows.ts'
+import type { FtsLoadState } from './fts-port.ts'
 
 export type { Change, ChangeKind }
 
@@ -85,7 +86,15 @@ export interface CommitBatch {
  * 过新/损坏的库会被**静默覆盖**（真数据丢失）。
  */
 export type LoadResult =
-  | { status: 'ok'; raw: string }
+  | {
+      status: 'ok'
+      raw: string
+      /**
+       * 派生索引的状态。它不是内容：丢了／不匹配都能全量重建。
+       * 只有「行」后端（桌面库）会给；浏览器没有 FTS。
+       */
+      search?: FtsLoadState
+    }
   /** 从没保存过 */
   | { status: 'empty' }
   /**

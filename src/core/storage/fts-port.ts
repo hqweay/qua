@@ -11,6 +11,19 @@
 import type { Op } from '../kb/types.ts'
 import type { RowWrite, StoredWorkspace } from './db-rows.ts'
 
+/** 索引状态：只有 `ready` 时查询才相信 FTS，其余降级扫描 */
+export type FtsState = 'pending' | 'building' | 'ready'
+
+/** 从库里读出的索引状态（渲染层据此决定「直接用」还是「后台重建」） */
+export interface FtsLoadState {
+  /** 块 id → FTS rowid（只读快照；写入时复制） */
+  map: Map<string, number>
+  state: FtsState
+  rowidSeq: number
+  /** 建索引时用的分词器版本；空串＝旧库／还没建过 */
+  tokenizer: string
+}
+
 export interface FtsCommitPlan {
   writes: RowWrite[]
   /** **事务成功之后**才调用：内存里的映射到这一刻才与盘上一致 */

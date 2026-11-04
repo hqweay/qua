@@ -85,6 +85,10 @@ const qua = {
   save: (writes: unknown[], opts?: { replace?: boolean; oplog?: unknown[] }): Promise<unknown> =>
     ipcRenderer.invoke('qua:storage/save', writes, opts ?? {}),
 
+  /** 全文检索（match 由渲染层编译；主进程只做参数绑定与 bm25 排序） */
+  search: (match: string, limit: number, offset = 0): Promise<unknown> =>
+    ipcRenderer.invoke('qua:search/query', match, limit, offset),
+
   /** 每库设置（窗口 bounds／槽布局／折叠态） */
   getSetting: (key: string): Promise<unknown> => ipcRenderer.invoke('qua:settings/get', key),
   setSetting: (key: string, value: string): Promise<unknown> => ipcRenderer.invoke('qua:settings/set', key, value),

@@ -22,7 +22,9 @@
  */
 import type { CommitBatch, LoadResult, SaveResult, StoragePort } from './port.ts'
 import { WORKSPACE_VERSION, type Workspace } from './shape.ts'
+import { META_KEYS } from '../identity/library.ts'
 import { rowsToWorkspace, type RawLibraryRows, type RowWrite } from './db-rows.ts'
+import type { FtsLoadState, FtsState } from './fts-port.ts'
 
 /** 主进程那一侧的最小面（`electron/preload.ts` 暴露的同名方法） */
 export interface LibraryBridge {
@@ -36,6 +38,12 @@ export interface LibraryBridge {
    * 或跳号（对端水位出现空洞），而 `op_log` 的两条性质都建立在这条上。
    */
   save(writes: unknown[], opts?: { replace?: boolean; oplog?: { at: number; opJson: string }[] }): Promise<unknown>
+
+  /**
+   * 全文检索查询。`match` 由渲染层编译（含列过滤与 phrase），主进程只把它当参数绑定。
+   * 返回 `blockId` ＋ BM25 分数；路径、片段、软删过滤都归渲染层。
+   */
+  search?(match: string, limit: number, offset?: number): Promise<unknown>
 
   /**
    * 资产面（内容寻址；字节走 ArrayBuffer，主进程写进库目录的 `assets/`）。
@@ -65,6 +73,19 @@ export function createIpcAdapter(bridge: LibraryBridge): StoragePort {
   /** 单写者：与 localStorage 适配器同一条口径（后一次提交永远排在前一次之后） */
   let tail: Promise<unknown> = Promise.resolve()
 
+  /** 库里的索引状态 → 渲染层直接可用的快照（状态不认识就按 pending 处理，宁可重建） */
+  function searchOf(rows: RawLibraryRows): FtsLoadState {
+    const raw = rows.meta[META_KEYS.ftsState]
+    const state: FtsState = raw === 'ready' || raw === 'building' ? raw : 'pending'
+    const seq = Number(rows.meta[META_KEYS.ftsRowidSeq] ?? 0)
+    return {
+      map: new Map((rows.ftsMap ?? []).map((r) => [r.block_id, Number(r.fts_rowid)] as const)),
+      state,
+      rowidSeq: Number.isFinite(seq) && seq >= 0 ? seq : 0,
+      tokenizer: rows.meta[META_KEYS.ftsTokenizer] ?? '',
+    }
+  }
+
   return {
     kind: IPC_BACKEND,
     consumes: 'rows',
@@ -81,7 +102,11 @@ export function createIpcAdapter(bridge: LibraryBridge): StoragePort {
       if (res.status === 'empty') return { status: 'empty' }
       if (res.status === 'ok' && res.rows) {
         // 补回当前版本：库里不存版本（唯一真相是 user_version）
-        return { status: 'ok', raw: JSON.stringify(withVersion(rowsToWorkspace(res.rows))) }
+        return {
+          status: 'ok',
+          raw: JSON.stringify(withVersion(rowsToWorkspace(res.rows))),
+          search: searchOf(res.rows),
+        }
       }
       // `no-library` 等：这不是「库坏了」，是「这个窗口没有库」
       return { status: 'incompatible', reason: String(res.status ?? 'unknown') }

@@ -67,6 +67,8 @@ import {
   type AssetMeta,
 } from './core/infra/assets.ts'
 import { createIpcAdapter, type LibraryBridge } from './core/storage/ipc-adapter.ts'
+import type { FtsCommitSource } from './core/storage/fts-port.ts'
+import { createSearchService, type SearchService } from './app/search/service.ts'
 import {
   createDeviceStore,
   createLibrarySettingsPort,
@@ -115,8 +117,22 @@ const LIBRARY_BRIDGE: LibraryBridge | null =
     ? (window as unknown as { qua: LibraryBridge }).qua
     : null
 
+/**
+ * **搜索运行时**在读完库之后才能建（索引状态是库的一部分）；存储门面用 getter
+ * 现取它 —— 这样「建 store」与「建搜索」的先后不会变成一条隐式依赖。
+ */
+let search: SearchService | undefined
+
+/** 存储门面看到的**索引计划**：索引实例还没建好时返回 null（内容照常落盘） */
+const ftsSource: FtsCommitSource = {
+  plan: (w, ops) => (search ? search.indexer.plan(w, ops) : Promise.resolve(null)),
+  onError: () => search?.indexer.onError(),
+  onReplace: () => search?.indexer.onReplace(),
+}
+
 const store = createWorkspaceStore(
   LIBRARY_BRIDGE ? createIpcAdapter(LIBRARY_BRIDGE) : createLocalStorageAdapter(STORAGE_KEY),
+  ftsSource,
 )
 /**
  * **设备状态**（偏好）走它自己的键与端口实例：库作废不连累它。
@@ -178,6 +194,19 @@ let ws: Workspace = boot.status === 'ok' ? boot.ws : seedWorkspace()
  * 而两个仓都空着的时候（第一次打开）更该看到那一栏。
  */
 if (boot.status !== 'ok') device.prefs.journalMounts = seedJournalMounts()
+
+/**
+ * **搜索运行时**：桌面库才可能走 FTS；web 没有 SQLite，构造时 `bridge.search` 缺失
+ * ⇒ 查询自动走森林扫描（同一套词项，标记为降级）。
+ *
+ * 索引状态来自这次装载：状态不是 `ready`／分词器版本不匹配 ⇒ 先扫描，后台重建
+ * （重建在 worker 里，不占输入路径）。
+ */
+search = createSearchService({
+  bridge: LIBRARY_BRIDGE,
+  forest: () => ws.blocks,
+  snapshot: boot.status === 'ok' ? boot.search : undefined,
+})
 
 /**
  * **启动顺序**：先把种子资产的字节写进资产库，再拿一次全库索引，最后才渲染。
@@ -427,6 +456,12 @@ const {
   getChrome: () => chrome,
   isQuiet: () => quiet,
 })
+
+/**
+ * 打开的是盘上已有的库 ⇒ 现在就检查索引；种子／换库那条路要等第一笔 replace
+ * 落盘（`onReplace`）之后才重建，否则会先给一份还没写进库的森林建索引。
+ */
+if (boot.status === 'ok') search.start()
 
 /* ------------------------------------------------------------ 关闭握手（Electron 库面） */
 

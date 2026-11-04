@@ -22,7 +22,7 @@ import { changesOf } from '../kb/changes.ts'
 import { META_KEYS } from '../identity/library.ts'
 import { parseWorkspace, type ParseResult, type Workspace } from './shape.ts'
 import { rowWritesFor, workspaceToRowWrites } from './db-rows.ts'
-import type { FtsCommitPlan, FtsCommitSource } from './fts-port.ts'
+import type { FtsCommitPlan, FtsCommitSource, FtsLoadState } from './fts-port.ts'
 
 /** 「整份库都动过」的那批改动：本地适配器的最细粒度（信封实现与门面共用同一份声明） */
 export const WHOLE_LIBRARY_CHANGES: Change[] = [
@@ -36,7 +36,9 @@ export const WHOLE_LIBRARY_CHANGES: Change[] = [
  * `storage-error` 与 `corrupt` 必须分开：前者「读不到」，后者「读到了但打不开」，
  * 给用户的建议完全不同（换个浏览器 / 备份抢救）。
  */
-export type LoadedWorkspace = ParseResult | { status: 'storage-error'; error: unknown }
+export type LoadedWorkspace =
+  | (ParseResult & { search?: FtsLoadState })
+  | { status: 'storage-error'; error: unknown; search?: FtsLoadState }
 
 export interface WorkspaceStore {
   readonly kind: string
@@ -68,7 +70,7 @@ export function judge(r: LoadResult): LoadedWorkspace {
   if (r.status === 'storage-error') return { status: 'storage-error', error: r.error }
   if (r.status === 'incompatible') return { status: 'storage-error', error: new Error(r.reason) }
   if (r.status === 'empty') return { status: 'empty' }
-  return parseWorkspace(r.raw)
+  return { ...parseWorkspace(r.raw), search: r.search }
 }
 
 /**
