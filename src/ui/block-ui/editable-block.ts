@@ -78,6 +78,14 @@ export interface EditableBlockDeps {
   /** 面包屑的就地展开／逐层收起（省略则事件层退回 focusBlock） */
   onExpandContext?: (ancestorId: string, rowId: string) => void
   onContextBack?: (rootId: string) => void
+  /**
+   * **空块占位文案**（省略＝编辑器默认的「空块／写点什么…」）。
+   *
+   * 抬头那类落点里，这一行不是「一块空内容」而是「这个名字还是空的」——
+   * 默认占位会在一个名字格子里说「按 / 呼出命令」。
+   * ⚠️ 与虚拟化占位（`BlockEditor` 的 `placeholder()`）不是一件事。
+   */
+  emptyPlaceholder?: string
 }
 
 export class EditableBlock {
@@ -185,6 +193,7 @@ export class EditableBlock {
       },
       ...(this.deps.embedBodies === false ? { embedBodies: false } : {}),
       ...(this.deps.structuralScope ? { structuralScope: this.deps.structuralScope } : {}),
+      ...(this.deps.emptyPlaceholder !== undefined ? { emptyPlaceholder: this.deps.emptyPlaceholder } : {}),
       onExpandContext: this.deps.onExpandContext,
       onContextBack: this.deps.onContextBack,
     })
