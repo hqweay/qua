@@ -96,11 +96,11 @@ src/**               编辑器、命令表、绑定表、localStorage           
 #### 1.2.1 一个必须知道的冲突：菜单 `role: undo` vs app 自己的 `⌘Z`
 
 `main.ts` 的「编辑」菜单按 macOS 规范放了 `role: undo/redo`（键等价物 `⌘Z` / `⇧⌘Z`）。
-app 的绑定表里**也**有 `core.history/undo`（自己的快照栈）。
+app 的绑定表里**也**有 `core.history/undo`（自己的撤销栈：按事务记动过的那几块）。
 在 macOS 上 **NSMenu 的键等价物先于 web contents 处理**，所以：
 
 - 用户按 `⌘Z` 时，**大概率走菜单 role**（= `webContents.undo()`，即 contenteditable 的原生撤销栈），
-  而**不是** app 自己的 `core.history/undo`（块树 ＋ 行内内容的快照回滚）。
+  而**不是** app 自己的 `core.history/undo`（块树 ＋ 行内内容的回滚，只写动过的块）。
 - 这两个撤销栈是**两套**。原生那个只知道 DOM 文本编辑，不知道块结构与行内内容。
 
 **这次没有改它**（改「编辑」菜单会牵动「哪一套才算真撤销」这个产品决定，不该由壳来定）。

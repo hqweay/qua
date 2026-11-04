@@ -312,10 +312,12 @@ function snapshotOf(forest: readonly Block[]): Snapshot {
 /* ------------------------------------------------------------ diff */
 
 /**
- * **把 `from → to` 表达成一批 op**（撤销用）。
+ * **把 `from → to` 表达成一批 op**（重放／整库对账用）。
+ *
+ * ⚠️ 撤销**不**走这里：它只比 `kb/scoped.ts` 的 touched 块（否则 ⌘Z 仍是 O(整库)）。
  *
  * @param from 起点森林（通常是「当前」）
- * @param to   终点森林（通常是「快照里那份」）
+ * @param to   终点森林
  */
 export function diff(from: readonly Block[], to: readonly Block[]): Op[] {
   const a = snapshotOf(from)
@@ -404,7 +406,7 @@ export function applyOps(forest: Block[], ops: readonly Op[], lookup?: ForestLoo
    * **收端门**：这批 op 先验再吃，违规抛错、森林一个字节不动（校验只读）。
    *
    * 本地 tx 产出的 op 在发看点已经验过（`propOps`／正文闸），这里拦的是
-   * **不是本地产出的流**——撤销/回放的日志（`store.restore`）、将来的远端 op 流。
+   * **不是本地产出的流**——撤销/回放的日志（`store.undo`）、将来的远端 op 流。
    * 同一个函数（`validate`）服务两条路：发侧拦「这次能不能写」，收端拦「这批能不能应用」。
    */
   const violations = validate(forest, ops, lookup)

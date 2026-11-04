@@ -987,9 +987,9 @@ function applyBlockType(blockId: string, typeId: string): boolean {
 }
 
 /**
- * 命令层的事务入口：装配层补撤销快照（零 op 不记），并把**改到的那几行**当场重画。
+ * 命令层的事务入口：装配层补撤销条目（零 op 不记），并把**改到的那几行**当场重画。
  *
- * 为什么在装配层：撤销快照与「重画哪一行」都需要 `ed`／`blocks`／`repaintBlock`，
+ * 为什么在装配层：撤销条目与「重画哪一行」都需要 `ed`／`blocks`／`repaintBlock`，
  * 而命令层只声明「发生了什么」。
  */
 const runTx: TxRun = (fn) => {
@@ -1784,7 +1784,7 @@ const app: App = {
   openPropertiesDrawer: (blockId) => panels.openPropertiesDrawer(blockId),
   setBlockType: (blockId, typeId) => applyBlockType(blockId, typeId),
 
-  // 导航历史（中心槽走到哪）；与 undo/redo 的模型快照栈无关
+  // 导航历史（中心槽走到哪）；与 undo/redo 的撤销栈无关
   historyBack: () => historyGo('back'),
   historyForward: () => historyGo('forward'),
 
