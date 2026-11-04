@@ -35,6 +35,7 @@ import { plainText } from '../model/runs.ts'
 import type { QueryHit, QueryNode, QuerySpec } from '../query/query.ts'
 import { findById, isQuerySpec } from '../query/query.ts'
 import { isRefKind, REFERENCE_KINDS, type RefKind } from '../relations/relations.ts'
+import { mentionSnippet, mentionSpotsOf } from '../relations/mention.ts'
 import { t } from '../infra/msg.ts'
 import {
   canonicalViews,
@@ -357,6 +358,12 @@ function memberRecords(host: Block, kb: KbClient, rows: readonly ViewRecord[]): 
  *
  * 两者合成一行；`matched` 记命中的词／标签。标签提及是**提及**，不是引用，
  * 也不是成员：它只回答「正文里提到了我」。
+ *
+ * 文本命中行另带**候选引用**的两样东西（`#名` 已是引用，不在转换之列）：
+ *   · `mentionSpots` —— 名字在那一块正文里的可转换出现处（plain 区间）；
+ *   · `mentionSnippet` —— 片段（命中段标 mark，第 k 个 mark ⇄ `mentionSpots[k]`）。
+ * 都是这次读出来的派生值，不落盘；渲染端拿它画「高亮 ＋ 一键转换」，
+ * 不往可编辑体里注任何东西。
  */
 function mentionRecords(host: Block, kb: KbClient): ViewRecord[] {
   const word = displayTextOf(host)
@@ -383,7 +390,17 @@ function mentionRecords(host: Block, kb: KbClient): ViewRecord[] {
   const rows = resolveRows(hits, kb)
   return rows.map((r) => {
     const words = byBlock.get(r.block.id)
-    return words && words.size > 0 ? { ...r, derived: { matched: [...words].join(' · ') } } : r
+    if (!words || words.size === 0) return r
+    const spots = mentionSpotsOf(r.block.content, word)
+    return {
+      ...r,
+      derived: {
+        matched: [...words].join(' · '),
+        ...(spots.length > 0
+          ? { mentionSpots: spots, mentionSnippet: mentionSnippet(plainText(r.block.content), spots) }
+          : {}),
+      },
+    }
   })
 }
 
