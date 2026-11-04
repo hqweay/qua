@@ -36,7 +36,7 @@ import { createIcon } from './view/icons.ts'
 import { mountEmbedBody } from './ui/block-ui/embed-body.ts'
 import { renderAliasEditor } from './ui/block-ui/alias-editor.ts'
 import { renderLinkComposer, renderNamePrompt, type ObjFieldDeps } from './ui/overlay/panels.ts'
-import { devCommands, dropIdentity, journalCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, zoomCommands } from './app/commands-impl.ts'
+import { devCommands, dropIdentity, journalCommands, mentionCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, zoomCommands } from './app/commands-impl.ts'
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupAxis } from './app/wiring/axis.ts'
@@ -1413,6 +1413,11 @@ const app: App = {
   ...propsCommands({
     kb,
     write: writeProps,
+    run: runTx,
+    toast: (text, kind) => app.toast(text, kind),
+  }),
+  ...mentionCommands({
+    kb,
     run: runTx,
     toast: (text, kind) => app.toast(text, kind),
   }),

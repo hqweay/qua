@@ -889,3 +889,29 @@ button.queryview-chip:hover {
   background: var(--ui-accent-soft);
   font-weight: var(--ui-fw-medium);
 }
+
+/* ---------------------------------------------------------------- 提及栏的候选引用 */
+
+/* 片段格：片段要能当正文读，命中段是按钮（一键转换的落点） */
+.mention-field {
+  min-width: 0;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-sm);
+}
+.mention-hit {
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-accent-soft);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.mention-hit:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+/* 列表的字段列放宽一档：片段要能当正文读（默认字段宽只装得下两三个字） */
+.vl-field.mention-field {
+  max-width: 24rem;
+}

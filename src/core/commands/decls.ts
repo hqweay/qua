@@ -152,6 +152,11 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.tag/delete', title: t('cmd.tag.delete'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'delete', 'remove'] },
   { name: 'core.block/edit-aliases', title: t('cmd.block.edit-aliases'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['alias', 'name', 'list'] },
   { name: 'core.block/set-type', title: t('cmd.block.set-type'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, type: { type: 'string' } }, keywords: ['type', 'convert'] },
+  /**
+   * 把一处纯文本提及换成一枚指向目标块的引用（`start`/`end` 是 plain 偏移区间）。
+   * 入口只有提及栏片段行上的高亮按钮（与 `set-anchor` 同一条口径：不进命令面板）。
+   */
+  { name: 'core.block/convert-mention', title: t('cmd.block.convert-mention'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { blockId: { type: 'string' }, to: { type: 'string' }, start: { type: 'integer' }, end: { type: 'integer' } }, keywords: ['mention', 'ref', t('menu.kw.ref')], hidden: true },
 
   /* ---- 视图 ---- */
   { name: 'core.view/toggle-theme', title: t('cmd.view.toggle-theme'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dark', 'light', 'theme'] },

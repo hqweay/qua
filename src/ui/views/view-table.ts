@@ -23,6 +23,7 @@ import { t } from '../../core/infra/msg.ts'
 import { makeTagChipEl } from '../../view/editor/block-dom.ts'
 import type { BlockCell } from '../block-ui/block-cell.ts'
 import { makeCellEditor } from '../block-ui/properties.ts'
+import { mentionDerivedOf, renderMentionField } from './mention-field.ts'
 import {
   CHILDREN_COLUMN,
   CREATED_COLUMN,
@@ -62,6 +63,8 @@ export interface ViewTableDeps {
   insertRow: () => void
   deleteRow: (rowId: string) => void
   openBlock: (blockId: string, place?: OpenPlace) => void
+  /** 提及栏片段行的「转成引用」（命中列有候选片段时用；省略 ⇒ 命中列只读） */
+  convertMention?: (blockId: string, spot: { start: number; end: number }) => void
   /** 标题格（投影 ＋ 单块编辑器浮层） */
   cell: BlockCell
   /** `ref` 值的选择器（属性区那一份复用；省略 ＝ ref 列只读） */
@@ -606,6 +609,14 @@ export class ViewTable {
     ) {
       const box = document.createElement('div')
       box.className = 'tv-plain ui-ellipsis'
+      // 提及栏的命中列画「片段 ＋ 每处转换按钮」；其余只读列仍是纯文本
+      if (key === MATCHED_COLUMN) {
+        const m = mentionDerivedOf(r)
+        if (m && this.deps.convertMention) {
+          renderMentionField(box, m, (spot) => this.deps.convertMention!(r.block.id, spot))
+          return box
+        }
+      }
       box.textContent = fieldTextOf(r, key)
       if (box.textContent === '') box.dataset.empty = '1'
       return box
