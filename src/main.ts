@@ -2037,8 +2037,8 @@ function viewEvents(
         },
         onChange: (kind) => change?.(kind as 'text' | 'struct' | 'view' | 'load'),
         // 投影＝同一台 ViewHost（surface 'embed'），绑定的是**这一次露面**
-        mountView: (hostBlock, target, el) => {
-          const vh = panels.mountEmbedView(hostBlock, target, el, active)
+        mountView: (hostBlock, target, el, titleInto) => {
+          const vh = panels.mountEmbedView(hostBlock, target, el, active, titleInto)
           return () => {
             vh.dispose()
             vh.root.remove()

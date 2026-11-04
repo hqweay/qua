@@ -927,13 +927,18 @@
   overflow: hidden;
 }
 /*
- * 抬头里那台编辑器：**只留正文那一格**。
+ * **名字那一格里那台编辑器：只留正文那一格**。
  *
- * 块标、缩进、行高下限都是「正文屏幕里的一行块」的几何；抬头是一行名字，
- * 带上它们会把抬头撑高、并在名字左边多出一颗没有语义的点。字号与字重跟着
- * 抬头走（抬头是 fs-sm / 600，块默认是 fs-md / 常规）。
+ * 两处落点都读这一条（整屏查询的抬头 `.queryview-title`、投影行的名字行
+ * `.embed-title-row`）：这一格里**已经有一颗块标**（行自己的那颗），里层编辑器
+ * 再画一颗就得到两颗点、外加一个 gutter 的缩进 —— 名字会从块标右边很远的地方
+ * 才开始，读起来不是「这一块」。
+ *
+ * ⚠️ 用两处共用的类名 `.title-editor` 选择，**不要**分别按两个容器各写一条：
+ *    那样只要有一处改了 DOM（比如名字从抬头挪到块标那一行），另一处就静默失效
+ *    （实测：挪完多出一颗块标 ＋ 12px 缩进，而类型检查与单测都拦不住）。
  */
-.queryview-title .title-editor .blk {
+.title-editor .blk {
   padding-left: 0;
   min-height: 0;
   font-size: inherit;
@@ -941,12 +946,12 @@
   font-weight: inherit;
   color: inherit;
 }
-.queryview-title .title-editor .blk > .left {
+.title-editor .blk > .left {
   display: none;
 }
 /* 名字为空时的占位就是「未命名查询」：占位只在没有字时出现，所以它同时是
    「这个名字空不空」的一句人话 —— 不需要第二个判据去挂 `data-empty-text`。 */
-.queryview-title .title-editor .tx[data-ph]::before {
+.title-editor .tx[data-ph]::before {
   font-weight: 400;
 }
 .queryview-count {
@@ -1521,6 +1526,39 @@
   min-width: 0;
 }
 /*
+ * **投影的身体里是两格：名字那一行 ＋ 结果面板**。
+ *
+ * 为什么名字不在面板里：投影这一行**就是一个查询块**——正文里那个查询块长什么样，
+ * 这里就该长什么样（块标 ＋ 名字一行，结果折在下一行）。把名字塞进面板的抬头，
+ * 读起来是「一张表的标题」，而不是「这一块」。
+ *
+ * 几何与 `.blk[data-view-body='1']` 同一条：身体跟块标同一行，里面 `flex-wrap`，
+ * 名字吃掉这一行剩下的宽度，面板 `flex-basis: 100%` 折到下一行。
+ *
+ * 折叠的边界正好落在两格之间：折的是**下一层**（面板），名字那一行永远在。
+ * 这也让「折起来还认得出这是哪个查询」成立 —— 只剩一颗空心块标＋一条空白时，
+ * 读者不知道自己在看什么。
+ */
+.blk-embed-body[data-embed-body='view'] {
+  display: flex;
+  flex-wrap: wrap;
+  /* 与 `VIEW_BODY_GAP` 同源：面板与名字那一行之间的缝 */
+  row-gap: var(--ui-gap-1);
+}
+.blk-embed-body[data-embed-body='view'] .embed-title-row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.blk-embed-body[data-embed-body='view'] .embed-panel {
+  /* 折到下一行（与 `.blk-view-body` 同一条几何：独占一整行，起点对齐名字） */
+  flex: 0 0 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+}
+/*
  * **镜像：岛首行就是这一行**。岛内 depth-0 行的块标本落在「身体起点 ＋ 岛自己的
  * gutter」——比宿主行的块标列远一个 gutter；把身体左移一个 gutter，岛首行的块标
  * 就落进宿主行的块标列，正文起点与普通行完全一致 ⇒ 镜像在几何上不再是
@@ -1576,15 +1614,14 @@
   opacity: 0;
 }
 /* 投影（源的结果视图）：高度与正文行内体同一条口径——**自然高**（紧凑性归折叠）。
-   折叠只藏不卸：`data-folded` 把整格收起，行缩回一行（ViewHost 的冻结与滚动都在）。 */
+   折叠只藏不卸，而且**只藏面板**：`data-folded` 收起的是「下一层」（结果），
+   名字那一行留着 —— 折起来仍认得出这是哪个查询。 */
 .blk-embed-body[data-embed-body='view'] {
-  display: flex;
-  flex-direction: column;
   height: auto;
   min-height: 0;
   overflow: hidden;
 }
-.blk-embed-body[data-embed-body='view'][data-folded='1'] {
+.blk-embed-body[data-embed-body='view'][data-folded='1'] .embed-panel {
   display: none;
 }
 /* 身体的实例缓存留了一个「搬家托盘」（`.blk-embed-holder`）：行重画时身体整棵挪进
@@ -1604,14 +1641,23 @@
   「这一团到哪结束」的线索。真镜像（children 源）不经过这里，也不该有壳：它是
   「那一块就在这里」，加壳反而错。分界线：镜像无壳、投影有壳——与抬头判据同一条分界的两面。
 */
-.queryview[data-surface='embed'] {
-  margin-top: 0;
+/*
+ * 壳挂在**面板**上（`.embed-panel`），不挂在 `.queryview` 上：面板才是「这一块的结果」
+ * 那一格，`.queryview` 是它的渲染器。挂在两处会得到两层内边距与两圈边线。
+ */
+.embed-panel {
   padding: var(--ui-gap-2) var(--ui-gap-3);
   background: var(--ui-surface-sunken);
   border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-md);
+}
+.queryview[data-surface='embed'] {
+  margin-top: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .queryview[data-surface='embed'] .queryview-body {
   flex: 1 1 auto;

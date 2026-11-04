@@ -158,6 +158,14 @@ export interface ViewHostDeps {
   /** 求值的上下文：`$self` 指谁、结果剔除谁 */
   context: QueryContext
   surface: ViewSurface
+  /**
+   * **名字画到哪**（只有投影给）。
+   *
+   * 投影跟正文里那个查询块**同一形状**：名字占一行（块标旁），结果面板折在下一行。
+   * 给了它 ⇒ 名字画进这一格（那一行），`els.title` 藏起来（面板里不再重复一遍）。
+   * 不给 ⇒ 名字仍画在面板抬头里（整屏／内联／侧窗的既有画法）。
+   */
+  titleInto?: HTMLElement
   /** 发生写入之后要落盘 / 重画别的视图 */
   onChange: () => void
   /** 焦点进来 ⇒ 装配层把「活动编辑器」切过来（键位走命令层） */
@@ -424,9 +432,9 @@ export class ViewHost {
      * 改个名不该先点一下。装载只有源块、子块不画（`viewRootId`）、↵ 是敲完
      * —— 那三条判据都在 `mountTitleEditor` 里。
      */
-    if (deps.surface === 'embed') {
+    if (deps.surface === 'embed' && deps.titleInto) {
       this.title = mountTitleEditor({
-        into: this.els.title,
+        into: deps.titleInto,
         store: deps.store,
         write: deps.write,
         wire: (ed, change) => deps.wire(ed, change),
@@ -812,8 +820,15 @@ export class ViewHost {
      *   · **内联体／侧窗不写**：那一行上已经有块名了（同一句话同屏两遍是噪声）。
      *   · **投影写**：露面块自己的正文槽是空的，名字没有第二处可显示。
      */
+    /**
+     * **名字画在哪**：
+     *   · 投影（`embed`）：画在**块标那一行**（`titleInto`，与正文里那个查询块同一形状）
+     *     ⇒ 面板抬头不再写名字（同一句话同屏两遍是噪声）；
+     *   · 内联体／侧窗／挂载栏：那一行上已经有块名 ⇒ 也不写；
+     *   · 整屏：抬头就是这一屏的标题 ⇒ 写。
+     */
     this.els.title.hidden =
-      embed ? false : !query || this.deps.surface === 'inline' || this.deps.surface === 'dock' || this.deps.surface === 'mount'
+      embed || !query || this.deps.surface === 'inline' || this.deps.surface === 'dock' || this.deps.surface === 'mount'
     /**
      * **投影的抬头不在这里写**：它是构造时挂上的常驻编辑器（`TitleEditor`）。
      * 这里再写一次 `textContent` 就会把那一台正在打字的岛整个清掉。

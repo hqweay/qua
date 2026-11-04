@@ -38,6 +38,7 @@ import {
 import type { Tx } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
+import { EDIT_ISLAND_ATTR } from '../../view/editor/block-dom.ts'
 import { EditableBlock } from './editable-block.ts'
 
 export interface EmbedBodyDeps {
@@ -50,8 +51,12 @@ export interface EmbedBodyDeps {
   /**
    * 画**投影**：由装配层给一台 `ViewHost`（`surface: 'embed'`，绑定点是这一次露面）。
    * 这一层不认识视图配置，也不该认识 —— 认识一次就会长出第二份判据。
+   *
+   * `titleInto` 是**名字那一行**的落点（这一层造的，见 `mountEmbedBody`）：
+   * 投影跟正文里的查询块同一形状 —— 块标＋名字占一行，结果面板折在下一行。
+   * 名字由 `ViewHost` 自己画（它就是那一块正文，改它＝改源块）。
    */
-  mountView: (host: Block, target: Block, into: HTMLElement) => () => void
+  mountView: (host: Block, target: Block, into: HTMLElement, titleInto: HTMLElement) => () => void
   /** 重画某一**行**：判据翻转（镜像 ⇄ 投影）时用 */
   repaint: (blockId: string) => void
   /** 命令面（只说「移除这次露面」） */
@@ -82,7 +87,8 @@ export function mountEmbedBody(host: Block, into: HTMLElement, deps: EmbedBodyDe
   }
 
   const kind = embedBodyOf(host, find)
-  const body = kind === 'view' ? deps.mountView(host, target, into) : mountMirror(target, into, deps)
+  const body =
+    kind === 'view' ? mountProjection(host, target, into, deps) : mountMirror(target, into, deps)
 
   /**
    * **判据会翻**：`_embed.view === ''` 是「跟随源」，源自己换到某张视图之后，
@@ -121,6 +127,28 @@ function removeBtn(hostId: string, deps: EmbedBodyDeps): HTMLElement {
     deps.invoke('core.embed/remove', { blockId: hostId }, 'embed')
   })
   return btn
+}
+
+/**
+ * **投影**：与正文里那个查询块**同一形状** —— 名字占一行（块标旁），结果面板折在下一行。
+ *
+ * 为什么不把名字留在面板里（`ViewHost` 自己的抬头）：那是面板的 chrome，长得像
+ * 「一张表的标题」，而这一行本来就是一个**查询块**。同一个块在正文里长什么样、
+ * 在这里就长什么样 —— 只换身份标记（空心块标），不换形状。
+ *
+ * 两格的分工是**折叠**的边界：`title-row` 永远在（折起来也看得见），`panel` 是
+ * 「下一层」，折的就是它（`data-folded` 只藏不卸，ViewHost 的冻结与滚动还在）。
+ */
+function mountProjection(host: Block, target: Block, into: HTMLElement, deps: EmbedBodyDeps): () => void {
+  const titleRow = document.createElement('div')
+  titleRow.className = 'embed-title-row'
+  titleRow.contentEditable = 'false'
+  const panel = document.createElement('div')
+  panel.className = 'embed-panel'
+  panel.contentEditable = 'false'
+  panel.setAttribute(EDIT_ISLAND_ATTR, '1')
+  into.append(titleRow, panel)
+  return deps.mountView(host, target, panel, titleRow)
 }
 
 /** 镜像：源自己那一行 ＋ 它的子树，装进一台岛编辑器（能就地改） */

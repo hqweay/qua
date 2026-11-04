@@ -63,11 +63,12 @@ await page.evaluate(({ host, qid }) => {
 await sleep(500)
 
 const geom = await page.evaluate(() => {
-  const title = document.querySelector('.queryview[data-surface="embed"] .queryview-title')
-  const count = title?.parentElement?.querySelector('.queryview-count')
+  const title = document.querySelector('.blk[data-embed="1"] .embed-title-row')
+  const count = document.querySelector('.blk[data-embed="1"] .queryview-count')
   const tx = title?.querySelector('.tx')
   const blk = title?.querySelector('.blk')
   const left = blk?.querySelector('.left')
+  const marker = document.querySelector('.blk[data-embed="1"] > .left .marker')
   const r = (el) => (el ? el.getBoundingClientRect().toJSON() : null)
   return {
     titleText: title?.textContent ?? '',
@@ -78,25 +79,97 @@ const geom = await page.evaluate(() => {
     leftDisplay: left ? getComputedStyle(left).display : 'none',
     blkPadLeft: blk ? getComputedStyle(blk).paddingLeft : '',
     blkMinH: blk ? getComputedStyle(blk).minHeight : '',
+    markerRect: r(marker),
+    structure: (() => {
+      const body = document.querySelector('.blk[data-embed="1"] > .blk-embed-body')
+      // 身体里先有一个「搬家托盘」（实例缓存用，display:contents），真正的两格在它里面
+      const tray = body?.querySelector(':scope > .blk-embed-holder')
+      const tr = tray?.querySelector(':scope > .embed-title-row')
+      const panel = tray?.querySelector(':scope > .embed-panel')
+      const qv = panel?.querySelector(':scope > .queryview')
+      const titleInHead = qv?.querySelector('.queryview-title')
+      return {
+        bodyKids: [...(body?.children ?? [])].map((x) => x.className),
+        trayKids: [...(tray?.children ?? [])].map((x) => x.className),
+        titleRowIsDirect: Boolean(tr),
+        panelIsDirect: Boolean(panel),
+        queryviewInPanel: Boolean(qv),
+        headTitleHidden: titleInHead?.hidden ?? null,
+        titleRowKids: [...(tr?.children ?? [])].map((x) => x.className),
+      }
+    })(),
+    titleTop: r(title)?.top ?? null,
+    panelTop: r(document.querySelector('.blk[data-embed="1"] .embed-panel'))?.top ?? null,
     titleFont: title ? getComputedStyle(title).font : '',
+    bodyBlkFont: (() => {
+      const q = window.__qua.allBlocks().find((x) => x.props?._query)
+      const el = q ? document.querySelector(`.blk[data-block-id="${q.id}"]:not([data-embed])`) : null
+      const tx = el?.querySelector(':scope > .tx')
+      return tx ? getComputedStyle(tx).font : ''
+    })(),
     txFont: tx ? getComputedStyle(tx).font : '',
   }
 })
 log('几何:', JSON.stringify(geom, null, 2))
+
+/** 与**正文里那个查询块**逐格对照（判据：除了块标，其它应当一样） */
+const compare = await page.evaluate((qid) => {
+  const pick = (sel) => {
+    const el = document.querySelector(sel)
+    if (!el) return null
+    const cs = getComputedStyle(el)
+    const r = el.getBoundingClientRect()
+    return {
+      font: cs.font,
+      weight: cs.fontWeight,
+      size: cs.fontSize,
+      pad: cs.padding,
+      bg: cs.backgroundColor,
+      border: cs.border,
+      radius: cs.borderRadius,
+      marginInlineStart: cs.marginInlineStart,
+      width: Math.round(r.width),
+      left: Math.round(r.left),
+      top: Math.round(r.top),
+    }
+  }
+  const row = document.querySelector(`.blk[data-block-id="${qid}"]:not([data-embed])`)
+  const emb = document.querySelector('.blk[data-embed="1"]')
+  return {
+    body: {
+      row: pick(`.blk[data-block-id="${qid}"]:not([data-embed])`),
+      tx: pick(`.blk[data-block-id="${qid}"]:not([data-embed]) > .tx`),
+      body: pick(`.blk[data-block-id="${qid}"]:not([data-embed]) > .blk-view-body`),
+      view: pick(`.blk[data-block-id="${qid}"]:not([data-embed]) > .blk-view-body > .queryview`),
+    },
+    proj: {
+      row: pick('.blk[data-embed="1"]'),
+      titleRow: pick('.blk[data-embed="1"] .embed-title-row'),
+      tx: pick('.blk[data-embed="1"] .embed-title-row .tx'),
+      panel: pick('.blk[data-embed="1"] .embed-panel'),
+      view: pick('.blk[data-embed="1"] .embed-panel > .queryview'),
+    },
+    rowDepth: row?.dataset.depth ?? '',
+    embDepth: emb?.dataset.depth ?? '',
+    embPadLeft: emb ? getComputedStyle(emb).paddingLeft : '',
+    rowPadLeft: row ? getComputedStyle(row).paddingLeft : '',
+  }
+}, fx.qid)
+log('对照:', JSON.stringify(compare, null, 2))
 
 /** 空名字：占位句（把源的名字清掉，抬头那一行应当变成「未命名查询」） */
 /**
  * ⚠️ 查询块的正文**只能由「直接打字」写**（`canWriteText` 挡住程序化整段替换，
  *    见 `core/kb/diff.ts` 的 `directEdit` 那一条）——所以这里走真实按键，不调 `editBlock`。
  */
-await page.locator('.queryview[data-surface="embed"] .queryview-title .tx').click()
+await page.locator('.blk[data-embed="1"] .embed-title-row .tx').click()
 await page.keyboard.press('ControlOrMeta+a')
 await page.keyboard.press('Backspace')
 await sleep(400)
 const emptyGeom = await page.evaluate(() => {
-  const title = document.querySelector('.queryview[data-surface="embed"] .queryview-title')
+  const title = document.querySelector('.blk[data-embed="1"] .embed-title-row')
   const tx = title?.querySelector('.tx')
-  return { text: title?.textContent ?? '', ph: tx?.dataset.ph ?? '', hidden: title?.hidden ?? true }
+  return { text: title?.textContent ?? '', ph: tx?.dataset.ph ?? '' }
 })
 log('空名字:', JSON.stringify(emptyGeom))
 /**
@@ -107,12 +180,28 @@ log('空名字:', JSON.stringify(emptyGeom))
 await page.evaluate(() => window.__qua.focusBlock(window.__qua.__editor.doc.roots[0].id, 0))
 await sleep(350)
 const blurred = await page.evaluate(() => {
-  const title = document.querySelector('.queryview[data-surface="embed"] .queryview-title')
+  const title = document.querySelector('.blk[data-embed="1"] .embed-title-row')
   const tx = title?.querySelector('.tx')
   const before = tx ? getComputedStyle(tx, '::before').content : ''
   return { text: title?.textContent ?? '', ph: tx?.dataset.ph ?? '', before, caret: tx?.closest('.blk')?.dataset.caret ?? '' }
 })
 log('失焦后:', JSON.stringify(blurred))
+/**
+ * **折叠态**：点三角折面板 ⇒ 只剩块标＋名字一行（面板收起，名字留在原地）。
+ */
+await page.evaluate(() => {
+  const row = document.querySelector('.blk[data-embed="1"]')
+  row?.querySelector(':scope > .left > .fold')?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+})
+await sleep(250)
+const foldedShot = await page.evaluate(() => {
+  const row = document.querySelector('.blk[data-embed="1"]')
+  const r = row?.getBoundingClientRect()
+  return r ? { x: Math.max(0, r.left - 40), y: Math.max(0, r.top - 30), width: Math.min(1000, r.width + 80), height: 120 } : null
+})
+if (foldedShot) await page.screenshot({ path: join(ROOT, 'shots', 'probe-embed-title-folded.png'), clip: foldedShot })
+log('截图: shots/probe-embed-title-folded.png')
+
 const box = await page.evaluate(() => {
   const row = document.querySelector('.blk[data-embed="1"]')
   const r = row?.getBoundingClientRect()

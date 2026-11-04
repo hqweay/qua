@@ -957,7 +957,11 @@ export function makeBlockEl(
      */
     if (embedKind === 'view') {
       body.dataset.embedBody = 'view'
-      // 折叠只藏不卸（ViewHost 的冻结结果与滚动位置还在），与查询内联体同一条口径
+      /**
+       * 折叠只藏不卸（ViewHost 的冻结结果与滚动位置还在），与查询内联体同一条口径。
+       * ⚠️ 投影的身体里有两格（名字那一行 ＋ 结果面板）：`data-folded` 只藏**面板**
+       *    （见 CSS），名字那一行折起来也看得见 —— 折的是「下一层」，不是这一块自己。
+       */
       if (folded) body.dataset.folded = '1'
     } else {
       body.dataset.embedBody = 'mirror'
