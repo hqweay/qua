@@ -345,7 +345,7 @@
     <div class="card pad">
       <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">落盘：两种宿主，三条不可逆契约</b></div>
       <div class="kv">
-        <dt>qua.db（Electron）</dt><dd><b>每个库一份</b> SQLite（主进程单写者，WAL）。块是<b>自己的行</b>：<code>Block</code>（正文 run 序列／annos／时刻／落库编码的 <code>parent</code>＋<code>left</code>／软删）＋ <code>BlockProperty</code>（一格一行，有序列表拆行＋<code>pos</code>）＋ <code>BlockAlias</code>（地址，主键是名字）＋ <code>BlockList</code>（露面）＋ <code>meta</code>／<code>settings</code>／<code>op_log</code>（<b>变更流</b>，与内容行<b>同一个事务</b>追加；整份替换＝新 genesis：清旧日志、序号归零，再把这一批 op 写进去）。schema 版本＝<code>PRAGMA user_version</code>（唯一判据，当前 {{DB_SCHEMA_VERSION}}）</dd>
+        <dt>qua.db（Electron）</dt><dd><b>每个库一份</b> SQLite（主进程单写者，WAL）。块是<b>自己的行</b>：<code>Block</code>（正文 run 序列／annos／时刻／落库编码的 <code>parent</code>＋<code>left</code>／软删）＋ <code>BlockProperty</code>（一格一行，有序列表拆行＋<code>pos</code>）＋ <code>BlockAlias</code>（地址，主键是名字）＋ <code>BlockList</code>（露面）＋ <code>BlockFTS</code>／<code>BlockFTSMap</code>（全文派生：contentless 两表 ＋ 稳定 rowid 映射，状态在 <code>meta</code>）＋ <code>meta</code>／<code>settings</code>／<code>op_log</code>（<b>变更流</b>，与内容行<b>同一个事务</b>追加；整份替换＝新 genesis：清旧日志、序号归零，再把这一批 op 写进去）。schema 版本＝<code>PRAGMA user_version</code>（唯一判据，当前 {{DB_SCHEMA_VERSION}}）</dd>
         <dt>编码在哪</dt><dd>「一个块长成哪几行」只有一份定义（<code>storage/db-rows.ts</code>）；主进程只做<b>通用 SQL</b>（表名/列名白名单，不认识块）。一次编辑只写动过的那几块 ⇒ <b>写成本不随库体量增长</b></dd>
         <dt>qua.workspace（web）</dt><dd>整库（块森林；行内内容与区间都在块上），套一层信封 <code>{ backend, envelope, data }</code>。浏览器没有用户可选目录的同等语义 ⇒ 单窗口单库</dd>
         <dt>qua.device</dt><dd>设备态：主题 / 槽宽 / <b>左右槽的卡片清单</b> / 钉住清单（<b>不进 KB</b>）</dd>
@@ -402,7 +402,7 @@
     <div class="card pad">
       <div class="sec-h" style="margin:0 0 9px"><b style="font-size:13px">查询与反向</b></div>
       <div class="struct" style="line-height:1.8">query(spec, ctx) · backlinksOf(id)<br>backrefBlocksOf(id) · annotationsOf</div>
-      <div class="note" style="margin-top:8px">同一个 <code>query()</code> 服务所有表面：纯函数路径与索引路径由等式测试钉住「结果相同」；上下文（<code>$self</code>／scope／exclude）由调用方给。</div>
+      <div class="note" style="margin-top:8px">同一个 <code>query()</code> 服务所有表面：纯函数路径与索引路径由等式测试钉住「结果相同」；上下文（<code>$self</code>／scope／exclude）由调用方给。<br><b>⌘F</b> 正文检索：FTS <code>ready</code> 时走 SQLite FTS（worker 建索引），否则扫描；web 恒扫描并在标题标明降级。</div>
     </div>
   </div>
 </section>
