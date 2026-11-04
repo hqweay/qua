@@ -21,7 +21,7 @@ import { rebuildSearch } from '../../src/app/search/rebuild.ts'
 
 const tokenize = (text: string): TokenizedText => tokenizeText(text, cut, pinyin as never)
 const indexerOf = (): SearchIndexer =>
-  new SearchIndexer(undefined, tokenizeManyWith(tokenize), () => {})
+  new SearchIndexer(undefined, tokenizeManyWith(tokenize))
 
 function capture(): { writes: RowWrite[][]; save: (w: readonly RowWrite[]) => Promise<{ ok: true }> } {
   const writes: RowWrite[][] = []
@@ -56,11 +56,9 @@ test('重建期间来了编辑 ⇒ 不标 ready（索引缺一块时宁可继续
   const blocks = [a]
   const indexer = indexerOf()
   const cap = capture()
-  let injected = false
   const save = async (w: readonly RowWrite[]) => {
-    // 第一批索引写进去之后，模拟用户改了一块：store 会走 indexer.plan
-    if (!injected && w.some((x) => x.table === 'BlockFTS' && x.op === 'insert')) {
-      injected = true
+    // 每一批索引写入期间都模拟一次编辑：连续两轮都脏 ⇒ 不能标 ready
+    if (w.some((x) => x.table === 'BlockFTS' && x.op === 'insert')) {
       const ops: Op[] = [{ e: 'block', id: a.id, op: 'upsert', value: { content: [{ t: 'text', v: '重建期间改的' }] }, at: 9 }]
       assert.equal(await indexer.plan({ blocks, activeId: a.id, savedAt: 1 }, ops), null)
     }
