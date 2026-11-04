@@ -841,6 +841,7 @@ export const MSG = {
   'ui.search.empty': '没有匹配项',
   'ui.search.title': '搜索',
   'ui.search.titleBuilding': '搜索 · 索引构建中（先扫描）',
+  'ui.search.titleScan': '搜索 · 网页版按文本扫描',
   'ui.search.placeholderBlock': '搜索正文；↑↓ 选择，↵ 打开',
   'ui.search.needQuery': '输入关键词开始搜索',
   'ui.palette.placeholder': '输入命令名、中文标题或别名…',
