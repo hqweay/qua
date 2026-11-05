@@ -14,13 +14,25 @@
  * ⚠️ **重载节奏归 `EditableBlock`**（防抖、聚焦冻结、离焦补做）；这里只在
  *    「当前对象换了」时主动换一次装载，不叠第二条重载路径。
  */
-import { derivedRecordsOf, type Block, type BlockStore } from '../../core/index.ts'
+import {
+  applyQuickFilter,
+  derivedRecordsOf,
+  displayNameOf,
+  EMPTY_QUICK_FILTER,
+  quickFilterAdd,
+  quickFilterDrop,
+  type Block,
+  type BlockStore,
+  type QuickFilterAtom,
+  type QuickFilterState,
+} from '../../core/index.ts'
 import { expandContexts, unfoldForContext } from '../../core/views/context-expand.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { BlockEditor, Run } from '../../view/editor/editor.ts'
 import { buildDockCard, applyDockCardState, type DockCardState } from '../dock/dock.ts'
 import { cardNote } from '../chrome/card-parts.ts'
+import { renderQuickFilter } from '../chrome/quick-filter.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
 
 export interface BackrefsCardDeps {
@@ -42,6 +54,8 @@ export interface BackrefsCardDeps {
   /** 卡壳状态（收起／单卡／拖拽／关闭；装配层按 prefs 现算） */
   state: () => DockCardState
   onClose: () => void
+  /** 浮层外壳（快速筛选的 chips 层住在这里面；与挂载区同一条窄缝） */
+  openPopover?: (render: (host: HTMLElement) => void, anchor: DOMRect | null | (() => DOMRect | null)) => void
 }
 
 export class BackrefsCard {
@@ -56,6 +70,13 @@ export class BackrefsCard {
   private target = ''
   /** 面包屑就地展开的祖先栈（运行时视图状态，不落盘；与挂载区/窗口同一条机制） */
   private expanded = new Set<string>()
+  /**
+   * 快速筛选 chips（**会话瞬态**）：不写偏好、不入库、不产生 op、不进撤销栈。
+   * 卡跟着对象走——换了对象，chips 说的就不是同一批材料，清空。
+   */
+  private filter: QuickFilterState = { ...EMPTY_QUICK_FILTER }
+  private readonly tools: HTMLElement
+  private readonly filterBtn: HTMLButtonElement
 
   constructor(deps: BackrefsCardDeps) {
     this.deps = deps
@@ -63,6 +84,18 @@ export class BackrefsCard {
     this.host.className = 'dock-backlinks-editor'
     this.empty = cardNote(t('ui.dock.noBackRefs'))
     this.empty.hidden = true
+
+    // 卡头没有「本卡专属动作」的通道（那是跨卡扫视的区域）——筛选按钮贴着它作用的内容
+    this.tools = document.createElement('div')
+    this.tools.className = 'dock-backlinks-tools'
+    this.tools.hidden = true
+    this.filterBtn = document.createElement('button')
+    this.filterBtn.type = 'button'
+    this.filterBtn.className = 'dock-backlinks-filter'
+    this.filterBtn.textContent = t('ui.filter.button')
+    this.filterBtn.title = t('ui.filter.buttonHint')
+    this.filterBtn.addEventListener('click', () => this.openQuickFilter())
+    this.tools.appendChild(this.filterBtn)
 
     this.editable = new EditableBlock({
       host: this.host,
@@ -81,7 +114,7 @@ export class BackrefsCard {
 
     const body = document.createElement('div')
     body.className = 'dock-backlinks-body'
-    body.append(this.editable.root, this.empty)
+    body.append(this.tools, this.editable.root, this.empty)
 
     this.el = buildDockCard(
       {
@@ -107,6 +140,8 @@ export class BackrefsCard {
       this.target = target
       // 换对象 ⇒ 上一份展开栈说的是旧那批来源块的祖先，清掉（过期的 id 不该再展开）
       this.expanded.clear()
+      // chips 说的是「上一批材料里看谁」——对象换了就归零，不带着旧筛选看新对象
+      this.filter = { ...EMPTY_QUICK_FILTER }
       this.load(this.editable.ed)
     }
     return this.el
@@ -128,7 +163,13 @@ export class BackrefsCard {
    */
   private load(ed: BlockEditor | null, _ids?: readonly string[], focusHint?: string): void {
     const host = this.deps.kb.get(this.target)
-    const records = host ? derivedRecordsOf(host, this.deps.kb, 'refs') : []
+    const all = host ? derivedRecordsOf(host, this.deps.kb, 'refs') : []
+    const records = applyQuickFilter(all, this.filter)
+
+    // 筛选按钮：有材料、或正筛着（结果被筛空时还得留得住「摘掉 chip」的入口）
+    const active = this.filter.include.length > 0 || this.filter.remove.length > 0
+    this.tools.hidden = all.length === 0 && !active
+    this.filterBtn.dataset.active = active ? '1' : '0'
 
     const ids = new Set(records.map((r) => r.block.id))
     const roots: Block[] = []
@@ -141,6 +182,7 @@ export class BackrefsCard {
 
     if (roots.length === 0) {
       this.empty.hidden = false
+      this.empty.textContent = active ? t('ui.dock.noBackRefsFiltered') : t('ui.dock.noBackRefs')
       this.host.hidden = true
       // 已有编辑器也要清空：否则「没有反链了」时屏幕上还留着上一条
       const editor = ed ?? this.editable.ed
@@ -169,5 +211,46 @@ export class BackrefsCard {
   private collapse(rootId: string): void {
     if (!this.expanded.delete(rootId)) return
     this.load(this.editable.ed)
+  }
+
+  /**
+   * 弹出 chips 层。锚点每次现查（重画会重建按钮，矩形快照留不住指向）；
+   * 锚点不在了 ⇒ 浮层自己关（装配层浮层的既有口径）。
+   */
+  private openQuickFilter(): void {
+    if (!this.deps.openPopover) return
+    this.deps.openPopover(
+      (box) => {
+        const paint = (): void =>
+          renderQuickFilter(box, {
+            records: () => {
+              const host = this.deps.kb.get(this.target)
+              return host ? derivedRecordsOf(host, this.deps.kb, 'refs') : []
+            },
+            state: () => this.filter,
+            labelOf: (atom: QuickFilterAtom) => {
+              const id = 'up' in atom ? atom.up.is : atom.tag
+              const block = this.deps.kb.get(id)
+              return block ? displayNameOf(block) || id.slice(-4) : id.slice(-4)
+            },
+            onAdd: (atom, to) => {
+              const next = quickFilterAdd(this.filter, atom, to)
+              if (!next) return
+              this.filter = next
+              this.load(this.editable.ed)
+              paint()
+            },
+            onDrop: (atom) => {
+              const next = quickFilterDrop(this.filter, atom)
+              if (!next) return
+              this.filter = next
+              this.load(this.editable.ed)
+              paint()
+            },
+          })
+        paint()
+      },
+      () => this.el.querySelector('.dock-backlinks-filter')?.getBoundingClientRect() ?? null,
+    )
   }
 }

@@ -1222,7 +1222,8 @@
   margin-left: auto;
 }
 .mount-derived-view,
-.mount-derived-more {
+.mount-derived-more,
+.mount-derived-filter {
   background: none;
   border: 0;
   padding: 0 var(--ui-gap-2);
@@ -1233,11 +1234,13 @@
   line-height: 1.6;
 }
 .mount-derived-view:hover,
-.mount-derived-more:hover {
+.mount-derived-more:hover,
+.mount-derived-filter:hover {
   color: var(--ui-text);
   background: var(--ui-bg-hover);
 }
-.mount-derived-view[data-active='1'] {
+.mount-derived-view[data-active='1'],
+.mount-derived-filter[data-active='1'] {
   color: var(--ui-text);
   background: var(--ui-accent-soft);
 }

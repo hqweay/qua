@@ -414,6 +414,8 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, w
       },
       state: () => cardStateFor(side, 'backrefs'),
       onClose: () => closeCard(side, 'backrefs'),
+      // 快速筛选的弹层外壳（chips 的内容与状态都在卡自己手里）
+      openPopover: (render, anchor) => layers.openPopover(render, anchor),
     }),
   // 左槽行／日历日期的「打开」都经这一条；具体落点策略只在 App.openBlock 一份
   openBlock: (id, place, opts) => app.openBlock(id, place, opts),

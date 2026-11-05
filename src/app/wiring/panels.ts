@@ -11,10 +11,12 @@ import {
   buildAdjacency,
   danglingOf,
   declaredFieldIds,
+  applyQuickFilter,
   derivedColumns,
   derivedListFields,
   derivedRecordsOf,
   displayNameOf,
+  EMPTY_QUICK_FILTER,
   findByAlias,
   flatten,
   hasQueryBody,
@@ -709,6 +711,8 @@ export function setupPanels(deps: PanelsDeps) {
       // 与正文同一套事件（点引用/块标/右键菜单/`#`·`@` 补全），装配层只给这一份
       wire: (editor, change) => deps.wireEditor(editor, change, 'mount'),
       onAddTab: (id) => addLocalQueryTab(id),
+      // 快速筛选的弹层外壳（chips 的内容与状态都在挂载区自己手里）
+      openPopover: (render, anchor) => layers.openPopover(render, anchor),
       // 大纲分支的切换下拉：与视图宿主那条同一个菜单（装配层现画行，这里只给锚点）
       derivedKind: (hostBlock, source) => {
         const mountHost = mountHostOf(hostBlock)
@@ -778,7 +782,17 @@ export function setupPanels(deps: PanelsDeps) {
           return asBody(
             createView({ kind: 'block', blockId: mountHostBlock.id }, mountHostBlock, undefined, {
               kind,
-              records: () => derivedRecordsOf(blocks.find(mountHostBlock.id) ?? mountHostBlock, kb, entry.source),
+              /**
+               * 列表/表格与大纲读**同一份 chips**（挂在挂载区实例上）：两处各算各的
+               * 就会出现两批行。⚠️ 经**注册表**晚读、不引上面那个 `area`：
+               * 挂载区的构造函数会当场画第一屏，设备状态里存着表格看法时，这条路
+               * 在 `area` 还没初始化完就走进来（构造期状态必是空筛选，缺省值即真值）。
+               */
+              records: () =>
+                applyQuickFilter(
+                  derivedRecordsOf(blocks.find(mountHostBlock.id) ?? mountHostBlock, kb, entry.source),
+                  mountInstances.get(hostId)?.area.filterOf(entry.source) ?? EMPTY_QUICK_FILTER,
+                ),
               columns: derivedColumns(entry.source),
               listFields: derivedListFields(entry.source),
               setKind: (k) => setDerivedKind(mountHostBlock, entry.source, k),
