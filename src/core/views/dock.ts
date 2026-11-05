@@ -24,6 +24,7 @@
  */
 
 import type { MsgId } from '../infra/msg.ts'
+import { isUtilityFaceId, type UtilityFaceId } from './utility-face.ts'
 
 /** 命令小卡的 key 前缀；只有「扁平 key」这一层用它，`DockEntry` 自己不存前缀 */
 export const DOCK_CMD_PREFIX = 'cmd:'
@@ -46,7 +47,7 @@ export function pinDefaultFor(action: WindowEntryAction): boolean {
  * 重启清理：**非 pin 的块窗口卡不留到下一次启动**（窗口是「打开来看」的临时上下文，
  * 重启还全在，攒几轮就是一列没人看的旧窗口）；pin 了的是用户明说要留的，保留。
  *
- * 派生卡、命令小卡是**槽的家具**——布局的一部分，不属于「打开的东西」，一律不受影响。
+ * 派生卡、命令小卡、工具面卡是**槽的家具**——布局的一部分，不属于「打开的东西」，一律不受影响。
  */
 export function pruneEphemeralWindows(
   cards: readonly DockEntry[],
@@ -61,10 +62,16 @@ export function pruneEphemeralWindows(
 /** 宿主现算的派生卡（闭集；画廊、渲染、旧字节解析共用这一份） */
 export type DerivedCardId = 'inspect' | 'belongs' | 'backrefs' | 'trash' | 'calendar'
 
+/**
+ * `utility` ＝ **工具面住进槽**（如搜索卡）。身份就是工具面目录里的那一个 id：
+ * 同一张面在中心 tab 与槽里是同一个东西的两种挂载，不是两个概念。
+ * 与派生卡分开的理由同目录的分法：工具面没有拥有者、没有条件，目录各自闭集。
+ */
 export type DockEntry =
   | { kind: 'block'; block: string }
   | { kind: 'derived'; card: DerivedCardId }
   | { kind: 'cmd'; command: string }
+  | { kind: 'utility'; face: UtilityFaceId }
 
 /** 一张卡的扁平身份（DOM 属性／收起表／单卡表／拖拽载荷共用） */
 export function dockKey(entry: DockEntry): string {
@@ -75,6 +82,8 @@ export function dockKey(entry: DockEntry): string {
       return entry.card
     case 'cmd':
       return `${DOCK_CMD_PREFIX}${entry.command}`
+    case 'utility':
+      return `utility:${entry.face}`
   }
 }
 
@@ -159,6 +168,10 @@ function dockEntryOf(raw: unknown): DockEntry | null {
   }
   if (o.kind === 'cmd') {
     return typeof o.command === 'string' && o.command !== '' ? { kind: 'cmd', command: o.command } : null
+  }
+  // 未知工具面 id ⇒ 丢掉（与派生卡同一条理由：没有渲染器，留着就是一张看不见也关不掉的卡）
+  if (o.kind === 'utility') {
+    return isUtilityFaceId(o.face) ? { kind: 'utility', face: o.face } : null
   }
   return null
 }

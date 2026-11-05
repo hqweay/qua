@@ -16,7 +16,7 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { assert, freshPage, key as kbd, launch, openPage, reopenPage, resolveBase } from '../scripts/harness.mjs'
+import { assert, freshPage, key as kbd, launch, MOD, openPage, reopenPage, resolveBase } from '../scripts/harness.mjs'
 
 const SHOTS = fileURLToPath(new URL('../shots/', import.meta.url))
 const results = []
@@ -20197,6 +20197,78 @@ await check('T252 浮层里点预览的折叠三角：折展开合、浮层不�
   assert(!(await page.evaluate(() => Boolean(document.querySelector('.popover.search-overlay')))), '点浮层外面仍关闭')
   await ctx.close()
   return '折叠三角在浮层里可点：折展开合、浮层不关；真外点仍关'
+})
+
+await check('T253 搜索的落点：⇧+↵ 右槽窗口打开命中并关浮层；⇧+点小卡搜索卡住进右槽；⌘+点小卡进中心 tab', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const probeId = await plantProbe(page, '搜索落点探针XYZ')
+  assert(probeId, '前置：探针块要建出来')
+
+  // ① 浮层里 ⇧+↵：选中那条开进右槽窗口（首条自动选中＝探针；打开＝离开浮层，落点不管在哪）
+  await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
+  await page.waitForSelector('.popover.search-overlay .search-face-input')
+  await page.fill('.popover.search-overlay .search-face-input', '搜索落点探针XYZ')
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('.popover.search-overlay .search-row[data-search-row]')),
+    null,
+    { timeout: 3000 },
+  )
+  await page.keyboard.press('Shift+Enter')
+  await page.waitForTimeout(250)
+  const afterShift = await page.evaluate((id) => ({
+    overlay: Boolean(document.querySelector('.popover.search-overlay')),
+    cards: window.__qua.snapshot().dock.right.cards,
+    win: Boolean(document.querySelector(`#dock-right-stack .dock-card[data-card-id="${id}"]`)),
+  }), probeId)
+  assert(!afterShift.overlay, '⇧+↵ 之后浮层关')
+  assert(afterShift.cards.includes(probeId) && afterShift.win, `⇧+↵ 应把命中开进右槽窗口：${JSON.stringify(afterShift)}`)
+
+  // ② 画廊加一张搜索小卡（画廊同时列着命令与工具面卡，选命令那行——hint 是命令名）
+  await page.locator('#dock-right-add').click()
+  await page.waitForTimeout(120)
+  // 行的挑选在 mousedown（pickActive），locator.click 会派发完整序列
+  const picked = await page.locator('.layer .layer-item[data-id="core.search/open"]').count()
+  assert(picked === 1, '画廊里应有 core.search/open 那一行')
+  await page.locator('.layer .layer-item[data-id="core.search/open"]').click()
+  await page.waitForTimeout(150)
+  const tiled = await page.evaluate(
+    () => [...document.querySelectorAll('#dock-right-stack > .dock-tile')].map((el) => el.dataset.cardId),
+  )
+  assert(tiled.includes('cmd:core.search/open'), `右槽应有搜索小卡：${JSON.stringify(tiled)}`)
+
+  // ③ ⇧+点小卡：搜索卡住进右槽（utility:search），同一份面，输入框能搜
+  await page
+    .locator('#dock-right-stack > .dock-tile[data-card-id="cmd:core.search/open"] .dock-tile-main')
+    .click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(250)
+  const docked = await page.evaluate(() => ({
+    cards: window.__qua.snapshot().dock.right.cards,
+    card: Boolean(document.querySelector('#dock-right-stack .dock-card[data-card-id="utility:search"]')),
+    input: Boolean(document.querySelector('#dock-right-stack .dock-search-body .search-face-input')),
+  }))
+  assert(docked.card && docked.input && docked.cards.includes('utility:search'), `⇧+点小卡应把搜索卡开进右槽：${JSON.stringify(docked)}`)
+  await page.fill('#dock-right-stack .dock-search-body .search-face-input', '搜索落点探针XYZ')
+  await page.waitForFunction(
+    () => document.querySelector('#dock-right-stack .dock-search-body .search-row-text')?.textContent?.includes('搜索落点探针XYZ'),
+    null,
+    { timeout: 3000 },
+  )
+
+  // ④ ⌘+点小卡：同一张面开进中心 tab（槽卡原样——两种挂载并存，不是二选一）
+  await page
+    .locator('#dock-right-stack > .dock-tile[data-card-id="cmd:core.search/open"] .dock-tile-main')
+    .click({ modifiers: [MOD] })
+  await page.waitForTimeout(250)
+  const tabbed = await page.evaluate(() => ({
+    surface: !document.querySelector('#center-surface[data-face="search"]')?.hidden,
+    card: Boolean(document.querySelector('#dock-right-stack .dock-card[data-card-id="utility:search"]')),
+  }))
+  assert(tabbed.surface, '⌘+点小卡应打开中心搜索 tab')
+  assert(tabbed.card, '槽里的搜索卡不动（两种挂载并存）')
+
+  await ctx.close()
+  return '⇧+↵ 右槽开命中并关浮层；⇧+点小卡搜索卡进右槽可搜；⌘+点小卡进 tab、槽卡并存'
 })
 
 await check('T235 晋升为查询块：{text} spec 与手建逐字节同、落森林顶层、走打开路由、一次 ⌘Z 回滚', async () => {

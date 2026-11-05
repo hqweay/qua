@@ -15,32 +15,9 @@
  */
 import type { MsgId } from '../infra/msg.ts'
 import { DERIVED_CARDS, isDerivedCardId, type DerivedCardId } from './dock.ts'
-
-/**
- * 工具面的 id 空间（闭集）。⚠️ 目录（`UTILITY_FACES`）里**还没有行**：
- * 行与它的图标/固定名/渲染分支在这个面自己落地时一起加——入口守卫看目录不看类型，
- * 所以空目录期间这里的名义成员不可达（打不开、也画不出来）。
- */
-export type UtilityFaceId = 'search'
-
-export interface UtilityFaceDecl {
-  id: UtilityFaceId
-  /** 打开入口与 tab 条的图标（`lucide:<name>`，与派生卡目录同一套解析） */
-  icon: string
-  /** tab 条的固定名（字典 id；UI 调 `t()` 取字） */
-  label: MsgId
-}
-
-/**
- * 工具面目录：**表面目录唯一一份**。行与它的渲染分支一起加（渲染穷举会红）。
- */
-export const UTILITY_FACES: readonly UtilityFaceDecl[] = [
-  { id: 'search', icon: 'lucide:search', label: 'ui.surface.search' },
-]
-
-export function isUtilityFaceId(v: unknown): v is UtilityFaceId {
-  return typeof v === 'string' && UTILITY_FACES.some((d) => d.id === v)
-}
+// 工具面目录住叶子（槽与中心两边共用，见 `utility-face.ts` 的说明）；这里再出口给既有读者
+export { isUtilityFaceId, UTILITY_FACES, type UtilityFaceDecl, type UtilityFaceId } from './utility-face.ts'
+import { isUtilityFaceId, UTILITY_FACES, type UtilityFaceId } from './utility-face.ts'
 
 /** 一张表面 tab 的身份（tab 状态里只存这一份；块 tab 不用它） */
 export type SurfaceRef =

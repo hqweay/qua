@@ -12,7 +12,7 @@ import { plainText } from './core/model/runs.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
 import { BlockStore } from './core/model/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
-import { validSurfaceRef } from './core/index.ts'
+import { dockKey, validSurfaceRef } from './core/index.ts'
 import type { Op } from './core/kb/types.ts'
 import { BlockEditor, type ViewEvents } from './view/editor/editor.ts'
 import { inputSession } from './view/editor/input-session.ts'
@@ -32,6 +32,7 @@ import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from 
 import { openTagChoice } from './app/retrieval/tag-choice.ts'
 import { DockWindows } from './ui/dock/dock-windows.ts'
 import { BackrefsCard } from './ui/cards/backrefs-card.ts'
+import { SearchCard } from './ui/cards/search-card.ts'
 import { mountDockSlot } from './ui/dock/dock.ts'
 import { createIcon } from './view/icons.ts'
 import { mountEmbedBody } from './ui/block-ui/embed-body.ts'
@@ -372,7 +373,7 @@ const { keyHints, uiCtx } = setupKeys({
 
 /** 卡头菜单／画廊／窗口卡依赖／槽宽拖拽的家什；赋值在 panels/app 之后（见那一节的注释） */
 let menus: ReturnType<typeof setupCardMenus>
-const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, windowLabel, setWindows, toggleFoldAll, topWindow, closeOtherWindows, closeAllWindows } = setupDocks({
+const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, cardStateFor, windowLabel, setWindows, toggleFoldAll, topWindow, closeOtherWindows, closeAllWindows } = setupDocks({
   kb,
   prefs,
   applyChrome: () => applyChrome(),
@@ -419,6 +420,20 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, cardStateFor, w
       onClose: () => closeCard(side, 'backrefs'),
       // 快速筛选的弹层外壳（chips 的内容与状态都在卡自己手里）
       openPopover: (render, anchor) => layers.openPopover(render, anchor),
+    }),
+  /**
+   * 搜索卡（**工具面住进槽**）：与 ⌘P 浮层、中心 tab 是同一份 `SearchFace`。
+   * 依赖经 `searchFaceDeps()` 现取（引擎/打开/晋升/复制都在装配层）；卡壳状态与关闭
+   * 归槽那套（与派生卡同型）。
+   */
+  createSearchCard: (side) =>
+    new SearchCard({
+      faceDeps: searchFaceDeps,
+      // 扁平 key 由 `dockKey` 一份地算（DOM 属性、收起表、关闭目标同一份身份）
+      id: dockKey({ kind: 'utility', face: 'search' }),
+      title: t('ui.surface.search'),
+      state: () => cardStateFor(side, dockKey({ kind: 'utility', face: 'search' })),
+      onClose: () => closeCard(side, dockKey({ kind: 'utility', face: 'search' })),
     }),
   // 左槽行／日历日期的「打开」都经这一条；具体落点策略只在 App.openBlock 一份
   openBlock: (id, place, opts) => app.openBlock(id, place, opts),
@@ -527,7 +542,7 @@ const searchFaceDeps = (): SearchFaceDeps => {
     query: (text, limit) => (search ?? { query: async () => ({ hits: [], mode: 'scan' as const }) }).query(text, limit),
     // 行怎么说与 ⌘P 浮层同一份
     describe: (hit, term) => describeHit(kb, hit, term),
-    openBlock: (id) => app.openBlock(id, 'center'),
+    openBlock: (id, place) => app.openBlock(id, place ?? 'center'),
     // 晋升：把词写进 {text} 条件建查询块（与手建同一份创建路径，落森林顶层，一笔回滚）
     promote: (term) => app.createQuery(term, { where: { text: term } }),
     // 无结果的创建入口：找到或创建页（与引用浮层同一条创建路径），建好当场打开
@@ -1952,11 +1967,23 @@ const app: App = {
    *
    * 宿主就是常驻搜索面本身（`compact` 形态）：同一份组件、同一台预览，不是第二套结果渲染。
    * 浮层只负责「快入口」的形状——可编辑但不常驻，要常驻就把词展开进 tab。
+   *
+   * `place` ＝ 挂载形态（与块打开同一套落点语言）：缺省＝浮层；`dock` ＝ 搜索卡
+   * 住进右槽（槽家具，✕ 摘掉、画廊加回来）；`tab` ＝ 中心 tab。三种挂载是同一份
+   * `SearchFace`，落点只回答「去哪」，词不随入口走（浮层的词只经「展开」带过去）。
    */
-  openSearch: () => {
+  openSearch: (place) => {
     if (!search) return
     // 第一次打开搜索时把索引排上（启动期不抢 CPU；用户按下 ⌘P 是最可靠的「现在可以建」信号）
     search.start()
+    if (place === 'dock') {
+      addUtility('right', 'search')
+      return
+    }
+    if (place === 'tab') {
+      app.openSurface({ kind: 'utility', id: 'search' })
+      return
+    }
     const deps = searchFaceDeps()
     const built: { face: SearchFace | null; box: HTMLElement | null } = { face: null, box: null }
     let onFocusIn: ((e: FocusEvent) => void) | null = null
@@ -1967,10 +1994,10 @@ const app: App = {
         built.face = new SearchFace({
           ...deps,
           compact: true,
-          // 选中即走：先关浮层（拆面、还焦点），再走装配层的打开路由
-          openBlock: (id) => {
+          // 选中即走：先关浮层（拆面、还焦点），再走装配层的打开路由（落点随修饰键）
+          openBlock: (id, place) => {
             layers.closePopover()
-            app.openBlock(id, 'center')
+            app.openBlock(id, place ?? 'center')
           },
           createPage: (name) => {
             layers.closePopover()
@@ -2710,6 +2737,7 @@ menus = setupCardMenus({
   windowLabel,
   addTile,
   addDerived,
+  addUtility,
   toggleFoldAll,
   closeOtherWindows,
   closeAllWindows,

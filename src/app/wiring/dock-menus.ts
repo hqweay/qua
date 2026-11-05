@@ -6,7 +6,7 @@
  * 咬合变成显式的 deps 清单——一半来自 `setupDocks` 的返回（状态的家在那边），
  * 一半是装配层的活引用（换库/焦点切换会变的，一律现取，不传值）。
  */
-import { DERIVED_CARDS, dockKey, isCardCollapsed, type DerivedCardId } from '../../core/index.ts'
+import { DERIVED_CARDS, dockKey, isCardCollapsed, UTILITY_FACES, type DerivedCardId, type UtilityFaceId } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
@@ -27,6 +27,7 @@ export interface DockMenusDeps {
   windowLabel: (blockId: string) => string
   addTile: (side: 'left' | 'right', command: string) => void
   addDerived: (side: 'left' | 'right', id: DerivedCardId) => void
+  addUtility: (side: 'left' | 'right', face: UtilityFaceId) => void
   toggleFoldAll: (side: 'left' | 'right') => void
   closeOtherWindows: (side: 'left' | 'right', key: string) => void
   closeAllWindows: (side: 'left' | 'right') => void
@@ -150,6 +151,11 @@ export function setupCardMenus(deps: DockMenusDeps) {
      * `onPick` 查表，不靠字符串切分。
      */
     const derivedRows = new Map<string, DerivedCardId>()
+    /**
+     * 工具面卡（现只有搜索）与派生卡同列一张画廊：✕ 只摘露面，加回来只有这一处入口
+     * （防「单向陷阱」的同一套判据）。前缀映射与派生卡同理——`utility:` 不进 `cards`。
+     */
+    const utilityRows = new Map<string, UtilityFaceId>()
     const rows: Row[] = [
       ...deps
         .getRegistry()
@@ -164,6 +170,18 @@ export function setupCardMenus(deps: DockMenusDeps) {
           command: d.name,
           keyHint: deps.keyHints().get(d.name),
         })),
+      ...UTILITY_FACES.filter((d) => !cards.some((e) => e.kind === 'utility' && e.face === d.id)).map((d) => {
+        const id = `utility:${d.id}`
+        utilityRows.set(id, d.id)
+        return {
+          id,
+          label: t(d.label),
+          hint: '',
+          icon: d.icon,
+          group: `palette/${t('menu.cat.widget')}`,
+          keyHint: undefined,
+        }
+      }),
       ...DERIVED_CARDS.filter((d) => !cards.some((e) => e.kind === 'derived' && e.card === d.id)).map((d) => {
         const id = `derived:${d.id}`
         derivedRows.set(id, d.id)
@@ -187,6 +205,11 @@ export function setupCardMenus(deps: DockMenusDeps) {
       placeholder: t('ui.palette.placeholder'),
       emptyText: t('ui.dock.tileGalleryEmpty'),
       onPick: (row) => {
+        const utility = utilityRows.get(row.id)
+        if (utility) {
+          deps.addUtility(side, utility)
+          return
+        }
         const derived = derivedRows.get(row.id)
         if (derived) {
           deps.addDerived(side, derived)
