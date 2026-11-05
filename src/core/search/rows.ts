@@ -244,12 +244,27 @@ export function ftsSourceTexts(
   ids: ReadonlySet<string>,
 ): { key: string; text: string }[] {
   const look = probeOf(ws.blocks, ids)
-  const out: { key: string; text: string }[] = []
 
   // 引用目标、标签块、字段定义块都可能在森林任意处：并成一个探测集，一次找齐
+  const wanted = collectWanted(ids, (id) => look.get(id))
+  const helpers = probeOf(ws.blocks, wanted)
+  /**
+   * 两遍探测合成一个「按 id 找块」：下面每一处都只需要这一格语义，
+   * 于是按 id 场景（`matchSourcesOf`）可以整段复用，不必再走一遍森林。
+   */
+  const get = (id: string): Block | undefined => look.get(id) ?? helpers.get(id)
+  return sourceTextsOf(ids, get)
+}
+
+/**
+ * 「这一批块 ＋ 它们引用的目标／标签／定义块」需要哪些 id（一次遍历能收齐的最小集）。
+ *
+ * 与下面那份投影拆开，是为了让**按 id 的调用方**跳过这一趟收集：它手里已经能查表。
+ */
+function collectWanted(ids: Iterable<string>, get: (id: string) => Block | undefined): Set<string> {
   const wanted = new Set<string>()
   for (const id of ids) {
-    const b = look.get(id)
+    const b = get(id)
     if (!b || isDeleted(b)) continue
     for (const r of b.content) if (r.t === 'ref' && r.to) wanted.add(r.to)
     for (const tid of tagIdsOf(b)) wanted.add(tid)
@@ -265,10 +280,23 @@ export function ftsSourceTexts(
       }
     }
   }
-  const helpers = probeOf(ws.blocks, wanted)
+  return wanted
+}
+
+/**
+ * **按 id 现算一批块的各来源文本**（索引行与「为什么命中」共用这一份投影）。
+ *
+ * `get` 是唯一的外部能力：批量场景传一次森林遍历收齐的探测表（省掉 N 次走树），
+ * 按 id 场景传读门面（`kb.get` 走索引表，O(1)）——两者语义相同，结果逐字一致。
+ */
+export function sourceTextsOf(
+  ids: Iterable<string>,
+  get: (id: string) => Block | undefined,
+): { key: string; text: string }[] {
+  const out: { key: string; text: string }[] = []
 
   for (const id of ids) {
-    const b = look.get(id)
+    const b = get(id)
     if (!b || isDeleted(b)) continue
 
     const content = plainText(b.content)
@@ -288,9 +316,9 @@ export function ftsSourceTexts(
       seenTagNames.add(n)
       tagNames.push(n)
     }
-    for (const tid of new Set(tagIdsOf(b))) pushTagName(helpers.get(tid))
+    for (const tid of new Set(tagIdsOf(b))) pushTagName(get(tid))
     for (const r of b.content) {
-      if (r.t === 'ref' && r.flavor === '#' && r.to) pushTagName(helpers.get(r.to))
+      if (r.t === 'ref' && r.flavor === '#' && r.to) pushTagName(get(r.to))
     }
     if (tagNames.length > 0) out.push({ key: ftsRowKey(id, 'tag'), text: tagNames.join(' ') })
 
@@ -300,7 +328,7 @@ export function ftsSourceTexts(
     const props = b.props ?? {}
     for (const name of Object.keys(props)) {
       if (name.startsWith('_')) continue
-      const text = propertySearchTextOf(helpers.get(name), props[name], (hid) => helpers.get(hid))
+      const text = propertySearchTextOf(get(name), props[name], get)
       if (text !== null) propTexts.push(text)
     }
     if (propTexts.length > 0) out.push({ key: ftsRowKey(id, 'prop'), text: propTexts.join(' ') })
@@ -313,7 +341,7 @@ export function ftsSourceTexts(
         const s = `${r.v} ${r.url}`.trim()
         if (s !== '') linkTexts.push(s)
       } else if (r.t === 'ref' && r.flavor !== '#' && r.to) {
-        const t = helpers.get(r.to)
+        const t = get(r.to)
         if (!t || isDeleted(t)) continue
         const n = displayTextOf(t).trim()
         if (n !== '') linkTexts.push(n)
