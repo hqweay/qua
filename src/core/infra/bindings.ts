@@ -54,7 +54,7 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/move-block-up', kind: 'keymap', key: 'mod+shift+up', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/move-block-down', kind: 'keymap', key: 'mod+shift+down', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/duplicate-block', kind: 'keymap', key: 'mod+shift+d', when: 'editorTextFocus', layer: 'core' },
-  { command: 'core.editor/delete-block', kind: 'keymap', key: 'mod+shift+backspace', when: 'editorTextFocus && !blockIsRoot', layer: 'core' },
+  { command: 'core.editor/delete-block', kind: 'keymap', key: 'mod+shift+backspace', when: 'editorTextFocus && blockCanDelete', layer: 'core' },
   { command: 'core.editor/toggle-collapse', kind: 'keymap', key: 'mod+.', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/toggle-todo', kind: 'keymap', key: 'mod+enter', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/insert-page-ref', kind: 'keymap', key: 'mod+shift+k', when: 'editorTextFocus', layer: 'core' },
@@ -120,7 +120,7 @@ export const BINDINGS: Binding[] = [
 
   /* ================= 块菜单（悬停左侧拖动把手 / 圆点或右键） ================= */
   { command: 'core.editor/duplicate-block', kind: 'menu', when: 'blockFocused', group: 'block/1-basic', order: 20, layer: 'core' },
-  { command: 'core.editor/delete-block', kind: 'menu', when: 'blockFocused && !blockIsRoot', group: 'block/1-basic', order: 40, layer: 'core', keywords: [t('menu.kw.delete')] },
+  { command: 'core.editor/delete-block', kind: 'menu', when: 'blockFocused && blockCanDelete', group: 'block/1-basic', order: 40, layer: 'core', keywords: [t('menu.kw.delete')] },
   // 日记天也是装载根（编辑器里的 delete-block 删不到）⇒ 删除走命令面；今天不出现（见 ctx 键）
   { command: 'core.journal/delete', kind: 'menu', when: 'blockFocused && blockCanDeleteJournal', group: 'block/1-basic', order: 45, layer: 'core', keywords: [t('menu.kw.delete')] },
   { command: 'core.editor/move-block-up', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 10, layer: 'core' },
@@ -220,7 +220,7 @@ export const BINDINGS: Binding[] = [
    */
   { command: 'core.editor/clear-todo', kind: 'slash', when: 'editorTextFocus && blockType == "todo"', group: 'slash/3-structure', order: 15, layer: 'core', icon: 'lucide:square-dashed' },
   { command: 'core.editor/duplicate-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/3-structure', order: 20, layer: 'core', label: t('menu.label.duplicate'), icon: 'lucide:copy' },
-  { command: 'core.editor/delete-block', kind: 'slash', when: 'editorTextFocus && !blockIsRoot', group: 'slash/3-structure', order: 30, layer: 'core', label: t('menu.label.delete'), icon: 'lucide:trash-2' },
+  { command: 'core.editor/delete-block', kind: 'slash', when: 'editorTextFocus && blockCanDelete', group: 'slash/3-structure', order: 30, layer: 'core', label: t('menu.label.delete'), icon: 'lucide:trash-2' },
 
   /* ================= 划选气泡（选中一段文本才浮出；顶部没有工具栏） ================= */
   { command: 'core.anno/toggle-bold', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 10, layer: 'core', icon: 'lucide:bold', label: t('menu.label.bold') },

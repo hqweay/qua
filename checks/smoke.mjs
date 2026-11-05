@@ -4443,6 +4443,59 @@ await check('T56 聚焦根块时块菜单**没有**「删除块」，命令被�
   return `根块：blockIsRoot=true、菜单无删除项、直接 invoke 也被拒（块数不变 ${before.total}）`
 })
 
+await check('T254 查询块根可删：菜单有删除项、软删可撤销（此前三处入口都不给、又没有替代命令 ⇒ 完全删不掉）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  // ① 查询块根（晋升的产物）：此前三处入口都不给删除、又没有替代命令 ⇒ 完全删不掉
+  await page.evaluate(() =>
+    window.__qua.invoke('core.query/create', { name: '查询根块XYZ', spec: { where: { text: '查询根块XYZ' } } }),
+  )
+  await page.waitForTimeout(250)
+  // handler 回的是布尔；块 id 按内容现找
+  const qid = await page.evaluate(() =>
+    window.__qua.allBlocks().find((b) => (b.text ?? '').includes('查询根块XYZ'))?.id,
+  )
+  assert(qid, `前置：查询块要建出来`)
+
+  const menuOf = (id) =>
+    page.evaluate(async (blockId) => {
+      window.__qua.focusBlock(blockId, 0)
+      await new Promise((r) => setTimeout(r, 250))
+      const k = window.__qua.ctxKeys()
+      const ed = window.__qua.__editor
+      const el = document.querySelector(`.blk[data-block-id="${blockId}"]`)
+      if (!el) throw new Error('zoom 之后行没挂出来：' + blockId)
+      ed.events.blockMenu?.(blockId, el.getBoundingClientRect())
+      return {
+        isRoot: Boolean(k.blockIsRoot),
+        canDelete: Boolean(k.blockCanDelete),
+        items: [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? ''),
+      }
+    }, id)
+
+  const qMenu = await menuOf(qid)
+  assert(qMenu.isRoot && qMenu.canDelete, `查询块根应可删：${JSON.stringify(qMenu)}`)
+  assert(
+    qMenu.items.some((x) => x.includes('删除')),
+    `查询块根的菜单应有删除项：${JSON.stringify(qMenu.items)}`,
+  )
+
+  // 删除生效：正文里不再有它；⌘Z 一撤销就回来（整棵软删、可回）
+  await page.evaluate(() => window.__qua.invoke('core.editor/delete-block'))
+  await page.waitForTimeout(200)
+  // text() 只读当前视图；存在性按整片森林的投影判
+  const hasBlock = (mark) =>
+    page.evaluate((m) => window.__qua.allBlocks().some((b) => (b.text ?? '').includes(m)), mark)
+  assert(!(await hasBlock('查询根块XYZ')), '删除应生效（整片森林里不再有它）')
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForTimeout(250)
+  assert(await hasBlock('查询根块XYZ'), '撤销应找回查询块')
+
+  await ctx.close()
+  return '查询块根：菜单有删除项、删了可撤销；页根仍不给删除块（T56）'
+})
+
 /**
  * **日记流的「当前对象」不是一块，而是一棵多段 feed**。
  *
