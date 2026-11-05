@@ -1553,10 +1553,10 @@ await check('T7 拖拽重排：把第 2 块拖到第 1 块上方（真实 DnD �
 
 /* -------------------------------------------------- 命令面板 / 菜单 */
 
-await check('T8 命令面板 ⌘P：列出全部命令、可搜、**无绑定也能执行**', async () => {
+await check('T8 命令面板 ⌘⇧P：列出全部命令、可搜、**无绑定也能执行**', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.focus())
-  await page.keyboard.press(kbd('mod+p'))
+  await page.keyboard.press(kbd('mod+shift+p'))
   const rows = await page.locator('.layer-item').count()
   assert(rows > 30, `命令面板应列出全部命令，实际 ${rows} 行`)
   const noKey = await page.evaluate(() => {
@@ -13743,10 +13743,10 @@ await check('T149 覆盖层：关掉之后按键仍落在编辑器；浮层开�
   await page.waitForTimeout(200)
 
   // ① 命令面板：开 → Esc 关 → **打字必须进得去**
-  await page.keyboard.press('Meta+p')
+  await page.keyboard.press(kbd('mod+shift+p'))
   await page.waitForTimeout(250)
   const opened = await page.evaluate(() => Boolean(document.querySelector('.layer')))
-  assert(opened, '⌘P 应打开命令面板')
+  assert(opened, '⌘⇧P 应打开命令面板')
   await page.keyboard.press('Escape')
   await page.waitForTimeout(300)
   const closed = await page.evaluate(() => {
@@ -16066,7 +16066,7 @@ await check(
 await check('T174 浮层有进场动画；退场的节点真的离开文档（不是留一个隐形的）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.focus())
-  await page.keyboard.press(kbd('mod+p'))
+  await page.keyboard.press(kbd('mod+shift+p'))
   const layerAnim = await page.evaluate(() => getComputedStyle(document.querySelector('.layer')).animationName)
   assert(layerAnim !== 'none', `命令面板应有进场动画，实际 animation=${layerAnim}`)
   await page.keyboard.press('Escape')
@@ -16074,7 +16074,7 @@ await check('T174 浮层有进场动画；退场的节点真的离开文档（�
 
   // 抽屉：进场有动画；Esc 退场走完后节点摘掉（waitForSelector 才是「关」的判据）
   await page.evaluate(() => window.__qua.focus())
-  await page.keyboard.press(kbd('mod+p'))
+  await page.keyboard.press(kbd('mod+shift+p'))
   await page.locator('.layer-input').fill('导出')
   await page.locator('.layer-item').first().click()
   await page.waitForSelector('.drawer')
@@ -16090,7 +16090,7 @@ await check('T174 浮层有进场动画；退场的节点真的离开文档（�
 await check('T175 键盘焦点处处可见：按钮亮 accent 环、菜单搜索框亮分隔线', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.focus())
-  await page.keyboard.press(kbd('mod+p'))
+  await page.keyboard.press(kbd('mod+shift+p'))
   // ① 菜单搜索框自己的焦点语言：下分隔线换 accent（它没有边框可换）
   const inputLine = await page.evaluate(() => getComputedStyle(document.querySelector('.layer-input')).borderBottomColor)
   const accent = await page.evaluate(() => {
@@ -19501,9 +19501,9 @@ await check('T227 点父块的竖线：查询块（无 children、有身体）�
 
 /* -------------------------------------------------------------- 全文检索 */
 
-await check('T228 ⌘F 搜索：输入正文词出结果、命中高亮、↵ 打开、Esc 关闭、无结果说人话', async () => {
+await check('T228 ⌘P 搜索：输入正文词出结果、命中高亮、↵ 打开、Esc 关闭、无结果说人话', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.keyboard.press('Meta+f')
+  await page.keyboard.press(kbd('mod+p'))
   await page.waitForSelector('.layer-input')
   await page.waitForFunction(() => document.activeElement?.classList.contains('layer-input'))
   const head = await page.locator('.layer-head').textContent()
@@ -19531,7 +19531,7 @@ await check('T228 ⌘F 搜索：输入正文词出结果、命中高亮、↵ �
   const active = await page.evaluate(() => window.__qua.snapshot().activeId)
   assert(active === target, `↵ 打开的是这一条（不是「有反应但没换块」）：${active} vs ${target}`)
 
-  await page.keyboard.press('Meta+f')
+  await page.keyboard.press(kbd('mod+p'))
   await page.waitForSelector('.layer-input')
   await page.keyboard.type('不存在的高频词xyz')
   await page.waitForFunction(() => document.querySelector('.layer-empty')?.textContent?.includes('没有匹配项'))
@@ -19868,7 +19868,7 @@ const plantProbe = async (page, text) => {
   }, text)
 }
 
-await check('T234 ⌘F 浮层「展开为面板」⇒ 中心搜索 tab：词带过去；左命中列表＋右块预览同屏；切行预览跟着换；导航让位可回来', async () => {
+await check('T234 ⌘P 浮层「展开为面板」⇒ 中心搜索 tab：词带过去；左命中列表＋右块预览同屏；切行预览跟着换；导航让位可回来', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const probeId = await plantProbe(page, '搜索面探针XYZ')
@@ -19880,7 +19880,7 @@ await check('T234 ⌘F 浮层「展开为面板」⇒ 中心搜索 tab：词带�
   })
   assert(secondId && secondId !== probeId, `前置：要有第二条命中：${secondId}`)
 
-  // ⌘F 浮层：出结果 ＋「展开为面板」行
+  // ⌘P 浮层：出结果 ＋「展开为面板」行
   await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
   await page.fill('.layer-input', '探针XYZ')
   await page.waitForFunction(() => [...document.querySelectorAll('.layer-item')].some((e) => e.dataset.id === 'search/expand'), null, { timeout: 3000 })
@@ -19908,7 +19908,7 @@ await check('T234 ⌘F 浮层「展开为面板」⇒ 中心搜索 tab：词带�
   assert(now.faceAttr === 'search', `外框要标出「现在是搜索面」（外框不滚、不留白）：${now.faceAttr}`)
   assert(
     now.rows.includes(probeId) && now.rows.length === overlayIds.length,
-    `面内命中与 ⌘F 一致：面 ${JSON.stringify(now.rows)} vs 浮层 ${JSON.stringify(overlayIds)}`,
+    `面内命中与 ⌘P 一致：面 ${JSON.stringify(now.rows)} vs 浮层 ${JSON.stringify(overlayIds)}`,
   )
 
   /**

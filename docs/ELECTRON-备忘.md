@@ -83,13 +83,13 @@ src/**               编辑器、命令表、绑定表、localStorage           
 
 | | Chrome（浏览器标签页） | Electron（这个 app） |
 |---|---|---|
-| `⌘P` | **打印**（浏览器接管） | 本 app 的命令面板（绑定表里 `mod+p`，Electron 里没有打印这个默认动作） |
+| `⌘P` | **打印**（浏览器接管） | 本 app 的全文搜索（绑定表里 `mod+p`，Electron 里没有打印这个默认动作）；命令面板在 `⌘⇧P` |
 | `⌘R` / `⇧⌘R` | 刷新 | **dev 才有**（菜单里 `role: reload/forceReload`）；打包后菜单里没有这两项 |
 | `⌥⌘I` / `F12` | 无（或打开浏览器 devtools） | 开发者工具；`F12` 还额外挂了 `before-input-event`（不依赖菜单） |
 | `⌘+` / `⌘-` / `⌘0` | 浏览器缩放整页 | 同样缩放整页（`webContents.setZoomFactor`）——实测 `zoomFactor=1.5` 时 `innerWidth 1400→933`、`devicePixelRatio=2` |
 | `⌘W` | 关标签页 | `role: close` 关窗口（macOS 惯例：窗口关了 app 留在 Dock） |
 | `⌘Q` / `⌘H` / `⌘M` | 无 | `role: quit/hide/minimize`，键等价物由 NSMenu 注册 |
-| `⌘F` | 浏览器查找栏 | **什么都不发生**（见 ③②） |
+| `⌘F` | 浏览器查找栏 | **什么都不发生**（无绑定，预留给就地查找；见 ③②） |
 | `⌘A` | 全选页面 | **原生全选**（见 ③①），**没有**被本 app 接管 |
 | `⌘Z` | 浏览器无所谓 | ⚠️ **菜单里 `role: undo/redo` 和 app 自己的 `⌘Z` 绑定在抢**，见下面 1.2.1 |
 
@@ -323,6 +323,9 @@ FATAL:content/browser/gpu/gpu_data_manager_impl_private.cc:417] GPU process isn'
   跨 N 块删除怎么走一次事务（现在连删除都还没走命令，是浏览器直接改 DOM）。
 
 ### ② `⌘F`：**零反应**（没有绑定，也没有查找 UI）
+
+> 2026-11-05 注：全文检索已落地、键位是 `⌘P`；`⌘F` 仍**故意不绑定**，预留给就地查找/替换。
+> 下面这段是当年的探针记录（当时搜索功能尚不存在），不代表现在缺能力。
 
 - 按 `⌘F`：命令日志增量 **0**、`document.querySelector('input[type=search], .find-bar, [class*=find]')` 为 **null**、
   焦点没动，DOM 选区不变。

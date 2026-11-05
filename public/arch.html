@@ -404,7 +404,7 @@
     <div class="card pad">
       <div class="sec-h" style="margin:0 0 9px"><b style="font-size:13px">查询与反向</b></div>
       <div class="struct" style="line-height:1.8">query(spec, ctx) · backlinksOf(id)<br>backrefBlocksOf(id) · annotationsOf</div>
-      <div class="note" style="margin-top:8px">同一个 <code>query()</code> 服务所有表面：纯函数路径与索引路径由等式测试钉住「结果相同」；上下文（<code>$self</code>／scope／exclude）由调用方给。<br><b>⌘F</b> 正文检索：FTS <code>ready</code> 时走 SQLite FTS（worker 建索引），否则扫描；web 恒扫描并在标题标明降级。</div>
+      <div class="note" style="margin-top:8px">同一个 <code>query()</code> 服务所有表面：纯函数路径与索引路径由等式测试钉住「结果相同」；上下文（<code>$self</code>／scope／exclude）由调用方给。<br><b>⌘P</b> 正文检索：FTS <code>ready</code> 时走 SQLite FTS（worker 建索引），否则扫描；web 恒扫描并在标题标明降级。</div>
     </div>
   </div>
 </section>

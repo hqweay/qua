@@ -37,6 +37,16 @@ test('标题不带类别前缀：类别由面板分组承载，搜索词进 keyw
   }
 })
 
+test('键位：⌘P 只开搜索，⌘⇧P 只开命令面板，⌘F 留给就地查找', () => {
+  const keysOf = (command: string) =>
+    BINDINGS.filter((b) => b.kind === 'keymap' && b.command === command).map((b) => b.key)
+  assert.deepEqual(keysOf('core.search/open'), ['mod+p'], '搜索只住在 ⌘P：多一个入口就多一份结果口径')
+  assert.deepEqual(keysOf('core.command-palette/show'), ['mod+shift+p'], '命令面板只留 ⌘⇧P')
+  assert.equal(keysOf('core.command-palette/show').length, 1, '⌘P 上的旧命令面板绑定要删掉，不是叠加')
+  const onF = BINDINGS.filter((b) => b.kind === 'keymap' && b.key === 'mod+f')
+  assert.deepEqual(onF, [], '⌘F 预留给就地查找，全局键位表里不该有人占它')
+})
+
 test('绑定表只有四个渲染面（keymap/menu/slash/selection），面板枚举命令表不经绑定表', () => {
   for (const b of BINDINGS) {
     assert.ok(b.kind !== 'palette', `绑定表不该再有 palette 档：${b.command}`)
