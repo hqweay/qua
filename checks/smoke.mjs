@@ -20144,6 +20144,61 @@ await check('T234 ⌘P 浮层「展开为面板」⇒ 中心搜索 tab：词带�
   return '展开带词、两列同屏、左列只读、切行换预览、kind 去重、导航让位'
 })
 
+await check('T252 浮层里点预览的折叠三角：折展开合、浮层不关（按下即重排的行不许被「点外面」误杀）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  // 探针带一个子块 ⇒ 右列预览里有折叠三角（子块默认折叠）
+  const probeId = await plantProbe(page, '折叠三角探针XYZ')
+  assert(probeId, '前置：探针块要建出来')
+  await page.evaluate((id) => {
+    const ed = window.__qua.__editor
+    const kid = ed.insertBlockAfter(id, '折叠三角探针的子块')
+    ed.indent(kid)
+  }, probeId)
+
+  await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
+  await page.fill('.popover.search-overlay .search-face-input', '折叠三角探针XYZ')
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('.popover.search-overlay .search-row[data-search-row]')),
+    null,
+    { timeout: 3000 },
+  )
+  // 折叠三角按下即重排：编辑器的 mousedown 处理器当场重画整屏，正被按的那一行
+  // 在事件还在冒泡时就已经换成新 DOM——「点外面就关」的判据不能对着游离节点算
+  await page.waitForSelector('.popover.search-overlay .search-face-preview .fold[data-fold-for]')
+  const foldedBefore = await page.evaluate(
+    () => Boolean(document.querySelector('.popover.search-overlay .search-face-preview .blk[data-collapsed]')),
+  )
+  // 用坐标点（真实输入事件）：locator.click 的命中预检会把悬停才现的绝对定位三角
+  // 让给相邻列判，坐标点击与用户手势等价
+  const at = await page.evaluate(() => {
+    const r = document
+      .querySelector('.popover.search-overlay .search-face-preview .fold[data-fold-for]')
+      .getBoundingClientRect()
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+  })
+  await page.mouse.click(at.x, at.y)
+  await page.waitForTimeout(150)
+  const after = await page.evaluate(() => ({
+    open: Boolean(document.querySelector('.popover.search-overlay')),
+    folded: Boolean(document.querySelector('.popover.search-overlay .search-face-preview .blk[data-collapsed]')),
+  }))
+  assert(after.open, '点折叠三角之后浮层还开着（按下即重排 ≠ 点到了外面）')
+  assert(after.folded !== foldedBefore, `折叠态要翻：${foldedBefore} → ${after.folded}`)
+
+  // 对照：真点浮层外面（正文空白）仍要关——修的是「误杀」，不是把外点关停了
+  // （浮层盖着正文，locator.click 会被命中预检拦住；坐标点击与用户手势等价）
+  const out = await page.evaluate(() => {
+    const r = document.querySelector('.popover.search-overlay').getBoundingClientRect()
+    return { x: r.left > 20 ? 8 : window.innerWidth - 8, y: r.top + r.height / 2 }
+  })
+  await page.mouse.click(out.x, out.y)
+  await page.waitForTimeout(150)
+  assert(!(await page.evaluate(() => Boolean(document.querySelector('.popover.search-overlay')))), '点浮层外面仍关闭')
+  await ctx.close()
+  return '折叠三角在浮层里可点：折展开合、浮层不关；真外点仍关'
+})
+
 await check('T235 晋升为查询块：{text} spec 与手建逐字节同、落森林顶层、走打开路由、一次 ⌘Z 回滚', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))

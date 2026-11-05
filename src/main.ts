@@ -2612,7 +2612,15 @@ document.addEventListener('mousedown', (e) => {
   if (!layers.popoverOpen()) return
   // 气泡自己的控件（别名编辑器、引用详情里的按钮）不算「点到外面」——
   // 否则 mousedown 就把宿主节点摘掉，后续 click 根本落不到按钮上。
-  if (layers.popoverContains(target)) return
+  //
+  // 「在不在里面」按**按下那一刻的路径**判，不按 target 现查：
+  // 编辑器自己的 mousedown 会当场重排 DOM（折叠三角、导轨——按下即重画整屏），
+  // 正被按的那一行在事件还在冒泡时就已经换成了新 DOM。此刻 target 是**游离节点**，
+  // 对它判 contains 恒为 false ⇒「按在浮层里」被误判成「点到了外面」，浮层当场关闭。
+  // composedPath 在派发那一刻就定死，不随中途换 DOM 变。
+  for (const node of e.composedPath()) {
+    if (node instanceof Node && layers.popoverContains(node)) return
+  }
   if ((target as HTMLElement).closest?.('.atom')) return
   // 从浮层里打开的引用选择器（`.layer`）不算「点到外面」：选完还要回浮层继续改
   if ((target as HTMLElement).closest?.('.layer')) return
