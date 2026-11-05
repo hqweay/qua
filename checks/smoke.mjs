@@ -7277,7 +7277,7 @@ await check(
 )
 
 await check(
-  'T65 `insertBlockAfter` 走一笔事务：插一块只发 1 条 upsert{parent,index}（落点由事务算，不是 splice 出来再报）；空块 + 待办＝时刻 upsert ＋ 1 条 prop.set；一次撤销回得去',
+  'T65 `insertBlockAfter` 走一笔事务：插一块只发 1 条 upsert{parent,index}（落点由事务算，不是 splice 出来再报）；空块 + 待办＝时刻 upsert ＋ 自有槽与值各一条 prop.set；一次撤销回得去',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -7438,7 +7438,7 @@ await check(
           }
           return []
         })(),
-        propValue: live?.props?.[ops.find((o) => o.e === 'prop' && o.op === 'set')?.name ?? ''],
+        propValue: live?.props?.[ops.find((o) => o.e === 'prop' && o.op === 'set' && o.name !== '_ownProps')?.name ?? ''],
       }
     })
     if (!todo.skipped) {
@@ -7446,12 +7446,13 @@ await check(
       const structOps = todo.ops.filter((o) => o.e === 'block')
       /**
        * **一次属性写入会同时刷新「修改于」**（时刻住在块上、值住在属性袋里）⇒ 这一支
-       * 产出「一条 upsert{content,modified} ＋ 一条 prop.set」，一次撤销仍然一步回去。
-       * 判据因此是「恰好这两条、没有结构 op」，不是「总共一条」——后者会逼实现
-       * 把两件不同的事实塞进同一条 op 里。
+       * 产出「一条 upsert{content,modified} ＋ 值与自有槽各一条 prop.set」，一次撤销仍然一步回去。
+       * 槽是「这一栏在」的载体（值清空后行还在，读缺省「待办」），所以与值同批落。
+       * 判据因此是「恰好这三条、没有结构 op」，不是「总共一条」——后者会逼实现
+       * 把几件不同的事实塞进同一条 op 里。
        */
-      assert(todo.ops.length === 2, `空块 + 待办应恰好 2 条 op（时刻 upsert ＋ prop.set）：${JSON.stringify(todo.ops)}`)
-      assert(propSets.length === 1, `其中一条应是 prop.set：${JSON.stringify(todo.ops)}`)
+      assert(todo.ops.length === 3, `空块 + 待办应恰好 3 条 op（时刻 upsert ＋ 自有槽 ＋ 值）：${JSON.stringify(todo.ops)}`)
+      assert(propSets.length === 2, `其中两条应是 prop.set（自有槽 ＋ 值）：${JSON.stringify(todo.ops)}`)
       assert(
         structOps.length === 1 && Object.keys(structOps[0].value ?? {}).includes('modified'),
         `另一条只该是「记改动时刻」的 upsert（不带 parent/index）：${JSON.stringify(structOps)}`,
@@ -7466,7 +7467,7 @@ await check(
     await ctx.close()
     return todo.skipped
       ? 'insertBlockAfter ⇒ ops=[block.upsert{parent,index}]（1 条，落点＝原块之后）；⌘Z 回原样。空块+待办分支本页没有空块，跳过'
-      : 'insertBlockAfter ⇒ ops=[block.upsert{parent,index}]（1 条，落点＝原块之后）；⌘Z 回原样；空块 + /待办 ⇒ ops=[upsert{modified}, prop.set]（一笔事务，没有结构 op）'
+      : 'insertBlockAfter ⇒ ops=[block.upsert{parent,index}]（1 条，落点＝原块之后）；⌘Z 回原样；空块 + /待办 ⇒ ops=[upsert{modified}, prop.set×2（自有槽＋值）]（一笔事务，没有结构 op）'
   },
 )
 
@@ -8884,7 +8885,7 @@ const opShape = (page) =>
   })
 
 await check(
-  'T77 切换待办走一笔事务：时刻 upsert ＋ 1 条 prop.set（任务状态槽，首切＝false），一次撤销回无槽',
+  'T77 切换待办走一笔事务：时刻 upsert ＋ 自有槽与值各一条 prop.set（首切＝待办），一次撤销回无槽',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -8896,12 +8897,13 @@ await check(
     await page.waitForTimeout(120)
     const ops = await opShape(page)
     /**
-     * 改属性值同时也是「改了这一块」⇒ 一笔里两条：记时刻的 `block.upsert{…,modified}`（不带
-     * parent/index，所以不是结构 op）＋ 任务状态槽的 `prop.set`。撤销仍然一步回。
+     * 改属性值同时也是「改了这一块」⇒ 一笔里三条：记时刻的 `block.upsert{…,modified}`（不带
+     * parent/index，所以不是结构 op）＋ 自有槽与任务状态值各一条 `prop.set`。撤销仍然一步回。
+     * 槽是「这一栏在」的载体：值清空后行还在（读缺省「待办」），首切就要落上。
      */
     const propOps = ops.filter((o) => o.e === 'prop' && o.op === 'set')
     const stampOps = ops.filter((o) => o.e === 'block' && o.op === 'upsert')
-    assert(ops.length === 2, `切换待办应恰好 2 条 op（时刻 upsert ＋ prop.set）：${JSON.stringify(ops)}`)
+    assert(ops.length === 3, `切换待办应恰好 3 条 op（时刻 upsert ＋ 自有槽 ＋ 值）：${JSON.stringify(ops)}`)
     assert(stampOps.length === 1, `其中一条应是记时刻的 upsert：${JSON.stringify(ops)}`)
     /** 任务状态是 select（值＝选项块 id）：首切（还不是任务）落「待办」选项 id，从定义块的子块现读 */
     const todoId = await page.evaluate(() => {
@@ -8913,19 +8915,23 @@ await check(
       return ''
     })
     assert(todoId !== '', '前置：种子里应有任务状态定义（含「待办」选项）')
+    const valueOp = propOps.find((o) => o.name !== '_ownProps')
     assert(
-      propOps.length === 1 && propOps[0].block === target.id && propOps[0].value === todoId,
-      `另一条应是任务状态槽的 prop.set（首切＝落「待办」选项）：${JSON.stringify(ops)}`,
+      propOps.length === 2 && valueOp && valueOp.block === target.id && valueOp.value === todoId,
+      `另两条应是 prop.set：自有槽 ＋ 任务状态值（首切＝落「待办」选项）：${JSON.stringify(ops)}`,
     )
-    const propName = propOps[0].name
+    const propName = valueOp.name
 
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(150)
     const back = await page.evaluate((t) => window.__qua.__editor.store.find(t.id)?.props ?? null, target)
-    assert(!back || !(propName in back), `一次撤销应回到没有任务槽：${JSON.stringify(back)}`)
+    assert(
+      !back || (!(propName in back) && !('_ownProps' in back)),
+      `一次撤销应回到没有任务槽也没有自有槽：${JSON.stringify(back)}`,
+    )
 
     await ctx.close()
-    return `toggleTodo ⇒ upsert{modified} ＋ prop.set{${propName}:待办选项}；⌘Z 回无槽`
+    return `toggleTodo ⇒ upsert{modified} ＋ prop.set×2（自有槽＋${propName}:待办选项）；⌘Z 回无槽`
   },
 )
 
@@ -9669,14 +9675,33 @@ await check(
     assert(done.todo === 'done', `点一下方框应当场变已完成：${JSON.stringify(done)}`)
 
     /**
-     * 摘掉属性（`clear-value` 会连槽位一起摘）⇒ 标记当场消失。
+     * 清空值停在「待填」：任务状态的定义给了缺省 ⇒ `clear-value` 只清值、行与方框都在
+     * （读侧缺省「待办」）。「摘掉整栏」是「取消待办」那条专属命令的事。
      *
-     * 不对称的刷新比不刷新更难查：出现的时候对、消失的时候要等下一次重渲染。
+     * 不对称的刷新比不刷新更难查：出现的时候对、消失（或变状态）的时候要等下一次重渲染。
      */
     await page.evaluate(
       ({ id, propId }) => window.__qua.invoke('core.props/clear-value', { blockId: id, propId }),
       { id: target.id, propId: statusId },
     )
+    await page.waitForTimeout(200)
+    const cleared = await page.evaluate((id) => {
+      const blk = document.querySelector(`.blk[data-block-id="${id}"]`)
+      const model = window.__qua.__editor.store.find(id)
+      return {
+        slot: Array.isArray(model?.props?._ownProps) ? model.props._ownProps.length : 0,
+        value: model?.props?.[window.__qua.propDefs().find((d) => d.label === '任务状态')?.id],
+        todo: blk?.dataset.todo ?? null,
+        box: !!blk?.querySelector('.todo-box'),
+      }
+    }, target.id)
+    assert(cleared.slot === 1 && cleared.value === undefined, `清空后值没了、槽还在：${JSON.stringify(cleared)}`)
+    assert(cleared.todo === 'todo' && cleared.box === true, `清空后停在「待填」（读缺省待办，方框仍在）：${JSON.stringify(cleared)}`)
+
+    /**
+     * 「取消待办」才是摘栏：值连自有槽一起走 ⇒ 标记当场消失。
+     */
+    await page.evaluate((id) => window.__qua.__editor.clearTodo(id), target.id)
     await page.waitForTimeout(200)
     const removed = await page.evaluate((id) => {
       const blk = document.querySelector(`.blk[data-block-id="${id}"]`)
@@ -9687,11 +9712,11 @@ await check(
         box: !!blk?.querySelector('.todo-box'),
       }
     }, target.id)
-    assert(removed.slot === 0, `摘掉后模型里不该留着槽位：${JSON.stringify(removed)}`)
-    assert(removed.todo === null && removed.box === false, `摘掉后方框与状态应一起消失：${JSON.stringify(removed)}`)
+    assert(removed.slot === 0, `取消待办后模型里不该留着槽位：${JSON.stringify(removed)}`)
+    assert(removed.todo === null && removed.box === false, `取消待办后方框与状态应一起消失：${JSON.stringify(removed)}`)
 
     await ctx.close()
-    return `add-field(任务状态) ⇒ 当场 todo ＋ 方框；点一下 ⇒ done；clear-value ⇒ 两者一起消失`
+    return `add-field(任务状态) ⇒ 当场 todo ＋ 方框；点一下 ⇒ done；clear-value ⇒ 停在待填（槽在）；取消待办 ⇒ 两者一起消失`
   },
 )
 

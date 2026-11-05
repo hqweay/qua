@@ -76,6 +76,7 @@ import {
   fieldTableOf,
   setValue,
   clearValue,
+  declareOwnProp,
   todoOf,
   TASK_STATUS_PROP_ID,
   TASK_STATUS_TODO_ID,
@@ -156,6 +157,8 @@ import { mergeCapture, type UndoCapture } from '../../core/kb/scoped.ts'
 import type { AssetView } from '../../core/infra/assets.ts'
 // 标签块的「找到或创建」有两种落地（直写 / 事务），判据只有一份
 import { ensureTagInTx, tagLookupOf } from '../../core/kb/ensure-tag.ts'
+// 任务状态定义块的事务内按需物化：落值之前保证定义在，面板才有行可画
+import { ensureTaskStatusInTx } from '../../core/kb/ensure-task.ts'
 // 用户可见文案一律走 t
 import { t } from '../../core/infra/msg.ts'
 import {
@@ -2559,9 +2562,18 @@ export class BlockEditor {
       next = field.value === TASK_STATUS_DONE_ID ? TASK_STATUS_TODO_ID : TASK_STATUS_DONE_ID
     }
     this.beginUndoEntry()
-    // 切的是一个属性值：一笔 patch 正好 1 条 `prop.set`（与「插入待办」同一形状）
+    // 切的是一个属性值：一笔 patch 落「值 ＋（新挂时）自有槽」，与「插入待办」同一形状。
+    // 落的是任务状态值 ⇒ 定义块得先在（恢复空库／定义被清掉的库里没有它，
+    // 缺了它这一行只剩「未知属性」）；同一笔事务里补上，值与定义同批落盘。
+    // 这一栏**没有任何来源**的块还要登记自有槽：「这一栏在」不能只靠值撑着，
+    // 否则面板里清成「待填」就等于整栏消失、任务身份一起没了 —— 行该留在
+    // 「待填」（读缺省「待办」），摘栏走显式的「取消待办」。
     this.write((tx) => {
-      tx.patch(id, (b) => setValue(b, propId, next))
+      if (propId === TASK_STATUS_PROP_ID) ensureTaskStatusInTx(this.store.blocks, tx)
+      tx.patch(id, (b) => {
+        if (field === undefined) declareOwnProp(b, TASK_STATUS_PROP_ID)
+        setValue(b, propId, next)
+      })
     })
     this.structTail(null, [id])
   }
@@ -2642,18 +2654,25 @@ export class BlockEditor {
         return loc.block.id
       }
       if (todoOf(loc.block, this.fieldTable()) !== undefined) return null
-      // 只落一个属性值、不动结构 ⇒ 一笔事务里正好 1 条 `prop.set`
+      // 只落一个属性值、不动结构 ⇒ 一笔事务里正好 1 条 `prop.set`（定义块缺了就同批补上）。
+      // 自有槽同批登记：这一栏「在」不能只靠值撑着（见 toggleTodo 的注释）
       this.write((tx) => {
-        tx.patch(loc.block.id, (b) =>
-          setValue(b, TASK_STATUS_PROP_ID, todo === 'done' ? TASK_STATUS_DONE_ID : TASK_STATUS_TODO_ID),
-        )
+        ensureTaskStatusInTx(this.store.blocks, tx)
+        tx.patch(loc.block.id, (b) => {
+          declareOwnProp(b, TASK_STATUS_PROP_ID)
+          setValue(b, TASK_STATUS_PROP_ID, todo === 'done' ? TASK_STATUS_DONE_ID : TASK_STATUS_TODO_ID)
+        })
       })
       this.structTail({ id: loc.block.id, off: 0 }, [loc.block.id])
       return loc.block.id
     }
     const b = mkBlock(text)
-    // 待办不是块的字段，是**任务状态属性**的一个值：这里落值，不落「块的种类」
-    if (todo) b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: todo === 'done' ? TASK_STATUS_DONE_ID : TASK_STATUS_TODO_ID }
+    // 待办不是块的字段，是**任务状态属性**的一个值：这里落值，不落「块的种类」。
+    // 自有槽跟值一起登记（见 toggleTodo）：清空值行还在，「待办」这个身份不靠值独撑
+    if (todo) {
+      declareOwnProp(b, TASK_STATUS_PROP_ID)
+      b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: todo === 'done' ? TASK_STATUS_DONE_ID : TASK_STATUS_TODO_ID }
+    }
     /**
      * **落点只由 `tx.insert` 算**（它按整片森林取兄弟列表）。
      * 这里不能再顺手 `splice`/`unshift` 一下：那样同一件事就有两个计算者，
@@ -2673,6 +2692,8 @@ export class BlockEditor {
     if (!site || site.kind === 'replace') return null
     const at = site.kind === 'first-child' ? { parentId: site.parentId, index: 0 } : site
     const ok = this.write((tx) => {
+      // 新块自带待办值 ⇒ 定义块得同批在（与切换待办同一条判据）
+      if (todo) ensureTaskStatusInTx(this.store.blocks, tx)
       tx.insert(b, at.parentId, at.index)
       return true
     })

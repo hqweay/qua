@@ -3,6 +3,7 @@
  */
 import {
   CHOICE_SCOPE_PROP,
+  clearKeepsField,
   clearValue,
   declareField,
   declareOwnProp,
@@ -63,7 +64,10 @@ export function propsCommands(
     clearPropValue: (blockId, propId) => {
       const b = find(blockId)
       if (!b) return
-      d.write(blockId, () => clearValue(b, propId))
+      // 定义给了缺省值的字段（如任务状态）：清空停在「待填」，行不摘 ——
+      // 「未填」是定义支持的读侧状态；摘栏走这类字段专属的命令（取消待办）
+      const def = d.kb.propDefs().find((x) => x.id === propId)
+      d.write(blockId, () => clearValue(b, propId, { keepField: clearKeepsField(def) }))
     },
 
     /**

@@ -18,20 +18,16 @@
  */
 import {
   declareField,
-  DEFAULT_PROP,
-  mkBlock,
-  mkPropDef,
   mkTagBlock,
   shiftISO,
+  TASK_STATUS_ABANDONED_ID,
   TASK_STATUS_DONE_ID,
-  TASK_STATUS_DOING_ID,
   TASK_STATUS_PROP_ID,
-  TASK_STATUS_TODO_ID,
   todayISO,
-  UI_POSITION_PROP,
   type Block,
   type MountEntry,
 } from '../index.ts'
+import { taskStatusVocabulary } from './task-vocabulary.ts'
 import { t } from '../infra/msg.ts'
 import type { Workspace } from '../infra/workspace.ts'
 import { forest, longParagraph, LONG_EN, mkJournal, mkPage, resolveRefs, resolveSeedTags, SEED_AT } from './build.ts'
@@ -207,8 +203,9 @@ export function seedWorkspace(): Workspace {
      */
     {
       text: '本页的待办',
-      // 「未完成」＝ 有这一栏、值不是「完成」（`neq` 只对有这一栏的块成立）：
+      // 「未完成」＝ 有这一栏、值不是终态（`neq` 只对有这一栏的块成立）：
       // 靠标签声明拿到这一栏的块由读侧缺省读出「待办」，一样命中，不需要专用原子。
+      // 「完成」与「放弃」都是关闭：前者做成了，后者明确不做了，都不算还欠着。
       // 「本页之下」显式写成方向条件：范围轴退场后，缺省就是整库。
       props: {
         _icon: 'lucide:list-filter',
@@ -216,6 +213,7 @@ export function seedWorkspace(): Workspace {
           where: {
             all: [
               { prop: { id: TASK_STATUS_PROP_ID, neq: TASK_STATUS_DONE_ID } },
+              { prop: { id: TASK_STATUS_PROP_ID, neq: TASK_STATUS_ABANDONED_ID } },
               { up: { is: '$self' } },
             ],
           },
@@ -344,13 +342,9 @@ function filler(lines: readonly string[]): SeedBlock[] {
  *
  * ⚠️ 这两个名字是**数据**（定义块/标签块的正文），不是界面文案：它们会进库、
  *    会跟着导出、用户也能改。所以它们与其它种子内容住在一起，而不是进 `msg.ts`。
+ *    任务状态与三个选项的名字跟着定义块构造器走（`props.ts`）——形状只有一个来源。
  */
-export const TASK_STATUS_LABEL = '任务状态'
 export const TASK_TAG_LABEL = '任务'
-/** 任务状态三个选项的显示名（**种子内容**，不是界面文案；改显示名不动任何值，值认选项 id） */
-export const TASK_TODO_LABEL = '待办'
-export const TASK_DOING_LABEL = '进行中'
-export const TASK_DONE_LABEL = '完成'
 
 /**
  * **日记面板的演示栏**（`Prefs.journalMounts` 的种子）。
@@ -374,7 +368,9 @@ export function seedJournalMounts(): MountEntry[] {
           all: [
             // 「这一天下面」＝ 某个祖先既是日记块、日期又等于宿主那一天（`$self` 解析成宿主的 `_date`）
             { up: { all: [{ role: 'journal' }, { prop: { id: '_date', eq: '$self' } }] } },
+            // 「还没关」＝ 不是「完成」也不是「放弃」（两者都是终态，见「本页的待办」）
             { prop: { id: TASK_STATUS_PROP_ID, neq: TASK_STATUS_DONE_ID } },
+            { prop: { id: TASK_STATUS_PROP_ID, neq: TASK_STATUS_ABANDONED_ID } },
           ],
         },
       },
@@ -384,21 +380,10 @@ export function seedJournalMounts(): MountEntry[] {
 }
 
 function coreVocabulary(): Block[] {
-  // 任务状态是 select（待办／进行中／完成）：值存选项块 id，缺省读出「待办」——
-  // 刚挂上任务、还没填过的块，读侧就是「待办」，不需要先点一格才算任务。
-  // 选项块与定义块一样按核心词汇取**确定性 id**（`todoOf`／⌘↵／种子查询按 id 认「完成」）。
-  const taskStatus = mkPropDef(
-    TASK_STATUS_LABEL,
-    'select',
-    { [UI_POSITION_PROP]: 'block-left', [DEFAULT_PROP]: TASK_STATUS_TODO_ID },
-    TASK_STATUS_PROP_ID,
-  )
-  const choice = (label: string, id: string): Block => ({ ...mkBlock(label), id })
-  taskStatus.children = [
-    choice(TASK_TODO_LABEL, TASK_STATUS_TODO_ID),
-    choice(TASK_DOING_LABEL, TASK_STATUS_DOING_ID),
-    choice(TASK_DONE_LABEL, TASK_STATUS_DONE_ID),
-  ]
+  // 定义块与选项从 core 的构造器来：种子与写路径的按需物化共用同一份形状，
+  // 两边各造一份就会漂移（种子有的选项、按需物化的没有，查询就分叉）。
+  // 选项 id 仍是核心词汇的**确定性 id**（`todoOf`／⌘↵／种子查询按 id 认「完成」）。
+  const taskStatus = taskStatusVocabulary()
   const task = mkTagBlock(TASK_TAG_LABEL)
   task.props = { ...(task.props ?? {}), _icon: 'lucide:check-square' }
   declareField(task, TASK_STATUS_PROP_ID)
