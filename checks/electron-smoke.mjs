@@ -15,7 +15,7 @@
  *     不加就是 GPU 进程反复崩到 `FATAL: GPU process isn't usable. Goodbye.`。
  */
 import { _electron } from 'playwright-core'
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -1244,13 +1244,13 @@ await check('E13 菜单「库」：新建库 ⇒ 新窗；最近的库随注册�
   const newLib = bar.find((i) => i.label === '新建库…')
   assert(newLib, '「新建库…」应当在「库」里')
   assert(newLib.accel === 'CommandOrControl+Shift+N', `新建库的键应当住在菜单数据里（⌘⇧N），实际 ${newLib.accel}`)
+  const openLib = bar.find((i) => i.label === '打开库…')
+  assert(openLib && openLib.accel === 'CommandOrControl+O', `「打开库…」应当在「库」里（⌘O）：${JSON.stringify(openLib)}`)
 
-  // 触发菜单里的「新建库…」⇒ 新窗（一库一窗：新库必然是新窗）
+  // 「新建库…」点击后走**选文件夹对话框**（原生对话框没法在冒烟里点）——
+  // 它背后那一层（建库 ⇒ 开新窗 ⇒ 注册表重建）在这里走同一条 IPC 验：
   const before = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
-  await app.evaluate(({ Menu, BrowserWindow }) => {
-    const item = Menu.getApplicationMenu().getMenuItemById('library-new')
-    item.click(item, BrowserWindow.getAllWindows()[0])
-  })
+  await first.page.evaluate(() => window.qua.createLibrary('dd'.repeat(16), '菜单库B'))
   const pageB = await (async () => {
     const t0 = Date.now()
     while (Date.now() - t0 < 8000) {
@@ -1517,6 +1517,80 @@ await check('E15 全文检索：索引建好后 ⌘P 可搜、拼音可搜、编
   assert((none?.hits ?? []).length === 0, `真没有就是空：${JSON.stringify(none)}`)
   await app.close()
   return `⌘P 出结果并高亮；拼音走 FTS；编辑「${unique}」后增量命中 ${target.slice(-6)}`
+})
+
+/* ═══════════════════════════════════════════════════ E16 外部库：指定目录建库、按目录打开、副本拒绝 */
+
+/**
+ * 「用户的库落在哪」是用户要拍板的事。这一条钉住库面的三个目录级动作：
+ *
+ *   ① 在**指定目录**建库（不落默认 repos/）→ 目录里长出 library.json ＋ qua.db ＋ assets/，
+ *      注册表条目带 path；
+ *   ② **按目录打开**：同目录再开＝聚焦已有（不新开窗、不建第二份）；
+ *   ③ **副本拒绝**：把库目录拷一份再按目录打开 ⇒ 拒绝（两份同 id，打开哪份都必须显式）；
+ *      **不是库拒绝**：空目录 ⇒ 拒绝，且**不往里撒文件**。
+ *   ④ 重启恢复：最后建的库（lastOpenedId）重开后还是它。
+ *
+ * ⚠️ 原生对话框没法在冒烟里点：这里走的是对话框背后的**同一层**（`qua:library/create`
+ *    带 dir、`qua:library/open-at`）；对话框只是「路径从哪来」的皮。
+ */
+await check('E16 外部库：指定目录建库、按目录打开聚焦已有、副本/非库拒绝、重启恢复最后库', async () => {
+  const dir = join(CACHE, '12-externlib')
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+  const extDir = join(dir, '我的正式库')
+
+  const first = await launch('externlib', { userData: dir })
+  const app = first.app
+
+  // ① 指定目录建库
+  const LIB_B_ID = 'cc'.repeat(16)
+  const created = await first.page.evaluate(
+    ([id, name, d]) => window.qua.createLibrary(id, name, d),
+    [LIB_B_ID, '外部库', extDir],
+  )
+  assert(created?.status === 'ok', `指定目录建库失败：${JSON.stringify(created)}`)
+  const winsAfterCreate = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
+  // 目录三件套与注册表条目在测试进程里直接读盘（app.evaluate 的作用域里没有 require）
+  const onDisk = {
+    manifest: existsSync(join(extDir, 'library.json')),
+    db: existsSync(join(extDir, 'qua.db')),
+    assets: existsSync(join(extDir, 'assets')),
+  }
+  assert(winsAfterCreate === 2, `建库应开第二扇窗：${winsAfterCreate}`)
+  assert(onDisk.manifest && onDisk.db && onDisk.assets, `库目录应长出三件套：${JSON.stringify(onDisk)}`)
+  const registry = JSON.parse(readFileSync(join(dir, 'qua-data', 'app.json'), 'utf8'))
+  const entry = registry.libraries.find((l) => l.id === LIB_B_ID)
+  assert(entry?.path === extDir, `外部库条目应带 path：${JSON.stringify(entry)}`)
+
+  // ② 按目录再开＝聚焦已有（不新开窗）
+  const reopened = await first.page.evaluate((d) => window.qua.openLibraryAt(d), extDir)
+  assert(reopened?.status === 'ok', `按目录打开失败：${JSON.stringify(reopened)}`)
+  const winsAfterReopen = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
+  assert(winsAfterReopen === 2, `同目录再开不该新开窗：${winsAfterReopen}`)
+
+  // ③ 副本拒绝：拷一份目录，按副本路径打开 ⇒ identity-conflict
+  const copyDir = join(dir, '副本')
+  cpSync(extDir, copyDir, { recursive: true })
+  const copied = await first.page.evaluate((d) => window.qua.openLibraryAt(d), copyDir)
+  assert(copied?.status === 'failed' && copied?.failure?.reason === 'identity-conflict', `副本应被拒绝：${JSON.stringify(copied)}`)
+
+  // ④ 不是库拒绝：空目录 ⇒ not-a-library，且不往里撒文件
+  const emptyDir = join(dir, '空目录')
+  mkdirSync(emptyDir, { recursive: true })
+  const notLib = await first.page.evaluate((d) => window.qua.openLibraryAt(d), emptyDir)
+  assert(notLib?.status === 'failed' && notLib?.failure?.reason === 'not-a-library', `非库目录应被拒绝：${JSON.stringify(notLib)}`)
+  const emptyAfter = readdirSync(emptyDir)
+  assert(emptyAfter.length === 0, `拒绝时不该往目录里撒文件：${JSON.stringify(emptyAfter)}`)
+
+  await app.close()
+
+  // ⑤ 重启恢复：lastOpenedId 是最后建的库（外部库 B）
+  const second = await launch('externlib-reopen', { userData: dir })
+  const libInfo = await second.page.evaluate(() => window.qua.libraryInfo())
+  assert(libInfo?.status === 'ok' && libInfo.id === LIB_B_ID, `重启应恢复最后打开的库：${JSON.stringify(libInfo)}`)
+  await second.app.close()
+  return `指定目录建库（三件套＋注册表带 path）；按目录再开聚焦；副本拒绝、空目录拒绝且不撒文件；重启恢复外部库`
 })
 
 /* ═══════════════════════════════════════════════════ 汇总 */

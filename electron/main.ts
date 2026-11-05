@@ -16,6 +16,7 @@ import {
   Menu,
   MessageChannelMain,
   app,
+  dialog,
   ipcMain,
   nativeTheme,
   net,
@@ -25,14 +26,15 @@ import {
   type WebContents,
 } from 'electron'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 // 文案字典与 renderer **共用同一份**（`src/core/msg.ts` 是零依赖叶子）。菜单是用户可见文案，
 // 所以连「相」都走 t('app.name')，不在这里硬编码。
 import { t } from '../src/core/infra/msg'
 import { ASSET_SCHEME, isAssetHash } from '../src/core/infra/assets.ts'
-import { libraryId } from '../src/core/identity/library.ts'
+import { MANIFEST_FILE, libraryId } from '../src/core/identity/library.ts'
 import { loadRegistry } from './library/registry.ts'
+import type { OpenFailure } from './library/session.ts'
 import { LibraryManager } from './library/windows.ts'
 
 /**
@@ -253,6 +255,13 @@ console.log(
 
 const REGISTRY_IO = { file: join(QUA_DATA_ROOT, 'app.json'), reposDir: join(QUA_DATA_ROOT, 'repos') }
 
+/**
+ * **隔离模式**：命令行显式给了数据目录（`--user-data-dir`／`--qua-data-dir`）。
+ * 自检脚本全靠它把测试库关在与用户数据隔离的地方——这类运行**必须无人值守**，
+ * 首次启动不弹「选库」对话框（原生对话框会挂死冒烟），保持「自动建默认库」的旧路径。
+ */
+const ISOLATED = argvUserDataDir !== undefined || argvDataDir !== undefined
+
 // 无库时的兜底窗口：`bootLibraries()` 总会开一个库，这个变量留给「将来加欢迎页」
 
 /**
@@ -438,14 +447,25 @@ function buildMenu(): Menu {
         },
         { type: 'separator' },
         {
+          id: 'library-open',
+          label: t('menu.item.openLibrary'),
+          accelerator: 'CommandOrControl+O',
+          click: () => {
+            void promptOpenLibrary().then((r) => {
+              if (r.status === 'failed') failBox(r.failure)
+            })
+          },
+        },
+        {
           id: 'library-new',
           label: t('menu.item.newLibrary'),
           // 键位住在菜单数据里（与 renderer 的键位表同一条纪律：不写在 handler 的按键分支上）。
           // 「最近的库」挂不了键：菜单加速键只能落在可点击的条目上，子菜单项会被忽略。
           accelerator: 'CommandOrControl+Shift+N',
           click: () => {
-            const r = manager.create(libraryId(), t('library.defaultName'))
-            if (r.status === 'failed') console.warn('[library] menu create failed', r.failure)
+            void promptCreateLibrary().then((r) => {
+              if (r.status === 'failed') failBox(r.failure)
+            })
           },
         },
       ],
@@ -503,6 +523,98 @@ const manager = new LibraryManager({
 
 manager.installIpc()
 
+/* ------------------------------------------------------------ 选库（首次启动 / 菜单） */
+
+/** 打开/建库失败都弹这一句：给原因，不给「什么都没发生」 */
+function failureText(f: OpenFailure): string {
+  switch (f.reason) {
+    case 'not-a-library':
+      return t('library.fail.notALibrary')
+    case 'bad-manifest':
+      return t('library.fail.badManifest')
+    case 'identity-conflict':
+      return t('library.fail.identityConflict')
+    case 'too-new':
+      return t('library.fail.tooNew', { version: String(f.version) })
+    case 'corrupt':
+      return t('library.fail.corrupt')
+    case 'migrate-failed':
+      return t('library.fail.migrateFailed', { detail: f.detail })
+    case 'io':
+      return t('library.fail.io', { detail: f.detail })
+  }
+}
+
+function failBox(f: OpenFailure): void {
+  void dialog.showMessageBox({ type: 'error', title: APP_NAME, message: failureText(f) })
+}
+
+type PickResult = { status: 'ok' } | { status: 'canceled' } | { status: 'failed'; failure: OpenFailure }
+
+/**
+ * 新建库：**保存对话框一次给齐「位置 ＋ 名字」**，返回的路径就是库目录。
+ * （设计稿是「选父目录 → 建子目录」；保存对话框是同一件事的原生形状，还自带名字输入。）
+ * 选中的位置已经是一个库 ⇒ 幂等：打开它，不建第二份。
+ */
+async function promptCreateLibrary(): Promise<PickResult> {
+  const r = await dialog.showSaveDialog({
+    title: t('library.pick.newTitle'),
+    defaultPath: join(QUA_DATA_ROOT, t('library.defaultName')),
+    nameFieldLabel: t('library.pick.nameLabel'),
+    buttonLabel: t('library.pick.createButton'),
+    properties: ['createDirectory', 'showOverwriteConfirmation'],
+  })
+  if (r.canceled || !r.filePath) return { status: 'canceled' }
+  const dir = r.filePath
+  if (existsSync(join(dir, MANIFEST_FILE))) {
+    const opened = manager.openAt(dir)
+    return opened.status === 'ok' ? { status: 'ok' } : { status: 'failed', failure: opened.failure }
+  }
+  const created = manager.create(libraryId(), basename(dir), dir)
+  return created.status === 'ok' ? { status: 'ok' } : { status: 'failed', failure: created.failure }
+}
+
+/** 打开已有库：选目录 → 主进程按 manifest 判身份（不是库／副本／过新都在那一层拒绝） */
+async function promptOpenLibrary(): Promise<PickResult> {
+  const r = await dialog.showOpenDialog({
+    title: t('library.pick.openTitle'),
+    buttonLabel: t('library.pick.openButton'),
+    properties: ['openDirectory'],
+  })
+  if (r.canceled || r.filePaths.length === 0) return { status: 'canceled' }
+  const opened = manager.openAt(r.filePaths[0]!)
+  return opened.status === 'ok' ? { status: 'ok' } : { status: 'failed', failure: opened.failure }
+}
+
+/**
+ * **首次启动选库**（注册表里一个库都没有）：新建，或打开已有的库文件夹。
+ *
+ * 为什么是原生对话框而不是欢迎页：库还没建出来之前**没有渲染面可挂**——
+ * 欢迎页是一整块独立 UI（P4-D 的活），而「选个文件夹」原生对话框就是全部所需。
+ * 选完之前不开任何库窗口；用户取消到退出为止，绝不悄悄往文档目录撒一个默认库。
+ * 失败（不是库／副本／过新）说清原因后回到选择——循环的出口只有「开成了」和「退出」。
+ */
+async function chooseFirstLibrary(): Promise<void> {
+  for (;;) {
+    const pick = await dialog.showMessageBox({
+      type: 'question',
+      message: t('library.firstRun.message'),
+      detail: t('library.firstRun.detail'),
+      buttons: [t('library.firstRun.new'), t('library.firstRun.open'), t('library.firstRun.quit')],
+      defaultId: 0,
+      cancelId: 2,
+    })
+    if (pick.response === 2) {
+      app.quit()
+      return
+    }
+    const r = pick.response === 0 ? await promptCreateLibrary() : await promptOpenLibrary()
+    if (r.status === 'ok') return
+    if (r.status === 'canceled') continue
+    failBox(r.failure)
+  }
+}
+
 /**
  * `qua-asset://<hash>` → 那份字节。
  *
@@ -531,14 +643,12 @@ async function serveAsset(request: Request): Promise<Response> {
 }
 
 /**
- * 启动落点：`lastOpenedId` 能开就开它；否则建／开第一个库。
+ * 启动落点：`lastOpenedId` 能开就开它；否则开列表里第一个库；
+ * 一个库都没有时——隔离模式自动建默认库，**真实用户给选择**（新建 / 打开已有）。
  *
- * 为什么 v1 **总是**开一个库（而不是欢迎页）：欢迎页要一套没有库的渲染面，
- * 那是一整块独立的 UI。当前的完成判据是「两个库两个窗口」——
- * 先保证「有库可用」，「没有库时怎么办」留给最近库管理那一档。
- *
- * ⚠️ 没有库时**建一个默认库**，不是「什么都不开」：空窗口会让 renderer 拿不到库，
- * 于是它走 `no-library` 分支——那条分支现在还不存在。
+ * 为什么隔离模式不同：`--user-data-dir`／`--qua-data-dir` 是「与用户数据隔离」的显式声明
+ * （自检脚本全靠它），这类运行必须无人值守——原生对话框会挂死冒烟（E11 钉着这条自动建库路径）。
+ * 真实用户的第一次启动**不再悄悄建库**：库落在哪是用户要拍板的事。
  */
 function bootLibraries(): void {
   const loaded = loadRegistry(REGISTRY_IO)
@@ -554,10 +664,13 @@ function bootLibraries(): void {
     if (r.status === 'ok') return
     console.warn('[library] first library failed to open', r.failure)
   }
-  // 一个库都没有（首次启动）：建默认库
-  const id = libraryId()
-  const r = manager.create(id, t('library.defaultName'))
-  if (r.status === 'failed') console.error('[library] failed to create default library', r.failure)
+  if (ISOLATED) {
+    const id = libraryId()
+    const r = manager.create(id, t('library.defaultName'))
+    if (r.status === 'failed') console.error('[library] failed to create default library', r.failure)
+    return
+  }
+  void chooseFirstLibrary()
 }
 
 // 单实例：第二次从 Finder 双击只是把已有窗口拉到前面（而不是起第二个 app 抢同一份库）

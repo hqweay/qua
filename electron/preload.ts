@@ -78,7 +78,11 @@ const qua = {
   libraryInfo: (): Promise<unknown> => ipcRenderer.invoke('qua:library/info'),
   libraryList: (): Promise<unknown> => ipcRenderer.invoke('qua:library/list'),
   openLibrary: (id: string): Promise<unknown> => ipcRenderer.invoke('qua:library/open', id),
-  createLibrary: (id: string, name: string): Promise<unknown> => ipcRenderer.invoke('qua:library/create', id, name),
+  /** 在指定目录建库（外部库；不传落默认 `repos/<id>`）。目录必须为空或不存在的子路径 */
+  createLibrary: (id: string, name: string, dir?: string): Promise<unknown> =>
+    ipcRenderer.invoke('qua:library/create', id, name, dir),
+  /** 打开一个目录下的库（目录里必须有 `library.json`）；没登记过就登记为外部库 */
+  openLibraryAt: (dir: string): Promise<unknown> => ipcRenderer.invoke('qua:library/open-at', dir),
 
   /** 内容（四张内容表的全部行；编码归渲染层） */
   load: (): Promise<unknown> => ipcRenderer.invoke('qua:storage/load'),
