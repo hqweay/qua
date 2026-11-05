@@ -19868,11 +19868,17 @@ const plantProbe = async (page, text) => {
   }, text)
 }
 
-await check('T234 ⌘F 浮层「展开为面板」⇒ 中心搜索 tab：词随打开带过去；面内命中与浮层同一批；kind 去重；导航让位可回来', async () => {
+await check('T234 ⌘F 浮层「展开为面板」⇒ 中心搜索 tab：词带过去；左命中列表＋右块预览同屏；切行预览跟着换；导航让位可回来', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const probeId = await plantProbe(page, '搜索面探针XYZ')
   assert(probeId, '前置：探针块要建出来')
+  // 第二条命中：用来验「切行预览跟着换」（两条同词的块，前缀都含搜索词）
+  const secondId = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    return ed.insertBlockAfter(ed.doc.roots[0].id, '搜索面探针XYZ 第二条')
+  })
+  assert(secondId && secondId !== probeId, `前置：要有第二条命中：${secondId}`)
 
   // ⌘F 浮层：出结果 ＋「展开为面板」行
   await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
@@ -19887,20 +19893,113 @@ await check('T234 ⌘F 浮层「展开为面板」⇒ 中心搜索 tab：词随�
 
   // 展开 ⇒ 工具面 tab（kind 去重）；词随打开带过去；面内命中与浮层同一批
   await page.locator('.layer-item[data-id="search/expand"]').click()
-  await page.waitForTimeout(200)
+  await page.waitForTimeout(250)
   const face = () =>
     page.evaluate(() => ({
       tabs: [...document.querySelectorAll('.center-tab')].map((t) => ({ title: t.title, active: t.dataset.active === '1' })),
       surfaceVisible: !document.getElementById('center-surface').hidden,
+      faceAttr: document.getElementById('center-surface').dataset.face ?? '',
       term: document.querySelector('.search-face-input')?.value ?? null,
       rows: [...document.querySelectorAll('#center-surface [data-search-row]')].map((e) => e.dataset.searchRow),
     }))
   let now = await face()
   assert(now.tabs.some((t) => t.title === '搜索' && t.active), `搜索应成为中心 tab：${JSON.stringify(now.tabs)}`)
   assert(now.surfaceVisible && now.term === '探针XYZ', `词要随打开带过去：${JSON.stringify(now.term)}`)
+  assert(now.faceAttr === 'search', `外框要标出「现在是搜索面」（外框不滚、不留白）：${now.faceAttr}`)
   assert(
     now.rows.includes(probeId) && now.rows.length === overlayIds.length,
     `面内命中与 ⌘F 一致：面 ${JSON.stringify(now.rows)} vs 浮层 ${JSON.stringify(overlayIds)}`,
+  )
+
+  /**
+   * 主从布局：**两列同屏**，左列只读、右列是真正的块。
+   *
+   * 左列「只读」的判据是**里面没有任何 contenteditable**（不是「没有 input」：
+   * 输入框在顶栏，不在左列）；右列的判据是那颗 `.blk[data-block-id=...]` ——
+   * 块行由渲染层画，不是摘要。
+   */
+  const layout = await page.evaluate((id) => {
+    const list = document.querySelector('#center-surface .search-face-list')
+    const prev = document.querySelector('#center-surface .search-face-preview')
+    const selected = [...document.querySelectorAll('#center-surface .search-row')]
+      .filter((e) => e.dataset.selected === '1')
+      .map((e) => e.dataset.searchRow)
+    return {
+      list: Boolean(list),
+      preview: Boolean(prev),
+      listEditable: list ? list.querySelectorAll('[contenteditable="true"]').length : -1,
+      // 预览里是**这一块**的行（不是摘要）：块 id 就是选中那一块的 id
+      previewBlock: prev?.querySelector('.blk[data-block-id]')?.dataset.blockId ?? '',
+      previewText: prev?.querySelector('.blk[data-block-id] .tx')?.textContent ?? '',
+      selected,
+      previewBorderLeft: prev ? getComputedStyle(prev).borderLeftWidth : '',
+      probe: id,
+    }
+  }, probeId)
+  assert(layout.list && layout.preview, `两列都要在场：${JSON.stringify(layout)}`)
+  assert(layout.listEditable === 0, `左列不装编辑器（可扫读、50 条不抢焦点）：${JSON.stringify(layout)}`)
+  assert(
+    layout.selected.length === 1 && layout.previewBlock === layout.selected[0],
+    `首条自动选中，且右列画的就是**选中那一块的真块行**（不是摘要）：${JSON.stringify(layout)}`,
+  )
+  assert(layout.previewText.includes('探针XYZ'), `预览里是那一块的正文：${JSON.stringify(layout)}`)
+  assert(layout.probe && now.rows.includes(layout.probe), `探针块也在命中里：${JSON.stringify(now.rows)}`)
+  assert(layout.previewBorderLeft !== '0px', `右列有左边框（分隔归边框，不加第二种分隔件）：${layout.previewBorderLeft}`)
+
+  /**
+   * 窄屏（<900px）：**单列堆叠**——列表在上、预览在下，两列都不消失。
+   * 判据用真实矩形（列表底 ≤ 预览顶），不按 CSS 文案判：分叉的写法（`display:none`）
+   * 会让「点了没反应」，而那不报错。
+   */
+  await page.setViewportSize({ width: 820, height: 900 })
+  await page.waitForTimeout(250)
+  const stacked = await page.evaluate(() => {
+    const list = document.querySelector('#center-surface .search-face-list')
+    const prev = document.querySelector('#center-surface .search-face-preview')
+    const l = list?.getBoundingClientRect()
+    const p = prev?.getBoundingClientRect()
+    return {
+      list: l ? { w: l.width, h: l.height, bottom: l.bottom } : null,
+      prev: p ? { w: p.width, h: p.height, top: p.top } : null,
+      prevVisible: Boolean(prev && p && p.height > 0),
+      borderLeft: prev ? getComputedStyle(prev).borderLeftWidth : '',
+      borderTop: prev ? getComputedStyle(prev).borderTopWidth : '',
+    }
+  })
+  assert(
+    stacked.list && stacked.prev && stacked.prevVisible,
+    `窄屏下两列都要在场（预览不许被藏掉）：${JSON.stringify(stacked)}`,
+  )
+  assert(
+    stacked.list.bottom <= stacked.prev.top + 1 && Math.abs(stacked.prev.w - stacked.list.w) < 2,
+    `窄屏下是单列堆叠（列表在上、预览在下、同宽）：${JSON.stringify(stacked)}`,
+  )
+  assert(stacked.borderTop !== '0px', `堆叠时分隔改到上边：${JSON.stringify(stacked)}`)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.waitForTimeout(150)
+
+  // 切换左行 ⇒ 预览跟着换（同一台编辑器，换的是 roots）
+  const otherId = now.rows.find((id) => id !== layout.selected[0])
+  assert(otherId, `前置：要有第二行可切：${JSON.stringify(now.rows)}`)
+  const editorIdentity = () =>
+    page.evaluate(() => {
+      const host = document.querySelector('#center-surface .search-face-preview-editor')
+      return { has: Boolean(host), editor: host?.dataset.editor ?? '' }
+    })
+  const before = await editorIdentity()
+  await page.evaluate((id) => document.querySelector(`#center-surface [data-search-row="${id}"] .search-row-select`).click(), otherId)
+  await page.waitForTimeout(200)
+  const switched = await page.evaluate((id) => ({
+    previewBlock: document.querySelector('#center-surface .search-face-preview .blk[data-block-id]')?.dataset.blockId ?? '',
+    selected: [...document.querySelectorAll('#center-surface .search-row')].filter((e) => e.dataset.selected === '1').map((e) => e.dataset.searchRow),
+    want: id,
+  }), otherId)
+  assert(switched.previewBlock === otherId, `点另一行 ⇒ 右列换成那一块：${JSON.stringify(switched)}`)
+  assert(switched.selected.length === 1 && switched.selected[0] === otherId, `选中态跟着走：${JSON.stringify(switched)}`)
+  const after = await editorIdentity()
+  assert(
+    before.has && after.has && before.editor === after.editor,
+    `切换选中**不重建编辑器**（重建一次就丢一次撤销栈与选区）：${JSON.stringify({ before, after })}`,
   )
 
   // kind 去重：再展开一次不产生第二张搜索 tab
@@ -19922,17 +20021,18 @@ await check('T234 ⌘F 浮层「展开为面板」⇒ 中心搜索 tab：词随�
   const axisAfterDown = await page.evaluate(() => document.body.dataset.axis ?? '')
   assert(axisAfterDown === '', `Esc 退档：${axisAfterDown}`)
 
-  // 在面上点结果 ＝ 导航：终点面让位（tab 摘掉），导航落到块；esc 档位无关
-  await page.evaluate((id) => document.querySelector(`#center-surface [data-search-row="${id}"] .search-row-open`).click(), probeId)
-  await page.waitForTimeout(200)
+  // 行尾「打开」＝ 导航：终点面让位（tab 摘掉），导航落到块；esc 档位无关
+  await page.evaluate((id) => document.querySelector(`#center-surface [data-search-row="${id}"] .search-row-goto`).click(), probeId)
+  await page.waitForTimeout(250)
   now = await face()
   assert(!now.surfaceVisible, '导航 ⇒ 编辑器回来')
+  assert(now.faceAttr === '', `离开搜索面 ⇒ 外框不再标 face（否则外框一直不滚）：${now.faceAttr}`)
   assert(!now.tabs.some((t) => t.title === '搜索'), `导航离开终点面 ＝ 关闭它：${JSON.stringify(now.tabs)}`)
   const onProbe = await page.evaluate(() => window.__qua.snapshot().activeId)
   assert(onProbe === probeId, `导航应落到探针块：${onProbe}`)
 
   await ctx.close()
-  return '展开带词、命中一致、kind 去重、导航让位'
+  return '展开带词、两列同屏、左列只读、切行换预览、kind 去重、导航让位'
 })
 
 await check('T235 晋升为查询块：{text} spec 与手建逐字节同、落森林顶层、走打开路由、一次 ⌘Z 回滚', async () => {
@@ -20293,6 +20393,148 @@ await check('T240 快速筛选（引用栏）：大纲筛行；切到表格是�
 
   await ctx.close()
   return `引用栏：包含一页→抬头与大纲同减；表格看法同一份 chips（1 行）；摘空＝无筛选；undo/命令/落盘零变化`
+})
+
+await check('T241 搜索面右预览：就地编辑落盘、Enter 建子块并看得见、↑↓ 换选中不重建编辑器、⌘↵ 打开、离开后活动编辑器回到正文', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const probeId = await plantProbe(page, '预览编辑探针PQR')
+  assert(probeId, '前置：探针块要建出来')
+  // 第二条同词命中：用来验「↑↓ 换选中」与「打开落到选中那块」
+  const secondId = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    return ed.insertBlockAfter(ed.doc.roots[0].id, '预览编辑探针PQR 第二条')
+  })
+  assert(secondId && secondId !== probeId, `前置：要有第二条命中：${secondId}`)
+
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
+  await page.fill('.search-face-input', '预览编辑探针PQR')
+  await page.waitForFunction(() => document.querySelectorAll('#center-surface [data-search-row]').length >= 2, null, { timeout: 3000 })
+  await page.waitForTimeout(250)
+
+  const state = () =>
+    page.evaluate(() => ({
+      rows: [...document.querySelectorAll('#center-surface [data-search-row]')].map((e) => e.dataset.searchRow),
+      selected: [...document.querySelectorAll('#center-surface .search-row')].filter((e) => e.dataset.selected === '1').map((e) => e.dataset.searchRow),
+      previewBlocks: [...document.querySelectorAll('#center-surface .search-face-preview .blk[data-block-id]')].map((e) => e.dataset.blockId),
+      editor: document.querySelector('#center-surface .search-face-preview-editor')?.dataset.editor ?? '',
+      focusInPreview: Boolean(document.querySelector('#center-surface .search-face-preview')?.contains(document.activeElement)),
+      activeEditorIsMain: window.__qua.activeEditor() === window.__qua.__editor,
+      surfaceVisible: !document.getElementById('center-surface').hidden,
+    }))
+
+  // 前置：首条选中、预览就是它
+  let now = await state()
+  const first = now.selected[0]
+  assert(first !== '' && now.previewBlocks[0] === first, `前置：右列画的是选中的那一块：${JSON.stringify(now)}`)
+
+  // ① 就地编辑：点预览正文 → 打字 → 模型/落盘变，**左列表不重排**
+  const box = await page.evaluate(() => {
+    const tx = document.querySelector('#center-surface .search-face-preview .blk[data-block-id] .tx')
+    if (!tx) return null
+    const r = tx.getBoundingClientRect()
+    return { x: r.x + 3, y: r.y + r.height / 2 }
+  })
+  assert(box, '前置：预览里要有可点的正文')
+  await page.mouse.click(box.x, box.y)
+  await page.waitForTimeout(120)
+  const orderBefore = now.rows
+  await page.keyboard.type('X')
+  await page.waitForTimeout(350)
+  const edited = await page.evaluate((id) => {
+    const b = window.__qua.allBlocks().find((x) => x.id === id)
+    const rowText = document.querySelector(`#center-surface [data-search-row="${id}"] .search-row-text`)?.textContent ?? ''
+    return {
+      text: b?.text ?? '',
+      ops: window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id })),
+      rowText,
+      focusInPreview: Boolean(document.querySelector('#center-surface .search-face-preview')?.contains(document.activeElement)),
+      caretBlock: window.__qua.activeEditor()?.sel?.aBlock ?? '',
+    }
+  }, first)
+  assert(edited.text.includes('X'), `预览里打的字要进模型：${JSON.stringify(edited)}`)
+  assert(
+    edited.ops.some((o) => o.e === 'block' && o.op === 'upsert' && o.id === first),
+    `编辑走同一条写路径（产出这一块的 op ⇒ 会落盘、进索引、可撤销）：${JSON.stringify(edited.ops)}`,
+  )
+  assert(edited.rowText.includes('X'), `左选中行按 id 局部更新片段（左右不矛盾）：${JSON.stringify(edited)}`)
+  assert(edited.focusInPreview && edited.caretBlock === first, `连打时焦点留在预览里：${JSON.stringify(edited)}`)
+  now = await state()
+  assert(
+    JSON.stringify(now.rows) === JSON.stringify(orderBefore),
+    `预览编辑**不重跑搜索**（列表顺序不动）：${JSON.stringify(orderBefore)} vs ${JSON.stringify(now.rows)}`,
+  )
+
+  // ② Enter 拆根：右半成**首个子块**并展开 ⇒ 屏幕上看得见（不传 viewRootId 就是为了这一条）
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(350)
+  const split = await page.evaluate((id) => {
+    const b = window.__qua.__editor.store.find(id)
+    return {
+      self: b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '',
+      childIds: (b?.children ?? []).filter((c) => !c.deleted).map((c) => c.id),
+      previewBlocks: [...document.querySelectorAll('#center-surface .search-face-preview .blk[data-block-id]')].map((e) => e.dataset.blockId),
+      caretBlock: window.__qua.activeEditor()?.sel?.aBlock ?? '',
+    }
+  }, first)
+  assert(split.childIds.length === 1, `Enter 在预览根上应建出首个子块：${JSON.stringify(split)}`)
+  assert(split.self.trim() === 'X', `根留下光标前的半段：${JSON.stringify(split)}`)
+  assert(
+    split.previewBlocks.includes(split.childIds[0]),
+    `新子块要**当场看得见**（默认折叠由拆块动作展开）：${JSON.stringify(split)}`,
+  )
+  assert(split.caretBlock === split.childIds[0], `光标落到新子块：${JSON.stringify(split)}`)
+
+  // ③ 输入框 ↑↓ 换选中 ⇒ 预览跟着换，**编辑器实例不重建**
+  const editorBefore = now.editor
+  await page.evaluate(() => document.querySelector('.search-face-input').focus())
+  await page.keyboard.press('ArrowDown')
+  await page.waitForTimeout(250)
+  const moved = await state()
+  assert(
+    moved.selected.length === 1 && moved.selected[0] !== first,
+    `↑↓ 换选中（输入框的键归列表）：${JSON.stringify(moved)}`,
+  )
+  assert(moved.previewBlocks[0] === moved.selected[0], `预览跟着选中换：${JSON.stringify(moved)}`)
+  assert(
+    editorBefore !== '' && moved.editor === editorBefore,
+    `换选中只换 roots，不重建编辑器（重建一次丢一次撤销栈与选区）：${editorBefore} vs ${moved.editor}`,
+  )
+
+  // ④ 选中的块被删掉 ⇒ 那一行按 id 收掉、选中回落到还活着的一条、预览跟着换
+  const victim = moved.selected[0]
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), victim)
+  await page.evaluate(() => window.__qua.invoke('core.editor/delete-block', {}, 'api'))
+  await page.waitForTimeout(500)
+  const afterDelete = await state()
+  assert(
+    !afterDelete.rows.includes(victim),
+    `删掉选中块 ⇒ 左列表按 id 收掉那一行（不是等下一次刷新）：${JSON.stringify(afterDelete)}`,
+  )
+  assert(
+    afterDelete.selected.length === 1 && afterDelete.selected[0] !== victim,
+    `选中回落到还活着的一条（不留下「选中的是一块已被删的」）：${JSON.stringify(afterDelete)}`,
+  )
+  assert(
+    afterDelete.previewBlocks[0] === afterDelete.selected[0] && afterDelete.previewBlocks[0] !== victim,
+    `预览跟着回落到新选中那条：${JSON.stringify(afterDelete)}`,
+  )
+
+  // ⑤ 输入框 ⌘↵ ＝ 在主编辑器打开选中那块（浮层仍是裸 ↵ 打开）
+  const target = afterDelete.selected[0]
+  await page.evaluate(() => document.querySelector('.search-face-input').focus())
+  await page.keyboard.press(kbd('mod+Enter'))
+  await page.waitForTimeout(300)
+  now = await state()
+  assert(!now.surfaceVisible, `⌘↵ 导航离开搜索面：${JSON.stringify(now)}`)
+  const landed = await page.evaluate(() => window.__qua.snapshot().activeId)
+  assert(landed === target, `⌘↵ 落到选中的那一块：${landed} vs ${target}`)
+
+  // ⑥ 离开之后活动编辑器回到正文（预览编辑器不能继续占着键位）
+  assert(now.activeEditorIsMain, '离开搜索面后 `ed` 回到正文（否则键位会打到一张已经拆掉的面）')
+
+  await ctx.close()
+  return '就地编辑落盘、Enter 子块可见、↑↓ 换选中不重建、删块回落、⌘↵ 打开、离开回正文'
 })
 
 /**

@@ -75,6 +75,8 @@ export function setupSurface(deps: SurfaceDeps) {
       searchFace = null
       el.hidden = true
       el.replaceChildren()
+      // 外框的「这一面要不要整面滚」由面自己说（搜索面是主从布局，左右各自滚）
+      delete el.dataset.face
       chrome.scrollEl.hidden = false
       return
     }
@@ -88,17 +90,27 @@ export function setupSurface(deps: SurfaceDeps) {
       return
     }
     el.replaceChildren(body)
+    if (current.kind === 'utility') el.dataset.face = current.face
+    else delete el.dataset.face
     el.hidden = false
     chrome.scrollEl.hidden = true
+    /**
+     * **身体接进文档之后**才让组件建编辑器。
+     *
+     * `BlockEditor` 构造时就渲染并量 DOM（行高、选区、折叠几何都从容器现读）——
+     * 在游离容器上量出来的东西是错的，而这类错不报错，只表现为「光标落在错的地方」。
+     */
+    if (current.kind === 'utility' && current.face === 'search') searchFace?.mount()
   }
 
-  /** 库变了 ⇒ 当前这张面重画。派生面身体现造最便宜；搜索面重跑一次当前词（结果随库变） */
+  /**
+   * 库变了 ⇒ 当前这张面重画。派生面身体现造最便宜；**搜索面不重跑**——
+   * 它的右列是一台真编辑器，每敲一个字都是一次库变化，重跑会重排列表、打断正在输入的那一行。
+   * 搜索面的「刷新」是面上的显式动作（`SearchFace.rerun`），不由库变化触发。
+   */
   function refreshIfShown(): void {
     if (current === null) return
-    if (current.kind === 'utility' && current.face === 'search') {
-      searchFace?.rerun()
-      return
-    }
+    if (current.kind === 'utility' && current.face === 'search') return
     render()
   }
 

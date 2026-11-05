@@ -458,6 +458,30 @@ const surface = setupSurface({
   getChrome: () => chrome,
   searchDeps: () => ({
     kb,
+    /**
+     * 预览是一台**真编辑器**：它读同一份 store、走同一个写入口、接同一份事件表
+     * （右键块菜单 / `#`·`@` 补全 / 引用跳转 / 撞名提示都在里面）。
+     * 这些依赖用闭包/取值函数——`run`／`scheduleSave` 在本节之后才装配（见文件顺序）。
+     */
+    store: blocks,
+    write: editorRun(run, () => ed),
+    wire: (editor, change) => wireViewEditor(editor, change, 'surface'),
+    onFocus: (editor) => {
+      ed = editor
+      scheduleBadge()
+    },
+    onDispose: (editor) => {
+      if (ed !== editor) return
+      ed = mainEd
+      scheduleBadge()
+    },
+    // 预览里编辑：落盘、刷角标与 tab 标题。**不重跑搜索**（重跑会重排列表、打断这一行的输入）
+    onChange: () => {
+      syncSections()
+      scheduleSave()
+      scheduleTabs()
+      scheduleBadge()
+    },
     // 引擎现取：索引状态会变（ready 才信 FTS，否则扫描降级——面自己把降级说明白）
     query: (text, limit) => (search ?? { query: async () => ({ hits: [], mode: 'scan' as const }) }).query(text, limit),
     // 行怎么说与 ⌘F 浮层同一份
