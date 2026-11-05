@@ -19504,42 +19504,61 @@ await check('T227 点父块的竖线：查询块（无 children、有身体）�
 await check('T228 ⌘P 搜索：输入正文词出结果、命中高亮、↵ 打开、Esc 关闭、无结果说人话', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.keyboard.press(kbd('mod+p'))
-  await page.waitForSelector('.layer-input')
-  await page.waitForFunction(() => document.activeElement?.classList.contains('layer-input'))
-  const head = await page.locator('.layer-head').textContent()
-  assert(head?.includes('扫描'), `web 搜索要标明扫描降级：${head}`)
-  const initial = await page.locator('.layer-empty').textContent()
-  assert(initial?.includes('输入关键词'), `空输入先说怎么开始：${initial}`)
+  // ⌘P 的宿主就是常驻搜索面（compact 形态）：同一个组件、同一台预览
+  await page.waitForSelector('.popover.search-overlay .search-face-input')
+  await page.waitForFunction(() => document.activeElement?.classList.contains('search-face-input'))
+  // 空词＝最近更新（浮层与 tab 是同一份面，不再有「输入关键词」那块独立空屏）
+  const initial = await page.evaluate(() => ({
+    groups: [...document.querySelectorAll('.popover.search-overlay .search-face-group')].map((e) => e.textContent ?? ''),
+    rows: document.querySelectorAll('.popover.search-overlay .search-row').length,
+  }))
+  assert(initial.rows > 0 && initial.groups.includes('最近更新'), `空输入给最近更新：${JSON.stringify(initial)}`)
 
   await page.keyboard.type('内容寻址')
-  await page.waitForSelector('.layer-item')
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('.popover.search-overlay .search-row[data-search-row]')
+      return Boolean(el && el.querySelector('.search-row-text')?.textContent?.includes('内容寻址'))
+    },
+    null,
+    { timeout: 3000 },
+  )
+  // 降级说明：web 没有 SQLite，面自己把「按正文扫描」说出来（不是索引坏了）。
+  // 最近更新不是一次查询，所以这句只在真的查过一次之后才有——读它必须在结果行出来之后。
+  const mode = await page.locator('.popover.search-overlay .search-face-mode').textContent()
+  assert(mode?.includes('扫描'), `web 搜索要标明扫描降级：${mode}`)
+
   const first = await page.evaluate(() => {
-    const el = document.querySelector('.layer-item')
+    const el = document.querySelector('.popover.search-overlay .search-row[data-search-row]')
     return {
-      id: el?.dataset.id ?? '',
-      text: el?.textContent ?? '',
-      marks: el?.querySelectorAll('mark').length ?? 0,
+      id: el?.dataset.searchRow ?? '',
+      text: el?.querySelector('.search-row-text')?.textContent ?? '',
+      marks: el?.querySelectorAll('.search-row-text mark').length ?? 0,
     }
   })
-  assert(first.id.startsWith('search/'), `结果行带块身份：${first.id}`)
+  assert(first.id !== '' && !first.id.startsWith('search/'), `结果行带块身份（不是合成行）：${first.id}`)
   assert(first.text.includes('内容寻址'), `结果片段包含查询词：${JSON.stringify(first.text)}`)
   assert(first.marks > 0, '命中词在片段里高亮')
-  const target = first.id.slice('search/'.length)
+  const target = first.id
   await page.keyboard.press('Enter')
   await page.waitForTimeout(250)
-  assert(!(await page.evaluate(() => Boolean(document.querySelector('.layer')))), '选中之后浮层关闭')
+  assert(!(await page.evaluate(() => Boolean(document.querySelector('.popover.search-overlay')))), '选中之后浮层关闭')
   const active = await page.evaluate(() => window.__qua.snapshot().activeId)
   assert(active === target, `↵ 打开的是这一条（不是「有反应但没换块」）：${active} vs ${target}`)
 
   await page.keyboard.press(kbd('mod+p'))
-  await page.waitForSelector('.layer-input')
+  await page.waitForSelector('.popover.search-overlay .search-face-input')
   await page.keyboard.type('不存在的高频词xyz')
-  await page.waitForFunction(() => document.querySelector('.layer-empty')?.textContent?.includes('没有匹配项'))
+  await page.waitForFunction(
+    () => document.querySelector('.popover.search-overlay .search-face-note')?.textContent?.includes('没有匹配项'),
+    null,
+    { timeout: 3000 },
+  )
   await page.keyboard.press('Escape')
   await page.waitForTimeout(120)
-  assert(!(await page.evaluate(() => Boolean(document.querySelector('.layer')))), 'Esc 关闭搜索')
+  assert(!(await page.evaluate(() => Boolean(document.querySelector('.popover.search-overlay')))), 'Esc 关闭搜索')
   await ctx.close()
-  return `空态提示、命中高亮 ${first.marks} 处、↵ 打开 ${target.slice(-6)}、无结果与 Esc 都走通`
+  return `最近更新空态、命中高亮 ${first.marks} 处、↵ 打开 ${target.slice(-6)}、无结果与 Esc 都走通`
 })
 
 /* -------------------------------------------------------------- 聚焦与段尾槽 */
@@ -19880,19 +19899,24 @@ await check('T234 ⌘P 浮层「展开为面板」⇒ 中心搜索 tab：词带�
   })
   assert(secondId && secondId !== probeId, `前置：要有第二条命中：${secondId}`)
 
-  // ⌘P 浮层：出结果 ＋「展开为面板」行
+  // ⌘P 浮层：出结果 ＋「展开为面板」按钮（有命中才出现）
   await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
-  await page.fill('.layer-input', '探针XYZ')
-  await page.waitForFunction(() => [...document.querySelectorAll('.layer-item')].some((e) => e.dataset.id === 'search/expand'), null, { timeout: 3000 })
-  const overlayIds = await page.evaluate(() =>
-    [...document.querySelectorAll('.layer-item')]
-      .map((e) => e.dataset.id)
-      .filter((id) => id.startsWith('search/') && id !== 'search/expand'),
+  await page.fill('.popover.search-overlay .search-face-input', '探针XYZ')
+  await page.waitForFunction(
+    () => {
+      const b = document.querySelector('.popover.search-overlay .search-face-expand')
+      return Boolean(b) && !b.hidden
+    },
+    null,
+    { timeout: 3000 },
   )
-  assert(overlayIds.includes(`search/${probeId}`), `浮层应命中探针块：${JSON.stringify(overlayIds)}`)
+  const overlayIds = await page.evaluate(() =>
+    [...document.querySelectorAll('.popover.search-overlay .search-row[data-search-row]')].map((e) => e.dataset.searchRow),
+  )
+  assert(overlayIds.includes(probeId), `浮层应命中探针块：${JSON.stringify(overlayIds)}`)
 
   // 展开 ⇒ 工具面 tab（kind 去重）；词随打开带过去；面内命中与浮层同一批
-  await page.locator('.layer-item[data-id="search/expand"]').click()
+  await page.evaluate(() => document.querySelector('.popover.search-overlay .search-face-expand').click())
   await page.waitForTimeout(250)
   const face = () =>
     page.evaluate(() => ({
@@ -19956,6 +19980,16 @@ await check('T234 ⌘P 浮层「展开为面板」⇒ 中心搜索 tab：词带�
     `换词之后选中的是**第一条**（不继承上一份列表的选中）：selected=${JSON.stringify(layout.selected)} rows[0]=${now.rows[0]}`,
   )
   assert(layout.previewBorderLeft !== '0px', `右列有左边框（分隔归边框，不加第二种分隔件）：${layout.previewBorderLeft}`)
+  // 宽档（≥900）：列表在左、预览在右，同一条水平带（不是「上下堆叠」）
+  const split = await page.evaluate(() => {
+    const l = document.querySelector('#center-surface .search-face-list')?.getBoundingClientRect()
+    const p = document.querySelector('#center-surface .search-face-preview')?.getBoundingClientRect()
+    return l && p ? { listRight: l.right, prevLeft: p.left, top: l.top, prevTop: p.top } : null
+  })
+  assert(
+    split && split.prevLeft >= split.listRight - 1 && Math.abs(split.top - split.prevTop) < 2,
+    `≥900 是左右分栏：${JSON.stringify(split)}`,
+  )
 
   /**
    * **公共祖先只说一次**：这批命中整批来自同一处时，`住哪` 提进分组标题、行里不再重复。
@@ -19980,7 +20014,16 @@ await check('T234 ⌘P 浮层「展开为面板」⇒ 中心搜索 tab：词带�
    * 会让「点了没反应」，而那不报错。
    */
   await page.setViewportSize({ width: 820, height: 900 })
-  await page.waitForTimeout(250)
+  // 按几何条件等（不是固定等待）：媒体查询生效与重排都落在这一条判据里
+  await page.waitForFunction(
+    () => {
+      const l = document.querySelector('#center-surface .search-face-list')?.getBoundingClientRect()
+      const p = document.querySelector('#center-surface .search-face-preview')?.getBoundingClientRect()
+      return Boolean(l && p && l.bottom <= p.top + 1 && Math.abs(p.width - l.width) < 2)
+    },
+    null,
+    { timeout: 3000 },
+  )
   const stacked = await page.evaluate(() => {
     const list = document.querySelector('#center-surface .search-face-list')
     const prev = document.querySelector('#center-surface .search-face-preview')
@@ -20004,7 +20047,16 @@ await check('T234 ⌘P 浮层「展开为面板」⇒ 中心搜索 tab：词带�
   )
   assert(stacked.borderTop !== '0px', `堆叠时分隔改到上边：${JSON.stringify(stacked)}`)
   await page.setViewportSize({ width: 1440, height: 900 })
-  await page.waitForTimeout(150)
+  // 切回宽档也按同一条判据等（不是「resize 之后就回不去了」）
+  await page.waitForFunction(
+    () => {
+      const l = document.querySelector('#center-surface .search-face-list')?.getBoundingClientRect()
+      const p = document.querySelector('#center-surface .search-face-preview')?.getBoundingClientRect()
+      return Boolean(l && p && p.left >= l.right - 1)
+    },
+    null,
+    { timeout: 3000 },
+  )
 
   // 切换左行 ⇒ 预览跟着换（同一台编辑器，换的是 roots）
   const otherId = now.rows.find((id) => id !== layout.selected[0])
@@ -20032,9 +20084,16 @@ await check('T234 ⌘P 浮层「展开为面板」⇒ 中心搜索 tab：词带�
 
   // kind 去重：再展开一次不产生第二张搜索 tab
   await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
-  await page.fill('.layer-input', '探针XYZ')
-  await page.waitForFunction(() => [...document.querySelectorAll('.layer-item')].some((e) => e.dataset.id === 'search/expand'), null, { timeout: 3000 })
-  await page.locator('.layer-item[data-id="search/expand"]').click()
+  await page.fill('.popover.search-overlay .search-face-input', '探针XYZ')
+  await page.waitForFunction(
+    () => {
+      const b = document.querySelector('.popover.search-overlay .search-face-expand')
+      return Boolean(b) && !b.hidden
+    },
+    null,
+    { timeout: 3000 },
+  )
+  await page.evaluate(() => document.querySelector('.popover.search-overlay .search-face-expand').click())
   await page.waitForTimeout(150)
   now = await face()
   assert(now.tabs.filter((t) => t.title === '搜索').length === 1, `同一张面全局一张 tab：${JSON.stringify(now.tabs)}`)
@@ -20982,10 +21041,212 @@ await check('T246 搜索面挂→卸→再挂幂等；compact 只收 tab 专属�
 })
 
 /**
- * **判定必须在所有用例之后**：这一段曾经写在中途，之后新增的用例（T206 起）即使红了
- * 也不会进 `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。
- * 新增用例一律加在本段**之前**。
+ * **T247：两面同屏。**
+ *
+ * tab 搜索面与 ⌘P 浮层可以同时存在，且它们各自有一台 `PreviewPane`／一条高亮 key。
+ * 判据必须落在**同屏那一刻**的真实产物上（高亮 key 集合、两份编辑器 DOM），
+ * 而不是「先开一面、关掉、再开另一面」——后者永远测不到互踩。
  */
+await check('T247 同屏两面：tab 搜索面 ＋ ⌘P 浮层高亮不互踩、编辑器两份、关浮层后 tab 仍能定位', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const probeId = await plantProbe(page, '双面探针QRS')
+  assert(probeId, '前置：探针块要建出来')
+
+  // ① 先开常驻面（tab），按同词选中并高亮
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
+  await page.fill('#center-surface .search-face-input', '双面探针QRS')
+  await page.waitForFunction(() => document.querySelectorAll('#center-surface [data-search-row]').length > 0, null, { timeout: 3000 })
+  await page.waitForFunction(() => Boolean(CSS.highlights?.has('search-match')), null, { timeout: 3000 })
+
+  // ② 再开浮层：两层同屏，各用各的 key
+  await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
+  await page.fill('.popover.search-overlay .search-face-input', '双面探针QRS')
+  await page.waitForFunction(() => Boolean(CSS.highlights?.has('search-match-overlay')), null, { timeout: 3000 })
+  const both = await page.evaluate((id) => ({
+    keys: [...CSS.highlights.keys()],
+    editors: [...document.querySelectorAll('.search-face-preview-editor')].map((e) => ({
+      inOverlay: Boolean(e.closest('.popover.search-overlay')),
+      hasProbe: Boolean(e.querySelector(`.blk[data-block-id="${id}"]`)),
+    })),
+  }), probeId)
+  assert(
+    both.keys.includes('search-match') && both.keys.includes('search-match-overlay'),
+    `两面各一条高亮 key（同屏不许互删）：${JSON.stringify(both.keys)}`,
+  )
+  assert(both.editors.length === 2, `两面各一台预览（是两份 DOM，不是同一个容器）：${JSON.stringify(both.editors)}`)
+  assert(
+    both.editors.every((e) => e.hasProbe) && both.editors.some((e) => e.inOverlay) && both.editors.some((e) => !e.inOverlay),
+    `两份预览都画到了命中的那一块：${JSON.stringify(both.editors)}`,
+  )
+
+  // ③ 关浮层：只收它自己那条 key，tab 仍亮、仍能定位（命中落在预览可视区内）
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('.popover.search-overlay'), null, { timeout: 3000 })
+  const after = await page.evaluate(() => {
+    const prev = document.querySelector('#center-surface .search-face-preview')
+    const box = prev?.getBoundingClientRect()
+    const tx = prev?.querySelector('.blk .tx')
+    let hit = null
+    if (tx) {
+      const walker = document.createTreeWalker(tx, NodeFilter.SHOW_TEXT)
+      while (walker.nextNode()) {
+        const n = walker.currentNode
+        const at = (n.textContent ?? '').indexOf('双面探针QRS')
+        if (at >= 0) {
+          const r = document.createRange()
+          r.setStart(n, at)
+          r.setEnd(n, at + '双面探针QRS'.length)
+          hit = r.getBoundingClientRect()
+          break
+        }
+      }
+    }
+    return {
+      keys: [...(CSS.highlights?.keys() ?? [])],
+      tabPreview: Boolean(prev && tx),
+      visible: hit && box ? hit.top >= box.top - 1 && hit.bottom <= box.bottom + 1 : null,
+    }
+  })
+  assert(after.keys.includes('search-match'), `关浮层不许删掉 tab 的高亮 key：${JSON.stringify(after.keys)}`)
+  assert(!after.keys.includes('search-match-overlay'), `浮层自己的 key 要随面收起：${JSON.stringify(after.keys)}`)
+  assert(after.tabPreview && after.visible === true, `关浮层后 tab 仍能定位到命中：${JSON.stringify(after)}`)
+
+  await ctx.close()
+  return '两面高亮各一条 key、预览两份、关浮层后 tab 高亮与定位都在'
+})
+
+/**
+ * **T248：浮层右列只读（阶段 A）。**
+ *
+ * `contenteditable=false` 只是其中一半：待办勾选／拖拽／drop／右键菜单都挂在宿主上，
+ * 照样能写模型。这一条钉「打字进不去 + 这几类入口都不出菜单」。
+ */
+await check('T248 浮层右列只读：宿主不可编辑、打字/右键都不写模型、焦点留在搜索框', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const probeId = await plantProbe(page, '只读探针DEF')
+  assert(probeId, '前置：探针块要建出来')
+
+  await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
+  await page.fill('.popover.search-overlay .search-face-input', '只读探针DEF')
+  await page.waitForFunction(() => Boolean(document.querySelector('.popover.search-overlay .search-face-preview .blk')), null, { timeout: 3000 })
+
+  const before = await page.evaluate((id) => ({
+    readOnly: document.querySelector('.popover.search-overlay .search-face-preview')?.dataset.readonly ?? '',
+    editable: document.querySelector('.popover.search-overlay .search-face-preview-editor')?.contentEditable ?? '',
+    text: window.__qua.allBlocks().find((b) => b.id === id)?.text ?? '',
+  }), probeId)
+  assert(before.readOnly === '1', `预览根要标只读：${JSON.stringify(before)}`)
+  assert(before.editable === 'false', `宿主不可编辑（contenteditable=false）：${JSON.stringify(before)}`)
+
+  // 强行聚焦预览宿主再打字：模型一个字节都不许变，焦点也不许停在预览里
+  await page.evaluate(() => {
+    const host = document.querySelector('.popover.search-overlay .search-face-preview-editor')
+    host.setAttribute('tabindex', '-1')
+    host.focus()
+  })
+  await page.keyboard.type('ZZZ')
+  await page.waitForTimeout(200)
+  const after = await page.evaluate((id) => ({
+    text: window.__qua.allBlocks().find((b) => b.id === id)?.text ?? '',
+    focusInPreview: Boolean(document.activeElement?.closest?.('.search-face-preview-editor')),
+  }), probeId)
+  assert(after.text === before.text, `只读预览里的打字不许进模型：${JSON.stringify({ before: before.text, after: after.text })}`)
+  assert(after.focusInPreview === false, `焦点不许停在只读预览里：${JSON.stringify(after)}`)
+
+  // 右键不弹块菜单（只读预览没有能删块/改类型的菜单）
+  const menu = await page.evaluate(() => {
+    const tx = document.querySelector('.popover.search-overlay .search-face-preview .blk .tx')
+    tx?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))
+    return document.querySelectorAll('.layer').length
+  })
+  assert(menu === 0, `只读预览不该弹块菜单：${menu}`)
+  assert(
+    await page.evaluate((id) => window.__qua.allBlocks().find((b) => b.id === id)?.text ?? '', probeId) === before.text,
+    '右键之后模型仍然没变',
+  )
+
+  await ctx.close()
+  return '宿主不可编辑、打字不进模型、焦点不在预览、右键不弹菜单'
+})
+
+/**
+ * **T249：两档布局（≥900 分栏 / <900 堆叠）。**
+ *
+ * 用真实矩形判两档，并要求**切回去**也能恢复分栏——「resize 一次就回不去」的写法
+ * 通常只在单向上被验过。等待全部走几何判据，不用固定等待。
+ */
+await check('T249 搜索面两档布局：≥900 左右分栏、<900 上下堆叠、切回分栏', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await plantProbe(page, '布局探针GHI')
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
+  await page.fill('#center-surface .search-face-input', '布局探针GHI')
+  await page.waitForFunction(() => Boolean(document.querySelector('#center-surface .search-face-preview .blk')), null, { timeout: 3000 })
+
+  const rects = () =>
+    page.evaluate(() => {
+      const l = document.querySelector('#center-surface .search-face-list')?.getBoundingClientRect()
+      const p = document.querySelector('#center-surface .search-face-preview')?.getBoundingClientRect()
+      const prev = document.querySelector('#center-surface .search-face-preview')
+      return l && p
+        ? {
+            list: { left: l.left, right: l.right, top: l.top, bottom: l.bottom, w: l.width },
+            prev: { left: p.left, right: p.right, top: p.top, bottom: p.bottom, w: p.width },
+            borderLeft: prev ? getComputedStyle(prev).borderLeftWidth : '',
+            borderTop: prev ? getComputedStyle(prev).borderTopWidth : '',
+          }
+        : null
+    })
+
+  // ≥900：左右分栏
+  await page.setViewportSize({ width: 960, height: 900 })
+  await page.waitForFunction(
+    () => {
+      const l = document.querySelector('#center-surface .search-face-list')?.getBoundingClientRect()
+      const p = document.querySelector('#center-surface .search-face-preview')?.getBoundingClientRect()
+      return Boolean(l && p && p.left >= l.right - 1)
+    },
+    null,
+    { timeout: 3000 },
+  )
+  const wide = await rects()
+  assert(wide?.borderLeft !== '0px' && wide?.borderTop === '0px', `宽档用左边框分隔：${JSON.stringify(wide)}`)
+
+  // <900：上下堆叠
+  await page.setViewportSize({ width: 880, height: 900 })
+  await page.waitForFunction(
+    () => {
+      const l = document.querySelector('#center-surface .search-face-list')?.getBoundingClientRect()
+      const p = document.querySelector('#center-surface .search-face-preview')?.getBoundingClientRect()
+      return Boolean(l && p && l.bottom <= p.top + 1 && Math.abs(p.width - l.width) < 2)
+    },
+    null,
+    { timeout: 3000 },
+  )
+  const narrow = await rects()
+  assert(narrow?.borderTop !== '0px' && narrow?.borderLeft === '0px', `窄档改成上边框：${JSON.stringify(narrow)}`)
+
+  // 切回宽档：同一条判据反向成立
+  await page.setViewportSize({ width: 960, height: 900 })
+  await page.waitForFunction(
+    () => {
+      const l = document.querySelector('#center-surface .search-face-list')?.getBoundingClientRect()
+      const p = document.querySelector('#center-surface .search-face-preview')?.getBoundingClientRect()
+      return Boolean(l && p && p.left >= l.right - 1)
+    },
+    null,
+    { timeout: 3000 },
+  )
+  const back = await rects()
+  assert(back?.borderLeft !== '0px' && back?.borderTop === '0px', `切回宽档仍分栏：${JSON.stringify(back)}`)
+
+  await ctx.close()
+  return '960 分栏、880 堆叠、再切回 960 分栏'
+})
+
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

@@ -13,10 +13,24 @@ export interface SearchFaceChrome {
   /** 「晋升为查询块」——tab 专属；紧凑形态不摆（那一步要建内容，属于面板/常驻面） */
   promote: boolean
   /**
-   * 右列预览。**紧凑形态也必须留着**：藏了它就等于「点了行没反应」
+   * 右列预览。两种形态都留着：藏了它就等于「点了行没反应」
    * （全部结果行只剩只读片段，没有任何编辑出口）。
    */
   preview: boolean
+  /** 「展开为面板」——紧凑形态专属：浮层是一次性快入口，要常驻就把词带进 tab */
+  expand: boolean
+  /** 裸 ↵ 的落点：tab 是「进右列预览」，紧凑形态是「打开选中的那条」（浮层选中即走） */
+  bareEnterOpens: boolean
+  /**
+   * 右列是不是只读。**紧凑形态在阶段 A 只给看**：浮层是覆盖层，命令键位被 `layerOpen()`
+   * 停掉，可编辑预览会变成「能进不能出」；开编辑是阶段 B 的事。
+   */
+  previewReadOnly: boolean
+  /**
+   * 命中高亮的命名空间。两面可同屏（tab 搜索面 + ⌘P 浮层），共用一条 key 会让
+   * 任一面收起时把另一面的高亮一起删掉。tab 沿用 `search-match`（既有断言钉着它）。
+   */
+  highlightKey: string
 }
 
 /**
@@ -25,5 +39,21 @@ export interface SearchFaceChrome {
  * `preview` 恒为真，写出来是给断言与读者一个明确口径，而不是省略字段。
  */
 export function faceChrome(compact: boolean): SearchFaceChrome {
-  return { promote: !compact, preview: true }
+  return compact
+    ? {
+        promote: false,
+        preview: true,
+        expand: true,
+        bareEnterOpens: true,
+        previewReadOnly: true,
+        highlightKey: 'search-match-overlay',
+      }
+    : {
+        promote: true,
+        preview: true,
+        expand: false,
+        bareEnterOpens: false,
+        previewReadOnly: false,
+        highlightKey: 'search-match',
+      }
 }
