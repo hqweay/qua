@@ -3,15 +3,14 @@
  *
  * 形状是**主从布局**：顶部输入行；左列是**只读的命中列表**（`HitView` 片段/住哪/经由），
  * 右列是**当前选中的那一块**，用 `EditableBlock` 画成真正的块。
- * tab 尺寸里右列可直接改；**紧凑尺寸（⌘P 浮层）在阶段 A 只给看**（`faceChrome().previewReadOnly`）——
- * 浮层是覆盖层，命令键位被 `layerOpen()` 停掉，可编辑预览会变成「能进不能出」。
- * 两份尺寸仍是**同一台** `PreviewPane`，只读是宿主的参数，不是第二套实现。
+ * tab 与 **紧凑尺寸（⌘P 浮层）都可编辑**：两份尺寸仍是**同一台** `PreviewPane`，
+ * 只读只是宿主的参数（`faceChrome().previewReadOnly`），不是第二套实现。
  *
  * 为什么不是「整列结果都换成块行」：50 条整块太吵，列表要能扫读；真正要改的只有一块。
  * 为什么不是「每行一台编辑器」：那是 50 个订阅与 50 个重载器，与「一台编辑器 N 个 loader」
  * 相反。所以这里是 **一个 master-detail：左边找、右边改**。
  *
- * 与浮层的分工：浮层是一次性快入口（选中即走）；这里是常驻 tab——
+ * 与浮层的分工：浮层是快入口（可编辑，但它不常驻）；这里是常驻 tab——
  * 词随打开带过来一次（**不做 live 双写**：两边各搜各的，改词不互相追）。
  *
  * 四条动作口径：
@@ -42,6 +41,7 @@ import type { HitView } from '../../app/search/hits.ts'
 import type { SearchHit, SearchResult } from '../../app/search/service.ts'
 import { pickAfterRemoval, pickSelection, sharedHintOf } from './selection.ts'
 import { faceChrome } from './face-chrome.ts'
+import { claimHighlightKey } from './highlight-key.ts'
 import { PreviewPane } from './preview-pane.ts'
 
 /** 输入防抖窗口（ms）：见 `debounce` 字段的取值理由 */
@@ -57,6 +57,12 @@ export interface SearchFaceDeps {
   wire: (editor: BlockEditor, change: (kind: string) => void) => void
   /** 预览获得焦点：装配层把「活动编辑器」切过来（键位走命令层，认的是它） */
   onFocus: (editor: BlockEditor) => void
+  /**
+   * 焦点**离开本面**（整面级：面内的输入框 ↔ 预览之间不算离开）：
+   * 装配层若正把活动编辑器指着本面，要交回。与 `onFocus` 成对维护，
+   * 否则「最后聚焦者胜」会让两个面同屏时活动编辑器停在已经离开的那一面。
+   */
+  onBlur?: (editor: BlockEditor) => void
   /** 搜索面被拆掉：装配层若正把活动编辑器指着预览，要退回正文 */
   onDispose: (editor: BlockEditor) => void
   /** 预览里编辑了模型：落盘、刷角标、刷 tab 标题；**绝不重跑搜索** */
@@ -157,6 +163,8 @@ export class SearchFace {
     this.deps = deps
     // 形态的**唯一**翻译点：构造器里只读这份结果，不再现读 `deps.compact`
     const chrome = faceChrome(deps.compact === true)
+    // 同屏可有多台同类宿主（两个 tab 面/两面 + 第三个宿主）：基名只给第一个，其余派生
+    const highlightKey = claimHighlightKey(chrome.highlightKey)
     this.debounce = new DebouncedInput((value) => this.setTerm(value), SEARCH_INPUT_DEBOUNCE_MS)
     this.root = document.createElement('div')
     this.root.className = 'search-face'
@@ -175,7 +183,7 @@ export class SearchFace {
     this.input.addEventListener('keydown', (e) => {
       // Enter 立即查：别让「打完就按回车」看到的是旧列表
       if (e.key === 'Enter') this.debounce.flush()
-      // `⌘/Ctrl + ↵` ＝ 在主编辑器打开（两个尺寸的差异：浮层是裸 ↵ 打开）
+      // `⌘/Ctrl + ↵` ＝ 在主编辑器打开（两个尺寸同一口径；输入框的裸 ↵ 由 `bareEnterOpens` 定）
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
         e.preventDefault()
         this.openSelected()
@@ -192,9 +200,9 @@ export class SearchFace {
       if (e.key === 'Enter') {
         e.preventDefault()
         /**
-         * 裸 ↵ 的落点由形态决定：
-         *   · tab ⇒ 进右列预览开始编辑；
-         *   · 紧凑（浮层）⇒ 打开选中那条（浮层是「选中即走」的一次性入口）。
+         * 裸 ↵ 只回答**输入框**的落点：`bareEnterOpens` 为真时打开选中那条
+         * （不可编辑的紧凑面）；否则把焦点交给右列预览开始编辑。
+         * **预览里的 ↵ 不经过这里**——那是编辑器自己的结构动作（拆块/合并）。
          * 只认**当前列表就是这个词的结果**：Enter 会先 flush 防抖，而查询是异步的——
          * 不等它对齐就打开，会打开上一份列表里的旧首条。
          */
@@ -299,9 +307,9 @@ export class SearchFace {
       onFocus: (editor) => this.deps.onFocus(editor),
       onDispose: (editor) => this.deps.onDispose(editor),
       returnFocus: () => this.input.focus(),
-      // 阶段 A：浮层的右列只给看；tab 照旧可编辑。只读与高亮命名空间都由 `faceChrome` 定
+      // 两面都可编辑；只读与高亮基名都由 `faceChrome` 定（key 已按本次宿主领过）
       readOnly: chrome.previewReadOnly,
-      highlightKey: chrome.highlightKey,
+      highlightKey,
       noteOf: (id) => {
         const row = this.rows.find((v) => v.blockId === id)
         return row?.source && row.source !== 'content'
@@ -313,6 +321,17 @@ export class SearchFace {
     this.bodyEl.append(this.listEl, this.pane.root)
 
     this.root.append(bar, this.bodyEl)
+
+    /**
+     * **整面级失焦**（不是预览级）：焦点离开 `.search-face` 才把活动编辑器交回。
+     * 面内「输入框 ↔ 预览」来回不算离开——那还是同一面，键位该落在这面的编辑器上。
+     */
+    this.root.addEventListener('focusout', (e) => {
+      const next = e.relatedTarget as Node | null
+      if (next && this.root.contains(next)) return
+      const editor = this.pane.editor
+      if (editor) this.deps.onBlur?.(editor)
+    })
 
     this.subscribeStore()
     this.renderRecents()

@@ -19,16 +19,21 @@ export interface SearchFaceChrome {
   preview: boolean
   /** 「展开为面板」——紧凑形态专属：浮层是一次性快入口，要常驻就把词带进 tab */
   expand: boolean
-  /** 裸 ↵ 的落点：tab 是「进右列预览」，紧凑形态是「打开选中的那条」（浮层选中即走） */
-  bareEnterOpens: boolean
   /**
-   * 右列是不是只读。**紧凑形态在阶段 A 只给看**：浮层是覆盖层，命令键位被 `layerOpen()`
-   * 停掉，可编辑预览会变成「能进不能出」；开编辑是阶段 B 的事。
+   * 输入框裸 ↵ 的落点：`true` ＝打开选中的那条，`false` ＝把焦点交给右列预览。
+   *
+   * ⚠️ 只回答**输入框**的 ↵。预览里的 ↵ 永远归编辑器（拆块／合并），不经过这里——
+   * 两件事共用一条判据会让「开始编辑」和「离开这一屏」互相顶掉。
+   * 只有**不可编辑的紧凑面**才需要 `true`；可编辑之后浮层也走 `false`。
    */
+  bareEnterOpens: boolean
+  /** 右列是不是只读。两种形态都可编辑；留着这个开关是给「只给看」的宿主用 */
   previewReadOnly: boolean
   /**
    * 命中高亮的命名空间。两面可同屏（tab 搜索面 + ⌘P 浮层），共用一条 key 会让
-   * 任一面收起时把另一面的高亮一起删掉。tab 沿用 `search-match`（既有断言钉着它）。
+   * 任一面收起时把另一面的高亮一起删掉。
+   * 这里给的是**基名**；真正落到 `CSS.highlights` 的那条 key 由
+   * `./highlight-key.ts` 分配（同屏多个同类宿主也不重名）。
    */
   highlightKey: string
 }
@@ -44,8 +49,8 @@ export function faceChrome(compact: boolean): SearchFaceChrome {
         promote: false,
         preview: true,
         expand: true,
-        bareEnterOpens: true,
-        previewReadOnly: true,
+        bareEnterOpens: false,
+        previewReadOnly: false,
         highlightKey: 'search-match-overlay',
       }
     : {

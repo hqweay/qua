@@ -90,7 +90,8 @@ export function installDispatch(deps: DispatchDeps): DispatchEnv {
     ctx: deps.uiCtx,
     isMac: deps.isMac,
     invoke: (name, args, ctx) => deps.getRegistry().invoke(name, args, 'keymap', ctx).handled,
-    layerOpen: () => deps.layers.anyOpen(),
+    // 覆盖层默认拦命令键；焦点在浮层里的真编辑器时放行（↵/Tab/撤销归编辑器）
+    layerOpen: () => deps.layers.anyOpen() && !deps.layers.allowsEditorKeys(),
     trace: (tr: KeyTrace) => {
       const ed = deps.getEd()
       if (!ed.probe.traced) return
