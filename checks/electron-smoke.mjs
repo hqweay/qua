@@ -368,9 +368,9 @@ await check('E4 窗口尺寸/位置记忆：改了尺寸 → 关窗 → 重开�
   return `${bounds1.width}×${bounds1.height} @ (${bounds1.x},${bounds1.y}) 跨进程重启原样保持；落盘文件 ${join(dir, 'window-state.json')}`
 })
 
-/* ═══════════════════════════════════════════════════ E5 真按键：⌘A / ⌘F */
+/* ═══════════════════════════════════════════════════ E5 真按键：⌘A / ⌘P */
 
-await check('E5 ⌘A 与 ⌘F 的当前行为（①② 的 Electron 现状）', async () => {
+await check('E5 ⌘A 与 ⌘P 的当前行为（①② 的 Electron 现状）', async () => {
   const { app, page } = await launch('hotkeys')
   await page.evaluate(() => window.__qua.quiet(true))
   const snapBefore = await page.evaluate(() => ({
@@ -379,10 +379,10 @@ await check('E5 ⌘A 与 ⌘F 的当前行为（①② 的 Electron 现状）', 
     log: window.__qua.commandLog().length,
   }))
 
-  // ⌘F
+  // ⌘P
   await page.evaluate(() => window.__qua.focus())
   const logBeforeF = await page.evaluate(() => window.__qua.commandLog().length)
-  await page.keyboard.press('Meta+f')
+  await page.keyboard.press('Meta+p')
   await new Promise((r) => setTimeout(r, 250))
   const afterF = await page.evaluate(() => ({
     logDelta: window.__qua.commandLog().length,
@@ -416,7 +416,7 @@ await check('E5 ⌘A 与 ⌘F 的当前行为（①② 的 Electron 现状）', 
     }
   })
 
-  log(`      ⌘F：命令日志增量=${afterF.logDelta}（1＝走 core.search/open）、搜索浮层=${afterF.searchOpen}、DOM 选区="${afterF.domSel}"`)
+  log(`      ⌘P：命令日志增量=${afterF.logDelta}（1＝走 core.search/open）、搜索浮层=${afterF.searchOpen}、DOM 选区="${afterF.domSel}"`)
   log(`      ⌘A：DOM rangeCount=${afterA.rangeCount}、跨 ${afterA.domBlocksSpanned} 个 .blk、DOM 文本长 ${afterA.domTextLen}、锚点在 #editor 内=${afterA.anchorInEditor}`)
   log(`      ⌘A：模型选区=${JSON.stringify(afterA.modelSel)}（仍是单块=${afterA.modelStillOneBlock}）、命令日志增量=${afterA.logDelta}`)
   log(`      起始状态：块数=${snapBefore.blocks}、虚拟化=${snapBefore.virtualize}、已挂 DOM=${snapBefore.domNodes} 节点`)
@@ -457,10 +457,10 @@ await check('E5 ⌘A 与 ⌘F 的当前行为（①② 的 Electron 现状）', 
     `      ⇒ ${deleted.blocks === n1 && deleted.texts.filter((t) => t === '').length === 0 ? '**「全选删除」几乎没生效**：16 块的 DOM 删除被模型丢弃，只剩锚点块被同步' : `模型变成 ${deleted.blocks} 块`}`,
   )
 
-  assert(afterF.logDelta - logBeforeF === 1, '⌘F 应当走 core.search/open（恰好一条命令）')
-  assert(afterF.searchOpen, '⌘F 应当打开搜索浮层（原生菜单没有抢走）')
+  assert(afterF.logDelta - logBeforeF === 1, '⌘P 应当走 core.search/open（恰好一条命令）')
+  assert(afterF.searchOpen, '⌘P 应当打开搜索浮层（原生菜单没有抢走）')
   assert(afterA.rangeCount >= 1 && afterA.domBlocksSpanned > 1, '⌘A 应当产生跨块的 DOM 选区')
-  return `⌘F＝core.search/open（搜索浮层打开、无系统查找 UI）；⌘A＝原生全选（DOM 跨 ${afterA.domBlocksSpanned} 块 / ${afterA.domTextLen} 字），模型选区不变（仍单块）；紧接打字${
+  return `⌘P＝core.search/open（搜索浮层打开、无系统查找 UI）；⌘A＝原生全选（DOM 跨 ${afterA.domBlocksSpanned} 块 / ${afterA.domTextLen} 字），模型选区不变（仍单块）；紧接打字${
     wiped ? '**整篇被覆盖成 1 块**' : '只动被覆盖的那一块'
   }`
 })
@@ -1375,7 +1375,7 @@ await check('E14 每库状态：折叠/槽开关跟着库走；切库与重启�
 })
 
 
-await check('E15 全文检索：索引建好后 ⌘F 可搜、拼音可搜、编辑后增量进索引', async () => {
+await check('E15 全文检索：索引建好后 ⌘P 可搜、拼音可搜、编辑后增量进索引', async () => {
   const { app, page } = await launch('fts')
   /** 等索引**稳定** ready：启动期的 seed 落盘可能把刚建好的索引再作废一次 */
   const stableReady = async (timeout = 30000) => {
@@ -1404,8 +1404,8 @@ await check('E15 全文检索：索引建好后 ⌘F 可搜、拼音可搜、编
     { timeout: 15000 },
   )
 
-  // ⌘F 是真实的「现在开始用」信号：它既打开浮层，也把索引排上。
-  await page.keyboard.press('Meta+f')
+  // ⌘P 是真实的「现在开始用」信号：它既打开浮层，也把索引排上。
+  await page.keyboard.press('Meta+p')
   await page.waitForSelector('.layer-input')
   await page.waitForFunction(() => document.activeElement?.classList.contains('layer-input'))
   await page.keyboard.type('内容寻址')
@@ -1418,8 +1418,8 @@ await check('E15 全文检索：索引建好后 ⌘F 可搜、拼音可搜、编
   }
   await page.keyboard.press('Escape')
 
-  // ① ⌘F 的结果行（上面已经等到）——再验一次身份与高亮
-  await page.keyboard.press('Meta+f')
+  // ① ⌘P 的结果行（上面已经等到）——再验一次身份与高亮
+  await page.keyboard.press('Meta+p')
   await page.waitForSelector('.layer-input')
   await page.waitForFunction(() => document.activeElement?.classList.contains('layer-input'))
   await page.keyboard.type('内容寻址')
@@ -1497,7 +1497,7 @@ await check('E15 全文检索：索引建好后 ⌘F 可搜、拼音可搜、编
   const none = await page.evaluate(() => window.__qua.search.query('绝不存在的检索词xyz', 5))
   assert((none?.hits ?? []).length === 0, `真没有就是空：${JSON.stringify(none)}`)
   await app.close()
-  return `⌘F 出结果并高亮；拼音走 FTS；编辑「${unique}」后增量命中 ${target.slice(-6)}`
+  return `⌘P 出结果并高亮；拼音走 FTS；编辑「${unique}」后增量命中 ${target.slice(-6)}`
 })
 
 /* ═══════════════════════════════════════════════════ 汇总 */

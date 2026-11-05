@@ -198,7 +198,7 @@ export const COMMANDS: CommandDecl[] = [
 
   /* ---- 浮层 ---- */
   { name: 'core.command-palette/show', title: t('cmd.command-palette.show'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), keywords: ['palette', 'command', t('menu.kw.command')], tile: { icon: 'lucide:compass' } },
-  { name: 'core.search/open', title: t('cmd.search.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), keywords: ['search', 'find', 'ctrlf'], tile: { icon: 'lucide:search' } },
+  { name: 'core.search/open', title: t('cmd.search.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), keywords: ['search', 'find', 'ctrlp'], tile: { icon: 'lucide:search' } },
   { name: 'core.menu/block', title: t('cmd.menu.block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), args: { blockId: { type: 'string' } } },
   { name: 'core.menu/slash', title: t('cmd.menu.slash'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer') },
   { name: 'core.layer/close', title: t('cmd.layer.close'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), hidden: true },
