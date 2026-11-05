@@ -85,6 +85,7 @@ import { ViewList } from '../views/view-list.ts'
 import { ViewMindmap } from '../views/view-mindmap.ts'
 import { ViewListTable } from '../views/view-list-table.ts'
 import { ViewTable } from '../views/view-table.ts'
+import { ViewGrouped } from '../views/view-grouped.ts'
 import { mentionDerivedOf, renderMentionField } from '../views/mention-field.ts'
 
 /** 默认看法的临时 id（不落盘：它代表「这一份源没有激活视图」这件事本身） */
@@ -230,8 +231,12 @@ export interface DerivedMode {
   /** 表格列 / 列表字段：**临时构造**，不落盘 */
   columns: ViewColumn[]
   listFields: string[]
+  /** 这一栏的分组键（设备状态；'' ＝ 没分组）。与看法同层：派生栏没有可写的视图配置 */
+  groupBy: string
   /** 切看法写哪（设备状态；由装配层落地） */
   setKind: (kind: DerivedViewKind) => void
+  /** 换分组键写哪（同上：设备状态，不落 KB） */
+  setGroup: (key: string) => void
   /** 表头的只读说明（「指向这一块」这类） */
   explain: string
 }
@@ -388,6 +393,12 @@ export class ViewHost {
   private gallery: ViewGallery | null = null
   private calendar: ViewCalendar | null = null
   private mindmap: ViewMindmap | null = null
+  /** 分组包装（列表／表格带 `groupBy` 时）：段头归它、段身归各 kind 渲染器 */
+  private grouped: ViewGrouped | null = null
+  /** 分组包装当前装的 kind（list ⇄ table 互切要重建段身） */
+  private groupedKind: 'list' | 'table' | null = null
+  /** 这一次 body 实际按哪个分组键画（'' ＝ 未分组）：键变了 body 要重摆 */
+  private renderedGroupKey = ''
   /** 这一屏现在画的是谁：`outline` 或激活视图的 id（变了才换分支） */
   private mode = ''
   private readonly cell: BlockCell
@@ -446,8 +457,12 @@ export class ViewHost {
      * 就会永远说「画着」，而它不报错，只表现为「切了视图，点了没反应」。
      */
     if (deps.owner.kind === 'block') this.els.root.dataset.viewOwner = deps.owner.blockId
-    // 派生栏的抬头由挂载区画（它要说清这一栏是什么）；这一层只借渲染器
-    if (deps.derived) this.els.head.hidden = true
+    /**
+     * 派生栏的抬头由挂载区画（栏名／条数／说明／快速筛选都在那边），这一层只借渲染器
+     * ——但**分组选择**留在这条抬头里：与自定义查询同一颗 select、同一份候选口径，
+     * 单独抄一份到挂载区就是第二份会漂的候选逻辑。条数挂载区已有 ⇒ 藏掉。
+     */
+    if (deps.derived) this.els.count.hidden = true
     this.els.refresh.textContent = t('ui.query.refresh')
     this.els.refresh.addEventListener('click', () => this.refresh())
     this.els.sort.textContent = t('ui.query.sort')
@@ -664,11 +679,13 @@ export class ViewHost {
    */
   private derivedView(): ViewConfig {
     const d = this.deps.derived!
-    if (d.kind === 'list') return { id: 'derived:list', kind: 'list', list: { fields: [...d.listFields] } }
+    const group = d.groupBy ? { groupBy: d.groupBy } : {}
+    if (d.kind === 'list') return { id: 'derived:list', kind: 'list', list: { fields: [...d.listFields] }, ...group }
     return {
       id: 'derived:table',
       kind: 'table',
       table: { columns: d.columns.map((c) => ({ ...c })), ...(this.derivedSort.length > 0 ? { sort: this.derivedSort } : {}) },
+      ...group,
     }
   }
 
@@ -745,14 +762,22 @@ export class ViewHost {
       return
     }
     this.paintChrome(b, view)
+    // 分组键变了不换 mode（同一张视图）：body 得重摆成新分组
+    const groupKey = view && (view.kind === 'list' || view.kind === 'table') ? (view.groupBy ?? '') : ''
+    if (view && groupKey !== this.renderedGroupKey) {
+      this.showBody(view)
+      return
+    }
     if (view?.kind === 'list-table') this.listTable?.render()
-    else if (view?.kind === 'list') this.list?.render()
+    else if (view?.kind === 'list') (this.grouped ?? this.list)?.render()
     else if (view?.kind === 'board') this.board?.render()
     else if (view?.kind === 'gallery') this.gallery?.render()
     else if (view?.kind === 'calendar') this.calendar?.render()
     else if (view?.kind === 'mindmap') this.mindmap?.render()
-    else if (view?.kind === 'table') this.table?.sync()
-    else if (view) this.paintBodyFallback()
+    else if (view?.kind === 'table') {
+      if (this.grouped) this.grouped.render()
+      else this.table?.sync()
+    } else if (view) this.paintBodyFallback()
     else this.render()
   }
 
@@ -933,6 +958,8 @@ export class ViewHost {
     options.push(none)
     for (const [key, n] of [...counts.entries()]
       .filter(([k, n]) => n > 0 && (k === '_tags' || this.deps.fields().some((f) => f.id === k)))
+      // 卡片（看板）的分组列**不支持多值属性**：拖卡写值没有唯一动作——多值去列表/表格分组
+      .filter(([k]) => !(kind === 'board' && isMultiValueKey(k)))
       .sort((a, b) => b[1] - a[1])) {
       const o = document.createElement('option')
       o.value = key
@@ -947,6 +974,11 @@ export class ViewHost {
       this.els.group.value = ''
     }
     this.els.group.onchange = () => {
+      // 派生栏没有可写的视图配置：分组跟看法一样住设备状态，由装配层落
+      if (this.deps.derived) {
+        this.deps.derived.setGroup(this.els.group.value)
+        return
+      }
       this.deps.invoke('core.view/set-group', {
         owner: this.writeOwner,
         viewId: view.id,
@@ -1116,11 +1148,8 @@ export class ViewHost {
      * （点开构建器只会得到一份不属于它的条件）。所以要留下一句话，但不做成按钮。
      */
     if (this.deps.derived) {
-      box.hidden = false
-      const chip = document.createElement('span')
-      chip.className = 'queryview-chip ui-ellipsis'
-      chip.textContent = this.deps.derived.explain
-      box.appendChild(chip)
+      // 只读说明由挂载区的抬头说（栏名旁边那句）；这里再放一枚就是同屏两遍
+      box.hidden = true
       return
     }
     const spec = this.source.kind === 'query' ? this.source.spec : null
@@ -1398,6 +1427,43 @@ export class ViewHost {
     this.syncFoldAll()
     this.els.editor.replaceChildren()
     /**
+     * **分组对记录视图全量生效**：列表与表格带 `groupBy` 时整批交给分组包装——
+     * 「一个值一段」，段头是组名、段身还是那一 kind 自己的渲染器（表格分组＝一个
+     * 属性值一张表）。多值键 fan-out（一块进每个所属组）；「未设置」收没有值的。
+     */
+    const want = view.kind
+    const groupKey = want === 'list' || want === 'table' ? (view.groupBy ?? '') : ''
+    this.renderedGroupKey = groupKey
+    if (groupKey !== '') {
+      if (want !== 'table') {
+        this.table?.dispose()
+        this.table = null
+      }
+      if (want !== 'list') {
+        this.list?.dispose()
+        this.list = null
+      }
+      if (!this.grouped || this.groupedKind !== want) {
+        this.grouped?.dispose()
+        this.grouped = new ViewGrouped({
+          view: () => this.view ?? view,
+          records: () => this.records(),
+          choices: (id) => (id === '_tags' ? this.tagChoices() : this.deps.choices?.(id) ?? []),
+          makeBody: (records) =>
+            want === 'list' ? this.buildList(records, view) : this.buildTable(records, view),
+        })
+        this.groupedKind = want === 'table' ? 'table' : 'list'
+        this.els.table.replaceChildren(this.grouped.root)
+      }
+      this.grouped.render()
+      return
+    }
+    if (this.grouped) {
+      this.grouped.dispose()
+      this.grouped = null
+      this.groupedKind = null
+    }
+    /**
      * 三条渲染器：表格（行＝记录、列＝属性）、结构映射表（表头＝直接子块、一列＝它的孩子）、
      * 记录列表（M3）。它们**不共用**布局：平表有固定行高与窗口化，结构映射表按内容排。
      * 所以按 kind 各建各的实例，切走就 dispose（不藏一台还在订阅的）。
@@ -1406,7 +1472,6 @@ export class ViewHost {
      * 四条渲染器各建各的实例（切走就 dispose，不藏一台还在订阅的）：
      * `table`／`list-table`／`list`／（其余 kind 还没做，给一句实话）。
      */
-    const want = view.kind
     if (want !== 'table') {
       this.table?.dispose()
       this.table = null
@@ -1502,29 +1567,7 @@ export class ViewHost {
     }
     if (want === 'list') {
       if (!this.list) {
-        this.list = new ViewList({
-          store: this.deps.store,
-          records: () => this.records(),
-          view: () => this.view ?? view,
-          fieldLabel: (id) => {
-            const reserved = RESERVED_FIELD_LABEL[id]
-            if (reserved) return t(reserved)
-            return this.deps.fields().find((f) => f.id === id)?.label ?? id.slice(-6)
-          },
-          projectTitle: (r, into) => this.deps.project(r.block, into),
-          project: (r, key, into) => {
-            // 提及栏的命中列画「片段 ＋ 转换按钮」；其余列仍是纯文本
-            const m = key === MATCHED_COLUMN ? mentionDerivedOf(r) : null
-            if (m) {
-              renderMentionField(into, m, (spot) => this.convertMention(r.block.id, spot))
-              return
-            }
-            into.textContent = fieldTextOf(r, key, (v) =>
-              typeof v === 'string' && this.deps.refLabel ? this.deps.refLabel(v) : null,
-            )
-          },
-          openBlock: (id, place) => this.deps.openBlock(id, place),
-        })
+        this.list = this.buildList(() => this.records(), view)
         this.els.table.replaceChildren(this.list.root)
       }
       this.list.render()
@@ -1549,41 +1592,73 @@ export class ViewHost {
       return
     }
     if (!this.table) {
-      this.table = new ViewTable({
-        store: this.deps.store,
-        host: () => this.deps.host(),
-        view: () => this.view ?? view,
-        records: () => this.records(),
-        defs: () => this.deps.kb.propDefs(),
-        defaults: () =>
-          this.deps.derived?.columns.map((c) => ({ ...c })) ??
-          defaultColumnsForSource(this.source, this.deps.kb, {
-            hits: this.frozen?.hits ?? [],
-          }),
-        setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
-        clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
-        // 表头排序写**视图的显示序**：不重查、不改 `_query.sort`（成员只由条件/上限决定）
-        // 派生栏没有可写的配置：排序只在这一屏内生效（切走回原序，不留第二真相）
-        sort: (by, dir) => {
-          if (this.deps.derived) {
-            this.derivedSort = dir === '' ? [] : [{ by, dir: dir === 'desc' ? 'desc' : 'asc' }]
-            this.sync(true)
-            return
-          }
-          this.deps.invoke('core.view/set-sort', { owner: this.writeOwner, viewId: this.view?.id ?? '', by, dir })
-        },
-        insertRow: () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }),
-        deleteRow: (rowId) => this.deps.invoke('core.view/delete-row', { rowId }),
-        openBlock: (id, place) => this.deps.openBlock(id, place),
-        convertMention: (blockId, spot) => this.convertMention(blockId, spot),
-        cell: this.cell,
-        ...(this.deps.pickRef ? { pickRef: this.deps.pickRef } : {}),
-        ...(this.deps.refLabel ? { refLabel: this.deps.refLabel } : {}),
-        ...(this.deps.tagName ? { tagName: this.deps.tagName } : {}),
-      })
+      this.table = this.buildTable(() => this.records(), view)
       this.els.table.replaceChildren(this.table.root)
     }
     this.table.render()
+  }
+
+  /** 记录列表的装配（分组包装的段身也用这一份：只有 records 换成「那一组」） */
+  private buildList(records: () => ViewRecord[], view: ViewConfig): ViewList {
+    return new ViewList({
+      store: this.deps.store,
+      records,
+      view: () => this.view ?? view,
+      fieldLabel: (id) => {
+        const reserved = RESERVED_FIELD_LABEL[id]
+        if (reserved) return t(reserved)
+        return this.deps.fields().find((f) => f.id === id)?.label ?? id.slice(-6)
+      },
+      projectTitle: (r, into) => this.deps.project(r.block, into),
+      project: (r, key, into) => {
+        // 提及栏的命中列画「片段 ＋ 转换按钮」；其余列仍是纯文本
+        const m = key === MATCHED_COLUMN ? mentionDerivedOf(r) : null
+        if (m) {
+          renderMentionField(into, m, (spot) => this.convertMention(r.block.id, spot))
+          return
+        }
+        into.textContent = fieldTextOf(r, key, (v) =>
+          typeof v === 'string' && this.deps.refLabel ? this.deps.refLabel(v) : null,
+        )
+      },
+      openBlock: (id, place) => this.deps.openBlock(id, place),
+    })
+  }
+
+  /** 表格的装配（同上：records 可换成某一组的；其余依赖与直连完全一致） */
+  private buildTable(records: () => ViewRecord[], view: ViewConfig): ViewTable {
+    return new ViewTable({
+      store: this.deps.store,
+      host: () => this.deps.host(),
+      view: () => this.view ?? view,
+      records,
+      defs: () => this.deps.kb.propDefs(),
+      defaults: () =>
+        this.deps.derived?.columns.map((c) => ({ ...c })) ??
+        defaultColumnsForSource(this.source, this.deps.kb, {
+          hits: this.frozen?.hits ?? [],
+        }),
+      setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
+      clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
+      // 表头排序写**视图的显示序**：不重查、不改 `_query.sort`（成员只由条件/上限决定）
+      // 派生栏没有可写的配置：排序只在这一屏内生效（切走回原序，不留第二真相）
+      sort: (by, dir) => {
+        if (this.deps.derived) {
+          this.derivedSort = dir === '' ? [] : [{ by, dir: dir === 'desc' ? 'desc' : 'asc' }]
+          this.sync(true)
+          return
+        }
+        this.deps.invoke('core.view/set-sort', { owner: this.writeOwner, viewId: this.view?.id ?? '', by, dir })
+      },
+      insertRow: () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }),
+      deleteRow: (rowId) => this.deps.invoke('core.view/delete-row', { rowId }),
+      openBlock: (id, place) => this.deps.openBlock(id, place),
+      convertMention: (blockId, spot) => this.convertMention(blockId, spot),
+      cell: this.cell,
+      ...(this.deps.pickRef ? { pickRef: this.deps.pickRef } : {}),
+      ...(this.deps.refLabel ? { refLabel: this.deps.refLabel } : {}),
+      ...(this.deps.tagName ? { tagName: this.deps.tagName } : {}),
+    })
   }
 
   /** 类型与数据形状先就位，渲染器随后（列表/看板/画廊/日历/导图）；这里给一句实话而不是空屏 */

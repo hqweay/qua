@@ -183,8 +183,8 @@ export interface EditorBridge {
   emitTrigger: (id: string) => void
   /** 触发词被消费掉之后从正文里抹掉（`#查询词`／`@查询词`／`/查询词`） */
   dropTrigger: (id: string) => void
-  /** 插入一行纯文本（多行粘贴用）*/
-  insertPlainText: (id: string, offset: number, text: string) => void
+  /** 插入一行纯文本（多行粘贴用）；`cut` 给出同块要替换的区间（区间选中粘贴） */
+  insertPlainText: (id: string, offset: number, text: string, cut?: { from: number; to: number } | null) => void
   /**
    * **当前光标落点**（粘贴/选文件时先捕获它，入库回来按它插）。
    *
@@ -192,6 +192,8 @@ export interface EditorBridge {
    * 而且 `paste` 发生在浏览器改 DOM 之前，此刻的 `sel` 才是用户按下那一刻的位置。
    */
   caretPoint: () => { blockId: string; offset: number } | null
+  /** 粘贴落点：光标处 + 同块区间选中的替换范围（与 `caretPoint` 同时捕获，事件层不自己读选区） */
+  pasteTarget: () => { blockId: string; offset: number; cut: { from: number; to: number } | null } | null
   /**
    * 粘贴进来一份图片字节（v1 只取第一张）。
    *
@@ -624,11 +626,16 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       return
     }
     const text = e.clipboardData?.getData('text/plain') ?? ''
-    const sel = document.getSelection()
-    const id = br.blockOf(sel?.anchorNode ?? null)
-    if (!id || !sel) return
+    if (!text) return
     br.syncSel()
-    br.insertPlainText(id, 0, text)
+    /**
+     * 落点必须取**光标处**，不是块首：块已有文本、光标停在中间或尾部时，
+     * 粘贴的内容要接在光标那里。同块内有区间选中时一并替换（与 Enter 的同块删选区同判据）。
+     * 落点在同步选区后**先捕获**（和贴图同一条纪律）。
+     */
+    const target = br.pasteTarget()
+    if (!target) return
+    br.insertPlainText(target.blockId, target.offset, text, target.cut)
   })
 
   /* ── 拖入文件：v1 明确不做，但**必须拦住原生注入** ── */

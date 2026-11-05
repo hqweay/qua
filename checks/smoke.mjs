@@ -189,6 +189,15 @@ const mountTab = async (page, kind) => {
   await page.waitForTimeout(180)
 }
 
+/** 派生栏的看法是**一颗下拉**（与自定义查询的「视图…」同壳）：点按钮 → 点菜单行 */
+const pickDerivedView = async (page, kind) => {
+  await page.locator('.mount-derived-views .qv-view-btn').click()
+  await page.waitForTimeout(150)
+  await page.locator(`.layer-item[data-id="${kind}"]`).click()
+  await page.waitForTimeout(250)
+}
+
+
 /** 挂载区里的行（只在**激活栏**的 body 里） */
 const mountRows = (page) => page.evaluate(() => document.querySelectorAll('#editor .mount .mount-editor .blk, #editor .mount .queryview-editor .blk').length)
 
@@ -2276,7 +2285,7 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   const head = () =>
     page.evaluate(() => ({
       count: document.querySelector('.mount-derived-count')?.textContent ?? '',
-      active: document.querySelector('.mount-derived-view[data-active="1"]')?.dataset.kind ?? '',
+      active: document.querySelector('.mount-derived-views .mount-derived-view-label')?.textContent ?? '',
       why: document.querySelector('.mount-derived-why')?.textContent ?? '',
     }))
   const tableOf = () =>
@@ -2284,8 +2293,11 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
       rows: document.querySelectorAll('.mount-view .tv-row').length,
       cols: [...document.querySelectorAll('.mount-view .tv-head [data-col]')].map((e) => e.dataset.col),
       cells: [...document.querySelectorAll('.mount-view .tv-row [data-col]')].map((e) => e.textContent ?? ''),
-      // 派生栏没有拥有者：视图宿主自己的抬头（含刷新/新建视图/改名）不许露出来
-      qvHead: document.querySelector('.mount-view .queryview-head')?.hidden ?? false,
+      // 派生栏没有拥有者：宿主抬头里只应有**分组选择**（看法切换器在挂载区抬头）——
+      // 刷新/排序/新建行/条件条这些「写拥有者配置」的按钮一律不许露出来
+      qvRefresh: document.querySelector('.mount-view .queryview-head .queryview-refresh')?.hidden ?? true,
+      qvSort: document.querySelector('.mount-view .queryview-head .queryview-sort')?.hidden ?? true,
+      qvNewRow: [...document.querySelectorAll('.mount-view .queryview-head button')].every((b) => b.hidden || b.className !== 'queryview-newrow'),
     }))
   const num = (s) => Number((s.match(/\d+/) ?? ['0'])[0])
 
@@ -2294,14 +2306,14 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   const refsHead = await head()
   const refsCount = num(refsHead.count)
   assert(refsCount >= 1, `引用栏应有命中（造过一条引用）：${JSON.stringify(refsHead)}`)
-  await page.locator('.mount-derived-view[data-kind="table"]').click()
+  await pickDerivedView(page, 'table')
   await page.waitForTimeout(450)
   const refsTable = await tableOf()
-  assert(refsHead.active === 'outline', '前置：缺省是大纲')
+  assert(refsHead.active === '大纲', '前置：缺省是大纲')
   assert(refsTable.rows === refsCount, `切表格不改变成员：${refsCount} → ${refsTable.rows}`)
   assert(refsTable.cols.includes('path') && refsTable.cols.includes('refCount'), `引用表要有路径与次数：${JSON.stringify(refsTable.cols)}`)
   assert(refsTable.cells.some((c) => /^\d+$/.test(c) && Number(c) >= 1), `引用次数要画出来：${JSON.stringify(refsTable.cells)}`)
-  assert(refsTable.qvHead === true, '派生栏的视图宿主不许画自己的抬头（没有拥有者）')
+  assert(refsTable.qvRefresh === true && refsTable.qvSort === true && refsTable.qvNewRow === true, '派生栏的宿主抬头只留分组选择——刷新/排序/新建行这些写拥有者配置的不许露出来')
 
   // ② 关掉重开：看法是设备状态，重开仍在
   const reopened = await reopenPage(browser, ctx, base, page)
@@ -2311,15 +2323,15 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   await page2.waitForTimeout(450)
   await mountTab(page2, 'refs')
   const persisted = await page2.evaluate(() => ({
-    active: document.querySelector('.mount-derived-view[data-active="1"]')?.dataset.kind ?? '',
+    active: document.querySelector('.mount-derived-views .mount-derived-view-label')?.textContent ?? '',
     rows: document.querySelectorAll('.mount-view .tv-row').length,
   }))
-  assert(persisted.active === 'table', `派生栏的看法要落设备状态（重开仍是表格）：${JSON.stringify(persisted)}`)
+  assert(persisted.active === '表格', `派生栏的看法要落设备状态（重开仍是表格）：${JSON.stringify(persisted)}`)
   assert(persisted.rows === refsCount, `重开后成员一致：${refsCount} → ${persisted.rows}`)
 
   // ③ 提及 / 同类：命中词与共同标签各自落在表里
   await mountTab(page2, 'mentions')
-  await page2.locator('.mount-derived-view[data-kind="table"]').click()
+  await pickDerivedView(page2, 'table')
   await page2.waitForTimeout(450)
   const mentions = await page2.evaluate(() => ({
     count: Number((document.querySelector('.mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
@@ -2334,7 +2346,7 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   assert(mentions.why.includes('没有指向它'), `提及的说明要写清「不含引用」：${mentions.why}`)
 
   await mountTab(page2, 'same')
-  await page2.locator('.mount-derived-view[data-kind="table"]').click()
+  await pickDerivedView(page2, 'table')
   await page2.waitForTimeout(450)
   const same = await page2.evaluate(() => ({
     count: Number((document.querySelector('.mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
@@ -2358,7 +2370,7 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
 
   // ⑥ live：现算的成员会跟着数据变（不冻成员、没有刷新按钮）
   await mountTab(page2, 'refs')
-  await page2.locator('.mount-derived-view[data-kind="table"]').click()
+  await pickDerivedView(page2, 'table')
   await page2.waitForTimeout(400)
   const beforeLive = await page2.evaluate(() => document.querySelectorAll('.mount-view .tv-row').length)
   await page2.evaluate((pid) => {
@@ -2417,7 +2429,7 @@ await check('T194b 引用含属性引用：kind 过滤可切；标签页默认�
   await page.locator('.mount-derived-kind[data-kind="all"]').click()
   await page.waitForTimeout(250)
   assert(await page.evaluate(has, setup.src), '切回「全部」后属性引用源回来')
-  await page.locator('.mount-derived-view[data-kind="table"]').click()
+  await pickDerivedView(page, 'table')
   await page.waitForTimeout(450)
   const table = await page.evaluate(() => ({
     kinds: [...document.querySelectorAll('.mount-view .tv-row [data-col="relKinds"]')].map((e) => e.textContent ?? ''),
@@ -3229,9 +3241,9 @@ await check('T238 查询块标题的行内编辑与普通块同档：划选加�
     }, fx.qid)
   const hasBold = (runs) => runs.some((r) => r.marks?.includes('bold'))
   /** 点进一行的正文并双击选一个词（⌘A 是整屏选区，不是这一行的） */
-  const dblclickRow = async (sel) => {
+  const dblclickRow = async (sel, offset = 60) => {
     const box = await page.locator(sel).first().boundingBox()
-    await page.mouse.dblclick(box.x + Math.min(60, box.width / 2), box.y + box.height / 2)
+    await page.mouse.dblclick(box.x + Math.min(offset, box.width / 2), box.y + box.height / 2)
     await page.waitForTimeout(250)
   }
   const clickBoldInBubble = () =>
@@ -3335,7 +3347,8 @@ await check('T238 查询块标题的行内编辑与普通块同档：划选加�
     await page.waitForTimeout(50)
   }
   assert((await contentOf()).filter((r) => r.t === 'asset').length >= 2, `抬头里也能粘贴图（同一份内容，两个表面同档）：${JSON.stringify(await contentOf())}`)
-  await dblclickRow(titleTx)
+  // 双击点落在**行首文字**内（贴图之后行首不再是可选词，60px 处可能已是图片原子）
+  await dblclickRow(titleTx, 12)
   const bar2 = await page.evaluate(() => Boolean(document.querySelector('body > .selbar')))
   assert(bar2, '抬头里的划选气泡照常出现（装配层接线本就齐，缺的是内容闸那一档）')
   await clickBoldInBubble()
@@ -4311,6 +4324,99 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
 
   await ctx.close()
   return `单块内拖=文本；A→C=3 块；右键多块菜单删除 + 一次撤销；Shift+拖=跨块文本；Mod+Shift+A 全选块；Enter 清选区；Shift+↓ 边界规则；⌘A 两次升级`
+})
+
+await check('T257 块选区批量操作：Tab 整段缩进 / Shift+Tab 反缩进 / ⌘↵ 批量转待办，各一次撤销', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(150)
+  const ids = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const rootId = ed.doc.roots[0].id
+    // 锚块在前：A 不是首子块，Tab 才有前兄弟可进
+    const anchor = ed.insertBlockAfter(rootId, '锚锚锚锚')
+    const a = ed.insertBlockAfter(anchor, '甲甲甲甲')
+    const b = ed.insertBlockAfter(a, '乙乙乙乙')
+    const c = ed.insertBlockAfter(b, '丙丙丙丙')
+    return { anchor, a, b, c, rootId }
+  })
+  assert(ids.a && ids.b && ids.c, `前置：三个块都要建出来：${JSON.stringify(ids)}`)
+  const rect = async (id) =>
+    page.evaluate((id) => {
+      const r = document.querySelector(`.blk[data-block-id="${id}"] .tx`).getBoundingClientRect()
+      return { x: r.left + 2, y: r.top + r.height / 2 }
+    }, id)
+  /** 父关系走编辑器 store（`blocks()` 投影没有父位）；待办走 `blocks().todo` 三态 */
+  const shape = () =>
+    page.evaluate(({ a, b, c }) => {
+      const parentOf = (id) => {
+        for (const root of window.__qua.__editor.doc.roots) {
+          const i = root.children.findIndex((x) => x.id === id)
+          if (i >= 0) return { parentId: root.id, index: i }
+          for (const sub of root.children) {
+            const j = sub.children.findIndex((x) => x.id === id)
+            if (j >= 0) return { parentId: sub.id, index: j }
+          }
+        }
+        return null
+      }
+      const todoOf = (id) => window.__qua.blocks().find((x) => x.id === id)?.todo ?? null
+      return {
+        count: window.__qua.snapshot().blockSelectionCount,
+        a: parentOf(a),
+        b: parentOf(b),
+        c: parentOf(c),
+        aTodo: todoOf(a),
+        bTodo: todoOf(b),
+        cTodo: todoOf(c),
+      }
+    }, ids)
+  const drag = async (from, to) => {
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await page.mouse.move(to.x, to.y, { steps: 8 })
+    await page.mouse.up()
+  }
+
+  // ① 拖选 A..C → Tab：三块整段缩进（进锚块子层、次序保持），选区保持
+  await drag(await rect(ids.a), await rect(ids.c))
+  await page.keyboard.press('Tab')
+  await page.waitForTimeout(150)
+  const ind = await shape()
+  assert(ind.count === 3, `缩进后选区应保持：${JSON.stringify(ind)}`)
+  assert(ind.a?.parentId === ids.anchor && ind.b?.parentId === ids.anchor && ind.c?.parentId === ids.anchor, `三块应都进锚块子层：${JSON.stringify(ind)}`)
+  assert(ind.a?.index === 0 && ind.b?.index === 1 && ind.c?.index === 2, `次序应保持 A,B,C：${JSON.stringify(ind)}`)
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForTimeout(150)
+  const back1 = await shape()
+  assert(back1.a?.parentId === ids.rootId && back1.b?.parentId === ids.rootId && back1.c?.parentId === ids.rootId, `一次撤销应回根层：${JSON.stringify(back1)}`)
+
+  // ② 反缩进：缩进之后 Shift+Tab 回根层（逆序处理、次序保持）
+  await drag(await rect(ids.a), await rect(ids.c))
+  await page.keyboard.press('Tab')
+  await page.waitForTimeout(150)
+  await page.keyboard.press('Shift+Tab')
+  await page.waitForTimeout(150)
+  const outd = await shape()
+  assert(outd.a?.parentId === ids.rootId && outd.b?.parentId === ids.rootId && outd.c?.parentId === ids.rootId, `Shift+Tab 应整段回根层：${JSON.stringify(outd)}`)
+  assert(outd.b?.index === (outd.a?.index ?? 0) + 1 && outd.c?.index === (outd.a?.index ?? 0) + 2, `次序应保持 A,B,C：${JSON.stringify(outd)}`)
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForTimeout(120)
+
+  // ③ ⌘↵ 批量转待办：三块同笔变任务；一次撤销全回
+  await drag(await rect(ids.a), await rect(ids.c))
+  await page.keyboard.press(`${MOD}+Enter`)
+  await page.waitForTimeout(150)
+  const todo = await shape()
+  assert(todo.aTodo === 'todo' && todo.bTodo === 'todo' && todo.cTodo === 'todo', `三块应都成任务：${JSON.stringify(todo)}`)
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(150)
+  const noTodo = await shape()
+  assert(noTodo.aTodo === null && noTodo.bTodo === null && noTodo.cTodo === null, `一次撤销应全部回非任务：${JSON.stringify(noTodo)}`)
+
+  await ctx.close()
+  return `块选区 Tab/Shift+Tab/⌘↵ ⇒ 整段缩进次序保持、反缩进回根层次序不变、批量转待办一笔撤销`
 })
 
 await check('T54 聚焦日记块后日期仍可见：它自己是 depth 0 的只读日期行，子块缩进挂在下面、仍可聚焦', async () => {
@@ -9429,6 +9535,72 @@ await check(
 
     await ctx.close()
     return `pasteAt ⇒ 单行 [upsert{text}]；多行 [upsert ＋ insert×n]；⌘Z 各自复原`
+  },
+)
+
+await check(
+  'T256 粘贴落点是光标处不是块首：块尾/块中粘贴都接在光标那里；区间选中粘贴＝替换选区',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const target = await pickLeaf(page)
+    assert(target, '第一页里应有可编辑的内容块')
+    const readPlain = () =>
+      page.evaluate((id) => {
+        const b = window.__qua.__editor.store.find(id)
+        return b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : ''
+      }, target.id)
+    /** 把光标/选区设到 .tx 的第 offset 个字符处（len 给出时＝区间 [offset, offset+len)），再派发粘贴 */
+    const pasteAtCaret = (text, offset, len) =>
+      page.evaluate(
+        ({ sel, text, offset, len }) => {
+          const tx = document.querySelector(sel)
+          const node = tx.firstChild
+          if (!node || node.nodeType !== Node.TEXT_NODE) return 'no-text-node'
+          const r = document.createRange()
+          r.setStart(node, offset)
+          if (len === null || len === undefined) r.collapse(true)
+          else r.setEnd(node, offset + len)
+          const s = document.getSelection()
+          s.removeAllRanges()
+          s.addRange(r)
+          const dt = new DataTransfer()
+          dt.setData('text/plain', text)
+          tx.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+          return 'ok'
+        },
+        { sel: `.blk[data-block-id="${target.id}"] > .tx`, text, offset, len: len ?? null },
+      )
+
+    await page.evaluate((t) => window.__qua.__editor.pasteAt(t.id, 0, '你好世界'), target)
+    await page.waitForTimeout(120)
+    const baseText = '你好世界' + target.text
+
+    // ① 块尾粘贴：新内容接在末尾，不是跑到块首
+    assert((await pasteAtCaret('尾', baseText.length)) === 'ok', '正文行应有一个文本节点')
+    await page.waitForTimeout(150)
+    assert((await readPlain()) === baseText + '尾', `块尾粘贴应接在光标处：${await readPlain()}`)
+
+    // ② 块中粘贴：插在第 2 个字符后面
+    await pasteAtCaret('·', 2)
+    await page.waitForTimeout(150)
+    const mid = baseText.slice(0, 2) + '·' + baseText.slice(2) + '尾'
+    assert((await readPlain()) === mid, `块中粘贴应插在光标处：${await readPlain()}`)
+
+    // ③ 区间选中粘贴：替换选中段 [1,3)（⌘Z 一次回上一步）
+    await pasteAtCaret('X', 1, 2)
+    await page.waitForTimeout(150)
+    const replaced = mid.slice(0, 1) + 'X' + mid.slice(3)
+    assert((await readPlain()) === replaced, `区间选中粘贴应替换选区：${await readPlain()}`)
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    // 连续 insert 在合并窗口（1200ms）内是一步：一次 ⌘Z 至少要撤掉这次的替换
+    const undone = await readPlain()
+    assert(!undone.includes('X'), `撤销应撤掉区间替换：${undone}`)
+
+    await ctx.close()
+    return `事件层 paste ⇒ 块尾/块中接在光标处；区间替换 ＋ ⌘Z 复原`
   },
 )
 
@@ -19818,7 +19990,7 @@ await check('T229 聚焦一个有露面的查询块：段尾挂载区只搬进�
   return `聚焦露面块与源查询块都成功；正文 1 个段尾槽，岛里的 .sec 没有抢走挂载区`
 })
 
-await check('T230 分组：入口按覆盖率给候选；按标签分堆一块进多列、列头是标签名、多值键禁拖', async () => {
+await check('T230 分组：入口按覆盖率给候选；卡片禁多值分组列；列表按标签分堆一块进多段', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const pid = await pageByTitle(page, '产品设计')
@@ -19838,7 +20010,7 @@ await check('T230 分组：入口按覆盖率给候选；按标签分堆一块�
   }, pid)
   assert(!prep.error, `前置：应能造出一块双标签：${JSON.stringify(prep)}`)
 
-  // 建看板（自动挑第一个 select 分组），再用**抬头入口**把分组键切到「标签」
+  // 建看板（自动挑第一个 select 分组）：分组入口在，但**多值键不做卡片候选**
   await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'board' }), pid)
   await page.waitForTimeout(450)
   const entry = await page.evaluate(() => {
@@ -19853,42 +20025,59 @@ await check('T230 分组：入口按覆盖率给候选；按标签分堆一块�
     entry.options.some((o) => /（\d+／\d+）/.test(o)),
     `候选要标覆盖率（几条／共几条）：${JSON.stringify(entry.options)}`,
   )
-  assert(entry.options.some((o) => o.includes('多值')), `多值键要带尾注：${JSON.stringify(entry.options)}`)
-  await page.selectOption('.queryview-group', '_tags')
+  assert(
+    entry.options.every((o) => !o.includes('多值')),
+    `卡片视图不提供多值分组列（拖卡写值没有唯一动作）：${JSON.stringify(entry.options)}`,
+  )
+  const cardDrag = await page.evaluate(() => document.querySelector('.vb-card')?.getAttribute('draggable') ?? null)
+  assert(cardDrag === 'true', `单值分组的卡可拖：${cardDrag}`)
+
+  // 配置里存着多值键（从别处带过来）⇒ 卡片如实说明，不静默 fan-out
+  await page.evaluate((pid) => {
+    const views = window.__qua.__editor.store.find(pid)?.props?._views ?? []
+    const board = views.find((v) => v.kind === 'board')
+    window.__qua.invoke('core.view/set-group', { blockId: pid, viewId: board.id, groupBy: '_tags' })
+  }, pid)
   await page.waitForTimeout(450)
+  const note = await page.evaluate(() => document.querySelector('.vb')?.textContent ?? '')
+  assert(note.includes('不支持多值'), `卡片对多值分组给一句实话：${note.slice(0, 40)}`)
 
-  const board = await page.evaluate(({ member, otherName }) => ({
-    cols: [...document.querySelectorAll('.vb-col')].map((c) => ({
-      value: c.dataset.value ?? '',
-      name: c.querySelector('.vb-col-name')?.textContent ?? '',
-      count: c.querySelector('.vb-col-count')?.textContent ?? '',
-    })),
-    memberCols: [...document.querySelectorAll('.vb-col')].filter(
-      (c) => c.querySelector(`.vb-card[data-block-id="${member}"]`) !== null,
-    ).length,
-    draggable: document.querySelector(`.vb-card[data-block-id="${member}"]`)?.getAttribute('draggable') ?? null,
-    named: [...document.querySelectorAll('.vb-col-name')].filter((n) => n.textContent === otherName).length,
-  }), prep)
-  assert(board.cols.length >= 3, `按标签分堆至少两列＋未设置：${JSON.stringify(board.cols)}`)
-  assert(board.named >= 1, `列头要是标签名而不是块 id（${prep.otherName}）：${JSON.stringify(board.cols)}`)
-  assert(board.memberCols === 2, `双标签的块应进两个组（fan-out），实际 ${board.memberCols} 列`)
-  assert(board.draggable === 'false', `多值键的卡不可拖：${board.draggable}`)
-  const countsSum = board.cols.reduce((acc, c) => acc + Number(c.count || 0), 0)
-  assert(countsSum >= 2, `列头数字＝组内成员数：${JSON.stringify(board.cols)}`)
-
-  // 切回「不分组」：配置清掉，看板回「需要分组」的空态
-  await page.selectOption('.queryview-group', '')
+  // 列表视图：多值键 fan-out——双标签的块进两个段，段头是标签名
+  await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'list' }), pid)
   await page.waitForTimeout(350)
-  const cleared = await page.evaluate(() => Boolean(document.querySelector('.vb .tv-unsupported')))
-  assert(cleared, '清掉分组后看板回到需要分组的空态')
+  await page.evaluate((pid) => {
+    const views = window.__qua.__editor.store.find(pid)?.props?._views ?? []
+    const list = views.find((v) => v.kind === 'list')
+    window.__qua.invoke('core.view/set-group', { blockId: pid, viewId: list.id, groupBy: '_tags' })
+  }, pid)
+  await page.waitForTimeout(450)
+  const grouped = await page.evaluate(({ member, otherName }) => ({
+    secs: [...document.querySelectorAll('.vgroup-sec')].map((sec) => ({
+      name: sec.querySelector('.vgroup-name')?.textContent ?? '',
+      count: sec.querySelector('.vgroup-count')?.textContent ?? '',
+      hasMember: Boolean(sec.querySelector(`[data-block-id="${member}"]`)),
+    })),
+  }), prep)
+  const memberSecs = grouped.secs.filter((x) => x.hasMember)
+  assert(grouped.secs.length >= 2, `按标签应分出至少两段：${JSON.stringify(grouped.secs)}`)
+  assert(memberSecs.length === 2, `双标签的块应进两个组（fan-out），实际 ${memberSecs.length} 段`)
+  assert(memberSecs.some((x) => x.name === prep.otherName), `段头要是标签名而不是块 id：${JSON.stringify(grouped.secs)}`)
+
+  // 清掉分组：配置删键，不留空串
+  await page.evaluate((pid) => {
+    const views = window.__qua.__editor.store.find(pid)?.props?._views ?? []
+    const list = views.find((v) => v.kind === 'list')
+    window.__qua.invoke('core.view/set-group', { blockId: pid, viewId: list.id, groupBy: '' })
+  }, pid)
+  await page.waitForTimeout(350)
   const stored = await page.evaluate(
-    (pid) => window.__qua.__editor.store.find(pid)?.props?._views?.find((v) => v.kind === 'board')?.groupBy ?? '',
+    (pid) => window.__qua.__editor.store.find(pid)?.props?._views?.find((v) => v.kind === 'list')?.groupBy ?? '',
     pid,
   )
   assert(stored === '', '清掉的分组不该留在配置里（删键，不留空串）')
 
   await ctx.close()
-  return `入口标覆盖率；按标签分堆：双标签块进 2 列、列头是标签名、卡不可拖；清掉回空态`
+  return `入口标覆盖率；卡片禁多值分组列（配置带多值给实话）；列表按标签 fan-out 双段、段头标签名；清掉删键`
 })
 
 /* ---------------------------------------------------------------- 档位轴 */
@@ -20622,7 +20811,7 @@ await check('T237 候选引用：片段行高亮名字出现处、一键转成�
 
   // ① 提及栏 → 列表：命中格是片段，名字处是高亮按钮
   await mountTab(page, 'mentions')
-  await page.locator('.mount-derived-view[data-kind="list"]').click()
+  await pickDerivedView(page, 'list')
   await page.waitForTimeout(450)
   const before = await page.evaluate((pid) => ({
     probeRow: Boolean(document.querySelector(`.mount-view .vl-row[data-block-id="${pid}"]`)),
@@ -20646,7 +20835,7 @@ await check('T237 候选引用：片段行高亮名字出现处、一键转成�
   assert(!after.srcText.includes(setup.word), `那一处纯文本换成了引用（投影里不再有名字）：${JSON.stringify(after)}`)
 
   await mountTab(page, 'refs')
-  await page.locator('.mount-derived-view[data-kind="list"]').click()
+  await pickDerivedView(page, 'list')
   await page.waitForTimeout(450)
   const refs = await page.evaluate((pid) => ({
     probeRow: Boolean(document.querySelector(`.mount-view .vl-row[data-block-id="${pid}"]`)),
@@ -20662,14 +20851,14 @@ await check('T237 候选引用：片段行高亮名字出现处、一键转成�
   }), setup.probe)
   assert(undone.srcText === setup.probeText, `一次撤销回到原文：${JSON.stringify(undone)}`)
   await mountTab(page, 'mentions')
-  await page.locator('.mount-derived-view[data-kind="list"]').click()
+  await pickDerivedView(page, 'list')
   await page.waitForTimeout(450)
   const mentionsAgain = await page.evaluate((pid) => ({
     probeRow: Boolean(document.querySelector(`.mount-view .vl-row[data-block-id="${pid}"]`)),
   }), setup.probe)
   assert(mentionsAgain.probeRow, `一次撤销后回到提及栏：${JSON.stringify(mentionsAgain)}`)
   await mountTab(page, 'refs')
-  await page.locator('.mount-derived-view[data-kind="list"]').click()
+  await pickDerivedView(page, 'list')
   await page.waitForTimeout(450)
   const refsAgain = await page.evaluate((pid) => ({
     probeRow: Boolean(document.querySelector(`.mount-view .vl-row[data-block-id="${pid}"]`)),
@@ -20817,13 +21006,13 @@ await check('T240 快速筛选（引用栏）：大纲筛行；切到表格是�
   assert((await mountRows(page)) === 1, `大纲只剩那一页的一行`)
 
   // 切到表格：同一份 chips 也在生效（两处各算各的就会出现两批行）
-  await page.locator('.mount-derived-view[data-kind="table"]').click()
+  await pickDerivedView(page, 'table')
   await page.waitForTimeout(450)
   const tableRows = await page.evaluate(() => document.querySelectorAll('.mount-view .tv-row').length)
   assert(tableRows === 1, `表格看法读到同一份筛选（1 行）：${tableRows}`)
 
   // 回大纲（切看法点的是弹层外的按钮，弹层已关，重开再摘）
-  await page.locator('.mount-derived-view[data-kind="outline"]').click()
+  await pickDerivedView(page, 'outline')
   await page.waitForTimeout(250)
   const ledger = () =>
     page.evaluate(() => ({

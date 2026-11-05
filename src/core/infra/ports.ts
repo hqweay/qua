@@ -466,6 +466,8 @@ export interface App {
   openViewSlice(owner: ViewOwnerRef, viewId: string, anchor?: DOMRect | null): void
   /** 「视图…」菜单：列出默认看法 ＋ 已有视图 ＋ 新建…（**纯 UI**，落在装配层） */
   openViewMenu(owner: ViewOwnerRef, anchor?: DOMRect | null): void
+  /** 派生栏（引用／提及）的看法下拉：只有三档（大纲／列表／表格），写设备状态不建视图 */
+  openDerivedViewMenu(anchor: DOMRect | null, current: string, onPick: (kind: string) => void): void
   /** 打开**条件构建器**（一个浮层；草稿改在本地，点「应用」才写一次） */
   openQueryBuilder(owner: ViewOwnerRef): void
   /**

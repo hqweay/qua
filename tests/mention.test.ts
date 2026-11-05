@@ -98,8 +98,9 @@ test('转换：区间已不是那个词 ⇒ 拒写；区间里有原子 ⇒ 拒�
 
 test('片段：第 k 个 mark 恰是第 k 处；窗口不切在命中中间', () => {
   const text = '一句开场白，设计在中间，设计还在后面，结尾还有设计。'
-  const spots = mentionSpotsOf(textRuns(text), '设计')
-  const parts = mentionSnippet(text, spots, 40)
+  const content = textRuns(text)
+  const spots = mentionSpotsOf(content, '设计')
+  const parts = mentionSnippet(content, spots, 40)
   const marks = parts.filter((p) => p.mark === true)
   assert.ok(marks.length >= 1, '窗口里要有高亮段')
   marks.forEach((m, i) => {
@@ -112,10 +113,23 @@ test('片段：第 k 个 mark 恰是第 k 处；窗口不切在命中中间', ()
   assert.ok(parts[0]!.text === '…' || spots[0]!.start < 24, '开头要么省略号要么从近处起')
 })
 
+test('片段：命中前有原子时 mark 仍对得上——展示串与 spots 同一坐标系（plain）', () => {
+  const atom: RefRun = { id: 'a1', t: 'ref', to: 'x', label: 'x' }
+  const content: Run[] = [...textRuns('ab'), atom, ...textRuns('cd设计ef')]
+  const spots = mentionSpotsOf(content, '设计')
+  assert.deepEqual(spots.map((s) => [s.start, s.end]), [[5, 7]])
+  const parts = mentionSnippet(content, spots, 96)
+  const marks = parts.filter((p) => p.mark === true)
+  assert.deepEqual(marks.map((m) => m.text), ['设计'], 'mark 文本应是命中词本身')
+  // 原子在窗口里占一格占位符，不把 mark 推到别的字上
+  const joined = parts.map((p) => p.text).join('')
+  assert.ok(joined.includes('□') && joined.includes('设计'), `片段里原子占位、命中完整：${joined}`)
+})
+
 test('片段：全部命中都在窗口里时没有省略号', () => {
-  const text = '设计和设计'
-  const spots = mentionSpotsOf(textRuns(text), '设计')
-  const parts = mentionSnippet(text, spots, 96)
+  const content = textRuns('设计和设计')
+  const spots = mentionSpotsOf(content, '设计')
+  const parts = mentionSnippet(content, spots, 96)
   assert.deepEqual(
     parts.map((p) => [p.text, p.mark === true]),
     [

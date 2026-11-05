@@ -41,6 +41,7 @@ import {
   detectTrigger,
   mergeIntoPrevPlan,
   moveStaysInside,
+  siblingsOf,
   prevPlaceholder,
   hasTag,
   hasLiveChildren,
@@ -2285,6 +2286,98 @@ export class BlockEditor {
     this.structuralMove(id, outdentMove(this.doc, id))
   }
 
+  /**
+   * 批量缩进（块选区 Tab）：文档序逐块落进**各自当时**的前兄弟——
+   * 连续选区里后一块的前兄弟会随前一块搬走而变成同一个目标，整段选区自然
+   * 保持原有次序一起进同一层。一笔撤销；section 根与前兄弟不可收留的块跳过。
+   *
+   * ⚠️ **落点先算好再动手**（与批量删除同一条纪律）：写路径里的树要过事务，
+   * 边写边 locate 读到哪棵树是没保证的；全部落点从**同一份快照**推出、
+   * 前一块的最终位置喂给后一块（它的前兄弟刚搬走 ⇒ 跟着进同一层），一笔事务落。
+   */
+  indentMany(ids: readonly string[]): boolean {
+    const snap = this.doc
+    /** 前一个兄弟位在本批里已经搬走的块 → 它的最终落点（后一块跟着进同一层） */
+    const movedPrev = new Map<string, { parentId: string; index: number }>()
+    /** 同一目标层本批已追加几个（前兄弟没搬的块落在快照长度之后，按这个顺延） */
+    const appendedTo = new Map<string, number>()
+    const plans: { id: string; parentId: string; index: number }[] = []
+    let firstTarget: string | null = null
+    for (const id of ids) {
+      const loc = locate(snap, id)
+      if (!loc || loc.parent === null) continue
+      const prev = siblingsOf(snap, loc.parent)[loc.index - 1] ?? null
+      const chained = prev ? movedPrev.get(prev.id) : undefined
+      const plan = chained
+        ? { parentId: chained.parentId, index: chained.index + 1 }
+        : indentMove(snap, id)
+      if (!plan || plan.parentId === null || !this.scopeAllowsMove(id, plan)) continue
+      const index = chained ? plan.index : plan.index + (appendedTo.get(plan.parentId) ?? 0)
+      if (plans.length === 0) firstTarget = plan.parentId
+      plans.push({ id, parentId: plan.parentId, index })
+      movedPrev.set(id, { parentId: plan.parentId, index })
+      appendedTo.set(plan.parentId, (appendedTo.get(plan.parentId) ?? 0) + 1)
+    }
+    if (plans.length === 0) return false
+    this.beginUndoEntry()
+    /**
+     * ⚠️ **改前落点要专门记**。撤销恢复走 `prev`（前兄弟 id），而实移会改掉后面
+     * 块的 prev：先移 A，B 的「改前落点」就被记成 mid-batch 的（prev 全坍缩到
+     * 同一个目标层），撤销按 prev 恢复时次序整个倒掉（实测 [A,B,C] → [C,B,A]）。
+     * ⇒ 实移前先给每块做一次**原位 move**（no-op，位置不变），让捕获里记下的
+     *   「改前落点」是真·批前落点；撤销按状态序逐块 prev 恢复，次序自然对。
+     */
+    for (const p of plans) {
+      const cur = locate(snap, p.id)
+      if (cur) this.write((tx) => tx.move(p.id, cur.parent?.id ?? null, cur.index))
+    }
+    for (const p of plans) {
+      this.write((tx) => {
+        tx.move(p.id, p.parentId, p.index)
+        tx.patch(p.id, (x) => (x.modified = Date.now()))
+      })
+    }
+    // 刚搬进去的那一层必须看得见（与单块缩进同一条纪律）
+    if (firstTarget) unfoldBlock(this.doc, firstTarget)
+    this.structTail()
+    return true
+  }
+
+  /**
+   * 批量反缩进（块选区 Shift+Tab）：同一父块的块都插到「父的下一个兄弟位」，
+   * 后处理的块按已有几个顺延一格，原有次序保持。一笔撤销。
+   */
+  outdentMany(ids: readonly string[]): boolean {
+    const snap = this.doc
+    /** 同一落点层（某个父的下一个兄弟位）本批已占几个 */
+    const appendedTo = new Map<string, number>()
+    const plans: { id: string; parentId: string; index: number }[] = []
+    for (const id of ids) {
+      const loc = locate(snap, id)
+      if (!loc || loc.parent === null) continue
+      const plan = outdentMove(snap, id)
+      if (!plan || plan.parentId === null || !this.scopeAllowsMove(id, plan)) continue
+      const index = plan.index + (appendedTo.get(plan.parentId) ?? 0)
+      plans.push({ id, parentId: plan.parentId, index })
+      appendedTo.set(plan.parentId, (appendedTo.get(plan.parentId) ?? 0) + 1)
+    }
+    if (plans.length === 0) return false
+    this.beginUndoEntry()
+    // 同 indentMany：实移前先原位 no-op 记下真·改前落点（理由见那边）
+    for (const p of plans) {
+      const cur = locate(snap, p.id)
+      if (cur) this.write((tx) => tx.move(p.id, cur.parent?.id ?? null, cur.index))
+    }
+    for (const p of plans) {
+      this.write((tx) => {
+        tx.move(p.id, p.parentId, p.index)
+        tx.patch(p.id, (x) => (x.modified = Date.now()))
+      })
+    }
+    this.structTail()
+    return true
+  }
+
   move(id: string, delta: -1 | 1): void {
     this.structuralMove(id, siblingMove(this.doc, id, delta))
   }
@@ -2576,6 +2669,43 @@ export class BlockEditor {
       })
     })
     this.structTail(null, [id])
+  }
+
+  /**
+   * 批量切换待办（块选区）：每块按**自己**的字段判据翻值（同 `toggleTodo`），
+   * 全部装进**一笔事务**：定义块只补一次、一次撤销整体复原。section 根跳过。
+   */
+  toggleTodoMany(ids: readonly string[]): boolean {
+    const plans: { id: string; propId: string; fieldDefined: boolean; next: unknown }[] = []
+    for (const id of ids) {
+      const loc = locate(this.doc, id)
+      if (!loc || loc.parent === null) continue
+      const fields = gutterFieldsOf(loc.block, this.store.blocks)
+      const field = fields.find((f) => f.propId === TASK_STATUS_PROP_ID) ?? fields.find((f) => f.kind === 'checkbox')
+      const propId = field?.propId ?? TASK_STATUS_PROP_ID
+      let next: unknown
+      if (propId !== TASK_STATUS_PROP_ID) {
+        next = field ? field.value !== true : false
+      } else if (field === undefined) {
+        next = TASK_STATUS_TODO_ID
+      } else {
+        next = field.value === TASK_STATUS_DONE_ID ? TASK_STATUS_TODO_ID : TASK_STATUS_DONE_ID
+      }
+      plans.push({ id, propId, fieldDefined: field !== undefined, next })
+    }
+    if (plans.length === 0) return false
+    this.beginUndoEntry()
+    this.write((tx) => {
+      ensureTaskStatusInTx(this.store.blocks, tx)
+      for (const p of plans) {
+        tx.patch(p.id, (b) => {
+          if (!p.fieldDefined) declareOwnProp(b, TASK_STATUS_PROP_ID)
+          setValue(b, p.propId, p.next)
+        })
+      }
+    })
+    this.structTail(null, plans.map((p) => p.id))
+    return true
   }
 
   /**
@@ -3115,6 +3245,18 @@ export class BlockEditor {
     return { blockId, offset: this.sel?.aOff ?? 0 }
   }
 
+  /** 粘贴落点：光标处；同块内有区间选中时顺带给出要**替换**的范围（与 Enter 的同块删选区同判据） */
+  pasteTarget(): { blockId: string; offset: number; cut: { from: number; to: number } | null } | null {
+    const blockId = this.sel?.aBlock ?? this.rows()[0]?.block.id
+    if (!blockId) return null
+    const s = this.sel
+    const cut =
+      s && s.aBlock === blockId && s.hBlock === blockId && s.aOff !== s.hOff
+        ? { from: Math.min(s.aOff, s.hOff), to: Math.max(s.aOff, s.hOff) }
+        : null
+    return { blockId, offset: s?.aOff ?? 0, cut }
+  }
+
   /** 按 run id 找到它（诊断/popover 用；全库找，popover 的目标块不一定在本视图） */
   findRun(runId: string): { block: Block; run: RunWithId } | null {
     let hit: { block: Block; run: RunWithId } | null = null
@@ -3479,12 +3621,13 @@ export class BlockEditor {
       onShellActivate: (date, place) => this.events.shellWrite?.(date, place),
       emitTrigger: (id) => this.emitTrigger(id),
       dropTrigger: (id) => this.dropTrigger(id),
-      insertPlainText: (id, _off, text) => this.pasteAt(id, _off, text),
+      insertPlainText: (id, _off, text, cut) => this.pasteAt(id, _off, text, cut),
       /**
        * 光标落点：**在浏览器改 DOM 之前**读（`paste` 处理器里第一件事就是捕获它）。
        * 入库是异步的，落点必须在那一刻定下来。
        */
       caretPoint: () => this.caretPoint(),
+      pasteTarget: () => this.pasteTarget(),
       /**
        * 粘贴图片：事件层只报「有这么一份字节、落在哪」；入库与插 run 由装配层接
        * （`view` 不该知道资产库长什么样）。
@@ -3804,18 +3947,22 @@ export class BlockEditor {
   }
 
   /** 粘贴：多行 → 拆块（id 规则：首块保留原 id，其余新发）。纯文本插入，继承插入点的格式。 */
-  pasteAt(id: string, offset: number, text: string): void {
+  pasteAt(id: string, offset: number, text: string, cut?: { from: number; to: number } | null): void {
     const lines = text.split('\n')
     const loc = locate(this.doc, id)
     if (!loc) return
+    // 区间选中＝先删后贴，插入点就是范围起点；两步在**同一笔**内容写里落
+    const at = cut ? Math.min(cut.from, cut.to) : offset
+    const cutTo = cut ? Math.max(cut.from, cut.to) : offset
     this.beginUndoEntry()
     if (lines.length === 1) {
-      const next = spliceRuns(loc.block.content, offset, offset, this.runsWithRefs(lines[0]!))
+      const next = spliceRuns(loc.block.content, at, cutTo, this.runsWithRefs(lines[0]!))
       // 单行粘贴与打字同档（把字落进这一行）；多行分支含拆块，归结构路径（下面不标记）
       this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
     } else {
       // 光标处切两半：首行接在左半后面，余下各成新块，**原右半接到最后一块尾部**
-      const [head, tail] = splitRuns(loc.block.content, offset)
+      const base = cut ? spliceRuns(loc.block.content, at, cutTo, []) : loc.block.content
+      const [head, tail] = splitRuns(base, at)
       const first = joinRuns(head, textRuns(lines[0]!))
       const created: Block[] = []
       for (let i = 1; i < lines.length; i++) created.push(mkBlock(lines[i]!))
@@ -3837,7 +3984,7 @@ export class BlockEditor {
     }
     this.finishUndoEntry('insert')
     this.renderAll()
-    this.placeCaret(id, offset + (lines[0]?.length ?? 0))
+    this.placeCaret(id, at + (lines[0]?.length ?? 0))
     this.emitChange('text')
   }
 

@@ -719,6 +719,8 @@ export function setupPanels(deps: PanelsDeps) {
         return readMountView(deps.prefs().mountViews, mountHost, source)
       },
       setDerivedKind: (hostBlock, source, kind) => setDerivedKind(hostBlock, source, kind),
+      // 看法下拉与自定义查询的「视图…」同壳（同一台浮层，行由宿主层现画）
+      openDerivedViewMenu: (anchor, current, onPick) => app.openDerivedViewMenu(anchor, current, (k) => onPick(k as DerivedViewKind)),
       onRemoveTab: (mountHost, tabId) => {
         void deps.getRegistry().invoke('core.mount/remove', { host: mountHost, tabId }, 'mount')
         // 摘完当场重排：栏是模型/设备状态里的一格，DOM 不会自己知道
@@ -795,7 +797,16 @@ export function setupPanels(deps: PanelsDeps) {
                 ),
               columns: derivedColumns(entry.source),
               listFields: derivedListFields(entry.source),
+              // 分组键与看法同层（设备状态）：派生栏没有可写的视图配置
+              groupBy: deps.prefs().mountGroups[mountViewKey(mountHost, entry.source)] ?? '',
               setKind: (k) => setDerivedKind(mountHostBlock, entry.source, k),
+              setGroup: (key) => {
+                const mk = mountViewKey(mountHost, entry.source)
+                if (key === '') delete deps.prefs().mountGroups[mk]
+                else deps.prefs().mountGroups[mk] = key
+                deps.scheduleDeviceSave()
+                mountInstances.get(hostId)?.area.render()
+              },
               explain: t(explainKey),
             }),
           )
