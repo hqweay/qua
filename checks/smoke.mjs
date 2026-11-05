@@ -20124,6 +20124,177 @@ await check('T237 候选引用：片段行高亮名字出现处、一键转成�
   return `提及 ${before.rows} 行（片段高亮＋按钮）→ 一键转换提及消失/引用出现（1 op）→ ⌘Z 换回来`
 })
 
+await check('T239 快速筛选（反链卡）：候选带计数、点击加入/Shift 排除、加摘可逆；全程不产生 op、不进撤销栈、不落盘', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  // 两个不同页各有一条块引用**没有既有反链的最后一页** ⇒ 卡里两行、来源两页（每页各命中 1 行）
+  const setup = await page.evaluate(() => {
+    const pages = window.__qua.pages()
+    const P = pages[pages.length - 1]
+    const from = (pageId) => {
+      window.__qua.invoke('core.page/open', { pageId })
+      const rows = window.__qua
+        .__editor.rows()
+        .map((r) => r.block)
+        .filter((x) => x.id !== pageId && x.children.length === 0)
+      window.__qua.focusBlock(rows[0].id, 999)
+      window.__qua.invoke('core.editor/insert-page-ref', { pageId: P.id })
+      return pageId
+    }
+    const Q = pages[1]
+    const R = pages[2]
+    from(Q.id)
+    from(R.id)
+    return { P: P.id, Q: Q.id, R: R.id, q: Q.title, r: R.title }
+  })
+  assert(setup.q !== setup.r, `前置：两个来源页名不同（chip 按名字点）：${JSON.stringify(setup)}`)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.P)
+  await page.waitForTimeout(450)
+  const card = '#dock-right .dock-card[data-card-id="backrefs"]'
+  const rowCount = () => page.evaluate((sel) => document.querySelectorAll(`${sel} .blk[data-depth="0"]`).length, card)
+  assert((await rowCount()) === 2, `前置：卡里两行源块`)
+
+  // 写路径零参与的三样账：撤销栈深度、命令日志、落盘的那一份库
+  await page.waitForTimeout(300) // 让开机期的任何落盘先落完，账从稳态起算
+  const ledger = () =>
+    page.evaluate(() => ({
+      undo: window.__qua.snapshot().undoDepth,
+      cmds: window.__qua.commandLog().length,
+      store: window.localStorage.getItem('qua.workspace'),
+    }))
+  const before = await ledger()
+
+  // 打开弹层：候选＝结果集里出现过的页，各带计数 1
+  await page.locator(`${card} .dock-backlinks-filter`).click()
+  await page.waitForTimeout(200)
+  const candidateChips = page.locator('.popover .quick-filter-pages .quick-filter-chip')
+  assert((await candidateChips.count()) === 2, `候选应只有两个来源页：${await candidateChips.count()}`)
+  const chipN = async (loc) => Number((await loc.locator('.quick-filter-chip-n').textContent()) ?? '0')
+  const qChip = candidateChips.filter({ hasText: setup.q })
+  const rChip = candidateChips.filter({ hasText: setup.r })
+  assert((await chipN(qChip)) === 1 && (await chipN(rChip)) === 1, `两颗候选各带计数 1`)
+
+  // 点击 → 加入「包含」：只留那一页的一行；候选不缩（计数是结果集的事实，不随手势变）
+  await qChip.click()
+  await page.waitForTimeout(250)
+  assert((await rowCount()) === 1, `加入包含后只剩那一页的一行`)
+  assert((await candidateChips.count()) === 2, `候选与计数不随筛选缩`)
+  const colOf = (col) => page.locator(`.popover .quick-filter-col[data-col="${col}"] .quick-filter-chip`)
+  assert((await colOf('include').count()) === 1, `包含列有一颗已选 chip`)
+
+  // Shift+点另一颗 → 加入「排除」：并集里没有它，行数不变；chip 落排除列
+  await rChip.click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(250)
+  assert((await rowCount()) === 1, `排除另一页不改变现有行（它已被包含列藏掉）`)
+  assert((await colOf('remove').count()) === 1, `排除列有一颗已选 chip`)
+
+  // 摘掉包含（点已选 chip）→ 另一页回来了；再摘排除 → 全部回来（可逆）
+  await colOf('include').click()
+  await page.waitForTimeout(250)
+  assert((await rowCount()) === 1, `摘掉包含后剩另一页的一行`)
+  await colOf('remove').click()
+  await page.waitForTimeout(250)
+  assert((await rowCount()) === 2, `两列摘空＝无筛选：行集回到原样`)
+
+  // 排除到全空：空态说自己的实话（「没有符合筛选的引用」），不冒充「还没有反链」
+  await candidateChips.filter({ hasText: setup.q }).click({ modifiers: ['Shift'] })
+  await candidateChips.filter({ hasText: setup.r }).click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(250)
+  const emptied = await page.evaluate((sel) => ({
+    rows: document.querySelectorAll(`${sel} .blk[data-depth="0"]`).length,
+    note: document.querySelector(`${sel} .dock-empty`)?.textContent ?? '',
+  }), card)
+  assert(emptied.rows === 0, `两页都排除后没有行：${JSON.stringify(emptied)}`)
+  assert(emptied.note.includes('没有符合筛选'), `筛空的空态要说「筛选」，不说「没有反链」：${JSON.stringify(emptied)}`)
+
+  await page.waitForTimeout(300)
+  const after = await ledger()
+  assert(
+    after.undo === before.undo && after.cmds === before.cmds && after.store === before.store,
+    `全程不改撤销栈/命令日志/落盘：undo ${before.undo}→${after.undo} cmds ${before.cmds}→${after.cmds} store ${before.store === after.store}`,
+  )
+
+  await ctx.close()
+  return `候选两页各带计数 1；包含→1 行、Shift 排除→落排除列、逐颗摘除两行全回；筛空说「没有符合筛选的引用」；undo/命令/落盘零变化`
+})
+
+await check('T240 快速筛选（引用栏）：大纲筛行；切到表格是同一份 chips；摘空＝无筛选；同样零写路径', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const setup = await page.evaluate(() => {
+    const pages = window.__qua.pages()
+    const P = pages[pages.length - 1]
+    const from = (pageId) => {
+      window.__qua.invoke('core.page/open', { pageId })
+      const rows = window.__qua
+        .__editor.rows()
+        .map((r) => r.block)
+        .filter((x) => x.id !== pageId && x.children.length === 0)
+      window.__qua.focusBlock(rows[0].id, 999)
+      window.__qua.invoke('core.editor/insert-page-ref', { pageId: P.id })
+      return pageId
+    }
+    const Q = pages[1]
+    const R = pages[2]
+    from(Q.id)
+    from(R.id)
+    return { P: P.id, q: Q.title, r: R.title }
+  })
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.P)
+  await page.waitForTimeout(450)
+  await mountTab(page, 'refs')
+  const countText = () => page.evaluate(() => document.querySelector('.mount-derived-count')?.textContent ?? '')
+  assert((await countText()).includes('2'), `前置：引用栏两行：${await countText()}`)
+
+  await page.waitForTimeout(300)
+  // 撤销/命令的账从**任何手势之前**起算；落盘的账从**切看法之后**起算——
+  // 切看法是设备状态的合法写（偏好），不许把它的账算到 chips 头上
+  const start = await page.evaluate(() => ({ undo: window.__qua.snapshot().undoDepth, cmds: window.__qua.commandLog().length }))
+
+  // 弹层 → 包含其中一页：大纲的行与抬头数字一起变
+  await page.locator('#editor .mount .mount-derived-filter').first().click()
+  await page.waitForTimeout(200)
+  const candidateChips = page.locator('.popover .quick-filter-pages .quick-filter-chip')
+  await candidateChips.filter({ hasText: setup.q }).click()
+  await page.waitForTimeout(250)
+  assert((await countText()).includes('1'), `筛后抬头＝1：${await countText()}`)
+  assert((await mountRows(page)) === 1, `大纲只剩那一页的一行`)
+
+  // 切到表格：同一份 chips 也在生效（两处各算各的就会出现两批行）
+  await page.locator('.mount-derived-view[data-kind="table"]').click()
+  await page.waitForTimeout(450)
+  const tableRows = await page.evaluate(() => document.querySelectorAll('.mount-view .tv-row').length)
+  assert(tableRows === 1, `表格看法读到同一份筛选（1 行）：${tableRows}`)
+
+  // 回大纲（切看法点的是弹层外的按钮，弹层已关，重开再摘）
+  await page.locator('.mount-derived-view[data-kind="outline"]').click()
+  await page.waitForTimeout(250)
+  const ledger = () =>
+    page.evaluate(() => ({
+      undo: window.__qua.snapshot().undoDepth,
+      cmds: window.__qua.commandLog().length,
+      store: window.localStorage.getItem('qua.workspace'),
+    }))
+  const before = await ledger()
+
+  await page.locator('#editor .mount .mount-derived-filter').first().click()
+  await page.waitForTimeout(200)
+  await page.locator('.popover .quick-filter-col[data-col="include"] .quick-filter-chip').click()
+  await page.waitForTimeout(250)
+  assert((await countText()).includes('2'), `摘空后抬头＝2：${await countText()}`)
+  assert((await mountRows(page)) === 2, `摘空后两行都回来`)
+
+  await page.waitForTimeout(300)
+  const after = await ledger()
+  assert(
+    after.undo === start.undo && after.cmds === start.cmds && after.store === before.store,
+    `全程不改撤销栈/命令日志、chips 不落盘：undo ${start.undo}→${after.undo} cmds ${start.cmds}→${after.cmds} store ${before.store === after.store}`,
+  )
+
+  await ctx.close()
+  return `引用栏：包含一页→抬头与大纲同减；表格看法同一份 chips（1 行）；摘空＝无筛选；undo/命令/落盘零变化`
+})
+
 /**
  * **判定必须在所有用例之后**：这一段曾经写在中途，之后新增的用例（T206 起）即使红了
  * 也不会进 `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。
