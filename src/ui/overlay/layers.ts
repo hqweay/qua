@@ -16,6 +16,7 @@ import { renderIcon } from '../../view/icons.ts'
 import { captureFocus, type FocusReturn } from './focus-return.ts'
 import { placeNear } from './place.ts'
 import { dismissFloating } from './overlay-dismiss.ts'
+import { QueryGate } from './query-gate.ts'
 
 export interface Row {
   id: string
@@ -157,6 +158,11 @@ export class Layers {
   private allRows: Row[] = []
   private active = 0
   private opts: MenuOpts | null = null
+  /**
+   * 输入框的「什么时候真的过滤」：组合期不过滤、同值只放行一次。
+   * 每次开菜单换一份新状态（上一次的查询词不该影响这一次）。
+   */
+  private gate = new QueryGate()
   private drawerEl: HTMLElement | null = null
   private toastEl: HTMLElement | null = null
   private popEl: HTMLElement | null = null
@@ -261,6 +267,7 @@ export class Layers {
     this.allRows = o.rows
     this.rows = o.rows
     this.active = 0
+    this.gate = new QueryGate()
     const box = document.createElement('div')
     box.className = 'layer'
     box.setAttribute('role', 'dialog')
@@ -275,7 +282,14 @@ export class Layers {
       input.className = 'layer-input'
       input.placeholder = o.placeholder ?? t('ui.search.placeholder')
       input.spellcheck = false
-      input.addEventListener('input', () => this.applyQuery(input.value))
+      // 组合期的输入法中间态不重建候选；组合结束只发一次（与随后的同值 input 合并）
+      input.addEventListener('compositionstart', () => this.gate.compositionStart())
+      input.addEventListener('compositionend', () => {
+        if (this.gate.compositionEnd(input.value)) this.applyQuery(input.value)
+      })
+      input.addEventListener('input', () => {
+        if (this.gate.input(input.value)) this.applyQuery(input.value)
+      })
       input.addEventListener('keydown', (e) => e.stopPropagation())
       box.appendChild(input)
       this.inputEl = input

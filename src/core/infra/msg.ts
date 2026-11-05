@@ -317,6 +317,7 @@ export const MSG = {
   'ui.tagPicker.reusePage': '把同名页「{name}」也标记为标签',
   'ui.tagPicker.reuseHint': '同名必同一块：复用它，不新建',
   'ui.tagPicker.typeToCreate': '输入名字新建标签',
+  'ui.tagPicker.members': '{count} 个块',
   'ui.role.removeTagTitle': '「{tag}」还被 {members} 个块打着',
   'ui.role.removeTagContinue': '继续（值不会丢，会变成「本块自有」）',
   'ui.role.declarations': '{count} 个标签属性会失效；重新标记为标签后自动恢复',

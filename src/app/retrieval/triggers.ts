@@ -15,16 +15,12 @@
  */
 import {
   addressesOf,
-  allTags,
-  buildAdjacency,
   displayNameOf,
   findByAlias,
-  findTagByName,
   hasIdentity,
   hasList,
   isJournal,
   normalizeAlias,
-  parentsOf,
   plainText,
   primaryAliasOf,
   tagIdsOf,
@@ -36,6 +32,7 @@ import { resolveBindings } from '../../core/infra/bindings.ts'
 import { t } from '../../core/infra/msg.ts'
 import { TRIGGER_QUERY_MAX, type TriggerChar } from '../../core/infra/trigger.ts'
 import { rowsFromBindings, type Row } from '../../ui/overlay/layers.ts'
+import { createTagChoice } from './tag-choice.ts'
 // 第二段（成员搜索）的判据住在 `member-rows.ts`（纯函数，可单测）；这里只取成员上限常量，
 // 并把形状转发给装配层（`main.ts` 从这里拿 `memberRows`，与 `createTriggers` 同一个门面）。
 import { INSTANCE_CAP } from './member-rows.ts'
@@ -154,54 +151,19 @@ function instanceRows(tags: readonly Block[], want: string, deps: TriggerDeps): 
 
 function tagRows(query: string, deps: TriggerDeps): Row[] {
   const forest = deps.forest()
-  const want = normalizeAlias(query)
-  const tags = allTags(forest)
-    .slice()
-    // 排序用**主地址**（全名）而不是显示叶子：`A/B` 与 `C/B` 的叶子相同，按叶子排会看着无序
-    .sort((a, b) => (primaryAliasOf(a) || displayNameOf(a)).localeCompare(primaryAliasOf(b) || displayNameOf(b)))
-
-  // 边图邻接表一次建好：这一屏要为每个标签问「它的上级是谁」，逐个现建就是 O(标签数 × 全库)
-  const adj = buildAdjacency(forest)
-  const classRows: Row[] = tags.filter((tag) => matchesName(tag, want)).map((tag) => {
-    const name = displayNameOf(tag)
-    const parents = parentsOf(tag, adj)
-    return {
-      id: `retrieval/tag/${tag.id}`,
-      label: `#${name}`,
-      hint: parents.length > 0 ? t('ui.tagPicker.hierarchy', { parents: parents.map((p) => `#${displayNameOf(p)}`).join('、') }) : '',
-      icon: 'lucide:hash',
-      group: 'retrieval/2-tag',
-      keyHint: deps.shortcutHint,
-      pick: { kind: 'tag', id: tag.id, name: primaryAliasOf(tag) || name },
-    }
+  // 候选、排序、新建行的口径和「插入标签」浮层只有一份（行形状仍由各自决定）
+  const choice = createTagChoice(forest, {
+    idPrefix: 'retrieval/tag',
+    tagGroup: 'retrieval/2-tag',
+    createGroup: 'retrieval/3-new',
+    createFirst: false,
+    keyHint: deps.shortcutHint,
+    createIcon: 'lucide:plus',
+    createId: (name) => `retrieval/newTag/${name}`,
+    createLabel: (name) => t('ui.retrieval.newTag', { name }),
+    createHint: (page) => (page ? t('ui.tagPicker.reuseHint') : t('ui.retrieval.newTagHint')),
   })
-
-  const trimmed = query.trim()
-  // 同名页会**兼作标签**（`ensureTagInTx` 复用）——这件事必须在行上说出来
-  const page = trimmed === '' ? undefined : findByAlias(forest, trimmed, (b) => hasList(b, 'page') && !hasList(b, 'tag'))
-  /**
-   * 这一行是**目标**（「还不存在的标签」），不是「新建实例」：
-   * `↵` / `⌥↵` / `⇧↵` 仍然各给一个落点（与已有标签行同一条判据）。
-   *
-   * ⚠️ 只在**没有同名标签**时出现：标签已经存在时，已有那一行用三种键就够了；
-   *    再显示「新建标签」是假话。部分匹配（`Foo` 对 `Foobar`）不算同名，
-   *    所以 `Foo` 仍能建出来。
-   */
-  const newRows: Row[] =
-    trimmed === '' || findTagByName(forest, trimmed)
-      ? []
-      : [
-          {
-            id: `retrieval/newTag/${trimmed}`,
-            label: t('ui.retrieval.newTag', { name: trimmed }),
-            hint: page ? t('ui.tagPicker.reuseHint') : t('ui.retrieval.newTagHint'),
-            icon: 'lucide:plus',
-            group: 'retrieval/3-new',
-            keyHint: deps.shortcutHint,
-            pick: { kind: 'newTag', name: trimmed },
-          },
-        ]
-  return [...instanceRows(tags, want, deps), ...classRows, ...newRows]
+  return [...instanceRows(choice.tags, normalizeAlias(query), deps), ...choice.rows(query)]
 }
 
 /* -------------------------------------------------------- 页与块（`@` 源）*/
