@@ -52,6 +52,7 @@ import { installDispatch, setupKeys } from './app/wiring/keys.ts'
 import { dispatchKey } from './core/infra/dispatch.ts'
 import { setupOwners } from './app/wiring/owners.ts'
 import { QueryTree } from './ui/query/query-tree.ts'
+import type { SearchFaceDeps } from './ui/search/search-face.ts'
 import { setupChrome } from './app/wiring/chrome.ts'
 import { setupPages, type TabInfo } from './app/wiring/pages.ts'
 import { renderCenterTabs as paintCenterTabs } from './ui/chrome/center-tabs.ts'
@@ -450,6 +451,68 @@ const axis = setupAxis({
 })
 
 /**
+ * 搜索面的依赖：tab 宿主与诊断探针共用同一个产地。
+ *
+ * 这些依赖用闭包/取值函数——`run`／`scheduleSave` 在本节之后才装配（见文件顺序），
+ * 调用发生在用户打开搜索面时，不是装配时。
+ */
+const searchFaceDeps = (): SearchFaceDeps => ({
+  kb,
+  /**
+   * 预览是一台**真编辑器**：它读同一份 store、走同一个写入口、接同一份事件表
+   * （右键块菜单 / `#`·`@` 补全 / 引用跳转 / 撞名提示都在里面）。
+   * 这些依赖用闭包/取值函数——`run`／`scheduleSave` 在本节之后才装配（见文件顺序）。
+   */
+  store: blocks,
+  write: editorRun(run, () => ed),
+  /**
+   * `inlineViewBodies=true`：预览画的是**这一块的真实位置**（用户在这里改它），
+   * 所以查询块要像正文那样把结果画在自己行下。不传的话，搜到查询块点开只看见
+   * 一行名字、看不到结果，也不会有折叠三角（`bodyFoldable` 要求 `viewBody` 在场）。
+   */
+  wire: (editor, change) => wireViewEditor(editor, change, 'surface', true),
+  onFocus: (editor) => {
+    ed = editor
+    scheduleBadge()
+  },
+  onDispose: (editor) => {
+    if (ed !== editor) return
+    ed = mainEd
+    scheduleBadge()
+  },
+  // 预览里编辑：落盘、刷角标与 tab 标题。**不重跑搜索**（重跑会重排列表、打断这一行的输入）
+  onChange: () => {
+    syncSections()
+    scheduleSave()
+    scheduleTabs()
+    scheduleBadge()
+  },
+  // 引擎现取：索引状态会变（ready 才信 FTS，否则扫描降级——面自己把降级说明白）
+  query: (text, limit) => (search ?? { query: async () => ({ hits: [], mode: 'scan' as const }) }).query(text, limit),
+  // 行怎么说与 ⌘P 浮层同一份
+  describe: (hit, term) => describeHit(kb, hit, term),
+  openBlock: (id) => app.openBlock(id, 'center'),
+  // 晋升：把词写进 {text} 条件建查询块（与手建同一份创建路径，落森林顶层，一笔回滚）
+  promote: (term) => app.createQuery(term, { where: { text: term } }),
+  // 无结果的创建入口：找到或创建页（与引用浮层同一条创建路径），建好当场打开
+  createPage: (name) => {
+    const r = pageDeps.run((tx) => ensurePageInTx({ resolveAlias: (n) => kb.resolveAlias(n), roots: () => kb.roots() }, name, tx)?.id ?? '')
+    if (r.result !== '') app.openBlock(r.result, 'center')
+  },
+  copyRef: (id) => {
+    void registry.invoke('core.editor/copy-block-ref', { blockId: id }, 'surface')
+  },
+  // 刷新之后说一句（移除了几条 / 失败保留旧结果）：与查询视图同一个出口
+  toast: (text, kind) => app.toast(text, kind),
+  // 空态「最近更新」：模型直取（修改时间倒序），不经过查询引擎。
+  // 只取前 N 块再投影（不先对整片森林排序）：结果与「全量排序后 slice」逐条相同
+  recents: (limit) =>
+    recentBlocks({ roots: ws.blocks }, limit)
+      .map((b) => describeHit(kb, { blockId: b.id, score: 0 }, ''))
+      .filter((v): v is HitView => v !== null),
+})
+
+/**
  * 中心表面宿主：派生/工具面的 tab 身体住这里（与编辑器二选一可见）。
  * 装配在 chrome 之后（要它的宿主元素）、pages 之前（tab 状态层要经由它切表面）。
  */
@@ -458,61 +521,7 @@ const surface = setupSurface({
   getRegistry: () => registry,
   renderDocks: () => renderDocks(),
   getChrome: () => chrome,
-  searchDeps: () => ({
-    kb,
-    /**
-     * 预览是一台**真编辑器**：它读同一份 store、走同一个写入口、接同一份事件表
-     * （右键块菜单 / `#`·`@` 补全 / 引用跳转 / 撞名提示都在里面）。
-     * 这些依赖用闭包/取值函数——`run`／`scheduleSave` 在本节之后才装配（见文件顺序）。
-     */
-    store: blocks,
-    write: editorRun(run, () => ed),
-    /**
-     * `inlineViewBodies=true`：预览画的是**这一块的真实位置**（用户在这里改它），
-     * 所以查询块要像正文那样把结果画在自己行下。不传的话，搜到查询块点开只看见
-     * 一行名字、看不到结果，也不会有折叠三角（`bodyFoldable` 要求 `viewBody` 在场）。
-     */
-    wire: (editor, change) => wireViewEditor(editor, change, 'surface', true),
-    onFocus: (editor) => {
-      ed = editor
-      scheduleBadge()
-    },
-    onDispose: (editor) => {
-      if (ed !== editor) return
-      ed = mainEd
-      scheduleBadge()
-    },
-    // 预览里编辑：落盘、刷角标与 tab 标题。**不重跑搜索**（重跑会重排列表、打断这一行的输入）
-    onChange: () => {
-      syncSections()
-      scheduleSave()
-      scheduleTabs()
-      scheduleBadge()
-    },
-    // 引擎现取：索引状态会变（ready 才信 FTS，否则扫描降级——面自己把降级说明白）
-    query: (text, limit) => (search ?? { query: async () => ({ hits: [], mode: 'scan' as const }) }).query(text, limit),
-    // 行怎么说与 ⌘P 浮层同一份
-    describe: (hit, term) => describeHit(kb, hit, term),
-    openBlock: (id) => app.openBlock(id, 'center'),
-    // 晋升：把词写进 {text} 条件建查询块（与手建同一份创建路径，落森林顶层，一笔回滚）
-    promote: (term) => app.createQuery(term, { where: { text: term } }),
-    // 无结果的创建入口：找到或创建页（与引用浮层同一条创建路径），建好当场打开
-    createPage: (name) => {
-      const r = pageDeps.run((tx) => ensurePageInTx({ resolveAlias: (n) => kb.resolveAlias(n), roots: () => kb.roots() }, name, tx)?.id ?? '')
-      if (r.result !== '') app.openBlock(r.result, 'center')
-    },
-    copyRef: (id) => {
-      void registry.invoke('core.editor/copy-block-ref', { blockId: id }, 'surface')
-    },
-    // 刷新之后说一句（移除了几条 / 失败保留旧结果）：与查询视图同一个出口
-    toast: (text, kind) => app.toast(text, kind),
-    // 空态「最近更新」：模型直取（修改时间倒序），不经过查询引擎。
-    // 只取前 N 块再投影（不先对整片森林排序）：结果与「全量排序后 slice」逐条相同
-    recents: (limit) =>
-      recentBlocks({ roots: ws.blocks }, limit)
-        .map((b) => describeHit(kb, { blockId: b.id, score: 0 }, ''))
-        .filter((v): v is HitView => v !== null),
-  }),
+  searchDeps: searchFaceDeps,
 })
 
 /**
@@ -2768,6 +2777,8 @@ diag = setupDiagnostics({
     quiet = v
   },
   getSearch: () => search,
+  /** 自检探针与 tab 宿主同一个产地（见 `searchFaceDeps`） */
+  searchFaceDeps,
 })
 
 paintStaticCopy()

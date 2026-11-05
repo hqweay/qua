@@ -20937,6 +20937,51 @@ await check('T245 输入法组词期的 ↵ 不执行浮层命令（捕获阶段
 })
 
 /**
+ * **T246：同一个搜索面「挂 → 卸 → 再挂」幂等，且紧凑形态不藏预览。**
+ *
+ * 这一轮还不接浮层，所以用 `__qua.searchFaceCycle` 在临时宿主里跑两轮：
+ * 验四件事——卸载后订阅归零、再挂不重复订阅、右列编辑器不泄漏、词/行/选中都在；
+ * 外加一条形态断言：compact 不摆「晋升为查询块」，tab 摆；两轮 `data-preview` 都是 1
+ * （藏预览＝点了结果行没反应，审查已否掉）。
+ */
+await check('T246 搜索面挂→卸→再挂幂等；compact 只收 tab 专属件、预览仍在', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const term = '挂载探针MNO'
+  await plantProbe(page, term)
+  const report = await page.evaluate((t) => window.__qua.searchFaceCycle(t), term)
+  assert(report, '自检口要接上：searchFaceCycle 不该回 null')
+
+  for (const [label, r] of Object.entries({ compact: report.compact, tab: report.tab })) {
+    assert(r.activeAfterUnmount === 0, `${label}：卸载后订阅要退干净，剩 ${r.activeAfterUnmount}`)
+    assert(
+      r.activeAfterRemount === r.activeBeforeUnmount,
+      `${label}：再挂不能重复订阅（前 ${r.activeBeforeUnmount} 条，后 ${r.activeAfterRemount} 条）`,
+    )
+    assert(r.detachedWhileUnmounted, `${label}：卸载期间根要离开宿主`)
+    assert(r.editorsAfterUnmount === 0, `${label}：卸载后右列编辑器 DOM 要摘净，剩 ${r.editorsAfterUnmount}`)
+    assert(
+      r.roots === 1 && r.lists === 1 && r.previews === 1 && r.editors === 1,
+      `${label}：再挂后各该一份，收到 roots=${r.roots} lists=${r.lists} previews=${r.previews} editors=${r.editors}`,
+    )
+    assert(r.previewFlag === '1', `${label}：右列预览要在（data-preview=${r.previewFlag}）`)
+    assert(r.termBefore === term && r.termAfter === term, `${label}：词不该丢（${r.termBefore}→${r.termAfter}）`)
+    assert(r.rowsBefore > 0 && r.rowsAfter === r.rowsBefore, `${label}：行不该丢（${r.rowsBefore}→${r.rowsAfter}）`)
+    assert(
+      r.selectedBefore !== '' && r.selectedAfter === r.selectedBefore,
+      `${label}：选中不该丢（${r.selectedBefore}→${r.selectedAfter}）`,
+    )
+    assert(
+      r.queriesAfterWait === r.queriesBeforeWait,
+      `${label}：卸载时排着的防抖不许补发（多发了 ${r.queriesAfterWait - r.queriesBeforeWait} 次查询）`,
+    )
+  }
+  assert(report.compact.promote === false, 'compact 不该摆「晋升为查询块」')
+  assert(report.tab.promote === true, 'tab 形态要保留「晋升为查询块」')
+  await ctx.close()
+  return `两轮：卸载归零、再挂不重复订阅、编辑器不泄漏、词/行/选中都在；compact 收晋升、留预览`
+})
+
+/**
  * **判定必须在所有用例之后**：这一段曾经写在中途，之后新增的用例（T206 起）即使红了
  * 也不会进 `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。
  * 新增用例一律加在本段**之前**。

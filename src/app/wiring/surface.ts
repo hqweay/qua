@@ -43,6 +43,21 @@ export function setupSurface(deps: SurfaceDeps) {
     },
   }
 
+  /** 搜索面：造一台新的（旧的先收掉）；词随打开带一次，不做 live 双写 */
+  function buildSearchFace(): SearchFace {
+    searchFace?.dispose()
+    const face = new SearchFace(deps.searchDeps())
+    searchFace = face
+    const term = pendingTerm
+    pendingTerm = null
+    face.setTerm(term ?? '')
+    window.setTimeout(() => {
+      // 只在它还是当前那一台时抢焦点（可能已经切走/收掉）
+      if (face === searchFace) face.focusInput()
+    })
+    return face
+  }
+
   /** 一张面的身体。派生卡的分支与槽渲染共用构造函数；中心接不住的卡在这里落 null ⇒ 回编辑器，不摆空面。 */
   function buildBody(ref: SurfaceRef): HTMLElement | null {
     if (ref.kind === 'derived') {
@@ -52,18 +67,7 @@ export function setupSurface(deps: SurfaceDeps) {
       }
       return null
     }
-    // 工具面的身体是**有状态的组件**；目录（`UTILITY_FACES`）加一行、这里加一个 case
-    switch (ref.face) {
-      case 'search': {
-        searchFace?.dispose()
-        searchFace = new SearchFace(deps.searchDeps())
-        const term = pendingTerm
-        pendingTerm = null
-        searchFace.setTerm(term ?? '')
-        window.setTimeout(() => searchFace?.focusInput(), 0)
-        return searchFace.root
-      }
-    }
+    // 工具面是**有状态的组件**：它自己 `mount(host)`（见 `render` 的搜索面分支）
     return null
   }
 
@@ -80,6 +84,19 @@ export function setupSurface(deps: SurfaceDeps) {
       chrome.scrollEl.hidden = false
       return
     }
+    /**
+     * **搜索面**：有状态的组件，根由它自己 `mount(host)`（不是 render 替它 append 一颗身体）。
+     * 布局属性（`data-face` / `hidden`）必须**先**落定再挂编辑器——`BlockEditor` 构造时会量 DOM。
+     */
+    if (current.kind === 'utility' && current.face === 'search') {
+      const face = buildSearchFace()
+      el.replaceChildren()
+      el.dataset.face = current.face
+      el.hidden = false
+      chrome.scrollEl.hidden = true
+      face.mount(el)
+      return
+    }
     const body = buildBody(current)
     if (!body) {
       // 守卫挡住了不认识的面 ⇒ 回到编辑器（不摆一张空面）
@@ -94,13 +111,6 @@ export function setupSurface(deps: SurfaceDeps) {
     else delete el.dataset.face
     el.hidden = false
     chrome.scrollEl.hidden = true
-    /**
-     * **身体接进文档之后**才让组件建编辑器。
-     *
-     * `BlockEditor` 构造时就渲染并量 DOM（行高、选区、折叠几何都从容器现读）——
-     * 在游离容器上量出来的东西是错的，而这类错不报错，只表现为「光标落在错的地方」。
-     */
-    if (current.kind === 'utility' && current.face === 'search') searchFace?.mount()
   }
 
   /**

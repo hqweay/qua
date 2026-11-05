@@ -38,6 +38,7 @@ import { renderIcon } from '../../view/icons.ts'
 import type { HitView } from '../../app/search/hits.ts'
 import type { SearchHit, SearchResult } from '../../app/search/service.ts'
 import { pickAfterRemoval, pickSelection, sharedHintOf } from './selection.ts'
+import { faceChrome } from './face-chrome.ts'
 import { PreviewPane } from './preview-pane.ts'
 
 /** 输入防抖窗口（ms）：见 `debounce` 字段的取值理由 */
@@ -71,6 +72,11 @@ export interface SearchFaceDeps {
   recents: (limit: number) => HitView[]
   /** 刷新之后说一句（移除了几条 / 失败保留旧结果）：与查询视图同一个出口 */
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
+  /**
+   * **紧凑形态**（浮层用；这一轮只让模式存在，还没有宿主传它）。
+   * 形态差异只在 `faceChrome()` 里翻译成「哪些件不摆」，不要散记 `if (compact)`。
+   */
+  compact?: boolean
 }
 
 const VIA_KEY: Record<FtsSource, MsgId> = {
@@ -125,8 +131,11 @@ export class SearchFace {
   /** 异步结果的序号：慢一拍的回复不能盖掉刚打出来的新词 */
   private seq = 0
   private disposed = false
-  /** store 订阅：冻结集里的块被外部动过 ⇒ 点亮 stale */
-  private readonly offStore: () => void
+  /**
+   * store 订阅：冻结集里的块被外部动过 ⇒ 点亮 stale。
+   * 可空：`unmount()` 退订、`mount()` 再订阅，所以它必须能表达「现在没订」。
+   */
+  private offStore: (() => void) | null = null
   /**
    * 输入防抖：连续输入只查最后一次。
    * 取值 140ms：足够跨过一次键盘连击，又不至于让「停下就想看结果」有体感延迟；
@@ -136,6 +145,8 @@ export class SearchFace {
 
   constructor(deps: SearchFaceDeps) {
     this.deps = deps
+    // 形态的**唯一**翻译点：构造器里只读这份结果，不再现读 `deps.compact`
+    const chrome = faceChrome(deps.compact === true)
     this.debounce = new DebouncedInput((value) => this.setTerm(value), SEARCH_INPUT_DEBOUNCE_MS)
     this.root = document.createElement('div')
     this.root.className = 'search-face'
@@ -175,16 +186,23 @@ export class SearchFace {
       }
     })
 
-    const promote = document.createElement('button')
-    promote.type = 'button'
-    promote.className = 'search-face-promote'
-    promote.title = t('ui.search.promote')
-    promote.setAttribute('aria-label', t('ui.search.promote'))
-    renderIcon(promote, 'lucide:list-filter', 'list-filter')
-    promote.addEventListener('click', () => {
-      const q = this.term()
-      if (q !== '') this.deps.promote(q)
-    })
+    /**
+     * 「晋升为查询块」是 **tab 专属**：紧凑形态不摆这件（要建内容的那一步属于常驻面）。
+     * 判据来自 `faceChrome`，不是这里的 `if (deps.compact)`。
+     */
+    let promote: HTMLButtonElement | null = null
+    if (chrome.promote) {
+      promote = document.createElement('button')
+      promote.type = 'button'
+      promote.className = 'search-face-promote'
+      promote.title = t('ui.search.promote')
+      promote.setAttribute('aria-label', t('ui.search.promote'))
+      renderIcon(promote, 'lucide:list-filter', 'list-filter')
+      promote.addEventListener('click', () => {
+        const q = this.term()
+        if (q !== '') this.deps.promote(q)
+      })
+    }
 
     this.modeEl = document.createElement('span')
     this.modeEl.className = 'search-face-mode'
@@ -208,7 +226,9 @@ export class SearchFace {
     this.refreshBtn.textContent = t('ui.query.refresh')
     this.refreshBtn.addEventListener('click', () => this.refresh())
 
-    bar.append(this.input, this.staleEl, this.refreshBtn, promote, this.modeEl)
+    bar.append(this.input, this.staleEl, this.refreshBtn)
+    if (promote) bar.append(promote)
+    bar.append(this.modeEl)
 
     this.listEl = document.createElement('div')
     this.listEl.className = 'search-face-list'
@@ -250,14 +270,22 @@ export class SearchFace {
 
     this.root.append(bar, this.bodyEl)
 
-    /**
-     * **冻结的命中集**：外部改了其中某块 ⇒ 只点亮「结果可能已过期」，不重排。
-     *
-     * 为什么订阅在这里而不在 `EditableBlock` 里：那一台管的是**右列**（预览装载），
-     * 它已经会自己跟上外部变化；这一层管的是**左列**（冻结的结果集）——两件事。
-     * 自己的编辑不算外部变化（那一行已经按 id 局部更新过）。
-     */
-    this.offStore = deps.store.subscribe((source, ids) => {
+    this.subscribeStore()
+    this.renderRecents()
+  }
+
+  /**
+   * **冻结的命中集**：外部改了其中某块 ⇒ 只点亮「结果可能已过期」，不重排。
+   *
+   * 为什么订阅在这里而不在 `EditableBlock` 里：那一台管的是**右列**（预览装载），
+   * 它已经会自己跟上外部变化；这一层管的是**左列**（冻结的结果集）——两件事。
+   * 自己的编辑不算外部变化（那一行已经按 id 局部更新过）。
+   *
+   * 幂等：已订过就返回（`mount()` 每次都会调它，但同一时刻只该有一条）。
+   */
+  private subscribeStore(): void {
+    if (this.offStore) return
+    this.offStore = this.deps.store.subscribe((source, ids) => {
       if (this.disposed || this.frozen.size === 0) return
       if (isOwnEdit(source, this.pane.editor)) return
       // 拿不到「动过哪些块」就不点亮：宁可少提示，也不要因为别处重画而误报
@@ -275,18 +303,35 @@ export class SearchFace {
       for (const id of touched) this.refreshRowSnippet(id)
       this.paintStale()
     })
-
-    this.renderRecents()
   }
 
   /**
-   * **root 接进文档之后**再装预览编辑器。
+   * 挂到给定宿主：**根进文档之后**再装预览编辑器（`BlockEditor` 构造时会量 DOM，
+   * 在游离容器上量出来的尺寸/选区是错的）。
    *
-   * `BlockEditor` 构造时就会渲染并量 DOM；在游离容器上量出来的尺寸/选区是错的
-   * （`surface.ts` 是先造身体、随后才 `replaceChildren`）。
+   * 幂等：已在同一宿主上就只补一次预览挂载；换宿主则把根搬过去。
    */
-  mount(): void {
+  mount(host: HTMLElement): void {
+    if (this.disposed) return
+    this.subscribeStore()
+    if (this.root.parentElement !== host) host.appendChild(this.root)
     this.pane.mount()
+  }
+
+  /**
+   * **从宿主上摘下来**（不是销毁）：退订、撤掉挂着的输入定时器、拆预览编辑器、
+   * 把根从宿主移除。保留词 / 列表 / 选中，再次 `mount()` 能接着用。
+   *
+   * 幂等：没有宿主时就什么都不做。
+   */
+  unmount(): void {
+    if (this.disposed) return
+    // 挂着的防抖会在卸载之后补发一枪（用户已经看不见这一屏了）
+    this.debounce.cancel()
+    this.pane.unmount()
+    this.offStore?.()
+    this.offStore = null
+    this.root.parentElement?.removeChild(this.root)
   }
 
   /** 词随打开带过来一次；之后这个 tab 自己管自己的词 */
@@ -379,7 +424,8 @@ export class SearchFace {
     if (this.disposed) return
     this.disposed = true
     this.debounce.dispose()
-    this.offStore()
+    this.offStore?.()
+    this.offStore = null
     // 右列自己收尾：摘高亮 → 先 flush 最后一笔 → 交回活动编辑器 → 拆（见 `PreviewPane.dispose`）
     this.pane.dispose()
   }

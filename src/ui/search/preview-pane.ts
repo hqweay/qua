@@ -131,9 +131,32 @@ export class PreviewPane {
     ed.placeCaret(id, 0)
   }
 
+  /**
+   * **从宿主上摘下来**（不是销毁）：拆编辑器、摘高亮，但保留「选谁 / 词 / 折叠记忆」，
+   * 允许之后再次 `mount()`。幂等。
+   *
+   * 与 `dispose()` 只差一条：这个实例还能再用。两者共用同一份 `teardown()`，
+   * 免得「拆干净」这件事出现两个版本。
+   */
+  unmount(): void {
+    if (this.disposed) return
+    this.teardown()
+    this.mounted = false
+  }
+
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.teardown()
+  }
+
+  /**
+   * 拆编辑器的**唯一**一份（卸载与销毁共用）。
+   *
+   * ⚠️ `component.root.remove()` 必须显式做：`EditableBlock.dispose()` 只拆订阅与事件，
+   * 不把岛根从父节点摘掉——不摘的话重新 `mount()` 会留下**第二份**编辑器 DOM。
+   */
+  private teardown(): void {
     // 高亮住在**全局注册表**里：面拆掉不摘，它会留在别处（而且没人再清）
     this.clearMatch()
     /**
@@ -142,10 +165,13 @@ export class PreviewPane {
      * 覆盖层关闭是「先 remove DOM 再还焦点」：`focusout` 那条补 flush 是**延迟一拍**的
      * （`setTimeout(0)`），等不到就 dispose 了。`flush()` 同步收尾，不依赖 blur。
      */
-    this.component?.flush()
-    const ed = this.component?.ed
+    const component = this.component
+    if (!component) return
+    component.flush()
+    const ed = component.ed
     if (ed) this.deps.onDispose(ed)
-    this.component?.dispose()
+    component.dispose()
+    component.root.remove()
     this.component = null
   }
 
