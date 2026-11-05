@@ -122,7 +122,7 @@ export interface MountAreaDeps {
   setDerivedKind?: (host: Block, source: DerivedSource, kind: DerivedViewKind) => void
   /**
    * 浮层外壳（快速筛选的 chips 弹层住在这里面）。装配层持有浮层实例，这一层
-   * 不认识它的落位与生命周期——给一个与弹层同形的窄缝就够。
+   * 不认识它的落位与生命周期——窄接口只收「画进哪、锚在哪」，够用。
    */
   openPopover?: (render: (host: HTMLElement) => void, anchor: DOMRect | null | (() => DOMRect | null)) => void
   /**
