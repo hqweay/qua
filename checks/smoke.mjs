@@ -20715,6 +20715,95 @@ await check('T242 搜索面冻结与刷新：外部改命中块 ⇒ 只点亮 st
   return '冻结不重排、stale 点亮、左行跟上、刷新移除并报数、最近更新不标 stale'
 })
 
+await check('T243 搜索面：长块预览滚到命中处并高亮；空态点行也能预览；「经由」按同一份来源投影现算（扫描下也有）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
+  await page.waitForTimeout(300)
+
+  /**
+   * ① **长块里命中词在屏幕外** —— 右列存在就是为了看命中的那一句。
+   *
+   * 判据用**真实矩形**：命中的 Range 必须落在预览的可视区内。块高 2300+、可视 800，
+   * 不滚的话命中在视口外——而那不报错，只表现为「预览没用」。
+   */
+  const longId = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const filler = '这是一段用来撑高块的填充文字，重复很多遍。'.repeat(120)
+    return ed.insertBlockAfter(ed.doc.roots[0].id, `${filler} 命中词LONGTARGET 在最后`)
+  })
+  await page.waitForTimeout(500)
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
+  await page.fill('.search-face-input', 'LONGTARGET')
+  await page.waitForFunction(() => document.querySelectorAll('#center-surface [data-search-row]').length > 0, null, { timeout: 3000 })
+  await page.waitForTimeout(700)
+  const long = await page.evaluate(() => {
+    const prev = document.querySelector('#center-surface .search-face-preview')
+    const tx = prev?.querySelector('.blk .tx')
+    const box = prev?.getBoundingClientRect()
+    let found = null
+    const walker = document.createTreeWalker(tx, NodeFilter.SHOW_TEXT)
+    while (walker.nextNode()) {
+      const n = walker.currentNode
+      const at = (n.textContent ?? '').indexOf('LONGTARGET')
+      if (at >= 0) {
+        const r = document.createRange()
+        r.setStart(n, at)
+        r.setEnd(n, at + 10)
+        found = r.getBoundingClientRect()
+        break
+      }
+    }
+    return {
+      blockH: Math.round(tx?.getBoundingClientRect().height ?? 0),
+      previewH: Math.round(box?.height ?? 0),
+      scrolled: Math.round(prev?.scrollTop ?? 0),
+      matchVisible: found && box ? found.top >= box.top - 1 && found.bottom <= box.bottom + 1 : null,
+      highlightNames: CSS.highlights ? [...CSS.highlights.keys()] : [],
+    }
+  })
+  assert(long.blockH > long.previewH, `前置：块要比预览高（否则滚不滚都看得见，断言恒绿）：${JSON.stringify(long)}`)
+  assert(long.matchVisible === true, `长块里命中词要滚进可视区（否则预览只剩块首）：${JSON.stringify(long)}`)
+  assert(long.scrolled > 0, `确实滚了（不是「恰好可见」）：${JSON.stringify(long)}`)
+  assert(
+    long.highlightNames.includes('search-match'),
+    `命中要高亮，且用 CSS Custom Highlight（不往 contenteditable 插 mark）：${JSON.stringify(long.highlightNames)}`,
+  )
+
+  // ② **空态（最近更新）点一行也能预览** —— 现在点它是有反馈的
+  await page.fill('.search-face-input', '')
+  await page.waitForTimeout(400)
+  const recent = await page.evaluate(() => ({
+    preview: document.querySelector('#center-surface .search-face-body')?.dataset.preview,
+    blocks: [...document.querySelectorAll('#center-surface .search-face-preview .blk[data-block-id]')].map((e) => e.dataset.blockId),
+    selected: [...document.querySelectorAll('#center-surface .search-row')].filter((e) => e.dataset.selected === '1').map((e) => e.dataset.searchRow),
+  }))
+  assert(recent.blocks.length === 1, `空态也要有预览（点了才有反馈，不是「点了没反应」）：${JSON.stringify(recent)}`)
+  assert(recent.preview === '1' && recent.blocks[0] === recent.selected[0], `空态预览跟选中一一对应：${JSON.stringify(recent)}`)
+
+  // ③ **「经由」按同一份来源投影现算**：扫描降级（web）下也要说得出来路
+  //    用一个**标签名**命中：扫描路径能搜到标签，而正文里没有那个词
+  const tagName = await page.evaluate(() => window.__qua.allBlocks().find((b) => b.roles.includes('tag'))?.aliases?.[0] ?? '')
+  assert(tagName !== '', '前置：库里要有标签块')
+  await page.fill('.search-face-input', tagName)
+  await page.waitForFunction(() => document.querySelectorAll('#center-surface [data-search-row]').length > 0, null, { timeout: 3000 })
+  await page.waitForTimeout(500)
+  const via = await page.evaluate(() => ({
+    row: document.querySelector('#center-surface .search-row-via')?.textContent ?? '',
+    note: document.querySelector('#center-surface .search-face-preview .blk-context-note')?.textContent ?? '',
+    bodyHasWord: (document.querySelector('#center-surface .search-face-preview .blk .tx')?.textContent ?? '').includes('任务'),
+  }))
+  assert(via.row !== '', `标签命中的行要标「经由」（扫描降级没有 FTS 的 source，得现算）：${JSON.stringify(via)}`)
+  assert(
+    via.note === via.row,
+    `左右两处同源（左行与右列都说得出来路，不是一处有一处空）：${JSON.stringify(via)}`,
+  )
+  assert(!via.bodyHasWord, `前置：正文里没有这个词（否则「经由」是假的）：${JSON.stringify(via)}`)
+
+  await ctx.close()
+  return '长块滚到命中并高亮、空态可预览、经由两处同源'
+})
+
 /**
  * **判定必须在所有用例之后**：这一段曾经写在中途，之后新增的用例（T206 起）即使红了
  * 也不会进 `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。

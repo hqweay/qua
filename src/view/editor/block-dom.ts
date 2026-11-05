@@ -550,6 +550,8 @@ export function makeBlockEl(
     gutter?: readonly GutterField[]
     find?: FindBlock
     context?: readonly Block[]
+    /** 这一行为什么出现在这一屏里（`Doc.rootNotes`）；省略 ＝ 不画那一格 */
+    note?: string
     /** 这是一个「展开出来的上下文根」：行首给「收起上下文」 */
     contextBack?: boolean
     /**
@@ -654,7 +656,15 @@ export function makeBlockEl(
    * ⚠️ 必须登记进 `ALLOWED_ROW_CHILDREN`：漏了它，第一次收光标就会被当游离节点删掉。
    */
   const trail = opts.context ?? []
-  if (trail.length > 0 || opts.contextBack) {
+  /**
+   * **来源说明**：这一行为什么出现在这一屏里（`Doc.rootNotes`）。
+   *
+   * 与面包屑同一条布局（`.blk-context` 那一行、`.tx` 外）：它描述**来路**而不是内容，
+   * 落进 `.tx` 就会被 `readRuns` 当字读回去。
+   * 只在**有**说明时才多挂这一格：绝大多数装载没有它，不该为此多一个空节点。
+   */
+  const note = opts.note ?? ''
+  if (trail.length > 0 || opts.contextBack || note !== '') {
     el.dataset.context = '1'
     const ctx = document.createElement('span')
     ctx.className = 'blk-context'
@@ -692,6 +702,13 @@ export function makeBlockEl(
       back.dataset.contextBackFor = b.id
       back.textContent = `↩ ${t('ui.context.collapse')}`
       ctx.appendChild(back)
+    }
+    if (note !== '') {
+      // 只读的说明，不是可点的面包屑格：它回答「为什么」，不提供去处
+      const src = document.createElement('span')
+      src.className = 'blk-context-note ui-ellipsis'
+      src.textContent = note
+      ctx.appendChild(src)
     }
     el.appendChild(ctx)
   }
