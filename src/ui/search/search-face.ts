@@ -35,6 +35,7 @@
  *     同样不显示右列。
  */
 import { t, type MsgId } from '../../core/infra/msg.ts'
+import { DebouncedInput } from '../../core/infra/debounced-input.ts'
 import { hasFoldable, isDeleted, isOwnEdit, type BlockStore } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import type { FtsSource } from '../../core/search/sources.ts'
@@ -44,6 +45,9 @@ import type { HitView } from '../../app/search/hits.ts'
 import type { SearchHit, SearchResult } from '../../app/search/service.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
 import { pickAfterRemoval, pickSelection, sharedHintOf } from './selection.ts'
+
+/** 输入防抖窗口（ms）：见 `debounce` 字段的取值理由 */
+const SEARCH_INPUT_DEBOUNCE_MS = 140
 
 export interface SearchFaceDeps {
   kb: KbClient
@@ -136,9 +140,16 @@ export class SearchFace {
   private disposed = false
   /** store 订阅：冻结集里的块被外部动过 ⇒ 点亮 stale */
   private readonly offStore: () => void
+  /**
+   * 输入防抖：连续输入只查最后一次。
+   * 取值 140ms：足够跨过一次键盘连击，又不至于让「停下就想看结果」有体感延迟；
+   * 空词与 Enter 不受它影响（见 `DebouncedInput`）。
+   */
+  private readonly debounce: DebouncedInput
 
   constructor(deps: SearchFaceDeps) {
     this.deps = deps
+    this.debounce = new DebouncedInput((value) => this.setTerm(value), SEARCH_INPUT_DEBOUNCE_MS)
     this.root = document.createElement('div')
     this.root.className = 'search-face'
 
@@ -149,8 +160,13 @@ export class SearchFace {
     this.input.className = 'search-face-input'
     this.input.placeholder = t('ui.search.placeholderBlock')
     this.input.spellcheck = false
-    this.input.addEventListener('input', () => this.setTerm(this.input.value))
+    this.input.addEventListener('input', () => this.debounce.input(this.input.value))
+    // 输入法组合期不查：每敲一个拼音字母都发一次查询，而那时词还是中间态
+    this.input.addEventListener('compositionstart', () => this.debounce.compositionStart())
+    this.input.addEventListener('compositionend', () => this.debounce.compositionEnd(this.input.value))
     this.input.addEventListener('keydown', (e) => {
+      // Enter 立即查：别让「打完就按回车」看到的是旧列表
+      if (e.key === 'Enter') this.debounce.flush()
       // `⌘/Ctrl + ↵` ＝ 在主编辑器打开（两个尺寸的差异：浮层是裸 ↵ 打开）
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
         e.preventDefault()
@@ -268,6 +284,8 @@ export class SearchFace {
   /** 词随打开带过来一次；之后这个 tab 自己管自己的词 */
   setTerm(term: string): void {
     if (this.disposed) return
+    // 已经按这个词查了（或别的口径已接手）⇒ 丢掉还挂着的防抖定时器，避免补发一枪
+    this.debounce.cancel()
     if (this.input.value !== term) this.input.value = term
     const q = term.trim()
     const mine = ++this.seq
@@ -352,6 +370,7 @@ export class SearchFace {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.debounce.dispose()
     // 高亮住在**全局注册表**里：面拆掉不摘，它会留在别处（而且没人再清）
     this.clearMatch()
     this.offStore()

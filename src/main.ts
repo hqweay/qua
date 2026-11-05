@@ -74,6 +74,7 @@ import { createIpcAdapter, type LibraryBridge } from './core/storage/ipc-adapter
 import type { FtsCommitSource } from './core/storage/fts-port.ts'
 import { createSearchService, type SearchService } from './app/search/service.ts'
 import { describeHit, type HitView } from './app/search/hits.ts'
+import { recentBlocks } from './app/search/recents.ts'
 import {
   createDeviceStore,
   createLibrarySettingsPort,
@@ -504,15 +505,12 @@ const surface = setupSurface({
     },
     // 刷新之后说一句（移除了几条 / 失败保留旧结果）：与查询视图同一个出口
     toast: (text, kind) => app.toast(text, kind),
-    // 空态「最近更新」：模型直取（修改时间倒序），不经过查询引擎
-    recents: (limit) => {
-      const alive = flatten({ roots: ws.blocks }).filter((b) => !isDeleted(b))
-      return alive
-        .sort((a, b) => b.modified - a.modified)
-        .slice(0, limit)
+    // 空态「最近更新」：模型直取（修改时间倒序），不经过查询引擎。
+    // 只取前 N 块再投影（不先对整片森林排序）：结果与「全量排序后 slice」逐条相同
+    recents: (limit) =>
+      recentBlocks({ roots: ws.blocks }, limit)
         .map((b) => describeHit(kb, { blockId: b.id, score: 0 }, ''))
-        .filter((v): v is HitView => v !== null)
-    },
+        .filter((v): v is HitView => v !== null),
   }),
 })
 
