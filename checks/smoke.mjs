@@ -20814,6 +20814,93 @@ await check('T243 搜索面：长块预览滚到命中处并高亮；空态点�
 })
 
 /**
+ * **T244：关面即收最后一笔。**
+ *
+ * 判据是「不依赖 blur」：打完最后一个字就**直接切走**（不先点别处）。
+ * 覆盖层关闭是「先 remove DOM 再还焦点」，`focusout` 那条补 flush 是延迟一拍的，
+ * 等不到就 dispose 了——最后一笔要在 `PreviewPane.dispose()` 里同步推进模型。
+ */
+await check('T244 搜索面关掉时先收最后一笔：预览里打最后一个字就切走 ⇒ 模型有它、重开还在', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const probeId = await plantProbe(page, '关面探针UVW')
+  assert(probeId, '前置：探针块要建出来')
+  const pageId = await page.evaluate(() => window.__qua.pages()[0].id)
+
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
+  await page.fill('.search-face-input', '关面探针UVW')
+  await page.waitForFunction(() => document.querySelectorAll('#center-surface [data-search-row]').length > 0, null, { timeout: 3000 })
+  await page.waitForTimeout(300)
+
+  const box = await page.evaluate(() => {
+    const tx = document.querySelector('#center-surface .search-face-preview .blk[data-block-id] .tx')
+    if (!tx) return null
+    const r = tx.getBoundingClientRect()
+    return { x: r.x + 3, y: r.y + r.height / 2 }
+  })
+  assert(box, '前置：预览里要有可点的正文')
+  await page.mouse.click(box.x, box.y)
+  await page.waitForTimeout(120)
+  // 最后一个字：打完之后**立刻**切走，中间不给 focusout 那一拍留时间
+  await page.keyboard.type('Z')
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId)
+  await page.waitForTimeout(400)
+
+  const left = await page.evaluate((id) => {
+    const b = window.__qua.allBlocks().find((x) => x.id === id)
+    return {
+      text: b?.text ?? '',
+      focusInSurface: Boolean(document.getElementById('center-surface')?.contains(document.activeElement)),
+    }
+  }, probeId)
+  assert(left.text.includes('Z'), `切走时最后一笔要已进模型（不能等 blur）：${JSON.stringify(left)}`)
+  assert(!left.focusInSurface, `已经离开搜索面：${JSON.stringify(left)}`)
+
+  // 重开搜索面再看一眼：屏幕上也得在（模型之外，索引/装载也跟上了）
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
+  await page.fill('.search-face-input', '关面探针UVW')
+  await page.waitForFunction(() => document.querySelectorAll('#center-surface [data-search-row]').length > 0, null, { timeout: 3000 })
+  await page.waitForTimeout(500)
+  const reopened = await page.evaluate(() => ({
+    previewText: document.querySelector('#center-surface .search-face-preview .blk[data-block-id] .tx')?.textContent ?? '',
+    rowText: document.querySelector('#center-surface .search-row-text')?.textContent ?? '',
+  }))
+  assert(reopened.previewText.includes('Z'), `重开后预览里字还在：${JSON.stringify(reopened)}`)
+  assert(reopened.rowText.includes('Z'), `左行片段也带上（左右不矛盾）：${JSON.stringify(reopened)}`)
+
+  /**
+   * **第二段：`flush()` 的契约本身。**
+   *
+   * 上面那段是真实用户流——今天每条 `input` 都同步写模型，所以即使没有 `flush()` 它也是绿的
+   * （反向验证过）。`flush()` 存在的边界是「DOM 已经变了，但没有那一笔 `input` 被报到」
+   * （浏览器吞事件 / 收尾时的原生改写）：这里直接把 DOM 文本改掉、**派发零个事件**，
+   * 再切走。没有 `flush()` 这一笔必然丢；有它就必须进模型。
+   */
+  const box2 = await page.evaluate(() => {
+    const tx = document.querySelector('#center-surface .search-face-preview .blk[data-block-id] .tx')
+    if (!tx) return null
+    const r = tx.getBoundingClientRect()
+    return { x: r.x + 3, y: r.y + r.height / 2 }
+  })
+  assert(box2, '前置（第二段）：预览里要有正文')
+  await page.mouse.click(box2.x, box2.y)
+  await page.evaluate(() => {
+    const tx = document.querySelector('#center-surface .search-face-preview .blk[data-block-id] .tx')
+    // 只改 DOM、不发 input：模拟「浏览器改了正文但事件没报到」
+    const node = tx?.lastChild
+    if (node && node.nodeType === Node.TEXT_NODE) node.nodeValue = `${node.nodeValue}Q`
+    else tx?.appendChild(document.createTextNode('Q'))
+  })
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId)
+  await page.waitForTimeout(300)
+  const flushed = await page.evaluate((id) => window.__qua.allBlocks().find((x) => x.id === id)?.text ?? '', probeId)
+  assert(flushed.includes('Q'), `关面时要把「DOM 已变、事件没报到」的那一笔同步推进模型：${JSON.stringify(flushed)}`)
+
+  await ctx.close()
+  return '切走即收最后一笔、重开字还在、DOM 未报的那笔也落地'
+})
+
+/**
  * **判定必须在所有用例之后**：这一段曾经写在中途，之后新增的用例（T206 起）即使红了
  * 也不会进 `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。
  * 新增用例一律加在本段**之前**。

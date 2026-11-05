@@ -136,6 +136,13 @@ export class PreviewPane {
     this.disposed = true
     // 高亮住在**全局注册表**里：面拆掉不摘，它会留在别处（而且没人再清）
     this.clearMatch()
+    /**
+     * **先把最后一笔推进模型，再拆**。
+     *
+     * 覆盖层关闭是「先 remove DOM 再还焦点」：`focusout` 那条补 flush 是**延迟一拍**的
+     * （`setTimeout(0)`），等不到就 dispose 了。`flush()` 同步收尾，不依赖 blur。
+     */
+    this.component?.flush()
     const ed = this.component?.ed
     if (ed) this.deps.onDispose(ed)
     this.component?.dispose()
