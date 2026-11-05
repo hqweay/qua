@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, addressesOf,   allTags, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, findByAlias, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, normalizeAlias, parentsOf, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec } from './core/index.ts'
+import { addAlias, addList, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec } from './core/index.ts'
 import { plainText } from './core/model/runs.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
 import { BlockStore } from './core/model/store.ts'
@@ -29,6 +29,7 @@ import {
 } from './core/commands/index.ts'
 import { Layers, paletteRows, rowsFromBindings, type PickMods, type Row } from './ui/overlay/layers.ts'
 import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from './app/retrieval/triggers.ts'
+import { openTagChoice } from './app/retrieval/tag-choice.ts'
 import { DockWindows } from './ui/dock/dock-windows.ts'
 import { BackrefsCard } from './ui/cards/backrefs-card.ts'
 import { mountDockSlot } from './ui/dock/dock.ts'
@@ -1765,76 +1766,24 @@ const app: App = {
    *
    * 这是「`#` 补全」当前的产品形态：从列表选一个已有标签插边（正文里敲 `#` 自动成边仍未做）。
    * 层级只帮人认位置，不参与消歧（地址唯一）。
+   *
+   * 候选与浮层都交给 `app/retrieval/tag-choice.ts`：标签表与边图邻接表在**打开这一刻**
+   * 建一次，输入只做本地过滤（不再每行重建一遍邻接表）。
    */
   showTagPicker: () => {
-    const tags = allTags(ws.blocks)
-      .slice()
-      // 排序用**主地址**（全名、规范化）而不是显示叶子：`A/B` 与 `C/B` 的叶子相同，
-      // 按叶子排会让两行看起来没有稳定顺序。
-      .sort((a, b) => (addressesOf(a)[0] ?? blockName(a)).localeCompare(addressesOf(b)[0] ?? blockName(b)))
-    let query = ''
-    /**
-     * 列表随输入重建：没有完全同名的标签时，第一行是**新建**。
-     * 名字命中一个已有页（还没有 tag 露面）时，文案会说明「复用它」——
-     * 这就是「让一个页兼作标签」的入口（同名必同一块）。
-     *
-     * ⚠️ 匹配走**全部地址**（`addressesOf`），不是只看主名叶子：块可以有多个别名，
-     *    只比主名会让「第二个名字」在补全里找不到自己。
-     */
-    const buildRows = (): Row[] => {
-      const q = query.trim()
-      const want = normalizeAlias(q)
-      const rows: Row[] = tags
-        .filter(
-          (tag) =>
-            want === '' ||
-            normalizeAlias(blockName(tag)).includes(want) ||
-            addressesOf(tag).some((a) => a.includes(want)),
-        )
-        .map((tag) => {
-          const parents = parentsOf(tag, adjacency())
-          return {
-            id: `tagpick/${tag.id}`,
-            label: `#${blockName(tag)}`,
-            hint:
-              parents.length > 0
-                ? t('ui.tagPicker.hierarchy', { parents: parents.map((p) => `#${blockName(p)}`).join('、') })
-                : '',
-            icon: 'lucide:hash',
-            group: 'tagpick/1',
-          }
-        })
-      if (q !== '' && !tags.some((tag) => addressesOf(tag).includes(want))) {
-        const page = findByAlias(ws.blocks, q, (b) => hasList(b, 'page') && !hasList(b, 'tag'))
-        rows.unshift({
-          id: 'tagpick/new',
-          label: page ? t('ui.tagPicker.reusePage', { name: q }) : t('ui.tagPicker.create', { name: q }),
-          hint: page ? t('ui.tagPicker.reuseHint') : '',
-          icon: 'lucide:hash',
-          group: 'tagpick/0',
-        })
-      }
-      return rows
-    }
-    layers.openMenu({
-      rows: buildRows(),
+    openTagChoice({
+      layers,
+      forest: ws.blocks,
       anchor: ed.caretRect(),
       title: t('ui.tagPicker.title'),
-      searchable: true,
-      focusSearch: true,
       emptyText: t('ui.tagPicker.typeToCreate'),
-      onQuery: (q) => {
-        query = q
-        layers.setRows(buildRows())
-      },
-      onPick: (row) => {
-        if (row.id === 'tagpick/new') {
-          app.insertTag(query.trim())
+      onPick: (pick) => {
+        if (pick.kind === 'create') {
+          app.insertTag(pick.name)
           return
         }
-        const tag = tags.find((x) => `tagpick/${x.id}` === row.id)
         // 插入的是**地址**（全名）：`insertTag` 走 findByAlias，叶子在 `A/B` 上解析不到。
-        if (tag) void registry.invoke('core.editor/insert-tag', { tag: primaryAliasOf(tag) || blockName(tag) }, 'menu', uiCtx())
+        void registry.invoke('core.editor/insert-tag', { tag: pick.name }, 'menu', uiCtx())
       },
     })
   },
