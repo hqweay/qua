@@ -20,8 +20,14 @@
  * 不握手＝「关掉重开少最后一句」。
  */
 import { BrowserWindow, app, ipcMain, type WebContents } from 'electron'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { DB_SCHEMA_VERSION, type LibraryEntry } from '../../src/core/identity/library.ts'
+import {
+  DB_SCHEMA_VERSION,
+  MANIFEST_FILE,
+  parseManifest,
+  type LibraryEntry,
+} from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
 import { loadContent, openSession, saveContent, type OpenFailure, type RepoSession } from './session.ts'
 import { readSeq, searchFts, type RowWrite } from './sqlite.ts'
@@ -132,6 +138,45 @@ export class LibraryManager {
     this.windows.set(id, win)
     this.bind(win, session)
     return { status: 'ok', window: win }
+  }
+
+  /**
+   * 打开一个**任意目录**下的库（「打开库…」与首次启动的「加载已有库」走这里）。
+   *
+   * 身份从**目录里的 manifest** 读（`library.json.id` 是权威），不信任路径与调用方：
+   *   · 目录里没有 manifest ⇒ 不是库，拒绝（绝不往用户目录里撒文件）；
+   *   · 这个 id 已经登记在别处 ⇒ 拒绝（两份同 id 是副本；打开哪份都必须是显式的）；
+   *   · 没登记过 ⇒ 登记为外部库（`entry.path`），显示名先用目录名（open 之后以库为准）。
+   * 之后的流程与 `open(id)` 完全同一条：同库已开＝聚焦，否则开窗。
+   */
+  openAt(dir: string): { status: 'ok'; window: BrowserWindow } | { status: 'failed'; failure: OpenFailure } {
+    const raw = (() => {
+      try {
+        return readFileSync(join(dir, MANIFEST_FILE), 'utf8')
+      } catch {
+        return null
+      }
+    })()
+    const parsed = parseManifest(raw)
+    if (parsed.status === 'missing') return { status: 'failed', failure: { reason: 'not-a-library', dir } }
+    if (parsed.status === 'corrupt') {
+      return { status: 'failed', failure: { reason: 'bad-manifest', dir, detail: parsed.reason } }
+    }
+    const id = parsed.manifest.id
+    const loaded = loadRegistry(this.deps.io)
+    const known = loaded.registry.libraries.find((l) => l.id === id)
+    if (known && libraryDir(this.deps.io, known) !== dir) {
+      return { status: 'failed', failure: { reason: 'identity-conflict', dir, manifestId: id } }
+    }
+    if (!known) {
+      const entry: LibraryEntry = { id, name: dir.split('/').pop() ?? id, path: dir }
+      saveRegistry(this.deps.io, {
+        ...loaded.registry,
+        libraries: [...loaded.registry.libraries, entry],
+      })
+      this.deps.onRegistryChanged?.()
+    }
+    return this.open(id)
   }
 
   /* ------------------------------------------------------------ 窗口绑定与关闭握手 */
@@ -427,9 +472,20 @@ export class LibraryManager {
       return r.status === 'ok' ? { status: 'ok' } : { status: 'failed', failure: r.failure }
     })
 
-    ipcMain.handle('qua:library/create', (_e, id: unknown, name: unknown) => {
+    ipcMain.handle('qua:library/create', (_e, id: unknown, name: unknown, dir: unknown) => {
       if (typeof id !== 'string' || typeof name !== 'string') return { status: 'failed', reason: 'bad-args' }
-      const r = this.create(id, name)
+      if (dir !== undefined && typeof dir !== 'string') return { status: 'failed', reason: 'bad-args' }
+      const r = this.create(id, name, dir)
+      return r.status === 'ok' ? { status: 'ok' } : { status: 'failed', failure: r.failure }
+    })
+
+    /**
+     * 打开一个**目录**下的库（目录里必须有 `library.json`）。身份从 manifest 读，
+     * 没登记过就登记为外部库——「打开库…」与将来欢迎页的共用落点。
+     */
+    ipcMain.handle('qua:library/open-at', (_e, dir: unknown) => {
+      if (typeof dir !== 'string' || dir === '') return { status: 'failed', reason: 'bad-args' }
+      const r = this.openAt(dir)
       return r.status === 'ok' ? { status: 'ok' } : { status: 'failed', failure: r.failure }
     })
 

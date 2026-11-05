@@ -1069,8 +1069,21 @@ export const MSG = {
   /* 库：一库一窗的入口与默认名 */
   'menu.bar.library': '库',
   'menu.item.newLibrary': '新建库…',
+  'menu.item.openLibrary': '打开库…',
   'menu.item.recentLibraries': '最近的库',
   'library.defaultName': '我的库',
+  /* 首次启动：选库（新建 / 打开已有）。库建出来之前没有渲染面可挂，所以走原生对话框 */
+  'library.firstRun.message': '选择你的库',
+  'library.firstRun.detail':
+    '新建一个库，或打开已有的库文件夹。库是一个普通文件夹（library.json ＋ qua.db ＋ assets/），拷贝整个目录就是完整备份。',
+  'library.firstRun.new': '新建库…',
+  'library.firstRun.open': '打开已有库…',
+  'library.firstRun.quit': '退出',
+  'library.pick.newTitle': '新建库：选位置并起名',
+  'library.pick.nameLabel': '库名',
+  'library.pick.createButton': '在这里建库',
+  'library.pick.openTitle': '打开库：选库文件夹',
+  'library.pick.openButton': '打开这个库',
   'library.fail.notALibrary': '这个目录不是一个 Qua 库',
   'library.fail.badManifest': '这个目录的库标记读不懂（可能是别的版本）',
   'library.fail.identityConflict': '这个目录是另一个库的副本',
