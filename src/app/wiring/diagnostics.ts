@@ -45,6 +45,7 @@ import { DISPLAY_PROP } from '../../core/index.ts'
 import type { App, FixtureName, MenuRequest, PanelKind, Registry } from '../../core/commands/index.ts'
 import type { LoadedWorkspace, Prefs, ThemeMode, Workspace, WorkspaceStore } from '../../core/infra/workspace.ts'
 import { createBadge } from '../../ui/chrome/badge.ts'
+import { SearchFace, type SearchFaceDeps } from '../../ui/search/search-face.ts'
 import type { Layers, Row } from '../../ui/overlay/layers.ts'
 import type { Chrome } from '../../ui/chrome/chrome.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
@@ -86,6 +87,11 @@ export type DiagnosticsDeps = {
   setQuiet: (v: boolean) => void
   /** 搜索门面（自检用；产品路径不经过它） */
   getSearch?: () => SearchProbe | undefined
+  /**
+   * 搜索面依赖（自检用；产品路径从 `surface` 那一份拿）。
+   * 给 `searchFaceCycle` 造一台**脱开 tab** 的面，验「挂 → 卸 → 再挂」。
+   */
+  searchFaceDeps?: () => SearchFaceDeps
 }
 
 /** 自检只读的那几格；用窄类型避免 diagnostics 依赖 app 层实现 */
@@ -94,6 +100,162 @@ export interface SearchProbe {
   mode: () => string
   query: (text: string, limit?: number) => Promise<unknown>
   rebuild: () => Promise<void>
+}
+
+/** `searchFaceCycle` 的报告：全是可直接 JSON 化的数字/字符串/布尔 */
+export interface SearchFaceCycleReport {
+  compact: boolean
+  /** 订阅 / 退订调用次数（面 + 右列编辑器共用同一个计数口径） */
+  subscribeCalls: number
+  unsubscribeCalls: number
+  /** 第一次挂载、装好结果之后仍活着的订阅数 */
+  activeBeforeUnmount: number
+  /** 卸载之后**必须归零**（面与右列编辑器都退订） */
+  activeAfterUnmount: number
+  /** 再挂之后：与 `activeBeforeUnmount` 相等才说明没有重复订阅 */
+  activeAfterRemount: number
+  /** 卸载期间根真的离开了宿主 */
+  detachedWhileUnmounted: boolean
+  /** 卸载后右列编辑器 DOM 是否摘净（不留第二份） */
+  editorsAfterUnmount: number
+  /** 再挂之后的 DOM 计数：每项都该是 1 */
+  roots: number
+  lists: number
+  previews: number
+  editors: number
+  /** 紧凑形态不摆「晋升为查询块」；tab 形态摆 */
+  promote: boolean
+  /** 右列在不在（`data-preview`＝`1`） */
+  previewFlag: string
+  /** 词 / 行数 / 选中在挂—卸—挂前后必须一致 */
+  termBefore: string
+  termAfter: string
+  rowsBefore: number
+  rowsAfter: number
+  selectedBefore: string
+  selectedAfter: string
+  /** 卸载时排着的那一枪防抖**不许补发**（两边相等） */
+  queriesBeforeWait: number
+  queriesAfterWait: number
+}
+
+/**
+ * **自检专用**：把一台搜索面在临时宿主里「挂 → 卸 → 再挂」一遍，把副作用计数报回来。
+ *
+ * 为什么住在诊断面：产品路径只需要 `mount(host)`；这里要观察「有没有重复订阅 / 有没有
+ * 漏掉的定时器 / 右列编辑器有没有泄漏」，那是测试关心的事，不该进组件 API。
+ *
+ * ⚠️ 宿主 `hidden`（不参与布局）：这条路验的是**结构与生命周期**，不是像素。
+ *    编辑器构造时量到的尺寸是 0，但不会被断言，也不会影响状态。
+ */
+async function cycleSearchFace(
+  build: () => SearchFaceDeps,
+  compact: boolean,
+  term: string,
+): Promise<SearchFaceCycleReport> {
+  const host = document.createElement('div')
+  host.hidden = true
+  document.body.appendChild(host)
+
+  const base = build()
+  let subscribeCalls = 0
+  let unsubscribeCalls = 0
+  let active = 0
+  let queries = 0
+  /**
+   * 影子 store：只影子 `subscribe`（数「同一时刻有几条活订阅」）。
+   * 用 `Object.create` 保留整条原型链，编辑器与面上的其它调用仍命中真实现。
+   */
+  const store = Object.create(base.store) as SearchFaceDeps['store']
+  store.subscribe = (fn) => {
+    subscribeCalls++
+    active++
+    const off = base.store.subscribe(fn)
+    let done = false
+    return () => {
+      if (done) return
+      done = true
+      active--
+      unsubscribeCalls++
+      off()
+    }
+  }
+  const query: SearchFaceDeps['query'] = (text, limit) => {
+    queries++
+    return base.query(text, limit)
+  }
+
+  const face = new SearchFace({ ...base, store, query, compact })
+  const inputOf = () => host.querySelector<HTMLInputElement>('.search-face-input')
+  const rowsOf = () => host.querySelectorAll('.search-row').length
+  const snapshot = () => ({
+    term: inputOf()?.value ?? '',
+    rows: rowsOf(),
+    selected: host.querySelector('.search-row[data-selected="1"]')?.getAttribute('data-search-row') ?? '',
+  })
+
+  face.setTerm(term)
+  face.mount(host)
+  /**
+   * 查询是异步的：等到**命中行**（行里带 `<mark>`）出现再快照。
+   *
+   * ⚠️ 不能等「有行」——构造器先画了「最近更新」（20 条），而查询还没回来；那个瞬间
+   * 快照会把最近更新当成命中结果（实测：前 20 后 1，看起来像「重挂丢了行」）。
+   */
+  for (let i = 0; i < 40 && host.querySelector('.search-row mark') === null; i++) {
+    await new Promise((r) => window.setTimeout(r, 50))
+  }
+  const before = snapshot()
+  const activeBeforeUnmount = active
+
+  // 排一枪防抖（值不变也会重启计时器），然后**立刻**卸载：这一枪不该在卸下之后补发
+  inputOf()?.dispatchEvent(new Event('input', { bubbles: true }))
+  const queriesBeforeWait = queries
+  face.unmount()
+  const detachedWhileUnmounted = host.querySelector('.search-face') === null
+  const editorsAfterUnmount = face.root.querySelectorAll('.search-face-preview-editor .blk').length
+  const activeAfterUnmount = active
+  await new Promise((r) => window.setTimeout(r, 300))
+  const queriesAfterWait = queries
+
+  face.mount(host)
+  await new Promise((r) => window.setTimeout(r, 50))
+  const after = snapshot()
+  const roots = host.querySelectorAll('.search-face').length
+  const lists = host.querySelectorAll('.search-face-list').length
+  const previews = host.querySelectorAll('.search-face-preview').length
+  const editors = host.querySelectorAll('.search-face-preview-editor .blk').length
+  const previewFlag = host.querySelector('.search-face-body')?.getAttribute('data-preview') ?? ''
+  const promote = host.querySelector('.search-face-promote') !== null
+  const activeAfterRemount = active
+
+  face.dispose()
+  host.remove()
+
+  return {
+    compact,
+    subscribeCalls,
+    unsubscribeCalls,
+    activeBeforeUnmount,
+    activeAfterUnmount,
+    activeAfterRemount,
+    detachedWhileUnmounted,
+    editorsAfterUnmount,
+    roots,
+    lists,
+    previews,
+    editors,
+    promote,
+    previewFlag,
+    termBefore: before.term,
+    termAfter: after.term,
+    rowsBefore: before.rows,
+    rowsAfter: after.rows,
+    selectedBefore: before.selected,
+    selectedAfter: after.selected,
+    queriesBeforeWait,
+    queriesAfterWait,
+  }
 }
 
 
@@ -574,6 +736,17 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
       mode: () => deps.getSearch?.()?.mode() ?? 'scan',
       query: (text: string, limit = 20) => deps.getSearch?.()?.query(text, limit) ?? Promise.resolve({ hits: [], mode: 'scan' }),
       rebuild: () => deps.getSearch?.()?.rebuild() ?? Promise.resolve(),
+    },
+    /**
+     * 搜索面生命周期自检：紧凑 / tab 两轮「挂 → 卸 → 再挂」。
+     * 没接依赖就回 `null`（不是所有装配都会给这一份）。
+     */
+    searchFaceCycle: async (term: string) => {
+      const build = deps.searchFaceDeps
+      if (!build) return null
+      const compact = await cycleSearchFace(build, true, term)
+      const tab = await cycleSearchFace(build, false, term)
+      return { compact, tab }
     },
     __registry: registry,
     __layers: layers,
