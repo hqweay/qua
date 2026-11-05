@@ -1292,6 +1292,8 @@ export class BlockEditor {
         find,
         // 只有装载根会带上下文：子行的位置已经由缩进表达
         context: r.depth === 0 ? this.doc.contexts?.get(r.block.id) : undefined,
+        // 来源说明与面包屑同一格：都在说明「这一行为什么在这一屏里」
+        note: r.depth === 0 ? this.doc.rootNotes?.get(r.block.id) : undefined,
         // 展开出来的根才有「收起上下文」；没接回调就不画一个点了没反应的按钮
         contextBack: Boolean(this.onContextBack) && r.depth === 0 && (this.doc.expandedRoots?.has(r.block.id) ?? false),
         // 露面块的身体：这一层只认「有没有展开」；画什么由装配层给（见 `ViewEvents.embedBody`）
@@ -3332,12 +3334,14 @@ export class BlockEditor {
     this.events.mounted?.()
   }
 
-  /** 这一行除正文外还占几条「整行头」（面包屑／别名头的高度由 block-dom 统一算） */
+  /** 这一行除正文外还占几条「整行头」（面包屑／别名头／来源说明的高度由 block-dom 统一算） */
   private extraHeads(r: VisibleRow): number {
     if (r.depth !== 0) return 0
     const hasTrail = (this.doc.contexts?.get(r.block.id)?.length ?? 0) > 0
     const hasBack = Boolean(this.onContextBack) && (this.doc.expandedRoots?.has(r.block.id) ?? false)
-    return hasTrail || hasBack ? 1 : 0
+    // 来源说明与面包屑同住 `.blk-context` 那一行：两者都在时仍是**一条**头，不是两条
+    const hasNote = (this.doc.rootNotes?.get(r.block.id) ?? '') !== ''
+    return hasTrail || hasBack || hasNote ? 1 : 0
   }
 
   private placeholder(count: number, which: string, height = count * LINE_H): HTMLElement {

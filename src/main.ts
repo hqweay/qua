@@ -490,7 +490,7 @@ const surface = setupSurface({
     // 引擎现取：索引状态会变（ready 才信 FTS，否则扫描降级——面自己把降级说明白）
     query: (text, limit) => (search ?? { query: async () => ({ hits: [], mode: 'scan' as const }) }).query(text, limit),
     // 行怎么说与 ⌘F 浮层同一份
-    describe: (hit, term) => describeHit(kb, hit, term),
+    describe: (hit, term) => describeHit(kb, hit, term, ws.blocks),
     openBlock: (id) => app.openBlock(id, 'center'),
     // 晋升：把词写进 {text} 条件建查询块（与手建同一份创建路径，落森林顶层，一笔回滚）
     promote: (term) => app.createQuery(term, { where: { text: term } }),

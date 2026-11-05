@@ -352,6 +352,8 @@ export class SearchFace {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    // 高亮住在**全局注册表**里：面拆掉不摘，它会留在别处（而且没人再清）
+    this.clearMatch()
     this.offStore()
     const ed = this.preview?.ed
     if (ed) this.deps.onDispose(ed)
@@ -550,9 +552,9 @@ export class SearchFace {
 
   /* ------------------------------------------------------------ 右列预览 */
 
-  /** 这一屏该不该有右列：没有命中（空词/无结果）就没有「选中的那一条」 */
+  /** 这一屏该不该有右列：有选中的那一条就有（空词的「最近更新」也走同一套主从布局） */
   private previewWanted(): boolean {
-    return this.term() !== '' && this.selectedId !== ''
+    return this.selectedId !== ''
   }
 
   private syncPreview(): void {
@@ -560,6 +562,7 @@ export class SearchFace {
     this.bodyEl.dataset.preview = want ? '1' : '0'
     if (!want) {
       // 收起时把预览清空：隐藏的编辑器不该继续挂着上一块（也不该继续被外部变化重载）
+      this.clearMatch()
       const ed = this.preview?.ed
       if (ed) {
         if (ed.doc.roots.length > 0) ed.loadPage({ roots: [], folded: ed.doc.folded })
@@ -641,9 +644,81 @@ export class SearchFace {
     }
     const path = this.deps.kb.pathOf(block.id)
     const contexts = path.length > 1 ? new Map([[block.id, path.slice(0, -1)]]) : undefined
-    ed.loadPage({ roots: [block], ...(contexts ? { contexts } : {}), folded })
-    // 换内容即回顶部（切换选中不继承上一块的滚动位置）
+    /**
+     * **来源说明**：词可能不在正文里（别名/标签/属性/链接命中的情况）。
+     * 这一句回答「它为什么在这儿」，与左行那个「经由」同一份来路。
+     */
+    const row = this.rows.find((v) => v.blockId === block.id)
+    const note = row?.source && row.source !== 'content' ? t('ui.search.via', { via: t(VIA_KEY[row.source]) }) : undefined
+    const rootNotes = note ? new Map([[block.id, note]]) : undefined
+    ed.loadPage({ roots: [block], ...(contexts ? { contexts } : {}), ...(rootNotes ? { rootNotes } : {}), folded })
+    /**
+     * **滚到命中处并高亮**（换选中就重新定位）。
+     *
+     * 长块里命中词可能在屏幕外——那样右列就只剩「这一块的开头」，
+     * 而用户来这儿就是为了看命中的那一句。
+     * 高亮用 CSS Custom Highlight（**不往 contenteditable 里插 `<mark>`**：
+     * 那会改模型读数、破坏光标与输入法）。
+     */
+    this.revealMatch(ed, block.id)
+  }
+
+  /**
+   * 把命中词高亮并把预览滚到它那里。
+   *
+   * 三条边界：
+   *   · **没有词**（空态最近更新）⇒ 不高亮、不滚动（没有「命中」可言）；
+   *   · **浏览器不支持 `CSS.highlights`** ⇒ 只滚动、不高亮（降级看得见地少一样，不报错）；
+   *   · 命中词可能**跨文本节点**（被 mark/ref 原子切断）⇒ 按 `.tx` 内的文本节点逐个找，
+   *     找不到就退化成「滚到块首」——不假装找到。
+   */
+  private revealMatch(ed: BlockEditor, blockId: string): void {
+    const term = this.queriedTerm.trim()
     this.previewEl.scrollTop = 0
+    // 上一处的高亮先摘掉：高亮是**全局注册表**里的一条，不摘会留在别的视图上
+    this.clearMatch()
+    if (term === '') return
+    const tx = ed.txEl(blockId)
+    if (!tx) return
+    const terms = term.split(/\s+/).filter(Boolean)
+    const ranges: Range[] = []
+    const walker = document.createTreeWalker(tx, NodeFilter.SHOW_TEXT)
+    const lower = terms.map((x) => x.toLowerCase())
+    while (walker.nextNode()) {
+      const node = walker.currentNode as Text
+      const text = node.textContent ?? ''
+      const low = text.toLowerCase()
+      for (const t of lower) {
+        let from = 0
+        while (from < low.length) {
+          const at = low.indexOf(t, from)
+          if (at < 0) break
+          const r = document.createRange()
+          r.setStart(node, at)
+          r.setEnd(node, at + t.length)
+          ranges.push(r)
+          from = at + t.length
+        }
+      }
+    }
+    if (ranges.length === 0) return
+    // 支持就用 Custom Highlight（不碰 DOM、不进模型）；不支持就只滚不亮
+    if (typeof CSS !== 'undefined' && CSS.highlights) {
+      const hl = new Highlight(...ranges)
+      CSS.highlights.set('search-match', hl)
+    }
+    // 滚到**第一处**命中。用预览容器自己的 `scrollTop` 而不是 `scrollIntoView`：
+    // 后者会一路往上找**能滚的祖先**，于是滚的是外层（甚至整页），预览自己没动
+    // —— 实测：块高 2347、可视 816，`scrollIntoView` 之后命中仍在视口外。
+    const at = ranges[0]!.getBoundingClientRect()
+    const box = this.previewEl.getBoundingClientRect()
+    const delta = at.top - box.top
+    this.previewEl.scrollTop += delta - this.previewEl.clientHeight / 3
+  }
+
+  /** 摘掉本次预览的高亮（换选中 / 关面 / 收起预览都要走这里） */
+  private clearMatch(): void {
+    if (typeof CSS !== 'undefined' && CSS.highlights) CSS.highlights.delete('search-match')
   }
 
   /** 把某一行从列表里摘掉，并把选中挪到还在的那一条 */
