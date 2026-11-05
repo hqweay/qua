@@ -35,6 +35,7 @@ import {
   ownPropIds,
   mkTagBlock,
   readField,
+  TASK_STATUS_ABANDONED_ID,
   TASK_STATUS_DONE_ID,
   TASK_STATUS_DOING_ID,
   TASK_STATUS_PROP_ID,
@@ -259,7 +260,7 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter、s
   // 选项＝定义块的直接子块，id 是核心词汇（代码按 id 认「完成」，不按显示名）
   assert.deepEqual(
     (def!.children ?? []).map((c) => c.id),
-    [TASK_STATUS_TODO_ID, TASK_STATUS_DOING_ID, TASK_STATUS_DONE_ID],
+    [TASK_STATUS_TODO_ID, TASK_STATUS_DOING_ID, TASK_STATUS_DONE_ID, TASK_STATUS_ABANDONED_ID],
   )
   assert.equal(def!.props?._default, TASK_STATUS_TODO_ID, '缺省读出「待办」：刚挂上的任务不用先点一格')
 

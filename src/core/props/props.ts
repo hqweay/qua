@@ -95,6 +95,8 @@ export const TASK_STATUS_PROP_ID = derivedId('prop', 'core/task-status')
 export const TASK_STATUS_TODO_ID = derivedId('choice', 'core/task-status/todo')
 export const TASK_STATUS_DOING_ID = derivedId('choice', 'core/task-status/doing')
 export const TASK_STATUS_DONE_ID = derivedId('choice', 'core/task-status/done')
+/** 「放弃」：这件事**关掉**且没做成 —— 与「完成」同属终态，种子查询把两者都算关闭 */
+export const TASK_STATUS_ABANDONED_ID = derivedId('choice', 'core/task-status/abandoned')
 
 /**
  * 定义块上的**缺省值**槽：声明了这一栏却没填的块，读侧按它取值（select 存选项块 id）。
@@ -925,18 +927,37 @@ export function setValue(block: Block, propId: string, value: unknown): void {
 }
 
 /**
+ * 「清空值」之后这一栏还该不该在？
+ *
+ * 定义给了 `_default` ⇒ 「未填」是定义明确支持的状态（读侧有答案：读缺省），
+ * 清空应该停在「待填」，而不是把整栏摘掉 —— 任务状态就是这类：清空后块仍是
+ * 任务（方框还在、读出「待办」），摘栏走它专属的「取消待办」。
+ * 没有缺省的定义，未填没有读侧答案，自有栏的清空就是它唯一的退路。
+ */
+export function clearKeepsField(def: Block | undefined): boolean {
+  return def !== undefined && prop<unknown>(def, DEFAULT_PROP) !== undefined
+}
+
+/**
  * 删一个值（只删这一槽；标签的声明与定义都不动）。
  *
- * ⚠️ **自有属性槽跟着一起删**：对普通块来说「这条属性」是用户手动加进来的，清空值
+ * ⚠️ **自有属性槽默认跟着一起删**：对普通块来说「这条属性」是用户手动加进来的，清空值
  *    是这个动作唯一的退路 —— 留下一个永远「待填」的行，用户就再也没法把它去掉。
  *    标签声明的属性正相反：声明在标签上，值清空后行仍在（那才是「待填」的意义）。
+ *
+ * ⚠️ `keepField`（清空后留栏）：定义给了缺省值的字段（`clearKeepsField`）走这一档 ——
+ *    没槽的当场补登记（值先于槽写入的旧块也有份），行回到「待填」。
+ *    「摘掉整栏」对这类字段另有专属命令（如「取消待办」），不带这个选项。
  */
-export function clearValue(block: Block, propId: string): void {
+export function clearValue(block: Block, propId: string, opts: { keepField?: boolean } = {}): void {
   const hadSlot = ownPropIds(block).includes(propId)
-  if ((!block.props || !(propId in block.props)) && !hadSlot) return
+  const hadValue = block.props !== undefined && propId in block.props
+  if (!hadValue && !hadSlot && !opts.keepField) return
   const next = { ...(block.props ?? {}) }
   delete next[propId]
-  if (hadSlot) {
+  if (opts.keepField) {
+    if (!hadSlot) next[OWN_PROPS_PROP] = [...ownPropIds(block), propId]
+  } else if (hadSlot) {
     const slots = ownPropIds(block).filter((id) => id !== propId)
     if (slots.length === 0) delete next[OWN_PROPS_PROP]
     else next[OWN_PROPS_PROP] = slots
@@ -964,3 +985,18 @@ export function cleanableValues(block: Block, removedTag: Block, forest: readonl
   const stillDeclared = new Set(remaining.flatMap((t) => declaredFieldIds(t)))
   return declared.filter((pid) => hasValue(block, pid) && !stillDeclared.has(pid))
 }
+
+/* ------------------------------------------------------------ 任务状态词汇 */
+
+/**
+ * 全部选项 id（**值域的权威清单**：按需物化补选项、种子查询认终态都走它）。
+ *
+ * 选项**块**的构造器在 `fixtures/task-vocabulary.ts`——显示名是库内容（数据，不是
+ * 文案），与种子内容同住；这里只放代码要按 id 认的确定性 id。
+ */
+export const TASK_STATUS_CHOICE_IDS = [
+  TASK_STATUS_TODO_ID,
+  TASK_STATUS_DOING_ID,
+  TASK_STATUS_DONE_ID,
+  TASK_STATUS_ABANDONED_ID,
+] as const
