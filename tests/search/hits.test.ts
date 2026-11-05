@@ -1,5 +1,5 @@
 /**
- * 一条命中怎么说：⌘F 浮层与中心搜索面共用 describeHit——
+ * 一条命中怎么说：⌘P 浮层与中心搜索面共用 describeHit——
  * 高亮片段、住哪（祖先链兜底）、来路透传，两处各拼一遍迟早分叉。
  */
 import { test } from 'node:test'

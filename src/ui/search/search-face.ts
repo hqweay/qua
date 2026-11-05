@@ -1,5 +1,5 @@
 /**
- * 中心**搜索面**：⌘F 浮层的另一个尺寸（同一份引擎、同一套行说法，不是第二套结果渲染）。
+ * 中心**搜索面**：⌘P 浮层的另一个尺寸（同一份引擎、同一套行说法，不是第二套结果渲染）。
  *
  * 形状是**主从布局**：顶部输入行；左列是**只读的命中列表**（`HitView` 片段/住哪/经由），
  * 右列是**当前选中的那一块**，用 `EditableBlock` 画成真正的块、可以直接改。
@@ -65,7 +65,7 @@ export interface SearchFaceDeps {
   onChange: (kind: string) => void
   /** 引擎现取（索引状态会变）：ready ⇒ FTS，否则扫描降级。降级要在面上明说，不装没事 */
   query: (text: string, limit?: number) => Promise<SearchResult>
-  /** 行怎么说（与 ⌘F 浮层同一份） */
+  /** 行怎么说（与 ⌘P 浮层同一份） */
   describe: (hit: SearchHit, term: string) => HitView | null
   openBlock: (blockId: string) => void
   /** 晋升为查询块（森林顶层；返回块 id） */
