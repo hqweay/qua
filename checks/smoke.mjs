@@ -3196,6 +3196,172 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
   return `投影出结果；标题就地可编辑（改的是源）；三角与竖线都折身体（折后线仍在）；指针三态（跟随/钉大纲/跟随）；$self 跟着放它的地方`
 })
 
+await check('T238 查询块标题的行内编辑与普通块同档：划选加粗、粘贴文本与图、#·@·/ 补全都落在这一份正文上（投影抬头与正文行同验）；结构边界不动', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await page.evaluate(() => {
+    const q = window.__qua
+    const p = q.pages().find((x) => (x.title ?? '').includes('产品设计')) ?? q.pages()[0]
+    q.invoke('core.page/open', { pageId: p.id })
+    let qb = null
+    const walk = (l) => {
+      for (const b of l) {
+        if (b.props?._query && !qb) qb = b
+        walk(b.children ?? [])
+      }
+    }
+    walk(q.__editor.store.blocks)
+    q.invoke('core.embed/insert', { blockId: q.__editor.doc.roots[0].id, targetId: qb.id, view: 'mirror' })
+    return { qid: qb.id }
+  })
+  assert(fx.qid, '前置：种子里有查询块')
+  await page.waitForTimeout(500)
+  const atoms0 = await page.evaluate(() => window.__qua.snapshot().atoms)
+  /**
+   * 内容是**一份**：正文行与投影抬头改的都是源块正文。能力断言读模型（marks/asset/ref
+   * 落没落在 content 上），显示断言读两处 DOM（strong 同时出现在正文行与抬头）——
+   * 只读一处就验不出「抬头是第二份名字」这类错法。
+   */
+  const contentOf = () =>
+    page.evaluate((id) => {
+      const b = window.__qua.__editor.store.find(id)
+      return (b?.content ?? []).map((r) => ({ t: r.t, marks: r.marks ?? null, label: r.label ?? '', v: (r.v ?? '').slice(0, 6) }))
+    }, fx.qid)
+  const hasBold = (runs) => runs.some((r) => r.marks?.includes('bold'))
+  /** 点进一行的正文并双击选一个词（⌘A 是整屏选区，不是这一行的） */
+  const dblclickRow = async (sel) => {
+    const box = await page.locator(sel).first().boundingBox()
+    await page.mouse.dblclick(box.x + Math.min(60, box.width / 2), box.y + box.height / 2)
+    await page.waitForTimeout(250)
+  }
+  const clickBoldInBubble = () =>
+    page.evaluate(() => {
+      const btn = [...document.querySelectorAll('body > .selbar .sel-btn')].find((b) => b.dataset.command === 'core.anno/toggle-bold')
+      btn?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    })
+
+  /* ── 正文行：划选 ⇒ 气泡 ⇒ 加粗落进内容 ── */
+  const bodyRow = `#editor .blk[data-block-id="${fx.qid}"]:not([data-embed]) > .tx`
+  await dblclickRow(bodyRow)
+  const bar1 = await page.evaluate(() => ({
+    open: Boolean(document.querySelector('body > .selbar')),
+    hasBold: [...document.querySelectorAll('body > .selbar .sel-btn')].some((b) => b.dataset.command === 'core.anno/toggle-bold'),
+  }))
+  assert(bar1.open && bar1.hasBold, `查询行的划选气泡照常出现（含加粗）：${JSON.stringify(bar1)}`)
+  await clickBoldInBubble()
+  await page.waitForTimeout(300)
+  assert(hasBold(await contentOf()), `气泡加粗写进查询块正文（此前被正文闸整笔拦下）：${JSON.stringify(await contentOf())}`)
+
+  /* ── 正文行：粘贴单行文本、粘贴图 ── */
+  await page.evaluate((sel) => {
+    const tx = document.querySelector(sel)
+    const r = document.createRange()
+    r.selectNodeContents(tx)
+    r.collapse(false)
+    const s = document.getSelection()
+    s.removeAllRanges()
+    s.addRange(r)
+    const dt = new DataTransfer()
+    dt.setData('text/plain', '附')
+    tx.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+  }, bodyRow)
+  await page.waitForTimeout(250)
+  assert((await contentOf()).some((r) => r.t === 'text' && r.v.includes('附')), `查询块正文里能粘贴文本（与打字同档）：${JSON.stringify(await contentOf())}`)
+  await page.evaluate(async (sel) => {
+    const bin = atob('iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAIAAAADnC86AAAAMElEQVR4nO3NQQkAAAgEsItjHGMbyxKCn8H+y3S9iFgsFovFYrFYLBaLxWKxWHxnAY8m0GozORegAAAAAElFTkSuQmCC')
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    const tx = document.querySelector(sel)
+    const r = document.createRange()
+    r.selectNodeContents(tx)
+    r.collapse(false)
+    const s = document.getSelection()
+    s.removeAllRanges()
+    s.addRange(r)
+    const dt = new DataTransfer()
+    dt.items.add(new File([bytes], '正文行贴图.png', { type: 'image/png' }))
+    tx.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+  }, bodyRow)
+  for (let i = 0; i < 80; i++) {
+    if ((await page.evaluate(() => window.__qua.snapshot().atoms)) > atoms0) break
+    await page.waitForTimeout(50)
+  }
+  assert((await contentOf()).some((r) => r.t === 'asset'), `查询块正文里能粘贴图（模型装得下插图，限制不在模型）：${JSON.stringify(await contentOf())}`)
+
+  /* ── 投影抬头：触发补全（# → ↵ 落成行内标签）、斜杠、粘贴图、划选加粗两处同变 ── */
+  const titleTx = '.blk[data-embed="1"] .embed-title-row .tx'
+  await page.locator(titleTx).first().click()
+  await page.waitForTimeout(150)
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.press('ArrowRight')
+  await page.waitForTimeout(100)
+  await page.keyboard.type('#任务')
+  await page.waitForTimeout(400)
+  const hashLayer = await page.evaluate(() => {
+    const layer = document.querySelector('.layer')
+    return { open: Boolean(layer), n: layer ? layer.querySelectorAll('.layer-item').length : 0 }
+  })
+  assert(hashLayer.open, `抬头里敲 # 补全浮层要弹（触发判据是「这行能不能直接编辑」，不是「正文是不是内容」）：${JSON.stringify(hashLayer)}`)
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(350)
+  assert((await contentOf()).some((r) => r.t === 'ref'), `# 落账：行内标签 run 进了查询块正文：${JSON.stringify(await contentOf())}`)
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.press('ArrowRight')
+  await page.waitForTimeout(80)
+  await page.keyboard.type(' /')
+  await page.waitForTimeout(400)
+  assert(await page.evaluate(() => Boolean(document.querySelector('.layer'))), '抬头里斜杠菜单照常弹出（空白之后）')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(120)
+  await page.keyboard.press('Backspace')
+  await page.waitForTimeout(120)
+  await page.evaluate(async (sel) => {
+    const bin = atob('iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAIAAAADnC86AAAAMElEQVR4nO3NQQkAAAgEsItjHGMbyxKCn8H+y3S9iFgsFovFYrFYLBaLxWKxWHxnAY8m0GozORegAAAAAElFTkSuQmCC')
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    const tx = document.querySelector(sel)
+    const r = document.createRange()
+    r.selectNodeContents(tx)
+    r.collapse(false)
+    const s = document.getSelection()
+    s.removeAllRanges()
+    s.addRange(r)
+    const dt = new DataTransfer()
+    dt.items.add(new File([bytes], '抬头贴图.png', { type: 'image/png' }))
+    tx.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+  }, titleTx)
+  for (let i = 0; i < 80; i++) {
+    if ((await page.evaluate(() => window.__qua.snapshot().atoms)) > atoms0 + 1) break
+    await page.waitForTimeout(50)
+  }
+  assert((await contentOf()).filter((r) => r.t === 'asset').length >= 2, `抬头里也能粘贴图（同一份内容，两个表面同档）：${JSON.stringify(await contentOf())}`)
+  await dblclickRow(titleTx)
+  const bar2 = await page.evaluate(() => Boolean(document.querySelector('body > .selbar')))
+  assert(bar2, '抬头里的划选气泡照常出现（装配层接线本就齐，缺的是内容闸那一档）')
+  await clickBoldInBubble()
+  await page.waitForTimeout(300)
+  const titleHtml = await page.evaluate(() => document.querySelector('.blk[data-embed="1"] .embed-title-row .tx')?.innerHTML ?? '')
+  const bodyHtml = await page.evaluate((id) => {
+    const tx = [...document.querySelectorAll(`.blk[data-block-id="${id}"] > .tx`)].find((el) => !el.closest('.blk-embed-body'))
+    return tx?.innerHTML ?? ''
+  }, fx.qid)
+  assert(titleHtml.includes('mk-bold') && bodyHtml.includes('mk-bold'), `抬头加粗后，正文行与抬头两处同时变（一份正文，不是两份名字）：${JSON.stringify({ titleHtml, bodyHtml })}`)
+
+  /* ── 结构边界不动：直接编辑这一档放行，不等于拆块放行 ── */
+  await page.locator(titleTx).first().click()
+  await page.waitForTimeout(120)
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.press('ArrowRight')
+  await page.waitForTimeout(80)
+  const blocksBefore = await page.evaluate(() => window.__qua.allBlocks().length)
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(300)
+  assert((await page.evaluate(() => window.__qua.allBlocks().length)) === blocksBefore, '抬头里 ↵ 仍是「敲完」（直接编辑放行不改变拆块被挡的边界）')
+
+  await ctx.close()
+  return `划选加粗、粘贴文本与图、#·/ 补全在正文行与投影抬头都落进同一份正文；↵ 仍不拆块`
+})
+
 await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器改主名 ⇒ chip 跟着变；删除 ⇒ dangling', async () => {
   const { ctx, page } = await freshPage(browser, base)
   // 打开「产品设计 · 决策日志」：seed 里那一页有指向别处的 `[[..]]`
