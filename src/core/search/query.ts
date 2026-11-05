@@ -13,6 +13,8 @@ import { charsOf, hasHan, latinRuns } from './tokenizer.ts'
 import { isPropDefBlock, type Block } from '../model/model.ts'
 import { plainText } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
+import { displayTextOf } from '../identity/alias.ts'
+import { tagIdsOf } from '../identity/tags.ts'
 
 /** FTS5 字符串字面量：引号内的 `"` 要翻倍，否则查询语法会当场报错 */
 function q(s: string): string {
@@ -115,15 +117,49 @@ export function scanTerms(input: string): string[] {
     .filter(Boolean)
 }
 
+/**
+ * 扫描时这一块的可搜文本：正文投影 ＋ **标签名**。
+ *
+ * 为什么标签要单独补：正文投影只收 text run（`plainText` 的既定口径），
+ * 行内 `#名` 是 ref run、归属 `_tags` 是属性——两者都不在正文里。FTS 有独立的
+ * tag 行兜住它们；扫描降级若只读正文，就会「明明打了标签却搜不到（web / 索引未就绪）」。
+ * 名字走 `displayTextOf` 现算，与 FTS 的标签行同一个口径。
+ *
+ * 只补标签（不补别名／属性／外链）：扫描是无索引时的兜底，每多一个来源就多一次
+ * 逐块解析；标签是用户最常直接搜的那一类，其余来源在索引就绪后由 FTS 覆盖。
+ */
+function scanTextOf(b: Block, byId: ReadonlyMap<string, Block>): string {
+  let out = plainText(b.content)
+  const names: string[] = []
+  for (const tid of new Set(tagIdsOf(b))) {
+    const t = byId.get(tid)
+    if (t) names.push(displayTextOf(t))
+  }
+  // 行内 `#名` 是提及不是归属（不写 `_tags`）⇒ 只能从 run 里取
+  for (const r of b.content) {
+    if (r.t !== 'ref' || r.flavor !== '#' || !r.to) continue
+    const t = byId.get(r.to)
+    if (t) names.push(displayTextOf(t))
+  }
+  const tags = names.filter((x) => x.trim() !== '').join(' ')
+  if (tags !== '') out = out === '' ? tags : `${out} ${tags}`
+  return out
+}
+
 /** 扫描替身：返回命中的块 id（森林先序，与查询的缺省顺序同一口径） */
 export function scanSearch(roots: readonly Block[], input: string, limit: number): string[] {
   const terms = scanTerms(input)
   if (terms.length === 0 || limit <= 0) return []
+  // 标签名住在别的块里：扫两遍森林（第一遍建查找表，第二遍匹配），仍是 O(n)
+  const byId = new Map<string, Block>()
+  walkForest(roots, (b) => {
+    byId.set(b.id, b)
+  })
   const out: string[] = []
   walkForest(roots, (b, ctx) => {
     // 属性定义的子树是「这栏能选什么」，不是内容行（与查询求值同一口径）
     if (ctx.path.slice(0, -1).some(isPropDefBlock)) return
-    const text = plainText(b.content).toLowerCase()
+    const text = scanTextOf(b, byId).toLowerCase()
     if (text === '') return
     if (!terms.every((t) => text.includes(t))) return
     out.push(b.id)

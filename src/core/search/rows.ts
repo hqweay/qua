@@ -8,10 +8,12 @@
  * 一块最多五行索引（每来源一行，见 `sources.ts`）：
  *   · `content` —— 正文投影；
  *   · `alias`   —— 全部地址文本（首个是主名）；
- *   · `tag`     —— 它带的标签的**现算名**（归属住在 `_tags`，名字跟着标签块走）；
- *   · `prop`    —— 存下来的属性值（文本值原样；选项值索引**选项块的现算名**）；
+ *   · `tag`     —— 它带的标签的**现算名**（归属住在 `_tags`，名字跟着标签块走）
+ *                   ＋ 正文里行内 `#名` 指到的标签名（那里是**提及**、不写 `_tags`）；
+ *   · `prop`    —— 存下来的属性值按**定义块的 kind**投影（文本／日期原样、数字转串、
+ *                   选项值取**选项现算名**、引用值取**目标现算名**、checkbox 不产文本）；
  *   · `link`    —— 外链的显示文本与地址 ＋ 引用指向目标的**现算名**（锚文本不算——
- *                  那是「这一处的显示」，不是目标的身份）。
+ *                  那是「这一处的显示」，不是目标的身份）；行内 `#名` 归 tag 行，不在这里。
  *
  * 四条不变量：
  *   · **软删的块不进索引**（与 `{text}` 扫描「只搜活块」同一口径）；
@@ -20,7 +22,8 @@
  *   · 名字类来源（tag／prop 选项／link 引用）索引的是**现算名** ⇒ 名字变了要牵连重索引
  *     （见 `ftsTargets` 的扩散名单）。
  */
-import { ALIASES_PROP, aliasesOf, hasList, isDeleted, isPropDefBlock, type Block } from '../model/model.ts'
+import { ALIASES_PROP, aliasesOf, isDeleted, isPropDefBlock, type Block } from '../model/model.ts'
+import { propKindOf } from '../props/props.ts'
 import { displayTextOf } from '../identity/alias.ts'
 import { plainText } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
@@ -63,51 +66,63 @@ function subtreeIds(root: Block): string[] {
 }
 
 /**
- * 指向 `targetId` 的**引用源块**（可见块里正文带指向它的引用 run，含行内标签露面）。
+ * 「哪些块的行里住着这个 id 的现算名」——按**依赖方式**分开。
  *
- * 引用的显示名是渲染时现算的（目标改名跟着走），索引里那份「目标现算名」同理——
- * 目标的可解析性或名字一变，源块的 link 行就要重铺。改名／删除都是低频动作，
- * 这里一次全库扫描的代价可以接受（选项改名、标签改名各有一份同类的扩散名单）。
+ * 改名／软删／恢复要重铺的不是一张名单，而是三类各动各行的名单。把它们收在
+ * 一个入口里：新增一类「按 id 依赖」（例如将来属性名也可搜）时只补一格，
+ * 而不是在 `ftsTargets` 里再写一支全库扫描 —— 扩散点分散的表现，是同一件事
+ * 有三份各自演化的遍历。
+ *
+ * ⚠️ 只认**存下来的值**：定义块上的缺省槽不是任何块存过的值，选项改名不牵连它
+ *    （「带缺省未填」的块本来就没有属性行）。
  */
-function refSourceIds(ws: StoredWorkspace, targetId: string): Set<string> {
-  const out = new Set<string>()
+interface IdDependents {
+  /** 正文里有 ref run 指向它（link 行；`flavor '#'` 的同时进 tag 行） */
+  content: Set<string>
+  /** `_tags` 里带着它（tag 行） */
+  tag: Set<string>
+  /** 非系统属性的值指向它（prop 行：选项值或引用值） */
+  prop: Set<string>
+}
+
+/** 这一格值是不是指向 `id`（标量或数组项；普通文本值命中与否只看相等） */
+function propPointsAt(value: unknown, id: string): boolean {
+  if (typeof value === 'string') return value === id
+  if (Array.isArray(value)) return value.some((x) => typeof x === 'string' && x === id)
+  return false
+}
+
+function dependentsOf(ws: StoredWorkspace, id: string): IdDependents {
+  const dep: IdDependents = { content: new Set(), tag: new Set(), prop: new Set() }
   walkForest(ws.blocks, (b) => {
     for (const r of b.content) {
-      if (r.t === 'ref' && r.to === targetId) {
-        out.add(b.id)
+      if (r.t === 'ref' && r.to === id) {
+        dep.content.add(b.id)
+        break
+      }
+    }
+    if (tagIdsOf(b).includes(id)) dep.tag.add(b.id)
+    for (const name of Object.keys(b.props ?? {})) {
+      if (name.startsWith('_')) continue
+      if (propPointsAt(b.props?.[name], id)) {
+        dep.prop.add(b.id)
         break
       }
     }
   })
-  return out
+  return dep
 }
 
-/** 打了某个标签的可见块（归属住在 `_tags`；软删的成员早已不在索引里） */
-function tagMemberIds(ws: StoredWorkspace, tagId: string): Set<string> {
-  const out = new Set<string>()
-  walkForest(ws.blocks, (b) => {
-    if (tagIdsOf(b).includes(tagId)) out.add(b.id)
-  })
-  return out
-}
-
-/**
- * 属性值取了某个选项块的可见块（字段值存在「定义块的块 id」这个属性名下，值是选项块 id）。
- *
- * ⚠️ 只认**存下来的值**：定义块上的缺省槽不是任何块存过的值，选项改名不牵连它
- * （「带缺省未填」的块本来就没有属性行）。
- */
-function choiceTakerIds(ws: StoredWorkspace, choiceId: string): Set<string> {
-  const out = new Set<string>()
-  walkForest(ws.blocks, (b) => {
-    const props = b.props
-    if (!props) return
-    for (const name of Object.keys(props)) {
-      if (name.startsWith('_')) continue
-      if (props[name] === choiceId) out.add(b.id)
-    }
-  })
-  return out
+/** 把依赖方的行按来源重铺（改名／存在性变化共用这一条） */
+function addDependentIndex(targets: FtsTargets, dep: IdDependents): void {
+  for (const id of dep.content) {
+    addIn(targets.index, 'link', id)
+    // 不按 flavor 细分：普通引用重铺 tag 行只会得到同一份文本，
+    // 低频路径上不值得为省一次分词多判断一次
+    addIn(targets.index, 'tag', id)
+  }
+  for (const id of dep.tag) addIn(targets.index, 'tag', id)
+  for (const id of dep.prop) addIn(targets.index, 'prop', id)
 }
 
 /** 一次遍历拿齐「块 ＋ 它的树父」（选项块的判定要看父块是不是字段定义） */
@@ -133,10 +148,12 @@ function probeWithParent(
  * 块级 op（正文／位置／存在）影响**全部来源**；属性 op 按**属性名**分派：
  * 地址、标签归属、字段值各动各的行，其余系统槽不进索引。
  *
- * 名字类来源的**牵连重索引**（改 A 要重铺 B 的行）：
- *   · 改地址 → 这个块的别名行；它是标签 ⇒ 全部成员块的标签行；被引用 ⇒ 引用块的 link 行；
+ * 名字类来源的**牵连重索引**（改 A 要重铺 B 的行）——统一走 `dependentsOf`：
+ *   · 改地址 → 这个块的别名行；被它牵连的是「行里住着它的现算名」的三类块
+ *     （标签成员／引用源／属性值指向它的块）；
  *   · 改字段定义下选项块的正文 ⇒ 所有取该选项的块的 prop 行；
- *   · 目标被软删／恢复／清除 ⇒ 引用它的块的 link 行（可解析性变了）。
+ *   · 目标被软删／恢复／清除 ⇒ 引用它的块的 link／tag 行与属性值指向它的块的 prop 行
+ *     （可解析性变了，现算名从行里消失／回来）。
  *
  * 刻意**不**做的扩散：改正文不牵连引用块的 link 行——没有地址的块的「名字」来自
  * 正文投影，逐键扩散等于给打字路径加一次全库扫描；那条路的过期行由重建收口
@@ -154,7 +171,7 @@ export function ftsTargets(ws: StoredWorkspace, ops: readonly Op[]): FtsTargets 
     if (op.op === 'exist') {
       if (op.state === 'purged') {
         for (const s of FTS_SOURCES) addIn(remove, s, op.id)
-        for (const id of refSourceIds(ws, op.id)) addIn(index, 'link', id)
+        addDependentIndex({ index, remove }, dependentsOf(ws, op.id))
         continue
       }
       // `deleted`／`present` 都是整棵子树的可见性变化
@@ -162,8 +179,8 @@ export function ftsTargets(ws: StoredWorkspace, ops: readonly Op[]): FtsTargets 
       if (b) {
         const into = op.state === 'deleted' ? remove : index
         for (const id of subtreeIds(b)) for (const s of FTS_SOURCES) addIn(into, s, id)
-        // 引用它的块：目标的可解析性变了，link 行要跟着改
-        for (const id of refSourceIds(ws, op.id)) addIn(index, 'link', id)
+        // 依赖它的块：可解析性变了 ⇒ 引用行、标签行、属性值行一起重铺
+        addDependentIndex({ index, remove }, dependentsOf(ws, op.id))
       } else if (op.state === 'deleted') {
         for (const s of FTS_SOURCES) addIn(remove, s, op.id)
       }
@@ -177,11 +194,8 @@ export function ftsTargets(ws: StoredWorkspace, ops: readonly Op[]): FtsTargets 
     if (op.e !== 'prop') continue
     if (op.name === ALIASES_PROP) {
       addIn(index, 'alias', op.block)
-      const b = probeOf(ws.blocks, [op.block]).get(op.block)
-      // 标签块改名 ⇒ 名字住在成员块的标签行里，全部成员要重铺
-      if (b && hasList(b, 'tag')) for (const id of tagMemberIds(ws, op.block)) addIn(index, 'tag', id)
-      // 名字变了 ⇒ 引用它的块的 link 行（行内提及与普通引用同路）
-      for (const id of refSourceIds(ws, op.block)) addIn(index, 'link', id)
+      // 名字变了 ⇒ 行里住着这个名字的三类块一起重铺（标签成员／引用源／属性值指向它的块）
+      addDependentIndex({ index, remove }, dependentsOf(ws, op.block))
       continue
     }
     if (op.name === TAGS_PROP) {
@@ -198,7 +212,7 @@ export function ftsTargets(ws: StoredWorkspace, ops: readonly Op[]): FtsTargets 
   const look = probeWithParent(ws, contentChanged)
   for (const [id, probed] of look) {
     if (probed.parent && isPropDefBlock(probed.parent)) {
-      for (const tid of choiceTakerIds(ws, id)) addIn(index, 'prop', tid)
+      for (const tid of dependentsOf(ws, id).prop) addIn(index, 'prop', tid)
     }
   }
 
@@ -222,8 +236,8 @@ export function ftsTargets(ws: StoredWorkspace, ops: readonly Op[]): FtsTargets 
  * 软删的块、解析不到的目标、空文本：各自安静地不产行（空的来源行不存在，
  * `buildFtsWrites` 据此把「没文本了」的行摘掉）。
  *
- * 选项名的解析走**属性名**：字段值的属性名就是字段定义块的 id，先找到定义块，
- * 再在它的直接子块里找值指向的那个选项——不用为了「哪些 id 是选项」扫全库。
+ * 属性值的投影按**定义块的 kind** 分派（见 `propertySearchTextOf`）：选项值与引用值
+ * 都要现算目标名，所以属性名（＝定义块 id）与「值是 id」的属性值都并进同一个探测集。
  */
 export function ftsSourceTexts(
   ws: StoredWorkspace,
@@ -243,7 +257,11 @@ export function ftsSourceTexts(
     if (props) {
       for (const name of Object.keys(props)) {
         if (name.startsWith('_')) continue
-        if (typeof props[name] === 'string') wanted.add(name)
+        // 属性名永远要：投影要按定义块的 kind 分派，没有定义就只能当文本（数字会因此丢）
+        wanted.add(name)
+        // 值可能就是某个块的 id（选项／引用）——是它们才要现算名。
+        // 普通文本值也一并放进来：探测本来就是一次全库走查，多几个不存在的 id 不改变成本
+        for (const v of idCandidatesOf(props[name])) wanted.add(v)
       }
     }
   }
@@ -259,34 +277,42 @@ export function ftsSourceTexts(
     const aliases = aliasesOf(b)
     if (aliases.length > 0) out.push({ key: ftsRowKey(id, 'alias'), text: aliases.join(' ') })
 
-    // 标签名：现算（`displayTextOf` 的口径——解析不到的悬空 id 不产文本）
+    // 标签名：现算（`displayTextOf` 的口径——解析不到的悬空 id 不产文本）。
+    // 两个来源并成一行：`_tags` 的归属 ＋ 正文里 `#名` 的提及（后者不写 `_tags`）。
     const tagNames: string[] = []
-    for (const tid of new Set(tagIdsOf(b))) {
-      const t = helpers.get(tid)
-      if (!t || isDeleted(t)) continue
+    const seenTagNames = new Set<string>()
+    const pushTagName = (t: Block | undefined): void => {
+      if (!t || isDeleted(t)) return
       const n = displayTextOf(t)
-      if (n.trim() !== '') tagNames.push(n)
+      if (n.trim() === '' || seenTagNames.has(n)) return
+      seenTagNames.add(n)
+      tagNames.push(n)
+    }
+    for (const tid of new Set(tagIdsOf(b))) pushTagName(helpers.get(tid))
+    for (const r of b.content) {
+      if (r.t === 'ref' && r.flavor === '#' && r.to) pushTagName(helpers.get(r.to))
     }
     if (tagNames.length > 0) out.push({ key: ftsRowKey(id, 'tag'), text: tagNames.join(' ') })
 
-    // 属性值：文本值原样；指向选项块的值索引选项名（选项名是用户搜的词，id 不是）
+    // 属性值：按定义块的 kind 投影（文本／日期原样、数字转串、选项／引用取现算名、
+    // checkbox 不产文本）。裸 id 永远不进索引——它会让任意查询误命中
     const propTexts: string[] = []
     const props = b.props ?? {}
     for (const name of Object.keys(props)) {
       if (name.startsWith('_')) continue
-      const v = props[name]
-      if (typeof v !== 'string' || v.trim() === '') continue
-      propTexts.push(choiceNameOf(helpers, name, v) ?? v)
+      const text = propertySearchTextOf(helpers.get(name), props[name], (hid) => helpers.get(hid))
+      if (text !== null) propTexts.push(text)
     }
     if (propTexts.length > 0) out.push({ key: ftsRowKey(id, 'prop'), text: propTexts.join(' ') })
 
-    // 链接与引用：外链取显示文本＋地址；引用取目标现算名（锚文本是显示层的事）
+    // 链接与引用：外链取显示文本＋地址；引用取目标现算名（锚文本是显示层的事）。
+    // 行内 `#名` 已经从 tag 行进来，这里跳过，避免同一个标签两种来路。
     const linkTexts: string[] = []
     for (const r of b.content) {
       if (r.t === 'link') {
         const s = `${r.v} ${r.url}`.trim()
         if (s !== '') linkTexts.push(s)
-      } else if (r.t === 'ref' && r.to) {
+      } else if (r.t === 'ref' && r.flavor !== '#' && r.to) {
         const t = helpers.get(r.to)
         if (!t || isDeleted(t)) continue
         const n = displayTextOf(t).trim()
@@ -298,26 +324,62 @@ export function ftsSourceTexts(
   return out
 }
 
+/** 一格属性值里可能是块 id 的串（普通文本值也原样返回——认不认由投影函数按 kind 决定） */
+function idCandidatesOf(value: unknown): string[] {
+  if (typeof value === 'string') return [value]
+  return Array.isArray(value) ? value.filter((x): x is string => typeof x === 'string') : []
+}
+
 /**
- * 一个字符串属性值的可搜文本：指向字段定义下某个选项 ⇒ 选项名；否则原样。
+ * 一个属性值的**可搜文本**（唯一投影：FTS 行与将来的扫描降级都调这里）。
  *
- * 返回 `null` 表示按原值索引。定义块不存在／不是定义／子块里没有这个值——
- * 都按「普通文本值」处理，不猜。
+ * 按定义块的 `_kind` 分派 —— **不按「值长得像 id」猜**：同一个字符串在不同 kind 下
+ * 是选项 id、引用目标 id，或普通文本；猜错就会把裸 id 变成可搜词。
+ *
+ * 返回 `null` ＝ 这个值不产文本：
+ *   · `checkbox` —— 布尔值不是词；索引 `false` 会让「没做」变成可搜命中；
+ *   · 解析不到的目标／选项 —— 悬空 id 不是名字（索引 id 会让任意查询误命中）；
+ *   · 非字符串的文本值 —— 形状不认识，不猜。
+ *
+ * 数组值逐项投影后拼接：多值属性不能只取第一项（否则第二项永远搜不到）。
  */
-function choiceNameOf(
-  helpers: ReturnType<typeof probeOf>,
-  propName: string,
-  value: string,
+export function propertySearchTextOf(
+  def: Block | undefined,
+  value: unknown,
+  find: (id: string) => Block | undefined,
 ): string | null {
-  const def = helpers.get(propName)
-  if (!def || !isPropDefBlock(def)) return null
-  for (const c of def.children) {
-    if (c.id === value) {
-      const n = plainText(c.content).trim()
-      return n === '' ? null : n
+  if (Array.isArray(value)) {
+    const parts: string[] = []
+    for (const v of value) {
+      const s = propertySearchTextOf(def, v, find)
+      if (s !== null && s.trim() !== '') parts.push(s)
     }
+    return parts.length === 0 ? null : parts.join(' ')
   }
-  return null
+  switch (def ? propKindOf(def) : 'text') {
+    case 'checkbox':
+      return null
+    case 'number':
+      return value === null || value === undefined ? null : String(value)
+    case 'date':
+      return typeof value === 'string' && value.trim() !== '' ? value : null
+    case 'select': {
+      if (typeof value !== 'string' || value === '') return null
+      const choice = find(value)
+      if (!choice || isDeleted(choice)) return null
+      const name = plainText(choice.content).trim()
+      return name === '' ? null : name
+    }
+    case 'ref': {
+      if (typeof value !== 'string' || value === '') return null
+      const target = find(value)
+      if (!target || isDeleted(target)) return null
+      const name = displayTextOf(target).trim()
+      return name === '' ? null : name
+    }
+    default:
+      return typeof value === 'string' && value.trim() !== '' ? value : null
+  }
 }
 
 export interface FtsBuilt {

@@ -24,7 +24,9 @@ import { uuidv7Hex } from '../../src/core/model/ids.ts'
 import { BlockStore } from '../../src/core/model/store.ts'
 import { MemoryKb } from '../../src/core/kb/memory.ts'
 import { mkTagBlock } from '../../src/core/identity/tags.ts'
+import { mkPropDef } from '../../src/core/props/props.ts'
 import { META_KEYS } from '../../src/core/identity/library.ts'
+import { ftsSourceTexts } from '../../src/core/search/rows.ts'
 import type { StoredWorkspace } from '../../src/core/storage/db-rows.ts'
 import type { Op } from '../../src/core/kb/types.ts'
 import { applyRowWrites, openLibraryDb, readMeta, searchFts, type Db } from '../../electron/library/sqlite.ts'
@@ -49,7 +51,13 @@ process.on('exit', () => {
 
 /* ------------------------------------------------------------ 夹具 */
 
-const refRun = (to: string, label: string) => ({ id: uuidv7Hex(), t: 'ref' as const, to, label })
+const refRun = (to: string, label: string, flavor?: '#') => ({
+  id: uuidv7Hex(),
+  t: 'ref' as const,
+  to,
+  label,
+  ...(flavor ? { flavor } : {}),
+})
 const linkRun = (v: string, url: string) => ({ id: uuidv7Hex(), t: 'link' as const, v, url })
 
 /** 定义块 ＋ 它的唯一选项（选项＝定义块的直接子块） */
@@ -135,14 +143,30 @@ test('tag：打标签 ⇒ 成员块可按标签名搜到；摘标签 ⇒ 不可�
   assert.ok(!hitsOf(h.db, '设计').includes(`${member.id}|tag`), '摘标签 ⇒ 标签行摘除')
 })
 
+test('tag：行内 #名 的提及也进 tag 行（不写 _tags）；改名跟着走', async () => {
+  const h = harness()
+  const tag = mkTagBlock('任务')
+  const member = mkBlock('')
+  h.store.blocks.push(tag, member)
+
+  await h.commit(h.kb.tx((tx) => tx.patch(member.id, (b) => { b.content = [refRun(tag.id, '任务', '#')] })).ops)
+  assert.ok(hitsOf(h.db, '任务').includes(`${member.id}|tag`), '行内标签按标签名可搜，来路是 tag')
+  assert.ok(!hitsOf(h.db, '任务').includes(`${member.id}|link`), '同一枚标签不再有两种来路')
+
+  await h.commit(h.kb.tx((tx) => tx.setAliases(tag.id, ['待办'])).ops)
+  assert.ok(hitsOf(h.db, '待办').includes(`${member.id}|tag`), '改名后行内提及的标签行跟着新名')
+  assert.ok(!hitsOf(h.db, '任务').includes(`${member.id}|tag`), '旧名不再经这一块命中')
+})
+
 test('prop：写字符串值与选项值 ⇒ 可搜；清值 ⇒ 不可搜（选项值索引选项名，不是 id）', async () => {
   const h = harness()
   const { def, choice } = choiceFixture('进行中')
+  const textDef = mkPropDef('备注', 'text')
   const taker = mkBlock('带字段的一行')
-  h.store.blocks.push(def, taker)
+  h.store.blocks.push(def, textDef, taker)
 
-  // 文本值：索引存下来的字符串本身
-  await h.commit(h.kb.tx((tx) => tx.setProp(taker.id, def.id, '红薯与咖啡')).ops)
+  // 文本值：索引存下来的字符串本身（用 text 定义；select 下这个串不是选项 id，不产文本）
+  await h.commit(h.kb.tx((tx) => tx.setProp(taker.id, textDef.id, '红薯与咖啡')).ops)
   assert.ok(hitsOf(h.db, '红薯').includes(`${taker.id}|prop`), '文本值可搜')
 
   // 选项值：存的是选项块 id，可搜的是选项名
@@ -152,6 +176,66 @@ test('prop：写字符串值与选项值 ⇒ 可搜；清值 ⇒ 不可搜（选
 
   await h.commit(h.kb.tx((tx) => tx.clearProp(taker.id, def.id)).ops)
   assert.ok(!hitsOf(h.db, '进行').includes(`${taker.id}|prop`), '清值 ⇒ 属性行摘除')
+})
+
+test('prop：按定义的 kind 投影（ref 取目标名、number 转串、date／text 原串、checkbox 不产词）', async () => {
+  const h = harness()
+  const target = mkBlock('', { props: { [ALIASES_PROP]: ['旧目标名'] } })
+  const textDef = mkPropDef('备注', 'text')
+  const numDef = mkPropDef('数量', 'number')
+  const dateDef = mkPropDef('日期', 'date')
+  const checkDef = mkPropDef('完成', 'checkbox')
+  const refDef = mkPropDef('相关', 'ref')
+  const taker = mkBlock('带字段的一行')
+  h.store.blocks.push(target, textDef, numDef, dateDef, checkDef, refDef, taker)
+
+  await h.commit(
+    h.kb.tx((tx) => {
+      tx.setProp(taker.id, textDef.id, '准备材料')
+      tx.setProp(taker.id, numDef.id, 42)
+      tx.setProp(taker.id, dateDef.id, '2026-11-05')
+      tx.setProp(taker.id, checkDef.id, false)
+      tx.setProp(taker.id, refDef.id, target.id)
+    }).ops,
+  )
+
+  assert.ok(hitsOf(h.db, '准备').includes(`${taker.id}|prop`), 'text 原串可搜')
+  assert.ok(hitsOf(h.db, '42').includes(`${taker.id}|prop`), 'number 转串后可搜')
+  assert.ok(hitsOf(h.db, '2026').includes(`${taker.id}|prop`), 'date 原串可搜')
+  assert.ok(hitsOf(h.db, '旧目标').includes(`${taker.id}|prop`), 'ref 值按目标现算名可搜')
+  assert.ok(!hitsOf(h.db, 'false').includes(`${taker.id}|prop`), 'checkbox 的 false 不是可搜词')
+  assert.ok(!hitsOf(h.db, target.id).includes(`${taker.id}|prop`), 'ref 的裸 id 不进索引')
+  assert.ok(!hitsOf(h.db, '不相干').includes(`${taker.id}|prop`), '不相关词不命中')
+  assert.ok(!hitsOf(h.db, '完成').includes(`${taker.id}|prop`), '属性名不是这一块的可搜文本')
+
+  await h.commit(h.kb.tx((tx) => tx.setAliases(target.id, ['新目标名'])).ops)
+  assert.ok(hitsOf(h.db, '新目标').includes(`${taker.id}|prop`), '目标改名后属性行跟着新名')
+  assert.ok(!hitsOf(h.db, '旧目标').includes(`${taker.id}|prop`), '旧名不再经属性行命中')
+})
+
+test('prop：checkbox 值不产 prop 行（负例：没有可搜文本的来源行不存在）', async () => {
+  const h = harness()
+  const checkDef = mkPropDef('完成', 'checkbox')
+  const only = mkBlock('只有复选框')
+  h.store.blocks.push(checkDef, only)
+  await h.commit(h.kb.tx((tx) => tx.setProp(only.id, checkDef.id, false)).ops)
+
+  const texts = ftsSourceTexts({ blocks: h.store.blocks, activeId: '', savedAt: 1 }, new Set([only.id]))
+  assert.ok(!texts.some((t) => t.key.endsWith('prop')), 'checkbox 不建 prop 行')
+  assert.ok(!hitsOf(h.db, 'false').includes(`${only.id}|prop`), 'false 不是可搜词')
+})
+
+test('prop：数组值逐项投影（第二项也要进索引）', async () => {
+  const h = harness()
+  const t1 = mkBlock('', { props: { [ALIASES_PROP]: ['目标甲'] } })
+  const t2 = mkBlock('', { props: { [ALIASES_PROP]: ['目标乙'] } })
+  const refDef = mkPropDef('关联', 'ref')
+  const taker = mkBlock('多值的一行')
+  h.store.blocks.push(t1, t2, refDef, taker)
+  await h.commit(h.kb.tx((tx) => tx.setProp(taker.id, refDef.id, [t1.id, t2.id])).ops)
+
+  assert.ok(hitsOf(h.db, '目标甲').includes(`${taker.id}|prop`), '第一项可搜')
+  assert.ok(hitsOf(h.db, '目标乙').includes(`${taker.id}|prop`), '第二项也进来（不是只取第一项）')
 })
 
 test('link：外链文本／地址与引用目标名 ⇒ 可搜；正文里的原子拿掉 ⇒ 不可搜', async () => {
