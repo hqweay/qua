@@ -2372,20 +2372,22 @@ export class BlockEditor {
     const loc = locate(this.doc, id)
     if (!loc) return
     /**
-     * **有角色的根块不许从编辑器删**（QB-001）。
+     * **有身份的根块不许从编辑器删**（QB-001）——**查询块例外**。
      *
-     * 为什么按角色而不是按「是不是根」判：正文的根既可能是
-     *   · 一个**有角色的容器**（页／日记／反链／查询记录）—— 它是视图的装载单位，
-     *     `doc.roots[0]` 就是森林里那块本身；splice 掉它只是让这个视图看不见，
-     *     库里那块还在 ⇒ 刷新就回来（用户看到「删了又复活」，比报错更糟）。删它要走命令面
-     *     （`core.page/delete` 那一路，带确认与落盘）。
-     *   · 也可能是一个**普通内容块**（zoom 进来的某一块）—— 它没有身份语义，
-     *     删掉它就是删掉这块内容，应当放行。
+     * 为什么按身份而不是按「是不是根」判：正文的根既可能是
+     *   · 一个**有身份的容器**（页／日记／反链）—— 它是视图的装载单位，
+     *     `doc.roots[0]` 就是森林里那块本身；删它要走命令面（`core.page/delete` 那一路，
+     *     带「至少留一页」与换邻页）。删掉它只 splice 视图的话，库里那块还在
+     *     ⇒ 刷新就回来（「删了又复活」比报错更糟）。
+     *   · 也可能是一个**普通内容块**（zoom 进来的某一块）—— 没有身份语义，
+     *     删掉就是删掉这块内容，应当放行。
+     *   · **查询块根**：晋升出来的查询是内容，又没有自己的删除命令面——
+     *     也按内容放行（整棵软删、⌘Z 可回）。
      *
      * ⚠️ `allowRootRemove: false` 是另一条更严的线：反链／查询列表的根是**别的页的块**，
      *    在这里删源块不合适（那类删除走命令面），所以那一类实例整体关掉。
      */
-    if (loc.parent === null && hasIdentity(loc.block)) return
+    if (loc.parent === null && hasIdentity(loc.block) && !isQueryBlock(loc.block)) return
     if (loc.parent === null && !this.allowRootRemove) return
     this.beginUndoEntry()
     const idx = flatten(this.doc).findIndex((b) => b.id === id)
@@ -4011,6 +4013,19 @@ export class BlockEditor {
        */
       blockIsRoot: at !== null && at.parent === null,
       blockIsForestRoot: forestRoot,
+      /**
+       * 删除入口的准入：**按「有没有身份、有没有替代命令」判，不按「是不是根」**。
+       *
+       * 页／标签／日记天是身份根——它们是视图的装载单位，且各自有命令面的删除
+       * （`core.page/delete` 带「至少留一页」，`core.journal/delete` 不给今天），
+       * 从编辑器删只会让视图看不见、库里还在（「删了又复活」）⇒ 这里不给。
+       * 非身份的根块（森林顶层的普通块、zoom 进来的普通块）删掉就是删掉内容，
+       * 与普通块同构；**查询块根**同理——晋升出来的查询是内容，又没有替代命令，
+       * 藏掉它就是「完全删不掉」。编辑器侧的删除走事务（整棵软删、⌘Z 可回），
+       * 装载根的收尾（doc.roots splice／留空位）在删除命令里已处理。
+       */
+      blockCanDelete:
+        id !== null && !(at !== null && at.parent === null && b !== undefined && hasIdentity(b) && !isQueryBlock(b)),
       /**
        * 「提取为页」只对**内容块**有定义：身份块（journal／tag／schema／query）
        * 不靠位置表达信息，搬它们没有意义；森林根也没有可移动的落点。
