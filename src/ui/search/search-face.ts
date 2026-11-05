@@ -35,7 +35,7 @@
  *     同样不显示右列。
  */
 import { t, type MsgId } from '../../core/infra/msg.ts'
-import { hasFoldable, isDeleted, type BlockStore } from '../../core/index.ts'
+import { hasFoldable, isDeleted, isOwnEdit, type BlockStore } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import type { FtsSource } from '../../core/search/sources.ts'
 import type { BlockEditor, Run } from '../../view/editor/editor.ts'
@@ -43,7 +43,7 @@ import { renderIcon } from '../../view/icons.ts'
 import type { HitView } from '../../app/search/hits.ts'
 import type { SearchHit, SearchResult } from '../../app/search/service.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
-import { pickAfterRemoval, pickSelection } from './selection.ts'
+import { pickAfterRemoval, pickSelection, sharedHintOf } from './selection.ts'
 
 export interface SearchFaceDeps {
   kb: KbClient
@@ -71,6 +71,8 @@ export interface SearchFaceDeps {
   copyRef: (blockId: string) => void
   /** 空态的「最近更新」：模型直取，按修改时间倒序 */
   recents: (limit: number) => HitView[]
+  /** 刷新之后说一句（移除了几条 / 失败保留旧结果）：与查询视图同一个出口 */
+  toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
 const VIA_KEY: Record<FtsSource, MsgId> = {
@@ -86,6 +88,8 @@ export class SearchFace {
   private readonly deps: SearchFaceDeps
   private readonly input: HTMLInputElement
   private readonly modeEl: HTMLElement
+  private readonly staleEl: HTMLElement
+  private readonly refreshBtn: HTMLButtonElement
   private readonly bodyEl: HTMLElement
   private readonly listEl: HTMLElement
   /** 右列（滚动容器；编辑器宿主是它里面那一格） */
@@ -95,6 +99,21 @@ export class SearchFace {
   private rows: HitView[] = []
   /** 当前选中那一块（右列预览就是它）；空串 ＝ 没有选中 */
   private selectedId = ''
+  /**
+   * **这一份列表的身份**（`'recents'` 或查询词）。
+   *
+   * 选中跨列表保留只在**同一份列表**里有意义（刷新时不该把用户选的那条换掉）。
+   * 换了词就是另一份列表——把上一份的选中带过来会让「首条自动选中」静默失效
+   * （实测：最近更新的第一条恰好也在新结果里 ⇒ 选中停在它身上，而它排在新列表的末尾）。
+   */
+  private listKey = ''
+  /**
+   * 这一份列表里「住哪」是不是**全一样**（已提进分组标题）。
+   *
+   * 局部更新（预览编辑、外部 touch）要沿用同一条判据：否则一改那一行，
+   * 它又把刚提走的「住哪」吐回来，行宽当场变窄。
+   */
+  private sharedHint = ''
   /** 结果行元素按 id 复用：编辑预览后**只改选中那一行**，不重排 */
   private preview: EditableBlock | null = null
   /** 已经种过「默认折叠」的块（用户展开过的不再种第二次） */
@@ -103,9 +122,20 @@ export class SearchFace {
   private mounted = false
   /** 这一份列表是不是「搜索命中」（不是最近更新）：决定分组标题与它的计数 */
   private resultMode = false
+  /**
+   * **冻结的命中集**：搜出来就不随库变化重算。
+   *
+   * 它是「结果可能已过期」的判据来源——外部改了其中某块（`ids` 命中）就点亮提示，
+   * 但**不重排**；真正移除发生在显式刷新，并说清移除了几条。
+   */
+  private frozen = new Set<string>()
+  /** 上一次查询用的词（刷新要按**它**重跑，不是输入框里可能刚改过的词） */
+  private queriedTerm = ''
   /** 异步结果的序号：慢一拍的回复不能盖掉刚打出来的新词 */
   private seq = 0
   private disposed = false
+  /** store 订阅：冻结集里的块被外部动过 ⇒ 点亮 stale */
+  private readonly offStore: () => void
 
   constructor(deps: SearchFaceDeps) {
     this.deps = deps
@@ -157,7 +187,25 @@ export class SearchFace {
     this.modeEl.className = 'search-face-mode'
     this.modeEl.hidden = true
 
-    bar.append(this.input, promote, this.modeEl)
+    /**
+     * 「结果可能已过期」：只是提示，不拦编辑、不重排列表。
+     *
+     * 为什么必须和刷新按钮一起出现：搜索结果是**冻结**的（库变化不重跑——那会重排
+     * 列表、把正在输入的那一行换掉）。冻结而没有刷新出口，就是「列表永远停在搜出来的
+     * 那一刻，而用户看不到任何说明」。
+     */
+    this.staleEl = document.createElement('span')
+    this.staleEl.className = 'search-face-stale'
+    this.staleEl.hidden = true
+
+    this.refreshBtn = document.createElement('button')
+    this.refreshBtn.type = 'button'
+    this.refreshBtn.className = 'search-face-refresh'
+    // 与查询视图同一个动作、同一句文案（`ui.query.refresh`）——它也需要「看得见」才可发现
+    this.refreshBtn.textContent = t('ui.query.refresh')
+    this.refreshBtn.addEventListener('click', () => this.refresh())
+
+    bar.append(this.input, this.staleEl, this.refreshBtn, promote, this.modeEl)
 
     this.listEl = document.createElement('div')
     this.listEl.className = 'search-face-list'
@@ -175,6 +223,32 @@ export class SearchFace {
     this.bodyEl.append(this.listEl, this.previewEl)
 
     this.root.append(bar, this.bodyEl)
+
+    /**
+     * **冻结的命中集**：外部改了其中某块 ⇒ 只点亮「结果可能已过期」，不重排。
+     *
+     * 为什么订阅在这里而不在 `EditableBlock` 里：那一台管的是**右列**（预览装载），
+     * 它已经会自己跟上外部变化；这一层管的是**左列**（冻结的结果集）——两件事。
+     * 自己的编辑不算外部变化（那一行已经按 id 局部更新过）。
+     */
+    this.offStore = deps.store.subscribe((source, ids) => {
+      if (this.disposed || this.frozen.size === 0) return
+      if (isOwnEdit(source, this.preview?.ed)) return
+      // 拿不到「动过哪些块」就不点亮：宁可少提示，也不要因为别处重画而误报
+      if (!ids || ids.length === 0) return
+      const touched = ids.filter((id) => this.frozen.has(id))
+      if (touched.length === 0) return
+      /**
+       * **先按 id 把受影响的行片段改成当前内容，再点亮 stale**。
+       *
+       * 只点亮不更新会让左右自相矛盾：右列预览是 `EditableBlock`，它自己会跟上外部
+       * 变化 ⇒ 屏幕上「预览是新的、左边那一行还是旧的」。片段是**快照**没错，但快照
+       * 至少要反映「这一刻这一块是什么」，否则用户会以为改错了地方。
+       * 移除仍然只在刷新时发生（那一步会报告条数）。
+       */
+      for (const id of touched) this.refreshRowSnippet(id)
+      this.paintStale()
+    })
 
     this.renderRecents()
   }
@@ -228,9 +302,57 @@ export class SearchFace {
     this.setTerm(this.input.value)
   }
 
+  /**
+   * **显式刷新**：按上一次查询的词重跑，并说清移除了几条。
+   *
+   * 为什么按 `queriedTerm` 而不是输入框的当前值：输入框里的词可能已经改了但还没提交
+   * （用户只是敲了一半）。刷新承诺的是「把这一份结果按当前库重算」，不是「按新词重搜」。
+   *
+   * 为什么必须报告移除条数：冻结的结果集里有的块可能已经不匹配了（被改掉、被删掉）。
+   * 静默少几条，用户会以为搜索漏了；说一句「有 N 条已不再匹配」才让这件事可解释。
+   */
+  refresh(): void {
+    if (this.disposed) return
+    const q = this.queriedTerm
+    if (q === '') {
+      // 空词（最近更新）不是一次查询：重取一遍就好，没有「移除」可言
+      this.renderRecents()
+      return
+    }
+    const before = new Set(this.rows.map((v) => v.blockId))
+    const mine = ++this.seq
+    void this.deps
+      .query(q, 50)
+      .then((r) => {
+        if (this.disposed || mine !== this.seq) return
+        const views = r.hits.map((hit) => this.deps.describe(hit, q)).filter((v): v is HitView => v !== null)
+        const after = new Set(views.map((v) => v.blockId))
+        const dropped = [...before].filter((id) => !after.has(id)).length
+        this.paint(views, t('ui.search.results', { count: views.length }), q)
+        this.clearStale()
+        if (dropped > 0) this.deps.toast(t('ui.query.dropped', { count: dropped }), 'ok')
+      })
+      .catch(() => {
+        if (this.disposed || mine !== this.seq) return
+        // 刷新失败保留旧结果 + 说一句（不静默清空——那会看起来像「搜索全丢了」）
+        this.deps.toast(t('ui.query.refreshFailed', { message: t('ui.search.queryFailed') }), 'warn')
+      })
+  }
+
+  /** 「结果可能已过期」：只是提示，不改列表、不拦编辑 */
+  private paintStale(): void {
+    this.staleEl.hidden = false
+    this.staleEl.textContent = t('ui.query.stale')
+  }
+
+  private clearStale(): void {
+    this.staleEl.hidden = true
+  }
+
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.offStore()
     const ed = this.preview?.ed
     if (ed) this.deps.onDispose(ed)
     this.preview?.dispose()
@@ -243,12 +365,17 @@ export class SearchFace {
 
   /* ------------------------------------------------------------ 列表 */
 
-  private setRows(views: HitView[]): void {
+  private setRows(views: HitView[], key: string): void {
     this.rows = views
-    // 结果集变了：旧选中还在就保留，不在就选第一条；空结果 ⇒ 没有选中
+    /**
+     * 同一份列表（刷新）⇒ 旧选中还在就保留（刷新不该把用户选的那条换掉）；
+     * **换了列表** ⇒ 一律选第一条（首条自动选中是这一屏的初始态）。
+     */
+    const keep = key === this.listKey ? this.selectedId : ''
+    this.listKey = key
     this.selectedId = pickSelection(
       views.map((v) => v.blockId),
-      this.selectedId,
+      keep,
     )
   }
 
@@ -286,11 +413,23 @@ export class SearchFace {
     at?.scrollIntoView({ block: 'nearest' })
   }
 
-  private paint(views: HitView[], header: string | null): void {
-    this.setRows(views)
+  private paint(views: HitView[], header: string | null, key: string): void {
+    this.setRows(views, key)
+    // 冻结集就是「这一份结果里有哪些块」：外部动过其中任何一块 ⇒ 点亮 stale
+    this.frozen = new Set(views.map((v) => v.blockId))
+    /**
+     * **公共祖先只说一次**。
+     *
+     * 命中常常整批来自同一页（`住哪` 逐行都是同一句），逐行重复既不携带信息，
+     * 又把片段挤成一截（实测左列 299px 里它占 47px、片段只剩 178px）。
+     * 判据是「是不是同一个」：全一样 ⇒ 提进分组标题、行里不再重复；
+     * 不一样 ⇒ 每行各说各的（那才是有用的信息）。
+     */
+    const shared = sharedHintOf(views.map((v) => v.hint))
+    this.sharedHint = shared
     this.listEl.replaceChildren()
-    if (header !== null) this.listEl.appendChild(groupHeader(header))
-    for (const view of views) this.listEl.appendChild(this.row(view))
+    if (header !== null) this.listEl.appendChild(groupHeader(shared === '' ? header : `${header} · ${shared}`))
+    for (const view of views) this.listEl.appendChild(this.row(view, shared !== ''))
     this.renderSelection()
     this.syncPreview()
   }
@@ -299,15 +438,19 @@ export class SearchFace {
   private renderRecents(): void {
     this.modeEl.hidden = true
     this.resultMode = false
+    // 最近更新不是一次查询：没有冻结集、没有「移除几条」、也不该有 stale
+    this.queriedTerm = ''
+    this.frozen = new Set()
+    this.clearStale()
     const views = this.deps.recents(20)
     if (views.length === 0) {
-      this.setRows([])
+      this.setRows([], 'recents')
       this.listEl.replaceChildren()
       this.listEl.appendChild(this.emptyNote(t('ui.search.empty')))
       this.syncPreview()
       return
     }
-    this.paint(views, t('ui.search.recents'))
+    this.paint(views, t('ui.search.recents'), 'recents')
   }
 
   private renderResults(r: SearchResult, q: string): void {
@@ -315,16 +458,22 @@ export class SearchFace {
     this.modeEl.hidden = r.mode !== 'scan'
     this.modeEl.textContent = t('ui.search.degraded')
     this.resultMode = true
+    // 刷新按**这个词**重跑（输入框里可能已经改了半截，那不是刷新要用的词）
+    this.queriedTerm = q
+    this.clearStale()
     const views = r.hits.map((hit) => this.deps.describe(hit, q)).filter((v): v is HitView => v !== null)
     if (views.length === 0) {
       this.renderNoResults(q)
       return
     }
-    this.paint(views, t('ui.search.results', { count: views.length }))
+    this.paint(views, t('ui.search.results', { count: views.length }), q)
   }
 
   private renderNoResults(q: string): void {
     this.resultMode = true
+    this.queriedTerm = q
+    this.frozen = new Set()
+    this.clearStale()
     this.rows = []
     this.selectedId = ''
     this.listEl.replaceChildren()
@@ -342,7 +491,7 @@ export class SearchFace {
     this.syncPreview()
   }
 
-  private row(view: HitView): HTMLElement {
+  private row(view: HitView, hideHint = false): HTMLElement {
     const row = document.createElement('div')
     row.className = 'search-row'
     // 读数契约：冒烟与探针按这个属性取「搜索面里有哪些结果」
@@ -356,7 +505,7 @@ export class SearchFace {
     pick.addEventListener('click', () => this.select(view.blockId))
     // 双击＝打开（单击预览、双击打开：两个动作各有一个可见出口，行尾那颗图标是打开的入口）
     pick.addEventListener('dblclick', () => this.deps.openBlock(view.blockId))
-    fillRowText(pick, view)
+    fillRowText(pick, view, hideHint)
 
     const tail = document.createElement('span')
     tail.className = 'search-row-tail'
@@ -517,14 +666,23 @@ export class SearchFace {
   }
 
   /**
-   * 预览里编辑之后：用当前块重新说这一行，**只改选中那一行的片段与「住哪」，不重排**。
+   * 预览里编辑之后：用当前块重新说**选中那一行**，只改片段与「住哪」，不重排。
    *
    * 为什么只改一行：列表是冻结的命中集，编辑不该改变结果顺序；左右不一致又会让用户
    * 怀疑「改的是不是同一个块」。词不再命中时**不**在这里移除（那是刷新/stale 的事）。
    */
   private refreshSelectedRow(): void {
-    const id = this.selectedId
-    if (id === '') return
+    if (this.selectedId === '') return
+    this.refreshRowSnippet(this.selectedId)
+  }
+
+  /**
+   * **按 id 重说一行**（选中行与外部 touch 的行共用这一条）。
+   *
+   * 三件事按顺序判：块没了 ⇒ 收掉这一行并回落选中；块还在 ⇒ 只换片段文本；
+   * 描述不出来（`describe` 给 null）⇒ 什么都不做（宁可少改一行，也不要把行画成空的）。
+   */
+  private refreshRowSnippet(id: string): void {
     const at = this.rows.findIndex((v) => v.blockId === id)
     if (at < 0) return
     const block = this.deps.kb.get(id)
@@ -545,7 +703,7 @@ export class SearchFace {
     this.rows[at] = view
     const row = this.listEl.querySelector<HTMLElement>(`.search-row[data-search-row="${id}"]`)
     const pick = row?.querySelector<HTMLElement>('.search-row-select')
-    if (pick) fillRowText(pick, view)
+    if (pick) fillRowText(pick, view, this.sharedHint !== '')
   }
 
   private updateGroupCount(): void {
@@ -563,7 +721,7 @@ export class SearchFace {
 }
 
 /** 一行里「命中片段 ＋ 住哪」：初次画与编辑后的局部更新共用这一份 */
-function fillRowText(host: HTMLElement, view: HitView): void {
+function fillRowText(host: HTMLElement, view: HitView, hideHint = false): void {
   const label = document.createElement('span')
   label.className = 'search-row-text ui-ellipsis'
   for (const p of view.parts) {
@@ -574,6 +732,11 @@ function fillRowText(host: HTMLElement, view: HitView): void {
     } else {
       label.appendChild(document.createTextNode(p.text))
     }
+  }
+  // 「住哪」提进分组标题时不在这里重复（同一句话逐行说 N 遍＝没有信息，还挤掉片段）
+  if (hideHint) {
+    host.replaceChildren(label)
+    return
   }
   const hint = document.createElement('span')
   hint.className = 'search-row-hint ui-ellipsis'

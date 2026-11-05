@@ -465,7 +465,12 @@ const surface = setupSurface({
      */
     store: blocks,
     write: editorRun(run, () => ed),
-    wire: (editor, change) => wireViewEditor(editor, change, 'surface'),
+    /**
+     * `inlineViewBodies=true`：预览画的是**这一块的真实位置**（用户在这里改它），
+     * 所以查询块要像正文那样把结果画在自己行下。不传的话，搜到查询块点开只看见
+     * 一行名字、看不到结果，也不会有折叠三角（`bodyFoldable` 要求 `viewBody` 在场）。
+     */
+    wire: (editor, change) => wireViewEditor(editor, change, 'surface', true),
     onFocus: (editor) => {
       ed = editor
       scheduleBadge()
@@ -497,6 +502,8 @@ const surface = setupSurface({
     copyRef: (id) => {
       void registry.invoke('core.editor/copy-block-ref', { blockId: id }, 'surface')
     },
+    // 刷新之后说一句（移除了几条 / 失败保留旧结果）：与查询视图同一个出口
+    toast: (text, kind) => app.toast(text, kind),
     // 空态「最近更新」：模型直取（修改时间倒序），不经过查询引擎
     recents: (limit) => {
       const alive = flatten({ roots: ws.blocks }).filter((b) => !isDeleted(b))
