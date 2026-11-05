@@ -83,6 +83,8 @@ const qua = {
     ipcRenderer.invoke('qua:library/create', id, name, dir),
   /** 打开一个目录下的库（目录里必须有 `library.json`）；没登记过就登记为外部库 */
   openLibraryAt: (dir: string): Promise<unknown> => ipcRenderer.invoke('qua:library/open-at', dir),
+  /** 整库快照到 `<库目录>/backups/`；渲染层的显式清库动作把它当回退面 */
+  backupLibrary: (label?: string): Promise<unknown> => ipcRenderer.invoke('qua:library/backup', label ?? 'manual'),
 
   /** 内容（四张内容表的全部行；编码归渲染层） */
   load: (): Promise<unknown> => ipcRenderer.invoke('qua:storage/load'),

@@ -379,11 +379,29 @@ function inTransaction<T>(db: Db, fn: () => T): T {
 }
 
 /**
- * 迁移前给整库拍一份快照：`VACUUM INTO '<库目录>/backups/<epoch毫秒>-before-migrate-v<旧版本>.db'`。
+ * 给整库拍一份快照：`VACUUM INTO '<库目录>/backups/<epoch毫秒>-<label>.db'`。
+ *
+ * 文件名带 epoch 毫秒（防撞——SQLite 语义是目标文件已存在即报错）与用途标签
+ * （出事时一眼知道这份快照是从哪一步拍下来的）。
+ *
+ * 失败**抛出**而不是吞掉：快照是那一步的回退面，要不要继续由调用方决定
+ * （迁移：从不再丢内容的那一版起必须中止；用户显式的「恢复空库」：中止）。
+ * `label` 只由我们的代码给，不接受外部字符串；这里仍不收 `/`，避免写到目录外。
+ */
+export function snapshotLibrary(db: Db, libraryDir: string, label: string): string {
+  if (!/^[a-z0-9-]{1,40}$/.test(label)) throw new Error(`bad snapshot label: ${label}`)
+  const dir = join(libraryDir, BACKUPS_DIR)
+  mkdirSync(dir, { recursive: true })
+  // VACUUM INTO 不吃参数绑定 ⇒ 只能拼字面量；路径里唯一要逃的字符是单引号（翻倍）
+  const target = join(dir, `${Date.now()}-${label}.db`).replace(/'/g, "''")
+  db.exec(`vacuum into '${target}'`)
+  return target
+}
+
+/**
+ * 迁移前的快照：`backups/<epoch毫秒>-before-migrate-v<旧版本>.db`。
  *
  * 为什么在这个时机：迁移是「把库改写成新形状」的唯一批量入口，快照就是它的回退面。
- * 文件名带 epoch 毫秒（防撞——SQLite 语义是目标文件已存在即报错）与旧版本号（出事时一眼知道
- * 快照是从哪一版拍下来的）。
  *
  * ## 从哪一版起「失败必须中止」
  *
@@ -398,12 +416,8 @@ function inTransaction<T>(db: Db, fn: () => T): T {
  * 它会自然继承这条纪律；判据落在「从哪一版开始不再丢内容」，不是某一版号。
  */
 function snapshotBeforeMigrate(db: Db, file: string, fromVersion: number): void {
-  const dir = join(dirname(file), BACKUPS_DIR)
   try {
-    mkdirSync(dir, { recursive: true })
-    // VACUUM INTO 不吃参数绑定 ⇒ 只能拼字面量；路径里唯一要逃的字符是单引号（翻倍）
-    const target = join(dir, `${Date.now()}-before-migrate-v${fromVersion}.db`).replace(/'/g, "''")
-    db.exec(`vacuum into '${target}'`)
+    snapshotLibrary(db, dirname(file), `before-migrate-v${fromVersion}`)
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     if (fromVersion >= 8) {

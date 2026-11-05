@@ -61,6 +61,12 @@ export interface LibraryBridge {
    */
   getSetting(key: string): Promise<unknown>
   setSetting(key: string, value: string): Promise<unknown>
+
+  /**
+   * 整库快照（主进程 `VACUUM INTO` 到库目录的 `backups/`）。返回快照路径。
+   * 渲染层显式清库前调用它；主进程失败会原样报错，让清空中止。
+   */
+  backupLibrary?(label?: string): Promise<unknown>
 }
 
 export const IPC_BACKEND = 'ipc-library'
@@ -150,8 +156,24 @@ export function createIpcAdapter(bridge: LibraryBridge): StoragePort {
     },
 
     /**
-     * 清空。**故意什么都不做**：一条 `dev.workspace/reset` 在接上真库之后就是一次数据事故。
-     * 要清库只能删目录（用户显式动作）。
+     * 整库快照：主进程把**当前已落盘的字节** `VACUUM INTO` 到库目录的 `backups/`。
+     *
+     * 只快照「已经在盘上」的那份 —— 调用方必须先把渲染层的写队列 flush 掉
+     * （`StoragePort.backup` 的契约）。失败**抛出**，清空动作据此中止。
+     * 没有这个接口的宿主 ⇒ `null`（web 的 localStorage 有它自己的实现）。
+     */
+    async backup(): Promise<string | null> {
+      if (!bridge.backupLibrary) return null
+      const r = (await bridge.backupLibrary('before-reset')) as
+        | { status?: string; path?: string; error?: unknown }
+        | null
+      if (r?.status === 'ok' && typeof r.path === 'string') return r.path
+      throw new Error(typeof r?.error === 'string' ? r.error : `library backup failed: ${String(r?.status)}`)
+    },
+
+    /**
+     * 清空。**故意什么都不做**：库的内容只走用户显式的「恢复空库」——
+     * 它先拍一份 `backup()` 快照再整份替换，不是一条可以随手调的 `clear()`。
      */
     async clear(): Promise<void> {
       console.warn('[storage] clear() is a no-op on a library-backed workspace')

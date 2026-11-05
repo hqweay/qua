@@ -513,6 +513,13 @@ export interface App {
    * 异步在实现里收尾（按钮已经退场，不需要等它）。
    */
   resetWorkspace(): void
+  /**
+   * **清空成真空库**（只有今天一行，没有演示内容）。
+   *
+   * 同样是「先备份、失败就放弃覆盖」：它与 `resetWorkspace` 的差别只在换成什么内容，
+   * 以及要不要把每库的视图状态一起回默认（换的是整份库，旧 id 全作废）。
+   */
+  blankWorkspace(): void
   setVirtualize(on: boolean, radius?: number): void
   runImeProbe(): { fired: number; seq: string[] }
 }

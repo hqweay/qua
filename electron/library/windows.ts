@@ -30,7 +30,7 @@ import {
 } from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
 import { loadContent, openSession, saveContent, type OpenFailure, type RepoSession } from './session.ts'
-import { readSeq, searchFts, type RowWrite } from './sqlite.ts'
+import { readSeq, searchFts, snapshotLibrary, type RowWrite } from './sqlite.ts'
 
 /** 关窗握手等 renderer 回话的上限。超时就强关——卡住比丢一句话更糟。 */
 const CLOSE_ACK_TIMEOUT_MS = 1500
@@ -430,6 +430,24 @@ export class LibraryManager {
         return { ok: true }
       } catch (err) {
         return { ok: false, error: String(err) }
+      }
+    })
+
+    /**
+     * **整库快照**（`backups/<epoch>-<label>.db`）：给用户显式的「恢复空库」当回退面。
+     *
+     * 只在这里做：`VACUUM INTO` 要一条活着的连接，而连接归会话所有（一库一窗、单写者）。
+     * 返回**绝对路径**：渲染层把它原样说给用户听，不自己拼库目录。
+     * 失败如实返回错误 —— 调用方会中止覆盖，绝不做没有备份的清空。
+     */
+    ipcMain.handle('qua:library/backup', (e, label: unknown) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      const name = typeof label === 'string' && /^[a-z0-9-]{1,40}$/.test(label) ? label : 'manual'
+      try {
+        return { status: 'ok', path: snapshotLibrary(s.db, s.dir, name) }
+      } catch (err) {
+        return { status: 'error', error: err instanceof Error ? err.message : String(err) }
       }
     })
 

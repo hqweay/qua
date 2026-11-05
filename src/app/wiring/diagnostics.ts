@@ -373,6 +373,21 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
         { id: 'empty', label: t('ui.state.empty'), hint: t('ui.stateMenu.emptyHint'), icon: 'lucide:square', group: 'dbg/2-state', command: 'dev.fixture/load', args: { state: 'empty' } },
       )
       /**
+       * **恢复空库**：把用户自己的库清成「只有今天一行」，与上面那几个「演示状态」
+       * 不是同一件事 —— 它真落盘、旧块 id 全部作废，所以只在可写态给出来
+       * （只读态的出路是下面那行「备份并重建」）。
+       */
+      if (!getReadOnly()) {
+        rows.push({
+          id: 'blank',
+          label: t('ui.dbg.blank'),
+          hint: t('ui.dbg.blankHint'),
+          icon: 'lucide:eraser',
+          group: 'dbg/3-data',
+          command: 'dev.workspace/blank',
+        })
+      }
+      /**
        * 只读态下的出路。**只在真的读不出来时出现**：
        *   · `corrupt` 是唯一「重建能解决」的那一档（`too-new` 该升级，`storage-error` 重建也写不进去）；
        *   · 重建成功后 `getReadOnly()` 变假 ⇒ 这一行自己消失，不会留着一个「点第二次又备份又清空」的按钮。

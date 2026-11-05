@@ -8,10 +8,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseWorkspace, WORKSPACE_VERSION, type Workspace } from '../src/core/infra/workspace.ts'
-import { mkBlock, type Block } from '../src/core/index.ts'
+import { mkBlock, hasList, journalId, plainText, todayISO, walkForest, type Block } from '../src/core/index.ts'
 import { seedWorkspace } from '../src/core/infra/seed.ts'
 import { bootWorkspace } from '../src/core/infra/bootstrap.ts'
-import { degradedWorkspace, emptyWorkspace, sparseWorkspace } from '../src/core/fixtures/states.ts'
+import { blankWorkspace, degradedWorkspace, emptyWorkspace, sparseWorkspace } from '../src/core/fixtures/states.ts'
 
 const valid = (patch: Record<string, unknown> = {}): string =>
   JSON.stringify({
@@ -179,6 +179,7 @@ test('每一处创建路径产出的块都带真时刻（不是 undefined、也�
     ['seed', seedWorkspace()],
     ['boot', bootWorkspace()],
     ['empty', emptyWorkspace()],
+    ['blank', blankWorkspace()],
     ['sparse', sparseWorkspace()],
     ['degraded', degradedWorkspace()],
   ]
@@ -215,4 +216,19 @@ test('每一处创建路径产出的块都带真时刻（不是 undefined、也�
     return out
   }
   assert.equal(stampOf(a).join(','), stampOf(b2).join(','), '种子的时刻必须可重放（不能是「现在」）')
+})
+
+test('blankWorkspace: 只有今天一行 —— 一个日记根 ＋ 一个可写空子块，没有页/标签', () => {
+  const ws = blankWorkspace()
+  assert.equal(ws.blocks.length, 1, '空库只该有一个根（今天）')
+  assert.equal(ws.blocks[0].id, journalId(todayISO()), '根必须就是今天那一天（身份由日期确定性派生）')
+  assert.equal(ws.blocks[0].children.length, 1, '日记行只读 ⇒ 必须有一个子块当落点，否则打得开却打不了字')
+  assert.equal(plainText(ws.blocks[0].children[0].content), '', '落点应当是空行（不是一句占位文案）')
+  assert.equal(ws.activeId, ws.blocks[0].id, '落点＝今天（否则新库打开后停在别处）')
+  // 「空」是内容空，不是「一页空页」：空库里没有任何东西进页列表或标签列表
+  const withIdentity: string[] = []
+  walkForest(ws.blocks, (b) => {
+    if (hasList(b, 'page') || hasList(b, 'tag')) withIdentity.push(b.id)
+  })
+  assert.deepEqual(withIdentity, [], '空库不该有页/标签露面')
 })
