@@ -20209,8 +20209,17 @@ await check('T236 空态＝最近更新（非空且含最新改动的块）；�
   // 复制引用：走「复制块引用」同一条命令（剪贴板是块引用文本）
   await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
   await page.fill('.search-face-input', '空态探针LMN')
-  await page.waitForFunction(() => document.querySelectorAll('#center-surface [data-search-row]').length > 0, null, { timeout: 3000 })
-  await page.evaluate(() => document.querySelector('#center-surface .search-row-copy').click())
+  // 条件是「这次词的结果行出现」，不是「有行」：输入防抖窗口内旧列表还在，
+  // 拿「有行」当条件是空转，会点到上一份列表的第一行
+  await page.waitForFunction(
+    (id) => Boolean(document.querySelector(`#center-surface [data-search-row="${id}"]`)),
+    probeId,
+    { timeout: 3000 },
+  )
+  await page.evaluate((id) => {
+    const row = document.querySelector(`#center-surface [data-search-row="${id}"]`)
+    row?.querySelector('.search-row-copy')?.click()
+  }, probeId)
   await page.waitForTimeout(150)
   const clip = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''))
   assert(clip === `((${probeId}))`, `复制引用应得到块引用文本：${clip}`)
