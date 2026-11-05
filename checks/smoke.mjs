@@ -20901,6 +20901,42 @@ await check('T244 搜索面关掉时先收最后一笔：预览里打最后一�
 })
 
 /**
+ * **T245：输入法组词期的 `↵` 归输入法。**
+ *
+ * `Layers` 的键盘处理器挂在 `document` 的**捕获阶段**，比输入框/输入法都早；
+ * 组词时按 `↵` 是在确认候选，处理器若把它当成「选中这一行」，就会顺手执行一条命令。
+ * 这条用例合成一个 `isComposing:true` 的 `↵`（Playwright 的真按键不带这个位），
+ * 验「菜单不动、命令没跑」，再用真 `↵` 验组合结束后照常。
+ */
+await check('T245 输入法组词期的 ↵ 不执行浮层命令（捕获阶段就早退）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.focus())
+  await page.keyboard.press(kbd('mod+shift+p'))
+  await page.locator('.layer-input').fill('导出')
+  const rows = await page.locator('.layer-item').count()
+  const composing = await page.evaluate(() => {
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true })
+    document.dispatchEvent(ev)
+    return { composing: ev.isComposing, prevented: ev.defaultPrevented }
+  })
+  assert(composing.composing, '前置：合成事件的 isComposing 要为 true')
+  assert(!composing.prevented, '组合期的 ↵ 不该被当成菜单键（连 preventDefault 都不该发生）')
+  const afterIme = await page.evaluate(() => ({
+    layer: document.querySelectorAll('.layer').length,
+    drawer: document.querySelectorAll('.drawer').length,
+  }))
+  assert(afterIme.layer === 1, `组合期的 ↵ 不该把菜单选走：${JSON.stringify(afterIme)}`)
+  assert(afterIme.drawer === 0, `组合期的 ↵ 不该执行命令：${JSON.stringify(afterIme)}`)
+  // 组合结束：同一个 ↵ 照常执行（不能为了防组词把整条键废掉）
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(200)
+  assert((await page.locator('.drawer').count()) === 1, '组合结束后的 ↵ 要照常执行')
+  assert((await page.locator('.layer').count()) === 0, '执行后菜单要关掉')
+  await ctx.close()
+  return `组合期 ↵ 早退（${rows} 行不动），组合结束后 ↵ 照常执行`
+})
+
+/**
  * **判定必须在所有用例之后**：这一段曾经写在中途，之后新增的用例（T206 起）即使红了
  * 也不会进 `fail`，而退出码看的是 `fail` ⇒ 那一截用例其实是「跑了但不判红」的假绿。
  * 新增用例一律加在本段**之前**。

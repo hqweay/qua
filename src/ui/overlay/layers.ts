@@ -16,6 +16,7 @@ import { renderIcon } from '../../view/icons.ts'
 import { captureFocus, type FocusReturn } from './focus-return.ts'
 import { placeNear } from './place.ts'
 import { dismissFloating } from './overlay-dismiss.ts'
+import { menuKeyAction } from './menu-key.ts'
 import { QueryGate } from './query-gate.ts'
 
 export interface Row {
@@ -188,32 +189,22 @@ export class Layers {
       (e) => {
         if (!this.open) return
         const ke = e as KeyboardEvent
-        const k = ke.key
-        if (k === 'ArrowDown' || k === 'ArrowUp') {
-          ke.preventDefault()
-          ke.stopPropagation()
-          this.move(k === 'ArrowDown' ? 1 : -1)
-          return
-        }
-        if (k === 'Enter') {
-          ke.preventDefault()
-          ke.stopPropagation()
+        const action = menuKeyAction(ke)
+        // 组合期一律不接（`↵` 是在确认候选，不是在选行）；认不出的键交给别人
+        if (action === 'ignore' || action === 'pass') return
+        ke.preventDefault()
+        ke.stopPropagation()
+        if (action === 'pick') {
           // 修饰键必须传出去：同一个对象按 ⌘/⌥ 是不同的落点（⌘Enter 已归「切换待办」，
           // 所以浮层这里不替它编语义，只如实上报按了什么）
           this.pickActive({ altKey: ke.altKey, metaKey: ke.metaKey, ctrlKey: ke.ctrlKey, shiftKey: ke.shiftKey })
           return
         }
-        if (k === 'Escape') {
-          ke.preventDefault()
-          ke.stopPropagation()
+        if (action === 'close') {
           this.closeMenu()
           return
         }
-        if (k === 'Tab') {
-          ke.preventDefault()
-          ke.stopPropagation()
-          this.move(ke.shiftKey ? -1 : 1)
-        }
+        this.move(action === 'up' || action === 'tab-prev' ? -1 : 1)
       },
       true,
     )
