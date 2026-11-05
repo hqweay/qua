@@ -222,6 +222,27 @@ export class BlockSelection {
     return true
   }
 
+  /** 批量缩进（Tab）：只动最上层根，子树随块走；一笔撤销；选区保持 */
+  indentSelectedBlocks(): boolean {
+    const ok = this.ed.indentMany(this.blockSelRoots().map((b) => b.id))
+    if (ok) this.paintBlockSel()
+    return ok
+  }
+
+  /** 批量反缩进（Shift+Tab）：同上，逆序处理保持原有次序 */
+  outdentSelectedBlocks(): boolean {
+    const ok = this.ed.outdentMany(this.blockSelRoots().map((b) => b.id))
+    if (ok) this.paintBlockSel()
+    return ok
+  }
+
+  /** 批量切换待办：每块按自己的字段翻值，一笔撤销；选区保持 */
+  toggleTodoSelectedBlocks(): boolean {
+    const ok = this.ed.toggleTodoMany(this.blockSelRoots().map((b) => b.id))
+    if (ok) this.paintBlockSel()
+    return ok
+  }
+
   /** 选中的块 → 大纲文本（缩进 2 空格；子树随块走） */
   selectedBlocksText(): string {
     const roots = this.blockSelRoots()

@@ -73,6 +73,10 @@ export function convertSpotToRef(content: Content, spot: MentionSpot, to: string
 /**
  * 提及栏片段行的**结构化片段**：命中段标 `mark`，其余是普通文本段。
  *
+ * 入参是**内容**不是串：spots 是 plain 偏移（原子占 1 格），展示串必须与之同一坐标系
+ * ——文本照抄、原子各占一格占位符。喂「投影串」（原子不占格）会让 mark 在
+ * 含引用/图等原子的块上整体错位甚至一处都画不出来（高亮与转换按钮一起消失）。
+ *
  * 窗口从首个出现处附近起截（与搜索片段同一条纪律：宁可前后省略号，不把整段堆进一行）；
  * 窗口不许切在命中中间——尾巴越界就把窗口推到那一处之后。
  *
@@ -80,9 +84,10 @@ export function convertSpotToRef(content: Content, spot: MentionSpot, to: string
  *    （窗口永远包含首个出现处 ⇒ 被窗口截掉的出现处只在尾部）。
  *    渲染端靠这条约定把「第 k 个高亮」接到「第 k 处转换」上。
  */
-export function mentionSnippet(text: string, spots: readonly MentionSpot[], max = 96): TextPart[] {
+export function mentionSnippet(content: Content, spots: readonly MentionSpot[], max = 96): TextPart[] {
   const first = spots[0]
-  if (!first || text === '') return []
+  if (!first || content.length === 0) return []
+  const text = plainDisplay(content)
   const start = Math.max(0, first.start - 24)
   let end = Math.min(text.length, start + max)
   for (const s of spots) {
@@ -100,4 +105,11 @@ export function mentionSnippet(text: string, spots: readonly MentionSpot[], max 
   if (cursor < end) parts.push({ text: text.slice(cursor, end) })
   if (end < text.length) parts.push({ text: '…' })
   return parts
+}
+
+/** 与 plain 偏移对齐的展示串：文本照抄，原子各占一格占位（原子不可转，只占位） */
+function plainDisplay(content: Content): string {
+  let out = ''
+  for (const r of content) out += r.t === 'text' ? r.v : '□'
+  return out
 }

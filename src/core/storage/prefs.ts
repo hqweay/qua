@@ -46,6 +46,13 @@ export interface Prefs {
    * 键的形状见 `mountViewKey`（块宿主带块 id、日记宿主不带）。
    */
   mountViews: Record<string, DerivedViewKind>
+  /**
+   * **派生栏（引用／提及）的分组键**（设备状态，与 `mountViews` 同层同键）。
+   *
+   * 派生栏没有可写的视图配置：分组跟看法一样只是「这一台设备怎么看这一栏」，
+   * 存成内容就会跨设备跟着走、还会多一份能分叉的配置。键见 `mountViewKey`。
+   */
+  mountGroups: Record<string, string>
   /** 三槽的开关与宽度；入口条已作废 */
   dock: DockPrefs
   virtualize: boolean
@@ -145,6 +152,7 @@ export const DEFAULT_PREFS: Prefs = {
   feedLayout: 'column',
   journalMounts: [],
   mountViews: {},
+  mountGroups: {},
   dock: DEFAULT_DOCK,
   virtualize: false,
   radius: 12,
@@ -231,6 +239,13 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
       }
     }
   }
+  // 派生栏的分组键：同 mountViews 的逐格验形（非空串才收，'' ＝ 没分组，不必记）
+  const mountGroups: Record<string, string> = {}
+  if (p.mountGroups && typeof p.mountGroups === 'object' && !Array.isArray(p.mountGroups)) {
+    for (const [k, v] of Object.entries(p.mountGroups)) {
+      if (typeof k === 'string' && k !== '' && typeof v === 'string' && v !== '') mountGroups[k] = v
+    }
+  }
 
   return {
     ...DEFAULT_PREFS,
@@ -240,6 +255,7 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     // 日记面板的栏：逐项重建（坏项丢掉），与 `_mounts` 共用同一份判据
     journalMounts: canonicalMountEntries(p.journalMounts),
     mountViews,
+    mountGroups,
     dock: {
       // `legacyPinned` 只在归一内部用，不进落盘形状
       left: { open: left.open, width: left.width, cards: left.cards },

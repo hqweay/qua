@@ -1748,6 +1748,44 @@ function commandDecls() {
 }
 
 /* ═══════════════════════════════════════════════════════╗
+   ║ 38 · 图标引用只许指向 vendor 表里已有的名字              ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  /**
+   * **`lucide:<name>` 的 name 必须能在 `view/icons.ts` 的 `ICON_PATHS` 查到。**
+   *
+   * 查不到的引用运行时会降级成问号占位（不静默消失），但界面上一排问号＝静默劣化：
+   * 搜索卡、视图菜单整批出现过「代码里写了 `lucide:search`、表里没有 search」的事故。
+   * ⇒ 静态对账：源码里所有 `lucide:…` 字面量 ∪ `createIcon('…')` 调用点，
+   *   都必须落在 vendor 表的键集合里。
+   */
+  const iconsSrc = readFileSync(join(ROOT, 'src/view/icons.ts'), 'utf8')
+  const tableKeys = new Set([...iconsSrc.matchAll(/^\s*"([a-z0-9-]+)":/gm)].map((m) => m[1]))
+  const hits = []
+  for (const f of srcFiles) {
+    if (rel(f) === 'src/view/icons.ts') continue
+    const src = readFileSync(f, 'utf8')
+    for (const m of src.matchAll(/lucide:([a-z0-9-]+)/g)) {
+      if (!tableKeys.has(m[1])) hits.push(`${rel(f)}  lucide:${m[1]} 不在 vendor 表`)
+    }
+    for (const m of src.matchAll(/createIcon\(\s*['"]([a-z0-9-]+)['"]/g)) {
+      if (!tableKeys.has(m[1])) hits.push(`${rel(f)}  createIcon('${m[1]}') 不在 vendor 表`)
+    }
+  }
+  add({
+    id: 38,
+    title: '图标引用对账：源码里的每个 `lucide:<name>` 与 `createIcon(<name>)` 都能在 `ICON_PATHS` 查到',
+    method: '正则收源码里的图标引用字面量，与 `src/view/icons.ts` 的表键做集合差',
+    scope: `src/**/*.ts（vendor 表 ${tableKeys.size} 个键）`,
+    whitelist: '`icons.ts` 自身；未知名字的运行时降级（问号占位）保留——本条管的是**源头**不再新增坏引用',
+    hits: hits.length,
+    detail: hits,
+    note: '查不到的引用会显示成问号占位（不静默消失），但一排问号＝静默劣化；加图标＝把上游 path 粘进表，而不是让引用落空',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
    ║ 等内核（不假装在跑）                                     ║
    ╚═══════════════════════════════════════════════════════ */
 

@@ -8,8 +8,9 @@
  *   · **空列与「未设置」都在**。空列让「把这个状态的东西挪走」有落点；
  *     「未设置」那一列让「还没填」的东西看得见 —— 藏起来等于告诉用户「这些不存在」。
  */
-import { fieldTextOf, isMultiValueKey, openPlaceOf, sortRecords, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../../core/index.ts'
+import { fieldTextOf, openPlaceOf, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
+import { bucketize, bucketLabel, orderBuckets, recordsForGrouping, GROUP_UNSET, type GroupBucket } from './grouping.ts'
 import { viewNote } from './view-note.ts'
 
 export interface ViewBoardDeps {
@@ -27,20 +28,12 @@ export interface ViewBoardDeps {
 }
 
 /**
- * 「未设置」这一列的内部键。
+ * 「未设置」这一列的内部键与分桶口径都住在 `grouping.ts`（列表／表格的分组共用）。
  *
  * 分组键带**类型前缀**：`true`／`"true"`／`1` 是不同的值，合成一个会把它们混成一列，
  * 而拖回去写哪种类型就没有答案了。空串**不是**「未设置」（它是一个合法值）。
  */
-const UNSET = '\u0000unset'
-
-const keyOfValue = (v: unknown): string => {
-  if (v === undefined || v === null || v === '') return UNSET
-  if (typeof v === 'string') return `s:${v}`
-  if (typeof v === 'number') return `n:${v}`
-  if (typeof v === 'boolean') return `b:${v}`
-  return `j:${JSON.stringify(v)}`
-}
+const UNSET = GROUP_UNSET
 
 export class ViewBoard {
   readonly root: HTMLElement
@@ -65,60 +58,39 @@ export class ViewBoard {
       this.root.appendChild(viewNote(t('ui.board.needsGroup')))
       return
     }
-    /** 多值键（`_tags`）：一块进每个所属组，拖拽禁用（写路径只有单值有唯一动作） */
-    this.multi = isMultiValueKey(key)
-
-    const records = sortRecords(this.deps.records(), view?.table?.sort)
-    const declared = this.deps.choices(key)
     /**
-     * 列的次序：用户配置的组序在前（存原始值），其余声明选项按声明序，
-     * 没声明过的按**第一次出现**；「未设置」永远最后。
+     * **多值键不进卡片分组**：卡片列的拖卡＝「写那格的值」，多值下没有唯一动作
+     * （加一个还是换一个？别的组里那张卡怎么办）。分组下拉也不提供多值候选——
+     * 配置里存着的多值键（从列表切过来）在这里如实说明，而不是静默 fan-out。
      */
-    const order: string[] = []
-    for (const g of view?.groupOrder ?? []) {
-      const k = `s:${g}`
-      if (!order.includes(k)) order.push(k)
+    const o = {
+      choices: (propId: string) => this.deps.choices(propId),
+      groupOrder: view?.groupOrder,
     }
-    for (const c of declared) {
-      const k = `s:${c.id}`
-      if (!order.includes(k)) order.push(k)
+    const { multi } = bucketize(this.deps.records(), key, o)
+    if (multi) {
+      this.multi = true
+      this.root.appendChild(viewNote(t('ui.board.noMultiGroup')))
+      return
     }
-    const buckets = new Map<string, ViewRecord[]>()
-    /** 分组键 → 原始值（拖卡回去要写回**同类型**的那个值） */
-    const rawOf = new Map<string, unknown>()
-    for (const r of records) {
-      const raw = r.values[key]
-      // 多值键：值是列表 ⇒ 记录**出现在每个所属组**（fan-out）；一个值都没有 ⇒「未设置」
-      const values = this.multi ? (Array.isArray(raw) ? raw : []) : [raw]
-      if (values.length === 0) {
-        if (!buckets.has(UNSET)) buckets.set(UNSET, [])
-        buckets.get(UNSET)!.push(r)
-        continue
-      }
-      for (const v of values) {
-        const id = keyOfValue(v)
-        if (!buckets.has(id)) {
-          buckets.set(id, [])
-          rawOf.set(id, v)
-          if (id !== UNSET && !order.includes(id)) order.push(id)
-        }
-        buckets.get(id)!.push(r)
-      }
-    }
-    if (view?.board?.showEmpty === true || buckets.size > 0) {
-      for (const id of order) if (!buckets.has(id)) buckets.set(id, [])
-      if (!buckets.has(UNSET)) buckets.set(UNSET, [])
-    }
-    order.push(UNSET)
+    this.multi = false
 
-    for (const id of order) {
-      const items = buckets.get(id)
-      if (!items) continue
-      this.root.appendChild(this.column(id, items, key, rawOf.get(id)))
+    const records = recordsForGrouping(this.deps.records(), view)
+    const { buckets, order } = bucketize(records, key, o)
+    if (view?.board?.showEmpty === true || buckets.length > 0) {
+      for (const id of order) {
+        if (buckets.some((b) => b.id === id)) continue
+        buckets.push({ id, raw: undefined, records: [], unset: id === UNSET })
+      }
+    }
+
+    for (const b of orderBuckets(buckets, order)) {
+      this.root.appendChild(this.column(b, key))
     }
   }
 
-  private column(id: string, items: readonly ViewRecord[], propId: string, raw: unknown): HTMLElement {
+  private column(b: GroupBucket, propId: string): HTMLElement {
+    const id = b.id
     const col = document.createElement('div')
     col.className = 'vb-col'
     col.dataset.value = id === UNSET ? '' : id
@@ -128,22 +100,16 @@ export class ViewBoard {
     head.className = 'vb-col-head'
     const name = document.createElement('span')
     name.className = 'vb-col-name ui-ellipsis'
-    /**
-     * 列头文案：`select`／`_tags` 的值是**块 id**，得翻译成它的名字；
-     * 其余属性（文本／数字／日期）的值本身就是列名。
-     */
-    const label =
-      id === UNSET ? t('ui.board.unset') : (this.deps.choices(propId).find((c) => c.id === raw)?.label ?? String(raw))
-    name.textContent = label
+    name.textContent = bucketLabel(b, propId, { choices: (pid) => this.deps.choices(pid) })
     const count = document.createElement('span')
     count.className = 'vb-col-count'
-    count.textContent = String(items.length)
+    count.textContent = String(b.records.length)
     head.append(name, count)
     col.appendChild(head)
 
     const list = document.createElement('div')
     list.className = 'vb-cards'
-    for (const r of items) list.appendChild(this.card(r))
+    for (const r of b.records) list.appendChild(this.card(r))
     col.appendChild(list)
 
     /**
@@ -167,8 +133,8 @@ export class ViewBoard {
         e.preventDefault()
         const blockId = this.dragging
         this.dragging = ''
-        if (id === UNSET) this.deps.clearValue(blockId, propId)
-        else this.deps.setValue(blockId, propId, raw)
+        if (b.unset) this.deps.clearValue(blockId, propId)
+        else this.deps.setValue(blockId, propId, b.raw)
       })
     }
     return col

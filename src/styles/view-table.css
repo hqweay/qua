@@ -37,7 +37,8 @@
   它不是 tab（不并列所有视图），也不是普通按钮（点开是一张菜单）——
   所以给一层边框与箭头，和旁边的「刷新」这类动作按钮分开。
 */
-.qv-view-btn.qv-view-current {
+.qv-view-btn.qv-view-current,
+.qv-view-btn.mount-derived-view-btn {
   display: inline-flex;
   align-items: center;
   gap: var(--ui-gap-1);
@@ -50,7 +51,8 @@
   font-size: var(--ui-fs-sm);
   font-weight: var(--ui-fw-normal);
 }
-.qv-view-current:hover {
+.qv-view-current:hover,
+.mount-derived-view-btn:hover {
   background: var(--ui-bg-hover);
   color: var(--ui-text);
 }
@@ -914,4 +916,34 @@ button.queryview-chip:hover {
 /* 列表的字段列放宽一档：片段要能当正文读（默认字段宽只装得下两三个字） */
 .vl-field.mention-field {
   max-width: 24rem;
+}
+
+/* ── 分组包装（列表／表格带 groupBy 时：一个属性值一段）── */
+.vgroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-3);
+}
+.vgroup-sec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+  min-width: 0;
+}
+.vgroup-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-xs);
+  padding: var(--ui-gap-1) var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+}
+.vgroup-name {
+  flex: 1;
+  min-width: 0;
+}
+.vgroup-count {
+  color: var(--ui-text-tertiary);
 }

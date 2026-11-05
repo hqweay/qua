@@ -397,7 +397,7 @@ function mentionRecords(host: Block, kb: KbClient): ViewRecord[] {
       derived: {
         matched: [...words].join(' · '),
         ...(spots.length > 0
-          ? { mentionSpots: spots, mentionSnippet: mentionSnippet(plainText(r.block.content), spots) }
+          ? { mentionSpots: spots, mentionSnippet: mentionSnippet(r.block.content, spots) }
           : {}),
       },
     }

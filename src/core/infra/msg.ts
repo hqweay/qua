@@ -38,6 +38,9 @@ export const MSG = {
   'cmd.editor.copy-ref': '复制为引文（含原文快照）',
   'cmd.editor.copy-block-ref': '复制块链接（((id))）',
   'cmd.editor.delete-selected-blocks': '删除选中的块',
+  'cmd.editor.indent-selected-blocks': '缩进选中的块',
+  'cmd.editor.outdent-selected-blocks': '反缩进选中的块',
+  'cmd.editor.toggle-todo-selected-blocks': '切换选中块的待办',
   'cmd.editor.copy-selected-blocks': '复制选中的块（大纲文本）',
   'cmd.editor.copy-selected-block-refs': '复制选中块的引用',
   'cmd.selection.clear': '取消块选择',
@@ -530,9 +533,10 @@ export const MSG = {
   /* 记录列表（`list`）：一行一条，没有缩进 —— 它的源里两种是平的一批 */
   'ui.list.empty': '这一份源还没有记录',
   'ui.list.open': '打开这一条',
-  /* 看板：按某一列的单值分组；拖卡＝写属性（不是 re-parent） */
-  'ui.board.needsGroup': '看板要选一列来分组（视图菜单里挑一列）',
+  /* 卡片（看板）：按某一列的单值分组；拖卡＝写属性（不是 re-parent） */
+  'ui.board.needsGroup': '卡片要选一列来分组（视图菜单里挑一列）',
   'ui.board.unset': '未设置',
+  'ui.board.noMultiGroup': '卡片的分组列不支持多值属性（多值请在列表或表格里分组）',
   /* 画廊：封面是派生的（正文里第一张图） */
   'ui.gallery.noCover': '没有封面',
   /* 日历：按日期落在月网格里 */
@@ -546,7 +550,7 @@ export const MSG = {
   'ui.mindmap.empty': '这一块没有子块',
   'ui.view.kind.table': '表格',
   'ui.view.kind.list-table': '大纲表格',
-  'ui.view.kind.board': '看板',
+  'ui.view.kind.board': '卡片',
   'ui.view.kind.gallery': '画廊',
   'ui.view.kind.calendar': '日历',
   'ui.view.kind.mindmap': '思维导图',
@@ -568,7 +572,7 @@ export const MSG = {
   'ui.view.sortAsc': '升序',
   'ui.view.sortDesc': '降序',
   'ui.view.unknownKind': '不认识的视图类型',
-  'ui.view.boardNeedsField': '看板需要一个分组字段（先建一个「单选」或「勾选」属性）',
+  'ui.view.boardNeedsField': '卡片需要一个分组字段（先建一个「单选」或「勾选」属性）',
   'ui.view.columnMissing': '已删除的属性',
   'ui.view.childrenCount': '{count} 子块',
   'ui.view.editTitle': '点文字编辑这一块',

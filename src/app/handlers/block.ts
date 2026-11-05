@@ -173,6 +173,9 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     return true
   },
   'core.editor/delete-selected-blocks': (_a, app) => app.ed.bsel.deleteSelectedBlocks(),
+  'core.editor/indent-selected-blocks': (_a, app) => app.ed.bsel.indentSelectedBlocks(),
+  'core.editor/outdent-selected-blocks': (_a, app) => app.ed.bsel.outdentSelectedBlocks(),
+  'core.editor/toggle-todo-selected-blocks': (_a, app) => app.ed.bsel.toggleTodoSelectedBlocks(),
   'core.editor/copy-selected-blocks': (_a, app) => {
     const text = app.ed.bsel.selectedBlocksText()
     if (!text) return false

@@ -91,6 +91,9 @@ export const BINDINGS: Binding[] = [
   { command: 'core.selection/focus-first', kind: 'keymap', key: 'enter', when: 'blockSelection', layer: 'core' },
   { command: 'core.editor/delete-selected-blocks', kind: 'keymap', key: 'backspace', when: 'blockSelection', layer: 'core' },
   { command: 'core.editor/delete-selected-blocks', kind: 'keymap', key: 'delete', when: 'blockSelection', layer: 'core' },
+  { command: 'core.editor/indent-selected-blocks', kind: 'keymap', key: 'tab', when: 'blockSelection', layer: 'core' },
+  { command: 'core.editor/outdent-selected-blocks', kind: 'keymap', key: 'shift+tab', when: 'blockSelection', layer: 'core' },
+  { command: 'core.editor/toggle-todo-selected-blocks', kind: 'keymap', key: 'mod+enter', when: 'blockSelection', layer: 'core' },
   { command: 'core.selection/select-all-blocks', kind: 'keymap', key: 'mod+shift+a', when: 'editorTextFocus || blockSelection', layer: 'core' },
   { command: 'core.selection/extend-up', kind: 'keymap', key: 'shift+up', when: 'editorTextFocus || blockSelection', layer: 'core', args: { dir: -1 } },
   { command: 'core.selection/extend-down', kind: 'keymap', key: 'shift+down', when: 'editorTextFocus || blockSelection', layer: 'core', args: { dir: 1 } },
@@ -196,6 +199,9 @@ export const BINDINGS: Binding[] = [
 
   /* ================= 块选区菜单 ================= */
   { command: 'core.editor/delete-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 10, layer: 'core', keywords: [t('menu.kw.delete')] },
+  { command: 'core.editor/indent-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 15, layer: 'core', keywords: ['tab', t('menu.kw.indent')] },
+  { command: 'core.editor/outdent-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 16, layer: 'core', keywords: ['shift tab', t('menu.kw.outdent')] },
+  { command: 'core.editor/toggle-todo-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 17, layer: 'core', keywords: ['todo', 'task'] },
   { command: 'core.editor/copy-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 20, layer: 'core' },
   { command: 'core.editor/copy-selected-block-refs', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 30, layer: 'core', keywords: ['ref', t('menu.kw.ref')] },
   { command: 'core.selection/clear', kind: 'menu', when: 'blockSelection', group: 'blockSel/2-clear', order: 10, layer: 'core' },

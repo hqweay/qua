@@ -37,7 +37,6 @@ import {
   mountEntriesOf,
   readViewSet,
   unfoldForContext,
-  DERIVED_VIEW_KINDS,
   EMPTY_QUICK_FILTER,
   quickFilterAdd,
   quickFilterDrop,
@@ -59,6 +58,7 @@ import { t, type MsgId } from '../../core/infra/msg.ts'
 import { type BlockEditor, type Run } from '../../view/editor/editor.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
 import { bindDropTarget, setDragTab } from '../../view/dnd.ts'
+import { renderIcon } from '../../view/icons.ts'
 import { renderQuickFilter } from './quick-filter.ts'
 
 /** 非大纲那一栏的**视图体**（由装配层造：只有那里有完整依赖） */
@@ -120,6 +120,11 @@ export interface MountAreaDeps {
   derivedKind?: (host: Block, source: DerivedSource) => DerivedViewKind
   /** 切派生栏的看法（装配层写设备状态并重画这一栏） */
   setDerivedKind?: (host: Block, source: DerivedSource, kind: DerivedViewKind) => void
+  /**
+   * 派生栏的看法下拉（与自定义查询的「视图…」同壳：同一台浮层）。
+   * 这一栏只有三档可切——大纲／列表／表格，没有可新建的东西。
+   */
+  openDerivedViewMenu?: (anchor: DOMRect | null, current: DerivedViewKind, onPick: (kind: DerivedViewKind) => void) => void
   /**
    * 浮层外壳（快速筛选的 chips 弹层住在这里面）。装配层持有浮层实例，这一层
    * 不认识它的落位与生命周期——窄接口只收「画进哪、锚在哪」，够用。
@@ -656,7 +661,8 @@ export class MountArea {
      * **关联型引用默认折叠**（派生栏专用）：引用／提及／同类这三栏的每一行都是
      * 「因为一条边而出现」—— `[[引用]]`、`#标签`，**全是关联型**，不是靠祖先带进来的
      * （那种叫传递型，得等「命中块的子孙也进结果」才有）。
-     * 虎鲸的口径正是：关联型默认折叠（只给那一行），传递型默认展开（好看出属于哪一片）。
+     * 默认折的判据来自行本身的来路：一行引用单独看没有上下文，摊开是一屏噪声；
+     * 传递型命中带着「它属于哪一片」的祖先链，摊开才读得懂。
      *
      * ⚠️ **只播种一次**（按栏记）：用户手动展开某一行以后不许再覆盖 ——
      *    否则每次重画都把人刚展开的又折回去。
@@ -766,6 +772,10 @@ export class MountArea {
       head.appendChild(this.quickFilterButton(entry.source))
     }
 
+    /**
+     * 看法切换是**一颗下拉**（与自定义查询的「视图…」同壳、同台浮层），不是一排 tab：
+     * 三档看法是同一件事的三种读法，排开只会抢走条数与筛选的位置。
+     */
     const seg = document.createElement('div')
     seg.className = 'mount-derived-views'
     const labels: Record<DerivedViewKind, MsgId> = {
@@ -773,19 +783,26 @@ export class MountArea {
       list: 'ui.view.kind.list',
       table: 'ui.view.kind.table',
     }
-    for (const k of DERIVED_VIEW_KINDS) {
-      const b = document.createElement('button')
-      b.type = 'button'
-      b.className = 'mount-derived-view'
-      b.dataset.kind = k
-      if (k === kind) b.dataset.active = '1'
-      b.textContent = t(labels[k])
-      b.addEventListener('click', () => {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    // ⚠️ 不带 `qv-view-current`：那是视图宿主抬头切换器的钩子（冒烟按它点），
+    //    派生栏这一颗凑同名会把两台切换器搅在一起；样式借 `qv-view-btn`，身份用自己的。
+    btn.className = 'qv-view-btn mount-derived-view-btn'
+    btn.title = t('ui.view.switchHint')
+    const label = document.createElement('span')
+    label.className = 'mount-derived-view-label'
+    label.textContent = t(labels[kind])
+    const caret = document.createElement('span')
+    caret.className = 'qv-view-caret'
+    renderIcon(caret, 'lucide:chevron-down', 'chevron-down')
+    btn.append(label, caret)
+    btn.addEventListener('click', () => {
+      this.deps.openDerivedViewMenu?.(btn.getBoundingClientRect(), kind, (k) => {
         if (k === kind) return
         this.deps.setDerivedKind?.(host, entry.source, k)
       })
-      seg.appendChild(b)
-    }
+    })
+    seg.appendChild(btn)
     head.appendChild(seg)
 
   }

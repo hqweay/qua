@@ -1744,6 +1744,31 @@ const app: App = {
   },
 
   /**
+   * **派生栏（引用／提及）的看法下拉**：只有三档——大纲／列表／表格。
+   *
+   * 与自定义查询的「视图…」同壳（同一台浮层、同一颗按钮的形状），但**没有**新建／
+   * 改名／切片：派生栏是只读关系视图，没有 `_views` 可以写，看法只是设备状态的一格。
+   */
+  openDerivedViewMenu: (anchor, current, onPick) => {
+    const kinds = ['outline', 'list', 'table'] as const
+    const labels = { outline: t('ui.view.outline'), list: t('ui.view.kind.list'), table: t('ui.view.kind.table') }
+    const icons = { outline: 'lucide:list-tree', list: 'lucide:list', table: 'lucide:table' }
+    layers.openMenu({
+      rows: kinds.map((k) => ({
+        id: k,
+        label: labels[k],
+        icon: icons[k],
+        ...(k === current ? { keyHint: t('ui.view.current') } : {}),
+      })),
+      anchor,
+      width: 200,
+      title: t('menu.label.views'),
+      searchable: false,
+      onPick: (row) => onPick(String(row.id)),
+    })
+  },
+
+  /**
    * **切片构建器**：与「视图… → 编辑切片…」同一台浮层（抬头切片 chip 也走这里）。
    *
    * 切片没有「默认看法」那一份配置：`spec` 每次现读，视图被删了就退回空树；
