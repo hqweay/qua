@@ -5,9 +5,10 @@
  * （worker 或测试里的假实现）。这样索引逻辑能在 Node 单测里跑，不需要 WASM。
  */
 import type { Op } from '../../core/kb/types.ts'
-import type { StoredWorkspace } from '../../core/storage/db-rows.ts'
+import type { RowWrite, StoredWorkspace } from '../../core/storage/db-rows.ts'
 import type { FtsCommitPlan, FtsCommitSource } from '../../core/storage/fts-port.ts'
 import type { FtsSource } from '../../core/search/sources.ts'
+import { META_KEYS } from '../../core/identity/library.ts'
 import type { TokenizedText } from '../../core/search/tokenizer.ts'
 import { buildFtsWrites, ftsSourceTexts, ftsTargets } from '../../core/search/rows.ts'
 import { ftsRowKey, parseFtsRowKey } from '../../core/search/sources.ts'
@@ -28,6 +29,16 @@ export interface SearchSnapshot {
 }
 
 export type TokenizeMany = (items: readonly { id: string; text: string }[]) => Promise<Map<string, TokenizedText>>
+
+/** `fts_rowid_seq` 的一行写入：分配器的水位与索引行一起提交，重开从这里接着发号 */
+function rowidSeqWrite(seq: number): RowWrite {
+  return {
+    table: 'meta',
+    op: 'upsert',
+    key: { key: META_KEYS.ftsRowidSeq },
+    values: { value: String(seq) },
+  }
+}
 
 /** 单测／降级用的同步分词器包装（真实实现是 worker） */
 export function tokenizeManyWith(
@@ -54,7 +65,16 @@ export class SearchIndexer implements FtsCommitSource {
 
   constructor(snapshot: SearchSnapshot | undefined, tokenize: TokenizeMany) {
     this.map = new Map(snapshot?.map ?? [])
-    this.rowid = snapshot?.rowidSeq ?? 0
+    /**
+     * **水位不能低于映射里的最大值**。
+     *
+     * `fts_rowid` 在 `BlockFTSMap` 上是全局 UNIQUE：水位若从旧 meta 起算，新分配的
+     * rowid 会撞上仍然存在的映射行（重开之后第一次编辑必撞）。增量写从这一版起
+     * 会把水位一起落盘；但存量库里的水位可能已经是旧的，所以加载时按映射兜底。
+     */
+    let rowid = snapshot?.rowidSeq ?? 0
+    for (const used of this.map.values()) if (used > rowid) rowid = used
+    this.rowid = rowid
     this.state = snapshot?.state ?? 'pending'
     this.tokenizer = snapshot?.tokenizer ?? ''
     this.tokenize = tokenize
@@ -174,7 +194,15 @@ export class SearchIndexer implements FtsCommitSource {
     const built = buildFtsWrites(targets, tokens, this.map, this.rowid)
     if (built.writes.length === 0) return null
     return {
-      writes: built.writes,
+      /**
+       * **水位与映射同一批**。
+       *
+       * 只在重建时写 meta、增量不写，会让「重开之后接着发号」从一个旧数字开始：
+       * 盘上映射里的 rowid 还在，新分配的会撞 `fts_rowid` 的 UNIQUE（实测）。
+       * 放进同一批还有一个好处：事务失败时两者一起回滚，不会出现「水位涨了、
+       * 映射没落盘」的第二个坏状态。
+       */
+      writes: [...built.writes, rowidSeqWrite(built.nextRowid)],
       apply: () => {
         this.map = built.map
         this.rowid = built.nextRowid
