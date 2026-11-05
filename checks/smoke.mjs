@@ -19944,7 +19944,35 @@ await check('T234 ⌘F 浮层「展开为面板」⇒ 中心搜索 tab：词带�
   )
   assert(layout.previewText.includes('探针XYZ'), `预览里是那一块的正文：${JSON.stringify(layout)}`)
   assert(layout.probe && now.rows.includes(layout.probe), `探针块也在命中里：${JSON.stringify(now.rows)}`)
+  /**
+   * **首条自动选中**：换了一份列表（词变了）就从头选，不把上一份列表的选中带过来。
+   *
+   * 这一条抓的是真出现过的 bug：空态「最近更新」的第一条恰好也在新结果里，
+   * 于是跨列表保留把它带过来——而它在新列表里排在**末尾**，屏幕上看起来
+   * 「首条没选中、选中在最后一行」。
+   */
+  assert(
+    layout.selected[0] === now.rows[0],
+    `换词之后选中的是**第一条**（不继承上一份列表的选中）：selected=${JSON.stringify(layout.selected)} rows[0]=${now.rows[0]}`,
+  )
   assert(layout.previewBorderLeft !== '0px', `右列有左边框（分隔归边框，不加第二种分隔件）：${layout.previewBorderLeft}`)
+
+  /**
+   * **公共祖先只说一次**：这批命中整批来自同一处时，`住哪` 提进分组标题、行里不再重复。
+   *
+   * 判据用「片段占了多少宽」而不是看文案：逐行重复同一句会把它挤成一截
+   * （实测同一页 6 条命中时，片段从 232px 掉到 178px，而省下的 47px 一个字都没多说）。
+   */
+  const sharedHint = await page.evaluate(() => ({
+    group: document.querySelector('#center-surface .search-face-group')?.textContent ?? '',
+    hints: [...document.querySelectorAll('#center-surface .search-row-hint')].map((e) => e.textContent ?? ''),
+    rows: document.querySelectorAll('#center-surface .search-row').length,
+    textW: Math.round((document.querySelector('#center-surface .search-row-text')?.getBoundingClientRect().width ?? 0)),
+  }))
+  assert(
+    sharedHint.rows >= 2 && sharedHint.hints.length === 0 && sharedHint.group.includes('·'),
+    `同一处的整批命中：住哪提进分组标题、行里不再重复：${JSON.stringify(sharedHint)}`,
+  )
 
   /**
    * 窄屏（<900px）：**单列堆叠**——列表在上、预览在下，两列都不消失。
@@ -20113,6 +20141,53 @@ await check('T236 空态＝最近更新（非空且含最新改动的块）；�
   assert(now.term === '', '前置：面开着、词为空')
   assert(now.groups.includes('最近更新'), `空态应给最近更新：${JSON.stringify(now.groups)}`)
   assert(now.rows.length > 0 && now.rows.includes(probeId), `最近更新非空且含最新改动的块：${JSON.stringify(now.rows.slice(0, 5))}`)
+
+  /**
+   * **从「最近更新」切到「搜索结果」时，选中要重新落到第一条**。
+   *
+   * 这一条抓的是真出现过的 bug：空态选中的是最近更新的首条，而它恰好也在搜索
+   * 结果里（只是排在后面）⇒ 跨列表保留把它带过来，屏幕上表现为「首条没选中、
+   * 选中在末行」。判据必须是「换了一份列表」而不是「这个 id 还在不在」。
+   *
+   * ⚠️ **前置要造出「位置不同」**：把最近更新的首条（`newest`）的 modified 推到最前，
+   *    再让它排进搜索结果的**后面**（搜索按 FTS 分数/插入序，这里靠建块顺序）。
+   *    没有这一步，两个位置恰好相同，断言恒绿（反向验证已证实）。
+   */
+  const newest = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id })
+    const a = ed.insertBlockAfter(ed.doc.roots[0].id, '最近首条ZYX')
+    const b = ed.insertBlockAfter(a, '最近首条ZYX 第二条')
+    // 让 b 成为「最近更新」的第一条（modified 最新），但它在搜索里排在 a 之后
+    ed.write((t) => t.patch(b, (x) => { x.modified = Date.now() + 5000 }))
+    return { a, b }
+  })
+  await page.waitForTimeout(400)
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
+  await page.waitForTimeout(400)
+  const newestFirst = await page.evaluate((b) => {
+    const sel = [...document.querySelectorAll('#center-surface .search-row')].filter((e) => e.dataset.selected === '1').map((e) => e.dataset.searchRow)
+    return { selected: sel, isNewest: sel[0] === b }
+  }, newest.b)
+  await page.fill('.search-face-input', '最近首条ZYX')
+  await page.waitForFunction(() => document.querySelectorAll('#center-surface [data-search-row]').length >= 2, null, { timeout: 3000 })
+  await page.waitForTimeout(350)
+  const afterTerm = await page.evaluate(() => ({
+    rows: [...document.querySelectorAll('#center-surface [data-search-row]')].map((e) => e.dataset.searchRow),
+    selected: [...document.querySelectorAll('#center-surface .search-row')].filter((e) => e.dataset.selected === '1').map((e) => e.dataset.searchRow),
+  }))
+  assert(
+    newestFirst.isNewest,
+    `前置：空态选中的应是最近更新首条（这样才能验「跨列表不继承」）：${JSON.stringify(newestFirst)}`,
+  )
+  assert(
+    afterTerm.rows.length >= 2 && afterTerm.rows[0] !== newest.b,
+    `前置：搜索里最近更新首条**不在第一位**（否则断言恒绿）：${JSON.stringify(afterTerm)}`,
+  )
+  assert(
+    afterTerm.selected.length === 1 && afterTerm.selected[0] === afterTerm.rows[0],
+    `换词后选中第一条（不继承上一份列表的选中）：${JSON.stringify(afterTerm)}`,
+  )
 
   // 无结果 ⇒ 创建入口；同名地址已存在 ⇒ 不给（复用不建第二个）
   await page.fill('.search-face-input', '全新词QQ')
@@ -20533,8 +20608,111 @@ await check('T241 搜索面右预览：就地编辑落盘、Enter 建子块并�
   // ⑥ 离开之后活动编辑器回到正文（预览编辑器不能继续占着键位）
   assert(now.activeEditorIsMain, '离开搜索面后 `ed` 回到正文（否则键位会打到一张已经拆掉的面）')
 
+  // ⑥ 预览画的是**这一块的真实位置**：查询块要像正文那样把结果画在自己行下
+  //    （少了 `viewBody`，搜到查询块只看见一行名字、也没有折叠三角——静默失效）
+  const qid = await page.evaluate(() => window.__qua.invoke('core.query/create', { name: '预览查询块QRS', spec: { where: { text: '产品' } } }, 'api') && '')
+  await page.waitForTimeout(400)
+  const qblock = await page.evaluate(() => window.__qua.allBlocks().find((b) => b.text.includes('预览查询块QRS'))?.id ?? '')
+  assert(qblock !== '', '前置：查询块要建出来')
+  // 回到搜索面再搜它（上一步已导航离开）
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
+  await page.fill('.search-face-input', '预览查询块QRS')
+  await page.waitForFunction(() => document.querySelectorAll('#center-surface [data-search-row]').length > 0, null, { timeout: 3000 })
+  await page.waitForTimeout(600)
+  const queryPreview = await page.evaluate((id) => {
+    const prev = document.querySelector('#center-surface .search-face-preview')
+    const el = prev?.querySelector(`.blk[data-block-id="${id}"]`)
+    const body = el?.querySelector('.blk-view-body, .queryview, .queryview-tree')
+    return {
+      found: Boolean(el),
+      hasViewBody: Boolean(body),
+      resultRows: body ? body.querySelectorAll('.blk, .tv-row, .qt-row').length : 0,
+      fold: Boolean(el?.querySelector('.fold')),
+    }
+  }, qblock)
+  assert(queryPreview.found, `查询块要进预览：${JSON.stringify(queryPreview)}`)
+  assert(
+    queryPreview.hasViewBody && queryPreview.fold,
+    `预览里查询块要画结果体（与正文同一规则：有身体才有折叠三角）：${JSON.stringify(queryPreview)}`,
+  )
+
   await ctx.close()
-  return '就地编辑落盘、Enter 子块可见、↑↓ 换选中不重建、删块回落、⌘↵ 打开、离开回正文'
+  return '就地编辑落盘、Enter 子块可见、↑↓ 换选中不重建、删块回落、⌘↵ 打开、离开回正文、查询块带结果体'
+})
+
+await check('T242 搜索面冻结与刷新：外部改命中块 ⇒ 只点亮 stale 且左右一致；刷新按上一次的词重跑、移除并报条数；最近更新不标 stale', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
+  await page.waitForTimeout(300)
+  const ids = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const a = ed.insertBlockAfter(ed.doc.roots[0].id, 'FROZENPROBE 甲')
+    const b = ed.insertBlockAfter(a, 'FROZENPROBE 乙')
+    return { a, b }
+  })
+  await page.waitForTimeout(300)
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
+  await page.fill('.search-face-input', 'FROZENPROBE')
+  await page.waitForFunction(() => document.querySelectorAll('#center-surface [data-search-row]').length >= 2, null, { timeout: 3000 })
+  await page.waitForTimeout(350)
+
+  const state = () =>
+    page.evaluate(() => ({
+      rows: [...document.querySelectorAll('#center-surface [data-search-row]')].map((e) => e.dataset.searchRow),
+      rowTexts: [...document.querySelectorAll('#center-surface .search-row-text')].map((e) => e.textContent ?? ''),
+      group: document.querySelector('#center-surface .search-face-group')?.textContent ?? '',
+      stale: !document.querySelector('#center-surface .search-face-stale')?.hidden,
+      hasRefresh: Boolean(document.querySelector('#center-surface .search-face-refresh')),
+    }))
+
+  let now = await state()
+  assert(now.rows.length === 2, `前置：两条命中：${JSON.stringify(now)}`)
+  assert(now.hasRefresh, '刷新入口必须在（冻结的结果集需要一个显式出口）')
+  assert(!now.stale, `刚搜出来的结果不该标过期：${JSON.stringify(now)}`)
+
+  // ① 外部改其中一块 ⇒ 只点亮 stale、**不重排**、左行片段跟着变（左右一致）
+  const orderBefore = now.rows
+  await page.evaluate((id) => {
+    const ed = window.__qua.__editor
+    ed.write((t) => t.patch(id, (x) => { x.content = [{ t: 'text', v: '彻底不命中AAA' }] }))
+  }, ids.a)
+  await page.waitForTimeout(600)
+  now = await state()
+  assert(
+    JSON.stringify(now.rows) === JSON.stringify(orderBefore),
+    `外部改命中块 ⇒ 列表**不重排**（冻结的是集合与顺序）：${JSON.stringify(now.rows)} vs ${JSON.stringify(orderBefore)}`,
+  )
+  assert(now.stale, `冻结集里的块被外部改过 ⇒ 点亮「结果可能已过期」：${JSON.stringify(now)}`)
+  assert(
+    now.rowTexts.some((s) => s.includes('彻底不命中AAA')),
+    `左行片段要跟上当前内容（右列预览会跟上，左边停在旧字就是左右矛盾）：${JSON.stringify(now.rowTexts)}`,
+  )
+
+  // ② 刷新：按上一次的词重跑 ⇒ 不再匹配的那条消失，并报告移除条数
+  //    弹 toast 是被测行为本身，先解除静音（其余断言不受影响）
+  await page.evaluate(() => window.__qua.quiet(false))
+  await page.evaluate(() => document.querySelector('#center-surface .search-face-refresh').click())
+  await page.waitForTimeout(700)
+  now = await state()
+  assert(
+    now.rows.length === 1 && !now.rows.includes(ids.a),
+    `刷新按当前库重算：不再匹配的那条消失：${JSON.stringify(now.rows)}`,
+  )
+  assert(now.group.includes('1'), `抬头计数跟着刷新：${now.group}`)
+  assert(!now.stale, `刷新之后提示要收掉：${JSON.stringify(now)}`)
+  const toast = await page.evaluate(() => [...document.querySelectorAll('.toast')].map((e) => e.textContent ?? '').join(' | '))
+  assert(toast.includes('1'), `刷新要报告移除了几条（静默少一条会被当成搜索漏了）：${toast}`)
+
+  // ③ 空词（最近更新）不是一次查询：不该有 stale、也没有「移除」可言
+  await page.fill('.search-face-input', '')
+  await page.waitForTimeout(350)
+  now = await state()
+  assert(now.group.includes('最近更新'), `空词走最近更新：${now.group}`)
+  assert(!now.stale, `最近更新不是查询，不该标过期：${JSON.stringify(now)}`)
+
+  await ctx.close()
+  return '冻结不重排、stale 点亮、左行跟上、刷新移除并报数、最近更新不标 stale'
 })
 
 /**

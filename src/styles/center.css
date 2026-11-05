@@ -187,6 +187,28 @@
   font-size: var(--ui-fs-xs);
   white-space: nowrap;
 }
+/* 「结果可能已过期」：只是提示，不拦编辑、不改排版（与查询视图同一条口径） */
+.search-face-stale {
+  flex: 0 0 auto;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+  white-space: nowrap;
+}
+.search-face-stale[hidden] {
+  display: none;
+}
+/* 刷新：与查询视图同一个动作，长得也像同一种「小动作」 */
+.search-face-refresh {
+  flex: 0 0 auto;
+  padding: var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+.search-face-refresh:hover {
+  background: var(--ui-bg-hover);
+  color: var(--ui-text);
+}
 
 /*
   两列：左列表只放摘要（4 份），右预览是真正的块（6 份）。
@@ -289,8 +311,12 @@
   border-radius: var(--ui-radius-sm);
   text-align: start;
 }
+/*
+  片段先占满、住哪随后让位：两格都 `flex: 0 1 auto` 时它们**按内容比例**平分宽度，
+  于是片段被「产品设…」这种长路径挤成一截——而片段才是这一行要读的东西。
+*/
 .search-row-text {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
   color: var(--ui-text);
 }
@@ -301,6 +327,7 @@
 }
 .search-row-hint {
   flex: 0 1 auto;
+  max-width: 40%;
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-xs);
 }

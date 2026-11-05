@@ -1135,6 +1135,7 @@ export const MSG = {
   'ui.search.open': '打开',
   'ui.search.createPage': '新建页「{name}」',
   'ui.search.results': '{count} 个结果',
+  'ui.search.queryFailed': '搜索失败',
   'cmd.block.convert-mention': '把提及转成引用',
   'ui.mount.mention.convert': '转成引用',
   'ui.toast.mentionStale': '那一处的正文已经变了，没有转换',
