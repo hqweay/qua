@@ -172,6 +172,25 @@ export class EditableBlock {
     return this.editor
   }
 
+  /**
+   * **同步收尾**：把当前那一行的 DOM 内容推入模型，并收一次编辑边界。
+   *
+   * 为什么要有这个入口：`focusout` 那条补 flush 是**延迟一拍**的（`setTimeout(0)`），
+   * 而覆盖层关闭是「先 remove DOM 再还焦点」——焦点事件不保证派发，等不到那一拍。
+   * 关掉一个正在编辑的浮层时，最后一笔要在这里落地，不能指望 blur。
+   *
+   * 幂等：正文每条 `input` 都已经同步过一次（见 `editor-events`），这里再推一遍
+   * 在内容相同时是 no-op；组合期也推——模型一直是 DOM 的投影，收尾只是对齐。
+   */
+  flush(): void {
+    const ed = this.editor
+    if (!ed) return
+    const id = ed.caretBlock()
+    if (!id) return
+    ed.syncFromDom(id, false)
+    ed.commitEdit(id)
+  }
+
   /** 建那一个编辑器；建了就一直复用（重建一次，撤销栈与选区就丢一次） */
   ensureEditor(): BlockEditor {
     if (this.editor) return this.editor
