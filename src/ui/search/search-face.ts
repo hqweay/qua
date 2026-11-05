@@ -18,15 +18,9 @@
  *     晋升成内容（要切片/要常驻时才用），创建走查询块自己的路径，这里不算结果；
  *   · **复制引用**（每行）＝ 与编辑器「复制块引用」同一条命令。
  *
- * 预览的口径（照反链卡的先例，不是另发明一套）：
- *   · 一个 `EditableBlock` 实例**跨选中复用**：换选中只换 roots，不重建——重建一次就丢一次
- *     撤销栈与选区；
- *   · `structuralScope:'roots'`：预览根是派生的结果行，不能并进上一行/搬出结果集；
- *     根内部照常编辑（改字、建子块、删子块）；
- *   · **不传 `viewRootId`**：它不是「标题格」，Enter 要能建子块并**看见**它
- *     ⇒ 子块默认折叠，而拆块动作自己会展开（`splitTx` 的 `unfoldBlock`）；
- *   · 编辑走**同一份 `run`**：落盘、索引增量、撤销都在；**绝不重跑搜索**——
- *     重跑会重排列表并打断正在输入的那一行。
+ * 预览（右列）的整组状态**住在 `./preview-pane.ts`**：懒建一台 `EditableBlock`、
+ * 跨选中复用、默认折叠、命中高亮、删除后回落、关面时先 `flush()` 再拆。
+ * 这一层只回答「选谁」——两列的状态各自有一份生命周期，混在一个类里会长成两套 if。
  *
  * 空态与无结果：
  *   · 词为空 ⇒ **最近更新**（按修改时间直接从模型取，不经过查询引擎——
@@ -36,15 +30,15 @@
  */
 import { t, type MsgId } from '../../core/infra/msg.ts'
 import { DebouncedInput } from '../../core/infra/debounced-input.ts'
-import { hasFoldable, isDeleted, isOwnEdit, type BlockStore } from '../../core/index.ts'
+import { isDeleted, isOwnEdit, type BlockStore } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import type { FtsSource } from '../../core/search/sources.ts'
 import type { BlockEditor, Run } from '../../view/editor/editor.ts'
 import { renderIcon } from '../../view/icons.ts'
 import type { HitView } from '../../app/search/hits.ts'
 import type { SearchHit, SearchResult } from '../../app/search/service.ts'
-import { EditableBlock } from '../block-ui/editable-block.ts'
 import { pickAfterRemoval, pickSelection, sharedHintOf } from './selection.ts'
+import { PreviewPane } from './preview-pane.ts'
 
 /** 输入防抖窗口（ms）：见 `debounce` 字段的取值理由 */
 const SEARCH_INPUT_DEBOUNCE_MS = 140
@@ -96,9 +90,8 @@ export class SearchFace {
   private readonly refreshBtn: HTMLButtonElement
   private readonly bodyEl: HTMLElement
   private readonly listEl: HTMLElement
-  /** 右列（滚动容器；编辑器宿主是它里面那一格） */
-  private readonly previewEl: HTMLElement
-  private readonly previewHost: HTMLElement
+  /** 右列预览（整组状态归它：见 `./preview-pane.ts`） */
+  private readonly pane: PreviewPane
   /** 当前列表对应的块（选中/打开都按 id 说话） */
   private rows: HitView[] = []
   /** 当前选中那一块（右列预览就是它）；空串 ＝ 没有选中 */
@@ -118,12 +111,6 @@ export class SearchFace {
    * 它又把刚提走的「住哪」吐回来，行宽当场变窄。
    */
   private sharedHint = ''
-  /** 结果行元素按 id 复用：编辑预览后**只改选中那一行**，不重排 */
-  private preview: EditableBlock | null = null
-  /** 已经种过「默认折叠」的块（用户展开过的不再种第二次） */
-  private readonly seededFold = new Set<string>()
-  /** root 接进文档之后才建编辑器（`BlockEditor` 构造时会量 DOM） */
-  private mounted = false
   /** 这一份列表是不是「搜索命中」（不是最近更新）：决定分组标题与它的计数 */
   private resultMode = false
   /**
@@ -226,17 +213,40 @@ export class SearchFace {
     this.listEl = document.createElement('div')
     this.listEl.className = 'search-face-list'
 
-    this.previewEl = document.createElement('div')
-    this.previewEl.className = 'search-face-preview'
-    // 宿主（可编辑容器）与滚动容器分开：`EditableBlock` 会把宿主装进它自己的岛根，
-    // 再让调用方把**岛根**接进布局 —— 若把同一颗元素既当宿主又当岛根的父节点，就是自环。
-    this.previewHost = document.createElement('div')
-    this.previewHost.className = 'search-face-preview-editor'
-
     this.bodyEl = document.createElement('div')
     this.bodyEl.className = 'search-face-body'
-    this.bodyEl.dataset.preview = '0'
-    this.bodyEl.append(this.listEl, this.previewEl)
+
+    /**
+     * 右列的整组状态交给 `PreviewPane`：这一层只在「选中变了 / 列表换了一份 /
+     * 空态变了」时告诉它「选谁、词是什么」。
+     *
+     * 三个回调刻意都是**读活值**（选中、行、词）而不是拷一份进来：预览要跟的是
+     * 左列**此刻**的选中，拷进来的快照会在刷新/摘行之后说谎。
+     */
+    this.pane = new PreviewPane(this.bodyEl, {
+      kb: deps.kb,
+      store: deps.store,
+      write: deps.write,
+      wire: deps.wire,
+      targetId: () => this.selectedId,
+      onDrop: (id) => this.dropRow(id),
+      onEdit: (kind) => {
+        // 左行是**快照**，预览是这一块的真相：编辑后只按 id 改那一行，不重排
+        this.refreshSelectedRow()
+        this.deps.onChange(kind)
+      },
+      onFocus: (editor) => this.deps.onFocus(editor),
+      onDispose: (editor) => this.deps.onDispose(editor),
+      returnFocus: () => this.input.focus(),
+      noteOf: (id) => {
+        const row = this.rows.find((v) => v.blockId === id)
+        return row?.source && row.source !== 'content'
+          ? t('ui.search.via', { via: t(VIA_KEY[row.source]) })
+          : undefined
+      },
+    })
+
+    this.bodyEl.append(this.listEl, this.pane.root)
 
     this.root.append(bar, this.bodyEl)
 
@@ -249,7 +259,7 @@ export class SearchFace {
      */
     this.offStore = deps.store.subscribe((source, ids) => {
       if (this.disposed || this.frozen.size === 0) return
-      if (isOwnEdit(source, this.preview?.ed)) return
+      if (isOwnEdit(source, this.pane.editor)) return
       // 拿不到「动过哪些块」就不点亮：宁可少提示，也不要因为别处重画而误报
       if (!ids || ids.length === 0) return
       const touched = ids.filter((id) => this.frozen.has(id))
@@ -276,9 +286,7 @@ export class SearchFace {
    * （`surface.ts` 是先造身体、随后才 `replaceChildren`）。
    */
   mount(): void {
-    if (this.mounted || this.disposed) return
-    this.mounted = true
-    this.syncPreview()
+    this.pane.mount()
   }
 
   /** 词随打开带过来一次；之后这个 tab 自己管自己的词 */
@@ -371,13 +379,9 @@ export class SearchFace {
     if (this.disposed) return
     this.disposed = true
     this.debounce.dispose()
-    // 高亮住在**全局注册表**里：面拆掉不摘，它会留在别处（而且没人再清）
-    this.clearMatch()
     this.offStore()
-    const ed = this.preview?.ed
-    if (ed) this.deps.onDispose(ed)
-    this.preview?.dispose()
-    this.preview = null
+    // 右列自己收尾：摘高亮 → 先 flush 最后一笔 → 交回活动编辑器 → 拆（见 `PreviewPane.dispose`）
+    this.pane.dispose()
   }
 
   private term(): string {
@@ -417,7 +421,7 @@ export class SearchFace {
     }
     this.selectedId = blockId
     this.renderSelection()
-    this.syncPreview()
+    this.pane.sync(this.queriedTerm)
   }
 
   /** 选中态是**一个属性**（`data-selected`）：列表与预览的对应关系只有这一份 */
@@ -452,7 +456,7 @@ export class SearchFace {
     if (header !== null) this.listEl.appendChild(groupHeader(shared === '' ? header : `${header} · ${shared}`))
     for (const view of views) this.listEl.appendChild(this.row(view, shared !== ''))
     this.renderSelection()
-    this.syncPreview()
+    this.pane.sync(this.queriedTerm)
   }
 
   /** 空态：最近更新（模型直取；不是一次查询，没有「结果数」可说，也不存在降级） */
@@ -468,7 +472,7 @@ export class SearchFace {
       this.setRows([], 'recents')
       this.listEl.replaceChildren()
       this.listEl.appendChild(this.emptyNote(t('ui.search.empty')))
-      this.syncPreview()
+      this.pane.sync(this.queriedTerm)
       return
     }
     this.paint(views, t('ui.search.recents'), 'recents')
@@ -509,7 +513,7 @@ export class SearchFace {
       create.addEventListener('click', () => this.deps.createPage(q))
       this.listEl.appendChild(create)
     }
-    this.syncPreview()
+    this.pane.sync(this.queriedTerm)
   }
 
   private row(view: HitView, hideHint = false): HTMLElement {
@@ -571,175 +575,6 @@ export class SearchFace {
 
   /* ------------------------------------------------------------ 右列预览 */
 
-  /** 这一屏该不该有右列：有选中的那一条就有（空词的「最近更新」也走同一套主从布局） */
-  private previewWanted(): boolean {
-    return this.selectedId !== ''
-  }
-
-  private syncPreview(): void {
-    const want = this.previewWanted()
-    this.bodyEl.dataset.preview = want ? '1' : '0'
-    if (!want) {
-      // 收起时把预览清空：隐藏的编辑器不该继续挂着上一块（也不该继续被外部变化重载）
-      this.clearMatch()
-      const ed = this.preview?.ed
-      if (ed) {
-        if (ed.doc.roots.length > 0) ed.loadPage({ roots: [], folded: ed.doc.folded })
-        // 焦点还留在被隐藏的那一列 ⇒ 交回输入框（焦点不能停在一个看不见的容器里）
-        if (ed.ownFocus()) this.input.focus()
-      }
-      return
-    }
-    // 还没接进文档 ⇒ 等 `mount()`；在游离容器上建编辑器会量错尺寸
-    if (!this.mounted) return
-    this.loadPreview(this.ensurePreviewEditor())
-  }
-
-  /** 懒建：第一次有选中项时才建这一台（空结果不该建实例） */
-  private ensurePreviewEditor(): BlockEditor {
-    if (!this.preview) {
-      this.preview = new EditableBlock({
-        host: this.previewHost,
-        store: this.deps.store,
-        write: this.deps.write,
-        load: (ed) => {
-          if (ed) this.loadPreview(ed)
-        },
-        // 预览的根是派生的结果行：不能并进上一行/搬出结果集；根内部照常编辑
-        structuralScope: 'roots',
-        wire: this.deps.wire,
-        onChange: (kind) => {
-          // 左行是**快照**，预览是这一块的真相：编辑后只按 id 改那一行，不重排
-          this.refreshSelectedRow()
-          this.deps.onChange(kind)
-        },
-        onFocus: (editor) => this.deps.onFocus(editor),
-      })
-      this.previewEl.appendChild(this.preview.root)
-    }
-    return this.preview.ed ?? this.preview.ensureEditor()
-  }
-
-  /**
-   * 装什么：**选中的那一块**（按 id 现读活块），面包屑给祖先链。
-   *
-   * ⚠️ 折叠表**每次从 `ed.doc.folded` 重读**：`writeFold` 每次都换一个新对象，
-   *    长期持有一份旧引用会让「用户展开过」在下次装载时丢掉。
-   */
-  private loadPreview(ed: BlockEditor): void {
-    if (!this.previewWanted()) {
-      if (ed.doc.roots.length > 0) ed.loadPage({ roots: [], folded: ed.doc.folded })
-      return
-    }
-    const block = this.deps.kb.get(this.selectedId)
-    /**
-     * 选中的块已经**软删/真没了** ⇒ 回落。
-     *
-     * 判据含软删：删除是原位标记，`kb.get` 照样取得到它——只看「取不取得到」会让
-     * 预览继续画一个已经被删的块（「删了还在这儿」）。回落只走一次（下一块不会是它）。
-     */
-    if (!block || isDeleted(block)) {
-      this.dropRow(this.selectedId)
-      if (!this.previewWanted()) {
-        ed.loadPage({ roots: [], folded: ed.doc.folded })
-        return
-      }
-      const next = this.deps.kb.get(this.selectedId)
-      if (!next) return
-      this.paintPreview(ed, next)
-      return
-    }
-    this.paintPreview(ed, block)
-  }
-
-  /** 装载一块进预览：子块默认折叠、面包屑给祖先链 */
-  private paintPreview(ed: BlockEditor, block: import('../../core/index.ts').Block): void {
-    const folded = { ...(ed.doc.folded ?? {}) }
-    // 子块默认折叠：防「一屏 50 条大树」。只在这一块**第一次被选中**时种一次——
-    // 用户展开过的不再种回去（Enter 拆出来的子块因此看得见）
-    if (!this.seededFold.has(block.id)) {
-      this.seededFold.add(block.id)
-      if (hasFoldable(block)) folded[block.id] = true
-    }
-    const path = this.deps.kb.pathOf(block.id)
-    const contexts = path.length > 1 ? new Map([[block.id, path.slice(0, -1)]]) : undefined
-    /**
-     * **来源说明**：词可能不在正文里（别名/标签/属性/链接命中的情况）。
-     * 这一句回答「它为什么在这儿」，与左行那个「经由」同一份来路。
-     */
-    const row = this.rows.find((v) => v.blockId === block.id)
-    const note = row?.source && row.source !== 'content' ? t('ui.search.via', { via: t(VIA_KEY[row.source]) }) : undefined
-    const rootNotes = note ? new Map([[block.id, note]]) : undefined
-    ed.loadPage({ roots: [block], ...(contexts ? { contexts } : {}), ...(rootNotes ? { rootNotes } : {}), folded })
-    /**
-     * **滚到命中处并高亮**（换选中就重新定位）。
-     *
-     * 长块里命中词可能在屏幕外——那样右列就只剩「这一块的开头」，
-     * 而用户来这儿就是为了看命中的那一句。
-     * 高亮用 CSS Custom Highlight（**不往 contenteditable 里插 `<mark>`**：
-     * 那会改模型读数、破坏光标与输入法）。
-     */
-    this.revealMatch(ed, block.id)
-  }
-
-  /**
-   * 把命中词高亮并把预览滚到它那里。
-   *
-   * 三条边界：
-   *   · **没有词**（空态最近更新）⇒ 不高亮、不滚动（没有「命中」可言）；
-   *   · **浏览器不支持 `CSS.highlights`** ⇒ 只滚动、不高亮（降级看得见地少一样，不报错）；
-   *   · 命中词可能**跨文本节点**（被 mark/ref 原子切断）⇒ 按 `.tx` 内的文本节点逐个找，
-   *     找不到就退化成「滚到块首」——不假装找到。
-   */
-  private revealMatch(ed: BlockEditor, blockId: string): void {
-    const term = this.queriedTerm.trim()
-    this.previewEl.scrollTop = 0
-    // 上一处的高亮先摘掉：高亮是**全局注册表**里的一条，不摘会留在别的视图上
-    this.clearMatch()
-    if (term === '') return
-    const tx = ed.txEl(blockId)
-    if (!tx) return
-    const terms = term.split(/\s+/).filter(Boolean)
-    const ranges: Range[] = []
-    const walker = document.createTreeWalker(tx, NodeFilter.SHOW_TEXT)
-    const lower = terms.map((x) => x.toLowerCase())
-    while (walker.nextNode()) {
-      const node = walker.currentNode as Text
-      const text = node.textContent ?? ''
-      const low = text.toLowerCase()
-      for (const t of lower) {
-        let from = 0
-        while (from < low.length) {
-          const at = low.indexOf(t, from)
-          if (at < 0) break
-          const r = document.createRange()
-          r.setStart(node, at)
-          r.setEnd(node, at + t.length)
-          ranges.push(r)
-          from = at + t.length
-        }
-      }
-    }
-    if (ranges.length === 0) return
-    // 支持就用 Custom Highlight（不碰 DOM、不进模型）；不支持就只滚不亮
-    if (typeof CSS !== 'undefined' && CSS.highlights) {
-      const hl = new Highlight(...ranges)
-      CSS.highlights.set('search-match', hl)
-    }
-    // 滚到**第一处**命中。用预览容器自己的 `scrollTop` 而不是 `scrollIntoView`：
-    // 后者会一路往上找**能滚的祖先**，于是滚的是外层（甚至整页），预览自己没动
-    // —— 实测：块高 2347、可视 816，`scrollIntoView` 之后命中仍在视口外。
-    const at = ranges[0]!.getBoundingClientRect()
-    const box = this.previewEl.getBoundingClientRect()
-    const delta = at.top - box.top
-    this.previewEl.scrollTop += delta - this.previewEl.clientHeight / 3
-  }
-
-  /** 摘掉本次预览的高亮（换选中 / 关面 / 收起预览都要走这里） */
-  private clearMatch(): void {
-    if (typeof CSS !== 'undefined' && CSS.highlights) CSS.highlights.delete('search-match')
-  }
-
   /** 把某一行从列表里摘掉，并把选中挪到还在的那一条 */
   private dropRow(id: string): void {
     const at = this.rows.findIndex((v) => v.blockId === id)
@@ -748,15 +583,13 @@ export class SearchFace {
     if (this.selectedId === id) this.selectedId = pickAfterRemoval(this.rows.map((v) => v.blockId), at)
     this.updateGroupCount()
     this.renderSelection()
-    this.bodyEl.dataset.preview = this.previewWanted() ? '1' : '0'
+    // 只同步「右列在不在」：装载下一块由调用点（或 `PreviewPane` 自己）继续
+    this.pane.setVisible(this.selectedId !== '')
   }
 
   /** `↵` 把焦点放进右列预览（开始编辑）：光标落在这一块的开头 */
   private focusPreview(): void {
-    const ed = this.preview?.ed
-    if (!ed || !this.previewWanted()) return
-    ed.container.focus()
-    if (this.selectedId !== '') ed.placeCaret(this.selectedId, 0)
+    this.pane.focus()
   }
 
   /**
@@ -788,7 +621,7 @@ export class SearchFace {
      */
     if (!block || isDeleted(block)) {
       this.dropRow(id)
-      this.syncPreview()
+      this.pane.sync(this.queriedTerm)
       return
     }
     const source = this.rows[at]!.source
