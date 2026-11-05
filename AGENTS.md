@@ -204,6 +204,9 @@ pnpm gate:bundle    # gate ＋ 打包产物冒烟（慢，单列）
   并且**逐条列出跳过了什么**。判不出的路径一律按全量，所以它只会少跑、不会猜。
   只改测试文件时它会收窄到「只跑那几个文件」。拿不准时看一眼 `pnpm gate:fast --plan`。
 - `build:electron` 是门禁必需的一环——少它 `check:electron` 会拿旧 `main.cjs` **假绿**（真踩过）。
+  ⚠️ 还有另一半：E 组跑的是 **dist 产物**，构建必须带测试面——`VITE_QUA_TEST=1 pnpm build`
+  （即 `pnpm build:test`）＋ `pnpm build:electron`。裸 `pnpm build` 编出来的产物没有 `window.__qua`，
+  **全体 E 用例在 `waitForFunction` 上超时 0/16**，看起来像壳坏了，其实只是构建口径不对（2026-11-06 实测）。
 - 门禁里的浏览器步骤一律 `QUA_NO_DEV=1`：验的是**构建产物**，不去连 5180 上可能属于
   **另一棵树**的 dev server（并行车道里真踩过）。
 - `pnpm check` 覆盖：敲字 / Enter 拆块 / Backspace 合并 / Tab 缩进 / 区间格式 /
