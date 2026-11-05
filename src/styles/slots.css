@@ -620,3 +620,34 @@ button.ghost.wide {
   color: var(--ui-text);
   background: var(--ui-accent-soft);
 }
+
+/*
+ * 搜索卡（工具面住进槽）：容器只有一列槽宽，主从布局改**堆叠**——
+ * 判据是宿主（卡身）而不是视口宽度，与中心搜索面的窄屏档同一条口径
+ * （列表在上、预览在下；藏掉预览＝「点了行没反应」）。
+ * 高度定死：搜索面自己两列各自滚，卡身不定高的话堆叠后的总高会随内容漂。
+ */
+.dock-search-body {
+  height: 360px;
+  display: flex;
+  flex-direction: column;
+}
+.dock-search-body .search-face {
+  padding: 0;
+}
+/* 状态件（刷新/降级说明/过期提示）在 271px 的卡里挤不下：输入框独占一行，它们折到下一行
+   （输入框要给足 basis，否则 min-width:0 会让它被压到没有、状态件仍挤在同一行） */
+.dock-search-body .search-face-bar {
+  flex-wrap: wrap;
+}
+.dock-search-body .search-face-input {
+  flex-basis: 100%;
+}
+.dock-search-body .search-face-body {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+}
+.dock-search-body .search-face-preview {
+  border-left: none;
+  border-top: 1px solid var(--ui-border);
+}

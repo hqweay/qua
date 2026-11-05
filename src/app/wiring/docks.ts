@@ -17,10 +17,13 @@ import {
   dockKey,
   findInForest,
   isCardCollapsed,
+  openPlaceOf,
   pinDefaultFor,
   pruneEphemeralWindows,
   type DerivedCardId,
   type DockEntry,
+  type OpenPlace,
+  type UtilityFaceId,
   type WindowEntryAction,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
@@ -40,6 +43,7 @@ import {
   type DockTile,
 } from '../../ui/dock/dock.ts'
 import { trashCard, type DockContentDeps } from '../../ui/dock/dock-content.ts'
+import { SearchCard } from '../../ui/cards/search-card.ts'
 import { emptyCardList } from '../../ui/chrome/card-parts.ts'
 import type { BackrefsCard } from '../../ui/cards/backrefs-card.ts'
 import { calendarCard } from '../../ui/cards/calendar-card.ts'
@@ -83,6 +87,11 @@ export type DocksDeps = {
    */
   createBackrefsCard: (side: 'left' | 'right') => BackrefsCard
   /**
+   * 搜索卡（**工具面住进槽**）的工厂：与反链卡同一条理由——编辑器要接活动编辑器、
+   * 写事务、事件表，那些在装配顺序里晚于本节；按需建才拿得到。
+   */
+  createSearchCard: (side: 'left' | 'right') => SearchCard
+  /**
    * 打开一个块的唯一路由（左槽行、日历日期共用）。
    *
    * 槽不自己判断「右槽／新 tab」：那套策略只有 `App.openBlock` 一份；这里只转交。
@@ -124,6 +133,29 @@ export function setupDocks(deps: DocksDeps) {
     if (!inst) return
     inst.dispose()
     backrefsCards.delete(side)
+  }
+
+  /**
+   * 搜索卡**每个槽一份**（同一张面可以同时出现在两槽）：懒建、摘卡 dispose，
+   * 判据与反链卡同一份——带输入框/编辑器的卡不能每次重画重建。
+   */
+  const searchCards = new Map<'left' | 'right', SearchCard>()
+
+  function ensureSearch(side: 'left' | 'right'): SearchCard {
+    let inst = searchCards.get(side)
+    if (!inst) {
+      inst = deps.createSearchCard(side)
+      searchCards.set(side, inst)
+    }
+    return inst
+  }
+
+  /** 这一槽没有搜索卡了 ⇒ 把面收掉（订阅、预览编辑器、卡壳一起） */
+  function dropSearch(side: 'left' | 'right'): void {
+    const inst = searchCards.get(side)
+    if (!inst) return
+    inst.dispose()
+    searchCards.delete(side)
   }
 
   /**
@@ -440,8 +472,9 @@ export function setupDocks(deps: DocksDeps) {
     const contentIds = cards.flatMap((e) => (e.kind === 'block' ? [e.block] : []))
     const winCards = windows ? windows[side].sync(contentIds) : new Map<string, HTMLElement>()
     const entries: DockCardEntry[] = []
-    /** 这一槽里有没有反链卡（没有就把它那台编辑器收掉） */
+    /** 这一槽里有没有反链卡／搜索卡（没有就把它们那台编辑器收掉） */
     let hasBackrefs = false
+    let hasSearch = false
     for (const card of cards) {
       // 种类由 `kind` 说，不由字符串形状猜：改 id 生成方案也不会让某种卡整片消失
       const key = dockKey(card)
@@ -462,12 +495,33 @@ export function setupDocks(deps: DocksDeps) {
         entries.push({ ...derivedCard(side, card.card), size: 'large' })
         continue
       }
+      if (card.kind === 'utility') {
+        // 工具面住进槽：与反链卡同型的持久卡（里面有输入框/编辑器）；渲染穷举在 faceCard 里
+        const el = faceCard(side, card.face)
+        if (el) {
+          if (card.face === 'search') hasSearch = true
+          entries.push({ id: key, el, size: 'large' })
+        }
+        continue
+      }
       const el = winCards.get(card.block)
       if (el) entries.push({ id: key, el, size: 'large' })
     }
     if (!hasBackrefs) dropBackrefs(side)
+    if (!hasSearch) dropSearch(side)
     renderDockStack(slot.stack, entries, t('ui.dock.empty'), deps.prefs().dock.solo[side])
     syncTileCols(slot.stack)
+  }
+
+  /**
+   * 一张**工具面卡**的身体。目录（`UTILITY_FACES`）加一个 id、这里没接 ⇒ 编译期红
+   * （与派生卡的 `derivedCard` 同一条穷举纪律）。
+   */
+  function faceCard(side: 'left' | 'right', face: UtilityFaceId): HTMLElement | null {
+    switch (face) {
+      case 'search':
+        return ensureSearch(side).sync()
+    }
   }
 
   /**
@@ -524,6 +578,10 @@ export function setupDocks(deps: DocksDeps) {
    *
    * 命令不可用（产品构建裁掉、插件卸载）时**保留位置**，画成占位格：
    * 从 cards 里删掉会让整排 reflow，用户会以为自己的布局丢了。
+   *
+   * 修饰键跟随块打开的同一套落点语言（`openPlaceOf`）：普通＝原样调用；
+   * Shift/⌘＝把落点作为 `place` 参数随调用传出去——命令认不认是它自己的事
+   * （搜索认：Shift＝搜索卡住进右槽、⌘＝中心 tab）；不认 `place` 的命令照旧。
    */
   function actionTile(side: 'left' | 'right', command: string): HTMLElement {
     const id = dockKey({ kind: 'cmd', command })
@@ -535,8 +593,10 @@ export function setupDocks(deps: DocksDeps) {
       icon: ok ? decl!.tile!.icon : 'lucide:circle-help',
       missing: !ok,
       close: { title: t('ui.dock.removeTile'), onClick: () => removeTile(side, command) },
-      onClick: () => {
-        if (ok) void deps.getRegistry().invoke(command, {}, 'tile')
+      onClick: (e) => {
+        if (!ok) return
+        const place: OpenPlace = openPlaceOf(e)
+        void deps.getRegistry().invoke(command, place === 'center' ? {} : { place }, 'tile')
       },
       onDragStart: (e) => setDragCard(e.dataTransfer, id),
     }
@@ -830,12 +890,41 @@ export function setupDocks(deps: DocksDeps) {
     deps.scheduleBadge()
   }
 
+  /**
+   * 把一张**工具面卡**加进槽（现只有搜索）。
+   *
+   * 与 `addDerived` 分开：两者落进 `cards` 的 `kind` 不同，混成一个会让
+   * 「加回来的是哪一种」取决于字符串前缀（与上面同一条理由）。
+   * 加进的是**右槽还是调用方指定的槽**由调用方说——修饰键只回答「去哪」。
+   */
+  function addUtility(side: 'left' | 'right', face: UtilityFaceId): void {
+    const dock = deps.prefs().dock
+    const entry: DockEntry = { kind: 'utility', face }
+    const key = dockKey(entry)
+    if (dock[side].cards.some((e) => dockKey(e) === key)) {
+      // 已在槽里：把它滚到眼前（与窗口卡的「打开来看」同一条口径，不再 push 第二张）
+      reveal(side, key)
+      return
+    }
+    dock[side].cards.push(entry)
+    if (!deps.slotOpen(side)) {
+      dock[side].open = true
+      deps.noteSlotChanged(side)
+      deps.applyChrome()
+    }
+    renderDocks()
+    reveal(side, key)
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+  }
+
   return {
     renderDocks,
     openWindow,
     closeCard,
     addTile,
     addDerived,
+    addUtility,
     toggleFoldAll,
     topWindow,
     closeOtherWindows,

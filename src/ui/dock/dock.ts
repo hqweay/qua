@@ -70,7 +70,8 @@ export interface DockTile {
   missing?: boolean
   /** 移出入口；小卡只有这一个 chrome 动作 */
   close?: { title?: string; onClick: () => void }
-  onClick: () => void
+  /** 点击带着原始事件出去：修饰键的落点语义（Shift＝右槽、⌘＝tab）由装配层判 */
+  onClick: (e: MouseEvent) => void
   onDragStart?: (e: DragEvent) => void
 }
 
@@ -99,7 +100,7 @@ export function buildDockTile(tile: DockTile): HTMLElement {
   renderIcon(main, tile.missing ? 'lucide:circle-help' : tile.icon, 'square', 'md')
   main.addEventListener('click', (e) => {
     e.stopPropagation()
-    if (!tile.missing) tile.onClick()
+    if (!tile.missing) tile.onClick(e)
   })
   el.appendChild(main)
 

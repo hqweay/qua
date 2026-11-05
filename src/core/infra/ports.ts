@@ -494,8 +494,11 @@ export interface App {
    *
    * 它不是一个查询块，也不是命令面板：输入的是**正文关键词**，结果是块。
    * 首版独立成一层，不塞进 `_query`（查询求值是同步的，FTS 是异步的）。
+   *
+   * `place` ＝ 挂载形态（与块打开同一套落点语言）：缺省＝⌘P 浮层；
+   * `'dock'` ＝ 搜索卡住进右槽；`'tab'` ＝ 中心 tab。同一份 `SearchFace`。
    */
-  openSearch(): void
+  openSearch(place?: 'center' | 'dock' | 'tab'): void
   showMenu(req: MenuRequest): void
   showPopover(render: (host: HTMLElement) => void, anchor: DOMRect | null): void
   closeLayers(): void

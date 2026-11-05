@@ -16,6 +16,7 @@
  * 四条动作口径：
  *   · **选中**（单击行 / ↑↓）＝ 换右列预览，**不导航**（点一下就走的入口是行尾那颗图标）；
  *   · **打开**（双击行 / 行尾图标 / `⌘↵` / 预览里的块标）＝ 走装配层的打开路由；
+ *     修饰键与块打开同一套：`⇧↵`·`⇧+双击`·`⇧+行尾图标`＝右槽窗口，`⌘`＝新 tab；
  *   · **晋升为查询块**＝ 把词写进 `{text}` 条件建一个查询块——搜索从会话状态
  *     晋升成内容（要切片/要常驻时才用），创建走查询块自己的路径，这里不算结果；
  *   · **复制引用**（每行）＝ 与编辑器「复制块引用」同一条命令。
@@ -32,7 +33,7 @@
  */
 import { t, type MsgId } from '../../core/infra/msg.ts'
 import { DebouncedInput } from '../../core/infra/debounced-input.ts'
-import { isDeleted, isOwnEdit, type BlockStore } from '../../core/index.ts'
+import { isDeleted, isOwnEdit, openPlaceOf, type BlockStore, type OpenPlace } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import type { FtsSource } from '../../core/search/sources.ts'
 import type { BlockEditor, Run } from '../../view/editor/editor.ts'
@@ -71,7 +72,11 @@ export interface SearchFaceDeps {
   query: (text: string, limit?: number) => Promise<SearchResult>
   /** 行怎么说（与 ⌘P 浮层同一份） */
   describe: (hit: SearchHit, term: string) => HitView | null
-  openBlock: (blockId: string) => void
+  /**
+   * 打开一条命中。落点与块打开同一套语言（`openPlaceOf`）：缺省＝中心，
+   * Shift＝右槽窗口，⌘/Ctrl＝新 tab。浮层宿主自己负责先关浮层。
+   */
+  openBlock: (blockId: string, place?: OpenPlace) => void
   /** 晋升为查询块（森林顶层；返回块 id） */
   promote: (term: string) => string
   /** 无结果时的创建入口（页） */
@@ -183,10 +188,11 @@ export class SearchFace {
     this.input.addEventListener('keydown', (e) => {
       // Enter 立即查：别让「打完就按回车」看到的是旧列表
       if (e.key === 'Enter') this.debounce.flush()
-      // `⌘/Ctrl + ↵` ＝ 在主编辑器打开（两个尺寸同一口径；输入框的裸 ↵ 由 `bareEnterOpens` 定）
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+      // `⌘/Ctrl + ↵` ＝ 在主编辑器打开；`⇧ + ↵` ＝ 右槽窗口打开（两个尺寸同一口径；
+      // 输入框的裸 ↵ 由 `bareEnterOpens` 定）。修饰键的落点语言与块打开同一份（`openPlaceOf`）
+      if (e.key === 'Enter' && !e.altKey && (e.metaKey || e.ctrlKey || e.shiftKey)) {
         e.preventDefault()
-        this.openSelected()
+        this.openSelected(openPlaceOf(e))
         return
       }
       // 其余只认**裸键**：修饰键组合归命令层的键位表——这里抢了的话，
@@ -650,8 +656,9 @@ export class SearchFace {
     // 按下不挪焦点：行只回答「选谁」，输入框要继续接 ↑↓（否则点一下行，方向键就失效）
     pick.addEventListener('mousedown', (e) => e.preventDefault())
     pick.addEventListener('click', () => this.select(view.blockId))
-    // 双击＝打开（单击预览、双击打开：两个动作各有一个可见出口，行尾那颗图标是打开的入口）
-    pick.addEventListener('dblclick', () => this.deps.openBlock(view.blockId))
+    // 双击＝打开（单击预览、双击打开：两个动作各有一个可见出口，行尾那颗图标是打开的入口）。
+    // 修饰键跟块打开同一份判据：Shift＝右槽窗口、⌘/Ctrl＝新 tab
+    pick.addEventListener('dblclick', (e) => this.deps.openBlock(view.blockId, openPlaceOf(e)))
     fillRowText(pick, view, hideHint)
 
     const tail = document.createElement('span')
@@ -671,7 +678,7 @@ export class SearchFace {
     renderIcon(go, 'lucide:arrow-up-right', 'arrow-up-right')
     go.addEventListener('click', (e) => {
       e.stopPropagation()
-      this.deps.openBlock(view.blockId)
+      this.deps.openBlock(view.blockId, openPlaceOf(e))
     })
     tail.appendChild(go)
 
@@ -691,8 +698,8 @@ export class SearchFace {
     return row
   }
 
-  private openSelected(): void {
-    if (this.selectedId !== '') this.deps.openBlock(this.selectedId)
+  private openSelected(place?: OpenPlace): void {
+    if (this.selectedId !== '') this.deps.openBlock(this.selectedId, place)
   }
 
   /* ------------------------------------------------------------ 右列预览 */
