@@ -1711,6 +1711,43 @@ function commandDecls() {
 }
 
 /* ═══════════════════════════════════════════════════════╗
+   ║ 37 · 搜索面右列的唯一拥有者：`preview-pane.ts`              ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  /**
+   * **预览的整组状态只有一份拥有者**。
+   *
+   * 搜索面分「左列只读结果行 / 右列可编辑预览」之后，右列那一台编辑器
+   * （懒建、跨选中复用、折叠表、命中高亮、关面时先 flush 再拆）整组住在
+   * `src/ui/search/preview-pane.ts`。若同一目录别的文件又 `new EditableBlock`，
+   * 就会长出第二份同样的状态机：两份折叠表、谁先 flush 各说一套，
+   * 而两套在空态/单条结果这些分支上只会在某些时机分叉（平时都像对的）。
+   */
+  const OWNER = 'src/ui/search/preview-pane.ts'
+  const hits = []
+  for (const f of srcFiles) {
+    const relPath = rel(f)
+    if (!relPath.startsWith('src/ui/search/') || !relPath.endsWith('.ts')) continue
+    if (relPath === OWNER) continue
+    if (/new\s+EditableBlock\s*\(/.test(readFileSync(f, 'utf8'))) {
+      hits.push(`${relPath} 自己造了 EditableBlock —— 右列的预览只由 ${OWNER} 拥有`)
+    }
+  }
+  add({
+    id: 37,
+    title: '搜索面的预览只有一台编辑器：`ui/search/` 下 `new EditableBlock` 只许出现在 `preview-pane.ts`',
+    method:
+      '正则扫 `src/ui/search/**/*.ts` 的构造点（`new EditableBlock(`），除拥有者外一处都不许有',
+    scope: `src/ui/search/**/*.ts（拥有者 ${OWNER}）`,
+    whitelist: '只有 `preview-pane.ts` 一个文件 —— 第二个构造点＝第二份状态机，不是「顺手多建一个」',
+    hits: hits.length,
+    detail: hits,
+    note: '别的目录（正文 / 挂载区 / 查询结果 / 侧槽窗口）照旧各自建自己那台，本条只收搜索面这一组',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
    ║ 等内核（不假装在跑）                                     ║
    ╚═══════════════════════════════════════════════════════ */
 
