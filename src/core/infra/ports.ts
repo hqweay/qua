@@ -490,7 +490,7 @@ export interface App {
   /* 浮层 / 提示 */
   toast(text: string, kind?: 'ok' | 'warn' | 'info'): void
   /**
-   * 打开全文检索（⌘F）。
+   * 打开全文检索（⌘P）。
    *
    * 它不是一个查询块，也不是命令面板：输入的是**正文关键词**，结果是块。
    * 首版独立成一层，不塞进 `_query`（查询求值是同步的，FTS 是异步的）。

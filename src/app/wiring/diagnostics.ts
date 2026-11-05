@@ -568,7 +568,7 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
     __editor: mainEd,
     /** 当前活动编辑器（键位/命令认的那一台）；测试面用它读里层编辑器的组合态 */
     activeEditor: () => deps.getEd(),
-    /** 搜索状态与查询（自检用；产品路径是 ⌘F 浮层） */
+    /** 搜索状态与查询（自检用；产品路径是 ⌘P 浮层） */
     search: {
       status: () => deps.getSearch?.()?.status() ?? 'pending',
       mode: () => deps.getSearch?.()?.mode() ?? 'scan',
