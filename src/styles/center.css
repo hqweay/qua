@@ -127,15 +127,30 @@
   scrollbar-gutter: stable;
   padding: 0 var(--ui-doc-pad) var(--ui-gap-7);
 }
+/*
+  搜索面是**主从布局**：外框不再整面滚，也不带左右留白——
+  滚动与留白归左右两列各自所有（见 `.search-face`／`.search-face-list`）。
+  外框继续滚的话，左列表滚到一半、右预览也跟着整面走，「两列各自滚」就不成立。
+*/
+#center-surface[data-face='search'] {
+  overflow: hidden;
+  padding: 0;
+}
 
 /* ---------------------------------------------------------- 搜索面 */
 
-/* 输入行：词框占满、动作贴右；不放抬头——tab 名就是它的抬头（界面少字） */
+/*
+  主从布局：顶部输入行 ＋ 左命中列表 ＋ 右块预览。
+  外框（`#center-surface`）在搜索面时不滚也不留白 —— 滚动归左右两列各自所有
+  （见下方 `#center-surface[data-face='search']`），否则外框整面滚动会把两列带着一起走。
+*/
 .search-face {
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: var(--ui-gap-3);
-  padding-top: var(--ui-gap-5);
+  padding: var(--ui-gap-5) var(--ui-doc-pad) 0;
 }
 .search-face-bar {
   display: flex;
@@ -173,9 +188,63 @@
   white-space: nowrap;
 }
 
+/*
+  两列：左列表只放摘要（4 份），右预览是真正的块（6 份）。
+  `min-height:0` 是「各自滚动」的前提：flex 子项的默认最小高度是内容高，
+  少了它两列会互相撑高、整面又开始滚。
+*/
+.search-face-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(240px, 4fr) minmax(0, 6fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+/* 没有命中（空词 / 无结果）⇒ 左列独占整宽：右列没有「选中的那一条」可画 */
+.search-face-body[data-preview='0'] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.search-face-body[data-preview='0'] .search-face-preview {
+  display: none;
+}
 .search-face-list {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: var(--ui-gap-7);
+  scrollbar-gutter: stable;
+}
+.search-face-preview {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  /* 分隔归这一条边框：两列之间不再有第二种分隔件 */
+  border-left: 1px solid var(--ui-border);
+  padding: var(--ui-gap-3) var(--ui-gap-4) var(--ui-gap-7);
+  scrollbar-gutter: stable;
+}
+/*
+  预览的根行不放大：字号阶梯的「根块 lg」说的是**正文屏幕**里的第一层（页/日记作为
+  这一屏的身份）。预览是一列结果行，同一块在正文里 13.5px、换到预览变成 15.5px 是错的。
+*/
+.search-face-preview-editor .blk[data-depth='0'] {
+  font-size: var(--ui-fs-md);
+}
+
+/* 窄屏：单列堆叠（列表在上、预览在下）。不把预览藏掉，否则「点了没反应」 */
+@media (max-width: 900px) {
+  .search-face-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .search-face-body[data-preview='0'] {
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .search-face-preview {
+    border-left: none;
+    border-top: 1px solid var(--ui-border);
+  }
 }
 .search-face-group {
   padding: var(--ui-gap-2) 0 var(--ui-gap-1);
@@ -199,17 +268,18 @@
   color: var(--ui-text);
 }
 
-/* 结果行：命中片段 ＋ 住哪 一条线上，来路标注与复制引用贴右 */
+/* 结果行：命中片段 ＋ 住哪 一条线上，来路标注与行尾动作贴右 */
 .search-row {
   display: flex;
   align-items: center;
   gap: var(--ui-gap-2);
   border-radius: var(--ui-radius-sm);
 }
-.search-row[data-active='1'] {
+/* 选中态与右列预览一一对应：一个属性说「选的是哪一条」 */
+.search-row[data-selected='1'] {
   background: var(--ui-accent-soft);
 }
-.search-row-open {
+.search-row-select {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
@@ -253,8 +323,20 @@
   color: var(--ui-text-tertiary);
   opacity: 0;
 }
+/* 行尾的「打开」：常驻（双击不可发现，总得有一个看得见的出口） */
+.search-row-goto {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--ui-gap-1);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-tertiary);
+}
+.search-row-goto:hover {
+  background: var(--ui-bg-hover);
+  color: var(--ui-text);
+}
 .search-row:hover .search-row-copy,
-.search-row[data-active='1'] .search-row-copy,
+.search-row[data-selected='1'] .search-row-copy,
 .search-row-copy:focus-visible {
   opacity: 1;
 }
