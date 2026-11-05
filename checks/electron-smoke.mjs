@@ -16,7 +16,7 @@
  */
 import { _electron } from 'playwright-core'
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
@@ -1593,8 +1593,40 @@ await check('E16 外部库：指定目录建库、按目录打开聚焦已有、
   return `指定目录建库（三件套＋注册表带 path）；按目录再开聚焦；副本拒绝、空目录拒绝且不撒文件；重启恢复外部库`
 })
 
-/* ═══════════════════════════════════════════════════ 汇总 */
+/* ---------------------------------------------------------------- 显式清库的回退面 */
 
+/**
+ * 「恢复空库」在桌面宿主的回退面：主进程 `VACUUM INTO` 一份真快照到 `<库目录>/backups/`。
+ *
+ * 为什么单独验这一条：渲染层那条链路（备份 → 清空 → 重开）浏览器冒烟已经覆盖，
+ * 但**桌面宿主**的备份走的是主进程 `node:sqlite` + 文件系统，和 localStorage 的
+ * 「抄一个键」完全不是一回事。它失败时渲染层会中止清空，所以这里钉的是
+ * 「返回的是真文件、在库目录里、且路径不接受外部拼出来的 label」。
+ */
+await check('E17 显式清库的回退面：backupLibrary 在库目录 backups/ 落一份真 SQLite 快照', async () => {
+  const { app, page } = await launch('backup')
+  const lib = await page.evaluate(() => window.qua.libraryInfo())
+  assert(lib?.status === 'ok' && typeof lib.dir === 'string', `库应已打开：${JSON.stringify(lib)}`)
+
+  const r = await page.evaluate(() => window.qua.backupLibrary('before-reset'))
+  assert(r?.status === 'ok' && typeof r.path === 'string', `快照应成功：${JSON.stringify(r)}`)
+  const backups = join(lib.dir, 'backups')
+  assert(r.path.startsWith(backups + sep), `快照应落在库目录的 backups/：${r.path}`)
+  assert(/[/\\]\d+-before-reset\.db$/.test(r.path), `文件名应带时间戳与用途：${r.path}`)
+  assert(existsSync(r.path), `返回的路径应当真实存在：${r.path}`)
+  const head = readFileSync(r.path).subarray(0, 15).toString('latin1')
+  assert(head === 'SQLite format 3', `快照应当是 SQLite 文件：${JSON.stringify(head)}`)
+  assert(readdirSync(backups).includes(r.path.slice(backups.length + 1)), '快照文件应当出现在 backups/ 的清单里')
+
+  // label 只由我们的代码给；渲染层就算传一个带路径的串也不许写到目录外
+  const bad = await page.evaluate(() => window.qua.backupLibrary('../../outside'))
+  assert(bad?.status === 'ok' && bad.path.startsWith(backups + sep), `坏 label 应回退成固定值而不是逃出目录：${JSON.stringify(bad)}`)
+
+  await app.close()
+  return `快照 ${r.path.slice(backups.length + 1)}（真 SQLite 文件）；坏 label 不逃出库目录`
+})
+
+/* ═══════════════════════════════════════════════════ 汇总 */
 const passed = results.filter((r) => r.ok).length
 log(`\n${passed}/${results.length} 通过\n`)
 for (const r of results.filter((x) => !x.ok)) log(`  FAIL ${r.name}：${r.msg}`)

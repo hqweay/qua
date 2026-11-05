@@ -5982,6 +5982,92 @@ await check('T20 过新 / 损坏的库不被覆盖：进入只读演示态并持
   return `过新 v99 原样保留；损坏 JSON 原样保留；调试菜单备份（${recovered.backupKey.replace('qua.workspace.bak.', 'bak.')}）并重建后可写、冷启动可读；告警「${a.text.slice(0, 24)}…」`
 })
 
+await check('T255 调试菜单「恢复空库」：先备份原库，再清成只有今天一行；重开仍是空库', async () => {
+  const KEY = 'qua.workspace'
+  const { ctx, page } = await freshPage(browser, base)
+  // 冷启动的种子是**第一次落盘**才写下去的（250ms 防抖）；先做一次会排期落盘的小编辑，
+  // 这样后面才有「清空前」的原始字节可比。
+  await page.evaluate(() => window.__qua.invoke('core.editor/insert-block'))
+  await page.waitForFunction((k) => Boolean(localStorage.getItem(k)), KEY, { timeout: 3000 })
+  // 等这批防抖落盘落定（250ms 窗口）：`before.raw` 与随后备份拿到的必须是同一份字节
+  await page.waitForTimeout(400)
+  // 前置：把每库视图状态改成非默认（关右槽）——「清库」要连它一起回默认，否则旧槽里
+  // 还挂着指向已删块 id 的窗口卡，看着像新库其实不是。
+  await page.evaluate(() => window.__qua.invoke('core.dock/toggle-right'))
+  await page.waitForFunction(() => window.__qua.snapshot().dock.right.open === false, null, { timeout: 2000 })
+  const before = await page.evaluate((k) => ({ raw: localStorage.getItem(k), snap: window.__qua.snapshot() }), KEY)
+  assert(before.snap.pageCount > 0, `起点应是有内容的种子库：${JSON.stringify({ pageCount: before.snap.pageCount })}`)
+  assert(before.snap.dock.right.open === false, '前置：右槽应已关')
+
+  await page.locator('#state-menu-btn').click()
+  await page.waitForFunction(
+    () => [...document.querySelectorAll('.layer-label')].some((e) => e.textContent === '恢复空库'),
+    null,
+    { timeout: 2000 },
+  )
+  // 与 T20 的菜单点击同一个入口（行是 mousedown 选中，不是 click）
+  await page.evaluate(() => {
+    const row = [...document.querySelectorAll('.layer-item')].find((r) => r.querySelector('.layer-label')?.textContent === '恢复空库')
+    row.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  // 落盘走防抖：等「备份键出现」且「内容变成只有今天一个根」
+  await page.waitForFunction(
+    ([k]) => {
+      if (Object.keys(localStorage).every((x) => !x.startsWith(k + '.bak.'))) return false
+      const raw = localStorage.getItem(k)
+      if (!raw) return false
+      try {
+        return JSON.parse(raw)?.data?.blocks?.length === 1
+      } catch {
+        return false
+      }
+    },
+    [KEY],
+    { timeout: 3000 },
+  )
+  const after = await page.evaluate((k) => {
+    const keys = Object.keys(localStorage).filter((x) => x.startsWith(k + '.bak.'))
+    return {
+      backupKey: keys[0] ?? '',
+      backup: keys[0] ? localStorage.getItem(keys[0]) : null,
+      raw: localStorage.getItem(k),
+      snap: window.__qua.snapshot(),
+      blocks: window.__qua.allBlocks(),
+    }
+  }, KEY)
+
+  assert(after.backupKey, '清空前应先把原库抄到备份键')
+  // 比内容不比字节：`backupBeforeReplace` 会先 flush 一次（`savedAt` 会变），
+  // 但备份拍的必须是**清空前那份库**——块 id 逐个一致才算数。
+  const backupIds = JSON.parse(String(after.backup))?.data?.blocks?.map((b) => b.id) ?? []
+  const beforeIds = JSON.parse(String(before.raw))?.data?.blocks?.map((b) => b.id) ?? []
+  assert(beforeIds.length > 0 && JSON.stringify(backupIds) === JSON.stringify(beforeIds), '备份内容应当是清空前的库（块 id 逐个一致）')
+  assert(after.snap.pageCount === 0, `空库不该有页：${JSON.stringify({ pageCount: after.snap.pageCount })}`)
+  assert(after.snap.topBlocks === 1, `空库只该有一个根：${after.snap.topBlocks}`)
+  assert(after.snap.totalBlocks === 2, `今天 ＋ 一个可写空行＝2 块：${after.snap.totalBlocks}`)
+  assert(after.blocks[0].roles.includes('journal'), `根应当是今天那一天：${JSON.stringify(after.blocks[0])}`)
+  assert(after.blocks[0].text === '', `日记行正文应为空的日期投影：${JSON.stringify(after.blocks[0].text)}`)
+  assert(after.blocks[1]?.text === '' && after.blocks[1]?.lists.length === 0, '唯一子块应当是能直接打字的空行')
+  assert(after.snap.dock.right.open === true, '清库后每库视图状态应回默认（右槽重新打开）')
+
+  // 另起 context 用新字节冷启动：空库不是「空文件」——它就是库本身，所以不应被重新 seed
+  const reopen = await browser.newContext({ viewport: { width: 1200, height: 800 } })
+  const reopenedPage = await reopen.newPage()
+  await reopenedPage.addInitScript(([k, v]) => localStorage.setItem(k, v), [KEY, after.raw])
+  await reopenedPage.goto(base, { waitUntil: 'load' })
+  await reopenedPage.waitForFunction(() => Boolean(window.__qua))
+  const reopened = await reopenedPage.evaluate(() => window.__qua.snapshot())
+  assert(reopened.readOnly === false, `空库冷启动应可写：${JSON.stringify(reopened.bootNotice)}`)
+  assert(
+    reopened.pageCount === 0 && reopened.topBlocks === 1 && reopened.totalBlocks === 2,
+    `重开后仍是空库（不重新种演示数据）：${JSON.stringify({ pageCount: reopened.pageCount, top: reopened.topBlocks, total: reopened.totalBlocks })}`,
+  )
+  await reopen.close()
+  await ctx.close()
+
+  return `先备份（${after.backupKey.replace('qua.workspace.bak.', 'bak.')}）再清空：1 根 / 2 块、0 页；每库视图状态回默认；重开仍是空库`
+})
+
 /* ------------------------------------------------------------ 侧槽 */
 
 await check('T45 Shift+点块标 ⇒ 右槽打开并定位；不换中心/不入历史；再点不关闭，× 才关闭；待办方框的 Shift 仍是勾选', async () => {

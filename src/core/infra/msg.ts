@@ -667,6 +667,7 @@ export const MSG = {
   'cmd.dev.load-state': '载入演示状态',
   'cmd.dev.simulate-ime': '模拟 IME 组合期按键（守卫自检）',
   'cmd.dev.reset-all': '备份并重建本地库',
+  'cmd.dev.blank': '恢复空库（只留今天）',
 
   /* -------------------------------------------------- 命令分组 category（menu.*） */
   'menu.cat.editor': '编辑器',
@@ -1004,6 +1005,8 @@ export const MSG = {
   'ui.stateMenu.emptyHint': '什么都没写',
   'ui.dbg.recover': '备份并重建本地库',
   'ui.dbg.recoverHint': '读不出来的原始字节先备份，再写入演示数据',
+  'ui.dbg.blank': '恢复空库',
+  'ui.dbg.blankHint': '先备份，再清成只有今天一行',
 
   /* ------------------------------------------------------------ 启动 / 持久化告警 */
   'ui.boot.tooNew': '本地库版本（v{version}）比当前应用新，已进入只读演示模式：不会写入或覆盖你的数据。请升级应用后再打开。',
@@ -1037,6 +1040,10 @@ export const MSG = {
   'ui.toast.resetDoneNoBackup': '已重建本地库（这个后端没有备份能力，原字节未保留）',
   'ui.toast.resetBackupFailed': '备份原始字节失败，已中止重建：{message}',
   'ui.toast.resetFailed': '重建本地库失败：{message}',
+  'ui.toast.blankDone': '已恢复空库；原库备份在 {key}',
+  'ui.toast.blankDoneNoBackup': '已恢复空库（这个后端没有备份能力，原库未保留）',
+  'ui.toast.blankBackupFailed': '备份原库失败，已中止清空：{message}',
+  'ui.toast.blankFailed': '恢复空库失败：{message}',
   'ui.toast.copied': '已复制',
   'ui.toast.stateLoaded': '已载入：{state}',
   'ui.toast.virtOn': '虚拟化 on（窗口半径 {radius} 行）：DOM 节点数会小于块数',

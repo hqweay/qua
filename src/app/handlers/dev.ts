@@ -22,4 +22,8 @@ export const DEV_HANDLERS: Record<string, Handler> = {
     app.resetWorkspace()
     return true
   },
+  'dev.workspace/blank': (_a, app) => {
+    app.blankWorkspace()
+    return true
+  },
 }

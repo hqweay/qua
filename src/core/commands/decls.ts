@@ -213,6 +213,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'dev.fixture/load', title: t('cmd.dev.load-state'), capability: 'admin', undoable: false, version: '0.1', category: t('menu.cat.dev'), args: { state: { type: 'string', enum: ['seed', 'empty', 'sparse', 'degraded'] } } },
   { name: 'dev.ime/simulate', title: t('cmd.dev.simulate-ime'), capability: 'read', undoable: false, version: '0.1', category: t('menu.cat.dev') },
   { name: 'dev.workspace/reset', title: t('cmd.dev.reset-all'), capability: 'admin', undoable: false, version: '0.1', category: t('menu.cat.dev') },
+  { name: 'dev.workspace/blank', title: t('cmd.dev.blank'), capability: 'admin', undoable: false, version: '0.1', category: t('menu.cat.dev') },
 ]
 
 export const DECL_BY_NAME: Map<string, CommandDecl> = new Map(COMMANDS.map((c) => [c.name, c]))

@@ -60,9 +60,10 @@ import { renderCenterTabs as paintCenterTabs } from './ui/chrome/center-tabs.ts'
 import { setupDiagnostics } from './app/wiring/diagnostics.ts'
 import { HANDLERS } from './app/handlers.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
-import { t } from './core/infra/msg.ts'
+import { t, type MsgId } from './core/infra/msg.ts'
 import { ensurePageInTx } from './core/index.ts'
 import { seedJournalMounts, seedWorkspace } from './core/infra/seed.ts'
+import { blankWorkspace } from './core/fixtures/states.ts'
 import { createIdbAssetStore } from './core/storage/asset-idb.ts'
 import { createIpcAssetStore } from './core/storage/asset-ipc.ts'
 import { ensureSeedAssets } from './core/storage/seed-assets.ts'
@@ -84,6 +85,7 @@ import {
   createLocalStorageAdapter,
   createWorkspaceStore,
   DEVICE_KEY,
+  normalizePrefs,
   STORAGE_KEY,
   type Prefs,
   type Workspace,
@@ -2104,13 +2106,8 @@ const app: App = {
    */
   resetWorkspace: () => {
     void (async () => {
-      let backupKey: string | null = null
-      try {
-        backupKey = await store.backup()
-      } catch (e) {
-        app.toast(t('ui.toast.resetBackupFailed', { message: errText(e) }), 'warn')
-        return
-      }
+      const backupKey = await backupBeforeReplace('ui.toast.resetBackupFailed')
+      if (backupKey === false) return
       // 只换内存：写入交给 forceReplaceNow（它才知道「这一次是整份替换」）
       swapWorkspace(seedWorkspace(), false)
       const r = await forceReplaceNow()
@@ -2130,6 +2127,63 @@ const app: App = {
       )
     })()
   },
+
+  /**
+   * **恢复空库**：清成「只有今天一行」，没有演示内容。
+   *
+   * 与 `resetWorkspace` 共用「先备份、失败就中止」这条前半段；差别在后半段：
+   *   · 换的是 `blankWorkspace()`（今天 ＋ 一个空子块），不是演示种子；
+   *   · **每库的视图状态一起回默认**（槽布局／日记栏／派生栏看法／折叠态）——
+   *     它们跟着库走，而换库之后旧块 id 在新内容里不存在，留着只会指向空气。
+   *   · 不补种子资产：空库里没有图可引用，补进来只是给下一次打开留一堆孤儿字节
+   *     （代价登记：旧资产的**字节**没有删，只在库清空后变成不可达的孤儿；
+   *      清理要走「导入／修复」那条入口，不在这个调试动作里顺手做）。
+   */
+  blankWorkspace: () => {
+    void (async () => {
+      const backupKey = await backupBeforeReplace('ui.toast.blankBackupFailed')
+      if (backupKey === false) return
+      // 换内容之前先把每库视图状态回默认：`swapWorkspace` 只清折叠态，槽与日记栏不会自己回去
+      device.prefs.dock = normalizePrefs({}).dock
+      device.prefs.journalMounts = []
+      device.prefs.mountViews = {}
+      // 只换内存：写入交给 forceReplaceNow（它才知道「这一次是整份替换」）
+      swapWorkspace(blankWorkspace(), false)
+      const r = await forceReplaceNow()
+      if (!r.ok) {
+        app.toast(t('ui.toast.blankFailed', { message: errText(r.error) }), 'warn')
+        return
+      }
+      bootState.notice = null
+      chrome.showNotice(null)
+      scheduleDeviceSave()
+      chrome.renderDebugState()
+      app.toast(
+        backupKey ? t('ui.toast.blankDone', { key: backupKey }) : t('ui.toast.blankDoneNoBackup'),
+        backupKey ? 'ok' : 'warn',
+      )
+    })()
+  },
+}
+
+/**
+ * 显式重置的公共前半段：**先把在途写入落干净，再备份原始字节**。
+ *
+ * 顺序是判据的一部分：落盘有 250ms 防抖，队列里可能还有没发出去的编辑；
+ * 不 flush 就备份，拿到的是一份「少了最后一句」的快照，而这次备份看起来还成功了。
+ *
+ * 返回 `false` ＝ 备份失败，调用方**必须中止**（不做没有备份的覆盖）；
+ * `null` ＝ 这个后端没有备份能力（web 之外的宿主实现了它，不该静默当成成功）。
+ */
+async function backupBeforeReplace(failMsg: MsgId): Promise<string | null | false> {
+  try {
+    saveNow()
+    await store.settle()
+    return await store.backup()
+  } catch (e) {
+    app.toast(t(failMsg, { message: errText(e) }), 'warn')
+    return false
+  }
 }
 
 /* ------------------------------------------------------ 行头：别名 / 字段 */
