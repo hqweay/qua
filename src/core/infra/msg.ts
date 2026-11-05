@@ -1138,6 +1138,19 @@ export const MSG = {
   'cmd.block.convert-mention': '把提及转成引用',
   'ui.mount.mention.convert': '转成引用',
   'ui.toast.mentionStale': '那一处的正文已经变了，没有转换',
+
+  /* ------------------------------------------------------ 快速筛选（派生面的 chips） */
+  'ui.filter.button': '筛选',
+  'ui.filter.buttonHint': '按结果里出现过的页/标签筛这一屏',
+  'ui.filter.include': '包含',
+  'ui.filter.remove': '排除',
+  'ui.filter.pages': '页',
+  'ui.filter.tags': '标签',
+  'ui.filter.chipHint': '点击加入包含；Shift+点击加入排除',
+  'ui.filter.activeHint': '点击摘除；Shift+点击改为排除',
+  'ui.filter.chipHintRemove': '点击摘除',
+  'ui.filter.empty': '这一屏的结果里没有可筛的页或标签',
+  'ui.dock.noBackRefsFiltered': '没有符合筛选的引用',
 } as const
 
 /** 回调 id 就是 MSG 的键 —— 写错一个 id 会在 `pnpm typecheck` 阶段就红 */

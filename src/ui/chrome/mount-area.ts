@@ -26,9 +26,11 @@
  * ⚠️ 这里不碰命令、不认识浮层：`＋`／`×` 只回调装配层。
  */
 import {
+  applyQuickFilter,
   canEditMounts,
   derivedRecordsOf,
   derivedSpecOf,
+  displayNameOf,
   expandContexts,
   hasLiveChildren,
   isJournal,
@@ -36,12 +38,17 @@ import {
   readViewSet,
   unfoldForContext,
   DERIVED_VIEW_KINDS,
+  EMPTY_QUICK_FILTER,
+  quickFilterAdd,
+  quickFilterDrop,
   type Block,
   type BlockStore,
   type DerivedSource,
   type DerivedViewKind,
   type MountEntry,
   type MountHost,
+  type QuickFilterAtom,
+  type QuickFilterState,
   type ViewOwnerStore,
   type ViewConfig,
   type ViewRecord,
@@ -52,6 +59,7 @@ import { t, type MsgId } from '../../core/infra/msg.ts'
 import { type BlockEditor, type Run } from '../../view/editor/editor.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
 import { bindDropTarget, setDragTab } from '../../view/dnd.ts'
+import { renderQuickFilter } from './quick-filter.ts'
 
 /** 非大纲那一栏的**视图体**（由装配层造：只有那里有完整依赖） */
 export interface ViewBodyHost {
@@ -112,6 +120,11 @@ export interface MountAreaDeps {
   derivedKind?: (host: Block, source: DerivedSource) => DerivedViewKind
   /** 切派生栏的看法（装配层写设备状态并重画这一栏） */
   setDerivedKind?: (host: Block, source: DerivedSource, kind: DerivedViewKind) => void
+  /**
+   * 浮层外壳（快速筛选的 chips 弹层住在这里面）。装配层持有浮层实例，这一层
+   * 不认识它的落位与生命周期——给一个与弹层同形的窄缝就够。
+   */
+  openPopover?: (render: (host: HTMLElement) => void, anchor: DOMRect | null | (() => DOMRect | null)) => void
   /**
    * 这一栏非大纲时用的视图体（local 栏可以有表格等看法）。
    *
@@ -215,6 +228,12 @@ export class MountArea {
   private readonly tabViews = new Map<string, ViewBodyHost>()
   /** 引用栏的 kind 过滤（大纲专用设备状态；切到表格时由「类型」列承担同一件事） */
   private refKind: 'all' | 'inline' | 'property' | 'embed' = 'all'
+  /**
+   * 派生栏的快速筛选 chips（**会话瞬态**，按来源一格）：加/摘只改这份内存状态——
+   * 不写偏好、不入库、不产生 op、不进撤销栈。段落换人时清空：
+   * 换了宿主，chips 说的就不是同一批材料了。
+   */
+  private readonly quickFilters = new Map<DerivedSource, QuickFilterState>()
   /** 上一次读到的那组条目的串（`refreshEntries` 用它判「要不要重排」） */
   private entrySig = ''
 
@@ -354,6 +373,7 @@ export class MountArea {
       this.expandedByTab.clear()
       this.covers = new Map()
       this.refKind = 'all'
+      this.quickFilters.clear()
       for (const v of this.tabViews.values()) v.dispose()
       this.tabViews.clear()
     }
@@ -574,17 +594,23 @@ export class MountArea {
     }
     const all = derivedRecordsOf(host, this.deps.kb, entry.source)
     /**
+     * 快速筛选先落，类型过滤再落：chips 答的是「这一栏看谁」，kind 答的是
+     * 「引用里看哪几类」——两刀同一批材料，切法有先后。抬头的计数与
+     * 类型计数都读**筛过之后**的那批（主数字＝现在看得见的条数）。
+     */
+    const filtered = applyQuickFilter(all, this.filterOf(entry.source))
+    /**
      * kind 过滤只作用于**大纲**：列表/表格走视图宿主的记录源，那里用「类型」列
      * 承担同一件事。否则会出现「抬头条数是过滤后的、表里是全部」的假数字。
      */
     const records =
       entry.source === 'refs' && kind === 'outline' && this.refKind !== 'all'
-        ? all.filter((r) => {
+        ? filtered.filter((r) => {
             const keys = r.derived?.relKindKeys
             return Array.isArray(keys) && keys.includes(this.refKind)
           })
-        : all
-    this.renderDerivedHead(host, entry, kind, records.length, all)
+        : filtered
+    this.renderDerivedHead(host, entry, kind, records.length, filtered)
     const view = this.viewOf(entry)
     if (view) {
       this.showView(host, entry)
@@ -731,6 +757,15 @@ export class MountArea {
       head.appendChild(kinds)
     }
 
+    /**
+     * 快速筛选的入口（引用／提及两栏）：候选与计数都是面板层的 chrome，
+     * 与行渲染器分层。结果为空且没筛时不给——空结果上没有可筛的东西，
+     * 挂一颗点了只说「没有候选」的按钮是噪声。
+     */
+    if ((entry.source === 'refs' || entry.source === 'mentions') && (count > 0 || this.filterActive(entry.source))) {
+      head.appendChild(this.quickFilterButton(entry.source))
+    }
+
     const seg = document.createElement('div')
     seg.className = 'mount-derived-views'
     const labels: Record<DerivedViewKind, MsgId> = {
@@ -753,6 +788,77 @@ export class MountArea {
     }
     head.appendChild(seg)
 
+  }
+
+  /* ---------------------------------------------------------- 快速筛选 */
+
+  /**
+   * 这一栏现在的 chips（**会话瞬态**；装配层的列表/表格记录源也读这一份，
+   * 两处同一个答案——大纲与表格各算各的就会出现两批行）。
+   */
+  filterOf(source: DerivedSource): QuickFilterState {
+    return this.quickFilters.get(source) ?? EMPTY_QUICK_FILTER
+  }
+
+  private filterActive(source: DerivedSource): boolean {
+    const s = this.filterOf(source)
+    return s.include.length > 0 || s.remove.length > 0
+  }
+
+  private quickFilterButton(source: DerivedSource): HTMLButtonElement {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'mount-derived-filter'
+    btn.textContent = t('ui.filter.button')
+    btn.title = t('ui.filter.buttonHint')
+    if (this.filterActive(source)) btn.dataset.active = '1'
+    btn.addEventListener('click', () => this.openQuickFilter(source))
+    return btn
+  }
+
+  /**
+   * 弹出 chips 层。锚点每次**现查**（手势会重画抬头、重建按钮，矩形快照会指向
+   * 一个已经不存在的元素）；锚点不在了 ⇒ 浮层自己关（装配层浮层的既有口径）。
+   */
+  private openQuickFilter(source: DerivedSource): void {
+    if (!this.deps.openPopover) return
+    this.deps.openPopover(
+      (box) => {
+        const paint = (): void =>
+          renderQuickFilter(box, {
+            records: () => {
+              const h = this.deps.host()
+              return h ? derivedRecordsOf(h, this.deps.kb, source) : []
+            },
+            state: () => this.filterOf(source),
+            labelOf: (atom) => this.atomLabel(atom),
+            onAdd: (atom, to) => {
+              if (this.mutateFilter(source, (s) => quickFilterAdd(s, atom, to))) paint()
+            },
+            onDrop: (atom) => {
+              if (this.mutateFilter(source, (s) => quickFilterDrop(s, atom))) paint()
+            },
+          })
+        paint()
+      },
+      () => this.derivedHeadEl.querySelector('.mount-derived-filter')?.getBoundingClientRect() ?? null,
+    )
+  }
+
+  /** 改一份 chips：真变了才落、才重画这一屏（返回给弹层决定要不要跟着重画） */
+  private mutateFilter(source: DerivedSource, fn: (s: QuickFilterState) => QuickFilterState | null): boolean {
+    const next = fn(this.filterOf(source))
+    if (!next) return false
+    this.quickFilters.set(source, next)
+    this.render()
+    return true
+  }
+
+  /** chip 的显示名：按 id 经读门面现解析（名字是显示层的事，不进状态） */
+  private atomLabel(atom: QuickFilterAtom): string {
+    const id = 'up' in atom ? atom.up.is : atom.tag
+    const block = this.deps.kb.get(id)
+    return block ? displayNameOf(block) || id.slice(-4) : id.slice(-4)
   }
 
   private showView(host: Block, entry: MountEntry): void {

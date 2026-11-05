@@ -636,3 +636,67 @@
     animation-name: overlay-out;
   }
 }
+
+/* 快速筛选弹层：两列 chips（包含／排除）＋ 候选。面板层 chrome，状态住会话瞬态。 */
+.quick-filter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-3);
+}
+.quick-filter-cols {
+  display: flex;
+  gap: var(--ui-gap-4);
+}
+.quick-filter-col {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  flex: 1;
+  min-width: 0;
+}
+.quick-filter-col-title,
+.quick-filter-group-title {
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+.quick-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  max-width: 100%;
+  background: none;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  padding: 0 var(--ui-gap-2);
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+  line-height: 1.6;
+}
+.quick-filter-chip:hover {
+  color: var(--ui-text);
+  background: var(--ui-bg-hover);
+}
+.quick-filter-chip-n {
+  color: var(--ui-text-tertiary);
+}
+.quick-filter-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+  border-top: 1px solid var(--ui-border-subtle);
+  padding-top: var(--ui-gap-2);
+}
+.quick-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-1);
+}
+.quick-filter-empty {
+  margin: 0;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}

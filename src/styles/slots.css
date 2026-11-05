@@ -591,3 +591,32 @@ button.ghost.wide {
 .cal-cell[data-today='1'] .cal-dot {
   background: var(--ui-accent);
 }
+
+/* 卡内工具行：筛选贴着它作用的那批行（卡头只留「这张卡」的控件，不放内容动作） */
+.dock-backlinks-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--ui-gap-1);
+}
+.dock-backlinks-tools[hidden] {
+  display: none;
+}
+.dock-backlinks-filter {
+  background: none;
+  border: 0;
+  padding: 0 var(--ui-gap-2);
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+  border-radius: var(--ui-radius-sm);
+  line-height: 1.6;
+}
+.dock-backlinks-filter:hover {
+  color: var(--ui-text);
+  background: var(--ui-bg-hover);
+}
+.dock-backlinks-filter[data-active='1'] {
+  color: var(--ui-text);
+  background: var(--ui-accent-soft);
+}
