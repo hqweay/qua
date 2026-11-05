@@ -28,13 +28,7 @@ export interface HitView {
   source?: FtsSource
 }
 
-export function describeHit(
-  kb: KbClient,
-  hit: SearchHit,
-  term: string,
-  /** 整片森林（用来现算来路）；省略 ⇒ 只在 FTS 命中时才有 `source` */
-  forest?: readonly Block[],
-): HitView | null {
+export function describeHit(kb: KbClient, hit: SearchHit, term: string): HitView | null {
   const b: Block | undefined = kb.get(hit.blockId)
   if (!b) return null
   const text = plainText(b.content)
@@ -48,6 +42,11 @@ export function describeHit(
     .map((x) => blockLabel(x))
     .filter((x) => x !== '')
   const hint = trail.length > 0 ? trail.join(' › ') : blockLabel(b)
-  const source = hit.source ?? (forest && term.trim() !== '' ? matchSourcesOf(forest, b.id, term)[0]?.source : undefined)
+  /**
+   * 来路：FTS 命中时索引已经告诉我们哪一行命中了；扫描降级没有这一格 ⇒ **按同一份
+   * 来源投影现算**（走读门面的 id 查表，不遍历森林）。
+   */
+  const source =
+    hit.source ?? (term.trim() !== '' ? matchSourcesOf((id) => kb.get(id), b.id, term)[0]?.source : undefined)
   return { blockId: b.id, parts, hint, ...(source ? { source } : {}) }
 }
