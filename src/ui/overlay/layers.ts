@@ -235,6 +235,12 @@ export class Layers {
       'keydown',
       (e) => {
         if (e.key !== 'Escape') return
+        /**
+         * **分层**：菜单在最上面，`Esc` 先归它（上面的菜单分支已经 `preventDefault`）。
+         * `stopPropagation()` 挡不住**同一个 document 上的后一个监听器**，所以这里要显式
+         * 认「这一发 Esc 已经被菜单吃掉」——否则一次 Esc 会把菜单和底下的浮层一起关掉。
+         */
+        if (e.defaultPrevented) return
         if (this.popEl) {
           e.preventDefault()
           e.stopPropagation()
@@ -731,6 +737,24 @@ export class Layers {
 
   anyOpen(): boolean {
     return this.open || this.popoverOpen() || this.drawerOpen()
+  }
+
+  /**
+   * **命令键要不要放行给覆盖层里的编辑器**。
+   *
+   * 覆盖层默认接管按键（菜单有 ↑↓/↵、抽屉与信息浮层里的输入框要打字）。但信息浮层
+   * 里可以放一台**真编辑器**（搜索面的右列预览）：焦点在它的可编辑宿主里时，
+   * `↵`／`Tab`／`⌘Z` 必须归编辑器，否则「能进不能出」。
+   *
+   * 三条边界：菜单／抽屉开着时一律不放行（它们自己有按键语义）；焦点在浮层的
+   * `<input>` 上时不放行（那是搜索框/表单）；焦点已经离开浮层时也不放行。
+   */
+  allowsEditorKeys(): boolean {
+    if (this.open || this.drawerEl) return false
+    const box = this.popEl
+    if (!box) return false
+    const active = document.activeElement
+    return active instanceof HTMLElement && box.contains(active) && active.isContentEditable
   }
 
   macLabel(key: string): string {

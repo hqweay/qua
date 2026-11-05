@@ -460,6 +460,7 @@ const axis = setupAxis({
  */
 const faceEditorSlot = (): {
   onFocus: (editor: BlockEditor) => void
+  onBlur: (editor: BlockEditor) => void
   onDispose: (editor: BlockEditor) => void
   /** 写入事务的目标：本面自己指向的那台（没有就回落） */
   target: () => BlockEditor
@@ -467,18 +468,23 @@ const faceEditorSlot = (): {
   const fallback = ed
   let owned: BlockEditor | null = null
   const fallbackAlive = (): BlockEditor => (fallback.container.isConnected ? fallback : mainEd)
+  const release = (editor: BlockEditor): void => {
+    if (owned !== editor) return
+    owned = null
+    if (ed !== editor) return
+    ed = fallbackAlive()
+    scheduleBadge()
+  }
   return {
     onFocus: (editor) => {
       owned = editor
       ed = editor
       scheduleBadge()
     },
+    // 焦点离开这一面：活动编辑器交回打开前那台（另一面若接了焦点，它自己的 onFocus 马上会覆盖）
+    onBlur: release,
     onDispose: (editor) => {
-      if (owned !== editor) return
-      owned = null
-      if (ed !== editor) return
-      ed = fallbackAlive()
-      scheduleBadge()
+      release(editor)
     },
     target: () => owned ?? fallbackAlive(),
   }
@@ -508,6 +514,7 @@ const searchFaceDeps = (): SearchFaceDeps => {
      */
     wire: (editor, change) => wireViewEditor(editor, change, 'surface', true),
     onFocus: slot.onFocus,
+    onBlur: slot.onBlur,
     onDispose: slot.onDispose,
     // 预览里编辑：落盘、刷角标与 tab 标题。**不重跑搜索**（重跑会重排列表、打断这一行的输入）
     onChange: () => {
@@ -1944,7 +1951,7 @@ const app: App = {
    * 全文检索（⌘P）：输入正文关键词，结果是**块**，右列是选中那块的真块预览。
    *
    * 宿主就是常驻搜索面本身（`compact` 形态）：同一份组件、同一台预览，不是第二套结果渲染。
-   * 浮层只负责「一次性快入口」的形状——选中即走，要常驻就把词展开进 tab。
+   * 浮层只负责「快入口」的形状——可编辑但不常驻，要常驻就把词展开进 tab。
    */
   openSearch: () => {
     if (!search) return
@@ -1998,10 +2005,16 @@ const app: App = {
       /**
        * **焦点不许逃出浮层**：`layerOpen()` 只停命令派发，挡不住 Tab／点击把焦点
        * 交给覆盖层之外——那之后按键会落到底下的编辑器上（用户看不到，却在改正文）。
+       *
+       * ⚠️ 判据不是「在不在 `box` 内」：块菜单、`#` 标签选择器这些**派生覆盖层**
+       * 挂在 `body`（`.layer` / `.selbar`），焦点一进去就把搜索浮层关掉——
+       * 用户只是点了个菜单，整个搜索面却消失了。所以放行本浮层的派生覆盖层。
        */
       onFocusIn = (e) => {
         const target = e.target as Node | null
-        if (target && box.contains(target)) return
+        if (!target) return
+        if (box.contains(target)) return
+        if (target instanceof Element && target.closest('.layer, .selbar')) return
         layers.closePopover()
       }
       document.addEventListener('focusin', onFocusIn, true)

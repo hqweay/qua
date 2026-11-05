@@ -16,14 +16,14 @@ test('tab 形态：晋升入口与可编辑预览都在', () => {
   assert.equal(chrome.highlightKey, 'search-match', 'tab 沿用既有断言钉住的那条 key')
 })
 
-test('compact 形态：只收 tab 专属的晋升入口，预览必须留着', () => {
+test('compact 形态：只收 tab 专属的晋升入口，预览必须留着且可编辑', () => {
   const chrome = faceChrome(true)
   assert.equal(chrome.promote, false, '紧凑形态不摆「晋升为查询块」')
   assert.equal(chrome.preview, true, '藏了预览就等于「点了结果行没反应」')
   assert.equal(chrome.expand, true, '浮层要把词带去常驻面')
-  assert.equal(chrome.bareEnterOpens, true, '浮层是选中即走')
-  assert.equal(chrome.previewReadOnly, true, '阶段 A 浮层预览只给看')
-  assert.equal(chrome.highlightKey, 'search-match-overlay', '两面同屏必须各有一条 key')
+  assert.equal(chrome.bareEnterOpens, false, '浮层输入框的 ↵ 是进预览，不是打开块')
+  assert.equal(chrome.previewReadOnly, false, '浮层预览可编辑（与 tab 同一台预览）')
+  assert.equal(chrome.highlightKey, 'search-match-overlay', '两面同屏必须各有基名')
 })
 
 test('两面同屏：高亮 key 不重名', () => {

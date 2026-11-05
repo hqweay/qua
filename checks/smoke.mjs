@@ -19501,7 +19501,7 @@ await check('T227 点父块的竖线：查询块（无 children、有身体）�
 
 /* -------------------------------------------------------------- 全文检索 */
 
-await check('T228 ⌘P 搜索：输入正文词出结果、命中高亮、↵ 打开、Esc 关闭、无结果说人话', async () => {
+await check('T228 ⌘P 搜索：输入正文词出结果、命中高亮、↵ 进预览、⌘↵ 打开、Esc 关闭、无结果说人话', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.keyboard.press(kbd('mod+p'))
   // ⌘P 的宿主就是常驻搜索面（compact 形态）：同一个组件、同一台预览
@@ -19540,11 +19540,33 @@ await check('T228 ⌘P 搜索：输入正文词出结果、命中高亮、↵ �
   assert(first.text.includes('内容寻址'), `结果片段包含查询词：${JSON.stringify(first.text)}`)
   assert(first.marks > 0, '命中词在片段里高亮')
   const target = first.id
+  const beforeOpen = await page.evaluate(() => window.__qua.snapshot().activeId)
+  /**
+   * 浮层输入框的裸 ↵ ＝**把焦点交给右列预览**（开始编辑），不是打开块。
+   * 打开走 `⌘↵`（或行尾那颗图标）——两个动作各有一条可见出口。
+   */
   await page.keyboard.press('Enter')
+  await page.waitForFunction(
+    () => Boolean(document.activeElement?.closest('.popover.search-overlay .search-face-preview-editor')),
+    null,
+    { timeout: 3000 },
+  )
+  const entered = await page.evaluate(() => ({
+    overlay: Boolean(document.querySelector('.popover.search-overlay')),
+    activeId: window.__qua.snapshot().activeId,
+    inPreview: Boolean(document.activeElement?.closest('.popover.search-overlay .search-face-preview-editor')),
+  }))
+  assert(entered.overlay, '输入框 ↵ 只把焦点交给预览，浮层不许关')
+  assert(entered.inPreview, `裸 ↵ 之后焦点要在右列预览里：${JSON.stringify(entered)}`)
+  assert(entered.activeId === beforeOpen, `裸 ↵ 不该打开块（中心落点没变）：${JSON.stringify({ beforeOpen, ...entered })}`)
+
+  // ⌘↵ 才是「打开」：焦点回输入框再按（⌘↵ 在预览里是待办开关，不是打开）
+  await page.click('.popover.search-overlay .search-face-input')
+  await page.keyboard.press(kbd('mod+Enter'))
   await page.waitForTimeout(250)
-  assert(!(await page.evaluate(() => Boolean(document.querySelector('.popover.search-overlay')))), '选中之后浮层关闭')
+  assert(!(await page.evaluate(() => Boolean(document.querySelector('.popover.search-overlay')))), '⌘↵ 打开之后浮层关闭')
   const active = await page.evaluate(() => window.__qua.snapshot().activeId)
-  assert(active === target, `↵ 打开的是这一条（不是「有反应但没换块」）：${active} vs ${target}`)
+  assert(active === target, `⌘↵ 打开的是这一条（不是「有反应但没换块」）：${active} vs ${target}`)
 
   await page.keyboard.press(kbd('mod+p'))
   await page.waitForSelector('.popover.search-overlay .search-face-input')
@@ -19558,7 +19580,7 @@ await check('T228 ⌘P 搜索：输入正文词出结果、命中高亮、↵ �
   await page.waitForTimeout(120)
   assert(!(await page.evaluate(() => Boolean(document.querySelector('.popover.search-overlay')))), 'Esc 关闭搜索')
   await ctx.close()
-  return `最近更新空态、命中高亮 ${first.marks} 处、↵ 打开 ${target.slice(-6)}、无结果与 Esc 都走通`
+  return `最近更新空态、命中高亮 ${first.marks} 处、↵ 进预览、⌘↵ 打开 ${target.slice(-6)}、无结果与 Esc 都走通`
 })
 
 /* -------------------------------------------------------------- 聚焦与段尾槽 */
@@ -20663,7 +20685,7 @@ await check('T241 搜索面右预览：就地编辑落盘、Enter 建子块并�
     `预览跟着回落到新选中那条：${JSON.stringify(afterDelete)}`,
   )
 
-  // ⑤ 输入框 ⌘↵ ＝ 在主编辑器打开选中那块（浮层仍是裸 ↵ 打开）
+  // ⑤ 输入框 ⌘↵ ＝ 在主编辑器打开选中那块（裸 ↵ 一律进预览，与 tab 同口径）
   const target = afterDelete.selected[0]
   await page.evaluate(() => document.querySelector('.search-face-input').focus())
   await page.keyboard.press(kbd('mod+Enter'))
@@ -21069,6 +21091,11 @@ await check('T247 同屏两面：tab 搜索面 ＋ ⌘P 浮层高亮不互踩、
       inOverlay: Boolean(e.closest('.popover.search-overlay')),
       hasProbe: Boolean(e.querySelector(`.blk[data-block-id="${id}"]`)),
     })),
+    // 晋升是 tab 专属：浮层里不许出现（接编辑时最容易顺手打开）
+    promote: {
+      overlay: Boolean(document.querySelector('.popover.search-overlay .search-face-promote')),
+      tab: Boolean(document.querySelector('#center-surface .search-face-promote')),
+    },
   }), probeId)
   assert(
     both.keys.includes('search-match') && both.keys.includes('search-match-overlay'),
@@ -21079,6 +21106,7 @@ await check('T247 同屏两面：tab 搜索面 ＋ ⌘P 浮层高亮不互踩、
     both.editors.every((e) => e.hasProbe) && both.editors.some((e) => e.inOverlay) && both.editors.some((e) => !e.inOverlay),
     `两份预览都画到了命中的那一块：${JSON.stringify(both.editors)}`,
   )
+  assert(!both.promote.overlay && both.promote.tab, `「晋升」只属于 tab，浮层里不许出现：${JSON.stringify(both.promote)}`)
 
   // ③ 关浮层：只收它自己那条 key，tab 仍亮、仍能定位（命中落在预览可视区内）
   await page.keyboard.press('Escape')
@@ -21117,19 +21145,19 @@ await check('T247 同屏两面：tab 搜索面 ＋ ⌘P 浮层高亮不互踩、
 })
 
 /**
- * **T248：浮层右列只读（阶段 A）。**
+ * **T248：浮层右列可编辑。**
  *
- * `contenteditable=false` 只是其中一半：待办勾选／拖拽／drop／右键菜单都挂在宿主上，
- * 照样能写模型。这一条钉「打字进不去 + 这几类入口都不出菜单」。
+ * 浮层预览现在可编辑：同一台 `EditableBlock`，只是宿主不再挂只读守卫。
+ * 这一条钉三件事：宿主可编辑、**真键盘打字进模型**、关掉再开文字还在（`flush()` 走过）。
  */
-await check('T248 浮层右列只读：宿主不可编辑、打字/右键都不写模型、焦点留在搜索框', async () => {
+await check('T248 浮层右列可编辑：宿主可编辑、真键盘打字进模型、Esc 重开文字还在', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
-  const probeId = await plantProbe(page, '只读探针DEF')
+  const probeId = await plantProbe(page, '可编辑探针DEF')
   assert(probeId, '前置：探针块要建出来')
 
   await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
-  await page.fill('.popover.search-overlay .search-face-input', '只读探针DEF')
+  await page.fill('.popover.search-overlay .search-face-input', '可编辑探针DEF')
   await page.waitForFunction(() => Boolean(document.querySelector('.popover.search-overlay .search-face-preview .blk')), null, { timeout: 3000 })
 
   const before = await page.evaluate((id) => ({
@@ -21137,38 +21165,35 @@ await check('T248 浮层右列只读：宿主不可编辑、打字/右键都不�
     editable: document.querySelector('.popover.search-overlay .search-face-preview-editor')?.contentEditable ?? '',
     text: window.__qua.allBlocks().find((b) => b.id === id)?.text ?? '',
   }), probeId)
-  assert(before.readOnly === '1', `预览根要标只读：${JSON.stringify(before)}`)
-  assert(before.editable === 'false', `宿主不可编辑（contenteditable=false）：${JSON.stringify(before)}`)
+  assert(before.readOnly === '', `浮层预览不再是只读（宿主不挂守卫）：${JSON.stringify(before)}`)
+  assert(before.editable === 'true', `宿主可编辑：${JSON.stringify(before)}`)
 
-  // 强行聚焦预览宿主再打字：模型一个字节都不许变，焦点也不许停在预览里
-  await page.evaluate(() => {
-    const host = document.querySelector('.popover.search-overlay .search-face-preview-editor')
-    host.setAttribute('tabindex', '-1')
-    host.focus()
-  })
-  await page.keyboard.type('ZZZ')
-  await page.waitForTimeout(200)
-  const after = await page.evaluate((id) => ({
-    text: window.__qua.allBlocks().find((b) => b.id === id)?.text ?? '',
-    focusInPreview: Boolean(document.activeElement?.closest?.('.search-face-preview-editor')),
-  }), probeId)
-  assert(after.text === before.text, `只读预览里的打字不许进模型：${JSON.stringify({ before: before.text, after: after.text })}`)
-  assert(after.focusInPreview === false, `焦点不许停在只读预览里：${JSON.stringify(after)}`)
-
-  // 右键不弹块菜单（只读预览没有能删块/改类型的菜单）
-  const menu = await page.evaluate(() => {
-    const tx = document.querySelector('.popover.search-overlay .search-face-preview .blk .tx')
-    tx?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))
-    return document.querySelectorAll('.layer').length
-  })
-  assert(menu === 0, `只读预览不该弹块菜单：${menu}`)
-  assert(
-    await page.evaluate((id) => window.__qua.allBlocks().find((b) => b.id === id)?.text ?? '', probeId) === before.text,
-    '右键之后模型仍然没变',
+  // 真键盘：点进预览、光标到行尾、打字 ⇒ 模型跟着变（不是只改了 DOM）
+  await page.click(`.popover.search-overlay .search-face-preview .blk[data-block-id="${probeId}"] .tx`)
+  await page.keyboard.press('End')
+  const suffix = '已编辑'
+  await page.keyboard.type(suffix)
+  await page.waitForFunction(
+    ({ id, s }) => (window.__qua.allBlocks().find((b) => b.id === id)?.text ?? '').endsWith(s),
+    { id: probeId, s: suffix },
+    { timeout: 3000 },
   )
+  const focus = await page.evaluate(() => ({
+    inPreview: Boolean(document.activeElement?.closest?.('.popover.search-overlay .search-face-preview-editor')),
+  }))
+  assert(focus.inPreview, `打字时焦点在预览编辑器里：${JSON.stringify(focus)}`)
+
+  // 关掉再开：待提交的那一笔已经在拆面前 flush 进模型
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('.popover.search-overlay'), null, { timeout: 3000 })
+  await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
+  await page.fill('.popover.search-overlay .search-face-input', '可编辑探针DEF')
+  await page.waitForFunction(() => Boolean(document.querySelector('.popover.search-overlay .search-face-preview .blk')), null, { timeout: 3000 })
+  const after = await page.evaluate((id) => window.__qua.allBlocks().find((b) => b.id === id)?.text ?? '', probeId)
+  assert(after.endsWith(suffix), `重开之后新文本还在（flush 走了）：${JSON.stringify({ before: before.text, after })}`)
 
   await ctx.close()
-  return '宿主不可编辑、打字不进模型、焦点不在预览、右键不弹菜单'
+  return `宿主可编辑、真键盘写入「${suffix}」、重开仍在`
 })
 
 /**
@@ -21246,6 +21271,127 @@ await check('T249 搜索面两档布局：≥900 左右分栏、<900 上下堆�
   return '960 分栏、880 堆叠、再切回 960 分栏'
 })
 
+
+/**
+ * **T250：浮层里的派生覆盖层不被焦点守卫误关。**
+ *
+ * 焦点逃逸守卫原先只认「在不在浮层 box 内」：块菜单／`#` 选择器挂在 `body`（`.layer`），
+ * 焦点一进去就把整个搜索浮层关掉。判据要扩到「本浮层及其派生覆盖层」，且 Esc 按层退。
+ */
+await check('T250 浮层焦点守卫：块菜单开在 box 外不关搜索面、Esc 只关菜单、再 Esc 关浮层并还焦点', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const probeId = await plantProbe(page, '菜单探针HIJ')
+  assert(probeId, '前置：探针块要建出来')
+
+  // 打开前先把焦点放进正文（关闭时要还到这里，而不是浮层里的输入框）
+  const pre = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    window.__qua.focusBlock(ed.doc.roots[0].id, 0)
+    return { inEditor: Boolean(document.activeElement?.closest('#editor')) }
+  })
+  assert(pre.inEditor, `前置：焦点先在正文里：${JSON.stringify(pre)}`)
+
+  await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
+  await page.fill('.popover.search-overlay .search-face-input', '菜单探针HIJ')
+  await page.waitForFunction(() => Boolean(document.querySelector('.popover.search-overlay .search-face-preview .blk')), null, { timeout: 3000 })
+
+  // 右键预览里的块：菜单是 `body > .layer`，不在浮层 box 内
+  await page.click(`.popover.search-overlay .search-face-preview .blk[data-block-id="${probeId}"] .tx`, { button: 'right' })
+  await page.waitForSelector('.layer', { timeout: 3000 })
+  const both = await page.evaluate(() => ({
+    overlay: Boolean(document.querySelector('.popover.search-overlay')),
+    layers: document.querySelectorAll('.layer').length,
+  }))
+  assert(both.layers > 0, `右键要真的开块菜单：${JSON.stringify(both)}`)
+  assert(both.overlay, `块菜单开在 box 外，不许把搜索浮层关掉：${JSON.stringify(both)}`)
+
+  // 第一次 Esc：只关菜单
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => document.querySelectorAll('.layer').length === 0, null, { timeout: 3000 })
+  assert(
+    await page.evaluate(() => Boolean(document.querySelector('.popover.search-overlay'))),
+    '第一次 Esc 只关菜单，搜索浮层要留着',
+  )
+
+  // 第二次 Esc：关浮层，焦点回正文，活动编辑器回主编辑器
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('.popover.search-overlay'), null, { timeout: 3000 })
+  const post = await page.evaluate(() => ({
+    overlay: Boolean(document.querySelector('.popover.search-overlay')),
+    inEditor: Boolean(document.activeElement?.closest('#editor')),
+    onBody: document.activeElement === document.body,
+    activeIsMain: window.__qua.activeEditor() === window.__qua.__editor,
+  }))
+  assert(!post.overlay, '第二次 Esc 关掉浮层')
+  assert(post.inEditor && !post.onBody, `关浮层后焦点回打开前的正文：${JSON.stringify(post)}`)
+  assert(post.activeIsMain, `活动编辑器要回到主编辑器（不是停在浮层曾聚焦的预览里）：${JSON.stringify(post)}`)
+
+  await ctx.close()
+  return '块菜单不关搜索面、Esc 按层退、关闭后焦点与活动编辑器都回正文'
+})
+
+/**
+ * **T251：预览内 Enter 归编辑器（与输入框 ↵ 拆成两条判据）。**
+ *
+ * 输入框 ↵＝聚焦预览；预览内 ↵＝结构动作。合成一条判据会让「开始编辑」和
+ * 「离开这一屏」互相顶掉：要么开始编辑变成打开块，要么结构键被输入框吃掉。
+ */
+await check('T251 浮层预览内 ↵：活动编辑器是预览、模型新增一块、关面后活动编辑器回正文', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const probeId = await plantProbe(page, '预览编辑KLM')
+  assert(probeId, '前置：探针块要建出来')
+
+  await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
+  await page.fill('.popover.search-overlay .search-face-input', '预览编辑KLM')
+  await page.waitForFunction(() => Boolean(document.querySelector('.popover.search-overlay .search-face-preview .blk')), null, { timeout: 3000 })
+  const before = await page.evaluate(() => window.__qua.allBlocks().length)
+
+  // 输入框裸 ↵ ⇒ 焦点进预览（不是打开块）
+  await page.keyboard.press('Enter')
+  await page.waitForFunction(
+    () => Boolean(document.activeElement?.closest('.popover.search-overlay .search-face-preview-editor')),
+    null,
+    { timeout: 3000 },
+  )
+  const active = await page.evaluate(() => ({
+    inOverlay: Boolean(window.__qua.activeEditor().container.closest('.popover.search-overlay')),
+    overlay: Boolean(document.querySelector('.popover.search-overlay')),
+  }))
+  assert(active.overlay, '进预览不关浮层')
+  assert(active.inOverlay, `活动编辑器要切成预览那一台（否则 ↵ 会落到正文）：${JSON.stringify(active)}`)
+
+  // 预览内 ↵ ⇒ 编辑器自己的结构动作（模型新增一块），不是「打开结果」
+  const newText = '预览内新增'
+  await page.keyboard.press('Enter')
+  await page.keyboard.type(newText)
+  await page.waitForFunction(
+    (s) => window.__qua.allBlocks().some((b) => b.text.includes(s)),
+    newText,
+    { timeout: 3000 },
+  )
+  const after = await page.evaluate(() => ({
+    count: window.__qua.allBlocks().length,
+    overlay: Boolean(document.querySelector('.popover.search-overlay')),
+  }))
+  assert(after.count > before, `预览内 ↵ 要在模型里新增一块：${JSON.stringify({ before, after })}`)
+  assert(after.overlay, '预览内 ↵ 是结构动作，不许顺带把浮层关掉')
+
+  // 关面：活动编辑器、焦点都回正文
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('.popover.search-overlay'), null, { timeout: 3000 })
+  const post = await page.evaluate(() => ({
+    activeIsMain: window.__qua.activeEditor() === window.__qua.__editor,
+    inEditor: Boolean(document.activeElement?.closest('#editor')),
+    onBody: document.activeElement === document.body,
+  }))
+  assert(post.activeIsMain, `关浮层后活动编辑器回主编辑器：${JSON.stringify(post)}`)
+  assert(post.inEditor && !post.onBody, `关浮层后焦点回正文：${JSON.stringify(post)}`)
+
+  await ctx.close()
+  return `输入框 ↵ 进预览、预览内 ↵ 新增一块（${before} → ${after.count}）、关面回正文`
+})
 
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
