@@ -81,6 +81,7 @@ import {
   TASK_STATUS_TODO_ID,
   TASK_STATUS_DONE_ID,
   canWriteText,
+  canDirectEditText,
   isOwnEdit,
   type Block,
   type CtxKeys,
@@ -1799,13 +1800,23 @@ export class BlockEditor {
   /**
    * 块内替换（程序化编辑入口）：按 plain 偏移切内容，一次 content 写入。
    * 格式与原子随切片自然分家（相邻同段合并、区间盖住的原子整枚消失——都是序列语义）。
+   *
+   * `directEdit` 给「用户正对着这一行」的调用者（抹触发词）——与打字同档；
+   * 缺省不标记，程序化整段替换仍被正文闸挡住。
    */
-  editBlock(id: string, from: number, to: number, insert: string, kind: 'insert' | 'delete' = 'insert'): void {
+  editBlock(
+    id: string,
+    from: number,
+    to: number,
+    insert: string,
+    kind: 'insert' | 'delete' = 'insert',
+    opts?: { directEdit?: boolean },
+  ): void {
     const loc = locate(this.doc, id)
     if (!loc) return
     this.beginUndoEntry()
     const next = spliceRuns(loc.block.content, from, to, insert)
-    this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
+    this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, opts)
     this.finishUndoEntry(kind, Date.now())
     this.renderBlock(id)
     this.emitChange('text')
@@ -2936,12 +2947,13 @@ export class BlockEditor {
       return next
     }
     const touched = [...new Set(ranges.map((r) => r.blockId))]
+    // 选区格式（加粗/高亮/清格式…）是用户正对着这一行发起的直接编辑，与打字同档
     this.write((tx) => {
       for (const bid of touched) {
         const b = this.store.find(bid)
         if (b) tx.patch(bid, (bb) => writeBlockContent(bb, apply(bid, bb.content)))
       }
-    })
+    }, undefined, { directEdit: true })
     this.finishUndoEntry('mark')
     if (rerender === 'single' && ranges.length === 1) this.renderBlock(ranges[0]!.blockId)
     else this.renderAll()
@@ -2986,7 +2998,9 @@ export class BlockEditor {
    *    把光标甩到别处等于抢一次焦点。
    */
   private commitContent(id: string, next: readonly InlineRun[], undo: UndoKind, caret?: number): void {
-    this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
+    // 这里是**行内 run 编辑**的统一落点（插引用/图片/外链、改锚文本、摘原子……）——
+    // 全部是用户正对着这一行发起的直接编辑，与打字同档；结构写路径不走这里。
+    this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
     this.finishUndoEntry(undo)
     this.renderBlock(id)
     if (caret !== undefined) this.placeCaret(id, caret)
@@ -3208,8 +3222,9 @@ export class BlockEditor {
         return true
       }
       if (label === '') return false
-      // 重建要改**宿主块**的 run（`to` 指过去）：只读行（journal 日期等）不写
-      if (!canWriteText(hit.block)) return false
+      // 重建要改**宿主块**的 run（`to` 指过去）：只读行（journal 日期等）不写；
+      // 可直接编辑的行（普通块／查询标题）都修——引用能进标题，修复就要跟得上
+      if (!canDirectEditText(hit.block)) return false
       const lookup = tagLookupOf(this.store.blocks)
       const target = run.flavor === '#' ? ensureTagInTx(lookup, label, tx) : ensurePageInTx(lookup, label, tx)
       if (!target) return false
@@ -3221,7 +3236,7 @@ export class BlockEditor {
       )
       mode = 'repointed'
       return true
-    })
+    }, undefined, { directEdit: true })
     if (!ok) return 'none'
     this.finishUndoEntry('other', Date.now())
     this.renderAll()
@@ -3234,7 +3249,8 @@ export class BlockEditor {
     if (!hit) return
     this.beginUndoEntry()
     const next = removeRunById(hit.block.content, runId)
-    this.write((tx) => tx.patch(hit.block.id, (b) => writeBlockContent(b, next)))
+    // 摘原子与插原子同档（都是这一行上的行内 run 编辑）
+    this.write((tx) => tx.patch(hit.block.id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
     this.finishUndoEntry('delete')
     this.renderAll()
     this.emitChange('text')
@@ -3498,7 +3514,8 @@ export class BlockEditor {
       restoreBlockContent: (id, content) => {
         if (!locate(this.doc, id)) return
         this.beginUndoEntry()
-        this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, content)))
+        // 写回的是组合开始前模型里已有的那份正文（那次进入本身是直接编辑），同一档
+        this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, content)), undefined, { directEdit: true })
         this.finishUndoEntry('delete')
         this.emitChange('text', [id])
       },
@@ -3585,8 +3602,9 @@ export class BlockEditor {
     const bid = id ?? this.sel?.aBlock
     if (!bid) return null
     const loc = locate(this.doc, bid)
-    // 只读行（日记日期）与不写正文的块上不该弹：那里连字都敲不进去
-    if (!loc || !canWriteText(loc.block)) return null
+    // 只读行（日记日期等）上不该弹：那里连字都敲不进去。判据是「这一行能不能直接编辑」，
+    // 不是「正文是不是内容」——查询块的正文是名字，但名字行同样敲得进字、弹得出补全。
+    if (!loc || !canDirectEditText(loc.block)) return null
     const off = this.sel?.aBlock === bid ? (this.sel?.aOff ?? 0) : 0
     const text = plainText(loc.block.content).slice(0, projectOff(loc.block.content, off))
     const hit = detectTrigger(text, { composing: this.probe.isComposing })
@@ -3614,7 +3632,8 @@ export class BlockEditor {
   dropTrigger(id: string): boolean {
     const hit = this.triggerAt(id)
     if (!hit) return false
-    this.editBlock(id, hit.from, hit.to, '', 'delete')
+    // 抹触发词是用户刚在这一行敲下那几个字的逆动作，与打字同档
+    this.editBlock(id, hit.from, hit.to, '', 'delete', { directEdit: true })
     this.placeCaret(id, hit.from)
     return true
   }
@@ -3713,7 +3732,8 @@ export class BlockEditor {
       return true
     }
 
-    const ok = this.write((tx) => apply(tx, loc.block))
+    // 落点改的是「正在打字的这一行」的正文（抹触发词＋插 run），与打字同档
+    const ok = this.write((tx) => apply(tx, loc.block), undefined, { directEdit: true })
     if (!ok) return false
     /**
      * 撤销合并窗口的陷阱：打字那笔（`insert`）与这一笔若同 kind 且落在 1200ms 内，
@@ -3764,7 +3784,8 @@ export class BlockEditor {
     this.beginUndoEntry()
     if (lines.length === 1) {
       const next = spliceRuns(loc.block.content, offset, offset, this.runsWithRefs(lines[0]!))
-      this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
+      // 单行粘贴与打字同档（把字落进这一行）；多行分支含拆块，归结构路径（下面不标记）
+      this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
     } else {
       // 光标处切两半：首行接在左半后面，余下各成新块，**原右半接到最后一块尾部**
       const [head, tail] = splitRuns(loc.block.content, offset)
