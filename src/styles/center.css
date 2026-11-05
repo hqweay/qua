@@ -181,6 +181,21 @@
   background: var(--ui-accent-soft);
   color: var(--ui-text);
 }
+/* 「展开为面板」：紧凑形态把当前词带进常驻 tab（与晋升同一档「小动作」） */
+.search-face-expand {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-tertiary);
+}
+.search-face-expand:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+.search-face-expand[hidden] {
+  display: none;
+}
 .search-face-mode {
   flex: 0 0 auto;
   color: var(--ui-text-tertiary);
@@ -222,13 +237,8 @@
   grid-template-columns: minmax(240px, 4fr) minmax(0, 6fr);
   grid-template-rows: minmax(0, 1fr);
 }
-/* 没有命中（空词 / 无结果）⇒ 左列独占整宽：右列没有「选中的那一条」可画 */
-.search-face-body[data-preview='0'] {
-  grid-template-columns: minmax(0, 1fr);
-}
-.search-face-body[data-preview='0'] .search-face-preview {
-  display: none;
-}
+/* 布局只有两档（分栏 / 堆叠），不再按「有没有选中」引入第三档：
+   没有命中时右列留空，宽度不变。 */
 .search-face-list {
   display: flex;
   flex-direction: column;
@@ -259,19 +269,17 @@
   破坏光标与输入法预编辑串。Custom Highlight 是纯渲染层的另一层画笔，
   模型与 DOM 一个字节都不动。
 */
-.search-face-preview-editor ::highlight(search-match) {
+.search-face-preview-editor ::highlight(search-match),
+.search-face-preview-editor ::highlight(search-match-overlay) {
   background-color: var(--ui-accent-soft);
   color: inherit;
 }
 
 /* 窄屏：单列堆叠（列表在上、预览在下）。不把预览藏掉，否则「点了没反应」 */
-@media (max-width: 900px) {
+@media (max-width: 899px) {
   .search-face-body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
-  }
-  .search-face-body[data-preview='0'] {
-    grid-template-rows: minmax(0, 1fr);
   }
   .search-face-preview {
     border-left: none;

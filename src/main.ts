@@ -52,7 +52,7 @@ import { installDispatch, setupKeys } from './app/wiring/keys.ts'
 import { dispatchKey } from './core/infra/dispatch.ts'
 import { setupOwners } from './app/wiring/owners.ts'
 import { QueryTree } from './ui/query/query-tree.ts'
-import type { SearchFaceDeps } from './ui/search/search-face.ts'
+import { SearchFace, type SearchFaceDeps } from './ui/search/search-face.ts'
 import { setupChrome } from './app/wiring/chrome.ts'
 import { setupPages, type TabInfo } from './app/wiring/pages.ts'
 import { renderCenterTabs as paintCenterTabs } from './ui/chrome/center-tabs.ts'
@@ -451,66 +451,96 @@ const axis = setupAxis({
 })
 
 /**
+ * 一个搜索面**自己那份**「活动编辑器」槽。
+ *
+ * `ed` 是装配层的单槽，而两面（tab 搜索面 / ⌘P 浮层）可以同屏：每面各持一份槽，
+ * `onFocus` 才不会被对方顶掉；`onDispose` 只在「活动编辑器还是我这台」时回落，
+ * 否则关浮层会把 tab 面正指着的那台抢回正文。
+ * `fallback` 是这一面打开那一刻的活动编辑器——关面后回落到它原来所在的位置。
+ */
+const faceEditorSlot = (): {
+  onFocus: (editor: BlockEditor) => void
+  onDispose: (editor: BlockEditor) => void
+  /** 写入事务的目标：本面自己指向的那台（没有就回落） */
+  target: () => BlockEditor
+} => {
+  const fallback = ed
+  let owned: BlockEditor | null = null
+  const fallbackAlive = (): BlockEditor => (fallback.container.isConnected ? fallback : mainEd)
+  return {
+    onFocus: (editor) => {
+      owned = editor
+      ed = editor
+      scheduleBadge()
+    },
+    onDispose: (editor) => {
+      if (owned !== editor) return
+      owned = null
+      if (ed !== editor) return
+      ed = fallbackAlive()
+      scheduleBadge()
+    },
+    target: () => owned ?? fallbackAlive(),
+  }
+}
+
+/**
  * 搜索面的依赖：tab 宿主与诊断探针共用同一个产地。
  *
  * 这些依赖用闭包/取值函数——`run`／`scheduleSave` 在本节之后才装配（见文件顺序），
  * 调用发生在用户打开搜索面时，不是装配时。
  */
-const searchFaceDeps = (): SearchFaceDeps => ({
-  kb,
-  /**
-   * 预览是一台**真编辑器**：它读同一份 store、走同一个写入口、接同一份事件表
-   * （右键块菜单 / `#`·`@` 补全 / 引用跳转 / 撞名提示都在里面）。
-   * 这些依赖用闭包/取值函数——`run`／`scheduleSave` 在本节之后才装配（见文件顺序）。
-   */
-  store: blocks,
-  write: editorRun(run, () => ed),
-  /**
-   * `inlineViewBodies=true`：预览画的是**这一块的真实位置**（用户在这里改它），
-   * 所以查询块要像正文那样把结果画在自己行下。不传的话，搜到查询块点开只看见
-   * 一行名字、看不到结果，也不会有折叠三角（`bodyFoldable` 要求 `viewBody` 在场）。
-   */
-  wire: (editor, change) => wireViewEditor(editor, change, 'surface', true),
-  onFocus: (editor) => {
-    ed = editor
-    scheduleBadge()
-  },
-  onDispose: (editor) => {
-    if (ed !== editor) return
-    ed = mainEd
-    scheduleBadge()
-  },
-  // 预览里编辑：落盘、刷角标与 tab 标题。**不重跑搜索**（重跑会重排列表、打断这一行的输入）
-  onChange: () => {
-    syncSections()
-    scheduleSave()
-    scheduleTabs()
-    scheduleBadge()
-  },
-  // 引擎现取：索引状态会变（ready 才信 FTS，否则扫描降级——面自己把降级说明白）
-  query: (text, limit) => (search ?? { query: async () => ({ hits: [], mode: 'scan' as const }) }).query(text, limit),
-  // 行怎么说与 ⌘P 浮层同一份
-  describe: (hit, term) => describeHit(kb, hit, term),
-  openBlock: (id) => app.openBlock(id, 'center'),
-  // 晋升：把词写进 {text} 条件建查询块（与手建同一份创建路径，落森林顶层，一笔回滚）
-  promote: (term) => app.createQuery(term, { where: { text: term } }),
-  // 无结果的创建入口：找到或创建页（与引用浮层同一条创建路径），建好当场打开
-  createPage: (name) => {
-    const r = pageDeps.run((tx) => ensurePageInTx({ resolveAlias: (n) => kb.resolveAlias(n), roots: () => kb.roots() }, name, tx)?.id ?? '')
-    if (r.result !== '') app.openBlock(r.result, 'center')
-  },
-  copyRef: (id) => {
-    void registry.invoke('core.editor/copy-block-ref', { blockId: id }, 'surface')
-  },
-  // 刷新之后说一句（移除了几条 / 失败保留旧结果）：与查询视图同一个出口
-  toast: (text, kind) => app.toast(text, kind),
-  // 空态「最近更新」：模型直取（修改时间倒序），不经过查询引擎。
-  // 只取前 N 块再投影（不先对整片森林排序）：结果与「全量排序后 slice」逐条相同
-  recents: (limit) =>
-    recentBlocks({ roots: ws.blocks }, limit)
-      .map((b) => describeHit(kb, { blockId: b.id, score: 0 }, ''))
-      .filter((v): v is HitView => v !== null),
-})
+const searchFaceDeps = (): SearchFaceDeps => {
+  const slot = faceEditorSlot()
+  return {
+    kb,
+    /**
+     * 预览是一台**真编辑器**：它读同一份 store、走同一个写入口、接同一份事件表
+     * （右键块菜单 / `#`·`@` 补全 / 引用跳转 / 撞名提示都在里面）。
+     * 这些依赖用闭包/取值函数——`run`／`scheduleSave` 在本节之后才装配（见文件顺序）。
+     */
+    store: blocks,
+    write: editorRun(run, slot.target),
+    /**
+     * `inlineViewBodies=true`：预览画的是**这一块的真实位置**（用户在这里改它），
+     * 所以查询块要像正文那样把结果画在自己行下。不传的话，搜到查询块点开只看见
+     * 一行名字、看不到结果，也不会有折叠三角（`bodyFoldable` 要求 `viewBody` 在场）。
+     */
+    wire: (editor, change) => wireViewEditor(editor, change, 'surface', true),
+    onFocus: slot.onFocus,
+    onDispose: slot.onDispose,
+    // 预览里编辑：落盘、刷角标与 tab 标题。**不重跑搜索**（重跑会重排列表、打断这一行的输入）
+    onChange: () => {
+      syncSections()
+      scheduleSave()
+      scheduleTabs()
+      scheduleBadge()
+    },
+    // 引擎现取：索引状态会变（ready 才信 FTS，否则扫描降级——面自己把降级说明白）
+    query: (text, limit) => (search ?? { query: async () => ({ hits: [], mode: 'scan' as const }) }).query(text, limit),
+    // 行怎么说与 ⌘P 浮层同一份
+    describe: (hit, term) => describeHit(kb, hit, term),
+    openBlock: (id) => app.openBlock(id, 'center'),
+    // 晋升：把词写进 {text} 条件建查询块（与手建同一份创建路径，落森林顶层，一笔回滚）
+    promote: (term) => app.createQuery(term, { where: { text: term } }),
+    // 无结果的创建入口：找到或创建页（与引用浮层同一条创建路径），建好当场打开
+    createPage: (name) => {
+      const r = pageDeps.run((tx) => ensurePageInTx({ resolveAlias: (n) => kb.resolveAlias(n), roots: () => kb.roots() }, name, tx)?.id ?? '')
+      if (r.result !== '') app.openBlock(r.result, 'center')
+    },
+    copyRef: (id) => {
+      void registry.invoke('core.editor/copy-block-ref', { blockId: id }, 'surface')
+    },
+    // 刷新之后说一句（移除了几条 / 失败保留旧结果）：与查询视图同一个出口
+    toast: (text, kind) => app.toast(text, kind),
+    // 空态「最近更新」：模型直取（修改时间倒序），不经过查询引擎。
+    // 只取前 N 块再投影（不先对整片森林排序）：结果与「全量排序后 slice」逐条相同
+    recents: (limit) =>
+      recentBlocks({ roots: ws.blocks }, limit)
+        .map((b) => describeHit(kb, { blockId: b.id, score: 0 }, ''))
+        .filter((v): v is HitView => v !== null),
+  }
+}
 
 /**
  * 中心表面宿主：派生/工具面的 tab 身体住这里（与编辑器二选一可见）。
@@ -1911,93 +1941,71 @@ const app: App = {
 
   /* ---- 浮层与提示（装配层专有）---- */
   /**
-   * 全文检索（⌘P）：输入正文关键词，结果是**块**。
+   * 全文检索（⌘P）：输入正文关键词，结果是**块**，右列是选中那块的真块预览。
    *
-   * 结果行只带 `blockId`；打开仍走 `app.openBlock`（导航、历史、聚焦只有那一条路）。
-   * 查询是异步的（FTS 在主进程／worker 里），所以用序号挡住过期回复：
-   * 慢一拍的结果不能盖掉用户刚打出来的新一批。
+   * 宿主就是常驻搜索面本身（`compact` 形态）：同一份组件、同一台预览，不是第二套结果渲染。
+   * 浮层只负责「一次性快入口」的形状——选中即走，要常驻就把词展开进 tab。
    */
   openSearch: () => {
     if (!search) return
     // 第一次打开搜索时把索引排上（启动期不抢 CPU；用户按下 ⌘P 是最可靠的「现在可以建」信号）
     search.start()
-    let seq = 0
-    /** 当前词：结果行之外还有一颗「展开为面板」——选中那一刻要用它把词带过去 */
-    let term = ''
-    const building = Boolean(LIBRARY_BRIDGE) && search.status() !== 'ready'
-    // web 没有 SQLite：搜索仍可用，但必须让用户知道这是扫描降级（不是索引坏了）
-    const title = building
-      ? t('ui.search.titleBuilding')
-      : LIBRARY_BRIDGE
-        ? t('ui.search.title')
-        : t('ui.search.titleScan')
-    layers.openMenu({
-      rows: [],
-      anchor: null,
-      width: 620,
-      title,
-      searchable: true,
-      focusSearch: true,
-      placeholder: t('ui.search.placeholderBlock'),
-      emptyText: t('ui.search.needQuery'),
-      onQuery: (q) => {
-        const mine = ++seq
-        term = q.trim()
-        if (term === '') {
-          layers.setEmptyText(t('ui.search.needQuery'))
-          layers.setRows([])
-          return
-        }
-        layers.setEmptyText(t('ui.search.empty'))
-        void search!
-          .query(term, 50)
-          .then((r) => {
-            if (mine !== seq || !layers.open) return
-            const hits = r.hits.flatMap((hit) => {
-              const view = describeHit(kb, hit, term)
-              if (!view) return []
-              return [
-                {
-                  id: `search/${view.blockId}`,
-                  label: view.parts.map((p) => p.text).join(''),
-                  parts: view.parts,
-                  hint: view.hint,
-                  icon: 'lucide:file-text',
-                  args: { blockId: view.blockId },
-                },
-              ]
-            })
-            // 展开为面板：同一份搜索的另一个尺寸（中心 tab），词随打开带过去。
-            // 挂在**末尾**（第一行必须是最高命中——⌘P 打字后 ↵ 的语义是「打开」，被展开抢走就反了），
-            // 且只在**有命中**时给：无结果时浮层的「没有匹配项」是钉住的诚实口径，不让一颗动作行顶掉它
-            layers.setRows([
-              ...hits,
-              ...(hits.length > 0
-                ? [
-                    {
-                      id: 'search/expand',
-                      label: t('ui.search.expand'),
-                      icon: 'lucide:panel-right',
-                      hint: '',
-                    },
-                  ]
-                : []),
-            ])
-          })
-          .catch(() => {
-            if (mine === seq) layers.setRows([])
-          })
+    const deps = searchFaceDeps()
+    const built: { face: SearchFace | null; box: HTMLElement | null } = { face: null, box: null }
+    let onFocusIn: ((e: FocusEvent) => void) | null = null
+    layers.openPopover(
+      (host) => {
+        built.box = host
+        host.classList.add('search-overlay')
+        built.face = new SearchFace({
+          ...deps,
+          compact: true,
+          // 选中即走：先关浮层（拆面、还焦点），再走装配层的打开路由
+          openBlock: (id) => {
+            layers.closePopover()
+            app.openBlock(id, 'center')
+          },
+          createPage: (name) => {
+            layers.closePopover()
+            deps.createPage(name)
+          },
+          // 展开：把词带进常驻 tab（先关浮层，否则两层各搜各的、还同屏遮着）
+          expand: (term) => {
+            layers.closePopover()
+            surface.setPendingTerm(term)
+            app.openSurface({ kind: 'utility', id: 'search' })
+          },
+        })
       },
-      onPick: (row) => {
-        if (row.id === 'search/expand') {
-          surface.setPendingTerm(term)
-          app.openSurface({ kind: 'utility', id: 'search' })
-          return
-        }
-        const id = (row.args as { blockId?: unknown } | undefined)?.blockId
-        if (typeof id === 'string' && id !== '') app.openBlock(id, 'center')
+      null,
+      () => {
+        if (onFocusIn) document.removeEventListener('focusin', onFocusIn, true)
+        onFocusIn = null
+        built.face?.dispose()
+        built.face = null
+        built.box = null
       },
-    })
+    )
+    /**
+     * 渲染回调跑在 append 之前（游离树里建编辑器会量错尺寸/选区），
+     * 所以挂载与聚焦要等浮层进文档之后。宽高由 `.search-overlay` 显式定死，
+     * `placePopover` 在内容进树之前也已经量得准。
+     */
+    if (built.face !== null && built.box !== null) {
+      built.face.mount(built.box)
+      built.face.focusInput()
+      const { box } = built
+      /**
+       * **焦点不许逃出浮层**：`layerOpen()` 只停命令派发，挡不住 Tab／点击把焦点
+       * 交给覆盖层之外——那之后按键会落到底下的编辑器上（用户看不到，却在改正文）。
+       */
+      onFocusIn = (e) => {
+        const target = e.target as Node | null
+        if (target && box.contains(target)) return
+        layers.closePopover()
+      }
+      document.addEventListener('focusin', onFocusIn, true)
+    }
   },
   toast: (text, kind = 'info') => {
     if (!quiet) layers.toast(text, kind)

@@ -45,6 +45,17 @@ export interface PreviewPaneDeps {
    * 正文命中是默认来路，上层不给这一句（逐行写「经由正文」是噪音）。
    */
   noteOf: (blockId: string) => string | undefined
+  /**
+   * **只读预览**（浮层阶段 A）。仍是同一台 `EditableBlock`，只把「能写」关掉：
+   * 宿主不可编辑 ＋ 捕获阶段拦掉四类会写模型的交互（待办勾选／拖拽／drop／右键菜单）。
+   * 为什么不在组件内核加 `readOnly`：那会把「一台编辑器」拆成两种形状；这只是宿主层的守卫。
+   */
+  readOnly?: boolean
+  /**
+   * 命中高亮的命名空间。两面可同屏（tab 搜索面 ＋ ⌘P 浮层），共用一条 key 会让
+   * 任一面收起时把另一面的高亮一起删掉，所以由 `faceChrome` 按形态各给一条。
+   */
+  highlightKey: string
 }
 
 export class PreviewPane {
@@ -74,6 +85,8 @@ export class PreviewPane {
     this.host = document.createElement('div')
     this.host.className = 'search-face-preview-editor'
     this.setVisible(false)
+    // 守卫只在构造时装一次：卸载再挂载（`unmount()` → `mount()`）不该叠第二份监听
+    if (deps.readOnly === true) this.installReadOnlyGuards()
   }
 
   /**
@@ -124,6 +137,8 @@ export class PreviewPane {
 
   /** `↵` 把焦点放进右列预览（开始编辑）：光标落在这一块的开头 */
   focus(): void {
+    // 只读预览没有「开始编辑」这一步：抢走焦点会让搜索框的 ↑↓/打字全失效
+    if (this.deps.readOnly === true) return
     const ed = this.component?.ed
     const id = this.deps.targetId()
     if (!ed || id === '') return
@@ -167,7 +182,8 @@ export class PreviewPane {
      */
     const component = this.component
     if (!component) return
-    component.flush()
+    // 只读预览没有待提交的编辑：跳过 flush（它读的是可写宿主里的光标）
+    if (this.deps.readOnly !== true) component.flush()
     const ed = component.ed
     if (ed) this.deps.onDispose(ed)
     component.dispose()
@@ -183,6 +199,7 @@ export class PreviewPane {
   /** 懒建：第一次有选中项时才建这一台（空结果不该建实例） */
   private ensureEditor(): BlockEditor {
     if (!this.component) {
+      const readOnly = this.deps.readOnly === true
       this.component = new EditableBlock({
         host: this.host,
         store: this.deps.store,
@@ -192,13 +209,100 @@ export class PreviewPane {
         },
         // 预览的根是派生的结果行：不能并进上一行/搬出结果集；根内部照常编辑
         structuralScope: 'roots',
-        wire: this.deps.wire,
-        onChange: (kind) => this.deps.onEdit(kind),
-        onFocus: (editor) => this.deps.onFocus(editor),
+        // 只读时三个回调都换成显式 no-op：不接的话「编辑/焦点/落盘」仍会走到装配层
+        wire: readOnly ? () => {} : this.deps.wire,
+        onChange: readOnly ? () => {} : (kind) => this.deps.onEdit(kind),
+        onFocus: readOnly ? () => {} : (editor) => this.deps.onFocus(editor),
       })
       this.root.appendChild(this.component.root)
     }
-    return this.component.ed ?? this.component.ensureEditor()
+    const ed = this.component.ed ?? this.component.ensureEditor()
+    // BlockEditor 构造时会把宿主设成可编辑；只读要在这之后落定（卸载后重建也走这里）
+    if (this.deps.readOnly === true) this.host.contentEditable = 'false'
+    return ed
+  }
+
+  /**
+   * **只读预览**（浮层阶段 A）：同一个 `EditableBlock`，只把「能写」关掉。
+   *
+   * `contenteditable=false` 只挡打字：待办勾选、原生拖拽、外部 drop、右键块菜单
+   * 都挂在**宿主容器**上，照样会触发（而且它们都写模型）。所以在预览根上按捕获阶段
+   * 统一拦掉这几类——守卫住宿主层，不改组件内核，也不复制第二台预览。
+   */
+  private installReadOnlyGuards(): void {
+    this.root.dataset.readonly = '1'
+    const inside = (target: EventTarget | null): boolean => this.host.contains(target as Node)
+    /**
+     * 左键按压不挪焦点、不划选：焦点留在搜索框（↑↓/打字继续有效）。
+     * 只拦编辑器内——预览留白与滚动条在 `root` 上，拦了会滚不动预览。
+     */
+    this.root.addEventListener(
+      'mousedown',
+      (e) => {
+        if (e.button !== 0 || !inside(e.target)) return
+        e.preventDefault()
+        this.deps.returnFocus()
+      },
+      true,
+    )
+    // 待办勾选会写模型（`[data-todo-for]` 的 click 在编辑器容器上）
+    this.root.addEventListener(
+      'click',
+      (e) => {
+        if (!inside(e.target)) return
+        if ((e.target as HTMLElement).closest?.('[data-todo-for]')) {
+          e.preventDefault()
+          e.stopPropagation()
+        }
+      },
+      true,
+    )
+    // 原生拖拽（块标拖出/拖入）与外部文件 drop 都会改结构
+    this.root.addEventListener(
+      'dragstart',
+      (e) => {
+        if (!inside(e.target)) return
+        e.preventDefault()
+        e.stopPropagation()
+      },
+      true,
+    )
+    for (const type of ['dragover', 'drop'] as const) {
+      this.root.addEventListener(
+        type,
+        (e) => {
+          if (!inside(e.target)) return
+          e.preventDefault()
+          e.stopPropagation()
+        },
+        true,
+      )
+    }
+    // 右键块菜单：能删块、能改类型，只读预览不该有它
+    this.root.addEventListener(
+      'contextmenu',
+      (e) => {
+        if (!inside(e.target)) return
+        e.preventDefault()
+        e.stopPropagation()
+      },
+      true,
+    )
+    /**
+     * 焦点只要落进宿主就交回搜索框。
+     *
+     * `contenteditable=false` 只挡打字：Tab、程序化 `focus()`、辅助工具仍然能把焦点
+     * 送进这台编辑器。而键位路由认的是「活动编辑器」——焦点停在这里，↑↓/Enter
+     * 就会落到一台不接写入的编辑器上，用户看到的是「按键没反应」。
+     */
+    this.root.addEventListener(
+      'focusin',
+      (e) => {
+        if (!inside(e.target)) return
+        this.deps.returnFocus()
+      },
+      true,
+    )
   }
 
   /**
@@ -305,7 +409,8 @@ export class PreviewPane {
     // 支持就用 Custom Highlight（不碰 DOM、不进模型）；不支持就只滚不亮
     if (typeof CSS !== 'undefined' && CSS.highlights) {
       const hl = new Highlight(...ranges)
-      CSS.highlights.set('search-match', hl)
+      // 按面命名空间：两面同屏（tab 面 ＋ 浮层）时各自 set/delete 自己那条
+      CSS.highlights.set(this.deps.highlightKey, hl)
     }
     // 滚到**第一处**命中。用预览容器自己的 `scrollTop` 而不是 `scrollIntoView`：
     // 后者会一路往上找**能滚的祖先**，于是滚的是外层（甚至整页），预览自己没动
@@ -318,6 +423,6 @@ export class PreviewPane {
 
   /** 摘掉本次预览的高亮（换选中 / 关面 / 收起预览都要走这里） */
   private clearMatch(): void {
-    if (typeof CSS !== 'undefined' && CSS.highlights) CSS.highlights.delete('search-match')
+    if (typeof CSS !== 'undefined' && CSS.highlights) CSS.highlights.delete(this.deps.highlightKey)
   }
 }

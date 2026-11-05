@@ -387,7 +387,7 @@ await check('E5 ⌘A 与 ⌘P 的当前行为（①② 的 Electron 现状）', 
   const afterF = await page.evaluate(() => ({
     logDelta: window.__qua.commandLog().length,
     anyFindUI: Boolean(document.querySelector('input[type=search], .find-bar, [class*=find]')),
-    searchOpen: Boolean(document.querySelector('.layer-input')),
+    searchOpen: Boolean(document.querySelector('.popover.search-overlay .search-face-input')),
     lastCommand: window.__qua.snapshot().lastCommand?.name ?? '',
     domSel: String(document.getSelection()?.toString() ?? ''),
   }))
@@ -1405,11 +1405,12 @@ await check('E15 全文检索：索引建好后 ⌘P 可搜、拼音可搜、编
   )
 
   // ⌘P 是真实的「现在开始用」信号：它既打开浮层，也把索引排上。
+  // 浮层里挂的是常驻搜索面（紧凑形态），行与输入框都是那份组件的 DOM。
   await page.keyboard.press('Meta+p')
-  await page.waitForSelector('.layer-input')
-  await page.waitForFunction(() => document.activeElement?.classList.contains('layer-input'))
+  await page.waitForSelector('.popover.search-overlay .search-face-input')
+  await page.waitForFunction(() => document.activeElement?.classList.contains('search-face-input'))
   await page.keyboard.type('内容寻址')
-  await page.waitForSelector('.layer-item')
+  await page.waitForSelector('.popover.search-overlay .search-row[data-search-row]')
 
   // 等索引稳定（可能经历「搜索触发的首建 + seed 落盘后的重建」两轮）
   if (!(await stableReady())) {
@@ -1420,16 +1421,34 @@ await check('E15 全文检索：索引建好后 ⌘P 可搜、拼音可搜、编
 
   // ① ⌘P 的结果行（上面已经等到）——再验一次身份与高亮
   await page.keyboard.press('Meta+p')
-  await page.waitForSelector('.layer-input')
-  await page.waitForFunction(() => document.activeElement?.classList.contains('layer-input'))
+  await page.waitForSelector('.popover.search-overlay .search-face-input')
+  await page.waitForFunction(() => document.activeElement?.classList.contains('search-face-input'))
   await page.keyboard.type('内容寻址')
-  await page.waitForSelector('.layer-item')
-  const first = await page.evaluate(() => ({
-    id: document.querySelector('.layer-item')?.dataset.id ?? '',
-    text: document.querySelector('.layer-item')?.textContent ?? '',
-    marks: document.querySelectorAll('.layer-item mark').length,
-  }))
-  assert(first.id.startsWith('search/'), `结果行带块身份：${first.id}`)
+  // 空词给的是「最近更新」：行在那里不代表查询已经回来了，等**命中片段**本身对上
+  await page.waitForFunction(
+    () => {
+      const row = document.querySelector('.popover.search-overlay .search-row[data-search-row]')
+      return Boolean(row && row.querySelector('.search-row-text')?.textContent?.includes('内容寻址'))
+    },
+    null,
+    { timeout: 5000 },
+  )
+  const first = await page.evaluate(() => {
+    const row = document.querySelector('.popover.search-overlay .search-row[data-search-row]')
+    return {
+      id: row?.dataset.searchRow ?? '',
+      // 行里除了命中片段还有来源与按键，取片段本身才不会被 chrome 文字混进来
+      text: row?.querySelector('.search-row-text')?.textContent ?? '',
+      marks: row?.querySelectorAll('.search-row-text mark').length ?? 0,
+      realBlock: (() => {
+        const id = row?.dataset.searchRow ?? ''
+        return window.__qua.allBlocks().some((b) => b.id === id)
+      })(),
+    }
+  })
+  // 行带的必须是**真块 id**（不是合成行）：合成前缀的 id 打开时会找不到块
+  assert(first.id !== '' && !first.id.startsWith('search/'), `结果行带块身份：${first.id}`)
+  assert(first.realBlock, `结果行的 id 必须能在库里找到：${first.id}`)
   assert(first.text.includes('内容寻址'), `结果片段包含查询词：${JSON.stringify(first.text)}`)
   assert(first.marks > 0, '片段里有高亮')
   await page.keyboard.press('Escape')

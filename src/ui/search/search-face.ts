@@ -2,7 +2,10 @@
  * 中心**搜索面**：⌘P 浮层的另一个尺寸（同一份引擎、同一套行说法，不是第二套结果渲染）。
  *
  * 形状是**主从布局**：顶部输入行；左列是**只读的命中列表**（`HitView` 片段/住哪/经由），
- * 右列是**当前选中的那一块**，用 `EditableBlock` 画成真正的块、可以直接改。
+ * 右列是**当前选中的那一块**，用 `EditableBlock` 画成真正的块。
+ * tab 尺寸里右列可直接改；**紧凑尺寸（⌘P 浮层）在阶段 A 只给看**（`faceChrome().previewReadOnly`）——
+ * 浮层是覆盖层，命令键位被 `layerOpen()` 停掉，可编辑预览会变成「能进不能出」。
+ * 两份尺寸仍是**同一台** `PreviewPane`，只读是宿主的参数，不是第二套实现。
  *
  * 为什么不是「整列结果都换成块行」：50 条整块太吵，列表要能扫读；真正要改的只有一块。
  * 为什么不是「每行一台编辑器」：那是 50 个订阅与 50 个重载器，与「一台编辑器 N 个 loader」
@@ -73,10 +76,15 @@ export interface SearchFaceDeps {
   /** 刷新之后说一句（移除了几条 / 失败保留旧结果）：与查询视图同一个出口 */
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
   /**
-   * **紧凑形态**（浮层用；这一轮只让模式存在，还没有宿主传它）。
-   * 形态差异只在 `faceChrome()` 里翻译成「哪些件不摆」，不要散记 `if (compact)`。
+   * **紧凑形态**（⌘P 浮层）。形态差异只在 `faceChrome()` 里翻译成「哪些件不摆」，
+   * 不要散记 `if (compact)`。
    */
   compact?: boolean
+  /**
+   * 「展开为面板」：把当前词带进常驻的搜索 tab（紧凑形态专属，是否摆由 `faceChrome().expand` 决定）。
+   * 装配层负责关浮层、带词、开 tab；组件只上报「用这个词展开」。
+   */
+  expand?: (term: string) => void
 }
 
 const VIA_KEY: Record<FtsSource, MsgId> = {
@@ -94,6 +102,8 @@ export class SearchFace {
   private readonly modeEl: HTMLElement
   private readonly staleEl: HTMLElement
   private readonly refreshBtn: HTMLButtonElement
+  /** 「展开为面板」（只有紧凑形态有；其余形态是 null） */
+  private readonly expandBtn: HTMLButtonElement | null
   private readonly bodyEl: HTMLElement
   private readonly listEl: HTMLElement
   /** 右列预览（整组状态归它：见 `./preview-pane.ts`） */
@@ -181,7 +191,17 @@ export class SearchFace {
       }
       if (e.key === 'Enter') {
         e.preventDefault()
-        // ↵ ＝ 把焦点放进右列预览（开始编辑）；「打开」在 ⌘↵ 与行尾图标上
+        /**
+         * 裸 ↵ 的落点由形态决定：
+         *   · tab ⇒ 进右列预览开始编辑；
+         *   · 紧凑（浮层）⇒ 打开选中那条（浮层是「选中即走」的一次性入口）。
+         * 只认**当前列表就是这个词的结果**：Enter 会先 flush 防抖，而查询是异步的——
+         * 不等它对齐就打开，会打开上一份列表里的旧首条。
+         */
+        if (chrome.bareEnterOpens) {
+          if (this.listKey === this.term()) this.openSelected()
+          return
+        }
         this.focusPreview()
       }
     })
@@ -201,6 +221,25 @@ export class SearchFace {
       promote.addEventListener('click', () => {
         const q = this.term()
         if (q !== '') this.deps.promote(q)
+      })
+    }
+
+    /**
+     * 「展开为面板」是**紧凑形态专属**：浮层是一次性快入口，要常驻就把词带进 tab。
+     * 只在有命中时出现——空词或没搜到东西的词，展开成一个空面板没有意义。
+     */
+    let expand: HTMLButtonElement | null = null
+    if (chrome.expand && deps.expand) {
+      expand = document.createElement('button')
+      expand.type = 'button'
+      expand.className = 'search-face-expand'
+      expand.title = t('ui.search.expand')
+      expand.setAttribute('aria-label', t('ui.search.expand'))
+      renderIcon(expand, 'lucide:panel-right', 'panel-right')
+      expand.hidden = true
+      expand.addEventListener('click', () => {
+        const q = this.term()
+        if (q !== '') deps.expand?.(q)
       })
     }
 
@@ -228,7 +267,9 @@ export class SearchFace {
 
     bar.append(this.input, this.staleEl, this.refreshBtn)
     if (promote) bar.append(promote)
+    if (expand) bar.append(expand)
     bar.append(this.modeEl)
+    this.expandBtn = expand
 
     this.listEl = document.createElement('div')
     this.listEl.className = 'search-face-list'
@@ -258,6 +299,9 @@ export class SearchFace {
       onFocus: (editor) => this.deps.onFocus(editor),
       onDispose: (editor) => this.deps.onDispose(editor),
       returnFocus: () => this.input.focus(),
+      // 阶段 A：浮层的右列只给看；tab 照旧可编辑。只读与高亮命名空间都由 `faceChrome` 定
+      readOnly: chrome.previewReadOnly,
+      highlightKey: chrome.highlightKey,
       noteOf: (id) => {
         const row = this.rows.find((v) => v.blockId === id)
         return row?.source && row.source !== 'content'
@@ -448,6 +492,18 @@ export class SearchFace {
       views.map((v) => v.blockId),
       keep,
     )
+    this.syncExpand()
+  }
+
+  /**
+   * 「展开为面板」只在**真的查过一次且这次有命中**时出现。
+   *
+   * 空词给的是「最近更新」，不是一次查询：它既没有可带过去的词，展开成面板也只是
+   * 把同一份最近列表搬个地方。无结果时同理——展开成一个空面板没有意义。
+   */
+  private syncExpand(): void {
+    if (!this.expandBtn) return
+    this.expandBtn.hidden = !this.resultMode || this.rows.length === 0
   }
 
   private move(delta: number): void {
@@ -549,6 +605,7 @@ export class SearchFace {
     this.selectedId = ''
     this.listEl.replaceChildren()
     this.listEl.appendChild(this.emptyNote(t('ui.search.empty')))
+    this.syncExpand()
     // 创建入口沿引用浮层的先例：同名地址已经存在 ⇒ 不给（建第二个同名块是假话）
     const exists = this.deps.kb.resolveAlias(q)
     if (!exists) {
@@ -628,6 +685,7 @@ export class SearchFace {
     this.listEl.querySelector(`.search-row[data-search-row="${id}"]`)?.remove()
     if (this.selectedId === id) this.selectedId = pickAfterRemoval(this.rows.map((v) => v.blockId), at)
     this.updateGroupCount()
+    this.syncExpand()
     this.renderSelection()
     // 只同步「右列在不在」：装载下一块由调用点（或 `PreviewPane` 自己）继续
     this.pane.setVisible(this.selectedId !== '')

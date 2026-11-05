@@ -246,6 +246,49 @@
   color: var(--ui-text);
 }
 
+/*
+  ⌘P 浮层搜索的宿主尺寸：`placePopover` 在 append 之后量 box 定坐标，
+  所以宽高必须在 CSS 里定死（渲染回调里补 class，量之前就已生效）。
+  base `.popover` 的 380px 上限与内边距是「信息浮层」的形状，这里全部覆盖。
+*/
+.popover.search-overlay {
+  display: flex;
+  min-width: 0;
+  max-width: none;
+  width: min(960px, calc(100vw - 96px));
+  height: min(680px, 66vh);
+  padding: 0;
+  overflow: hidden;
+}
+.popover.search-overlay .search-face {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* 常驻面用 `--ui-doc-pad`；浮层不是文档，内边距收回常规值 */
+  padding: var(--ui-gap-3) var(--ui-gap-4) 0;
+}
+/*
+  base `.popover button` 给所有按钮加了边框与左右内边距；搜索面自己的行内控件
+  不想要那一层。面内各控件的内边距在下面按件补回（base 的 `(0,1,1)` 比它们本来的
+  `(0,1,0)` 高一条，所以这里必须用带 `button` 的复合选择器才压得住）。
+*/
+.popover.search-overlay button {
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+}
+.popover.search-overlay button.search-row-select {
+  padding: var(--ui-gap-1) var(--ui-gap-2);
+}
+.popover.search-overlay button.search-row-goto,
+.popover.search-overlay button.search-row-copy {
+  padding: var(--ui-gap-1);
+}
+.popover.search-overlay button.search-face-create {
+  border: 1px solid var(--ui-border);
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+}
+
 /* ------------------------------------------------ 别名编辑器（行头浮层） */
 
 .alias-head {

@@ -177,6 +177,12 @@ export class Layers {
   private menuFocus: FocusReturn | null = null
   /** 信息浮层打开之前焦点在哪（同上） */
   private popFocus: FocusReturn | null = null
+  /**
+   * 信息浮层关闭前的回调（宿主拆自己的人）。
+   * 为什么挂在 Layers 而不是让调用方自己监听：浮层的关闭有一条又一条出口
+   * （Esc／点外部／被另一个浮层顶掉／锚点消失），漏掉任何一条，宿主就漏拆。
+   */
+  private popClose: (() => void) | null = null
   /** 抽屉打开之前焦点在哪（同上） */
   private drawerFocus: FocusReturn | null = null
   /** 划选气泡（顶部工具栏作废后的落点，2026-10-19）*/
@@ -567,7 +573,11 @@ export class Layers {
    * ⚠️ 两种形态的差别是**只在桌面端才显形**的：Web 上很少拖窗口边、也很少在浮层开着
    *    时滚动整页；桌面应用这两件事都是日常动作。
    */
-  openPopover(render: (host: HTMLElement) => void, anchor: DOMRect | null | (() => DOMRect | null)): void {
+  openPopover(
+    render: (host: HTMLElement) => void,
+    anchor: DOMRect | null | (() => DOMRect | null),
+    onClose?: () => void,
+  ): void {
     this.closePopover()
     const box = document.createElement('div')
     box.className = 'popover'
@@ -576,6 +586,7 @@ export class Layers {
     render(box)
     document.body.appendChild(box)
     this.popEl = box
+    this.popClose = onClose ?? null
     this.popAnchor = typeof anchor === 'function' ? anchor : anchor ? () => anchor : null
     /**
      * 焦点归还：浮层本身**不抢**焦点（只有里面的输入框在 autofocus 时才会拿走），
@@ -627,9 +638,13 @@ export class Layers {
     window.removeEventListener('resize', this.reflow)
     window.removeEventListener('scroll', this.reflow, true)
     const box = this.popEl
+    const close = this.popClose
+    this.popClose = null
     this.popAnchor = null
-    this.popEl?.remove()
     this.popEl = null
+    // 先回调、后摘 DOM：宿主在这时面对的还是仍在文档里的编辑器（收尾不靠游离节点）
+    close?.()
+    box?.remove()
     const fr = this.popFocus
     this.popFocus = null
     fr?.restore(box)
