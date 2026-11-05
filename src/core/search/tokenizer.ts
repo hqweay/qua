@@ -16,8 +16,13 @@
  *    查询端只能写 `chars : "笔 记"`（逐字 phrase），见 `query.ts`。
  */
 
-/** 分词器版本：换库／换版本后旧索引必须全量重建（写进 `meta.fts_tokenizer`） */
-export const FTS_TOKENIZER_VERSION = 'jieba-wasm@2.4.0+pinyin-pro@3.29.5:v1'
+/**
+ * 索引版本：分词器或**行的投影口径**一变，旧索引就必须全量重建（写进 `meta.fts_tokenizer`）。
+ *
+ * 它是派生数据的版本，不是库版本：重建读的是当前森林，所以不需要动 `WORKSPACE_VERSION`
+ * 或表结构，下次启动发现版本不一致会自己重铺。
+ */
+export const FTS_TOKENIZER_VERSION = 'jieba-wasm@2.4.0+pinyin-pro@3.29.5:v2'
 
 export interface TokenizedText {
   /** 词级：空格分隔 */

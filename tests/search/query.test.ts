@@ -12,6 +12,8 @@ import { pinyin } from 'pinyin-pro'
 import { charsOf, tokenizeText } from '../../src/core/search/tokenizer.ts'
 import { compileMatch, highlightSnippet, scanSearch } from '../../src/core/search/query.ts'
 import { mkBlock } from '../../src/core/model/model.ts'
+import { uuidv7Hex } from '../../src/core/model/ids.ts'
+import { mkTagBlock } from '../../src/core/identity/tags.ts'
 import { mkPropDef } from '../../src/core/props/props.ts'
 import { plainText, textRuns } from '../../src/core/model/runs.ts'
 
@@ -76,6 +78,18 @@ test('scanSearch：全部词都要出现；属性定义子树不算内容行', (
   assert.deepEqual(scanSearch(roots, '笔记', 10), [hit.id])
   assert.deepEqual(scanSearch(roots, '笔记 应用', 10), [hit.id])
   assert.deepEqual(scanSearch(roots, '笔记', 0), [])
+})
+
+test('scanSearch：标签归属与行内 #标签 都按标签名可搜（无索引时的兜底）', () => {
+  const tag = mkTagBlock('任务')
+  const byProp = mkBlock('别的一行', { props: { _tags: [tag.id] } })
+  const inline = mkBlock([{ id: uuidv7Hex(), t: 'ref', to: tag.id, flavor: '#', label: '任务' }])
+  const unrelated = mkBlock('无关的一行')
+  const roots = [tag, byProp, inline, unrelated]
+  const hits = scanSearch(roots, '任务', 10)
+  assert.ok(hits.includes(byProp.id), '属性标签的块要能搜到')
+  assert.ok(hits.includes(inline.id), '行内 #标签 的块要能搜到')
+  assert.ok(!hits.includes(unrelated.id), '不相关的块不许命中')
 })
 
 test('highlightSnippet：字面命中打标，窗口外的字用省略号', () => {

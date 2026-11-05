@@ -1470,6 +1470,30 @@ await check('E15 全文检索：索引建好后 ⌘F 可搜、拼音可搜、编
   assert(hit?.mode === 'fts', `索引 ready 之后新词查询应当走 FTS：${JSON.stringify(hit)}`)
   assert((hit?.hits ?? []).some((h) => h.blockId === target), `新词应命中刚编辑的块：${JSON.stringify(hit)}`)
 
+  // ④ 属性值进索引：值可搜、属性名本身不把使用块带出来（属性名可搜未做）
+  const propLabel = '检索字段探针'
+  const propValue = '属性值探针词'
+  await page.evaluate(
+    ({ blockId, label }) =>
+      window.__qua.invoke('core.props/create-def', { blockId, label, kind: 'text', target: 'own' }, 'api'),
+    { blockId: target, label: propLabel },
+  )
+  const defId = await page.evaluate((label) => window.__qua.propDefs().find((d) => d.label === label)?.id ?? '', propLabel)
+  assert(defId, `前置：新属性定义要建出来（${propLabel}）`)
+  await page.evaluate(
+    ({ blockId, propId, value }) =>
+      window.__qua.invoke('core.props/set-value', { blockId, propId, value }, 'api'),
+    { blockId: target, propId: defId, value: propValue },
+  )
+  // 查询会把重建排上（若索引刚被 replace 作废）；等回 ready 再验 FTS 的那一份
+  await page.evaluate((text) => window.__qua.search.query(text, 5), propValue)
+  if (!(await stableReady(15000))) throw new Error('写属性之后索引没有回到 ready')
+  const byValue = await page.evaluate((text) => window.__qua.search.query(text, 5), propValue)
+  assert(byValue?.mode === 'fts', `属性值查询应当走 FTS：${JSON.stringify(byValue)}`)
+  assert((byValue?.hits ?? []).some((h) => h.blockId === target), `属性值应命中使用块：${JSON.stringify(byValue)}`)
+  const byName = await page.evaluate((text) => window.__qua.search.query(text, 5), propLabel)
+  assert(!(byName?.hits ?? []).some((h) => h.blockId === target), '属性名本身不把使用块带出来')
+
   const none = await page.evaluate(() => window.__qua.search.query('绝不存在的检索词xyz', 5))
   assert((none?.hits ?? []).length === 0, `真没有就是空：${JSON.stringify(none)}`)
   await app.close()
