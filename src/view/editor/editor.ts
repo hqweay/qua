@@ -79,7 +79,6 @@ import {
   clearValue,
   declareOwnProp,
   todoOf,
-  DEFAULT_PROP,
   TASK_STATUS_PROP_ID,
   TASK_STATUS_TODO_ID,
   TASK_STATUS_DONE_ID,
@@ -513,17 +512,13 @@ function applyTodoPlan(b: Block, plan: TodoPlan): void {
 /** 目标字段不存在 ⇒ 落核心任务状态（「第一次按 ⌘↵ ＝ 变成待办」） */
 function todoPlanOfField(field: GutterField | undefined): TodoPlan {
   if (!field) return { propId: TASK_STATUS_PROP_ID, next: TASK_STATUS_TODO_ID, clear: false, createCore: true }
-  if (field.doneChoiceId === undefined) {
-    return { propId: field.propId, next: field.value !== true, clear: false, createCore: false }
+  // 任务状态：勾选 ⇄ 取消在**两个显式选项**之间翻，不再靠 default/清空
+  if (field.use === 'status' && field.check) {
+    const next = field.value === field.check.on ? field.check.off : field.check.on
+    return { propId: field.propId, next, clear: false, createCore: false }
   }
-  if (field.value !== field.doneChoiceId) {
-    return { propId: field.propId, next: field.doneChoiceId, clear: false, createCore: false }
-  }
-  const dflt = field.def.props?.[DEFAULT_PROP]
-  // 没有缺省值可回 ⇒ 清成「未填」，但保留这一栏（行还在，下一次点击仍能勾）
-  return dflt === undefined
-    ? { propId: field.propId, next: undefined, clear: true, createCore: false }
-    : { propId: field.propId, next: dflt, clear: false, createCore: false }
+  // 同一行上别的 checkbox 字段仍是布尔翻转
+  return { propId: field.propId, next: field.value !== true, clear: false, createCore: false }
 }
 
 export class BlockEditor {
@@ -2693,20 +2688,35 @@ export class BlockEditor {
    *    gutter 上随即出现方框 —— 于是「先成为一个没做完的任务，再点才勾上」，
    *    与原来「第一次切换 ＝ 变成待办」的手感一致。
    */
+  /**
+   * **普通勾选框**（`_check` 无 `_use`）：只翻 on/off，不碰 `todoOf`/划线。
+   * 每个字段自己的 propId 从 gutter 带过来；一行上多个勾选框互不串台。
+   */
+  toggleCheck(id: string, propId: string): void {
+    const loc = locate(this.doc, id)
+    if (!loc) return
+    const field = gutterFieldsOf(loc.block, this.store.blocks).find((f) => f.propId === propId)
+    if (!field?.check) return
+    const next = field.value === field.check.on ? field.check.off : field.check.on
+    this.beginUndoEntry()
+    this.write((tx) => tx.patch(id, (b) => setValue(b, propId, next)))
+    this.structTail(null, [id])
+  }
+
   toggleTodo(id: string, onlyPropId?: string): void {
     const loc = locate(this.doc, id)
     if (!loc) return
     const fields = gutterFieldsOf(loc.block, this.store.blocks)
     /**
      * 目标字段：点 gutter 上哪一枚就传哪个 propId（多个 checkbox 不串台）；
-     * 命令／快捷键不带目标 ⇒ 第一条带 `_done` 的 select，其次 checkbox。
+     * 命令／快捷键不带目标 ⇒ 库里唯一的 status 字段，其次 checkbox。
      */
     let field: GutterField | undefined
     if (onlyPropId !== undefined) {
       field = fields.find((f) => f.propId === onlyPropId)
       if (!field) return
     } else {
-      field = fields.find((f) => f.doneChoiceId !== undefined) ?? fields.find((f) => f.kind === 'checkbox')
+      field = fields.find((f) => f.use === 'status') ?? fields.find((f) => f.kind === 'checkbox')
     }
     const plan = todoPlanOfField(field)
     this.beginUndoEntry()
@@ -2730,7 +2740,7 @@ export class BlockEditor {
       const loc = locate(this.doc, id)
       if (!loc || loc.parent === null) continue
       const fields = gutterFieldsOf(loc.block, this.store.blocks)
-      const field = fields.find((f) => f.doneChoiceId !== undefined) ?? fields.find((f) => f.kind === 'checkbox')
+      const field = fields.find((f) => f.use === 'status') ?? fields.find((f) => f.kind === 'checkbox')
       plans.push({ id, plan: todoPlanOfField(field) })
     }
     if (plans.length === 0) return false
@@ -2761,8 +2771,8 @@ export class BlockEditor {
   clearTodo(id: string): 'cleared' | 'declared' | 'none' {
     const loc = locate(this.doc, id)
     if (!loc) return 'none'
-    // 目标与 `toggleTodo` 同一判据：第一条带 `_done` 的 select（自定义任务属性也认）
-    const field = gutterFieldsOf(loc.block, this.store.blocks).find((f) => f.doneChoiceId !== undefined)
+    // 目标与 `toggleTodo` 同一判据：库里唯一的任务状态字段
+    const field = gutterFieldsOf(loc.block, this.store.blocks).find((f) => f.use === 'status')
     if (!field) return 'none'
     this.beginUndoEntry()
     this.write((tx) => tx.patch(id, (b) => clearValue(b, field.propId)))
@@ -3790,6 +3800,7 @@ export class BlockEditor {
        */
       toggleChildrenCollapse: (id) => this.toggleChildrenCollapse(id),
       toggleTodo: (id, propId) => this.toggleTodo(id, propId),
+      toggleCheck: (id, propId) => this.toggleCheck(id, propId),
       pickGutterValue: (id, propId, anchor) => this.pickGutterValue(id, propId, anchor),
       blankArea: this.blankArea,
       clickEmptyArea: (y, x, place) => this.clickEmptyArea(y, x, place),

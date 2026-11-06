@@ -20,7 +20,16 @@
  */
 import { walkForest } from '../model/walk.ts'
 import { isDeleted, type Block } from '../model/model.ts'
-import { TASK_STATUS_CHOICE_IDS, TASK_STATUS_PROP_ID } from '../props/props.ts'
+import {
+  CHECK_PROP,
+  TASK_STATUS_CHOICE_IDS,
+  TASK_STATUS_DONE_ID,
+  TASK_STATUS_PROP_ID,
+  TASK_STATUS_TODO_ID,
+  USE_PROP,
+  checkOf,
+  useOf,
+} from '../props/props.ts'
 import { taskStatusChoices, taskStatusVocabulary } from '../fixtures/task-vocabulary.ts'
 import type { Tx } from './types.ts'
 
@@ -51,6 +60,19 @@ export function ensureTaskStatusInTx(forest: readonly Block[], tx: Tx): void {
   }
   // 软删的定义块占着 id：不往回收站里的块补选项，也不插第二份
   if (isDeleted(def)) return
+  /**
+   * 定义块在、但语义/显示映射缺了（旧版本物化的那一份）：同一笔事务补上。
+   * 这不是迁移数据——只补两个系统键，值一个字节不动。
+   */
+  if (useOf(def) !== 'status' || checkOf(def) === undefined) {
+    tx.patch(def.id, (b) => {
+      b.props = {
+        ...(b.props ?? {}),
+        [USE_PROP]: 'status',
+        [CHECK_PROP]: { on: TASK_STATUS_DONE_ID, off: TASK_STATUS_TODO_ID },
+      }
+    })
+  }
   const have = new Set(def.children.map((c) => c.id))
   const wanted = new Map(taskStatusChoices().map((c) => [c.id, c]))
   for (const id of TASK_STATUS_CHOICE_IDS) {

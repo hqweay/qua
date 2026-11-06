@@ -140,8 +140,12 @@ import {
  * v38 → v39：**字段基数 `_cardinality`**（`one`／`many`；多值只对 `select` 有意义，值＝选项 id 数组）。
  *            旧库没有这一格读出来就是单值，本不必作废；加一版与前面每一条同理由：
  *            让写路径只面对一种形状（多值只写数组），读路径不必在「有没有这一格」上分叉。
+ * v39 → v40：**「完成」从选项上的 `_done` 改成定义级的 `_use`／`_check`**：
+ *            `_use: 'status'` 是语义（库级唯一），`_check {on, off}` 是勾选框映射
+ *            （勾选/取消写哪两个选项）。旧库的完成标记新代码不读（任务身份会消失）
+ *            ⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 39
+export const WORKSPACE_VERSION = 40
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

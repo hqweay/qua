@@ -530,6 +530,13 @@
 .blk .identity.prop-mark:hover {
   color: var(--ui-text-secondary);
 }
+/* 普通勾选框（`_check` 无 `_use`）：翻 on/off，不是任务 */
+.blk .identity.check-box {
+  cursor: pointer;
+}
+.blk .identity.check-box:hover {
+  color: var(--ui-text-secondary);
+}
 /* 多值属性：一串图标是一个命中区（点任意一枚开同一个多选菜单） */
 .blk .identity.prop-multi {
   gap: 2px;
@@ -1858,6 +1865,13 @@
   gap: var(--ui-gap-2);
   font-size: var(--ui-fs-sm);
   color: var(--ui-text-secondary);
+}
+.choices-check {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+  padding-top: var(--ui-gap-2);
+  border-top: 1px dashed var(--ui-border-subtle);
 }
 /* select 单元格：当前值图标 + 原生下拉。没有图标时不加壳，保持原样 */
 .prop-select {

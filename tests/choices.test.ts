@@ -408,24 +408,44 @@ test('选项命令：插入/改名/移动/作用域/软删都走一笔事务（�
   assert.equal(choiceById(kb.roots(), c1)?.id, c1, '软删的选项仍能被解析（显示「选项已删除」）')
 })
 
-test('选项图标/完成标记/快捷入口：写命令、完成值兄弟唯一、空图标摘格', () => {
-  const { cmds, kb } = commandHarness()
-  const defId = cmds.createPropDef('', '优先级', 'select', 'own')
-  const c1 = cmds.addChoice(defId, '高')
-  const c2 = cmds.addChoice(defId, '中')
-  cmds.addChoice(defId, '低')
+test('图标/勾选框映射/快捷入口：图标写选项、状态唯一、空图标摘格', () => {
+  const { cmds, kb, toasts } = commandHarness()
+  const defId = cmds.createPropDef('', '状态', 'select', 'own')
+  const c1 = cmds.addChoice(defId, '待办')
+  const c2 = cmds.addChoice(defId, '完成')
+  cmds.addChoice(defId, '进行中')
 
-  cmds.setChoiceIcon(c1, 'lucide:flag')
-  assert.equal(kb.get(c1)?.props?._icon, 'lucide:flag', '图标写在选项块上')
+  cmds.setChoiceIcon(c1, 'lucide:square')
+  assert.equal(kb.get(c1)?.props?._icon, 'lucide:square', '图标写在选项块上')
 
-  cmds.setChoiceDone(defId, c1, true)
-  assert.equal(kb.get(c1)?.props?._done, true)
-  cmds.setChoiceDone(defId, c2, true)
-  assert.equal(kb.get(c1)?.props?._done, undefined, '打第二个完成值时兄弟上的标记被摘掉')
-  assert.equal(kb.get(c2)?.props?._done, true, '每个定义最多一个')
+  cmds.setChoiceCheck(defId, { on: c2, off: c1, status: true })
+  assert.deepEqual(kb.get(defId)?.props?._check, { on: c2, off: c1 })
+  assert.equal(kb.get(defId)?.props?._use, 'status')
 
-  cmds.setChoiceDone(defId, c2, false)
-  assert.equal(kb.get(c2)?.props?._done, undefined, '取消只摘这一个')
+  // 任务状态库级唯一：第二个定义再标 status ⇒ 拒绝，不静默换主
+  const def2 = cmds.createPropDef('', '另一个状态', 'select', 'own', 'new')
+  const d1 = cmds.addChoice(def2, '未完成')
+  const d2 = cmds.addChoice(def2, '完成')
+  cmds.setChoiceCheck(def2, { on: d2, off: d1, status: true })
+  assert.equal(kb.get(def2)?.props?._use, undefined, '第二条 status 被拒绝')
+  assert.ok(toasts.some((x) => x.includes('任务状态')), `应有提示：${JSON.stringify(toasts)}`)
+
+  // 摘掉映射：`_check` 与 `_use` 一起走
+  cmds.setChoiceCheck(defId, null)
+  assert.equal('_check' in (kb.get(defId)?.props ?? {}), false)
+  assert.equal('_use' in (kb.get(defId)?.props ?? {}), false)
+
+  // 普通勾选框：有 `_check`、没有 `_use`
+  cmds.setChoiceCheck(defId, { on: c2, off: c1, status: false })
+  assert.deepEqual(kb.get(defId)?.props?._check, { on: c2, off: c1 })
+  assert.equal(kb.get(defId)?.props?._use, undefined)
+
+  // 有勾选框时不能切多值（单值才能「勾一个」）
+  cmds.setChoiceCardinality(defId, 'many')
+  assert.equal(kb.get(defId)?.props?._cardinality, undefined, '多值被拒绝')
+  cmds.setChoiceCheck(defId, null)
+  cmds.setChoiceCardinality(defId, 'many')
+  assert.equal(kb.get(defId)?.props?._cardinality, 'many', '摘掉勾选框后可以切多值')
 
   cmds.setUiPosition(defId, 'block-left')
   assert.equal(kb.get(defId)?.props?._uiPosition, 'block-left')

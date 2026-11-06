@@ -3,11 +3,16 @@
  */
 import {
   CARDINALITY_PROP,
+  CHECK_PROP,
   CHOICE_SCOPE_PROP,
-  DONE_PROP,
   ICON_PROP,
   UI_POSITION_PROP,
+  USE_PROP,
+  cardinalityOf,
+  checkOf,
   flatten,
+  parseCheckSpec,
+  useOf,
   valueListOf,
   clearKeepsField,
   clearValue,
@@ -19,7 +24,6 @@ import {
   mkPropDef,
   normalizeAlias,
   parseChoiceScope,
-  prop,
   propKindOf,
   propLabel,
   setValue,
@@ -47,7 +51,7 @@ export function propsCommands(
   | 'moveChoice'
   | 'setChoiceScope'
   | 'setChoiceIcon'
-  | 'setChoiceDone'
+  | 'setChoiceCheck'
   | 'setChoiceCardinality'
   | 'setUiPosition'
   | 'deleteChoice'
@@ -244,23 +248,46 @@ export function propsCommands(
     },
 
     /**
-     * 标记/取消「完成」值：每个定义最多一个。
+     * 写/摘勾选框映射（`_check {on, off}`），可选把它标成任务状态（`_use: 'status'`）。
      *
-     * 打标时**同一笔事务**摘掉兄弟上的标记——拆成两次写会留下「两个完成值」的中间态，
-     * 而 `todoOf` 只能取第一个（另一个静默失效）。取消只摘这一个，属性随即不再是任务型。
+     * - `spec === null` ⇒ 摘掉 `_check` 与 `_use`；
+     * - `status: true` ⇒ 库级唯一：已有另一条任务状态属性就拒绝，不静默换主；
+     * - 多值属性不能有勾选框（单值才能「勾一个」）。
      */
-    setChoiceDone: (defId, choiceId, done) => {
+    setChoiceCheck: (defId, spec) => {
       const def = find(defId)
-      if (!def || propKindOf(def) !== 'select' || !def.children.some((c) => c.id === choiceId)) return
-      d.run((tx) => {
-        if (done) {
-          for (const c of def.children) {
-            if (c.id === choiceId || prop<boolean>(c, DONE_PROP) !== true) continue
-            tx.patch(c.id, (b) => patchProp(b, DONE_PROP, undefined))
-          }
+      if (!def || propKindOf(def) !== 'select') return
+      if (spec === null) {
+        d.run((tx) =>
+          tx.patch(defId, (b) => {
+            patchProp(b, CHECK_PROP, undefined)
+            if (useOf(b) === 'status') patchProp(b, USE_PROP, undefined)
+          }),
+        )
+        return
+      }
+      const parsed = parseCheckSpec(spec)
+      if (!parsed) {
+        d.toast(t('ui.props.choice.checkInvalid'), 'warn')
+        return
+      }
+      if (cardinalityOf(def) === 'many') {
+        d.toast(t('ui.props.choice.checkMultiBlocked'), 'warn')
+        return
+      }
+      if (spec.status) {
+        const other = d.kb.propDefs().find((x) => x.id !== defId && useOf(x) === 'status')
+        if (other) {
+          d.toast(t('ui.props.choice.statusTaken', { label: propLabel(other) }), 'warn')
+          return
         }
-        tx.patch(choiceId, (b) => patchProp(b, DONE_PROP, done ? true : undefined))
-      })
+      }
+      d.run((tx) =>
+        tx.patch(defId, (b) => {
+          patchProp(b, CHECK_PROP, parsed)
+          patchProp(b, USE_PROP, spec.status ? 'status' : undefined)
+        }),
+      )
     },
 
     /**
@@ -274,6 +301,11 @@ export function propsCommands(
     setChoiceCardinality: (defId, cardinality: Cardinality) => {
       const def = find(defId)
       if (!def || propKindOf(def) !== 'select') return
+      // 多值不能是勾选框/任务状态：先摘掉映射，别留下一个读出来无效的 `_check`
+      if (cardinality === 'many' && checkOf(def) !== undefined) {
+        d.toast(t('ui.props.choice.checkMultiBlocked'), 'warn')
+        return
+      }
       if (cardinality === 'one') {
         const hasMulti = flatten({ roots: [...d.kb.roots()] }).some((b) => valueListOf(b.props?.[defId]).length > 1)
         if (hasMulti) {

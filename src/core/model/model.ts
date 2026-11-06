@@ -156,13 +156,19 @@ export type SystemPropId =
    */
   | '_choiceScope'
   /**
-   * 一个**选项块**的「完成」标记（见 `core/props.ts` 的 `doneChoiceOf`）。
+   * 属性定义的**用途**（见 `core/props.ts` 的 `useOf`）：`status`（任务状态）。
    *
-   * 「哪个值算完成」是值级语义，不是某个固定 propId 的私事：打在选项上，
-   * 自定义的「任务」属性和内置任务状态走同一套 ⌘↵／删除线／查询。
-   * 每个定义最多一个（写入路径保证），读侧取第一个。
+   * 语义和显示是两件事：`_use` 说这条属性拿来干什么，`_check` 说它显示成勾选框。
+   * 现在只有 `status`；优先级先作为普通 select，等有应用级消费者再扩。
    */
-  | '_done'
+  | '_use'
+  /**
+   * 属性定义的**勾选框映射**（见 `core/props.ts` 的 `checkOf`）：`{ on, off }`。
+   *
+   * 「勾选写哪个选项、取消写哪个选项」是显示/编辑映射，本身不等于任务语义；
+   * `_use: 'status'` 时才同时驱动 `todoOf`/删除线/⌘↵。多值属性不能有它。
+   */
+  | '_check'
   /**
    * 字段定义的**基数**（见 `core/props.ts` 的 `cardinalityOf`）：`one`（缺省）／`many`。
    *

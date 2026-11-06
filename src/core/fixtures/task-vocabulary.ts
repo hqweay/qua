@@ -14,8 +14,8 @@
  */
 import { ICON_PROP, mkBlock, type Block } from '../model/model.ts'
 import {
+  CHECK_PROP,
   DEFAULT_PROP,
-  DONE_PROP,
   mkPropDef,
   TASK_STATUS_ABANDONED_ID,
   TASK_STATUS_DONE_ID,
@@ -23,6 +23,7 @@ import {
   TASK_STATUS_PROP_ID,
   TASK_STATUS_TODO_ID,
   UI_POSITION_PROP,
+  USE_PROP,
 } from '../props/props.ts'
 
 /** 显示名是**种子内容**：改显示名不动任何值，值认选项 id */
@@ -36,22 +37,27 @@ export const TASK_ABANDONED_LABEL = '放弃'
  * 四个选项块（id 是核心词汇的确定性 id）。
  *
  * 每个值带一枚 `_icon`：它画在块标与正文之间，所以「待办／进行中／完成／放弃」
- * 在行上是一个形状而不是一段字。`_done` 只打在「完成」上——它是这套机制里的
- * 「完成」档，⌘↵／删除线／查询都按这个标记走，不按固定 propId。
+ * 在行上是一个形状而不是一段字。哪个值是「完成」由定义块的 `_check` 决定
+ * （on = 完成、off = 待办），不靠选项上的私有标记。
  */
 export function taskStatusChoices(): Block[] {
-  const icon = (name: string, extra: Record<string, unknown> = {}): { props: Record<string, unknown> } => ({
-    props: { [ICON_PROP]: `lucide:${name}`, ...extra },
+  const icon = (name: string): { props: Record<string, unknown> } => ({
+    props: { [ICON_PROP]: `lucide:${name}` },
   })
   return [
     { ...mkBlock(TASK_TODO_LABEL, icon('square')), id: TASK_STATUS_TODO_ID },
     { ...mkBlock(TASK_DOING_LABEL, icon('square-dashed')), id: TASK_STATUS_DOING_ID },
-    { ...mkBlock(TASK_DONE_LABEL, icon('square-check', { [DONE_PROP]: true })), id: TASK_STATUS_DONE_ID },
+    { ...mkBlock(TASK_DONE_LABEL, icon('square-check')), id: TASK_STATUS_DONE_ID },
     { ...mkBlock(TASK_ABANDONED_LABEL, icon('square-x')), id: TASK_STATUS_ABANDONED_ID },
   ]
 }
 
-/** 造一份「任务状态」词汇：定义块（选项已挂为子块）＋ 缺省「待办」＋ gutter 快捷位 */
+/**
+ * 造一份「任务状态」词汇：定义块（选项已挂为子块）＋ 缺省「待办」＋ gutter 快捷位。
+ *
+ * `_use: 'status'` 是语义（唯一一条任务状态），`_check` 是显示/编辑映射
+ * （勾选＝完成、取消＝待办）。两者分开：没有 `_use` 的 `_check` 只是一个普通勾选框。
+ */
 export function taskStatusVocabulary(): Block {
   const def = mkPropDef(
     TASK_STATUS_LABEL,
@@ -59,6 +65,8 @@ export function taskStatusVocabulary(): Block {
     {
       [UI_POSITION_PROP]: 'block-left',
       [DEFAULT_PROP]: TASK_STATUS_TODO_ID,
+      [USE_PROP]: 'status',
+      [CHECK_PROP]: { on: TASK_STATUS_DONE_ID, off: TASK_STATUS_TODO_ID },
       // 未填时 gutter 上画定义块自己的图标（与「待办」同形），入口不会因没有值而消失
       [ICON_PROP]: 'lucide:square',
     },

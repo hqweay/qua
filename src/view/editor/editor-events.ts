@@ -321,8 +321,10 @@ export interface EditorBridge {
   /** 点进空天格子（复盘兜底）：物化那天归装配层；`place` 已翻译好修饰键 */
   onShellActivate: (date: string, place: OpenPlace) => void
   /** 勾选 / 取消待办（点方框）*/
-  /** `propId` 由 gutter 上那一枚图标带过来；命令/快捷键不带 ⇒ 第一条任务型字段 */
+  /** `propId` 由 gutter 上那一枚图标带过来；命令/快捷键不带 ⇒ 唯一的任务状态字段 */
   toggleTodo: (blockId: string, propId?: string) => void
+  /** 普通勾选框（`_check` 无 `_use`）：只翻 on/off */
+  toggleCheck: (blockId: string, propId: string) => void
   /** 点普通 select 的 gutter 图标：装配层开取值菜单 */
   pickGutterValue: (blockId: string, propId: string, anchor: DOMRect) => void
   /** 任何模型变化 */
@@ -957,9 +959,17 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       return
     }
 
+    /** 普通勾选框（`_check` 无 `_use`）：只翻 on/off，不碰 `todoOf`/划线 */
+    const check = target.closest<HTMLElement>('[data-check-for]')
+    if (check?.dataset.checkFor && check.dataset.propId) {
+      e.preventDefault()
+      br.toggleCheck(check.dataset.checkFor, check.dataset.propId)
+      return
+    }
+
     /**
      * ④ **普通 select 的 gutter 图标**：点开选项菜单（不是翻转）。
-     *    与待办方框互斥：完成型 select 同时带着 `data-todo-for`，上面那一支先接住。
+     *    与待办方框互斥：任务/勾选框各自带 `data-todo-for`/`data-check-for`，上面两支先接住。
      */
     const gutterProp = target.closest<HTMLElement>('[data-prop-for]')
     if (gutterProp?.dataset.propFor && gutterProp.dataset.propId) {
