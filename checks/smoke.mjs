@@ -18009,6 +18009,75 @@ await check('C1 相对日期：树上存表达式；锚只在日记页里出现�
   return '相对态 chip ＋ 表达式落库；锚出现/可 toggle；切回固定日期后往返成绝对形状'
 })
 
+/* ---------------------------------------------------------------- 卡头 → 中心/全屏 */
+
+/**
+ * **卡-中心-全屏是同一份内容的三种落点**：卡头菜单「全屏打开」＝中心开同一份内容
+ * 并进全屏档，**卡留在槽里**（退出全屏它还在）——移动是导航，不是搬运。
+ */
+await check('M4 卡头「全屏打开」：中心开同一份内容并进全屏；退出后卡还在槽里', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(350)
+
+  const targetId = await page.evaluate(() => {
+    const rows = window.__qua.blocks().filter((b) => b.text && b.text.trim() !== '')
+    return rows[0]?.id ?? ''
+  })
+  assert(targetId !== '', '前置：当前页应有一个有正文的块')
+  await page.evaluate((id) => window.__qua.invoke('core.dock/open-block', { blockId: id, side: 'right' }), targetId)
+  await page.waitForTimeout(500)
+  const cardThere = () =>
+    page.evaluate(
+      (id) => Boolean(document.querySelector(`.dock-card[data-card-id="${id}"]`)),
+      targetId,
+    )
+  assert(await cardThere(), '前置：右槽应有这张窗口卡')
+
+  // 卡头右键 ⇒ 菜单里有「全屏打开」（只认这张卡的头，槽里可能还有别的卡）
+  await page.evaluate(
+    (id) => {
+      const head = document.querySelector(`.dock-card[data-card-id="${id}"] .dock-card-head`)
+      head?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    },
+    targetId,
+  )
+  await page.waitForTimeout(250)
+  const rows = await page.evaluate(() =>
+    [...document.querySelectorAll('.layer-item')].map((e) => e.textContent ?? ''),
+  )
+  assert(rows.some((r) => r.includes('全屏打开')), `卡头菜单要有「全屏打开」：${JSON.stringify(rows)}`)
+
+  await page.locator('.layer-item', { hasText: '全屏打开' }).first().click()
+  await page.waitForTimeout(500)
+  const full = await page.evaluate(
+    (id) => ({
+      axis: document.body.dataset.axis ?? '',
+      active: window.__qua.snapshot().activeId,
+      exitShown: Boolean(document.querySelector('.axis-exit')) && !document.querySelector('.axis-exit')?.hidden,
+    }),
+    targetId,
+  )
+  assert(full.axis === 'full', `全屏打开要进全屏档：${JSON.stringify(full)}`)
+  assert(full.active === targetId, `中心要打开同一份内容（实际 active=${full.active}）`)
+  assert(full.exitShown, '全屏档要给退出口')
+
+  // Esc 沿轴退：全屏 → 宽屏 → 常规；回到常规后卡还在槽里（留在槽里，不是搬走了）
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
+  const wide = await page.evaluate(() => document.body.dataset.axis ?? '')
+  assert(wide === 'wide', `Esc 要退到宽屏（实际 ${wide}）`)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
+  const back = await page.evaluate(() => document.body.dataset.axis ?? 'normal')
+  assert(back === 'normal', `再退要回常规（实际 ${back}）`)
+  assert(await cardThere(), '退出全屏后卡要还在槽里（移动是导航不是搬运）')
+
+  await ctx.close()
+  return '全屏打开：body[data-axis=full] ＋ 中心同一块；Esc 两步退回后卡仍在槽'
+})
+
 /**
  * **挂载区的「＋」只建 local 查询**：不弹菜单、不建块、不产生 linked 指针。
  *

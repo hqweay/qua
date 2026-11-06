@@ -71,6 +71,13 @@ export function setupAxis(deps: AxisDeps) {
     return true
   }
 
+  /** 直接落到某一档（「全屏打开」这类一步到位的入口用它，不必逐档走） */
+  function to(next: AxisMode): boolean {
+    if (!isAxisMode(next) || next === mode) return false
+    setMode(next)
+    return true
+  }
+
   /**
    * 用户在档位期间手动动了某一侧槽 ⇒ 以他为准：这一侧脱离强制收起。
    * 调用方先把他的意图写进 prefs（开关/开槽入口各自的职责），这里只记
@@ -85,6 +92,7 @@ export function setupAxis(deps: AxisDeps) {
     mode: () => mode,
     slotOpen,
     step,
+    to,
     noteSlotChanged,
   }
 }

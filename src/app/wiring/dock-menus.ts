@@ -6,7 +6,7 @@
  * 咬合变成显式的 deps 清单——一半来自 `setupDocks` 的返回（状态的家在那边），
  * 一半是装配层的活引用（换库/焦点切换会变的，一律现取，不传值）。
  */
-import { DERIVED_CARDS, dockKey, isCardCollapsed, UTILITY_FACES, type DerivedCardId, type UtilityFaceId } from '../../core/index.ts'
+import { centerDerivedOpenable, DERIVED_CARDS, dockKey, isCardCollapsed, UTILITY_FACES, type DerivedCardId, type UtilityFaceId } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
@@ -80,6 +80,16 @@ export function setupCardMenus(deps: DockMenusDeps) {
     const blockId = b?.id ?? ''
     const windows = dock[side].cards.filter((e) => e.kind === 'block')
     const anyExpanded = dock[side].cards.some((e) => !isCardCollapsed(dock, side, dockKey(e)))
+    /**
+     * 这张卡能不能「在中心打开」（同一份内容在中心的一次露面，卡留在槽里）。
+     *
+     * 块窗口有「在正文中打开」（同一条语义的既有名字）；派生卡只有中心接得住的
+     * 才给行——其余的中心身体还没有，给了就是「点了没反应」的入口。
+     */
+    const centerOpenable =
+      entry?.kind === 'block' ||
+      entry?.kind === 'utility' ||
+      (entry?.kind === 'derived' && centerDerivedOpenable(entry.card))
     const rows: Row[] = [
       { id: 'toggle', label: st.collapsed ? t('ui.dock.expandCard') : t('ui.dock.collapseCard') },
       { id: 'solo', label: st.solo ? t('ui.dock.unsoloCard') : t('ui.dock.soloCard') },
@@ -90,10 +100,17 @@ export function setupCardMenus(deps: DockMenusDeps) {
             { id: 'focus', label: t('ui.dock.focusInEditor') },
           ]
         : []),
+      ...(centerOpenable && !isWindow ? [{ id: 'center', label: t('cmd.surface.open') }] : []),
+      ...(centerOpenable ? [{ id: 'openFull', label: t('ui.dock.openFull') }] : []),
       { id: 'closeOthers', label: t('ui.dock.closeOtherWindows'), disabled: windows.length <= 1 },
       { id: 'closeAll', label: t('ui.dock.closeAllWindows'), disabled: windows.length === 0 },
       { id: 'foldAll', label: anyExpanded ? t('ui.dock.foldAll') : t('ui.dock.unfoldAll') },
     ]
+    /** 派生/工具卡的「在中心打开」：条目里存的是目录 id，这里翻成命令参数 */
+    const openSurface = (): void => {
+      if (entry?.kind === 'utility') void deps.getRegistry().invoke('core.surface/open', { kind: 'utility', id: entry.face }, 'dock')
+      else if (entry?.kind === 'derived') void deps.getRegistry().invoke('core.surface/open', { kind: 'derived', id: entry.card }, 'dock')
+    }
     deps.layers.openMenu({
       rows,
       anchor,
@@ -115,6 +132,15 @@ export function setupCardMenus(deps: DockMenusDeps) {
             return
           case 'focus':
             void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'dock')
+            return
+          case 'center':
+            openSurface()
+            return
+          case 'openFull':
+            // 全屏是**同一份内容换个大点的落点**：中心先打开（块窗口走既有导航），再落档位
+            if (entry?.kind === 'block') void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'dock')
+            else openSurface()
+            void deps.getRegistry().invoke('core.view/axis-to', { mode: 'full' }, 'dock')
             return
           case 'closeOthers':
             deps.closeOtherWindows(side, key)

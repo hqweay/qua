@@ -98,6 +98,11 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     app.axisStep(-1)
     return true
   },
+  'core.view/axis-to': (a, app) => {
+    const mode = a.mode === 'full' ? 'full' : a.mode === 'wide' ? 'wide' : null
+    if (!mode) return false
+    return app.axisTo(mode)
+  },
   /**
    * 在侧槽打开一个块：**不换中心、不入历史**。
    * 缺省目标是光标所在块（块菜单不传 args）；`side` 缺省右槽（Shift+点的落点）。

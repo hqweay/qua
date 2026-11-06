@@ -136,6 +136,7 @@ export const MSG = {
   'ui.dock.closeOtherWindows': '关闭其他窗口',
   'ui.dock.closeAllWindows': '关闭全部窗口',
   'ui.dock.focusInEditor': '在正文中打开',
+  'ui.dock.openFull': '全屏打开（卡留在槽里）',
   'ui.dock.closeWindow': '关闭这个窗口（块本身不删）',
   'ui.dock.closeWidget': '关闭这张卡（内容不删）',
   'ui.dock.closeCard': '关闭这张卡；需要时在「添加卡片」里加回来',
@@ -1173,6 +1174,7 @@ export const MSG = {
   /* ------------------------------------------------------ 档位轴（宽屏／全屏） */
   'cmd.view.axisUp': '进一档（宽屏 / 全屏）',
   'cmd.view.axisDown': '退一档',
+  'cmd.view.axisTo': '直选档位',
   'menu.kw.wide': '宽屏',
   'menu.kw.fullscreen': '全屏',
   'ui.axis.exitWide': '退出宽屏（Esc）',

@@ -452,6 +452,12 @@ export interface App {
    */
   axisStep(dir: 1 | -1): boolean
   /**
+   * 档位轴**直接落到某一档**（「全屏打开」这类一步到位的入口用它）。
+   *
+   * 与 `axisStep` 同一条 overlay 判据：不写 prefs、退出口照常；已在目标档 ＝ `false`。
+   */
+  axisTo(mode: 'wide' | 'full'): boolean
+  /**
    * **在侧槽打开一个块**（一张窗口）：确保槽开着、把块放进 `cards`、滚到它。
    *
    * 与 `openPropertiesDrawer` 的区别：那个是瞬态任务面（不动侧槽）、这个在侧槽

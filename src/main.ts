@@ -1986,6 +1986,7 @@ const app: App = {
 
   // 档位轴：进/退一档；状态住窗口，不写偏好
   axisStep: (dir) => axis.step(dir),
+  axisTo: (mode) => axis.to(mode),
 
   ...devCommands({
     replaceWorkspace: (next) => swapWorkspace(next, true),

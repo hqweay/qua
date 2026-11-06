@@ -177,9 +177,11 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.dock/toggle-left', title: t('cmd.dock.toggle-left'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dock', 'left', 'panel'] },
   { name: 'core.dock/toggle-right', title: t('cmd.dock.toggle-right'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dock', 'right', 'panel'] },
   // 档位轴：进/退一档（宽屏＝双槽收起＋阅读宽度放开；全屏＝再藏抬头与 tab 条）。
-  // 档位只住窗口：不写偏好、不跨会话，所以没有「直选某一档」的第三条——轴本身就是两条。
+  // 档位只住窗口：不写偏好、不跨会话。进/退是键盘的两条；「全屏打开」这类
+  // 一步到位的入口还要一条直选（进/退两条走不到的语义）。
   { name: 'core.view/axis-up', title: t('cmd.view.axisUp'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['wide', 'fullscreen', 'focus', t('menu.kw.wide'), t('menu.kw.fullscreen')] },
   { name: 'core.view/axis-down', title: t('cmd.view.axisDown'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },
+  { name: 'core.view/axis-to', title: t('cmd.view.axisTo'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true, args: { mode: { type: 'string', enum: ['wide', 'full'] } } },
   { name: 'core.dock/open-block', title: t('cmd.dock.open-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, side: { type: 'string' } }, keywords: ['dock', 'open', 'window', 'sidebar'] },
   { name: 'core.dock/top-window', title: t('cmd.dock.topWindow'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dock', 'pin', 'top', 'window', 'sidebar'] },
   { name: 'core.view/toggle-virtualize', title: t('cmd.view.toggle-virtualize'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { on: { type: 'boolean' }, radius: { type: 'integer' } }, keywords: ['virtual', 'window', 'DOM'] },
