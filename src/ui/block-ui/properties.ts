@@ -17,7 +17,8 @@
  *    把它当成另一条属性（也会诱导两个 picker 共用去重集合）。
  * ⚠️ 组件不写模型：所有写入经注入的回调（由装配层转成命令）。
  */
-import type { Block } from '../../core/index.ts'
+import type { Block, ClickMods } from '../../core/index.ts'
+import { clickModsOf } from '../../core/index.ts'
 import { plainText } from '../../core/model/runs.ts'
 import { onCommitKeys } from './keys.ts'
 import type { Dangling, FieldRow, PropKind } from '../../core/index.ts'
@@ -69,7 +70,7 @@ export interface PropertiesDeps {
    * 不注入的话，同一个标签在正文里能点、在属性区点了没反应 —— 同一件事有两种行为，
    * 每一次都要重新猜一遍哪个能点。
    */
-  openRef: (to: string, mods: { shiftKey: boolean }) => void
+  openRef: (to: string, mods: ClickMods) => void
   /** 森林里全部定义（「添加已有属性」用） */
   defs: () => Block[]
   /** 短 id（未知属性的显示） */
@@ -426,7 +427,7 @@ export function makeFieldRow(
   if (row.def && deps.openRef) {
     name.dataset.refTo = row.def.id
     name.title = t('ui.props.openDef')
-    name.addEventListener('click', (e) => deps.openRef!(row.def!.id, { shiftKey: e.shiftKey }))
+    name.addEventListener('click', (e) => deps.openRef!(row.def!.id, clickModsOf(e)))
   }
   label.appendChild(name)
   if (opts.showSource !== false) {
@@ -872,7 +873,7 @@ export class PropertiesPanel {
       text.dataset.refTo = tag.id
       text.className = 'props-tag-name'
       text.title = t('ui.chip.tagTitle', { label: name })
-      text.addEventListener('click', (e) => this.deps.openRef(tag.id, { shiftKey: e.shiftKey }))
+      text.addEventListener('click', (e) => this.deps.openRef(tag.id, clickModsOf(e)))
       const del = this.tagDel(t('ui.props.tagRemove'), () => this.deps.removeTag(target, tag.id))
       chip.append(text, del)
       value.appendChild(chip)

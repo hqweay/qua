@@ -20,6 +20,7 @@
  */
 import {
   listTableOf,
+  clickModsOf,
   openPlaceOf,
   sortListRows,
   type Block,
@@ -277,7 +278,7 @@ export class ViewListTable {
     el.addEventListener('click', (e) => {
       const target = e.target as HTMLElement | null
       if (!target) return
-      this.deps.cell.handleClick(blockId, target, { altKey: e.altKey, shiftKey: e.shiftKey }, { x: e.clientX, y: e.clientY })
+      this.deps.cell.handleClick(blockId, target, clickModsOf(e), { x: e.clientX, y: e.clientY })
     })
   }
 
@@ -312,7 +313,7 @@ export class ViewListTable {
         if (!target) return
         // 展开区在**这一格里面**：不拦的话外层的点击处理会把它当成「点这一格」再开一台编辑器
         e.stopPropagation()
-        this.deps.cell.handleClick(child.id, target, { altKey: e.altKey, shiftKey: e.shiftKey }, { x: e.clientX, y: e.clientY })
+        this.deps.cell.handleClick(child.id, target, clickModsOf(e), { x: e.clientX, y: e.clientY })
       })
       row.append(marker, body)
       box.appendChild(row)

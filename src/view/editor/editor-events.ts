@@ -19,7 +19,7 @@ import type { TriggerChar } from '../../core/infra/trigger.ts'
 import type { RunWithId } from '../../core/model/runs.ts'
 import type { Content } from '../../core/model/runs.ts'
 import { isCommittedTextInput } from '../../core/infra/ime.ts'
-import { openPlaceOf, type OpenPlace } from '../../core/views/open.ts'
+import { clickModsOf, openPlaceOf, type ClickMods, type OpenPlace } from '../../core/views/open.ts'
 
 /**
  * **「按下期间不换 DOM」的指针接线**：按下 → 冻结；放开 → 延迟一拍。
@@ -77,13 +77,7 @@ function clipboardImageFiles(dt: DataTransfer | null): File[] {
  * ⚠️ 只传**判据**（修饰键），不传 `MouseEvent`：事件层不是 DOM 类型的分发处，
  *    再往上的消费者（装配层、UI 组件）不该为了读一个 `altKey` 拿到整个原生事件。
  */
-export interface RefClickMods {
-  altKey: boolean
-  shiftKey: boolean
-  /** ⌘/Ctrl+点＝在新 tab 打开（浏览器同一条手势） */
-  metaKey?: boolean
-  ctrlKey?: boolean
-}
+export type RefClickMods = ClickMods
 
 /**
  * 一次「指向某块的露面」被点：**去哪**（`to`）＋ **它自己的身份**（`run`，可无）。
@@ -751,12 +745,11 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      */
     const refEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.refTo !== undefined)
     if (refEl?.dataset.refTo) {
-      br.onRefClick({ to: refEl.dataset.refTo, ...(refEl.dataset.atomId ? { runId: refEl.dataset.atomId } : {}) }, refEl, {
-        altKey: e.altKey,
-        shiftKey: e.shiftKey,
-        metaKey: e.metaKey,
-        ctrlKey: e.ctrlKey,
-      })
+      br.onRefClick(
+        { to: refEl.dataset.refTo, ...(refEl.dataset.atomId ? { runId: refEl.dataset.atomId } : {}) },
+        refEl,
+        clickModsOf(e),
+      )
       e.preventDefault()
       return
     }
@@ -770,7 +763,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      */
     const atomEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('atom'))
     if (atomEl?.dataset.atomId) {
-      const mods = { altKey: e.altKey, shiftKey: e.shiftKey }
+      const mods = clickModsOf(e)
       if (br.onAtomClick) {
         br.onAtomClick(
           {

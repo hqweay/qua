@@ -118,6 +118,7 @@ export const MSG = {
   'cmd.dock.toggle-left': '收起 / 展开左槽',
   'cmd.dock.toggle-right': '收起 / 展开右槽',
   'cmd.dock.open-block': '在右槽打开',
+  'cmd.block.open-new-tab': '在新页签打开',
   'cmd.dock.topWindow': '置顶当前窗口',
   'ui.dock.leftTitle': '左槽',
   'ui.dock.rightTitle': '右槽',
@@ -832,7 +833,7 @@ export const MSG = {
   // 空标题页的初始地址：它必须存在（在页列表里 ⇒ 至少有一个名字），但用户可以随时改
   'ui.page.untitledAlias': '未命名-{id}',
   /* ------------------------------------------------------------ 面包屑 / 上下文 */
-  'ui.crumb.hint': '点击展开上下文 · ⌘/Ctrl 点击跳转 · Shift 点击在右槽打开',
+  'ui.crumb.hint': '点击展开上下文 · ⌘/Ctrl 点击在新页签打开 · Shift 点击在右槽打开',
   'ui.context.collapse': '收起上下文',
 
   /* ---------------------------------------------------------------- 顶栏 */
@@ -912,13 +913,13 @@ export const MSG = {
   'ui.block.foldCollapse': '折叠（点击）',
   'ui.block.foldLine': '折叠 / 展开子块（点击）',
   'cmd.editor.toggle-children-collapse': '折叠 / 展开子块',
-  'ui.block.focusHint': '点击聚焦到此块 · Shift+点击在右槽打开 · 拖动移动 · 右键打开菜单',
+  'ui.block.focusHint': '点击聚焦到此块 · Shift+点击在右槽打开 · ⌘/Ctrl+点击在新页签打开 · 拖动移动 · 右键打开菜单',
   'ui.block.schemaHint': '属性定义（正文是定义名，不能在行内改）· 点击聚焦 · 拖动移动 · 右键打开菜单',
   'ui.block.menuHint': '右键打开块菜单',
   'ui.block.handleHint': '拖拽重排 · 右键打开块菜单',
   'ui.block.placeholderFirst': '写点什么…（按 / 呼出命令）',
   'ui.block.placeholderEmpty': '空块',
-  'ui.todo.toggle': '点击切换完成 · ⌥+点击选择状态',
+  'ui.todo.toggle': '点击切换完成 · 右键选择状态',
   /**
    * 「取消待办」摘完这一块自己的槽之后，如果这一栏还在（标签声明给的），
    * 就得说清它从哪来 —— 否则看起来像「点了没反应」。

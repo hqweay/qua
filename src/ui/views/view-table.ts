@@ -15,7 +15,7 @@
  *   `>= 2000` **窗口化**（只挂可视范围 ± 若干行，用上下留白撑出滚动高度）。
  */
 import type { Block, BlockStore, OpenPlace, ViewColumn, ViewConfig, ViewRecord } from '../../core/index.ts'
-import { openPlaceOf } from '../../core/index.ts'
+import { clickModsOf, openPlaceOf } from '../../core/index.ts'
 import {
   cardinalityOf,
   choicesOf,
@@ -583,12 +583,11 @@ export class ViewTable {
     const box = document.createElement('div')
     box.classList.add('ui-ellipsis')
     this.deps.cell.render(r.block, box)
-    const mods = (e: MouseEvent): { altKey: boolean; shiftKey: boolean } => ({ altKey: e.altKey, shiftKey: e.shiftKey })
     box.addEventListener('click', (e) => {
       // 引用/原子先导航：只认「点到的是谁」，不认「点在格子里」——否则点 `[[某页]]` 会进编辑
       const target = e.target as HTMLElement | null
       if (!target) return
-      this.deps.cell.handleClick(r.block.id, target, mods(e), { x: e.clientX, y: e.clientY })
+      this.deps.cell.handleClick(r.block.id, target, clickModsOf(e), { x: e.clientX, y: e.clientY })
     })
     return box
   }

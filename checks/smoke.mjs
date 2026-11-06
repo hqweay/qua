@@ -23533,6 +23533,121 @@ await check('T261 搜索面命中坐标：紧跟 chip 的正文命中不误染 c
   }
 })
 
+/**
+ * **T264｜同一个「打开」在每一处入口都要成立，而且看得见。**
+ *
+ * 三条曾各自漂移过：
+ *   · 属性区的标签名只把 Shift 交进去（`{ shiftKey }`），⌘+点静默退化成普通点击 ——
+ *     同一条落点判据在入口处被抄窄了；
+ *   · 块菜单只有「在右槽打开」，没有「在新页签打开」（能力在命令里，入口不在）；
+ *   · 块标提示只写 Shift，⌘+点这条手势等于只存在于代码里。
+ *
+ * 判据都落在**结果**上：页签条多一张、活跃对象换成目标；不是「点了有反应」。
+ */
+await check('T264 ⌘+点属性区标签名 ⇒ 新页签；块菜单有「在新页签打开」；块标提示写明手势', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  try {
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    // 前置：一个带标签的块（属性区才会出现「标签名」这一处露面）
+    const tagName = `落点标签${Date.now().toString(36).slice(-4)}`
+    const hostId = await page.evaluate((name) => {
+      const rows = window.__qua.__editor.rows().map((r) => r.block)
+      const spot = rows.find((b) => b.children.length === 0 && !b.props?._tags?.length)
+      if (!spot) throw new Error('前置：这一页没有可落的块')
+      window.__qua.invoke('core.tags/add', { blockId: spot.id, name })
+      return spot.id
+    }, tagName)
+    await page.waitForTimeout(300)
+    const tagId = await page.evaluate((name) => {
+      const b = window.__qua.__editor.store.blocks.find((x) => (x.props?._aliases ?? []).includes(name))
+      return b?.id ?? ''
+    }, tagName)
+    assert(hostId !== '' && tagId !== '', `前置：应有一个带标签的块：${JSON.stringify({ hostId, tagId })}`)
+
+    const tabs = () =>
+      page.evaluate(() => ({
+        count: document.querySelectorAll('#center-tabs .center-tab').length,
+        active: window.__qua.snapshot().activeId,
+      }))
+
+    // 属性区画的是**当前对象**：真的 zoom 过去，不是只放光标
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), hostId)
+    await page.waitForTimeout(300)
+
+    // ① ⌘+点属性区标签名 ⇒ 新页签（这条入口曾经只认 Shift）
+    const beforeMeta = await tabs()
+    await page.locator(`[data-panel-tag-id="${tagId}"] .props-tag-name`).click({ modifiers: ['Meta'] })
+    await page.waitForTimeout(400)
+    const afterMeta = await tabs()
+    assert(
+      afterMeta.count === beforeMeta.count + 1,
+      `⌘+点应开一张新页签，而不是把当前页签换掉：${JSON.stringify({ beforeMeta, afterMeta })}`,
+    )
+    assert(afterMeta.active === tagId, `新页签应打开标签块：${JSON.stringify(afterMeta)}`)
+
+    // 收尾：关掉这张页签，回到**页根**（不是 zoom 到宿主——那会让兄弟块都不在屏上）
+    await page.evaluate(() => window.__qua.invoke('core.tab/close', {}))
+    await page.waitForTimeout(250)
+    await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
+    await page.waitForTimeout(350)
+
+    // ② 块标提示：两个手势都要写出来（只写 Shift 等于 ⌘+点不存在）
+    const hint = await page.evaluate(
+      (id) => document.querySelector(`.blk[data-block-id="${id}"] [data-focus-for]`)?.title ?? '',
+      hostId,
+    )
+    assert(hint.includes('新页签'), `块标提示要写明 ⌘+点开新页签：${JSON.stringify(hint)}`)
+    assert(hint.includes('右槽'), `Shift+点那条提示不能丢：${JSON.stringify(hint)}`)
+
+    // ③ 块菜单：入口在，点了真的开新页签
+    //    ⚠️ 目标必须**不是当前页签那一块**：同一视图按 id 去重（切过去，不重复开）。
+    //    ⚠️ 页根自己也是一行 `.tx`，而它就是当前 activeId —— 一起排掉。
+    const otherId = await page.evaluate((host) => {
+      const cur = window.__qua.snapshot().activeId
+      return (
+        [...document.querySelectorAll('#editor .blk')]
+          .filter((r) => r.querySelector(':scope > .tx') && r.dataset.blockId !== host)
+          .map((r) => r.dataset.blockId ?? '')
+          .find((x) => x !== '' && x !== cur) ?? ''
+      )
+    }, hostId)
+    assert(otherId !== '', `前置：应有另一行正文块当菜单目标：${JSON.stringify({ hostId, otherId })}`)
+    await page.evaluate((id) => {
+      const mk = document.querySelector(`.blk[data-block-id="${id}"] [data-focus-for]`)
+      mk.scrollIntoView({ block: 'center' })
+      mk.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    }, otherId)
+    await page.waitForTimeout(200)
+    const labels = await page.evaluate(() =>
+      [...document.querySelectorAll('.layer .layer-item')].map((x) => x.textContent ?? ''),
+    )
+    assert(labels.some((x) => x.includes('在新页签打开')), `块菜单要有「在新页签打开」：${JSON.stringify(labels)}`)
+    assert(labels.some((x) => x.includes('在右槽打开')), `既有的「在右槽打开」不能丢：${JSON.stringify(labels)}`)
+
+    const beforeMenu = await tabs()
+    await page.evaluate(() => {
+      const item = [...document.querySelectorAll('.layer .layer-item')].find((x) =>
+        x.textContent.includes('在新页签打开'),
+      )
+      if (!item) throw new Error('块菜单应有「在新页签打开」')
+      item.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    })
+    await page.waitForTimeout(400)
+    const afterMenu = await tabs()
+    assert(
+      afterMenu.count === beforeMenu.count + 1,
+      `菜单项应开一张新页签：${JSON.stringify({ beforeMenu, afterMenu })}`,
+    )
+    assert(afterMenu.active === otherId, `菜单项应打开右键那一块（不是光标在别处）：${JSON.stringify({ otherId, afterMenu })}`)
+
+    return `属性区 ⌘+点 → 新页签（${beforeMeta.count}→${afterMeta.count}）；块菜单有入口且开了第 ${afterMenu.count} 张；提示写明两个手势`
+  } finally {
+    await ctx.close()
+  }
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

@@ -17,6 +17,7 @@ import {
   type Block,
   type CtxKeys,
   type OpenPlace,
+  type ClickMods,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { Workspace } from '../../core/infra/workspace.ts'
@@ -172,7 +173,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
   const handleAtomClick = (
     atom: { runId: string; kind: string; hash?: string },
     el: HTMLElement,
-    mods: { altKey: boolean; shiftKey: boolean },
+    mods: ClickMods,
     via: string,
   ): void => {
     if (atom.kind === 'link') {

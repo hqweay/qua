@@ -38,6 +38,7 @@ import {
   readMountView,
   todayISO,
   type Block,
+  type ClickMods,
   type DerivedSource,
   type DerivedViewKind,
   type MountEntry,
@@ -116,7 +117,7 @@ export type PanelsDeps = {
    */
   project: (block: Block, into: HTMLElement) => void
   /** 点标题里的一枚非引用原子（图片/外链）：默认动作 / ⌥ 详情（与正文同一份） */
-  atomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: { altKey: boolean; shiftKey: boolean }) => void
+  atomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: ClickMods) => void
 }
 
 export function setupPanels(deps: PanelsDeps) {
@@ -361,8 +362,7 @@ export function setupPanels(deps: PanelsDeps) {
       repaint()
     },
       // 属性区里的标签名也是「指向标签块的一处露面」，与正文 chip 同一条口径
-      // 属性区里的标签名也是「指向标签块的一处露面」，与正文 chip 同一条口径
-      openRef: (to, mods) => refClick({ to }, { altKey: false, ...mods }),
+      openRef: (to, mods) => refClick({ to }, { ...mods, altKey: false }),
       defs: () => [...kb.propDefs()],
       shortId: (id) => shortId(id),
       setValue: (b, propId, value) => void deps.getRegistry().invoke('core.props/set-value', { blockId: b.id, propId, value }, 'ui'),

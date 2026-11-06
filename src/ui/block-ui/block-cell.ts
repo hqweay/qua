@@ -14,7 +14,7 @@
  *    窗口化不会被它打断。代价是滚动/改窗口尺寸时锚点会跑 —— 所以那两种事件直接提交并关掉。
  */
 import { plainLen } from '../../core/model/runs.ts'
-import type { Block, BlockStore, OpenPlace } from '../../core/index.ts'
+import type { Block, BlockStore, ClickMods, OpenPlace } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { EditableBlock } from './editable-block.ts'
 import { inputSession } from '../../view/editor/input-session.ts'
@@ -32,10 +32,13 @@ export interface AtomHit {
   hash?: string
 }
 
-export interface CellClickMods {
-  altKey: boolean
-  shiftKey: boolean
-}
+/**
+ * 表格/卡片里的一次点击：与正文用**同一份**修饰键结构（`ClickMods`）。
+ *
+ * 曾经这里是 `{ altKey, shiftKey }` 两格：表格标题格里的引用/原子于是认 Shift 不认 ⌘，
+ * 「⌘+点开新页签」在这些入口静默退化成普通点击。别再收窄它。
+ */
+export type CellClickMods = ClickMods
 
 export interface BlockCellDeps {
   store: BlockStore

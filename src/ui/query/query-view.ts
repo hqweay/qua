@@ -49,6 +49,7 @@ import {
   todayISO,
   slicedSpec,
   type Block,
+  type ClickMods,
   type FoldState,
   type OpenPlace,
   type BlockStore,
@@ -197,8 +198,8 @@ export interface ViewHostDeps {
   /** 标题列的投影（run/marks/引用/图片）——由装配层注入，`ui` 不拿整片森林 */
   project: (block: Block, into: HTMLElement) => void
   /** 点标题里的引用/原子（与正文同一条口径） */
-  refClick: (hit: { to: string; runId?: string }, el: HTMLElement, mods: { altKey: boolean; shiftKey: boolean }) => void
-  onAtomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: { altKey: boolean; shiftKey: boolean }) => void
+  refClick: (hit: { to: string; runId?: string }, el: HTMLElement, mods: ClickMods) => void
+  onAtomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: ClickMods) => void
   /** 打开一块（行首块标 / 紧凑列表） */
   openBlock: (blockId: string, place?: OpenPlace) => void
   /** `ref` 值的选择器（与属性区同一份） */

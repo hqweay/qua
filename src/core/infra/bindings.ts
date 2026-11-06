@@ -157,6 +157,9 @@ export const BINDINGS: Binding[] = [
   // 显式入口：把「看这一块的属性」做成一次点击。落点是属性抽屉——不换中心、
   // 不动槽（侧槽开关只归 core.dock/*），能力不依赖任何面板是否在场。
   { command: 'core.block/inspect', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 31, layer: 'core' },
+  // 「在别处打开」的第二种落点：与 ⌘/Ctrl+点同一条路（`focus-block` 的 `newTab`）。
+  // 菜单补的是**可发现性**——手势在，但没人知道它，等于没有。
+  { command: 'core.block/focus-block', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 32, layer: 'core', args: { newTab: true }, label: t('cmd.block.open-new-tab'), keywords: ['tab', 'page', 'open'] },
   { command: 'core.dock/open-block', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 33, layer: 'core' },
   /**
    * 退回上一级：**最外层时不给入口**（`when` 挡住），不是点了没反应。
