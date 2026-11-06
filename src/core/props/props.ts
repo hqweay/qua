@@ -17,7 +17,16 @@
  * ⚠️ `_fieldDefs` 里存的是 **ref（id）**，不是名字：改名零迁移，重名不撞车。
  * ⚠️ 本文件零 DOM：属性面板只消费这里的派生结果，写入通过命令。
  */
-import { isDeleted, hasList, isPropDefBlock, prop, type Block, type BlockProps, type TodoState } from '../model/model.ts'
+import {
+  ICON_PROP,
+  isDeleted,
+  hasList,
+  isPropDefBlock,
+  prop,
+  type Block,
+  type BlockProps,
+  type TodoState,
+} from '../model/model.ts'
 import { displayNameOf } from '../identity/alias.ts'
 import { plainText, textRuns } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
@@ -127,6 +136,8 @@ export interface FieldTable {
   kinds: ReadonlyMap<string, PropKind>
   /** 属性 id → 缺省值（定义块写了 `_default` 才有；`readField` 对「已声明未填」按它取值） */
   defaults: ReadonlyMap<string, unknown>
+  /** 属性 id → 「完成」档的选项 id（`select` 且选项带 `_done` 才有） */
+  done: ReadonlyMap<string, string>
 }
 
 /** 从森林建一份字段读取表（标签声明 ＋ 定义 kind／缺省值各扫一趟） */
@@ -135,12 +146,15 @@ export function fieldTableOf(forest: readonly Block[]): FieldTable {
   for (const tag of allTags(forest)) byTag.set(tag.id, declaredFieldIds(tag))
   const kinds = new Map<string, PropKind>()
   const defaults = new Map<string, unknown>()
+  const done = new Map<string, string>()
   for (const def of allPropDefs(forest)) {
     kinds.set(def.id, propKindOf(def))
     const dflt = prop<unknown>(def, DEFAULT_PROP)
     if (dflt !== undefined) defaults.set(def.id, dflt)
+    const doneId = doneChoiceOf(def)
+    if (doneId !== undefined) done.set(def.id, doneId)
   }
-  return { byTag, kinds, defaults }
+  return { byTag, kinds, defaults, done }
 }
 
 /**
@@ -193,13 +207,29 @@ export function readField(block: Block, propId: string, table: FieldTable): Fiel
 }
 
 /**
- * 「任务状态」的派生读法：**值就是属性槽**，没有第二份块字段。
+ * 一块「有哪些字段」的**有序**清单（标签声明在前、自有槽在后）。
  *
- * 它是 `select`（选项＝待办／进行中／完成），三态与值这样对上：
- *   · 值＝「完成」选项 ⇒ `'done'`（做完了）；
+ * 与 `fieldRows` 同一顺序，但不建行——`todoOf` 只需要「第一条完成型属性是谁」，
+ * 不需要选项、显示名这些格子。两处各写一套顺序就会在「多个标签声明同一属性/
+ * 自有属性排在后」时给出不同答案。
+ */
+function fieldIdsInOrder(block: Block, table: FieldTable): string[] {
+  const out: string[] = []
+  for (const tagId of tagIdsOf(block)) {
+    for (const propId of table.byTag.get(tagId) ?? []) if (!out.includes(propId)) out.push(propId)
+  }
+  for (const propId of ownFieldIds(block)) if (!out.includes(propId)) out.push(propId)
+  return out
+}
+
+/**
+ * 「任务」的派生读法：**第一个带「完成」选项的已声明字段**。
+ *
+ * 三态与值这样对上：
+ *   · 值＝该属性 `_done` 标记的选项 ⇒ `'done'`（做完了）；
  *   · 其余任何已声明形态 ⇒ `'todo'`（**是任务、还没做完**）——待办、进行中、
- *     以及**靠标签声明拿到这一栏还没填**的块（读侧缺省读出「待办」）；
- *   · 没有这一栏 ⇒ `undefined`（这块压根不是任务）。
+ *     以及**靠标签声明拿到这一栏还没填**的块（读侧缺省读出缺省项）；
+ *   · 没有任何完成型字段 ⇒ `undefined`（这块压根不是任务）。
  *
  * ⚠️ **判据是「有没有这一栏」（`readField`），不是「有没有值」。** 把「未填」并进
  *    `undefined` 会让刚挂上的任务立刻不算任务 —— 屏幕上画着空心方框、查询查不到它。
@@ -207,17 +237,25 @@ export function readField(block: Block, propId: string, table: FieldTable): Fiel
  * ⚠️ 必须传 `FieldTable`：只认 `_ownProps` 会漏掉**标签声明**那一半，而「任务」这个
  *    种子标签正是用 `declareField` 把这一栏给到成员的。那种块屏幕上是未完成、模型里
  *    却不是任务 —— 同一个块两种答案，且没有任何一层报错。
+ *
+ * ⚠️ **不再认固定的 propId／选项 id**：完成是选项上的 `_done`（值级语义）。
+ *    多个完成型字段同屏时按 `fieldRows` 顺序取第一条（先标签后自有、声明顺序），
+ *    与 gutter 上画出哪一个方框同一个答案。
  */
 export function todoOf(block: Block, table: FieldTable): TodoState | undefined {
-  /**
-   * 定义块没了／不是 select ⇒ **不是任务**（与渲染一致：gutter 上没有定义就不画方框）。
-   * 这里必须问 kind，而不是只看「有没有这一栏」：一条悬空的槽位无法说明它是任务状态
-   * 这一栏（定义被删后值还在，拿别的 kind 的值来判会得到错误的答案）。
-   */
-  if (table.kinds.get(TASK_STATUS_PROP_ID) !== 'select') return undefined
-  const { declared, value } = readField(block, TASK_STATUS_PROP_ID, table)
-  if (!declared) return undefined
-  return value === TASK_STATUS_DONE_ID ? 'done' : 'todo'
+  for (const propId of fieldIdsInOrder(block, table)) {
+    const doneId = table.done.get(propId)
+    if (doneId === undefined) continue
+    /**
+     * 定义块没了／不是 select ⇒ 跳过（与渲染一致：gutter 上没有定义就不画方框）。
+     * 悬空的槽位无法说明它是任务型字段；拿别的 kind 的值来判会得到错误的答案。
+     */
+    if (table.kinds.get(propId) !== 'select') continue
+    const { declared, value } = readField(block, propId, table)
+    if (!declared) continue
+    return value === doneId ? 'done' : 'todo'
+  }
+  return undefined
 }
 
 export type PropKind = 'text' | 'number' | 'date' | 'checkbox' | 'select' | 'ref' | 'url'
@@ -281,6 +319,17 @@ export function choicesOf(def: Block): Block[] {
 }
 
 /**
+ * 这个定义「完成」档的选项 id（`_done`）；没有 ⇒ `undefined`。
+ *
+ * 只认 `select` 的直接子块：`_done` 是选项的值级语义，不是任意块的标记。
+ * 软删的选项不算（它已经不在可选集合里）；坏数据带多个时按兄弟顺序取第一个。
+ */
+export function doneChoiceOf(def: Block): string | undefined {
+  if (propKindOf(def) !== 'select') return undefined
+  return choicesOf(def).find((c) => prop<boolean>(c, DONE_PROP) === true)?.id
+}
+
+/**
  * 一个选项的可见范围（**唯一的可见性来源**）。
  *
  * 三态互斥，所以没有「既 only 又 except」的冲突态，也没有优先级规则。
@@ -290,6 +339,23 @@ export type ChoiceScope = { mode: 'all' } | { mode: 'only'; tags: string[] } | {
 
 /** 选项作用域住在选项块上（系统属性；形状见 `ChoiceScope`） */
 export const CHOICE_SCOPE_PROP = '_choiceScope'
+
+/**
+ * 选项上的「完成」标记（系统属性）：这个值表示这件事做完了。
+ *
+ * 为什么是**值级**而不是属性级：任务语义问的是「这个选项算不算完成」，
+ * 不是「这条属性是不是任务属性」。打在选项上，`doneChoiceOf(def)` 就是唯一的派生；
+ * 自定义的「任务」属性与内置任务状态因此走同一套 ⌘↵／删除线／查询。
+ *
+ * 不变量：**每个定义最多一个**。写入路径（命令）在打标时把兄弟上的标记一并摘掉；
+ * 读侧若遇到坏数据（手写多个）按兄弟顺序取第一个，不抛错。
+ */
+export const DONE_PROP = '_done'
+
+/** `_done` 的形状判据：只有 `true` 算标记；`false` 与「没有这一格」同义 */
+export function isDoneFlag(v: unknown): boolean {
+  return v === true
+}
 
 /**
  * 把一格未知值读成三态作用域；`null` ＝ 形状不认识（命令层据此拒绝写入）。
@@ -830,6 +896,52 @@ export interface GutterField {
   value: unknown
   /** 有没有值。渲染方用它区分「未填」与「已填」，**不是**准入条件 */
   filled: boolean
+  /**
+   * `select`：当前值指向的选项（**含软删**）。渲染方据此取图标与显示名；
+   * 值缺失／值不是选项 id ⇒ 缺席。
+   */
+  choice?: Block
+  /**
+   * 画在块左侧的图标：`select` ＝ 选项 `_icon` ?? 定义 `_icon`。
+   * `checkbox` 不吃这一格——它的图形由勾选状态决定（方框／勾）。
+   */
+  icon?: string
+  /**
+   * `select`：这个字段的「完成」档选项 id（选项带 `_done`）。
+   * 有它 ⇒ 这个槽是**任务型开关**（点一下翻完成，⌘↵ 也认它）；
+   * 没有 ⇒ 一个普通的值，点击打开选项菜单。
+   */
+  doneChoiceId?: string
+}
+
+/** 当前值指向的选项（含软删：值还在，显示不能丢）；不是选项 id ⇒ 缺席 */
+function choiceByValue(def: Block, value: unknown): Block | undefined {
+  if (typeof value !== 'string' || value === '') return undefined
+  return def.children.find((c) => c.id === value)
+}
+
+/** 块左侧画哪个图标：选项自己的 `_icon` 优先，缺省退回定义块上的 `_icon` */
+function gutterIconOf(def: Block, choice: Block | undefined): string | undefined {
+  return (choice ? prop<string>(choice, ICON_PROP) : undefined) ?? prop<string>(def, ICON_PROP)
+}
+
+/** 一行字段 → gutter 上的一件（两个派生入口共用，避免逐行/批量两种形状漂移） */
+function gutterFieldOf(
+  row: { propId: string; def: Block; kind: PropKind; value: unknown; filled: boolean },
+): GutterField {
+  const choice = row.kind === 'select' ? choiceByValue(row.def, row.value) : undefined
+  const icon = gutterIconOf(row.def, choice)
+  const doneChoiceId = row.kind === 'select' ? doneChoiceOf(row.def) : undefined
+  return {
+    propId: row.propId,
+    def: row.def,
+    kind: row.kind,
+    value: row.value,
+    filled: row.filled,
+    ...(choice ? { choice } : {}),
+    ...(icon ? { icon } : {}),
+    ...(doneChoiceId ? { doneChoiceId } : {}),
+  }
 }
 
 /**
@@ -861,7 +973,15 @@ export function gutterFieldsOf(block: Block, forest: readonly Block[]): GutterFi
   for (const row of fieldRows(block, forest)) {
     if (!row.def) continue
     if (uiPositionOf(row.def) !== 'block-left') continue
-    out.push({ propId: row.propId, def: row.def, kind: row.kind, value: row.value, filled: row.filled })
+    out.push(
+      gutterFieldOf({
+        propId: row.propId,
+        def: row.def,
+        kind: row.kind,
+        value: row.value,
+        filled: row.filled,
+      }),
+    )
   }
   return out
 }
@@ -895,13 +1015,16 @@ export function gutterFieldsFor(
       // 没有定义就不知道该画成什么，不进 gutter（与 `fieldRows` 跳过悬空定义同因）
       if (!def) return
       if (uiPositionOf(def) !== 'block-left') return
-      fields.set(propId, {
+      fields.set(
         propId,
-        def,
-        kind: propKindOf(def),
-        value: valueOf(block, propId),
-        filled: hasValue(block, propId),
-      })
+        gutterFieldOf({
+          propId,
+          def,
+          kind: propKindOf(def),
+          value: valueOf(block, propId),
+          filled: hasValue(block, propId),
+        }),
+      )
     }
     for (const tag of resolveTagIds(block, tagById)) for (const propId of declaredFieldIds(tag)) take(propId)
     for (const propId of ownFieldIds(block)) take(propId)

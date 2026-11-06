@@ -3,6 +3,9 @@
  */
 import {
   CHOICE_SCOPE_PROP,
+  DONE_PROP,
+  ICON_PROP,
+  UI_POSITION_PROP,
   clearKeepsField,
   clearValue,
   declareField,
@@ -13,11 +16,13 @@ import {
   mkPropDef,
   normalizeAlias,
   parseChoiceScope,
+  prop,
   propKindOf,
   propLabel,
   setValue,
   undeclareField,
   type Block,
+  type UiPosition,
 } from '../../core/index.ts'
 import { textRuns } from '../../core/model/runs.ts'
 import { t } from '../../core/infra/msg.ts'
@@ -37,9 +42,24 @@ export function propsCommands(
   | 'setChoiceLabel'
   | 'moveChoice'
   | 'setChoiceScope'
+  | 'setChoiceIcon'
+  | 'setChoiceDone'
+  | 'setUiPosition'
   | 'deleteChoice'
 > {
   const find = (id: string): Block | undefined => d.kb.get(id)
+
+  /**
+   * 写/摘一个系统键，并保持「属性袋不留空壳」的既有形状（`{}` 与「没有属性」是两件事）。
+   * `value === undefined` ⇒ 删键。
+   */
+  const patchProp = (b: Block, key: string, value: unknown): void => {
+    const props = { ...(b.props ?? {}) }
+    if (value === undefined) delete props[key]
+    else props[key] = value
+    if (Object.keys(props).length === 0) delete b.props
+    else b.props = props
+  }
 
   const addProp = (blockId: string, propId: string, target: PropTarget): void => {
     const b = find(blockId)
@@ -208,6 +228,41 @@ export function propsCommands(
             b.props = { ...(b.props ?? {}), [CHOICE_SCOPE_PROP]: parsed }
           }
         }),
+      )
+    },
+
+    /** 写选项图标：空串 ＝ 摘掉这一格（无图标） */
+    setChoiceIcon: (choiceId, icon) => {
+      if (!find(choiceId)) return
+      const value = icon.trim()
+      d.run((tx) => tx.patch(choiceId, (b) => patchProp(b, ICON_PROP, value === '' ? undefined : value)))
+    },
+
+    /**
+     * 标记/取消「完成」值：每个定义最多一个。
+     *
+     * 打标时**同一笔事务**摘掉兄弟上的标记——拆成两次写会留下「两个完成值」的中间态，
+     * 而 `todoOf` 只能取第一个（另一个静默失效）。取消只摘这一个，属性随即不再是任务型。
+     */
+    setChoiceDone: (defId, choiceId, done) => {
+      const def = find(defId)
+      if (!def || propKindOf(def) !== 'select' || !def.children.some((c) => c.id === choiceId)) return
+      d.run((tx) => {
+        if (done) {
+          for (const c of def.children) {
+            if (c.id === choiceId || prop<boolean>(c, DONE_PROP) !== true) continue
+            tx.patch(c.id, (b) => patchProp(b, DONE_PROP, undefined))
+          }
+        }
+        tx.patch(choiceId, (b) => patchProp(b, DONE_PROP, done ? true : undefined))
+      })
+    },
+
+    /** 写定义块的快捷入口位置（`panel` ＝ 摘键，回到缺省） */
+    setUiPosition: (defId, position: UiPosition) => {
+      if (!find(defId)) return
+      d.run((tx) =>
+        tx.patch(defId, (b) => patchProp(b, UI_POSITION_PROP, position === 'panel' ? undefined : position)),
       )
     },
 

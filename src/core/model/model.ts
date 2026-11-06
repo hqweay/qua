@@ -155,6 +155,14 @@ export type SystemPropId =
    * 「哪些标签的成员看得到它」。三态一个表达式，不做「按标签分槽的值」。
    */
   | '_choiceScope'
+  /**
+   * 一个**选项块**的「完成」标记（见 `core/props.ts` 的 `doneChoiceOf`）。
+   *
+   * 「哪个值算完成」是值级语义，不是某个固定 propId 的私事：打在选项上，
+   * 自定义的「任务」属性和内置任务状态走同一套 ⌘↵／删除线／查询。
+   * 每个定义最多一个（写入路径保证），读侧取第一个。
+   */
+  | '_done'
   // 自有属性槽：这一块自己登记了哪些属性（见 `core/props.ts` 的 `ownPropIds`）
   | '_ownProps'
   // 字段定义的**编辑位置**（见 `core/props.ts` 的 `uiPositionOf`）

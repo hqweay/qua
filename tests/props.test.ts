@@ -20,6 +20,7 @@ import {
   declaredFieldIds,
   declaredFields,
   DEFAULT_PROP,
+  DONE_PROP,
   ensureTag,
   fieldIdsOf,
   fieldRows,
@@ -263,6 +264,10 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter、s
     [TASK_STATUS_TODO_ID, TASK_STATUS_DOING_ID, TASK_STATUS_DONE_ID, TASK_STATUS_ABANDONED_ID],
   )
   assert.equal(def!.props?._default, TASK_STATUS_TODO_ID, '缺省读出「待办」：刚挂上的任务不用先点一格')
+  // 「完成」是选项上的值级标记，不再靠固定选项 id；图标也是选项自己的数据
+  const done = def!.children.find((c) => c.id === TASK_STATUS_DONE_ID)
+  assert.equal(done?.props?._done, true, '「完成」选项带 `_done`，todoOf 按它判')
+  assert.equal(done?.props?._icon, 'lucide:square-check', '每个值有自己的图标')
 
   const task = ws.blocks.find((b) => hasList(b, 'tag') && plainText(b.content) === '任务')
   assert.ok(task, '标签块应在森林顶层')
@@ -284,11 +289,11 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter、s
 
 test('todoOf：完成 ⇒ done；待办／进行中／有槽没填／**靠标签声明** ⇒ todo；没有这一栏 ⇒ undefined', () => {
   const def = mkPropDef('任务状态', 'select', { [DEFAULT_PROP]: TASK_STATUS_TODO_ID }, TASK_STATUS_PROP_ID)
-  // 选项＝定义块的直接子块（值存选项块 id）；测试里不必是核心 id，判据只认传入的 DONE id
+  // 选项＝定义块的直接子块（值存选项块 id）；「完成」靠选项上的 `_done` 认，不靠固定 id
   def.children = [
     { id: TASK_STATUS_TODO_ID, text: '待办', children: [] },
     { id: TASK_STATUS_DOING_ID, text: '进行中', children: [] },
-    { id: TASK_STATUS_DONE_ID, text: '完成', children: [] },
+    { id: TASK_STATUS_DONE_ID, text: '完成', children: [], props: { [DONE_PROP]: true } },
   ] as Block[]
   const tag = mkTagBlock('任务')
   declareField(tag, TASK_STATUS_PROP_ID)
@@ -314,6 +319,44 @@ test('todoOf：完成 ⇒ done；待办／进行中／有槽没填／**靠标签
   assert.equal(todoOf(none, fields), undefined)
 })
 
+test('完成是选项上的值级标记：自定义「任务」属性也走 todoOf；没有 `_done` 的 select 不算任务', () => {
+  const custom = mkPropDef('我的任务', 'select', {}, 'p-custom')
+  custom.children = [
+    { ...mkBlock('未开始'), id: 'c-open' },
+    { ...mkBlock('搞定', { props: { [DONE_PROP]: true } }), id: 'c-done' },
+  ]
+  const host: Block = { id: 'h', text: '', children: [], props: { 'p-custom': 'c-done' } }
+  assert.equal(todoOf(host, fieldTableOf([custom, host])), 'done', '自定义任务属性与内置任务同一条判据')
+
+  const plain = mkPropDef('优先级', 'select', {}, 'p-plain')
+  plain.children = [{ ...mkBlock('高'), id: 'p1' }]
+  const h2: Block = { id: 'h2', text: '', children: [], props: { 'p-plain': 'p1' } }
+  assert.equal(todoOf(h2, fieldTableOf([plain, h2])), undefined, '没有 `_done` ⇒ 只是普通属性')
+})
+
+test('gutter 派生：select 带当前选项的图标与完成档；未填退回定义图标', () => {
+  const def = mkPropDef(
+    '优先级',
+    'select',
+    { [UI_POSITION_PROP]: 'block-left', _icon: 'lucide:flag' },
+    'p-prio',
+  )
+  def.children = [
+    { ...mkBlock('高', { props: { _icon: 'lucide:arrow-up' } }), id: 'p-hi' },
+    { ...mkBlock('低', { props: { _icon: 'lucide:arrow-down' } }), id: 'p-lo' },
+  ]
+  const host: Block = { id: 'h', text: '', children: [], props: { 'p-prio': 'p-hi' } }
+  const f = gutterFieldsOf(host, [def, host])[0]!
+  assert.equal(f.icon, 'lucide:arrow-up', '选项自己的图标优先')
+  assert.equal(f.choice?.id, 'p-hi', '当前值指向的选项跟着派生出来')
+  assert.equal(f.doneChoiceId, undefined, '没有 `_done` ⇒ 普通值，不画任务开关')
+
+  const empty: Block = { id: 'e', text: '', children: [], props: { _ownProps: ['p-prio'] } }
+  const e = gutterFieldsOf(empty, [def, empty])[0]!
+  assert.equal(e.filled, false)
+  assert.equal(e.icon, 'lucide:flag', '未填 ⇒ 定义块的图标，入口不因没有值而消失')
+})
+
 test('标签声明的字段：屏幕画方框与「模型里是任务」同一个判据（不许一处认、一处不认）', () => {
   /**
    * 这条钉的是这个 bug 的根：`#任务` 用 `declareField` 把「任务状态」给到成员，
@@ -326,6 +369,10 @@ test('标签声明的字段：屏幕画方框与「模型里是任务」同一�
     { [UI_POSITION_PROP]: 'block-left', [DEFAULT_PROP]: TASK_STATUS_TODO_ID },
     TASK_STATUS_PROP_ID,
   )
+  def.children = [
+    { id: TASK_STATUS_TODO_ID, text: '待办', children: [] },
+    { id: TASK_STATUS_DONE_ID, text: '完成', children: [], props: { [DONE_PROP]: true } },
+  ] as Block[]
   const tagBlock = mkTagBlock('任务')
   declareField(tagBlock, TASK_STATUS_PROP_ID)
   const host = tag(mkBlock('打上 #任务、一次没点过'), tagBlock.id)

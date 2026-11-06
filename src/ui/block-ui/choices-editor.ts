@@ -18,15 +18,21 @@
  */
 import { onCommitKeys } from './keys.ts'
 import {
+  DONE_PROP,
+  ICON_PROP,
   choiceScopeOf,
   choiceVisible,
   choicesOf,
   plainText,
+  prop,
   propKindOf,
+  uiPositionOf,
   type Block,
   type ChoiceScope,
+  type UiPosition,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
+import { renderIcon } from '../../view/icons.ts'
 
 /** 写入口（由装配层实现成命令；组件只声明「发生了什么」） */
 export interface ChoiceActions {
@@ -34,6 +40,12 @@ export interface ChoiceActions {
   setLabel: (choiceId: string, label: string) => void
   move: (defId: string, choiceId: string, beforeId: string) => void
   setScope: (choiceId: string, scope: ChoiceScope) => void
+  /** 选项在块左侧的图标（空串＝无图标） */
+  setIcon: (choiceId: string, icon: string) => void
+  /** 标记「完成」值（每个定义最多一个；只传 false 时只摘这一个） */
+  setDone: (defId: string, choiceId: string, done: boolean) => void
+  /** 定义块的快捷入口位置（block-left ＝ 块左侧图标；panel ＝ 只留属性卡） */
+  setUiPosition: (defId: string, position: UiPosition) => void
   remove: (choiceId: string) => void
 }
 
@@ -49,6 +61,8 @@ export interface ChoicesEditorDeps {
   write: ChoiceActions
   /** 标签显示名（`#名`） */
   tagName: (id: string) => string
+  /** 图标选择器（装配层开浮层；未接 ⇒ 图标只读） */
+  pickIcon?: (anchor: DOMRect, current: string, onPick: (icon: string) => void) => void
 }
 
 export class ChoicesEditor {
@@ -89,6 +103,33 @@ export class ChoicesEditor {
       head.appendChild(hint)
     }
     section.appendChild(head)
+
+    /**
+     * **快捷入口位置**：只在属性定义页给（标签视角改的是全局定义，越权）。
+     *
+     * 勾上 ⇒ 这一条属性在每行的块标后画当前值的图标；块的属性卡里**仍然**能改，
+     * 两者读同一份行派生、写同一条命令（`_uiPosition` 只决定入口画在哪）。
+     */
+    if (focusTag === '') {
+      const gutter = document.createElement('label')
+      gutter.className = 'choices-gutter'
+      const box = document.createElement('input')
+      box.type = 'checkbox'
+      box.className = 'prop-check'
+      box.dataset.choiceGutter = '1'
+      box.checked = uiPositionOf(def) === 'block-left'
+      box.addEventListener('change', () => {
+        this.deps.write.setUiPosition(def.id, box.checked ? 'block-left' : 'panel')
+        this.render()
+      })
+      const text = document.createElement('span')
+      text.textContent = t('ui.props.choice.gutter')
+      const hint = document.createElement('span')
+      hint.className = 'choices-hint'
+      hint.textContent = t('ui.props.choice.gutterTitle')
+      gutter.append(box, text, hint)
+      section.appendChild(gutter)
+    }
 
     const visible = this.visibleChoices(def, focusTag)
     if (visible.length === 0) {
@@ -214,6 +255,20 @@ export class ChoicesEditor {
     const controls = document.createElement('span')
     controls.className = 'choice-controls'
     if (full) {
+      /**
+       * 「完成」值：**每个属性最多一个**（命令在同一笔事务里摘兄弟的标记）。
+       * 没标时是一个小圆圈（可点），标上是 ✓ —— 不给整列打勾框，太吵。
+       */
+      const on = prop<boolean>(choice, DONE_PROP) === true
+      const done = this.iconButton(on ? '✓' : '○', t('ui.props.choice.doneTitle'), () => {
+        this.deps.write.setDone(def.id, choice.id, !on)
+        this.render()
+      })
+      done.dataset.choiceDone = on ? '1' : '0'
+      done.classList.add('choice-done')
+      done.setAttribute('aria-pressed', on ? 'true' : 'false')
+      controls.appendChild(done)
+
       const up = this.iconButton('↑', t('ui.props.choice.moveUp'), () => {
         if (index === 0) return
         const before = siblings[index - 1]
@@ -255,7 +310,33 @@ export class ChoicesEditor {
       controls.appendChild(hide)
     }
 
-    row.append(name, badge, controls)
+    /**
+     * **图标预览／入口**：这个值在块左侧长什么样。没有图标时画虚线框——
+     * 它同时是「这里可以选一个图标」的可点提示。
+     *
+     * 图标集是 `view/icons.ts` 的一份数据；浮层由装配层开（`pickIcon`），
+     * 组件只负责「点的是哪一行、选完写哪一格」。
+     */
+    const icon = prop<string>(choice, ICON_PROP) ?? ''
+    const ico = document.createElement('button')
+    ico.type = 'button'
+    ico.className = 'choice-icon'
+    ico.dataset.choiceIcon = '1'
+    ico.title = icon === '' ? t('ui.props.choice.pickIcon') : t('ui.props.choice.iconTitle')
+    renderIcon(ico, icon, 'square-dashed', 'sm')
+    if (editable && this.deps.pickIcon) {
+      ico.addEventListener('click', (e) => {
+        e.preventDefault()
+        this.deps.pickIcon?.(ico.getBoundingClientRect(), icon, (next) => {
+          this.deps.write.setIcon(choice.id, next)
+          this.render()
+        })
+      })
+    } else {
+      ico.disabled = true
+    }
+
+    row.append(ico, name, badge, controls)
     item.appendChild(row)
 
     if (full && this.openScope === choice.id) item.appendChild(this.scopePanel(choice))

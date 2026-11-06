@@ -83,6 +83,25 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
     app.setChoiceScope(choiceId, scope)
     return true
   },
+  'core.props/set-choice-icon': (a, app) => {
+    const choiceId = S(a.choiceId)
+    if (!choiceId) return false
+    app.setChoiceIcon(choiceId, S(a.icon))
+    return true
+  },
+  'core.props/set-choice-done': (a, app) => {
+    const defId = S(a.defId)
+    const choiceId = S(a.choiceId)
+    if (!defId || !choiceId) return false
+    app.setChoiceDone(defId, choiceId, a.done === true)
+    return true
+  },
+  'core.props/set-ui-position': (a, app) => {
+    const defId = S(a.defId)
+    if (!defId) return false
+    app.setUiPosition(defId, a.position === 'block-left' ? 'block-left' : 'panel')
+    return true
+  },
   'core.props/delete-choice': (a, app) => {
     const choiceId = S(a.choiceId)
     if (!choiceId) return false

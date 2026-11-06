@@ -134,8 +134,11 @@ import {
  *            旧库的布尔值对新判据（认「完成」选项 id）不再成立 ⇒ 作废重 seed，不写迁移。
  * v36 → v37：**分组键升为视图配置顶层位**（`groupBy`／`groupOrder`，记录视图共用），
  *            看板配置不再自带 `groupBy`。旧库的看板配置形状换了位置 ⇒ 作废重 seed，不写迁移。
+ * v37 → v38：**「完成」从固定的任务状态选项改成选项上的 `_done`**（值级语义），
+ *            同时选项可以带 `_icon`（列表左侧的图标）。旧库的任务状态选项没有这个标记，
+ *            新判据会把它读成「不是任务」（勾选与删除线一起消失）⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 37
+export const WORKSPACE_VERSION = 38
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

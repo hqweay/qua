@@ -523,6 +523,13 @@
 .blk .identity.todo-box:hover {
   color: var(--ui-text-secondary);
 }
+/* 普通 select 的 gutter 入口：点开取值菜单（不是翻转） */
+.blk .identity.prop-mark {
+  cursor: pointer;
+}
+.blk .identity.prop-mark:hover {
+  color: var(--ui-text-secondary);
+}
 .blk .identity.tag-mark {
   opacity: 0.8;
   cursor: default;
@@ -1805,6 +1812,56 @@
 .choice-x:disabled {
   opacity: 0.35;
   cursor: default;
+}
+/* 选项图标：预览 + 选择入口；没图标时画虚线框（「这里可以选一个」） */
+.choice-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 20px;
+  block-size: 20px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-sm);
+  background: none;
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.choice-icon:hover:not(:disabled) {
+  border-color: var(--ui-border);
+  color: var(--ui-text);
+}
+.choice-icon:disabled {
+  cursor: default;
+}
+.choice-done[data-choice-done='1'] {
+  color: var(--ui-accent);
+}
+.choices-gutter {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  font-size: var(--ui-fs-sm);
+  color: var(--ui-text-secondary);
+}
+/* select 单元格：当前值图标 + 原生下拉。没有图标时不加壳，保持原样 */
+.prop-select {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.prop-select .prop-input {
+  min-width: 0;
+}
+.prop-select-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--ui-text-tertiary);
 }
 .choice-scope-panel {
   display: flex;
