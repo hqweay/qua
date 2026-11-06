@@ -918,7 +918,7 @@ export const MSG = {
   'ui.block.foldCollapse': '折叠（点击）',
   'ui.block.foldLine': '折叠 / 展开子块（点击）',
   'cmd.editor.toggle-children-collapse': '折叠 / 展开子块',
-  'ui.block.focusHint': '点击聚焦到此块 · Shift+点击在右槽打开 · ⌘/Ctrl+点击在新页签打开 · 拖动移动 · 右键打开菜单',
+  'ui.block.focusHint': '点击聚焦到此块 · Shift+点击在右槽打开 · ⌘/Ctrl+点击在新页签打开 · ⌥+点击看属性 · 拖动移动 · 右键打开菜单',
   'ui.block.schemaHint': '属性定义（正文是定义名，不能在行内改）· 点击聚焦 · 拖动移动 · 右键打开菜单',
   'ui.block.menuHint': '右键打开块菜单',
   'ui.block.handleHint': '拖拽重排 · 右键打开块菜单',

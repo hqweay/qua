@@ -390,6 +390,11 @@ export interface ViewEvents {
    */
   focusBlock?: (blockId: string) => void
   /**
+   * **⌥+左键点块标**：看这一块的属性（打开属性面板并钉住它）。
+   * 与落点无关、不入历史；未接 ⇒ 不做事（不退化成聚焦）。
+   */
+  inspectBlock?: (blockId: string) => void
+  /**
    * **打开一个块**：`place` 已把 Shift／⌘/Ctrl 翻译好（中心／右槽／新 tab）。
    *
    * 事件层只报落点，不认识「侧槽」「tab」这些具体语义；生产装配统一接到
@@ -3939,6 +3944,11 @@ export class BlockEditor {
       focusBlock: (id) => {
         this.commitLeavingLine(id)
         this.events.focusBlock?.(id)
+      },
+      // ⌥+点块标 = 看这一块的属性。与聚焦同一条编辑边界（先交出当前行）
+      inspectBlock: (id) => {
+        this.commitLeavingLine(id)
+        this.events.inspectBlock?.(id)
       },
       // 打开落点（Shift／⌘）由装配层分流；事件层只把 place 交上去
       // ⚠️ 没接就不做事（不再退化成中心 zoom：那会让缺入口看起来像成功）

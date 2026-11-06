@@ -2533,6 +2533,11 @@ function viewEvents(
     // 所以「点块标进去」与「点面包屑出来」共用一套语义，没有第二种入口。
     focusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, via),
     /**
+     * **⌥+点块标 ＝ 看这一块的属性**：与块菜单「看属性」同一条命令，
+     * 于是钉块、不换中心、不动槽、不入历史只有一份实现。
+     */
+    inspectBlock: (blockId) => void registry.invoke('core.block/inspect', { blockId }, via),
+    /**
      * **gutter 上普通 select 的取值菜单**：贴着那枚图标弹出。
      *
      * 行由装配层现画（选项身份/作用域只有库读得准），选中后走

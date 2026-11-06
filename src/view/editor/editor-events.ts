@@ -284,6 +284,13 @@ export interface EditorBridge {
    */
   focusBlock: (blockId: string) => void
   /**
+   * **⌥+左键点块标**：看这一块的属性（打开属性面板并钉住它）。
+   *
+   * 与 `focusBlock`／`openBlock` 不是同一类：它是「看这一处自己的第二层」，
+   * 不改落点、不入历史。省略 ⇒ 不做事（不退化成聚焦：那会让缺入口看起来像成功）。
+   */
+  inspectBlock?: (blockId: string) => void
+  /**
    * 打开一个块：`place` 已把 Shift／⌘/Ctrl 翻译好，事件层不再认识侧槽与 tab。
    * 省略 ⇒ 非中心落点什么都不做（与「缺入口就让它看得见地缺」同一条）。
    */
@@ -807,8 +814,12 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     if (marker?.dataset.focusFor) {
       // Shift+左键 ⇒ 钉到右槽（同一个入口可逆：已钉住则取消）
       // ⌘/Ctrl+左键 ⇒ 在新 tab 打开（浏览器同一条手势）；普通左键＝当前 tab 聚焦
+      // ⌥+左键 ⇒ 看这一块的属性（第二层：不开新面、不改落点、不入历史）
       const place = openPlaceOf(e)
-      if (place === 'center') br.focusBlock(marker.dataset.focusFor)
+      if (e.altKey) {
+        e.preventDefault()
+        br.inspectBlock?.(marker.dataset.focusFor)
+      } else if (place === 'center') br.focusBlock(marker.dataset.focusFor)
       else {
         e.preventDefault()
         br.openBlock?.(marker.dataset.focusFor, place)

@@ -23742,6 +23742,29 @@ await check('T265 块下属性行：有值才出现；点一项打开属性面�
       '再点同一项应保持面板打开（这一条入口不是开关）',
     )
 
+    // ④ ⌥+点块标 ⇒ 打开属性面板（第二层：不改中心、不入历史）
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(250)
+    assert(!(await page.evaluate(() => Boolean(document.querySelector('.drawer')))), '前置：Esc 应关掉面板')
+    const centerBeforeAlt = await page.evaluate(() => window.__qua.snapshot().activeId)
+    await page.locator(`.blk[data-block-id="${fx.host}"] [data-focus-for]`).click({ modifiers: ['Alt'] })
+    await page.waitForTimeout(350)
+    const alt = await page.evaluate((author) => {
+      const row = document.querySelector(`.drawer .prop-row[data-prop-id="${author}"]`)
+      const mk = document.querySelector(
+        '.blk[data-block-id="' + window.__qua.snapshot().activeId + '"] [data-focus-for]',
+      )
+      return {
+        open: Boolean(document.querySelector('.drawer')),
+        row: Boolean(row),
+        active: window.__qua.snapshot().activeId,
+        hint: mk?.title ?? '',
+      }
+    }, fx.author)
+    assert(alt.open && alt.row, `⌥+点块标要打开属性面板并列出这一块：${JSON.stringify(alt)}`)
+    assert(alt.active === centerBeforeAlt, `⌥+点块标不改中心：${centerBeforeAlt} → ${alt.active}`)
+    assert(alt.hint.includes('看属性'), `块标提示要写明 ⌥+点击看属性：${JSON.stringify(alt.hint)}`)
+
     // ③ 空块不出这一行：同一个标签下另起一块，没有值
     const bare = await page.evaluate((tagId) => {
       const inv = (name, args = {}) => window.__qua.invoke(name, args)
