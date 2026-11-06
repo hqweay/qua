@@ -75,7 +75,7 @@ test('addView(board)：没有 select/checkbox 属性 ⇒ 拒绝并提示，不�
   assert.match(toasts[0]!, /按一个属性分组/, `提示要指到「缺什么」：${toasts[0]}`)
 })
 
-test('addView(board)：有分组字段时照常建，并把分组列写进配置', () => {
+test('addView(board)：有分组属性时照常建，并把分组列写进配置', () => {
   const root = mkBlock('')
   root.id = 'root'
   const status = mkPropDef('状态', 'select')

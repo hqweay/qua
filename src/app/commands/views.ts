@@ -138,7 +138,7 @@ export function viewConfigCommands(
          * 退到第一个 `checkbox`（真/假两列也说得通）。
          *
          * ⚠️ 一个都没有 ⇒ **当场拒绝**，不写库：没有分组的看板是「一堆没有列的卡」，
-         * 用户看到的是「点了新建看板，什么也没发生」。不如明说「先有一个分组字段」。
+         * 用户看到的是「点了新建看板，什么也没发生」。不如明说「先按一个属性分组」。
          */
         const groupBy = firstDefOf(d, 'select') ?? firstDefOf(d, 'checkbox')
         if (!groupBy) {
