@@ -45,10 +45,11 @@ export function taskStatusChoices(): Block[] {
     props: { [ICON_PROP]: `lucide:${name}` },
   })
   return [
-    { ...mkBlock(TASK_TODO_LABEL, icon('square')), id: TASK_STATUS_TODO_ID },
-    { ...mkBlock(TASK_DOING_LABEL, icon('square-dashed')), id: TASK_STATUS_DOING_ID },
-    { ...mkBlock(TASK_DONE_LABEL, icon('square-check')), id: TASK_STATUS_DONE_ID },
-    { ...mkBlock(TASK_ABANDONED_LABEL, icon('square-x')), id: TASK_STATUS_ABANDONED_ID },
+    // 非方框图标：状态标记读作「当前状态」，不是 checkbox（方框留给普通 `_check`）
+    { ...mkBlock(TASK_TODO_LABEL, icon('circle')), id: TASK_STATUS_TODO_ID },
+    { ...mkBlock(TASK_DOING_LABEL, icon('loader-circle')), id: TASK_STATUS_DOING_ID },
+    { ...mkBlock(TASK_DONE_LABEL, icon('circle-check')), id: TASK_STATUS_DONE_ID },
+    { ...mkBlock(TASK_ABANDONED_LABEL, icon('circle-x')), id: TASK_STATUS_ABANDONED_ID },
   ]
 }
 
@@ -68,7 +69,7 @@ export function taskStatusVocabulary(): Block {
       [USE_PROP]: 'status',
       [CHECK_PROP]: { on: TASK_STATUS_DONE_ID, off: TASK_STATUS_TODO_ID },
       // 未填时 gutter 上画定义块自己的图标（与「待办」同形），入口不会因没有值而消失
-      [ICON_PROP]: 'lucide:square',
+      [ICON_PROP]: 'lucide:circle',
     },
     TASK_STATUS_PROP_ID,
   )

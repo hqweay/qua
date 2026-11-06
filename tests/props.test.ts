@@ -270,7 +270,7 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter、s
   assert.equal(def!.props?._use, 'status')
   assert.deepEqual(def!.props?._check, { on: TASK_STATUS_DONE_ID, off: TASK_STATUS_TODO_ID })
   const done = def!.children.find((c) => c.id === TASK_STATUS_DONE_ID)
-  assert.equal(done?.props?._icon, 'lucide:square-check', '每个值有自己的图标')
+  assert.equal(done?.props?._icon, 'lucide:circle-check', '每个值有自己的图标（非方框，读作状态）')
 
   const task = ws.blocks.find((b) => hasList(b, 'tag') && plainText(b.content) === '任务')
   assert.ok(task, '标签块应在森林顶层')

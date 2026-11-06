@@ -5515,8 +5515,34 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
     `悬停块标不该动身份图标：${JSON.stringify(hovered)}`,
   )
 
+  // 状态标记：普通点击翻完成/取消；⌥+点击开状态菜单，选「进行中」
+  await page.evaluate((id) => {
+    document
+      .querySelector(`#editor > .sec > .blk[data-block-id="${id}"] > .left > .todo-box`)
+      ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, altKey: true }))
+  }, deep)
+  await page.waitForFunction(() => document.querySelectorAll('.layer-item').length > 0)
+  const statusRows = await page.evaluate(() =>
+    [...document.querySelectorAll('.layer-item')].map((r) => r.querySelector('.layer-label')?.textContent ?? ''),
+  )
+  assert(
+    statusRows.includes('待办') && statusRows.includes('进行中') && statusRows.includes('完成'),
+    `⌥+点击应打开状态菜单：${JSON.stringify(statusRows)}`,
+  )
+  await page.locator('.layer-item', { hasText: '进行中' }).first().click()
+  await page.waitForFunction(
+    (id) =>
+      document
+        .querySelector(`#editor > .sec > .blk[data-block-id="${id}"] > .left > .todo-box`)
+        ?.getAttribute('data-icon') === 'lucide:loader-circle',
+    deep,
+  )
+  const doing = await readRow(deep)
+  assert(doing.todo === 'todo', '进行中仍是未完成（不划线）')
+  assert(!doing.boxClasses.includes('check-box'), '任务状态仍是状态标记，不是普通 checkbox')
+
   await ctx.close()
-  return `todo/done/深缩进（depth ${deepRow.depth}）三种：块标恒为圆点＋可聚焦，方框在身份图标上（.ico ${deepRow.boxW}）`
+  return `todo/done/深缩进（depth ${deepRow.depth}）＋⌥+点击状态菜单（进行中）：块标恒为圆点，状态标记在身份图标上（.ico ${deepRow.boxW}）`
 })
 
 await check('T205 取消待办：摘掉这一栏就真的不是任务了（`/待办` 的逆；标签声明的另说）', async () => {
