@@ -22592,8 +22592,27 @@ await check('T260 转引用守卫：受保护块 toast 不写库；块菜单只�
   )
   assert(!afterB.some((r) => r.t === 'ref'), `未命中区域不许出现 ref run：${JSON.stringify(afterB)}`)
 
+  // ④ ⌥ 拖选不是点击：释放在命中字上也不许转换（拖选结束时选区非空）
+  const dragBefore = await contentOf('mention-guard-b')
+  const dragFrom = await wordRect('mention-guard-b', '清单')
+  const hitB = await hitOf('mention-guard-b')
+  assert(dragFrom && hitB, `前置：B 的拖选两端都要量得出坐标：${JSON.stringify({ dragFrom, hitB })}`)
+  await page.keyboard.down('Alt')
+  await page.mouse.move(dragFrom.x, dragFrom.y)
+  await page.mouse.down()
+  await page.mouse.move(hitB.x, hitB.y, { steps: 6 })
+  await page.mouse.up()
+  await page.keyboard.up('Alt')
+  const dragged = await page.evaluate(() => (document.getSelection()?.toString() ?? '').length)
+  assert(dragged > 0, `前置：⌥ 拖过一段要产生选区（得到 ${dragged} 个字符）`)
+  const afterDrag = await contentOf('mention-guard-b')
+  assert(
+    JSON.stringify(afterDrag) === JSON.stringify(dragBefore),
+    `⌥ 拖选不该转引用：${JSON.stringify({ before: dragBefore, after: afterDrag })}`,
+  )
+
   await ctx.close()
-  return '受保护块给 toast 且模型不变；菜单在命中处出现、点它转换，不在命中处不出现；未命中 ⌥ 单击零写入'
+  return '受保护块给 toast 且模型不变；菜单在命中处出现、点它转换，不在命中处不出现；未命中 ⌥ 单击零写入；⌥ 拖选不转换'
 })
 
 const known = results.filter((r) => !r.ok && r.known)

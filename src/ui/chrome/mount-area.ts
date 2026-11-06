@@ -659,6 +659,13 @@ export class MountArea {
    */
   private readonly onHitClick = (e: MouseEvent): void => {
     if (!e.altKey || !this.mentionTo) return
+    /**
+     * **拖选不是点击**：按住 ⌥ 拖过一段文本，释放在同一行时浏览器仍会派发一次 `click`。
+     * 那时落点可能正好停在命中字上，于是「选了一段」变成「把一段转成引用」。
+     * 拖选结束时选区非空且未折叠，据此把这一枪挡掉（单击落下的光标永远是折叠的）。
+     */
+    const sel = document.getSelection()
+    if (sel && !sel.isCollapsed) return
     const target = e.target instanceof Element ? e.target : null
     const blk = target?.closest<HTMLElement>('.blk')
     const blockId = blk?.dataset?.['blockId']
