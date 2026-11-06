@@ -136,7 +136,7 @@ export const COMMANDS: CommandDecl[] = [
 
   /* ---- 日记（今日是落点，不是特例；：日期只读、一天一个） ---- */
   { name: 'core.journal/today', title: t('cmd.journal.today'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { date: { type: 'string' } }, keywords: ['journal', 'today', 'daily'], tile: { icon: 'lucide:calendar' } },
-  { name: 'core.journal/open', title: t('cmd.journal.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), hidden: true, args: { date: { type: 'string' }, place: { type: 'string', enum: ['center', 'dock', 'tab'] } }, keywords: ['journal', 'date', 'open', 'dock', 'tab'] },
+  { name: 'core.journal/open', title: t('cmd.journal.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), hidden: true, args: { date: { type: 'string' }, place: { type: 'string', enum: ['center', 'dock', 'tab', 'inspect'] } }, keywords: ['journal', 'date', 'open', 'dock', 'tab'] },
   { name: 'core.journal/prev', title: t('cmd.journal.prev'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), keywords: ['journal', 'prev', 'yesterday'], tile: { icon: 'lucide:chevron-left' } },
   { name: 'core.journal/next', title: t('cmd.journal.next'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), keywords: ['journal', 'next', 'tomorrow'] },
   { name: 'core.journal/review', title: t('cmd.journal.review'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { days: { type: 'number' } }, keywords: ['review', 'retro', 'days'] },

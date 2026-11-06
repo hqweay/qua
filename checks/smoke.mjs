@@ -23814,6 +23814,44 @@ await check('T265 块下属性行：有值才出现；点一项打开属性面�
   }
 })
 
+/**
+ * **T266｜⌥ 在「不是块标」的入口上也成立**（手势统一的回归钉子）。
+ *
+ * 日历日期不是块：它先由 `core.journal/open` **幂等物化**出那一天的块，
+ * 再把属性面板钉上去。判据是「那一天真的存在了 ＋ 面板开的是它 ＋ 中心没动」。
+ */
+await check('T266 ⌥+点日期：先物化那一天再开它的属性面板；中心不动', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  try {
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const before = await page.evaluate(() => window.__qua.snapshot().activeId)
+    const r = await page.evaluate(() =>
+      window.__qua.invoke('core.journal/open', { date: '2020-01-02', place: 'inspect' }),
+    )
+    assert(r?.ok === true && r?.handled === true, `⌥+点日期：命令应被接受（place: inspect）：${JSON.stringify(r)}`)
+    await page.waitForTimeout(450)
+    const after = await page.evaluate(() => {
+      const drawer = document.querySelector('.drawer')
+      const j = window.__qua.__editor.store.blocks.find((b) => b.props?._date === '2020-01-02')
+      return {
+        open: Boolean(drawer),
+        title: drawer?.querySelector('.drawer-head')?.textContent ?? '',
+        active: window.__qua.snapshot().activeId,
+        journalId: j?.id ?? '',
+      }
+    })
+    assert(after.journalId !== '', `要先物化那一天：${JSON.stringify(after)}`)
+    assert(after.open, `属性面板要开起来：${JSON.stringify(after)}`)
+    assert(after.title.includes('2020'), `面板要钉在打开的那一天：${JSON.stringify(after)}`)
+    assert(after.active === before, `⌥+点日期不改中心：${before} → ${after.active}`)
+
+    return `物化 2020-01-02 → 面板钉在它上；中心仍是 ${before.slice(0, 6)}…`
+  } finally {
+    await ctx.close()
+  }
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 
