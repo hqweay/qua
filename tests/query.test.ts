@@ -965,3 +965,13 @@ test('isQueryNode / canonical / isQuerySpec：today 原子与 todayFrom 锚', ()
   )
   assert.equal(isQuerySpec({ where: { today: { offset: 0 } }, todayFrom: 'nope' }), false, '锚只有一种取值')
 })
+
+test('role 条件按值分发：page 问「露面里有没有 page」，未知值不命中', () => {
+  const { blocks } = fixture()
+  const spec: QuerySpec = { where: { role: 'page' } }
+  assert.deepEqual(runQuery(spec, { blocks }).map((h) => h.blockId), ['p1', 'p2'], '页 = _lists 里 page 的块')
+  assert.deepEqual(queryByIndex(rebuild(blocks), blocks, spec, {}), runQuery(spec, { blocks }), '两条路径同解')
+  // 日记天与标签块不是页；{is:$self} 之类不受影响
+  const unknown = { where: { role: 'nope' } } as unknown as QuerySpec
+  assert.deepEqual(runQuery(unknown, { blocks }), [], '未知 role 不命中（不抛，形状宽容、语义拒绝）')
+})

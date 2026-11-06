@@ -1831,16 +1831,17 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
     const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
+    // 值返回的先序遍历：先找到的那份查询块获胜，外层不许覆盖
+    // （整片森林上还有别的顶层查询块；命中即层层 return，不再看后面的兄弟）
     const walk = (list) => {
       for (const b of list) {
-        if (b.props?._query) {
-          found = b.id
-          return
-        }
-        walk(b.children)
+        if (b.props?._query) return b.id
+        const r = walk(b.children)
+        if (r) return r
       }
+      return ''
     }
-    walk(window.__qua.__editor.store.blocks)
+    found = walk(window.__qua.__editor.store.blocks)
     return found
   })
   assert(qid, '前置：这一页里应有一个查询块')
@@ -2459,16 +2460,17 @@ await check('T195 查询在正文内联渲染：不打开就在原位出结果�
     const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
+    // 值返回的先序遍历：先找到的那份查询块获胜，外层不许覆盖
+    // （整片森林上还有别的顶层查询块；命中即层层 return，不再看后面的兄弟）
     const walk = (list) => {
       for (const b of list) {
-        if (b.props?._query) {
-          found = b.id
-          return
-        }
-        walk(b.children)
+        if (b.props?._query) return b.id
+        const r = walk(b.children)
+        if (r) return r
       }
+      return ''
     }
-    walk(window.__qua.__editor.store.blocks)
+    found = walk(window.__qua.__editor.store.blocks)
     return found
   })
   assert(qid, '前置：这一页里应有一个查询块')
@@ -2742,16 +2744,17 @@ await check('T196 查询块在右槽窗口也画结果：同一台 ViewHost；�
     const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
+    // 值返回的先序遍历：先找到的那份查询块获胜，外层不许覆盖
+    // （整片森林上还有别的顶层查询块；命中即层层 return，不再看后面的兄弟）
     const walk = (list) => {
       for (const b of list) {
-        if (b.props?._query) {
-          found = b.id
-          return
-        }
-        walk(b.children)
+        if (b.props?._query) return b.id
+        const r = walk(b.children)
+        if (r) return r
       }
+      return ''
     }
-    walk(window.__qua.__editor.store.blocks)
+    found = walk(window.__qua.__editor.store.blocks)
     return found
   })
   assert(qid, '前置：页里应有查询块')
@@ -15314,16 +15317,17 @@ await check('T158 查询源也能是表格：行＝冻结命中（不折叠祖�
     const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
+    // 值返回的先序遍历：先找到的那份查询块获胜，外层不许覆盖
+    // （整片森林上还有别的顶层查询块；命中即层层 return，不再看后面的兄弟）
     const walk = (list) => {
       for (const b of list) {
-        if (b.props?._query) {
-          found = b.id
-          return
-        }
-        walk(b.children)
+        if (b.props?._query) return b.id
+        const r = walk(b.children)
+        if (r) return r
       }
+      return ''
     }
-    walk(window.__qua.__editor.store.blocks)
+    found = walk(window.__qua.__editor.store.blocks)
     return found
   })
   assert(qid, '前置：库里有一个查询块')
@@ -18178,6 +18182,52 @@ await check('M3 设置面：⌘, 开且去重；捕获键位立即生效且重�
   return '⌘, 开且去重；主题直选；捕获 ⌘U 即时生效；⌘W 被拒；重启后 ⌘Z 失效、⌘U 撤销'
 })
 
+/* ---------------------------------------------------------------- 全部页面（role 谓词） */
+
+/**
+ * **「全部页面」工作台**＝一个查询块：条件问「页」这份身份（露面里有没有 page），
+ * 不是第二个目录实体。种子自带一份；打开它 ＝ 打开工作台。
+ */
+await check('M5 种子「全部页面」：role 条件按露面挑页，树上可改', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  const qid = await page.evaluate(() => {
+    let found = ''
+    const walk = (list) => {
+      for (const b of list) {
+        if (!found && b.props?._query?.where?.role === 'page') found = b.id
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return found
+  })
+  assert(qid !== '', '前置：种子应有「全部页面」查询块')
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
+  await page.waitForTimeout(600)
+
+  const st = await page.evaluate(() => ({
+    count: Number((document.querySelector('.queryview-count')?.textContent ?? '').match(/\d+/)?.[0] ?? '0'),
+    names: [...document.querySelectorAll('.queryview-editor .blk .tx')].map((e) => e.textContent ?? ''),
+  }))
+  assert(st.count === 5, `种子 5 页应全部命中（实际 ${st.count}）`)
+  assert(
+    st.names.some((x) => x.includes('产品设计')) && st.names.some((x) => x.includes('输入面')),
+    `结果里是页不是别的：${JSON.stringify(st.names.slice(0, 3))}`,
+  )
+
+  // 树上：角色行有两个值位（日记／页），当前是「页」——语言进了值域，树就要跟
+  await ensureTree(page)
+  const roleSel = await page.evaluate(
+    () => document.querySelector('.queryview-tree .qt-row[data-qt-row="role"] select[data-qt="role"]')?.value ?? '',
+  )
+  assert(roleSel === 'page', `角色行当前值应是「页」：${roleSel}`)
+
+  await ctx.close()
+  return '种子全部页面：5 页命中、树上行是 role=page'
+})
+
 /**
  * **挂载区的「＋」只建 local 查询**：不弹菜单、不建块、不产生 linked 指针。
  *
@@ -18376,16 +18426,17 @@ await check('T197 全部收起／全部展开：一个按钮、文案随状态�
     const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
+    // 值返回的先序遍历：先找到的那份查询块获胜，外层不许覆盖
+    // （整片森林上还有别的顶层查询块；命中即层层 return，不再看后面的兄弟）
     const walk = (list) => {
       for (const b of list) {
-        if (b.props?._query) {
-          found = b.id
-          return
-        }
-        walk(b.children)
+        if (b.props?._query) return b.id
+        const r = walk(b.children)
+        if (r) return r
       }
+      return ''
     }
-    walk(window.__qua.__editor.store.blocks)
+    found = walk(window.__qua.__editor.store.blocks)
     return found
   })
   assert(qid, '前置：这一页里应有一个查询块')

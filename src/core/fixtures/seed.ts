@@ -18,6 +18,7 @@
  */
 import {
   declareField,
+  mkQueryBlock,
   mkTagBlock,
   shiftISO,
   TASK_STATUS_ABANDONED_ID,
@@ -307,6 +308,16 @@ export function seedWorkspace(): Workspace {
 
   const built = [journal, yesterday, dayBefore, day3, day4, day5, p1, p2, p3, p4, p5]
   const blocks = built.map((b) => b.page)
+
+  /**
+   * **全部页面**＝一个查询块。要「所有页在一处看」的工作台，造的是**条件**（`role:'page'`
+   * 问的就是「页」这份身份判据），不是第二个目录实体——列表本身能排序能切片，因为它是查询。
+   */
+  const allPages = mkQueryBlock({ name: '全部页面', spec: { where: { role: 'page' } }, icon: 'lucide:list' })
+  allPages.created = SEED_AT
+  allPages.modified = SEED_AT
+  blocks.push(allPages)
+
   // 核心词汇（定义块 ＋ 标签块）先在森林顶层就位：`ensureTag` 要能找到 `任务` 并复用，
   // 否则种子会建出第二个同名标签；`[[ ]]` 的解析也要在这之后（标签同样占地址）。
   blocks.push(...coreVocabulary())

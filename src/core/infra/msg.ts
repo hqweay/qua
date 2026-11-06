@@ -496,6 +496,7 @@ export const MSG = {
   'ui.query.kind.role': '角色',
   'ui.query.kind.ref': '引用',
   'ui.query.role.journal': '日记',
+  'ui.query.role.page': '页',
   'ui.query.tree.summary': '条件 · {count} 条',
   'ui.query.tree.count': '{count} 条',
   'ui.query.tree.regroup': '再组合',

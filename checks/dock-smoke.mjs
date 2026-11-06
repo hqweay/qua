@@ -1920,16 +1920,17 @@ await check('A28 日记段与面板有可见的分层：段间留白/分隔线�
     const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
+    // 值返回的先序遍历：先找到的那份查询块获胜，外层不许覆盖
+    // （整片森林上还有别的顶层查询块；命中即层层 return，不再看后面的兄弟）
     const walk = (list) => {
       for (const b of list) {
-        if (b.props?._query) {
-          found = b.id
-          return
-        }
-        walk(b.children)
+        if (b.props?._query) return b.id
+        const r = walk(b.children)
+        if (r) return r
       }
+      return ''
     }
-    walk(window.__qua.__editor.store.blocks)
+    found = walk(window.__qua.__editor.store.blocks)
     return found
   })
   assert(qid, '前置：应有一个查询块')

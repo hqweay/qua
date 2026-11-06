@@ -466,7 +466,19 @@ export class QueryTree {
         break
       case 'role':
         el.append(
-          selectEl([{ value: 'journal', label: t('ui.query.role.journal') }], row.role, () => {}, 'qt-value', 'role'),
+          selectEl(
+            [
+              { value: 'journal', label: t('ui.query.role.journal') },
+              { value: 'page', label: t('ui.query.role.page') },
+            ],
+            row.role,
+            (next) => {
+              row.role = next === 'page' ? 'page' : 'journal'
+              this.paint()
+            },
+            'qt-value',
+            'role',
+          ),
         )
         break
       case 'path':

@@ -10,7 +10,7 @@
  * ⚠️ 接索引后本文件的签名不变：`evaluateQuery`（判定与顺序）由两条路径共用，
  *    索引路径见 `index-port.ts` 的 `queryByIndex`；`QuerySpec` 仍是那个 canonical JSON。
  */
-import { isJournalBlock, isPropDefBlock, primaryAliasOf, type Block } from '../model/model.ts'
+import { hasList, isJournalBlock, isPropDefBlock, primaryAliasOf, type Block } from '../model/model.ts'
 import { plainText } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
 import { findPath } from '../model/tree.ts'
@@ -128,10 +128,11 @@ export type QueryNode =
    *    `{role:'journal'}` 问的是**身份**（这块是不是日记）。所以「某一天下面」
    *    不再是 `{journal:日期}`，而是 `{up:{all:[{role:'journal'},{prop:{_date,eq}}]}}`：
    *    方向与条件正交之后，它可进 `any`／`not`，也不偷换候选集。
-   * ⚠️ 逐值分发到**既有唯一判据**，不另设第二份答案：journal 的判据只有「`_date` 在不在」。
-   *    值域首版只实现 `journal`（有日期表可查）；`page`／`tag` 留轴，进值域时在此续支。
+   * ⚠️ 逐值分发到**既有唯一判据**，不另设第二份答案：journal 的判据只有「`_date` 在不在」，
+   *    page 的判据只有「`_lists` 里有没有 `page`」——身份由数据推出，查询问的就是这份判据。
+   *    `tag` 留轴，有真消费者时在此续支。
    */
-  | { role: 'journal' }
+  | { role: 'journal' | 'page' }
   | { all: QueryNode[] }
   | { any: QueryNode[] }
   | { not: QueryNode }
@@ -632,8 +633,10 @@ function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher {
 }
 
 /** role 逐值分发到**既有唯一判据**，不另设第二份答案；进新值域时在此续支 */
-function roleMatches(role: 'journal', b: Block): boolean {
-  return role === 'journal' ? isJournalBlock(b) : false
+function roleMatches(role: 'journal' | 'page', b: Block): boolean {
+  if (role === 'journal') return isJournalBlock(b)
+  if (role === 'page') return hasList(b, 'page')
+  return false
 }
 
 /**

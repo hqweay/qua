@@ -25,7 +25,7 @@ export type TreeRow =
   | { kind: 'prop'; field: string; op: DraftOp; value: string }
   | { kind: 'ref'; target: string }
   | { kind: 'is'; target: string }
-  | { kind: 'role'; role: 'journal' }
+  | { kind: 'role'; role: 'journal' | 'page' }
   /**
    * 路径（方向）行：`{up|down|near:{is:id}}` 或某一天（只有 `up` 有天的形状）。
    * `dir` 缺省 `up`（旧草稿兼容读法：`dir in row === false` 视作 `'up'`）。
@@ -139,7 +139,9 @@ export function treeRowOf(node: QueryNode): TreeRow | null {
     return null
   }
   if ('is' in node) return { kind: 'is', target: node.is }
-  if ('role' in node) return node.role === 'journal' ? { kind: 'role', role: 'journal' } : null
+  if ('role' in node) {
+    return node.role === 'journal' || node.role === 'page' ? { kind: 'role', role: node.role } : null
+  }
   if ('up' in node) return pathRowOf('up', node.up)
   if ('down' in node) return pathRowOf('down', node.down)
   if ('near' in node) return pathRowOf('near', node.near)

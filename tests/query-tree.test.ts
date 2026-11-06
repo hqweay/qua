@@ -30,6 +30,7 @@ test('条件树往返：组／非／算子／待办预设／路径与方向／�
     { where: { ref: 'x' } },
     { where: { is: 'x' } },
     { where: { role: 'journal' } },
+    { where: { role: 'page' } },
     { where: { prop: { id: 'p-1', eq: 1 } } },
     { where: { prop: { id: 'p-1', eq: '' } } },
     { where: { prop: { id: 'p-1', eq: '42' } } },
@@ -85,7 +86,7 @@ test('条件树：拆不动的形状返回 null（调用方走只读 JSON，不�
     { where: { up: { down: { text: 'x' } } } },
     { where: { ref: { to: 'x' } } },
     { where: { ref: { to: 'x', kind: 'inline' } } },
-    { where: { role: 'page' } },
+    { where: { role: 'nope' } },
     { where: { not: { not: { tag: 'x' } } } },
     { where: { prop: { id: 'p', eq: 1, neq: 2 } } },
     // 相对日期只在「某一天之下」那行有值位：裸的 `{today}` 走 JSON（语言层合法，树上不假装）
