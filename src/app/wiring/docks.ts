@@ -17,12 +17,12 @@ import {
   dockKey,
   findInForest,
   isCardCollapsed,
-  openPlaceOf,
+  openActionOf,
   pinDefaultFor,
   pruneEphemeralWindows,
   type DerivedCardId,
   type DockEntry,
-  type OpenPlace,
+  type OpenAction,
   type UtilityFaceId,
   type WindowEntryAction,
 } from '../../core/index.ts'
@@ -98,7 +98,7 @@ export type DocksDeps = {
    */
   openBlock: (
     id: string,
-    place: import('../../core/index.ts').OpenPlace,
+    place: import('../../core/index.ts').OpenAction,
     opts?: import('../../core/index.ts').OpenOpts,
   ) => void
 }
@@ -579,7 +579,7 @@ export function setupDocks(deps: DocksDeps) {
    * 命令不可用（产品构建裁掉、插件卸载）时**保留位置**，画成占位格：
    * 从 cards 里删掉会让整排 reflow，用户会以为自己的布局丢了。
    *
-   * 修饰键跟随块打开的同一套落点语言（`openPlaceOf`）：普通＝原样调用；
+   * 修饰键跟随块打开的同一套落点语言（`openActionOf`）：普通＝原样调用；
    * Shift/⌘＝把落点作为 `place` 参数随调用传出去——命令认不认是它自己的事
    * （搜索认：Shift＝搜索卡住进右槽、⌘＝中心 tab）；不认 `place` 的命令照旧。
    */
@@ -595,7 +595,7 @@ export function setupDocks(deps: DocksDeps) {
       close: { title: t('ui.dock.removeTile'), onClick: () => removeTile(side, command) },
       onClick: (e) => {
         if (!ok) return
-        const place: OpenPlace = openPlaceOf(e)
+        const place: OpenAction = openActionOf(e)
         void deps.getRegistry().invoke(command, place === 'center' ? {} : { place }, 'tile')
       },
       onDragStart: (e) => setDragCard(e.dataTransfer, id),

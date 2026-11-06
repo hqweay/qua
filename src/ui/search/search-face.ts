@@ -33,7 +33,7 @@
  */
 import { t, type MsgId } from '../../core/infra/msg.ts'
 import { DebouncedInput } from '../../core/infra/debounced-input.ts'
-import { isDeleted, isOwnEdit, openPlaceOf, type BlockStore, type OpenPlace } from '../../core/index.ts'
+import { isDeleted, isOwnEdit, openActionOf, type BlockStore, type OpenAction } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import type { FtsSource } from '../../core/search/sources.ts'
 import type { BlockEditor, Run } from '../../view/editor/editor.ts'
@@ -73,10 +73,10 @@ export interface SearchFaceDeps {
   /** 行怎么说（与 ⌘P 浮层同一份） */
   describe: (hit: SearchHit, term: string) => HitView | null
   /**
-   * 打开一条命中。落点与块打开同一套语言（`openPlaceOf`）：缺省＝中心，
+   * 打开一条命中。落点与块打开同一套语言（`openActionOf`）：缺省＝中心，
    * Shift＝右槽窗口，⌘/Ctrl＝新 tab。浮层宿主自己负责先关浮层。
    */
-  openBlock: (blockId: string, place?: OpenPlace) => void
+  openBlock: (blockId: string, place?: OpenAction) => void
   /** 晋升为查询块（森林顶层；返回块 id） */
   promote: (term: string) => string
   /** 无结果时的创建入口（页） */
@@ -189,10 +189,10 @@ export class SearchFace {
       // Enter 立即查：别让「打完就按回车」看到的是旧列表
       if (e.key === 'Enter') this.debounce.flush()
       // `⌘/Ctrl + ↵` ＝ 在主编辑器打开；`⇧ + ↵` ＝ 右槽窗口打开（两个尺寸同一口径；
-      // 输入框的裸 ↵ 由 `bareEnterOpens` 定）。修饰键的落点语言与块打开同一份（`openPlaceOf`）
+      // 输入框的裸 ↵ 由 `bareEnterOpens` 定）。修饰键的落点语言与块打开同一份（`openActionOf`）
       if (e.key === 'Enter' && !e.altKey && (e.metaKey || e.ctrlKey || e.shiftKey)) {
         e.preventDefault()
-        this.openSelected(openPlaceOf(e))
+        this.openSelected(openActionOf(e))
         return
       }
       // 其余只认**裸键**：修饰键组合归命令层的键位表——这里抢了的话，
@@ -658,7 +658,7 @@ export class SearchFace {
     pick.addEventListener('click', () => this.select(view.blockId))
     // 双击＝打开（单击预览、双击打开：两个动作各有一个可见出口，行尾那颗图标是打开的入口）。
     // 修饰键跟块打开同一份判据：Shift＝右槽窗口、⌘/Ctrl＝新 tab
-    pick.addEventListener('dblclick', (e) => this.deps.openBlock(view.blockId, openPlaceOf(e)))
+    pick.addEventListener('dblclick', (e) => this.deps.openBlock(view.blockId, openActionOf(e)))
     fillRowText(pick, view, hideHint)
 
     const tail = document.createElement('span')
@@ -678,7 +678,7 @@ export class SearchFace {
     renderIcon(go, 'lucide:arrow-up-right', 'arrow-up-right')
     go.addEventListener('click', (e) => {
       e.stopPropagation()
-      this.deps.openBlock(view.blockId, openPlaceOf(e))
+      this.deps.openBlock(view.blockId, openActionOf(e))
     })
     tail.appendChild(go)
 
@@ -698,7 +698,7 @@ export class SearchFace {
     return row
   }
 
-  private openSelected(place?: OpenPlace): void {
+  private openSelected(place?: OpenAction): void {
     if (this.selectedId !== '') this.deps.openBlock(this.selectedId, place)
   }
 

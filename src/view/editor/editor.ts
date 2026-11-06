@@ -134,7 +134,7 @@ import {
   type Run as InlineRun,
   type RunWithId,
 } from '../../core/model/runs.ts'
-import { journalDateLabel, type OpenPlace, type SecLayout, type ShellCol } from '../../core/index.ts'
+import { journalDateLabel, type OpenAction, type SecLayout, type ShellCol } from '../../core/index.ts'
 export type { SecLayout }
 
 /**
@@ -390,17 +390,12 @@ export interface ViewEvents {
    */
   focusBlock?: (blockId: string) => void
   /**
-   * **⌥+左键点块标**：看这一块的属性（打开属性面板并钉住它）。
-   * 与落点无关、不入历史；未接 ⇒ 不做事（不退化成聚焦）。
-   */
-  inspectBlock?: (blockId: string) => void
-  /**
    * **打开一个块**：`place` 已把 Shift／⌘/Ctrl 翻译好（中心／右槽／新 tab）。
    *
    * 事件层只报落点，不认识「侧槽」「tab」这些具体语义；生产装配统一接到
    * `App.openBlock`，独立/测试实例未接时非中心落点什么都不做（不退化为中心 zoom）。
    */
-  openBlock?: (blockId: string, place: OpenPlace) => void
+  openBlock?: (blockId: string, place: OpenAction) => void
   /**
    * **结构动作之后，光标落在了本视图看不见的块上**：把它送到能被看见的地方（源位置）。
    *
@@ -461,7 +456,7 @@ export interface ViewEvents {
    * **在空天格子里落笔**（复盘兜底）：装配层物化那一天并重装载。
    * 编辑器只报日期——「造块进库」是命令层的事，视图不写库。
    */
-  shellWrite?: (date: string, place?: OpenPlace) => void
+  shellWrite?: (date: string, place?: OpenAction) => void
   /**
    * **一次改名被拒**（编辑边界上撞到已有地址，正文已回滚）。
    *
@@ -3766,7 +3761,7 @@ export class BlockEditor {
    * ⚠️ 段与段之间的「缝」暂不单独建块（见 `待定-日记流.md`）；首版只认全局底部（column）
    *    与列内底部（row/grid）。
    */
-  clickEmptyArea(clientY: number, clientX = 0, place: OpenPlace = 'center'): boolean {
+  clickEmptyArea(clientY: number, clientX = 0, place: OpenAction = 'center'): boolean {
     if (!this.allowBlankCreate) return false
     this.bsel.clearBlockSelection()
     const rows = this.rows()
@@ -3944,11 +3939,6 @@ export class BlockEditor {
       focusBlock: (id) => {
         this.commitLeavingLine(id)
         this.events.focusBlock?.(id)
-      },
-      // ⌥+点块标 = 看这一块的属性。与聚焦同一条编辑边界（先交出当前行）
-      inspectBlock: (id) => {
-        this.commitLeavingLine(id)
-        this.events.inspectBlock?.(id)
       },
       // 打开落点（Shift／⌘）由装配层分流；事件层只把 place 交上去
       // ⚠️ 没接就不做事（不再退化成中心 zoom：那会让缺入口看起来像成功）

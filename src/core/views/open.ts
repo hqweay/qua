@@ -1,20 +1,31 @@
 /**
- * **打开一块的落点**：修饰键只回答「去哪」，不回答「打开什么」。
+ * **一次点击去哪／看什么**：修饰键只回答这一个问题，不回答「打开什么」。
  *
  * 为什么把它收成一份纯函数：同一个动作在正文块标、面包屑、行内引用、属性区、
  * 左槽行、查询的六种看法、日历格里各写一遍 if/else，必然有两处漂移
  * （实测：槽里的行认 Shift 不认 ⌘，而文档头面包屑正好相反）。
- * 事件层只把鼠标上的修饰键交进来（`clickModsOf`），落点由装配层按这唯一一份判据分流。
+ * 事件层只把鼠标上的修饰键交进来（`clickModsOf`），分流由装配层按这唯一一份判据做。
  *
- * ⚠️ **`⌥` 不参与**：它是「看详情／lightbox」，不是另一个落点。
- * ⚠️ **Shift 优先于 ⌘/Ctrl**：Shift+⌘ 仍按右槽处理，不让组合键产生第三种语义。
+ * 四档与优先级：
+ *   · `⌥` → `inspect`：**看这一处自己的第二层**（有 run 的露面＝那一枚的详情；
+ *     块级指针＝这一块的属性面板）。优先级最高：组合键只产生一种语义。
+ *   · `Shift` → `dock`：在右槽开一个窗口（并排看）。
+ *   · `⌘`/`Ctrl` → `tab`：在新页签打开（另开一处看）。
+ *   · 无修饰 → `center`：默认动作（打开/聚焦）。
+ *
+ * ⚠️ **`⌥` 不是落点**：它不改「你在哪」，只把这一处自己的东西展开一层。
+ *    所以 `inspect` 与另外三档的区别是**生命周期**（瞬态 vs 常驻），不是位置。
  */
-export type OpenPlace = 'center' | 'dock' | 'tab'
+export type OpenAction = 'center' | 'dock' | 'tab' | 'inspect'
+
+/** 三个真正的落点（`inspect` 不在这里：它不是「去哪」）。 */
+export type OpenPlace = Exclude<OpenAction, 'inspect'>
 
 export interface OpenMods {
   shiftKey?: boolean
   metaKey?: boolean
   ctrlKey?: boolean
+  altKey?: boolean
 }
 
 /**
@@ -52,7 +63,13 @@ export function clickModsOf(e: {
   }
 }
 
-export function openPlaceOf(mods: OpenMods = {}): OpenPlace {
+/**
+ * 一次点击的动作：`⌥` 优先于 `Shift`，`Shift` 优先于 `⌘`/`Ctrl`。
+ *
+ * 组合键只产生一种语义（⌥+Shift 仍是「看第二层」），不让用户去记两两组合。
+ */
+export function openActionOf(mods: OpenMods = {}): OpenAction {
+  if (mods.altKey) return 'inspect'
   if (mods.shiftKey) return 'dock'
   if (mods.metaKey || mods.ctrlKey) return 'tab'
   return 'center'

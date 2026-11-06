@@ -20,7 +20,10 @@ export const JOURNAL_HANDLERS: Record<string, Handler> = {
   'core.journal/open': (a, app) => {
     const date = typeof a.date === 'string' ? a.date : ''
     if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)) return false
-    app.openJournal(date, a.place === 'dock' ? 'dock' : a.place === 'tab' ? 'tab' : 'center')
+    app.openJournal(
+      date,
+      a.place === 'dock' ? 'dock' : a.place === 'tab' ? 'tab' : a.place === 'inspect' ? 'inspect' : 'center',
+    )
     return true
   },
   'core.journal/prev': (_a, app) => {

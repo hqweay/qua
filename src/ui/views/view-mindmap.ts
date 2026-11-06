@@ -13,7 +13,7 @@
 import { walkForest } from '../../core/model/walk.ts'
 import { t } from '../../core/infra/msg.ts'
 import { viewNote } from './view-note.ts'
-import { openPlaceOf, type Block, type OpenPlace } from '../../core/index.ts'
+import { openActionOf, type Block, type OpenAction } from '../../core/index.ts'
 import type { BlockStore, ViewConfig } from '../../core/index.ts'
 
 export interface ViewMindmapDeps {
@@ -22,7 +22,7 @@ export interface ViewMindmapDeps {
   root: () => Block | undefined
   view: () => ViewConfig | null
   projectTitle: (block: Block, into: HTMLElement) => void
-  openBlock: (blockId: string, place?: OpenPlace) => void
+  openBlock: (blockId: string, place?: OpenAction) => void
 }
 
 /** 节点上限：超过就只画这些（并说出来） */
@@ -130,7 +130,7 @@ export class ViewMindmap {
       text.className = 'vm-node-text ui-ellipsis'
       this.deps.projectTitle(n.block, text)
       card.appendChild(text)
-      card.addEventListener('click', (e) => this.deps.openBlock(n.block.id, openPlaceOf(e)))
+      card.addEventListener('click', (e) => this.deps.openBlock(n.block.id, openActionOf(e)))
       canvas.appendChild(card)
     }
     this.root.appendChild(canvas)

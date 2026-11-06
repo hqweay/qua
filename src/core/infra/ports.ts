@@ -23,7 +23,7 @@ import type { SecLayout } from '../query/feed.ts'
 import type { MountHost } from '../views/mount.ts'
 import type { ViewConfig } from '../views/view.ts'
 import type { ViewOwnerRef } from '../views/view-owner.ts'
-import type { OpenOpts, OpenPlace } from '../views/open.ts'
+import type { OpenOpts, OpenAction } from '../views/open.ts'
 
 export type Capability = 'read' | 'write' | 'admin' | 'plugin'
 export type FixtureName = 'seed' | 'empty' | 'sparse' | 'degraded' | 'boot'
@@ -398,10 +398,10 @@ export interface App {
    * **打开一个块的唯一落点路由**（点击/键盘入口共用）。
    *
    * 与 `zoomTo`／`openInDock`／`openInNewTab` 不是四种导航语义，而是把它们组合成
-   * 一条策略：`place` 从 `openPlaceOf(mods)` 来；`center:'keep'` 给导航面（不抢焦点），
+   * 一条策略：`place` 从 `openActionOf(mods)` 来；`center:'keep'` 给导航面（不抢焦点），
    * 缺省 `'focus'` 给内容面（聚焦到这一块）。命令面仍可直调底层方法，互不替代。
    */
-  openBlock(id: string, place?: OpenPlace, opts?: OpenOpts): void
+  openBlock(id: string, place?: OpenAction, opts?: OpenOpts): void
   /**
    * **打开某一天的日记**（日历/复盘空天格子的唯一入口）。
    *
@@ -409,7 +409,7 @@ export interface App {
    * 不存在的块会静默拒绝。这里先按日期**幂等物化**（在回收站则复活），再按 `place`
    * 分流——物化只发生在日记命令这一处，UI 不自己拼 `journalId`。
    */
-  openJournal(date: string, place?: OpenPlace): void
+  openJournal(date: string, place?: OpenAction): void
   /** 新 tab（今日）；今日已经开着就切过去 */
   newTab(): boolean
   /** 关 tab（省略 id ＝ 当前）；关掉最后一张会补一张今日 */

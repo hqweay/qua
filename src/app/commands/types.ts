@@ -137,6 +137,12 @@ export interface PageDeps {
   /** 在新 tab 打开一个块/页（⌘+点的落点；同一个视图已开着就切过去） */
   openInNewTab: (id: string, feed?: boolean) => boolean
   /**
+   * 看这一块自己的属性（属性面板，钉在打开时那一块）。
+   *
+   * 日记「⌥+点日期」要用它：先物化那一天，再把面板钉上去——不改中心。
+   */
+  openPropertiesDrawer: (id: string) => void
+  /**
    * 把光标放到指定的块（`focusFirstBlock` 的精确版）。
    *
    * 提取为页后要落到原位置留下的那枚引用上；块不在当前视图时 `placeCaret` 是空操作，

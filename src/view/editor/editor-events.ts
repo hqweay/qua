@@ -19,7 +19,7 @@ import type { TriggerChar } from '../../core/infra/trigger.ts'
 import type { RunWithId } from '../../core/model/runs.ts'
 import type { Content } from '../../core/model/runs.ts'
 import { isCommittedTextInput } from '../../core/infra/ime.ts'
-import { clickModsOf, openPlaceOf, type ClickMods, type OpenPlace } from '../../core/views/open.ts'
+import { clickModsOf, openActionOf, type ClickMods, type OpenAction } from '../../core/views/open.ts'
 
 /**
  * **「按下期间不换 DOM」的指针接线**：按下 → 冻结；放开 → 延迟一拍。
@@ -284,17 +284,10 @@ export interface EditorBridge {
    */
   focusBlock: (blockId: string) => void
   /**
-   * **⌥+左键点块标**：看这一块的属性（打开属性面板并钉住它）。
-   *
-   * 与 `focusBlock`／`openBlock` 不是同一类：它是「看这一处自己的第二层」，
-   * 不改落点、不入历史。省略 ⇒ 不做事（不退化成聚焦：那会让缺入口看起来像成功）。
-   */
-  inspectBlock?: (blockId: string) => void
-  /**
    * 打开一个块：`place` 已把 Shift／⌘/Ctrl 翻译好，事件层不再认识侧槽与 tab。
    * 省略 ⇒ 非中心落点什么都不做（与「缺入口就让它看得见地缺」同一条）。
    */
-  openBlock?: (blockId: string, place: OpenPlace) => void
+  openBlock?: (blockId: string, place: OpenAction) => void
   /**
    * **面包屑普通点击 ＝ 就地展开上下文**；`rowId` 是这一格所在的行。
    * 省略 ⇒ 事件层退回 `focusBlock`（不是所有编辑器都有「一栏可装载的根」）。
@@ -318,9 +311,9 @@ export interface EditorBridge {
    * ⚠️ 返回 false 表示「这里不该由我处理」（例如点中的其实是个块）——调用方据此
    *    决定是否 preventDefault。**不返回布尔就无法区分「没建」与「建了」**。
    */
-  clickEmptyArea: (clientY: number, clientX: number, place: OpenPlace) => boolean
+  clickEmptyArea: (clientY: number, clientX: number, place: OpenAction) => boolean
   /** 点进空天格子（复盘兜底）：物化那天归装配层；`place` 已翻译好修饰键 */
-  onShellActivate: (date: string, place: OpenPlace) => void
+  onShellActivate: (date: string, place: OpenAction) => void
   /** 勾选 / 取消待办（点方框）*/
   /** `propId` 由 gutter 上那一枚图标带过来；命令/快捷键不带 ⇒ 唯一的任务状态字段 */
   toggleTodo: (blockId: string, propId?: string) => void
@@ -704,7 +697,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       (n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('sec') && n.dataset.shell !== undefined,
     )
     if (shellSec?.dataset.shell) {
-      br.onShellActivate(shellSec.dataset.shell, openPlaceOf(e))
+      br.onShellActivate(shellSec.dataset.shell, openActionOf(e))
       e.preventDefault()
       return
     }
@@ -726,7 +719,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     const crumbEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.crumbFor !== undefined)
     if (crumbEl?.dataset.crumbFor) {
       const ancestor = crumbEl.dataset.crumbFor
-      const place = openPlaceOf(e)
+      const place = openActionOf(e)
       if (place !== 'center') {
         // Shift＝右槽；⌘/Ctrl＝新 tab。落点由装配层分流，事件层只报 place
         br.openBlock?.(ancestor, place)
@@ -801,7 +794,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     if (!inBlock && !inCrumb) {
       // 块选区刚拖出来时，mouseup 后的 click 可能落在空白区 ⇒ 不能当成「点空白建块」
       if (br.hasBlockSelection()) return
-      if (br.clickEmptyArea(e.clientY, e.clientX, openPlaceOf(e))) e.preventDefault()
+      if (br.clickEmptyArea(e.clientY, e.clientX, openActionOf(e))) e.preventDefault()
       return
     }
 
@@ -812,17 +805,13 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      */
     const marker = path.find((n): n is HTMLElement => n instanceof HTMLElement && 'focusFor' in n.dataset)
     if (marker?.dataset.focusFor) {
-      // Shift+左键 ⇒ 钉到右槽（同一个入口可逆：已钉住则取消）
-      // ⌘/Ctrl+左键 ⇒ 在新 tab 打开（浏览器同一条手势）；普通左键＝当前 tab 聚焦
-      // ⌥+左键 ⇒ 看这一块的属性（第二层：不开新面、不改落点、不入历史）
-      const place = openPlaceOf(e)
-      if (e.altKey) {
-        e.preventDefault()
-        br.inspectBlock?.(marker.dataset.focusFor)
-      } else if (place === 'center') br.focusBlock(marker.dataset.focusFor)
+      // Shift+左键 ⇒ 右槽；⌘/Ctrl+左键 ⇒ 新页签；⌥+左键 ⇒ 看这一块的属性。
+      // 动作由 `openActionOf` 算，落点/面板由装配层的同一条路由分流。
+      const action = openActionOf(e)
+      if (action === 'center') br.focusBlock(marker.dataset.focusFor)
       else {
         e.preventDefault()
-        br.openBlock?.(marker.dataset.focusFor, place)
+        br.openBlock?.(marker.dataset.focusFor, action)
       }
     }
   })

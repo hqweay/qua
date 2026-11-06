@@ -51,7 +51,7 @@ import {
   type Block,
   type ClickMods,
   type FoldState,
-  type OpenPlace,
+  type OpenAction,
   type BlockStore,
   type FrozenResult,
   type QueryContext,
@@ -210,7 +210,7 @@ export interface ViewHostDeps {
   refClick: (hit: { to: string; runId?: string }, el: HTMLElement, mods: ClickMods) => void
   onAtomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: ClickMods) => void
   /** 打开一块（行首块标 / 紧凑列表） */
-  openBlock: (blockId: string, place?: OpenPlace) => void
+  openBlock: (blockId: string, place?: OpenAction) => void
   /** `ref` 值的选择器（与属性区同一份） */
   pickRef?: (owner: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect) => void
   /** 多值 select 的选值浮层（与属性卡共用；省略 ⇒ 多值格只读） */

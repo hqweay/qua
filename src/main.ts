@@ -957,6 +957,8 @@ const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEdit
   // 「看属性」承诺的是内容而不是一列空槽：卡被关掉之后由这一条放回来
   ensureDockCard: (side, id) => addDerived(side, id),
   openInDock: (id) => openWindow('right', id),
+  // ⌥+点日期：先物化那一天，再把属性面板钉上去（不改中心）
+  openPropertiesDrawer: (id) => app.openPropertiesDrawer(id),
   onTabsChanged: (tabs) => {
     renderCenterTabs(tabs)
     // 表面 tab 开着时库会变（恢复/删除走别处）：身体跟着重画，与槽里的同一张卡同拍
@@ -1581,19 +1583,26 @@ const app: App = {
   removeAtom: (runId) => ed.removeRun(runId),
   openInDock: (id, side) => openWindow(side === 'left' ? 'left' : 'right', id),
   /**
-   * **所有「点一下就打开」的入口共用这一条路由**（`place` 由 `openPlaceOf` 算）。
+   * **所有「点一下就打开」的入口共用这一条路由**（`action` 由 `openActionOf` 算）。
    *
-   * 它不新增导航语义，只把已有三种落点组合起来：
-   *   · dock  → `openInDock`（不换中心、不入历史）
-   *   · tab   → `openInNewTab`
-   *   · center→ 内容面 `zoomTo`（聚焦）；导航面 `openPage`（不抢焦点）
+   * 它不新增导航语义，只把四档动作组合起来：
+   *   · inspect → `openPropertiesDrawer`（看这一块自己的第二层；不改中心、不动槽、不入历史）
+   *   · dock    → `openInDock`（不换中心、不入历史）
+   *   · tab     → `openInNewTab`
+   *   · center  → 内容面 `zoomTo`（聚焦）；导航面 `openPage`（不抢焦点）
+   *
+   * ⚠️ `inspect` 放在最前：它是**目标自己的面**，不是「去哪」，先分流掉才不会落进导航。
    */
-  openBlock: (id, place = 'center', opts) => {
-    if (place === 'dock') {
+  openBlock: (id, action = 'center', opts) => {
+    if (action === 'inspect') {
+      app.openPropertiesDrawer(id)
+      return
+    }
+    if (action === 'dock') {
       app.openInDock(id, 'right')
       return
     }
-    if (place === 'tab') {
+    if (action === 'tab') {
       app.openInNewTab(id, opts?.feed === true)
       return
     }
@@ -2532,11 +2541,6 @@ function viewEvents(
     // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
     // 所以「点块标进去」与「点面包屑出来」共用一套语义，没有第二种入口。
     focusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, via),
-    /**
-     * **⌥+点块标 ＝ 看这一块的属性**：与块菜单「看属性」同一条命令，
-     * 于是钉块、不换中心、不动槽、不入历史只有一份实现。
-     */
-    inspectBlock: (blockId) => void registry.invoke('core.block/inspect', { blockId }, via),
     /**
      * **gutter 上普通 select 的取值菜单**：贴着那枚图标弹出。
      *

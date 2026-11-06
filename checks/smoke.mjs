@@ -23765,6 +23765,32 @@ await check('T265 块下属性行：有值才出现；点一项打开属性面�
     assert(alt.active === centerBeforeAlt, `⌥+点块标不改中心：${centerBeforeAlt} → ${alt.active}`)
     assert(alt.hint.includes('看属性'), `块标提示要写明 ⌥+点击看属性：${JSON.stringify(alt.hint)}`)
 
+    /**
+     * ⑤ **同一个手势在面包屑上也成立**：⌥ 是「看这一处自己的第二层」，
+     * 不分入口。面包屑那一格指的是祖先块 ⇒ 打开祖先的属性面板，中心不动。
+     */
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(250)
+    // 先 zoom 进这一块：面包屑要有祖先才谈得上「⌥+点它看那一块」
+    await page.evaluate((h) => window.__qua.invoke('core.block/focus-block', { blockId: h }), fx.host)
+    await page.waitForTimeout(350)
+    const zoomedActive = await page.evaluate(() => window.__qua.snapshot().activeId)
+    const crumb = await page.evaluate(() => {
+      const el = document.querySelector('#crumbs-trail .crumb')
+      return { exists: Boolean(el), label: el?.textContent ?? '' }
+    })
+    assert(crumb.exists, `前置：zoom 之后面包屑要有一格祖先：${JSON.stringify(crumb)}`)
+    await page.locator('#crumbs-trail .crumb').first().click({ modifiers: ['Alt'] })
+    await page.waitForTimeout(350)
+    const crumbAlt = await page.evaluate(() => ({
+      open: Boolean(document.querySelector('.drawer')),
+      title: document.querySelector('.drawer .drawer-head')?.textContent ?? '',
+      active: window.__qua.snapshot().activeId,
+    }))
+    assert(crumbAlt.open, `⌥+点面包屑要打开那一块的属性面板：${JSON.stringify(crumbAlt)}`)
+    assert(crumbAlt.title.includes(crumb.label), `面板要钉在面包屑指的那一块：${JSON.stringify({ crumb, crumbAlt })}`)
+    assert(crumbAlt.active === zoomedActive, `⌥+点面包屑不改中心：${zoomedActive} → ${crumbAlt.active}`)
+
     // ③ 空块不出这一行：同一个标签下另起一块，没有值
     const bare = await page.evaluate((tagId) => {
       const inv = (name, args = {}) => window.__qua.invoke(name, args)

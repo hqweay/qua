@@ -9,7 +9,7 @@
  *     它们在网格下方一列（`showUndated`），而「有日期但不在这个月」的条目完全不画
  *     —— 那是「翻到那个月」的事，不是「这一格装不下」。
  */
-import { isJournalDate, openPlaceOf, sortRecords, todayISO, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../../core/index.ts'
+import { isJournalDate, openActionOf, sortRecords, todayISO, type BlockStore, type OpenAction, type ViewConfig, type ViewRecord } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { viewNote } from './view-note.ts'
 
@@ -18,7 +18,7 @@ export interface ViewCalendarDeps {
   records: () => ViewRecord[]
   view: () => ViewConfig | null
   projectTitle: (record: ViewRecord, into: HTMLElement) => void
-  openBlock: (blockId: string, place?: OpenPlace) => void
+  openBlock: (blockId: string, place?: OpenAction) => void
   /** 今天（本地日 `YYYY-MM-DD`）；由装配层给，测试与截图才钉得住 */
   today: () => string
 }
@@ -113,7 +113,7 @@ export class ViewCalendar {
           chip.className = 'vc-item ui-ellipsis'
           chip.dataset.blockId = r.block.id
           chip.textContent = r.title || t('ui.page.untitled')
-          chip.addEventListener('click', (e) => this.deps.openBlock(r.block.id, openPlaceOf(e)))
+          chip.addEventListener('click', (e) => this.deps.openBlock(r.block.id, openActionOf(e)))
           box.appendChild(chip)
         })
         if (dayRows.length > 3) {
@@ -140,7 +140,7 @@ export class ViewCalendar {
         chip.className = 'vc-item ui-ellipsis'
         chip.dataset.blockId = r.block.id
         chip.textContent = r.title || t('ui.page.untitled')
-        chip.addEventListener('click', (e) => this.deps.openBlock(r.block.id, openPlaceOf(e)))
+        chip.addEventListener('click', (e) => this.deps.openBlock(r.block.id, openActionOf(e)))
         box.appendChild(chip)
       }
       this.root.appendChild(box)

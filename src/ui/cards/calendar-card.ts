@@ -15,7 +15,7 @@
  *
  * ⚠️ 这一层不认 `registry`／`ws`：能力由 `CalendarDeps` 收进来（与 `dock-content` 同一口径）。
  */
-import { openPlaceOf, todayISO, type OpenPlace } from '../../core/index.ts'
+import { openActionOf, todayISO, type OpenAction } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
 import { renderIcon } from '../../view/icons.ts'
@@ -30,7 +30,7 @@ export interface CalendarDeps {
    * ⚠️ 空白天在库里还没有块；物化（含从回收站复活）由 `core.journal/open` 那一处做，
    *    日历不自己拼 `journalId` —— 否则会出现第二份「哪天是哪个块」的答案。
    */
-  openDate: (date: string, place?: OpenPlace) => void
+  openDate: (date: string, place?: OpenAction) => void
 }
 
 /**
@@ -159,7 +159,7 @@ export function calendarCard(deps: CalendarDeps): DockCard {
         cell.appendChild(dot)
       }
 
-      cell.addEventListener('click', (e) => deps.openDate(date, openPlaceOf(e)))
+      cell.addEventListener('click', (e) => deps.openDate(date, openActionOf(e)))
       grid.appendChild(cell)
     }
   }

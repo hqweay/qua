@@ -175,7 +175,8 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
     openJournal: (date, place = 'center') => {
       if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)) return
       const id = ensure(date)
-      if (place === 'dock') d.openInDock(id)
+      if (place === 'inspect') d.openPropertiesDrawer(id)
+      else if (place === 'dock') d.openInDock(id)
       else if (place === 'tab') d.openInNewTab(id)
       else openBlock(id)
     },

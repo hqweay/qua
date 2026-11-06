@@ -10,13 +10,13 @@ import {
   canWriteText,
   findInForest,
   hasTag,
-  openPlaceOf,
+  openActionOf,
   refTitle,
   tagIdsOf,
   trashOf,
   type Block,
   type CtxKeys,
-  type OpenPlace,
+  type OpenAction,
   type ClickMods,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
@@ -42,7 +42,7 @@ export interface AtomPopoverDeps {
   getMainEd: () => BlockEditor
   getWs: () => Workspace
   /** 打开一块的唯一路由（中心 zoom／右槽／新 tab）——只在 `App.openBlock` 一份 */
-  openBlockRoute: (id: string, place?: OpenPlace) => void
+  openBlockRoute: (id: string, place?: OpenAction) => void
   layers: Layers
 
   /* —— 其余函数需要的活引用 —— */
@@ -217,7 +217,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
   const handleRefClick = (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement): void => {
     const target = ref.to !== '' && findInForest(deps.getWs().blocks, ref.to) ? ref.to : undefined
     if (target && (!mods.altKey || !ref.run)) {
-      deps.openBlockRoute(target, openPlaceOf(mods))
+      deps.openBlockRoute(target, openActionOf(mods))
       return
     }
     if (ref.run && el) showAtomPopover(ref.run, anchorOf(el))

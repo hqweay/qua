@@ -109,7 +109,7 @@ export type PanelsDeps = {
   getRegistry: () => Registry
   getChrome: () => Chrome
   /** 打开一个块：落点由装配层的唯一路由分流（中心／右槽／新 tab） */
-  openBlock: (blockId: string, place?: import('../../core/index.ts').OpenPlace) => void
+  openBlock: (blockId: string, place?: import('../../core/index.ts').OpenAction) => void
   /**
    * **把一块的正文投影进一个容器**（run/marks/引用/图片都在）。
    *

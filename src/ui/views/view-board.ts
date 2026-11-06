@@ -8,7 +8,7 @@
  *   · **空列与「未设置」都在**。空列让「把这个状态的东西挪走」有落点；
  *     「未设置」那一列让「还没填」的东西看得见 —— 藏起来等于告诉用户「这些不存在」。
  */
-import { fieldTextOf, openPlaceOf, type BlockStore, type OpenPlace, type ViewConfig, type ViewRecord } from '../../core/index.ts'
+import { fieldTextOf, openActionOf, type BlockStore, type OpenAction, type ViewConfig, type ViewRecord } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { bucketize, bucketLabel, orderBuckets, recordsForGrouping, GROUP_UNSET, type GroupBucket } from './grouping.ts'
 import { viewNote } from './view-note.ts'
@@ -22,7 +22,7 @@ export interface ViewBoardDeps {
   setValue: (blockId: string, propId: string, value: unknown) => void
   clearValue: (blockId: string, propId: string) => void
   projectTitle: (record: ViewRecord, into: HTMLElement) => void
-  openBlock: (blockId: string, place?: OpenPlace) => void
+  openBlock: (blockId: string, place?: OpenAction) => void
   /** 这一列可选的值（`select` 的选项块 id → 名字；没有选项的属性给空表＝按现出现的值分组） */
   choices: (propId: string) => readonly { id: string; label: string }[]
   /** 字段基数解析：多值字段不进卡片分组（拖卡写值没有唯一动作） */
@@ -174,7 +174,7 @@ export class ViewBoard {
     card.addEventListener('dragend', () => {
       this.dragging = ''
     })
-    card.addEventListener('click', (e) => this.deps.openBlock(r.block.id, openPlaceOf(e)))
+    card.addEventListener('click', (e) => this.deps.openBlock(r.block.id, openActionOf(e)))
     return card
   }
 }

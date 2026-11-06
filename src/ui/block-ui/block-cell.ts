@@ -14,7 +14,7 @@
  *    窗口化不会被它打断。代价是滚动/改窗口尺寸时锚点会跑 —— 所以那两种事件直接提交并关掉。
  */
 import { plainLen } from '../../core/model/runs.ts'
-import type { Block, BlockStore, ClickMods, OpenPlace } from '../../core/index.ts'
+import type { Block, BlockStore, ClickMods, OpenAction } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { EditableBlock } from './editable-block.ts'
 import { inputSession } from '../../view/editor/input-session.ts'
@@ -58,7 +58,7 @@ export interface BlockCellDeps {
   refClick: (hit: RefHit, el: HTMLElement, mods: CellClickMods) => void
   onAtomClick?: (atom: AtomHit, el: HTMLElement, mods: CellClickMods) => void
   /** 行首块标 / 紧凑列表里的一行：打开这一块（`place` 由调用方按修饰键算） */
-  openBlock: (blockId: string, place?: OpenPlace) => void
+  openBlock: (blockId: string, place?: OpenAction) => void
 }
 
 /** 标题格的类名（表格与紧凑列表共用；CSS 只需认这一个） */
@@ -144,7 +144,7 @@ export class BlockCell {
   }
 
   /** 行首块标：打开这一块（与正文里点块标同一条命令） */
-  readonly openBlock = (blockId: string, place?: OpenPlace): void => {
+  readonly openBlock = (blockId: string, place?: OpenAction): void => {
     this.deps.openBlock(blockId, place)
   }
 

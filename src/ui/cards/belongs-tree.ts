@@ -31,7 +31,7 @@ export interface BelongsTreeDeps {
   rows: (face: BlockList) => readonly BelongsRow[]
   activeId: () => string
   /** 点一行：打开它（页/标签都是块，落点由 `place` 说） */
-  open: (id: string, place?: import('../../core/index.ts').OpenPlace) => void
+  open: (id: string, place?: import('../../core/index.ts').OpenAction) => void
   /** 换面之后重画这一槽（槽内容由装配层排，组件自己不动别人的 DOM） */
   refresh: () => void
   /** 把一个块归到另一个块下面（拖入的落点含义；由装配层转成命令） */

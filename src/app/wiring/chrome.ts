@@ -29,7 +29,7 @@ export type ChromeDeps = {
   getMainEd: () => BlockEditor
   getRegistry: () => Registry
   /** 点面包屑：落点由唯一路由分流（普通＝返回；Shift＝右槽；⌘/Ctrl＝新 tab） */
-  openBlock: (blockId: string, place: import('../../core/index.ts').OpenPlace) => void
+  openBlock: (blockId: string, place: import('../../core/index.ts').OpenAction) => void
   /**
    * 这一侧槽**此刻**看得见吗（档位轴的 overlay 判据，纯判据在 core）。
    * 槽的开关与宽度都按它画——档位强制收起的槽，prefs 里仍是开着的也不能露面。
