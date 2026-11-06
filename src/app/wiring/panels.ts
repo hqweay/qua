@@ -485,18 +485,37 @@ export function setupPanels(deps: PanelsDeps) {
     drawerPanel.render()
   }
 
-  const openPropertiesDrawer = (blockId: string): void => {
+  /**
+   * **把焦点送到抽屉里的某一栏**：点块下属性行的值 ⇒ 打开的就是那一栏。
+   *
+   * ⚠️ 必须在抽屉**已经挂进文档**之后调用：`openDrawer` 先 render 再挂载，
+   *    render 里对游离节点 `focus()` 是空操作（与浮层同一条坑）。
+   */
+  function focusPropRow(root: HTMLElement, propId: string): void {
+    const row = root.querySelector<HTMLElement>(`.prop-row[data-prop-id="${propId}"]`)
+    if (!row) return
+    row.scrollIntoView({ block: 'nearest' })
+    row.querySelector<HTMLElement>('input, select, textarea, button')?.focus()
+  }
+
+  const openPropertiesDrawer = (blockId: string, focusPropId?: string): void => {
     const b = findInForest(deps.getWs().blocks, blockId)
     if (!b) return
-    // **同一块上再点一次＝收起**（toggle）：入口按钮就是这张抽屉的开关，
-    // 「点了没反应」（先关再开同内容）在用户眼里等于坏了。另一块＝换内容。
-    if (drawerBlockId === blockId && layers.drawerOpen()) {
+    /**
+     * **同一块上再点一次＝收起**（toggle）：入口按钮就是这张抽屉的开关，
+     * 「点了没反应」（先关再开同内容）在用户眼里等于坏了。另一块＝换内容。
+     *
+     * ⚠️ **带 `focusPropId` 的入口不 toggle**：块下属性行与抽屉可以同时可见
+     *    （抽屉盖右缘、正文在左边），点一个值不该把刚打开的面板关掉。
+     */
+    if (!focusPropId && drawerBlockId === blockId && layers.drawerOpen()) {
       layers.closeDrawer()
       drawerBlockId = null
       drawerPanel = null
       return
     }
     drawerBlockId = blockId
+    let rootEl: HTMLElement | null = null
     layers.openDrawer(blockLabel(b), (host) => {
       const root = document.createElement('div')
       root.className = 'props-drawer'
@@ -518,7 +537,10 @@ export function setupPanels(deps: PanelsDeps) {
       drawerPanel = panel
       host.appendChild(root)
       panel.render()
+      rootEl = root
     })
+    // 抽屉此时已挂进文档（`openDrawer` 同步 append），焦点才落得住
+    if (focusPropId && rootEl) focusPropRow(rootEl, focusPropId)
   }
 
   function renderProperties(): void {

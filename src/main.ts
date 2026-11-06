@@ -38,6 +38,7 @@ import { SearchCard } from './ui/cards/search-card.ts'
 import { mountDockSlot } from './ui/dock/dock.ts'
 import { createIcon } from './view/icons.ts'
 import { mountEmbedBody } from './ui/block-ui/embed-body.ts'
+import { renderPropsLine } from './ui/block-ui/props-line.ts'
 import { renderAliasEditor } from './ui/block-ui/alias-editor.ts'
 import { renderLinkComposer, renderNamePrompt, type ObjFieldDeps } from './ui/overlay/panels.ts'
 import { devCommands, dropIdentity, journalCommands, mentionCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, zoomCommands } from './app/commands-impl.ts'
@@ -1356,6 +1357,9 @@ const owners = setupOwners({
   prefs: () => prefs(),
   scheduleDeviceSave: () => scheduleDeviceSave(),
   scheduleSave: () => scheduleSave(),
+  recordDevice: (step) => {
+    blocks.recordDevice(step)
+  },
   onChange: () => {
     panels?.renderMounts()
     panels?.renderProperties()
@@ -1940,7 +1944,7 @@ const app: App = {
     return true
   },
   openAliasEditor: (blockId, autofocus) => openAliasEditor(blockId, ed.caretRect(), autofocus),
-  openPropertiesDrawer: (blockId) => panels.openPropertiesDrawer(blockId),
+  openPropertiesDrawer: (blockId, focusPropId) => panels.openPropertiesDrawer(blockId, focusPropId),
   setBlockType: (blockId, typeId) => applyBlockType(blockId, typeId),
 
   // 导航历史（中心槽走到哪）；与 undo/redo 的撤销栈无关
@@ -2339,6 +2343,17 @@ function focusSourceInMain(blockId: string): void {
 }
 
 /**
+ * `ref` 值的显示名（块下属性行用）。与属性面板同一条兜底：
+ * 目标没了就说「已删除」，不把 32 位 id 露给用户。
+ */
+const refLabelOf = (targetId: string): string => {
+  const b = kb.get(targetId)
+  return b
+    ? displayNameOf(b).trim() || shortId(b.id)
+    : t('ui.props.refMissing', { id: shortId(targetId) })
+}
+
+/**
  * **一台视图编辑器的完整事件表**：正文、挂载区、查询结果**共用这一份**。
  *
  * 为什么收成一个函数：这些编辑器是同一种东西（`BlockEditor` ＋ 一份 roots），
@@ -2500,6 +2515,15 @@ function viewEvents(
           viewBody: (block: Block, into: HTMLElement) => viewBodies(block, into),
         }
       : {}),
+    /**
+     * **块下属性行**：值文本与点击都在这一层（`view` 不 import `ui`）。
+     * 点一项 ⇒ 打开属性面板并聚焦那一栏；写入仍走面板里的同一条命令。
+     */
+    propsLine: (block: Block, data, into: HTMLElement) =>
+      renderPropsLine(block.id, data, into, {
+        inspect: (id, propId) => app.openPropertiesDrawer(id, propId),
+        refLabel: refLabelOf,
+      }),
     // 复盘空天格子里落笔：中心＝物化并回到这一屏；Shift/⌘＝同一天开右槽/新 tab
     shellWrite: (date, place) => {
       if (place && place !== 'center') void app.openJournal(date, place)

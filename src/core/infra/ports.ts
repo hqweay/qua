@@ -315,7 +315,7 @@ export interface App {
    * 不是「换个屏」。抽屉钉在这一块上（不跟焦点），做完即走；要常驻是另一件事，
    * 归检视卡与窗口卡。zoom / 打开页 / 点链接是导航，永远不替用户改侧栏的开合。
    */
-  openPropertiesDrawer(blockId: string): void
+  openPropertiesDrawer(blockId: string, focusPropId?: string): void
   /* 挂载区（块底面板）：写哪一格由 `MountHost` 判，命令层不自己判「是不是日记」 */
   /**
    * 加一栏 **local tab**：这一栏自己拥有条件与视图。**不建块**（块数一个都不变）。

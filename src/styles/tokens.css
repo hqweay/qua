@@ -156,6 +156,13 @@
     这边用它算偏移；两处各写一份就会静默错开（断言 A23 量的是真实矩形，能抓到）。
   */
   --ui-head-h: calc(var(--ui-fs-xs) * var(--ui-lh-tight));
+  /*
+    **块下属性行**的高度：一行小字（与别名头同高）。
+    虚拟化侧的同名数值是 `block-dom.ts` 的 `PROP_LINE_H`（占位在没有 DOM 的行上算，
+    读不到 computed style）：它 ＝ 这一行 ＋ `.blk` 的 `row-gap`（`--ui-gap-1`）。
+    改这里就要两边一起改。
+  */
+  --ui-props-h: var(--ui-head-h);
   /* 折叠三角：11px 实心 caret，绝对定位不占位 */
   --ui-caret-size: 11px;
   /*

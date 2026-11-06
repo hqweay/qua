@@ -23648,6 +23648,123 @@ await check('T264 ⌘+点属性区标签名 ⇒ 新页签；块菜单有「在�
   }
 })
 
+/**
+ * **T265｜块下属性行**：有值才出现、块标图标上的不重复、点一项落在面板那一栏。
+ *
+ * 判据都落在**结果**上：这一行的文本、有没有重复、点完焦点在哪一栏；
+ * 不看「有没有这个节点」。空值只记数（`+N`），因为这一行是定高一行。
+ */
+await check('T265 块下属性行：有值才出现；点一项打开属性面板并聚焦那一栏；空值收进 +N', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  try {
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const fx = await page.evaluate(() => {
+      const inv = (name, args = {}) => window.__qua.invoke(name, args)
+      const rows = window.__qua.__editor.rows().map((r) => r.block)
+      const spot = rows.find((b) => b.children.length === 0 && !b.props?._tags?.length)
+      if (!spot) throw new Error('前置：这一页没有可落的块')
+      inv('core.tags/add', { blockId: spot.id, name: '块下探针' })
+      const tag = window.__qua.__editor.store.blocks.find((b) => (b.props?._aliases ?? []).includes('块下探针'))
+      if (!tag) throw new Error('前置：标签块没建出来')
+      inv('core.props/create-def', { blockId: tag.id, label: '作者', kind: 'text', target: 'declared' })
+      inv('core.props/create-def', { blockId: tag.id, label: '备注', kind: 'text', target: 'declared' })
+      const defs = window.__qua.__editor.store.blocks.filter((b) => b.props?._kind === 'text' && b.content.some?.((r) => r.t === 'text' && (r.v === '作者' || r.v === '备注')))
+      const author = defs.find((b) => b.content.some((r) => r.t === 'text' && r.v === '作者'))
+      const note = defs.find((b) => b.content.some((r) => r.t === 'text' && r.v === '备注'))
+      if (!author || !note) throw new Error(`前置：定义块没建出来 ${JSON.stringify(defs.map((b) => b.id))}`)
+      inv('core.props/set-value', { blockId: spot.id, propId: author.id, value: '张三' })
+      return { host: spot.id, tagId: tag.id, author: author.id, note: note.id }
+    })
+    await page.waitForTimeout(400)
+
+    const line = await page.evaluate((h) => {
+      const row = document.querySelector(`.blk[data-block-id="${h}"]`)
+      const el = row?.querySelector(':scope > .blk-props-line')
+      return {
+        present: Boolean(el),
+        text: el?.textContent ?? '',
+        pairs: [...(el?.querySelectorAll('.blk-prop') ?? [])].map((x) => x.textContent ?? ''),
+        more: el?.querySelector('.blk-prop-more')?.textContent ?? '',
+        inTx: Boolean(el?.closest('.tx')),
+        inRow: el?.parentElement === row,
+        rowText: row?.querySelector('.tx')?.textContent ?? '',
+      }
+    }, fx.host)
+    assert(line.present, `有值 ⇒ 块下要出现属性行：${JSON.stringify(line)}`)
+    assert(line.pairs.some((x) => x.includes('作者') && x.includes('张三')), `属性行要写名字和值：${JSON.stringify(line)}`)
+    assert(line.more.includes('1'), `备注声明了但没填 ⇒ 收进 +N：${JSON.stringify(line)}`)
+    assert(!line.inTx && line.inRow, `属性行是 .blk 的直接子节点、不在正文槽里：${JSON.stringify(line)}`)
+    assert(line.rowText === '把「引用某段」的 UI 补上' || !line.rowText.includes('张三'), `属性行不能进正文读数：${JSON.stringify(line)}`)
+
+    /**
+     * 几何：属性行与正文**同一起笔列**（内容列），高度等于定高 token（虚拟化按它估）。
+     * 这两条是虚拟化与「读起来像这一块的注释」的全部几何依据。
+     */
+    const geo = await page.evaluate((h) => {
+      const row = document.querySelector(`.blk[data-block-id="${h}"]`)
+      const tx = row?.querySelector(':scope > .tx')
+      const el = row?.querySelector(':scope > .blk-props-line')
+      const rect = (x) => (x ? { left: x.getBoundingClientRect().left, h: x.getBoundingClientRect().height } : null)
+      return { tx: rect(tx), line: rect(el) }
+    }, fx.host)
+    assert(geo.tx && geo.line, `前置：正文与属性行都要在：${JSON.stringify(geo)}`)
+    assert(Math.abs(geo.tx.left - geo.line.left) <= 2, `属性行要与正文同一起笔列：${JSON.stringify(geo)}`)
+    assert(Math.abs(geo.line.h - 18) <= 2, `属性行是定高一行（≈18，虚拟化按 20 含 row-gap 估）：${JSON.stringify(geo)}`)
+
+    // ① 点一项 ⇒ 打开属性面板，焦点落在这一栏的控件上（不是只开一个空面板）
+    await page.locator(`.blk[data-block-id="${fx.host}"] > .blk-props-line .blk-prop`).first().click()
+    await page.waitForTimeout(350)
+    const after = await page.evaluate((author) => {
+      const drawer = document.querySelector('.drawer')
+      const row = drawer?.querySelector(`.prop-row[data-prop-id="${author}"]`)
+      const active = document.activeElement
+      return {
+        open: Boolean(drawer),
+        row: Boolean(row),
+        focused: Boolean(row && active && row.contains(active)),
+        activeTag: active?.tagName ?? '',
+      }
+    }, fx.author)
+    assert(after.open && after.row, `点一项要打开属性面板并列出那一栏：${JSON.stringify(after)}`)
+    assert(after.focused, `焦点要落在那一栏的控件上：${JSON.stringify(after)}`)
+
+    // ② 再点同一项**不该把面板关掉**（属性行与抽屉可以同时可见）
+    await page.evaluate((h) => {
+      document.querySelector(`.blk[data-block-id="${h}"] > .blk-props-line .blk-prop`)?.dispatchEvent(
+        new MouseEvent('click', { bubbles: true, cancelable: true }),
+      )
+    }, fx.host)
+    await page.waitForTimeout(250)
+    assert(
+      await page.evaluate(() => Boolean(document.querySelector('.drawer'))),
+      '再点同一项应保持面板打开（这一条入口不是开关）',
+    )
+
+    // ③ 空块不出这一行：同一个标签下另起一块，没有值
+    const bare = await page.evaluate((tagId) => {
+      const inv = (name, args = {}) => window.__qua.invoke(name, args)
+      const rows = window.__qua.__editor.rows().map((r) => r.block)
+      const spot = rows.find((b) => b.children.length === 0 && !b.props?._tags?.length && b.id !== window.__qua.__editor.caretBlock())
+      if (!spot) return ''
+      inv('core.tags/add', { blockId: spot.id, name: '块下探针' })
+      return spot.id
+    }, fx.tagId)
+    await page.waitForTimeout(350)
+    if (bare) {
+      assert(
+        await page.evaluate((h) => !document.querySelector(`.blk[data-block-id="${h}"] > .blk-props-line`), bare),
+        '只有空值 ⇒ 不出属性行（不靠空行表达 schema）',
+      )
+    }
+
+    return `作者 张三 ＋ +1 待填；点一项开面板并聚焦那一栏；再点不关；空值不出行`
+  } finally {
+    await ctx.close()
+  }
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

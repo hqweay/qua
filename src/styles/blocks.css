@@ -1040,6 +1040,77 @@
    结果」藏在折叠线以下，也把阅读切成两个滚动语境。紧凑性归**折叠**（三角／导轨都可折），
    不归封顶——封顶与单根屏豁免那一对特判已随折叠入口齐全而退场。
    虚拟化档（opt-in）的窗口外占位仍按 `VIEW_BODY_H` 估算（估不准是已知代价）。 */
+.blk[data-props-line='1'] {
+  flex-wrap: wrap;
+  /* 与 `PROP_LINE_H` 里的 gap 同源：属性行与正文行之间的缝 */
+  row-gap: var(--ui-gap-1);
+}
+/*
+ * **块下属性行**：有值、且没画成块标后图标的属性（`select`/`checkbox` 有图标就不重复）。
+ *
+ * 形状：一行小字、定高、不换行。超出收成 `+N`（虚拟化按 `PROP_LINE_H` 估高度，
+ * 自由换行会让滚动条系统性偏小）。对齐 `.tx` 的起点——与别名头、查询体同一条几何口径。
+ *
+ * 它是一排**按钮**（点一项开属性面板），所以整格 `contenteditable=false` 且标成编辑岛：
+ * 否则 `ownFocus()` 会把「焦点在按钮上」判成「本视图在编辑」，把光标抢回正文。
+ */
+.blk-props-line {
+  flex: 0 0 auto;
+  width: calc(100% - var(--ui-marker-slot) - var(--ui-gap-4));
+  margin-inline-start: calc(var(--ui-marker-slot) + var(--ui-gap-4));
+  height: var(--ui-props-h);
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: var(--ui-fs-xs);
+  line-height: var(--ui-lh-tight);
+  color: var(--ui-text-secondary);
+}
+.blk-props-line .blk-prop,
+.blk-props-line .blk-prop-more {
+  /* 复位 UA 的按钮外观：这一行读起来是字，不是一排控件 */
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+  max-width: 100%;
+}
+.blk-props-line .blk-prop:hover,
+.blk-props-line .blk-prop:focus-visible,
+.blk-props-line .blk-prop-more:hover,
+.blk-props-line .blk-prop-more:focus-visible {
+  color: var(--ui-text);
+}
+.blk-props-line .blk-prop:focus-visible,
+.blk-props-line .blk-prop-more:focus-visible {
+  outline: 1px solid var(--ui-accent);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+.blk-props-line .blk-prop-name {
+  color: var(--ui-text-secondary);
+}
+.blk-props-line .blk-prop-value {
+  color: var(--ui-text);
+  max-width: 24ch;
+}
+.blk-props-line .blk-prop-sep {
+  color: var(--ui-text-secondary);
+  user-select: none;
+}
+.blk-props-line .blk-prop-more {
+  color: var(--ui-text-secondary);
+}
 .blk[data-view-body='1'] {
   flex-wrap: wrap;
   /* 与 `VIEW_BODY_GAP` 同源：body 与上一行之间的缝 */

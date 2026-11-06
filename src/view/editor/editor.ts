@@ -76,6 +76,7 @@ import {
   walkForest,
   gutterFieldsOf,
   gutterFieldsFor,
+  belowFieldsFor,
   fieldTableOf,
   setValue,
   clearValue,
@@ -93,6 +94,7 @@ import {
   type Doc,
   type FieldTable,
   type GutterField,
+  type BelowFields,
   type Located,
   type MovePlan,
   type QuerySpec,
@@ -427,6 +429,12 @@ export interface ViewEvents {
    * 否则同一块会挂两台视图宿主。
    */
   viewBody?: (block: Block, into: HTMLElement) => (() => void) | void
+  /**
+   * **块下属性行**：值文本与「点值开属性面板」都在装配层。
+   *
+   * `view` 只负责「这一行有这一格」与高度；这里不返回卸载函数（行里没有订阅）。
+   */
+  propsLine?: (block: Block, data: BelowFields, into: HTMLElement) => void
   /**
    * **资产此刻的样子**（`view/asset-views.ts` 的 `assetViewOf`）。
    *
@@ -1224,10 +1232,9 @@ export class BlockEditor {
    *    段中间，那时这一段还在往下长，槽会被后一行挤到中间去。
    */
   private renderRows(rows: readonly VisibleRow[], tailComplete = true): void {
-    const gutters = gutterFieldsFor(
-      rows.map((r) => r.block),
-      this.store.blocks,
-    )
+    const blocks = rows.map((r) => r.block)
+    const gutters = gutterFieldsFor(blocks, this.store.blocks)
+    const below = belowFieldsFor(blocks, this.store.blocks)
     let sec: HTMLElement | null = null
     /** 给上一段收尾：追加那个空槽（只给有段根的行段） */
     const closeSec = (): void => {
@@ -1272,7 +1279,7 @@ export class BlockEditor {
         sec.dataset.sec = r.depth === 0 ? r.block.id : ''
         this.container.appendChild(sec)
       }
-      sec.appendChild(this.makeBlockEl(r, gutters.get(r.block.id)))
+      sec.appendChild(this.makeBlockEl(r, gutters.get(r.block.id), below.get(r.block.id)))
     }
     if (tailComplete) closeSec()
     // 比所有已装段都更早的空天格子：追加在最后
@@ -1323,7 +1330,13 @@ export class BlockEditor {
       hasChildren: hasLiveChildren(loc.block),
     }
     this.embeds.disposeRow(id)
-    el.replaceWith(this.makeBlockEl(row, gutterFieldsOf(row.block, this.store.blocks)))
+    el.replaceWith(
+      this.makeBlockEl(
+        row,
+        gutterFieldsOf(row.block, this.store.blocks),
+        belowFieldsFor([row.block], this.store.blocks).get(row.block.id),
+      ),
+    )
     this.repaintOverlays()
   }
 
@@ -1331,7 +1344,11 @@ export class BlockEditor {
    * @param gutter 这一行的 gutter 字段，**由调用方算好**：`block-dom` 是渲染层，没有森林；
    *               让它自己去扫一遍全库就等于「每画一行扫一次」。批量路径只扫一次库。
    */
-  private makeBlockEl(r: VisibleRow, gutter: readonly GutterField[] | undefined): HTMLElement {
+  private makeBlockEl(
+    r: VisibleRow,
+    gutter: readonly GutterField[] | undefined,
+    below: BelowFields | undefined,
+  ): HTMLElement {
     // 引用解析走**共享 store** 的森林：引用目标可能在当前视图之外（另一页／另一天），
     // 只有整片森林能回答「它还在不在、现在叫什么」。
     const find = (id: string) => this.store.find(id)
@@ -1371,6 +1388,13 @@ export class BlockEditor {
         ...(this.events.viewBody
           ? {
               viewBody: (b: Block, into: HTMLElement) => this.embeds.attachViewBody(b, into),
+            }
+          : {}),
+        // 块下属性行：值文本与点击都在装配层；`view` 只给位置与定高
+        ...(below && this.events.propsLine
+          ? {
+              below,
+              propsLine: (b: Block, data: BelowFields, into: HTMLElement) => this.events.propsLine!(b, data, into),
             }
           : {}),
       },
@@ -3670,6 +3694,10 @@ export class BlockEditor {
      * 与**露面块里的投影**（源的结果视图）。两者高度都来自 `VIEW_BODY_H` ——
      * 少算一处，带这种行的文档滚动条就系统性偏小。
      */
+    const below = belowFieldsFor(
+      rows.map((r) => r.block),
+      this.store.blocks,
+    )
     const rowH = (r: VisibleRow): number =>
       visibleRowHeight(
         r.block,
@@ -3678,6 +3706,7 @@ export class BlockEditor {
           (Boolean(this.events.embedBody) &&
             rowHasEmbedViewBody(r.block, (id) => this.store.find(id)) &&
             !isFolded(this.doc, r.block.id)),
+        Boolean(this.events.propsLine) && below.has(r.block.id),
       )
     if (from > 0) {
       const headH = rows.slice(0, from).reduce((n, r) => n + rowH(r), 0)

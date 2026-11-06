@@ -37,6 +37,7 @@ import {
   tagIdsOf,
   typeDeclOf,
   type Block,
+  type BelowFields,
   type FindBlock,
   type FoldState,
   type GutterField,
@@ -85,6 +86,18 @@ export const VIEW_BODY_H = 168
 export const VIEW_BODY_GAP = 2
 
 /**
+ * **块下属性行**额外占的高度（近似值，只给虚拟化的占位滚动条用）。
+ *
+ * 一行小字（`--ui-fs-xs` × `--ui-lh-tight` ≈ 18）＋ `.blk` 的 `row-gap`
+ * （＝ `--ui-gap-1`，2）＝ 20。与 `ALIAS_HEAD_H`／`VIEW_BODY_GAP` 同一条纪律：
+ * 视觉走 token，虚拟化走这个数；改那行的高度就要两边一起改。
+ *
+ * 为什么它必须是**定高**：属性行不换行（超出收成 `+N`）。自由换行会让虚拟化的
+ * 占位估算彻底失效（行高依赖宽度与内容），滚动条系统性偏小。
+ */
+export const PROP_LINE_H = 20
+
+/**
  * 这一行要不要把查询结果画在自己下面。
  *
  * **按源分派**：有结果身体（`hasQueryBody`）就画，段根也不例外 —— 聚焦后查询块是
@@ -107,10 +120,10 @@ export function rowHasInlineViewBody(r: VisibleRow): boolean {
  *    （宁可高估留白，也别低估让滚动条偏小）；聚焦档只发生在窗口里的那一行上，
  *    而占位算的是窗口**之外**的行。
  */
-export function visibleRowHeight(b: Block, extraHeads = 0, viewBody = false): number {
+export function visibleRowHeight(b: Block, extraHeads = 0, viewBody = false, propsLine = false): number {
   const aliasHead = aliasesOf(b).length > 0 && prop<string>(b, DISPLAY_PROP) !== 'text' ? 1 : 0
   const extra = viewBody ? VIEW_BODY_H + VIEW_BODY_GAP : 0
-  return LINE_H + extra + (aliasHead + extraHeads) * ALIAS_HEAD_H
+  return LINE_H + extra + (aliasHead + extraHeads) * ALIAS_HEAD_H + (propsLine ? PROP_LINE_H : 0)
 }
 
 /**
@@ -506,6 +519,7 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'blk-tags',
   'blk-embed-body',
   'blk-view-body',
+  'blk-props-line',
 ])
 
 /**
@@ -572,6 +586,14 @@ export function makeBlockEl(
      *    结果行／里层编辑器在构造上没有这个回调，深度由此截断。
      */
     viewBody?: (b: Block, into: HTMLElement) => void
+    /**
+     * **块下属性行**：有值、且没画在块标后的属性（派生见 `belowFieldsFor`）。
+     *
+     * `view` 只交代「这一行有这一格」并把它算进高度；值文本与点击（开属性面板）
+     * 由装配层给——和 `viewBody`／`embedBody` 同一条分工。
+     */
+    below?: BelowFields
+    propsLine?: (b: Block, data: BelowFields, into: HTMLElement) => void
   },
 ): HTMLElement {
   const b = r.block
@@ -1176,6 +1198,29 @@ export function makeBlockEl(
    */
   const tags = makeTagsEl(b, opts.find)
   if (tags) el.appendChild(tags)
+
+  /**
+   * **块下属性行**：有值、且没画在块标后的属性（`select`/`checkbox` 有图标就不重复）。
+   *
+   * 位置在正文行之下、查询体之前（属性说的是这一块自己，结果说的是它的下一层）。
+   * `flex-wrap` 让它独占一行，`margin-inline-start` 对齐 `.tx` 的起点——与别名头、
+   * 查询体同一条几何口径。
+   *
+   * ⚠️ 它是**编辑岛**：里面是一排按钮，点下去焦点在按钮上。不标岛的话
+   *    `ownFocus()` 会判成「本视图在编辑」，`restoreSel()` 会把光标抢回正文
+   *    （与挂载区抬头那颗按钮同一个坑）。标了岛，外层连事件都不接，点击归按钮自己。
+   * ⚠️ 必须登记进 `ALLOWED_ROW_CHILDREN`：漏了它，第一次收光标就会当游离节点删掉。
+   */
+  if (opts.below && opts.below.rows.length > 0 && opts.propsLine) {
+    el.dataset.propsLine = '1'
+    const line = document.createElement('div')
+    line.className = 'blk-props-line'
+    line.contentEditable = 'false'
+    line.setAttribute(EDIT_ISLAND_ATTR, '1')
+    line.dataset.propsLineFor = b.id
+    el.appendChild(line)
+    opts.propsLine(b, opts.below, line)
+  }
 
   /**
    * **正文里的查询体**：贴在 `.tx` 下面的一整格（不是塞进 `.tx`）。

@@ -942,68 +942,135 @@ export interface FieldRow {
  */
 export function fieldRows(block: Block, forest: readonly Block[]): FieldRow[] {
   const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
+  const tags = tagsById(forest)
   const rows = new Map<string, FieldRow>()
   let order = 0
 
   /** 同一份行派生里补 `select` 的几格：值控件的选项与当前值名字都从这里来 */
   let look: ChoiceLookup | undefined
-  const fill = (row: FieldRow): FieldRow => {
-    if (!row.def || row.kind !== 'select') return row
-    look ??= choiceLookupOf(forest)
-    const cells = choiceCells(block, row.propId, row.def, forest, look)
-    row.choices = cells.choices
-    if (cells.currentChoiceLabel !== undefined) row.currentChoiceLabel = cells.currentChoiceLabel
-    if (cells.currentChoiceDeleted === true) row.currentChoiceDeleted = true
-    if (cells.currentChoiceLabels !== undefined) row.currentChoiceLabels = cells.currentChoiceLabels
-    if (cells.currentChoices !== undefined) row.currentChoices = cells.currentChoices
-    return row
-  }
+  const lazyLook = (): ChoiceLookup => (look ??= choiceLookupOf(forest))
 
-  for (const tag of resolveTagIds(block, tagsById(forest))) {
+  for (const tag of resolveTagIds(block, tags)) {
     for (const propId of declaredFieldIds(tag)) {
       const existing = rows.get(propId)
       if (existing) {
         existing.sources.push(tag)
         continue
       }
-      const def = defs.get(propId)
-      rows.set(
-        propId,
-        fill({
-          propId,
-          label: def ? propLabel(def) || propId : propId,
-          kind: def ? propKindOf(def) : 'text',
-          cardinality: def ? cardinalityOf(def) : 'one',
-          value: valueOf(block, propId),
-          filled: hasValue(block, propId),
-          def,
-          sources: [tag],
-          order: order++,
-        }),
-      )
+      rows.set(propId, fieldRowOf(block, propId, defs.get(propId), [tag], order++, forest, lazyLook))
     }
   }
 
   for (const propId of ownFieldIds(block)) {
     if (rows.has(propId)) continue
-    const def = defs.get(propId)
-    rows.set(
-      propId,
-      fill({
-        propId,
-        label: def ? propLabel(def) || propId : propId,
-        kind: def ? propKindOf(def) : 'text',
-        cardinality: def ? cardinalityOf(def) : 'one',
-        value: valueOf(block, propId),
-        filled: hasValue(block, propId),
-        def,
-        sources: [],
-        order: order++,
-      }),
-    )
+    rows.set(propId, fieldRowOf(block, propId, defs.get(propId), [], order++, forest, lazyLook))
   }
 
   return [...rows.values()].sort((a, b) => a.order - b.order)
+}
+
+/**
+ * 一行属性的**唯一构造点**：面板、gutter、块下行都吃它，各自只做过滤。
+ *
+ * 三处各拼一份行对象时，最先漂的是 `select` 的选项格（面板有、块下行没有 ⇒
+ * 同一个值在两个面上一个能改一个只显示）。所以构造只在这里。
+ */
+function fieldRowOf(
+  block: Block,
+  propId: string,
+  def: Block | undefined,
+  sources: Block[],
+  order: number,
+  forest: readonly Block[],
+  look: () => ChoiceLookup,
+): FieldRow {
+  const row: FieldRow = {
+    propId,
+    label: def ? propLabel(def) || propId : propId,
+    kind: def ? propKindOf(def) : 'text',
+    cardinality: def ? cardinalityOf(def) : 'one',
+    value: valueOf(block, propId),
+    filled: hasValue(block, propId),
+    def,
+    sources,
+    order,
+  }
+  if (!def || row.kind !== 'select') return row
+  const cells = choiceCells(block, propId, def, forest, look())
+  row.choices = cells.choices
+  if (cells.currentChoiceLabel !== undefined) row.currentChoiceLabel = cells.currentChoiceLabel
+  if (cells.currentChoiceDeleted === true) row.currentChoiceDeleted = true
+  if (cells.currentChoiceLabels !== undefined) row.currentChoiceLabels = cells.currentChoiceLabels
+  if (cells.currentChoices !== undefined) row.currentChoices = cells.currentChoices
+  return row
+}
+
+/**
+ * **块下属性行**的派生：有值、且**没有画在块标后**的行。
+ *
+ * 与 `gutterFieldsOf`／面板吃同一份 `fieldRows`，只做过滤 —— 三个画法对同一条属性
+ * 不会给出不同答案。
+ *
+ * 判据与 `block-dom` 的 gutter 分支**逐字对应**（只有 `select`／`checkbox` 会画图标）：
+ * 手写一个 `block-left` 的 text 属性不会画图标，那它就得在块下行出现，不能两头都没有。
+ *
+ * 空值（声明了但没填）不进行，只记数：块下行是**定高一行**，用占位符铺满会把额度
+ * 吃光（「负责人 — · 截止 — · 优先级 —」）；待填的可发现性交给面板与 `+N` 提示。
+ * ⇒ 没有任何有值属性的块**不出这一行**（不靠空行表达 schema）。
+ */
+export interface BelowFields {
+  /** 要画出来的行（有值、未上 gutter），顺序与面板一致 */
+  rows: FieldRow[]
+  /** 没值但声明过的行数（面板里能看到「待填」） */
+  pending: number
+}
+
+/** 块下属性行：批级派生（整屏一次扫库，行级只查表） */
+export function belowFieldsFor(
+  blocks: readonly Block[],
+  forest: readonly Block[],
+): Map<string, BelowFields> {
+  const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
+  const tags = tagsById(forest)
+  let look: ChoiceLookup | undefined
+  const lazyLook = (): ChoiceLookup => (look ??= choiceLookupOf(forest))
+  const out = new Map<string, BelowFields>()
+
+  for (const block of blocks) {
+    const rows = new Map<string, FieldRow>()
+    let order = 0
+    for (const tag of resolveTagIds(block, tags)) {
+      for (const propId of declaredFieldIds(tag)) {
+        const existing = rows.get(propId)
+        if (existing) {
+          existing.sources.push(tag)
+          continue
+        }
+        rows.set(propId, fieldRowOf(block, propId, defs.get(propId), [tag], order++, forest, lazyLook))
+      }
+    }
+    for (const propId of ownFieldIds(block)) {
+      if (rows.has(propId)) continue
+      rows.set(propId, fieldRowOf(block, propId, defs.get(propId), [], order++, forest, lazyLook))
+    }
+
+    const visible: FieldRow[] = []
+    let pending = 0
+    for (const row of rows.values()) {
+      if (isGutterRow(row)) continue
+      if (row.filled) visible.push(row)
+      else pending++
+    }
+    if (visible.length > 0) out.set(block.id, { rows: visible, pending })
+  }
+  return out
+}
+
+/** 这条行会不会被画成块标后的图标（判据与 `block-dom` 的 gutter 分支同一份） */
+function isGutterRow(row: FieldRow): boolean {
+  if (!row.def) return false
+  if (uiPositionOf(row.def) !== 'block-left') return false
+  return row.kind === 'select' || row.kind === 'checkbox'
 }
 
 /** 属性 id 集合（模型口径的 `fieldsOf`：标签属性 ∪ 块属性） */
