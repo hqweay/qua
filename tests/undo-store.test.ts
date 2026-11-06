@@ -174,3 +174,46 @@ test('撤销条目：序列化字节与库体量无关（100 与 10,000 块相�
   }
   assert.equal(bytesAt(10_000), bytesAt(100))
 })
+
+/* ------------------------------------------------------------ 设备步 */
+
+test('设备步：undo/redo 各调各的闭包；块森林零 op、指纹不动', () => {
+  const { a, store, kb } = fixture()
+  const fp = forestFingerprint(store.blocks)
+  const log: string[] = []
+  store.recordDevice({
+    undo: () => log.push('undo'),
+    redo: () => log.push('redo'),
+  })
+  const u = store.undo('me', null)
+  assert.ok(u)
+  assert.equal(u.ops.length, 0, '设备步块侧零 op')
+  assert.deepEqual(log, ['undo'], '撤销调 undo 闭包')
+  const r = store.redo('me', null)
+  assert.ok(r)
+  assert.equal(r.ops.length, 0)
+  assert.deepEqual(log, ['undo', 'redo'], '重做调 redo 闭包')
+  assert.equal(forestFingerprint(store.blocks), fp, '森林一字未动')
+  // 重做之后条目回到栈顶：再撤一次仍走 undo 闭包（条目在两侧搬运，不取「现在」）
+  store.undo('me', null)
+  assert.deepEqual(log, ['undo', 'redo', 'undo'])
+  void a
+  void kb
+})
+
+test('设备步不与块条目合并：记完设备步，⌘Z 一次只撤设备步', () => {
+  const { a, store, kb } = fixture()
+  edit(kb, store, 'insert', (tx) =>
+    tx.patch(a.id, (x) => {
+      writeBlockContent(x, textRuns('改过'))
+      x.modified = 900
+    }),
+  )
+  const log: string[] = []
+  store.recordDevice({ undo: () => log.push('device'), redo: () => {} })
+  store.undo('me', null)
+  assert.deepEqual(log, ['device'], '先撤的是设备步（栈顶），不是块编辑')
+  assert.equal(plainText(a.content), '改过', '块内容没被动')
+  store.undo('me', null)
+  assert.equal(plainText(a.content), '甲', '再一次才撤到块编辑')
+})

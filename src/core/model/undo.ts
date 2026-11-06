@@ -12,6 +12,19 @@ import { mergeStates } from '../kb/scoped.ts'
 export type UndoKind = 'insert' | 'delete' | 'structural' | 'mark' | 'other'
 
 /**
+ * **设备状态的撤销步**（一对闭包）：不碰块森林，只回滚/重放一处设备配置。
+ *
+ * 为什么在核心撤销栈里：同一种手势（摘一栏／加一栏）在块宿主上走事务（可撤销）、
+ * 在日记宿主上写设备状态——后者若进不了栈，用户对着同一个 ⌘Z 得到两种答案。
+ * 闭包由装配层在记录时给（只有它认识 prefs 与重画），栈只负责在 undo/redo 时调用；
+ * 换库清栈 ⇒ 闭包与栈同生共死，不会把快照写进另一份库的配置。
+ */
+export interface DeviceUndoStep {
+  undo(): void
+  redo(): void
+}
+
+/**
  * 撤销栈里的条目：一次事务（或一次合并在同一窗口里的连续编辑）的**两侧状态**。
  *
  * 为什么两侧都存：撤销要回到 `before`、重做要回到 `after`。只存一侧就得在撤销时
@@ -30,6 +43,8 @@ export interface UndoEntry extends UndoCapture {
    * 旧实现把这个值存在 `future` 栈的那份整库快照里；现在它只是一格，跟条目一起走。
    */
   redoSel?: Sel | null
+  /** 设备步（只由 `recordDevice` 产生；`before/after` 为空，块侧无 op） */
+  device?: DeviceUndoStep
 }
 
 export class UndoStack {
@@ -73,6 +88,17 @@ export class UndoStack {
       return false
     }
     this.past.push({ ...capture, sel, kind, at })
+    if (this.past.length > 500) this.past.shift()
+    return true
+  }
+
+  /**
+   * 记一笔**设备步**（不碰块的配置改动）：独立条目、不合并、块侧零 op。
+   * undo/redo 时由栈的使用方调用闭包（见 `DeviceUndoStep`）。
+   */
+  recordDevice(step: DeviceUndoStep, at = Date.now()): boolean {
+    this.future = []
+    this.past.push({ before: [], after: [], directEdit: false, sel: null, kind: 'other', at, device: step })
     if (this.past.length > 500) this.past.shift()
     return true
   }

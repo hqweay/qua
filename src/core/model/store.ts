@@ -14,7 +14,7 @@
  *   · **撤销条目只记这次事务动过的块**（前态／后态 ＋ 落点），不存整片森林；
  *     撤销/重做只对那几块生成 op（`kb/scoped.ts`）。
  */
-import { UndoStack, type UndoKind } from './undo.ts'
+import { UndoStack, type DeviceUndoStep, type UndoKind } from './undo.ts'
 import type { Block } from './model.ts'
 import type { Op } from '../kb/types.ts'
 import type { Sel } from './selection.ts'
@@ -205,6 +205,11 @@ export class BlockStore {
     return this.undoStack.record(capture, sel, kind, at)
   }
 
+  /** 记一笔**设备步**（不碰块的配置改动，如日记宿主的挂载栏）：栈只存闭包，调用在 undo/redo。 */
+  recordDevice(step: DeviceUndoStep): boolean {
+    return this.undoStack.recordDevice(step)
+  }
+
   /**
    * 撤销一步：**只对条目里那几块**生成 op（不再有整库快照与整库 diff）。
    *
@@ -223,6 +228,8 @@ export class BlockStore {
     const ops = scopedOps(lookup, entry.before, { directEdit: entry.directEdit })
     applyOps(this.blocks, ops, lookup)
     this.apply(ops, source)
+    // 设备步：块侧零 op，回滚的是装配层在记录时交给栈的那份配置
+    entry.device?.undo()
     return { ops, sel: entry.sel }
   }
 
@@ -237,6 +244,7 @@ export class BlockStore {
     const ops = scopedOps(lookup, entry.after, { directEdit: entry.directEdit })
     applyOps(this.blocks, ops, lookup)
     this.apply(ops, source)
+    entry.device?.redo()
     return { ops, sel: redoSel }
   }
 }

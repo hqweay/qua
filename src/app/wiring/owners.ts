@@ -53,6 +53,8 @@ export type OwnersDeps = {
   scheduleSave: () => void
   /** 屏幕跟上（重画段、角标） */
   onChange: () => void
+  /** 设备步进撤销栈（日记宿主的栏操作没有事务可记，快照撤销在这里给） */
+  recordDevice: (step: { undo(): void; redo(): void }) => void
 }
 
 /**
@@ -90,8 +92,18 @@ export function setupOwners(deps: OwnersDeps): OwnerStore {
    */
   const writeEntriesIn = (tx: Tx | null, host: MountHost, next: readonly MountEntry[]): void => {
     if (host.kind === 'journal') {
+      // 设备状态没有事务可捕获 ⇒ 撤销走**快照步**：undo/redo 各自把那一份配置写回来
+      // （深拷两份，之后谁改它都不串）。闭包走活引用 ＋ onChange，撤完面板自己跟上。
+      const before = JSON.parse(JSON.stringify(deps.prefs().journalMounts ?? []))
+      const after = JSON.parse(JSON.stringify(canonicalMountEntries(next)))
       deps.prefs().journalMounts = canonicalMountEntries(next)
       deps.scheduleDeviceSave()
+      const restore = (snapshot: unknown): void => {
+        deps.prefs().journalMounts = JSON.parse(JSON.stringify(snapshot)) as MountEntry[]
+        deps.scheduleDeviceSave()
+        deps.onChange()
+      }
+      deps.recordDevice({ undo: () => restore(before), redo: () => restore(after) })
       return
     }
     if (!tx) return
