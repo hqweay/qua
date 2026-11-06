@@ -8,7 +8,7 @@
  *
  * 规则：
  *   · 折叠 ⇒ 同级；无子块 ⇒ 同级；有子块且展开 ⇒ **子块**（插成首个）。
- *   · 块中 ⇒ **同级拆**：左半进上方新块，原块保 id／右半／子树。
+ *   · 块中 ⇒ **同级拆**：左半进上方新块，原块保 id／右半／子树；值属性随前半走（身份留原块）。
  *   · 块尾 + 展开有子块 ⇒ 首个子块；块尾 + 无子块 ⇒ 同级。
  *
  * 隐式不变量：**子块永远留在原 id**。旧实现把子树搬给右半（新 id），已纠正。
@@ -122,18 +122,14 @@ test('Enter（第三次修订）split：offset=0 退化成「在上方插空块�
   assert.equal(inserted.index, 0)
 })
 
-test('Enter（第三次修订）split：只给新块发 id，原块 id/props 不变', () => {
+test('Enter（值属性随前半）split：值属性与自有槽搬进上方新块，原块只留身份', () => {
   const doc = fixture()
-  doc.roots[0]!.props = { 'p-task': false }
-  const before = new Set(flatten(doc).map((b) => b.id))
+  doc.roots[0]!.props = { 'p-task': 'choice-done', _ownProps: ['p-task'], _aliases: ['foo'] }
   const r = splitBlockBefore(doc, 'a', 2)!
-  const after = flatten(doc).map((b) => b.id)
-  assert.equal(after.length, before.size + 1)
-  assert.deepEqual(
-    after.filter((x) => !before.has(x)),
-    [r.inserted],
-  )
-  assert.deepEqual(locate(doc, 'a')!.block.props, { 'p-task': false }, '属性值跟着原块')
+  const front = locate(doc, r.inserted)!.block
+  const kept = locate(doc, 'a')!.block
+  assert.deepEqual(front.props, { 'p-task': 'choice-done', _ownProps: ['p-task'] }, '值属性与槽随前半走')
+  assert.deepEqual(kept.props, { _aliases: ['foo'] }, '身份属性留在原块')
 })
 
 test('Enter（第四次修订）空块 + 缩进 ≥ 2 层 ⇒ outdent（Enter 反缩进，不建块）', () => {

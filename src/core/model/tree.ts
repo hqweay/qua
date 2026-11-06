@@ -30,6 +30,7 @@ import { isEmptyContent, joinRuns, plainLen, sliceRuns, splitRuns, cloneRunsNewI
 import { walkForest } from './walk.ts'
 import { cloneMountEntries, MOUNTS_PROP } from '../views/mount.ts'
 import { isEmbedBlock } from '../views/embed.ts'
+import { splitPropsForEnter } from '../props/props.ts'
 export function locate(doc: Doc, id: string): Located | null {
   let found: Located | null = null
   walkForest(doc.roots, (b, ctx) => {
@@ -288,8 +289,11 @@ export function cloneSubtree(b: Block): { block: Block; idMap: Map<string, strin
 /**
  * Enter 拆块（块中：同级拆）。
  *
- * **左半进新块、插在原块之前（同级）**；原块保留 id、右半、子树与 todo/props，
- * 光标留在原块 0 位。即：视觉上是「左半在上 / 右半在下＋子块」，但**原块是下半**。
+ * **左半进新块、插在原块之前（同级）**；原块保留 id、右半与子树，光标留在原块 0 位。
+ * 即：视觉上是「左半在上 / 右半在下＋子块」，但**原块是下半**。
+ *
+ * **值属性随前半走**（判据在 `splitPropsForEnter`）：「是任务」这类值属性说的是
+ * 前半那句话，下半是续文不继承；身份属性（`_` 开头）留在原块。
  *
  * 为什么不选「右半成首个子块」：那样用户按一次 Enter 会**多出一层缩进**，
  * 而块内换行是很高频的动作，层数的意外增长会累积成难以整理的文档。
@@ -305,8 +309,10 @@ export function splitBlockBefore(doc: Doc, id: string, offset: number): { kept: 
   const loc = locate(doc, id)
   if (!loc) return null
   const [left, right] = splitRuns(loc.block.content, Math.max(0, Math.min(offset, plainLen(loc.block.content))))
-  const b = mkBlock(left)
+  const { moved, kept } = splitPropsForEnter(loc.block.props)
+  const b = mkBlock(left, moved ? { props: moved } : {})
   writeBlockContent(loc.block, right)
+  loc.block.props = kept
   const list = siblingsOf(doc, loc.parent)
   list.splice(loc.index, 0, b)
   return { kept: loc.block.id, inserted: b.id }

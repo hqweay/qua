@@ -852,6 +852,34 @@ export function ownFieldIds(block: Block): string[] {
   return out
 }
 
+/**
+ * **块中拆分（Enter）时的属性分家：值属性随前半走，身份留在原块。**
+ *
+ * 「是任务」「优先级」这类值属性说的是**这一行写的那句话**；拆开后那句话是
+ * 前半（上方新块），下半只是续文 —— 让续文继承任务标记，读起来就是
+ * 「后半莫名其妙带了个方框」。自有槽（`_ownProps`）跟着值一起走：
+ * 槽是值的声明，两者分开会让「这一栏在不在」在两块上各答一半。
+ *
+ * `_` 开头的系统属性（地址、露面、日期、查询…）是**块身份**，不属于内容 ——
+ * 原块保 id，身份也保在原块；标签声明（`_tags`／`_fieldDefs`）同理不搬，
+ * 所以靠标签拿到这一栏的块拆开后两半都还带着声明，这是分类的本义，不是 bug。
+ */
+export function splitPropsForEnter(
+  props: BlockProps | undefined,
+): { moved: BlockProps | undefined; kept: BlockProps | undefined } {
+  if (!props) return { moved: undefined, kept: undefined }
+  const moved: BlockProps = {}
+  const kept: BlockProps = {}
+  for (const [k, v] of Object.entries(props)) {
+    if (k === OWN_PROPS_PROP || !k.startsWith('_')) moved[k] = v
+    else kept[k] = v
+  }
+  return {
+    moved: Object.keys(moved).length > 0 ? moved : undefined,
+    kept: Object.keys(kept).length > 0 ? kept : undefined,
+  }
+}
+
 export function valueOf(block: Block, propId: string): unknown {
   return block.props?.[propId]
 }

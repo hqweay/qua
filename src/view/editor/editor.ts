@@ -80,6 +80,7 @@ import {
   setValue,
   clearValue,
   declareOwnProp,
+  splitPropsForEnter,
   todoOf,
   TASK_STATUS_PROP_ID,
   TASK_STATUS_TODO_ID,
@@ -2261,11 +2262,17 @@ export class BlockEditor {
       return { caret: { id: b.id, off: 0 } }
     }
 
-    // 块中 ⇒ 同级拆：左半进**上方新块**；原块保 id、右半、子树
+    // 块中 ⇒ 同级拆：左半进**上方新块**；原块保 id、右半、子树。
+    // **值属性随前半走**（判据在 core 的 `splitPropsForEnter`）：任务标记这类
+    // 属性说的是前半那句话，下半是续文，不继承。
     const [left, right] = splitRuns(content, offset)
-    const leftBlock = mkBlock(left)
+    const { moved, kept } = splitPropsForEnter(loc.block.props)
+    const leftBlock = mkBlock(left, moved ? { props: moved } : {})
     tx.insert(leftBlock, parent.id, loc.index)
-    tx.patch(id, (b) => writeBlockContent(b, right))
+    tx.patch(id, (b) => {
+      writeBlockContent(b, right)
+      b.props = kept
+    })
     return { caret: { id: !cut && offset === 0 ? leftBlock.id : id, off: 0 } }
   }
 
@@ -2772,8 +2779,9 @@ export class BlockEditor {
   }
 
   /**
-   * **点 gutter 上一条普通 select 的图标**：把锚点交给装配层开选项菜单。
-   * 完成型 select 不走这里（它点一下直接翻完成，见 `toggleTodo`）。
+   * **gutter 上 select 类图标的取值菜单**：把锚点交给装配层开选项菜单。
+   * 入口有三条：左键点普通 select、⌥+点状态标记、右键点任何 select 类图标
+   * （状态标记的普通左键不走这里——那一下翻完成，见 `toggleTodo`）。
    */
   pickGutterValue(id: string, propId: string, anchor: DOMRect): void {
     if (!locate(this.doc, id)) return
