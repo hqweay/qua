@@ -89,7 +89,7 @@ export interface RefClickMods {
  * 一次「指向某块的露面」被点：**去哪**（`to`）＋ **它自己的身份**（`run`，可无）。
  *
  * ⚠️ `to` 与 `run` 指的不是同一个东西：`to` 是**目标块**（点了去哪），`run` 是**这枚露面
- *    自己的行内对象**（有它才有「详情／删引用」可做）。chip 与属性区的标签名只有归属、
+ *    自己的行内原子**（有它才有「详情／删引用」可做）。chip 与属性区的标签名只有归属、
  *    没有 run —— 这也是为什么它们不弹详情浮层：那里没有可看可删的东西。
  * ⚠️ `to` 为空串 ＝ 这枚不是块引用（图片／外链），只能弹详情。
  */
@@ -99,7 +99,7 @@ export interface RefClickHit {
 }
 
 /**
- * 右键落在**一枚行内对象**上（引用／行内标签／外链／图片／块级标签 chip）。
+ * 右键落在**一枚行内原子**上（引用／行内标签／外链／图片／块级标签 chip）。
  *
  * 为什么它必须与 `onBlockMenu` 分开：同一个 `.blk` 里，右键块标、右键正文里的
  * `#标签`、右键行尾的标签 chip 是三件不同的事。事件层只回答「落点是谁」，
@@ -248,11 +248,11 @@ export interface EditorBridge {
    */
   onRefClick: (ref: { to: string; runId?: string }, el: HTMLElement, mods: RefClickMods) => void
   /**
-   * **非引用的行内对象被点**（图片／将来的文件、外链）。
+   * **非引用的行内原子被点**（图片／将来的文件、外链）。
    *
    * 为什么与 `onRefClick` 分成两个入口而不是「to 传空串」：
-   *   引用是「去哪」，行内对象是「看它自己」。合成一支之后，装配层只能靠
-   *   「`to === ''` 就当图片」来分派 —— 每加一种行内对象就要在那一条分支里再猜一次，
+   *   引用是「去哪」，行内原子是「看它自己」。合成一支之后，装配层只能靠
+   *   「`to === ''` 就当图片」来分派 —— 每加一种行内原子就要在那一条分支里再猜一次，
    *   而猜错的表现是「点了没反应」或「点图片跳到一个空页」。
    *
    * `mods.altKey` ＝ 要详情而不是默认动作（图片默认是 lightbox）。
@@ -260,7 +260,7 @@ export interface EditorBridge {
    */
   onAtomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: RefClickMods) => void
   /**
-   * **右键一枚行内对象**：引用／行内标签／外链／图片／标签 chip 各自的菜单。
+   * **右键一枚行内原子**：引用／行内标签／外链／图片／标签 chip 各自的菜单。
    *
    * `el` 是落点元素（浮层的锚点），`rect` 是右键那一刻的指针位置。
    * ⚠️ 未接 ⇒ 退回块菜单（不是「点了没反应」）：事件层只少一个分流，不少一个菜单。
@@ -762,7 +762,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     }
 
     /**
-     * 非引用的行内对象（图片／外链）：它们没有目标块，只有一枚 run 可看可删。
+     * 非引用的行内原子（图片／外链）：它们没有目标块，只有一枚 run 可看可删。
      * ⚠️ 这一支必须在上面那支**之后**：它是「没有 `data-ref-to` 的原子」，
      *    而上面那一支只认有目标的露面。
      * ⚠️ 分派按 `data-atom-kind`（渲染层写进 DOM 的种类），不按类名：
@@ -830,7 +830,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     e.preventDefault()
     const rect = new DOMRect(e.clientX, e.clientY, 0, 0)
     /**
-     * **右键落在一枚行内对象上 ⇒ 开它自己的菜单**（不是块菜单）。
+     * **右键落在一枚行内原子上 ⇒ 开它自己的菜单**（不是块菜单）。
      *
      * 判据与 `click` 那一支同源：用 `composedPath()`，因为菜单动作会重渲染，
      * `target.closest()` 在重渲染之后可能已经不在树上（与面包屑同一条实测理由）。

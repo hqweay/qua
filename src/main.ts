@@ -895,7 +895,7 @@ function showMenu(req: MenuRequest): void {
 let objFieldDeps: ObjFieldDeps | undefined
 let popovers: ReturnType<typeof setupAtomPopovers>
 
-/** 行内对象浮层/右键菜单/露面点击的唯一口径；deps 全是活引用（app/registry/ws 都晚于此处初始化） */
+/** 行内原子浮层/右键菜单/露面点击的唯一口径；deps 全是活引用（app/registry/ws 都晚于此处初始化） */
 popovers = setupAtomPopovers({
   uiCtx,
   isMac,
@@ -2461,11 +2461,11 @@ function viewEvents(
      */
     assetView: assetViewOf,
     /**
-     * 非引用的行内对象被点：图片默认开 lightbox，`⌥` 才看详情；
+     * 非引用的行内原子被点：图片默认开 lightbox，`⌥` 才看详情；
      * 缺失/不可用**不开空 lightbox**，直接给详情（那里面说清为什么没有图）。
      */
     onAtomClick: (atom, el, mods) => popovers.handleAtomClick(atom, el, mods, via),
-    /** 右键一枚行内对象：引用改锚文本、标签摘归属、图看详情——三类身份三组动作 */
+    /** 右键一枚行内原子：引用改锚文本、标签摘归属、图看详情——三类身份三组动作 */
     atomMenu: (hit, el, rect) => popovers.handleAtomMenu(hit, el, rect),
     onCopy: (ids, text) => {
       copiedClip = { ids: [...ids], text }

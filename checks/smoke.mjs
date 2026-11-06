@@ -7109,7 +7109,7 @@ await check('T52 归属边：属于在属性区、成员含算作、禁环、悬
     hasRelations: !!document.querySelector('.tagpanel-relations, [data-tag-relations]'),
     members: document.querySelectorAll('#editor .mount .mount-editor .blk').length,
   }))
-  assert(ui.tabs.some((x) => x.includes('引用')), `打开任何块都该有「引用」栏：${JSON.stringify(ui.tabs)}`)
+  assert(ui.tabs.some((x) => x.includes('反链')), `打开任何块都该有「反链」栏：${JSON.stringify(ui.tabs)}`)
   assert(!ui.hasRelations, '「属于／包含」不该还留在标签面板里（它们对任何块都能配 ⇒ 住属性区）')
   assert(ui.members >= 2, `「成员」栏应渲染出成员块：${ui.members}`)
 
@@ -13930,7 +13930,7 @@ await check('T145 锚文本：清空 ⇒ 回到现算名（空串＝删键，不
   return `清锚文本：键被删掉、行内回到现算名（${cleared.label}）`
 })
 
-await check('T145b 右键行内对象：引用/标签各有自己的菜单，锚文本入口同一浮层且直落输入框', async () => {
+await check('T145b 右键行内原子：引用/标签各有自己的菜单，锚文本入口同一浮层且直落输入框', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const setup = await seedPageRef(page)
@@ -13958,10 +13958,10 @@ await check('T145b 右键行内对象：引用/标签各有自己的菜单，锚
     await page.waitForTimeout(180)
   }
 
-  // ① 右键那枚引用 ⇒ **行内对象**菜单（不是块菜单：它不该出现「删除块」这类项）
+  // ① 右键那枚引用 ⇒ **行内原子**菜单（不是块菜单：它不该出现「删除块」这类项）
   const refMenu = await openMenuAt(`#editor [data-atom-id="${setup.runId}"]`)
   assert(!refMenu.missing, '前置：引用的 DOM 应在编辑区里')
-  assert(refMenu.title === '行内对象', `右键引用应开行内对象菜单：${JSON.stringify(refMenu)}`)
+  assert(refMenu.title === '行内原子', `右键引用应开行内原子菜单：${JSON.stringify(refMenu)}`)
   assert(refMenu.rows.includes('修改显示名…'), `引用菜单应有锚文本入口：${JSON.stringify(refMenu.rows)}`)
   assert(refMenu.rows.includes('删除这处引用'), `引用菜单应能删这一处：${JSON.stringify(refMenu.rows)}`)
   assert(!refMenu.rows.includes('删除块'), `别让块菜单抢了这枚原子：${JSON.stringify(refMenu.rows)}`)
@@ -14018,7 +14018,7 @@ await check('T145b 右键行内对象：引用/标签各有自己的菜单，锚
   await page.waitForTimeout(180)
   const chipMenu = await openMenuAt(`.blk[data-block-id="${tagged}"] .blk-tags .tag-chip`)
   assert(!chipMenu.missing, '前置：加了标签后应画出 chip')
-  assert(chipMenu.title === '行内对象', `右键 chip 也应开自己的菜单：${JSON.stringify(chipMenu)}`)
+  assert(chipMenu.title === '行内原子', `右键 chip 也应开自己的菜单：${JSON.stringify(chipMenu)}`)
   assert(chipMenu.rows.includes('从本块摘除标签'), `chip 菜单应能摘归属：${JSON.stringify(chipMenu.rows)}`)
   assert(!chipMenu.rows.includes('删除这处引用'), `chip 没有 run，不该出现删引用：${JSON.stringify(chipMenu.rows)}`)
   await pickMenuRow('从本块摘除标签')
@@ -14033,10 +14033,10 @@ await check('T145b 右键行内对象：引用/标签各有自己的菜单，锚
   assert(tagGone.chips === 0, `摘了归属后 chip 应消失：${JSON.stringify(tagGone)}`)
 
   await ctx.close()
-  return `右键引用 → 行内对象菜单（改锚文本直落输入框／清除／删除）；右键 chip → 摘归属（_tags 清零、chip 消失）`
+  return `右键引用 → 行内原子菜单（改锚文本直落输入框／清除／删除）；右键 chip → 摘归属（_tags 清零、chip 消失）`
 })
 
-await check('T145c 行内对象转文本：引用/行内标签/外链都能取消对象身份；外链可改文字与地址', async () => {
+await check('T145c 行内原子转文本：引用/行内标签/外链都能取消对象身份；外链可改文字与地址', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const pickRow = async (label) => {
@@ -22625,7 +22625,7 @@ await check('T258 提及栏大纲高亮命中：区间落在命中字上、切�
   assert(drawn.rows.some((t) => t.startsWith(NAME)), `行里显示的是块正文：${JSON.stringify(drawn.rows)}`)
 
   // 切走：这一栏的高亮要摘掉（key 不能留在全局注册表里）
-  const refsTab = page.locator('#editor .mount .mount-tab', { hasText: '引用' }).first()
+  const refsTab = page.locator('#editor .mount .mount-tab', { hasText: '反链' }).first()
   if (await refsTab.count()) await refsTab.click()
   await page.waitForFunction(
     () => ![...(CSS.highlights?.keys() ?? [])].some((k) => k.startsWith('mention-hit')),

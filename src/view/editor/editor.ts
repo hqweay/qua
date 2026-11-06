@@ -335,17 +335,17 @@ export interface ViewEvents {
    */
   refClick?: (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement) => void
   /**
-   * **点了非引用的行内对象**（图片／将来的文件、外链）。
+   * **点了非引用的行内原子**（图片／将来的文件、外链）。
    *
-   * 为什么与 `refClick` 分开：引用是「去哪」，行内对象是「看它自己」。
-   * 合成一支之后，装配层只能靠「`to === ''` 就当图片」来分派 —— 每加一种行内对象
+   * 为什么与 `refClick` 分开：引用是「去哪」，行内原子是「看它自己」。
+   * 合成一支之后，装配层只能靠「`to === ''` 就当图片」来分派 —— 每加一种行内原子
    * 就要在那条分支里再猜一次，猜错的表现是「点了没反应」或「点图跳到一个空页」。
    *
    * ⚠️ 未接 ⇒ 事件层退回详情浮层（旧行为），不让点击看起来像没发生。
    */
   onAtomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: RefClickMods) => void
   /**
-   * **右键一枚行内对象**（引用／行内标签／外链／图片／标签 chip）。
+   * **右键一枚行内原子**（引用／行内标签／外链／图片／标签 chip）。
    *
    * 与 `blockMenu` 分开：右键块标是「对这块做什么」，右键一枚原子是「对这一处做什么」。
    * 未接 ⇒ 事件层退回块菜单（不是没反应）。身份判据见 `AtomMenuHit`。
@@ -3512,7 +3512,7 @@ export class BlockEditor {
   }
 
   /**
-   * **把一枚行内对象变成纯文本**（取消引用／标签／链接，字留在原处）。
+   * **把一枚行内原子变成纯文本**（取消引用／标签／链接，字留在原处）。
    *
    * 取的是**用户此刻看到的字**：普通引用＝解析后的名字、行内 `#`＝`#名字`
    * （`#` 是它此刻的写法，不是装饰）、外链＝显示文字、资产＝文件名快照。
@@ -3888,7 +3888,7 @@ export class BlockEditor {
         this.events.refClick?.({ to: ref.to, ...(run ? { run } : {}) }, mods, el)
       },
       /**
-       * 非引用的行内对象（图片/外链）。与 `onRefClick` 同一套编辑边界：
+       * 非引用的行内原子（图片/外链）。与 `onRefClick` 同一套编辑边界：
        * 点击 `contenteditable=false` 的元素不派发 `focusout`，不显式提交则修改时间停在上一处。
        */
       onAtomClick: (atom, el, mods) => {

@@ -1,5 +1,5 @@
 /**
- * 浮层家族：**行内对象（原子）的详情浮层与右键菜单、露面点击的唯一口径**。
+ * 浮层家族：**行内原子的详情浮层与右键菜单、露面点击的唯一口径**。
  *
  * 此前散在装配入口中段，与面板依赖互相咬合；收进这里后咬合成显式 deps 清单。
  * 装配层传进来的都是活引用（活动编辑器、库、registry 一律现取，不传值），
@@ -164,7 +164,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
   }
 
   /**
-   * **点一枚非引用的行内对象**（图片 / 外链）：默认动作 or `⌥` 详情。
+   * **点一枚非引用的行内原子**（图片 / 外链）：默认动作 or `⌥` 详情。
    *
    * 正文、挂载区、查询结果、表格标题格**共用这一份**：分开写就会出现
    * 「正文里点图能开、表里点图没反应」这种只在某处复现的差别。
@@ -185,7 +185,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
       return
     }
     if (atom.kind !== 'asset' || !atom.hash) {
-      // 将来别的行内对象：先给详情（它们的「打开」还没做，别假装做了）
+      // 将来别的行内原子：先给详情（它们的「打开」还没做，别假装做了）
       if (atom.runId) showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), anchorOf(el))
       return
     }
@@ -229,7 +229,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
   const openDrawerFor = (kind: PanelKind): void => panelDrawer(panelDeps, kind)
 
   /**
-   * 行内对象右键菜单里那两条**不是命令**的行。
+   * 行内原子右键菜单里那两条**不是命令**的行。
    *
    * 判据：它们打开的是 UI 面（锚文本浮层、资产详情），不写模型 ⇒ 不发明一条
    * 「命令里弹浮层」的命令（命令层不该知道浮层长什么样，`arch [18]` 只管 DOM，
@@ -241,7 +241,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
   const ATOM_ROW_DETAILS = 'atom/details'
 
   /**
-   * **右键一枚行内对象**：按它的身份现算一组动作。
+   * **右键一枚行内原子**：按它的身份现算一组动作。
    *
    * 三类身份各有一条不许合并的差别（见 `AtomMenuHit`）：
    *   · `tagId`＝块级标签 chip，它是**归属**（`props._tags`）⇒ 摘掉的是归属；

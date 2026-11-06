@@ -289,7 +289,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     return app.ed.setRunLink(id, { url: chk.url, text })
   },
 
-  /** 行内对象 → 纯文本：字留在原处，取消的是它作为一个对象的身份 */
+  /** 行内原子 → 纯文本：字留在原处，取消的是它作为一个对象的身份 */
   'core.editor/atom-to-text': (a, app) => app.ed.runToText(S(a.atomId)),
 
   /**

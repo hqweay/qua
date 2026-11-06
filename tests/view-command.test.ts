@@ -62,7 +62,7 @@ function depsOf(blocks: Block[]): {
   return { d, writes, toasts }
 }
 
-test('addView(board)：没有 select/checkbox 字段 ⇒ 拒绝并提示，不写 `_views`（不是静默消失）', () => {
+test('addView(board)：没有 select/checkbox 属性 ⇒ 拒绝并提示，不写 `_views`（不是静默消失）', () => {
   const root = mkBlock('')
   root.id = 'root'
   const { d, writes, toasts } = depsOf([root])
@@ -72,7 +72,7 @@ test('addView(board)：没有 select/checkbox 字段 ⇒ 拒绝并提示，不�
   assert.equal(id, '', '建不出来就该返回空串（调用方据此判失败）')
   assert.equal(writes.length, 0, '一个字节都不许写：写了也会被 canonicalViews 丢掉')
   assert.equal(toasts.length, 1, '要说一句话，而不是让用户以为点了没反应')
-  assert.match(toasts[0]!, /分组字段/, `提示要指到「缺什么」：${toasts[0]}`)
+  assert.match(toasts[0]!, /按一个属性分组/, `提示要指到「缺什么」：${toasts[0]}`)
 })
 
 test('addView(board)：有分组字段时照常建，并把分组列写进配置', () => {

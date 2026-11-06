@@ -273,7 +273,7 @@ export function cloneSubtree(b: Block): { block: Block; idMap: Map<string, strin
       created: at,
       modified: at,
       // 行内内容随副本走，但**原子发新 id**：复制的是内容不是身份，
-      // 两枚同名引用是两个独立的行内对象（按 run id 删一枚不该删掉两枚）
+      // 两枚同名引用是两个独立的行内原子（按 run id 删一枚不该删掉两枚）
       content: cloneRunsNewIds(x.content),
       children: x.children.map(cp),
       // ⚠️ 折叠态**不随副本走**：那是「这一行此刻收着」，不是这块的内容。

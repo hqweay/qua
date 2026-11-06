@@ -199,7 +199,7 @@ export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView, onAss
    * 它和 `data-atom-id` 是两个不同的事实，所以不能共用一个属性：
    *   · `data-atom-id` 是**这枚 run 的身份**（读数要按它把 run 原样带回，删引用也按它）；
    *   · `data-ref-to` 是**它的目标**（点了该去哪）。
-   * 只有引用有目标：图片／外链是行内对象但不是块引用，没有这一格。
+   * 只有引用有目标：图片／外链是行内原子但不是块引用，没有这一格。
    *
    * ⚠️ 为什么值得单开一格而不是让事件层去认 `.atom`：块级标签 chip 与属性区的标签
    *    也是「指向某块的露面」，但它们没有 run、也不住在编辑器里。共用同一个属性之后，
@@ -243,7 +243,7 @@ export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView, onAss
   } else if (r.t === 'link') {
     /**
      * 外链：`v` 是**显示文本**（内容），`url` 是目标——两键分家，改名字不动地址。
-     * 仍按**不可分原子**渲染（占 1 格）：链接是一枚行内对象，不是一串字。
+     * 仍按**不可分原子**渲染（占 1 格）：链接是一枚行内原子，不是一串字。
      *
      * ⚠️ 但 `v` **不进 `plainText` 投影**（原子都不是文本流的一部分，见 `core/runs.ts`）：
      *    搜索／引文／导出里看不见这枚链接的显示文本。把它显示出来是**呈现**，
