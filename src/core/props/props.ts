@@ -73,7 +73,12 @@ export function isUiPositionValue(v: unknown): boolean {
   return v === 'block-left' || v === 'panel'
 }
 
-/** 定义块声明的编辑位置（缺省 `panel`：没写就是「要展开填」的那一类） */
+/**
+ * 定义块声明的编辑位置：`block-left` ＝ 块标后的图标；`panel`（缺省）＝ 不上图标。
+ *
+ * ⚠️ `panel` **不是**「只在属性面板」：有值时它落在**块下属性行**（决策 208）。
+ *    取消 `block-left` 勾选就是把这一条从图标挪到块下，而不是把它藏起来。
+ */
 export function uiPositionOf(def: Block | undefined): UiPosition {
   return def && prop<string>(def, UI_POSITION_PROP) === 'block-left' ? 'block-left' : 'panel'
 }

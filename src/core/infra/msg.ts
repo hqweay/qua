@@ -264,7 +264,7 @@ export const MSG = {
   'ui.props.choice.checkNeedTwo': '至少需要两个选项才能显示为勾选框',
   'ui.props.choice.statusTaken': '已经有任务状态属性：{label}',
   'ui.props.choice.gutter': '在块标后显示属性图标',
-  'ui.props.choice.gutterTitle': '需要选项带图标才看得见',
+  'ui.props.choice.gutterTitle': '不勾选 ⇒ 有值时显示在块下属性行',
   'ui.props.pickChoice': '选择值',
   'ui.props.pickChoiceMulti': '选择值（可多选）',
   'ui.props.choice.current': '当前',
