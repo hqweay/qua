@@ -22616,6 +22616,341 @@ await check('T260 转引用守卫：受保护块 toast 不写库；块菜单只�
 })
 
 /**
+ * **T262：命中字上 hover 出「转成引用」，点它就转换。**
+ *
+ * 高亮是 `::highlight`（纯画层、没有元素可点），所以提示必须自己反算矩形：
+ * 坐标 → plain 偏移（`offsetAtPoint`）→ 命中区间（`spanAt`）→ Range 的矩形。
+ * 这里钉四件事：
+ *   ① hover 命中字出现且只出现一颗提示；未命中处 hover 不出；
+ *   ② 悬停本身不动模型（它不是写入动作）；
+ *   ③ 点提示 ⇒ 那一处切成指向来源页的引用；
+ *   ④ 转换后提示自己收掉（不留在屏幕上指着一处已经不存在的命中）。
+ */
+await check('T262 提及命中 hover 出「转成引用」：未命中处不出、悬停不写库、点命中字当场转换', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const NAME = '提及悬停页VWX'
+  const pageId = 'mention-hover-page'
+  await page.evaluate((a) => {
+    window.__qua.forceForest((forest) => {
+      const at = Date.now()
+      const mk = (id, content, props) => ({ id, content, children: [], created: at, modified: at, ...(props ? { props } : {}) })
+      forest.length = 0
+      forest.push(
+        mk(a.pageId, [{ t: 'text', v: a.name }], { _aliases: [a.name], _lists: ['page'] }),
+        mk('mention-hover-a', [{ t: 'text', v: `今天完成了${a.name}，很顺利` }]),
+      )
+    })
+  }, { name: NAME, pageId })
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId)
+  await page.waitForSelector('#editor .mount .mount-tab', { timeout: 5000 })
+  await page.locator('#editor .mount .mount-tab', { hasText: '提及' }).first().click()
+  await page.waitForFunction(
+    () => {
+      const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('mention-hit'))
+      return Boolean(key && CSS.highlights.get(key).size >= 1)
+    },
+    null,
+    { timeout: 5000 },
+  )
+
+  const contentOf = (id) =>
+    page.evaluate((bid) => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === bid) return b.content
+          const r = walk(b.children)
+          if (r) return r
+        }
+        return null
+      }
+      return walk(window.__qua.__editor.store.blocks)
+    }, id)
+  const hitOf = (id) =>
+    page.evaluate((bid) => {
+      const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('mention-hit'))
+      const set = key ? CSS.highlights.get(key) : null
+      if (!set) return null
+      for (const r of set) {
+        const blk = r.startContainer.parentElement?.closest?.('.blk')
+        if (blk?.dataset?.blockId !== bid) continue
+        const rect = r.getBoundingClientRect()
+        return { text: r.toString(), x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      }
+      return null
+    }, id)
+  const wordRect = (id, word) =>
+    page.evaluate((a) => {
+      const blk = document.querySelector(`#editor .mount-editor .blk[data-block-id="${a.id}"]`)
+      const tx = blk?.querySelector(':scope > .tx')
+      if (!tx) return null
+      const walker = document.createTreeWalker(tx, NodeFilter.SHOW_TEXT)
+      while (walker.nextNode()) {
+        const node = walker.currentNode
+        const at = node.data.indexOf(a.word)
+        if (at < 0) continue
+        const r = document.createRange()
+        r.setStart(node, at)
+        r.setEnd(node, at + a.word.length)
+        const rect = r.getBoundingClientRect()
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      }
+      return null
+    }, { id, word })
+
+  const hit = await hitOf('mention-hover-a')
+  assert(hit && hit.text === NAME, `前置：A 要有一处命中高亮：${JSON.stringify(hit)}`)
+  const before = await contentOf('mention-hover-a')
+
+  // ① 悬停命中字：出现一句提示；模型一个字节都不动
+  await page.mouse.move(hit.x, hit.y)
+  await page.waitForSelector('.mention-tip', { timeout: 3000 })
+  const tip = await page.evaluate(() => document.querySelector('.mention-tip')?.textContent ?? '')
+  assert(tip.includes('点击转为引用'), `hover 提示要说清动作：${JSON.stringify(tip)}`)
+  const still = await contentOf('mention-hover-a')
+  assert(JSON.stringify(still) === JSON.stringify(before), `悬停不是写入动作：${JSON.stringify({ before, still })}`)
+
+  // ② 悬停未命中的字：提示要收掉（不是「移开也不消失」）
+  const miss = await wordRect('mention-hover-a', '今天')
+  assert(miss, '前置：A 的未命中词要量得出矩形')
+  await page.mouse.move(miss.x, miss.y)
+  await page.waitForFunction(() => !document.querySelector('.mention-tip'), null, { timeout: 3000 })
+
+  // ③ 回到命中，看着提示点那一处 ⇒ 换成指向来源页的引用（提示本身不接收点击）
+  await page.mouse.move(hit.x, hit.y)
+  await page.waitForSelector('.mention-tip', { timeout: 3000 })
+  await page.mouse.click(hit.x, hit.y)
+  await page.waitForFunction(
+    (bid) => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === bid) return b
+          const r = walk(b.children)
+          if (r) return r
+        }
+        return null
+      }
+      const b = walk(window.__qua.__editor.store.blocks)
+      return Boolean(b && b.content.some((r) => r.t === 'ref'))
+    },
+    'mention-hover-a',
+    { timeout: 3000 },
+  )
+  const after = await contentOf('mention-hover-a')
+  const ref = after.find((r) => r.t === 'ref')
+  assert(ref && ref.to === pageId && ref.label === NAME, `点提示要切成指向来源页的引用：${JSON.stringify(after)}`)
+  // ④ 提示自己收掉：它指的那处命中已经不存在了
+  await page.waitForFunction(() => !document.querySelector('.mention-tip'), null, { timeout: 3000 })
+
+  await ctx.close()
+  return '命中 hover 出提示、未命中不出；悬停零写入；点命中字切成指向来源页的引用；转换后提示收掉'
+})
+
+/**
+ * **T263：划选气泡里的「转为引用」。**
+ *
+ * 两种目标来源各钉一次：
+ *   · 选中文本已经是某个块的地址 ⇒ 指向它，**不新建**、也不改它的身份；
+ *   · 没有同名地址 ⇒ 新建页块并指向它（一次撤销把页也撤掉）。
+ * 另钉准入：跨块选区没有这一颗（「把一段跨行文字变成一枚引用」没有定义）。
+ */
+await check('T263 选区转引用：同名地址复用、没有就新建页、跨块选区不给入口、一次撤销全回', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const PAGE = '选区转换页YZA'
+  const EXIST = '已有页XYZ'
+  const FRESH = '新名字ABC'
+  const pageId = 'selection-ref-page'
+  await page.evaluate((a) => {
+    window.__qua.forceForest((forest) => {
+      const at = Date.now()
+      const mk = (id, content, props, children = []) => ({
+        id,
+        content,
+        children,
+        created: at,
+        modified: at,
+        ...(props ? { props } : {}),
+      })
+      forest.length = 0
+      forest.push(
+        mk(a.pageId, [{ t: 'text', v: '选区转换' }], { _aliases: [a.page], _lists: ['page'] }, [
+          mk('selection-ref-a', [{ t: 'text', v: a.exist }]),
+          mk('selection-ref-b', [{ t: 'text', v: a.fresh }]),
+          mk('selection-ref-c', [{ t: 'text', v: '跨块甲' }]),
+          mk('selection-ref-d', [{ t: 'text', v: '跨块乙' }]),
+        ]),
+        mk('selection-ref-exist', [{ t: 'text', v: a.exist }], { _aliases: [a.exist], _lists: ['page'] }),
+      )
+    })
+  }, { page: PAGE, exist: EXIST, fresh: FRESH, pageId })
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId)
+  await page.waitForSelector('#editor .blk[data-block-id="selection-ref-a"]', { timeout: 5000 })
+
+  const contentOf = (id) =>
+    page.evaluate((bid) => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === bid) return b.content
+          const r = walk(b.children)
+          if (r) return r
+        }
+        return null
+      }
+      return walk(window.__qua.__editor.store.blocks)
+    }, id)
+  const pagesWithAlias = (alias) =>
+    page.evaluate(
+      (name) =>
+        window.__qua
+          .allBlocks()
+          .filter((b) => b.aliases.includes(name))
+          .map((b) => ({ id: b.id, lists: b.lists })),
+      alias,
+    )
+  const pickFromBar = async (command) => {
+    await page.evaluate((cmd) => {
+      const b = document.querySelector(`.selbar .sel-btn[data-command="${cmd}"]`)
+      b?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    }, command)
+  }
+  /** 从块尾往回选 len 个字符（真实按键，与用户划选同一条链路） */
+  const selectLast = async (id, len) => {
+    await page.evaluate((a) => window.__qua.focusBlock(a.id, a.len), { id, len })
+    await page.keyboard.down('Shift')
+    for (let i = 0; i < len; i++) await page.keyboard.press('ArrowLeft')
+    await page.keyboard.up('Shift')
+    await page.waitForFunction(() => document.querySelectorAll('.selbar').length === 1, null, { timeout: 3000 })
+  }
+
+  // ① 已有同名地址：只换成引用，不新建、不改身份
+  const beforeExist = await pagesWithAlias(EXIST)
+  assert(beforeExist.length === 1, `前置：同名地址只有一个块：${JSON.stringify(beforeExist)}`)
+  await selectLast('selection-ref-a', EXIST.length)
+  const bar = await page.evaluate(() => ({
+    open: Boolean(document.querySelector('.selbar')),
+    hasEntry: [...document.querySelectorAll('.selbar .sel-btn')].some(
+      (b) => b.dataset.command === 'core.editor/selection-to-ref',
+    ),
+  }))
+  assert(bar.open && bar.hasEntry, `单块纯文本选区要有「转为引用」：${JSON.stringify(bar)}`)
+  await pickFromBar('core.editor/selection-to-ref')
+  await page.waitForFunction(
+    (bid) => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === bid) return b
+          const r = walk(b.children)
+          if (r) return r
+        }
+        return null
+      }
+      const b = walk(window.__qua.__editor.store.blocks)
+      return Boolean(b && b.content.some((r) => r.t === 'ref'))
+    },
+    'selection-ref-a',
+    { timeout: 3000 },
+  )
+  const aAfter = await contentOf('selection-ref-a')
+  const aRef = aAfter.find((r) => r.t === 'ref')
+  assert(aRef && aRef.to === beforeExist[0].id, `复用已有地址：${JSON.stringify({ aRef, target: beforeExist[0].id })}`)
+  const afterExist = await pagesWithAlias(EXIST)
+  assert(
+    afterExist.length === 1 && JSON.stringify(afterExist[0].lists) === JSON.stringify(beforeExist[0].lists),
+    `已有地址只该被引用，不该被改身份或复制：${JSON.stringify({ beforeExist, afterExist })}`,
+  )
+
+  // 撤销：正文回原文，目标块一个不少
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForFunction(
+    (a) => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === a.id) return b
+          const r = walk(b.children)
+          if (r) return r
+        }
+        return null
+      }
+      const b = walk(window.__qua.__editor.store.blocks)
+      return Boolean(b && !b.content.some((r) => r.t === 'ref') && b.content.map((r) => r.v ?? '').join('') === a.text)
+    },
+    { id: 'selection-ref-a', text: EXIST },
+    { timeout: 3000 },
+  )
+
+  // ② 没有同名地址：新建页块并引用；一次撤销连页一起撤掉
+  const pagesBefore = await page.evaluate(() => window.__qua.snapshot().pageCount)
+  await selectLast('selection-ref-b', FRESH.length)
+  await pickFromBar('core.editor/selection-to-ref')
+  await page.waitForFunction(
+    (bid) => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === bid) return b
+          const r = walk(b.children)
+          if (r) return r
+        }
+        return null
+      }
+      const b = walk(window.__qua.__editor.store.blocks)
+      return Boolean(b && b.content.some((r) => r.t === 'ref'))
+    },
+    'selection-ref-b',
+    { timeout: 3000 },
+  )
+  const created = await pagesWithAlias(FRESH)
+  assert(created.length === 1 && created[0].lists.includes('page'), `没有同名地址时要新建页块：${JSON.stringify(created)}`)
+  const bAfter = await contentOf('selection-ref-b')
+  const bRef = bAfter.find((r) => r.t === 'ref')
+  assert(bRef && bRef.to === created[0].id, `引用要指向新建的页：${JSON.stringify({ bRef, created })}`)
+  const toast = await page.evaluate(() =>
+    [...document.querySelectorAll('.toast')].map((x) => x.textContent ?? '').join('|'),
+  )
+  assert(toast.includes(FRESH), `新建页要说一句（否则用户不知道多了一块）：${toast}`)
+  const pagesAfter = await page.evaluate(() => window.__qua.snapshot().pageCount)
+  assert(pagesAfter === pagesBefore + 1, `页数要 +1：${JSON.stringify({ pagesBefore, pagesAfter })}`)
+
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForFunction(
+    (a) => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === a.id) return b
+          const r = walk(b.children)
+          if (r) return r
+        }
+        return null
+      }
+      const b = walk(window.__qua.__editor.store.blocks)
+      if (!b || b.content.some((r) => r.t === 'ref')) return false
+      return !window.__qua.allBlocks().some((x) => x.aliases.includes(a.text))
+    },
+    { id: 'selection-ref-b', text: FRESH },
+    { timeout: 3000 },
+  )
+
+  // ③ 跨块选区：气泡照常出现，但没有「转为引用」这一颗
+  await page.evaluate(() => window.__qua.focusBlock('selection-ref-c', 3))
+  await page.keyboard.press('Meta+a')
+  await page.waitForFunction(() => document.querySelectorAll('.selbar').length === 1, null, { timeout: 3000 })
+  const cross = await page.evaluate(() => ({
+    sel: window.__qua.snapshot().selection,
+    hasEntry: [...document.querySelectorAll('.selbar .sel-btn')].some(
+      (b) => b.dataset.command === 'core.editor/selection-to-ref',
+    ),
+    hasCopy: [...document.querySelectorAll('.selbar .sel-btn')].some(
+      (b) => b.dataset.command === 'core.editor/copy-ref',
+    ),
+  }))
+  assert(cross.sel && cross.sel.aBlock !== cross.sel.hBlock, `前置：⌘A 要跨块选择：${JSON.stringify(cross.sel)}`)
+  assert(cross.hasCopy, `气泡本身照常出现（同一组里的复制还在）：${JSON.stringify(cross)}`)
+  assert(!cross.hasEntry, `跨块选区不给「转为引用」：${JSON.stringify(cross)}`)
+
+  await ctx.close()
+  return `已有地址复用（不新建不改身份）、没有就新建页（页数 ${pagesBefore}→${pagesAfter}）、跨块选区不给入口；两处各一次撤销全回`
+})
+
+/**
  * 搜索面预览的命中高亮必须落在**正文**那一段字符上（plain 坐标），而不是
  * 「`.tx` 里哪个文本节点先被 walker 撞见」。三条口径各钉一处：
  *   · 正文紧跟在 chip 之后 ⇒ 偏移要补上原子那一格，且 chip 自己的显示名不算正文命中；

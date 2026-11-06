@@ -242,6 +242,12 @@ export interface MentionDeps {
   /** 开一笔事务：一条内容写、一次撤销；撤销条目与落盘由装配层收 */
   run: TxRun
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
+  /** 活动编辑器上的选区（单块纯文本）；不能转 ⇒ `null`。与气泡准入同一份判据 */
+  selection: () => { blockId: string; start: number; end: number; text: string } | null
+  /** 新建页块之后刷新左槽的页清单（页数变了，清单不能停在旧数） */
+  refreshList: () => void
+  /** 转完把光标落到引用之后（重画会摘掉原选区；不落光标等于让用户重新点一次） */
+  placeCaret: (blockId: string, offset: number) => void
 }
 
 /** 归属边写入的宿主能力；森林扫描的派生由装配层按窄口注入（成环检查要全库） */

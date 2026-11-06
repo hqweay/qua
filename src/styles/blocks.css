@@ -1287,6 +1287,31 @@
   min-height: var(--ui-line-h);
   outline: none;
 }
+/**
+ * 提及命中的 hover 提示：**那一处高亮唯一可点的落点**。
+ * `::highlight` 没有元素可打，所以提示做成浮层，锚在命中字的矩形上；
+ * 它跟着指针出现／消失，按 §1.12 的频率表**不做过渡**（hover 一天几十次，
+ * 任何时长都会被读成延迟）。
+ */
+.mention-tip {
+  position: fixed;
+  z-index: var(--ui-z-hint);
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 var(--ui-gap-3);
+  background: var(--ui-surface-raised);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  box-shadow: var(--ui-shadow-mid);
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-sm);
+  line-height: 1;
+  white-space: nowrap;
+  /* 只说明、不接收点击：它压在正文上，能点就会吃掉旁边那一行的点击 */
+  pointer-events: none;
+  user-select: none;
+}
 .mount-empty {
   margin: 0;
   color: var(--ui-text-tertiary);

@@ -170,6 +170,8 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     )
     return true
   },
+  // 划选气泡那一颗：选区 → 同名引用（没有同名地址就新建页）。复核、事务、toast 都在门面那一步
+  'core.editor/selection-to-ref': (_a, app) => app.convertSelectionToRef(),
   /**
    * 复制成**文本记号** `((block-id))`：粘贴时会被解析成行内引用，也能被「粘贴为…」读成露面源。
    * 与 `copy-ref`（引文快照 JSON）分开：那个是给人看的引文，这个是给库内粘贴用的指针。

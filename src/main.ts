@@ -1519,6 +1519,10 @@ const app: App = {
     kb,
     run: runTx,
     toast: (text, kind) => app.toast(text, kind),
+    // 选区从**活动编辑器**现取：正文/挂载区/侧槽都可能发起划选
+    selection: () => ed.selectionSpot(),
+    refreshList: () => renderDocks(),
+    placeCaret: (blockId, offset) => ed.placeCaret(blockId, offset),
   }),
   ...viewConfigCommands({
     kb,

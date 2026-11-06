@@ -117,6 +117,7 @@ import {
   refRunsOf,
   runById,
   sameRuns,
+  sliceRuns,
   spliceRuns,
   splitRuns,
   textRuns,
@@ -3184,6 +3185,30 @@ export class BlockEditor {
     return [...out]
   }
 
+  /**
+   * 当前选区**能不能转成引用**：单块、非空、整段都是文本（原子占格不可被文字替换）。
+   *
+   * 两端空白剪掉：选中「 名字 」时，引用只该包住名字本身，不能把空格也吞进 chip。
+   * 这是划选气泡那颗按钮的准入判据，也是命令执行时的复核口径 —— 两处不同就会出现
+   * 「按钮在、点了却说没选区」。
+   */
+  selectionSpot(): { blockId: string; start: number; end: number; text: string } | null {
+    const s = this.sel
+    if (!s || s.aBlock !== s.hBlock) return null
+    const b = locate(this.doc, s.aBlock)?.block
+    if (!b || !canWriteText(b)) return null
+    const from = Math.min(s.aOff, s.hOff)
+    const to = Math.max(s.aOff, s.hOff)
+    if (from >= to) return null
+    const slice = sliceRuns(b.content, from, to)
+    if (slice.length === 0 || slice.some((r) => r.t !== 'text')) return null
+    const raw = plainText(slice)
+    const start = from + (raw.length - raw.trimStart().length)
+    const end = to - (raw.length - raw.trimEnd().length)
+    const text = raw.slice(start - from, end - from)
+    return text === '' ? null : { blockId: s.aBlock, start, end, text }
+  }
+
   clearMarksAtSel(): void {
     const s = this.sel
     if (!s) return
@@ -4247,6 +4272,8 @@ export class BlockEditor {
       editorTextFocus: document.activeElement === this.container || this.container.contains(document.activeElement),
       selectionEmpty: s ? s.aBlock === s.hBlock && s.aOff === s.hOff : true,
       selectionCount: s && !(s.aBlock === s.hBlock && s.aOff === s.hOff) ? (s.aBlock === s.hBlock ? 1 : 2) : 0,
+      /** 选区能不能转引用（单块纯文本）：与命令执行时同一份判据 */
+      selectionRef: this.selectionSpot() !== null,
       blockFocused: Boolean(id),
       blockId: id ?? '',
       /**

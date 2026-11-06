@@ -242,6 +242,11 @@ export const BINDINGS: Binding[] = [
   { command: 'core.anno/toggle-code', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 40, layer: 'core', icon: 'lucide:code', label: t('menu.label.code') },
   { command: 'core.anno/clear-marks', kind: 'selection', when: 'editorTextFocus && !selectionEmpty && marking', group: 'sel/1-mark', order: 50, layer: 'core', icon: 'lucide:eraser', label: t('menu.label.clearMarks') },
   { command: 'core.editor/copy-ref', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/2-ref', order: 10, layer: 'core', icon: 'lucide:quote', label: t('menu.label.copyRef') },
+  /**
+   * 选区 → 引用：与「复制为引文」同组（都是「这一段的去处」，不是格式）。
+   * 只在单块纯文本选区上出现——跨块或夹着原子时「换成一枚引用」没有定义。
+   */
+  { command: 'core.editor/selection-to-ref', kind: 'selection', when: 'editorTextFocus && selectionRef', group: 'sel/2-ref', order: 20, layer: 'core', icon: 'lucide:arrow-up-right', label: t('menu.label.selectionToRef') },
 ]
 
 /* --------------------------------------------------------- 键位匹配 */

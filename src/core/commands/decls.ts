@@ -164,6 +164,12 @@ export const COMMANDS: CommandDecl[] = [
    * 入口只有提及栏片段行上的高亮按钮（与 `set-anchor` 同一条口径：不进命令面板）。
    */
   { name: 'core.block/convert-mention', title: t('cmd.block.convert-mention'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { blockId: { type: 'string' }, to: { type: 'string' }, start: { type: 'integer' }, end: { type: 'integer' } }, keywords: ['mention', 'ref', t('menu.kw.ref')], hidden: true },
+  /**
+   * 划选气泡的「转为引用」：选中一段文本，换成指向同名块的引用。
+   * 同名地址不存在 ⇒ 顺手建一个页块（与 `@` 的「新建页」同一条创建路径）。
+   * 只在单块纯文本选区上有定义 ⇒ 不进命令面板（面板没有选区可给）。
+   */
+  { name: 'core.editor/selection-to-ref', title: t('cmd.editor.selection-to-ref'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), keywords: ['ref', 'convert', t('menu.kw.ref')], hidden: true },
 
   /* ---- 视图 ---- */
   { name: 'core.view/toggle-theme', title: t('cmd.view.toggle-theme'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dark', 'light', 'theme'] },

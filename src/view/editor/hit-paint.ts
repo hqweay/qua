@@ -113,6 +113,24 @@ function txById(host: HTMLElement): Map<string, HTMLElement> {
 }
 
 /**
+ * **命中区间 → DOM Range**（画高亮与 hover 定位共用）。
+ *
+ * 为什么抽出来：`::highlight` 只是画层，没有可命中的元素 —— 想知道「鼠标现在压在
+ * 哪一处命中上」，只能拿同一份区间反算出 Range，再问它的矩形。若在这里另写一份
+ * 偏移换算，画亮的那一处与能点的那一处迟早不是同一个位置。
+ */
+export function rangeAtSpan(tx: HTMLElement, span: PlainSpan): Range | null {
+  const segments = segmentsOf(tx)
+  const from = pointAt(segments, span.start)
+  const to = pointAt(segments, span.end)
+  if (!from || !to) return null
+  const r = document.createRange()
+  r.setStart(from.node, from.offset)
+  r.setEnd(to.node, to.offset)
+  return r
+}
+
+/**
  * 把一组块的命中区间画成一条高亮。
  *
  * 一条 key **只 set 一次**：`CSS.highlights` 是按 key 整条替换的，逐块 set 会让
@@ -135,15 +153,9 @@ export function paintHits(
   for (const [blockId, spans] of blocks) {
     const tx = screen.get(blockId)
     if (!tx || spans.length === 0) continue
-    const segments = segmentsOf(tx)
     for (const span of spans) {
-      const from = pointAt(segments, span.start)
-      const to = pointAt(segments, span.end)
-      if (!from || !to) continue
-      const r = document.createRange()
-      r.setStart(from.node, from.offset)
-      r.setEnd(to.node, to.offset)
-      ranges.push(r)
+      const r = rangeAtSpan(tx, span)
+      if (r) ranges.push(r)
     }
   }
   if (ranges.length === 0) {

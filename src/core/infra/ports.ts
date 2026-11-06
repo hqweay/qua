@@ -203,6 +203,15 @@ export interface App {
    * @returns 真的转换了才 `true`
    */
   convertMention(blockId: string, to: string, start: number, end: number): boolean
+  /**
+   * **选区转引用**（划选气泡那一颗）。
+   *
+   * 选中的是一串纯文本：同名地址已经存在 ⇒ 指向它；不存在 ⇒ 建一个页块再指向它。
+   * 建目标与替换正文在**同一笔事务**里，一次撤销回到原文（也会撤掉顺手建的页）。
+   *
+   * @returns 真的转换了才 `true`
+   */
+  convertSelectionToRef(): boolean
   /* 属性（属性是块第一公民；值在块上 `props[propId]`，一块一槽） */
   setPropValue(blockId: string, propId: string, value: unknown): void
   clearPropValue(blockId: string, propId: string): void

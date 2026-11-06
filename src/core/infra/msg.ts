@@ -752,6 +752,7 @@ export const MSG = {
   'menu.label.link': '外链',
   'menu.label.fold': '折叠',
   'menu.label.copyRef': '复制为引文',
+  'menu.label.selectionToRef': '转为引用',
 
   /* -------------------------------------------- 绑定表 keywords（搜索别名） */
   'menu.kw.enter': '回车',
@@ -1189,9 +1190,12 @@ export const MSG = {
   'ui.search.results': '{count} 个结果',
   'ui.search.queryFailed': '搜索失败',
   'cmd.block.convert-mention': '把提及转成引用',
+  'cmd.editor.selection-to-ref': '把选中文本转为引用',
   'ui.mount.mention.convert': '转成引用',
+  'ui.mount.mention.hoverHint': '点击转为引用',
   'ui.toast.mentionStale': '那一处的正文已经变了，没有转换',
   'ui.toast.mentionReadonly': '这一行的正文是名字或只读内容，不能改写',
+  'ui.toast.selectionToRefCreated': '新建页「{name}」并转为引用',
 
   /* ------------------------------------------------------ 快速筛选（派生面的 chips） */
   'ui.filter.button': '筛选',
