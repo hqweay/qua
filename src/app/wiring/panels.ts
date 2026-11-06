@@ -799,6 +799,9 @@ export function setupPanels(deps: PanelsDeps) {
       },
       // 焦点进挂载区 ⇒ 活动编辑器就是那一个（键位走命令层，认的是它）
       onFocus: (editor) => deps.setEd(editor),
+      invoke: (name, args) => {
+        void deps.getRegistry().invoke(name, args, 'mount')
+      },
       // 与正文同一套事件（点引用/块标/右键菜单/`#`·`@` 补全），装配层只给这一份
       wire: (editor, change) => deps.wireEditor(editor, change, 'mount'),
       onAddTab: (id) => addLocalQueryTab(id),

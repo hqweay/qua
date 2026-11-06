@@ -175,6 +175,7 @@ import {
 } from './block-dom.ts'
 import { assetViewOf, markAssetMissing } from '../asset-views.ts'
 import { ReloadPolicy } from './reload-policy.ts'
+import { spanAt, type PlainSpan } from './hit-paint.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
 import { Drag } from "./drag.ts"
 import { EmbedBodies } from "./embed-bodies.ts"
@@ -4209,6 +4210,28 @@ export class BlockEditor {
     return this.shells
   }
 
+  /**
+   * 这一台编辑器上**命中高亮**的区间与目标，由画高亮的宿主设入（提及栏）。
+   *
+   * 内核不知道谁画了高亮，只回答「光标所在的这一格是不是命中」——⌥ 单击与块菜单
+   * 的 `when` 都读这一份，判据不许有第二处。
+   */
+  private mentionHits: { to: string; spans: ReadonlyMap<string, readonly PlainSpan[]> } | null = null
+
+  /** 换宿主/切栏时由宿主清掉（`null` ＝ 这台编辑器上没有命中） */
+  setMentionHits(hits: { to: string; spans: ReadonlyMap<string, readonly PlainSpan[]> } | null): void {
+    this.mentionHits = hits
+  }
+
+  /** 光标处落在命中区间里 ⇒ 目标与区间；否则 `null` */
+  mentionHitAtCaret(): { to: string; start: number; end: number } | null {
+    const hits = this.mentionHits
+    const blockId = this.caretBlock()
+    if (!hits || !blockId) return null
+    const span = spanAt(hits.spans.get(blockId) ?? [], this.caretOffset())
+    return span ? { to: hits.to, start: span.start, end: span.end } : null
+  }
+
   ctxKeys(): CtxKeys {
     const s = this.sel
     const id = s?.aBlock ?? null
@@ -4236,6 +4259,8 @@ export class BlockEditor {
        */
       blockIsRoot: at !== null && at.parent === null,
       blockIsForestRoot: forestRoot,
+      // 光标落在命中高亮里（块菜单「转为引用」的准入，与 ⌥ 单击同一份判据）
+      mentionHit: this.mentionHitAtCaret() !== null,
       /**
        * 删除入口的准入：**按「有没有身份、有没有替代命令」判，不按「是不是根」**。
        *

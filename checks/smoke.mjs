@@ -22282,6 +22282,320 @@ await check('T258 提及栏大纲高亮命中：区间落在命中字上、切�
   return '两行命中都落在名字上；切走摘掉、切回重画'
 })
 
+/**
+ * **T259：⌥ + 单击命中字 = 转为引用。**
+ *
+ * 钉的是「点哪儿算一处命中」这条判据在真实鼠标下的行为——它与高亮共用同一批 Range：
+ * 普通命中、跨 run 命中、命中整段落在 marks 里都要切成 `ref`；每切一处，一次撤销回原文。
+ *
+ * 为什么坐标从 `CSS.highlights` 里取：Custom Highlight 只是一层画笔，没有可打的元素；
+ * Range 的矩形就是「用户看到的命中字」本身，点击与断言用的是同一处，不另算一遍。
+ */
+await check('T259 ⌥ 单击提及命中字转引用：普通/跨 run/marks 内都成，一次撤销回原文', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const NAME = '提及转换页PQR'
+  const pageId = 'mention-convert-page'
+  await page.evaluate((a) => {
+    window.__qua.forceForest((forest) => {
+      const at = Date.now()
+      const mk = (id, content, props) => ({ id, content, children: [], created: at, modified: at, ...(props ? { props } : {}) })
+      forest.length = 0
+      forest.push(
+        mk(a.pageId, [{ t: 'text', v: a.name }], { _aliases: [a.name], _lists: ['page'] }),
+        mk('mention-convert-a', [{ t: 'text', v: `今天完成了${a.name}，很顺利` }]),
+        // 跨 run：命中字由两个文本段拼出来
+        mk('mention-convert-b', [{ t: 'text', v: '提及转换' }, { t: 'text', v: '页PQR 清单里还有三条' }]),
+        // 命中整段落在 marks 里：切成的原子本身不带格式（已知后果，不是回归）
+        mk('mention-convert-c', [{ t: 'text', v: `今天完成了${a.name}，很顺利`, marks: ['bold'] }]),
+      )
+    })
+  }, { name: NAME, pageId })
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId)
+  await page.waitForSelector('#editor .mount .mount-tab', { timeout: 5000 })
+  await page.locator('#editor .mount .mount-tab', { hasText: '提及' }).first().click()
+
+  /** 该块在命中高亮里的那一处（矩形中点＋Range 文本）；没有命中给 null */
+  const hitOf = (id) =>
+    page.evaluate((bid) => {
+      const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('mention-hit'))
+      const set = key ? CSS.highlights.get(key) : null
+      if (!set) return null
+      for (const r of set) {
+        const blk = r.startContainer.parentElement?.closest?.('.blk')
+        if (blk?.dataset?.blockId !== bid) continue
+        const rect = r.getBoundingClientRect()
+        return { text: r.toString(), x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      }
+      return null
+    }, id)
+
+  const contentOf = (id) =>
+    page.evaluate((bid) => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === bid) return b.content
+          const r = walk(b.children)
+          if (r) return r
+        }
+        return null
+      }
+      return walk(window.__qua.__editor.store.blocks)
+    }, id)
+
+  const CASES = [
+    ['mention-convert-a', `今天完成了${NAME}，很顺利`, '今天完成了，很顺利'],
+    ['mention-convert-b', `${NAME} 清单里还有三条`, ' 清单里还有三条'],
+    ['mention-convert-c', `今天完成了${NAME}，很顺利`, '今天完成了，很顺利'],
+  ]
+  for (const [id, original, rest] of CASES) {
+    await page.waitForFunction(
+      (bid) => {
+        const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('mention-hit'))
+        return Boolean(
+          key &&
+            [...CSS.highlights.get(key)].some(
+              (r) => r.startContainer.parentElement?.closest?.('.blk')?.dataset?.blockId === bid,
+            ),
+        )
+      },
+      id,
+      { timeout: 5000 },
+    )
+    const hit = await hitOf(id)
+    assert(hit && hit.text === NAME, `${id} 的命中区间要正好是名字：${JSON.stringify(hit)}`)
+
+    await page.keyboard.down('Alt')
+    await page.mouse.click(hit.x, hit.y)
+    await page.keyboard.up('Alt')
+
+    await page.waitForFunction(
+      (bid) => {
+        const walk = (list) => {
+          for (const b of list) {
+            if (b.id === bid) return b
+            const r = walk(b.children)
+            if (r) return r
+          }
+          return null
+        }
+        const b = walk(window.__qua.__editor.store.blocks)
+        return Boolean(b && b.content.some((r) => r.t === 'ref'))
+      },
+      id,
+      { timeout: 3000 },
+    )
+    const after = await contentOf(id)
+    const ref = after.find((r) => r.t === 'ref')
+    assert(ref && ref.to === pageId && ref.label === NAME, `${id} 要切成指向这一页的 ref：${JSON.stringify(after)}`)
+    const text = after.reduce((s, r) => s + (r.t === 'text' ? r.v : ''), '')
+    assert(text === rest, `${id} 切完正文只剩其余文本：${JSON.stringify({ text, rest })}`)
+
+    // 一次撤销回到原文（转换走的是同一条事务）
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForFunction(
+      (a) => {
+        const walk = (list) => {
+          for (const b of list) {
+            if (b.id === a.id) return b
+            const r = walk(b.children)
+            if (r) return r
+          }
+          return null
+        }
+        const b = walk(window.__qua.__editor.store.blocks)
+        if (!b) return false
+        const plain = b.content.reduce((s, r) => s + (r.t === 'text' ? r.v : ''), '')
+        return !b.content.some((r) => r.t === 'ref') && plain === a.original
+      },
+      { id, original },
+      { timeout: 3000 },
+    )
+  }
+
+  await ctx.close()
+  return '三处命中（普通／跨 run／marks 内）都切成 ref；每次一次撤销回原文；marks 内的原子本身不带格式（已知后果）'
+})
+
+/**
+ * **T260：转引用的三道守卫。**
+ *
+ * ① 受保护块（查询块的正文是它的名字）⇒ 一句 toast、模型一个字节都不动；
+ * ② 块菜单那一项与 ⌥ 单击读**同一份判据**：光标在命中区间里才出现，不在就不出现；
+ * ③ 未命中区域 ⌥ 单击不许写库（光标照常落下，但零 op）。
+ */
+await check('T260 转引用守卫：受保护块 toast 不写库；块菜单只在命中处出现；未命中 ⌥ 零写入', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const NAME = '转换守卫页STU'
+  const pageId = 'mention-guard-page'
+  await page.evaluate((a) => {
+    window.__qua.forceForest((forest) => {
+      const at = Date.now()
+      const mk = (id, content, props) => ({ id, content, children: [], created: at, modified: at, ...(props ? { props } : {}) })
+      forest.length = 0
+      forest.push(
+        mk(a.pageId, [{ t: 'text', v: a.name }], { _aliases: [a.name], _lists: ['page'] }),
+        mk('mention-guard-a', [{ t: 'text', v: `今天完成了${a.name}，很顺利` }]),
+        mk('mention-guard-b', [{ t: 'text', v: `${a.name} 清单里还有三条` }]),
+        // 查询块的正文就是它的名字：内容写路径禁写，是真实的受保护块
+        mk('mention-guard-q', [{ t: 'text', v: `${a.name} 查询块` }], { _query: { where: { text: 'no-such-text-zzz' } } }),
+      )
+    })
+  }, { name: NAME, pageId })
+
+  const contentOf = (id) =>
+    page.evaluate((bid) => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === bid) return b.content
+          const r = walk(b.children)
+          if (r) return r
+        }
+        return null
+      }
+      return walk(window.__qua.__editor.store.blocks)
+    }, id)
+
+  // ① 受保护块：直接走命令面（⌥ 与菜单最终都落到它）
+  const beforeQ = await contentOf('mention-guard-q')
+  await page.evaluate(
+    (a) => window.__qua.invoke('core.block/convert-mention', { blockId: a.id, to: a.to, start: 0, end: a.len }),
+    { id: 'mention-guard-q', to: pageId, len: NAME.length },
+  )
+  await page.waitForFunction(() => Boolean(document.querySelector('.toast')), null, { timeout: 3000 })
+  const toast = await page.evaluate(() =>
+    [...document.querySelectorAll('.toast')].map((x) => x.textContent ?? '').join('|'),
+  )
+  assert(toast.includes('不能改写'), `受保护块要说清原因（不是「点了没反应」）：${toast}`)
+  const afterQ = await contentOf('mention-guard-q')
+  assert(
+    JSON.stringify(afterQ) === JSON.stringify(beforeQ),
+    `受保护块的模型不许变：${JSON.stringify({ before: beforeQ, after: afterQ })}`,
+  )
+
+  // ② 块菜单：光标落在命中区间里 ⇒ 有这一项，点它当场转换
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId)
+  await page.waitForSelector('#editor .mount .mount-tab', { timeout: 5000 })
+  await page.locator('#editor .mount .mount-tab', { hasText: '提及' }).first().click()
+  await page.waitForFunction(
+    () => {
+      const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('mention-hit'))
+      return Boolean(key && CSS.highlights.get(key).size >= 2)
+    },
+    null,
+    { timeout: 5000 },
+  )
+  const hitOf = (id) =>
+    page.evaluate((bid) => {
+      const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('mention-hit'))
+      const set = key ? CSS.highlights.get(key) : null
+      if (!set) return null
+      for (const r of set) {
+        const blk = r.startContainer.parentElement?.closest?.('.blk')
+        if (blk?.dataset?.blockId !== bid) continue
+        const rect = r.getBoundingClientRect()
+        return { text: r.toString(), x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      }
+      return null
+    }, id)
+  const hitA = await hitOf('mention-guard-a')
+  assert(hitA && hitA.text === NAME, `前置：A 要有一处命中高亮：${JSON.stringify(hitA)}`)
+  await page.mouse.click(hitA.x, hitA.y)
+  await page.waitForFunction(
+    (id) => {
+      const ed = window.__qua.activeEditor()
+      return Boolean(ed && ed.sel && ed.sel.aBlock === id)
+    },
+    'mention-guard-a',
+    { timeout: 3000 },
+  )
+  await page.evaluate((id) => window.__qua.openBlockMenu(id), 'mention-guard-a')
+  await page.waitForSelector('.layer-item', { timeout: 3000 })
+  const onHitRows = await page.evaluate(() =>
+    [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? ''),
+  )
+  assert(
+    onHitRows.some((l) => l.includes('把提及转成引用')),
+    `光标在命中处时块菜单要有这一项：${JSON.stringify(onHitRows)}`,
+  )
+  const idx = onHitRows.findIndex((l) => l.includes('把提及转成引用'))
+  await page.locator(`.layer-item[data-index="${idx}"]`).click()
+  await page.waitForFunction(
+    (id) => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === id) return b
+          const r = walk(b.children)
+          if (r) return r
+        }
+        return null
+      }
+      const b = walk(window.__qua.__editor.store.blocks)
+      return Boolean(b && b.content.some((r) => r.t === 'ref'))
+    },
+    'mention-guard-a',
+    { timeout: 3000 },
+  )
+
+  // ③ 不在命中处：同为纯文本，但菜单里不该有这一项；⌥ 单击也不许写库
+  const wordRect = (id, word) =>
+    page.evaluate((a) => {
+      const blk = document.querySelector(`#editor .mount-editor .blk[data-block-id="${a.id}"]`)
+      const tx = blk?.querySelector(':scope > .tx')
+      if (!tx) return null
+      const walker = document.createTreeWalker(tx, NodeFilter.SHOW_TEXT)
+      while (walker.nextNode()) {
+        const node = walker.currentNode
+        const at = node.data.indexOf(a.word)
+        if (at < 0) continue
+        const r = document.createRange()
+        r.setStart(node, at)
+        r.setEnd(node, at + a.word.length)
+        const rect = r.getBoundingClientRect()
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      }
+      return null
+    }, { id, word })
+  const miss = await wordRect('mention-guard-b', '清单')
+  assert(miss, '前置：B 的未命中词要量得出矩形')
+  await page.mouse.click(miss.x, miss.y)
+  await page.waitForFunction(
+    (id) => {
+      const ed = window.__qua.activeEditor()
+      return Boolean(ed && ed.sel && ed.sel.aBlock === id)
+    },
+    'mention-guard-b',
+    { timeout: 3000 },
+  )
+  await page.evaluate((id) => window.__qua.openBlockMenu(id), 'mention-guard-b')
+  await page.waitForSelector('.layer-item', { timeout: 3000 })
+  const offHitRows = await page.evaluate(() =>
+    [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? ''),
+  )
+  assert(
+    !offHitRows.some((l) => l.includes('把提及转成引用')),
+    `不在命中处时菜单里不该有这一项：${JSON.stringify(offHitRows)}`,
+  )
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('.layer-item'), null, { timeout: 3000 })
+
+  const beforeB = await contentOf('mention-guard-b')
+  const missAgain = await wordRect('mention-guard-b', '清单')
+  assert(missAgain, '前置：撤销菜单后 B 的未命中词还在')
+  await page.keyboard.down('Alt')
+  await page.mouse.click(missAgain.x, missAgain.y)
+  await page.keyboard.up('Alt')
+  const afterB = await contentOf('mention-guard-b')
+  assert(
+    JSON.stringify(afterB) === JSON.stringify(beforeB),
+    `未命中区域 ⌥ 单击不许写库：${JSON.stringify({ before: beforeB, after: afterB })}`,
+  )
+  assert(!afterB.some((r) => r.t === 'ref'), `未命中区域不许出现 ref run：${JSON.stringify(afterB)}`)
+
+  await ctx.close()
+  return '受保护块给 toast 且模型不变；菜单在命中处出现、点它转换，不在命中处不出现；未命中 ⌥ 单击零写入'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

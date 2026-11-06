@@ -1191,6 +1191,7 @@ export const MSG = {
   'cmd.block.convert-mention': '把提及转成引用',
   'ui.mount.mention.convert': '转成引用',
   'ui.toast.mentionStale': '那一处的正文已经变了，没有转换',
+  'ui.toast.mentionReadonly': '这一行的正文是名字或只读内容，不能改写',
 
   /* ------------------------------------------------------ 快速筛选（派生面的 chips） */
   'ui.filter.button': '筛选',

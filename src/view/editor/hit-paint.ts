@@ -16,6 +16,8 @@
  * 现找文本节点；调用方在装载后与 DOM 变化后各调一次（见挂载区的 `MutationObserver`）。
  */
 
+import { offsetIn } from './dom-text.ts'
+
 /** 一个块正文里的命中区间：plain 偏移（文本段按字符数，原子占 1 格） */
 export interface PlainSpan {
   start: number
@@ -148,4 +150,28 @@ export function paintHits(
 /** 摘掉这条 key 的高亮（切走这一栏／拆掉宿主都要走这里） */
 export function clearHits(key: string): void {
   if (typeof CSS !== 'undefined' && CSS.highlights) CSS.highlights.delete(key)
+}
+
+/**
+ * 落点在哪一处命中上（**半开区间**：区间末尾那一格不算，那里是下一个字符）。
+ *
+ * ⌥ 单击与块菜单的 `when` 都读这一条 —— 两份判据的下场是
+ * 「高亮上有、点了却能点空」。
+ */
+export function spanAt(spans: readonly PlainSpan[], offset: number): PlainSpan | null {
+  for (const s of spans) if (offset >= s.start && offset < s.end) return s
+  return null
+}
+
+/**
+ * **鼠标位置 → plain 偏移**（读回的逆向：`offsetIn` 是那套坐标的唯一一份实现）。
+ *
+ * 为什么不用 `::highlight` 去命中：Custom Highlight 只是画层，没有可打的元素，
+ * 也就没有 `elementFromPoint` 可问 —— 只能反过来从坐标问浏览器「那里是哪个字」。
+ */
+export function offsetAtPoint(tx: HTMLElement, x: number, y: number): number | null {
+  const doc = document as Document & { caretRangeFromPoint?: (x: number, y: number) => Range | null }
+  const range = doc.caretRangeFromPoint?.(x, y) ?? null
+  if (!range || !tx.contains(range.startContainer)) return null
+  return offsetIn(tx, range.startContainer, range.startOffset)
 }

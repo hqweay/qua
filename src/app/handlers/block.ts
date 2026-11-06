@@ -99,9 +99,17 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     app.toast(t('ui.toast.blockRestored'))
     return true
   },
-  // 提及栏片段行的按钮是唯一入口；区间复核与「没转成」的实话都在门面那一步
-  'core.block/convert-mention': (a, app) =>
-    app.convertMention(S(a.blockId), S(a.to), Number(a.start), Number(a.end)),
+  // 提及栏片段行的按钮与块菜单那一条都走这道门面；区间复核与「没转成」的实话在门面那一步
+  'core.block/convert-mention': (a, app) => {
+    // 菜单行不带参数：它问的是「光标正停在哪一处命中上」，与 ⌥ 单击同一份判据
+    if (!a.blockId) {
+      const hit = app.ed.mentionHitAtCaret()
+      const id = app.ed.caretBlock()
+      if (!hit || !id) return false
+      return app.convertMention(id, hit.to, hit.start, hit.end)
+    }
+    return app.convertMention(S(a.blockId), S(a.to), Number(a.start), Number(a.end))
+  },
   'core.editor/toggle-todo': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false
