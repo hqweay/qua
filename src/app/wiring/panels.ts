@@ -9,6 +9,9 @@
 import {
   blockLabel,
   buildAdjacency,
+  cardinalityOf,
+  choiceDisplayLabel,
+  choicesFor,
   danglingOf,
   declaredFieldIds,
   applyQuickFilter,
@@ -53,6 +56,7 @@ import type { Tx } from '../../core/kb/types.ts'
 import type { BlockStore } from '../../core/model/store.ts'
 import type { Prefs, Workspace } from '../../core/infra/workspace.ts'
 import type { Layers, Row } from '../../ui/overlay/layers.ts'
+import { openChoicePicker } from '../choice-picker.ts'
 import { ICON_PATHS } from '../../view/icons.ts'
 import { MountArea, type ViewBodyHost } from '../../ui/chrome/mount-area.ts'
 import { PropertiesPanel, type PropertiesDeps } from '../../ui/block-ui/properties.ts'
@@ -189,6 +193,36 @@ export function setupPanels(deps: PanelsDeps) {
    * ⚠️ `anchor` 由调用方给（属性区给按钮 rect、行内浮层给按钮 rect）：
    *    不再一律贴光标——否则从浮层里选值时，菜单会跑到编辑器的光标处。
    */
+  /**
+   * **多值属性选值**：属性卡/表格共用的入口。
+   *
+   * 浮层、图标、勾选状态都在 `openChoicePicker`（一处实现）；这里只负责
+   * 「按当前块解析能选的选项」＋「把写回接到调用方的 commit」。
+   */
+  const pickChoiceValue = (
+    b: Block,
+    propId: string,
+    current: readonly string[],
+    onPick: (next: string[]) => void,
+    anchor?: DOMRect,
+  ): void => {
+    const def = kb.get(propId)
+    if (!def) return
+    const tagName = (id: string): string => {
+      const tag = kb.get(id)
+      return tag ? displayNameOf(tag).trim() || shortId(id) : shortId(id)
+    }
+    openChoicePicker({
+      layers,
+      def,
+      choices: choicesFor(b, propId, kb.roots()),
+      current,
+      anchor: anchor ?? deps.getEd().caretRect(),
+      labelOf: (c) => choiceDisplayLabel(c, def, tagName),
+      onPick: (next) => onPick(Array.isArray(next) ? next : [next]),
+    })
+  }
+
   const pickRefValue = (
     owner: Block,
     _propId: string,
@@ -347,6 +381,8 @@ export function setupPanels(deps: PanelsDeps) {
        * 属性区与行内实例浮层共用同一份，候选集合不会分叉。
        */
       pickRef: pickRefValue,
+      /** 多值 select：整份数组写回（每次勾选一次撤销） */
+      pickChoice: (b, propId, current, onPick, anchor) => pickChoiceValue(b, propId, current, onPick, anchor),
       /** 选项图标：同一张 `ICON_PATHS` 数据现画成一列（带图标预览，可搜索） */
       pickIcon: pickIconValue,
       refLabel: (targetId) => {
@@ -390,6 +426,8 @@ export function setupPanels(deps: PanelsDeps) {
           void deps.getRegistry().invoke('core.props/set-choice-icon', { choiceId, icon }, 'ui'),
         setDone: (defId, choiceId, done) =>
           void deps.getRegistry().invoke('core.props/set-choice-done', { defId, choiceId, done }, 'ui'),
+        setCardinality: (defId, cardinality) =>
+          void deps.getRegistry().invoke('core.props/set-choice-cardinality', { defId, cardinality }, 'ui'),
         setUiPosition: (defId, position) =>
           void deps.getRegistry().invoke('core.props/set-ui-position', { defId, position }, 'ui'),
         remove: (choiceId) => void deps.getRegistry().invoke('core.props/delete-choice', { choiceId }, 'ui'),
@@ -641,6 +679,7 @@ export function setupPanels(deps: PanelsDeps) {
       ...(deps.atomClick ? { onAtomClick: (atom, el, mods) => deps.atomClick!(atom, el, mods) } : {}),
       openBlock: (id, place) => deps.openBlock(id, place),
       pickRef: (b, propId, current, onPick, anchor) => pickRefValue(b, propId, current, onPick, anchor),
+      pickChoice: (b, propId, current, onPick, anchor) => pickChoiceValue(b, propId, current, onPick, anchor),
       refLabel: (id) => {
         const b = kb.get(id)
         if (!b) return t('ui.props.refMissing', { id: shortId(id) })
@@ -655,7 +694,9 @@ export function setupPanels(deps: PanelsDeps) {
       /** 条件树的字段下拉：属性定义 ＋ 显示名（同名带来源）＋ kind（值控件按 kind 分派） */
       fields: () => {
         const labels = propDisplayLabels(kb.roots())
-        return kb.propDefs().map((d) => ({ id: d.id, label: labels.get(d.id) ?? propLabel(d), kind: propKindOf(d) }))
+        return kb
+          .propDefs()
+          .map((d) => ({ id: d.id, label: labels.get(d.id) ?? propLabel(d), kind: propKindOf(d), cardinality: cardinalityOf(d) }))
       },
       /**
        * 看板分组列的**选项**：`select` 的选项是定义块的直接子块（顺序＝children 顺序）。
@@ -1012,6 +1053,7 @@ export function setupPanels(deps: PanelsDeps) {
     renderProperties,
     scheduleProperties,
     pickRefValue,
+    pickChoiceValue,
     openPropertiesDrawer,
     mountBlockView,
     mountEmbedView,

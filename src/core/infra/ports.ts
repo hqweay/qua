@@ -17,7 +17,7 @@
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { CtxKeys } from '../index.ts'
 import type { QueryNode, QuerySpec } from '../query/query.ts'
-import type { ChoiceScope, UiPosition } from '../props/props.ts'
+import type { Cardinality, ChoiceScope, UiPosition } from '../props/props.ts'
 import type { SecLayout } from '../query/feed.ts'
 import type { MountHost } from '../views/mount.ts'
 import type { ViewConfig } from '../views/view.ts'
@@ -245,6 +245,12 @@ export interface App {
    * `done === false` 只摘这一个，该属性从此不再是任务型字段。
    */
   setChoiceDone(defId: string, choiceId: string, done: boolean): void
+  /**
+   * 切换单值/多值（只对 `select`）。
+   *
+   * 切回 `one` 时若仍有块选了多个值 ⇒ **拒绝**并给一句提示，不静默只显示第一个。
+   */
+  setChoiceCardinality(defId: string, cardinality: Cardinality): void
   /** 写定义块的快捷入口位置（`block-left` ＝ 块左侧图标；`panel` ＝ 只留属性面板） */
   setUiPosition(defId: string, position: UiPosition): void
   /** 删一个选项（**普通软删**：值保留，恢复后自动解析回来） */

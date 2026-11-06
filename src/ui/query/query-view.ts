@@ -203,11 +203,19 @@ export interface ViewHostDeps {
   openBlock: (blockId: string, place?: OpenPlace) => void
   /** `ref` 值的选择器（与属性区同一份） */
   pickRef?: (owner: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect) => void
+  /** 多值 select 的选值浮层（与属性卡共用；省略 ⇒ 多值格只读） */
+  pickChoice?: (
+    owner: Block,
+    propId: string,
+    current: readonly string[],
+    onPick: (next: string[]) => void,
+    anchor?: DOMRect,
+  ) => void
   refLabel?: (targetId: string) => string
   /** 标签名解析（`select` 选项显示名里的 `#名`） */
   tagName?: (id: string) => string
   /** 可选的属性定义（条件树的字段下拉；按显示名排好，`ui` 不扫森林） */
-  fields: () => readonly { id: string; label: string; kind?: PropKind }[]
+  fields: () => readonly { id: string; label: string; kind?: PropKind; cardinality?: 'one' | 'many' }[]
   /** 某一列的**选项**（`select` 的看板分组列；其余属性给空表） */
   choices?: (propId: string) => readonly { id: string; label: string }[]
   /** 今天（本地日）：日历的「今天描边」要钉得住 */
@@ -959,11 +967,11 @@ export class ViewHost {
     for (const [key, n] of [...counts.entries()]
       .filter(([k, n]) => n > 0 && (k === '_tags' || this.deps.fields().some((f) => f.id === k)))
       // 卡片（看板）的分组列**不支持多值属性**：拖卡写值没有唯一动作——多值去列表/表格分组
-      .filter(([k]) => !(kind === 'board' && isMultiValueKey(k)))
+      .filter(([k]) => !(kind === 'board' && isMultiValueKey(k, (id) => this.cardinalityOf(id))))
       .sort((a, b) => b[1] - a[1])) {
       const o = document.createElement('option')
       o.value = key
-      const multi = isMultiValueKey(key) ? t('ui.query.group.multi') : ''
+      const multi = isMultiValueKey(key, (id) => this.cardinalityOf(id)) ? t('ui.query.group.multi') : ''
       o.textContent = `${label(key)}${multi}（${n}／${total}）`
       options.push(o)
     }
@@ -1290,6 +1298,7 @@ export class ViewHost {
         choices: (propId) => this.deps.choices?.(propId) ?? [],
         ...(this.ownerBlock() ? { owner: this.ownerBlock() } : {}),
         ...(this.deps.pickRef ? { pickRef: this.deps.pickRef } : {}),
+        ...(this.deps.pickChoice ? { pickChoice: this.deps.pickChoice } : {}),
         ...(this.deps.refLabel ? { refLabel: this.deps.refLabel } : {}),
         apply: (next) => this.deps.invoke('core.query/set-spec', { owner: this.writeOwner, spec: next }),
         afterApply: () => this.refocusBody(),
@@ -1449,6 +1458,7 @@ export class ViewHost {
           view: () => this.view ?? view,
           records: () => this.records(),
           choices: (id) => (id === '_tags' ? this.tagChoices() : this.deps.choices?.(id) ?? []),
+          cardinalityOf: (id) => this.cardinalityOf(id),
           makeBody: (records) =>
             want === 'list' ? this.buildList(records, view) : this.buildTable(records, view),
         })
@@ -1509,6 +1519,7 @@ export class ViewHost {
           view: () => this.view ?? view,
           fieldLabel: (id) => this.deps.fields().find((f) => f.id === id)?.label ?? id.slice(-6),
           choices: (id) => (id === '_tags' ? this.tagChoices() : this.deps.choices?.(id) ?? []),
+          cardinalityOf: (id) => this.cardinalityOf(id),
           setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
           clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
           projectTitle: (r, into) => this.deps.project(r.block, into),
@@ -1671,6 +1682,11 @@ export class ViewHost {
   }
 
   /** 行（派生）：query＝命中（不折叠祖先）；children＝直接子块；items＝`_items` 解析到的活块 */
+  /** 字段基数（多值键的唯一口径：看板排除、列表/表格 fan-out） */
+  private cardinalityOf(propId: string): 'one' | 'many' {
+    return this.deps.fields().find((f) => f.id === propId)?.cardinality ?? 'one'
+  }
+
   private records(): ViewRecord[] {
     if (this.deps.derived) return this.deps.derived.records()
     const src = this.source

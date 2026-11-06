@@ -96,6 +96,12 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
     app.setChoiceDone(defId, choiceId, a.done === true)
     return true
   },
+  'core.props/set-choice-cardinality': (a, app) => {
+    const defId = S(a.defId)
+    if (!defId) return false
+    app.setChoiceCardinality(defId, a.cardinality === 'many' ? 'many' : 'one')
+    return true
+  },
   'core.props/set-ui-position': (a, app) => {
     const defId = S(a.defId)
     if (!defId) return false

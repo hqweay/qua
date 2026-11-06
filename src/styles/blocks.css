@@ -530,6 +530,20 @@
 .blk .identity.prop-mark:hover {
   color: var(--ui-text-secondary);
 }
+/* 多值属性：一串图标是一个命中区（点任意一枚开同一个多选菜单） */
+.blk .identity.prop-multi {
+  gap: 2px;
+}
+.blk .identity.prop-multi .prop-multi-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.blk .identity.prop-multi .prop-multi-more {
+  font-size: var(--ui-fs-2xs);
+  color: var(--ui-text-tertiary);
+  white-space: nowrap;
+}
 .blk .identity.tag-mark {
   opacity: 0.8;
   cursor: default;

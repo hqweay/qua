@@ -31,6 +31,8 @@ export interface GroupBucket {
 export interface BucketizeOptions {
   choices: (propId: string) => readonly { id: string; label: string }[]
   groupOrder?: readonly string[]
+  /** 字段基数解析（多值字段一块进每个所属组；缺省只认 `_tags`） */
+  cardinalityOf?: (propId: string) => 'one' | 'many'
 }
 
 const keyOfValue = (v: unknown): string => {
@@ -47,7 +49,7 @@ export function bucketize(
   key: string,
   o: BucketizeOptions,
 ): { multi: boolean; buckets: GroupBucket[]; order: string[] } {
-  const multi = isMultiValueKey(key)
+  const multi = isMultiValueKey(key, o.cardinalityOf)
   const order: string[] = []
   for (const g of o.groupOrder ?? []) {
     const k = `s:${g}`
@@ -69,7 +71,14 @@ export function bucketize(
   }
   for (const r of records) {
     const raw = r.values[key]
-    const values = multi ? (Array.isArray(raw) ? raw : []) : [raw]
+    // 多值字段的旧值可能是单值（定义刚从 one 切成 many）⇒ 读成一个元素，不落进「未设置」
+    const values = multi
+      ? Array.isArray(raw)
+        ? raw
+        : raw === undefined || raw === null || raw === ''
+          ? []
+          : [raw]
+      : [raw]
     if (values.length === 0) {
       push(GROUP_UNSET, undefined, r)
       continue

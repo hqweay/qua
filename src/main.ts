@@ -8,6 +8,8 @@
  */
 import './styles.css'
 import { addAlias, addList, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, choicesFor, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec } from './core/index.ts'
+import { choiceDisplayLabel, cardinalityOf, singleValueOf, valueListOf } from './core/index.ts'
+import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
 import { BlockStore } from './core/model/store.ts'
@@ -1448,7 +1450,9 @@ function openSpecPopover(opts: {
       spec: opts.spec,
       fields: () => {
         const labels = propDisplayLabels(kb.roots())
-        return kb.propDefs().map((d) => ({ id: d.id, label: labels.get(d.id) ?? propLabel(d), kind: propKindOf(d) }))
+        return kb
+          .propDefs()
+          .map((d) => ({ id: d.id, label: labels.get(d.id) ?? propLabel(d), kind: propKindOf(d), cardinality: cardinalityOf(d) }))
       },
       /**
        * `select` 的选项：**定义块的直接子块，全量、排除软删**。
@@ -2497,32 +2501,31 @@ function viewEvents(
       const block = kb.get(blockId)
       const def = kb.get(propId)
       if (!block || !def) return
-      const current = String(block.props?.[propId] ?? '')
-      const rows: Row[] = choicesFor(block, propId, kb.roots()).map((c) => {
-        const icon = prop<string>(c, '_icon') ?? prop<string>(def, '_icon')
-        return {
-          id: `choice/${c.id}`,
-          label: displayNameOf(c).trim() || shortId(c.id),
-          ...(icon ? { icon } : {}),
-          keyHint: c.id === current ? t('ui.props.choice.current') : undefined,
-        }
-      })
+      const current =
+        cardinalityOf(def) === 'many'
+          ? valueListOf(block.props?.[propId])
+          : singleValueOf(block.props?.[propId])
       /**
        * **推迟到本轮事件之后开**：gutter 的入口走 `mousedown`（避免先挪光标），
        * 而浮层的「点别处关」监听也挂在 `document` 的 `mousedown` 上 —— 同步开会
        * 让同一个事件在冒泡到 `document` 时把刚开的菜单关掉（表现为「点了没反应」）。
        */
       queueMicrotask(() =>
-        layers.openMenu({
-          rows,
+        openChoicePicker({
+          layers,
+          def,
+          choices: choicesFor(block, propId, kb.roots()),
+          current,
           anchor,
-          title: t('ui.props.pickChoice'),
-          searchable: true,
-          focusSearch: true,
-          emptyText: t('ui.props.choice.empty'),
-          onPick: (row) => {
-            const id = String(row.id).slice('choice/'.length)
-            void registry.invoke('core.props/set-value', { blockId, propId, value: id }, via)
+          labelOf: (c) => {
+            const tagName = (id: string): string => {
+              const t2 = kb.get(id)
+              return t2 ? displayNameOf(t2).trim() || shortId(id) : shortId(id)
+            }
+            return choiceDisplayLabel(c, def, tagName)
+          },
+          onPick: (next) => {
+            void registry.invoke('core.props/set-value', { blockId, propId, value: next }, via)
           },
         }),
       )
@@ -2669,6 +2672,7 @@ const {
   renderProperties,
   scheduleProperties,
   pickRefValue,
+  pickChoiceValue,
   openPropertiesDrawer,
   mountBlockView,
   mountEmbedView,
@@ -2709,6 +2713,7 @@ panels = {
   renderProperties,
   scheduleProperties,
   pickRefValue,
+  pickChoiceValue,
   openPropertiesDrawer,
   mountBlockView,
   mountEmbedView,
@@ -2743,6 +2748,7 @@ objFieldDeps = {
   clearValue: (recordId, propId) =>
     void registry.invoke('core.props/clear-value', { blockId: recordId, propId }, 'popover'),
   pickRef: pickRefValue,
+  pickChoice: pickChoiceValue,
   refLabel: (targetId) => {
     const b = kb.get(targetId)
     return b ? blockName(b) : t('ui.props.refMissing', { id: shortId(targetId) })

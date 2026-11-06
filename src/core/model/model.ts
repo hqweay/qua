@@ -163,6 +163,13 @@ export type SystemPropId =
    * 每个定义最多一个（写入路径保证），读侧取第一个。
    */
   | '_done'
+  /**
+   * 字段定义的**基数**（见 `core/props.ts` 的 `cardinalityOf`）：`one`（缺省）／`many`。
+   *
+   * 多值只对 `select` 有意义：值是一个选项 id 数组，顺序按选项兄弟序。
+   * 它是**值形态**，不是新的 kind——单选/多选共用同一套选项与同一份值域。
+   */
+  | '_cardinality'
   // 自有属性槽：这一块自己登记了哪些属性（见 `core/props.ts` 的 `ownPropIds`）
   | '_ownProps'
   // 字段定义的**编辑位置**（见 `core/props.ts` 的 `uiPositionOf`）

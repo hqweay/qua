@@ -22,6 +22,7 @@ import {
   choicesFor,
   choicesOf,
   fieldRows,
+  isMultiValueKey,
   mkPropDef,
   propDisplayLabels,
   runQuery,
@@ -433,6 +434,57 @@ test('选项图标/完成标记/快捷入口：写命令、完成值兄弟唯一
 
   cmds.setChoiceIcon(c1, '')
   assert.equal('_icon' in (kb.get(c1)?.props ?? {}), false, '空图标摘格，不留空串')
+})
+
+test('多值：setChoiceCardinality 写/摘 `_cardinality`；切回单值挡住仍有 >1 值的库', () => {
+  const { cmds, kb, toasts } = commandHarness()
+  const defId = cmds.createPropDef('', '标签集', 'select', 'own')
+  const c1 = cmds.addChoice(defId, '甲')
+  const c2 = cmds.addChoice(defId, '乙')
+  const host: Block = {
+    id: 'host',
+    content: textRuns('一块'),
+    children: [],
+    created: 1,
+    modified: 1,
+    props: { [defId]: [c1, c2] },
+  }
+  kb.tx((tx) => tx.insert(host, null, 0))
+
+  cmds.setChoiceCardinality(defId, 'many')
+  assert.equal(kb.get(defId)?.props?._cardinality, 'many')
+  cmds.setChoiceCardinality(defId, 'one')
+  assert.equal(kb.get(defId)?.props?._cardinality, 'many', '还有块选了两个值 ⇒ 不切，且不静默丢值')
+  assert.ok(toasts.some((x) => x.includes('多个值')), `应有提示：${JSON.stringify(toasts)}`)
+
+  cmds.setPropValue('host', defId, [c1])
+  cmds.setChoiceCardinality(defId, 'one')
+  assert.equal('_cardinality' in (kb.get(defId)?.props ?? {}), false, '只剩一个值 ⇒ 可切回单值，槽摘掉')
+})
+
+test('多值字段的查询：eq/neq 按包含判，empty 判空数组', () => {
+  const a = { ...blk('a', 'A'), props: { 'p-multi': ['x', 'y'] } }
+  const b = { ...blk('b', 'B'), props: { 'p-multi': ['y'] } }
+  const c = { ...blk('c', 'C'), props: { 'p-multi': [] } }
+  // 不放定义块：`empty` 的既有语义是「没有这一栏 **或** 空值」，定义块自己会命中「没有」。
+  const blocks = [a, b, c]
+  const hits = (where: Parameters<typeof runQuery>[0]['where']): string[] =>
+    runQuery({ where }, { blocks })
+      .map((h) => h.blockId)
+      .sort()
+  assert.deepEqual(hits({ prop: { id: 'p-multi', eq: 'y' } }), ['a', 'b'], 'eq = 包含')
+  assert.deepEqual(hits({ prop: { id: 'p-multi', neq: 'y' } }), ['c'], 'neq = 不包含')
+  assert.deepEqual(hits({ prop: { id: 'p-multi', empty: true } }), ['c'], 'empty = 空数组')
+})
+
+test('isMultiValueKey：`_tags` 永远多值；字段按 `_cardinality` 解析', () => {
+  assert.equal(isMultiValueKey('_tags'), true)
+  assert.equal(isMultiValueKey('p-multi'), false, '没有解析器时不猜')
+  assert.equal(
+    isMultiValueKey('p-multi', (id) => (id === 'p-multi' ? 'many' : 'one')),
+    true,
+    '定义声明多值 ⇒ 同一个判据',
+  )
 })
 
 /* ------------------------------------------------------------ 8. 排序 */

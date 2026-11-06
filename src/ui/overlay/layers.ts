@@ -146,6 +146,11 @@ export interface MenuOpts {
    * （`#名` 按 `Enter` 插进正文、按 `⌥Enter` 归到本块），所以这枚参数必须在选中那一刻取。
    */
   onPick: (row: Row, mods: PickMods) => void
+  /**
+   * **选中后不关**（多选取值用）：每点一行还留在原地，由调用方 `setRows` 更新勾选态。
+   * 缺省 `false`：菜单是一次性动作面板，选完即关。
+   */
+  keepOpen?: boolean
   onQuery?: (q: string) => void
   onClose?: () => void
 }
@@ -440,7 +445,8 @@ export class Layers {
     const row = this.rows[this.active]
     if (!row || row.disabled) return
     const onPick = this.opts?.onPick
-    this.closeMenu()
+    const keep = this.opts?.keepOpen === true
+    if (!keep) this.closeMenu()
     onPick?.(row, mods)
   }
 

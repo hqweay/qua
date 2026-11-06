@@ -2,10 +2,13 @@
  * 属性命令：值的读写、字段定义的声明与摘除。
  */
 import {
+  CARDINALITY_PROP,
   CHOICE_SCOPE_PROP,
   DONE_PROP,
   ICON_PROP,
   UI_POSITION_PROP,
+  flatten,
+  valueListOf,
   clearKeepsField,
   clearValue,
   declareField,
@@ -22,6 +25,7 @@ import {
   setValue,
   undeclareField,
   type Block,
+  type Cardinality,
   type UiPosition,
 } from '../../core/index.ts'
 import { textRuns } from '../../core/model/runs.ts'
@@ -44,6 +48,7 @@ export function propsCommands(
   | 'setChoiceScope'
   | 'setChoiceIcon'
   | 'setChoiceDone'
+  | 'setChoiceCardinality'
   | 'setUiPosition'
   | 'deleteChoice'
 > {
@@ -256,6 +261,29 @@ export function propsCommands(
         }
         tx.patch(choiceId, (b) => patchProp(b, DONE_PROP, done ? true : undefined))
       })
+    },
+
+    /**
+     * 切换单值/多值。
+     *
+     * 切到多值不需要迁移旧值：读路径把单值当作「只有一个」（`valueListOf`），
+     * 下一次写值自然归一成数组。切回单值要**挡住仍有 >1 个值的库**——
+     * 否则那些值会在界面上静默变成「只显示第一个」，而数据还在。
+     * 这是一次罕见动作，扫一遍森林可以接受；不在打字路径上。
+     */
+    setChoiceCardinality: (defId, cardinality: Cardinality) => {
+      const def = find(defId)
+      if (!def || propKindOf(def) !== 'select') return
+      if (cardinality === 'one') {
+        const hasMulti = flatten({ roots: [...d.kb.roots()] }).some((b) => valueListOf(b.props?.[defId]).length > 1)
+        if (hasMulti) {
+          d.toast(t('ui.props.choice.multiBlocked'), 'warn')
+          return
+        }
+      }
+      d.run((tx) =>
+        tx.patch(defId, (b) => patchProp(b, CARDINALITY_PROP, cardinality === 'many' ? 'many' : undefined)),
+      )
     },
 
     /** 写定义块的快捷入口位置（`panel` ＝ 摘键，回到缺省） */

@@ -357,6 +357,29 @@ test('gutter 派生：select 带当前选项的图标与完成档；未填退回
   assert.equal(e.icon, 'lucide:flag', '未填 ⇒ 定义块的图标，入口不因没有值而消失')
 })
 
+test('多值 select：值读成数组、名字按兄弟序、被作用域隐藏的值仍显示；`_done` 在多值上不算完成', () => {
+  const def = mkPropDef('标签集', 'select', { _cardinality: 'many' }, 'p-multi')
+  def.children = [
+    { ...mkBlock('甲', { props: { _done: true } }), id: 'c1' },
+    { ...mkBlock('乙'), id: 'c2' },
+    { ...mkBlock('丙', { props: { _choiceScope: { mode: 'only', tags: ['t1'] } } }), id: 'c3' },
+  ]
+  const host: Block = {
+    id: 'h',
+    content: textRuns('带多值'),
+    children: [],
+    created: 1,
+    modified: 1,
+    props: { 'p-multi': ['c3', 'c1'] },
+  }
+  const rows = fieldRows(host, [def, host])
+  const row = rows.find((r) => r.propId === 'p-multi')!
+  assert.equal(row.cardinality, 'many')
+  assert.deepEqual(row.currentChoiceLabels, ['甲', '丙'], '顺序＝选项兄弟序，不是勾选序')
+  assert.deepEqual(row.currentChoices?.map((c) => c.id), ['c1', 'c3'], '被作用域隐藏的值照常显示')
+  assert.equal(todoOf(host, fieldTableOf([def, host])), undefined, '多值不是任务：`_done` 在 many 上不生效')
+})
+
 test('标签声明的字段：屏幕画方框与「模型里是任务」同一个判据（不许一处认、一处不认）', () => {
   /**
    * 这条钉的是这个 bug 的根：`#任务` 用 `declareField` 把「任务状态」给到成员，

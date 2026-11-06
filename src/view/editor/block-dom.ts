@@ -954,6 +954,43 @@ export function makeBlockEl(
    * （「这一栏在，但还没填」），checkbox 按勾选状态画方框/勾。
    */
   for (const field of opts.gutter ?? []) {
+    /**
+     * **多值 select**：一个字段贡献一串图标（每个选中值一枚），顺序＝选项兄弟序。
+     * 整串是**一个**命中区：点任意一枚都打开同一个多选菜单——
+     * 单枚图标不是「删掉这个值」的按钮（图标读作状态，误触代价不对称）。
+     * 超过 3 枚收成 `+N`（不静默截断）。
+     */
+    if (field.kind === 'select' && field.cardinality === 'many') {
+      const mark = document.createElement('span')
+      mark.className = 'identity prop-mark prop-multi'
+      mark.dataset.propFor = b.id
+      mark.dataset.propId = field.propId
+      const picked = field.picked ?? []
+      const cap = 3
+      if (picked.length === 0) {
+        renderIcon(mark, prop<string>(field.def, '_icon'), 'square-dashed', 'sm')
+      } else {
+        for (const c of picked.slice(0, cap)) {
+          const ico = document.createElement('span')
+          ico.className = 'prop-multi-ico'
+          renderIcon(ico, prop<string>(c, '_icon') ?? prop<string>(field.def, '_icon'), 'square-dashed', 'sm')
+          mark.appendChild(ico)
+        }
+        if (picked.length > cap) {
+          const more = document.createElement('span')
+          more.className = 'prop-multi-more'
+          more.textContent = `+${picked.length - cap}`
+          mark.appendChild(more)
+        }
+      }
+      const labels = picked.map((c) => plainText(c.content).trim()).filter((x) => x !== '')
+      mark.title = t('ui.props.gutterTitle', {
+        prop: blockLabel(field.def),
+        value: labels.length === 0 ? t('ui.props.pending') : labels.join('、'),
+      })
+      left?.appendChild(mark)
+      continue
+    }
     if (field.kind === 'select') {
       const isTask = field.doneChoiceId !== undefined
       const mark = document.createElement('span')
