@@ -321,7 +321,10 @@ export interface EditorBridge {
   /** 点进空天格子（复盘兜底）：物化那天归装配层；`place` 已翻译好修饰键 */
   onShellActivate: (date: string, place: OpenPlace) => void
   /** 勾选 / 取消待办（点方框）*/
-  toggleTodo: (blockId: string) => void
+  /** `propId` 由 gutter 上那一枚图标带过来；命令/快捷键不带 ⇒ 第一条任务型字段 */
+  toggleTodo: (blockId: string, propId?: string) => void
+  /** 点普通 select 的 gutter 图标：装配层开取值菜单 */
+  pickGutterValue: (blockId: string, propId: string, anchor: DOMRect) => void
   /** 任何模型变化 */
   onChange: () => void
   /** 重挂载窗口后 */
@@ -949,7 +952,19 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       e.preventDefault()
       // 方框的动作是「切换完成」，不是「打开」——Shift 不改变它。
       // 「在右槽打开」的入口是块标/行/引用，统一由装配层的 `App.openBlock` 承担。
-      br.toggleTodo(todo.dataset.todoFor)
+      // `prop-id` 让一行上的多个 toggle 不串台（第一个仍是命令/快捷键的缺省目标）。
+      br.toggleTodo(todo.dataset.todoFor, todo.dataset.propId)
+      return
+    }
+
+    /**
+     * ④ **普通 select 的 gutter 图标**：点开选项菜单（不是翻转）。
+     *    与待办方框互斥：完成型 select 同时带着 `data-todo-for`，上面那一支先接住。
+     */
+    const gutterProp = target.closest<HTMLElement>('[data-prop-for]')
+    if (gutterProp?.dataset.propFor && gutterProp.dataset.propId) {
+      e.preventDefault()
+      br.pickGutterValue(gutterProp.dataset.propFor, gutterProp.dataset.propId, gutterProp.getBoundingClientRect())
     }
   })
 

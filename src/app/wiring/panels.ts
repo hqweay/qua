@@ -53,6 +53,7 @@ import type { Tx } from '../../core/kb/types.ts'
 import type { BlockStore } from '../../core/model/store.ts'
 import type { Prefs, Workspace } from '../../core/infra/workspace.ts'
 import type { Layers, Row } from '../../ui/overlay/layers.ts'
+import { ICON_PATHS } from '../../view/icons.ts'
 import { MountArea, type ViewBodyHost } from '../../ui/chrome/mount-area.ts'
 import { PropertiesPanel, type PropertiesDeps } from '../../ui/block-ui/properties.ts'
 import type { DerivedMode } from '../../ui/query/query-view.ts'
@@ -227,6 +228,41 @@ export function setupPanels(deps: PanelsDeps) {
   }
 
   /**
+   * **选项图标选择器**：把 `ICON_PATHS` 的键现画成一列，行内带图标预览。
+   *
+   * 为什么不另造一份「可选图标清单」：`view/icons.ts` 已经是图标值的唯一数据源，
+   * 这里再列一遍就会与真正能渲染的集合分叉（选了却画成占位）。
+   */
+  const pickIconValue = (anchor: DOMRect, current: string, onPick: (icon: string) => void): void => {
+    const rows: Row[] = [
+      {
+        id: 'icon/',
+        label: t('ui.props.choice.iconNone'),
+        keyHint: current === '' ? t('ui.props.choice.current') : undefined,
+      },
+    ]
+    for (const name of Object.keys(ICON_PATHS)) {
+      const value = `lucide:${name}`
+      rows.push({
+        id: `icon/${value}`,
+        label: name,
+        icon: value,
+        keyHint: current === value ? t('ui.props.choice.current') : undefined,
+      })
+    }
+    layers.openMenu({
+      rows,
+      anchor,
+      title: t('ui.props.choice.pickIcon'),
+      width: 320,
+      searchable: true,
+      focusSearch: true,
+      emptyText: t('ui.props.choice.iconNone'),
+      onPick: (row) => onPick(String(row.id).slice('icon/'.length)),
+    })
+  }
+
+  /**
    * 新建属性定义，并按 `target` 挂到这一块上。
    *
    * `select` 是唯一「建完还必须再填东西」的类型（没有选项就是空下拉）：
@@ -311,6 +347,8 @@ export function setupPanels(deps: PanelsDeps) {
        * 属性区与行内实例浮层共用同一份，候选集合不会分叉。
        */
       pickRef: pickRefValue,
+      /** 选项图标：同一张 `ICON_PATHS` 数据现画成一列（带图标预览，可搜索） */
+      pickIcon: pickIconValue,
       refLabel: (targetId) => {
         const b = kb.get(targetId)
         if (!b) return t('ui.props.refMissing', { id: shortId(targetId) })
@@ -348,6 +386,12 @@ export function setupPanels(deps: PanelsDeps) {
           void deps.getRegistry().invoke('core.props/move-choice', { defId, choiceId, beforeId }, 'ui'),
         setScope: (choiceId, scope) =>
           void deps.getRegistry().invoke('core.props/set-choice-scope', { choiceId, scope }, 'ui'),
+        setIcon: (choiceId, icon) =>
+          void deps.getRegistry().invoke('core.props/set-choice-icon', { choiceId, icon }, 'ui'),
+        setDone: (defId, choiceId, done) =>
+          void deps.getRegistry().invoke('core.props/set-choice-done', { defId, choiceId, done }, 'ui'),
+        setUiPosition: (defId, position) =>
+          void deps.getRegistry().invoke('core.props/set-ui-position', { defId, position }, 'ui'),
         remove: (choiceId) => void deps.getRegistry().invoke('core.props/delete-choice', { choiceId }, 'ui'),
       },
   })

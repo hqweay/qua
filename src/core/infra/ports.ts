@@ -17,7 +17,7 @@
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { CtxKeys } from '../index.ts'
 import type { QueryNode, QuerySpec } from '../query/query.ts'
-import type { ChoiceScope } from '../props/props.ts'
+import type { ChoiceScope, UiPosition } from '../props/props.ts'
 import type { SecLayout } from '../query/feed.ts'
 import type { MountHost } from '../views/mount.ts'
 import type { ViewConfig } from '../views/view.ts'
@@ -236,6 +236,17 @@ export interface App {
   moveChoice(defId: string, choiceId: string, beforeId: string): void
   /** 写选项的可见范围（三态；形状不认识则不写） */
   setChoiceScope(choiceId: string, scope: ChoiceScope): void
+  /** 写选项的图标（`lucide:<name>` 或字面文本；空串＝无图标） */
+  setChoiceIcon(choiceId: string, icon: string): void
+  /**
+   * 标记/取消「完成」值（选项上的 `_done`）。
+   *
+   * `done === true` 时**同一笔事务**把兄弟上的标记摘掉（每个定义最多一个）；
+   * `done === false` 只摘这一个，该属性从此不再是任务型字段。
+   */
+  setChoiceDone(defId: string, choiceId: string, done: boolean): void
+  /** 写定义块的快捷入口位置（`block-left` ＝ 块左侧图标；`panel` ＝ 只留属性面板） */
+  setUiPosition(defId: string, position: UiPosition): void
   /** 删一个选项（**普通软删**：值保留，恢复后自动解析回来） */
   deleteChoice(choiceId: string): void
   /* 归属边（属于／包含；一条边存在子块的 `_belongsTo`，任何块都能配） */

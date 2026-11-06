@@ -12,9 +12,10 @@
  * 时刻用当下（`mkBlock`/`mkPropDef` 的默认）：按需物化发生在「正在编辑」那一刻，
  * 它就是那次编辑的时刻；种子拿到后自己重盖统一时刻。
  */
-import { mkBlock, type Block } from '../model/model.ts'
+import { ICON_PROP, mkBlock, type Block } from '../model/model.ts'
 import {
   DEFAULT_PROP,
+  DONE_PROP,
   mkPropDef,
   TASK_STATUS_ABANDONED_ID,
   TASK_STATUS_DONE_ID,
@@ -31,13 +32,22 @@ export const TASK_DOING_LABEL = '进行中'
 export const TASK_DONE_LABEL = '完成'
 export const TASK_ABANDONED_LABEL = '放弃'
 
-/** 四个选项块（id 是核心词汇的确定性 id） */
+/**
+ * 四个选项块（id 是核心词汇的确定性 id）。
+ *
+ * 每个值带一枚 `_icon`：它画在块标与正文之间，所以「待办／进行中／完成／放弃」
+ * 在行上是一个形状而不是一段字。`_done` 只打在「完成」上——它是这套机制里的
+ * 「完成」档，⌘↵／删除线／查询都按这个标记走，不按固定 propId。
+ */
 export function taskStatusChoices(): Block[] {
+  const icon = (name: string, extra: Record<string, unknown> = {}): { props: Record<string, unknown> } => ({
+    props: { [ICON_PROP]: `lucide:${name}`, ...extra },
+  })
   return [
-    { ...mkBlock(TASK_TODO_LABEL), id: TASK_STATUS_TODO_ID },
-    { ...mkBlock(TASK_DOING_LABEL), id: TASK_STATUS_DOING_ID },
-    { ...mkBlock(TASK_DONE_LABEL), id: TASK_STATUS_DONE_ID },
-    { ...mkBlock(TASK_ABANDONED_LABEL), id: TASK_STATUS_ABANDONED_ID },
+    { ...mkBlock(TASK_TODO_LABEL, icon('square')), id: TASK_STATUS_TODO_ID },
+    { ...mkBlock(TASK_DOING_LABEL, icon('square-dashed')), id: TASK_STATUS_DOING_ID },
+    { ...mkBlock(TASK_DONE_LABEL, icon('square-check', { [DONE_PROP]: true })), id: TASK_STATUS_DONE_ID },
+    { ...mkBlock(TASK_ABANDONED_LABEL, icon('square-x')), id: TASK_STATUS_ABANDONED_ID },
   ]
 }
 
@@ -46,7 +56,12 @@ export function taskStatusVocabulary(): Block {
   const def = mkPropDef(
     TASK_STATUS_LABEL,
     'select',
-    { [UI_POSITION_PROP]: 'block-left', [DEFAULT_PROP]: TASK_STATUS_TODO_ID },
+    {
+      [UI_POSITION_PROP]: 'block-left',
+      [DEFAULT_PROP]: TASK_STATUS_TODO_ID,
+      // 未填时 gutter 上画定义块自己的图标（与「待办」同形），入口不会因没有值而消失
+      [ICON_PROP]: 'lucide:square',
+    },
     TASK_STATUS_PROP_ID,
   )
   def.children = taskStatusChoices()

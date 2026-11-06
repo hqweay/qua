@@ -79,6 +79,7 @@ import {
   clearValue,
   declareOwnProp,
   todoOf,
+  DEFAULT_PROP,
   TASK_STATUS_PROP_ID,
   TASK_STATUS_TODO_ID,
   TASK_STATUS_DONE_ID,
@@ -370,6 +371,14 @@ export interface ViewEvents {
    */
   blockMenu?: (blockId: string, rect: DOMRect, appearanceHost?: string) => void
   /**
+   * **点 gutter 上一条普通 `select` 图标**：装配层开选项菜单。
+   *
+   * 视图只报「点了谁的哪条属性」，选值与写值走命令（`core.props/set-value`）——
+   * 撤销/落盘只有一条路，视图不需要知道命令名。
+   * ⚠️ 未接 ⇒ 什么都不做；不静默退化成「聚焦这一行」。
+   */
+  pickChoice?: (blockId: string, propId: string, anchor: DOMRect) => void
+  /**
    * **左键点块标**：聚焦/zoom 到这个块。
    * 装配层把它接到 `core.block/focus-block`（面包屑那一格是同一个命令）。
    */
@@ -480,6 +489,42 @@ export type AcceptPick =
   /** 新标签是**目标**；三种键各给一个落点（`inline` 行内 / `assign` 块标签 / `instance` 新实例） */
   | { kind: 'newTag'; name: string; action: 'inline' | 'assign' | 'instance' }
   | { kind: 'tag'; name: string }
+
+/**
+ * 一次「切换待办」要写哪一格（纯判据：单块与批量共用，避免两份翻值逻辑漂移）。
+ *
+ * `createCore`：这一行没有任何任务型字段 ⇒ 落核心任务状态并登记自有槽，
+ * 与「第一次按 ⌘↵ ＝ 变成待办」的旧手感一致。
+ * `clear`：完成型字段没有缺省值可回 ⇒ 清掉值但保留这一栏（行仍在「未填」）。
+ */
+interface TodoPlan {
+  propId: string
+  next?: unknown
+  clear: boolean
+  createCore: boolean
+}
+
+function applyTodoPlan(b: Block, plan: TodoPlan): void {
+  if (plan.createCore) declareOwnProp(b, TASK_STATUS_PROP_ID)
+  if (plan.clear) clearValue(b, plan.propId, { keepField: true })
+  else setValue(b, plan.propId, plan.next)
+}
+
+/** 目标字段不存在 ⇒ 落核心任务状态（「第一次按 ⌘↵ ＝ 变成待办」） */
+function todoPlanOfField(field: GutterField | undefined): TodoPlan {
+  if (!field) return { propId: TASK_STATUS_PROP_ID, next: TASK_STATUS_TODO_ID, clear: false, createCore: true }
+  if (field.doneChoiceId === undefined) {
+    return { propId: field.propId, next: field.value !== true, clear: false, createCore: false }
+  }
+  if (field.value !== field.doneChoiceId) {
+    return { propId: field.propId, next: field.doneChoiceId, clear: false, createCore: false }
+  }
+  const dflt = field.def.props?.[DEFAULT_PROP]
+  // 没有缺省值可回 ⇒ 清成「未填」，但保留这一栏（行还在，下一次点击仍能勾）
+  return dflt === undefined
+    ? { propId: field.propId, next: undefined, clear: true, createCore: false }
+    : { propId: field.propId, next: dflt, clear: false, createCore: false }
+}
 
 export class BlockEditor {
   container: HTMLElement
@@ -2624,13 +2669,22 @@ export class BlockEditor {
   }
 
   /**
+   * **点 gutter 上一条普通 select 的图标**：把锚点交给装配层开选项菜单。
+   * 完成型 select 不走这里（它点一下直接翻完成，见 `toggleTodo`）。
+   */
+  pickGutterValue(id: string, propId: string, anchor: DOMRect): void {
+    if (!locate(this.doc, id)) return
+    this.events.pickChoice?.(id, propId, anchor)
+  }
+
+  /**
    * **勾 / 取消勾选**这一行 gutter 上那个任务开关。
    *
    * 写的是**属性值**，不是块字段：任务状态是一个真实字段（有定义块、能进查询、能导出），
    * 所以这里走 `setValue`。`gutterFieldsOf` 是唯一的「这一行有哪些 gutter 字段」来源，
    * 点方框与菜单命令共用它 ⇒ 两条入口不会对同一行给出不同答案。
    *
-   * 任务状态是 select（值＝选项块 id）：切换是**完成 ⇄ 未完成**的二元互换，
+   * 完成型字段是 select（值＝选项块 id）：切换是**完成 ⇄ 未完成**的二元互换，
    * 「进行中」不进快捷键 —— 它是显式意图，走属性编辑器或看板拖列去设。
    * 同一行上别的 checkbox 字段仍是布尔翻转（「未填」也算没勾，一次点击就是打上勾）。
    *
@@ -2639,34 +2693,29 @@ export class BlockEditor {
    *    gutter 上随即出现方框 —— 于是「先成为一个没做完的任务，再点才勾上」，
    *    与原来「第一次切换 ＝ 变成待办」的手感一致。
    */
-  toggleTodo(id: string): void {
+  toggleTodo(id: string, onlyPropId?: string): void {
     const loc = locate(this.doc, id)
     if (!loc) return
     const fields = gutterFieldsOf(loc.block, this.store.blocks)
-    const field =
-      fields.find((f) => f.propId === TASK_STATUS_PROP_ID) ?? fields.find((f) => f.kind === 'checkbox')
-    const propId = field?.propId ?? TASK_STATUS_PROP_ID
-    let next: unknown
-    if (propId !== TASK_STATUS_PROP_ID) {
-      next = field ? field.value !== true : false
-    } else if (field === undefined) {
-      next = TASK_STATUS_TODO_ID
+    /**
+     * 目标字段：点 gutter 上哪一枚就传哪个 propId（多个 checkbox 不串台）；
+     * 命令／快捷键不带目标 ⇒ 第一条带 `_done` 的 select，其次 checkbox。
+     */
+    let field: GutterField | undefined
+    if (onlyPropId !== undefined) {
+      field = fields.find((f) => f.propId === onlyPropId)
+      if (!field) return
     } else {
-      next = field.value === TASK_STATUS_DONE_ID ? TASK_STATUS_TODO_ID : TASK_STATUS_DONE_ID
+      field = fields.find((f) => f.doneChoiceId !== undefined) ?? fields.find((f) => f.kind === 'checkbox')
     }
+    const plan = todoPlanOfField(field)
     this.beginUndoEntry()
     // 切的是一个属性值：一笔 patch 落「值 ＋（新挂时）自有槽」，与「插入待办」同一形状。
-    // 落的是任务状态值 ⇒ 定义块得先在（恢复空库／定义被清掉的库里没有它，
+    // 落的是核心任务状态 ⇒ 定义块得先在（恢复空库／定义被清掉的库里没有它，
     // 缺了它这一行只剩「未知属性」）；同一笔事务里补上，值与定义同批落盘。
-    // 这一栏**没有任何来源**的块还要登记自有槽：「这一栏在」不能只靠值撑着，
-    // 否则面板里清成「待填」就等于整栏消失、任务身份一起没了 —— 行该留在
-    // 「待填」（读缺省「待办」），摘栏走显式的「取消待办」。
     this.write((tx) => {
-      if (propId === TASK_STATUS_PROP_ID) ensureTaskStatusInTx(this.store.blocks, tx)
-      tx.patch(id, (b) => {
-        if (field === undefined) declareOwnProp(b, TASK_STATUS_PROP_ID)
-        setValue(b, propId, next)
-      })
+      if (plan.propId === TASK_STATUS_PROP_ID) ensureTaskStatusInTx(this.store.blocks, tx)
+      tx.patch(id, (b) => applyTodoPlan(b, plan))
     })
     this.structTail(null, [id])
   }
@@ -2676,33 +2725,21 @@ export class BlockEditor {
    * 全部装进**一笔事务**：定义块只补一次、一次撤销整体复原。section 根跳过。
    */
   toggleTodoMany(ids: readonly string[]): boolean {
-    const plans: { id: string; propId: string; fieldDefined: boolean; next: unknown }[] = []
+    const plans: { id: string; plan: TodoPlan }[] = []
     for (const id of ids) {
       const loc = locate(this.doc, id)
       if (!loc || loc.parent === null) continue
       const fields = gutterFieldsOf(loc.block, this.store.blocks)
-      const field = fields.find((f) => f.propId === TASK_STATUS_PROP_ID) ?? fields.find((f) => f.kind === 'checkbox')
-      const propId = field?.propId ?? TASK_STATUS_PROP_ID
-      let next: unknown
-      if (propId !== TASK_STATUS_PROP_ID) {
-        next = field ? field.value !== true : false
-      } else if (field === undefined) {
-        next = TASK_STATUS_TODO_ID
-      } else {
-        next = field.value === TASK_STATUS_DONE_ID ? TASK_STATUS_TODO_ID : TASK_STATUS_DONE_ID
-      }
-      plans.push({ id, propId, fieldDefined: field !== undefined, next })
+      const field = fields.find((f) => f.doneChoiceId !== undefined) ?? fields.find((f) => f.kind === 'checkbox')
+      plans.push({ id, plan: todoPlanOfField(field) })
     }
     if (plans.length === 0) return false
     this.beginUndoEntry()
     this.write((tx) => {
-      ensureTaskStatusInTx(this.store.blocks, tx)
-      for (const p of plans) {
-        tx.patch(p.id, (b) => {
-          if (!p.fieldDefined) declareOwnProp(b, TASK_STATUS_PROP_ID)
-          setValue(b, p.propId, p.next)
-        })
+      if (plans.some((p) => p.plan.propId === TASK_STATUS_PROP_ID)) {
+        ensureTaskStatusInTx(this.store.blocks, tx)
       }
+      for (const p of plans) tx.patch(p.id, (b) => applyTodoPlan(b, p.plan))
     })
     this.structTail(null, plans.map((p) => p.id))
     return true
@@ -2724,14 +2761,20 @@ export class BlockEditor {
   clearTodo(id: string): 'cleared' | 'declared' | 'none' {
     const loc = locate(this.doc, id)
     if (!loc) return 'none'
-    if (todoOf(loc.block, this.fieldTable()) === undefined) return 'none'
+    // 目标与 `toggleTodo` 同一判据：第一条带 `_done` 的 select（自定义任务属性也认）
+    const field = gutterFieldsOf(loc.block, this.store.blocks).find((f) => f.doneChoiceId !== undefined)
+    if (!field) return 'none'
     this.beginUndoEntry()
-    this.write((tx) => tx.patch(id, (b) => clearValue(b, TASK_STATUS_PROP_ID)))
+    this.write((tx) => tx.patch(id, (b) => clearValue(b, field.propId)))
     this.structTail(null, [id])
-    // 字段读取表是懒建的派生表：上面这一笔可能改了「哪些标签声明了这一栏」之外的形状，
-    // 但值／槽变了 ⇒ 重新定位再问一次，别读改之前那个 `loc`
+    // 摘完要**再读一次**判据：这一栏可能来自标签的字段声明（`clearValue` 只动自有槽），
+    // 还剩下就返回 `'declared'`，由调用方解释「它来自标签」，而不是让用户对着
+    // 一个没变化的方框猜。
     const after = locate(this.doc, id)
-    return after && todoOf(after.block, this.fieldTable()) !== undefined ? 'declared' : 'cleared'
+    const still = after
+      ? gutterFieldsOf(after.block, this.store.blocks).some((f) => f.propId === field.propId)
+      : false
+    return still ? 'declared' : 'cleared'
   }
 
   /** 整块换成一段纯文本（清除所有格式与原子；命令/测试用） */
@@ -3746,7 +3789,8 @@ export class BlockEditor {
        * 本来就该作用于聚焦中的编辑器，语义不冲突。
        */
       toggleChildrenCollapse: (id) => this.toggleChildrenCollapse(id),
-      toggleTodo: (id) => this.toggleTodo(id),
+      toggleTodo: (id, propId) => this.toggleTodo(id, propId),
+      pickGutterValue: (id, propId, anchor) => this.pickGutterValue(id, propId, anchor),
       blankArea: this.blankArea,
       clickEmptyArea: (y, x, place) => this.clickEmptyArea(y, x, place),
       onChange: () => this.emitChange('text'),

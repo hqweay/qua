@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec } from './core/index.ts'
+import { addAlias, addList, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, choicesFor, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec } from './core/index.ts'
 import { plainText } from './core/model/runs.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
 import { BlockStore } from './core/model/store.ts'
@@ -2487,6 +2487,46 @@ function viewEvents(
     // **左键点块标 ＝ 聚焦/zoom**。与面包屑那一格同一条命令，
     // 所以「点块标进去」与「点面包屑出来」共用一套语义，没有第二种入口。
     focusBlock: (blockId) => void registry.invoke('core.block/focus-block', { blockId }, via),
+    /**
+     * **gutter 上普通 select 的取值菜单**：贴着那枚图标弹出。
+     *
+     * 行由装配层现画（选项身份/作用域只有库读得准），选中后走
+     * `core.props/set-value` —— 与属性面板、表格同一条写命令。
+     */
+    pickChoice: (blockId, propId, anchor) => {
+      const block = kb.get(blockId)
+      const def = kb.get(propId)
+      if (!block || !def) return
+      const current = String(block.props?.[propId] ?? '')
+      const rows: Row[] = choicesFor(block, propId, kb.roots()).map((c) => {
+        const icon = prop<string>(c, '_icon') ?? prop<string>(def, '_icon')
+        return {
+          id: `choice/${c.id}`,
+          label: displayNameOf(c).trim() || shortId(c.id),
+          ...(icon ? { icon } : {}),
+          keyHint: c.id === current ? t('ui.props.choice.current') : undefined,
+        }
+      })
+      /**
+       * **推迟到本轮事件之后开**：gutter 的入口走 `mousedown`（避免先挪光标），
+       * 而浮层的「点别处关」监听也挂在 `document` 的 `mousedown` 上 —— 同步开会
+       * 让同一个事件在冒泡到 `document` 时把刚开的菜单关掉（表现为「点了没反应」）。
+       */
+      queueMicrotask(() =>
+        layers.openMenu({
+          rows,
+          anchor,
+          title: t('ui.props.pickChoice'),
+          searchable: true,
+          focusSearch: true,
+          emptyText: t('ui.props.choice.empty'),
+          onPick: (row) => {
+            const id = String(row.id).slice('choice/'.length)
+            void registry.invoke('core.props/set-value', { blockId, propId, value: id }, via)
+          },
+        }),
+      )
+    },
     /**
      * 点导轨段不再走命令层：折叠表是**每台编辑器一份**的视图实例态，
      * 镜像岛与源同屏时走「活动编辑器」就会点了镜像的线、折了源——

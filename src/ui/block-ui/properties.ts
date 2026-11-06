@@ -23,6 +23,7 @@ import { onCommitKeys } from './keys.ts'
 import type { Dangling, FieldRow, PropKind } from '../../core/index.ts'
 import type { PropCreateMode } from '../../core/infra/ports.ts'
 import {
+  ICON_PROP,
   choiceDisplayLabel,
   clockLabel,
   displayNameOf,
@@ -31,10 +32,12 @@ import {
   isPropDef,
   normalizeAlias,
   PROP_KINDS,
+  prop,
   propKindOf,
   propLabel,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
+import { renderIcon } from '../../view/icons.ts'
 import { ChoicesEditor, type ChoiceActions } from './choices-editor.ts'
 
 export interface PropertiesDeps {
@@ -97,6 +100,13 @@ export interface PropertiesDeps {
    * 不注入的话，`ref` 只能让用户手打 32 位 id，那等于没有这个类型。
    */
   pickRef: (b: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect) => void
+  /**
+   * **给选项选一个图标**（装配层弹出图标网格，选中后回调写 `_icon`）。
+   *
+   * 与 `pickRef` 同一条理由：图标集是 `view/icons.ts` 的数据，属性区不该自己
+   * 维护第二份清单；浮层也只有装配层能开。
+   */
+  pickIcon: (anchor: DOMRect, current: string, onPick: (icon: string) => void) => void
   /**
    * **这一块归在谁下面**（`props._belongsTo` 的活块，有序）。
    *
@@ -297,7 +307,22 @@ export function makeCellEditor(
     }
     sel.value = current
     sel.addEventListener('change', () => send(sel.value === '' ? undefined : sel.value))
-    return sel
+    /**
+     * **当前值的图标预览**：有图标才加这一枚（没有的 select 保持原样，不给每一条
+     * 都塞一个虚线占位）。它读的是行派生里的选项块，与 gutter 同一个 `_icon`。
+     */
+    const currentChoice = choices.find((c) => c.id === current)
+    const icon =
+      (currentChoice ? prop<string>(currentChoice, ICON_PROP) : undefined) ??
+      (row.def ? prop<string>(row.def, ICON_PROP) : undefined)
+    if (icon === undefined) return sel
+    const wrap = document.createElement('span')
+    wrap.className = 'prop-select'
+    const ico = document.createElement('span')
+    ico.className = 'prop-select-ico'
+    renderIcon(ico, icon, 'square-dashed', 'sm')
+    wrap.append(ico, sel)
+    return wrap
   }
   const input = document.createElement('input')
   input.className = 'prop-input'
@@ -429,6 +454,8 @@ export class PropertiesPanel {
       tags: () => this.deps.allTags(),
       write: this.deps.choices,
       tagName: (id: string) => this.deps.tagName(id),
+      pickIcon: (anchor: DOMRect, current: string, onPick: (icon: string) => void) =>
+        this.deps.pickIcon(anchor, current, onPick),
     }
     this.choicesFull = new ChoicesEditor({
       ...base,

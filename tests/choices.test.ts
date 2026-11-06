@@ -407,6 +407,34 @@ test('选项命令：插入/改名/移动/作用域/软删都走一笔事务（�
   assert.equal(choiceById(kb.roots(), c1)?.id, c1, '软删的选项仍能被解析（显示「选项已删除」）')
 })
 
+test('选项图标/完成标记/快捷入口：写命令、完成值兄弟唯一、空图标摘格', () => {
+  const { cmds, kb } = commandHarness()
+  const defId = cmds.createPropDef('', '优先级', 'select', 'own')
+  const c1 = cmds.addChoice(defId, '高')
+  const c2 = cmds.addChoice(defId, '中')
+  cmds.addChoice(defId, '低')
+
+  cmds.setChoiceIcon(c1, 'lucide:flag')
+  assert.equal(kb.get(c1)?.props?._icon, 'lucide:flag', '图标写在选项块上')
+
+  cmds.setChoiceDone(defId, c1, true)
+  assert.equal(kb.get(c1)?.props?._done, true)
+  cmds.setChoiceDone(defId, c2, true)
+  assert.equal(kb.get(c1)?.props?._done, undefined, '打第二个完成值时兄弟上的标记被摘掉')
+  assert.equal(kb.get(c2)?.props?._done, true, '每个定义最多一个')
+
+  cmds.setChoiceDone(defId, c2, false)
+  assert.equal(kb.get(c2)?.props?._done, undefined, '取消只摘这一个')
+
+  cmds.setUiPosition(defId, 'block-left')
+  assert.equal(kb.get(defId)?.props?._uiPosition, 'block-left')
+  cmds.setUiPosition(defId, 'panel')
+  assert.equal('_uiPosition' in (kb.get(defId)?.props ?? {}), false, 'panel 是缺省 ⇒ 摘键')
+
+  cmds.setChoiceIcon(c1, '')
+  assert.equal('_icon' in (kb.get(c1)?.props ?? {}), false, '空图标摘格，不留空串')
+})
+
 /* ------------------------------------------------------------ 8. 排序 */
 
 test('sortRecords：select 列按选项兄弟顺序（resolver），不在列表的值排最后', () => {

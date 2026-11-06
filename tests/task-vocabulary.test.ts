@@ -134,7 +134,8 @@ test('按需物化：选项补齐不重排 —— 老库的三选项定义块长
     ensureTaskStatusInTx(store.blocks, tx)
     return true
   })
-  assert.equal(r.ops.length, 1, '只补缺的那一格')
+  // 一条 block.insert ＋ 一条 prop.set（新补的选项带 `_icon`；op 是按格发的）
+  assert.equal(r.ops.length, 2, '只补缺的那一格（选项块＋它的图标格）')
 
   const def = findPropDef(store.blocks, TASK_STATUS_PROP_ID)!
   assert.deepEqual(

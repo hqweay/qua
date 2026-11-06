@@ -16067,6 +16067,170 @@ await check(
 )
 
 /**
+ * **选项图标与 gutter 入口**：`_uiPosition: 'block-left'` 的 select 在块标后画
+ * **当前值的图标**；点它开取值菜单（行也带图标），选中写回选项 id。
+ */
+await check(
+  'T171c select 的 gutter 图标：跟着值走；点开菜单换值（行带图标）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const setup = await page.evaluate(() => {
+      const host = window.__qua.blocks().find((b) => b.roles.length === 0 && b.text.trim().length > 1)
+      if (!host) return { hostId: '', defId: '', low: '' }
+      const defId = (() => {
+        window.__qua.invoke('core.props/create-def', {
+          blockId: host.id,
+          label: '冒烟优先级',
+          kind: 'select',
+          target: 'own',
+        })
+        return window.__qua.propDefs().find((d) => d.label === '冒烟优先级')?.id ?? ''
+      })()
+      window.__qua.invoke('core.props/add-choice', { defId, label: '高' })
+      window.__qua.invoke('core.props/add-choice', { defId, label: '低' })
+      const row = window.__qua.fields(host.id).find((f) => f.propId === defId)
+      const hi = row?.choices.find((c) => c.label === '高')?.id ?? ''
+      const low = row?.choices.find((c) => c.label === '低')?.id ?? ''
+      window.__qua.invoke('core.props/set-choice-icon', { choiceId: hi, icon: 'lucide:flag' })
+      window.__qua.invoke('core.props/set-choice-icon', { choiceId: low, icon: 'lucide:arrow-down' })
+      window.__qua.invoke('core.props/set-ui-position', { defId, position: 'block-left' })
+      window.__qua.invoke('core.props/set-value', { blockId: host.id, propId: defId, value: hi })
+      window.__qua.focusBlock(host.id)
+      return { hostId: host.id, defId, low }
+    })
+    assert(setup.hostId !== '' && setup.defId !== '' && setup.low !== '', `前置：块/定义/选项都应建出来：${JSON.stringify(setup)}`)
+
+    await page.waitForTimeout(300)
+
+    await page.waitForFunction(
+      (id) => Boolean(document.querySelector(`.blk[data-block-id="${id}"] .prop-mark`)),
+      setup.hostId,
+    )
+    const before = await page.evaluate((id) => {
+      const mark = document.querySelector(`.blk[data-block-id="${id}"] .prop-mark`)
+      return {
+        icon: mark?.getAttribute('data-icon') ?? '',
+        prop: mark?.getAttribute('data-prop-id') ?? '',
+        title: mark?.getAttribute('title') ?? '',
+      }
+    }, setup.hostId)
+    assert(
+      before.icon === 'lucide:flag' && before.prop === setup.defId,
+      `gutter 画的是当前选项的图标：${JSON.stringify(before)}`,
+    )
+    assert(before.title.includes('冒烟优先级') && before.title.includes('高'), `图标带属性名与当前值：${before.title}`)
+
+    await page.evaluate((id) => {
+      document
+        .querySelector(`.blk[data-block-id="${id}"] .prop-mark`)
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    }, setup.hostId)
+    await page.waitForTimeout(400)
+    const rows = await page.evaluate(() =>
+      [...document.querySelectorAll('.layer-item')].map((r) => ({
+        label: r.querySelector('.layer-label')?.textContent ?? '',
+        icon: r.querySelector('.layer-ico')?.dataset.icon ?? '',
+      })),
+    )
+    assert(
+      rows.some((r) => r.label === '高' && r.icon === 'lucide:flag') &&
+        rows.some((r) => r.label === '低' && r.icon === 'lucide:arrow-down'),
+      `取值菜单的行也带图标：${JSON.stringify(rows)}`,
+    )
+
+    await page.locator('.layer-item', { hasText: '低' }).first().click()
+    await page.waitForTimeout(600)
+    const afterState = await page.evaluate(
+      ({ hostId, defId }) => ({
+        value: window.__qua.fields(hostId).find((f) => f.propId === defId)?.value ?? null,
+        icon: document.querySelector(`.blk[data-block-id="${hostId}"] .prop-mark`)?.getAttribute('data-icon') ?? '',
+        layers: document.querySelectorAll('.layer').length,
+      }),
+      setup,
+    )
+    assert(
+      afterState.value === setup.low && afterState.icon === 'lucide:arrow-down',
+      `选中后值/图标都该变：${JSON.stringify(afterState)}`,
+    )
+    const after = afterState.value
+    assert(after === setup.low, `选中后写的是选项 id：${JSON.stringify({ after, low: setup.low })}`)
+
+    await ctx.close()
+    return `gutter flag→arrow-down；菜单行带图标；值＝${String(after).slice(-6)}`
+  },
+)
+
+/**
+ * **选项编辑器里的图标 / 完成值 / 快捷入口**：三枚控件都写模型，重画后状态还在。
+ */
+await check(
+  'T171d 选项编辑器：图标选择器写 `_icon`；完成值唯一；快捷入口勾选写 `_uiPosition`',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const setup = await page.evaluate(() => {
+      const host = window.__qua.blocks().find((b) => b.roles.length === 0 && b.text.trim().length > 1)
+      if (!host) return { defId: '' }
+      window.__qua.invoke('core.props/create-def', {
+        blockId: host.id,
+        label: '冒烟图标',
+        kind: 'select',
+        target: 'own',
+      })
+      const defId = window.__qua.propDefs().find((d) => d.label === '冒烟图标')?.id ?? ''
+      window.__qua.invoke('core.props/add-choice', { defId, label: '甲' })
+      window.__qua.invoke('core.props/add-choice', { defId, label: '乙' })
+      window.__qua.invoke('core.block/focus-block', { blockId: defId })
+      return { defId }
+    })
+    assert(setup.defId !== '', '前置：定义块应建出来并聚焦')
+    await page.waitForSelector('.choices-editor')
+
+    // 图标选择器：点第一行的图标 → 选 flag → 写回 `_icon`
+    await page.locator('.choices-editor .choice-icon').first().click()
+    await page.waitForFunction(() => document.querySelectorAll('.layer-item').length > 0)
+    const iconRows = await page.evaluate(() =>
+      [...document.querySelectorAll('.layer-item')].map((r) => r.querySelector('.layer-label')?.textContent ?? ''),
+    )
+    assert(iconRows.includes('flag'), `图标选择器要有 flag：${JSON.stringify(iconRows.slice(0, 10))}`)
+    await page.locator('.layer-item', { hasText: 'flag' }).first().click()
+    await page.waitForFunction(
+      () => document.querySelector('.choices-editor .choice-icon')?.getAttribute('data-icon') === 'lucide:flag',
+    )
+
+    // 完成值：点第二行的 ○ → 它变成 ✓，第一行仍是 ○（最多一个）
+    await page.locator('.choices-editor .choice-row').nth(1).locator('[data-choice-done]').click()
+    const doneState = await page.evaluate(() =>
+      [...document.querySelectorAll('.choices-editor .choice-item')].map((item) => ({
+        label: item.querySelector('.choice-name')?.value ?? '',
+        done: item.querySelector('[data-choice-done]')?.getAttribute('data-choice-done') ?? '',
+      })),
+    )
+    assert(
+      doneState.some((c) => c.label === '乙' && c.done === '1') &&
+        doneState.filter((c) => c.done === '1').length === 1,
+      `完成值唯一且落在乙上：${JSON.stringify(doneState)}`,
+    )
+
+    // 快捷入口：勾上 → 写 `_uiPosition: block-left`；重画后仍勾着
+    await page.locator('.choices-gutter input[type="checkbox"]').check()
+    await page.waitForTimeout(200)
+    const gutterChecked = await page.evaluate(
+      () => document.querySelector('.choices-gutter input[type="checkbox"]')?.checked ?? null,
+    )
+    assert(gutterChecked === true, '勾选快捷入口后重画仍应是勾上的（写进了 `_uiPosition`）')
+
+    await ctx.close()
+    return `图标写回 flag；完成值唯一（乙）；快捷入口已勾选`
+  },
+)
+
+/**
  * **选项（select）的可见范围与标签视角**
  *
  * 三件事一起钉：① 选项是定义块的子块（标签视角新增默认「只对本标签可见」）；

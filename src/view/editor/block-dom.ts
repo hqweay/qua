@@ -17,8 +17,6 @@ import {
   DEFAULT_BLOCK_TYPE,
   DIVIDER_TYPE,
   DISPLAY_PROP,
-  TASK_STATUS_DONE_ID,
-  TASK_STATUS_PROP_ID,
   aliasesOf,
   blockLabel,
   blockTypeOf,
@@ -48,7 +46,7 @@ import { MARK_TYPES, isEmptyContent, plainText, refRunsOf, type AssetRun, type M
 import type { AssetView } from '../../core/infra/assets.ts'
 import { t } from '../../core/infra/msg.ts'
 import { danglingView, refTitle, resolveRefs } from '../../core/relations/ref.ts'
-import { createIcon } from '../icons.ts'
+import { createIcon, renderIcon } from '../icons.ts'
 
 /** 行高：与 CSS 的 `--ui-line-h` 必须一致（虚拟化算占位高度要用） */
 export const LINE_H = 30
@@ -602,12 +600,18 @@ export function makeBlockEl(
   const foldable = r.hasChildren || bodyFoldable || embedBodyFoldable
   /** 这一行下面是否要画**行内**的身体（按源分派：有结果身体就画，段根同此） */
   const inlineBody = Boolean(opts.viewBody) && rowHasInlineViewBody(r)
-  /** gutter 上那个**任务开关**：任务状态字段优先（select，值是选项块 id），其余 checkbox 字段沿用二元画法 */
-  const box =
-    opts.gutter?.find((f) => f.propId === TASK_STATUS_PROP_ID) ?? opts.gutter?.find((f) => f.kind === 'checkbox')
   /**
-   * 待办三态：任务状态值＝「完成」选项 ⇒ 做完了；其余已声明形态（待办／进行中／未填）
-   * ⇒ 是任务但没做完；这一行没有任务字段（gutter 里也没有别的 checkbox）⇒ 不是任务。
+   * gutter 上那个**任务开关**：带 `_done` 的 select 优先，其次 checkbox。
+   *
+   * ⚠️ 判据是选项上的 `_done`，不是固定 propId：自定义的「任务」属性和内置任务状态
+   *    走同一套。多个完成型字段同屏时取 `gutter` 的第一条（行序＝标签声明→自有），
+   *    与 `todoOf` 同一个答案。
+   */
+  const box =
+    opts.gutter?.find((f) => f.doneChoiceId !== undefined) ?? opts.gutter?.find((f) => f.kind === 'checkbox')
+  /**
+   * 待办三态：值＝该字段的「完成」选项 ⇒ 做完了；其余已声明形态（待办／进行中／未填）
+   * ⇒ 是任务但没做完；这一行没有任务型字段（gutter 里也没有别的 checkbox）⇒ 不是任务。
    *
    * ⚠️ **未填要算「未完成」，不能算「不是任务」**：这个槽的准入判据是「这块有这条属性」
    *    而不是「这条属性有值」（见 `gutterFieldsOf`）—— 刚给它加上、还没点过的那一下，
@@ -619,8 +623,8 @@ export function makeBlockEl(
   const todo: 'todo' | 'done' | undefined =
     box === undefined
       ? undefined
-      : box.propId === TASK_STATUS_PROP_ID
-        ? box.value === TASK_STATUS_DONE_ID
+      : box.doneChoiceId !== undefined
+        ? box.value === box.doneChoiceId
           ? 'done'
           : 'todo'
         : box.value === true
@@ -935,20 +939,54 @@ export function makeBlockEl(
     tagMark.title = t('ui.tag.mark')
     left.appendChild(tagMark)
   }
-  if (left && box) {
-    /**
-     * 待办：`true` 画勾选、`false` 画空心 —— 差别只在图标与 `.blk` 上的 `data-todo`，
-     * 身份元素本身不增删（「点一下填上」不该让 DOM 结构换掉）。
-     * ⚠️ `.todo-box` 这个类名与 `data-todo` 都是样式/门禁的契约，留在原来的名字上，
-     *    只是宿主从块标换成了这枚身份图标。
-     */
-    const todoMark = document.createElement('span')
-    todoMark.className = 'identity todo-box todo-mark'
-    todoMark.dataset.todoFor = b.id
-    todoMark.dataset.propId = box.propId
-    todoMark.appendChild(createIcon(todo === 'done' ? 'square-check' : 'square', 'sm'))
-    todoMark.title = t('ui.todo.toggle')
-    left.appendChild(todoMark)
+  /**
+   * **gutter 上的快捷入口＝一列图标**，一条归 gutter 的属性一枚（顺序沿用
+   * `gutterFieldsOf`：标签声明在前、自有属性在后）。
+   *
+   * 三种画法，区别在**点下去做什么**：
+   *   · 带 `_done` 的 select：任务开关（点一下翻完成）——保留 `.todo-box` 与 `data-todo-for`，
+   *     这两个名字是 CSS 与冒烟的契约；
+   *   · 其余 select：普通值（点开选项菜单）——`.prop-mark` ＋ `data-prop-for`；
+   *   · checkbox：布尔翻转（点一下切换它自己的值）——也走 `data-todo-for`，
+   *     但带 `data-prop-id`，所以多个 checkbox 不会互相串台。
+   *
+   * 图标取选项自己的 `_icon`，缺省用定义块的 `_icon`；再缺省 select 画虚线框
+   * （「这一栏在，但还没填」），checkbox 按勾选状态画方框/勾。
+   */
+  for (const field of opts.gutter ?? []) {
+    if (field.kind === 'select') {
+      const isTask = field.doneChoiceId !== undefined
+      const mark = document.createElement('span')
+      // 两类入口互斥：任务开关走 `data-todo-for`（翻值），普通 select 走 `data-prop-for`（开菜单）
+      mark.className = isTask ? 'identity todo-box todo-mark' : 'identity prop-mark'
+      mark.dataset.propId = field.propId
+      if (isTask) mark.dataset.todoFor = b.id
+      else mark.dataset.propFor = b.id
+      const fallback = isTask ? (todo === 'done' ? 'square-check' : 'square') : 'square-dashed'
+      renderIcon(mark, field.icon, fallback, 'sm')
+      if (isTask) {
+        mark.title = t('ui.todo.toggle')
+      } else {
+        const value = field.choice ? plainText(field.choice.content).trim() : ''
+        mark.title = t('ui.props.gutterTitle', {
+          prop: blockLabel(field.def),
+          value: value === '' ? t('ui.props.pending') : value,
+        })
+      }
+      left?.appendChild(mark)
+      continue
+    }
+    if (field.kind === 'checkbox') {
+      const mark = document.createElement('span')
+      mark.className = 'identity todo-box check-mark'
+      mark.dataset.todoFor = b.id
+      mark.dataset.propId = field.propId
+      mark.appendChild(createIcon(field.value === true ? 'square-check' : 'square', 'sm'))
+      mark.title = t('ui.props.gutterToggle', { prop: blockLabel(field.def) })
+      left?.appendChild(mark)
+    }
+    // 其余 kind 暂不画：`_uiPosition` 的编辑入口只在 select 上给（见选项编辑器），
+    // 但手写数据里出现也不该画一枚点了没反应的图标。
   }
   const tx = document.createElement('span')
   tx.className = 'tx'
