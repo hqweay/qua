@@ -57,6 +57,8 @@ import type { KbClient } from '../../core/kb/types.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
 import { type BlockEditor, type Run } from '../../view/editor/editor.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
+import { clearHits, paintHits, type PlainSpan } from '../../view/editor/hit-paint.ts'
+import { claimHighlightKey, releaseHighlightKey } from '../search/highlight-key.ts'
 import { bindDropTarget, setDragTab } from '../../view/dnd.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { renderQuickFilter } from './quick-filter.ts'
@@ -177,6 +179,22 @@ const DERIVED_WHY: Record<DerivedSource, MsgId> = {
   mentions: 'ui.mount.why.mentions',
 }
 
+/**
+ * 提及栏的命中区间：从**派生记录**里原样搬出来。
+ *
+ * 为什么不再按词重搜：`derivedRecordsOf` 已经为每条记录算过 `mentionSpots`
+ * （纯文本段、可切引用的那几处）。按词重搜会得到「看起来一样、但不是能转的那一处」的一批区间——
+ * 高亮与「转引用」必须认同一处。
+ */
+function mentionSpansOf(records: readonly ViewRecord[]): ReadonlyMap<string, readonly PlainSpan[]> {
+  const out = new Map<string, readonly PlainSpan[]>()
+  for (const r of records) {
+    const spots = r.derived?.['mentionSpots'] as readonly PlainSpan[] | undefined
+    if (spots && spots.length > 0) out.set(r.block.id, spots)
+  }
+  return out
+}
+
 export class MountArea {
   readonly root: HTMLElement
   private readonly deps: MountAreaDeps
@@ -233,6 +251,20 @@ export class MountArea {
   private readonly tabViews = new Map<string, ViewBodyHost>()
   /** 引用栏的 kind 过滤（大纲专用设备状态；切到表格时由「类型」列承担同一件事） */
   private refKind: 'all' | 'inline' | 'property' | 'embed' = 'all'
+  /**
+   * **提及栏的高亮**：块 id → plain 区间（`derived.mentionSpots` 原样搬来）。
+   * 派生值，不落盘；切栏时清空。
+   */
+  private hitSpans: ReadonlyMap<string, readonly PlainSpan[]> = new Map()
+  /** 高亮 key：第一次真的画时才领（没人看提及栏就不占一条 key），拆掉时归还 */
+  private hitKey: string | null = null
+  /**
+   * 重画会让 Range 失效（块行是整行替换的，见 `hit-paint` 的注释），所以不在装载时
+   * 缓存 Range，而是在 DOM 变化后重找。观测器兜住两条本地重画路径：编辑器自己打字后的
+   * 行内重排，以及 `EditableBlock` 欠账后的重载。
+   */
+  private readonly hitObserver: MutationObserver
+  private hitFrame = 0
   /**
    * 派生栏的快速筛选 chips（**会话瞬态**，按来源一格）：加/摘只改这份内存状态——
    * 不写偏好、不入库、不产生 op、不进撤销栈。段落换人时清空：
@@ -298,6 +330,9 @@ export class MountArea {
     })
 
     this.bodyEl.append(this.derivedHeadEl, this.emptyEl, this.block.root, this.viewEl)
+
+    this.hitObserver = new MutationObserver(() => this.scheduleHitPaint())
+    this.hitObserver.observe(this.editorEl, { subtree: true, childList: true, characterData: true })
     this.root.append(this.summaryEl, this.tabsEl, this.bodyEl)
 
     this.render()
@@ -310,6 +345,13 @@ export class MountArea {
 
   /** 摘掉实例（装配层在段根换人时调）：退订 store、卸事件，别让游离容器继续被重画 */
   dispose(): void {
+    this.hitObserver.disconnect()
+    if (this.hitFrame) cancelAnimationFrame(this.hitFrame)
+    if (this.hitKey) {
+      clearHits(this.hitKey)
+      releaseHighlightKey(this.hitKey)
+      this.hitKey = null
+    }
     this.detachView()
     for (const v of this.tabViews.values()) v.dispose()
     this.tabViews.clear()
@@ -561,7 +603,36 @@ export class MountArea {
 
   /* ------------------------------------------------------------ body */
 
+  /**
+   * 把这一栏的命中区间画成高亮。
+   *
+   * key 懒领：没人停在提及栏时不该占一条 `CSS.highlights` 的 key。
+   * 没有命中 ⇒ 只摘旧的、不领新的。
+   */
+  private paintMentionHits(): void {
+    // 这一栏此刻画的不是大纲（列表/表格/空态）：老的行还留在 DOM 里但已经不可见，
+    // 在上面画 Range 只会得到几条指向隐藏节点的区间
+    if (this.hitSpans.size === 0 || this.editorEl.hidden) {
+      if (this.hitKey) clearHits(this.hitKey)
+      return
+    }
+    this.hitKey ??= claimHighlightKey('mention-hit')
+    paintHits(this.editorEl, this.hitSpans, this.hitKey)
+  }
+
+  /** DOM 变化合并到下一帧：一次重画（整行替换）会连发十几条 mutation，逐条重算纯属浪费 */
+  private scheduleHitPaint(): void {
+    if (this.hitFrame) return
+    this.hitFrame = requestAnimationFrame(() => {
+      this.hitFrame = 0
+      this.paintMentionHits()
+    })
+  }
+
   private load(host: Block, entry: MountEntry, focusHint?: string): void {
+    // 换栏：上一栏的命中高亮先摘掉，再由这一栏自己决定要不要画
+    this.hitSpans = new Map()
+    this.paintMentionHits()
     if (entry.kind === 'derived') {
       this.loadDerived(host, entry, focusHint)
       return
@@ -616,6 +687,11 @@ export class MountArea {
           })
         : filtered
     this.renderDerivedHead(host, entry, kind, records.length, filtered)
+    /**
+     * 提及栏的命中区间：**同一份派生记录**里已经算好了（`derived.mentionSpots`），
+     * 这里只搬过来，不再按词重搜一遍——画高亮与「之后切成引用」必须认同一处命中。
+     */
+    if (entry.source === 'mentions') this.hitSpans = mentionSpansOf(records)
     const view = this.viewOf(entry)
     if (view) {
       this.showView(host, entry)
@@ -677,6 +753,8 @@ export class MountArea {
     }
     const folded = unfoldForContext(ed.doc.folded, plan.covers, (id) => this.deps.kb.pathOf(id))
     ed.loadPage({ roots: plan.roots, folded, contexts: plan.contexts, expandedRoots: plan.contextRoots })
+    // 装载刚换了整片 DOM：立刻画一次（不等观测器那一帧，避免「先无高亮再补上」的闪动）
+    this.paintMentionHits()
     if (plan.focusId) ed.reveal(plan.focusId)
   }
 

@@ -22201,6 +22201,87 @@ await check('T251 浮层预览内 ↵：活动编辑器是预览、模型新增�
   return `输入框 ↵ 进预览、预览内 ↵ 新增一块（${before} → ${after.count}）、关面回正文`
 })
 
+/**
+ * **T258：提及栏的大纲里，命中文本要真的被画上高亮。**
+ *
+ * 提及栏默认是大纲（`loadOutline` 拉的是一台真编辑器），行里显示的是块正文。
+ * 命中区间来自派生记录的 `mentionSpots`（plain 偏移）；这里钉三件事：
+ * 区间落在**正确的字**上、切走这一栏就摘掉、切回来又画上。
+ *
+ * 为什么不用固定等待：装载后的首次绘制是同步的，DOM 变化后的补画走 rAF——
+ * 断言用 `waitForFunction` 等 `CSS.highlights` 自己出现，不给时长。
+ */
+await check('T258 提及栏大纲高亮命中：区间落在命中字上、切走摘掉、切回重画', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const NAME = '提及高亮探针MNO'
+  const pageId = 'mentionprobe-page'
+  await page.evaluate((a) => {
+    window.__qua.forceForest((forest) => {
+      const at = Date.now()
+      const mk = (id, content, props) => ({ id, content, children: [], created: at, modified: at, ...(props ? { props } : {}) })
+      forest.length = 0
+      forest.push(
+        mk(a.pageId, [{ t: 'text', v: a.name }], { _aliases: [a.name], _lists: ['page'] }),
+        mk('mentionprobe-a', [{ t: 'text', v: `今天完成了${a.name}，很顺利` }]),
+        mk('mentionprobe-b', [{ t: 'text', v: `${a.name}清单里还有三条` }]),
+      )
+    })
+  }, { name: NAME, pageId })
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId)
+  await page.waitForSelector('#editor .mount .mount-tab', { timeout: 5000 })
+
+  const mentionTab = page.locator('#editor .mount .mount-tab', { hasText: '提及' }).first()
+  assert(await mentionTab.count(), '前置：页面的挂载区要有「提及」一栏')
+  await mentionTab.click()
+
+  // 命中区间：两行各一处，且 Range 的文本就是名字本身
+  await page.waitForFunction(
+    () => {
+      const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('mention-hit'))
+      return Boolean(key && CSS.highlights.get(key).size >= 2)
+    },
+    null,
+    { timeout: 5000 },
+  )
+  const drawn = await page.evaluate(() => {
+    const key = [...CSS.highlights.keys()].find((k) => k.startsWith('mention-hit'))
+    const ranges = []
+    for (const r of CSS.highlights.get(key)) ranges.push(r.toString())
+    return {
+      key,
+      ranges,
+      rows: [...document.querySelectorAll('#editor .mount-editor .blk .tx')].map((t) => t.textContent ?? ''),
+    }
+  })
+  assert(drawn.ranges.length === 2, `两行各一处命中：${JSON.stringify(drawn)}`)
+  assert(drawn.ranges.every((t) => t === NAME), `高亮落在命中字上（不是整行）：${JSON.stringify(drawn.ranges)}`)
+  assert(drawn.rows.some((t) => t.startsWith(NAME)), `行里显示的是块正文：${JSON.stringify(drawn.rows)}`)
+
+  // 切走：这一栏的高亮要摘掉（key 不能留在全局注册表里）
+  const refsTab = page.locator('#editor .mount .mount-tab', { hasText: '引用' }).first()
+  if (await refsTab.count()) await refsTab.click()
+  await page.waitForFunction(
+    () => ![...(CSS.highlights?.keys() ?? [])].some((k) => k.startsWith('mention-hit')),
+    null,
+    { timeout: 5000 },
+  )
+
+  // 切回：重画一次，区间又要回来
+  await mentionTab.click()
+  await page.waitForFunction(
+    () => {
+      const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('mention-hit'))
+      return Boolean(key && CSS.highlights.get(key).size === 2)
+    },
+    null,
+    { timeout: 5000 },
+  )
+
+  await ctx.close()
+  return '两行命中都落在名字上；切走摘掉、切回重画'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 
