@@ -22615,6 +22615,145 @@ await check('T260 转引用守卫：受保护块 toast 不写库；块菜单只�
   return '受保护块给 toast 且模型不变；菜单在命中处出现、点它转换，不在命中处不出现；未命中 ⌥ 单击零写入；⌥ 拖选不转换'
 })
 
+/**
+ * 搜索面预览的命中高亮必须落在**正文**那一段字符上（plain 坐标），而不是
+ * 「`.tx` 里哪个文本节点先被 walker 撞见」。三条口径各钉一处：
+ *   · 正文紧跟在 chip 之后 ⇒ 偏移要补上原子那一格，且 chip 自己的显示名不算正文命中；
+ *   · 词跨过一个原子（投影里连着）⇒ 高亮要覆盖原子两侧的两个字，不许「找不到就不画」；
+ *   · 大小写/多命中 ⇒ 每处都画，不是只画第一处。
+ */
+await check('T261 搜索面命中坐标：紧跟 chip 的正文命中不误染 chip、跨原子命中覆盖两端、大小写与多命中逐处画', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.evaluate(() => {
+    window.__qua.forceForest((forest) => {
+      const at = Date.now()
+      const mk = (id, content, props) => ({
+        id,
+        content,
+        children: [],
+        created: at,
+        modified: at,
+        ...(props ? { props } : {}),
+      })
+      forest.length = 0
+      forest.push(
+        mk('coord-tag', [{ t: 'text', v: '甲命中词' }], { _aliases: ['甲命中词'], _lists: ['tag'] }),
+        mk('coord-dst', [{ t: 'text', v: '目标页正文' }], { _aliases: ['目标页'], _lists: ['page'] }),
+        // 正文「先看〔#甲命中词〕，甲命中词写在后面」：命中词既在 chip 显示名里，也在正文里
+        mk('coord-a', [
+          { t: 'text', v: '先看' },
+          { t: 'ref', to: 'coord-tag', label: '甲命中词', flavor: '#' },
+          { t: 'text', v: '，甲命中词写在后面' },
+        ]),
+        // 正文「开〔引用〕事务单」：投影里「开事务单」是连着的
+        mk('coord-b', [
+          { t: 'text', v: '开' },
+          { t: 'ref', to: 'coord-dst', label: '目标丙' },
+          { t: 'text', v: '事务单' },
+        ]),
+        mk('coord-c', [{ t: 'text', v: 'Zeta 两次 zeta 收尾' }]),
+      )
+    })
+  })
+
+  await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: 'coord-dst' }))
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
+  await page.waitForSelector('.search-face-input', { timeout: 5000 })
+
+  /** 搜一个词、选中某一行，读出预览里这条 key 的真实区间 */
+  const pick = async (term, blockId) => {
+    await page.fill('.search-face-input', term)
+    // 条件是「这一次词的那一行出现」，不是「有行」：防抖窗口里旧列表还在
+    await page.waitForFunction(
+      (bid) => Boolean(document.querySelector(`#center-surface [data-search-row="${bid}"]`)),
+      blockId,
+      { timeout: 3000 },
+    )
+    /**
+     * 输入是**防抖**的：列表会先出一次、落定后再重排一次，重排会把选中打回第一行。
+     * 所以「选中是这一块 ＋ 预览是这一块 ＋ 这一块的高亮换了」要一起成立才算选好；
+     * 不成立就再点一次（重排只发生一次，第二遍点中即稳定），不靠固定等待。
+     *
+     * 判「高亮换了」用**区间落点**而不是文字：同一段文字可能就在下一块上
+     * （夹具里「任务」同时出现在标签块与正文块），只比文字会把「没换」当成「换了」。
+     */
+    const signature = () =>
+      page.evaluate(() => {
+        const hl = CSS.highlights.get('search-match')
+        return hl ? [...hl].map((r) => `${r.startContainer.data ?? ''}@${r.startOffset}`).join('|') : ''
+      })
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const before = await signature()
+      await page.evaluate(
+        (bid) => document.querySelector(`#center-surface [data-search-row="${bid}"] .search-row-select`).click(),
+        blockId,
+      )
+      const ok = await page
+        .waitForFunction(
+          ({ bid, before }) => {
+            if (document.querySelector(`#center-surface [data-search-row="${bid}"]`)?.dataset.selected !== '1') return false
+            if (!document.querySelector(`.search-face-preview .blk[data-block-id="${bid}"]`)) return false
+            const hl = CSS.highlights.get('search-match')
+            if (!hl || hl.size === 0) return false
+            const now = [...hl].map((r) => `${r.startContainer.data ?? ''}@${r.startOffset}`).join('|')
+            return now !== before
+          },
+          { bid: blockId, before },
+          { timeout: 1200 },
+        )
+        .then(() => true)
+        .catch(() => false)
+      if (ok) break
+    }
+    return page.evaluate(() => {
+      const hl = CSS.highlights.get('search-match')
+      const ranges = hl ? [...hl] : []
+      return {
+        count: hl?.size ?? 0,
+        texts: ranges.map((r) => r.toString()),
+        // 区间起点是不是落在 chip/引用的 `.atom` 里（那里是目标的名字，不是正文）
+        inAtom: ranges.filter((r) => r.startContainer.parentElement?.closest?.('.atom')).length,
+        start: ranges.map((r) => ({ text: r.startContainer.data ?? '', offset: r.startOffset })),
+        keys: [...CSS.highlights.keys()],
+      }
+    })
+  }
+
+  try {
+    // ① 紧跟 chip 的正文命中：只画正文那一处，chip 显示名不算正文
+    const a = await pick('甲命中词', 'coord-a')
+    assert(a.count === 1, `正文命中只应有一处（chip 显示名不算正文）：${JSON.stringify(a)}`)
+    assert(a.texts[0] === '甲命中词', `高亮要正好落在「甲命中词」这几个字上：${JSON.stringify(a)}`)
+    assert(a.inAtom === 0, `命中不许落在 chip 里：${JSON.stringify(a)}`)
+    // 正文段是「，甲命中词写在后面」，命中从第 1 格开始 ⇒ 偏移补齐了前面那个原子
+    assert(
+      a.start[0]?.text === '，甲命中词写在后面' && a.start[0]?.offset === 1,
+      `偏移要补上 chip 那一格（期望正文段 offset 1）：${JSON.stringify(a.start)}`,
+    )
+
+    // ② 跨原子：投影里「开事务单」连着，plain 区间要把原子两侧都覆盖
+    const b = await pick('开事务单', 'coord-b')
+    assert(b.count === 1, `跨原子的词要画成一条区间：${JSON.stringify(b)}`)
+    assert(
+      b.texts[0]?.startsWith('开') && b.texts[0]?.endsWith('事务单'),
+      `跨原子区间要覆盖两侧的正文：${JSON.stringify(b.texts)}`,
+    )
+
+    // ③ 大小写 + 多命中：两处都画（不是只画第一处），且只画这一块的
+    const c = await pick('zeta', 'coord-c')
+    assert(c.count === 2, `同一块里的两处命中都要画：${JSON.stringify(c)}`)
+    assert(
+      c.texts.includes('Zeta') && c.texts.includes('zeta'),
+      `大小写不敏感：两处都要画出来：${JSON.stringify(c.texts)}`,
+    )
+
+    return `紧跟 chip 的正文命中只画正文（offset 1、inAtom 0）；跨原子命中覆盖「开…任务单」；两处大小写命中都画`
+  } finally {
+    await ctx.close()
+  }
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

@@ -120,13 +120,16 @@ function txById(host: HTMLElement): Map<string, HTMLElement> {
  *
  * 没有命中、或块不在这一屏（大纲只画顶层，子块没有行）⇒ 静默跳过；`CSS.highlights`
  * 不支持时同样跳过（降级是「少一样装饰」，不是报错）。
+ *
+ * **返回这一屏画出的 Range**：调用方还要把它们之一滚进视口（「滚到第一处命中」）。
+ * 自己另建一份 Range 等于把「命中在哪」算第二遍——两处一旦口径不同，
+ * 画亮的那一处和滚到的那一处就不是同一个位置。
  */
 export function paintHits(
   host: HTMLElement,
   blocks: ReadonlyMap<string, readonly PlainSpan[]>,
   key: string,
-): void {
-  if (typeof CSS === 'undefined' || !CSS.highlights) return
+): Range[] {
   const ranges: Range[] = []
   const screen = txById(host)
   for (const [blockId, spans] of blocks) {
@@ -144,11 +147,13 @@ export function paintHits(
     }
   }
   if (ranges.length === 0) {
-    CSS.highlights.delete(key)
-    return
+    clearHits(key)
+    return ranges
   }
+  if (typeof CSS === 'undefined' || !CSS.highlights) return ranges
   ensureStyle(key)
   CSS.highlights.set(key, new Highlight(...ranges))
+  return ranges
 }
 
 /** 摘掉这条 key 的高亮（切走这一栏／拆掉宿主都要走这里） */
