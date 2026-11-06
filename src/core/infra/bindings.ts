@@ -178,6 +178,13 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/insert-link', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 25, layer: 'core' },
   { command: 'core.editor/copy-ref', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 30, layer: 'core' },
   { command: 'core.editor/copy-block-ref', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 35, layer: 'core' },
+  /**
+   * **提及命中 → 引用**：只有光标正停在命中区间上时才出现。
+   *
+   * 判据与 ⌥ 单击同一份（`mentionHit` 由编辑器按 `spanAt` 现算），这里不放参数——
+   * 具体是哪一段由命令向编辑器要，免得菜单行与手势各带一份区间。
+   */
+  { command: 'core.block/convert-mention', kind: 'menu', when: 'mentionHit', group: 'block/4-inline', order: 40, layer: 'core' },
   { command: 'core.anno/clear-marks', kind: 'menu', when: 'blockFocused && !selectionEmpty', group: 'block/5-mark', order: 50, layer: 'core' },
   /**
    * **视图**（一个块换个看法）：入口只在「有东西可摊开」的块上（查询块 / 有子块 / 已有视图）。

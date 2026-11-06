@@ -57,7 +57,7 @@ import type { KbClient } from '../../core/kb/types.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
 import { type BlockEditor, type Run } from '../../view/editor/editor.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
-import { clearHits, paintHits, type PlainSpan } from '../../view/editor/hit-paint.ts'
+import { clearHits, offsetAtPoint, paintHits, spanAt, type PlainSpan } from '../../view/editor/hit-paint.ts'
 import { claimHighlightKey, releaseHighlightKey } from '../search/highlight-key.ts'
 import { bindDropTarget, setDragTab } from '../../view/dnd.ts'
 import { renderIcon } from '../../view/icons.ts'
@@ -139,6 +139,11 @@ export interface MountAreaDeps {
    * 只有那一层答得出来。
    */
   createView?: (host: Block, entry: MountEntry) => ViewBodyHost | null
+  /**
+   * **命令面**：⌥ 单击命中字要「转为引用」，走的仍是 `core.block/convert-mention`
+   * （一次内容写、可撤销）。这一层不认识命令表，只报「谁、哪一段、指向谁」。
+   */
+  invoke: (name: string, args: Record<string, unknown>) => void
   /**
    * 初始是否展开。日记流里只有今天展开，更早的天是一行摘要（一行 DOM ＋ 不建编辑器）。
    */
@@ -256,6 +261,8 @@ export class MountArea {
    * 派生值，不落盘；切栏时清空。
    */
   private hitSpans: ReadonlyMap<string, readonly PlainSpan[]> = new Map()
+  /** 命中点到的是谁（这一栏的来源块：页/标签）；换栏清空 */
+  private mentionTo: string | null = null
   /** 高亮 key：第一次真的画时才领（没人看提及栏就不占一条 key），拆掉时归还 */
   private hitKey: string | null = null
   /**
@@ -333,6 +340,7 @@ export class MountArea {
 
     this.hitObserver = new MutationObserver(() => this.scheduleHitPaint())
     this.hitObserver.observe(this.editorEl, { subtree: true, childList: true, characterData: true })
+    this.editorEl.addEventListener('click', this.onHitClick)
     this.root.append(this.summaryEl, this.tabsEl, this.bodyEl)
 
     this.render()
@@ -346,6 +354,8 @@ export class MountArea {
   /** 摘掉实例（装配层在段根换人时调）：退订 store、卸事件，别让游离容器继续被重画 */
   dispose(): void {
     this.hitObserver.disconnect()
+    this.editorEl.removeEventListener('click', this.onHitClick)
+    this.block.ed?.setMentionHits(null)
     if (this.hitFrame) cancelAnimationFrame(this.hitFrame)
     if (this.hitKey) {
       clearHits(this.hitKey)
@@ -629,9 +639,51 @@ export class MountArea {
     })
   }
 
+  /**
+   * 把「这一栏的命中」交给编辑器：⌥ 单击与块菜单的 `when` 都读它，
+   * 判据只有 `spanAt` 一处。没有命中（别的栏／别的视图）就交回 `null`。
+   */
+  private syncMentionHits(ed: BlockEditor | null | undefined): void {
+    ed?.setMentionHits(
+      this.mentionTo && this.hitSpans.size > 0 ? { to: this.mentionTo, spans: this.hitSpans } : null,
+    )
+  }
+
+  /**
+   * **⌥ + 单击命中字 = 转为引用。**
+   *
+   * 为什么是 ⌥：命中永远是**纯文本**（`mentionSpotsOf` 会把含原子的切片剔掉），
+   * 而 ⌥ 单击在编辑器里只对原子/引用有意义（「看详情而不是默认动作」）——
+   * 打在文本上它本来是空的，不会和 ⌘ 新 tab、Shift 进右槽撞。
+   * 落点用 `caretRangeFromPoint` 换算回 plain 偏移：高亮只是画层，没有可点的元素。
+   */
+  private readonly onHitClick = (e: MouseEvent): void => {
+    if (!e.altKey || !this.mentionTo) return
+    const target = e.target instanceof Element ? e.target : null
+    const blk = target?.closest<HTMLElement>('.blk')
+    const blockId = blk?.dataset?.['blockId']
+    if (!blk || !blockId || !this.editorEl.contains(blk)) return
+    const tx = blk.querySelector<HTMLElement>(':scope > .tx')
+    if (!tx) return
+    const offset = offsetAtPoint(tx, e.clientX, e.clientY)
+    // 没命中就**原样放行**：光标照常落下，一个字节都不写
+    const span = offset === null ? null : spanAt(this.hitSpans.get(blockId) ?? [], offset)
+    if (!span) return
+    e.preventDefault()
+    e.stopPropagation()
+    this.deps.invoke('core.block/convert-mention', {
+      blockId,
+      to: this.mentionTo,
+      start: span.start,
+      end: span.end,
+    })
+  }
+
   private load(host: Block, entry: MountEntry, focusHint?: string): void {
     // 换栏：上一栏的命中高亮先摘掉，再由这一栏自己决定要不要画
     this.hitSpans = new Map()
+    this.mentionTo = null
+    this.block.ed?.setMentionHits(null)
     this.paintMentionHits()
     if (entry.kind === 'derived') {
       this.loadDerived(host, entry, focusHint)
@@ -691,7 +743,12 @@ export class MountArea {
      * 提及栏的命中区间：**同一份派生记录**里已经算好了（`derived.mentionSpots`），
      * 这里只搬过来，不再按词重搜一遍——画高亮与「之后切成引用」必须认同一处命中。
      */
-    if (entry.source === 'mentions') this.hitSpans = mentionSpansOf(records)
+    if (entry.source === 'mentions') {
+      this.hitSpans = mentionSpansOf(records)
+      // 命中属于**这一栏的来源块**（页/标签），转引用时目标就是它
+      this.mentionTo = host.id
+      this.syncMentionHits(this.block.ed)
+    }
     const view = this.viewOf(entry)
     if (view) {
       this.showView(host, entry)
@@ -755,6 +812,8 @@ export class MountArea {
     ed.loadPage({ roots: plan.roots, folded, contexts: plan.contexts, expandedRoots: plan.contextRoots })
     // 装载刚换了整片 DOM：立刻画一次（不等观测器那一帧，避免「先无高亮再补上」的闪动）
     this.paintMentionHits()
+    // 编辑器第一次建出来才可能设命中（旧的一台已经在 `load` 里清过了）
+    this.syncMentionHits(ed)
     if (plan.focusId) ed.reveal(plan.focusId)
   }
 
