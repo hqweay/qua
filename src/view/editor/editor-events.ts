@@ -949,12 +949,27 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      *    ⚠️ 它和上面「点块标＝聚焦」互不遮挡：块标上只有 `data-focus-for`，
      *       方框上只有 `data-todo-for`，一次点击只可能命中其中一个。
      */
+    /**
+     * **任务状态标记**：普通点击＝完成/取消（快路径），`⌥`+点击＝状态菜单。
+     * 状态标记不是 checkbox：它可以显示 Doing/Canceled，主点击只翻 on/off，
+     * 其余状态从菜单里显式选；两种手势分工，互不误触。
+     */
+    const status = target.closest<HTMLElement>('[data-status-for]')
+    if (status?.dataset.statusFor) {
+      e.preventDefault()
+      if (e.altKey && status.dataset.propId) {
+        br.pickGutterValue(status.dataset.statusFor, status.dataset.propId, status.getBoundingClientRect())
+      } else {
+        br.toggleTodo(status.dataset.statusFor, status.dataset.propId)
+      }
+      return
+    }
+
     const todo = target.closest<HTMLElement>('[data-todo-for]')
     if (todo?.dataset.todoFor) {
       e.preventDefault()
-      // 方框的动作是「切换完成」，不是「打开」——Shift 不改变它。
-      // 「在右槽打开」的入口是块标/行/引用，统一由装配层的 `App.openBlock` 承担。
-      // `prop-id` 让一行上的多个 toggle 不串台（第一个仍是命令/快捷键的缺省目标）。
+      // 只有 checkbox 字段走到这里（状态标记在上面已接住）：
+      // `prop-id` 让一行上的多个 toggle 不串台。
       br.toggleTodo(todo.dataset.todoFor, todo.dataset.propId)
       return
     }

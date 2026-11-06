@@ -998,7 +998,9 @@ export function makeBlockEl(
         mark.className = 'identity todo-box todo-mark'
         mark.dataset.propId = field.propId
         mark.dataset.todoFor = b.id
-        renderIcon(mark, field.icon, todo === 'done' ? 'square-check' : 'square', 'sm')
+        // 状态标记：当前值的图标；非方框的 fallback（任务状态不是 checkbox）
+        mark.dataset.statusFor = b.id
+        renderIcon(mark, field.icon, todo === 'done' ? 'circle-check' : 'circle', 'sm')
         mark.title = t('ui.todo.toggle')
         left?.appendChild(mark)
         continue

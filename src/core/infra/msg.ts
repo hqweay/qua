@@ -915,7 +915,7 @@ export const MSG = {
   'ui.block.handleHint': '拖拽重排 · 右键打开块菜单',
   'ui.block.placeholderFirst': '写点什么…（按 / 呼出命令）',
   'ui.block.placeholderEmpty': '空块',
-  'ui.todo.toggle': '点击切换完成 · Shift+点击在右槽打开',
+  'ui.todo.toggle': '点击切换完成 · ⌥+点击选择状态',
   /**
    * 「取消待办」摘完这一块自己的槽之后，如果这一栏还在（标签声明给的），
    * 就得说清它从哪来 —— 否则看起来像「点了没反应」。
