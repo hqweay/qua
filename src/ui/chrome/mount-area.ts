@@ -108,8 +108,9 @@ export interface MountAreaDeps {
    *
    * 模板（条件＋默认视图）在 core 的 `derivedTemplateOf`；这一层只报
    * 「哪个宿主的哪个来源、锚点在哪」，写与激活都在装配层。
+   * `openTree`：物化完直接摊开新栏的条件树（手势承诺「改条件」就一步够到）。
    */
-  onMaterializeTab?: (hostId: string, source: DerivedSource, anchor: DOMRect) => void
+  onMaterializeTab?: (hostId: string, source: DerivedSource, anchor: DOMRect, opts?: { openTree?: boolean }) => void
   /** 「×」：摘掉一栏（`tabId` 是**稳定 id**，不是数组下标） */
   onRemoveTab?: (host: MountHost, tabId: string) => void
   /**
@@ -1147,6 +1148,13 @@ export class MountArea {
     const num = document.createElement('span')
     num.className = 'mount-derived-count'
     num.textContent = t('ui.mount.count', { count })
+    /**
+     * 条件用**人话句子**（不是条件 chip）：chip 走条件**草稿**拆行，而内置栏的
+     * 条件全是 `{ref}`／`{text}∧¬{ref}`——`ref` 叶子不进草稿语言（那是构建器的
+     * 行模型），拆出来只会是一枚「复合条件」。**条件树**另有一套行模型、认 ref 行
+     * ⇒ 「改条件」的入口是旁边的复制按钮：物化成 local 栏后开树就能改
+     * （E 批登记：chip 化内置栏等 ref 行进草稿，或树摘要下沉成 chip）。
+     */
     const why = document.createElement('span')
     why.className = 'mount-derived-why ui-ellipsis'
     why.textContent = t(DERIVED_WHY[entry.source])
@@ -1243,7 +1251,7 @@ export class MountArea {
       copy.title = t('ui.mount.materialize')
       renderIcon(copy, 'lucide:copy', 'copy')
       copy.addEventListener('click', () => {
-        this.deps.onMaterializeTab?.(host.id, entry.source, copy.getBoundingClientRect())
+        this.deps.onMaterializeTab?.(host.id, entry.source, copy.getBoundingClientRect(), { openTree: true })
       })
       head.appendChild(copy)
     }

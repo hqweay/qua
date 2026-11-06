@@ -396,7 +396,7 @@ export const MSG = {
   'ui.mount.newTabName': '这一栏叫什么？',
   'ui.mount.specTitle': '条件（JSON）',
   'ui.mount.localName': '新查询',
-  'ui.mount.materialize': '以此建查询栏（条件可再改）',
+  'ui.mount.materialize': '以此建查询栏，就地改条件',
   'ui.mount.viewGone': '这张视图已不存在',
   'ui.mount.rename': '重命名这一栏',
   'ui.mount.renameHint': '双击重命名这一栏',
@@ -480,6 +480,7 @@ export const MSG = {
   'ui.query.label.empty': '{name} 为空',
   'ui.query.label.notEmpty': '{name} 非空',
   'ui.query.label.cmp': '{name} {op} {value}',
+  'ui.query.chipNot': '非·{text}',
   /* 条件树的词：方向与条件是两轴，组头只留短词（长句在树上重复 N 次就是噪声） */
   'ui.query.kind.path': '路径',
   'ui.query.tree.dirUp': '上级匹配',

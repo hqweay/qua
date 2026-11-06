@@ -119,6 +119,15 @@ function isTreeOpen(owner: ViewOwnerRef, surface: ViewSurface, topLevel: boolean
   return treeOpen.get(treeKeyOf(owner, surface)) ?? surfaceDefaultsOpen(surface, topLevel)
 }
 
+/**
+ * **外部把某一栏的条件树摊开**（挂载区「复制为查询栏」的手势：物化出新栏后
+ * 直接进条件树，从「看条件」一步到「改条件」）。键与 ViewHost 同一份 store，
+ * 所以新栏第一次画抬头时读到的就是摊开态。
+ */
+export function openQueryTreeFor(owner: ViewOwnerRef, surface: ViewSurface): void {
+  treeOpen.set(treeKeyOf(owner, surface), true)
+}
+
 /** 保留列在列表里的字段名（属性列走 `deps.fields()`） */
 const RESERVED_FIELD_LABEL: Record<string, MsgId> = {
   tags: 'ui.props.tagsTitle',
@@ -1157,7 +1166,7 @@ export class ViewHost {
      * （点开构建器只会得到一份不属于它的条件）。所以要留下一句话，但不做成按钮。
      */
     if (this.deps.derived) {
-      // 只读说明由挂载区的抬头说（栏名旁边那句）；这里再放一枚就是同屏两遍
+      // 条件由挂载区的抬头说（栏名旁边那排 chip）；这里再放一枚就是同屏两遍
       box.hidden = true
       return
     }

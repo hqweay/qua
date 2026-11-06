@@ -224,3 +224,43 @@ test('收窄不许悄悄改掉已存下来的算子（打开一次条件就变�
   assert.equal(ops.indexOf('contains'), ops.length - 1, '补在末尾：前四个仍是这一类的正常问法')
   assert.ok(opsFor('checkbox', 'empty').includes('empty'))
 })
+
+/* ------------------------------------------------------------ 显示模式（只读投影） */
+
+const SPEC_NOT_TAG: QuerySpec = { where: { all: [{ text: 'x' }, { not: { tag: 'a' } }] } }
+/** 提及的组合条件：`not` 里是 `{ref}`——ref 叶子不进草稿语言（那是树的行模型） */
+const SPEC_MENTIONS: QuerySpec = { where: { all: [{ text: '$self' }, { not: { ref: '$self' } }] } }
+
+test('显示模式：「非（可拆叶子）」拆成带 not 标记的行；编辑路径仍是 verbatim（不混两套）', () => {
+  // 编辑路径：含 not ⇒ 拆不动，走 verbatim（往返判据不变）
+  assert.ok(draftOfSpec(SPEC_NOT_TAG).verbatim !== undefined, '编辑路径不产 not 行')
+  // 显示模式：拆成两行，第二行带 not 标记
+  const view = draftOfSpec(SPEC_NOT_TAG, { displayNot: true })
+  assert.equal(view.verbatim, undefined)
+  assert.deepEqual(
+    view.rows.map((r) => ({ kind: r.kind, value: r.value, not: r.not === true })),
+    [
+      { kind: 'text', value: 'x', not: false },
+      { kind: 'tag', value: 'a', not: true },
+    ],
+  )
+  // not 里套拆不动的形状（嵌套组合）⇒ 整块退回 verbatim（不显示拆一半）
+  const nested: QuerySpec = { where: { all: [{ text: 'x' }, { not: { any: [{ tag: 'a' }] } }] } }
+  assert.ok(draftOfSpec(nested, { displayNot: true }).verbatim !== undefined)
+})
+
+test('边界（登记）：ref 叶子不进草稿语言，提及的组合条件在显示模式下也是 verbatim', () => {
+  // chip 化内置栏等 ref 行进草稿（或树摘要下沉成 chip）——在那之前提到栏的人话
+  // 说明走挂载区自己的 why 句，不走 chip
+  assert.ok(draftOfSpec(SPEC_MENTIONS, { displayNot: true }).verbatim !== undefined)
+})
+
+test('显示模式不保证往返，也不许被拼回去：specOfDraft 无视 not 标记', () => {
+  const view = draftOfSpec(SPEC_NOT_TAG, { displayNot: true })
+  // 把显示草稿喂给 specOfDraft：not 行当普通行拼（丢掉「非」是显示模式自担的代价——
+  // 它只该被喂给只读投影，这里钉的是「不会崩、不丢行」）
+  const back = specOfDraft(view)
+  assert.ok(back.where && 'all' in back.where, '拼回的是组合条件')
+  const leaves = 'all' in back.where ? back.where.all : []
+  assert.equal(leaves.length, view.rows.length, '行数一致：not 只是标记，不丢行')
+})

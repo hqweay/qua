@@ -2,12 +2,12 @@
  * **条件的人话投影**（chip 与旧平铺草稿共用）。
  *
  * 条件树的编辑面住在 `ui/query-tree.ts`；这里只把一份 `QuerySpec` 说成人话：
- *   · 抬头上的 chip（收起的树、投影窗口）；
- *   · 派生栏那一句只读说明（它不是用户配的条件，也没有可编辑的落点）。
+ *   · 抬头上的 chip（收起的树、投影窗口、挂载区的派生栏）。
  *
- * ⚠️ `draftOfSpec` 只表达**一层平铺行**：嵌套组、方向的非 `{is:id}` 形状、带 kind 的 `ref`
- *    都拆不动，返回 `verbatim` ⇒ 这里显示「复合条件」。不要为了 chip 好看去硬拆——拆一半再拼回去
- *    就会悄悄丢掉剩下的条件。
+ * ⚠️ chip 是**只读**投影 ⇒ 走显示模式拆「非」叶子；但更深的嵌套、方向的非
+ *    `{is:id}` 形状、带 kind 的 `ref` 仍然拆不动 ⇒ 整块显示「复合条件」。
+ *    显示模式不拼回去，所以拆了不丢条件；**编辑**路径保持缺省模式——
+ *    那里拆一半再拼回去，就会悄悄丢掉剩下的条件。
  */
 import {
   draftOfSpec,
@@ -73,18 +73,21 @@ export function queryChips(
   /** 方向行的目标块 id → 名字 */
   refLabel?: (id: string) => string,
 ): string[] {
-  const draft = draftOfSpec(spec)
+  // chip 是**只读**投影 ⇒ 用显示模式拆「非」叶子（提及的组合条件才能摆出来）；
+  // 显示模式不保证往返，而这里根本没有「拼回去」这一步，不会丢条件
+  const draft = draftOfSpec(spec, { displayNot: true })
   if (draft.verbatim !== undefined) return [t('ui.query.builder.complex')]
   const choiceLabel = choices
     ? (propId: string, valueId: string) => choices(propId).find((c) => c.id === valueId)?.label
     : undefined
-  return draft.rows.map((row) =>
-    rowLabel(
+  return draft.rows.map((row) => {
+    const label = rowLabel(
       row,
       (id) => fields.find((f) => f.id === id)?.label ?? id.slice(-6),
       (op) => t(OP_TEXT[op]),
       choiceLabel,
       refLabel,
-    ),
-  )
+    )
+    return row.not === true ? t('ui.query.chipNot', { text: label }) : label
+  })
 }

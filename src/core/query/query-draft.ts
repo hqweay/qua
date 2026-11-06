@@ -56,6 +56,14 @@ export interface DraftRow {
   value?: string
   /** `path` 才有；缺省 `up` */
   dir?: 'up' | 'down' | 'near'
+  /**
+   * **只显示**：这一行是「非（…）」。
+   *
+   * 只在 `draftOfSpec` 的显示模式（`displayNot`）里出现——编辑路径不产它，
+   * `specOfDraft` 也不读它：显示模式**不保证往返**（把「非」拆出来是为了看得见，
+   * 不是为了改回去；改回去仍走 verbatim 那条路）。
+   */
+  not?: boolean
 }
 
 /** 整份草稿：一层组合 ＋ 上限/顺序 */
@@ -133,8 +141,12 @@ function literalText(v: unknown): string {
  * ⚠️ `any:[]`（恒假）**不在**「拆不动」里：它就是「还没有条件」，拆成零行草稿
  *    往返逐字节相等；留在 verbatim 里，条件行的每次修改都会被原样吞掉 ——
  *    新建栏拿到的正是这份空条件，那就永远配不起来。
+ *
+ * **显示模式**（`opts.displayNot`）：「非（可拆叶子）」拆成带 `not` 标记的行。
+ * 这是给**只读展示**用的（条件 chip），不保证往返——编辑路径（缺省）不产也不读
+ * `not` 行，`specOfDraft` 对它视而不见，所以两种模式不会在回写时各说各话。
  */
-export function draftOfSpec(spec: QuerySpec): QueryDraft {
+export function draftOfSpec(spec: QuerySpec, opts?: { displayNot?: boolean }): QueryDraft {
   const where = spec.where
   const base: QueryDraft = {
     mode: 'all',
@@ -148,12 +160,22 @@ export function draftOfSpec(spec: QuerySpec): QueryDraft {
     return { ...base, verbatim: JSON.stringify(canonicalSpec(spec), null, 2) }
   }
   // `any:[]`（恒假）就是「还没有条件」：拆成零行草稿往返逐字节相等，
-  // 新建栏的空条件才能从条件行开始配 —— 留在 verbatim 里，条件行的修改会被原样吞掉
+  // 新建栏拿到的正是这份空条件，那就永远配不起来 —— 留在 verbatim 里，条件行的修改会被原样吞掉
   const rows: DraftRow[] = []
   for (const leaf of leaves) {
     const row = rowOf(leaf)
-    if (!row) return { ...base, verbatim: JSON.stringify(canonicalSpec(spec), null, 2) }
-    rows.push(row)
+    if (row) {
+      rows.push(row)
+      continue
+    }
+    if (opts?.displayNot === true && 'not' in leaf) {
+      const inner = rowOf(leaf.not)
+      if (inner) {
+        rows.push({ ...inner, not: true })
+        continue
+      }
+    }
+    return { ...base, verbatim: JSON.stringify(canonicalSpec(spec), null, 2) }
   }
   return {
     ...base,

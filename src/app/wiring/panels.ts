@@ -63,7 +63,7 @@ import { ICON_PATHS } from '../../view/icons.ts'
 import { BUILTIN_LABEL, MountArea, type ViewBodyHost } from '../../ui/chrome/mount-area.ts'
 import { PropertiesPanel, type PropertiesDeps } from '../../ui/block-ui/properties.ts'
 import type { DerivedMode } from '../../ui/query/query-view.ts'
-import { createViewHostEls, ViewHost } from '../../ui/query/query-view.ts'
+import { createViewHostEls, openQueryTreeFor, ViewHost } from '../../ui/query/query-view.ts'
 
 import type { Chrome } from '../../ui/chrome/chrome.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
@@ -806,7 +806,7 @@ export function setupPanels(deps: PanelsDeps) {
       // 与正文同一套事件（点引用/块标/右键菜单/`#`·`@` 补全），装配层只给这一份
       wire: (editor, change) => deps.wireEditor(editor, change, 'mount'),
       onAddTab: (id) => addLocalQueryTab(id),
-      onMaterializeTab: (id, source) => materializeDerivedTab(id, source),
+      onMaterializeTab: (id, source, _anchor, opts) => materializeDerivedTab(id, source, opts),
       // 快速筛选的弹层外壳（chips 的内容与状态都在挂载区自己手里）
       openPopover: (render, anchor) => layers.openPopover(render, anchor),
       // 大纲分支的切换下拉：与视图宿主那条同一个菜单（装配层现画行，这里只给锚点）
@@ -961,8 +961,10 @@ export function setupPanels(deps: PanelsDeps) {
    * 建出来就是普通用户栏——条件、视图、名字都能改；内置栏本体不动，它继续现算。
    * 走 `core.mount/add-local` 命令面（带 views），不另开写路径。
    * 维度不存在时模板是 `null` ⇒ 挂载区根本没给按钮，这里兜底返回。
+   * `openTree`：物化完直接把新栏的条件树摊开——手势的承诺是「改条件」，
+   * 让用户再点一次摘要 chip 才够到树，等于把承诺拆成两半。
    */
-  function materializeDerivedTab(hostId: string, source: DerivedSource): void {
+  function materializeDerivedTab(hostId: string, source: DerivedSource, opts?: { openTree?: boolean }): void {
     const host = blocks.find(hostId)
     if (!host) return
     const template = derivedTemplateOf(host, kb.roots(), source)
@@ -987,6 +989,9 @@ export function setupPanels(deps: PanelsDeps) {
     if (!added) return
     // 新栏当场切过去：建了不看，「点了没生效」的另一种长相
     mountInstances.get(hostId)?.area.activateTab(added.id)
+    if (opts?.openTree === true) {
+      openQueryTreeFor({ kind: 'tab', host: mountHost, tabId: added.id }, 'mount')
+    }
   }
 
   /**
