@@ -138,6 +138,8 @@ export interface FieldTable {
   defaults: ReadonlyMap<string, unknown>
   /** 属性 id → 「完成」档的选项 id（`select` 且选项带 `_done` 才有） */
   done: ReadonlyMap<string, string>
+  /** 属性 id → 基数（缺省 `one`；定义块写了 `_cardinality: 'many'` 才是多值） */
+  cardinality: ReadonlyMap<string, Cardinality>
 }
 
 /** 从森林建一份字段读取表（标签声明 ＋ 定义 kind／缺省值各扫一趟） */
@@ -147,14 +149,17 @@ export function fieldTableOf(forest: readonly Block[]): FieldTable {
   const kinds = new Map<string, PropKind>()
   const defaults = new Map<string, unknown>()
   const done = new Map<string, string>()
+  const cardinality = new Map<string, Cardinality>()
   for (const def of allPropDefs(forest)) {
     kinds.set(def.id, propKindOf(def))
     const dflt = prop<unknown>(def, DEFAULT_PROP)
     if (dflt !== undefined) defaults.set(def.id, dflt)
     const doneId = doneChoiceOf(def)
     if (doneId !== undefined) done.set(def.id, doneId)
+    const card = cardinalityOf(def)
+    if (card === 'many') cardinality.set(def.id, card)
   }
-  return { byTag, kinds, defaults, done }
+  return { byTag, kinds, defaults, done, cardinality }
 }
 
 /**
@@ -253,7 +258,7 @@ export function todoOf(block: Block, table: FieldTable): TodoState | undefined {
     if (table.kinds.get(propId) !== 'select') continue
     const { declared, value } = readField(block, propId, table)
     if (!declared) continue
-    return value === doneId ? 'done' : 'todo'
+    return singleValueOf(value) === doneId ? 'done' : 'todo'
   }
   return undefined
 }
@@ -326,6 +331,8 @@ export function choicesOf(def: Block): Block[] {
  */
 export function doneChoiceOf(def: Block): string | undefined {
   if (propKindOf(def) !== 'select') return undefined
+  // 完成是**单值**状态：多值里「一个完成了、另一个没完成」无法映射成 todoOf 的二态
+  if (cardinalityOf(def) === 'many') return undefined
   return choicesOf(def).find((c) => prop<boolean>(c, DONE_PROP) === true)?.id
 }
 
@@ -355,6 +362,51 @@ export const DONE_PROP = '_done'
 /** `_done` 的形状判据：只有 `true` 算标记；`false` 与「没有这一格」同义 */
 export function isDoneFlag(v: unknown): boolean {
   return v === true
+}
+
+/**
+ * 字段的**基数**：`one`（缺省）／`many`。
+ *
+ * 多值只对 `select` 有意义：值是一个选项 id 数组（顺序按选项兄弟序），
+ * 不是新的 kind —— 单选/多选共用同一套选项与同一份值域。
+ */
+export type Cardinality = 'one' | 'many'
+
+/** 定义块上的基数槽（系统属性；缺省 `one` 不落盘） */
+export const CARDINALITY_PROP = '_cardinality'
+
+export function isCardinalityValue(v: unknown): boolean {
+  return v === 'one' || v === 'many'
+}
+
+/** 定义块的基数（缺省 `one`：没写就是单值） */
+export function cardinalityOf(def: Block | undefined): Cardinality {
+  return def && prop<string>(def, CARDINALITY_PROP) === 'many' ? 'many' : 'one'
+}
+
+/**
+ * 把一格值读成**选项 id 列表**（多值读法的唯一入口）。
+ *
+ * 兼容两种历史形状：单值（string）在读多值时视为「只有一个」，数组则逐项过滤。
+ * 写路径始终写数组；这条兼容只服务「单值定义刚切成多值、旧块还没被写过」的瞬间，
+ * 不做第二份存储。
+ */
+export function valueListOf(value: unknown): string[] {
+  if (typeof value === 'string') return value === '' ? [] : [value]
+  if (!Array.isArray(value)) return []
+  return value.filter((x): x is string => typeof x === 'string' && x !== '')
+}
+
+/**
+ * 把一格值读成**单个选项 id**（单值读法的唯一入口）。
+ *
+ * 数组只在「多值定义切回单值」的过渡期出现（切换命令会挡住仍有 >1 个值的库）；
+ * 取第一个是安全的降级，下一次写值就归一成 string。
+ */
+export function singleValueOf(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : ''
+  return ''
 }
 
 /**
@@ -640,12 +692,37 @@ export function choiceCells(
   def: Block,
   forest: readonly Block[],
   lookup?: ChoiceLookup,
-): Pick<FieldRow, 'choices' | 'currentChoiceLabel' | 'currentChoiceDeleted'> {
+): Pick<
+  FieldRow,
+  'choices' | 'currentChoiceLabel' | 'currentChoiceDeleted' | 'currentChoiceLabels' | 'currentChoices'
+> {
   const look = lookup ?? choiceLookupOf(forest)
   const choices = choicesForDef(block, def, look.tagById)
   const value = valueOf(block, propId)
-  if (typeof value !== 'string' || value === '') return { choices }
-  const current = look.find(value)
+  // 多值：每一格都显示名字（含软删/隐藏的值），缺失项用「已删除」兜底
+  if (cardinalityOf(def) === 'many') {
+    const ids = valueListOf(value)
+    if (ids.length === 0) return { choices }
+    const set = new Set(ids)
+    const known = new Set(def.children.map((c) => c.id))
+    // 显示顺序＝**选项兄弟序**；不在定义里的旧值（另一个库/已 purge）按值序排在末尾
+    const ordered = [...def.children.filter((c) => set.has(c.id)).map((c) => c.id), ...ids.filter((id) => !known.has(id))]
+    const currentChoices: Block[] = []
+    const currentChoiceLabels: string[] = []
+    for (const id of ordered) {
+      const current = look.find(id)
+      if (!current) {
+        currentChoiceLabels.push(t('ui.props.choice.deleted'))
+        continue
+      }
+      currentChoices.push(current)
+      currentChoiceLabels.push(choiceDisplayLabel(current, def, look.tagName))
+    }
+    return { choices, currentChoices, currentChoiceLabels }
+  }
+  const id = singleValueOf(value)
+  if (id === '') return { choices }
+  const current = look.find(id)
   // 真没了（purge／值来自另一个库）：没有名字可显示，UI 用「选项已删除」兜底
   if (!current) return { choices }
   const currentChoiceLabel = choiceDisplayLabel(current, def, look.tagName)
@@ -784,6 +861,8 @@ export interface FieldRow {
   /** 显示名：定义块的正文；定义缺失时退回 propId（数据不静默消失） */
   label: string
   kind: PropKind
+  /** 值形态：`one`（缺省）／`many`（`select` 的多值） */
+  cardinality: Cardinality
   value: unknown
   /** 有值 ⇔ 不是「待填」 */
   filled: boolean
@@ -809,6 +888,10 @@ export interface FieldRow {
   currentChoiceLabel?: string
   /** `select` 行：当前值指向的选项**已被软删**（控件显示旧名 ＋ 「已删除」标记） */
   currentChoiceDeleted?: boolean
+  /** `select` 多值行：当前值指向的选项名（顺序＝选项兄弟序；缺失项用「已删除」兜底） */
+  currentChoiceLabels?: string[]
+  /** `select` 多值行：当前值指向的选项块（含软删；缺失项不在里面） */
+  currentChoices?: Block[]
 }
 
 /**
@@ -834,6 +917,8 @@ export function fieldRows(block: Block, forest: readonly Block[]): FieldRow[] {
     row.choices = cells.choices
     if (cells.currentChoiceLabel !== undefined) row.currentChoiceLabel = cells.currentChoiceLabel
     if (cells.currentChoiceDeleted === true) row.currentChoiceDeleted = true
+    if (cells.currentChoiceLabels !== undefined) row.currentChoiceLabels = cells.currentChoiceLabels
+    if (cells.currentChoices !== undefined) row.currentChoices = cells.currentChoices
     return row
   }
 
@@ -851,6 +936,7 @@ export function fieldRows(block: Block, forest: readonly Block[]): FieldRow[] {
           propId,
           label: def ? propLabel(def) || propId : propId,
           kind: def ? propKindOf(def) : 'text',
+          cardinality: def ? cardinalityOf(def) : 'one',
           value: valueOf(block, propId),
           filled: hasValue(block, propId),
           def,
@@ -870,6 +956,7 @@ export function fieldRows(block: Block, forest: readonly Block[]): FieldRow[] {
         propId,
         label: def ? propLabel(def) || propId : propId,
         kind: def ? propKindOf(def) : 'text',
+        cardinality: def ? cardinalityOf(def) : 'one',
         value: valueOf(block, propId),
         filled: hasValue(block, propId),
         def,
@@ -896,13 +983,20 @@ export interface GutterField {
   value: unknown
   /** 有没有值。渲染方用它区分「未填」与「已填」，**不是**准入条件 */
   filled: boolean
+  /** 字段基数（`one`／`many`；只有 `select` 可能是 `many`） */
+  cardinality: Cardinality
   /**
-   * `select`：当前值指向的选项（**含软删**）。渲染方据此取图标与显示名；
+   * `select`（单值）：当前值指向的选项（**含软删**）。渲染方据此取图标与显示名；
    * 值缺失／值不是选项 id ⇒ 缺席。
    */
   choice?: Block
   /**
-   * 画在块左侧的图标：`select` ＝ 选项 `_icon` ?? 定义 `_icon`。
+   * `select`（多值）：被选中的选项，**按选项兄弟序**（含软删/已隐藏——值还在就要显示）。
+   * 渲染方据此画多枚图标；空数组＝未填。
+   */
+  picked?: Block[]
+  /**
+   * 画在块左侧的图标：`select`（单值）＝ 选项 `_icon` ?? 定义 `_icon`。
    * `checkbox` 不吃这一格——它的图形由勾选状态决定（方框／勾）。
    */
   icon?: string
@@ -916,8 +1010,16 @@ export interface GutterField {
 
 /** 当前值指向的选项（含软删：值还在，显示不能丢）；不是选项 id ⇒ 缺席 */
 function choiceByValue(def: Block, value: unknown): Block | undefined {
-  if (typeof value !== 'string' || value === '') return undefined
-  return def.children.find((c) => c.id === value)
+  const id = singleValueOf(value)
+  if (id === '') return undefined
+  return def.children.find((c) => c.id === id)
+}
+
+/** 多值：按选项兄弟序取回被选中的选项（含软删/已隐藏，值还在就要显示） */
+function pickedChoicesOf(def: Block, value: unknown): Block[] {
+  const ids = new Set(valueListOf(value))
+  if (ids.size === 0) return []
+  return def.children.filter((c) => ids.has(c.id))
 }
 
 /** 块左侧画哪个图标：选项自己的 `_icon` 优先，缺省退回定义块上的 `_icon` */
@@ -929,7 +1031,10 @@ function gutterIconOf(def: Block, choice: Block | undefined): string | undefined
 function gutterFieldOf(
   row: { propId: string; def: Block; kind: PropKind; value: unknown; filled: boolean },
 ): GutterField {
-  const choice = row.kind === 'select' ? choiceByValue(row.def, row.value) : undefined
+  const cardinality = row.kind === 'select' ? cardinalityOf(row.def) : 'one'
+  const many = cardinality === 'many'
+  const choice = row.kind === 'select' && !many ? choiceByValue(row.def, row.value) : undefined
+  const picked = row.kind === 'select' && many ? pickedChoicesOf(row.def, row.value) : undefined
   const icon = gutterIconOf(row.def, choice)
   const doneChoiceId = row.kind === 'select' ? doneChoiceOf(row.def) : undefined
   return {
@@ -938,7 +1043,9 @@ function gutterFieldOf(
     kind: row.kind,
     value: row.value,
     filled: row.filled,
+    cardinality,
     ...(choice ? { choice } : {}),
+    ...(picked ? { picked } : {}),
     ...(icon ? { icon } : {}),
     ...(doneChoiceId ? { doneChoiceId } : {}),
   }

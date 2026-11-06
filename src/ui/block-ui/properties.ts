@@ -35,6 +35,7 @@ import {
   prop,
   propKindOf,
   propLabel,
+  valueListOf,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { renderIcon } from '../../view/icons.ts'
@@ -101,6 +102,17 @@ export interface PropertiesDeps {
    */
   pickRef: (b: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect) => void
   /**
+   * **多值属性选值**（选中不关、逐项勾）。单选走原生 `<select>`，多选必须开浮层：
+   * 原生 `<select multiple>` 的交互（Ctrl/⌘ 点）不是这套 UI 的语言。
+   */
+  pickChoice: (
+    b: Block,
+    propId: string,
+    current: readonly string[],
+    onPick: (next: string[]) => void,
+    anchor?: DOMRect,
+  ) => void
+  /**
    * **给选项选一个图标**（装配层弹出图标网格，选中后回调写 `_icon`）。
    *
    * 与 `pickRef` 同一条理由：图标集是 `view/icons.ts` 的数据，属性区不该自己
@@ -155,6 +167,8 @@ export interface PropertiesDeps {
  * 后者不需要标签行、归属行、系统信息，只需要这一组回调。
  */
 export type FieldRowDeps = Pick<PropertiesDeps, 'shortId' | 'setValue' | 'clearValue' | 'pickRef' | 'refLabel'> & {
+  /** 多值选择器（省略 ⇒ 多值字段只读；行内实例浮层可以不给） */
+  pickChoice?: PropertiesDeps['pickChoice']
   /** 标签名解析（选项显示名的 `#名`）；缺省显示短 id */
   tagName?: (id: string) => string
   /** 打开属性定义块（普通块的属性名可点：改选项去定义页，不在块上再开一个编辑面） */
@@ -167,7 +181,7 @@ export type FieldRowDeps = Pick<PropertiesDeps, 'shortId' | 'setValue' | 'clearV
  * 全都可以缺省：表格格子里没有属性区那套依赖时，控件退化成只读/短 id 显示，
  * 而不是「点了报错」。
  */
-export type CellEditorDeps = Partial<Pick<FieldRowDeps, 'pickRef' | 'refLabel' | 'tagName'>>
+export type CellEditorDeps = Partial<Pick<FieldRowDeps, 'pickRef' | 'pickChoice' | 'refLabel' | 'tagName'>>
 
 export interface PropertiesEls {
   /** 卡片本身：`hidden` 与否表达「有没有主体」 */
@@ -265,6 +279,27 @@ export function makeCellEditor(
     btn.addEventListener('click', () => {
       pick(owner, row.propId, current, (targetId) => send(targetId === '' ? undefined : targetId), btn.getBoundingClientRect())
     })
+    return btn
+  }
+  if (kind === 'select' && row.cardinality === 'many') {
+    /**
+     * 多值：一个按钮显示当前选中的名字，点开多选浮层（`openChoicePicker`，保持打开逐项勾）。
+     * 写回的是**整份数组**，与单选同一条 `set-value` 命令；每次勾选一次撤销。
+     */
+    const current = valueListOf(row.value)
+    const labels = row.currentChoiceLabels ?? []
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'prop-input prop-multi'
+    btn.dataset.multi = '1'
+    btn.textContent = labels.length === 0 ? t('ui.props.pending') : labels.join('、')
+    if (deps?.pickChoice && owner) {
+      btn.addEventListener('click', () => {
+        deps.pickChoice?.(owner, row.propId, current, (next) => send(next), btn.getBoundingClientRect())
+      })
+    } else {
+      btn.disabled = true
+    }
     return btn
   }
   if (kind === 'select') {

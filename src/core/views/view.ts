@@ -947,8 +947,13 @@ export function withGroup(view: ViewConfig, groupBy: string, groupOrder?: readon
  * 现阶段唯一的多值键是标签归属（`_tags` 是 ref 列表）；将来字段声明多值
  * （`_cardinality`）时在此续支，三处路由（候选标注／分桶 fan-out／拖拽禁用）吃同一份判据。
  */
-export function isMultiValueKey(key: string): boolean {
-  return key === '_tags'
+export function isMultiValueKey(
+  key: string,
+  cardinalityOf?: (propId: string) => 'one' | 'many',
+): boolean {
+  // 标签归属永远是列表；字段声明多值（`_cardinality: 'many'`）走同一个判据。
+  // 调用方给不出解析器时只认 `_tags`（旧调用点不会因此把单值字段当多值）。
+  return key === '_tags' || cardinalityOf?.(key) === 'many'
 }
 
 /**

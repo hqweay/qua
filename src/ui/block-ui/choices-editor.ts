@@ -20,6 +20,7 @@ import { onCommitKeys } from './keys.ts'
 import {
   DONE_PROP,
   ICON_PROP,
+  cardinalityOf,
   choiceScopeOf,
   choiceVisible,
   choicesOf,
@@ -44,6 +45,8 @@ export interface ChoiceActions {
   setIcon: (choiceId: string, icon: string) => void
   /** 标记「完成」值（每个定义最多一个；只传 false 时只摘这一个） */
   setDone: (defId: string, choiceId: string, done: boolean) => void
+  /** 单值/多值（多选时 `_done` 无效；切回单值有「仍有块选了多个值」的守卫） */
+  setCardinality: (defId: string, cardinality: 'one' | 'many') => void
   /** 定义块的快捷入口位置（block-left ＝ 块左侧图标；panel ＝ 只留属性卡） */
   setUiPosition: (defId: string, position: UiPosition) => void
   remove: (choiceId: string) => void
@@ -129,6 +132,29 @@ export class ChoicesEditor {
       hint.textContent = t('ui.props.choice.gutterTitle')
       gutter.append(box, text, hint)
       section.appendChild(gutter)
+
+      /**
+       * **单值/多值**：多值时一个块可以选多个选项，gutter 依次画它们的图标。
+       * 只在定义页给（标签视角改的是全局定义）。
+       */
+      const multi = document.createElement('label')
+      multi.className = 'choices-gutter'
+      const mbox = document.createElement('input')
+      mbox.type = 'checkbox'
+      mbox.className = 'prop-check'
+      mbox.dataset.choiceMulti = '1'
+      mbox.checked = cardinalityOf(def) === 'many'
+      mbox.addEventListener('change', () => {
+        this.deps.write.setCardinality(def.id, mbox.checked ? 'many' : 'one')
+        this.render()
+      })
+      const mtext = document.createElement('span')
+      mtext.textContent = t('ui.props.choice.multi')
+      const mhint = document.createElement('span')
+      mhint.className = 'choices-hint'
+      mhint.textContent = t('ui.props.choice.multiHint')
+      multi.append(mbox, mtext, mhint)
+      section.appendChild(multi)
     }
 
     const visible = this.visibleChoices(def, focusTag)
@@ -258,16 +284,19 @@ export class ChoicesEditor {
       /**
        * 「完成」值：**每个属性最多一个**（命令在同一笔事务里摘兄弟的标记）。
        * 没标时是一个小圆圈（可点），标上是 ✓ —— 不给整列打勾框，太吵。
+       * 多值定义没有「完成」：一个块可以同时选完成和未完成，二态无法表达。
        */
-      const on = prop<boolean>(choice, DONE_PROP) === true
-      const done = this.iconButton(on ? '✓' : '○', t('ui.props.choice.doneTitle'), () => {
-        this.deps.write.setDone(def.id, choice.id, !on)
-        this.render()
-      })
-      done.dataset.choiceDone = on ? '1' : '0'
-      done.classList.add('choice-done')
-      done.setAttribute('aria-pressed', on ? 'true' : 'false')
-      controls.appendChild(done)
+      if (cardinalityOf(def) === 'one') {
+        const on = prop<boolean>(choice, DONE_PROP) === true
+        const done = this.iconButton(on ? '✓' : '○', t('ui.props.choice.doneTitle'), () => {
+          this.deps.write.setDone(def.id, choice.id, !on)
+          this.render()
+        })
+        done.dataset.choiceDone = on ? '1' : '0'
+        done.classList.add('choice-done')
+        done.setAttribute('aria-pressed', on ? 'true' : 'false')
+        controls.appendChild(done)
+      }
 
       const up = this.iconButton('↑', t('ui.props.choice.moveUp'), () => {
         if (index === 0) return

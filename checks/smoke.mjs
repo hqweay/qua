@@ -16218,15 +16218,107 @@ await check(
     )
 
     // 快捷入口：勾上 → 写 `_uiPosition: block-left`；重画后仍勾着
-    await page.locator('.choices-gutter input[type="checkbox"]').check()
+    await page.locator('.choices-gutter [data-choice-gutter]').check()
     await page.waitForTimeout(200)
     const gutterChecked = await page.evaluate(
-      () => document.querySelector('.choices-gutter input[type="checkbox"]')?.checked ?? null,
+      () => document.querySelector('[data-choice-gutter]')?.checked ?? null,
     )
     assert(gutterChecked === true, '勾选快捷入口后重画仍应是勾上的（写进了 `_uiPosition`）')
 
     await ctx.close()
     return `图标写回 flag；完成值唯一（乙）；快捷入口已勾选`
+  },
+)
+
+/**
+ * **多值属性**：一个字段在 gutter 上依次画多枚图标（前 3 枚 + `+N`）；
+ * 点整串开同一个多选菜单，勾掉一项菜单不关、值写回数组。
+ */
+await check(
+  'T171e 多值 select：gutter 依次画图标（3 + +N）；点开多选菜单勾选不关、写回数组',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const setup = await page.evaluate(() => {
+      const host = window.__qua.blocks().find((b) => b.roles.length === 0 && b.text.trim().length > 1)
+      if (!host) return { hostId: '', defId: '', ids: [] }
+      window.__qua.invoke('core.props/create-def', {
+        blockId: host.id,
+        label: '冒烟多值',
+        kind: 'select',
+        target: 'own',
+      })
+      const defId = window.__qua.propDefs().find((d) => d.label === '冒烟多值')?.id ?? ''
+      const labels = ['甲', '乙', '丙', '丁']
+      const icons = ['flag', 'arrow-down', 'minus', 'square-x']
+      for (const label of labels) window.__qua.invoke('core.props/add-choice', { defId, label })
+      const row = window.__qua.fields(host.id).find((f) => f.propId === defId)
+      const ids = labels.map((label) => row?.choices.find((c) => c.label === label)?.id ?? '')
+      ids.forEach((id, i) => window.__qua.invoke('core.props/set-choice-icon', { choiceId: id, icon: `lucide:${icons[i]}` }))
+      window.__qua.invoke('core.props/set-choice-cardinality', { defId, cardinality: 'many' })
+      window.__qua.invoke('core.props/set-ui-position', { defId, position: 'block-left' })
+      window.__qua.invoke('core.props/set-value', { blockId: host.id, propId: defId, value: ids })
+      window.__qua.focusBlock(host.id)
+      return { hostId: host.id, defId, ids }
+    })
+    assert(setup.hostId !== '' && setup.ids.every(Boolean), `前置：块/定义/四个选项都应建出来：${JSON.stringify(setup)}`)
+
+    await page.waitForFunction(
+      (id) => Boolean(document.querySelector(`.blk[data-block-id="${id}"] .prop-multi`)),
+      setup.hostId,
+    )
+    const before = await page.evaluate((id) => {
+      const mark = document.querySelector(`.blk[data-block-id="${id}"] .prop-multi`)
+      return {
+        icons: mark?.querySelectorAll('.prop-multi-ico').length ?? 0,
+        more: mark?.querySelector('.prop-multi-more')?.textContent ?? '',
+        iconsRaw: [...(mark?.querySelectorAll('.prop-multi-ico') ?? [])].map((e) => e.getAttribute('data-icon')),
+      }
+    }, setup.hostId)
+    assert(before.icons === 3 && before.more === '+1', `前 3 枚 + +1：${JSON.stringify(before)}`)
+    assert(
+      before.iconsRaw.join(',') === 'lucide:flag,lucide:arrow-down,lucide:minus',
+      `按选项兄弟序取图标：${before.iconsRaw.join(',')}`,
+    )
+
+    await page.evaluate((id) => {
+      document
+        .querySelector(`.blk[data-block-id="${id}"] .prop-multi`)
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    }, setup.hostId)
+    await page.waitForFunction(() => document.querySelectorAll('.layer-item').length > 0)
+    const menu = await page.evaluate(() =>
+      [...document.querySelectorAll('.layer-item')].map((r) => ({
+        label: r.querySelector('.layer-label')?.textContent ?? '',
+        check: r.querySelector('.layer-key')?.textContent ?? '',
+      })),
+    )
+    assert(
+      menu.length === 4 && menu.every((r) => r.check === '✓'),
+      `四个选项都应勾上：${JSON.stringify(menu)}`,
+    )
+
+    await page.locator('.layer-item', { hasText: '甲' }).first().click()
+    await page.waitForTimeout(300)
+    const after = await page.evaluate(
+      ({ hostId, defId }) => ({
+        value: window.__qua.fields(hostId).find((f) => f.propId === defId)?.value ?? null,
+        menuOpen: document.querySelectorAll('.layer-item').length,
+        checked: [...document.querySelectorAll('.layer-item')].filter((r) => r.querySelector('.layer-key')?.textContent === '✓').length,
+        icons: document.querySelector(`.blk[data-block-id="${hostId}"] .prop-multi`)?.querySelectorAll('.prop-multi-ico').length ?? 0,
+        more: document.querySelector(`.blk[data-block-id="${hostId}"] .prop-multi-more`)?.textContent ?? '',
+      }),
+      setup,
+    )
+    assert(Array.isArray(after.value) && after.value.length === 3, `写回数组、去掉甲：${JSON.stringify(after)}`)
+    assert(after.value[0] === setup.ids[1], '数组按选项兄弟序（甲被移走，乙在首位）')
+    assert(after.menuOpen === 4 && after.checked === 3, `菜单不关、勾选变三个：${JSON.stringify(after)}`)
+    assert(after.icons === 3 && after.more === '', `gutter 跟着变三枚、无 +N：${JSON.stringify(after)}`)
+
+    await ctx.close()
+    return `4 选中 ⇒ 3+1；勾掉甲 ⇒ 菜单仍开、值 3 个、图标 3 枚`
   },
 )
 

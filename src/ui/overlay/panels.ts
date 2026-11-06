@@ -83,6 +83,8 @@ export interface ObjFieldDeps {
   setValue: (recordId: string, propId: string, value: unknown) => void
   clearValue: (recordId: string, propId: string) => void
   pickRef: FieldRowDeps['pickRef']
+  /** 多值 select 的选值浮层（与属性卡共用；省略 ⇒ 多值字段只读） */
+  pickChoice?: FieldRowDeps['pickChoice']
   refLabel: FieldRowDeps['refLabel']
   /** 标签名解析（选项显示名的 `#名`）；省略时显示短 id */
   tagName?: FieldRowDeps['tagName']
@@ -146,6 +148,7 @@ function renderObjFields(
           draw()
         },
         pickRef: fields.pickRef,
+        ...(fields.pickChoice ? { pickChoice: fields.pickChoice } : {}),
         refLabel: fields.refLabel,
         ...(fields.tagName ? { tagName: fields.tagName } : {}),
       }

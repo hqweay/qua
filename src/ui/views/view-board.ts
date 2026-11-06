@@ -25,6 +25,8 @@ export interface ViewBoardDeps {
   openBlock: (blockId: string, place?: OpenPlace) => void
   /** 这一列可选的值（`select` 的选项块 id → 名字；没有选项的属性给空表＝按现出现的值分组） */
   choices: (propId: string) => readonly { id: string; label: string }[]
+  /** 字段基数解析：多值字段不进卡片分组（拖卡写值没有唯一动作） */
+  cardinalityOf?: (propId: string) => 'one' | 'many'
 }
 
 /**
@@ -66,6 +68,7 @@ export class ViewBoard {
     const o = {
       choices: (propId: string) => this.deps.choices(propId),
       groupOrder: view?.groupOrder,
+      ...(this.deps.cardinalityOf ? { cardinalityOf: this.deps.cardinalityOf } : {}),
     }
     const { multi } = bucketize(this.deps.records(), key, o)
     if (multi) {

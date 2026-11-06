@@ -16,7 +16,17 @@
  */
 import type { Block, BlockStore, OpenPlace, ViewColumn, ViewConfig, ViewRecord } from '../../core/index.ts'
 import { openPlaceOf } from '../../core/index.ts'
-import { choicesOf, clockLabel, displayNameOf, hasValue, liveChildren, propDisplayLabels, propKindOf, propLabel } from '../../core/index.ts'
+import {
+  cardinalityOf,
+  choicesOf,
+  clockLabel,
+  displayNameOf,
+  hasValue,
+  liveChildren,
+  propDisplayLabels,
+  propKindOf,
+  propLabel,
+} from '../../core/index.ts'
 import { choiceCells, ChoiceLookupIndex, type ChoiceLookup, type FieldRow } from '../../core/props/props.ts'
 import { plainText } from '../../core/model/runs.ts'
 import { t } from '../../core/infra/msg.ts'
@@ -69,6 +79,14 @@ export interface ViewTableDeps {
   cell: BlockCell
   /** `ref` 值的选择器（属性区那一份复用；省略 ＝ ref 列只读） */
   pickRef?: (owner: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect) => void
+  /** 多值 select 的选值浮层（与属性卡共用；省略 ⇒ 多值格只读） */
+  pickChoice?: (
+    owner: Block,
+    propId: string,
+    current: readonly string[],
+    onPick: (next: string[]) => void,
+    anchor?: DOMRect,
+  ) => void
   refLabel?: (targetId: string) => string
   /** 标签名解析（`select` 选项显示名里的 `#名`）；省略时显示短 id */
   tagName?: (id: string) => string
@@ -638,6 +656,7 @@ export class ViewTable {
     const row = cellRow(block, propId, def, this.deps.store.blocks, this.lookup())
     const deps = {
       pickRef: this.deps.pickRef,
+      pickChoice: this.deps.pickChoice,
       refLabel: this.deps.refLabel,
       tagName: this.deps.tagName,
     }
@@ -702,6 +721,7 @@ function cellRow(
     propId,
     label: def ? propLabel(def) || propId : propId,
     kind,
+    cardinality: def ? cardinalityOf(def) : 'one',
     value,
     filled: hasValue(block, propId),
     def,
@@ -717,6 +737,8 @@ function cellRow(
     row.choices = cells.choices
     if (cells.currentChoiceLabel !== undefined) row.currentChoiceLabel = cells.currentChoiceLabel
     if (cells.currentChoiceDeleted === true) row.currentChoiceDeleted = true
+    if (cells.currentChoiceLabels !== undefined) row.currentChoiceLabels = cells.currentChoiceLabels
+    if (cells.currentChoices !== undefined) row.currentChoices = cells.currentChoices
   }
   return row
 }

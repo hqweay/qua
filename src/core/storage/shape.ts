@@ -137,8 +137,11 @@ import {
  * v37 → v38：**「完成」从固定的任务状态选项改成选项上的 `_done`**（值级语义），
  *            同时选项可以带 `_icon`（列表左侧的图标）。旧库的任务状态选项没有这个标记，
  *            新判据会把它读成「不是任务」（勾选与删除线一起消失）⇒ 作废重 seed，不写迁移。
+ * v38 → v39：**字段基数 `_cardinality`**（`one`／`many`；多值只对 `select` 有意义，值＝选项 id 数组）。
+ *            旧库没有这一格读出来就是单值，本不必作废；加一版与前面每一条同理由：
+ *            让写路径只面对一种形状（多值只写数组），读路径不必在「有没有这一格」上分叉。
  */
-export const WORKSPACE_VERSION = 38
+export const WORKSPACE_VERSION = 39
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

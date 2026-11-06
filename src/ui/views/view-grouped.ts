@@ -17,6 +17,8 @@ export interface ViewGroupedDeps {
   view: () => ViewConfig | null
   records: () => ViewRecord[]
   choices: (propId: string) => readonly { id: string; label: string }[]
+  /** 字段基数解析：多值字段 fan-out（一块进每个所属组） */
+  cardinalityOf?: (propId: string) => 'one' | 'many'
   /** 造一个装某组记录的段身（列表或表格由宿主决定） */
   makeBody: (records: () => ViewRecord[]) => { root: HTMLElement; render(): void; dispose(): void }
 }
@@ -48,7 +50,11 @@ export class ViewGrouped {
   render(): void {
     const view = this.deps.view()
     const key = view?.groupBy ?? ''
-    const o: BucketizeOptions = { choices: this.deps.choices, groupOrder: view?.groupOrder }
+    const o: BucketizeOptions = {
+      choices: this.deps.choices,
+      groupOrder: view?.groupOrder,
+      ...(this.deps.cardinalityOf ? { cardinalityOf: this.deps.cardinalityOf } : {}),
+    }
     const { buckets, order } = bucketize(recordsForGrouping(this.deps.records(), view), key, o)
     const ordered = orderBuckets(buckets, order).filter((b) => b.records.length > 0 || b.unset)
 

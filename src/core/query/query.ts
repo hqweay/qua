@@ -562,8 +562,14 @@ function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher {
       if ('exists' in op) return declared === op.exists
       if ('empty' in op) return isEmptyValue(v) === op.empty
       if (!declared) return false
-      if ('eq' in op) return Object.is(v, op.eq)
-      if ('neq' in op) return !Object.is(v, op.neq)
+      /**
+       * 多值字段的 `eq`/`neq` 按**包含**判（数组里有没有这一项）：
+       * 一个块可以选多个值，「等于」在用户眼里就是「其中一个是我要的」。
+       * 这不是新算子——同一个 `eq` 在单值上是相等、在多值上是包含，
+       * 由值形态决定，条件语言不需要为多值再分一套。
+       */
+      if ('eq' in op) return Array.isArray(v) ? v.some((x) => Object.is(x, op.eq)) : Object.is(v, op.eq)
+      if ('neq' in op) return Array.isArray(v) ? !v.some((x) => Object.is(x, op.neq)) : !Object.is(v, op.neq)
       if ('contains' in op) return valueContains(v, op.contains)
       return compareOp(v, op)
     }

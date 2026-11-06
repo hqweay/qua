@@ -38,12 +38,14 @@ import { TAGS_PROP, isTagRefList } from '../identity/tags.ts'
 import { BELONGS_TO_PROP, isBelongsToRefs } from '../relations/hierarchy.ts'
 import { isJournalDate } from '../identity/journal.ts'
 import {
+  CARDINALITY_PROP,
   CHOICE_SCOPE_PROP,
   DEFAULT_PROP,
   DONE_PROP,
   FIELD_DEFS_PROP,
   OWN_PROPS_PROP,
   UI_POSITION_PROP,
+  isCardinalityValue,
   isDefaultValue,
   isDoneFlag,
   isFieldDefRefs,
@@ -79,6 +81,7 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   [FIELD_DEFS_PROP]: isFieldDefRefs,
   [CHOICE_SCOPE_PROP]: (v) => parseChoiceScope(v) !== null,
   [DONE_PROP]: isDoneFlag,
+  [CARDINALITY_PROP]: isCardinalityValue,
   [OWN_PROPS_PROP]: isOwnPropSlots,
   [UI_POSITION_PROP]: isUiPositionValue,
   [DEFAULT_PROP]: isDefaultValue,
