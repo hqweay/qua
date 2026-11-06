@@ -7,14 +7,11 @@
  * 形态各一个」——再加第三个预览宿主时，手编第三条 key 就会漏。
  *
  * 口径：基名第一次分配原样返回（既有的 `search-match` / `search-match-overlay`
- * 与既有 CSS 规则都不动），之后同名再要就派生 `-2`、`-3`……由宿主在拆掉时归还。
+ * 这两条名字不动），之后同名再要就派生 `-2`、`-3`……由宿主在拆掉时归还。
  * 纯数据、零依赖：单测可直接 import。
  */
 
 const inUse = new Set<string>()
-
-/** CSS 里已经有静态规则的基名；派生出来的 key 由宿主动态补一条规则（见 `preview-pane`） */
-export const CSS_STATIC_HIGHLIGHT_KEYS: readonly string[] = ['search-match', 'search-match-overlay']
 
 /** 领一条本次会话唯一的高亮 key（同一基名可领多条） */
 export function claimHighlightKey(base: string): string {

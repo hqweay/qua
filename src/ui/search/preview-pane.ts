@@ -17,9 +17,11 @@
  */
 import { hasFoldable, isDeleted, type Block, type BlockStore } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
+import { textSpansOf } from '../../core/query/text-spans.ts'
 import type { BlockEditor, Run } from '../../view/editor/editor.ts'
+import { clearHits, paintHits } from '../../view/editor/hit-paint.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
-import { CSS_STATIC_HIGHLIGHT_KEYS, releaseHighlightKey } from './highlight-key.ts'
+import { releaseHighlightKey } from './highlight-key.ts'
 
 export interface PreviewPaneDeps {
   kb: KbClient
@@ -414,7 +416,7 @@ export class PreviewPane {
      * 高亮用 CSS Custom Highlight（**不往 contenteditable 里插 `<mark>`**：
      * 那会改模型读数、破坏光标与输入法）。
      */
-    this.revealMatch(ed, block.id)
+    this.revealMatch(block)
   }
 
   /**
@@ -423,47 +425,19 @@ export class PreviewPane {
    * 三条边界：
    *   · **没有词**（空态最近更新）⇒ 不高亮、不滚动（没有「命中」可言）；
    *   · **浏览器不支持 `CSS.highlights`** ⇒ 只滚动、不高亮（降级看得见地少一样，不报错）；
-   *   · 命中词可能**跨文本节点**（被 mark/ref 原子切断）⇒ 按 `.tx` 内的文本节点逐个找，
-   *     找不到就退化成「滚到块首」——不假装找到。
+   *   · 落点**按模型算**（`textSpansOf` 给出 plain 偏移），不按 DOM 现搜——
+   *     一套坐标只算一次：画的区间与滚到的区间是同一批 Range。
    */
-  private revealMatch(ed: BlockEditor, blockId: string): void {
+  private revealMatch(block: Block): void {
     const term = this.term.trim()
     this.root.scrollTop = 0
     // 上一处的高亮先摘掉：高亮是**全局注册表**里的一条，不摘会留在别的视图上
     this.clearMatch()
     if (term === '') return
-    const tx = ed.txEl(blockId)
-    if (!tx) return
-    const terms = term.split(/\s+/).filter(Boolean)
-    const ranges: Range[] = []
-    const walker = document.createTreeWalker(tx, NodeFilter.SHOW_TEXT)
-    const lower = terms.map((x) => x.toLowerCase())
-    while (walker.nextNode()) {
-      const node = walker.currentNode as Text
-      const text = node.textContent ?? ''
-      const low = text.toLowerCase()
-      for (const t of lower) {
-        let from = 0
-        while (from < low.length) {
-          const at = low.indexOf(t, from)
-          if (at < 0) break
-          const r = document.createRange()
-          r.setStart(node, at)
-          r.setEnd(node, at + t.length)
-          ranges.push(r)
-          from = at + t.length
-        }
-      }
-    }
+    const spans = textSpansOf(block.content, term)
+    if (spans.length === 0) return
+    const ranges = paintHits(this.root, new Map([[block.id, spans]]), this.deps.highlightKey)
     if (ranges.length === 0) return
-    // 支持就用 Custom Highlight（不碰 DOM、不进模型）；不支持就只滚不亮
-    if (typeof CSS !== 'undefined' && CSS.highlights) {
-      const hl = new Highlight(...ranges)
-      // 按面命名空间：两面同屏（tab 面 ＋ 浮层）时各自 set/delete 自己那条。
-      // 派生 key 没有静态 CSS 规则，第一次用到时补一条（见 `ensureHighlightStyle`）。
-      ensureHighlightStyle(this.deps.highlightKey)
-      CSS.highlights.set(this.deps.highlightKey, hl)
-    }
     // 滚到**第一处**命中。用预览容器自己的 `scrollTop` 而不是 `scrollIntoView`：
     // 后者会一路往上找**能滚的祖先**，于是滚的是外层（甚至整页），预览自己没动
     // —— 实测：块高 2347、可视 816，`scrollIntoView` 之后命中仍在视口外。
@@ -475,20 +449,6 @@ export class PreviewPane {
 
   /** 摘掉本次预览的高亮（换选中 / 关面 / 收起预览都要走这里） */
   private clearMatch(): void {
-    if (typeof CSS !== 'undefined' && CSS.highlights) CSS.highlights.delete(this.deps.highlightKey)
+    clearHits(this.deps.highlightKey)
   }
-}
-
-/**
- * 派生 key 的样式规则：基名在 `center.css` 里有静态规则，第三处宿主拿到的
- * `search-match-2` 之类没有。按 key 补一条（同一条声明，不做第二套观感）。
- */
-const styledHighlightKeys = new Set<string>()
-function ensureHighlightStyle(key: string): void {
-  if (CSS_STATIC_HIGHLIGHT_KEYS.includes(key) || styledHighlightKeys.has(key)) return
-  styledHighlightKeys.add(key)
-  const style = document.createElement('style')
-  style.dataset.highlightKey = key
-  style.textContent = `.search-face-preview-editor ::highlight(${key}) { background-color: var(--ui-accent-soft); color: inherit; }`
-  document.head.appendChild(style)
 }

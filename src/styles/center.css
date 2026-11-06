@@ -263,18 +263,6 @@
 .search-face-preview-editor .blk[data-depth='0'] {
   font-size: var(--ui-fs-md);
 }
-/*
-  **预览里的命中高亮**（CSS Custom Highlight）。
-  为什么用这个而不是往 `.tx` 里插 `<mark>`：后者会改 `readRuns` 的读数、
-  破坏光标与输入法预编辑串。Custom Highlight 是纯渲染层的另一层画笔，
-  模型与 DOM 一个字节都不动。
-*/
-.search-face-preview-editor ::highlight(search-match),
-.search-face-preview-editor ::highlight(search-match-overlay) {
-  /* 与挂载区提及命中（`view/editor/hit-paint.ts`）同一条 token：同一件事不许有两档深浅 */
-  background-color: var(--ui-hit-bg);
-  color: inherit;
-}
 
 /* 窄屏：单列堆叠（列表在上、预览在下）。不把预览藏掉，否则「点了没反应」 */
 @media (max-width: 899px) {
