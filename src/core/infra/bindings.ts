@@ -298,7 +298,7 @@ export const RESERVED_KEYS: readonly string[] = ['mod+q', 'mod+w', 'mod+n']
 /**
  * 设置界面捕获到的键能不能用；合法时给**归一化**的键位。
  *
- * v1 的两条硬判据（BE13 的落法）：
+ * 两条硬判据：
  *   · **必须带 ⌘/Alt 一类修饰键**——裸键归打字，绑走它每个字都进命令；
  *   · **保留键不可覆盖**（见 `RESERVED_KEYS`）。
  */

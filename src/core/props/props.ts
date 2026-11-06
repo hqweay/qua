@@ -76,7 +76,7 @@ export function isUiPositionValue(v: unknown): boolean {
 /**
  * 定义块声明的编辑位置：`block-left` ＝ 块标后的图标；`panel`（缺省）＝ 不上图标。
  *
- * ⚠️ `panel` **不是**「只在属性面板」：有值时它落在**块下属性行**（决策 208）。
+ * ⚠️ `panel` **不是**「只在属性面板」：有值时它落在**块下属性行**。
  *    取消 `block-left` 勾选就是把这一条从图标挪到块下，而不是把它藏起来。
  */
 export function uiPositionOf(def: Block | undefined): UiPosition {
