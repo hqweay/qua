@@ -1262,7 +1262,8 @@
 }
 .mount-derived-view,
 .mount-derived-more,
-.mount-derived-filter {
+.mount-derived-filter,
+.mount-derived-copy {
   background: none;
   border: 0;
   padding: 0 var(--ui-gap-2);
@@ -1274,7 +1275,8 @@
 }
 .mount-derived-view:hover,
 .mount-derived-more:hover,
-.mount-derived-filter:hover {
+.mount-derived-filter:hover,
+.mount-derived-copy:hover {
   color: var(--ui-text);
   background: var(--ui-bg-hover);
 }

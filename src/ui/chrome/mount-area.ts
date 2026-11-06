@@ -103,6 +103,13 @@ export interface MountAreaDeps {
   wire: (editor: BlockEditor, change: (kind: string) => void) => void
   /** 「＋」：由装配层弹一个选择器（本层不知道浮层长什么样） */
   onAddTab?: (hostId: string) => void
+  /**
+   * **「复制为查询栏」**：把一栏内置项的条件物化成 local 栏（可改条件、可加视图）。
+   *
+   * 模板（条件＋默认视图）在 core 的 `derivedTemplateOf`；这一层只报
+   * 「哪个宿主的哪个来源、锚点在哪」，写与激活都在装配层。
+   */
+  onMaterializeTab?: (hostId: string, source: DerivedSource, anchor: DOMRect) => void
   /** 「×」：摘掉一栏（`tabId` 是**稳定 id**，不是数组下标） */
   onRemoveTab?: (host: MountHost, tabId: string) => void
   /**
@@ -162,7 +169,7 @@ interface MountRoots {
   contexts: Map<string, readonly Block[]>
 }
 
-const BUILTIN_LABEL: Record<DerivedSource, MsgId> = {
+export const BUILTIN_LABEL: Record<DerivedSource, MsgId> = {
   refs: 'ui.mount.refs',
   members: 'ui.mount.members',
   same: 'ui.mount.same',
@@ -1224,6 +1231,22 @@ export class MountArea {
     seg.appendChild(btn)
     head.appendChild(seg)
 
+    /**
+     * **复制为查询栏**：把这一栏的内置条件物化成 local 栏——条件即查询条件，
+     * 这是它从「死配置」变成「可组合起点」的入口。维度不存在（没有标签⇒同类、
+     * 没有可读文本⇒提及）不给：没有条件可物化。
+     */
+    if (derivedSpecOf(host, this.deps.kb.roots(), entry.source) !== null) {
+      const copy = document.createElement('button')
+      copy.type = 'button'
+      copy.className = 'mount-derived-copy'
+      copy.title = t('ui.mount.materialize')
+      renderIcon(copy, 'lucide:copy', 'copy')
+      copy.addEventListener('click', () => {
+        this.deps.onMaterializeTab?.(host.id, entry.source, copy.getBoundingClientRect())
+      })
+      head.appendChild(copy)
+    }
   }
 
   /* ---------------------------------------------------------- 快速筛选 */

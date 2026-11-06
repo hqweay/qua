@@ -20,6 +20,7 @@ import {
   derivedEntriesOf,
   derivedRecordsOf,
   derivedSpecOf,
+  derivedTemplateOf,
   fieldTextOf,
   REF_COUNT_COLUMN,
   MATCHED_COLUMN,
@@ -211,6 +212,28 @@ test('空态的前置：没有标签／没有可读文本时，那一栏的条�
   const { host, blocks } = fixture()
   assert.notEqual(derivedSpecOf(host, blocks, 'same'), null, '有标签 ⇒ 同类有维度')
   assert.notEqual(derivedSpecOf(host, blocks, 'mentions'), null, '有名字 ⇒ 提及有维度')
+})
+
+test('物化模板：条件＝内置 spec，视图带本源默认列；维度不存在 ⇒ null', () => {
+  const { host, blocks, tag } = fixture()
+  // 引用：条件就是 `{ref:'$self'}`，视图带「次数/类型」列
+  const refs = derivedTemplateOf(host, blocks, 'refs')
+  assert.deepEqual(refs?.spec, { where: { ref: '$self' } })
+  assert.equal(refs?.views.length, 1)
+  assert.ok(refs?.views[0]!.table?.columns.some((c) => c.key === REF_COUNT_COLUMN), '引用模板带次数列')
+  // 提及：物化的是组合条件（文本 ∧ 非引用），带命中列
+  const mentions = derivedTemplateOf(host, blocks, 'mentions')
+  assert.deepEqual(mentions?.spec, {
+    where: { all: [{ text: '$self' }, { not: { ref: '$self' } }] },
+  })
+  assert.ok(mentions?.views[0]!.table?.columns.some((c) => c.key === MATCHED_COLUMN), '提及模板带命中列')
+  // 成员：条件按标签名现算（物化是快照，改名不追——代价在注释里）
+  const members = derivedTemplateOf(tag, blocks, 'members')
+  assert.notEqual(members, null, '标签块有成员模板')
+  // 维度不存在 ⇒ 没有可物化的东西（调用方不给按钮）
+  const bare = b('bare', '   ')
+  assert.equal(derivedTemplateOf(bare, [bare], 'same'), null)
+  assert.equal(derivedTemplateOf(bare, [bare], 'mentions'), null)
 })
 
 test('内置栏的 id 是派生的：同一个宿主、同一个来源 ⇒ 同一个 id（刷新不漂）', () => {

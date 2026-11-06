@@ -18,6 +18,7 @@ import {
   derivedColumns,
   derivedListFields,
   derivedRecordsOf,
+  derivedTemplateOf,
   displayNameOf,
   EMPTY_QUICK_FILTER,
   findByAlias,
@@ -59,7 +60,7 @@ import type { Prefs, Workspace } from '../../core/infra/workspace.ts'
 import type { Layers, Row } from '../../ui/overlay/layers.ts'
 import { openChoicePicker } from '../choice-picker.ts'
 import { ICON_PATHS } from '../../view/icons.ts'
-import { MountArea, type ViewBodyHost } from '../../ui/chrome/mount-area.ts'
+import { BUILTIN_LABEL, MountArea, type ViewBodyHost } from '../../ui/chrome/mount-area.ts'
 import { PropertiesPanel, type PropertiesDeps } from '../../ui/block-ui/properties.ts'
 import type { DerivedMode } from '../../ui/query/query-view.ts'
 import { createViewHostEls, ViewHost } from '../../ui/query/query-view.ts'
@@ -805,6 +806,7 @@ export function setupPanels(deps: PanelsDeps) {
       // 与正文同一套事件（点引用/块标/右键菜单/`#`·`@` 补全），装配层只给这一份
       wire: (editor, change) => deps.wireEditor(editor, change, 'mount'),
       onAddTab: (id) => addLocalQueryTab(id),
+      onMaterializeTab: (id, source) => materializeDerivedTab(id, source),
       // 快速筛选的弹层外壳（chips 的内容与状态都在挂载区自己手里）
       openPopover: (render, anchor) => layers.openPopover(render, anchor),
       // 大纲分支的切换下拉：与视图宿主那条同一个菜单（装配层现画行，这里只给锚点）
@@ -950,6 +952,41 @@ export function setupPanels(deps: PanelsDeps) {
     if (!added) return
     // 新栏当场切过去：建了不看，「点了没生效」的另一种长相（激活的是这一栏自己的表格视图）
     mountInstances.get(host.id)?.area.activateTab(added.id)
+  }
+
+  /**
+   * **「复制为查询栏」**：把一栏内置项物化成 local 栏。
+   *
+   * 模板在 core 的 `derivedTemplateOf`（内置 spec ＋ 本源默认列），这里只管写与激活：
+   * 建出来就是普通用户栏——条件、视图、名字都能改；内置栏本体不动，它继续现算。
+   * 走 `core.mount/add-local` 命令面（带 views），不另开写路径。
+   * 维度不存在时模板是 `null` ⇒ 挂载区根本没给按钮，这里兜底返回。
+   */
+  function materializeDerivedTab(hostId: string, source: DerivedSource): void {
+    const host = blocks.find(hostId)
+    if (!host) return
+    const template = derivedTemplateOf(host, kb.roots(), source)
+    if (!template) return
+    const mountHost = mountHostOf(host)
+    const before = new Set(owners.entriesOf(mountHost).map((e) => e.id))
+    void deps
+      .getRegistry()
+      .invoke(
+        'core.mount/add-local',
+        {
+          host: mountHost,
+          label: t(BUILTIN_LABEL[source]),
+          spec: template.spec,
+          views: template.views,
+          view: template.views[0]?.id ?? '',
+        },
+        'mount',
+      )
+    const added = owners.entriesOf(mountHost).find((e) => !before.has(e.id))
+    renderMounts()
+    if (!added) return
+    // 新栏当场切过去：建了不看，「点了没生效」的另一种长相
+    mountInstances.get(hostId)?.area.activateTab(added.id)
   }
 
   /**

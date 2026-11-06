@@ -40,6 +40,7 @@ import { t } from '../infra/msg.ts'
 import {
   canonicalViews,
   cloneViews,
+  mkViewId,
   MATCHED_COLUMN,
   MODIFIED_COLUMN,
   PATH_COLUMN,
@@ -411,6 +412,32 @@ function propNamesOf(kb: KbClient): Map<string, string> {
     if (name !== '') out.set(def.id, name)
   }
   return out
+}
+
+/**
+ * **把一栏内置项物化成 local 栏的模板**：条件就是这一栏的内置 spec，
+ * 视图给一张带本源特有列的表格。维度不存在（没有标签⇒同类、没有可读文本⇒提及）
+ * ⇒ `null`，调用方不给入口。
+ *
+ * 这是「内置栏与查询栏是同一种东西」的兑现口：内置栏的条件本来就是同一套
+ * 条件语言、同一条求值路径（`derivedSpecOf` → `kb.query`），物化只是把
+ * 现算的条件交到用户手里——改条件、加视图，随即组合出内置栏给不了的样子。
+ *
+ * ⚠️ 物化是**快照**：条件按当下算好写进那一栏，之后内置栏怎么变它都不跟
+ * （尤其「成员」的条件是标签名的并集，改名不追）。要「一直跟」就留着内置栏，
+ * 要组合才物化——两者各自成立，不互为副本。
+ */
+export function derivedTemplateOf(
+  host: Block,
+  forest: readonly Block[],
+  source: DerivedSource,
+): { spec: QuerySpec; views: ViewConfig[] } | null {
+  const spec = derivedSpecOf(host, forest, source)
+  if (!spec) return null
+  return {
+    spec,
+    views: [{ id: mkViewId(), kind: 'table', table: { columns: derivedColumns(source) } }],
+  }
 }
 
 /**
