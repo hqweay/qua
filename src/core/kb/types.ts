@@ -303,7 +303,11 @@ export interface KbClient {
   /** 这一块当前的可引用区间（通常为空——anno 只在被引用时存在） */
   annosOf(id: string): readonly Anno[]
 
-  query(spec: QuerySpec, opts?: { selfId?: string; excludeIds?: readonly string[] }): QueryHit[]
+  /**
+   * 求值一次。`today` 是 `{today}` 原子（相对日期）的基准日——由调用方注入，
+   * 不在这层读时钟（求值要保持「同样输入同样输出」）。
+   */
+  query(spec: QuerySpec, opts?: { selfId?: string; excludeIds?: readonly string[]; today?: string }): QueryHit[]
   backlinksOf(id: string): readonly BackrefSource[]
   /** 引用发生处的**块**（不是按页聚合）——反链 view block 的行；同一块多处引用各算一条 */
   backrefBlocksOf(id: string): readonly BackrefBlock[]

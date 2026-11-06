@@ -520,7 +520,9 @@ export const MSG = {
   'ui.query.near': '自身或上下级满足',
   'ui.query.relative.today': '今天',
   'ui.query.relative.offset': '今天 {n} 天',
+  'ui.query.relative.mode': '今天 ± N 天',
   'ui.query.usePageDate': '按本页日期',
+  'ui.query.usePageDateHint': '「今天」按这一页的日期算（页面没有日期时按系统今天）',
   'ui.query.jsonOnly': '这条条件只能用 JSON 编辑（树上还表达不了）',
   'ui.query.tree.add': '加一条条件',
 

@@ -29,8 +29,12 @@ export type TreeRow =
   /**
    * 路径（方向）行：`{up|down|near:{is:id}}` 或某一天（只有 `up` 有天的形状）。
    * `dir` 缺省 `up`（旧草稿兼容读法：`dir in row === false` 视作 `'up'`）。
+   *
+   * 天有两态：**固定**（`date` ＝ `'YYYY-MM-DD'`，`rel` 缺省）与**相对**
+   * （`rel` ＝ 偏移天数，0 ＝ 今天；`date` 留空）。相对态拼回去是
+   * `{up:{today:{offset}}}`——存表达式不存字面量，隔天求值自然换一天。
    */
-  | { kind: 'path'; by: 'journal' | 'block'; dir?: 'up' | 'down' | 'near'; date: string; blockId: string }
+  | { kind: 'path'; by: 'journal' | 'block'; dir?: 'up' | 'down' | 'near'; date: string; blockId: string; rel?: number }
 
 export type TreeRowKind = TreeRow['kind']
 
@@ -66,6 +70,8 @@ export interface TreeDraft {
   limit?: number
   /** 成员顺序（多键，按数组序生效）；树不再编辑它（抬头排序编辑器是唯一入口），只随往返保全 */
   sort?: SortKey[]
+  /** `{today}` 的基准锚（抬头那颗「按本页日期」）；树自己不编辑它，只随往返保全 */
+  todayFrom?: 'host'
 }
 
 const PROP_OP_KEYS = ['eq', 'neq', 'contains', 'gt', 'gte', 'lt', 'lte', 'exists', 'empty'] as const
@@ -178,6 +184,10 @@ export function treeRowOf(node: QueryNode): TreeRow | null {
 function pathRowOf(dir: 'up' | 'down' | 'near', node: QueryNode): TreeRow | null {
   if ('is' in node) return { kind: 'path', by: 'block', dir, date: '', blockId: node.is }
   if (dir !== 'up') return null
+  // 相对日期：`{up:{today:{offset}}}`——树上可编辑的相对形状只有这一种
+  if ('today' in node) {
+    return Number.isFinite(node.today.offset) ? { kind: 'path', by: 'journal', date: '', blockId: '', rel: node.today.offset } : null
+  }
   if (!('all' in node) || node.all.length !== 2) return null
   const [first, second] = node.all
   if (!first || !second) return null
@@ -193,6 +203,7 @@ export function treeOfSpec(spec: QuerySpec): TreeDraft | null {
   const common = {
     ...(typeof spec.limit === 'number' ? { limit: spec.limit } : {}),
     ...(spec.sort && spec.sort.length > 0 ? { sort: spec.sort.map((s) => ({ ...s })) } : {}),
+    ...(spec.todayFrom === 'host' ? { todayFrom: 'host' as const } : {}),
   }
 
   if ('all' in where || 'any' in where) {
@@ -238,6 +249,8 @@ export function treeNodeOfRow(row: TreeRow): QueryNode | null {
       const dir = row.dir ?? 'up'
       return dir === 'down' ? { down: { is: row.blockId } } : dir === 'near' ? { near: { is: row.blockId } } : { up: { is: row.blockId } }
     }
+    // 相对：存表达式（`{today:{offset}}`），不把任何一天的日期写进条件
+    if (row.rel !== undefined) return { up: { today: { offset: row.rel } } }
     return row.date.trim() === ''
       ? null
       : { up: { all: [{ role: 'journal' }, { prop: { id: '_date', eq: row.date } }] } }
@@ -318,6 +331,7 @@ export function specOfTree(draft: TreeDraft): QuerySpec {
   const out: QuerySpec = { where }
   if (draft.sort && draft.sort.length > 0) out.sort = draft.sort.map((s) => ({ ...s }))
   if (typeof draft.limit === 'number' && draft.limit > 0) out.limit = Math.floor(draft.limit)
+  if (draft.todayFrom === 'host') out.todayFrom = 'host'
   return canonicalSpec(out)
 }
 

@@ -15,7 +15,7 @@ import { plainText } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
 import { findPath } from '../model/tree.ts'
 import { findTagByName, tagIdsOf, tagMemberIds } from '../identity/tags.ts'
-import { journalDays } from '../identity/journal.ts'
+import { journalDate, journalDays, shiftISO } from '../identity/journal.ts'
 import { displayTextOf } from '../identity/alias.ts'
 import { fieldTableOf, readField, type FieldTable } from '../props/props.ts'
 import { isRefKind, relationEdgesOfForest, REFERENCE_KINDS, type RefKind, type RelationKind } from '../relations/relations.ts'
@@ -107,6 +107,21 @@ export type QueryNode =
   /** 自己／祖先／子孙 **任一处**满足这个条件 */
   | { near: QueryNode }
   /**
+   * **（基准 ± offset）那一天的日记块**。相对日期：**存表达式，不存字面量** ——
+   * 求值时现算，同一个「今天」隔天就是另一天（固化成 `'YYYY-MM-DD'` 的查询会悄悄说谎）。
+   *
+   * 判据与 `{prop:{id:'_date', eq:…}}` 同一条：块的 `_date`（journal 身份位）等于
+   * 基准日偏移 `offset` 天。所以它包装进 `{up}` 就是「那一天之下的块」，
+   * 可进 `any`／`not`，与方向原子照常正交——语言层不为「某天之下」再造第二种写法。
+   *
+   * ⚠️ 基准从哪来（系统今天／宿主那一天）不是条件的性质，进 `QueryContext.today`
+   *    由调用方注入（§`resolveTodayBase`）；条件里没有它的位置，否则「今天」
+   *    又要被固化进 `_query`。
+   * ⚠️ 值域只有 `_date`：属性类型为日期的**普通字段**仍是绝对日期
+   *    （`eq` 收表达式会把值位的字面量契约打破），先不做。
+   */
+  | { today: { offset: number } }
+  /**
    * **是某种东西**的块本身（成员条件）。
    *
    * ⚠️ 与方向原子的分工写死：`{up}`／`{down}` 问的是**位置**（谁在谁下面），
@@ -187,6 +202,15 @@ export interface QuerySpec {
   sort?: SortKey[]
   /** 取多少条（在排序之后截断，所以「取最新的 3 天」取得到）；缺省不限 */
   limit?: number
+  /**
+   * `{today}` 原子的**基准从哪来**：缺省＝系统今天；`'host'`＝宿主那一天的 `_date`。
+   *
+   * 锚进 spec 而不进视图配置／设备状态：它改变的是**哪些块命中**（查询语义），
+   * 与条件同一个拥有者（`_query`）——换台设备、换个看法，同一份查询的语义不该变。
+   * 宿主不是日记块（查询块被搬到普通页）⇒ 按系统今天算（退回缺省语义，
+   * 不撒谎也不空集；`$self` 的「永不命中」留给「会命中一切」的危险值，这里不是）。
+   */
+  todayFrom?: 'host'
 }
 
 /* ------------------------------------------------------------ 求值 */
@@ -198,20 +222,24 @@ export interface QuerySpec {
  * |---|---|
  * | `selfId` | 条件里的 `'$self'` 指谁 |
  * | `excludeIds` | 结果里剔除谁 |
+ * | `today` | `{today}` 原子的基准日（`'YYYY-MM-DD'`） |
  *
  * ⚠️ 为什么 `selfId` 不再顺带排除：那是两件事被塞进同一个字段的后果 ——
  *    想解析 `$self`，就不得不把它从结果里去掉；而「查询块自己不该出现在自己的结果里」
  *    与「宿主不该出现在挂载区里」是**各自独立**的两条规则，合并之后只能成对表达。
+ * ⚠️ `today` 是**解析完的具体日期**，不是 `'host'` 那个开关：进冻结键的必须是
+ *    「这一次求值相对哪天」——跨天之后冻结结果才算真过期。
  */
 export interface QueryContext {
   selfId?: string
   excludeIds?: readonly string[]
+  today?: string
 }
 
 /** 上下文的**稳定串**（冻结结果的判据之一；顺序无关 ⇒ 排序后再拼） */
 export function contextKey(ctx: QueryContext): string {
   const ex = [...new Set((ctx.excludeIds ?? []).filter((x) => typeof x === 'string' && x !== ''))].sort()
-  return JSON.stringify({ selfId: ctx.selfId ?? null, excludeIds: ex })
+  return JSON.stringify({ selfId: ctx.selfId ?? null, excludeIds: ex, today: ctx.today ?? null })
 }
 
 /**
@@ -224,7 +252,7 @@ export function evaluateQuerySpec(
   kb: Pick<KbClient, 'query'>,
   ctx: QueryContext,
 ): QueryHit[] {
-  return kb.query(spec, { selfId: ctx.selfId, excludeIds: ctx.excludeIds })
+  return kb.query(spec, { selfId: ctx.selfId, excludeIds: ctx.excludeIds, ...(ctx.today ? { today: ctx.today } : {}) })
 }
 
 export interface QueryRunInput {
@@ -241,6 +269,13 @@ export interface QueryRunInput {
   selfId?: string
   /** 结果里剔除这些块（`selfId` 之外的独立一条） */
   excludeIds?: readonly string[]
+  /**
+   * `{today}` 原子的基准日（`'YYYY-MM-DD'`，本地日历）。
+   *
+   * 必须由调用方注入、不许在这里读时钟：求值是纯函数（同样输入同样输出），
+   * 时钟进来「隔天同结果」就没法单测了（相对日期的验收第一条）。
+   */
+  today?: string
 }
 
 /** 一条结果：块 id ＋ 它在森林里的路径（D8：可编辑列表必须给上下文，否则不知道这条住哪） */
@@ -281,6 +316,13 @@ export interface QueryEnv {
    * 两条求值路径都必须给同一份（`core/props.ts` 的 `fieldTableOf`）。
    */
   fields: FieldTable
+  /**
+   * `{today}` 原子的基准日（调用方注入；缺省 ⇒ 相对日期不命中，不猜一个「今天」）。
+   *
+   * 它住在环境而不是条件里：基准是「这一次求值相对哪天」，同一份条件
+   * 隔天该有另一份答案——写进条件就是又把今天固化了一遍。
+   */
+  today?: string
   /**
    * 结果里剔除这些块。
    *
@@ -536,6 +578,14 @@ function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher {
       return matches(node.near, block) || hasAncestor(node.near, block.id) || hasDescendant(node.near, block.id)
     }
     if ('role' in node) return roleMatches(node.role, block)
+    /**
+     * 相对日期：与 `{prop:{id:'_date',eq}}` 同一条判据（`_date` 等于基准偏移 `offset` 天），
+     * 只是值**现算**。没有基准（调用方没注入）⇒ 不命中——猜一个「今天」
+     * 等于把时钟偷偷接回求值器，隔天同结果的验收就没法写了。
+     */
+    if ('today' in node) {
+      return env.today !== undefined && journalDate(block) !== '' && journalDate(block) === shiftISO(env.today, node.today.offset)
+    }
     if ('ref' in node) return env.refs.has(block.id)
     /**
      * 标签条件：**按边判定**，不扫文本。
@@ -683,6 +733,10 @@ export function isQueryNode(raw: unknown): raw is QueryNode {
   if ('up' in n) return isQueryNode(n.up)
   if ('down' in n) return isQueryNode(n.down)
   if ('near' in n) return isQueryNode(n.near)
+  if ('today' in n) {
+    const t = n.today as { offset?: unknown } | null | undefined
+    return !!t && typeof t === 'object' && !Array.isArray(t) && typeof t.offset === 'number'
+  }
   if ('ref' in n) {
     if (typeof n.ref === 'string') return true
     const r = n.ref
@@ -712,6 +766,7 @@ export function isQuerySpec(raw: unknown): raw is QuerySpec {
   const s = raw as Record<string, unknown>
   if (!isQueryNode(s.where)) return false
   if (s.limit !== undefined && typeof s.limit !== 'number') return false
+  if (s.todayFrom !== undefined && s.todayFrom !== 'host') return false
   if (s.sort !== undefined) {
     if (!Array.isArray(s.sort)) return false
     for (const k of s.sort) {
@@ -771,6 +826,7 @@ export function canonicalNode(n: QueryNode): QueryNode {
   if ('up' in n) return { up: canonicalNode(n.up) }
   if ('down' in n) return { down: canonicalNode(n.down) }
   if ('near' in n) return { near: canonicalNode(n.near) }
+  if ('today' in n) return { today: { offset: n.today.offset } }
   return { role: n.role }
 }
 
@@ -791,6 +847,7 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
     refs: collectRefs(q.where, input.blocks),
     tags: collectTags(q.where, input.blocks),
     fields: fieldTableOf(input.blocks),
+    ...(input.today ? { today: input.today } : {}),
     ...(input.excludeIds && input.excludeIds.length > 0 ? { excludeIds: new Set(input.excludeIds) } : {}),
   }
   const roots: readonly Block[] = input.blocks
@@ -830,6 +887,33 @@ export function usesSelf(node: QueryNode): boolean {
 
 /** 哨兵字面量：条件里写它 ＝ 「这一块自己」的这一侧面 */
 export const SELF = '$self'
+
+/**
+ * 条件里有没有 `{today}` 原子（相对日期）。
+ *
+ * 调用方用它决定两件事：要不要注入基准日、抬头要不要给「按本页日期」的锚。
+ * 没有 `{today}` 的查询带一个 today 上下文只是白算，还会让冻结键天天变。
+ */
+export function usesToday(node: QueryNode): boolean {
+  if ('all' in node) return node.all.some(usesToday)
+  if ('any' in node) return node.any.some(usesToday)
+  if ('not' in node) return usesToday(node.not)
+  if ('up' in node) return usesToday(node.up)
+  if ('down' in node) return usesToday(node.down)
+  if ('near' in node) return usesToday(node.near)
+  return 'today' in node
+}
+
+/**
+ * 相对日期的**基准日**：锚在宿主上 ⇒ 宿主那一天的 `_date`；否则系统今天。
+ *
+ * 宿主没有日期（查询块被搬到普通页／投影到非日记页）⇒ **退回系统今天**：
+ * 「按本页日期」问不出来的时候给出缺省语义，而不是空集——`$self` 的
+ * 「永不命中」留给「会把一切命中」的危险值（空文本/空值），这里不是。
+ */
+export function resolveTodayBase(spec: QuerySpec, hostDate: string | undefined, systemToday: string): string {
+  return spec.todayFrom === 'host' && hostDate !== undefined && hostDate !== '' ? hostDate : systemToday
+}
 
 /**
  * 把条件里的 `'$self'` 解析成**宿主的这一侧面**。纯函数，不改入参。

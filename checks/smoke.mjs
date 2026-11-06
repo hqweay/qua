@@ -17902,6 +17902,113 @@ await check('B6 拆不动的形状显示只读 JSON ＋ 一句提示（不静默
   return 'near 形状：只读 JSON ＋ 提示；0 行、0 可编辑控件、无应用'
 })
 
+/* ---------------------------------------------------------------- 相对日期（C1） */
+
+/**
+ * **相对日期**：条件里存 `{today:{offset}}` 表达式（不存字面量），抬头给「按本页日期」的锚。
+ *
+ * 锚只有「条件真用了相对日期 且 宿主（`$self`）是日记块」时才出现——没有相对日期的
+ * 查询给这颗开关是噪声。锚切换写的是基础条件的 `todayFrom`，与条件树同一条 `set-spec` 路。
+ */
+await check('C1 相对日期：树上存表达式；锚只在日记页里出现并可切换', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  // 前置：今天的日记块（冷启动会种出来）
+  const dayId = await page.evaluate(() => {
+    const t = new Date()
+    const iso = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+    let found = ''
+    const walk = (list) => {
+      for (const b of list) {
+        if (!found && b.props?._date === iso) found = b.id
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return found
+  })
+  assert(dayId !== '', '前置：今天应有一个日记块')
+
+  // 在今天这一页里建查询块（宿主＝那一天），条件直接用相对日期
+  await page.evaluate(
+    (day) =>
+      window.__qua.invoke('core.query/create', {
+        name: 'C批-相对日期',
+        spec: { where: { up: { today: { offset: 0 } } } },
+        parentId: day,
+      }),
+    dayId,
+  )
+  await page.waitForTimeout(600)
+  const qid = await page.evaluate(() => String(window.__qua.snapshot().activeId))
+  assert(qid !== '', '前置：应能在今天下面建出查询块')
+
+  // 锚出现（条件用了相对日期 ＋ 宿主是日记块）；此时未勾
+  const anchor0 = await page.evaluate(() => {
+    const input = document.querySelector('[data-query-chip="anchor"]')
+    return { shown: Boolean(input), checked: input?.checked ?? null }
+  })
+  assert(anchor0.shown, `宿主是日记块 ⇒ 锚要出现：${JSON.stringify(anchor0)}`)
+  assert(anchor0.checked === false, `缺省不勾（系统今天）：${JSON.stringify(anchor0)}`)
+
+  // 树上：路径行是相对态（数字输入 ＋「相对」chip），spec 存的是表达式
+  await ensureTree(page)
+  const row0 = await page.evaluate(() => {
+    const row = document.querySelector('.queryview-tree .qt-row[data-qt-row="path"]')
+    return {
+      mode: row?.querySelector('[data-qt="path-mode"]')?.value ?? '',
+      chip: row?.querySelector('.qt-chip')?.textContent ?? '',
+      num: row?.querySelector('input[type="number"]')?.value ?? '',
+    }
+  })
+  assert(row0.mode === 'rel', `相对 spec 拆出来应是相对态：${JSON.stringify(row0)}`)
+  assert(row0.chip === '相对', `相对态要带「相对」chip：${JSON.stringify(row0)}`)
+  assert(row0.num === '0', `偏移 0 ＝ 今天：${JSON.stringify(row0)}`)
+
+  // 勾上锚 ⇒ spec 写进 todayFrom:'host'；再点一次 ⇒ 摘掉（toggle）
+  await page.locator('[data-query-chip="anchor"]').click()
+  await page.waitForTimeout(400)
+  const anchored = await page.evaluate(
+    (id) => ({
+      todayFrom: window.__qua.__editor.store.find(id)?.props?._query?.todayFrom ?? null,
+      checked: document.querySelector('[data-query-chip="anchor"]')?.checked ?? null,
+    }),
+    qid,
+  )
+  assert(anchored.todayFrom === 'host', `勾上锚 ⇒ todayFrom:'host'（实际 ${JSON.stringify(anchored)}）`)
+  await page.locator('[data-query-chip="anchor"]').click()
+  await page.waitForTimeout(400)
+  const unanchored = await page.evaluate(
+    (id) => window.__qua.__editor.store.find(id)?.props?._query?.todayFrom ?? null,
+    qid,
+  )
+  assert(unanchored === null, `再点一次要摘掉锚（实际 ${JSON.stringify(unanchored)}）`)
+
+  // 树上切回「某一天」：填固定日期应用 ⇒ spec 变回绝对形状，todayFrom 随往返保全
+  await page.locator('.queryview-tree .qt-row[data-qt-row="path"] [data-qt="path-mode"]').selectOption('abs')
+  await page.waitForTimeout(250)
+  const t = new Date()
+  const iso = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+  await page
+    .locator('.queryview-tree .qt-row[data-qt-row="path"] input[type="date"]')
+    .fill(iso)
+  await page.locator('.queryview-tree [data-qt="apply"]').click()
+  await page.waitForTimeout(450)
+  const after = await page.evaluate(
+    (id) => window.__qua.__editor.store.find(id)?.props?._query ?? null,
+    qid,
+  )
+  assert(
+    JSON.stringify(after?.where) === JSON.stringify({ up: { all: [{ role: 'journal' }, { prop: { id: '_date', eq: iso } }] } }),
+    `固定日期应用后应是绝对形状：${JSON.stringify(after?.where)}`,
+  )
+  assert(after?.todayFrom === undefined, `锚已摘掉 ⇒ 不该回来：${JSON.stringify(after)}`)
+
+  await ctx.close()
+  return '相对态 chip ＋ 表达式落库；锚出现/可 toggle；切回固定日期后往返成绝对形状'
+})
+
 /**
  * **挂载区的「＋」只建 local 查询**：不弹菜单、不建块、不产生 linked 指针。
  *

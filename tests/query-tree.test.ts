@@ -51,6 +51,10 @@ test('条件树往返：组／非／算子／待办预设／路径与方向／�
     { where: { any: [] } },
     { where: { all: [{ any: [{ tag: '甲' }] }] } },
     { where: day },
+    { where: { up: { today: { offset: 0 } } } },
+    { where: { up: { today: { offset: 2 } } } },
+    { where: { up: { today: { offset: -1 } } } },
+    { where: { up: { today: { offset: 0 } } }, todayFrom: 'host' },
     { where: { up: { is: 'x' } } },
     { where: { down: { is: 'x' } } },
     { where: { near: { is: 'x' } } },
@@ -84,6 +88,8 @@ test('条件树：拆不动的形状返回 null（调用方走只读 JSON，不�
     { where: { role: 'page' } },
     { where: { not: { not: { tag: 'x' } } } },
     { where: { prop: { id: 'p', eq: 1, neq: 2 } } },
+    // 相对日期只在「某一天之下」那行有值位：裸的 `{today}` 走 JSON（语言层合法，树上不假装）
+    { where: { today: { offset: 0 } } },
   ]
   for (const spec of hard) assert.equal(treeOfSpec(spec as QuerySpec), null, JSON.stringify(spec))
 })

@@ -11,6 +11,7 @@ import assert from 'node:assert/strict'
 import type { Atom, Block } from '../src/core/index.ts'
 import {
   canonicalSpec,
+  contextKey,
   findJournalDay,
   findTagByName,
   declareField,
@@ -28,8 +29,10 @@ import {
   resolveRows,
   runQuery,
   resolveSelfSpec,
+  resolveTodayBase,
   usesSelf,
   isQueryNode,
+  isQuerySpec,
   specChanged,
   queryByIndex,
   rebuild,
@@ -903,4 +906,62 @@ test('runQuery：保留键能排序——created/modified 是块字段，refCoun
   const rand = ids(runQuery(spec([{ by: 'random', dir: 'asc', seed: 42 }]), { blocks: forest }))
   const randAgain = ids(runQuery(spec([{ by: 'random', dir: 'asc', seed: 42 }]), { blocks: forest }))
   assert.deepEqual(rand, randAgain, '同一种子同一序')
+})
+
+/* ------------------------------------------------------------ C 批：相对日期（`{today}` 原子 ＋ 宿主锚） */
+
+test('相对日期：同一份 spec 换一个基准日，结果就换一批（没固化成字面量）', () => {
+  const { blocks } = fixture()
+  // j1 的 `_date` 是 2026-10-20；「今天」由调用方注入，不在这里读时钟
+  const spec: QuerySpec = { where: { today: { offset: 0 } } }
+  assert.deepEqual(runQuery(spec, { blocks, today: '2026-10-20' }).map((h) => h.blockId), ['j1'])
+  assert.deepEqual(runQuery(spec, { blocks, today: '2026-10-21' }), [], '隔天同一个「今天」不再是那一天')
+  // 偏移走本地日历：基准 10-21 往回一天就是 10-20
+  assert.deepEqual(runQuery({ where: { today: { offset: -1 } } }, { blocks, today: '2026-10-21' }).map((h) => h.blockId), ['j1'])
+  // 非日记块没有 `_date`：正文再像日期也不命中
+  assert.deepEqual(runQuery({ where: { today: { offset: 0 } } }, { blocks, today: '2026-10-20' }).map((h) => h.blockId), ['j1'])
+})
+
+test('相对日期：没有基准就不命中（不偷偷接时钟）', () => {
+  const { blocks } = fixture()
+  assert.deepEqual(runQuery({ where: { today: { offset: 0 } } }, { blocks }), [])
+})
+
+test('相对日期包进方向原子：`{up:{today}}` ＝ 那一天之下的块', () => {
+  const { blocks } = fixture()
+  const hits = runQuery({ where: { up: { today: { offset: 0 } } } }, { blocks, today: '2026-10-20' })
+  assert.deepEqual(hits.map((h) => h.blockId), ['j1a', 'j1b'])
+  assert.equal(hits.some((h) => h.blockId === 'j1'), false, '天自己不会入选（up 不含自己）')
+})
+
+test('相对日期：两条求值路径同解', () => {
+  const { blocks } = fixture()
+  const spec: QuerySpec = { where: { up: { today: { offset: 0 } } } }
+  assert.deepEqual(queryByIndex(rebuild(blocks), blocks, spec, { today: '2026-10-20' }), runQuery(spec, { blocks, today: '2026-10-20' }))
+})
+
+test('锚：resolveTodayBase 三态（宿主那一天／宿主没日期退回系统今天／没锚）', () => {
+  const anchored: QuerySpec = { where: { today: { offset: 0 } }, todayFrom: 'host' }
+  assert.equal(resolveTodayBase(anchored, '2026-10-20', '2026-11-07'), '2026-10-20')
+  assert.equal(resolveTodayBase(anchored, undefined, '2026-11-07'), '2026-11-07', '宿主没有日期 ⇒ 缺省语义（系统今天），不是空集')
+  assert.equal(resolveTodayBase({ where: { today: { offset: 0 } } }, '2026-10-20', '2026-11-07'), '2026-11-07', '没锚 ＝ 系统今天')
+})
+
+test('冻结键把基准日算进去：跨天之后冻结结果算过期', () => {
+  assert.notEqual(contextKey({ selfId: 'x', today: '2026-11-07' }), contextKey({ selfId: 'x' }))
+  assert.equal(contextKey({ selfId: 'x' }), contextKey({ selfId: 'x', today: undefined }), '没有相对日期的查询不带这一格')
+})
+
+test('isQueryNode / canonical / isQuerySpec：today 原子与 todayFrom 锚', () => {
+  assert.equal(isQueryNode({ today: { offset: 0 } }), true)
+  assert.equal(isQueryNode({ today: { offset: -3 } }), true)
+  assert.equal(isQueryNode({ today: { offset: 'x' } }), false)
+  assert.equal(isQueryNode({ today: {} }), false)
+  assert.equal(isQueryNode({ today: null }), false)
+  assert.deepEqual(canonicalSpec({ where: { today: { offset: 2 } } }), { where: { today: { offset: 2 } } })
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(canonicalSpec({ where: { today: { offset: 0 } }, todayFrom: 'host' }))),
+    { where: { today: { offset: 0 } }, todayFrom: 'host' },
+  )
+  assert.equal(isQuerySpec({ where: { today: { offset: 0 } }, todayFrom: 'nope' }), false, '锚只有一种取值')
 })

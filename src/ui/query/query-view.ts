@@ -39,6 +39,9 @@ import {
   sourceOf,
   unfoldForContext,
   usesSelf,
+  usesToday,
+  resolveTodayBase,
+  journalDate,
   viewsBroken,
   viewNameOf,
   droppedFrom,
@@ -534,7 +537,7 @@ export class ViewHost {
        */
       if (isOwnEdit(source, this.outline?.ed)) {
         const spec = this.effective
-        if (spec && frozenStale(this.frozen, spec, this.deps.context, this.viewKey)) {
+        if (spec && frozenStale(this.frozen, spec, this.evalContext(spec), this.viewKey)) {
           this.sync()
         }
         return
@@ -798,6 +801,28 @@ export class ViewHost {
   }
 
   /**
+   * 这一次求值的上下文：`$self`／剔除名单来自装配层；`{today}`（相对日期）的基准**现算**。
+   *
+   * 为什么不随装配层一次性给：基准跟墙钟走（跨天要变），装一次就冻死了；
+   * 也没有 `{today}` 的查询不该带这一格——否则冻结键天天变，全库查询白白重算。
+   */
+  private evalContext(spec: QuerySpec): QueryContext {
+    if (!usesToday(spec.where)) return this.deps.context
+    const base = this.deps.today?.() ?? todayISO()
+    return { ...this.deps.context, today: resolveTodayBase(spec, this.hostDate(), base) }
+  }
+
+  /** 宿主（`$self` 指的那一块）的日期；宿主不是日记块 ⇒ `undefined`（锚要藏起来） */
+  private hostDate(): string | undefined {
+    const selfId = this.deps.context.selfId
+    if (selfId === undefined) return undefined
+    const host = this.deps.kb.get(selfId)
+    if (!host) return undefined
+    const date = journalDate(host)
+    return date === '' ? undefined : date
+  }
+
+  /**
    * 冻结结果：**只在五种情况下重算**。
    *
    *   · 还没有冻结（这一实例首次求值）；
@@ -812,9 +837,10 @@ export class ViewHost {
   private ensureFrozen(): void {
     const spec = this.effective
     if (!spec) return
-    if (!frozenStale(this.frozen, spec, this.deps.context, this.viewKey)) return
+    const ctx = this.evalContext(spec)
+    if (!frozenStale(this.frozen, spec, ctx, this.viewKey)) return
     const before = this.frozen?.hits ?? []
-    this.frozen = freezeResult(spec, this.deps.kb, this.deps.context, this.viewKey)
+    this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey)
     const dropped = droppedFrom(before, this.frozen.hits)
     if (dropped.length > 0 && before.length > 0) {
       this.deps.toast?.(t('ui.query.dropped', { count: dropped.length }), 'info')
@@ -837,7 +863,7 @@ export class ViewHost {
     // 与刷新同一条「按当前树重算」，但不报 toast：这是编辑边界的自动收口，
     // 不是用户按了刷新。被覆盖的命中仍会由祖先子树渲染出来，不该说「不再满足」。
     const spec = this.effective
-    if (spec) this.frozen = freezeResult(spec, this.deps.kb, this.deps.context, this.viewKey)
+    if (spec) this.frozen = freezeResult(spec, this.deps.kb, this.evalContext(spec), this.viewKey)
   }
 
   /** 刷新按钮：**只重算这一个实例**（别的表面各自持有自己的那份，不受影响） */
@@ -847,7 +873,7 @@ export class ViewHost {
       const spec = this.effective
       if (!spec) return
       const before = this.frozen?.hits ?? []
-      this.frozen = freezeResult(spec, this.deps.kb, this.deps.context, this.viewKey)
+      this.frozen = freezeResult(spec, this.deps.kb, this.evalContext(spec), this.viewKey)
       const dropped = droppedFrom(before, this.frozen.hits)
       // 刷新＝成员与顺序都换了：上一轮的上下文展开没有依据，从头来
       this.expanded = new Set()
@@ -1158,12 +1184,14 @@ export class ViewHost {
       box.hidden = true
       return
     }
+    const anchor = this.anchorEl(spec)
+    if (anchor) box.appendChild(anchor)
     const slice = this.sliceChip()
     if (this.treeAllowed() && isTreeOpen(this.writeOwner, this.deps.surface, this.treeTopLevel())) {
-      // 树摊开时抬头不再重复**基础条件**；切片不在树里，仍要显式标出
-      if (slice) {
+      // 树摊开时抬头不再重复**基础条件**；锚是控制不是条件的重复，切片也不在树里，都要显式给出
+      if (slice || anchor) {
         box.hidden = false
-        box.appendChild(slice)
+        if (slice) box.appendChild(slice)
       } else {
         box.hidden = true
       }
@@ -1199,6 +1227,35 @@ export class ViewHost {
     edit.addEventListener('click', () => this.deps.invoke('core.query/open-builder', { owner: this.writeOwner }))
     box.appendChild(edit)
     void b
+  }
+
+  /**
+   * 抬头上的**锚**：「今天」相对哪一天。只有条件里真有 `{today}`、且宿主是日记块时才出现
+   * （没有相对日期的查询给这颗开关是噪声；宿主没有日期时它也无处锚）。
+   *
+   * 它写的是**基础条件**的 `todayFrom`（与条件树同一个 `set-spec` 路径）：
+   * 锚改变的是哪些块命中——查询语义，不是看法配置。
+   */
+  private anchorEl(spec: QuerySpec): HTMLElement | null {
+    if (!usesToday(spec.where)) return null
+    if (this.hostDate() === undefined) return null
+    const label = document.createElement('label')
+    label.className = 'queryview-chip queryview-chip--anchor'
+    label.title = t('ui.query.usePageDateHint')
+    const input = document.createElement('input')
+    input.type = 'checkbox'
+    input.dataset.queryChip = 'anchor'
+    input.checked = spec.todayFrom === 'host'
+    input.addEventListener('change', () => {
+      const next: QuerySpec = { ...spec }
+      if (input.checked) next.todayFrom = 'host'
+      else delete next.todayFrom
+      this.deps.invoke('core.query/set-spec', { owner: this.writeOwner, spec: next })
+    })
+    const text = document.createElement('span')
+    text.textContent = t('ui.query.usePageDate')
+    label.append(input, text)
+    return label
   }
 
   /**

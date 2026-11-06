@@ -92,7 +92,7 @@ export function freezeResult(
     specKey: specKeyOf(spec),
     viewKey,
     contextKey: contextKey(ctx),
-    hits: kb.query(spec, { selfId: ctx.selfId, excludeIds: ctx.excludeIds }),
+    hits: kb.query(spec, { selfId: ctx.selfId, excludeIds: ctx.excludeIds, ...(ctx.today ? { today: ctx.today } : {}) }),
   }
 }
 
@@ -169,6 +169,7 @@ export function canonicalSpec(spec: QuerySpec): QuerySpec {
   const out: QuerySpec = { where: canonicalNode(spec.where) }
   if (spec.sort && spec.sort.length > 0) out.sort = spec.sort.map((k) => ({ by: k.by, dir: k.dir }))
   if (typeof spec.limit === 'number') out.limit = spec.limit
+  if (spec.todayFrom === 'host') out.todayFrom = 'host'
   return out
 }
 

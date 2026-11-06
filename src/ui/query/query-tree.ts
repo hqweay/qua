@@ -785,6 +785,51 @@ export class QueryTree {
       out.push(wrap)
       return out
     }
+    // 天有两态：固定某一天（日期输入）／相对今天（存 `{today:{offset}}`，不存字面量）。
+    // 相对态的偏移可负（昨天 ＝ −1）；0 就是今天。
+    out.push(
+      selectEl(
+        [
+          { value: 'abs', label: t('ui.query.tree.pathDay') },
+          { value: 'rel', label: t('ui.query.relative.mode') },
+        ],
+        row.rel !== undefined ? 'rel' : 'abs',
+        (next) => {
+          if (next === 'rel') {
+            row.date = ''
+            row.rel = row.rel ?? 0
+          } else {
+            row.rel = undefined
+            row.date = ''
+          }
+          this.paint()
+        },
+        'qt-path-mode',
+        'path-mode',
+      ),
+    )
+    if (row.rel !== undefined) {
+      const wrap = document.createElement('span')
+      wrap.className = 'qt-inline'
+      const input = document.createElement('input')
+      input.type = 'number'
+      input.step = '1'
+      input.className = 'qt-value ui-input'
+      input.dataset.qt = 'value'
+      input.title = t('ui.query.relative.mode')
+      input.value = String(row.rel)
+      input.addEventListener('input', () => {
+        const n = Number(input.value)
+        if (input.value.trim() !== '' && Number.isFinite(n)) row.rel = Math.trunc(n)
+        this.syncRow(input, row)
+      })
+      const chip = document.createElement('span')
+      chip.className = 'qt-chip'
+      chip.textContent = t('ui.query.tree.relative')
+      wrap.append(input, chip)
+      out.push(wrap)
+      return out
+    }
     const input = document.createElement('input')
     input.type = 'date'
     input.className = 'qt-value'

@@ -830,7 +830,7 @@ export function queryByIndex(
   index: Index,
   forest: readonly Block[],
   spec: QuerySpec,
-  opts: { selfId?: string; excludeIds?: readonly string[] } = {},
+  opts: { selfId?: string; excludeIds?: readonly string[]; today?: string } = {},
 ): QueryHit[] {
   /**
    * `'$self'` 的解析与纯函数路径**共用同一份**（`resolveSelfSpec`），
@@ -843,6 +843,7 @@ export function queryByIndex(
     refs: refsByIndex(q.where, index),
     tags: tagsByIndex(q.where, index),
     fields: fieldTableOf(forest),
+    ...(opts.today ? { today: opts.today } : {}),
     ...(opts.excludeIds && opts.excludeIds.length > 0 ? { excludeIds: new Set(opts.excludeIds) } : {}),
   }
   const roots: readonly Block[] = forest
