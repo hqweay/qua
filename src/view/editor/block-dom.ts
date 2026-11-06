@@ -960,6 +960,9 @@ export function makeBlockEl(
    *   · checkbox：布尔翻转（点一下切换它自己的值）——也走 `data-todo-for`，
    *     但带 `data-prop-id`，所以多个 checkbox 不会互相串台。
    *
+   * **右键任何 select 类图标都开取值菜单**（状态标记也如此）：换到哪个值是显式意图，
+   * 不该逼用户记住 ⌥ 才够得着（入口判据在 editor-events 的 contextmenu 支）。
+   *
    * 图标取选项自己的 `_icon`，缺省用定义块的 `_icon`；再缺省 select 画虚线框
    * （「这一栏在，但还没填」），checkbox 按勾选状态画方框/勾。
    */

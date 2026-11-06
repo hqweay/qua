@@ -823,6 +823,25 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     e.preventDefault()
     const rect = new DOMRect(e.clientX, e.clientY, 0, 0)
     /**
+     * **右键落在属性图标上 ⇒ 开这一栏的取值菜单**（不是块菜单）。
+     *
+     * 这是「换一个属性值」的通用手势：select 类字段（任务状态、普通单选/多选）
+     * 的候选值只有库读得准，菜单统一交给装配层的取值菜单（与左键点普通 select、
+     * ⌥+点状态标记同一条路）。勾选框的值只有 on/off，左键就是换值，
+     * 右键不另开菜单（落回块菜单）。
+     *
+     * 判据：图标带 `data-prop-id`；select 类的行 id 住在 `data-status-for`／
+     * `data-prop-for` 上——只带 `data-check-for`／`data-todo-for` 的是勾选框，不接。
+     */
+    const propMark = target.closest<HTMLElement>('[data-prop-id]')
+    if (propMark?.dataset.propId) {
+      const rowId = propMark.dataset.statusFor ?? propMark.dataset.propFor
+      if (rowId) {
+        br.pickGutterValue(rowId, propMark.dataset.propId, rect)
+        return
+      }
+    }
+    /**
      * **右键落在一枚行内原子上 ⇒ 开它自己的菜单**（不是块菜单）。
      *
      * 判据与 `click` 那一支同源：用 `composedPath()`，因为菜单动作会重渲染，
@@ -917,6 +936,14 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       e.preventDefault()
     }
 
+    /**
+     * 下面四支 gutter 动作都只认**左键**：右键在 `contextmenu` 之前也会派发一次
+     * `mousedown`，不判按键的话，右键属性图标会先翻一次值、再开菜单（实测踩过）。
+     * 右键有自己的菜单入口（contextmenu 支），到这里就该让路。
+     * ⓞ 的插入点拦截放在它前面，右键照旧不挪光标。
+     */
+    if (e.button !== 0) return
+
     // ① 折叠三角：只给有子块的行生成，所以这里不需要判 empty
     const fold = target.closest<HTMLElement>('[data-fold-for]')
     if (fold?.dataset.foldFor) {
@@ -943,7 +970,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      *       方框上只有 `data-todo-for`，一次点击只可能命中其中一个。
      */
     /**
-     * **任务状态标记**：普通点击＝完成/取消（快路径），`⌥`+点击＝状态菜单。
+     * **任务状态标记**：普通点击＝完成/取消（快路径），右键（或 ⌥+点击）＝状态菜单。
      * 状态标记不是 checkbox：它可以显示 Doing/Canceled，主点击只翻 on/off，
      * 其余状态从菜单里显式选；两种手势分工，互不误触。
      */
