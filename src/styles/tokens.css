@@ -41,6 +41,17 @@
   /* 强调与语义色 */
   --ui-accent: var(--c-accent);
   --ui-accent-soft: var(--c-accent-soft);
+  /*
+    命中底色：**提及命中与搜索命中共用这一条**。
+    两个入口画的是同一件事，各定一档就会「同一处命中在两处深浅不同」。
+
+    为什么不是 `--ui-accent-soft`：它只有 8% 透明，浅色主题下与行底色几乎分不开
+    （实测取样 Δ16.6，肉眼读作「没有高亮」）。取强调色 20%：浅色 Δ41.7、
+    深色 Δ58.6，两套主题都读得出来；再深就开始压正文（32% 时深色主题下
+    正文对比掉到 8:1 以下）。命中文字本身不换色（`color: inherit`），
+    所以加粗与普通正文的对比同值，不额外掉一档。
+  */
+  --ui-hit-bg: color-mix(in srgb, var(--ui-accent) 20%, transparent);
   --ui-danger: var(--c-danger);
   --ui-warn: var(--c-warn);
   --ui-ok: var(--c-ok);

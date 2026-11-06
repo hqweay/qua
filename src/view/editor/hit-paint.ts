@@ -37,7 +37,11 @@ function ensureStyle(key: string): void {
   styledKeys.add(key)
   const style = document.createElement('style')
   style.dataset.highlightKey = key
-  style.textContent = `::highlight(${key}) { background-color: var(--ui-accent-soft); color: inherit; }`
+  /**
+   * 命中底色与搜索命中（`styles/center.css` 的 `search-match`）取**同一个 token**：
+   * 两个入口画的是同一件事，各定一档就会「同一处命中在两处深浅不同」。
+   */
+  style.textContent = `::highlight(${key}) { background-color: var(--ui-hit-bg); color: inherit; }`
   document.head.appendChild(style)
 }
 
