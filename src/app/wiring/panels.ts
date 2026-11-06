@@ -424,8 +424,14 @@ export function setupPanels(deps: PanelsDeps) {
           void deps.getRegistry().invoke('core.props/set-choice-scope', { choiceId, scope }, 'ui'),
         setIcon: (choiceId, icon) =>
           void deps.getRegistry().invoke('core.props/set-choice-icon', { choiceId, icon }, 'ui'),
-        setDone: (defId, choiceId, done) =>
-          void deps.getRegistry().invoke('core.props/set-choice-done', { defId, choiceId, done }, 'ui'),
+        setCheck: (defId, spec) =>
+          void deps
+            .getRegistry()
+            .invoke(
+              'core.props/set-choice-check',
+              { defId, on: spec?.on ?? '', off: spec?.off ?? '', status: spec?.status ?? false },
+              'ui',
+            ),
         setCardinality: (defId, cardinality) =>
           void deps.getRegistry().invoke('core.props/set-choice-cardinality', { defId, cardinality }, 'ui'),
         setUiPosition: (defId, position) =>

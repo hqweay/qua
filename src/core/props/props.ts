@@ -136,8 +136,11 @@ export interface FieldTable {
   kinds: ReadonlyMap<string, PropKind>
   /** 属性 id → 缺省值（定义块写了 `_default` 才有；`readField` 对「已声明未填」按它取值） */
   defaults: ReadonlyMap<string, unknown>
-  /** 属性 id → 「完成」档的选项 id（`select` 且选项带 `_done` 才有） */
-  done: ReadonlyMap<string, string>
+  /**
+   * **唯一**的「任务状态」定义（`_use: 'status'` ＋ 合法 `_check`）。
+   * 库级概念：没有「多个完成型属性取第一条」的裁决。
+   */
+  status?: { defId: string; on: string; off: string }
   /** 属性 id → 基数（缺省 `one`；定义块写了 `_cardinality: 'many'` 才是多值） */
   cardinality: ReadonlyMap<string, Cardinality>
 }
@@ -148,18 +151,21 @@ export function fieldTableOf(forest: readonly Block[]): FieldTable {
   for (const tag of allTags(forest)) byTag.set(tag.id, declaredFieldIds(tag))
   const kinds = new Map<string, PropKind>()
   const defaults = new Map<string, unknown>()
-  const done = new Map<string, string>()
   const cardinality = new Map<string, Cardinality>()
+  let status: FieldTable['status']
   for (const def of allPropDefs(forest)) {
     kinds.set(def.id, propKindOf(def))
     const dflt = prop<unknown>(def, DEFAULT_PROP)
     if (dflt !== undefined) defaults.set(def.id, dflt)
-    const doneId = doneChoiceOf(def)
-    if (doneId !== undefined) done.set(def.id, doneId)
     const card = cardinalityOf(def)
     if (card === 'many') cardinality.set(def.id, card)
+    // 写入路径保证最多一个 status；坏数据带多个时按先序取第一个，不抛错
+    if (!status && useOf(def) === 'status') {
+      const check = checkOf(def)
+      if (check) status = { defId: def.id, on: check.on, off: check.off }
+    }
   }
-  return { byTag, kinds, defaults, done, cardinality }
+  return { byTag, kinds, defaults, cardinality, ...(status ? { status } : {}) }
 }
 
 /**
@@ -212,29 +218,13 @@ export function readField(block: Block, propId: string, table: FieldTable): Fiel
 }
 
 /**
- * 一块「有哪些字段」的**有序**清单（标签声明在前、自有槽在后）。
- *
- * 与 `fieldRows` 同一顺序，但不建行——`todoOf` 只需要「第一条完成型属性是谁」，
- * 不需要选项、显示名这些格子。两处各写一套顺序就会在「多个标签声明同一属性/
- * 自有属性排在后」时给出不同答案。
- */
-function fieldIdsInOrder(block: Block, table: FieldTable): string[] {
-  const out: string[] = []
-  for (const tagId of tagIdsOf(block)) {
-    for (const propId of table.byTag.get(tagId) ?? []) if (!out.includes(propId)) out.push(propId)
-  }
-  for (const propId of ownFieldIds(block)) if (!out.includes(propId)) out.push(propId)
-  return out
-}
-
-/**
- * 「任务」的派生读法：**第一个带「完成」选项的已声明字段**。
+ * 「任务」的派生读法：**库里唯一的 status 定义**。
  *
  * 三态与值这样对上：
- *   · 值＝该属性 `_done` 标记的选项 ⇒ `'done'`（做完了）；
+ *   · 值＝该定义 `_check.on` ⇒ `'done'`（做完了）；
  *   · 其余任何已声明形态 ⇒ `'todo'`（**是任务、还没做完**）——待办、进行中、
  *     以及**靠标签声明拿到这一栏还没填**的块（读侧缺省读出缺省项）；
- *   · 没有任何完成型字段 ⇒ `undefined`（这块压根不是任务）。
+ *   · 没有 status 定义，或这块没有那一栏 ⇒ `undefined`（这块压根不是任务）。
  *
  * ⚠️ **判据是「有没有这一栏」（`readField`），不是「有没有值」。** 把「未填」并进
  *    `undefined` 会让刚挂上的任务立刻不算任务 —— 屏幕上画着空心方框、查询查不到它。
@@ -243,24 +233,15 @@ function fieldIdsInOrder(block: Block, table: FieldTable): string[] {
  *    种子标签正是用 `declareField` 把这一栏给到成员的。那种块屏幕上是未完成、模型里
  *    却不是任务 —— 同一个块两种答案，且没有任何一层报错。
  *
- * ⚠️ **不再认固定的 propId／选项 id**：完成是选项上的 `_done`（值级语义）。
- *    多个完成型字段同屏时按 `fieldRows` 顺序取第一条（先标签后自有、声明顺序），
- *    与 gutter 上画出哪一个方框同一个答案。
+ * ⚠️ **不再有「第一条完成型属性」**：`_use: 'status'` 全局唯一（写入路径保证），
+ *    `todoOf` 只认这一条；两个属性的歧义在模型层就不存在。
  */
 export function todoOf(block: Block, table: FieldTable): TodoState | undefined {
-  for (const propId of fieldIdsInOrder(block, table)) {
-    const doneId = table.done.get(propId)
-    if (doneId === undefined) continue
-    /**
-     * 定义块没了／不是 select ⇒ 跳过（与渲染一致：gutter 上没有定义就不画方框）。
-     * 悬空的槽位无法说明它是任务型字段；拿别的 kind 的值来判会得到错误的答案。
-     */
-    if (table.kinds.get(propId) !== 'select') continue
-    const { declared, value } = readField(block, propId, table)
-    if (!declared) continue
-    return singleValueOf(value) === doneId ? 'done' : 'todo'
-  }
-  return undefined
+  const status = table.status
+  if (!status) return undefined
+  const { declared, value } = readField(block, status.defId, table)
+  if (!declared) return undefined
+  return singleValueOf(value) === status.on ? 'done' : 'todo'
 }
 
 export type PropKind = 'text' | 'number' | 'date' | 'checkbox' | 'select' | 'ref' | 'url'
@@ -323,18 +304,7 @@ export function choicesOf(def: Block): Block[] {
   return def.children.filter((c) => !isDeleted(c))
 }
 
-/**
- * 这个定义「完成」档的选项 id（`_done`）；没有 ⇒ `undefined`。
- *
- * 只认 `select` 的直接子块：`_done` 是选项的值级语义，不是任意块的标记。
- * 软删的选项不算（它已经不在可选集合里）；坏数据带多个时按兄弟顺序取第一个。
- */
-export function doneChoiceOf(def: Block): string | undefined {
-  if (propKindOf(def) !== 'select') return undefined
-  // 完成是**单值**状态：多值里「一个完成了、另一个没完成」无法映射成 todoOf 的二态
-  if (cardinalityOf(def) === 'many') return undefined
-  return choicesOf(def).find((c) => prop<boolean>(c, DONE_PROP) === true)?.id
-}
+
 
 /**
  * 一个选项的可见范围（**唯一的可见性来源**）。
@@ -348,20 +318,59 @@ export type ChoiceScope = { mode: 'all' } | { mode: 'only'; tags: string[] } | {
 export const CHOICE_SCOPE_PROP = '_choiceScope'
 
 /**
- * 选项上的「完成」标记（系统属性）：这个值表示这件事做完了。
+ * 属性定义的**用途**（系统属性）：这条属性拿来干什么。
  *
- * 为什么是**值级**而不是属性级：任务语义问的是「这个选项算不算完成」，
- * 不是「这条属性是不是任务属性」。打在选项上，`doneChoiceOf(def)` 就是唯一的派生；
- * 自定义的「任务」属性与内置任务状态因此走同一套 ⌘↵／删除线／查询。
+ * 现在只有 `status`（任务状态）。优先级先作为普通 select，等有应用级消费者
+ * （任务表／快捷键／默认任务模板）再扩这个联合——不要为假设的用途先造枚举值。
  *
- * 不变量：**每个定义最多一个**。写入路径（命令）在打标时把兄弟上的标记一并摘掉；
- * 读侧若遇到坏数据（手写多个）按兄弟顺序取第一个，不抛错。
+ * 用途与显示分开：`_use` 说语义，`_check` 说怎么编辑/显示。
  */
-export const DONE_PROP = '_done'
+export type PropUse = 'status'
 
-/** `_done` 的形状判据：只有 `true` 算标记；`false` 与「没有这一格」同义 */
-export function isDoneFlag(v: unknown): boolean {
-  return v === true
+export const USE_PROP = '_use'
+
+export function isUseValue(v: unknown): boolean {
+  return v === 'status'
+}
+
+/** 定义的用途；不是 `select`／没写／未知值 ⇒ 缺席（普通属性） */
+export function useOf(def: Block | undefined): PropUse | undefined {
+  if (!def || propKindOf(def) !== 'select') return undefined
+  return prop<string>(def, USE_PROP) === 'status' ? 'status' : undefined
+}
+
+/**
+ * 勾选框映射（系统属性）：勾选写 `on`、取消写 `off`。
+ *
+ * 它是**显示/编辑**映射，不自动等于任务：`_use: 'status'` 时才驱动
+ * `todoOf`/删除线/⌘↵；没有 `_use` 就只是一个普通的两态开关（如「已读/未读」）。
+ */
+export interface CheckSpec {
+  on: string
+  off: string
+}
+
+export const CHECK_PROP = '_check'
+
+/** 形状判据：两个非空、互不相同的选项 id（悬空 id 合法——软删的选项还在树上） */
+export function parseCheckSpec(v: unknown): CheckSpec | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const raw = v as { on?: unknown; off?: unknown }
+  if (typeof raw.on !== 'string' || raw.on === '') return null
+  if (typeof raw.off !== 'string' || raw.off === '') return null
+  if (raw.on === raw.off) return null
+  return { on: raw.on, off: raw.off }
+}
+
+export function isCheckValue(v: unknown): boolean {
+  return parseCheckSpec(v) !== null
+}
+
+/** 定义的勾选框映射；不是 `select`／多值／坏形状 ⇒ 缺席（退回普通 select） */
+export function checkOf(def: Block | undefined): CheckSpec | undefined {
+  if (!def || propKindOf(def) !== 'select') return undefined
+  if (cardinalityOf(def) === 'many') return undefined
+  return parseCheckSpec(prop<unknown>(def, CHECK_PROP)) ?? undefined
 }
 
 /**
@@ -1001,11 +1010,12 @@ export interface GutterField {
    */
   icon?: string
   /**
-   * `select`：这个字段的「完成」档选项 id（选项带 `_done`）。
-   * 有它 ⇒ 这个槽是**任务型开关**（点一下翻完成，⌘↵ 也认它）；
-   * 没有 ⇒ 一个普通的值，点击打开选项菜单。
+   * `select`：勾选框映射（`_check`）。有它 ⇒ 画成勾选框（勾选/取消写 on/off）；
+   * 没有 ⇒ 普通值，点击打开选项菜单。
    */
-  doneChoiceId?: string
+  check?: CheckSpec
+  /** `select`：用途；只有 `status` 时这个勾选框同时是任务开关（划线/⌘↵） */
+  use?: PropUse
 }
 
 /** 当前值指向的选项（含软删：值还在，显示不能丢）；不是选项 id ⇒ 缺席 */
@@ -1036,7 +1046,8 @@ function gutterFieldOf(
   const choice = row.kind === 'select' && !many ? choiceByValue(row.def, row.value) : undefined
   const picked = row.kind === 'select' && many ? pickedChoicesOf(row.def, row.value) : undefined
   const icon = gutterIconOf(row.def, choice)
-  const doneChoiceId = row.kind === 'select' ? doneChoiceOf(row.def) : undefined
+  const check = row.kind === 'select' ? checkOf(row.def) : undefined
+  const use = check ? useOf(row.def) : undefined
   return {
     propId: row.propId,
     def: row.def,
@@ -1047,7 +1058,8 @@ function gutterFieldOf(
     ...(choice ? { choice } : {}),
     ...(picked ? { picked } : {}),
     ...(icon ? { icon } : {}),
-    ...(doneChoiceId ? { doneChoiceId } : {}),
+    ...(check ? { check } : {}),
+    ...(use ? { use } : {}),
   }
 }
 

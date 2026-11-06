@@ -39,19 +39,21 @@ import { BELONGS_TO_PROP, isBelongsToRefs } from '../relations/hierarchy.ts'
 import { isJournalDate } from '../identity/journal.ts'
 import {
   CARDINALITY_PROP,
+  CHECK_PROP,
   CHOICE_SCOPE_PROP,
   DEFAULT_PROP,
-  DONE_PROP,
   FIELD_DEFS_PROP,
   OWN_PROPS_PROP,
   UI_POSITION_PROP,
+  USE_PROP,
   isCardinalityValue,
+  isCheckValue,
   isDefaultValue,
-  isDoneFlag,
   isFieldDefRefs,
   isOwnPropSlots,
   isPropKind,
   isUiPositionValue,
+  isUseValue,
   parseChoiceScope,
 } from './props.ts'
 import { isQuerySpec } from '../query/query.ts'
@@ -80,7 +82,8 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   _kind: isPropKind,
   [FIELD_DEFS_PROP]: isFieldDefRefs,
   [CHOICE_SCOPE_PROP]: (v) => parseChoiceScope(v) !== null,
-  [DONE_PROP]: isDoneFlag,
+  [USE_PROP]: isUseValue,
+  [CHECK_PROP]: isCheckValue,
   [CARDINALITY_PROP]: isCardinalityValue,
   [OWN_PROPS_PROP]: isOwnPropSlots,
   [UI_POSITION_PROP]: isUiPositionValue,

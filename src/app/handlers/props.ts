@@ -89,11 +89,17 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
     app.setChoiceIcon(choiceId, S(a.icon))
     return true
   },
-  'core.props/set-choice-done': (a, app) => {
+  'core.props/set-choice-check': (a, app) => {
     const defId = S(a.defId)
-    const choiceId = S(a.choiceId)
-    if (!defId || !choiceId) return false
-    app.setChoiceDone(defId, choiceId, a.done === true)
+    if (!defId) return false
+    const on = S(a.on)
+    const off = S(a.off)
+    if (on === '' && off === '') {
+      app.setChoiceCheck(defId, null)
+      return true
+    }
+    if (!on || !off) return false
+    app.setChoiceCheck(defId, { on, off, status: a.status === true })
     return true
   },
   'core.props/set-choice-cardinality': (a, app) => {

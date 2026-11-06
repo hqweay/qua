@@ -16167,15 +16167,18 @@ await check(
  * **选项编辑器里的图标 / 完成值 / 快捷入口**：三枚控件都写模型，重画后状态还在。
  */
 await check(
-  'T171d 选项编辑器：图标选择器写 `_icon`；完成值唯一；快捷入口勾选写 `_uiPosition`',
+  'T171d 选项编辑器：图标选择器写 `_icon`；勾选框映射出 on/off；快捷入口勾选写 `_uiPosition`',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
     await openFirstPage(page)
 
     const setup = await page.evaluate(() => {
-      const host = window.__qua.blocks().find((b) => b.roles.length === 0 && b.text.trim().length > 1)
-      if (!host) return { defId: '' }
+      // 不能挑一个已经是任务的行：下面要断言「普通勾选框不产生 data-todo/划线」
+      const host = window.__qua
+        .blocks()
+        .find((b) => b.roles.length === 0 && b.todo === null && b.text.trim().length > 1)
+      if (!host) return { defId: '', hostId: '' }
       window.__qua.invoke('core.props/create-def', {
         blockId: host.id,
         label: '冒烟图标',
@@ -16185,8 +16188,9 @@ await check(
       const defId = window.__qua.propDefs().find((d) => d.label === '冒烟图标')?.id ?? ''
       window.__qua.invoke('core.props/add-choice', { defId, label: '甲' })
       window.__qua.invoke('core.props/add-choice', { defId, label: '乙' })
+      window.__qua.invoke('core.props/add-choice', { defId, label: '丙' })
       window.__qua.invoke('core.block/focus-block', { blockId: defId })
-      return { defId }
+      return { defId, hostId: host.id }
     })
     assert(setup.defId !== '', '前置：定义块应建出来并聚焦')
     await page.waitForSelector('.choices-editor')
@@ -16203,30 +16207,72 @@ await check(
       () => document.querySelector('.choices-editor .choice-icon')?.getAttribute('data-icon') === 'lucide:flag',
     )
 
-    // 完成值：点第二行的 ○ → 它变成 ✓，第一行仍是 ○（最多一个）
-    await page.locator('.choices-editor .choice-row').nth(1).locator('[data-choice-done]').click()
-    const doneState = await page.evaluate(() =>
-      [...document.querySelectorAll('.choices-editor .choice-item')].map((item) => ({
-        label: item.querySelector('.choice-name')?.value ?? '',
-        done: item.querySelector('[data-choice-done]')?.getAttribute('data-choice-done') ?? '',
-      })),
-    )
+    // 勾选框映射：勾上「显示为勾选框」→ 出现 on/off 两个下拉（默认前两个选项）
+    await page.locator('[data-choice-check]').check()
+    await page.waitForSelector('[data-choice-check-which="on"]')
+    const checkState = await page.evaluate(() => {
+      const on = document.querySelector('[data-choice-check-which="on"]')
+      const off = document.querySelector('[data-choice-check-which="off"]')
+      return {
+        on: on?.value ?? '',
+        off: off?.value ?? '',
+        onText: on?.selectedOptions[0]?.textContent ?? '',
+        offText: off?.selectedOptions[0]?.textContent ?? '',
+        hasStatus: Boolean(document.querySelector('[data-choice-status]')),
+      }
+    })
     assert(
-      doneState.some((c) => c.label === '乙' && c.done === '1') &&
-        doneState.filter((c) => c.done === '1').length === 1,
-      `完成值唯一且落在乙上：${JSON.stringify(doneState)}`,
+      checkState.on !== '' && checkState.off !== '' && checkState.on !== checkState.off,
+      `勾选框映射应有两个不同选项：${JSON.stringify(checkState)}`,
     )
+    assert(checkState.onText === '甲' && checkState.offText === '乙', `默认取前两个选项：${JSON.stringify(checkState)}`)
+    assert(checkState.hasStatus, '还应给出「勾选表示完成（任务型）」')
 
-    // 快捷入口：勾上 → 写 `_uiPosition: block-left`；重画后仍勾着
-    await page.locator('.choices-gutter [data-choice-gutter]').check()
-    await page.waitForTimeout(200)
+    // 先在 gutter 上显示出来（默认 panel，不会画占位）；重画后仍勾着
+    await page.locator('[data-choice-gutter]').check()
+    await page.waitForTimeout(150)
     const gutterChecked = await page.evaluate(
       () => document.querySelector('[data-choice-gutter]')?.checked ?? null,
     )
     assert(gutterChecked === true, '勾选快捷入口后重画仍应是勾上的（写进了 `_uiPosition`）')
 
+    // 普通勾选框：值在 off（乙）时点一下 → on（甲）；不产生 data-todo/划线
+    await page.evaluate(
+      ({ hostId, defId, off }) => {
+        window.__qua.invoke('core.props/set-value', { blockId: hostId, propId: defId, value: off })
+        // 定义页已经把屏幕换走了：用命令回到宿主所在的那一段（diagnostics 的 focusBlock 只在当前 doc 内放光标）
+        window.__qua.invoke('core.block/focus-block', { blockId: hostId })
+      },
+      { ...setup, off: checkState.off },
+    )
+    await page.waitForFunction(
+      (id) => Boolean(document.querySelector(`.blk[data-block-id="${id}"] .check-box`)),
+      setup.hostId,
+    )
+    const plainBefore = await page.evaluate((id) => {
+      const row = document.querySelector(`.blk[data-block-id="${id}"]`)
+      return { todo: row?.getAttribute('data-todo') ?? null, box: Boolean(row?.querySelector('.check-box')) }
+    }, setup.hostId)
+    assert(plainBefore.box === true && plainBefore.todo === null, `普通勾选框不该是任务：${JSON.stringify(plainBefore)}`)
+
+    await page.evaluate((id) => {
+      document
+        .querySelector(`.blk[data-block-id="${id}"] .check-box`)
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    }, setup.hostId)
+    await page.waitForTimeout(250)
+    const plainAfter = await page.evaluate(
+      ({ hostId, defId }) => ({
+        value: window.__qua.fields(hostId).find((f) => f.propId === defId)?.value ?? null,
+        todo: document.querySelector(`.blk[data-block-id="${hostId}"]`)?.getAttribute('data-todo') ?? null,
+      }),
+      setup,
+    )
+    assert(plainAfter.value === checkState.on, `点一下应写 on（甲）：${JSON.stringify(plainAfter)}`)
+    assert(plainAfter.todo === null, '普通勾选框翻值后仍不是任务')
+
     await ctx.close()
-    return `图标写回 flag；完成值唯一（乙）；快捷入口已勾选`
+    return `图标写回 flag；勾选框映射出 on/off；快捷入口已勾选`
   },
 )
 

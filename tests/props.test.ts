@@ -19,8 +19,10 @@ import {
   declareOwnProp,
   declaredFieldIds,
   declaredFields,
+  CHECK_PROP,
   DEFAULT_PROP,
-  DONE_PROP,
+  USE_PROP,
+  checkOf,
   ensureTag,
   fieldIdsOf,
   fieldRows,
@@ -264,9 +266,10 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter、s
     [TASK_STATUS_TODO_ID, TASK_STATUS_DOING_ID, TASK_STATUS_DONE_ID, TASK_STATUS_ABANDONED_ID],
   )
   assert.equal(def!.props?._default, TASK_STATUS_TODO_ID, '缺省读出「待办」：刚挂上的任务不用先点一格')
-  // 「完成」是选项上的值级标记，不再靠固定选项 id；图标也是选项自己的数据
+  // 语义（use）与显示（check）分开：任务状态唯一，勾选=完成、取消=待办
+  assert.equal(def!.props?._use, 'status')
+  assert.deepEqual(def!.props?._check, { on: TASK_STATUS_DONE_ID, off: TASK_STATUS_TODO_ID })
   const done = def!.children.find((c) => c.id === TASK_STATUS_DONE_ID)
-  assert.equal(done?.props?._done, true, '「完成」选项带 `_done`，todoOf 按它判')
   assert.equal(done?.props?._icon, 'lucide:square-check', '每个值有自己的图标')
 
   const task = ws.blocks.find((b) => hasList(b, 'tag') && plainText(b.content) === '任务')
@@ -288,12 +291,21 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter、s
 })
 
 test('todoOf：完成 ⇒ done；待办／进行中／有槽没填／**靠标签声明** ⇒ todo；没有这一栏 ⇒ undefined', () => {
-  const def = mkPropDef('任务状态', 'select', { [DEFAULT_PROP]: TASK_STATUS_TODO_ID }, TASK_STATUS_PROP_ID)
-  // 选项＝定义块的直接子块（值存选项块 id）；「完成」靠选项上的 `_done` 认，不靠固定 id
+  const def = mkPropDef(
+    '任务状态',
+    'select',
+    {
+      [DEFAULT_PROP]: TASK_STATUS_TODO_ID,
+      [USE_PROP]: 'status',
+      [CHECK_PROP]: { on: TASK_STATUS_DONE_ID, off: TASK_STATUS_TODO_ID },
+    },
+    TASK_STATUS_PROP_ID,
+  )
+  // 选项＝定义块的直接子块（值存选项块 id）；「完成」由定义的 `_check.on` 认
   def.children = [
     { id: TASK_STATUS_TODO_ID, text: '待办', children: [] },
     { id: TASK_STATUS_DOING_ID, text: '进行中', children: [] },
-    { id: TASK_STATUS_DONE_ID, text: '完成', children: [], props: { [DONE_PROP]: true } },
+    { id: TASK_STATUS_DONE_ID, text: '完成', children: [] },
   ] as Block[]
   const tag = mkTagBlock('任务')
   declareField(tag, TASK_STATUS_PROP_ID)
@@ -319,11 +331,16 @@ test('todoOf：完成 ⇒ done；待办／进行中／有槽没填／**靠标签
   assert.equal(todoOf(none, fields), undefined)
 })
 
-test('完成是选项上的值级标记：自定义「任务」属性也走 todoOf；没有 `_done` 的 select 不算任务', () => {
-  const custom = mkPropDef('我的任务', 'select', {}, 'p-custom')
+test('完成是定义的 `_use: status` + `_check.on`：自定义任务也走 todoOf；没有 status 的 select 不算任务', () => {
+  const custom = mkPropDef(
+    '我的任务',
+    'select',
+    { [USE_PROP]: 'status', [CHECK_PROP]: { on: 'c-done', off: 'c-open' } },
+    'p-custom',
+  )
   custom.children = [
     { ...mkBlock('未开始'), id: 'c-open' },
-    { ...mkBlock('搞定', { props: { [DONE_PROP]: true } }), id: 'c-done' },
+    { ...mkBlock('搞定'), id: 'c-done' },
   ]
   const host: Block = { id: 'h', text: '', children: [], props: { 'p-custom': 'c-done' } }
   assert.equal(todoOf(host, fieldTableOf([custom, host])), 'done', '自定义任务属性与内置任务同一条判据')
@@ -331,7 +348,7 @@ test('完成是选项上的值级标记：自定义「任务」属性也走 todo
   const plain = mkPropDef('优先级', 'select', {}, 'p-plain')
   plain.children = [{ ...mkBlock('高'), id: 'p1' }]
   const h2: Block = { id: 'h2', text: '', children: [], props: { 'p-plain': 'p1' } }
-  assert.equal(todoOf(h2, fieldTableOf([plain, h2])), undefined, '没有 `_done` ⇒ 只是普通属性')
+  assert.equal(todoOf(h2, fieldTableOf([plain, h2])), undefined, '没有 status ⇒ 只是普通属性')
 })
 
 test('gutter 派生：select 带当前选项的图标与完成档；未填退回定义图标', () => {
@@ -349,7 +366,8 @@ test('gutter 派生：select 带当前选项的图标与完成档；未填退回
   const f = gutterFieldsOf(host, [def, host])[0]!
   assert.equal(f.icon, 'lucide:arrow-up', '选项自己的图标优先')
   assert.equal(f.choice?.id, 'p-hi', '当前值指向的选项跟着派生出来')
-  assert.equal(f.doneChoiceId, undefined, '没有 `_done` ⇒ 普通值，不画任务开关')
+  assert.equal(f.check, undefined, '没有 `_check` ⇒ 普通值，不画勾选框')
+  assert.equal(f.use, undefined, '没有 `_use` ⇒ 不是任务状态')
 
   const empty: Block = { id: 'e', text: '', children: [], props: { _ownProps: ['p-prio'] } }
   const e = gutterFieldsOf(empty, [def, empty])[0]!
@@ -357,10 +375,15 @@ test('gutter 派生：select 带当前选项的图标与完成档；未填退回
   assert.equal(e.icon, 'lucide:flag', '未填 ⇒ 定义块的图标，入口不因没有值而消失')
 })
 
-test('多值 select：值读成数组、名字按兄弟序、被作用域隐藏的值仍显示；`_done` 在多值上不算完成', () => {
-  const def = mkPropDef('标签集', 'select', { _cardinality: 'many' }, 'p-multi')
+test('多值 select：值读成数组、名字按兄弟序、被作用域隐藏的值仍显示；多值不能是勾选框', () => {
+  const def = mkPropDef(
+    '标签集',
+    'select',
+    { _cardinality: 'many', [USE_PROP]: 'status', [CHECK_PROP]: { on: 'c1', off: 'c2' } },
+    'p-multi',
+  )
   def.children = [
-    { ...mkBlock('甲', { props: { _done: true } }), id: 'c1' },
+    { ...mkBlock('甲'), id: 'c1' },
     { ...mkBlock('乙'), id: 'c2' },
     { ...mkBlock('丙', { props: { _choiceScope: { mode: 'only', tags: ['t1'] } } }), id: 'c3' },
   ]
@@ -377,7 +400,8 @@ test('多值 select：值读成数组、名字按兄弟序、被作用域隐藏�
   assert.equal(row.cardinality, 'many')
   assert.deepEqual(row.currentChoiceLabels, ['甲', '丙'], '顺序＝选项兄弟序，不是勾选序')
   assert.deepEqual(row.currentChoices?.map((c) => c.id), ['c1', 'c3'], '被作用域隐藏的值照常显示')
-  assert.equal(todoOf(host, fieldTableOf([def, host])), undefined, '多值不是任务：`_done` 在 many 上不生效')
+  assert.equal(checkOf(def), undefined, '多值不能有勾选框映射（读侧直接忽略）')
+  assert.equal(todoOf(host, fieldTableOf([def, host])), undefined, '多值不是任务：status 映射在 many 上不生效')
 })
 
 test('标签声明的字段：屏幕画方框与「模型里是任务」同一个判据（不许一处认、一处不认）', () => {
@@ -389,12 +413,17 @@ test('标签声明的字段：屏幕画方框与「模型里是任务」同一�
   const def = mkPropDef(
     '任务状态',
     'select',
-    { [UI_POSITION_PROP]: 'block-left', [DEFAULT_PROP]: TASK_STATUS_TODO_ID },
+    {
+      [UI_POSITION_PROP]: 'block-left',
+      [DEFAULT_PROP]: TASK_STATUS_TODO_ID,
+      [USE_PROP]: 'status',
+      [CHECK_PROP]: { on: TASK_STATUS_DONE_ID, off: TASK_STATUS_TODO_ID },
+    },
     TASK_STATUS_PROP_ID,
   )
   def.children = [
     { id: TASK_STATUS_TODO_ID, text: '待办', children: [] },
-    { id: TASK_STATUS_DONE_ID, text: '完成', children: [], props: { [DONE_PROP]: true } },
+    { id: TASK_STATUS_DONE_ID, text: '完成', children: [] },
   ] as Block[]
   const tagBlock = mkTagBlock('任务')
   declareField(tagBlock, TASK_STATUS_PROP_ID)

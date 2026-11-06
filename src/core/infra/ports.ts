@@ -239,12 +239,12 @@ export interface App {
   /** 写选项的图标（`lucide:<name>` 或字面文本；空串＝无图标） */
   setChoiceIcon(choiceId: string, icon: string): void
   /**
-   * 标记/取消「完成」值（选项上的 `_done`）。
+   * 写/摘勾选框映射（`_check {on, off}`），可选标成任务状态（`_use: 'status'`）。
    *
-   * `done === true` 时**同一笔事务**把兄弟上的标记摘掉（每个定义最多一个）；
-   * `done === false` 只摘这一个，该属性从此不再是任务型字段。
+   * `null` ＝ 摘掉；`status: true` 时库级唯一（已有另一条就拒绝）；
+   * 多值属性不能有 `_check`。
    */
-  setChoiceDone(defId: string, choiceId: string, done: boolean): void
+  setChoiceCheck(defId: string, spec: { on: string; off: string; status: boolean } | null): void
   /**
    * 切换单值/多值（只对 `select`）。
    *

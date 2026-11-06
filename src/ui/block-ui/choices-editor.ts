@@ -18,9 +18,9 @@
  */
 import { onCommitKeys } from './keys.ts'
 import {
-  DONE_PROP,
   ICON_PROP,
   cardinalityOf,
+  checkOf,
   choiceScopeOf,
   choiceVisible,
   choicesOf,
@@ -28,6 +28,7 @@ import {
   prop,
   propKindOf,
   uiPositionOf,
+  useOf,
   type Block,
   type ChoiceScope,
   type UiPosition,
@@ -43,9 +44,9 @@ export interface ChoiceActions {
   setScope: (choiceId: string, scope: ChoiceScope) => void
   /** 选项在块左侧的图标（空串＝无图标） */
   setIcon: (choiceId: string, icon: string) => void
-  /** 标记「完成」值（每个定义最多一个；只传 false 时只摘这一个） */
-  setDone: (defId: string, choiceId: string, done: boolean) => void
-  /** 单值/多值（多选时 `_done` 无效；切回单值有「仍有块选了多个值」的守卫） */
+  /** 写/摘勾选框映射；`status: true` 同时标为库级唯一的任务状态 */
+  setCheck: (defId: string, spec: { on: string; off: string; status: boolean } | null) => void
+  /** 单值/多值（多选不能是勾选框/任务状态；切回单值有「仍有块选了多个值」的守卫） */
   setCardinality: (defId: string, cardinality: 'one' | 'many') => void
   /** 定义块的快捷入口位置（block-left ＝ 块左侧图标；panel ＝ 只留属性卡） */
   setUiPosition: (defId: string, position: UiPosition) => void
@@ -169,6 +170,8 @@ export class ChoicesEditor {
     for (const [i, choice] of visible.entries()) list.appendChild(this.choiceItem(def, choice, i, visible, focusTag))
     section.appendChild(list)
 
+    if (focusTag === '') section.appendChild(this.checkSection(def))
+
     if (focusTag !== '') {
       const hidden = this.hiddenChoices(def, focusTag)
       if (hidden.length > 0) section.appendChild(this.hiddenBlock(hidden, focusTag))
@@ -184,6 +187,107 @@ export class ChoicesEditor {
       section.appendChild(this.addForm(def, ''))
     }
     this.root.appendChild(section)
+  }
+
+  /**
+   * **勾选框映射**（`_check {on, off}`）与任务状态用途（`_use: 'status'`）。
+   *
+   * 两个决定分开：
+   *   · 「显示为勾选框」只影响编辑/显示（勾选写 on、取消写 off），普通属性也能用；
+   *   · 「勾选表示完成」把它标成库级唯一的任务状态（划线/⌘↵/todoOf）。
+   * 多值属性不能勾选（单值才能「勾一个」）；少于两个选项时不给开。
+   */
+  private checkSection(def: Block): HTMLElement {
+    const box = document.createElement('div')
+    box.className = 'choices-check'
+    if (cardinalityOf(def) === 'many') return box
+
+    const all = choicesOf(def)
+    const check = checkOf(def)
+    const status = useOf(def) === 'status'
+
+    const head = document.createElement('label')
+    head.className = 'choices-gutter'
+    const cb = document.createElement('input')
+    cb.type = 'checkbox'
+    cb.className = 'prop-check'
+    cb.dataset.choiceCheck = '1'
+    cb.checked = check !== undefined
+    cb.disabled = all.length < 2
+    cb.addEventListener('change', () => {
+      if (cb.checked) {
+        const on = all[0]?.id ?? ''
+        const off = all[1]?.id ?? ''
+        this.deps.write.setCheck(def.id, on && off ? { on, off, status: false } : null)
+      } else {
+        this.deps.write.setCheck(def.id, null)
+      }
+      this.render()
+    })
+    const label = document.createElement('span')
+    label.textContent = t('ui.props.choice.check')
+    const hint = document.createElement('span')
+    hint.className = 'choices-hint'
+    hint.textContent = all.length < 2 ? t('ui.props.choice.checkNeedTwo') : ''
+    head.append(cb, label, hint)
+    box.appendChild(head)
+    if (!check) return box
+
+    const names = new Map(all.map((c) => [c.id, plainText(c.content).trim() || c.id.slice(-6)]))
+    const selectRow = (which: 'on' | 'off'): HTMLElement => {
+      const row = document.createElement('label')
+      row.className = 'choices-gutter'
+      const text = document.createElement('span')
+      text.textContent = t(which === 'on' ? 'ui.props.choice.checkOn' : 'ui.props.choice.checkOff')
+      const sel = document.createElement('select')
+      sel.className = 'prop-input'
+      sel.dataset.choiceCheckWhich = which
+      const seen = new Set<string>()
+      for (const c of all) {
+        seen.add(c.id)
+        const o = document.createElement('option')
+        o.value = c.id
+        o.textContent = names.get(c.id) ?? c.id.slice(-6)
+        sel.appendChild(o)
+      }
+      const current = check[which]
+      // 映射指向软删/不可见选项时仍显示出来，不静默改成另一个值
+      if (!seen.has(current)) {
+        const o = document.createElement('option')
+        o.value = current
+        o.textContent = t('ui.props.choice.deleted')
+        sel.appendChild(o)
+      }
+      sel.value = current
+      sel.addEventListener('change', () => {
+        const next = { on: which === 'on' ? sel.value : check.on, off: which === 'off' ? sel.value : check.off }
+        this.deps.write.setCheck(def.id, { ...next, status })
+        this.render()
+      })
+      row.append(text, sel)
+      return row
+    }
+    box.append(selectRow('on'), selectRow('off'))
+
+    const statusRow = document.createElement('label')
+    statusRow.className = 'choices-gutter'
+    const sbox = document.createElement('input')
+    sbox.type = 'checkbox'
+    sbox.className = 'prop-check'
+    sbox.dataset.choiceStatus = '1'
+    sbox.checked = status
+    sbox.addEventListener('change', () => {
+      this.deps.write.setCheck(def.id, { on: check.on, off: check.off, status: sbox.checked })
+      this.render()
+    })
+    const stext = document.createElement('span')
+    stext.textContent = t('ui.props.choice.checkStatus')
+    const shint = document.createElement('span')
+    shint.className = 'choices-hint'
+    shint.textContent = t('ui.props.choice.checkStatusHint')
+    statusRow.append(sbox, stext, shint)
+    box.appendChild(statusRow)
+    return box
   }
 
   /* ---------------------------------------------------------- 两个视角的集合 */
@@ -281,23 +385,6 @@ export class ChoicesEditor {
     const controls = document.createElement('span')
     controls.className = 'choice-controls'
     if (full) {
-      /**
-       * 「完成」值：**每个属性最多一个**（命令在同一笔事务里摘兄弟的标记）。
-       * 没标时是一个小圆圈（可点），标上是 ✓ —— 不给整列打勾框，太吵。
-       * 多值定义没有「完成」：一个块可以同时选完成和未完成，二态无法表达。
-       */
-      if (cardinalityOf(def) === 'one') {
-        const on = prop<boolean>(choice, DONE_PROP) === true
-        const done = this.iconButton(on ? '✓' : '○', t('ui.props.choice.doneTitle'), () => {
-          this.deps.write.setDone(def.id, choice.id, !on)
-          this.render()
-        })
-        done.dataset.choiceDone = on ? '1' : '0'
-        done.classList.add('choice-done')
-        done.setAttribute('aria-pressed', on ? 'true' : 'false')
-        controls.appendChild(done)
-      }
-
       const up = this.iconButton('↑', t('ui.props.choice.moveUp'), () => {
         if (index === 0) return
         const before = siblings[index - 1]
