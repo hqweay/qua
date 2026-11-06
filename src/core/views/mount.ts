@@ -509,9 +509,17 @@ export interface MountReadOpts {
 export function mountEntriesOf(host: Block, opts: MountReadOpts = {}): MountEntry[] {
   const derived = derivedEntriesOf(host)
   const stored = storedEntriesOf(host, opts)
+  /**
+   * **local 栏占用内置栏的稳定 id ⇒ 替换那一栏**（「改条件」的原地物化）：
+   * 物化出的 local 栏拿 `derivedTabId(source)` 当 id，对应的内置栏从此不再出现——
+   * 同一栏从「现算、只读」变成「拥有配置、可编辑」，不是一栏变两栏。
+   * 普通 local 的 id 是 `t-<hex>`，与内置 id（来源名）天然不撞，只有刻意物化才撞得上。
+   */
+  const taken = new Set(stored.filter((e) => e.kind === 'local').map((e) => e.id))
+  const live = derived.filter((d) => !taken.has(d.id))
   const markers = stored.filter((e): e is Extract<MountEntry, { kind: 'derived' }> => e.kind === 'derived')
-  if (markers.length === 0) return [...derived, ...stored]
-  const bySource = new Map(derived.map((d) => [d.source, d]))
+  if (markers.length === 0) return [...live, ...stored]
+  const bySource = new Map(live.map((d) => [d.source, d]))
   const out: MountEntry[] = []
   for (const e of stored) {
     if (e.kind === 'local') {
@@ -521,7 +529,7 @@ export function mountEntriesOf(host: Block, opts: MountReadOpts = {}): MountEntr
     const d = bySource.get(e.source)
     if (d) out.push(d)
   }
-  const missing = derived.filter((d) => !markers.some((m) => m.source === d.source))
+  const missing = live.filter((d) => !markers.some((m) => m.source === d.source))
   if (missing.length > 0) {
     const last = out.reduce((at, e, i) => (e.kind === 'derived' ? i : at), -1)
     out.splice(last + 1, 0, ...missing)

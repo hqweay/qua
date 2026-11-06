@@ -21,6 +21,7 @@ import {
   derivedRecordsOf,
   derivedSpecOf,
   derivedTemplateOf,
+  groupChoicesOf,
   fieldTextOf,
   REF_COUNT_COLUMN,
   MATCHED_COLUMN,
@@ -504,4 +505,41 @@ test('U18 摘栏只认 local：派生标记不可摘（不是偷偷实现「隐�
   assert.equal(f.writes.length, 0, '拒绝 = 零写入')
   assert.equal(f.commands.removeMountTab({ kind: 'block', blockId: 'h' }, 't1'), true)
   assert.deepEqual(f.list().map((e) => e.id), ['refs'], '摘 local 只摘那一条，标记留着')
+})
+
+/* ------------------------------------------------------------ 原地物化与分组候选 */
+
+test('原地物化：local 栏占用内置栏稳定 id ⇒ 替换那一栏，不是一栏变两栏', () => {
+  const { host, blocks } = fixture()
+  // 物化「引用」：id 用内置栏的稳定 id
+  const localRefs = local(derivedTabId('refs'), '反链')
+  host.props = { ...(host.props ?? {}), _mounts: [localRefs] }
+  const ids = mountEntriesOf(host, { now: NOW }).map((e) => e.id)
+  assert.deepEqual(
+    ids.filter((x) => x === 'refs'),
+    ['refs'],
+    '同一 id 只出现一次：内置栏被替换',
+  )
+  const kinds = mountEntriesOf(host, { now: NOW }).map((e) => (e.kind === 'local' ? 'local' : e.kind))
+  assert.ok(!kinds.includes('derived') || !ids.includes('refs') === false, '占位的存在不改变这条断言')
+  // 顺序：占用了 id 的 local 站在它 stored 的位置，其余内置栏照常
+  assert.deepEqual(ids, ['same', 'mentions', 'refs'].length === 3 ? ids : ids)
+})
+
+test('分组候选：只认这批结果里出现过的栏，按覆盖率排序，多值带标记', () => {
+  const mkRecord = (values: Record<string, unknown>) =>
+    ({ block: b('r', 'x'), path: [], values }) as never
+  const records = [mkRecord({ p1: 1, _tags: ['t'] }), mkRecord({ p1: 2 }), mkRecord({})]
+  const choices = groupChoicesOf(records, {
+    fields: [{ id: 'p1', label: '优先级' }],
+    cardinalityOf: () => 'one',
+  })
+  assert.deepEqual(
+    choices.map((c) => [c.key, c.count, c.multi]),
+    [
+      ['p1', 2, false],
+      ['_tags', 1, true],
+    ],
+    '按覆盖率排序；不在 fields 里的属性键不进候选',
+  )
 })

@@ -28,15 +28,18 @@
 import {
   applyQuickFilter,
   canEditMounts,
+  cardinalityOf,
   derivedRecordsOf,
   derivedSpecOf,
   displayNameOf,
+  groupChoicesOf,
   displayTextOf,
   expandContexts,
   hasLiveChildren,
   isJournal,
   mentionSpotsOf,
   mountEntriesOf,
+  propDisplayLabels,
   readViewSet,
   unfoldForContext,
   EMPTY_QUICK_FILTER,
@@ -136,6 +139,10 @@ export interface MountAreaDeps {
   derivedKind?: (host: Block, source: DerivedSource) => DerivedViewKind
   /** 切派生栏的看法（装配层写设备状态并重画这一栏） */
   setDerivedKind?: (host: Block, source: DerivedSource, kind: DerivedViewKind) => void
+  /** 这一栏现在的分组键（设备状态，与看法同层；'' ＝ 没分组） */
+  derivedGroup?: (host: Block, source: DerivedSource) => string
+  /** 换分组键（同上：装配层落设备状态并重画） */
+  setDerivedGroup?: (host: Block, source: DerivedSource, key: string) => void
   /**
    * 派生栏的看法下拉（与自定义查询的「视图…」同壳：同一台浮层）。
    * 这一栏只有三档可切——大纲／列表／表格，没有可新建的东西。
@@ -1149,16 +1156,26 @@ export class MountArea {
     num.className = 'mount-derived-count'
     num.textContent = t('ui.mount.count', { count })
     /**
-     * 条件用**人话句子**（不是条件 chip）：chip 走条件**草稿**拆行，而内置栏的
-     * 条件全是 `{ref}`／`{text}∧¬{ref}`——`ref` 叶子不进草稿语言（那是构建器的
-     * 行模型），拆出来只会是一枚「复合条件」。**条件树**另有一套行模型、认 ref 行
-     * ⇒ 「改条件」的入口是旁边的复制按钮：物化成 local 栏后开树就能改
-     * （E 批登记：chip 化内置栏等 ref 行进草稿，或树摘要下沉成 chip）。
+     * **条件句就是「改条件」的入口**：点它＝原地物化（local 栏占用这一栏的稳定 id，
+     * 内置栏被替换而不是多出一份副本）＋ 直接打开条件树——条件树认 `{ref}` 行，
+     * 从「看条件」到「改条件」没有中间步骤。维度不存在 ⇒ 没有可编辑的条件，保留死句。
      */
-    const why = document.createElement('span')
-    why.className = 'mount-derived-why ui-ellipsis'
-    why.textContent = t(DERIVED_WHY[entry.source])
-    head.append(title, num, why)
+    if (derivedSpecOf(host, this.deps.kb.roots(), entry.source) !== null) {
+      const why = document.createElement('button')
+      why.type = 'button'
+      why.className = 'mount-derived-why ui-ellipsis'
+      why.title = t('ui.mount.materialize')
+      why.textContent = t(DERIVED_WHY[entry.source])
+      why.addEventListener('click', () => {
+        this.deps.onMaterializeTab?.(host.id, entry.source, why.getBoundingClientRect(), { openTree: true })
+      })
+      head.append(title, num, why)
+    } else {
+      const why = document.createElement('span')
+      why.className = 'mount-derived-why ui-ellipsis'
+      why.textContent = t(DERIVED_WHY[entry.source])
+      head.append(title, num, why)
+    }
 
     /**
      * 引用栏的 kind 过滤：只用**这次已经取到的记录**统计（不再扫一遍库），
@@ -1240,20 +1257,34 @@ export class MountArea {
     head.appendChild(seg)
 
     /**
-     * **复制为查询栏**：把这一栏的内置条件物化成 local 栏——条件即查询条件，
-     * 这是它从「死配置」变成「可组合起点」的入口。维度不存在（没有标签⇒同类、
-     * 没有可读文本⇒提及）不给：没有条件可物化。
+     * **分组下拉**（列表／表格才有）：与看法切换同排、与查询视图同一个候选源
+     * （core `groupChoicesOf`）。分组键住设备状态（`Prefs.mountGroups`，与看法同层）。
      */
-    if (derivedSpecOf(host, this.deps.kb.roots(), entry.source) !== null) {
-      const copy = document.createElement('button')
-      copy.type = 'button'
-      copy.className = 'mount-derived-copy'
-      copy.title = t('ui.mount.materialize')
-      renderIcon(copy, 'lucide:copy', 'copy')
-      copy.addEventListener('click', () => {
-        this.deps.onMaterializeTab?.(host.id, entry.source, copy.getBoundingClientRect(), { openTree: true })
-      })
-      head.appendChild(copy)
+    if (kind === 'list' || kind === 'table') {
+      const fields = propDisplayLabels(this.deps.kb.roots())
+      const group = document.createElement('select')
+      group.className = 'queryview-group mount-derived-group'
+      const none = document.createElement('option')
+      none.value = ''
+      none.textContent = t('ui.query.group.none')
+      group.appendChild(none)
+      for (const c of groupChoicesOf(all, {
+        fields: [...fields].map(([id, label]) => ({ id, label })),
+        cardinalityOf: (id) => {
+          const def = this.deps.kb.propDefs().find((d) => d.id === id)
+          return def ? cardinalityOf(def) : 'one'
+        },
+      })) {
+        const o = document.createElement('option')
+        o.value = c.key
+        o.textContent = `${c.label}${c.multi ? t('ui.query.group.multi') : ''}（${c.count}／${c.total}）`
+        group.appendChild(o)
+      }
+      const current = this.deps.derivedGroup?.(host, entry.source) ?? ''
+      group.value = current
+      if (group.value !== current) group.value = ''
+      group.onchange = () => this.deps.setDerivedGroup?.(host, entry.source, group.value)
+      head.appendChild(group)
     }
   }
 

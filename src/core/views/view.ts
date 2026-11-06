@@ -956,6 +956,55 @@ export function isMultiValueKey(
   return key === '_tags' || cardinalityOf?.(key) === 'many'
 }
 
+/** 分组下拉的一个候选（key ＋ 显示名 ＋ 覆盖率 ＋ 是否多值） */
+export interface GroupChoice {
+  key: string
+  label: string
+  /** 这批结果里有多少块带着这一栏 */
+  count: number
+  /** 这批结果一共多少块（覆盖率分母） */
+  total: number
+  /** 多值键：能分组但（看板）拖拽禁用，选项上带尾注 */
+  multi: boolean
+}
+
+/**
+ * **分组下拉的候选**（唯一实现）：候选＝这批结果里**真正出现过的栏**，按覆盖率排序，
+ * 覆盖率直接标在选项上——只对这批结果有意义的栏才值得出现在前面。
+ * 候选范围 v1 ＝ 属性定义 ＋ `_tags`（按标签归属分堆）。
+ *
+ * 查询视图的抬头与挂载区派生栏的抬头各画一个下拉，**必须**吃同一份候选——
+ * 两处各算一遍，就会出现「同一个栏在两个落点里排位不同」。
+ */
+export function groupChoicesOf(
+  records: readonly ViewRecord[],
+  opts: {
+    /** 属性定义（id → 显示名）；候选只认这里出现过的 id ＋ `_tags` */
+    fields: readonly { id: string; label: string }[]
+    /** 多值解析（缺省只认 `_tags`） */
+    cardinalityOf?: (propId: string) => 'one' | 'many'
+  },
+): GroupChoice[] {
+  const total = records.length
+  const counts = new Map<string, number>()
+  for (const r of records) {
+    for (const [k, v] of Object.entries(r.values)) {
+      if (v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)) continue
+      counts.set(k, (counts.get(k) ?? 0) + 1)
+    }
+  }
+  return [...counts.entries()]
+    .filter(([k, n]) => n > 0 && (k === '_tags' || opts.fields.some((f) => f.id === k)))
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, count]) => {
+      const label =
+        key === '_tags'
+          ? t('ui.query.group.tagsKey')
+          : (opts.fields.find((f) => f.id === key)?.label ?? key.slice(-6))
+      return { key, label, count, total, multi: isMultiValueKey(key, opts.cardinalityOf) }
+    })
+}
+
 /**
  * 写这一张视图的**切片**（`undefined` ／ `null` ＝ 清掉，回到「只有基础条件」）。
  *

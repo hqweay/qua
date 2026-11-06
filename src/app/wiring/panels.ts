@@ -31,6 +31,7 @@ import {
   journalDate,
   mountHostOf,
   mountViewKey,
+  derivedTabId,
   normalizeAlias,
   parentsOf,
   propDisplayLabels,
@@ -837,6 +838,17 @@ export function setupPanels(deps: PanelsDeps) {
         return readMountView(deps.prefs().mountViews, mountHost, source)
       },
       setDerivedKind: (hostBlock, source, kind) => setDerivedKind(hostBlock, source, kind),
+      derivedGroup: (hostBlock, source) => {
+        const mk = mountViewKey(mountHostOf(hostBlock), source)
+        return deps.prefs().mountGroups[mk] ?? ''
+      },
+      setDerivedGroup: (hostBlock, source, key) => {
+        const mk = mountViewKey(mountHostOf(hostBlock), source)
+        if (key === '') delete deps.prefs().mountGroups[mk]
+        else deps.prefs().mountGroups[mk] = key
+        deps.scheduleDeviceSave()
+        mountInstances.get(hostBlock.id)?.area.render()
+      },
       // 看法下拉与自定义查询的「视图…」同壳（同一台浮层，行由宿主层现画）
       openDerivedViewMenu: (anchor, current, onPick) => app.openDerivedViewMenu(anchor, current, (k) => onPick(k as DerivedViewKind)),
       onRemoveTab: (mountHost, tabId) => {
@@ -915,16 +927,9 @@ export function setupPanels(deps: PanelsDeps) {
                 ),
               columns: derivedColumns(entry.source),
               listFields: derivedListFields(entry.source),
-              // 分组键与看法同层（设备状态）：派生栏没有可写的视图配置
+              // 分组键与看法同层（设备状态）；下拉由挂载区抬头画，这里只带渲染用的键
               groupBy: deps.prefs().mountGroups[mountViewKey(mountHost, entry.source)] ?? '',
               setKind: (k) => setDerivedKind(mountHostBlock, entry.source, k),
-              setGroup: (key) => {
-                const mk = mountViewKey(mountHost, entry.source)
-                if (key === '') delete deps.prefs().mountGroups[mk]
-                else deps.prefs().mountGroups[mk] = key
-                deps.scheduleDeviceSave()
-                mountInstances.get(hostId)?.area.render()
-              },
               explain: t(explainKey),
             }),
           )
@@ -1011,6 +1016,9 @@ export function setupPanels(deps: PanelsDeps) {
       .invoke(
         'core.mount/add-local',
         {
+          // **占用内置栏的稳定 id**：合并规则让 local 替换对应的内置栏——
+          // 「改条件」是原地升级（现算 → 可编辑），不是一栏变两栏
+          id: derivedTabId(source),
           host: mountHost,
           label: t(BUILTIN_LABEL[source]),
           spec: template.spec,

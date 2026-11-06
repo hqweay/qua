@@ -337,6 +337,8 @@ export interface App {
     views?: ViewConfig[],
     activeView?: string,
     emptyView?: 'table' | 'none',
+    /** 指定栏 id（占用内置栏稳定 id ⇒ 原地替换那一栏）；已占用 ⇒ 忽略，回退随机 id */
+    id?: string,
   ): string
   /** 摘一栏（`tabId` 是稳定 id，不是数组下标）。**不删任何块** */
   removeMountTab(host: MountHost, tabId: string): boolean

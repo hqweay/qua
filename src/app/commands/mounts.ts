@@ -71,14 +71,18 @@ export function mountCommands(
      * 没有激活视图时这一栏只有大纲分支，条件与范围（这一块之下/全库）的
      * 芯片住在视图抬头里 —— 缺了这张表，「范围只到宿主这一块」在屏幕上无处可看。
      */
-    addLocalTab: (host, label, spec, views, activeView, emptyView) => {
+    addLocalTab: (host, label, spec, views, activeView, emptyView, id) => {
       if (!editable(host)) return ''
       const name = label.trim()
       if (name === '' || !spec || typeof spec !== 'object' || !spec.where) return ''
       const canon = canonicalSpec(spec)
       const source: Source = { kind: 'query', spec: canon }
       const list = canonicalViews(views ?? [], source)
-      const entry: MountEntry = { id: mkTabId(), kind: 'local', label: name, spec: canon, views: list }
+      // 指定 id 只在**没被占用**时生效：撞了（重复物化／手工数据）回退随机 id，
+      // 绝不产生两条同 id 的栏——id 是激活态与冻结缓存的键
+      const existing = new Set(entriesOf(host).map((e) => e.id))
+      const tabId = id !== undefined && id !== '' && !existing.has(id) ? id : mkTabId()
+      const entry: MountEntry = { id: tabId, kind: 'local', label: name, spec: canon, views: list }
       let active = activeView !== undefined && activeView !== '' ? activeView : ''
       if (list.length === 0 && emptyView !== 'none') {
         // 列在第一次建表时算一次（与 `core.view/add` 同一条口径），之后不随结果漂移

@@ -17,9 +17,11 @@ export const MOUNT_HANDLERS: Record<string, Handler> = {
     const spec = a.spec as QuerySpec | undefined
     if (!host || !label || !spec || typeof spec !== 'object' || !spec.where) return false
     const view = S(a.view)
-    // views 可带（「复制为查询栏」把本源默认列一起物化）；不带走缺省表格
+    // views 可带（「改条件」把本源默认列一起物化）；不带走缺省表格。
+    // id 可带（占用内置栏稳定 id ⇒ 原地替换那一栏）；已占用 ⇒ 忽略，回退随机 id
     const views = Array.isArray(a.views) ? (a.views as Parameters<typeof app.addLocalTab>[3]) : []
-    return app.addLocalTab(host, label, spec, views, view) !== ''
+    const id = S(a.id)
+    return app.addLocalTab(host, label, spec, views, view, undefined, id !== '' ? id : undefined) !== ''
   },
   'core.mount/remove': (a, app) => {
     const host = hostArg(a.host)

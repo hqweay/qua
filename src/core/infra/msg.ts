@@ -399,7 +399,7 @@ export const MSG = {
   'ui.mount.newTabName': '这一栏叫什么？',
   'ui.mount.specTitle': '条件（JSON）',
   'ui.mount.localName': '新查询',
-  'ui.mount.materialize': '以此建查询栏，就地改条件',
+  'ui.mount.materialize': '改成可编辑的查询栏（可改条件、可摘除）',
   'ui.mount.viewGone': '这张视图已不存在',
   'ui.mount.rename': '重命名这一栏',
   'ui.mount.renameHint': '双击重命名这一栏',

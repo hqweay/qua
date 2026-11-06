@@ -25,12 +25,12 @@ import {
   childrenRecords,
   defaultColumnsForSource,
   fieldTextOf,
+  groupChoicesOf,
   MATCHED_COLUMN,
   displayNameOf,
   expandContexts,
   hasLiveChildren,
   isOwnEdit,
-  isMultiValueKey,
   isQueryBlock,
   listTableOf,
   resolveRows,
@@ -253,8 +253,6 @@ export interface DerivedMode {
   groupBy: string
   /** 切看法写哪（设备状态；由装配层落地） */
   setKind: (kind: DerivedViewKind) => void
-  /** 换分组键写哪（同上：设备状态，不落 KB） */
-  setGroup: (key: string) => void
   /** 表头的只读说明（「指向这一块」这类） */
   explain: string
 }
@@ -946,43 +944,33 @@ export class ViewHost {
   }
 
   /**
-   * **分组选择**（记录视图才有）：候选＝这批结果里**真正出现过的栏**，按覆盖率排序，
-   * 覆盖率直接标在选项上（「12／20」）——只对这批结果有意义的栏才值得出现在前面。
-   * 候选范围 v1 ＝ 属性定义 ＋ `_tags`（按标签归属分堆）；多值键带「多值」尾注
-   * （它们能分组，但拖拽禁用——写路径只有单值有唯一动作）。
+   * **分组选择**（记录视图才有）：候选吃 core 的 `groupChoicesOf`（唯一实现）——
+   * 查询视图与挂载区派生栏的两个下拉必须给出同一份候选。多值键带尾注
+   * （能分组，但看板拖拽禁用——写路径只有单值有唯一动作）。
+   *
+   * ⚠️ **派生栏不画**：它的分组下拉由挂载区抬头画（与看法切换同排）——
+   * ViewHost 的抬头对派生栏是隐藏的，留下这一颗就是「不分组」孤零零一行（实测难看）。
    */
   private paintGroup(view: ViewConfig | null): void {
     const kind = view?.kind
     const record = kind === 'list' || kind === 'table' || kind === 'board' || kind === 'gallery'
-    this.els.group.hidden = !record || !view
-    if (!record || !view) return
-    const records = this.records()
-    const total = records.length
-    const counts = new Map<string, number>()
-    for (const r of records) {
-      for (const [k, v] of Object.entries(r.values)) {
-        if (v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)) continue
-        counts.set(k, (counts.get(k) ?? 0) + 1)
-      }
-    }
-    const label = (key: string): string => {
-      if (key === '_tags') return t('ui.query.group.tagsKey')
-      return this.deps.fields().find((f) => f.id === key)?.label ?? key.slice(-6)
-    }
+    this.els.group.hidden = !record || !view || Boolean(this.deps.derived)
+    if (!record || !view || this.deps.derived) return
+    // 卡片（看板）的分组列**不支持多值属性**：拖卡写值没有唯一动作——多值去列表/表格分组
+    const board = kind === 'board'
+    const choices = groupChoicesOf(this.records(), {
+      fields: this.deps.fields(),
+      cardinalityOf: (id) => this.cardinalityOf(id),
+    }).filter((c) => !(board && c.multi))
     const options: HTMLOptionElement[] = []
     const none = document.createElement('option')
     none.value = ''
     none.textContent = t('ui.query.group.none')
     options.push(none)
-    for (const [key, n] of [...counts.entries()]
-      .filter(([k, n]) => n > 0 && (k === '_tags' || this.deps.fields().some((f) => f.id === k)))
-      // 卡片（看板）的分组列**不支持多值属性**：拖卡写值没有唯一动作——多值去列表/表格分组
-      .filter(([k]) => !(kind === 'board' && isMultiValueKey(k, (id) => this.cardinalityOf(id))))
-      .sort((a, b) => b[1] - a[1])) {
+    for (const c of choices) {
       const o = document.createElement('option')
-      o.value = key
-      const multi = isMultiValueKey(key, (id) => this.cardinalityOf(id)) ? t('ui.query.group.multi') : ''
-      o.textContent = `${label(key)}${multi}（${n}／${total}）`
+      o.value = c.key
+      o.textContent = `${c.label}${c.multi ? t('ui.query.group.multi') : ''}（${c.count}／${c.total}）`
       options.push(o)
     }
     this.els.group.replaceChildren(...options)
@@ -992,11 +980,6 @@ export class ViewHost {
       this.els.group.value = ''
     }
     this.els.group.onchange = () => {
-      // 派生栏没有可写的视图配置：分组跟看法一样住设备状态，由装配层落
-      if (this.deps.derived) {
-        this.deps.derived.setGroup(this.els.group.value)
-        return
-      }
       this.deps.invoke('core.view/set-group', {
         owner: this.writeOwner,
         viewId: view.id,

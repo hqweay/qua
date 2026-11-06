@@ -576,6 +576,19 @@
 button.queryview-chip {
   cursor: pointer;
 }
+/* 分组下拉（查询抬头与派生栏抬头共用一颗原语）：与旁边的看法按钮同高同字，
+   不然就是原生控件默认样式的「不分组」孤零零杵着（实测难看） */
+.queryview-group {
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  height: var(--ui-row-h);
+  padding: 0 var(--ui-gap-2);
+  border: 0;
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
 button.queryview-chip:hover {
   background: var(--ui-surface-raised);
 }
