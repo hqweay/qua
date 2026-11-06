@@ -214,6 +214,8 @@ export const COMMANDS: CommandDecl[] = [
   /* ---- 浮层 ---- */
   { name: 'core.command-palette/show', title: t('cmd.command-palette.show'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), keywords: ['palette', 'command', t('menu.kw.command')], tile: { icon: 'lucide:compass' } },
   { name: 'core.search/open', title: t('cmd.search.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), keywords: ['search', 'find', 'ctrlp'], tile: { icon: 'lucide:search' } },
+  // 设置是工具面：打开入口就是这一条命令（⌘,），可钉成 cmd 卡——不另造第四种入口
+  { name: 'core.settings/open', title: t('cmd.settings.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['settings', 'preferences', 'keys', 'theme'], tile: { icon: 'lucide:settings' } },
   { name: 'core.menu/block', title: t('cmd.menu.block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), args: { blockId: { type: 'string' } } },
   { name: 'core.menu/slash', title: t('cmd.menu.slash'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer') },
   { name: 'core.layer/close', title: t('cmd.layer.close'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), hidden: true },

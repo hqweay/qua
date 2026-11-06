@@ -18078,6 +18078,106 @@ await check('M4 卡头「全屏打开」：中心开同一份内容并进全屏�
   return '全屏打开：body[data-axis=full] ＋ 中心同一块；Esc 两步退回后卡仍在槽'
 })
 
+/* ---------------------------------------------------------------- 设置（⌘,） */
+
+/**
+ * **设置面**：⌘, 开中心工具面（按 kind 去重）；快捷键页捕获新键位 ⇒ 进设备偏好
+ * ＋ 注入绑定层（读时生效），重启后还在。改完的键位要**立刻**生效——
+ * 只存盘不注入的话，「改好了但要重启」是一种静默说谎。
+ */
+await check('M3 设置面：⌘, 开且去重；捕获键位立即生效且重启后还在', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  // ⚠️ 不 quiet：保留键被拒的那条断言要读 toast（quiet 会掐掉它）
+
+  await page.keyboard.press(`${MOD}+,`)
+  await page.waitForTimeout(400)
+  const opened = await page.evaluate(() => ({
+    face: document.querySelector('#center-surface')?.dataset.face ?? '',
+    visible: document.querySelector('#center-surface')?.hidden === false,
+    tabs: [...document.querySelectorAll('.center-tab')].map((e) => e.textContent ?? ''),
+  }))
+  assert(opened.face === 'settings' && opened.visible, `⌘, 要打开设置面：${JSON.stringify(opened)}`)
+  assert(opened.tabs.filter((x) => x === '设置').length === 1, `设置 tab 一张（按 kind 去重）：${JSON.stringify(opened.tabs)}`)
+
+  // 再按一次 ⌘, ＝ 切过去，不是第二张
+  await page.keyboard.press(`${MOD}+,`)
+  await page.waitForTimeout(300)
+  const again = await page.evaluate(() => document.querySelectorAll('#center-surface').length)
+  assert(again === 1, `再按 ⌘, 不开第二张：${again}`)
+
+  // 主题直选：点「亮」⇒ 当前档挪过去
+  await page.locator('[data-settings-theme="light"]').click()
+  await page.waitForTimeout(300)
+  const theme = await page.evaluate(() => ({
+    on: document.querySelector('.settings-theme-opt--on')?.dataset.settingsTheme ?? '',
+  }))
+  assert(theme.on === 'light', `主题当前档要跟上：${JSON.stringify(theme)}`)
+
+  // 捕获：点「撤销」那一行的键位 chip → 按 ⌘U ⇒ 行内变成 ⌘U ＋「自定义」
+  const undoRow = '[data-settings-key="core.history/undo|null"]'
+  await page.locator(`${undoRow} .settings-key-chip`).first().click()
+  await page.waitForTimeout(200)
+  assert(
+    await page.locator(`${undoRow} [data-settings-capture]`).count(),
+    '点键位 chip 要进捕获态',
+  )
+  await page.keyboard.press(`${MOD}+u`)
+  await page.waitForTimeout(300)
+  const row = await page.evaluate(
+    (sel) => ({
+      chips: [...document.querySelectorAll(`${sel} .settings-key-chip`)].map((e) => e.textContent ?? ''),
+      marked: document.querySelector(`${sel} .settings-key-mark`)?.textContent ?? '',
+    }),
+    undoRow,
+  )
+  assert(row.chips.some((c) => c.includes('U')), `捕获后行内要出现新键位：${JSON.stringify(row)}`)
+  assert(row.marked === '自定义', `覆盖过的行要有「自定义」标记：${JSON.stringify(row)}`)
+
+  // 保留键：进捕获态按 ⌘W ⇒ 一句实话，捕获不退出
+  const redoRow = '[data-settings-key="core.history/redo|null"]'
+  await page.locator(`${redoRow} .settings-key-chip`).first().click()
+  await page.waitForTimeout(200)
+  await page.keyboard.press(`${MOD}+w`)
+  await page.waitForTimeout(300)
+  const warned = await page.evaluate(() => document.querySelector('.toast')?.textContent ?? '')
+  assert(warned.includes('窗口'), `保留键要被拒并说原因：${JSON.stringify(warned)}`)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+
+  // 重启（真·关页重开，beforeunload 会把设备状态落盘）：再开设置面，键位还在，且真的生效
+  const reopened = await reopenPage(browser, ctx, base, page)
+  await reopened.page.waitForTimeout(500)
+  await reopened.page.keyboard.press(`${MOD}+,`)
+  await reopened.page.waitForTimeout(400)
+  const after = await reopened.page.evaluate(() => {
+    const row = document.querySelector('[data-settings-key="core.history/undo|null"] .settings-key-chip')
+    return { chip: row?.textContent ?? '' }
+  })
+  assert(after.chip.includes('U'), `重启后键位覆盖要还在：${JSON.stringify(after)}`)
+
+  // 行为验证（关掉设置面回到正文的可写块）：⌘Z 不再是撤销（打字后按它文字不动），⌘U 才是
+  await reopened.page.keyboard.press(`${MOD}+Shift+w`)
+  await reopened.page.waitForTimeout(300)
+  await reopened.page.evaluate(() => {
+    const b = window.__qua.blocks().find((x) => !x.roles?.includes('journal'))
+    window.__qua.focusBlock(b.id, 0)
+  })
+  await reopened.page.waitForTimeout(200)
+  await reopened.page.keyboard.type('夜班标记甲')
+  await reopened.page.waitForTimeout(250)
+  await reopened.page.keyboard.press(`${MOD}+z`)
+  await reopened.page.waitForTimeout(250)
+  const oldKey = await reopened.page.evaluate(() => window.__qua.text().join('|'))
+  assert(oldKey.includes('夜班标记甲'), `旧键 ⌘Z 不再是撤销（文字还在）：${JSON.stringify(oldKey)}`)
+  await reopened.page.keyboard.press(`${MOD}+u`)
+  await reopened.page.waitForTimeout(250)
+  const newKey = await reopened.page.evaluate(() => window.__qua.text().join('|'))
+  assert(!newKey.includes('夜班标记甲'), `新键 ⌘U 才是撤销（文字被撤掉）：${JSON.stringify(newKey)}`)
+
+  await reopened.ctx.close()
+  return '⌘, 开且去重；主题直选；捕获 ⌘U 即时生效；⌘W 被拒；重启后 ⌘Z 失效、⌘U 撤销'
+})
+
 /**
  * **挂载区的「＋」只建 local 查询**：不弹菜单、不建块、不产生 linked 指针。
  *

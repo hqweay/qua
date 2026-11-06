@@ -854,6 +854,19 @@ export const MSG = {
   'ui.theme.mode.light': '亮',
   'ui.theme.mode.dark': '暗',
 
+  /* ---------------------------------------------------------------- 设置（工具面） */
+  'ui.surface.settings': '设置',
+  'cmd.settings.open': '设置',
+  'ui.settings.appearance': '外观',
+  'ui.settings.keys': '快捷键',
+  'ui.settings.keysHint': '点一下键位再按新的；Esc 取消',
+  'ui.settings.capture': '按新的键…',
+  'ui.settings.customized': '自定义',
+  'ui.settings.keysReset': '恢复默认',
+  'ui.settings.removed': '已摘掉',
+  'ui.keys.needModifier': '要带 ⌘ / Alt 一类修饰键（裸键归打字）',
+  'ui.keys.reserved': '这颗键归窗口（退出／关窗／新窗），改不了',
+
   /* ---------------------------------------------------------------- 空态提示 */
   'ui.emptyHint': '按 <kbd>/</kbd> 呼出斜杠命令 · <kbd>⌘P</kbd> 打开命令面板 · <kbd>⌘B</kbd> 给选区加粗',
 

@@ -15,6 +15,7 @@ import type { Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import { trashCard, type DockContentDeps } from '../../ui/dock/dock-content.ts'
 import { SearchFace, type SearchFaceDeps } from '../../ui/search/search-face.ts'
+import { SettingsFace, type SettingsFaceDeps } from '../../ui/settings/settings-face.ts'
 import type { Chrome } from '../../ui/chrome/chrome.ts'
 
 export interface SurfaceDeps {
@@ -25,12 +26,16 @@ export interface SurfaceDeps {
   getChrome: () => Chrome
   /** 搜索面的依赖（引擎/打开/晋升/复制——全在装配层，面自己不认识 app） */
   searchDeps: () => SearchFaceDeps
+  /** 设置面的依赖（偏好/命令面/写键位——同样全在装配层） */
+  settingsDeps: () => SettingsFaceDeps
 }
 
 export function setupSurface(deps: SurfaceDeps) {
   let current: SurfaceRef | null = null
   /** 搜索面实例：只有当前在前时活着；离开就收掉（终点面不保留位置与词） */
   let searchFace: SearchFace | null = null
+  /** 设置面实例：同一条寿命（终点面不保留状态，回来现读偏好） */
+  let settingsFace: SettingsFace | null = null
   /** 从浮层「展开为面板」带过来的词：**随打开带一次**，不做 live 双写 */
   let pendingTerm: string | null = null
 
@@ -77,6 +82,8 @@ export function setupSurface(deps: SurfaceDeps) {
     if (!current) {
       searchFace?.dispose()
       searchFace = null
+      settingsFace?.dispose()
+      settingsFace = null
       el.hidden = true
       el.replaceChildren()
       // 外框的「这一面要不要整面滚」由面自己说（搜索面是主从布局，左右各自滚）
@@ -97,12 +104,25 @@ export function setupSurface(deps: SurfaceDeps) {
       face.mount(el)
       return
     }
+    if (current.kind === 'utility' && current.face === 'settings') {
+      settingsFace?.dispose()
+      const face = new SettingsFace(deps.settingsDeps())
+      settingsFace = face
+      el.replaceChildren()
+      el.dataset.face = current.face
+      el.hidden = false
+      chrome.scrollEl.hidden = true
+      face.mount(el)
+      return
+    }
     const body = buildBody(current)
     if (!body) {
       // 守卫挡住了不认识的面 ⇒ 回到编辑器（不摆一张空面）
       current = null
       searchFace?.dispose()
       searchFace = null
+      settingsFace?.dispose()
+      settingsFace = null
       render()
       return
     }
@@ -120,7 +140,9 @@ export function setupSurface(deps: SurfaceDeps) {
    */
   function refreshIfShown(): void {
     if (current === null) return
-    if (current.kind === 'utility' && current.face === 'search') return
+    // 工具面是**有状态的组件**，库变化不重画：搜索面重跑会打断输入（重画归面上的显式动作），
+    // 设置面读的是偏好不是库——内容变了它也不该动
+    if (current.kind === 'utility') return
     render()
   }
 

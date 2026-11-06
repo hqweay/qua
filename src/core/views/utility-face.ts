@@ -11,7 +11,7 @@
  */
 import type { MsgId } from '../infra/msg.ts'
 
-export type UtilityFaceId = 'search'
+export type UtilityFaceId = 'search' | 'settings'
 
 export interface UtilityFaceDecl {
   id: UtilityFaceId
@@ -19,13 +19,16 @@ export interface UtilityFaceDecl {
   icon: string
   /** tab 条的固定名（字典 id；UI 调 `t()` 取字） */
   label: MsgId
+  /** 能不能钉进槽（有槽卡身）。没有卡身的面只住中心——画廊不给「添加到槽」的行 */
+  slot?: boolean
 }
 
 /**
  * 工具面目录：**表面目录唯一一份**。行与它的渲染分支一起加（渲染穷举会红）。
  */
 export const UTILITY_FACES: readonly UtilityFaceDecl[] = [
-  { id: 'search', icon: 'lucide:search', label: 'ui.surface.search' },
+  { id: 'search', icon: 'lucide:search', label: 'ui.surface.search', slot: true },
+  { id: 'settings', icon: 'lucide:settings', label: 'ui.surface.settings' },
 ]
 
 export function isUtilityFaceId(v: unknown): v is UtilityFaceId {

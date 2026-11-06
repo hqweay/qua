@@ -136,6 +136,20 @@ test('device: 存了再读 ⇒ 主题／槽宽／钉住都原样回来', async (
   assert.deepEqual(loaded.folded, { b1: true, b2: true })
 })
 
+test('device: 用户键位覆盖存了再读原样回来；坏形状（空身份 / 非键位值）丢掉', () => {
+  const p = normalizePrefs({
+    keys: {
+      'core.history/undo|null': 'mod+u',
+      'core.history/redo|null': null,
+      '': 'mod+x',
+      bad: 42,
+    },
+  })
+  assert.deepEqual(p.keys, { 'core.history/undo|null': 'mod+u', 'core.history/redo|null': null }, '空身份与非键位值不进偏好')
+  const roundTrip = normalizePrefs({ ...p, railOpen: undefined })
+  assert.deepEqual(roundTrip.keys, p.keys)
+})
+
 test('device: 缺字段只补默认（与库无关：旧字节里没有的键不崩）', async () => {
   resetMemoryLocalStorage()
   const key = freshKey()

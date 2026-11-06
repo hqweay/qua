@@ -22,6 +22,7 @@ import { editorRun } from './view/editor/editor-run.ts'
 import { fillBlockText } from './view/editor/block-dom.ts'
 import {
   resolveBindings,
+  setUserKeys,
 } from './core/infra/bindings.ts'
 import {
   COMMANDS,
@@ -57,6 +58,7 @@ import { dispatchKey } from './core/infra/dispatch.ts'
 import { setupOwners } from './app/wiring/owners.ts'
 import { QueryTree } from './ui/query/query-tree.ts'
 import { SearchFace, type SearchFaceDeps } from './ui/search/search-face.ts'
+import type { SettingsFaceDeps } from './ui/settings/settings-face.ts'
 import { setupChrome } from './app/wiring/chrome.ts'
 import { setupPages, type TabInfo } from './app/wiring/pages.ts'
 import { renderCenterTabs as paintCenterTabs } from './ui/chrome/center-tabs.ts'
@@ -361,6 +363,9 @@ const prefs = (): Prefs => device.prefs
 
 /* ------------------------------------------------------------ 键位提示 */
 
+// 用户改过的键位启动即注入（读时生效；之后每次改动由设置面的写回调再注入）
+setUserKeys(prefs().keys)
+
 /** 提示表与上下文键收在 wiring/keys；pages 分片的四件晚于此处 ⇒ getter，运行时现取 */
 const { keyHints, uiCtx } = setupKeys({
   getEd: () => ed,
@@ -573,12 +578,32 @@ const searchFaceDeps = (): SearchFaceDeps => {
  * 中心表面宿主：派生/工具面的 tab 身体住这里（与编辑器二选一可见）。
  * 装配在 chrome 之后（要它的宿主元素）、pages 之前（tab 状态层要经由它切表面）。
  */
+/** 设置面的依赖（同搜索面的道理：`run`／`scheduleDeviceSave` 晚于本节 ⇒ 闭包现取） */
+const settingsFaceDeps = (): SettingsFaceDeps => ({
+  prefs,
+  invoke: (name, args) => {
+    void registry.invoke(name, args, 'settings')
+  },
+  commandTitle: (name) => registry.decl(name)?.title ?? name,
+  /**
+   * 键位覆盖的**唯一写点**：进 prefs（落盘）＋ 注入绑定层（读时生效）。
+   * 注入和保存必须同时发生——只存不注入，改完的键位要重启才认。
+   */
+  patchKeys: (next) => {
+    prefs().keys = next
+    setUserKeys(next)
+    scheduleDeviceSave()
+  },
+  toast: (text, kind) => app.toast(text, kind),
+})
+
 const surface = setupSurface({
   kb,
   getRegistry: () => registry,
   renderDocks: () => renderDocks(),
   getChrome: () => chrome,
   searchDeps: searchFaceDeps,
+  settingsDeps: settingsFaceDeps,
 })
 
 /**

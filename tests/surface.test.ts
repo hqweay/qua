@@ -31,9 +31,12 @@ test('中心派生卡守卫：接得住的放行，槽绑定的持久卡与未�
   assert.equal(centerDerivedOpenable('nope'), false)
 })
 
-test('工具面目录是闭集：已有一行（搜索）；清单外的 id 一律不认', () => {
-  assert.deepEqual(UTILITY_FACES.map((d) => d.id), ['search'])
+test('工具面目录是闭集：搜索与设置两行；清单外的 id 一律不认', () => {
+  assert.deepEqual(UTILITY_FACES.map((d) => d.id), ['search', 'settings'])
+  // 槽卡身是逐面声明的：搜索能钉进槽；设置只有中心
+  assert.deepEqual(UTILITY_FACES.filter((d) => d.slot === true).map((d) => d.id), ['search'])
   assert.equal(isUtilityFaceId('search'), true)
+  assert.equal(isUtilityFaceId('settings'), true)
   assert.equal(isUtilityFaceId('widgets'), false)
   assert.equal(isUtilityFaceId(42), false)
 })

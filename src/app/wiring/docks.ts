@@ -521,6 +521,9 @@ export function setupDocks(deps: DocksDeps) {
     switch (face) {
       case 'search':
         return ensureSearch(side).sync()
+      case 'settings':
+        // 设置不进槽：没有「钉着看设置」的场景，它只住中心（画廊也不给添加行）
+        return null
     }
   }
 

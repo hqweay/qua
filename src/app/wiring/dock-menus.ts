@@ -196,7 +196,7 @@ export function setupCardMenus(deps: DockMenusDeps) {
           command: d.name,
           keyHint: deps.keyHints().get(d.name),
         })),
-      ...UTILITY_FACES.filter((d) => !cards.some((e) => e.kind === 'utility' && e.face === d.id)).map((d) => {
+      ...UTILITY_FACES.filter((d) => d.slot === true && !cards.some((e) => e.kind === 'utility' && e.face === d.id)).map((d) => {
         const id = `utility:${d.id}`
         utilityRows.set(id, d.id)
         return {

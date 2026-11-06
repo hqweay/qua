@@ -13,7 +13,7 @@
  */
 import { evalWhen, evalWhenSafe } from './when.ts'
 // ⚠️ 三个收敛点之二：绑定表的 `label` / `keywords` 一律走 t
-import { t } from './msg.ts'
+import { t, type MsgId } from './msg.ts'
 import type { CtxKeys } from '../index.ts'
 
 export type BindingKind = 'keymap' | 'menu' | 'slash' | 'selection'
@@ -81,6 +81,8 @@ export const BINDINGS: Binding[] = [
   { command: 'core.command-palette/show', kind: 'keymap', key: 'mod+shift+p', when: '', layer: 'core' },
   // 全文检索：`⌘P` 是「找内容」，与 `⌘⇧P`「找命令」并列；菜单没有原生 Find／Print role，不会抢
   { command: 'core.search/open', kind: 'keymap', key: 'mod+p', when: '', layer: 'core' },
+  // 设置：⌘,（macOS 同一条直觉）。设置是中心工具面，按 kind 去重（再按＝切过去）
+  { command: 'core.settings/open', kind: 'keymap', key: 'mod+,', when: '', layer: 'core' },
   // `⌘F` 预留给就地查找（块内查找/替换）：**故意不绑定**，别把这条还给全局搜索——
   // 全局搜索已经住在 `⌘P`，两个入口会各搜一份、结果口径再分叉。
   { command: 'core.layer/close', kind: 'keymap', key: 'escape', when: '', layer: 'core' },
@@ -254,6 +256,63 @@ export const BINDINGS: Binding[] = [
 
 /* --------------------------------------------------------- 键位匹配 */
 
+/* ---- 用户覆盖（设备态注入） ---- */
+
+/**
+ * 用户改过的键位。键＝**绑定身份**（命令＋参数：一条命令可以因参数不同而有多个动作，
+ * 覆盖的是「这个动作」而不是「这条命令」）；值＝新键位，`null` ＝ 摘掉。
+ *
+ * 覆盖是**设备状态**（不进库、不参与同步）：键位回答「这一台机器怎么用」，不是内容。
+ * 表本身保持静态；覆盖在**读的时候**生效（`effectiveKey`），启动与每次修改由装配层注入。
+ */
+const userKeys = new Map<string, string | null>()
+
+/** 键位绑定的身份（keymap 没有 group：命令＋参数就是全部） */
+export function bindingIdOf(b: Binding): string {
+  return `${b.command}|${JSON.stringify(b.args ?? null)}`
+}
+
+/** 整表替换用户覆盖（调用方给的是偏好里那份的现值；坏形状的项丢掉） */
+export function setUserKeys(next: Record<string, string | null> | undefined): void {
+  userKeys.clear()
+  if (!next || typeof next !== 'object') return
+  for (const [id, key] of Object.entries(next)) {
+    if (typeof id !== 'string' || id === '') continue
+    if (key === null || typeof key === 'string') userKeys.set(id, key)
+  }
+}
+
+/** 这条绑定**此刻生效**的键位；`null` ＝ 用户摘掉了（按键不再命中它） */
+export function effectiveKey(b: Binding): string | null {
+  const overridden = userKeys.get(bindingIdOf(b))
+  if (overridden !== undefined) return overridden
+  return b.key ?? null
+}
+
+/**
+ * 归宿主与窗口的键：退出／关窗／新窗（浏览器与系统壳的同名动作）。覆盖它们
+ * 只会造出「按了没反应」的观感——壳先收到，命令永远不来。
+ */
+export const RESERVED_KEYS: readonly string[] = ['mod+q', 'mod+w', 'mod+n']
+
+/**
+ * 设置界面捕获到的键能不能用；合法时给**归一化**的键位。
+ *
+ * v1 的两条硬判据（BE13 的落法）：
+ *   · **必须带 ⌘/Alt 一类修饰键**——裸键归打字，绑走它每个字都进命令；
+ *   · **保留键不可覆盖**（见 `RESERVED_KEYS`）。
+ */
+export function validateUserKey(raw: string): { ok: true; key: string } | { ok: false; reason: MsgId } {
+  const key = canonKey(raw)
+  if (key === '' || key === 'escape') return { ok: false, reason: 'ui.keys.needModifier' }
+  const parts = key.split('+')
+  if (!['mod', 'ctrl', 'meta', 'alt'].includes(parts[0] ?? '')) return { ok: false, reason: 'ui.keys.needModifier' }
+  if (RESERVED_KEYS.includes(key)) return { ok: false, reason: 'ui.keys.reserved' }
+  return { ok: true, key }
+}
+
+/* --------------------------------------------------------- 键位匹配 */
+
 const MOD_ORDER = ['mod', 'ctrl', 'meta', 'alt', 'shift']
 
 /** 归一化绑定键（把修饰键排成固定顺序，便于字符串比较） */
@@ -402,7 +461,10 @@ export function resolveKey(e: KeyboardEvent, ctx: CtxKeys, isMac: boolean): KeyR
   let hit: Binding | null = null
   for (let i = ordered.length - 1; i >= 0; i--) {
     const b = ordered[i]!
-    const keyOk = canonKey(b.key ?? '') === id
+    // 用户覆盖在读的时候生效：摘掉的键位不参与解析，改过的按新键比
+    const eff = effectiveKey(b)
+    if (eff === null) continue
+    const keyOk = canonKey(eff) === id
     if (!keyOk) continue
     const ok = whenOk(b, ctx)
     attempts.push({ binding: b, keyOk, whenOk: ok })
@@ -411,14 +473,49 @@ export function resolveKey(e: KeyboardEvent, ctx: CtxKeys, isMac: boolean): KeyR
   return { hit, attempts, id }
 }
 
-/** 绑定表里出现过的全部键位（速查表用） */
+/** 绑定表里出现过的全部键位（速查表用；用户覆盖生效后的样子） */
 export function keymapRows(): { key: string; command: string; when: string; layer: Layer }[] {
-  return BINDINGS.filter((b) => b.kind === 'keymap' && b.key).map((b) => ({
-    key: b.key!,
-    command: b.command,
-    when: b.when ?? '',
-    layer: b.layer,
-  }))
+  const out: { key: string; command: string; when: string; layer: Layer }[] = []
+  const seen = new Set<string>()
+  for (const b of BINDINGS) {
+    if (b.kind !== 'keymap') continue
+    const eff = effectiveKey(b)
+    if (eff === null) continue
+    // 同一身份的多条表项覆盖后共用同一个键：速查表只报一行，不把同一个键念两遍
+    const dedupe = `${bindingIdOf(b)}|${eff}`
+    if (seen.has(dedupe)) continue
+    seen.add(dedupe)
+    out.push({ key: eff, command: b.command, when: b.when ?? '', layer: b.layer })
+  }
+  return out
+}
+
+/** 设置界面的键位清单：**一条绑定身份一行**（改键位改的是身份，不是表里的某一行） */
+export interface KeymapSettingsRow {
+  /** 绑定身份（`bindingIdOf`；写覆盖与重置都按它说话） */
+  id: string
+  command: string
+  /** 生效键位（已归一；「已摘掉」＝ 空数组） */
+  keys: string[]
+  /** 用户覆盖：`undefined` ＝ 没动过；`null` ＝ 摘掉；字符串 ＝ 新键 */
+  override: string | null | undefined
+  when: string
+}
+
+export function keymapSettingsRows(): KeymapSettingsRow[] {
+  const byId = new Map<string, KeymapSettingsRow>()
+  for (const b of BINDINGS) {
+    if (b.kind !== 'keymap') continue
+    const id = bindingIdOf(b)
+    let row = byId.get(id)
+    if (!row) {
+      row = { id, command: b.command, keys: [], override: userKeys.get(id), when: b.when ?? '' }
+      byId.set(id, row)
+    }
+    const eff = effectiveKey(b)
+    if (eff !== null && !row.keys.includes(eff)) row.keys.push(eff)
+  }
+  return [...byId.values()]
 }
 
 /** 给「Inspect Context Keys」用：把 ctx 里被绑定表引用到的键标出来 */

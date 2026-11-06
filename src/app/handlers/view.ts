@@ -35,6 +35,8 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     if (!id) return false
     return app.openSurface({ kind: a.kind === 'utility' ? 'utility' : 'derived', id })
   },
+  // 设置：工具面直开（⌘, 与命令面板共用这一条；目录守卫在 openSurface 里）
+  'core.settings/open': (_a, app) => app.openSurface({ kind: 'utility', id: 'settings' }),
   /**
    * 移动到…：先选块（光标 / 选区），再弹目标选择器。
    *

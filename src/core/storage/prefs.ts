@@ -59,6 +59,13 @@ export interface Prefs {
   radius: number
   /** 角标默认展开？ */
   badgeOpen: boolean
+  /**
+   * 用户覆盖的键位（设备态：键位回答「这一台机器怎么用」，不进库、不参与同步）。
+   *
+   * 键＝绑定身份（命令＋参数），值＝新键位；`null` ＝ 摘掉这条键位。
+   * 生效在**读绑定表的时候**（`core/infra/bindings.ts`），这里只存用户写下的那份。
+   */
+  keys: Record<string, string | null>
   /** @deprecated 2026-10-19 起的旧形状；只用于读迁移，写一律写 `dock` */
   railOpen?: boolean
 }
@@ -157,6 +164,7 @@ export const DEFAULT_PREFS: Prefs = {
   virtualize: false,
   radius: 12,
   badgeOpen: false,
+  keys: {},
 }
 
 /**
@@ -247,6 +255,15 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     }
   }
 
+  // 用户键位覆盖：身份非空、值是键位串或「摘掉」（null）。别的形状丢掉，不猜
+  const keys: Record<string, string | null> = {}
+  if (p.keys && typeof p.keys === 'object' && !Array.isArray(p.keys)) {
+    for (const [id, key] of Object.entries(p.keys)) {
+      if (typeof id !== 'string' || id === '') continue
+      if (key === null || (typeof key === 'string' && key !== '')) keys[id] = key
+    }
+  }
+
   return {
     ...DEFAULT_PREFS,
     ...p,
@@ -256,6 +273,7 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     journalMounts: canonicalMountEntries(p.journalMounts),
     mountViews,
     mountGroups,
+    keys,
     dock: {
       // `legacyPinned` 只在归一内部用，不进落盘形状
       left: { open: left.open, width: left.width, cards: left.cards },

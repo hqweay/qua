@@ -498,3 +498,110 @@
   border-radius: var(--ui-radius-sm);
   font-size: var(--ui-fs-xs);
 }
+
+/* ---------------------------------------------------------- 设置面 */
+
+/*
+  一列分节，窄读宽（设置不是表格，铺满整面会让每一行都显得空）。
+  外框照常滚（与编辑器同一份滚动容器），不需要主从布局。
+*/
+.settings-face {
+  max-width: 640px;
+  padding: var(--ui-gap-5) var(--ui-doc-pad) var(--ui-gap-7);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-6);
+}
+.settings-sec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-3);
+}
+.settings-sec-title {
+  margin: 0;
+  font-size: var(--ui-fs-md);
+  font-weight: 600;
+  color: var(--ui-text);
+}
+.settings-hint {
+  margin: 0;
+  font-size: var(--ui-fs-sm);
+  color: var(--ui-text-tertiary);
+}
+/* 主题三档：一排等宽选项，当前档描边（不用第二个颜色位） */
+.settings-theme {
+  display: flex;
+  gap: var(--ui-gap-2);
+}
+.settings-theme-opt {
+  flex: 0 0 auto;
+}
+.settings-theme-opt--on {
+  box-shadow: inset 0 0 0 1px var(--ui-accent);
+  color: var(--ui-text);
+}
+/* 快捷键行：命令名 …… 键位。行高与正文同源，悬停只亮行、不做第二套控件样式 */
+.settings-keys {
+  display: flex;
+  flex-direction: column;
+}
+.settings-key-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-3);
+  min-height: var(--ui-row-h);
+  padding: 0 var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+}
+.settings-key-row:hover {
+  background: var(--ui-bg-hover);
+}
+.settings-key-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--ui-fs-sm);
+  color: var(--ui-text);
+}
+.settings-key-mark {
+  flex: 0 0 auto;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+.settings-key-keys {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: var(--ui-gap-1);
+}
+.settings-key-chip {
+  min-width: 2.4em;
+  padding: 2px var(--ui-gap-2);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text);
+  cursor: pointer;
+}
+.settings-key-chip:hover {
+  border-color: var(--ui-accent);
+}
+.settings-key-chip--empty {
+  color: var(--ui-text-tertiary);
+}
+.settings-key-chip--capture {
+  border-color: var(--ui-accent);
+  color: var(--ui-accent);
+  background: var(--ui-accent-soft);
+}
+.settings-key-reset {
+  flex: 0 0 auto;
+  display: inline-flex;
+  padding: var(--ui-gap-1);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-tertiary);
+}
+.settings-key-reset:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
