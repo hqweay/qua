@@ -28,6 +28,7 @@ import {
   hasIdentity,
   hasQueryBody,
   hasList,
+  hasDescendant,
   isJournal,
   journalDate,
   todayISO,
@@ -53,6 +54,7 @@ import {
   normSel,
   outdentMove,
   tagIdsOf,
+  typeDeclOf,
   selToTextRanges,
   setBlockType,
   siblingMove,
@@ -625,6 +627,11 @@ export class BlockEditor {
   private entryCap: UndoCapture | null = null
   /** 当前动作开始时的选区（撤销后回到这里） */
   private entrySel: Sel | null = null
+  /**
+   * 撤销条目的**嵌套深度**：复合命令可以用 `App.runGroup` 包住一组编辑器方法，
+   * 而后者自己也会 `begin/finish`。只有最外层真正开袋／落条目；内层并入外层。
+   */
+  private entryDepth = 0
   /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
   private readonly offStore: () => void
   private readonly unbind: () => void
@@ -753,6 +760,9 @@ export class BlockEditor {
    * 之后的每次 `write` 都会把事务出口的捕获并进来 —— 不再有「取整片森林快照」这一步。
    */
   beginUndoEntry(): void {
+    this.entryDepth++
+    // 内层并入外层：只有最外层能重置捕获袋（否则复合命令会把外层的 before 冲掉）
+    if (this.entryDepth > 1) return
     this.entryCap = null
     this.entrySel = this.sel
   }
@@ -761,8 +771,15 @@ export class BlockEditor {
    * **收尾一个撤销条目**：把这一动作里所有事务的捕获交给撤销栈。
    *
    * `capture === null`（这一段没有开过事务）⇒ 不新建条目；合并窗口由栈判。
+   *
+   * 配对规则：有 `begin` 就按深度退；**没有配对的 `finish`**（历史上有些行内编辑
+   * 在调用方已经开袋的情况下只调 finish）按老行为直接落条目，不静默吞掉。
    */
   finishUndoEntry(kind: UndoKind, at = Date.now()): void {
+    if (this.entryDepth > 0) {
+      this.entryDepth--
+      if (this.entryDepth > 0) return
+    }
     this.undo.record(this.entryCap, this.entrySel, kind, at)
     this.entryCap = null
   }
@@ -2463,6 +2480,95 @@ export class BlockEditor {
     })
     if (o.unfoldId) unfoldBlock(this.doc, o.unfoldId)
     this.structTail(o.caretAt ?? (this.sel ? { id: this.sel.aBlock, off: this.sel.aOff } : null))
+  }
+
+  /**
+   * **多块拖拽**：把一组最上层根作为一个**连续的 run** 落到目标处。
+   *
+   * 为什么不能逐块算 `dropMove` 再挨个落：
+   * 每次移动都会从原列表摘掉一块、再插进目标位；同一列表里「后一块」的最终下标
+   * 会被前面已经搬走的块改变（实测把 `[B,C]` 拖回 `D` 前面会得到 `[A,B,D,C]`）。
+   * ⇒ 先确认「这一组最终落在目标父的哪个下标」，再做两段写：
+   *   ① 全部追加到目标父末尾（文档序，先得到一个有序的 run）；
+   *   ② 从后往前把每块插到 `index`（逆序插入 ⇒ 正是在 index 处拼回原序）。
+   * 两段在同一条事务里，一次 ⌘Z 全回。
+   *
+   * 目标落在被拖子树里（含自己）⇒ 不移动：那会造环，和单块拖拽同一条守卫。
+   * 派生面（查询结果／镜像）的根不在块选区里（选区只收 depth > 0），但落点仍要走
+   * `structuralScope === 'roots'` 的同一道门：不能把块搬到本文档之外。
+   */
+  moveBlocksTo(ids: readonly string[], targetId: string | null, zone: 'before' | 'after' | 'inside'): boolean {
+    const roots = [...new Set(ids)].filter((id) => locate(this.doc, id)?.parent !== null)
+    if (roots.length === 0) return false
+    const snap = this.doc
+    const locOf = new Map(roots.map((id) => [id, locate(snap, id)] as const))
+    if (locOf.size === 0) return false
+    // 目标不能落在被拖的子树里（含选中的块自己）
+    if (targetId !== null) {
+      for (const id of roots) {
+        if (id === targetId || hasDescendant(snap, id, targetId)) return false
+      }
+    }
+    /** 目标父里，本批有几块**直接**子块（它们会先被摘走再追加回来） */
+    const directChildren = (parentId: string): number => {
+      let n = 0
+      for (const loc of locOf.values()) if (loc?.parent?.id === parentId) n++
+      return n
+    }
+    /** 目标父里、下标在 `at` 之前的本批块数（它们摘走后目标下标要前移） */
+    const beforeAt = (parentId: string, at: number): number => {
+      let n = 0
+      for (const loc of locOf.values()) if (loc?.parent?.id === parentId && loc.index < at) n++
+      return n
+    }
+
+    let parentId: string
+    let index: number
+    if (targetId === null) {
+      const root = snap.roots[snap.roots.length - 1]
+      if (!root || typeDeclOf(root).children === 'none') return false
+      parentId = root.id
+      index = root.children.length - directChildren(parentId)
+    } else {
+      const tgt = locate(snap, targetId)
+      if (!tgt) return false
+      if (zone === 'inside') {
+        if (typeDeclOf(tgt.block).children === 'none') return false
+        parentId = tgt.block.id
+        index = tgt.block.children.length - directChildren(parentId)
+      } else {
+        if (!tgt.parent) return false
+        parentId = tgt.parent.id
+        index = tgt.index + (zone === 'after' ? 1 : 0) - beforeAt(parentId, tgt.index)
+      }
+    }
+    // 目标父不能在被拖的子树里（与「目标落在被拖子树里」是同一件事的另一侧）
+    for (const id of roots) if (id === parentId || hasDescendant(snap, id, parentId)) return false
+    // 派生面：根不搬、落点必须在本文档里（与单块 `moveStaysInside` 同一条门）
+    if (this.structuralScope === 'roots' && !locate(snap, parentId)) return false
+
+    this.beginUndoEntry()
+    this.write((tx) => {
+      /**
+       * **改前落点要先记**：撤销按「前兄弟 id」恢复，而随后的实移会把后面块的 prev 改掉。
+       * 先在原位做一次 no-op move（位置不变），让捕获记下真·批前落点；否则撤销会
+       * 按迁移途中的 prev 恢复，次序整个倒过来（实测 [A,B,C] → [C,B,A]）。
+       */
+      for (const id of roots) {
+        const loc = locOf.get(id)
+        const parent = loc?.parent?.id
+        if (parent) tx.move(id, parent, loc!.index)
+      }
+      // ① 先按文档序追加到目标父末尾，得到一个有序的 run
+      for (const id of roots) tx.move(id, parentId, Number.MAX_SAFE_INTEGER)
+      // ② 从后往前插到 index：每次插到同一位置，后插的会排到前面，逆序拼回原序
+      for (let i = roots.length - 1; i >= 0; i--) tx.move(roots[i]!, parentId, Math.max(0, index))
+      for (const id of roots) tx.patch(id, (x) => (x.modified = Date.now()))
+    })
+    if (zone === 'inside' && targetId) unfoldBlock(this.doc, targetId)
+    this.structTail()
+    this.bsel.paintBlockSel()
+    return true
   }
 
   duplicate(id: string): string | null {

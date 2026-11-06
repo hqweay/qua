@@ -1289,9 +1289,9 @@
 }
 /**
  * 提及命中的 hover 提示：**那一处高亮唯一可点的落点**。
- * `::highlight` 没有元素可打，所以提示做成浮层，锚在命中字的矩形上；
- * 它跟着指针出现／消失，按 §1.12 的频率表**不做过渡**（hover 一天几十次，
- * 任何时长都会被读成延迟）。
+ * `::highlight` 没有元素可打，所以提示做成浮层，跟着指针出现在左上方；
+ * 点提示＝转换那一处，点命中字本身＝把光标放进去编辑（两个落点，不抢同一枪）。
+ * 按 §1.12 的频率表**不做过渡**（hover 一天几十次，任何时长都会被读成延迟）。
  */
 .mention-tip {
   position: fixed;
@@ -1305,12 +1305,18 @@
   border-radius: var(--ui-radius-sm);
   box-shadow: var(--ui-shadow-mid);
   color: var(--ui-text-secondary);
+  font: inherit;
   font-size: var(--ui-fs-sm);
   line-height: 1;
   white-space: nowrap;
-  /* 只说明、不接收点击：它压在正文上，能点就会吃掉旁边那一行的点击 */
-  pointer-events: none;
+  cursor: pointer;
   user-select: none;
+}
+/* hover 只换描边与字色，**底色保持不透明**：提示浮在正文上，半透明底会和下面的字叠在一起读不清 */
+.mention-tip:hover {
+  background: var(--ui-surface-raised);
+  border-color: var(--ui-accent);
+  color: var(--ui-text);
 }
 .mount-empty {
   margin: 0;
@@ -1663,7 +1669,7 @@
   z-index: var(--ui-z-rail);
 }
 /*
- * **查询块的块标是漏斗**：类型进形状（形状优先——暗色主题靠深浅区分不可靠）。
+ * **特殊身份的块标**：查询＝漏斗，属性定义＝滑杆。类型进形状（形状优先——暗色主题靠深浅区分不可靠）。
  * 图标与点互斥；悬停时照旧让位给抓手——「任何块标悬停＝把手」这一条不变。
  */
 .blk .marker .marker-ico {
@@ -1674,10 +1680,12 @@
   color: var(--ui-text-tertiary);
   opacity: 0.7;
 }
-.blk .marker.marker-query::before {
+.blk .marker.marker-query::before,
+.blk .marker.marker-schema::before {
   opacity: 0;
 }
-.blk .marker.marker-query:hover .marker-ico {
+.blk .marker.marker-query:hover .marker-ico,
+.blk .marker.marker-schema:hover .marker-ico {
   opacity: 0;
 }
 /* 投影（源的结果视图）：高度与正文行内体同一条口径——**自然高**（紧凑性归折叠）。

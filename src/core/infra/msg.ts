@@ -805,6 +805,7 @@ export const MSG = {
   'err.when.false': 'when 为假',
   'err.cmd.notRegistered': '未注册的命令：{name}',
   'err.cmd.failed': '命令失败：{name}｜{message}',
+  'err.cmd.notGroupable': '命令不能并入批量操作（必须同步且声明为可撤销）：{name}',
   'err.clipboardFailed': '复制失败（浏览器未授权剪贴板）',
 
   /* ------------------------------------------------------------ 外链的打开判据 */
@@ -912,6 +913,7 @@ export const MSG = {
   'ui.block.foldLine': '折叠 / 展开子块（点击）',
   'cmd.editor.toggle-children-collapse': '折叠 / 展开子块',
   'ui.block.focusHint': '点击聚焦到此块 · Shift+点击在右槽打开 · 拖动移动 · 右键打开菜单',
+  'ui.block.schemaHint': '属性定义（正文是定义名，不能在行内改）· 点击聚焦 · 拖动移动 · 右键打开菜单',
   'ui.block.menuHint': '右键打开块菜单',
   'ui.block.handleHint': '拖拽重排 · 右键打开块菜单',
   'ui.block.placeholderFirst': '写点什么…（按 / 呼出命令）',
@@ -1192,7 +1194,7 @@ export const MSG = {
   'cmd.block.convert-mention': '把提及转成引用',
   'cmd.editor.selection-to-ref': '把选中文本转为引用',
   'ui.mount.mention.convert': '转成引用',
-  'ui.mount.mention.hoverHint': '点击转为引用',
+  'ui.mount.mention.hoverHint': '转为引用',
   'ui.toast.mentionStale': '那一处的正文已经变了，没有转换',
   'ui.toast.mentionReadonly': '这一行的正文是名字或只读内容，不能改写',
   'ui.toast.selectionToRefCreated': '新建页「{name}」并转为引用',

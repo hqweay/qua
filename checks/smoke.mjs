@@ -4211,9 +4211,20 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
     `前置：三个块都要建出来。a=${ids.a} b=${ids.b} c=${ids.c}；` +
       `根 ${ids.rootId}；doc.roots=[${ids.roots.join(',')}]`,
   )
+  await page.waitForFunction(
+    (a) => a.every((id) => document.querySelector(`.blk[data-block-id="${id}"]`)),
+    [ids.a, ids.b, ids.c],
+    { timeout: 3000 },
+  )
   const rect = async (id) =>
     page.evaluate((id) => {
       const el = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
+      if (!el)
+        throw new Error(
+          `rect: block not rendered: ${id}; dom=${[...document.querySelectorAll('.blk[data-block-id]')]
+            .map((e) => e.dataset.blockId)
+            .join(',')}; model=${window.__qua.blocks().map((b) => b.id).join(',')}`,
+        )
       const r = el.getBoundingClientRect()
       return { x: r.left + 2, y: r.top + r.height / 2 }
     }, id)
@@ -4259,7 +4270,9 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
 
   // ④ 菜单删除 → 三块消失；一次 ⌘Z 复原
   const del = await page.evaluate(() => {
-    const btn = [...document.querySelectorAll('.layer-item')].find((e) => e.textContent?.includes('删除选中的块'))
+    const items = [...document.querySelectorAll('.layer-item')]
+    const btn = items.find((e) => e.textContent?.includes('删除选中的块'))
+    if (!btn) throw new Error(`多块菜单里没有删除项：${items.map((e) => e.textContent).join(' | ')}`)
     const r = btn.getBoundingClientRect()
     return { x: r.left + 10, y: r.top + r.height / 2 }
   })
@@ -4272,13 +4285,25 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
   assert(back.texts.includes('AAAA') && back.texts.includes('BBBB') && back.texts.includes('CCCC'), `一次撤销应复原三块：${JSON.stringify(back.texts)}`)
 
   // ⑤ Shift+拖拽 = 跨块**文本**（我们的增量；块选区不激活）
+  // 删除/撤销之后 DOM 已重排 ⇒ 先 focus 再量；focus 可能带着滚动，等两帧让落点稳定
   await page.evaluate((id) => window.__qua.focusBlock(id, 0), ids.a)
-  // 删除/撤销之后 DOM 已重排 ⇒ 落点必须重算，不能复用删除前的 rect
+  await page.waitForFunction(
+    (ids) => ids.every((id) => document.querySelector(`.blk[data-block-id="${id}"] .tx`)),
+    [ids.a, ids.b, ids.c],
+    { timeout: 3000 },
+  )
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
   const [ra5, rc5] = await Promise.all([rect(ids.a), rect(ids.c)])
+  // Shift+mousedown 的原生语义是「从当前插入点扩选」：先单击 A 落一个折叠光标，
+  // 否则会从上一次撤销恢复的插入点（可能还在 C）开始扩选。
+  await page.mouse.click(ra5.x, ra5.y)
   await drag(ra5, rc5, true)
   const text = await state()
   assert(text.count === 0, `Shift+拖拽不应选块：${JSON.stringify(text)}`)
-  assert(text.textSel.includes('AAAA') && text.textSel.includes('BBBB'), `Shift+拖拽应选到跨块文本：${JSON.stringify(text.textSel)}`)
+  assert(
+    text.textSel.includes('AAAA') && text.textSel.includes('BBBB'),
+    `Shift+拖拽应选到跨块文本：${JSON.stringify({ textSel: text.textSel, texts: text.texts, ra5, rc5 })}`,
+  )
   await page.keyboard.press('Escape')
 
   // ⑥ Mod+Shift+A 全选块；Enter 清选区并落到首块 0 位
@@ -4324,6 +4349,265 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
 
   await ctx.close()
   return `单块内拖=文本；A→C=3 块；右键多块菜单删除 + 一次撤销；Shift+拖=跨块文本；Mod+Shift+A 全选块；Enter 清选区；Shift+↓ 边界规则；⌘A 两次升级`
+})
+
+/**
+ * **T35b：多选块后拖任一行的块标 ⇒ 整组按原序一起移动。**
+ *
+ * 钉三件事：
+ *   ① 选区里有 3 块时，从块标起拖搬走的是**整组**，不是按下的那一块；
+ *   ② 落地后组内次序不变（run 语义，不是逐块各算一个落点）；
+ *   ③ 一次 ⌘Z 回到拖之前的顺序。
+ */
+await check('T35b 多选块拖拽：拖组里任一行的块标，整组按原序一起落；一次撤销回原序', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+  await page.waitForTimeout(150)
+  const ids = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const rootId = ed.doc.roots[0].id
+    const a = ed.insertBlockAfter(rootId, 'MOVE-A')
+    const b = ed.insertBlockAfter(a, 'MOVE-B')
+    const c = ed.insertBlockAfter(b, 'MOVE-C')
+    const d = ed.insertBlockAfter(c, 'MOVE-D')
+    return { a, b, c, d, rootId }
+  })
+  assert(ids.a && ids.b && ids.c && ids.d, `前置：四个块都要建出来：${JSON.stringify(ids)}`)
+  await page.waitForTimeout(150)
+
+  const rect = async (id) =>
+    page.evaluate((id) => {
+      const el = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
+      const r = el.getBoundingClientRect()
+      return { x: r.left + 2, y: r.top + r.height / 2 }
+    }, id)
+  const [ra, rc] = await Promise.all([rect(ids.a), rect(ids.c)])
+
+  // 拖选 A..C（3 块）
+  await page.mouse.move(ra.x, ra.y)
+  await page.mouse.down()
+  await page.mouse.move(rc.x, rc.y, { steps: 8 })
+  await page.mouse.up()
+  const selected = await page.evaluate(() => window.__qua.snapshot().blockSelectionCount)
+  assert(selected === 3, `前置：A..C 应选中 3 块，实际 ${selected}`)
+
+  // 从 **B 的块标**起拖，落到 D 之后 ⇒ 整组 [A,B,C] 应整体跟在 D 后面
+  const dropped = await page.evaluate((a) => {
+    const el = (id) => document.querySelector(`.blk[data-block-id="${id}"]`)
+    const src = el(a.b)
+    const tgt = el(a.d)
+    const handle = src.querySelector('.handle')
+    const r = tgt.getBoundingClientRect()
+    const dt = new DataTransfer()
+    const mk = (type) =>
+      new DragEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: dt,
+        clientX: r.left + 40,
+        clientY: r.bottom - 2,
+      })
+    handle.dispatchEvent(mk('dragstart'))
+    tgt.dispatchEvent(mk('dragover'))
+    tgt.dispatchEvent(mk('drop'))
+    handle.dispatchEvent(mk('dragend'))
+    return {
+      order: window.__qua.blocks().map((b) => b.text).filter((t) => t.startsWith('MOVE-')),
+      count: window.__qua.snapshot().blockSelectionCount,
+    }
+  }, ids)
+  assert(
+    JSON.stringify(dropped.order) === JSON.stringify(['MOVE-D', 'MOVE-A', 'MOVE-B', 'MOVE-C']),
+    `整组应按原序落到 D 之后：${JSON.stringify(dropped.order)}`,
+  )
+  assert(dropped.count === 3, `拖完选区应仍在（还是这 3 块）：${JSON.stringify(dropped)}`)
+
+  // 一次撤销回原序
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(150)
+  const undone = await page.evaluate(() =>
+    window.__qua.blocks().map((b) => b.text).filter((t) => t.startsWith('MOVE-')),
+  )
+  assert(
+    JSON.stringify(undone) === JSON.stringify(['MOVE-A', 'MOVE-B', 'MOVE-C', 'MOVE-D']),
+    `一次 ⌘Z 应回原序：${JSON.stringify(undone)}`,
+  )
+
+  // ② 反向：选 B..D，拖到 A 之前 ⇒ 整组 [B,C,D] 应到 A 前面；一次 ⌘Z 回原序
+  await page.waitForTimeout(150)
+  const [rb2, rd2] = await Promise.all([rect(ids.b), rect(ids.d)])
+  await page.mouse.move(rb2.x, rb2.y)
+  await page.mouse.down()
+  await page.mouse.move(rd2.x, rd2.y, { steps: 8 })
+  await page.mouse.up()
+  const selected2 = await page.evaluate(() => window.__qua.snapshot().blockSelectionCount)
+  assert(selected2 === 3, `前置：B..D 应选中 3 块，实际 ${selected2}`)
+  const dropped2 = await page.evaluate((a) => {
+    const el = (id) => document.querySelector(`.blk[data-block-id="${id}"]`)
+    const src = el(a.c)
+    const tgt = el(a.a)
+    const handle = src.querySelector('.handle')
+    const r = tgt.getBoundingClientRect()
+    const dt = new DataTransfer()
+    const mk = (type) =>
+      new DragEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: dt,
+        clientX: r.left + 40,
+        clientY: r.top + 2,
+      })
+    handle.dispatchEvent(mk('dragstart'))
+    tgt.dispatchEvent(mk('dragover'))
+    tgt.dispatchEvent(mk('drop'))
+    handle.dispatchEvent(mk('dragend'))
+    return window.__qua.blocks().map((b) => b.text).filter((t) => t.startsWith('MOVE-'))
+  }, ids)
+  assert(
+    JSON.stringify(dropped2) === JSON.stringify(['MOVE-B', 'MOVE-C', 'MOVE-D', 'MOVE-A']),
+    `整组应落到 A 之前并保持原序：${JSON.stringify(dropped2)}`,
+  )
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(150)
+  const undone2 = await page.evaluate(() =>
+    window.__qua.blocks().map((b) => b.text).filter((t) => t.startsWith('MOVE-')),
+  )
+  assert(
+    JSON.stringify(undone2) === JSON.stringify(['MOVE-A', 'MOVE-B', 'MOVE-C', 'MOVE-D']),
+    `反向拖拽也应一次 ⌘Z 回原序：${JSON.stringify(undone2)}`,
+  )
+
+  // ③ 拖进 D（先给 D 一个子块 E）⇒ run 应成为 D 的末尾三个孩子，原序不变
+  await page.evaluate((d) => {
+    const ed = window.__qua.__editor
+    const e = ed.insertBlockAfter(d, 'MOVE-E')
+    ed.indent(e)
+    return e
+  }, ids.d)
+  await page.waitForTimeout(200)
+  const [ra3, rc3] = await Promise.all([rect(ids.a), rect(ids.c)])
+  await page.mouse.move(ra3.x, ra3.y)
+  await page.mouse.down()
+  await page.mouse.move(rc3.x, rc3.y, { steps: 8 })
+  await page.mouse.up()
+  const selected3 = await page.evaluate(() => window.__qua.snapshot().blockSelectionCount)
+  assert(selected3 === 3, `前置：A..C 应选中 3 块，实际 ${selected3}`)
+  const dChildren = () =>
+    page.evaluate((d) => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === d) return b.children.map((c) => c.content.map((r) => r.v ?? '').join(''))
+          const x = walk(b.children)
+          if (x) return x
+        }
+        return null
+      }
+      return walk(window.__qua.__editor.store.blocks)
+    }, ids.d)
+  await page.evaluate((a) => {
+    const el = (id) => document.querySelector(`.blk[data-block-id="${id}"]`)
+    const src = el(a.b)
+    const tgt = el(a.d)
+    const handle = src.querySelector('.handle')
+    const r = tgt.getBoundingClientRect()
+    const dt = new DataTransfer()
+    const mk = (type) =>
+      new DragEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: dt,
+        clientX: r.left + 40,
+        clientY: r.top + r.height / 2,
+      })
+    handle.dispatchEvent(mk('dragstart'))
+    tgt.dispatchEvent(mk('dragover'))
+    tgt.dispatchEvent(mk('drop'))
+    handle.dispatchEvent(mk('dragend'))
+  }, ids)
+  const inside = await dChildren()
+  assert(
+    JSON.stringify(inside) === JSON.stringify(['MOVE-E', 'MOVE-A', 'MOVE-B', 'MOVE-C']),
+    `整组应作为 D 的末尾孩子按原序落位：${JSON.stringify(inside)}`,
+  )
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(150)
+  const insideUndone = await dChildren()
+  assert(
+    JSON.stringify(insideUndone) === JSON.stringify(['MOVE-E']),
+    `拖进 D 也应一次 ⌘Z 回到「D 只有 E」：${JSON.stringify(insideUndone)}`,
+  )
+
+  await ctx.close()
+  return '3 块选区、从组内任一行的块标起拖 ⇒ 整组按原序落到 D 之后 / A 之前 / D 里面；一次 ⌘Z 回原序'
+})
+
+/**
+ * **T35c：批量命令 `invokeGroup` —— 组内写入共用一个撤销条目。**
+ *
+ * 钉三件事：
+ *   ① 两条 `core.tags/add` 在一条组里都成功，块上两条 `_tags`；
+ *   ② 一次 ⌘Z 把两条一起撤回（不是撤一条）；
+ *   ③ 组里混入一条 `undoable:false` 的命令（`core.page/open`）⇒ **整组拒绝**，
+ *      前一条也不执行（不做「执行一半再报错」）。
+ */
+await check('T35c 批量命令 invokeGroup：组内写入共用一个撤销条目；不可撤销命令整组拒绝', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(150)
+  const id = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    return ed.insertBlockAfter(ed.doc.roots[0].id, 'BATCH-HOST')
+  })
+  assert(id, '前置：要有一条可挂标签的块')
+  await page.waitForTimeout(150)
+
+  const tagsOf = (bid) =>
+    page.evaluate((bid) => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === bid) return b
+          const r = walk(b.children)
+          if (r) return r
+        }
+        return null
+      }
+      const b = walk(window.__qua.__editor.store.blocks)
+      return Array.isArray(b?.props?._tags) ? b.props._tags.length : 0
+    }, bid)
+
+  const ran = await page.evaluate((bid) => {
+    const out = window.__qua.__registry.invokeGroup(
+      [
+        { name: 'core.tags/add', args: { blockId: bid, name: '批甲' } },
+        { name: 'core.tags/add', args: { blockId: bid, name: '批乙' } },
+      ],
+      'api',
+    )
+    return out.map((r) => r.ok)
+  }, id)
+  assert(ran.length === 2 && ran.every(Boolean), `两条命令都该成功：${JSON.stringify(ran)}`)
+  assert((await tagsOf(id)) === 2, `两条标签都该在块上：${await tagsOf(id)}`)
+
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(150)
+  assert((await tagsOf(id)) === 0, `一次 ⌘Z 应把两条一起撤回：${await tagsOf(id)}`)
+
+  const rejected = await page.evaluate((bid) => {
+    const out = window.__qua.__registry.invokeGroup(
+      [
+        { name: 'core.tags/add', args: { blockId: bid, name: '不该加' } },
+        { name: 'core.page/open', args: { pageId: window.__qua.pages()[0].id } },
+      ],
+      'api',
+    )
+    return { ok: out.map((r) => r.ok), error: out[0]?.error ?? '' }
+  }, id)
+  assert(rejected.ok.length === 1 && rejected.ok[0] === false, `整组应被拒绝：${JSON.stringify(rejected)}`)
+  assert((await tagsOf(id)) === 0, '整组拒绝时第一条也不许执行')
+
+  await ctx.close()
+  return '两条写入共用一个撤销条目（一次 ⌘Z 全回）；混入不可撤销命令 ⇒ 整组拒绝、零写入'
 })
 
 await check('T257 块选区批量操作：Tab 整段缩进 / Shift+Tab 反缩进 / ⌘↵ 批量转待办，各一次撤销', async () => {
@@ -9808,6 +10092,88 @@ await check(
     return `createPropDef ⇒ [upsert{parent:null}, prop.set]；定义块住顶层`
   },
 )
+
+/**
+ * **T91b：属性定义行「看起来是定义，且真的改不动」。**
+ *
+ * 属性定义的正文是**定义名**，不是内容；行内没有改名路径。以前 DOM 仍接受输入，
+ * 写闸在 `tx` 处抛 protected ⇒ 字先出现在屏幕上、模型没变、重画一过又消失。
+ * 这里钉三件事：块标画出「属性」形状、正文 `contenteditable=false`、打字后模型与 DOM 都不动。
+ */
+await check('T91b 属性定义行：块标是属性图标（滑杆）、正文只读——点它打字模型与 DOM 都不动', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.evaluate(() => {
+    const at = Date.now()
+    const mk = (id, content, props) => ({
+      id,
+      content,
+      children: [],
+      created: at,
+      modified: at,
+      ...(props ? { props } : {}),
+    })
+    window.__qua.forceForest((forest) => {
+      forest.length = 0
+      forest.push(
+        mk('prop-def-row', [{ t: 'text', v: '冒烟属性' }], { _kind: 'select' }),
+      )
+    })
+    window.__qua.invoke('core.block/focus-block', { blockId: 'prop-def-row' })
+  })
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('#editor .blk[data-block-id="prop-def-row"]')),
+    null,
+    { timeout: 5000 },
+  )
+
+  const before = await page.evaluate(() => {
+    const row = (id) => document.querySelector(`#editor .blk[data-block-id="${id}"]`)
+    const def = row('prop-def-row')
+    const tx = def.querySelector(':scope > .tx')
+    const marker = def.querySelector(':scope > .left .marker')
+    const r = tx.getBoundingClientRect()
+    return {
+      schema: marker.classList.contains('marker-schema'),
+      icon: Boolean(marker.querySelector('.marker-ico svg')),
+      editable: tx.contentEditable,
+      readonly: tx.dataset.readonly,
+      text: tx.textContent ?? '',
+      point: { x: r.x + 18, y: r.y + r.height / 2 },
+    }
+  })
+  assert(before.schema && before.icon, `属性定义的块标要画成属性图标：${JSON.stringify(before)}`)
+  assert(
+    before.editable === 'false' && before.readonly === '1',
+    `属性定义的正文必须只读（DOM 不接受输入）：${JSON.stringify(before)}`,
+  )
+
+  await page.mouse.click(before.point.x, before.point.y)
+  await page.keyboard.type('X')
+  await page.waitForTimeout(200)
+  const after = await page.evaluate(() => {
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.id === 'prop-def-row') return b
+        const r = walk(b.children)
+        if (r) return r
+      }
+      return null
+    }
+    const b = walk(window.__qua.__editor.store.blocks)
+    return {
+      model: b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null,
+      dom: document.querySelector('#editor .blk[data-block-id="prop-def-row"] .tx')?.textContent ?? null,
+    }
+  })
+  assert(
+    after.model === before.text && after.dom === before.text,
+    `属性定义行内打字不许留下任何字（模型与 DOM 都不动）：${JSON.stringify({ before: before.text, after })}`,
+  )
+
+  await ctx.close()
+  return '块标＝滑杆图标；正文 contenteditable=false；打字后模型与 DOM 都不动'
+})
 
 await check(
   'T92 加一个 gutter 属性 ⇒ 那一行**当场**画出标记（不靠别处碰一下才刷新）',
@@ -22616,17 +22982,20 @@ await check('T260 转引用守卫：受保护块 toast 不写库；块菜单只�
 })
 
 /**
- * **T262：命中字上 hover 出「转成引用」，点它就转换。**
+ * **T262：命中字上 hover 出「转为引用」按钮；点提示转换，点命中字编辑。**
  *
  * 高亮是 `::highlight`（纯画层、没有元素可点），所以提示必须自己反算矩形：
  * 坐标 → plain 偏移（`offsetAtPoint`）→ 命中区间（`spanAt`）→ Range 的矩形。
- * 这里钉四件事：
+ * 这里钉五件事：
  *   ① hover 命中字出现且只出现一颗提示；未命中处 hover 不出；
  *   ② 悬停本身不动模型（它不是写入动作）；
- *   ③ 点提示 ⇒ 那一处切成指向来源页的引用；
- *   ④ 转换后提示自己收掉（不留在屏幕上指着一处已经不存在的命中）。
+ *   ③ **单击命中字＝把光标放进去编辑**（与竞品一致）：不转换、不写库；
+ *      在命中字中间改一个字 ⇒ 高亮随正文消失，但这一行还留着；改回来高亮又出现；
+ *   ④ **点悬停提示本身** ⇒ 切成指向来源页的引用（指针要能**慢慢**从命中字挪上按钮：
+ *      快速瞬移测不出「一往按钮移动，按钮就消失」这个回归）；
+ *   ⑤ 转换后提示自己收掉（不留在屏幕上指着一处已经不存在的命中）。
  */
-await check('T262 提及命中 hover 出「转成引用」：未命中处不出、悬停不写库、点命中字当场转换', async () => {
+await check('T262 提及命中 hover 提示：点提示才转换；点命中字＝编辑（高亮随正文消失/恢复、行不消失）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const NAME = '提及悬停页VWX'
@@ -22675,7 +23044,15 @@ await check('T262 提及命中 hover 出「转成引用」：未命中处不出�
         const blk = r.startContainer.parentElement?.closest?.('.blk')
         if (blk?.dataset?.blockId !== bid) continue
         const rect = r.getBoundingClientRect()
-        return { text: r.toString(), x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+        return {
+          text: r.toString(),
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom,
+        }
       }
       return null
     }, id)
@@ -22706,9 +23083,18 @@ await check('T262 提及命中 hover 出「转成引用」：未命中处不出�
   await page.mouse.move(hit.x, hit.y)
   await page.waitForSelector('.mention-tip', { timeout: 3000 })
   const tip = await page.evaluate(() => document.querySelector('.mention-tip')?.textContent ?? '')
-  assert(tip.includes('点击转为引用'), `hover 提示要说清动作：${JSON.stringify(tip)}`)
+  assert(tip.includes('转为引用'), `hover 提示要说清动作：${JSON.stringify(tip)}`)
   const still = await contentOf('mention-hover-a')
   assert(JSON.stringify(still) === JSON.stringify(before), `悬停不是写入动作：${JSON.stringify({ before, still })}`)
+  // 提示锚在**命中字**上：在同一处命中里横着挪，浮窗位置不许跟着指针跑
+  const tipPosA = await page.locator('.mention-tip').boundingBox()
+  await page.mouse.move(hit.right - 4, hit.y)
+  await page.waitForTimeout(220)
+  const tipPosB = await page.locator('.mention-tip').boundingBox()
+  assert(
+    tipPosA && tipPosB && tipPosA.x === tipPosB.x && tipPosA.y === tipPosB.y,
+    `提示要固定在高亮处，不跟指针跑：${JSON.stringify({ tipPosA, tipPosB })}`,
+  )
 
   // ② 悬停未命中的字：提示要收掉（不是「移开也不消失」）
   const miss = await wordRect('mention-hover-a', '今天')
@@ -22716,10 +23102,68 @@ await check('T262 提及命中 hover 出「转成引用」：未命中处不出�
   await page.mouse.move(miss.x, miss.y)
   await page.waitForFunction(() => !document.querySelector('.mention-tip'), null, { timeout: 3000 })
 
-  // ③ 回到命中，看着提示点那一处 ⇒ 换成指向来源页的引用（提示本身不接收点击）
+  // ③ 回到命中，看着提示**单击**那一处 ⇒ 只是落光标：不转换、模型一字不动
   await page.mouse.move(hit.x, hit.y)
   await page.waitForSelector('.mention-tip', { timeout: 3000 })
   await page.mouse.click(hit.x, hit.y)
+  await page.waitForTimeout(250)
+  const afterPlain = await contentOf('mention-hover-a')
+  assert(
+    !afterPlain.some((r) => r.t === 'ref') && JSON.stringify(afterPlain) === JSON.stringify(before),
+    `单击命中字是编辑，不是转换：${JSON.stringify({ before, afterPlain })}`,
+  )
+  // 光标落在命中字中间 ⇒ 打一个字把名字断开：高亮消失，但这一行还在（编辑途中不抽走）
+  await page.keyboard.type('X')
+  await page.waitForTimeout(350)
+  const broken = await page.evaluate((bid) => {
+    const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('mention-hit'))
+    const set = key ? CSS.highlights.get(key) : null
+    const rows = [...document.querySelectorAll('#editor .mount-editor .blk')].map((b) => b.dataset.blockId)
+    const hitHere = set
+      ? [...set].some((r) => r.startContainer.parentElement?.closest?.('.blk')?.dataset?.blockId === bid)
+      : false
+    return { rowExists: rows.includes(bid), hitHere }
+  }, 'mention-hover-a')
+  assert(broken.rowExists, `编辑途中这一行不许被抽走：${JSON.stringify(broken)}`)
+  assert(!broken.hitHere, `名字被改断 ⇒ 那一行的高亮应消失（不是钉在旧偏移上）：${JSON.stringify(broken)}`)
+  // 改回来 ⇒ 高亮又出现
+  await page.keyboard.press('Backspace')
+  await page.waitForFunction(
+    (bid) => {
+      const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('mention-hit'))
+      const set = key ? CSS.highlights.get(key) : null
+      return Boolean(
+        set &&
+          [...set].some((r) => r.startContainer.parentElement?.closest?.('.blk')?.dataset?.blockId === bid),
+      )
+    },
+    'mention-hover-a',
+    { timeout: 3000 },
+  )
+
+  // ④ 回到命中，**慢慢**把指针挪到提示按钮上再点它 ⇒ 换成指向来源页的引用
+  //    （慢移是回归点：快速瞬移测不出「一往按钮移动，按钮就消失」）
+  const hit2 = await hitOf('mention-hover-a')
+  assert(hit2, '前置：改回来之后命中重新出现')
+  await page.mouse.move(hit2.x, hit2.y)
+  await page.waitForSelector('.mention-tip', { timeout: 3000 })
+  const tipBox = await page.locator('.mention-tip').boundingBox()
+  assert(tipBox, '前置：提示按钮要量得出矩形')
+  await page.mouse.move(tipBox.x + tipBox.width / 2, tipBox.y + tipBox.height / 2, { steps: 12 })
+  await page.waitForTimeout(120)
+  assert(
+    await page.evaluate(() => Boolean(document.querySelector('.mention-tip'))),
+    '指针慢慢挪到提示上时，按钮不许先消失（否则点不到）',
+  )
+  // 提示浮在正文上：hover 底色必须**不透明**，否则下面的字会透上来读不清
+  const tipPaint = await page.evaluate(() => {
+    const t = document.querySelector('.mention-tip')
+    const s = getComputedStyle(t)
+    const parts = s.backgroundColor.match(/rgba?\(([^)]+)\)/)?.[1]?.split(',').map((x) => Number(x.trim())) ?? []
+    return { bg: s.backgroundColor, alpha: parts.length === 4 ? parts[3] : 1 }
+  })
+  assert(tipPaint.alpha === 1, `hover 时提示底色必须不透明（不能透出正文）：${JSON.stringify(tipPaint)}`)
+  await page.locator('.mention-tip').click()
   await page.waitForFunction(
     (bid) => {
       const walk = (list) => {
@@ -22739,11 +23183,11 @@ await check('T262 提及命中 hover 出「转成引用」：未命中处不出�
   const after = await contentOf('mention-hover-a')
   const ref = after.find((r) => r.t === 'ref')
   assert(ref && ref.to === pageId && ref.label === NAME, `点提示要切成指向来源页的引用：${JSON.stringify(after)}`)
-  // ④ 提示自己收掉：它指的那处命中已经不存在了
+  // ⑤ 提示自己收掉：它指的那处命中已经不存在了
   await page.waitForFunction(() => !document.querySelector('.mention-tip'), null, { timeout: 3000 })
 
   await ctx.close()
-  return '命中 hover 出提示、未命中不出；悬停零写入；点命中字切成指向来源页的引用；转换后提示收掉'
+  return '命中 hover 出提示、未命中不出；悬停零写入；点提示才转换；点命中字＝编辑（高亮随正文消失/恢复、行不消失）'
 })
 
 /**

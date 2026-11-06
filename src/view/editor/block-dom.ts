@@ -27,6 +27,7 @@ import {
   inlineTagIdsOf,
   isJournal,
   isEmbedBlock,
+  isPropDefBlock,
   isQueryBlock,
   journalDate,
   journalDateLabel,
@@ -909,15 +910,24 @@ export function makeBlockEl(
     marker.draggable = true
     marker.dataset.dragFor = markerTargetId
     /**
-     * **查询块的块标是漏斗**：类型进形状（形状优先，颜色在暗色主题下不可靠）。
+     * **特殊身份进块标形状**（形状优先，颜色在暗色主题下不可靠）：
+     *   · 查询块 ＝ 漏斗（它的正文是名字，这一块还会摊开一张结果视图）；
+     *   · 属性定义 ＝ 滑杆（它不是内容，是「字段声明」；正文就是定义名，直接打字改不动）。
      * 图标与点互斥（CSS），悬停时都让位给抓手——「任何块标悬停＝把手」这一条不变。
      */
-    if (isQueryBlock(b)) {
-      marker.classList.add('marker-query')
-      const qico = document.createElement('span')
-      qico.className = 'marker-ico'
-      qico.appendChild(createIcon('list-filter', 'sm'))
-      marker.appendChild(qico)
+    const special = isQueryBlock(b)
+      ? { cls: 'marker-query', icon: 'list-filter' as const }
+      : isPropDefBlock(b)
+        ? { cls: 'marker-schema', icon: 'sliders-horizontal' as const }
+        : null
+    if (special) {
+      marker.classList.add(special.cls)
+      const ico = document.createElement('span')
+      ico.className = 'marker-ico'
+      ico.appendChild(createIcon(special.icon, 'sm'))
+      marker.appendChild(ico)
+      // 属性定义的正文是定义名，行内改不了；悬停块标时把「它是什么」说清
+      if (isPropDefBlock(b)) marker.title = t('ui.block.schemaHint')
     }
     left.appendChild(marker)
   }
@@ -1111,23 +1121,28 @@ export function makeBlockEl(
    *    `contenteditable=false` ＋ `data-readonly` ⇒ 点它不落光标（见 editor-events 的 mousedown 分支）。
    *    写入该行的模型路径本来就不该存在（`_date` 是只读的，正文留空是它的常态）；
    *    以前能聚焦 ⇒ 光标停在日期后面、一打字就把日期挤掉，像在编辑一个不该存在的字段。
-   * ⚠️ 只对 **journal** 这样：`page` 行的正文就是页名，**必须可编辑**。
+   * ⚠️ **journal 与属性定义**都这样：前者正文是日期投影，后者正文是定义名。
+   *    两者都没有「行内改字」这条路径，让 DOM 接受输入只会出现
+   *    「字进 DOM、模型不变、控制台抛 protected」——重画一过字又消失。
+   * ⚠️ `page` 行不在此列：页的正文就是描述，**必须可编辑**。
    */
-  if (isReadonlyBlock(b)) {
+  if (isReadonlyBlock(b) || isPropDefBlock(b)) {
     tx.contentEditable = 'false'
     tx.dataset.readonly = '1'
     /**
      * 占位文案只属于 **journal**：它的「正文」是 `_date` 的投影，投影要看得见。
      * 类型不可写的块没有可显示的内容（分割线的线本身就是全部），不挂占位——
-     * 否则会在一条线旁边多出一行日期。
+     * 否则会在一条线旁边多出一行日期。属性定义的正文是定义名，已经画在行里了，也不挂。
      */
-    if (!isEmptyContent(b.content)) {
-      // 兜底：万一旧数据里 journal 有正文（不该发生），仍要能看见它
-      tx.dataset.ph = plainText(b.content)
-      tx.dataset.phReadonly = '1'
-    } else if (isJournal(b)) {
-      tx.dataset.ph = journalDateLabel(journalDate(b))
-      tx.dataset.phReadonly = '1'
+    if (isReadonlyBlock(b)) {
+      if (!isEmptyContent(b.content)) {
+        // 兜底：万一旧数据里 journal 有正文（不该发生），仍要能看见它
+        tx.dataset.ph = plainText(b.content)
+        tx.dataset.phReadonly = '1'
+      } else if (isJournal(b)) {
+        tx.dataset.ph = journalDateLabel(journalDate(b))
+        tx.dataset.phReadonly = '1'
+      }
     }
   } else if (isEmptyContent(b.content)) {
     // 空块的幽灵占位：CSS 生成内容，**不进 DOM 文本**

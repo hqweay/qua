@@ -32,6 +32,14 @@ export class BlockSelection {
     return this.blockSel ? [...this.blockSel.ids] : []
   }
 
+  /**
+   * 拖拽用：选中块的**最上层根**（祖先也在选区里 ⇒ 只留祖先，避免父子被搬两次）。
+   * 这是「一次搬一组」的唯一清单；派生面（查询结果/镜像）的根不在选区里，天然排除。
+   */
+  selectedRootIds(): string[] {
+    return this.blockSelRoots().map((b) => b.id)
+  }
+
   inBlockSelection(id: string): boolean {
     return Boolean(this.blockSel?.ids.includes(id))
   }

@@ -31,9 +31,11 @@ import {
   derivedRecordsOf,
   derivedSpecOf,
   displayNameOf,
+  displayTextOf,
   expandContexts,
   hasLiveChildren,
   isJournal,
+  mentionSpotsOf,
   mountEntriesOf,
   readViewSet,
   unfoldForContext,
@@ -263,10 +265,18 @@ export class MountArea {
   /**
    * **提及栏的高亮**：块 id → plain 区间（`derived.mentionSpots` 原样搬来）。
    * 派生值，不落盘；切栏时清空。
+   *
+   * ⚠️ 装载时算出来的那一份只是起点：用户可能在「提及」这一栏里**直接编辑**那一行
+   *    （与竞品一致——点进命中字里打字时，高亮应随正文走，而不是钉在旧偏移上）。
+   *    区间因此按**此刻的正文**重算，见 `liveMentionSpans`。
    */
   private hitSpans: ReadonlyMap<string, readonly PlainSpan[]> = new Map()
   /** 命中点到的是谁（这一栏的来源块：页/标签）；换栏清空 */
   private mentionTo: string | null = null
+  /** 这一栏冻结下来的成员（块 id，装载时的派生记录顺序）：高亮随内容重算，成员不重算 */
+  private mentionRecordIds: readonly string[] = []
+  /** 装载时目标的名字：高亮认的还是这串字（名字改了要等这一栏重载，不追改名） */
+  private mentionWord = ''
   /** 高亮 key：第一次真的画时才领（没人看提及栏就不占一条 key），拆掉时归还 */
   private hitKey: string | null = null
   /**
@@ -278,17 +288,22 @@ export class MountArea {
   private hitFrame = 0
   /**
    * **命中字上的 hover 提示**：`::highlight` 只是画笔、没有可命中的元素，
-   * 所以「点一下转成引用」必须有一个真的按钮 —— 它只在指针压住命中字时出现。
+   * 所以「光标现在压着哪一处命中」只能靠指针坐标反算。
    * 提示挂在 `body`（不挂在编辑器里）：挂进去会被行重画一起摘掉，还会被滚动容器裁掉。
+   *
+   * ⚠️ 提示**本身是转换按钮**（与竞品同形）：点它才转换；点命中字是「把光标放进去编辑」。
+   *    两者必须是两个落点——同一枪只能有一个意思。提示锚在**高亮文本的上方**（放不下翻到下方），
+   *    不跟指针跑：跟着鼠标跑的目标永远追不上；
+   *    从正文移到提示上要留一点宽限（`tipHideTimer`），否则 `mouseleave` 会先把提示收掉。
    */
-  private tipEl: HTMLDivElement | null = null
-  /** 提示此刻说的是哪一处命中（点击时用这一份区间判断「这一枪是冲着它来的」） */
+  private tipEl: HTMLButtonElement | null = null
+  /** 提示此刻指向哪一处命中：它被按下时转的就是这一处（不是「光标现在在哪」） */
   private tipAt: { blockId: string; span: PlainSpan } | null = null
   /** 悬停**停留**一小会儿才浮出：路过命中不算（否则每次划过都闪一下，还可能挡下一次点击） */
   private tipShowTimer = 0
+  /** 离开正文到指针挪上提示之间的宽限；进入提示就取消 */
+  private tipHideTimer = 0
   private tipWant: { blockId: string; span: PlainSpan; at: AnchorRect } | null = null
-  /** `mousedown` 时提示正指着哪一处：`click` 靠它区分「点这一处＝转换」与「点这一处＝落光标」 */
-  private armedHit: { blockId: string; span: PlainSpan } | null = null
   private hoverFrame = 0
   private hoverPoint: { x: number; y: number } | null = null
   /**
@@ -652,6 +667,16 @@ export class MountArea {
   private paintMentionHits(): void {
     // 重画会让行整体换掉 ⇒ 提示锚着的那一处矩形已经过期，收掉，等指针再停上来
     this.hideTip()
+    /**
+     * **区间随正文重算，成员不重算**：这一栏里点进命中字就能改（与竞品一致），
+     * 改一个字就可能让「这一串名字」不再连续。装载时那份区间钉在旧偏移上，
+     * 继续画只会盖住旁边的字（不是「高亮消失」）。所以每次重画都按此刻的正文再找一遍：
+     * 改坏 ⇒ 没有区间（高亮消失）、改回来 ⇒ 区间又出现；这一行本身留到离开这片区域再重载。
+     */
+    if (this.mentionTo && this.mentionWord !== '') {
+      this.hitSpans = this.liveMentionSpans()
+      this.syncMentionHits(this.block.ed)
+    }
     // 这一栏此刻画的不是大纲（列表/表格/空态）：老的行还留在 DOM 里但已经不可见，
     // 在上面画 Range 只会得到几条指向隐藏节点的区间
     if (this.hitSpans.size === 0 || this.editorEl.hidden) {
@@ -660,6 +685,24 @@ export class MountArea {
     }
     this.hitKey ??= claimHighlightKey('mention-hit')
     paintHits(this.editorEl, this.hitSpans, this.hitKey)
+  }
+
+  /**
+   * 按**冻结的成员 ＋ 此刻的正文**重算命中区间。
+   *
+   * 成员是装载那一刻的派生记录（编辑途中不重查：行被抽走会让正在打字的 DOM 消失，
+   * 那正是「编辑时块不见了」）；区间是纯函数、读当前内容，改字/改回来立刻反映。
+   */
+  private liveMentionSpans(): Map<string, readonly PlainSpan[]> {
+    const out = new Map<string, readonly PlainSpan[]>()
+    const word = this.mentionWord
+    for (const id of this.mentionRecordIds) {
+      const b = this.deps.kb.get(id)
+      if (!b) continue
+      const spots = mentionSpotsOf(b.content, word)
+      if (spots.length > 0) out.set(id, spots.map((s) => ({ start: s.start, end: s.end })))
+    }
+    return out
   }
 
   /** DOM 变化合并到下一帧：一次重画（整行替换）会连发十几条 mutation，逐条重算纯属浪费 */
@@ -684,15 +727,17 @@ export class MountArea {
   /**
    * **⌥ + 单击命中字 = 转为引用。**
    *
+   * 为什么只认 ⌥、而不是「悬停后单击」：点命中字最常见的意思是**把光标放进去编辑**。
+   * 这一栏的行就是源块本身，编辑是它最主要的能力（改一个字，高亮随正文消失；
+   * 改回来，高亮又出现——派生高亮的语义）。把单击让给「转换」就等于用户点不进去。
+   *
    * 为什么是 ⌥：命中永远是**纯文本**（`mentionSpotsOf` 会把含原子的切片剔掉），
    * 而 ⌥ 单击在编辑器里只对原子/引用有意义（「看详情而不是默认动作」）——
    * 打在文本上它本来是空的，不会和 ⌘ 新 tab、Shift 进右槽撞。
    * 落点用 `caretRangeFromPoint` 换算回 plain 偏移：高亮只是画层，没有可点的元素。
    */
   private readonly onHitClick = (e: MouseEvent): void => {
-    const armed = this.armedHit
-    this.armedHit = null
-    if (!this.mentionTo || (!e.altKey && !armed)) return
+    if (!this.mentionTo || !e.altKey) return
     /**
      * **拖选不是点击**：按住 ⌥ 拖过一段文本，释放在同一行时浏览器仍会派发一次 `click`。
      * 那时落点可能正好停在命中字上，于是「选了一段」变成「把一段转成引用」。
@@ -710,12 +755,6 @@ export class MountArea {
     // 没命中就**原样放行**：光标照常落下，一个字节都不写
     const span = offset === null ? null : spanAt(this.hitSpans.get(blockId) ?? [], offset)
     if (!span) return
-    /**
-     * 普通单击只有在「提示刚刚指着**同一处**」时才算转换：鼠标路过直接点仍然只是落光标。
-     * 指的不是同一处（提示盖在别的行上、用户其实点了那行）⇒ 放行，不拿旁边的命中顶替。
-     */
-    const aimed = armed && armed.blockId === blockId && armed.span.start === span.start && armed.span.end === span.end
-    if (!e.altKey && !aimed) return
     e.preventDefault()
     e.stopPropagation()
     this.hideTip()
@@ -728,15 +767,12 @@ export class MountArea {
   }
 
   /**
-   * **鼠标停在命中字上 ⇒ 浮一句「点击转为引用」，点那一处就转换。**
+   * **鼠标停在命中字上 ⇒ 浮出「转为引用」按钮。**
    *
-   * 为什么提示本身不可点（`pointer-events: none`）：它是一个 `fixed` 浮层，
-   * 一旦能接收点击，就会**盖住下一行**——用户想点旁边那行时先打中浮层（真踩过）。
-   * 把「点哪里」留给人正在看的那处命中字，浮层只负责说明；判定仍然复用
-   * `offsetAtPoint` ＋ `spanAt`，与画高亮、`⌥` 单击是同一份区间。
-   *
-   * 「点命中字＝转换」只在**提示已经浮出**时成立：鼠标路过时先落光标照旧；
-   * 停留一小会儿看到提示之后再点，才是显式的转换动作。
+   * 提示是一个独立的小按钮，**固定在高亮文本上方**（放不下翻到下方，不跟指针跑）：
+   * 点它才转换；点命中字本身只是落光标编辑。从正文挪到提示上的那一小段留了宽限
+   * （`scheduleHideTip`），否则 `mouseleave` 会先把提示收掉、按钮点不到。
+   * 判定仍然复用 `offsetAtPoint` ＋ `spanAt`，与画高亮是同一份区间。
    */
   private readonly onHitHover = (e: MouseEvent): void => {
     this.hoverPoint = { x: e.clientX, y: e.clientY }
@@ -747,16 +783,14 @@ export class MountArea {
     })
   }
 
-  /** 指针离开整片正文（含滚出可视区）⇒ 不再有命中可点 */
+  /** 指针离开整片正文：先留一点宽限，让人能挪上提示按钮；没进去就收 */
   private readonly onHitLeave = (): void => {
     this.hoverPoint = null
-    this.hideTip()
+    this.scheduleHideTip()
   }
 
-  /** 按一下正文：记住「提示指着谁」再收掉提示 —— `click` 要靠这一份判断这次要不要转换 */
+  /** 按下就收掉提示：它锚着的那一处马上就会被光标/选区改变，留着只会说谎 */
   private readonly onHitDown = (): void => {
-    // 每次按下都重算：上一条命中的「已瞄准」不许留到下一次点击（它可能已经在别处）
-    this.armedHit = this.tipEl && this.tipAt ? { blockId: this.tipAt.blockId, span: this.tipAt.span } : null
     this.hideTip()
   }
 
@@ -772,21 +806,30 @@ export class MountArea {
       return
     }
     const el = document.elementFromPoint(p.x, p.y)
+    /**
+     * **指针已经压在提示按钮上**：那正是用户要去点的目标，不是「离开了命中」。
+     * 提示是 `position: fixed` 挂在 `body` 上的，但指针往上挪的那几步仍可能落在
+     * 编辑器盒子里 ⇒ `mousemove` 会跑到这里；不先认它，就会在点中之前把按钮收掉。
+     */
+    if (el && this.tipEl && (el === this.tipEl || this.tipEl.contains(el))) {
+      this.cancelHideTip()
+      return
+    }
     const blk = el?.closest<HTMLElement>('.blk')
     const blockId = blk?.dataset?.['blockId']
     if (!blk || !blockId || !this.editorEl.contains(blk)) {
-      this.hideTip()
+      this.scheduleHideTip()
       return
     }
     const tx = blk.querySelector<HTMLElement>(':scope > .tx')
     if (!tx) {
-      this.hideTip()
+      this.scheduleHideTip()
       return
     }
     const offset = offsetAtPoint(tx, p.x, p.y)
     const span = offset === null ? null : spanAt(this.hitSpans.get(blockId) ?? [], offset)
     if (!span) {
-      this.hideTip()
+      this.scheduleHideTip()
       return
     }
     /**
@@ -799,14 +842,15 @@ export class MountArea {
       (r) => p.x >= r.left - 2 && p.x <= r.right + 2 && p.y >= r.top - 2 && p.y <= r.bottom + 2,
     )
     if (!rect) {
-      this.hideTip()
+      this.scheduleHideTip()
       return
     }
-    this.scheduleTip(blockId, span, { left: p.x, top: p.y, right: p.x, bottom: p.y })
+    this.scheduleTip(blockId, span, rect)
   }
 
   /** 同一处命中：已在显示就只挪位置；换了一处：已显示的直接换，没显示的等停留 */
   private scheduleTip(blockId: string, span: PlainSpan, at: AnchorRect): void {
+    this.cancelHideTip()
     const shown = this.tipAt
     if (this.tipEl && shown && shown.blockId === blockId && shown.span.start === span.start && shown.span.end === span.end) {
       this.placeTip(at)
@@ -829,19 +873,58 @@ export class MountArea {
     this.tipWant = null
     let tip = this.tipEl
     if (!tip) {
-      tip = document.createElement('div')
+      tip = document.createElement('button')
+      tip.type = 'button'
       tip.className = 'mention-tip'
       tip.textContent = t('ui.mount.mention.hoverHint')
-      // 只说明、不拦截：它盖在正文上，能点的话就会吃掉旁边那一行的点击
-      tip.style.pointerEvents = 'none'
+      // 进入提示就取消「离开正文」那条宽限；离开提示则收掉（回到正文会重新浮出）
+      tip.addEventListener('mouseenter', () => this.cancelHideTip())
+      tip.addEventListener('mouseleave', () => this.hideTip())
+      tip.addEventListener('click', this.onTipClick)
       document.body.appendChild(tip)
       this.tipEl = tip
     }
+    this.cancelHideTip()
     this.tipAt = { blockId, span }
     this.placeTip(at)
   }
 
-  /** 锚在**指针**上（不是命中字的固定矩形）：提示跟着光标走，用户点的永远是光标下的正文 */
+  /** 点提示＝转它指着的那一处（与命中字本身分开：点字是编辑） */
+  private readonly onTipClick = (e: MouseEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    const at = this.tipAt
+    const to = this.mentionTo
+    if (!at || !to) return
+    this.hideTip()
+    this.deps.invoke('core.block/convert-mention', {
+      blockId: at.blockId,
+      to,
+      start: at.span.start,
+      end: at.span.end,
+    })
+  }
+
+  /** 指针离开正文到「挪上提示」之间的宽限；进入提示或重新命中都会取消 */
+  private scheduleHideTip(): void {
+    this.cancelHideTip()
+    this.tipHideTimer = window.setTimeout(() => {
+      this.tipHideTimer = 0
+      this.hideTip()
+    }, 240)
+  }
+
+  private cancelHideTip(): void {
+    if (this.tipHideTimer) {
+      window.clearTimeout(this.tipHideTimer)
+      this.tipHideTimer = 0
+    }
+  }
+
+  /**
+   * 锚在**命中字的矩形**上（不是指针）：提示浮在那一处高亮的上方，不跟着鼠标跑——
+   * 跟着跑的目标永远追不上。上方放不下时 `placeNear` 会翻到下方。
+   */
   private placeTip(anchor: AnchorRect): void {
     const tip = this.tipEl
     if (!tip) return
@@ -853,7 +936,7 @@ export class MountArea {
       anchor,
       side: 'above',
       align: 'left',
-      gap: 10,
+      gap: 6,
       pad: 8,
     })
     tip.style.left = `${at.left}px`
@@ -865,6 +948,7 @@ export class MountArea {
       window.clearTimeout(this.tipShowTimer)
       this.tipShowTimer = 0
     }
+    this.cancelHideTip()
     this.tipWant = null
     this.tipEl?.remove()
     this.tipEl = null
@@ -875,6 +959,8 @@ export class MountArea {
     // 换栏：上一栏的命中高亮先摘掉，再由这一栏自己决定要不要画
     this.hitSpans = new Map()
     this.mentionTo = null
+    this.mentionRecordIds = []
+    this.mentionWord = ''
     this.hideTip()
     this.block.ed?.setMentionHits(null)
     this.paintMentionHits()
@@ -940,6 +1026,9 @@ export class MountArea {
       this.hitSpans = mentionSpansOf(records)
       // 命中属于**这一栏的来源块**（页/标签），转引用时目标就是它
       this.mentionTo = host.id
+      // 成员与词都冻结在装载这一刻；区间由 paintMentionHits 按当前正文重算
+      this.mentionRecordIds = records.map((r) => r.block.id)
+      this.mentionWord = displayTextOf(host)
       this.syncMentionHits(this.block.ed)
     }
     const view = this.viewOf(entry)

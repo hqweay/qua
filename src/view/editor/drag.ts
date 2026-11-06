@@ -13,6 +13,8 @@ type DropZone = 'before' | 'after' | 'inside'
 
 export class Drag {
   private dragId: string | null = null
+  /** 这一次拖的**整组**（多选时是一组最上层根；单选时只有一个） */
+  private dragIds: readonly string[] = []
   private dropEl: HTMLElement | null = null
 
   constructor(private readonly ed: BlockEditor) {}
@@ -23,9 +25,19 @@ export class Drag {
   }
 
   begin(id: string): void {
+    /**
+     * **拖动多选里的一块＝拖动整组**：选区是一次显式的「这组东西」；
+     * 从其中任一行的块标起拖，都不该只搬走按下的那一块。
+     * 按下的块不在选区里 ⇒ 这是一次新的单块拖拽，先把旧选区清掉（否则屏幕上还亮着一组，
+     * 实际上只搬走一块）。
+     */
+    const grouped = this.ed.bsel.hasBlockSelection() && this.ed.bsel.inBlockSelection(id)
+    const roots = grouped ? this.ed.bsel.selectedRootIds() : []
+    if (!grouped && this.ed.bsel.hasBlockSelection()) this.ed.bsel.clearBlockSelection()
     this.dragId = id
+    this.dragIds = roots.length > 0 ? roots : [id]
     this.ed.container.classList.add('dragging')
-    this.ed.blockEl(id)?.classList.add('drag-src')
+    for (const x of this.dragIds) this.ed.blockEl(x)?.classList.add('drag-src')
   }
 
   showDropTarget(el: HTMLElement | null, zone: DropZone | null): void {
@@ -41,6 +53,16 @@ export class Drag {
   drop(draggedId: string | null, targetId: string | null, zone: DropZone): void {
     const id = draggedId
     if (!id) return
+    /**
+     * **整组拖拽**：多选时 `dragIds` 是那一组最上层根，落手走编辑器的批量落点。
+     * 组里的块全在本 doc 里（选区只收可见行），所以不走跨容器那一支。
+     */
+    if (this.dragIds.length > 1) {
+      const group = [...this.dragIds]
+      this.end()
+      this.ed.moveBlocksTo(group, targetId, zone)
+      return
+    }
     const loc = locate(this.ed.doc, id)
     if (!loc) {
       // 别的露面拖来的块：store 现取本体，落点走跨容器口径（守卫在那边各归各位）
@@ -77,13 +99,14 @@ export class Drag {
   }
 
   end(): void {
-    const id = this.dragId
+    const ids = this.dragIds
     this.dragId = null
+    this.dragIds = []
     this.ed.container.classList.remove('dragging', 'drop-end')
     if (this.dropEl) delete this.dropEl.dataset.drop
     this.dropEl = null
     for (const el of Array.from(this.ed.container.querySelectorAll<HTMLElement>('.blk[data-drop]'))) delete el.dataset.drop
-    if (id) this.ed.blockEl(id)?.classList.remove('drag-src')
+    for (const x of ids) this.ed.blockEl(x)?.classList.remove('drag-src')
   }
 
   private setDropEl(el: HTMLElement | null): void {

@@ -268,8 +268,15 @@ export class MemoryKb implements KbClient {
     const touched = new Map<string, TouchedBlock>()
     /** 回滚日志：逆序应用的「怎么退回去」 */
     const rollback: (() => void)[] = []
+    /**
+     * **本事务内的父指针覆盖**：`store.index.parentOf` 是**事务出口**才更新的快照，
+     * 同一笔里搬了 A 再搬 A 时，`Tx.move` 会按旧父去摘 —— 摘错列表，实测能把目标父
+     * 自己从树上摘掉（整棵子树凭空消失）。这里按「本事务已经改过的父」覆盖一层，
+     * 只覆盖动过的块，成本与库体量无关；出口 `store.apply(ops)` 仍按 op 重建索引。
+     */
+    const parentOverride = new Map<string, string | null>()
     try {
-      const result = fn(this.makeTx(touched, rollback))
+      const result = fn(this.makeTx(touched, rollback, parentOverride))
       /**
        * **op 只在出口产生**：`diffTouched` 只比动过的块，成本与库体量无关。
        * 每个 `Tx` 方法只改内存，不再各自 `ops.push` —— 完备性由构造保证：
@@ -302,7 +309,11 @@ export class MemoryKb implements KbClient {
     }
   }
 
-  private makeTx(touched: Map<string, TouchedBlock>, rollback: (() => void)[]): Tx {
+  private makeTx(
+    touched: Map<string, TouchedBlock>,
+    rollback: (() => void)[],
+    parentOverride: Map<string, string | null>,
+  ): Tx {
     const at = (): number => this.now()
     const require = (id: string): Block => {
       const b = this.get(id)
@@ -398,8 +409,9 @@ export class MemoryKb implements KbClient {
         walkForest(
           [block],
           (node, ctx) => {
+            const parent = ctx.parent?.id ?? parentId
             const placement: Placement = {
-              parent: ctx.parent?.id ?? parentId,
+              parent,
               prev:
                 ctx.parent === null
                   ? rootPrev
@@ -408,6 +420,8 @@ export class MemoryKb implements KbClient {
                     : (ctx.parent.children[ctx.index - 1]?.id ?? null),
             }
             touchNew(node, placement)
+            // 新块还不在索引里：本事务内若紧接着搬它，`parentOf` 要能答出真父
+            parentOverride.set(node.id, parent)
           },
           // 新子树里没有软删的块，但显式写出来：这条路径不该被「看不见的块」影响
           { includeDeleted: true },
@@ -419,7 +433,7 @@ export class MemoryKb implements KbClient {
         if (parentId !== null && subtreeIds(b).includes(parentId)) {
           throw new Error(`kb: cannot move "${id}" into its own subtree`)
         }
-        const parentBefore = self.parentOf(id)?.id ?? null
+        const parentBefore = parentOverride.has(id) ? parentOverride.get(id)! : (self.parentOf(id)?.id ?? null)
         const from = siblings(self.store, parentBefore)
         const list = siblings(self.store, parentId)
         if (!from || !list) throw new Error(`kb: no such parent "${parentId}"`)
@@ -442,6 +456,7 @@ export class MemoryKb implements KbClient {
         // 同一块被移动两次：改前落点取第一次，改后落点取最后一次 ⇒ 净变化由 diff 判
         t.beforePlacement ??= beforePlacement
         t.afterPlacement = { parent: parentId, prev: at_ === 0 ? null : (list[at_ - 1]?.id ?? null) }
+        parentOverride.set(id, parentId)
       },
 
       remove(id) {

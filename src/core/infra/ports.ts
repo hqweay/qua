@@ -16,6 +16,7 @@
  */
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { CtxKeys } from '../index.ts'
+import type { UndoKind } from '../model/undo.ts'
 import type { QueryNode, QuerySpec } from '../query/query.ts'
 import type { Cardinality, ChoiceScope, UiPosition } from '../props/props.ts'
 import type { SecLayout } from '../query/feed.ts'
@@ -120,6 +121,18 @@ export interface MenuRequest {
 /** 命令处理器拿到的「受管门面」 */
 export interface App {
   ed: BlockEditor
+  /**
+   * **把一组同步写／命令收进同一个撤销条目**（一次 ⌘Z 全回）。
+   *
+   * 这是「显式命令分组」在本模型里的对应物：分组的是**历史**，不是事务。
+   * 真正「要么全成要么全败」的批量模型写在 `Tx`（`d.run(tx => …)`）那一层；
+   * 这里只保证「这一段里发生的所有写入，撤销时算一步」。
+   *
+   * ⚠️ 嵌套安全：内层 `runGroup` 并入外层，不会重置外层的捕获袋。
+   * ⚠️ `fn` 抛错时已经发生的写入仍会收成一个可撤销条目（不做自动回滚）；
+   *    要原子性请在 `fn` 里用一笔 `tx`。
+   */
+  runGroup<T>(fn: () => T, kind?: UndoKind): T
   /* 页面 */
   listPages(): { id: string; title: string; icon: string; blocks: number }[]
   activePageId(): string

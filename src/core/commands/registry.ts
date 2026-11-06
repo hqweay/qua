@@ -77,4 +77,36 @@ export class Registry {
     this.app.ed.probe.lastCommand = { name, at: Date.now(), via }
     return { ok: true, handled }
   }
+
+  /**
+   * **一组命令共用一个撤销条目**（命令分组 API 的历史语义，不是事务回滚）。
+   *
+   * 准入：每条命令都必须已声明、有 handler、且 `undoable`。一条不合格就整组拒绝，
+   * 不做「执行一半再报错」。组内命令必须**同步**——异步命令（选图、剪贴板、浮层）
+   * 的后续写入发生在 `runGroup` 关袋之后，分组对它没有意义。
+   *
+   * 语义边界：失败时**已经执行的那几条写入仍会收进同一个撤销条目**（可一次 ⌘Z 撤回），
+   * 但不会自动把前几条回滚。要「要么全成要么全败」请让命令内部用一笔 `tx`。
+   */
+  invokeGroup(
+    cmds: readonly { name: string; args?: Record<string, unknown> }[],
+    via = 'api',
+    ctx?: CtxKeys,
+  ): InvokeResult[] {
+    if (cmds.length === 0) return []
+    const bad = cmds.find((c) => {
+      const decl = this.decls.get(c.name)
+      return !decl || !decl.undoable || !this.handlers.has(c.name)
+    })
+    if (bad) return [{ ok: false, handled: false, error: t('err.cmd.notGroupable', { name: bad.name }) }]
+    return this.app.runGroup(() => {
+      const out: InvokeResult[] = []
+      for (const c of cmds) {
+        const r = this.invoke(c.name, c.args ?? {}, via, ctx)
+        out.push(r)
+        if (!r.ok) break
+      }
+      return out
+    })
+  }
 }
