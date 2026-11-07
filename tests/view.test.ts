@@ -53,7 +53,7 @@ import {
   withCover,
   withFilter,
   withGroup,
-  withLayout,
+  withTabsDirection,
   withListSort,
   withSort,
   withStructureGroup,
@@ -680,35 +680,36 @@ test('结构分组：只接 children 源的卡片、与按值分组互斥、清�
   assert.equal('groupByStructure' in withGroup(structure, 'p1'), false, '按值分组接管时结构分组退场')
 })
 
-test('卡片摆法：有分组才有消费者；页签存配置、并排回缺省；不分组时 layout 丢掉', () => {
+test('页签：children 源才接；方向存配置、横排回缺省；卡片不残留摆法位', () => {
   const child = { kind: 'children', blockId: 'x' } as const
-  const view = (cards: ViewConfig['cards'], extra: Partial<ViewConfig> = {}): ViewConfig => ({
-    id: 'v',
-    kind: 'cards',
-    ...extra,
-    ...(cards ? { cards } : {}),
-  })
+  const query = { kind: 'query', spec: { from: { kind: 'tag', id: 't' } } } as const
 
-  const [tabsH] = canonicalViews([view({ layout: 'tabs-h' }, { groupBy: 'p1' })], child)
-  assert.equal(cardLayoutOf(tabsH), 'tabs-h', '页签是显式配置，不是新 kind')
-  assert.equal(tabsH!.cards?.layout, 'tabs-h')
+  const [tabs] = canonicalViews([{ id: 'v', kind: 'tabs', tabs: { direction: 'vertical' } }], child)
+  assert.equal(tabs?.kind, 'tabs', '页签是独立 kind（children 源）')
+  assert.equal(tabs!.tabs?.direction, 'vertical')
 
-  const [tabsV] = canonicalViews([view({ layout: 'tabs-v' }, { groupByStructure: true })], child)
-  assert.equal(cardLayoutOf(tabsV), 'tabs-v', '结构分组同样有摆法（组来源与摆法正交）')
+  const [tabsH] = canonicalViews([{ id: 'v', kind: 'tabs', tabs: { direction: 'horizontal' } }], child)
+  assert.equal(tabsH!.tabs?.direction, undefined, '横排是缺省：不存它（默认与显式默认只有一种写法）')
 
-  const [plain] = canonicalViews([view({ layout: 'columns' }, { groupBy: 'p1' })], child)
-  assert.equal(plain!.cards?.layout, undefined, '并排是缺省：不存它（默认与显式默认只有一种写法）')
-  assert.equal(cardLayoutOf(plain), 'columns')
+  const [noDir] = canonicalViews([{ id: 'v', kind: 'tabs', tabs: { direction: 'diagonal' as never } }], child)
+  assert.equal(noDir!.tabs?.direction, undefined, '只认两个方向，别的丢掉')
 
-  const [noGroup] = canonicalViews([view({ layout: 'tabs-h' })], child)
-  assert.equal(noGroup!.cards?.layout, undefined, '没有分组 ⇒ 摆法没有消费者，丢掉')
-  assert.equal(cardLayoutOf(noGroup), 'grid', '不分组就是网格')
+  const [dropped] = canonicalViews([{ id: 'v', kind: 'tabs' }], query)
+  assert.equal(dropped, undefined, '查询源命中是平的，没有「页」⇒ 页签不接')
 
-  const base: ViewConfig = { id: 'v', kind: 'cards', groupBy: 'p1' }
-  const tabs = withLayout(base, 'tabs-h')
-  assert.equal(tabs.cards?.layout, 'tabs-h')
-  assert.equal('layout' in (withLayout(tabs, 'columns').cards ?? {}), false, '选并排＝回到缺省（删键）')
-  assert.equal(base.cards?.layout, undefined, '不改原视图')
+  // 卡片退回两副面孔：旧的摆法位被 canonical 丢掉（原型不迁移，读不进来就作废）
+  const [stale] = canonicalViews(
+    [{ id: 'v', kind: 'cards', groupBy: 'p1', cards: { layout: 'tabs-h' } as never }],
+    child,
+  )
+  assert.equal(cardLayoutOf(stale), 'columns', '卡片长成什么由分组键派生')
+  assert.equal(stale!.cards && 'layout' in stale.cards, false, '摆法位不再是卡片的配置')
+
+  const base: ViewConfig = { id: 'v', kind: 'tabs' }
+  const vertical = withTabsDirection(base, 'vertical')
+  assert.equal(vertical.tabs?.direction, 'vertical')
+  assert.equal('direction' in (withTabsDirection(vertical, 'horizontal').tabs ?? {}), false, '选横排＝回到缺省（删键）')
+  assert.equal(base.tabs?.direction, undefined, '不改原视图')
 })
 
 test('卡片配置一份：cover／size／showEmpty 原样往返；布局是派生的，切布局不搬配置', () => {

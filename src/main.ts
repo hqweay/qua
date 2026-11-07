@@ -1672,7 +1672,7 @@ const app: App = {
       },
     ]
     for (const v of data.views) {
-      // 卡片的图标画「它现在长什么样」：网格／并排／横向页签／纵向页签
+      // 卡片的图标画「它现在长什么样」：网格／看板列；页签画它的方向
       const cardLayout = v.kind === 'cards' ? cardLayoutOf(v) : ''
       rows.push({
         id: `view//${v.id}`,
@@ -1683,12 +1683,12 @@ const app: App = {
             : v.kind === 'cards'
               ? cardLayout === 'columns'
                 ? 'lucide:columns-3'
-                : cardLayout === 'tabs-h'
-                  ? 'lucide:panel-top'
-                  : cardLayout === 'tabs-v'
-                    ? 'lucide:panel-left'
-                    : 'lucide:layout-grid'
-              : 'lucide:table',
+                : 'lucide:layout-grid'
+              : v.kind === 'tabs'
+                ? v.tabs?.direction === 'vertical'
+                  ? 'lucide:panel-left'
+                  : 'lucide:panel-top'
+                : 'lucide:table',
         ...(v.filter ? { hint: t('ui.view.slice') } : {}),
         ...(active?.id === v.id ? { keyHint: t('ui.view.current') } : {}),
       })
@@ -1721,18 +1721,17 @@ const app: App = {
         }
       }
       /**
-       * **卡片的摆法**（有分组才有）：并排／横向页签／纵向页签。
-       * 不分组时只有网格，这一组不出现——不是把三档禁掉再留一排灰行。
+       * **页签的方向**：横向（缺省）／纵向。纯渲染差异 ⇒ 配置位，
+       * 不是两种看法；这一组只对页签视图出现。
        */
-      if (active.kind === 'cards' && (active.groupBy || active.groupByStructure)) {
-        const current = cardLayoutOf(active)
+      if (active.kind === 'tabs') {
+        const current = active.tabs?.direction === 'vertical' ? 'vertical' : 'horizontal'
         for (const [value, label, icon] of [
-          ['columns', t('ui.view.layout.columns'), 'lucide:columns-3'],
-          ['tabs-h', t('ui.view.layout.tabsH'), 'lucide:panel-top'],
-          ['tabs-v', t('ui.view.layout.tabsV'), 'lucide:panel-left'],
+          ['horizontal', t('ui.tabs.direction.h'), 'lucide:panel-top'],
+          ['vertical', t('ui.tabs.direction.v'), 'lucide:panel-left'],
         ] as const) {
           rows.push({
-            id: `view/layout/${value}`,
+            id: `view/tabs-dir/${value}`,
             label,
             icon,
             group: 'view/6-layout',
@@ -1788,6 +1787,7 @@ const app: App = {
       cards: 'lucide:layout-grid',
       calendar: 'lucide:calendar',
       mindmap: 'lucide:git-fork',
+      tabs: 'lucide:panel-top',
     }
     for (const kind of storedKindsFor(source)) {
       rows.push({
@@ -1832,10 +1832,10 @@ const app: App = {
             { owner, viewId: active.id, cover: id.slice('view/cover/'.length) },
             'menu',
           )
-        } else if (id.startsWith('view/layout/') && active) {
+        } else if (id.startsWith('view/tabs-dir/') && active) {
           void registry.invoke(
-            'core.view/set-layout',
-            { owner, viewId: active.id, layout: id.slice('view/layout/'.length) },
+            'core.view/set-tabs-direction',
+            { owner, viewId: active.id, direction: id.slice('view/tabs-dir/'.length) },
             'menu',
           )
         } else if (id === 'view/rename' && active) {

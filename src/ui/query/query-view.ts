@@ -82,6 +82,7 @@ import { mountTitleEditor, type TitleEditor } from '../block-ui/title-editor.ts'
 import { queryChips } from './query-builder.ts'
 import { QueryTree, treeSummary } from './query-tree.ts'
 import { ViewCards } from '../views/view-cards.ts'
+import { ViewTabs } from '../views/view-tabs.ts'
 import { ViewCalendar } from '../views/view-calendar.ts'
 import { ViewMindmap } from '../views/view-mindmap.ts'
 import { ViewListTable } from '../views/view-list-table.ts'
@@ -392,6 +393,8 @@ export class ViewHost {
   private listTable: ViewListTable | null = null
   /** 卡片分支（看板／画廊是同一张看法的两副面孔，`cardLayoutOf` 决定画成列还是网格） */
   private cards: ViewCards | null = null
+  /** 页签分支（一次只看一个子块；激活页是渲染器自己的实例状态） */
+  private tabs: ViewTabs | null = null
   private calendar: ViewCalendar | null = null
   private mindmap: ViewMindmap | null = null
   /** 分组包装（表格带 `groupBy` 时）：段头归它、段身仍是表格 */
@@ -772,6 +775,7 @@ export class ViewHost {
     }
     if (view?.kind === 'list-table') this.listTable?.render()
     else if (view?.kind === 'cards') this.cards?.render()
+    else if (view?.kind === 'tabs') this.tabs?.render()
     else if (view?.kind === 'calendar') this.calendar?.render()
     else if (view?.kind === 'mindmap') this.mindmap?.render()
     else if (view?.kind === 'table') {
@@ -1532,6 +1536,10 @@ export class ViewHost {
       this.cards?.dispose()
       this.cards = null
     }
+    if (want !== 'tabs') {
+      this.tabs?.dispose()
+      this.tabs = null
+    }
     if (want !== 'calendar') {
       this.calendar?.dispose()
       this.calendar = null
@@ -1571,6 +1579,27 @@ export class ViewHost {
         this.els.table.replaceChildren(this.cards.root)
       }
       this.cards.render()
+      return
+    }
+    if (want === 'tabs') {
+      if (!this.tabs) {
+        this.tabs = new ViewTabs({
+          store: this.deps.store,
+          write: this.deps.write,
+          // 页签＝直接子块（复用结构派生的那一遍遍历；查询源命中是平的，建不了页签视图）
+          tabs: () => {
+            const src = this.source
+            return src.kind === 'children' ? structureGroupsOf(src.blockId, this.deps.kb) : []
+          },
+          view: () => this.view ?? view,
+          wire: (editor, change) => this.deps.wire(editor, change),
+          onChange: () => this.deps.onChange(),
+          onFocus: (editor) => this.deps.onFocus(editor),
+          openBlock: (id, place) => this.deps.openBlock(id, place),
+        })
+        this.els.table.replaceChildren(this.tabs.root)
+      }
+      this.tabs.render()
       return
     }
     if (want === 'calendar') {

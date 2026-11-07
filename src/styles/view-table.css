@@ -741,14 +741,14 @@ button.queryview-chip:hover {
   flex-direction: column;
   gap: var(--ui-gap-2);
 }
-/* 页签摆法：一次只看一组；横／纵只差切换条方向。
-   组还是同一份 `Group[]`，卡片本体不变——这不是第二种看法。 */
-.vcards[data-layout='tabs-h'] {
+/* 页签视图：一次只看一个子块；横／纵只差切换条方向。
+   身体是一台可编辑大纲（普通块的行），不是卡片——页签是独立看法，不是卡片的摆法。 */
+.vtabs-view[data-direction='horizontal'] {
   display: flex;
   flex-direction: column;
   gap: var(--ui-gap-2);
 }
-.vcards[data-layout='tabs-v'] {
+.vtabs-view[data-direction='vertical'] {
   display: flex;
   flex-direction: row;
   align-items: flex-start;
@@ -759,14 +759,14 @@ button.queryview-chip:hover {
   gap: var(--ui-gap-1);
   min-width: 0;
 }
-.vcards[data-layout='tabs-h'] .vtabs {
+.vtabs-view[data-direction='horizontal'] .vtabs {
   flex-direction: row;
   align-items: center;
   padding-bottom: var(--ui-gap-1);
   border-bottom: 1px solid var(--ui-border);
   overflow-x: auto;
 }
-.vcards[data-layout='tabs-v'] .vtabs {
+.vtabs-view[data-direction='vertical'] .vtabs {
   flex-direction: column;
   align-items: stretch;
   min-width: 9rem;
@@ -799,26 +799,11 @@ button.queryview-chip:hover {
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-xs);
 }
-.vtabs-add {
-  flex: none;
-  padding: 0 var(--ui-gap-1);
-  border: 0;
-  background: none;
-  font: inherit;
-  line-height: 1;
-  color: var(--ui-text-tertiary);
-  cursor: pointer;
-  opacity: 0.45;
-}
-.vcards[data-layout='tabs-h'] .vtabs-add {
-  margin-left: auto;
-}
-.vtabs-add:hover {
-  opacity: 1;
-  color: var(--ui-text);
-}
 .vtabs-body {
   flex: 1;
+  min-width: 0;
+}
+.vtabs-editor {
   min-width: 0;
 }
 /* 卡：两副面孔共用同一份身体（正文 ＋ 块下属性行 ＋ 可选封面）。

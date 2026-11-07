@@ -18871,91 +18871,71 @@ await check('T267 卡片按一级子块分组：组＝直接子块（有身份�
 })
 
 /* ---------------------------------------------------------------- T268 */
-
-await check('T268 卡片摆法：并排／横向页签／纵向页签是同一份组的三种摆法；激活项是实例状态', async () => {
+await check('T268 页签视图：页签＝直接子块，身体是可编辑大纲；激活页是实例状态；方向是配置位', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const fx = await buildListTree(page)
-  await page.evaluate((rid) => window.__qua.invoke('core.view/add', { blockId: rid, kind: 'cards' }), fx.root)
+  await page.evaluate((rid) => window.__qua.invoke('core.view/add', { blockId: rid, kind: 'tabs' }), fx.root)
   await page.waitForTimeout(450)
-
-  const viewId = await page.evaluate((rid) => {
-    const v = (window.__qua.__editor.store.find(rid)?.props?._views ?? []).find((x) => x.kind === 'cards')
-    return v?.id ?? ''
-  }, fx.root)
-  assert(viewId !== '', '前置：应有卡片视图')
 
   /**
-   * 没有分组：摆法没有消费者。命令当场拒绝、不写死配置——
-   * 否则 `canonicalViews` 读回来也会丢掉，用户看到的是「点了没生效」。
+   * 视图菜单里能建到页签（children 源）；查询源建不到（命中是平的）由同一张源×kind 表判。
    */
-  await page.evaluate(
-    ({ rid, vid }) => window.__qua.invoke('core.view/set-layout', { blockId: rid, viewId: vid, layout: 'tabs-h' }),
-    { rid: fx.root, vid: viewId },
-  )
-  await page.waitForTimeout(200)
-  const noGroupLayout = await page.evaluate(
-    ({ rid, vid }) =>
-      (window.__qua.__editor.store.find(rid)?.props?._views ?? []).find((v) => v.id === vid)?.cards?.layout ?? '',
-    { rid: fx.root, vid: viewId },
-  )
-  assert(noGroupLayout === '', `没有分组时不写摆法：${noGroupLayout}`)
-
-  // 结构分组（组＝三个直接子块），再打开视图菜单：三种摆法都在
-  await page.evaluate(
-    ({ rid, vid }) =>
-      window.__qua.invoke('core.view/set-group', { blockId: rid, viewId: vid, groupBy: '', structure: true }),
-    { rid: fx.root, vid: viewId },
-  )
-  await page.waitForTimeout(450)
   await page.locator('.queryview .qv-view-current').first().click()
   await page.waitForTimeout(220)
   const menu = await layerRows(page)
-  const labels = menu.map((r) => r.label)
   assert(
-    labels.includes('并排分栏') && labels.includes('横向页签') && labels.includes('纵向页签'),
-    `有分组的卡片：视图菜单要有三种摆法：${JSON.stringify(labels)}`,
+    menu.some((r) => r.label.includes('页签')),
+    `视图菜单要有页签：${JSON.stringify(menu.map((r) => r.label))}`,
   )
-  const tabsAt = menu.findIndex((r) => r.label === '横向页签')
-  await page.locator(`.layer-item[data-index="${tabsAt}"]`).click()
-  await page.waitForTimeout(450)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(220)
+
+  const viewId = await page.evaluate((rid) => {
+    const v = (window.__qua.__editor.store.find(rid)?.props?._views ?? []).find((x) => x.kind === 'tabs')
+    return v?.id ?? ''
+  }, fx.root)
+  assert(viewId !== '', '前置：应有页签视图')
 
   const tabsState = () =>
     page.evaluate(() => ({
-      layout: document.querySelector('.vcards')?.dataset.layout ?? '',
+      direction: document.querySelector('.vtabs-view')?.dataset.direction ?? '',
       tabs: [...document.querySelectorAll('.vtab')].map((t) => ({
         key: t.dataset.groupKey ?? '',
         name: t.querySelector('.vtab-name')?.textContent ?? '',
         active: t.dataset.active === '1',
       })),
-      body: [...document.querySelectorAll('.vtabs-body .vcard[data-block-id]')].map((c) => c.dataset.blockId ?? ''),
-      cols: document.querySelectorAll('.vcol').length,
+      bodyText: document.querySelector('.vtabs-body')?.textContent ?? '',
+      rows: document.querySelectorAll('.vtabs-body .blk').length,
+      editable: (document.querySelector('.vtabs-body [contenteditable="true"]') ?? null) !== null,
+      cards: document.querySelectorAll('.vtabs-body .vcard').length,
     }))
 
   const first = await tabsState()
-  assert(first.layout === 'tabs-h', `菜单选「横向页签」要生效：${JSON.stringify(first)}`)
-  assert(first.cols === 0, `页签摆法不画并排的列：${first.cols}`)
+  assert(first.direction === 'horizontal', `方向缺省横排：${first.direction}`)
   assert(
     JSON.stringify(first.tabs.map((t) => t.key)) === JSON.stringify(fx.rows),
-    `页签＝同一份组（顺序＝children）：${JSON.stringify(first.tabs)}`,
+    `页签＝直接子块（顺序＝children）：${JSON.stringify(first.tabs)}`,
   )
-  assert(first.tabs[0]?.active === true, `默认激活第一组：${JSON.stringify(first.tabs)}`)
+  assert(first.tabs[0]?.active === true, `默认激活第一页：${JSON.stringify(first.tabs)}`)
   assert(
-    JSON.stringify(first.body) === JSON.stringify([fx.cells.c11, fx.cells.c12]),
-    `只画激活那一组的卡：${JSON.stringify(first.body)}`,
+    first.bodyText.includes('名称') && first.bodyText.includes('键盘') && first.bodyText.includes('鼠标'),
+    `身体渲染那一块的整棵子树：${first.bodyText.slice(0, 40)}`,
   )
+  assert(first.editable, '身体是可编辑大纲（contenteditable）')
+  assert(first.cards === 0, `身体不是卡片：${first.cards}`)
 
-  // 切到第二组：只换可见成员，不是换视图／不重查
+  // 切到第二页：只换可见内容，不是换视图；编辑器复用（不重建 ⇒ 撤销栈与选区不丢）
   await page.evaluate((gid) => document.querySelector(`.vtab[data-group-key="${gid}"]`)?.click(), fx.rows[1])
   await page.waitForTimeout(400)
   const second = await tabsState()
-  assert(second.tabs[1]?.active === true, `点第二组 ⇒ 它激活：${JSON.stringify(second.tabs)}`)
+  assert(second.tabs[1]?.active === true, `点第二页 ⇒ 它激活：${JSON.stringify(second.tabs)}`)
   assert(
-    JSON.stringify(second.body) === JSON.stringify([fx.cells.c21]),
-    `激活组换了，内容跟着换：${JSON.stringify(second.body)}`,
+    second.bodyText.includes('价格') && second.bodyText.includes('399') && !second.bodyText.includes('键盘'),
+    `身体跟着激活页换：${second.bodyText.slice(0, 40)}`,
   )
 
-  // 组尾的 ＋：往激活那一组末尾插一张卡（结构写），一次撤销收回
+  // 在页签里打字就落在那一块上：块尾 Enter 建子块，一次撤销收回
   const kidsOf = (gid) =>
     page.evaluate((id) => {
       const walk = (list) => {
@@ -18969,55 +18949,49 @@ await check('T268 卡片摆法：并排／横向页签／纵向页签是同一�
       return walk(window.__qua.__editor.store.blocks)
     }, gid)
   const before = await kidsOf(fx.rows[1])
-  await page.evaluate(() => document.querySelector('.vtabs-add')?.click())
-  await page.waitForTimeout(450)
-  assert(
-    (await kidsOf(fx.rows[1])) === before + 1,
-    `页签里的 ＋ 在这一组末尾插一块：${before} → ${await kidsOf(fx.rows[1])}`,
-  )
-  assert((await tabsState()).body.length === 2, '新卡出现在激活那一组')
+  await page.locator(`.vtabs-body .blk[data-block-id="${fx.rows[1]}"] > .tx`).click()
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(400)
+  assert((await kidsOf(fx.rows[1])) === before + 1, `页签里的 Enter 建子块：${before} → ${await kidsOf(fx.rows[1])}`)
   await page.evaluate(() => window.__qua.invoke('core.history/undo'))
-  await page.waitForTimeout(450)
+  await page.waitForTimeout(400)
   assert((await kidsOf(fx.rows[1])) === before, '一次撤销收回')
-  assert((await tabsState()).body.length === 1, '撤销后内容也回去')
 
-  // 纵向页签：同一份组，只换条的方向（纯渲染参数，不是第二种看法）
+  // 纵向：只换切换条方向（纯渲染差异 ⇒ 配置位），组与内容不变
   await page.evaluate(
-    ({ rid, vid }) => window.__qua.invoke('core.view/set-layout', { blockId: rid, viewId: vid, layout: 'tabs-v' }),
+    ({ rid, vid }) =>
+      window.__qua.invoke('core.view/set-tabs-direction', { blockId: rid, viewId: vid, direction: 'vertical' }),
     { rid: fx.root, vid: viewId },
   )
   await page.waitForTimeout(450)
   const vertical = await page.evaluate(() => {
-    const root = document.querySelector('.vcards')
+    const root = document.querySelector('.vtabs-view')
     const strip = document.querySelector('.vtabs')
     return {
-      layout: root?.dataset.layout ?? '',
-      direction: strip ? getComputedStyle(strip).flexDirection : '',
+      direction: root?.dataset.direction ?? '',
+      column: strip ? getComputedStyle(strip).flexDirection : '',
       tabs: document.querySelectorAll('.vtab').length,
     }
   })
-  assert(vertical.layout === 'tabs-v', `纵向页签要生效：${JSON.stringify(vertical)}`)
-  assert(vertical.direction === 'column', `纵向页签的切换条竖排：${JSON.stringify(vertical)}`)
-  assert(vertical.tabs === 3, `换方向不换组：${JSON.stringify(vertical)}`)
+  assert(vertical.direction === 'vertical', `纵向要生效：${JSON.stringify(vertical)}`)
+  assert(vertical.column === 'column', `纵向的切换条竖排：${JSON.stringify(vertical)}`)
+  assert(vertical.tabs === 3, `换方向不换页：${JSON.stringify(vertical)}`)
 
-  // 回到并排：同一份组，三种摆法可逆
-  await page.evaluate(
-    ({ rid, vid }) => window.__qua.invoke('core.view/set-layout', { blockId: rid, viewId: vid, layout: 'columns' }),
+  // 方向写进了那张视图的配置（激活页不落盘——它是实例状态）
+  const cardsProbe = await page.evaluate(
+    ({ rid, vid }) => {
+      const v = (window.__qua.__editor.store.find(rid)?.props?._views ?? []).find((x) => x.id === vid)
+      return v?.tabs ?? ''
+    },
     { rid: fx.root, vid: viewId },
   )
-  await page.waitForTimeout(450)
-  const columns = await page.evaluate(() => ({
-    layout: document.querySelector('.vcards')?.dataset.layout ?? '',
-    cols: document.querySelectorAll('.vcol[data-group-block-id]').length,
-    tabs: document.querySelectorAll('.vtab').length,
-  }))
   assert(
-    columns.layout === 'columns' && columns.cols === 3 && columns.tabs === 0,
-    `回到并排：${JSON.stringify(columns)}`,
+    typeof cardsProbe === 'object' && cardsProbe?.direction === 'vertical',
+    `页签方向落盘：${JSON.stringify(cardsProbe)}`,
   )
 
   await ctx.close()
-  return `无分组拒绝 → 横向页签 3 组／切组／＋卡撤销 → 纵向 → 并排`
+  return `3 页＝直接子块 → 身体是子树大纲（非卡）→ 切页 → 页内 Enter 撤销 → 纵向`
 })
 
 await check('T197 全部收起／全部展开：一个按钮、文案随状态变；只作用于顶层行；非大纲视图下隐藏', async () => {

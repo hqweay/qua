@@ -21,7 +21,7 @@ import type { QueryNode, QuerySpec } from '../query/query.ts'
 import type { Cardinality, ChoiceScope, UiPosition } from '../props/props.ts'
 import type { SecLayout } from '../query/feed.ts'
 import type { MountHost } from '../views/mount.ts'
-import type { CardArrangement, ViewConfig } from '../views/view.ts'
+import type { TabsDirection, ViewConfig } from '../views/view.ts'
 import type { ViewOwnerRef } from '../views/view-owner.ts'
 import type { OpenOpts, OpenAction } from '../views/open.ts'
 
@@ -515,10 +515,10 @@ export interface App {
   /** 卡片的封面：`first-asset`（有图才显示）／`none`（纯文字卡） */
   viewSetCover(owner: ViewOwnerRef, viewId: string, cover: 'first-asset' | 'none'): boolean
   /**
-   * 卡片的**摆法**：`columns`（并排，缺省）／`tabs-h`（横向页签）／`tabs-v`（纵向页签）。
-   * 只在有分组时有消费者；没有分组当场拒绝（不写死配置）。
+   * 页签的**切换条方向**：`horizontal`（横排，缺省）／`vertical`（纵排）。
+   * 只对页签视图有意义；别的 kind 当场拒绝。
    */
-  viewSetLayout(owner: ViewOwnerRef, viewId: string, layout: CardArrangement): boolean
+  viewSetTabsDirection(owner: ViewOwnerRef, viewId: string, direction: TabsDirection): boolean
   /**
    * 写一张视图的**切片**：与源的基础条件 AND 叠加（不替换），`null` ＝ 清掉。
    *
