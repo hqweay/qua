@@ -1,5 +1,7 @@
 /**
  * `pnpm check` —— 浏览器级冒烟：**真 Chrome ＋ 真按键 ＋ 真鼠标**，逐条打勾。
+ * ⚠️ 本文件是**纯 JS**（.mjs）：TS 语法（如 `arr[0]!.x` 的非空断言）在这里直接 SyntaxError——
+ * 改完先 `node --check checks/smoke.mjs`。
  * 断言口径尽量贴任务书：能敲字 / Enter 拆块 / Backspace 合并 / Tab 缩进 / 折叠 / 拖拽重排 /
  * 四种区间格式 / 两种行内原子 / 命令面板（无绑定也能执行）/ 菜单由绑定表渲染 /
  * localStorage 持久化 / 三风格 × 亮暗 / 空态·稀疏态·降级态 / 虚拟化与 composing 角标。
