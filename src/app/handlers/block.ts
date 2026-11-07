@@ -70,7 +70,8 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   'core.editor/delete-block': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false
-    app.ed.remove(id)
+    // remove 对「有身份的装载根」等会静默拒绝——没删就不说「已删除」
+    if (!app.ed.remove(id)) return false
     app.toast(t('ui.toast.blockDeleted'))
     return true
   },

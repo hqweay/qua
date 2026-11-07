@@ -2703,10 +2703,17 @@ function viewEvents(
         anchor: rect,
         title: t('menu.title.block'),
         // 右键落在露面行上（投影行的绑源块标／镜像岛里的源行）：菜单开在源上，
-        // 附「移除这次露面」——露面块 id 只有打开这一刻才知道，走现算追加项
+        // 附**这一次露面自己的两件事**——露面块 id 只有打开这一刻才知道，走现算追加项。
+        // 「看法」必须有：镜像行没有任何别的路径够到指针菜单（跟随源／固定大纲／命名视图），
+        // 而菜单里那个「视图…」是**源块**的视图菜单——从镜像行切它改的是源，不是这一次露面。
         ...(appearanceHost
           ? {
               extraRows: [
+                {
+                  id: 'appearance-views',
+                  label: t('ui.embed.viewMenuRow'),
+                  hint: t('ui.embed.viewChoiceHint'),
+                },
                 {
                   id: 'appearance-remove',
                   label: t('ui.embed.remove'),
@@ -2717,6 +2724,14 @@ function viewEvents(
               ],
             }
           : {}),
+        onPick: (row) => {
+          if (row.id === 'appearance-views') {
+            const embed = appearanceHost ? blocks.find(appearanceHost) : undefined
+            if (embed) openEmbedViewMenu(embed)
+            return
+          }
+          if (row.command) registry.invoke(row.command, (row.args as Record<string, unknown>) ?? {}, 'menu')
+        },
       })
     },
   }

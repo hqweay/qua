@@ -19018,6 +19018,91 @@ await check('T268 页签视图：页签＝直接子块，身体是可编辑大�
   return `3 页＝直接子块 → 身体是子树大纲（非卡）→ 切页 → 页内 Enter 撤销 → 纵向 → 子块页签正文就地画（子块行让位）`
 })
 
+/* ---------------------------------------------------------------- T269 */
+
+await check('T269 露面行的菜单与删除诚实：源行菜单带「这一次露面的看法…」；有身份的装载根拒绝删除时不发「已删除块」', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await buildListTree(page)
+
+  /* ── 镜像行：源行菜单带指针入口，点开是三格（跟随源／固定大纲／命名视图） ── */
+  await page.evaluate(
+    ({ rid, sid }) => window.__qua.invoke('core.embed/insert', { blockId: rid, targetId: sid, view: 'mirror' }),
+    { rid: fx.root, sid: fx.rows[0] },
+  )
+  await page.waitForTimeout(450)
+
+  const ctxMenu = (sid) =>
+    page.evaluate((id) => {
+      const el = [...document.querySelectorAll(`.blk[data-block-id="${id}"]`)].find((x) => x.closest('.blk-embed-body'))
+      el?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+      return [...document.querySelectorAll('.layer-item .layer-label')].map((r) => r.textContent)
+    }, sid)
+
+  const menu = await ctxMenu(fx.rows[0])
+  assert(
+    menu.some((t) => t?.includes('这一次露面的看法')),
+    `源行菜单要带露面指针入口：${JSON.stringify(menu)}`,
+  )
+  assert(menu.some((t) => t?.includes('移除这次露面')), `移除入口还在：${JSON.stringify(menu)}`)
+  await page.waitForTimeout(150)
+  await page.evaluate(() => {
+    const item = [...document.querySelectorAll('.layer-item')].find((r) =>
+      r.querySelector('.layer-label')?.textContent?.includes('这一次露面的看法'),
+    )
+    item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
+  })
+  await page.waitForTimeout(250)
+  const pointerMenu = await page.evaluate(() =>
+    [...document.querySelectorAll('.layer-item .layer-label')].map((r) => r.textContent),
+  )
+  assert(
+    pointerMenu.some((t) => t?.includes('跟随源')) && pointerMenu.some((t) => t?.includes('固定为大纲')),
+    `指针菜单是三格：${JSON.stringify(pointerMenu)}`,
+  )
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+
+  /* ── 删除诚实：镜像一个有身份的根（页）⇒ 装载根拒绝删除，不发「已删除块」 ── */
+  await page.evaluate(() => window.__qua.invoke('core.page/new'))
+  await page.waitForTimeout(450)
+  const pageB = await page.evaluate(() => window.__qua.__editor.doc.roots[0].id)
+  await page.evaluate(
+    ({ rid, pid }) => window.__qua.invoke('core.embed/insert', { blockId: rid, targetId: pid, view: 'mirror' }),
+    { rid: fx.root, pid: pageB },
+  )
+  await page.evaluate((pid) => window.__qua.invoke('core.page/open', { pageId: pid }), fx.root)
+  await page.waitForTimeout(450)
+
+  // 真实点击把光标放回岛里的源行（右键菜单的命令落点＝活动编辑器的光标块）
+  await page.locator(`.blk-embed-body .blk[data-block-id="${pageB}"] > .tx`).click()
+  await page.evaluate((id) => {
+    const el = [...document.querySelectorAll(`.blk[data-block-id="${id}"]`)].find((x) => x.closest('.blk-embed-body'))
+    el?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  }, pageB)
+  await page.waitForTimeout(250)
+  await page.evaluate(() => {
+    const item = [...document.querySelectorAll('.layer-item')].find((r) =>
+      r.querySelector('.layer-label')?.textContent?.includes('删除块'),
+    )
+    item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
+  })
+  await page.waitForTimeout(350)
+  const after = await page.evaluate((pid) => ({
+    stillThere: Boolean(window.__qua.__editor.store.find(pid)),
+    deletedAt: window.__qua.__editor.store.find(pid)?.props?._deletedAt ?? '',
+    toasts: [...document.querySelectorAll('.toast')].map((t) => t.textContent ?? ''),
+  }), pageB)
+  assert(after.stillThere && !after.deletedAt, `有身份的装载根不被删：${JSON.stringify(after)}`)
+  assert(
+    !after.toasts.some((t) => t?.includes('已删除块')),
+    `拒绝删除就不说「已删除块」：${JSON.stringify(after.toasts)}`,
+  )
+
+  await ctx.close()
+  return `源行菜单带露面看法入口（三格）→ 页的镜像被右键删除 ⇒ 没删、没有假 toast`
+})
+
 await check('T197 全部收起／全部展开：一个按钮、文案随状态变；只作用于顶层行；非大纲视图下隐藏', async () => {
   const { ctx, page } = await freshPage(browser, base)
   // ① 打开「产品设计」页里那个查询块（条件＝本页之下未完成的待办）

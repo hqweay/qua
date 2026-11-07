@@ -544,6 +544,7 @@ export const MSG = {
   'ui.embed.newView': '在源上新建视图…',
   'ui.embed.viewChoice': '看法',
   'ui.embed.viewChoiceHint': '这次露面看哪一张：镜像／大纲／源上的命名视图',
+  'ui.embed.viewMenuRow': '这一次露面的看法…',
   'ui.embed.remove': '移除这次露面',
   'ui.embed.removeHint': '只删这一次露面，源块与其它露面都不动',
   'ui.embed.insert': '插入露面…',

@@ -2648,9 +2648,15 @@ export class BlockEditor {
     return true
   }
 
-  remove(id: string): void {
+  /**
+   * 删一块。**返回值回答「真的删了」**：两条守卫（有身份的装载根／`allowRootRemove`
+   * 关掉的实例）会静默拒绝——调用方要拿这个值决定 toast 说不说「已删除」，
+   * 不然就是「提示删了、其实没删」（露面岛的源行上真踩过：菜单在源上、
+   * 源是有身份的根 ⇒ 拒绝，toast 照发）。
+   */
+  remove(id: string): boolean {
     const loc = locate(this.doc, id)
-    if (!loc) return
+    if (!loc) return false
     /**
      * **有身份的根块不许从编辑器删**（QB-001）——**查询块例外**。
      *
@@ -2658,7 +2664,7 @@ export class BlockEditor {
      *   · 一个**有身份的容器**（页／日记／反链）—— 它是视图的装载单位，
      *     `doc.roots[0]` 就是森林里那块本身；删它要走命令面（`core.page/delete` 那一路，
      *     带「至少留一页」与换邻页）。删掉它只 splice 视图的话，库里那块还在
-     *     ⇒ 刷新就回来（「删了又复活」比报错更糟）。
+     * ⇒ 刷新就回来（「删了又复活」比报错更糟）。
      *   · 也可能是一个**普通内容块**（zoom 进来的某一块）—— 没有身份语义，
      *     删掉就是删掉这块内容，应当放行。
      *   · **查询块根**：晋升出来的查询是内容，又没有自己的删除命令面——
@@ -2667,8 +2673,8 @@ export class BlockEditor {
      * ⚠️ `allowRootRemove: false` 是另一条更严的线：反链／查询列表的根是**别的页的块**，
      *    在这里删源块不合适（那类删除走命令面），所以那一类实例整体关掉。
      */
-    if (loc.parent === null && hasIdentity(loc.block) && !isQueryBlock(loc.block)) return
-    if (loc.parent === null && !this.allowRootRemove) return
+    if (loc.parent === null && hasIdentity(loc.block) && !isQueryBlock(loc.block)) return false
+    if (loc.parent === null && !this.allowRootRemove) return false
     this.beginUndoEntry()
     const idx = flatten(this.doc).findIndex((b) => b.id === id)
     const wasRoot = loc.parent === null
@@ -2697,6 +2703,7 @@ export class BlockEditor {
     const after = flatten(this.doc)
     const caret = after[Math.min(idx, after.length - 1)]!
     this.structTail({ id: caret.id, off: 0 })
+    return true
   }
 
   /**
