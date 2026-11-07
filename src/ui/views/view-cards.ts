@@ -308,11 +308,18 @@ export class ViewCards {
     }
     if (meta.childNodes.length > 0) body.appendChild(meta)
     body.addEventListener('click', (e) => {
-      // 已经在编辑这一张：点击属于编辑器自己（选词、点引用由事件表处理）
-      if (this.deps.cell.editingId === r.block.id) return
       const target = e.target as HTMLElement | null
       if (!target) return
-      // 属性行自己开面板（那是它的点击语义），不进编辑
+      /**
+       * **已经在编辑这一张**：点击属于编辑器自己（放光标、选词、点引用）。
+       * ⚠️ 必须 `stopPropagation`：否则冒泡到卡片那一层会被当成「点卡片」——
+       *    用户看到的是「点第二下就跳到那一块去了」（真踩过）。
+       */
+      if (this.deps.cell.editingId === r.block.id) {
+        e.stopPropagation()
+        return
+      }
+      // 属性行自己开面板（那是它的点击语义），不进编辑；卡片那一层也认这一格、不会打开块
       if (target.closest('.blk-props-line')) return
       // 修饰键仍是「打开」（Shift＝右槽、⌘＝新页签）：不因为正文可编辑就吞掉
       if (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return

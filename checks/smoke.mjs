@@ -18466,6 +18466,22 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
   assert(inCard.editorInside, `编辑器要装在卡片里，而不是浮层上：${JSON.stringify(inCard)}`)
   assert(inCard.activeInCard, `焦点要落在卡片里的编辑器上：${JSON.stringify(inCard)}`)
   assert(!inCard.floating, `卡片不该复用表格那台浮层编辑器：${JSON.stringify(inCard)}`)
+  // 编辑中再点一下：只是放光标，不跳转、不聚焦到那一块（卡片那一层不能抢走）
+  const activeBeforeSecond = await page.evaluate(() => window.__qua.snapshot().activeId)
+  await page.mouse.click(titleBox.x + 20, titleBox.y + 10)
+  await page.waitForTimeout(180)
+  const secondClick = await page.evaluate(
+    (id) => ({
+      active: window.__qua.snapshot().activeId,
+      editing: Boolean(document.querySelector(`.vcard[data-block-id="${id}"] .inline-editor`)),
+    }),
+    editedId,
+  )
+  assert(
+    secondClick.active === activeBeforeSecond,
+    `编辑中再点卡片不该跳转：${activeBeforeSecond} → ${secondClick.active}`,
+  )
+  assert(secondClick.editing, `编辑中再点卡片仍是编辑态：${JSON.stringify(secondClick)}`)
   const typed = '卡片就地编辑'
   await page.keyboard.type(typed)
   await page.keyboard.press('Enter')
