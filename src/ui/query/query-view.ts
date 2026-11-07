@@ -74,8 +74,7 @@ import { t } from '../../core/infra/msg.ts'
 import { BlockEditor, type Run } from '../../view/editor/editor.ts'
 import { DeferredFlush } from '../../view/editor/deferred-flush.ts'
 import { renderIcon } from '../../view/icons.ts'
-import { BlockCell } from '../block-ui/block-cell.ts'
-import { InlineBlockEditor } from '../block-ui/inline-block-editor.ts'
+import { SurfaceEditor } from '../block-ui/surface-editor.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
 import { mountTitleEditor, type TitleEditor } from '../block-ui/title-editor.ts'
 import { queryChips } from './query-builder.ts'
@@ -391,15 +390,14 @@ export class ViewHost {
   private renderedGroupKey = ''
   /** 这一屏现在画的是谁：`outline` 或激活视图的 id（变了才换分支） */
   private mode = ''
-  private readonly cell: BlockCell
-  /** 卡片标题的就地编辑器（与表格那台是两件东西：一个在格子里、一个贴上去） */
-  private readonly inline: InlineBlockEditor
+  /** **一台就地编辑器**（卡片标题格、表格标题格、大纲表格的格共用） */
+  private readonly cell: SurfaceEditor
   /**
    * **投影抬头的常驻编辑器**（只有 `surface === 'embed'` 才有）。
    *
-   * 它与 `cell` 是两种「改名字」的画法，各有各的落点：表格一屏几行、按需开浮层；
-   * 抬头只有一处、直接可写。抬头**不用** `cell` —— 同一个 `BlockCell` 实例的浮层
-   * 一次只开一台，而表格与抬头可能同屏。
+   * 它与 `cell` 是两种「改名字」的画法，各有各的落点：表格/卡片按需开、装进那一格；
+   * 抬头只有一处、直接可写。抬头**不用** `cell` —— 同一台 `SurfaceEditor` 一次只编辑
+   * 一处，而表格与抬头可能同屏。
    */
   private title: TitleEditor | null = null
   /** 查询视图自己的 stale 订阅（只点亮提示、不重排——冻结成员是 D4） */
@@ -464,7 +462,13 @@ export class ViewHost {
     this.els.newRow.title = t('ui.view.newRowTitle')
     this.els.newRow.addEventListener('click', () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }))
     this.els.foldAll.addEventListener('click', () => this.toggleFoldAll())
-    this.cell = new BlockCell({
+    /**
+     * **一台就地编辑器**：一次只编辑一处，装进被点的那一格（不是浮层）。
+     *
+     * 卡片与表格共用它 —— 差别只在「那一格长什么样」，不在编辑器。
+     * 冻结范围＝这一屏：正在打字的格不该因为别处的变化被重排。
+     */
+    this.cell = new SurfaceEditor({
       store: deps.store,
       write: deps.write,
       wire: (ed, change) => deps.wire(ed, change),
@@ -473,20 +477,13 @@ export class ViewHost {
       project: (b, into) => deps.project(b, into),
       refClick: (hit, el, mods) => deps.refClick(hit, el, mods),
       ...(deps.onAtomClick ? { onAtomClick: deps.onAtomClick } : {}),
-      openBlock: (id, place) => deps.openBlock(id, place),
-    })
-    /**
-     * **卡片标题的就地编辑器**：一次只编辑一张卡，装进那张卡里（不是浮层）。
-     * 冻结范围＝这一屏：正在打字的卡不该因为别处的变化被重排。
-     */
-    this.inline = new InlineBlockEditor({
-      store: deps.store,
-      write: deps.write,
-      wire: (ed, change) => deps.wire(ed, change),
-      onFocus: (ed) => deps.onFocus(ed),
-      onChange: () => deps.onChange(),
       area: this.els.root,
-      onClose: (blockId) => this.cards?.afterEdit(blockId),
+      // 编辑结束：让正在画那一格的渲染器把投影放回去（只有它在场时才做）
+      onClose: (blockId) => {
+        this.table?.afterEdit(blockId)
+        this.listTable?.afterEdit(blockId)
+        this.cards?.afterEdit(blockId)
+      },
     })
     /**
      * **投影抬头是常驻可编辑的一行名字**（只有 `embed` 表面显示抬头名字）。
@@ -595,7 +592,6 @@ export class ViewHost {
     this.title?.dispose()
     this.title = null
     this.cell.dispose()
-    this.inline.dispose()
   }
 
   /**
@@ -1529,13 +1525,8 @@ export class ViewHost {
           cardinalityOf: (id) => this.cardinalityOf(id),
           setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
           clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
-          projectTitle: (r, into) => this.deps.project(r.block, into),
           openBlock: (id, place) => this.deps.openBlock(id, place),
-          editor: this.inline,
-          refClick: (hit, el, mods) => this.deps.refClick(hit, el, mods),
-          ...(this.deps.onAtomClick
-            ? { onAtomClick: (atom, el, mods) => this.deps.onAtomClick!(atom, el, mods) }
-            : {}),
+          cell: this.cell,
         })
         this.els.table.replaceChildren(this.cards.root)
       }

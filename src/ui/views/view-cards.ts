@@ -23,7 +23,7 @@ import {
   type ViewConfig,
   type ViewRecord,
 } from '../../core/index.ts'
-import type { InlineBlockEditor } from '../block-ui/inline-block-editor.ts'
+import type { SurfaceEditor } from '../block-ui/surface-editor.ts'
 import { t } from '../../core/infra/msg.ts'
 import { assetViewOf } from '../../view/asset-views.ts'
 import { bucketize, bucketLabel, orderBuckets, recordsForGrouping, GROUP_UNSET, type GroupBucket } from './grouping.ts'
@@ -31,10 +31,10 @@ import { viewNote } from './view-note.ts'
 
 export interface ViewCardsDeps {
   /**
-   * **一台按需的就地编辑器**：点卡片上的文字才建，装进**这一张卡里**（不是浮层），
-   * 失焦/Enter 提交、Esc 回滚。一次只发生一张卡的编辑，所以是一台而不是每卡一台。
+   * **一台按需的就地编辑器**（与表格标题格同一台）：点卡片上的文字才建，
+   * 装进**这一张卡里**（不是浮层），失焦/Enter 提交、Esc 回滚。
    */
-  editor: InlineBlockEditor
+  cell: SurfaceEditor
   records: () => ViewRecord[]
   view: () => ViewConfig | null
   /** 这一列可选的值（`select` 的选项块 id → 名字；没有选项的属性给空表＝按现出现的值分组） */
@@ -44,11 +44,7 @@ export interface ViewCardsDeps {
   /** 写一格属性（拖卡落点） */
   setValue: (blockId: string, propId: string, value: unknown) => void
   clearValue: (blockId: string, propId: string) => void
-  projectTitle: (record: ViewRecord, into: HTMLElement) => void
   openBlock: (blockId: string, place?: OpenAction) => void
-  /** 点标题里的引用/原子（与正文同一条口径） */
-  refClick?: (hit: { to: string; runId?: string }, el: HTMLElement, mods: ReturnType<typeof clickModsOf>) => void
-  onAtomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: ReturnType<typeof clickModsOf>) => void
 }
 
 /** 一张卡最多显示几个字段（再多就不是「看一眼」而是表格了） */
@@ -74,7 +70,7 @@ export class ViewCards {
 
   render(): void {
     // 整片重画会把正在编辑的那张卡的 DOM 换掉：先把这次编辑收尾
-    this.deps.editor.commit()
+    this.deps.cell.commit()
     const view = this.deps.view()
     const layout = cardLayoutOf(view)
     this.root.dataset.layout = layout
@@ -104,7 +100,7 @@ export class ViewCards {
       const id = el.dataset.blockId ?? ''
       if (!wanted.has(id)) continue
       // 正在打字的那张不动：它的值就是用户刚打进去的，重建会把焦点与 IME 串一起丢
-      if (this.deps.editor.editingId === id) continue
+      if (this.deps.cell.editingId === id) continue
       const r = byId.get(id)
       if (!r) {
         lost = true
@@ -262,29 +258,16 @@ export class ViewCards {
      */
     const title = document.createElement('div')
     title.className = 'vcard-title'
-    const inner = document.createElement('span')
-    inner.className = 'vcard-title-inner ui-ellipsis'
-    this.deps.projectTitle(r, inner)
-    title.appendChild(inner)
+    this.deps.cell.render(r.block, title)
     title.addEventListener('click', (e) => {
       // 已经在编辑这一张：点击属于编辑器自己（选词、点引用由事件表处理）
-      if (this.deps.editor.editingId === r.block.id) return
+      if (this.deps.cell.editingId === r.block.id) return
       const target = e.target as HTMLElement | null
       if (!target) return
-      const hit = routeCellClick(target)
-      if (hit.kind === 'ref' && hit.el && hit.to) {
-        e.stopPropagation()
-        this.deps.refClick?.({ to: hit.to, ...(hit.runId ? { runId: hit.runId } : {}) }, hit.el, clickModsOf(e))
-        return
-      }
-      if (hit.kind === 'atom' && hit.el && hit.atom) {
-        e.stopPropagation()
-        this.deps.onAtomClick?.(hit.atom, hit.el, clickModsOf(e))
-        return
-      }
+      // 修饰键仍是「打开」（Shift＝右槽、⌘＝新页签）：不因为正文可编辑就吞掉
       if (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return
       e.stopPropagation()
-      this.deps.editor.edit(r.block.id, title, { x: e.clientX, y: e.clientY })
+      this.deps.cell.handleClick(r.block.id, target, clickModsOf(e), { x: e.clientX, y: e.clientY }, title)
     })
     card.appendChild(title)
 
@@ -342,31 +325,4 @@ export class ViewCards {
 function firstAssetOf(r: ViewRecord): string {
   for (const run of r.block.content) if (run.t === 'asset') return run.asset
   return ''
-}
-
-/**
- * 一次点击落在谁身上：引用／原子／其余。
- *
- * 与表格标题格那份判据同形（`block-cell.ts` 的 `handleClick`）：两处各自内联，
- * 是因为表格那台是浮层、这台在流里，生命周期不同；**判据必须一样**——
- * 不一样的那一天，同一个引用在表格里是导航、在卡片里变成给引用改字，而且不报错。
- */
-function routeCellClick(target: HTMLElement): { kind: 'ref' | 'atom' | 'none'; el?: HTMLElement; to?: string; runId?: string; atom?: { runId: string; kind: string; hash?: string } } {
-  const ref = target.closest<HTMLElement>('[data-ref-to]')
-  if (ref?.dataset.refTo) {
-    return { kind: 'ref', el: ref, to: ref.dataset.refTo, ...(ref.dataset.atomId ? { runId: ref.dataset.atomId } : {}) }
-  }
-  const atom = target.closest<HTMLElement>('.atom')
-  if (atom?.dataset.atomId) {
-    return {
-      kind: 'atom',
-      el: atom,
-      atom: {
-        runId: atom.dataset.atomId,
-        kind: atom.dataset.atomKind ?? '',
-        ...(atom.dataset.assetHash ? { hash: atom.dataset.assetHash } : {}),
-      },
-    }
-  }
-  return { kind: 'none' }
 }

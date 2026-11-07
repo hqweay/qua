@@ -3,7 +3,7 @@
  *
  * 渲染口径（为什么长这样）：
  *   · **格就是块**：表头格画那个直接子块的正文，身体格画它的第 j 个孩子。用的是
- *     `BlockCell` 的 run 投影 ＋ 一台按需浮层编辑器 —— 不是 `<input>`、不是每格 contenteditable、
+ *     `SurfaceEditor` 的 run 投影 ＋ 一台就地单块编辑器 —— 不是 `<input>`、不是每格 contenteditable、
  *     也不是每行一台编辑器（一屏几十格里各开一台，DOM 与订阅会随格数翻倍）。
  *   · **表头是真表头**：第一行就是容器的直接子块，数据上不需要额外字段（列＝那个块）。
  *     吸顶 ＋ 加粗只是让它读起来像表头，没有第二份事实。
@@ -32,7 +32,7 @@ import {
 } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
-import type { BlockCell } from '../block-ui/block-cell.ts'
+import type { SurfaceEditor } from '../block-ui/surface-editor.ts'
 
 export interface ViewListTableDeps {
   store: BlockStore
@@ -42,7 +42,7 @@ export interface ViewListTableDeps {
   view: () => ViewConfig
   kb: KbClient
   /** 格子：run 投影 ＋ 一台按需浮层编辑器（与平表同一台组件） */
-  cell: BlockCell
+  cell: SurfaceEditor
   openBlock: (blockId: string, place?: OpenAction) => void
   /** 往某一列（表头块）末尾插一项：写在那个块下面，与大纲里敲 ↵＋Tab 同一条路 */
   insertItem: (columnId: string) => void
@@ -116,6 +116,8 @@ export class ViewListTable {
   /* ---------------------------------------------------------- 搭 */
 
   private buildAll(): void {
+    // 整表重搭会把正在编辑的格摘掉：先把这次编辑收尾
+    this.deps.cell.commit()
     this.bodies.clear()
     this.root.dataset.empty = this.columns.length === 0 ? '1' : '0'
     this.root.style.setProperty(
@@ -210,7 +212,8 @@ export class ViewListTable {
   /** 这一块的投影体（登记进 `bodies`：局部修补按 blockId 找得到它） */
   private bodyOf(block: Block): HTMLElement {
     const body = document.createElement('div')
-    body.className = 'lt-body'
+    // `tv-title-inner` 是「这一格是块本身」的既有类名（样式与断言都按它选）
+    body.className = 'lt-body tv-title-inner'
     this.deps.cell.render(block, body)
     this.bodies.set(block.id, body)
     return body
@@ -272,14 +275,21 @@ export class ViewListTable {
 
   /**
    * 点格：引用/原子先导航，普通文字才进编辑（与平表标题列同一套手势）。
-   * 判据在 `BlockCell.handleClick` 里（它只认 `[data-ref-to]` 与 `.tv-title-inner`）。
+   * 槽位是格里的那个投影体（`.lt-body`）：点格上的按钮（打开/删除/加一项）不算编辑。
    */
   private wireClick(el: HTMLElement, blockId: string): void {
     el.addEventListener('click', (e) => {
       const target = e.target as HTMLElement | null
       if (!target) return
-      this.deps.cell.handleClick(blockId, target, clickModsOf(e), { x: e.clientX, y: e.clientY })
+      const slot = target.closest<HTMLElement>('.lt-body')
+      this.deps.cell.handleClick(blockId, target, clickModsOf(e), { x: e.clientX, y: e.clientY }, slot)
     })
+  }
+
+  /** 一次就地编辑结束：只重画那一格 */
+  afterEdit(blockId: string): void {
+    const body = this.bodies.get(blockId)
+    if (body) this.patchBody(blockId, body)
   }
 
   /** 三级起：在那一格**里面**摊开（不进主表列） */
@@ -313,7 +323,7 @@ export class ViewListTable {
         if (!target) return
         // 展开区在**这一格里面**：不拦的话外层的点击处理会把它当成「点这一格」再开一台编辑器
         e.stopPropagation()
-        this.deps.cell.handleClick(child.id, target, clickModsOf(e), { x: e.clientX, y: e.clientY })
+        this.deps.cell.handleClick(child.id, target, clickModsOf(e), { x: e.clientX, y: e.clientY }, body)
       })
       row.append(marker, body)
       box.appendChild(row)

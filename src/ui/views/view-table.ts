@@ -6,7 +6,9 @@
  *     no-op ⇒ 窗口化那档直接失效。用 **div 行 ＋ 每行 `display:grid` ＋ 共享 `--qv-cols`**：
  *     列宽只在一个变量里，行是普通块级盒，`content-visibility` / 绝对定位都能用。
  *   · **标题列是块本身**：投影成 run（marks/引用/图片都在），点文字才换成一台单块编辑器
- *     （见 `block-cell.ts`）。所以「改正文」和「改属性」是同一批块，没有第二份数据。
+ *     （见 `surface-editor.ts`）。所以「改正文」和「改属性」是同一批块，没有第二份数据。
+ *   · **编辑期行高让给内容**：密度是阅读期的约束，不是书写期的。正在编辑的那一行
+ *     `height:auto`，提交后回到固定行高（窗口化仍按固定行高算，只有这一行是特例）。
  *   · **行按 blockId 局部修补**：整表 `textContent=''` 重挂会重演「按下的按钮被换掉 ⇒ click
  *     不派发」「正在输入的单元格被换掉 ⇒ IME 断掉」。结构变了（增/删/排序）才整体重排。
  *
@@ -31,7 +33,7 @@ import { choiceCells, ChoiceLookupIndex, type ChoiceLookup, type FieldRow } from
 import { plainText } from '../../core/model/runs.ts'
 import { t } from '../../core/infra/msg.ts'
 import { makeTagChipEl } from '../../view/editor/block-dom.ts'
-import type { BlockCell } from '../block-ui/block-cell.ts'
+import type { SurfaceEditor } from '../block-ui/surface-editor.ts'
 import { makeCellEditor } from '../block-ui/properties.ts'
 import { mentionDerivedOf, renderMentionField } from './mention-field.ts'
 import {
@@ -75,8 +77,8 @@ export interface ViewTableDeps {
   openBlock: (blockId: string, place?: OpenAction) => void
   /** 提及栏片段行的「转成引用」（命中列有候选片段时用；省略 ⇒ 命中列只读） */
   convertMention?: (blockId: string, spot: { start: number; end: number }) => void
-  /** 标题格（投影 ＋ 单块编辑器浮层） */
-  cell: BlockCell
+  /** 标题格（投影 ＋ 就地单块编辑器；一台实例，跟着焦点走） */
+  cell: SurfaceEditor
   /** `ref` 值的选择器（属性区那一份复用；省略 ＝ ref 列只读） */
   pickRef?: (owner: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect) => void
   /** 多值 select 的选值浮层（与属性卡共用；省略 ⇒ 多值格只读） */
@@ -220,6 +222,8 @@ export class ViewTable {
 
   /** 整表重排（首次装、列变了、行集合变了、降级形态变了） */
   render(): void {
+    // 整表重排会把正在编辑的格摘掉：先把这次编辑收尾（回调会把那一格重画一遍）
+    this.deps.cell.commit()
     const host = this.deps.host()
     const view = this.deps.view()
     this.rowH = ROW_H[view.table?.rowHeight ?? 'cozy'] ?? ROW_H.cozy
@@ -551,7 +555,8 @@ export class ViewTable {
     const cells = new Map<string, HTMLElement>()
     for (const col of this.cols) {
       const cell = document.createElement('div')
-      cell.className = `tv-cell ui-ellipsis ${col.key === TITLE_COLUMN ? 'tv-title' : 'tv-prop'}`
+      // 标题格不套 `ui-ellipsis`：那一格在编辑期要能长高换行（省略号在内层文字上）
+      cell.className = `tv-cell ${col.key === TITLE_COLUMN ? 'tv-title' : 'tv-prop ui-ellipsis'}`
       cell.dataset.col = col.key
       if (col.key !== TITLE_COLUMN) cell.dataset.prop = col.key
       cell.appendChild(col.key === TITLE_COLUMN ? this.titleInner(r) : this.cellContent(r, col.key))
@@ -581,15 +586,20 @@ export class ViewTable {
 
   private titleInner(r: ViewRecord): HTMLElement {
     const box = document.createElement('div')
-    box.classList.add('ui-ellipsis')
+    box.className = 'tv-title-inner'
     this.deps.cell.render(r.block, box)
     box.addEventListener('click', (e) => {
       // 引用/原子先导航：只认「点到的是谁」，不认「点在格子里」——否则点 `[[某页]]` 会进编辑
       const target = e.target as HTMLElement | null
       if (!target) return
-      this.deps.cell.handleClick(r.block.id, target, clickModsOf(e), { x: e.clientX, y: e.clientY })
+      this.deps.cell.handleClick(r.block.id, target, clickModsOf(e), { x: e.clientX, y: e.clientY }, box)
     })
     return box
+  }
+
+  /** 一次就地编辑结束：只重画那一行（整表重排会丢滚动与 hover） */
+  afterEdit(blockId: string): void {
+    this.patch(blockId)
   }
 
   private cellContent(r: ViewRecord, key: string): HTMLElement {

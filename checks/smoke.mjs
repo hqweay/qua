@@ -3133,21 +3133,22 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
   const pinned = await activeViewOf(qid)
   assert(pinned !== '', `推给露面看一根指针之前，源要先有一张激活视图：${pinned}`)
 
-  // ②b 表格单元格浮层：打一个字不能把它撑掉（浮层挂在 body 上，父编辑器看不见它）
+  // ②b 表格单元格就地编辑：打一个字不能把它撑掉（编辑器就在格子里，父编辑器看不得也不该管）
   const cell = page.locator('.blk[data-embed="1"] .tv-row .tv-title-inner').first()
   assert((await cell.count()) > 0, '投影的表格里有标题格可点')
   await cell.click()
   await page.waitForTimeout(150)
   const cellOpen = await page.evaluate(() => {
-    const box = document.querySelector('.tv-edit')
+    const box = document.querySelector('.tv-row .inline-editor')
     return { open: Boolean(box), focus: Boolean(box?.contains(document.activeElement)) }
   })
-  assert(cellOpen.open && cellOpen.focus, `表格单元格浮层打开且焦点在里面：${JSON.stringify(cellOpen)}`)
+  assert(cellOpen.open && cellOpen.focus, `表格单元格就地编辑器打开且焦点在里面：${JSON.stringify(cellOpen)}`)
   await page.keyboard.type('K')
   await page.waitForTimeout(250)
   const cellAfter = await page.evaluate(() => {
-    const box = document.querySelector('.tv-edit')
-    const id = box?.dataset.blockId ?? ''
+    const row = document.querySelector('.tv-row[data-editing="1"]')
+    const box = row?.querySelector('.inline-editor')
+    const id = row?.dataset.blockId ?? ''
     const walk = (l) => {
       for (const x of l) {
         if (x.id === id) return x
@@ -3163,8 +3164,8 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
       text: b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '',
     }
   })
-  assert(cellAfter.open, `打一个字浮层仍在（父编辑器没有整片重排）：${JSON.stringify(cellAfter)}`)
-  assert(cellAfter.focusInside, '打完字焦点仍在浮层里')
+  assert(cellAfter.open, `打一个字编辑器仍在（父编辑器没有整片重排）：${JSON.stringify(cellAfter)}`)
+  assert(cellAfter.focusInside, '打完字焦点仍在编辑器里')
   assert(cellAfter.text.includes('K'), `字进了模型：${cellAfter.text.slice(0, 20)}`)
   await page.keyboard.press('Escape')
   await page.waitForTimeout(200)
@@ -14850,17 +14851,17 @@ await check('T152 标题列＝块本身：点文字就地进单块编辑器；En
   await page.locator('.tv-row .tv-title-inner').first().click()
   await page.waitForTimeout(220)
   const opened = await page.evaluate(() => {
-    const box = document.querySelector('.tv-edit')
+    const box = document.querySelector('.tv-row .inline-editor')
     const active = document.activeElement
     return {
-      overlay: Boolean(box),
-      overlays: document.querySelectorAll('.tv-edit').length,
+      editor: Boolean(box),
+      editors: document.querySelectorAll('.inline-editor').length,
       focusInside: Boolean(box?.contains(active)),
-      inputs: document.querySelectorAll('.tv-edit input').length,
+      inputs: document.querySelectorAll('.tv-row .inline-editor input').length,
     }
   })
-  assert(opened.overlay && opened.overlays === 1, `同一时刻只有一台浮层编辑器：${JSON.stringify(opened)}`)
-  assert(opened.focusInside, '打开后焦点必须在浮层里（否则打的字进正文）')
+  assert(opened.editor && opened.editors === 1, `同一时刻只有一台就地编辑器：${JSON.stringify(opened)}`)
+  assert(opened.focusInside, '打开后焦点必须在编辑器里（否则打的字进正文）')
   assert(opened.inputs === 0, '标题列不是 <input>（要用块编辑器）')
   /**
    * **不是「每行一台编辑器」**：表格行里不该出现块编辑器的行 DOM（`.blk`）。
@@ -14868,10 +14869,14 @@ await check('T152 标题列＝块本身：点文字就地进单块编辑器；En
    * 每一台还要各自维护重载节奏。这条断言就是那个量级错误的照妖镜。
    */
   const perRow = await page.evaluate(() => ({
-    blk: document.querySelectorAll('.tv-row .blk').length,
-    tx: document.querySelectorAll('.tv-row .tx').length,
+    editors: document.querySelectorAll('.tv-row .inline-editor').length,
+    idleEditors: document.querySelectorAll('.tv-row:not([data-editing="1"]) .blk').length,
+    editingRows: document.querySelectorAll('.tv-row[data-editing="1"]').length,
   }))
-  assert(perRow.blk === 0 && perRow.tx === 0, `表格行里不该有编辑器（每行一台是量级错误）：${JSON.stringify(perRow)}`)
+  assert(
+    perRow.editors === 1 && perRow.editingRows === 1 && perRow.idleEditors === 0,
+    `只有正在编辑的那一行有编辑器（每行一台是量级错误）：${JSON.stringify(perRow)}`,
+  )
 
   /**
    * **同一时刻只有一台**：点另一行的标题 ⇒ 上一台先提交并关掉，不是并排开出第二台。
@@ -14883,12 +14888,12 @@ await check('T152 标题列＝块本身：点文字就地进单块编辑器；En
   await secondTitle.click()
   await page.waitForTimeout(220)
   const swapped = await page.evaluate(() => ({
-    overlays: document.querySelectorAll('.tv-edit').length,
-    row: document.querySelector('.tv-edit')?.dataset.blockId ?? '',
+    editors: document.querySelectorAll('.inline-editor').length,
+    row: document.querySelector('.tv-row[data-editing="1"]')?.dataset.blockId ?? '',
     rows: [...document.querySelectorAll('.tv-row')].map((r) => r.dataset.blockId ?? ''),
   }))
-  assert(swapped.overlays === 1, `换一行编辑不该并排开出第二台：${JSON.stringify(swapped)}`)
-  assert(swapped.row === swapped.rows[4], `浮层应贴在刚点的那一行上：${JSON.stringify(swapped)}`)
+  assert(swapped.editors === 1, `换一行编辑不该并排开出第二台：${JSON.stringify(swapped)}`)
+  assert(swapped.row === swapped.rows[4], `编辑器应装在刚点的那一行里：${JSON.stringify(swapped)}`)
 
   // 回到第一行继续（后面几条断言都针对第一行）
   await page.locator('.tv-row .tv-title-inner').first().click()
@@ -14912,23 +14917,51 @@ await check('T152 标题列＝块本身：点文字就地进单块编辑器；En
 
   await page.keyboard.press('Enter')
   await page.waitForTimeout(250)
-  const committed = await page.evaluate(() => ({ overlay: Boolean(document.querySelector('.tv-edit')), activeTag: document.activeElement?.tagName }))
+  const committed = await page.evaluate(() => ({ overlay: Boolean(document.querySelector('.inline-editor')), activeTag: document.activeElement?.tagName }))
   assert(!committed.overlay, `Enter 提交后浮层应关掉：${JSON.stringify(committed)}`)
   const afterCommit = await rowText()
   assert(afterCommit.text.includes('Q'), '提交后内容留在模型里')
   assert(afterCommit.modified > first.modified, `提交是一次改动边界（修改时间要动）：${first.modified} → ${afterCommit.modified}`)
 
+  /**
+   * **行在编辑期把高度让给内容**：密度是阅读期的约束，不是书写期的。
+   * 写长一点让标题换行 ⇒ 这一行变高；提交 ⇒ 回到密度档（虚拟化仍按固定行高算）。
+   */
+  const rowBox = () =>
+    page.evaluate(() => {
+      const row = document.querySelector('.tv-row')
+      return { h: Math.round(row.getBoundingClientRect().height), editing: row.dataset.editing ?? '' }
+    })
+  const restH = await rowBox()
+  await page.locator('.tv-row .tv-title-inner').first().click()
+  await page.waitForTimeout(200)
+  await page.keyboard.type('这一句足够长，用来让标题换行并把这一行撑高，而不是把它裁掉。'.repeat(2))
+  await page.waitForTimeout(250)
+  const grown = await rowBox()
+  assert(
+    grown.editing === '1' && grown.h > restH.h + 8,
+    `编辑期行高要让给内容：${JSON.stringify(restH)} → ${JSON.stringify(grown)}`,
+  )
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(300)
+  const shrunk = await rowBox()
+  assert(
+    shrunk.editing === '' && Math.abs(shrunk.h - restH.h) <= 2,
+    `提交后回到密度档：${JSON.stringify(grown)} → ${JSON.stringify(shrunk)}`,
+  )
+
   // Esc 取消：内容写回打开那一刻的样子
+  const beforeCancel = await rowText()
   await page.locator('.tv-row .tv-title-inner').first().click()
   await page.waitForTimeout(200)
   await page.keyboard.type('ZZZ')
   await page.waitForTimeout(150)
   await page.keyboard.press('Escape')
   await page.waitForTimeout(250)
-  const cancelled = await page.evaluate(() => ({ overlay: Boolean(document.querySelector('.tv-edit')) }))
+  const cancelled = await page.evaluate(() => ({ overlay: Boolean(document.querySelector('.inline-editor')) }))
   const afterCancel = await rowText()
   assert(!cancelled.overlay, 'Esc 之后浮层关掉')
-  assert(afterCancel.text === afterCommit.text, `Esc 不写：${afterCommit.text.slice(-6)} → ${afterCancel.text.slice(-6)}`)
+  assert(afterCancel.text === beforeCancel.text, `Esc 不写：${beforeCancel.text.slice(-6)} → ${afterCancel.text.slice(-6)}`)
 
   // 点引用先导航（不进编辑）：标题里那一枚 `[[产品设计 · 决策日志]]`
   const refRow = page.locator('.tv-row .tv-title-inner [data-ref-to]').first()
@@ -14938,12 +14971,12 @@ await check('T152 标题列＝块本身：点文字就地进单块编辑器；En
   const refTarget = await refRow.getAttribute('data-ref-to')
   await refRow.click()
   await page.waitForTimeout(350)
-  const nav = await page.evaluate(() => ({ active: window.__qua.snapshot().activeId, overlay: Boolean(document.querySelector('.tv-edit')) }))
+  const nav = await page.evaluate(() => ({ active: window.__qua.snapshot().activeId, overlay: Boolean(document.querySelector('.inline-editor')) }))
   assert(!nav.overlay, '点引用不该开编辑器（先导航）')
   assert(nav.active !== activeBefore || nav.active === refTarget, `点引用应换中心（或本来就指向当前页）：${activeBefore} → ${nav.active}`)
 
   await ctx.close()
-  return `点文字→一台浮层；Enter 提交（${first.modified}→${afterCommit.modified}）；Esc 不写；点引用先导航`
+  return `点文字→一台就地编辑器；Enter 提交（${first.modified}→${afterCommit.modified}）；Esc 不写；点引用先导航`
 })
 
 /* ---------------------------------------------------------------- T153 */
@@ -15710,8 +15743,8 @@ await check('T163 大纲表格：改格子⇒写回那一块（表头格写直�
   await page.locator(`.lt-cell[data-block-id="${fx.cells.c11}"] .tv-title-inner`).click()
   await page.waitForTimeout(220)
   const opened = await page.evaluate(() => ({
-    overlays: document.querySelectorAll('.tv-edit').length,
-    id: document.querySelector('.tv-edit')?.dataset.blockId ?? '',
+    overlays: document.querySelectorAll('.inline-editor').length,
+    id: document.querySelector('.inline-editor .blk[data-block-id]')?.dataset.blockId ?? '',
   }))
   assert(opened.overlays === 1 && opened.id === fx.cells.c11, `点那一格开的是那一项：${JSON.stringify(opened)}`)
 
@@ -18358,7 +18391,7 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
     return {
       editorInside: Boolean(card?.querySelector('.inline-editor')),
       activeInCard: Boolean(card?.contains(document.activeElement)),
-      floating: Boolean(document.querySelector('.tv-edit')),
+      floating: Boolean(document.querySelector('body > .inline-editor')),
     }
   }, editedId)
   assert(inCard.editorInside, `编辑器要装在卡片里，而不是浮层上：${JSON.stringify(inCard)}`)
