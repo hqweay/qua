@@ -53,6 +53,7 @@ import {
   withCover,
   withFilter,
   withGroup,
+  withLayout,
   withListSort,
   withSort,
   withStructureGroup,
@@ -677,6 +678,37 @@ test('结构分组：只接 children 源的卡片、与按值分组互斥、清�
   assert.equal('groupOrder' in structure, false)
   assert.equal('groupByStructure' in withStructureGroup(structure, false), false, '清掉删键')
   assert.equal('groupByStructure' in withGroup(structure, 'p1'), false, '按值分组接管时结构分组退场')
+})
+
+test('卡片摆法：有分组才有消费者；页签存配置、并排回缺省；不分组时 layout 丢掉', () => {
+  const child = { kind: 'children', blockId: 'x' } as const
+  const view = (cards: ViewConfig['cards'], extra: Partial<ViewConfig> = {}): ViewConfig => ({
+    id: 'v',
+    kind: 'cards',
+    ...extra,
+    ...(cards ? { cards } : {}),
+  })
+
+  const [tabsH] = canonicalViews([view({ layout: 'tabs-h' }, { groupBy: 'p1' })], child)
+  assert.equal(cardLayoutOf(tabsH), 'tabs-h', '页签是显式配置，不是新 kind')
+  assert.equal(tabsH!.cards?.layout, 'tabs-h')
+
+  const [tabsV] = canonicalViews([view({ layout: 'tabs-v' }, { groupByStructure: true })], child)
+  assert.equal(cardLayoutOf(tabsV), 'tabs-v', '结构分组同样有摆法（组来源与摆法正交）')
+
+  const [plain] = canonicalViews([view({ layout: 'columns' }, { groupBy: 'p1' })], child)
+  assert.equal(plain!.cards?.layout, undefined, '并排是缺省：不存它（默认与显式默认只有一种写法）')
+  assert.equal(cardLayoutOf(plain), 'columns')
+
+  const [noGroup] = canonicalViews([view({ layout: 'tabs-h' })], child)
+  assert.equal(noGroup!.cards?.layout, undefined, '没有分组 ⇒ 摆法没有消费者，丢掉')
+  assert.equal(cardLayoutOf(noGroup), 'grid', '不分组就是网格')
+
+  const base: ViewConfig = { id: 'v', kind: 'cards', groupBy: 'p1' }
+  const tabs = withLayout(base, 'tabs-h')
+  assert.equal(tabs.cards?.layout, 'tabs-h')
+  assert.equal('layout' in (withLayout(tabs, 'columns').cards ?? {}), false, '选并排＝回到缺省（删键）')
+  assert.equal(base.cards?.layout, undefined, '不改原视图')
 })
 
 test('卡片配置一份：cover／size／showEmpty 原样往返；布局是派生的，切布局不搬配置', () => {

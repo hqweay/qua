@@ -46,6 +46,15 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
     if (cover !== 'first-asset' && cover !== 'none') return false
     return app.viewSetCover(owner, viewId, cover)
   },
+  /** 卡片摆法：并排／横向页签／纵向页签（只认这三档；有没有分组由命令层判） */
+  'core.view/set-layout': (a, app) => {
+    const owner = ownerOrCur(a, app)
+    const viewId = S(a.viewId)
+    const layout = S(a.layout)
+    if (!owner || !viewId) return false
+    if (layout !== 'columns' && layout !== 'tabs-h' && layout !== 'tabs-v') return false
+    return app.viewSetLayout(owner, viewId, layout)
+  },
   /**
    * 写分组键；`groupBy:''` ＝ 清掉（与 set-sort 的空串清掉同一约定）。
    *

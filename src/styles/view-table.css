@@ -741,6 +741,86 @@ button.queryview-chip:hover {
   flex-direction: column;
   gap: var(--ui-gap-2);
 }
+/* 页签摆法：一次只看一组；横／纵只差切换条方向。
+   组还是同一份 `Group[]`，卡片本体不变——这不是第二种看法。 */
+.vcards[data-layout='tabs-h'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+}
+.vcards[data-layout='tabs-v'] {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--ui-gap-3);
+}
+.vtabs {
+  display: flex;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+}
+.vcards[data-layout='tabs-h'] .vtabs {
+  flex-direction: row;
+  align-items: center;
+  padding-bottom: var(--ui-gap-1);
+  border-bottom: 1px solid var(--ui-border);
+  overflow-x: auto;
+}
+.vcards[data-layout='tabs-v'] .vtabs {
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 9rem;
+  padding-right: var(--ui-gap-2);
+  border-right: 1px solid var(--ui-border);
+}
+.vtab {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  padding: var(--ui-gap-1) var(--ui-gap-2);
+  border: 0;
+  border-radius: var(--ui-radius-sm);
+  background: none;
+  font: inherit;
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.vtab:hover {
+  color: var(--ui-text);
+}
+.vtab[data-active='1'] {
+  background: var(--ui-surface-sunken);
+  color: var(--ui-text);
+}
+.vtab-name {
+  min-width: 0;
+}
+.vtab-count {
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+.vtabs-add {
+  flex: none;
+  padding: 0 var(--ui-gap-1);
+  border: 0;
+  background: none;
+  font: inherit;
+  line-height: 1;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+  opacity: 0.45;
+}
+.vcards[data-layout='tabs-h'] .vtabs-add {
+  margin-left: auto;
+}
+.vtabs-add:hover {
+  opacity: 1;
+  color: var(--ui-text);
+}
+.vtabs-body {
+  flex: 1;
+  min-width: 0;
+}
 /* 卡：两副面孔共用同一份身体（正文 ＋ 块下属性行 ＋ 可选封面）。
    默认就有**边框 ＋ 投影**：卡片是「一张能拿起来的东西」，不是靠 hover 才显形的一块底。
    （同类产品的卡片也都是 border ＋ shadow 起手：没有它们，网格退化成一片文字。） */

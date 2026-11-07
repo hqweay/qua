@@ -69,6 +69,15 @@ export interface ViewCardsDeps {
   refLabel?: (targetId: string) => string
 }
 
+/** 页签摆法的一组（值分组与结构分组共用这一份形状） */
+interface TabGroup {
+  key: string
+  label: string
+  records: readonly ViewRecord[]
+  /** 结构分组：这一组是一个真实块（双击打开、＋加卡都用它） */
+  groupBlockId?: string
+}
+
 /** 「未设置」这一列的内部键与分桶口径都住在 `grouping.ts`（表格的分组共用） */
 const UNSET = GROUP_UNSET
 
@@ -82,6 +91,13 @@ export class ViewCards {
   private below: ReadonlyMap<string, BelowFields> = new Map()
   /** 结构分组的形状签名（组 id ＋ 每组的卡 id）：变了才整片重画 */
   private structureShape = ''
+  /**
+   * 页签摆法的**激活组**（视图实例状态：不进 KB、不跨表面同步）。
+   * 组被删/改名后解析不到 ⇒ 回落第一组（见 `renderTabs`）。
+   */
+  private activeGroup = ''
+  /** 页签摆法的形状签名（组 key ＋ 组名 ＋ 每组的卡 id）：变了才整片重画 */
+  private groupShape = ''
 
   constructor(deps: ViewCardsDeps) {
     this.deps = deps
@@ -97,9 +113,17 @@ export class ViewCards {
     const view = this.deps.view()
     const layout = cardLayoutOf(view)
     this.root.dataset.layout = layout
-    this.refreshBelow(this.deps.records().map((r) => r.block))
+    /**
+     * 块下属性行按**这一屏真正画出来的卡**算：
+     * 结构分组的卡是二级子块，不是 `records()`（那里是一级＝组）。
+     */
+    const blocks = groupsByStructure(view)
+      ? this.deps.structureGroups().flatMap((g) => g.records.map((r) => r.block))
+      : this.deps.records().map((r) => r.block)
+    this.refreshBelow(blocks)
     this.root.replaceChildren()
-    if (layout === 'columns') this.renderColumns(view)
+    if (layout === 'tabs-h' || layout === 'tabs-v') this.renderTabs(view)
+    else if (layout === 'columns') this.renderColumns(view)
     else this.renderGrid(view)
   }
 
@@ -122,7 +146,21 @@ export class ViewCards {
      * 结构分组：组块自己变了（改名）或结构变了（增删组／卡）⇒ 整片重画。
      * 卡的**内容**变化仍走下面的局部修补（那是高频路径）。
      */
-    if (groupsByStructure(view)) {
+    const layout = this.root.dataset.layout
+    if (layout === 'tabs-h' || layout === 'tabs-v') {
+      /**
+       * 页签摆法：组的成员/组名或激活项解析不到时整片重画。
+       * 卡的**内容**变化仍走下面的局部修补（那是高频路径）。
+       */
+      const { groups, multi } = this.tabGroups(view)
+      const shape = multi
+        ? 'multi'
+        : groups.map((g) => `${g.key}:${g.label}:${g.records.map((r) => r.block.id).join(',')}`).join('|')
+      if (shape !== this.groupShape) {
+        this.render()
+        return
+      }
+    } else if (groupsByStructure(view)) {
       const groups = this.deps.structureGroups()
       if (groups.some((g) => wanted.has(g.block.id)) || this.structureShapeOf(groups) !== this.structureShape) {
         this.render()
@@ -384,6 +422,139 @@ export class ViewCards {
   /** 结构分组的形状签名：组 id ＋ 每组的卡 id（变了才整片重画） */
   private structureShapeOf(groups: readonly StructureGroup[] = this.deps.structureGroups()): string {
     return groups.map((g) => `${g.block.id}:${g.records.map((r) => r.block.id).join(',')}`).join('|')
+  }
+
+  /**
+   * **页签摆法**：一次只看一组。横向／纵向只差切换条的方向
+   * （纯渲染差异 ⇒ 参数，不是两种看法）。
+   *
+   * 激活项是**视图实例状态**：不进 KB、不跨表面同步。切走再回来回落第一组；
+   * 组被删后解析不到也回落第一组——不留一个点不亮的状态。
+   */
+  private renderTabs(view: ViewConfig | null): void {
+    const { groups, multi } = this.tabGroups(view)
+    this.multi = multi
+    this.groupShape = multi
+      ? 'multi'
+      : groups.map((g) => `${g.key}:${g.label}:${g.records.map((r) => r.block.id).join(',')}`).join('|')
+    if (multi) {
+      this.root.appendChild(viewNote(t('ui.board.noMultiGroup')))
+      return
+    }
+    if (groups.length === 0) {
+      this.root.appendChild(viewNote(groupsByStructure(view) ? t('ui.cards.noGroups') : t('ui.cards.empty')))
+      return
+    }
+    const active = groups.find((g) => g.key === this.activeGroup) ?? groups[0]!
+    this.activeGroup = active.key
+    const vertical = this.root.dataset.layout === 'tabs-v'
+
+    const strip = document.createElement('div')
+    strip.className = 'vtabs'
+    strip.setAttribute('role', 'tablist')
+    strip.setAttribute('aria-orientation', vertical ? 'vertical' : 'horizontal')
+    for (const g of groups) {
+      const tab = document.createElement('button')
+      tab.type = 'button'
+      tab.className = 'vtab'
+      tab.dataset.groupKey = g.key
+      if (g.key === active.key) tab.dataset.active = '1'
+      tab.setAttribute('role', 'tab')
+      tab.setAttribute('aria-selected', g.key === active.key ? 'true' : 'false')
+      const name = document.createElement('span')
+      name.className = 'vtab-name ui-ellipsis'
+      name.textContent = g.label
+      const count = document.createElement('span')
+      count.className = 'vtab-count'
+      count.textContent = String(g.records.length)
+      tab.append(name, count)
+      tab.addEventListener('click', () => {
+        if (this.activeGroup === g.key) return
+        this.activeGroup = g.key
+        this.render()
+      })
+      // 组有身份：双击打开那一块（单击是切换，不抢走）
+      const groupBlockId = g.groupBlockId
+      if (groupBlockId) {
+        tab.title = t('ui.cards.openGroupHint')
+        tab.addEventListener('dblclick', (e) => {
+          e.preventDefault()
+          this.deps.openBlock(groupBlockId, openActionOf(e))
+        })
+      }
+      strip.appendChild(tab)
+    }
+
+    /**
+     * 「加一张卡」只对**结构分组**成立（在那一组末尾插子块）。
+     * 按值分组的「加一条」是新建一条记录，不在这一屏凭空长出来。
+     */
+    const activeBlockId = active.groupBlockId
+    if (activeBlockId) {
+      const add = document.createElement('button')
+      add.type = 'button'
+      add.className = 'vtabs-add'
+      add.title = t('ui.cards.addCardTitle')
+      add.setAttribute('aria-label', t('ui.cards.addCard'))
+      add.textContent = '＋'
+      add.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        this.deps.cell.commit()
+        this.deps.insertCard(activeBlockId)
+      })
+      strip.appendChild(add)
+    }
+
+    const body = document.createElement('div')
+    body.className = 'vtabs-body'
+    body.setAttribute('role', 'tabpanel')
+    const list = document.createElement('div')
+    list.className = 'vcol-cards'
+    for (const r of active.records) list.appendChild(this.card(r, this.cardOpts(view)))
+    body.appendChild(list)
+    this.root.append(strip, body)
+  }
+
+  /**
+   * 页签摆法的组：与列布局吃**同两份派生**（`structureGroups`／`bucketize`），
+   * 只是一次只画一组。空组保留（结构分组）／按 `showEmpty`（值分组）。
+   */
+  private tabGroups(view: ViewConfig | null): { groups: readonly TabGroup[]; multi: boolean } {
+    if (groupsByStructure(view)) {
+      return {
+        multi: false,
+        groups: this.deps.structureGroups().map((g) => ({
+          key: g.block.id,
+          label: displayNameOf(g.block) || t('ui.cards.untitledGroup'),
+          records: g.records,
+          groupBlockId: g.block.id,
+        })),
+      }
+    }
+    const key = view?.groupBy ?? ''
+    const o = {
+      choices: (propId: string) => this.deps.choices(propId),
+      groupOrder: view?.groupOrder,
+      ...(this.deps.cardinalityOf ? { cardinalityOf: this.deps.cardinalityOf } : {}),
+    }
+    const records = recordsForGrouping(this.deps.records(), view)
+    const { buckets, order, multi } = bucketize(records, key, o)
+    if (multi) return { groups: [], multi }
+    if (view?.cards?.showEmpty === true || buckets.length > 0) {
+      for (const id of order) {
+        if (buckets.some((b) => b.id === id)) continue
+        buckets.push({ id, raw: undefined, records: [], unset: id === UNSET })
+      }
+    }
+    return {
+      multi: false,
+      groups: orderBuckets(buckets, order).map((b) => ({
+        key: b.id,
+        label: bucketLabel(b, key, { choices: (pid) => this.deps.choices(pid) }),
+        records: b.records,
+      })),
+    }
   }
 
   private card(r: ViewRecord, o: { cover: boolean; draggable: boolean }): HTMLElement {

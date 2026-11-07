@@ -1672,6 +1672,8 @@ const app: App = {
       },
     ]
     for (const v of data.views) {
+      // 卡片的图标画「它现在长什么样」：网格／并排／横向页签／纵向页签
+      const cardLayout = v.kind === 'cards' ? cardLayoutOf(v) : ''
       rows.push({
         id: `view//${v.id}`,
         label: viewNameOf(v, (k) => t(`ui.view.kind.${k}`)),
@@ -1679,9 +1681,13 @@ const app: App = {
           v.kind === 'list-table'
             ? 'lucide:table-properties'
             : v.kind === 'cards'
-              ? cardLayoutOf(v) === 'columns'
+              ? cardLayout === 'columns'
                 ? 'lucide:columns-3'
-                : 'lucide:layout-grid'
+                : cardLayout === 'tabs-h'
+                  ? 'lucide:panel-top'
+                  : cardLayout === 'tabs-v'
+                    ? 'lucide:panel-left'
+                    : 'lucide:layout-grid'
               : 'lucide:table',
         ...(v.filter ? { hint: t('ui.view.slice') } : {}),
         ...(active?.id === v.id ? { keyHint: t('ui.view.current') } : {}),
@@ -1711,6 +1717,26 @@ const app: App = {
             icon,
             group: 'view/7-manage',
             ...(cover === value ? { keyHint: t('ui.view.current') } : {}),
+          })
+        }
+      }
+      /**
+       * **卡片的摆法**（有分组才有）：并排／横向页签／纵向页签。
+       * 不分组时只有网格，这一组不出现——不是把三档禁掉再留一排灰行。
+       */
+      if (active.kind === 'cards' && (active.groupBy || active.groupByStructure)) {
+        const current = cardLayoutOf(active)
+        for (const [value, label, icon] of [
+          ['columns', t('ui.view.layout.columns'), 'lucide:columns-3'],
+          ['tabs-h', t('ui.view.layout.tabsH'), 'lucide:panel-top'],
+          ['tabs-v', t('ui.view.layout.tabsV'), 'lucide:panel-left'],
+        ] as const) {
+          rows.push({
+            id: `view/layout/${value}`,
+            label,
+            icon,
+            group: 'view/6-layout',
+            ...(current === value ? { keyHint: t('ui.view.current') } : {}),
           })
         }
       }
@@ -1804,6 +1830,12 @@ const app: App = {
           void registry.invoke(
             'core.view/set-cover',
             { owner, viewId: active.id, cover: id.slice('view/cover/'.length) },
+            'menu',
+          )
+        } else if (id.startsWith('view/layout/') && active) {
+          void registry.invoke(
+            'core.view/set-layout',
+            { owner, viewId: active.id, layout: id.slice('view/layout/'.length) },
             'menu',
           )
         } else if (id === 'view/rename' && active) {

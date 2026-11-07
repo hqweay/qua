@@ -576,6 +576,7 @@ export const MSG = {
   'ui.cards.openGroup': '打开这一组',
   'ui.cards.addCard': '加一张卡',
   'ui.cards.addCardTitle': '在这一组末尾加一张卡',
+  'ui.cards.openGroupHint': '双击打开这一组',
   /* 卡片（看板）：按某一列的单值分组；拖卡＝写属性（不是 re-parent） */
   'ui.board.unset': '未设置',
   'ui.board.noMultiGroup': '卡片的分组列不支持多值属性（多值请在列表或表格里分组）',
@@ -597,6 +598,11 @@ export const MSG = {
   'ui.view.kind.calendar': '日历',
   'ui.view.kind.mindmap': '思维导图',
   'ui.view.structureOnlyChildren': '按一级子块分组只用于一个块的卡片视图',
+  /* 卡片摆法（有分组才有）：并排是缺省，页签是一次只看一组 */
+  'ui.view.layout.columns': '并排分栏',
+  'ui.view.layout.tabsH': '横向页签',
+  'ui.view.layout.tabsV': '纵向页签',
+  'ui.view.layoutNeedsGroup': '先给卡片选一个分组，才有摆法可切',
   'ui.view.outline': '大纲',
   'ui.view.label': '视图',
   'ui.view.switchHint': '切换视图',
@@ -693,6 +699,7 @@ export const MSG = {
   'cmd.view.rename': '重命名视图',
   'cmd.view.set-sort': '按列排序',
   'cmd.view.set-group': '设置分组',
+  'cmd.view.set-layout': '切换卡片摆法',
   'cmd.view.set-cover': '设置封面',
   'cmd.view.set-filter': '设置视图切片',
   'cmd.view.new-row': '新建一行',

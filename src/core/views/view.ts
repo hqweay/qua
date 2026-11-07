@@ -39,13 +39,21 @@ import { canonicalNode, isQueryNode, type QueryNode, type QuerySpec, type SortKe
 export type ViewKind = 'outline' | 'table' | 'list-table' | 'cards' | 'calendar' | 'mindmap'
 
 /**
- * 卡片的两副面孔。**不是两个 kind**：卡片本体（标题 ＋ 字段 ＋ 可选封面）只有一份，
- * 差别只在容器——不分组是网格（画廊），分组是列（看板）。
+ * 卡片的**摆法**（不是看法种类）：卡片本体（标题 ＋ 字段 ＋ 可选封面）只有一份，
+ * 差别只在「组怎么摆」。
  *
- * 判据：换过去「身体」没变（同一张卡、同一批记录），变的是它怎么被摆，
- * 而「怎么摆」已经有配置位（`groupBy`）能表达。为它再裂一个 kind 就是同一件事的第二份答案。
+ *   · `grid`   不分组（画廊）；
+ *   · `columns` 组并排成列（看板）；
+ *   · `tabs-h` 一次看一组、横向切换条（横向页签）；
+ *   · `tabs-v` 同上、纵向切换条（纵向页签）。
+ *
+ * 判据：换过去「身体」没变（同一张卡、同一批记录），变的是它怎么被摆。
+ * 为摆法再裂一个 kind，就是给同一份「摆」开第二份答案——配置位一个就够。
  */
-export type CardLayout = 'grid' | 'columns'
+export type CardLayout = 'grid' | 'columns' | 'tabs-h' | 'tabs-v'
+
+/** 有分组时才存在的摆法（`grid` 是「不分组」的唯一形态，不写进配置） */
+export type CardArrangement = Exclude<CardLayout, 'grid'>
 
 /** 卡片视图的配置（**一份**，两副面孔共用：切布局不丢封面/尺寸） */
 export interface CardsConfig {
@@ -58,6 +66,14 @@ export interface CardsConfig {
   size?: 's' | 'm' | 'l'
   /** 列布局：把声明过、但这一批里没出现的值也画成空列（「把这个状态的东西挪走」要有落点） */
   showEmpty?: boolean
+  /**
+   * **摆法**（只在有分组时有消费者）。缺省＝`columns`（看板），
+   * 显式写 `tabs-h`／`tabs-v` 才是「一次只看一组」。
+   *
+   * 不写 `grid`：不分组就是网格，存一个 `grid` 会允许「分组了但排成网格」
+   * 这类没有消费者的组合（死配置不留盘的同一条判据）。
+   */
+  layout?: CardArrangement
 }
 
 /** 可落盘的视图种类（`outline` 不在其中） */
@@ -112,18 +128,24 @@ export function defaultKindFor(_source: Source): ViewKind {
 }
 
 /**
- * 卡片这一张视图**长成网格还是列**（**唯一判据**）。
+ * 卡片这一张视图**长成什么容器**（**唯一判据**）。
  *
- * 判据只有一条：**有没有分组键**。不分组＝看一堆卡（画廊），分组＝按值分列（看板）。
- * 为什么不存一格 `layout`：那会允许「分组了但排成网格」这类没有消费者的组合，
- * 而且与「分组是记录视图共用位」的口径打成两份答案。
+ * 两层：
+ *   · **有没有分组**决定「网格 vs 有组」——不分组＝看一堆卡（画廊）；
+ *   · 有组时看 `cards.layout`——缺省 `columns`（看板），显式才是横向／纵向页签。
+ *
+ * 为什么不接受 `layout: 'grid'`：那会允许「分组了但排成网格」这类没有消费者的组合
+ * （死配置不留盘的同一条判据）。`canonicalViews` 还会在**没有分组**时丢掉 `layout` ——
+ * 那一刻它没有消费者，留着就是死配置。
  *
  * 拖拽门禁、空态、窄宽降级、选择器候选都读它——各判一遍的下场是
  * 「下拉选了分组，屏幕没变成列」。
  */
 export function cardLayoutOf(v: ViewConfig | null | undefined): CardLayout {
-  if (groupsByStructure(v)) return 'columns'
-  return v && typeof v.groupBy === 'string' && v.groupBy !== '' ? 'columns' : 'grid'
+  const grouped = groupsByStructure(v) || (typeof v?.groupBy === 'string' && v.groupBy !== '')
+  if (!grouped) return 'grid'
+  const layout = v?.cards?.layout
+  return layout === 'tabs-h' || layout === 'tabs-v' ? layout : 'columns'
 }
 
 /**
@@ -376,6 +398,8 @@ function cardsOf(raw: unknown): CardsConfig | undefined {
   const out: CardsConfig = { cover: c.cover === 'none' ? 'none' : 'first-asset' }
   if (c.size === 's' || c.size === 'm' || c.size === 'l') out.size = c.size
   if (c.showEmpty === true) out.showEmpty = true
+  // `columns` 是缺省：不存它（「默认」与「显式选了默认」只有一种写法）
+  if (c.layout === 'tabs-h' || c.layout === 'tabs-v') out.layout = c.layout
   return out
 }
 
@@ -433,6 +457,8 @@ export function canonicalViews(raw: unknown, source: Source): ViewConfig[] {
     } else if (kind === 'cards') {
       const cards = cardsOf(v.cards)
       if (cards) view.cards = cards
+      // 摆法只在**有分组**时有消费者：不分组就是网格（那一刻 layout 是死配置）
+      if (view.cards && !view.groupBy && !view.groupByStructure) delete view.cards.layout
     } else if (kind === 'calendar') {
       const c = v.calendar
       if (!c || typeof c !== 'object' || !isStr(c.dateBy)) continue
@@ -1028,6 +1054,21 @@ export function withCover(view: ViewConfig, cover: 'first-asset' | 'none'): View
   const next = cloneView(view)
   const cards: CardsConfig = { ...(next.cards ?? {}) }
   cards.cover = cover === 'none' ? 'none' : 'first-asset'
+  next.cards = cards
+  return next
+}
+
+/**
+ * 写**摆法**（`columns` ＝ 回到缺省，删键；不写 `grid`）。
+ *
+ * 与 `withCover` 同一族：只动 `cards.layout`，卡片本体与分组键都不搬。
+ * 没有分组时布局没有消费者——命令面先挡，`canonicalViews` 再丢一次。
+ */
+export function withLayout(view: ViewConfig, layout: CardArrangement): ViewConfig {
+  const next = cloneView(view)
+  const cards: CardsConfig = { ...(next.cards ?? {}) }
+  if (layout === 'columns') delete cards.layout
+  else cards.layout = layout
   next.cards = cards
   return next
 }

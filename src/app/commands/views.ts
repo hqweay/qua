@@ -31,6 +31,7 @@ import {
   withFilter,
   withCover,
   withGroup,
+  withLayout,
   withListSort,
   withSort,
   withStructureGroup,
@@ -70,6 +71,7 @@ export function viewConfigCommands(
   | 'viewSetSort'
   | 'viewSetGroup'
   | 'viewSetCover'
+  | 'viewSetLayout'
   | 'setViewFilter'
   | 'setQuerySpec'
   | 'createQuery'
@@ -290,6 +292,27 @@ export function viewConfigCommands(
       if (!view || view.kind !== 'cards') return false
       d.owners.write(owner, { views: upsertView(data.views, withCover(view, cover)) })
       reveal(owner)
+      return true
+    },
+
+    /**
+     * 写**卡片摆法**：并排（缺省）／横向页签／纵向页签。
+     *
+     * 只在**有分组**时有消费者：没有分组就是网格，写进去也只会被 `canonicalViews`
+     * 丢掉——命令面先挡，免得「点了没生效」。
+     */
+    viewSetLayout: (owner, viewId, layout) => {
+      const data = d.owners.read(owner)
+      if (!data) return false
+      const view = resolveView(data, viewId)
+      if (!view || view.kind !== 'cards') return false
+      if (!view.groupBy && !view.groupByStructure) {
+        d.toast(t('ui.view.layoutNeedsGroup'), 'warn')
+        return false
+      }
+      if (layout !== 'columns' && layout !== 'tabs-h' && layout !== 'tabs-v') return false
+      d.owners.write(owner, { views: upsertView(data.views, withLayout(view, layout)) })
+      after()
       return true
     },
 
