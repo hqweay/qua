@@ -50,7 +50,7 @@ export type CardLayout = 'grid' | 'columns'
 export interface CardsConfig {
   /**
    * 封面：取这张卡**正文里的第一张图**（派生的，不存「我选了哪张」）。
-   * `none` ＝ 不画封面位（看板的默认：任务卡上放图是噪声）。
+   * `none` ＝ 不画封面位（纯文字卡）。缺省是 `first-asset`：卡片默认就是画廊。
    */
   cover?: 'first-asset' | 'none'
   /** 网格布局的卡宽档位（列布局不看它：列宽由容器定） */
@@ -365,7 +365,7 @@ function listSortOf(raw: unknown): ListSort | undefined {
  * 卡片配置的**形状**（两边共用一份：写进去的必须能原样读回来）。
  *
  * 三种缺省都由这里定，不在渲染器里各判一遍：
- *   · `cover` 缺省 = `first-asset`（卡片默认尝试取图；看板预设显式写 `none`）；
+ *   · `cover` 缺省 = `first-asset`（卡片默认尝试取图；想要纯文字卡就显式写 `none`）；
  *   · `size` 只在合法档位里留（网格布局才看它）；
  *   · 空 `fields` 删键（「没配」与「配了空」必须只有一种写法）。
  */

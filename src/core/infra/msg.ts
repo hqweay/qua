@@ -572,7 +572,7 @@ export const MSG = {
   'ui.list.open': '打开这一条',
   /* 卡片（看板）：按某一列的单值分组；拖卡＝写属性（不是 re-parent） */
   'ui.board.unset': '未设置',
-  'ui.board.noMultiGroup': '看板的分组列不支持多值属性（多值请在列表或表格里分组）',
+  'ui.board.noMultiGroup': '卡片的分组列不支持多值属性（多值请在列表或表格里分组）',
   /* 画廊：封面是派生的（正文里第一张图） */
   'ui.gallery.noCover': '没有封面',
   /* 日历：按日期落在月网格里 */
@@ -588,10 +588,6 @@ export const MSG = {
   'ui.view.kind.list-table': '大纲表格',
   /* 卡片：一种看法，两副面孔（不分组＝网格，分组＝列） */
   'ui.view.kind.cards': '卡片',
-  'ui.view.layout.board': '看板',
-  'ui.view.layout.gallery': '画廊',
-  'ui.view.addBoard': '新建看板',
-  'ui.view.addGallery': '新建画廊',
   'ui.view.kind.calendar': '日历',
   'ui.view.kind.mindmap': '思维导图',
   'ui.view.outline': '大纲',
@@ -612,7 +608,6 @@ export const MSG = {
   'ui.view.sortAsc': '升序',
   'ui.view.sortDesc': '降序',
   'ui.view.unknownKind': '不认识的视图类型',
-  'ui.view.boardNeedsField': '看板要按一个属性分组（先建一个「单选」或「勾选」属性）',
   'ui.view.columnMissing': '已删除的属性',
   'ui.view.childrenCount': '{count} 子块',
   'ui.view.editTitle': '点文字编辑这一块',

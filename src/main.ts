@@ -1738,29 +1738,11 @@ const app: App = {
       table: 'lucide:table',
       'list-table': 'lucide:table-properties',
       list: 'lucide:list',
+      cards: 'lucide:layout-grid',
       calendar: 'lucide:calendar',
       mindmap: 'lucide:git-fork',
     }
     for (const kind of storedKindsFor(source)) {
-      /**
-       * 卡片有**两条预设**（看板＝分组列，画廊＝不分组），但只有一种 kind：
-       * 用户找的是这两个词，模型里只有一个（布局从 `groupBy` 派生）。
-       */
-      if (kind === 'cards') {
-        rows.push({
-          id: 'view/add/board',
-          label: t('ui.view.addBoard'),
-          icon: 'lucide:columns-3',
-          group: 'view/9-add',
-        })
-        rows.push({
-          id: 'view/add/gallery',
-          label: t('ui.view.addGallery'),
-          icon: 'lucide:layout-grid',
-          group: 'view/9-add',
-        })
-        continue
-      }
       rows.push({
         id: `view/add/${kind}`,
         // 建的行一律「新建 X」：裸 kind 名读起来像「切过去」，点下去却是建——

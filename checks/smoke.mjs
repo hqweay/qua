@@ -15253,6 +15253,18 @@ await check('T157 入口：块菜单「视图…」→ 新建表格 ⇒ _activeV
   const second = await layerRows(page)
   assert(second.some((r) => r.label === '大纲'), `子菜单里有「大纲」：${JSON.stringify(second.map((r) => r.label))}`)
   assert(second.some((r) => r.label === '新建表格'), `子菜单里有「新建表格」：${JSON.stringify(second.map((r) => r.label))}`)
+  /**
+   * 卡片只有**一个**入口：默认画廊，选分组才变看板。
+   * 「新建看板／新建画廊」两条预设会让「这是两种东西」的印象回来——用户已拍板收掉。
+   */
+  assert(
+    second.some((r) => r.label === '新建卡片'),
+    `子菜单里有「新建卡片」：${JSON.stringify(second.map((r) => r.label))}`,
+  )
+  assert(
+    !second.some((r) => r.label.includes('新建看板') || r.label.includes('新建画廊')),
+    `卡片只留一个入口，不再有看板／画廊两条预设：${JSON.stringify(second.map((r) => r.label))}`,
+  )
   const addAt = second.findIndex((r) => r.label === '新建表格')
   assert(second[addAt].hint !== undefined || true, '行可点')
   await page.locator(`.layer-item[data-index="${addAt}"]`).click()
@@ -18308,18 +18320,54 @@ await check('T190 卡片两副面孔（看板／画廊）：换布局不重查�
     await page.waitForTimeout(450)
   }
 
-  // ① 看板：列 ≥2（含「未设置」）；拖一张卡到另一列 ⇒ 只改那一格
-  await addView('board')
+  /**
+   * ① 卡片**默认是画廊**（网格）；选一个分组列 ⇒ 同一张看法**变成列**（看板）。
+   *
+   * 钉两件事：布局是派生的（不新建一种看法、不重查、卡片配置不搬）；
+   * 以及拖卡写的是**属性**，不是 re-parent。
+   */
+  const groupId = await page.evaluate(
+    () => window.__qua.propDefs().find((d) => d.kind === 'select')?.id ?? '',
+  )
+  assert(groupId !== '', '前置：库里应有「任务状态」这类 select 属性可用于分组')
+
+  await addView('cards')
+  const gallery = await page.evaluate(() => ({
+    layout: document.querySelector('.vcards')?.dataset.layout ?? '',
+    cards: document.querySelectorAll('.vcard').length,
+    cover: document.querySelectorAll('.vcard-cover').length,
+  }))
+  assert(gallery.layout === 'grid', `卡片默认排成网格（画廊）：${JSON.stringify(gallery)}`)
+  assert(
+    gallery.cards > 0 && gallery.cover === gallery.cards,
+    `画廊一格一卡、每张都有封面位：${JSON.stringify(gallery)}`,
+  )
+
+  // 选一个分组列 ⇒ 列（看板）。改的是**同一张视图**的分组键，不是新建一种看法
+  await page.evaluate(
+    ({ id, gid }) => {
+      const views = window.__qua.__editor.store.find(id)?.props?._views ?? []
+      const v = views.find((x) => x.kind === 'cards')
+      window.__qua.invoke('core.view/set-group', { blockId: id, viewId: v.id, groupBy: gid })
+    },
+    { id: qid, gid: groupId },
+  )
+  await page.waitForTimeout(450)
   const board = await page.evaluate(() => ({
     layout: document.querySelector('.vcards')?.dataset.layout ?? '',
     cols: [...document.querySelectorAll('.vcol')].map((c) => c.dataset.value ?? ''),
     cards: document.querySelectorAll('.vcard').length,
     unset: Boolean(document.querySelector('.vcol[data-unset="1"]')),
+    cover: document.querySelectorAll('.vcard-cover').length,
   }))
   assert(board.layout === 'columns', `有分组键的卡片应排成列（看板）：${JSON.stringify(board)}`)
   assert(board.cols.length >= 2, `看板应至少有一列（＋未设置）：${JSON.stringify(board)}`)
-  assert(board.cards > 0, `看板要画出卡：${JSON.stringify(board)}`)
+  assert(board.cards === gallery.cards, `换布局不换成员：${gallery.cards} → ${board.cards}`)
   assert(board.unset, `「未设置」那一列必须在（藏起来＝告诉用户这些不存在）：${JSON.stringify(board)}`)
+  assert(
+    board.cover === board.cards,
+    `换布局不动卡片配置：画廊带的封面位在列里照样在：${JSON.stringify(board)}`,
+  )
 
   const card = await page.evaluate(() => {
     const el = document.querySelector('.vcard')
@@ -18338,19 +18386,14 @@ await check('T190 卡片两副面孔（看板／画廊）：换布局不重查�
     walk(window.__qua.__editor.store.blocks, null)
     return parent
   }, card.id)
-  const targetCol = await page.evaluate((own) => {
-    const col = [...document.querySelectorAll('.vcol')].find((c) => (c.dataset.value ?? '') !== own)
-    return { value: col?.dataset.value ?? '', unset: col?.dataset.unset === '1' }
-  }, await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?.['_query'] ? '' : '', card.id))
-  void targetCol
   const colValue = await page.evaluate(() => {
     const cols = [...document.querySelectorAll('.vcol')]
     const withValue = cols.find((c) => c.dataset.unset !== '1' && c.dataset.value !== '')
     return withValue?.dataset.value ?? ''
   })
   assert(colValue !== '', `前置：应有一列带值：${colValue}`)
-  const propId = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._views?.find((v) => v.id === window.__qua.__editor.store.find(id)?.props?._activeView)?.groupBy ?? '', qid)
-  assert(propId !== '', '前置：看板应有分组列')
+  // 分组列就是刚才选的那个 select（拖卡写的也是它）
+  const propId = groupId
   await page.evaluate(
     ({ propId: pid, value, blockId }) => window.__qua.invoke('core.props/set-value', { blockId, propId: pid, value }),
     { propId, value: colValue, blockId: card.id },
@@ -18371,41 +18414,22 @@ await check('T190 卡片两副面孔（看板／画廊）：换布局不重查�
   assert(afterDrag.parent === parentBefore, `拖卡不许换父子（那会改结构）：${parentBefore} → ${afterDrag.parent}`)
   assert(afterDrag.where === '{"tag":"任务"}', `拖卡不许改条件：${afterDrag.where}`)
 
-  // ② 画廊：同一张看法、不分组 ⇒ 网格；一格一卡，每张都有封面位
-  await addView('gallery')
-  const gallery = await page.evaluate(() => ({
-    layout: document.querySelector('.vcards')?.dataset.layout ?? '',
-    cards: document.querySelectorAll('.vcard').length,
-    cover: document.querySelectorAll('.vcard-cover').length,
-  }))
-  assert(gallery.layout === 'grid', `没有分组键的卡片应排成网格（画廊）：${JSON.stringify(gallery)}`)
-  assert(
-    gallery.cards > 0 && gallery.cover === gallery.cards,
-    `画廊一格一卡、每张都有封面位：${JSON.stringify(gallery)}`,
-  )
-
-  // ②b 画廊选一个分组键 ⇒ **同一张看法**变成列（不新建 kind、不重查、卡片配置不搬）
+  // ② 清掉分组 ⇒ 回到网格（同一张看法；成员与卡片配置都不变）
   await page.evaluate(
-    ({ id, pid }) => {
+    ({ id }) => {
       const views = window.__qua.__editor.store.find(id)?.props?._views ?? []
-      const g = views.find((v) => v.kind === 'cards' && !v.groupBy)
-      window.__qua.invoke('core.view/set-group', { blockId: id, viewId: g.id, groupBy: pid })
+      const v = views.find((x) => x.kind === 'cards')
+      window.__qua.invoke('core.view/set-group', { blockId: id, viewId: v.id, groupBy: '' })
     },
-    { id: qid, pid: propId },
+    { id: qid },
   )
   await page.waitForTimeout(450)
-  const regrouped = await page.evaluate(() => ({
+  const backToGrid = await page.evaluate(() => ({
     layout: document.querySelector('.vcards')?.dataset.layout ?? '',
-    cols: document.querySelectorAll('.vcol').length,
     cards: document.querySelectorAll('.vcard').length,
-    cover: document.querySelectorAll('.vcard-cover').length,
   }))
-  assert(regrouped.layout === 'columns', `选了分组就该排成列（这正是「分组就成了看板」）：${JSON.stringify(regrouped)}`)
-  assert(regrouped.cols >= 2, `列数＝分组值 ＋ 未设置：${JSON.stringify(regrouped)}`)
-  assert(
-    regrouped.cover === regrouped.cards,
-    `换布局不动卡片配置：画廊带的封面位在列里照样在：${JSON.stringify(regrouped)}`,
-  )
+  assert(backToGrid.layout === 'grid', `清掉分组就回到网格：${JSON.stringify(backToGrid)}`)
+  assert(backToGrid.cards === gallery.cards, `换布局不换成员：${gallery.cards} → ${backToGrid.cards}`)
 
   // ③ 日历：月网格 42 格、今天有描边
   await addView('calendar')
@@ -19856,10 +19880,23 @@ await check('T215 Shift+点日历／查询各看法的打开入口 ⇒ 右槽窗
     )
     await page.waitForTimeout(450)
   }
-  await addView('board')
-  await shiftOpen('.vcards[data-layout="columns"] .vcard[data-block-id]', '看板卡')
-  await addView('gallery')
-  await shiftOpen('.vcards[data-layout="grid"] .vcard[data-block-id]', '画廊卡')
+  await addView('cards')
+  await shiftOpen('.vcards[data-layout="grid"] .vcard[data-block-id]', '卡片（网格）')
+  // 选一个分组列 ⇒ 同一张看法变成列；同一个打开入口照样开右槽
+  const gid = await page.evaluate(
+    () => window.__qua.propDefs().find((d) => d.kind === 'select')?.id ?? '',
+  )
+  assert(gid !== '', '前置：库里应有可用于分组的 select 属性')
+  await page.evaluate(
+    ({ id, groupId }) => {
+      const views = window.__qua.__editor.store.find(id)?.props?._views ?? []
+      const v = views.find((x) => x.kind === 'cards')
+      window.__qua.invoke('core.view/set-group', { blockId: id, viewId: v.id, groupBy: groupId })
+    },
+    { id: qid, groupId: gid },
+  )
+  await page.waitForTimeout(450)
+  await shiftOpen('.vcards[data-layout="columns"] .vcard[data-block-id]', '卡片（列）')
   await addView('list')
   await shiftOpen('.vl-bullet', '列表行首', '.vl-row')
   await addView('table')
@@ -21063,8 +21100,22 @@ await check('T230 分组：入口按覆盖率给候选；卡片禁多值分组�
   }, pid)
   assert(!prep.error, `前置：应能造出一块双标签：${JSON.stringify(prep)}`)
 
-  // 建看板（自动挑第一个 select 分组）：分组入口在，但**多值键不做卡片候选**
-  await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'board' }), pid)
+  // 建卡片 ＋ 选一个单值分组列（「任务状态」是 select）：
+  // 分组入口在，但**多值键不做卡片候选**（拖卡写值没有唯一动作）
+  await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'cards' }), pid)
+  await page.waitForTimeout(350)
+  const gid = await page.evaluate(
+    () => window.__qua.propDefs().find((d) => d.kind === 'select')?.id ?? '',
+  )
+  assert(gid !== '', '前置：库里应有可用于分组的 select 属性')
+  await page.evaluate(
+    ({ pid, groupId }) => {
+      const views = window.__qua.__editor.store.find(pid)?.props?._views ?? []
+      const v = views.find((x) => x.kind === 'cards')
+      window.__qua.invoke('core.view/set-group', { blockId: pid, viewId: v.id, groupBy: groupId })
+    },
+    { pid, groupId: gid },
+  )
   await page.waitForTimeout(450)
   const entry = await page.evaluate(() => {
     const sel = document.querySelector('.queryview-group')
