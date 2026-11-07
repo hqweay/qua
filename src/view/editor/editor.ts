@@ -30,6 +30,7 @@ import {
   hasTabsBody,
   hasList,
   hasDescendant,
+  isDeleted,
   isJournal,
   journalDate,
   todayISO,
@@ -108,6 +109,7 @@ import {
 } from '../../core/index.ts'
 import { resolveRef } from '../../core/relations/ref.ts'
 import { inputSession } from './input-session.ts'
+import type { ClipboardRefs } from './clipboard-flavor.ts'
 import {
   clearMarks as clearRunsMarks,
   fromProjection,
@@ -369,6 +371,8 @@ export interface ViewEvents {
    * 「粘贴为…」用它把「刚才复制的是哪一块」找回来（自定义剪贴板 MIME 在 Chromium 不可靠）。
    */
   onCopy?: (ids: readonly string[], text: string) => void
+  /** 剪切味的源块已都不在（粘贴端已按正文降级）：装配层给一句实话 */
+  clipboardNotice?: (kind: 'move-source-gone') => void
   /** 拖入文件被拒（v1 不做拖拽入图）：装配层给一句明确文案 */
   onDropFilesRejected?: () => void
   /**
@@ -3856,6 +3860,9 @@ export class BlockEditor {
       emitTrigger: (id) => this.emitTrigger(id),
       dropTrigger: (id) => this.dropTrigger(id),
       insertPlainText: (id, _off, text, cut) => this.pasteAt(id, _off, text, cut),
+      pasteRefsAt: (target, refs) => this.pasteRefsAt(target, refs),
+      pasteIntoSelection: (refs, text) => this.pasteIntoSelection(refs, text),
+      clipboardNotice: (kind) => this.events.clipboardNotice?.(kind),
       /**
        * 光标落点：**在浏览器改 DOM 之前**读（`paste` 处理器里第一件事就是捕获它）。
        * 入库是异步的，落点必须在那一刻定下来。
@@ -4222,6 +4229,160 @@ export class BlockEditor {
     this.renderAll()
     this.placeCaret(id, at + (lines[0]?.length ?? 0))
     this.emitChange('text')
+  }
+
+  /* ---------------------------------------------- 剪贴板引用味（复制端定身份，粘贴端定看法） */
+
+  /**
+   * 复制快照：块选区＝最上层根（按序），否则光标所在块。
+   * `text` 是随剪贴板走的**正文味**（外部应用贴出的就是它），`ids` 是引用味。
+   * 只取当前块不含子树：外部拿到的与屏幕上看到的一致；子树由引用/露面的呈现语义管。
+   */
+  copySnapshot(): { ids: string[]; text: string } | null {
+    if (this.bsel.hasBlockSelection()) {
+      const ids = this.bsel.selectedRootIds()
+      if (ids.length === 0) return null
+      return { ids, text: this.bsel.selectedBlocksText() }
+    }
+    const id = this.sel?.aBlock ?? this.rows()[0]?.block.id
+    if (!id) return null
+    const b = locate(this.doc, id)?.block
+    if (!b) return null
+    return { ids: [id], text: plainText(b.content) }
+  }
+
+  /** 划选快照（⌘⇧C 的锚文本）：`selectionSpot` 已把「单块纯文本」的判据收在一处 */
+  anchorSnapshot(): { id: string; text: string } | null {
+    const spot = this.selectionSpot()
+    return spot ? { id: spot.blockId, text: spot.text } : null
+  }
+
+  /** 单块的正文味（复制块链接用：软外拿到的是块文本，不是 `((id))` 记号） */
+  plainTextOf(id: string): string {
+    const b = locate(this.doc, id)?.block ?? this.store.find(id)
+    return b ? plainText(b.content) : ''
+  }
+
+  /** 造一枚指向 `rid` 的行内引用原子；目标不在（已删/别库）⇒ dangling，照实显示 */
+  private refRunTo(rid: string, anchor?: string): InlineRun {
+    const t = this.store.find(rid)
+    const alive = Boolean(t) && !isDeleted(t!)
+    return {
+      id: uuidv7Hex(),
+      t: 'ref',
+      to: alive ? rid : undefined,
+      label: t ? refTitle(t) : undefined,
+      ...(anchor ? { anchor } : {}),
+    }
+  }
+
+  /**
+   * 粘贴一份带引用味的载荷（文本态落点，paste 事件与命令共用）。
+   *
+   * 剪切味 ⇒ 整组**移动**到落点块的后面（一笔事务，id 不变；标记不消费 ⇒ 可反复贴、
+   * 反复移）。引用味 ⇒ 落点处插行内引用原子（带锚文本写 `anchor`，显示名链照旧解析）。
+   * 返回 `gone` ＝ 剪切味但源块已都不在 ⇒ 调用方按纯文本降级并给一句实话。
+   */
+  pasteRefsAt(
+    target: { blockId: string; offset: number; cut: { from: number; to: number } | null },
+    refs: ClipboardRefs,
+  ): 'moved' | 'pasted' | 'gone' | 'refused' {
+    if (refs.move) return this.moveClipboardRun(refs.ids, target.blockId, 'after')
+    const loc = locate(this.doc, target.blockId)
+    if (!loc) return 'gone'
+    const runs = refs.ids.map((rid) => this.refRunTo(rid, refs.anchor))
+    const at = target.cut ? Math.min(target.cut.from, target.cut.to) : target.offset
+    const cutTo = target.cut ? Math.max(target.cut.from, target.cut.to) : target.offset
+    this.beginUndoEntry()
+    const next = spliceRuns(loc.block.content, at, cutTo, runs)
+    // 与单行粘贴同档：把内容落进这一行（directEdit，过内容闸的同一道豁口）
+    this.write((tx) => tx.patch(target.blockId, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
+    this.finishUndoEntry('insert')
+    this.renderAll()
+    this.placeCaret(target.blockId, at + plainText(runs).length)
+    this.emitChange('text')
+    return 'pasted'
+  }
+
+  /**
+   * 块选区态的粘贴落点：没有光标，⌘V 的东西作为新块落在选区后面。
+   * 剪切味 ⇒ 移动到选区后（源没了 ⇒ 降级为文本）；引用味 ⇒ 每枚引用一块；
+   * 纯文本 ⇒ 每行一块（`((id))` 记号照常解析成引用）。
+   */
+  pasteIntoSelection(refs: ClipboardRefs | null, text: string): 'moved' | 'pasted' | 'gone' | 'refused' {
+    const selIds = this.bsel.selectedRootIds()
+    const lastId = selIds[selIds.length - 1]
+    if (!lastId) return 'gone'
+    if (refs?.move) {
+      const r = this.moveClipboardRun(refs.ids, lastId, 'after')
+      if (r !== 'gone') return r
+      // 源已都不在 ⇒ 落到下面的文本分支按正文降级（调用方给实话）
+    } else if (refs) {
+      return this.insertBlocksAfter(lastId, refs.ids.map((rid) => mkBlock([this.refRunTo(rid, refs.anchor)])))
+    }
+    return this.insertBlocksAfter(lastId, text.split('\n').map((l) => mkBlock(this.runsWithRefs(l))))
+  }
+
+  /** 新块插到 `afterId` 后面（同级位；日记根的兄弟位按整片森林算，不是本视图的 roots） */
+  private insertBlocksAfter(afterId: string, blocks: Block[]): 'pasted' | 'gone' {
+    if (blocks.length === 0) return 'gone'
+    const floc = locate({ roots: this.store.blocks }, afterId)
+    if (!floc) return 'gone'
+    this.beginUndoEntry()
+    this.write((tx) => blocks.forEach((b, i) => tx.insert(b, floc.parent?.id ?? null, floc.index + 1 + i)))
+    this.structTail()
+    this.bsel.paintBlockSel()
+    return 'pasted'
+  }
+
+  /**
+   * 剪贴板移动的核心：把一组块搬到目标块 `zone` 侧，**一笔事务**（undo 一步全回）。
+   *
+   * 为什么不复用拖拽的 `moveBlocksTo`：那条管道的源必须在本文档里，而剪切粘贴的源
+   * 可以在任何页——⌘X 在 A 页、⌘V 在 B 页是主用法。⇒ 源按**整片森林**定位，
+   * 落点仍在本视图。同一笔里先在原位 no-op 记下「改前落点」（撤销按 prev 恢复，
+   * 不先记会被迁移途中的 prev 污染）、再追加成 run、逆序插回目标位——
+   * 这本次序账与多块拖拽是同一本。
+   *
+   * 派生面（查询结果／镜像）不收结构性粘贴：结果行不是块的位置。
+   * 标记是意图不是锁：调用方对同一份剪贴板可以反复调（反复贴＝反复移）。
+   */
+  private moveClipboardRun(ids: readonly string[], targetId: string, zone: 'before' | 'after'): 'moved' | 'gone' | 'refused' {
+    if (this.structuralScope === 'roots') return 'refused'
+    const forest: Doc = { roots: this.store.blocks }
+    const tgt = locate(forest, targetId)
+    if (!tgt) return 'refused'
+    const parentId = tgt.parent?.id ?? null
+    const live: Array<{ id: string; loc: Located }> = []
+    for (const id of [...new Set(ids)]) {
+      const b = this.store.find(id)
+      if (!b || isDeleted(b)) continue
+      const loc = locate(forest, id)
+      if (loc) live.push({ id, loc })
+    }
+    if (live.length === 0) return 'gone'
+    // 目标落在被搬的子树里（含目标就是被搬块自己）⇒ 拒：那会造环，与拖拽同一条守卫
+    for (const { id } of live) {
+      if (id === targetId || hasDescendant(forest, id, targetId)) return 'refused'
+    }
+    if (parentId !== null) {
+      const parent = this.store.find(parentId)
+      if (!parent || isDeleted(parent) || typeDeclOf(parent).children === 'none') return 'refused'
+    }
+    const at = tgt.index + (zone === 'after' ? 1 : 0)
+    // 目标下标之前的本批块会先被摘走 ⇒ 目标下标前移（与多块拖拽同一本账）
+    let index = at
+    for (const { loc } of live) if (loc.parent?.id === parentId && loc.index < at) index--
+    this.beginUndoEntry()
+    this.write((tx) => {
+      for (const { id, loc } of live) if (loc.parent) tx.move(id, loc.parent.id, loc.index)
+      for (const { id } of live) tx.move(id, parentId, Number.MAX_SAFE_INTEGER)
+      for (let i = live.length - 1; i >= 0; i--) tx.move(live[i]!.id, parentId, Math.max(0, index))
+      for (const { id } of live) tx.patch(id, (x) => (x.modified = Date.now()))
+    })
+    this.structTail()
+    this.bsel.paintBlockSel()
+    return 'moved'
   }
 
   /* ------------------------------------------------------ 页面装载 */

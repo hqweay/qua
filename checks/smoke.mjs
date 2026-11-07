@@ -16254,6 +16254,143 @@ await check('T168 悬空：源被删 ⇒ 说一句实话＋一个移除入口；
   return `dangling（${after.note}）＋移除入口；源被删后露面块仍在`
 })
 
+await check(
+  'T271 块复制的引用味：软内粘贴落成行内引用（锚文本随行）；一次粘贴一次撤销；正文味不含记号（软外视角）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const target = await pickLeaf(page)
+    assert(target, '第一页里应有可编辑的内容块')
+    // 前置：多行粘贴造一个引用源块
+    await page.evaluate((t) => window.__qua.__editor.pasteAt(t.id, t.text.length, `${t.text}\n引用源块`), target)
+    await page.waitForTimeout(120)
+    const src = await page.evaluate((t) => {
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '')
+      const p = window.__qua.__editor.store.find(t.parentId)
+      const i = p.children.findIndex((x) => x.id === t.id)
+      return { id: p.children[i + 1].id, text: plain(p.children[i + 1]) }
+    }, target)
+    assert(src.text === '引用源块', `前置：源块就位：${JSON.stringify(src)}`)
+
+    // ① 引用味粘贴：落点出现一枚 ref 原子；单行内容写＝一笔事务一条 op
+    // 前置的多行粘贴把首行原样拼回了正文 ⇒ 落点用**现查的正文长度**（块尾），不吃过期偏移
+    const endOff = await page.evaluate((t) => {
+      const b = window.__qua.__editor.store.find(t.id)
+      return b.content.filter((r) => r.t === 'text').map((r) => r.v).join('').length
+    }, target)
+    const r1 = await page.evaluate(
+      ({ t, s, at }) => window.__qua.__editor.pasteRefsAt({ blockId: t.id, offset: at, cut: null }, { ids: [s.id] }),
+      { t: target, s: src, at: endOff },
+    )
+    await page.waitForTimeout(120)
+    assert(r1 === 'pasted', `应返回 pasted：${r1}`)
+    const runs1 = await page.evaluate((t) => {
+      const b = window.__qua.__editor.store.find(t.id)
+      return b.content.map((r) => r.t).join(',')
+    }, target)
+    assert(runs1.endsWith('ref'), `落点出现引用原子：${runs1}`)
+    const ops1 = await opShape(page)
+    assert(ops1.length === 1 && ops1[0].op === 'upsert' && ops1[0].block === target.id, `应恰好 1 条正文 upsert：${JSON.stringify(ops1)}`)
+    assert(ops1[0].atomKinds === 'ref', `原子应是引用：${JSON.stringify(ops1)}`)
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const runsBack = await page.evaluate((t) => {
+      const b = window.__qua.__editor.store.find(t.id)
+      return b.content.map((r) => r.t).join(',')
+    }, target)
+    assert(!runsBack.includes('ref'), `一次撤销应摘掉引用原子：${runsBack}`)
+
+    // ② 锚文本随行：这一处的显示名写进 anchor（不改源、不占正文）
+    await page.evaluate(
+      ({ t, s }) => window.__qua.__editor.pasteRefsAt({ blockId: t.id, offset: 0, cut: null }, { ids: [s.id], anchor: '锚文本' }),
+      { t: target, s: src },
+    )
+    await page.waitForTimeout(120)
+    const anchor = await page.evaluate((t) => {
+      const b = window.__qua.__editor.store.find(t.id)
+      return b.content.find((r) => r.t === 'ref')?.anchor
+    }, target)
+    assert(anchor === '锚文本', `锚文本应随行走：${JSON.stringify(anchor)}`)
+
+    // ③ 正文味（外部应用会贴出的）：是块文本，不是 ((id)) 记号
+    const snap = await page.evaluate(() => window.__qua.__editor.copySnapshot())
+    assert(snap && snap.ids.length >= 1 && !snap.text.includes('(('), `正文味不应带记号：${JSON.stringify(snap)}`)
+
+    await ctx.close()
+    return `引用味⇒ref 原子（1 op／1 撤销）；anchor 随行；copySnapshot 正文无记号`
+  },
+)
+
+await check(
+  'T272 剪切＝粘贴时移动：id 不变、一次撤销全回；标记不消费可反复移；源没了降级返回 gone',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const target = await pickLeaf(page)
+    assert(target, '第一页里应有可编辑的内容块')
+    // 前置：target 下挂两个兄弟 M（搬运块）、C（落点块）
+    await page.evaluate((t) => window.__qua.__editor.pasteAt(t.id, t.text.length, `${t.text}\n搬运块\n落点块`), target)
+    await page.waitForTimeout(120)
+    const fx = await page.evaluate((t) => {
+      const p = window.__qua.__editor.store.find(t.parentId)
+      const i = p.children.findIndex((x) => x.id === t.id)
+      return { parentId: t.parentId, m: p.children[i + 1].id, c: p.children[i + 2].id }
+    }, target)
+    const order = () =>
+      page.evaluate((f) => {
+        const p = window.__qua.__editor.store.find(f.parentId)
+        const i = p.children.findIndex((x) => x.id === f.m)
+        return i
+      }, fx)
+
+    // ① 剪切粘贴＝移动：M 搬到 C 后面，id 不变
+    const r1 = await page.evaluate(
+      ({ f }) => window.__qua.__editor.pasteRefsAt({ blockId: f.c, offset: 0, cut: null }, { ids: [f.m], move: true }),
+      { f: fx },
+    )
+    await page.waitForTimeout(150)
+    assert(r1 === 'moved', `应返回 moved：${r1}`)
+    const mStill = await page.evaluate((f) => Boolean(window.__qua.__editor.store.find(f.m)), fx)
+    assert(mStill, '移动后 id 不变（同一块换位置，不是复制）')
+    const after1 = await page.evaluate((f) => {
+      const p = window.__qua.__editor.store.find(f.parentId)
+      const ids = p.children.map((x) => x.id)
+      return ids.indexOf(f.m) - ids.indexOf(f.c)
+    }, fx)
+    assert(after1 === 1, `M 应在 C 后面：${JSON.stringify(after1)}`)
+
+    // ② 一次撤销＝整步移动全回（摘源＋插目标同笔，没有半个移动）
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    assert((await order()) === 1, '撤销后 M 回到 C 前面（原位）')
+
+    // ③ 标记不消费：同一份载荷再贴一次＝再移一次
+    await page.evaluate(
+      ({ f }) => window.__qua.__editor.pasteRefsAt({ blockId: f.c, offset: 0, cut: null }, { ids: [f.m], move: true }),
+      { f: fx },
+    )
+    await page.waitForTimeout(150)
+    const after3 = await page.evaluate((f) => {
+      const p = window.__qua.__editor.store.find(f.parentId)
+      const ids = p.children.map((x) => x.id)
+      return ids.indexOf(f.m) - ids.indexOf(f.c)
+    }, fx)
+    assert(after3 === 1, '第二次粘贴同载荷＝再次移动到 C 后')
+
+    // ④ 源块没了 ⇒ gone（调用方按文本降级并给实话），不是静默假成功
+    const r4 = await page.evaluate(
+      ({ f }) => window.__qua.__editor.pasteRefsAt({ blockId: f.c, offset: 0, cut: null }, { ids: ['does-not-exist'], move: true }),
+      { f: fx },
+    )
+    assert(r4 === 'gone', `源不存在应返回 gone：${r4}`)
+
+    await ctx.close()
+    return `移动保 id（1 撤销全回）；同载荷可反复移；源没了返回 gone`
+  },
+)
+
 await check('T169 重开之后露面还在：首帧也要有身体（事件表接上后必须重画一次）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))

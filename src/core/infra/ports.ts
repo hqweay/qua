@@ -150,6 +150,19 @@ export interface App {
   /** 读剪贴板文本（粘贴为… 用；命令层不直接碰浏览器全局） */
   readText(): Promise<string>
   /**
+   * 写剪贴板的多味载体：`text` 给外部应用，`html` 尾部的注释载荷给本应用
+   * （引用/剪切意图），`clip` 同时更新会话账。命令层不直接碰浏览器全局。
+   */
+  copyFlavors(
+    f: { text: string; html?: string; clip?: { ids: readonly string[]; move?: boolean; anchor?: string } },
+    label?: string,
+  ): void
+  /**
+   * 读剪贴板的引用味＋正文味（块选区态的粘贴用：那边没有光标，走命令路径）。
+   * 解析链与 paste 事件同序：HTML 注释载荷 → 会话对账 →（没有就）纯文本。
+   */
+  readFlavors(): Promise<{ refs: { ids: string[]; move?: boolean; anchor?: string } | null; text: string }>
+  /**
    * **露面块的结构动作**：落在**中心编辑器**上，而不是「此刻焦点所在的那一台」。
    *
    * 为什么：焦点可能在一面镜像的岛里（它的装载只有源那一棵），而要被改的露面块

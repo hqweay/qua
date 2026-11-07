@@ -15,6 +15,8 @@
  */
 import { bindDropTarget, setDragBlock, zoneHint } from '../dnd.ts'
 import { EDIT_ISLAND_ATTR } from './block-dom.ts'
+import { refsFromHtml } from './clipboard-flavor.ts'
+import type { ClipboardRefs } from './clipboard-flavor.ts'
 import type { TriggerChar } from '../../core/infra/trigger.ts'
 import type { RunWithId } from '../../core/model/runs.ts'
 import type { Content } from '../../core/model/runs.ts'
@@ -197,6 +199,21 @@ export interface EditorBridge {
   onPasteImage: (file: File, point: { blockId: string; offset: number } | null) => Promise<void>
   /** 复制事件报告「复制了哪几块、那段文本是什么」（给同会话的「粘贴为…」用） */
   onCopy?: (ids: readonly string[], text: string) => void
+  /**
+   * 粘贴一份带引用味的载荷（`text/html` 注释里解析出来的）：剪切味＝移动到落点后，
+   * 引用味＝落点处插引用原子。返回 `gone` ＝ 剪切味的源块已都不在（已按文本降级）。
+   */
+  pasteRefsAt: (
+    target: { blockId: string; offset: number; cut: { from: number; to: number } | null },
+    refs: ClipboardRefs,
+  ) => 'moved' | 'pasted' | 'gone' | 'refused'
+  /**
+   * 块选区态的粘贴：没有光标，粘贴的东西作为新块落在选区后面。
+   * 与 ⌘V 的命令路径（块选区态的键位命令）共用编辑器里同一份实现。
+   */
+  pasteIntoSelection: (refs: ClipboardRefs | null, text: string) => 'moved' | 'pasted' | 'gone' | 'refused'
+  /** 剪切味的源块已都不在（粘贴端已按正文降级）：装配层给一句实话 */
+  clipboardNotice?: (kind: 'move-source-gone') => void
   /** 拖入文件被拒（v1 不做拖拽入图）：装配层给一句明确文案 */
   onDropFilesRejected?: () => void
   /**
@@ -625,6 +642,24 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       return
     }
     const text = e.clipboardData?.getData('text/plain') ?? ''
+    /**
+     * **先认引用味**（`text/html` 尾部的载荷注释）：本应用复制的块带身份来——
+     * 剪切味贴成移动、引用味贴成引用；外部应用复制的没有注释，落回下面的纯文本。
+     * 解析链的更后两档（正文 `((id))` 记号、纯文本）在 `insertPlainText` 那条路里。
+     */
+    const refs = refsFromHtml(e.clipboardData?.getData('text/html'))
+    if (refs) {
+      br.syncSel()
+      if (br.hasBlockSelection()) {
+        // 块选区态没有光标：粘贴的东西作为新块落在选区后面
+        if (br.pasteIntoSelection(refs, text) === 'gone') br.clipboardNotice?.('move-source-gone')
+        return
+      }
+      const target = br.pasteTarget()
+      if (!target) return
+      if (br.pasteRefsAt(target, refs) === 'gone') br.clipboardNotice?.('move-source-gone')
+      return
+    }
     if (!text) return
     br.syncSel()
     /**

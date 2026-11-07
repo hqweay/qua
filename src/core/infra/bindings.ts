@@ -99,6 +99,15 @@ export const BINDINGS: Binding[] = [
   { command: 'core.selection/extend-up', kind: 'keymap', key: 'shift+up', when: 'editorTextFocus || blockSelection', layer: 'core', args: { dir: -1 } },
   { command: 'core.selection/extend-down', kind: 'keymap', key: 'shift+down', when: 'editorTextFocus || blockSelection', layer: 'core', args: { dir: 1 } },
   { command: 'core.menu/slash', kind: 'keymap', key: 'mod+/', when: 'editorTextFocus', layer: 'core' },
+  // 复制端定身份（粘贴端零打断）：块上 ⌘C＝多味复制（软内 ⌘V 贴成引用、软外贴出正文），
+  // 划选 ⌘C 不在此列（键位不命中 ⇒ 原生复制文本）。⌘⇧C 两个身份档：划选＝块引＋静态锚文本，无划选＝只贴正文（复制份）。
+  { command: 'core.editor/copy-block', kind: 'keymap', key: 'mod+c', when: 'editorTextFocus && selectionEmpty', layer: 'core' },
+  { command: 'core.editor/copy-ref-anchor', kind: 'keymap', key: 'mod+shift+c', when: 'editorTextFocus && !selectionEmpty', layer: 'core' },
+  { command: 'core.editor/copy-block-text', kind: 'keymap', key: 'mod+shift+c', when: 'editorTextFocus && selectionEmpty', layer: 'core' },
+  // 剪切与块选区粘贴：⌘X 本身不动文档，移动发生在 ⌘V 那一刻（一笔事务，id 不变、可反复贴）；
+  // 光标态的 ⌘X／⌘V 留给原生文本剪切与 paste 事件。
+  { command: 'core.editor/cut-blocks', kind: 'keymap', key: 'mod+x', when: 'blockSelection', layer: 'core' },
+  { command: 'core.editor/paste-into-selection', kind: 'keymap', key: 'mod+v', when: 'blockSelection', layer: 'core' },
   { command: 'core.page/new', kind: 'keymap', key: 'mod+shift+n', when: '', layer: 'core' },
   { command: 'core.view/toggle-theme', kind: 'keymap', key: 'mod+shift+l', when: '', layer: 'core' },
   // 三槽开关：`⌘⌥1` / `⌘⌥2` ——中心槽没有独立快捷键
@@ -116,8 +125,9 @@ export const BINDINGS: Binding[] = [
   { command: 'core.journal/review', kind: 'keymap', key: 'mod+shift+r', args: { days: 3 }, when: '!editorTextFocus', layer: 'core' },
   { command: 'core.journal/review', kind: 'keymap', key: 'mod+alt+shift+r', args: { days: 7 }, when: '!editorTextFocus', layer: 'core' },
   { command: 'core/bindings/list', kind: 'keymap', key: 'mod+shift+?', when: '', layer: 'core' },
-  // user 层真实在用的键位（层次序由单测覆盖；不另设演示别名——那是用户可见的重复键）
-  { command: 'core.view/toggle-virtualize', kind: 'keymap', key: 'mod+shift+v', when: '', layer: 'user' },
+  // 粘贴为镜像：看法轴的键位（同一块贴成块位置的露面）。原占用者虚拟化开关退到命令面板
+  // （键位只是加速器，面板照常可达）；调试开关不占 ⌘⇧V 这样的黄金位。
+  { command: 'core.embed/paste', kind: 'keymap', key: 'mod+shift+v', when: 'blockFocused', args: { view: 'mirror' }, layer: 'core' },
   // Esc 的最后一层语义：档位轴退一档（常规时 `axisActive` 为假 ⇒ 不命中，Esc 落到关浮层那条）。
   // 放在键位段末尾：解析自下而上，块选区清空（表内更早）先于它命中。
   { command: 'core.view/axis-down', kind: 'keymap', key: 'escape', when: 'axisActive && !blockSelection', layer: 'core' },

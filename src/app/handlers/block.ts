@@ -7,8 +7,18 @@
 import { t } from '../../core/infra/msg.ts'
 import { checkExternalUrl, rejectText } from '../../core/index.ts'
 import { MISSING_ASSET_HASH, SEED_ASSET_HASH } from '../../core/fixtures/assets.ts'
-import type { Handler } from '../../core/infra/ports.ts'
+import type { App, Handler } from '../../core/infra/ports.ts'
+import { buildCopyHtml } from '../../view/editor/clipboard-flavor.ts'
 import { curBlock, S } from './shared.ts'
+
+/**
+ * 块复制的多味载体（引用意图）：正文味给外部应用，HTML 载荷给本应用
+ * （软内 ⌘V 贴成引用）。`text` 缺省时按 id 现取块正文。
+ */
+const copyRefs = (app: App, ids: readonly string[], text?: string): void => {
+  const body = text ?? ids.map((id) => app.ed.plainTextOf(id)).filter(Boolean).join('\n')
+  app.copyFlavors({ text: body, html: buildCopyHtml(body, { ids: [...ids] }), clip: { ids: [...ids] } }, t('ui.toast.blockRefCopied'))
+}
 
 export const STRUCT_HANDLERS: Record<string, Handler> = {
   /* ---- 结构 ---- */
@@ -180,7 +190,59 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   'core.editor/copy-block-ref': (a, app) => {
     const id = S(a.blockId) || curBlock(app)
     if (!id) return false
-    app.copy(`((${id}))`, t('ui.toast.blockRefCopied'))
+    copyRefs(app, [id])
+    return true
+  },
+  /**
+   * 复制块（块上 ⌘C，光标无划选／块选区都归它）：多味载体——
+   * 软内 ⌘V 贴成引用（HTML 载荷），软外 ⌘V 贴出正文（text/plain）。
+   * 划选文本的 ⌘C 不归这里：选区非空时键位不命中，原生复制原样保留。
+   */
+  'core.editor/copy-block': (_a, app) => {
+    const snap = app.ed.copySnapshot()
+    if (!snap) return false
+    copyRefs(app, snap.ids, snap.text)
+    return true
+  },
+  /**
+   * 复制份（块上 ⌘⇧C／划选外的情况）：只写正文味、不带引用意图——
+   * 软内软外 ⌘V 行为一致，贴出来都是新块。与 ⌘C 是同一动作的两个身份档。
+   */
+  'core.editor/copy-block-text': (_a, app) => {
+    const snap = app.ed.copySnapshot()
+    if (!snap) return false
+    app.copy(snap.text, t('ui.toast.blocksCopied'))
+    return true
+  },
+  /** 划选 ⌘⇧C：块引＋静态锚文本（划选文本是这一处的显示名；源块改文锚不跟） */
+  'core.editor/copy-ref-anchor': (_a, app) => {
+    const snap = app.ed.anchorSnapshot()
+    if (!snap) return false
+    const html = buildCopyHtml(snap.text, { ids: [snap.id], anchor: snap.text })
+    app.copyFlavors(
+      { text: snap.text, html, clip: { ids: [snap.id], anchor: snap.text } },
+      t('ui.toast.refCopied'),
+    )
+    return true
+  },
+  /**
+   * 剪切块（块选区 ⌘X）：引用味＋移动意图。⌘X 本身不动文档——移动发生在
+   * 粘贴那一刻（一笔事务，id 不变、可反复贴）；光标态的 ⌘X 留给原生文本剪切。
+   */
+  'core.editor/cut-blocks': (_a, app) => {
+    if (!app.ed.bsel.hasBlockSelection()) return false
+    const snap = app.ed.copySnapshot()
+    if (!snap) return false
+    const html = buildCopyHtml(snap.text, { ids: snap.ids, move: true })
+    app.copyFlavors({ text: snap.text, html, clip: { ids: snap.ids, move: true } }, t('ui.toast.cutBlocks'))
+    return true
+  },
+  /** 块选区态的 ⌘V：没有光标，粘贴的东西作为新块落在选区后面（与 paste 事件同一份编辑器实现） */
+  'core.editor/paste-into-selection': (_a, app) => {
+    void app.readFlavors().then(({ refs, text }) => {
+      const r = app.ed.pasteIntoSelection(refs, text)
+      if (r === 'gone') app.toast(t('ui.toast.moveSourceGone'), 'warn')
+    })
     return true
   },
   'core.editor/delete-selected-blocks': (_a, app) => app.ed.bsel.deleteSelectedBlocks(),
@@ -194,9 +256,9 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     return true
   },
   'core.editor/copy-selected-block-refs': (_a, app) => {
-    const text = app.ed.bsel.selectedBlockRefs()
-    if (!text) return false
-    app.copy(text, t('ui.toast.blockRefsCopied'))
+    const snap = app.ed.copySnapshot()
+    if (!snap) return false
+    copyRefs(app, snap.ids, snap.text)
     return true
   },
   'core.selection/clear': (_a, app) => {

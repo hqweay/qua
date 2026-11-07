@@ -262,13 +262,6 @@ export class BlockSelection {
     return lines.join('\n')
   }
 
-  /** 选中的块 → 块引用（每行一个最上层根） */
-  selectedBlockRefs(): string {
-    return this.blockSelRoots()
-      .map((b) => `((${b.id}))`)
-      .join('\n')
-  }
-
   /** 把 `data-blocksel` 刷到当前挂载的 `.blk` 上（虚拟化下只染已挂载行） */
   /** 编辑器在每次重排收尾都要重染（渲染归编辑器，漆层归这里） */
   paintBlockSel(): void {
