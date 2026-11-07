@@ -572,8 +572,6 @@ export const MSG = {
   /* 卡片（看板）：按某一列的单值分组；拖卡＝写属性（不是 re-parent） */
   'ui.board.unset': '未设置',
   'ui.board.noMultiGroup': '卡片的分组列不支持多值属性（多值请在列表或表格里分组）',
-  /* 画廊：封面是派生的（正文里第一张图） */
-  'ui.gallery.noCover': '没有封面',
   /* 日历：按日期落在月网格里 */
   'ui.calendar.needsDate': '日历要选一列日期（视图菜单里挑一列）',
   'ui.calendar.undated': '没有日期的',

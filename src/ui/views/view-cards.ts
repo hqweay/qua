@@ -265,7 +265,11 @@ export class ViewCards {
     card.className = 'vcard'
     card.dataset.blockId = r.block.id
 
-    if (o.cover) card.appendChild(this.cover(r))
+    // 封面是**派生**的：有图才有横幅，没图就不占位（不拿首字充数）
+    if (o.cover) {
+      const cover = this.cover(r)
+      if (cover) card.appendChild(cover)
+    }
 
     /**
      * **卡片的身体就是这一块的投影**：正文（run）＋ 块下属性行（有值的、未上 gutter 的）。
@@ -336,28 +340,22 @@ export class ViewCards {
     return grip
   }
 
-  /** 封面位：有图放图，没图放首字（缺文件也留位，别让格子塌掉） */
-  private cover(r: ViewRecord): HTMLElement {
+  /**
+   * 封面：这一块正文里的**第一枚图**。
+   *
+   * **没有图就没有封面位**——不拿首字占位充数：一个 4:3 的空框会让「一张文字卡」
+   * 看起来像「一张坏掉的图卡」。文件丢了也不留框（移除元素，卡片回到文字卡的形状）。
+   */
+  private cover(r: ViewRecord): HTMLElement | null {
+    const hash = firstAssetOf(r)
+    if (hash === '') return null
     const box = document.createElement('div')
     box.className = 'vcard-cover'
-    const hash = firstAssetOf(r)
-    if (hash === '') {
-      box.dataset.state = 'none'
-      const mark = document.createElement('span')
-      mark.className = 'vcard-cover-mark'
-      mark.textContent = (r.title || t('ui.page.untitled')).slice(0, 1)
-      box.appendChild(mark)
-      return box
-    }
     const img = document.createElement('img')
     img.className = 'vcard-cover-img'
     img.alt = ''
     img.src = assetViewOf(hash).url ?? ''
-    img.addEventListener('error', () => {
-      img.remove()
-      box.dataset.state = 'missing'
-      box.textContent = t('ui.gallery.noCover')
-    })
+    img.addEventListener('error', () => box.remove())
     box.appendChild(img)
     return box
   }

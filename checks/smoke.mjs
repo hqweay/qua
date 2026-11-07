@@ -18371,9 +18371,10 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
     cover: document.querySelectorAll('.vcard-cover').length,
   }))
   assert(gallery.layout === 'grid', `卡片默认排成网格（画廊）：${JSON.stringify(gallery)}`)
+  assert(gallery.cards > 0, `画廊要画出卡：${JSON.stringify(gallery)}`)
   assert(
-    gallery.cards > 0 && gallery.cover === gallery.cards,
-    `画廊一格一卡、每张都有封面位：${JSON.stringify(gallery)}`,
+    gallery.cover === 0,
+    `没有图的卡不该有封面位（不拿首字占位充数）：${JSON.stringify(gallery)}`,
   )
 
   /**
@@ -18476,10 +18477,7 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
   assert(board.cols.length >= 2, `看板应至少有一列（＋未设置）：${JSON.stringify(board)}`)
   assert(board.cards === gallery.cards, `换布局不换成员：${gallery.cards} → ${board.cards}`)
   assert(board.unset, `「未设置」那一列必须在（藏起来＝告诉用户这些不存在）：${JSON.stringify(board)}`)
-  assert(
-    board.cover === board.cards,
-    `换布局不动卡片配置：画廊带的封面位在列里照样在：${JSON.stringify(board)}`,
-  )
+  assert(board.cover === 0, `没有图的卡在列里也不该冒封面位：${JSON.stringify(board)}`)
 
   const card = await page.evaluate(() => {
     const el = document.querySelector('.vcard')
