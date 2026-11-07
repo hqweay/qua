@@ -294,15 +294,19 @@
   color: var(--ui-text-tertiary);
 }
 
-/* 单块标题编辑器：贴在格子上（fixed ⇒ 不改行高、不打断窗口化） */
+/* 单块标题编辑器：贴在格子上（fixed ⇒ 不改行高、不打断窗口化）。
+   **画成格子的样子**：同底色、无圆角、无投影，只留一圈内描边当焦点环 —
+   浮起来的那一块（阴影＋圆角）会读成「弹了个框」，而用户要的是「格子在编辑」。
+   ⚠️ 边框必须留 1px（透明即可）：0 宽时 Chromium 下这一格的 Enter 不再走本组件的
+   捕获监听（T152 实测红），而它看起来完全一样。 */
 .tv-edit {
   position: fixed;
   z-index: var(--ui-z-chrome);
-  padding: var(--ui-gap-2) var(--ui-gap-4);
+  padding: 0 var(--ui-gap-2);
   background: var(--ui-surface);
-  border: 1px solid var(--ui-accent);
-  border-radius: var(--ui-radius-md);
-  box-shadow: var(--ui-shadow-pop);
+  border: 1px solid transparent;
+  border-radius: 0;
+  box-shadow: inset 0 0 0 1px var(--ui-accent);
   font-size: var(--ui-fs-md);
 }
 .tv-edit-host {
@@ -310,6 +314,12 @@
 }
 .tv-edit .blk {
   margin: 0;
+  padding-left: 0;
+  min-height: 0;
+}
+/* 格子里不画块标：那一格的名字从左边开始，和它没在编辑时一样 */
+.tv-edit .blk > .left {
+  display: none;
 }
 
 /* ---------------------------------------------------------- 降级：紧凑列表

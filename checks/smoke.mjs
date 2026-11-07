@@ -18279,7 +18279,7 @@ await check('T189 挂载区的 + 直接建 local 查询：不弹菜单、不建�
  * 看板拖卡把它做成了 re-parent（结构被改，而用户以为只是换了个分组）、
  * 以及「分组下拉选了值、屏幕没变成列」（配置写进去了却没人消费）。
  */
-await check('T190 卡片两副面孔（看板／画廊）：换布局不重查；拖卡写属性不换父子；选分组即成看板', async () => {
+await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换布局不重查；拖卡写属性不换父子', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const qid = await page.evaluate(() => {
@@ -18342,6 +18342,54 @@ await check('T190 卡片两副面孔（看板／画廊）：换布局不重查�
     gallery.cards > 0 && gallery.cover === gallery.cards,
     `画廊一格一卡、每张都有封面位：${JSON.stringify(gallery)}`,
   )
+
+  /**
+   * 卡片正文**就地编辑**：点文字 ⇒ 编辑器装在**这一张卡里**（不是浮层），
+   * caret 落在点到的位置，打字直接进模型；Enter 提交并还原成投影；Esc 回滚。
+   */
+  const editedId = await page.evaluate(() => document.querySelector('.vcard[data-block-id]')?.dataset.blockId ?? '')
+  assert(editedId !== '', '前置：应有一张卡')
+  const titleBox = await page.locator(`.vcard[data-block-id="${editedId}"] .vcard-title`).first().boundingBox()
+  assert(titleBox, '前置：卡片标题要有可点的盒子')
+  await page.mouse.click(titleBox.x + 6, titleBox.y + titleBox.height / 2)
+  await page.waitForTimeout(250)
+  const inCard = await page.evaluate((id) => {
+    const card = document.querySelector(`.vcard[data-block-id="${id}"]`)
+    return {
+      editorInside: Boolean(card?.querySelector('.inline-editor')),
+      activeInCard: Boolean(card?.contains(document.activeElement)),
+      floating: Boolean(document.querySelector('.tv-edit')),
+    }
+  }, editedId)
+  assert(inCard.editorInside, `编辑器要装在卡片里，而不是浮层上：${JSON.stringify(inCard)}`)
+  assert(inCard.activeInCard, `焦点要落在卡片里的编辑器上：${JSON.stringify(inCard)}`)
+  assert(!inCard.floating, `卡片不该复用表格那台浮层编辑器：${JSON.stringify(inCard)}`)
+  const typed = '卡片就地编辑'
+  await page.keyboard.type(typed)
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(300)
+  const committed = await page.evaluate(
+    (id) => ({
+      text: window.__qua.allBlocks().find((b) => b.id === id)?.text ?? '',
+      editorGone: !document.querySelector(`.vcard[data-block-id="${id}"] .inline-editor`),
+    }),
+    editedId,
+  )
+  assert(committed.text.includes(typed), `打字要直接进模型：${JSON.stringify(committed)}`)
+  assert(committed.editorGone, `Enter 提交后要还原成投影：${JSON.stringify(committed)}`)
+
+  // Esc：把打开那一刻的内容写回去（编辑器是边打边写模型的）
+  const titleBox2 = await page.locator(`.vcard[data-block-id="${editedId}"] .vcard-title`).first().boundingBox()
+  await page.mouse.click(titleBox2.x + 6, titleBox2.y + titleBox2.height / 2)
+  await page.waitForTimeout(200)
+  await page.keyboard.type('不该留下')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(250)
+  const reverted = await page.evaluate(
+    (id) => window.__qua.allBlocks().find((b) => b.id === id)?.text ?? '',
+    editedId,
+  )
+  assert(!reverted.includes('不该留下'), `Esc 要回滚这一次输入：${JSON.stringify(reverted)}`)
 
   // 选一个分组列 ⇒ 列（看板）。改的是**同一张视图**的分组键，不是新建一种看法
   await page.evaluate(
@@ -19897,8 +19945,6 @@ await check('T215 Shift+点日历／查询各看法的打开入口 ⇒ 右槽窗
   )
   await page.waitForTimeout(450)
   await shiftOpen('.vcards[data-layout="columns"] .vcard[data-block-id]', '卡片（列）')
-  await addView('list')
-  await shiftOpen('.vl-bullet', '列表行首', '.vl-row')
   await addView('table')
   await shiftOpen('.tv-marker', '表格块标', '.tv-row')
 
@@ -19917,7 +19963,7 @@ await check('T215 Shift+点日历／查询各看法的打开入口 ⇒ 右槽窗
   )
 
   await ctx.close()
-  return `日历（已写/空白）+ 看板/画廊/列表/表格的 Shift 都开右槽；中心与历史不动`
+  return `日历（已写/空白）+ 卡片/表格的 Shift 都开右槽；中心与历史不动`
 })
 
 /**
@@ -20065,8 +20111,8 @@ await check('T219 视图切片：基础条件 ∩ 切片；菜单按名列出并
     await page.waitForTimeout(350)
   }
 
-  // 两张视图：列表（只看基础条件）与表格（再叠一片「甲」）
-  await addView('list')
+  // 两张视图：卡片（只看基础条件）与表格（再叠一片「甲」）
+  await addView('cards')
   await renameActive('全部')
   await addView('table')
   await renameActive('只看甲')
@@ -21080,7 +21126,7 @@ await check('T229 聚焦一个有露面的查询块：段尾挂载区只搬进�
   return `聚焦露面块与源查询块都成功；正文 1 个段尾槽，岛里的 .sec 没有抢走挂载区`
 })
 
-await check('T230 分组：入口按覆盖率给候选；卡片禁多值分组列；列表按标签分堆一块进多段', async () => {
+await check('T230 分组：入口按覆盖率给候选；卡片禁多值分组列；表格按标签分堆一块进多段', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const pid = await pageByTitle(page, '产品设计')
@@ -21146,13 +21192,13 @@ await check('T230 分组：入口按覆盖率给候选；卡片禁多值分组�
   const note = await page.evaluate(() => document.querySelector('.vcards')?.textContent ?? '')
   assert(note.includes('不支持多值'), `卡片对多值分组给一句实话：${note.slice(0, 40)}`)
 
-  // 列表视图：多值键 fan-out——双标签的块进两个段，段头是标签名
-  await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'list' }), pid)
+  // 表格视图：多值键 fan-out——双标签的块进两个段，段头是标签名
+  await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'table' }), pid)
   await page.waitForTimeout(350)
   await page.evaluate((pid) => {
     const views = window.__qua.__editor.store.find(pid)?.props?._views ?? []
-    const list = views.find((v) => v.kind === 'list')
-    window.__qua.invoke('core.view/set-group', { blockId: pid, viewId: list.id, groupBy: '_tags' })
+    const table = views.find((v) => v.kind === 'table')
+    window.__qua.invoke('core.view/set-group', { blockId: pid, viewId: table.id, groupBy: '_tags' })
   }, pid)
   await page.waitForTimeout(450)
   const grouped = await page.evaluate(({ member, otherName }) => ({
@@ -21170,18 +21216,18 @@ await check('T230 分组：入口按覆盖率给候选；卡片禁多值分组�
   // 清掉分组：配置删键，不留空串
   await page.evaluate((pid) => {
     const views = window.__qua.__editor.store.find(pid)?.props?._views ?? []
-    const list = views.find((v) => v.kind === 'list')
-    window.__qua.invoke('core.view/set-group', { blockId: pid, viewId: list.id, groupBy: '' })
+    const table = views.find((v) => v.kind === 'table')
+    window.__qua.invoke('core.view/set-group', { blockId: pid, viewId: table.id, groupBy: '' })
   }, pid)
   await page.waitForTimeout(350)
   const stored = await page.evaluate(
-    (pid) => window.__qua.__editor.store.find(pid)?.props?._views?.find((v) => v.kind === 'list')?.groupBy ?? '',
+    (pid) => window.__qua.__editor.store.find(pid)?.props?._views?.find((v) => v.kind === 'table')?.groupBy ?? '',
     pid,
   )
   assert(stored === '', '清掉的分组不该留在配置里（删键，不留空串）')
 
   await ctx.close()
-  return `入口标覆盖率；卡片禁多值分组列（配置带多值给实话）；列表按标签 fan-out 双段、段头标签名；清掉删键`
+  return `入口标覆盖率；卡片禁多值分组列（配置带多值给实话）；表格按标签 fan-out 双段、段头标签名；清掉删键`
 })
 
 /* ---------------------------------------------------------------- 档位轴 */
@@ -21915,35 +21961,35 @@ await check('T237 候选引用：片段行高亮名字出现处、一键转成�
 
   // ① 提及栏 → 列表：命中格是片段，名字处是高亮按钮
   await mountTab(page, 'mentions')
-  await pickDerivedView(page, 'list')
+  await pickDerivedView(page, 'table')
   await page.waitForTimeout(450)
   const before = await page.evaluate((pid) => ({
-    probeRow: Boolean(document.querySelector(`.mount-view .vl-row[data-block-id="${pid}"]`)),
-    hitTexts: [...document.querySelectorAll(`.mount-view .vl-row[data-block-id="${pid}"] .mention-hit`)].map((e) => e.textContent ?? ''),
+    probeRow: Boolean(document.querySelector(`.mount-view .tv-row[data-block-id="${pid}"]`)),
+    hitTexts: [...document.querySelectorAll(`.mount-view .tv-row[data-block-id="${pid}"] .mention-hit`)].map((e) => e.textContent ?? ''),
     count: Number((document.querySelector('.mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
-    rows: document.querySelectorAll('.mount-view .vl-row').length,
+    rows: document.querySelectorAll('.mount-view .tv-row').length,
   }), setup.probe)
   assert(before.probeRow, `提及栏应有探针那一行：${JSON.stringify(before)}`)
   assert(before.hitTexts.length >= 1 && before.hitTexts.every((s) => s.includes(setup.word)), `片段行的名字处应是高亮按钮：${JSON.stringify(before)}`)
 
   // ② 一键转换：恰好一条内容写；该条从提及消失、同时在引用栏出现
-  await page.locator(`.mount-view .vl-row[data-block-id="${setup.probe}"] .mention-hit`).first().click()
+  await page.locator(`.mount-view .tv-row[data-block-id="${setup.probe}"] .mention-hit`).first().click()
   await page.waitForTimeout(650)
   const ops = await page.evaluate(() => window.__qua.lastOps().map((o) => ({ e: o.e, op: o.op, id: o.id })))
   assert(ops.length === 1 && ops[0].e === 'block' && ops[0].op === 'upsert' && ops[0].id === setup.probe, `一次转换＝一条内容写：${JSON.stringify(ops)}`)
   const after = await page.evaluate((pid) => ({
-    mentionsRow: Boolean(document.querySelector(`.mount-view .vl-row[data-block-id="${pid}"]`)),
+    mentionsRow: Boolean(document.querySelector(`.mount-view .tv-row[data-block-id="${pid}"]`)),
     srcText: window.__qua.allBlocks().find((x) => x.id === pid)?.text ?? '',
   }), setup.probe)
   assert(!after.mentionsRow, `转换后该条从提及消失：${JSON.stringify(after)}`)
   assert(!after.srcText.includes(setup.word), `那一处纯文本换成了引用（投影里不再有名字）：${JSON.stringify(after)}`)
 
   await mountTab(page, 'refs')
-  await pickDerivedView(page, 'list')
+  await pickDerivedView(page, 'table')
   await page.waitForTimeout(450)
   const refs = await page.evaluate((pid) => ({
-    probeRow: Boolean(document.querySelector(`.mount-view .vl-row[data-block-id="${pid}"]`)),
-    rows: document.querySelectorAll('.mount-view .vl-row').length,
+    probeRow: Boolean(document.querySelector(`.mount-view .tv-row[data-block-id="${pid}"]`)),
+    rows: document.querySelectorAll('.mount-view .tv-row').length,
   }), setup.probe)
   assert(refs.probeRow, `同一关系索引里它换到引用栏：${JSON.stringify(refs)}`)
 
@@ -21955,17 +22001,17 @@ await check('T237 候选引用：片段行高亮名字出现处、一键转成�
   }), setup.probe)
   assert(undone.srcText === setup.probeText, `一次撤销回到原文：${JSON.stringify(undone)}`)
   await mountTab(page, 'mentions')
-  await pickDerivedView(page, 'list')
+  await pickDerivedView(page, 'table')
   await page.waitForTimeout(450)
   const mentionsAgain = await page.evaluate((pid) => ({
-    probeRow: Boolean(document.querySelector(`.mount-view .vl-row[data-block-id="${pid}"]`)),
+    probeRow: Boolean(document.querySelector(`.mount-view .tv-row[data-block-id="${pid}"]`)),
   }), setup.probe)
   assert(mentionsAgain.probeRow, `一次撤销后回到提及栏：${JSON.stringify(mentionsAgain)}`)
   await mountTab(page, 'refs')
-  await pickDerivedView(page, 'list')
+  await pickDerivedView(page, 'table')
   await page.waitForTimeout(450)
   const refsAgain = await page.evaluate((pid) => ({
-    probeRow: Boolean(document.querySelector(`.mount-view .vl-row[data-block-id="${pid}"]`)),
+    probeRow: Boolean(document.querySelector(`.mount-view .tv-row[data-block-id="${pid}"]`)),
   }), setup.probe)
   assert(!refsAgain.probeRow, `一次撤销后引用栏没有它：${JSON.stringify(refsAgain)}`)
 

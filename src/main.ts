@@ -1815,9 +1815,9 @@ const app: App = {
    * 改名／切片：派生栏是只读关系视图，没有 `_views` 可以写，看法只是设备状态的一格。
    */
   openDerivedViewMenu: (anchor, current, onPick) => {
-    const kinds = ['outline', 'list', 'table'] as const
-    const labels = { outline: t('ui.view.outline'), list: t('ui.view.kind.list'), table: t('ui.view.kind.table') }
-    const icons = { outline: 'lucide:list-tree', list: 'lucide:list', table: 'lucide:table' }
+    const kinds = ['outline', 'table'] as const
+    const labels = { outline: t('ui.view.outline'), table: t('ui.view.kind.table') }
+    const icons = { outline: 'lucide:list-tree', table: 'lucide:table' }
     layers.openMenu({
       rows: kinds.map((k) => ({
         id: k,

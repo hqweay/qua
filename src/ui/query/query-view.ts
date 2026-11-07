@@ -7,7 +7,7 @@
  * |---|---|---|
  * | **query**（查询块／local tab） | 名字 ＋ 条数 ＋ 「可能已过期」＋ 刷新 ＋ 视图切换 | 大纲＝一列命中；表格＝同一批命中 |
  * | **children**（普通块，激活了视图） | 条数 ＋ 视图切换 ＋ 新建一行 | 表格（直接子块＝行）；切回大纲就没有这一层 |
- * | **items**（收藏块） | 条数 ＋ 视图切换 ＋ 加一条 | 列表（默认）／表格…；没有大纲（它不是树） |
+ * | **items**（收藏块） | 条数 ＋ 视图切换 ＋ 加一条 | 表格／卡片；没有大纲（它不是树） |
  *
  * 四条口径（为什么长这样）：
  *   · **配置在拥有者上**：这一层只经 `ViewOwnerStore` 读写，不知道配置住在
@@ -24,9 +24,7 @@
 import {
   childrenRecords,
   defaultColumnsForSource,
-  fieldTextOf,
   groupChoicesOf,
-  MATCHED_COLUMN,
   displayNameOf,
   expandContexts,
   hasLiveChildren,
@@ -48,7 +46,6 @@ import {
   freezeResult,
   frozenStale,
   readViewSet,
-  defaultKindFor,
   todayISO,
   slicedSpec,
   type Block,
@@ -73,26 +70,22 @@ import {
   type PropKind,
 } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
-import { t, type MsgId } from '../../core/infra/msg.ts'
+import { t } from '../../core/infra/msg.ts'
 import { BlockEditor, type Run } from '../../view/editor/editor.ts'
 import { DeferredFlush } from '../../view/editor/deferred-flush.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { BlockCell } from '../block-ui/block-cell.ts'
+import { InlineBlockEditor } from '../block-ui/inline-block-editor.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
 import { mountTitleEditor, type TitleEditor } from '../block-ui/title-editor.ts'
 import { queryChips } from './query-builder.ts'
 import { QueryTree, treeSummary } from './query-tree.ts'
 import { ViewCards } from '../views/view-cards.ts'
 import { ViewCalendar } from '../views/view-calendar.ts'
-import { ViewList } from '../views/view-list.ts'
 import { ViewMindmap } from '../views/view-mindmap.ts'
 import { ViewListTable } from '../views/view-list-table.ts'
 import { ViewTable } from '../views/view-table.ts'
 import { ViewGrouped } from '../views/view-grouped.ts'
-import { mentionDerivedOf, renderMentionField } from '../views/mention-field.ts'
-
-/** 默认看法的临时 id（不落盘：它代表「这一份源没有激活视图」这件事本身） */
-const DEFAULT_VIEW_ID = 'view-default'
 
 /**
  * 条件树开没开：**设备状态，不落盘、不进 KB**。
@@ -128,20 +121,6 @@ function isTreeOpen(owner: ViewOwnerRef, surface: ViewSurface, topLevel: boolean
  */
 export function openQueryTreeFor(owner: ViewOwnerRef, surface: ViewSurface): void {
   treeOpen.set(treeKeyOf(owner, surface), true)
-}
-
-/** 保留列在列表里的字段名（属性列走 `deps.fields()`） */
-const RESERVED_FIELD_LABEL: Record<string, MsgId> = {
-  tags: 'ui.props.tagsTitle',
-  children: 'ui.view.childrenCount',
-  created: 'ui.props.createdAt',
-  modified: 'ui.props.modifiedAt',
-  path: 'ui.view.col.path',
-  refCount: 'ui.view.col.refCount',
-  relKinds: 'ui.view.col.relKinds',
-  via: 'ui.view.col.via',
-  matched: 'ui.view.col.matched',
-  sharedTags: 'ui.view.col.sharedTags',
 }
 
 export interface ViewHostDeps {
@@ -244,13 +223,11 @@ export interface ViewHostDeps {
 }
 
 export interface DerivedMode {
-  /** 本轮只开列表与表格（大纲走挂载区自己的那一支） */
-  kind: 'list' | 'table'
+  /** 派生栏只有**表格**会走到 ViewHost（大纲由挂载区自己画） */
   /** 现算的一批记录（已带派生列） */
   records: () => ViewRecord[]
-  /** 表格列 / 列表字段：**临时构造**，不落盘 */
+  /** 表格列：**临时构造**，不落盘 */
   columns: ViewColumn[]
-  listFields: string[]
   /** 这一栏的分组键（设备状态；'' ＝ 没分组）。与看法同层：派生栏没有可写的视图配置 */
   groupBy: string
   /** 切看法写哪（设备状态；由装配层落地） */
@@ -404,21 +381,19 @@ export class ViewHost {
   private table: ViewTable | null = null
   /** 结构映射表分支（表头＝直接子块、一列＝那个子块的孩子） */
   private listTable: ViewListTable | null = null
-  /** 记录列表分支（query／children／items 三种源都接） */
-  private list: ViewList | null = null
   /** 卡片分支（看板／画廊是同一张看法的两副面孔，`cardLayoutOf` 决定画成列还是网格） */
   private cards: ViewCards | null = null
   private calendar: ViewCalendar | null = null
   private mindmap: ViewMindmap | null = null
-  /** 分组包装（列表／表格带 `groupBy` 时）：段头归它、段身归各 kind 渲染器 */
+  /** 分组包装（表格带 `groupBy` 时）：段头归它、段身仍是表格 */
   private grouped: ViewGrouped | null = null
-  /** 分组包装当前装的 kind（list ⇄ table 互切要重建段身） */
-  private groupedKind: 'list' | 'table' | null = null
   /** 这一次 body 实际按哪个分组键画（'' ＝ 未分组）：键变了 body 要重摆 */
   private renderedGroupKey = ''
   /** 这一屏现在画的是谁：`outline` 或激活视图的 id（变了才换分支） */
   private mode = ''
   private readonly cell: BlockCell
+  /** 卡片标题的就地编辑器（与表格那台是两件东西：一个在格子里、一个贴上去） */
+  private readonly inline: InlineBlockEditor
   /**
    * **投影抬头的常驻编辑器**（只有 `surface === 'embed'` 才有）。
    *
@@ -501,6 +476,19 @@ export class ViewHost {
       openBlock: (id, place) => deps.openBlock(id, place),
     })
     /**
+     * **卡片标题的就地编辑器**：一次只编辑一张卡，装进那张卡里（不是浮层）。
+     * 冻结范围＝这一屏：正在打字的卡不该因为别处的变化被重排。
+     */
+    this.inline = new InlineBlockEditor({
+      store: deps.store,
+      write: deps.write,
+      wire: (ed, change) => deps.wire(ed, change),
+      onFocus: (ed) => deps.onFocus(ed),
+      onChange: () => deps.onChange(),
+      area: this.els.root,
+      onClose: (blockId) => this.cards?.afterEdit(blockId),
+    })
+    /**
      * **投影抬头是常驻可编辑的一行名字**（只有 `embed` 表面显示抬头名字）。
      *
      * 它不是「点一下开浮层」：露面行的正文槽是空的，抬头是名字**唯一**的落点，
@@ -572,8 +560,8 @@ export class ViewHost {
         // children/items 源是活的：子块的正文/属性变了，那一行要跟着变（按 blockId 局部修补）
         if (this.table) this.table.sync(ids)
         if (this.listTable) this.listTable.render(ids)
-        // 列表没有局部修补（它的行就是记录本身）：整表重画，反正只画看得见的那几行
-        if (this.list) this.list.render()
+        // 卡片按 blockId 局部修补：整片重画会把正在编辑的那张卡的锚点摘掉
+        if (this.cards) this.cards.sync(ids)
       }
     })
   }
@@ -598,8 +586,6 @@ export class ViewHost {
     this.table = null
     this.listTable?.dispose()
     this.listTable = null
-    this.list?.dispose()
-    this.list = null
     this.cards?.dispose()
     this.cards = null
     this.calendar?.dispose()
@@ -609,6 +595,7 @@ export class ViewHost {
     this.title?.dispose()
     this.title = null
     this.cell.dispose()
+    this.inline.dispose()
   }
 
   /**
@@ -695,7 +682,6 @@ export class ViewHost {
   private derivedView(): ViewConfig {
     const d = this.deps.derived!
     const group = d.groupBy ? { groupBy: d.groupBy } : {}
-    if (d.kind === 'list') return { id: 'derived:list', kind: 'list', list: { fields: [...d.listFields] }, ...group }
     return {
       id: 'derived:table',
       kind: 'table',
@@ -705,19 +691,14 @@ export class ViewHost {
   }
 
   /**
-   * **这一份源的默认看法**（没有激活视图时用它画）。
+   * **这一份源这一屏实际要画的那张视图**（`null` ＝ 大纲）。
    *
-   * 它是一张**临时** `ViewConfig`（id 固定、不落盘）：`items` 源的默认是「列表」，
-   * 而列表需要一个 `kind` 才知道画成什么。写回库里的只有用户在切换器里**真的新建**的那些。
-   *
-   * ⚠️ `children`／`query` 的默认是**大纲**，那条分支不走这里（大纲没有配置可言）。
+   * 派生栏没有拥有者 ⇒ 它那份临时表格配置由这里现造（不落盘）；
+   * 其余情形就是拥有者激活的那一张，没有就是大纲。
    */
   private defaultView(): ViewConfig | null {
     if (this.deps.derived) return this.derivedView()
-    if (this.bound.view) return this.bound.view
-    const src = this.source
-    if (defaultKindFor(src) !== 'list') return null
-    return { id: DEFAULT_VIEW_ID, kind: 'list' }
+    return this.bound.view
   }
 
   /** 写配置时的拥有者（绑定 ⇒ 目标块；不是这一次的宿主） */
@@ -778,13 +759,12 @@ export class ViewHost {
     }
     this.paintChrome(b, view)
     // 分组键变了不换 mode（同一张视图）：body 得重摆成新分组
-    const groupKey = view && (view.kind === 'list' || view.kind === 'table') ? (view.groupBy ?? '') : ''
+    const groupKey = view?.kind === 'table' ? (view.groupBy ?? '') : ''
     if (view && groupKey !== this.renderedGroupKey) {
       this.showBody(view)
       return
     }
     if (view?.kind === 'list-table') this.listTable?.render()
-    else if (view?.kind === 'list') (this.grouped ?? this.list)?.render()
     else if (view?.kind === 'cards') this.cards?.render()
     else if (view?.kind === 'calendar') this.calendar?.render()
     else if (view?.kind === 'mindmap') this.mindmap?.render()
@@ -974,10 +954,10 @@ export class ViewHost {
    */
   private paintGroup(view: ViewConfig | null): void {
     const kind = view?.kind
-    const record = kind === 'list' || kind === 'table' || kind === 'cards'
+    const record = kind === 'table' || kind === 'cards'
     this.els.group.hidden = !record || !view || Boolean(this.deps.derived)
     if (!record || !view || this.deps.derived) return
-    // 卡片的分组列**不支持多值属性**：拖卡写值没有唯一动作——多值去列表/表格分组
+    // 卡片的分组列**不支持多值属性**：拖卡写值没有唯一动作——多值去表格分组
     const cards = kind === 'cards'
     const choices = groupChoicesOf(this.records(), {
       fields: this.deps.fields(),
@@ -1362,7 +1342,7 @@ export class ViewHost {
    * 为什么不是「每种 kind 一个按钮」：一个拥有者可以有**多个**同 kind 的视图（各自列/序不同），
    * 按 kind 放按钮就表达不了「第 2 张表」。
    * 为什么不是「每个视图一颗按钮」：视图一多，抬头就变成一排等宽的 tab，抢走条数与刷新
-   * 的位置；而切换看法是低频动作，收进下拉更合适（菜单里同时给出「新建表格／列表…」）。
+   * 的位置；而切换看法是低频动作，收进下拉更合适（菜单里同时给出「新建表格／卡片…」）。
    */
   private paintViews(b: Block, view: ViewConfig | null): void {
     const box = this.els.views
@@ -1481,33 +1461,26 @@ export class ViewHost {
     this.syncFoldAll()
     this.els.editor.replaceChildren()
     /**
-     * **分组对记录视图全量生效**：列表与表格带 `groupBy` 时整批交给分组包装——
+     * **分组对记录视图全量生效**：表格带 `groupBy` 时整批交给分组包装——
      * 「一个值一段」，段头是组名、段身还是那一 kind 自己的渲染器（表格分组＝一个
      * 属性值一张表）。多值键 fan-out（一块进每个所属组）；「未设置」收没有值的。
      */
     const want = view.kind
-    const groupKey = want === 'list' || want === 'table' ? (view.groupBy ?? '') : ''
+    const groupKey = want === 'table' ? (view.groupBy ?? '') : ''
     this.renderedGroupKey = groupKey
     if (groupKey !== '') {
       if (want !== 'table') {
         this.table?.dispose()
         this.table = null
       }
-      if (want !== 'list') {
-        this.list?.dispose()
-        this.list = null
-      }
-      if (!this.grouped || this.groupedKind !== want) {
-        this.grouped?.dispose()
+      if (!this.grouped) {
         this.grouped = new ViewGrouped({
           view: () => this.view ?? view,
           records: () => this.records(),
           choices: (id) => (id === '_tags' ? this.tagChoices() : this.deps.choices?.(id) ?? []),
           cardinalityOf: (id) => this.cardinalityOf(id),
-          makeBody: (records) =>
-            want === 'list' ? this.buildList(records, view) : this.buildTable(records, view),
+          makeBody: (records) => this.buildTable(records, view),
         })
-        this.groupedKind = want === 'table' ? 'table' : 'list'
         this.els.table.replaceChildren(this.grouped.root)
       }
       this.grouped.render()
@@ -1516,11 +1489,10 @@ export class ViewHost {
     if (this.grouped) {
       this.grouped.dispose()
       this.grouped = null
-      this.groupedKind = null
     }
     /**
      * 三条渲染器：表格（行＝记录、列＝属性）、结构映射表（表头＝直接子块、一列＝它的孩子）、
-     * 记录列表（M3）。它们**不共用**布局：平表有固定行高与窗口化，结构映射表按内容排。
+     * 它们**不共用**布局：平表有固定行高与窗口化，结构映射表按内容排。
      * 所以按 kind 各建各的实例，切走就 dispose（不藏一台还在订阅的）。
      */
     /**
@@ -1534,10 +1506,6 @@ export class ViewHost {
     if (want !== 'list-table') {
       this.listTable?.dispose()
       this.listTable = null
-    }
-    if (want !== 'list') {
-      this.list?.dispose()
-      this.list = null
     }
     if (want !== 'cards') {
       this.cards?.dispose()
@@ -1563,6 +1531,11 @@ export class ViewHost {
           clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
           projectTitle: (r, into) => this.deps.project(r.block, into),
           openBlock: (id, place) => this.deps.openBlock(id, place),
+          editor: this.inline,
+          refClick: (hit, el, mods) => this.deps.refClick(hit, el, mods),
+          ...(this.deps.onAtomClick
+            ? { onAtomClick: (atom, el, mods) => this.deps.onAtomClick!(atom, el, mods) }
+            : {}),
         })
         this.els.table.replaceChildren(this.cards.root)
       }
@@ -1601,14 +1574,6 @@ export class ViewHost {
       this.mindmap.render()
       return
     }
-    if (want === 'list') {
-      if (!this.list) {
-        this.list = this.buildList(() => this.records(), view)
-        this.els.table.replaceChildren(this.list.root)
-      }
-      this.list.render()
-      return
-    }
     if (want === 'list-table') {
       if (!this.listTable) {
         this.listTable = new ViewListTable({
@@ -1632,33 +1597,6 @@ export class ViewHost {
       this.els.table.replaceChildren(this.table.root)
     }
     this.table.render()
-  }
-
-  /** 记录列表的装配（分组包装的段身也用这一份：只有 records 换成「那一组」） */
-  private buildList(records: () => ViewRecord[], view: ViewConfig): ViewList {
-    return new ViewList({
-      store: this.deps.store,
-      records,
-      view: () => this.view ?? view,
-      fieldLabel: (id) => {
-        const reserved = RESERVED_FIELD_LABEL[id]
-        if (reserved) return t(reserved)
-        return this.deps.fields().find((f) => f.id === id)?.label ?? id.slice(-6)
-      },
-      projectTitle: (r, into) => this.deps.project(r.block, into),
-      project: (r, key, into) => {
-        // 提及栏的命中列画「片段 ＋ 转换按钮」；其余列仍是纯文本
-        const m = key === MATCHED_COLUMN ? mentionDerivedOf(r) : null
-        if (m) {
-          renderMentionField(into, m, (spot) => this.convertMention(r.block.id, spot))
-          return
-        }
-        into.textContent = fieldTextOf(r, key, (v) =>
-          typeof v === 'string' && this.deps.refLabel ? this.deps.refLabel(v) : null,
-        )
-      },
-      openBlock: (id, place) => this.deps.openBlock(id, place),
-    })
   }
 
   /** 表格的装配（同上：records 可换成某一组的；其余依赖与直连完全一致） */
@@ -1697,7 +1635,7 @@ export class ViewHost {
     })
   }
 
-  /** 类型与数据形状先就位，渲染器随后（列表/卡片/日历/导图）；这里给一句实话而不是空屏 */
+  /** 类型与数据形状先就位，渲染器随后（卡片/日历/导图）；这里给一句实话而不是空屏 */
   private paintBodyFallback(): void {
     this.els.table.replaceChildren()
     const p = document.createElement('p')
@@ -1707,7 +1645,7 @@ export class ViewHost {
   }
 
   /** 行（派生）：query＝命中（不折叠祖先）；children＝直接子块；items＝`_items` 解析到的活块 */
-  /** 字段基数（多值键的唯一口径：看板排除、列表/表格 fan-out） */
+  /** 字段基数（多值键的唯一口径：卡片列排除、表格 fan-out） */
   private cardinalityOf(propId: string): 'one' | 'many' {
     return this.deps.fields().find((f) => f.id === propId)?.cardinality ?? 'one'
   }
@@ -1720,7 +1658,7 @@ export class ViewHost {
   }
 
   /**
-   * 提及栏片段行的「转成引用」（列表/表格的命中列共用）。
+   * 提及栏片段行的「转成引用」（表格的命中列）。
    *
    * 只在派生模式下有意义：派生栏的 host 就是提及的目标。走命令面——
    * 一条内容写、一次撤销；区间复核与「没转成」的实话都在命令那一步。

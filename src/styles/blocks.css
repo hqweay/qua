@@ -966,18 +966,19 @@
   overflow: hidden;
 }
 /*
- * **名字那一格里那台编辑器：只留正文那一格**。
+ * **一格里的那台单块编辑器：只留正文那一格**。
  *
- * 两处落点都读这一条（整屏查询的抬头 `.queryview-title`、投影行的名字行
- * `.embed-title-row`）：这一格里**已经有一颗块标**（行自己的那颗），里层编辑器
- * 再画一颗就得到两颗点、外加一个 gutter 的缩进 —— 名字会从块标右边很远的地方
- * 才开始，读起来不是「这一块」。
+ * 三处落点都读这一条：整屏查询的抬头 `.queryview-title`、投影行的名字行
+ * `.embed-title-row`、卡片标题 `.vcard-title`。这一格里**已经有一颗块标**
+ * （行自己的那颗）或压根不该有块标，里层编辑器再画一颗就得到两颗点、外加一个
+ * gutter 的缩进 —— 名字会从块标右边很远的地方才开始，读起来不是「这一块」。
  *
- * ⚠️ 用两处共用的类名 `.title-editor` 选择，**不要**分别按两个容器各写一条：
- *    那样只要有一处改了 DOM（比如名字从抬头挪到块标那一行），另一处就静默失效
- *    （实测：挪完多出一颗块标 ＋ 12px 缩进，而类型检查与单测都拦不住）。
+ * ⚠️ 用共用的类名选择（`.title-editor`／`.inline-editor`），**不要**分别按容器
+ *    各写一条：那样只要有一处改了 DOM，另一处就静默失效（实测：挪完多出一颗块标
+ *    ＋ 12px 缩进，而类型检查与单测都拦不住）。
  */
-.title-editor .blk {
+.title-editor .blk,
+.inline-editor .blk {
   padding-left: 0;
   min-height: 0;
   font-size: inherit;
@@ -985,7 +986,8 @@
   font-weight: inherit;
   color: inherit;
 }
-.title-editor .blk > .left {
+.title-editor .blk > .left,
+.inline-editor .blk > .left {
   display: none;
 }
 /* 名字为空时的占位就是「未命名查询」：占位只在没有字时出现，所以它同时是

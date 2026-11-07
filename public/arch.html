@@ -547,16 +547,16 @@
 
     <div class="card pad">
       <div class="subh">视图 <span>kind 是封闭表，兼容性只有一张表</span></div>
-      <div class="struct" style="line-height:1.8"><span class="type">ViewKind</span> <span class="pipe">=</span> outline | list | table | list-table
+      <div class="struct" style="line-height:1.8"><span class="type">ViewKind</span> <span class="pipe">=</span> outline | table | list-table
            | cards | calendar | mindmap
-<span class="cmt">outline 不落盘：没有激活视图 ＝ 大纲（query/children）</span>
+<span class="cmt">outline 不落盘：没有激活视图 ＝ 大纲（query/children）；它是可编辑的那一种，没有第二个只读「列表」</span>
 <span class="cmt">cards 的两副面孔由 groupBy 派生：不分组＝网格（画廊），有键＝列（看板）</span></div>
       <table class="tbl" style="margin-top:10px">
         <thead><tr><th>源</th><th>能落盘的 kind</th><th>默认</th></tr></thead>
         <tbody>
-          <tr><td>query</td><td class="m">list · table · cards · calendar</td><td>大纲</td></tr>
+          <tr><td>query</td><td class="m">table · cards · calendar</td><td>大纲</td></tr>
           <tr><td>children</td><td class="m">↑ ＋ list-table · mindmap</td><td>大纲</td></tr>
-          <tr><td>items</td><td class="m">list · table · cards · calendar</td><td>列表</td></tr>
+          <tr><td>items</td><td class="m">table · cards · calendar</td><td>表格</td></tr>
         </tbody>
       </table>
       <div class="note" style="margin-top:9px">

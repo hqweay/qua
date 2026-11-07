@@ -72,22 +72,22 @@ test('device: 从没存过 ⇒ 默认偏好与空折叠表（调用方不必再�
   assert.deepEqual(loaded.folded, {}, '没有折叠记录 ＝ 全展开')
 })
 
-test('device: 派生栏的看法是设备状态：坏键/坏值丢掉，允许的三种留下', () => {
+test('device: 派生栏的看法是设备状态：坏键/坏值丢掉，允许的两档留下', () => {
   const p = normalizePrefs({
     mountViews: {
       'block:b1:refs': 'table',
-      'block:b1:mentions': 'list',
+      'block:b1:mentions': 'table',
       'block:b1:same': 'outline',
       'journal:refs': 'table',
       // 坏值/坏键：丢掉（不是回退成某个值 —— 「没选过」是另一件事）
-      'block:b2:refs': 'board',
+      'block:b2:refs': 'list',
       'block:b3:refs': 42,
       '': 'table',
     } as unknown as Prefs['mountViews'],
   })
   assert.deepEqual(p.mountViews, {
     'block:b1:refs': 'table',
-    'block:b1:mentions': 'list',
+    'block:b1:mentions': 'table',
     'block:b1:same': 'outline',
     'journal:refs': 'table',
   })

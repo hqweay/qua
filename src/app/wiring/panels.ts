@@ -16,7 +16,6 @@ import {
   declaredFieldIds,
   applyQuickFilter,
   derivedColumns,
-  derivedListFields,
   derivedRecordsOf,
   derivedTemplateOf,
   displayNameOf,
@@ -913,7 +912,6 @@ export function setupPanels(deps: PanelsDeps) {
                   : 'ui.mount.why.mentions'
           return asBody(
             createView({ kind: 'block', blockId: mountHostBlock.id }, mountHostBlock, undefined, {
-              kind,
               /**
                * 列表/表格与大纲读**同一份 chips**（挂在挂载区实例上）：两处各算各的
                * 就会出现两批行。⚠️ 经**注册表**晚读、不引上面那个 `area`：
@@ -926,7 +924,6 @@ export function setupPanels(deps: PanelsDeps) {
                   mountInstances.get(hostId)?.area.filterOf(entry.source) ?? EMPTY_QUICK_FILTER,
                 ),
               columns: derivedColumns(entry.source),
-              listFields: derivedListFields(entry.source),
               // 分组键与看法同层（设备状态）；下拉由挂载区抬头画，这里只带渲染用的键
               groupBy: deps.prefs().mountGroups[mountViewKey(mountHost, entry.source)] ?? '',
               setKind: (k) => setDerivedKind(mountHostBlock, entry.source, k),

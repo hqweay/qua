@@ -1,5 +1,5 @@
 /**
- * **分组包装**：列表／表格按某一列分成「一组一段」时的宿主。
+ * **分组包装**：表格按某一列分成「一组一段」时的宿主。
  *
  * 段头（组名 ＋ 条数）归这里，段身归各 kind 自己的渲染器——`makeBody` 由宿主
  * （ViewHost）给：它知道一台 ViewList／ViewTable 要接哪些依赖，这里不重复那份
@@ -7,7 +7,7 @@
  * （闭包槽位），不整段重建——整表重建是「滚动一下全屏闪」的来源。
  *
  * 多值键（`isMultiValueKey`）的口径与看板一致：一块**出现在每个所属组**
- * （fan-out）；一个值都没有 ⇒ 只进「未设置」。这里不禁多值——列表/表格没有
+ * （fan-out）；一个值都没有 ⇒ 只进「未设置」。这里不禁多值——表格没有
  * 「拖去某组写值」的动作，fan-out 展示没有歧义（看板禁多值是拖卡语义逼的）。
  */
 import { type ViewConfig, type ViewRecord } from '../../core/index.ts'
@@ -19,7 +19,7 @@ export interface ViewGroupedDeps {
   choices: (propId: string) => readonly { id: string; label: string }[]
   /** 字段基数解析：多值字段 fan-out（一块进每个所属组） */
   cardinalityOf?: (propId: string) => 'one' | 'many'
-  /** 造一个装某组记录的段身（列表或表格由宿主决定） */
+  /** 造一个装某组记录的段身（宿主决定用哪台渲染器） */
   makeBody: (records: () => ViewRecord[]) => { root: HTMLElement; render(): void; dispose(): void }
 }
 

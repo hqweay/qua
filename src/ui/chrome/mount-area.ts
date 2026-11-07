@@ -1231,7 +1231,6 @@ export class MountArea {
     seg.className = 'mount-derived-views'
     const labels: Record<DerivedViewKind, MsgId> = {
       outline: 'ui.view.outline',
-      list: 'ui.view.kind.list',
       table: 'ui.view.kind.table',
     }
     const btn = document.createElement('button')
@@ -1260,7 +1259,7 @@ export class MountArea {
      * **分组下拉**（列表／表格才有）：与看法切换同排、与查询视图同一个候选源
      * （core `groupChoicesOf`）。分组键住设备状态（`Prefs.mountGroups`，与看法同层）。
      */
-    if (kind === 'list' || kind === 'table') {
+    if (kind === 'table') {
       const fields = propDisplayLabels(this.deps.kb.roots())
       const group = document.createElement('select')
       group.className = 'queryview-group mount-derived-group'

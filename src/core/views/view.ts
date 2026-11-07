@@ -13,7 +13,7 @@
  *
  * ⚠️ 本文件**零 DOM、零写库**：读只吃块与读门面，写由命令层在事务里做。
  * ⚠️ 行／记录层与「怎么画」分开：这里只回答「有哪些记录、按什么序」，
- *    `ui/view-*.ts` 才决定画成表还是列表。
+ *    `ui/view-*.ts` 才决定画成表还是卡片。
  */
 import { ACTIVE_VIEW_PROP, VIEWS_PROP, isDeleted, isQueryBlock, liveChildren, type Block, type BlockProps } from '../model/model.ts'
 import { displayNameOf } from '../identity/alias.ts'
@@ -31,11 +31,12 @@ import { canonicalNode, isQueryNode, type QueryNode, type QuerySpec, type SortKe
  * 视图种类。
  *
  * `outline` **不落盘**——它等价于「没有激活视图」（children/query 源的默认）。
- * `list` 是**记录列表**（标题 ＋ 可选字段），不是大纲树：没有缩进、没有折叠三角。
+ * 它是**可编辑**的那种看法：一块一行，缩进/折叠/面包屑/块下属性行都在。
+ * 没有单独的「列表」看法：同源同记录、只差只读紧凑行，那是同一个东西的第二种答案。
  * `list-table` 是**结构映射表**（表头＝直接子块、一列＝它的孩子），只接 children。
  * `cards` 是**卡片**：同一批记录、同一张卡，容器由**分组键**决定（见 `cardLayoutOf`）。
  */
-export type ViewKind = 'outline' | 'list' | 'table' | 'list-table' | 'cards' | 'calendar' | 'mindmap'
+export type ViewKind = 'outline' | 'table' | 'list-table' | 'cards' | 'calendar' | 'mindmap'
 
 /**
  * 卡片的两副面孔。**不是两个 kind**：卡片本体（标题 ＋ 字段 ＋ 可选封面）只有一份，
@@ -68,15 +69,16 @@ export type StoredViewKind = Exclude<ViewKind, 'outline'>
  * **派生栏**（引用／同类／提及）能选的看法。
  *
  * 派生栏没有拥有者：它不拥有条件、也不拥有视图配置，所以这份选择是**设备状态**
- * （存 `Prefs`），不是 `_views`。本轮只开三种 —— 大纲／列表／表格；
- * 看板要分组列、日历要日期列，而派生栏的那两列没有可配置的落点。
+ * （存 `Prefs`），不是 `_views`。只开两档 —— 大纲／表格：
+ * 派生栏是只读关系视图，大纲是可编辑的行列、表格是带派生列的密集读法；
+ * 「列表」那一档已随存储层的 `list` 一起退场（它的字段配置从未有写入点）。
  */
-export type DerivedViewKind = 'outline' | Extract<StoredViewKind, 'list' | 'table'>
+export type DerivedViewKind = 'outline' | Extract<StoredViewKind, 'table'>
 
 /** 派生栏允许的看法（**唯一一份**：prefs 归一与 UI 的切换器都读它） */
-export const DERIVED_VIEW_KINDS: readonly DerivedViewKind[] = ['outline', 'list', 'table']
+export const DERIVED_VIEW_KINDS: readonly DerivedViewKind[] = ['outline', 'table']
 
-const STORED_KINDS: readonly StoredViewKind[] = ['list', 'table', 'list-table', 'cards', 'calendar', 'mindmap']
+const STORED_KINDS: readonly StoredViewKind[] = ['table', 'list-table', 'cards', 'calendar', 'mindmap']
 
 /**
  * 可落盘的视图种类（**唯一一份**）：命令面与读路径都要判「这个 kind 认不认识」。
@@ -95,8 +97,8 @@ export const STORED_VIEW_KINDS: readonly StoredViewKind[] = STORED_KINDS
  * `canonicalViews` 与 UI 的「能切哪几种」都读这一张表。
  */
 export const STORED_KINDS_BY_SOURCE: Record<Source['kind'], readonly StoredViewKind[]> = {
-  query: ['list', 'table', 'cards', 'calendar'],
-  children: ['list', 'table', 'list-table', 'cards', 'calendar', 'mindmap'],
+  query: ['table', 'cards', 'calendar'],
+  children: ['table', 'list-table', 'cards', 'calendar', 'mindmap'],
 }
 
 /** 这一份源能落盘的视图种类 */
@@ -169,20 +171,13 @@ export interface ListSort {
   dir: 'asc' | 'desc'
 }
 
-/** 记录列表（`list`）：标题 ＋ 可选字段。不是大纲树，没有缩进与折叠 */
-export interface ListConfig {
-  /** 要显示的字段（属性定义 id 或保留键）；缺省只显示标题 */
-  fields?: string[]
-  rowHeight?: 'compact' | 'cozy'
-}
-
 /**
  * 一个命名视图（`_views[]` 里的一项）。
  *
  * 只保留**这个 kind 自己的**子配置：table 视图不带着 cards 配置走（两份配置迟早分叉）。
  *
- * ⚠️ `list` 是记录列表，`listTable` 是结构映射表 —— 名字必须分开，
- *    因为它们曾经共用一个 `list` 键（那时「列表视图」还不存在）。
+ * ⚠️ `listTable` 是结构映射表（表头＝直接子块），它与「列表」没有关系——
+ *    那个看法已经退场（同源同记录、只读，是大纲的劣化版）。
  */
 export interface ViewConfig {
   id: string
@@ -199,7 +194,7 @@ export interface ViewConfig {
    */
   filter?: QueryNode
   /**
-   * **分组键**（记录视图共用）：卡片＝列（看板），表格＝分节，列表＝分段——
+   * **分组键**（记录视图共用）：卡片＝列（看板），表格＝分节——
    * 一个组、多种呈现，键不随视图种类各存一份。键＝列键（属性定义块 id 或保留键；
    * `_tags` ＝ 按标签归属分堆）。分组按**当前值**实时导出，不是成员集合的第二份答案。
    *
@@ -209,8 +204,6 @@ export interface ViewConfig {
   /** 组的呈现顺序（存**原始值**：select 是选项块 id、`_tags` 是标签块 id）。缺省＝声明序 ＋ 第一次出现，「未设置」恒最后。 */
   groupOrder?: string[]
   table?: TableConfig
-  /** 记录列表（不是大纲树、不是结构映射表） */
-  list?: ListConfig
   /** 结构映射表：**只有排序**，没有列（列＝一个直接子块，不是配置） */
   listTable?: { sort?: ListSort }
   /** 卡片（看板／画廊是它的两副面孔，不是两个 kind） */
@@ -289,7 +282,6 @@ export function isSortableColumn(key: string): boolean {
 /* ------------------------------------------------------------ 读 */
 
 const ROW_HEIGHTS: readonly RowHeight[] = ['compact', 'cozy', 'comfortable']
-const LIST_ROW_HEIGHTS: readonly NonNullable<ListConfig['rowHeight']>[] = ['compact', 'cozy']
 
 function isStr(v: unknown): v is string {
   return typeof v === 'string' && v.trim() !== ''
@@ -337,19 +329,6 @@ function tableOf(raw: unknown): TableConfig | undefined {
   if (t.rowHeight && ROW_HEIGHTS.includes(t.rowHeight)) out.rowHeight = t.rowHeight
   const sort = Array.isArray(t.sort) ? t.sort.map(sortOf).filter((s): s is SortKey => s !== null) : []
   if (sort.length > 0) out.sort = sort
-  return out
-}
-
-/** 记录列表的配置：字段 ＋ 行高 */
-function listOf(raw: unknown): ListConfig | undefined {
-  if (!raw || typeof raw !== 'object') return undefined
-  const l = raw as Partial<ListConfig>
-  const out: ListConfig = {}
-  if (Array.isArray(l.fields)) {
-    const fields = l.fields.filter(isStr)
-    if (fields.length > 0) out.fields = fields
-  }
-  if (l.rowHeight && LIST_ROW_HEIGHTS.includes(l.rowHeight)) out.rowHeight = l.rowHeight
   return out
 }
 
@@ -421,9 +400,6 @@ export function canonicalViews(raw: unknown, source: Source): ViewConfig[] {
     if (kind === 'table') {
       const table = tableOf(v.table)
       if (table) view.table = table
-    } else if (kind === 'list') {
-      const list = listOf(v.list)
-      if (list) view.list = list
     } else if (kind === 'list-table') {
       const sort = listSortOf(v.listTable?.sort)
       if (sort) view.listTable = { sort }
@@ -595,7 +571,7 @@ export function sourceConflicts(b: Block): boolean {
 /* ------------------------------------------------------------ 记录层 */
 
 /**
- * 表格/列表/看板/画廊/日历共用的一条记录。
+ * 表格／卡片／日历共用的一条记录。
  *
  * ⚠️ 记录是**派生的**（每次装载按 id 现读），不缓存、不落盘：
  * 缓存一份就等于承认「表里的值」可以短暂地不是块上的值。
@@ -798,7 +774,7 @@ export function pathTextOf(r: ViewRecord): string {
 }
 
 /**
- * 一格的**纯文本**（列表／看板／画廊用；表格画的是 run，不走这里）。
+ * 一格的**纯文本**（卡片用；表格画的是 run，不走这里）。
  *
  * `resolve` 给「值是一个块 id」的列（`select` 的选项、`ref` 的目标）一次解析机会：
  * 那些值按 id 直接显示是一串 hex，用户看不懂。解析不到就原样显示 ——
@@ -934,11 +910,6 @@ function cloneView(v: ViewConfig): ViewConfig {
     const table: TableConfig = { ...v.table, columns: v.table.columns.map((c) => ({ ...c })) }
     if (v.table.sort) table.sort = v.table.sort.map((s) => ({ ...s }))
     out.table = table
-  }
-  if (v.list) {
-    const list: ListConfig = { ...v.list }
-    if (v.list.fields) list.fields = [...v.list.fields]
-    out.list = list
   }
   if (v.listTable) out.listTable = v.listTable.sort ? { sort: { ...v.listTable.sort } } : {}
   if (v.cards) {
@@ -1112,16 +1083,6 @@ export function withColumns(view: ViewConfig, columns: readonly ViewColumn[]): V
   const next = cloneView(view)
   if (!next.table) next.table = { columns: [] }
   next.table.columns = columns.map((c) => ({ ...c }))
-  return next
-}
-
-/** 写记录列表的字段（空 ⇒ 只显示标题） */
-export function withListFields(view: ViewConfig, fields: readonly string[] | undefined): ViewConfig {
-  const next = cloneView(view)
-  const list: ListConfig = { ...(next.list ?? {}) }
-  if (!fields || fields.length === 0) delete list.fields
-  else list.fields = [...fields]
-  next.list = list
   return next
 }
 

@@ -1,7 +1,7 @@
 /**
  * **记录视图的分组分桶**：把一批记录按某一列摆进「一个值一组」的桶里。
  *
- * 从看板的分桶逻辑抽出，列表／表格的分组与它共用同一份次序与多值口径——
+ * 从卡片列的分桶逻辑抽出，表格的分组与它共用同一份次序与多值口径——
  * 两个渲染器各写一遍，就会在「未设置」「声明序」「多值 fan-out」这些分支上各漂各的。
  *
  * 次序约定（与看板一致）：
@@ -89,7 +89,7 @@ export function bucketize(
   return { multi, buckets: [...buckets.values()], order }
 }
 
-/** 按完整次序摆桶（看板用：空列也在次序里；列表/表格只摆非空桶） */
+/** 按完整次序摆桶（列布局用：空列也在次序里；分组表格只摆非空桶） */
 export function orderBuckets(buckets: readonly GroupBucket[], order: readonly string[]): GroupBucket[] {
   const byId = new Map(buckets.map((b) => [b.id, b]))
   const out: GroupBucket[] = []

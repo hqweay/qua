@@ -14,6 +14,7 @@
  */
 import {
   cardLayoutOf,
+  clickModsOf,
   fieldTextOf,
   openActionOf,
   sortRecords,
@@ -22,12 +23,18 @@ import {
   type ViewConfig,
   type ViewRecord,
 } from '../../core/index.ts'
+import type { InlineBlockEditor } from '../block-ui/inline-block-editor.ts'
 import { t } from '../../core/infra/msg.ts'
 import { assetViewOf } from '../../view/asset-views.ts'
 import { bucketize, bucketLabel, orderBuckets, recordsForGrouping, GROUP_UNSET, type GroupBucket } from './grouping.ts'
 import { viewNote } from './view-note.ts'
 
 export interface ViewCardsDeps {
+  /**
+   * **一台按需的就地编辑器**：点卡片上的文字才建，装进**这一张卡里**（不是浮层），
+   * 失焦/Enter 提交、Esc 回滚。一次只发生一张卡的编辑，所以是一台而不是每卡一台。
+   */
+  editor: InlineBlockEditor
   records: () => ViewRecord[]
   view: () => ViewConfig | null
   /** 这一列可选的值（`select` 的选项块 id → 名字；没有选项的属性给空表＝按现出现的值分组） */
@@ -39,12 +46,15 @@ export interface ViewCardsDeps {
   clearValue: (blockId: string, propId: string) => void
   projectTitle: (record: ViewRecord, into: HTMLElement) => void
   openBlock: (blockId: string, place?: OpenAction) => void
+  /** 点标题里的引用/原子（与正文同一条口径） */
+  refClick?: (hit: { to: string; runId?: string }, el: HTMLElement, mods: ReturnType<typeof clickModsOf>) => void
+  onAtomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: ReturnType<typeof clickModsOf>) => void
 }
 
 /** 一张卡最多显示几个字段（再多就不是「看一眼」而是表格了） */
 const MAX_FIELDS = 3
 
-/** 「未设置」这一列的内部键与分桶口径都住在 `grouping.ts`（列表／表格的分组共用） */
+/** 「未设置」这一列的内部键与分桶口径都住在 `grouping.ts`（表格的分组共用） */
 const UNSET = GROUP_UNSET
 
 export class ViewCards {
@@ -63,12 +73,71 @@ export class ViewCards {
   dispose(): void {}
 
   render(): void {
+    // 整片重画会把正在编辑的那张卡的 DOM 换掉：先把这次编辑收尾
+    this.deps.editor.commit()
     const view = this.deps.view()
     const layout = cardLayoutOf(view)
     this.root.dataset.layout = layout
     this.root.replaceChildren()
     if (layout === 'columns') this.renderColumns(view)
     else this.renderGrid(view)
+  }
+
+  /**
+   * **局部修补**（外部改了某几块）：只重画受影响的那几张卡。
+   *
+   * 整片重画会摘掉正在编辑那张卡的锚点（那台浮层是贴在一格上的），
+   * 也会把滚动位置与 hover 一起丢掉 —— 与表格的 `patchRow` 同一条口径。
+   * 记录掉出结果集时退回整片重画：分桶计数与列成员都得重算。
+   */
+  sync(ids: readonly string[]): void {
+    if (ids.length === 0) return
+    const view = this.deps.view()
+    if (cardLayoutOf(view) !== this.root.dataset.layout) {
+      this.render()
+      return
+    }
+    const wanted = new Set(ids)
+    const byId = new Map(this.deps.records().map((r) => [r.block.id, r]))
+    let lost = false
+    for (const el of [...this.root.querySelectorAll<HTMLElement>('.vcard[data-block-id]')]) {
+      const id = el.dataset.blockId ?? ''
+      if (!wanted.has(id)) continue
+      // 正在打字的那张不动：它的值就是用户刚打进去的，重建会把焦点与 IME 串一起丢
+      if (this.deps.editor.editingId === id) continue
+      const r = byId.get(id)
+      if (!r) {
+        lost = true
+        break
+      }
+      el.replaceWith(this.card(r, this.cardOpts(view)))
+    }
+    if (lost) this.render()
+  }
+
+  /**
+   * 一次就地编辑结束：**只重画那一张**（整片重排会丢滚动与 hover，也会把刚提交的卡换掉）。
+   * 记录掉出结果集时退回整片重画（分桶与计数都得重算）。
+   */
+  afterEdit(blockId: string): void {
+    const view = this.deps.view()
+    const r = this.deps.records().find((x) => x.block.id === blockId)
+    const el = this.root.querySelector<HTMLElement>(`.vcard[data-block-id="${blockId}"]`)
+    if (!r || !el) {
+      this.render()
+      return
+    }
+    el.replaceWith(this.card(r, this.cardOpts(view)))
+  }
+
+  /** 这一屏卡片的样子（封面／字段／可拖）——两副面孔共用一份 */
+  private cardOpts(view: ViewConfig | null): { cover: boolean; fields: readonly string[]; draggable: boolean } {
+    return {
+      cover: view?.cards?.cover !== 'none',
+      fields: (view?.cards?.fields ?? []).filter((k) => k !== TITLE_COLUMN),
+      // 只有列布局能拖：拖进某列＝写那格的值，网格里没有落点
+      draggable: cardLayoutOf(view) === 'columns' && !this.multi,
+    }
   }
 
   /**
@@ -81,12 +150,11 @@ export class ViewCards {
     this.root.dataset.size = view?.cards?.size ?? 'm'
     const records = sortRecords(this.deps.records(), view?.table?.sort)
     if (records.length === 0) {
-      this.root.appendChild(viewNote(t('ui.list.empty')))
+      this.root.appendChild(viewNote(t('ui.cards.empty')))
       return
     }
-    const cover = view?.cards?.cover !== 'none'
-    const fields = (view?.cards?.fields ?? []).filter((k) => k !== TITLE_COLUMN)
-    for (const r of records) this.root.appendChild(this.card(r, { cover, fields, draggable: false }))
+    const o = this.cardOpts(view)
+    for (const r of records) this.root.appendChild(this.card(r, o))
   }
 
   /** 列（看板）：按分组键把记录摆进「一个值一列」 */
@@ -119,10 +187,8 @@ export class ViewCards {
       }
     }
 
-    const cover = view?.cards?.cover !== 'none'
-    const fields = (view?.cards?.fields ?? []).filter((k) => k !== TITLE_COLUMN)
     for (const b of orderBuckets(buckets, order)) {
-      this.root.appendChild(this.column(b, key, { cover, fields }))
+      this.root.appendChild(this.column(b, key, this.cardOpts(view)))
     }
   }
 
@@ -188,9 +254,38 @@ export class ViewCards {
 
     if (o.cover) card.appendChild(this.cover(r))
 
+    /**
+     * 标题就是这一块的正文：**点文字就地编辑**（编辑器装在**这一张卡里**，不是浮层）。
+     *
+     * 修饰键仍是「打开」（Shift＝右槽、⌘＝新页签）：那是块标/行首的同一套手势，
+     * 不能因为正文变得可编辑就把这两条路吞掉。点引用/原子先导航，也不进编辑。
+     */
     const title = document.createElement('div')
-    title.className = 'vcard-title ui-ellipsis'
-    this.deps.projectTitle(r, title)
+    title.className = 'vcard-title'
+    const inner = document.createElement('span')
+    inner.className = 'vcard-title-inner ui-ellipsis'
+    this.deps.projectTitle(r, inner)
+    title.appendChild(inner)
+    title.addEventListener('click', (e) => {
+      // 已经在编辑这一张：点击属于编辑器自己（选词、点引用由事件表处理）
+      if (this.deps.editor.editingId === r.block.id) return
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      const hit = routeCellClick(target)
+      if (hit.kind === 'ref' && hit.el && hit.to) {
+        e.stopPropagation()
+        this.deps.refClick?.({ to: hit.to, ...(hit.runId ? { runId: hit.runId } : {}) }, hit.el, clickModsOf(e))
+        return
+      }
+      if (hit.kind === 'atom' && hit.el && hit.atom) {
+        e.stopPropagation()
+        this.deps.onAtomClick?.(hit.atom, hit.el, clickModsOf(e))
+        return
+      }
+      if (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return
+      e.stopPropagation()
+      this.deps.editor.edit(r.block.id, title, { x: e.clientX, y: e.clientY })
+    })
     card.appendChild(title)
 
     for (const key of o.fields.slice(0, MAX_FIELDS)) {
@@ -247,4 +342,31 @@ export class ViewCards {
 function firstAssetOf(r: ViewRecord): string {
   for (const run of r.block.content) if (run.t === 'asset') return run.asset
   return ''
+}
+
+/**
+ * 一次点击落在谁身上：引用／原子／其余。
+ *
+ * 与表格标题格那份判据同形（`block-cell.ts` 的 `handleClick`）：两处各自内联，
+ * 是因为表格那台是浮层、这台在流里，生命周期不同；**判据必须一样**——
+ * 不一样的那一天，同一个引用在表格里是导航、在卡片里变成给引用改字，而且不报错。
+ */
+function routeCellClick(target: HTMLElement): { kind: 'ref' | 'atom' | 'none'; el?: HTMLElement; to?: string; runId?: string; atom?: { runId: string; kind: string; hash?: string } } {
+  const ref = target.closest<HTMLElement>('[data-ref-to]')
+  if (ref?.dataset.refTo) {
+    return { kind: 'ref', el: ref, to: ref.dataset.refTo, ...(ref.dataset.atomId ? { runId: ref.dataset.atomId } : {}) }
+  }
+  const atom = target.closest<HTMLElement>('.atom')
+  if (atom?.dataset.atomId) {
+    return {
+      kind: 'atom',
+      el: atom,
+      atom: {
+        runId: atom.dataset.atomId,
+        kind: atom.dataset.atomKind ?? '',
+        ...(atom.dataset.assetHash ? { hash: atom.dataset.assetHash } : {}),
+      },
+    }
+  }
+  return { kind: 'none' }
 }

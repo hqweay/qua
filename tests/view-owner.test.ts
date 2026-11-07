@@ -59,7 +59,7 @@ test('storedKindsFor：结构映射表与导图只接 children（命中集合没
   const src = { kind: 'query' as const, spec: QUERY }
   assert.ok(!storedKindsFor(src).includes('list-table'), 'query 不该有结构映射表')
   assert.ok(!storedKindsFor(src).includes('mindmap'), 'query 不该有导图')
-  assert.ok(storedKindsFor(src).includes('list'), 'query 有记录列表')
+  assert.ok(storedKindsFor(src).includes('cards'), 'query 有卡片（默认画廊，分组即看板）')
 })
 
 /* ------------------------------------------------------------ 读：拥有者 */

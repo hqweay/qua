@@ -560,16 +560,14 @@ export const MSG = {
   'ui.embed.tableNeedsTree': '查询结果没有可对齐的子块，不能映射成表',
   'ui.embed.emptySource': '源没有子块',
 
-  'ui.view.kind.list': '列表',
   'ui.view.col.path': '路径',
   'ui.view.col.refCount': '引用次数',
   'ui.view.col.relKinds': '类型',
   'ui.view.col.via': '经由',
   'ui.view.col.matched': '命中词',
   'ui.view.col.sharedTags': '共同标签',
-  /* 记录列表（`list`）：一行一条，没有缩进 —— 它的源里两种是平的一批 */
-  'ui.list.empty': '这一份源还没有记录',
-  'ui.list.open': '打开这一条',
+  /* 卡片：默认网格（画廊），选一个分组列就是列（看板） */
+  'ui.cards.empty': '这一份源还没有记录',
   /* 卡片（看板）：按某一列的单值分组；拖卡＝写属性（不是 re-parent） */
   'ui.board.unset': '未设置',
   'ui.board.noMultiGroup': '卡片的分组列不支持多值属性（多值请在列表或表格里分组）',

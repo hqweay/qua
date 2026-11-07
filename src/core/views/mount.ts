@@ -209,7 +209,7 @@ export function mountViewKey(host: MountHost, source: DerivedSource): string {
 /** 这一格选了什么（缺省大纲；未知值在 `normalizePrefs` 那一层已经丢掉了） */
 export function readMountView(views: MountViews | undefined, host: MountHost, source: DerivedSource): DerivedViewKind {
   const v = views?.[mountViewKey(host, source)]
-  return v === 'list' || v === 'table' ? v : 'outline'
+  return v === 'table' ? v : 'outline'
 }
 
 /**
@@ -465,23 +465,6 @@ export function derivedColumns(source: DerivedSource): ViewColumn[] {
     })),
     { key: MODIFIED_COLUMN, width: 150 },
   ]
-}
-
-/**
- * 派生栏切到列表时的字段（同样临时构造）。
- *
- * 列表只放两列：位置与「这一栏特有的那一列」—— 列表本来就是更瘦的一张表。
- */
-export function derivedListFields(source: DerivedSource): string[] {
-  const special =
-    source === 'refs'
-      ? REL_KINDS_COLUMN
-      : source === 'members'
-        ? VIA_COLUMN
-        : source === 'mentions'
-          ? MATCHED_COLUMN
-          : SHARED_TAGS_COLUMN
-  return [PATH_COLUMN, special]
 }
 
 /* ------------------------------------------------------------ 读 */
