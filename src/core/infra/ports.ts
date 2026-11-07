@@ -503,6 +503,8 @@ export interface App {
    * 分组是视图配置，不是查询的一部分：改它不重查、不改成员，只是这批记录换一种摆法。
    */
   viewSetGroup(owner: ViewOwnerRef, viewId: string, groupBy: string, groupOrder?: readonly string[]): boolean
+  /** 卡片的封面：`first-asset`（有图才显示）／`none`（纯文字卡） */
+  viewSetCover(owner: ViewOwnerRef, viewId: string, cover: 'first-asset' | 'none'): boolean
   /**
    * 写一张视图的**切片**：与源的基础条件 AND 叠加（不替换），`null` ＝ 清掉。
    *

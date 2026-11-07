@@ -29,6 +29,7 @@ import {
   upsertView,
   viewNameOf,
   withFilter,
+  withCover,
   withGroup,
   withListSort,
   withSort,
@@ -67,6 +68,7 @@ export function viewConfigCommands(
   | 'viewDeleteRow'
   | 'viewSetSort'
   | 'viewSetGroup'
+  | 'viewSetCover'
   | 'setViewFilter'
   | 'setQuerySpec'
   | 'createQuery'
@@ -273,6 +275,20 @@ export function viewConfigCommands(
       const sort = direction === '' ? [] : [{ by, dir: direction as 'asc' | 'desc' }]
       d.owners.write(owner, { views: upsertView(data.views, withSort(view, sort)) })
       after()
+      return true
+    },
+
+    /**
+     * 写**卡片封面**：`first-asset`（有图才显示）／`none`（纯文字卡）。
+     * 只认卡片视图：别的 kind 写进去会被 `canonicalViews` 丢掉（那就是「点了没生效」）。
+     */
+    viewSetCover: (owner, viewId, cover) => {
+      const data = d.owners.read(owner)
+      if (!data) return false
+      const view = resolveView(data, viewId)
+      if (!view || view.kind !== 'cards') return false
+      d.owners.write(owner, { views: upsertView(data.views, withCover(view, cover)) })
+      reveal(owner)
       return true
     },
 

@@ -18376,6 +18376,26 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
     gallery.cover === 0,
     `没有图的卡不该有封面位（不拿首字占位充数）：${JSON.stringify(gallery)}`,
   )
+  // 文字卡也要有「一张卡」的体积（不是塌成一条）
+  const cardBox = await page.locator('.vcard').first().boundingBox()
+  assert(cardBox && cardBox.height >= 70, `文本卡也要有卡片体积：${JSON.stringify(cardBox)}`)
+
+  // 封面是**配置**（两档），不是新视图
+  await page.locator('.queryview .qv-view-current').first().click()
+  await page.waitForTimeout(220)
+  const coverMenu = await layerRows(page)
+  assert(
+    coverMenu.some((r) => r.label === '封面：正文首图') && coverMenu.some((r) => r.label === '封面：无'),
+    `卡片视图菜单要有封面两档：${JSON.stringify(coverMenu.map((r) => r.label))}`,
+  )
+  const noneAt = coverMenu.findIndex((r) => r.label === '封面：无')
+  await page.locator(`.layer-item[data-index="${noneAt}"]`).click()
+  await page.waitForTimeout(350)
+  const coverCfg = await page.evaluate((id) => {
+    const b = window.__qua.__editor.store.find(id)
+    return (b?.props?._views ?? []).find((v) => v.kind === 'cards')?.cards?.cover ?? ''
+  }, qid)
+  assert(coverCfg === 'none', `菜单点「封面：无」要写进配置：${coverCfg}`)
 
   /**
    * **卡片的身体＝块的投影 ＋ 块下属性行**：有值的属性直接在卡里可读（点它开面板），

@@ -37,6 +37,15 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
     if (!owner || !by) return false
     return app.viewSetSort(owner, S(a.viewId), by, S(a.dir))
   },
+  /** 写卡片封面；只认卡片视图（别的 kind 会被 canonicalViews 丢掉） */
+  'core.view/set-cover': (a, app) => {
+    const owner = ownerOrCur(a, app)
+    const viewId = S(a.viewId)
+    const cover = S(a.cover)
+    if (!owner || !viewId) return false
+    if (cover !== 'first-asset' && cover !== 'none') return false
+    return app.viewSetCover(owner, viewId, cover)
+  },
   /** 写分组键；`groupBy:''` ＝ 清掉（与 set-sort 的空串清掉同一约定） */
   'core.view/set-group': (a, app) => {
     const owner = ownerOrCur(a, app)

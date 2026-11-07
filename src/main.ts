@@ -1693,6 +1693,26 @@ const app: App = {
      * 用户已经在「视图…」里看见了它，入口就该在同一处。
      */
     if (active) {
+      /**
+       * **卡片的封面**：两档——「有图才显示」与「无」。
+       *
+       * 不是新视图：画廊与块卡共用同一副身体，只差这一格配置。
+       */
+      if (active.kind === 'cards') {
+        const cover = active.cards?.cover === 'none' ? 'none' : 'first-asset'
+        for (const [value, label, icon] of [
+          ['first-asset', t('ui.view.cover.first'), 'lucide:image'],
+          ['none', t('ui.view.cover.none'), 'lucide:image-off'],
+        ] as const) {
+          rows.push({
+            id: `view/cover/${value}`,
+            label,
+            icon,
+            group: 'view/7-manage',
+            ...(cover === value ? { keyHint: t('ui.view.current') } : {}),
+          })
+        }
+      }
       rows.push({ id: 'view/rename', label: t('ui.view.rename'), icon: 'lucide:pencil', group: 'view/7-manage' })
       if (source.kind === 'query') {
         rows.push({
@@ -1779,6 +1799,12 @@ const app: App = {
           // 升 → 降 → 取消（与平表表头同一套三次点击）
           const next = dir === '' ? 'asc' : dir === 'asc' ? 'desc' : ''
           void registry.invoke('core.view/set-sort', { owner, viewId: active?.id ?? '', by: col, dir: next }, 'menu')
+        } else if (id.startsWith('view/cover/') && active) {
+          void registry.invoke(
+            'core.view/set-cover',
+            { owner, viewId: active.id, cover: id.slice('view/cover/'.length) },
+            'menu',
+          )
         } else if (id === 'view/rename' && active) {
           // 名字是这一张视图的配置：就在同一份菜单里改，走命令面落盘／可撤销
           layers.openPopover(

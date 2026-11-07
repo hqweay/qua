@@ -585,6 +585,8 @@ export const MSG = {
   'ui.view.kind.list-table': '大纲表格',
   /* 卡片：一种看法，两副面孔（不分组＝网格，分组＝列） */
   'ui.view.kind.cards': '卡片',
+  'ui.view.cover.first': '封面：正文首图',
+  'ui.view.cover.none': '封面：无',
   'ui.view.kind.calendar': '日历',
   'ui.view.kind.mindmap': '思维导图',
   'ui.view.outline': '大纲',
@@ -683,6 +685,7 @@ export const MSG = {
   'cmd.view.rename': '重命名视图',
   'cmd.view.set-sort': '按列排序',
   'cmd.view.set-group': '设置分组',
+  'cmd.view.set-cover': '设置封面',
   'cmd.view.set-filter': '设置视图切片',
   'cmd.view.new-row': '新建一行',
   'cmd.view.delete-row': '删除这一行',

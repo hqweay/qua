@@ -301,3 +301,46 @@ test('set-filter 缺 filter 参数 ⇒ 拒绝且不产生写（不会静默清�
   assert.deepEqual(calls.at(-1), [owner, 'v2', null])
   assert.equal(h({ owner, viewId: 'v2', filter: { tag: 'y' } }, gate), true)
 })
+
+test('viewSetCover：只写卡片视图的封面；别的 kind 拒绝（不写一个读回来会被丢掉的字节）', () => {
+  const root = mkBlock('')
+  root.id = 'root'
+  const { kb } = kbOf([root])
+  const writes: { owner: unknown; patch: Partial<ViewOwnerData> }[] = []
+  const held: ViewConfig[] = [
+    { id: 'c', kind: 'cards', cards: { cover: 'first-asset' } },
+    { id: 't', kind: 'table' },
+  ]
+  const owners: OwnerStore = {
+    read: () => ({ views: held }),
+    write: (_owner, patch) => {
+      if (patch.views) held.splice(0, held.length, ...patch.views)
+      writes.push({ owner: _owner, patch })
+    },
+    readBinding: () => null,
+    setBindingView: () => {},
+    entriesOf: () => [],
+    writeEntries: () => {},
+    entryOf: () => undefined,
+  }
+  const d: ViewConfigDeps = {
+    kb,
+    owners,
+    run: <R,>(fn: (tx: Tx) => R) => kb.tx(fn),
+    reloadPage: () => {},
+    rootIds: () => [],
+    viewShown: () => false,
+    activeId: () => 'root',
+    openBlock: () => {},
+    refreshList: () => {},
+    toast: () => {},
+  }
+  const app = viewConfigCommands(d)
+  const owner = { kind: 'block', blockId: 'root' } as const
+
+  assert.equal(app.viewSetCover(owner, 'c', 'none'), true)
+  assert.equal(held[0]!.cards?.cover, 'none', '卡片视图写下封面')
+  const before = writes.length
+  assert.equal(app.viewSetCover(owner, 't', 'none'), false, '表格不是卡片视图：拒绝')
+  assert.equal(writes.length, before, '拒绝时一个字节都不写')
+})

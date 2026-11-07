@@ -725,6 +725,8 @@ button.queryview-chip:hover {
   border-radius: var(--ui-radius-sm);
   cursor: pointer;
   min-width: 0;
+  /* 没有图/字很少时也要有「一张卡」的体积：内容少不等于格子塌成一条 */
+  min-height: 5.5rem;
 }
 .vcards[data-layout='columns'] .vcard {
   background: var(--ui-surface);

@@ -49,6 +49,7 @@ import {
   upsertView,
   viewNameOf,
   visibleRows,
+  withCover,
   withFilter,
   withGroup,
   withListSort,
@@ -622,4 +623,14 @@ test('卡片配置一份：cover／size／showEmpty 原样往返；布局是派�
   )
   assert.equal(bad!.cards?.size, undefined, '不在三档里的尺寸丢掉')
   assert.equal(bad!.cards?.size, undefined, '不在三档里的尺寸丢掉')
+})
+
+test('withCover：只动 cards.cover，其余配置原样（封面是配置，不是新视图）', () => {
+  const v: ViewConfig = { id: 'c', kind: 'cards', groupBy: 'p1', cards: { cover: 'first-asset', size: 'l' } }
+  const none = withCover(v, 'none')
+  assert.equal(none.cards?.cover, 'none')
+  assert.equal(none.cards?.size, 'l', '尺寸与其余配置不丢')
+  assert.equal(none.groupBy, 'p1', '布局键不动')
+  assert.equal(v.cards?.cover, 'first-asset', '不改原视图')
+  assert.equal(withCover(none, 'first-asset').cards?.cover, 'first-asset', '往返')
 })

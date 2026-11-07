@@ -945,6 +945,19 @@ export function withSort(view: ViewConfig, sort: readonly SortKey[] | undefined)
 }
 
 /**
+ * 写卡片封面：`first-asset`（有图才显示）／`none`（纯文字卡）。
+ *
+ * 只动 `cards.cover`，其余配置原样：封面是「这一张怎么看」，不是新的视图种类。
+ */
+export function withCover(view: ViewConfig, cover: 'first-asset' | 'none'): ViewConfig {
+  const next = cloneView(view)
+  const cards: CardsConfig = { ...(next.cards ?? {}) }
+  cards.cover = cover === 'none' ? 'none' : 'first-asset'
+  next.cards = cards
+  return next
+}
+
+/**
  * 写**分组键**（`''` ＝ 清掉，删键而不是留空串）。
  *
  * 分组是记录视图共用的配置位：换视图种类键跟着走（一个组、多种呈现）。
