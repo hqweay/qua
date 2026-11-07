@@ -74,12 +74,18 @@ export interface VisibleRow {
  *    让它们进正文大纲，就会多出一批「能折叠、能拖、回车能拆块」的普通块，
  *    而那些动作对「一个选项」没有意义。语义与视图宿主那条 `childless` 相同：
  *    子树由别处渲染。
+ *
+ * `opts.bodyHosts` 是调用方给的「这一屏真会画身体」的判据（容器型视图，如页签）：
+ *    命中的块只画根行，子块行让位给身体。调用方必须**真的**会画身体才给——
+ *    不画身体的编辑器（挂载区／镜像／查询结果自己）给了它，子块就哪儿都不画了。
  */
-export function visibleRows(doc: Doc): VisibleRow[] {
+export function visibleRows(doc: Doc, opts: { bodyHosts?: (b: Block) => boolean } = {}): VisibleRow[] {
   const out: VisibleRow[] = []
   const childless = new Set<string>()
   if (doc.viewRootId) childless.add(doc.viewRootId)
-  for (const b of flatten(doc)) if (isPropDefBlock(b)) childless.add(b.id)
+  for (const b of flatten(doc)) {
+    if (isPropDefBlock(b) || opts.bodyHosts?.(b)) childless.add(b.id)
+  }
   walkForest(
     doc.roots,
     (b, ctx) => {

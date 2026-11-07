@@ -524,7 +524,8 @@ export function isViewRoot(b: Block | undefined): boolean {
  * 这一块的身体是不是**它自己的结果视图**（贴在这一行下面，而不是等「打开」）。
  *
  * 判据只有一条：源是 query。查询的命中**不是 children**，所以就地画结果
- * 不会出现「同一批块画两遍」；children 源的视图仍走「打开才渲染」那条口径。
+ * 不会出现「同一批块画两遍」；children 源的视图里只有**容器型**（页签，
+ * `hasTabsBody`）也走这条「身体替换子块行」的形状——其余仍「打开才渲染」。
  *
  * ⚠️ 它只回答「有没有身体」。**位置**由渲染层决定（`view/block-dom.ts` 的
  *    `rowHasInlineViewBody`：有身体就画在自己行下，段根同此——聚焦后身体
@@ -533,6 +534,18 @@ export function isViewRoot(b: Block | undefined): boolean {
  */
 export function hasQueryBody(b: Block | undefined): boolean {
   return isQueryBlock(b)
+}
+
+/**
+ * 这一页的激活视图是不是**容器型**（页签）：正文里**身体替换子块行**。
+ *
+ * 「children 源打开才渲染」防的是同一批子块在正文和视图里各画一遍；页签的
+ * 页＝直接子块、身体＝那一页的子树——让子块行**让位**（只画根行＋身体），
+ * 两遍的问题就不存在。这与查询块是同一条形状（身体＝内容本身）。
+ * 记录型（表格／卡片…）仍「打开才渲染」：大纲里还要能直接看到与编辑子块结构。
+ */
+export function hasTabsBody(b: Block | undefined): boolean {
+  return activeView(b)?.kind === 'tabs'
 }
 
 /* ------------------------------------------------------------ 源 */

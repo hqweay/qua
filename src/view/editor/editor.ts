@@ -27,6 +27,7 @@ import {
   flatten,
   hasIdentity,
   hasQueryBody,
+  hasTabsBody,
   hasList,
   hasDescendant,
   isJournal,
@@ -1121,7 +1122,11 @@ export class BlockEditor {
 
   /** 可见行（**折叠的子树在这里被排除**） */
   rows(): VisibleRow[] {
-    return visibleRows(this.doc).filter((r) => !r.hidden)
+    return visibleRows(this.doc, {
+      // 只有这一屏真会画身体的编辑器才让子块行让位（没有 viewBody 回调的
+      // 里层编辑器——挂载区／镜像／查询结果——子块仍照常画）
+      ...(this.events.viewBody ? { bodyHosts: hasTabsBody } : {}),
+    }).filter((r) => !r.hidden)
   }
 
   /**
@@ -2797,7 +2802,7 @@ export class BlockEditor {
    */
   private bodyFoldable(b: Block): boolean {
     return (
-      (Boolean(this.events.viewBody) && hasQueryBody(b)) ||
+      (Boolean(this.events.viewBody) && (hasQueryBody(b) || hasTabsBody(b))) ||
       (Boolean(this.events.embedBody) && rowHasEmbedViewBody(b, (id) => this.store.find(id)))
     )
   }

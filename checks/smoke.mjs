@@ -18990,8 +18990,32 @@ await check('T268 页签视图：页签＝直接子块，身体是可编辑大�
     `页签方向落盘：${JSON.stringify(cardsProbe)}`,
   )
 
+  // 非聚焦也显示：子块上的页签视图在正文里就地画（身体替换子块行）
+  await page.evaluate((rid) => window.__qua.invoke('core.view/add', { blockId: rid, kind: 'tabs' }), fx.rows[2])
+  await page.waitForTimeout(450)
+  const inlineBody = await page.evaluate(
+    (id) => {
+      const row = document.querySelector(`.blk[data-block-id="${id}"]`)
+      const body = row?.querySelector(':scope > .blk-view-body')
+      return {
+        hasTabs: Boolean(body?.querySelector('.vtabs-view')),
+        tabs: body?.querySelectorAll('.vtab').length ?? 0,
+        firstTab: body?.querySelector('.vtab-name')?.textContent ?? '',
+        // 子块行让位：正文大纲里（身体之外）不再有它的孩子
+        outside: [...document.querySelectorAll('#editor .blk')]
+          .filter((el) => el.dataset.blockId === 'c31' && !el.closest('.blk-view-body') && !el.closest('.mount-editor'))
+          .length,
+      }
+    },
+    fx.rows[2],
+  )
+  assert(inlineBody.hasTabs, `子块的页签视图在正文就地画：${JSON.stringify(inlineBody)}`)
+  assert(inlineBody.tabs === 2, `页签＝那一块的直接子块：${inlineBody.tabs}`)
+  assert(inlineBody.firstTab === '12', `第一页名＝子块名：${inlineBody.firstTab}`)
+  assert(inlineBody.outside === 0, `子块行让位（正文大纲里没有重复的子块）：${inlineBody.outside}`)
+
   await ctx.close()
-  return `3 页＝直接子块 → 身体是子树大纲（非卡）→ 切页 → 页内 Enter 撤销 → 纵向`
+  return `3 页＝直接子块 → 身体是子树大纲（非卡）→ 切页 → 页内 Enter 撤销 → 纵向 → 子块页签正文就地画（子块行让位）`
 })
 
 await check('T197 全部收起／全部展开：一个按钮、文案随状态变；只作用于顶层行；非大纲视图下隐藏', async () => {
