@@ -1519,8 +1519,12 @@ export class ViewHost {
     if (want === 'cards') {
       if (!this.cards) {
         this.cards = new ViewCards({
+          store: this.deps.store,
           records: () => this.records(),
           view: () => this.view ?? view,
+          inspect: (blockId, propId) =>
+            this.deps.invoke('core.block/inspect', { blockId, ...(propId ? { propId } : {}) }),
+          ...(this.deps.refLabel ? { refLabel: (id: string) => this.deps.refLabel!(id) } : {}),
           choices: (id) => (id === '_tags' ? this.tagChoices() : this.deps.choices?.(id) ?? []),
           cardinalityOf: (id) => this.cardinalityOf(id),
           setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),

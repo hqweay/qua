@@ -715,8 +715,9 @@ button.queryview-chip:hover {
   flex-direction: column;
   gap: var(--ui-gap-2);
 }
-/* 卡：两副面孔共用同一份身体（标题 ＋ 字段 ＋ 可选封面） */
+/* 卡：两副面孔共用同一份身体（正文 ＋ 块下属性行 ＋ 可选封面） */
 .vcard {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--ui-gap-1);
@@ -751,12 +752,37 @@ button.queryview-chip:hover {
   height: 100%;
   object-fit: cover;
 }
-.vcard-title {
-  color: var(--ui-text);
+.vcard-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+  cursor: text;
 }
-.vcard-field {
+/* 属性行在卡里占满整宽：正文那一份的左边距是给块标留的，卡片里没有块标 */
+.vcard-props {
+  width: 100%;
+  margin-inline-start: 0;
+  overflow: hidden;
+}
+/* 拖卡的手柄：卡身是编辑器，拖它等于选字 ⇒ 拖拽只能从这里发起 */
+.vcard-grip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 0 var(--ui-gap-1);
   color: var(--ui-text-tertiary);
-  font-size: var(--ui-fs-xs);
+  font-size: var(--ui-fs-sm);
+  line-height: var(--ui-lh-tight);
+  cursor: grab;
+  opacity: 0.35;
+  user-select: none;
+}
+.vcard:hover .vcard-grip {
+  opacity: 1;
+}
+.vcard-grip:active {
+  cursor: grabbing;
 }
 
 /* ---------------------------------------------------------------- 日历 */

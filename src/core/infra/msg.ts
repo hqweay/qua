@@ -568,6 +568,7 @@ export const MSG = {
   'ui.view.col.sharedTags': '共同标签',
   /* 卡片：默认网格（画廊），选一个分组列就是列（看板） */
   'ui.cards.empty': '这一份源还没有记录',
+  'ui.cards.drag': '拖动这张卡',
   /* 卡片（看板）：按某一列的单值分组；拖卡＝写属性（不是 re-parent） */
   'ui.board.unset': '未设置',
   'ui.board.noMultiGroup': '卡片的分组列不支持多值属性（多值请在列表或表格里分组）',

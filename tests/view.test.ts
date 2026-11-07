@@ -598,14 +598,14 @@ test('分组键是记录视图共用的顶层位：canonical 往返、清掉删�
   assert.equal(isMultiValueKey('p1'), false)
 })
 
-test('卡片配置一份：cover／size／fields／showEmpty 原样往返；布局是派生的，切布局不搬配置', () => {
+test('卡片配置一份：cover／size／showEmpty 原样往返；布局是派生的，切布局不搬配置', () => {
   const [v] = canonicalViews(
-    [{ id: 'c', kind: 'cards', cards: { cover: 'none', size: 'l', fields: ['p1', 'title'], showEmpty: true } }],
+    [{ id: 'c', kind: 'cards', cards: { cover: 'none', size: 'l', showEmpty: true } }],
     { kind: 'children', blockId: 'x' },
   )
   assert.deepEqual(
     v!.cards,
-    { cover: 'none', size: 'l', fields: ['p1', 'title'], showEmpty: true },
+    { cover: 'none', size: 'l', showEmpty: true },
     '写进去的必须能原样读回来（否则就是「设了没生效」）',
   )
 
@@ -617,9 +617,9 @@ test('卡片配置一份：cover／size／fields／showEmpty 原样往返；布�
 
   // 坏档位／空字段：丢掉，不抛（一个错键不该让整个块打不开）
   const [bad] = canonicalViews(
-    [{ id: 'c', kind: 'cards', cards: { size: 'xl', fields: [] } }],
+    [{ id: 'c', kind: 'cards', cards: { size: 'xl' } }],
     { kind: 'children', blockId: 'x' },
   )
   assert.equal(bad!.cards?.size, undefined, '不在三档里的尺寸丢掉')
-  assert.equal(bad!.cards?.fields, undefined, '空字段＝没配（删键，不留空数组）')
+  assert.equal(bad!.cards?.size, undefined, '不在三档里的尺寸丢掉')
 })

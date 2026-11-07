@@ -47,7 +47,7 @@ export type ViewKind = 'outline' | 'table' | 'list-table' | 'cards' | 'calendar'
  */
 export type CardLayout = 'grid' | 'columns'
 
-/** 卡片视图的配置（**一份**，两副面孔共用：切布局不丢字段/封面/尺寸） */
+/** 卡片视图的配置（**一份**，两副面孔共用：切布局不丢封面/尺寸） */
 export interface CardsConfig {
   /**
    * 封面：取这张卡**正文里的第一张图**（派生的，不存「我选了哪张」）。
@@ -56,8 +56,6 @@ export interface CardsConfig {
   cover?: 'first-asset' | 'none'
   /** 网格布局的卡宽档位（列布局不看它：列宽由容器定） */
   size?: 's' | 'm' | 'l'
-  /** 卡上显示哪几个字段（属性定义 id 或保留键）；缺省只显示标题 */
-  fields?: string[]
   /** 列布局：把声明过、但这一批里没出现的值也画成空列（「把这个状态的东西挪走」要有落点） */
   showEmpty?: boolean
 }
@@ -352,10 +350,6 @@ function cardsOf(raw: unknown): CardsConfig | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const c = raw as Partial<CardsConfig>
   const out: CardsConfig = { cover: c.cover === 'none' ? 'none' : 'first-asset' }
-  if (Array.isArray(c.fields)) {
-    const fields = c.fields.filter(isStr)
-    if (fields.length > 0) out.fields = fields
-  }
   if (c.size === 's' || c.size === 'm' || c.size === 'l') out.size = c.size
   if (c.showEmpty === true) out.showEmpty = true
   return out
@@ -912,11 +906,7 @@ function cloneView(v: ViewConfig): ViewConfig {
     out.table = table
   }
   if (v.listTable) out.listTable = v.listTable.sort ? { sort: { ...v.listTable.sort } } : {}
-  if (v.cards) {
-    const cards: CardsConfig = { ...v.cards }
-    if (v.cards.fields) cards.fields = [...v.cards.fields]
-    out.cards = cards
-  }
+  if (v.cards) out.cards = { ...v.cards }
   return out
 }
 

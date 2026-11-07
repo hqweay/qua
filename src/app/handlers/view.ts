@@ -70,7 +70,9 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
   'core.block/inspect': (a, app) => {
     const id = typeof a.blockId === 'string' && a.blockId !== '' ? a.blockId : app.ed.caretBlock()
     if (!id) return false
-    app.openPropertiesDrawer(id)
+    // 块下属性行点的是**某一项**：带上 propId，抽屉直接聚焦那一栏
+    const propId = typeof a.propId === 'string' && a.propId !== '' ? a.propId : undefined
+    app.openPropertiesDrawer(id, propId)
     return true
   },
 

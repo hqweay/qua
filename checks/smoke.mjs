@@ -18377,12 +18377,43 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
   )
 
   /**
+   * **卡片的身体＝块的投影 ＋ 块下属性行**：有值的属性直接在卡里可读（点它开面板），
+   * 不再是「卡片专用字段列表」那第二份格式。
+   */
+  const firstCardId = await page.evaluate(
+    () => document.querySelector('.vcard[data-block-id]')?.dataset.blockId ?? '',
+  )
+  const probeProp = await page.evaluate((id) => {
+    window.__qua.invoke('core.props/create-def', {
+      blockId: id,
+      label: '卡片属性探针',
+      kind: 'text',
+      target: 'own',
+    })
+    return window.__qua.propDefs().find((d) => d.label === '卡片属性探针')?.id ?? ''
+  }, firstCardId)
+  assert(probeProp !== '', '前置：应能建一个非 gutter 属性')
+  await page.evaluate(
+    ({ id, pid }) => window.__qua.invoke('core.props/set-value', { blockId: id, propId: pid, value: '卡上可见' }),
+    { id: firstCardId, pid: probeProp },
+  )
+  await page.waitForTimeout(350)
+  const cardProps = await page.evaluate((id) => ({
+    row: Boolean(document.querySelector(`.vcard[data-block-id="${id}"] .vcard-props`)),
+    text: document.querySelector(`.vcard[data-block-id="${id}"] .vcard-props`)?.textContent ?? '',
+  }), firstCardId)
+  assert(
+    cardProps.row && cardProps.text.includes('卡上可见'),
+    `卡片要显示块下属性行：${JSON.stringify(cardProps)}`,
+  )
+
+  /**
    * 卡片正文**就地编辑**：点文字 ⇒ 编辑器装在**这一张卡里**（不是浮层），
    * caret 落在点到的位置，打字直接进模型；Enter 提交并还原成投影；Esc 回滚。
    */
   const editedId = await page.evaluate(() => document.querySelector('.vcard[data-block-id]')?.dataset.blockId ?? '')
   assert(editedId !== '', '前置：应有一张卡')
-  const titleBox = await page.locator(`.vcard[data-block-id="${editedId}"] .vcard-title`).first().boundingBox()
+  const titleBox = await page.locator(`.vcard[data-block-id="${editedId}"] .vcard-body`).first().boundingBox()
   assert(titleBox, '前置：卡片标题要有可点的盒子')
   await page.mouse.click(titleBox.x + 6, titleBox.y + titleBox.height / 2)
   await page.waitForTimeout(250)
@@ -18412,7 +18443,7 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
   assert(committed.editorGone, `Enter 提交后要还原成投影：${JSON.stringify(committed)}`)
 
   // Esc：把打开那一刻的内容写回去（编辑器是边打边写模型的）
-  const titleBox2 = await page.locator(`.vcard[data-block-id="${editedId}"] .vcard-title`).first().boundingBox()
+  const titleBox2 = await page.locator(`.vcard[data-block-id="${editedId}"] .vcard-body`).first().boundingBox()
   await page.mouse.click(titleBox2.x + 6, titleBox2.y + titleBox2.height / 2)
   await page.waitForTimeout(200)
   await page.keyboard.type('不该留下')
@@ -21212,8 +21243,12 @@ await check('T230 分组：入口按覆盖率给候选；卡片禁多值分组�
     entry.options.every((o) => !o.includes('多值')),
     `卡片视图不提供多值分组列（拖卡写值没有唯一动作）：${JSON.stringify(entry.options)}`,
   )
-  const cardDrag = await page.evaluate(() => document.querySelector('.vcard')?.getAttribute('draggable') ?? null)
-  assert(cardDrag === 'true', `单值分组的卡可拖：${cardDrag}`)
+  const dragFace = await page.evaluate(() => ({
+    grip: document.querySelector('.vcard-grip')?.getAttribute('draggable') ?? null,
+    card: document.querySelector('.vcard')?.getAttribute('draggable') ?? null,
+  }))
+  assert(dragFace.grip === 'true', `单值分组的卡有拖拽手柄：${JSON.stringify(dragFace)}`)
+  assert(dragFace.card !== 'true', `卡身不拖（它现在是编辑器，拖它会变选字）：${JSON.stringify(dragFace)}`)
 
   // 配置里存着多值键（从别处带过来）⇒ 卡片如实说明，不静默 fan-out
   await page.evaluate((pid) => {
