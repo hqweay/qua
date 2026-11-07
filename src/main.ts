@@ -2730,6 +2730,13 @@ function viewEvents(
             if (embed) openEmbedViewMenu(embed)
             return
           }
+          // **露面行上的「删除块」＝移除这一次露面**：这一行的光标块是源，
+          // 直接删会把源整棵删掉（真实踩过：镜像里的源行选「删除块」，源没了）。
+          // 露面行的删除语义只有一种——摘露面；删源请去源自己的位置。
+          if (row.command === 'core.editor/delete-block' && appearanceHost) {
+            void registry.invoke('core.embed/remove', { blockId: appearanceHost }, 'menu')
+            return
+          }
           if (row.command) registry.invoke(row.command, (row.args as Record<string, unknown>) ?? {}, 'menu')
         },
       })
