@@ -123,7 +123,7 @@ const stateMenuBtn = $('state-menu-btn')
  * **存储端口**：装配层是它的唯一持有者。
  * 换后端（内核 SQLite／主进程单写者）只换这一行，上层一行不改。
  *
- * 两个宿主两条路（115 D13）：
+ * 两个宿主两条路：
  *   · Electron：库在**主进程**（`node:sqlite`），字节经 IPC；一个窗口一个库。
  *   · web：单窗口单库，仍是 localStorage（浏览器没有用户可选目录的同等语义）。
  * 判据是 `window.qua` 在不在（preload 暴露的库面），**不是** `userAgent`——
