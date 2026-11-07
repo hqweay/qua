@@ -433,7 +433,7 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, car
       openPopover: (render, anchor) => layers.openPopover(render, anchor),
     }),
   /**
-   * 搜索卡（**工具面住进槽**）：与 ⌘P 浮层、中心 tab 是同一份 `SearchFace`。
+   * 搜索卡（**工具面住进槽**）：与 ⌘K 浮层、中心 tab 是同一份 `SearchFace`。
    * 依赖经 `searchFaceDeps()` 现取（引擎/打开/晋升/复制都在装配层）；卡壳状态与关闭
    * 归槽那套（与派生卡同型）。
    */
@@ -479,7 +479,7 @@ const axis = setupAxis({
 /**
  * 一个搜索面**自己那份**「活动编辑器」槽。
  *
- * `ed` 是装配层的单槽，而两面（tab 搜索面 / ⌘P 浮层）可以同屏：每面各持一份槽，
+ * `ed` 是装配层的单槽，而两面（tab 搜索面 / ⌘K 浮层）可以同屏：每面各持一份槽，
  * `onFocus` 才不会被对方顶掉；`onDispose` 只在「活动编辑器还是我这台」时回落，
  * 否则关浮层会把 tab 面正指着的那台抢回正文。
  * `fallback` 是这一面打开那一刻的活动编辑器——关面后回落到它原来所在的位置。
@@ -551,7 +551,7 @@ const searchFaceDeps = (): SearchFaceDeps => {
     },
     // 引擎现取：索引状态会变（ready 才信 FTS，否则扫描降级——面自己把降级说明白）
     query: (text, limit) => (search ?? { query: async () => ({ hits: [], mode: 'scan' as const }) }).query(text, limit),
-    // 行怎么说与 ⌘P 浮层同一份
+    // 行怎么说与 ⌘K 浮层同一份
     describe: (hit, term) => describeHit(kb, hit, term),
     openBlock: (id, place) => app.openBlock(id, place ?? 'center'),
     // 晋升：把词写进 {text} 条件建查询块（与手建同一份创建路径，落森林顶层，一笔回滚）
@@ -2115,7 +2115,7 @@ const app: App = {
 
   /* ---- 浮层与提示（装配层专有）---- */
   /**
-   * 全文检索（⌘P）：输入正文关键词，结果是**块**，右列是选中那块的真块预览。
+   * 全文检索（⌘K）：输入正文关键词，结果是**块**，右列是选中那块的真块预览。
    *
    * 宿主就是常驻搜索面本身（`compact` 形态）：同一份组件、同一台预览，不是第二套结果渲染。
    * 浮层只负责「快入口」的形状——可编辑但不常驻，要常驻就把词展开进 tab。
@@ -2126,7 +2126,7 @@ const app: App = {
    */
   openSearch: (place) => {
     if (!search) return
-    // 第一次打开搜索时把索引排上（启动期不抢 CPU；用户按下 ⌘P 是最可靠的「现在可以建」信号）
+    // 第一次打开搜索时把索引排上（启动期不抢 CPU；用户按下 ⌘K 是最可靠的「现在可以建」信号）
     search.start()
     if (place === 'dock') {
       addUtility('right', 'search')

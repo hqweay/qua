@@ -30,7 +30,7 @@ export interface SearchFaceChrome {
   /** 右列是不是只读。两种形态都可编辑；留着这个开关是给「只给看」的宿主用 */
   previewReadOnly: boolean
   /**
-   * 命中高亮的命名空间。两面可同屏（tab 搜索面 + ⌘P 浮层），共用一条 key 会让
+   * 命中高亮的命名空间。两面可同屏（tab 搜索面 + ⌘K 浮层），共用一条 key 会让
    * 任一面收起时把另一面的高亮一起删掉。
    * 这里给的是**基名**；真正落到 `CSS.highlights` 的那条 key 由
    * `./highlight-key.ts` 分配（同屏多个同类宿主也不重名）。

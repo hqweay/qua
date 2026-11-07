@@ -368,9 +368,9 @@ await check('E4 窗口尺寸/位置记忆：改了尺寸 → 关窗 → 重开�
   return `${bounds1.width}×${bounds1.height} @ (${bounds1.x},${bounds1.y}) 跨进程重启原样保持；落盘文件 ${join(dir, 'window-state.json')}`
 })
 
-/* ═══════════════════════════════════════════════════ E5 真按键：⌘A / ⌘P */
+/* ═══════════════════════════════════════════════════ E5 真按键：⌘A / ⌘P / ⌘K */
 
-await check('E5 ⌘A 与 ⌘P 的当前行为（①② 的 Electron 现状）', async () => {
+await check('E5 ⌘A 与 ⌘P／⌘K 的当前行为（①② 的 Electron 现状）', async () => {
   const { app, page } = await launch('hotkeys')
   await page.evaluate(() => window.__qua.quiet(true))
   const snapBefore = await page.evaluate(() => ({
@@ -379,17 +379,30 @@ await check('E5 ⌘A 与 ⌘P 的当前行为（①② 的 Electron 现状）', 
     log: window.__qua.commandLog().length,
   }))
 
-  // ⌘P
+  // ⌘P ＝ 命令面板
   await page.evaluate(() => window.__qua.focus())
   const logBeforeF = await page.evaluate(() => window.__qua.commandLog().length)
   await page.keyboard.press('Meta+p')
   await new Promise((r) => setTimeout(r, 250))
-  const afterF = await page.evaluate(() => ({
+  const afterP = await page.evaluate(() => ({
+    logDelta: window.__qua.commandLog().length,
+    paletteOpen: window.__qua.ctxKeys().paletteOpen,
+    lastCommand: window.__qua.snapshot().lastCommand?.name ?? '',
+    domSel: String(document.getSelection()?.toString() ?? ''),
+  }))
+  await page.keyboard.press('Escape')
+  await new Promise((r) => setTimeout(r, 120))
+
+  // ⌘K ＝ 全局搜索
+  await page.evaluate(() => window.__qua.focus())
+  const logBeforeK = await page.evaluate(() => window.__qua.commandLog().length)
+  await page.keyboard.press('Meta+k')
+  await new Promise((r) => setTimeout(r, 250))
+  const afterK = await page.evaluate(() => ({
     logDelta: window.__qua.commandLog().length,
     anyFindUI: Boolean(document.querySelector('input[type=search], .find-bar, [class*=find]')),
     searchOpen: Boolean(document.querySelector('.popover.search-overlay .search-face-input')),
     lastCommand: window.__qua.snapshot().lastCommand?.name ?? '',
-    domSel: String(document.getSelection()?.toString() ?? ''),
   }))
   await page.keyboard.press('Escape')
   await new Promise((r) => setTimeout(r, 120))
@@ -416,7 +429,8 @@ await check('E5 ⌘A 与 ⌘P 的当前行为（①② 的 Electron 现状）', 
     }
   })
 
-  log(`      ⌘P：命令日志增量=${afterF.logDelta}（1＝走 core.search/open）、搜索浮层=${afterF.searchOpen}、DOM 选区="${afterF.domSel}"`)
+  log(`      ⌘P：命令日志增量=${afterP.logDelta}（1＝走 core.command-palette/show）、面板=${afterP.paletteOpen}、DOM 选区="${afterP.domSel}"`)
+  log(`      ⌘K：命令日志增量=${afterK.logDelta}（1＝走 core.search/open）、搜索浮层=${afterK.searchOpen}`)
   log(`      ⌘A：DOM rangeCount=${afterA.rangeCount}、跨 ${afterA.domBlocksSpanned} 个 .blk、DOM 文本长 ${afterA.domTextLen}、锚点在 #editor 内=${afterA.anchorInEditor}`)
   log(`      ⌘A：模型选区=${JSON.stringify(afterA.modelSel)}（仍是单块=${afterA.modelStillOneBlock}）、命令日志增量=${afterA.logDelta}`)
   log(`      起始状态：块数=${snapBefore.blocks}、虚拟化=${snapBefore.virtualize}、已挂 DOM=${snapBefore.domNodes} 节点`)
@@ -457,10 +471,12 @@ await check('E5 ⌘A 与 ⌘P 的当前行为（①② 的 Electron 现状）', 
     `      ⇒ ${deleted.blocks === n1 && deleted.texts.filter((t) => t === '').length === 0 ? '**「全选删除」几乎没生效**：16 块的 DOM 删除被模型丢弃，只剩锚点块被同步' : `模型变成 ${deleted.blocks} 块`}`,
   )
 
-  assert(afterF.logDelta - logBeforeF === 1, '⌘P 应当走 core.search/open（恰好一条命令）')
-  assert(afterF.searchOpen, '⌘P 应当打开搜索浮层（原生菜单没有抢走）')
+  assert(afterP.logDelta - logBeforeF === 1, '⌘P 应当走 core.command-palette/show（恰好一条命令）')
+  assert(afterP.paletteOpen, '⌘P 应当打开命令面板（原生菜单没有抢走）')
+  assert(afterK.logDelta - logBeforeK === 1, '⌘K 应当走 core.search/open（恰好一条命令）')
+  assert(afterK.searchOpen, '⌘K 应当打开搜索浮层（原生菜单没有抢走）')
   assert(afterA.rangeCount >= 1 && afterA.domBlocksSpanned > 1, '⌘A 应当产生跨块的 DOM 选区')
-  return `⌘P＝core.search/open（搜索浮层打开、无系统查找 UI）；⌘A＝原生全选（DOM 跨 ${afterA.domBlocksSpanned} 块 / ${afterA.domTextLen} 字），模型选区不变（仍单块）；紧接打字${
+  return `⌘P＝命令面板；⌘K＝core.search/open（搜索浮层打开、无系统查找 UI）；⌘A＝原生全选（DOM 跨 ${afterA.domBlocksSpanned} 块 / ${afterA.domTextLen} 字），模型选区不变（仍单块）；紧接打字${
     wiped ? '**整篇被覆盖成 1 块**' : '只动被覆盖的那一块'
   }`
 })
@@ -1375,7 +1391,7 @@ await check('E14 每库状态：折叠/槽开关跟着库走；切库与重启�
 })
 
 
-await check('E15 全文检索：索引建好后 ⌘P 可搜、拼音可搜、编辑后增量进索引', async () => {
+await check('E15 全文检索：索引建好后 ⌘K 可搜、拼音可搜、编辑后增量进索引', async () => {
   const { app, page } = await launch('fts')
   /** 等索引**稳定** ready：启动期的 seed 落盘可能把刚建好的索引再作废一次 */
   const stableReady = async (timeout = 30000) => {
@@ -1404,9 +1420,9 @@ await check('E15 全文检索：索引建好后 ⌘P 可搜、拼音可搜、编
     { timeout: 15000 },
   )
 
-  // ⌘P 是真实的「现在开始用」信号：它既打开浮层，也把索引排上。
+  // ⌘K 是真实的「现在开始用」信号：它既打开浮层，也把索引排上。
   // 浮层里挂的是常驻搜索面（紧凑形态），行与输入框都是那份组件的 DOM。
-  await page.keyboard.press('Meta+p')
+  await page.keyboard.press('Meta+k')
   await page.waitForSelector('.popover.search-overlay .search-face-input')
   await page.waitForFunction(() => document.activeElement?.classList.contains('search-face-input'))
   await page.keyboard.type('内容寻址')
@@ -1420,7 +1436,7 @@ await check('E15 全文检索：索引建好后 ⌘P 可搜、拼音可搜、编
   await page.keyboard.press('Escape')
 
   // ① ⌘P 的结果行（上面已经等到）——再验一次身份与高亮
-  await page.keyboard.press('Meta+p')
+  await page.keyboard.press('Meta+k')
   await page.waitForSelector('.popover.search-overlay .search-face-input')
   await page.waitForFunction(() => document.activeElement?.classList.contains('search-face-input'))
   await page.keyboard.type('内容寻址')

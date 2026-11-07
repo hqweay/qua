@@ -1562,10 +1562,10 @@ await check('T7 拖拽重排：把第 2 块拖到第 1 块上方（真实 DnD �
 
 /* -------------------------------------------------- 命令面板 / 菜单 */
 
-await check('T8 命令面板 ⌘⇧P：列出全部命令、可搜、**无绑定也能执行**', async () => {
+await check('T8 命令面板 ⌘P：列出全部命令、可搜、**无绑定也能执行**', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.focus())
-  await page.keyboard.press(kbd('mod+shift+p'))
+  await page.keyboard.press(kbd('mod+p'))
   const rows = await page.locator('.layer-item').count()
   assert(rows > 30, `命令面板应列出全部命令，实际 ${rows} 行`)
   const noKey = await page.evaluate(() => {
@@ -14475,10 +14475,10 @@ await check('T149 覆盖层：关掉之后按键仍落在编辑器；浮层开�
   await page.waitForTimeout(200)
 
   // ① 命令面板：开 → Esc 关 → **打字必须进得去**
-  await page.keyboard.press(kbd('mod+shift+p'))
+  await page.keyboard.press(kbd('mod+p'))
   await page.waitForTimeout(250)
   const opened = await page.evaluate(() => Boolean(document.querySelector('.layer')))
-  assert(opened, '⌘⇧P 应打开命令面板')
+  assert(opened, '⌘P 应打开命令面板')
   await page.keyboard.press('Escape')
   await page.waitForTimeout(300)
   const closed = await page.evaluate(() => {
@@ -17225,7 +17225,7 @@ await check(
 await check('T174 浮层有进场动画；退场的节点真的离开文档（不是留一个隐形的）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.focus())
-  await page.keyboard.press(kbd('mod+shift+p'))
+  await page.keyboard.press(kbd('mod+p'))
   const layerAnim = await page.evaluate(() => getComputedStyle(document.querySelector('.layer')).animationName)
   assert(layerAnim !== 'none', `命令面板应有进场动画，实际 animation=${layerAnim}`)
   await page.keyboard.press('Escape')
@@ -17233,7 +17233,7 @@ await check('T174 浮层有进场动画；退场的节点真的离开文档（�
 
   // 抽屉：进场有动画；Esc 退场走完后节点摘掉（waitForSelector 才是「关」的判据）
   await page.evaluate(() => window.__qua.focus())
-  await page.keyboard.press(kbd('mod+shift+p'))
+  await page.keyboard.press(kbd('mod+p'))
   await page.locator('.layer-input').fill('导出')
   await page.locator('.layer-item').first().click()
   await page.waitForSelector('.drawer')
@@ -17249,7 +17249,7 @@ await check('T174 浮层有进场动画；退场的节点真的离开文档（�
 await check('T175 键盘焦点处处可见：按钮亮 accent 环、菜单搜索框亮分隔线', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.focus())
-  await page.keyboard.press(kbd('mod+shift+p'))
+  await page.keyboard.press(kbd('mod+p'))
   // ① 菜单搜索框自己的焦点语言：下分隔线换 accent（它没有边框可换）
   const inputLine = await page.evaluate(() => getComputedStyle(document.querySelector('.layer-input')).borderBottomColor)
   const accent = await page.evaluate(() => {
@@ -21559,10 +21559,10 @@ await check('T227 点父块的竖线：查询块（无 children、有身体）�
 
 /* -------------------------------------------------------------- 全文检索 */
 
-await check('T228 ⌘P 搜索：输入正文词出结果、命中高亮、↵ 进预览、⌘↵ 打开、Esc 关闭、无结果说人话', async () => {
+await check('T228 ⌘K 搜索：输入正文词出结果、命中高亮、↵ 进预览、⌘↵ 打开、Esc 关闭、无结果说人话', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.keyboard.press(kbd('mod+p'))
-  // ⌘P 的宿主就是常驻搜索面（compact 形态）：同一个组件、同一台预览
+  await page.keyboard.press(kbd('mod+k'))
+  // ⌘K 的宿主就是常驻搜索面（compact 形态）：同一个组件、同一台预览
   await page.waitForSelector('.popover.search-overlay .search-face-input')
   await page.waitForFunction(() => document.activeElement?.classList.contains('search-face-input'))
   // 空词＝最近更新（浮层与 tab 是同一份面，不再有「输入关键词」那块独立空屏）
@@ -21626,7 +21626,7 @@ await check('T228 ⌘P 搜索：输入正文词出结果、命中高亮、↵ �
   const active = await page.evaluate(() => window.__qua.snapshot().activeId)
   assert(active === target, `⌘↵ 打开的是这一条（不是「有反应但没换块」）：${active} vs ${target}`)
 
-  await page.keyboard.press(kbd('mod+p'))
+  await page.keyboard.press(kbd('mod+k'))
   await page.waitForSelector('.popover.search-overlay .search-face-input')
   await page.keyboard.type('不存在的高频词xyz')
   await page.waitForFunction(
@@ -23212,7 +23212,7 @@ await check('T244 搜索面关掉时先收最后一笔：预览里打最后一�
 await check('T245 输入法组词期的 ↵ 不执行浮层命令（捕获阶段就早退）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.focus())
-  await page.keyboard.press(kbd('mod+shift+p'))
+  await page.keyboard.press(kbd('mod+p'))
   await page.locator('.layer-input').fill('导出')
   const rows = await page.locator('.layer-item').count()
   const composing = await page.evaluate(() => {

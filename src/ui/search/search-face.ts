@@ -1,9 +1,9 @@
 /**
- * 中心**搜索面**：⌘P 浮层的另一个尺寸（同一份引擎、同一套行说法，不是第二套结果渲染）。
+ * 中心**搜索面**：⌘K 浮层的另一个尺寸（同一份引擎、同一套行说法，不是第二套结果渲染）。
  *
  * 形状是**主从布局**：顶部输入行；左列是**只读的命中列表**（`HitView` 片段/住哪/经由），
  * 右列是**当前选中的那一块**，用 `EditableBlock` 画成真正的块。
- * tab 与 **紧凑尺寸（⌘P 浮层）都可编辑**：两份尺寸仍是**同一台** `PreviewPane`，
+ * tab 与 **紧凑尺寸（⌘K 浮层）都可编辑**：两份尺寸仍是**同一台** `PreviewPane`，
  * 只读只是宿主的参数（`faceChrome().previewReadOnly`），不是第二套实现。
  *
  * 为什么不是「整列结果都换成块行」：50 条整块太吵，列表要能扫读；真正要改的只有一块。
@@ -70,7 +70,7 @@ export interface SearchFaceDeps {
   onChange: (kind: string) => void
   /** 引擎现取（索引状态会变）：ready ⇒ FTS，否则扫描降级。降级要在面上明说，不装没事 */
   query: (text: string, limit?: number) => Promise<SearchResult>
-  /** 行怎么说（与 ⌘P 浮层同一份） */
+  /** 行怎么说（与 ⌘K 浮层同一份） */
   describe: (hit: SearchHit, term: string) => HitView | null
   /**
    * 打开一条命中。落点与块打开同一套语言（`openActionOf`）：缺省＝中心，
@@ -87,7 +87,7 @@ export interface SearchFaceDeps {
   /** 刷新之后说一句（移除了几条 / 失败保留旧结果）：与查询视图同一个出口 */
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
   /**
-   * **紧凑形态**（⌘P 浮层）。形态差异只在 `faceChrome()` 里翻译成「哪些件不摆」，
+   * **紧凑形态**（⌘K 浮层）。形态差异只在 `faceChrome()` 里翻译成「哪些件不摆」，
    * 不要散记 `if (compact)`。
    */
   compact?: boolean

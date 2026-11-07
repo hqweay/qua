@@ -76,15 +76,14 @@ export const BINDINGS: Binding[] = [
   { command: 'core.tab/prev', kind: 'keymap', key: 'mod+shift+[', when: '', layer: 'core' },
   { command: 'core.tab/next', kind: 'keymap', key: 'mod+shift+]', when: '', layer: 'core' },
   { command: 'core.tab/close', kind: 'keymap', key: 'mod+shift+w', when: '', layer: 'core' },
-  // `when` 为空 ⇒ 总是可用：命令面板是键盘可达性的兜底。
-  // 只留 `⌘⇧P` 一条：`⌘P` 让给全文检索（见下），两个面板入口会造成「按哪个都行、键位提示还各说一套」。
-  { command: 'core.command-palette/show', kind: 'keymap', key: 'mod+shift+p', when: '', layer: 'core' },
-  // 全文检索：`⌘P` 是「找内容」，与 `⌘⇧P`「找命令」并列；菜单没有原生 Find／Print role，不会抢
-  { command: 'core.search/open', kind: 'keymap', key: 'mod+p', when: '', layer: 'core' },
+  // `when` 为空 ⇒ 总是可用：命令面板是键盘可达性的兜底。`⌘P` 是命令面板的行业默认键位。
+  { command: 'core.command-palette/show', kind: 'keymap', key: 'mod+p', when: '', layer: 'core' },
+  // 全文检索：`⌘K`（同为行业默认）；菜单没有原生 Find／Print role，不会抢
+  { command: 'core.search/open', kind: 'keymap', key: 'mod+k', when: '', layer: 'core' },
   // 设置：⌘,（macOS 同一条直觉）。设置是中心工具面，按 kind 去重（再按＝切过去）
   { command: 'core.settings/open', kind: 'keymap', key: 'mod+,', when: '', layer: 'core' },
   // `⌘F` 预留给就地查找（块内查找/替换）：**故意不绑定**，别把这条还给全局搜索——
-  // 全局搜索已经住在 `⌘P`，两个入口会各搜一份、结果口径再分叉。
+  // 全局搜索已经住在 `⌘K`，两个入口会各搜一份、结果口径再分叉。
   { command: 'core.layer/close', kind: 'keymap', key: 'escape', when: '', layer: 'core' },
   /* ================= 块选区 =================
      ⚠️ 这些必须放在文本绑定**之后**：按键解析是**反向遍历、后出现者优先**。

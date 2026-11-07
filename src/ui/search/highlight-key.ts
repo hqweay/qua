@@ -3,7 +3,7 @@
  *
  * 为什么需要它：`CSS.highlights` 是按 key 整条删的（`delete(key)`），没有「只删我这
  * 几段 range」。两个宿主共用一条 key ⇒ 后关的那一面会把前一面还开着的高亮一起清掉，
- * 而且不报错。tab 与 ⌘P 浮层已经各有一条（`faceChrome` 给基名），但那只覆盖「两种
+ * 而且不报错。tab 与 ⌘K 浮层已经各有一条（`faceChrome` 给基名），但那只覆盖「两种
  * 形态各一个」——再加第三个预览宿主时，手编第三条 key 就会漏。
  *
  * 口径：基名第一次分配原样返回（既有的 `search-match` / `search-match-overlay`
