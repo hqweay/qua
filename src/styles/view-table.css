@@ -706,9 +706,35 @@ button.queryview-chip:hover {
 .vcol-name {
   flex: 1;
   min-width: 0;
+  /* 按一级子块分组时，组名是「打开那一块」的按钮：清掉按钮外观，只留文字 */
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 .vcol-count {
   color: var(--ui-text-tertiary);
+}
+.vcol-add {
+  flex: none;
+  padding: 0 var(--ui-gap-1);
+  border: 0;
+  background: none;
+  font: inherit;
+  line-height: 1;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+  /* 常显但压低：它是这一列唯一「能让它长大」的动作（与结构映射表的 ＋ 同一档） */
+  opacity: 0.45;
+}
+.vcol-head:hover .vcol-add {
+  opacity: 1;
+}
+.vcol-add:hover {
+  color: var(--ui-text);
 }
 .vcol-cards {
   display: flex;

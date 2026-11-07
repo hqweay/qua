@@ -33,6 +33,7 @@ import {
   withGroup,
   withListSort,
   withSort,
+  withStructureGroup,
   type Block,
   type ListSort,
   type Source,
@@ -298,12 +299,24 @@ export function viewConfigCommands(
      * 分组是**视图配置**，不是查询的一部分：改它不重查、不换成员，只是这批记录
      * 换一种摆法。`groupOrder` 由看板按声明序回填（用户拖序是另一批事）。
      */
-    viewSetGroup: (owner, viewId, groupBy, groupOrder) => {
+    viewSetGroup: (owner, viewId, groupBy, groupOrder, structure) => {
       const data = d.owners.read(owner)
       if (!data) return false
       const view = resolveView(data, viewId)
       if (!view) return false
-      d.owners.write(owner, { views: upsertView(data.views, withGroup(view, groupBy, groupOrder)) })
+      /**
+       * 两种分组来源互斥，写一边清另一边：
+       *   · `structure` ⇒ 组＝容器的直接子块（组有身份，拖卡＝换父）；
+       *   · 否则 ⇒ 按值分组（`''` 把它们一起清掉）。
+       * 允许写进不支持的 kind／源由 `canonicalViews` 兜底——但命令面先挡一次，
+       * 免得「点了没生效」。
+       */
+      if (structure === true && (view.kind !== 'cards' || sourceOfRef(d, owner)?.kind !== 'children')) {
+        d.toast(t('ui.view.structureOnlyChildren'), 'warn')
+        return false
+      }
+      const next = structure === true ? withStructureGroup(view, true) : withGroup(view, groupBy, groupOrder)
+      d.owners.write(owner, { views: upsertView(data.views, next) })
       after()
       return true
     },

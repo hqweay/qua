@@ -46,7 +46,12 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
     if (cover !== 'first-asset' && cover !== 'none') return false
     return app.viewSetCover(owner, viewId, cover)
   },
-  /** 写分组键；`groupBy:''` ＝ 清掉（与 set-sort 的空串清掉同一约定） */
+  /**
+   * 写分组键；`groupBy:''` ＝ 清掉（与 set-sort 的空串清掉同一约定）。
+   *
+   * `structure:true` ＝ 按一级子块分组（组＝容器的直接子块）；它与按值分组互斥，
+   * 命令层只传一个来源，清另一份是 `withGroup`／`withStructureGroup` 的事。
+   */
   'core.view/set-group': (a, app) => {
     const owner = ownerOrCur(a, app)
     const viewId = S(a.viewId)
@@ -54,7 +59,7 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
     const groupBy = S(a.groupBy)
     const rawOrder = a.groupOrder
     const groupOrder = Array.isArray(rawOrder) ? rawOrder.map((g) => S(g)).filter((g) => g !== '') : undefined
-    return app.viewSetGroup(owner, viewId, groupBy, groupOrder)
+    return app.viewSetGroup(owner, viewId, groupBy, groupOrder, a.structure === true)
   },
   /** 写一张视图的切片；显式 `null` ＝ 清掉，缺参 ＝ 拒绝（不能把「没传」当成清空） */
   'core.view/set-filter': (a, app) => {

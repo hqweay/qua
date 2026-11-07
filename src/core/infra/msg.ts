@@ -474,6 +474,7 @@ export const MSG = {
   'ui.query.sortKey.refCount': '引用次数',
   'ui.query.sortKey.random': '随机',
   'ui.query.group.none': '不分组',
+  'ui.query.group.structure': '一级子块',
   'ui.query.group.tagsKey': '标签',
   'ui.query.group.multi': ' · 多值',
   'ui.query.edit': '编辑条件…',
@@ -569,6 +570,12 @@ export const MSG = {
   /* 卡片：默认网格（画廊），选一个分组列就是列（看板） */
   'ui.cards.empty': '这一份源还没有记录',
   'ui.cards.drag': '拖动这张卡',
+  /* 卡片按一级子块分组：组＝容器的直接子块（有身份） */
+  'ui.cards.noGroups': '这个块还没有子块；每个一级子块就是一列',
+  'ui.cards.untitledGroup': '未命名',
+  'ui.cards.openGroup': '打开这一组',
+  'ui.cards.addCard': '加一张卡',
+  'ui.cards.addCardTitle': '在这一组末尾加一张卡',
   /* 卡片（看板）：按某一列的单值分组；拖卡＝写属性（不是 re-parent） */
   'ui.board.unset': '未设置',
   'ui.board.noMultiGroup': '卡片的分组列不支持多值属性（多值请在列表或表格里分组）',
@@ -589,6 +596,7 @@ export const MSG = {
   'ui.view.cover.none': '封面：无',
   'ui.view.kind.calendar': '日历',
   'ui.view.kind.mindmap': '思维导图',
+  'ui.view.structureOnlyChildren': '按一级子块分组只用于一个块的卡片视图',
   'ui.view.outline': '大纲',
   'ui.view.label': '视图',
   'ui.view.switchHint': '切换视图',

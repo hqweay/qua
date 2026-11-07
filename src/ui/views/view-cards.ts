@@ -17,12 +17,14 @@ import {
   cardLayoutOf,
   clickModsOf,
   displayNameOf,
+  groupsByStructure,
   openActionOf,
   sortRecords,
   type BelowFields,
   type Block,
   type BlockStore,
   type OpenAction,
+  type StructureGroup,
   type ViewConfig,
   type ViewRecord,
 } from '../../core/index.ts'
@@ -51,6 +53,15 @@ export interface ViewCardsDeps {
   /** 写一格属性（拖卡落点） */
   setValue: (blockId: string, propId: string, value: unknown) => void
   clearValue: (blockId: string, propId: string) => void
+  /**
+   * **结构分组**（`groupByStructure`）：组＝容器的直接子块、记录＝组里的直接子块。
+   * 只有 children 源有；按值分组时这份是空的（渲染器不读）。
+   */
+  structureGroups: () => readonly StructureGroup[]
+  /** 拖卡进另一组＝把那块搬到组下面（结构事务，不是写值） */
+  moveInto: (blockId: string, groupBlockId: string) => void
+  /** 给一组加一张卡＝在组块末尾插一个子块（与大纲里 ↵＋Tab 同一条写路径） */
+  insertCard: (groupBlockId: string) => void
   openBlock: (blockId: string, place?: OpenAction) => void
   /** 点卡上的属性行 ⇒ 打开属性面板并聚焦那一栏 */
   inspect: (blockId: string, propId?: string) => void
@@ -69,6 +80,8 @@ export class ViewCards {
   private multi = false
   /** 这一批记录各自的块下属性行（一次算一批，逐卡只查表） */
   private below: ReadonlyMap<string, BelowFields> = new Map()
+  /** 结构分组的形状签名（组 id ＋ 每组的卡 id）：变了才整片重画 */
+  private structureShape = ''
 
   constructor(deps: ViewCardsDeps) {
     this.deps = deps
@@ -105,6 +118,17 @@ export class ViewCards {
       return
     }
     const wanted = new Set(ids)
+    /**
+     * 结构分组：组块自己变了（改名）或结构变了（增删组／卡）⇒ 整片重画。
+     * 卡的**内容**变化仍走下面的局部修补（那是高频路径）。
+     */
+    if (groupsByStructure(view)) {
+      const groups = this.deps.structureGroups()
+      if (groups.some((g) => wanted.has(g.block.id)) || this.structureShapeOf(groups) !== this.structureShape) {
+        this.render()
+        return
+      }
+    }
     this.refreshBelow(ids.map((id) => this.deps.store.find(id)).filter((b): b is Block => b !== undefined))
     const byId = new Map(this.deps.records().map((r) => [r.block.id, r]))
     let lost = false
@@ -179,6 +203,10 @@ export class ViewCards {
 
   /** 列（看板）：按分组键把记录摆进「一个值一列」 */
   private renderColumns(view: ViewConfig | null): void {
+    if (groupsByStructure(view)) {
+      this.renderStructureColumns(view)
+      return
+    }
     const key = view?.groupBy ?? ''
     /**
      * **多值键不进列分组**：列的拖卡＝「写那格的值」，多值下没有唯一动作
@@ -260,6 +288,102 @@ export class ViewCards {
       })
     }
     return col
+  }
+
+  /**
+   * **按一级子块分组**：组＝容器的直接子块（真实块），记录＝它的直接子块。
+   *
+   * 与按值分组的三处差别是语义，不是样式：
+   *   · 组**有身份** —— 组名读那一块、点开就是那一块；没有合成键、没有「未设置」；
+   *   · 拖卡＝**换父**（结构事务），不是写那格的值；
+   *   · 空组保留：它就是一个真实子块，还能拖卡进去。
+   */
+  private renderStructureColumns(view: ViewConfig | null): void {
+    // 结构分组永远单值：拖拽面全开
+    this.multi = false
+    const groups = this.deps.structureGroups()
+    this.structureShape = this.structureShapeOf(groups)
+    if (groups.length === 0) {
+      this.root.appendChild(viewNote(t('ui.cards.noGroups')))
+      return
+    }
+    const o = this.cardOpts(view)
+    for (const g of groups) this.root.appendChild(this.structureColumn(g, o))
+  }
+
+  private structureColumn(g: StructureGroup, card: { cover: boolean }): HTMLElement {
+    const col = document.createElement('div')
+    col.className = 'vcol'
+    // 组＝一个真实子块：用它的块 id（不是 `groupBy` 的合成值键）
+    col.dataset.groupBlockId = g.block.id
+
+    const head = document.createElement('div')
+    head.className = 'vcol-head'
+    const name = document.createElement('button')
+    name.type = 'button'
+    name.className = 'vcol-name ui-ellipsis'
+    name.textContent = displayNameOf(g.block) || t('ui.cards.untitledGroup')
+    name.title = t('ui.cards.openGroup')
+    name.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      this.deps.openBlock(g.block.id, openActionOf(e))
+    })
+    const count = document.createElement('span')
+    count.className = 'vcol-count'
+    count.textContent = String(g.records.length)
+
+    /**
+     * 「加一张卡」：与结构映射表表头的 ＋ 同一条写路径（在组块末尾插一个子块）。
+     * 常显、透明度压低——它是这一列唯一「能让它长大」的动作。
+     */
+    const add = document.createElement('button')
+    add.type = 'button'
+    add.className = 'vcol-add'
+    add.title = t('ui.cards.addCardTitle')
+    add.setAttribute('aria-label', t('ui.cards.addCard'))
+    add.textContent = '＋'
+    add.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      // 先结束正在进行的编辑：否则改动时刻会落在一个马上重排的块上
+      this.deps.cell.commit()
+      this.deps.insertCard(g.block.id)
+    })
+    head.append(name, count, add)
+    col.appendChild(head)
+
+    const list = document.createElement('div')
+    list.className = 'vcol-cards'
+    for (const r of g.records) list.appendChild(this.card(r, { ...card, draggable: true }))
+    col.appendChild(list)
+
+    /**
+     * 落点：整列接卡。拖进来＝把卡**搬**到这一组下面（结构写、一次撤销），
+     * 不是改属性值——组的身份是块，不是某个字段的取值。
+     */
+    col.addEventListener('dragover', (e) => {
+      if (this.dragging === '') return
+      e.preventDefault()
+      col.dataset.dropTarget = '1'
+    })
+    col.addEventListener('dragleave', () => {
+      delete col.dataset.dropTarget
+    })
+    col.addEventListener('drop', (e) => {
+      delete col.dataset.dropTarget
+      if (this.dragging === '') return
+      e.preventDefault()
+      const blockId = this.dragging
+      this.dragging = ''
+      this.deps.moveInto(blockId, g.block.id)
+    })
+    return col
+  }
+
+  /** 结构分组的形状签名：组 id ＋ 每组的卡 id（变了才整片重画） */
+  private structureShapeOf(groups: readonly StructureGroup[] = this.deps.structureGroups()): string {
+    return groups.map((g) => `${g.block.id}:${g.records.map((r) => r.block.id).join(',')}`).join('|')
   }
 
   private card(r: ViewRecord, o: { cover: boolean; draggable: boolean }): HTMLElement {

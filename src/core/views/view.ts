@@ -122,7 +122,18 @@ export function defaultKindFor(_source: Source): ViewKind {
  * 「下拉选了分组，屏幕没变成列」。
  */
 export function cardLayoutOf(v: ViewConfig | null | undefined): CardLayout {
+  if (groupsByStructure(v)) return 'columns'
   return v && typeof v.groupBy === 'string' && v.groupBy !== '' ? 'columns' : 'grid'
+}
+
+/**
+ * 这一张视图是不是**按一级子块分组**（**唯一判据**）。
+ *
+ * 与 `groupBy` 并列而不是嵌进去：两者是两种分组来源（结构／值），
+ * 组的身份与拖卡写动作都不同。读这一条的地方：布局派生、渲染分支、分组下拉回显。
+ */
+export function groupsByStructure(v: ViewConfig | null | undefined): boolean {
+  return v?.groupByStructure === true
 }
 
 /**
@@ -201,6 +212,19 @@ export interface ViewConfig {
   groupBy?: string
   /** 组的呈现顺序（存**原始值**：select 是选项块 id、`_tags` 是标签块 id）。缺省＝声明序 ＋ 第一次出现，「未设置」恒最后。 */
   groupOrder?: string[]
+  /**
+   * **结构分组**：组＝这个块的**直接子块**，记录＝那个子块的直接子块
+   * （一级成组、二级成记录）。
+   *
+   * 与 `groupBy` 是**两种分组来源**，语义不同、互斥：
+   *   · `groupBy` 的组按**值**实时导出，组没有身份（拖卡＝写那格的值）；
+   *   · 这里的组是一个**真实块**（可改名、可增删，拖卡＝换父）。
+   * 所以它不是一个保留键——那会让「这一组是什么」有两个答案。
+   *
+   * 只有 `children` 源的 `cards` 认它；其余组合由 `canonicalViews` 丢掉
+   * （写进去也只会是死配置）。
+   */
+  groupByStructure?: true
   table?: TableConfig
   /** 结构映射表：**只有排序**，没有列（列＝一个直接子块，不是配置） */
   listTable?: { sort?: ListSort }
@@ -383,11 +407,20 @@ export function canonicalViews(raw: unknown, source: Source): ViewConfig[] {
     if (isStr(v.name)) view.name = v.name
     // 切片只对 query 源生效；别的源写进来也丢掉（否则「写进去了、却永远不生效」）
     if (source.kind === 'query' && isQueryNode(v.filter)) view.filter = canonicalNode(v.filter)
+    /**
+     * **结构分组只接 children 源的卡片**：组＝直接子块、记录＝它的孩子。
+     * 别的组合写进来也丢掉——读路径没有第二个消费者，留着就是死配置。
+     */
+    const structure = source.kind === 'children' && kind === 'cards' && v.groupByStructure === true
+    if (structure) view.groupByStructure = true
     // 分组键是记录视图共用的顶层位（大纲忽略它；写进去不报错、也不丢——换视图种类键还在）
-    if (isStr(v.groupBy)) view.groupBy = v.groupBy
-    if (Array.isArray(v.groupOrder)) {
-      const order = v.groupOrder.filter(isStr)
-      if (order.length > 0) view.groupOrder = order
+    // ⚠️ 结构分组与按值分组**互斥**：组顺序＝children 顺序，没有第二份 groupOrder。
+    if (!structure) {
+      if (isStr(v.groupBy)) view.groupBy = v.groupBy
+      if (Array.isArray(v.groupOrder)) {
+        const order = v.groupOrder.filter(isStr)
+        if (order.length > 0) view.groupOrder = order
+      }
     }
     // **只留这个 kind 自己的那份**：别的 kind 的配置跟着一个不存在的 kind 走，
     // 切过去时是「上一份视图的残留」，而没人能说清它该不该生效
@@ -614,6 +647,48 @@ export function childrenRecords(rootId: string, kb: KbClient): ViewRecord[] {
     out.push(recordOf(child, path, kb))
   }
   return out
+}
+
+/** 结构分组的一列：一级子块（＝组）＋ 它活着的直接子块（＝组里的记录） */
+export interface StructureColumn {
+  block: Block
+  items: readonly Block[]
+}
+
+/**
+ * **结构分组的最底层派生**：一级子块当组、它的直接子块当记录。
+ *
+ * 与 `childrenRecords` 只差一层（那边一级子块就是记录）。`list-table` 与
+ * 「按一级子块分组的卡片」共用这一份——两处各取一次树，迟早会在
+ * 「软删跳过」「组顺序」这些分支上各漂各的。
+ *
+ * 组顺序＝`children` 顺序；空组**保留**（它是一个真实子块，还能拖卡进去）。
+ */
+export function structuralColumnsOf(rootId: string, kb: KbClient): StructureColumn[] {
+  const root = kb.get(rootId)
+  if (!root) return []
+  const out: StructureColumn[] = []
+  for (const child of kb.children(rootId)) {
+    if (isDeleted(child)) continue
+    out.push({ block: child, items: kb.children(child.id).filter((b) => !isDeleted(b)) })
+  }
+  return out
+}
+
+/** 结构分组的一组：组块 ＋ 组里的记录（卡片消费；与 `list-table` 共用底层派生） */
+export interface StructureGroup {
+  block: Block
+  records: readonly ViewRecord[]
+}
+
+export function structureGroupsOf(rootId: string, kb: KbClient): StructureGroup[] {
+  const root = kb.get(rootId)
+  if (!root) return []
+  return structuralColumnsOf(rootId, kb).map((col) => ({
+    block: col.block,
+    // 路径到组块为止：记录属于那一组，不是容器的直接子块
+    records: col.items.map((item) => recordOf(item, [root, col.block], kb)),
+  }))
 }
 
 /**
@@ -965,6 +1040,8 @@ export function withCover(view: ViewConfig, cover: 'first-asset' | 'none'): View
  */
 export function withGroup(view: ViewConfig, groupBy: string, groupOrder?: readonly string[]): ViewConfig {
   const next = cloneView(view)
+  // 按值分组接管：结构分组退场（两种来源互斥；`''` 把它们一起清掉）
+  delete next.groupByStructure
   if (groupBy === '') {
     delete next.groupBy
     delete next.groupOrder
@@ -974,6 +1051,22 @@ export function withGroup(view: ViewConfig, groupBy: string, groupOrder?: readon
   const order = (groupOrder ?? []).filter((g) => typeof g === 'string' && g !== '')
   if (order.length > 0) next.groupOrder = order
   else delete next.groupOrder
+  return next
+}
+
+/**
+ * 写**结构分组**（`false` ＝ 清掉）。
+ *
+ * 与 `withGroup` 对称：两种分组来源互斥，切换时把另一边清掉——
+ * 留着一份不生效的 `groupBy` 就是「两个答案」，而用户看不到哪个在起作用。
+ * 组顺序＝`children` 顺序，所以这里没有 `groupOrder` 可写。
+ */
+export function withStructureGroup(view: ViewConfig, on: boolean): ViewConfig {
+  const next = cloneView(view)
+  delete next.groupBy
+  delete next.groupOrder
+  if (on) next.groupByStructure = true
+  else delete next.groupByStructure
   return next
 }
 

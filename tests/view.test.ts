@@ -46,6 +46,7 @@ import {
   sortRecords,
   sourceOf,
   sourceConflicts,
+  structureGroupsOf,
   upsertView,
   viewNameOf,
   visibleRows,
@@ -54,6 +55,7 @@ import {
   withGroup,
   withListSort,
   withSort,
+  withStructureGroup,
   type Block,
   type ViewConfig,
   type ViewRecord,
@@ -439,6 +441,51 @@ test('listTableOf：软删的表头不出列、软删的项不占行（位置按
   assert.equal(t2.rows[1]!.cells[0], null, '名称那一列只剩一项 ⇒ 第 2 行左侧空着')
 })
 
+test('structureGroupsOf：组＝一级子块（有身份）、记录＝它的孩子、空组保留、软删两边都跳过', () => {
+  const root = listTree()
+  const { kb } = kbOf([root])
+  const groups = structureGroupsOf('root', kb)
+  assert.deepEqual(
+    groups.map((g) => g.block.id),
+    ['r1', 'r2', 'r3'],
+    '组就是容器的直接子块，顺序＝children 顺序（没有第二份组序）',
+  )
+  assert.deepEqual(
+    groups[0]!.records.map((r) => r.block.id),
+    ['c11', 'c12'],
+    '记录＝组里的直接子块',
+  )
+  assert.deepEqual(
+    groups[0]!.records[0]!.path.map((b) => b.id),
+    ['root', 'r1'],
+    '记录的路径到组块为止（它属于那一组，不是容器的直接子块）',
+  )
+  assert.deepEqual(
+    groups.map((g) => g.block.id),
+    listTableOf('root', kb).columns.map((c) => c.id),
+    '结构映射表与结构分组共用同一份派生（两处各取一次树必漂）',
+  )
+
+  // 空组保留：它就是一个真实子块（还能拖卡进去），不像按值分组那样「合成空列」
+  const emptyRoot = mk('root', '空组', [mk('g1', '一组')])
+  const { kb: kb2 } = kbOf([emptyRoot])
+  const empty = structureGroupsOf('root', kb2)
+  assert.equal(empty.length, 1)
+  assert.deepEqual(empty[0]!.records, [], '有子块但没内容 ⇒ 组还在')
+
+  // 软删：组与记录都跳过（否则组里出现打不开的块）
+  const deleted = listTree()
+  deleted.children[1] = { ...deleted.children[1]!, props: { _deletedAt: 5 } }
+  deleted.children[0] = {
+    ...deleted.children[0]!,
+    children: [deleted.children[0]!.children[0]!, { ...deleted.children[0]!.children[1]!, props: { _deletedAt: 5 } }],
+  }
+  const { kb: kb3 } = kbOf([deleted])
+  const live = structureGroupsOf('root', kb3)
+  assert.deepEqual(live.map((g) => g.block.id), ['r1', 'r3'], '被删的组不出列')
+  assert.deepEqual(live[0]!.records.map((r) => r.block.id), ['c11'], '被删的卡不占位')
+})
+
 test('sortListRows：按第 k 列只改显示序、空值最后、相等保持 children 顺序；children 顺序一个字节不动', () => {
   const root = listTree()
   const { kb } = kbOf([root])
@@ -597,6 +644,39 @@ test('分组键是记录视图共用的顶层位：canonical 往返、清掉删�
   // 多值键判据：现阶段只有标签归属；同一份判据喂候选标注／分桶／拖拽三处
   assert.equal(isMultiValueKey('_tags'), true)
   assert.equal(isMultiValueKey('p1'), false)
+})
+
+test('结构分组：只接 children 源的卡片、与按值分组互斥、清掉删键', () => {
+  const child = { kind: 'children', blockId: 'x' } as const
+  const query = { kind: 'query', spec: { where: { any: [] } } } as const
+
+  const [kept] = canonicalViews(
+    [{ id: 'a', kind: 'cards', groupByStructure: true, groupBy: 'p1', groupOrder: ['a'] }],
+    child,
+  )
+  assert.equal(kept!.groupByStructure, true, 'children 源的卡片认结构分组')
+  assert.equal(kept!.groupBy, undefined, '两种来源互斥：结构分组不吃按值分组的键')
+  assert.equal(kept!.groupOrder, undefined, '组顺序＝children 顺序，没有第二份 order')
+  assert.equal(cardLayoutOf(kept), 'columns', '结构分组 ⇒ 列布局（与看板同一个容器）')
+
+  assert.equal(
+    canonicalViews([{ id: 'b', kind: 'table', groupByStructure: true }], child)[0]!.groupByStructure,
+    undefined,
+    '别的 kind 写进来也丢掉（没有第二个消费者）',
+  )
+  assert.equal(
+    canonicalViews([{ id: 'c', kind: 'cards', groupByStructure: true }], query)[0]!.groupByStructure,
+    undefined,
+    'query 源没有「一级子块」可分组 ⇒ 丢掉（写进去就是死配置）',
+  )
+
+  const v: ViewConfig = { id: 'v', kind: 'cards', groupBy: 'p1', groupOrder: ['a'] }
+  const structure = withStructureGroup(v, true)
+  assert.equal(structure.groupByStructure, true)
+  assert.equal('groupBy' in structure, false, '写结构分组清掉按值分组')
+  assert.equal('groupOrder' in structure, false)
+  assert.equal('groupByStructure' in withStructureGroup(structure, false), false, '清掉删键')
+  assert.equal('groupByStructure' in withGroup(structure, 'p1'), false, '按值分组接管时结构分组退场')
 })
 
 test('卡片配置一份：cover／size／showEmpty 原样往返；布局是派生的，切布局不搬配置', () => {

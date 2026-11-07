@@ -16,7 +16,7 @@
 import { isDeleted, type Block } from '../model/model.ts'
 import type { KbClient } from '../kb/types.ts'
 import { plainText } from '../model/runs.ts'
-import type { ListSort } from './view.ts'
+import { structuralColumnsOf, type ListSort } from './view.ts'
 
 /** 一列里的一项：某一列（表头块）的第 j 个孩子 ＋ 它自己的孩子（三级起只做「可展开」） */
 export interface ListTableItem {
@@ -61,19 +61,16 @@ export function listSortValueOf(row: ListTableRow, col: number): string {
 export function listTableOf(rootId: string, kb: KbClient): ListTable {
   const root = kb.get(rootId)
   if (!root) return { root: undefined, columns: [], rows: [] }
-  const columns: Block[] = []
+  /**
+   * 列＝容器的直接子块、项＝它的孩子：这份派生与「按一级子块分组的卡片」共用
+   * （`structuralColumnsOf`）。这里只再加一项「三级起可展开」。
+   */
+  const cols = structuralColumnsOf(rootId, kb)
+  const columns = cols.map((c) => c.block)
   /** `itemsByCol[i]` ＝ 第 i 列的各项（顺序＝children 顺序，软删的已跳过） */
-  const itemsByCol: ListTableItem[][] = []
-  for (const child of kb.children(rootId)) {
-    if (isDeleted(child)) continue
-    columns.push(child)
-    const items: ListTableItem[] = []
-    for (const item of kb.children(child.id)) {
-      if (isDeleted(item)) continue
-      items.push({ block: item, children: liveChildren(kb, item.id) })
-    }
-    itemsByCol.push(items)
-  }
+  const itemsByCol: ListTableItem[][] = cols.map((col) =>
+    col.items.map((item) => ({ block: item, children: liveChildren(kb, item.id) })),
+  )
   const height = itemsByCol.reduce((n, items) => Math.max(n, items.length), 0)
   const rows: ListTableRow[] = []
   for (let j = 0; j < height; j++) {

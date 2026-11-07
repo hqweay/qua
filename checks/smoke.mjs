@@ -18718,6 +18718,158 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
   return `看板 ${board.cols.length} 列／画廊 ${gallery.cards} 卡／日历 42 格／导图 ${mm.nodes} 节点；条数始终 ${rowsBefore}`
 })
 
+/* ---------------------------------------------------------------- T267 */
+
+await check('T267 卡片按一级子块分组：组＝直接子块（有身份）、卡＝它的孩子；拖卡＝换父、可撤销；清掉回网格', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await buildListTree(page)
+
+  /**
+   * 前置：children 源建卡片，默认画廊——卡＝这一页的**直接子块**（3 张）。
+   * 选「一级子块」之后，记录下沉一层：组＝那 3 个直接子块，卡＝它们各自的孩子。
+   */
+  await page.evaluate((rid) => window.__qua.invoke('core.view/add', { blockId: rid, kind: 'cards' }), fx.root)
+  await page.waitForTimeout(450)
+  const gallery = await page.evaluate(() => ({
+    layout: document.querySelector('.vcards')?.dataset.layout ?? '',
+    cards: [...document.querySelectorAll('.vcard[data-block-id]')].map((c) => c.dataset.blockId ?? ''),
+  }))
+  assert(gallery.layout === 'grid', `卡片默认仍是画廊：${JSON.stringify(gallery)}`)
+  assert(gallery.cards.length === 3, `画廊的卡＝一级子块（3）：${JSON.stringify(gallery.cards)}`)
+
+  // 分组下拉里出现「一级子块」（只对 children 源的卡片；query 源由单测钉住「丢弃」）
+  const hasStructureOption = await page.evaluate(() =>
+    [...document.querySelectorAll('.queryview-group option')].some((o) => o.textContent === '一级子块'),
+  )
+  assert(hasStructureOption, 'children 源的卡片：分组下拉应有「一级子块」')
+
+  const viewId = await page.evaluate((rid) => {
+    const v = (window.__qua.__editor.store.find(rid)?.props?._views ?? []).find((x) => x.kind === 'cards')
+    return v?.id ?? ''
+  }, fx.root)
+  assert(viewId !== '', '前置：应有卡片视图')
+  await page.evaluate(
+    ({ rid, vid }) =>
+      window.__qua.invoke('core.view/set-group', { blockId: rid, viewId: vid, groupBy: '', structure: true }),
+    { rid: fx.root, vid: viewId },
+  )
+  await page.waitForTimeout(450)
+
+  const state = () =>
+    page.evaluate(() => ({
+      layout: document.querySelector('.vcards')?.dataset.layout ?? '',
+      cols: [...document.querySelectorAll('.vcol[data-group-block-id]')].map((c) => ({
+        group: c.dataset.groupBlockId ?? '',
+        name: c.querySelector('.vcol-name')?.textContent ?? '',
+        cards: [...c.querySelectorAll('.vcard[data-block-id]')].map((x) => x.dataset.blockId ?? ''),
+      })),
+      cards: document.querySelectorAll('.vcard[data-block-id]').length,
+    }))
+
+  const grouped = await state()
+  assert(grouped.layout === 'columns', `结构分组 ⇒ 列：${JSON.stringify(grouped)}`)
+  assert(
+    JSON.stringify(grouped.cols.map((c) => c.group)) === JSON.stringify(fx.rows),
+    `组＝容器的直接子块，顺序＝children 顺序：${JSON.stringify(grouped.cols.map((c) => c.group))}`,
+  )
+  assert(
+    JSON.stringify(grouped.cols.map((c) => c.cards)) ===
+      JSON.stringify([
+        [fx.cells.c11, fx.cells.c12],
+        [fx.cells.c21],
+        [fx.cells.c31, fx.cells.c32],
+      ]),
+    `卡＝组里的直接子块（三级起不进列）：${JSON.stringify(grouped.cols.map((c) => c.cards))}`,
+  )
+  assert(
+    grouped.cols.map((c) => c.name).join(',') === '名称,价格,库存',
+    `组名读那一块（组有身份）：${JSON.stringify(grouped.cols.map((c) => c.name))}`,
+  )
+  assert(grouped.cards === 5, `一共 5 张卡：${grouped.cards}`)
+
+  // 拖「键盘」到「价格」列：换父（不是写值）
+  const parentOf = (id) =>
+    page.evaluate((bid) => {
+      const walk = (list, p) => {
+        for (const b of list) {
+          if (b.id === bid) return p
+          const r = walk(b.children, b.id)
+          if (r !== '') return r
+        }
+        return ''
+      }
+      return walk(window.__qua.__editor.store.blocks, '')
+    }, id)
+  const parentBefore = await parentOf(fx.cells.c11)
+  assert(parentBefore === fx.rows[0], `前置：键盘在名称下：${parentBefore}`)
+  await page.evaluate(
+    ({ card, col }) => {
+      const grip = document.querySelector(`.vcard[data-block-id="${card}"] .vcard-grip`)
+      const target = document.querySelectorAll('.vcol[data-group-block-id]')[col]
+      const dt = new DataTransfer()
+      const ev = (type) => new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt })
+      grip.dispatchEvent(ev('dragstart'))
+      target.dispatchEvent(ev('dragover'))
+      target.dispatchEvent(ev('drop'))
+      grip.dispatchEvent(ev('dragend'))
+    },
+    { card: fx.cells.c11, col: 1 },
+  )
+  await page.waitForTimeout(450)
+  const parentAfter = await parentOf(fx.cells.c11)
+  assert(parentAfter === fx.rows[1], `拖卡＝换父（写到目标组下）：${parentBefore} → ${parentAfter}`)
+  const afterDrop = await state()
+  assert(
+    JSON.stringify(afterDrop.cols.map((c) => c.cards)) ===
+      JSON.stringify([[fx.cells.c12], [fx.cells.c21, fx.cells.c11], [fx.cells.c31, fx.cells.c32]]),
+    `DOM 跟着换组（追加到目标组末尾）：${JSON.stringify(afterDrop.cols.map((c) => c.cards))}`,
+  )
+
+  // 一次撤销回到原组（结构事务，不是写值）
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForTimeout(450)
+  assert((await parentOf(fx.cells.c11)) === fx.rows[0], '一次撤销回到原组')
+  const undone = await state()
+  assert(
+    JSON.stringify(undone.cols.map((c) => c.cards)) ===
+      JSON.stringify([[fx.cells.c11, fx.cells.c12], [fx.cells.c21], [fx.cells.c31, fx.cells.c32]]),
+    `撤销后 DOM 也回到原组：${JSON.stringify(undone.cols.map((c) => c.cards))}`,
+  )
+
+  // 组头的 ＋ 加一张卡＝在组块末尾插一个子块（与大纲 ↵＋Tab 同一条写路径）
+  const kidsOf = (gid) =>
+    page.evaluate((id) => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === id) return b.children.length
+          const r = walk(b.children)
+          if (r !== -1) return r
+        }
+        return -1
+      }
+      return walk(window.__qua.__editor.store.blocks)
+    }, gid)
+  const kidsBefore = await kidsOf(fx.rows[0])
+  await page.evaluate(() => document.querySelector('.vcol[data-group-block-id] .vcol-add')?.click())
+  await page.waitForTimeout(450)
+  assert((await kidsOf(fx.rows[0])) === kidsBefore + 1, `组头的 ＋ 在那一组末尾插一个子块：${kidsBefore} → ${await kidsOf(fx.rows[0])}`)
+  assert((await state()).cards === 6, '新卡出现在那一列里')
+
+  // 清掉分组 ⇒ 回网格（同一张看法；记录回到一级子块）
+  await page.evaluate(
+    ({ rid, vid }) => window.__qua.invoke('core.view/set-group', { blockId: rid, viewId: vid, groupBy: '' }),
+    { rid: fx.root, vid: viewId },
+  )
+  await page.waitForTimeout(450)
+  const back = await state()
+  assert(back.layout === 'grid', `清掉分组回网格：${JSON.stringify(back)}`)
+  assert(back.cards === 3, `网格的卡＝一级子块：${back.cards}`)
+
+  await ctx.close()
+  return `3 组／5 卡 → 拖卡换父并撤销 → 组头 ＋ → 清掉回网格`
+})
+
 await check('T197 全部收起／全部展开：一个按钮、文案随状态变；只作用于顶层行；非大纲视图下隐藏', async () => {
   const { ctx, page } = await freshPage(browser, base)
   // ① 打开「产品设计」页里那个查询块（条件＝本页之下未完成的待办）

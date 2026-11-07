@@ -25,6 +25,7 @@ import {
   childrenRecords,
   defaultColumnsForSource,
   groupChoicesOf,
+  groupsByStructure,
   displayNameOf,
   expandContexts,
   hasLiveChildren,
@@ -48,6 +49,7 @@ import {
   readViewSet,
   todayISO,
   slicedSpec,
+  structureGroupsOf,
   type Block,
   type ClickMods,
   type FoldState,
@@ -85,6 +87,14 @@ import { ViewMindmap } from '../views/view-mindmap.ts'
 import { ViewListTable } from '../views/view-list-table.ts'
 import { ViewTable } from '../views/view-table.ts'
 import { ViewGrouped } from '../views/view-grouped.ts'
+
+/**
+ * 分组下拉里「按一级子块」的那一项（**UI-only 哨兵**）。
+ *
+ * 落盘的是 `ViewConfig.groupByStructure: true`，不是这个字符串——
+ * 它是 `<option>` 的 value，只活在 DOM 里；不要写进 `_views`。
+ */
+const STRUCTURE_GROUP = '\u0000structure'
 
 /**
  * 条件树开没开：**设备状态，不落盘、不进 KB**。
@@ -955,6 +965,11 @@ export class ViewHost {
     if (!record || !view || this.deps.derived) return
     // 卡片的分组列**不支持多值属性**：拖卡写值没有唯一动作——多值去表格分组
     const cards = kind === 'cards'
+    /**
+     * 「按一级子块」只对 **children 源的卡片**成立：组是容器的直接子块。
+     * query 源的命中是平的（没有「一级」），别把这一项列出来——写了也没人消费。
+     */
+    const structureOk = cards && this.source.kind === 'children'
     const choices = groupChoicesOf(this.records(), {
       fields: this.deps.fields(),
       cardinalityOf: (id) => this.cardinalityOf(id),
@@ -964,6 +979,13 @@ export class ViewHost {
     none.value = ''
     none.textContent = t('ui.query.group.none')
     options.push(none)
+    if (structureOk) {
+      const o = document.createElement('option')
+      // UI-only 哨兵：落盘的是 `groupByStructure:true`，不是这个值
+      o.value = STRUCTURE_GROUP
+      o.textContent = t('ui.query.group.structure')
+      options.push(o)
+    }
     for (const c of choices) {
       const o = document.createElement('option')
       o.value = c.key
@@ -971,16 +993,19 @@ export class ViewHost {
       options.push(o)
     }
     this.els.group.replaceChildren(...options)
-    this.els.group.value = view.groupBy ?? ''
-    if (this.els.group.value !== (view.groupBy ?? '')) {
+    this.els.group.value = groupsByStructure(view) ? STRUCTURE_GROUP : (view.groupBy ?? '')
+    if (!options.some((o) => o.value === this.els.group.value)) {
       // 存着的分组键不在候选里（这批结果没有这一栏了）⇒ 显示「无分组」，不悄悄改配置
       this.els.group.value = ''
     }
     this.els.group.onchange = () => {
+      const picked = this.els.group.value
+      const structure = picked === STRUCTURE_GROUP
       this.deps.invoke('core.view/set-group', {
         owner: this.writeOwner,
         viewId: view.id,
-        groupBy: this.els.group.value,
+        groupBy: structure ? '' : picked,
+        ...(structure ? { structure: true } : {}),
       })
     }
   }
@@ -1529,6 +1554,17 @@ export class ViewHost {
           cardinalityOf: (id) => this.cardinalityOf(id),
           setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
           clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
+          // 结构分组只接 children 源：组＝直接子块、记录＝它的孩子（query 命中是平的，没有一级）
+          structureGroups: () => {
+            const src = this.source
+            return src.kind === 'children' ? structureGroupsOf(src.blockId, this.deps.kb) : []
+          },
+          // 拖卡＝换父（结构与撤销都归命令层），不是写某个字段的值
+          moveInto: (blockId, groupBlockId) =>
+            this.deps.invoke('core.block/move-to', { blockId, targetId: groupBlockId }),
+          // 加一张卡＝在组块末尾插一个子块（与大纲里 ↵＋Tab 同一条写路径）
+          insertCard: (groupBlockId) =>
+            this.deps.invoke('core.view/new-row', { owner: this.writeOwner, blockId: groupBlockId }),
           openBlock: (id, place) => this.deps.openBlock(id, place),
           cell: this.cell,
         })
