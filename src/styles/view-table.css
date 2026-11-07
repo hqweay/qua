@@ -662,16 +662,29 @@ button.queryview-chip:hover {
   font-size: var(--ui-fs-sm);
 }
 
-/* ---------------------------------------------------------------- 看板
-   按某一列的单值分组。卡拖到另一列＝**写那一格的值**，不是换父子。 */
-.vb {
+/* ---------------------------------------------------------------- 卡片
+   一种看法、两副面孔：不分组＝网格（画廊），分组＝列（看板）。
+   卡片本体只有一份；差别全在容器（`data-layout`）与封面位的有无。 */
+.vcards[data-layout='columns'] {
   display: flex;
   gap: var(--ui-gap-3);
   align-items: flex-start;
   overflow-x: auto;
   padding-bottom: var(--ui-gap-2);
 }
-.vb-col {
+.vcards[data-layout='grid'] {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: var(--ui-gap-3);
+}
+.vcards[data-layout='grid'][data-size='s'] {
+  grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+}
+.vcards[data-layout='grid'][data-size='l'] {
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+}
+/* 列：一列＝一个分组值；空列也画（「把这个状态的东西挪走」要有落点） */
+.vcol {
   flex: 0 0 15rem;
   display: flex;
   flex-direction: column;
@@ -681,72 +694,49 @@ button.queryview-chip:hover {
   background: var(--ui-surface-sunken);
   min-height: 4rem;
 }
-.vb-col[data-drop-target='1'] {
+.vcol[data-drop-target='1'] {
   outline: 1px dashed var(--ui-accent);
 }
-.vb-col-head {
+.vcol-head {
   display: flex;
   align-items: center;
   gap: var(--ui-gap-2);
   color: var(--ui-text-secondary);
   font-size: var(--ui-fs-xs);
 }
-.vb-col-name {
+.vcol-name {
   flex: 1;
   min-width: 0;
 }
-.vb-col-count {
+.vcol-count {
   color: var(--ui-text-tertiary);
 }
-.vb-cards {
+.vcol-cards {
   display: flex;
   flex-direction: column;
   gap: var(--ui-gap-2);
 }
-.vb-card {
-  padding: var(--ui-gap-2);
-  border-radius: var(--ui-radius-sm);
-  background: var(--ui-surface);
-  cursor: pointer;
-}
-.vb-card:hover {
-  background: var(--ui-surface-raised);
-}
-.vb-card-title {
-  color: var(--ui-text);
-}
-.vb-card-field {
-  margin-top: var(--ui-gap-1);
-  color: var(--ui-text-tertiary);
-  font-size: var(--ui-fs-xs);
-}
-
-/* ---------------------------------------------------------------- 画廊 */
-.vg {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
-  gap: var(--ui-gap-3);
-}
-.vg[data-size='s'] {
-  grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
-}
-.vg[data-size='l'] {
-  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
-}
-.vg-card {
+/* 卡：两副面孔共用同一份身体（标题 ＋ 字段 ＋ 可选封面） */
+.vcard {
   display: flex;
   flex-direction: column;
   gap: var(--ui-gap-1);
   padding: var(--ui-gap-2);
-  border-radius: var(--ui-radius-md);
-  background: var(--ui-surface-sunken);
+  border-radius: var(--ui-radius-sm);
   cursor: pointer;
   min-width: 0;
 }
-.vg-card:hover {
+.vcards[data-layout='columns'] .vcard {
+  background: var(--ui-surface);
+}
+.vcards[data-layout='grid'] .vcard {
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface-sunken);
+}
+.vcards .vcard:hover {
   background: var(--ui-surface-raised);
 }
-.vg-cover {
+.vcard-cover {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -757,15 +747,15 @@ button.queryview-chip:hover {
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-lg);
 }
-.vg-cover-img {
+.vcard-cover-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.vg-card-title {
+.vcard-title {
   color: var(--ui-text);
 }
-.vg-card-field {
+.vcard-field {
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-xs);
 }

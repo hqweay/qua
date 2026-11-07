@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, propDisplayLabels, propKindOf, propLabel, choicesOf, choicesFor, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, type UndoKind } from './core/index.ts'
+import { addAlias, addList, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propDisplayLabels, propKindOf, propLabel, choicesOf, choicesFor, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, type UndoKind } from './core/index.ts'
 import { choiceDisplayLabel, cardinalityOf, singleValueOf, valueListOf } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
@@ -1674,7 +1674,14 @@ const app: App = {
       rows.push({
         id: `view//${v.id}`,
         label: viewNameOf(v, (k) => t(`ui.view.kind.${k}`)),
-        icon: v.kind === 'list-table' ? 'lucide:table-properties' : 'lucide:table',
+        icon:
+          v.kind === 'list-table'
+            ? 'lucide:table-properties'
+            : v.kind === 'cards'
+              ? cardLayoutOf(v) === 'columns'
+                ? 'lucide:columns-3'
+                : 'lucide:layout-grid'
+              : 'lucide:table',
         ...(v.filter ? { hint: t('ui.view.slice') } : {}),
         ...(active?.id === v.id ? { keyHint: t('ui.view.current') } : {}),
       })
@@ -1731,12 +1738,29 @@ const app: App = {
       table: 'lucide:table',
       'list-table': 'lucide:table-properties',
       list: 'lucide:list',
-      board: 'lucide:columns-3',
-      gallery: 'lucide:layout-grid',
       calendar: 'lucide:calendar',
       mindmap: 'lucide:git-fork',
     }
     for (const kind of storedKindsFor(source)) {
+      /**
+       * 卡片有**两条预设**（看板＝分组列，画廊＝不分组），但只有一种 kind：
+       * 用户找的是这两个词，模型里只有一个（布局从 `groupBy` 派生）。
+       */
+      if (kind === 'cards') {
+        rows.push({
+          id: 'view/add/board',
+          label: t('ui.view.addBoard'),
+          icon: 'lucide:columns-3',
+          group: 'view/9-add',
+        })
+        rows.push({
+          id: 'view/add/gallery',
+          label: t('ui.view.addGallery'),
+          icon: 'lucide:layout-grid',
+          group: 'view/9-add',
+        })
+        continue
+      }
       rows.push({
         id: `view/add/${kind}`,
         // 建的行一律「新建 X」：裸 kind 名读起来像「切过去」，点下去却是建——

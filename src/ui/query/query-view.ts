@@ -82,9 +82,8 @@ import { EditableBlock } from '../block-ui/editable-block.ts'
 import { mountTitleEditor, type TitleEditor } from '../block-ui/title-editor.ts'
 import { queryChips } from './query-builder.ts'
 import { QueryTree, treeSummary } from './query-tree.ts'
-import { ViewBoard } from '../views/view-board.ts'
+import { ViewCards } from '../views/view-cards.ts'
 import { ViewCalendar } from '../views/view-calendar.ts'
-import { ViewGallery } from '../views/view-gallery.ts'
 import { ViewList } from '../views/view-list.ts'
 import { ViewMindmap } from '../views/view-mindmap.ts'
 import { ViewListTable } from '../views/view-list-table.ts'
@@ -407,9 +406,8 @@ export class ViewHost {
   private listTable: ViewListTable | null = null
   /** 记录列表分支（query／children／items 三种源都接） */
   private list: ViewList | null = null
-  /** 看板／画廊／日历／导图：各建各的实例（切走就 dispose） */
-  private board: ViewBoard | null = null
-  private gallery: ViewGallery | null = null
+  /** 卡片分支（看板／画廊是同一张看法的两副面孔，`cardLayoutOf` 决定画成列还是网格） */
+  private cards: ViewCards | null = null
   private calendar: ViewCalendar | null = null
   private mindmap: ViewMindmap | null = null
   /** 分组包装（列表／表格带 `groupBy` 时）：段头归它、段身归各 kind 渲染器 */
@@ -602,10 +600,8 @@ export class ViewHost {
     this.listTable = null
     this.list?.dispose()
     this.list = null
-    this.board?.dispose()
-    this.board = null
-    this.gallery?.dispose()
-    this.gallery = null
+    this.cards?.dispose()
+    this.cards = null
     this.calendar?.dispose()
     this.calendar = null
     this.mindmap?.dispose()
@@ -789,8 +785,7 @@ export class ViewHost {
     }
     if (view?.kind === 'list-table') this.listTable?.render()
     else if (view?.kind === 'list') (this.grouped ?? this.list)?.render()
-    else if (view?.kind === 'board') this.board?.render()
-    else if (view?.kind === 'gallery') this.gallery?.render()
+    else if (view?.kind === 'cards') this.cards?.render()
     else if (view?.kind === 'calendar') this.calendar?.render()
     else if (view?.kind === 'mindmap') this.mindmap?.render()
     else if (view?.kind === 'table') {
@@ -979,15 +974,15 @@ export class ViewHost {
    */
   private paintGroup(view: ViewConfig | null): void {
     const kind = view?.kind
-    const record = kind === 'list' || kind === 'table' || kind === 'board' || kind === 'gallery'
+    const record = kind === 'list' || kind === 'table' || kind === 'cards'
     this.els.group.hidden = !record || !view || Boolean(this.deps.derived)
     if (!record || !view || this.deps.derived) return
-    // 卡片（看板）的分组列**不支持多值属性**：拖卡写值没有唯一动作——多值去列表/表格分组
-    const board = kind === 'board'
+    // 卡片的分组列**不支持多值属性**：拖卡写值没有唯一动作——多值去列表/表格分组
+    const cards = kind === 'cards'
     const choices = groupChoicesOf(this.records(), {
       fields: this.deps.fields(),
       cardinalityOf: (id) => this.cardinalityOf(id),
-    }).filter((c) => !(board && c.multi))
+    }).filter((c) => !(cards && c.multi))
     const options: HTMLOptionElement[] = []
     const none = document.createElement('option')
     none.value = ''
@@ -1544,13 +1539,9 @@ export class ViewHost {
       this.list?.dispose()
       this.list = null
     }
-    if (want !== 'board') {
-      this.board?.dispose()
-      this.board = null
-    }
-    if (want !== 'gallery') {
-      this.gallery?.dispose()
-      this.gallery = null
+    if (want !== 'cards') {
+      this.cards?.dispose()
+      this.cards = null
     }
     if (want !== 'calendar') {
       this.calendar?.dispose()
@@ -1561,13 +1552,11 @@ export class ViewHost {
       this.mindmap = null
     }
     this.els.table.hidden = false
-    if (want === 'board') {
-      if (!this.board) {
-        this.board = new ViewBoard({
-          store: this.deps.store,
+    if (want === 'cards') {
+      if (!this.cards) {
+        this.cards = new ViewCards({
           records: () => this.records(),
           view: () => this.view ?? view,
-          fieldLabel: (id) => this.deps.fields().find((f) => f.id === id)?.label ?? id.slice(-6),
           choices: (id) => (id === '_tags' ? this.tagChoices() : this.deps.choices?.(id) ?? []),
           cardinalityOf: (id) => this.cardinalityOf(id),
           setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
@@ -1575,23 +1564,9 @@ export class ViewHost {
           projectTitle: (r, into) => this.deps.project(r.block, into),
           openBlock: (id, place) => this.deps.openBlock(id, place),
         })
-        this.els.table.replaceChildren(this.board.root)
+        this.els.table.replaceChildren(this.cards.root)
       }
-      this.board.render()
-      return
-    }
-    if (want === 'gallery') {
-      if (!this.gallery) {
-        this.gallery = new ViewGallery({
-          store: this.deps.store,
-          records: () => this.records(),
-          view: () => this.view ?? view,
-          projectTitle: (r, into) => this.deps.project(r.block, into),
-          openBlock: (id, place) => this.deps.openBlock(id, place),
-        })
-        this.els.table.replaceChildren(this.gallery.root)
-      }
-      this.gallery.render()
+      this.cards.render()
       return
     }
     if (want === 'calendar') {
@@ -1722,7 +1697,7 @@ export class ViewHost {
     })
   }
 
-  /** 类型与数据形状先就位，渲染器随后（列表/看板/画廊/日历/导图）；这里给一句实话而不是空屏 */
+  /** 类型与数据形状先就位，渲染器随后（列表/卡片/日历/导图）；这里给一句实话而不是空屏 */
   private paintBodyFallback(): void {
     this.els.table.replaceChildren()
     const p = document.createElement('p')

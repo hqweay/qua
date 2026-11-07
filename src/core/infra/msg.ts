@@ -571,7 +571,6 @@ export const MSG = {
   'ui.list.empty': '这一份源还没有记录',
   'ui.list.open': '打开这一条',
   /* 卡片（看板）：按某一列的单值分组；拖卡＝写属性（不是 re-parent） */
-  'ui.board.needsGroup': '看板要选一列来分组（视图菜单里挑一列）',
   'ui.board.unset': '未设置',
   'ui.board.noMultiGroup': '看板的分组列不支持多值属性（多值请在列表或表格里分组）',
   /* 画廊：封面是派生的（正文里第一张图） */
@@ -587,8 +586,12 @@ export const MSG = {
   'ui.mindmap.empty': '这一块没有子块',
   'ui.view.kind.table': '表格',
   'ui.view.kind.list-table': '大纲表格',
-  'ui.view.kind.board': '看板',
-  'ui.view.kind.gallery': '画廊',
+  /* 卡片：一种看法，两副面孔（不分组＝网格，分组＝列） */
+  'ui.view.kind.cards': '卡片',
+  'ui.view.layout.board': '看板',
+  'ui.view.layout.gallery': '画廊',
+  'ui.view.addBoard': '新建看板',
+  'ui.view.addGallery': '新建画廊',
   'ui.view.kind.calendar': '日历',
   'ui.view.kind.mindmap': '思维导图',
   'ui.view.outline': '大纲',

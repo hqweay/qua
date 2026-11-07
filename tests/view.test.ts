@@ -19,6 +19,7 @@ import {
   activeView,
   activeViewId,
   canonicalViews,
+  cardLayoutOf,
   childrenRecords,
   cloneSubtree,
   defaultColumnsForSource,
@@ -118,13 +119,13 @@ test('readViews：逐项校验，坏项只丢这一项（不抛、不连坐）',
   assert.deepEqual(views[0]!.table?.columns, [{ key: 'title', width: 260 }], '列配置原样留下')
 })
 
-test('canonicalViews：只保留 kind 对应的那份子配置（table 不把 board 配置带走）', () => {
+test('canonicalViews：只保留 kind 对应的那份子配置（table 不把卡片配置带走）', () => {
   const views = canonicalViews(
-    [{ id: 'v', kind: 'table', table: { columns: [{ key: 'title' }] }, board: { groupBy: 'x' }, name: '表' }],
+    [{ id: 'v', kind: 'table', table: { columns: [{ key: 'title' }] }, cards: { cover: 'none' }, name: '表' }],
     { kind: 'children', blockId: 'n' },
   )
   assert.equal(views.length, 1)
-  assert.equal(views[0]!.board, undefined, 'table 视图不该带着 board 配置')
+  assert.equal(views[0]!.cards, undefined, 'table 视图不该带着卡片配置')
   assert.deepEqual(views[0]!.table?.columns, [{ key: 'title' }])
   assert.equal(views[0]!.name, '表')
 })
@@ -562,26 +563,29 @@ test('命名／删除：多切片各自带 filter，改名不丢切片，删一�
 })
 
 test('分组键是记录视图共用的顶层位：canonical 往返、清掉删键、多值判据只有一份', () => {
-  // 看板的分组住在顶层，board 子配置只剩卡片自己的东西；board 不带分组也合法（空看板）
+  // 卡片的布局从分组键派生（不存 layout），cards 子配置只剩卡片自己的东西；
+  // 不分组也合法（＝网格）
   const views = canonicalViews(
     [
-      { id: 'a', kind: 'board', groupBy: '_tags', groupOrder: ['t2', 't1'], board: { showEmpty: true } },
-      { id: 'b', kind: 'board' },
+      { id: 'a', kind: 'cards', groupBy: '_tags', groupOrder: ['t2', 't1'], cards: { cover: 'none', showEmpty: true } },
+      { id: 'b', kind: 'cards' },
       { id: 'c', kind: 'table', groupBy: 'p1' },
     ],
     { kind: 'children', blockId: 'x' },
   )
-  const board = views.find((v) => v.id === 'a')!
-  assert.equal(board.groupBy, '_tags', '分组键收顶层位')
-  assert.deepEqual(board.groupOrder, ['t2', 't1'])
-  assert.deepEqual(board.board, { showEmpty: true }, 'board 子配置不再带 groupBy')
+  const card = views.find((v) => v.id === 'a')!
+  assert.equal(card.groupBy, '_tags', '分组键收顶层位')
+  assert.deepEqual(card.groupOrder, ['t2', 't1'])
+  assert.deepEqual(card.cards, { cover: 'none', showEmpty: true }, 'cards 子配置不再带 groupBy')
   const bare = views.find((v) => v.id === 'b')!
-  assert.equal(bare.groupBy, undefined, '没有分组的看板合法（不再是「丢掉整张」）')
+  assert.equal(bare.groupBy, undefined, '没有分组的卡片合法（＝网格，不再是「丢掉整张」）')
+  assert.equal(cardLayoutOf(card), 'columns', '有分组键 ⇒ 列（看板）')
+  assert.equal(cardLayoutOf(bare), 'grid', '没有分组键 ⇒ 网格（画廊）')
   const table = views.find((v) => v.id === 'c')!
   assert.equal(table.groupBy, 'p1', '表格同样能带分组键（分节呈现待做，配置位先行）')
 
   // withGroup：写一格／清掉删键（空配置不留「曾经分过」的痕迹）
-  const v0: ViewConfig = { id: 'v', kind: 'board' }
+  const v0: ViewConfig = { id: 'v', kind: 'cards' }
   const grouped = withGroup(v0, 'p1', ['a', ''])
   assert.equal(grouped.groupBy, 'p1')
   assert.deepEqual(grouped.groupOrder, ['a'], '组序里的空串滤掉')
@@ -592,4 +596,30 @@ test('分组键是记录视图共用的顶层位：canonical 往返、清掉删�
   // 多值键判据：现阶段只有标签归属；同一份判据喂候选标注／分桶／拖拽三处
   assert.equal(isMultiValueKey('_tags'), true)
   assert.equal(isMultiValueKey('p1'), false)
+})
+
+test('卡片配置一份：cover／size／fields／showEmpty 原样往返；布局是派生的，切布局不搬配置', () => {
+  const [v] = canonicalViews(
+    [{ id: 'c', kind: 'cards', cards: { cover: 'none', size: 'l', fields: ['p1', 'title'], showEmpty: true } }],
+    { kind: 'children', blockId: 'x' },
+  )
+  assert.deepEqual(
+    v!.cards,
+    { cover: 'none', size: 'l', fields: ['p1', 'title'], showEmpty: true },
+    '写进去的必须能原样读回来（否则就是「设了没生效」）',
+  )
+
+  // 同一份配置，换个分组键就换容器：卡片配置不搬家
+  const columns = withGroup(v!, 'p1')
+  assert.equal(cardLayoutOf(v), 'grid')
+  assert.equal(cardLayoutOf(columns), 'columns')
+  assert.deepEqual(columns.cards, v!.cards, '换布局不动卡片配置（一份配置两副面孔）')
+
+  // 坏档位／空字段：丢掉，不抛（一个错键不该让整个块打不开）
+  const [bad] = canonicalViews(
+    [{ id: 'c', kind: 'cards', cards: { size: 'xl', fields: [] } }],
+    { kind: 'children', blockId: 'x' },
+  )
+  assert.equal(bad!.cards?.size, undefined, '不在三档里的尺寸丢掉')
+  assert.equal(bad!.cards?.fields, undefined, '空字段＝没配（删键，不留空数组）')
 })

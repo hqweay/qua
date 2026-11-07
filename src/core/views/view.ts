@@ -33,8 +33,33 @@ import { canonicalNode, isQueryNode, type QueryNode, type QuerySpec, type SortKe
  * `outline` **不落盘**——它等价于「没有激活视图」（children/query 源的默认）。
  * `list` 是**记录列表**（标题 ＋ 可选字段），不是大纲树：没有缩进、没有折叠三角。
  * `list-table` 是**结构映射表**（表头＝直接子块、一列＝它的孩子），只接 children。
+ * `cards` 是**卡片**：同一批记录、同一张卡，容器由**分组键**决定（见 `cardLayoutOf`）。
  */
-export type ViewKind = 'outline' | 'list' | 'table' | 'list-table' | 'board' | 'gallery' | 'calendar' | 'mindmap'
+export type ViewKind = 'outline' | 'list' | 'table' | 'list-table' | 'cards' | 'calendar' | 'mindmap'
+
+/**
+ * 卡片的两副面孔。**不是两个 kind**：卡片本体（标题 ＋ 字段 ＋ 可选封面）只有一份，
+ * 差别只在容器——不分组是网格（画廊），分组是列（看板）。
+ *
+ * 判据：换过去「身体」没变（同一张卡、同一批记录），变的是它怎么被摆，
+ * 而「怎么摆」已经有配置位（`groupBy`）能表达。为它再裂一个 kind 就是同一件事的第二份答案。
+ */
+export type CardLayout = 'grid' | 'columns'
+
+/** 卡片视图的配置（**一份**，两副面孔共用：切布局不丢字段/封面/尺寸） */
+export interface CardsConfig {
+  /**
+   * 封面：取这张卡**正文里的第一张图**（派生的，不存「我选了哪张」）。
+   * `none` ＝ 不画封面位（看板的默认：任务卡上放图是噪声）。
+   */
+  cover?: 'first-asset' | 'none'
+  /** 网格布局的卡宽档位（列布局不看它：列宽由容器定） */
+  size?: 's' | 'm' | 'l'
+  /** 卡上显示哪几个字段（属性定义 id 或保留键）；缺省只显示标题 */
+  fields?: string[]
+  /** 列布局：把声明过、但这一批里没出现的值也画成空列（「把这个状态的东西挪走」要有落点） */
+  showEmpty?: boolean
+}
 
 /** 可落盘的视图种类（`outline` 不在其中） */
 export type StoredViewKind = Exclude<ViewKind, 'outline'>
@@ -51,7 +76,7 @@ export type DerivedViewKind = 'outline' | Extract<StoredViewKind, 'list' | 'tabl
 /** 派生栏允许的看法（**唯一一份**：prefs 归一与 UI 的切换器都读它） */
 export const DERIVED_VIEW_KINDS: readonly DerivedViewKind[] = ['outline', 'list', 'table']
 
-const STORED_KINDS: readonly StoredViewKind[] = ['list', 'table', 'list-table', 'board', 'gallery', 'calendar', 'mindmap']
+const STORED_KINDS: readonly StoredViewKind[] = ['list', 'table', 'list-table', 'cards', 'calendar', 'mindmap']
 
 /**
  * 可落盘的视图种类（**唯一一份**）：命令面与读路径都要判「这个 kind 认不认识」。
@@ -70,8 +95,8 @@ export const STORED_VIEW_KINDS: readonly StoredViewKind[] = STORED_KINDS
  * `canonicalViews` 与 UI 的「能切哪几种」都读这一张表。
  */
 export const STORED_KINDS_BY_SOURCE: Record<Source['kind'], readonly StoredViewKind[]> = {
-  query: ['list', 'table', 'board', 'gallery', 'calendar'],
-  children: ['list', 'table', 'list-table', 'board', 'gallery', 'calendar', 'mindmap'],
+  query: ['list', 'table', 'cards', 'calendar'],
+  children: ['list', 'table', 'list-table', 'cards', 'calendar', 'mindmap'],
 }
 
 /** 这一份源能落盘的视图种类 */
@@ -84,6 +109,20 @@ export function storedKindsFor(source: Source): readonly StoredViewKind[] {
  */
 export function defaultKindFor(_source: Source): ViewKind {
   return 'outline'
+}
+
+/**
+ * 卡片这一张视图**长成网格还是列**（**唯一判据**）。
+ *
+ * 判据只有一条：**有没有分组键**。不分组＝看一堆卡（画廊），分组＝按值分列（看板）。
+ * 为什么不存一格 `layout`：那会允许「分组了但排成网格」这类没有消费者的组合，
+ * 而且与「分组是记录视图共用位」的口径打成两份答案。
+ *
+ * 拖拽门禁、空态、窄宽降级、选择器候选都读它——各判一遍的下场是
+ * 「下拉选了分组，屏幕没变成列」。
+ */
+export function cardLayoutOf(v: ViewConfig | null | undefined): CardLayout {
+  return v && typeof v.groupBy === 'string' && v.groupBy !== '' ? 'columns' : 'grid'
 }
 
 /**
@@ -140,7 +179,7 @@ export interface ListConfig {
 /**
  * 一个命名视图（`_views[]` 里的一项）。
  *
- * 只保留**这个 kind 自己的**子配置：table 视图不带着 board 配置走（两份配置迟早分叉）。
+ * 只保留**这个 kind 自己的**子配置：table 视图不带着 cards 配置走（两份配置迟早分叉）。
  *
  * ⚠️ `list` 是记录列表，`listTable` 是结构映射表 —— 名字必须分开，
  *    因为它们曾经共用一个 `list` 键（那时「列表视图」还不存在）。
@@ -160,9 +199,11 @@ export interface ViewConfig {
    */
   filter?: QueryNode
   /**
-   * **分组键**（记录视图共用）：看板＝列、表格＝分节、画廊＝分堆——
+   * **分组键**（记录视图共用）：卡片＝列（看板），表格＝分节，列表＝分段——
    * 一个组、多种呈现，键不随视图种类各存一份。键＝列键（属性定义块 id 或保留键；
    * `_tags` ＝ 按标签归属分堆）。分组按**当前值**实时导出，不是成员集合的第二份答案。
+   *
+   * ⚠️ 对**卡片**它还是布局开关：`''` ⇒ 网格，有键 ⇒ 列（`cardLayoutOf` 一份判据）。
    */
   groupBy?: string
   /** 组的呈现顺序（存**原始值**：select 是选项块 id、`_tags` 是标签块 id）。缺省＝声明序 ＋ 第一次出现，「未设置」恒最后。 */
@@ -172,8 +213,8 @@ export interface ViewConfig {
   list?: ListConfig
   /** 结构映射表：**只有排序**，没有列（列＝一个直接子块，不是配置） */
   listTable?: { sort?: ListSort }
-  board?: { cardFields?: string[]; showEmpty?: boolean }
-  gallery?: { cover?: 'first-asset' | 'none'; cardFields?: string[]; size?: 's' | 'm' | 'l' }
+  /** 卡片（看板／画廊是它的两副面孔，不是两个 kind） */
+  cards?: CardsConfig
   calendar?: { dateBy: string; showUndated?: boolean }
   mindmap?: { cardFields?: string[]; direction?: 'both' | 'right' }
 }
@@ -321,6 +362,27 @@ function listSortOf(raw: unknown): ListSort | undefined {
 }
 
 /**
+ * 卡片配置的**形状**（两边共用一份：写进去的必须能原样读回来）。
+ *
+ * 三种缺省都由这里定，不在渲染器里各判一遍：
+ *   · `cover` 缺省 = `first-asset`（卡片默认尝试取图；看板预设显式写 `none`）；
+ *   · `size` 只在合法档位里留（网格布局才看它）；
+ *   · 空 `fields` 删键（「没配」与「配了空」必须只有一种写法）。
+ */
+function cardsOf(raw: unknown): CardsConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const c = raw as Partial<CardsConfig>
+  const out: CardsConfig = { cover: c.cover === 'none' ? 'none' : 'first-asset' }
+  if (Array.isArray(c.fields)) {
+    const fields = c.fields.filter(isStr)
+    if (fields.length > 0) out.fields = fields
+  }
+  if (c.size === 's' || c.size === 'm' || c.size === 'l') out.size = c.size
+  if (c.showEmpty === true) out.showEmpty = true
+  return out
+}
+
+/**
  * 逐项重建视图列表（与 `canonicalSpec` 同一条纪律）。
  *
  * 判据与后果：
@@ -365,14 +427,9 @@ export function canonicalViews(raw: unknown, source: Source): ViewConfig[] {
     } else if (kind === 'list-table') {
       const sort = listSortOf(v.listTable?.sort)
       if (sort) view.listTable = { sort }
-    } else if (kind === 'board') {
-      const b = v.board
-      if (b && typeof b === 'object') {
-        if (Array.isArray(b.cardFields)) view.board = { cardFields: b.cardFields.filter(isStr) }
-        if (b.showEmpty === true) view.board = { ...(view.board ?? {}), showEmpty: true }
-      }
-    } else if (kind === 'gallery') {
-      view.gallery = { cover: v.gallery?.cover === 'none' ? 'none' : 'first-asset' }
+    } else if (kind === 'cards') {
+      const cards = cardsOf(v.cards)
+      if (cards) view.cards = cards
     } else if (kind === 'calendar') {
       const c = v.calendar
       if (!c || typeof c !== 'object' || !isStr(c.dateBy)) continue
@@ -884,6 +941,11 @@ function cloneView(v: ViewConfig): ViewConfig {
     out.list = list
   }
   if (v.listTable) out.listTable = v.listTable.sort ? { sort: { ...v.listTable.sort } } : {}
+  if (v.cards) {
+    const cards: CardsConfig = { ...v.cards }
+    if (v.cards.fields) cards.fields = [...v.cards.fields]
+    out.cards = cards
+  }
   return out
 }
 

@@ -123,7 +123,14 @@ export function viewConfigCommands(
     addView: (owner, kindRaw) => {
       const source = sourceOfRef(d, owner)
       if (!source) return ''
-      const kind = storedKindsFor(source).find((k) => k === kindRaw)
+      /**
+       * **卡片的两条预设**：`board`／`gallery` 不是两种 kind，只是同一张看法带不带分组
+       * （`cardLayoutOf` 从 `groupBy` 派生布局）。保留这两个名字，是因为用户找的正是
+       * 「看板」「画廊」这两个词（菜单与命令面板都按它列）；模型里只有一种卡片。
+       */
+      const preset = kindRaw === 'board' || kindRaw === 'gallery' ? kindRaw : ''
+      const want = preset === '' ? kindRaw : 'cards'
+      const kind = storedKindsFor(source).find((k) => k === want)
       if (!kind) {
         d.toast(t('ui.view.unknownKind'), 'warn')
         return ''
@@ -132,39 +139,46 @@ export function viewConfigCommands(
       const view: ViewConfig = { id, kind }
       if (kind === 'table') {
         view.table = { columns: defaultColumnsForSource(source, d.kb) }
-      } else if (kind === 'board') {
+      } else if (kind === 'cards') {
         /**
-         * 分组列先给一个**能分组**的：第一个 `select`（值域有限），
-         * 退到第一个 `checkbox`（真/假两列也说得通）。
+         * 看板预设：分组列先给一个**能分组**的（第一个 `select`，退到第一个 `checkbox`）。
          *
-         * ⚠️ 一个都没有 ⇒ **当场拒绝**，不写库：没有分组的看板是「一堆没有列的卡」，
+         * ⚠️ 一个都没有 ⇒ **当场拒绝**，不写库：没有分组的卡片是「一堆格子」，
          * 用户看到的是「点了新建看板，什么也没发生」。不如明说「先按一个属性分组」。
+         * 画廊预设＝同一张看法**不分组**（网格），封面取正文第一张图。
          */
-        const groupBy = firstDefOf(d, 'select') ?? firstDefOf(d, 'checkbox')
-        if (!groupBy) {
-          d.toast(t('ui.view.boardNeedsField'), 'warn')
-          return ''
+        if (preset === 'board') {
+          const groupBy = firstDefOf(d, 'select') ?? firstDefOf(d, 'checkbox')
+          if (!groupBy) {
+            d.toast(t('ui.view.boardNeedsField'), 'warn')
+            return ''
+          }
+          view.groupBy = groupBy
+          view.cards = { cover: 'none' }
+        } else {
+          view.cards = { cover: 'first-asset' }
         }
-        view.groupBy = groupBy
       } else if (kind === 'calendar') {
         // 日期列：第一个 `date` 定义；任何块都可能有 `_date`（日记块）⇒ 退到它
         view.calendar = { dateBy: firstDefOf(d, 'date') ?? '_date' }
-      } else if (kind === 'gallery') {
-        view.gallery = { cover: 'first-asset' }
       } else if (kind === 'mindmap') {
         view.mindmap = { direction: 'both' }
       }
       /**
-       * 建视图就给**默认名**（kind 显示名，撞名加序号）：`name` 字段一直在，此前无人填，
-       * 于是同 kind 多张在菜单里全叫一个名字，只能靠顺序猜。「表格」「表格 2」
-       * 从此分得开；改名入口另立，不在这里。
+       * 建视图就给**默认名**（卡片按布局叫看板／画廊，其余按 kind；撞名加序号）：
+       * `name` 字段一直在，此前无人填，于是同 kind 多张在菜单里全叫一个名字，
+       * 只能靠顺序猜。「表格」「表格 2」从此分得开；改名入口另立，不在这里。
        */
       const taken = new Set(
         (d.owners.read(owner)?.views ?? []).map((v) => viewNameOf(v, (k) => t(`ui.view.kind.${k}`))),
       )
       {
-        let name = t(`ui.view.kind.${kind}`)
-        for (let n = 2; taken.has(name); n++) name = `${t(`ui.view.kind.${kind}`)} ${n}`
+        const base =
+          kind === 'cards'
+            ? t(preset === 'board' ? 'ui.view.layout.board' : 'ui.view.layout.gallery')
+            : t(`ui.view.kind.${kind}`)
+        let name = base
+        for (let n = 2; taken.has(name); n++) name = `${base} ${n}`
         view.name = name
       }
       d.owners.write(owner, { views: upsertView(d.owners.read(owner)?.views ?? [], view), activeView: id })

@@ -187,7 +187,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.view/toggle-virtualize', title: t('cmd.view.toggle-virtualize'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { on: { type: 'boolean' }, radius: { type: 'integer' } }, keywords: ['virtual', 'window', 'DOM'] },
 
   /* ---- 视图配置（块怎么看：表格/看板/…；大纲 ＝ 没有激活视图） ---- */
-  { name: 'core.view/add', title: t('cmd.view.add'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { owner: {}, kind: { type: 'string' } }, keywords: ['view', t('menu.kw.views'), 'table', 'board', 'gallery', 'calendar'] },
+  { name: 'core.view/add', title: t('cmd.view.add'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { owner: {}, kind: { type: 'string' } }, keywords: ['view', t('menu.kw.views'), 'table', 'cards', 'board', 'gallery', 'calendar'] },
   { name: 'core.view/set-active', title: t('cmd.view.set-active'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { owner: {}, viewId: { type: 'string' } }, keywords: ['view', t('menu.kw.views'), 'outline', 'switch'] },
   { name: 'core.view/remove', title: t('cmd.view.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { owner: {}, viewId: { type: 'string' } }, keywords: ['view', t('menu.kw.views'), 'remove', 'delete'] },
   { name: 'core.view/rename', title: t('cmd.view.rename'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { owner: {}, name: { type: 'string' } }, keywords: ['view', t('menu.kw.views'), 'rename'] },

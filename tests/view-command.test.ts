@@ -62,7 +62,7 @@ function depsOf(blocks: Block[]): {
   return { d, writes, toasts }
 }
 
-test('addView(board)：没有 select/checkbox 属性 ⇒ 拒绝并提示，不写 `_views`（不是静默消失）', () => {
+test('addView(看板预设)：没有 select/checkbox 属性 ⇒ 拒绝并提示，不写 `_views`（不是静默消失）', () => {
   const root = mkBlock('')
   root.id = 'root'
   const { d, writes, toasts } = depsOf([root])
@@ -75,7 +75,7 @@ test('addView(board)：没有 select/checkbox 属性 ⇒ 拒绝并提示，不�
   assert.match(toasts[0]!, /按一个属性分组/, `提示要指到「缺什么」：${toasts[0]}`)
 })
 
-test('addView(board)：有分组属性时照常建，并把分组列写进配置', () => {
+test('addView(看板预设)：有分组属性时照常建，落成 `cards` ＋ 顶层分组键（布局从分组键派生）', () => {
   const root = mkBlock('')
   root.id = 'root'
   const status = mkPropDef('状态', 'select')
@@ -87,14 +87,37 @@ test('addView(board)：有分组属性时照常建，并把分组列写进配置
   assert.equal(writes.length, 1)
   const views = writes[0]!.patch.views ?? []
   assert.equal(views.length, 1)
-  assert.equal(views[0]!.kind, 'board')
+  assert.equal(views[0]!.kind, 'cards', '看板不是独立的 kind：它是卡片的分组布局')
   assert.equal(views[0]!.groupBy, status.id, '分组列＝那个 select 定义（顶层共用位）')
+  assert.deepEqual(views[0]!.cards, { cover: 'none' }, '看板预设默认不画封面位（任务卡上放图是噪声）')
+  assert.equal(views[0]!.name, '看板', '默认名按布局取，用户找的还是这个词')
   // 写进去的那一份必须能被读路径读回来（否则又是「点了没生效」）
   assert.equal(
     readViews({ ...root, props: { _views: views } }).length,
     1,
     'canonicalViews 认它',
   )
+})
+
+test('addView(画廊预设)：同一张看法、不分组（网格＋封面），与看板是同一 kind', () => {
+  const root = mkBlock('')
+  root.id = 'root'
+  const status = mkPropDef('状态', 'select')
+  const { d, writes } = depsOf([root, status])
+  const app = viewConfigCommands(d)
+
+  const id = app.addView({ kind: 'block', blockId: 'root' }, 'gallery')
+  assert.notEqual(id, '', '画廊不要求任何属性：它只是不分组的卡片')
+  const views = writes[0]!.patch.views ?? []
+  assert.equal(views[0]!.kind, 'cards')
+  assert.equal(views[0]!.groupBy, undefined, '不分组 ⇒ 网格布局')
+  assert.deepEqual(views[0]!.cards, { cover: 'first-asset' }, '画廊尝试取正文第一张图做封面')
+  assert.equal(views[0]!.name, '画廊')
+
+  // 两个预设落在同一种 kind 上：名字不同，模型只有一种卡片
+  app.addView({ kind: 'block', blockId: 'root' }, 'board')
+  const boardView = writes.at(-1)!.patch.views?.[0]
+  assert.equal(boardView?.kind, 'cards', '看板／画廊是两副面孔，不是两个 kind')
 })
 
 test('addView：建视图就给默认名（kind 显示名，撞名加序号）——同 kind 多张从此分得开', () => {
