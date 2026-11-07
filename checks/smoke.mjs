@@ -18379,6 +18379,23 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
   // 文字卡也要有「一张卡」的体积（不是塌成一条）
   const cardBox = await page.locator('.vcard').first().boundingBox()
   assert(cardBox && cardBox.height >= 70, `文本卡也要有卡片体积：${JSON.stringify(cardBox)}`)
+  // 卡片默认就看得出来是卡片：边框 ＋ 投影，不是 hover 才显形
+  const cardLook = await page.evaluate(() => {
+    const el = document.querySelector('.vcard')
+    if (!el) return null
+    const cs = getComputedStyle(el)
+    const text = el.querySelector('.surface-text')
+    return {
+      border: cs.borderTopWidth,
+      shadow: cs.boxShadow,
+      clamp: text ? getComputedStyle(text).webkitLineClamp : '',
+    }
+  })
+  assert(
+    cardLook && cardLook.border !== '0px' && cardLook.shadow !== 'none',
+    `卡片默认要有边框与投影：${JSON.stringify(cardLook)}`,
+  )
+  assert(cardLook.clamp === '3', `卡片正文最多三行、超出省略：${JSON.stringify(cardLook)}`)
 
   // 封面是**配置**（两档），不是新视图
   await page.locator('.queryview .qv-view-current').first().click()

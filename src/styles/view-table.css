@@ -673,14 +673,16 @@ button.queryview-chip:hover {
 }
 .vcards[data-layout='grid'] {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
-  gap: var(--ui-gap-3);
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: var(--ui-gap-4);
+  /* 同一行的卡等高：一排参差比留白更乱 */
+  align-items: stretch;
 }
 .vcards[data-layout='grid'][data-size='s'] {
-  grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
 }
 .vcards[data-layout='grid'][data-size='l'] {
-  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
 }
 /* 列：一列＝一个分组值；空列也画（「把这个状态的东西挪走」要有落点） */
 .vcol {
@@ -715,39 +717,38 @@ button.queryview-chip:hover {
   flex-direction: column;
   gap: var(--ui-gap-2);
 }
-/* 卡：两副面孔共用同一份身体（正文 ＋ 块下属性行 ＋ 可选封面） */
+/* 卡：两副面孔共用同一份身体（正文 ＋ 块下属性行 ＋ 可选封面）。
+   默认就有**边框 ＋ 投影**：卡片是「一张能拿起来的东西」，不是靠 hover 才显形的一块底。
+   （同类产品的卡片也都是 border ＋ shadow 起手：没有它们，网格退化成一片文字。） */
 .vcard {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--ui-gap-1);
-  padding: var(--ui-gap-2);
-  border-radius: var(--ui-radius-sm);
+  padding: 0;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface);
+  box-shadow: var(--ui-shadow-low);
   cursor: pointer;
   min-width: 0;
-  /* 没有图/字很少时也要有「一张卡」的体积：内容少不等于格子塌成一条 */
-  min-height: 5.5rem;
-}
-.vcards[data-layout='columns'] .vcard {
-  background: var(--ui-surface);
-}
-.vcards[data-layout='grid'] .vcard {
-  border-radius: var(--ui-radius-md);
-  background: var(--ui-surface-sunken);
+  min-height: 4.5rem;
+  overflow: hidden;
 }
 .vcards .vcard:hover {
-  background: var(--ui-surface-raised);
+  border-color: var(--ui-border);
+  box-shadow: var(--ui-shadow-mid);
 }
+/* 正在编辑的那张：焦点环给整张卡（不是给里面那台编辑器的某一行） */
+.vcard:focus-within {
+  border-color: var(--ui-accent);
+  box-shadow: var(--ui-shadow-mid);
+}
+/* 封面贴着卡片边缘（圆角由卡片裁）：不是卡片里再套一个小方块 */
 .vcard-cover {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  aspect-ratio: 4 / 3;
-  border-radius: var(--ui-radius-sm);
+  width: 100%;
+  aspect-ratio: 16 / 9;
   overflow: hidden;
-  background: var(--ui-surface);
-  color: var(--ui-text-tertiary);
-  font-size: var(--ui-fs-lg);
+  background: var(--ui-surface-sunken);
 }
 .vcard-cover-img {
   width: 100%;
@@ -756,23 +757,57 @@ button.queryview-chip:hover {
 }
 .vcard-body {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  gap: var(--ui-gap-1);
+  gap: var(--ui-gap-2);
   min-width: 0;
+  padding: var(--ui-gap-4);
   cursor: text;
 }
+/* 卡片里的正文是「读一段」：最多三行、超出省略；不是表格那一行的省略号 */
+.vcard-body .surface-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+  line-height: var(--ui-lh-normal);
+  font-weight: var(--ui-fw-medium);
+  color: var(--ui-text);
+}
 /* 属性行在卡里占满整宽：正文那一份的左边距是给块标留的，卡片里没有块标 */
+/* 卡片的元信息（标签 ＋ 属性）：贴在卡底；标题与它之间的留白是刻意的 */
+.vcard-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+  margin-top: auto;
+  min-width: 0;
+}
+.vcard-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-gap-2);
+  overflow: hidden;
+}
 .vcard-props {
   width: 100%;
   margin-inline-start: 0;
+  height: auto;
+  flex-wrap: wrap;
+  row-gap: var(--ui-gap-1);
+  white-space: normal;
   overflow: hidden;
 }
 /* 拖卡的手柄：卡身是编辑器，拖它等于选字 ⇒ 拖拽只能从这里发起 */
 .vcard-grip {
   position: absolute;
-  top: 0;
-  right: 0;
-  padding: 0 var(--ui-gap-1);
+  top: var(--ui-gap-2);
+  right: var(--ui-gap-2);
+  padding: 0 var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+  /* 有封面时手柄压在图上：给一层底，别让图标和照片纹理糊在一起 */
+  background: var(--ui-surface);
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-sm);
   line-height: var(--ui-lh-tight);

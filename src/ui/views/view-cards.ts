@@ -16,6 +16,7 @@ import {
   belowFieldsFor,
   cardLayoutOf,
   clickModsOf,
+  displayNameOf,
   openActionOf,
   sortRecords,
   type BelowFields,
@@ -27,6 +28,7 @@ import {
 } from '../../core/index.ts'
 import type { SurfaceEditor } from '../block-ui/surface-editor.ts'
 import { renderPropsLine } from '../block-ui/props-line.ts'
+import { makeTagChipEl } from '../../view/editor/block-dom.ts'
 import { t } from '../../core/infra/msg.ts'
 import { assetViewOf } from '../../view/asset-views.ts'
 import { bucketize, bucketLabel, orderBuckets, recordsForGrouping, GROUP_UNSET, type GroupBucket } from './grouping.ts'
@@ -280,6 +282,20 @@ export class ViewCards {
     const body = document.createElement('div')
     body.className = 'vcard-body'
     this.deps.cell.render(r.block, body)
+    /**
+     * 卡片的**元信息**贴在卡底：标签 chips ＋ 属性行。
+     *
+     * 分组两件都不存在时整块不画（空着比画一条空行好）；有它们时贴在底部，
+     * 标题与元信息之间的留白看起来是「一张卡」而不是「没写完的格子」。
+     */
+    const meta = document.createElement('div')
+    meta.className = 'vcard-meta'
+    if (r.tags.length > 0) {
+      const tags = document.createElement('div')
+      tags.className = 'vcard-tags'
+      for (const tag of r.tags) tags.appendChild(makeTagChipEl(tag.id, displayNameOf(tag)))
+      meta.appendChild(tags)
+    }
     const below = this.below.get(r.block.id)
     if (below) {
       const line = document.createElement('div')
@@ -288,8 +304,9 @@ export class ViewCards {
         inspect: (id, propId) => this.deps.inspect(id, propId),
         refLabel: (id) => this.deps.refLabel?.(id) ?? id.slice(-6),
       })
-      body.appendChild(line)
+      meta.appendChild(line)
     }
+    if (meta.childNodes.length > 0) body.appendChild(meta)
     body.addEventListener('click', (e) => {
       // 已经在编辑这一张：点击属于编辑器自己（选词、点引用由事件表处理）
       if (this.deps.cell.editingId === r.block.id) return
