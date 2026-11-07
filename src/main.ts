@@ -51,6 +51,7 @@ import { createRowBodyCache } from './app/wiring/row-bodies.ts'
 import { setupDocks } from './app/wiring/docks.ts'
 import { setupCardMenus } from './app/wiring/dock-menus.ts'
 import { setupPanels } from './app/wiring/panels.ts'
+import { createTodoStamp } from './app/wiring/todo-stamp.ts'
 import { setupAtomPopovers } from './app/wiring/atom-popovers.ts'
 import { setupFeed } from './app/wiring/feed.ts'
 import { installDispatch, setupKeys } from './app/wiring/keys.ts'
@@ -2708,6 +2709,12 @@ function wireViewEditor(
 let panels: ReturnType<typeof setupPanels>
 
 /**
+ * 投影的任务完成态：一个注入点管所有表面（表格／大纲表格／卡片／日历／导图）。
+ * 字段表随写作废、懒重建，见 `app/wiring/todo-stamp.ts`。
+ */
+const stampTodo = createTodoStamp(blocks)
+
+/**
  * tab 标题的刷新是**去抖**的：正文每敲一个字都会 `change`，而 tab 条重建会
  * 把 hover/焦点从上面摘掉。只有标题真的变了才值得重画，60ms 的延迟用户看不出来。
  */
@@ -2802,7 +2809,11 @@ const {
   scheduleBadge,
   refClick: popovers.handleRefClick,
   // 表格标题列画的是**块的样子**：投影与正文同一条路（run/marks/引用/图片）
-  project: (b, into) => fillBlockText(into, b, (id) => blocks.find(id), assetViewOf, markAssetMissing),
+  project: (b, into) => {
+    fillBlockText(into, b, (id) => blocks.find(id), assetViewOf, markAssetMissing)
+    // 投影也要看得出「做完了」：判据与大纲同一份（`todoOf`），住在装配层的唯一投影入口
+    stampTodo(b, into)
+  },
   atomClick: (atom, el, mods) => popovers.handleAtomClick(atom, el, mods, 'table'),
   // 挂载区/查询结果接的是**同一份**事件表（差别只在「装载谁」）
   wireEditor: (editor, change, via) => wireViewEditor(editor, change, via),

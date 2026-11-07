@@ -15779,7 +15779,87 @@ await check('T163 大纲表格：改格子⇒写回那一块（表头格写直�
   assert(ex.head.length === before.head.length, `展开不增加主表列：${ex.head.length}`)
   assert(ex.cols === before.cols, `列数没变：${ex.cols}`)
 
-  // 表头块标：打开那一列的直接子块（换中心）。块标是 `visibility: hidden`，先悬停那一格
+  /**
+   * **完成态在阅读态就看得见**，不是聚焦/编辑才长出删除线。
+   *
+   * 两件事一起断言：
+   *   · 投影盒子带 `data-todo='done'` 且真的算出 `line-through`；
+   *   · 此时**没有** `.inline-editor`（证明读到的是投影，不是「点进去之后那台编辑器」）。
+   * 然后切到平表看同一块：两个渲染器共用装配层那一个投影入口，判据只该有一份。
+   */
+  const doneState = await page.evaluate((cell) => {
+    const q = window.__qua
+    const forest = q.__editor.store.blocks
+    const walk = (list, hit) => {
+      for (const b of list) {
+        const got = hit(b)
+        if (got) return got
+        const deep = walk(b.children ?? [], hit)
+        if (deep) return deep
+      }
+      return null
+    }
+    // 库里唯一的任务状态定义（`_use: 'status'` ＋ `_check`）：值写它的 `on` 选项块 id
+    const status = walk(forest, (b) => (b.props?._use === 'status' && b.props?._check ? b : null))
+    if (!status) return { error: 'fixture 里没有任务状态定义' }
+    // 先确认这一格此刻**不是**完成态，免得下面断言的是种子自带的样子
+    const before = walk(forest, (b) => (b.id === cell ? b : null))
+    /** ⚠️ 先取值再写：块是**活引用**，事务原地改 props —— 写完之后再读，读到的是新值 */
+    const wasDone = before?.props?.[status.id] === status.props._check.on
+    q.invoke('core.props/set-value', { blockId: cell, propId: status.id, value: status.props._check.on })
+    return { propId: status.id, wasDone }
+  }, fx.rows[0])
+  assert(!doneState.error, `前置：找得到任务状态定义（${doneState.error ?? ''}）`)
+  assert(doneState.wasDone === false, `前置：这一块在写入之前不是完成态：${JSON.stringify(doneState)}`)
+  await page.waitForTimeout(450)
+
+  const readDone = (selector) =>
+    page.evaluate((sel) => {
+      const slot = document.querySelector(sel)
+      return {
+        todo: slot?.dataset.todo ?? '',
+        decoration: slot ? getComputedStyle(slot).textDecorationLine : '',
+        editors: document.querySelectorAll('.inline-editor').length,
+      }
+    }, selector)
+
+  const ltDone = await readDone(`.lt-cell[data-block-id="${fx.rows[0]}"] .surface-text`)
+  assert(
+    ltDone.todo === 'done' && ltDone.decoration.includes('line-through') && ltDone.editors === 0,
+    `大纲表格：完成态在阅读态就有删除线（${JSON.stringify(ltDone)}）`,
+  )
+
+  // 切到平表：同一块、同一套投影，读到的完成态必须一致
+  const listViewId = await page.evaluate(
+    (rid) => {
+      const q = window.__qua
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === rid) return b
+          const deep = walk(b.children ?? [])
+          if (deep) return deep
+        }
+        return null
+      }
+      const host = walk(q.__editor.store.blocks)
+      return (host?.props?._views ?? []).find((v) => v.kind === 'list-table')?.id ?? ''
+    },
+    fx.root,
+  )
+  await page.evaluate((rid) => window.__qua.invoke('core.view/add', { blockId: rid, kind: 'table' }), fx.root)
+  await page.waitForTimeout(450)
+  const tvDone = await readDone(`.tv-row[data-block-id="${fx.rows[0]}"] .surface-text`)
+  assert(
+    tvDone.todo === 'done' && tvDone.decoration.includes('line-through') && tvDone.editors === 0,
+    `平表：同一块同一套投影（${JSON.stringify(tvDone)}）`,
+  )
+  await page.evaluate(
+    ({ rid, vid }) => window.__qua.invoke('core.view/set-active', { blockId: rid, viewId: vid }),
+    { rid: fx.root, vid: listViewId },
+  )
+  await page.waitForTimeout(450)
+
+  // 表头块标：打开那一列的直接子块（换中心）。块标悬停才现身（藏起来时也不吃正文的点击）
   const headCell = page.locator(`.lt-cell--head[data-block-id="${fx.rows[1]}"]`)
   await headCell.hover()
   await headCell.locator('.lt-marker').click()
@@ -20061,6 +20141,8 @@ await check('T215 Shift+点日历／查询各看法的打开入口 ⇒ 右槽窗
   await page.waitForTimeout(450)
   await shiftOpen('.vcards[data-layout="columns"] .vcard[data-block-id]', '卡片（列）')
   await addView('table')
+  // 块标平时藏着（悬停或键盘聚焦才现身）；真鼠标是先移过去再点，这里同样先悬停那一行
+  await page.locator('.tv-row').first().hover()
   await shiftOpen('.tv-marker', '表格块标', '.tv-row')
 
   // ④ 普通点仍回中心（默认没有分叉）

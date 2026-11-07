@@ -209,26 +209,17 @@
   border-radius: var(--ui-radius-pill);
   background: var(--ui-border);
   cursor: pointer;
-  opacity: 0;
-}
-.tv-row:hover .tv-marker,
-.tv-title-inner[data-editing='1'] .tv-marker {
-  opacity: 1;
 }
 .tv-marker:hover {
   background: var(--ui-text-tertiary);
 }
 .tv-del {
-  visibility: hidden;
   border: 0;
   background: none;
   padding: 0;
   font: inherit;
   color: var(--ui-text-tertiary);
   cursor: pointer;
-}
-.tv-row:hover .tv-del {
-  visibility: visible;
 }
 .tv-del:hover {
   color: var(--ui-danger);
@@ -242,6 +233,16 @@
 /* 投影那一行是块级盒子：`ui-ellipsis` 管省略，这里只给它一个块级落点 */
 .surface-text {
   display: block;
+}
+/**
+ * **投影里的完成态**：与大纲里 `.blk[data-todo='done'] .tx` 同一条外观
+ * （`blocks.css` 那一份）——读的时候就要看得出做完了，不必先聚焦。
+ * `data-todo` 由装配层的投影入口盖（判据 `todoOf`，见 `app/wiring/todo-stamp.ts`）。
+ */
+.surface-text[data-todo='done'] {
+  color: var(--ui-text-tertiary);
+  text-decoration: line-through;
+  text-decoration-color: var(--ui-text-tertiary);
 }
 /* 编辑期：那一行把高度让给内容。密度是阅读期的约束，不是书写期的 —— 
    固定行高是虚拟化的前提，但「正在写的那一行」可以临时不是固定高度。 */
@@ -438,8 +439,9 @@
   opacity: 0.45;
 }
 /* 块操作：块标（打开这一块）／＋（加一项，仅表头）／×（删这一列/项）。
-   容器只管排；**可见性由每个动作自己的入口决定**：常显的只有「加一项」
-   —— 它是唯一「让表能继续长大、且没有别的入口」的动作；打开/删除是整理动作，悬停才出现。 */
+   容器只管排；**可见性由共用那一条决定**（见文件末尾「块操作按钮的显隐」）：
+   常显的只有「加一项」—— 它是唯一「让表能继续长大、且没有别的入口」的动作；
+   打开/删除是整理动作，悬停或键盘聚焦才出现。 */
 .lt-chrome {
   position: absolute;
   top: var(--ui-gap-1);
@@ -448,14 +450,8 @@
   display: flex;
   align-items: center;
   gap: var(--ui-gap-1);
-}
-.lt-marker,
-.lt-del {
-  visibility: hidden;
-}
-.lt-cell:hover .lt-marker,
-.lt-cell:hover .lt-del {
-  visibility: visible;
+  /* 隐藏的按钮不该吃掉正文上的点击（它浮在格子右上角） */
+  pointer-events: none;
 }
 .lt-marker {
   flex: none;
@@ -482,6 +478,8 @@
 }
 .lt-add {
   opacity: 0.45;
+  /* 父容器关掉了 pointer-events（隐藏的块标不该吃掉正文点击）；这个动作是常显的 */
+  pointer-events: auto;
 }
 .lt-cell:hover .lt-add {
   opacity: 1;
@@ -1011,4 +1009,36 @@ button.queryview-chip:hover {
 }
 .vgroup-count {
   color: var(--ui-text-tertiary);
+}
+
+/* ---------------------------------------------------------- 块操作按钮的显隐（**唯一一份**）
+
+   平表的行（`.tv-row`）与结构映射表的格（`.lt-cell`）都读这一条：块标与删除
+   只在**悬停**或**键盘聚焦**时露出，平时不占视觉。
+
+   两个坑都真踩过：
+   · 用 `visibility: hidden` 藏 ⇒ 元素**不在 Tab 序列里**（键盘永远到不了）；
+     两种表还各错一半：平表块标是 `opacity: 0`（能聚焦但不显形）、结构映射表的块标根本到不了。
+     所以统一成 `opacity` —— 聚焦态靠 `:focus-visible` 显形。
+   · 隐藏时连 `pointer-events` 一起关掉：这两枚按钮浮在文字上方，看不见却可点是误触
+     （`pointer-events` 会继承，`.lt-chrome` 上那一层也是为同一个原因）。
+   不加入场动画：这是每天见上百次的 hover 件（频率表里那一档是「不动画」）。 */
+.tv-marker,
+.tv-del,
+.lt-marker,
+.lt-del {
+  opacity: 0;
+  pointer-events: none;
+}
+.tv-row:hover .tv-marker,
+.tv-row:hover .tv-del,
+.tv-title-inner[data-editing='1'] .tv-marker,
+.lt-cell:hover .lt-marker,
+.lt-cell:hover .lt-del,
+.tv-marker:focus-visible,
+.tv-del:focus-visible,
+.lt-marker:focus-visible,
+.lt-del:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
