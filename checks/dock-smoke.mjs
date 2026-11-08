@@ -1416,9 +1416,17 @@ await check('A21 日历卡：一格一天、周一起始、点一格去那天；
   const m = Number(before.today[0].slice(5, 7))
   const days = new Date(y, m, 0).getDate()
   assert(before.cellCount === days, `${y}-${m} 应有 ${days} 格，实际 ${before.cellCount}`)
-  // 1 号之前的空位数 ＝ 1 号是周几（周一起始 ⇒ 周一为 0）
+  // 1 号之前的空位数 ＝ 1 号是周几（周一起始 ⇒ 周一为 0）。
+  // 月网格把首尾都补齐成整周（尾部空位让最后一行也满 7 格），所以数「1 号之前」那段，
+  // 不是全部 .cal-pad
+  const gridSeq = await page.evaluate(() => {
+    const card = document.querySelector('#dock-left .dock-card[data-card-id="calendar"]')
+    return [...card.querySelectorAll('.cal-cell')].map((el) => (el.classList.contains('cal-pad') ? 'pad' : 'day'))
+  })
   const firstPad = (new Date(y, m - 1, 1).getDay() + 6) % 7
-  assert(before.pads === firstPad, `1 号之前的空位应是 ${firstPad} 个（周一起始），实际 ${before.pads}`)
+  const leadingPads = gridSeq.indexOf('day')
+  assert(leadingPads === firstPad, `1 号之前的空位应是 ${firstPad} 个（周一起始），实际 ${leadingPads}`)
+  assert(gridSeq.length % 7 === 0, `网格应补齐成整周（7 的倍数）：${gridSeq.length}`)
 
   // ③ 写过的那天要有标记（种子库里今天一定写过）
   assert(before.written.length >= 1, `有内容的日期必须标出来（否则日历只剩数字）：${JSON.stringify(before.written)}`)
