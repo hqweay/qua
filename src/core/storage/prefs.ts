@@ -66,6 +66,11 @@ export interface Prefs {
    * 生效在**读绑定表的时候**（`core/infra/bindings.ts`），这里只存用户写下的那份。
    */
   keys: Record<string, string | null>
+  /**
+   * 命令面板「最近执行」的名单（设备态：这一台机器上跑过什么，不进库、不参与同步）。
+   * 只记**从面板成功执行**的命令名，最新在前、去重封顶；形状归 `normalizePrefs`。
+   */
+  recentCommands: string[]
   /** @deprecated 2026-10-19 起的旧形状；只用于读迁移，写一律写 `dock` */
   railOpen?: boolean
 }
@@ -165,6 +170,7 @@ export const DEFAULT_PREFS: Prefs = {
   radius: 12,
   badgeOpen: false,
   keys: {},
+  recentCommands: [],
 }
 
 /**
@@ -264,6 +270,11 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     }
   }
 
+  // 最近执行的命令名：非空串才收，去重、封顶——它只是面板顶部的「再来一次」名单
+  const recentCommands = Array.isArray(p.recentCommands)
+    ? [...new Set(p.recentCommands.filter((n): n is string => typeof n === 'string' && n !== ''))].slice(0, 12)
+    : []
+
   return {
     ...DEFAULT_PREFS,
     ...p,
@@ -274,6 +285,7 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     mountViews,
     mountGroups,
     keys,
+    recentCommands,
     dock: {
       // `legacyPinned` 只在归一内部用，不进落盘形状
       left: { open: left.open, width: left.width, cards: left.cards },

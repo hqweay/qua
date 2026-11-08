@@ -767,19 +767,42 @@ export class Layers {
   }
 }
 
-/** 命令面板的行：**全部命令**（含没有任何键位的），键位只作为提示 */
-export function paletteRows(decls: CommandDecl[], keyHints: Map<string, string>): Row[] {
-  return decls
-    .filter((d) => !d.hidden)
-    .map((d) => ({
-      id: d.name,
-      label: d.title,
-      // hint 放**命令名**：命令面板列的是命令表本身，键位只是右边的一个提示
-      hint: d.name,
-      icon: '›',
-      group: `palette/${d.category}`,
-      command: d.name,
-      keyHint: keyHints.get(d.name),
-    }))
+/**
+ * 命令面板的行：**全部命令**（含没有任何键位的），键位只作为提示。
+ *
+ * 空查询时把「最近执行」的名单置顶（同样只列未隐藏的命令；顺序＝名单顺序）——
+ * 面板是搜索工具不是浏览页，155 条平铺没人看，顶部那段才是「再来一次」的入口。
+ * 有查询词时收起最近段：搜索结果里同一命令出现两次只会互相稀释。
+ * 过滤在这里做（调用方经 `onQuery` 回填），空间与浮层自带的过滤同款：标题＋命令名。
+ */
+export function paletteRows(
+  decls: CommandDecl[],
+  keyHints: Map<string, string>,
+  opts: { recents?: string[]; query?: string } = {},
+): Row[] {
+  const q = (opts.query ?? '').trim().toLowerCase()
+  const row = (d: CommandDecl, id: string) => ({
+    id,
+    label: d.title,
+    // hint 放**命令名**：命令面板列的是命令表本身，键位只是右边的一个提示
+    hint: d.name,
+    icon: '›',
+    group: `palette/${d.category}`,
+    command: d.name,
+    keyHint: keyHints.get(d.name),
+  })
+  const visibleDecls = decls.filter((d) => !d.hidden)
+  const byName = new Map(visibleDecls.map((d) => [d.name, d]))
+  const recent =
+    q === ''
+      ? (opts.recents ?? [])
+          .map((n) => byName.get(n))
+          .filter((d): d is CommandDecl => d !== undefined)
+          .map((d) => row(d, `recent//${d.name}`))
+      : []
+  const rest = visibleDecls
+    .filter((d) => q === '' || `${d.title} ${d.name}`.toLowerCase().includes(q))
+    .map((d) => row(d, d.name))
     .sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label))
+  return [...recent, ...rest]
 }

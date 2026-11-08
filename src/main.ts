@@ -869,6 +869,20 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
   }
 }
 
+/** 「最近执行」名单的封顶数（与 `normalizePrefs` 的裁剪一致；两处只此一处语义，改一起改） */
+const RECENT_COMMANDS_MAX = 12
+
+/**
+ * 记一笔「最近执行」（设备态，不进库）：只认**从面板成功执行**的命令——
+ * 失败与「未处理」不进名单。最新在前、去重、封顶；名单只是面板顶部的「再来一次」。
+ */
+function noteRecentCommand(name: string): void {
+  const prev = prefs().recentCommands ?? []
+  if (prev[0] === name) return
+  prefs().recentCommands = [name, ...prev.filter((n) => n !== name)].slice(0, RECENT_COMMANDS_MAX)
+  scheduleDeviceSave()
+}
+
 function showMenu(req: MenuRequest): void {
   const ctx = req.ctx ?? uiCtx()
   /**
@@ -877,17 +891,22 @@ function showMenu(req: MenuRequest): void {
    */
   triggerCh = null
   if (req.kind === 'palette') {
-    const rows = paletteRows(registry.list(), keyHints())
+    // 空查询带「最近执行」段、有查询词收起——收放判据在 `paletteRows`，这里只传话
+    const buildRows = (q: string): Row[] =>
+      paletteRows(registry.list(), keyHints(), { recents: prefs().recentCommands, query: q })
     layers.openMenu({
-      rows,
+      rows: buildRows(''),
       anchor: null,
       title: req.title ?? t('menu.title.palettePlain'),
       searchable: true,
       focusSearch: true,
       placeholder: t('ui.palette.placeholder'),
       emptyText: t('ui.palette.empty'),
+      onQuery: (q) => layers.setRows(buildRows(q)),
       onPick: (row) => {
-        if (row.command) registry.invoke(row.command, (row.args as Record<string, unknown>) ?? {}, 'palette', ctx)
+        if (!row.command) return
+        const r = registry.invoke(row.command, (row.args as Record<string, unknown>) ?? {}, 'palette', ctx)
+        if (r.ok && r.handled) noteRecentCommand(row.command)
       },
     })
     return

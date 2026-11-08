@@ -742,6 +742,7 @@ export const MSG = {
   'menu.cat.journal': '日记',
   'menu.cat.view': '视图',
   'menu.cat.layer': '浮层',
+  'menu.cat.recent': '最近执行',
   'menu.cat.diag': '诊断',
   'menu.cat.dev': '演示',
   'menu.cat.props': '属性',
