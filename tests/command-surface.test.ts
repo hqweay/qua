@@ -53,6 +53,28 @@ test('绑定表只有四个渲染面（keymap/menu/slash/selection），面板�
   }
 })
 
+test('面板每行可执行：参数只能由别的界面给的命令不进面板（机器接口不受 hidden 影响）', () => {
+  // 面板裸按一条带必选参数的命令只会得到「未处理」——一条永远点不动的行比没有更糟。
+  // 这些命令的参数由抽屉／选择器／搜索／机器接口提供；它们的 UI 各有自己的入口命令。
+  const families = [/^core\.props\//, /^core\.mount\//, /^core\.belongs-to\//, /^core\.query\/(set-spec|create)$/]
+  const named = [
+    'core.page/open', 'core.surface/open', 'core.block/restore', 'core.block/set-type',
+    'core.editor/insert-tag', 'core.tags/add', 'core.tags/remove',
+    'core.embed/from-atom', 'core.embed/set-view',
+    'core.view/set-active', 'core.view/remove', 'core.view/rename', 'core.view/set-sort',
+    'core.view/set-columns', 'core.view/set-cover', 'core.view/set-tabs-direction',
+    'core.view/set-group', 'core.view/set-filter', 'core.view/new-row', 'core.view/delete-row',
+  ]
+  for (const c of visible) {
+    assert.ok(!families.some((re) => re.test(c.name)), `${c.name} 属于配置/机器面，面板不该列`)
+    assert.ok(!named.includes(c.name), `${c.name} 带必选参数、无收集路径，面板不该列`)
+  }
+  // 留在面板里的带参命令必须有「无参也有结果」的路径（光标回落／选择器／默认值）
+  for (const name of ['core.block/focus-block', 'core.block/move-to', 'core.embed/insert', 'core.view/add', 'core.query/insert', 'core.view/menu']) {
+    assert.ok(visible.some((c) => c.name === name), `${name} 无参可执行，应留在面板兜底`)
+  }
+})
+
 test('斜杠只收「这里有什么」：折叠/删除不进斜杠，露面/复制/选标签在', () => {
   const slash = BINDINGS.filter((b) => b.kind === 'slash')
   const cmds = slash.map((b) => b.command)
