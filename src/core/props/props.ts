@@ -945,11 +945,24 @@ export interface ChildPropsLookup {
  * 嵌在子树里的普通块，只建顶层会让「引用目标=非顶层块」的透传静默查空
  * （真机踩过：目标页在顶层命中、目标普通块嵌在子树查空，表现为「引用页生效、
  * 引用块不生效」）。`tagsById` 自带全库递归，不用另处理。 */
-export function childPropsLookupOf(forest: readonly Block[]): ChildPropsLookup {
-  const blocks = new Map<string, Block>()
-  walkForest(forest, (b) => {
-    blocks.set(b.id, b)
-  })
+export function childPropsLookupOf(
+  forest: readonly Block[],
+  /**
+   * 复用**既有的全库 byId 表**（`store.index.blocks`：活引用、增量维护）。
+   * 省掉每次渲染批量的全库 walkForest＋Map 重建——热路径渲染不该每次 O(N) 建表。
+   * 缺省（纯函数/单测路径）才自己 walk 一遍。
+   */
+  blocksById?: ReadonlyMap<string, Block>,
+): ChildPropsLookup {
+  let blocks: Map<string, Block>
+  if (blocksById) {
+    blocks = blocksById as Map<string, Block>
+  } else {
+    blocks = new Map()
+    walkForest(forest, (b) => {
+      blocks.set(b.id, b)
+    })
+  }
   return { tags: tagsById(forest), blocks }
 }
 
@@ -1134,6 +1147,7 @@ export function fieldRowsWithParent(
   block: Block,
   forest: readonly Block[],
   parent: Block | null | undefined,
+  blocksById?: ReadonlyMap<string, Block>,
 ): FieldRow[] {
   const rows = fieldRows(block, forest)
   if (!parent) return rows
@@ -1142,7 +1156,7 @@ export function fieldRowsWithParent(
   let look: ChoiceLookup | undefined
   const lazyLook = (): ChoiceLookup => (look ??= choiceLookupOf(forest))
   const merged = [...rows]
-  for (const propId of childDisplayPropsResolved(parent, childPropsLookupOf(forest))) {
+  for (const propId of childDisplayPropsResolved(parent, childPropsLookupOf(forest, blocksById))) {
     if (merged.some((r) => r.propId === propId)) continue
     merged.push(fieldRowOf(block, propId, defs.get(propId), [], order++, forest, lazyLook))
   }
@@ -1212,10 +1226,11 @@ export function belowFieldsFor(
   forest: readonly Block[],
   /** 行的模型父块（`_childProps` 显示声明的来源）；省略 ⇒ 行为与旧签名完全一致 */
   parentOf?: (id: string) => Block | null | undefined,
+  blocksById?: ReadonlyMap<string, Block>,
 ): Map<string, BelowFields> {
   const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
   const tags = tagsById(forest)
-  const lookup = childPropsLookupOf(forest)
+  const lookup = childPropsLookupOf(forest, blocksById)
   let look: ChoiceLookup | undefined
   const lazyLook = (): ChoiceLookup => (look ??= choiceLookupOf(forest))
   const out = new Map<string, BelowFields>()

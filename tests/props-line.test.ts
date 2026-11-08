@@ -221,6 +221,24 @@ test('传递型引用：正文只有一枚引用的块，其子块沿目标解�
   assert.deepEqual(viaBroken, [], '链上有一环带正文 ⇒ 断')
 })
 
+test('childPropsLookupOf：复用外部 byId 表（index.blocks）与自建 walk 的结果一致', () => {
+  const lifeTag = blk('tag-idx', 'LifeLog', { _aliases: ['LifeLog'], _lists: ['tag'], [CHILD_PROPS_PROP]: [ENGINE_CREATED] })
+  const nested = blk('nested-idx', '念书', { [CHILD_PROPS_PROP]: [ENGINE_CREATED] })
+  const page = blk('pg-idx', '页')
+  page.children = [nested]
+  const pass = blk('pass-i', '')
+  pass.content = [{ id: 'r9', t: 'ref', to: 'nested-idx' }]
+  const child = blk('c1', '一条')
+  const forest = [lifeTag, page, pass, child]
+  // 模拟 index.blocks（全库 byId，含嵌套）
+  const byId = new Map(forest.map((b) => [b.id, b]))
+  for (const b of forest) for (const k of b.children ?? []) byId.set(k.id, k)
+  const viaIndex = (belowFieldsFor([child], forest, (id) => (id === 'c1' ? pass : null), byId).get('c1')?.rows ?? []).map((r) => r.propId)
+  const viaWalk = (belowFieldsFor([child], forest, (id) => (id === 'c1' ? pass : null)).get('c1')?.rows ?? []).map((r) => r.propId)
+  assert.deepEqual(viaIndex, viaWalk, '复用 index 表与自建 walk 等价')
+  assert.deepEqual(viaIndex, [ENGINE_CREATED])
+})
+
 test('传递型引用：目标嵌在子树里也命中（lookup 必须递归全库，不是顶层一遍）', () => {
   const lifeTag = blk('tag-nested', 'LifeLog', { _aliases: ['LifeLog'], _lists: ['tag'], [CHILD_PROPS_PROP]: [ENGINE_CREATED] })
   // 目标块**嵌在页的子树里**（真机形状）：顶层森林数组里没有它

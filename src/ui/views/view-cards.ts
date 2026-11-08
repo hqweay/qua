@@ -181,7 +181,8 @@ export class ViewCards {
       const pid = this.deps.store.index.parentOf.get(id) ?? null
       return pid ? (this.deps.store.find(pid) ?? null) : null
     }
-    for (const [id, data] of belowFieldsFor(blocks, this.deps.store.blocks, parentOf)) next.set(id, data)
+    for (const [id, data] of belowFieldsFor(blocks, this.deps.store.blocks, parentOf, this.deps.store.index.blocks))
+      next.set(id, data)
     // 掉出结果集的块不再留着（卡片重画时就不会去找它）
     for (const id of [...next.keys()]) {
       if (!this.deps.store.find(id)) next.delete(id)

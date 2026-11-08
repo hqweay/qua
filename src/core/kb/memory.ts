@@ -151,7 +151,7 @@ export class MemoryKb implements KbClient {
     const b = this.get(id)
     if (!b) return []
     // 面板与属性行同一口径：父块声明了 `_childProps` ⇒ 面板里也见得到（否则点了那行没处聚焦）
-    return fieldRowsWithParent(b, this.store.blocks, this.parentOf(id) ?? null)
+    return fieldRowsWithParent(b, this.store.blocks, this.parentOf(id) ?? null, this.store.index.blocks)
   }
 
   gutterFieldsOf(ids: readonly string[]): Map<string, GutterField[]> {

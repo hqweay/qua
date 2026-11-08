@@ -1261,7 +1261,7 @@ export class BlockEditor {
   private renderRows(rows: readonly VisibleRow[], tailComplete = true): void {
     const blocks = rows.map((r) => r.block)
     const gutters = gutterFieldsFor(blocks, this.store.blocks)
-    const below = belowFieldsFor(blocks, this.store.blocks, (id) => this.parentOfRow(id))
+    const below = belowFieldsFor(blocks, this.store.blocks, (id) => this.parentOfRow(id), this.store.index.blocks)
     let sec: HTMLElement | null = null
     /** 给上一段收尾：追加那个空槽（只给有段根的行段） */
     const closeSec = (): void => {
@@ -1361,7 +1361,9 @@ export class BlockEditor {
       this.makeBlockEl(
         row,
         gutterFieldsOf(row.block, this.store.blocks),
-        belowFieldsFor([row.block], this.store.blocks, (id) => this.parentOfRow(id)).get(row.block.id),
+        belowFieldsFor([row.block], this.store.blocks, (id) => this.parentOfRow(id), this.store.index.blocks).get(
+          row.block.id,
+        ),
       ),
     )
     this.repaintOverlays()
@@ -3787,6 +3789,7 @@ export class BlockEditor {
       rows.map((r) => r.block),
       this.store.blocks,
       (id) => this.parentOfRow(id),
+      this.store.index.blocks,
     )
     const rowH = (r: VisibleRow): number =>
       visibleRowHeight(
