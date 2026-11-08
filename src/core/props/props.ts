@@ -960,7 +960,20 @@ export function childDisplayPropsResolved(
   }
   const target = passThroughRefTarget(parent)
   if (target) {
-    for (const propId of childDisplayPropsResolved(lookup.blocks.get(target) ?? null, lookup, nextSeen)) {
+    // dev log (troubleshooting): fires only when the parent is a pass-through ref block, low frequency
+    const targetBlock = lookup.blocks.get(target) ?? null
+    // eslint-disable-next-line no-console
+    console.log(
+      '[childProps] pass-through at',
+      parent.id.slice(-6),
+      '-> target',
+      target.slice(-6),
+      'targetInForest:',
+      targetBlock !== null,
+      'targetDecl:',
+      targetBlock ? childDisplayProps(targetBlock) : null,
+    )
+    for (const propId of childDisplayPropsResolved(targetBlock, lookup, nextSeen)) {
       if (!out.includes(propId)) out.push(propId)
     }
   }
