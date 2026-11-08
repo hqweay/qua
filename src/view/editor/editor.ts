@@ -264,6 +264,12 @@ export interface ViewOpts {
   /** 是否允许删除 section 根；反链视图设为 false（删源块走命令面） */
   allowRootRemove?: boolean
   /**
+   * 删掉的段根是**最后一段**时，要不要补一个空块当落点（默认要：编辑器没有
+   * 落点就没法打字）。**页签身体要关**：它一段恒一页，fill 会把「删这一页」
+   * 变成「原地换一个空块」——页签的落点由视图层给（回落到别的页／空态）。
+   */
+  rootRemoveFill?: boolean
+  /**
    * **结构动作能在哪一层寻址**（默认 `'document'`）。
    *
    * `'roots'`：这一屏的 `doc.roots` 是**结果集**（查询命中、镜像源）。每一棵根子树
@@ -607,6 +613,7 @@ export class BlockEditor {
   blankArea: HTMLElement
   private allowBlankCreate: boolean
   private allowRootRemove: boolean
+  private rootRemoveFill: boolean
   /** 结构动作的可寻址层（见 `ViewOpts.structuralScope`） */
   private structuralScope: 'document' | 'roots'
   /** 段的排列（视图配置；`data-layout` 供 CSS 选择，见 `setLayout`）；装配层按它挡住只属单列的行为 */
@@ -655,6 +662,7 @@ export class BlockEditor {
     this.blankArea = o.blankArea ?? o.container
     this.allowBlankCreate = o.allowBlankCreate !== false
     this.allowRootRemove = o.allowRootRemove !== false
+    this.rootRemoveFill = o.rootRemoveFill !== false
     this.structuralScope = o.structuralScope ?? 'document'
     // 写入口顺手作废那张派生表：标签声明／定义 kind 变了，下一次 `todoOf` 要重算
     this.write = (fn, source, opts) => {
@@ -2690,7 +2698,7 @@ export class BlockEditor {
      *
      * ⚠️ UI 的三个删除入口都带 `!blockIsRoot` ⇒ 正常操作删不到装载根，这一支只服务 API/测试。
      */
-    const fill = wasRoot && this.doc.roots.length === 1 ? mkBlock('') : null
+    const fill = wasRoot && this.rootRemoveFill && this.doc.roots.length === 1 ? mkBlock('') : null
     const forestLoc = fill ? locate({ roots: this.store.blocks }, id) : null
     this.write((tx) => {
       tx.remove(id)
@@ -2705,8 +2713,8 @@ export class BlockEditor {
       this.viewRootIds = this.viewRootIds.filter((x) => x !== id)
     }
     const after = flatten(this.doc)
-    const caret = after[Math.min(idx, after.length - 1)]!
-    this.structTail({ id: caret.id, off: 0 })
+    // 关 fill 的实例删空了段（页签删最后一页）：没有落点可给，视图层会回落激活页
+    if (after.length > 0) this.structTail({ id: after[Math.min(idx, after.length - 1)]!.id, off: 0 })
     return true
   }
 

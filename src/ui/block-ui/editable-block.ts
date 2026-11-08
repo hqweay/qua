@@ -68,6 +68,11 @@ export interface EditableBlockDeps {
    */
   allowRootRemove?: boolean
   /**
+   * 删掉最后一段时补不补空块落点（默认补）。页签身体关掉：一段恒一页，
+   * fill 会把「删这一页」变成「原地换空块」，落点由视图层回落激活页给。
+   */
+  rootRemoveFill?: boolean
+  /**
    * 冻结判据的范围，默认＝岛根。挂载区要连 tab 条一起算「有人在这」——
    * 焦点落在 tab 按钮上时重排 tab 条，同样会把正被按的那颗换掉。
    */
@@ -207,6 +212,7 @@ export class EditableBlock {
       //（根是别的页的块）；页签身体用 `allowRootRemove` 显式打开
       allowBlankCreate: false,
       allowRootRemove: this.deps.allowRootRemove === true,
+      rootRemoveFill: this.deps.rootRemoveFill !== false,
       // 重载节奏归本组件（唯一一条路径），编辑器不再自己跟随 store
       autoReload: false,
       store: this.deps.store,

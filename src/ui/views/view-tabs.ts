@@ -44,8 +44,8 @@ export class ViewTabs {
   private readonly deps: ViewTabsDeps
   /** 页签的形状签名（块 id ＋ 名字）：变了才重建切换条；正文变化不碰它 */
   private shape = ''
-  /** 成员数签名：新建/删除一行才走重建（切换条重建会搬动身体编辑器的 DOM ⇒ 不能跟着打字节奏走） */
-  private memberCount = -1
+  /** 成员的 id 签名：新建／删除／**换了一块**都算变了（重建搬身体编辑器 ⇒ 不能跟打字节奏走） */
+  private memberIds = ''
   /** 激活页（视图实例状态：不进 KB、不跨表面同步） */
   private active = ''
   private component: EditableBlock | null = null
@@ -73,7 +73,7 @@ export class ViewTabs {
     const view = this.deps.view()
     const direction = view?.tabs?.direction === 'vertical' ? 'vertical' : 'horizontal'
     this.root.dataset.direction = direction
-    this.memberCount = groups.length
+    this.memberIds = groups.map((g) => g.block.id).join('|')
 
     const nextShape = groups.map((g) => `${g.block.id}:${displayNameOf(g.block)}`).join('|')
     if (nextShape !== this.shape || !this.strip || !this.body) {
@@ -93,7 +93,9 @@ export class ViewTabs {
    */
   sync(ids?: readonly string[]): void {
     const groups = this.deps.tabs()
-    if (groups.length !== this.memberCount) {
+    // 成员签名用 **id 序**不用数量：数量守不住「删一块＋原地补一块」这类替换形
+    // （数量没变、名单变了）——旧签名会漏掉重建，页签条顶着旧样子
+    if (groups.map((g) => g.block.id).join('|') !== this.memberIds) {
       this.render()
       return
     }
@@ -221,8 +223,10 @@ export class ViewTabs {
         // 页的根是派生的行：不能并进上一行／搬出这一页；根内部照常编辑
         structuralScope: 'roots',
         // 首行就是页签本身（容器的真实子块）：右键「删除块」＝删这一页（软删可回）。
-        // 其余记录视图不开——它们的段根是别的页的块
+        // 其余记录视图不开——它们的段根是别的页的块。fill 也关：一段恒一页，
+        // 补空块会把「删这一页」变成「原地换空块」；落点由视图回落激活页给
         allowRootRemove: true,
+        rootRemoveFill: false,
         load: (ed) => {
           if (!ed) return
           ed.reloadFromStore()
