@@ -393,8 +393,9 @@ await check('E5 ⌘A 与 ⌘P／⌘K 的当前行为（①② 的 Electron 现�
   await page.keyboard.press('Escape')
   await new Promise((r) => setTimeout(r, 120))
 
-  // ⌘K ＝ 全局搜索
+  // ⌘K ＝ 全局搜索（按焦点分流：正文聚焦时归插链接，失焦才是搜索）
   await page.evaluate(() => window.__qua.focus())
+  await page.evaluate(() => document.activeElement?.blur())
   const logBeforeK = await page.evaluate(() => window.__qua.commandLog().length)
   await page.keyboard.press('Meta+k')
   await new Promise((r) => setTimeout(r, 250))
@@ -1422,6 +1423,9 @@ await check('E15 全文检索：索引建好后 ⌘K 可搜、拼音可搜、编
 
   // ⌘K 是真实的「现在开始用」信号：它既打开浮层，也把索引排上。
   // 浮层里挂的是常驻搜索面（紧凑形态），行与输入框都是那份组件的 DOM。
+  // 上面刚在正文里打过字（编辑器聚焦＝⌘K 归插链接），先失焦再按
+  await page.evaluate(() => document.activeElement?.blur())
+  await page.waitForTimeout(100)
   await page.keyboard.press('Meta+k')
   await page.waitForSelector('.popover.search-overlay .search-face-input')
   await page.waitForFunction(() => document.activeElement?.classList.contains('search-face-input'))
@@ -1436,6 +1440,9 @@ await check('E15 全文检索：索引建好后 ⌘K 可搜、拼音可搜、编
   await page.keyboard.press('Escape')
 
   // ① ⌘P 的结果行（上面已经等到）——再验一次身份与高亮
+  // Esc 关掉浮层后焦点归还正文（⌘K 在聚焦态归插链接），再失焦一次
+  await page.evaluate(() => document.activeElement?.blur())
+  await page.waitForTimeout(100)
   await page.keyboard.press('Meta+k')
   await page.waitForSelector('.popover.search-overlay .search-face-input')
   await page.waitForFunction(() => document.activeElement?.classList.contains('search-face-input'))
