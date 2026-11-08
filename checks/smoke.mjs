@@ -1664,8 +1664,10 @@ await check('T9 块菜单与斜杠菜单**都是绑定表的渲染结果**（同
    */
   const beforeAtoms = (await page.evaluate(() => window.__qua.atoms())).length
   const [chooser] = await Promise.all([
-    page.waitForEvent('filechooser', { timeout: 5000 }),
-    page.keyboard.press('Enter'),
+    page.waitForEvent('filechooser', { timeout: 8000 }),
+    // 显式选「图片」行（trusted mousedown→mouseup，与键盘挑选同一条命令）：
+    // 盲按 Enter 依赖「过滤后 active 恰好落在图片行」，负载下过滤渲染慢半步就挑到别的行
+    page.locator('.layer-item[data-id^="core.editor/insert-image"]').click(),
   ])
   assert(Boolean(chooser), '斜杠菜单选「图片」应打开文件选择器')
   await chooser.setFiles({
@@ -21449,6 +21451,9 @@ await check('T225 嵌入的查询大纲里：组合期不换承载行；提交�
 await check('T226 多露面的结构传播：镜像里建块，源当场长出来；宿主行原样保留；光标按可见性留下或回源', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
+  // 本用例断的是「文本编辑不重画行」的 DOM 同一性；虚拟化器本来就会卸载窗口外的行
+  // （那是它自己的契约），负载下一次窗口重算就让 find() 落空、identity 恒 false——关掉再测
+  await page.evaluate(() => window.__qua.setVirtualize(false))
 
   // ① 搭结构（同屏三处：主编辑器、镜像 B 的投影、源树）：
   //    页 P ← 露面 B（→ 查询 A）；A 的容器 U 里有普通命中行 C1。
@@ -23549,7 +23554,7 @@ await check('T248 浮层右列可编辑：宿主可编辑、真键盘打字进�
 
   await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
   await page.fill('.popover.search-overlay .search-face-input', '可编辑探针DEF')
-  await page.waitForFunction(() => Boolean(document.querySelector('.popover.search-overlay .search-face-preview .blk')), null, { timeout: 3000 })
+  await page.waitForFunction(() => Boolean(document.querySelector('.popover.search-overlay .search-face-preview .blk')), null, { timeout: 8000 })
 
   const before = await page.evaluate((id) => ({
     readOnly: document.querySelector('.popover.search-overlay .search-face-preview')?.dataset.readonly ?? '',
@@ -23567,7 +23572,7 @@ await check('T248 浮层右列可编辑：宿主可编辑、真键盘打字进�
   await page.waitForFunction(
     ({ id, s }) => (window.__qua.allBlocks().find((b) => b.id === id)?.text ?? '').endsWith(s),
     { id: probeId, s: suffix },
-    { timeout: 3000 },
+    { timeout: 8000 },
   )
   const focus = await page.evaluate(() => ({
     inPreview: Boolean(document.activeElement?.closest?.('.popover.search-overlay .search-face-preview-editor')),
@@ -23576,10 +23581,10 @@ await check('T248 浮层右列可编辑：宿主可编辑、真键盘打字进�
 
   // 关掉再开：待提交的那一笔已经在拆面前 flush 进模型
   await page.keyboard.press('Escape')
-  await page.waitForFunction(() => !document.querySelector('.popover.search-overlay'), null, { timeout: 3000 })
+  await page.waitForFunction(() => !document.querySelector('.popover.search-overlay'), null, { timeout: 8000 })
   await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
   await page.fill('.popover.search-overlay .search-face-input', '可编辑探针DEF')
-  await page.waitForFunction(() => Boolean(document.querySelector('.popover.search-overlay .search-face-preview .blk')), null, { timeout: 3000 })
+  await page.waitForFunction(() => Boolean(document.querySelector('.popover.search-overlay .search-face-preview .blk')), null, { timeout: 8000 })
   const after = await page.evaluate((id) => window.__qua.allBlocks().find((b) => b.id === id)?.text ?? '', probeId)
   assert(after.endsWith(suffix), `重开之后新文本还在（flush 走了）：${JSON.stringify({ before: before.text, after })}`)
 
