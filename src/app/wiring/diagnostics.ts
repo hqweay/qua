@@ -417,6 +417,8 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
     layers.openMenu({
       rows,
       anchor: stateMenuBtn.getBoundingClientRect(),
+      // 同一颗按钮再点一次＝收起（toggle）
+      trigger: stateMenuBtn,
       title: t('menu.title.debugMenu'),
       searchable: false,
       focusSearch: false,

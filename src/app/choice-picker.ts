@@ -22,6 +22,8 @@ export interface ChoicePickerOpts {
   current: string | readonly string[]
   /** 锚点（缺省 ⇒ 菜单自己找落点，与命令面板同一条兜底） */
   anchor?: DOMRect | null
+  /** 这次打开的触发元素（点的那颗图标／按钮）；给了它，同一颗再点一次＝收起 */
+  trigger?: HTMLElement
   /** 选项显示名（同名选项带作用域；缺省只用正文） */
   labelOf?: (choice: Block) => string
   /** 选中后写回：单选给 string，多选给 string[]（顺序＝选项兄弟序） */
@@ -64,6 +66,7 @@ export function openChoicePicker(o: ChoicePickerOpts): void {
   o.layers.openMenu({
     rows: rows(),
     anchor: o.anchor ?? null,
+    ...(o.trigger ? { trigger: o.trigger } : {}),
     title: o.title ?? t(multi ? 'ui.props.pickChoiceMulti' : 'ui.props.pickChoice'),
     searchable: true,
     focusSearch: true,

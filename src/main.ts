@@ -399,7 +399,7 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, car
   getSlots: () => ({ left: dockLeft, right: dockRight }),
   // 检视卡在面板分片里创建并挂进右槽堆叠；这里只在重画时取它（它必须已经在文档里）
   inspectCard: () => chrome.inspectCardEl,
-  showCardMenu: (side, key, anchor) => menus.showCardMenu(side, key, anchor),
+  showCardMenu: (side, key, anchor, trigger) => menus.showCardMenu(side, key, anchor, trigger),
   /**
    * 反链卡：**一列真实的可编辑块**（与正文「引用」栏同一种东西），不是一列摘要行。
    *
@@ -431,7 +431,7 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, car
       state: () => cardStateFor(side, 'backrefs'),
       onClose: () => closeCard(side, 'backrefs'),
       // 快速筛选的弹层外壳（chips 的内容与状态都在卡自己手里）
-      openPopover: (render, anchor) => layers.openPopover(render, anchor),
+      openPopover: (render, anchor, trigger) => layers.openPopover(render, anchor, undefined, trigger),
     }),
   /**
    * 搜索卡（**工具面住进槽**）：与 ⌘K 浮层、中心 tab 是同一份 `SearchFace`。
@@ -919,6 +919,7 @@ function showMenu(req: MenuRequest): void {
     layers.openMenu({
       rows,
       anchor: req.anchor,
+      ...(req.trigger ? { trigger: req.trigger } : {}),
       title: req.title,
       searchable: false,
       focusSearch: false,
@@ -1528,7 +1529,7 @@ function openSpecPopover(opts: {
         return choicesOf(def).map((c) => ({ id: c.id, label: displayNameOf(c).trim() || shortId(c.id) }))
       },
       ...(hostBlock ? { owner: hostBlock } : {}),
-      pickRef: (b, propId, current, onPick, rect) => pickRefValue(b, propId, current, onPick, rect),
+      pickRef: (b, propId, current, onPick, rect, trigger) => pickRefValue(b, propId, current, onPick, rect, trigger),
       refLabel: (targetId) => {
         const target = kb.get(targetId)
         return target
@@ -1677,7 +1678,7 @@ const app: App = {
    * 是数据。菜单项由 `_views` 现画，选中之后仍走命令面（`core.view/*`）——
    * 于是撤销、落盘、审计只有一条路（与「菜单由绑定表渲染」同一条纪律的延伸）。
    */
-  openViewMenu: (owner, dropdownAnchor) => {
+  openViewMenu: (owner, dropdownAnchor, trigger) => {
     /**
      * **露面块不拥有视图配置**：`_embed = { block, view }` 只有一格选择。
      * 同一个「视图…」入口在露面块上编辑的是**那根指针**（跟随源／大纲／源的命名视图）——
@@ -1847,6 +1848,8 @@ const app: App = {
     layers.openMenu({
       rows,
       anchor,
+      // 同一颗「当前看法」按钮再点一次＝收起（toggle）；块菜单那条入口没有元素，退回先关再开
+      ...(trigger ? { trigger } : {}),
       ...(dropdownAnchor ? { width: 260 } : {}),
       title: t('menu.label.views'),
       searchable: false,
@@ -2478,6 +2481,9 @@ const openAliasEditor = (blockId: string, anchor: HTMLElement | DOMRect | null, 
       }),
     // 元素锚点会跟着那一颗按钮走（行随重渲染被换掉时由 `anchorOf` 兜住「不在了」）
     anchor === null ? null : anchor instanceof HTMLElement ? popovers.anchorOf(anchor) : anchor,
+    // 元素锚点即触发器：同一颗按钮再点一次＝收起（toggle）；矩形锚点没有稳定元素，退回先关再开
+    undefined,
+    anchor instanceof HTMLElement ? { el: anchor } : undefined,
   )
 }
 
@@ -2800,7 +2806,7 @@ function viewEvents(
     openBlock: (blockId, place) => app.openBlock(blockId, place),
     // 结构动作后光标不可见的兜底：所有编辑器共用同一份实现（判据在 focusSourceInMain）
     focusSource: (blockId) => focusSourceInMain(blockId),
-    blockMenu: (blockId, rect, appearanceHost) => {
+    blockMenu: (blockId, rect, appearanceHost, trigger) => {
       const ed = active()
       // 命中**已选中的块**（且多块）⇒ 多块菜单；否则清块选区，走原单块菜单
       if (ed.bsel.inBlockSelection(blockId) && ed.bsel.blockSelectionCount() > 1) {
@@ -2820,6 +2826,8 @@ function viewEvents(
         kind: 'menu',
         prefix: 'block/',
         anchor: rect,
+        // 同一处再右键一次＝收起（toggle）；触发元素随行重渲染换掉时退回先关再开
+        ...(trigger ? { trigger } : {}),
         title: t('menu.title.block'),
         // 右键落在露面行上（投影行的绑源块标／镜像岛里的源行）：菜单开在源上，
         // 附**这一次露面自己的两件事**——露面块 id 只有打开这一刻才知道，走现算追加项。
@@ -3066,6 +3074,8 @@ document.addEventListener('mousedown', (e) => {
     if (node instanceof Node && layers.popoverContains(node)) return
   }
   if ((target as HTMLElement).closest?.('.atom')) return
+  // 按在触发元素上不算「点到外面」：同触发器再点一次＝toggle，判据在 `openPopover`
+  if (layers.popoverTriggerContains(target)) return
   // 从浮层里打开的引用选择器（`.layer`）不算「点到外面」：选完还要回浮层继续改
   if ((target as HTMLElement).closest?.('.layer')) return
   layers.closePopover()
@@ -3190,7 +3200,7 @@ const dockLeft = mountDockSlot($('dock-left'), {
   foldAllLabel: t('ui.dock.foldAll'),
   resizeLabel: t('ui.dock.resize'),
   icon: 'lucide:chevron-left',
-  onAdd: () => menus.showWidgetGallery('left'),
+  onAdd: (add) => menus.showWidgetGallery('left', add),
   onCollapse: () => registry.invoke('core.dock/toggle-left', {}, 'dock'),
   onFoldAll: () => toggleFoldAll('left'),
 })
@@ -3202,7 +3212,7 @@ const dockRight = mountDockSlot($('dock-right'), {
   foldAllLabel: t('ui.dock.foldAll'),
   resizeLabel: t('ui.dock.resize'),
   icon: 'lucide:chevron-right',
-  onAdd: () => menus.showWidgetGallery('right'),
+  onAdd: (add) => menus.showWidgetGallery('right', add),
   onCollapse: () => registry.invoke('core.dock/toggle-right', {}, 'dock'),
   onFoldAll: () => toggleFoldAll('right'),
 })

@@ -55,7 +55,12 @@ export interface BackrefsCardDeps {
   state: () => DockCardState
   onClose: () => void
   /** 浮层外壳（快速筛选的 chips 层住在这里面；与挂载区同一条窄缝） */
-  openPopover?: (render: (host: HTMLElement) => void, anchor: DOMRect | null | (() => DOMRect | null)) => void
+  openPopover?: (
+    render: (host: HTMLElement) => void,
+    anchor: DOMRect | null | (() => DOMRect | null),
+    /** 这次打开的触发者；给了它，同一触发者再点一次＝收起（toggle，见 `layers.openPopover`） */
+    trigger?: { el?: HTMLElement; key?: string },
+  ) => void
 }
 
 export class BackrefsCard {
@@ -251,6 +256,7 @@ export class BackrefsCard {
         paint()
       },
       () => this.el.querySelector('.dock-backlinks-filter')?.getBoundingClientRect() ?? null,
+      { el: this.filterBtn },
     )
   }
 }

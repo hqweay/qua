@@ -66,7 +66,7 @@ export interface ChoicesEditorDeps {
   /** 标签显示名（`#名`） */
   tagName: (id: string) => string
   /** 图标选择器（装配层开浮层；未接 ⇒ 图标只读） */
-  pickIcon?: (anchor: DOMRect, current: string, onPick: (icon: string) => void) => void
+  pickIcon?: (anchor: DOMRect, current: string, onPick: (icon: string) => void, trigger?: HTMLElement) => void
 }
 
 export class ChoicesEditor {
@@ -446,7 +446,7 @@ export class ChoicesEditor {
         this.deps.pickIcon?.(ico.getBoundingClientRect(), icon, (next) => {
           this.deps.write.setIcon(choice.id, next)
           this.render()
-        })
+        }, ico)
       })
     } else {
       ico.disabled = true

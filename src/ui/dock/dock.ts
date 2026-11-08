@@ -132,7 +132,7 @@ export interface DockCardState {
   /** 缺省（不可 pin 的卡）没有回调，按钮也不会画出来 */
   onTogglePin?: () => void
   /** 右键卡头：卡片菜单（折叠／只看／关闭其他…）。锚给菜单定位用 */
-  onHeadMenu?: (anchor: DOMRect) => void
+  onHeadMenu?: (anchor: DOMRect, trigger?: HTMLElement) => void
   onDragStart?: (e: DragEvent) => void
 }
 
@@ -235,7 +235,7 @@ function bindHeadToggle(head: HTMLElement): void {
   head.addEventListener('contextmenu', (e) => {
     e.preventDefault()
     const card = head.closest<HTMLElement>('.dock-card')
-    if (card) cardStates.get(card)?.onHeadMenu?.(head.getBoundingClientRect())
+    if (card) cardStates.get(card)?.onHeadMenu?.(head.getBoundingClientRect(), head)
   })
 }
 
@@ -433,7 +433,7 @@ export function mountDockSlot(
     foldAllLabel: string
     resizeLabel: string
     icon: string
-    onAdd: () => void
+    onAdd: (add: HTMLButtonElement) => void
     onCollapse: () => void
     onFoldAll: () => void
   },
@@ -445,7 +445,7 @@ export function mountDockSlot(
     renderIcon(add, 'lucide:plus', 'plus')
     add.setAttribute('aria-label', opts.addLabel)
     add.title = opts.addLabel
-    add.addEventListener('click', opts.onAdd)
+    add.addEventListener('click', () => opts.onAdd(add))
   }
   // 图标与标题随状态翻面（收起全部 ⇄ 展开全部），由装配层在重画时写；这里只绑一次动作
   renderIcon(els.foldAllEl, 'lucide:chevrons-down-up', 'chevrons-down-up')

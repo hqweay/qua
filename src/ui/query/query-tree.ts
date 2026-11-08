@@ -48,7 +48,7 @@ export interface QueryTreeDeps {
   close?: () => void
   /** 内联树：收起按钮；弹层：关闭按钮 */
   inline?: boolean
-  pickRef?: (owner: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect) => void
+  pickRef?: (owner: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect, trigger?: HTMLElement) => void
   refLabel?: (targetId: string) => string
   /** 块选择器的宿主（排除自己） */
   owner?: Block
@@ -712,7 +712,7 @@ export class QueryTree {
     b.addEventListener('click', () => {
       const owner = this.deps.owner
       if (!this.deps.pickRef || !owner) return
-      this.deps.pickRef(owner, '', current, onPick, b.getBoundingClientRect())
+      this.deps.pickRef(owner, '', current, onPick, b.getBoundingClientRect(), b)
     })
     if (!this.deps.pickRef || !this.deps.owner) {
       // 没有块选择器（例如 local tab 没有块宿主）：退化成手输 id，不把入口藏掉

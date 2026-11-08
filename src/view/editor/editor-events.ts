@@ -296,7 +296,7 @@ export interface EditorBridge {
    * 或镜像岛里的源那一行）：菜单开在**源**上，装配层会附「移除这次露面」——
    * 露面行自己的 chrome 已交给源（块标绑源），摘露面的出口就跟着走同一条路。
    */
-  onBlockMenu: (blockId: string, rect: DOMRect, appearanceHost?: string) => void
+  onBlockMenu: (blockId: string, rect: DOMRect, appearanceHost?: string, trigger?: HTMLElement) => void
   /**
    * **跨块拖选**：在 `.tx` 内按下 / 移动 / 松开。
    * 事件层只报坐标；「是否切成块选区」的判定在编辑器里（单块内仍是原生文本选择）。
@@ -965,7 +965,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     const marker = target.closest<HTMLElement>('[data-focus-for]')
     const rowId = marker?.closest<HTMLElement>('.blk[data-block-id]')?.dataset.blockId
     if (marker?.dataset.focusFor && rowId && rowId !== marker.dataset.focusFor) {
-      br.onBlockMenu(marker.dataset.focusFor, rect, rowId)
+      br.onBlockMenu(marker.dataset.focusFor, rect, rowId, marker)
       return
     }
     /**
@@ -976,11 +976,11 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     if (body?.dataset.embedBodyFor) {
       const first = body.querySelector<HTMLElement>('.blk[data-depth="0"]')
       if (first?.dataset.blockId && first.dataset.blockId === el.dataset.blockId) {
-        br.onBlockMenu(el.dataset.blockId, rect, body.dataset.embedBodyFor)
+        br.onBlockMenu(el.dataset.blockId, rect, body.dataset.embedBodyFor, first)
         return
       }
     }
-    br.onBlockMenu(el.dataset.blockId, rect)
+    br.onBlockMenu(el.dataset.blockId, rect, undefined, target instanceof HTMLElement ? target : undefined)
   })
 
   /* ── gutter 上的三个动作：折叠三角 / 导轨 / 待办方框 ── */

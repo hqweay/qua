@@ -5955,6 +5955,11 @@ await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling
   await page.locator(`#editor .atom-page[data-atom-id="${r.atomId}"]`).click({ modifiers: ['Alt'] })
   const pop = await page.locator('.popover').innerText()
   assert(pop.includes('删除这个引用'), `⌥ 点击应弹详情浮层：${pop.slice(0, 60)}`)
+  // 同一枚原子再 ⌥-点一次＝收起（toggle）：入口就是这层浮层的开关，
+  // 拆掉重滑进来一次（内容没变用户看到一闪）不是这条入口该有的样子
+  await page.locator(`#editor .atom-page[data-atom-id="${r.atomId}"]`).click({ modifiers: ['Alt'] })
+  await page.waitForTimeout(150)
+  assert(!(await page.evaluate(() => Boolean(document.querySelector('.popover')))), '同一枚再 ⌥-点一次＝收起（toggle）')
   await page.keyboard.press('Escape')
 
   // dangling：左键也只能弹详情（不静默失败）

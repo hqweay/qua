@@ -119,6 +119,13 @@ export interface MenuOpts {
   keepOpen?: boolean
   onQuery?: (q: string) => void
   onClose?: () => void
+  /**
+   * **这次打开的触发元素**（点的那颗按钮／右键的那颗块标）。给了它，
+   * 同一颗触发器再触发一次＝**收起**（toggle）——入口按钮就是这张菜单的开关，
+   * 「点了没反应」（拆掉重建再滑进来一次）在用户眼里等于坏了。
+   * 不给（菜单行二级入口、键盘入口）＝老行为：先关再开。
+   */
+  trigger?: HTMLElement
 }
 
 export class Layers {
@@ -154,6 +161,10 @@ export class Layers {
    * （Esc／点外部／被另一个浮层顶掉／锚点消失），漏掉任何一条，宿主就漏拆。
    */
   private popClose: (() => void) | null = null
+  /** 菜单/浮层的触发元素（`MenuOpts.trigger` 的去处；关闭时清掉） */
+  private menuTrigger: HTMLElement | null = null
+  private popTriggerEl: HTMLElement | null = null
+  private popTriggerKey: string | undefined = undefined
   /** 抽屉打开之前焦点在哪（同上） */
   private drawerFocus: FocusReturn | null = null
   /** 划选气泡（顶部工具栏作废后的落点，2026-10-19）*/
@@ -189,6 +200,10 @@ export class Layers {
       if (!this.open) return
       const t = e.target as Node
       if (this.el?.contains(t) || this.popEl?.contains(t)) return
+      // 按在触发元素上不算「点到外面」：关与开都归触发器自己的 handler
+      //（同触发器再点一次＝toggle，判据在 `openMenu`）。这里抢先关掉的话，
+      // click 到 handler 时菜单已经没了，toggle 判据永远落空。
+      if (this.menuTrigger?.contains(t)) return
       /**
        * **点任何别处都关**（含正文里的块行）。
        *
@@ -231,7 +246,17 @@ export class Layers {
   /* ------------------------------------------------------------ 菜单 */
 
   openMenu(o: MenuOpts): void {
+    /**
+     * **同一颗触发器再触发一次＝收起**（toggle）。判据收在这里而不是散在各入口：
+     * 入口只报「我是谁」，开还是收是浮层自己的状态。
+     * 触发元素被整行重渲染换掉（新节点）时判据落空 ⇒ 退回先关再开，与旧行为一致。
+     */
+    if (this.open && o.trigger && this.menuTrigger === o.trigger) {
+      this.closeMenu()
+      return
+    }
     this.closeMenu(false)
+    this.menuTrigger = o.trigger ?? null
     /**
      * **焦点归还**：菜单会抢焦点（搜索框要能打字），关掉之后必须还回去。
      * 不还的后果见 `ui/focus-return.ts`：关掉后打字一个字符都进不去，且不报错。
@@ -426,6 +451,7 @@ export class Layers {
     this.rows = []
     this.allRows = []
     this.open = false
+    this.menuTrigger = null
     const cb = this.opts?.onClose
     this.opts = null
     // 先归还焦点再回调：回调里可能立刻打开另一个覆盖层（那会重新记一次焦点）
@@ -555,8 +581,26 @@ export class Layers {
     render: (host: HTMLElement) => void,
     anchor: DOMRect | null | (() => DOMRect | null),
     onClose?: () => void,
+    trigger?: { el?: HTMLElement; key?: string },
   ): void {
+    /**
+     * **同一颗触发器再点一次＝收起**（toggle）：入口按钮就是这层浮层的开关，
+     * 先拆再建等于每次点都让它重滑进来一次（与 `openMenu` 同一条判据、同一处收口）。
+     *
+     * 身份优先按 `key`（正文里的原子随重渲染整颗换新节点，节点靠不住；run id 才稳），
+     * 没有 key 的（chrome 里的按钮）按元素本身。两边都不给＝老行为：先关再开。
+     */
+    const same =
+      trigger &&
+      ((trigger.key !== undefined && this.popTriggerKey === trigger.key) ||
+        (trigger.key === undefined && trigger.el !== undefined && this.popTriggerEl === trigger.el))
+    if (this.popEl && same) {
+      this.closePopover()
+      return
+    }
     this.closePopover()
+    this.popTriggerEl = trigger?.el ?? null
+    this.popTriggerKey = trigger?.key
     const box = document.createElement('div')
     box.className = 'popover'
     // 浮层是对话框：它里面有可编辑的字段，读屏与键盘导航都该知道「这是一层」
@@ -620,6 +664,8 @@ export class Layers {
     this.popClose = null
     this.popAnchor = null
     this.popEl = null
+    this.popTriggerEl = null
+    this.popTriggerKey = undefined
     // 先回调、后摘 DOM：宿主在这时面对的还是仍在文档里的编辑器（收尾不靠游离节点）
     close?.()
     box?.remove()
@@ -637,6 +683,14 @@ export class Layers {
    */
   popoverContains(node: Node | null): boolean {
     return node !== null && (this.popEl?.contains(node) ?? false)
+  }
+
+  /**
+   * 这个节点是不是当前气泡的**触发元素**。外点关闭的豁免判据：
+   * 按下触发器不算「点到外面」，关与开都归触发器自己的 handler（同 `openMenu` 的 toggle）。
+   */
+  popoverTriggerContains(node: Node | null): boolean {
+    return node !== null && (this.popTriggerEl?.contains(node) ?? false)
   }
 
   /* ------------------------------------------------------------ 抽屉面板 */

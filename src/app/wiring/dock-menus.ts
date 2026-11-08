@@ -71,7 +71,7 @@ export function setupCardMenus(deps: DockMenusDeps) {
    * 菜单项是数据现画的，选中之后写路径仍走命令面／装配层的同一处入口）。
    * 关闭类动作只数**窗口卡**：派生卡／组件卡／命令小卡是家具，有自己的 ✕。
    */
-  const showCardMenu = (side: 'left' | 'right', key: string, anchor: DOMRect): void => {
+  const showCardMenu = (side: 'left' | 'right', key: string, anchor: DOMRect, trigger?: HTMLElement): void => {
     const st = deps.cardStateFor(side, key)
     const dock = deps.prefs().dock
     const entry = dock[side].cards.find((e) => dockKey(e) === key)
@@ -114,6 +114,8 @@ export function setupCardMenus(deps: DockMenusDeps) {
     deps.layers.openMenu({
       rows,
       anchor,
+      // 同一颗卡头再右键一次＝收起（toggle）
+      ...(trigger ? { trigger } : {}),
       searchable: false,
       emptyText: t('ui.dock.tileGalleryEmpty'),
       onPick: (row) => {
@@ -164,7 +166,7 @@ export function setupCardMenus(deps: DockMenusDeps) {
    *   · 派生卡（目录在 `core/views/dock.ts` 的 `DERIVED_CARDS`）。
    * 命令是**策展过的**集合（不是所有命令）。
    */
-  const showWidgetGallery = (side: 'left' | 'right'): void => {
+  const showWidgetGallery = (side: 'left' | 'right', trigger?: HTMLElement): void => {
     const cards = deps.prefs().dock[side].cards
     const taken = new Set(cards.filter((e) => e.kind === 'cmd').map(dockKey))
     /**
@@ -225,6 +227,8 @@ export function setupCardMenus(deps: DockMenusDeps) {
     deps.layers.openMenu({
       rows,
       anchor: null,
+      // 同一颗「＋」再点一次＝收起（toggle）
+      ...(trigger ? { trigger } : {}),
       title: t('ui.dock.tileGallery'),
       searchable: true,
       focusSearch: true,

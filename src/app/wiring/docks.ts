@@ -78,7 +78,7 @@ export type DocksDeps = {
    */
   inspectCard: () => HTMLElement
   /** 右键卡头：卡片菜单（行与动作归装配入口——它有浮层与命令面；这里只给时机与锚） */
-  showCardMenu: (side: 'left' | 'right', key: string, anchor: DOMRect) => void
+  showCardMenu: (side: 'left' | 'right', key: string, anchor: DOMRect, trigger?: HTMLElement) => void
   /**
    * 反链卡（可编辑块列）的**工厂**：由装配入口在依赖就绪后注入。
    *
@@ -203,7 +203,7 @@ export function setupDocks(deps: DocksDeps) {
       onToggleCollapse: () => toggleCollapse(id),
       onToggleSolo: () => toggleSolo(side, id),
       onTogglePin: () => togglePin(id),
-      onHeadMenu: (anchor) => deps.showCardMenu(side, id, anchor),
+      onHeadMenu: (anchor, trigger) => deps.showCardMenu(side, id, anchor, trigger),
       onDragStart: (e) => setDragCard(e.dataTransfer, id),
     }
   }

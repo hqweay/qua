@@ -152,7 +152,12 @@ export interface MountAreaDeps {
    * 浮层外壳（快速筛选的 chips 弹层住在这里面）。装配层持有浮层实例，这一层
    * 不认识它的落位与生命周期——窄接口只收「画进哪、锚在哪」，够用。
    */
-  openPopover?: (render: (host: HTMLElement) => void, anchor: DOMRect | null | (() => DOMRect | null)) => void
+  openPopover?: (
+    render: (host: HTMLElement) => void,
+    anchor: DOMRect | null | (() => DOMRect | null),
+    /** 这次打开的触发者；给了它，同一触发者再点一次＝收起（toggle，见 `layers.openPopover`） */
+    trigger?: { el?: HTMLElement; key?: string },
+  ) => void
   /**
    * 这一栏非大纲时用的视图体（local 栏可以有表格等看法）。
    *
@@ -1309,7 +1314,7 @@ export class MountArea {
     btn.textContent = t('ui.filter.button')
     btn.title = t('ui.filter.buttonHint')
     if (this.filterActive(source)) btn.dataset.active = '1'
-    btn.addEventListener('click', () => this.openQuickFilter(source))
+    btn.addEventListener('click', () => this.openQuickFilter(source, btn))
     return btn
   }
 
@@ -1317,7 +1322,7 @@ export class MountArea {
    * 弹出 chips 层。锚点每次**现查**（手势会重画抬头、重建按钮，矩形快照会指向
    * 一个已经不存在的元素）；锚点不在了 ⇒ 浮层自己关（装配层浮层的既有口径）。
    */
-  private openQuickFilter(source: DerivedSource): void {
+  private openQuickFilter(source: DerivedSource, trigger?: HTMLElement): void {
     if (!this.deps.openPopover) return
     this.deps.openPopover(
       (box) => {
@@ -1339,6 +1344,7 @@ export class MountArea {
         paint()
       },
       () => this.derivedHeadEl.querySelector('.mount-derived-filter')?.getBoundingClientRect() ?? null,
+      trigger ? { el: trigger } : undefined,
     )
   }
 

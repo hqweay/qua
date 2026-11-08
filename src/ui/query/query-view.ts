@@ -192,7 +192,7 @@ export interface ViewHostDeps {
    * `anchor` 只是浮层的落点：下拉要贴着那颗按钮，而不是居中。菜单的行仍由
    * 装配层现画（大纲／已有视图／新建…），这一层不复制一份视图清单。
    */
-  openViewMenu?: (owner: ViewOwnerRef, anchor: DOMRect) => void
+  openViewMenu?: (owner: ViewOwnerRef, anchor: DOMRect, trigger?: HTMLElement) => void
   /**
    * **打开切片构建器**（抬头切片 chip 的落点）。
    *
@@ -208,7 +208,7 @@ export interface ViewHostDeps {
   /** 打开一块（行首块标 / 紧凑列表） */
   openBlock: (blockId: string, place?: OpenAction) => void
   /** `ref` 值的选择器（与属性区同一份） */
-  pickRef?: (owner: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect) => void
+  pickRef?: (owner: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect, trigger?: HTMLElement) => void
   /** 多值 select 的选值浮层（与属性卡共用；省略 ⇒ 多值格只读） */
   pickChoice?: (
     owner: Block,
@@ -216,6 +216,7 @@ export interface ViewHostDeps {
     current: readonly string[],
     onPick: (next: string[]) => void,
     anchor?: DOMRect,
+    trigger?: HTMLElement,
   ) => void
   refLabel?: (targetId: string) => string
   /** 标签名解析（`select` 选项显示名里的 `#名`） */
@@ -1510,7 +1511,7 @@ export class ViewHost {
        * 都只有一张表（`openViewMenu`），这里不另拼一份行。
        * 拿不到宿主菜单时退回命令面（没有锚点，居中弹出）——仍然是同一条动作。
        */
-      if (this.deps.openViewMenu) this.deps.openViewMenu(this.writeOwner, btn.getBoundingClientRect())
+      if (this.deps.openViewMenu) this.deps.openViewMenu(this.writeOwner, btn.getBoundingClientRect(), btn)
       else this.deps.invoke('core.view/menu', { owner: this.writeOwner })
     })
     box.appendChild(btn)

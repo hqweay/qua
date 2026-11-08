@@ -68,7 +68,12 @@ export interface PanelDeps {
    *   后者才是桌面端该用的形态——浮层要跟着锚点走（拖窗口、滚动正文），
    *   而一个矩形快照记不住自己指向谁。见 `ui/layers.ts` 的 `openPopover`。
    */
-  openPopover: (render: (host: HTMLElement) => void, anchor: DOMRect | null | (() => DOMRect | null)) => void
+  openPopover: (
+    render: (host: HTMLElement) => void,
+    anchor: DOMRect | null | (() => DOMRect | null),
+    /** 这次打开的触发者；给了它，同一触发者再点一次＝收起（toggle，见 `layers.openPopover`） */
+    trigger?: { el?: HTMLElement; key?: string },
+  ) => void
   openDrawer: (title: string, render: (host: HTMLElement) => void) => void
 }
 
@@ -414,6 +419,8 @@ export function showAtomPopover(
      * 那个入口的主语是「看看这是什么」，抢焦点会盖掉诊断信息。
      */
     focus?: 'anchor' | 'link'
+    /** 这次打开的触发者（点的那枚原子）；同一枚再点一次＝收起（run id 是稳身份） */
+    trigger?: { el?: HTMLElement; key?: string }
   },
 ): void {
   let focusEl: HTMLInputElement | null = null
@@ -612,7 +619,7 @@ export function showAtomPopover(
     })
     row.appendChild(del)
     host.append(h, dl, note, row)
-  }, rect)
+  }, rect, opts?.trigger)
   /**
    * 等这一帧挂好再聚焦：`openPopover` 里的 render 是同步跑的，但浮层的位置
    * 在 append 之后才由 `placePopover` 写；先焦点后落位会让浏览器按旧位置滚一下。

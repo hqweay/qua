@@ -208,6 +208,7 @@ export function setupPanels(deps: PanelsDeps) {
     current: readonly string[],
     onPick: (next: string[]) => void,
     anchor?: DOMRect,
+    trigger?: HTMLElement,
   ): void => {
     const def = kb.get(propId)
     if (!def) return
@@ -220,6 +221,7 @@ export function setupPanels(deps: PanelsDeps) {
       def,
       choices: choicesFor(b, propId, kb.roots()),
       current,
+      ...(trigger ? { trigger } : {}),
       anchor: anchor ?? deps.getEd().caretRect(),
       labelOf: (c) => choiceDisplayLabel(c, def, tagName),
       onPick: (next) => onPick(Array.isArray(next) ? next : [next]),
@@ -232,6 +234,7 @@ export function setupPanels(deps: PanelsDeps) {
     current: string,
     onPick: (targetId: string) => void,
     anchor?: DOMRect,
+    trigger?: HTMLElement,
   ): void => {
     const rows: Row[] = []
     for (const b of flatten({ roots: [...kb.roots()] })) {
@@ -251,6 +254,8 @@ export function setupPanels(deps: PanelsDeps) {
     layers.openMenu({
       rows,
       anchor: anchor ?? deps.getEd().caretRect(),
+      // 同一颗值按钮再点一次＝收起（toggle）
+      ...(trigger ? { trigger } : {}),
       title: t('ui.props.pickRef'),
       searchable: true,
       focusSearch: true,
@@ -270,7 +275,7 @@ export function setupPanels(deps: PanelsDeps) {
    * 为什么不另造一份「可选图标清单」：`view/icons.ts` 已经是图标值的唯一数据源，
    * 这里再列一遍就会与真正能渲染的集合分叉（选了却画成占位）。
    */
-  const pickIconValue = (anchor: DOMRect, current: string, onPick: (icon: string) => void): void => {
+  const pickIconValue = (anchor: DOMRect, current: string, onPick: (icon: string) => void, trigger?: HTMLElement): void => {
     const rows: Row[] = [
       {
         id: 'icon/',
@@ -290,6 +295,7 @@ export function setupPanels(deps: PanelsDeps) {
     layers.openMenu({
       rows,
       anchor,
+      ...(trigger ? { trigger } : {}),
       title: t('ui.props.choice.pickIcon'),
       width: 320,
       searchable: true,
@@ -384,7 +390,7 @@ export function setupPanels(deps: PanelsDeps) {
        */
       pickRef: pickRefValue,
       /** 多值 select：整份数组写回（每次勾选一次撤销） */
-      pickChoice: (b, propId, current, onPick, anchor) => pickChoiceValue(b, propId, current, onPick, anchor),
+      pickChoice: (b, propId, current, onPick, anchor, trigger) => pickChoiceValue(b, propId, current, onPick, anchor, trigger),
       /** 选项图标：同一张 `ICON_PATHS` 数据现画成一列（带图标预览，可搜索） */
       pickIcon: pickIconValue,
       refLabel: (targetId) => {
@@ -715,14 +721,14 @@ export function setupPanels(deps: PanelsDeps) {
       toast: (text, kind) => app.toast(text, kind),
       invoke: (name, args) => void deps.getRegistry().invoke(name, args, 'queryview'),
       // 视图切换是下拉：贴着按钮弹「视图…」菜单（行仍由装配层现画）
-      openViewMenu: (owner, anchor) => app.openViewMenu(owner, anchor),
+      openViewMenu: (owner, anchor, trigger) => app.openViewMenu(owner, anchor, trigger),
       openSlice: (owner, viewId, anchor) => app.openViewSlice(owner, viewId, anchor),
       project: (b, into) => deps.project(b, into),
       refClick: (hit, el, mods) => deps.refClick(hit, mods, el),
       ...(deps.atomClick ? { onAtomClick: (atom, el, mods) => deps.atomClick!(atom, el, mods) } : {}),
       openBlock: (id, place) => deps.openBlock(id, place),
-      pickRef: (b, propId, current, onPick, anchor) => pickRefValue(b, propId, current, onPick, anchor),
-      pickChoice: (b, propId, current, onPick, anchor) => pickChoiceValue(b, propId, current, onPick, anchor),
+      pickRef: (b, propId, current, onPick, anchor, trigger) => pickRefValue(b, propId, current, onPick, anchor, trigger),
+      pickChoice: (b, propId, current, onPick, anchor, trigger) => pickChoiceValue(b, propId, current, onPick, anchor, trigger),
       refLabel: (id) => {
         const b = kb.get(id)
         if (!b) return t('ui.props.refMissing', { id: shortId(id) })
@@ -844,7 +850,7 @@ export function setupPanels(deps: PanelsDeps) {
       onAddTab: (id) => addLocalQueryTab(id),
       onMaterializeTab: (id, source, _anchor, opts) => materializeDerivedTab(id, source, opts),
       // 快速筛选的弹层外壳（chips 的内容与状态都在挂载区自己手里）
-      openPopover: (render, anchor) => layers.openPopover(render, anchor),
+      openPopover: (render, anchor, trigger) => layers.openPopover(render, anchor, undefined, trigger),
       // 大纲分支的切换下拉：与视图宿主那条同一个菜单（装配层现画行，这里只给锚点）
       derivedKind: (hostBlock, source) => {
         const mountHost = mountHostOf(hostBlock)

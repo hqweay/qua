@@ -86,7 +86,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
     // 把这一枚引用摊开成块：与「粘贴为镜像／表格」同一条命令（看法写在露面块自己身上）
     embedAtom: (atomId, view) => void deps.getRegistry().invoke('core.embed/from-atom', { atomId, view }, 'popover'),
     closePopover: () => deps.layers.closePopover(),
-    openPopover: (render, anchor) => deps.layers.openPopover(render, anchor),
+    openPopover: (render, anchor, trigger) => deps.layers.openPopover(render, anchor, undefined, trigger),
     openDrawer: (title, render) => deps.layers.openDrawer(title, render),
   }
 
@@ -115,7 +115,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
   const showAtomPopover = (
     a: RunWithId,
     anchor: DOMRect | null | (() => DOMRect | null),
-    opts?: { focus?: 'anchor' | 'link' },
+    opts?: { focus?: 'anchor' | 'link'; trigger?: { el?: HTMLElement; key?: string } },
   ): void => panelPopover(panelDeps, a, anchor, deps.objFieldDeps(), opts)
 
   /**
@@ -136,7 +136,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
   const showAssetDetails = (runId: string, _hash: string, el: HTMLElement): void => {
     const run = findRunOrNull(runId)
     if (run?.t === 'asset') {
-      showAtomPopover(run, anchorOf(el))
+      showAtomPopover(run, anchorOf(el), { trigger: { el, key: run.id } })
       return
     }
     // 模型里已经没有了（刚被删）：不弹一个操作不了的空浮层
@@ -182,12 +182,17 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
         void deps.getRegistry().invoke('core.link/open', { atomId: atom.runId }, via)
         return
       }
-      showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), anchorOf(el))
+      showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), anchorOf(el), {
+        trigger: { el, key: atom.runId },
+      })
       return
     }
     if (atom.kind !== 'asset' || !atom.hash) {
       // 将来别的行内原子：先给详情（它们的「打开」还没做，别假装做了）
-      if (atom.runId) showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), anchorOf(el))
+      if (atom.runId)
+        showAtomPopover(findRunOrNull(atom.runId) ?? ({ id: atom.runId, t: 'ref' } as RunWithId), anchorOf(el), {
+          trigger: { el, key: atom.runId },
+        })
       return
     }
     const view = assetViewOf(atom.hash)
@@ -220,7 +225,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
       deps.openBlockRoute(target, openActionOf(mods))
       return
     }
-    if (ref.run && el) showAtomPopover(ref.run, anchorOf(el))
+    if (ref.run && el) showAtomPopover(ref.run, anchorOf(el), { trigger: { el, key: ref.run.id } })
     /**
      * 剩下的两种情形都不做事，且都不假装成功：
      *   · 没有 run（chip／属性区）且目标不在了 ⇒ 没有可弹的内容；
@@ -321,6 +326,8 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
       kind: 'menu',
       prefix: 'atom/',
       anchor: rect,
+      // 同一枚原子再右键一次＝收起（toggle）
+      trigger: el,
       title: t('menu.title.atom'),
       extraRows: rows,
       onPick: (row) => {

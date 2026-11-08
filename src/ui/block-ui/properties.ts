@@ -101,7 +101,7 @@ export interface PropertiesDeps {
    * 而属性区只认识「当前这一块」——它也拿不到 DOM 之外的浮层。
    * 不注入的话，`ref` 只能让用户手打 32 位 id，那等于没有这个类型。
    */
-  pickRef: (b: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect) => void
+  pickRef: (b: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect, trigger?: HTMLElement) => void
   /**
    * **多值属性选值**（选中不关、逐项勾）。单选走原生 `<select>`，多选必须开浮层：
    * 原生 `<select multiple>` 的交互（Ctrl/⌘ 点）不是这套 UI 的语言。
@@ -112,6 +112,7 @@ export interface PropertiesDeps {
     current: readonly string[],
     onPick: (next: string[]) => void,
     anchor?: DOMRect,
+    trigger?: HTMLElement,
   ) => void
   /**
    * **给选项选一个图标**（装配层弹出图标网格，选中后回调写 `_icon`）。
@@ -278,7 +279,7 @@ export function makeCellEditor(
     btn.dataset.refId = current
     btn.textContent = current === '' ? t('ui.props.pending') : (deps.refLabel?.(current) ?? current)
     btn.addEventListener('click', () => {
-      pick(owner, row.propId, current, (targetId) => send(targetId === '' ? undefined : targetId), btn.getBoundingClientRect())
+      pick(owner, row.propId, current, (targetId) => send(targetId === '' ? undefined : targetId), btn.getBoundingClientRect(), btn)
     })
     return btn
   }
@@ -296,7 +297,7 @@ export function makeCellEditor(
     btn.textContent = labels.length === 0 ? t('ui.props.pending') : labels.join('、')
     if (deps?.pickChoice && owner) {
       btn.addEventListener('click', () => {
-        deps.pickChoice?.(owner, row.propId, current, (next) => send(next), btn.getBoundingClientRect())
+        deps.pickChoice?.(owner, row.propId, current, (next) => send(next), btn.getBoundingClientRect(), btn)
       })
     } else {
       btn.disabled = true

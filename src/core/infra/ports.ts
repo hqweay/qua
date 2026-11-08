@@ -116,6 +116,8 @@ export interface MenuRequest {
   onPick?: (row: MenuRow, decl: CommandDecl | undefined) => void
   /** 关掉时回调（斜杠菜单用来复位内部状态） */
   onClose?: () => void
+  /** 这次打开的触发元素（点/右键的那个节点）；给了它，同一处再触发一次＝收起（toggle） */
+  trigger?: HTMLElement
 }
 
 /** 命令处理器拿到的「受管门面」 */
@@ -573,7 +575,7 @@ export interface App {
   /** 打开**切片构建器**：与「视图… → 编辑切片…」同一台浮层（点抬头 chip 也走这里） */
   openViewSlice(owner: ViewOwnerRef, viewId: string, anchor?: DOMRect | null): void
   /** 「视图…」菜单：列出默认看法 ＋ 已有视图 ＋ 新建…（**纯 UI**，落在装配层） */
-  openViewMenu(owner: ViewOwnerRef, anchor?: DOMRect | null): void
+  openViewMenu(owner: ViewOwnerRef, anchor?: DOMRect | null, trigger?: HTMLElement): void
   /** 派生栏（引用／提及）的看法下拉：只有三档（大纲／列表／表格），写设备状态不建视图 */
   openDerivedViewMenu(anchor: DOMRect | null, current: string, onPick: (kind: string) => void): void
   /** 打开**条件构建器**（一个浮层；草稿改在本地，点「应用」才写一次） */
