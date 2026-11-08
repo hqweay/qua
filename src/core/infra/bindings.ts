@@ -248,6 +248,8 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/toggle-todo-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 17, layer: 'core', keywords: ['todo', 'task'] },
   { command: 'core.editor/copy-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 20, layer: 'core' },
   { command: 'core.editor/copy-selected-block-refs', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 30, layer: 'core', keywords: ['ref', t('menu.kw.ref')] },
+  // 剪切：⌘X 有键位，菜单补的是指针用户的路（与复制同处一组；移动发生在粘贴那一刻）
+  { command: 'core.editor/cut-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 40, layer: 'core', keywords: ['cut', 'move'] },
   { command: 'core.selection/clear', kind: 'menu', when: 'blockSelection', group: 'blockSel/2-clear', order: 10, layer: 'core' },
 
   /* ================= 斜杠菜单（输入 `/`） =================
