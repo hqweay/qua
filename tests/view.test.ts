@@ -22,6 +22,7 @@ import {
   cardLayoutOf,
   childrenRecords,
   cloneSubtree,
+  columnsOfRaw,
   defaultColumnsForSource,
   defaultWidthOf,
   fieldTextOf,
@@ -254,7 +255,7 @@ test('resolveRows：每条命中都是一行（父子同时命中不折叠）；
 
 /* ------------------------------------------------------------ 列 */
 
-test('defaultColumnsForSource：children 源看子块实际拥有的属性（只取一次），一个都没有才给四列默认', () => {
+test('defaultColumnsForSource：children 源看子块实际拥有的属性（只取一次），一个都没有才给两列兜底', () => {
   const { root, defs } = pageWith5()
   const { kb } = kbOf([root, ...defs])
   const cols = defaultColumnsForSource({ kind: 'children', blockId: 'root' }, kb)
@@ -266,7 +267,21 @@ test('defaultColumnsForSource：children 源看子块实际拥有的属性（只
   const empty = mk('e', '空容器', [mk('x', '没有属性')])
   const { kb: kb2 } = kbOf([empty])
   const fallback = defaultColumnsForSource({ kind: 'children', blockId: 'e' }, kb2).map((c) => c.key)
-  assert.deepEqual(fallback, ['title', 'tags', 'children', 'modified'], '没有属性 ⇒ title/tags/children/modified')
+  // 兜底只放真有内容的两列：系统元数据（子块数/创建/修改/路径）退成列管理里的可加列
+  assert.deepEqual(fallback, ['title', 'tags'], '没有属性 ⇒ title/tags')
+})
+
+test('columnsOfRaw：标题列恒在第一位，其余按 key 去重、宽度夹档', () => {
+  assert.deepEqual(
+    columnsOfRaw([{ key: 'modified' }, { key: 'tags' }]).map((c) => c.key),
+    ['title', 'modified', 'tags'],
+    '没写标题也要有——它是行身份',
+  )
+  assert.deepEqual(columnsOfRaw([{ key: 'title' }, { key: 'tags', width: 9999 }, { key: 'tags' }]), [
+    { key: 'title', width: 260 },
+    { key: 'tags', width: 480 },
+  ], '重复键丢一份、宽度夹到上限、标题宽度取默认')
+  assert.deepEqual(columnsOfRaw('not-an-array').map((c) => c.key), ['title'], '坏输入不炸，只留标题')
 })
 
 test('保留列 path／refCount／matched／sharedTags：文本与排序值都认它们', () => {

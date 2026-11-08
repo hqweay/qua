@@ -70,6 +70,11 @@ import {
   type ViewRecord,
   type ViewSurface,
   type PropKind,
+  CHILDREN_COLUMN,
+  CREATED_COLUMN,
+  MODIFIED_COLUMN,
+  PATH_COLUMN,
+  defaultWidthOf,
 } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
@@ -265,6 +270,10 @@ export interface ViewHostEls {
   sort: HTMLButtonElement
   /** 排序面板：与条件树同一哲学的就地一行（不是浮层），打开时按当前 spec 现画 */
   sortPanel: HTMLElement
+  /** **列**按钮（表格视图才有）：就地展开列管理面板，勾选要显示的列 */
+  columnsBtn: HTMLButtonElement
+  /** 列管理面板：勾选即落盘（`core.view/set-columns`），整份替换 */
+  columnsPanel: HTMLElement
   /** 条件 chip 条（查询源才有；收起时只剩一条摘要） */
   filters: HTMLElement
   /** 条件树（就地展开；与抬头同属这一段，不是浮层） */
@@ -324,6 +333,13 @@ export function createViewHostEls(): ViewHostEls {
   const sortPanel = document.createElement('div')
   sortPanel.className = 'queryview-sortpanel'
   sortPanel.hidden = true
+  const columnsBtn = document.createElement('button')
+  columnsBtn.type = 'button'
+  columnsBtn.className = 'queryview-columns'
+  columnsBtn.hidden = true
+  const columnsPanel = document.createElement('div')
+  columnsPanel.className = 'queryview-sortpanel queryview-columnspanel'
+  columnsPanel.hidden = true
   const refresh = document.createElement('button')
   refresh.type = 'button'
   refresh.className = 'queryview-refresh'
@@ -335,7 +351,7 @@ export function createViewHostEls(): ViewHostEls {
   newRow.type = 'button'
   newRow.className = 'queryview-newrow'
   newRow.hidden = true
-  head.append(title, count, topCount, stale, filters, views, group, sort, refresh, foldAll, newRow)
+  head.append(title, count, topCount, stale, filters, views, group, sort, columnsBtn, refresh, foldAll, newRow)
 
   const tree = document.createElement('div')
   tree.className = 'queryview-tree'
@@ -359,7 +375,7 @@ export function createViewHostEls(): ViewHostEls {
   table.hidden = true
   body.append(editor, table)
 
-  root.append(head, tree, sortPanel, body)
+  root.append(head, tree, sortPanel, columnsPanel, body)
   return {
     root,
     head,
@@ -372,6 +388,8 @@ export function createViewHostEls(): ViewHostEls {
     group,
     sort,
     sortPanel,
+    columnsBtn,
+    columnsPanel,
     refresh,
     foldAll,
     newRow,
@@ -471,6 +489,9 @@ export class ViewHost {
     this.els.sort.textContent = t('ui.query.sort')
     this.els.sort.title = t('ui.query.sortTitle')
     this.els.sort.addEventListener('click', () => this.toggleSortPanel())
+    this.els.columnsBtn.textContent = t('ui.view.columns')
+    this.els.columnsBtn.title = t('ui.view.columnsTitle')
+    this.els.columnsBtn.addEventListener('click', () => this.toggleColumnsPanel())
     this.els.newRow.textContent = t('ui.view.newRow')
     this.els.newRow.title = t('ui.view.newRowTitle')
     this.els.newRow.addEventListener('click', () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }))
@@ -937,6 +958,10 @@ export class ViewHost {
     this.els.refresh.hidden = !query
     this.els.sort.hidden = !query
     if (!query) this.els.sortPanel.hidden = true
+    // 列管理只对表格视图开放（写的是 table.columns）；派生栏没有可写配置，列由来源定
+    const columnsEditable = !derived && view?.kind === 'table'
+    this.els.columnsBtn.hidden = !columnsEditable
+    if (!columnsEditable) this.els.columnsPanel.hidden = true
     // 派生栏是只读关系视图 ⇒ 不给新建/改名/刷新
     this.els.newRow.hidden = Boolean(derived) || query
     /**
@@ -1151,6 +1176,57 @@ export class ViewHost {
       this.refocusBody()
     })
     panel.append(apply)
+  }
+
+  /** 列管理面板就地展开／收起；打开时按当前视图的列配置现画 */
+  private toggleColumnsPanel(): void {
+    const panel = this.els.columnsPanel
+    if (!panel.hidden) {
+      panel.hidden = true
+      return
+    }
+    const view = this.view
+    if (!view || view.kind !== 'table') return
+    this.paintColumnsRows(view)
+    panel.hidden = false
+  }
+
+  /**
+   * 列管理的行：**标题恒在**（它是行身份，不进候选）＋ 一行一个候选列。
+   *
+   * 候选两路：字段（属性定义，`deps.fields()` 与条件树同一份）＋ 保留的系统列
+   * （子块数/创建/修改/路径——它们是「什么时候动过、在哪」的投影，不默认占位但随取随有）。
+   * 勾选即落盘（`core.view/set-columns`，整份替换）：没有「应用」一步，勾完表格就地重画。
+   */
+  private paintColumnsRows(view: ViewConfig): void {
+    const panel = this.els.columnsPanel
+    panel.replaceChildren()
+    const current = view.table?.columns ?? []
+    const rows: { key: string; label: string }[] = [
+      { key: CHILDREN_COLUMN, label: t('ui.view.col.children') },
+      { key: CREATED_COLUMN, label: t('ui.props.createdAt') },
+      { key: MODIFIED_COLUMN, label: t('ui.props.modifiedAt') },
+      { key: PATH_COLUMN, label: t('ui.view.col.path') },
+      ...this.deps.fields().map((f) => ({ key: f.id, label: f.label })),
+    ]
+    for (const r of rows) {
+      const row = document.createElement('label')
+      row.className = 'qcp-row'
+      const box = document.createElement('input')
+      box.type = 'checkbox'
+      box.checked = current.some((c) => c.key === r.key)
+      box.addEventListener('change', () => {
+        const kept = current.filter((c) => c.key !== r.key)
+        const next = box.checked
+          ? [...kept, { key: r.key, width: defaultWidthOf(r.key) }]
+          : kept
+        this.deps.invoke('core.view/set-columns', { owner: this.writeOwner, viewId: view.id, columns: next })
+        panel.hidden = true
+        this.refocusBody()
+      })
+      row.append(box, document.createTextNode(r.label))
+      panel.append(row)
+    }
   }
 
   /**

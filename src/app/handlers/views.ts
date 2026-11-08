@@ -37,6 +37,12 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
     if (!owner || !by) return false
     return app.viewSetSort(owner, S(a.viewId), by, S(a.dir))
   },
+  /** 表格的整份列清单（列管理）：形状校验在命令层（`columnsOfRaw`），这里只接参数 */
+  'core.view/set-columns': (a, app) => {
+    const owner = ownerOrCur(a, app)
+    if (!owner || !Array.isArray(a.columns)) return false
+    return app.viewSetColumns(owner, S(a.viewId), a.columns)
+  },
   /** 写卡片封面；只认卡片视图（别的 kind 会被 canonicalViews 丢掉） */
   'core.view/set-cover': (a, app) => {
     const owner = ownerOrCur(a, app)

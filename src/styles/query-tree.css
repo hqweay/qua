@@ -414,6 +414,15 @@
   margin-inline-start: auto;
 }
 
+/* 列管理面板：与排序面板同卡片、同节奏；一行一列，勾选即落盘（无「应用」步） */
+.qcp-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  min-width: 0;
+  cursor: pointer;
+}
+
 .qsp-ops button {
   border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-sm);

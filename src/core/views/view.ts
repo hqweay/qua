@@ -340,6 +340,24 @@ function columnOf(raw: unknown): ViewColumn | null {
   return out
 }
 
+/**
+ * 一份原始列清单 ⇒ 可落盘的列（命令面 `core.view/set-columns` 与读路径共用同一份）。
+ *
+ * 标题列**永远在且在第一位**：它是块本身，其余每一列都是「这一块的这个方面」——
+ * 没有它，一张表就没有行身份可指。其余按传入序去重（同键写两遍是配置 bug，不是两种列）。
+ */
+export function columnsOfRaw(raw: unknown): ViewColumn[] {
+  const list = Array.isArray(raw) ? raw.map(columnOf).filter((c): c is ViewColumn => c !== null) : []
+  const out: ViewColumn[] = []
+  const seen = new Set<string>()
+  for (const c of list) {
+    if (c.key === TITLE_COLUMN || seen.has(c.key)) continue
+    seen.add(c.key)
+    out.push(c)
+  }
+  return [{ key: TITLE_COLUMN, width: defaultWidthOf(TITLE_COLUMN) }, ...out]
+}
+
 function sortOf(raw: unknown): SortKey | null {
   if (!raw || typeof raw !== 'object') return null
   const k = raw as Partial<SortKey>
@@ -770,13 +788,16 @@ export function defaultWidthOf(key: string): number {
   return 140
 }
 
-/** 四列兜底：空表也要有列头，否则用户不知道「这里能放什么」 */
+/**
+ * 两列兜底：空表也要有列头，否则用户不知道「这里能放什么」——但只放**真有内容的两列**。
+ * 系统元数据（子块数/创建/修改/路径）不默认占位：它们是「什么时候动过」不是「这块是什么」，
+ * 而兜底出现的时机恰是「子块还没声明任何字段」——最该引导去声明字段的时候，
+ * 摆几列凑数的元数据只会把「＋ 添加列」的那一步往后推。想要它们走列管理（`core.view/set-columns`）。
+ */
 function fallbackColumns(): ViewColumn[] {
   return [
     { key: TITLE_COLUMN, width: defaultWidthOf(TITLE_COLUMN) },
     { key: TAGS_COLUMN, width: defaultWidthOf(TAGS_COLUMN) },
-    { key: CHILDREN_COLUMN, width: defaultWidthOf(CHILDREN_COLUMN) },
-    { key: MODIFIED_COLUMN, width: defaultWidthOf(MODIFIED_COLUMN) },
   ]
 }
 

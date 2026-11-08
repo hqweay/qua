@@ -34,6 +34,8 @@ import {
   withTabsDirection,
   withListSort,
   withSort,
+  withColumns,
+  columnsOfRaw,
   withStructureGroup,
   type Block,
   type ListSort,
@@ -69,6 +71,7 @@ export function viewConfigCommands(
   | 'viewInsertRow'
   | 'viewDeleteRow'
   | 'viewSetSort'
+  | 'viewSetColumns'
   | 'viewSetGroup'
   | 'viewSetCover'
   | 'viewSetTabsDirection'
@@ -277,6 +280,21 @@ export function viewConfigCommands(
       if (view.kind !== 'table') return false
       const sort = direction === '' ? [] : [{ by, dir: direction as 'asc' | 'desc' }]
       d.owners.write(owner, { views: upsertView(data.views, withSort(view, sort)) })
+      after()
+      return true
+    },
+
+    /**
+     * 写**表格的整份列清单**（列管理的落点）。形状校验在 `columnsOfRaw`：
+     * 标题列恒在第一位、其余按 key 去重、宽度夹档——坏项丢掉而不是让整表消失。
+     * 只认表格视图：别的 kind 写进去会被 `canonicalViews` 丢掉（那就是「点了没生效」）。
+     */
+    viewSetColumns: (owner, viewId, columns) => {
+      const data = d.owners.read(owner)
+      if (!data) return false
+      const view = resolveView(data, viewId)
+      if (!view || view.kind !== 'table') return false
+      d.owners.write(owner, { views: upsertView(data.views, withColumns(view, columnsOfRaw(columns))) })
       after()
       return true
     },

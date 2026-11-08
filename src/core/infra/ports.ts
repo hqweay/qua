@@ -511,6 +511,11 @@ export interface App {
    */
   viewSetSort(owner: ViewOwnerRef, viewId: string, by: string, dir: string): boolean
   /**
+   * 写**表格的列清单**（整份替换，不逐列改）：`columns` 是原始数组，形状校验在读路径那一份
+   * （`columnsOfRaw`）——标题列永远在第一位，其余按 key 去重。只认表格视图。
+   */
+  viewSetColumns(owner: ViewOwnerRef, viewId: string, columns: unknown): boolean
+  /**
    * 写**分组键**（记录视图共用的顶层配置位）：`groupBy === ''` ＝ 清掉。
    *
    * 分组是视图配置，不是查询的一部分：改它不重查、不改成员，只是这批记录换一种摆法。
