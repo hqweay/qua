@@ -593,6 +593,8 @@ export class ViewHost {
         if (this.listTable) this.listTable.render(ids)
         // 卡片按 blockId 局部修补：整片重画会把正在编辑的那张卡的锚点摘掉
         if (this.cards) this.cards.sync(ids)
+        // 页签只认「成员数变了」（新建/删除一行）：切换条重建会搬动身体编辑器的 DOM
+        if (this.tabs) this.tabs.sync()
       }
     })
   }

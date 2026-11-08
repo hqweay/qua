@@ -44,6 +44,8 @@ export class ViewTabs {
   private readonly deps: ViewTabsDeps
   /** 页签的形状签名（块 id ＋ 名字）：变了才重建切换条；正文变化不碰它 */
   private shape = ''
+  /** 成员数签名：新建/删除一行才走重建（切换条重建会搬动身体编辑器的 DOM ⇒ 不能跟着打字节奏走） */
+  private memberCount = -1
   /** 激活页（视图实例状态：不进 KB、不跨表面同步） */
   private active = ''
   private component: EditableBlock | null = null
@@ -71,6 +73,7 @@ export class ViewTabs {
     const view = this.deps.view()
     const direction = view?.tabs?.direction === 'vertical' ? 'vertical' : 'horizontal'
     this.root.dataset.direction = direction
+    this.memberCount = groups.length
 
     const nextShape = groups.map((g) => `${g.block.id}:${displayNameOf(g.block)}`).join('|')
     if (nextShape !== this.shape || !this.strip || !this.body) {
@@ -78,6 +81,15 @@ export class ViewTabs {
       this.renderStrip(groups)
     }
     this.paint(groups)
+  }
+
+  /**
+   * 逐块通知（`ids` 是被动过的那几个块）的入口：只在**成员数变了**时重建。
+   * 新建/删除一行 ⇒ 直接子块增减 ⇒ 切换条要跟上；正文/改名不打这里（重建会搬动
+   * 身体编辑器的 DOM，跟着打字节奏走就等于每键丢一次选区）。
+   */
+  sync(): void {
+    if (this.deps.tabs().length !== this.memberCount) this.render()
   }
 
   /** 重建切换条（结构与改名走这里；编辑器与身体不动） */
