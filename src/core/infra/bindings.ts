@@ -228,27 +228,33 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/copy-selected-block-refs', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 30, layer: 'core', keywords: ['ref', t('menu.kw.ref')] },
   { command: 'core.selection/clear', kind: 'menu', when: 'blockSelection', group: 'blockSel/2-clear', order: 10, layer: 'core' },
 
-  /* ================= 斜杠菜单（输入 `/`） ================= */
-  // 没有「正文块」：插一个普通块就是按 ↵，斜杠里再列一遍等于把同一个动作说两遍
-  { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-basic', order: 20, layer: 'core', label: t('menu.label.todo'), args: { type: 'todo' }, keywords: ['todo', 'task'], icon: 'lucide:square' },
+  /* ================= 斜杠菜单（输入 `/`） =================
+     成员判据：只收「**这里要有什么、这一行变成什么**」——插入新内容
+     （结构块／行内原子／归属）或本行变换，且每条都必须提供 ↵ 之外的能力。
+     没有「正文块」：插一个普通块就是按 ↵，斜杠里再列一遍等于把同一个动作说两遍。
+     折叠与删除不在斜杠：它们回答的是「对这块做什么」，不回答「这里有什么」——
+     折叠是视图状态（⌘. 在），删除是块骨架操作（⌘⇧D／⌫ 在）。 */
+  { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 10, layer: 'core', label: t('menu.label.todo'), args: { type: 'todo' }, keywords: ['todo', 'task'], icon: 'lucide:square' },
+  /**
+   * 「取消待办」：`/待办` 把这一行变成任务之后，同一个入口能把它变回去 ——
+   * 只在这一块真是任务时出现（同菜单那条判据），否则斜杠列表里永远挂着一个空动作。
+   * 图标复用「虚线方框」：它是「这个方框可以被拿掉」的现成说法，不新增图标数据。
+   */
+  { command: 'core.editor/clear-todo', kind: 'slash', when: 'editorTextFocus && blockType == "todo"', group: 'slash/1-structure', order: 15, layer: 'core', icon: 'lucide:square-dashed' },
   // 分割线：没有正文的块，插完光标要落到它下面那一行（见 insertDividerAfter）
-  { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-basic', order: 30, layer: 'core', label: t('menu.label.divider'), args: { type: 'divider' }, keywords: ['divider', 'hr', 'line', t('menu.kw.divider')], icon: 'lucide:minus' },
-  { command: 'core.query/insert', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-basic', order: 50, layer: 'core', label: t('cmd.query.insert'), keywords: ['query', 'filter', 'where'], icon: 'lucide:list-filter' },
+  { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 20, layer: 'core', label: t('menu.label.divider'), args: { type: 'divider' }, keywords: ['divider', 'hr', 'line', t('menu.kw.divider')], icon: 'lucide:minus' },
+  { command: 'core.query/insert', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 30, layer: 'core', label: t('cmd.query.insert'), keywords: ['query', 'filter', 'where'], icon: 'lucide:list-filter' },
+  // 露面：不带参数 ⇒ 命令开选择器选目标块（与块菜单那条同一条路）
+  { command: 'core.embed/insert', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 40, layer: 'core', label: t('ui.embed.insert'), keywords: ['embed', t('menu.kw.embed'), 'mirror'], icon: 'lucide:git-fork' },
+  // 「复制块」是键盘用户唯一免鼠标的复制路径（⌘C+⌘V 要两步还得挪光标）
+  { command: 'core.editor/duplicate-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 50, layer: 'core', label: t('menu.label.duplicate'), icon: 'lucide:copy' },
   { command: 'core.editor/insert-page-ref', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 10, layer: 'core', label: t('menu.label.pageRef'), keywords: ['ref', 'link', t('menu.kw.ref')], icon: 'lucide:arrow-up-right' },
   // 斜杠菜单的「图片」是**真入口**（选文件）；不带 preset 才走 `App.pickImage()`
   { command: 'core.editor/insert-image', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 20, layer: 'core', label: t('menu.label.image'), keywords: ['image', 'asset', t('menu.kw.image')], icon: 'lucide:image' },
   // 外链：不带 `url` ⇒ 命令打开输入框（`App.showLinkComposer`）；带了 ⇒ 直接插
   { command: 'core.editor/insert-link', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 25, layer: 'core', label: t('menu.label.link'), keywords: ['link', 'url', t('menu.kw.link')], icon: 'lucide:link' },
-  { command: 'core.editor/insert-tag', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 30, layer: 'core', label: t('menu.label.tag'), args: { tag: t('ui.arg.demoTag') }, keywords: ['tag', t('menu.kw.tag')], icon: 'lucide:hash' },
-  { command: 'core.editor/toggle-collapse', kind: 'slash', when: 'editorTextFocus && blockFoldable', group: 'slash/3-structure', order: 10, layer: 'core', label: t('menu.label.toggleCollapse'), icon: 'lucide:chevron-down' },
-  /**
-   * 斜杠里的「取消待办」：`/待办` 把这一行变成任务之后，同一个入口能把它变回去 ——
-   * 只在这一块真是任务时出现（同菜单那条判据），否则斜杠列表里永远挂着一个空动作。
-   * 图标复用「虚线方框」：它是「这个方框可以被拿掉」的现成说法，不新增图标数据。
-   */
-  { command: 'core.editor/clear-todo', kind: 'slash', when: 'editorTextFocus && blockType == "todo"', group: 'slash/3-structure', order: 15, layer: 'core', icon: 'lucide:square-dashed' },
-  { command: 'core.editor/duplicate-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/3-structure', order: 20, layer: 'core', label: t('menu.label.duplicate'), icon: 'lucide:copy' },
-  { command: 'core.editor/delete-block', kind: 'slash', when: 'editorTextFocus && blockCanDelete', group: 'slash/3-structure', order: 30, layer: 'core', label: t('menu.label.delete'), icon: 'lucide:trash-2' },
+  // 「标签」开选择器现挑，不插固定名字的标签——哪一个是用户的事，不是菜单的事
+  { command: 'core.editor/pick-tag', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 30, layer: 'core', label: t('menu.label.tag'), keywords: ['tag', t('menu.kw.tag')], icon: 'lucide:hash' },
 
   /* ================= 划选气泡（选中一段文本才浮出；顶部没有工具栏） ================= */
   { command: 'core.anno/toggle-bold', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 10, layer: 'core', icon: 'lucide:bold', label: t('menu.label.bold') },

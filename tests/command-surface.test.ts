@@ -52,3 +52,22 @@ test('绑定表只有四个渲染面（keymap/menu/slash/selection），面板�
     assert.ok(b.kind !== 'palette', `绑定表不该再有 palette 档：${b.command}`)
   }
 })
+
+test('斜杠只收「这里有什么」：折叠/删除不进斜杠，露面/复制/选标签在', () => {
+  const slash = BINDINGS.filter((b) => b.kind === 'slash')
+  const cmds = slash.map((b) => b.command)
+  assert.ok(!cmds.includes('core.editor/toggle-collapse'), '折叠是视图状态（⌘. 在），不回答「这里有什么」')
+  assert.ok(!cmds.includes('core.editor/delete-block'), '删除是块骨架操作（⌘⇧D/⌫ 在），不回答「这里有什么」')
+  assert.ok(
+    !slash.some((b) => b.command === 'core.editor/insert-block' && b.args === undefined),
+    '正文块档（无参 insert-block）与 ↵ 同果，不许悄悄加回来；待办/分割线两档不受此限',
+  )
+  for (const need of ['core.embed/insert', 'core.editor/duplicate-block', 'core.editor/pick-tag']) {
+    assert.ok(cmds.includes(need), `${need} 应在斜杠`)
+  }
+  assert.deepEqual(
+    [...new Set(slash.map((b) => b.group))].sort(),
+    ['slash/1-structure', 'slash/2-inline'],
+    '斜杠分组只有「结构/行内」两轴',
+  )
+})
