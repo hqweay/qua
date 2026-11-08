@@ -48,13 +48,16 @@ export function captureFocus(): FocusReturn {
         now instanceof HTMLElement && now !== document.body && !(overlay?.contains(now) ?? false)
       if (focusLeftOverlay) return null
 
+      // ⚠️ `preventScroll` 必须带：focus() 默认会把元素的顶边滚进视口，而编辑区是
+      //    **单个** contenteditable 容器、顶边就是文档顶——关菜单（选完一项／点正文
+      //    关掉）那一刻正文会被整锅滚到最上面。这里归还的是键盘焦点，不是滚动位置。
       if (active.isConnected) {
-        active.focus()
+        active.focus({ preventScroll: true })
         return active
       }
       // 那个元素已经不在了（被重渲染换掉）：退回它所在的编辑宿主，别让按键落空
       if (host && host.isConnected) {
-        host.focus()
+        host.focus({ preventScroll: true })
         return host
       }
       return null

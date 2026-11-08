@@ -25038,6 +25038,83 @@ await check('T266 ⌥+点日期：先物化那一天再开它的属性面板；�
   }
 })
 
+/**
+ * T273｜**关取值菜单不滚屏**。
+ *
+ * 编辑态的焦点整片只落在编辑器容器上（顶边就是文档顶）：焦点归还若不带
+ * `preventScroll`，focus() 会把这个容器的顶边滚进视口 —— 选完一项、点正文关掉，
+ * 两条路都经 closeMenu，滚动条都会被整锅拽到最上面。钉住的是「归还的是焦点，
+ * 不是滚动位置」。
+ */
+await check(
+  'T273 关取值菜单不滚屏：选中一项、点正文关掉，#scroll 都停在原地',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    // 前置：一块打 #任务（gutter 出任务状态图标），页尾再撑 60 行让 #scroll 真能滚
+    const fx = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const b = window.__qua.blocks().find((x) => x.children === 0 && x.text.length > 2)
+      window.__qua.focusBlock(b.id, 0)
+      window.__qua.invoke('core.editor/insert-tag', { tag: ' 任务 ' })
+      let last = b.id
+      for (let i = 0; i < 60; i++) last = ed.insertBlockAfter(last, `撑长第${i}行——只是让正文超出视口`)
+      return { host: b.id }
+    })
+    await page.waitForTimeout(250)
+
+    // 先点一下正文（编辑态焦点落在编辑器容器上——真机出事的形状），再把状态图标挪到视口 40% 处
+    await page.locator(`.blk[data-block-id="${fx.host}"] > .tx`).click()
+    const icon = page.locator(`.blk[data-block-id="${fx.host}"] .todo-mark`)
+    await icon.scrollIntoViewIfNeeded()
+    await page.evaluate(({ host }) => {
+      const s = document.getElementById('scroll')
+      const mark = document.querySelector(`.blk[data-block-id="${host}"] .todo-mark`)
+      // 图标挪到视口 40% 处；至少滚过 120px（图标本来可能就贴着 40% 线，负增量会停在 0）
+      s.scrollTop = Math.max(120, s.scrollTop + mark.getBoundingClientRect().top - window.innerHeight * 0.4)
+    }, fx)
+    const scrollable = await page.evaluate(() => {
+      const s = document.getElementById('scroll')
+      return s.scrollHeight > s.clientHeight
+    })
+    assert(scrollable, '前置：#scroll 应真的可滚（撑长块没起作用？）')
+    const topOf = () => page.evaluate(() => document.getElementById('scroll').scrollTop)
+
+    // ① 右键状态图标开取值菜单，选中一项 ⇒ 写值；滚动条不动
+    await icon.click({ button: 'right' })
+    await page.waitForSelector('.layer', { timeout: 3000 })
+    const top1 = await topOf()
+    assert(top1 > 0, `前置：文档应已滚动到中段（top=${top1}）`)
+    await page.locator('.layer .layer-item', { hasText: '进行中' }).click()
+    await page.waitForTimeout(200)
+    const top2 = await topOf()
+    const val = await page.evaluate((id) => {
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '')
+      const def = window.__qua.propDefs().find((d) => d.label === '任务状态')
+      const want = window.__qua.__editor.store.find(def.id).children.find((c) => plain(c) === '进行中')?.id
+      const got = window.__qua.fields(id).find((x) => x.propId === def.id)?.value
+      return { got, want }
+    }, fx.host)
+    assert(val.got !== '' && val.got === val.want, `选项应写进属性：${JSON.stringify(val)}`)
+    assert(Math.abs(top2 - top1) <= 2, `选完一项滚动条不该动：${top1} → ${top2}`)
+
+    // ② 再开一次，点正文关掉 ⇒ 滚动同样不动
+    await icon.click({ button: 'right' })
+    await page.waitForSelector('.layer', { timeout: 3000 })
+    const top3 = await topOf()
+    await page.locator(`.blk[data-block-id="${fx.host}"] > .tx`).click()
+    await page.waitForTimeout(200)
+    assert((await page.locator('.layer').count()) === 0, '点正文应关掉取值菜单')
+    const top4 = await topOf()
+    assert(Math.abs(top4 - top3) <= 2, `点正文关菜单滚动条不该动：${top3} → ${top4}`)
+
+    await ctx.close()
+    return `选完一项 ${top1}px→${top2}px；点正文关 ${top3}px→${top4}px，都停在原地`
+  },
+)
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 
