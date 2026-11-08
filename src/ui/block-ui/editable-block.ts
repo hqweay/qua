@@ -62,6 +62,12 @@ export interface EditableBlockDeps {
    */
   structuralScope?: 'document' | 'roots'
   /**
+   * **段根可不可以删**（默认不可）。查询结果／侧槽窗口的段根是**别的页的块**，
+   * 在这里删源不合适（那类删除走命令面）；**页签身体**的段根就是页签本身——
+   * 容器的真实子块，删除＝删这一页（软删可回），要显式打开。
+   */
+  allowRootRemove?: boolean
+  /**
    * 冻结判据的范围，默认＝岛根。挂载区要连 tab 条一起算「有人在这」——
    * 焦点落在 tab 按钮上时重排 tab 条，同样会把正被按的那颗换掉。
    */
@@ -197,9 +203,10 @@ export class EditableBlock {
     const ed = new BlockEditor({
       container: this.host,
       blankArea: this.host,
-      // 记录视图：没有「视图级同级」——点空白不建块、删段根不删块
+      // 记录视图：没有「视图级同级」——点空白不建块。删段根默认也不许
+      //（根是别的页的块）；页签身体用 `allowRootRemove` 显式打开
       allowBlankCreate: false,
-      allowRootRemove: false,
+      allowRootRemove: this.deps.allowRootRemove === true,
       // 重载节奏归本组件（唯一一条路径），编辑器不再自己跟随 store
       autoReload: false,
       store: this.deps.store,

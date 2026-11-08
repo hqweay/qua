@@ -84,12 +84,36 @@ export class ViewTabs {
   }
 
   /**
-   * 逐块通知（`ids` 是被动过的那几个块）的入口：只在**成员数变了**时重建。
-   * 新建/删除一行 ⇒ 直接子块增减 ⇒ 切换条要跟上；正文/改名不打这里（重建会搬动
-   * 身体编辑器的 DOM，跟着打字节奏走就等于每键丢一次选区）。
+   * 逐块通知（`ids` 是被动过的那几个块）的入口，两件事分开做：
+   *
+   * · **成员数变了**（新建/删除一行）⇒ 重建切换条；
+   * · **已有页签的内容变了**（首行就是页签的名字，改正文＝改名）⇒ **就地改文案**。
+   *   重建会搬动身体编辑器的 DOM（丢焦点、断输入），所以改名绝不走整条重建——
+   *   逐键 patch 一个 span 的 textContent 就够。
    */
-  sync(): void {
-    if (this.deps.tabs().length !== this.memberCount) this.render()
+  sync(ids?: readonly string[]): void {
+    const groups = this.deps.tabs()
+    if (groups.length !== this.memberCount) {
+      this.render()
+      return
+    }
+    if (!ids || ids.length === 0 || !this.strip) return
+    let relabelled = false
+    for (const id of ids) {
+      const tab = this.strip.querySelector(`.vtab[data-group-key="${CSS.escape(id)}"]`)
+      if (!tab) continue
+      const g = groups.find((x) => x.block.id === id)
+      if (!g) continue
+      const name = tab.querySelector('.vtab-name')
+      if (name) name.textContent = displayNameOf(g.block) || t('ui.cards.untitledGroup')
+      const count = tab.querySelector('.vtab-count')
+      if (count) count.textContent = String(g.records.length)
+      relabelled = true
+    }
+    // shape 里的名字位已经就地改过：不同步它，下次 render 会拿陈旧签名误判「要整条重建」
+    if (relabelled) {
+      this.shape = groups.map((g) => `${g.block.id}:${displayNameOf(g.block)}`).join('|')
+    }
   }
 
   /** 重建切换条（结构与改名走这里；编辑器与身体不动） */
@@ -196,6 +220,9 @@ export class ViewTabs {
         write: this.deps.write,
         // 页的根是派生的行：不能并进上一行／搬出这一页；根内部照常编辑
         structuralScope: 'roots',
+        // 首行就是页签本身（容器的真实子块）：右键「删除块」＝删这一页（软删可回）。
+        // 其余记录视图不开——它们的段根是别的页的块
+        allowRootRemove: true,
         load: (ed) => {
           if (!ed) return
           ed.reloadFromStore()
