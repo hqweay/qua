@@ -53,8 +53,8 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/outdent-block', kind: 'keymap', key: 'shift+tab', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/move-block-up', kind: 'keymap', key: 'mod+shift+up', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/move-block-down', kind: 'keymap', key: 'mod+shift+down', when: 'editorTextFocus', layer: 'core' },
-  { command: 'core.editor/duplicate-block', kind: 'keymap', key: 'mod+shift+d', when: 'editorTextFocus', layer: 'core' },
-  { command: 'core.editor/delete-block', kind: 'keymap', key: 'mod+shift+backspace', when: 'editorTextFocus && blockCanDelete', layer: 'core' },
+  // 删除块只有 ⌘⇧D 一键（复制块不占键位，走块菜单/斜杠）：块选区态的同键绑定在下面盖过它
+  { command: 'core.editor/delete-block', kind: 'keymap', key: 'mod+shift+d', when: 'editorTextFocus && blockCanDelete', layer: 'core' },
   { command: 'core.editor/toggle-collapse', kind: 'keymap', key: 'mod+.', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/toggle-todo', kind: 'keymap', key: 'mod+enter', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/insert-page-ref', kind: 'keymap', key: 'mod+shift+k', when: 'editorTextFocus', layer: 'core' },
@@ -71,8 +71,7 @@ export const BINDINGS: Binding[] = [
   // 导航前进/后退（中心槽走到哪）：与 undo/redo 的撤销栈是两套，键也不同
   { command: 'core.history/back', kind: 'keymap', key: 'mod+[', when: 'canGoBack', layer: 'core' },
   { command: 'core.history/forward', kind: 'keymap', key: 'mod+]', when: 'canGoForward', layer: 'core' },
-  // tab：一个 tab 一份保存的视图。⌘T 新建（今日）；⇧⌘[/] 前后切换；⇧⌘W 关闭（⌘W 是关窗口）
-  { command: 'core.tab/new', kind: 'keymap', key: 'mod+t', when: '', layer: 'core' },
+  // tab：一个 tab 一份保存的视图。⇧⌘[/] 前后切换；⇧⌘W 关闭（⌘W 是关窗口）；⌘T 归「回今日」
   { command: 'core.tab/prev', kind: 'keymap', key: 'mod+shift+[', when: '', layer: 'core' },
   { command: 'core.tab/next', kind: 'keymap', key: 'mod+shift+]', when: '', layer: 'core' },
   { command: 'core.tab/close', kind: 'keymap', key: 'mod+shift+w', when: '', layer: 'core' },
@@ -92,6 +91,8 @@ export const BINDINGS: Binding[] = [
   { command: 'core.selection/focus-first', kind: 'keymap', key: 'enter', when: 'blockSelection', layer: 'core' },
   { command: 'core.editor/delete-selected-blocks', kind: 'keymap', key: 'backspace', when: 'blockSelection', layer: 'core' },
   { command: 'core.editor/delete-selected-blocks', kind: 'keymap', key: 'delete', when: 'blockSelection', layer: 'core' },
+  // 与单块删除同键（⌘⇧D）：选区态盖过文本态——一个键按状态删一块或删所选
+  { command: 'core.editor/delete-selected-blocks', kind: 'keymap', key: 'mod+shift+d', when: 'blockSelection', layer: 'core' },
   { command: 'core.editor/indent-selected-blocks', kind: 'keymap', key: 'tab', when: 'blockSelection', layer: 'core' },
   { command: 'core.editor/outdent-selected-blocks', kind: 'keymap', key: 'shift+tab', when: 'blockSelection', layer: 'core' },
   { command: 'core.editor/toggle-todo-selected-blocks', kind: 'keymap', key: 'mod+enter', when: 'blockSelection', layer: 'core' },
@@ -116,8 +117,8 @@ export const BINDINGS: Binding[] = [
   // 档位轴：⇧⌘↵ 进一档（常规→宽屏→全屏，到顶不动）。Esc 退一档的绑定在键位段末尾——
   // 它要让位给块选区清空（选区在场先清选区）；浮层在场时派发层不派发，浮层自己收，浮层天然优先。
   { command: 'core.view/axis-up', kind: 'keymap', key: 'mod+shift+enter', when: '', layer: 'core' },
-  // 今日三件：`⌘⇧D` 回今日（**避开编辑器的复制块**：`⌘⇧D` 在编辑器里归 duplicate）
-  { command: 'core.journal/today', kind: 'keymap', key: 'mod+shift+d', when: '!editorTextFocus', layer: 'core' },
+  // 回今日：`⌘T`（新开 tab 撤了键——两者落同一处，差别只在多不多一张 tab）
+  { command: 'core.journal/today', kind: 'keymap', key: 'mod+t', when: '', layer: 'core' },
   // 前后翻日：**仅在 journal 视图且编辑器失焦时**生效的原文口径）
   { command: 'core.journal/prev', kind: 'keymap', key: 'mod+alt+left', when: 'journalView && !editorTextFocus', layer: 'core' },
   { command: 'core.journal/next', kind: 'keymap', key: 'mod+alt+right', when: 'journalView && !editorTextFocus', layer: 'core' },

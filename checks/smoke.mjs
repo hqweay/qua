@@ -22000,11 +22000,11 @@ await check('T231 档位轴三档：⇧⌘↵ 进一档到全屏；宽屏收双�
   }))
   assert(hidden.crumbs && hidden.tabs, '全屏再藏抬头与 tab 条（只剩内容与退出口）')
 
-  // 档位住窗口不住 tab：全屏中切 tab 仍在全屏
+  // 档位住窗口不住 tab：全屏中回今日（⌘T）仍在全屏
   await page.keyboard.press(kbd('mod+t'))
   await page.waitForTimeout(120)
   now = await axisState(page)
-  assert(now.axis === 'full', `全屏中切 tab 仍在全屏：${now.axis}`)
+  assert(now.axis === 'full', `全屏中回今日仍在全屏：${now.axis}`)
 
   await page.keyboard.press('Escape')
   now = await axisState(page)
@@ -22095,9 +22095,10 @@ await check('T233 回收站在中心打开：卡留在槽里（同一份数据�
   assert(now.tabs.filter((t) => t.title === '回收站').length === 1, `同一张面全局一张 tab：${JSON.stringify(now.tabs)}`)
 
   // 终点面：没有历史（前进/后退都不可用）；切走再切回，身体重新现算
+  // （⌘T 现在是回今日、会顶掉表面 tab——切走用 ⇧⌘[，tab 保留才能切回）
   const navable = await page.evaluate(() => window.__qua.ctxKeys())
   assert(!navable.canGoBack && !navable.canGoForward, '终点面没有内部历史')
-  await page.keyboard.press(kbd('mod+t'))
+  await page.keyboard.press(kbd('mod+Shift+['))
   await page.waitForTimeout(150)
   now = await state()
   assert(now.scrollVisible && !now.surfaceVisible, '切到块 tab ⇒ 编辑器回来')
