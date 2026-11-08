@@ -60,3 +60,42 @@ test('同一层里的下标跟着真实位置走（不总是 0）', () => {
   const loc = locate(docOf([page]), 'k2')!
   assert.deepEqual(insertSiteOf(loc, { blank: false }), { kind: 'after', parentId: 'page', index: 2 })
 })
+
+/* ---- dir: 'before'（上方插入，⌘⇧↵）---- */
+
+test('before：普通块 ⇒ 上一个兄弟位（同父、自己的下标）', () => {
+  const a = mkBlock('甲')
+  const b = mkBlock('乙')
+  a.id = 'a'
+  b.id = 'b'
+  const page = mkBlock('页')
+  page.id = 'page'
+  page.children = [a, b]
+  const loc = locate(docOf([page]), 'b')!
+  assert.deepEqual(insertSiteOf(loc, { blank: false, dir: 'before' }), { kind: 'before', parentId: 'page', index: 1 })
+})
+
+test('before：空块 ⇒ 仍是原地改（上方插落在空白行上，意图已满足）', () => {
+  const child = mkBlock('')
+  child.id = 'child'
+  const page = mkBlock('页')
+  page.id = 'page'
+  page.children = [child]
+  const loc = locate(docOf([page]), 'child')!
+  assert.deepEqual(insertSiteOf(loc, { blank: true, dir: 'before' }), { kind: 'replace' })
+})
+
+test('before：section 根没有上方兄弟位 ⇒ 退化为首个子块', () => {
+  const page = mkBlock('页')
+  page.id = 'page'
+  const loc = locate(docOf([page]), 'page')!
+  assert.deepEqual(insertSiteOf(loc, { blank: false, dir: 'before' }), { kind: 'first-child', parentId: 'page' })
+})
+
+test('before：声明容不下子块的根 ⇒ null（与 after 同一口径，不静默挪到别处）', () => {
+  const divider = mkBlock('')
+  divider.id = 'divider'
+  divider.props = { _type: 'core/divider' }
+  const loc = locate(docOf([divider]), 'divider')!
+  assert.equal(insertSiteOf(loc, { blank: false, dir: 'before' }), null)
+})

@@ -3062,6 +3062,39 @@ export class BlockEditor {
   }
 
   /**
+   * 在 `id` **上方**插一个空正文块（⌘⇧↵），返回新块 id。
+   *
+   * 与 `insertBlockAfter` 同一套判据，只有落点方向不同：
+   *   · 空块 ⇒ 意图已经满足：不动模型、不记撤销，光标落回它自己块首；
+   *   · section 根没有「上方兄弟位」⇒ 退化为它的首个子块（判据在 `insertSiteOf` 的
+   *     `before` 注释里，不在编辑器里另判一份）；
+   *   · 其余 ⇒ 插在**上一个兄弟位**，新块成为当前块的前一个同级。
+   *
+   * 落点只由 `insertSiteOf` ＋ `tx.insert` 算（理由同 `insertBlockAfter`：树的身份只有一份）。
+   */
+  insertBlockBefore(id: string): string | null {
+    const loc = locate(this.doc, id)
+    if (!loc) return null
+    this.beginUndoEntry()
+    const blank = isEmptyContent(loc.block.content) && !hasLiveChildren(loc.block) && canWriteText(loc.block)
+    if (blank) {
+      this.placeCaret(loc.block.id, 0)
+      return loc.block.id
+    }
+    const site = insertSiteOf(loc, { blank: false, dir: 'before' })
+    if (!site || site.kind !== 'before' && site.kind !== 'first-child') return null
+    const at = site.kind === 'first-child' ? { parentId: site.parentId, index: 0 } : site
+    const b = mkBlock('')
+    const ok = this.write((tx) => {
+      tx.insert(b, at.parentId, at.index)
+      return true
+    })
+    if (!ok) return null
+    this.structTail({ id: b.id, off: 0 })
+    return b.id
+  }
+
+  /**
    * 插入一个**分割线**：它是「没有正文的块」。
    *
    * 为什么它不是 `insertBlockAfter`：这类块的 `.tx` 里没有可写正文，插进去之后

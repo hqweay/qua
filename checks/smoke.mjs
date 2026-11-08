@@ -22004,7 +22004,7 @@ const axisState = (page) =>
     exitHidden: document.querySelector('.axis-exit')?.hidden ?? true,
   }))
 
-await check('T231 档位轴三档：⇧⌘↵ 进一档到全屏；宽屏收双槽、阅读宽度放开、切 tab 仍在全屏；Esc 两步还原原样', async () => {
+await check('T231 档位轴三档：命令进一档到全屏；宽屏收双槽、阅读宽度放开、切 tab 仍在全屏；Esc 两步还原原样', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
 
@@ -22016,7 +22016,9 @@ await check('T231 档位轴三档：⇧⌘↵ 进一档到全屏；宽屏收双�
   assert(before.right === 'open', '前置：右槽开着')
   assert(before.docW <= 760, `前置：常规档阅读宽度在档内（${before.docW}）`)
 
-  await page.keyboard.press(kbd('mod+Shift+Enter'))
+  // 进档走命令（键位让给了上方插入，面板照常可达）；Esc 退档仍是键盘
+  const axisUp = () => page.evaluate(() => window.__qua.invoke('core.view/axis-up', {}, 'api'))
+  await axisUp()
   let now = await axisState(page)
   assert(now.axis === 'wide', `进一档 ⇒ 宽屏：${now.axis}`)
   assert(now.left === 'closed' && now.right === 'closed', `宽屏收起双槽：${now.left}/${now.right}`)
@@ -22024,7 +22026,7 @@ await check('T231 档位轴三档：⇧⌘↵ 进一档到全屏；宽屏收双�
   const wideW = now.docW
   assert(now.exitHidden === false, '宽屏给退出口')
 
-  await page.keyboard.press(kbd('mod+Shift+Enter'))
+  await axisUp()
   now = await axisState(page)
   assert(now.axis === 'full', `再进一档 ⇒ 全屏：${now.axis}`)
   const hidden = await page.evaluate(() => ({
@@ -22052,14 +22054,15 @@ await check('T231 档位轴三档：⇧⌘↵ 进一档到全屏；宽屏收双�
   assert(now.docW <= 760, `常规档阅读宽度收回（${now.docW}）`)
 
   await ctx.close()
-  return `两键进到全屏、Esc 两步还原；宽屏宽 ${before.docW}→${wideW}`
+  return `两步进到全屏、Esc 两步还原；宽屏宽 ${before.docW}→${wideW}`
 })
 
 await check('T232 Esc 浮层优先于退档；档位期间手动开槽以他为准，退出后保持他的样子', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
 
-  await page.keyboard.press(kbd('mod+Shift+Enter'))
+  // 进档走命令（键位让给了上方插入，面板照常可达）
+  await page.evaluate(() => window.__qua.invoke('core.view/axis-up', {}, 'api'))
   let now = await axisState(page)
   assert(now.axis === 'wide', '前置：在宽屏档')
 
@@ -22386,12 +22389,12 @@ await check('T234 ⌘P 浮层「展开为面板」⇒ 中心搜索 tab：词带�
   now = await face()
   assert(now.tabs.filter((t) => t.title === '搜索').length === 1, `同一张面全局一张 tab：${JSON.stringify(now.tabs)}`)
 
-  // 带修饰的组合键在面上归命令层：⌘⇧↵ 进宽屏，面与 tab 原样；Esc 退档
-  await page.keyboard.press(kbd('mod+Shift+Enter'))
+  // 进档走命令（键位让给了上方插入）：面上进档不抢「打开」，面与 tab 原样；Esc 退档仍是键盘
+  await page.evaluate(() => window.__qua.invoke('core.view/axis-up', {}, 'api'))
   now = await face()
   const axisAfterUp = await page.evaluate(() => document.body.dataset.axis ?? '')
-  assert(axisAfterUp === 'wide', `⌘⇧↵ 应进宽屏：${axisAfterUp}`)
-  assert(now.surfaceVisible && now.tabs.filter((t) => t.title === '搜索').length === 1, '⌘⇧↵ 进档不抢「打开」，面原样')
+  assert(axisAfterUp === 'wide', `命令进档应到宽屏：${axisAfterUp}`)
+  assert(now.surfaceVisible && now.tabs.filter((t) => t.title === '搜索').length === 1, '进档不抢「打开」，面原样')
   await page.keyboard.press('Escape')
   const axisAfterDown = await page.evaluate(() => document.body.dataset.axis ?? '')
   assert(axisAfterDown === '', `Esc 退档：${axisAfterDown}`)
@@ -25392,6 +25395,79 @@ await check(
     return `父块勾「创建于」⇒ 子块显示；撤掉消失；标签声明 ⇒ 成员子块同样显示`
   },
 )
+
+/**
+ * T276｜**上方插入**（⌘⇧↵）：光标所在块的上一同级多一个空正文块，光标落新块块首。
+ *
+ * 钉三件事：
+ *   · keymap 路径：⌘⇧↵ 在编辑器聚焦态判给「上方插入」（真键盘触发，不走直调）；
+ *   · 结构：新块是当前块的**前一个同级**（同层、紧跟其前），光标在新块 0 位；
+ *   · 键位换主的另一面：「档位轴进一档」命令仍活着（面板照常可达），Esc 退档不受影响。
+ */
+await check('T276 上方插入：⌘⇧↵ 在光标块上方建空同级块、光标落新块块首；档位轴命令仍可达、Esc 退档不受影响', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const fx = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const rootId = ed.doc.roots[0].id
+    const a = ed.insertBlockAfter(rootId, '上方插入甲')
+    const b = ed.insertBlockAfter(a, '上方插入乙')
+    return { a, b }
+  })
+  const n0 = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
+  // 真键盘：聚焦乙块块中，按 ⌘⇧↵（keymap 路径——modified 组合键归命令层）
+  await page.evaluate((id) => window.__qua.focusBlock(id, 1), fx.b)
+  await page.waitForTimeout(100)
+  await page.keyboard.press(kbd('mod+Shift+Enter'))
+  await page.waitForTimeout(200)
+
+  const st = await page.evaluate((fx) => {
+    const rows = window.__qua.blocks()
+    const bi = rows.findIndex((x) => x.id === fx.b)
+    const sel = window.__qua.snapshot().selection
+    const depthOf = (id) => Number(document.querySelector(`.blk[data-block-id="${id}"]`)?.dataset.depth)
+    return {
+      newId: sel.aBlock,
+      newText: rows.find((x) => x.id === sel.aBlock)?.text,
+      rightBefore: bi > 0 && rows[bi - 1]?.id === sel.aBlock,
+      sameDepth: depthOf(sel.aBlock) === depthOf(fx.b),
+      sel,
+      total: window.__qua.snapshot().totalBlocks,
+    }
+  }, fx)
+  assert(st.newId && st.newId !== fx.b, `⌘⇧↵ 应新建一块并落光标：${JSON.stringify(st.sel)}`)
+  assert(st.newText === '', `新块应是空正文块：${JSON.stringify(st.newText)}`)
+  assert(st.rightBefore, `新块应紧跟当前块之前（上一同级）：${JSON.stringify(st.newId)}`)
+  assert(st.sameDepth, '新块应与当前块同层（不是子块）')
+  assert(st.sel.aOff === 0, `光标应在新块块首 0 位：${JSON.stringify(st.sel)}`)
+  assert(st.total === n0 + 1, `应净增一块：${n0} → ${st.total}`)
+
+  // 撤销粒度：一次 ⌘Z 连新块带光标一起回去（一笔事务，与在下方插入同构）
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(200)
+  const undone = await page.evaluate((fx) => {
+    return {
+      total: window.__qua.snapshot().totalBlocks,
+      sel: window.__qua.snapshot().selection,
+      b: fx.b,
+    }
+  }, fx)
+  assert(undone.total === n0, `⌘Z 应撤掉新块：${st.total} → ${undone.total}`)
+  assert(undone.sel.aBlock === undone.b, `光标应回乙块：${JSON.stringify(undone.sel)}`)
+
+  // 键位换主的另一面：进档命令仍活着（面板可达），Esc 退档不受影响
+  await page.evaluate(() => window.__qua.invoke('core.view/axis-up', {}, 'api'))
+  const axisNow = await axisState(page)
+  assert(axisNow.axis === 'wide', `进档命令应仍可用：${JSON.stringify(axisNow)}`)
+  await page.keyboard.press('Escape')
+  const axisAfter = await axisState(page)
+  assert(axisAfter.axis === '', `Esc 退档不受影响：${JSON.stringify(axisAfter)}`)
+
+  await ctx.close()
+  return `⌘⇧↵ 上方插入：上一同级空块＋光标块首；档位轴命令仍可达、Esc 退档不受影响`
+})
 
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length

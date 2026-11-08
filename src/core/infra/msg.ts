@@ -33,6 +33,7 @@ export const MSG = {
   'cmd.editor.toggle-todo': '切换待办',
   'cmd.editor.clear-todo': '取消待办',
   'cmd.editor.insert-block': '在下方插入块',
+  'cmd.editor.insert-block-before': '在上方插入块',
   'cmd.editor.clear-block': '清空本块',
   'cmd.editor.insert-tag': '插入标签 #',
   'cmd.editor.copy-ref': '复制为引文（含原文快照）',

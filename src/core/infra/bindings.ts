@@ -116,9 +116,11 @@ export const BINDINGS: Binding[] = [
   // 三槽开关：`⌘⌥1` / `⌘⌥2` ——中心槽没有独立快捷键
   { command: 'core.dock/toggle-left', kind: 'keymap', key: 'mod+alt+1', when: '', layer: 'core' },
   { command: 'core.dock/toggle-right', kind: 'keymap', key: 'mod+alt+2', when: '', layer: 'core' },
-  // 档位轴：⇧⌘↵ 进一档（常规→宽屏→全屏，到顶不动）。Esc 退一档的绑定在键位段末尾——
-  // 它要让位给块选区清空（选区在场先清选区）；浮层在场时派发层不派发，浮层自己收，浮层天然优先。
-  { command: 'core.view/axis-up', kind: 'keymap', key: 'mod+shift+enter', when: '', layer: 'core' },
+  // 上方插入：⇧⌘↵。Enter 家族三键各归其位——↵/⇧↵ 是拆块（下方语义），⌘↵ 是切换待办，
+  // 「上方」这个方向落在剩下的 ⇧⌘↵ 上。原占用者档位轴进档退到命令面板
+  // （键位只是加速器，面板照常可达）；退档不受影响（Esc 的绑定在键位段末尾——
+  // 它要让位给块选区清空（选区在场先清选区）；浮层在场时派发层不派发，浮层自己收，浮层天然优先）。
+  { command: 'core.editor/insert-block-before', kind: 'keymap', key: 'mod+shift+enter', when: 'editorTextFocus', layer: 'core' },
   // 回今日：`⌘T`（新开 tab 撤了键——两者落同一处，差别只在多不多一张 tab）
   { command: 'core.journal/today', kind: 'keymap', key: 'mod+t', when: '', layer: 'core' },
   // 前后翻日：**仅在 journal 视图且编辑器失焦时**生效的原文口径）

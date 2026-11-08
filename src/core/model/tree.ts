@@ -430,6 +430,13 @@ export function insertSiblingAfter(doc: Doc, id: string): Block | null {
  *     插成它的**首个子块**（视觉上「根行之后」就是第一个子块）；
  *   · `after`：其余 ⇒ 插在它的**下一个兄弟位**。
  *
+ * `dir: 'before'` 把兄弟落点翻到**上一个兄弟位**（上方插入）：
+ *   · section 根仍然没有「上方」——根行上方没有兄弟位可落，退化为 `first-child`
+ *     （新块出现在根行正下方，不是正上方）。这是一处主动降标准：真正「根行上方」
+ *     意味着要越过根去动上一棵树或根的父层，日记流多根下语义会分叉，先不做；
+ *   · 空块在 before 下同样是 `replace`：「上方插一块」落在空白行上，意图已经满足。
+ *     代价登记：回头看若「空块上方插一块」想表达「保留空白行」，才需要给 replace 加方向。
+ *
  * 返回 `null` ＝ 这里放不下一个新块（声明了 `children:'none'` 的容器）。
  *
  * ⚠️ 只算落点，不判断「该不该建」，也不决定空块那一支改成什么 —— 那是调用方（编辑器）的事。
@@ -446,13 +453,15 @@ export type InsertSite =
   | { kind: 'replace' }
   | { kind: 'first-child'; parentId: string }
   | { kind: 'after'; parentId: string | null; index: number }
+  | { kind: 'before'; parentId: string; index: number }
 
-export function insertSiteOf(loc: Located, opts: { blank: boolean }): InsertSite | null {
+export function insertSiteOf(loc: Located, opts: { blank: boolean; dir?: 'after' | 'before' }): InsertSite | null {
   if (opts.blank) return { kind: 'replace' }
   if (loc.parent === null) {
     if (typeDeclOf(loc.block).children === 'none') return null
     return { kind: 'first-child', parentId: loc.block.id }
   }
+  if (opts.dir === 'before') return { kind: 'before', parentId: loc.parent.id, index: loc.index }
   return { kind: 'after', parentId: loc.parent.id, index: loc.index + 1 }
 }
 

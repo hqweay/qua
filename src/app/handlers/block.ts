@@ -157,7 +157,15 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     const todo = type === 'todo' ? ('todo' as const) : undefined
     app.ed.insertBlockAfter(id, text, todo)
     return true
-  },  'core.editor/clear-block': (_a, app) => {
+  },
+  // 缺省目标取光标所在块（curBlock），不是「当前打开的那一屏」——
+  // 日记流里 activeId 是第一个根，新块会飞到流顶部而不是光标处
+  'core.editor/insert-block-before': (_a, app) => {
+    const id = curBlock(app)
+    if (!id) return false
+    return app.ed.insertBlockBefore(id) !== null
+  },
+  'core.editor/clear-block': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false
     app.ed.setText(id, '')

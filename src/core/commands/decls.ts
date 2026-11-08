@@ -39,6 +39,9 @@ export const COMMANDS: CommandDecl[] = [
    */
   { name: 'core.editor/clear-todo', title: t('cmd.editor.clear-todo'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['todo', 'untodo', t('menu.kw.untodo')] },
   { name: 'core.editor/insert-block', title: t('cmd.editor.insert-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { type: { type: 'string', enum: ['paragraph', 'todo', 'divider'] }, text: { type: 'string' } }, keywords: ['insert', 'new block'] },
+  // 只建空正文块、不接类型变体：上方插入目前只有键盘一条入口，斜杠菜单走的是下方语义；
+  // 等出现第二个入口（斜杠/菜单项）再决定变体怎么共享
+  { name: 'core.editor/insert-block-before', title: t('cmd.editor.insert-block-before'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['insert', 'above', 'before', 'new block'] },
   { name: 'core.editor/clear-block', title: t('cmd.editor.clear-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor') },
   // 打归属的收集路径是选择器（`pick-tag`）；裸命令只会插一条固定名字的标签 ⇒ 不进面板
   { name: 'core.editor/insert-tag', title: t('cmd.editor.insert-tag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { tag: { type: 'string' } }, keywords: ['tag', t('menu.kw.tag')], hidden: true },
