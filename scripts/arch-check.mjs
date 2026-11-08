@@ -1625,7 +1625,7 @@ function commandDecls() {
   const EXPECTED = new Set([
     '_type', '_icon', '_date', '_aliases', '_lists', '_display', '_query', '_views', '_activeView',
     '_embed', '_kind', '_fieldDefs', '_choiceScope', '_use', '_check', '_cardinality', '_ownProps', '_uiPosition', '_default',
-    '_belongsTo', '_tags', '_mounts', '_deletedAt',
+    '_belongsTo', '_tags', '_mounts', '_deletedAt', '_childProps',
   ])
   const hits = []
   const unionKeys = new Set()

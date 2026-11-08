@@ -40,6 +40,7 @@ import { isJournalDate } from '../identity/journal.ts'
 import {
   CARDINALITY_PROP,
   CHECK_PROP,
+  CHILD_PROPS_PROP,
   CHOICE_SCOPE_PROP,
   DEFAULT_PROP,
   FIELD_DEFS_PROP,
@@ -48,6 +49,7 @@ import {
   USE_PROP,
   isCardinalityValue,
   isCheckValue,
+  isChildPropsValue,
   isDefaultValue,
   isFieldDefRefs,
   isOwnPropSlots,
@@ -86,6 +88,7 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   [CHECK_PROP]: isCheckValue,
   [CARDINALITY_PROP]: isCardinalityValue,
   [OWN_PROPS_PROP]: isOwnPropSlots,
+  [CHILD_PROPS_PROP]: isChildPropsValue,
   [UI_POSITION_PROP]: isUiPositionValue,
   [DEFAULT_PROP]: isDefaultValue,
   // 归属与标签

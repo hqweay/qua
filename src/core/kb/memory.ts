@@ -22,12 +22,12 @@ import { aliasesOf, DELETED_AT_PROP, hasList, isDeleted, type Block } from '../m
 import { findInForest, trashOf } from '../model/tree.ts'
 import { walkForest } from '../model/walk.ts'
 import { findTagByName, tagsOf as tagsOfBlock } from '../identity/tags.ts'
+import { isPropDef } from '../props/props.ts'
 import { findJournalDay } from '../identity/journal.ts'
 import { blockIdByAlias, indexPathOf, queryByIndex, relationsFrom, relationsTo } from '../infra/index-port.ts'
 import {
-  allPropDefs,
   declaredFields,
-  fieldRows,
+  fieldRowsWithParent,
   gutterFieldsFor,
   type FieldRow,
   type GutterField,
@@ -149,7 +149,9 @@ export class MemoryKb implements KbClient {
 
   fieldsOf(id: string): readonly FieldRow[] {
     const b = this.get(id)
-    return b ? fieldRows(b, this.store.blocks) : []
+    if (!b) return []
+    // 面板与属性行同一口径：父块声明了 `_childProps` ⇒ 面板里也见得到（否则点了那行没处聚焦）
+    return fieldRowsWithParent(b, this.store.blocks, this.parentOf(id) ?? null)
   }
 
   gutterFieldsOf(ids: readonly string[]): Map<string, GutterField[]> {
@@ -163,7 +165,14 @@ export class MemoryKb implements KbClient {
   }
 
   propDefs(): readonly Block[] {
-    return allPropDefs(this.store.blocks)
+    // **库里的定义块**（引擎合成定义不进：它不是库对象，没有定义页；
+    // 重名校验、新建集合、清单都以这一份为准）。行构造处的 defs 表吃
+    // `allPropDefs`（含引擎），两份清单各自回答自己的问题。
+    const out: Block[] = []
+    walkForest(this.store.blocks, (b) => {
+      if (isPropDef(b)) out.push(b)
+    })
+    return out
   }
 
   declaredFieldsOf(id: string): readonly Block[] {

@@ -178,6 +178,12 @@ export type SystemPropId =
   | '_cardinality'
   // 自有属性槽：这一块自己登记了哪些属性（见 `core/props.ts` 的 `ownPropIds`）
   | '_ownProps'
+  /**
+   * **子块行内属性显示**的声明（见 `core/props.ts` 的 `childDisplayProps`）：
+   * 父块声明「我的直接子块行内显示这些属性」。只是**显示**声明——字段不继承、
+   * 值不落子块、显示凭位置（在声明块直接之下）。
+   */
+  | '_childProps'
   // 字段定义的**编辑位置**（见 `core/props.ts` 的 `uiPositionOf`）
   | '_uiPosition'
   /**

@@ -56,6 +56,8 @@ test('写侧：系统键的坏值在 op 发看点被拒，森林逐字节不变'
     ['_icon', ''],
     ['_fieldDefs', 42],
     ['_ownProps', 42],
+    ['_childProps', 42],
+    ['_childProps', ['x', 42]], // 数组里混进非字符串
     ['_uiPosition', 'center'],
     ['_aliases', []], // 空数组与「没有这一格」是两种写法
     ['_lists', ['page', 'page']], // 无序集合：重复没有第二种语义
@@ -85,6 +87,7 @@ test('写侧：合法值放行（`_type` 刻意开放；id 列表允许悬空）
   kb.tx((tx) => tx.setProp(ids[2]!, '_tags', ['不存在的标签 id'])) // 悬空合法：软删要能自愈
   kb.tx((tx) => tx.setProp(ids[2]!, '_date', '2026-11-01'))
   kb.tx((tx) => tx.setProp(ids[2]!, '_query', { where: { text: 'x' } }))
+  kb.tx((tx) => tx.setProp(ids[2]!, '_childProps', ['core/created'])) // 悬空/引擎 id 合法：显示声明按 id 读
 })
 
 test('写侧：专用方法与 `patch` 的就地改走同一道闸', () => {

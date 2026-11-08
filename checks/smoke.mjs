@@ -25204,6 +25204,64 @@ await check(
   },
 )
 
+/**
+ * T275｜**子块行内属性显示**（`_childProps`）：父块声明 ⇒ 直接子块的属性行并入显示。
+ *
+ * 钉的是 lifelog 的行内形态（父节点开个元数据开关，子行自动带创建时间）：
+ *   · 块菜单命令经门面写 `_childProps`（写进系统槽 = 判据登记表放行）；
+ *   · 直接子块 `.blk-props-line` 出现「创建于 …」（引擎值桥到块顶层字段）；
+ *   · 孙块不显示（时间戳跟「记录」走，不跟每一行走）；
+ *   · 撤掉声明 ⇒ 行消失（现算不落盘到子块，零残留）。
+ */
+await check(
+  'T275 子块行内属性：父块勾「创建于」⇒ 直接子块显示时间、孙块无、撤掉消失',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const fx = await page.evaluate(() => {
+      const inv = (name, args = {}) => window.__qua.invoke(name, args)
+      const rows = window.__qua.__editor.rows().map((r) => r.block)
+      const host = rows.find((b) => b.children.length >= 2) ?? rows[rows.length - 1]
+      const kids = host.children.map((c) => c.id)
+      if (kids.length < 1) {
+        inv('core.editor/insert-block', { blockId: host.id, text: '记录一条' })
+      }
+      // 声明：父块勾「创建时间」（引擎属性 core/created）
+      inv('core.props/set-child-props', { blockId: host.id, propId: 'core/created', on: true })
+      const childId = (window.__qua.__editor.store.blocks.find((b) => b.id === host.id)?.children?.[0])?.id
+      const grandId = window.__qua.__editor.store.blocks.find((b) => b.id === childId)?.children?.[0]?.id ?? null
+      return { host: host.id, childId, grandId }
+    })
+    await page.waitForTimeout(400)
+
+    const childLine = await page.evaluate((id) => {
+      const row = document.querySelector(`.blk[data-block-id="${id}"]`)
+      const el = row?.querySelector(':scope > .blk-props-line')
+      return { present: Boolean(el), text: el?.textContent ?? '' }
+    }, fx.childId)
+    assert(childLine.present, `子块应出现属性行：${JSON.stringify(childLine)}`)
+    assert(childLine.text.includes('创建于'), `属性行应显示「创建于 …」：${JSON.stringify(childLine)}`)
+    if (fx.grandId) {
+      const grandHas = await page.evaluate(
+        (id) => Boolean(document.querySelector(`.blk[data-block-id="${id}"]`)?.querySelector(':scope > .blk-props-line')),
+        fx.grandId,
+      )
+      assert(!grandHas, '孙块不该显示（只直接子块）')
+    }
+
+    // 撤掉声明 ⇒ 直接子块的行消失（现算，零残留）
+    await page.evaluate((h) => window.__qua.invoke('core.props/set-child-props', { blockId: h, propId: 'core/created', on: false }), fx.host)
+    await page.waitForTimeout(400)
+    const gone = await page.evaluate((id) => Boolean(document.querySelector(`.blk[data-block-id="${id}"]`)?.querySelector(':scope > .blk-props-line')), fx.childId)
+    assert(!gone, '撤掉声明后子块属性行应消失')
+
+    await ctx.close()
+    return `父块勾「创建于」⇒ 子块 ${fx.childId.slice(-6)} 显示时间戳；撤掉即消失`
+  },
+)
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

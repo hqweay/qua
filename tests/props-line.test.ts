@@ -10,7 +10,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
-import { belowFieldsFor, fieldRows, mkPropDef, type FieldRow } from '../src/core/index.ts'
+import {
+  belowFieldsFor,
+  CHILD_PROPS_PROP,
+  ENGINE_CREATED,
+  enginePropText,
+  fieldRows,
+  fieldRowsWithParent,
+  mkPropDef,
+  type FieldRow,
+} from '../src/core/index.ts'
 import { textRuns } from '../src/core/model/runs.ts'
 
 /* ------------------------------------------------------------ 夹具 */
@@ -84,4 +93,62 @@ test('块下属性行：批级派生与单块 fieldRows 过滤逐行一致', () 
       return r.kind !== 'select' && r.kind !== 'checkbox'
     }).length,
   )
+})
+
+/* ------------------------------------------------------------ _childProps 与引擎属性 */
+
+test('子块行内属性：父块 _childProps 并入直接子块的行；孙块不沾光', () => {
+  const parent = blk('p1', 'Life Log', { [CHILD_PROPS_PROP]: [ENGINE_CREATED] })
+  const child = blk('c1', '今天的一条')
+  const grand = blk('g1', '细节')
+  const forest = [parent, { ...child, children: [grand] } as Block]
+  const withParent = (blocks: readonly Block[]) =>
+    belowFieldsFor(blocks, forest, (id) => (id === 'c1' ? parent : id === 'g1' ? child : null))
+  const rows = withParent([child]).get('c1')?.rows ?? []
+  assert.deepEqual(rows.map((r) => r.propId), [ENGINE_CREATED], '子块并入「创建于」')
+  assert.equal((withParent([grand]).get('g1')?.rows ?? []).length, 0, '孙块不显示（只直接子块）')
+})
+
+test('子块行内属性：有值才显示（普通属性子块没填 ⇒ pending）；子块自己的行优先去重', () => {
+  const defMood = mkPropDef('心情', 'text', {}, 'def-mood')
+  const parent = blk('p1', 'Log', { [CHILD_PROPS_PROP]: [defMood.id, ENGINE_CREATED] })
+  const empty = blk('c1', '没填心情')
+  const own = blk('c2', '自己有这栏', { _ownProps: [defMood.id], 'def-mood': '平静' })
+  const forest = [parent, empty, own, defMood]
+  const call = (blocks: readonly Block[]) =>
+    belowFieldsFor(blocks, forest, (id) => (id === 'c1' || id === 'c2' ? parent : null))
+  const e1 = call([empty]).get('c1')
+  assert.deepEqual(e1?.rows.map((r) => r.propId), [ENGINE_CREATED], '没填的行不出，引擎行恒有值')
+  assert.equal(e1?.pending, 1, '空值记进 pending')
+  const e2 = call([own]).get('c2')
+  assert.equal(e2?.rows.filter((r) => r.propId === defMood.id).length, 1, '同一 propId 只出一行')
+})
+
+test('引擎属性：定义合成注入、值桥到块顶层字段；显示文本今天给时刻、往日带日期', () => {
+  const t = new Date('2026-11-08T14:32:00')
+  const b = blk('b1', 'x', {})
+  b.created = t.getTime()
+  // 行只有被声明（如父块 _childProps）才出现——引擎注入的是**定义**（可查、有 label），不是「每块都显示」
+  const parent = blk('p1', 'Log', { [CHILD_PROPS_PROP]: [ENGINE_CREATED] })
+  const row = fieldRowsWithParent(b, [b, parent], parent).find((r) => r.propId === ENGINE_CREATED)
+  assert.ok(row, '声明后引擎行出现')
+  assert.equal(row?.label, '创建于')
+  assert.equal(row?.value, b.created, '值桥：来自 block.created，不是 props 袋')
+  assert.ok(row?.filled, '引擎行恒有值')
+  assert.equal(enginePropText(ENGINE_CREATED, b.created), '14:32', '今天只给时刻')
+  const otherDay = new Date('2026-11-01T09:05:00').getTime()
+  assert.equal(enginePropText(ENGINE_CREATED, otherDay), '11-01 09:05', '往日带日期')
+  // 旧签名（不传 parentOf）行为不变：引擎行不凭空出现
+  assert.equal(belowFieldsFor([b], []).get('b1'), undefined)
+})
+
+test('fieldRowsWithParent：面板口径与批级一致（父声明排在子块自己的行之后）', () => {
+  const defMood = mkPropDef('心情', 'text', {}, 'def-mood2')
+  const parent = blk('p1', 'Log', { [CHILD_PROPS_PROP]: [ENGINE_CREATED, defMood.id] })
+  const child = blk('c1', '记录', { _ownProps: [defMood.id], 'def-mood2': '平静' })
+  const forest = [parent, child, defMood]
+  const rows = fieldRowsWithParent(child, forest, parent)
+  assert.deepEqual(rows.map((r) => r.propId), [defMood.id, ENGINE_CREATED], '自有行在前、父声明补在后、去重')
+  // 单块（无父）等于旧 fieldRows
+  assert.deepEqual(fieldRowsWithParent(child, forest, null).map((r) => r.propId), [defMood.id])
 })

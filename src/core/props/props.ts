@@ -30,7 +30,8 @@ import {
 import { displayNameOf } from '../identity/alias.ts'
 import { plainText, textRuns } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
-import { derivedId, uuidv7Hex } from '../model/ids.ts'
+import { derivedId, pad, uuidv7Hex } from '../model/ids.ts'
+import { todayISO } from '../identity/journal.ts'
 import { allTags, resolveTagIds, tagIdsOf, tagsById } from '../identity/tags.ts'
 import { t } from '../infra/msg.ts'
 
@@ -743,9 +744,60 @@ export function choiceCells(
   return isDeleted(current) ? { choices, currentChoiceLabel, currentChoiceDeleted: true } : { choices, currentChoiceLabel }
 }
 
-/** 森林里全部属性定义（先序） */
+/* ------------------------------------------------------------ 引擎属性（core/*） */
+
+/**
+ * **引擎属性**：值住在块的**顶层字段**（`created`/`modified`，引擎记账的必填字段），
+ * 不是 `props` 袋里的一格；但以属性定义的面目进所有显示面（属性行/面板/清单）。
+ *
+ * · **id 即词汇**（跨库稳定，与 `derivedId` 的核心词汇同一档）；定义是**合成对象**，
+ *   不在森林里——它们没有定义页可编辑，只提供 label/kind 给行构造；
+ * · **只读**：`setValue` 拒绝（值由引擎记账，写入没有语义）；
+ * · 消费面（`fieldRowText`／面板）**先按 engine 分支**，再走各自的 kind 分支——
+ *   合成定义的 kind 只是兜底，漏了分支的画法会把毫秒数当普通值画出来。
+ */
+export const ENGINE_CREATED = 'core/created'
+export const ENGINE_MODIFIED = 'core/modified'
+
+export function isEngineProp(propId: string): boolean {
+  return propId === ENGINE_CREATED || propId === ENGINE_MODIFIED
+}
+
+let engineDefs: Block[] | null = null
+/** 引擎属性的合成定义（模块级缓存；id 稳定 ⇒ 三处消费共享同一批对象） */
+export function enginePropDefs(): Block[] {
+  engineDefs ??= [
+    mkPropDef(t('ui.props.createdAt'), 'date', {}, ENGINE_CREATED),
+    mkPropDef(t('ui.props.modifiedAt'), 'date', {}, ENGINE_MODIFIED),
+  ]
+  return engineDefs
+}
+
+/** 引擎属性的值（块顶层字段）；不是引擎属性 ⇒ `undefined` */
+export function enginePropValue(block: Block, propId: string): unknown {
+  if (propId === ENGINE_CREATED) return block.created
+  if (propId === ENGINE_MODIFIED) return block.modified
+  return undefined
+}
+
+/**
+ * 引擎属性行的显示文本：**今天写的只给时刻，往日带上日期**——
+ * 记录基本是当天写的（lifelog 的主读法），翻旧账时日期才有信息增量。
+ */
+export function enginePropText(propId: string, ms: number): string {
+  if (!isEngineProp(propId)) return ''
+  if (!Number.isFinite(ms) || ms <= 0) return ''
+  const d = new Date(ms)
+  const hm = `${pad(d.getHours(), 2)}:${pad(d.getMinutes(), 2)}`
+  return todayISO(d) === todayISO() ? hm : `${todayISO(d).slice(5)} ${hm}`
+}
+
+/** 森林里全部属性定义（先序）＋ 引擎属性的合成定义 */
 export function allPropDefs(forest: readonly Block[]): Block[] {
-  const out: Block[] = []
+  // ⚠️ 拷贝一份再 push：直接拿缓存数组的引用，会把森林里的定义永久攒进缓存
+  // （第一次调用后每次调用都多一批——实测把 seed 的任务状态 def 攒进去，
+  // 抢走了后续调用里真正的 status 定义）
+  const out: Block[] = [...enginePropDefs()]
   walkForest(forest, (b) => {
     if (isPropDef(b)) out.push(b)
   })
@@ -822,6 +874,29 @@ export function ownPropIds(block: Block): string[] {
   const raw = prop<unknown>(block, OWN_PROPS_PROP)
   if (!Array.isArray(raw)) return []
   return raw.filter((x): x is string => typeof x === 'string')
+}
+
+/**
+ * **子块行内属性显示**的声明槽（父块上的系统属性；有序 propId 列表）。
+ *
+ * 「我的**直接子块**行内显示这些属性」——同类大纲工具「节点元数据」的同构物，但它不是
+ * `declareField`（v29 收掉的「页声明」）那件事：**字段不继承、值不落子块**，
+ * 声明的只是显示；显示凭**位置**（在声明块直接之下），值各自读子块自己的。
+ * 这就是它与「标签声明（成员有这一格）」的分界，也是它没有移动语义坑的原因
+ * （没有隐式写，子块上一个字节都不多）。
+ */
+export const CHILD_PROPS_PROP = '_childProps'
+
+/** `_childProps` 的形状判据（读路径与落盘校验共用同一份）：非空字符串数组（同 `_ownProps` 形状） */
+export function isChildPropsValue(v: unknown): boolean {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string' && x !== '')
+}
+
+/** 父块声明给直接子块显示的属性（去重保序；悬空 id 原样保留，行构造时按「无定义」兜底） */
+export function childDisplayProps(parent: Block | null | undefined): string[] {
+  const raw = parent ? prop<unknown>(parent, CHILD_PROPS_PROP) : undefined
+  if (!Array.isArray(raw)) return []
+  return [...new Set(raw.filter((x): x is string => typeof x === 'string' && x !== ''))]
 }
 
 /**
@@ -975,6 +1050,30 @@ export function fieldRows(block: Block, forest: readonly Block[]): FieldRow[] {
 }
 
 /**
+ * 单块行 ＋ **父块声明**（`_childProps`）的并入（面板/只读门面用；渲染批级走
+ * `belowFieldsFor` 的同一条合并）。父块声明排在子块自己的行之后——它是环境给的
+ * 注记，不是这一块的内容；子块已有的 propId 不重复出（自己的行优先）。
+ */
+export function fieldRowsWithParent(
+  block: Block,
+  forest: readonly Block[],
+  parent: Block | null | undefined,
+): FieldRow[] {
+  const rows = fieldRows(block, forest)
+  if (!parent) return rows
+  const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
+  let order = (rows[rows.length - 1]?.order ?? -1) + 1
+  let look: ChoiceLookup | undefined
+  const lazyLook = (): ChoiceLookup => (look ??= choiceLookupOf(forest))
+  const merged = [...rows]
+  for (const propId of childDisplayProps(parent)) {
+    if (merged.some((r) => r.propId === propId)) continue
+    merged.push(fieldRowOf(block, propId, defs.get(propId), [], order++, forest, lazyLook))
+  }
+  return merged.sort((a, b) => a.order - b.order)
+}
+
+/**
  * 一行属性的**唯一构造点**：面板、gutter、块下行都吃它，各自只做过滤。
  *
  * 三处各拼一份行对象时，最先漂的是 `select` 的选项格（面板有、块下行没有 ⇒
@@ -994,8 +1093,9 @@ function fieldRowOf(
     label: def ? propLabel(def) || propId : propId,
     kind: def ? propKindOf(def) : 'text',
     cardinality: def ? cardinalityOf(def) : 'one',
-    value: valueOf(block, propId),
-    filled: hasValue(block, propId),
+    // 引擎属性的值住在块顶层字段，`valueOf` 只读 props 袋 ⇒ 这里一处桥接
+    value: isEngineProp(propId) ? enginePropValue(block, propId) : valueOf(block, propId),
+    filled: isEngineProp(propId) ? true : hasValue(block, propId),
     def,
     sources,
     order,
@@ -1034,6 +1134,8 @@ export interface BelowFields {
 export function belowFieldsFor(
   blocks: readonly Block[],
   forest: readonly Block[],
+  /** 行的模型父块（`_childProps` 显示声明的来源）；省略 ⇒ 行为与旧签名完全一致 */
+  parentOf?: (id: string) => Block | null | undefined,
 ): Map<string, BelowFields> {
   const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
   const tags = tagsById(forest)
@@ -1055,6 +1157,13 @@ export function belowFieldsFor(
       }
     }
     for (const propId of ownFieldIds(block)) {
+      if (rows.has(propId)) continue
+      rows.set(propId, fieldRowOf(block, propId, defs.get(propId), [], order++, forest, lazyLook))
+    }
+    // 父块声明（`_childProps`）排在子块自己的行之后；子块已有的 propId 不重复出。
+    // 有值才显示是同一条纪律（engine 行恒有值；普通属性子块没填就不出空行）
+    const parent = parentOf?.(block.id) ?? null
+    for (const propId of childDisplayProps(parent)) {
       if (rows.has(propId)) continue
       rows.set(propId, fieldRowOf(block, propId, defs.get(propId), [], order++, forest, lazyLook))
     }
@@ -1263,6 +1372,8 @@ export function gutterFieldsFor(
  * ⚠️ 只认「值真的变了」：点一下已经选中的那个选项不是一次改动。
  */
 export function setValue(block: Block, propId: string, value: unknown): void {
+  // 引擎属性只读：值由引擎记账，写入没有语义（静默 no-op ⇒ 零 op、不进撤销）
+  if (isEngineProp(propId)) return
   const prev = block.props?.[propId]
   block.props = { ...(block.props ?? {}), [propId]: value }
   if (!sameValue(prev, value)) block.modified = Date.now()
@@ -1292,6 +1403,8 @@ export function clearKeepsField(def: Block | undefined): boolean {
  *    「摘掉整栏」对这类字段另有专属命令（如「取消待办」），不带这个选项。
  */
 export function clearValue(block: Block, propId: string, opts: { keepField?: boolean } = {}): void {
+  // 引擎属性只读：与 `setValue` 同一条闸（清空同样没有语义）
+  if (isEngineProp(propId)) return
   const hadSlot = ownPropIds(block).includes(propId)
   const hadValue = block.props !== undefined && propId in block.props
   if (!hadValue && !hadSlot && !opts.keepField) return

@@ -296,6 +296,17 @@ export interface App {
   setChoiceCardinality(defId: string, cardinality: Cardinality): void
   /** 写定义块的快捷入口位置（`block-left` ＝ 块左侧图标；`panel` ＝ 只留属性面板） */
   setUiPosition(defId: string, position: UiPosition): void
+  /**
+   * 写/摘「子块行内属性显示」声明（`_childProps`）：父块声明「我的直接子块行内
+   * 显示这一格」。字段不继承、值不落子块——只是显示声明，撤掉零残留。
+   */
+  setChildProps(blockId: string, propId: string, on: boolean): void
+  /**
+   * **打开子块行内属性的选择器**（`core.props/child-props-menu` 的落点）。
+   * 多选清单：引擎两项＋全部属性定义；勾选态来自父块的 `_childProps`。
+   * 浮层归装配层（命令 handler 不碰 DOM，与 showRefPicker 同一条理由）。
+   */
+  showChildPropsPicker(blockId: string): void
   /** 删一个选项（**普通软删**：值保留，恢复后自动解析回来） */
   deleteChoice(choiceId: string): void
   /* 归属边（属于／包含；一条边存在子块的 `_belongsTo`，任何块都能配） */

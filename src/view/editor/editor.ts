@@ -1249,10 +1249,19 @@ export class BlockEditor {
    * ⚠️ 最后一段只有在**它完整**时才发槽（`tailComplete`）：虚拟化窗口的下边界可能切在
    *    段中间，那时这一段还在往下长，槽会被后一行挤到中间去。
    */
+  /**
+   * 行的**模型父块**（`_childProps` 显示声明的来源；父不在装载窗口 ⇒ null）。
+   * 渲染是按树扁平成可见行的（`VisibleRow` 没有 parent 指针），但 doc 里有——
+   * 「显示跟数据走」就靠这一步把模型父链接回来（嵌入岛装的是同一棵子树 ⇒ 自动跟随）。
+   */
+  private parentOfRow(id: string): Block | null {
+    return locate(this.doc, id)?.parent ?? null
+  }
+
   private renderRows(rows: readonly VisibleRow[], tailComplete = true): void {
     const blocks = rows.map((r) => r.block)
     const gutters = gutterFieldsFor(blocks, this.store.blocks)
-    const below = belowFieldsFor(blocks, this.store.blocks)
+    const below = belowFieldsFor(blocks, this.store.blocks, (id) => this.parentOfRow(id))
     let sec: HTMLElement | null = null
     /** 给上一段收尾：追加那个空槽（只给有段根的行段） */
     const closeSec = (): void => {
@@ -1352,7 +1361,7 @@ export class BlockEditor {
       this.makeBlockEl(
         row,
         gutterFieldsOf(row.block, this.store.blocks),
-        belowFieldsFor([row.block], this.store.blocks).get(row.block.id),
+        belowFieldsFor([row.block], this.store.blocks, (id) => this.parentOfRow(id)).get(row.block.id),
       ),
     )
     this.repaintOverlays()
@@ -3748,6 +3757,7 @@ export class BlockEditor {
     const below = belowFieldsFor(
       rows.map((r) => r.block),
       this.store.blocks,
+      (id) => this.parentOfRow(id),
     )
     const rowH = (r: VisibleRow): number =>
       visibleRowHeight(

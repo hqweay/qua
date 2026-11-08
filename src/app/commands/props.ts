@@ -4,12 +4,14 @@
 import {
   CARDINALITY_PROP,
   CHECK_PROP,
+  CHILD_PROPS_PROP,
   CHOICE_SCOPE_PROP,
   ICON_PROP,
   UI_POSITION_PROP,
   USE_PROP,
   cardinalityOf,
   checkOf,
+  childDisplayProps,
   flatten,
   parseCheckSpec,
   useOf,
@@ -54,6 +56,7 @@ export function propsCommands(
   | 'setChoiceCheck'
   | 'setChoiceCardinality'
   | 'setUiPosition'
+  | 'setChildProps'
   | 'deleteChoice'
 > {
   const find = (id: string): Block | undefined => d.kb.get(id)
@@ -324,6 +327,25 @@ export function propsCommands(
       d.run((tx) =>
         tx.patch(defId, (b) => patchProp(b, UI_POSITION_PROP, position === 'panel' ? undefined : position)),
       )
+    },
+
+    /**
+     * 写/摘「子块行内属性显示」声明（`_childProps`）：`on` 加一格、`off` 摘一格，
+     * 清空＝摘键（「没有声明」与「空声明」是两件事）。
+     */
+    setChildProps: (blockId, propId, on: boolean) => {
+      const parent = find(blockId)
+      if (!parent) return
+      const childIds = parent.children.map((c) => c.id)
+      d.run((tx) =>
+        tx.patch(blockId, (b) => {
+          const next = childDisplayProps(b).filter((id) => id !== propId)
+          if (on) next.push(propId)
+          patchProp(b, CHILD_PROPS_PROP, next.length > 0 ? next : undefined)
+        }),
+      )
+      // 声明写在父块，显示变在**子块的行**——写回调只重画父块，受影响的孩子在这里列出来
+      d.repaintBlocks([blockId, ...childIds])
     },
 
     /**

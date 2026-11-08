@@ -18,7 +18,7 @@
  * ⚠️ 组件不写模型：所有写入经注入的回调（由装配层转成命令）。
  */
 import type { Block, ClickMods } from '../../core/index.ts'
-import { clickModsOf } from '../../core/index.ts'
+import { clickModsOf, enginePropText, isEngineProp } from '../../core/index.ts'
 import { plainText } from '../../core/model/runs.ts'
 import { onCommitKeys } from './keys.ts'
 import type { Dangling, FieldRow, PropKind } from '../../core/index.ts'
@@ -439,6 +439,15 @@ export function makeFieldRow(
 
   const value = document.createElement('span')
   value.className = 'prop-value'
+  /**
+   * 引擎行（`core/created`/`core/modified`）只读：值由引擎记账，没有可编辑的值控件
+   * （合成定义的 kind 只是兜底，给它控件会把毫秒数当 date 输入框画出来），也没有清空。
+   */
+  if (isEngineProp(row.propId)) {
+    value.textContent = enginePropText(row.propId, Number(row.value))
+    el.append(label, value)
+    return el
+  }
   value.appendChild(
     makeCellEditor(
       row,

@@ -209,6 +209,9 @@ export const BINDINGS: Binding[] = [
    */
   { command: 'core.view/menu', kind: 'menu', when: 'blockFocused && blockCanHaveView', group: 'block/5-view', order: 10, layer: 'core', label: t('menu.label.views'), keywords: ['view', 'table', 'grid', t('menu.kw.views')] },
   { command: 'core.embed/insert', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 20, layer: 'core', label: t('ui.embed.insert') },
+  // 子块行内属性：父块上的显示声明（`_childProps`）——菜单是动态清单（引擎两项＋全部定义），
+  // 只挂一条命令、由装配层现画（与 core.view/menu 同一机制）
+  { command: 'core.props/child-props-menu', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 25, layer: 'core', label: t('menu.label.childProps'), keywords: ['property', 'child', 'created', t('menu.kw.date')] },
   { command: 'core.embed/paste-menu', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 30, layer: 'core', label: t('cmd.embed.paste-menu') },
   // zoom：进子树的入口挂在块菜单。**叶子块也给**（修订：
   // 块标左键＝聚焦是一贯行为：若叶子不给，点击结果会时 zoom 时不 zoom）

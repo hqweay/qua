@@ -176,7 +176,12 @@ export class ViewCards {
   private refreshBelow(blocks: readonly Block[]): void {
     if (blocks.length === 0) return
     const next = new Map(this.below)
-    for (const [id, data] of belowFieldsFor(blocks, this.deps.store.blocks)) next.set(id, data)
+    // 卡片与大纲同一口径：记录的模型父块声明了 `_childProps` ⇒ 卡上也显示（显示跟数据走）
+    const parentOf = (id: string): Block | null => {
+      const pid = this.deps.store.index.parentOf.get(id) ?? null
+      return pid ? (this.deps.store.find(pid) ?? null) : null
+    }
+    for (const [id, data] of belowFieldsFor(blocks, this.deps.store.blocks, parentOf)) next.set(id, data)
     // 掉出结果集的块不再留着（卡片重画时就不会去找它）
     for (const id of [...next.keys()]) {
       if (!this.deps.store.find(id)) next.delete(id)

@@ -241,6 +241,11 @@ export interface PropsDeps {
   /** 一次写入（属性）：写哪个块是确定的 */
   write: (blockId: string, mutate: () => void) => void
   /**
+   * 重画**一批块所在的行**（写入回调只保证重画写入的那一块；`_childProps` 这类
+   * 「写在父块、显示在子块」的声明要自己把受影响的行列出来）。
+   */
+  repaintBlocks: (ids: readonly string[]) => void
+  /**
    * 开一笔事务：给「新建定义 ＋ 声明到块上」这种复合动作用（同一笔才不会有半批）。
    * 带回 op 数——零 op 的事务不该记撤销步。
    */

@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propDisplayLabels, propKindOf, propLabel, choicesOf, choicesFor, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, type UndoKind } from './core/index.ts'
+import { addAlias, addList, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propDisplayLabels, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, type UndoKind } from './core/index.ts'
 import { choiceDisplayLabel, cardinalityOf, singleValueOf, valueListOf } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
@@ -1586,6 +1586,10 @@ const app: App = {
   ...propsCommands({
     kb,
     write: writeProps,
+    // 「写在父块、显示在子块」的声明（`_childProps`）要能把受影响的孩子一起重画
+    repaintBlocks: (ids) => {
+      for (const id of ids) repaintBlock(id)
+    },
     run: runTx,
     toast: (text, kind) => app.toast(text, kind),
   }),
@@ -2011,6 +2015,44 @@ const app: App = {
    * 候选与浮层都交给 `app/retrieval/tag-choice.ts`：标签表与边图邻接表在**打开这一刻**
    * 建一次，输入只做本地过滤（不再每行重建一遍邻接表）。
    */
+  /**
+   * **子块行内属性的选择器**（块菜单「子块行内属性…」的落点）：多选清单＝
+   * 引擎两项＋全部属性定义；勾选即写父块的 `_childProps`（keepOpen，逐项一次撤销）。
+   */
+  showChildPropsPicker: (blockId) => {
+    const parent = kb.get(blockId)
+    if (!parent) return
+    const current = new Set(childDisplayProps(parent))
+    const rows = () => {
+      const all = [
+        ...kb.propDefs().map((d) => ({ id: d.id, label: propLabel(d) || d.id.slice(-6) })),
+        ...enginePropDefs().map((d) => ({ id: d.id, label: propLabel(d) })),
+      ]
+      all.sort((x, y) => x.label.localeCompare(y.label, 'zh'))
+      return all.map((it) => ({
+        id: `childprop/${it.id}`,
+        label: it.label,
+        keyHint: current.has(it.id) ? '✓' : undefined,
+      }))
+    }
+    layers.openMenu({
+      rows: rows(),
+      anchor: ed.caretRect(),
+      title: t('menu.label.childProps'),
+      searchable: true,
+      focusSearch: true,
+      keepOpen: true,
+      onPick: (row) => {
+        const propId = String(row.id).slice('childprop/'.length)
+        const on = !current.has(propId)
+        if (on) current.add(propId)
+        else current.delete(propId)
+        void registry.invoke('core.props/set-child-props', { blockId, propId, on }, 'menu', uiCtx())
+        layers.setRows(rows())
+      },
+    })
+  },
+
   showTagPicker: () => {
     openTagChoice({
       layers,

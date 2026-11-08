@@ -13,6 +13,7 @@
  *    但「这一行写什么」只有这一份，免得同一块在四个面上给出四种说法。
  */
 import { t } from '../../core/infra/msg.ts'
+import { enginePropText, isEngineProp } from '../../core/index.ts'
 import type { BelowFields, FieldRow } from '../../core/index.ts'
 
 export interface PropsLineDeps {
@@ -31,6 +32,8 @@ export interface PropsLineDeps {
  * 选项已删/作用域隐藏时保留旧名并标注 —— 与面板同一条兜底。
  */
 export function fieldRowText(row: FieldRow, refLabel: (id: string) => string): string {
+  // 引擎行先于 kind 分支：合成定义的 kind 只是兜底，走到 date 分支会把毫秒数画成日期串
+  if (isEngineProp(row.propId)) return enginePropText(row.propId, Number(row.value))
   if (row.kind === 'select') {
     if (row.cardinality === 'many') return (row.currentChoiceLabels ?? []).join('、')
     return row.currentChoiceLabel ?? t('ui.props.choice.deleted')

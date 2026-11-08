@@ -3,7 +3,7 @@
  */
 import type { ChoiceScope } from '../../core/props/props.ts'
 import type { Handler, PropTarget } from '../../core/infra/ports.ts'
-import { S } from './shared.ts'
+import { curBlock, S } from './shared.ts'
 
 /**
  * 属性挂到块上的两个去处（`own` / `declared`）。
@@ -112,6 +112,19 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
     const defId = S(a.defId)
     if (!defId) return false
     app.setUiPosition(defId, a.position === 'block-left' ? 'block-left' : 'panel')
+    return true
+  },
+  'core.props/set-child-props': (a, app) => {
+    const blockId = S(a.blockId)
+    const propId = S(a.propId)
+    if (!blockId || !propId) return false
+    app.setChildProps(blockId, propId, a.on === true)
+    return true
+  },
+  'core.props/child-props-menu': (a, app) => {
+    const blockId = S(a.blockId) || curBlock(app)
+    if (!blockId) return false
+    app.showChildPropsPicker(blockId)
     return true
   },
   'core.props/delete-choice': (a, app) => {
