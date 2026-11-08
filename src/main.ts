@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propDisplayLabels, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind } from './core/index.ts'
+import { addAlias, addList, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propDisplayLabels, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, hasTabsBody, type StoredViewKind, type UndoKind } from './core/index.ts'
 import { choiceDisplayLabel, cardinalityOf, singleValueOf, valueListOf } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
@@ -1584,7 +1584,15 @@ const app: App = {
     const view = buildFreshView(kb, { kind: 'children', blockId: '' }, kindRaw as StoredViewKind)
     if (!view) return ''
     const ownerProps = withBlockOwnerData(undefined, { views: [view], activeView: view.id })
-    return ed.insertViewAfter(blockId, ownerProps) ?? ''
+    const id = ed.insertViewAfter(blockId, ownerProps) ?? ''
+    /**
+     * **身体不就地画的看法要当场打开**：children 源里只有容器型（页签）在正文行内
+     * 画身体（`rowHasInlineViewBody`），记录型（表格／卡片…）「打开才渲染」——
+     * 插完不打开，配置写进了模型、屏幕一动不动，就是「点了没生效」。
+     * 与视图菜单配完视图那条「没有表面在画 ⇒ 打开」同一条口径。
+     */
+    if (id !== '' && !hasTabsBody(kb.get(id))) app.zoomTo(id)
+    return id
   },
 
   ...pageCommands(pageDeps),
