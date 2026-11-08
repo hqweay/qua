@@ -28,7 +28,7 @@ import {
   type TodoState,
 } from '../model/model.ts'
 import { displayNameOf } from '../identity/alias.ts'
-import { plainText, textRuns } from '../model/runs.ts'
+import { plainText, textRuns, type RefRun } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
 import { derivedId, pad, uuidv7Hex } from '../model/ids.ts'
 import { todayISO } from '../identity/journal.ts'
@@ -900,17 +900,26 @@ export function childDisplayProps(parent: Block | null | undefined): string[] {
 }
 
 /**
- * **传递型引用**：正文**只有一枚引用**的块（没有别的文字与原子）——它只是
+ * **传递型引用**：正文**只有一枚引用**的块（没有可见文字、没有别的原子）——它只是
  * 「指到那个块的一跳」，透传目标块的显示声明。
  *
- * 判据从严：`content` 恰好一枚 run 且是 `ref`。正文里有别的字 ⇒ 引用只是提及
+ * 判据：**投影（`plainText`）无可见文字** ＋ 恰一枚 `ref` run ＋ 没有第三种原子。
+ * 「恰一枚 run」的初版判据踩了真机：引用后跟一个空格（`[ref, text(' ')]`）看起来
+ * 就是「只有引用」，却因多一枚空白 run 被判掉——可见文字为空才是用户心智里的
+ * 「只有引用」，空白段不算字。正文里有**非空白**的字 ⇒ 引用只是提及
  * （「今天看了 LifeLog 的设计」不该让子块长出时间戳）。悬空引用（`to` 缺）⇒
  * 不透传——声明跟身份走，身份没了就没有透传的方向。
  */
 export function passThroughRefTarget(block: Block): string | null {
-  if (block.content.length !== 1) return null
-  const r = block.content[0]
-  return r.t === 'ref' && r.to ? r.to : null
+  if (plainText(block.content).trim() !== '') return null
+  const refs: RefRun[] = []
+  for (const r of block.content) {
+    if (r.t === 'text') continue
+    if (r.t !== 'ref') return null
+    refs.push(r)
+  }
+  if (refs.length !== 1) return null
+  return refs[0].to ?? null
 }
 
 /**

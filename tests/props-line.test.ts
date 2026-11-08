@@ -220,3 +220,19 @@ test('传递型引用：正文只有一枚引用的块，其子块沿目标解�
   const viaBroken = (belowFieldsFor([child], forest, (id) => (id === 'c1' ? mid : null)).get('c1')?.rows ?? []).map((r) => r.propId)
   assert.deepEqual(viaBroken, [], '链上有一环带正文 ⇒ 断')
 })
+
+test('传递型引用：引用后跟空格（[ref, text(空格)]）仍透传——可见文字为空才算「只有引用」', () => {
+  const lifeTag = blk('tag-life2', 'LifeLog', { _aliases: ['LifeLog'], _lists: ['tag'], [CHILD_PROPS_PROP]: [ENGINE_CREATED] })
+  // 真机踩到的形状：引用后跟了空格 run，多一枚 run 但没有可见文字
+  const pass = blk('pass-sp', '')
+  pass.content = [{ id: 'r6', t: 'ref', to: 'tag-life2' }, ...textRuns(' ')]
+  const child = blk('c1', '一条')
+  const forest = [lifeTag, pass, child]
+  const rows = (belowFieldsFor([child], forest, (id) => (id === 'c1' ? pass : null)).get('c1')?.rows ?? []).map((r) => r.propId)
+  assert.deepEqual(rows, [ENGINE_CREATED], '空白段不算字 ⇒ 透传')
+  // 非空白文字 ⇒ 不透传（提及）
+  const withWords = blk('pass-w', '')
+  withWords.content = [{ id: 'r7', t: 'ref', to: 'tag-life2' }, ...textRuns(' 今天看了 ')]
+  const rows2 = (belowFieldsFor([child], forest, (id) => (id === 'c1' ? withWords : null)).get('c1')?.rows ?? []).map((r) => r.propId)
+  assert.deepEqual(rows2, [], '有可见文字 ⇒ 不透传')
+})
