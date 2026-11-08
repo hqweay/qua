@@ -3138,6 +3138,52 @@ export class BlockEditor {
   }
 
   /**
+   * 斜杠「插入看法」的落点：建（或空块原地转）一个**预配看法**的容器块，返回它的 id。
+   *
+   * 落点与 `insertQueryAfter` 同一条判据（空块原地转／有正文插兄弟，`insertSiteOf` 收口）。
+   * 看法配置作为**初始 props** 随整块落库（`mkQueryBlock` 同形）：调用方经
+   * `withBlockOwnerData` 规范化后传入，本方法不解释它的内容——这样视图配置的写
+   * 仍然只有 `ViewOwnerStore` 一份语义，这里只是搭车。
+   *
+   * 与查询块的两处不同：
+   *   · 容器块**有可写正文**（那一行就是它的名字）⇒ 光标落进块自己，不留尾部空块；
+   *   · 空块原地转时也不新增落点块——那一行原地变成容器，光标留在原地。
+   */
+  insertViewAfter(id?: string, ownerProps?: Record<string, unknown>): string | null {
+    const target = id !== undefined && id !== '' ? id : (this.caretBlock() ?? this.rows()[0]?.block.id ?? '')
+    if (target === '') return null
+    const loc = locate(this.doc, target) ?? locate({ roots: this.store.blocks }, target)
+    if (!loc) return null
+    this.beginUndoEntry()
+
+    const blank = isEmptyContent(loc.block.content) && !hasLiveChildren(loc.block) && canWriteText(loc.block)
+    if (blank) {
+      const ok = this.write((tx) => {
+        tx.patch(loc.block.id, (b) => {
+          b.props = { ...(b.props ?? {}), ...(ownerProps ?? {}) }
+          b.modified = Date.now()
+        })
+        return true
+      })
+      if (!ok) return null
+      this.structTail(null, [loc.block.id])
+      return loc.block.id
+    }
+
+    const site = insertSiteOf(loc, { blank: false })
+    if (!site || site.kind === 'replace') return null
+    const at = site.kind === 'first-child' ? { parentId: site.parentId, index: 0 } : { parentId: site.parentId, index: site.index }
+    const view = mkBlock('', ownerProps ? { props: ownerProps } : {})
+    const ok = this.write((tx) => {
+      tx.insert(view, at.parentId, at.index)
+      return true
+    })
+    if (!ok) return null
+    this.structTail({ id: view.id, off: 0 }, [view.id])
+    return view.id
+  }
+
+  /**
    * 插入一块**没有正文的块**（分割线／露面块），返回它的 id（原地改类型时就是 `id` 自己）。
    *
    * 分两支，判据是**插入点本身是不是一个空块**：

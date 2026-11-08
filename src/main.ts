@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propDisplayLabels, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, type UndoKind } from './core/index.ts'
+import { addAlias, addList, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propDisplayLabels, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind } from './core/index.ts'
 import { choiceDisplayLabel, cardinalityOf, singleValueOf, valueListOf } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
@@ -43,7 +43,7 @@ import { mountEmbedBody } from './ui/block-ui/embed-body.ts'
 import { renderPropsLine } from './ui/block-ui/props-line.ts'
 import { renderAliasEditor } from './ui/block-ui/alias-editor.ts'
 import { renderLinkComposer, renderNamePrompt, type ObjFieldDeps } from './ui/overlay/panels.ts'
-import { devCommands, dropIdentity, journalCommands, mentionCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, zoomCommands } from './app/commands-impl.ts'
+import { devCommands, dropIdentity, journalCommands, mentionCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, buildFreshView, zoomCommands } from './app/commands-impl.ts'
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupAxis } from './app/wiring/axis.ts'
@@ -1572,6 +1572,21 @@ const app: App = {
    */
   insertQueryBlock: (blockId) => ed.insertQueryAfter(blockId) ?? '',
 
+  /**
+   * **斜杠「插入看法」的落点**（`core.view/insert` 带 `kind` 的那一支）。
+   *
+   * 配置在**插入前**建好（`buildFreshView`：与视图菜单共一份 kind 兜底与默认名），
+   * 经 `withBlockOwnerData` 规范化成**初始 props** 随整块落库——结构与配置同一笔事务、
+   * 一次撤销；写语义仍只有 ViewOwnerStore 一份（这里只造新块的出生 props，与
+   * `mkQueryBlock` 同形，不碰已有块的配置）。
+   */
+  insertViewBlock: (blockId, kindRaw) => {
+    const view = buildFreshView(kb, { kind: 'children', blockId: '' }, kindRaw as StoredViewKind)
+    if (!view) return ''
+    const ownerProps = withBlockOwnerData(undefined, { views: [view], activeView: view.id })
+    return ed.insertViewAfter(blockId, ownerProps) ?? ''
+  },
+
   ...pageCommands(pageDeps),
   // 日记与页共用同一份依赖（今日是落点，不是特例代码路径）
   ...journalCommands(pageDeps),
@@ -1814,15 +1829,6 @@ const app: App = {
      * **能建哪几种**（表只有 `STORED_KINDS_BY_SOURCE` 一张）：
      * 查询源没有结构映射表与导图 —— 命中集合不是树，没有「第 k 个孩子」可对齐。
      */
-    const ICON: Record<string, string> = {
-      table: 'lucide:table',
-      'list-table': 'lucide:table-properties',
-      list: 'lucide:list',
-      cards: 'lucide:layout-grid',
-      calendar: 'lucide:calendar',
-      mindmap: 'lucide:git-fork',
-      tabs: 'lucide:panel-top',
-    }
     for (const kind of storedKindsFor(source)) {
       rows.push({
         id: `view/add/${kind}`,
@@ -1834,7 +1840,7 @@ const app: App = {
             : kind === 'list-table'
               ? t('ui.view.addListTable')
               : t('ui.view.addKind', { kind: t(`ui.view.kind.${kind}` as 'ui.view.kind.table') }),
-        icon: ICON[kind] ?? 'lucide:square',
+        icon: VIEW_KIND_ICON[kind],
         group: 'view/9-add',
       })
     }

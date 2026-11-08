@@ -273,6 +273,8 @@ export const BINDINGS: Binding[] = [
   // 分割线：没有正文的块，插完光标要落到它下面那一行（见 insertDividerAfter）
   { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 20, layer: 'core', label: t('menu.label.divider'), args: { type: 'divider' }, keywords: ['divider', 'hr', 'line', t('menu.kw.divider')], icon: 'lucide:minus' },
   { command: 'core.query/insert', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 30, layer: 'core', label: t('cmd.query.insert'), keywords: ['query', 'filter', 'where'], icon: 'lucide:list-filter' },
+  // 看法：不带参数 ⇒ 命令开选择器选哪一种（与露面/标签同一条两段式；大纲不列——↵ 已经做了）
+  { command: 'core.view/insert', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 35, layer: 'core', label: t('menu.label.insertView'), keywords: ['view', 'tabs', 'table', 'board', 'mindmap', t('menu.kw.view')], icon: 'lucide:layout-grid' },
   // 露面：不带参数 ⇒ 命令开选择器选目标块（与块菜单那条同一条路）
   { command: 'core.embed/insert', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 40, layer: 'core', label: t('ui.embed.insert'), keywords: ['embed', t('menu.kw.embed'), 'mirror'], icon: 'lucide:git-fork' },
   // 「复制块」是键盘用户唯一免鼠标的复制路径（⌘C+⌘V 要两步还得挪光标）

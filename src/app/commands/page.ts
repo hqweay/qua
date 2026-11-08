@@ -21,9 +21,11 @@ import {
   plainText,
   primaryAliasOf,
   prop,
+  storedKindsFor,
   tagIdsOf,
   todayISO,
   uuidv7Hex,
+  VIEW_KIND_ICON,
   writeRename,
   type Block,
 } from '../../core/index.ts'
@@ -77,6 +79,7 @@ export function pageCommands(d: PageDeps): Pick<
   | 'showRefPicker'
   | 'showDatePicker'
   | 'showEmbedPicker'
+  | 'showViewPicker'
   | 'insertTag'
   | 'extractToPage'
 > {
@@ -324,6 +327,25 @@ export function pageCommands(d: PageDeps): Pick<
       // 那是同一次插入的第二份实现，而且它不重排 —— 露面行要等下一次全量重画才出现，
       // 看起来就是「点了嵌入没反应」。
       d.openRefPicker(rows, undefined, t('ui.embed.pick'))
+    },
+
+    /**
+     * **插哪种看法？**（斜杠「插入看法」的两段式第一段）
+     *
+     * 候选只列 **children 源兼容的非缺省看法**（表只有 `STORED_KINDS_BY_SOURCE` 一张）：
+     * 新容器块的源必然是 children；大纲不列——选大纲＝普通块，↵ 已经做了。
+     * 每行带 `command`＋`args`，选中后由选择器的默认分发把 `core.view/insert` 跑完
+     * （与露面选择器同一条纪律：不许在这里手写插入）。
+     */
+    showViewPicker: (at) => {
+      const rows: Row[] = storedKindsFor({ kind: 'children', blockId: at }).map((kind) => ({
+        id: `viewpick/${kind}`,
+        label: t(`ui.view.kind.${kind}`),
+        icon: VIEW_KIND_ICON[kind],
+        command: 'core.view/insert',
+        args: { blockId: at, kind },
+      }))
+      d.openRefPicker(rows, undefined, t('ui.view.pick'))
     },
 
     showRefPicker: () => {

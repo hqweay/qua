@@ -7,7 +7,7 @@
  */
 import type { Handler } from '../../core/infra/ports.ts'
 import { isQueryNode, type QueryNode, type QuerySpec } from '../../core/query/query.ts'
-import { ownerOrCur, S } from './shared.ts'
+import { curBlock, ownerOrCur, S } from './shared.ts'
 
 export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
   'core.view/add': (a, app) => {
@@ -124,6 +124,21 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
     const id = app.insertQueryBlock(S(a.blockId) || undefined)
     if (id === '') return false
     return true
+  },
+  /**
+   * 斜杠「插入看法」，两段式（与 `core.embed/insert` 同款）：
+   * 不带 `kind` ⇒ 开看法选择器；带 `kind` ⇒ 建一个预配看法的容器块。
+   * 落点与其它插块命令同一条判据（收在编辑器的 `insertViewAfter`）。
+   */
+  'core.view/insert': (a, app) => {
+    const at = S(a.blockId) || curBlock(app)
+    if (!at) return false
+    const kind = S(a.kind)
+    if (!kind) {
+      app.showViewPicker(at)
+      return true
+    }
+    return app.insertViewBlock(at, kind) !== ''
   },
   'core.view/menu': (a, app) => {
     /**

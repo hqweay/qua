@@ -40,17 +40,14 @@ import {
   type Block,
   type ListSort,
   type Source,
+  type StoredViewKind,
   type ViewConfig,
   type ViewOwnerRef,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { App } from '../../core/infra/ports.ts'
+import type { KbClient } from '../../core/kb/types.ts'
 import type { ViewConfigDeps } from './types.ts'
-
-/** 库里第一个某种 kind 的属性定义（看板的分组列／日历的日期列先给一个能用的） */
-function firstDefOf(d: ViewConfigDeps, kind: string): string | undefined {
-  return d.kb.propDefs().find((def) => def.props?._kind === kind)?.id
-}
 
 /** 一个拥有者这一刻的源（写配置前先问：能不能建这种 kind，看的是源） */
 function sourceOfRef(d: ViewConfigDeps, owner: ViewOwnerRef): Source | null {
@@ -58,6 +55,42 @@ function sourceOfRef(d: ViewConfigDeps, owner: ViewOwnerRef): Source | null {
   if (!data) return null
   const host = owner.kind === 'block' ? d.kb.get(owner.blockId) : undefined
   return sourceOfOwner(owner, data, host)
+}
+
+/**
+ * 建一张**默认配置**的视图：kind 兜底（表格列／卡片封面／日历日期列）＋ 默认名。
+ *
+ * 兜底写两份就会漂移，所以 `addView`（视图菜单）与斜杠「插入看法」共用这一份。
+ * `existing` 只用来给同名 kind 加序号（「表格」「表格 2」）——新块没有兄弟视图，
+ * 斜杠那条传缺省即可。源不兼容的 kind 返回 `null`（表只有 `STORED_KINDS_BY_SOURCE` 一张：
+ * 写进去也会被 `canonicalViews` 丢掉，那是「点了没生效」）。
+ */
+export function buildFreshView(
+  kb: KbClient,
+  source: Source,
+  kind: StoredViewKind,
+  existing: readonly ViewConfig[] = [],
+): ViewConfig | null {
+  if (!storedKindsFor(source).includes(kind)) return null
+  const view: ViewConfig = { id: mkViewId(), kind }
+  if (kind === 'table') {
+    view.table = { columns: defaultColumnsForSource(source, kb) }
+  } else if (kind === 'cards') {
+    // 卡片默认就是画廊（不分组、封面取正文首图）；要看板是抬头选一个分组列，不是另一种东西
+    view.cards = { cover: 'first-asset' }
+  } else if (kind === 'calendar') {
+    // 日期列：第一个 `date` 定义；任何块都可能有 `_date`（日记块）⇒ 退到它
+    view.calendar = { dateBy: kb.propDefs().find((def) => def.props?._kind === 'date')?.id ?? '_date' }
+  } else if (kind === 'mindmap') {
+    view.mindmap = { direction: 'both' }
+  }
+  // 建视图就给默认名（kind 显示名，撞名加序号）：同 kind 多张在菜单里才分得开
+  const taken = new Set(existing.map((v) => viewNameOf(v, (k) => t(`ui.view.kind.${k}`))))
+  const base = t(`ui.view.kind.${kind}`)
+  let name = base
+  for (let n = 2; taken.has(name); n++) name = `${base} ${n}`
+  view.name = name
+  return view
 }
 
 export function viewConfigCommands(
@@ -122,56 +155,20 @@ export function viewConfigCommands(
 
   return {
     /**
-     * 新建一个视图并设为激活。
-     *
-     * 表格的列**在这里算一次**（`defaultColumnsForSource`）：算完写进配置，之后不随结果漂移。
-     * ⚠️ **源不兼容的 kind 当场拒绝**（表只有 `STORED_KINDS_BY_SOURCE` 一张）：
-     *    写进去也会被 `canonicalViews` 丢掉，那是「点了没生效」。
+     * 新建一个视图并设为激活。兜底配置与默认名收在 `buildFreshView`（与斜杠「插入看法」共用）。
      */
     addView: (owner, kindRaw) => {
       const source = sourceOfRef(d, owner)
       if (!source) return ''
-      const kind = storedKindsFor(source).find((k) => k === kindRaw)
-      if (!kind) {
+      const data = d.owners.read(owner)
+      const view = buildFreshView(d.kb, source, kindRaw as StoredViewKind, data?.views ?? [])
+      if (!view) {
         d.toast(t('ui.view.unknownKind'), 'warn')
         return ''
       }
-      const id = mkViewId()
-      const view: ViewConfig = { id, kind }
-      if (kind === 'table') {
-        view.table = { columns: defaultColumnsForSource(source, d.kb) }
-      } else if (kind === 'cards') {
-        /**
-         * 卡片**默认就是画廊**：不分组、封面取正文第一张图。
-         *
-         * 想要看板不是「建另一种东西」——在抬头选一个分组列，容器自己变成列
-         * （`cardLayoutOf` 从 `groupBy` 派生布局）。所以这里不需要任何属性、
-         * 也不会因为「没有 select」拒绝建：一张卡片随时能建，随时能分组。
-         */
-        view.cards = { cover: 'first-asset' }
-      } else if (kind === 'calendar') {
-        // 日期列：第一个 `date` 定义；任何块都可能有 `_date`（日记块）⇒ 退到它
-        view.calendar = { dateBy: firstDefOf(d, 'date') ?? '_date' }
-      } else if (kind === 'mindmap') {
-        view.mindmap = { direction: 'both' }
-      }
-      /**
-       * 建视图就给**默认名**（kind 显示名，撞名加序号）：`name` 字段一直在，此前无人填，
-       * 于是同 kind 多张在菜单里全叫一个名字，只能靠顺序猜。「表格」「表格 2」
-       * 从此分得开；改名入口另立，不在这里。
-       */
-      const taken = new Set(
-        (d.owners.read(owner)?.views ?? []).map((v) => viewNameOf(v, (k) => t(`ui.view.kind.${k}`))),
-      )
-      {
-        const base = t(`ui.view.kind.${kind}`)
-        let name = base
-        for (let n = 2; taken.has(name); n++) name = `${base} ${n}`
-        view.name = name
-      }
-      d.owners.write(owner, { views: upsertView(d.owners.read(owner)?.views ?? [], view), activeView: id })
+      d.owners.write(owner, { views: upsertView(data?.views ?? [], view), activeView: view.id })
       reveal(owner)
-      return id
+      return view.id
     },
 
     /**

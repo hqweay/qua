@@ -101,6 +101,19 @@ export const STORED_KINDS_BY_SOURCE: Record<Source['kind'], readonly StoredViewK
   children: ['table', 'list-table', 'cards', 'calendar', 'mindmap', 'tabs'],
 }
 
+/**
+ * 看法在菜单／选择器里的图标（lucide 名）。与 kind 表同住一份：
+ * 视图菜单、斜杠选择器各画一遍就会漂移（同一个看法两个图形）。
+ */
+export const VIEW_KIND_ICON: Record<StoredViewKind, string> = {
+  table: 'lucide:table',
+  'list-table': 'lucide:table-properties',
+  cards: 'lucide:layout-grid',
+  calendar: 'lucide:calendar',
+  mindmap: 'lucide:git-fork',
+  tabs: 'lucide:panel-top',
+}
+
 /** 这一份源能落盘的视图种类 */
 export function storedKindsFor(source: Source): readonly StoredViewKind[] {
   return STORED_KINDS_BY_SOURCE[source.kind] ?? []

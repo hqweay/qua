@@ -157,6 +157,8 @@ export interface App {
   showDatePicker(): void
   /** 选一个块作为露面的源（锚在 `at` 那一行上）；插入位置也在 `at` 后面 */
   showEmbedPicker(at: string): void
+  /** 选一种看法来插（`core.view/insert` 不带 `kind` 时）：只列 children 源兼容的非缺省看法 */
+  showViewPicker(at: string): void
   /** 读剪贴板文本（粘贴为… 用；命令层不直接碰浏览器全局） */
   readText(): Promise<string>
   /**
@@ -597,6 +599,13 @@ export interface App {
    * 结构写与落点空块在同一笔事务里 ⇒ 一次撤销。
    */
   insertQueryBlock(blockId?: string): string
+  /**
+   * **斜杠「插入看法」的落点**：建（或空块原地转）一个预配看法的容器块，返回块 id。
+   *
+   * 看法配置随新块的初始 props 一次落库（与查询块同形）⇒ 结构与配置同一笔事务、
+   * 一次撤销。`kind` 不认识时返回空串（选择器只列兼容的 kind，正常流到不了这里）。
+   */
+  insertViewBlock(blockId: string, kind: string): string
   /** 改一次露面选的视图（`core.embed/set-view` 的落点） */
   setEmbedView(blockId: string, view: string): boolean
   /* 浮层 / 提示 */

@@ -559,6 +559,7 @@ export const MSG = {
   'ui.embed.insert': '插入露面…',
   'ui.embed.pick': '选哪一块来露面？',
   'ui.embed.pickEmpty': '没有可插入的块',
+  'ui.view.pick': '插哪种看法？',
   'ui.embed.inserted': '已插入露面',
   'ui.embed.fromAtom': '在这里展开',
   'ui.embed.asMirror': '镜像',
@@ -719,6 +720,7 @@ export const MSG = {
   'cmd.view.new-row': '新建一行',
   'cmd.view.delete-row': '删除这一行',
   'cmd.view.menu': '视图…',
+  'cmd.view.insert': '插入看法…',
   'cmd.embed.set-view': '换这次露面的看法',
   'cmd.embed.insert': '插入露面…',
   'cmd.embed.from-atom': '展开引用为露面',
@@ -784,6 +786,7 @@ export const MSG = {
   'menu.label.dateRef': '日期',
   'menu.label.image': '图片',
   'menu.label.tag': '标签',
+  'menu.label.insertView': '插入看法…',
   'menu.label.duplicate': '复制块',
   'menu.label.delete': '删除块',
   'menu.label.bold': '加粗',
@@ -821,6 +824,7 @@ export const MSG = {
   'menu.kw.views': '视图',
   'menu.kw.query': '查询',
   'menu.kw.embed': '露面',
+  'menu.kw.view': '看法',
 
   /* ---------------------------------------------------------------- 浮层标题 */
   'menu.title.palette': '命令面板 · 一切命令可搜、可无绑定执行',
