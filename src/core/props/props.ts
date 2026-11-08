@@ -939,9 +939,17 @@ export interface ChildPropsLookup {
   blocks: ReadonlyMap<string, Block>
 }
 
-/** 从整片森林建查找环境（`belowFieldsFor`／`fieldRowsWithParent`／诊断共用一份构建） */
+/** 从整片森林建查找环境（`belowFieldsFor`／`fieldRowsWithParent`／诊断共用一份构建）。
+ *
+ * ⚠️ blocks 表必须**递归全库**（`walkForest`），不是顶层一遍——传递目标常是
+ * 嵌在子树里的普通块，只建顶层会让「引用目标=非顶层块」的透传静默查空
+ * （真机踩过：目标页在顶层命中、目标普通块嵌在子树查空，表现为「引用页生效、
+ * 引用块不生效」）。`tagsById` 自带全库递归，不用另处理。 */
 export function childPropsLookupOf(forest: readonly Block[]): ChildPropsLookup {
-  const blocks = new Map(forest.map((b) => [b.id, b]))
+  const blocks = new Map<string, Block>()
+  walkForest(forest, (b) => {
+    blocks.set(b.id, b)
+  })
   return { tags: tagsById(forest), blocks }
 }
 
@@ -960,20 +968,7 @@ export function childDisplayPropsResolved(
   }
   const target = passThroughRefTarget(parent)
   if (target) {
-    // dev log (troubleshooting): fires only when the parent is a pass-through ref block, low frequency
-    const targetBlock = lookup.blocks.get(target) ?? null
-    // eslint-disable-next-line no-console
-    console.log(
-      '[childProps] pass-through at',
-      parent.id.slice(-6),
-      '-> target',
-      target.slice(-6),
-      'targetInForest:',
-      targetBlock !== null,
-      'targetDecl:',
-      targetBlock ? childDisplayProps(targetBlock) : null,
-    )
-    for (const propId of childDisplayPropsResolved(targetBlock, lookup, nextSeen)) {
+    for (const propId of childDisplayPropsResolved(lookup.blocks.get(target) ?? null, lookup, nextSeen)) {
       if (!out.includes(propId)) out.push(propId)
     }
   }

@@ -221,6 +221,20 @@ test('传递型引用：正文只有一枚引用的块，其子块沿目标解�
   assert.deepEqual(viaBroken, [], '链上有一环带正文 ⇒ 断')
 })
 
+test('传递型引用：目标嵌在子树里也命中（lookup 必须递归全库，不是顶层一遍）', () => {
+  const lifeTag = blk('tag-nested', 'LifeLog', { _aliases: ['LifeLog'], _lists: ['tag'], [CHILD_PROPS_PROP]: [ENGINE_CREATED] })
+  // 目标块**嵌在页的子树里**（真机形状）：顶层森林数组里没有它
+  const page = blk('pg', '页', { props: undefined } as Record<string, unknown>)
+  const nested = blk('nested', '念书', { [CHILD_PROPS_PROP]: [ENGINE_CREATED] })
+  page.children = [nested]
+  const pass = blk('pass-n', '')
+  pass.content = [{ id: 'r8', t: 'ref', to: 'nested' }]
+  const child = blk('c1', '一条')
+  const forest = [lifeTag, page, pass, child]
+  const rows = (belowFieldsFor([child], forest, (id) => (id === 'c1' ? pass : null)).get('c1')?.rows ?? []).map((r) => r.propId)
+  assert.deepEqual(rows, [ENGINE_CREATED], '非顶层的目标块也要被 lookup 找到')
+})
+
 test('传递型引用：引用后跟空格（[ref, text(空格)]）仍透传——可见文字为空才算「只有引用」', () => {
   const lifeTag = blk('tag-life2', 'LifeLog', { _aliases: ['LifeLog'], _lists: ['tag'], [CHILD_PROPS_PROP]: [ENGINE_CREATED] })
   // 真机踩到的形状：引用后跟了空格 run，多一枚 run 但没有可见文字
