@@ -467,12 +467,15 @@ export function setupPanels(deps: PanelsDeps) {
    */
   let drawerBlockId: string | null = null
   let drawerPanel: PropertiesPanel | null = null
+  /** 抽屉的根元素，跟着 `drawerPanel` 一起生灭；已开着时供 `focusPropRow` 定位 */
+  let drawerRootEl: HTMLElement | null = null
 
   /** 库一变就跟着刷（与检视卡同一条通知、同鲜度）；抽屉已被关掉就顺手清状态 */
   function renderDrawer(): void {
     if (!layers.drawerOpen()) {
       drawerPanel = null
       drawerBlockId = null
+      drawerRootEl = null
       return
     }
     if (!drawerPanel) return
@@ -481,6 +484,7 @@ export function setupPanels(deps: PanelsDeps) {
       layers.closeDrawer()
       drawerPanel = null
       drawerBlockId = null
+      drawerRootEl = null
       return
     }
     drawerPanel.render()
@@ -513,10 +517,19 @@ export function setupPanels(deps: PanelsDeps) {
       layers.closeDrawer()
       drawerBlockId = null
       drawerPanel = null
+      drawerRootEl = null
+      return
+    }
+    /**
+     * **抽屉已经开着同一块 ⇒ 不重建，只把焦点送到那一栏**。
+     * `openDrawer` 是先关再开：对已开着的抽屉重建一遍，等于每次点值都让面板
+     * 拆掉重滑进来一次——内容没变，用户看到的却是一闪。
+     */
+    if (focusPropId && drawerBlockId === blockId && layers.drawerOpen() && drawerRootEl) {
+      focusPropRow(drawerRootEl, focusPropId)
       return
     }
     drawerBlockId = blockId
-    let rootEl: HTMLElement | null = null
     layers.openDrawer(blockLabel(b), (host) => {
       const root = document.createElement('div')
       root.className = 'props-drawer'
@@ -536,12 +549,12 @@ export function setupPanels(deps: PanelsDeps) {
         ),
       )
       drawerPanel = panel
+      drawerRootEl = root
       host.appendChild(root)
       panel.render()
-      rootEl = root
     })
     // 抽屉此时已挂进文档（`openDrawer` 同步 append），焦点才落得住
-    if (focusPropId && rootEl) focusPropRow(rootEl, focusPropId)
+    if (focusPropId && drawerRootEl) focusPropRow(drawerRootEl, focusPropId)
   }
 
   function renderProperties(): void {

@@ -24916,17 +24916,21 @@ await check('T265 块下属性行：有值才出现；点一项打开属性面�
     assert(after.open && after.row, `点一项要打开属性面板并列出那一栏：${JSON.stringify(after)}`)
     assert(after.focused, `焦点要落在那一栏的控件上：${JSON.stringify(after)}`)
 
-    // ② 再点同一项**不该把面板关掉**（属性行与抽屉可以同时可见）
+    // ② 再点同一项**不该把面板关掉**（属性行与抽屉可以同时可见），
+    // 也不该拆掉重建：同一块已开着 ⇒ 原地留用，只挪焦点——重建会让面板重滑进来一次，
+    // 内容没变用户看到的却是一闪。用探针属性钉住「还是原来那个节点」。
+    await page.evaluate(() => document.querySelector('.drawer')?.setAttribute('data-probe', 'same-node'))
     await page.evaluate((h) => {
       document.querySelector(`.blk[data-block-id="${h}"] > .blk-props-line .blk-prop`)?.dispatchEvent(
         new MouseEvent('click', { bubbles: true, cancelable: true }),
       )
     }, fx.host)
     await page.waitForTimeout(250)
-    assert(
-      await page.evaluate(() => Boolean(document.querySelector('.drawer'))),
-      '再点同一项应保持面板打开（这一条入口不是开关）',
-    )
+    const afterSecond = await page.evaluate(() => ({
+      open: Boolean(document.querySelector('.drawer')),
+      same: document.querySelector('.drawer')?.getAttribute('data-probe') === 'same-node',
+    }))
+    assert(afterSecond.open && afterSecond.same, `再点同一项应保持原面板（不关、不重建）：${JSON.stringify(afterSecond)}`)
 
     // ④ ⌥+点块标 ⇒ 打开属性面板（第二层：不改中心、不入历史）
     await page.keyboard.press('Escape')
