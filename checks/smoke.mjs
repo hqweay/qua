@@ -25257,8 +25257,47 @@ await check(
     const gone = await page.evaluate((id) => Boolean(document.querySelector(`.blk[data-block-id="${id}"]`)?.querySelector(':scope > .blk-props-line')), fx.childId)
     assert(!gone, '撤掉声明后子块属性行应消失')
 
+    /**
+     * **标签声明**：把声明写在 LifeLog 标签块上 ⇒ 打了 #LifeLog 的块，其直接子块
+     * 也显示（与标签声明字段同构——数据槽换显示槽）。露面镜像里（父＝标签块
+     * 自己）同样命中：显示凭模型父链，不凭 DOM 位置。
+     */
+    const tagFx = await page.evaluate(() => {
+      const inv = (name, args = {}) => window.__qua.invoke(name, args)
+      // host 从 **store**（唯一真源）挑：rows() 是装载快照，与 store 的交付时序可能脱节。
+      // 挑一个**已有子块**的内容块打标（避免「给无子块的块建子块」的落点绕路）
+      const store = window.__qua.__editor.store
+      const host = store.blocks.find((b) => b.children.length > 0 && !b.props?._tags?.length && !b.props?._date && !b.props?._query)
+      if (!host) throw new Error('前置：没有带子块的内容块')
+      // 直调编辑器 addTag（registry 路径已由 T265 钉；这里验的是标签声明链，不是 addTag 本身）
+      const added = window.__qua.__editor.addTag(host.id, 'LifeLog探针')
+      const afterDirect = store.blocks.find((b) => b.id === host.id)
+      if (!added || !afterDirect?.props?._tags?.length) {
+        throw new Error(`前置：打标签失败 ${JSON.stringify({ added, hostProps: Object.keys(afterDirect?.props ?? {}) })}`)
+      }
+      const tag = store.blocks.find((b) => (b.props?._aliases ?? []).includes('LifeLog探针'))
+      if (!tag) throw new Error('前置：标签块没建出来')
+      inv('core.props/set-child-props', { blockId: tag.id, propId: 'core/created', on: true })
+      // 焦点落到子块（虚拟化窗口按可见渲染：先进视口再断言 DOM）
+      const childId = afterDirect.children[0].id
+      window.__qua.focusBlock(childId, 0)
+      return { host: host.id, tag: tag.id, childId }
+    })
+    await page.waitForTimeout(400)
+    const tagLine = await page.evaluate((id) => {
+      const el = document.querySelector(`.blk[data-block-id="${id}"] > .blk-props-line`)
+      // 模型层口径（面板同源）：fieldsOf 走 fieldRowsWithParent，标签链在不在一测便知
+      const modelRows = window.__qua.invoke ? window.__qua.fields(id).map((r) => r.propId) : null
+      return { present: Boolean(el), text: el?.textContent ?? '', modelRows }
+    }, tagFx.childId)
+    assert(
+      tagLine.modelRows?.includes('core/created'),
+      `标签声明的模型链未生效：${JSON.stringify(tagLine)}`,
+    )
+    assert(tagLine.present && tagLine.text.includes('创建于'), `打了标签的块，其子块应显示时间戳：${JSON.stringify(tagLine)}`)
+
     await ctx.close()
-    return `父块勾「创建于」⇒ 子块 ${fx.childId.slice(-6)} 显示时间戳；撤掉即消失`
+    return `父块勾「创建于」⇒ 子块显示；撤掉消失；标签声明 ⇒ 成员子块同样显示`
   },
 )
 

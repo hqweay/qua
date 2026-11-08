@@ -14,7 +14,7 @@ import {
   declaredFieldIds,
   displayNameOf,
   dockKey,
-  fieldRows,
+  type FieldRow,
   findInForest,
   flatten,
   hasList,
@@ -55,6 +55,8 @@ export type DiagnosticsDeps = {
   DEV_SURFACE: boolean
   store: WorkspaceStore
   boot: LoadedWorkspace
+  /** 只读门面：探针的属性区与属性面板同一口径（含 `_childProps` 声明链） */
+  kb: { fieldsOf(id: string): readonly FieldRow[] }
   /** 启动态是**活的**：重建本地库之后要当场从只读翻回可写，所以传 getter 而不是值 */
   getReadOnly: () => boolean
   getBootNotice: () => string | null
@@ -524,7 +526,9 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
         const tag = findInForest(ws.blocks, id)
         return tag ? displayNameOf(tag) || id.slice(-6) : id.slice(-6)
       }
-      return fieldRows(b, ws.blocks).map((r) => ({
+      // 与属性面板同一口径（`kb.fieldsOf`：含父块/标签的 `_childProps` 声明链）——
+      // 探针读到「另一个答案」比没有桥更糟
+      return deps.kb.fieldsOf(b.id).map((r) => ({
         propId: r.propId,
         label: r.label,
         kind: r.kind,

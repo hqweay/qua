@@ -2038,7 +2038,8 @@ const app: App = {
     layers.openMenu({
       rows: rows(),
       anchor: ed.caretRect(),
-      title: t('menu.label.childProps'),
+      // 标签块上的声明对**所有成员**的子块生效（解析链含标签）；普通块只对自己的子块
+      title: t(hasList(parent, 'tag') ? 'menu.label.childPropsTag' : 'menu.label.childProps'),
       searchable: true,
       focusSearch: true,
       keepOpen: true,
@@ -3216,6 +3217,7 @@ menus.bindResize('right', dockRight)
 diag = setupDiagnostics({
   DEV_SURFACE,
   store,
+  kb,
   boot,
   getReadOnly: () => bootState.readOnly,
   getBootNotice: () => bootState.notice,

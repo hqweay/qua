@@ -14,6 +14,7 @@ import {
   belowFieldsFor,
   CHILD_PROPS_PROP,
   ENGINE_CREATED,
+  ENGINE_MODIFIED,
   enginePropText,
   fieldRows,
   fieldRowsWithParent,
@@ -140,6 +141,40 @@ test('引擎属性：定义合成注入、值桥到块顶层字段；显示文�
   assert.equal(enginePropText(ENGINE_CREATED, otherDay), '11-01 09:05', '往日带日期')
   // 旧签名（不传 parentOf）行为不变：引擎行不凭空出现
   assert.equal(belowFieldsFor([b], []).get('b1'), undefined)
+})
+
+test('标签声明：打了标签的块，其子块并入标签的显示声明；父块自己的声明在前', () => {
+  const defMood = mkPropDef('心情', 'text', {}, 'def-mood3')
+  const lifeTag = blk('tag-life', 'LifeLog', { _aliases: ['LifeLog'], _lists: ['tag'], [CHILD_PROPS_PROP]: [ENGINE_CREATED] })
+  const parent = blk('p1', '今天的记录', { _tags: ['tag-life'], [CHILD_PROPS_PROP]: [ENGINE_MODIFIED] })
+  const child = blk('c1', '一条', { 'def-mood3': '平静' })
+  const forest = [lifeTag, parent, child, defMood]
+  const rows = (belowFieldsFor([child], forest, (id) => (id === 'c1' ? parent : null)).get('c1')?.rows ?? []).map((r) => r.propId)
+  // 子块写过值的（def-mood3）是它自己的行、永远在前；声明链的补充行（父块自己的→标签的）按序在后
+  assert.deepEqual(rows, [defMood.id, ENGINE_MODIFIED, ENGINE_CREATED])
+  // 没填值的声明不显示（pending）：child 没填的心情不出现，由 pending 记数
+  // 面板口径一致
+  const panelRows = fieldRowsWithParent(child, forest, parent).map((r) => r.propId)
+  assert.deepEqual(panelRows, rows)
+})
+
+test('标签声明：多标签并集去重；标签块自己当容器也生效；标签的标签不传递', () => {
+  const defA = mkPropDef('甲', 'text', {}, 'def-a')
+  const defB = mkPropDef('乙', 'text', {}, 'def-b')
+  const tag1 = blk('tag-1', 'T1', { _aliases: ['T1'], _lists: ['tag'], [CHILD_PROPS_PROP]: [ENGINE_MODIFIED, ENGINE_CREATED] })
+  const tag2 = blk('tag-2', 'T2', { _aliases: ['T2'], _lists: ['tag'], [CHILD_PROPS_PROP]: [ENGINE_CREATED, defB.id] })
+  // 标签的标签：tag2 打了 tag1 ⇒ 不传递（不做继承）
+  tag2.props = { ...(tag2.props ?? {}), _tags: ['tag-1'] }
+  const parent = blk('p1', '两标签', { _tags: ['tag-1', 'tag-2'] })
+  const child = blk('c1', '一条', { 'def-b': 'b值' })
+  const forest = [tag1, tag2, parent, child, defA, defB]
+  const rows = (belowFieldsFor([child], forest, (id) => (id === 'c1' ? parent : null)).get('c1')?.rows ?? []).map((r) => r.propId)
+  // 子块自己的行（def-b，写了值）在前；声明链按打标序去重合并（core/created 只出一次）
+  assert.deepEqual(rows, [defB.id, ENGINE_MODIFIED, ENGINE_CREATED])
+  // 标签块自己当容器：child 直挂 tag1 下 ⇒ 父块自己的声明命中（甲没填值不显示）
+  const underTag = blk('c2', '挂在标签下')
+  const rows2 = (belowFieldsFor([underTag], forest, (id) => (id === 'c2' ? tag1 : null)).get('c2')?.rows ?? []).map((r) => r.propId)
+  assert.deepEqual(rows2, [ENGINE_MODIFIED, ENGINE_CREATED])
 })
 
 test('fieldRowsWithParent：面板口径与批级一致（父声明排在子块自己的行之后）', () => {

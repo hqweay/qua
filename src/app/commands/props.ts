@@ -13,6 +13,7 @@ import {
   checkOf,
   childDisplayProps,
   flatten,
+  hasList,
   parseCheckSpec,
   useOf,
   valueListOf,
@@ -23,6 +24,7 @@ import {
   declaredFieldIds,
   displayNameOf,
   mkBlock,
+  membersOf,
   mkPropDef,
   normalizeAlias,
   parseChoiceScope,
@@ -336,7 +338,6 @@ export function propsCommands(
     setChildProps: (blockId, propId, on: boolean) => {
       const parent = find(blockId)
       if (!parent) return
-      const childIds = parent.children.map((c) => c.id)
       d.run((tx) =>
         tx.patch(blockId, (b) => {
           const next = childDisplayProps(b).filter((id) => id !== propId)
@@ -344,8 +345,12 @@ export function propsCommands(
           patchProp(b, CHILD_PROPS_PROP, next.length > 0 ? next : undefined)
         }),
       )
-      // 声明写在父块，显示变在**子块的行**——写回调只重画父块，受影响的孩子在这里列出来
-      d.repaintBlocks([blockId, ...childIds])
+      // 声明写在父块，显示变在**子块的行**——写回调只重画父块，受影响的行在这里列出来：
+      // 普通块 ⇒ 它的孩子；**标签块** ⇒ 全体成员的孩子（解析链含标签声明，成员的子块都显示）
+      const affected = hasList(parent, 'tag')
+        ? [...membersOf(blockId, d.kb.roots())].flatMap((mid) => d.kb.get(mid)?.children.map((c) => c.id) ?? [])
+        : parent.children.map((c) => c.id)
+      d.repaintBlocks([blockId, ...affected])
     },
 
     /**

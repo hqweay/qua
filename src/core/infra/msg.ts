@@ -794,6 +794,7 @@ export const MSG = {
   'menu.label.insertRef': '插入引用',
   'menu.label.insertImage': '插入图片',
   'menu.label.childProps': '子块行内属性…',
+  'menu.label.childPropsTag': '子块行内属性（对所有打了此标签的块生效）…',
   'menu.label.link': '外链',
   'menu.label.fold': '折叠',
   'menu.label.copyRef': '复制为引文',

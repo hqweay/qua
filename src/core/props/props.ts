@@ -900,6 +900,28 @@ export function childDisplayProps(parent: Block | null | undefined): string[] {
 }
 
 /**
+ * 显示声明的**解析链**：父块自己的声明 ∪ 父块各**标签**的声明（按打标顺序，去重）。
+ *
+ * 与 `_fieldDefs`（标签声明字段给成员）完全同构——数据槽换成显示槽。同一个槽自动
+ * 覆盖两个读者：标签块自己当容器（父链第一项命中）、任意块打了标签（标签链命中），
+ * 没有第二种语义。**不做标签继承**（标签的标签不传递）——与「不做继承、多标签
+ * 并集」同一拍板。正文里**引用**某个块不生效：引用是内容不是归属，声明跟身份走。
+ */
+export function childDisplayPropsResolved(
+  parent: Block | null | undefined,
+  tagsByIdMap: ReadonlyMap<string, Block>,
+): string[] {
+  if (!parent) return []
+  const out = childDisplayProps(parent)
+  for (const tag of resolveTagIds(parent, tagsByIdMap)) {
+    for (const propId of childDisplayProps(tag)) {
+      if (!out.includes(propId)) out.push(propId)
+    }
+  }
+  return out
+}
+
+/**
  * 给**普通块**加一条自有属性（幂等；追加到末尾 ＝ 显示顺序）。
  *
  * 为什么要一个槽位，而不是写个空值占位：`props[propId] = ''` 会让「键在不在」与
@@ -1066,7 +1088,7 @@ export function fieldRowsWithParent(
   let look: ChoiceLookup | undefined
   const lazyLook = (): ChoiceLookup => (look ??= choiceLookupOf(forest))
   const merged = [...rows]
-  for (const propId of childDisplayProps(parent)) {
+  for (const propId of childDisplayPropsResolved(parent, tagsById(forest))) {
     if (merged.some((r) => r.propId === propId)) continue
     merged.push(fieldRowOf(block, propId, defs.get(propId), [], order++, forest, lazyLook))
   }
@@ -1160,10 +1182,11 @@ export function belowFieldsFor(
       if (rows.has(propId)) continue
       rows.set(propId, fieldRowOf(block, propId, defs.get(propId), [], order++, forest, lazyLook))
     }
-    // 父块声明（`_childProps`）排在子块自己的行之后；子块已有的 propId 不重复出。
-    // 有值才显示是同一条纪律（engine 行恒有值；普通属性子块没填就不出空行）
+    // 父块声明（`_childProps`，含父块标签的声明）排在子块自己的行之后；
+    // 子块已有的 propId 不重复出。有值才显示是同一条纪律（engine 行恒有值；
+    // 普通属性子块没填就不出空行）
     const parent = parentOf?.(block.id) ?? null
-    for (const propId of childDisplayProps(parent)) {
+    for (const propId of childDisplayPropsResolved(parent, tags)) {
       if (rows.has(propId)) continue
       rows.set(propId, fieldRowOf(block, propId, defs.get(propId), [], order++, forest, lazyLook))
     }
