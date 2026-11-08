@@ -25115,6 +25115,74 @@ await check(
   },
 )
 
+/**
+ * T274｜**引用日期**：斜杠菜单「日期」→ 日历选择 → 插入指向那天的引用。
+ *
+ * 钉的是整条接线：
+ *   · 斜杠菜单里有「日期」，选中后弹的是**日历选择器**（月网格浮层，不是菜单）；
+ *   · 点未来某天 ⇒ 插入一枚 ref run，目标**已物化**（state=resolved——引用日期
+ *     不留 dangling 给用户修）；
+ *   · 显示名是**日期投影**（journalDateLabel 现算，不是插数据时刻的名字快照）。
+ * 「日记流不展示未来」由单测钉（feed.test.ts）——UI 上复现流顶出现未来天要先翻日，
+ * 单测更准。
+ */
+await check(
+  'T274 斜杠「日期」→ 日历选未来某天 → 插入已解析的日期引用（物化那天）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    // 新块里打 `/日`，应出现「日期」项（日历选择器是新入口，不是通用引用候选里混日期）
+    await page.evaluate(() => {
+      const bs = window.__qua.blocks()
+      const id = bs[bs.length - 1].id
+      window.__qua.focusBlock(id, 0)
+    })
+    await page.keyboard.press('End')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('/')
+    await page.waitForSelector('.layer', { timeout: 3000 })
+    await page.keyboard.type('日')
+    const item = page.locator('.layer .layer-item', { hasText: '日期' })
+    assert((await item.count()) >= 1, '斜杠菜单应含「日期」项')
+
+    // 选中 ⇒ 日历选择器浮层（.popover 月网格），先翻到下个月再点一格——跨月的那天也要可选
+    await item.first().click()
+    await page.waitForSelector('.popover .cal-grid', { timeout: 3000 })
+    await page.locator('.popover .cal-nav').last().click()
+    const future = await page.evaluate(() => {
+      // 下个月 15 号：用「本月 1 号 ±」的构造，不要在今天的日期上 setMonth（月末溢出会跳月）
+      const now = new Date()
+      const d = new Date(now.getFullYear(), now.getMonth() + 1, 15)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-15`
+    })
+    await page.locator(`.popover .cal-cell[data-date="${future}"]`).click()
+    await page.waitForTimeout(200)
+
+    // 浮层应关掉；插入的引用已解析（目标物化）且显示名＝日期投影
+    assert((await page.locator('.popover').count()) === 0, '选中一天后应关掉选择器')
+    const atom = await page.evaluate((date) => {
+      const want = new Date(`${date}T12:00:00`).toLocaleDateString('zh-CN', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        weekday: 'short',
+      })
+      const hits = window.__qua
+        .atoms()
+        .filter((a) => a.kind === 'page' && a.target && a.label.includes(String(new Date(date).getFullYear())))
+      return { hits, want }
+    }, future)
+    const ref = atom.hits.find((a) => a.label.replace(/\s/g, '') === atom.want.replace(/\s/g, ''))
+    assert(Boolean(ref), `应插入显示为日期投影的引用（期望「${atom.want}」，实际 ${JSON.stringify(atom.hits.map((a) => a.label))}）`)
+    assert(ref.state === 'resolved', `引用日期的目标应已物化（resolved），实际 ${ref.state}`)
+
+    await ctx.close()
+    return `选了 ${future}：引用显示「${ref.label}」、目标已物化`
+  },
+)
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

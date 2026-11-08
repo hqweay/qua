@@ -145,6 +145,14 @@ export interface App {
   /** 把焦点交给页名（**UI 归装配层**：命令只说「要改名」，不碰 `document` — 59 ） */
   focusTitle(): void
   showRefPicker(): void
+  /**
+   * **打开日期选择器**（`core.editor/insert-date-ref` 不带 `date` 时的那条路）。
+   *
+   * 与 `showRefPicker` 同一条理由：选择日期要一个浮层，而命令 handler 不碰 DOM。
+   * 选中之后的插入仍回命令面（带 `date` 那一支）——选择器只回答日期，
+   * 「物化那天 ＋ 插引用」不在这里。
+   */
+  showDatePicker(): void
   /** 选一个块作为露面的源（锚在 `at` 那一行上）；插入位置也在 `at` 后面 */
   showEmbedPicker(at: string): void
   /** 读剪贴板文本（粘贴为… 用；命令层不直接碰浏览器全局） */
@@ -425,6 +433,14 @@ export interface App {
    * 分流——物化只发生在日记命令这一处，UI 不自己拼 `journalId`。
    */
   openJournal(date: string, place?: OpenAction): void
+  /**
+   * **按日期拿那天的 journal 块 id**（没有就幂等物化；在回收站则复活）。
+   *
+   * 「引用日期」要与「打开那天」共用同一份物化口径：两处各写一遍 `journalId` 拼装，
+   * 就会出现两个「哪天是哪个块」的答案。给 `core.editor/insert-date-ref` 用——
+   * 引用的目标必须真的存在，dangling 日期引用不留给用户修。
+   */
+  ensureJournal(date: string): string
   /** 新 tab（今日）；今日已经开着就切过去 */
   newTab(): boolean
   /** 关 tab（省略 id ＝ 当前）；关掉最后一张会补一张今日 */

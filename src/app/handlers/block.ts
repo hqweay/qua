@@ -5,7 +5,7 @@
  * 只经 `App` 门面改状态（`app.ed.*`），不碰 DOM。
  */
 import { t } from '../../core/infra/msg.ts'
-import { checkExternalUrl, rejectText } from '../../core/index.ts'
+import { checkExternalUrl, isJournalDate, journalDateLabel, rejectText } from '../../core/index.ts'
 import { MISSING_ASSET_HASH, SEED_ASSET_HASH } from '../../core/fixtures/assets.ts'
 import type { App, Handler } from '../../core/infra/ports.ts'
 import { buildCopyHtml } from '../../view/editor/clipboard-flavor.ts'
@@ -281,6 +281,28 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     const page = app.listPages().find((p) => p.id === pageId)
     if (!page) return false
     app.ed.insertRef({ to: page.id, label: page.title || t('ui.page.untitled') })
+    return true
+  },
+  /**
+   * 日期引用：目标＝那天的 journal 块。
+   *
+   * · 不带 `date` ⇒ 开日历选择器（`App.showDatePicker`）；带 ⇒ 直接插。
+   * · **物化与插引用同一撤销条目**（`runGroup`）：不分组的话 ⌘Z 一次只撤掉引用、
+   *   留下一个谁也没引用的空 journal 块——半批比慢更贵。
+   * · `label` 只是 dangling 兜底快照；显示名走 `displayTextOf` 的日期投影，
+   *   目标由 `ensureJournal` 保证存在 ⇒ 实际永远走投影那条。
+   */
+  'core.editor/insert-date-ref': (a, app) => {
+    const date = S(a.date)
+    if (!date) {
+      app.showDatePicker()
+      return true
+    }
+    if (!isJournalDate(date)) return false
+    app.runGroup(() => {
+      const id = app.ensureJournal(date)
+      app.ed.insertRef({ to: id, label: journalDateLabel(date) })
+    })
     return true
   },
   'core.editor/insert-image': (a, app) => {

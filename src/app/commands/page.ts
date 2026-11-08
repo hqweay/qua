@@ -75,6 +75,7 @@ export function pageCommands(d: PageDeps): Pick<
   | 'renamePage'
   | 'focusTitle'
   | 'showRefPicker'
+  | 'showDatePicker'
   | 'showEmbedPicker'
   | 'insertTag'
   | 'extractToPage'
@@ -334,7 +335,9 @@ export function pageCommands(d: PageDeps): Pick<
        *    **每一个新建的页都不在顶层** ⇒ 那个选择器会静默少掉它们（不报错，只是「找不到」）。
        * ⚠️ 正确的判据是「有地址、可被引用」：页与标签都是（`page`／`tag` 露面）。
        *    两者都扫**整片森林**（`kb.pages`／`kb.tags`），所以嵌在任何位置的目标都在候选里。
-       * ⚠️ journal 天不进候选：它的「名字」是日期，引用它没有稳定语义（哪天？）。
+       * ⚠️ journal 天不进候选：它的「名字」是日期、且天数无界，混进通用候选只会把
+       *    列表撑爆。引用日期有**专用入口**——斜杠菜单「日期」（日历选择），
+       *    那一条负责把「哪天」问清楚。
        */
       const pageRow = (p: Block): Row => ({
         id: `pick/${p.id}`,
@@ -355,6 +358,11 @@ export function pageCommands(d: PageDeps): Pick<
       })
       const rows: Row[] = [...pages().map(pageRow), ...d.kb.tags().map(tagRow)]
       d.openRefPicker(rows)
+    },
+
+    /** 日期选择器只回答「哪一天」；物化那天 ＋ 插引用由命令带参那一支做 */
+    showDatePicker: () => {
+      d.openDatePicker()
     },
   }
 }

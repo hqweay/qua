@@ -275,6 +275,8 @@ export const BINDINGS: Binding[] = [
   // 「复制块」是键盘用户唯一免鼠标的复制路径（⌘C+⌘V 要两步还得挪光标）
   { command: 'core.editor/duplicate-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 50, layer: 'core', label: t('menu.label.duplicate'), icon: 'lucide:copy' },
   { command: 'core.editor/insert-page-ref', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 10, layer: 'core', label: t('menu.label.pageRef'), keywords: ['ref', 'link', t('menu.kw.ref')], icon: 'lucide:arrow-up-right' },
+  // 日期：不带参数 ⇒ 命令开日历选择器（选中那天才回命令面插引用）
+  { command: 'core.editor/insert-date-ref', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 15, layer: 'core', label: t('menu.label.dateRef'), keywords: ['date', 'day', 'journal', t('menu.kw.date')], icon: 'lucide:calendar' },
   // 斜杠菜单的「图片」是**真入口**（选文件）；不带 preset 才走 `App.pickImage()`
   { command: 'core.editor/insert-image', kind: 'slash', when: 'editorTextFocus', group: 'slash/2-inline', order: 20, layer: 'core', label: t('menu.label.image'), keywords: ['image', 'asset', t('menu.kw.image')], icon: 'lucide:image' },
   // 外链：不带 `url` ⇒ 命令打开输入框（`App.showLinkComposer`）；带了 ⇒ 直接插

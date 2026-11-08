@@ -32,7 +32,7 @@ import type { PageDeps } from './types.ts'
  * · **只读**：日期只进 `_date`，不进 `text`；这里没有任何写 `_date` 的分支。
  * · **不引入焦点栈**：翻日/回流只是把中心槽的「当前对象」换一块或换一串（同口径）。
  */
-export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journalShift' | 'journalReview' | 'journalShellWrite' | 'deleteJournal' | 'openJournal'> {
+export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journalShift' | 'journalReview' | 'journalShellWrite' | 'deleteJournal' | 'openJournal' | 'ensureJournal'> {
   /**
    * 幂等物化：库里没有这一天的**活块**才创建（一点 op）。
    *
@@ -111,6 +111,13 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
       .kb.query({ ...FEED_SPEC, limit: days })
       .map((h) => d.kb.get(h.blockId))
       .filter((b): b is Block => b !== undefined)
+      /**
+       * **不展示未来**（物化 ≠ 露面）：引用日期会把还没到的天提前物化出来，
+       * 它们不该占着流顶——「今天往回看」是日记流的语义，未来从日历进。
+       * ⚠️ spec 没有日期范围原子（后置项），先由装载路径收窄——与下面复盘窗口
+       *    的收窄是同一条已登记的代偿；日期范围原子落地后两处一起退役。
+       */
+      .filter((b) => journalDate(b) <= date)
     /**
      * 复盘的窗口是「今天往回 N 天」：比窗口更早的存在天不该混进格子（spec 没有
      * 日期范围原子——那是后置项；这里先由装载路径收窄，代价登记在案）。
@@ -152,6 +159,8 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
   }
 
   return {
+    // 「引用日期」与「打开那天」共用同一份物化：两份拼装会出现两个「哪天是哪个块」的答案
+    ensureJournal: ensure,
     journalToday: (date) => {
       const ok = typeof date === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)
       // 「去某一天」＝只打开那一天（选日期是落点，不是筛选）；「回今日」＝今天在顶的日记流

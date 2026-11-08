@@ -11,7 +11,7 @@
  * ⚠️ 写规则不在这里：物化今天、空天补首子块、`_date` 只读是**装载与写边界**的事
  *    （`journal.ts` 与装载边界）；查询永不写库。
  */
-import { FEED_INITIAL } from '../identity/journal.ts'
+import { FEED_INITIAL, journalDate, todayISO } from '../identity/journal.ts'
 import type { Block } from '../model/model.ts'
 import { findById, runQuery, type QuerySpec } from './query.ts'
 
@@ -26,11 +26,20 @@ export const FEED_SPEC: QuerySpec = {
  * spec 求值内核（纯路径）：结果 id 翻回活块，解析不到的跳过。
  *
  * 「不造空天」是这条 spec 的自然结果——没有写过的日期没有块，也就不会命中。
+ *
+ * ⚠️ **不展示未来**（物化 ≠ 露面）：引用日期会把还没到的天提前物化出来（块是真的，
+ *    引用目标必须存在），但它们不该占着流顶——「今天往回看」是日记流的语义，
+ *    未来从日历进。spec 没有日期范围原子（后置项），先由装载路径收窄——与命令层
+ *    `openFeed` 的收窄是同一条已登记的代偿；日期范围原子落地后两处一起退役。
+ *
+ * @param now 纯函数不偷看墙钟：测试给固定值，运行时省略 ＝ 现在
  */
-export function feedDays(blocks: readonly Block[], limit: number): Block[] {
+export function feedDays(blocks: readonly Block[], limit: number, now?: Date): Block[] {
+  const today = todayISO(now)
   return runQuery({ ...FEED_SPEC, limit }, { blocks })
     .map((h) => findById(blocks, h.blockId))
     .filter((b): b is Block => b !== undefined)
+    .filter((b) => journalDate(b) <= today)
 }
 
 /**

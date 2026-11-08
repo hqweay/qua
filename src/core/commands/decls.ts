@@ -64,6 +64,8 @@ export const COMMANDS: CommandDecl[] = [
 
   /* ---- 行内原子 ---- */
   { name: 'core.editor/insert-page-ref', title: t('cmd.editor.insert-page-ref'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { pageId: { type: 'string' } }, keywords: ['ref', 'link', t('menu.kw.ref'), 'chip'], expose: { http: { description: t('menu.expose.insertPageRef') } } },
+  // 日期引用：不带 `date` ⇒ 开日历选择器；目标＝那天的 journal 块（物化只发生在日记命令那一处）
+  { name: 'core.editor/insert-date-ref', title: t('cmd.editor.insert-date-ref'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { date: { type: 'string' } }, keywords: ['date', 'day', 'journal', t('menu.kw.date')] },
   // `preset` 只是验收/演示用的旁路（`ready` / `missing`）；不传 ⇒ 选一张真图入库
   { name: 'core.editor/insert-image', title: t('cmd.editor.insert-image'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { preset: { type: 'string', enum: ['ready', 'missing'] } }, keywords: ['image', 'asset', t('menu.kw.image')] },
   // 外链：`url` 必填（协议白名单在 `core/link.ts`）、`text` 是这个链接显示的字（省略 ⇒ 显示地址）

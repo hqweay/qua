@@ -41,6 +41,13 @@ test('日记流：limit 生效（降序下 limit 变宽＝向更旧追加，无�
   assert.deepEqual(feedDays(blocks, 0), [])
 })
 
+test('日记流：不展示未来（引用日期提前物化的天不占流顶；物化 ≠ 露面）', () => {
+  // 「明天开会」在正文里引用了那天 ⇒ 那天的 journal 块是真的，但流只回答「今天往回看」
+  const now = new Date('2026-10-20T12:00:00')
+  const blocks = [j('2026-10-22'), j('2026-10-21'), j('2026-10-20')]
+  assert.deepEqual(dates(feedDays(blocks, ALL, now)), ['2026-10-20'])
+})
+
 test('日记流：走整片森林 —— 嵌在页子树里的 journal 也进流（与日期索引同口径）', () => {
   const nested = j('2026-10-19')
   const blocks = [j('2026-10-20'), p('p1', 'page', [nested])]

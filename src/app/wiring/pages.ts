@@ -42,6 +42,7 @@ import type { Chrome } from '../../ui/chrome/chrome.ts'
 import { isReadonlyBlock } from '../../view/editor/block-dom.ts'
 import type { BlockEditor, ViewState } from '../../view/editor/editor.ts'
 import { rootsFor, rootsForMany } from '../commands/roots.ts'
+import { datePicker } from '../../ui/overlay/date-picker.ts'
 import type { PageDeps } from '../commands-impl.ts'
 
 export type PagesDeps = {
@@ -782,6 +783,27 @@ export function setupPages(deps: PagesDeps) {
       }),
     pageTitle,
     pageIcon,
+    openDatePicker: (onPick) =>
+      /**
+       * 自由内容浮层（不是菜单）：日历没有「一行一个候选」的形状。
+       * 选中即关；`onPick` 省略 ＝ 回命令面插引用（与 `openRefPicker` 的默认分发同一条分工）。
+       */
+      layers.openPopover(
+        (host) =>
+          host.appendChild(
+            datePicker({
+              onPick: (date) => {
+                layers.closePopover()
+                if (onPick) {
+                  onPick(date)
+                  return
+                }
+                deps.getRegistry().invoke('core.editor/insert-date-ref', { date }, 'menu', uiCtx())
+              },
+            }),
+          ),
+        deps.getEd().caretRect(),
+      ),
   }
 
   /**

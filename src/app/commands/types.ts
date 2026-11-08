@@ -173,6 +173,12 @@ export interface PageDeps {
    * 两种候选集合（同一件事两个答案）。
    */
   openRefPicker: (rows: Row[], onPick?: (row: Row) => void, title?: string) => void
+  /**
+   * 打开**日期选择器**（浮层；锚在当前光标）。`onPick` 省略 ＝ 选完回命令面
+   * （分发 `core.editor/insert-date-ref` 带日期）——选择器只回答日期，
+   * 与 `openRefPicker` 同一条分工。
+   */
+  openDatePicker: (onPick?: (date: string) => void) => void
   pageTitle: (b: Block) => string
   pageIcon: (b: Block) => string
 }

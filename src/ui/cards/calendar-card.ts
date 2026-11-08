@@ -15,10 +15,10 @@
  *
  * ⚠️ 这一层不认 `registry`／`ws`：能力由 `CalendarDeps` 收进来（与 `dock-content` 同一口径）。
  */
-import { openActionOf, todayISO, type OpenAction } from '../../core/index.ts'
+import { openActionOf, type OpenAction } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
-import { renderIcon } from '../../view/icons.ts'
+import { monthGrid } from '../chrome/month-grid.ts'
 import type { DockCard } from '../dock/dock.ts'
 
 export interface CalendarDeps {
@@ -33,153 +33,34 @@ export interface CalendarDeps {
   openDate: (date: string, place?: OpenAction) => void
 }
 
-/**
- * 某个月的网格。
- *
- * 口径：**周一起始**（中文日历的惯例），一格一天，月外的格子留空而不是画邻月日期——
- * 画邻月会让「这一格是几号」需要靠位置猜（同一个月里出现两个「1」）。
- *
- * @param month `YYYY-MM`；`null` ＝ 跟着「今天」所在的那一个月
- */
-function monthOf(date: string): { y: number; m: number } {
-  const [y, m] = date.split('-').map(Number)
-  return { y: y ?? 1970, m: m ?? 1 }
-}
-
-/** `YYYY-MM` → 这个月有几天 */
-function daysInMonth(y: number, m: number): number {
-  return new Date(y, m, 0).getDate()
-}
-
-/** 这一天是周几（**0 ＝ 周一**，与本仓日历的起始一致） */
-function weekdayIndex(y: number, m: number, d: number): number {
-  const jsDay = new Date(y, m - 1, d).getDay() // 0 ＝ 周日
-  return (jsDay + 6) % 7
-}
-
-/** 这一格的日期串（与 `journalDate` 同一种形状——口径由 `todayISO` 一处给） */
-function isoOf(y: number, m: number, d: number): string {
-  return todayISO(new Date(y, m - 1, d))
-}
-
 export function calendarCard(deps: CalendarDeps): DockCard {
-  const body = document.createElement('div')
-  body.className = 'cal'
-
-  /** 当前显示的月份（视图状态，不入库：翻月是本次查看的一部分，不是配置） */
-  let cursor = todayISO()
-
-  const head = document.createElement('div')
-  head.className = 'cal-head'
-  const prev = document.createElement('button')
-  prev.type = 'button'
-  prev.className = 'dock-btn cal-nav'
-  prev.title = t('ui.cal.prevMonth')
-  prev.setAttribute('aria-label', t('ui.cal.prevMonth'))
-  renderIcon(prev, 'lucide:chevron-left', 'chevron-left')
-  const label = document.createElement('button')
-  label.type = 'button'
-  label.className = 'cal-label'
   /**
-   * **点月份回本月**：翻远了之后回到今天那一月。
-   *
-   * 为什么它长在 body 里而不是卡头：它作用于**卡里的内容**（这个月视图），
-   * 不是这张卡本身。卡头只放卡级控件，否则每张卡的图标列就会错开。
+   * 一个月的身体是共享的月网格原语（`month-grid`）：游标／翻月／回本月／表头／
+   * 今天标记都在那里。卡在这里只给三件自己的事：
+   *   · 月外的格子**留空**（导航不画邻月：那会让「几号」要靠位置猜）；
+   *   · 每次重画读一次「哪几天写过」并标记（写完一天要能立刻看见，卡没有 change 订阅）；
+   *   · 点格 ＝ 去那天（`core.journal/open` 带日期；物化只由那一条命令做，卡不自己拼 `journalId`）。
    */
-  label.title = t('ui.cal.thisMonth')
-  label.setAttribute('aria-label', t('ui.cal.thisMonth'))
-  label.addEventListener('click', () => {
-    cursor = todayISO()
-    paint()
-  })
-  const next = document.createElement('button')
-  next.type = 'button'
-  next.className = 'dock-btn cal-nav'
-  next.title = t('ui.cal.nextMonth')
-  next.setAttribute('aria-label', t('ui.cal.nextMonth'))
-  renderIcon(next, 'lucide:chevron-right', 'chevron-right')
-  head.append(prev, label, next)
-  body.appendChild(head)
-
-  const grid = document.createElement('div')
-  grid.className = 'cal-grid'
-  body.appendChild(grid)
-
-  /**
-   * 画这个月。
-   *
-   * ⚠️ 每次重画都重新读一次「哪几天存在」：写完一天之后日历要能立刻标出来，
-   *    而它没有自己的 change 订阅（卡不是编辑器）。
-   */
-  const paint = (): void => {
-    const { y, m } = monthOf(cursor)
-    label.textContent = t('ui.cal.monthLabel', { y: String(y), m: String(m) })
-    grid.replaceChildren()
-
-    // 表头：周一起始
-    for (const w of t('ui.cal.weekdays').split(',')) {
-      const cell = document.createElement('span')
-      cell.className = 'cal-week'
-      cell.textContent = w
-      grid.appendChild(cell)
-    }
-
-    const today = todayISO()
-    const written = new Set(deps.kb.journalDates())
-    const first = weekdayIndex(y, m, 1)
-    const total = daysInMonth(y, m)
-
-    // 月外的格子留空（不画邻月日期：那会让「几号」要靠位置猜）
-    for (let i = 0; i < first; i++) {
-      const pad = document.createElement('span')
-      pad.className = 'cal-cell cal-pad'
-      grid.appendChild(pad)
-    }
-
-    for (let d = 1; d <= total; d++) {
-      const date = isoOf(y, m, d)
-      const cell = document.createElement('button')
-      cell.type = 'button'
-      cell.className = 'cal-cell'
-      cell.dataset.date = date
-      if (date === today) cell.dataset.today = '1'
-      if (written.has(date)) cell.dataset.written = '1'
-      cell.title = t(written.has(date) ? 'ui.cal.openWritten' : 'ui.cal.openBlank')
-      cell.setAttribute('aria-label', t('ui.cal.dayLabel', { date }))
-
-      const num = document.createElement('span')
-      num.className = 'cal-day'
-      num.textContent = String(d)
-      cell.appendChild(num)
-
-      // 有内容：一颗小点。只画数字等于「这天写过」看不出来，而那是日历一半的用处
-      if (written.has(date)) {
+  const grid = monthGrid({
+    outOfMonth: 'blank',
+    onPick: (date, e) => deps.openDate(date, openActionOf(e)),
+    dayLabel: (date) => t('ui.cal.dayLabel', { date }),
+    mark: (cells) => {
+      const written = new Set(deps.kb.journalDates())
+      for (const [date, cell] of cells) {
+        if (!written.has(date)) {
+          cell.title = t('ui.cal.openBlank')
+          continue
+        }
+        cell.dataset.written = '1'
+        cell.title = t('ui.cal.openWritten')
+        // 有内容：一颗小点。只画数字等于「这天写过」看不出来，而那是日历一半的用处
         const dot = document.createElement('span')
         dot.className = 'cal-dot'
         cell.appendChild(dot)
       }
-
-      cell.addEventListener('click', (e) => deps.openDate(date, openActionOf(e)))
-      grid.appendChild(cell)
-    }
-  }
-
-  prev.addEventListener('click', () => {
-    const { y, m } = monthOf(cursor)
-    const at = new Date(y, m - 1, 1)
-    at.setMonth(at.getMonth() - 1)
-    cursor = isoOf(at.getFullYear(), at.getMonth() + 1, 1)
-    paint()
-  })
-  next.addEventListener('click', () => {
-    const { y, m } = monthOf(cursor)
-    const at = new Date(y, m - 1, 1)
-    at.setMonth(at.getMonth() + 1)
-    cursor = isoOf(at.getFullYear(), at.getMonth() + 1, 1)
-    paint()
+    },
   })
 
-  paint()
-
-  return { id: 'calendar', title: t('ui.cal.title'), body }
+  return { id: 'calendar', title: t('ui.cal.title'), body: grid.el }
 }
