@@ -446,6 +446,22 @@ export function fillBlockText(
   }
 
   if (tx.childNodes.length === 0) tx.appendChild(document.createElement('br'))
+
+  /**
+   * **光标锚**：正文以原子收尾时（引用/资产是行内唯一或最后内容），`.tx` 里原子之后
+   * 没有文本节点——光标的唯一候选位是「原子与行末之间的元素缝隙」，Chrome 不认
+   * （竖线不画、按键前把光标挪走，退格会把整行可编辑根摘掉，见 `posAt` 的注）。
+   * 在原子后补一个**空文本节点**给光标站位：它是真文本节点，竖线画得出、按键落得进，
+   * 但长度为 0 ⇒ 读数（`readRuns` 的空段跳过／`nodeLen`／`offsetIn`）天然把它当不存在，
+   * 模型一个字节不多。思源在模型里塞零宽字符解决同一问题，这里把代价留在渲染层。
+   */
+  if (b.content.length > 0 && b.content[b.content.length - 1]!.t !== 'text') {
+    const anchor = document.createElement('span')
+    anchor.className = 'tx-caret-anchor'
+    anchor.dataset.caretAnchor = '1'
+    anchor.appendChild(document.createTextNode(''))
+    tx.appendChild(anchor)
+  }
 }
 
 /**

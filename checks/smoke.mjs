@@ -25296,6 +25296,58 @@ await check(
     )
     assert(tagLine.present && tagLine.text.includes('创建于'), `打了标签的块，其子块应显示时间戳：${JSON.stringify(tagLine)}`)
 
+    /**
+     * **原子收尾行的光标锚**：正文以原子收尾时 `.tx` 里原子后没有文本节点——
+     * 光标的唯一候选位是「原子与行末之间」的元素缝隙，Chrome 不认（竖线不画、
+     * 退格摘整行）。渲染层在原子后补一个**空文本节点**（`tx-caret-anchor`）：
+     * 竖线画得出、打字落得进，长度为 0 ⇒ 四条读路径天然把它当不存在，模型零污染。
+     */
+    const anchorFx = await page.evaluate(() => {
+      const inv = (name, args = {}) => window.__qua.invoke(name, args)
+      const ed = window.__qua.__editor
+      const store = ed.store
+      const rows = ed.rows().map((r) => r.block)
+      const h = rows.find((b) => !b.props?._date && !b.props?._query && (b.content ?? []).some((x) => x.t === 'text' && x.v.length > 2))
+      window.__qua.focusBlock(h.id, 0)
+      const sib = ed.insertBlockAfter(h.id, '')
+      window.__qua.focusBlock(sib, 0)
+      const pages = window.__qua.pages()
+      inv('core.editor/insert-page-ref', { pageId: pages[0].id })
+      return { sib, pageId: pages[0].id }
+    })
+    await page.waitForTimeout(300)
+    const anchorS1 = await page.evaluate((id) => {
+      const row = document.querySelector(`.blk[data-block-id="${id}"]`)
+      const anchor = row?.querySelector('.tx-caret-anchor')
+      return { anchorExists: Boolean(anchor), anchorIsEmptyText: anchor?.firstChild?.nodeType === 3 && anchor.firstChild.length === 0 }
+    }, anchorFx.sib)
+    assert(anchorS1.anchorExists && anchorS1.anchorIsEmptyText, `原子收尾行应有空文本锚：${JSON.stringify(anchorS1)}`)
+    // 真键盘：点击行内 → 打字应进模型（原子后），且模型里没有锚点的痕迹
+    const abox = await page.evaluate((id) => {
+      const row = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
+      const r = row.getBoundingClientRect()
+      return { x: r.right - 12, y: r.top + r.height / 2 }
+    }, anchorFx.sib)
+    await page.mouse.click(abox.x, abox.y)
+    await page.waitForTimeout(150)
+    await page.keyboard.type('A')
+    await page.waitForTimeout(300)
+    const anchorS2 = await page.evaluate((id) => {
+      // ⚠️ content 断言走 **doc 投影**（`__qua.blocks()` = flatten(doc)，全树可达）——
+      // store.blocks 是**顶层森林**，嵌套块用 find 扫顶层永远找不到（本轮诊断踩过）
+      const b = window.__qua.blocks().find((x) => x.id === id)
+      const row = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
+      return {
+        model: b ? JSON.stringify(b.text) : null,
+        domText: row?.textContent ?? null,
+      }
+    }, anchorFx.sib)
+    assert(
+      // 投影只含打进去的 A（引用芯片不进投影；锚点是空文本节点，投影零痕迹）
+      anchorS2.model === '"A"' && anchorS2.domText.endsWith('A'),
+      `原子行打字应进模型（投影=A、DOM 末尾=A）：${JSON.stringify(anchorS2)}`,
+    )
+
     await ctx.close()
     return `父块勾「创建于」⇒ 子块显示；撤掉消失；标签声明 ⇒ 成员子块同样显示`
   },
