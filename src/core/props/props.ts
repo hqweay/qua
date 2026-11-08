@@ -933,9 +933,21 @@ export function passThroughRefTarget(block: Block): string | null {
  * 正文里有别的字的引用不透传（见 `passThroughRefTarget`）：引用是内容，透传只认
  * 「这一块就是一跳」的形状。
  */
+/** 解析链的查找环境（tags 与全库 byId，一次森林遍历的查找表） */
+export interface ChildPropsLookup {
+  tags: ReadonlyMap<string, Block>
+  blocks: ReadonlyMap<string, Block>
+}
+
+/** 从整片森林建查找环境（`belowFieldsFor`／`fieldRowsWithParent`／诊断共用一份构建） */
+export function childPropsLookupOf(forest: readonly Block[]): ChildPropsLookup {
+  const blocks = new Map(forest.map((b) => [b.id, b]))
+  return { tags: tagsById(forest), blocks }
+}
+
 export function childDisplayPropsResolved(
   parent: Block | null | undefined,
-  lookup: { tags: ReadonlyMap<string, Block>; blocks: ReadonlyMap<string, Block> },
+  lookup: ChildPropsLookup,
   seen: ReadonlySet<string> = new Set(),
 ): string[] {
   if (!parent || seen.has(parent.id)) return []
@@ -1122,8 +1134,7 @@ export function fieldRowsWithParent(
   let look: ChoiceLookup | undefined
   const lazyLook = (): ChoiceLookup => (look ??= choiceLookupOf(forest))
   const merged = [...rows]
-  const lookup = { tags: tagsById(forest), blocks: new Map(forest.map((b) => [b.id, b])) }
-  for (const propId of childDisplayPropsResolved(parent, lookup)) {
+  for (const propId of childDisplayPropsResolved(parent, childPropsLookupOf(forest))) {
     if (merged.some((r) => r.propId === propId)) continue
     merged.push(fieldRowOf(block, propId, defs.get(propId), [], order++, forest, lazyLook))
   }
@@ -1196,8 +1207,7 @@ export function belowFieldsFor(
 ): Map<string, BelowFields> {
   const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
   const tags = tagsById(forest)
-  // 传递型引用的解析要按 id 找目标块（与 tags 同一次森林遍历的成本档）
-  const lookup = { tags, blocks: new Map(forest.map((b) => [b.id, b])) }
+  const lookup = childPropsLookupOf(forest)
   let look: ChoiceLookup | undefined
   const lazyLook = (): ChoiceLookup => (look ??= choiceLookupOf(forest))
   const out = new Map<string, BelowFields>()

@@ -8,6 +8,10 @@ import {
   allPropDefs,
   allTags,
   buildAdjacency,
+  childDisplayProps,
+  passThroughRefTarget,
+  resolveTagIds,
+  tagsById,
   childrenIn,
   choiceDisplayLabel,
   danglingOf,
@@ -56,7 +60,12 @@ export type DiagnosticsDeps = {
   store: WorkspaceStore
   boot: LoadedWorkspace
   /** 只读门面：探针的属性区与属性面板同一口径（含 `_childProps` 声明链） */
-  kb: { fieldsOf(id: string): readonly FieldRow[] }
+  kb: {
+    fieldsOf(id: string): readonly FieldRow[]
+    get(id: string): Block | undefined
+    parentOf(id: string): Block | undefined
+    roots(): readonly Block[]
+  }
   /** 启动态是**活的**：重建本地库之后要当场从只读翻回可写，所以传 getter 而不是值 */
   getReadOnly: () => boolean
   getBootNotice: () => string | null
@@ -516,6 +525,54 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
         kind: propKindOf(d),
         declaredBy: allTags(ws.blocks).filter((t) => declaredFieldIds(t).includes(d.id)).map((t) => t.id),
       }))
+    },
+    /**
+     * **子块行内属性的解析链诊断**：给定一个块，逐步回答「声明沿哪条链来」。
+     * 透传（正文只有一枚引用）/标签链/父块声明，每一环的命中与否都在输出里。
+     */
+    childPropsDiag(blockId: string) {
+      const kb = deps.kb
+      const block = kb.get(blockId)
+      if (!block) return { err: 'block not found' }
+      const forest = kb.roots()
+      const parent = kb.parentOf(blockId) ?? null
+      const parentChain: unknown[] = []
+      // 沿解析链走一遍（与 childDisplayPropsResolved 同序），每环记录命中
+      let cur: Block | null | undefined = parent
+      const seen = new Set<string>()
+      const resolved: string[] = []
+      let depth = 0
+      while (cur && !seen.has(cur.id) && depth < 8) {
+        seen.add(cur.id)
+        depth += 1
+        const own = childDisplayProps(cur)
+        parentChain.push({
+          at: depth,
+          id: cur.id.slice(-6),
+          text:
+            (cur.content ?? [])
+              .map((r) => (r.t === 'ref' ? '[[ref→' + String(r.to ?? '').slice(-6) + ']]' : r.t === 'text' ? r.v : ''))
+              .join('')
+              .slice(0, 20) || 'empty',
+          ownDecl: own,
+          viaPassThrough: passThroughRefTarget(cur) !== null,
+        })
+        for (const p of own) if (!resolved.includes(p)) resolved.push(p)
+        for (const t of resolveTagIds(cur, tagsById(forest))) {
+          const tagDecl = childDisplayProps(t)
+          if (tagDecl.length) parentChain.push({ at: depth, viaTag: displayNameOf(t), ownDecl: tagDecl })
+          for (const p of tagDecl) if (!resolved.includes(p)) resolved.push(p)
+        }
+        const target = passThroughRefTarget(cur)
+        cur = target ? kb.get(target) : null
+      }
+      return {
+        block: blockId.slice(-6),
+        parent: parent ? parent.id.slice(-6) : null,
+        parentChain,
+        resolved,
+        fieldsNow: kb.fieldsOf(blockId).map((r) => r.propId),
+      }
     },
     /** 一个块的属性区（**派生**：声明 ∪ 自有；同一 propId 只一行） */
     fields(blockId: string) {
