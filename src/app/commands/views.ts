@@ -25,6 +25,8 @@ import {
   renameView,
   resolveView,
   sourceOfOwner,
+  hasChildrenViewBody,
+  hasQueryBody,
   storedKindsFor,
   upsertView,
   viewNameOf,
@@ -120,7 +122,7 @@ export function viewConfigCommands(
    *   · **已经有表面在画它**（正文里的内联体、侧槽窗口的卡、挂载区的栏）⇒ 那台视图宿主
    *     自己订阅了拥有者的配置，就地重画。**不换屏、不动光标**：切个看法不该把用户
    *     正在读/写的位置换掉，更不该把这一块放大成整屏；
-   *   · **没有表面在画它**（收藏块、children 源的激活视图只在打开时才画）⇒ 把这一块打开，
+   *   · **没有表面在画它**（收藏块、激活视图但无行内体的表面）⇒ 把这一块打开，
    *     否则配置写进了模型、屏幕一动不动（点了没生效）。
    */
   const reveal = (owner: ViewOwnerRef): void => {
@@ -140,6 +142,16 @@ export function viewConfigCommands(
      */
     if (roots.includes(owner.blockId)) {
       d.openBlock(owner.blockId)
+      return
+    }
+    /**
+     * **它的身体会就地画**（查询源／children 源激活视图）：重画之后身体自己出现在
+     * 这一行下面——不换屏、不动光标。首次激活时身体还没挂上（`viewShown` 看不到），
+     * 所以这条要走在 `viewShown` 前面，否则会把用户拽去整屏。
+     */
+    const b = d.kb.get(owner.blockId)
+    if (b && (hasQueryBody(b) || hasChildrenViewBody(b))) {
+      d.reloadPage()
       return
     }
     /**

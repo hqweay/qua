@@ -555,8 +555,8 @@ export function isViewRoot(b: Block | undefined): boolean {
  * 这一块的身体是不是**它自己的结果视图**（贴在这一行下面，而不是等「打开」）。
  *
  * 判据只有一条：源是 query。查询的命中**不是 children**，所以就地画结果
- * 不会出现「同一批块画两遍」；children 源的视图里只有**容器型**（页签，
- * `hasTabsBody`）也走这条「身体替换子块行」的形状——其余仍「打开才渲染」。
+ * 不会出现「同一批块画两遍」；children 源的激活视图走
+ * `hasChildrenViewBody`（身体替换子块行，与页签同一条形状）。
  *
  * ⚠️ 它只回答「有没有身体」。**位置**由渲染层决定（`view/block-dom.ts` 的
  *    `rowHasInlineViewBody`：有身体就画在自己行下，段根同此——聚焦后身体
@@ -573,10 +573,25 @@ export function hasQueryBody(b: Block | undefined): boolean {
  * 「children 源打开才渲染」防的是同一批子块在正文和视图里各画一遍；页签的
  * 页＝直接子块、身体＝那一页的子树——让子块行**让位**（只画根行＋身体），
  * 两遍的问题就不存在。这与查询块是同一条形状（身体＝内容本身）。
- * 记录型（表格／卡片…）仍「打开才渲染」：大纲里还要能直接看到与编辑子块结构。
+ * 记录型（表格／卡片…）在**有 `viewBody` 回调的编辑器**里同样就地画
+ * （`hasChildrenViewBody`）；这个谓词剩下的读者是**挂载区**——那里的编辑器
+ * 不画行内体，记录型仍走段尾宿主、页签不建（让位机制不在场，建了会画两遍）。
  */
 export function hasTabsBody(b: Block | undefined): boolean {
   return activeView(b)?.kind === 'tabs'
+}
+
+/**
+ * children 源的激活视图：**身体替换子块行**，与页签同一条形状。
+ *
+ * 曾经只有页签（容器型）就地画、记录型「打开才渲染」——分界是「同一批子块
+ * 画两遍」＋「大纲里还要直接编辑子块结构」。前者随子块行让位消失（与页签
+ * 同一条机制），后者由看法切换承担（身体的 chrome 就有看法切换器，切回大纲
+ * 即见子块行）。用户拍板：原地也能渲染成卡片、思维导图等——插入一个看法，
+ * 退出聚焦后它不该无声。
+ */
+export function hasChildrenViewBody(b: Block | undefined): boolean {
+  return !isQueryBlock(b) && activeView(b) !== null
 }
 
 /* ------------------------------------------------------------ 源 */

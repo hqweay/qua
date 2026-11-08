@@ -31,7 +31,7 @@ import {
   activeView,
   flatten,
   hasQueryBody,
-  hasTabsBody,
+  hasChildrenViewBody,
   isEmbedBlock,
   isViewRoot,
   type Block,
@@ -163,14 +163,14 @@ export class DockWindows {
      * 身体 = 根行编辑器 ＋（可选）它的视图体。两者同一张卡、同一份 store；
      * 视图体的写 source 是这台窗口编辑器（撤销/重画落在这一张卡里）。
      *
-     * **身体画在自己行下的源不走这里**（查询源、容器型页签：`rowHasInlineViewBody`，
+     * **身体画在自己行下的源不走这里**（查询源、children 源激活视图：`rowHasInlineViewBody`，
      * 与正文同一条路）；窗口根宿主只接其余 children/items 源的视图根 ——
      * 再建一台就是同一块挂两台。
      */
     const body = document.createElement('div')
     body.className = 'dock-window-body'
     body.appendChild(win.root)
-    const view = isViewRoot(block) && !hasQueryBody(block) && !hasTabsBody(block)
+    const view = isViewRoot(block) && !hasQueryBody(block) && !hasChildrenViewBody(block)
       ? (this.deps.mountViewRoot?.(block, body, () => win.ed ?? undefined) ?? null)
       : null
 

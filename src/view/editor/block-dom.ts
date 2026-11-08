@@ -22,8 +22,8 @@ import {
   blockTypeOf,
   displayNameOf,
   embedBodyOf,
+  hasChildrenViewBody,
   hasQueryBody,
-  hasTabsBody,
   identityTags,
   inlineTagIdsOf,
   isJournal,
@@ -101,8 +101,8 @@ export const PROP_LINE_H = 20
 /**
  * 这一行要不要把视图身体画在自己下面。
  *
- * **按源分派**：查询块有结果身体（`hasQueryBody`）；children 源里只有**容器型**
- * （页签，`hasTabsBody`——身体替换子块行）也算。段根也不例外 —— 聚焦后它是
+ * **按源分派**：查询块有结果身体（`hasQueryBody`）；children 源的激活视图
+ * （`hasChildrenViewBody`——身体替换子块行）也算。段根也不例外 —— 聚焦后它是
  * 这一屏唯一的根，身体仍贴着它自己那一行，与它在正文里子行时是同一种画法
  * （同一个 ViewHost、同一套折叠与高度档）。
  *
@@ -110,7 +110,7 @@ export const PROP_LINE_H = 20
  * 而那一层（挂载区／镜像／查询结果／单元格）在构造上没有 `viewBody` 回调。
  */
 export function rowHasInlineViewBody(r: VisibleRow): boolean {
-  return hasQueryBody(r.block) || hasTabsBody(r.block)
+  return hasQueryBody(r.block) || hasChildrenViewBody(r.block)
 }
 
 /**
@@ -636,7 +636,7 @@ export function makeBlockEl(
    * 查询结果列表里的命中行也是查询块，但那一层画的是**结果行**，不是它自己的位置；
    * 给它一个折叠三角就是死控件。
    */
-  const bodyFoldable = Boolean(opts.viewBody) && (hasQueryBody(b) || hasTabsBody(b))
+  const bodyFoldable = Boolean(opts.viewBody) && (hasQueryBody(b) || hasChildrenViewBody(b))
   const embedBodyFoldable = Boolean(opts.embedBody) && embedKind === 'view'
   const foldable = r.hasChildren || bodyFoldable || embedBodyFoldable
   /** 这一行下面是否要画**行内**的身体（按源分派：有结果身体就画，段根同此） */

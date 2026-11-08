@@ -26,7 +26,7 @@ import {
   defaultColumnsForSource,
   defaultWidthOf,
   fieldTextOf,
-  hasTabsBody,
+  hasChildrenViewBody,
   isMultiValueKey,
   MATCHED_COLUMN,
   PATH_COLUMN,
@@ -387,22 +387,24 @@ test('viewRootId：那一行的子块不画（由视图宿主画），且折叠�
   assert.equal(withView[0]!.hidden, false, '根行本身必须可见')
 })
 
-test('bodyHosts：容器型（页签）的身体替换子块行——判据给了才让位', () => {
+test('bodyHosts：children 源激活视图的身体替换子块行——判据给了才让位', () => {
   const { root } = pageWith5()
   root.props = { ...root.props, [VIEWS_PROP]: [{ id: 'v', kind: 'tabs' }], [ACTIVE_VIEW_PROP]: 'v' }
   const doc = { roots: [root], folded: {} }
   // 没有画身体的编辑器（不给判据）：子块照常画——不画身体的里层编辑器靠这条不丢内容
   assert.equal(visibleRows(doc).length, 6, '不给判据：子块照常画')
   // 给了判据（这一屏真会画页签身体）：只画根行，子块行让位
-  const rows = visibleRows(doc, { bodyHosts: hasTabsBody })
+  const rows = visibleRows(doc, { bodyHosts: hasChildrenViewBody })
   assert.equal(rows.length, 1, '页签身体替换子块行')
   assert.equal(rows[0]!.block.id, 'root')
   assert.equal(rows[0]!.hasChildren, false, '子块在身体里 ⇒ 不给子块折叠三角')
-  // 记录型的激活视图（表格）不算：身体不替换，子块照常画
-  root.props![ACTIVE_VIEW_PROP] = ''
+  // 记录型同样替换（与页签同一条形状）：表格激活时子块行也让位
   root.props![VIEWS_PROP] = [{ id: 'v2', kind: 'table' }, { id: 'v', kind: 'tabs' }]
   root.props![ACTIVE_VIEW_PROP] = 'v2'
-  assert.equal(visibleRows(doc, { bodyHosts: hasTabsBody }).length, 6, '记录型视图不替换子块行')
+  assert.equal(visibleRows(doc, { bodyHosts: hasChildrenViewBody }).length, 1, '记录型视图同样替换子块行')
+  // 切回大纲（无激活视图）：子块行回来
+  root.props![ACTIVE_VIEW_PROP] = ''
+  assert.equal(visibleRows(doc, { bodyHosts: hasChildrenViewBody }).length, 6, '无激活视图：子块照常画')
 })
 
 test('ownFieldIds 是 defaultColumns 的输入：只认块自己的槽（不扫全库）', () => {
