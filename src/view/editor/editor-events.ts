@@ -161,6 +161,12 @@ export interface EditorBridge {
    */
   reclaimCaret: () => boolean
   /**
+   * **删除键贴着原子的接管**（⌫／Delete）。`'back'` 判光标前一格、`'forward'` 判
+   * 当前格；那一格是原子 ⇒ 摘那枚 run 并返回 `true`（调用方防默认，不放行给原生
+   * 删除——不稳定光标位上原生删除会把整行可编辑根摘掉，见 `BlockEditor` 实现）。
+   */
+  deleteAdjacentAtom: (dir: 'back' | 'forward') => boolean
+  /**
    * **编辑边界**：把这一行的正文当作一次改名提交（撞名则回滚并报给装配层）。
    * 只在「离开这一行」时调 —— 逐字符校验会打死输入法。
    */
@@ -454,6 +460,20 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      *    那时再收（`syncSel` → `reclaimCaret`）。
      */
     if (!br.composing() && br.reclaimCaret()) {
+      e.preventDefault()
+      return
+    }
+    /**
+     * **删除键贴着原子 ⇒ 接管**（⌫／Delete）：那一格是原子就摘那枚 run，不放行。
+     * 不稳定光标位上（「块尾是原子」的元素位）原生删除会把整行可编辑根摘掉而
+     * 模型一字不动——接管之后稳定位与不稳定位同一个结果、同一档撤销。
+     * 先 `syncSel` 再判：不稳定位经 `offsetIn` 映射回的模型偏移仍然正确。
+     */
+    if (
+      !br.composing() &&
+      (e.inputType === 'deleteContentBackward' || e.inputType === 'deleteContentForward') &&
+      br.deleteAdjacentAtom(e.inputType === 'deleteContentBackward' ? 'back' : 'forward')
+    ) {
       e.preventDefault()
       return
     }

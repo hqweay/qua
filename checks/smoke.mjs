@@ -25178,8 +25178,29 @@ await check(
     assert(Boolean(ref), `应插入显示为日期投影的引用（期望「${atom.want}」，实际 ${JSON.stringify(atom.hits.map((a) => a.label))}）`)
     assert(ref.state === 'resolved', `引用日期的目标应已物化（resolved），实际 ${ref.state}`)
 
+    /**
+     * **⌫ 删除接管**：插入后的光标位（块尾原子与 `<br>` 之间）是 Chrome 的不稳定
+     * 光标位——原生删除曾把整行 `.tx` 从 DOM 摘掉而模型一字不动（「删除键删不掉
+     * 引用、行还坏了」）。接管后：⌫ 一次摘掉那枚 run、行完好、马上能打字。
+     */
+    await page.keyboard.press('Backspace')
+    await page.waitForTimeout(300)
+    const del = await page.evaluate((bid) => {
+      const b = window.__qua.__editor.store.find(bid)
+      return {
+        runs: b?.content?.map((r) => r.t) ?? null,
+        txExists: Boolean(document.querySelector(`.blk[data-block-id="${bid}"] .tx`)),
+      }
+    }, ref.blockId)
+    assert(JSON.stringify(del.runs) === '[]', `⌫ 一次应从模型摘掉那枚引用，实际 ${JSON.stringify(del.runs)}`)
+    assert(del.txExists, '⌫ 后行应完好（.tx 还在）')
+    await page.keyboard.insertText('删完还能打')
+    await page.waitForTimeout(200)
+    const retyped = await page.evaluate((bid) => window.__qua.__editor.store.find(bid)?.content?.map((r) => r.t), ref.blockId)
+    assert(JSON.stringify(retyped) === '["text"]', `删除后行应还能打字（行没有坏），实际 ${JSON.stringify(retyped)}`)
+
     await ctx.close()
-    return `选了 ${future}：引用显示「${ref.label}」、目标已物化`
+    return `选了 ${future}：引用显示「${ref.label}」、目标已物化；⌫ 摘引用后行完好可续打`
   },
 )
 

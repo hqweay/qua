@@ -28,6 +28,7 @@ import {
   projectRange,
   refRunsOf,
   removeRunById,
+  runAtCell,
   runById,
   sameRuns,
   sliceRuns,
@@ -333,4 +334,17 @@ test('资产 run：plainText 贡献 0、plain 占 1 格、永不带 marks（三�
   // 归一化之后仍然没有 marks（即使被区间格式盖过）
   const bold = toggleMark(c, 'bold', 0, plainLen(c))
   assert.equal((bold.find((x): x is AssetRun => x.t === 'asset')!).marks, undefined)
+})
+
+test('runAtCell：plain 格位 → 占格的 run（删除键接管判据）', () => {
+  // 「引用」(0-1) · ref(2) · 「与图」(3-4) · asset(5) · 「尾」(6)
+  const c: Run[] = [...textRuns('引用'), ref('p1', { label: '目标' }), ...textRuns('与图'), asset('h1'), ...textRuns('尾')]
+  assert.equal((runAtCell(c, 0) as { t: string }).t, 'text', '文本格 ⇒ 所在的 text run')
+  assert.equal((runAtCell(c, 2) as { t: string }).t, 'ref', '原子格 ⇒ 那枚原子')
+  assert.equal((runAtCell(c, 5) as { t: string }).t, 'asset')
+  assert.equal((runAtCell(c, 6) as { t: string }).t, 'text', '末文本格')
+  assert.equal(runAtCell(c, 7), null, '越界（总长之后）⇒ null')
+  assert.equal(runAtCell(c, -1), null, '负格位 ⇒ null')
+  // 空内容没有格
+  assert.equal(runAtCell([], 0), null)
 })

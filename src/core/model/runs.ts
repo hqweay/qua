@@ -252,6 +252,31 @@ export function locateCursor(content: Content, off: number): RunCursor {
   return { index: content.length - 1, inner: last.t === 'text' ? last.v.length : 1 }
 }
 
+/**
+ * plain **格位** → 占着这一格的 run（文本格 ＝ 它所在的 text run；原子格 ＝ 那枚原子）。
+ *
+ * 与 `locateCursor` 的差别：游标回答「光标在这个 run 的哪个位置」（偏移落在原子
+ * 后缘会钳到末 run），这里回答「第 `cell` 格本身是什么」——删除键的接管判据要的
+ * 是后者：⌫ 删的是光标**前一格**、Delete 删的是光标**这一格**，格上是不是原子
+ * 一眼可判，不经过「后缘算不算命中」的边界约定。
+ *
+ * 格位越界（`cell < 0` 或落在总长之后）⇒ `null`。
+ */
+export function runAtCell(content: Content, cell: number): Run | null {
+  if (cell < 0) return null
+  let acc = 0
+  for (const r of content) {
+    if (r.t === 'text') {
+      if (cell < acc + r.v.length) return r
+      acc += r.v.length
+      continue
+    }
+    if (acc === cell) return r
+    acc += 1
+  }
+  return null
+}
+
 /* ------------------------------------------------------- 切片与拼接 */
 
 /**

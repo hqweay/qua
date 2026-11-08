@@ -39,6 +39,7 @@ import {
   indentMove,
   enterKind,
   locate,
+  runAtCell,
   insertSiteOf,
   blockSpanPlan,
   detectTrigger,
@@ -3652,8 +3653,34 @@ export class BlockEditor {
     return mode
   }
 
+  /**
+   * **删除键贴着原子的接管**（⌫ 删前一格／Delete 删当前格）：那一格是原子 ⇒
+   * 摘那枚 run、走模型路径，不放行给原生删除。
+   *
+   * 为什么接管：光标贴着原子时 DOM 里常常**没有文本节点可站**（「块尾是原子」
+   * 的插入点落在原子与 `<br>` 之间的元素位），那是 Chrome 的不稳定光标位——
+   * 原生删除会按它自己挪错的位置走，把整行可编辑根从 DOM 摘掉而模型一字不动
+   * （实测：插入引用后马上 ⌫，`.tx` 整个消失、行从此打不进字）。稳定位上原生
+   * 删除本来也会摘原子，接管之后两条路同一个结果、同一档撤销（`'delete'`）。
+   *
+   * @returns 接管了才 `true`；非折叠选区／跨块／格上不是原子 ⇒ `false`（照常走原生）
+   */
+  deleteAdjacentAtom(dir: 'back' | 'forward'): boolean {
+    const s = this.sel
+    if (!s || s.aBlock !== s.hBlock || s.aOff !== s.hOff) return false
+    const loc = locate(this.doc, s.aBlock)
+    if (!loc || !canDirectEditText(loc.block)) return false
+    const hit = runAtCell(loc.block.content, dir === 'back' ? s.aOff - 1 : s.aOff)
+    if (!hit || hit.t === 'text') return false
+    this.beginUndoEntry()
+    const next = removeRunById(loc.block.content, hit.id)
+    this.commitContent(loc.block.id, next, 'delete', dir === 'back' ? s.aOff - 1 : s.aOff)
+    return true
+  }
+
   /** 删掉一枚行内原子（显式动作；只动那一格，文本不受影响） */
-  removeRun(runId: string): void {    const hit = this.findRun(runId)
+  removeRun(runId: string): void {
+    const hit = this.findRun(runId)
     if (!hit) return
     this.beginUndoEntry()
     const next = removeRunById(hit.block.content, runId)
@@ -3855,6 +3882,7 @@ export class BlockEditor {
       syncSel: () => this.syncSel(),
       caretBlock: () => this.caretBlock(),
       reclaimCaret: () => this.reclaimCaret(),
+      deleteAdjacentAtom: (dir) => this.deleteAdjacentAtom(dir),
       commitEdit: (id) => {
         this.commitEdit(id)
       },
