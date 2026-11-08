@@ -58,8 +58,6 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/toggle-collapse', kind: 'keymap', key: 'mod+.', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/toggle-todo', kind: 'keymap', key: 'mod+enter', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/insert-page-ref', kind: 'keymap', key: 'mod+shift+k', when: 'editorTextFocus', layer: 'core' },
-  // 外链：⌘K（与「引用 ⌘⇧K」同族，差一个修饰键）；开了输入框之后由浮层接手，不在这里绑第二下
-  { command: 'core.editor/insert-link', kind: 'keymap', key: 'mod+k', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.anno/toggle-bold', kind: 'keymap', key: 'mod+b', when: 'editorTextFocus && !selectionEmpty', layer: 'core' },
   { command: 'core.anno/toggle-italic', kind: 'keymap', key: 'mod+i', when: 'editorTextFocus && !selectionEmpty', layer: 'core' },
   { command: 'core.anno/toggle-highlight', kind: 'keymap', key: 'mod+e', when: 'editorTextFocus && !selectionEmpty', layer: 'core' },
@@ -79,6 +77,10 @@ export const BINDINGS: Binding[] = [
   { command: 'core.command-palette/show', kind: 'keymap', key: 'mod+p', when: '', layer: 'core' },
   // 全文检索：`⌘K`（同为行业默认）；菜单没有原生 Find／Print role，不会抢
   { command: 'core.search/open', kind: 'keymap', key: 'mod+k', when: '', layer: 'core' },
+  // 外链：⌘K（与「引用 ⌘⇧K」同族，差一个修饰键）；开了输入框之后由浮层接手，不在这里绑第二下。
+  // ⚠️ 必须**排在搜索那条之后**：一键两义靠反向求值「后出现者优先」分离（⌘⇧D 同款手法）——
+  // 排在前面，编辑器态的这条永远轮不到（键位表序就是裁决序，不是装饰）。
+  { command: 'core.editor/insert-link', kind: 'keymap', key: 'mod+k', when: 'editorTextFocus', layer: 'core' },
   // 设置：⌘,（macOS 同一条直觉）。设置是中心工具面，按 kind 去重（再按＝切过去）
   { command: 'core.settings/open', kind: 'keymap', key: 'mod+,', when: '', layer: 'core' },
   // `⌘F` 预留给就地查找（块内查找/替换）：**故意不绑定**，别把这条还给全局搜索——

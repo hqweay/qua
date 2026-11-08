@@ -48,6 +48,18 @@ test('键位：⌘P 只开命令面板，⌘K 只开全局搜索，⌘F 留给�
   assert.deepEqual(onF, [], '⌘F 预留给就地查找，全局键位表里不该有人占它')
 })
 
+test('一键两义：编辑器态的身份必须排在全局态之后（⌘K＝搜索/插链接）', () => {
+  // 同一个键可以按状态做两件事，但解析是**反向遍历、后出现者优先**——
+  // 特异的（编辑器态）绑定必须排在一般的（when 空）之后，否则永远轮不到。
+  // 表序就是裁决序：这不是风格，是键位能不能用的分界（⌘⇧D 同款手法）。
+  const withIndex = BINDINGS.map((b, i) => ({ b, i })).filter((x) => x.b.kind === 'keymap' && x.b.key === 'mod+k')
+  const link = withIndex.find((x) => x.b.command === 'core.editor/insert-link')
+  const search = withIndex.find((x) => x.b.command === 'core.search/open')
+  assert.ok(link && search, '⌘K 的两个身份（插链接/全局搜索）都应在表上')
+  assert.ok(link!.b.when === 'editorTextFocus' && search!.b.when === '', '两个身份的 when：编辑器态/全局态')
+  assert.ok(link!.i > search!.i, '插链接必须排在搜索之后，否则编辑器里 ⌘K 永远开搜索')
+})
+
 test('绑定表只有四个渲染面（keymap/menu/slash/selection），面板枚举命令表不经绑定表', () => {
   for (const b of BINDINGS) {
     assert.ok(b.kind !== 'palette', `绑定表不该再有 palette 档：${b.command}`)
