@@ -126,7 +126,9 @@ test('子块行内属性：有值才显示（普通属性子块没填 ⇒ pendin
 })
 
 test('引擎属性：定义合成注入、值桥到块顶层字段；显示文本今天给时刻、往日带日期', () => {
-  const t = new Date('2026-11-08T14:32:00')
+  // 「今天」必须按跑测试那天的日历日构造——硬编码日期跨过零点就不再是今天（11-08 那份真炸过）
+  const now = new Date()
+  const t = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 14, 32, 0)
   const b = blk('b1', 'x', {})
   b.created = t.getTime()
   // 行只有被声明（如父块 _childProps）才出现——引擎注入的是**定义**（可查、有 label），不是「每块都显示」

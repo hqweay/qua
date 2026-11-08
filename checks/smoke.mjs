@@ -1597,7 +1597,27 @@ await check('T9 块菜单与斜杠菜单**都是绑定表的渲染结果**（同
     return [...document.querySelectorAll('.layer-item .layer-label')].map((r) => r.textContent)
   })
   assert(viaClick.length >= 8, `块菜单项太少：${JSON.stringify(viaClick)}`)
-  assert(viaClick.some((t) => t.includes('复制块')), `块菜单应含「复制块」：${JSON.stringify(viaClick)}`)
+  // 复制类收进了子菜单：顶层给「复制」锚点行，复制块等五味在它下面（mousedown 拾取行）
+  assert(viaClick.some((t) => t === '复制'), `块菜单应含「复制」子菜单锚点：${JSON.stringify(viaClick)}`)
+  await page.evaluate(() => {
+    const row = [...document.querySelectorAll('.layer-item')].find(
+      (el) => el.querySelector('.layer-label')?.textContent === '复制',
+    )
+    row?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForTimeout(150)
+  const copySub = await page.evaluate(() =>
+    [...document.querySelectorAll('.layer-item .layer-label')].map((r) => r.textContent),
+  )
+  assert(copySub.some((t) => t.includes('复制块')), `「复制」子菜单应含「复制块」：${JSON.stringify(copySub)}`)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(150)
+  // 重开块菜单，后续断言基于顶层行
+  await page.evaluate(() => {
+    const el = document.querySelector('.blk .handle')
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForTimeout(200)
   // 叶子块也给「聚焦到此块」（聚焦含块自身，不是只看子树）
   assert(viaClick.some((t) => t.includes('聚焦到此块')), `块菜单应含 zoom 入口（叶子也給）：${JSON.stringify(viaClick)}`)
   const grouped = await page.locator('.layer-group').allInnerTexts()
@@ -21770,6 +21790,9 @@ await check('T228 ⌘K 搜索：输入正文词出结果、命中高亮、↵ �
   const active = await page.evaluate(() => window.__qua.snapshot().activeId)
   assert(active === target, `⌘↵ 打开的是这一条（不是「有反应但没换块」）：${active} vs ${target}`)
 
+  // ⌘K 一键两义（按焦点分流）：⌘↵ 打开后正文已聚焦，⌘K 归插链接；失焦才回到搜索
+  await page.evaluate(() => document.activeElement?.blur())
+  await page.waitForTimeout(100)
   await page.keyboard.press(kbd('mod+k'))
   await page.waitForSelector('.popover.search-overlay .search-face-input')
   await page.keyboard.type('不存在的高频词xyz')
@@ -22668,7 +22691,10 @@ await check('T236 空态＝最近更新（非空且含最新改动的块）；�
   }, probeId)
   await page.waitForTimeout(150)
   const clip = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''))
-  assert(clip === `((${probeId}))`, `复制引用应得到块引用文本：${clip}`)
+  // 多味复制后 text/plain 是块正文（外部应用不看到 ((id)) 协议串），引用意图住在
+  // text/html 的注释载荷里——所以软外读到的是正文、且绝不该是记号本身
+  assert(clip.includes('空态探针LMN'), `复制引用的正文味应是块正文：${clip}`)
+  assert(!clip.includes(`((${probeId}))`), `正文味不该把 ((id)) 记号泄给外部应用：${clip}`)
 
   await ctx.close()
   return '空态最近更新、创建入口、复制引用'
