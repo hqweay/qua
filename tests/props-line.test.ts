@@ -187,3 +187,36 @@ test('fieldRowsWithParent：面板口径与批级一致（父声明排在子块�
   // 单块（无父）等于旧 fieldRows
   assert.deepEqual(fieldRowsWithParent(child, forest, null).map((r) => r.propId), [defMood.id])
 })
+
+test('传递型引用：正文只有一枚引用的块，其子块沿目标解析声明；引用带正文不透传；环不死循环', () => {
+  const lifeTag = blk('tag-life', 'LifeLog', { _aliases: ['LifeLog'], _lists: ['tag'], [CHILD_PROPS_PROP]: [ENGINE_CREATED] })
+  // 传递块：正文恰好一枚指向 LifeLog 的引用
+  const pass = blk('pass1', '')
+  pass.content = [{ id: 'r1', t: 'ref', to: 'tag-life' }]
+  const child = blk('c1', '一条')
+  const forest = [lifeTag, pass, child]
+
+  const viaPass = (belowFieldsFor([child], forest, (id) => (id === 'c1' ? pass : null)).get('c1')?.rows ?? []).map((r) => r.propId)
+  assert.deepEqual(viaPass, [ENGINE_CREATED], '传递块的子块沿目标命中声明')
+
+  // 带正文的引用不透传
+  const withText = blk('pass2', '今天看了')
+  withText.content = [...textRuns('今天看了'), { id: 'r2', t: 'ref', to: 'tag-life' }]
+  const viaText = (belowFieldsFor([child], forest, (id) => (id === 'c1' ? withText : null)).get('c1')?.rows ?? []).map((r) => r.propId)
+  assert.deepEqual(viaText, [], '引用只是提及 ⇒ 不透传')
+
+  // 环：A 传 B、B 传 A ⇒ 终止不炸
+  const a = blk('loop-a', '')
+  a.content = [{ id: 'r3', t: 'ref', to: 'loop-b' }]
+  const b = blk('loop-b', '')
+  b.content = [{ id: 'r4', t: 'ref', to: 'loop-a' }]
+  const viaLoop = (belowFieldsFor([child], forest, (id) => (id === 'c1' ? a : null)).get('c1')?.rows ?? []).map((r) => r.propId)
+  assert.deepEqual(viaLoop, [], '环上没有声明 ⇒ 空且终止')
+
+  // 传递链中间带正文即断（A 传 B，B 有正文 + 引用 C）
+  const c = blk('tag-c', 'C', { _aliases: ['C'], _lists: ['tag'], [CHILD_PROPS_PROP]: [ENGINE_CREATED] })
+  const mid = blk('mid', '正文')
+  mid.content = [...textRuns('正文'), { id: 'r5', t: 'ref', to: 'tag-c' }]
+  const viaBroken = (belowFieldsFor([child], forest, (id) => (id === 'c1' ? mid : null)).get('c1')?.rows ?? []).map((r) => r.propId)
+  assert.deepEqual(viaBroken, [], '链上有一环带正文 ⇒ 断')
+})

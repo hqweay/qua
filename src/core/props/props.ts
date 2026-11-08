@@ -900,21 +900,46 @@ export function childDisplayProps(parent: Block | null | undefined): string[] {
 }
 
 /**
- * 显示声明的**解析链**：父块自己的声明 ∪ 父块各**标签**的声明（按打标顺序，去重）。
+ * **传递型引用**：正文**只有一枚引用**的块（没有别的文字与原子）——它只是
+ * 「指到那个块的一跳」，透传目标块的显示声明。
+ *
+ * 判据从严：`content` 恰好一枚 run 且是 `ref`。正文里有别的字 ⇒ 引用只是提及
+ * （「今天看了 LifeLog 的设计」不该让子块长出时间戳）。悬空引用（`to` 缺）⇒
+ * 不透传——声明跟身份走，身份没了就没有透传的方向。
+ */
+export function passThroughRefTarget(block: Block): string | null {
+  if (block.content.length !== 1) return null
+  const r = block.content[0]
+  return r.t === 'ref' && r.to ? r.to : null
+}
+
+/**
+ * 显示声明的**解析链**：父块自己的声明 ∪ 父块各**标签**的声明 ∪ **传递目标的链**
+ * （按上列顺序，去重）。
  *
  * 与 `_fieldDefs`（标签声明字段给成员）完全同构——数据槽换成显示槽。同一个槽自动
- * 覆盖两个读者：标签块自己当容器（父链第一项命中）、任意块打了标签（标签链命中），
- * 没有第二种语义。**不做标签继承**（标签的标签不传递）——与「不做继承、多标签
- * 并集」同一拍板。正文里**引用**某个块不生效：引用是内容不是归属，声明跟身份走。
+ * 覆盖几个读者：标签块自己当容器（父链命中）、任意块打了标签（标签链命中）、
+ * **传递型引用块**（正文只有一枚引用 ⇒ 沿目标递归，`seen` 防环）。
+ * **不做标签继承**（标签的标签不传递）——与「不做继承、多标签并集」同一拍板。
+ * 正文里有别的字的引用不透传（见 `passThroughRefTarget`）：引用是内容，透传只认
+ * 「这一块就是一跳」的形状。
  */
 export function childDisplayPropsResolved(
   parent: Block | null | undefined,
-  tagsByIdMap: ReadonlyMap<string, Block>,
+  lookup: { tags: ReadonlyMap<string, Block>; blocks: ReadonlyMap<string, Block> },
+  seen: ReadonlySet<string> = new Set(),
 ): string[] {
-  if (!parent) return []
+  if (!parent || seen.has(parent.id)) return []
+  const nextSeen = new Set(seen).add(parent.id)
   const out = childDisplayProps(parent)
-  for (const tag of resolveTagIds(parent, tagsByIdMap)) {
+  for (const tag of resolveTagIds(parent, lookup.tags)) {
     for (const propId of childDisplayProps(tag)) {
+      if (!out.includes(propId)) out.push(propId)
+    }
+  }
+  const target = passThroughRefTarget(parent)
+  if (target) {
+    for (const propId of childDisplayPropsResolved(lookup.blocks.get(target) ?? null, lookup, nextSeen)) {
       if (!out.includes(propId)) out.push(propId)
     }
   }
@@ -1088,7 +1113,8 @@ export function fieldRowsWithParent(
   let look: ChoiceLookup | undefined
   const lazyLook = (): ChoiceLookup => (look ??= choiceLookupOf(forest))
   const merged = [...rows]
-  for (const propId of childDisplayPropsResolved(parent, tagsById(forest))) {
+  const lookup = { tags: tagsById(forest), blocks: new Map(forest.map((b) => [b.id, b])) }
+  for (const propId of childDisplayPropsResolved(parent, lookup)) {
     if (merged.some((r) => r.propId === propId)) continue
     merged.push(fieldRowOf(block, propId, defs.get(propId), [], order++, forest, lazyLook))
   }
@@ -1161,6 +1187,8 @@ export function belowFieldsFor(
 ): Map<string, BelowFields> {
   const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
   const tags = tagsById(forest)
+  // 传递型引用的解析要按 id 找目标块（与 tags 同一次森林遍历的成本档）
+  const lookup = { tags, blocks: new Map(forest.map((b) => [b.id, b])) }
   let look: ChoiceLookup | undefined
   const lazyLook = (): ChoiceLookup => (look ??= choiceLookupOf(forest))
   const out = new Map<string, BelowFields>()
@@ -1186,7 +1214,7 @@ export function belowFieldsFor(
     // 子块已有的 propId 不重复出。有值才显示是同一条纪律（engine 行恒有值；
     // 普通属性子块没填就不出空行）
     const parent = parentOf?.(block.id) ?? null
-    for (const propId of childDisplayPropsResolved(parent, tags)) {
+    for (const propId of childDisplayPropsResolved(parent, lookup)) {
       if (rows.has(propId)) continue
       rows.set(propId, fieldRowOf(block, propId, defs.get(propId), [], order++, forest, lazyLook))
     }
