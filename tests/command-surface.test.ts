@@ -9,6 +9,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { COMMANDS } from '../src/core/commands/decls.ts'
 import { BINDINGS } from '../src/core/infra/bindings.ts'
+import { groupTitle } from '../src/ui/overlay/group-titles.ts'
 
 const visible = COMMANDS.filter((c) => !c.hidden)
 
@@ -92,4 +93,23 @@ test('斜杠只收「这里有什么」：折叠/删除不进斜杠，露面/复
     ['slash/1-structure', 'slash/2-inline'],
     '斜杠分组只有「结构/行内」两轴',
   )
+})
+
+test('块菜单：删除同位、复制/插入收子菜单、组标题人人有份', () => {
+  const menu = BINDINGS.filter((b) => b.kind === 'menu' && (b.group ?? '').startsWith('block/'))
+  const deleteGroup = menu.filter((b) => b.group === 'block/6-delete').map((b) => b.command)
+  for (const need of ['core.editor/delete-block', 'core.journal/delete', 'core.page/delete', 'core.tag/delete']) {
+    assert.ok(deleteGroup.includes(need), `${need} 应住在删除组：危险动作位置恒定`)
+  }
+  const anchors = BINDINGS.filter((b) => b.command === 'core.menu/sub').map((b) => JSON.stringify(b.args))
+  assert.deepEqual(
+    [...anchors].sort(),
+    [JSON.stringify({ prefix: 'blockCopy/' }), JSON.stringify({ prefix: 'blockInsert/' })],
+    '复制/插入两套行只从子菜单锚点进来',
+  )
+  // 组标题必须人人有份：裸 id 露给用户就是「打不开的引用」（视图组曾整个组没有标题）
+  for (const b of menu) {
+    const g = b.group ?? ''
+    assert.ok(g === '' || groupTitle(g) !== g, `分组 ${g} 缺标题，裸 id 不该露给用户`)
+  }
 })

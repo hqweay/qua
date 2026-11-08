@@ -17,6 +17,7 @@ import { captureFocus, type FocusReturn } from './focus-return.ts'
 import { placeNear } from './place.ts'
 import { dismissFloating } from './overlay-dismiss.ts'
 import { menuKeyAction } from './menu-key.ts'
+import { groupTitle } from './group-titles.ts'
 import { QueryGate } from './query-gate.ts'
 
 export interface Row {
@@ -69,40 +70,6 @@ export interface PickMods {
 }
 
 const NO_MODS: PickMods = { altKey: false, metaKey: false, ctrlKey: false, shiftKey: false }
-
-const GROUP_TITLES: Record<string, string> = {
-  'block/1-basic': t('menu.group.basic'),
-  'block/2-structure': t('menu.group.structure'),
-  'block/3-kind': t('menu.group.blockKind'),
-  'block/3-role': t('menu.group.identity'),
-  'block/4-inline': t('menu.group.inline'),
-  'block/5-mark': t('menu.group.mark'),
-  'slash/1-structure': t('menu.group.structure'),
-  'slash/2-inline': t('menu.group.inlineAtom'),
-  'sel/1-mark': t('menu.group.mark'),
-  'sel/2-ref': t('menu.group.ref'),
-  'pick/1': t('menu.group.pickPage'),
-  'pick/2': t('menu.group.pickTag'),
-  // 检索浮层（`#` 标签源 / `@` 页块源）：分组是「结果从哪儿来」，不是命令分类
-  'retrieval/1-instance': t('menu.group.instance'),
-  'retrieval/2-tag': t('menu.group.pickTag'),
-  'retrieval/3-new': t('menu.group.new'),
-  'retrieval/1-page': t('menu.group.pickPage'),
-  'retrieval/2-block': t('menu.group.block'),
-  'dbg/1-look': t('menu.group.debugLook'),
-  'dbg/2-theme': t('menu.group.debugTheme'),
-  'dbg/3-state': t('menu.group.debugState'),
-  'view/7-manage': t('menu.group.viewManage'),
-  'view/8-sort': t('menu.group.viewSort'),
-  'view/9-add': t('menu.group.viewAdd'),
-}
-
-export function groupTitle(g: string | undefined): string {
-  if (!g) return ''
-  // 命令面板的分组就是命令自己的 category，别把 `palette/` 前缀露给用户
-  if (g.startsWith('palette/')) return g.slice('palette/'.length)
-  return GROUP_TITLES[g] ?? g
-}
 
 /** 绑定 → 行（菜单/斜杠/工具栏/面板都用它；标题来自**命令表**，绑定只负责挂载点） */
 export function rowsFromBindings(

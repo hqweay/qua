@@ -133,16 +133,29 @@ export const BINDINGS: Binding[] = [
   // 放在键位段末尾：解析自下而上，块选区清空（表内更早）先于它命中。
   { command: 'core.view/axis-down', kind: 'keymap', key: 'escape', when: 'axisActive && !blockSelection', layer: 'core' },
 
-  /* ================= 块菜单（悬停左侧拖动把手 / 圆点或右键） ================= */
-  { command: 'core.editor/duplicate-block', kind: 'menu', when: 'blockFocused', group: 'block/1-basic', order: 20, layer: 'core' },
-  { command: 'core.editor/delete-block', kind: 'menu', when: 'blockFocused && blockCanDelete', group: 'block/1-basic', order: 40, layer: 'core', keywords: [t('menu.kw.delete')] },
-  // 日记天也是装载根（编辑器里的 delete-block 删不到）⇒ 删除走命令面；今天不出现（见 ctx 键）
-  { command: 'core.journal/delete', kind: 'menu', when: 'blockFocused && blockCanDeleteJournal', group: 'block/1-basic', order: 45, layer: 'core', keywords: [t('menu.kw.delete')] },
-  { command: 'core.editor/move-block-up', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 10, layer: 'core' },
-  { command: 'core.editor/move-block-down', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 20, layer: 'core' },
-  { command: 'core.editor/indent-block', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 30, layer: 'core' },
-  { command: 'core.editor/outdent-block', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 40, layer: 'core' },
-  { command: 'core.editor/toggle-todo', kind: 'menu', when: 'blockFocused', group: 'block/3-kind', order: 10, layer: 'core' },
+  /* ================= 块菜单（悬停左侧拖动把手 / 圆点或右键） =================
+     顶层只留「对这一块做什么」的骨架动作；「复制有几种味」「插进正文有几种原子」
+     这两件多选项收进**子菜单**（锚点＝一条命令＋绑定行上的分组前缀，与动态的
+     「视图…」同一机制）——顶层短了，语义轴不变。删除类**同住一组**：
+     危险动作的位置恒定，`when` 只决定那一行写的是删块还是删页。 */
+
+  /* ---- 基本：两个子菜单锚点 ---- */
+  { command: 'core.menu/sub', kind: 'menu', when: 'blockFocused', group: 'block/1-basic', order: 10, layer: 'core', args: { prefix: 'blockCopy/' }, label: t('menu.group.copy') },
+  { command: 'core.menu/sub', kind: 'menu', when: 'blockFocused', group: 'block/1-basic', order: 20, layer: 'core', args: { prefix: 'blockInsert/' }, label: t('menu.group.insert') },
+  /* 复制（子菜单）：前四条是「同一块的几种味」，复制块是落进文档的副本 */
+  { command: 'core.editor/copy-block', kind: 'menu', when: 'blockFocused', group: 'blockCopy/1', order: 10, layer: 'core' },
+  { command: 'core.editor/copy-block-text', kind: 'menu', when: 'blockFocused', group: 'blockCopy/1', order: 20, layer: 'core' },
+  { command: 'core.editor/copy-ref', kind: 'menu', when: 'blockFocused', group: 'blockCopy/1', order: 30, layer: 'core' },
+  { command: 'core.editor/copy-block-ref', kind: 'menu', when: 'blockFocused', group: 'blockCopy/1', order: 40, layer: 'core' },
+  { command: 'core.editor/duplicate-block', kind: 'menu', when: 'blockFocused', group: 'blockCopy/1', order: 50, layer: 'core' },
+  /* 插入（子菜单）：行内原子与归属，落点都是这一块的正文 */
+  { command: 'core.editor/pick-tag', kind: 'menu', when: 'blockFocused', group: 'blockInsert/1', order: 10, layer: 'core' },
+  { command: 'core.editor/insert-page-ref', kind: 'menu', when: 'blockFocused', group: 'blockInsert/1', order: 20, layer: 'core' },
+  { command: 'core.editor/insert-image', kind: 'menu', when: 'blockFocused', group: 'blockInsert/1', order: 30, layer: 'core' },
+  { command: 'core.editor/insert-link', kind: 'menu', when: 'blockFocused', group: 'blockInsert/1', order: 40, layer: 'core' },
+
+  /* ---- 结构：把这一块摆成什么样（顺序/深度/状态） ---- */
+  { command: 'core.editor/toggle-todo', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 10, layer: 'core' },
   /**
    * 与上面那条**成对**出现：`toggle-todo` 在「是任务」时只翻值，翻不出「不是任务」这一态
    * （见 `editor.clearTodo`），所以「变回去」必须是独立一条。
@@ -150,29 +163,54 @@ export const BINDINGS: Binding[] = [
    * 判据用 `blockType`（`core/view/editor.ts` 的 `ctxKeys`，只取 `todo`／`paragraph` 两值）：
    * 不是任务的块上不显示 —— 一条「点了什么都不会发生」的菜单项比没有更糟。
    */
-  { command: 'core.editor/clear-todo', kind: 'menu', when: 'blockFocused && blockType == "todo"', group: 'block/3-kind', order: 15, layer: 'core' },
-  { command: 'core.editor/toggle-collapse', kind: 'menu', when: 'blockFocused && blockFoldable', group: 'block/3-kind', order: 20, layer: 'core', label: t('menu.label.toggleCollapse') },
-  // 露面：加/减一格标记（页/标签各自独立、可兼位；顺序无语义）
+  { command: 'core.editor/clear-todo', kind: 'menu', when: 'blockFocused && blockType == "todo"', group: 'block/2-structure', order: 15, layer: 'core' },
+  { command: 'core.editor/toggle-collapse', kind: 'menu', when: 'blockFocused && blockFoldable', group: 'block/2-structure', order: 20, layer: 'core', label: t('menu.label.toggleCollapse') },
+  { command: 'core.editor/move-block-up', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 30, layer: 'core' },
+  { command: 'core.editor/move-block-down', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 40, layer: 'core' },
+  { command: 'core.editor/indent-block', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 50, layer: 'core' },
+  { command: 'core.editor/outdent-block', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 60, layer: 'core' },
+  /**
+   * 移动到…：**显式点名**的重排。与「块上移/下移」不同——那两个只换同级顺序，
+   * 这个跨容器。身份块不给入口：它们不参与组织，搬它们没有意义（位置不承载信息）。
+   */
+  { command: 'core.block/move-to', kind: 'menu', when: 'blockFocused && !blockIsRoot', group: 'block/2-structure', order: 70, layer: 'core' },
+
+  /* ---- 身份与露面：加/减一格标记（页/标签各自独立、可兼位；顺序无语义） ---- */
   { command: 'core.block/as-page', kind: 'menu', when: 'blockFocused && !blockHasPageRole', group: 'block/3-role', order: 10, layer: 'core' },
   { command: 'core.block/unpage', kind: 'menu', when: 'blockFocused && blockHasPageRole', group: 'block/3-role', order: 11, layer: 'core' },
-  // 与「取消页」是两条轴：取消只摘露面位（块和内容都还在），删除连子树一起软删（回收站可恢复）
-  { command: 'core.page/delete', kind: 'menu', when: 'blockFocused && blockHasPageRole', group: 'block/3-role', order: 13, layer: 'core' },
+  // 删除页/删除标签在「删除」组（危险动作同位）；这一组只留身份的加减与配置
   { command: 'core.block/extract-to-page', kind: 'menu', when: 'blockFocused && blockCanExtractPage', group: 'block/3-role', order: 12, layer: 'core' },
   { command: 'core.block/as-tag', kind: 'menu', when: 'blockFocused && !blockHasTagRole', group: 'block/3-role', order: 20, layer: 'core' },
   { command: 'core.block/untag', kind: 'menu', when: 'blockFocused && blockHasTagRole', group: 'block/3-role', order: 21, layer: 'core' },
-  { command: 'core.tag/delete', kind: 'menu', when: 'blockFocused && blockHasTagRole', group: 'block/3-role', order: 22, layer: 'core' },
   // 别名是「名字层」的配置，不属于任何具体列表：任何聚焦块都能打开
   { command: 'core.block/edit-aliases', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 30, layer: 'core' },
-  // zoom：进子树的入口挂在块菜单。**叶子块也给**（修订：
-  // 块标左键＝聚焦是一贯行为：若叶子不给，点击结果会时 zoom 时不 zoom）
-  { command: 'core.block/focus-block', kind: 'menu', when: 'blockFocused', group: 'block/3-kind', order: 30, layer: 'core', keywords: ['zoom', t('menu.kw.zoom')] },
   // 显式入口：把「看这一块的属性」做成一次点击。落点是属性抽屉——不换中心、
   // 不动槽（侧槽开关只归 core.dock/*），能力不依赖任何面板是否在场。
   { command: 'core.block/inspect', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 31, layer: 'core' },
-  // 「在别处打开」的第二种落点：与 ⌘/Ctrl+点同一条路（`focus-block` 的 `newTab`）。
-  // 菜单补的是**可发现性**——手势在，但没人知道它，等于没有。
-  { command: 'core.block/focus-block', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 32, layer: 'core', args: { newTab: true }, label: t('cmd.block.open-new-tab'), keywords: ['tab', 'page', 'open'] },
-  { command: 'core.dock/open-block', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 33, layer: 'core' },
+
+  /* ---- 行内：光标正停在什么上，就给什么（都带 `when`，平时不占行） ---- */
+  /**
+   * **提及命中 → 引用**：只有光标正停在命中区间上时才出现。
+   *
+   * 判据与 ⌥ 单击同一份（`mentionHit` 由编辑器按 `spanAt` 现算），这里不放参数——
+   * 具体是哪一段由命令向编辑器要，免得菜单行与手势各带一份区间。
+   */
+  { command: 'core.block/convert-mention', kind: 'menu', when: 'mentionHit', group: 'block/4-inline', order: 10, layer: 'core' },
+  { command: 'core.anno/clear-marks', kind: 'menu', when: 'blockFocused && !selectionEmpty', group: 'block/4-inline', order: 20, layer: 'core' },
+
+  /* ---- 视图与导航：换个看法、去别的位置看 ---- */
+  { command: 'core.query/insert', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 5, layer: 'core', label: t('cmd.query.insert'), keywords: ['query', 'filter', 'where'], icon: 'lucide:list-filter' },
+  /**
+   * **视图**（一个块换个看法）：入口只在「有东西可摊开」的块上（查询块 / 有子块 / 已有视图）。
+   * 菜单里是**动态**的一份清单（大纲 ＋ 已有视图 ＋ 新建表格），所以只挂一条命令、
+   * 由装配层按当前的 `_views` 现画 —— 绑定表是静态的，装不下「每个块不一样」的项。
+   */
+  { command: 'core.view/menu', kind: 'menu', when: 'blockFocused && blockCanHaveView', group: 'block/5-view', order: 10, layer: 'core', label: t('menu.label.views'), keywords: ['view', 'table', 'grid', t('menu.kw.views')] },
+  { command: 'core.embed/insert', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 20, layer: 'core', label: t('ui.embed.insert') },
+  { command: 'core.embed/paste-menu', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 30, layer: 'core', label: t('cmd.embed.paste-menu') },
+  // zoom：进子树的入口挂在块菜单。**叶子块也给**（修订：
+  // 块标左键＝聚焦是一贯行为：若叶子不给，点击结果会时 zoom 时不 zoom）
+  { command: 'core.block/focus-block', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 40, layer: 'core', keywords: ['zoom', t('menu.kw.zoom')] },
   /**
    * 退回上一级：**最外层时不给入口**（`when` 挡住），不是点了没反应。
    *
@@ -181,35 +219,19 @@ export const BINDINGS: Binding[] = [
    * ⚠️ 标题也从「退回顶层」改掉了：那个词把**系统架**露给了用户
    *    （用户世界里不该有「顶层」这个概念，根是系统自己的事）。
    */
-  { command: 'core.block/zoom-out', kind: 'menu', when: 'blockFocused && !blockIsRoot', group: 'block/3-kind', order: 20, layer: 'core', keywords: ['zoom', 'out', 'back'] },
-  /**
-   * 移动到…：**显式点名**的重排。与「块上移/下移」不同——那两个只换同级顺序，
-   * 这个跨容器。身份块不给入口：它们不参与组织，搬它们没有意义（位置不承载信息）。
-   */
-  { command: 'core.block/move-to', kind: 'menu', when: 'blockFocused && !blockIsRoot', group: 'block/2-structure', order: 30, layer: 'core' },
-  { command: 'core.editor/pick-tag', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 5, layer: 'core' },
-  { command: 'core.editor/insert-page-ref', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 10, layer: 'core' },
-  { command: 'core.editor/insert-image', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 20, layer: 'core' },
-  { command: 'core.editor/insert-link', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 25, layer: 'core' },
-  { command: 'core.editor/copy-ref', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 30, layer: 'core' },
-  { command: 'core.editor/copy-block-ref', kind: 'menu', when: 'blockFocused', group: 'block/4-inline', order: 35, layer: 'core' },
-  /**
-   * **提及命中 → 引用**：只有光标正停在命中区间上时才出现。
-   *
-   * 判据与 ⌥ 单击同一份（`mentionHit` 由编辑器按 `spanAt` 现算），这里不放参数——
-   * 具体是哪一段由命令向编辑器要，免得菜单行与手势各带一份区间。
-   */
-  { command: 'core.block/convert-mention', kind: 'menu', when: 'mentionHit', group: 'block/4-inline', order: 40, layer: 'core' },
-  { command: 'core.anno/clear-marks', kind: 'menu', when: 'blockFocused && !selectionEmpty', group: 'block/5-mark', order: 50, layer: 'core' },
-  /**
-   * **视图**（一个块换个看法）：入口只在「有东西可摊开」的块上（查询块 / 有子块 / 已有视图）。
-   * 菜单里是**动态**的一份清单（大纲 ＋ 已有视图 ＋ 新建表格），所以只挂一条命令、
-   * 由装配层按当前的 `_views` 现画 —— 绑定表是静态的，装不下「每个块不一样」的项。
-   */
-  { command: 'core.view/menu', kind: 'menu', when: 'blockFocused && blockCanHaveView', group: 'block/6-view', order: 10, layer: 'core', label: t('menu.label.views'), keywords: ['view', 'table', 'grid', t('menu.kw.views')] },
-  { command: 'core.query/insert', kind: 'menu', when: 'blockFocused', group: 'block/6-view', order: 5, layer: 'core', label: t('cmd.query.insert'), keywords: ['query', 'filter', 'where'], icon: 'lucide:list-filter' },
-  { command: 'core.embed/insert', kind: 'menu', when: 'blockFocused', group: 'block/6-view', order: 20, layer: 'core', label: t('ui.embed.insert') },
-  { command: 'core.embed/paste-menu', kind: 'menu', when: 'blockFocused', group: 'block/6-view', order: 30, layer: 'core', label: t('cmd.embed.paste-menu') },
+  { command: 'core.block/zoom-out', kind: 'menu', when: 'blockFocused && !blockIsRoot', group: 'block/5-view', order: 45, layer: 'core', keywords: ['zoom', 'out', 'back'] },
+  // 「在别处打开」的第二种落点：与 ⌘/Ctrl+点同一条路（`focus-block` 的 `newTab`）。
+  // 菜单补的是**可发现性**——手势在，但没人知道它，等于没有。
+  { command: 'core.block/focus-block', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 50, layer: 'core', args: { newTab: true }, label: t('cmd.block.open-new-tab'), keywords: ['tab', 'page', 'open'] },
+  { command: 'core.dock/open-block', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 55, layer: 'core' },
+
+  /* ---- 删除：危险动作**同位**——位置恒定，`when` 决定那一行删的是什么 ---- */
+  { command: 'core.editor/delete-block', kind: 'menu', when: 'blockFocused && blockCanDelete', group: 'block/6-delete', order: 10, layer: 'core', keywords: [t('menu.kw.delete')] },
+  // 日记天也是装载根（编辑器里的 delete-block 删不到）⇒ 删除走命令面；今天不出现（见 ctx 键）
+  { command: 'core.journal/delete', kind: 'menu', when: 'blockFocused && blockCanDeleteJournal', group: 'block/6-delete', order: 20, layer: 'core', keywords: [t('menu.kw.delete')] },
+  // 与「取消页」是两条轴：取消只摘露面位（块和内容都还在），删除连子树一起软删（回收站可恢复）
+  { command: 'core.page/delete', kind: 'menu', when: 'blockFocused && blockHasPageRole', group: 'block/6-delete', order: 30, layer: 'core' },
+  { command: 'core.tag/delete', kind: 'menu', when: 'blockFocused && blockHasTagRole', group: 'block/6-delete', order: 40, layer: 'core' },
   /* 「粘贴为…」的两档：同一个命令，只差一个看法（菜单动态项由装配层现画，绑定点只给选项） */
   /**
    * ⚠️ 判据用 `blockFocused`（编辑器上下文里**有**这个键），不要用 `editorFocus`：

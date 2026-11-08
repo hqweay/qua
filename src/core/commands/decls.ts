@@ -232,6 +232,8 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.settings/open', title: t('cmd.settings.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['settings', 'preferences', 'keys', 'theme'], tile: { icon: 'lucide:settings' } },
   { name: 'core.menu/block', title: t('cmd.menu.block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), args: { blockId: { type: 'string' } } },
   { name: 'core.menu/slash', title: t('cmd.menu.slash'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer') },
+  // 子菜单锚点：绑定行带分组前缀（args），handler 把那一组渲染成二级菜单。带参 ⇒ 不进面板
+  { name: 'core.menu/sub', title: t('cmd.menu.sub'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), args: { prefix: { type: 'string' } }, hidden: true },
   { name: 'core.layer/close', title: t('cmd.layer.close'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), hidden: true },
 
   /* ---- 诊断（59  / ） ---- */
