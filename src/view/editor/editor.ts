@@ -3663,8 +3663,37 @@ export class BlockEditor {
   }
 
   /**
+   * **打字贴着原子的接管**（与 `deleteAdjacentAtom` 对称的那一半）：折叠光标的
+   * 前一格或当前格是原子 ⇒ 这一笔插入走模型路径（`spliceRuns` 继承左邻格式），
+   * 不放行给原生。
+   *
+   * 为什么接管：光标贴原子时 DOM 里常常没有文本节点可站（「块尾是原子」「整行
+   * 只有原子」），原生插入按不稳定位乱放——实测「纯引用行打字进不去／位置乱」，
+   * 字被塞进 DOM 的游离处再被读回，行为随 Chrome 心情。稳定位上原生打字本来也
+   * 写得对，接管之后两条路同一结果、同一档打字撤销。
+   *
+   * ⚠️ 组合期（IME）不接——守卫在事件层（与删除接管同一条）。
+   *
+   * @returns 接管了才 `true`；非折叠／跨块／不贴原子 ⇒ `false`（照常走原生）
+   */
+  insertTextAtCaret(text: string): boolean {
+    const s = this.sel
+    if (!s || s.aBlock !== s.hBlock || s.aOff !== s.hOff) return false
+    const loc = locate(this.doc, s.aBlock)
+    if (!loc || !canDirectEditText(loc.block)) return false
+    const content = loc.block.content
+    const before = runAtCell(content, s.aOff - 1)
+    const after = runAtCell(content, s.aOff)
+    const nextToAtom = (before !== null && before.t !== 'text') || (after !== null && after.t !== 'text')
+    if (!nextToAtom) return false
+    this.beginUndoEntry()
+    const next = spliceRuns(content, s.aOff, s.aOff, text)
+    this.commitContent(loc.block.id, next, 'insert', s.aOff + text.length)
+    return true
+  }
+
+  /**
    * **删除键贴着原子的接管**（⌫ 删前一格／Delete 删当前格）：那一格是原子 ⇒
-   * 摘那枚 run、走模型路径，不放行给原生删除。
    *
    * 为什么接管：光标贴着原子时 DOM 里常常**没有文本节点可站**（「块尾是原子」
    * 的插入点落在原子与 `<br>` 之间的元素位），那是 Chrome 的不稳定光标位——
@@ -3893,6 +3922,7 @@ export class BlockEditor {
       caretBlock: () => this.caretBlock(),
       reclaimCaret: () => this.reclaimCaret(),
       deleteAdjacentAtom: (dir) => this.deleteAdjacentAtom(dir),
+      insertTextAtCaret: (text) => this.insertTextAtCaret(text),
       commitEdit: (id) => {
         this.commitEdit(id)
       },

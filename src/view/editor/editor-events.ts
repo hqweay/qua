@@ -167,6 +167,12 @@ export interface EditorBridge {
    */
   deleteAdjacentAtom: (dir: 'back' | 'forward') => boolean
   /**
+   * **打字贴着原子的接管**（⌫/Delete 的对称面）：折叠光标贴着一枚原子时，
+   * `insertText` 走模型路径插入（纯引用行没有可站文本节点，原生插入按不稳定位
+   * 乱放）。非贴原子 ⇒ `false`，照常走原生。
+   */
+  insertTextAtCaret: (text: string) => boolean
+  /**
    * **编辑边界**：把这一行的正文当作一次改名提交（撞名则回滚并报给装配层）。
    * 只在「离开这一行」时调 —— 逐字符校验会打死输入法。
    */
@@ -473,6 +479,20 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       !br.composing() &&
       (e.inputType === 'deleteContentBackward' || e.inputType === 'deleteContentForward') &&
       br.deleteAdjacentAtom(e.inputType === 'deleteContentBackward' ? 'back' : 'forward')
+    ) {
+      e.preventDefault()
+      return
+    }
+    /**
+     * **打字贴着原子 ⇒ 接管**（删除接管的对称面）：`insertText` 每字符一发；
+     * 组合期（IME）不碰——预编辑串仍走原生，`compositionend` 后的
+     * `syncFromDom` 照常读回。
+     */
+    if (
+      !br.composing() &&
+      e.inputType === 'insertText' &&
+      e.data != null &&
+      br.insertTextAtCaret(e.data)
     ) {
       e.preventDefault()
       return
