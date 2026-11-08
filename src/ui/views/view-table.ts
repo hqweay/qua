@@ -483,7 +483,7 @@ export class ViewTable {
   private labelOf(key: string): string {
     if (key === TITLE_COLUMN) return t('ui.view.kind.table')
     if (key === TAGS_COLUMN) return t('ui.props.tagsTitle')
-    if (key === CHILDREN_COLUMN) return '#'
+    if (key === CHILDREN_COLUMN) return t('ui.view.col.children')
     if (key === CREATED_COLUMN) return t('ui.props.createdAt')
     if (key === MODIFIED_COLUMN) return t('ui.props.modifiedAt')
     if (key === PATH_COLUMN) return t('ui.view.col.path')
