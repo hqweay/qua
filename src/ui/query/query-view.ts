@@ -588,6 +588,9 @@ export class ViewHost {
           return
         }
         this.noteTouched(ids)
+        // ⚠️ 每种视图种类在这里占一行：漏接不报错——配置写进去了、屏幕不动（「点了没生效」）。
+        // 修补粒度按「重建会不会搬动编辑器 DOM」分：表格按行 patch；页签只认成员 id 签名
+        // （切换条重建会搬身体编辑器，不能跟打字节奏走）。
         // children/items 源是活的：子块的正文/属性变了，那一行要跟着变（按 blockId 局部修补）
         if (this.table) this.table.sync(ids)
         if (this.listTable) this.listTable.render(ids)
