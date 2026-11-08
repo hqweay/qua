@@ -1197,11 +1197,12 @@ export class ViewHost {
    * 候选两路：字段（属性定义，`deps.fields()` 与条件树同一份）＋ 保留的系统列
    * （子块数/创建/修改/路径——它们是「什么时候动过、在哪」的投影，不默认占位但随取随有）。
    * 勾选即落盘（`core.view/set-columns`，整份替换）：没有「应用」一步，勾完表格就地重画。
+   * ⚠️ 面板**不收**：连续勾选是常态；`current` 每次勾选都现读（`bound` 是活引用）——
+   * 用开面板那一刻的快照算下一份，第二次勾会把第一次的修改整个冲掉。
    */
   private paintColumnsRows(view: ViewConfig): void {
     const panel = this.els.columnsPanel
     panel.replaceChildren()
-    const current = view.table?.columns ?? []
     const rows: { key: string; label: string }[] = [
       { key: CHILDREN_COLUMN, label: t('ui.view.col.children') },
       { key: CREATED_COLUMN, label: t('ui.props.createdAt') },
@@ -1214,14 +1215,12 @@ export class ViewHost {
       row.className = 'qcp-row'
       const box = document.createElement('input')
       box.type = 'checkbox'
-      box.checked = current.some((c) => c.key === r.key)
+      box.checked = (view.table?.columns ?? []).some((c) => c.key === r.key)
       box.addEventListener('change', () => {
+        const current = this.defaultView()?.kind === 'table' ? (this.defaultView()!.table?.columns ?? []) : []
         const kept = current.filter((c) => c.key !== r.key)
-        const next = box.checked
-          ? [...kept, { key: r.key, width: defaultWidthOf(r.key) }]
-          : kept
+        const next = box.checked ? [...kept, { key: r.key, width: defaultWidthOf(r.key) }] : kept
         this.deps.invoke('core.view/set-columns', { owner: this.writeOwner, viewId: view.id, columns: next })
-        panel.hidden = true
         this.refocusBody()
       })
       row.append(box, document.createTextNode(r.label))

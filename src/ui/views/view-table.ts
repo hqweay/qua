@@ -260,6 +260,15 @@ export class ViewTable {
      * 整库扫只在「没有 ids 的整批修补」与整表重排时做 —— 逐键重扫会把打字变成 O(整库)。
      */
     if (ids === undefined || ids.length === 0) {
+      // **列清单变了**（列管理勾选）：行序没变但列变了，patchAll 会拿旧 `this.cols`
+      // 补出一张旧表（配置已写、屏幕不动）——列/行高与上次不同就整表重排
+      const declared = view.table?.columns ?? []
+      const cols = visibleColumns(declared.length > 0 ? declared : this.deps.defaults())
+      const rowH = ROW_H[view.table?.rowHeight ?? 'cozy'] ?? ROW_H.cozy
+      if (JSON.stringify([cols, rowH]) !== JSON.stringify([this.cols, this.rowH])) {
+        this.render()
+        return
+      }
       this.rebuildChoiceRanks()
       this.rebuildLookups()
     } else {
