@@ -160,7 +160,7 @@ pnpm gate:queued    # 同 gate，但**排队的**：文件锁串行 + 隔离 wor
 pnpm gate:fast      # 按 git 改动跳到「碰得到的那几支」，并逐条列出跳过了什么
 pnpm gate:fast --plan   # 只打「这次会跑哪些 / 跳过哪些」，不真跑
 pnpm test:one tests/x.test.ts   # 只跑这几个单测文件（~0.2s）
-QUA_SMOKE_ONLY="T187" pnpm check:smoke   # 只跑名字含这个子串的冒烟用例（~5s，要先构建）
+QUA_SMOKE_ONLY="T187" pnpm check:smoke   # 只跑名字含这个子串的冒烟用例（~5s）。⚠️ 跑的是 dist，不替你构建：改完 src 先 `pnpm build:test` 再点射，否则测的是旧产物（症状：typecheck 绿但「新方法 missing／行为没变」；QUA_NO_DEV=1 时尤其如此——验的是构建产物，不去连 5180 的 dev 服务器）
 pnpm gate:web       # 同 gate，但不含 Electron（CI 的 Linux job 用这个）
 pnpm dev            # vite + electron 一起起（src/** 热更新；electron/*.ts 改动要重跑）
 pnpm dev:web        # 只起 vite → http://127.0.0.1:5180/
