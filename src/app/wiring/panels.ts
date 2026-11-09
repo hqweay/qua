@@ -25,7 +25,7 @@ import {
   flatten,
   SELF,
   hasQueryBody,
-  hasTabsBody,
+  hasChildrenViewBody,
   hasList,
   findInForest,
   isJournal,
@@ -711,11 +711,13 @@ export function setupPanels(deps: PanelsDeps) {
    *
    * 判据按**源**分：只有 children/items 源的视图根（收藏块、激活了某张视图的块）
    * 才走段尾宿主。**身体画在自己行下的块不建**（`rowHasInlineViewBody`：查询源、
-   * 容器型页签）——段尾再来一台就是同一块挂两台。
+   * children 源激活视图——与侧槽窗口宿主的排除口径同一条）——段尾再来一台
+   * 就是同一块挂两台。
    * 收藏块即使没有 `_activeView` 也要建 —— 它的默认看法是列表，不画出来
    * 用户就只看到一行摘要，而 `_items` 里的东西一个都看不见。
    */
-  const wantsView = (host: Block): boolean => isViewRoot(host) && !hasQueryBody(host) && !hasTabsBody(host)
+  const wantsView = (host: Block): boolean =>
+    isViewRoot(host) && !hasQueryBody(host) && !hasChildrenViewBody(host)
 
   /** 一个拥有者「显示的是哪一块」（center 表面：拥有者就是这一块） */
   const blockOf = (owner: ViewOwnerRef): Block | undefined => (owner.kind === 'block' ? blocks.find(owner.blockId) : undefined)
