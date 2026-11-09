@@ -153,12 +153,17 @@ test('addView：建视图就给默认名（kind 显示名，撞名加序号）�
  * （还顺手把光标放进那一块）；另一头是什么都不做（点了没生效）。两条都不报错，
  * 所以用注入的两个空操作把「它到底走了哪条路」钉住。
  */
-function revealDeps(opts: { roots: readonly string[]; shown: boolean }): { d: ViewConfigDeps; calls: string[] } {
+function revealDeps(opts: {
+  roots: readonly string[]
+  shown: boolean
+  /** 查询源（身体会就地画）；false ＝ 普通块（没有行内体，切看法靠打开或宿主自订） */
+  queryBody?: boolean
+}): { d: ViewConfigDeps; calls: string[] } {
   const page = mkBlock('页')
   page.id = 'page'
   const q = mkBlock('')
   q.id = 'q'
-  q.props = { _query: { where: { any: [] } } }
+  if (opts.queryBody !== false) q.props = { _query: { where: { any: [] } } }
   page.children = [q]
   const { kb } = kbOf([page])
   const { owners } = fakeOwners()
@@ -178,18 +183,34 @@ function revealDeps(opts: { roots: readonly string[]; shown: boolean }): { d: Vi
   return { d, calls }
 }
 
-test('setActiveView：身体已经被某个表面画着 ⇒ 就地重画，不换屏、不动光标', () => {
+test('setActiveView：身体会就地画（查询源）⇒ 只重画这一屏，不换屏、不打开', () => {
+  // 首次激活时身体还没挂上（viewShown 看不到），所以「就地画」判据要走在 viewShown 前面——
+  // 已有表面画着也一样重画：重画之后身体自己出现在这一行下面。
   const { d, calls } = revealDeps({ roots: ['page'], shown: true })
   const app = viewConfigCommands(d)
   assert.equal(app.setActiveView({ kind: 'block', blockId: 'q' }, ''), true)
-  assert.deepEqual(calls, [], `有表面在画它就不该换屏／打开：${JSON.stringify(calls)}`)
+  assert.deepEqual(calls, ['reload'], `就地画 ⇒ 重画这一屏，不换屏不打开：${JSON.stringify(calls)}`)
 })
 
-test('setActiveView：没有表面在画它 ⇒ 打开它（不打开就永远看不到结果）', () => {
+test('setActiveView：身体会就地画、还没挂上 ⇒ 同样只重画（不把用户拽去整屏）', () => {
   const { d, calls } = revealDeps({ roots: ['page'], shown: false })
   const app = viewConfigCommands(d)
   assert.equal(app.setActiveView({ kind: 'block', blockId: 'q' }, ''), true)
+  assert.deepEqual(calls, ['reload'], `就地画 ⇒ 重画这一屏，不打开：${JSON.stringify(calls)}`)
+})
+
+test('setActiveView：没有行内体、也没有表面画它 ⇒ 打开它（不打开就永远看不到结果）', () => {
+  const { d, calls } = revealDeps({ roots: ['page'], shown: false, queryBody: false })
+  const app = viewConfigCommands(d)
+  assert.equal(app.setActiveView({ kind: 'block', blockId: 'q' }, ''), true)
   assert.deepEqual(calls, ['open:q'], `没有表面在画它 ⇒ 打开它：${JSON.stringify(calls)}`)
+})
+
+test('setActiveView：没有行内体、已有表面画着 ⇒ 什么都不做（宿主自己订阅了配置）', () => {
+  const { d, calls } = revealDeps({ roots: ['page'], shown: true, queryBody: false })
+  const app = viewConfigCommands(d)
+  assert.equal(app.setActiveView({ kind: 'block', blockId: 'q' }, ''), true)
+  assert.deepEqual(calls, [], `有表面在画它就不该换屏／打开：${JSON.stringify(calls)}`)
 })
 
 test('setActiveView：它是整屏唯一的根 ⇒ 重装这一屏（正文只画根行 ⇄ 恢复子树）', () => {
