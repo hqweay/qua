@@ -148,10 +148,16 @@ export function viewConfigCommands(
      * **它的身体会就地画**（查询源／children 源激活视图）：重画之后身体自己出现在
      * 这一行下面——不换屏、不动光标。首次激活时身体还没挂上（`viewShown` 看不到），
      * 所以这条要走在 `viewShown` 前面，否则会把用户拽去整屏。
+     *
+     * 前提是**它真的在当前这一屏上**（是某个根的后代）：不在屏上的块重画多少遍
+     * 都看不见——创建路径（查询块落森林顶层）就栽在「重画了但什么都没出现」，
+     * 那种块仍然要打开它。
      */
     const b = d.kb.get(owner.blockId)
-    if (b && (hasQueryBody(b) || hasChildrenViewBody(b))) {
-      d.reloadPage()
+    const onScreen = d.rootIds().some((rid) => d.kb.pathOf(owner.blockId).some((p) => p.id === rid))
+    if (b && onScreen && (hasQueryBody(b) || hasChildrenViewBody(b))) {
+      // 轻重画（编辑器自己重读 roots＋重画＋恢复选区），不走整页装载——那会清掉光标
+      d.rerenderEditor()
       return
     }
     /**

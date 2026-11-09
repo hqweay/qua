@@ -302,6 +302,12 @@ export interface ViewConfigDeps {
   run: TxRun
   /** 重装当前这一屏（切视图、增删行之后要让屏幕跟上） */
   reloadPage: () => void
+  /**
+   * **轻重画**：只重读主编辑器的 roots 并重画行（编辑器自己的 `reloadFromStore`），
+   * 不走装配层的整页装载。用于「块就在当前屏上、身体要就地挂出来」的切看法——
+   * 整页装载会清掉光标，违背「切看法不动光标」；编辑器路径自带选区恢复。
+   */
+  rerenderEditor: () => void
   /** 这一屏现在装的是哪些根（判断「要不要换屏」：一屏多根时视图宿主根本不存在） */
   rootIds: () => readonly string[]
   /**

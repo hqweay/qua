@@ -1642,6 +1642,7 @@ const app: App = {
     owners,
     run: runTx,
     reloadPage: () => pageDeps.reloadPage(),
+    rerenderEditor: () => mainEd.reloadFromStore(),
     rootIds: () => pageDeps.rootIds(),
     /**
      * 这一块的视图身体此刻有没有被某个表面画着（正文内联体／段尾宿主／侧槽窗口／挂载区）。

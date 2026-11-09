@@ -51,6 +51,7 @@ function depsOf(blocks: Block[]): {
     // 命令层的 TxRun：这里直接跑一遍拿结果，不关心 op 数
     run: <R,>(fn: (tx: Tx) => R) => kb.tx(fn),
     reloadPage: () => {},
+    rerenderEditor: () => {},
     rootIds: () => [],
     // 没有表面在画它（这一层不碰 DOM）⇒ 切视图之后按「打开它」那条路走，这里是空操作
     viewShown: () => false,
@@ -124,6 +125,7 @@ test('addView：建视图就给默认名（kind 显示名，撞名加序号）�
     owners,
     run: <R,>(fn: (tx: Tx) => R) => kb.tx(fn),
     reloadPage: () => {},
+    rerenderEditor: () => {},
     rootIds: () => [],
     viewShown: () => false,
     activeId: () => 'root',
@@ -158,14 +160,20 @@ function revealDeps(opts: {
   shown: boolean
   /** 查询源（身体会就地画）；false ＝ 普通块（没有行内体，切看法靠打开或宿主自订） */
   queryBody?: boolean
+  /** true ＝ q 不挂在当前屏的根下（创建路径落森林顶层的形状） */
+  detached?: boolean
 }): { d: ViewConfigDeps; calls: string[] } {
   const page = mkBlock('页')
   page.id = 'page'
   const q = mkBlock('')
   q.id = 'q'
   if (opts.queryBody !== false) q.props = { _query: { where: { any: [] } } }
-  page.children = [q]
-  const { kb } = kbOf([page])
+  // 挂在另一棵树下：块真实存在，只是不在当前屏（roots）上
+  const other = mkBlock('别页')
+  other.id = 'other'
+  if (opts.detached) other.children = [q]
+  else page.children = [q]
+  const { kb } = kbOf([page, other])
   const { owners } = fakeOwners()
   const calls: string[] = []
   const d: ViewConfigDeps = {
@@ -173,6 +181,8 @@ function revealDeps(opts: {
     owners,
     run: <R,>(fn: (tx: Tx) => R) => kb.tx(fn),
     reloadPage: () => calls.push('reload'),
+    // 屏上块的就地画分支走这一条（编辑器轻重画，自带选区恢复）
+    rerenderEditor: () => calls.push('reload'),
     rootIds: () => opts.roots,
     viewShown: () => opts.shown,
     activeId: () => 'page',
@@ -204,6 +214,14 @@ test('setActiveView：没有行内体、也没有表面画它 ⇒ 打开它（�
   const app = viewConfigCommands(d)
   assert.equal(app.setActiveView({ kind: 'block', blockId: 'q' }, ''), true)
   assert.deepEqual(calls, ['open:q'], `没有表面在画它 ⇒ 打开它：${JSON.stringify(calls)}`)
+})
+
+test('setActiveView：身体会就地画但块不在当前屏上 ⇒ 打开它（重画看不见屏外块）', () => {
+  // 创建路径把查询块落在森林顶层：它不是当前屏任何根的后代，重画多少遍都不出现
+  const { d, calls } = revealDeps({ roots: ['page'], shown: false, detached: true })
+  const app = viewConfigCommands(d)
+  assert.equal(app.setActiveView({ kind: 'block', blockId: 'q' }, ''), true)
+  assert.deepEqual(calls, ['open:q'], `屏外的就地画块 ⇒ 打开它：${JSON.stringify(calls)}`)
 })
 
 test('setActiveView：没有行内体、已有表面画着 ⇒ 什么都不做（宿主自己订阅了配置）', () => {
@@ -259,6 +277,7 @@ test('setViewFilter：一次动作只写一次（一步撤销）；清掉删键�
     owners,
     run: <R,>(fn: (tx: Tx) => R) => kb.tx(fn),
     reloadPage: () => {},
+    rerenderEditor: () => {},
     rootIds: () => [],
     viewShown: () => true,
     activeId: () => 'q',
@@ -349,6 +368,7 @@ test('viewSetCover：只写卡片视图的封面；别的 kind 拒绝（不写�
     owners,
     run: <R,>(fn: (tx: Tx) => R) => kb.tx(fn),
     reloadPage: () => {},
+    rerenderEditor: () => {},
     rootIds: () => [],
     viewShown: () => false,
     activeId: () => 'root',
