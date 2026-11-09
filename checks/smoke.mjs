@@ -5094,10 +5094,26 @@ await check('T58b 属性面板挂/摘块标签：只写归属，正文不动', a
     return b.id
   })
   await page.waitForTimeout(150)
-  await page.waitForSelector('.props-tag-input', { timeout: 4000 })
+  await page.waitForSelector('.props-tag-add', { timeout: 4000 })
 
-  await page.fill('.props-tag-input', '项目')
-  await page.press('.props-tag-input', 'Enter')
+  // 挂标签走**候选浮层**（与查询条件值位同一个手势）：点「＋」→ 搜「项目」→ 新建行
+  await page.click('.props-tag-add')
+  await page.waitForSelector('.layer .layer-input', { timeout: 4000 })
+  await page.fill('.layer .layer-input', '项目')
+  await page.waitForTimeout(200)
+  const overlayRows = await page.evaluate(() =>
+    [...document.querySelectorAll('.layer-item .layer-label')].map((x) => x.textContent),
+  )
+  assert(
+    overlayRows.some((s) => s.includes('项目') && (s.includes('新建') || s.includes('复用'))),
+    `候选浮层应给「新建/复用」行：${JSON.stringify(overlayRows)}`,
+  )
+  await page.evaluate(() => {
+    const item = [...document.querySelectorAll('.layer-item')].find((el) =>
+      el.textContent?.includes('项目') && (el.textContent?.includes('新建') || el.textContent?.includes('复用')),
+    )
+    item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
   await page.waitForTimeout(250)
 
   const added = await page.evaluate((id) => {

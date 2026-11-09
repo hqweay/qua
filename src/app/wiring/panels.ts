@@ -20,13 +20,10 @@ import {
   derivedTemplateOf,
   displayNameOf,
   EMPTY_QUICK_FILTER,
-  findByAlias,
   findTagByName,
-  flatten,
   SELF,
   hasQueryBody,
   hasChildrenViewBody,
-  hasList,
   findInForest,
   isJournal,
   isViewRoot,
@@ -62,7 +59,7 @@ import type { BlockStore } from '../../core/model/store.ts'
 import type { Prefs, Workspace } from '../../core/infra/workspace.ts'
 import type { Layers, Row } from '../../ui/overlay/layers.ts'
 import { openChoicePicker } from '../choice-picker.ts'
-import { openTagChoice } from '../retrieval/tag-choice.ts'
+import { createNameChoice, openNameChoice, openTagChoice } from '../retrieval/name-choice.ts'
 import { ICON_PATHS } from '../../view/icons.ts'
 import { BUILTIN_LABEL, MountArea, type ViewBodyHost } from '../../ui/chrome/mount-area.ts'
 import { PropertiesPanel, type PropertiesDeps } from '../../ui/block-ui/properties.ts'
@@ -240,38 +237,33 @@ export function setupPanels(deps: PanelsDeps) {
     trigger?: HTMLElement,
     opts?: { rootBlock?: boolean },
   ): void => {
-    const rows: Row[] = []
     /**
      * 「根块」是条件值位上的一枚虚拟块：它不在森林里，求值时由 `selfId` 解析成宿主。
      * 只在条件树要它（`rootBlock`）—— 属性区给某个块挑引用目标时，没有「随位置变化」这回事。
      * 与真实块同列、同搜索、同勾选，用户不必知道内部那个记号。
+     * 它不是候选目录的行（目录只管森林里的块），所以每次查询都由这里前置。
      */
-    if (opts?.rootBlock) {
-      rows.push({
-        id: `ref/${SELF}`,
-        label: t('ui.query.rootBlock'),
-        hint: t('ui.query.rootBlockHint'),
-        icon: 'lucide:square',
-        // 不给 group：置顶的一行不需要分组标题，看起来就是候选里的第一块
-        keyHint: current === SELF ? t('ui.props.refCurrent') : undefined,
-      })
-    }
-    for (const b of flatten({ roots: [...kb.roots()] })) {
+    const rootRow = (): Row[] =>
+      opts?.rootBlock
+        ? [
+            {
+              id: `ref/${SELF}`,
+              label: t('ui.query.rootBlock'),
+              hint: t('ui.query.rootBlockHint'),
+              icon: 'lucide:square',
+              // 不给 group：置顶的一行不需要分组标题，看起来就是候选里的第一块
+              keyHint: current === SELF ? t('ui.props.refCurrent') : undefined,
+            },
+          ]
+        : []
+    const choice = createNameChoice(kb.roots(), {
+      kind: 'ref',
       // 自己不能指向自己：那会造出一个立刻成环的引用
-      if (owner && b.id === owner.id) continue
-      const title = displayNameOf(b).trim()
-      rows.push({
-        id: `ref/${b.id}`,
-        label: title === '' ? t('ui.page.untitled') : title,
-        hint: hasList(b, 'page') ? t('ui.props.refIsPage') : t('ui.props.refIsBlock'),
-        icon: hasList(b, 'page') ? 'lucide:file' : 'lucide:square',
-        group: hasList(b, 'page') ? 'ref/1-page' : 'ref/2-block',
-        // 当前值做个标记：不然选过一次之后看不出来「现在是哪个」
-        keyHint: b.id === current ? t('ui.props.refCurrent') : undefined,
-      })
-    }
+      ...(owner ? { excludeIds: [owner.id] } : {}),
+      currentId: current,
+    })
     layers.openMenu({
-      rows,
+      rows: [...rootRow(), ...choice.rows('')],
       anchor: anchor ?? deps.getEd().caretRect(),
       // 同一颗值按钮再点一次＝收起（toggle）
       ...(trigger ? { trigger } : {}),
@@ -279,6 +271,7 @@ export function setupPanels(deps: PanelsDeps) {
       searchable: true,
       focusSearch: true,
       emptyText: t('ui.props.refEmpty'),
+      onQuery: (q) => layers.setRows([...rootRow(), ...choice.rows(q)]),
       onPick: (row) => {
         const id = String(row.id).slice('ref/'.length)
         onPick(id)
@@ -390,15 +383,29 @@ export function setupPanels(deps: PanelsDeps) {
     // 归属（filed-under）：任何块都有这一行；跨类的那条边只在这里看得见
     belongsTo: (b) => parentsOf(b, adj()),
     belongsDangling: (b) => danglingOf(b, adj()),
-    addBelong: (b, name) => {
-      // 入口收窄：候选只给页与标签（模型不查露面，这是 UI 的取舍）
-      const parent = findByAlias(deps.getWs().blocks, name, (x) => hasList(x, 'page') || hasList(x, 'tag'))
-      if (!parent) {
-        app.toast(t('ui.belongs.notFound', { name }), 'warn')
-        return
-      }
-      void deps.getRegistry().invoke('core.belongs-to/add', { childId: b.id, parentId: parent.id }, 'ui')
-      repaint()
+    /**
+     * **「选一个归属」浮层**：候选＝页＋标签（`kind:'pageOrTag'`），只选已有——
+     * 配归属不该顺手造身份。已挂的上级不再出现在候选里。
+     * 手打名字的入口随它退场：候选里没有的名字本来也加不上，省掉一句「找不到」。
+     */
+    pickBelong: (b, anchor, trigger) => {
+      openNameChoice({
+        layers,
+        forest: kb.roots(),
+        kind: 'pageOrTag',
+        allowCreate: false,
+        excludeIds: parentsOf(b, adj()).map((p) => p.id),
+        anchor,
+        trigger,
+        title: t('ui.belongs.pickTitle'),
+        emptyText: t('ui.belongs.pickEmpty'),
+        idPrefix: 'propbelong',
+        onPick: (pick) => {
+          if (pick.kind !== 'block') return
+          void deps.getRegistry().invoke('core.belongs-to/add', { childId: b.id, parentId: pick.id }, 'ui')
+          repaint()
+        },
+      })
     },
     removeBelong: (b, parentId) => {
       void deps.getRegistry().invoke('core.belongs-to/remove', { childId: b.id, parentId }, 'ui')
@@ -410,9 +417,26 @@ export function setupPanels(deps: PanelsDeps) {
     },
     // 挂/摘之后**面板自己重画**：这一行显示的就是刚改的那份 `_tags`，
     // 等下一次选区变化才刷会让「加完没反应」
-    addTag: (b, name) => {
-      void deps.getRegistry().invoke('core.tags/add', { blockId: b.id, name }, 'ui')
-      repaint()
+    /**
+     * **「选一个标签」浮层**（与查询条件值位同一个手势）：可搜可新建，
+     * 新建与选中走同一条写路径（`core.tags/add` 自己处理复用同名页／新建标签块）。
+     * 已挂的不重复出现在候选里。
+     */
+    pickTag: (b, anchor, trigger) => {
+      openTagChoice({
+        layers,
+        forest: kb.roots(),
+        anchor,
+        trigger,
+        title: t('ui.props.pickTagTitle'),
+        emptyText: t('ui.props.pickTagEmpty'),
+        selectedIds: kb.tagsOf(b.id).map((x) => x.id),
+        idPrefix: 'proptag',
+        onPick: (pick) => {
+          void deps.getRegistry().invoke('core.tags/add', { blockId: b.id, name: pick.name }, 'ui')
+          repaint()
+        },
+      })
     },
     removeTag: (b, tagId) => {
       void deps.getRegistry().invoke('core.tags/remove', { blockId: b.id, tagId }, 'ui')

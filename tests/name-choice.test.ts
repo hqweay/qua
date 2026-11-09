@@ -1,12 +1,15 @@
 /**
- * **「选一个标签」的候选判据**（`app/retrieval/tag-choice.ts`）。
+ * **「选一个名字」的候选判据**（`app/retrieval/name-choice.ts`）。
  *
- * 钉住五件事：
+ * 钉住八件事：
  *   ① 过滤走**全部地址**（第二别名、大小写、空白规范化都能找到自己）；
  *   ② 排序走**主地址**（`A/B` 与 `C/B` 的叶子相同，按叶子排会看着无序）；
  *   ③ 来源＝全部／限定子树／已用优先；已选与排除项不出现在候选里；
  *   ④ 新建行只在「有输入且没有同名标签」时出现；同名页会给「复用它」的文案；
- *   ⑤ **目录只建一次**：标签再多、查询再多次，邻接表也只建一遍（旧写法是每行建一遍）。
+ *   ⑤ **目录只建一次**：标签再多、查询再多次，邻接表也只建一遍（旧写法是每行建一遍）；
+ *   ⑥ 页／页＋标签源：只收身份块、按主地址排、身份组复用 `pick/1`／`pick/2`、**没有新建行**；
+ *   ⑦ 引用源：保持**文档序**不重排、排除自己、当前值行打「当前」徽标；
+ *   ⑧ `tags` 会话的既有形状（`pageFor`／`tagById`）不因泛化而丢。
  *
  * ⚠️ 这里刻意不测浮层 DOM／按键：菜单的键盘与 IME 组合守卫住在 `ui/overlay/layers.ts`
  *    与 `ui/overlay/query-gate.ts`，前者由真浏览器冒烟验，后者的状态机由 `query-gate` 单测钉。
@@ -16,7 +19,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { textRuns, walkForest, type Block } from '../src/core/index.ts'
 import { t } from '../src/core/infra/msg.ts'
-import { createTagChoice } from '../src/app/retrieval/tag-choice.ts'
+import { createNameChoice, createTagChoice } from '../src/app/retrieval/name-choice.ts'
 
 const tag = (id: string, aliases: string[], parents: string[] = []): Block => ({
   id,
@@ -40,6 +43,16 @@ const page = (id: string, alias: string): Block => ({
   props: { _aliases: [alias], _lists: ['page'] },
 })
 
+/** 普通块（无身份、可有子树与露面；引用源用它验文档序） */
+const item = (id: string, name: string, children: Block[] = [], lists: string[] = []): Block => ({
+  id,
+  content: textRuns(name),
+  children,
+  created: 0,
+  modified: 0,
+  props: lists.length > 0 ? { _lists: lists } : {},
+})
+
 const labels = (rows: { label: string }[]): string[] => rows.map((r) => r.label)
 const tagRows = (rows: { group?: string }[]): { label: string; hint?: string }[] =>
   rows.filter((r) => r.group === 'tagpick/1') as { label: string; hint?: string }[]
@@ -58,7 +71,7 @@ test('② 排序：按主地址而不是显示叶子（`A/B` 与 `C/B` 的叶子
   const forest = [tag('z', ['C/B']), tag('a', ['A/B']), tag('m', ['B'])]
   const choice = createTagChoice(forest)
   assert.deepEqual(labels(choice.rows('')), ['#B', '#B', '#B'], '三行都是叶子 B')
-  assert.deepEqual(choice.tags.map((b) => b.id), ['a', 'm', 'z'], '主地址序：A/B < B < C/B')
+  assert.deepEqual(choice.blocks.map((b) => b.id), ['a', 'm', 'z'], '主地址序：A/B < B < C/B')
 })
 
 test('③ 层级提示来自边的上级；已选／排除不出现；限定子树；已用优先', () => {
@@ -148,4 +161,51 @@ test('⑥ 目录只建一次：标签再多、查询再多次，邻接表也只�
 
   for (const q of ['', 'tag', 'tag1', 't', 'tag2']) choice.rows(q)
   assert.equal(walks, 1, '输入只做本地过滤，不再重建邻接表')
+})
+
+test('⑥ 页／页＋标签源：只收身份块、按主地址排、身份组复用 pick/1·pick/2、没有新建行', () => {
+  const forest = [page('p1', 'zzz'), tag('t1', ['aaa']), item('x', 'plain'), item('p2', 'bare-page', [], ['page'])]
+  const both = createNameChoice(forest, { kind: 'pageOrTag' })
+
+  assert.deepEqual(labels(both.rows('')), ['#aaa', 'bare-page', 'zzz'], '普通块不进候选，按主地址排（无别名页兜底用 id）')
+  assert.deepEqual(
+    both.rows('').map((r) => r.group),
+    ['pick/2', 'pick/1', 'pick/1'],
+    '页与标签各归各组（分组标题表里已有的两组）',
+  )
+  assert.equal(both.rows('brandnew').some((r) => r.pick?.kind === 'newTag'), false, '归属是选已有，不给新建行')
+
+  const pagesOnly = createNameChoice(forest, { kind: 'page' })
+  assert.deepEqual(labels(pagesOnly.rows('')), ['bare-page', 'zzz'], '页源只列页')
+  assert.deepEqual(
+    createNameChoice(forest, { kind: 'pageOrTag', excludeIds: ['p1', 't1'] }).rows('').map((r) => r.label),
+    ['bare-page'],
+    '排除项对所有来源生效',
+  )
+})
+
+test('⑦ 引用源：文档序不重排、排除自己、当前值行打「当前」徽标', () => {
+  const forest = [page('p1', 'P1'), item('r0', 'R0'), item('c1', 'C1'), item('c2', 'C2')]
+  const choice = createNameChoice(forest, { kind: 'ref' })
+  assert.deepEqual(
+    choice.rows('').map((r) => r.id),
+    ['ref/p1', 'ref/r0', 'ref/c1', 'ref/c2'],
+    '引用保持文档序（不按地址重排）',
+  )
+  assert.deepEqual(
+    createNameChoice(forest, { kind: 'ref', excludeIds: ['r0'] }).rows('').map((r) => r.id),
+    ['ref/p1', 'ref/c1', 'ref/c2'],
+    '自己不进候选（引用不能指向自己）',
+  )
+  const marked = createNameChoice(forest, { kind: 'ref', currentId: 'c2' }).rows('')
+  assert.equal(marked.find((r) => r.id === 'ref/c2')!.keyHint, t('ui.props.refCurrent'), '当前值行有徽标')
+  assert.equal(marked.find((r) => r.id === 'ref/p1')!.keyHint, undefined, '别的行没有')
+})
+
+test('⑧ tag 会话的既有形状不因泛化而丢（tags 表、pageFor、tagById）', () => {
+  const forest = [tag('a', ['exists']), page('p', 'brandnew')]
+  const choice = createTagChoice(forest)
+  assert.deepEqual(choice.blocks.map((b) => b.id), ['a'], 'blocks 就是标签表（按主地址排）')
+  assert.equal(choice.pageFor('brandnew')?.id, 'p')
+  assert.equal(choice.tagById('a')?.id, 'a')
 })

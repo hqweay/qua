@@ -32,7 +32,7 @@ import { resolveBindings } from '../../core/infra/bindings.ts'
 import { t } from '../../core/infra/msg.ts'
 import { TRIGGER_QUERY_MAX, type TriggerChar } from '../../core/infra/trigger.ts'
 import { rowsFromBindings, type Row } from '../../ui/overlay/layers.ts'
-import { createTagChoice } from './tag-choice.ts'
+import { createTagChoice } from './name-choice.ts'
 // 第二段（成员搜索）的判据住在 `member-rows.ts`（纯函数，可单测）；这里只取成员上限常量，
 // 并把形状转发给装配层（`main.ts` 从这里拿 `memberRows`，与 `createTriggers` 同一个门面）。
 import { INSTANCE_CAP } from './member-rows.ts'
@@ -163,7 +163,7 @@ function tagRows(query: string, deps: TriggerDeps): Row[] {
     createLabel: (name) => t('ui.retrieval.newTag', { name }),
     createHint: (page) => (page ? t('ui.tagPicker.reuseHint') : t('ui.retrieval.newTagHint')),
   })
-  return [...instanceRows(choice.tags, normalizeAlias(query), deps), ...choice.rows(query)]
+  return [...instanceRows(choice.blocks, normalizeAlias(query), deps), ...choice.rows(query)]
 }
 
 /* -------------------------------------------------------- 页与块（`@` 源）*/

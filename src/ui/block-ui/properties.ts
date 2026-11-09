@@ -59,8 +59,13 @@ export interface PropertiesDeps {
    *    同一个标签可以只当分类（没有字段）。
    */
   tags: (b: Block) => Block[]
-  /** 挂一个标签（只写归属；行内露面由「正文里敲 `#名`」产生） */
-  addTag: (b: Block, name: string) => void
+  /**
+   * **打开「选一个标签」浮层**（可搜可新建），选中后由装配层写归属并重画。
+   *
+   * 与 `pickRef` 同一条理由走注入：候选要读整片森林、浮层在 ui 层之外，
+   * 属性区只认识「当前这一块」。
+   */
+  pickTag: (b: Block, anchor: DOMRect, trigger: HTMLElement) => void
   /** 摘掉一个标签（连带收掉它在正文里的露面） */
   removeTag: (b: Block, tagId: string) => void
   /**
@@ -130,8 +135,11 @@ export interface PropertiesDeps {
   belongsTo: (b: Block) => Block[]
   /** 悬空上级的两态（回收站里的不能清、真没了的能清） */
   belongsDangling: (b: Block) => Dangling
-  /** 加一条归属（按名字在页／标签里找；找不到就提示） */
-  addBelong: (b: Block, name: string) => void
+  /**
+   * **打开「选一个归属」浮层**（候选＝页＋标签，只选已有不新建），选中后由装配层写边并重画。
+   * 手打名字的入口随它退场：候选里没有的名字本来也加不上（模型不查露面，入口收窄是 UI 的取舍）。
+   */
+  pickBelong: (b: Block, anchor: DOMRect, trigger: HTMLElement) => void
   /** 删一条归属（只动这一块；不碰名字、不碰它的子块） */
   removeBelong: (b: Block, parentId: string) => void
   /** 清理「上级真没了」的那些 */
@@ -829,18 +837,13 @@ export class PropertiesPanel {
       value.appendChild(prune)
     }
 
-    const input = document.createElement('input')
-    input.className = 'prop-input props-tag-input'
-    input.placeholder = t('ui.belongs.placeholder')
-    onCommitKeys(input, {
-      commit: () => {
-        const parentName = input.value.trim()
-        if (parentName === '') return
-        this.deps.addBelong(target, parentName)
-        input.value = ''
-      },
-    })
-    value.appendChild(input)
+    // 与查询条件值位同一个手势：点开浮层选已有，而不是手打名字碰运气
+    const add = document.createElement('button')
+    add.type = 'button'
+    add.className = 'ghost props-belong-add'
+    add.textContent = t('ui.belongs.add')
+    add.addEventListener('click', () => this.deps.pickBelong(target, add.getBoundingClientRect(), add))
+    value.appendChild(add)
 
     row.append(label, value)
     return row
@@ -888,18 +891,13 @@ export class PropertiesPanel {
       chip.append(text, del)
       value.appendChild(chip)
     }
-    const input = document.createElement('input')
-    input.className = 'prop-input props-tag-input'
-    input.placeholder = t('ui.props.tagPlaceholder')
-    onCommitKeys(input, {
-      commit: () => {
-        const tagName = input.value.trim()
-        if (tagName === '') return
-        this.deps.addTag(target, tagName)
-        input.value = ''
-      },
-    })
-    value.appendChild(input)
+    // 与查询条件值位同一个手势：点开浮层选已有（可新建），而不是手打名字碰运气
+    const add = document.createElement('button')
+    add.type = 'button'
+    add.className = 'ghost props-tag-add'
+    add.textContent = t('ui.props.tagAdd')
+    add.addEventListener('click', () => this.deps.pickTag(target, add.getBoundingClientRect(), add))
+    value.appendChild(add)
 
     row.append(label, value)
     return row

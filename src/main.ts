@@ -33,7 +33,7 @@ import {
 } from './core/commands/index.ts'
 import { Layers, paletteRows, rowsFromBindings, type PickMods, type Row } from './ui/overlay/layers.ts'
 import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from './app/retrieval/triggers.ts'
-import { openTagChoice } from './app/retrieval/tag-choice.ts'
+import { openTagChoice } from './app/retrieval/name-choice.ts'
 import { DockWindows } from './ui/dock/dock-windows.ts'
 import { BackrefsCard } from './ui/cards/backrefs-card.ts'
 import { SearchCard } from './ui/cards/search-card.ts'
@@ -2031,7 +2031,7 @@ const app: App = {
    * 这是「`#` 补全」当前的产品形态：从列表选一个已有标签插边（正文里敲 `#` 自动成边仍未做）。
    * 层级只帮人认位置，不参与消歧（地址唯一）。
    *
-   * 候选与浮层都交给 `app/retrieval/tag-choice.ts`：标签表与边图邻接表在**打开这一刻**
+   * 候选与浮层都交给 `app/retrieval/name-choice.ts`：标签表与边图邻接表在**打开这一刻**
    * 建一次，输入只做本地过滤（不再每行重建一遍邻接表）。
    */
   /**
