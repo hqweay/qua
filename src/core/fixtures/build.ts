@@ -45,7 +45,7 @@ export interface BuiltPage {
   /** 页 ＝ `_lists` 里有 `page` 的块；名字在 `_aliases`（journal 也复用这个形状） */
   page: Block
   /** 页面标题 → id 的解析表（延后处理引用目标；行内内容已就位，只等回填 `to`） */
-  refs: { runId: string; label: string }[]
+  refs: { runId: string; label: string; flavor?: '#' }[]
   /** 还没解析成 id 的标签归属（森林凑齐、标签块建好之后再落进 `_tags`） */
   pendingTags: { block: Block; name: string }[]
 }

@@ -1,6 +1,6 @@
 /**
  * 迷你 DSL：种子正文里直接写 `**粗**` / `==高亮==` / `` `代码` `` / `[[页面]]` / `![[图.png]]` /
- * `[名字](https://…)`，由 `parseInline` 解析成** run 序列**——这正是模型里的行内内容形状
+ * `[名字](https://…)` / `#标签`，由 `parseInline` 解析成** run 序列**——这正是模型里的行内内容形状
  * （文本段带 marks、原子是 run），而不是把富文本塞进 DOM。
  *
  * 单独一层是为了让「种子内容长什么样」与「内容怎么变成块」分开：
@@ -38,10 +38,12 @@ export interface SeedBlock {
 export interface PendingRef {
   runId: string
   label: string
+  /** 只有行内标签（`#名`）有：回填时与普通 `[[…]]` 走同一张地址表，flavor 原样保留 */
+  flavor?: '#'
 }
 
 interface AtomToken {
-  kind: 'page' | 'image' | 'link'
+  kind: 'page' | 'image' | 'link' | 'tag'
   start: number
   label: string
   /** 只有 `kind: 'link'` 有：规范化之后的地址（显示名与地址是两个键，同 `LinkRun`） */
@@ -84,6 +86,24 @@ export function parseInline(src: string): { runs: Run[]; refs: PendingRef[] } {
       atoms.push({ kind: 'page', start: text.length - 1, label: page[1]!.trim() })
       i += page[0].length
       continue
+    }
+    /**
+     * `#标签` ⇒ 一枚**行内标签**（`RefRun` 带 `flavor:'#'`）：占正文 1 格的原子，
+     * 与块级归属（`props._tags`，走 `SeedBlock.tags`）是两件事——同一份归属的两种露面。
+     *
+     * 目标解析与 `[[…]]` 共用一张表（标签占地址）：解析不到就是悬空，不造假 id。
+     * ⚠️ 尾部紧跟的标点不进名字（`#功能。` 的标签是「功能」，句号留给文本流）；
+     *    名字拿不到东西时整个退回普通字符，不吞 `#`。
+     */
+    const tag = /^#([^\s#]+)/.exec(rest)
+    if (tag) {
+      const label = tag[1]!.replace(/[。，、；：！？.,;:!?)）】》'"”’]+$/, '')
+      if (label !== '') {
+        text += '\uFFF9'
+        atoms.push({ kind: 'tag', start: text.length - 1, label })
+        i += 1 + label.length
+        continue
+      }
     }
     /**
      * `[名字](地址)` ⇒ 一枚外链。名字可以为空（`[](地址)`）⇒ 显示地址本身，
@@ -207,6 +227,17 @@ export function parseInline(src: string): { runs: Run[]; refs: PendingRef[] } {
           url: atom.url!,
           ...(mk.length ? { marks: mk } : {}),
         }
+        runs.push(run)
+      } else if (atom.kind === 'tag') {
+        // 行内标签是 ref run 的一种风味（`flavor:'#'`）：显示成 `#名`，目标延后按地址回填
+        const run: RefRun = {
+          id: uuidv7Hex(),
+          t: 'ref',
+          flavor: '#',
+          label: atom.label,
+          ...(mk.length ? { marks: mk } : {}),
+        }
+        refs.push({ runId: run.id, label: atom.label, flavor: '#' })
         runs.push(run)
       } else {
         const run: RefRun = { id: uuidv7Hex(), t: 'ref', label: atom.label, ...(mk.length ? { marks: mk } : {}) }

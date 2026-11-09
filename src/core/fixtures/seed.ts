@@ -3,13 +3,16 @@
  *
  * 默认落点是今日 journal，所以「第一次打开看到什么」由这一屏承担：
  * 一句主张、三个地址（仓库 / 演示站 / 架构图）、行内图片与缺失资产、引用与悬空引用、
- * 标签、待办两种状态、嵌套、以及「这一屏可以随便改」的提醒。
+ * 行内标签与块标签（同一份归属的两种露面）、待办两种状态、嵌套、以及「这一屏可以随便改」的提醒。
+ * 顶层另有**属性 / 实例 / 看法**的完整样本：`功能` 标签声明两个属性、几条实例填着值、
+ * 一条「功能看板」查询在四张看法（看板 / 表格 / 画廊 / 日历）之间切换——
+ * 每个已落地的能力都有一份**能摸到的数据**，而不是一句文档。
  *
  * 为什么不是一张「欢迎页」：页 / 日记 / 标签都只是块的露面，**开场落点就是真实的
  * 编辑面**——用户看到的第一块不是只读介绍，而是可以拆、可以改、可以撤销的内容。
  *
  * 正文用迷你 DSL 写（见 `inline.ts`），由它解析成 run 序列（文本段带格式、引用与图片是 run）。
- * 三个演示状态（空 / 稀疏 / 降级）在 `states.ts`，冷启动首屏在 `core/bootstrap.ts`：
+ * 三个演示状态（空 / 稀疏 / 降级）在 `states.ts`，冷启动首屏在 `core/infra/bootstrap.ts`：
  * 它们与「满态种子」是**不同的用途**，混在一个文件里会让「改首屏」和「改满态」互相牵连。
  *
  * ⚠️ 内容里的几个名字是**判据**，不是文案：`产品设计 · 决策日志` 必须是第一页
@@ -17,13 +20,22 @@
  *    六天的 journal 保证日记流能滚、能向后加载。改它们要连带跑门禁。
  */
 import {
+  appendEdge,
+  CHILD_PROPS_PROP,
   declareField,
+  DEFAULT_PROP,
+  derivedId,
+  mkBlock,
+  mkObjRecord,
+  mkPropDef,
   mkQueryBlock,
   mkTagBlock,
+  plainText,
   shiftISO,
   TASK_STATUS_ABANDONED_ID,
   TASK_STATUS_DONE_ID,
   TASK_STATUS_PROP_ID,
+  textRuns,
   todayISO,
   type Block,
   type MountEntry,
@@ -72,6 +84,8 @@ export function seedWorkspace(): Workspace {
         { text: '选中一段按 ⌘B 加粗、⌘I 斜体、⌘E 高亮，⌘＋反引号是行内代码——格式是那段文字自己的属性。' },
         { text: '引用一枚页：[[输入面笔记]]（左键打开，Shift+左键在右槽开一张窗）。' },
         { text: '悬空引用也读得出来：[[还没写的页面]] 只是没有目标，不是坏数据。' },
+        { text: '正文里的 #功能 是一次提及（占一格的原子）；块的标签 chip 不占正文——同一份归属，两种露面。' },
+        { text: '顶层有一条「功能看板」值得点开：实例按状态分列的看板，还能切成表格、画廊与日历——同一批数据，四种读法。' },
         { text: '这一屏之外还有两页值得翻：[[输入面笔记]] 与 [[开发日志 · 2026-W44]]。' },
         { text: '标签是归属，不是正文里的几个字：', tags: ['设计', '发布'] },
       ],
@@ -91,51 +105,43 @@ export function seedWorkspace(): Workspace {
     ]),
   ])
 
-  /* ------------------------------------------------------- 昨天 / 前天：开发日志 */
+  /* ------------------------------------------------------- 昨天 / 前天：这一周在做什么 */
 
   const yesterday = mkJournal(shiftISO(todayISO(), -1), [
     {
-      text: '行内图片真正落地的一天：先嗅探 magic bytes，再入库（内容寻址），最后按**捕获的落点**插 run。',
+      text: '属性与实例收口的一天：标签可以**声明属性**，实例（⇧↵）是标签的一次出现——背后没有新实体。',
       children: [
-        { text: '粘贴、选文件、拒绝拖入走同一条收口——拖进来的裸 <img> 只活在 DOM 里，刷新就没了。' },
-        { text: '行高固定 1.35em：虚拟化的占位不需要跟着图变。' },
+        { text: '值走属性（能进查询、导出、属性面板），分类走标签；「任务」就是这两样的组合。' },
+        { text: '实例落在森林顶层：位置对它不承载信息，读路径一律按 id 与归属找它。' },
       ],
     },
-    {
-      text: '这几天的地址也记一下：',
-      children: [
-        { text: '[](https://github.com/hqweay/qua)' },
-        { text: '[](https://qua.leay.net/)' },
-      ],
-    },
-    { text: '昨天的判断：先做「看得见」，再做「管理」——lightbox 与详情够用，图库放到以后。' },
+    { text: '给「功能」标签声明了状态与落地日期，顶层那几条实例就是用产品管理产品。' },
     ...filler([
-      '缺失与不可用分成两态：一个是「库里没有这份字节」，一个是「资产库根本没打开」。',
-      'CSP 的 img-src 少了 blob: 会静默变 0×0——图不报错，就是不显示。',
-      '同一份字节第二次入库是空操作，只是多一枚 run。',
-      '删除图不删字节：内容寻址的代价是「删了还在」，管它的是另一件事。',
-      '详情里的字段全现算：hash 落盘，mime 与状态归资产库。',
-      '图不许带格式：位图没有加粗这回事。',
-      '图片是一枚原子，占正文 1 格——和引用、外链同一种东西。',
+      '声明与值分开：定义块回答「这一栏是什么」，块上的值回答「这块填了什么」。',
+      'select 的值域是定义块的直接子块——角色由位置派生，不另存一份「这是选项」。',
+      '缺省值住在定义上：实例没填这一栏时，面板读出来的就是它。',
+      '属性键是定义块的 id：改显示名不影响查询语义。',
+      '实例没有地址：身份由「哪条归属指着它」给出，要提名是另一个动词。',
+      '顶层不是杂物抽屉：实例住在那里，是因为位置对它不承载信息。',
     ]),
   ])
 
   const dayBefore = mkJournal(shiftISO(todayISO(), -2), [
     {
-      text: '查询的口径又过了一遍：**冻结成员与顺序，内容按块 id 现读**。',
+      text: '看法收口的一天：同一批记录，卡片按值分列是**看板**、不分组是**画廊**、按日期铺开是**日历**。',
       children: [
-        { text: '刷新是显式动作，所以打字的时候行不会跳。' },
-        { text: '不匹配了不整块消失，只标「可能已过期」。' },
+        { text: '看法住在源块上，露面只存一次选择——同一批数据不会有第二份配置。' },
+        { text: '按值分组时拖卡＝写那一格的值，不是换父子。' },
       ],
     },
-    { text: '反链走同一条查询：它只是「谁指向我」。' },
+    { text: '顶层那条「功能看板」就是样本：四张看法切换，数据一行不动。' },
     ...filler([
+      '大纲是唯一可编辑的那种看法——其它看法先把数据读清楚。',
+      'query 源不接导图：命中集合不是树，硬接只会画出错误的结构。',
+      '日历的落点跟着日期属性走：没填日期的卡去「未填」那一格。',
+      '表格的列也是属性：键是定义块 id，改名列还在。',
+      '看板不是第二种看法：卡片分组之后的那副面孔。',
       '空结果要保留抬头，不能整块消失。',
-      '刷新失败保留旧结果，只弹一条提示。',
-      '结果行首给面包屑：同一句话在别的页里也有时，读者得知道这一行住哪。',
-      '条件先只管一种：待办状态。',
-      '表格与看板留到字段级编辑之后。',
-      '真正难的是索引，不是渲染。',
     ]),
   ])
 
@@ -193,6 +199,7 @@ export function seedWorkspace(): Workspace {
         { text: '组件第二处就抽出来：正文 / 挂载区 / 查询结果 / 侧槽共用同一个编辑器配方。' },
       ],
     },
+    { text: '实例是标签的一次出现：顶层的几条「功能」实例背后没有新实体——归属与属性就是它的全部。' },
     // 待办样本：这一页恰好一条未完成，页底那条查询才稳定只有 1 行结果。
     { text: '把「引用某段」的 UI 补上', tags: ['任务'], task: false },
     { text: '行内内容边界断言复跑通过', tags: ['任务', '证据'], task: true },
@@ -223,6 +230,8 @@ export function seedWorkspace(): Workspace {
       },
     },
     { text: '关于「假数据」：这一页与别处一样可改；换库只换内容，不改形状。' },
+    // 最后两行是**镜像样本**：宿主块在装配段构造（要指向 p3 的「下一步」，那时 id 才存在）。
+    { text: '最后一行是镜像：源是开发日志的「下一步」，改源跟着变——露面只存一次看法的选择。' },
   ])
 
   const p2 = mkPage('输入面笔记', 'lucide:flask-conical', [
@@ -250,6 +259,9 @@ export function seedWorkspace(): Workspace {
     { text: '一行里塞满行内原子：[[产品设计 · 决策日志]] ![[输入面-第二张.png]] 后面还要能继续打字。' },
     { text: '一段带四种行内格式的句子：**加粗的结论**、*斜体的限定*、==高亮的关键词==、`inline code`。' },
     { text: '标记顺序不能错：==先高亮== 再 **后加粗**，两个区间都得落在自己那几个字上。' },
+    // **算作**样本：下一行会被 appendEdge 到 p3 的「下一步」下（装配段做，那时父块 id 才存在）。
+    { text: '同一块、两处算作：下面这行迁移笔记也算作开发日志「下一步」的一员——算作只加一条父边，树没有搬。' },
+    { text: '多库迁移的注意点：先备份原始字节，再换内容。' },
     { text: '降级样本 · 超长块：' + longParagraph() },
     { text: '降级样本 · 全英文长行（不该溢出容器）：' + LONG_EN },
     { text: '归属放在正文之外：这一页打了标签，字一个都没被改。', tags: ['设计', '输入面', '资产'] },
@@ -257,11 +269,11 @@ export function seedWorkspace(): Workspace {
 
   const p3 = mkPage('开发日志 · 2026-W44', 'lucide:newspaper', [
     {
-      text: '本周：行内图片接进正文。',
+      text: '本周：属性、实例与看法。',
       children: [
-        { text: '粘贴 / 选文件 → 嗅探 → 入库（去重）→ 按捕获的落点插 run。' },
-        { text: '真图缩略、lightbox、⌥ 详情；missing 与 unavailable 是两种不同的失败。' },
-        { text: '行高不变，虚拟化的占位不用跟着图变。' },
+        { text: '标签声明属性、⇧↵ 建实例、属性面板就地改值——值能进查询与表格。' },
+        { text: '卡片按值分列是看板、不分组是画廊、按日期铺开是日历：同一批数据，一份配置。' },
+        { text: '顶层的「功能看板」就是这周的数据样本：用产品管理产品。' },
       ],
     },
     {
@@ -275,18 +287,29 @@ export function seedWorkspace(): Workspace {
     {
       text: '最近几天',
       children: [
-        { text: '10-27 行内图片上线：粘贴、选文件、lightbox、缺失三态；全量门禁绿。' },
-        { text: '10-26 三张表收口：命令、绑定、上下文键各只有一份事实源。' },
-        { text: '10-25 侧槽：一个块一张卡，可收起、只看这一张、拖序。' },
-        { text: '10-24 拖拽收成一条缝：载荷只带块 id，落点决定含义。' },
+        { text: '11-09 回收站清空：对口径集合的一次清理，不进撤销。' },
+        { text: '11-05 多库与库根：一个窗口一个库，数据从浏览器搬进文件。' },
+        { text: '11-07 看法收口：卡片分列是看板，不分组是画廊。' },
+        { text: '10-27 行内图片上线：粘贴、选文件、lightbox、缺失三态。' },
       ],
     },
     {
       text: '下一步',
+      // **子块行头属性**的演示：父块声明 `_childProps`，直接子块行头显示这一栏的值。
+      props: { [CHILD_PROPS_PROP]: [FEATURE_STATUS_PROP_ID] },
       children: [
-        { text: '多库与库根：一个窗口一个库，数据从浏览器搬进文件。' },
-        { text: '引用某一段：锚点带 blockId，改名与重排之后还能找回。' },
-        { text: '表格与看板：先把条件构造器做出来。' },
+        {
+          text: '条件构造器：把查询的门槛降下来。',
+          props: { [FEATURE_STATUS_PROP_ID]: FEATURE_STATUS_EXPLORING_ID },
+        },
+        {
+          text: '发布与签名：把安装包送到别人手上。',
+          props: { [FEATURE_STATUS_PROP_ID]: FEATURE_STATUS_EXPLORING_ID },
+        },
+        {
+          text: '图库管理：图多了之后的入口。',
+          props: { [FEATURE_STATUS_PROP_ID]: FEATURE_STATUS_SHELVED_ID },
+        },
       ],
     },
     { text: '这一页也是块：把「下一步」整棵子树拖进左槽，就能开一张窗口。' },
@@ -319,15 +342,78 @@ export function seedWorkspace(): Workspace {
   allPages.modified = SEED_AT
   blocks.push(allPages)
 
-  // 核心词汇（定义块 ＋ 标签块）先在森林顶层就位：`ensureTag` 要能找到 `任务` 并复用，
-  // 否则种子会建出第二个同名标签；`[[ ]]` 的解析也要在这之后（标签同样占地址）。
-  blocks.push(...coreVocabulary())
+  /**
+   * **功能看板**＝属性 / 实例 / 看法三件事共用的一条查询：条件按标签归属取成员，
+   * 四张命名看法（看板 / 表格 / 画廊 / 日历）挂在源块上——切看法不换数据。
+   *
+   * ⚠️ 同「全部页面」：只造**条件与配置**，不预置结果——冻结是求值产生的。
+   */
+  const featureBoard = mkQueryBlock({
+    name: '功能看板',
+    spec: { where: { tag: FEATURE_TAG_LABEL } },
+    views: [
+      {
+        id: 'seed-kanban',
+        name: '看板',
+        kind: 'cards',
+        // 看板＝卡片按值分列：组按选项 id 实时导出，呈现顺序钉成声明序
+        groupBy: FEATURE_STATUS_PROP_ID,
+        groupOrder: [FEATURE_STATUS_EXPLORING_ID, FEATURE_STATUS_SHIPPED_ID, FEATURE_STATUS_SHELVED_ID],
+      },
+      {
+        id: 'seed-table',
+        name: '表格',
+        kind: 'table',
+        table: { columns: [{ key: FEATURE_STATUS_PROP_ID }, { key: FEATURE_DATE_PROP_ID }] },
+      },
+      { id: 'seed-gallery', name: '画廊', kind: 'cards' },
+      {
+        id: 'seed-calendar',
+        name: '日历',
+        kind: 'calendar',
+        calendar: { dateBy: FEATURE_DATE_PROP_ID, showUndated: true },
+      },
+    ],
+    activeView: 'seed-kanban',
+  })
+  featureBoard.created = SEED_AT
+  featureBoard.modified = SEED_AT
 
-  // 标签归属先落成 id（新标签块会在这时进森林），再解析 `[[ ]]`
+  // 核心词汇（定义块 ＋ 标签块）先在森林顶层就位：`ensureTag` 要能找到 `任务` 并复用，
+  // 否则种子会建出第二个同名标签；`[[ ]]` 与 `#标签` 的解析也要在这之后（标签同样占地址）。
+  const vocab = coreVocabulary()
+  blocks.push(...vocab.blocks)
+
+  // 标签归属先落成 id（新标签块会在这时进森林），再解析 `[[ ]]` 与 `#标签`
   resolveSeedTags(blocks, built.flatMap((b) => b.pendingTags))
   resolveRefs(blocks, built)
 
+  // 实例样本：条数与值的分布开——看板每一列有卡、日历有落点、缺省值有一条没填的样本
+  blocks.push(...featureInstances(vocab.featureTagId))
+  blocks.push(featureBoard)
+
+  /* ---------------------------------------------- 要拿到已建块 id 才能写的样本 */
+
+  const nextStep = childByPlain(p3.page, '下一步')
+  // 镜像：p1 的宿主块指向 p3 的「下一步」（`view:''` ＝ 跟随源块的默认看法）
+  if (nextStep) {
+    const mirror = mkBlock(textRuns('下一步 · 镜像'), {
+      props: { _embed: { block: nextStep.id, view: '' } },
+      created: SEED_AT,
+      modified: SEED_AT,
+    })
+    p1.page.children.push(mirror)
+    // 算作：p2 的迁移笔记同时算作「下一步」的一员——多一条父边，树没有搬
+    const migrationNote = childByPlain(p2.page, '多库迁移的注意点')
+    if (migrationNote) appendEdge(migrationNote, nextStep)
+  }
+
   return forest(blocks, built)
+}
+
+/** 按正文前缀找页的直接子块（装配段用它拿到 DSL 造不出来的那几个 id） */
+function childByPlain(page: Block, prefix: string): Block | undefined {
+  return page.children.find((c) => plainText(c.content).startsWith(prefix))
 }
 
 /**
@@ -339,24 +425,91 @@ function filler(lines: readonly string[]): SeedBlock[] {
   return lines.map((text) => ({ text }))
 }
 
-/**
- * **核心词汇**：种子库里必须存在的字段定义与标签。
- *
- * 它们住在**森林顶层** —— 身份不参与组织（`schema` 与 `tag` 的位置不承载任何信息，
- * 所有读路径都按 id 找它们）。所以这里不挂在任何页的子树下：挂在谁下面，
- * 谁被删掉就会带走它们。
- *
- * 顺序：定义块在前、标签块在后 —— 标签要声明那个字段，读一遍就知道它声明的是谁。
- *
- * 「任务」不是一个新概念，是两样东西的组合：**值**（做完了没有）＝ 一个全局属性，
- * **分类**（这块属于任务）＝ 一个标签。值走属性是因为它的语义是用户词汇、
- * 要能进查询/导出/属性面板；而「这块是不是任务」是分类，分类是标签的事。
- *
- * ⚠️ 这两个名字是**数据**（定义块/标签块的正文），不是界面文案：它们会进库、
- *    会跟着导出、用户也能改。所以它们与其它种子内容住在一起，而不是进 `msg.ts`。
- *    任务状态与三个选项的名字跟着定义块构造器走（`props.ts`）——形状只有一个来源。
- */
+/* ------------------------------------------------- 「功能」词汇：属性 ＋ 标签 ＋ 实例 */
+
 export const TASK_TAG_LABEL = '任务'
+export const FEATURE_TAG_LABEL = '功能'
+export const FEATURE_STATUS_LABEL = '功能状态'
+export const FEATURE_DATE_LABEL = '落地日期'
+
+/**
+ * 「功能」词汇的**确定性 id**：查询条件、看板分组、日历落点认的都是 id——
+ * 种子每次构建都重跑，id 必须跨重开稳定（与任务状态词汇同一条纪律）。
+ */
+export const FEATURE_STATUS_PROP_ID = derivedId('prop', 'seed/feature-status')
+export const FEATURE_DATE_PROP_ID = derivedId('prop', 'seed/feature-date')
+export const FEATURE_STATUS_EXPLORING_ID = derivedId('choice', 'seed/feature-status/exploring')
+export const FEATURE_STATUS_SHIPPED_ID = derivedId('choice', 'seed/feature-status/shipped')
+export const FEATURE_STATUS_SHELVED_ID = derivedId('choice', 'seed/feature-status/shelved')
+
+/**
+ * 「功能」标签 ＋ 声明给它的两个属性定义。
+ *
+ * 它们住在**森林顶层**（身份不参与组织，位置不承载信息）；顺序：定义块在前、标签在后——
+ * 标签声明字段，读一遍就知道它声明的是谁。这份词汇只有种子一个使用者：
+ * 用户手敲 `#功能` 时按需物化出来的标签**不带**这些声明——那是一条普通标签，
+ * 演示用的属性与实例是种子内容，不是核心词汇。
+ */
+function featureVocabulary(): { blocks: Block[]; tagId: string } {
+  // 选项块（select 的值域＝定义块的直接子块）：角色由位置派生，每个值带一枚图标
+  const statusDef = mkPropDef(
+    FEATURE_STATUS_LABEL,
+    'select',
+    // 缺省值住在定义上：实例没填这一栏时，面板读出来的就是它
+    { [DEFAULT_PROP]: FEATURE_STATUS_EXPLORING_ID },
+    FEATURE_STATUS_PROP_ID,
+  )
+  const choice = (label: string, id: string, icon: string): Block => ({
+    ...mkBlock(label, { props: { _icon: `lucide:${icon}` } }),
+    id,
+  })
+  statusDef.children = [
+    choice('探索中', FEATURE_STATUS_EXPLORING_ID, 'loader-circle'),
+    choice('已落地', FEATURE_STATUS_SHIPPED_ID, 'circle-check'),
+    choice('搁置', FEATURE_STATUS_SHELVED_ID, 'minus'),
+  ]
+  const dateDef = mkPropDef(FEATURE_DATE_LABEL, 'date', {}, FEATURE_DATE_PROP_ID)
+  const tag = mkTagBlock(FEATURE_TAG_LABEL)
+  tag.props = { ...(tag.props ?? {}), _icon: 'lucide:sliders-horizontal' }
+  declareField(tag, FEATURE_STATUS_PROP_ID)
+  declareField(tag, FEATURE_DATE_PROP_ID)
+  // 子块也要同一个固定时刻：漏一层就会得到「定义是 2026-10-27、它的选项是现在」
+  for (const b of [statusDef, dateDef, tag, ...statusDef.children]) {
+    b.created = SEED_AT
+    b.modified = SEED_AT
+  }
+  return { blocks: [statusDef, dateDef, tag], tagId: tag.id }
+}
+
+/**
+ * 实例样本：**一条普通的内容块**，靠 `props._tags` 归属在「功能」下——没有新实体。
+ *
+ * 内容是自指的：这几条就是 Qua 自己的功能清单。值的分布是刻意的：
+ * 已落地的带日期（日历有落点）、「快速筛选」不填状态（缺省读出「探索中」）、
+ * 探索与搁置各有一条（看板每一列都有卡）。
+ */
+function featureInstances(tagId: string): Block[] {
+  const record = (name: string, status?: string, shippedOn?: string): Block => {
+    const r = mkObjRecord(name, tagId)
+    if (status !== undefined) r.props = { ...(r.props ?? {}), [FEATURE_STATUS_PROP_ID]: status }
+    if (shippedOn !== undefined) r.props = { ...(r.props ?? {}), [FEATURE_DATE_PROP_ID]: shippedOn }
+    // 它们同样是种子内容 ⇒ 与其它种子同一个固定时刻
+    r.created = SEED_AT
+    r.modified = SEED_AT
+    return r
+  }
+  return [
+    record('命令面板', FEATURE_STATUS_SHIPPED_ID, '2026-09-30'),
+    record('行内图片', FEATURE_STATUS_SHIPPED_ID, '2026-10-27'),
+    record('多库与库根', FEATURE_STATUS_SHIPPED_ID, '2026-11-05'),
+    record('回收站', FEATURE_STATUS_SHIPPED_ID, '2026-11-09'),
+    record('快速筛选'),
+    record('引用某一段', FEATURE_STATUS_EXPLORING_ID),
+    record('图库管理', FEATURE_STATUS_SHELVED_ID),
+  ]
+}
+
+/* --------------------------------------------------------------- 设备侧 */
 
 /**
  * **日记面板的演示栏**（`Prefs.journalMounts` 的种子）。
@@ -391,7 +544,7 @@ export function seedJournalMounts(): MountEntry[] {
   ]
 }
 
-function coreVocabulary(): Block[] {
+function coreVocabulary(): { blocks: Block[]; featureTagId: string } {
   // 定义块与选项从 core 的构造器来：种子与写路径的按需物化共用同一份形状，
   // 两边各造一份就会漂移（种子有的选项、按需物化的没有，查询就分叉）。
   // 选项 id 仍是核心词汇的**确定性 id**（`todoOf`／⌘↵／种子查询按 id 认「完成」）。
@@ -399,11 +552,13 @@ function coreVocabulary(): Block[] {
   const task = mkTagBlock(TASK_TAG_LABEL)
   task.props = { ...(task.props ?? {}), _icon: 'lucide:check-square' }
   declareField(task, TASK_STATUS_PROP_ID)
+  // 「功能」词汇只有种子这一个使用者（见 `featureVocabulary` 的注释），时刻由它自己盖
+  const feature = featureVocabulary()
   // 它们也是**种子内容**（会进库、会导出）⇒ 与其它种子同一个固定时刻：
-  // 留 `Date.now()` 会让这两块每次 seed 都跟别的内容差一年，而它们本该是同一份快照。
+  // 留 `Date.now()` 会让这些块每次 seed 都跟别的内容差一年，而它们本该是同一份快照。
   for (const b of [taskStatus, task, ...taskStatus.children]) {
     b.created = SEED_AT
     b.modified = SEED_AT
   }
-  return [taskStatus, task]
+  return { blocks: [taskStatus, task, ...feature.blocks], featureTagId: feature.tagId }
 }
