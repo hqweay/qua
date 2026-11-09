@@ -584,6 +584,23 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
   await page.waitForTimeout(250)
   assert(!(await page.evaluate(() => Boolean(document.querySelector('.drawer')))), 'Esc 关掉抽屉')
 
+  // **带栏的入口同样 toggle**：同一栏再点一次＝收起（入口就是开关）。用块 a：
+  // T1b 给它建过「主体测试属性」，抽屉里才有带栏的行（b 没有声明属性，捞不到行）。
+  // 收尾必须关着——后面「外点关闭的分界」从关着的状态开始
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), a)
+  await page.waitForSelector('.props-drawer')
+  const propIds = await page.evaluate(() =>
+    [...document.querySelectorAll('.props-drawer .prop-row[data-prop-id]')].map((r) => r.getAttribute('data-prop-id') ?? ''),
+  )
+  assert(propIds.length >= 1, `前置：抽屉里有带栏的属性行：${JSON.stringify(propIds)}`)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(250)
+  await page.evaluate(({ id, pid }) => window.__qua.invoke('core.block/inspect', { blockId: id, propId: pid }), { id: a, pid: propIds[0] })
+  await page.waitForSelector('.props-drawer')
+  await page.evaluate(({ id, pid }) => window.__qua.invoke('core.block/inspect', { blockId: id, propId: pid }), { id: a, pid: propIds[0] })
+  await page.waitForTimeout(250)
+  assert(!(await page.evaluate(() => Boolean(document.querySelector('.drawer')))), '同一栏再点一次＝收起（toggle）')
+
   // 外点关闭的分界：**离开上下文才关**。点正文（块行/气口）＝还在与抽屉同一件事里，不关；
   // 点别的表面（槽卡）＝明确的离开动作 ⇒ 收起。
   await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), b)

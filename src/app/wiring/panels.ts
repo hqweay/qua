@@ -524,6 +524,8 @@ export function setupPanels(deps: PanelsDeps) {
   let drawerPanel: PropertiesPanel | null = null
   /** 抽屉的根元素，跟着 `drawerPanel` 一起生灭；已开着时供 `focusPropRow` 定位 */
   let drawerRootEl: HTMLElement | null = null
+  /** 抽屉当前聚焦的属性栏（带 `focusPropId` 的入口喂进来）；「同一栏再点一次＝收起」靠它判 */
+  let drawerFocusPropId: string | null = null
 
   /** 库一变就跟着刷（与检视卡同一条通知、同鲜度）；抽屉已被关掉就顺手清状态 */
   function renderDrawer(): void {
@@ -531,6 +533,7 @@ export function setupPanels(deps: PanelsDeps) {
       drawerPanel = null
       drawerBlockId = null
       drawerRootEl = null
+      drawerFocusPropId = null
       return
     }
     if (!drawerPanel) return
@@ -540,6 +543,7 @@ export function setupPanels(deps: PanelsDeps) {
       drawerPanel = null
       drawerBlockId = null
       drawerRootEl = null
+      drawerFocusPropId = null
       return
     }
     drawerPanel.render()
@@ -564,15 +568,15 @@ export function setupPanels(deps: PanelsDeps) {
     /**
      * **同一块上再点一次＝收起**（toggle）：入口按钮就是这张抽屉的开关，
      * 「点了没反应」（先关再开同内容）在用户眼里等于坏了。另一块＝换内容。
-     *
-     * ⚠️ **带 `focusPropId` 的入口不 toggle**：块下属性行与抽屉可以同时可见
-     *    （抽屉盖右缘、正文在左边），点一个值不该把刚打开的面板关掉。
+     * 带 `focusPropId` 的入口同样 toggle，判的是**栏**：同一栏再点一次＝收起，
+     * 另一栏＝把焦点挪过去——入口按钮就是开关，这条判据与不带栏的入口同一条。
      */
-    if (!focusPropId && drawerBlockId === blockId && layers.drawerOpen()) {
+    if (drawerBlockId === blockId && layers.drawerOpen() && (!focusPropId || drawerFocusPropId === focusPropId)) {
       layers.closeDrawer()
       drawerBlockId = null
       drawerPanel = null
       drawerRootEl = null
+      drawerFocusPropId = null
       return
     }
     /**
@@ -582,9 +586,11 @@ export function setupPanels(deps: PanelsDeps) {
      */
     if (focusPropId && drawerBlockId === blockId && layers.drawerOpen() && drawerRootEl) {
       focusPropRow(drawerRootEl, focusPropId)
+      drawerFocusPropId = focusPropId
       return
     }
     drawerBlockId = blockId
+    drawerFocusPropId = focusPropId ?? null
     layers.openDrawer(blockLabel(b), (host) => {
       const root = document.createElement('div')
       root.className = 'props-drawer'
