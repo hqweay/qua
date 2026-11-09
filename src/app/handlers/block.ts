@@ -16,7 +16,7 @@ import { curBlock, S } from './shared.ts'
  * （软内 ⌘V 贴成引用）。`text` 缺省时按 id 现取块正文。
  */
 const copyRefs = (app: App, ids: readonly string[], text?: string): void => {
-  const body = text ?? ids.map((id) => app.ed.plainTextOf(id)).filter(Boolean).join('\n')
+  const body = text ?? ids.map((id) => app.ed.clip.plainTextOf(id)).filter(Boolean).join('\n')
   app.copyFlavors({ text: body, html: buildCopyHtml(body, { ids: [...ids] }), clip: { ids: [...ids] } }, t('ui.toast.blockRefCopied'))
 }
 
@@ -223,7 +223,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
    * 划选文本的 ⌘C 不归这里：选区非空时键位不命中，原生复制原样保留。
    */
   'core.editor/copy-block': (_a, app) => {
-    const snap = app.ed.copySnapshot()
+    const snap = app.ed.clip.copySnapshot()
     if (!snap) return false
     copyRefs(app, snap.ids, snap.text)
     return true
@@ -233,14 +233,14 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
    * 软内软外 ⌘V 行为一致，贴出来都是新块。与 ⌘C 是同一动作的两个身份档。
    */
   'core.editor/copy-block-text': (_a, app) => {
-    const snap = app.ed.copySnapshot()
+    const snap = app.ed.clip.copySnapshot()
     if (!snap) return false
     app.copy(snap.text, t('ui.toast.blocksCopied'))
     return true
   },
   /** 划选 ⌘⇧C：块引＋静态锚文本（划选文本是这一处的显示名；源块改文锚不跟） */
   'core.editor/copy-ref-anchor': (_a, app) => {
-    const snap = app.ed.anchorSnapshot()
+    const snap = app.ed.clip.anchorSnapshot()
     if (!snap) return false
     const html = buildCopyHtml(snap.text, { ids: [snap.id], anchor: snap.text })
     app.copyFlavors(
@@ -255,7 +255,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
    */
   'core.editor/cut-blocks': (_a, app) => {
     if (!app.ed.bsel.hasBlockSelection()) return false
-    const snap = app.ed.copySnapshot()
+    const snap = app.ed.clip.copySnapshot()
     if (!snap) return false
     const html = buildCopyHtml(snap.text, { ids: snap.ids, move: true })
     app.copyFlavors({ text: snap.text, html, clip: { ids: snap.ids, move: true } }, t('ui.toast.cutBlocks'))
@@ -264,7 +264,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   /** 块选区态的 ⌘V：没有光标，粘贴的东西作为新块落在选区后面（与 paste 事件同一份编辑器实现） */
   'core.editor/paste-into-selection': (_a, app) => {
     void app.readFlavors().then(({ refs, text }) => {
-      const r = app.ed.pasteIntoSelection(refs, text)
+      const r = app.ed.clip.pasteIntoSelection(refs, text)
       if (r === 'gone') app.toast(t('ui.toast.moveSourceGone'), 'warn')
     })
     return true
@@ -280,7 +280,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     return true
   },
   'core.editor/copy-selected-block-refs': (_a, app) => {
-    const snap = app.ed.copySnapshot()
+    const snap = app.ed.clip.copySnapshot()
     if (!snap) return false
     copyRefs(app, snap.ids, snap.text)
     return true
