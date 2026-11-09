@@ -1359,18 +1359,19 @@ await check('T23 gutter 三件：块标与把手合并、三角悬停才现、�
   assert(Number(r.gripOpacity) < 0.05, `静止态抓手应不可见（hover 才换 grip），实际 opacity=${r.gripOpacity}`)
   assert(r.bulletSize === '5px' && r.caretSize === '11px', `token 取值应对齐设计稿（5px / 11px）：${r.bulletSize}/${r.caretSize}`)
 
-  // R2：**既无子块也无身体**的行不生成 `.fold` 节点（不是 visibility:hidden）
+  // R2：**既无子块也无身体**的行不生成 `.fold` 节点（不是 visibility:hidden）。
+  // 「身体」有两种：视图身体（viewBody）与嵌入体（镜像行的源子树）——后者同样可折。
   const foldOnLeaf = await page.evaluate(() => {
     const rows = [...document.querySelectorAll('#editor .blk')]
-    const leaves = rows.filter((el) => !el.dataset.hasChildren && el.dataset.viewBody !== '1')
-    const bodies = rows.filter((el) => el.dataset.viewBody === '1')
+    const leaves = rows.filter((el) => !el.dataset.hasChildren && el.dataset.viewBody !== '1' && el.dataset.embed !== '1')
+    const bodies = rows.filter((el) => el.dataset.viewBody === '1' || el.dataset.embed === '1')
     return {
       leafCount: leaves.length,
       withFold: leaves.filter((el) => el.querySelector('.fold')).length,
       // 对照：有子块的行必须生成
       parentsWithFold: rows.filter((el) => el.dataset.hasChildren && el.querySelector('.fold')).length,
       parentCount: rows.filter((el) => el.dataset.hasChildren).length,
-      // 查询块的身体也可折：这一类行（没有 children）同样要有三角
+      // 查询块／镜像行的身体也可折：这一类行（没有 children）同样要有三角
       bodyCount: bodies.length,
       bodiesWithFold: bodies.filter((el) => el.querySelector('.fold')).length,
     }
@@ -9859,7 +9860,7 @@ await check(
     assert(target, '第一页里应有可编辑的内容块')
 
     // ① 单行
-    await page.evaluate((t) => window.__qua.__editor.pasteAt(t.id, 0, '粘贴头'), target)
+    await page.evaluate((t) => window.__qua.__editor.clip.pasteAt(t.id, 0, '粘贴头'), target)
     await page.waitForTimeout(120)
     const ops1 = await opShape(page)
     assert(ops1.length === 1, `单行粘贴应恰好 1 条 op：${JSON.stringify(ops1)}`)
@@ -9876,7 +9877,7 @@ await check(
     assert(back1 === target.text, `一次撤销应回原文：${JSON.stringify(back1)}`)
 
     // ② 多行：首行拼进原块，其余每行一个新块
-    await page.evaluate((t) => window.__qua.__editor.pasteAt(t.id, t.text.length, '甲行\n乙行\n丙行'), target)
+    await page.evaluate((t) => window.__qua.__editor.clip.pasteAt(t.id, t.text.length, '甲行\n乙行\n丙行'), target)
     await page.waitForTimeout(120)
     const ops2 = await opShape(page)
     assert(ops2.length === 3, `三行粘贴应恰好 3 条 op（正文＋2 个新块）：${JSON.stringify(ops2)}`)
@@ -9949,7 +9950,7 @@ await check(
         { sel: `.blk[data-block-id="${target.id}"] > .tx`, text, offset, len: len ?? null },
       )
 
-    await page.evaluate((t) => window.__qua.__editor.pasteAt(t.id, 0, '你好世界'), target)
+    await page.evaluate((t) => window.__qua.__editor.clip.pasteAt(t.id, 0, '你好世界'), target)
     await page.waitForTimeout(120)
     const baseText = '你好世界' + target.text
 
@@ -16339,7 +16340,7 @@ await check(
     const target = await pickLeaf(page)
     assert(target, '第一页里应有可编辑的内容块')
     // 前置：多行粘贴造一个引用源块
-    await page.evaluate((t) => window.__qua.__editor.pasteAt(t.id, t.text.length, `${t.text}\n引用源块`), target)
+    await page.evaluate((t) => window.__qua.__editor.clip.pasteAt(t.id, t.text.length, `${t.text}\n引用源块`), target)
     await page.waitForTimeout(120)
     const src = await page.evaluate((t) => {
       const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '')
@@ -16356,7 +16357,7 @@ await check(
       return b.content.filter((r) => r.t === 'text').map((r) => r.v).join('').length
     }, target)
     const r1 = await page.evaluate(
-      ({ t, s, at }) => window.__qua.__editor.pasteRefsAt({ blockId: t.id, offset: at, cut: null }, { ids: [s.id] }),
+      ({ t, s, at }) => window.__qua.__editor.clip.pasteRefsAt({ blockId: t.id, offset: at, cut: null }, { ids: [s.id] }),
       { t: target, s: src, at: endOff },
     )
     await page.waitForTimeout(120)
@@ -16379,7 +16380,7 @@ await check(
 
     // ② 锚文本随行：这一处的显示名写进 anchor（不改源、不占正文）
     await page.evaluate(
-      ({ t, s }) => window.__qua.__editor.pasteRefsAt({ blockId: t.id, offset: 0, cut: null }, { ids: [s.id], anchor: '锚文本' }),
+      ({ t, s }) => window.__qua.__editor.clip.pasteRefsAt({ blockId: t.id, offset: 0, cut: null }, { ids: [s.id], anchor: '锚文本' }),
       { t: target, s: src },
     )
     await page.waitForTimeout(120)
@@ -16390,7 +16391,7 @@ await check(
     assert(anchor === '锚文本', `锚文本应随行走：${JSON.stringify(anchor)}`)
 
     // ③ 正文味（外部应用会贴出的）：是块文本，不是 ((id)) 记号
-    const snap = await page.evaluate(() => window.__qua.__editor.copySnapshot())
+    const snap = await page.evaluate(() => window.__qua.__editor.clip.copySnapshot())
     assert(snap && snap.ids.length >= 1 && !snap.text.includes('(('), `正文味不应带记号：${JSON.stringify(snap)}`)
 
     await ctx.close()
@@ -16407,7 +16408,7 @@ await check(
     const target = await pickLeaf(page)
     assert(target, '第一页里应有可编辑的内容块')
     // 前置：target 下挂两个兄弟 M（搬运块）、C（落点块）
-    await page.evaluate((t) => window.__qua.__editor.pasteAt(t.id, t.text.length, `${t.text}\n搬运块\n落点块`), target)
+    await page.evaluate((t) => window.__qua.__editor.clip.pasteAt(t.id, t.text.length, `${t.text}\n搬运块\n落点块`), target)
     await page.waitForTimeout(120)
     const fx = await page.evaluate((t) => {
       const p = window.__qua.__editor.store.find(t.parentId)
@@ -16423,7 +16424,7 @@ await check(
 
     // ① 剪切粘贴＝移动：M 搬到 C 后面，id 不变
     const r1 = await page.evaluate(
-      ({ f }) => window.__qua.__editor.pasteRefsAt({ blockId: f.c, offset: 0, cut: null }, { ids: [f.m], move: true }),
+      ({ f }) => window.__qua.__editor.clip.pasteRefsAt({ blockId: f.c, offset: 0, cut: null }, { ids: [f.m], move: true }),
       { f: fx },
     )
     await page.waitForTimeout(150)
@@ -16444,7 +16445,7 @@ await check(
 
     // ③ 标记不消费：同一份载荷再贴一次＝再移一次
     await page.evaluate(
-      ({ f }) => window.__qua.__editor.pasteRefsAt({ blockId: f.c, offset: 0, cut: null }, { ids: [f.m], move: true }),
+      ({ f }) => window.__qua.__editor.clip.pasteRefsAt({ blockId: f.c, offset: 0, cut: null }, { ids: [f.m], move: true }),
       { f: fx },
     )
     await page.waitForTimeout(150)
@@ -16457,7 +16458,7 @@ await check(
 
     // ④ 源块没了 ⇒ gone（调用方按文本降级并给实话），不是静默假成功
     const r4 = await page.evaluate(
-      ({ f }) => window.__qua.__editor.pasteRefsAt({ blockId: f.c, offset: 0, cut: null }, { ids: ['does-not-exist'], move: true }),
+      ({ f }) => window.__qua.__editor.clip.pasteRefsAt({ blockId: f.c, offset: 0, cut: null }, { ids: ['does-not-exist'], move: true }),
       { f: fx },
     )
     assert(r4 === 'gone', `源不存在应返回 gone：${r4}`)

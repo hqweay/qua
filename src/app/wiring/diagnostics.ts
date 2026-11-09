@@ -330,12 +330,13 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
   /** DOM 统计（角标与诊断面板的证据源） */
   function domStats(): { blocks: number; domBlocks: number; domNodes: number } {
     /**
-     * ⚠️ 只数**主编辑器自己的**行：挂载区／查询视图的 DOM 也落在 `#editor` 里面
-     * （段尾槽），但它们渲染的是**别的视图的**块集合。混进来会让「虚拟化少挂了几个」
-     * 这类断言算进它们那一份，读数与块数对不上。
+     * ⚠️ 只数**主编辑器自己的**行：挂载区／查询视图／嵌入体的 DOM 也落在 `#editor`
+     * 里面（段尾槽／行内身体），但它们渲染的是**别的块集合的**投影（别的视图、
+     * 镜像的源子树）。混进来会让「虚拟化少挂了几个」「DOM 行＝块数」这类断言
+     * 算进它们那一份，读数与块数对不上。
      */
     const own = (sel: string): number =>
-      [...editorEl.querySelectorAll(sel)].filter((el) => !el.closest('.mount, .queryview')).length
+      [...editorEl.querySelectorAll(sel)].filter((el) => !el.closest('.mount, .queryview, .blk-embed-body')).length
     return {
       blocks: flatten(mainEd.doc).length,
       domBlocks: own('.blk'),
