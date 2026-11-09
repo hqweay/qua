@@ -166,6 +166,9 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.block/zoom-out', title: t('cmd.block.zoom-out'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['zoom', 'out', 'back'] },
   { name: 'core.block/move-to', title: t('cmd.block.move-to'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' }, targetId: { type: 'string' } }, keywords: ['move', 'move to', t('menu.kw.move')] },
   { name: 'core.block/restore', title: t('cmd.block.restore'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' } }, keywords: ['restore', 'undelete', 'trash', t('menu.kw.trash')], hidden: true },
+  // 回收站的清空只有卡上那一个入口（确认框长在卡里）：命令面只提供机器形状，
+  // 不进命令面板——「仅从回收站显式触发」是口径，不是建议
+  { name: 'core.trash/purge', title: t('cmd.trash.purge'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.editor'), args: { ids: { type: 'string' } }, keywords: ['trash', 'purge', 'empty', t('menu.kw.trash')], hidden: true },
 
   /* ---- 角色（加/减一个机制位，不是破坏性转换） ---- */
   { name: 'core.block/as-page', title: t('cmd.block.as-page'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.page'), args: { blockId: { type: 'string' } }, keywords: ['page', 'role'] },

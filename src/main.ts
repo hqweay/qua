@@ -402,6 +402,7 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, add
   showCardMenu: (side, key, anchor, trigger) => menus.showCardMenu(side, key, anchor, trigger),
   showShortcutMenu: (side, blockId, anchor, trigger) => menus.showShortcutMenu(side, blockId, anchor, trigger),
   toast: (msg, kind) => app.toast(msg, kind),
+  confirm: (o) => layers.confirm(o),
   /**
    * 反链卡：**一列真实的可编辑块**（与正文「引用」栏同一种东西），不是一列摘要行。
    *
@@ -608,6 +609,7 @@ const surface = setupSurface({
   getChrome: () => chrome,
   searchDeps: searchFaceDeps,
   settingsDeps: settingsFaceDeps,
+  confirm: (o) => layers.confirm(o),
 })
 
 /**
@@ -1565,6 +1567,18 @@ const app: App = {
     } finally {
       ed.finishUndoEntry(kind)
     }
+  },
+
+  /**
+   * **回收站清空**：purge 不进撤销栈（不可逆是口径），所以它与撤销/重做同形——
+   * 建 op → 原地应用 → `store.apply` 宣布 → op 交落盘队列。撤销捕获那条路一步都不碰。
+   */
+  purgeTrash: (ids) => {
+    const ops = kb.purgeTrash(ids)
+    if (ops.length === 0) return 0
+    addOps(ops)
+    scheduleSave()
+    return ops.length
   },
 
   /**

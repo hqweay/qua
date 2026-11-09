@@ -167,6 +167,9 @@ export class Layers {
   private popTriggerKey: string | undefined = undefined
   /** 抽屉打开之前焦点在哪（同上） */
   private drawerFocus: FocusReturn | null = null
+  /** 确认框（背板 ＋ 盒子）；打开之前的焦点同上 */
+  private confirmEl: HTMLElement | null = null
+  private confirmFocus: FocusReturn | null = null
   /** 划选气泡（顶部工具栏作废后的落点，2026-10-19）*/
   private selEl: HTMLElement | null = null
   open = false
@@ -227,6 +230,12 @@ export class Layers {
          * 认「这一发 Esc 已经被菜单吃掉」——否则一次 Esc 会把菜单和底下的浮层一起关掉。
          */
         if (e.defaultPrevented) return
+        if (this.confirmEl) {
+          e.preventDefault()
+          e.stopPropagation()
+          this.closeConfirm()
+          return
+        }
         if (this.popEl) {
           e.preventDefault()
           e.stopPropagation()
@@ -735,6 +744,97 @@ export class Layers {
 
   drawerOpen(): boolean {
     return this.drawerEl !== null
+  }
+
+  /* ------------------------------------------------------------ 确认框 */
+
+  /**
+   * **后果性操作的确认框**：一句后果 ＋ 两颗按钮。破坏性动作的最后一道闸——
+   * 它只负责「让用户在知道后果的前提下再说一次要」，不做任何选择（选择是菜单的事）。
+   *
+   * 三条交互纪律（与菜单/抽屉同源）：
+   *   · `Esc` ＝ 取消（构造器的 Esc 分支里它排在抽屉前面：它在最上层）；
+   *   · 点背板 ＝ 取消——确认框是问句，不是陷阱，「反悔」必须有一条不用瞄准的出路；
+   *   · 焦点落在确认钮上：键盘流 Enter 直接确认；关掉后焦点归还原处。
+   */
+  confirm(o: {
+    title: string
+    /** 后果文案：写清会发生什么、能不能反悔（后果性操作的确认文案不可减） */
+    body?: string
+    confirmLabel: string
+    cancelLabel?: string
+    /** 危险动作：确认钮用警示色（删除类） */
+    danger?: boolean
+    onConfirm: () => void
+  }): void {
+    this.closeConfirm()
+    const backdrop = document.createElement('div')
+    backdrop.className = 'confirm-backdrop'
+    // 只有**按在背板本身**才算「点到外面」：盒子里的按钮冒泡上来时不能抢先关框
+    //（关在 click 之前，那颗按钮就永远等不到自己的 click——实测踩过）。
+    backdrop.addEventListener('mousedown', (e) => {
+      if (e.target === backdrop) this.closeConfirm()
+    })
+
+    const box = document.createElement('div')
+    box.className = 'confirm'
+    box.setAttribute('role', 'alertdialog')
+    if (o.danger) box.dataset.danger = '1'
+
+    const title = document.createElement('div')
+    title.className = 'confirm-title'
+    title.textContent = o.title
+    box.appendChild(title)
+    if (o.body) {
+      const body = document.createElement('div')
+      body.className = 'confirm-body'
+      body.textContent = o.body
+      box.appendChild(body)
+    }
+
+    const row = document.createElement('div')
+    row.className = 'confirm-actions'
+    const cancel = document.createElement('button')
+    cancel.type = 'button'
+    cancel.className = 'ghost'
+    cancel.textContent = o.cancelLabel ?? t('ui.confirm.cancel')
+    cancel.addEventListener('click', () => this.closeConfirm())
+    const ok = document.createElement('button')
+    ok.type = 'button'
+    ok.className = 'confirm-ok'
+    ok.textContent = o.confirmLabel
+    ok.addEventListener('click', () => {
+      this.closeConfirm()
+      o.onConfirm()
+    })
+    row.append(cancel, ok)
+    box.appendChild(row)
+
+    // Enter ＝ 确认（焦点在确认钮上时浏览器本来就会做；这里把整框变成键盘可完成的）
+    box.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.isComposing) return
+      e.preventDefault()
+      ok.click()
+    })
+
+    backdrop.appendChild(box)
+    document.body.appendChild(backdrop)
+    this.confirmEl = backdrop
+    this.confirmFocus = captureFocus()
+    requestAnimationFrame(() => ok.focus())
+  }
+
+  closeConfirm(): void {
+    const backdrop = this.confirmEl
+    this.confirmEl = null
+    if (backdrop) backdrop.remove()
+    const fr = this.confirmFocus
+    this.confirmFocus = null
+    fr?.restore(backdrop)
+  }
+
+  confirmOpen(): boolean {
+    return this.confirmEl !== null
   }
 
   /* ------------------------------------------------------------ toast */

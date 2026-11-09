@@ -743,3 +743,62 @@
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-xs);
 }
+
+/* ============================================================ 确认框 */
+
+/*
+ * 后果性动作的最后一道闸。形状刻意小：它是**一句问**，不是一张表单——
+ * 后果文案 ＋ 两颗按钮，没有第三个内容槽（要选择的是菜单，不是确认框）。
+ */
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--ui-z-confirm);
+  display: grid;
+  place-items: center;
+  background: var(--ui-scrim);
+  animation: overlay-in var(--ui-dur-1) var(--ui-ease-out);
+}
+.confirm {
+  width: min(360px, calc(100vw - 32px));
+  background: var(--ui-surface-raised);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  box-shadow: var(--ui-shadow-pop);
+  padding: var(--ui-gap-4) var(--ui-gap-5);
+}
+.confirm-title {
+  font-weight: 600;
+  font-size: var(--ui-fs-sm);
+}
+.confirm-body {
+  margin-top: var(--ui-gap-2);
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-xs);
+  line-height: 1.5;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ui-gap-2);
+  margin-top: var(--ui-gap-4);
+}
+.confirm-ok {
+  border: 0;
+  background: var(--ui-accent);
+  color: var(--ui-surface);
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  font-weight: 600;
+  padding: 4px var(--ui-gap-4);
+  border-radius: var(--ui-radius-sm);
+  cursor: pointer;
+}
+/* 危险动作：确认钮说同一种话（警示色），后果已经在文案里写明 */
+.confirm[data-danger='1'] .confirm-ok {
+  background: var(--ui-danger);
+}
+.confirm-ok:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 1px;
+}

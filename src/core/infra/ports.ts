@@ -141,6 +141,13 @@ export interface App {
   newPage(): void
   openPage(id: string): void
   deletePage(id: string): void
+  /**
+   * 永久清除回收站条目（整棵子树级联，不可恢复、不进撤销栈）。
+   *
+   * @returns 实际清除的块数（含级联的后代）；0 ＝ 没有可清的。
+   *          op 的落盘与重画都在这条门面里收口，handler 只管说「做了多少」。
+   */
+  purgeTrash(ids: readonly string[]): number
   /** 删除标签块（整棵子树软删，回收站可恢复）；不是「取消标签」——那是摘露面位 */
   deleteTag(id: string): boolean
   renamePage(id: string, title: string): void

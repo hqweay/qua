@@ -25746,6 +25746,112 @@ await check('T279 回到今日：未来天不占日记流窗口（先剔未来�
   return `未来三天物化后，两条入口仍装 ${afterTile.dates.length} 段、均不晚于 ${afterTile.today}；正文 ${afterTile.rows} 行`
 })
 
+/* ---------------------------------------------------------------- T280 */
+
+/**
+ * 回收站清空：**口径常驻可见 ＋ 确认框告知后果 ＋ purge 不进撤销栈**。
+ *
+ * 判据：
+ *   ① 工具行在 body 里：口径切换（全部／空块）＋「清空 N」，N 是当前口径下的条数；
+ *   ② 切到「空块」⇒ 列表只剩空块条目（带子树或有正文的都不算）；
+ *   ③ 清空前有确认框（后果文案写数量与不可恢复）；取消 ⇒ 什么都不动；
+ *   ④ 确认 ⇒ 条目永久消失（模型里也没有了），且**撤销不回来**（purge 不进撤销栈）。
+ */
+await check('T280 回收站清空：口径筛选可见、确认后永久删除且撤销不回来', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  // 造两条回收站条目：一条空块、一条带正文（清空「空块」口径只该带走前者）
+  const targets = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const root = ed.doc.roots.find((b) => !b.props?._date) ?? ed.doc.roots[0]
+    const plain = (b) => b.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
+    return {
+      text: plain(root).slice(0, 4),
+      id1: ed.insertBlockAfter(root.id, ''),
+      id2: ed.insertBlockAfter(root.id, '留着的一块'),
+    }
+  })
+  await page.evaluate((ids) => {
+    for (const id of ids) window.__qua.__editor.remove(id)
+  }, [targets.id1, targets.id2])
+  await page.waitForTimeout(250)
+
+  const readCard = () =>
+    page.evaluate(() => {
+      const card = document.querySelector('[data-card-id="trash"]')
+      return {
+        rows: [...(card?.querySelectorAll('[data-trash-row]') ?? [])].map((el) => el.getAttribute('data-trash-row')),
+        clear: card?.querySelector('.trash-clear')?.textContent ?? '',
+        pressed: [...(card?.querySelectorAll('.trash-scope') ?? [])].map((b) => b.getAttribute('aria-pressed')),
+      }
+    })
+
+  // ① 工具行：「清空 2」、两个口径钮（当前口径＝全部）
+  const all = await readCard()
+  assert(all.rows.length === 2, `前置：回收站应有两条，实际 ${JSON.stringify(all.rows)}`)
+  assert(all.clear.includes('2'), `清空钮应带当前口径的条数：${all.clear}`)
+
+  // ② 切「空块」口径 ⇒ 只剩空块那一行
+  await page.locator('[data-card-id="trash"] .trash-scope').nth(1).click()
+  await page.waitForTimeout(200)
+  const blank = await readCard()
+  assert(
+    blank.rows.length === 1 && blank.rows[0] === targets.id1,
+    `空块口径下只该剩空块条目：${JSON.stringify(blank.rows)}`,
+  )
+  assert(blank.clear.includes('1'), `空块口径下清空钮该是 1：${blank.clear}`)
+  assert(blank.pressed[1] === 'true', '空块口径钮应是按下态')
+
+  // ③ 清空 ⇒ 先出确认框；取消 ⇒ 什么都不动
+  await page.locator('[data-card-id="trash"] .trash-clear').click()
+  await page.waitForTimeout(150)
+  const confirmBox = await page.evaluate(() => {
+    const box = document.querySelector('.confirm')
+    return { title: box?.querySelector('.confirm-title')?.textContent ?? '', body: box?.querySelector('.confirm-body')?.textContent ?? '' }
+  })
+  assert(confirmBox.title.length > 0, '清空必须先有确认框')
+  assert(confirmBox.body.includes('1') && confirmBox.body.includes('不可恢复'), `确认框要写数量与不可恢复：${confirmBox.body}`)
+
+  // 取消（Esc）：条目原样留着
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(150)
+  assert((await page.evaluate(() => Boolean(document.querySelector('.confirm')))) === false, 'Esc 应关掉确认框')
+  const afterCancel = await readCard()
+  assert(afterCancel.rows.length === 1, '取消之后条目不该动')
+
+  // ④ 确认 ⇒ 永久删除；撤销不回来（purge 不进撤销栈）
+  await page.locator('[data-card-id="trash"] .trash-clear').click()
+  await page.waitForTimeout(150)
+  await page.locator('.confirm .confirm-ok').click()
+  await page.waitForTimeout(250)
+  const purged = await page.evaluate((id) => ({
+    row: document.querySelectorAll('[data-card-id="trash"] [data-trash-row]').length,
+    gone: !window.__qua.__editor.store.blocks.some((b) => b.id === id),
+  }), targets.id1)
+  assert(purged.row === 0, '确认清空之后空块口径下该没有条目')
+  assert(purged.gone, '被清的块应当从模型里消失（不是软删，是退场）')
+
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForTimeout(250)
+  const undone = await page.evaluate((id) => {
+    const card = document.querySelector('[data-card-id="trash"]')
+    return {
+      back: window.__qua.__editor.store.blocks.some((b) => b.id === id),
+      rows: card ? card.querySelectorAll('[data-trash-row]').length : -1,
+    }
+  }, targets.id1)
+  assert(!undone.back, '撤销不该把清掉的块带回来（purge 不进撤销栈）')
+
+  // 收尾：删掉的正文块留在回收站里，别污染别的用例
+  await page.evaluate((id) => window.__qua.invoke('core.trash/purge', { ids: id }), targets.id2)
+  await page.waitForTimeout(200)
+
+  await ctx.close()
+  return '口径切换筛选可见、清空带确认（取消不动）、确认后模型退场且撤销不回来'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

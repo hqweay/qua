@@ -110,6 +110,22 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     app.toast(t('ui.toast.blockRestored'))
     return true
   },
+  /**
+   * 永久清除回收站条目（回收站卡的「清空」是唯一入口，确认框长在卡里——
+   * 这条命令本身不带确认：从别处调它不会问）。
+   *
+   * 判据：purge **不进撤销栈**（不可逆是口径）——所以它不走编辑器写入口，
+   * 走 `App.purgeTrash`（撤销/重做同一条 op 路：建 op → 应用 → 宣布 → 落盘）。
+   */
+  'core.trash/purge': (args, app) => {
+    const raw = (args as { ids?: string }).ids ?? ''
+    const ids = raw.split(',').filter((s) => s !== '')
+    if (ids.length === 0) return false
+    const n = app.purgeTrash(ids)
+    if (n === 0) return false
+    app.toast(t('ui.toast.trashPurged', { count: String(n) }))
+    return true
+  },
   // 提及栏片段行的按钮与块菜单那一条都走这道门面；区间复核与「没转成」的实话在门面那一步
   'core.block/convert-mention': (a, app) => {
     // 菜单行不带参数：它问的是「光标正停在哪一处命中上」，与 ⌥ 单击同一份判据

@@ -13,7 +13,7 @@
 import { type SurfaceRef } from '../../core/index.ts'
 import type { Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
-import { trashCard, type DockContentDeps } from '../../ui/dock/dock-content.ts'
+import { trashCard, trashScope, type DockContentDeps } from '../../ui/dock/dock-content.ts'
 import { SearchFace, type SearchFaceDeps } from '../../ui/search/search-face.ts'
 import { SettingsFace, type SettingsFaceDeps } from '../../ui/settings/settings-face.ts'
 import type { Chrome } from '../../ui/chrome/chrome.ts'
@@ -24,6 +24,14 @@ export interface SurfaceDeps {
   /** 恢复之后槽里的回收站卡要跟上（同一份数据的两个尺寸） */
   renderDocks: () => void
   getChrome: () => Chrome
+  /** 回收站清空的确认框（`Layers.confirm`；浮层原语归装配入口，与 toast 同一条理由） */
+  confirm: (o: {
+    title: string
+    body: string
+    confirmLabel: string
+    danger: boolean
+    onConfirm: () => void
+  }) => void
   /** 搜索面的依赖（引擎/打开/晋升/复制——全在装配层，面自己不认识 app） */
   searchDeps: () => SearchFaceDeps
   /** 设置面的依赖（偏好/命令面/写键位——同样全在装配层） */
@@ -46,6 +54,18 @@ export function setupSurface(deps: SurfaceDeps) {
       deps.renderDocks()
       refreshIfShown()
     },
+    /** 与侧槽卡同一份依赖形状（口径现值住 `trashScope`，两处天然共用） */
+    purgeTrash: (ids) => {
+      void deps.getRegistry().invoke('core.trash/purge', { ids: ids.join(',') }, 'dock')
+      deps.renderDocks()
+      refreshIfShown()
+    },
+    onTrashScope: (s) => {
+      trashScope.set(s)
+      deps.renderDocks()
+      refreshIfShown()
+    },
+    confirm: (o) => deps.confirm(o),
   }
 
   /** 搜索面：造一台新的（旧的先收掉）；词随打开带一次，不做 live 双写 */

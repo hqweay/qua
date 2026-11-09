@@ -42,7 +42,7 @@ import {
   type DockSlotEls,
   type DockTile,
 } from '../../ui/dock/dock.ts'
-import { trashCard, type DockContentDeps } from '../../ui/dock/dock-content.ts'
+import { trashCard, trashScope, type DockContentDeps } from '../../ui/dock/dock-content.ts'
 import { SearchCard } from '../../ui/cards/search-card.ts'
 import { emptyCardList } from '../../ui/chrome/card-parts.ts'
 import type { BackrefsCard } from '../../ui/cards/backrefs-card.ts'
@@ -88,6 +88,17 @@ export type DocksDeps = {
   ) => void
   /** 目标块不在了：点它不能静默没反应，得说一句为什么 */
   toast: (msg: string, kind?: 'ok' | 'warn' | 'info') => void
+  /**
+   * 后果性操作的确认框（`Layers.confirm`）：回收站清空前的最后一道闸。
+   * 浮层原语归装配入口（与 `toast` 同一条理由：三套皮肤一个产地）。
+   */
+  confirm: (o: {
+    title: string
+    body: string
+    confirmLabel: string
+    danger: boolean
+    onConfirm: () => void
+  }) => void
   /**
    * 反链卡（可编辑块列）的**工厂**：由装配入口在依赖就绪后注入。
    *
@@ -181,6 +192,16 @@ export function setupDocks(deps: DocksDeps) {
       void deps.getRegistry().invoke('core.block/restore', { blockId: id }, 'dock')
       renderDocks()
     },
+    /** 清空同样走命令面（`core.trash/purge`）；purge 自己会宣布，重画跟着订阅走，但补一次不贵也不抖 */
+    purgeTrash: (ids) => {
+      void deps.getRegistry().invoke('core.trash/purge', { ids: ids.join(',') }, 'dock')
+      renderDocks()
+    },
+    onTrashScope: (s) => {
+      trashScope.set(s)
+      renderDocks()
+    },
+    confirm: (o) => deps.confirm(o),
   }
 
   /**

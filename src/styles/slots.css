@@ -501,6 +501,55 @@ button.ghost.wide {
   background: var(--ui-bg-hover);
 }
 
+/* 回收站卡的工具行（长在 body：卡头没有本卡专属动作的通道）。
+   左边口径切换、右边「清空 N」——删什么在按之前就看得见。 */
+.trash-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  padding: 0 var(--ui-gap-1) var(--ui-gap-1);
+}
+.trash-scope {
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-tertiary);
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  cursor: pointer;
+  padding: 2px var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+}
+/* 当前口径：与「悬停是中性、选中是圈定」的分工一致，选中用 accent-soft */
+.trash-scope[aria-pressed='true'] {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+.trash-scope:hover {
+  background: var(--ui-bg-hover);
+}
+.trash-scope[aria-pressed='true']:hover {
+  background: var(--ui-accent-soft);
+}
+.trash-clear {
+  flex: none;
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--ui-danger);
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  cursor: pointer;
+  padding: 2px var(--ui-gap-1);
+  border-radius: var(--ui-radius-sm);
+}
+.trash-clear:hover {
+  background: var(--ui-bg-hover);
+}
+.trash-clear:disabled {
+  color: var(--ui-text-tertiary);
+  cursor: default;
+}
+
 /*
  * ------------------------------------------------ 日历卡
  *
