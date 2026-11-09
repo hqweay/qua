@@ -316,6 +316,13 @@ export class MemoryKb implements KbClient {
    * `siblings` 查父在不在、`move` 查不成环）—— 那是「已知非法」的防线，也是今天的现状。
    * 另一道 `validate(state, ops)` 服务**重放**（同步收端／`applyOps`）：对端的流必须先验再吃。
    * 两者不是重复：前者管「这次能不能写」，后者管「这批 op 能不能应用在别的库上」。
+   *
+   * ## `undo` 只交付、不记账
+   *
+   * 返回的 `UndoCapture` 交给**调用方**收集（编辑器把一次动作的多笔写并成一条撤销条目，
+   * `store.record` 由装配层调）——`kb.tx` 自己不碰撤销栈。给模型层写撤销测试时
+   * 别假设「tx 跑完栈里就有了」：要么走编辑器路径（冒烟），要么在测试里手动
+   * `store.record(r.undo, …)` 再 `store.undo`——否则那条「撤销会／不会怎样」的断言恒真。
    */
   tx<R>(fn: (tx: Tx) => R, opts: TxOpts = {}): TxResult & { result: R; undo: UndoCapture } {
     /** 动过的块：改前快照（新块为 `null`）＋ 改后落点。出口处一次性比出 op。 */
