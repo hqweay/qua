@@ -18,11 +18,14 @@ import {
   applyQuickFilter,
   derivedRecordsOf,
   displayNameOf,
+  hasLiveChildren,
+  passThroughRefTarget,
   EMPTY_QUICK_FILTER,
   quickFilterAdd,
   quickFilterDrop,
   type Block,
   type BlockStore,
+  type FoldState,
   type QuickFilterAtom,
   type QuickFilterState,
 } from '../../core/index.ts'
@@ -75,6 +78,8 @@ export class BackrefsCard {
   private target = ''
   /** 面包屑就地展开的祖先栈（运行时视图状态，不落盘；与挂载区/窗口同一条机制） */
   private expanded = new Set<string>()
+  /** 折叠播种已按哪个对象播过：面包屑展开/收起会再走 `load`，不能反复播 */
+  private foldSeededFor = ''
   /**
    * 快速筛选 chips（**会话瞬态**）：不写偏好、不入库、不产生 op、不进撤销栈。
    * 卡跟着对象走——换了对象，chips 说的就不是同一批材料，清空。
@@ -145,6 +150,8 @@ export class BackrefsCard {
       this.target = target
       // 换对象 ⇒ 上一份展开栈说的是旧那批来源块的祖先，清掉（过期的 id 不该再展开）
       this.expanded.clear()
+      // 折叠播种同样跟着对象走：新对象的来源块要按两型重新播一遍
+      this.foldSeededFor = ''
       // chips 说的是「上一批材料里看谁」——对象换了就归零，不带着旧筛选看新对象
       this.filter = { ...EMPTY_QUICK_FILTER }
       this.load(this.editable.ed)
@@ -198,6 +205,18 @@ export class BackrefsCard {
     this.empty.hidden = true
     this.host.hidden = false
     const editor = ed ?? this.editable.ensureEditor()
+    /**
+     * 折叠播种（与挂载区引用栏同一口径，判据同一份）：关联型（正文有字＋引用）
+     * 默认折——一行关联单独看没有上下文；传递型（正文只有一枚引用）**不折**——
+     * 块自己没有内容，挂着的子块才是这条引用真正指到的东西。
+     * 必须写回 `doc.folded` 再装载，否则「闪一下折着、随即又展开」。
+     */
+    if (this.foldSeededFor !== this.target) {
+      this.foldSeededFor = this.target
+      const seeded: FoldState = { ...(editor.doc.folded ?? {}) }
+      for (const b of roots) if (!passThroughRefTarget(b) && hasLiveChildren(b)) seeded[b.id] = true
+      editor.doc.folded = seeded
+    }
     const plan = expandContexts({ roots, contexts }, this.expanded, (id) => this.deps.kb.pathOf(id), focusHint)
     this.expanded = plan.expanded
     const folded = unfoldForContext(editor.doc.folded, plan.covers, (id) => this.deps.kb.pathOf(id))

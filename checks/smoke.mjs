@@ -19602,8 +19602,28 @@ await check('T199 关联型引用默认折叠、传递型默认摊开：引用�
   assert(!opened.collapsed, `点开之后不该还是折着：${JSON.stringify(opened)}`)
   assert(opened.text.includes('关联型的上下文'), `展开后才见得到关联型的上下文：${JSON.stringify(opened.text.slice(0, 200))}`)
 
+  // ④ 右槽反链卡同一口径：判据是同一份，两处不该各说各话
+  const cardRows = await page.evaluate((sel) => {
+    const card = document.querySelector(sel)
+    return {
+      present: Boolean(card),
+      text: card?.innerText ?? '',
+      rows: [...card.querySelectorAll('.blk[data-depth="0"]')].map((el) => ({
+        id: el.dataset.blockId ?? '',
+        collapsed: el.dataset.collapsed === '1',
+      })),
+    }
+  }, '#dock-right .dock-card[data-card-id="backrefs"]')
+  assert(cardRows.present, `前置：右槽反链卡应在：${JSON.stringify(cardRows.present)}`)
+  const cardAssoc = cardRows.rows.find((r) => r.id === made.assoc)
+  const cardPass = cardRows.rows.find((r) => r.id === made.pass)
+  assert(cardAssoc?.collapsed === true, `卡里关联型也要默认折：${JSON.stringify(cardRows.rows)}`)
+  assert(cardPass && !cardPass.collapsed, `卡里传递型也要默认摊：${JSON.stringify(cardRows.rows)}`)
+  assert(cardRows.text.includes('传递型的上下文'), `卡里传递型的子块要不点就见：${JSON.stringify(cardRows.text.slice(0, 200))}`)
+  assert(!cardRows.text.includes('关联型的上下文'), `卡里关联型的子块默认不该出现：${JSON.stringify(cardRows.text.slice(0, 200))}`)
+
   await ctx.close()
-  return `关联型默认折着、传递型默认摊开（子块不点就见）；关联型展开后才见上下文`
+  return `关联型默认折着、传递型默认摊开（子块不点就见）；引用栏与右槽反链卡同一口径`
 })
 
 await check(
