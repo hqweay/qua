@@ -720,6 +720,15 @@ export class PropertiesPanel {
       const text = document.createElement('span')
       text.textContent = `${labels.get(def.id) ?? (plainText(def.content).trim() || def.id)} · ${t(`ui.props.kind.${propKindOf(def)}`)}`
       /**
+       * **名字可点＝打开定义块**：与属性行的名字、标签 chip 的名字同一契约
+       * （`data-ref-to`）。一枚 chip 上「选项」「×」各有自己的命中区，
+       * 可点的只有这段名字，三个命中区互不重叠。
+       */
+      text.dataset.refTo = def.id
+      text.className = 'props-tag-name'
+      text.title = t('ui.props.openDef')
+      text.addEventListener('click', (e) => this.deps.openRef(def.id, clickModsOf(e)))
+      /**
        * `select` 的一条声明带「选项」入口：选项是定义块的子块，而标签视角只该看
        * 「对本标签可见」的那几条。**就地展开**在清单下面 —— 再开一层抽屉会让
        * 「现在在改谁」要看两处抬头才知道。

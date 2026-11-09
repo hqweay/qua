@@ -12911,8 +12911,24 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   assert(tagOwn.rows.includes(ownDefId), `标签块自己的属性要出现在卡里：${JSON.stringify(tagOwn)}`)
   assert(tagOwn.declared.includes(ownDefId), '声明段仍应列出这条标签属性')
 
+  /**
+   * ④ 声明 chip 的名字也要能打开定义块：与属性行的名字、标签 chip 的名字同一契约。
+   *    判据不是「有 title」而是「点了真的过去」——名字 span 上加了契约却没接导航的错照样绿。
+   */
+  const declaredChip = await page.evaluate((defId) => {
+    const name = document.querySelector(`[data-declared-prop-id="${defId}"] .props-tag-name`)
+    return { found: Boolean(name), refTo: name?.dataset.refTo ?? '', title: name?.title ?? '' }
+  }, ownDefId)
+  assert(declaredChip.found, `声明 chip 的名字要带可点命中区（props-tag-name）：${JSON.stringify(declaredChip)}`)
+  assert(declaredChip.refTo === ownDefId, `声明 chip 的名字要走同一条导航契约（data-ref-to 指向定义块）：${JSON.stringify(declaredChip)}`)
+  assert(declaredChip.title !== '', `可点就要看得出来能点（title 要说去哪）：${JSON.stringify(declaredChip)}`)
+  await page.locator(`[data-declared-prop-id="${ownDefId}"] .props-tag-name`).click()
+  await page.waitForTimeout(200)
+  const afterChip = await page.evaluate((defId) => window.__qua.snapshot().activeId, ownDefId)
+  assert(afterChip === ownDefId, `点声明 chip 的名字应打开定义块：${afterChip} ≠ ${ownDefId}`)
+
   await ctx.close()
-  return `两个槽互不占位：标签属性选得了自己，自己有值也声明得了；两段的入口各贴各的清单`
+  return `两个槽互不占位：标签属性选得了自己，自己有值也声明得了；声明 chip 的名字点开定义块`
 })
 
 /**
