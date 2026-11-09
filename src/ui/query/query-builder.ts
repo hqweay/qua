@@ -47,7 +47,7 @@ export function rowLabel(
   if (row.kind === 'path') {
     const dir = row.dir ?? 'up'
     const dirText = t(dir === 'down' ? 'ui.query.tree.dirDown' : dir === 'near' ? 'ui.query.tree.dirNear' : 'ui.query.tree.dirUp')
-    const target = row.value === '$self' ? t('ui.query.tree.selfBlock') : (refLabel?.(row.value ?? '') ?? row.value ?? '')
+    const target = row.value === '$self' ? t('ui.query.rootBlock') : (refLabel?.(row.value ?? '') ?? row.value ?? '')
     return `${dirText} · ${target}`
   }
   if (row.kind === 'tag') return `#${row.value ?? ''}`

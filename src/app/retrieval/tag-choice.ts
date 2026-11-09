@@ -209,6 +209,8 @@ export interface OpenTagChoiceOpts extends TagChoiceOpts {
   title: string
   emptyText: string
   onPick: (pick: TagChoicePick) => void
+  /** 入口按钮：给了它，同一颗按钮再点一次就是收起（与其它值选择器同一条手势） */
+  trigger?: HTMLElement
 }
 
 /**
@@ -221,6 +223,7 @@ export function openTagChoice(o: OpenTagChoiceOpts): void {
   o.layers.openMenu({
     rows: choice.rows(''),
     anchor: o.anchor,
+    ...(o.trigger ? { trigger: o.trigger } : {}),
     title: o.title,
     searchable: true,
     focusSearch: true,

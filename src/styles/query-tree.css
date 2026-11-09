@@ -23,8 +23,13 @@
   align-items: center;
   gap: var(--ui-gap-2);
   min-height: 24px;
+  padding-bottom: var(--ui-gap-1);
+  border-bottom: 1px solid var(--ui-border-subtle);
   font-size: var(--ui-fs-xs);
   color: var(--ui-text-tertiary);
+}
+.qt-body {
+  padding-top: var(--ui-gap-1);
 }
 .qt-title {
   color: var(--ui-text-secondary);
@@ -68,15 +73,16 @@
 .qt-mode {
   height: 22px;
   padding: 0 var(--ui-gap-1);
-  border: 1px solid var(--ui-border-subtle);
+  border: 1px solid transparent;
   border-radius: var(--ui-radius-sm);
-  background: var(--ui-surface);
+  background: transparent;
   color: var(--ui-text-secondary);
   font: inherit;
   cursor: pointer;
 }
 .qt-mode:hover {
-  border-color: var(--ui-border);
+  background: var(--ui-bg-hover);
+  border-color: var(--ui-border-subtle);
 }
 /* 「非」是一枚开关：勾上时整枚变强调色，而不是只有一个 12px 的小方框 */
 .qt-not {
@@ -139,10 +145,11 @@
   padding-left: var(--ui-gap-2);
   min-width: 0;
 }
-.qt-row[data-qt-incomplete='1'] {
-  outline: 1px dashed var(--ui-warn);
-  outline-offset: -1px;
-  border-radius: var(--ui-radius-sm);
+/* 未填是每条新行的正常初态：只给那一格值控件一条下划线。
+   整行套警告色虚线框，等于用「你做错了」迎接每一条刚加进来的条件。 */
+.qt-row[data-qt-incomplete='1'] .qt-value {
+  border-bottom: 1px dashed var(--ui-border);
+  color: var(--ui-text-tertiary);
 }
 .qt-inline {
   display: inline-flex;
@@ -150,36 +157,39 @@
   gap: var(--ui-gap-1);
   min-width: 0;
 }
-.qt-hash {
-  color: var(--ui-text-tertiary);
-  font-size: var(--ui-fs-sm);
-}
 
-/* 叶子行控件按内容宽，不铺满 —— 一行条件要读成一句话，铺满就变表单 */
+/* 一行条件要读成一句话：控件默认就是文字，hover 才显出「可点」，focus 才描边。
+   每个词都套一个框，读起来就是一张表单——这正是条件区原来的样子。 */
 .qt-value,
 .qt-kind,
 .qt-field,
 .qt-op,
-.qt-limit,
-.qt-sort-col,
-.qt-sort-dir {
+.qt-limit {
   max-width: 16rem;
-  height: 26px;
-  padding: 0 var(--ui-gap-2);
-  border: 1px solid var(--ui-border-subtle);
+  height: 24px;
+  padding: 0 var(--ui-gap-1);
+  border: 1px solid transparent;
   border-radius: var(--ui-radius-sm);
-  background: var(--ui-surface);
+  background: transparent;
   color: var(--ui-text);
   font-size: var(--ui-fs-sm);
+}
+.qt-value:hover,
+.qt-kind:hover,
+.qt-field:hover,
+.qt-op:hover,
+.qt-limit:hover {
+  background: var(--ui-bg-hover);
+  border-color: var(--ui-border-subtle);
 }
 .qt-value:focus-visible,
 .qt-kind:focus-visible,
 .qt-field:focus-visible,
 .qt-op:focus-visible,
-.qt-limit:focus-visible,
-.qt-sort-col:focus-visible,
-.qt-sort-dir:focus-visible {
+.qt-limit:focus-visible {
   border-color: var(--ui-accent);
+  background: var(--ui-surface);
+  outline: none;
 }
 .qt-value.ui-input {
   width: auto;
@@ -189,9 +199,34 @@
 .qt-op {
   color: var(--ui-text-secondary);
 }
-.qt-ref {
+.qt-ref,
+.qt-chip-btn {
   cursor: pointer;
   text-align: left;
+}
+/* 值 chip 是句子里唯一有底的一段：扫一眼就知道这一行填了什么 */
+.qt-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 var(--ui-gap-2);
+  border: 0;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-surface-sunken);
+  color: var(--ui-text);
+  font-size: var(--ui-fs-sm);
+}
+.qt-chip-btn:hover {
+  background: var(--ui-bg-hover);
+}
+.qt-placeholder {
+  color: var(--ui-text-tertiary);
+}
+.qt-missing {
+  color: var(--ui-warn);
+}
+.qt-chip--self {
+  color: var(--ui-text-secondary);
 }
 .qt-switch {
   display: inline-flex;
@@ -203,12 +238,6 @@
 }
 .qt-switch input {
   margin: 0;
-}
-.qt-hint {
-  flex-basis: 100%;
-  padding-left: var(--ui-gap-1);
-  color: var(--ui-warn);
-  font-size: var(--ui-fs-xs);
 }
 .qt-chip {
   display: inline-flex;
@@ -276,57 +305,38 @@
   color: var(--ui-text);
 }
 
-/*
-  选项是一组**字段**，不是一句话：标签在上、控件在下，三项按内容宽排。
-  旧写法把标签和控件挤在同一行，控件宽窄不一（限数框被拉成一整条），
-  读起来像一张没对齐的表单。
-*/
-.qt-opts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--ui-gap-2) var(--ui-gap-5);
-  padding-top: var(--ui-gap-2);
-  border-top: 1px solid var(--ui-border-subtle);
-  color: var(--ui-text-secondary);
-}
-.qt-opt {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--ui-gap-1);
+/* 「最多」与「应用」都收在抬头：条件卡的 body 只剩条件本身，不再有分隔线和表单脚 */
+.qt-spacer {
+  margin-left: auto;
 }
 .qt-opt-label {
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-2xs);
 }
-.qt-opt-controls {
-  display: flex;
+.qt-limit-wrap {
+  display: inline-flex;
   align-items: center;
   gap: var(--ui-gap-1);
 }
-.qt-opt--limit .qt-limit {
-  width: 5.5em;
-  max-width: 5.5em;
+.qt-head .qt-limit {
+  width: 4.5em;
+  max-width: 4.5em;
 }
-.qt-opt--sort .qt-sort-col {
-  width: 9em;
+.qt-head .qt-apply {
+  padding: 0 var(--ui-gap-2);
+  border: 0;
+  border-radius: var(--ui-radius-sm);
+  background: transparent;
+  color: var(--ui-accent);
+  font-size: var(--ui-fs-xs);
+  cursor: pointer;
 }
-.qt-opt--sort .qt-sort-dir {
-  width: 5em;
+.qt-head .qt-apply:hover:not(:disabled) {
+  background: var(--ui-bg-hover);
 }
-.qt-sort-dir:disabled {
-  opacity: 0.5;
+.qt-head .qt-apply[disabled] {
+  opacity: 0.45;
   cursor: default;
-}
-.qt-foot {
-  display: flex;
-  justify-content: flex-end;
-  padding-top: var(--ui-gap-1);
-}
-.qt-apply[disabled] {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* 空态：标题 ＋ 一句实话 ＋ 一个主动作（不摆一张占位的图） */

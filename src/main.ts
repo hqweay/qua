@@ -1529,7 +1529,9 @@ function openSpecPopover(opts: {
         return choicesOf(def).map((c) => ({ id: c.id, label: displayNameOf(c).trim() || shortId(c.id) }))
       },
       ...(hostBlock ? { owner: hostBlock } : {}),
-      pickRef: (b, propId, current, onPick, rect, trigger) => pickRefValue(b, propId, current, onPick, rect, trigger),
+      pickRef: (b, propId, current, onPick, rect, trigger, opts) => pickRefValue(b, propId, current, onPick, rect, trigger, opts),
+      pickTag: pickTagValue,
+      tagExists,
       refLabel: (targetId) => {
         const target = kb.get(targetId)
         return target
@@ -2985,6 +2987,8 @@ const {
   scheduleProperties,
   pickRefValue,
   pickChoiceValue,
+  pickTagValue,
+  tagExists,
   openPropertiesDrawer,
   mountBlockView,
   mountEmbedView,
@@ -3030,6 +3034,8 @@ panels = {
   scheduleProperties,
   pickRefValue,
   pickChoiceValue,
+  pickTagValue,
+  tagExists,
   openPropertiesDrawer,
   mountBlockView,
   mountEmbedView,

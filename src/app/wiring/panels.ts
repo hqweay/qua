@@ -21,7 +21,9 @@ import {
   displayNameOf,
   EMPTY_QUICK_FILTER,
   findByAlias,
+  findTagByName,
   flatten,
+  SELF,
   hasQueryBody,
   hasTabsBody,
   hasList,
@@ -60,6 +62,7 @@ import type { BlockStore } from '../../core/model/store.ts'
 import type { Prefs, Workspace } from '../../core/infra/workspace.ts'
 import type { Layers, Row } from '../../ui/overlay/layers.ts'
 import { openChoicePicker } from '../choice-picker.ts'
+import { openTagChoice } from '../retrieval/tag-choice.ts'
 import { ICON_PATHS } from '../../view/icons.ts'
 import { BUILTIN_LABEL, MountArea, type ViewBodyHost } from '../../ui/chrome/mount-area.ts'
 import { PropertiesPanel, type PropertiesDeps } from '../../ui/block-ui/properties.ts'
@@ -229,17 +232,33 @@ export function setupPanels(deps: PanelsDeps) {
   }
 
   const pickRefValue = (
-    owner: Block,
+    owner: Block | undefined,
     _propId: string,
     current: string,
     onPick: (targetId: string) => void,
     anchor?: DOMRect,
     trigger?: HTMLElement,
+    opts?: { rootBlock?: boolean },
   ): void => {
     const rows: Row[] = []
+    /**
+     * 「根块」是条件值位上的一枚虚拟块：它不在森林里，求值时由 `selfId` 解析成宿主。
+     * 只在条件树要它（`rootBlock`）—— 属性区给某个块挑引用目标时，没有「随位置变化」这回事。
+     * 与真实块同列、同搜索、同勾选，用户不必知道内部那个记号。
+     */
+    if (opts?.rootBlock) {
+      rows.push({
+        id: `ref/${SELF}`,
+        label: t('ui.query.rootBlock'),
+        hint: t('ui.query.rootBlockHint'),
+        icon: 'lucide:square',
+        // 不给 group：置顶的一行不需要分组标题，看起来就是候选里的第一块
+        keyHint: current === SELF ? t('ui.props.refCurrent') : undefined,
+      })
+    }
     for (const b of flatten({ roots: [...kb.roots()] })) {
       // 自己不能指向自己：那会造出一个立刻成环的引用
-      if (b.id === owner.id) continue
+      if (owner && b.id === owner.id) continue
       const title = displayNameOf(b).trim()
       rows.push({
         id: `ref/${b.id}`,
@@ -268,6 +287,36 @@ export function setupPanels(deps: PanelsDeps) {
       },
     })
   }
+
+  /**
+   * 查询条件里的标签值：候选是库里已有的标签，按地址／别名可搜。
+   * `allowCreate:false` —— 配条件是一次读操作，不该顺手往库里建标签，
+   * 更不该让一条刚选完的条件查出空集。
+   */
+  const pickTagValue = (
+    _current: string,
+    onPick: (name: string) => void,
+    anchor?: DOMRect,
+    trigger?: HTMLElement,
+  ): void => {
+    openTagChoice({
+      layers,
+      forest: kb.roots(),
+      anchor: anchor ?? null,
+      ...(trigger ? { trigger } : {}),
+      title: t('ui.query.pickTagTitle'),
+      emptyText: t('ui.query.pickTagEmpty'),
+      allowCreate: false,
+      idPrefix: 'qtag',
+      onPick: (pick) => {
+        // 关掉「新建」后只可能选到已有标签；写回主地址，与 findTagByName 同一口径
+        if (pick.kind === 'tag') onPick(pick.name)
+      },
+    })
+  }
+
+  /** 条件按名存：标签改名后旧条件解析不到，给一句实话而不是静默空集 */
+  const tagExists = (name: string): boolean => findTagByName(kb.roots(), name) !== undefined
 
   /**
    * **选项图标选择器**：把 `ICON_PATHS` 的键现画成一列，行内带图标预览。
@@ -727,8 +776,10 @@ export function setupPanels(deps: PanelsDeps) {
       refClick: (hit, el, mods) => deps.refClick(hit, mods, el),
       ...(deps.atomClick ? { onAtomClick: (atom, el, mods) => deps.atomClick!(atom, el, mods) } : {}),
       openBlock: (id, place) => deps.openBlock(id, place),
-      pickRef: (b, propId, current, onPick, anchor, trigger) => pickRefValue(b, propId, current, onPick, anchor, trigger),
+      pickRef: (b, propId, current, onPick, anchor, trigger, opts) => pickRefValue(b, propId, current, onPick, anchor, trigger, opts),
       pickChoice: (b, propId, current, onPick, anchor, trigger) => pickChoiceValue(b, propId, current, onPick, anchor, trigger),
+      pickTag: pickTagValue,
+      tagExists,
       refLabel: (id) => {
         const b = kb.get(id)
         if (!b) return t('ui.props.refMissing', { id: shortId(id) })
@@ -1166,6 +1217,8 @@ export function setupPanels(deps: PanelsDeps) {
     scheduleProperties,
     pickRefValue,
     pickChoiceValue,
+    pickTagValue,
+    tagExists,
     openPropertiesDrawer,
     mountBlockView,
     mountEmbedView,

@@ -207,8 +207,12 @@ export interface ViewHostDeps {
   onAtomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: ClickMods) => void
   /** 打开一块（行首块标 / 紧凑列表） */
   openBlock: (blockId: string, place?: OpenAction) => void
-  /** `ref` 值的选择器（与属性区同一份） */
-  pickRef?: (owner: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect, trigger?: HTMLElement) => void
+  /** `ref` 值的选择器（与属性区同一份；`rootBlock` 让条件树多一枚「根块」候选） */
+  pickRef?: (owner: Block | undefined, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect, trigger?: HTMLElement, opts?: { rootBlock?: boolean }) => void
+  /** 标签值选择器：只列已有标签、可搜；查询是读操作，不给新建 */
+  pickTag?: (current: string, onPick: (name: string) => void, anchor?: DOMRect, trigger?: HTMLElement) => void
+  /** 标签名还解析得到吗：按名存的条件改名后要显示悬空态，而不是静默空集 */
+  tagExists?: (name: string) => boolean
   /** 多值 select 的选值浮层（与属性卡共用；省略 ⇒ 多值格只读） */
   pickChoice?: (
     owner: Block,
@@ -1282,10 +1286,14 @@ export class ViewHost {
     if (this.treeAllowed()) {
       const summary = document.createElement('button')
       summary.type = 'button'
-      summary.className = 'queryview-chip'
+      summary.className = 'queryview-chip ui-ellipsis'
       summary.dataset.queryChip = 'summary'
-      summary.textContent = treeSummary(spec)
-      summary.title = t('ui.query.edit')
+      // 收起态要读得出「这一屏按什么选的」；只报条数等于没说。
+      // 拆不动的形状 queryChips 会整块给「复合条件」，那时才退回条数。
+      const labels = queryChips(spec, this.deps.fields(), this.deps.choices, this.deps.refLabel)
+      summary.textContent = labels.length > 0 ? `${treeSummary(spec)} · ${labels.join(' · ')}` : treeSummary(spec)
+      // 抬头窄时省略几何走 ui-ellipsis 原语；title 给全文，不让「读得出内容」变成「读不全」
+      summary.title = summary.textContent
       summary.addEventListener('click', () => this.openTree())
       box.appendChild(summary)
       if (slice) box.appendChild(slice)
@@ -1429,6 +1437,8 @@ export class ViewHost {
         choices: (propId) => this.deps.choices?.(propId) ?? [],
         ...(this.ownerBlock() ? { owner: this.ownerBlock() } : {}),
         ...(this.deps.pickRef ? { pickRef: this.deps.pickRef } : {}),
+        ...(this.deps.pickTag ? { pickTag: this.deps.pickTag } : {}),
+        ...(this.deps.tagExists ? { tagExists: this.deps.tagExists } : {}),
         ...(this.deps.pickChoice ? { pickChoice: this.deps.pickChoice } : {}),
         ...(this.deps.refLabel ? { refLabel: this.deps.refLabel } : {}),
         apply: (next) => this.deps.invoke('core.query/set-spec', { owner: this.writeOwner, spec: next }),

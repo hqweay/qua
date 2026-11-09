@@ -14,6 +14,7 @@
 import {
   canonicalSpec,
   opsFor,
+  SELF,
   specKeyOf,
   specOfTree,
   treeIncomplete,
@@ -48,26 +49,44 @@ export interface QueryTreeDeps {
   close?: () => void
   /** 内联树：收起按钮；弹层：关闭按钮 */
   inline?: boolean
-  pickRef?: (owner: Block, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect, trigger?: HTMLElement) => void
-  refLabel?: (targetId: string) => string
-  /** 块选择器的宿主（排除自己） */
-  owner?: Block
   /**
-   * 显示「条数／排序」两格；缺省 `true`。
+   * 块值选择器。`opts.rootBlock` 为真时候选里多一枚虚拟块「根块」——
+   * 只有条件树要它：属性区给某个块挑引用目标时，「随所在位置变化」没有意义。
+   * `owner` 可缺省：它只用于排除自己，枚举候选不需要它（条件树未必有块宿主）。
+   */
+  pickRef?: (
+    owner: Block | undefined,
+    propId: string,
+    current: string,
+    onPick: (targetId: string) => void,
+    anchor?: DOMRect,
+    trigger?: HTMLElement,
+    opts?: { rootBlock?: boolean },
+  ) => void
+  refLabel?: (targetId: string) => string
+  /** 块选择器的宿主（排除自己）；没有也能开 —— 见 `pickRef` */
+  owner?: Block
+  /** 标签值选择器：候选是库里已有的标签，可搜索；查询是读操作，不许顺手新建 */
+  pickTag?: (current: string, onPick: (name: string) => void, anchor?: DOMRect, trigger?: HTMLElement) => void
+  /** 标签名还解析得到吗：按名存的条件在改名后会悬空，要给一句实话而不是静默空集 */
+  tagExists?: (name: string) => boolean
+  /**
+   * 显示「最多」那一格；缺省 `true`。
    *
-   * 切片编辑用 `false`：切片只是 `QueryNode`，没有 `limit`／`sort` 的位置——
+   * 切片编辑用 `false`：切片只是 `QueryNode`，没有 `limit` 的位置——
    * 画出来却存不进去，等于「点了没生效」。
    */
   showOptions?: boolean
 }
 
+/** 一行开头的词是**结论**（这行是什么），不是问卷；展开下拉才是问卷 */
 const ROW_KIND_TEXT: Record<TreeRowKind, MsgId> = {
-  tag: 'ui.query.kind.tag',
-  text: 'ui.query.kind.text',
-  prop: 'ui.query.kind.prop',
-  ref: 'ui.query.kind.ref',
-  is: 'ui.query.kind.is',
-  role: 'ui.query.kind.role',
+  tag: 'ui.query.prefix.tag',
+  text: 'ui.query.prefix.text',
+  prop: 'ui.query.prefix.prop',
+  ref: 'ui.query.prefix.ref',
+  is: 'ui.query.prefix.is',
+  role: 'ui.query.prefix.role',
   path: 'ui.query.kind.path',
 }
 
@@ -91,7 +110,8 @@ function defaultRow(kind: TreeRowKind, field: string): TreeRow {
   if (kind === 'ref') return { kind: 'ref', target: '' }
   if (kind === 'is') return { kind: 'is', target: '' }
   if (kind === 'role') return { kind: 'role', role: 'journal' }
-  return { kind: 'path', by: 'journal', date: '', blockId: '' }
+  // 新加的方向行默认就锚在「根块」：与两个创建种子同口径，一次点击即得到一条完整条件
+  return { kind: 'path', by: 'block', dir: 'up', date: '', blockId: '$self' }
 }
 
 function option(value: string, label: string): HTMLOptionElement {
@@ -171,34 +191,35 @@ export class QueryTree {
     this.painted = true
     this.deps.apply(spec)
     this.deps.afterApply?.()
+    // 应用完这一刻草稿又与 spec 相同了：按钮要跟着回到不可点
+    this.syncApply()
   }
 
-  /** 一行填完/清空：更新那一行的未填标记与「应用」的可用性，不重画（保焦点） */
+  /**
+   * 一行填完/清空：只更新「应用」的可用性，不重画（重画会把焦点冲掉）。
+   * 未填态由那格值控件自己的 placeholder ＋ 下划线表达，不再往行里插一句提示——
+   * 一条新加的行必然未填，用警告色和独占一行的文字迎接它，等于把正常初态当错误。
+   */
   private syncRow(el: HTMLElement, row: TreeRow): void {
     const rowEl = el.closest<HTMLElement>('.qt-row')
     if (rowEl) {
-      const incomplete = treeNodeOfRow(row) === null
-      if (incomplete) rowEl.dataset.qtIncomplete = '1'
+      if (treeNodeOfRow(row) === null) rowEl.dataset.qtIncomplete = '1'
       else delete rowEl.dataset.qtIncomplete
-      let hint = rowEl.querySelector<HTMLElement>('.qt-hint')
-      if (incomplete) {
-        if (!hint) {
-          hint = document.createElement('span')
-          hint.className = 'qt-hint'
-          hint.textContent = t('ui.query.tree.incomplete')
-          const del = rowEl.querySelector('.qt-del')
-          if (del) rowEl.insertBefore(hint, del)
-          else rowEl.append(hint)
-        }
-      } else hint?.remove()
+      rowEl.querySelector('.qt-hint')?.remove()
     }
     this.syncApply()
+  }
+
+  /** 草稿与当前 spec 是否不同：没改动就不该给一颗能点的「应用」 */
+  private dirty(): boolean {
+    if (!this.draft) return false
+    return specKeyOf(specOfTree(this.draft)) !== this.key
   }
 
   private syncApply(): void {
     if (!this.applyBtn || !this.draft) return
     const incomplete = treeIncomplete(this.draft.root)
-    this.applyBtn.disabled = incomplete
+    this.applyBtn.disabled = incomplete || !this.dirty()
     if (incomplete) this.applyBtn.title = t('ui.query.tree.incomplete')
     else this.applyBtn.removeAttribute('title')
   }
@@ -215,9 +236,9 @@ export class QueryTree {
     const body = document.createElement('div')
     body.className = 'qt-body'
     body.append(this.groupEl(this.draft.root, 0, null, -1))
-    if (this.deps.showOptions !== false) body.append(this.optionsEl(this.draft))
-    body.append(this.footEl())
     this.box.append(body)
+    // 加行／删行／换组这些手势走 paint()，不经过 syncRow —— 重画后要重算一次按钮
+    this.syncApply()
     if (this.focusNew) {
       this.focusNew = false
       const rows = this.box.querySelectorAll('.qt-row')
@@ -227,6 +248,10 @@ export class QueryTree {
     }
   }
 
+  /**
+   * 抬头把「提交」与「取多少」收在一起：编辑中的草稿还不是谓词，「应用」是它成为谓词的
+   * 那一刻；`limit` 答的是结果批取多少，本来就不该和条件挤成一张带分隔线的表单。
+   */
   private headEl(): HTMLElement {
     const head = document.createElement('div')
     head.className = 'qt-head'
@@ -237,6 +262,23 @@ export class QueryTree {
     count.className = 'qt-count'
     count.textContent = this.draft ? t('ui.query.tree.count', { count: treeLeafCount(this.draft.root) }) : t('ui.query.builder.json')
     head.append(title, count)
+
+    const spacer = document.createElement('span')
+    spacer.className = 'qt-spacer'
+    head.append(spacer)
+    if (this.deps.showOptions !== false && this.draft) head.append(this.limitEl())
+
+    // 拆不动的形状是只读 JSON：那里没有草稿可以「应用」，连灰着的按钮都不该摆
+    if (this.draft) {
+      const apply = buttonEl(t('ui.query.builder.apply'), 'qt-apply', 'apply')
+      apply.disabled = true
+      apply.addEventListener('click', () => {
+        this.apply()
+        this.painted = true
+      })
+      this.applyBtn = apply
+      head.append(apply)
+    }
     if (this.deps.close) {
       const close = buttonEl(
         this.deps.inline ? t('ui.query.tree.collapse') : t('ui.query.builder.cancel'),
@@ -247,6 +289,30 @@ export class QueryTree {
       head.append(close)
     }
     return head
+  }
+
+  private limitEl(): HTMLElement {
+    const wrap = document.createElement('label')
+    wrap.className = 'qt-limit-wrap'
+    const label = document.createElement('span')
+    label.className = 'qt-opt-label'
+    label.textContent = t('ui.query.builder.limit')
+    const input = document.createElement('input')
+    input.type = 'number'
+    input.min = '0'
+    input.className = 'qt-limit ui-input'
+    input.dataset.qt = 'limit'
+    input.placeholder = t('ui.query.builder.noLimit')
+    input.value = this.draft?.limit === undefined ? '' : String(this.draft.limit)
+    input.addEventListener('input', () => {
+      if (!this.draft) return
+      const n = Number(input.value)
+      if (input.value.trim() === '' || !Number.isFinite(n) || n <= 0) delete this.draft.limit
+      else this.draft.limit = Math.floor(n)
+      this.syncApply()
+    })
+    wrap.append(label, input)
+    return wrap
   }
 
   private jsonOnlyEl(): HTMLElement {
@@ -486,13 +552,6 @@ export class QueryTree {
         break
     }
 
-    if (incomplete) {
-      const hint = document.createElement('span')
-      hint.className = 'qt-hint'
-      hint.textContent = t('ui.query.tree.incomplete')
-      el.append(hint)
-    }
-
     const del = buttonEl('×', 'qt-del', 'del')
     del.title = t('ui.query.builder.removeRow')
     del.addEventListener('click', () => {
@@ -503,27 +562,43 @@ export class QueryTree {
     return el
   }
 
+  /**
+   * 系统预填的派生值只显示人话，不给输入框 —— 用户没有机会敲出 `$self`，
+   * 「正文里真的含这几个字」与相对语义在数据层同字节的歧义也就碰不到。
+   */
+  private selfChip(text: string): HTMLElement {
+    const chip = document.createElement('span')
+    chip.className = 'qt-chip qt-chip--self'
+    chip.dataset.qt = 'value'
+    chip.textContent = text
+    return chip
+  }
+
   private textRowControls(row: Extract<TreeRow, { kind: 'tag' | 'text' }>): HTMLElement {
     if (row.kind === 'tag') {
-      const hash = document.createElement('span')
-      hash.className = 'qt-hash'
-      hash.textContent = '#'
-      const input = document.createElement('input')
-      input.className = 'qt-value ui-input'
-      input.dataset.qt = 'value'
-      input.placeholder = t('ui.query.builder.tagHint')
-      input.value = row.value
-      input.addEventListener('input', () => {
-        row.value = input.value
-        this.syncRow(input, row)
+      if (row.value === SELF) return this.selfChip(t('ui.query.selfTag'))
+      const name = row.value
+      // 条件按名存：标签一改名就解析不到。给一句实话，别让查询静默变空集
+      const missing = name !== '' && this.deps.tagExists?.(name) === false
+      const label =
+        name === ''
+          ? t('ui.query.pickTag')
+          : missing
+            ? `#${name} · ${t('ui.query.tagMissing')}`
+            : `#${name}`
+      const b = buttonEl(label, `qt-value qt-chip-btn qt-slot${name === '' ? ' qt-placeholder' : ''}${missing ? ' qt-missing' : ''}`, 'value')
+      b.title = t('ui.query.pickTagHint')
+      b.addEventListener('click', () => {
+        this.deps.pickTag?.(name, (next) => {
+          row.value = next
+          this.paint()
+        }, b.getBoundingClientRect(), b)
       })
-      const wrap = document.createElement('span')
-      wrap.className = 'qt-inline'
-      wrap.append(hash, input)
-      return wrap
+      return b
     }
+    if (row.value === SELF) return this.selfChip(t('ui.query.selfText'))
     const input = document.createElement('input')
-    input.className = 'qt-value ui-input'
+    input.className = 'qt-value ui-input qt-slot'
     input.dataset.qt = 'value'
     input.placeholder = t('ui.query.builder.textHint')
     input.value = row.value
@@ -579,6 +654,8 @@ export class QueryTree {
   }
 
   private valueControl(row: Extract<TreeRow, { kind: 'prop' }>): HTMLElement {
+    // `{prop:{eq:'$self'}}` 是「取根块同一栏的值」，系统预填；显示成一句人话，不给输入框
+    if (row.value === SELF) return this.selfChip(t('ui.query.selfProp'))
     if (row.op === 'exists' || row.op === 'empty') {
       const sel = selectEl(
         [
@@ -668,7 +745,7 @@ export class QueryTree {
     return input
   }
 
-  /** 非日期的日期值（例如 `$self`）：原样显示，给一个「相对」标记；C 批会换成正式控件 */
+  /** 非日期的日期字面量：原样显示，给一个「相对」标记；裸哨兵已改走 `selfChip` */
   private relativeInput(row: Extract<TreeRow, { kind: 'prop' }>): HTMLElement {
     const wrap = document.createElement('span')
     wrap.className = 'qt-inline'
@@ -701,135 +778,101 @@ export class QueryTree {
     })
   }
 
+  /**
+   * 块值位统一走选择器：「根块」是候选里的一块，不是一枚独立的魔法按钮。
+   * 也**不退成手输 id** —— 那正是让用户去写 `$self` 的口子；没有选择器就明说不可选。
+   */
   private refButton(current: string, onPick: (id: string) => void): HTMLElement {
     const label =
       current === ''
         ? t('ui.query.tree.pickBlock')
-        : current === '$self'
-          ? t('ui.query.tree.selfBlock')
+        : current === SELF
+          ? t('ui.query.rootBlock')
           : (this.deps.refLabel?.(current) ?? current)
-    const b = buttonEl(label, 'qt-value qt-ref', 'ref')
-    b.addEventListener('click', () => {
-      const owner = this.deps.owner
-      if (!this.deps.pickRef || !owner) return
-      this.deps.pickRef(owner, '', current, onPick, b.getBoundingClientRect(), b)
-    })
-    if (!this.deps.pickRef || !this.deps.owner) {
-      // 没有块选择器（例如 local tab 没有块宿主）：退化成手输 id，不把入口藏掉
-      const input = document.createElement('input')
-      input.className = 'qt-value ui-input'
-      input.dataset.qt = 'value'
-      input.placeholder = current
-      input.value = current
-      input.addEventListener('input', () => onPick(input.value))
-      return input
+    const b = buttonEl(label, `qt-value qt-ref qt-slot${current === '' ? ' qt-placeholder' : ''}`, 'ref')
+    if (!this.deps.pickRef) {
+      b.disabled = true
+      b.title = t('ui.query.noBlockPicker')
+      return b
     }
+    b.addEventListener('click', () => {
+      this.deps.pickRef?.(this.deps.owner, '', current, onPick, b.getBoundingClientRect(), b, { rootBlock: true })
+    })
     return b
   }
 
+  /**
+   * 路径行：**一个模式词 ＋ 一个值控件**。
+   *
+   * 原先把「来源(天/块)」「方向」「固定/相对」摊成三个下拉，再加目标块与「这一块」
+   * 两颗按钮 —— 一条条件五个带框控件，还出现两枚一模一样的「这一块」。
+   * 它们是同一件事的几种问法，收进一个模式词即可；目标永远是同一个块选择器。
+   */
   private pathControls(row: Extract<TreeRow, { kind: 'path' }>): HTMLElement[] {
-    const out: HTMLElement[] = []
-    out.push(
-      selectEl(
-        [
-          { value: 'journal', label: t('ui.query.tree.pathDay') },
-          { value: 'block', label: t('ui.query.tree.pathBlock') },
-        ],
-        row.by,
-        (next) => {
-          row.by = next === 'block' ? 'block' : 'journal'
-          if (row.by === 'journal') row.dir = 'up' // 天的形状只有「之上」一个方向
-          this.paint()
-        },
-        'qt-path-by',
-        'path-by',
-      ),
+    const mode = this.pathModeOf(row)
+    const sel = selectEl(
+      [
+        { value: 'up', label: t('ui.query.tree.dirUp') },
+        { value: 'down', label: t('ui.query.tree.dirDown') },
+        { value: 'near', label: t('ui.query.tree.dirNear') },
+        { value: 'abs', label: t('ui.query.pathMode.day') },
+        { value: 'rel', label: t('ui.query.pathMode.today') },
+        { value: 'host', label: t('ui.query.pathMode.host') },
+      ],
+      mode,
+      (next) => {
+        row.dir = undefined
+        if (next === 'up' || next === 'down' || next === 'near') {
+          row.by = 'block'
+          if (next === 'down' || next === 'near') row.dir = next
+          row.rel = undefined
+          // 方向行默认锚在「根块」：与两个创建种子同口径，加一行就是一条完整条件
+          if (row.blockId === '') row.blockId = SELF
+        } else if (next === 'rel') {
+          row.by = 'journal'
+          row.date = ''
+          row.rel = row.rel ?? 0
+        } else if (next === 'host') {
+          row.by = 'journal'
+          row.rel = undefined
+          row.date = SELF
+        } else {
+          row.by = 'journal'
+          row.rel = undefined
+          if (row.date === SELF || !isJournalDate(row.date)) row.date = ''
+        }
+        this.paint()
+      },
+      'qt-path-mode',
+      'path-mode',
     )
+    return [sel, this.pathValue(row, mode)]
+  }
+
+  private pathModeOf(row: Extract<TreeRow, { kind: 'path' }>): string {
+    if (row.by === 'block') return row.dir ?? 'up'
+    if (row.date === SELF) return 'host'
+    return row.rel !== undefined ? 'rel' : 'abs'
+  }
+
+  private pathValue(row: Extract<TreeRow, { kind: 'path' }>, mode: string): HTMLElement {
     if (row.by === 'block') {
-      out.push(
-        selectEl(
-          [
-            { value: 'up', label: t('ui.query.tree.dirUp') },
-            { value: 'down', label: t('ui.query.tree.dirDown') },
-            { value: 'near', label: t('ui.query.tree.dirNear') },
-          ],
-          row.dir ?? 'up',
-          (next) => {
-            row.dir = next === 'up' ? undefined : (next as 'down' | 'near')
-            this.paint()
-          },
-          'qt-path-dir',
-          'path-dir',
-        ),
-      )
-      out.push(
-        this.refButton(row.blockId, (id) => {
-          row.blockId = id
-          this.paint()
-        }),
-      )
-      // 「这一块」＝`$self`（宿主／所在容器）：随手查询的锚就住这一格里
-      const self = buttonEl(t('ui.query.tree.selfBlock'), 'qt-value qt-ref', 'ref-self')
-      self.title = t('ui.query.tree.selfHint')
-      self.addEventListener('click', () => {
-        row.blockId = '$self'
+      return this.refButton(row.blockId, (id) => {
+        row.blockId = id
         this.paint()
       })
-      out.push(self)
-      return out
     }
-    if (row.date !== '' && !isJournalDate(row.date)) {
-      const wrap = document.createElement('span')
-      wrap.className = 'qt-inline'
-      const input = document.createElement('input')
-      input.className = 'qt-value ui-input'
-      input.dataset.qt = 'value'
-      input.dataset.qtRelative = '1'
-      input.value = row.date
-      input.addEventListener('input', () => {
-        row.date = input.value
-        this.syncRow(input, row)
-      })
-      const chip = document.createElement('span')
-      chip.className = 'qt-chip'
-      chip.textContent = t('ui.query.tree.relative')
-      wrap.append(input, chip)
-      out.push(wrap)
-      return out
-    }
-    // 天有两态：固定某一天（日期输入）／相对今天（存 `{today:{offset}}`，不存字面量）。
-    // 相对态的偏移可负（昨天 ＝ −1）；0 就是今天。
-    out.push(
-      selectEl(
-        [
-          { value: 'abs', label: t('ui.query.tree.pathDay') },
-          { value: 'rel', label: t('ui.query.relative.mode') },
-        ],
-        row.rel !== undefined ? 'rel' : 'abs',
-        (next) => {
-          if (next === 'rel') {
-            row.date = ''
-            row.rel = row.rel ?? 0
-          } else {
-            row.rel = undefined
-            row.date = ''
-          }
-          this.paint()
-        },
-        'qt-path-mode',
-        'path-mode',
-      ),
-    )
-    if (row.rel !== undefined) {
+    // 「这一天下面」用根块的日期：`eq:SELF` 是 seed 的形状，显示成一句人话，不给输入框
+    if (row.date === SELF) return this.selfChip(t('ui.query.selfDate'))
+    if (mode === 'rel') {
       const wrap = document.createElement('span')
       wrap.className = 'qt-inline'
       const input = document.createElement('input')
       input.type = 'number'
       input.step = '1'
-      input.className = 'qt-value ui-input'
+      input.className = 'qt-value ui-input qt-slot'
       input.dataset.qt = 'value'
-      input.title = t('ui.query.relative.mode')
-      input.value = String(row.rel)
+      input.value = String(row.rel ?? 0)
       input.addEventListener('input', () => {
         const n = Number(input.value)
         if (input.value.trim() !== '' && Number.isFinite(n)) row.rel = Math.trunc(n)
@@ -839,72 +882,18 @@ export class QueryTree {
       chip.className = 'qt-chip'
       chip.textContent = t('ui.query.tree.relative')
       wrap.append(input, chip)
-      out.push(wrap)
-      return out
+      return wrap
     }
     const input = document.createElement('input')
-    input.type = 'date'
-    input.className = 'qt-value'
+    input.type = row.date !== '' && !isJournalDate(row.date) ? 'text' : 'date'
+    input.className = 'qt-value ui-input qt-slot'
     input.dataset.qt = 'value'
     input.value = row.date
     input.addEventListener('input', () => {
       row.date = input.value
       this.syncRow(input, row)
     })
-    out.push(input)
-    return out
-  }
-
-  /* ---------------------------------------------------------- 范围/上限/顺序 */
-
-  private optionsEl(draft: TreeDraft): HTMLElement {
-    const row = document.createElement('div')
-    row.className = 'qt-opts'
-
-    const labelOf = (text: string): HTMLSpanElement => {
-      const s = document.createElement('span')
-      s.className = 'qt-opt-label'
-      s.textContent = text
-      return s
-    }
-
-    const limit = document.createElement('label')
-    limit.className = 'qt-opt qt-opt--limit'
-    limit.append(labelOf(t('ui.query.builder.limit')))
-    const limitInput = document.createElement('input')
-    limitInput.type = 'number'
-    limitInput.min = '0'
-    limitInput.className = 'qt-limit ui-input'
-    limitInput.dataset.qt = 'limit'
-    limitInput.placeholder = t('ui.query.builder.noLimit')
-    limitInput.value = draft.limit === undefined ? '' : String(draft.limit)
-    limitInput.addEventListener('input', () => {
-      const n = Number(limitInput.value)
-      if (limitInput.value.trim() === '' || !Number.isFinite(n) || n <= 0) delete draft.limit
-      else draft.limit = Math.floor(n)
-    })
-    limit.append(limitInput)
-    row.append(limit)
-
-    // 排序不在这里：成员顺序是抬头排序编辑器的格子（多键、按数组序生效），
-    // 条件树只管「取哪些」。`draft.sort` 原样随往返保全，不被这里吞掉。
-    return row
-  }
-
-  private footEl(): HTMLElement {
-    const foot = document.createElement('div')
-    foot.className = 'qt-foot'
-    const apply = buttonEl(t('ui.query.builder.apply'), 'qt-apply ui-btn', 'apply')
-    const incomplete = this.draft ? treeIncomplete(this.draft.root) : true
-    apply.disabled = incomplete
-    if (incomplete) apply.title = t('ui.query.tree.incomplete')
-    this.applyBtn = apply
-    apply.addEventListener('click', () => {
-      this.apply()
-      this.painted = true
-    })
-    foot.append(apply)
-    return foot
+    return input
   }
 }
 

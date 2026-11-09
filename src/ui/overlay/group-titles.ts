@@ -21,6 +21,9 @@ const GROUP_TITLES: Record<string, string> = {
   'sel/2-ref': t('menu.group.ref'),
   'pick/1': t('menu.group.pickPage'),
   'pick/2': t('menu.group.pickTag'),
+  // 块选择器的两组：分组 id 不是用户语言，别把 `ref/1-page` 露到浮层里
+  'ref/1-page': t('menu.group.pickPage'),
+  'ref/2-block': t('menu.group.block'),
   // 检索浮层（`#` 标签源 / `@` 页块源）：分组是「结果从哪儿来」，不是命令分类
   'retrieval/1-instance': t('menu.group.instance'),
   'retrieval/2-tag': t('menu.group.pickTag'),
