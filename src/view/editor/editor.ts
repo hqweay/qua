@@ -41,7 +41,6 @@ import {
   runAtCell,
   insertSiteOf,
   blockSpanPlan,
-  detectTrigger,
   mergeIntoPrevPlan,
   moveStaysInside,
   siblingsOf,
@@ -51,7 +50,6 @@ import {
   liveChildren,
   mkBlock,
   mkQueryBlock,
-  createObjRecordInTx,
   trashOf,
   normSel,
   outdentMove,
@@ -100,8 +98,6 @@ import {
   type QuerySpec,
   type Sel,
   type TodoState,
-  type TriggerChar,
-  type TriggerHit,
   type UndoKind,
   type VisibleRow,
 } from '../../core/index.ts'
@@ -109,14 +105,12 @@ import { resolveRef } from '../../core/relations/ref.ts'
 import { inputSession } from './input-session.ts'
 import {
   clearMarks as clearRunsMarks,
-  fromProjection,
   insertRunAt,
   isEmptyContent,
   marksInRange,
   mkAnno,
   plainLen,
   plainText,
-  projectOff,
   removeRunById,
   refRunsOf,
   runById,
@@ -186,6 +180,7 @@ import { Drag } from "./drag.ts"
 import { EmbedBodies } from "./embed-bodies.ts"
 import { BlockSelection } from "./block-selection.ts"
 import { ClipboardOps } from './clipboard-ops.ts'
+import { TriggerOps } from './trigger-ops.ts'
 import { bindEditorEvents, type AtomMenuHit, type RefClickHit, type RefClickMods, type TriggerQuery } from './editor-events.ts'
 
 export interface Probe {
@@ -582,6 +577,8 @@ export class BlockEditor {
   readonly drag = new Drag(this)
   /** 剪贴板三味（正文／引用／剪切移动）与粘贴落点：没有自有状态，全部经本编辑器 */
   readonly clip = new ClipboardOps(this)
+  /** 触发词三事（报浮层／抹字／落账）：没有自有状态，全部经本编辑器 */
+  readonly triggers = new TriggerOps(this)
   /** 块级选区（跨块整块选择）：字段与方法都在协作对象里，这里只是持有它 */
   readonly bsel = new BlockSelection(this)
   /**
@@ -4008,8 +4005,8 @@ export class BlockEditor {
       endMouseSelect: () => this.bsel.endMouseSelect(),
       hasBlockSelection: () => this.bsel.hasBlockSelection(),
       onShellActivate: (date, place) => this.events.shellWrite?.(date, place),
-      emitTrigger: (id) => this.emitTrigger(id),
-      dropTrigger: (id) => this.dropTrigger(id),
+      emitTrigger: (id) => this.triggers.emitTrigger(id),
+      dropTrigger: (id) => this.triggers.dropTrigger(id),
       insertPlainText: (id, _off, text, cut) => this.clip.pasteAt(id, _off, text, cut),
       pasteRefsAt: (target, refs) => this.clip.pasteRefsAt(target, refs),
       pasteIntoSelection: (refs, text) => this.clip.pasteIntoSelection(refs, text),
@@ -4151,168 +4148,6 @@ export class BlockEditor {
     })
   }
 
-
-  /**
-   * 此刻光标前有没有一个**正在输入的触发词**（`/`／`#`／`@`）。
-   *
-   * 判定落在**投影**（`plainText`）上：触发字符是正文里的字，与格式无关；
-   * 判定本身在 `core/trigger.ts`（纯函数、被单测逐条钉），这里只负责把
-   * 「光标 plain 偏移」换算成那段投影文本，并把结果换算回 **plain 偏移**。
-   *
-   * `from`／`to` 是 plain 偏移：抹字与插原子都在这套坐标里做，
-   * 于是「删掉触发词、插入一枚原子」不需要第二套偏移换算。
-   */
-  triggerAt(id?: string): (Omit<TriggerHit, 'from'> & { from: number; to: number }) | null {
-    const bid = id ?? this.sel?.aBlock
-    if (!bid) return null
-    const loc = locate(this.doc, bid)
-    // 只读行（日记日期等）上不该弹：那里连字都敲不进去。判据是「这一行能不能直接编辑」，
-    // 不是「正文是不是内容」——查询块的正文是名字，但名字行同样敲得进字、弹得出补全。
-    if (!loc || !canDirectEditText(loc.block)) return null
-    const off = this.sel?.aBlock === bid ? (this.sel?.aOff ?? 0) : 0
-    const text = plainText(loc.block.content).slice(0, projectOff(loc.block.content, off))
-    const hit = detectTrigger(text, { composing: this.probe.isComposing })
-    if (!hit) return null
-    return { ch: hit.ch, query: hit.query, from: fromProjection(loc.block.content, hit.from), to: off }
-  }
-
-  /** 上报「在敲什么」（`null` ＝ 这一段已经结束，浮层该关） */
-  private emitTrigger(id: string): void {
-    if (!this.events.triggerQuery) return
-    const hit = this.triggerAt(id)
-    if (!hit) {
-      this.events.triggerQuery(null, new DOMRect())
-      return
-    }
-    this.events.triggerQuery({ ch: hit.ch, query: hit.query }, this.caretRect() ?? new DOMRect())
-  }
-
-  /**
-   * 把触发词从模型里抹掉（选中命令后调用）。
-   *
-   * 只在**命令行**上有这一步：命令要落在「触发词原来那一格」，所以得先把它让出来。
-   * `#`／`@` 的落点不走这里——它们与插入本身是**同一笔事务**（见 `acceptTrigger`）。
-   */
-  dropTrigger(id: string): boolean {
-    const hit = this.triggerAt(id)
-    if (!hit) return false
-    // 抹触发词是用户刚在这一行敲下那几个字的逆动作，与打字同档
-    this.editBlock(id, hit.from, hit.to, '', 'delete', { directEdit: true })
-    this.placeCaret(id, hit.from)
-    return true
-  }
-
-  /**
-   * **选中浮层一行之后的落点**：删掉触发词，并把结果落到它原来的位置。
-   *
-   * 三件事在同一笔事务里（一次撤销就是一次动作）：
-   *   ① 抹掉 `#查询词`／`@查询词`；② 需要时建出标签块／记录；③ 插入露面 run 或写归属。
-   * 拆开落盘会留下「字删了、标签没建」这种半批，而半批比慢更贵。
-   *
-   * `ch` 是**打开浮层时那个触发字符**：落点前再检测一次（文本此刻才是事实），
-   * 若最近敲下的已经不是它（用户改了主意／挪了光标），就什么都不做而不是猜一个落点。
-   *
-   * 为什么只有 `tag`／`newObj` 才建标签块：`ref` 指向的目标已经存在（浮层刚列出它），
-   * 再 `ensureTag` 一遍等于用名字重新解析一次，反而会把别名/同名页的口径再走一道。
-   */
-  acceptTrigger(opts: { ch: TriggerChar; pick: AcceptPick }): boolean {
-    const hit = this.triggerAt()
-    if (!hit || hit.ch !== opts.ch) return false
-    const id = this.sel?.aBlock
-    const loc = id ? locate(this.doc, id) : null
-    if (!id || !loc) return false
-    const pick = opts.pick
-    this.beginUndoEntry()
-    /** 这次是否往树上插了新块（记录）——真插了就整片重画（索引／块数要跟上） */
-    let createdBlock = false
-
-    const apply = (tx: Tx, block: Block): boolean => {
-      let tagId: string | null = null
-      let recordId: string | null = null
-      let pageId: string | null = null
-
-      const needTag = pick.kind === 'tag' || pick.kind === 'newTag'
-      if (needTag) {
-        const tag = ensureTagInTx(tagLookupOf(this.store.blocks), pick.name, tx)
-        if (!tag) return false
-        tagId = tag.id
-      }
-      if (pick.kind === 'newObj') {
-        /**
-         * 新实例的标签由**浮层打开那一刻的 tagId** 给（第二段成员搜索锚定的就是它），
-         * 不再按名字重解析：实例名与标签名是两个名字，按名解析会把实例名当成标签名。
-         * 打开到按下之间标签可能被摘身份 ⇒ 找不回就整体不做，不猜一个落点。
-         */
-        const tagBlock = this.store.find(pick.tagId)
-        if (!tagBlock || !hasList(tagBlock, 'tag')) return false
-        tagId = tagBlock.id
-      }
-
-      if (pick.kind === 'newPage') {
-        const page = ensurePageInTx(tagLookupOf(this.store.blocks), pick.name, tx)
-        if (!page) return false
-        pageId = page.id
-        // 页落在森林顶层，可能不在当前视图里；整片重画一次，让索引/页数跟上
-        createdBlock = true
-      }
-
-      /**
-       * 记录是**内容块**，住森林顶层（与页块、标签块同一条口径）。它没有地址：
-       * 正文就是键入的名字（作描述），身份由「哪条引用指向它」给出。
-       */
-      if (pick.kind === 'newObj' || (pick.kind === 'newTag' && pick.action === 'instance')) {
-        const record = createObjRecordInTx(tx, this.store.blocks, pick.name, tagId!)
-        recordId = record.id
-        createdBlock = true
-      }
-
-      const assign = pick.kind === 'tag' || (pick.kind === 'newTag' && pick.action === 'assign')
-
-      /** 一次落点只插**一枚** run；块标签是归类，不插 run。 */
-      let inserted: RefRun[] = []
-      if (pick.kind === 'ref') {
-        inserted = [
-          {
-            id: uuidv7Hex(),
-            t: 'ref',
-            to: pick.to,
-            ...(pick.flavor ? { flavor: pick.flavor } : {}),
-            label: pick.label,
-          },
-        ]
-      } else if (pick.kind === 'newPage') {
-        // 页引用不加 `#` 风味：它是页面，不是标签
-        inserted = [{ id: uuidv7Hex(), t: 'ref', to: pageId!, label: pick.name }]
-      } else if (pick.kind === 'newObj') {
-        inserted = [{ id: uuidv7Hex(), t: 'ref', to: recordId!, flavor: '#', label: pick.name }]
-      } else if (pick.kind === 'newTag' && pick.action !== 'assign') {
-        const to = pick.action === 'instance' ? recordId! : tagId!
-        inserted = [{ id: uuidv7Hex(), t: 'ref', to, flavor: '#', label: pick.name }]
-      }
-
-      const next = spliceRuns(block.content, hit.from, hit.to, inserted)
-      tx.patch(id, (b) => writeBlockContent(b, next))
-      if (assign) tx.setTags(id, [...tagIdsOf(block), tagId!])
-      return true
-    }
-
-    // 落点改的是「正在打字的这一行」的正文（抹触发词＋插 run），与打字同档
-    const ok = this.write((tx) => apply(tx, loc.block), undefined, { directEdit: true })
-    if (!ok) return false
-    /**
-     * 撤销合并窗口的陷阱：打字那笔（`insert`）与这一笔若同 kind 且落在 1200ms 内，
-     * 会被并成一步 —— 一次撤销就回到「输入前」，跳过落点那一格。所以这里一律记
-     * `other`（不可合并）：落点动作是**显式的一次选择**，不是打字的延续。
-     */
-    this.finishUndoEntry('other')
-    // 插了新块 ⇒ 整片重画（索引／块数要跟上）；只改这一行时仍走单行
-    if (createdBlock) this.renderAll()
-    else this.renderBlock(id)
-    // 光标：插了露面的落在它之后（1 格）；只归类的那一格已经没了，落在原处
-    this.placeCaret(id, hit.from + (pick.kind === 'tag' ? 0 : 1))
-    this.emitChange(createdBlock ? 'struct' : 'text', [id])
-    return true
-  }
 
   /* ------------------------------------------------------ 页面装载 */
 

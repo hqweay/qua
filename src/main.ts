@@ -806,19 +806,19 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
   // 命令行：先把 `/查询词` 让出来，再走命令 —— 命令自己决定落在哪一格（与原来同形）
   if (pick.kind === 'command') {
     const id = ed.caretBlock()
-    if (id) ed.dropTrigger(id)
+    if (id) ed.triggers.dropTrigger(id)
     if (pick.command) registry.invoke(pick.command, (pick.args as Record<string, unknown>) ?? {}, 'slash', uiCtx())
     return
   }
 
   if (pick.kind === 'page' || pick.kind === 'block') {
-    ed.acceptTrigger({ ch, pick: { kind: 'ref', to: pick.id, label: pick.name } })
+    ed.triggers.acceptTrigger({ ch, pick: { kind: 'ref', to: pick.id, label: pick.name } })
     return
   }
 
   // `@` 无同名页：当场建页（或复用同名地址）并在原位插引用；同一笔事务
   if (pick.kind === 'newPage') {
-    ed.acceptTrigger({ ch, pick: { kind: 'newPage', name: pick.name } })
+    ed.triggers.acceptTrigger({ ch, pick: { kind: 'newPage', name: pick.name } })
     return
   }
 
@@ -834,7 +834,7 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
    */
   if (pick.kind === 'newTag') {
     const action = mods.shiftKey ? 'instance' : mods.altKey ? 'assign' : 'inline'
-    ed.acceptTrigger({ ch, pick: { kind: 'newTag', name: pick.name, action } })
+    ed.triggers.acceptTrigger({ ch, pick: { kind: 'newTag', name: pick.name, action } })
     return
   }
 
@@ -845,7 +845,7 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
 
   const tagName = pick.kind === 'instance' ? pick.tag : pick.kind === 'tag' ? pick.name : ''
   if (ch === '#' && tagName !== '' && mods.altKey) {
-    ed.acceptTrigger({ ch, pick: { kind: 'tag', name: tagName } })
+    ed.triggers.acceptTrigger({ ch, pick: { kind: 'tag', name: tagName } })
     return
   }
 
@@ -855,7 +855,7 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
    */
   if (pick.kind === 'newObj') {
     if (!pick.tagId) return
-    ed.acceptTrigger({ ch, pick: { kind: 'newObj', name: pick.name, tagId: pick.tagId } })
+    ed.triggers.acceptTrigger({ ch, pick: { kind: 'newObj', name: pick.name, tagId: pick.tagId } })
     return
   }
 
@@ -864,12 +864,12 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
    * 只多一个 `flavor:'#'` 的显示风味。选中的是哪条记录由浮层那一行给出。
    */
   if (pick.kind === 'instance') {
-    ed.acceptTrigger({ ch, pick: { kind: 'ref', to: pick.id, label: pick.name, flavor: '#' } })
+    ed.triggers.acceptTrigger({ ch, pick: { kind: 'ref', to: pick.id, label: pick.name, flavor: '#' } })
     return
   }
 
   if (pick.kind === 'tag') {
-    ed.acceptTrigger({ ch, pick: { kind: 'ref', to: pick.id, label: pick.name, flavor: '#' } })
+    ed.triggers.acceptTrigger({ ch, pick: { kind: 'ref', to: pick.id, label: pick.name, flavor: '#' } })
   }
 }
 

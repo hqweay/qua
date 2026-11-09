@@ -14239,12 +14239,12 @@ await check('T145c 行内原子转文本：引用/行内标签/外链都能取�
     // ⇒ 先落一个「新建标签」物化标签块，再用它的 id 落一次「新建实例」
     ed.editBlock(hostId, 0, 0, '#')
     ed.placeCaret(hostId, 1)
-    ed.acceptTrigger({ ch: '#', pick: { kind: 'newTag', name: '对象测试标签', action: 'inline' } })
+    ed.triggers.acceptTrigger({ ch: '#', pick: { kind: 'newTag', name: '对象测试标签', action: 'inline' } })
     const tagId = ed.store.blocks.find((x) => (x.props?._aliases ?? []).includes('对象测试标签'))?.id ?? ''
     const len = ed.store.find(hostId).content.length
     ed.editBlock(hostId, len, len, '#')
     ed.placeCaret(hostId, len + 1)
-    const ok = ed.acceptTrigger({ ch: '#', pick: { kind: 'newObj', name: '对象测试标签', tagId } })
+    const ok = ed.triggers.acceptTrigger({ ch: '#', pick: { kind: 'newObj', name: '对象测试标签', tagId } })
     const atom = window.__qua.atoms().filter((a) => a.blockId === hostId && a.kind === 'tag').at(-1)
     return { ok, hostId, runId: atom?.id ?? '', recordId: atom?.target?.id ?? '' }
   })
