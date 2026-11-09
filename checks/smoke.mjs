@@ -18286,7 +18286,11 @@ await check('C1 相对日期：树上存表达式；锚只在日记页里出现�
     dayId,
   )
   await page.waitForTimeout(600)
-  const qid = await page.evaluate(() => String(window.__qua.snapshot().activeId))
+  // 创建路径对**屏上已有宿主**的块不再换屏（身体就地画，见 reveal）⇒ activeId 仍是日记流；
+  // 查询块按名字现找
+  const qid = await page.evaluate(() =>
+    String(window.__qua.allBlocks().find((b) => (b.text ?? '').includes('C批-相对日期'))?.id ?? ''),
+  )
   assert(qid !== '', '前置：应能在今天下面建出查询块')
 
   // 锚出现（条件用了相对日期 ＋ 宿主是日记块）；此时未勾

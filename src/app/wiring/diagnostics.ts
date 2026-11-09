@@ -841,9 +841,10 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
      */
     forceForest: (mutate: (forest: Block[]) => void) => {
       mutate(mainEd.store.blocks)
-      // 森林被整体换掉 ⇒ 索引必须整库重建（没有 op 可依），与 `store.reset` 同一条路
-      mainEd.store.discardIndex()
-      mainEd.store.apply([], 'diagnostics')
+      // 森林被整体换掉 ⇒ 走 `reset` 的同一条语义（整库重建索引＋全量通知）。
+      // 之前走 `apply([], 'diagnostics')`：零 op 通知被订阅者当「没变化」——
+      // 行内视图宿主（表格/卡片身体）不重画，规模断言量到旧的那一份。
+      mainEd.store.reset(mainEd.store.blocks)
     },
   }
 

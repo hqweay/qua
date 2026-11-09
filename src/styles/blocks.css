@@ -1156,6 +1156,13 @@
 .queryview[data-surface='inline'] .tv-scroll {
   max-height: none;
 }
+/* 窗口化的表要一只**有界的**滚动盒：虚拟化按 scrollTop/clientHeight 算窗口，
+   自然高（max-height:none）会让 clientHeight＝全部内容 ⇒ 窗口＝整表（几千行全挂）。
+   只在窗口化那档收回来；非窗口档保持自然高（滚动归整页）。 */
+.queryview[data-surface='inline'] .tv[data-virtual='1'] .tv-scroll,
+.queryview[data-surface='embed'] .tv[data-virtual='1'] .tv-scroll {
+  max-height: min(60vh, 640px);
+}
 
 /* ---------------------------------------------------------- 挂载区（块底）
    一条 tab 条 ＋ 一个 body：箱子是块的 chrome，列表是共享 store 的活块（可原地编辑）。

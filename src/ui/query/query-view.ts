@@ -579,7 +579,13 @@ export class ViewHost {
        * 整片重装一遍（每个字一次）。条件/视图的改动走命令层，`source` 不是它。
        */
       if (this.title && isOwnEdit(source, this.title.editor())) return
-      if (ids && ids.length > 0) {
+      if (ids === undefined) {
+        // **整库通知**（换库／诊断面的森林替换）：没有 id 集 ⇒ 全量重读。
+        // 只认 id 的修补在这里收不到任何行——森林内容变了而身体还挂着旧的那份。
+        this.sync()
+        return
+      }
+      if (ids.length > 0) {
         /**
          * **拥有者自己的配置变了**（`_query`／`_views`／`_activeView`／名字）⇒ 重读重画。
          *
