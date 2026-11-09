@@ -4,6 +4,7 @@
 import {
   FEED_INITIAL,
   FEED_SPEC,
+  feedWindow,
   isJournal,
   journalDate,
   journalId,
@@ -84,8 +85,9 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
   /**
    * 打开**日记流**（复盘＝同一条装载路径带参）：`date` 在顶、更早的「存在的天」往下。
    *
-   * ⚠️ 「哪些天」由一份 QuerySpec 字面量回答（role 成员条件＋`_date` 降序＋limit），
-   *    经索引路径求值（`kb.query`）——与查询块共用同一份评估，这里没有第二条来源语言。
+   * ⚠️ 「哪些天」由一份 QuerySpec 字面量回答（role 成员条件＋`_date` 降序），
+   *    经索引路径求值（`kb.query`）——与查询块共用同一份评估，这里没有第二条来源语言；
+   *    「不展示未来 ＋ 取几段」是装载窗口的事（`feedWindow`），与冷启动纯路径同一处判据。
    * ⚠️ 每个加载的天都要能直接打字：日期行只读 ⇒ 空天的首子块由装载边界补（经事务进库）。
    * ⚠️ `days`／`layout` 省略＝普通日记流（设备偏好的排列）；带参＝复盘（首版横排）。
    */
@@ -107,17 +109,16 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
       fallbackCaret: true,
     })
     // 流的形态＝「date 在顶、更早存在的天往下」：选天是查询的事，「怎么排」是装载的事
-    let dayBlocks = d
-      .kb.query({ ...FEED_SPEC, limit: days })
-      .map((h) => d.kb.get(h.blockId))
-      .filter((b): b is Block => b !== undefined)
-      /**
-       * **不展示未来**（物化 ≠ 露面）：引用日期会把还没到的天提前物化出来，
-       * 它们不该占着流顶——「今天往回看」是日记流的语义，未来从日历进。
-       * ⚠️ spec 没有日期范围原子（后置项），先由装载路径收窄——与下面复盘窗口
-       *    的收窄是同一条已登记的代偿；日期范围原子落地后两处一起退役。
-       */
-      .filter((b) => journalDate(b) <= date)
+    // ⚠️ 先剔未来再截前 days 段：反过来的话，引用日期物化的未来天会占满名额，
+    //    滤完一段不剩（点「回到今日」进空白页）。判据收在 feedWindow 一处。
+    let dayBlocks = feedWindow(
+      d
+        .kb.query(FEED_SPEC)
+        .map((h) => d.kb.get(h.blockId))
+        .filter((b): b is Block => b !== undefined),
+      date,
+      days,
+    )
     /**
      * 复盘的窗口是「今天往回 N 天」：比窗口更早的存在天不该混进格子（spec 没有
      * 日期范围原子——那是后置项；这里先由装载路径收窄，代价登记在案）。

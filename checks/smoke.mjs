@@ -25561,6 +25561,59 @@ await check('T277 ⌘⇧+点击：新页签＋一次性宽屏；档位不跟 tab
   return `⌘⇧+点：新 tab＋宽屏、去重命中也进档；切 tab 不换档、Esc 一次退；⌘+点 对照不带宽屏`
 })
 
+await check('T279 回到今日：未来天不占日记流窗口（先剔未来再截首屏，否则进空白页）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const future = await page.evaluate(() => {
+    const p = (n) => String(n).padStart(2, '0')
+    const out = []
+    for (let i = 1; i <= 3; i++) {
+      const d = new Date()
+      d.setDate(d.getDate() + i)
+      out.push(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`)
+    }
+    return out
+  })
+  // 引用日期会把还没到的天提前物化出来：日历上那些未来的圆点是真的块
+  for (const d of future) await page.evaluate((dt) => window.__qua.invoke('core.journal/today', { date: dt }), d)
+  await page.waitForTimeout(150)
+
+  const read = () =>
+    page.evaluate(() => {
+      const p = (n) => String(n).padStart(2, '0')
+      const d = new Date()
+      const today = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+      return {
+        today,
+        dates: window.__qua.__editor.doc.roots.map((b) => String(b.props?._date ?? '')),
+        rows: document.querySelectorAll('#editor .blk').length,
+        activeId: window.__qua.snapshot().activeId,
+      }
+    })
+
+  const tile = '#dock-left-stack > .dock-tile[data-card-id="cmd:core.journal/today"] .dock-tile-main'
+  const afterTile = await (async () => {
+    await page.locator(tile).click()
+    await page.waitForTimeout(250)
+    return read()
+  })()
+  const checkFeed = (r, tag) => {
+    assert(r.dates.length === 3, `${tag}首屏应有 3 段存在的天，实得 ${JSON.stringify(r.dates)}`)
+    assert(r.dates.every((d) => d !== '' && d <= r.today), `${tag}日记流不该露出未来天：${JSON.stringify(r.dates)}／今天 ${r.today}`)
+    assert(future.every((d) => !r.dates.includes(d)), `${tag}物化出来的未来天不该进流：${JSON.stringify(r.dates)}`)
+    assert(r.rows > 0, `${tag}装载根非空，正文就必须有行（不能是空白页）`)
+  }
+  checkFeed(afterTile, '点「回到今日」小卡：')
+
+  // 左槽「今日」入口是另一条装载路径，也必须共用同一处窗口判据
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), afterTile.activeId)
+  await page.waitForTimeout(250)
+  checkFeed(await read(), '左槽今日入口：')
+
+  await ctx.close()
+  return `未来三天物化后，两条入口仍装 ${afterTile.dates.length} 段、均不晚于 ${afterTile.today}；正文 ${afterTile.rows} 行`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

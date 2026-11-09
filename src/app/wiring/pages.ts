@@ -10,6 +10,7 @@ import {
   displayNameOf,
   FEED_INITIAL,
   FEED_SPEC,
+  feedWindow,
   findInForest,
   findPath,
   hasLiveChildren,
@@ -265,12 +266,17 @@ export function setupPages(deps: PagesDeps) {
     const b = kb.get(id)
     if (!b) return null
     const mainEd = deps.getMainEd()
+    // 与「回今日」同一处窗口判据：先剔未来再截首屏（新 tab 也不能被未来天占满）
     const feedDays =
       feed && isJournal(b)
-        ? kb
-            .query({ ...FEED_SPEC, limit: FEED_INITIAL })
-            .map((h) => kb.get(h.blockId))
-            .filter((x): x is Block => x !== undefined)
+        ? feedWindow(
+            kb
+              .query(FEED_SPEC)
+              .map((h) => kb.get(h.blockId))
+              .filter((x): x is Block => x !== undefined),
+            todayISO(),
+            FEED_INITIAL,
+          )
         : []
     const roots = feed && isJournal(b) ? rootsForMany(feedDays) : rootsFor(b)
     materializeEditableRoots(roots)

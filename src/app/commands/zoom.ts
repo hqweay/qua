@@ -1,7 +1,7 @@
 /**
  * zoom 命令：把中心槽的「当前对象」换成任意块，以及退回祖先。
  */
-import { FEED_INITIAL, FEED_SPEC, hasList, isJournal } from '../../core/index.ts'
+import { FEED_INITIAL, FEED_SPEC, feedWindow, hasList, isJournal, todayISO } from '../../core/index.ts'
 import type { App } from '../../core/infra/ports.ts'
 import type { Block } from '../../core/model/model.ts'
 import { rootsFor, rootsForMany } from './roots.ts'
@@ -46,12 +46,17 @@ export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut'> {
     const mode =
       restore ?? (hasList(b, 'page') || isJournal(b) ? 'saved' : 'none')
     d.setActiveId(id, { feed, restore: mode })
+    // 与「回今日」同一处窗口判据：先剔未来再截首屏，别让物化出来的未来天占满名额
     const feedDays =
       feed && isJournal(b)
-        ? d
-            .kb.query({ ...FEED_SPEC, limit: FEED_INITIAL })
-            .map((h) => d.kb.get(h.blockId))
-            .filter((x): x is Block => x !== undefined)
+        ? feedWindow(
+            d
+              .kb.query(FEED_SPEC)
+              .map((h) => d.kb.get(h.blockId))
+              .filter((x): x is Block => x !== undefined),
+            todayISO(),
+            FEED_INITIAL,
+          )
         : []
     d.loadPage(feed && isJournal(b) ? rootsForMany(feedDays) : rootsFor(b))
     d.refreshList()

@@ -1,6 +1,7 @@
 /**
- * 日记流的选择口径：它是查询视图的**临时实例**——「哪些天、什么序、取几段」
- * 由一份 QuerySpec 字面量（`FEED_SPEC`）回答，与查询块共用同一份评估（`evaluateQuery`）。
+ * 日记流的选择口径：它是查询视图的**临时实例**——「哪些天、什么序」
+ * 由一份 QuerySpec 字面量（`FEED_SPEC`）回答，与查询块共用同一份评估（`evaluateQuery`）；
+ * 「先剔未来、再取几段」是装载窗口（`feedWindow`）的事，两条路径共用。
  *
  * 这里钉的是三件在界面上很难复现的事：
  *   · 产品口径——今日在顶（`_date` 降序）、**不造空天**、非日记不混入；
@@ -9,7 +10,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { FEED_SPEC, feedDays, findById, journalDate, journalDays, queryByIndex, rebuild } from '../src/core/index.ts'
+import { FEED_SPEC, feedDays, feedWindow, findById, journalDate, journalDays, queryByIndex, rebuild } from '../src/core/index.ts'
 import type { Block } from '../src/core/model/model.ts'
 import { textRuns } from '../src/core/model/runs.ts'
 
@@ -46,6 +47,27 @@ test('日记流：不展示未来（引用日期提前物化的天不占流顶�
   const now = new Date('2026-10-20T12:00:00')
   const blocks = [j('2026-10-22'), j('2026-10-21'), j('2026-10-20')]
   assert.deepEqual(dates(feedDays(blocks, ALL, now)), ['2026-10-20'])
+})
+
+test('日记流：未来天不占窗口名额（先剔未来再截断，否则一屏空白）', () => {
+  // 三个未来天正好占满首屏窗口：旧写法先截三段再滤未来 ⇒ 一个段都不剩
+  const now = new Date('2026-10-20T12:00:00')
+  const blocks = [j('2026-10-23'), j('2026-10-22'), j('2026-10-21'), j('2026-10-20'), j('2026-10-19'), j('2026-10-18')]
+  assert.deepEqual(dates(feedDays(blocks, 3, now)), ['2026-10-20', '2026-10-19', '2026-10-18'])
+  assert.deepEqual(dates(feedDays(blocks, 2, now)), ['2026-10-20', '2026-10-19'])
+  // 窗口比历史天还宽 ⇒ 未来天依然一个都不露面
+  assert.deepEqual(dates(feedDays(blocks, 9, now)), ['2026-10-20', '2026-10-19', '2026-10-18'])
+})
+
+test('等式：命令层（索引查询 ＋ 窗口）＝ 纯路径（未来天占满名额时也不空白）', () => {
+  const blocks = [j('2026-10-23'), j('2026-10-21'), j('2026-10-22'), j('2026-10-20'), j('2026-10-19'), p('p1', 'page')]
+  const hits = queryByIndex(rebuild(blocks, []), blocks, FEED_SPEC)
+    .map((h) => findById(blocks, h.blockId))
+    .filter((b): b is Block => b !== undefined)
+  const fromIndex = feedWindow(hits, '2026-10-20', 3)
+  const fromPure = feedDays(blocks, 3, new Date('2026-10-20T12:00:00'))
+  assert.deepEqual(dates(fromIndex), dates(fromPure))
+  assert.deepEqual(dates(fromIndex), ['2026-10-20', '2026-10-19'])
 })
 
 test('日记流：走整片森林 —— 嵌在页子树里的 journal 也进流（与日期索引同口径）', () => {

@@ -30,7 +30,7 @@ import {
   type Block,
 } from '../../core/index.ts'
 import { ensureTagInTx } from '../../core/kb/ensure-tag.ts'
-import { FEED_SPEC } from '../../core/query/feed.ts'
+import { FEED_SPEC, feedWindow } from '../../core/query/feed.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { App } from '../../core/infra/ports.ts'
 import type { Row } from '../../ui/overlay/layers.ts'
@@ -148,11 +148,16 @@ export function pageCommands(d: PageDeps): Pick<
         // 左槽打开页：恢复位置，但焦点留在左槽（用户是点导航来的）
         focusRestore: false,
       })
+      // 与冷启动／「回今日」同一处窗口判据：先剔未来再截首屏
       const feedDays = isTodayEntry
-        ? d
-            .kb.query({ ...FEED_SPEC, limit: FEED_INITIAL })
-            .map((h) => d.kb.get(h.blockId))
-            .filter((b): b is Block => b !== undefined)
+        ? feedWindow(
+            d
+              .kb.query(FEED_SPEC)
+              .map((h) => d.kb.get(h.blockId))
+              .filter((b): b is Block => b !== undefined),
+            todayISO(),
+            FEED_INITIAL,
+          )
         : []
       d.loadPage(isTodayEntry ? rootsForMany(feedDays) : rootsFor(p))
       d.refreshList()
