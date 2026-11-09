@@ -157,6 +157,8 @@ export function captureOf(touched: Iterable<TouchedBlock>, directEdit = false): 
      * `Tx` 今天没有 purge（清除只由撤销产生），所以 touched 的块在出口一定还在树上。
      * 将来若 `Tx` 长出 purge，这里会连同 `scopedOps` 的三态表一起失效 ——
      * 所以用断言把「改后一定 present」写成显式前提，而不是靠沉默。
+     * 真要永久清除（回收站清空）时不需要长 purge：它没有改前状态可比对，
+     * 根本不进 `Tx`，走撤销/重做同形（见 `KbClient.purgeTrash`）。
      */
     after.push({
       id: t.block.id,

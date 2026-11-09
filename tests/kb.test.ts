@@ -153,6 +153,20 @@ test('夹具上的读面：seedWorkspace 里每一页都能 get 到、别名能�
 
 /* ------------------------------------------------------------ 写面：patch */
 
+test('patch 本事务 insert 进来的块 ⇒ 明确报错（没有改前状态可比对，不给人一个裸 TypeError）', () => {
+  const { kb } = fixture()
+  const fresh = mkBlock('新块', { created: 1000, modified: 1000 })
+  assert.throws(
+    () =>
+      kb.tx((tx) => {
+        tx.insert(fresh, null, 0)
+        tx.patch(fresh.id, () => {})
+      }),
+    /inserted in this same tx/,
+    '同事务 insert 后 patch 必须有一句说得出「为什么」的错',
+  )
+})
+
 test('patch 改内容 ⇒ 恰好一条 block.upsert{content} ＋ 一条 blocks change', () => {
   const { kb } = fixture()
   const r = kb.tx((tx) => {

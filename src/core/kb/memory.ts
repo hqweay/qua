@@ -429,7 +429,15 @@ export class MemoryKb implements KbClient {
       patch(id, fn) {
         const b = require(id)
         const t = touch(b)
-        const before = t.before!
+        /**
+         * 本事务 `insert` 进来的块没有改前状态（`touchNew` 记 `before: null`）——
+         * 它的一切本就该由 `insert` 的一次成型决定。裸放行的话调用方拿到的是
+         * 一个没有话的 TypeError（读 `null.children`），报不出「为什么」。
+         */
+        if (!t.before) {
+          throw new Error(`kb: patch("${id}") — block was inserted in this same tx; give it its cells at insert time`)
+        }
+        const before = t.before
         fn(b)
         // 子树不归 patch 管：能改 `children` 的只有结构 op，否则结构变化会被 diff 静默吞掉
         const kids = b.children
