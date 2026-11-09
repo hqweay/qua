@@ -343,7 +343,13 @@ export function setupPages(deps: PagesDeps) {
   function openInNewTab(id: string, feed = false): boolean {
     initTabs()
     const existing = tabs.find((tab) => tab.kind === 'block' && tab.activeId === id && tab.feed === feed)
-    if (existing) return activateTab(existing.id)
+    if (existing) {
+      // 「已经开着、而且就是当前这张」也算打开成功：activateTab 的 false 只说明**没发生切换**，
+      // 不是打开失败。装配层拿这个布尔决定要不要施加一次性效果（⌘⇧ 进宽屏），
+      // 把它当失败会让「⌘⇧+点当前已开的块」静默丢掉宽屏（T277）。
+      if (existing.id !== activeTabId) activateTab(existing.id)
+      return true
+    }
     const tab = makeTab(id, feed)
     if (!tab) return false
     captureActive()

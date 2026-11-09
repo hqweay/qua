@@ -436,7 +436,8 @@ export interface App {
    * **打开一个块的唯一落点路由**（点击/键盘入口共用）。
    *
    * 与 `zoomTo`／`openInDock`／`openInNewTab` 不是四种导航语义，而是把它们组合成
-   * 一条策略：`place` 从 `openActionOf(mods)` 来；`center:'keep'` 给导航面（不抢焦点），
+   * 一条策略：`place` 从 `openActionOf(mods)` 来；`tabWide` 是 `tab` 的一次性加强
+   * （打开后顺手进宽屏，档位仍住窗口）；`center:'keep'` 给导航面（不抢焦点），
    * 缺省 `'focus'` 给内容面（聚焦到这一块）。命令面仍可直调底层方法，互不替代。
    */
   openBlock(id: string, place?: OpenAction, opts?: OpenOpts): void
@@ -619,7 +620,7 @@ export interface App {
    * `place` ＝ 挂载形态（与块打开同一套落点语言）：缺省＝⌘K 浮层；
    * `'dock'` ＝ 搜索卡住进右槽；`'tab'` ＝ 中心 tab。同一份 `SearchFace`。
    */
-  openSearch(place?: 'center' | 'dock' | 'tab'): void
+  openSearch(place?: 'center' | 'dock' | 'tab' | 'tabWide'): void
   showMenu(req: MenuRequest): void
   showPopover(render: (host: HTMLElement) => void, anchor: DOMRect | null): void
   closeLayers(): void

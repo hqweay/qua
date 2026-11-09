@@ -14,7 +14,7 @@ import { plainText } from './core/model/runs.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
 import { BlockStore } from './core/model/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
-import { dockKey, validSurfaceRef } from './core/index.ts'
+import { dockKey, openAxisOf, validSurfaceRef } from './core/index.ts'
 import type { Op } from './core/kb/types.ts'
 import { BlockEditor, type ViewEvents } from './view/editor/editor.ts'
 import { inputSession } from './view/editor/input-session.ts'
@@ -1664,7 +1664,7 @@ const app: App = {
    * 它不新增导航语义，只把四档动作组合起来：
    *   · inspect → `openPropertiesDrawer`（看这一块自己的第二层；不改中心、不动槽、不入历史）
    *   · dock    → `openInDock`（不换中心、不入历史）
-   *   · tab     → `openInNewTab`
+   *   · tab     → `openInNewTab`（`tabWide` 同一落点，另外一次性进宽屏）
    *   · center  → 内容面 `zoomTo`（聚焦）；导航面 `openPage`（不抢焦点）
    *
    * ⚠️ `inspect` 放在最前：它是**目标自己的面**，不是「去哪」，先分流掉才不会落进导航。
@@ -1678,8 +1678,11 @@ const app: App = {
       app.openInDock(id, 'right')
       return
     }
-    if (action === 'tab') {
-      app.openInNewTab(id, opts?.feed === true)
+    if (action === 'tab' || action === 'tabWide') {
+      const opened = app.openInNewTab(id, opts?.feed === true)
+      // 一次性进档只在「真的打开／切过去」时发生；档位住窗口，不跟 tab 走（布局归窗口、内容归 tab）
+      const axis = openAxisOf(action)
+      if (opened && axis) app.axisTo(axis)
       return
     }
     if (opts?.center === 'keep') app.openPage(id)
@@ -2214,8 +2217,11 @@ const app: App = {
       addUtility('right', 'search')
       return
     }
-    if (place === 'tab') {
+    if (place === 'tab' || place === 'tabWide') {
       app.openSurface({ kind: 'utility', id: 'search' })
+      // 与块打开同一份判据：⌘⇧ 打开搜索面也顺手进宽屏（一次性，不写 prefs）
+      const axis = place && openAxisOf(place)
+      if (axis) app.axisTo(axis)
       return
     }
     const deps = searchFaceDeps()
@@ -2754,8 +2760,11 @@ function viewEvents(
       }),
     // 复盘空天格子里落笔：中心＝物化并回到这一屏；Shift/⌘＝同一天开右槽/新 tab
     shellWrite: (date, place) => {
-      if (place && place !== 'center') void app.openJournal(date, place)
-      else void app.journalShellWrite(date)
+      if (place && place !== 'center') {
+        void app.openJournal(date, place)
+        const axis = openAxisOf(place)
+        if (axis) app.axisTo(axis)
+      } else void app.journalShellWrite(date)
     },
     // 剪切味的源块已都不在（已按正文降级粘贴）：给一句实话，不让 ⌘V 看起来没发生
     clipboardNotice: (kind) => {

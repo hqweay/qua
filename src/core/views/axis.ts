@@ -1,5 +1,5 @@
 /**
- * 档位轴：常规 → 宽屏 → 全屏，**一根轴三档**。
+ * 档位轴：常规 → 宽屏 → 全屏 →（回到常规），**一根轴三档、进档循环**。
  *
  * 它是**叠在设备偏好上的一层**（与「聚焦即展开」「单卡展开」同一条 overlay 判据）：
  * 进入不写 prefs，退出自动回到进入前的样子——不需要记快照，两个状态轴也长不出复合态。
@@ -22,11 +22,20 @@ export function isAxisActive(mode: AxisMode): boolean {
   return mode !== 'normal'
 }
 
-/** 沿轴走一步；已在端点则原地不动（返回 null ＝ 这次没有效果） */
+/**
+ * 沿轴走一步：**进一档（dir=1）在三档里循环**（全屏再进 ⇒ 常规）；**退一档（dir=-1）到底不动**。
+ * 返回 null ＝ 这次没有效果。
+ *
+ * 为什么不对称：「进一档」是命令面板里显式的「换下一档」——到全屏就没反应等于死键，
+ * 循环让这一条命令覆盖全部三档；退档是 Esc 语义栈的最后一层，常规档没有更低的档可退，
+ * 返回 null 才轮得到「关浮层／清块选区」（`bindings.ts` 的 `axisActive` 守卫同理）。
+ * 若退档也循环，常规档按一下 Esc 会把人反手扔进全屏。
+ */
 export function axisStep(mode: AxisMode, dir: 1 | -1): AxisMode | null {
   const at = AXIS_MODES.indexOf(mode)
-  const next = at + dir
-  return next >= 0 && next < AXIS_MODES.length ? AXIS_MODES[next]! : null
+  if (dir === 1) return AXIS_MODES[(at + 1) % AXIS_MODES.length]!
+  const next = at - 1
+  return next >= 0 ? AXIS_MODES[next]! : null
 }
 
 /**

@@ -93,7 +93,7 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     app.toggleDock('right')
     return true
   },
-  /* ---- 档位轴（常规→宽屏→全屏；Esc 沿轴退一档）---- */
+  /* ---- 档位轴（进一档三档循环；Esc 沿轴退一档，到底不动）---- */
   'core.view/axis-up': (_a, app) => {
     app.axisStep(1)
     return true

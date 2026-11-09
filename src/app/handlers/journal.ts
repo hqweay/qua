@@ -5,6 +5,7 @@
  * 形态差异全部由门面里的 `journalToday` / `journalShift` 决定。
  */
 import type { Handler } from '../../core/infra/ports.ts'
+import { openAxisOf } from '../../core/index.ts'
 import { curBlock, S } from './shared.ts'
 
 export const JOURNAL_HANDLERS: Record<string, Handler> = {
@@ -20,10 +21,12 @@ export const JOURNAL_HANDLERS: Record<string, Handler> = {
   'core.journal/open': (a, app) => {
     const date = typeof a.date === 'string' ? a.date : ''
     if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)) return false
-    app.openJournal(
-      date,
-      a.place === 'dock' ? 'dock' : a.place === 'tab' ? 'tab' : a.place === 'inspect' ? 'inspect' : 'center',
-    )
+    const place =
+      a.place === 'tabWide' ? 'tabWide' : a.place === 'dock' ? 'dock' : a.place === 'tab' ? 'tab' : a.place === 'inspect' ? 'inspect' : 'center'
+    app.openJournal(date, place)
+    // 一次性进档：档位仍住窗口（窗口任务态），只是这次打开顺手把空间给足
+    const axis = openAxisOf(place)
+    if (axis) app.axisTo(axis)
     return true
   },
   'core.journal/prev': (_a, app) => {

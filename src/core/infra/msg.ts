@@ -886,7 +886,7 @@ export const MSG = {
   // 空标题页的初始地址：它必须存在（在页列表里 ⇒ 至少有一个名字），但用户可以随时改
   'ui.page.untitledAlias': '未命名-{id}',
   /* ------------------------------------------------------------ 面包屑 / 上下文 */
-  'ui.crumb.hint': '点击展开上下文 · ⌘/Ctrl 点击在新页签打开 · Shift 点击在右槽打开',
+  'ui.crumb.hint': '点击展开上下文 · ⌘/Ctrl 点击在新页签打开 · Shift 点击在右槽打开 · ⌘/Ctrl+Shift 点击在宽屏新页签打开',
   'ui.context.collapse': '收起上下文',
 
   /* ---------------------------------------------------------------- 顶栏 */
@@ -979,7 +979,7 @@ export const MSG = {
   'ui.block.foldCollapse': '折叠（点击）',
   'ui.block.foldLine': '折叠 / 展开子块（点击）',
   'cmd.editor.toggle-children-collapse': '折叠 / 展开子块',
-  'ui.block.focusHint': '点击聚焦到此块 · Shift+点击在右槽打开 · ⌘/Ctrl+点击在新页签打开 · ⌥+点击看属性 · 拖动移动 · 右键打开菜单',
+  'ui.block.focusHint': '点击聚焦到此块 · Shift+点击在右槽打开 · ⌘/Ctrl+点击在新页签打开 · ⌘/Ctrl+Shift+点击在宽屏新页签打开 · ⌥+点击看属性 · 拖动移动 · 右键打开菜单',
   'ui.block.schemaHint': '属性定义（正文是定义名，不能在行内改）· 点击聚焦 · 拖动移动 · 右键打开菜单',
   'ui.block.menuHint': '右键打开块菜单',
   'ui.block.handleHint': '拖拽重排 · 右键打开块菜单',
@@ -1231,8 +1231,8 @@ export const MSG = {
   'menu.item.zoom': '缩放',
   'menu.item.front': '前置全部窗口',
 
-  /* ------------------------------------------------------ 档位轴（宽屏／全屏） */
-  'cmd.view.axisUp': '进一档（宽屏 / 全屏）',
+  /* ------------------------------------------------------ 档位轴（常规／宽屏／全屏，三档循环） */
+  'cmd.view.axisUp': '进一档（宽屏 / 全屏 / 常规，循环）',
   'cmd.view.axisDown': '退一档',
   'cmd.view.axisTo': '直选档位',
   'menu.kw.wide': '宽屏',

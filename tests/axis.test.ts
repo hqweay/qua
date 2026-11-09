@@ -1,5 +1,5 @@
 /**
- * 档位轴的纯判据：一根轴三档、端点不动、槽的可见性是「prefs ∧ 档位没强制收起 ∧ 用户没放开过」。
+ * 档位轴的纯判据：一根轴三档、进档循环、退档到底不动、槽的可见性是「prefs ∧ 档位没强制收起 ∧ 用户没放开过」。
  *
  * overlay 口径的可执行版本：进入不写 prefs ⇒ 退出的还原是**自动**的（判据退回读 prefs），
  * 不需要快照。用户在档位期间动过的那一侧以他为准（`released` 记「动过」，值读 prefs）。
@@ -14,16 +14,17 @@ test('档位轴三档有序：常规 → 宽屏 → 全屏', () => {
   assert.deepEqual(AXIS_MODES, ['normal', 'wide', 'full'])
 })
 
-test('沿轴进一档：常规→宽屏→全屏，到顶不动', () => {
+test('沿轴进一档：常规→宽屏→全屏→常规，三档循环', () => {
   assert.equal(axisStep('normal', 1), 'wide')
   assert.equal(axisStep('wide', 1), 'full')
-  assert.equal(axisStep('full', 1), null)
+  assert.equal(axisStep('full', 1), 'normal')
+  assert.equal(axisStep('normal', 1), 'wide', '转完一圈继续走，不是停在端点')
 })
 
-test('沿轴退一档：全屏→宽屏→常规，到底不动', () => {
+test('沿轴退一档：全屏→宽屏→常规，到底不动（Esc 不循环）', () => {
   assert.equal(axisStep('full', -1), 'wide')
   assert.equal(axisStep('wide', -1), 'normal')
-  assert.equal(axisStep('normal', -1), null)
+  assert.equal(axisStep('normal', -1), null, '常规档没有更低的档：Esc 让给关浮层／清块选区')
 })
 
 test('常规档不在轴上：Esc 的 when 键不命中', () => {

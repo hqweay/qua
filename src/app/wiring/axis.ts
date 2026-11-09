@@ -63,7 +63,10 @@ export function setupAxis(deps: AxisDeps) {
     deps.scheduleBadge()
   }
 
-  /** 沿轴进/退一档；已在端点 ⇒ false（这次按键没有效果，不报错也不 toast） */
+  /**
+   * 沿轴进/退一档：进档走满全屏后回到常规（三档循环，判据在 core）；退档到常规 ⇒ false。
+   * false ＝ 这次按键没有效果（不报错也不 toast），常规档的 Esc 才能落到关浮层那层。
+   */
   function step(dir: 1 | -1): boolean {
     const next = axisStep(mode, dir)
     if (!next) return false

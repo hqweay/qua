@@ -153,7 +153,7 @@ export const COMMANDS: CommandDecl[] = [
 
   /* ---- 日记（今日是落点，不是特例；：日期只读、一天一个） ---- */
   { name: 'core.journal/today', title: t('cmd.journal.today'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { date: { type: 'string' } }, keywords: ['journal', 'today', 'daily'], tile: { icon: 'lucide:calendar' } },
-  { name: 'core.journal/open', title: t('cmd.journal.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), hidden: true, args: { date: { type: 'string' }, place: { type: 'string', enum: ['center', 'dock', 'tab', 'inspect'] } }, keywords: ['journal', 'date', 'open', 'dock', 'tab'] },
+  { name: 'core.journal/open', title: t('cmd.journal.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), hidden: true, args: { date: { type: 'string' }, place: { type: 'string', enum: ['center', 'dock', 'tab', 'inspect', 'tabWide'] } }, keywords: ['journal', 'date', 'open', 'dock', 'tab'] },
   { name: 'core.journal/prev', title: t('cmd.journal.prev'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), keywords: ['journal', 'prev', 'yesterday'], tile: { icon: 'lucide:chevron-left' } },
   { name: 'core.journal/next', title: t('cmd.journal.next'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), keywords: ['journal', 'next', 'tomorrow'] },
   { name: 'core.journal/review', title: t('cmd.journal.review'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { days: { type: 'number' } }, keywords: ['review', 'retro', 'days'] },
@@ -193,8 +193,9 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.view/set-theme', title: t('cmd.view.set-theme'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { mode: { type: 'string', enum: ['system', 'light', 'dark'] } }, keywords: ['dark', 'light', 'theme'] },
   { name: 'core.dock/toggle-left', title: t('cmd.dock.toggle-left'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dock', 'left', 'panel'] },
   { name: 'core.dock/toggle-right', title: t('cmd.dock.toggle-right'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dock', 'right', 'panel'] },
-  // 档位轴：进/退一档（宽屏＝双槽收起＋阅读宽度放开；全屏＝再藏抬头与 tab 条）。
-  // 档位只住窗口：不写偏好、不跨会话。进/退是键盘的两条；「全屏打开」这类
+  // 档位轴：进一档在三档间循环（常规→宽屏→全屏→常规），Esc 退一档到底不动。
+  // 宽屏＝双槽收起＋阅读宽度放开；全屏＝再藏抬头与 tab 条；档位只住窗口：不写偏好、不跨会话。
+  // 键位换主后（⌘⇧↵ 归「上方插入」）进档走命令面板、退档仍是 Esc；「全屏打开」这类
   // 一步到位的入口还要一条直选（进/退两条走不到的语义）。
   { name: 'core.view/axis-up', title: t('cmd.view.axisUp'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['wide', 'fullscreen', 'focus', t('menu.kw.wide'), t('menu.kw.fullscreen')] },
   { name: 'core.view/axis-down', title: t('cmd.view.axisDown'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },

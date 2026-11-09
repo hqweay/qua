@@ -22004,7 +22004,7 @@ const axisState = (page) =>
     exitHidden: document.querySelector('.axis-exit')?.hidden ?? true,
   }))
 
-await check('T231 档位轴三档：命令进一档到全屏；宽屏收双槽、阅读宽度放开、切 tab 仍在全屏；Esc 两步还原原样', async () => {
+await check('T231 档位轴三档：进一档循环到全屏再回常规；宽屏收双槽、阅读宽度放开、切 tab 仍在全屏；Esc 两步还原原样', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
 
@@ -22053,8 +22053,22 @@ await check('T231 档位轴三档：命令进一档到全屏；宽屏收双槽�
   assert(now.exitHidden === true, '常规档没有退出口')
   assert(now.docW <= 760, `常规档阅读宽度收回（${now.docW}）`)
 
+  // 进一档是三档循环：全屏再进 ⇒ 常规（不是死键）；回常规走的是与 Esc 退档同一份 overlay 判据
+  await axisUp() // 常规 → 宽屏
+  await axisUp() // 宽屏 → 全屏
+  await axisUp() // 全屏 → 常规（循环）
+  now = await axisState(page)
+  assert(now.axis === '', `全屏再进一档 ⇒ 常规（三档循环）：${now.axis}`)
+  assert(now.left === 'closed' && now.right === 'open', `循环回常规也原样还原槽：${now.left}/${now.right}`)
+  assert(now.exitHidden === true, '循环回常规没有退出口')
+  assert(now.docW <= 760, `循环回常规阅读宽度收回（${now.docW}）`)
+  // 退档不循环：常规档按 Esc 不该反向跳进全屏（Esc 落在关浮层那层）
+  await page.keyboard.press('Escape')
+  now = await axisState(page)
+  assert(now.axis === '', `常规档 Esc 不反向进档：${now.axis}`)
+
   await ctx.close()
-  return `两步进到全屏、Esc 两步还原；宽屏宽 ${before.docW}→${wideW}`
+  return `两步进到全屏、Esc 两步还原、再走一圈回常规；宽屏宽 ${before.docW}→${wideW}`
 })
 
 await check('T232 Esc 浮层优先于退档；档位期间手动开槽以他为准，退出后保持他的样子', async () => {
@@ -25467,6 +25481,84 @@ await check('T276 上方插入：⌘⇧↵ 在光标块上方建空同级块、�
 
   await ctx.close()
   return `⌘⇧↵ 上方插入：上一同级空块＋光标块首；档位轴命令仍可达、Esc 退档不受影响`
+})
+
+/**
+ * T277｜⌘⇧+点 ＝ 新页签 ＋ **一次性**宽屏（档位仍住窗口，不跟 tab）。
+ *
+ * 钉三件事：① 落点是新 tab，不是被 Shift 吃掉的右槽窗口；② 档位是 wide；
+ * ③ 档位**不跟 tab**：切回旧 tab 仍 wide、Esc 一次退档后切 tab 也不反弹；
+ * 对照组 ⌘+点 仍是普通新 tab，不带宽屏。
+ */
+await check('T277 ⌘⇧+点击：新页签＋一次性宽屏；档位不跟 tab、Esc 一次退档', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const state = () =>
+    page.evaluate(() => ({
+      axis: document.body.dataset.axis ?? '',
+      tabs: document.querySelectorAll('#center-tabs .center-tab').length,
+      active: window.__qua.snapshot().activeId,
+    }))
+  const ids = await page.evaluate(() => window.__qua.__editor.rows().map((r) => r.block.id).slice(0, 4))
+  const marker = (id) => `.blk[data-block-id="${id}"] [data-focus-for]`
+  const before = await state()
+  assert(before.axis === '', '前置：常规档')
+  const target = ids.find((id) => id !== before.active)
+  assert(target, `前置：要有一个不是当前对象的块可点：${JSON.stringify({ ids, active: before.active })}`)
+  // 对照用的独立块：不与 target／当前对象重合，保证 ⌘+点 真的是「开一张新页签」
+  const other = await page.evaluate((rootId) => window.__qua.__editor.insertBlockAfter(rootId, 'T277 对照块'), before.active)
+  assert(other, '前置：应造出对照块')
+
+  await page.locator(marker(target)).click({ modifiers: [MOD, 'Shift'] })
+  await page.waitForTimeout(250)
+  let now = await state()
+  assert(now.tabs === before.tabs + 1, `⌘⇧+点应开新页签（不是右槽窗口）：${JSON.stringify({ before, now })}`)
+  assert(now.axis === 'wide', `⌘⇧+点应一次性进宽屏：${now.axis}`)
+  assert(now.active === target, `新页签应打开被点的块：${now.active}`)
+
+  // 档位住窗口：切回旧 tab 仍是宽屏，不是「每张 tab 一份档位」
+  await page.locator('#center-tabs .center-tab').first().click()
+  await page.waitForTimeout(250)
+  now = await state()
+  assert(now.axis === 'wide', `切回旧页签仍在宽屏（档位不跟 tab）：${now.axis}`)
+
+  // Esc 一次退档；之后切 tab 不该把宽屏带回来
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(150)
+  now = await state()
+  assert(now.axis === '', `Esc 一次退档：${now.axis}`)
+  await page.locator('#center-tabs .center-tab').last().click()
+  await page.waitForTimeout(200)
+  now = await state()
+  assert(now.axis === '', `切页签不把宽屏带回来：${now.axis}`)
+
+  // 去重命中：⌘⇧+点「已经开着、就是当前页签」的块，也必须进宽屏。
+  // openInNewTab 走 activateTab 的 false 只表示「没发生切换」，不是打开失败。
+  const beforeSame = await state()
+  await page.locator(marker(target)).click({ modifiers: [MOD, 'Shift'] })
+  await page.waitForTimeout(250)
+  now = await state()
+  assert(now.tabs === beforeSame.tabs, `同一视图不重复开页签：${JSON.stringify({ beforeSame, now })}`)
+  assert(now.axis === 'wide', `去重命中也要一次性进宽屏：${now.axis}`)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(150)
+  now = await state()
+  assert(now.axis === '', `去重那次也能 Esc 一次退档：${now.axis}`)
+
+  // 对照：普通 ⌘+点仍是新页签，不进宽屏（一次性进档只属于 ⌘⇧）
+  await page.locator('#center-tabs .center-tab').first().click()
+  await page.waitForTimeout(200)
+  const beforeMeta = await state()
+  await page.locator(marker(other)).click({ modifiers: [MOD] })
+  await page.waitForTimeout(250)
+  const afterMeta = await state()
+  assert(afterMeta.tabs === beforeMeta.tabs + 1, `⌘+点应开新页签：${JSON.stringify({ beforeMeta, afterMeta })}`)
+  assert(afterMeta.axis === '', `⌘+点不该进宽屏：${afterMeta.axis}`)
+
+  await ctx.close()
+  return `⌘⇧+点：新 tab＋宽屏、去重命中也进档；切 tab 不换档、Esc 一次退；⌘+点 对照不带宽屏`
 })
 
 const known = results.filter((r) => !r.ok && r.known)

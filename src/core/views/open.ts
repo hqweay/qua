@@ -6,20 +6,24 @@
  * （实测：槽里的行认 Shift 不认 ⌘，而文档头面包屑正好相反）。
  * 事件层只把鼠标上的修饰键交进来（`clickModsOf`），分流由装配层按这唯一一份判据做。
  *
- * 四档与优先级：
+ * 五档与优先级：
  *   · `⌥` → `inspect`：**看这一处自己的第二层**（有 run 的露面＝那一枚的详情；
  *     块级指针＝这一块的属性面板）。优先级最高：组合键只产生一种语义。
+ *   · `⌘/Ctrl + Shift` → `tabWide`：在新页签打开，**并一次性进宽屏**。
  *   · `Shift` → `dock`：在右槽开一个窗口（并排看）。
- *   · `⌘`/`Ctrl` → `tab`：在新页签打开（另开一处看）。
+ *   · `⌘/Ctrl` → `tab`：在新页签打开（另开一处看）。
  *   · 无修饰 → `center`：默认动作（打开/聚焦）。
  *
+ * ⚠️ **`tabWide` 不是第五个落点**，是 `tab` 的一次性加强：档位仍住窗口（布局归窗口、内容归 tab），
+ *    切 tab 不换档位、Esc 一次退回。只承认这一个两键组合——其余组合仍按优先级归一，
+ *    不开「两两组合」的矩阵（⌥+Shift 仍是看第二层）。
  * ⚠️ **`⌥` 不是落点**：它不改「你在哪」，只把这一处自己的东西展开一层。
- *    所以 `inspect` 与另外三档的区别是**生命周期**（瞬态 vs 常驻），不是位置。
+ *    所以 `inspect` 与另外几档的区别是**生命周期**（瞬态 vs 常驻），不是位置。
  */
-export type OpenAction = 'center' | 'dock' | 'tab' | 'inspect'
+export type OpenAction = 'center' | 'dock' | 'tab' | 'inspect' | 'tabWide'
 
-/** 三个真正的落点（`inspect` 不在这里：它不是「去哪」）。 */
-export type OpenPlace = Exclude<OpenAction, 'inspect'>
+/** 三个真正的落点（`inspect` 不是「去哪」；`tabWide` 是 `tab` 的加强，不是新落点）。 */
+export type OpenPlace = Exclude<OpenAction, 'inspect' | 'tabWide'>
 
 export interface OpenMods {
   shiftKey?: boolean
@@ -64,15 +68,33 @@ export function clickModsOf(e: {
 }
 
 /**
- * 一次点击的动作：`⌥` 优先于 `Shift`，`Shift` 优先于 `⌘`/`Ctrl`。
+ * 一次点击的动作：`⌥` 优先，其次 `⌘/Ctrl + Shift`，再 `Shift`，最后 `⌘/Ctrl`。
  *
- * 组合键只产生一种语义（⌥+Shift 仍是「看第二层」），不让用户去记两两组合。
+ * 组合键只产生一种语义，不让用户去记两两组合；`tabWide` 是唯一被承认的两键组合，
+ * 因为它是「⌘+点」的加强（同一落点 ＋ 一次性给足空间），不是新的落点种类。
  */
 export function openActionOf(mods: OpenMods = {}): OpenAction {
   if (mods.altKey) return 'inspect'
+  if ((mods.metaKey === true || mods.ctrlKey === true) && mods.shiftKey === true) return 'tabWide'
   if (mods.shiftKey) return 'dock'
   if (mods.metaKey || mods.ctrlKey) return 'tab'
   return 'center'
+}
+
+/**
+ * 复合动作在这里**只拆一次**：只关心「去哪」的下游（命令参数白名单等）用 `openPlaceOf`
+ * 归一，不必懂宽屏；装配层用 `openAxisOf` 施加一次性档位。
+ *
+ * 为什么不把 axis 做成每个入口多传的一个参数：那些入口的修饰键结构被抄窄过三次
+ * （见 `ClickMods` 注释），多一个必传字段就多一处静默退化的机会。
+ */
+export function openPlaceOf(action: OpenAction): Exclude<OpenAction, 'tabWide'> {
+  return action === 'tabWide' ? 'tab' : action
+}
+
+/** 这一次打开要不要顺手进档位；`null` ＝ 不碰窗口（档位是窗口任务态：不写 prefs、不跨会话）。 */
+export function openAxisOf(action: OpenAction): 'wide' | null {
+  return action === 'tabWide' ? 'wide' : null
 }
 
 /**

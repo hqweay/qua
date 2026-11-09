@@ -186,7 +186,7 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
       const id = ensure(date)
       if (place === 'inspect') d.openPropertiesDrawer(id)
       else if (place === 'dock') d.openInDock(id)
-      else if (place === 'tab') d.openInNewTab(id)
+      else if (place === 'tab' || place === 'tabWide') d.openInNewTab(id)
       else openBlock(id)
     },
     /** 复盘＝带参的日记流：同 spec 换 `days`，首版横排（三天／周各成一屏） */
