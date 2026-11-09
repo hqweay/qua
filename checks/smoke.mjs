@@ -3388,7 +3388,9 @@ await check('T238 查询块标题的行内编辑与普通块同档：划选加�
     dt.items.add(new File([bytes], '抬头贴图.png', { type: 'image/png' }))
     tx.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
   }, titleTx)
-  for (let i = 0; i < 80; i++) {
+  // 贴图落库（hash＋行写入）偶发超过 4s；等待窗给足负载余量（8s 起），
+  // 否则断言的两次求值之间状态追上——红的是等窗，不是行为
+  for (let i = 0; i < 160; i++) {
     if ((await page.evaluate(() => window.__qua.snapshot().atoms)) > atoms0 + 1) break
     await page.waitForTimeout(50)
   }
