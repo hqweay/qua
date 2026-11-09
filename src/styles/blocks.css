@@ -1352,6 +1352,30 @@
   color: var(--ui-text);
   background: var(--ui-accent-soft);
 }
+/*
+  一键折/展（引用栏抬头）：与「筛选」同观感但**独立类名**——抬头的按钮各有自己的
+  断言锚点，共用类名会让按类名点「筛选」的测试撞上第二颗。装的是图标，收紧内距、垂直居中；
+  方向由 JS 换图标（折 ⇄ 展），样式不随方向变。
+*/
+.mount-derived-bulkfold {
+  background: none;
+  border: 0;
+  padding: 0 var(--ui-gap-1);
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+  border-radius: var(--ui-radius-sm);
+  display: inline-flex;
+  align-items: center;
+}
+.mount-derived-bulkfold:hover {
+  color: var(--ui-text);
+  background: var(--ui-bg-hover);
+}
+.mount-derived-bulkfold .ico {
+  width: var(--ui-icon-md);
+  height: var(--ui-icon-md);
+}
 .mount-editor {
   min-height: var(--ui-line-h);
   outline: none;

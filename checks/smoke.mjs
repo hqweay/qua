@@ -19638,8 +19638,61 @@ await check('T199 关联型引用默认折叠、传递型默认摊开：引用�
   assert(cardRows.text.includes('传递型的上下文'), `卡里传递型的子块要不点就见：${JSON.stringify(cardRows.text.slice(0, 200))}`)
   assert(!cardRows.text.includes('关联型的上下文'), `卡里关联型的子块默认不该出现：${JSON.stringify(cardRows.text.slice(0, 200))}`)
 
+  /**
+   * ⑤ 一键折/展（引用栏）：只动**关联型**——点一下全部折上，传递型照旧摊开；
+   *    再点一下全部展开。方向随现状翻面（此刻无折着的关联 ⇒ 这一下是「折叠」）。
+   */
+  const bulk = '#editor .mount [data-refs-bulk="1"]'
+  assert(await page.locator(bulk).count() > 0, '前置：引用栏抬头应有一键折/展按钮')
+  await page.locator(bulk).click()
+  await page.waitForTimeout(300)
+  const bulkFolded = await row(made.assoc)
+  const passAfterBulk = await row(made.pass)
+  assert(bulkFolded.collapsed, `一键后关联型应折上：${JSON.stringify(bulkFolded)}`)
+  assert(!passAfterBulk.collapsed, `一键**不该**动传递型：${JSON.stringify(passAfterBulk)}`)
+  assert(!bulkFolded.text.includes('关联型的上下文'), `一键折上后关联型的子块不该出现：${JSON.stringify(bulkFolded.text.slice(0, 200))}`)
+  assert(bulkFolded.text.includes('传递型的上下文'), `传递型的子块仍要不点就见：${JSON.stringify(bulkFolded.text.slice(0, 200))}`)
+  await page.locator(bulk).click()
+  await page.waitForTimeout(300)
+  const bulkOpened = await row(made.assoc)
+  assert(!bulkOpened.collapsed, `再点一下应全部展开：${JSON.stringify(bulkOpened)}`)
+  assert(bulkOpened.text.includes('关联型的上下文'), `展开后关联型的子块要出现：${JSON.stringify(bulkOpened.text.slice(0, 200))}`)
+
+  // ⑥ 反链卡的一键同口径：卡是**独立的编辑器实例**，此刻卡上关联型还折着（默认播种）
+  //    ⇒ 第一下是「展开」；再点一下才是「折叠」。两个方向都钉。
+  const cardBulk = '#dock-right .dock-card[data-card-id="backrefs"] [data-refs-bulk="1"]'
+  assert(await page.locator(cardBulk).count() > 0, '前置：反链卡工具行应有一键折/展按钮')
+  const cardState = () =>
+    page.evaluate((sel) => {
+      const card = document.querySelector(sel)
+      return {
+        rows: [...card.querySelectorAll('.blk[data-depth="0"]')].map((el) => ({
+          id: el.dataset.blockId ?? '',
+          collapsed: el.dataset.collapsed === '1',
+        })),
+        text: card?.innerText ?? '',
+      }
+    }, '#dock-right .dock-card[data-card-id="backrefs"]')
+  await page.locator(cardBulk).click()
+  await page.waitForTimeout(300)
+  const cardExpanded = await cardState()
+  const cardAssocEx = cardExpanded.rows.find((r) => r.id === made.assoc)
+  const cardPassEx = cardExpanded.rows.find((r) => r.id === made.pass)
+  assert(cardAssocEx && !cardAssocEx.collapsed, `卡里第一下（此刻关联型折着）应全展开：${JSON.stringify(cardExpanded.rows)}`)
+  assert(cardPassEx && !cardPassEx.collapsed, `一键**不该**动传递型：${JSON.stringify(cardExpanded.rows)}`)
+  assert(cardExpanded.text.includes('关联型的上下文'), `展开后关联型的子块要出现：${JSON.stringify(cardExpanded.text.slice(0, 200))}`)
+  await page.locator(cardBulk).click()
+  await page.waitForTimeout(300)
+  const cardFolded = await cardState()
+  const cardAssocFo = cardFolded.rows.find((r) => r.id === made.assoc)
+  const cardPassFo = cardFolded.rows.find((r) => r.id === made.pass)
+  assert(cardAssocFo?.collapsed === true, `卡里第二下应全折上：${JSON.stringify(cardFolded.rows)}`)
+  assert(cardPassFo && !cardPassFo.collapsed, `一键**不该**动传递型：${JSON.stringify(cardFolded.rows)}`)
+  assert(!cardFolded.text.includes('关联型的上下文'), `折上后关联型的子块不该出现：${JSON.stringify(cardFolded.text.slice(0, 200))}`)
+  assert(cardFolded.text.includes('传递型的上下文'), `传递型的子块仍要不点就见：${JSON.stringify(cardFolded.text.slice(0, 200))}`)
+
   await ctx.close()
-  return `关联型默认折着、传递型默认摊开（子块不点就见）；引用栏与右槽反链卡同一口径`
+  return `关联型默认折着、传递型默认摊开；一键折/展只动关联型（引用栏与反链卡同口径）；关联型展开后才见上下文`
 })
 
 await check(

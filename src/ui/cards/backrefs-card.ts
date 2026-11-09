@@ -19,11 +19,11 @@ import {
   derivedRecordsOf,
   displayNameOf,
   hasLiveChildren,
+  outermostHits,
   passThroughRefTarget,
   EMPTY_QUICK_FILTER,
   quickFilterAdd,
   quickFilterDrop,
-  type Block,
   type BlockStore,
   type FoldState,
   type QuickFilterAtom,
@@ -37,6 +37,7 @@ import { buildDockCard, applyDockCardState, type DockCardState } from '../dock/d
 import { cardNote } from '../chrome/card-parts.ts'
 import { renderQuickFilter } from '../chrome/quick-filter.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
+import { renderIcon } from '../../view/icons.ts'
 
 export interface BackrefsCardDeps {
   store: BlockStore
@@ -87,6 +88,8 @@ export class BackrefsCard {
   private filter: QuickFilterState = { ...EMPTY_QUICK_FILTER }
   private readonly tools: HTMLElement
   private readonly filterBtn: HTMLButtonElement
+  /** 一键折/展（关联型）：方向随现状翻面，图标与 title 在装载时现写 */
+  private readonly bulkBtn: HTMLButtonElement
 
   constructor(deps: BackrefsCardDeps) {
     this.deps = deps
@@ -106,6 +109,13 @@ export class BackrefsCard {
     this.filterBtn.title = t('ui.filter.buttonHint')
     this.filterBtn.addEventListener('click', () => this.openQuickFilter())
     this.tools.appendChild(this.filterBtn)
+    this.bulkBtn = document.createElement('button')
+    this.bulkBtn.type = 'button'
+    this.bulkBtn.className = 'dock-backlinks-bulkfold'
+    this.bulkBtn.dataset.refsBulk = '1'
+    this.bulkBtn.hidden = true
+    this.bulkBtn.addEventListener('click', () => this.bulkToggleRefFolds())
+    this.tools.appendChild(this.bulkBtn)
 
     this.editable = new EditableBlock({
       host: this.host,
@@ -183,14 +193,18 @@ export class BackrefsCard {
     this.tools.hidden = all.length === 0 && !active
     this.filterBtn.dataset.active = active ? '1' : '0'
 
-    const ids = new Set(records.map((r) => r.block.id))
-    const roots: Block[] = []
-    const contexts = new Map<string, readonly Block[]>()
-    for (const r of records) {
-      if (r.path.some((p) => ids.has(p.id))) continue
-      roots.push(r.block)
-      if (r.path.length > 0) contexts.set(r.block.id, r.path)
-    }
+    const { roots, contexts } = outermostHits(records)
+
+    // 一键折/展：有可折的关联根才给（挂一颗点了没反应的按钮是噪声）；方向随现状翻面
+    const assocIds = roots.filter((b) => !passThroughRefTarget(b) && hasLiveChildren(b)).map((b) => b.id)
+    this.bulkBtn.hidden = assocIds.length === 0
+    const anyFolded = assocIds.some((id) => Boolean(ed?.doc.folded?.[id] ?? this.editable.ed?.doc.folded?.[id]))
+    renderIcon(
+      this.bulkBtn,
+      anyFolded ? 'lucide:chevrons-up-down' : 'lucide:chevrons-down-up',
+      anyFolded ? 'chevrons-up-down' : 'chevrons-down-up',
+    )
+    this.bulkBtn.title = t(anyFolded ? 'ui.refs.expandAll' : 'ui.refs.foldAll')
 
     if (roots.length === 0) {
       this.empty.hidden = false
@@ -235,6 +249,30 @@ export class BackrefsCard {
   private collapse(rootId: string): void {
     if (!this.expanded.delete(rootId)) return
     this.load(this.editable.ed)
+  }
+
+  /**
+   * 一键折/展（关联型）：与挂载区引用栏同一份判据、同一个方向口径——
+   * 只动**关联型**的根；传递型的子块就是引用真正指到的内容，不参与批量。
+   * 动作时现算（筛选与来源都可能刚变过），动完走一次 `load`（图标随新现状翻面）。
+   */
+  private bulkToggleRefFolds(): void {
+    const host = this.deps.kb.get(this.target)
+    const editor = this.editable.ed
+    if (!host || !editor) return
+    const records = applyQuickFilter(derivedRecordsOf(host, this.deps.kb, 'refs'), this.filter)
+    const assocIds = outermostHits(records)
+      .roots.filter((b) => !passThroughRefTarget(b) && hasLiveChildren(b))
+      .map((b) => b.id)
+    if (assocIds.length === 0) return
+    const folded: FoldState = { ...(editor.doc.folded ?? {}) }
+    if (assocIds.some((id) => folded[id])) {
+      for (const id of assocIds) delete folded[id]
+    } else {
+      for (const id of assocIds) folded[id] = true
+    }
+    editor.doc.folded = folded
+    this.load(editor)
   }
 
   /**

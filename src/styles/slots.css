@@ -704,6 +704,28 @@ button.ghost.wide {
   color: var(--ui-text);
   background: var(--ui-accent-soft);
 }
+/* 一键折/展（反链卡工具行）：与「筛选」同观感但独立类名（抬头按钮各有断言锚点，不共用）；
+   装图标、垂直居中；方向由 JS 换图标，样式不随方向变 */
+.dock-backlinks-bulkfold {
+  background: none;
+  border: 0;
+  padding: 0 var(--ui-gap-1);
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+  border-radius: var(--ui-radius-sm);
+  display: inline-flex;
+  align-items: center;
+}
+.dock-backlinks-bulkfold:hover {
+  color: var(--ui-text);
+  background: var(--ui-bg-hover);
+}
+.dock-backlinks-bulkfold .ico {
+  width: var(--ui-icon-md);
+  height: var(--ui-icon-md);
+}
 
 /*
  * 搜索卡（工具面住进槽）：容器只有一列槽宽，主从布局改**堆叠**——

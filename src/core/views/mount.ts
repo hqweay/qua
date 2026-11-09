@@ -307,6 +307,26 @@ export function derivedRecordsOf(host: Block, kb: KbClient, source: DerivedSourc
   })
 }
 
+/**
+ * 大纲只画**最外层命中**：祖先与子孙同时命中时，子块由祖先那一行自己展开。
+ * 挂载区派生栏与右槽反链卡共用这一份剪枝（第三处使用者是一键折/展——
+ * 批量动作要动的就是「此刻看得见的那些根」）。
+ */
+export function outermostHits(records: readonly ViewRecord[]): {
+  roots: Block[]
+  contexts: Map<string, readonly Block[]>
+} {
+  const ids = new Set(records.map((r) => r.block.id))
+  const roots: Block[] = []
+  const contexts = new Map<string, readonly Block[]>()
+  for (const r of records) {
+    if (r.path.some((p) => ids.has(p.id))) continue
+    roots.push(r.block)
+    if (r.path.length > 0) contexts.set(r.block.id, r.path)
+  }
+  return { roots, contexts }
+}
+
 /** 引用行：一个来源块一行，带**次数**与**关系 kind**（正文／属性·字段名／嵌入） */
 function refRecords(host: Block, kb: KbClient, rows: readonly ViewRecord[]): ViewRecord[] {
   const bySource = new Map<string, { count: number; kinds: Set<RefKind>; props: Set<string> }>()

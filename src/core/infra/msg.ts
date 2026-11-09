@@ -1319,6 +1319,10 @@ export const MSG = {
   'ui.toast.mentionReadonly': '这一行的正文是名字或只读内容，不能改写',
   'ui.toast.selectionToRefCreated': '新建页「{name}」并转为引用',
 
+  /* ------------------------------------------------------ 引用栏一键折/展 */
+  'ui.refs.foldAll': '折叠全部关联型反链（传递型不受影响）',
+  'ui.refs.expandAll': '展开全部关联型反链（传递型不受影响）',
+
   /* ------------------------------------------------------ 快速筛选（派生面的 chips） */
   'ui.filter.button': '筛选',
   'ui.filter.buttonHint': '按结果里出现过的页/标签筛这一屏',

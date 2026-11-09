@@ -39,6 +39,7 @@ import {
   isJournal,
   mentionSpotsOf,
   mountEntriesOf,
+  outermostHits,
   passThroughRefTarget,
   propDisplayLabels,
   readViewSet,
@@ -1020,24 +1021,7 @@ export class MountArea {
       )
       return
     }
-    const all = derivedRecordsOf(host, this.deps.kb, entry.source)
-    /**
-     * 快速筛选先落，类型过滤再落：chips 答的是「这一栏看谁」，kind 答的是
-     * 「引用里看哪几类」——两刀同一批材料，切法有先后。抬头的计数与
-     * 类型计数都读**筛过之后**的那批（主数字＝现在看得见的条数）。
-     */
-    const filtered = applyQuickFilter(all, this.filterOf(entry.source))
-    /**
-     * kind 过滤只作用于**大纲**：列表/表格走视图宿主的记录源，那里用「类型」列
-     * 承担同一件事。否则会出现「抬头条数是过滤后的、表里是全部」的假数字。
-     */
-    const records =
-      entry.source === 'refs' && kind === 'outline' && this.refKind !== 'all'
-        ? filtered.filter((r) => {
-            const keys = r.derived?.relKindKeys
-            return Array.isArray(keys) && keys.includes(this.refKind)
-          })
-        : filtered
+    const { filtered, records } = this.displayedDerivedRecords(host, entry.source)
     this.renderDerivedHead(host, entry, kind, records.length, filtered)
     /**
      * 提及栏的命中区间：**同一份派生记录**里已经算好了（`derived.mentionSpots`），
@@ -1058,23 +1042,63 @@ export class MountArea {
       return
     }
     this.detachView()
-    /**
-     * 大纲只画**顶层**（祖先与子孙同时命中时，子块由祖先那一行自己展开）：
-     * 计数仍按记录条数（与列表/表格同一个数字）。
-     */
-    const ids = new Set(records.map((r) => r.block.id))
-    const roots: Block[] = []
-    const contexts = new Map<string, readonly Block[]>()
-    for (const r of records) {
-      if (r.path.some((p) => ids.has(p.id))) continue
-      roots.push(r.block)
-      if (r.path.length > 0) contexts.set(r.block.id, r.path)
-    }
+    // 大纲只画顶层：计数仍按记录条数（与列表/表格同一个数字）
+    const { roots, contexts } = outermostHits(records)
     const empty =
       entry.source === 'refs' && this.refKind !== 'all'
         ? 'ui.mount.empty.refsKind'
         : DERIVED_EMPTY[entry.source]
     this.loadOutline(entry, { roots, contexts }, focusHint, empty)
+  }
+
+  /**
+   * 派生栏此刻显示的记录：快速筛选先落，类型过滤再落（仅引用的大纲看法）。
+   * 装载与一键折/展同源——批量动作动的是「此刻看得见的那些根」，不能另算一批。
+   */
+  private displayedDerivedRecords(
+    host: Block,
+    source: DerivedSource,
+  ): { filtered: ViewRecord[]; records: ViewRecord[] } {
+    const kind = this.deps.derivedKind?.(host, source) ?? 'outline'
+    /**
+     * 快速筛选先落，类型过滤再落：chips 答的是「这一栏看谁」，kind 答的是
+     * 「引用里看哪几类」——两刀同一批材料，切法有先后。抬头的计数与
+     * 类型计数都读**筛过之后**的那批（主数字＝现在看得见的条数）。
+     */
+    const filtered = applyQuickFilter(derivedRecordsOf(host, this.deps.kb, source), this.filterOf(source))
+    /**
+     * kind 过滤只作用于**大纲**：列表/表格走视图宿主的记录源，那里用「类型」列
+     * 承担同一件事。否则会出现「抬头条数是过滤后的、表里是全部」的假数字。
+     */
+    const records =
+      source === 'refs' && kind === 'outline' && this.refKind !== 'all'
+        ? filtered.filter((r) => {
+            const keys = r.derived?.relKindKeys
+            return Array.isArray(keys) && keys.includes(this.refKind)
+          })
+        : filtered
+    return { filtered, records }
+  }
+
+  /**
+   * 一键折/展（引用栏）：只动**关联型**的根，方向随现状翻面——有关联型折着 ⇒ 全展开，
+   * 否则全折。动作时现算（筛选与 kind 都可能刚变过），动的是「此刻看得见的根」。
+   */
+  private bulkToggleRefFolds(host: Block): void {
+    const ed = this.block.ed
+    if (!ed) return
+    const assocIds = outermostHits(this.displayedDerivedRecords(host, 'refs').records)
+      .roots.filter((b) => !passThroughRefTarget(b) && hasLiveChildren(b))
+      .map((b) => b.id)
+    if (assocIds.length === 0) return
+    const folded: FoldState = { ...(ed.doc.folded ?? {}) }
+    if (assocIds.some((id) => folded[id])) {
+      for (const id of assocIds) delete folded[id]
+    } else {
+      for (const id of assocIds) folded[id] = true
+    }
+    ed.doc.folded = folded
+    this.render()
   }
 
   /** 大纲装载（local／派生共用的那一支） */
@@ -1231,6 +1255,34 @@ export class MountArea {
      */
     if ((entry.source === 'refs' || entry.source === 'mentions') && (count > 0 || this.filterActive(entry.source))) {
       head.appendChild(this.quickFilterButton(entry.source))
+    }
+
+    /**
+     * **一键折/展**（引用栏·大纲看法）：折/展全部**关联型**根。传递型不在名单里——
+     * 它的子块就是这条引用真正指到的内容，折了只剩一枚孤零零的引用（与折叠播种
+     * 同一份豁免判据）。方向随现状翻面：有关联型折着 ⇒ 全展开；全都开着 ⇒ 全折
+     * （与 dock「收起所有卡 ⇄ 展开所有卡」同款）。没有可折的关联根时不给——
+     * 挂一颗点了没反应的按钮是噪声。
+     */
+    if (entry.source === 'refs' && kind === 'outline') {
+      const assocIds = outermostHits(all)
+        .roots.filter((b) => !passThroughRefTarget(b) && hasLiveChildren(b))
+        .map((b) => b.id)
+      if (assocIds.length > 0) {
+        const bulk = document.createElement('button')
+        bulk.type = 'button'
+        bulk.className = 'mount-derived-bulkfold'
+        bulk.dataset.refsBulk = '1'
+        const anyFolded = assocIds.some((id) => Boolean(this.block.ed?.doc.folded?.[id]))
+        renderIcon(
+          bulk,
+          anyFolded ? 'lucide:chevrons-up-down' : 'lucide:chevrons-down-up',
+          anyFolded ? 'chevrons-up-down' : 'chevrons-down-up',
+        )
+        bulk.title = t(anyFolded ? 'ui.refs.expandAll' : 'ui.refs.foldAll')
+        bulk.addEventListener('click', () => this.bulkToggleRefFolds(host))
+        head.appendChild(bulk)
+      }
     }
 
     /**
