@@ -19516,61 +19516,94 @@ await check('T198 聚焦即展开：zoom 进折着的块 ⇒ 展开；退回 ⇒
   return `折叠 → 聚焦展开（子行回到 DOM）→ 退回收着；折叠表始终 ${JSON.stringify(Object.keys(zoomed.table))}；聚焦期间手动折当场生效`
 })
 
-await check('T199 关联型引用默认折叠：派生栏只给那一行，展开才见上下文', async () => {
+await check('T199 关联型引用默认折叠、传递型默认摊开：引用栏按两型播种，展开才见上下文', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
-  // ① 造一条「引用了 P 的块」，并给它一个子块 —— 没有子块就无所谓折叠
-  const made = await page.evaluate(() => {
+  /**
+   * ① 造两条「引用了 P 的块」，各带一个**不引用 P** 的子块（子块只是上下文）：
+   *    · 关联型：正文有字 ＋ 一枚引用 ——「今天有个 [[P]] 不错」，引用只是提及 ⇒ 默认折
+   *    · 传递型：正文**只有一枚引用** —— 块本身是一跳，子块才是引用带来的东西 ⇒ 默认摊
+   *    没有子块就无所谓折叠，所以两条都得有。
+   */
+  const setup = await page.evaluate(() => {
     const pages = window.__qua.pages()
     const P = pages[0]
     const Q = pages[1]
     window.__qua.invoke('core.page/open', { pageId: Q.id })
-    const rows = window.__qua.__editor.rows().map((r) => r.block).filter((x) => x.id !== Q.id && x.children.length === 0)
-    const refBy = rows[0]
-    window.__qua.focusBlock(refBy.id, 999)
-    window.__qua.invoke('core.editor/insert-page-ref', { pageId: P.id })
-    // 子块**不引用** P：它只是上下文（虎鲸叫传递型，靠展开才看得到）
-    window.__qua.invoke('core.editor/insert-block', { text: '这行没引用，只是上下文' })
-    window.__qua.invoke('core.editor/indent-block', {})
-    return { P: P.id, refBy: refBy.id }
+    // 源块自己造：种子页的行多半带正文，正文＋引用就成关联型了，捡现成的不可靠
+    const anchor = window.__qua.__editor.rows().map((r) => r.block).find((x) => x.id !== Q.id)
+    window.__qua.focusBlock(anchor.id, 999)
+    return { P: P.id, anchor: anchor.id, known: window.__qua.allBlocks().map((b) => b.id) }
   })
-  assert(made.P && made.refBy, `前置：应造出引用与它的子块：${JSON.stringify(made)}`)
+  const made = { P: setup.P, assoc: '', pass: '' }
+  const claimFresh = async (known) => {
+    const id = await page.evaluate(
+      (knownIds) => window.__qua.allBlocks().map((b) => b.id).find((id) => !knownIds.includes(id)) ?? '',
+      known,
+    )
+    known.push(id)
+    return id
+  }
+  // 第一刀：锚点行非空 ⇒ 空文本插块正常新建，光标落新块
+  await page.evaluate(() => window.__qua.invoke('core.editor/insert-block', { type: 'paragraph', text: '' }))
+  made.assoc = await claimFresh(setup.known)
+  // 第二刀：锚点已是空块，空文本插块是「意图已满足」的 no-op ⇒ 带正文插，再清空
+  await page.evaluate(() => window.__qua.invoke('core.editor/insert-block', { type: 'paragraph', text: '占位' }))
+  made.pass = await claimFresh(setup.known)
+  await page.evaluate(() => window.__qua.invoke('core.editor/clear-block', {}))
+  assert(made.P && made.assoc && made.pass, `前置：应造出两个空行当引用源：${JSON.stringify(made)}`)
 
-  // ② 回到 P：引用栏（派生，默认大纲）出现；那一行**默认折着**
+  // 关联型：先打字再插引用（正文有别的字 ⇒ 引用只是提及）
+  await page.evaluate((id) => window.__qua.focusBlock(id, 999), made.assoc)
+  await page.keyboard.type('今天有个引用不错')
+  await page.evaluate((p) => window.__qua.invoke('core.editor/insert-page-ref', { pageId: p }), made.P)
+  await page.evaluate(() => window.__qua.invoke('core.editor/insert-block', { type: 'paragraph', text: '关联型的上下文' }))
+  await page.evaluate(() => window.__qua.invoke('core.editor/indent-block', {}))
+  // 传递型：只有一枚引用，不打字
+  await page.evaluate((id) => window.__qua.focusBlock(id, 999), made.pass)
+  await page.evaluate((p) => window.__qua.invoke('core.editor/insert-page-ref', { pageId: p }), made.P)
+  await page.evaluate(() => window.__qua.invoke('core.editor/insert-block', { type: 'paragraph', text: '传递型的上下文' }))
+  await page.evaluate(() => window.__qua.invoke('core.editor/indent-block', {}))
+
+  // ② 回到 P：引用栏（派生，默认大纲）出现；关联型**默认折着**，传递型**默认摊开**
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), made.P)
   await page.waitForTimeout(450)
   await mountTab(page, 'refs')
   await page.waitForTimeout(300)
 
-  const row = () =>
-    page.evaluate((id) => {
+  const row = (id) =>
+    page.evaluate((bid) => {
       const host = document.querySelector('#editor .mount .mount-editor')
-      const el = host?.querySelector(`[data-block-id="${id}"]`)
+      const el = host?.querySelector(`[data-block-id="${bid}"]`)
       return {
         present: Boolean(el),
         collapsed: el?.dataset.collapsed === '1',
-        rows: host?.querySelectorAll('[data-block-id]').length ?? 0,
-        html: host?.innerHTML.slice(0, 300) ?? '(无 mount-editor)',
+        text: host?.innerText ?? '(无 mount-editor)',
       }
-    }, made.refBy)
+    }, id)
 
-  const first = await row()
-  assert(first.present, `前置：引用栏里应出现引用了 P 的那一行：${JSON.stringify(first)}`)
-  assert(first.collapsed, `关联型引用默认折叠：那一行应带 data-collapsed，实际 ${JSON.stringify(first)}`)
+  const assoc = await row(made.assoc)
+  assert(assoc.present, `前置：引用栏里应出现关联型那一行：${JSON.stringify(assoc)}`)
+  assert(assoc.collapsed, `关联型引用默认折叠：那一行应带 data-collapsed，实际 ${JSON.stringify(assoc)}`)
+  const pass = await row(made.pass)
+  assert(pass.present, `前置：引用栏里应出现传递型那一行：${JSON.stringify(pass)}`)
+  assert(!pass.collapsed, `传递型引用默认摊开：正文只有一枚引用的块不该折，实际 ${JSON.stringify(pass)}`)
+  assert(assoc.text.includes('传递型的上下文'), `传递型的子块要**不点就看得见**：${JSON.stringify(assoc.text.slice(0, 200))}`)
+  assert(!assoc.text.includes('关联型的上下文'), `关联型的子块默认不该出现：${JSON.stringify(assoc.text.slice(0, 200))}`)
 
-  // ③ 点开 ⇒ 上下文（那个没引用的子块）才出现
+  // ③ 点开关联型 ⇒ 上下文（那个没引用的子块）才出现
   // 三角的点击是委托出去的：JS 的 el.click() 打不中，走真实点击
   await page
-    .locator(`#editor .mount .mount-editor [data-block-id="${made.refBy}"] > .left > .fold`)
+    .locator(`#editor .mount .mount-editor [data-block-id="${made.assoc}"] > .left > .fold`)
     .first()
     .click()
   await page.waitForTimeout(400)
-  const opened = await row()
+  const opened = await row(made.assoc)
   assert(!opened.collapsed, `点开之后不该还是折着：${JSON.stringify(opened)}`)
-  assert(opened.rows > first.rows, `展开后才见得到上下文：${first.rows} → ${opened.rows}`)
+  assert(opened.text.includes('关联型的上下文'), `展开后才见得到关联型的上下文：${JSON.stringify(opened.text.slice(0, 200))}`)
 
   await ctx.close()
-  return `默认折着（关联型）→ 展开后才见上下文：${first.rows} → ${opened.rows} 行`
+  return `关联型默认折着、传递型默认摊开（子块不点就见）；关联型展开后才见上下文`
 })
 
 await check(

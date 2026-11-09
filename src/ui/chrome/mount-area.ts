@@ -39,6 +39,7 @@ import {
   isJournal,
   mentionSpotsOf,
   mountEntriesOf,
+  passThroughRefTarget,
   propDisplayLabels,
   readViewSet,
   unfoldForContext,
@@ -1094,10 +1095,11 @@ export class MountArea {
     delete this.editorEl.dataset.empty
     /**
      * **关联型引用默认折叠**（派生栏专用）：引用／提及／同类这三栏的每一行都是
-     * 「因为一条边而出现」—— `[[引用]]`、`#标签`，**全是关联型**，不是靠祖先带进来的
-     * （那种叫传递型，得等「命中块的子孙也进结果」才有）。
-     * 默认折的判据来自行本身的来路：一行引用单独看没有上下文，摊开是一屏噪声；
-     * 传递型命中带着「它属于哪一片」的祖先链，摊开才读得懂。
+     * 「因为一条边而出现」—— `[[引用]]`、`#标签`，正文里有别的字，引用只是提及。
+     * 一行关联单独看没有上下文，摊开是一屏噪声 ⇒ 默认折。
+     * **传递型引用不折**（只限引用栏）：正文**只有一枚引用**的块自己没有内容
+     * （`passThroughRefTarget` 命中），它挂着的子块才是这条引用真正指到的东西 ——
+     * 折了就只剩一枚孤零零的引用，看不见「这条引用带来了什么」⇒ 子树直接摊开。
      *
      * ⚠️ **只播种一次**（按栏记）：用户手动展开某一行以后不许再覆盖 ——
      *    否则每次重画都把人刚展开的又折回去。
@@ -1107,7 +1109,10 @@ export class MountArea {
     if (entry.kind === 'derived' && !this.foldSeeded.has(entry.id)) {
       this.foldSeeded.add(entry.id)
       const seeded: FoldState = { ...(ed.doc.folded ?? {}) }
-      for (const b of plan.roots) if (hasLiveChildren(b)) seeded[b.id] = true
+      for (const b of plan.roots) {
+        if (entry.source === 'refs' && passThroughRefTarget(b)) continue
+        if (hasLiveChildren(b)) seeded[b.id] = true
+      }
       ed.doc.folded = seeded
     }
     const folded = unfoldForContext(ed.doc.folded, plan.covers, (id) => this.deps.kb.pathOf(id))
