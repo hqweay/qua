@@ -25077,11 +25077,14 @@ await check('T265 块下属性行：有值才出现；点一项打开属性面�
       if (!tag) throw new Error('前置：标签块没建出来')
       inv('core.props/create-def', { blockId: tag.id, label: '作者', kind: 'text', target: 'declared' })
       inv('core.props/create-def', { blockId: tag.id, label: '备注', kind: 'text', target: 'declared' })
-      const defs = window.__qua.__editor.store.blocks.filter((b) => b.props?._kind === 'text' && b.content.some?.((r) => r.t === 'text' && (r.v === '作者' || r.v === '备注')))
+      // 第三条声明留空：+N 收纳断言要一枚「声明了但没填」的栏（备注要填值给 toggle 用）
+      inv('core.props/create-def', { blockId: tag.id, label: '进度', kind: 'text', target: 'declared' })
+      const defs = window.__qua.__editor.store.blocks.filter((b) => b.props?._kind === 'text' && b.content.some?.((r) => r.t === 'text' && ['作者', '备注', '进度'].includes(r.v)))
       const author = defs.find((b) => b.content.some((r) => r.t === 'text' && r.v === '作者'))
       const note = defs.find((b) => b.content.some((r) => r.t === 'text' && r.v === '备注'))
       if (!author || !note) throw new Error(`前置：定义块没建出来 ${JSON.stringify(defs.map((b) => b.id))}`)
       inv('core.props/set-value', { blockId: spot.id, propId: author.id, value: '张三' })
+      inv('core.props/set-value', { blockId: spot.id, propId: note.id, value: '李四' })
       return { host: spot.id, tagId: tag.id, author: author.id, note: note.id }
     })
     await page.waitForTimeout(400)
@@ -25101,7 +25104,7 @@ await check('T265 块下属性行：有值才出现；点一项打开属性面�
     }, fx.host)
     assert(line.present, `有值 ⇒ 块下要出现属性行：${JSON.stringify(line)}`)
     assert(line.pairs.some((x) => x.includes('作者') && x.includes('张三')), `属性行要写名字和值：${JSON.stringify(line)}`)
-    assert(line.more.includes('1'), `备注声明了但没填 ⇒ 收进 +N：${JSON.stringify(line)}`)
+    assert(line.more.includes('1'), `进度声明了但没填 ⇒ 收进 +N：${JSON.stringify(line)}`)
     assert(!line.inTx && line.inRow, `属性行是 .blk 的直接子节点、不在正文槽里：${JSON.stringify(line)}`)
     assert(line.rowText === '把「引用某段」的 UI 补上' || !line.rowText.includes('张三'), `属性行不能进正文读数：${JSON.stringify(line)}`)
 
@@ -25137,21 +25140,33 @@ await check('T265 块下属性行：有值才出现；点一项打开属性面�
     assert(after.open && after.row, `点一项要打开属性面板并列出那一栏：${JSON.stringify(after)}`)
     assert(after.focused, `焦点要落在那一栏的控件上：${JSON.stringify(after)}`)
 
-    // ② 再点同一项**不该把面板关掉**（属性行与抽屉可以同时可见），
-    // 也不该拆掉重建：同一块已开着 ⇒ 原地留用，只挪焦点——重建会让面板重滑进来一次，
-    // 内容没变用户看到的却是一闪。用探针属性钉住「还是原来那个节点」。
+    // ② 抽屉记着「此刻聚焦的是哪一栏」：**另一栏**再点＝只挪焦点（原地留用，
+    // 不拆掉重建——重建会让面板重滑进来一次，内容没变用户看到的却是一闪）；
+    // **同一栏**再点一次＝收起（toggle）。用探针属性钉住「还是原来那个节点」。
     await page.evaluate(() => document.querySelector('.drawer')?.setAttribute('data-probe', 'same-node'))
     await page.evaluate((h) => {
-      document.querySelector(`.blk[data-block-id="${h}"] > .blk-props-line .blk-prop`)?.dispatchEvent(
-        new MouseEvent('click', { bubbles: true, cancelable: true }),
-      )
+      ;[...document.querySelectorAll(`.blk[data-block-id="${h}"] > .blk-props-line .blk-prop`)]
+        .find((x) => x.textContent?.includes('备注'))
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    }, fx.host)
+    await page.waitForTimeout(250)
+    const afterOther = await page.evaluate(() => ({
+      open: Boolean(document.querySelector('.drawer')),
+      same: document.querySelector('.drawer')?.getAttribute('data-probe') === 'same-node',
+    }))
+    assert(afterOther.open && afterOther.same, `另一栏再点＝原地留用只挪焦点（不关、不重建）：${JSON.stringify(afterOther)}`)
+    // 同一栏（备注）再点一次 ⇒ 收起
+    await page.evaluate((h) => {
+      ;[...document.querySelectorAll(`.blk[data-block-id="${h}"] > .blk-props-line .blk-prop`)]
+        .find((x) => x.textContent?.includes('备注'))
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
     }, fx.host)
     await page.waitForTimeout(250)
     const afterSecond = await page.evaluate(() => ({
       open: Boolean(document.querySelector('.drawer')),
       same: document.querySelector('.drawer')?.getAttribute('data-probe') === 'same-node',
     }))
-    assert(afterSecond.open && afterSecond.same, `再点同一项应保持原面板（不关、不重建）：${JSON.stringify(afterSecond)}`)
+    assert(!afterSecond.open, `同一栏再点一次＝收起面板：${JSON.stringify(afterSecond)}`)
 
     // ④ ⌥+点块标 ⇒ 打开属性面板（第二层：不改中心、不入历史）
     await page.keyboard.press('Escape')
