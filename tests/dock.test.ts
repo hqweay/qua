@@ -10,6 +10,7 @@ import {
   canonicalDockEntries,
   dockKey,
   DERIVED_CARDS,
+  DOCK_SHORTCUT_PREFIX,
   pinDefaultFor,
   pruneEphemeralWindows,
 } from '../src/core/views/dock.ts'
@@ -122,6 +123,50 @@ test('dock: 重启清理——空 pin 表 ⇒ 只剩家具（派生卡/命令卡
   ] as const
   assert.deepEqual(pruneEphemeralWindows(cards, {}), [
     { kind: 'derived', card: 'calendar' },
+    { kind: 'cmd', command: 'x' },
+  ])
+})
+
+/* ---------------- 快捷小卡（指向一个块的常驻入口） ---------------- */
+
+test('dock: 快捷卡与窗口卡是两条独立露面——同一块的 key 不同，才能并存', () => {
+  assert.equal(dockKey({ kind: 'shortcut', block: 'b1' }), `${DOCK_SHORTCUT_PREFIX}b1`)
+  assert.notEqual(dockKey({ kind: 'shortcut', block: 'b1' }), dockKey({ kind: 'block', block: 'b1' }))
+  assert.deepEqual(
+    canonicalDockEntries([
+      { kind: 'shortcut', block: 'b1' },
+      { kind: 'block', block: 'b1' },
+    ]),
+    [
+      { kind: 'shortcut', block: 'b1' },
+      { kind: 'block', block: 'b1' },
+    ],
+  )
+})
+
+test('dock: 快捷卡逐项校验；目标块删了也留住这一格，空 block 才丢', () => {
+  assert.deepEqual(canonicalDockEntries([
+    { kind: 'shortcut', block: 'gone-but-kept' },
+    { kind: 'shortcut', block: '' },
+    { kind: 'shortcut' },
+    { kind: 'shortcut', block: 'dup' },
+    { kind: 'shortcut', block: 'dup' },
+  ]), [
+    { kind: 'shortcut', block: 'gone-but-kept' },
+    { kind: 'shortcut', block: 'dup' },
+  ])
+})
+
+test('dock: 重启清理不碰快捷卡（它是槽的家具，不是打开来看的窗口）', () => {
+  const cards = [
+    { kind: 'block', block: 'b1' },
+    { kind: 'shortcut', block: 'b1' },
+    { kind: 'shortcut', block: 'b2' },
+    { kind: 'cmd', command: 'x' },
+  ] as const
+  assert.deepEqual(pruneEphemeralWindows(cards, {}), [
+    { kind: 'shortcut', block: 'b1' },
+    { kind: 'shortcut', block: 'b2' },
     { kind: 'cmd', command: 'x' },
   ])
 })

@@ -517,6 +517,13 @@ export interface App {
    * 置顶是动作不是状态：位置住 `cards` 的序，常驻（pin）是另一位。目标没开着的窗口 ⇒ false。
    */
   topWindow(id: string): boolean
+  /**
+   * **在侧槽加一颗指向该块的快捷小卡**（设备状态，不进撤销）。
+   *
+   * 与 `openInDock` 是两条独立露面：同一块可以同时有窗口卡和快捷卡，
+   * 所以这条只加 `{kind:'shortcut'}`，不碰那张窗口卡，也不替用户关掉它。
+   */
+  addShortcut(id: string, side?: 'left' | 'right'): boolean
   /* 视图配置（`_views` / `_activeView`；视图不是实体，配置住在**拥有者**上） */
   /**
    * 新建一个视图并设为激活，返回它的 id（空串＝没建）。

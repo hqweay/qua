@@ -117,6 +117,15 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     app.openInDock(id, a.side === 'left' ? 'left' : 'right')
     return true
   },
+  /**
+   * 加到快捷：只写侧槽的设备状态，块内容与那张窗口卡都不动。
+   * 缺省目标是光标所在块（块菜单不传 args），缺省落在左槽。
+   */
+  'core.dock/add-shortcut': (a, app) => {
+    const id = typeof a.blockId === 'string' && a.blockId !== '' ? a.blockId : curBlock(app)
+    if (!id) return false
+    return app.addShortcut(id, a.side === 'right' ? 'right' : 'left')
+  },
   // 置顶当前块已打开的窗口；目标没开窗口 ⇒ false（面板里这条对它不可用）
   'core.dock/top-window': (a, app) => {
     const id = typeof a.blockId === 'string' && a.blockId !== '' ? a.blockId : curBlock(app)

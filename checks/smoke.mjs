@@ -18777,6 +18777,18 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
   assert(board.cards === gallery.cards, `换布局不换成员：${gallery.cards} → ${board.cards}`)
   assert(board.unset, `「未设置」那一列必须在（藏起来＝告诉用户这些不存在）：${JSON.stringify(board)}`)
   assert(board.cover === 0, `没有图的卡在列里也不该冒封面位：${JSON.stringify(board)}`)
+  // 空列（还没记录的声明选项）也是「一个值一组」：列头要叫得出选项名，
+  // 不能把「值的原文丢了」漏成字面 undefined
+  const colNames = await page.evaluate(() =>
+    [...document.querySelectorAll('.vcol')].map((c) => ({
+      unset: c.dataset.unset === '1',
+      name: c.querySelector('.vcol-name')?.textContent ?? '',
+    })),
+  )
+  assert(
+    colNames.every((c) => c.unset || (c.name !== '' && c.name !== 'undefined')),
+    `每个非未设置列头都要是选项名：${JSON.stringify(colNames)}`,
+  )
 
   const card = await page.evaluate(() => {
     const el = document.querySelector('.vcard')
@@ -25559,6 +25571,93 @@ await check('T277 ⌘⇧+点击：新页签＋一次性宽屏；档位不跟 tab
 
   await ctx.close()
   return `⌘⇧+点：新 tab＋宽屏、去重命中也进档；切 tab 不换档、Esc 一次退；⌘+点 对照不带宽屏`
+})
+
+await check('T278 快捷小卡：加到快捷 → Shift+点并存 → 收成快捷；不做转大卡；悬空不静默', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const active = await page.evaluate(() => window.__qua.snapshot().activeId)
+  const ids = await page.evaluate(() => window.__qua.__editor.rows().map((r) => r.block.id))
+  const target = ids.find((id) => id !== active)
+  assert(target, `前置：要有一个不是当前对象的块：${JSON.stringify({ ids, active })}`)
+  // 另一块只用来在删掉 target 之后触发一次重画（加快捷是唯一会重画槽的入口）
+  const other = await page.evaluate(
+    (rootId) => window.__qua.__editor.insertBlockAfter(rootId, 'T278 对照块'),
+    active,
+  )
+  assert(other, '前置：应造出对照块')
+
+  const key = `shortcut:${target}`
+  const tile = `#dock-left-stack > .dock-tile[data-card-id="${key}"]`
+  const card = `#dock-right-stack > .dock-card[data-card-id="${target}"]`
+  const dock = () =>
+    page.evaluate(() => ({
+      left: window.__qua.snapshot().dock.left.cards,
+      right: window.__qua.snapshot().dock.right.cards,
+      active: window.__qua.snapshot().activeId,
+    }))
+  const menuLabels = () =>
+    page.evaluate(() => [...document.querySelectorAll('.layer .layer-item')].map((el) => el.textContent ?? ''))
+
+  // ① 块菜单那条命令：加一颗指向 target 的快捷小卡（左槽小卡排）
+  await page.evaluate((id) => window.__qua.invoke('core.dock/add-shortcut', { blockId: id }), target)
+  await page.waitForTimeout(180)
+  let now = await dock()
+  assert(now.left.includes(key), `左槽应有快捷卡：${JSON.stringify(now)}`)
+  assert((await page.locator(tile).count()) === 1, '快捷小卡应画在左槽小卡排')
+  assert((await page.locator(`${tile} .dock-tile-glyph`).textContent())?.length > 0, '快捷小卡要有短标签')
+  assert(!now.right.includes(target), '加快捷不该顺手开一张窗口卡')
+
+  // ② 单击：走 openBlock 的 center 落点，跳到目标块
+  await page.locator(`${tile} .dock-tile-main`).click()
+  await page.waitForTimeout(220)
+  now = await dock()
+  assert(now.active === target, `单击应跳到目标块：${JSON.stringify(now)}`)
+
+  // ③ Shift+点：右槽加开窗口，快捷留在左槽 —— 同一块的两条独立露面并存
+  await page.locator(`${tile} .dock-tile-main`).click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(250)
+  now = await dock()
+  assert(now.left.includes(key) && now.right.includes(target), `Shift+点应并存：${JSON.stringify(now)}`)
+  assert((await page.locator(card).count()) === 1, '右槽应出现那张窗口卡')
+
+  // ④ 窗口卡卡头右键「收成快捷」：窗口消失、同槽已有快捷 ⇒ 不重复
+  await page.locator(`${card} .dock-card-head`).click({ button: 'right' })
+  await page.waitForTimeout(150)
+  assert((await menuLabels()).some((s) => s.includes('收成快捷')), `卡头菜单要有「收成快捷」：${JSON.stringify(await menuLabels())}`)
+  await page.locator('.layer .layer-item', { hasText: '收成快捷' }).first().click()
+  await page.waitForTimeout(220)
+  now = await dock()
+  assert(!now.right.includes(target), '收成之后窗口卡应消失')
+  assert(now.left.filter((k) => k === key).length === 1, '左槽那颗快捷应留下')
+  assert(!now.right.includes(key), '另一槽已有一颗 ⇒ 收成不该再造第二颗')
+
+  // ⑤ 小卡右键：没有「转大卡」那一行；「在侧槽展开」只在**同槽**加窗口，快捷不消失（不是互转）
+  await page.locator(tile).click({ button: 'right' })
+  await page.waitForTimeout(150)
+  const tileMenu = await menuLabels()
+  assert(!tileMenu.some((s) => s.includes('展开为窗口') || s.includes('转大卡')), `不做互转：${JSON.stringify(tileMenu)}`)
+  await page.locator('.layer .layer-item', { hasText: '在侧槽展开' }).first().click()
+  await page.waitForTimeout(220)
+  now = await dock()
+  assert(now.left.includes(key) && now.left.includes(target), `恢复只加窗口，快捷必须留下：${JSON.stringify(now)}`)
+  assert(!now.right.includes(key), '恢复不该顺手在右槽再造一颗快捷')
+
+  // ⑥ 目标块删了：这一格留住并置灰，点它要出提示而不是静默打开一个空处
+  await page.evaluate((id) => window.__qua.__editor.remove(id), target)
+  await page.evaluate((id) => window.__qua.invoke('core.dock/add-shortcut', { blockId: id }), other)
+  await page.waitForTimeout(220)
+  assert((await page.locator(tile).getAttribute('data-missing')) === '1', '目标块删了也要留住这一格（置灰占位）')
+  const before = await page.evaluate(() => window.__qua.snapshot().activeId)
+  await page.locator(`${tile} .dock-tile-main`).click()
+  await page.waitForTimeout(180)
+  const after = await page.evaluate(() => window.__qua.snapshot().activeId)
+  assert(after === before, `悬空快捷卡不能静默跳转：${before} → ${after}`)
+
+  await ctx.close()
+  return '快捷卡并存／收成／悬空；小卡没有「转大卡」入口，恢复只加窗口'
 })
 
 await check('T279 回到今日：未来天不占日记流窗口（先剔未来再截首屏，否则进空白页）', async () => {

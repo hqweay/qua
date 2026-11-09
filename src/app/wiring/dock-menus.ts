@@ -6,7 +6,7 @@
  * 咬合变成显式的 deps 清单——一半来自 `setupDocks` 的返回（状态的家在那边），
  * 一半是装配层的活引用（换库/焦点切换会变的，一律现取，不传值）。
  */
-import { centerDerivedOpenable, DERIVED_CARDS, dockKey, isCardCollapsed, UTILITY_FACES, type DerivedCardId, type UtilityFaceId } from '../../core/index.ts'
+import { blockLabel, centerDerivedOpenable, DERIVED_CARDS, dockKey, isCardCollapsed, UTILITY_FACES, walkForest, type DerivedCardId, type UtilityFaceId } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
@@ -28,6 +28,11 @@ export interface DockMenusDeps {
   addTile: (side: 'left' | 'right', command: string) => void
   addDerived: (side: 'left' | 'right', id: DerivedCardId) => void
   addUtility: (side: 'left' | 'right', face: UtilityFaceId) => void
+  addShortcut: (side: 'left' | 'right', blockId: string) => boolean
+  removeShortcut: (side: 'left' | 'right', blockId: string) => void
+  retargetShortcut: (side: 'left' | 'right', from: string, to: string) => boolean
+  collapseToShortcut: (side: 'left' | 'right', blockId: string) => boolean
+  restoreWindow: (side: 'left' | 'right', blockId: string) => void
   toggleFoldAll: (side: 'left' | 'right') => void
   closeOtherWindows: (side: 'left' | 'right', key: string) => void
   closeAllWindows: (side: 'left' | 'right') => void
@@ -98,6 +103,7 @@ export function setupCardMenus(deps: DockMenusDeps) {
             { id: 'pin', label: st.pinned ? t('ui.dock.unpinCard') : t('ui.dock.pinCard') },
             { id: 'top', label: t('cmd.dock.topWindow') },
             { id: 'focus', label: t('ui.dock.focusInEditor') },
+            { id: 'collapseToShortcut', label: t('ui.dock.collapseToShortcut') },
           ]
         : []),
       ...(centerOpenable && !isWindow ? [{ id: 'center', label: t('cmd.surface.open') }] : []),
@@ -135,6 +141,9 @@ export function setupCardMenus(deps: DockMenusDeps) {
           case 'focus':
             void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'dock')
             return
+          case 'collapseToShortcut':
+            deps.collapseToShortcut(side, blockId)
+            return
           case 'center':
             openSurface()
             return
@@ -152,6 +161,74 @@ export function setupCardMenus(deps: DockMenusDeps) {
             return
           case 'foldAll':
             deps.toggleFoldAll(side)
+            return
+        }
+      },
+    })
+  }
+
+  /**
+   * 「选一个块」：快捷卡指向谁。
+   *
+   * 行由森林现算（不缓存）——块改名、软删、恢复都该当场反映在候选里。
+   * 搜索交给浮层自己，不写第二套过滤；上限只是别让一次打开就摊平一万行。
+   */
+  const pickShortcutBlock = (onPick: (blockId: string) => void): void => {
+    const rows: Row[] = []
+    walkForest(deps.store.blocks, (b) => {
+      if (rows.length >= 300) return false
+      rows.push({ id: `shortcut-block/${b.id}`, label: blockLabel(b), icon: 'lucide:list-tree' })
+    })
+    deps.layers.openMenu({
+      rows,
+      anchor: null,
+      title: t('ui.dock.pickShortcutTitle'),
+      searchable: true,
+      focusSearch: true,
+      emptyText: t('ui.dock.pickShortcutEmpty'),
+      onPick: (row) => {
+        const id = row.id.startsWith('shortcut-block/') ? row.id.slice('shortcut-block/'.length) : ''
+        if (id === '' || !deps.kb.get(id)) return
+        onPick(id)
+      },
+    })
+  }
+
+  /**
+   * 快捷小卡右键：只给「这一颗」的动作。
+   *
+   * 没有「展开为窗口／转大卡」那一行：小卡只占 44px，删掉它是净亏；
+   * 「在侧槽展开」只**加**一张窗口卡，这颗快捷留在原地。
+   */
+  const showShortcutMenu = (
+    side: 'left' | 'right',
+    blockId: string,
+    anchor: DOMRect,
+    trigger?: HTMLElement,
+  ): void => {
+    const alive = deps.kb.get(blockId) !== undefined
+    const rows: Row[] = [
+      { id: 'retarget', label: t('ui.dock.retargetShortcut') },
+      ...(alive ? [{ id: 'restore', label: t('ui.dock.restoreWindow'), hint: t('ui.dock.shortcutShiftHint') }] : []),
+      { id: 'remove', label: t('ui.dock.removeShortcutMenu') },
+    ]
+    deps.layers.openMenu({
+      rows,
+      anchor,
+      ...(trigger ? { trigger } : {}),
+      searchable: false,
+      onPick: (row) => {
+        switch (row.id) {
+          case 'retarget':
+            pickShortcutBlock((to) => {
+              if (!deps.retargetShortcut(side, blockId, to)) deps.toast(t('ui.dock.shortcutExists'), 'info')
+            })
+            return
+          case 'restore':
+            deps.restoreWindow(side, blockId)
+            return
+          case 'remove':
+            deps.removeShortcut(side, blockId)
             return
         }
       },
@@ -185,6 +262,18 @@ export function setupCardMenus(deps: DockMenusDeps) {
      */
     const utilityRows = new Map<string, UtilityFaceId>()
     const rows: Row[] = [
+      /**
+       * 快捷卡的「加回来」入口：✕ 只摘一次露面，画廊里必须永远能再选一个块。
+       * 与命令小卡同列一张画廊，但选中的是块 id，不是命令名 ⇒ 单独一行、单独一个 onPick 分支。
+       */
+      {
+        id: 'shortcut:pick',
+        label: t('ui.dock.pickShortcut'),
+        hint: '',
+        icon: 'lucide:arrow-up-right',
+        group: `palette/${t('menu.cat.widget')}`,
+        keyHint: undefined,
+      },
       ...deps
         .getRegistry()
         .list()
@@ -235,6 +324,12 @@ export function setupCardMenus(deps: DockMenusDeps) {
       placeholder: t('ui.palette.placeholder'),
       emptyText: t('ui.dock.tileGalleryEmpty'),
       onPick: (row) => {
+        if (row.id === 'shortcut:pick') {
+          pickShortcutBlock((id) => {
+            deps.addShortcut(side, id)
+          })
+          return
+        }
         const utility = utilityRows.get(row.id)
         if (utility) {
           deps.addUtility(side, utility)
@@ -324,5 +419,5 @@ export function setupCardMenus(deps: DockMenusDeps) {
     })
   }
 
-  return { showCardMenu, showWidgetGallery, dockWindowsDeps, bindResize }
+  return { showCardMenu, showShortcutMenu, showWidgetGallery, dockWindowsDeps, bindResize }
 }

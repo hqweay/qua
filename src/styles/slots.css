@@ -151,6 +151,17 @@
   background: var(--ui-accent-soft);
   color: var(--ui-text);
 }
+/* 快捷小卡：图标下挂一两个字，让一排同图标的格子能彼此区分；全名仍在悬停提示里 */
+.dock-tile-main[data-glyph] {
+  flex-direction: column;
+  gap: 0;
+}
+.dock-tile-glyph {
+  max-width: 100%;
+  padding: 0 2px;
+  font-size: 11px;
+  line-height: 1.1;
+}
 .dock-tile-main:focus-visible,
 .dock-tile-x:focus-visible {
   outline: 2px solid var(--ui-accent);

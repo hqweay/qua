@@ -201,6 +201,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.view/axis-down', title: t('cmd.view.axisDown'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },
   { name: 'core.view/axis-to', title: t('cmd.view.axisTo'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true, args: { mode: { type: 'string', enum: ['wide', 'full'] } } },
   { name: 'core.dock/open-block', title: t('cmd.dock.open-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, side: { type: 'string' } }, keywords: ['dock', 'open', 'window', 'sidebar'] },
+  { name: 'core.dock/add-shortcut', title: t('cmd.dock.add-shortcut'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, side: { type: 'string' } }, keywords: ['shortcut', 'dock', 'quick', 'bookmark'] },
   { name: 'core.dock/top-window', title: t('cmd.dock.topWindow'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dock', 'pin', 'top', 'window', 'sidebar'] },
   { name: 'core.view/toggle-virtualize', title: t('cmd.view.toggle-virtualize'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { on: { type: 'boolean' }, radius: { type: 'integer' } }, keywords: ['virtual', 'window', 'DOM'] },
 

@@ -61,17 +61,37 @@ export interface DockCardAction {
  * 宿主只画这个格子，动作归调用方（通常是一条命令）。
  */
 export interface DockTile {
-  /** 稳定 key（`dockKey`）：`cmd:<命令名>` */
+  /** 稳定 key（`dockKey`）：`cmd:<命令名>` ／ `shortcut:<块 id>` */
   id: string
   title: string
   /** 图标名（`lucide:<name>`）；未知名字由 renderIcon 降级成占位 */
   icon: string
-  /** 命令已经不可用（插件卸载/产品构建裁掉）：置灰、保留位置 */
+  /**
+   * 图标下面那一行短标签（一两个字）。
+   *
+   * 一排同样图标的快捷小卡靠它彼此区分；全名仍在 `title` 的悬停提示里。
+   * 命令小卡不给：命令的图标本身就是它的身份。
+   */
+  glyph?: string
+  /**
+   * 这一格指向的东西已经不可用（插件卸载／快捷卡的目标块被删）：置灰、保留位置。
+   * 只管外观：置灰的格子仍可以响应点击（悬空的快捷卡要说清「为什么打不开」），
+   * 真正「点了不会做事」由 `disabled` 单独说。
+   */
   missing?: boolean
+  /**
+   * 「点了不会做事」——只影响无障碍语义和外壳的点击放行。
+   *
+   * 与 `missing` 分开：快捷卡的目标块被删了也置灰，但点它要**说一句为什么**
+   * （不是禁用），所以那颗格子 `missing: true` 而不 `disabled`。
+   */
+  disabled?: boolean
   /** 移出入口；小卡只有这一个 chrome 动作 */
   close?: { title?: string; onClick: () => void }
   /** 点击带着原始事件出去：修饰键的落点语义（Shift＝右槽、⌘＝tab）由装配层判 */
   onClick: (e: MouseEvent) => void
+  /** 右键：这张小卡自己的动作（改目标、在侧槽展开…）；菜单由装配层画 */
+  onMenu?: (anchor: DOMRect, trigger?: HTMLElement) => void
   onDragStart?: (e: DragEvent) => void
 }
 
@@ -96,13 +116,30 @@ export function buildDockTile(tile: DockTile): HTMLElement {
   main.className = 'dock-tile-main'
   main.title = tile.title
   main.setAttribute('aria-label', tile.title)
-  if (tile.missing) main.setAttribute('aria-disabled', 'true')
+  if (tile.disabled) main.setAttribute('aria-disabled', 'true')
   renderIcon(main, tile.missing ? 'lucide:circle-help' : tile.icon, 'square', 'md')
+  if (tile.glyph && !tile.missing) {
+    main.dataset.glyph = tile.glyph
+    const glyph = document.createElement('span')
+    // 省略行为用原语，不在这里再抄一份几何声明
+    glyph.className = 'dock-tile-glyph ui-ellipsis'
+    glyph.textContent = tile.glyph
+    main.appendChild(glyph)
+  }
   main.addEventListener('click', (e) => {
     e.stopPropagation()
-    if (!tile.missing) tile.onClick(e)
+    // 置灰不等于禁用：只有 `disabled` 的格子才由外壳吞掉点击，
+    // 其余一律交给小卡自己（悬空的快捷卡要借这次点击说清「为什么打不开」）。
+    if (tile.disabled) return
+    tile.onClick(e)
   })
   el.appendChild(main)
+  if (tile.onMenu) {
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      tile.onMenu?.(el.getBoundingClientRect(), el)
+    })
+  }
 
   if (tile.close) {
     const x = document.createElement('button')

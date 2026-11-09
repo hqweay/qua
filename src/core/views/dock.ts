@@ -2,7 +2,7 @@
  * 侧槽里的一张卡——**存的意图**（`DockEntry`），不是画出来的元素
  * （那个是 `ui/dock.ts` 的 `DockCardEntry`：id ＋ 元素 ＋ 尺寸）。
  *
- * 三种来源语义不同：块露面（窗口卡／组件卡）、宿主现算的派生卡、一条命令的小卡。
+ * 四种来源语义不同：块露面（窗口卡／组件卡）、指向一个块的快捷小卡、宿主现算的派生卡、一条命令的小卡。
  *
  * ## 为什么不是 `string[]`
  *
@@ -30,6 +30,15 @@ import { isUtilityFaceId, type UtilityFaceId } from './utility-face.ts'
 export const DOCK_CMD_PREFIX = 'cmd:'
 
 /**
+ * 快捷小卡的 key 前缀。
+ *
+ * 一个块可以同时有一张窗口卡和一颗快捷卡：两者是 `cards` 里**两条独立条目**，
+ * 所以身份必须不同。窗口卡的 key 保持块 id 不变（老设备状态里的 pinned／
+ * collapsed／solo 都按它存，换串会让那些状态静默失效），只有快捷卡带前缀。
+ */
+export const DOCK_SHORTCUT_PREFIX = 'shortcut:'
+
+/**
  * 一个块窗口进槽的**动作**。
  *
  * pin 的缺省跟着动作走，不跟着槽走：**拖进来（钉）＝常驻，打开来看（Shift+点／命令）＝重启即清**。
@@ -47,7 +56,9 @@ export function pinDefaultFor(action: WindowEntryAction): boolean {
  * 重启清理：**非 pin 的块窗口卡不留到下一次启动**（窗口是「打开来看」的临时上下文，
  * 重启还全在，攒几轮就是一列没人看的旧窗口）；pin 了的是用户明说要留的，保留。
  *
- * 派生卡、命令小卡、工具面卡是**槽的家具**——布局的一部分，不属于「打开的东西」，一律不受影响。
+ * 派生卡、快捷小卡、命令小卡、工具面卡是**槽的家具**——布局的一部分，
+ * 不属于「打开的东西」，一律不受影响。快捷卡也是家具：它是用户明说要留的入口，
+ * 若跟着窗口一起被清掉，第二天起来「常去的块」就不见了。
  */
 export function pruneEphemeralWindows(
   cards: readonly DockEntry[],
@@ -69,6 +80,8 @@ export type DerivedCardId = 'inspect' | 'belongs' | 'backrefs' | 'trash' | 'cale
  */
 export type DockEntry =
   | { kind: 'block'; block: string }
+  /** 指向一个块的快捷小卡：与窗口卡是两条独立露面，能同时存在 */
+  | { kind: 'shortcut'; block: string }
   | { kind: 'derived'; card: DerivedCardId }
   | { kind: 'cmd'; command: string }
   | { kind: 'utility'; face: UtilityFaceId }
@@ -78,6 +91,8 @@ export function dockKey(entry: DockEntry): string {
   switch (entry.kind) {
     case 'block':
       return entry.block
+    case 'shortcut':
+      return `${DOCK_SHORTCUT_PREFIX}${entry.block}`
     case 'derived':
       return entry.card
     case 'cmd':
@@ -161,6 +176,10 @@ function dockEntryOf(raw: unknown): DockEntry | null {
   const o = raw as Record<string, unknown>
   if (o.kind === 'block') {
     return typeof o.block === 'string' && o.block !== '' ? { kind: 'block', block: o.block } : null
+  }
+  if (o.kind === 'shortcut') {
+    // 目标块删了也要留住这一格（渲染层会把它画成「已删除」），所以这里只验形状
+    return typeof o.block === 'string' && o.block !== '' ? { kind: 'shortcut', block: o.block } : null
   }
   if (o.kind === 'derived') {
     // 未知派生卡 id ⇒ 丢掉：它没有渲染器，留着只会是一张看不见、也关不掉的卡

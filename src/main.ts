@@ -385,7 +385,7 @@ const { keyHints, uiCtx } = setupKeys({
 
 /** 卡头菜单／画廊／窗口卡依赖／槽宽拖拽的家什；赋值在 panels/app 之后（见那一节的注释） */
 let menus: ReturnType<typeof setupCardMenus>
-const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, cardStateFor, windowLabel, setWindows, toggleFoldAll, topWindow, closeOtherWindows, closeAllWindows } = setupDocks({
+const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, addShortcut, removeShortcut, retargetShortcut, collapseToShortcut, restoreWindow, cardStateFor, windowLabel, setWindows, toggleFoldAll, topWindow, closeOtherWindows, closeAllWindows } = setupDocks({
   kb,
   prefs,
   applyChrome: () => applyChrome(),
@@ -400,6 +400,8 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, car
   // 检视卡在面板分片里创建并挂进右槽堆叠；这里只在重画时取它（它必须已经在文档里）
   inspectCard: () => chrome.inspectCardEl,
   showCardMenu: (side, key, anchor, trigger) => menus.showCardMenu(side, key, anchor, trigger),
+  showShortcutMenu: (side, blockId, anchor, trigger) => menus.showShortcutMenu(side, blockId, anchor, trigger),
+  toast: (msg, kind) => app.toast(msg, kind),
   /**
    * 反链卡：**一列真实的可编辑块**（与正文「引用」栏同一种东西），不是一列摘要行。
    *
@@ -1691,6 +1693,8 @@ const app: App = {
     else app.zoomTo(id, opts?.feed, opts?.restore)
   },
   topWindow: (id) => topWindow(id),
+  /** 「加到快捷」：缺省左槽；块菜单／命令面不认识侧槽，落点由装配层给 */
+  addShortcut: (id, side) => addShortcut(side === 'right' ? 'right' : 'left', id),
 
   /**
    * **块菜单里的「视图…」**：大纲 ＋ 这个块已有的视图 ＋「新建」（两种表）＋（结构映射表时）排序。
@@ -3187,6 +3191,11 @@ menus = setupCardMenus({
   addTile,
   addDerived,
   addUtility,
+  addShortcut,
+  removeShortcut,
+  retargetShortcut,
+  collapseToShortcut,
+  restoreWindow,
   toggleFoldAll,
   closeOtherWindows,
   closeAllWindows,

@@ -231,6 +231,8 @@ export const BINDINGS: Binding[] = [
   // 菜单补的是**可发现性**——手势在，但没人知道它，等于没有。
   { command: 'core.block/focus-block', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 50, layer: 'core', args: { newTab: true }, label: t('cmd.block.open-new-tab'), keywords: ['tab', 'page', 'open'] },
   { command: 'core.dock/open-block', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 55, layer: 'core' },
+  // 「加到快捷」与「在右槽打开」是两条独立露面：前者只留一颗 44px 入口，后者摊一张窗口卡
+  { command: 'core.dock/add-shortcut', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 56, layer: 'core' },
 
   /* ---- 删除：危险动作**同位**——位置恒定，`when` 决定那一行删的是什么 ---- */
   { command: 'core.editor/delete-block', kind: 'menu', when: 'blockFocused && blockCanDelete', group: 'block/6-delete', order: 10, layer: 'core', keywords: [t('menu.kw.delete')] },

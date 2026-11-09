@@ -126,6 +126,7 @@ export const MSG = {
   'cmd.dock.toggle-left': '收起 / 展开左槽',
   'cmd.dock.toggle-right': '收起 / 展开右槽',
   'cmd.dock.open-block': '在右槽打开',
+  'cmd.dock.add-shortcut': '加到快捷',
   'cmd.block.open-new-tab': '在新页签打开',
   'cmd.dock.topWindow': '置顶当前窗口',
   'ui.dock.leftTitle': '左槽',
@@ -159,6 +160,18 @@ export const MSG = {
   'ui.dock.tileMissing': '这个命令已不可用',
   'ui.dock.tileGallery': '添加卡片',
   'ui.dock.tileGalleryEmpty': '没有可添加的卡片',
+  'ui.dock.shortcutMissing': '指向的块已删除',
+  'ui.dock.shortcutDangling': '这个块已被删除，无法打开',
+  'ui.dock.removeShortcut': '从槽里移出（块本身不删）',
+  'ui.dock.collapseToShortcut': '收成快捷',
+  'ui.dock.restoreWindow': '在侧槽展开',
+  'ui.dock.shortcutShiftHint': 'Shift+点也能在侧槽展开',
+  'ui.dock.retargetShortcut': '换一个块…',
+  'ui.dock.removeShortcutMenu': '移出这颗快捷',
+  'ui.dock.pickShortcut': '选一个块…',
+  'ui.dock.pickShortcutTitle': '选一个块作为快捷',
+  'ui.dock.pickShortcutEmpty': '没有可选的块',
+  'ui.dock.shortcutExists': '这一槽已经有指向它的快捷',
   /* ---------------------------------------------------------------- 属性区 */
   /*
    * 三个词分工，别混：

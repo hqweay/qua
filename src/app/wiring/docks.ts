@@ -79,6 +79,15 @@ export type DocksDeps = {
   inspectCard: () => HTMLElement
   /** 右键卡头：卡片菜单（行与动作归装配入口——它有浮层与命令面；这里只给时机与锚） */
   showCardMenu: (side: 'left' | 'right', key: string, anchor: DOMRect, trigger?: HTMLElement) => void
+  /** 右键快捷小卡：改目标／在侧槽展开等动作；与卡头菜单同样是装配层的浮层 */
+  showShortcutMenu: (
+    side: 'left' | 'right',
+    blockId: string,
+    anchor: DOMRect,
+    trigger?: HTMLElement,
+  ) => void
+  /** 目标块不在了：点它不能静默没反应，得说一句为什么 */
+  toast: (msg: string, kind?: 'ok' | 'warn' | 'info') => void
   /**
    * 反链卡（可编辑块列）的**工厂**：由装配入口在依赖就绪后注入。
    *
@@ -482,6 +491,11 @@ export function setupDocks(deps: DocksDeps) {
         entries.push({ id: key, el: actionTile(side, card.command), size: 'small' })
         continue
       }
+      if (card.kind === 'shortcut') {
+        // 目标块被删也照画这一格：位置稳定优先于可用性过滤（置灰由 tile 自己说）
+        entries.push({ id: key, el: shortcutTile(side, card.block), size: 'small' })
+        continue
+      }
       if (card.kind === 'derived') {
         /**
          * 反链卡是**持久卡壳**（里面有一台 contenteditable）：每次重画只 `sync`，
@@ -595,6 +609,7 @@ export function setupDocks(deps: DocksDeps) {
       title: ok ? decl!.title : t('ui.dock.tileMissing'),
       icon: ok ? decl!.tile!.icon : 'lucide:circle-help',
       missing: !ok,
+      disabled: !ok,
       close: { title: t('ui.dock.removeTile'), onClick: () => removeTile(side, command) },
       onClick: (e) => {
         if (!ok) return
@@ -606,6 +621,132 @@ export function setupDocks(deps: DocksDeps) {
     return buildDockTile(tile)
   }
 
+  /**
+   * 快捷小卡：指向一个块的常驻入口。
+   *
+   * 与命令小卡共用 44px 壳与同一排网格，但点击语义不同：命令小卡是「调用一条命令」，
+   * 快捷小卡是「打开一个块」，所以走 `App.openBlock` 唯一那条路由——
+   * Shift＝右槽开窗、⌘＝新 tab、⌥＝属性抽屉、无修饰＝中心，修饰键口径不用重写一遍。
+   *
+   * 名字每次重画现算：块改标题这颗卡跟着变，删了就置灰但不挪位置。
+   * 不存名字快照，也就没有「名字与目标块对不上」那一种坏状态。
+   */
+  function shortcutTile(side: 'left' | 'right', blockId: string): HTMLElement {
+    const id = dockKey({ kind: 'shortcut', block: blockId })
+    const target = kb.get(blockId)
+    const label = target ? blockLabel(target) : t('ui.dock.shortcutMissing')
+    const tile: DockTile = {
+      id,
+      title: label,
+      icon: target ? 'lucide:arrow-up-right' : 'lucide:circle-help',
+      ...(target ? { glyph: label.slice(0, 2) } : {}),
+      missing: !target,
+      close: { title: t('ui.dock.removeShortcut'), onClick: () => removeShortcut(side, blockId) },
+      onClick: (e) => {
+        if (!target) {
+          deps.toast(t('ui.dock.shortcutDangling'), 'warn')
+          return
+        }
+        deps.openBlock(blockId, openActionOf(e))
+      },
+      onMenu: (anchor, trigger) => deps.showShortcutMenu(side, blockId, anchor, trigger),
+      onDragStart: (e) => setDragCard(e.dataTransfer, id),
+    }
+    return buildDockTile(tile)
+  }
+
+  /** 只改 `cards`：同槽已有这一颗就不再加；返回这次是否真的新增 */
+  function insertShortcut(side: 'left' | 'right', blockId: string): boolean {
+    const cards = deps.prefs().dock[side].cards
+    const entry: DockEntry = { kind: 'shortcut', block: blockId }
+    const key = dockKey(entry)
+    if (cards.some((e) => dockKey(e) === key)) return false
+    // 小卡聚成一排：命令小卡与快捷小卡同属这一排，新的一颗接在最后一张小卡之后
+    const lastTile = cards.reduce((at, card, i) => (card.kind === 'cmd' || card.kind === 'shortcut' ? i : at), -1)
+    cards.splice(lastTile + 1, 0, entry)
+    return true
+  }
+
+  /**
+   * 确保这一槽有一颗指向该块的快捷卡（已存在就只滚到它，不产生第二颗）。
+   * 目标块不在库里就不加：一个指向空处的入口没有意义。
+   */
+  function addShortcut(side: 'left' | 'right', blockId: string): boolean {
+    if (!kb.get(blockId)) return false
+    const key = dockKey({ kind: 'shortcut', block: blockId })
+    insertShortcut(side, blockId)
+    if (!deps.slotOpen(side)) {
+      deps.prefs().dock[side].open = true
+      deps.noteSlotChanged(side)
+      deps.applyChrome()
+    }
+    renderDocks()
+    reveal(side, key)
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+    return true
+  }
+
+  /** 移出快捷卡：只摘这一次露面，块本身一个字节不动 */
+  function removeShortcut(side: 'left' | 'right', blockId: string): void {
+    closeCard(side, dockKey({ kind: 'shortcut', block: blockId }))
+  }
+
+  /** 换目标：位置与顺序不变，只把这一格指向另一块 */
+  function retargetShortcut(side: 'left' | 'right', from: string, to: string): boolean {
+    if (!kb.get(to)) return false
+    const cards = deps.prefs().dock[side].cards
+    const i = cards.findIndex((e) => e.kind === 'shortcut' && e.block === from)
+    if (i < 0) return false
+    const key = dockKey({ kind: 'shortcut', block: to })
+    if (cards.some((e) => dockKey(e) === key)) return false
+    cards[i] = { kind: 'shortcut', block: to }
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+    return true
+  }
+
+  /**
+   * 收成快捷：关掉这一槽的那张窗口卡，并在**同槽**留一颗指向同一块的快捷。
+   *
+   * 单向动作，没有对称的「小卡转大卡」：快捷卡留着只占 44px，删掉它是净亏；
+   * 想摊开看用 Shift+点（或菜单里的「在侧槽展开」）加开一张窗口即可。
+   * 摘窗口与加快捷在**一次写**里做完，只重画一次。
+   */
+  function collapseToShortcut(side: 'left' | 'right', blockId: string): boolean {
+    const dock = deps.prefs().dock
+    const winKey = dockKey({ kind: 'block', block: blockId })
+    const at = dock[side].cards.findIndex((e) => dockKey(e) === winKey)
+    if (at < 0) return false
+    dock[side].cards.splice(at, 1)
+    if (dock.solo[side] === winKey) dock.solo[side] = null
+    delete dock.pinnedCards[winKey]
+    delete dock.collapsedCards[winKey]
+    /**
+     * 「这块已经有快捷了吗」问的是**两侧**：另一槽留着一颗时，收成不该顺手再造第二颗。
+     * 左右各放一颗仍然允许，但那是用户主动加的，不是一次「收成」的副产物。
+     */
+    const hasAnyShortcut = (['left', 'right'] as const).some((s) =>
+      dock[s].cards.some((e) => e.kind === 'shortcut' && e.block === blockId),
+    )
+    if (!hasAnyShortcut) insertShortcut(side, blockId)
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+    return true
+  }
+
+  /**
+   * 「在侧槽展开」：只**加回**一张窗口卡，快捷卡留在原地。
+   *
+   * 这不是「转回去」——收成之后的状态是「只有快捷」，展开之后是「两者都有」，
+   * 不回到「只有窗口」，所以两条露面各自生灭，没有状态要搬。
+   */
+  function restoreWindow(side: 'left' | 'right', blockId: string): void {
+    openWindow(side, blockId, 'view')
+  }
+
   /** 添加快捷：只接受带 `tile` 元数据的命令；插在已有小卡之后，小卡聚成一排 */
   function addTile(side: 'left' | 'right', command: string): void {
     const decl = deps.getRegistry().decl(command)
@@ -614,7 +755,8 @@ export function setupDocks(deps: DocksDeps) {
     const entry: DockEntry = { kind: 'cmd', command }
     const key = dockKey(entry)
     if (dock[side].cards.some((e) => dockKey(e) === key)) return
-    const lastTile = dock[side].cards.reduce((at, card, i) => (card.kind === 'cmd' ? i : at), -1)
+    // 快捷小卡也在这一排：命令小卡插在最后一张小卡之后，别把它插到快捷卡前面
+    const lastTile = dock[side].cards.reduce((at, card, i) => (card.kind === 'cmd' || card.kind === 'shortcut' ? i : at), -1)
     dock[side].cards.splice(lastTile + 1, 0, entry)
     if (!deps.slotOpen(side)) {
       dock[side].open = true
@@ -928,6 +1070,11 @@ export function setupDocks(deps: DocksDeps) {
     addTile,
     addDerived,
     addUtility,
+    addShortcut,
+    removeShortcut,
+    retargetShortcut,
+    collapseToShortcut,
+    restoreWindow,
     toggleFoldAll,
     topWindow,
     closeOtherWindows,
