@@ -149,13 +149,20 @@ export function viewConfigCommands(
      * 这一行下面——不换屏、不动光标。首次激活时身体还没挂上（`viewShown` 看不到），
      * 所以这条要走在 `viewShown` 前面，否则会把用户拽去整屏。
      *
-     * 前提是**它真的在当前这一屏上**（是某个根的后代）：不在屏上的块重画多少遍
-     * 都看不见——创建路径（查询块落森林顶层）就栽在「重画了但什么都没出现」，
-     * 那种块仍然要打开它。
+     * 两个前提，缺一个就退回「打开它」：
+     *  · **树在当前屏上**（是某个根的后代）——不在屏上的块重画多少遍都看不见，
+     *    创建路径（查询块落森林顶层）就栽在「重画了但什么都没出现」；
+     *  · **行真的由主编辑器画着**——中间任何一层带了行内体（页签／卡片／查询身体），
+     *    它的行已经让位给那一层的身体岛，主编辑器重画够不到它（子块的页签就栽在
+     *    「重画了，岛没动」）。
      */
     const b = d.kb.get(owner.blockId)
-    const onScreen = d.rootIds().some((rid) => d.kb.pathOf(owner.blockId).some((p) => p.id === rid))
-    if (b && onScreen && (hasQueryBody(b) || hasChildrenViewBody(b))) {
+    const path = d.kb.pathOf(owner.blockId)
+    const onScreen = d.rootIds().some((rid) => path.some((p) => p.id === rid))
+    const inBodyIsland = path.some(
+      (p) => p.id !== owner.blockId && (hasQueryBody(p) || hasChildrenViewBody(p)),
+    )
+    if (b && onScreen && !inBodyIsland && (hasQueryBody(b) || hasChildrenViewBody(b))) {
       // 轻重画（编辑器自己重读 roots＋重画＋恢复选区），不走整页装载——那会清掉光标
       d.rerenderEditor()
       return
