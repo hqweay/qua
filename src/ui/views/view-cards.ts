@@ -237,7 +237,9 @@ export class ViewCards {
     if (view?.cards?.showEmpty === true || buckets.length > 0) {
       for (const id of order) {
         if (buckets.some((b) => b.id === id)) continue
-        buckets.push({ id, raw: undefined, records: [], unset: id === UNSET })
+        // 空列也是「一个值一组」：raw 要给回原始值，列头才叫得出名字、
+        // 拖卡写回才落的是那个值（写 undefined 等于把这格毁掉）
+        buckets.push({ id, raw: id.startsWith('s:') ? id.slice(2) : undefined, records: [], unset: id === UNSET })
       }
     }
 
