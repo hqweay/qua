@@ -37,10 +37,10 @@ import {
 import type { QueryHit, QuerySpec } from '../query/query.ts'
 import type { BlockStore } from '../model/store.ts'
 import { changesOf } from './changes.ts'
-import { cellsOf, diffTouched, type BeforeBlock, type Placement, type TouchedBlock } from './diff.ts'
+import { applyOps, cellsOf, diffTouched, type BeforeBlock, type Placement, type TouchedBlock } from './diff.ts'
 import { captureOf } from './scoped.ts'
 import type { UndoCapture } from './scoped.ts'
-import type { KbClient, PathEntry, Tx, TxOpts, TxResult } from './types.ts'
+import type { KbClient, Op, PathEntry, Tx, TxOpts, TxResult } from './types.ts'
 import type { Anno } from '../model/runs.ts'
 
 /** 按含**被删块**的遍历找块（可见遍历看不见它们；恢复路径用） */
@@ -198,6 +198,50 @@ export class MemoryKb implements KbClient {
 
   trash(): readonly Block[] {
     return trashOf(this.store.blocks)
+  }
+
+  purgeTrash(ids: readonly string[]): readonly Op[] {
+    /**
+     * 按**含被删块**的读面找（可见遍历看不见它们）。只认带删除标记的块：
+     * 回收站列的就是这些；没带标记的 id（活动块）不在这里清——清它该先删进回收站。
+     */
+    const lookup = this.store.undoLookup()
+    /** 已发过 op 的块：嵌套条目（子树里另有带标记的后代）不重复发 */
+    const covered = new Set<string>()
+    const ops: Op[] = []
+    for (const id of ids) {
+      const root = lookup.get(id)
+      if (!root || !isDeleted(root) || covered.has(id)) continue
+      /**
+       * 每条根的**整棵子树**都要一条 op（含不带标记的后代）——清除按结构级联，
+       * 子块若没有自己的账，重放时它就是「挂在已消失的父下」的孤儿。
+       * 子先于父（与撤销捕获的清除序同一纪律）：父先退场，子块的落点就补不回来了。
+       */
+      const subtree: Block[] = []
+      walkForest(
+        [root],
+        (b) => {
+          subtree.push(b)
+        },
+        { includeDeleted: true },
+      )
+      for (let i = subtree.length - 1; i >= 0; i--) {
+        const b = subtree[i]!
+        if (covered.has(b.id)) continue
+        covered.add(b.id)
+        ops.push({ e: 'block', id: b.id, op: 'exist', state: 'purged', at: this.now() })
+      }
+    }
+    if (ops.length === 0) return []
+
+    /**
+     * 与撤销/重做同形（不进 `Tx`，见 `KbClient.purgeTrash` 的说明）：
+     * 原地应用、出口宣布（索引按 op 修补、订阅者按 op 重画），
+     * op 交调用方落盘。`source` 不传：这不是某台编辑器的编辑，所有视图都该跟。
+     */
+    applyOps(this.store.blocks, ops, lookup)
+    this.store.apply(ops)
+    return ops
   }
 
   findTag(name: string): Block | undefined {

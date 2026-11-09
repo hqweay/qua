@@ -18,7 +18,9 @@ import assert from 'node:assert/strict'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { mkBlock, isDeleted, type Block } from '../src/core/model/model.ts'
-import { trashOf } from '../src/core/model/tree.ts'
+import { isBlankTrashEntry, trashOf } from '../src/core/model/tree.ts'
+import { diff, forestFingerprint, replay } from '../src/core/kb/diff.ts'
+import type { Op } from '../src/core/kb/types.ts'
 
 const NOW = 1_700_000_000_000
 const b = (id: string, children: Block[] = []): Block => ({
@@ -114,3 +116,67 @@ test('回收站是**派生**的：没有第二个存放处，改动之后清单�
     'kb.trash() 必须等于「从森林现算」，不许有第二份缓存',
   )
 })
+
+/* ------------------------------------------------------------ 清空（永久清除） */
+
+const purgeIds = (ops: readonly Op[]): string[] =>
+  ops.filter((o) => o.e === 'block' && o.op === 'exist').map((o) => (o as { id: string }).id)
+
+test('清空一条 ⇒ 整棵子树退场，每块一条 op（子先于父），兄弟位不动', () => {
+  const { kb } = fixture()
+  kb.tx((tx) => tx.remove('c1'))
+  const ops = kb.purgeTrash(['c1'])
+  // `c1` 的子树是 [c1, g1] ⇒ 两条，`g1` 在前（清除子先于父）
+  assert.deepEqual(purgeIds(ops), ['g1', 'c1'], `op 应覆盖整棵子树、子先于父：${purgeIds(ops).join(',')}`)
+  assert.equal(kb.trash().length, 0, '清空之后回收站空')
+  assert.equal(kb.get('c1'), undefined)
+  const p1 = kb.get('p1')!
+  assert.deepEqual(p1.children.map((x) => x.id), ['c2'], '子树从树上整棵摘掉，兄弟位不动')
+})
+
+test('清空可重放：genesis ＋ 编辑流 ＋ 清空 ⇒ replay 与当前森林逐字节相等', () => {
+  const store = new BlockStore([b('p1', [b('c1', [b('g1')]), b('c2')]), b('p2')])
+  const kb = new MemoryKb(store, { now: () => NOW })
+  const ops: Op[] = [...diff([], store.blocks)]
+  ops.push(...kb.tx((tx) => tx.remove('c1')).ops)
+  ops.push(...kb.tx((tx) => tx.remove('p2')).ops)
+  ops.push(...kb.purgeTrash(['c1', 'p2']))
+  assert.equal(
+    forestFingerprint(replay(ops) as never),
+    forestFingerprint(store.blocks as never),
+    '清空的 op 进日志后，重放必须回到同一个状态（purge 不是绕过日志的旁路）',
+  )
+})
+
+test('清空是幂等的：同一批再清一次 ⇒ 零 op', () => {
+  const { kb } = fixture()
+  kb.tx((tx) => tx.remove('c1'))
+  kb.purgeTrash(['c1'])
+  assert.deepEqual(kb.purgeTrash(['c1']), [], '块已经不在了 ⇒ 不再发 op')
+})
+
+test('嵌套条目（子树里另有带标记的后代）一起清 ⇒ 每块恰好一条 op，不重复', () => {
+  const { kb } = fixture()
+  kb.tx((tx) => tx.remove('g1'))
+  kb.tx((tx) => tx.remove('c1'))
+  const ops = kb.purgeTrash(['c1', 'g1'])
+  const ids = purgeIds(ops)
+  assert.equal(new Set(ids).size, ids.length, `不应有重复的 op：${ids.join(',')}`)
+  assert.deepEqual([...ids].sort(), ['c1', 'g1'], '两条都要有账（谁先谁后都行，但不能丢也不能重）')
+  assert.equal(kb.trash().length, 0)
+})
+
+test('清空只认带删除标记的根：活动块与未知 id 不动、返回零 op', () => {
+  const { kb } = fixture()
+  assert.deepEqual(kb.purgeTrash(['c1', 'nope']), [], '活动块与不存在的 id 都不该产生 op')
+  assert.deepEqual(kb.roots().map((x) => x.id), ['p1', 'p2'], '森林原样')
+})
+
+/* ------------------------------------------------------------ 空块口径 */
+
+test('空块判据：正文投影为空 ∧ 无子块；带正文或带子树都不算', () => {
+  assert.ok(isBlankTrashEntry(b('blank')), '空正文空子树 ⇒ 空块')
+  assert.ok(!isBlankTrashEntry(b('withKids', [b('kid')])), '带子树的条目不算空块（子树里可能有要保留的东西）')
+  assert.ok(!isBlankTrashEntry(mkBlock('有字', { created: NOW, modified: NOW })), '有正文的条目不算空块')
+})
+

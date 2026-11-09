@@ -284,6 +284,17 @@ export interface KbClient {
    * 没有第二个存放处——这个清单每次从森林现算，恢复经 `Tx.restore` 回原位。
    */
   trash(): readonly Block[]
+  /**
+   * **永久清除回收站条目**（操作根集合；整棵子树级联，不可恢复、不进撤销栈）。
+   *
+   * 为什么不在 `Tx` 里：purge 没有「改前状态」可比对——它的 op 形状是固定的
+   * （每块一条 `exist{purged}`），不是 diff 出来的；进 `Tx` 会要求撤销捕获的三态表
+   * 为一条永不撤销的写入留位置。它与撤销/重做同形：建 op → 原地应用 → 宣布，
+   * op 交给调用方落盘。
+   *
+   * @returns 实际发出的 op（含子树级联的每一条）；调用方为空批时可跳过后续。
+   */
+  purgeTrash(ids: readonly string[]): readonly Op[]
   /** 这个名字现在归哪个**标签块**（找不到 ≠ 没有同名块——同名地址可能被普通块占着） */
   findTag(name: string): Block | undefined
   /** 某天的 journal 块（一天一个；没有这一天 ⇒ `undefined`） */
