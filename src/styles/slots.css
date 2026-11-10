@@ -250,12 +250,15 @@
   display: flex;
   align-items: center;
   gap: var(--ui-gap-2);
-  /* 右边与 body 同一条内边距：最右那颗按钮的右缘 ＝ 内容区右缘（否则图标看起来「悬空」） */
-  padding: var(--ui-gap-3) var(--ui-gap-3) var(--ui-gap-2) var(--ui-gap-3);
-  font-size: var(--ui-fs-2xs);
-  letter-spacing: 0.02em;
+  /*
+   * 左右与 body 同一条内边距：静置只剩名字时，名字与正文**共左缘**（不然孤零零一条
+   * 小字还往里缩，看着像错位）；右边同理——最右那颗按钮的右缘 ＝ 内容区右缘。
+   */
+  padding: var(--ui-gap-3) var(--ui-gap-2) var(--ui-gap-2) var(--ui-gap-2);
+  /* 名字用「安静标签」的那一档（与槽空态同口径）：它现在独自代表整条头，太小太重都突兀 */
+  font-size: var(--ui-fs-xs);
   color: var(--ui-text-tertiary);
-  font-weight: 600;
+  font-weight: 500;
   cursor: grab;
 }
 .dock-card-head > button {
