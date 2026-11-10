@@ -643,12 +643,19 @@ button.ghost.wide {
   color: var(--ui-text-tertiary);
   line-height: 1.6;
 }
+/*
+ * 每格两条竖向领地：数字一条、标记一条。
+ * 底部这条带**所有格子都保留**（含没点的）：同一行里有点格与无点格的高度必须一致，
+ * 否则数字会各居各的中，整列错位。侧栏收窄到格子只剩十几像素时，数字与点
+ * 各自住自己的带，物理上碰不到——而不是靠偏移量在两种尺寸之间凑。
+ */
 .cal-cell {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   aspect-ratio: 1;
+  padding-bottom: calc(var(--ui-gap-2) + var(--ui-gap-1));
   border-radius: var(--ui-radius-sm);
   font-size: var(--ui-fs-xs);
   color: var(--ui-text-secondary);
@@ -673,7 +680,7 @@ button.ghost.wide {
   font-weight: var(--ui-fw-medium);
 }
 /*
- * 这天写过：数字正下方一颗点。
+ * 这天写过：数字正下方一颗点（住在格子预留的那条标记带里，见 `.cal-cell`）。
  *
  * 为什么是点而不是给整格上色：上色与「今天」的底色会撞成两种「有颜色」，
  * 而它们说的是不同的事（今天／写过）。点是小面积、不与底色竞争。
@@ -686,7 +693,7 @@ button.ghost.wide {
 .cal-dot {
   position: absolute;
   left: 50%;
-  bottom: var(--ui-gap-2);
+  bottom: var(--ui-gap-1);
   width: 4px;
   height: 4px;
   transform: translateX(-50%);
