@@ -26507,6 +26507,154 @@ await check('T282 页签：同一块不重复打开；放得下就平铺、放�
   return `${shape.total} 张不同名 tab 全平铺；重复按 + 不新增（${dup.total} 张不变）；集合 ${rows.length} 行可切换`
 })
 
+await check('T283 看板拖卡让位（FLIP）：手势落点出 200ms 动画、两端 rect 钉住；非手势改值瞬移；reducedMotion 无动画', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  // 前置与 T190 同一条：查询「任务」→ 卡片看法 → 按 select 分组
+  const qid = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    let found = ''
+    const walk = (list) => {
+      for (const b of list) {
+        if (!found && b.props?._query?.where) found = b.id
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return found
+  })
+  assert(qid !== '', '前置：种子里应有一个查询块')
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
+  await page.waitForTimeout(400)
+  await page.evaluate(
+    (id) => window.__qua.invoke('core.query/set-spec', { owner: { kind: 'block', blockId: id }, spec: { where: { tag: '任务' } } }),
+    qid,
+  )
+  await page.waitForTimeout(400)
+  await page.evaluate(
+    ({ id }) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'cards' }),
+    { id: qid },
+  )
+  await page.waitForTimeout(400)
+  const groupId = await page.evaluate(() => window.__qua.propDefs().find((d) => d.kind === 'select')?.id ?? '')
+  await page.evaluate(
+    ({ id, gid }) => {
+      const views = window.__qua.__editor.store.find(id)?.props?._views ?? []
+      const v = views.find((x) => x.kind === 'cards')
+      window.__qua.invoke('core.view/set-group', { blockId: id, viewId: v.id, groupBy: gid })
+    },
+    { id: qid, gid: groupId },
+  )
+  await page.waitForTimeout(450)
+
+  /**
+   * ① **真手势**：grip dragstart → 目标列 dragover/drop。动画句柄在**同一次
+   *    evaluate 里**抓（200ms 的窗口扛不住两次 evaluate 往返），挂到 window 上
+   *    供下一段对两端 rect 的断言用。
+   */
+  const drop = await page.evaluate(() => {
+    const cols = [...document.querySelectorAll('.vcol')]
+    const card = document.querySelector('.vcard[data-block-id]')
+    const from = cols.find((c) => c.contains(card))
+    const to = cols.find((c) => c !== from && c.dataset.unset !== '1' && c.dataset.value !== '')
+    if (!card || !to) return null
+    const id = card.dataset.blockId
+    const grip = card.querySelector('.vcard-grip')
+    const old = card.getBoundingClientRect()
+    const box = to.getBoundingClientRect()
+    const dt = new DataTransfer()
+    const ev = (type) =>
+      new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: box.left + 8, clientY: box.top + 8 })
+    grip.dispatchEvent(ev('dragstart'))
+    to.dispatchEvent(ev('dragover'))
+    to.dispatchEvent(ev('drop'))
+    grip.dispatchEvent(ev('dragend'))
+    const moved = document.querySelector(`.vcard[data-block-id="${id}"]`)
+    const anim = moved?.getAnimations().find((x) => x.id === 'qua-flip') ?? null
+    window.__t283 = { anim, id, to: to.dataset.value }
+    return {
+      id,
+      old: { x: old.x, y: old.y },
+      inTargetNow: moved?.closest('.vcol')?.dataset.value === to.dataset.value,
+      duration: anim ? anim.effect.getTiming().duration : null,
+    }
+  })
+  assert(drop, '前置：应有可拖的卡与目标列')
+  assert(drop.inTargetNow, `drop 之后卡应在目标列：${JSON.stringify(drop)}`)
+  assert(drop.duration === 200, `拖卡落点要出一条 200ms 的 FLIP：${JSON.stringify(drop.duration)}`)
+
+  // ② 两端 rect：currentTime=0 读旧位，finish 读新位——FLIP 补的位移必须两头都对
+  const ends = await page.evaluate(async (id) => {
+    const { anim, to } = window.__t283
+    const card = document.querySelector(`.vcard[data-block-id="${id}"]`)
+    anim.pause()
+    anim.currentTime = 0
+    const at0 = card.getBoundingClientRect()
+    anim.finish()
+    const atEnd = card.getBoundingClientRect()
+    return {
+      at0: { x: Math.round(at0.x), y: Math.round(at0.y) },
+      colEnd: card.closest('.vcol')?.dataset.value === to,
+    }
+  }, drop.id)
+  assert(
+    Math.abs(ends.at0.x - drop.old.x) <= 2 && Math.abs(ends.at0.y - drop.old.y) <= 2,
+    `动画起点应是旧位：${JSON.stringify({ at0: ends.at0, old: drop.old })}`,
+  )
+  assert(ends.colEnd, '动画终点后卡应在目标列')
+
+  // ③ **非手势**改值（命令面/面板走的同一入口）：卡换列但没有动画——动画读作延迟
+  const silent = await page.evaluate(() => {
+    const cols = [...document.querySelectorAll('.vcol')]
+    const target = cols.find((c) => c.dataset.unset !== '1' && c.dataset.value !== '')
+    const other = cols.find((c) => c !== target && c.querySelector('.vcard[data-block-id]'))
+    const card = other.querySelector('.vcard[data-block-id]')
+    if (!card || !target) return null
+    const propId = window.__qua.propDefs().find((d) => d.kind === 'select')?.id
+    const raw = target.dataset.value.startsWith('s:') ? target.dataset.value.slice(2) : target.dataset.value
+    window.__qua.invoke('core.props/set-value', { blockId: card.dataset.blockId, propId, value: raw })
+    // 重画会换节点：按 id 重查（旧引用挂在 detached 列上，读出来永远是旧列）
+    const moved = document.querySelector(`.vcard[data-block-id="${card.dataset.blockId}"]`)
+    const anims = [...document.getAnimations()].filter((a) => a.id === 'qua-flip')
+    return {
+      inTarget: moved?.closest('.vcol')?.dataset.value === target.dataset.value,
+      anims: anims.length,
+    }
+  })
+  assert(silent && silent.inTarget, `非手势改值也要换列：${JSON.stringify(silent)}`)
+  assert(silent.anims === 0, `非手势改值不该有 FLIP：${JSON.stringify(silent)}`)
+
+  // ④ reducedMotion：卡立刻在目标列、无动画
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const reduced = await page.evaluate(() => {
+    const cols = [...document.querySelectorAll('.vcol')]
+    const target = cols.find((c) => c.dataset.unset !== '1' && c.dataset.value !== '')
+    const other = cols.find((c) => c !== target && c.querySelector('.vcard[data-block-id]'))
+    const card = other.querySelector('.vcard[data-block-id]')
+    if (!card || !target) return null
+    const grip = card.querySelector('.vcard-grip')
+    const box = target.getBoundingClientRect()
+    const dt = new DataTransfer()
+    const ev = (type) =>
+      new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: box.left + 8, clientY: box.top + 8 })
+    grip.dispatchEvent(ev('dragstart'))
+    target.dispatchEvent(ev('dragover'))
+    target.dispatchEvent(ev('drop'))
+    grip.dispatchEvent(ev('dragend'))
+    const moved = document.querySelector(`.vcard[data-block-id="${card.dataset.blockId}"]`)
+    return {
+      inTarget: moved?.closest('.vcol')?.dataset.value === target.dataset.value,
+      anims: [...document.getAnimations()].filter((a) => a.id === 'qua-flip').length,
+    }
+  })
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  assert(reduced && reduced.inTarget, `reducedMotion 下卡也要换列：${JSON.stringify(reduced)}`)
+  assert(reduced.anims === 0, `reducedMotion 下不该有 FLIP：${JSON.stringify(reduced)}`)
+  await ctx.close()
+  return `手势 drop 出 200ms FLIP（两端 rect 钉住）；非手势瞬移；reducedMotion 无动画`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

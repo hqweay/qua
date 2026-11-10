@@ -36,6 +36,7 @@ import { t } from '../../core/infra/msg.ts'
 import { assetViewOf } from '../../view/asset-views.ts'
 import { bucketize, bucketLabel, orderBuckets, recordsForGrouping, GROUP_UNSET, type GroupBucket } from './grouping.ts'
 import { viewNote } from './view-note.ts'
+import { flip } from '../motion.ts'
 
 export interface ViewCardsDeps {
   /**
@@ -325,8 +326,17 @@ export class ViewCards {
         e.preventDefault()
         const blockId = this.dragging
         this.dragging = ''
-        if (b.unset) this.deps.clearValue(blockId, propId)
-        else this.deps.setValue(blockId, propId, b.raw)
+        // 拖卡落点＝「同一个东西换位置」：让位动画包住这一次写（命令面改值不走这里＝瞬移）
+        flip(
+          this.root,
+          '.vcard[data-block-id]',
+          (el) => el.dataset.blockId ?? '',
+          () => {
+            if (b.unset) this.deps.clearValue(blockId, propId)
+            else this.deps.setValue(blockId, propId, b.raw)
+          },
+          { priority: blockId },
+        )
       })
     }
     return col
@@ -418,7 +428,10 @@ export class ViewCards {
       e.preventDefault()
       const blockId = this.dragging
       this.dragging = ''
-      this.deps.moveInto(blockId, g.block.id)
+      // 换父落点与写值落点同一条原语：让位动画只挂在手势上
+      flip(this.root, '.vcard[data-block-id]', (el) => el.dataset.blockId ?? '', () => this.deps.moveInto(blockId, g.block.id), {
+        priority: blockId,
+      })
     })
     return col
   }

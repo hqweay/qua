@@ -731,8 +731,12 @@ button.queryview-chip:hover {
   background: var(--ui-surface-sunken);
   min-height: 4rem;
 }
+.vcol {
+  transition: background-color var(--ui-dur-1) var(--ui-ease-out);
+}
 .vcol[data-drop-target='1'] {
   outline: 1px dashed var(--ui-accent);
+  background: var(--ui-accent-soft);
 }
 .vcol-head {
   display: flex;
@@ -860,6 +864,9 @@ button.queryview-chip:hover {
   min-width: 0;
   min-height: 4.5rem;
   overflow: hidden;
+}
+.vcard {
+  transition: border-color var(--ui-dur-1) var(--ui-ease-out), box-shadow var(--ui-dur-1) var(--ui-ease-out);
 }
 .vcards .vcard:hover {
   border-color: var(--ui-border);
