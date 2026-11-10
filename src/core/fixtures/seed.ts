@@ -573,6 +573,8 @@ export function seedJournalMounts(): MountEntry[] {
  *
  * 与 `seedJournalMounts` 同层：槽布局是设备状态（`storage/device.ts`「跟库走」的四格之一），
  * 只在「这一份库是刚种出来的」时给（`main.ts` 启动段），已有库不自动改布局。
+ * ⚠️ 盘一进初始状态，checks 里「左槽唯一一只盘」「首匹配 `^="tray:"`」的假设就多了一只 ——
+ *    动这里（或默认槽布局）前先盘点 smoke/dock-smoke 的初始布局钉子，改写按捕获 key 精确认。
  * 成员按确定性 id 指块（见顶部常量）；id 立不住的后果与所有快捷卡相同——置灰，不炸。
  */
 export function seedDock(): DockPrefs {

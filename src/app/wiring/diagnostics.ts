@@ -62,6 +62,8 @@ import type { BlockEditor } from '../../view/editor/editor.ts'
  */
 function dockEntryKey(e: DockEntry): string | { tray: string; title: string | null; cards: string[] } {
   if (e.kind !== 'tray') return dockKey(e)
+  // `tray` 字段存**完整 key**（`tray:<id>`，与 DOM 的 data-card-id 同一串）——
+  // 拿它拼选择器别再加前缀（双前缀查无此人，红因看起来像「盘没建出来」）
   return { tray: dockKey(e), title: e.title ?? null, cards: e.cards.map(dockKey) }
 }
 
