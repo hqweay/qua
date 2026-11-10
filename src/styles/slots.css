@@ -655,6 +655,9 @@ button.ghost.wide {
   align-items: center;
   justify-content: center;
   aspect-ratio: 1;
+  /* 方格是偏好不是约束：行高被内容撑高时，有的引擎会把高反传成最小宽，
+     把 7 列顶出容器、裁掉最右列。显式归零，列宽永远由容器分配。 */
+  min-width: 0;
   padding-bottom: calc(var(--ui-gap-2) + var(--ui-gap-1));
   border-radius: var(--ui-radius-sm);
   font-size: var(--ui-fs-xs);

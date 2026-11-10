@@ -754,7 +754,8 @@ export const MSG = {
   'ui.cal.prevMonth': '上个月',
   'ui.cal.nextMonth': '下个月',
   'ui.cal.thisMonth': '回到本月',
-  'ui.cal.monthLabel': '{y} 年 {m} 月',
+  /* 无空格与日记日期（`Intl` zh-CN）同一惯例；空格会成断行点，最窄栏把「月」孤行 */
+  'ui.cal.monthLabel': '{y}年{m}月',
   /* 周一起始；逗号分隔是因为它要在网格里按顺序铺成表头 */
   'ui.cal.weekdays': '一,二,三,四,五,六,日',
   'ui.cal.dayLabel': '打开 {date} 的日记',
