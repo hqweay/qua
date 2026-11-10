@@ -26036,6 +26036,7 @@ await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、�
   const tray3 = now.find((e) => typeof e === 'object')
   assert(tray3?.title === '我的盘' && tray3.tray === trayIdBefore, `重命名只改 title、key 不动：${JSON.stringify(tray3)}`)
   assert((await trayCard.locator('.dock-card-count').textContent()) === '1', `命名后卡头应有计数位：${JSON.stringify(await trayCard.locator('.dock-card-count').textContent())}`)
+  assert((await trayCard.getAttribute('data-quiet-head')) === null, '命名的盘名字留守（盘名是正文看不出的上下文）')
 
   await ctx.close()
   return `建盘在原位＋一次收完（4 颗）＋盘内排序＋盘头收进去＋拖槽移出来；✕ 解散按原位归位；单成员移走即解散；重命名 key 不变`

@@ -435,6 +435,7 @@ await check('A18t 收纳盘：盘内小卡贴**盘内容盒**右缘（A18 口径
   await page.waitForTimeout(150)
   const trayCard = page.locator('#dock-left-stack > .dock-card[data-card-id^="tray:"]')
   assert((await trayCard.count()) === 1, '建盘后左槽应有一只盘卡（容器从内容里长出来）')
+  assert((await trayCard.getAttribute('data-quiet-head')) === '1', '未命名的盘静置闭嘴（成员摆在那里，计数不报第二遍）')
   await trayCard.locator('.dock-card-head').click({ button: 'right' })
   await page.waitForTimeout(150)
   await page.locator('.layer .layer-item', { hasText: '把其余小卡收进来' }).first().click()

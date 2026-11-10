@@ -605,6 +605,13 @@ export function setupDocks(deps: DocksDeps) {
         ...(named ? { count: String(tray.cards.length) } : {}),
         body: band,
         close: { title: t('ui.dock.trayDissolve'), onClick: () => dissolveTray(side, key) },
+        /**
+         * 未命名的盘静置**闭嘴**：展开时成员就摆在 body 里，「n 张小卡」报的是
+         * 看得见的信息——按「静置文字只报正文看不出的上下文」的判据只剩 grip。
+         * 盘名是用户起给这一组的、body 里没有的字 ⇒ 命名的盘静置留守。
+         * 收起后成员看不见了 ⇒ 收起态全键与标题常驻（壳的统一规则，见 §7）。
+         */
+        ...(named ? {} : { quietHead: true }),
       },
       cardStateFor(side, key),
     )
