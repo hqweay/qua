@@ -491,9 +491,28 @@ await check('A18t 收纳盘：盘内小卡贴**盘内容盒**右缘（A18 口径
     page.evaluate(() => document.querySelector('#dock-left-stack > .dock-card[data-card-id^="tray:"]').getBoundingClientRect().height)
   const isCollapsed = () =>
     page.evaluate(() => document.querySelector('#dock-left-stack > .dock-card[data-card-id^="tray:"]').dataset.collapsed === '1')
+  const closeOpacity = () =>
+    page.evaluate(
+      () =>
+        Number(
+          getComputedStyle(
+            document.querySelector('#dock-left-stack > .dock-card[data-card-id^="tray:"] > .dock-card-head [data-dock-action="close"]'),
+          ).opacity,
+        ),
+    )
+
+  // 静置只剩名字：按钮淡出但**永远占位**（列与右缘不动，没有虚边）／悬停这张卡进场／离开回淡出
+  assert((await closeOpacity()) === 0, '静置时盘头按钮应淡出（名字留守，留白是标签不是死空间）')
+  await trayCard.locator('.dock-card-head').hover()
+  await page.waitForTimeout(180)
+  assert((await closeOpacity()) === 1, '悬停这张卡应显形盘头按钮')
+  await page.mouse.move(720, 400)
+  await page.waitForTimeout(180)
+  assert((await closeOpacity()) === 0, '离开应回到只剩名字')
 
   await collapseTray()
   assert(await isCollapsed(), '点盘头应收起这只盘')
+  assert((await closeOpacity()) === 1, '收起的卡＝它的头：全键常驻')
   const h4 = await trayHeight()
 
   // 对照：一张普通卡收起后的高度——盘收起与「一张普通卡头」同构，不新增视觉词汇
@@ -1719,6 +1738,23 @@ await check('A24 卡头右侧同构：每张卡都是「单卡／关闭」两格
   assert(m.length >= 4, `应至少量到 4 张卡（派生／窗口／检视）：${JSON.stringify(m.map((c) => c.id))}`)
   assert(new Set(m.map((c) => c.kind)).size >= 2, `应同时量到两种来源的卡：${JSON.stringify(m.map((c) => c.kind))}`)
 
+  // 卡头静置**只剩名字**（按钮淡出但永远占位）：几何不受淡显影响，
+  // 但「关闭不能靠透明隐藏」这条要在**按钮显形的那一刻**验——悬停每一张卡读一次。
+  for (const c of m) {
+    // id 里有 `cmd:` 这类冒号——带引号的属性选择器原样可用（CSS.escape 是页面全局，Node 侧没有）
+    const sel = `#dock-${c.side}-stack > .dock-card[data-card-id="${c.id}"] > .dock-card-head`
+    await page.hover(sel)
+    await page.waitForTimeout(180)
+    const op = await page.evaluate((s) => {
+      const head = document.querySelector(s)
+      return {
+        head: Number(getComputedStyle(head).opacity),
+        close: Number(getComputedStyle(head.querySelector('[data-dock-action="close"]')).opacity),
+      }
+    }, sel)
+    assert(op.head === 1 && op.close > 0, `${c.id}：悬停这张卡应显形按钮，关闭不可见时不得是单颗透明：${JSON.stringify(op)}`)
+  }
+
   const columns = { left: { close: new Set(), solo: new Set() }, right: { close: new Set(), solo: new Set() } }
   for (const c of m) {
     // 卡头：收起（最左）＋ 常驻（仅窗口卡，紧挨收起）＋ 单卡 ＋ 关闭。
@@ -1735,9 +1771,8 @@ await check('A24 卡头右侧同构：每张卡都是「单卡／关闭」两格
     assert(close && solo, `${c.id}：右侧应有单卡＋关闭：${JSON.stringify(c.btns)}`)
     assert(c.kind !== 'window' || pin, `${c.id}：窗口卡必须有常驻开关：${JSON.stringify(c.btns)}`)
     assert(c.kind === 'window' || !pin, `${c.id}：家具卡不给常驻开关：${JSON.stringify(c.btns)}`)
-    // 判据是「看得见的最右一颗贴内容区右缘」：关闭若靠 opacity 藏起来仍占位，
-    // 它左边那颗（单卡）就会离右缘差一格——一列卡看下来是一条虚的边。
-    assert(close.op > 0, `${c.id}：关闭不能靠「透明但仍占位」隐藏：${JSON.stringify(close)}`)
+    // 判据是「头**可见时**最右一颗贴内容区右缘」：头平时整条淡出（没有半颗按钮藏着的中间态），
+    // 显形那一刻的几何由上面的 hover 循环验过 opacity——这里只钉列与右缘。
     assert(
       Math.abs(close.right - (c.headRight - c.padR)) <= 1,
       `${c.id}：关闭应贴内容区右缘：${JSON.stringify({ close, headRight: c.headRight, padR: c.padR })}`,

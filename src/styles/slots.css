@@ -238,6 +238,13 @@
 /*
  * 块卡头：卡片**自己的 chrome**，不是「块」——块在 body 里由 `block-renderers` 画。
  * 头是卡片的**拖源**：整头可拖（按钮除外），拖的是「这张卡」，不是块。
+ *
+ * **静置只剩名字**：卡头不能整条消失（头在流内、按钮在位，浮层把手会压住正文第一行——
+ * 日历的月份导航、窗口卡的首行都会被隐形把手截走点击），但静置时也**不该是一排图标**：
+ * 按钮淡出、名字留守（低对比）——那条留白成为标签，不是死空间。
+ * 按钮**永远占位**（纪律 2 的「永远占位」支）：显形前后列与右缘不动，
+ * 没有半颗按钮藏出来的虚边。悬停这张卡／键盘聚焦／卡收起时按钮进场；
+ * 收起的卡＝它的头，全键常驻（否则收起态什么都没有）。
  */
 .dock-card-head {
   display: flex;
@@ -250,6 +257,20 @@
   color: var(--ui-text-tertiary);
   font-weight: 600;
   cursor: grab;
+}
+.dock-card-head > button {
+  opacity: 0;
+  transition: opacity var(--ui-dur-1) ease;
+}
+.dock-card:hover > .dock-card-head > button,
+.dock-card:focus-within > .dock-card-head > button,
+.dock-card[data-collapsed='1'] > .dock-card-head > button {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dock-card-head > button {
+    transition: none;
+  }
 }
 .dock-card-head:active {
   cursor: grabbing;
@@ -278,35 +299,6 @@
   height: 20px;
   flex: 0 0 auto;
   font-size: var(--ui-fs-xs);
-}
-/*
- * 关闭常驻但**低对比**（hover 这张卡 / 聚焦到它 / 直接 hover ✕ 才提到满）。
- *
- * 为什么不再「hover 才出现」：`opacity: 0` 的按钮**仍占 20px ＋ 缝**，
- * 于是每张卡最右那颗**看得见的**图标都离右缘差 28px —— 一列卡看下来就是一条虚的边。
- * 常驻解决了那条缝，也顺手消掉 hover 时的位移；代价是每张卡多一颗 0.45 的 ✕。
- */
-.dock-card-head [data-dock-action='close'] {
-  opacity: 0.45;
-}
-.dock-card:hover > .dock-card-head [data-dock-action='close'],
-.dock-card:focus-within > .dock-card-head [data-dock-action='close'],
-.dock-card-head [data-dock-action='close']:hover,
-.dock-card-head [data-dock-action='close']:focus-visible {
-  opacity: 1;
-}
-/*
- * 常驻开关与关闭键同一条对比度口径：未 pin 低对比（它不是当前要紧的事），
- * pin 了常驻满对比——「这张卡重启还在」必须扫一眼就看得到。
- */
-.dock-card-head [data-dock-action='pin'][aria-pressed='false'] {
-  opacity: 0.45;
-}
-.dock-card:hover > .dock-card-head [data-dock-action='pin'][aria-pressed='false'],
-.dock-card:focus-within > .dock-card-head [data-dock-action='pin'][aria-pressed='false'],
-.dock-card-head [data-dock-action='pin'][aria-pressed='false']:hover,
-.dock-card-head [data-dock-action='pin'][aria-pressed='false']:focus-visible {
-  opacity: 1;
 }
 
 /*
