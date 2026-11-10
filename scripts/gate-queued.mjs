@@ -121,7 +121,10 @@ try {
   }
 
   exitCode = await new Promise((done) => {
-    const child = spawn('pnpm', ['-s', 'run', ...gateArgs], { cwd: wt, stdio: 'inherit' })
+    // `verify-deps-before-run=false`：pnpm 11.8 起在跑脚本前隐式校验依赖，软链来的 node_modules
+    // 会被判为「不匹配」并试图清掉重装——清的是主检出的依赖，且无 TTY 时直接 SIGTERM（exit 137）。
+    // 软链本身是成立的（pnpm 的链接是相对路径，整目录搬走仍成立），要关的只是这个前置校验。
+    const child = spawn('pnpm', ['--config.verify-deps-before-run=false', '-s', 'run', ...gateArgs], { cwd: wt, stdio: 'inherit' })
     child.on('error', (e) => {
       console.error(e.message)
       done(127)
