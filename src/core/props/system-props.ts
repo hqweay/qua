@@ -26,6 +26,7 @@
 import {
   ACTIVE_VIEW_PROP,
   ALIASES_PROP,
+  DEFAULT_FILTER_PROP,
   DELETED_AT_PROP,
   DISPLAY_PROP,
   ICON_PROP,
@@ -58,7 +59,7 @@ import {
   isUseValue,
   parseChoiceScope,
 } from './props.ts'
-import { isQuerySpec } from '../query/query.ts'
+import { isQueryNode, isQuerySpec } from '../query/query.ts'
 import { isActiveViewValue, isViewsValue } from '../views/view.ts'
 import { MOUNTS_PROP, isMountsValue } from '../views/mount.ts'
 import { EMBED_PROP, canonicalViewRef } from '../views/embed.ts'
@@ -79,6 +80,7 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   _query: isQuerySpec,
   [VIEWS_PROP]: isViewsValue,
   [ACTIVE_VIEW_PROP]: isActiveViewValue,
+  [DEFAULT_FILTER_PROP]: isQueryNode,
   [EMBED_PROP]: (v) => canonicalViewRef(v) !== null,
   // 字段定义（props.ts）
   _kind: isPropKind,

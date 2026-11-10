@@ -33,6 +33,7 @@ import {
   type BindingTarget,
   type ViewBindingRef,
   type ViewOwnerData,
+  type ViewOwnerPatch,
   type ViewOwnerRef,
   type ViewOwnerStore,
 } from '../../core/views/view-owner.ts'
@@ -145,7 +146,7 @@ export function setupOwners(deps: OwnersDeps): OwnerStore {
     return ownerDataOfTab(entryOf(owner.host, owner.tabId))
   }
 
-  const write = (owner: ViewOwnerRef, patch: Partial<ViewOwnerData>): void => {
+  const write = (owner: ViewOwnerRef, patch: ViewOwnerPatch): void => {
     if (owner.kind === 'block') {
       const b = deps.kb.get(owner.blockId)
       if (!b) return

@@ -399,9 +399,20 @@ export function viewConfigCommands(
         d.toast(t('ui.view.sliceOnlyQuery'), 'warn')
         return false
       }
+      if (filter !== null && !isQueryNode(filter)) return false
+      /**
+       * `viewId === ''` ＝ **默认看法（大纲）的切片**。它没有视图配置可挂，
+       * 所以住在拥有者自己的那一格（`_defaultFilter`）——同一个语义、同一个判据
+       * （此刻激活的是哪张视图），只是位置不同。没有这一条，新建查询块（还没有
+       * 任何命名视图）在最常见的面上就无处可筛。
+       */
+      if (viewId === '') {
+        d.owners.write(owner, { defaultFilter: filter })
+        reveal(owner)
+        return true
+      }
       const view = resolveView(data, viewId)
       if (!view) return false
-      if (filter !== null && !isQueryNode(filter)) return false
       d.owners.write(owner, { views: upsertView(data.views, withFilter(view, filter)) })
       reveal(owner)
       return true

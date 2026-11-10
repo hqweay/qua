@@ -33,7 +33,7 @@ import { tagIdsOf } from '../identity/tags.ts'
 import { descendantTagIds } from '../identity/tag-tree.ts'
 import { plainText } from '../model/runs.ts'
 import type { QueryHit, QueryNode, QuerySpec } from '../query/query.ts'
-import { findById, isQuerySpec } from '../query/query.ts'
+import { findById, isQueryNode, isQuerySpec } from '../query/query.ts'
 import { isRefKind, REFERENCE_KINDS, type RefKind } from '../relations/relations.ts'
 import { mentionSnippet, mentionSpotsOf } from '../relations/mention.ts'
 import { t } from '../infra/msg.ts'
@@ -98,6 +98,11 @@ export type MountEntry =
       spec: QuerySpec
       views: ViewConfig[]
       activeView?: string
+      /**
+       * **默认看法（大纲）的切片**：这一栏没有激活命名视图时生效的那一层条件。
+       * 与块拥有者的 `_defaultFilter` 同一件事、同一个语义（`slicedSpec` 叠加）。
+       */
+      defaultFilter?: QueryNode
     }
 
 /**
@@ -112,7 +117,13 @@ export type MountEntry =
 export function cloneMountEntries(entries: readonly MountEntry[]): MountEntry[] {
   return canonicalMountEntries(entries).map((e) =>
     e.kind === 'local'
-      ? { ...e, spec: JSON.parse(JSON.stringify(e.spec)) as QuerySpec, views: cloneViews(e.views) }
+      ? {
+          ...e,
+          spec: JSON.parse(JSON.stringify(e.spec)) as QuerySpec,
+          views: cloneViews(e.views),
+          // 切片也是配置：复制一栏不能与原件共享同一个对象（改一个动两个）
+          ...(e.defaultFilter ? { defaultFilter: JSON.parse(JSON.stringify(e.defaultFilter)) as QueryNode } : {}),
+        }
       : e,
   )
 }
@@ -629,6 +640,7 @@ export function canonicalMountEntries(raw: unknown): MountEntry[] {
         views: canonicalViews(l.views, { kind: 'query', spec: l.spec }),
       }
       if (typeof l.activeView === 'string' && l.activeView !== '') entry.activeView = l.activeView
+      if (isQueryNode(l.defaultFilter)) entry.defaultFilter = l.defaultFilter
       out.push(entry)
     }
   }

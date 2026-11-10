@@ -452,6 +452,7 @@ export const MSG = {
   'ui.query.stale': '结果可能已过期',
   'ui.query.dropped': '有 {count} 条已不再匹配，已从结果中移除',
   'ui.query.noSpec': '这个查询还没有条件',
+  'ui.query.noCondition': '还没有条件：加一条条件（或在筛选里挑一颗）才会出现结果',
   'ui.query.empty': '没有匹配的块',
   'ui.query.badJson': '条件不是合法的 JSON（文本已保留，改好再点应用）',
   /* 构建器（条件行 ＋ 一层组合 ＋ 范围/上限/顺序 ＋ JSON） */
@@ -530,7 +531,7 @@ export const MSG = {
   'ui.query.tree.changeKind': '换一类',
   'ui.query.tree.collapse': '收起条件',
   'ui.query.tree.emptyTitle': '还没有条件',
-  'ui.query.tree.emptyHint': '还没有条件：结果就是全库。加一条条件收窄它。',
+  'ui.query.tree.emptyHint': '还没有条件：一条都不显示。加一条条件（或在筛选里挑一颗），结果才会出现。',
   'ui.query.tree.incomplete': '这一条还没填完',
   'ui.query.tree.pathDay': '某一天',
   'ui.query.tree.pathBlock': '某一块',
@@ -1325,7 +1326,8 @@ export const MSG = {
 
   /* ------------------------------------------------------ 快速筛选（派生面的 chips） */
   'ui.filter.button': '筛选',
-  'ui.filter.buttonHint': '按结果里出现过的页/标签筛这一屏',
+  'ui.filter.buttonHint': '按这一屏结果里出现过的页/标签收窄（点击包含、Shift+点击排除）',
+  'ui.filter.buttonActive': '已筛 {count} 条：点击改筛选',
   'ui.filter.include': '包含',
   'ui.filter.remove': '排除',
   'ui.filter.pages': '页',
@@ -1334,6 +1336,9 @@ export const MSG = {
   'ui.filter.activeHint': '点击摘除；Shift+点击改为排除',
   'ui.filter.chipHintRemove': '点击摘除',
   'ui.filter.empty': '这一屏的结果里没有可筛的页或标签',
+  'ui.filter.emptyCenter': '这一屏里没有可筛的页或标签',
+  'ui.filter.searchHint': '找页或标签…',
+  'ui.filter.clear': '清除筛选',
   'ui.dock.noBackRefsFiltered': '没有符合筛选的引用',
 } as const
 

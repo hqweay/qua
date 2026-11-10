@@ -79,8 +79,13 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
   /** 写一张视图的切片；显式 `null` ＝ 清掉，缺参 ＝ 拒绝（不能把「没传」当成清空） */
   'core.view/set-filter': (a, app) => {
     const owner = ownerOrCur(a, app)
-    const viewId = S(a.viewId)
-    if (!owner || !viewId) return false
+    /**
+     * `viewId === ''` 是**默认看法（大纲）的切片**（拥有者的 `_defaultFilter`）——
+     * 新建查询块还没有命名视图，这是它唯一能落脚的地方。所以「空串」是合法值，
+     * 只有**没传**这一格才拒绝（写必须说清是哪一张视图的镜头）。
+     */
+    const viewId = a.viewId
+    if (!owner || typeof viewId !== 'string') return false
     const raw = a.filter
     if (raw === undefined) return false
     if (raw !== null && !isQueryNode(raw)) return false

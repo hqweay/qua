@@ -45,6 +45,55 @@
   color: var(--ui-text-tertiary);
   user-select: none;
 }
+/* ---------------------------------------------------------- 中心槽「顶栏」
+   tab 条 ＋ 这一屏的筛选漏斗。漏斗筛的是**当前打开的这一屏**：
+   看哪儿就在哪儿筛，不必先找到某个查询块。
+   条在 `#scroll` 之外，不随正文滚走。 */
+#center-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--ui-border-subtle);
+}
+#center-bar .center-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-bottom: 0;
+}
+.center-filter {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: 0;
+  padding: 0 var(--ui-gap-3);
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.center-filter svg {
+  width: 14px;
+  height: 14px;
+}
+.center-filter:hover {
+  color: var(--ui-text);
+}
+.center-filter[data-active] {
+  color: var(--ui-accent);
+}
+.center-filter[hidden] {
+  display: none;
+}
+/* 面板就地展开在条下面（不是浮层）：连点几颗时它不该跑来跑去 */
+.center-filter-panel {
+  flex: 0 0 auto;
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  border-bottom: 1px solid var(--ui-border-subtle);
+  background: var(--ui-surface);
+  font-size: var(--ui-fs-xs);
+}
+.center-filter-panel[hidden] {
+  display: none;
+}
 /* ---------------------------------------------------------- 中心槽 tab 条
    一个 tab ＝ 一份保存的视图（Doc + 位置 + 自己的历史）。条在 `#scroll` 之外，
    不随正文滚走；横向溢出时自己滚。 */

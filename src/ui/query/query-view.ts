@@ -23,15 +23,23 @@
  */
 import {
   childrenRecords,
+  chipsOfFilter,
   defaultColumnsForSource,
+  EMPTY_QUICK_FILTER,
+  evaluateQuerySpec,
   groupChoicesOf,
   groupsByStructure,
   displayNameOf,
   expandContexts,
   hasLiveChildren,
+  isEmptyWhere,
   isOwnEdit,
   isQueryBlock,
   listTableOf,
+  quickFilterActive,
+  quickFilterAdd,
+  quickFilterDrop,
+  quickFilterNode,
   resolveRows,
   resolveFrozen,
   resolveBoundView,
@@ -57,7 +65,10 @@ import {
   type BlockStore,
   type FrozenResult,
   type QueryContext,
+  type QueryNode,
   type QuerySpec,
+  type QuickFilterAtom,
+  type QuickFilterState,
   type Source,
   type ViewBindingRef,
   type ViewColumn,
@@ -81,6 +92,7 @@ import { t } from '../../core/infra/msg.ts'
 import { BlockEditor, type Run } from '../../view/editor/editor.ts'
 import { DeferredFlush } from '../../view/editor/deferred-flush.ts'
 import { renderIcon } from '../../view/icons.ts'
+import { renderQuickFilter } from '../chrome/quick-filter.ts'
 import { SurfaceEditor } from '../block-ui/surface-editor.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
 import { mountTitleEditor, type TitleEditor } from '../block-ui/title-editor.ts'
@@ -275,6 +287,10 @@ export interface ViewHostEls {
   sort: HTMLButtonElement
   /** 排序面板：与条件树同一哲学的就地一行（不是浮层），打开时按当前 spec 现画 */
   sortPanel: HTMLElement
+  /** **快速筛选**的漏斗（查询源才有）：就地展开 chips 面板，写这一张视图的 `filter` */
+  filterBtn: HTMLButtonElement
+  /** chips 面板（就地展开；与排序面板同一处哲学，不是浮层） */
+  filterPanel: HTMLElement
   /** **列**按钮（表格视图才有）：就地展开列管理面板，勾选要显示的列 */
   columnsBtn: HTMLButtonElement
   /** 列管理面板：勾选即落盘（`core.view/set-columns`），整份替换 */
@@ -338,6 +354,13 @@ export function createViewHostEls(): ViewHostEls {
   const sortPanel = document.createElement('div')
   sortPanel.className = 'queryview-sortpanel'
   sortPanel.hidden = true
+  const filterBtn = document.createElement('button')
+  filterBtn.type = 'button'
+  filterBtn.className = 'queryview-filter'
+  filterBtn.hidden = true
+  const filterPanel = document.createElement('div')
+  filterPanel.className = 'queryview-filterpanel'
+  filterPanel.hidden = true
   const columnsBtn = document.createElement('button')
   columnsBtn.type = 'button'
   columnsBtn.className = 'queryview-columns'
@@ -356,7 +379,7 @@ export function createViewHostEls(): ViewHostEls {
   newRow.type = 'button'
   newRow.className = 'queryview-newrow'
   newRow.hidden = true
-  head.append(title, count, topCount, stale, filters, views, group, sort, columnsBtn, refresh, foldAll, newRow)
+  head.append(title, count, topCount, stale, filters, views, group, sort, filterBtn, columnsBtn, refresh, foldAll, newRow)
 
   const tree = document.createElement('div')
   tree.className = 'queryview-tree'
@@ -380,7 +403,7 @@ export function createViewHostEls(): ViewHostEls {
   table.hidden = true
   body.append(editor, table)
 
-  root.append(head, tree, sortPanel, columnsPanel, body)
+  root.append(head, tree, sortPanel, columnsPanel, filterPanel, body)
   return {
     root,
     head,
@@ -393,6 +416,8 @@ export function createViewHostEls(): ViewHostEls {
     group,
     sort,
     sortPanel,
+    filterBtn,
+    filterPanel,
     columnsBtn,
     columnsPanel,
     refresh,
@@ -440,6 +465,8 @@ export class ViewHost {
   private readonly offStale: () => void
   /** 条件树（查询源；懒建，收起只隐藏不清空草稿） */
   private treeUi: QueryTree | null = null
+  /** chips 面板开着没有（就地展开；与排序面板同一种寿命） */
+  private filterOpen = false
   private staleIds = new Set<string>()
   /** 上下文展开栈（祖先 id）；刷新时清空，外部编辑重画时保留 */
   private expanded = new Set<string>()
@@ -494,6 +521,7 @@ export class ViewHost {
     this.els.sort.textContent = t('ui.query.sort')
     this.els.sort.title = t('ui.query.sortTitle')
     this.els.sort.addEventListener('click', () => this.toggleSortPanel())
+    this.els.filterBtn.addEventListener('click', () => this.toggleFilterPanel())
     this.els.columnsBtn.textContent = t('ui.view.columns')
     this.els.columnsBtn.title = t('ui.view.columnsTitle')
     this.els.columnsBtn.addEventListener('click', () => this.toggleColumnsPanel())
@@ -708,7 +736,20 @@ export class ViewHost {
   private get effective(): QuerySpec | null {
     const src = this.source
     if (src.kind !== 'query') return null
-    return slicedSpec(src.spec, this.view?.filter)
+    return slicedSpec(src.spec, this.activeFilter)
+  }
+
+  /**
+   * **此刻生效的切片**：激活了命名视图 ⇒ 它自己的 `filter`；否则是**默认看法**的
+   * （拥有者那一格 `_defaultFilter`）。判据只有一条——**现在激活的是哪张视图**。
+   *
+   * 派生面没有拥有者 ⇒ 永远没有切片（它连基础条件都是现算的）。
+   */
+  private get activeFilter(): QueryNode | null {
+    if (this.deps.derived) return null
+    if (this.view) return this.view.filter ?? null
+    const data = this.deps.owners.read(this.writeOwner)
+    return data?.defaultFilter ?? null
   }
 
   /**
@@ -974,6 +1015,21 @@ export class ViewHost {
     this.els.refresh.hidden = !query
     this.els.sort.hidden = !query
     if (!query) this.els.sortPanel.hidden = true
+    /**
+     * **快速筛选的漏斗**：查询源、且这一份 filter **认得出是 chips** 才给。
+     *
+     * 认不出的形状（树里拼的嵌套条件／按正文/属性写的条件）不给漏斗——点开只会
+     * 得到两列空 chips，一动手势就把那份条件整份换掉（静默丢条件）。那种形状
+     * 由切片摘要 chip 承接（同一份条件的另一条路）。
+     */
+    const filterable = query && !embed && chipsOfFilter(this.activeFilter) !== null
+    this.els.filterBtn.hidden = !filterable
+    if (!filterable) {
+      this.filterOpen = false
+      this.els.filterPanel.hidden = true
+    } else {
+      this.paintFilterButton()
+    }
     // 列管理只对表格视图开放（写的是 table.columns）；派生栏没有可写配置，列由来源定
     const columnsEditable = !derived && view?.kind === 'table'
     this.els.columnsBtn.hidden = !columnsEditable
@@ -1360,7 +1416,7 @@ export class ViewHost {
    * 需要知道自己在改的是叠加层，不是那份人人共享的基础条件。
    */
   private sliceChip(): HTMLElement | null {
-    const filter = this.view?.filter
+    const filter = this.activeFilter
     if (!filter) return null
     const chip = document.createElement('button')
     chip.type = 'button'
@@ -1370,12 +1426,101 @@ export class ViewHost {
     chip.title = t('ui.view.sliceHint')
     // 基础条件那颗是按钮，这一颗也必须是按钮：切片存在时任何激活视图都能就地改，
     // 不必先绕进「视图…」菜单（同一个落点，两条路）
-    const view = this.view
+    const viewId = this.view?.id ?? ''
     const owner = this.bound.owner
-    if (view && this.deps.openSlice) {
-      chip.addEventListener('click', () => this.deps.openSlice?.(owner, view.id, chip.getBoundingClientRect()))
+    if (this.deps.openSlice) {
+      chip.addEventListener('click', () => this.deps.openSlice?.(owner, viewId, chip.getBoundingClientRect()))
     }
     return chip
+  }
+
+  /* ---------------------------------------------------------- 快速筛选 */
+
+  /**
+   * 这一张视图的 chips。
+   *
+   * `chipsOfFilter` 认不出的形状不会走到这里（`paintChrome` 用同一条判据把漏斗藏了），
+   * 所以 `?? EMPTY` 只是给类型一个落点，不是「认不出就当没有」。
+   */
+  private filterState(): QuickFilterState {
+    return chipsOfFilter(this.activeFilter) ?? EMPTY_QUICK_FILTER
+  }
+
+  private paintFilterButton(): void {
+    const btn = this.els.filterBtn
+    renderIcon(btn, 'lucide:filter', 'filter')
+    const state = this.filterState()
+    const active = quickFilterActive(state)
+    if (active) btn.dataset.active = '1'
+    else delete btn.dataset.active
+    const count = state.include.length + state.remove.length
+    btn.title = active ? t('ui.filter.buttonActive', { count }) : t('ui.filter.buttonHint')
+    btn.setAttribute('aria-label', t('ui.filter.button'))
+    this.els.filterPanel.hidden = !this.filterOpen
+  }
+
+  /** 漏斗：就地开合 chips 面板（与排序面板同一种寿命；不用浮层——用户会连点几颗） */
+  private toggleFilterPanel(): void {
+    this.filterOpen = !this.filterOpen
+    if (this.filterOpen) this.paintFilterPanel()
+    this.els.filterPanel.hidden = !this.filterOpen
+  }
+
+  private paintFilterPanel(): void {
+    renderQuickFilter(this.els.filterPanel, {
+      records: () => this.filterCandidates(),
+      state: () => this.filterState(),
+      labelOf: (atom) => this.atomLabel(atom),
+      onAdd: (atom, to) => this.writeFilter(quickFilterAdd(this.filterState(), atom, to)),
+      onDrop: (atom) => this.writeFilter(quickFilterDrop(this.filterState(), atom)),
+      onClear: () => {
+        this.deps.invoke('core.view/set-filter', {
+          owner: this.writeOwner,
+          viewId: this.view?.id ?? '',
+          filter: null,
+        })
+        this.paintFilterButton()
+        this.paintFilterPanel()
+      },
+      search: true,
+    })
+  }
+
+  /**
+   * 写一层切片：**只写这一张视图的镜头**，不碰 `_query` 的基础条件。
+   *
+   * 视图 id 为空串 ＝ 默认看法（大纲），写拥有者自己的 `_defaultFilter`——
+   * 新建查询块还没有命名视图，这是它唯一能落脚的地方（见 `setViewFilter`）。
+   */
+  private writeFilter(next: QuickFilterState | null): void {
+    if (!next) return
+    this.deps.invoke('core.view/set-filter', {
+      owner: this.writeOwner,
+      viewId: this.view?.id ?? '',
+      filter: quickFilterNode(next),
+    })
+    this.paintFilterButton()
+    this.paintFilterPanel()
+  }
+
+  /**
+   * 候选来自**未筛**的结果集（`this.effective` 是基础条件 ∩ 切片；这里只跑基础条件）。
+   *
+   * 为什么不用手里那份冻结结果：它是筛过的。用它当候选源，排除一颗 chip 会让它
+   * 自己从候选里消失、计数也会随手指变化——「摘掉一颗一切回来」就没了参照。
+   * 只在打开面板时算一次（一次查询，5 万块约 5ms），不进绘制路径。
+   */
+  private filterCandidates(): readonly ViewRecord[] {
+    const src = this.source
+    if (src.kind !== 'query') return []
+    return resolveRows(evaluateQuerySpec(src.spec, this.deps.kb, this.evalContext(src.spec)), this.deps.kb)
+  }
+
+  /** chip 的显示名：页按 id 现解析；标签的原子本来就是名字 */
+  private atomLabel(atom: QuickFilterAtom): string {
+    if ('tag' in atom) return atom.tag
+    const b = this.deps.kb.get(atom.up.is)
+    return b ? displayNameOf(b) || atom.up.is.slice(-4) : atom.up.is.slice(-4)
   }
 
   /** 条件树能不能落在这里（投影／派生栏没有可编辑的落点） */
@@ -1896,7 +2041,19 @@ export class ViewHost {
       // 空结果是**状态**不是错误：保留抬头（含刷新按钮），正文给一句实话。
       // 判据用**生效条件**（基础 ∩ 切片）：切片里有 `$self` 时「离开宿主为空」同样成立
       const spec = this.effective
-      const why = spec && usesSelf(spec.where) ? t('ui.mount.needsHost') : t('ui.query.empty')
+      /**
+       * 三种空要说成三句话（用户下一步做的事不同）：
+       *   · 还没有条件 ⇒ 去加一条（新建的查询块一开始正是这样，不默认查全库）；
+       *   · 条件里有 `$self` 但这一处没有宿主 ⇒ 换个地方看；
+       *   · 有条件、只是没命中 ⇒ 这就是结果。
+       */
+      const why = !spec
+        ? t('ui.query.noSpec')
+        : isEmptyWhere(spec.where)
+          ? t('ui.query.noCondition')
+          : usesSelf(spec.where)
+            ? t('ui.mount.needsHost')
+            : t('ui.query.empty')
       // 空结果也保留本视图的折叠态：它记的是「哪些行收着」，不是「这次有几行」
       this.outline?.ed?.loadPage({ roots: [], folded: this.outline.ed.doc.folded })
       const host = this.outlineHost

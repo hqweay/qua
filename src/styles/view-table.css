@@ -71,6 +71,44 @@
 .qv-view-add {
   color: var(--ui-text-tertiary);
 }
+/*
+ * 快速筛选的漏斗：图标按钮。**筛着的时候自己变色**——不看面板也知道这一屏被筛过
+ * （与「切片摘要 chip」同一个事实的两种读法：一个是图标状态，一个是文字）。
+ */
+.queryview-filter {
+  margin-left: var(--ui-gap-3);
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.queryview-filter svg {
+  width: 14px;
+  height: 14px;
+}
+.queryview-filter:hover {
+  color: var(--ui-text);
+}
+.queryview-filter[data-active] {
+  color: var(--ui-accent);
+}
+.queryview-filter[hidden] {
+  display: none;
+}
+.queryview-filterpanel {
+  margin: var(--ui-gap-1) 0 var(--ui-gap-2);
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface);
+  font-size: var(--ui-fs-xs);
+}
+.queryview-filterpanel[hidden] {
+  display: none;
+}
 /* 抬头右侧的三颗按钮挤在一行：切换器吃剩余空间，按钮各自只占自己那一格 */
 .queryview-refresh,
 .queryview-foldall,

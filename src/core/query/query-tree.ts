@@ -301,6 +301,14 @@ export function queryNodeOfTree(node: TreeNode): QueryNode | null {
     if (!n) return null
     return node.not ? { not: n } : n
   }
+  /**
+   * **空组＝没有条件**，返回 `null`（＝未完成）而不是 `{all:[]}`。
+   *
+   * `{all:[]}` 在判定里是**恒真**（`[].every`）——把「还没条件」拼成它，
+   * 结果就是整个库。而用户此刻看到的是一个空组，心里想的是「还没开始筛」。
+   * 空组与「有行但没填完」走同一条出路：`specOfTree` 把它收成 `{any:[]}`（永不命中）。
+   */
+  if (node.items.length === 0) return null
   const children: QueryNode[] = []
   for (const child of node.items) {
     const n = queryNodeOfTree(child)

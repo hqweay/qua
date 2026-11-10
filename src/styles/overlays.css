@@ -743,6 +743,35 @@
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-xs);
 }
+/* 候选多了要能找：词只筛候选，不筛已选那两列（被搜索藏掉就会「有条件却看不见」） */
+.quick-filter-search {
+  width: 100%;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--ui-border-subtle);
+  padding: var(--ui-gap-1) 0;
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text);
+}
+.quick-filter-search:focus {
+  outline: none;
+  border-bottom-color: var(--ui-border);
+}
+/* 清除筛选：一颗退回到「没有条件」，不必逐颗摘 */
+.quick-filter-clear {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.quick-filter-clear:hover {
+  color: var(--ui-text);
+}
 
 /* ============================================================ 确认框 */
 

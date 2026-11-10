@@ -25,10 +25,10 @@
  *    不许在各处直接摸 `props._views`／`_mounts`／`Prefs`（`arch-check` 钉住了这一条）。
  * ⚠️ 本文件只有类型与纯函数：读写发生在**装配层**，因为「一次动作一笔事务」在那里才做得到。
  */
-import { ACTIVE_VIEW_PROP, VIEWS_PROP, isQueryBlock, type Block } from '../model/model.ts'
+import { ACTIVE_VIEW_PROP, DEFAULT_FILTER_PROP, VIEWS_PROP, isQueryBlock, type Block } from '../model/model.ts'
 import { readEmbed, type ViewRef } from './embed.ts'
 import { canonicalViews, readViews, resolveView, sourceOf, type Source, type ViewConfig, type ViewSet } from './view.ts'
-import type { QuerySpec } from '../query/query.ts'
+import { isQueryNode, type QueryNode, type QuerySpec } from '../query/query.ts'
 import type { MountEntry, MountHost } from './mount.ts'
 
 /* ------------------------------------------------------------ 拥有者 */
@@ -47,9 +47,24 @@ export type ViewOwnerRef =
 export interface ViewOwnerData extends ViewSet {
   /** 只有 query 源有（`_query`／local tab 的 `spec`） */
   query?: QuerySpec
+  /**
+   * **默认看法（大纲）的切片**：没有激活视图时生效的那一层条件。
+   *
+   * 与 `views[].filter` 是同一件东西的两个位置，判据只有一个：**此刻激活的是哪张视图**。
+   * 缺失 ＝ 默认看法没有切片（行为与没有这一格逐字相同）。
+   */
+  defaultFilter?: QueryNode
   /** tab 的名字（块拥有者的名字是它的地址，不在这里） */
   label?: string
 }
+
+/**
+ * 写补丁：只带要改的字段。
+ *
+ * `defaultFilter: null` ＝ **清掉**默认看法的切片（视图切片的清空走
+ * `withFilter(view, null)`，形状不同：那一份配置本来就允许没有 `filter` 键）。
+ */
+export type ViewOwnerPatch = Omit<Partial<ViewOwnerData>, 'defaultFilter'> & { defaultFilter?: QueryNode | null }
 
 /**
  * 往拥有者上写：**只写给出的字段**。
@@ -58,13 +73,15 @@ export interface ViewOwnerData extends ViewSet {
  * 一次只该动一部分。整份替换会把没传的字段写成「没有」——
  * 实测形状是「改了一下显示排序，查询条件没了」，而那一格本来不该被这次写碰到。
  */
-export function applyOwnerPatch(data: ViewOwnerData, patch: Partial<ViewOwnerData>): ViewOwnerData {
+export function applyOwnerPatch(data: ViewOwnerData, patch: ViewOwnerPatch): ViewOwnerData {
   const out: ViewOwnerData = { views: patch.views ?? data.views }
   const active = patch.activeView !== undefined ? patch.activeView : data.activeView
   if (active !== undefined && active !== '') out.activeView = active
   else delete out.activeView
   const query = patch.query !== undefined ? patch.query : data.query
   if (query !== undefined) out.query = query
+  const filter = patch.defaultFilter !== undefined ? patch.defaultFilter : data.defaultFilter
+  if (filter !== undefined && filter !== null) out.defaultFilter = filter
   const label = patch.label !== undefined ? patch.label : data.label
   if (label !== undefined) out.label = label
   return out
@@ -77,6 +94,8 @@ export function ownerDataOfBlock(b: Block | undefined): ViewOwnerData {
   const active = b.props?.[ACTIVE_VIEW_PROP]
   if (typeof active === 'string' && active !== '') out.activeView = active
   if (isQueryBlock(b)) out.query = b.props?._query as QuerySpec
+  const filter = b.props?.[DEFAULT_FILTER_PROP]
+  if (isQueryNode(filter)) out.defaultFilter = filter
   return out
 }
 
@@ -85,6 +104,7 @@ export function ownerDataOfTab(entry: MountEntry | undefined): ViewOwnerData | n
   if (!entry || entry.kind !== 'local') return null
   const out: ViewOwnerData = { views: entry.views, query: entry.spec, label: entry.label }
   if (entry.activeView !== undefined && entry.activeView !== '') out.activeView = entry.activeView
+  if (isQueryNode(entry.defaultFilter)) out.defaultFilter = entry.defaultFilter
   return out
 }
 
@@ -99,6 +119,7 @@ export function withTabOwnerData(entry: Extract<MountEntry, { kind: 'local' }>, 
     views: canonicalViews(data.views, { kind: 'query', spec: data.query ?? entry.spec }),
   }
   if (data.activeView !== undefined && data.activeView !== '') out.activeView = data.activeView
+  if (data.defaultFilter !== undefined) out.defaultFilter = data.defaultFilter
   return out
 }
 
@@ -115,6 +136,8 @@ export function withBlockOwnerData(
   if (data.query !== undefined) out._query = data.query
   if (data.views.length === 0) delete out[VIEWS_PROP]
   else out[VIEWS_PROP] = data.views
+  if (data.defaultFilter === undefined) delete out[DEFAULT_FILTER_PROP]
+  else out[DEFAULT_FILTER_PROP] = data.defaultFilter
   if (data.activeView === undefined || data.activeView === '') delete out[ACTIVE_VIEW_PROP]
   else out[ACTIVE_VIEW_PROP] = data.activeView
   return Object.keys(out).length === 0 ? undefined : out
@@ -201,7 +224,7 @@ export function fallbackViewOf(data: ViewOwnerData, view: string): { view: strin
  */
 export interface ViewOwnerStore {
   read(owner: ViewOwnerRef): ViewOwnerData | null
-  write(owner: ViewOwnerRef, patch: Partial<ViewOwnerData>): void
+  write(owner: ViewOwnerRef, patch: ViewOwnerPatch): void
   readBinding(binding: ViewBindingRef): BindingTarget | null
   setBindingView(binding: ViewBindingRef, view: string): void
 }

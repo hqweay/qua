@@ -67,7 +67,17 @@
             页 / 日记 / 被 zoom 的块，一律是**正文第一行**（`rootsFor()` 装进编辑器）。
       -->
       <main class="dock" id="dock-center" data-dock="center">
-        <div id="center-tabs" class="center-tabs" role="tablist"></div>
+        <!--
+          中心槽的「顶栏」：tab 条 ＋ **这一屏的筛选漏斗**（最右）。
+          漏斗筛的是**当前打开的这一屏**（页/日记/块的大纲行）——它就是 Roam 顶栏那颗
+          漏斗在我们这里的落点：不要先找查询块，看哪儿就在哪儿筛。
+        -->
+        <div id="center-bar">
+          <div id="center-tabs" class="center-tabs" role="tablist"></div>
+          <button id="center-filter" class="center-filter" type="button" hidden></button>
+        </div>
+        <!-- 漏斗的面板：就地展开（与查询块抬头的 chips 面板同一个组件），不是浮层 -->
+        <div id="center-filter-panel" class="center-filter-panel" hidden></div>
         <div id="scroll">
           <div id="doc">
             <!-- 面包屑：顶层时 hidden（不占高度）；点一格＝聚焦到该祖先（＝退回） -->

@@ -25996,6 +25996,178 @@ await check('T280 回收站清空：口径筛选可见、确认后永久删除�
   return '口径切换筛选可见、清空带确认（取消不动）、确认后模型退场且撤销不回来'
 })
 
+await check('T281 快速筛选：新建查询默认不查询；查询块的漏斗写这一张视图的切片（默认看法⇒_defaultFilter）且不动基础条件；中心顶栏的漏斗筛当前这一屏的大纲', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  // ① 新建查询块：空条件 ⇒ 0 行 ＋ 一句「还没有条件」（不是整个库）
+  const bid = await page.evaluate(() => {
+    const q = window.__qua
+    const ed = q.__editor
+    const at = ed.rows()[1]?.block.id ?? ed.rows()[0].block.id
+    q.focusBlock(at, 0)
+    q.invoke('core.query/insert', { blockId: at })
+    const find = (l) => {
+      for (const b of l) {
+        if (b.props?._query) return b
+        const r = find(b.children ?? [])
+        if (r) return r
+      }
+      return null
+    }
+    return find(ed.store.blocks)?.id ?? ''
+  })
+  await page.waitForTimeout(400)
+  const born = await page.evaluate((id) => {
+    const find = (l) => {
+      for (const b of l) {
+        if (b.id === id) return b
+        const r = find(b.children ?? [])
+        if (r) return r
+      }
+      return null
+    }
+    const b = find(window.__qua.__editor.store.blocks)
+    return {
+      where: JSON.stringify(b?.props?._query?.where ?? null),
+      rows: document.querySelectorAll('.queryview-outline .blk').length,
+      emptyText: document.querySelector('.queryview [data-empty-text]')?.dataset.emptyText ?? '',
+    }
+  }, bid)
+  assert(bid !== '', '前置：查询块建出来了')
+  assert(born.where === '{"any":[]}', `新建查询的条件应为 {any:[]}（默认不查询）：${born.where}`)
+  assert(born.rows === 0, `新建查询一条都不查：${born.rows}`)
+  assert(born.emptyText.includes('还没有条件'), `空态要说「还没有条件」：${born.emptyText}`)
+
+  // ② 给一个真条件，再用漏斗筛一刀：切片落 _defaultFilter，基础条件不动
+  await page.evaluate((id) => {
+    window.__qua.invoke('core.query/set-spec', { owner: { kind: 'block', blockId: id }, spec: { where: { tag: '任务' } } })
+  }, bid)
+  await page.waitForTimeout(400)
+  const pre = await page.evaluate(() => ({
+    rows: document.querySelectorAll('.queryview-outline .blk').length,
+    undo: window.__qua.snapshot().undoDepth,
+    funnel: !document.querySelector('.queryview-filter')?.hidden,
+  }))
+  assert(pre.rows > 0, `前置：{tag:任务} 有结果：${pre.rows}`)
+  assert(pre.funnel, '查询块的漏斗可见')
+
+  await page.locator('.queryview-filter').first().click()
+  await page.waitForTimeout(200)
+  const tags = page.locator('.queryview-filterpanel .quick-filter-tags .quick-filter-chip')
+  assert((await tags.count()) > 0, '面板候选里有标签')
+  await tags.first().click()
+  await page.waitForTimeout(400)
+  const sliced = await page.evaluate((id) => {
+    const find = (l) => {
+      for (const b of l) {
+        if (b.id === id) return b
+        const r = find(b.children ?? [])
+        if (r) return r
+      }
+      return null
+    }
+    const b = find(window.__qua.__editor.store.blocks)
+    return {
+      filter: b?.props?._defaultFilter ?? null,
+      query: JSON.stringify(b?.props?._query ?? null),
+      active: document.querySelector('.queryview-filter')?.dataset.active ?? '',
+      undo: window.__qua.snapshot().undoDepth,
+    }
+  }, bid)
+  assert(sliced.filter !== null, `包含一颗 chip 之后应写 _defaultFilter：${JSON.stringify(sliced.filter)}`)
+  assert(sliced.query.includes('"tag":"任务"'), `基础条件不许被 chips 改：${sliced.query}`)
+  assert(sliced.active === '1', '漏斗显示「已筛」态')
+  assert(sliced.undo > pre.undo, `写切片是一条可撤销的写：${pre.undo}→${sliced.undo}`)
+
+  // Shift+点同一颗 ⇒ 挪到排除（全排掉）；清除 ⇒ 回到原样且删掉那一格
+  await tags.first().click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(400)
+  assert(
+    (await page.evaluate(() => document.querySelectorAll('.queryview-outline .blk').length)) === 0,
+    '排除命中 ⇒ 结果清空',
+  )
+  await page.locator('.queryview-filterpanel .quick-filter-clear').click()
+  await page.waitForTimeout(400)
+  const cleared = await page.evaluate((id) => {
+    const find = (l) => {
+      for (const b of l) {
+        if (b.id === id) return b
+        const r = find(b.children ?? [])
+        if (r) return r
+      }
+      return null
+    }
+    const b = find(window.__qua.__editor.store.blocks)
+    return {
+      filter: b?.props?._defaultFilter ?? null,
+      rows: document.querySelectorAll('.queryview-outline .blk').length,
+    }
+  }, bid)
+  assert(cleared.filter === null, `清除筛选删掉那一格：${JSON.stringify(cleared.filter)}`)
+  assert(cleared.rows === pre.rows, `清除之后回到 ${pre.rows} 行：${cleared.rows}`)
+
+  // ③ 中心顶栏的漏斗：筛当前这一屏的大纲；正在编辑的那一块永远可见
+  const opened = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    if (!p) return 0
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    return 1
+  })
+  await page.waitForTimeout(500)
+  assert(opened === 1, '前置：打开了种子页「产品设计」')
+  const before = await page.evaluate(() => ({
+    rows: document.querySelectorAll('#editor .blk').length,
+    visible: !document.querySelector('#center-filter')?.hidden,
+  }))
+  assert(before.visible, '中心顶栏的漏斗可见')
+  assert(before.rows > 3, `前置：这一页有多行：${before.rows}`)
+
+  await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const walk = (b) => {
+      if ((b.props?._tags ?? []).length > 0) return b
+      for (const c of b.children ?? []) {
+        const hit = walk(c)
+        if (hit) return hit
+      }
+      return null
+    }
+    const hit = walk(ed.doc.roots[0])
+    if (hit) window.__qua.focusBlock(hit.id, 0)
+  })
+  await page.locator('#center-filter').click()
+  await page.waitForTimeout(200)
+  const centerChips = page.locator('#center-filter-panel .quick-filter-tags .quick-filter-chip')
+  assert((await centerChips.count()) > 0, '中心面板有标签候选')
+  await centerChips.first().click()
+  await page.waitForTimeout(450)
+  const filtered = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const rows = ed.rows()
+    return {
+      rows: rows.length,
+      caretShown: rows.some((r) => r.block.id === (ed.caretBlock() ?? '')),
+      active: document.querySelector('#center-filter')?.dataset.active ?? '',
+    }
+  })
+  assert(filtered.rows < before.rows, `包含之后行数减少：${before.rows}→${filtered.rows}`)
+  assert(filtered.caretShown, '正在编辑的那一块不许被筛掉')
+  assert(filtered.active === '1', '中心漏斗显示「已筛」态')
+
+  await page.locator('#center-filter-panel .quick-filter-clear').click()
+  await page.waitForTimeout(450)
+  const restored = await page.evaluate(() => ({
+    rows: document.querySelectorAll('#editor .blk').length,
+    active: document.querySelector('#center-filter')?.dataset.active ?? '',
+  }))
+  assert(restored.rows === before.rows, `清除之后回到 ${before.rows} 行：${restored.rows}`)
+  assert(restored.active !== '1', '清除之后漏斗回到未筛态')
+
+  await ctx.close()
+  return '新查询默认 0 行；查询块漏斗写 _defaultFilter（基础条件不动、可撤销）；中心漏斗筛当前屏且正在编辑的块不被藏；清除都回原样'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

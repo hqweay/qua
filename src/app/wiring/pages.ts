@@ -97,6 +97,14 @@ export type PagesDeps = {
    * tab 状态层只说「谁在前」；切回块 tab 时必须通知（编辑器重新可见）。
    */
   onSurface?: (ref: SurfaceRef | null) => void
+  /**
+   * **装载之后**的一拍（中心这一屏换好了）。
+   *
+   * 目前唯一的消费者是「这一屏的筛选」：它按当前对象分格，换屏之后按钮的状态与
+   * 可见性都要跟着换。放在这里而不是 `onTabsChanged`：后者在 tab 集合变化时才发，
+   * 同一个 tab 内换页（点链接）不会触发。
+   */
+  onLoaded?: () => void
 }
 
 /** 一条 tab 的显示信息（UI 只读，不改 tab 状态） */
@@ -565,6 +573,7 @@ export function setupPages(deps: PagesDeps) {
       skipNextFocus = false
     }
     emitTabs()
+    deps.onLoaded?.()
   }
 
   /**

@@ -1414,9 +1414,13 @@ export class MountArea {
     return true
   }
 
-  /** chip 的显示名：按 id 经读门面现解析（名字是显示层的事，不进状态） */
+  /**
+   * chip 的显示名：页按 id 经读门面现解析；**标签的原子本来就是名字**
+   * （条件语言的 `{tag}` 按名解析，chips 与它同形，不再存 id）。
+   */
   private atomLabel(atom: QuickFilterAtom): string {
-    const id = 'up' in atom ? atom.up.is : atom.tag
+    if ('tag' in atom) return atom.tag
+    const id = atom.up.is
     const block = this.deps.kb.get(id)
     return block ? displayNameOf(block) || id.slice(-4) : id.slice(-4)
   }

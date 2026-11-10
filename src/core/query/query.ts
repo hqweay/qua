@@ -981,6 +981,17 @@ export function resolveSelfSpec(spec: QuerySpec, host: Block, forest: readonly B
 }
 
 /**
+ * **这个条件一条都匹配不到吗**（空条件树）。
+ *
+ * 「还没有条件」在模型里就是 `{any: []}`（`[].some` ＝ false）。界面要能把
+ * 它与「有条件但没命中」说成两句不同的话：前者是「去加一条条件」，后者是
+ * 「这批条件没有结果」——同一屏两种空，用户下一步做的事完全不同。
+ */
+export function isEmptyWhere(node: QueryNode): boolean {
+  return 'any' in node && node.any.length === 0
+}
+
+/**
  * 「永不命中」的条件：`{any: []}` 的判定是 `[].some(...)` ＝ `false`。
  *
  * ⚠️ 不用 `{all: []}`：那是**恒真**（`[].every(...)`），正好相反。

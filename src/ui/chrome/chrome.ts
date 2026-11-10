@@ -64,6 +64,15 @@ export interface Chrome {
   /** 中心槽 tab 条（纯容器；内容由 `ui/center-tabs.ts` 画） */
   centerTabsEl: HTMLElement
   /**
+   * **这一屏的筛选漏斗**（顶栏最右）。
+   *
+   * 它筛的是当前打开的这一屏（页／日记／块的大纲行），状态住装配层的会话内存
+   * （按当前对象一格）——不落盘：它是「我此刻在看什么」，不是「这份内容是什么」。
+   */
+  centerFilterEl: HTMLButtonElement
+  /** 漏斗的面板（就地展开；内容由 `renderQuickFilter` 画） */
+  centerFilterPanelEl: HTMLElement
+  /**
    * **中心表面宿主**：派生/工具面的 tab 身体挂在这里，与 `#scroll` 二选一可见
    * （块 tab 的内容住编辑器，不用它）。可见性的切换归表面宿主，不归 tab 条。
    */
@@ -101,6 +110,8 @@ export function createChrome(onCrumb?: (blockId: string, place: OpenAction) => v
   const inspectCardEl = must('inspect-card')
   const inspectCardTitleEl = must('inspect-card-title')
   const centerTabsEl = must('center-tabs')
+  const centerFilterEl = must<HTMLButtonElement>('center-filter')
+  const centerFilterPanelEl = must('center-filter-panel')
   const centerSurfaceEl = must('center-surface')
   const propertiesBodyEl = must('properties-body')
   const propertiesAddEl = must<HTMLButtonElement>('properties-add')
@@ -183,6 +194,8 @@ export function createChrome(onCrumb?: (blockId: string, place: OpenAction) => v
     inspectCardEl,
     inspectCardTitleEl,
     centerTabsEl,
+    centerFilterEl,
+    centerFilterPanelEl,
     centerSurfaceEl,
     propertiesBodyEl,
     propertiesAddEl,

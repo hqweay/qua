@@ -133,6 +133,68 @@ export function ancestorsByBlockId(rows: readonly VisibleRow[]): Map<string, str
   return out
 }
 
+/** 行筛选的三态：`drop` ＝ 这一行**连同整棵子树**一起去掉 */
+export type RowVerdict = 'keep' | 'drop' | 'neutral'
+
+/**
+ * **行筛选**：只改「画哪些行」，不改树。
+ *
+ * 三态判定的语义（与快速筛选的 chips 同一份）：
+ *   · `keep` —— 这一行本身命中；
+ *   · `neutral` —— 不命中；只有在**它有命中后代**时留下当上下文（否则藏）；
+ *   · `drop` —— 连同**整棵子树**藏掉（排除语义：孩子属于被排除的那一块）。
+ *
+ * `force` 是「正在编辑的那一块」：它和它的祖先链永远算命中 ——
+ * 否则用户刚敲出来的空块（不带任何被筛的页/标签）会在下一帧凭空消失，
+ * 而光标还在里面。这条不是宽容，是**编辑面不能被它自己的镜头藏掉**。
+ *
+ * `hasChildren` 跟着重算：子块全被筛掉的行不能画折叠三角（点了没有任何东西可折）。
+ */
+export function filterVisibleRows<R extends VisibleRow>(
+  rows: readonly R[],
+  verdict: (row: R, path: readonly Block[]) => RowVerdict,
+  force?: ReadonlySet<string>,
+): R[] {
+  const noForce = force === undefined || force.size === 0
+  const visible = new Array<boolean>(rows.length).fill(false)
+  const stack: number[] = []
+  let dropDepth = -1
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]!
+    // 先弹出已结束的兄弟/祖先，再取祖先链：栈里此刻只剩 depth < r.depth 的那几层
+    stack.length = r.depth
+    const path = stack.map((j) => rows[j]!.block)
+    const v = !noForce && force.has(r.block.id) ? 'keep' : verdict(r, path)
+    stack[r.depth] = i
+    if (r.depth <= dropDepth) dropDepth = -1
+    if (dropDepth >= 0) continue
+    if (v === 'drop') {
+      dropDepth = r.depth
+      continue
+    }
+    if (v === 'keep') {
+      visible[i] = true
+      // 命中行的祖先链留作上下文：栈里每一层都算可见
+      for (const j of stack) visible[j] = true
+    }
+  }
+  const out: R[] = []
+  for (let i = 0; i < rows.length; i++) {
+    if (!visible[i]) continue
+    const r = rows[i]!
+    /**
+     * 「还有可见孩子吗」要**跳到下一行可见行**再比深度：中间可能隔着被筛掉的兄弟，
+     * 而孩子本身是可见的（命中行与它的祖先链都留）。只看 `i+1` 会把这种情况判成
+     * 「没有孩子」——折叠三角消失，而子树其实还在屏幕上。
+     */
+    let j = i + 1
+    while (j < rows.length && !visible[j]) j++
+    const hasVisibleChild = j < rows.length && rows[j]!.depth > r.depth
+    out.push(r.hasChildren === hasVisibleChild ? r : { ...r, hasChildren: hasVisibleChild })
+  }
+  return out
+}
+
 /** 从根到该块（含自身）的路径；`doc` 只是一个装载窗口，按它的 roots 走 */
 export function pathTo(doc: Doc, id: string): Block[] | null {
   return findPath(doc.roots, id)

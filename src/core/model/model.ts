@@ -102,6 +102,19 @@ export const VIEWS_PROP = '_views' as const
  */
 export const ACTIVE_VIEW_PROP = '_activeView' as const
 
+/**
+ * **默认看法（大纲）的切片**：没有激活视图时，这一份查询/容器还要再叠一层条件。
+ *
+ * 为什么需要单独一格：切片住在**视图配置**上（`_views[].filter`），而「没有激活视图」
+ * 恰恰是没有视图配置的那一刻——新建查询块正是这个状态。没有这一格，快速筛选在
+ * 最常见的那张面上无处可写（要么逼用户先建一张命名视图，要么把条件并进 `_query`
+ * 的基础条件里，后者会让「清除筛选」分不清哪几条是筛出来的）。
+ *
+ * 语义与视图切片**逐字相同**：生效条件 ＝ `{all:[基础条件, 这一格]}`（`slicedSpec`），
+ * 换到一张命名视图就换成那张视图自己的镜头，切回大纲它还在。
+ */
+export const DEFAULT_FILTER_PROP = '_defaultFilter' as const
+
 /** 这一块被删了吗（只看它自己；整棵子树不可见由遍历的跳过规则保证） */
 export function isDeleted(b: Block): boolean {
   return b.props !== undefined && DELETED_AT_PROP in b.props
@@ -143,6 +156,7 @@ export type SystemPropId =
   // 视图配置（见 `core/view.ts`）：一个块怎么看，与它是什么是两件事
   | typeof VIEWS_PROP
   | typeof ACTIVE_VIEW_PROP
+  | typeof DEFAULT_FILTER_PROP
   // 露面指针（见 `core/embed.ts`）：同一块在别处再出现一次
   | '_embed'
   // 字段定义（prop-def）：kind / 声明列表 / 选项的可见范围

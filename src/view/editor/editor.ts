@@ -66,7 +66,10 @@ import {
   toggleCollapsed,
   unfoldBlock,
   uuidv7Hex,
+  filterVisibleRows,
+  pathTo,
   visibleRows,
+  type RowVerdict,
   VIEWS_PROP,
   canonicalViews,
   upsertView,
@@ -1128,13 +1131,52 @@ export class BlockEditor {
     return this.blockEl(id)?.querySelector<HTMLElement>('.tx') ?? null
   }
 
-  /** 可见行（**折叠的子树在这里被排除**） */
-  rows(): VisibleRow[] {
+  /**
+   * **这一屏的行筛选**：给「当前视图漏斗」用的接缝。
+   *
+   * 传的是**provider**而不是一份固定判据：它回答「此刻有没有筛选、判据是什么」，
+   * 由装配层按「当前打开的是谁」现读（换页之后就自动是另一份/没有）。
+   * 返回 `null` ⇒ 不筛（`rows()` 原样返回，不比「筛了一遍恰好全过」）。
+   */
+  setRowFilter(
+    provider: (() => ((block: Block, path: readonly Block[]) => RowVerdict) | null) | null,
+    repaint = true,
+  ): void {
+    this.rowFilter = provider
+    if (repaint) this.renderAll()
+  }
+
+  /** 全部可见行（**不筛**）：筛选的候选与计数读它（筛过的那份会让候选自己消失） */
+  rowsAll(): VisibleRow[] {
+    return this.rawRows()
+  }
+
+  private rawRows(): VisibleRow[] {
     return visibleRows(this.doc, {
       // 只有这一屏真会画身体的编辑器才让子块行让位（没有 viewBody 回调的
       // 里层编辑器——挂载区／镜像／查询结果——子块仍照常画）
       ...(this.events.viewBody ? { bodyHosts: hasChildrenViewBody } : {}),
     }).filter((r) => !r.hidden)
+  }
+
+  /** 可见行（**折叠的子树在这里被排除**；有筛选时只留命中行与它们的上下文） */
+  rows(): VisibleRow[] {
+    const all = this.rawRows()
+    const filter = this.rowFilter?.()
+    if (!filter) return all
+    /**
+     * **正在编辑的那一块永远算命中**（连同它的祖先链）。
+     * 否则刚敲出来的空块（不带任何被筛的页/标签）会在下一帧凭空消失，
+     * 而光标还在里面——编辑面不能被它自己的镜头藏掉。
+     */
+    const force = new Set<string>()
+    const caret = this.caretBlock()
+    if (caret !== null) {
+      const chain = pathTo(this.doc, caret)
+      if (chain) for (const b of chain) force.add(b.id)
+      else force.add(caret)
+    }
+    return filterVisibleRows(all, (r, path) => filter(r.block, path), force)
   }
 
   /**
@@ -1590,6 +1632,9 @@ export class BlockEditor {
    * ⚠️ 只在**块 id 变了**时才动 DOM：`selectionchange` 在打字时很密，逐个块删属性会掉帧。
    */
   private caretMarks = ''
+
+  /** 这一屏的行筛选（provider；`null` ＝ 这个编辑器没有筛选接缝——里层编辑器就是这样） */
+  private rowFilter: (() => ((block: Block, path: readonly Block[]) => RowVerdict) | null) | null = null
 
   /**
    * **外部变化之后要不要／什么时候重排**的那份状态机（欠账、合并、补做、指针）。
@@ -3136,7 +3181,14 @@ export class BlockEditor {
     if (!loc) return null
     this.beginUndoEntry()
     const parentId = loc.parent?.id ?? null
-    const seed: QuerySpec = parentId ? { where: { up: { is: '$self' } } } : { where: { any: [] } }
+    /**
+     * **新查询一条都不查**（空条件 ＝ 永不命中）：先给条件，结果才会出现。
+     *
+     * 曾经在这里按「落点有没有父块」给 `{up:{is:'$self'}}`（＝这一页之下）——那是
+     * 「顺手先看看这一页」的便利，代价是**新建即出现一大批行**，用户读成「它自己
+     * 在乱查」；而条件该由用户给（条件树／筛选都就位了）。落点仍按 `insertSiteOf` 判。
+     */
+    const seed: QuerySpec = { where: { any: [] } }
     const blank = isEmptyContent(loc.block.content) && !hasLiveChildren(loc.block) && canWriteText(loc.block)
     const query = mkQueryBlock({ name: '', spec: seed, icon: 'lucide:list-filter' })
     const empty = mkBlock('')

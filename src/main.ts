@@ -63,6 +63,7 @@ import { SearchFace, type SearchFaceDeps } from './ui/search/search-face.ts'
 import type { SettingsFaceDeps } from './ui/settings/settings-face.ts'
 import { setupChrome } from './app/wiring/chrome.ts'
 import { setupPages, type TabInfo } from './app/wiring/pages.ts'
+import { setupOutlineFilter, type OutlineFilter } from './app/wiring/outline-filter.ts'
 import { renderCenterTabs as paintCenterTabs } from './ui/chrome/center-tabs.ts'
 import { setupDiagnostics } from './app/wiring/diagnostics.ts'
 import { HANDLERS } from './app/handlers.ts'
@@ -345,6 +346,8 @@ const layers = new Layers(() => isMac())
 let ed: BlockEditor
 /** 中心槽的主编辑器；`ed` 是「当前活动编辑器」（正文或反链 footer） */
 let mainEd: BlockEditor
+/** **这一屏的筛选**（顶栏漏斗）：按当前对象分格的会话状态；编辑器造好之后才装配 */
+let outlineFilter: OutlineFilter | null = null
 let registry: Registry
 /** 现在开着的是哪个触发字符的浮层（`null` ＝ 没开）；`lastQuery` 是上次列的查询词 */
 let triggerCh: TriggerChar | null = null
@@ -1015,7 +1018,12 @@ const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEdit
     // 表面 tab 开着时库会变（恢复/删除走别处）：身体跟着重画，与槽里的同一张卡同拍
     surface.refreshIfShown()
   },
-  onSurface: (ref) => surface.show(ref),
+  onSurface: (ref) => {
+    surface.show(ref)
+    // 表面让位/回来都会改变「这一屏」是什么：漏斗的可见性跟着换
+    outlineFilter?.render()
+  },
+  onLoaded: () => outlineFilter?.render(),
 })
 
 /**
@@ -1969,7 +1977,16 @@ const app: App = {
     openSpecPopover({
       owner,
       anchor: sliceAnchor ?? null,
-      spec: () => ({ where: owners.read(owner)?.views.find((v) => v.id === viewId)?.filter ?? { any: [] } }),
+      /**
+       * 切片住在哪：命名视图 ⇒ 它的 `filter`；默认看法（`''`）⇒ 拥有者的
+       * `defaultFilter`。两处同一件事，判据是「此刻激活的是哪张视图」。
+       */
+      spec: () => ({
+        where:
+          viewId === ''
+            ? (owners.read(owner)?.defaultFilter ?? { any: [] })
+            : (owners.read(owner)?.views.find((v) => v.id === viewId)?.filter ?? { any: [] }),
+      }),
       showOptions: false,
       onApply: (spec) => {
         void registry.invoke('core.view/set-filter', { owner, viewId, filter: filterOfSpec(spec) }, 'menu')
@@ -2544,6 +2561,18 @@ ed = new BlockEditor({
   write: editorRun(run, () => mainEd),
 })
 mainEd = ed
+/**
+ * **这一屏的筛选**（顶栏那颗漏斗）：同一份判定/面板，喂给**大纲的行遍历**。
+ * 装在主编辑器上，只此一家——里层编辑器（查询结果／挂载区／镜像）不吃这一层。
+ */
+outlineFilter = setupOutlineFilter({
+  chrome: () => chrome,
+  kb,
+  activeId: () => ws.activeId,
+  editor: () => mainEd,
+  surfaceShown: () => surface.showing() !== null,
+})
+outlineFilter.install()
 /**
  * 焦点在正文 → 活动编辑器＝正文；焦点在里层编辑岛时由那一层自己切
  * （挂载区的 `onFocus`／右槽窗口的 `onFocus`）。
