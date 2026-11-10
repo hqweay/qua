@@ -1,5 +1,5 @@
 /**
- * 中心槽的 chrome：**页名 ＋ 空态提示**（2026-10-20 撤顶栏后的全部内容）。
+ * 中心槽的 chrome：**面包屑 ＋ 空态提示**（2026-11-10 起 tab 条与漏斗住进贯通顶栏）。
  *
  * **组件自持 DOM**：组件在构造时把自己要用的元素取一次并收起来，装配层只拿这个对象，
  * 不再出现 `document.getElementById('...')`。两个好处：
@@ -12,8 +12,10 @@
  * **两样东西都不在这里了**（都是被明确撤掉的）：
  *   · **工具栏**（2026-10-19）：作用于选区的命令改由**划选气泡**承载
  *     （`Layers.openSelectionBar`，见 `bindings.ts` 的 `selection` 段）；
- *   · **顶栏的皮肤/明暗开关**（2026-10-20）：调试开关，挪进调试菜单（`main.ts`）。
- * ⇒ 于是这个组件**不再需要任何宿主能力**（没有按钮要 invoke、没有档位要读），
+ *   · **皮肤/明暗开关**（2026-10-20）：调试开关，挪进调试菜单（`main.ts`）。
+ * 顶栏现在是窗口级的一层（`app/wiring/chrome.ts` 装配），不属于这个组件；
+ * 它只放窗口级控件与中心 tab 的宿主，不放格式与调试开关。
+ * ⇒ 这个组件**仍不需要任何宿主能力**（没有按钮要 invoke、没有档位要读），
  *   构造参数也随之为空。
  */
 import { blockLabel, hasLiveChildren, openActionOf, type Block, type OpenAction } from '../../core/index.ts'
@@ -33,7 +35,7 @@ export interface Chrome {
   /**
    * 皮肤/主题**变了**之后要重画的东西。
    *
-   * ⚠️ 顶栏开关撤掉后（2026-10-20），这里**没有任何 chrome 可画**了 ——
+   * ⚠️ 贯通顶栏里没有主题开关（那是调试菜单的事），所以这里**没有任何 chrome 可画** ——
    * 它现在的实际作用是让调试菜单的「✓」跟着当前档位走。
    * 名字保留为「重画外观相关」，不再隐含「有一排按钮」。
    */
@@ -61,10 +63,14 @@ export interface Chrome {
    */
   inspectCardEl: HTMLElement
   inspectCardTitleEl: HTMLElement
-  /** 中心槽 tab 条（纯容器；内容由 `ui/center-tabs.ts` 画） */
+  /** 顶栏里的 tab 条（纯容器；内容由 `ui/center-tabs.ts` 画） */
   centerTabsEl: HTMLElement
+  /** 新建 tab 的 `+`：**在滚动区之外**，tab 多了也不会被横向滚走 */
+  centerTabAddEl: HTMLButtonElement
+  /** 「全部页签」集合入口：多于一屏才露出，点开由装配层用 Layers 列出 */
+  centerTabListEl: HTMLButtonElement
   /**
-   * **这一屏的筛选漏斗**（顶栏最右）。
+   * **这一屏的筛选漏斗**（顶栏右段）。
    *
    * 它筛的是当前打开的这一屏（页／日记／块的大纲行），状态住装配层的会话内存
    * （按当前对象一格）——不落盘：它是「我此刻在看什么」，不是「这份内容是什么」。
@@ -110,6 +116,8 @@ export function createChrome(onCrumb?: (blockId: string, place: OpenAction) => v
   const inspectCardEl = must('inspect-card')
   const inspectCardTitleEl = must('inspect-card-title')
   const centerTabsEl = must('center-tabs')
+  const centerTabAddEl = must<HTMLButtonElement>('center-tab-add')
+  const centerTabListEl = must<HTMLButtonElement>('center-tab-list')
   const centerFilterEl = must<HTMLButtonElement>('center-filter')
   const centerFilterPanelEl = must('center-filter-panel')
   const centerSurfaceEl = must('center-surface')
@@ -173,14 +181,15 @@ export function createChrome(onCrumb?: (blockId: string, place: OpenAction) => v
   }
 
   /**
-   * 顶栏已撤 ⇒ 没有按钮可画。皮肤/主题变了以后，唯一需要跟着变的是**调试菜单里的勾选**，
-   * 而菜单是**每次点开时重建**的（见 `main.ts` 的调试菜单）⇒ 这里没有要重画的东西。
+   * 顶栏里没有主题开关 ⇒ 没有按钮可画。皮肤/主题变了以后，唯一需要跟着变的是
+   * **调试菜单里的勾选**，而菜单是**每次点开时重建**的（见 `main.ts` 的调试菜单）
+   * ⇒ 这里没有要重画的东西。
    *
    * ⚠️ 保留这个方法而不是删掉调用点：它是一个**语义接缝**（"外观变了要通知一下"），
    *   将来如果皮肤改成能影响某处 chrome，这里就是那个落点。
    */
   function renderDebugState(): void {
-    // 无 chrome 可画（顶栏已撤）；皮肤与主题只影响 CSS 变量与调试菜单的勾选
+    // 无 chrome 可画（顶栏不放调试开关）；皮肤与主题只影响 CSS 变量与调试菜单的勾选
   }
 
   return {
@@ -194,6 +203,8 @@ export function createChrome(onCrumb?: (blockId: string, place: OpenAction) => v
     inspectCardEl,
     inspectCardTitleEl,
     centerTabsEl,
+    centerTabAddEl,
+    centerTabListEl,
     centerFilterEl,
     centerFilterPanelEl,
     centerSurfaceEl,

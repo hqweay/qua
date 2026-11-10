@@ -39,6 +39,15 @@ export const DOCK_CMD_PREFIX = 'cmd:'
 export const DOCK_SHORTCUT_PREFIX = 'shortcut:'
 
 /**
+ * 收纳盘的 key 前缀。
+ *
+ * 盘是小卡的容器（`tray:<id>`），它自己站一个位置、有自己的卡头——
+ * 收起表／单卡表／拖拽载荷都按这个 key 存。`id` 是设备状态里的稳定身份：
+ * 改名、换槽、收起都不换 key（key 只认身份，不认种类）。
+ */
+export const DOCK_TRAY_PREFIX = 'tray:'
+
+/**
  * 一个块窗口进槽的**动作**。
  *
  * pin 的缺省跟着动作走，不跟着槽走：**拖进来（钉）＝常驻，打开来看（Shift+点／命令）＝重启即清**。
@@ -85,6 +94,20 @@ export type DockEntry =
   | { kind: 'derived'; card: DerivedCardId }
   | { kind: 'cmd'; command: string }
   | { kind: 'utility'; face: UtilityFaceId }
+  /**
+   * 收纳盘：只收叶子小卡（cmd／shortcut）的一张卡——卡头是把手，body 是小卡排。
+   *
+   * 「只许叶子」类型表达不了，判据落在两头：
+   *   · **写入口**只放 cmd／shortcut 进 `cards`；
+   *   · **读入口**（`canonicalDockEntries`）读到嵌套盘就摊平、读到窗口类就上提——
+   *     只降级，不丢用户的卡。深度恒为 1，`cards` 的类型仍是 `DockEntry[]`，纵深靠判据守。
+   */
+  | { kind: 'tray'; id: string; title?: string; cards: DockEntry[] }
+
+/** 收纳盘只收叶子：这两种种类的条目才能进盘（写入口与读入口共用这一份判据） */
+export function isLeafEntry(entry: DockEntry): boolean {
+  return entry.kind === 'cmd' || entry.kind === 'shortcut'
+}
 
 /** 一张卡的扁平身份（DOM 属性／收起表／单卡表／拖拽载荷共用） */
 export function dockKey(entry: DockEntry): string {
@@ -99,7 +122,52 @@ export function dockKey(entry: DockEntry): string {
       return `${DOCK_CMD_PREFIX}${entry.command}`
     case 'utility':
       return `utility:${entry.face}`
+    case 'tray':
+      return `${DOCK_TRAY_PREFIX}${entry.id}`
   }
+}
+
+/**
+ * 「按 key 找条目」的**唯一一份**。
+ *
+ * 槽里是一条有序列表，盘是这条列表里的一种条目——所以顶层找不到时下探一层
+ * （盘的深度恒为 1，不递归）。返回**装着它的那份列表 ＋ 下标**：调用方直接在
+ * `list` 上 splice，不用再关心条目住顶层还是住盘里。
+ *
+ * 之前每个动作（找槽、关卡、移动、加小卡）各写一遍 `findIndex(dockKey === key)`，
+ * 盘一进来就要么漏掉盘内的条目、要么每处再抄一遍下探——收成一份，漏一处编译期就看得见。
+ */
+export function findDock(cards: DockEntry[], key: string): { list: DockEntry[]; index: number } | null {
+  for (let i = 0; i < cards.length; i++) {
+    const entry = cards[i]!
+    if (dockKey(entry) === key) return { list: cards, index: i }
+    if (entry.kind === 'tray') {
+      const inner = entry.cards
+      for (let j = 0; j < inner.length; j++) {
+        if (dockKey(inner[j]!) === key) return { list: inner, index: j }
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * 写出侧的空盘解散：**0 件就没有容器**（容器是内容的推论）。
+ *
+ * 只在**写路径**上跑（每次写入后调一次）——读路径（归一）不动空盘，
+ * 读时悄悄删等于替用户做了一次没说出口的写。返回被解散盘的 key，
+ * 调用方顺手清收起／单卡表里指向它们的键。
+ */
+export function dissolveEmptyTrays(cards: DockEntry[]): string[] {
+  const removed: string[] = []
+  for (let i = cards.length - 1; i >= 0; i--) {
+    const entry = cards[i]!
+    if (entry.kind === 'tray' && entry.cards.length === 0) {
+      cards.splice(i, 1)
+      removed.push(dockKey(entry))
+    }
+  }
+  return removed
 }
 
 /**
@@ -154,20 +222,90 @@ export function isDerivedCardId(v: unknown): v is DerivedCardId {
  * 同时认两种字节：
  *   · 新形状：`{kind, …}` 对象；
  *   · 旧形状：扁平字符串（老设备状态里存的就是它）。
+ *
+ * 盘的读路径**只降级，不丢用户的卡**：
+ *   · 盘里读到**嵌套盘** ⇒ 成员摊平到原位（递归，深度归一为 1）；
+ *   · 盘里读到**窗口类条目**（block／derived／utility——它们自己就有容器语义，
+ *     收进盘等于第二个槽）⇒ 上提到盘后一位，相遇顺序不变；
+ *   · **id 立不住的盘**（缺 id／撞了已有盘的 id）⇒ 原地摊平成普通条目。
+ * 同一个 key 只留第一份（口径是「这份露面」，不管它住顶层还是住盘里）。
+ * 空盘**不在读路径解散**：那是写出时的规则（`dissolveEmptyTrays`）——
+ * 读时悄悄删等于替用户做了一次没说出口的写。
  */
 export function canonicalDockEntries(raw: unknown): DockEntry[] {
   if (!Array.isArray(raw)) return []
   const out: DockEntry[] = []
   const seen = new Set<string>()
-  for (const item of raw) {
-    const entry = dockEntryOf(item)
-    if (!entry) continue
+  const emit = (entry: DockEntry): void => {
     const key = dockKey(entry)
-    if (seen.has(key)) continue
+    if (seen.has(key)) return
     seen.add(key)
     out.push(entry)
   }
+  for (const item of raw) emitTopLevel(item, seen, out, emit)
   return out
+}
+
+function rawObject(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  return raw as Record<string, unknown>
+}
+
+/** 一个顶层位：非盘条目原样；盘归一后先放盘、再放它上提的窗口类；立不住的盘原地摊平 */
+function emitTopLevel(
+  item: unknown,
+  seen: Set<string>,
+  out: DockEntry[],
+  emit: (entry: DockEntry) => void,
+): void {
+  const o = rawObject(item)
+  if (!o || o.kind !== 'tray') {
+    const entry = dockEntryOf(item)
+    if (entry) emit(entry)
+    return
+  }
+  const lifted: DockEntry[] = []
+  const leaves = collectTrayLeaves(o.cards, seen, lifted)
+  const id = typeof o.id === 'string' ? o.id : ''
+  const key = id === '' ? null : `${DOCK_TRAY_PREFIX}${id}`
+  if (key === null || seen.has(key)) {
+    // id 缺了 key 就立不住；撞 id 是形状错。两种都降级成「没有这只盘」：
+    // 成员按顶层条目放（叶在前、窗口类随后，原地展开顺序感不变），一张不丢。
+    // 叶子与窗口类在上面已经去过重，这里直接放行。
+    for (const leaf of leaves) out.push(leaf)
+    for (const up of lifted) out.push(up)
+    return
+  }
+  const title = typeof o.title === 'string' && o.title !== '' ? o.title : undefined
+  emit({ kind: 'tray', id, ...(title ? { title } : {}), cards: leaves })
+  for (const up of lifted) out.push(up)
+}
+
+/** 盘内容 → 去重后的叶子 ＋ 要上提的窗口类；嵌套盘递归摊平到原位（一张不丢） */
+function collectTrayLeaves(rawCards: unknown, seen: Set<string>, lifted: DockEntry[]): DockEntry[] {
+  const leaves: DockEntry[] = []
+  if (!Array.isArray(rawCards)) return leaves
+  for (const item of rawCards) {
+    const o = rawObject(item)
+    if (o && o.kind === 'tray') {
+      // 嵌套盘的叶子摊平到**原位**；它的窗口类并入本层的上提名单（最终排外层盘后）
+      const nestedLifted: DockEntry[] = []
+      for (const leaf of collectTrayLeaves(o.cards, seen, nestedLifted)) leaves.push(leaf)
+      for (const up of nestedLifted) lifted.push(up)
+      continue
+    }
+    const entry = dockEntryOf(item)
+    if (!entry) continue
+    pushUnique(isLeafEntry(entry) ? leaves : lifted, seen, entry)
+  }
+  return leaves
+}
+
+function pushUnique(list: DockEntry[], seen: Set<string>, entry: DockEntry): void {
+  const key = dockKey(entry)
+  if (seen.has(key)) return
+  seen.add(key)
+  list.push(entry)
 }
 
 function dockEntryOf(raw: unknown): DockEntry | null {

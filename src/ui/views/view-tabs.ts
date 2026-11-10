@@ -220,12 +220,11 @@ export class ViewTabs {
         host,
         store: this.deps.store,
         write: this.deps.write,
-        // 页的根是派生的行：不能并进上一行／搬出这一页；根内部照常编辑
+        // 页的根是派生的行：不能并进上一行／搬出这一页；根内部照常编辑。
+        // 首行就是页签本身（容器的真实子块）：右键「删除块」＝删这一页（软删可回，
+        // 默认放行）。fill 关：一段恒一页，补空块会把「删这一页」变成「原地换空块」；
+        // 落点由视图回落激活页给
         structuralScope: 'roots',
-        // 首行就是页签本身（容器的真实子块）：右键「删除块」＝删这一页（软删可回）。
-        // 其余记录视图不开——它们的段根是别的页的块。fill 也关：一段恒一页，
-        // 补空块会把「删这一页」变成「原地换空块」；落点由视图回落激活页给
-        allowRootRemove: true,
         rootRemoveFill: false,
         load: (ed) => {
           if (!ed) return

@@ -5,6 +5,8 @@
  * `light-dark()` 决定，JS 这边一行切类都不做。
  */
 import { darkQuery, resolveTheme } from '../../core/infra/theme.ts'
+import { t } from '../../core/infra/msg.ts'
+import { renderIcon, type IconName } from '../../view/icons.ts'
 import type { CtxKeys } from '../../core/index.ts'
 import { flatten } from '../../core/index.ts'
 import type { Registry } from '../../core/commands/index.ts'
@@ -114,12 +116,50 @@ export function setupChrome(deps: ChromeDeps) {
   // 视口跨过压缩区（839/840）时，inline 宽度要跟着交回 CSS / 重新写回
   window.addEventListener('resize', () => applyChrome())
 
+  /* ------------------------------------------------------------ 贯通顶栏 */
+
+  /**
+   * 顶栏的常驻按钮只补一个鼠标入口：命令本身都在注册表里，键位与命令面板共用同一条。
+   * 静态模板是空壳，图标与文案在这里灌入（换语言/换主题都不改 DOM 形状）。
+   *
+   * 返回的 paint 由 tab/导航状态层驱动：`emitTabs()` 每次导航都会发，
+   * 所以前进后退的可用态不必另开一条订阅。
+   */
+  function mountTopbar(): (canBack: boolean, canForward: boolean) => void {
+    deps.$('topbar').setAttribute('aria-label', t('ui.topbar.label'))
+    const bind = (
+      id: string,
+      icon: string,
+      fallback: IconName,
+      label: string,
+      command: string,
+    ): HTMLButtonElement => {
+      const el = deps.$<HTMLButtonElement>(id)
+      renderIcon(el, icon, fallback)
+      el.title = label
+      el.setAttribute('aria-label', label)
+      el.addEventListener('click', () => deps.getRegistry().invoke(command, {}, 'topbar'))
+      return el
+    }
+    const back = bind('topbar-back', 'lucide:chevron-left', 'chevron-left', t('ui.topbar.back'), 'core.history/back')
+    const forward = bind('topbar-forward', 'lucide:chevron-right', 'chevron-right', t('ui.topbar.forward'), 'core.history/forward')
+    bind('topbar-search', 'lucide:search', 'search', t('ui.topbar.search'), 'core.search/open')
+    bind('topbar-today', 'lucide:calendar', 'calendar', t('ui.topbar.today'), 'core.journal/today')
+    bind('topbar-palette', 'lucide:ellipsis', 'ellipsis', t('ui.topbar.palette'), 'core.command-palette/show')
+    return (canBack, canForward) => {
+      back.disabled = !canBack
+      forward.disabled = !canForward
+    }
+  }
+
+  const paintTopbarNav = mountTopbar()
+
   /* ------------------------------------------------------------ chrome 组件 */
 
   /**
-   * 中心槽的 chrome（页名 + 空态提示 + 编辑器挂载点）。
+   * 中心槽的 chrome（面包屑、空态提示、编辑器挂载点）。
    * ⚠️ **组件自持 DOM**：装配入口里不再出现那些元素的 `getElementById`。
-   * ⚠️ 皮肤/主题那两个开关**不在这里**：撤出顶栏，挪进调试菜单。
+   * ⚠️ 调试开关（皮肤/明暗）仍不常驻：它们挪进调试菜单，顶栏只放窗口级控件。
    */
   const chrome = createChrome((blockId, place) => {
     // 面包屑一格 ＝「回到这个祖先」：普通＝返回上次位置；Shift＝右槽；⌘/Ctrl＝新 tab
@@ -172,6 +212,8 @@ export function setupChrome(deps: ChromeDeps) {
     chrome,
     editorEl,
     applyChrome,
+    /** 历史前进/后退的可用态：由 `onTabsChanged` 带着 canGoBack/canGoForward 来画 */
+    paintTopbarNav,
     resolvedTheme,
     dockMinWidth,
     dockMaxWidth,

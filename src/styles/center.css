@@ -1,9 +1,10 @@
 /* ---------------------------------------------------------- 中心槽 */
 
 /*
-  中心槽（2026-10-20 修订）：**没有顶栏**。
-  顶栏原先只装甲乙丙／明暗两个开关；那两个是调试开关，已挪进调试菜单
-  ⇒ 顶栏里什么都不剩了，整个撤掉，不留空容器。
+  中心槽（2026-11-10 修订）：**顶栏不再属于中心槽**。
+  页签与这一屏的筛选漏斗都住进窗口级的 `#topbar`（见 shell.css）；
+  这里只画中心槽自己的内容：面包屑、编辑器、漏斗就地展开的面板、表面宿主。
+  调试开关与格式命令仍不常驻（调试菜单 / 划选气泡），不因为有了顶栏就回来。
 */
 /*
   文档头 = **只有面包屑**（去掉「标题」这个概念之后）。
@@ -45,45 +46,9 @@
   color: var(--ui-text-tertiary);
   user-select: none;
 }
-/* ---------------------------------------------------------- 中心槽「顶栏」
-   tab 条 ＋ 这一屏的筛选漏斗。漏斗筛的是**当前打开的这一屏**：
-   看哪儿就在哪儿筛，不必先找到某个查询块。
-   条在 `#scroll` 之外，不随正文滚走。 */
-#center-bar {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  border-bottom: 1px solid var(--ui-border-subtle);
-}
-#center-bar .center-tabs {
-  flex: 1 1 auto;
-  min-width: 0;
-  border-bottom: 0;
-}
-.center-filter {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  background: none;
-  border: 0;
-  padding: 0 var(--ui-gap-3);
-  color: var(--ui-text-tertiary);
-  cursor: pointer;
-}
-.center-filter svg {
-  width: 14px;
-  height: 14px;
-}
-.center-filter:hover {
-  color: var(--ui-text);
-}
-.center-filter[data-active] {
-  color: var(--ui-accent);
-}
-.center-filter[hidden] {
-  display: none;
-}
-/* 面板就地展开在条下面（不是浮层）：连点几颗时它不该跑来跑去 */
+/* ---------------------------------------------------------- 顶栏里的漏斗面板
+   tab 条与漏斗按钮都搬进了 `#topbar`（窗口级）；中心槽这里只剩漏斗就地展开的面板。
+   面板跟着内容走、不是浮层：连点几颗 chip 时它不该跑来跑去。 */
 .center-filter-panel {
   flex: 0 0 auto;
   padding: var(--ui-gap-2) var(--ui-gap-3);
@@ -94,45 +59,108 @@
 .center-filter-panel[hidden] {
   display: none;
 }
-/* ---------------------------------------------------------- 中心槽 tab 条
-   一个 tab ＝ 一份保存的视图（Doc + 位置 + 自己的历史）。条在 `#scroll` 之外，
-   不随正文滚走；横向溢出时自己滚。 */
+/* 漏斗的命中区、hover 与顶栏按钮同一套（shell.css）；这里只管它自己的状态 */
+.center-filter[data-active] {
+  color: var(--ui-accent);
+  background: var(--ui-accent-soft);
+}
+.center-filter[hidden] {
+  display: none;
+}
+/* ---------------------------------------------------------- 顶栏 tab 条
+   **能放得下就平铺，放不下才收进集合**：中段既不被一排重复名字挤爆，也不空成
+   一颗数字。相邻同名折成一格（同一个对象不重复占宽度），其余自然排开；
+   溢出时两端渐隐说明还有内容，不画滚动条（那条灰杠会把 42px 顶栏劈成两截）。
+   `+` 与集合入口都在条外，tab 再多也不会被滚走。 */
 .center-tabs {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: var(--ui-gap-1);
-  min-height: 30px;
-  padding: var(--ui-gap-1) var(--ui-gap-3);
-  border-bottom: 1px solid var(--ui-border-subtle);
-  overflow-x: auto;
+  min-width: 0;
+  height: 100%;
+  overflow-x: hidden;
   overflow-y: hidden;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+}
+.center-tabs::-webkit-scrollbar {
+  display: none;
+}
+/* 哪一侧还有内容就淡哪一边的 16px：代替滚动条说明「还能滚」，且不占高度 */
+.center-tabs[data-fade='start'] {
+  mask-image: linear-gradient(to right, transparent 0, var(--ui-surface) var(--ui-gap-5));
+}
+.center-tabs[data-fade='end'] {
+  mask-image: linear-gradient(to left, transparent 0, var(--ui-surface) var(--ui-gap-5));
+}
+.center-tabs[data-fade='both'] {
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    var(--ui-surface) var(--ui-gap-5),
+    var(--ui-surface) calc(100% - var(--ui-gap-5)),
+    transparent 100%
+  );
 }
 .center-tab {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--ui-gap-1);
   flex: 0 0 auto;
   max-width: 220px;
-  height: 24px;
-  padding: 0 var(--ui-gap-2);
-  border-radius: var(--ui-radius-sm);
-  color: var(--ui-text-secondary);
+  height: var(--ui-row-h);
+  padding: 0 var(--ui-gap-3);
+  color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-xs);
   white-space: nowrap;
   cursor: default;
   user-select: none;
 }
 .center-tab:hover {
-  background: var(--ui-surface-sunken);
+  color: var(--ui-text-secondary);
 }
 .center-tab[data-active='1'] {
-  background: var(--ui-accent-soft);
   color: var(--ui-text);
+  font-weight: var(--ui-fw-medium);
+  /* 当前 tab 的 × 常驻占位；其余 × 浮在文字上、不占宽度 */
+  padding-inline-end: calc(var(--ui-icon-md) + var(--ui-gap-3));
+}
+.center-tab[data-active='1']::after {
+  content: '';
+  position: absolute;
+  inset-inline: var(--ui-gap-3) calc(var(--ui-icon-md) + var(--ui-gap-3));
+  inset-block-end: 0;
+  height: 2px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-accent);
 }
 .center-tab-title {
   min-width: 0;
+}
+/* 「全部页签」入口：同一套徽标语言，靠数字说集合有多大 */
+.center-tab-list {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 var(--ui-gap-2);
+  margin-inline-start: auto;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent);
+  font-size: var(--ui-fs-2xs);
+  line-height: 1;
+  cursor: pointer;
+}
+.center-tab-list:hover {
+  background: var(--ui-bg-hover);
+  color: var(--ui-text);
+}
+/* 只有一屏时集合入口不出现，+ 自己顶到右端 */
+.center-tab-list[hidden] + .center-tab-add {
+  margin-inline-start: auto;
 }
 .center-tab-close,
 .center-tab-add {
@@ -149,11 +177,22 @@
   color: var(--ui-text-tertiary);
   cursor: pointer;
 }
+/*
+ * × 不占布局宽度：从前 `opacity: 0` 却仍占 18px ＋ 缝，开多张 tab 就白扔一排宽度。
+ * 浮在文字末尾时给一块顶栏同色的底，遮住的字读作「省略」而不是叠字；不产生 hover 位移。
+ */
 .center-tab-close {
+  position: absolute;
+  inset-inline-end: var(--ui-gap-1);
+  inset-block-start: 50%;
+  transform: translateY(-50%);
+  background: var(--ui-surface);
   opacity: 0;
 }
+.center-tab[data-active='1'] .center-tab-close {
+  opacity: 0.45;
+}
 .center-tab:hover .center-tab-close,
-.center-tab[data-active='1'] .center-tab-close,
 .center-tab-close:focus-visible {
   opacity: 1;
 }

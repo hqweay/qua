@@ -114,6 +114,8 @@
   --ui-gap-7: 36px;
   /* 密度（舒适为默认；紧凑档只改这一组） */
   --ui-row-h: 28px;
+  /* 贯通顶栏：三槽的抬头都收进这一行，槽内容统一从它下面开始 */
+  --ui-topbar-h: 42px;
   --ui-pane-pad: 16px;
   --ui-doc-pad: 40px;
   --ui-doc-measure: 660px;

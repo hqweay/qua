@@ -83,7 +83,7 @@ test('空 chips＝无筛选：原样返回同一引用，不复制、不筛', ()
   assert(quickFilterActive(EMPTY_QUICK_FILTER) === false)
 })
 
-test('包含列之间是「且」（再点一颗是收窄，照 Roam）', () => {
+test('包含列之间是「且」（再点一颗是收窄）', () => {
   const rows = [
     row('r1', [PAGE_A], [TAG_X]),
     row('r2', [PAGE_A], [TAG_Y]),

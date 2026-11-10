@@ -271,12 +271,29 @@ const ISOLATED = argvUserDataDir !== undefined || argvDataDir !== undefined
 function createWindow(_libraryId?: string, title?: string): BrowserWindow {
   const st = readState()
 
+  /**
+   * 系统标题栏交给网页顶栏接管。
+   *
+   * · macOS：`hidden` 只撤掉那条标题栏，红黄绿仍是**原生控件**浮在内容左上角；
+   *   `trafficLightPosition` 把它按到我们 42px 顶栏的竖中线上。不用 `frame: false`
+   *   加自绘按钮：那会丢掉原生的最大化/全屏语义与无障碍，还要自己处理悬停态。
+   * · 其它平台：`hidden` 会连最小化/最大化/关闭一起去掉 ⇒ 必须用
+   *   `titleBarOverlay` 把它们找回来，高度与网页顶栏同高；右侧安全区由 CSS 让出。
+   */
+  const windowChrome =
+    process.platform === 'darwin'
+      ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 12, y: 15 } }
+      : { titleBarStyle: 'hidden' as const, titleBarOverlay: { height: 42 } }
+
   const w = new BrowserWindow({
+    ...windowChrome,
     /**
-     * ⚠️ **`width/height` 是内容区尺寸，而 `getNormalBounds()` 返回整窗尺寸**（含标题栏）。
-     *    落盘用的是后者、建窗给的是前者 ⇒ 每重启一次高度就少一条标题栏
-     *    （macOS 上是 23px，看起来像「窗口记不住大小」）。
-     * ⇒ 建完窗立刻用 `setBounds` 校正成**整窗**口径，读与写从此说的是同一件事。
+     * ⚠️ **`width/height` 是内容区尺寸，而 `getNormalBounds()` 返回整窗尺寸**。
+     *    有系统标题栏时两者差一条标题栏（macOS 曾实测 23px）：落盘用后者、
+     *    建窗给前者 ⇒ 每重启一次高度就少一条（看起来像「窗口记不住大小」）。
+     *    标题栏隐藏后 macOS 上两者相等，但**校正仍要留**：它保证读与写
+     *    永远说同一套坐标，将来平台或标题栏样式再换也不会漂。
+     * ⇒ 建完窗立刻用 `setBounds` 校正成**整窗**口径。
      */
     x: st.x,
     y: st.y,
@@ -304,7 +321,8 @@ function createWindow(_libraryId?: string, title?: string): BrowserWindow {
    * **把尺寸校正成整窗口径**（与 `getNormalBounds()` 同一套坐标）。
    *
    * 构造参数里的 `width/height` 是**内容区**，而 `getNormalBounds()` 是**整窗** ——
-   * 不校正的话就是「写下去 700、读回来 677」，每重启少一条标题栏（macOS 上 23px）。
+   * 有标题栏时不校正就是「写下去 700、读回来 677」，每重启少一条（macOS 曾实测 23px）。
+   * 现在标题栏隐藏了，两者在 macOS 上相等，这条仍是**口径保证**而非补偿量。
    * ⚠️ `setBounds` 是整体替换：位置也要一起给，否则会被重置。
    */
   const b0 = w.getBounds()

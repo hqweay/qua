@@ -28,6 +28,7 @@ delete cleanEnv.ELECTRON_RUN_AS_NODE
 
 const extraArgs = ['--no-sandbox', '--disable-gpu']
 
+const ONLY = process.env.QUA_SMOKE_ONLY ?? ''
 const results = []
 const transcript = []
 function log(...a) {
@@ -37,6 +38,8 @@ function log(...a) {
 }
 
 async function check(name, fn) {
+  // 调试过滤：只跑名字含 QUA_SMOKE_ONLY 子串的用例；不设 ＝ 全跑（批次编排不受影响）
+  if (ONLY && !name.includes(ONLY)) return
   try {
     const msg = await fn()
     results.push({ name, ok: true, msg: msg ?? '' })
@@ -1647,6 +1650,49 @@ await check('E17 显式清库的回退面：backupLibrary 在库目录 backups/ 
 
   await app.close()
   return `快照 ${r.path.slice(backups.length + 1)}（真 SQLite 文件）；坏 label 不逃出库目录`
+})
+
+/* ═══════════════════════════════════════════════════ E18 自定义标题栏 */
+
+await check('E18 系统标题栏交给网页顶栏：整窗＝内容区、壳给出平台、顶栏可拖而按钮不可拖', async () => {
+  const { app, page } = await launch('custom-titlebar')
+  const win = await app.evaluate(({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows()[0]
+    return {
+      platform: process.platform,
+      frame: w.getBounds(),
+      content: w.getContentBounds(),
+      fullscreenable: w.isFullScreenable(),
+    }
+  })
+  // 隐藏标题栏后内容区就是整窗：有系统标题栏时两者会差一条（macOS 曾实测 23px）
+  assert(
+    Math.abs(win.frame.height - win.content.height) <= 1,
+    `系统标题栏应已隐藏（整窗与内容区同高）：${win.frame.height} vs ${win.content.height}`,
+  )
+  assert(win.fullscreenable, '隐藏标题栏不该丢掉原生全屏')
+
+  const dom = await page.evaluate(() => {
+    const bar = document.getElementById('topbar')
+    const first = document.querySelector('#topbar button')
+    const cs = getComputedStyle(bar)
+    return {
+      platform: document.body.dataset.platform ?? '',
+      height: bar.getBoundingClientRect().height,
+      drag: cs.getPropertyValue('-webkit-app-region').trim() || cs.getPropertyValue('app-region').trim(),
+      btnDrag: getComputedStyle(first).getPropertyValue('-webkit-app-region').trim(),
+      tabDrag: getComputedStyle(document.getElementById('center-tabs')).getPropertyValue('-webkit-app-region').trim(),
+      firstX: first.getBoundingClientRect().x,
+    }
+  })
+  assert(dom.platform === win.platform, `壳的平台要同步传到渲染层：${dom.platform} vs ${win.platform}`)
+  assert(dom.drag === 'drag', `顶栏整条应可拖窗：${dom.drag}`)
+  assert(dom.btnDrag === 'no-drag' && dom.tabDrag === 'no-drag', '按钮与 tab 条要标回 no-drag，否则点不动／滚不动')
+  // macOS 的原生红黄绿浮在左上：第一颗按钮必须让开那一块（灯组约 12..64，留到 78）
+  if (win.platform === 'darwin') assert(dom.firstX >= 78, `红黄绿在左上，第一颗按钮要让位：x=${dom.firstX}`)
+
+  await app.close()
+  return `${win.platform}：整窗/内容区 ${win.frame.height}/${win.content.height}；顶栏 ${dom.height}px，第一颗按钮 x=${dom.firstX}`
 })
 
 /* ═══════════════════════════════════════════════════ 汇总 */

@@ -144,6 +144,9 @@ export class SurfaceEditor {
       initialRoots: [block],
       viewRootId: blockId,
       structuralScope: 'roots',
+      // 岛与块 id 绑定（load 不跟随 store，提交路径假定块存在）：删根＝岛失去对象，
+      // 删除显式关——格子的收尾由看板/卡片层决定
+      allowRootRemove: false,
       // 卡片/格子里再出现露面块也只画占位（深度 1）
       embedBodies: false,
       // 编辑器自己跟随 store 时会把正在打的字换掉；这里只由本组件决定「何时重装」，

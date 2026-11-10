@@ -62,9 +62,10 @@ export interface EditableBlockDeps {
    */
   structuralScope?: 'document' | 'roots'
   /**
-   * **段根可不可以删**（默认不可）。查询结果／侧槽窗口的段根是**别的页的块**，
-   * 在这里删源不合适（那类删除走命令面）；**页签身体**的段根就是页签本身——
-   * 容器的真实子块，删除＝删这一页（软删可回），要显式打开。
+   * **段根可不可以删**（默认可）。根是真实块，删除＝软删（⌘Z 可回），面随后按
+   * store 重算收尾——派生行、页签身体都吃这个默认。显式关闭的只有**绑定单一块、
+   * 没有重算可依赖的岛**：侧槽窗口（根是钉住的锚块，删掉窗口就没有对象）与
+   * 卡片格（岛与块 id 绑定，提交路径假定块存在）。
    */
   allowRootRemove?: boolean
   /**
@@ -208,10 +209,10 @@ export class EditableBlock {
     const ed = new BlockEditor({
       container: this.host,
       blankArea: this.host,
-      // 记录视图：没有「视图级同级」——点空白不建块。删段根默认也不许
-      //（根是别的页的块）；页签身体用 `allowRootRemove` 显式打开
+      // 记录视图：没有「视图级同级」——点空白不建块。删段根默认放行
+      //（根是真实块，删除＝软删，面按 store 重算收尾）；绑定单一块的岛显式关闭
       allowBlankCreate: false,
-      allowRootRemove: this.deps.allowRootRemove === true,
+      allowRootRemove: this.deps.allowRootRemove !== false,
       rootRemoveFill: this.deps.rootRemoveFill !== false,
       // 重载节奏归本组件（唯一一条路径），编辑器不再自己跟随 store
       autoReload: false,

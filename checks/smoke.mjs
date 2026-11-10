@@ -704,12 +704,13 @@ await check('T3 四种行内格式（⌘B/⌘I/⌘E/⌘`）落在**那一截文�
   return `格式段 ${marks.length} 个（${[...types].join('/')}）；四种格式都住在 text run 上，模型里没有第二个实体`
 })
 
-await check('T3b 顶部无工具栏／无顶栏：格式在划选气泡，皮肤与明暗在调试菜单（不许加回来）', async () => {
+await check('T3b 顶栏只放窗口级控件：格式仍在划选气泡，皮肤与明暗仍在调试菜单（不许把工具栏/调试开关加回来）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   // 选文本需要**有内容的块**：冷启动在 journal 首行（只读日期，空文本），先打开假数据第一页
   await openFirstPage(page)
 
-  // ① 顶部**既没有工具栏也没有顶栏**（两条都是否定式口味，被后来的改动悄悄破坏过就得有人喊）
+  // ① 顶部是**一条贯通顶栏**，但既没有工具栏、也没有调试开关
+  //    （两条都是否定式口味，被后来的改动悄悄破坏过就得有人喊）
   const chrome = await page.evaluate(() => ({
     toolbar: document.querySelector('#toolbar'),
     topbar: document.querySelector('#topbar'),
@@ -719,11 +720,13 @@ await check('T3b 顶部无工具栏／无顶栏：格式在划选气泡，皮肤
     // 页 / 日记 / 被聚焦块一律是正文第一行
     oldCrumbs: Boolean(document.querySelector('#doc #crumbs')),
     trail: Boolean(document.querySelector('#crumbs-trail')),
+    formatBtns: document.querySelectorAll('#topbar [data-command^="core.anno/"]').length,
   }))
   assert(chrome.toolbar === null, '#toolbar 应当已经撤掉（格式改为划选气泡承载）')
-  assert(chrome.topbar === null, '#topbar 应当已经撤掉（它只剩调试开关，那些已挪进调试菜单）')
+  assert(chrome.topbar !== null, '贯通顶栏应常驻：tab、漏斗与窗口级控件都在这一条里')
   assert(chrome.skinSwitch === null, '顶栏不该再有甲乙丙切换（调试开关，归调试菜单）')
   assert(chrome.themeBtn === null, '顶栏不该再有明暗按钮（调试开关，归调试菜单）')
+  assert(chrome.formatBtns === 0, '格式命令不该借顶栏复活（仍在划选气泡）')
   assert(!chrome.oldCrumbs, '#crumbs（页图标＋页名）应已撤掉：本仓不存在「标题」这个概念')
   assert(chrome.trail, '面包屑的容器 #crumbs-trail 应仍在（顶层时 hidden，但 DOM 常驻）')
 
@@ -773,10 +776,10 @@ await check('T3b 顶部无工具栏／无顶栏：格式在划选气泡，皮肤
   await page.waitForFunction(() => document.querySelectorAll('.selbar').length === 0, null, { timeout: 2000 })
 
   await ctx.close()
-  return `顶部无工具栏；选中 ${after.selText.length} 字 → 气泡 ${btns.length} 颗 → 加粗后选区保住、气泡退场`
+  return `顶部一条贯通顶栏（无工具栏/调试开关）；选中 ${after.selText.length} 字 → 气泡 ${btns.length} 颗 → 加粗后选区保住、气泡退场`
 })
 
-await check('T3c 主题三档在调试菜单：点得到、改得动，且不在顶栏（皮肤已删）', async () => {
+await check('T3c 主题三档在调试菜单：点得到、改得动；顶栏不因此多出第二条（皮肤已删）', async () => {
   const { ctx, page } = await freshPage(browser, base)
 
   // ① 调试入口可见（它原来带 hidden 且没人取消 ⇒ 是死入口）
@@ -813,12 +816,62 @@ await check('T3c 主题三档在调试菜单：点得到、改得动，且不在
   })
   await page.waitForFunction(() => document.body.dataset.theme === 'dark', null, { timeout: 2000 })
 
-  // ⑤ 改完**顶栏不会冒出来**（防「为了显示开关又把顶栏加回来」）
-  const stillNoTopbar = await page.evaluate(() => document.querySelector('#topbar') === null)
-  assert(stillNoTopbar, '改完主题后不该冒出顶栏')
+  // ⑤ 改完**顶栏仍是原来那一条**（防「为了显示开关又叠一条新顶栏」）
+  const topbarCount = await page.evaluate(() => document.querySelectorAll('#topbar').length)
+  assert(topbarCount === 1, '改完主题后顶栏仍只有一条')
 
   await ctx.close()
-  return `调试菜单 ${rows.length} 项（三档主题，无皮肤）；切到暗后顶栏仍未回来`
+  return `调试菜单 ${rows.length} 项（三档主题，无皮肤）；切到暗后顶栏仍是同一条`
+})
+
+await check('T3d 贯通顶栏：只有一条、三槽内容同起点、tab 与漏斗上收、窗口级按钮真的接了命令', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  const shape = await page.evaluate(() => {
+    const bar = document.getElementById('topbar')
+    const rect = bar?.getBoundingClientRect()
+    const token = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-topbar-h'))
+    const stackTop = (side) => {
+      const el = document.querySelector(side === 'center' ? '#dock-center #scroll' : `#dock-${side} .dock-stack`)
+      return el ? el.getBoundingClientRect().top : -1
+    }
+    const tab = document.querySelector('.center-tab[data-active="1"]')
+    return {
+      count: document.querySelectorAll('#topbar').length,
+      height: rect?.height ?? -1,
+      bottom: rect?.bottom ?? -1,
+      token,
+      tops: ['left', 'center', 'right'].map(stackTop),
+      tabsInBar: Boolean(document.querySelector('#topbar #center-tabs')),
+      filterInBar: Boolean(document.querySelector('#topbar #center-filter')),
+      headsInSlots: document.querySelectorAll('#dock-left > .dock-head, #dock-right > .dock-head').length,
+      tabBg: tab ? getComputedStyle(tab).backgroundColor : '',
+      navBtns: ['topbar-back', 'topbar-forward', 'topbar-search', 'topbar-today', 'topbar-palette'].map((id) => Boolean(document.getElementById(id))),
+      panelHidden: document.getElementById('center-filter-panel').hidden,
+    }
+  })
+  assert(shape.count === 1, `顶栏只能有一条：${shape.count}`)
+  assert(Math.abs(shape.height - shape.token) <= 1, `顶栏高度应等于 --ui-topbar-h：${shape.height} vs ${shape.token}`)
+  for (const [i, y] of shape.tops.entries()) {
+    assert(Math.abs(y - shape.bottom) <= 1, `第 ${i} 槽内容应从顶栏底边开始（此前中心错台 11px）：${y} vs ${shape.bottom}`)
+  }
+  assert(shape.tabsInBar && shape.filterInBar, 'tab 条与这一屏的漏斗都应住在顶栏里')
+  assert(shape.headsInSlots === 0, '槽里不再各自抬头（按钮组已上收）')
+  assert(
+    shape.tabBg === 'transparent' || shape.tabBg.startsWith('rgba(0, 0, 0, 0)'),
+    `当前 tab 不该再是一整块药丸底色：${shape.tabBg}`,
+  )
+  assert(shape.navBtns.every(Boolean), '后退/前进/搜索/今日/命令面板五颗常驻按钮齐')
+  assert(shape.panelHidden, '漏斗面板默认收起')
+
+  // 窗口级按钮不是摆设：点「命令面板」真的 invoke 出菜单
+  await page.click('#topbar-palette')
+  await page.waitForFunction(() => document.querySelectorAll('.layer-item').length > 0, null, { timeout: 2000 })
+  const rows = await page.evaluate(() => document.querySelectorAll('.layer-item').length)
+
+  await ctx.close()
+  return `一条 ${shape.height}px 顶栏；三槽内容同起点 ${shape.tops.map((y) => y.toFixed(0)).join('/')}；点命令面板开出 ${rows} 行`
 })
 
 await check('T4 格式随打字继承：粗体末尾接着敲的字仍是粗体、素段末尾敲的字不带格式', async () => {
@@ -14666,7 +14719,7 @@ await check('T150 派生卡也能关：关掉即离开槽（模型不动）；�
   assert(closed.blocks === before.blocks, `关掉一张视图卡不该动模型：${before.blocks} → ${closed.blocks}`)
 
   // ② 回程：「添加组件」画廊里它还在，点了就回来（否则 ✕ 就是单向陷阱）
-  await page.locator('#dock-left .dock-add').click()
+  await page.locator('#dock-left-add').click()
   await page.waitForTimeout(160)
   const rows = await layerRows(page)
   assert(
@@ -14701,7 +14754,7 @@ await check('T150 派生卡也能关：关掉即离开槽（模型不动）；�
   await page.waitForTimeout(250)
 
   // 回程＝画廊：检视卡还在目录里，点了就回来（✕ 不是单向陷阱）
-  await page.locator('#dock-right .dock-add').click()
+  await page.locator('#dock-right-add').click()
   await page.waitForTimeout(160)
   const rowsRight = await layerRows(page)
   const atInspect = rowsRight.findIndex((r) => r.label === '检视卡')
@@ -14747,7 +14800,7 @@ await check('T202 检视卡在多根屏：画廊先说原因、添加给反馈�
   assert(roots > 1, `前置：日记流是多根屏：${roots}`)
 
   // ③ 画廊在**添加之前**说清它为什么暂时不可见
-  await page.locator('#dock-right .dock-add').click()
+  await page.locator('#dock-right-add').click()
   await page.waitForTimeout(160)
   const rows = await layerRows(page)
   const at = rows.findIndex((r) => r.label === '检视卡')
@@ -25837,6 +25890,158 @@ await check('T278 快捷小卡：加到快捷 → Shift+点并存 → 收成快�
   return '快捷卡并存／收成／悬空；小卡没有「转大卡」入口，恢复只加窗口'
 })
 
+/**
+ * **收纳盘**（设计 §3）：小卡收进一张卡——卡头是把手、body 是小卡排。
+ *
+ * 五条主断言对应 §3.7：
+ *   ③ ✕ 解散后小卡数量与顺序都不变（关容器不许带走成员）；
+ *   ④ 空盘不落盘、不画（最后一个成员被移走的那次写入就地解散）；
+ *   ①⑤（建盘从内容长出来／三颗按钮同列）与 ②（盘内右缘）分别在 A18t；
+ *   嵌套摊平／窗口上提「一张不丢」在 tests/dock.test.ts（读路径纯函数）。
+ * 三个落点走真 DnD：盘头＝收进去、盘内格前后＝排序、槽里＝移出来（**落点决定容器**）。
+ */
+await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、盘头收进去、拖槽移出来、✕ 解散不带走成员、空盘自动解散、重命名不换 key', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  const cards = () => page.evaluate(() => window.__qua.snapshot().dock.left.cards)
+  const traySel = '#dock-left-stack > .dock-card[data-card-id^="tray:"]'
+  const trayCard = page.locator(traySel)
+  const menuPick = async (label) => {
+    await page.locator('.layer .layer-item', { hasText: label }).first().click()
+    await page.waitForTimeout(180)
+  }
+
+  /** 真 DnD：tile 起拖（CARD_MIME）→ 容器 dragover/drop（坐标取 anchor 的前缘或末尾） */
+  const dragTo = (o) =>
+    page.evaluate(({ tileSel, containerSel, anchorSel, edge }) => {
+      const tile = document.querySelector(tileSel)
+      const container = document.querySelector(containerSel)
+      const anchor = anchorSel ? document.querySelector(anchorSel) : container
+      if (!tile || !container || !anchor) return { missing: { tile: !tile, container: !container, anchor: !anchor } }
+      const box = anchor.getBoundingClientRect()
+      const x = edge === 'end' ? box.right - 2 : box.left + 2
+      const y = box.top + box.height / 2
+      const dt = new DataTransfer()
+      const ev = (type) => new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y })
+      tile.dispatchEvent(ev('dragstart'))
+      container.dispatchEvent(ev('dragover'))
+      const hot = Boolean(
+        document.querySelector('[data-drop-before="1"], [data-drop-after="1"], [data-drop-into="1"], [data-drop-end="1"]'),
+      )
+      container.dispatchEvent(ev('drop'))
+      tile.dispatchEvent(ev('dragend'))
+      return { hot }
+    }, o)
+
+  // ① 建盘：右键第 2 颗小卡 ⇒ **盘插在那张小卡原来的位置**（容器从内容里长出来）
+  await page.locator('#dock-left-stack > .dock-tile[data-card-id="cmd:core.page/new"]').click({ button: 'right' })
+  await page.waitForTimeout(150)
+  await menuPick('收进新收纳盘')
+  let now = await cards()
+  assert(now[0] === 'cmd:core.journal/today' && typeof now[1] === 'object' && typeof now[1].tray === 'string',
+    `盘应插在被收那颗小卡的原位：${JSON.stringify(now)}`)
+  assert(JSON.stringify(now[1].cards) === JSON.stringify(['cmd:core.page/new']), `建盘时成员就是那一颗：${JSON.stringify(now[1])}`)
+  assert((await trayCard.count()) === 1, '左槽应画出一只盘卡')
+  assert((await trayCard.locator('.dock-card-title').textContent()) === '1 张小卡', `未命名的盘头应显示「n 张小卡」：${JSON.stringify(await trayCard.locator('.dock-card-title').textContent())}`)
+
+  // ② 一次收完：盘头右键 ⇒ 顶层裸排的小卡全部进盘（「这一排太碍事」是主路径）
+  await trayCard.locator('.dock-card-head').click({ button: 'right' })
+  await page.waitForTimeout(150)
+  await menuPick('把其余小卡收进来')
+  now = await cards()
+  const tray1 = now.find((e) => typeof e === 'object')
+  assert(JSON.stringify(tray1.cards) === JSON.stringify(['cmd:core.page/new', 'cmd:core.journal/today', 'cmd:core.command-palette/show', 'cmd:core.journal/prev']),
+    `其余小卡应按原顺序追加进盘：${JSON.stringify(tray1)}`)
+  assert(!now.some((e) => typeof e === 'string' && e.startsWith('cmd:')), `顶层不该再有裸排小卡：${JSON.stringify(now)}`)
+
+  // ③ 盘内排序：拖「前一天」到「回到今日」之前——与裸排同一条规则、同一份 cardDrop
+  const reorder = await dragTo({
+    tileSel: '.dock-tray-body > .dock-tile[data-card-id="cmd:core.journal/prev"]',
+    containerSel: `${traySel} .dock-tray-body`,
+    anchorSel: '.dock-tray-body > .dock-tile[data-card-id="cmd:core.journal/today"]',
+    edge: 'before',
+  })
+  assert(reorder?.hot === true, `盘内拖动应出现落点：${JSON.stringify(reorder)}`)
+  now = await cards()
+  assert(JSON.stringify(now.find((e) => typeof e === 'object').cards) === JSON.stringify(['cmd:core.page/new', 'cmd:core.journal/prev', 'cmd:core.journal/today', 'cmd:core.command-palette/show']),
+    `盘内排序应落盘：${JSON.stringify(now.find((e) => typeof e === 'object'))}`)
+
+  // ④ 盘头＝收进去：加一颗快捷小卡，拖到盘头 ⇒ 追加到盘末（落点决定容器）
+  const blockId = await page.evaluate(() => window.__qua.pages()[1].id)
+  await page.evaluate((id) => window.__qua.invoke('core.dock/add-shortcut', { blockId: id }), blockId)
+  await page.waitForTimeout(200)
+  const shKey = `shortcut:${blockId}`
+  const into = await dragTo({
+    tileSel: `#dock-left-stack > .dock-tile[data-card-id="${shKey}"]`,
+    containerSel: `${traySel} > .dock-card-head`,
+  })
+  assert(into?.hot === true, `拖到盘头应出现「收进去」落点：${JSON.stringify(into)}`)
+  now = await cards()
+  const tray2 = now.find((e) => typeof e === 'object')
+  assert(tray2.cards[tray2.cards.length - 1] === shKey && !now.includes(shKey),
+    `小卡应收进盘末、顶层不再有它：${JSON.stringify({ tray2, now })}`)
+
+  // ⑤ 槽里＝移出来：拖盘内格到槽里两张卡之间 ⇒ 落点决定容器，不需要「先出盘」
+  const out = await dragTo({
+    tileSel: '.dock-tray-body > .dock-tile[data-card-id="cmd:core.command-palette/show"]',
+    containerSel: '#dock-left .dock-stack',
+    anchorSel: '#dock-left-stack > .dock-card[data-card-id="calendar"]',
+    edge: 'before',
+  })
+  assert(out?.hot === true, `拖到槽里应出现落点：${JSON.stringify(out)}`)
+  now = await cards()
+  assert(now.includes('cmd:core.command-palette/show'), `成员应移出盘回到顶层：${JSON.stringify(now)}`)
+  assert(!now.find((e) => typeof e === 'object').cards.includes('cmd:core.command-palette/show'), '盘里不该再有它')
+
+  // ⑥ ✕＝解散：只摘把手，小卡留在原位——数量与顺序都不变（§3.7-3）
+  const before = await cards()
+  const trayIdx = before.findIndex((e) => typeof e === 'object')
+  const expected = [...before.slice(0, trayIdx), ...before[trayIdx].cards, ...before.slice(trayIdx + 1)]
+  await trayCard.locator(':scope > .dock-card-head [data-dock-action="close"]').click()
+  await page.waitForTimeout(200)
+  now = await cards()
+  assert(JSON.stringify(now) === JSON.stringify(expected), `解散应把成员按原顺序放回盘的位置：${JSON.stringify({ now, expected })}`)
+  assert((await trayCard.count()) === 0, '解散后 DOM 不该再有盘卡')
+
+  // ⑦ 空盘自动解散：建一只只有一颗成员的盘，✕ 那颗成员 ⇒ 容器跟着消失（§3.7-4）
+  try {
+  await page.locator('#dock-left-stack > .dock-tile[data-card-id="cmd:core.journal/prev"]').click({ button: 'right' })
+  await page.waitForTimeout(150)
+  await menuPick('收进新收纳盘')
+  assert((await trayCard.count()) === 1, '重建一只单成员盘')
+  await page.locator(`${traySel} .dock-tray-body > .dock-tile .dock-tile-x`).click()
+  await page.waitForTimeout(200)
+  now = await cards()
+  assert(!now.some((e) => typeof e === 'object'), `最后一个成员被移走 ⇒ 盘应就地解散：${JSON.stringify(now)}`)
+  assert((await trayCard.count()) === 0, '空盘不画')
+  } catch (e) { throw new Error('STEP7: ' + e.message) }
+
+  // ⑧ 重命名：行内输入；只改 title，key 不动（改名不换身份）
+  // （⑦ 的 ✕ 把 prev 那颗移出了槽——这正是空盘解散的路径；这里换还在顶层的一颗）
+  try {
+  await page.locator('#dock-left-stack > .dock-tile[data-card-id="cmd:core.journal/today"]').click({ button: 'right' })
+  await page.waitForTimeout(150)
+  await menuPick('收进新收纳盘')
+  const trayIdBefore = (await cards()).find((e) => typeof e === 'object').tray
+  await trayCard.locator('.dock-card-head').click({ button: 'right' })
+  await page.waitForTimeout(150)
+  await menuPick('重命名')
+  const rename = trayCard.locator('.dock-tray-rename')
+  assert((await rename.count()) === 1, '重命名应是盘头上的行内输入')
+  await rename.fill('我的盘')
+  await rename.press('Enter')
+  await page.waitForTimeout(200)
+  now = await cards()
+  const tray3 = now.find((e) => typeof e === 'object')
+  assert(tray3?.title === '我的盘' && tray3.tray === trayIdBefore, `重命名只改 title、key 不动：${JSON.stringify(tray3)}`)
+  assert((await trayCard.locator('.dock-card-count').textContent()) === '1', `命名后卡头应有计数位：${JSON.stringify(await trayCard.locator('.dock-card-count').textContent())}`)
+
+  await ctx.close()
+  return `建盘在原位＋一次收完（4 颗）＋盘内排序＋盘头收进去＋拖槽移出来；✕ 解散按原位归位；单成员移走即解散；重命名 key 不变`
+  } catch (e) { throw new Error('STEP8: ' + e.message) }
+})
+
 await check('T279 回到今日：未来天不占日记流窗口（先剔未来再截首屏，否则进空白页）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
@@ -26166,6 +26371,89 @@ await check('T281 快速筛选：新建查询默认不查询；查询块的漏�
 
   await ctx.close()
   return '新查询默认 0 行；查询块漏斗写 _defaultFilter（基础条件不动、可撤销）；中心漏斗筛当前屏且正在编辑的块不被藏；清除都回原样'
+})
+
+await check('T282 页签：同一块不重复打开；放得下就平铺、放不下交给集合入口', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1280, height: 800 } })
+  const pageIds = await page.evaluate(() => window.__qua.pages().map((p) => p.id))
+  for (let i = 0; i < 5; i++) {
+    await page.evaluate(() => window.__qua.invoke('core.tab/new', {}, 'api'))
+    await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }, 'api'), pageIds[i % pageIds.length])
+  }
+  await page.waitForTimeout(150)
+  const shape = await page.evaluate(() => {
+    const strip = document.getElementById('center-tabs')
+    const list = document.getElementById('center-tab-list')
+    const add = document.getElementById('center-tab-add')
+    const sr = strip.getBoundingClientRect()
+    const tabs = [...strip.querySelectorAll('.center-tab')]
+    const visible = tabs.filter((el) => {
+      const r = el.getBoundingClientRect()
+      return !el.hidden && r.left >= sr.left - 1 && r.right <= sr.right + 1
+    })
+    return {
+      total: tabs.length,
+      visible: visible.length,
+      activeVisible: visible.filter((el) => el.dataset.active === '1').length,
+      scrollbar: getComputedStyle(strip).scrollbarWidth,
+      listText: list.textContent,
+      listHidden: list.hidden,
+      addOutside: add.parentElement !== strip,
+      distinctTitles: new Set(tabs.map((el) => el.title)).size,
+    }
+  })
+  assert(shape.total === 5, `应开出 5 张 tab：${shape.total}`)
+  assert(shape.distinctTitles >= 2, `这条用例要造出不同名字的 tab（不然只测到同名那一种）：${shape.distinctTitles}`)
+  // 五张不同名都放得下 ⇒ 全部平铺占住中段，不空成一个数字
+  assert(shape.visible === 5 && shape.activeVisible === 1, `放得下的都应平铺、且只有一屏是当前：${JSON.stringify(shape)}`)
+  assert(shape.scrollbar === 'none', '顶栏不该露出滚动条')
+  assert(!shape.listHidden && shape.listText === '5', `集合入口应显示总数：${shape.listText}`)
+  assert(shape.addOutside, '「+」应在滚动区之外常驻')
+
+  await page.click('#center-tab-list')
+  await page.waitForFunction(() => document.querySelectorAll('.layer-item').length === 5, null, { timeout: 2000 })
+  const rows = await page.evaluate(() => [...document.querySelectorAll('.layer-item')].map((r) => ({
+    label: r.querySelector('.layer-label')?.textContent ?? '',
+    hint: r.querySelector('.layer-hint')?.textContent ?? '',
+  })))
+  assert(rows.filter((r) => r.hint === '当前').length === 1, `当前屏要标出来：${JSON.stringify(rows)}`)
+  assert(
+    new Set(rows.map((r) => r.label)).size === rows.length,
+    `同一个块只许有一张 tab ⇒ 名字不该重复：${JSON.stringify(rows)}`,
+  )
+  // 从集合切到第 2 屏：顶栏那一格要跟着换，且 tab 总数不变
+  const wanted = rows[1].label
+  await page.locator('.layer-item').nth(1).click()
+  await page.waitForTimeout(150)
+  const now = await page.evaluate(() => ({
+    title: document.querySelector('#center-tabs .center-tab[data-active="1"]')?.title ?? '',
+    list: document.getElementById('center-tab-list').textContent,
+  }))
+  assert(now.title === wanted, `从集合切过去后顶栏应显示那一屏：${now.title} vs ${wanted}`)
+  assert(now.list === '5', '切屏不该改变 tab 总数')
+
+  // 同一个块不重复打开：先按一次 + 把今日那张开出来，之后连按都不该再新增
+  await page.evaluate(() => window.__qua.invoke('core.tab/new', {}, 'api'))
+  await page.waitForTimeout(120)
+  const before = await page.evaluate(() => document.querySelectorAll('#center-tabs .center-tab').length)
+  await page.evaluate(() => {
+    for (let i = 0; i < 3; i++) window.__qua.invoke('core.tab/new', {}, 'api')
+  })
+  await page.waitForTimeout(150)
+  const dup = await page.evaluate(() => {
+    const tabs = [...document.querySelectorAll('#center-tabs .center-tab')]
+    return {
+      total: tabs.length,
+      titles: tabs.map((el) => el.querySelector('.center-tab-title')?.textContent ?? ''),
+      scrollbar: getComputedStyle(document.getElementById('center-tabs')).scrollbarWidth,
+      list: document.getElementById('center-tab-list').textContent,
+    }
+  })
+  assert(dup.total === before, `同一个块再按 + 不该新增 tab：${before} → ${dup.total}`)
+  assert(new Set(dup.titles).size === dup.titles.length, `每张 tab 应指向不同的块：${JSON.stringify(dup.titles)}`)
+  assert(dup.scrollbar === 'none' && dup.list === String(dup.total), `去重后顶栏仍不该露滚动条：${JSON.stringify(dup)}`)
+  await ctx.close()
+  return `${shape.total} 张不同名 tab 全平铺；重复按 + 不新增（${dup.total} 张不变）；集合 ${rows.length} 行可切换`
 })
 
 const known = results.filter((r) => !r.ok && r.known)

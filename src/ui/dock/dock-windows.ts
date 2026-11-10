@@ -139,8 +139,10 @@ export class DockWindows {
       // 窗口不是「真实兄弟序」：点空白不建块、删段根不删块（只是同一批块的一个视图）。
       // roots 是「一个块一张卡」，构造时就知道；此后 `load` 只按 id 重取。
       initialRoots: [block],
-      // 窗口的根是钉住的这一块：根不能搬/删（那会改到它真正的落点）
+      // 窗口的根是钉住的这一块：根不能搬（那会改到它真正的落点）；删除也显式关——
+      // 岛与这块绑定，删根＝窗口失去对象，窗口的收尾是关闭不是删除
       structuralScope: 'roots',
+      allowRootRemove: false,
       ...(viewRootId ? { viewRootId } : {}),
       load: (ed, ids) => {
         if (!ed) return

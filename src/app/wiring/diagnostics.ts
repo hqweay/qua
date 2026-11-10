@@ -18,6 +18,7 @@ import {
   declaredFieldIds,
   displayNameOf,
   dockKey,
+  type DockEntry,
   type FieldRow,
   findInForest,
   flatten,
@@ -53,6 +54,16 @@ import { SearchFace, type SearchFaceDeps } from '../../ui/search/search-face.ts'
 import type { Layers, Row } from '../../ui/overlay/layers.ts'
 import type { Chrome } from '../../ui/chrome/chrome.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
+
+/**
+ * 诊断面上的一张卡：扁平 key（与 DOM 的 `data-card-id`、收起表同一份身份）。
+ * 盘展开一层（成员也是扁平 key）——盘要是不可见，「收进去的那几张」就是盲区，
+ * 断言问不到盘里有什么。
+ */
+function dockEntryKey(e: DockEntry): string | { tray: string; title: string | null; cards: string[] } {
+  if (e.kind !== 'tray') return dockKey(e)
+  return { tray: dockKey(e), title: e.title ?? null, cards: e.cards.map(dockKey) }
+}
 
 export type DiagnosticsDeps = {
   /** 测试面开关：构建时由 env 决定（dev server 恒开，产物要显式带 flag） */
@@ -475,8 +486,21 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
          * 断言要能区分「落盘了没有」与「页面里渲染了没有」。
          */
         dock: {
-          left: { open: prefs().dock.left.open, width: prefs().dock.left.width, cards: prefs().dock.left.cards.map(dockKey) },
-          right: { open: prefs().dock.right.open, width: prefs().dock.right.width, cards: prefs().dock.right.cards.map(dockKey) },
+          /**
+           * 卡片是**扁平 key** 列表（与 DOM 的 `data-card-id`、收起表同一份身份）。
+           * 盘展开一层：`{tray, title, cards}`——盘要是也不可见，「收进去的那几张」
+           * 就成了诊断面上的盲区（断言问不到盘里有什么）。
+           */
+          left: {
+            open: prefs().dock.left.open,
+            width: prefs().dock.left.width,
+            cards: prefs().dock.left.cards.map(dockEntryKey),
+          },
+          right: {
+            open: prefs().dock.right.open,
+            width: prefs().dock.right.width,
+            cards: prefs().dock.right.cards.map(dockEntryKey),
+          },
           collapsed: [...Object.keys(prefs().dock.collapsedCards)],
           pinned: [...Object.keys(prefs().dock.pinnedCards)],
           solo: { ...prefs().dock.solo },

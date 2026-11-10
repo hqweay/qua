@@ -11,8 +11,12 @@
  */
 import { assert, freshPage, launch, resolveBase } from '../scripts/harness.mjs'
 
+const ONLY = process.env.QUA_SMOKE_ONLY ?? ''
 const results = []
 async function check(name, fn) {
+  // 调试过滤：只跑名字含 QUA_SMOKE_ONLY 子串的用例（不设 ＝ 全跑；批次编排不受影响）。
+  // 与 checks/smoke.mjs 同一口径：改一条几何断言时点射那一条，不必起整份 check:dock。
+  if (ONLY && !name.includes(ONLY)) return
   try {
     const msg = await fn()
     results.push({ name, ok: true, msg: msg ?? '' })
@@ -71,7 +75,8 @@ await check('A13 左右槽是对称实例：同一容器类型、同一 class �
   const shape = await page.evaluate(() => {
     const pick = (id) => {
       const el = document.getElementById(id)
-      const head = el.querySelector(':scope > .dock-head')
+      // 槽的按钮组已上收到贯通顶栏：按「槽 id + -head」在文档里取，比的是顶栏里那两组
+      const head = document.getElementById(`${id}-head`)
       const stack = el.querySelector(':scope > .dock-stack')
       return {
         tag: el.tagName,
@@ -90,7 +95,7 @@ await check('A13 左右槽是对称实例：同一容器类型、同一 class �
   assert(shape.left.classes === shape.right.classes, `左右槽 class 应一致：${shape.left.classes} vs ${shape.right.classes}`)
   assert(shape.left.dock === 'left' && shape.right.dock === 'right', `差异应只在 data-dock：${JSON.stringify(shape)}`)
   assert(shape.left.children === shape.right.children, `槽骨架应一致：\n  ${shape.left.children}\n  ${shape.right.children}`)
-  assert(shape.left.headChildren === shape.right.headChildren, `槽抬头骨架应一致：${shape.left.headChildren} vs ${shape.right.headChildren}`)
+  assert(shape.left.headChildren === shape.right.headChildren, `顶栏里的槽按钮组骨架应一致：${shape.left.headChildren} vs ${shape.right.headChildren}`)
   await ctx.close()
   return `同构 ${shape.left.tag}.${shape.left.classes}｜子元素 ${shape.left.children}（data-dock 分别 left/right；槽内块不同属内容差异）`
 })
@@ -266,7 +271,8 @@ await check('A18 小卡按列均分、整排右缘与大卡对齐；高度固定
 
   /**
    * **判据（对齐，不是绝对宽度）**：小卡排成一整行时，**最后一格的右缘 ＝ 大卡的右缘
-   * ＝ 内容区右缘**。
+   * ＝ 内容区右缘**。A18 的口径是「贴**所在容器**的内容盒右缘」——槽这半条在这里，
+   * 盘那半条（贴盘内容盒）在 A18t；盘的 body 换了容器，对齐基准跟着换。
    *
    * 为什么不再断言「固定 44px」：固定宽会留下一条 30px 的尾巴（224px 的内容区
    * 只放得下 4×44 ＋ 3×6 ＝ 194px），于是小卡右缘与大卡右缘差 30px —— 看起来像没摆正。
@@ -411,6 +417,128 @@ await check('A18 小卡按列均分、整排右缘与大卡对齐；高度固定
 
   await ctx.close()
   return `左槽 4 张小卡均分（各 ${m.tiles[0].w}px）、右缘与大卡对齐（${last.right}＝${m.card.right}）；高度 44px；右槽 0 张小卡；槽拖到 270/320 仍铺满；180 宽换行不拉伸；删到 3/2 张仍铺满；单张也铺满`
+})
+
+/* ---------------------------------------------------------------- A18t */
+
+await check('A18t 收纳盘：盘内小卡贴**盘内容盒**右缘（A18 口径的所在容器）；收起高度与张数无关；三颗按钮与普通卡同列', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  /**
+   * 建盘走真实路径：右键一颗小卡 →「收进新收纳盘」→ 盘头右键 →「把其余小卡收进来」。
+   * 建完左槽顶层没有裸排小卡，4 张全在盘里。
+   */
+  await page.locator('#dock-left-stack > .dock-tile').first().click({ button: 'right' })
+  await page.waitForTimeout(150)
+  await page.locator('.layer .layer-item', { hasText: '收进新收纳盘' }).first().click()
+  await page.waitForTimeout(150)
+  const trayCard = page.locator('#dock-left-stack > .dock-card[data-card-id^="tray:"]')
+  assert((await trayCard.count()) === 1, '建盘后左槽应有一只盘卡（容器从内容里长出来）')
+  await trayCard.locator('.dock-card-head').click({ button: 'right' })
+  await page.waitForTimeout(150)
+  await page.locator('.layer .layer-item', { hasText: '把其余小卡收进来' }).first().click()
+  await page.waitForTimeout(200)
+
+  const geo = await page.evaluate(() => {
+    const card = document.querySelector('#dock-left-stack > .dock-card[data-card-id^="tray:"]')
+    const band = card.querySelector(':scope > .dock-card-body > .dock-tray-body')
+    const cs = getComputedStyle(band)
+    const br = band.getBoundingClientRect()
+    const tiles = [...band.querySelectorAll(':scope > .dock-tile')].map((el) => {
+      const r = el.getBoundingClientRect()
+      return { w: +r.width.toFixed(1), h: +r.height.toFixed(1), top: +r.top.toFixed(1), left: +r.left.toFixed(1), right: +r.right.toFixed(1) }
+    })
+    const headBtn = (cardEl, action) => {
+      const b = cardEl.querySelector(`:scope > .dock-card-head [data-dock-action="${action}"]`)
+      if (!b) return null
+      const r = b.getBoundingClientRect()
+      return +(r.left + r.width / 2).toFixed(1)
+    }
+    return {
+      tiles,
+      cols: Number(cs.getPropertyValue('--dock-tile-cols')) || 0,
+      bandLeft: +br.left.toFixed(1),
+      bandRight: +br.right.toFixed(1),
+      btns: {
+        collapse: headBtn(card, 'collapse'),
+        solo: headBtn(card, 'solo'),
+        close: headBtn(card, 'close'),
+      },
+    }
+  })
+  assert(geo.tiles.length === 4, `一次收完后盘里应有 4 张小卡，实际 ${geo.tiles.length}`)
+  assert(geo.cols === 4, `盘内列数应等于张数（同一份列数函数）：${geo.cols}`)
+
+  /**
+   * **A18 的新口径：小卡的右缘贴「所在容器」的内容盒右缘。**
+   * 槽顶那半条（贴槽内容盒）在 A18 里；这里钉住盘这半条——盘的 body 换了容器，
+   * 右缘对齐必须跟着换，不能仍拿槽来算（否则盘内右侧永远差一条卡 padding 的缝）。
+   */
+  const last = geo.tiles[geo.tiles.length - 1]
+  assert(Math.abs(last.right - geo.bandRight) <= 1, `盘内最后一格应贴盘内容盒右缘：${JSON.stringify({ last, bandRight: geo.bandRight })}`)
+  assert(Math.abs(geo.tiles[0].left - geo.bandLeft) <= 0.5, `盘内第一格应贴盘内容盒左缘：${JSON.stringify(geo)}`)
+  for (const t of geo.tiles) assert(t.h === 44, `盘内小卡高度仍固定 44px：${JSON.stringify(t)}`)
+  const gaps = geo.tiles.slice(1).map((t, i) => +(t.left - geo.tiles[i].right).toFixed(1))
+  assert(new Set(gaps).size === 1, `盘内相邻小卡的缝必须恒等：${JSON.stringify(gaps)}`)
+
+  /** 收起复用 collapsedCards（键 tray:<id>）：点盘头空白＝开合，只藏 body */
+  const collapseTray = async () => {
+    await trayCard.locator('.dock-card-title').click()
+    await page.waitForTimeout(150)
+  }
+  const trayHeight = () =>
+    page.evaluate(() => document.querySelector('#dock-left-stack > .dock-card[data-card-id^="tray:"]').getBoundingClientRect().height)
+  const isCollapsed = () =>
+    page.evaluate(() => document.querySelector('#dock-left-stack > .dock-card[data-card-id^="tray:"]').dataset.collapsed === '1')
+
+  await collapseTray()
+  assert(await isCollapsed(), '点盘头应收起这只盘')
+  const h4 = await trayHeight()
+
+  // 对照：一张普通卡收起后的高度——盘收起与「一张普通卡头」同构，不新增视觉词汇
+  const cal = page.locator('#dock-left-stack > .dock-card[data-card-id="calendar"]')
+  await cal.locator('.dock-card-head').first().click()
+  await page.waitForTimeout(150)
+  const calH = await page.evaluate(() => document.querySelector('#dock-left-stack > .dock-card[data-card-id="calendar"]').getBoundingClientRect().height)
+  assert(Math.abs(h4 - calH) <= 1, `收起的盘应与收起的普通卡同高（盘收起＝一颗卡头）：${h4} vs ${calH}`)
+
+  // 三颗按钮与普通卡同列（A24 的列不变量）：收起／单卡／关闭的 x 逐一比对
+  const calBtns = await page.evaluate(() => {
+    const card = document.querySelector('#dock-left-stack > .dock-card[data-card-id="calendar"]')
+    const cx = (action) => {
+      const b = card.querySelector(`:scope > .dock-card-head [data-dock-action="${action}"]`)
+      const r = b.getBoundingClientRect()
+      return +(r.left + r.width / 2).toFixed(1)
+    }
+    return { collapse: cx('collapse'), solo: cx('solo'), close: cx('close') }
+  })
+  for (const k of ['collapse', 'solo', 'close']) {
+    assert(Math.abs(geo.btns[k] - calBtns[k]) <= 1, `盘头 ${k} 按钮应与普通卡同列：${geo.btns[k]} vs ${calBtns[k]}`)
+  }
+
+  // 高度与张数无关：把盘里的成员摘到只剩 1 张，再收起——同一颗头的高度不变
+  await cal.locator('.dock-card-head').first().click()
+  await page.waitForTimeout(120)
+  await trayCard.locator('.dock-card-title').click()
+  await page.waitForTimeout(150)
+  for (let i = 0; i < 3; i++) {
+    await page.evaluate(() => {
+      const band = document.querySelector('#dock-left-stack > .dock-card[data-card-id^="tray:"] .dock-tray-body')
+      band.querySelector(':scope > .dock-tile .dock-tile-x').click()
+    })
+    await page.waitForTimeout(120)
+  }
+  const rest = await page.evaluate(
+    () => document.querySelectorAll('#dock-left-stack > .dock-card[data-card-id^="tray:"] .dock-tray-body > .dock-tile').length,
+  )
+  assert(rest === 1, `摘到只剩 1 张成员，实际 ${rest}`)
+  await collapseTray()
+  const h1 = await trayHeight()
+  assert(Math.abs(h1 - h4) <= 0.5, `收起后高度应与张数无关：4 张 ${h4}px vs 1 张 ${h1}px`)
+
+  await ctx.close()
+  return `盘内 4 张贴盘内容盒右缘（${last.right}＝${geo.bandRight}）、列数 4、缝恒等；收起 ${h4}px（普通卡收起 ${calH}px、1 张时 ${h1}px，均同高）；三颗按钮同列`
 })
 
 /* ---------------------------------------------------------------- 保底 */
@@ -1677,11 +1805,11 @@ await check('A25 常驻：Shift+点开的窗口重启即清、pin 过的保留�
   )
   assert(order.indexOf(ids[0]) < order.indexOf(ids[1]), `置顶后 ids[0] 应在 ids[1] 之前：${JSON.stringify(order)}`)
 
-  // 槽头「收起所有卡」：两槽骨架里都有按钮，点右槽的 ⇒ 全部收起 + 退出单卡
+  // 顶栏里的槽按钮组「收起所有卡」：两槽骨架里都有按钮，点右槽的 ⇒ 全部收起 + 退出单卡
   for (const side of ['left', 'right']) {
-    assert(await page.locator(`#dock-${side} .dock-head .dock-foldall`).count(), `${side} 槽头应有收起全部按钮`)
+    assert(await page.locator(`#dock-${side}-foldall`).count(), `${side} 槽的顶栏按钮组应有收起全部按钮`)
   }
-  await page.click('#dock-right .dock-head .dock-foldall')
+  await page.click('#dock-right-foldall')
   await page.waitForTimeout(120)
   const folded = await page.evaluate(
     () => [...document.querySelectorAll('#dock-right-stack > .dock-card')].filter((c) => c.dataset.collapsed === '1').length,

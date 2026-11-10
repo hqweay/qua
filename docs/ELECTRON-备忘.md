@@ -450,6 +450,30 @@ page.evaluate: TypeError: port.postMessage is not a function
   （最大化/全屏时记「还原后」的尺寸，而不是屏幕尺寸）。实测跨进程重启保持 `1000×700 @ (140,110)`。
 - `nativeTheme` 与 `backgroundColor`：窗口底色写死 `#ffffff`（页面默认亮色），避免冷启动闪黑。
 
+### 4.8 自定义标题栏：系统那一条隐藏了，红黄绿仍是原生控件
+
+- **配置**：mac `titleBarStyle: 'hidden'` ＋ `trafficLightPosition: { x: 12, y: 15 }`
+  （灯按到 42px 网页顶栏的竖中线）；其它平台 `hidden` 会连窗口控制一起去掉，
+  必须配 `titleBarOverlay: { height: 42 }` 把最小化／最大化／关闭找回到右上角。
+  **不要** `frame: false` 加自绘按钮：会丢掉原生全屏／最大化语义与无障碍；
+  `roundedCorners` 保持默认（设 `false` 会让窗口不可全屏）。
+- **拖窗区**：隐藏标题栏后窗口默认不能拖。网页顶栏整条 `app-region: drag`，
+  **按钮与 tablist 逐个标 `no-drag`**（drag 连同子元素生效，不标就点不动／滚不动）。
+  平台安全区由壳同步给渲染层（`qua.platform` → `body[data-platform]`）：mac 左侧让 78px、
+  其它平台右侧让 140px；别用 UA 猜，浏览器宿主没有壳 ⇒ 两侧都不让。
+- ⚠️ **网页截图抓不到系统绘制的交通灯**（那是 WindowServer 画的独立层），
+  别拿截图判断灯没出来。判据是 `getBounds()` 与 `getContentBounds()` 同高
+  ＋ 第一颗按钮让出的 x；E18 单条点射在真 Electron 里实测 **817/817**、x=78。
+- **尺寸口径**：构造参数 `width/height` 是内容区，`getNormalBounds()` 是整窗。
+  有系统标题栏时两者差一条（macOS 曾实测 23px），不校正就每重启矮一截；
+  隐藏标题栏后 mac 上两者相等，但**校正仍要留**——它保证读与写是同一套坐标，
+  不再是「补 23px」（补一个已经不存在的量反而会漂）。E4 单条点射仍绿。
+- **没验**：Windows/Linux 的 WCO 安全区只按 CSS 留了 140px，没有真机；
+  mac 进入系统全屏时网页顶栏仍显示（交通灯移到菜单栏）；双击顶栏缩放、拖窗
+  这些原生手势要真机按一遍（见 §⑦）。**改主进程／preload 后必须重新
+  `build:electron` 并重启 Electron**：dev server 只热更 renderer。
+  本节实测来自 E18/E4/E3/E7 单条点射，**未跑全量**。
+
 ---
 
 ## ⑤ 怎么跑（三行）

@@ -2741,8 +2741,10 @@ export class BlockEditor {
      *   · **查询块根**：晋升出来的查询是内容，又没有自己的删除命令面——
      *     也按内容放行（整棵软删、⌘Z 可回）。
      *
-     * ⚠️ `allowRootRemove: false` 是另一条更严的线：反链／查询列表的根是**别的页的块**，
-     *    在这里删源块不合适（那类删除走命令面），所以那一类实例整体关掉。
+     * ⚠️ `allowRootRemove: false` 是另一条更严的线（实例显式关掉才生效），只服务
+     *    **绑定单一块的岛**：侧槽窗口（根是钉住的锚块，删掉窗口就没有对象——
+     *    收尾是关闭不是删除）与卡片格（岛与块 id 绑定，提交假定块存在）。
+     *    其余面默认放行：行的删除＝软删真块，面按 store 重算收尾。
      */
     if (loc.parent === null && hasIdentity(loc.block) && !isQueryBlock(loc.block)) return false
     if (loc.parent === null && !this.allowRootRemove) return false

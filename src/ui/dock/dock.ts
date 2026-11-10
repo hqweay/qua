@@ -44,6 +44,13 @@ export interface DockCard {
   hidden?: boolean
   /** 给一颗「常驻」开关（重启保留 vs 重启即清）；只有窗口卡给——家具没有这件事 */
   pinnable?: boolean
+  /**
+   * 卡头标题旁的**计数**（如收纳盘里的「n 张小卡」）。
+   *
+   * 为什么是一个槽而不是拼进标题：标题是主人写的字，计数是壳的扫视信息——
+   * 收纳盘合上也要能看出里面装了几张，这一位跟收起状态无关。
+   */
+  count?: string
 }
 
 export interface DockCardAction {
@@ -197,13 +204,18 @@ export interface DockSlotEls {
 
 /** 取一个槽的三块 DOM（抬头／标题／堆叠），并做一次存在性断言 */
 export function dockSlotEls(root: HTMLElement): DockSlotEls {
-  const head = root.querySelector<HTMLElement>(':scope > .dock-head')
+  /*
+   * 槽的按钮组已上收到贯通顶栏，不再挂在槽节点下面 ⇒ 按「槽 id + -head」在文档里取。
+   * 仍是组件自持 DOM：装配层不碰这些节点，这里取一次就收起来；
+   * 槽自己只留内容（`.dock-stack`）与宽度手柄。
+   */
+  const head = document.getElementById(`${root.id}-head`) as HTMLElement | null
   const titleEl = head?.querySelector<HTMLElement>('.dock-title')
   const stack = root.querySelector<HTMLElement>(':scope > .dock-stack')
   const resizeEl = root.querySelector<HTMLElement>(':scope > .dock-resize')
   const foldAllEl = head?.querySelector<HTMLButtonElement>('.dock-foldall')
   if (!head || !titleEl || !stack || !resizeEl || !foldAllEl) // 开发者可见的骨架断言（不是用户文案）：与 console.* 同一口径，用英文
-  throw new Error('dock: incomplete slot skeleton (need .dock-head / .dock-title / .dock-stack / .dock-resize / .dock-foldall)')
+  throw new Error('dock: incomplete slot skeleton (need topbar head / .dock-title / .dock-stack / .dock-resize / .dock-foldall)')
   return { root, head, titleEl, stack, resizeEl, foldAllEl }
 }
 
@@ -242,6 +254,12 @@ export function buildDockCard(card: DockCard, state: DockCardState): HTMLElement
   title.className = 'dock-card-title ui-ellipsis ui-ellipsis-grow'
   title.textContent = card.title
   head.appendChild(title)
+  if (card.count !== undefined) {
+    const count = document.createElement('span')
+    count.className = 'dock-card-count'
+    count.textContent = card.count
+    head.appendChild(count)
+  }
   head.appendChild(soloButton())
   if (card.close) head.appendChild(actionButton({ label: 'lucide:x', ...card.close }))
   bindHeadToggle(head)
@@ -456,9 +474,10 @@ export function renderDockStack(
 }
 
 /**
- * 装一个槽：取它的 DOM、写抬头文案、绑收起按钮。
+ * 装一个槽：取它的 DOM、写名字、绑按钮。
  *
- * **组件自持 DOM**：抬头里的标题与收起按钮只有这里知道，装配层不再 `getElementById`。
+ * **组件自持 DOM**：按钮组虽已上收到贯通顶栏，仍只有这里知道它的标题与收起按钮，
+ * 装配层不再 `getElementById`。槽节点自己只留内容与宽度手柄。
  */
 export function mountDockSlot(
   root: HTMLElement,

@@ -14,12 +14,16 @@ import {
   belongsToTree,
   blockLabel,
   buildAdjacency,
+  dissolveEmptyTrays,
   dockKey,
+  findDock,
   findInForest,
   isCardCollapsed,
+  isLeafEntry,
   openActionOf,
   pinDefaultFor,
   pruneEphemeralWindows,
+  uuidv7Hex,
   type DerivedCardId,
   type DockEntry,
   type OpenAction,
@@ -86,6 +90,8 @@ export type DocksDeps = {
     anchor: DOMRect,
     trigger?: HTMLElement,
   ) => void
+  /** 右键命令小卡：收进新收纳盘等动作；与快捷卡菜单同一条浮层路径 */
+  showTileMenu: (side: 'left' | 'right', command: string, anchor: DOMRect, trigger?: HTMLElement) => void
   /** 目标块不在了：点它不能静默没反应，得说一句为什么 */
   toast: (msg: string, kind?: 'ok' | 'warn' | 'info') => void
   /**
@@ -356,23 +362,36 @@ export function setupDocks(deps: DocksDeps) {
   }
 
   /**
-   * 关掉**一张卡**：窗口卡、组件卡、派生卡同一条路——只从 `cards` 里摘掉这一次露面。
+   * 关掉**一张卡**：窗口卡、派生卡同一条路——只从 `cards` 里摘掉这一次露面。
    *
-   * 三者的差别只在内容从哪来（块 / 组件 / 宿主现算），「关掉」的语义是同一个：
-   * 这块数据还在库里，只是这一槽不再显示它。所以不叫 `closeWindow`。
+   * 「按 key 找条目」只有一份（`findDock`）：条目住顶层还是住某只盘里，这里不用关心。
+   * 盘的 ✕ 不走这里（盘头的 ✕ 是**解散**，见 `dissolveTray`）。
    */
   function closeCard(side: 'left' | 'right', key: string): void {
     const dock = deps.prefs().dock
-    const i = dock[side].cards.findIndex((e) => dockKey(e) === key)
-    if (i < 0) return
-    dock[side].cards.splice(i, 1)
+    const found = findDock(dock[side].cards, key)
+    if (!found) return
+    found.list.splice(found.index, 1)
     if (dock.solo[side] === key) dock.solo[side] = null
     // pin 是「这一次露面」的属性：关掉就结束。留着的话，下次用「打开来看」重开
     // 会因为旧 pin 位还在而违背进入动作的缺省（拖入才常驻）。
     delete dock.pinnedCards[key]
+    dissolveIfEmpty(side)
     renderDocks()
     deps.scheduleDeviceSave()
     deps.scheduleBadge()
+  }
+
+  /**
+   * 写出即解散：这一槽里空掉的盘就地摘除（**容器是内容的推论**，0 件就没有容器），
+   * 并清掉收起／单卡表里指向它们的键。只在写路径上跑——读路径不悄悄删。
+   */
+  function dissolveIfEmpty(side: 'left' | 'right'): void {
+    const dock = deps.prefs().dock
+    for (const k of dissolveEmptyTrays(dock[side].cards)) {
+      delete dock.collapsedCards[k]
+      if (dock.solo[side] === k) dock.solo[side] = null
+    }
   }
 
   /**
@@ -464,6 +483,10 @@ export function setupDocks(deps: DocksDeps) {
       for (const e of before) if (!after.includes(e)) removed.add(dockKey(e))
       dock[side].cards = after
     }
+    // 空盘不落盘：启动清理是写路径的一段，顺手把旧字节里残留的空盘解散
+    for (const side of ['left', 'right'] as const) {
+      for (const k of dissolveEmptyTrays(dock[side].cards)) removed.add(k)
+    }
     if (removed.size === 0) return
     for (const side of ['left', 'right'] as const) {
       if (dock.solo[side] !== null && removed.has(dock.solo[side]!)) dock.solo[side] = null
@@ -539,6 +562,12 @@ export function setupDocks(deps: DocksDeps) {
         }
         continue
       }
+      if (card.kind === 'tray') {
+        // 空盘不画（写出已解散；旧字节里读来的空盘在这里不露面，等第一次写把它带走）
+        if (card.cards.length === 0) continue
+        entries.push(trayCard(side, card))
+        continue
+      }
       const el = winCards.get(card.block)
       if (el) entries.push({ id: key, el, size: 'large' })
     }
@@ -546,6 +575,46 @@ export function setupDocks(deps: DocksDeps) {
     if (!hasSearch) dropSearch(side)
     renderDockStack(slot.stack, entries, t('ui.dock.empty'), deps.prefs().dock.solo[side])
     syncTileCols(slot.stack)
+    syncTrayBands(slot.stack)
+  }
+
+  /**
+   * 收纳盘＝**一张卡，body 换成小卡排**：不新增外壳、不新增第二种排版。
+   *
+   * 卡头 `[chevron] 名字 [n] [单卡] [✕]`，三颗按钮与普通卡同列（A24 继续成立）；
+   * 未命名的盘，名字位显示「n 张小卡」。✕ 的语义是**解散**——只摘把手，
+   * 小卡留在原位（关容器不许带走成员），所以 close 给的是 `dissolveTray`。
+   * 盘的收起复用 `collapsedCards`（键是 `tray:<id>`）与 `isCardCollapsed` 唯一判据，
+   * 不新增收起表。
+   */
+  function trayCard(side: 'left' | 'right', tray: Extract<DockEntry, { kind: 'tray' }>): DockCardEntry {
+    const key = dockKey(tray)
+    const band = document.createElement('div')
+    band.className = 'dock-tray-body'
+    // 成员复用同一对小卡产地：点击／右键／移出／拖拽的所有行为白拿——
+    // 移出走 `closeCard`（findDock 找得到盘内的它），拖拽载荷就是它自己的 key
+    for (const member of tray.cards) {
+      if (member.kind === 'cmd') band.appendChild(actionTile(side, member.command))
+      else if (member.kind === 'shortcut') band.appendChild(shortcutTile(side, member.block))
+    }
+    const named = tray.title !== undefined && tray.title !== ''
+    const el = buildDockCard(
+      {
+        id: key,
+        title: named ? tray.title! : t('ui.dock.trayCount', { count: tray.cards.length }),
+        ...(named ? { count: String(tray.cards.length) } : {}),
+        body: band,
+        close: { title: t('ui.dock.trayDissolve'), onClick: () => dissolveTray(side, key) },
+      },
+      cardStateFor(side, key),
+    )
+    bindTrayDrops(side, tray.id, el)
+    return { id: key, el, size: 'large' }
+  }
+
+  /** 盘的 body 也是同一条网格流：列数同一份函数，只是换成盘的内容盒来算（A18 的新口径） */
+  function syncTrayBands(stack: HTMLElement): void {
+    for (const band of stack.querySelectorAll<HTMLElement>(':scope .dock-tray-body')) syncTileCols(band)
   }
 
   /**
@@ -605,7 +674,9 @@ export function setupDocks(deps: DocksDeps) {
     tileColsBound = true
     const ro = new ResizeObserver(() => {
       syncTileCols(left.stack)
+      syncTrayBands(left.stack)
       syncTileCols(right.stack)
+      syncTrayBands(right.stack)
     })
     ro.observe(left.stack)
     ro.observe(right.stack)
@@ -637,6 +708,11 @@ export function setupDocks(deps: DocksDeps) {
         const place: OpenAction = openActionOf(e)
         void deps.getRegistry().invoke(command, place === 'center' ? {} : { place }, 'tile')
       },
+      // 命令小卡的右键只给「收进新收纳盘」——已在盘里的成员没有第二个盘可进；
+      // 移出仍是 ✕（hover 常驻的那颗），不给菜单留第二份
+      ...(deps.prefs().dock[side].cards.some((e) => dockKey(e) === id)
+        ? { onMenu: (anchor: DOMRect, trigger?: HTMLElement) => deps.showTileMenu(side, command, anchor, trigger) }
+        : {}),
       onDragStart: (e) => setDragCard(e.dataTransfer, id),
     }
     return buildDockTile(tile)
@@ -676,13 +752,14 @@ export function setupDocks(deps: DocksDeps) {
     return buildDockTile(tile)
   }
 
-  /** 只改 `cards`：同槽已有这一颗就不再加；返回这次是否真的新增 */
+  /** 只改 `cards`：这一槽（含盘里）已有这一颗就不再加；返回这次是否真的新增 */
   function insertShortcut(side: 'left' | 'right', blockId: string): boolean {
     const cards = deps.prefs().dock[side].cards
     const entry: DockEntry = { kind: 'shortcut', block: blockId }
     const key = dockKey(entry)
-    if (cards.some((e) => dockKey(e) === key)) return false
-    // 小卡聚成一排：命令小卡与快捷小卡同属这一排，新的一颗接在最后一张小卡之后
+    // 「按 key 找条目」只有一份：盘里已经有了也不再放第二颗（同一槽内 key 唯一）
+    if (findDock(cards, key)) return false
+    // 小卡聚成一排：命令小卡与快捷小卡同属这一排，新的一颗接在最后一张**顶层**小卡之后
     const lastTile = cards.reduce((at, card, i) => (card.kind === 'cmd' || card.kind === 'shortcut' ? i : at), -1)
     cards.splice(lastTile + 1, 0, entry)
     return true
@@ -713,15 +790,15 @@ export function setupDocks(deps: DocksDeps) {
     closeCard(side, dockKey({ kind: 'shortcut', block: blockId }))
   }
 
-  /** 换目标：位置与顺序不变，只把这一格指向另一块 */
+  /** 换目标：位置与顺序不变，只把这一格指向另一块（盘里的快捷卡同样换得到） */
   function retargetShortcut(side: 'left' | 'right', from: string, to: string): boolean {
     if (!kb.get(to)) return false
     const cards = deps.prefs().dock[side].cards
-    const i = cards.findIndex((e) => e.kind === 'shortcut' && e.block === from)
-    if (i < 0) return false
+    const found = findDock(cards, dockKey({ kind: 'shortcut', block: from }))
+    if (!found) return false
     const key = dockKey({ kind: 'shortcut', block: to })
-    if (cards.some((e) => dockKey(e) === key)) return false
-    cards[i] = { kind: 'shortcut', block: to }
+    if (findDock(cards, key)) return false
+    found.list[found.index] = { kind: 'shortcut', block: to }
     renderDocks()
     deps.scheduleDeviceSave()
     deps.scheduleBadge()
@@ -745,12 +822,12 @@ export function setupDocks(deps: DocksDeps) {
     delete dock.pinnedCards[winKey]
     delete dock.collapsedCards[winKey]
     /**
-     * 「这块已经有快捷了吗」问的是**两侧**：另一槽留着一颗时，收成不该顺手再造第二颗。
-     * 左右各放一颗仍然允许，但那是用户主动加的，不是一次「收成」的副产物。
+     * 「这块已经有快捷了吗」问的是**两侧**（含盘里的）：另一侧留着一颗时，
+     * 收成不该顺手再造第二颗。左右各放一颗仍然允许，但那是用户主动加的，
+     * 不是一次「收成」的副产物。
      */
-    const hasAnyShortcut = (['left', 'right'] as const).some((s) =>
-      dock[s].cards.some((e) => e.kind === 'shortcut' && e.block === blockId),
-    )
+    const shortcutKey = dockKey({ kind: 'shortcut', block: blockId })
+    const hasAnyShortcut = (['left', 'right'] as const).some((s) => findDock(dock[s].cards, shortcutKey) !== null)
     if (!hasAnyShortcut) insertShortcut(side, blockId)
     renderDocks()
     deps.scheduleDeviceSave()
@@ -775,8 +852,8 @@ export function setupDocks(deps: DocksDeps) {
     const dock = deps.prefs().dock
     const entry: DockEntry = { kind: 'cmd', command }
     const key = dockKey(entry)
-    if (dock[side].cards.some((e) => dockKey(e) === key)) return
-    // 快捷小卡也在这一排：命令小卡插在最后一张小卡之后，别把它插到快捷卡前面
+    if (findDock(dock[side].cards, key)) return
+    // 快捷小卡也在这一排：命令小卡插在最后一张**顶层**小卡之后，别把它插到快捷卡前面
     const lastTile = dock[side].cards.reduce((at, card, i) => (card.kind === 'cmd' || card.kind === 'shortcut' ? i : at), -1)
     dock[side].cards.splice(lastTile + 1, 0, entry)
     if (!deps.slotOpen(side)) {
@@ -789,16 +866,9 @@ export function setupDocks(deps: DocksDeps) {
     deps.scheduleBadge()
   }
 
-  /** 移出小卡：只动 cards，不碰命令本身 */
+  /** 移出小卡：只动 cards，不碰命令本身（盘里的同样走这一条） */
   function removeTile(side: 'left' | 'right', command: string): void {
-    const dock = deps.prefs().dock
-    const key = dockKey({ kind: 'cmd', command })
-    const at = dock[side].cards.findIndex((e) => dockKey(e) === key)
-    if (at < 0) return
-    dock[side].cards.splice(at, 1)
-    renderDocks()
-    deps.scheduleDeviceSave()
-    deps.scheduleBadge()
+    closeCard(side, dockKey({ kind: 'cmd', command }))
   }
 
   /**
@@ -883,27 +953,69 @@ export function setupDocks(deps: DocksDeps) {
     bindWindowDrop(right.root, (id) => deps.kb.get(id) !== undefined, (id) => openWindow('right', id, 'drop'))
   }
 
-  function bindCardStack(stack: HTMLElement, side: 'left' | 'right'): void {
-    /** 两种载荷共用的落点指示：离指针最近的那张卡，前/后各亮一条线（拖到自己那格不亮） */
-    const markAt = (draggedKey: string, e: DragEvent): void => {
-      clearCardDropMarks()
-      const at = cardDrop(e, stack)
-      if (at.targetId && at.targetId !== draggedKey) {
-        const el = stack.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(at.targetId)}"]`)
-        if (el) el.dataset[at.place === 'before' ? 'dropBefore' : 'dropAfter'] = '1'
-      } else if (!at.targetId) stack.dataset.dropEnd = '1'
+  /**
+   * 盘的三个落点（落点都在**每次重画现建的**卡上，绑定随卡生灭，不需要解绑）：
+   *   · 盘头 ＝ 收进去（追加到盘末；收起态 body 不在，落点自然只剩盘头）；
+   *   · 盘内格前后 ＝ 盘内排序（与裸排同一份 cardDrop、同一条规则）；
+   *   · 槽里两张卡之间 ＝ 移出来（走槽 stack 既有的落点，见 `bindCardStack`）。
+   * 盘只收叶子：窗口类条目在 accept 处就拒掉（它们上提是**读路径**的兜底，不是通路）。
+   */
+  function bindTrayDrops(side: 'left' | 'right', trayId: string, cardEl: HTMLElement): void {
+    const trayKey = dockKey({ kind: 'tray', id: trayId, cards: [] })
+    const head = cardEl.querySelector<HTMLElement>(':scope > .dock-card-head')
+    const band = cardEl.querySelector<HTMLElement>(':scope > .dock-card-body > .dock-tray-body')
+    if (!head || !band) return
+    const leafDrag = (key: string): boolean => {
+      const src = findSide(key)
+      if (!src) return false
+      const found = findDock(deps.prefs().dock[src].cards, key)
+      const entry = found ? found.list[found.index]! : null
+      return entry !== null && isLeafEntry(entry)
     }
+    bindDropTarget(head, {
+      kind: 'card',
+      effect: 'move',
+      targetId: () => trayKey,
+      accept: (id) => id !== trayKey && leafDrag(id),
+      hint: () => t('ui.dock.trayDropIn'),
+      mark: () => {
+        head.dataset.dropInto = '1'
+      },
+      unmark: clearCardDropMarks,
+      onDrop: (id) => {
+        const src = findSide(id)
+        if (src) moveCard(src, side, id, { targetId: null, place: 'end' }, trayId)
+      },
+    })
+    bindDropTarget(band, {
+      kind: 'card',
+      effect: 'move',
+      targetId: () => trayKey,
+      accept: (id) => leafDrag(id),
+      hint: () => t('ui.dnd.moveCard'),
+      mark: (id, e) => markCardAt(band, id, e),
+      unmark: clearCardDropMarks,
+      onDrop: (id, _target, e) => {
+        const src = findSide(id)
+        if (src) moveCard(src, side, id, cardDrop(e, band), trayId)
+      },
+    })
+  }
+
+  function bindCardStack(stack: HTMLElement, side: 'left' | 'right'): void {
     bindDropTarget(stack, {
       kind: 'card',
       effect: 'move',
       targetId: () => null,
       accept: (id) => findSide(id) !== null,
       hint: () => t('ui.dnd.moveCard'),
-      mark: (id, e) => markAt(id, e),
+      mark: (id, e) => markCardAt(stack, id, e),
       unmark: clearCardDropMarks,
       onDrop: (id, _target, e) => {
         const from = findSide(id)
         if (!from) return
+        // 落点在槽里两张卡之间＝移出来：源条目哪怕住在盘里，findDock 也找得到——
+        // **落点决定容器**，没有「先出盘再排序」这种两段式
         moveCard(from, side, id, cardDrop(e, stack))
       },
     })
@@ -915,12 +1027,13 @@ export function setupDocks(deps: DocksDeps) {
       targetId: () => null,
       accept: (id) => deps.kb.get(id) !== undefined,
       hint: () => t('ui.dnd.pin'),
-      mark: (id, e) => markAt(id, e),
+      mark: (id, e) => markCardAt(stack, id, e),
       unmark: clearCardDropMarks,
       onDrop: (id, _target, e) => openWindow(side, id, 'drop', cardDrop(e, stack)),
     })
   }
 
+  /** 落点标记要跨两层容器清（槽直系 ＋ 盘 body ＋ 盘头的「收进去」） */
   function clearCardDropMarks(): void {
     for (const side of ['left', 'right'] as const) {
       const stack = deps.getSlots()[side].stack
@@ -929,18 +1042,29 @@ export function setupDocks(deps: DocksDeps) {
         delete el.dataset.dropBefore
         delete el.dataset.dropAfter
       }
+      for (const head of Array.from(stack.querySelectorAll<HTMLElement>('.dock-card-head[data-drop-into]'))) {
+        delete head.dataset.dropInto
+      }
+      for (const band of Array.from(stack.querySelectorAll<HTMLElement>('.dock-tray-body'))) {
+        delete band.dataset.dropEnd
+        for (const el of Array.from(band.querySelectorAll<HTMLElement>(':scope > .dock-tile'))) {
+          delete el.dataset.dropBefore
+          delete el.dataset.dropAfter
+        }
+      }
     }
   }
 
   /**
-   * 指针落在哪个 Widget 的哪一侧。
+   * 指针落在哪个 Widget 的哪一侧（**对一个容器**：槽的直系卡，或盘 body 里的成员格）。
    *
    * 流里小卡横排、大卡整行，不能用单纯的 Y 中点：取**离指针最近的 Widget**，
    * 同一行看 X、跨行看 Y。这样小卡可以左右换位，大卡可以上下换位。
+   * 盘内排序与槽内排序走的就是这同一份函数——只是容器换成 band（A18 的新口径）。
    */
-  function cardDrop(e: DragEvent, stack: HTMLElement): CardDrop {
+  function cardDrop(e: DragEvent, container: HTMLElement): CardDrop {
     const items = Array.from(
-      stack.querySelectorAll<HTMLElement>(':scope > .dock-card, :scope > .dock-tile'),
+      container.querySelectorAll<HTMLElement>(':scope > .dock-card, :scope > .dock-tile'),
     ).filter((el) => !el.hidden)
     if (items.length === 0) return { targetId: null, place: 'end' }
 
@@ -958,29 +1082,55 @@ export function setupDocks(deps: DocksDeps) {
     return { targetId: best!.el.dataset.cardId ?? null, place: before ? 'before' : 'after' }
   }
 
+  /** 两种载荷共用的落点指示（对 container）：离指针最近的那张卡，前/后各亮一条线（拖到自己那格不亮） */
+  function markCardAt(container: HTMLElement, draggedKey: string, e: DragEvent): void {
+    clearCardDropMarks()
+    const at = cardDrop(e, container)
+    if (at.targetId && at.targetId !== draggedKey) {
+      const el = container.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(at.targetId)}"]`)
+      if (el) el.dataset[at.place === 'before' ? 'dropBefore' : 'dropAfter'] = '1'
+    } else if (!at.targetId) container.dataset.dropEnd = '1'
+  }
+
   function findSide(key: string): 'left' | 'right' | null {
     const dock = deps.prefs().dock
-    if (dock.left.cards.some((e) => dockKey(e) === key)) return 'left'
-    if (dock.right.cards.some((e) => dockKey(e) === key)) return 'right'
+    if (findDock(dock.left.cards, key)) return 'left'
+    if (findDock(dock.right.cards, key)) return 'right'
     return null
   }
 
   /**
-   * 移动一张卡（槽内排序或跨槽）。
+   * 移动一张卡（槽内排序、跨槽、移出盘、盘内排序都是这一个动作）。
    *
-   * 先摘再找落点：同一槽里往后拖时，目标下标会因为自己先被摘掉而左移一格。
+   * 源头按 key 找（`findDock`：顶层或盘内都找得到）；目的地由 `dstTrayId` 说——
+   * `null` ＝ 顶层列表，给了 ＝ 那只盘的成员列表（**落点决定容器**，没有「进入盘模式」这种状态）。
+   * 先摘再找落点：同一份列表里往后拖时，目标下标会因为自己先被摘掉而左移一格。
    * 拖拽载荷里是**扁平 key**（`data-card-id`），不是条目本身 ⇒ 按 key 找条目再搬。
    */
-  function moveCard(from: 'left' | 'right', to: 'left' | 'right', key: string, at: CardDrop): void {
+  function moveCard(
+    from: 'left' | 'right',
+    to: 'left' | 'right',
+    key: string,
+    at: CardDrop,
+    dstTrayId: string | null = null,
+  ): void {
     if (at.targetId === key) return
     const dock = deps.prefs().dock
-    const src = dock[from].cards
-    const dst = dock[to].cards
-    const i = src.findIndex((e) => dockKey(e) === key)
-    if (i < 0) return
-    if (from !== to && dst.some((e) => dockKey(e) === key)) return
-    const entry = src[i]!
-    src.splice(i, 1)
+    const src = findDock(dock[from].cards, key)
+    if (!src) return
+    const entry = src.list[src.index]!
+    let dst: DockEntry[]
+    if (dstTrayId !== null) {
+      const trayFound = findDock(dock[to].cards, dockKey({ kind: 'tray', id: dstTrayId, cards: [] }))
+      const tray = trayFound ? trayFound.list[trayFound.index]! : null
+      // 盘只收叶子（容器只收叶子，读路径的摊平／上提是兜底不是通路）
+      if (!tray || tray.kind !== 'tray' || !isLeafEntry(entry)) return
+      dst = tray.cards
+    } else {
+      dst = dock[to].cards
+    }
+    if (src.list !== dst && dst.some((e) => dockKey(e) === key)) return
+    src.list.splice(src.index, 1)
 
     let index = dst.length
     if (at.targetId) {
@@ -996,6 +1146,8 @@ export function setupDocks(deps: DocksDeps) {
       deps.noteSlotChanged(to)
       deps.applyChrome()
     }
+    // 源头若是盘，搬走最后一张成员后它就空了 ⇒ 写出即解散
+    dissolveIfEmpty(from)
     renderDocks()
     deps.scheduleDeviceSave()
     deps.scheduleBadge()
@@ -1084,6 +1236,130 @@ export function setupDocks(deps: DocksDeps) {
     deps.scheduleBadge()
   }
 
+  /* ------------------------------------------------------------ 收纳盘 */
+
+  /**
+   * 建盘：**容器从内容里长出来**——盘插在那张小卡原来的位置，顺序感不变。
+   * 不存在空盘：建盘的唯一入口就是「把这一张收进去」。
+   */
+  function createTrayFromTile(side: 'left' | 'right', key: string): boolean {
+    const cards = deps.prefs().dock[side].cards
+    const i = cards.findIndex((e) => dockKey(e) === key)
+    if (i < 0) return false
+    const entry = cards[i]!
+    if (!isLeafEntry(entry)) return false
+    cards.splice(i, 1)
+    cards.splice(i, 0, { kind: 'tray', id: uuidv7Hex(), cards: [entry] })
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+    return true
+  }
+
+  /** 一次收完：把这一槽顶层还裸着的小卡全部收进这只盘（盘内已有的顺序不动） */
+  function collectRestIntoTray(side: 'left' | 'right', trayId: string): boolean {
+    const cards = deps.prefs().dock[side].cards
+    const tray = cards.find((e) => e.kind === 'tray' && e.id === trayId)
+    if (!tray || tray.kind !== 'tray') return false
+    const rest = cards.filter((e) => isLeafEntry(e))
+    if (rest.length === 0) return false
+    tray.cards.push(...rest)
+    for (const e of rest) cards.splice(cards.indexOf(e), 1)
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+    return true
+  }
+
+  /**
+   * ✕＝**解散**：只摘把手，小卡留在原位（数量与顺序都不变）——关容器不许带走成员。
+   * 盘头菜单里的「连同小卡移出」才是唯一后果性动作（✕ 不该是破坏性按钮）。
+   */
+  function dissolveTray(side: 'left' | 'right', key: string): boolean {
+    const dock = deps.prefs().dock
+    const i = dock[side].cards.findIndex((e) => dockKey(e) === key)
+    if (i < 0) return false
+    const tray = dock[side].cards[i]!
+    if (tray.kind !== 'tray') return false
+    dock[side].cards.splice(i, 1, ...tray.cards)
+    delete dock.collapsedCards[key]
+    if (dock.solo[side] === key) dock.solo[side] = null
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+    return true
+  }
+
+  /** 连同小卡移出：把这一只盘和它装的小卡一起从槽里摘掉 */
+  function removeTrayWithCards(side: 'left' | 'right', key: string): boolean {
+    const dock = deps.prefs().dock
+    const i = dock[side].cards.findIndex((e) => dockKey(e) === key)
+    if (i < 0) return false
+    const tray = dock[side].cards[i]!
+    if (tray.kind !== 'tray') return false
+    dock[side].cards.splice(i, 1)
+    delete dock.collapsedCards[key]
+    if (dock.solo[side] === key) dock.solo[side] = null
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+    return true
+  }
+
+  /**
+   * 重命名的**行内输入**：把盘头的标题位换成一只输入框，Enter／失灵点别处＝提交，
+   * Esc＝取消（重画恢复原样）。点盘头仍然是开合——输入框吞掉自己的点击与按键，
+   * 不让「改名打到一半」变成一次折叠。空串＝回到未命名（卡头显示「n 张小卡」）。
+   */
+  function startTrayRename(side: 'left' | 'right', trayId: string): void {
+    const key = dockKey({ kind: 'tray', id: trayId, cards: [] })
+    const tray = deps.prefs().dock[side].cards.find((e) => e.kind === 'tray' && e.id === trayId)
+    if (!tray || tray.kind !== 'tray') return
+    const stack = deps.getSlots()[side].stack
+    const titleEl = stack.querySelector<HTMLElement>(
+      `.dock-card[data-card-id="${CSS.escape(key)}"] > .dock-card-head > .dock-card-title`,
+    )
+    if (!titleEl) return
+    const input = document.createElement('input')
+    input.className = 'dock-tray-rename'
+    input.value = tray.title ?? ''
+    input.placeholder = t('ui.dock.trayRenamePlaceholder')
+    input.spellcheck = false
+    let done = false
+    const commit = () => {
+      if (done) return
+      done = true
+      renameTray(side, trayId, input.value)
+    }
+    const cancel = () => {
+      if (done) return
+      done = true
+      renderDocks()
+    }
+    input.addEventListener('click', (e) => e.stopPropagation())
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation()
+      if (e.key === 'Enter') commit()
+      else if (e.key === 'Escape') cancel()
+    })
+    input.addEventListener('blur', commit)
+    titleEl.replaceWith(input)
+    input.focus()
+    input.select()
+  }
+
+  /** 重命名落盘：只改 title，key 不动（改名、换槽、收起都不换 key） */
+  function renameTray(side: 'left' | 'right', trayId: string, title: string): void {
+    const tray = deps.prefs().dock[side].cards.find((e) => e.kind === 'tray' && e.id === trayId)
+    if (!tray || tray.kind !== 'tray') return
+    const name = title.trim()
+    if (name === '') delete tray.title
+    else tray.title = name
+    renderDocks()
+    deps.scheduleDeviceSave()
+    deps.scheduleBadge()
+  }
+
   return {
     renderDocks,
     openWindow,
@@ -1100,6 +1376,12 @@ export function setupDocks(deps: DocksDeps) {
     topWindow,
     closeOtherWindows,
     closeAllWindows,
+    /** 收纳盘：建盘（从一张顶层小卡长出来）／一次收完／解散／连同移出／行内重命名 */
+    createTrayFromTile,
+    collectRestIntoTray,
+    dissolveTray,
+    removeTrayWithCards,
+    startTrayRename,
     /** 卡头状态/标题给窗口管理器用（窗口卡由它自己建） */
     cardStateFor,
     windowLabel,

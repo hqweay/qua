@@ -74,6 +74,12 @@ const kernel = {
 /* ------------------------------------------------------------ 库面 */
 
 const qua = {
+  /**
+   * 壳的平台（**同步只读常量**）：网页顶栏要靠它决定给原生窗口控件让哪一侧、让多少。
+   * 不用 `userAgent` 猜：那是渲染层能被改写的字符串，这里是壳给的事实。
+   * 沙箱 preload 里 `process` 是受限的多面对象，取不到时退成 unknown（不让加载失败）。
+   */
+  platform: typeof process === 'undefined' ? 'unknown' : process.platform,
   /** 这个窗口订阅的是哪个库（没有库 ⇒ `status:'no-library'`，走欢迎页） */
   libraryInfo: (): Promise<unknown> => ipcRenderer.invoke('qua:library/info'),
   libraryList: (): Promise<unknown> => ipcRenderer.invoke('qua:library/list'),

@@ -8,9 +8,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   canonicalDockEntries,
+  dissolveEmptyTrays,
   dockKey,
   DERIVED_CARDS,
   DOCK_SHORTCUT_PREFIX,
+  DOCK_TRAY_PREFIX,
+  findDock,
   pinDefaultFor,
   pruneEphemeralWindows,
 } from '../src/core/views/dock.ts'
@@ -169,4 +172,125 @@ test('dock: 重启清理不碰快捷卡（它是槽的家具，不是打开来�
     { kind: 'shortcut', block: 'b2' },
     { kind: 'cmd', command: 'x' },
   ])
+})
+
+/* ---------------- 收纳盘（§3） ---------------- */
+
+const tray = (id: string, cards: unknown[], title?: string) =>
+  ({ kind: 'tray', id, ...(title ? { title } : {}), cards }) as never
+
+test('dock: 盘是一张卡——key 是 tray:<id>，收起表按它存；盘不参与重启清理', () => {
+  assert.equal(dockKey(tray('t1', [])), `${DOCK_TRAY_PREFIX}t1`)
+  const cards: never[] = [
+    tray('t1', [{ kind: 'cmd', command: 'x' }]),
+    { kind: 'cmd', command: 'y' },
+  ] as never
+  // 盘是家具：重启清理原样保留（它装的都是小卡，里面没有「打开来看的窗口」）
+  assert.deepEqual(pruneEphemeralWindows(cards, {}), cards)
+})
+
+test('dock: 盘内读到嵌套盘 ⇒ 成员摊平到原位，一张不丢', () => {
+  const out = canonicalDockEntries([
+    {
+      kind: 'tray',
+      id: 'outer',
+      cards: [
+        { kind: 'cmd', command: 'a' },
+        { kind: 'tray', id: 'inner', cards: [{ kind: 'cmd', command: 'b' }, { kind: 'shortcut', block: 's1' }] },
+        { kind: 'shortcut', block: 's2' },
+      ],
+    },
+  ])
+  assert.deepEqual(out, [
+    {
+      kind: 'tray',
+      id: 'outer',
+      cards: [
+        { kind: 'cmd', command: 'a' },
+        { kind: 'cmd', command: 'b' },
+        { kind: 'shortcut', block: 's1' },
+        { kind: 'shortcut', block: 's2' },
+      ],
+    },
+  ])
+})
+
+test('dock: 盘里读到窗口类条目 ⇒ 上提到盘后一位，相遇顺序不变', () => {
+  const out = canonicalDockEntries([
+    tray('t1', [
+      { kind: 'cmd', command: 'a' },
+      { kind: 'derived', card: 'calendar' },
+      { kind: 'block', block: 'b1' },
+      { kind: 'cmd', command: 'b' },
+    ]),
+    { kind: 'cmd', command: 'after' },
+  ])
+  assert.deepEqual(out, [
+    tray('t1', [
+      { kind: 'cmd', command: 'a' },
+      { kind: 'cmd', command: 'b' },
+    ]),
+    { kind: 'derived', card: 'calendar' },
+    { kind: 'block', block: 'b1' },
+    { kind: 'cmd', command: 'after' },
+  ])
+})
+
+test('dock: id 立不住的盘 ⇒ 原地摊平成普通条目（降级，不丢卡）', () => {
+  const out = canonicalDockEntries([
+    { kind: 'tray', cards: [{ kind: 'cmd', command: 'a' }, { kind: 'block', block: 'b1' }] },
+    { kind: 'cmd', command: 'b' },
+  ])
+  assert.deepEqual(out, [{ kind: 'cmd', command: 'a' }, { kind: 'block', block: 'b1' }, { kind: 'cmd', command: 'b' }])
+})
+
+test('dock: 同一个 key 只留第一份——顶层与盘内互相去重', () => {
+  // 盘里已有这颗快捷 ⇒ 后来的顶层同名卡不收（口径是「这份露面」，不管住哪层）
+  assert.deepEqual(
+    canonicalDockEntries([
+      tray('t1', [{ kind: 'shortcut', block: 's1' }]),
+      { kind: 'shortcut', block: 's1' },
+      { kind: 'cmd', command: 'x' },
+      tray('t2', [{ kind: 'cmd', command: 'x' }]),
+    ]),
+    [
+      tray('t1', [{ kind: 'shortcut', block: 's1' }]),
+      { kind: 'cmd', command: 'x' },
+      tray('t2', []),
+    ],
+  )
+})
+
+test('dock: 空盘在读路径**保留**（解散是写出侧的规则，读不悄悄删）', () => {
+  assert.deepEqual(canonicalDockEntries([tray('t1', []), { kind: 'cmd', command: 'x' }]), [
+    tray('t1', []),
+    { kind: 'cmd', command: 'x' },
+  ])
+})
+
+test('dock: 写出侧解散空盘——返回被摘盘的 key，非空盘不动', () => {
+  const cards: never[] = [
+    tray('empty1', []),
+    tray('full', [{ kind: 'cmd', command: 'x' }]),
+    tray('empty2', []),
+  ] as never
+  const removed = dissolveEmptyTrays(cards)
+  assert.deepEqual(removed, [`${DOCK_TRAY_PREFIX}empty2`, `${DOCK_TRAY_PREFIX}empty1`])
+  assert.deepEqual(cards, [tray('full', [{ kind: 'cmd', command: 'x' }])])
+})
+
+test('dock: findDock 是「按 key 找条目」的唯一一份——顶层与盘内都找得到，返回装着它的列表', () => {
+  const cards = [
+    { kind: 'cmd', command: 'top' },
+    tray('t1', [{ kind: 'shortcut', block: 's1' }]),
+  ] as never[]
+  const top = findDock(cards, 'cmd:top')
+  assert.ok(top)
+  assert.equal(top.index, 0)
+  assert.equal(top.list, cards, '顶层条目返回槽自己的列表')
+  const inner = findDock(cards, `${DOCK_SHORTCUT_PREFIX}s1`)
+  assert.ok(inner)
+  assert.equal(inner.index, 0)
+  assert.notEqual(inner.list, cards, '盘内条目返回盘的成员列表——调用方直接在它上面 splice')
+  assert.equal(findDock(cards, 'gone'), null)
 })

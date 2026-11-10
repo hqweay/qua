@@ -217,9 +217,29 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
   // 一个块全局最多一张窗口：同一个块/派生卡不留在两边。
   // 左槽先到先得——默认布局里左槽是导航位，冲突时保留它更符合直觉。
   // `cmd` 不是块，同一个命令可以两槽都有（它没有窗口状态可冲突）。
+  // 盘**摊平一层参与去重**：同一颗快捷卡不该同时躺在两槽的盘里；
+  // 从右槽盘里摘走成员后盘空了就一并解散（容器是内容的推论）。
   const shared = (e: DockEntry): boolean => e.kind !== 'cmd'
-  const leftKeys = new Set(left.cards.filter(shared).map(dockKey))
-  right.cards = right.cards.filter((e) => !shared(e) || !leftKeys.has(dockKey(e)))
+  const leftKeys = new Set<string>()
+  for (const e of left.cards) {
+    if (shared(e)) leftKeys.add(dockKey(e))
+    if (e.kind === 'tray') for (const m of e.cards) if (shared(m)) leftKeys.add(dockKey(m))
+  }
+  const dropShared = (cards: DockEntry[]): DockEntry[] => {
+    const out: DockEntry[] = []
+    for (const e of cards) {
+      if (e.kind !== 'tray') {
+        if (!shared(e) || !leftKeys.has(dockKey(e))) out.push(e)
+        continue
+      }
+      const members = e.cards.filter((m) => !shared(m) || !leftKeys.has(dockKey(m)))
+      if (members.length === e.cards.length) out.push(e)
+      else if (members.length > 0) out.push({ ...e, cards: members })
+      // 全被摘走 ⇒ 盘空了解散；一只都不缺就原样保留（不去重不动它）
+    }
+    return out
+  }
+  right.cards = dropShared(right.cards)
 
   const collapsedCards: Record<string, true> = {}
   if (dock?.collapsedCards && typeof dock.collapsedCards === 'object' && !Array.isArray(dock.collapsedCards)) {

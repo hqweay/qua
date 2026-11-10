@@ -137,6 +137,13 @@ const LIBRARY_BRIDGE: LibraryBridge | null =
     : null
 
 /**
+ * **网页顶栏就是窗口标题栏**：系统那条已隐藏，但原生窗口控件还浮在内容上。
+ * 平台由壳同步给出（不是 UA 猜的）：macOS 的红黄绿在左上 ⇒ 顶栏左侧让位；
+ * 其它平台的窗口控制在右上 ⇒ 右侧让位。浏览器宿主没有 `qua` ⇒ 两侧都不让。
+ */
+if (LIBRARY_BRIDGE?.platform) document.body.dataset.platform = LIBRARY_BRIDGE.platform
+
+/**
  * **搜索运行时**在读完库之后才能建（索引状态是库的一部分）；存储门面用 getter
  * 现取它 —— 这样「建 store」与「建搜索」的先后不会变成一条隐式依赖。
  */
@@ -388,7 +395,7 @@ const { keyHints, uiCtx } = setupKeys({
 
 /** 卡头菜单／画廊／窗口卡依赖／槽宽拖拽的家什；赋值在 panels/app 之后（见那一节的注释） */
 let menus: ReturnType<typeof setupCardMenus>
-const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, addShortcut, removeShortcut, retargetShortcut, collapseToShortcut, restoreWindow, cardStateFor, windowLabel, setWindows, toggleFoldAll, topWindow, closeOtherWindows, closeAllWindows } = setupDocks({
+const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, addShortcut, removeShortcut, retargetShortcut, collapseToShortcut, restoreWindow, cardStateFor, windowLabel, setWindows, toggleFoldAll, topWindow, closeOtherWindows, closeAllWindows, createTrayFromTile, collectRestIntoTray, dissolveTray, removeTrayWithCards, startTrayRename } = setupDocks({
   kb,
   prefs,
   applyChrome: () => applyChrome(),
@@ -404,6 +411,7 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, add
   inspectCard: () => chrome.inspectCardEl,
   showCardMenu: (side, key, anchor, trigger) => menus.showCardMenu(side, key, anchor, trigger),
   showShortcutMenu: (side, blockId, anchor, trigger) => menus.showShortcutMenu(side, blockId, anchor, trigger),
+  showTileMenu: (side, command, anchor, trigger) => menus.showTileMenu(side, command, anchor, trigger),
   toast: (msg, kind) => app.toast(msg, kind),
   confirm: (o) => layers.confirm(o),
   /**
@@ -457,7 +465,7 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, add
   openBlock: (id, place, opts) => app.openBlock(id, place, opts),
 })
 
-const { chrome, editorEl, applyChrome, resolvedTheme, dockMinWidth, dockMaxWidth, badge, scheduleBadge, markBooted } = setupChrome({
+const { chrome, editorEl, applyChrome, paintTopbarNav, resolvedTheme, dockMinWidth, dockMaxWidth, badge, scheduleBadge, markBooted } = setupChrome({
   prefs,
   bootNotice,
   shortId,
@@ -981,7 +989,7 @@ const dispatchEnv = installDispatch({
   editorEl,
 })
 
-const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEditableRoot, materializeEditableRoots, initTabs, resetTabs, activateTab, openInNewTab, openSurfaceTab, newTab, closeTab, nextTab, prevTab, canGoBack, canGoForward, refreshTabs } = setupPages({
+const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEditableRoot, materializeEditableRoots, initTabs, resetTabs, listTabs, activateTab, openInNewTab, openSurfaceTab, newTab, closeTab, nextTab, prevTab, canGoBack, canGoForward, refreshTabs } = setupPages({
   kb,
   blocks,
   txRun,
@@ -1015,6 +1023,8 @@ const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEdit
   openPropertiesDrawer: (id) => app.openPropertiesDrawer(id),
   onTabsChanged: (tabs) => {
     renderCenterTabs(tabs)
+    // 顶栏的前进/后退跟着导航历史置灰；`emitTabs()` 在每次导航与切 tab 时都发
+    paintTopbarNav(canGoBack(), canGoForward())
     // 表面 tab 开着时库会变（恢复/删除走别处）：身体跟着重画，与槽里的同一张卡同拍
     surface.refreshIfShown()
   },
@@ -1041,7 +1051,32 @@ function renderCenterTabs(tabs: readonly TabInfo[]): void {
     create: () => {
       newTab()
     },
-  })
+    /*
+     * 「全部页签」集合：顶栏放得下的直接点，放不下的从这里纵览／切换。
+     * 同一个块只许有一张 tab（状态层按视图去重）⇒ 名字天然能区分，不必编号。
+     */
+    openList: (trigger) => {
+      const tabs = listTabs()
+      layers.openMenu({
+        rows: tabs.map((tab) => ({
+          id: tab.id,
+          label: tab.title,
+          hint: tab.active ? t('ui.tabs.current') : '',
+          icon: tab.title.endsWith(t('ui.tabs.feed')) ? 'lucide:calendar' : 'lucide:file',
+          group: t('ui.tabs.group'),
+        })),
+        anchor: null,
+        trigger,
+        title: t('ui.tabs.all', { n: tabs.length }),
+        searchable: true,
+        focusSearch: false,
+        placeholder: t('ui.tabs.search'),
+        onPick: (row) => {
+          activateTab(row.id)
+        },
+      })
+    },
+  }, chrome.centerTabAddEl, chrome.centerTabListEl)
 }
 /* ------------------------------------------------------------ 属性写入 / 摘标签提示 */
 
@@ -3243,6 +3278,11 @@ menus = setupCardMenus({
   toggleFoldAll,
   closeOtherWindows,
   closeAllWindows,
+  createTrayFromTile,
+  collectRestIntoTray,
+  dissolveTray,
+  removeTrayWithCards,
+  startTrayRename,
   kb,
   prefs,
   getRegistry: () => registry,
@@ -3271,7 +3311,7 @@ const dockLeft = mountDockSlot($('dock-left'), {
   side: 'left',
   title: t('ui.dock.leftTitle'),
   addLabel: t('ui.dock.addTile'),
-  collapseLabel: t('ui.dock.collapseLeft'),
+  collapseLabel: t('ui.dock.toggleLeft'),
   foldAllLabel: t('ui.dock.foldAll'),
   resizeLabel: t('ui.dock.resize'),
   icon: 'lucide:chevron-left',
@@ -3283,7 +3323,7 @@ const dockRight = mountDockSlot($('dock-right'), {
   side: 'right',
   title: t('ui.dock.rightTitle'),
   addLabel: t('ui.dock.addTile'),
-  collapseLabel: t('ui.dock.collapseRight'),
+  collapseLabel: t('ui.dock.toggleRight'),
   foldAllLabel: t('ui.dock.foldAll'),
   resizeLabel: t('ui.dock.resize'),
   icon: 'lucide:chevron-right',

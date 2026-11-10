@@ -78,6 +78,7 @@ input {
        连中心槽一起压没（原型实测踩过）。这里用列宽归零 + visibility。
 */
 #app {
+  position: relative;
   display: grid;
   /*
    * 三列：左槽 / 中心槽 / 右槽。（2026-10-19 回扫后的口径）：
@@ -100,6 +101,97 @@ input {
   height: 100vh;
   overflow: hidden;
   background: var(--ui-surface);
+}
+
+/* ---------------------------------------------------------- 贯通顶栏
+   一条 absolute 的窗口级横条，不是 grid 的第一行：三槽的列算法（关槽不塌列、
+   压缩区间解除中心保底）与槽的 DOM 起点都不用改，只由三条槽各自让出这一行。
+   控件按「窗口/导航在左、上下文在中、工具在右」分组，中间是 tab 与留白。 */
+#topbar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: var(--ui-z-chrome);
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-3);
+  height: var(--ui-topbar-h);
+  padding: 0 var(--ui-gap-4);
+  background: var(--ui-surface);
+  border-bottom: var(--ui-sep) solid var(--ui-border-subtle);
+  color: var(--ui-text-secondary);
+}
+/* 这条顶栏就是窗口标题栏：整条可拖窗，可点的元素逐个标回 no-drag。
+   tab 主体是 div 不是 button，上面的 button 规则盖不住它，要单独标；
+   tab 条自身的横向滚动只在 tab 溢出（没有空白）时才发生，空白处还给拖窗不损失滚轮。 */
+#topbar {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+#topbar button,
+#topbar .center-tab {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+/* 原生窗口控件仍浮在内容上：macOS 红黄绿在左上 ⇒ 顶栏左侧让位；
+   其它平台的 titleBarOverlay 控制在右上 ⇒ 右侧让位。
+   只在 Electron 宿主（壳写 body[data-platform]）生效：浏览器里没有控件，不留空。 */
+body[data-platform='darwin'] #topbar {
+  padding-inline-start: 78px;
+}
+body[data-platform]:not([data-platform='darwin']) #topbar {
+  padding-inline-end: 140px;
+}
+#app > .dock {
+  padding-top: var(--ui-topbar-h);
+}
+.topbar-nav,
+.topbar-tools,
+.topbar-dock {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  flex: 0 0 auto;
+}
+.topbar-center {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+}
+.topbar-btn,
+.center-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--ui-row-h);
+  height: var(--ui-row-h);
+  padding: 0;
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.topbar-btn:hover,
+.center-filter:hover {
+  background: var(--ui-bg-hover);
+  color: var(--ui-text);
+}
+.topbar-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: none;
+}
+.topbar-btn:disabled:hover {
+  color: var(--ui-text-tertiary);
+}
+/* 槽的开关按钮常驻：槽关上之后，鼠标仍能把它叫回来（此前槽头整条随槽隐藏） */
+body[data-dock-left='closed'] #dock-left-head .dock-foldall,
+body[data-dock-left='closed'] #dock-left-head .dock-add,
+body[data-dock-right='closed'] #dock-right-head .dock-foldall,
+body[data-dock-right='closed'] #dock-right-head .dock-add {
+  display: none;
 }
 body[data-dock-left='closed'] #app {
   --dock-left-min: 0px;
@@ -129,7 +221,7 @@ body[data-dock-right='closed'] #dock-right {
   档位轴（body[data-axis]）：**叠在设备偏好上的一层**——进入不写 prefs，
   退出自动回到进入前的样子，所以这里只管「这一档长什么样」，不管还原。
   宽屏＝双槽收起（槽的可见性由装配层按档位判据写 data-dock-*，不在这里另写列宽）
-  ＋ 阅读/视图宽度上限放开；全屏＝再藏抬头与 tab 条，只剩内容与退出口。
+  ＋ 阅读/视图宽度上限放开；全屏＝再藏文档头与 tab 条，退出口浮在顶栏之下。
 */
 body[data-axis='wide'],
 body[data-axis='full'] {
@@ -139,10 +231,10 @@ body[data-axis='full'] #crumbs-trail,
 body[data-axis='full'] .center-tabs {
   display: none;
 }
-/* 退出口：档位收起了槽与抬头之后，Esc 之外的鼠标回路只有这一颗 */
+/* 退出口：档位收起了槽之后，Esc 之外的鼠标回路只有这一颗；落在顶栏之下不遮工具 */
 .axis-exit {
   position: fixed;
-  inset-block-start: var(--ui-gap-3);
+  inset-block-start: calc(var(--ui-topbar-h) + var(--ui-gap-3));
   inset-inline-end: var(--ui-gap-3);
   z-index: var(--ui-z-notice);
   display: inline-flex;

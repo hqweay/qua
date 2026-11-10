@@ -333,6 +333,49 @@ test('device: `cmd:` 不是块，同一个命令可以同时出现在两槽', as
   )
 })
 
+test('device: 左右槽去重摊平一层：同一颗快捷卡不该同时躺在两槽的盘里；盘空了解散', async () => {
+  resetMemoryLocalStorage()
+  const key = freshKey()
+  await store(key).save({
+    prefs: {
+      ...DEFAULT_PREFS,
+      dock: {
+        left: {
+          open: true,
+          width: null,
+          cards: [{ kind: 'shortcut', block: 's1' }, { kind: 'shortcut', block: 's2' }, { kind: 'derived', card: 'belongs' }],
+        },
+        right: {
+          open: true,
+          width: null,
+          cards: [
+            {
+              kind: 'tray',
+              id: 't1',
+              title: '收着',
+              cards: [{ kind: 'shortcut', block: 's1' }, { kind: 'cmd', command: 'core.page/new' }],
+            },
+            { kind: 'tray', id: 't2', cards: [{ kind: 'shortcut', block: 's2' }] },
+          ],
+        },
+        collapsedCards: {},
+        solo: { left: null, right: null },
+      },
+    },
+    folded: {},
+  })
+  const dock = (await store(key).load()).prefs.dock
+  // s1/s2 都在左槽已有：右槽盘里那几份被摘走；t1 还剩 cmd、t2 全被摘走 ⇒ 空盘解散
+  assert.deepEqual(dock.right.cards, [
+    {
+      kind: 'tray',
+      id: 't1',
+      title: '收着',
+      cards: [{ kind: 'cmd', command: 'core.page/new' }],
+    },
+  ])
+})
+
 test('device: 坏字节 / 别的后端的字节 ⇒ 回默认，不抛也不改写原字节', async () => {
   resetMemoryLocalStorage()
   const brokenKey = freshKey()

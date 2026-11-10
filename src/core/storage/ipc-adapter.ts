@@ -29,6 +29,11 @@ import { FTS_SOURCES, ftsRowKey, type FtsSource } from '../search/sources.ts'
 
 /** 主进程那一侧的最小面（`electron/preload.ts` 暴露的同名方法） */
 export interface LibraryBridge {
+  /**
+   * 壳的平台（同步常量，只在 Electron 里有）：顶栏按它给原生窗口控件让位。
+   * 可选是因为测试可以只造一张瘦桥（web 宿主根本没有 `window.qua`）。
+   */
+  platform?: string
   onFlush?(cb: () => void | Promise<void>): void
   libraryInfo(): Promise<unknown>
   load(): Promise<unknown>

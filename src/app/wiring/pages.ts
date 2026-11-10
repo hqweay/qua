@@ -396,6 +396,15 @@ export function setupPages(deps: PagesDeps) {
     return true
   }
 
+  /**
+   * `+`：**同一个视图只开一张 tab**。
+   *
+   * 从前这里无条件 `makeTab`，连按 `+` 就造出同一个「今日日记流」的 N 份状态——
+   * 名字相同、内容相同，只有各自的滚动位置／历史不同，顶栏却要为它们平铺 N 格。
+   * 现在与 `⌘+点`（`openInNewTab`）走同一条去重：已开着就切过去，不制造第二份状态。
+   * ⚠️ `openInNewTab` 返回 true 也包含「已经开着且就是当前」的情形（T277），
+   *    别拿这个布尔判断「有没有新造一张」。
+   */
   function newTab(): boolean {
     initTabs()
     const today = journalId(todayISO())
@@ -405,15 +414,7 @@ export function setupPages(deps: PagesDeps) {
     const targetId = todayBlock ? today : (blockTab?.activeId ?? '')
     const targetFeed = todayBlock ? true : Boolean(blockTab?.feed)
     if (!targetId) return false
-    // `+` 总是开一张新 tab（浏览器同一条直觉）；⌘+点击才按视图去重
-    const tab = makeTab(targetId, targetFeed)
-    if (!tab) return false
-    captureActive()
-    tabs.push(tab)
-    activeTabId = tab.id
-    syncNav()
-    loadTab(tab)
-    return true
+    return openInNewTab(targetId, targetFeed)
   }
 
   function closeTab(id?: string): boolean {

@@ -6,7 +6,7 @@
  * 咬合变成显式的 deps 清单——一半来自 `setupDocks` 的返回（状态的家在那边），
  * 一半是装配层的活引用（换库/焦点切换会变的，一律现取，不传值）。
  */
-import { blockLabel, centerDerivedOpenable, DERIVED_CARDS, dockKey, isCardCollapsed, UTILITY_FACES, walkForest, type DerivedCardId, type UtilityFaceId } from '../../core/index.ts'
+import { blockLabel, centerDerivedOpenable, DERIVED_CARDS, dockKey, findDock, isCardCollapsed, isLeafEntry, UTILITY_FACES, walkForest, type DerivedCardId, type DockEntry, type UtilityFaceId } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
@@ -36,6 +36,12 @@ export interface DockMenusDeps {
   toggleFoldAll: (side: 'left' | 'right') => void
   closeOtherWindows: (side: 'left' | 'right', key: string) => void
   closeAllWindows: (side: 'left' | 'right') => void
+  /** 收纳盘的四个动作 ＋ 行内重命名（状态与落盘的家在 setupDocks，这里只给时机与锚） */
+  createTrayFromTile: (side: 'left' | 'right', key: string) => boolean
+  collectRestIntoTray: (side: 'left' | 'right', trayId: string) => boolean
+  dissolveTray: (side: 'left' | 'right', key: string) => boolean
+  removeTrayWithCards: (side: 'left' | 'right', key: string) => boolean
+  startTrayRename: (side: 'left' | 'right', trayId: string) => void
 
   /* —— 装配层活引用 —— */
   kb: MemoryKb
@@ -79,12 +85,17 @@ export function setupCardMenus(deps: DockMenusDeps) {
   const showCardMenu = (side: 'left' | 'right', key: string, anchor: DOMRect, trigger?: HTMLElement): void => {
     const st = deps.cardStateFor(side, key)
     const dock = deps.prefs().dock
-    const entry = dock[side].cards.find((e) => dockKey(e) === key)
+    // 「按 key 找条目」只有一份（findDock）：盘头菜单的条目也从这里来
+    const found = findDock(dock[side].cards, key)
+    const entry: DockEntry | null = found ? found.list[found.index]! : null
+    const tray = entry?.kind === 'tray' ? entry : null
     const b = entry?.kind === 'block' ? deps.kb.get(entry.block) : undefined
     const isWindow = entry?.kind === 'block'
     const blockId = b?.id ?? ''
     const windows = dock[side].cards.filter((e) => e.kind === 'block')
     const anyExpanded = dock[side].cards.some((e) => !isCardCollapsed(dock, side, dockKey(e)))
+    /** 「把其余小卡收进来」给不给：这一槽顶层还裸着几张 */
+    const bareTiles = dock[side].cards.filter((e) => isLeafEntry(e)).length
     /**
      * 这张卡能不能「在中心打开」（同一份内容在中心的一次露面，卡留在槽里）。
      *
@@ -104,6 +115,13 @@ export function setupCardMenus(deps: DockMenusDeps) {
             { id: 'top', label: t('cmd.dock.topWindow') },
             { id: 'focus', label: t('ui.dock.focusInEditor') },
             { id: 'collapseToShortcut', label: t('ui.dock.collapseToShortcut') },
+          ]
+        : []),
+      ...(tray
+        ? [
+            { id: 'trayRename', label: t('ui.dock.trayRename') },
+            { id: 'trayCollect', label: t('ui.dock.trayCollect'), disabled: bareTiles === 0 },
+            { id: 'trayMoveOut', label: t('ui.dock.trayMoveOut') },
           ]
         : []),
       ...(centerOpenable && !isWindow ? [{ id: 'center', label: t('cmd.surface.open') }] : []),
@@ -143,6 +161,15 @@ export function setupCardMenus(deps: DockMenusDeps) {
             return
           case 'collapseToShortcut':
             deps.collapseToShortcut(side, blockId)
+            return
+          case 'trayRename':
+            if (tray) deps.startTrayRename(side, tray.id)
+            return
+          case 'trayCollect':
+            if (tray) deps.collectRestIntoTray(side, tray.id)
+            return
+          case 'trayMoveOut':
+            deps.removeTrayWithCards(side, key)
             return
           case 'center':
             openSurface()
@@ -199,6 +226,7 @@ export function setupCardMenus(deps: DockMenusDeps) {
    *
    * 没有「展开为窗口／转大卡」那一行：小卡只占 44px，删掉它是净亏；
    * 「在侧槽展开」只**加**一张窗口卡，这颗快捷留在原地。
+   * 顶层裸排的才给「收进新收纳盘」——盘只从内容里长出来，盘里的成员没有第二个盘可进。
    */
   const showShortcutMenu = (
     side: 'left' | 'right',
@@ -207,7 +235,10 @@ export function setupCardMenus(deps: DockMenusDeps) {
     trigger?: HTMLElement,
   ): void => {
     const alive = deps.kb.get(blockId) !== undefined
+    const key = dockKey({ kind: 'shortcut', block: blockId })
+    const topLevel = deps.prefs().dock[side].cards.some((e) => dockKey(e) === key)
     const rows: Row[] = [
+      ...(topLevel ? [{ id: 'trayNew', label: t('ui.dock.trayCreate') }] : []),
       { id: 'retarget', label: t('ui.dock.retargetShortcut') },
       ...(alive ? [{ id: 'restore', label: t('ui.dock.restoreWindow'), hint: t('ui.dock.shortcutShiftHint') }] : []),
       { id: 'remove', label: t('ui.dock.removeShortcutMenu') },
@@ -219,6 +250,9 @@ export function setupCardMenus(deps: DockMenusDeps) {
       searchable: false,
       onPick: (row) => {
         switch (row.id) {
+          case 'trayNew':
+            deps.createTrayFromTile(side, key)
+            return
           case 'retarget':
             pickShortcutBlock((to) => {
               if (!deps.retargetShortcut(side, blockId, to)) deps.toast(t('ui.dock.shortcutExists'), 'info')
@@ -231,6 +265,25 @@ export function setupCardMenus(deps: DockMenusDeps) {
             deps.removeShortcut(side, blockId)
             return
         }
+      },
+    })
+  }
+
+  /**
+   * 命令小卡右键：命令小卡此前没有菜单（移出是 hover 常驻的 ✕），
+   * 收纳盘给了它第一个右键动作——收进新收纳盘。同样只在顶层裸排时给。
+   */
+  const showTileMenu = (side: 'left' | 'right', command: string, anchor: DOMRect, trigger?: HTMLElement): void => {
+    const key = dockKey({ kind: 'cmd', command })
+    const topLevel = deps.prefs().dock[side].cards.some((e) => dockKey(e) === key)
+    if (!topLevel) return
+    deps.layers.openMenu({
+      rows: [{ id: 'trayNew', label: t('ui.dock.trayCreate') }],
+      anchor,
+      ...(trigger ? { trigger } : {}),
+      searchable: false,
+      onPick: (row) => {
+        if (row.id === 'trayNew') deps.createTrayFromTile(side, key)
       },
     })
   }
@@ -419,5 +472,5 @@ export function setupCardMenus(deps: DockMenusDeps) {
     })
   }
 
-  return { showCardMenu, showShortcutMenu, showWidgetGallery, dockWindowsDeps, bindResize }
+  return { showCardMenu, showShortcutMenu, showTileMenu, showWidgetGallery, dockWindowsDeps, bindResize }
 }

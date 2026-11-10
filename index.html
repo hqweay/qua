@@ -36,46 +36,65 @@
     <div id="boot-notice" class="boot-notice" role="status" hidden></div>
     <div id="app">
       <!--
-        三槽并排（2026-10-19 晚修订：**入口条已作废**）
-          `槽(left) ｜ 槽(center) ｜ 槽(right)`
-        · 三槽**同一种材质**，只靠一条分隔线分家（不是「侧栏灰 + 正文白」）
-        · 槽的开关与「这一槽放什么」都归槽自己（抬头上的左右箭头，⌘⌥1 / ⌘⌥2）
-        · 每个槽的内容 = **一列块**；这里只放空壳，块由 dock.ts 渲染
-        · 中心槽没有「页标题」这个概念
+        贯通顶栏 ＋ 三槽（2026-11-10 修订）
+          · 顶栏是**窗口级**的一层：后退/前进、搜索、回今日、命令面板、这一屏的漏斗、
+            页签，以及两侧槽自己的开关与卡片动作，全在这同一条里。
+            以前它们分住在左槽头 42px、中心 tab 条 31px、右槽头 42px 三条上，
+            高度与下边框各管各的，正文起点还错开 11px ⇒ 收成一条，槽不再各自抬头。
+          · 顶栏**绝对定位在 #app 顶部**：三槽的 DOM 与网格不变，各自 padding-top 让位。
+            这样槽的开关仍是「列宽归零 + visibility」，不用为一条顶栏改列算法。
+          · 漏斗筛的是「当前打开的这一屏」，面板仍就地展开在中心槽顶栏之下。
+          · 页签是**保存的视图**（含自己的历史），所以保留一排轻量文字，不折叠成菜单。
+          · 文案为空壳：按钮的 title/aria-label 由 msg.ts 在装配时灌入。
       -->
-      <section class="dock" id="dock-left" data-dock="left">
-        <div class="dock-head">
+      <header id="topbar" class="topbar">
+        <div class="topbar-nav" role="group">
+          <button id="topbar-back" class="topbar-btn" type="button"></button>
+          <button id="topbar-forward" class="topbar-btn" type="button"></button>
+          <button id="topbar-search" class="topbar-btn" type="button"></button>
+        </div>
+        <div class="dock-head topbar-dock" id="dock-left-head" data-dock-side="left">
           <span class="dock-title" id="dock-left-title"></span>
-          <span class="dock-sp"></span>
           <button class="dock-btn dock-foldall" id="dock-left-foldall" type="button"></button>
           <button class="dock-btn dock-add" id="dock-left-add" type="button"></button>
           <button class="dock-btn dock-collapse" id="dock-left-collapse" type="button"></button>
         </div>
+        <div class="topbar-center">
+          <div id="center-tabs" class="center-tabs" role="tablist"></div>
+          <!-- 全部页签集合入口：多于一屏才出现；tab 再多顶栏也只呈现当前这一屏 -->
+          <button id="center-tab-list" class="center-tab-list" type="button" hidden></button>
+          <!-- 新建 tab 的 + 在滚动区之外：tab 多了也不会被横向滚走 -->
+          <button id="center-tab-add" class="center-tab-add" type="button"></button>
+        </div>
+        <div class="topbar-tools" role="group">
+          <button id="center-filter" class="center-filter" type="button" hidden></button>
+          <button id="topbar-today" class="topbar-btn" type="button"></button>
+          <button id="topbar-palette" class="topbar-btn" type="button"></button>
+        </div>
+        <div class="dock-head topbar-dock" id="dock-right-head" data-dock-side="right">
+          <span class="dock-title" id="dock-right-title"></span>
+          <button class="dock-btn dock-foldall" id="dock-right-foldall" type="button"></button>
+          <button class="dock-btn dock-add" id="dock-right-add" type="button"></button>
+          <button class="dock-btn dock-collapse" id="dock-right-collapse" type="button"></button>
+        </div>
+      </header>
+
+      <section class="dock" id="dock-left" data-dock="left">
         <div class="dock-stack" id="dock-left-stack"></div>
         <!-- 内侧边缘的宽度手柄：位置（哪条边）由 JS 按 side 标，样式只读 token -->
         <div class="dock-resize"></div>
       </section>
 
       <!--
-        中心槽（2026-10-20 修订）：**没有顶栏**。
-          · 甲乙丙／明暗切换是调试开关，已挪进调试菜单（`window.__qua` 与 `#state-menu-btn`）
-            —— 正式软件不需要它们常驻；
-          · 格式类命令改由划选气泡承载（见 `bindings.ts` 的 `selection` 段），不再常驻；
-          · 于是顶栏里什么都不剩了 ⇒ **整个 `#topbar` 撤掉**，不为没有内容的容器留高度。
-          · **文档头只剩面包屑**：`#crumbs`（页图标＋页名）
-            整个撤掉 —— 它此前兼任「标题」，既与「中心槽没有页标题」冲突，又让那个位置**不可编辑**。
-            页 / 日记 / 被 zoom 的块，一律是**正文第一行**（`rootsFor()` 装进编辑器）。
+        中心槽（2026-11-10 修订）：**自己的抬头没有了，tab 与漏斗搬进贯通顶栏**。
+          · 调试开关（甲乙丙／明暗）仍在调试菜单，格式命令仍由划选气泡承载 ——
+            这两类东西不因为有了顶栏就常驻回来；
+          · 顶栏是窗口级的一层，不属于任何一个槽；中心槽这里只剩**内容**与
+            漏斗就地展开的面板（面板跟着内容走，不是浮层）。
+          · **文档头仍只剩面包屑**：页 / 日记 / 被 zoom 的块一律是正文第一行
+            （`rootsFor()` 装进编辑器），不存在不可编辑的「标题」位置。
       -->
       <main class="dock" id="dock-center" data-dock="center">
-        <!--
-          中心槽的「顶栏」：tab 条 ＋ **这一屏的筛选漏斗**（最右）。
-          漏斗筛的是**当前打开的这一屏**（页/日记/块的大纲行）——它就是 Roam 顶栏那颗
-          漏斗在我们这里的落点：不要先找查询块，看哪儿就在哪儿筛。
-        -->
-        <div id="center-bar">
-          <div id="center-tabs" class="center-tabs" role="tablist"></div>
-          <button id="center-filter" class="center-filter" type="button" hidden></button>
-        </div>
         <!-- 漏斗的面板：就地展开（与查询块抬头的 chips 面板同一个组件），不是浮层 -->
         <div id="center-filter-panel" class="center-filter-panel" hidden></div>
         <div id="scroll">
@@ -100,13 +119,6 @@
       </main>
 
       <section class="dock" id="dock-right" data-dock="right">
-        <div class="dock-head">
-          <span class="dock-title" id="dock-right-title"></span>
-          <span class="dock-sp"></span>
-          <button class="dock-btn dock-foldall" id="dock-right-foldall" type="button"></button>
-          <button class="dock-btn dock-add" id="dock-right-add" type="button"></button>
-          <button class="dock-btn dock-collapse" id="dock-right-collapse" type="button"></button>
-        </div>
         <div class="dock-stack" id="dock-right-stack">
           <!--
             检视卡：内容**跟着中心槽的当前对象**走（不是光标所在行）。

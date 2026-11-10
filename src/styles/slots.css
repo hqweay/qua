@@ -21,23 +21,15 @@
 .dock + .dock {
   border-left: var(--ui-sep) solid var(--ui-border-subtle);
 }
-/* 槽抬头：只有标题与一个动作，**没有工具栏**（入口条已作废） */
+/* 槽的按钮组已上收到贯通顶栏：这里只是那一组的 DOM 容器，不再自带高度与留白。
+   `.dock-title` 仍在 DOM 里（槽组件用它挂名字），但顶栏靠图标分组，文字不露面。 */
 .dock-head {
   display: flex;
   align-items: center;
-  gap: var(--ui-gap-3);
-  height: 42px;
-  padding: 0 var(--ui-gap-3) 0 var(--ui-gap-5);
   flex: 0 0 auto;
 }
 .dock-title {
-  font-size: var(--ui-fs-sm);
-  font-weight: 600;
-  color: var(--ui-text-secondary);
-  letter-spacing: 0.02em;
-}
-.dock-sp {
-  flex: 1;
+  display: none;
 }
 .dock-btn {
   width: 24px;
@@ -53,6 +45,11 @@
 .dock-btn:hover {
   background: var(--ui-accent-soft);
   color: var(--ui-text);
+}
+/* 顶栏里的槽按钮与窗口级按钮同一档命中区：一排图标读起来才是一排 */
+#topbar .dock-btn {
+  width: var(--ui-row-h);
+  height: var(--ui-row-h);
 }
 /* 带字的按钮（如检视卡的「＋ 属性」）：固定 24px 会把字逐字竖排 */
 .dock-btn--text {
@@ -118,6 +115,49 @@
   margin: 0;
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-xs);
+}
+/*
+ * 卡头的计数位（收纳盘的「n 张小卡」）：壳的扫视信息，跟收起状态无关。
+ * 低调常驻——它是元数据不是动作，不参与卡头按钮那一列的对位（A24 的列不变量）。
+ */
+.dock-card-count {
+  flex: 0 0 auto;
+  padding: 0 var(--ui-gap-1);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-surface-raised);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-2xs);
+  font-weight: 500;
+}
+/*
+ * 收纳盘的 body ＝ **小卡排**：与槽顶那条网格流同一条规则（列数由装配层算好写进
+ * `--dock-tile-cols`，min(放得下几列, 实际几张)），只是换成了盘的内容盒来算——
+ * 盘不新增第二种排版，也不给「列均分」开例外。
+ */
+.dock-tray-body {
+  display: grid;
+  grid-template-columns: repeat(var(--dock-tile-cols, 4), minmax(var(--ui-tile-min), 1fr));
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: var(--ui-gap-3);
+}
+/* 拖到**盘头**＝收进去：整头描边（与槽根的落点提示同一条视觉语言） */
+.dock-card-head[data-drop-into='1'] {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: -2px;
+}
+/* 盘的重命名是**行内输入**（单一入口；点盘头仍然是开合）：输入期盘头不可拖 */
+.dock-tray-rename {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  outline: 2px solid var(--ui-accent);
+  outline-offset: -2px;
+  border-radius: var(--ui-radius-sm);
+  padding: 0 var(--ui-gap-1);
 }
 
 /*
@@ -302,6 +342,10 @@
 .dock-stack[data-drop-end='1'] {
   box-shadow: inset 0 -2px 0 var(--ui-accent);
 }
+/* 盘内排序的「末尾」落点：与槽的同一条视觉语言，只是容器换成盘的内容盒 */
+.dock-tray-body[data-drop-end='1'] {
+  box-shadow: inset 0 -2px 0 var(--ui-accent);
+}
 
 /* 打开一个窗口后短暂描边：Shift+点/拖进来必须「看得见」 */
 .dock-card[data-flash='1'] {
@@ -337,7 +381,8 @@
  */
 .dock-resize {
   position: absolute;
-  top: 0;
+  /* 顶栏那一行不归槽管：手柄从它下面开始，否则会吃掉顶栏里的点击 */
+  top: var(--ui-topbar-h);
   bottom: 0;
   width: var(--ui-gap-3);
   z-index: var(--ui-z-resize);
