@@ -639,22 +639,19 @@ export function setupDocks(deps: DocksDeps) {
   }
 
   /**
-   * 小卡那一行分几列 ＝ **min(容量, 张数)，但格宽不许超过 `--ui-tile-max`**。
+   * 小卡那一行分几列 ＝ **min(这一行放得下几列, 实际有几张小卡)** —— 每行都铺满：
+   * 一张占满整行、两张两格铺满、超过容量换行（末行按同样的格宽留白）。
+   * 2026-11-11 拍板：张数少于容量时**铺满优先**——孤张占满整行是想要的观感
+   * （「留一条缝」曾更早被否）；曾试验的格宽上限因此被否。
    *
    * 为什么必须由这一层算（CSS 两条路都不对）：
    *   · `repeat(auto-fill, …)` 的列数只看可用宽度 ⇒ 张数少于列数时末尾多出一条空轨，
    *     小卡排到 4/5 处就停、右边留一条缝（槽 270px：5 列 4 张，右缘差 53px）；
-   *   · `flex: 1` 均分不知道换行 ⇒ 换行后的末行只剩一张时会被拉成一整条动作带
-   *     （槽 180px 时 4 张 → 3＋1，第 4 张变成整宽）。
-   *
-   * 基底是铺满口径（min(容量, 张数)，承「删一张就露缝」的既有拍板）；其上叠加一条
-   * **格宽上限**：一张小卡占满整行读作大卡——张数太少、铺满会把格宽顶过上限时
-   * 加列、右侧留白（「换行了的网格」，不是「没摆正」）。正常张数下上限永远碰不到，
-   * 铺满口径原样成立。
+   *   · `flex: 1` 均分不知道换行 ⇒ 末行换行行为不可控、且无「铺满」可言。
    *
    * **0 张也要写**：栈里还住着跨列大卡，轨道数不能退回 CSS 兜底（remove 让兜底接管
    * 曾把 4 条轨道的下限之和 194px 顶过 168 的槽宽，每张大卡被裁掉 14px——实测）。
-   * 公式按构造不会超容器，0 张时算出的列数永远是安全的。
+   * min(容量, 0) 经 Math.max(1, …) 收敛到 1，按构造不会超容器。
    */
   function syncTileCols(stack: HTMLElement): void {
     const tiles = stack.querySelectorAll(':scope > .dock-tile').length
@@ -662,11 +659,8 @@ export function setupDocks(deps: DocksDeps) {
     const inner = stack.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
     const gap = parseFloat(cs.columnGap) || 0
     const min = parseFloat(cs.getPropertyValue('--ui-tile-min')) || 44
-    const max = parseFloat(cs.getPropertyValue('--ui-tile-max')) || min * 3
     const capacity = Math.max(1, Math.floor((inner + gap) / (min + gap)))
-    // 格宽 ≤ max 所需的最少列数；max > min ⇒ 它 ≤ 容量，永不超过容器
-    const wide = Math.max(1, Math.ceil((inner + gap) / (max + gap)))
-    const next = String(Math.max(Math.min(capacity, tiles), wide))
+    const next = String(Math.max(1, Math.min(capacity, tiles)))
     // 只在真的变了时才写：ResizeObserver 会观察到「行数变化 ⇒ 高度变化」，别自激
     if (stack.style.getPropertyValue('--dock-tile-cols') !== next) stack.style.setProperty('--dock-tile-cols', next)
   }
