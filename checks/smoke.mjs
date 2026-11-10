@@ -3918,7 +3918,7 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
     const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
     const p = window.__qua.blocks().find((b) => b.id !== rootId && b.children === 0 && b.text !== '' && b.text.length > 4)
-    const c = ed.insertBlockAfter(p.id, '子块甲')
+    const c = ed.insert.insertBlockAfter(p.id, '子块甲')
     ed.indent(c)
     return p.id
   })
@@ -3958,8 +3958,8 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
     const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
     const base = window.__qua.blocks().find((b) => b.id !== rootId && b.text.length > 3)
-    const sid = ed.insertBlockAfter(base.id, '甲乙丙')
-    const kid = ed.insertBlockAfter(sid, '子')
+    const sid = ed.insert.insertBlockAfter(base.id, '甲乙丙')
+    const kid = ed.insert.insertBlockAfter(sid, '子')
     ed.indent(kid)
     return { sid }
   })
@@ -3989,8 +3989,8 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
   const outCase = await page.evaluate(() => {
     const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
-    const p = ed.insertBlockAfter(rootId, '反缩进父')
-    const c = ed.insertBlockAfter(p, '')
+    const p = ed.insert.insertBlockAfter(rootId, '反缩进父')
+    const c = ed.insert.insertBlockAfter(p, '')
     ed.indent(c)
     return { c }
   })
@@ -4086,7 +4086,7 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
     // 这一格量的是「插进来的块挂在哪一层」，前提是那一层此刻画得出来。
     const rootEl = document.querySelector(`.blk[data-block-id="${rootId}"]`)
     if (rootEl?.dataset.collapsed === '1') ed.toggleCollapse(rootId)
-    const id = ed.insertBlockAfter(rootId, '斜杠块')
+    const id = ed.insert.insertBlockAfter(rootId, '斜杠块')
     const rows = window.__qua.blocks()
     const el = document.querySelector(`.blk[data-block-id="${id}"]`)
     if (!el) return { skipped: '插入的块没挂上 DOM' }
@@ -4118,8 +4118,8 @@ await check('T30 聚焦块（section 根）文本中间 Enter ⇒ 左半留根�
   const ids = await page.evaluate(() => {
     const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
-    const id = ed.insertBlockAfter(rootId, '聚焦甲乙丙')
-    const kid = ed.insertBlockAfter(id, '聚焦子')
+    const id = ed.insert.insertBlockAfter(rootId, '聚焦甲乙丙')
+    const kid = ed.insert.insertBlockAfter(id, '聚焦子')
     ed.indent(kid)
     window.__qua.invoke('core.block/focus-block', { blockId: id })
     return { id, kid }
@@ -4161,7 +4161,7 @@ await check('T31 普通块块首 Enter ⇒ 上方插空块并把光标放进去�
   const ids = await page.evaluate(() => {
     const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
-    const id = ed.insertBlockAfter(rootId, '块首甲乙')
+    const id = ed.insert.insertBlockAfter(rootId, '块首甲乙')
     return { id }
   })
   const depth = await page.evaluate(
@@ -4203,7 +4203,7 @@ await check('T32 Shift+Enter 刻意等同 Enter（v1 不做软换行）', async 
   const ids = await page.evaluate(() => {
     const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
-    return { id: ed.insertBlockAfter(rootId, '软换甲乙丙') }
+    return { id: ed.insert.insertBlockAfter(rootId, '软换甲乙丙') }
   })
   const depth = await page.evaluate(
     (id) => Number(document.querySelector(`.blk[data-block-id="${id}"]`).dataset.depth),
@@ -4239,7 +4239,7 @@ await check('T33 同块选区 + Enter ⇒ 先删选区、再在起点拆（一�
   await openFirstPage(page)
   const id = await page.evaluate(() => {
     const ed = window.__qua.__editor
-    return ed.insertBlockAfter(ed.doc.roots[0].id, 'abcdefghij')
+    return ed.insert.insertBlockAfter(ed.doc.roots[0].id, 'abcdefghij')
   })
   const n0 = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
 
@@ -4302,9 +4302,9 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
   const ids = await page.evaluate(() => {
     const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
-    const a = ed.insertBlockAfter(rootId, 'AAAA')
-    const b = ed.insertBlockAfter(a, 'BBBB')
-    const c = ed.insertBlockAfter(b, 'CCCC')
+    const a = ed.insert.insertBlockAfter(rootId, 'AAAA')
+    const b = ed.insert.insertBlockAfter(a, 'BBBB')
+    const c = ed.insert.insertBlockAfter(b, 'CCCC')
     return { a, b, c, rootId, roots: ed.doc.roots.map((x) => x.id) }
   })
   assert(
@@ -4467,10 +4467,10 @@ await check('T35b 多选块拖拽：拖组里任一行的块标，整组按原�
   const ids = await page.evaluate(() => {
     const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
-    const a = ed.insertBlockAfter(rootId, 'MOVE-A')
-    const b = ed.insertBlockAfter(a, 'MOVE-B')
-    const c = ed.insertBlockAfter(b, 'MOVE-C')
-    const d = ed.insertBlockAfter(c, 'MOVE-D')
+    const a = ed.insert.insertBlockAfter(rootId, 'MOVE-A')
+    const b = ed.insert.insertBlockAfter(a, 'MOVE-B')
+    const c = ed.insert.insertBlockAfter(b, 'MOVE-C')
+    const d = ed.insert.insertBlockAfter(c, 'MOVE-D')
     return { a, b, c, d, rootId }
   })
   assert(ids.a && ids.b && ids.c && ids.d, `前置：四个块都要建出来：${JSON.stringify(ids)}`)
@@ -4581,7 +4581,7 @@ await check('T35b 多选块拖拽：拖组里任一行的块标，整组按原�
   // ③ 拖进 D（先给 D 一个子块 E）⇒ run 应成为 D 的末尾三个孩子，原序不变
   await page.evaluate((d) => {
     const ed = window.__qua.__editor
-    const e = ed.insertBlockAfter(d, 'MOVE-E')
+    const e = ed.insert.insertBlockAfter(d, 'MOVE-E')
     ed.indent(e)
     return e
   }, ids.d)
@@ -4658,7 +4658,7 @@ await check('T35c 批量命令 invokeGroup：组内写入共用一个撤销条�
   await page.waitForTimeout(150)
   const id = await page.evaluate(() => {
     const ed = window.__qua.__editor
-    return ed.insertBlockAfter(ed.doc.roots[0].id, 'BATCH-HOST')
+    return ed.insert.insertBlockAfter(ed.doc.roots[0].id, 'BATCH-HOST')
   })
   assert(id, '前置：要有一条可挂标签的块')
   await page.waitForTimeout(150)
@@ -4720,10 +4720,10 @@ await check('T257 块选区批量操作：Tab 整段缩进 / Shift+Tab 反缩进
     const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
     // 锚块在前：A 不是首子块，Tab 才有前兄弟可进
-    const anchor = ed.insertBlockAfter(rootId, '锚锚锚锚')
-    const a = ed.insertBlockAfter(anchor, '甲甲甲甲')
-    const b = ed.insertBlockAfter(a, '乙乙乙乙')
-    const c = ed.insertBlockAfter(b, '丙丙丙丙')
+    const anchor = ed.insert.insertBlockAfter(rootId, '锚锚锚锚')
+    const a = ed.insert.insertBlockAfter(anchor, '甲甲甲甲')
+    const b = ed.insert.insertBlockAfter(a, '乙乙乙乙')
+    const c = ed.insert.insertBlockAfter(b, '丙丙丙丙')
     return { anchor, a, b, c, rootId }
   })
   assert(ids.a && ids.b && ids.c, `前置：三个块都要建出来：${JSON.stringify(ids)}`)
@@ -5104,7 +5104,7 @@ await check('T58 敲 `#名` + 空格**不再**静默成标签：字原样留着�
    */
   const target = await page.evaluate(() => {
     const ed = window.__qua.__editor
-    const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+    const id = ed.insert.insertBlockAfter(window.__qua.blocks()[0].id, '')
     window.__qua.focusBlock(id, 0)
     return id
   })
@@ -5217,7 +5217,7 @@ await check('T59 `ref` 类型的值走选择器：显示目标**名字**、能�
     const bs = window.__qua.blocks()
     const host = bs.find((b) => !(b.roles?.length) && b.text.length > 2)
     const ed = window.__qua.__editor
-    const a = ed.insertBlockAfter(host.id, '候选人甲')
+    const a = ed.insert.insertBlockAfter(host.id, '候选人甲')
     window.__qua.invoke('core.block/focus-block', { blockId: host.id })
     return { host: host.id, a }
   })
@@ -5302,9 +5302,9 @@ await check('T60 跨块选区收拢 ⇒ 首尾拼成一块、中间块（连子�
   const before = await page.evaluate(() => {
     const ed = window.__qua.__editor
     const host = window.__qua.blocks().find((b) => !(b.roles?.length) && b.text.length > 2)
-    const a = ed.insertBlockAfter(host.id, 'AAAA')
-    const b = ed.insertBlockAfter(a, 'BBBB')
-    const c = ed.insertBlockAfter(b, 'CCCC')
+    const a = ed.insert.insertBlockAfter(host.id, 'AAAA')
+    const b = ed.insert.insertBlockAfter(a, 'BBBB')
+    const c = ed.insert.insertBlockAfter(b, 'CCCC')
     /**
      * 给 BBBB 挂一个**真正的子块**（`insertBlockAfter` 只在「首行特例」下建子块，
      * 所以这里直接改模型），它必须随 BBBB 一起没掉。
@@ -5363,7 +5363,7 @@ await check('T27 光标行隐藏占位、journal 日期不可聚焦、折叠图�
   // ① 光标所在行**不显示**占位符（否则光标落在「空块」二字后面）
   const ph = await page.evaluate(() => {
     const ed = window.__qua.__editor
-    const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+    const id = ed.insert.insertBlockAfter(window.__qua.blocks()[0].id, '')
     ed.placeCaret(id, 0)
     const el = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
     const before = getComputedStyle(el, '::before').content
@@ -5771,7 +5771,7 @@ await check('T42 冷启动后在反链 footer 编辑，不会把正文重载成�
      * 所以「让今日 journal 有反链」只能直接在编辑器上放一个原子里。这里要紧的是
      * **冷启动**这条路径（没有 openPage），不是用户从哪个菜单插的。
      */
-    const atomId = window.__qua.__editor.insertRef({ to: j.id, label: '今日' })
+    const atomId = window.__qua.__editor.insert.insertRef({ to: j.id, label: '今日' })
     return { journal: j.id, src: src.id, atomId }
   })
   assert(ids.atomId, '冷启动下应能往正文插一个指向今日 journal 的原子')
@@ -7357,7 +7357,7 @@ await check('T53 列表露面：输入名字建标签、同名页兼作标签、
   assert(created.title === created.aliases[0], `页列表标题应显示这个地址（不是空串）：${JSON.stringify(created)}`)
 
   // 改正文 ＝ 改描述：地址与页列表标题都不动
-  await page.evaluate((id) => window.__qua.__editor.setText(id, '页的描述'), pageId)
+  await page.evaluate((id) => window.__qua.__editor.insert.setText(id, '页的描述'), pageId)
   const described = await page.evaluate((id) => {
     const b = window.__qua.allBlocks().find((x) => x.id === id)
     const p = window.__qua.pages().find((x) => x.id === id)
@@ -7376,7 +7376,7 @@ await check('T53 列表露面：输入名字建标签、同名页兼作标签、
   await page.evaluate(() => window.__qua.__layers.closePopover())
 
   // 在它的子块上打同名标签 ⇒ 同名必同一块：复用这个页、加上 tag 露面
-  const childId = await page.evaluate((id) => window.__qua.__editor.insertBlockAfter(id, '内容'), pageId)
+  const childId = await page.evaluate((id) => window.__qua.__editor.insert.insertBlockAfter(id, '内容'), pageId)
   await page.evaluate((id) => window.__qua.focusBlock(id, 0), childId)
   await page.evaluate(() => window.__qua.invoke('core.editor/pick-tag'))
   await page.waitForSelector('.layer-input')
@@ -7443,7 +7443,7 @@ await check('T53 列表露面：输入名字建标签、同名页兼作标签、
   //    「标记为标签」；点了直接用正文当名字，且**不进页列表**（不需要先当页）。
   const plainText = '直接标记的标签'
   const plainId = await page.evaluate((text) => {
-    const id = window.__qua.__editor.insertBlockAfter(window.__qua.snapshot().activeId, text)
+    const id = window.__qua.__editor.insert.insertBlockAfter(window.__qua.snapshot().activeId, text)
     window.__qua.focusBlock(id, 0)
     return id
   }, plainText)
@@ -7466,7 +7466,7 @@ await check('T53 列表露面：输入名字建标签、同名页兼作标签、
   assert(direct.aliases[0] === plainText, `无名块应把正文当主名：${JSON.stringify(direct)} vs ${plainText}`)
 
   // ⑥ 空正文、没名字 ⇒ 标记为标签不是死路：打开别名编辑器并把光标放进输入框，一个字节都不写
-  const emptyId = await page.evaluate((id) => window.__qua.__editor.insertBlockAfter(id, ''), plainId)
+  const emptyId = await page.evaluate((id) => window.__qua.__editor.insert.insertBlockAfter(id, ''), plainId)
   await page.evaluate((id) => window.__qua.focusBlock(id, 0), emptyId)
   await page.evaluate((id) => window.__qua.invoke('core.block/as-tag', { blockId: id }), emptyId)
   await page.waitForSelector('.alias-editor')
@@ -7686,7 +7686,7 @@ await check(
      * 这里要断言的是「一个写方法 = 一笔事务 = 一组 op」。
      */
     const after = await page.evaluate((id) => {
-      window.__qua.__editor.setText(id, '改过的字')
+      window.__qua.__editor.insert.setText(id, '改过的字')
       const ops = window.__qua.lastOps()
       const atoms = window.__qua.atoms().map((a) => a.id)
       const runPlain = (c) => c.filter((r) => r.t === 'text').map((r) => r.v).join('')
@@ -7881,7 +7881,7 @@ await check(
         walk(ed.store.blocks)
         return n
       }
-      const newId = ed.insertBlockAfter(t.id, '插一块')
+      const newId = ed.insert.insertBlockAfter(t.id, '插一块')
       const ops = window.__qua.lastOps()
       // 模型读数走 store（整片森林）：诊断面的 `blocks()` 只给**当前视图**那一段
       let inModel = false
@@ -7954,7 +7954,7 @@ await check(
       if (!host) {
         const anchor = ed.rows().map((r) => r.block).find((x) => canEdit(ed, x))
         if (!anchor) return { skipped: true }
-        const id = ed.insertBlockAfter(anchor.id, '')
+        const id = ed.insert.insertBlockAfter(anchor.id, '')
         host = id ? ed.store.find(id) : undefined
         if (!host) return { skipped: true }
       }
@@ -8343,7 +8343,7 @@ await check(
     const focusNew = () =>
       page.evaluate(() => {
         const ed = window.__qua.__editor
-        const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+        const id = ed.insert.insertBlockAfter(window.__qua.blocks()[0].id, '')
         window.__qua.focusBlock(id, 0)
         return id
       })
@@ -8705,7 +8705,7 @@ await check(
     const created = await page.evaluate(() => {
       const ed = window.__qua.__editor
       const root = ed.doc.roots[0]
-      const kid = ed.insertBlockAfter(root.id, '删页测试子块')
+      const kid = ed.insert.insertBlockAfter(root.id, '删页测试子块')
       return {
         pageId: root.id,
         kidId: kid ?? '',
@@ -9550,7 +9550,7 @@ await check(
 
     await page.evaluate((id) => window.__qua.focusBlock(id, 9999), target.id)
     await page.evaluate(
-      (t) => window.__qua.__editor.insertRef({ to: t.id, label: '冒烟原子', flavor: '#' }),
+      (t) => window.__qua.__editor.insert.insertRef({ to: t.id, label: '冒烟原子', flavor: '#' }),
       target,
     )
     await page.waitForTimeout(120)
@@ -9589,7 +9589,7 @@ await check(
     // 前置：插一枚原子（setup 的 op 不参与断言）
     await page.evaluate((id) => window.__qua.focusBlock(id, 9999), target.id)
     const atomId = await page.evaluate(
-      (t) => window.__qua.__editor.insertRef({ to: t.id, label: '待删原子', flavor: '#' }),
+      (t) => window.__qua.__editor.insert.insertRef({ to: t.id, label: '待删原子', flavor: '#' }),
       target,
     )
     assert(atomId, '前置：原子应建出来')
@@ -9717,7 +9717,7 @@ await check(
       return { rootId: root.id, index: root.children.length - 1, id: last?.id ?? '' }
     })
     assert(tail.id, '末段应有末块')
-    await page.evaluate((t) => window.__qua.__editor.setText(t.id, '占住末尾'), tail)
+    await page.evaluate((t) => window.__qua.__editor.insert.setText(t.id, '占住末尾'), tail)
     await page.waitForTimeout(120)
 
     await page.evaluate(() => window.__qua.__editor.clickEmptyArea(99999))
@@ -9766,10 +9766,10 @@ await check(
     assert(target, '第一页里应有可编辑的内容块')
 
     // ① 空块 ⇒ 原地变线（先造一个空块：setup 的 op 不参与断言）
-    const blankId = await page.evaluate((t) => window.__qua.__editor.insertBlockAfter(t.id, ''), target)
+    const blankId = await page.evaluate((t) => window.__qua.__editor.insert.insertBlockAfter(t.id, ''), target)
     assert(blankId, '前置：空块应建出来')
     await page.waitForTimeout(120)
-    await page.evaluate((id) => window.__qua.__editor.insertDividerAfter(id), blankId)
+    await page.evaluate((id) => window.__qua.__editor.insert.insertDividerAfter(id), blankId)
     await page.waitForTimeout(120)
     const ops1 = await opShape(page)
     /** 改类型＝一次改动 ⇒ 一只 upsert{…,modified} 记时刻 ＋ 一条 `_type` 的 prop.set（同笔） */
@@ -9785,7 +9785,7 @@ await check(
     assert(backType === null, `一次撤销应回到没有类型：${JSON.stringify(backType)}`)
 
     // ② 有内容 ⇒ 线 ＋ 空块，同一笔 2 条 insert
-    await page.evaluate((t) => window.__qua.__editor.insertDividerAfter(t.id), target)
+    await page.evaluate((t) => window.__qua.__editor.insert.insertDividerAfter(t.id), target)
     await page.waitForTimeout(120)
     const ops2 = await opShape(page)
     const block2 = ops2.filter((o) => o.e === 'block')
@@ -9859,8 +9859,8 @@ await check(
     const made = await page.evaluate(() => {
       const ed = window.__qua.__editor
       const rootId = ed.doc.roots[0].id
-      const a = ed.insertBlockAfter(rootId, '删选甲甲甲')
-      const b = a ? ed.insertBlockAfter(a, '删选乙乙乙') : null
+      const a = ed.insert.insertBlockAfter(rootId, '删选甲甲甲')
+      const b = a ? ed.insert.insertBlockAfter(a, '删选乙乙乙') : null
       return { a, b }
     })
     assert(made.a && made.b, '前置：两个兄弟块应建出来')
@@ -10871,8 +10871,8 @@ await check(
     const setup = await page.evaluate(() => {
       const ed = window.__qua.__editor
       const root = ed.doc.roots[0]
-      const id = ed.insertBlockAfter(root.id, '提取源冒烟')
-      const childId = ed.insertBlockAfter(id, '子块')
+      const id = ed.insert.insertBlockAfter(root.id, '提取源冒烟')
+      const childId = ed.insert.insertBlockAfter(id, '子块')
       ed.indent(childId)
       const walk = (list, parent) => {
         for (let i = 0; i < list.length; i++) {
@@ -11656,7 +11656,7 @@ await check(
 
     const target = await page.evaluate(() => {
       const ed = window.__qua.__editor
-      const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+      const id = ed.insert.insertBlockAfter(window.__qua.blocks()[0].id, '')
       window.__qua.focusBlock(id, 0)
       return id
     })
@@ -11720,7 +11720,7 @@ await check(
 
     const target = await page.evaluate(() => {
       const ed = window.__qua.__editor
-      const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+      const id = ed.insert.insertBlockAfter(window.__qua.blocks()[0].id, '')
       window.__qua.focusBlock(id, 0)
       return id
     })
@@ -11784,7 +11784,7 @@ await check(
      */
     const target = await page.evaluate(() => {
       const ed = window.__qua.__editor
-      const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+      const id = ed.insert.insertBlockAfter(window.__qua.blocks()[0].id, '')
       window.__qua.focusBlock(id, 0)
       return id
     })
@@ -11847,7 +11847,7 @@ await check(
     const pageQuery = pg.title.split(/\s/)[0] || pg.title
     const first = await page.evaluate(() => {
       const ed = window.__qua.__editor
-      const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+      const id = ed.insert.insertBlockAfter(window.__qua.blocks()[0].id, '')
       window.__qua.focusBlock(id, 0)
       return id
     })
@@ -11877,8 +11877,8 @@ await check(
     const setup = await page.evaluate(() => {
       const ed = window.__qua.__editor
       const rootId = window.__qua.blocks()[0].id
-      const targetId = ed.insertBlockAfter(rootId, '块检索标记甲')
-      const typingId = ed.insertBlockAfter(rootId, '')
+      const targetId = ed.insert.insertBlockAfter(rootId, '块检索标记甲')
+      const typingId = ed.insert.insertBlockAfter(rootId, '')
       window.__qua.focusBlock(typingId, 0)
       return { targetId, typingId }
     })
@@ -11923,7 +11923,7 @@ await check(
      */
     const target = await page.evaluate(() => {
       const ed = window.__qua.__editor
-      const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+      const id = ed.insert.insertBlockAfter(window.__qua.blocks()[0].id, '')
       window.__qua.focusBlock(id, 0)
       return id
     })
@@ -12024,7 +12024,7 @@ await check(
     const focusNew = () =>
       page.evaluate(() => {
         const ed = window.__qua.__editor
-        const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+        const id = ed.insert.insertBlockAfter(window.__qua.blocks()[0].id, '')
         window.__qua.focusBlock(id, 0)
         return id
       })
@@ -12146,7 +12146,7 @@ await check(
      */
     const hostId = await page.evaluate(() => {
       const ed = window.__qua.__editor
-      const id = ed.insertBlockAfter(window.__qua.blocks()[0].id, '')
+      const id = ed.insert.insertBlockAfter(window.__qua.blocks()[0].id, '')
       window.__qua.focusBlock(id, 0)
       return id
     })
@@ -14221,7 +14221,7 @@ await check('T145c 行内原子转文本：引用/行内标签/外链都能取�
       (x) => x.props?._lists?.includes('tag') && x.props?._aliases?.[0] === '转文本标签',
     )
     window.__qua.focusBlock(hostId, 0)
-    const runId = window.__qua.__editor.insertRef({ to: b.id, label: '转文本标签', flavor: '#' })
+    const runId = window.__qua.__editor.insert.insertRef({ to: b.id, label: '转文本标签', flavor: '#' })
     return { hostId, runId }
   })
   await page.waitForTimeout(120)
@@ -14349,8 +14349,8 @@ await check('T146 锚文本：目标被删 ⇒ dangling 仍显示 anchor（`anch
     const [hostId, t1, t2] = leaves
     window.__qua.focusBlock(hostId, 0)
     const labelOf = (id) => plain(ed.store.find(id))
-    const anchored = ed.insertRef({ to: t1, label: labelOf(t1) })
-    const snapshot = ed.insertRef({ to: t2, label: labelOf(t2) })
+    const anchored = ed.insert.insertRef({ to: t1, label: labelOf(t1) })
+    const snapshot = ed.insert.insertRef({ to: t2, label: labelOf(t2) })
     return { hostId, t1, t2, anchored, snapshot, labels: [labelOf(t1), labelOf(t2)] }
   })
   assert(setup, '前置：当前视图里应有三块可当宿主/目标的叶子块')
@@ -20535,8 +20535,8 @@ await check(
     const tagSetup = await page.evaluate(() => {
       const ed = window.__qua.__editor
       const root = ed.doc.roots[0]
-      const member = ed.insertBlockAfter(root.id, '成员块')
-      const tag = ed.insertBlockAfter(member, '待删标签')
+      const member = ed.insert.insertBlockAfter(root.id, '成员块')
+      const tag = ed.insert.insertBlockAfter(member, '待删标签')
       window.__qua.invoke('core.block/as-tag', { blockId: tag })
       window.__qua.focusBlock(member, 0)
       window.__qua.invoke('core.editor/insert-tag', { tag: '待删标签' })
@@ -22415,7 +22415,7 @@ const plantProbe = async (page, text) => {
   await page.waitForTimeout(150)
   return page.evaluate((t) => {
     const ed = window.__qua.__editor
-    return ed.insertBlockAfter(ed.doc.roots[0].id, t)
+    return ed.insert.insertBlockAfter(ed.doc.roots[0].id, t)
   }, text)
 }
 
@@ -22427,7 +22427,7 @@ await check('T234 ⌘P 浮层「展开为面板」⇒ 中心搜索 tab：词带�
   // 第二条命中：用来验「切行预览跟着换」（两条同词的块，前缀都含搜索词）
   const secondId = await page.evaluate(() => {
     const ed = window.__qua.__editor
-    return ed.insertBlockAfter(ed.doc.roots[0].id, '搜索面探针XYZ 第二条')
+    return ed.insert.insertBlockAfter(ed.doc.roots[0].id, '搜索面探针XYZ 第二条')
   })
   assert(secondId && secondId !== probeId, `前置：要有第二条命中：${secondId}`)
 
@@ -22662,7 +22662,7 @@ await check('T252 浮层里点预览的折叠三角：折展开合、浮层不�
   assert(probeId, '前置：探针块要建出来')
   await page.evaluate((id) => {
     const ed = window.__qua.__editor
-    const kid = ed.insertBlockAfter(id, '折叠三角探针的子块')
+    const kid = ed.insert.insertBlockAfter(id, '折叠三角探针的子块')
     ed.indent(kid)
   }, probeId)
 
@@ -22874,8 +22874,8 @@ await check('T236 空态＝最近更新（非空且含最新改动的块）；�
   const newest = await page.evaluate(() => {
     const ed = window.__qua.__editor
     window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id })
-    const a = ed.insertBlockAfter(ed.doc.roots[0].id, '最近首条ZYX')
-    const b = ed.insertBlockAfter(a, '最近首条ZYX 第二条')
+    const a = ed.insert.insertBlockAfter(ed.doc.roots[0].id, '最近首条ZYX')
+    const b = ed.insert.insertBlockAfter(a, '最近首条ZYX 第二条')
     // 让 b 成为「最近更新」的第一条（modified 最新），但它在搜索里排在 a 之后
     ed.write((t) => t.patch(b, (x) => { x.modified = Date.now() + 5000 }))
     return { a, b }
@@ -23208,7 +23208,7 @@ await check('T241 搜索面右预览：就地编辑落盘、Enter 建子块并�
   // 第二条同词命中：用来验「↑↓ 换选中」与「打开落到选中那块」
   const secondId = await page.evaluate(() => {
     const ed = window.__qua.__editor
-    return ed.insertBlockAfter(ed.doc.roots[0].id, '预览编辑探针PQR 第二条')
+    return ed.insert.insertBlockAfter(ed.doc.roots[0].id, '预览编辑探针PQR 第二条')
   })
   assert(secondId && secondId !== probeId, `前置：要有第二条命中：${secondId}`)
 
@@ -23377,8 +23377,8 @@ await check('T242 搜索面冻结与刷新：外部改命中块 ⇒ 只点亮 st
   await page.waitForTimeout(300)
   const ids = await page.evaluate(() => {
     const ed = window.__qua.__editor
-    const a = ed.insertBlockAfter(ed.doc.roots[0].id, 'FROZENPROBE 甲')
-    const b = ed.insertBlockAfter(a, 'FROZENPROBE 乙')
+    const a = ed.insert.insertBlockAfter(ed.doc.roots[0].id, 'FROZENPROBE 甲')
+    const b = ed.insert.insertBlockAfter(a, 'FROZENPROBE 乙')
     return { a, b }
   })
   await page.waitForTimeout(300)
@@ -23460,7 +23460,7 @@ await check('T243 搜索面：长块预览滚到命中处并高亮；空态点�
   const longId = await page.evaluate(() => {
     const ed = window.__qua.__editor
     const filler = '这是一段用来撑高块的填充文字，重复很多遍。'.repeat(120)
-    return ed.insertBlockAfter(ed.doc.roots[0].id, `${filler} 命中词LONGTARGET 在最后`)
+    return ed.insert.insertBlockAfter(ed.doc.roots[0].id, `${filler} 命中词LONGTARGET 在最后`)
   })
   await page.waitForTimeout(500)
   await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
@@ -25359,7 +25359,7 @@ await check(
       window.__qua.focusBlock(b.id, 0)
       window.__qua.invoke('core.editor/insert-tag', { tag: ' 任务 ' })
       let last = b.id
-      for (let i = 0; i < 60; i++) last = ed.insertBlockAfter(last, `撑长第${i}行——只是让正文超出视口`)
+      for (let i = 0; i < 60; i++) last = ed.insert.insertBlockAfter(last, `撑长第${i}行——只是让正文超出视口`)
       return { host: b.id }
     })
     await page.waitForTimeout(250)
@@ -25608,7 +25608,7 @@ await check(
       const rows = ed.rows().map((r) => r.block)
       const h = rows.find((b) => !b.props?._date && !b.props?._query && (b.content ?? []).some((x) => x.t === 'text' && x.v.length > 2))
       window.__qua.focusBlock(h.id, 0)
-      const sib = ed.insertBlockAfter(h.id, '')
+      const sib = ed.insert.insertBlockAfter(h.id, '')
       window.__qua.focusBlock(sib, 0)
       const pages = window.__qua.pages()
       inv('core.editor/insert-page-ref', { pageId: pages[0].id })
@@ -25668,8 +25668,8 @@ await check('T276 上方插入：⌘⇧↵ 在光标块上方建空同级块、�
   const fx = await page.evaluate(() => {
     const ed = window.__qua.__editor
     const rootId = ed.doc.roots[0].id
-    const a = ed.insertBlockAfter(rootId, '上方插入甲')
-    const b = ed.insertBlockAfter(a, '上方插入乙')
+    const a = ed.insert.insertBlockAfter(rootId, '上方插入甲')
+    const b = ed.insert.insertBlockAfter(a, '上方插入乙')
     return { a, b }
   })
   const n0 = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
@@ -25750,7 +25750,7 @@ await check('T277 ⌘⇧+点击：新页签＋一次性宽屏；档位不跟 tab
   const target = ids.find((id) => id !== before.active)
   assert(target, `前置：要有一个不是当前对象的块可点：${JSON.stringify({ ids, active: before.active })}`)
   // 对照用的独立块：不与 target／当前对象重合，保证 ⌘+点 真的是「开一张新页签」
-  const other = await page.evaluate((rootId) => window.__qua.__editor.insertBlockAfter(rootId, 'T277 对照块'), before.active)
+  const other = await page.evaluate((rootId) => window.__qua.__editor.insert.insertBlockAfter(rootId, 'T277 对照块'), before.active)
   assert(other, '前置：应造出对照块')
 
   await page.locator(marker(target)).click({ modifiers: [MOD, 'Shift'] })
@@ -25814,7 +25814,7 @@ await check('T278 快捷小卡：加到快捷 → Shift+点并存 → 收成快�
   assert(target, `前置：要有一个不是当前对象的块：${JSON.stringify({ ids, active })}`)
   // 另一块只用来在删掉 target 之后触发一次重画（加快捷是唯一会重画槽的入口）
   const other = await page.evaluate(
-    (rootId) => window.__qua.__editor.insertBlockAfter(rootId, 'T278 对照块'),
+    (rootId) => window.__qua.__editor.insert.insertBlockAfter(rootId, 'T278 对照块'),
     active,
   )
   assert(other, '前置：应造出对照块')
@@ -26119,8 +26119,8 @@ await check('T280 回收站清空：口径筛选可见、确认后永久删除�
     const plain = (b) => b.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
     return {
       text: plain(root).slice(0, 4),
-      id1: ed.insertBlockAfter(root.id, ''),
-      id2: ed.insertBlockAfter(root.id, '留着的一块'),
+      id1: ed.insert.insertBlockAfter(root.id, ''),
+      id2: ed.insert.insertBlockAfter(root.id, '留着的一块'),
     }
   })
   await page.evaluate((ids) => {

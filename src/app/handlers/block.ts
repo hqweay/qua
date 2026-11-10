@@ -163,7 +163,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     const text = S(a.text, '')
     const type = S(a.type, 'paragraph')
     // 分割线没有正文可落光标：插入动作自己负责在它下面留一个落点
-    if (type === 'divider') return app.ed.insertDividerAfter(id)
+    if (type === 'divider') return app.ed.insert.insertDividerAfter(id)
     /**
      * 只认这两种写正文的类型。**未知类型不降级成段落**：命令面的 `enum` 只是元数据，
      * `invoke` 不会按它校验——放过去就会「插了一行普通文字」，
@@ -171,7 +171,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
      */
     if (type !== 'paragraph' && type !== 'todo') return false
     const todo = type === 'todo' ? ('todo' as const) : undefined
-    app.ed.insertBlockAfter(id, text, todo)
+    app.ed.insert.insertBlockAfter(id, text, todo)
     return true
   },
   // 缺省目标取光标所在块（curBlock），不是「当前打开的那一屏」——
@@ -179,12 +179,12 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   'core.editor/insert-block-before': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false
-    return app.ed.insertBlockBefore(id) !== null
+    return app.ed.insert.insertBlockBefore(id) !== null
   },
   'core.editor/clear-block': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false
-    app.ed.setText(id, '')
+    app.ed.insert.setText(id, '')
     return true
   },
   'core.editor/insert-tag': (a, app) => {
@@ -304,7 +304,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     }
     const page = app.listPages().find((p) => p.id === pageId)
     if (!page) return false
-    app.ed.insertRef({ to: page.id, label: page.title || t('ui.page.untitled') })
+    app.ed.insert.insertRef({ to: page.id, label: page.title || t('ui.page.untitled') })
     return true
   },
   /**
@@ -325,7 +325,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     if (!isJournalDate(date)) return false
     app.runGroup(() => {
       const id = app.ensureJournal(date)
-      app.ed.insertRef({ to: id, label: journalDateLabel(date) })
+      app.ed.insert.insertRef({ to: id, label: journalDateLabel(date) })
     })
     return true
   },
@@ -344,7 +344,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
       return true
     }
     // 尺寸不在这里：一份字节多大由资产索引回答（见 `AssetRun`）
-    app.ed.insertAsset(preset === 'missing' ? MISSING_ASSET_HASH : SEED_ASSET_HASH, {
+    app.ed.insert.insertAsset(preset === 'missing' ? MISSING_ASSET_HASH : SEED_ASSET_HASH, {
       label: preset === 'missing' ? t('ui.sample.assetMissingName') : t('ui.sample.assetReadyName'),
     })
     return true
@@ -367,7 +367,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
       return true
     }
     const text = a.text === undefined ? undefined : S(a.text)
-    return app.ed.insertLink({ url: chk.url, ...(text === undefined ? {} : { text }) }) !== null
+    return app.ed.insert.insertLink({ url: chk.url, ...(text === undefined ? {} : { text }) }) !== null
   },
 
   /**

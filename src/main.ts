@@ -1280,7 +1280,7 @@ async function insertAssetBlob(
   label: string,
   point?: { blockId: string; offset: number },
 ): Promise<boolean> {
-  const where = point ?? ed.caretPoint()
+  const where = point ?? ed.insert.caretPoint()
   if (!where) {
     app.toast(t('ui.asset.needCaret'), 'warn')
     return false
@@ -1311,7 +1311,7 @@ async function insertAssetBlob(
   // 入库成功 ⇒ 立刻登记，新 run 的首帧就能画出图（不用等下一次启动的索引）
   primeAsset(meta)
   // 尺寸不进 run：它是那份字节的属性，从索引里读（见 `AssetRun`）
-  const runId = ed.insertAssetAt(where.blockId, where.offset, meta.hash, { label })
+  const runId = ed.insert.insertAssetAt(where.blockId, where.offset, meta.hash, { label })
   if (!runId) {
     // 块在入库期间被删 / 光标越界：字节已经落库（孤儿，无害），引用不落
     app.toast(t('ui.asset.caretGone'), 'warn')
@@ -1327,7 +1327,7 @@ async function insertAssetBlob(
  * 多一个谁都不认识的空控件；用完即摘（连同它的 change 监听）。
  */
 function pickImageViaFileInput(): void {
-  const point = ed.caretPoint()
+  const point = ed.insert.caretPoint()
   if (!point) {
     app.toast(t('ui.asset.needCaret'), 'warn')
     return
@@ -1631,7 +1631,7 @@ const app: App = {
    * 插完还要把光标落到新留的空块上——视图命令只读写拥有者上的两个属性，碰不到这些。
    * 判据与「插入其他块」共用一套（空块原地转、否则插到下一行）。
    */
-  insertQueryBlock: (blockId) => ed.insertQueryAfter(blockId) ?? '',
+  insertQueryBlock: (blockId) => ed.insert.insertQueryAfter(blockId) ?? '',
 
   /**
    * **斜杠「插入看法」的落点**（`core.view/insert` 带 `kind` 的那一支）。
@@ -1646,7 +1646,7 @@ const app: App = {
     if (!view) return ''
     const ownerProps = withBlockOwnerData(undefined, { views: [view], activeView: view.id })
     // 所有 children 源看法都就地画身体（`rowHasInlineViewBody`），插完留在原地即见
-    return ed.insertViewAfter(blockId, ownerProps) ?? ''
+    return ed.insert.insertViewAfter(blockId, ownerProps) ?? ''
   },
 
   ...pageCommands(pageDeps),
@@ -2433,15 +2433,15 @@ const app: App = {
     return text
   },
   // 结构动作落在中心编辑器上：焦点可能在一面镜像的岛里，而露面块在正文里
-  insertEmbed: (at, targetId, view) => mainEd.insertEmbedAfter(at, targetId, view),
+  insertEmbed: (at, targetId, view) => mainEd.insert.insertEmbedAfter(at, targetId, view),
   /** 改一次露面选的视图（看法住在源块的命名视图上，这里只动指针） */
   setEmbedView: (blockId, view) => {
     owners.setBindingView({ kind: 'embed', blockId }, view)
     return true
   },
-  expandAtomToEmbed: (atomId, view) => mainEd.expandAtomToEmbed(atomId, view),
+  expandAtomToEmbed: (atomId, view) => mainEd.insert.expandAtomToEmbed(atomId, view),
   removeEmbed: (blockId) => {
-    const ok = mainEd.removeEmbed(blockId)
+    const ok = mainEd.insert.removeEmbed(blockId)
     // 焦点原本在那一面镜像里：它的宿主已经被摘掉，活动编辑器退回中心
     if (ok && ed !== mainEd && !ed.container.isConnected) ed = mainEd
     return ok
