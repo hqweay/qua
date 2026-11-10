@@ -39,7 +39,7 @@ export function sparseWorkspace(): Workspace {
   return forest([b.page], [b])
 }
 
-/** 降级态：超长块 / 全英文 / 超长标题 / 无标题 / 缺失资产，一屏看完 */
+/** 降级态：超长块 / 全英文 / 超长标题 / 无标题 / 缺失资产 / 纯原子行，一屏看完 */
 export function degradedWorkspace(): Workspace {
   const long = mkPage('超长标题 · A Very Long Page Title That Keeps Going And Going Until Both The Rail And The Breadcrumb Have To Truncate It', 'lucide:triangle-alert', [
     { text: '超长块（' + longParagraph().length + ' 字，单块）：' + longParagraph() },
@@ -49,9 +49,14 @@ export function degradedWorkspace(): Workspace {
     { text: '空块（既无文字也无子块）——上面这行下面还有一个：' },
     { text: '' },
     { text: '只有标点的一行：？？？！！！……' },
+    // 纯原子行（**祖先链的极端形状**）：整行只有一个引用/一张图时，面包屑、反链、
+    // 回收站读它靠的是呈现摘要（引用读目标名、图片读文件名），读不出字不等于「无标题」。
+    { text: '[[设计原则]]' },
+    { text: '![[丢失的截图.png]]' },
   ])
   const noTitle = mkPage('', 'lucide:file', [{ text: '无标题页里的内容' }])
-  const built = [long, noTitle]
+  const principles = mkPage('设计原则', 'lucide:file', [{ text: '一切皆块。' }])
+  const built = [long, noTitle, principles]
   const blocks = built.map((b) => b.page)
   resolveRefs(blocks, built)
   return forest(blocks, built)

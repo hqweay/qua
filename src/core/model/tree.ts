@@ -32,7 +32,6 @@ import { walkForest } from './walk.ts'
 import { cloneMountEntries, MOUNTS_PROP } from '../views/mount.ts'
 import { isEmbedBlock } from '../views/embed.ts'
 import { splitPropsForEnter } from '../props/props.ts'
-import { displayTextOf } from '../identity/alias.ts'
 export function locate(doc: Doc, id: string): Located | null {
   let found: Located | null = null
   walkForest(doc.roots, (b, ctx) => {
@@ -912,18 +911,6 @@ export function trashOf(forest: readonly Block[]): Block[] {
     { includeDeleted: true },
   )
   return out.filter(isDeleted)
-}
-
-/**
- * 回收站条目是「空块」吗：**根的显示投影为空 ∧ 没有子块**。
- *
- * 这是清空口径的判据（回收站卡按它筛、也按它计「清空 N」）。两条都取**窄**的：
- *   · 投影用 `displayTextOf`（与回收站行的「（空块）」占位是同一份投影）——
- *     只有一个引用原子的块会投影出目标名字，不算空；宁可少清。
- *   · 无子块：正文空但带子树的条目，子树里可能有要保留的东西，不进「空块」口径。
- */
-export function isBlankTrashEntry(b: Block): boolean {
-  return displayTextOf(b) === '' && b.children.length === 0
 }
 
 /**

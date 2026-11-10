@@ -9,7 +9,7 @@
 import { ICON_PROP, isJournalBlock, prop, type Block } from '../model/model.ts'
 import { derivedId, pad } from '../model/ids.ts'
 import { walkForest } from '../model/walk.ts'
-import { plainText } from '../model/runs.ts'
+import { isEmptyContent } from '../model/runs.ts'
 export function todayISO(now: Date = new Date()): string {
   const y = now.getFullYear()
   const m = String(now.getMonth() + 1).padStart(2, '0')
@@ -88,19 +88,21 @@ export function findJournalDay(blocks: readonly Block[], date: string): Block | 
 }
 
 /**
- * 这一天有没有**真正写过东西**（正文里有非空文字）。
+ * 这一天有没有**真正写过东西**。
  *
  * 判据是**整棵子树**，不是日期块自己的 `content`：日期的正文恒为空（它是 `_date` 的只读投影），
  * 内容都住子块。装载边界会给每天补一个空首子块，所以「有子块」不代表「有内容」。
+ * 「有内容」按**块的存在**判（`isEmptyContent`）：一行只有一个引用／一张图也是内容，
+ * 删除提醒不能把它当没写过——`plainText` 在这只会回答「有没有字」，那是另一个问题。
  *
  * 用途：删除一天时决定要不要提醒；查询侧「真正写过东西的天」也应当走这一份判据
  * （不要各自再写一遍「遍历子块看文本」）。
  */
 export function journalHasContent(b: Block): boolean {
-  if (plainText(b.content).trim() !== '') return true
+  if (!isEmptyContent(b.content)) return true
   let has = false
   walkForest(b.children, (x) => {
-    if (plainText(x.content).trim() === '') return
+    if (isEmptyContent(x.content)) return
     has = true
     return false
   })

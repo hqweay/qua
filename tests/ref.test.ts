@@ -1,11 +1,13 @@
 /**
- * **引用解析**的纯逻辑测试。
+ * **引用解析 ＋ 呈现摘要**的纯逻辑测试。
  *
- * 这里钉的是四件在界面上难复现、但又正是「改名传播」全部内容的事：
- *   ① 显示名来自目标的**主名叶子 > 正文**，`label` 只在解析不到时兜底；
+ * 这里钉的是五件在界面上难复现、但又正是「改名传播」全部内容的事：
+ *   ① 显示名来自目标的**主名叶子 > 呈现摘要**，`label` 只在解析不到时兜底；
  *   ② 目标改名（改 `_aliases`）⇒ 解析结果跟着变（**不需要回头改 run**）；
  *   ③ 目标被删 ⇒ `dangling` ＋ 沿用 `label`（错指要看得见，不假装解析成功）；
- *   ④ journal 的正文是空的 ⇒ 显示**日期投影**，不是「无标题」。
+ *   ④ journal 的正文是空的 ⇒ 显示**日期投影**，不是「无标题」；
+ *   ⑤ 一行只有原子（引用／图片／链接）⇒ 呈现摘要读得出东西，不是「无标题」，
+ *      且引用解析带预算——互引环在有限层内落回快照，不炸栈。
  *
  * ⚠️ 写正文（描述）**不该**改引用显示名：地址只有 `_aliases` 一份。
  */
@@ -13,10 +15,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
 import { writeBlockContent } from '../src/core/model/model.ts'
-import { renameAlias, refTitle, resolveRef, resolveRefs, danglingView } from '../src/core/index.ts'
+import { renameAlias, blockLabel, blockSummary, summaryText, resolveRef, resolveRefs, danglingView } from '../src/core/index.ts'
 import { displayTextOf } from '../src/core/identity/alias.ts'
 import { journalDateLabel } from '../src/core/identity/journal.ts'
-import { textRuns, type RefRun } from '../src/core/model/runs.ts'
+import { textRuns, type RefRun, type Run } from '../src/core/model/runs.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, content: textRuns(text), children: [], ...extra })
 const named = (id: string, alias: string, text = '', extra: Partial<Block> = {}): Block =>
@@ -119,13 +121,13 @@ test('④b 没有名字、正文空白的页 ⇒ 兜底「无标题」（不是�
   assert.equal(v.label, '无标题')
 })
 
-test('refTitle：主名叶子 > 正文；`_display` 不影响引用；journal 空日期退回名字/正文', () => {
-  assert.equal(refTitle(named('p', 'A/B', '描述')), 'B')
-  assert.equal(refTitle(b('p', '  甲  ')), '甲')
+test('blockLabel：主名叶子 > 正文；`_display` 不影响引用；journal 空日期退回名字/正文', () => {
+  assert.equal(blockLabel(named('p', 'A/B', '描述')), 'B')
+  assert.equal(blockLabel(b('p', '  甲  ')), '甲')
   // `_display` 只决定「这一行自己的头」怎么显示，不参与引用解析
-  assert.equal(refTitle({ ...named('p', '甲', '描述'), props: { _aliases: ['甲'], _display: 'text' } }), '甲')
+  assert.equal(blockLabel({ ...named('p', '甲', '描述'), props: { _aliases: ['甲'], _display: 'text' } }), '甲')
   // `_date` 为空时没有可显示的投影 ⇒ 退回正文（此时为空 ⇒ 兜底文案）
-  assert.equal(refTitle(b('j', '', { props: { _date: '' } })), '无标题')
+  assert.equal(blockLabel(b('j', '', { props: { _date: '' } })), '无标题')
 })
 
 test('resolveRefs：按 atomId 返回（不是按位置，顺序变了也不会张冠李戴）', () => {
@@ -245,9 +247,75 @@ test('U1b displayTextOf：主名叶子 > 正文；都空 ⇒ 空串（不兜「�
   assert.equal(displayTextOf(b('p', '   ')), '', '空就是空：查询拿「无标题」去匹配会命中一批怪东西')
 })
 
-test('U2 refTitle 与 displayTextOf 对日记是同一个串（收成一个入口，不是两份答案）', () => {
+test('U2 blockLabel 与 displayTextOf 对日记是同一个串（收成一个入口，不是两份答案）', () => {
   for (const date of ['2026-10-26', '2026-01-01', '2026-12-31']) {
     const j = b(`j-${date}`, '', { props: { _date: date } })
-    assert.equal(refTitle(j), displayTextOf(j))
+    assert.equal(blockLabel(j), displayTextOf(j))
   }
+})
+
+/* ------------------------------------------------- 呈现摘要（原子进得来） */
+
+/** 造带任意 run 的块 */
+const withRuns = (id: string, runs: Run[], extra: Partial<Block> = {}): Block => ({
+  id,
+  content: runs,
+  children: [],
+  ...extra,
+})
+
+test('S1 呈现摘要逐 run 读法：文本连成流、链接读文本、图片读文件名快照', () => {
+  const runs: Run[] = [
+    { t: 'text', v: '看 ' },
+    { id: 'l1', t: 'link', v: '官方文档', url: 'https://x' },
+    { t: 'text', v: '，配图 ' },
+    { id: 'a1', t: 'asset', asset: 'ab12', label: '发票.jpg' },
+  ]
+  assert.equal(summaryText(runs), '看 官方文档，配图 发票.jpg')
+  // 没带文件名快照的图片：占位「图片」，不许读成空
+  assert.equal(summaryText([{ id: 'a2', t: 'asset', asset: 'cd34' }]), '图片')
+})
+
+test('S2 一行只有一个块引用 ⇒ 呈现摘要就是目标的名字（面包屑的「无标题」由此修掉）', () => {
+  const line = withRuns('host', [{ id: 'r1', t: 'ref', label: '设计方案', to: 'p1' }])
+  const find = finder([line, named('p1', '设计方案', '目标正文')])
+  assert.equal(blockLabel(line, find), '设计方案')
+  // 引用 chip 的语义同一条链（resolveRef → blockLabel）
+  assert.equal(resolveRef(find, ref({ to: 'host' })).label, '设计方案')
+})
+
+test('S2b 目标的名字链优先：有主名的目标读主名，不读它正文', () => {
+  const forest = [named('p1', '甲', '这是描述')]
+  const line = withRuns('host', [{ id: 'r1', t: 'ref', to: 'p1' }])
+  assert.equal(blockLabel(line, finder(forest)), '甲')
+})
+
+test('S3 呈现摘要「空就是空」（不兜底的是 blockSummary，兜底的是 blockLabel）', () => {
+  assert.equal(blockSummary(b('p', '   ')), '')
+  assert.equal(blockLabel(b('p', '   ')), '无标题')
+  // 混合行：引用没写快照、目标也不在 ⇒ 引用那一格读空，但前面的字还在
+  const line = withRuns('host', [{ t: 'text', v: '开头 ' }, { id: 'r1', t: 'ref', to: 'gone' }])
+  assert.equal(blockSummary(line, finder([])), '开头')
+})
+
+test('S4 预算制：摘要里的引用解析到目标的名字，目标自己的引用退回快照（不无限追链）', () => {
+  // A 引 B（B 无名、正文只有一枚指向 C 的引用），C 有名
+  const c = named('c', '丙')
+  const bLine = withRuns('bl', [{ id: 'rb', t: 'ref', label: '丙', to: 'c' }])
+  const aLine = withRuns('al', [{ id: 'ra', t: 'ref', label: 'bl', to: 'bl' }])
+  const find = finder([aLine, bLine, c])
+  // chip 指向 A：A 的引用解析到 B 的标签，B 自己那层（引用 C）不再现算——取快照「丙」
+  assert.equal(resolveRef(find, ref({ to: 'al' })).label, '丙')
+  // 直接呈现 A：同一份答案
+  assert.equal(blockLabel(aLine, find), '丙')
+})
+
+test('S4b 互引环不炸：A 引 B、B 引 A，块标签在预算内落回快照并终止', () => {
+  const a = withRuns('a', [{ id: 'ra', t: 'ref', label: '乙行', to: 'b' }])
+  const bLine = withRuns('b', [{ id: 'rb', t: 'ref', label: '甲行', to: 'a' }])
+  const find = finder([a, bLine])
+  // 有 find：解析一层后预算耗尽 ⇒ 快照名（不是无限递归，也不会栈溢出）
+  assert.equal(blockLabel(a, find), '乙行')
+  // 没有 find：全部走快照，同一答案
+  assert.equal(blockLabel(a), '乙行')
 })

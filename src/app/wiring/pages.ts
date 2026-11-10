@@ -128,6 +128,9 @@ export function setupPages(deps: PagesDeps) {
     uiCtx,
   } = deps
 
+  /** 引用解析用（呈现摘要现算名字）：呈现面各处共用这一只箭头 */
+  const kbGet = (id: string) => kb.get(id)
+
   /**
    * **导航历史**（中心槽的「当前对象」先后）。与 undo/redo 是两套：
    *   · undo 管**数据**（块树/锚点/原子的快照）；
@@ -317,7 +320,7 @@ export function setupPages(deps: PagesDeps) {
     if (tab.kind !== 'block') {
       // 终点面：编辑器保持上一份块视图原样（回来时原位恢复），身体归表面宿主
       deps.onSurface?.(surfaceRefOf(tab))
-      deps.getChrome().renderTitle(activeBlock(), [])
+      deps.getChrome().renderTitle(activeBlock(), [], kbGet)
       deps.renderDocks()
       syncNav()
       emitTabs()
@@ -333,7 +336,7 @@ export function setupPages(deps: PagesDeps) {
     const { renderMounts, renderProperties } = deps.getPanels()
     renderMounts()
     renderProperties()
-    deps.getChrome().renderTitle(activeBlock(), activeTrail())
+    deps.getChrome().renderTitle(activeBlock(), activeTrail(), kbGet)
     deps.renderDocks()
     deps.scheduleSave()
     deps.scheduleBadge()
@@ -726,7 +729,7 @@ export function setupPages(deps: PagesDeps) {
     saveNow,
     scheduleSave,
     refreshList: () => renderDocks(),
-    refreshTitle: () => deps.getChrome().renderTitle(activeBlock(), activeTrail()),
+    refreshTitle: () => deps.getChrome().renderTitle(activeBlock(), activeTrail(), kbGet),
     focusFirstBlock: () => {
       /**
        * 本次装载已经恢复了位置 ⇒ 不要再把光标放回首块（那会先闪到顶部，

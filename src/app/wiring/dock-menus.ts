@@ -204,7 +204,7 @@ export function setupCardMenus(deps: DockMenusDeps) {
     const rows: Row[] = []
     walkForest(deps.store.blocks, (b) => {
       if (rows.length >= 300) return false
-      rows.push({ id: `shortcut-block/${b.id}`, label: blockLabel(b), icon: 'lucide:list-tree' })
+      rows.push({ id: `shortcut-block/${b.id}`, label: blockLabel(b, (id) => deps.kb.get(id)), icon: 'lucide:list-tree' })
     })
     deps.layers.openMenu({
       rows,

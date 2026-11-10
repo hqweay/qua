@@ -18,7 +18,9 @@ import assert from 'node:assert/strict'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { mkBlock, isDeleted, type Block } from '../src/core/model/model.ts'
-import { isBlankTrashEntry, trashOf } from '../src/core/model/tree.ts'
+import { isBlankTrashEntry } from '../src/core/index.ts'
+import { trashOf } from '../src/core/model/tree.ts'
+import { textRuns, type Run } from '../src/core/model/runs.ts'
 import { diff, forestFingerprint, replay } from '../src/core/kb/diff.ts'
 import type { Op } from '../src/core/kb/types.ts'
 
@@ -174,9 +176,26 @@ test('清空只认带删除标记的根：活动块与未知 id 不动、返回�
 
 /* ------------------------------------------------------------ 空块口径 */
 
-test('空块判据：正文投影为空 ∧ 无子块；带正文或带子树都不算', () => {
+/** 带指定 run 的块（图片／引用行的空块判据要用） */
+const withRuns = (id: string, runs: Run[]): Block => ({
+  ...mkBlock('', { created: NOW, modified: NOW }),
+  id,
+  content: runs,
+})
+
+test('空块判据：呈现摘要为空 ∧ 无子块；带正文、原子或子树都不算', () => {
   assert.ok(isBlankTrashEntry(b('blank')), '空正文空子树 ⇒ 空块')
   assert.ok(!isBlankTrashEntry(b('withKids', [b('kid')])), '带子树的条目不算空块（子树里可能有要保留的东西）')
   assert.ok(!isBlankTrashEntry(mkBlock('有字', { created: NOW, modified: NOW })), '有正文的条目不算空块')
+  // 一行只有一个引用：摘要读得出目标名（没有 find 时用快照），不算空——「清空空块」不许吃掉它
+  assert.ok(
+    !isBlankTrashEntry(withRuns('refOnly', [{ id: 'r1', t: 'ref', label: '某个目标' }])),
+    '引用原子读得出目标名 ⇒ 不算空块',
+  )
+  // 一行只有一张图：文件名快照就是内容，不算空
+  assert.ok(
+    !isBlankTrashEntry(withRuns('imgOnly', [{ id: 'a1', t: 'asset', asset: 'ab12', label: '发票.jpg' }])),
+    '图片行有文件名 ⇒ 不算空块',
+  )
 })
 

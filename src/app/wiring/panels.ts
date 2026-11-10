@@ -615,7 +615,7 @@ export function setupPanels(deps: PanelsDeps) {
     }
     drawerBlockId = blockId
     drawerFocusPropId = focusPropId ?? null
-    layers.openDrawer(blockLabel(b), (host) => {
+    layers.openDrawer(blockLabel(b, (id) => kb.get(id)), (host) => {
       const root = document.createElement('div')
       root.className = 'props-drawer'
       const titleEl = document.createElement('span')
@@ -674,7 +674,7 @@ export function setupPanels(deps: PanelsDeps) {
    * 名字写在卡的抬头，换主体时**标题变、卡不动** —— 位置稳定，用户不用重新认路。
    */
   function renderInspectTitle(b: Block | null): void {
-    chrome.inspectCardTitleEl.textContent = b ? blockLabel(b) : ''
+    chrome.inspectCardTitleEl.textContent = b ? blockLabel(b, (id) => kb.get(id)) : ''
   }
 
   blocks.subscribe(() => scheduleProperties())

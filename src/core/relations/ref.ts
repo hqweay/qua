@@ -1,5 +1,6 @@
 /**
- * **引用解析**（`RefResolver` 接缝）：行内原子显示什么，由**目标当前的状态**决定。
+ * **引用解析 ＋ 呈现标签**（`RefResolver` 接缝）：行内原子显示什么、整块读作什么，
+ * 都由**目标当前的状态**决定。
  *
  * 为什么它必须存在：引用如果显示插入时的快照，目标一改名，链接上挂的就是过期的字——
  * 双链里「改名要能传播」这件事只能靠**渲染时解析**，不能靠「改名时批量回去改一遍原子」
@@ -12,13 +13,19 @@
  * ⇒ `state` 是**派生**、不落盘：能不能解析到由「此刻森林里有没有这块」决定，
  *    存一份下来只会得到一个可能与事实不符的第二份真相。
  *
+ * 块级标签（`blockLabel`）是原子级解析的**顶层**：一行只有一枚引用时，
+ * 「这块读作什么」的答案就是那枚引用解析出来的名字——它跟引用 chip 是同一个问题，
+ * 所以住在这里，而不是各呈现面（面包屑／卡片头／回收站行）各自再答一遍。
+ *
  * ⚠️ 「按 id 找块」由调用方注入（`find`）：本文件零 DOM，也**不持有森林**
  *    —— 编辑器、popover、测试各自把「怎么找块」递进来，解析逻辑只有一份。
  */
 import { t } from '../infra/msg.ts'
-import { displayTextOf } from '../identity/alias.ts'
+import { aliasLeaf, primaryAliasOf } from '../identity/alias.ts'
+import { isJournal, journalDate, journalDateLabel } from '../identity/journal.ts'
 import { hasList, type Block } from '../model/model.ts'
 import { tagIdsOf } from '../identity/tags.ts'
+import type { Content } from '../model/runs.ts'
 
 /** 解析结果：**显示名 ＋ 还能不能解析到**（`dangling` 不是错误，是状态） */
 export interface RefView {
@@ -34,33 +41,88 @@ export interface RefView {
 /** 按 id 找块（整片森林；zoom 后引用目标可能在任意深度） */
 export type FindBlock = (id: string) => Block | undefined
 
+/* ------------------------------------------------------- 呈现摘要与标签 */
+
 /**
- * 一个块**被引用时**的显示名。
- *
- * 判据：**主名叶子 > 正文**（见 `displayNameOf`）——引用要叫「它的名字」，
- * 而不是「它的描述」。`_display` 不参与：那只是这一行自己的头怎么显示。
- *
- * ⚠️ 有一条特例：journal 的 `text` 恒为空（日期在 `_date` 里）⇒ 直接取名字会得到
- *    「无标题」。日期是它的可读投影，引用到某一天就该显示那一天
- *    （这也是「日期可引用」的第一个落点）。
- * ⚠️ 投影本身**不在这里算**：`displayTextOf` 是「这一块的可读文本」的唯一来源，
- *    本函数只负责给它兜一条「无标题」。两处各判一次日记，就是同一件事两个答案。
+ * dangling／预算耗尽共用的兜底名：`anchor` 压过快照（用户显式指定的显示名最高）。
+ * 快照是**插入时刻**的字，不是「用户最后见过的名字」——见 `resolveRef` 的取舍。
  */
-export function refTitle(b: Block): string {
-  const s = displayTextOf(b)
-  return s === '' ? t('ui.page.untitled') : s
+function refSnapshot(a: { anchor?: string; label?: string }): string {
+  const anchor = a.anchor === '' ? undefined : a.anchor
+  return anchor ?? a.label ?? ''
+}
+
+/**
+ * **呈现摘要**：一列 run 读出来是什么（`plainText` 的呈现层兄弟）。
+ *
+ * 三个投影三分，别混：
+ *   · `plainText`（model/runs）—— **文本流投影**，原子不进：查询、匹配、引文、
+ *     光标坐标都按它算（引用/chip 显示的字是目标的名字，不算这一块自己的字）；
+ *   · `displayTextOf`（identity/alias）—— 查询语义的可读文本（`{text}` 条件），
+ *     同样不含原子，空就是空；
+ *   · 本函数 —— **呈现摘要**：面包屑、卡片头、引用 chip、回收站行的读者是人，
+ *     而引用／图片／链接本身就是内容——读不出来就只剩「无标题」。
+ *
+ * 逐 run 的读法：text/link → 文本；asset → 文件名快照（缺失 ⇒ 占位「图片」）；
+ * ref → **现解析**（改名要传播，理由见文件头）。
+ *
+ * ⚠️ 解析带**预算**（`budget`）：每追一层引用扣一格，扣完退回快照。
+ *    预算不是「追几层刚好」的精调值，是**环终止的安全阀**：互引（A 引 B、B 引 A）
+ *    在有限格内必然落回快照。真实链追到预算尽头仍取快照，是可接受的退化。
+ */
+export function summaryText(content: Content, find?: FindBlock, budget = 2): string {
+  let out = ''
+  for (const r of content) {
+    if (r.t === 'text' || r.t === 'link') out += r.v
+    else if (r.t === 'asset') out += r.label ?? t('ui.atom.image')
+    else if (r.t === 'ref')
+      out += find && budget > 0 ? resolveRef(find, r, budget - 1).label : refSnapshot(r)
+  }
+  return out.trim()
+}
+
+/**
+ * 这一块**呈现**时的可读摘要：日记日期 > 主名叶子 > 摘要投影。空 ⇒ `''`。
+ *
+ * 与 `displayTextOf` 的分工：那是「这一块自己的字」（查询拿它去匹配，空就是空），
+ * 这是「这一块读起来是什么」（原子按 `summaryText` 的读法进）。链的形状刻意同构
+ * （日记 > 名字 > 内容），只在最后一段分叉——日记的正文恒为空、日期是它的可读投影，
+ * 这一段两个投影共享同一个答案。
+ */
+export function blockSummary(b: Block, find?: FindBlock, budget = 2): string {
+  if (isJournal(b)) {
+    const date = journalDate(b)
+    if (date !== '') return journalDateLabel(date)
+  }
+  const leaf = aliasLeaf(primaryAliasOf(b))
+  if (leaf !== '') return leaf
+  return summaryText(b.content, find, budget)
+}
+
+/**
+ * 呈现层「这一块叫什么」：`blockSummary` ＋ **无标题兜底**——全应用唯一的兜底定义点。
+ *
+ * 与 `blockSummary` 的分工：那个说「读起来是什么，空就是空」（回收站拿空串去画
+ * 「（空块）」占位），这里说「界面上必须有个名字」。面包屑、行上下文格、卡片头、
+ * 引用 chip、搜索行兜底都是同一个问题，只在这里回答一次；调用面不再各自发明兜底
+ * （裸 id 尤其不许露——用户没有可以从 4 位 hex 里认出哪块是哪块的能力）。
+ */
+export function blockLabel(b: Block, find?: FindBlock, budget = 2): string {
+  return blockSummary(b, find, budget) || t('ui.page.untitled')
 }
 
 /**
  * 解析一个行内引用。
  *
  * `a` 只取 `label`／`anchor`／`to`／`flavor` ⇒ popover 与测试可以不造完整 run。
+ * `budget` 是**目标标签**的追层预算（详见 `summaryText`）——chip 呈现目标的标签，
+ * 目标自己还是一行引用时，这一格的预算决定要不要继续往下读。
  *
  * ## 显示名的唯一一条链（改这里之前先看一眼）
  *
  * | 目标状态 | 显示什么 |
  * |---|---|
- * | resolved | `anchor ?? refTitle(target)` |
+ * | resolved | `anchor ?? blockLabel(target, find, budget)` |
  * | dangling  | `anchor ?? label ?? ''` |
  *
  * anchor 是「用户想让这一处叫什么」，所以它**压过一切派生出来的名字**；
@@ -81,18 +143,19 @@ export function refTitle(b: Block): string {
 export function resolveRef(
   find: FindBlock,
   a: { label?: string; to?: string; flavor?: '#'; anchor?: string },
+  budget = 2,
 ): RefView {
   const target = a.to
   // 空串 ＝ 没写（写入侧「写空即删键」⇒ 库里没有「有但是空的」这种形状），
   // 读侧把两者合成一个值，判据才不会在某一处漏成「显示一片空白」
   const anchor = a.anchor === '' ? undefined : a.anchor
   const fallback = a.flavor === '#' ? ('tag' as const) : ('page' as const)
-  if (!target) return { label: anchor ?? a.label ?? '', state: 'dangling', kind: fallback }
+  if (!target) return { label: refSnapshot(a), state: 'dangling', kind: fallback }
   const b = find(target)
-  if (!b) return { label: anchor ?? a.label ?? '', state: 'dangling', kind: fallback }
+  if (!b) return { label: refSnapshot(a), state: 'dangling', kind: fallback }
   // 标签的显示名＝**不带 `#` 的正文**；`#` 是呈现时加的装饰（`makeAtomEl`），不进正文，
   // 否则「标签块的正文」与「它在引用里显示的字」就成了两个需要同步的东西。
-  return { label: anchor ?? refTitle(b), state: 'resolved', kind: refKindOf(b) }
+  return { label: anchor ?? blockLabel(b, find, budget), state: 'resolved', kind: refKindOf(b) }
 }
 
 /**
@@ -118,9 +181,10 @@ function refKindOf(b: Block): 'tag' | 'obj' | 'page' {
 export function resolveRefs(
   find: FindBlock,
   runs: readonly { id: string; label?: string; to?: string; flavor?: '#'; anchor?: string }[],
+  budget = 2,
 ): Map<string, RefView> {
   const out = new Map<string, RefView>()
-  for (const a of runs) out.set(a.id, resolveRef(find, a))
+  for (const a of runs) out.set(a.id, resolveRef(find, a, budget))
   return out
 }
 
@@ -147,4 +211,17 @@ export function refTokensIn(text: string): { id: string; start: number; end: num
     out.push({ id: m[1]!, start, end: start + m[0].length })
   }
   return out
+}
+
+/**
+ * 回收站条目是「空块」吗：**根的呈现摘要为空 ∧ 没有子块**。
+ *
+ * 这是清空口径的判据（回收站卡按它筛、也按它计「清空 N」）。两条都取**窄**的：
+ *   · 摘要用 `blockSummary`（与回收站行的「（空块）」占位同一份投影）——
+ *     引用原子读得出目标名、图片读得出文件名，都不算空；宁可少清。
+ *     （住在解析接缝这边而不是 model：判据要吃「呈现摘要」，而那是本文件的投影。）
+ *   · 无子块：正文空但带子树的条目，子树里可能有要保留的东西，不进「空块」口径。
+ */
+export function isBlankTrashEntry(b: Block, find?: FindBlock): boolean {
+  return blockSummary(b, find) === '' && b.children.length === 0
 }

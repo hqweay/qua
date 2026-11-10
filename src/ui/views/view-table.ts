@@ -22,6 +22,7 @@ import {
   cardinalityOf,
   choicesOf,
   clockLabel,
+  blockLabel,
   displayNameOf,
   hasValue,
   liveChildren,
@@ -30,7 +31,6 @@ import {
   propLabel,
 } from '../../core/index.ts'
 import { choiceCells, ChoiceLookupIndex, type ChoiceLookup, type FieldRow } from '../../core/props/props.ts'
-import { plainText } from '../../core/model/runs.ts'
 import { t } from '../../core/infra/msg.ts'
 import { makeTagChipEl } from '../../view/editor/block-dom.ts'
 import type { SurfaceEditor } from '../block-ui/surface-editor.ts'
@@ -404,8 +404,7 @@ export class ViewTable {
       row.dataset.blockId = r.block.id
       const name = document.createElement('span')
       name.className = 'tv-compact-title ui-ellipsis'
-      const text = plainText(r.block.content).trim()
-      name.textContent = text === '' ? t('ui.page.untitled') : text
+      name.textContent = blockLabel(r.block, (id) => this.deps.store.find(id))
       row.appendChild(name)
       if (r.tags.length > 0) {
         const tag = document.createElement('span')

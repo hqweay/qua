@@ -11,7 +11,7 @@ import {
   findInForest,
   hasTag,
   openActionOf,
-  refTitle,
+  blockLabel,
   tagIdsOf,
   trashOf,
   type Block,
@@ -287,7 +287,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
        */
       if (!target && writable) {
         const tomb = run.to !== undefined && run.to !== '' ? trashOf(deps.getWs().blocks).find((b) => b.id === run.to) : undefined
-        const label = (run.anchor ?? run.label ?? '').trim() || (tomb ? refTitle(tomb) : '')
+        const label = (run.anchor ?? run.label ?? '').trim() || (tomb ? blockLabel(tomb) : '')
         if (label !== '') {
           if (tomb) add('atom/repair', t('ui.atomMenu.restoreTarget', { name: label }), 'core.editor/repair-ref', { atomId: run.id }, 'lucide:rotate-ccw')
           else add('atom/repair', t('ui.atomMenu.rebuildTarget', { name: label }), 'core.editor/repair-ref', { atomId: run.id }, 'lucide:plus')

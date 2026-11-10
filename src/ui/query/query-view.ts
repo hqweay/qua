@@ -29,6 +29,7 @@ import {
   evaluateQuerySpec,
   groupChoicesOf,
   groupsByStructure,
+  blockLabel,
   displayNameOf,
   expandContexts,
   hasLiveChildren,
@@ -1111,9 +1112,9 @@ export class ViewHost {
     }
   }
 
-  /** `_tags` 的组名解析：标签块的显示名（列头与选项都从这一份走） */
+  /** `_tags` 的组名解析：标签块的显示名（列头与选项都从这一份走；兜底只有「无标题」一种） */
   private tagChoices(): readonly { id: string; label: string }[] {
-    return this.deps.kb.tags().map((b) => ({ id: b.id, label: displayNameOf(b).trim() || b.id.slice(-6) }))
+    return this.deps.kb.tags().map((b) => ({ id: b.id, label: blockLabel(b, (x) => this.deps.kb.get(x)) }))
   }
 
   /**
@@ -1516,11 +1517,11 @@ export class ViewHost {
     return resolveRows(evaluateQuerySpec(src.spec, this.deps.kb, this.evalContext(src.spec)), this.deps.kb)
   }
 
-  /** chip 的显示名：页按 id 现解析；标签的原子本来就是名字 */
+  /** chip 的显示名：页按 id 现解析；标签的原子本来就是名字。目标没了说「无标题」，不露裸 id */
   private atomLabel(atom: QuickFilterAtom): string {
     if ('tag' in atom) return atom.tag
     const b = this.deps.kb.get(atom.up.is)
-    return b ? displayNameOf(b) || atom.up.is.slice(-4) : atom.up.is.slice(-4)
+    return b ? blockLabel(b, (x) => this.deps.kb.get(x)) : t('ui.page.untitled')
   }
 
   /** 条件树能不能落在这里（投影／派生栏没有可编辑的落点） */

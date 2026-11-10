@@ -14,7 +14,7 @@
  *    同一个手势落到正文行是「移动」、落到侧槽是「打开窗口」—— 含义由落点说，悬停时就贴出来。
  */
 import type { BelongsRow } from '../../core/relations/hierarchy.ts'
-import { displayNameOf, type Block, type BlockList } from '../../core/index.ts'
+import { blockLabel, type Block, type BlockList, type FindBlock } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { renderBlock, type BlockRenderCtx } from '../block-ui/block-renderers.ts'
 import { cardList, cardNote } from '../chrome/card-parts.ts'
@@ -36,7 +36,8 @@ export interface BelongsTreeDeps {
   refresh: () => void
   /** 把一个块归到另一个块下面（拖入的落点含义；由装配层转成命令） */
   link: (childId: string, parentId: string) => void
-  untitled: string
+  /** 引用解析用（行名现算引用目标的名字）；不给 ⇒ 引用退回快照名 */
+  find?: FindBlock
 }
 
 export class BelongsTree {
@@ -79,7 +80,7 @@ export class BelongsTree {
     const ctx: BlockRenderCtx = {
       isActive: (id) => id === this.deps.activeId(),
       onOpen: (b, place) => this.deps.open(b.id, place),
-      untitledLabel: this.deps.untitled,
+      find: this.deps.find,
     }
 
     const rows = this.deps.rows(this.face)
@@ -98,7 +99,7 @@ export class BelongsTree {
       wrap.draggable = true
       wrap.addEventListener('dragstart', (e) => setDragBlock(e.dataTransfer, row.block.id))
       // 拖一个块到这个 item 上 ⇒ **加边**（不是重排兄弟：兄弟顺序不落盘）
-      const name = displayNameOf(row.block).trim() || this.deps.untitled
+      const name = blockLabel(row.block, this.deps.find)
       bindDropTarget(wrap, {
         effect: 'link',
         targetId: () => row.block.id,

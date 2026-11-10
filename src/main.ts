@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propDisplayLabels, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind } from './core/index.ts'
+import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propDisplayLabels, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind } from './core/index.ts'
 import { choiceDisplayLabel, cardinalityOf, singleValueOf, valueListOf } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
@@ -367,6 +367,8 @@ let quiet = false
 const isMac = (): boolean => /Mac|iPhone|iPad/.test(navigator.platform)
 /** 短 id：uuidv7 前 12 位是时间戳（同一毫秒创建的块会撞），所以要短就取**尾部随机段** */
 const shortId = (id: string): string => id.slice(-6)
+/** 引用解析用（呈现摘要现算名字）：main 里的呈现面共用这一只箭头 */
+const kbGet = (id: string) => kb.get(id)
 /**
  * 偏好**不活在库里**（v15 起）：它是这台设备怎么显示（主题／槽宽／钉住的块）。
  * 调用点仍按「拿到一份可改的偏好对象」用它 —— 改完由 `scheduleDeviceSave()` 落盘。
@@ -1133,9 +1135,9 @@ function repaintBlock(blockId: string): void {
  * 「改这一块的属性」与「这一行的样子变了」是同一件事的两面。
  */
 
-/** 显示名：主名叶子 > 正文（空则短 id） */
+/** 显示名：呈现摘要（日记日期 > 主名 > 逐 run 可读），兜底只有「无标题」（core 里唯一一份） */
 function blockName(b: Block): string {
-  return displayNameOf(b).trim() || shortId(b.id)
+  return blockLabel(b, kbGet)
 }
 
 /**
@@ -1570,10 +1572,10 @@ function openSpecPopover(opts: {
        * `_tags` 不是定义：它按标签归属分组时的「选项」＝ 全部标签块（组名用显示名）。
        */
       choices: (propId) => {
-        if (propId === '_tags') return kb.tags().map((t) => ({ id: t.id, label: displayNameOf(t).trim() || shortId(t.id) }))
+        if (propId === '_tags') return kb.tags().map((t) => ({ id: t.id, label: blockLabel(t, kbGet) }))
         const def = kb.get(propId)
         if (!def || propKindOf(def) !== 'select') return []
-        return choicesOf(def).map((c) => ({ id: c.id, label: displayNameOf(c).trim() || shortId(c.id) }))
+        return choicesOf(def).map((c) => ({ id: c.id, label: blockLabel(c, kbGet) }))
       },
       ...(hostBlock ? { owner: hostBlock } : {}),
       pickRef: (b, propId, current, onPick, rect, trigger, opts) => pickRefValue(b, propId, current, onPick, rect, trigger, opts),
@@ -1581,9 +1583,7 @@ function openSpecPopover(opts: {
       tagExists,
       refLabel: (targetId) => {
         const target = kb.get(targetId)
-        return target
-          ? displayNameOf(target).trim() || shortId(target.id)
-          : t('ui.props.refMissing', { id: shortId(targetId) })
+        return target ? blockLabel(target, kbGet) : t('ui.props.refMissing', { id: shortId(targetId) })
       },
       apply: opts.onApply,
       close: () => layers.closePopover(),
@@ -2667,9 +2667,7 @@ function focusSourceInMain(blockId: string): void {
  */
 const refLabelOf = (targetId: string): string => {
   const b = kb.get(targetId)
-  return b
-    ? displayNameOf(b).trim() || shortId(b.id)
-    : t('ui.props.refMissing', { id: shortId(targetId) })
+  return b ? blockLabel(b, kbGet) : t('ui.props.refMissing', { id: shortId(targetId) })
 }
 
 /**
@@ -2887,7 +2885,7 @@ function viewEvents(
           labelOf: (c) => {
             const tagName = (id: string): string => {
               const t2 = kb.get(id)
-              return t2 ? displayNameOf(t2).trim() || shortId(id) : shortId(id)
+              return t2 ? blockLabel(t2, kbGet) : shortId(id)
             }
             return choiceDisplayLabel(c, def, tagName)
           },

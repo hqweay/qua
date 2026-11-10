@@ -14,6 +14,8 @@
  *    在不支持的行上画这个徽标，等于告诉用户一个按了没用的键。
  */
 import {
+  blockLabel,
+  findInForest,
   addressesOf,
   displayNameOf,
   findByAlias,
@@ -123,7 +125,8 @@ function instanceRows(tags: readonly Block[], want: string, deps: TriggerDeps): 
     if (name === '') return
     const ids = tagIdsOf(b).filter((id) => matched.has(id))
     if (ids.length === 0) return
-    const label = displayNameOf(b).trim() || t('ui.page.untitled')
+    // 呈现摘要 ＋ 唯一兜底（匹配语义不动：上面按 plainText 过滤的口径照旧）
+    const label = blockLabel(b, (id) => findInForest(deps.forest(), id))
     // 实例行也带着「它属于哪个标签」：⌥↵ 归类、⇧↵ 进成员搜索都要用到这个名字
     const owner = byId.get(ids[0]!)
     const tagName = owner ? primaryAliasOf(owner) || displayNameOf(owner) : ''
@@ -202,14 +205,15 @@ function mentionRows(query: string, deps: TriggerDeps): Row[] {
     const text = plainText(b.content)
     if (hasList(b, 'page') && matchesName(b, q)) {
       if (pages.length < MENTION_CAP) {
-        const name = displayNameOf(b).trim()
+        // 呈现摘要 ＋ 唯一兜底：页恒有地址（在列表里 ⇒ 至少有一个名字），这条兜底是防形状坏的
+        const name = blockLabel(b, (id) => findInForest(deps.forest(), id))
         pages.push({
           id: `retrieval/page/${b.id}`,
-          label: name === '' ? t('ui.page.untitled') : name,
+          label: name,
           hint: addressesOf(b).find((a) => a.includes('/')) ?? '',
           icon: 'lucide:file',
           group: 'retrieval/1-page',
-          pick: { kind: 'page', id: b.id, name: name === '' ? t('ui.page.untitled') : name },
+          pick: { kind: 'page', id: b.id, name },
         })
       }
       return

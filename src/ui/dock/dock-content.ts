@@ -13,7 +13,7 @@
  * 一个专用角色 ＋ 内部一列块 id」冒充它 —— 但冒充出来的东西会被读成产品概念，还白占一个
  * 角色值；等真概念从模型里长出来时再进槽。
  */
-import { displayTextOf, isBlankTrashEntry } from '../../core/index.ts'
+import { blockSummary, isBlankTrashEntry } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { DockCard } from './dock.ts'
@@ -96,7 +96,8 @@ export function trashCard(deps: DockContentDeps): DockCard {
   }
 
   // 口径只是清空（与列表）前的一次筛选，不是回收站的第二种状态
-  const entries = trashScope.get() === 'blank' ? items.filter(isBlankTrashEntry) : items
+  const kbGet = (id: string) => deps.kb.get(id)
+  const entries = trashScope.get() === 'blank' ? items.filter((b) => isBlankTrashEntry(b, kbGet)) : items
 
   const body = document.createElement('div')
 
@@ -156,8 +157,8 @@ export function trashCard(deps: DockContentDeps): DockCard {
 
     const text = document.createElement('span')
     text.className = 'trash-text ui-ellipsis ui-ellipsis-grow'
-    // 正文投影（与搜索／导出同一份口径）；空块给一句占位，否则行看起来像坏的
-    const plain = displayTextOf(b)
+    // 呈现摘要（引用读目标名、图片读文件名）；真空块给一句占位，否则行看起来像坏的
+    const plain = blockSummary(b, kbGet)
     text.textContent = plain === '' ? t('ui.dock.trashBlank') : plain
     row.appendChild(text)
 

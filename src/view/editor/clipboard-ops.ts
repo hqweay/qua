@@ -11,7 +11,7 @@ import {
   isDeleted,
   locate,
   mkBlock,
-  refTitle,
+  blockLabel,
   refTokensIn,
   typeDeclOf,
   uuidv7Hex,
@@ -125,7 +125,7 @@ export class ClipboardOps {
       id: uuidv7Hex(),
       t: 'ref',
       to: alive ? rid : undefined,
-      label: t ? refTitle(t) : undefined,
+      label: t ? blockLabel(t, (id) => this.ed.store.find(id)) : undefined,
       ...(anchor ? { anchor } : {}),
     }
   }
@@ -142,7 +142,7 @@ export class ClipboardOps {
       if (!target) {
         out.push(...textRuns(text.slice(t.start, t.end)))
       } else {
-        out.push({ id: uuidv7Hex(), t: 'ref', to: t.id, label: refTitle(target) })
+        out.push({ id: uuidv7Hex(), t: 'ref', to: t.id, label: blockLabel(target, (id) => this.ed.store.find(id)) })
       }
       at = t.end
     }

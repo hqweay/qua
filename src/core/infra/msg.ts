@@ -645,7 +645,6 @@ export const MSG = {
   'ui.cards.drag': '拖动这张卡',
   /* 卡片按一级子块分组：组＝容器的直接子块（有身份） */
   'ui.cards.noGroups': '这个块还没有子块；每个一级子块就是一列',
-  'ui.cards.untitledGroup': '未命名',
   'ui.cards.openGroup': '打开这一组',
   'ui.cards.addCard': '加一张卡',
   'ui.cards.addCardTitle': '在这一组末尾加一张卡',
@@ -1065,6 +1064,8 @@ export const MSG = {
   'ui.todo.declaredByTag': '这一块的任务状态来自标签的属性声明，摘掉对应标签才会消失',
   'ui.tag.mark': '标签',
   'ui.atom.unknown': '未知引用',
+  // 资产 run 没带文件名快照时（老数据/异常形状）的摘要占位：它仍是内容，不许读成「无标题」
+  'ui.atom.image': '图片',
   'ui.atom.pageTitle': '引用：{label}（左键打开，⌥ 点击看信息）',
   'ui.atom.pageDanglingTitle': '引用：{label}（目标不存在，点击看信息）',
   'ui.atom.tagTitle': '标签：#{label}（左键打开，⌥ 点击看信息）',

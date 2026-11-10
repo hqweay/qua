@@ -19,7 +19,6 @@ import { ALIASES_PROP, aliasesOf, listsOf, primaryAliasOf, type Block } from '..
 import { isJournal, journalDate, journalDateLabel } from './journal.ts'
 import { plainText } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
-import { t } from '../infra/msg.ts'
 
 /** 旧落盘键（v13 及以前）。新代码**不读**它；形状校验把它判成 corrupt。 */
 export const LEGACY_ALIAS_PROP = '_alias' as const
@@ -86,8 +85,8 @@ export function addressOf(b: Block): string {
 /**
  * 这一块**被引用时**的显示名：主名叶子 > 正文。
  *
- * ⚠️ 与 `refTitle` 的分工：本函数不兜底「无标题」，因为它是「这块有什么名字」的
- *    纯派生；要不要兜底文案是呈现层的事。正文为空 ⇒ 返回空串。
+ * ⚠️ 与 `blockLabel`（relations/ref.ts）的分工：本函数不兜底「无标题」，因为它是
+ *    「这块有什么名字」的纯派生；要不要兜底文案是呈现层的事。正文为空 ⇒ 返回空串。
  * ⚠️ `_display` **不参与**：它只决定这一行自己的头怎么显示；引用／反链永远叫主名叶子。
  */
 export function displayNameOf(b: Block): string {
@@ -102,8 +101,8 @@ export function displayNameOf(b: Block): string {
  * 一旦第二个读者（按可读文本做查询）出现，特判就会变成两份各自演化的答案。
  * ⇒ 它和 `displayNameOf` 相邻，**是同一个问题的完整答案**，不是「引用专用」。
  *
- * ⚠️ 返回空串不兜底「无标题」：那是呈现层的事（`refTitle`）。查询要的是「空就是空」——
- *    拿「无标题」去匹配文本会得到一批莫名其妙的命中。
+ * ⚠️ 返回空串不兜底「无标题」：那是呈现层的事（`blockLabel`，relations/ref.ts）。
+ *    查询要的是「空就是空」——拿「无标题」去匹配文本会得到一批莫名其妙的命中。
  * ⚠️ 日记的格式**可配**，落点就是这个函数：改一处，引用显示与「按文本提及」的查询
  *    同时跟着走（代价：同一份条件在格式改了之后结果集会变）。
  */
@@ -113,17 +112,6 @@ export function displayTextOf(b: Block): string {
     if (date !== '') return journalDateLabel(date)
   }
   return displayNameOf(b).trim()
-}
-
-/**
- * 呈现层的「这一行叫什么」：`displayTextOf` ＋ **无标题兜底**。
- *
- * 与 `displayTextOf` 的分工：那个说「可读文本是什么，空就是空」（查询拿空串去匹配
- * 文本时不能用「无标题」冒充），这里说「界面上必须有个名字」。面包屑、卡片头、
- * 检视卡标题都是同一个问题，只在这里回答一次。
- */
-export function blockLabel(b: Block): string {
-  return displayTextOf(b) || t('ui.page.untitled')
 }
 
 /** 能被地址找到的块 —— **只看 `_aliases`**，不再看页／标签列表。 */

@@ -11,9 +11,10 @@
  *     就落在那一块上；换页签＝换 roots，不重建编辑器（选区不丢）。
  */
 import {
-  displayNameOf,
+  blockLabel,
   openActionOf,
   type Block,
+  type FindBlock,
   type BlockStore,
   type OpenAction,
   type StructureGroup,
@@ -40,6 +41,8 @@ export interface ViewTabsDeps {
 }
 
 export class ViewTabs {
+  /** 引用解析用（呈现摘要现算名字）：页签名与形状签名共用这一只箭头 */
+  private readonly kbFind: FindBlock
   readonly root: HTMLElement
   private readonly deps: ViewTabsDeps
   /** 页签的形状签名（块 id ＋ 名字）：变了才重建切换条；正文变化不碰它 */
@@ -55,6 +58,7 @@ export class ViewTabs {
 
   constructor(deps: ViewTabsDeps) {
     this.deps = deps
+    this.kbFind = (id) => deps.store.find(id)
     this.root = document.createElement('section')
     this.root.className = 'vtabs-view'
   }
@@ -75,7 +79,7 @@ export class ViewTabs {
     this.root.dataset.direction = direction
     this.memberIds = groups.map((g) => g.block.id).join('|')
 
-    const nextShape = groups.map((g) => `${g.block.id}:${displayNameOf(g.block)}`).join('|')
+    const nextShape = groups.map((g) => `${g.block.id}:${blockLabel(g.block, this.kbFind)}`).join('|')
     if (nextShape !== this.shape || !this.strip || !this.body) {
       this.shape = nextShape
       this.renderStrip(groups)
@@ -107,14 +111,14 @@ export class ViewTabs {
       const g = groups.find((x) => x.block.id === id)
       if (!g) continue
       const name = tab.querySelector('.vtab-name')
-      if (name) name.textContent = displayNameOf(g.block) || t('ui.cards.untitledGroup')
+      if (name) name.textContent = blockLabel(g.block, this.kbFind)
       const count = tab.querySelector('.vtab-count')
       if (count) count.textContent = String(g.records.length)
       relabelled = true
     }
     // shape 里的名字位已经就地改过：不同步它，下次 render 会拿陈旧签名误判「要整条重建」
     if (relabelled) {
-      this.shape = groups.map((g) => `${g.block.id}:${displayNameOf(g.block)}`).join('|')
+      this.shape = groups.map((g) => `${g.block.id}:${blockLabel(g.block, this.kbFind)}`).join('|')
     }
   }
 
@@ -149,7 +153,7 @@ export class ViewTabs {
     tab.setAttribute('aria-selected', g.block.id === this.active ? 'true' : 'false')
     const name = document.createElement('span')
     name.className = 'vtab-name ui-ellipsis'
-    name.textContent = displayNameOf(g.block) || t('ui.cards.untitledGroup')
+    name.textContent = blockLabel(g.block, this.kbFind)
     const count = document.createElement('span')
     count.className = 'vtab-count'
     count.textContent = String(g.records.length)

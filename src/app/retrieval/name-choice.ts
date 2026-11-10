@@ -24,6 +24,7 @@ import {
   allTags,
   buildAdjacency,
   descendantIds,
+  blockLabel,
   displayNameOf,
   findByAlias,
   flatten,
@@ -38,8 +39,8 @@ import {
 import { t } from '../../core/infra/msg.ts'
 import type { Layers, Row } from '../../ui/overlay/layers.ts'
 
-/** 名字为空时的兜底：与装配层的 `shortId` 同一口径（末 6 位） */
-const shortName = (b: Block): string => displayNameOf(b).trim() || b.id.slice(-6)
+/** 行的显示名：呈现摘要 ＋ 唯一兜底（标签/页恒有地址；防形状坏时不露裸 id） */
+const rowName = (b: Block): string => blockLabel(b)
 
 /** 候选来源：标签／页／页＋标签／引用（全森林） */
 export type NameChoiceKind = 'tag' | 'page' | 'pageOrTag' | 'ref'
@@ -79,7 +80,7 @@ export interface NameChoiceOpts {
 
 /** 主地址比较：`A/B` 与 `C/B` 的叶子相同，按叶子排会让两行看起来没有稳定顺序 */
 const byPrimaryAddress = (a: Block, b: Block): number =>
-  (addressesOf(a)[0] ?? shortName(a)).localeCompare(addressesOf(b)[0] ?? shortName(b))
+  (addressesOf(a)[0] ?? displayNameOf(a).trim()).localeCompare(addressesOf(b)[0] ?? displayNameOf(b).trim())
 
 /**
  * **候选枚举的一条路由**：枚举范围与既定顺序都在这里定，过滤／投影不在此。
@@ -158,7 +159,7 @@ export function createNameChoice(
   const parentHint = (b: Block): string => {
     const parents = parentsOf(b, adj)
     return parents.length > 0
-      ? t('ui.tagPicker.hierarchy', { parents: parents.map((p) => `#${shortName(p)}`).join('、') })
+      ? t('ui.tagPicker.hierarchy', { parents: parents.map((p) => `#${rowName(p)}`).join('、') })
       : ''
   }
 
@@ -179,20 +180,20 @@ export function createNameChoice(
     if (kind === 'tag') {
       return {
         id: `${idPrefix}/${b.id}`,
-        label: `#${shortName(b)}`,
+        label: `#${rowName(b)}`,
         hint: [parentHint(b), countHint(b)].filter((s) => s !== '').join(' · '),
         icon: 'lucide:hash',
         group: tagGroup,
         keyHint: keyHintOf(b),
-        pick: { kind: 'tag', id: b.id, name: primaryAliasOf(b) || shortName(b) },
+        pick: { kind: 'tag', id: b.id, name: primaryAliasOf(b) || displayNameOf(b).trim() },
       }
     }
     if (kind === 'ref') {
       const isPage = hasList(b, 'page')
-      const title = displayNameOf(b).trim()
+      const title = rowName(b)
       return {
         id: `${idPrefix}/${b.id}`,
-        label: title === '' ? t('ui.page.untitled') : title,
+        label: title,
         hint: isPage ? t('ui.props.refIsPage') : t('ui.props.refIsBlock'),
         icon: isPage ? 'lucide:file' : 'lucide:square',
         group: isPage ? 'ref/1-page' : 'ref/2-block',
@@ -203,7 +204,7 @@ export function createNameChoice(
     const isTag = hasList(b, 'tag')
     return {
       id: `${idPrefix}/${b.id}`,
-      label: isTag ? `#${shortName(b)}` : shortName(b),
+      label: isTag ? `#${rowName(b)}` : rowName(b),
       hint: parentHint(b),
       icon: isTag ? 'lucide:hash' : 'lucide:file',
       group: isTag ? 'pick/2' : 'pick/1',

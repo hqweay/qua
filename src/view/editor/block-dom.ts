@@ -18,7 +18,6 @@ import {
   DIVIDER_TYPE,
   DISPLAY_PROP,
   aliasesOf,
-  blockLabel,
   blockTypeOf,
   displayNameOf,
   embedBodyOf,
@@ -48,7 +47,7 @@ import {
 import { MARK_TYPES, isEmptyContent, plainText, refRunsOf, type AssetRun, type MarkType, type RunWithId } from '../../core/model/runs.ts'
 import type { AssetView } from '../../core/infra/assets.ts'
 import { t } from '../../core/infra/msg.ts'
-import { danglingView, refTitle, resolveRefs } from '../../core/relations/ref.ts'
+import { blockLabel, danglingView, resolveRefs } from '../../core/relations/ref.ts'
 import { createIcon, renderIcon } from '../icons.ts'
 
 /** 行高：与 CSS 的 `--ui-line-h` 必须一致（虚拟化算占位高度要用） */
@@ -476,7 +475,7 @@ export function fillBlockText(
  *    而正文里那枚 `#名` 是另一件事（一次提及，不写归属）。两者指同一个标签时，
  *    用户的意图已经由正文那一枚表达了 —— 两个都画会看到两个 `#名`，
  *    删掉正文里那个还会留下一个「幽灵」chip。
- * ⚠️ 名字走 `refTitle`（现算）：标签块改名后 chip 上的字要跟着变，
+ * ⚠️ 名字走 `blockLabel`（现算）：标签块改名后 chip 上的字要跟着变，
  *    所以这里不存名字、只认 id。目标块不在 ⇒ 这条归属没有可显示的名字，跳过。
  * ⚠️ **没有标签就不生成这个节点**（同 `.fold` 的口径，不是隐藏）：空槽是纯噪声。
  * ⚠️ 分割线没有正文槽，也不画标签槽。
@@ -494,7 +493,7 @@ export function makeTagsEl(
   const el = document.createElement('span')
   el.className = 'blk-tags'
   el.contentEditable = 'false'
-  for (const tagId of tags) el.appendChild(makeTagChipEl(tagId, refTitle(find(tagId)!)))
+  for (const tagId of tags) el.appendChild(makeTagChipEl(tagId, blockLabel(find(tagId)!, find)))
   return el
 }
 
@@ -732,7 +731,7 @@ export function makeBlockEl(
       cell.className = 'blk-context-cell ui-ellipsis'
       cell.dataset.crumbFor = a.id
       cell.title = t('ui.crumb.hint')
-      cell.textContent = blockLabel(a)
+      cell.textContent = blockLabel(a, opts.find)
       ctx.appendChild(cell)
     }
     if (opts.contextBack) {

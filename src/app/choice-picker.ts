@@ -8,7 +8,7 @@
  * 单选/多选不是两个菜单：行、图标、空态都一样，差别只有「选中后关不关」与
  * 「写回 string 还是 string[]」。这个差别由定义的 `_cardinality` 决定，不由调用方猜。
  */
-import { ICON_PROP, cardinalityOf, plainText, prop, type Block } from '../core/index.ts'
+import { ICON_PROP, blockLabel, cardinalityOf, prop, type Block } from '../core/index.ts'
 import { t } from '../core/infra/msg.ts'
 import type { Layers, Row } from '../ui/overlay/layers.ts'
 
@@ -34,7 +34,8 @@ export interface ChoicePickerOpts {
 /** 打开取值菜单；多选时保持打开，每点一行写一次（每次一次撤销） */
 export function openChoicePicker(o: ChoicePickerOpts): void {
   const multi = cardinalityOf(o.def) === 'many'
-  const labelOf = o.labelOf ?? ((c: Block) => plainText(c.content).trim() || c.id.slice(-6))
+  // 呈现摘要 ＋ 唯一兜底：选项块没有自己的字（图片行）也读得出文件名，不露裸 id
+  const labelOf = o.labelOf ?? ((c: Block) => blockLabel(c))
   const iconOf = (c: Block): string | undefined =>
     prop<string>(c, ICON_PROP) ?? prop<string>(o.def, ICON_PROP)
   const known = new Set(o.def.children.map((c) => c.id))

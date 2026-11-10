@@ -18,8 +18,8 @@
  * ⇒ 这个组件**仍不需要任何宿主能力**（没有按钮要 invoke、没有档位要读），
  *   构造参数也随之为空。
  */
-import { blockLabel, hasLiveChildren, openActionOf, type Block, type OpenAction } from '../../core/index.ts'
-import { plainText } from '../../core/model/runs.ts'
+import { blockLabel, hasLiveChildren, openActionOf, type Block, type FindBlock, type OpenAction } from '../../core/index.ts'
+import { isEmptyContent } from '../../core/model/runs.ts'
 import { t } from '../../core/infra/msg.ts'
 
 export interface Chrome {
@@ -30,8 +30,9 @@ export interface Chrome {
    *   由 `rootsFor()` 装进编辑器；所以这里只收祖先链。
    * @param page 当前对象（仅为兼容签名保留；面包屑的文案不需要它）
    * @param trail 祖先链（不含当前对象自己）；空 ⇒ 整条隐藏
+   * @param find 按块 id 解析引用目标（呈现摘要要现算引用的名字）；不给 ⇒ 引用退回快照名
    */
-  renderTitle: (page: Block, trail?: Block[]) => void
+  renderTitle: (page: Block, trail?: Block[], find?: FindBlock) => void
   /**
    * 皮肤/主题**变了**之后要重画的东西。
    *
@@ -139,7 +140,7 @@ export function createChrome(onCrumb?: (blockId: string, place: OpenAction) => v
    * ⚠️ 面包屑是**派生**的（`findPath`），不入库、不物化、没有返回栈。
    * @param trail 祖先链（不含当前对象自己）；空 ⇒ 整条隐藏
    */
-  function renderTrail(trail: Block[]): void {
+  function renderTrail(trail: Block[], find?: FindBlock): void {
     trailEl.textContent = ''
     if (trail.length === 0) {
       trailEl.hidden = true
@@ -148,7 +149,7 @@ export function createChrome(onCrumb?: (blockId: string, place: OpenAction) => v
     trailEl.hidden = false
     for (const [i, b] of trail.entries()) {
       if (i > 0) trailEl.appendChild(mkSep())
-      trailEl.appendChild(mkCrumb(b))
+      trailEl.appendChild(mkCrumb(b, find))
     }
     trailEl.appendChild(mkSep())
   }
@@ -162,20 +163,20 @@ export function createChrome(onCrumb?: (blockId: string, place: OpenAction) => v
   }
 
   /** 面包屑一格：**可点**（点它＝聚焦到那个祖先 ⇒ 退回） */
-  function mkCrumb(b: Block): HTMLElement {
+  function mkCrumb(b: Block, find?: FindBlock): HTMLElement {
     const el = document.createElement('button')
     el.type = 'button'
     el.className = 'crumb ui-ellipsis'
     el.dataset.blockId = b.id
-    // journal 的「名字」是日期的只读投影；其余走显示名（主名叶子 > 正文，空则兜底）
-    el.textContent = blockLabel(b)
+    // 呈现摘要：日记是日期投影；其余是主名 > 呈现摘要（引用读目标名、图片读文件名），空则兜底
+    el.textContent = blockLabel(b, find)
     el.addEventListener('click', (e) => onCrumb?.(b.id, openActionOf(e)))
     return el
   }
 
   function renderEmptyHint(roots: Block[]): void {
     const first = roots[0]
-    const empty = roots.length <= 1 && plainText(first?.content ?? []) === '' && (!first || !hasLiveChildren(first))
+    const empty = roots.length <= 1 && isEmptyContent(first?.content ?? []) && (!first || !hasLiveChildren(first))
     emptyHintEl.hidden = !empty
     if (empty) emptyHintEl.innerHTML = t('ui.emptyHint')
   }
@@ -193,7 +194,7 @@ export function createChrome(onCrumb?: (blockId: string, place: OpenAction) => v
   }
 
   return {
-    renderTitle: (_block: Block, trail: Block[] = []) => renderTrail(trail),
+    renderTitle: (_block: Block, trail: Block[] = [], find?: FindBlock) => renderTrail(trail, find),
     renderDebugState,
     renderEmptyHint,
     showNotice,

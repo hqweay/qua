@@ -26,12 +26,12 @@
  * ⚠️ 这里不碰命令、不认识浮层：`＋`／`×` 只回调装配层。
  */
 import {
+  blockLabel,
   applyQuickFilter,
   canEditMounts,
   cardinalityOf,
   derivedRecordsOf,
   derivedSpecOf,
-  displayNameOf,
   groupChoicesOf,
   displayTextOf,
   expandContexts,
@@ -1422,7 +1422,8 @@ export class MountArea {
     if ('tag' in atom) return atom.tag
     const id = atom.up.is
     const block = this.deps.kb.get(id)
-    return block ? displayNameOf(block) || id.slice(-4) : id.slice(-4)
+    // 呈现摘要 ＋ 唯一兜底：目标没了说「无标题」，不露裸 id
+    return block ? blockLabel(block, (x) => this.deps.kb.get(x)) : t('ui.page.untitled')
   }
 
   private showView(host: Block, entry: MountEntry): void {

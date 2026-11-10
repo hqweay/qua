@@ -14,7 +14,8 @@
  * ⚠️ 空查询不列「新建实例」行：名字是空的记录没有可读的正文，那一行只会引出怪结果。
  */
 import {
-  displayNameOf,
+  blockLabel,
+  findInForest,
   hasIdentity,
   plainText,
   tagIdsOf,
@@ -47,7 +48,8 @@ export function memberRows(tag: MemberTagRef, query: string, deps: MemberDeps): 
       if (name === '') return
       if (name.toLowerCase() === want) exactExists.hit = true
       if (want !== '' && !name.toLowerCase().includes(want)) return
-      const label = displayNameOf(b).trim() || t('ui.page.untitled')
+      // 呈现摘要 ＋ 唯一兜底（匹配语义不动：上面按 plainText 过滤的口径照旧）
+      const label = blockLabel(b, (id) => findInForest(deps.forest(), id))
       hits.push({
         modified: b.modified,
         row: {

@@ -16,8 +16,8 @@
  */
 import {
   applyQuickFilter,
+  blockLabel,
   derivedRecordsOf,
-  displayNameOf,
   hasLiveChildren,
   outermostHits,
   passThroughRefTarget,
@@ -295,7 +295,8 @@ export class BackrefsCard {
             labelOf: (atom: QuickFilterAtom) => {
               const id = 'up' in atom ? atom.up.is : atom.tag
               const block = this.deps.kb.get(id)
-              return block ? displayNameOf(block) || id.slice(-4) : id.slice(-4)
+              // 呈现摘要 ＋ 唯一兜底：目标没了说「无标题」，不露裸 id
+              return block ? blockLabel(block, (x) => this.deps.kb.get(x)) : t('ui.page.untitled')
             },
             onAdd: (atom, to) => {
               const next = quickFilterAdd(this.filter, atom, to)

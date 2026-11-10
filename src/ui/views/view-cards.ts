@@ -16,12 +16,13 @@ import {
   belowFieldsFor,
   cardLayoutOf,
   clickModsOf,
-  displayNameOf,
+  blockLabel,
   groupsByStructure,
   openActionOf,
   sortRecords,
   type BelowFields,
   type Block,
+  type FindBlock,
   type BlockStore,
   type OpenAction,
   type StructureGroup,
@@ -73,6 +74,8 @@ export interface ViewCardsDeps {
 const UNSET = GROUP_UNSET
 
 export class ViewCards {
+  /** 引用解析用（呈现摘要现算名字）：组名与标签 chip 共用这一只箭头 */
+  private readonly kbFind: FindBlock
   readonly root: HTMLElement
   private readonly deps: ViewCardsDeps
   private dragging = ''
@@ -85,6 +88,7 @@ export class ViewCards {
 
   constructor(deps: ViewCardsDeps) {
     this.deps = deps
+    this.kbFind = (id) => deps.store.find(id)
     this.root = document.createElement('section')
     this.root.className = 'vcards'
   }
@@ -330,7 +334,7 @@ export class ViewCards {
     const name = document.createElement('button')
     name.type = 'button'
     name.className = 'vcol-name ui-ellipsis'
-    name.textContent = displayNameOf(g.block) || t('ui.cards.untitledGroup')
+    name.textContent = blockLabel(g.block, this.kbFind)
     name.title = t('ui.cards.openGroup')
     name.addEventListener('click', (e) => {
       e.preventDefault()
@@ -426,7 +430,7 @@ export class ViewCards {
     if (r.tags.length > 0) {
       const tags = document.createElement('div')
       tags.className = 'vcard-tags'
-      for (const tag of r.tags) tags.appendChild(makeTagChipEl(tag.id, displayNameOf(tag)))
+      for (const tag of r.tags) tags.appendChild(makeTagChipEl(tag.id, blockLabel(tag, this.kbFind)))
       meta.appendChild(tags)
     }
     const below = this.below.get(r.block.id)

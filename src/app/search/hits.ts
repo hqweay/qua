@@ -31,17 +31,18 @@ export interface HitView {
 export function describeHit(kb: KbClient, hit: SearchHit, term: string): HitView | null {
   const b: Block | undefined = kb.get(hit.blockId)
   if (!b) return null
+  const kbGet = (id: string) => kb.get(id)
   const text = plainText(b.content)
   const parts =
     text.trim() === ''
-      ? [{ text: blockLabel(b) }]
+      ? [{ text: blockLabel(b, kbGet) }]
       : highlightSnippet(text, term)
   const trail = kb
     .pathOf(b.id)
     .slice(0, -1)
-    .map((x) => blockLabel(x))
+    .map((x) => blockLabel(x, kbGet))
     .filter((x) => x !== '')
-  const hint = trail.length > 0 ? trail.join(' › ') : blockLabel(b)
+  const hint = trail.length > 0 ? trail.join(' › ') : blockLabel(b, kbGet)
   /**
    * 来路：FTS 命中时索引已经告诉我们哪一行命中了；扫描降级没有这一格 ⇒ **按同一份
    * 来源投影现算**（走读门面的 id 查表，不遍历森林）。
