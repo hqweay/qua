@@ -882,15 +882,16 @@ export function setupDocks(deps: DocksDeps) {
     const close = { title: t('ui.dock.closeCard'), onClick: () => closeCard(side, card) }
     // 卡的 id／状态键／关闭目标都取 `card` 本身，不从 spec 再读一遍：
     // 三处各读一个字段，一旦某个 spec 的 id 与目录不一致，就是「点 × 关错卡」。
+    // 派生卡全部 quiet：正文自己报得出名字（月历、树、清单），卡头静置不再报第二遍
     const finish = (spec: DockCard): DockCardEntry => ({
       id: card,
-      el: buildDockCard({ ...spec, id: card, close }, cardStateFor(side, card)),
+      el: buildDockCard({ ...spec, id: card, close, quietHead: true }, cardStateFor(side, card)),
     })
     // 穷举：`DERIVED_CARDS` 加一张、这里没接 ⇒ 编译期红（早先是三元链，漏了只是「点了没反应」）
     switch (card) {
       case 'inspect': {
         const el = deps.inspectCard()
-        decorateDockCard(el, { id: card, title: '', body: el, close }, cardStateFor(side, card))
+        decorateDockCard(el, { id: card, title: '', body: el, close, quietHead: true }, cardStateFor(side, card))
         return { id: card, el }
       }
       case 'belongs':

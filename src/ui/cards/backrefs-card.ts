@@ -142,6 +142,8 @@ export class BackrefsCard {
         title: t('ui.dock.backRefs'),
         body,
         close: { title: t('ui.dock.closeCard'), onClick: deps.onClose },
+        // 正文里已有它指向哪个块的面包屑：卡头静置不再报第二遍「反链」
+        quietHead: true,
       },
       deps.state(),
     )

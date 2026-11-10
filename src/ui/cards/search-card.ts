@@ -50,6 +50,8 @@ export class SearchCard {
         title: deps.title,
         body: this.body,
         close: { title: t('ui.dock.closeCard'), onClick: deps.onClose },
+        // 正文第一行就是搜索框本身：卡头静置不再报第二遍「搜索」
+        quietHead: true,
       },
       deps.state(),
     )

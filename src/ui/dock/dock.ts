@@ -51,6 +51,15 @@ export interface DockCard {
    * 收纳盘合上也要能看出里面装了几张，这一位跟收起状态无关。
    */
   count?: string
+  /**
+   * 静置时卡头**闭嘴**：只留把手标（grip），标题随 hover 进场。
+   *
+   * 静置文字的唯一职责是说出**正文看不出的上下文**（窗口卡的块路径、盘的小卡数）——
+   * 正文自己已经报过名字的卡（日历／归属树／反链／回收站／检视／搜索）不该再报一遍：
+   * 那会让卡顶叠出两套对齐语法的「头」，名字读作漂浮的碎字（「日历」压在月份导航上）。
+   * 没有字的把手条由 grip 站出来——它就是这条带的职能本身。
+   */
+  quietHead?: boolean
 }
 
 export interface DockCardAction {
@@ -233,6 +242,7 @@ export function buildDockCard(card: DockCard, state: DockCardState): HTMLElement
   el.className = 'dock-card'
   el.dataset.cardId = card.id
   el.hidden = card.hidden === true
+  if (card.quietHead) el.dataset.quietHead = '1'
 
   const head = document.createElement('div')
   head.className = 'dock-card-head'
@@ -246,6 +256,8 @@ export function buildDockCard(card: DockCard, state: DockCardState): HTMLElement
     cardStates.get(el)?.onDragStart?.(e)
   })
 
+  // 把手标常驻：静置时它就是这条带的职能本身（可拖、可动手），没有字也不空
+  head.appendChild(gripMark())
   // 常驻放在**左侧**（紧挨收起）：solo／关闭的 x 是跨卡对齐的（A24 的列不变量），
   // pin 插在右侧会把家具卡的这两颗推去别的列；插在左边，错位只发生在「卡状态」簇内。
   head.appendChild(collapseButton())
@@ -301,12 +313,14 @@ function bindHeadToggle(head: HTMLElement): void {
  */
 export function decorateDockCard(el: HTMLElement, card: DockCard, state: DockCardState): void {
   el.dataset.cardId = card.id
+  if (card.quietHead) el.dataset.quietHead = '1'
   let head = el.querySelector<HTMLElement>(':scope > .dock-card-head')
   if (!head) {
     head = document.createElement('div')
     head.className = 'dock-card-head'
     el.prepend(head)
   }
+  if (!head.querySelector(':scope > .dock-card-grip')) head.prepend(gripMark())
   if (!head.querySelector(`[${ACTION_ATTR}="collapse"]`)) head.prepend(collapseButton())
   if (!head.querySelector(`[${ACTION_ATTR}="solo"]`)) head.appendChild(soloButton())
   if (!head.querySelector(`[${ACTION_ATTR}="close"]`) && card.close) head.appendChild(actionButton({ label: 'lucide:x', ...card.close }))
@@ -326,6 +340,15 @@ export function decorateDockCard(el: HTMLElement, card: DockCard, state: DockCar
 }
 
 /* ------------------------------------------------------------ 卡片内部 */
+
+/** 把手标：静置时把手条的唯一可见物（不是按钮——它没有自己的动作，整条头都是把手） */
+function gripMark(): HTMLElement {
+  const grip = document.createElement('span')
+  grip.className = 'dock-card-grip'
+  grip.setAttribute('aria-hidden', 'true')
+  renderIcon(grip, 'lucide:grip-vertical', 'grip-vertical')
+  return grip
+}
 
 function collapseButton(): HTMLButtonElement {
   const btn = document.createElement('button')

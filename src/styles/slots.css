@@ -270,8 +270,28 @@
 .dock-card[data-collapsed='1'] > .dock-card-head > button {
   opacity: 1;
 }
+/*
+ * 把手标（grip）：静置时把手条的唯一可见物——没有字的带子由它站出来。
+ * 自明的卡（日历／树／搜索…）标题随 hover 进场（data-quiet-head='1'）：
+ * 名字压在正文自己的头上（「日历」叠着月份导航）读作漂浮的碎字。
+ */
+.dock-card-grip {
+  flex: 0 0 auto;
+  color: var(--ui-text-tertiary);
+  opacity: 0.55;
+}
+.dock-card[data-quiet-head='1'] > .dock-card-head > .dock-card-title {
+  opacity: 0;
+  transition: opacity var(--ui-dur-1) ease;
+}
+.dock-card[data-quiet-head='1']:hover > .dock-card-head > .dock-card-title,
+.dock-card[data-quiet-head='1']:focus-within > .dock-card-head > .dock-card-title,
+.dock-card[data-quiet-head='1'][data-collapsed='1'] > .dock-card-head > .dock-card-title {
+  opacity: 1;
+}
 @media (prefers-reduced-motion: reduce) {
-  .dock-card-head > button {
+  .dock-card-head > button,
+  .dock-card[data-quiet-head='1'] > .dock-card-head > .dock-card-title {
     transition: none;
   }
 }

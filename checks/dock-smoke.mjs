@@ -1755,6 +1755,25 @@ await check('A24 卡头右侧同构：每张卡都是「单卡／关闭」两格
     assert(op.head === 1 && op.close > 0, `${c.id}：悬停这张卡应显形按钮，关闭不可见时不得是单颗透明：${JSON.stringify(op)}`)
   }
 
+  // 静置头的文字只报「正文看不出的上下文」：自明卡（quiet）闭嘴只剩把手标，
+  // 窗口卡的块路径留守——判据看 opacity，不看有没有字
+  const rest = await page.evaluate(() => {
+    const read = (card) => ({
+      title: Number(getComputedStyle(card.querySelector(':scope > .dock-card-head > .dock-card-title')).opacity),
+      grip: Number(getComputedStyle(card.querySelector(':scope > .dock-card-head > .dock-card-grip')).opacity),
+    })
+    const quietCard =
+      document.querySelector('#dock-left-stack > .dock-card[data-card-id="calendar"]') ??
+      document.querySelector('#dock-right-stack > .dock-card[data-card-id="calendar"]')
+    const windowCard = document.querySelector('#dock-left-stack > .dock-card[data-window="1"]')
+      ?? document.querySelector('#dock-right-stack > .dock-card[data-window="1"]')
+    return { quiet: quietCard ? read(quietCard) : null, win: windowCard ? read(windowCard) : null }
+  })
+  assert(rest.quiet && rest.quiet.title === 0 && rest.quiet.grip > 0,
+    `自明卡静置应只剩把手标（「日历」不压着月份导航再报一遍名字）：${JSON.stringify(rest.quiet)}`)
+  assert(rest.win && rest.win.title > 0 && rest.win.grip > 0,
+    `窗口卡的路径是正文看不出的上下文，静置应与把手标一起留守：${JSON.stringify(rest.win)}`)
+
   const columns = { left: { close: new Set(), solo: new Set() }, right: { close: new Set(), solo: new Set() } }
   for (const c of m) {
     // 卡头：收起（最左）＋ 常驻（仅窗口卡，紧挨收起）＋ 单卡 ＋ 关闭。
