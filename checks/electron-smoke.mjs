@@ -1676,18 +1676,27 @@ await check('E18 系统标题栏交给网页顶栏：整窗＝内容区、壳给
     const bar = document.getElementById('topbar')
     const first = document.querySelector('#topbar button')
     const cs = getComputedStyle(bar)
+    const region = (el) => {
+      const v = getComputedStyle(el)
+      return v.getPropertyValue('-webkit-app-region').trim() || v.getPropertyValue('app-region').trim()
+    }
     return {
       platform: document.body.dataset.platform ?? '',
       height: bar.getBoundingClientRect().height,
-      drag: cs.getPropertyValue('-webkit-app-region').trim() || cs.getPropertyValue('app-region').trim(),
-      btnDrag: getComputedStyle(first).getPropertyValue('-webkit-app-region').trim(),
-      tabDrag: getComputedStyle(document.getElementById('center-tabs')).getPropertyValue('-webkit-app-region').trim(),
+      drag: region(bar),
+      btnDrag: region(first),
+      // app-region 沿继承走：容器不显式标注就会继承顶栏的 drag。这是**拍板的设计**——
+      // tab 药丸逐个标 no-drag（可点），tab 条的空白处还给拖窗。
+      tabPills: [...document.querySelectorAll('#center-tabs .center-tab')].map(region),
+      stripDrag: region(document.getElementById('center-tabs')),
       firstX: first.getBoundingClientRect().x,
     }
   })
   assert(dom.platform === win.platform, `壳的平台要同步传到渲染层：${dom.platform} vs ${win.platform}`)
   assert(dom.drag === 'drag', `顶栏整条应可拖窗：${dom.drag}`)
-  assert(dom.btnDrag === 'no-drag' && dom.tabDrag === 'no-drag', '按钮与 tab 条要标回 no-drag，否则点不动／滚不动')
+  assert(dom.btnDrag === 'no-drag', '顶栏按钮要标回 no-drag，否则点不动')
+  assert(dom.tabPills.length > 0 && dom.tabPills.every((v) => v === 'no-drag'), 'tab 药丸要标回 no-drag，否则点不动')
+  assert(dom.stripDrag === 'drag', 'tab 条的空白处应保持可拖窗（药丸之外不损失拖窗面）')
   // macOS 的原生红黄绿浮在左上：第一颗按钮必须让开那一块（灯组约 12..64，留到 78）
   if (win.platform === 'darwin') assert(dom.firstX >= 78, `红黄绿在左上，第一颗按钮要让位：x=${dom.firstX}`)
 

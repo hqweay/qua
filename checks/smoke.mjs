@@ -21707,6 +21707,9 @@ await check('T226 多露面的结构传播：镜像里建块，源当场长出�
     }
     const u = walk(window.__qua.__editor.store.blocks, (x) => x.id === 'T226U')
     const a = u.children.find((x) => Boolean(x.props?._query))
+    // 新查询默认一条都不查（空条件＝永不命中）：本用例要的是「有命中行的投影」，
+    // 条件自己给——「这一块的容器之下」与随手查询的旧缺省同形
+    window.__qua.invoke('core.query/set-spec', { blockId: a.id, spec: { where: { up: { is: '$self' } } } })
     window.__qua.invoke('core.embed/insert', { blockId: p.id, targetId: a.id, view: 'mirror' })
     const b = walk(window.__qua.__editor.store.blocks, (x) => x.props?._embed?.block === a.id)
     return { A: a.id, B: b.id, P: p.id }
@@ -25905,8 +25908,11 @@ await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、�
   await page.evaluate(() => window.__qua.quiet(true))
 
   const cards = () => page.evaluate(() => window.__qua.snapshot().dock.left.cards)
+  // 演示库的左槽自带一只命名演示盘（种子 dock）；本用例自建的盘都插在小卡原位、
+  // 排在演示盘之前 ⇒ DOM 里 `^="tray:"` 的**首匹配**恒是本用例自己的盘
+  // （下文 dragTo 的 querySelector 都吃这个次序）。计数与身份断言一律用捕获到的盘 id 精确认。
   const traySel = '#dock-left-stack > .dock-card[data-card-id^="tray:"]'
-  const trayCard = page.locator(traySel)
+  let trayCard = page.locator(traySel)
   const menuPick = async (label) => {
     await page.locator('.layer .layer-item', { hasText: label }).first().click()
     await page.waitForTimeout(180)
@@ -25942,7 +25948,11 @@ await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、�
   assert(now[0] === 'cmd:core.journal/today' && typeof now[1] === 'object' && typeof now[1].tray === 'string',
     `盘应插在被收那颗小卡的原位：${JSON.stringify(now)}`)
   assert(JSON.stringify(now[1].cards) === JSON.stringify(['cmd:core.page/new']), `建盘时成员就是那一颗：${JSON.stringify(now[1])}`)
-  assert((await trayCard.count()) === 1, '左槽应画出一只盘卡')
+  // 本用例的盘按捕获到的 id 精确认——左槽还有一只种子演示盘，`^="tray:"` 会匹配两只
+  const trayId = now[1].tray
+  const trayOf = (list) => list.find((e) => typeof e === 'object' && e.tray === trayId)
+  trayCard = page.locator(`#dock-left-stack > .dock-card[data-card-id="tray:${trayId}"]`)
+  assert((await trayCard.count()) === 1, '左槽应画出这只盘卡')
   assert((await trayCard.locator('.dock-card-title').textContent()) === '1 张小卡', `未命名的盘头应显示「n 张小卡」：${JSON.stringify(await trayCard.locator('.dock-card-title').textContent())}`)
 
   // ② 一次收完：盘头右键 ⇒ 顶层裸排的小卡全部进盘（「这一排太碍事」是主路径）
@@ -25950,7 +25960,7 @@ await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、�
   await page.waitForTimeout(150)
   await menuPick('把其余小卡收进来')
   now = await cards()
-  const tray1 = now.find((e) => typeof e === 'object')
+  const tray1 = trayOf(now)
   assert(JSON.stringify(tray1.cards) === JSON.stringify(['cmd:core.page/new', 'cmd:core.journal/today', 'cmd:core.command-palette/show', 'cmd:core.journal/prev']),
     `其余小卡应按原顺序追加进盘：${JSON.stringify(tray1)}`)
   assert(!now.some((e) => typeof e === 'string' && e.startsWith('cmd:')), `顶层不该再有裸排小卡：${JSON.stringify(now)}`)
@@ -25964,8 +25974,8 @@ await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、�
   })
   assert(reorder?.hot === true, `盘内拖动应出现落点：${JSON.stringify(reorder)}`)
   now = await cards()
-  assert(JSON.stringify(now.find((e) => typeof e === 'object').cards) === JSON.stringify(['cmd:core.page/new', 'cmd:core.journal/prev', 'cmd:core.journal/today', 'cmd:core.command-palette/show']),
-    `盘内排序应落盘：${JSON.stringify(now.find((e) => typeof e === 'object'))}`)
+  assert(JSON.stringify(trayOf(now).cards) === JSON.stringify(['cmd:core.page/new', 'cmd:core.journal/prev', 'cmd:core.journal/today', 'cmd:core.command-palette/show']),
+    `盘内排序应落盘：${JSON.stringify(trayOf(now))}`)
 
   // ④ 盘头＝收进去：加一颗快捷小卡，拖到盘头 ⇒ 追加到盘末（落点决定容器）
   const blockId = await page.evaluate(() => window.__qua.pages()[1].id)
@@ -25978,7 +25988,7 @@ await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、�
   })
   assert(into?.hot === true, `拖到盘头应出现「收进去」落点：${JSON.stringify(into)}`)
   now = await cards()
-  const tray2 = now.find((e) => typeof e === 'object')
+  const tray2 = trayOf(now)
   assert(tray2.cards[tray2.cards.length - 1] === shKey && !now.includes(shKey),
     `小卡应收进盘末、顶层不再有它：${JSON.stringify({ tray2, now })}`)
 
@@ -25992,29 +26002,33 @@ await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、�
   assert(out?.hot === true, `拖到槽里应出现落点：${JSON.stringify(out)}`)
   now = await cards()
   assert(now.includes('cmd:core.command-palette/show'), `成员应移出盘回到顶层：${JSON.stringify(now)}`)
-  assert(!now.find((e) => typeof e === 'object').cards.includes('cmd:core.command-palette/show'), '盘里不该再有它')
+  assert(!trayOf(now).cards.includes('cmd:core.command-palette/show'), '盘里不该再有它')
 
   // ⑥ ✕＝解散：只摘把手，小卡留在原位——数量与顺序都不变（§3.7-3）
   const before = await cards()
-  const trayIdx = before.findIndex((e) => typeof e === 'object')
+  const trayIdx = before.findIndex((e) => typeof e === 'object' && e.tray === trayId)
   const expected = [...before.slice(0, trayIdx), ...before[trayIdx].cards, ...before.slice(trayIdx + 1)]
   await trayCard.locator(':scope > .dock-card-head [data-dock-action="close"]').click()
   await page.waitForTimeout(200)
   now = await cards()
   assert(JSON.stringify(now) === JSON.stringify(expected), `解散应把成员按原顺序放回盘的位置：${JSON.stringify({ now, expected })}`)
-  assert((await trayCard.count()) === 0, '解散后 DOM 不该再有盘卡')
+  assert((await trayCard.count()) === 0, '解散后 DOM 不该再有这只盘卡')
 
   // ⑦ 空盘自动解散：建一只只有一颗成员的盘，✕ 那颗成员 ⇒ 容器跟着消失（§3.7-4）
   try {
   await page.locator('#dock-left-stack > .dock-tile[data-card-id="cmd:core.journal/prev"]').click({ button: 'right' })
   await page.waitForTimeout(150)
   await menuPick('收进新收纳盘')
-  assert((await trayCard.count()) === 1, '重建一只单成员盘')
-  await page.locator(`${traySel} .dock-tray-body > .dock-tile .dock-tile-x`).click()
+  now = await cards()
+  const tray7 = now.filter((e) => typeof e === 'object').find((e) => e.tray !== trayId)
+  assert(tray7 && JSON.stringify(tray7.cards) === JSON.stringify(['cmd:core.journal/prev']),
+    `重建一只单成员盘：${JSON.stringify(now)}`)
+  const tray7Card = page.locator(`#dock-left-stack > .dock-card[data-card-id="tray:${tray7.tray}"]`)
+  await page.locator(`#dock-left-stack > .dock-card[data-card-id="tray:${tray7.tray}"] .dock-tray-body > .dock-tile .dock-tile-x`).click()
   await page.waitForTimeout(200)
   now = await cards()
-  assert(!now.some((e) => typeof e === 'object'), `最后一个成员被移走 ⇒ 盘应就地解散：${JSON.stringify(now)}`)
-  assert((await trayCard.count()) === 0, '空盘不画')
+  assert(!now.some((e) => typeof e === 'object' && e.tray === tray7.tray), `最后一个成员被移走 ⇒ 盘应就地解散：${JSON.stringify(now)}`)
+  assert((await tray7Card.count()) === 0, '空盘不画')
   } catch (e) { throw new Error('STEP7: ' + e.message) }
 
   // ⑧ 重命名：行内输入；只改 title，key 不动（改名不换身份）
@@ -26023,20 +26037,25 @@ await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、�
   await page.locator('#dock-left-stack > .dock-tile[data-card-id="cmd:core.journal/today"]').click({ button: 'right' })
   await page.waitForTimeout(150)
   await menuPick('收进新收纳盘')
-  const trayIdBefore = (await cards()).find((e) => typeof e === 'object').tray
-  await trayCard.locator('.dock-card-head').click({ button: 'right' })
+  now = await cards()
+  // 新盘插在「回到今日」原位（顶层第 0 位）——按位置捕获，与槽里那只演示盘无关
+  assert(typeof now[0] === 'object' && JSON.stringify(now[0].cards) === JSON.stringify(['cmd:core.journal/today']),
+    `新盘应插在「回到今日」原位：${JSON.stringify(now)}`)
+  const trayId8 = now[0].tray
+  const trayCard8 = page.locator(`#dock-left-stack > .dock-card[data-card-id="tray:${trayId8}"]`)
+  await trayCard8.locator('.dock-card-head').click({ button: 'right' })
   await page.waitForTimeout(150)
   await menuPick('重命名')
-  const rename = trayCard.locator('.dock-tray-rename')
+  const rename = trayCard8.locator('.dock-tray-rename')
   assert((await rename.count()) === 1, '重命名应是盘头上的行内输入')
   await rename.fill('我的盘')
   await rename.press('Enter')
   await page.waitForTimeout(200)
   now = await cards()
-  const tray3 = now.find((e) => typeof e === 'object')
-  assert(tray3?.title === '我的盘' && tray3.tray === trayIdBefore, `重命名只改 title、key 不动：${JSON.stringify(tray3)}`)
-  assert((await trayCard.locator('.dock-card-count').textContent()) === '1', `命名后卡头应有计数位：${JSON.stringify(await trayCard.locator('.dock-card-count').textContent())}`)
-  assert((await trayCard.getAttribute('data-quiet-head')) === null, '命名的盘名字留守（盘名是正文看不出的上下文）')
+  const tray3 = now.find((e) => typeof e === 'object' && e.tray === trayId8)
+  assert(tray3?.title === '我的盘' && tray3.tray === trayId8, `重命名只改 title、key 不动：${JSON.stringify(tray3)}`)
+  assert((await trayCard8.locator('.dock-card-count').textContent()) === '1', `命名后卡头应有计数位：${JSON.stringify(await trayCard8.locator('.dock-card-count').textContent())}`)
+  assert((await trayCard8.getAttribute('data-quiet-head')) === null, '命名的盘名字留守（盘名是正文看不出的上下文）')
 
   await ctx.close()
   return `建盘在原位＋一次收完（4 颗）＋盘内排序＋盘头收进去＋拖槽移出来；✕ 解散按原位归位；单成员移走即解散；重命名 key 不变`
