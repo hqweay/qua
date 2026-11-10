@@ -71,10 +71,12 @@
  *    反过来用 flex 均分、让张数决定格宽，则**换行**时末行只剩一张会被拉成一整条动作带
  *    （槽 180px 时 4 张 → 3＋1，第 4 张变成整宽）。
  *
- *    只有同时知道「张数」与「宽度」才能既铺满又不在换行时拉伸——这两件事只有渲染层有。
- *    所以列数 ＝ min(这一行放得下几列, 实际几张小卡)；换行后的末行保持同样的格宽，
- *    右边留白（那是一个「换行了的网格」，不是「没摆正」）。
- *    `--dock-tile-cols` 缺省 4 只是首帧兜底，装配层每次重画/宽度变化都会立刻写它。
+ *    所以列数只由**容量**决定（装配层算好写进来）；张数不够就是「换行了的网格」
+ *    右边留白——格宽永远一致，不为铺满把个别小卡拉宽。
+ *    `--dock-tile-cols` 缺省 1 只是首帧兜底：兜底只许往收缩方向错——4 列的固定
+ *    下限（4×44＋间隙＝194px）比窄槽还宽，轨道全躺下限上，每张跨列大卡都会被
+ *    顶出槽沿裁掉（2026-11-11 实测：最后一张小卡入盘后栈里剩 0 张，兜底 4 生效，
+ *    卡 194 > 槽 180）。
  */
 .dock-stack {
   flex: 1;
@@ -82,7 +84,7 @@
   overflow-y: auto;
   overflow-x: hidden; /* 槽内禁横向 */
   display: grid;
-  grid-template-columns: repeat(var(--dock-tile-cols, 4), minmax(var(--ui-tile-min), 1fr));
+  grid-template-columns: repeat(var(--dock-tile-cols, 1), minmax(var(--ui-tile-min), 1fr));
   /*
    * 行必须显式按**内容**取值（max-content），不能用缺省的 auto：
    * 容器定高时，auto 轨道被「塞满容器」的分配行为拿走，卡异步长高（窗口编辑器装载、
@@ -130,13 +132,13 @@
   font-weight: 500;
 }
 /*
- * 收纳盘的 body ＝ **小卡排**：与槽顶那条网格流同一条规则（列数由装配层算好写进
- * `--dock-tile-cols`，min(放得下几列, 实际几张)），只是换成了盘的内容盒来算——
- * 盘不新增第二种排版，也不给「列均分」开例外。
+ * 收纳盘的 body ＝ **小卡排**：与槽顶那条网格流同一条规则（列数由装配层按容量算好
+ * 写进 `--dock-tile-cols`），只是换成了盘的内容盒来算——盘不新增第二种排版，
+ * 也不给「列均分」开例外。兜底 1 的理由同 `.dock-stack`。
  */
 .dock-tray-body {
   display: grid;
-  grid-template-columns: repeat(var(--dock-tile-cols, 4), minmax(var(--ui-tile-min), 1fr));
+  grid-template-columns: repeat(var(--dock-tile-cols, 1), minmax(var(--ui-tile-min), 1fr));
   grid-auto-rows: max-content;
   align-content: start;
   gap: var(--ui-gap-3);

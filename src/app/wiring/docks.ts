@@ -639,7 +639,7 @@ export function setupDocks(deps: DocksDeps) {
   }
 
   /**
-   * 小卡那一行分几列 ＝ **min(这一行放得下几列, 实际有几张小卡)**。
+   * 小卡那一行分几列 ＝ **这一行放得下几列（容量）**，与张数无关。
    *
    * 为什么必须由这一层算（CSS 两条路都不对）：
    *   · `repeat(auto-fill, …)` 的列数只看可用宽度 ⇒ 张数少于列数时末尾多出一条空轨，
@@ -647,22 +647,20 @@ export function setupDocks(deps: DocksDeps) {
    *   · `flex: 1` 均分不知道换行 ⇒ 换行后的末行只剩一张时会被拉成一整条动作带
    *     （槽 180px 时 4 张 → 3＋1，第 4 张变成整宽）。
    *
-   * 只有同时知道「张数」与「宽度」才能既铺满、又不在换行时拉伸——这两件事渲染层都有。
-   * 换行后的末行**保持与上面一行同样的格宽**，右边自然留白：那是一个「换行了的网格」，
-   * 不是「没摆正」。
+   * 列数只认容量、不掺张数：格宽一致是硬判据——张数不足时右边留白，那是一个
+   * 「换行了的网格」，不是「没摆正」。掺入张数（曾用 min(容量, 张数)）会把孤张
+   * 拉成整行宽（2026-11-11 实测：收 3 张进盘后剩 1 张，被拉满整行）。
+   *
+   * **0 张也要写**：栈里还住着跨列大卡，轨道数不能退回 CSS 兜底（remove 让兜底接管
+   * 曾把 4 条轨道的下限之和 194px 顶过 168 的槽宽，每张大卡被裁掉 14px——实测）。
+   * 容量按构造就不会超容器，0 张时写容量永远是安全的。
    */
   function syncTileCols(stack: HTMLElement): void {
-    const tiles = stack.querySelectorAll(':scope > .dock-tile').length
-    if (tiles === 0) {
-      stack.style.removeProperty('--dock-tile-cols')
-      return
-    }
     const cs = getComputedStyle(stack)
     const inner = stack.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
     const gap = parseFloat(cs.columnGap) || 0
     const min = parseFloat(cs.getPropertyValue('--ui-tile-min')) || 44
-    const capacity = Math.max(1, Math.floor((inner + gap) / (min + gap)))
-    const next = String(Math.min(capacity, tiles))
+    const next = String(Math.max(1, Math.floor((inner + gap) / (min + gap))))
     // 只在真的变了时才写：ResizeObserver 会观察到「行数变化 ⇒ 高度变化」，别自激
     if (stack.style.getPropertyValue('--dock-tile-cols') !== next) stack.style.setProperty('--dock-tile-cols', next)
   }
