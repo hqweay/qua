@@ -7,6 +7,7 @@
  * 顶层另有**属性 / 实例 / 看法**的完整样本：`功能` 标签声明两个属性、几条实例填着值、
  * 一条「功能看板」查询在四张看法（看板 / 表格 / 画廊 / 日历）之间切换——
  * 每个已落地的能力都有一份**能摸到的数据**，而不是一句文档。
+ * 槽的样本在**设备侧**（`seedDock()`）：左槽一只演示收纳盘，两颗快捷卡指到功能看板与输入面笔记。
  *
  * 为什么不是一张「欢迎页」：页 / 日记 / 标签都只是块的露面，**开场落点就是真实的
  * 编辑面**——用户看到的第一块不是只读介绍，而是可以拆、可以改、可以撤销的内容。
@@ -18,6 +19,8 @@
  * ⚠️ 内容里的几个名字是**判据**，不是文案：`产品设计 · 决策日志` 必须是第一页
  *    （首行＝页块正文、页底查询与反链都挂在它上面），`输入面笔记` 背着行内内容的样本，
  *    六天的 journal 保证日记流能滚、能向后加载。改它们要连带跑门禁。
+ *    `seedDock()` 的快捷卡按确定性 id 指到 `功能看板` 与 `输入面笔记`——这几块改名可以，
+ *    换 id 就要连带 `seedDock()` 与它的断言。
  */
 import {
   appendEdge,
@@ -43,6 +46,8 @@ import {
 import { taskStatusVocabulary } from './task-vocabulary.ts'
 import { t } from '../infra/msg.ts'
 import type { Workspace } from '../infra/workspace.ts'
+import { DEFAULT_DOCK, type DockPrefs } from '../storage/prefs.ts'
+import type { DockEntry } from '../views/dock.ts'
 import { forest, longParagraph, LONG_EN, mkJournal, mkPage, resolveRefs, resolveSeedTags, SEED_AT } from './build.ts'
 import type { SeedBlock } from './inline.ts'
 
@@ -98,6 +103,7 @@ export function seedWorkspace(): Workspace {
       '这一屏是假数据，但**真的能改**：关掉重开，改动还在。',
       '这一屏底部那条「今天的待办」是一条查询：只取今天这一页里没做完的任务。',
       '右槽是检视卡与反链：同一个块可以从好几处看。',
+      '左槽「常用」那格是一张收纳盘：小卡收进一张卡，卡头就是把手；拖出来就还原。',
       '⌘⇧V 开关虚拟化：窗口外的块不挂 DOM，滚动时再挂上。',
       '⌘⇧? 看全部键位；行首敲 / 是斜杠菜单。',
       '⌘Z 一步回：拆块、合并、格式、拖动都能撤销。',
@@ -265,7 +271,8 @@ export function seedWorkspace(): Workspace {
     { text: '降级样本 · 超长块：' + longParagraph() },
     { text: '降级样本 · 全英文长行（不该溢出容器）：' + LONG_EN },
     { text: '归属放在正文之外：这一页打了标签，字一个都没被改。', tags: ['设计', '输入面', '资产'] },
-  ])
+    // 确定性 id：演示盘（`seedDock()`）的快捷卡按 id 指到这一页——建库与设备状态分开调用，id 必须两边一致
+  ], SEED_INPUT_NOTES_ID)
 
   const p3 = mkPage('开发日志 · 2026-W44', 'lucide:newspaper', [
     {
@@ -378,6 +385,8 @@ export function seedWorkspace(): Workspace {
   })
   featureBoard.created = SEED_AT
   featureBoard.modified = SEED_AT
+  // 同「输入面笔记」：演示盘的快捷卡按 id 指到这块（确定性 id，见顶部常量）
+  featureBoard.id = SEED_FEATURE_BOARD_ID
 
   // 核心词汇（定义块 ＋ 标签块）先在森林顶层就位：`ensureTag` 要能找到 `任务` 并复用，
   // 否则种子会建出第二个同名标签；`[[ ]]` 与 `#标签` 的解析也要在这之后（标签同样占地址）。
@@ -441,6 +450,15 @@ export const FEATURE_DATE_PROP_ID = derivedId('prop', 'seed/feature-date')
 export const FEATURE_STATUS_EXPLORING_ID = derivedId('choice', 'seed/feature-status/exploring')
 export const FEATURE_STATUS_SHIPPED_ID = derivedId('choice', 'seed/feature-status/shipped')
 export const FEATURE_STATUS_SHELVED_ID = derivedId('choice', 'seed/feature-status/shelved')
+
+/**
+ * 收纳盘的快捷卡要**指向种子刚建出来的块**，而盘住在设备状态里、与建库分开调用 ——
+ * 两边必须拿到同一个 id ⇒ 这几块用确定性 id（与属性定义同一条纪律）。
+ * 指针按 id 存，id 稳定 ⇒ 盘里的快捷卡不会因重种而悬空。
+ */
+export const SEED_FEATURE_BOARD_ID = derivedId('block', 'seed/feature-board')
+export const SEED_INPUT_NOTES_ID = derivedId('block', 'seed/input-notes')
+export const SEED_TRAY_ID = derivedId('tray', 'seed/quick')
 
 /**
  * 「功能」标签 ＋ 声明给它的两个属性定义。
@@ -542,6 +560,43 @@ export function seedJournalMounts(): MountEntry[] {
       views: [],
     },
   ]
+}
+
+/**
+ * **演示库的槽布局**（`Prefs.dock` 的种子）＝ 默认布局 ＋ 一只**演示收纳盘**。
+ *
+ * 为什么是追加而不是把默认四颗快捷收进盘里：默认布局是所有新库的家当，演示不该扭曲它 ——
+ * 「小卡攒多了才收进盘」，默认四颗快捷还没有「多」到要收。演示盘讲的是另一个故事：
+ * **常去的块可以收进一张卡**，成员是两颗快捷卡，指到种子内容里最值得看的地方
+ * （功能看板 ＝ 属性/实例/看法的样本，输入面笔记 ＝ 行内内容的样本）——
+ * 访客点一颗就从槽里进了产品叙事。
+ *
+ * 与 `seedJournalMounts` 同层：槽布局是设备状态（`storage/device.ts`「跟库走」的四格之一），
+ * 只在「这一份库是刚种出来的」时给（`main.ts` 启动段），已有库不自动改布局。
+ * 成员按确定性 id 指块（见顶部常量）；id 立不住的后果与所有快捷卡相同——置灰，不炸。
+ */
+export function seedDock(): DockPrefs {
+  const d = DEFAULT_DOCK
+  // 小卡聚成一排（与 `insertShortcut` 的落点口径一致：新小卡插在最后一张顶层小卡之后），
+  // 盘插在快捷排之后、第一张大卡之前——它是左槽最显眼的位置，但不挤掉快捷与日历。
+  const found = d.left.cards.findIndex((e) => e.kind !== 'cmd')
+  const at = found === -1 ? d.left.cards.length : found
+  const tray: DockEntry = {
+    kind: 'tray',
+    id: SEED_TRAY_ID,
+    title: t('ui.dock.demo.trayTitle'),
+    cards: [
+      { kind: 'shortcut', block: SEED_FEATURE_BOARD_ID },
+      { kind: 'shortcut', block: SEED_INPUT_NOTES_ID },
+    ],
+  }
+  return {
+    left: { ...d.left, cards: [...d.left.cards.slice(0, at), tray, ...d.left.cards.slice(at)] },
+    right: { ...d.right, cards: [...d.right.cards] },
+    collapsedCards: {},
+    pinnedCards: {},
+    solo: { left: null, right: null },
+  }
 }
 
 function coreVocabulary(): { blocks: Block[]; featureTagId: string } {

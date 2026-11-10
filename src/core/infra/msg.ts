@@ -178,6 +178,8 @@ export const MSG = {
   'ui.dock.collapseToShortcut': '收成快捷',
   'ui.dock.restoreWindow': '在侧槽展开',
   'ui.dock.shortcutShiftHint': 'Shift+点也能在侧槽展开',
+  /** 演示库里那只收纳盘的名字（`seedDock()` 的 title）——与日记栏的演示词条同层 */
+  'ui.dock.demo.trayTitle': '常用',
   'ui.dock.retargetShortcut': '换一个块…',
   'ui.dock.removeShortcutMenu': '移出这颗快捷',
   'ui.dock.pickShortcut': '选一个块…',

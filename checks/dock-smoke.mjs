@@ -428,12 +428,20 @@ await check('A18t 收纳盘：盘内小卡贴**盘内容盒**右缘（A18 口径
   /**
    * 建盘走真实路径：右键一颗小卡 →「收进新收纳盘」→ 盘头右键 →「把其余小卡收进来」。
    * 建完左槽顶层没有裸排小卡，4 张全在盘里。
+   *
+   * 演示库的左槽自带一只命名演示盘（种子 dock）；本用例的盘插在第一颗小卡原位
+   * ＝ DOM 里第一只 `.dock-card` ⇒ 下文 `^="tray:"` 的 querySelector 首匹配恒是它。
+   * 定位器按捕获到的 key 精确认，不与演示盘混淆。
    */
   await page.locator('#dock-left-stack > .dock-tile').first().click({ button: 'right' })
   await page.waitForTimeout(150)
   await page.locator('.layer .layer-item', { hasText: '收进新收纳盘' }).first().click()
   await page.waitForTimeout(150)
-  const trayCard = page.locator('#dock-left-stack > .dock-card[data-card-id^="tray:"]')
+  const trayKey = await page.evaluate(
+    () => document.querySelector('#dock-left-stack > .dock-card[data-card-id^="tray:"]')?.dataset.cardId ?? '',
+  )
+  assert(trayKey !== '', '建盘后左槽应出现一只新盘卡（容器从内容里长出来）')
+  const trayCard = page.locator(`#dock-left-stack > .dock-card[data-card-id="${trayKey}"]`)
   assert((await trayCard.count()) === 1, '建盘后左槽应有一只盘卡（容器从内容里长出来）')
   assert((await trayCard.getAttribute('data-quiet-head')) === '1', '未命名的盘静置闭嘴（成员摆在那里，计数不报第二遍）')
   await trayCard.locator('.dock-card-head').click({ button: 'right' })
@@ -549,8 +557,11 @@ await check('A18t 收纳盘：盘内小卡贴**盘内容盒**右缘（A18 口径
     })
     await page.waitForTimeout(120)
   }
+  // 只数本用例那只盘的成员（左槽还有一只种子演示盘，跨盘的 querySelectorAll 会把它也数进去）
   const rest = await page.evaluate(
-    () => document.querySelectorAll('#dock-left-stack > .dock-card[data-card-id^="tray:"] .dock-tray-body > .dock-tile').length,
+    (key) => document.querySelector(`#dock-left-stack > .dock-card[data-card-id="${key}"] .dock-tray-body`)
+      ?.querySelectorAll(':scope > .dock-tile').length ?? 0,
+    trayKey,
   )
   assert(rest === 1, `摘到只剩 1 张成员，实际 ${rest}`)
   await collapseTray()

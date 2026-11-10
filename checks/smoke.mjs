@@ -25948,10 +25948,11 @@ await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、�
   assert(now[0] === 'cmd:core.journal/today' && typeof now[1] === 'object' && typeof now[1].tray === 'string',
     `盘应插在被收那颗小卡的原位：${JSON.stringify(now)}`)
   assert(JSON.stringify(now[1].cards) === JSON.stringify(['cmd:core.page/new']), `建盘时成员就是那一颗：${JSON.stringify(now[1])}`)
-  // 本用例的盘按捕获到的 id 精确认——左槽还有一只种子演示盘，`^="tray:"` 会匹配两只
-  const trayId = now[1].tray
-  const trayOf = (list) => list.find((e) => typeof e === 'object' && e.tray === trayId)
-  trayCard = page.locator(`#dock-left-stack > .dock-card[data-card-id="tray:${trayId}"]`)
+  // 本用例的盘按捕获到的 key 精确认——左槽还有一只种子演示盘，`^="tray:"` 会匹配两只
+  // （快照里 tray 字段存的就是完整 key `tray:<id>`，与 DOM 的 data-card-id 同一串）
+  const trayKey = now[1].tray
+  const trayOf = (list) => list.find((e) => typeof e === 'object' && e.tray === trayKey)
+  trayCard = page.locator(`#dock-left-stack > .dock-card[data-card-id="${trayKey}"]`)
   assert((await trayCard.count()) === 1, '左槽应画出这只盘卡')
   assert((await trayCard.locator('.dock-card-title').textContent()) === '1 张小卡', `未命名的盘头应显示「n 张小卡」：${JSON.stringify(await trayCard.locator('.dock-card-title').textContent())}`)
 
@@ -25978,7 +25979,13 @@ await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、�
     `盘内排序应落盘：${JSON.stringify(trayOf(now))}`)
 
   // ④ 盘头＝收进去：加一颗快捷小卡，拖到盘头 ⇒ 追加到盘末（落点决定容器）
-  const blockId = await page.evaluate(() => window.__qua.pages()[1].id)
+  // 挑一颗左槽还没有快捷卡的页：同一槽内 key 唯一，演示盘已收了它的话这颗就不会新增
+  const blockId = await page.evaluate(() => {
+    const taken = new Set(
+      window.__qua.snapshot().dock.left.cards.flatMap((e) => (typeof e === 'object' ? e.cards : [e])),
+    )
+    return window.__qua.pages().map((p) => p.id).find((id) => !taken.has(`shortcut:${id}`))
+  })
   await page.evaluate((id) => window.__qua.invoke('core.dock/add-shortcut', { blockId: id }), blockId)
   await page.waitForTimeout(200)
   const shKey = `shortcut:${blockId}`
@@ -26006,7 +26013,7 @@ await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、�
 
   // ⑥ ✕＝解散：只摘把手，小卡留在原位——数量与顺序都不变（§3.7-3）
   const before = await cards()
-  const trayIdx = before.findIndex((e) => typeof e === 'object' && e.tray === trayId)
+  const trayIdx = before.findIndex((e) => typeof e === 'object' && e.tray === trayKey)
   const expected = [...before.slice(0, trayIdx), ...before[trayIdx].cards, ...before.slice(trayIdx + 1)]
   await trayCard.locator(':scope > .dock-card-head [data-dock-action="close"]').click()
   await page.waitForTimeout(200)
@@ -26020,11 +26027,11 @@ await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、�
   await page.waitForTimeout(150)
   await menuPick('收进新收纳盘')
   now = await cards()
-  const tray7 = now.filter((e) => typeof e === 'object').find((e) => e.tray !== trayId)
+  const tray7 = now.filter((e) => typeof e === 'object').find((e) => e.tray !== trayKey)
   assert(tray7 && JSON.stringify(tray7.cards) === JSON.stringify(['cmd:core.journal/prev']),
     `重建一只单成员盘：${JSON.stringify(now)}`)
-  const tray7Card = page.locator(`#dock-left-stack > .dock-card[data-card-id="tray:${tray7.tray}"]`)
-  await page.locator(`#dock-left-stack > .dock-card[data-card-id="tray:${tray7.tray}"] .dock-tray-body > .dock-tile .dock-tile-x`).click()
+  const tray7Card = page.locator(`#dock-left-stack > .dock-card[data-card-id="${tray7.tray}"]`)
+  await page.locator(`#dock-left-stack > .dock-card[data-card-id="${tray7.tray}"] .dock-tray-body > .dock-tile .dock-tile-x`).click()
   await page.waitForTimeout(200)
   now = await cards()
   assert(!now.some((e) => typeof e === 'object' && e.tray === tray7.tray), `最后一个成员被移走 ⇒ 盘应就地解散：${JSON.stringify(now)}`)
@@ -26038,11 +26045,13 @@ await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、�
   await page.waitForTimeout(150)
   await menuPick('收进新收纳盘')
   now = await cards()
-  // 新盘插在「回到今日」原位（顶层第 0 位）——按位置捕获，与槽里那只演示盘无关
-  assert(typeof now[0] === 'object' && JSON.stringify(now[0].cards) === JSON.stringify(['cmd:core.journal/today']),
-    `新盘应插在「回到今日」原位：${JSON.stringify(now)}`)
-  const trayId8 = now[0].tray
-  const trayCard8 = page.locator(`#dock-left-stack > .dock-card[data-card-id="tray:${trayId8}"]`)
+  // 按「收的就是回到今日」捕获这只新盘，与槽里那只演示盘无关
+  const tray8 = now.find(
+    (e) => typeof e === 'object' && JSON.stringify(e.cards) === JSON.stringify(['cmd:core.journal/today']),
+  )
+  assert(tray8, `新盘应收着「回到今日」：${JSON.stringify(now)}`)
+  const trayId8 = tray8.tray
+  const trayCard8 = page.locator(`#dock-left-stack > .dock-card[data-card-id="${trayId8}"]`)
   await trayCard8.locator('.dock-card-head').click({ button: 'right' })
   await page.waitForTimeout(150)
   await menuPick('重命名')

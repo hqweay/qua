@@ -70,7 +70,7 @@ import { HANDLERS } from './app/handlers.ts'
 // 用户可见文案一律走 t；字典是零依赖叶子，Electron 主进程也 import 同一份
 import { t, type MsgId } from './core/infra/msg.ts'
 import { ensurePageInTx } from './core/index.ts'
-import { seedJournalMounts, seedWorkspace } from './core/infra/seed.ts'
+import { seedDock, seedJournalMounts, seedWorkspace } from './core/infra/seed.ts'
 import { blankWorkspace } from './core/fixtures/states.ts'
 import { createIdbAssetStore } from './core/storage/asset-idb.ts'
 import { createIpcAssetStore } from './core/storage/asset-ipc.ts'
@@ -221,12 +221,16 @@ const bootState = {
 }
 let ws: Workspace = boot.status === 'ok' ? boot.ws : seedWorkspace()
 /**
- * 种子库里那几栏演示查询：它们在**设备状态**里（日记面板是系统视图，不是块）。
+ * 种子库的**设备侧**演示配置：日记面板的演示栏 ＋ 左槽的演示收纳盘（`seedDock`）。
+ * 它们住在设备状态里（日记面板是系统视图；槽布局「跟库走」但不属于任何一块）。
  *
  * 只在「这一份库是刚种出来的」时给：旧库作废重 seed 也算一次全新开始，
- * 而两个仓都空着的时候（第一次打开）更该看到那一栏。
+ * 而两个仓都空着的时候（第一次打开）更该看到那一栏与那只盘。
  */
-if (boot.status !== 'ok') device.prefs.journalMounts = seedJournalMounts()
+if (boot.status !== 'ok') {
+  device.prefs.journalMounts = seedJournalMounts()
+  device.prefs.dock = seedDock()
+}
 
 /**
  * **搜索运行时**：桌面库才可能走 FTS；web 没有 SQLite，构造时 `bridge.search` 缺失
