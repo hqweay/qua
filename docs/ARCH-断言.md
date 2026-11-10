@@ -140,10 +140,10 @@ pnpm arch:check   # 只跑静态那一层（秒级）
 | `[29]` | **原语的几何不许在组件里再写一份**（改形状只改 `styles/primitives.css`；判「整组声明逐字相同」） | `arch-check` `[29]` | **跑** |
 | `[30]` | **被引用的 `var(--…)` 必须有定义**（悬空引用＝声明静默失效：不报错、不红、单测与类型都拦不住，只有把那行悬停上去的人眼能发现） | `arch-check` `[30]`（落地当天就抓到 5 处内联样式的悬空引用） | **跑** |
 | `[32]` | **拥有者模型的旧形状不得复活**：`_queryResult`／`journalMountsId`／`user:<index>`／`spec.todo` 零命中 | `arch-check` `[32]`（AST：字符串与标识符；注释不算命中，讲「为什么删掉」的记录留得住） | **跑** |
-| `[33]` | **视图配置的写路径唯一**：`_views`／`_activeView`／`_mounts` 只许 `core/view-owner.ts`／`core/mount.ts`／`app/wiring/owners.ts` 碰 | `arch-check` `[33]` | **跑** |
+| `[33]` | **视图配置的写路径唯一**：`_views`／`_activeView`／`_defaultFilter`／`_mounts` 只许 `core/view-owner.ts`／`core/mount.ts`／`app/wiring/owners.ts` 碰 | `arch-check` `[33]` | **跑** |
 | `[34]` | **源 × kind 的兼容表只有一份**（`STORED_KINDS_BY_SOURCE`） | `arch-check` `[34]` | **跑** |
 | `[35]` | **页的「字段声明」入口不存在**（能写没人读的值不许留着） | `arch-check` `[35]`（配 smoke T125 的界面一侧） | **跑** |
-| `[36]` | **系统键登记表唯一**：`SystemPropId` 联合与 `SYSTEM_PROP_CHECKS` 判据表一一对应（20 键双向比对；`typeof X` 经 core 全域常量表解析） | `arch-check` `[36]`（漏登记的键在收端等于不设防，掉进 `BlockProperty` 行还能跑） | **跑** |
+| `[36]` | **系统键登记表唯一**：`SystemPropId` 联合与 `SYSTEM_PROP_CHECKS` 判据表一一对应（24 键双向比对；`typeof X` 经 core 全域常量表解析） | `arch-check` `[36]`（漏登记的键在收端等于不设防，掉进 `BlockProperty` 行还能跑） | **跑** |
 
 **当前基线**：`pnpm arch:check` 硬断言 **29/29 过**（`[12b]` 是如实记账、不拦门的欠账；
 另有 6 条「等内核」，见 §4）。
