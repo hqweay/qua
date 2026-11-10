@@ -133,6 +133,36 @@ export class ViewCards {
         return
       }
     }
+    /**
+     * 值分组：改的那块**换了桶**（拖卡写值、面板改值）⇒ 整片重画。
+     * 局部修补只会把卡**原地**换掉——列成员与计数不会跟着走，「值改了、
+     * 卡还留在旧列」就是这条缝。内容变化（高频路径）仍走下面的就地修补。
+     */
+    const key = view?.groupBy ?? ''
+    if (cardLayoutOf(view) === 'columns' && key !== '') {
+      const o = {
+        choices: (pid: string) => this.deps.choices(pid),
+        groupOrder: view?.groupOrder,
+        ...(this.deps.cardinalityOf ? { cardinalityOf: this.deps.cardinalityOf } : {}),
+      }
+      const colOf = new Map<string, string>()
+      for (const b of bucketize(this.deps.records(), key, o).buckets) {
+        for (const r of b.records) colOf.set(r.block.id, b.id)
+      }
+      const moved = [...wanted].some((id) => {
+        // 正在打字的那张不判换列：它的桶要等编辑结束（afterEdit）再算
+        if (this.deps.cell.editingId === id) return false
+        const el = this.root.querySelector<HTMLElement>(`.vcard[data-block-id="${id}"]`)
+        if (!el) return false
+        const col = el.closest<HTMLElement>('.vcol')
+        const cur = col?.dataset.unset === '1' ? UNSET : (col?.dataset.value ?? '')
+        return (colOf.get(id) ?? UNSET) !== cur
+      })
+      if (moved) {
+        this.render()
+        return
+      }
+    }
     this.refreshBelow(ids.map((id) => this.deps.store.find(id)).filter((b): b is Block => b !== undefined))
     const byId = new Map(this.deps.records().map((r) => [r.block.id, r]))
     let lost = false

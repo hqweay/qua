@@ -18900,7 +18900,12 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
   )
 
   const card = await page.evaluate(() => {
-    const el = document.querySelector('.vcard')
+    // 挑一张**不在目标列**的卡：写值后才有「换列」可断（挑目标列自己的卡是空转——
+    // 它本来就那样，断言绿了也什么都没钉住）
+    const cols = [...document.querySelectorAll('.vcol')]
+    const target = cols.find((c) => c.dataset.unset !== '1' && c.dataset.value !== '')
+    const from = cols.find((c) => c !== target && c.querySelector('.vcard[data-block-id]'))
+    const el = from?.querySelector('.vcard[data-block-id]')
     return { id: el?.dataset.blockId ?? '', parent: window.__qua.__editor.store.find(el?.dataset.blockId ?? '') ? 'ok' : '' }
   })
   assert(card.id !== '', '前置：应有一张卡')
@@ -18922,11 +18927,14 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
     return withValue?.dataset.value ?? ''
   })
   assert(colValue !== '', `前置：应有一列带值：${colValue}`)
+  // 列上的 data-value 是**分桶内部键**（带 `s:` 前缀）；写回要落**原始值**
+  // （写前缀进去等于造出一个没人认识的新值），期望列才是同一根键。
+  const rawValue = colValue.startsWith('s:') ? colValue.slice(2) : colValue
   // 分组列就是刚才选的那个 select（拖卡写的也是它）
   const propId = groupId
   await page.evaluate(
     ({ propId: pid, value, blockId }) => window.__qua.invoke('core.props/set-value', { blockId, propId: pid, value }),
-    { propId, value: colValue, blockId: card.id },
+    { propId, value: rawValue, blockId: card.id },
   )
   await page.waitForTimeout(400)
   const afterDrag = await page.evaluate(({ id, q }) => {
@@ -18943,6 +18951,20 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
   }, { id: card.id, q: qid })
   assert(afterDrag.parent === parentBefore, `拖卡不许换父子（那会改结构）：${parentBefore} → ${afterDrag.parent}`)
   assert(afterDrag.where === '{"tag":"任务"}', `拖卡不许改条件：${afterDrag.where}`)
+  // **换列是拖卡的验收点**：写完值，卡必须搬进目标列（列成员与计数跟着重算）——
+  // 只断模型断不出「值改了、卡还留在旧列」的缝
+  const afterCol = await page.evaluate((id) => {
+    const cardEl = document.querySelector(`.vcard[data-block-id="${id}"]`)
+    const col = cardEl?.closest('.vcol')
+    return {
+      inCol: col?.dataset.value ?? '',
+      colCount: col?.querySelector('.vcol-count')?.textContent ?? '',
+    }
+  }, card.id)
+  assert(
+    afterCol.inCol === colValue,
+    `写值后卡要搬进目标列：${JSON.stringify(afterCol)}（期望列 ${colValue}）`,
+  )
 
   // ② 清掉分组 ⇒ 回到网格（同一张看法；成员与卡片配置都不变）
   await page.evaluate(
