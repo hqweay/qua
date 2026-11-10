@@ -2111,7 +2111,7 @@ const app: App = {
     const current = new Set(childDisplayProps(parent))
     const rows = () => {
       const all = [
-        ...kb.propDefs().map((d) => ({ id: d.id, label: propLabel(d) || d.id.slice(-6) })),
+        ...kb.propDefs().map((d) => ({ id: d.id, label: propLabel(d) || blockLabel(d, kbGet) })),
         ...enginePropDefs().map((d) => ({ id: d.id, label: propLabel(d) })),
       ]
       all.sort((x, y) => x.label.localeCompare(y.label, 'zh'))

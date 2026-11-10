@@ -24,7 +24,7 @@
  */
 import { hasList, isDeleted, prop, type Block, type BlockList } from '../model/model.ts'
 import { walkForest } from '../model/walk.ts'
-import { displayNameOf } from '../identity/alias.ts'
+import { blockLabel } from './ref.ts'
 
 /**
  * 子块 → 上级的有序 ref 列表（方向 子 → 父）。
@@ -241,8 +241,8 @@ export function cyclePathLabels(path: readonly string[], adj: Adjacency, shortId
   return path.map((id) => {
     const b = adj.byId.get(id)
     if (!b) return shortId(id)
-    // 显示名走主名叶子：标签的正文是描述，名字在 `_aliases` 里
-    const name = displayNameOf(b) || shortId(id)
+    // 呈现标签（主名 > 呈现摘要，兜底只有「无标题」）：标签的正文是描述，名字在 `_aliases` 里
+    const name = blockLabel(b, (x) => adj.byId.get(x))
     return hasList(b, 'tag') ? `#${name}` : name
   })
 }

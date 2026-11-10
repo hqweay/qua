@@ -214,7 +214,7 @@ export function setupPanels(deps: PanelsDeps) {
     if (!def) return
     const tagName = (id: string): string => {
       const tag = kb.get(id)
-      return tag ? displayNameOf(tag).trim() || shortId(id) : shortId(id)
+      return tag ? blockLabel(tag, (x) => kb.get(x)) : shortId(id)
     }
     openChoicePicker({
       layers,
@@ -837,7 +837,7 @@ export function setupPanels(deps: PanelsDeps) {
       choices: (propId) => {
         const def = kb.get(propId)
         if (!def) return []
-        return kb.children(propId).map((c) => ({ id: c.id, label: displayNameOf(c).trim() || shortId(c.id) }))
+        return kb.children(propId).map((c) => ({ id: c.id, label: blockLabel(c, (x) => kb.get(x)) }))
       },
       /* 日历的「今天」：由装配层钉住，别让渲染器自己 `new Date()`（截图与断言会漂） */
       today: () => todayISO(),
