@@ -14,7 +14,7 @@ import {
   upsertView,
   locate,
   insertSiteOf,
-  hasLiveChildren,
+  isBlankPlaceholder,
   mkBlock,
   mkQueryBlock,
   setBlockType,
@@ -23,13 +23,14 @@ import {
   TASK_STATUS_PROP_ID,
   TASK_STATUS_TODO_ID,
   TASK_STATUS_DONE_ID,
-  canWriteText,
   declareOwnProp,
   setValue,
   writeBlockContent,
   uuidv7Hex,
   blockLabel,
   dropInsertSite,
+  dropMoveExternal,
+  descendants,
   hasDescendant,
   type Block,
   type Located,
@@ -38,7 +39,6 @@ import {
 } from '../../core/index.ts'
 import {
   insertRunAt,
-  isEmptyContent,
   plainLen,
   removeRunById,
   textRuns,
@@ -90,7 +90,7 @@ export class InsertOps {
     const loc = locate(this.ed.doc, id)
     if (!loc) return null
     this.ed.beginUndoEntry()
-    const blank = isEmptyContent(loc.block.content) && !hasLiveChildren(loc.block) && canWriteText(loc.block)
+    const blank = isBlankPlaceholder(loc.block)
     if (blank && text === '') {
       /**
        * 空块 ＋ 无正文：
@@ -167,7 +167,7 @@ export class InsertOps {
     const loc = locate(this.ed.doc, id)
     if (!loc) return null
     this.ed.beginUndoEntry()
-    const blank = isEmptyContent(loc.block.content) && !hasLiveChildren(loc.block) && canWriteText(loc.block)
+    const blank = isBlankPlaceholder(loc.block)
     if (blank) {
       this.ed.placeCaret(loc.block.id, 0)
       return loc.block.id
@@ -233,7 +233,7 @@ export class InsertOps {
      * 在乱查」；而条件该由用户给（条件树／筛选都就位了）。落点仍按 `insertSiteOf` 判。
      */
     const seed: QuerySpec = { where: { any: [] } }
-    const blank = isEmptyContent(loc.block.content) && !hasLiveChildren(loc.block) && canWriteText(loc.block)
+    const blank = isBlankPlaceholder(loc.block)
     const query = mkQueryBlock({ name: '', spec: seed, icon: 'lucide:list-filter' })
     const empty = mkBlock('')
 
@@ -287,7 +287,7 @@ export class InsertOps {
     if (!loc) return null
     this.ed.beginUndoEntry()
 
-    const blank = isEmptyContent(loc.block.content) && !hasLiveChildren(loc.block) && canWriteText(loc.block)
+    const blank = isBlankPlaceholder(loc.block)
     if (blank) {
       const ok = this.ed.write((tx) => {
         tx.patch(loc.block.id, (b) => {
@@ -351,7 +351,7 @@ export class InsertOps {
      * 判据要**两块都空**：正文为空、且没有子块。有子块的块不能变成组件 ——
      * 那会把子树藏进一行摘要后面（组件块不许有子块，子块看不见）。
      */
-    if (isEmptyContent(loc.block.content) && !hasLiveChildren(loc.block) && canWriteText(loc.block)) {
+    if (isBlankPlaceholder(loc.block)) {
       // 原地改类型是一次属性写入：`_type` 一条 op，撤销一次回到「那行还是空白」。
       // 改类型也算一次改动 ⇒ 时刻并进同一笔（第二条 op）。
       this.ed.write((tx) => {
@@ -511,25 +511,50 @@ export class InsertOps {
    * **不补空块**：补位纪律属于「没有可写正文的块」（分割线／查询／露面）。
    * 这里插的是普通可写块，光标落到最后一枚的引用之后即可。
    *
+   * **源不必在这一份 doc 里**：引用只需要「指向谁 ＋ 显示什么」，侧槽卡／挂载区／
+   * 别的露面拖来的块都能落成引用（普通拖在这一格走 `dropMoveExternal`）。
+   * 两种来源各用自己那一份落点判据——它们本来就是「同一件事的两个版本」：
+   * 源在 doc 内用 `dropInsertSite`（与 `dropMove` 同一份，只少「摘掉自己」那格）；
+   * 源在外用 `dropMoveExternal`（外部位移本来就没有「摘掉自己」那格）。
+   *
    * 整组多选：N 块各一枚引用，同笔事务 ⇒ 一次撤销全回。
    */
   insertRefDrop(ids: readonly string[], targetId: string | null, zone: 'before' | 'after' | 'inside'): boolean {
     const doc = this.ed.doc
-    /** 段根（页／天／查询记录）没有兄弟位：日记流是真实日期序、查询结果集是视图序 */
-    const roots = [...new Set(ids)].filter((id) => locate(doc, id)?.parent !== null)
+    const find = (id: string) => this.ed.store.find(id)
+    const roots = [...new Set(ids)]
     if (roots.length === 0) return false
+    const locOf = new Map(roots.map((id) => [id, locate(doc, id)] as const))
+    const external = roots.filter((id) => !locOf.get(id) && find(id))
+    const internal = roots.filter((id) => Boolean(locOf.get(id)))
+    // 有既不在 doc 里、store 里也查不到的 id ⇒ 不是一次有效拖拽
+    if (internal.length + external.length !== roots.length) return false
+    // 一次拖拽只有一个来源（侧槽卡／挂载区／正文），不会混着来
+    if (external.length > 0 && internal.length > 0) return false
+    const fromOutside = external.length > 0
+    /** 段根（页／天／查询记录）没有兄弟位：日记流是真实日期序、查询结果集是视图序 */
+    if (roots.some((id) => locOf.get(id)?.parent === null)) return false
     if (targetId !== null) {
       const tgt = locate(doc, targetId)
-      if (!tgt || (tgt.parent === null && zone !== 'inside')) return false
+      if (!tgt) return false
+      // doc 内的目标也是段根时，before/after 会给它造一个没有家的兄弟；
+      // 外部位移没有这个问题（`dropMoveExternal` 自己把 before/after 折成 inside）
+      if (!fromOutside && tgt.parent === null && zone !== 'inside') return false
       // 落点不能落在被拖的子树里（含被拖块自己）——与单块拖拽同一条守卫
-      for (const id of roots) if (id === targetId || hasDescendant(doc, id, targetId)) return false
+      for (const id of roots) {
+        if (id === targetId) return false
+        const isInside = fromOutside ? descendants(find(id)!).some((b) => b.id === targetId) : hasDescendant(doc, id, targetId)
+        if (isInside) return false
+      }
     }
-    const site = dropInsertSite(doc, roots[0]!, targetId, zone)
+    const first = roots[0]!
+    const site = fromOutside
+      ? dropMoveExternal(doc, find(first)!, targetId, zone)
+      : dropInsertSite(doc, first, targetId, zone)
     if (!site) return false
     // 派生面（查询结果／镜像）：落点必须还在本文档里（与 `moveStaysInside` 同一条门）
     if (this.ed.structuralScope === 'roots' && (site.parentId === null || !locate(doc, site.parentId))) return false
 
-    const find = (id: string) => this.ed.store.find(id)
     const made = roots.map((id) => {
       const src = find(id)
       return mkBlock([refRunOf(id, src ? blockLabel(src, find) : '')])

@@ -27211,6 +27211,133 @@ await check('T286 拖到无子块的块中间 ⇒ 真的成为子块（不是折
   return `中间 ⇒ 真子块（父＝目标、块数不变、一次撤销回原位）；下沿 ⇒ 仍是兄弟；⌥ 同落点 ⇒ B 子树里一枚指向 C 的引用`
 })
 
+/**
+ * **T287：⌥ 拖的两个「有提示、没反应」的洞。**
+ *
+ * ① 源不在落点那一份 doc 里（槽里的卡／挂载区／别的露面）。普通拖在这一格走
+ *    `dropMoveExternal`（跨容器移动），引用则只认「源在本文档里」⇒ 提示说「插一枚引用」、
+ *    松手什么都不发生。引用只需要「指向谁 ＋ 显示什么」，源在哪一侧不该影响它。
+ * ② 目标是**类型声明不许有子块**的块（分割线／露面）。中间那一区在模型里没有落点
+ *    （`children: 'none'`）⇒ 同样「有提示、没反应」。它该像「后面」那样落下来，
+ *    而且提示要先说「后面」——提示与落手不许各说各的。
+ */
+await check('T287 ⌥ 拖的两个洞：外部源（槽里的卡）也落成引用；声明不许有子块的目标中间按「后面」算', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  /* ---------- ① 外部源：左槽卡里的块 → 另一页的正文 ---------- */
+  const src = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const root = ed.doc.roots[0].id
+    return ed.insert.insertBlockAfter(root, 'EXT-SRC')
+  })
+  await page.waitForTimeout(200)
+  const pin = await page.evaluate((id) => {
+    const marker = document.querySelector(`.blk[data-block-id="${id}"] .marker`)
+    const root = document.getElementById('dock-left')
+    const dt = new DataTransfer()
+    const ev = (type) => new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt })
+    marker.dispatchEvent(ev('dragstart'))
+    root.dispatchEvent(ev('dragover'))
+    const hot = root.dataset.dropPin === '1'
+    root.dispatchEvent(ev('drop'))
+    marker.dispatchEvent(ev('dragend'))
+    return { hot }
+  }, src)
+  assert(pin.hot, '前置：源块要能钉进左槽')
+  await page.waitForTimeout(350)
+
+  // 换到另一页：源块不在这一页的 doc 里（这才是「外部源」）
+  const tgt = await page.evaluate(() => {
+    const pages = window.__qua.pages()
+    window.__qua.invoke('core.page/open', { pageId: pages[1].id })
+    return pages[1].id
+  })
+  await page.waitForTimeout(400)
+  const t2 = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const root = ed.doc.roots[0].id
+    return { root, id: ed.insert.insertBlockAfter(root, 'EXT-TGT'), before: window.__qua.snapshot().totalBlocks }
+  })
+  await page.waitForTimeout(250)
+  assert(tgt && t2.id, '前置：第二页与目标块都要在')
+
+  const ext = await page.evaluate((a) => {
+    const handle = document.querySelector(`#dock-left .dock-card[data-window="1"] .blk[data-block-id="${a.src}"] .marker`)
+    const tgtEl = document.querySelector(`.blk[data-block-id="${a.tgt}"]`)
+    if (!handle || !tgtEl) return null
+    const r = tgtEl.getBoundingClientRect()
+    const dt = new DataTransfer()
+    const beforeIds = new Set(window.__qua.blocks().map((x) => x.id))
+    const ev = (type) =>
+      new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 40, clientY: r.top + r.height / 2, altKey: true })
+    handle.dispatchEvent(ev('dragstart'))
+    tgtEl.dispatchEvent(ev('dragover'))
+    const hint = document.querySelector('.dnd-hint')?.textContent ?? ''
+    tgtEl.dispatchEvent(ev('drop'))
+    handle.dispatchEvent(ev('dragend'))
+    const fresh = window.__qua.blocks().filter((x) => !beforeIds.has(x.id)).map((x) => x.id)
+    const atom = window.__qua.atoms().find((x) => x.blockId === fresh[0])
+    return { hint, fresh, target: atom?.target?.id ?? '', total: window.__qua.snapshot().totalBlocks }
+  }, { src, tgt: t2.id })
+  assert(ext, '槽里的卡与目标行都要在（卡没渲染出来就是另一回事）')
+  assert((ext.hint ?? '').includes('引用'), `外部源悬停时也要说「插一枚引用」：${ext.hint}`)
+  assert(ext.total === t2.before + 1, `外部源也要真的插一块：${t2.before} → ${ext.total}`)
+  assert(ext.target === src, `新块正文应指向槽里那个源块：${JSON.stringify(ext)}`)
+
+  /* ---------- ② 声明不许有子块的目标（分割线）：中间按「后面」算 ---------- */
+  const div = await page.evaluate((a) => {
+    const ed = window.__qua.__editor
+    ed.insert.insertDividerAfter(a.tgt)
+    const flat = []
+    const walk = (ls) =>
+      ls.forEach((x) => {
+        if (x.props?._type === 'core/divider') flat.push(x.id)
+        walk(x.children)
+      })
+    walk(ed.doc.roots)
+    return { id: flat[flat.length - 1], src: a.tgt2, before: window.__qua.snapshot().totalBlocks }
+  }, { tgt: t2.id, tgt2: t2.id })
+  await page.waitForTimeout(250)
+  assert(div.id, '前置：分割线要建出来')
+
+  const onDiv = await page.evaluate((a) => {
+    const handle = document.querySelector(`.blk[data-block-id="${a.src}"] .marker`)
+    const tgtEl = document.querySelector(`.blk[data-block-id="${a.div}"]`)
+    if (!handle || !tgtEl) return null
+    const r = tgtEl.getBoundingClientRect()
+    const dt = new DataTransfer()
+    const beforeTotal = window.__qua.snapshot().totalBlocks
+    const beforeIds = new Set(window.__qua.blocks().map((x) => x.id))
+    const ev = (type) =>
+      new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 40, clientY: r.top + r.height / 2, altKey: true })
+    handle.dispatchEvent(ev('dragstart'))
+    tgtEl.dispatchEvent(ev('dragover'))
+    const hint = document.querySelector('.dnd-hint')?.textContent ?? ''
+    const zone = tgtEl.dataset.drop ?? ''
+    tgtEl.dispatchEvent(ev('drop'))
+    handle.dispatchEvent(ev('dragend'))
+    const after = window.__qua.blocks()
+    const fresh = after.filter((x) => !beforeIds.has(x.id)).map((x) => x.id)
+    return {
+      hint,
+      zone,
+      beforeTotal,
+      total: window.__qua.snapshot().totalBlocks,
+      freshAt: after.findIndex((x) => x.id === fresh[0]),
+      divAt: after.findIndex((x) => x.id === a.div),
+    }
+  }, { src: t2.id, div: div.id })
+  assert(onDiv, '分割线行与源块标都要在')
+  assert(onDiv.zone === 'after', `分割线的中间应折成 after（高亮一起折）：${JSON.stringify(onDiv)}`)
+  assert(onDiv.hint.includes('后面'), `提示要说「这一行后面」，不许说「移进」：${onDiv.hint}`)
+  assert(onDiv.total === onDiv.beforeTotal + 1, `分割线上也要真的插一块：${JSON.stringify(onDiv)}`)
+  assert(onDiv.freshAt === onDiv.divAt + 1, `新块应落在分割线后面（紧邻）：${JSON.stringify(onDiv)}`)
+
+  await ctx.close()
+  return `外部源（槽里的卡）⇒ 1 枚指向它的引用；分割线中间 ⇒ 提示「后面」且真的落在它后面`
+})
+
 
 
 const known = results.filter((r) => !r.ok && r.known)

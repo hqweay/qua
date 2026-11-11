@@ -3583,6 +3583,12 @@ export class BlockEditor {
         // store 里存在即接——自环、类型不许有子块等守卫留在 `dropDrag`／`dropMoveExternal`
         return this.store.find(id) !== undefined
       },
+      acceptsChildren: (id) => {
+        if (id === '') return false
+        // store 是共享的：目标行属于另一个露面（镜像／挂载区／槽里的卡）时也答得出来
+        const b = locate(this.doc, id)?.block ?? this.store.find(id)
+        return b ? typeDeclOf(b).children !== 'none' : false
+      },
       beginDrag: (id) => this.drag.begin(id),
       showDropTarget: (el, zone) => this.drag.showDropTarget(el, zone),
       /**

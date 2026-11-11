@@ -244,6 +244,14 @@ export interface EditorBridge {
    */
   acceptDrag: (id: string) => boolean
   /**
+   * 这个**目标**块的类型容许有子块吗（`children !== 'none'`）。
+   *
+   * 用途只有一个：三区的「中间」在声明不许有子块的目标上（分割线／露面）没有落点，
+   * 悬停期就要折算成「后面」，让提示、高亮与落手说同一件事。
+   * ⚠️ 与「它此刻有没有子块」无关：空着的普通块照样能被拖成父块。
+   */
+  acceptsChildren: (id: string) => boolean
+  /**
    * 松手：编辑器按落点改结构（含撤销记录与重渲染）。
    *
    * `asRef` ＝ 这一次是**引用式**拖拽（悬停时按着 ⌥）：落点是同一份，但写入不同——
@@ -1115,6 +1123,21 @@ export function bindEditorEvents(br: EditorBridge): () => void {
   })
 
   /* ── 拖拽重排（HTML5 DnD，三区判定）────────────────── */
+  /**
+   * 三区的**实际**含义：声明不许有子块的目标（分割线／露面）没有「里面」这一区 ——
+   * 它容纳不下任何东西，`dropMove`／`dropInsertSite` 都会拒绝。
+   *
+   * ⚠️ 折算必须发生在**这里**（提示、高亮与落手读同一个值），不能只在落手里偷偷改：
+   *    只在落手改就会出现「提示说移进、松手却按后面处理」；只在落手拒绝就会出现
+   *    「提示说移进、松手什么都不发生」——后者是本轮真踩到的（⌥ 拖到露面行上没反应）。
+   */
+  const zoneAt = (e: DragEvent): 'before' | 'after' | 'inside' => {
+    const el = rowOf(e)
+    if (!el) return 'after'
+    const z = dropZone(el, e.clientY)
+    return z === 'inside' && !br.acceptsChildren(el.dataset.blockId ?? '') ? 'after' : z
+  }
+
   // 拖源只报「我是谁」；载荷形状与悬停记忆在 `view/dnd.ts`（跨组件共用的那一份）
   on(c, 'dragstart', (e: DragEvent) => {
     const handle = (e.target as HTMLElement).closest<HTMLElement>('[data-drag-for]')
@@ -1147,23 +1170,25 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       accept: (id) => br.acceptDrag(id),
       targetId: (e) => rowOf(e)?.dataset.blockId ?? null,
       hint: (_id, e) => {
-        const zone = zoneOf(e)
+        const zone = zoneAt(e)
         return isRefDrag() ? zoneRefHint(zone) : zoneHint(zone)
       },
       // 三区各有各的高亮线：由编辑器自己画（模块不认识 CSS 类名）
       mark: (_id, e) => {
         const el = rowOf(e)
-        if (el) br.showDropTarget(el, zoneOf(e))
+        if (el) br.showDropTarget(el, zoneAt(e))
         else br.showDropTarget(null, null)
       },
       unmark: () => br.showDropTarget(null, null),
       onDrop: (draggedId, targetId, e) => {
-        const el = rowOf(e)
-        const zone = el ? zoneOf(e) : 'after'
+        const zone = zoneAt(e)
         /**
          * 三区**原样**交给编辑器：悬停时说「移进这一行（作为子块）」的落点，松手就必须
          * 真的成为它的子块。曾经把「目标是叶子」的 inside 静默折成 after —— 提示说移进、
          * 结果只是挪到旁边，看起来像「拖了没反应」（目标本来就在它上面时完全没变化）。
+         *
+         * ⚠️ 只有**类型声明不许有子块**的目标（分割线／露面）没有「里面」这一区：
+         *    它在 `zoneAt` 里就折算成 after（提示与高亮一起折），不在这里偷偷改。
          */
         br.dropDrag(
           draggedId,
@@ -1189,10 +1214,4 @@ export { dropZone }
 /** 事件落在哪一行（`.blk`；没有就是拖在空白处） */
 function rowOf(e: DragEvent): HTMLElement | null {
   return (e.target as HTMLElement | null)?.closest<HTMLElement>('.blk') ?? null
-}
-
-/** 三区判定：按指针在行内的高度分上/中/下 */
-function zoneOf(e: DragEvent): 'before' | 'after' | 'inside' {
-  const el = rowOf(e)
-  return el ? dropZone(el, e.clientY) : 'after'
 }
