@@ -933,7 +933,17 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     const roTitle = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.phReadonly !== undefined)
     if (roTitle) {
       const row = roTitle.closest<HTMLElement>('.blk[data-block-id]')
-      if (row?.dataset.blockId) zoomOrOpen(row.dataset.blockId)
+      if (row?.dataset.blockId) {
+        // 日期行住在**流**里（不是中心装载的根）⇒ 「聚焦」（placeCaret）够不到那一天，
+        // 只会把光标留在只读行里。有 openBlock 路由的表面走它（zoom 装载那一天，修饰键同表）；
+        // 没有的表面退回与块标同一条路由。
+        if (br.openBlock) {
+          e.preventDefault()
+          br.openBlock(row.dataset.blockId, openActionOf(e))
+        } else {
+          zoomOrOpen(row.dataset.blockId)
+        }
+      }
     }
   })
 

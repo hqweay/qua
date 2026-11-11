@@ -2371,22 +2371,24 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.P)
   await page.waitForTimeout(450)
 
+  // 右槽挂载区卡与中心段尾是同一台组件 ⇒ 所有的 mount 查询都指名**中心**（#editor），
+  // 否则把两个表面的 DOM 加在一起、条数对不上（3 → 6 那种）。
   const head = () =>
     page.evaluate(() => ({
-      count: document.querySelector('.mount-derived-count')?.textContent ?? '',
-      active: document.querySelector('.mount-derived-views .mount-derived-view-label')?.textContent ?? '',
-      why: document.querySelector('.mount-derived-why')?.textContent ?? '',
+      count: document.querySelector('#editor .mount-derived-count')?.textContent ?? '',
+      active: document.querySelector('#editor .mount-derived-views .mount-derived-view-label')?.textContent ?? '',
+      why: document.querySelector('#editor .mount-derived-why')?.textContent ?? '',
     }))
   const tableOf = () =>
     page.evaluate(() => ({
-      rows: document.querySelectorAll('.mount-view .tv-row').length,
-      cols: [...document.querySelectorAll('.mount-view .tv-head [data-col]')].map((e) => e.dataset.col),
-      cells: [...document.querySelectorAll('.mount-view .tv-row [data-col]')].map((e) => e.textContent ?? ''),
+      rows: document.querySelectorAll('#editor .mount-view .tv-row').length,
+      cols: [...document.querySelectorAll('#editor .mount-view .tv-head [data-col]')].map((e) => e.dataset.col),
+      cells: [...document.querySelectorAll('#editor .mount-view .tv-row [data-col]')].map((e) => e.textContent ?? ''),
       // 派生栏没有拥有者：宿主抬头里只应有**分组选择**（看法切换器在挂载区抬头）——
       // 刷新/排序/新建行/条件条这些「写拥有者配置」的按钮一律不许露出来
-      qvRefresh: document.querySelector('.mount-view .queryview-head .queryview-refresh')?.hidden ?? true,
-      qvSort: document.querySelector('.mount-view .queryview-head .queryview-sort')?.hidden ?? true,
-      qvNewRow: [...document.querySelectorAll('.mount-view .queryview-head button')].every((b) => b.hidden || b.className !== 'queryview-newrow'),
+      qvRefresh: document.querySelector('#editor .mount-view .queryview-head .queryview-refresh')?.hidden ?? true,
+      qvSort: document.querySelector('#editor .mount-view .queryview-head .queryview-sort')?.hidden ?? true,
+      qvNewRow: [...document.querySelectorAll('#editor .mount-view .queryview-head button')].every((b) => b.hidden || b.className !== 'queryview-newrow'),
     }))
   const num = (s) => Number((s.match(/\d+/) ?? ['0'])[0])
 
@@ -2412,8 +2414,8 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   await page2.waitForTimeout(450)
   await mountTab(page2, 'refs')
   const persisted = await page2.evaluate(() => ({
-    active: document.querySelector('.mount-derived-views .mount-derived-view-label')?.textContent ?? '',
-    rows: document.querySelectorAll('.mount-view .tv-row').length,
+    active: document.querySelector('#editor .mount-derived-views .mount-derived-view-label')?.textContent ?? '',
+    rows: document.querySelectorAll('#editor .mount-view .tv-row').length,
   }))
   assert(persisted.active === '表格', `派生栏的看法要落设备状态（重开仍是表格）：${JSON.stringify(persisted)}`)
   assert(persisted.rows === refsCount, `重开后成员一致：${refsCount} → ${persisted.rows}`)
@@ -2423,11 +2425,11 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   await pickDerivedView(page2, 'table')
   await page2.waitForTimeout(450)
   const mentions = await page2.evaluate(() => ({
-    count: Number((document.querySelector('.mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
-    rows: document.querySelectorAll('.mount-view .tv-row').length,
-    cols: [...document.querySelectorAll('.mount-view .tv-head [data-col]')].map((e) => e.dataset.col),
-    matched: [...document.querySelectorAll('.mount-view .tv-row [data-col="matched"]')].map((e) => e.textContent ?? ''),
-    why: document.querySelector('.mount-derived-why')?.textContent ?? '',
+    count: Number((document.querySelector('#editor .mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
+    rows: document.querySelectorAll('#editor .mount-view .tv-row').length,
+    cols: [...document.querySelectorAll('#editor .mount-view .tv-head [data-col]')].map((e) => e.dataset.col),
+    matched: [...document.querySelectorAll('#editor .mount-view .tv-row [data-col="matched"]')].map((e) => e.textContent ?? ''),
+    why: document.querySelector('#editor .mount-derived-why')?.textContent ?? '',
   }))
   assert(mentions.rows === mentions.count && mentions.rows >= 1, `提及栏表格与条数一致：${JSON.stringify(mentions)}`)
   assert(mentions.cols.includes('matched'), `提及表要有命中词列：${JSON.stringify(mentions.cols)}`)
@@ -2438,10 +2440,10 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   await pickDerivedView(page2, 'table')
   await page2.waitForTimeout(450)
   const same = await page2.evaluate(() => ({
-    count: Number((document.querySelector('.mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
-    rows: document.querySelectorAll('.mount-view .tv-row').length,
-    cols: [...document.querySelectorAll('.mount-view .tv-head [data-col]')].map((e) => e.dataset.col),
-    shared: [...document.querySelectorAll('.mount-view .tv-row [data-col="sharedTags"]')].map((e) => e.textContent ?? ''),
+    count: Number((document.querySelector('#editor .mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
+    rows: document.querySelectorAll('#editor .mount-view .tv-row').length,
+    cols: [...document.querySelectorAll('#editor .mount-view .tv-head [data-col]')].map((e) => e.dataset.col),
+    shared: [...document.querySelectorAll('#editor .mount-view .tv-row [data-col="sharedTags"]')].map((e) => e.textContent ?? ''),
   }))
   assert(same.rows === same.count && same.rows >= 1, `同类栏表格与条数一致：${JSON.stringify(same)}`)
   assert(same.cols.includes('sharedTags'), `同类表要有共同标签列：${JSON.stringify(same.cols)}`)
@@ -2449,8 +2451,8 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
 
   // ⑤ 派生栏不提供「新建视图 / 重命名 / 刷新」
   const noOwner = await page2.evaluate(() => ({
-    addView: Boolean(document.querySelector('.mount-view .qv-view-add')),
-    refresh: Boolean(document.querySelector('.mount-view .queryview-refresh:not([hidden])')),
+    addView: Boolean(document.querySelector('#editor .mount-view .qv-view-add')),
+    refresh: Boolean(document.querySelector('#editor .mount-view .queryview-refresh:not([hidden])')),
     rename: [...document.querySelectorAll('.layer-label')].some((e) => (e.textContent ?? '').includes('重命名')),
   }))
   assert(!noOwner.addView, '派生栏不许有「新建视图」')
@@ -2461,7 +2463,7 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   await mountTab(page2, 'refs')
   await pickDerivedView(page2, 'table')
   await page2.waitForTimeout(400)
-  const beforeLive = await page2.evaluate(() => document.querySelectorAll('.mount-view .tv-row').length)
+  const beforeLive = await page2.evaluate(() => document.querySelectorAll('#editor .mount-view .tv-row').length)
   await page2.evaluate((pid) => {
     // 在这一页里挑一条**还没引用过它**的块，插一枚指向它的引用
     const rows = window.__qua.__editor.rows().map((r) => r.block)
@@ -2471,8 +2473,8 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   }, setup.P)
   await page2.waitForTimeout(600)
   const afterLive = await page2.evaluate(() => ({
-    rows: document.querySelectorAll('.mount-view .tv-row').length,
-    count: Number((document.querySelector('.mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
+    rows: document.querySelectorAll('#editor .mount-view .tv-row').length,
+    count: Number((document.querySelector('#editor .mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
   }))
   assert(afterLive.rows === beforeLive + 1, `派生栏是 live 的：新增一处引用后成员当场 +1（${beforeLive} → ${afterLive.rows}）`)
   assert(afterLive.count === afterLive.rows, `抬头条数与表行同一个数：${afterLive.count} vs ${afterLive.rows}`)
@@ -2503,25 +2505,26 @@ await check('T194b 引用含属性引用：kind 过滤可切；标签页默认�
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.P)
   await page.waitForTimeout(400)
   await mountTab(page, 'refs')
+  // 同 T194：右槽也有同一台挂载区卡，mount 查询一律指名中心（#editor）
   const initial = await page.evaluate(() => ({
-    count: Number((document.querySelector('.mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
-    chips: [...document.querySelectorAll('.mount-derived-kind')].map((e) => e.textContent ?? ''),
-    rows: document.querySelectorAll('.mount-editor .blk').length,
+    count: Number((document.querySelector('#editor .mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
+    chips: [...document.querySelectorAll('#editor .mount-derived-kind')].map((e) => e.textContent ?? ''),
+    rows: document.querySelectorAll('#editor .mount-editor .blk').length,
   }))
   assert(initial.count >= 1 && initial.rows >= 1, `属性引用应进「引用」栏：${JSON.stringify(initial)}`)
   assert(initial.chips.some((x) => x.includes('属性')), `应有「属性」过滤 chip：${JSON.stringify(initial.chips)}`)
-  const has = (id) => !!document.querySelector(`.mount-editor .blk[data-block-id="${id}"]`)
+  const has = (id) => !!document.querySelector(`#editor .mount-editor .blk[data-block-id="${id}"]`)
   assert(await page.evaluate(has, setup.src), '属性引用源应在「全部」里')
-  await page.locator('.mount-derived-kind[data-kind="inline"]').click()
+  await page.locator('#editor .mount-derived-kind[data-kind="inline"]').click()
   await page.waitForTimeout(250)
   assert(!(await page.evaluate(has, setup.src)), '切到「正文」后，只靠属性引用的源不该再出现')
-  await page.locator('.mount-derived-kind[data-kind="all"]').click()
+  await page.locator('#editor .mount-derived-kind[data-kind="all"]').click()
   await page.waitForTimeout(250)
   assert(await page.evaluate(has, setup.src), '切回「全部」后属性引用源回来')
   await pickDerivedView(page, 'table')
   await page.waitForTimeout(450)
   const table = await page.evaluate(() => ({
-    kinds: [...document.querySelectorAll('.mount-view .tv-row [data-col="relKinds"]')].map((e) => e.textContent ?? ''),
+    kinds: [...document.querySelectorAll('#editor .mount-view .tv-row [data-col="relKinds"]')].map((e) => e.textContent ?? ''),
   }))
   assert(table.kinds.some((x) => x.includes('属性') && x.includes('负责人')), `表格的类型列要写清属性名：${JSON.stringify(table.kinds)}`)
 
@@ -2530,9 +2533,9 @@ await check('T194b 引用含属性引用：kind 过滤可切；标签页默认�
   await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), tag)
   await page.waitForTimeout(350)
   const tagPage = await page.evaluate(() => ({
-    active: document.querySelector('.mount-tabwrap[data-active="1"]')?.dataset.tab ?? '',
-    labels: [...document.querySelectorAll('.mount-tab')].map((e) => e.textContent ?? ''),
-    rows: document.querySelectorAll('.mount-editor .blk').length,
+    active: document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab ?? '',
+    labels: [...document.querySelectorAll('#editor .mount-tab')].map((e) => e.textContent ?? ''),
+    rows: document.querySelectorAll('#editor .mount-editor .blk').length,
   }))
   assert(tagPage.active === 'members', `标签页默认落「成员」：${JSON.stringify(tagPage)}`)
   assert(tagPage.rows >= 1, `成员栏应有成员：${JSON.stringify(tagPage)}`)
@@ -5357,24 +5360,25 @@ await check('T60 跨块选区收拢 ⇒ 首尾拼成一块、中间块（连子�
   return `跨块收拢：块数 ${before.total}→${after.total}、拼成「AABB」，一次撤销连子树一起复原`
 })
 
-await check('T27 光标行隐藏占位、journal 日期不可聚焦、折叠图标贴自己的块标', async () => {
+await check('T27 空块就是空行（不挂占位）、journal 日期不可聚焦、折叠图标贴自己的块标', async () => {
   const { ctx, page } = await freshPage(browser, base)
 
-  // ① 光标所在行**不显示**占位符（否则光标落在「空块」二字后面）
+  // ① 空普通块**不再带占位文案**（空行就是空行）：data-ph 缺席，光标在不在都不画字。
+  //    占位只留三处——空页首块、调用方显式给的（抬头名字格）、journal 日期投影（T28 钉那个）。
   const ph = await page.evaluate(() => {
     const ed = window.__qua.__editor
     const id = ed.insert.insertBlockAfter(window.__qua.blocks()[0].id, '')
     ed.placeCaret(id, 0)
     const el = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
     const before = getComputedStyle(el, '::before').content
-    // 把光标挪到别的块 ⇒ 占位应回来
+    // 把光标挪到别的块 ⇒ 空行仍是空行，不冒出占位
     ed.placeCaret(window.__qua.blocks()[0].id, 0)
     const after = getComputedStyle(el, '::before').content
     return { withCaret: before, withoutCaret: after, hasDataPh: Boolean(el.dataset.ph) }
   })
-  assert(ph.hasDataPh, '前置：空块应带 data-ph')
-  assert(ph.withCaret === 'none' || ph.withCaret === 'normal', `光标所在行不该显示占位：${ph.withCaret}`)
-  assert(ph.withoutCaret !== 'none', `光标离开后占位应回来：${ph.withoutCaret}`)
+  assert(!ph.hasDataPh, '空普通块不该带 data-ph（占位只留空页首块／抬头／journal 投影）')
+  assert(ph.withCaret === 'none' || ph.withCaret === 'normal', `空块不该画占位（光标在）：${ph.withCaret}`)
+  assert(ph.withoutCaret === 'none' || ph.withoutCaret === 'normal', `空块不该画占位（光标离开）：${ph.withoutCaret}`)
 
   // ② journal 的日期行：不可编辑、点它不落光标
   const jr = await page.evaluate(() => {
@@ -5383,15 +5387,31 @@ await check('T27 光标行隐藏占位、journal 日期不可聚焦、折叠图�
   })
   assert(jr.ce === 'false', `journal 的日期行应 contenteditable=false：${JSON.stringify(jr)}`)
   assert(jr.readonly === '1', `journal 的日期行应带 data-readonly：${JSON.stringify(jr)}`)
-  const jpos = await page.evaluate(() => {
-    const tx = document.querySelector('.blk[data-role="journal"] .tx')
+  const oldest = await page.evaluate(() => {
+    const roots = [...document.querySelectorAll('.blk[data-role="journal"]')]
+    const last = roots[roots.length - 1]
+    const tx = last.querySelector('.tx')
     const r = tx.getBoundingClientRect()
-    return { x: r.left + 8, y: r.top + r.height / 2 }
+    return { id: last.dataset.blockId, ce: tx.contentEditable, readonly: tx.dataset.readonly ?? '', x: r.left + 8, y: r.top + r.height / 2 }
   })
+  assert(oldest.ce === 'false', `journal 的日期行应 contenteditable=false：${JSON.stringify(oldest)}`)
+  assert(oldest.readonly === '1', `journal 的日期行应带 data-readonly：${JSON.stringify(oldest)}`)
+  // 点日期＝聚焦到那一天（日期是那一天的标题）：只读与可点不矛盾——
+  // 日期行不可编辑、不落光标，但左键会把中心 zoom 到那一天（同 T54：第一段变成那一天自己）。
+  // 拿**最旧**的一天试（今天已是当前对象，点了看不出变化）。locator.click 会自动滚进视口
+  // （最旧的天在 fold 之下，裸坐标 click 点了个寂寞）。
   const selBefore = await page.evaluate(() => window.__qua.snapshot().selection)
-  await page.mouse.click(jpos.x, jpos.y)
-  const selAfter = await page.evaluate(() => window.__qua.snapshot().selection)
-  assert(JSON.stringify(selBefore) === JSON.stringify(selAfter), `点日期行不该移动光标：${JSON.stringify(selBefore)} → ${JSON.stringify(selAfter)}`)
+  await page.locator('.blk[data-role="journal"]').last().locator('.tx').click()
+  await page.waitForTimeout(350)
+  const zoomed = await page.evaluate((want) => {
+    const head = document.querySelector('#editor > .sec > .blk')
+    return { headId: head?.dataset.blockId ?? '', sel: window.__qua.snapshot().selection }
+  }, oldest.id)
+  assert(zoomed.headId === oldest.id, `点某天的日期＝zoom 到那一天（中心第一段变成那一天）：期望 ${oldest.id}，实际 ${zoomed.headId}`)
+  assert(
+    JSON.stringify(selBefore) !== JSON.stringify(zoomed.sel),
+    `点击日期后光标离开原块（进入那一天）：${JSON.stringify(selBefore)} → ${JSON.stringify(zoomed.sel)}`,
+  )
 
   // ③ 折叠三角贴**自己那颗块标**（xdepth 递增），不是整行最左
   const fold = await page.evaluate(() => {
@@ -5416,7 +5436,7 @@ await check('T27 光标行隐藏占位、journal 日期不可聚焦、折叠图�
   }
 
   await ctx.close()
-  return `光标行隐藏占位（离开后回来）；journal 日期 contenteditable=false 且点击不移光标；${fold.length} 个折叠三角 gap ${fold.map((f) => f.gap).join('/')}px`
+  return `空块不带占位（光标在不在都是空行）；journal 日期只读且点它＝zoom 到那一天；${fold.length} 个折叠三角 gap ${fold.map((f) => f.gap).join('/')}px`
 })
 
 await check('T28 日记流＝今日在顶＋存在的历史天；历史天可编辑且写回', async () => {
@@ -23572,7 +23592,8 @@ await check('T240 快速筛选（引用栏）：大纲筛行；切到表格是�
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.P)
   await page.waitForTimeout(450)
   await mountTab(page, 'refs')
-  const countText = () => page.evaluate(() => document.querySelector('.mount-derived-count')?.textContent ?? '')
+  // mount 查询一律指名中心（#editor）：右槽挂载区卡是同一台组件，全局查会把两个表面的行加在一起
+  const countText = () => page.evaluate(() => document.querySelector('#editor .mount-derived-count')?.textContent ?? '')
   assert((await countText()).includes('2'), `前置：引用栏两行：${await countText()}`)
 
   await page.waitForTimeout(300)
@@ -23592,7 +23613,7 @@ await check('T240 快速筛选（引用栏）：大纲筛行；切到表格是�
   // 切到表格：同一份 chips 也在生效（两处各算各的就会出现两批行）
   await pickDerivedView(page, 'table')
   await page.waitForTimeout(450)
-  const tableRows = await page.evaluate(() => document.querySelectorAll('.mount-view .tv-row').length)
+  const tableRows = await page.evaluate(() => document.querySelectorAll('#editor .mount-view .tv-row').length)
   assert(tableRows === 1, `表格看法读到同一份筛选（1 行）：${tableRows}`)
 
   // 回大纲（切看法点的是弹层外的按钮，弹层已关，重开再摘）
