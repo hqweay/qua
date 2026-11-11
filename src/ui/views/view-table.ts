@@ -385,7 +385,7 @@ export class ViewTable {
       el.textContent = label
       if (isSortableColumn(col.key)) {
         el.dataset.sortable = '1'
-        el.title = t('ui.view.sortHint')
+        el.dataset.tip = t('ui.view.sortHint')
         el.addEventListener('click', () => this.toggleSort(col.key))
       }
       const dir = sort.find((s) => s.by === col.key)?.dir
@@ -486,7 +486,7 @@ export class ViewTable {
     const marker = document.createElement('button')
     marker.type = 'button'
     marker.className = 'tv-marker'
-    marker.title = t('ui.view.openBlock')
+    marker.dataset.tip = t('ui.view.openBlock')
     marker.setAttribute('aria-label', t('ui.view.openBlock'))
     marker.addEventListener('click', (e) => {
       e.preventDefault()
@@ -512,7 +512,7 @@ export class ViewTable {
     const del = document.createElement('button')
     del.type = 'button'
     del.className = 'tv-del'
-    del.title = t('ui.view.deleteRow')
+    del.dataset.tip = t('ui.view.deleteRow')
     del.textContent = '×'
     del.addEventListener('click', (e) => {
       e.preventDefault()

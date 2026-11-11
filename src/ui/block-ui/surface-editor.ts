@@ -86,7 +86,7 @@ export class SurfaceEditor {
   render(block: Block, into: HTMLElement): void {
     into.replaceChildren()
     into.dataset.titleFor = block.id
-    into.title = t('ui.view.editTitle')
+    into.dataset.tip = t('ui.view.editTitle')
     const inner = document.createElement('span')
     // `tv-title-text` 是表格既有断言与样式的契约名；`surface-text` 是新的一层语义名
     inner.className = 'surface-text ui-ellipsis tv-title-text'

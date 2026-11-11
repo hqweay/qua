@@ -50,7 +50,7 @@ export function renderMentionField(into: HTMLElement, m: MentionDerived, onConve
     b.type = 'button'
     b.className = 'mention-hit'
     b.textContent = p.text
-    b.title = t('ui.mount.mention.convert')
+    b.dataset.tip = t('ui.mount.mention.convert')
     b.addEventListener('click', (e) => {
       // 行/格上还有别的点击语义（打开块）：转换是按钮自己的动作，不许冒上去
       e.stopPropagation()

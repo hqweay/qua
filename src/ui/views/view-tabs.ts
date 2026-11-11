@@ -164,7 +164,7 @@ export class ViewTabs {
       this.paint(this.deps.tabs())
     })
     // 组有身份：双击打开那一块（单击是切换，不抢走）
-    tab.title = t('ui.cards.openGroupHint')
+    tab.dataset.tip = t('ui.cards.openGroupHint')
     tab.addEventListener('dblclick', (e) => {
       e.preventDefault()
       this.deps.openBlock(g.block.id, openActionOf(e))

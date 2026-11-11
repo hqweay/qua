@@ -166,7 +166,7 @@ export function trashCard(deps: DockContentDeps): DockCard {
     btn.type = 'button'
     btn.className = 'trash-restore'
     btn.textContent = t('ui.dock.trashRestore')
-    btn.title = t('cmd.block.restore')
+    btn.dataset.tip = t('cmd.block.restore')
     btn.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()

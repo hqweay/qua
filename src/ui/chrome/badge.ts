@@ -135,7 +135,7 @@ export function createBadge(host: BadgeHost): Badge {
       t('ui.badge.dom', { dom: s.domNodes }) +
       t('ui.badge.theme', { theme: s.theme }) +
       t('ui.badge.composing', { composing: s.composing ? 'on' : 'off' })
-    badgeEl.title = t('ui.badge.title', {
+    badgeEl.dataset.tip = t('ui.badge.title', {
       blocks: s.blocks,
       domBlocks: s.domBlocks,
       domNodes: s.domNodes,

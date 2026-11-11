@@ -76,7 +76,7 @@ const outlineRenderer: BlockRenderer = {
     // 呈现摘要 ＋ 唯一兜底：内容块的正文只有原子时也读得出东西，不落到「无标题」
     const name = blockLabel(b, ctx.find)
     title.textContent = name
-    title.title = name
+    title.dataset.tip = name
 
     row.append(icon, title)
     bindRowClick(row, b, ctx)

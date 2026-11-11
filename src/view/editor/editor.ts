@@ -2302,7 +2302,7 @@ export class BlockEditor {
     if (folded) el.dataset.collapsed = '1'
     else delete el.dataset.collapsed
     const fold = el.querySelector<HTMLElement>(':scope > .left > .fold')
-    if (fold) fold.title = folded ? t('ui.block.foldExpand') : t('ui.block.foldCollapse')
+    if (fold) fold.dataset.tip = folded ? t('ui.block.foldExpand') : t('ui.block.foldCollapse')
     const body = el.querySelector<HTMLElement>(':scope > .blk-view-body, :scope > .blk-embed-body')
     if (body) {
       if (folded) body.dataset.folded = '1'

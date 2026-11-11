@@ -523,20 +523,20 @@ export class ViewHost {
      * 结构含义交给间距与分组去传达，不靠每个按钮自带一句名词。
      */
     renderIcon(this.els.refresh, 'lucide:rotate-ccw', 'rotate-ccw')
-    this.els.refresh.title = t('ui.query.refresh')
+    this.els.refresh.dataset.tip = t('ui.query.refresh')
     this.els.refresh.setAttribute('aria-label', t('ui.query.refresh'))
     this.els.refresh.addEventListener('click', () => this.refresh())
     renderIcon(this.els.sort, 'lucide:arrow-up-down', 'arrow-up-down')
-    this.els.sort.title = t('ui.query.sortTitle')
+    this.els.sort.dataset.tip = t('ui.query.sortTitle')
     this.els.sort.setAttribute('aria-label', t('ui.query.sort'))
     this.els.sort.addEventListener('click', () => this.toggleSortPanel())
     this.els.filterBtn.addEventListener('click', () => this.toggleFilterPanel())
     renderIcon(this.els.columnsBtn, 'lucide:columns-3', 'columns-3')
-    this.els.columnsBtn.title = t('ui.view.columnsTitle')
+    this.els.columnsBtn.dataset.tip = t('ui.view.columnsTitle')
     this.els.columnsBtn.setAttribute('aria-label', t('ui.view.columns'))
     this.els.columnsBtn.addEventListener('click', () => this.toggleColumnsPanel())
     this.els.newRow.textContent = t('ui.view.newRow')
-    this.els.newRow.title = t('ui.view.newRowTitle')
+    this.els.newRow.dataset.tip = t('ui.view.newRowTitle')
     this.els.newRow.addEventListener('click', () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }))
     this.els.foldAll.addEventListener('click', () => this.toggleFoldAll())
     /**
@@ -1053,7 +1053,7 @@ export class ViewHost {
      */
     const list = view?.kind === 'list-table'
     this.els.newRow.textContent = list ? t('ui.view.newColumn') : t('ui.view.newRow')
-    this.els.newRow.title = list ? t('ui.view.newColumnTitle') : t('ui.view.newRowTitle')
+    this.els.newRow.dataset.tip = list ? t('ui.view.newColumnTitle') : t('ui.view.newRowTitle')
     this.paintStale()
     this.paintFilters(b)
     this.paintTree()
@@ -1366,7 +1366,7 @@ export class ViewHost {
       const labels = queryChips(spec, this.deps.fields(), this.deps.choices, this.deps.refLabel, this.deps.tagLabel)
       summary.textContent = labels.length > 0 ? labels.join(' · ') : treeSummary(spec)
       // 抬头窄时省略几何走 ui-ellipsis 原语；title 给全文，不让「读得出内容」变成「读不全」
-      summary.title = summary.textContent
+      summary.dataset.tip = summary.textContent
       summary.addEventListener('click', () => this.openTree())
       box.appendChild(summary)
       if (slice) box.appendChild(slice)
@@ -1385,7 +1385,7 @@ export class ViewHost {
     edit.type = 'button'
     edit.className = 'queryview-chip queryview-chip--edit'
     edit.textContent = '＋'
-    edit.title = t('ui.query.edit')
+    edit.dataset.tip = t('ui.query.edit')
     edit.addEventListener('click', () => this.deps.invoke('core.query/open-builder', { owner: this.writeOwner }))
     box.appendChild(edit)
     void b
@@ -1403,7 +1403,7 @@ export class ViewHost {
     if (this.hostDate() === undefined) return null
     const label = document.createElement('label')
     label.className = 'queryview-chip queryview-chip--anchor'
-    label.title = t('ui.query.usePageDateHint')
+    label.dataset.tip = t('ui.query.usePageDateHint')
     const input = document.createElement('input')
     input.type = 'checkbox'
     input.dataset.queryChip = 'anchor'
@@ -1434,7 +1434,7 @@ export class ViewHost {
     chip.className = 'queryview-chip queryview-chip--slice ui-ellipsis'
     chip.dataset.queryChip = 'slice'
     chip.textContent = t('ui.view.sliceChip', { text: treeSummary({ where: filter }) })
-    chip.title = t('ui.view.sliceHint')
+    chip.dataset.tip = t('ui.view.sliceHint')
     // 基础条件那颗是按钮，这一颗也必须是按钮：切片存在时任何激活视图都能就地改，
     // 不必先绕进「视图…」菜单（同一个落点，两条路）
     const viewId = this.view?.id ?? ''
@@ -1465,7 +1465,7 @@ export class ViewHost {
     if (active) btn.dataset.active = '1'
     else delete btn.dataset.active
     const count = state.include.length + state.remove.length
-    btn.title = active ? t('ui.filter.buttonActive', { count }) : t('ui.filter.buttonHint')
+    btn.dataset.tip = active ? t('ui.filter.buttonActive', { count }) : t('ui.filter.buttonHint')
     btn.setAttribute('aria-label', t('ui.filter.button'))
     this.els.filterPanel.hidden = !this.filterOpen
   }
@@ -1650,7 +1650,7 @@ export class ViewHost {
       btn.type = 'button'
       btn.className = 'qv-view-btn'
       btn.textContent = t('ui.embed.viewChoice')
-      btn.title = t('ui.embed.viewChoiceHint')
+      btn.dataset.tip = t('ui.embed.viewChoiceHint')
       btn.addEventListener('click', () =>
         this.deps.invoke('core.view/menu', { owner: { kind: 'block', blockId: embedId } }),
       )
@@ -1669,7 +1669,7 @@ export class ViewHost {
     btn.type = 'button'
     btn.className = 'qv-view-btn qv-view-current'
     btn.dataset.viewCurrent = view?.id ?? ''
-    btn.title = t('ui.view.switchHint')
+    btn.dataset.tip = t('ui.view.switchHint')
     const label = document.createElement('span')
     label.className = 'qv-view-current-label'
     label.textContent = current

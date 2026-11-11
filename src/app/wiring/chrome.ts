@@ -136,7 +136,7 @@ export function setupChrome(deps: ChromeDeps) {
     ): HTMLButtonElement => {
       const el = deps.$<HTMLButtonElement>(id)
       renderIcon(el, icon, fallback)
-      el.title = label
+      el.dataset.tip = label
       el.setAttribute('aria-label', label)
       el.addEventListener('click', () => deps.getRegistry().invoke(command, {}, 'topbar'))
       return el

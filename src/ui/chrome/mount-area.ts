@@ -573,7 +573,7 @@ export class MountArea {
        * 那一栏的 chrome 已经有两件（名字、×），再加一件会把 4 个字的宽度吃掉。
        */
       if (entry.kind === 'local' && this.deps.onRenameTab) {
-        btn.title = t('ui.mount.renameHint')
+        btn.dataset.tip = t('ui.mount.renameHint')
         btn.addEventListener('dblclick', (e) => {
           e.preventDefault()
           this.deps.onRenameTab?.(hostRef, entry.id, btn.getBoundingClientRect())
@@ -626,7 +626,7 @@ export class MountArea {
         x.type = 'button'
         x.className = 'mount-x'
         x.textContent = '×'
-        x.title = t('ui.mount.remove')
+        x.dataset.tip = t('ui.mount.remove')
         x.dataset.tab = entry.id
         x.addEventListener('click', (e) => {
           e.stopPropagation()
@@ -651,7 +651,7 @@ export class MountArea {
       add.type = 'button'
       add.className = 'mount-add'
       add.textContent = '＋'
-      add.title = t('ui.mount.addLocalHint')
+      add.dataset.tip = t('ui.mount.addLocalHint')
       add.addEventListener('click', () => this.deps.onAddTab?.(host.id))
       this.tabsEl.appendChild(add)
     }
@@ -661,7 +661,7 @@ export class MountArea {
     collapse.type = 'button'
     collapse.className = 'mount-collapse'
     collapse.textContent = t('ui.mount.collapse')
-    collapse.title = t('ui.mount.collapse')
+    collapse.dataset.tip = t('ui.mount.collapse')
     collapse.addEventListener('click', () => this.setOpen(false))
     this.tabsEl.appendChild(collapse)
   }
@@ -1206,7 +1206,7 @@ export class MountArea {
       const why = document.createElement('button')
       why.type = 'button'
       why.className = 'mount-derived-why ui-ellipsis'
-      why.title = t('ui.mount.materialize')
+      why.dataset.tip = t('ui.mount.materialize')
       why.textContent = t(DERIVED_WHY[entry.source])
       why.addEventListener('click', () => {
         this.deps.onMaterializeTab?.(host.id, entry.source, why.getBoundingClientRect(), { openTree: true })
@@ -1287,7 +1287,7 @@ export class MountArea {
           anyFolded ? 'lucide:chevrons-up-down' : 'lucide:chevrons-down-up',
           anyFolded ? 'chevrons-up-down' : 'chevrons-down-up',
         )
-        bulk.title = t(anyFolded ? 'ui.refs.expandAll' : 'ui.refs.foldAll')
+        bulk.dataset.tip = t(anyFolded ? 'ui.refs.expandAll' : 'ui.refs.foldAll')
         bulk.addEventListener('click', () => this.bulkToggleRefFolds(host))
         head.appendChild(bulk)
       }
@@ -1308,7 +1308,7 @@ export class MountArea {
     // ⚠️ 不带 `qv-view-current`：那是视图宿主抬头切换器的钩子（冒烟按它点），
     //    派生栏这一颗凑同名会把两台切换器搅在一起；样式借 `qv-view-btn`，身份用自己的。
     btn.className = 'qv-view-btn mount-derived-view-btn'
-    btn.title = t('ui.view.switchHint')
+    btn.dataset.tip = t('ui.view.switchHint')
     const label = document.createElement('span')
     label.className = 'mount-derived-view-label'
     label.textContent = t(labels[kind])
@@ -1377,7 +1377,7 @@ export class MountArea {
     btn.type = 'button'
     btn.className = 'mount-derived-filter'
     btn.textContent = t('ui.filter.button')
-    btn.title = t('ui.filter.buttonHint')
+    btn.dataset.tip = t('ui.filter.buttonHint')
     if (this.filterActive(source)) btn.dataset.active = '1'
     btn.addEventListener('click', () => this.openQuickFilter(source, btn))
     return btn

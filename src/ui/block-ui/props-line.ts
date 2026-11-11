@@ -58,7 +58,7 @@ export function renderPropsLine(
   const cap = deps.cap ?? 3
   const shown = data.rows.slice(0, cap)
   into.replaceChildren()
-  into.title = t('ui.props.lineHint')
+  into.dataset.tip = t('ui.props.lineHint')
 
   shown.forEach((row, i) => {
     if (i > 0) {
@@ -93,7 +93,7 @@ export function renderPropsLine(
     btn.type = 'button'
     btn.className = 'blk-prop-more'
     btn.textContent = t('ui.props.lineMore', { n: more })
-    btn.title = t('ui.props.lineMoreHint')
+    btn.dataset.tip = t('ui.props.lineMoreHint')
     btn.addEventListener('click', () => deps.inspect(blockId))
     into.appendChild(btn)
   }

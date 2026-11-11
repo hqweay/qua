@@ -229,7 +229,7 @@ export class SearchFace {
       promote = document.createElement('button')
       promote.type = 'button'
       promote.className = 'search-face-promote'
-      promote.title = t('ui.search.promote')
+      promote.dataset.tip = t('ui.search.promote')
       promote.setAttribute('aria-label', t('ui.search.promote'))
       renderIcon(promote, 'lucide:list-filter', 'list-filter')
       promote.addEventListener('click', () => {
@@ -247,7 +247,7 @@ export class SearchFace {
       expand = document.createElement('button')
       expand.type = 'button'
       expand.className = 'search-face-expand'
-      expand.title = t('ui.search.expand')
+      expand.dataset.tip = t('ui.search.expand')
       expand.setAttribute('aria-label', t('ui.search.expand'))
       renderIcon(expand, 'lucide:panel-right', 'panel-right')
       expand.hidden = true
@@ -673,7 +673,7 @@ export class SearchFace {
     const go = document.createElement('button')
     go.type = 'button'
     go.className = 'search-row-goto'
-    go.title = t('ui.search.open')
+    go.dataset.tip = t('ui.search.open')
     go.setAttribute('aria-label', t('ui.search.open'))
     renderIcon(go, 'lucide:arrow-up-right', 'arrow-up-right')
     go.addEventListener('click', (e) => {
@@ -685,7 +685,7 @@ export class SearchFace {
     const copy = document.createElement('button')
     copy.type = 'button'
     copy.className = 'search-row-copy'
-    copy.title = t('ui.search.copyRef')
+    copy.dataset.tip = t('ui.search.copyRef')
     copy.setAttribute('aria-label', t('ui.search.copyRef'))
     renderIcon(copy, 'lucide:link', 'link')
     copy.addEventListener('click', (e) => {

@@ -72,7 +72,7 @@ export class ViewCalendar {
     prev.type = 'button'
     prev.className = 'vc-nav'
     prev.textContent = '‹'
-    prev.title = t('ui.calendar.prev')
+    prev.dataset.tip = t('ui.calendar.prev')
     prev.addEventListener('click', () => {
       this.month = shiftMonth(this.month, -1)
       this.render()
@@ -84,7 +84,7 @@ export class ViewCalendar {
     next.type = 'button'
     next.className = 'vc-nav'
     next.textContent = '›'
-    next.title = t('ui.calendar.next')
+    next.dataset.tip = t('ui.calendar.next')
     next.addEventListener('click', () => {
       this.month = shiftMonth(this.month, 1)
       this.render()

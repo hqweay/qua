@@ -186,7 +186,7 @@ export class ViewListTable {
       const more = document.createElement('button')
       more.type = 'button'
       more.className = 'lt-more'
-      more.title = t('ui.view.moreItemsTitle')
+      more.dataset.tip = t('ui.view.moreItemsTitle')
       more.textContent = open ? t('ui.view.fewerItems') : t('ui.view.moreItems', { count: String(item.children.length) })
       more.addEventListener('click', (e) => {
         e.preventDefault()
@@ -232,7 +232,7 @@ export class ViewListTable {
     const open = document.createElement('button')
     open.type = 'button'
     open.className = 'lt-marker'
-    open.title = t('ui.view.openBlock')
+    open.dataset.tip = t('ui.view.openBlock')
     open.setAttribute('aria-label', t('ui.view.openBlock'))
     open.addEventListener('click', (e) => {
       e.preventDefault()
@@ -245,7 +245,7 @@ export class ViewListTable {
       const add = document.createElement('button')
       add.type = 'button'
       add.className = 'lt-add'
-      add.title = t('ui.view.newItemTitle')
+      add.dataset.tip = t('ui.view.newItemTitle')
       add.setAttribute('aria-label', t('ui.view.newItem'))
       add.textContent = '＋'
       add.addEventListener('click', (e) => {
@@ -261,7 +261,7 @@ export class ViewListTable {
     const del = document.createElement('button')
     del.type = 'button'
     del.className = 'lt-del'
-    del.title = opts.insertItem ? t('ui.view.deleteColumn') : t('ui.view.deleteItem')
+    del.dataset.tip = opts.insertItem ? t('ui.view.deleteColumn') : t('ui.view.deleteItem')
     del.textContent = '×'
     del.addEventListener('click', (e) => {
       e.preventDefault()
@@ -303,7 +303,7 @@ export class ViewListTable {
       const marker = document.createElement('button')
       marker.type = 'button'
       marker.className = 'lt-sub-marker'
-      marker.title = t('ui.view.openBlock')
+      marker.dataset.tip = t('ui.view.openBlock')
       marker.dataset.dragFor = child.id
       marker.addEventListener('click', (e) => {
         e.preventDefault()

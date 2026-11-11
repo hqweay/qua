@@ -167,7 +167,7 @@ function chip(atom: QuickFilterAtom, label: string, count: number | undefined, g
     n.textContent = String(count)
     btn.appendChild(n)
   }
-  btn.title = t(gestures.hint)
+  btn.dataset.tip = t(gestures.hint)
   btn.addEventListener('click', (e) => {
     e.stopPropagation()
     if (e.shiftKey) gestures.shift(atom)

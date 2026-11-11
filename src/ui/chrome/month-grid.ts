@@ -48,7 +48,7 @@ export function monthGrid(opts: MonthGridOpts): MonthGrid {
   const prev = document.createElement('button')
   prev.type = 'button'
   prev.className = 'dock-btn cal-nav'
-  prev.title = t('ui.cal.prevMonth')
+  prev.dataset.tip = t('ui.cal.prevMonth')
   prev.setAttribute('aria-label', t('ui.cal.prevMonth'))
   renderIcon(prev, 'lucide:chevron-left', 'chevron-left')
   const label = document.createElement('button')
@@ -61,7 +61,7 @@ export function monthGrid(opts: MonthGridOpts): MonthGrid {
   const next = document.createElement('button')
   next.type = 'button'
   next.className = 'dock-btn cal-nav'
-  next.title = t('ui.cal.nextMonth')
+  next.dataset.tip = t('ui.cal.nextMonth')
   next.setAttribute('aria-label', t('ui.cal.nextMonth'))
   renderIcon(next, 'lucide:chevron-right', 'chevron-right')
   head.append(prev, label, next)
@@ -74,7 +74,7 @@ export function monthGrid(opts: MonthGridOpts): MonthGrid {
   const paint = (): void => {
     const [y, m] = cursor.split('-').map(Number)
     label.textContent = t('ui.cal.monthLabel', { y: String(y), m: String(m) })
-    label.title = t('ui.cal.thisMonth')
+    label.dataset.tip = t('ui.cal.thisMonth')
     label.setAttribute('aria-label', t('ui.cal.thisMonth'))
     grid.replaceChildren()
 
@@ -104,7 +104,7 @@ export function monthGrid(opts: MonthGridOpts): MonthGrid {
         cell.dataset.date = date
         if (date === today) cell.dataset.today = '1'
         if (out) cell.dataset.out = '1'
-        cell.title = date
+        cell.dataset.tip = date
         cell.setAttribute('aria-label', opts.dayLabel(date))
         const num = document.createElement('span')
         num.className = 'cal-day'

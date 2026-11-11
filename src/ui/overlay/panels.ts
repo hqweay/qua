@@ -326,7 +326,7 @@ function anchorRow(a: { id: string; anchor?: string }, resolvedLabel: string, de
   input.value = a.anchor ?? ''
   input.placeholder = resolvedLabel
   input.spellcheck = false
-  input.title = t('ui.popover.anchorHint')
+  input.dataset.tip = t('ui.popover.anchorHint')
   const hint = document.createElement('div')
   hint.className = 'popover-note'
   hint.textContent = t('ui.popover.anchorNote')
@@ -367,7 +367,7 @@ function linkRow(a: { id: string; v: string; url: string }, deps: PanelDeps): HT
   text.type = 'text'
   text.value = a.v
   text.placeholder = t('ui.link.textPlaceholder')
-  text.title = t('ui.link.editText')
+  text.dataset.tip = t('ui.link.editText')
   text.spellcheck = false
   const url = document.createElement('input')
   url.className = 'popover-anchor-input ui-field'
@@ -375,7 +375,7 @@ function linkRow(a: { id: string; v: string; url: string }, deps: PanelDeps): HT
   url.type = 'text'
   url.value = a.url
   url.placeholder = t('ui.link.urlPlaceholder')
-  url.title = t('ui.link.editUrl')
+  url.dataset.tip = t('ui.link.editUrl')
   url.spellcheck = false
   const submit = document.createElement('button')
   submit.type = 'submit'

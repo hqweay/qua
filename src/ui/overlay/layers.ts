@@ -525,7 +525,7 @@ export class Layers {
       b.dataset.command = r.command ?? ''
       if (r.icon) renderIcon(b, r.icon, 'circle-help')
       else b.textContent = r.label
-      b.title = `${r.label}${r.keyHint ? `（${r.keyHint}）` : ''}`
+      b.dataset.tip = `${r.label}${r.keyHint ? `（${r.keyHint}）` : ''}`
       // 按压态：选区里已经有这种格式 ⇒ 这一颗亮着（承原工具栏的 `data-on`）
       const suffix = (r.command ?? '').startsWith('core.anno/toggle-') ? (r.command ?? '').slice('core.anno/toggle-'.length) : ''
       if (suffix && o.activeMarks.has(suffix)) b.dataset.on = '1'

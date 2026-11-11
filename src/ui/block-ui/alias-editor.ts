@@ -124,7 +124,7 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
     mark.type = 'button'
     mark.className = 'alias-primary'
     mark.dataset.aliasPrimary = '1'
-    mark.title = t('ui.alias.primary')
+    mark.dataset.tip = t('ui.alias.primary')
     mark.textContent = isPrimary ? '★' : '☆'
     if (isPrimary) mark.dataset.active = '1'
     else {
@@ -145,7 +145,7 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
     del.type = 'button'
     del.className = 'alias-del'
     del.dataset.aliasRemove = '1'
-    del.title = removable ? t('ui.alias.remove') : t('ui.alias.needOne')
+    del.dataset.tip = removable ? t('ui.alias.remove') : t('ui.alias.needOne')
     del.textContent = '×'
     del.disabled = !removable
     del.addEventListener('click', () => {

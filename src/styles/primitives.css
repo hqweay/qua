@@ -141,3 +141,37 @@
   flex: 1;
 }
 
+
+/*
+  **说明层**（`data-tip` → `ui/overlay/tip.ts`）：替代原生 `title` 的那一条。
+
+  为什么是原语：此前 127 处说明全是浏览器渲染的原生 title —— 延迟、样式、主题
+  全都不受控。委托实现（一个 document 监听对）让元素侧只剩一行
+  `el.dataset.tip = t('…')`，动态行的生死随元素走，没有要清理的句柄。
+
+  ⚠️ 反白底是**固定**的（同 `--ui-scrim` 的道理）：说明要浮在任何内容之上，
+     亮暗主题下都必须压得住底下的字，所以底与字都不随语义槽翻转。
+  ⚠️ `pointer-events: none` 不是装饰：浮层恰好盖住目标时，接指针的层
+     会引发 mouseout 抖动（出现→消失→再出现）。
+*/
+.ui-tip {
+  position: fixed;
+  z-index: var(--ui-z-popover);
+  max-width: 280px;
+  padding: 3px 8px;
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-tip-bg);
+  color: var(--ui-text-inverse);
+  font-size: var(--ui-fs-xs);
+  line-height: 1.45;
+  white-space: pre-line;
+  pointer-events: none;
+  box-shadow: var(--ui-shadow-low);
+  opacity: 0;
+  transition: opacity var(--ui-dur-1) ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-tip {
+    transition: none;
+  }
+}

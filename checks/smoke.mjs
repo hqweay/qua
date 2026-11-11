@@ -6107,7 +6107,7 @@ await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling
     const target = window.__qua.pages().find((p) => p.id === a?.target?.id)
     return {
       atomId: el?.dataset.atomId ?? '',
-      title: el?.title ?? '',
+      title: el?.dataset.tip ?? '',
       targetTitle: target?.title ?? '',
       total: window.__qua.snapshot().totalBlocks,
     }
@@ -6142,7 +6142,7 @@ await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling
   // dangling：左键也只能弹详情（不静默失败）
   const dangling = await page.evaluate(() => {
     const el = document.querySelector('#editor .atom-page.dangling')
-    return { atomId: el?.dataset.atomId ?? '', title: el?.title ?? '' }
+    return { atomId: el?.dataset.atomId ?? '', title: el?.dataset.tip ?? '' }
   })
   assert(dangling.atomId, '假数据里应有 dangling 引用')
   assert(dangling.title.includes('目标不存在'), `dangling 的 title 该说实话：${dangling.title}`)
@@ -14487,7 +14487,7 @@ await check('T147 外链：插入成 LinkRun；点一下被拦下并交给壳；
 
   const dom = await page.evaluate(() => {
     const el = document.querySelector('#editor .atom-link')
-    return { text: el?.textContent ?? '', kind: el?.dataset.atomKind ?? '', title: el?.getAttribute('title') ?? '' }
+    return { text: el?.textContent ?? '', kind: el?.dataset.atomKind ?? '', title: el?.getAttribute('data-tip') ?? '' }
   })
   assert(dom.kind === 'link' && dom.text.includes('架构图'), `DOM 上应是一枚 link 原子：${JSON.stringify(dom)}`)
 
@@ -17171,7 +17171,7 @@ await check(
       return {
         icon: mark?.getAttribute('data-icon') ?? '',
         prop: mark?.getAttribute('data-prop-id') ?? '',
-        title: mark?.getAttribute('title') ?? '',
+        title: mark?.getAttribute('data-tip') ?? '',
       }
     }, setup.hostId)
     assert(
@@ -22839,7 +22839,7 @@ await check('T233 回收站在中心打开：卡留在槽里（同一份数据�
 
   const state = () =>
     page.evaluate(() => ({
-      tabs: [...document.querySelectorAll('.center-tab')].map((t) => ({ title: t.title, active: t.dataset.active === '1' })),
+      tabs: [...document.querySelectorAll('.center-tab')].map((t) => ({ title: t.dataset.tip, active: t.dataset.active === '1' })),
       surfaceVisible: !document.getElementById('center-surface').hidden,
       scrollVisible: !document.getElementById('scroll').hidden,
       surfaceRows: document.querySelectorAll('#center-surface [data-trash-row]').length,
@@ -22870,7 +22870,7 @@ await check('T233 回收站在中心打开：卡留在槽里（同一份数据�
   now = await state()
   assert(now.scrollVisible && !now.surfaceVisible, '切到块 tab ⇒ 编辑器回来')
   await page.evaluate(() => {
-    const el = [...document.querySelectorAll('.center-tab')].find((t) => t.title === '回收站')
+    const el = [...document.querySelectorAll('.center-tab')].find((t) => t.dataset.tip === '回收站')
     el.click()
   })
   await page.waitForTimeout(120)
@@ -22886,7 +22886,7 @@ await check('T233 回收站在中心打开：卡留在槽里（同一份数据�
 
   // 关闭即回：终点面关闭后不回「上一次的位置」，直接回到编辑器
   await page.evaluate(() => {
-    const el = [...document.querySelectorAll('.center-tab')].find((t) => t.title === '回收站')
+    const el = [...document.querySelectorAll('.center-tab')].find((t) => t.dataset.tip === '回收站')
     el.querySelector('.center-tab-close').click()
   })
   await page.waitForTimeout(120)
@@ -22942,7 +22942,7 @@ await check('T234 ⌘P 浮层「展开为面板」⇒ 中心搜索 tab：词带�
   await page.waitForTimeout(250)
   const face = () =>
     page.evaluate(() => ({
-      tabs: [...document.querySelectorAll('.center-tab')].map((t) => ({ title: t.title, active: t.dataset.active === '1' })),
+      tabs: [...document.querySelectorAll('.center-tab')].map((t) => ({ title: t.dataset.tip, active: t.dataset.active === '1' })),
       surfaceVisible: !document.getElementById('center-surface').hidden,
       faceAttr: document.getElementById('center-surface').dataset.face ?? '',
       term: document.querySelector('.search-face-input')?.value ?? null,
@@ -26916,7 +26916,7 @@ await check('T282 页签：同一块不重复打开；放得下就平铺、放�
       listText: list.textContent,
       listHidden: list.hidden,
       addOutside: add.parentElement !== strip,
-      distinctTitles: new Set(tabs.map((el) => el.title)).size,
+      distinctTitles: new Set(tabs.map((el) => el.dataset.tip)).size,
     }
   })
   assert(shape.total === 5, `应开出 5 张 tab：${shape.total}`)
@@ -26943,7 +26943,7 @@ await check('T282 页签：同一块不重复打开；放得下就平铺、放�
   await page.locator('.layer-item').nth(1).click()
   await page.waitForTimeout(150)
   const now = await page.evaluate(() => ({
-    title: document.querySelector('#center-tabs .center-tab[data-active="1"]')?.title ?? '',
+    title: document.querySelector('#center-tabs .center-tab[data-active="1"]')?.dataset.tip ?? '',
     list: document.getElementById('center-tab-list').textContent,
   }))
   assert(now.title === wanted, `从集合切过去后顶栏应显示那一屏：${now.title} vs ${wanted}`)
@@ -27740,6 +27740,42 @@ await check('T289 拖拽的可落性预告：拖到自己／自己的子块上�
 
   await ctx.close()
   return `自己／子块（⌥ 与普通拖）悬停零许诺、落手 0 变动；正常目标照常`
+})
+
+await check('T291 说明层：data-tip 悬停延迟浮出、离开收掉、滚动收掉（委托，无逐元素句柄）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  // 原语是委托的：document 两个监听，元素只带 data-tip。空值 ⇒ 不浮出。
+  const target = page.locator('#editor .blk .handle').first()
+  await target.hover()
+  await page.waitForTimeout(120)
+  assert((await page.locator('.ui-tip').count()) === 0, '悬停意图未到（400ms）不该浮出')
+  await page.waitForTimeout(500)
+  const tip1 = page.locator('.ui-tip')
+  assert((await tip1.count()) === 1, `悬停过意图该浮出说明层：${await tip1.count()}`)
+  assert(((await tip1.textContent()) ?? '').trim() !== '', '说明层要有内容（块标自带 data-tip）')
+
+  // 离开 ⇒ 收掉
+  await page.mouse.move(8, 8)
+  await page.waitForTimeout(250)
+  const opacity = await page.evaluate(() => document.querySelector('.ui-tip')?.style.opacity ?? 'none')
+  assert(opacity === '0', `离开后说明层该收掉（opacity 0）：${opacity}`)
+
+  // 滚动 ⇒ 即刻收掉（锚点移位后说明会指错地方）
+  await target.hover()
+  await page.waitForTimeout(550)
+  assert((await page.evaluate(() => document.querySelector('.ui-tip')?.style.opacity)) === '1', '再次悬停该重新浮出')
+  await page.evaluate(() => {
+    const el = document.querySelector('#scroll') ?? document.scrollingElement
+    el.dispatchEvent(new Event('scroll'))
+  })
+  await page.waitForTimeout(120)
+  const after = await page.evaluate(() => document.querySelector('.ui-tip')?.style.opacity ?? 'none')
+  assert(after === '0', `滚动该立刻收掉说明层：${after}`)
+
+  await ctx.close()
+  return `说明层：延迟浮出→离开收→滚动收，一条委托对全仓生效`
 })
 
 

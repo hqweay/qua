@@ -80,7 +80,7 @@ export function renderCenterTabs(
     el.setAttribute('role', 'tab')
     el.setAttribute('aria-selected', String(tab.active))
     el.tabIndex = tab.active ? 0 : -1
-    el.title = tab.title
+    el.dataset.tip = tab.title
     el.addEventListener('click', () => {
       // 已经是当前屏就别再切一次（重复 activate 会白写一次历史）
       if (!tab.active) handlers.activate(tab.id)
@@ -93,7 +93,7 @@ export function renderCenterTabs(
     const close = document.createElement('button')
     close.type = 'button'
     close.className = 'center-tab-close'
-    close.title = t('ui.tabs.close')
+    close.dataset.tip = t('ui.tabs.close')
     close.setAttribute('aria-label', t('ui.tabs.close'))
     renderIcon(close, 'lucide:x', 'x')
     close.addEventListener('click', (e) => {
@@ -107,12 +107,12 @@ export function renderCenterTabs(
 
   // 两颗条外按钮都是静态节点：每次重画只覆盖图标/文案/回调，不累积监听
   renderIcon(addEl, 'lucide:plus', 'plus')
-  addEl.title = t('ui.tabs.new')
+  addEl.dataset.tip = t('ui.tabs.new')
   addEl.setAttribute('aria-label', t('ui.tabs.new'))
   addEl.onclick = () => handlers.create()
 
   listEl.textContent = String(tabs.length)
-  listEl.title = t('ui.tabs.all', { n: tabs.length })
+  listEl.dataset.tip = t('ui.tabs.all', { n: tabs.length })
   listEl.setAttribute('aria-label', t('ui.tabs.all', { n: tabs.length }))
   // 只有一屏时不需要集合入口（不为一屏加一颗没用的按钮）
   listEl.hidden = tabs.length <= 1

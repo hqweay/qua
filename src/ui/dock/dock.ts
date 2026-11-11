@@ -130,7 +130,7 @@ export function buildDockTile(tile: DockTile): HTMLElement {
   const main = document.createElement('button')
   main.type = 'button'
   main.className = 'dock-tile-main'
-  main.title = tile.title
+  main.dataset.tip = tile.title
   main.setAttribute('aria-label', tile.title)
   if (tile.disabled) main.setAttribute('aria-disabled', 'true')
   renderIcon(main, tile.missing ? 'lucide:circle-help' : tile.icon, 'square', 'md')
@@ -161,7 +161,7 @@ export function buildDockTile(tile: DockTile): HTMLElement {
     const x = document.createElement('button')
     x.type = 'button'
     x.className = 'dock-tile-x'
-    x.title = tile.close.title ?? ''
+    x.dataset.tip = tile.close.title ?? ''
     if (tile.close.title) x.setAttribute('aria-label', tile.close.title)
     renderIcon(x, 'lucide:x', 'x', 'sm')
     x.addEventListener('click', (e) => {
@@ -359,7 +359,7 @@ function collapseButton(): HTMLButtonElement {
   btn.className = 'dock-btn dock-card-btn'
   btn.dataset.dockAction = 'collapse'
   btn.setAttribute('aria-expanded', 'true')
-  btn.title = t('ui.dock.collapseCard')
+  btn.dataset.tip = t('ui.dock.collapseCard')
   btn.addEventListener('click', (e) => {
     e.stopPropagation()
     const card = btn.closest<HTMLElement>('.dock-card')
@@ -374,7 +374,7 @@ function soloButton(): HTMLButtonElement {
   btn.className = 'dock-btn dock-card-btn'
   btn.dataset.dockAction = 'solo'
   btn.setAttribute('aria-pressed', 'false')
-  btn.title = t('ui.dock.soloCard')
+  btn.dataset.tip = t('ui.dock.soloCard')
   btn.addEventListener('click', (e) => {
     e.stopPropagation()
     const card = btn.closest<HTMLElement>('.dock-card')
@@ -406,7 +406,7 @@ function actionButton(a: DockCardAction): HTMLButtonElement {
   if (a.label === 'lucide:x') btn.dataset.dockAction = 'close'
   renderIcon(btn, a.label, 'square')
   if (a.title) {
-    btn.title = a.title
+    btn.dataset.tip = a.title
     btn.setAttribute('aria-label', a.title)
   }
   btn.addEventListener('click', (e) => {
@@ -429,21 +429,21 @@ export function applyDockCardState(el: HTMLElement, state: DockCardState): void 
   const collapse = el.querySelector<HTMLButtonElement>(`:scope > .dock-card-head [${ACTION_ATTR}="collapse"]`)
   if (collapse) {
     collapse.setAttribute('aria-expanded', state.collapsed ? 'false' : 'true')
-    collapse.title = state.collapsed ? t('ui.dock.expandCard') : t('ui.dock.collapseCard')
+    collapse.dataset.tip = state.collapsed ? t('ui.dock.expandCard') : t('ui.dock.collapseCard')
     const icon = state.collapsed ? 'lucide:chevron-right' : 'lucide:chevron-down'
     if (collapse.dataset.icon !== icon) renderIcon(collapse, icon, 'chevron-down')
   }
   const solo = el.querySelector<HTMLButtonElement>(`:scope > .dock-card-head [${ACTION_ATTR}="solo"]`)
   if (solo) {
     solo.setAttribute('aria-pressed', state.solo ? 'true' : 'false')
-    solo.title = state.solo ? t('ui.dock.unsoloCard') : t('ui.dock.soloCard')
+    solo.dataset.tip = state.solo ? t('ui.dock.unsoloCard') : t('ui.dock.soloCard')
     const icon = state.solo ? 'lucide:minimize-2' : 'lucide:maximize-2'
     if (solo.dataset.icon !== icon) renderIcon(solo, icon, 'maximize-2')
   }
   const pin = el.querySelector<HTMLButtonElement>(`:scope > .dock-card-head [${ACTION_ATTR}="pin"]`)
   if (pin) {
     pin.setAttribute('aria-pressed', state.pinned ? 'true' : 'false')
-    pin.title = state.pinned ? t('ui.dock.unpinCard') : t('ui.dock.pinCard')
+    pin.dataset.tip = state.pinned ? t('ui.dock.unpinCard') : t('ui.dock.pinCard')
     const icon = state.pinned ? 'lucide:pin' : 'lucide:pin-off'
     if (pin.dataset.icon !== icon) renderIcon(pin, icon, 'pin')
   }
@@ -526,13 +526,13 @@ export function mountDockSlot(
   if (add) {
     renderIcon(add, 'lucide:plus', 'plus')
     add.setAttribute('aria-label', opts.addLabel)
-    add.title = opts.addLabel
+    add.dataset.tip = opts.addLabel
     add.addEventListener('click', () => opts.onAdd(add))
   }
   // 图标与标题随状态翻面（收起全部 ⇄ 展开全部），由装配层在重画时写；这里只绑一次动作
   renderIcon(els.foldAllEl, 'lucide:chevrons-down-up', 'chevrons-down-up')
   els.foldAllEl.setAttribute('aria-label', opts.foldAllLabel)
-  els.foldAllEl.title = opts.foldAllLabel
+  els.foldAllEl.dataset.tip = opts.foldAllLabel
   els.foldAllEl.addEventListener('click', opts.onFoldAll)
   const btn = els.head.querySelector<HTMLButtonElement>('.dock-collapse')
   if (btn) {
@@ -544,7 +544,7 @@ export function mountDockSlot(
   els.resizeEl.dataset.resizeSide = opts.side
   els.resizeEl.setAttribute('role', 'separator')
   els.resizeEl.setAttribute('aria-orientation', 'vertical')
-  els.resizeEl.title = opts.resizeLabel
+  els.resizeEl.dataset.tip = opts.resizeLabel
   return els
 }
 

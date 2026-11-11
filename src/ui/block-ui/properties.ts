@@ -345,7 +345,7 @@ export function makeCellEditor(
       o.textContent = row.currentChoiceDeleted ? t('ui.props.choice.deletedNamed', { label: base }) : base
       o.dataset.missing = '1'
       if (row.currentChoiceDeleted) o.dataset.deleted = '1'
-      o.title = row.currentChoiceDeleted
+      o.dataset.tip = row.currentChoiceDeleted
         ? t('ui.props.choice.deletedTitle', { label: base })
         : t('ui.props.choice.notInScope')
       sel.appendChild(o)
@@ -435,7 +435,7 @@ export function makeFieldRow(
    */
   if (row.def && deps.openRef) {
     name.dataset.refTo = row.def.id
-    name.title = t('ui.props.openDef')
+    name.dataset.tip = t('ui.props.openDef')
     name.addEventListener('click', (e) => deps.openRef!(row.def!.id, clickModsOf(e)))
   }
   label.appendChild(name)
@@ -472,7 +472,7 @@ export function makeFieldRow(
   const clear = document.createElement('button')
   clear.type = 'button'
   clear.className = 'prop-clear ghost'
-  clear.title = t('ui.props.clear')
+  clear.dataset.tip = t('ui.props.clear')
   clear.textContent = '×'
   clear.addEventListener('click', () => deps.clearValue(target, row.propId))
 
@@ -527,7 +527,7 @@ export class PropertiesPanel {
       },
     })
     this.els.add.textContent = t('ui.props.addShort')
-    this.els.add.title = t('ui.props.add')
+    this.els.add.dataset.tip = t('ui.props.add')
     this.els.add.addEventListener('click', () => {
       this.formOpen = this.formOpen === 'own' ? null : 'own'
       this.render()
@@ -545,7 +545,7 @@ export class PropertiesPanel {
     const del = document.createElement('button')
     del.type = 'button'
     del.className = 'props-tag-x'
-    del.title = title
+    del.dataset.tip = title
     del.textContent = '×'
     del.addEventListener('click', onClick)
     return del
@@ -734,7 +734,7 @@ export class PropertiesPanel {
        */
       text.dataset.refTo = def.id
       text.className = 'props-tag-name'
-      text.title = t('ui.props.openDef')
+      text.dataset.tip = t('ui.props.openDef')
       text.addEventListener('click', (e) => this.deps.openRef(def.id, clickModsOf(e)))
       /**
        * `select` 的一条声明带「选项」入口：选项是定义块的子块，而标签视角只该看
@@ -747,7 +747,7 @@ export class PropertiesPanel {
         opt.className = 'props-tag-choice'
         opt.dataset.declaredChoices = def.id
         opt.textContent = t('ui.props.choice.open')
-        opt.title = t('ui.props.choice.openTitle')
+        opt.dataset.tip = t('ui.props.choice.openTitle')
         opt.addEventListener('click', () => {
           const open = this.tagChoices
           this.tagChoices = open && open.def.id === def.id && open.owner.id === target.id ? null : { def, owner: target }
@@ -776,7 +776,7 @@ export class PropertiesPanel {
     add.className = 'props-add props-declare-add'
     add.dataset.declareAdd = '1'
     add.textContent = t('ui.props.addTagProp')
-    add.title = t('ui.props.addTagPropTitle')
+    add.dataset.tip = t('ui.props.addTagPropTitle')
     add.addEventListener('click', () => {
       this.formOpen = this.formOpen === 'declared' ? null : 'declared'
       this.render()
@@ -815,7 +815,7 @@ export class PropertiesPanel {
       el.dataset.belongsId = id
       const t0 = document.createElement('span')
       t0.textContent = text
-      t0.title = title
+      t0.dataset.tip = title
       const del = this.tagDel(t('ui.belongs.remove'), () => this.deps.removeBelong(target, id))
       el.append(t0, del)
       return el
@@ -894,7 +894,7 @@ export class PropertiesPanel {
        */
       text.dataset.refTo = tag.id
       text.className = 'props-tag-name'
-      text.title = t('ui.chip.tagTitle', { label: name })
+      text.dataset.tip = t('ui.chip.tagTitle', { label: name })
       text.addEventListener('click', (e) => this.deps.openRef(tag.id, clickModsOf(e)))
       const del = this.tagDel(t('ui.props.tagRemove'), () => this.deps.removeTag(target, tag.id))
       chip.append(text, del)

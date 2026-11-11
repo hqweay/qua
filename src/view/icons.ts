@@ -184,6 +184,6 @@ export function renderIcon(
     host.appendChild(createIcon(name as IconName, size))
     return
   }
-  host.title = raw
+  host.dataset.tip = raw
   host.appendChild(createIcon('circle-help', size))
 }

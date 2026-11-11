@@ -516,7 +516,7 @@ export function setupDocks(deps: DocksDeps) {
     const el = deps.getSlots()[side].foldAllEl
     const icon = anyExpanded ? 'lucide:chevrons-down-up' : 'lucide:chevrons-up-down'
     if (el.dataset.icon !== icon) renderIcon(el, icon, 'chevrons-down-up')
-    el.title = anyExpanded ? t('ui.dock.foldAll') : t('ui.dock.unfoldAll')
+    el.dataset.tip = anyExpanded ? t('ui.dock.foldAll') : t('ui.dock.unfoldAll')
     el.setAttribute('aria-label', el.title)
   }
 

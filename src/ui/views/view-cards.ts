@@ -375,7 +375,7 @@ export class ViewCards {
     name.type = 'button'
     name.className = 'vcol-name ui-ellipsis'
     name.textContent = blockLabel(g.block, this.kbFind)
-    name.title = t('ui.cards.openGroup')
+    name.dataset.tip = t('ui.cards.openGroup')
     name.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
@@ -392,7 +392,7 @@ export class ViewCards {
     const add = document.createElement('button')
     add.type = 'button'
     add.className = 'vcol-add'
-    add.title = t('ui.cards.addCardTitle')
+    add.dataset.tip = t('ui.cards.addCardTitle')
     add.setAttribute('aria-label', t('ui.cards.addCard'))
     add.textContent = '＋'
     add.addEventListener('click', (e) => {
@@ -528,7 +528,7 @@ export class ViewCards {
     grip.className = 'vcard-grip'
     grip.draggable = true
     grip.dataset.dragFor = r.block.id
-    grip.title = t('ui.cards.drag')
+    grip.dataset.tip = t('ui.cards.drag')
     grip.setAttribute('aria-label', t('ui.cards.drag'))
     grip.textContent = '⠿'
     grip.addEventListener('dragstart', (e) => {

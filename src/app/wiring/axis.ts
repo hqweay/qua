@@ -45,7 +45,7 @@ export function setupAxis(deps: AxisDeps) {
     exitEl.hidden = mode === 'normal'
     if (mode !== 'normal') {
       const label = t(mode === 'full' ? 'ui.axis.exitFull' : 'ui.axis.exitWide')
-      exitEl.title = label
+      exitEl.dataset.tip = label
       exitEl.setAttribute('aria-label', label)
     }
     deps.applyChrome()

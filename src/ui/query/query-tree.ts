@@ -230,7 +230,7 @@ export class QueryTree {
     if (!this.applyBtn || !this.draft) return
     const incomplete = treeIncomplete(this.draft.root)
     this.applyBtn.disabled = incomplete || !this.dirty()
-    if (incomplete) this.applyBtn.title = t('ui.query.tree.incomplete')
+    if (incomplete) this.applyBtn.dataset.tip = t('ui.query.tree.incomplete')
     else this.applyBtn.removeAttribute('title')
   }
 
@@ -367,7 +367,7 @@ export class QueryTree {
       'qt-mode',
       'mode',
     )
-    mode.title = t(group.mode === 'any' ? 'ui.query.tree.orHint' : 'ui.query.tree.andHint')
+    mode.dataset.tip = t(group.mode === 'any' ? 'ui.query.tree.orHint' : 'ui.query.tree.andHint')
 
     const notLabel = document.createElement('label')
     notLabel.className = 'qt-not'
@@ -394,7 +394,7 @@ export class QueryTree {
     }
     if (parent) {
       const del = buttonEl('×', 'qt-del', 'del')
-      del.title = t('ui.query.builder.removeRow')
+      del.dataset.tip = t('ui.query.builder.removeRow')
       del.addEventListener('click', () => {
         parent.items.splice(index, 1)
         this.pickerFor = null
@@ -591,7 +591,7 @@ export class QueryTree {
     }
 
     const del = buttonEl('×', 'qt-del', 'del')
-    del.title = t('ui.query.builder.removeRow')
+    del.dataset.tip = t('ui.query.builder.removeRow')
     del.addEventListener('click', () => {
       parent.items.splice(index, 1)
       this.paint()
@@ -628,7 +628,7 @@ export class QueryTree {
         `qt-value qt-chip-btn qt-slot${row.value === '' ? ' qt-placeholder' : ''}${name === '' ? ' qt-missing' : ''}`,
         'value',
       )
-      b.title = t('ui.query.pickTagHint')
+      b.dataset.tip = t('ui.query.pickTagHint')
       b.addEventListener('click', () => {
         this.deps.pickTag?.(row.value, (next) => {
           row.value = next
@@ -843,7 +843,7 @@ export class QueryTree {
     const b = buttonEl(label, `qt-value qt-ref qt-slot${current === '' ? ' qt-placeholder' : ''}`, 'ref')
     if (!this.deps.pickRef) {
       b.disabled = true
-      b.title = t('ui.query.noBlockPicker')
+      b.dataset.tip = t('ui.query.noBlockPicker')
       return b
     }
     b.addEventListener('click', () => {
@@ -880,7 +880,7 @@ export class QueryTree {
       'dir',
     )
     sel.dataset.set = node.dir ? '1' : '0'
-    sel.title = t('ui.query.tree.dirHint')
+    sel.dataset.tip = t('ui.query.tree.dirHint')
     return sel
   }
 

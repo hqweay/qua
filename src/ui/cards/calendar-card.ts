@@ -49,11 +49,11 @@ export function calendarCard(deps: CalendarDeps): DockCard {
       const written = new Set(deps.kb.journalDates())
       for (const [date, cell] of cells) {
         if (!written.has(date)) {
-          cell.title = t('ui.cal.openBlank')
+          cell.dataset.tip = t('ui.cal.openBlank')
           continue
         }
         cell.dataset.written = '1'
-        cell.title = t('ui.cal.openWritten')
+        cell.dataset.tip = t('ui.cal.openWritten')
         // 有内容：一颗小点。只画数字等于「这天写过」看不出来，而那是日历一半的用处
         const dot = document.createElement('span')
         dot.className = 'cal-dot'

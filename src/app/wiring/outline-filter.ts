@@ -120,7 +120,7 @@ export function setupOutlineFilter(deps: OutlineFilterDeps): OutlineFilter {
     if (active) btn.dataset.active = '1'
     else delete btn.dataset.active
     const count = state.include.length + state.remove.length
-    btn.title = active ? t('ui.filter.buttonActive', { count }) : t('ui.filter.buttonHint')
+    btn.dataset.tip = active ? t('ui.filter.buttonActive', { count }) : t('ui.filter.buttonHint')
     btn.setAttribute('aria-label', t('ui.filter.button'))
   }
 

@@ -122,7 +122,7 @@ function removeBtn(hostId: string, deps: EmbedBodyDeps): HTMLElement {
   btn.type = 'button'
   btn.className = 'embed-remove ui-btn'
   btn.textContent = t('ui.embed.remove')
-  btn.title = t('ui.embed.removeHint')
+  btn.dataset.tip = t('ui.embed.removeHint')
   btn.addEventListener('click', () => {
     deps.invoke('core.embed/remove', { blockId: hostId }, 'embed')
   })

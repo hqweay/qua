@@ -223,7 +223,7 @@ export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView, onAss
   // ⚠️ 解析后的显示名**另存一份到 `data-ref-label`**：`.atom-label` 里带 `[[ ]]`／`#` 装饰，
   //    而 run 上的名字快照是过期的 —— 给探针一个「此刻真的在显示什么」的读点。
   if (r.t === 'ref' || r.t === 'link' || r.t === 'asset') el.dataset.refLabel = label
-  el.title =
+  el.dataset.tip =
     r.t === 'asset'
       ? t(
           assetState === 'missing'
@@ -363,7 +363,7 @@ export function makeTagChipEl(tagId: string, name: string): HTMLElement {
   el.dataset.refTo = tagId
   el.contentEditable = 'false'
   el.textContent = `#${name}`
-  el.title = t('ui.chip.tagTitle', { label: name })
+  el.dataset.tip = t('ui.chip.tagTitle', { label: name })
   return el
 }
 
@@ -730,7 +730,7 @@ export function makeBlockEl(
       cell.type = 'button'
       cell.className = 'blk-context-cell ui-ellipsis'
       cell.dataset.crumbFor = a.id
-      cell.title = t('ui.crumb.hint')
+      cell.dataset.tip = t('ui.crumb.hint')
       cell.textContent = blockLabel(a, opts.find)
       ctx.appendChild(cell)
     }
@@ -779,14 +779,14 @@ export function makeBlockEl(
     name.dataset.aliasAction = 'config'
     // 显示叶子（`A/B` ⇒ `B`）；全名放进 title，路径语义不挤占行宽
     name.textContent = displayNameOf(b)
-    name.title = t('ui.alias.fullName', { name: primaryAliasOf(b) })
+    name.dataset.tip = t('ui.alias.fullName', { name: primaryAliasOf(b) })
     head.appendChild(name)
 
     const config = document.createElement('button')
     config.type = 'button'
     config.className = 'blk-alias-btn'
     config.dataset.aliasAction = 'config'
-    config.title = t('ui.alias.configTitle')
+    config.dataset.tip = t('ui.alias.configTitle')
     config.appendChild(createIcon('sliders-horizontal', 'sm'))
     head.appendChild(config)
 
@@ -794,7 +794,7 @@ export function makeBlockEl(
     props.type = 'button'
     props.className = 'blk-alias-btn'
     props.dataset.aliasAction = 'props'
-    props.title = t('ui.block.properties')
+    props.dataset.tip = t('ui.block.properties')
     props.appendChild(createIcon('panel-right', 'sm'))
     head.appendChild(props)
     el.appendChild(head)
@@ -838,7 +838,7 @@ export function makeBlockEl(
       rail.className = 'rail'
       rail.dataset.foldLineFor = ancestors[k]!
       rail.style.setProperty('--rail-depth', String(k))
-      rail.title = t('ui.block.foldLine')
+      rail.dataset.tip = t('ui.block.foldLine')
       rails.appendChild(rail)
     }
     el.appendChild(rails)
@@ -884,7 +884,7 @@ export function makeBlockEl(
     self.contentEditable = 'false'
     // 这一段是「自己的子树」（子块层，或身体那一层），可点折/展
     self.dataset.foldLineFor = b.id
-    self.title = t('ui.block.foldLine')
+    self.dataset.tip = t('ui.block.foldLine')
     el.appendChild(self)
   }
 
@@ -916,7 +916,7 @@ export function makeBlockEl(
     fold.dataset.foldFor = b.id
     // 始终画 `chevron-down`：收起态由 CSS 旋转（`.blk[data-collapsed] .fold .ico`）
     fold.appendChild(createIcon('chevron-down', 'sm'))
-    fold.title = folded ? t('ui.block.foldExpand') : t('ui.block.foldCollapse')
+    fold.dataset.tip = folded ? t('ui.block.foldExpand') : t('ui.block.foldCollapse')
     left.appendChild(fold)
   }
 
@@ -945,7 +945,7 @@ export function makeBlockEl(
     grip.className = 'grip'
     grip.appendChild(createIcon('grip-vertical', 'sm'))
     marker.appendChild(grip)
-    marker.title = t('ui.block.focusHint')
+    marker.dataset.tip = t('ui.block.focusHint')
     marker.draggable = true
     marker.dataset.dragFor = markerTargetId
     /**
@@ -966,7 +966,7 @@ export function makeBlockEl(
       ico.appendChild(createIcon(special.icon, 'sm'))
       marker.appendChild(ico)
       // 属性定义的正文是定义名，行内改不了；悬停块标时把「它是什么」说清
-      if (isPropDefBlock(b)) marker.title = t('ui.block.schemaHint')
+      if (isPropDefBlock(b)) marker.dataset.tip = t('ui.block.schemaHint')
     }
     left.appendChild(marker)
   }
@@ -984,7 +984,7 @@ export function makeBlockEl(
     const tagMark = document.createElement('span')
     tagMark.className = 'identity tag-mark'
     tagMark.appendChild(createIcon('hash', 'sm'))
-    tagMark.title = t('ui.tag.mark')
+    tagMark.dataset.tip = t('ui.tag.mark')
     left.appendChild(tagMark)
   }
   /**
@@ -1036,7 +1036,7 @@ export function makeBlockEl(
         }
       }
       const labels = picked.map((c) => plainText(c.content).trim()).filter((x) => x !== '')
-      mark.title = t('ui.props.gutterTitle', {
+      mark.dataset.tip = t('ui.props.gutterTitle', {
         prop: blockLabel(field.def),
         value: labels.length === 0 ? t('ui.props.pending') : labels.join('、'),
       })
@@ -1053,7 +1053,7 @@ export function makeBlockEl(
         // 状态标记：当前值的图标；非方框的 fallback（任务状态不是 checkbox）
         mark.dataset.statusFor = b.id
         renderIcon(mark, field.icon, todo === 'done' ? 'circle-check' : 'circle', 'sm')
-        mark.title = t('ui.todo.toggle')
+        mark.dataset.tip = t('ui.todo.toggle')
         left?.appendChild(mark)
         continue
       }
@@ -1065,7 +1065,7 @@ export function makeBlockEl(
         mark.dataset.checkFor = b.id
         renderIcon(mark, field.icon, field.value === field.check.on ? 'square-check' : 'square', 'sm')
         const value = field.choice ? plainText(field.choice.content).trim() : ''
-        mark.title = t('ui.props.gutterTitle', {
+        mark.dataset.tip = t('ui.props.gutterTitle', {
           prop: blockLabel(field.def),
           value: value === '' ? t('ui.props.pending') : value,
         })
@@ -1078,7 +1078,7 @@ export function makeBlockEl(
       mark.dataset.propFor = b.id
       renderIcon(mark, field.icon, 'square-dashed', 'sm')
       const value = field.choice ? plainText(field.choice.content).trim() : ''
-      mark.title = t('ui.props.gutterTitle', {
+      mark.dataset.tip = t('ui.props.gutterTitle', {
         prop: blockLabel(field.def),
         value: value === '' ? t('ui.props.pending') : value,
       })
@@ -1091,7 +1091,7 @@ export function makeBlockEl(
       mark.dataset.todoFor = b.id
       mark.dataset.propId = field.propId
       mark.appendChild(createIcon(field.value === true ? 'square-check' : 'square', 'sm'))
-      mark.title = t('ui.props.gutterToggle', { prop: blockLabel(field.def) })
+      mark.dataset.tip = t('ui.props.gutterToggle', { prop: blockLabel(field.def) })
       left?.appendChild(mark)
     }
     // 其余 kind 暂不画：`_uiPosition` 的编辑入口只在 select 上给（见选项编辑器），

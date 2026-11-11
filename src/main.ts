@@ -47,6 +47,7 @@ import { devCommands, dropIdentity, journalCommands, mentionCommands, mountComma
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupAxis } from './app/wiring/axis.ts'
+import { installTooltips } from './ui/overlay/tip.ts'
 import { setupSurface } from './app/wiring/surface.ts'
 import { createRowBodyCache } from './app/wiring/row-bodies.ts'
 import { setupDocks } from './app/wiring/docks.ts'
@@ -3242,7 +3243,7 @@ ed.events.mounted = () => {
 function paintStaticCopy(): void {
   document.title = t('app.title')
   // 三槽的抬头（槽里没有「我的库」这类导航外壳，标题只是槽自身的 chrome）
-  stateMenuBtn.title = t('ui.debug.title')
+  stateMenuBtn.dataset.tip = t('ui.debug.title')
   // 图标 ＋ 文案：图标走 view/icons.ts，按钮本身仍是一个普通 button（不是块）
   stateMenuBtn.replaceChildren(
     createIcon('sliders-horizontal', 'sm'),
@@ -3377,6 +3378,7 @@ diag = setupDiagnostics({
 })
 
 paintStaticCopy()
+installTooltips()
 applyChrome()
 chrome.renderDebugState()
 renderDocks()

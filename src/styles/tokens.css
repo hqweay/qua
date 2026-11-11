@@ -62,6 +62,11 @@
   --ui-scrim: light-dark(rgba(20, 22, 26, 0.72), rgba(0, 0, 0, 0.82));
   /* 遮罩上的字：遮罩在亮暗两套主题下都暗，所以它是**固定**的浅色，不是 `--ui-text` */
   --ui-text-inverse: light-dark(#f4f5f6, #e7e9ed);
+  /*
+    说明层（tooltip）底：同 `--ui-scrim` 的道理 —— 说明要浮在任何内容之上，
+    亮暗主题下都得压得住底下的字 ⇒ 固定深色，不随语义槽翻转；字走 `--ui-text-inverse`。
+  */
+  --ui-tip-bg: light-dark(rgba(20, 22, 26, 0.94), rgba(8, 9, 11, 0.94));
   /* 字重：只开两档（正文 / 强调），多一档就没人分得清该用哪个 */
   --ui-fw-normal: 400;
   --ui-fw-medium: 600;

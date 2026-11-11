@@ -148,7 +148,7 @@ export class SettingsFace {
       none.type = 'button'
       none.className = 'settings-key-chip settings-key-chip--empty'
       none.textContent = '—'
-      none.title = t('ui.settings.keysHint')
+      none.dataset.tip = t('ui.settings.keysHint')
       none.addEventListener('click', () => {
         this.capturingId = row.id
         this.render()
@@ -163,7 +163,7 @@ export class SettingsFace {
       const reset = document.createElement('button')
       reset.type = 'button'
       reset.className = 'settings-key-reset'
-      reset.title = t('ui.settings.keysReset')
+      reset.dataset.tip = t('ui.settings.keysReset')
       reset.setAttribute('aria-label', t('ui.settings.keysReset'))
       renderIcon(reset, 'lucide:rotate-ccw', 'rotate-ccw')
       reset.addEventListener('click', () => {
@@ -182,7 +182,7 @@ export class SettingsFace {
     chip.type = 'button'
     chip.className = 'settings-key-chip'
     chip.textContent = keyLabel(key, this.isMac)
-    chip.title = t('ui.settings.keysHint')
+    chip.dataset.tip = t('ui.settings.keysHint')
     chip.addEventListener('click', () => {
       this.capturingId = rowId
       this.render()

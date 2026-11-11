@@ -364,7 +364,7 @@ export class ChoicesEditor {
       name.readOnly = true
       name.tabIndex = -1
       name.classList.add('choice-name--static')
-      name.title = t('ui.props.choice.sharedReadonly')
+      name.dataset.tip = t('ui.props.choice.sharedReadonly')
     }
 
     const badge = document.createElement('button')
@@ -373,7 +373,7 @@ export class ChoicesEditor {
     badge.dataset.mode = scope.mode
     badge.textContent = this.scopeLabel(scope)
     if (full) {
-      badge.title = t('ui.props.choice.badgeTitle', { scope: badge.textContent })
+      badge.dataset.tip = t('ui.props.choice.badgeTitle', { scope: badge.textContent })
       badge.addEventListener('click', () => {
         this.openScope = this.openScope === choice.id ? '' : choice.id
         this.render()
@@ -418,7 +418,7 @@ export class ChoicesEditor {
       hide.className = 'choice-hide'
       hide.dataset.choiceHide = '1'
       hide.textContent = t('ui.props.choice.hideForTag')
-      hide.title = t('ui.props.choice.hideForTagTitle')
+      hide.dataset.tip = t('ui.props.choice.hideForTagTitle')
       hide.addEventListener('click', (e) => {
         e.preventDefault()
         this.hideFromTag(choice, focusTag)
@@ -438,7 +438,7 @@ export class ChoicesEditor {
     ico.type = 'button'
     ico.className = 'choice-icon'
     ico.dataset.choiceIcon = '1'
-    ico.title = icon === '' ? t('ui.props.choice.pickIcon') : t('ui.props.choice.iconTitle')
+    ico.dataset.tip = icon === '' ? t('ui.props.choice.pickIcon') : t('ui.props.choice.iconTitle')
     renderIcon(ico, icon, 'square-dashed', 'sm')
     if (editable && this.deps.pickIcon) {
       ico.addEventListener('click', (e) => {
@@ -477,7 +477,7 @@ export class ChoicesEditor {
     const b = document.createElement('button')
     b.type = 'button'
     b.className = 'choice-x'
-    b.title = title
+    b.dataset.tip = title
     b.textContent = text
     b.addEventListener('click', (e) => {
       e.preventDefault()
@@ -571,7 +571,7 @@ export class ChoicesEditor {
       prune.className = 'choice-prune'
       prune.dataset.choicePrune = '1'
       prune.textContent = t('ui.props.choice.pruneScopes')
-      prune.title = t('ui.props.choice.pruneScopesTitle')
+      prune.dataset.tip = t('ui.props.choice.pruneScopesTitle')
       prune.addEventListener('click', () => {
         const tags = scopedTags.filter((id) => Boolean(this.deps.tagById(id)))
         this.deps.write.setScope(
