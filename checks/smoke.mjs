@@ -27142,7 +27142,10 @@ await check('T284 ⌥ 拖＝插引用：悬停按 ⌥ 即生效（普通拖仍�
     }
   }, ids)
   assert(ref.hint.includes('引用'), `⌥ 拖的提示要说「插一枚引用」：${ref.hint}`)
-  assert(ref.effect === 'link', `⌥ 拖的光标应是 link（建关系那一档，不加第四值）：${ref.effect}`)
+  // 光标必须是 copy 不能是 link：macOS 上 ⌥ 是系统拷贝修饰键，系统提议的操作是 Copy，
+  // 落点若答 link 与提议不相容 ⇒ 松手被系统取消、drop 根本不派发（真机抓到的：8 次 ⌥ 拖 0 drop）。
+  // copy 也更真：这一手插的是一枚新块。曾拍过「建关系那一档 link」，被这条系统语义推翻。
+  assert(ref.effect === 'copy', `⌥ 拖的光标应是 copy（macOS ⌥＝系统拷贝提议，link 不相容会被取消）：${ref.effect}`)
   assert(ref.totalAfter === ref.totalBefore + 1, `⌥ 拖应只多一块：${ref.totalBefore} → ${ref.totalAfter}`)
   assert(ref.srcIndex === ref.srcIndexAfter, `⌥ 拖不许搬原块：${ref.srcIndex} → ${ref.srcIndexAfter}`)
   assert(ref.fresh.length === 1, `⌥ 拖应恰好插一块：${JSON.stringify(ref.fresh)}`)

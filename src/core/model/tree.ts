@@ -1028,6 +1028,10 @@ export function dropRefused(
   targetId: string | null,
   pos: 'before' | 'after' | 'inside',
 ): boolean {
+  // 目标不在这一份 doc 里 ⇒ 两支落手（doc 内／跨容器）都进不去（插引用的守卫同一条）：
+  // 典型是拖到挂载区／镜像岛的地盘——那个编辑器接住了悬停，但它的 doc 里没有这一行。
+  // 悬停期就不许诺，不然「提示照说、松手没反应」。
+  if (targetId !== null && !locate(doc, targetId)) return true
   if (!locate(doc, id)) return false
   const a = dropAnchorOf(doc, id, targetId, pos)
   if (!a) return true

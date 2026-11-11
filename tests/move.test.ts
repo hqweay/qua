@@ -202,6 +202,17 @@ test('悬停预告：外部源不归这份判据（落手走跨容器那支，�
   assert.equal(dropRefused(doc, '不在doc里的块', null, 'after'), false)
 })
 
+test('悬停预告：目标行不在接住的那份 doc 里 ⇒ 拒（挂载区／镜像岛的地盘不许假许诺）', () => {
+  const doc = fixture()
+  // 源在 doc 内、目标在别处（镜像行的 id、挂载区里的行）：本 doc 的两支落手都进不去
+  assert.equal(dropRefused(doc, 'c1', '别的doc的行', 'inside'), true)
+  assert.equal(dropRefused(doc, 'c1', '别的doc的行', 'after'), true)
+  // 外部源也一样：目标不在这份 doc，接住的编辑器落手必拒
+  assert.equal(dropRefused(doc, '不在doc里的块', '别的doc的行', 'inside'), true)
+  // 空白处（targetId null）不在此列：落点走「最后一个根的末尾」
+  assert.equal(dropRefused(doc, '不在doc里的块', null, 'after'), false)
+})
+
 test('applyMove 自环守卫：目标是自己或自己的后代 ⇒ false，且不摘不改', () => {
   const doc = fixture()
   const snapshot = JSON.stringify(doc.roots)

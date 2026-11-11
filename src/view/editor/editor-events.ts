@@ -1179,8 +1179,12 @@ export function bindEditorEvents(br: EditorBridge): () => void {
        * ⇒ 用户按下 ⌥ 的那一刻（下一帧悬停）就能看到提示变化，松手也一定照它做。
        */
       onHover: (_id, e) => noteDragRef(clickModsOf(e).altKey),
-      // 悬停时按着 ⌥ ⇒ 这个落点是「在这里留一枚引用」（建关系那一档光标），不是搬走
-      effect: () => (isRefDrag() ? 'link' : 'move'),
+      // 悬停时按着 ⌥ ⇒ 这个落点是「在这里留一枚引用」，不是搬走。
+      // ⚠️ 必须答 **copy** 不能答 link：macOS 上 ⌥ 是系统拷贝修饰键，系统给这次拖拽
+      // 提议的操作是 Copy；落点若答 link，与提议不相容 ⇒ 松手被系统整个取消，
+      // `drop` 根本不派发（悬停提示照常，读起来就是「有提示、松手没反应」）。
+      // copy 也更真：这一手插的是一枚新块。
+      effect: () => (isRefDrag() ? 'copy' : 'move'),
       // 段根（页／天／查询记录）不参与拖拽；未知 id 也不接（别人的载荷可能不是块）
       accept: (id, e) => {
         if (!br.acceptDrag(id)) return false
