@@ -1123,7 +1123,13 @@ export function setupPanels(deps: PanelsDeps) {
           label: t(BUILTIN_LABEL[source]),
           spec: template.spec,
           views: template.views,
-          view: template.views[0]?.id ?? '',
+          // 看法跟着这一栏物化前的样子走：原是大纲（缺省）就不给激活视图，
+          // 缺省落回大纲——点条件句是来改条件的，不该顺手被换成表格；
+          // 本源的派生列仍在视图列表里，要表格随时切得回来
+          view:
+            readMountView(deps.prefs().mountViews, mountHost, source) === 'table'
+              ? (template.views[0]?.id ?? '')
+              : '',
         },
         'mount',
       )
