@@ -547,6 +547,13 @@ export const MSG = {
   'ui.query.chipNot': '非·{text}',
   /* 条件树的词：方向与条件是两轴，组头只留短词（长句在树上重复 N 次就是噪声） */
   'ui.query.kind.day': '某一天',
+  'ui.query.kind.stamp': '时间',
+  'ui.query.stamp.created': '创建时间',
+  'ui.query.stamp.modified': '修改时间',
+  'ui.query.stamp.on': '就在这一天',
+  'ui.query.stamp.after': '从这天起',
+  'ui.query.stamp.before': '早于这一天',
+  'ui.query.label.stamp': '{field} {op} {date}',
   'ui.query.tree.dirHint': '方向：这条条件问的是自身、某个上级、某个下级，还是链条中任一处',
   // 方向那一格与 chip 共用短词：它们是修饰，不是句子
   'ui.query.dir.self': '自身',

@@ -8,12 +8,18 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   canonicalSpec,
+  dayStartMs,
+  runQuery,
+  shiftISO,
   specOfTree,
   treeIncomplete,
   treeLeafCount,
+  treeNodeOfRow,
   treeOfSpec,
   TASK_STATUS_PROP_ID,
+  type Block,
   type QuerySpec,
+  type TreeRow,
 } from '../src/core/index.ts'
 
 const roundTrip = (spec: QuerySpec): void => {
@@ -72,6 +78,19 @@ test('条件树往返：组／非／算子／待办预设／路径与方向／�
     { where: { not: { down: { all: [{ tag: '甲' }, { text: '乙' }] } } } },
     { where: { today: { offset: 1 } } },
     { where: { up: { all: [{ role: 'journal' }, { prop: { id: '_date', eq: '$self' } }] } } },
+    // 时间范围：三种形状各自往返（值是本地日零点上的毫秒）
+    { where: { prop: { id: 'core/created', gte: dayStartMs('2026-10-20') } } },
+    { where: { prop: { id: 'core/modified', lt: dayStartMs('2026-10-20') } } },
+    {
+      where: {
+        all: [
+          { prop: { id: 'core/created', gte: dayStartMs('2026-10-20') } },
+          { prop: { id: 'core/created', lt: dayStartMs('2026-10-21') } },
+        ],
+      },
+    },
+    // 不是零点的时刻没有日期等价物 ⇒ 当普通属性行（字节仍不变）
+    { where: { prop: { id: 'core/created', gte: dayStartMs('2026-10-20') + 3_600_000 } } },
   ]
   for (const spec of cases) roundTrip(spec)
 })
@@ -145,6 +164,30 @@ test('合成根上的方向也是真的（用户给根组挂了上级）', () =>
   assert.ok(draft && draft.synthesizedRoot)
   draft.root.dir = 'up'
   assert.deepEqual(specOfTree(draft).where, { up: { tag: 'x' } }, '不因为多了方向就包一层 all')
+})
+
+test('时间范围：就在这一天＝[当天零点, 次日零点)，从起／早于各是一侧', () => {
+  const start = dayStartMs('2026-10-20')
+  const next = dayStartMs(shiftISO('2026-10-20', 1))
+  const row: TreeRow = { kind: 'stamp', field: 'core/created', op: 'on', date: '2026-10-20' }
+  assert.deepEqual(
+    treeNodeOfRow(row),
+    { all: [{ prop: { id: 'core/created', gte: start } }, { prop: { id: 'core/created', lt: next } }] },
+    '「就在这一天」展开成半开区间，不含次日零点',
+  )
+
+  const mk = (id: string, created: number): Block => ({ id, content: [], children: [], created, modified: created })
+  const blocks = [
+    mk('before', start - 1),
+    mk('mid', start + 12 * 3_600_000),
+    mk('edge', next),
+  ]
+  const hits = (r: TreeRow) =>
+    runQuery({ where: treeNodeOfRow(r)! }, { blocks }).map((h) => h.blockId)
+
+  assert.deepEqual(hits(row), ['mid'], '当天中午命中、次日零点不命中')
+  assert.deepEqual(hits({ ...row, op: 'after' }), ['mid', 'edge'], '从这天起＝当天零点以后')
+  assert.deepEqual(hits({ ...row, op: 'before' }), ['before'], '早于这一天＝当天零点以前')
 })
 
 test('多键排序拆得动：树草稿整组保全，拼回去逐字节相等（树自己不编辑它，抬头排序面板是唯一入口）', () => {

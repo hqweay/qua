@@ -6,14 +6,15 @@
  *
  * ⚠️ **不是「所有能求值的 id」**：`{prop}` 的白名单（`core/props.ts` 的
  *    `QUERYABLE_SYSTEM_PROPS`）比这宽——`_kind`／`_type`／`_tags`／`core/created`／
- *    `core/modified` 语言层认，但**没有值控件能把它们问清楚**：
+ *    `core/modified` 语言层认，但**没有字段级的控件能把它们问清楚**：
  *      · `_kind`／`_type` 的值是内部 id，用户没有地方学到它；
  *      · `_tags` 的 `eq` 会与 `{tag}`（按名）造出同一件事的第二种写法；
- *      · `core/created`／`modified` 是毫秒，日期输入填进去对不上。
- *    它们仍可由 JSON 写成（条件树会如实显示），只是不进下拉。
+ *      · `core/created`／`modified` 是毫秒，日期输入填进去对不上（它们走「时间」那一行）。
+ *    它们仍可由 JSON 写成（条件树会如实显示），只是不进**字段**下拉。
  *
- * 引擎属性（`core/created`／`core/modified`）**不进候选**：值在块顶层字段、是毫秒，
- * 现在没有能把「某一天」映射成毫秒区间的值控件（见上面的触发判据）。
+ * 引擎属性（`core/created`／`core/modified`）**不进这里的下拉**：它们有自己的一行
+ * （`kind:'stamp'` 的时间范围行，值控件是「字段 ＋ 问法 ＋ 日期」，条件里落成毫秒区间）。
+ * 混进字段下拉会得到一个「日期填进毫秒」的框——对不上，还不报错。
  */
 import { allPropDefs, propDisplayLabels, propKindOf, cardinalityOf, isEngineProp, systemQueryFieldLabel } from '../props/props.ts'
 import type { PropKind } from '../props/props.ts'
@@ -31,7 +32,8 @@ export interface QueryFieldOption {
  * 下拉里真正列出来的系统槽（每一项都有对应的值控件与清楚的问法）。
  *
  * 加一项的前提：**用户能不查文档就填出值**。`_date` 有日期控件、`_aliases` 是名字文本；
- * 其余系统槽要等各自的值控件（时间区间／标签选择器）落地。
+ * `_tags` 要等标签选择器（且只该有「有标签」这一档，避免与 `{tag}` 重复），
+ * `core/created`／`core/modified` 走「时间」行（`kind:'stamp'`），都不进这一列。
  */
 const QUERY_FIELD_SYSTEM_SLOTS: readonly string[] = ['_date', '_aliases']
 

@@ -24,6 +24,9 @@ import {
   TREE_ROW_KINDS,
   isQueryableSystemProp,
   systemQueryFieldLabel,
+  ENGINE_CREATED,
+  ENGINE_MODIFIED,
+  todayISO,
   type Block,
   type DraftOp,
   type PropKind,
@@ -90,6 +93,7 @@ const ROW_KIND_TEXT: Record<TreeRowKind, MsgId> = {
   is: 'ui.query.prefix.is',
   role: 'ui.query.prefix.role',
   day: 'ui.query.kind.day',
+  stamp: 'ui.query.kind.stamp',
 }
 
 const OP_TEXT: Record<DraftOp, MsgId> = {
@@ -112,8 +116,12 @@ function defaultRow(kind: TreeRowKind, field: string): TreeRow {
   if (kind === 'ref') return { kind: 'ref', target: '' }
   if (kind === 'is') return { kind: 'is', target: '' }
   if (kind === 'role') return { kind: 'role', role: 'journal' }
-  // 新加的「某一天」默认「今天」（`{today:{offset:0}}`）：加一行就是一条完整条件
-  return { kind: 'day', date: '', rel: 0 }
+  if (kind === 'day') {
+    // 新加的「某一天」默认「今天」（`{today:{offset:0}}`）：加一行就是一条完整条件
+    return { kind: 'day', date: '', rel: 0 }
+  }
+  // 新加的「时间」默认「创建时间 · 就在今天」：同样是加一行就能应用
+  return { kind: 'stamp', field: ENGINE_CREATED, op: 'on', date: todayISO() }
 }
 
 function option(value: string, label: string): HTMLOptionElement {
@@ -486,6 +494,7 @@ export class QueryTree {
       { pick: 'row:is', label: t('ui.query.kind.is') },
       { pick: 'row:role', label: t('ui.query.kind.role') },
       { pick: 'row:day', label: t('ui.query.kind.day') },
+      { pick: 'row:stamp', label: t('ui.query.kind.stamp') },
     ])
     return picker
   }
@@ -575,6 +584,9 @@ export class QueryTree {
         break
       case 'day':
         el.append(...this.dayControls(row))
+        break
+      case 'stamp':
+        el.append(...this.stampControls(row))
         break
     }
 
@@ -901,6 +913,52 @@ export class QueryTree {
       'day-mode',
     )
     return [sel, this.dayValue(row, mode)]
+  }
+
+  /**
+   * **时间范围**那一行：字段（创建／修改）＋ 问法（就在这一天／从这天起／早于这一天）＋ 日期。
+   *
+   * 值存绝对毫秒（本地日零点），「就在这一天」展开成「当天零点 ≤ t < 次日零点」两条——
+   * 与「某一天」预设同一种做法：一行可以拼成不止一个节点，但字节是确定的。
+   */
+  private stampControls(row: Extract<TreeRow, { kind: 'stamp' }>): HTMLElement[] {
+    const field = selectEl(
+      [
+        { value: ENGINE_CREATED, label: t('ui.query.stamp.created') },
+        { value: ENGINE_MODIFIED, label: t('ui.query.stamp.modified') },
+      ],
+      row.field,
+      (next) => {
+        row.field = next === ENGINE_MODIFIED ? 'core/modified' : 'core/created'
+        this.syncApply()
+      },
+      'qt-stamp-field',
+      'stamp-field',
+    )
+    const op = selectEl(
+      [
+        { value: 'on', label: t('ui.query.stamp.on') },
+        { value: 'after', label: t('ui.query.stamp.after') },
+        { value: 'before', label: t('ui.query.stamp.before') },
+      ],
+      row.op,
+      (next) => {
+        row.op = next === 'after' ? 'after' : next === 'before' ? 'before' : 'on'
+        this.syncApply()
+      },
+      'qt-stamp-op',
+      'stamp-op',
+    )
+    const date = document.createElement('input')
+    date.type = 'date'
+    date.className = 'qt-value ui-input qt-slot'
+    date.dataset.qt = 'value'
+    date.value = row.date
+    date.addEventListener('input', () => {
+      row.date = date.value
+      this.syncRow(date, row)
+    })
+    return [field, op, date]
   }
 
   private dayModeOf(row: Extract<TreeRow, { kind: 'day' }>): 'abs' | 'rel' | 'host' {

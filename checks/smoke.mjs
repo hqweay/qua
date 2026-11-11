@@ -18433,6 +18433,78 @@ await check('B8 系统槽入口：字段下拉里有「日记日期」「别名�
   return '下拉含日记日期／别名；选 _date 写出 {prop:{_date,eq}} 且命中那天'
 })
 
+await check('B9 时间范围：字段 ＋ 问法 ＋ 日期，就在这一天＝[零点, 次日零点)', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await page.evaluate(() => {
+    const at = Date.now()
+    const mk = (id, text, created) => ({
+      id,
+      content: text ? [{ t: 'text', v: text }] : [],
+      children: [],
+      created,
+      modified: created,
+    })
+    window.__qua.forceForest((forest) => {
+      forest.length = 0
+      // 今天一个、三天前一个：默认「就在今天」只该命中前者
+      forest.push(mk('today', '今天创建', at), mk('old', '三天前创建', at - 3 * 86_400_000))
+    })
+    window.__qua.invoke('core.query/create', { name: '时间范围', spec: { where: { any: [] } } })
+    return String(window.__qua.snapshot().activeId)
+  })
+  assert(qid !== '', '前置：应能建出查询块')
+  await page.waitForTimeout(600)
+  await ensureTree(page)
+
+  await qtAdd(page, '.queryview-tree .qt-group[data-qt-depth="0"]', 'row:stamp')
+  const rowSel = '.queryview-tree .qt-row[data-qt-row="stamp"]'
+  const initial = await page.evaluate(() => {
+    const row = document.querySelector('.queryview-tree .qt-row[data-qt-row="stamp"]')
+    const d = new Date()
+    const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    return {
+      field: row?.querySelector('[data-qt="stamp-field"]')?.value ?? '',
+      op: row?.querySelector('[data-qt="stamp-op"]')?.value ?? '',
+      date: row?.querySelector('[data-qt="value"]')?.value ?? '',
+      local,
+    }
+  })
+  assert(initial.field === 'core/created' && initial.op === 'on', `默认是「创建时间 · 就在这一天」：${JSON.stringify(initial)}`)
+  assert(initial.date === initial.local, `默认日期是今天：${JSON.stringify(initial)}`)
+
+  const shot = () =>
+    page.evaluate(
+      (id) => ({
+        where: window.__qua.__editor.store.find(id)?.props?._query?.where ?? null,
+        rows: [...document.querySelectorAll('.queryview .queryview-editor .blk[data-block-id]')].map(
+          (e) => e.dataset.blockId ?? '',
+        ),
+      }),
+      qid,
+    )
+
+  await page.locator('.queryview-tree [data-qt="apply"]').click()
+  await page.waitForTimeout(450)
+  const on = await shot()
+  const pair = on.where?.all ?? on.where?.any?.[0]?.all ?? null
+  assert(
+    Array.isArray(pair) && pair.length === 2 && pair[0]?.prop?.gte < pair[1]?.prop?.lt,
+    `「就在这一天」应落成半开区间两条：${JSON.stringify(on.where)}`,
+  )
+  assert(on.rows.join(',') === 'today', `只命中今天创建的块：${JSON.stringify(on.rows)}`)
+
+  // 换成「早于这一天」⇒ 只剩三天前那块
+  await page.selectOption(`${rowSel} [data-qt="stamp-op"]`, 'before')
+  await page.locator('.queryview-tree [data-qt="apply"]').click()
+  await page.waitForTimeout(450)
+  const before = await shot()
+  assert(before.rows.join(',') === 'old', `早于今天 ⇒ 只剩三天前那块：${JSON.stringify(before.rows)}`)
+
+  await ctx.close()
+  return '默认「创建时间·就在这一天·今天」；落成 gte/lt 两条；换「早于这一天」结果换一侧'
+})
+
 /* ---------------------------------------------------------------- 相对日期（C1） */
 
 /**

@@ -106,6 +106,14 @@ function rowSentence(row: TreeRow, deps: ConditionTextDeps): string {
       return `${t('ui.query.prefix.role')}${t(row.role === 'page' ? 'ui.query.role.page' : 'ui.query.role.journal')}`
     case 'day':
       return dayText(row)
+    case 'stamp':
+      return t('ui.query.label.stamp', {
+        field: t(row.field === 'core/modified' ? 'ui.query.stamp.modified' : 'ui.query.stamp.created'),
+        op: t(
+          row.op === 'on' ? 'ui.query.stamp.on' : row.op === 'after' ? 'ui.query.stamp.after' : 'ui.query.stamp.before',
+        ),
+        date: row.date,
+      })
     case 'prop':
       return propText(row, deps)
   }

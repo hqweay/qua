@@ -9,7 +9,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { queryChips } from '../src/ui/query/query-builder.ts'
-import type { QuerySpec } from '../src/core/index.ts'
+import { dayStartMs, type QuerySpec } from '../src/core/index.ts'
 
 const fields = [{ id: 'p', label: '状态' }]
 const chips = (where: QuerySpec['where']): string[] => queryChips({ where }, fields)
@@ -59,6 +59,26 @@ test('某一天：固定日期／相对／与根块同一天', () => {
   assert.deepEqual(
     chips({ up: { all: [{ role: 'journal' }, { prop: { id: '_date', eq: '$self' } }] } }),
     ['上级 · 与根块同一天'],
+  )
+})
+
+test('时间范围读成一句：字段 ＋ 问法 ＋ 日期', () => {
+  assert.deepEqual(
+    chips({ prop: { id: 'core/created', gte: dayStartMs('2026-10-20') } }),
+    ['创建时间 从这天起 2026-10-20'],
+  )
+  assert.deepEqual(
+    chips({ prop: { id: 'core/modified', lt: dayStartMs('2026-10-20') } }),
+    ['修改时间 早于这一天 2026-10-20'],
+  )
+  assert.deepEqual(
+    chips({
+      all: [
+        { prop: { id: 'core/created', gte: dayStartMs('2026-10-20') } },
+        { prop: { id: 'core/created', lt: dayStartMs('2026-10-21') } },
+      ],
+    }),
+    ['创建时间 就在这一天 2026-10-20'],
   )
 })
 

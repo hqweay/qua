@@ -35,6 +35,22 @@ export function shiftISO(date: string, days: number): string {
 }
 
 /**
+ * `(本地日) → 那一天的零点毫秒`（本地时区；夏令时交给 `Date`）。
+ *
+ * 时间范围条件的值存的是**绝对毫秒**，日期只是它的**值控件投影**——所以「某一天」
+ * 在条件里是 `[当天零点, 次日零点)` 这个区间，而不是一个会被时区改写的日期串。
+ */
+export function dayStartMs(date: string): number {
+  const [y, m, d] = date.split('-').map(Number)
+  return new Date(y!, (m ?? 1) - 1, d ?? 1).getTime()
+}
+
+/** 毫秒 → 本地日期（`YYYY-MM-DD`）：把绝对时刻映射回日期控件的值 */
+export function dateOfMs(ms: number): string {
+  return todayISO(new Date(ms))
+}
+
+/**
  * `(本地日) → id`：**确定性派生**（`derivedId('journal', date)`）。
  *
  * ⚠️ 取舍：以前这个 id 的**前 12 位是本地零点的毫秒时间戳**、尾部塞日期数字 ——
