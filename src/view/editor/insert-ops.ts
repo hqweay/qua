@@ -32,6 +32,7 @@ import {
   dropMoveExternal,
   descendants,
   hasDescendant,
+  unfoldBlock,
   type Block,
   type Located,
   type QuerySpec,
@@ -563,6 +564,12 @@ export class InsertOps {
     this.ed.write((tx) => {
       made.forEach((b, i) => tx.insert(b, site.parentId, site.index + i))
     })
+    /**
+     * **插进了折叠的层就展开它**：inside 的落点父可能是收着的（「这一行收着」是视图态，
+     * 不进事务）——不展开的话引用块真的插进去了，屏幕却一丝不动，读起来就是
+     * 「拖了没反应」。普通拖在同一格走 `structuralMove` 的 `unfoldId`，这里同口径。
+     */
+    if (zone === 'inside' && site.parentId) unfoldBlock(this.ed.doc, site.parentId)
     const last = made[made.length - 1]!
     this.ed.structTail({ id: last.id, off: plainLen(last.content) })
     this.ed.bsel.paintBlockSel()

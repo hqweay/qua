@@ -27511,6 +27511,64 @@ await check('T287 ⌥ 拖的两个洞：外部源（槽里的卡）也落成引�
   return `外部源（槽里的卡）⇒ 1 枚指向它的引用；分割线中间 ⇒ 提示「后面」且真的落在它后面`
 })
 
+await check('T290 ⌥ 拖进折叠的块：引用真的插进去，且**父块展开、屏幕上看得见**（不许插进看不见的层）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  const ids = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const root = ed.doc.roots[0]
+    const a = ed.insert.insertBlockAfter(root.id, 'FOLD-A')
+    const p = ed.insert.insertBlockAfter(a, 'FOLD-P')
+    const k = ed.insert.insertBlockAfter(p, 'FOLD-K')
+    ed.write((tx) => tx.move(k, p, 0))
+    // 折叠 p（视图态，不进事务）：子块从屏幕上消失
+    ed.doc.folded = { ...(ed.doc.folded ?? {}), [p]: true }
+    ed.renderAll()
+    return { a, p, k, before: window.__qua.snapshot().totalBlocks }
+  })
+  await page.waitForTimeout(250)
+  const pre = await page.evaluate((s) => {
+    const kid = document.querySelector(`.blk[data-block-id="${s.k}"]`)
+    return { kidRendered: Boolean(kid), foldTri: Boolean(document.querySelector(`.blk[data-block-id="${s.p}"] [data-fold-for]`)) }
+  }, ids)
+  assert(!pre.kidRendered, '前置：折叠后子块要从屏幕上消失')
+  assert(pre.foldTri, '前置：父块要有折叠三角')
+
+  const dropped = await page.evaluate((s) => {
+    const handle = document.querySelector(`.blk[data-block-id="${s.a}"] .marker`)
+    const tgtEl = document.querySelector(`.blk[data-block-id="${s.p}"]`)
+    if (!handle || !tgtEl) return null
+    const r = tgtEl.getBoundingClientRect()
+    const dt = new DataTransfer()
+    const ev = (type) =>
+      new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 40, clientY: r.top + r.height / 2, altKey: true })
+    handle.dispatchEvent(ev('dragstart'))
+    tgtEl.dispatchEvent(ev('dragover'))
+    const hint = document.querySelector('.dnd-hint')?.textContent ?? ''
+    tgtEl.dispatchEvent(ev('drop'))
+    handle.dispatchEvent(ev('dragend'))
+    return { hint, total: window.__qua.snapshot().totalBlocks }
+  }, ids)
+  await page.waitForTimeout(300)
+  assert(dropped, '折叠父块与源块标都要在')
+  assert(dropped.hint.includes('引用'), `提示要说插引用：${dropped.hint}`)
+  assert(dropped.total === ids.before + 1, `模型里要真的多一块：${ids.before} → ${dropped.total}`)
+
+  // 关键断言：父块展开、新引用块在屏幕上
+  const after = await page.evaluate((s) => {
+    const ed = window.__qua.__editor
+    const p = ed.store.find(s.p)
+    const lastKid = p.children[p.children.length - 1]
+    return { folded: ed.doc.folded?.[s.p] === true, kidRendered: lastKid ? Boolean(document.querySelector(`.blk[data-block-id="${lastKid.id}"]`)) : false }
+  }, ids)
+  assert(!after.folded, `父块要被展开：${JSON.stringify(after)}`)
+  assert(after.kidRendered, `新引用块必须在屏幕上（不许插进看不见的层）：${JSON.stringify(after)}`)
+
+  await ctx.close()
+  return `折叠目标 ⌥ 落手：模型 +1 且父块展开、引用可见`
+})
+
 await check('T289 拖拽的可落性预告：拖到自己／自己的子块上，悬停不给提示不给高亮，落手 0 变动（⌥ 与普通拖同判）；换正常目标仍照常', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
