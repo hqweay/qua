@@ -9,7 +9,7 @@
  * 「复合条件」。而两份投影的判据迟早分叉：同一个查询在条件树里读得懂、收起后读不懂。
  *
  * ⚠️ 这里零 DOM：`queryChips` 返回字符串，画不画、怎么排是调用方的事。
- * ⚠️ 括号与「非」的位置不是装饰：`{not:{up:{all:[A,B]}}}` ＝「没有这样的上级（A 且 B）」，
+ * ⚠️ 括号与「非」的位置不是装饰：`{not:{up:{all:[A,B]}}}` ＝「没有这样的祖先（A 且 B）」，
  *    所以「非」在最外、方向次之、组在内 —— 与条件的拼装顺序同构。
  */
 import {
@@ -41,12 +41,19 @@ const DIR_TEXT: Record<'up' | 'down' | 'near', MsgId> = {
   near: 'ui.query.dir.near',
 }
 
+/** 「这一块」行挂了方向时的合并读法：值位直接嵌进介词短语（「在 项目页 之下」） */
+const DIR_CHIP: Record<'up' | 'down' | 'near', MsgId> = {
+  up: 'ui.query.chip.up',
+  down: 'ui.query.chip.down',
+  near: 'ui.query.chip.near',
+}
+
 export interface ConditionTextDeps {
   /** 属性定义（id → 显示名）；不在表里的 id 再问系统槽名字 */
   fields: readonly { id: string; label: string }[]
   /** `select` 的值是选项块 id，要换成选项名 */
   choices?: (propId: string) => readonly { id: string; label: string }[]
-  /** 引用／就是 `/` 某一块的目标 id → 名字 */
+  /** 引用／这一块 `/` 某一块的目标 id → 名字 */
   refLabel?: (targetId: string) => string
 }
 
@@ -76,7 +83,12 @@ export function queryChips(
 function sentence(node: TreeNode, deps: ConditionTextDeps, topLevel: boolean): string {
   if (node.kind === 'leaf') {
     let text = rowSentence(node.row, deps)
-    if (node.dir) text = `${t(DIR_TEXT[node.dir])} · ${text}`
+    if (node.dir && node.row.kind === 'is') {
+      // 「这一块」行：介词短语直接吃掉值位（「在 项目页 之下」），不再「短语 · 行」两截
+      text = t(DIR_CHIP[node.dir], { target: targetText(node.row.target, deps) })
+    } else if (node.dir) {
+      text = `${t(DIR_TEXT[node.dir])} · ${text}`
+    }
     if (node.not) text = t('ui.query.chipNot', { text })
     return text
   }
@@ -84,7 +96,7 @@ function sentence(node: TreeNode, deps: ConditionTextDeps, topLevel: boolean): s
   let text = node.items.map((child) => sentence(child, deps, false)).join(` ${join} `)
   /**
    * 括号只在**会读错**时出现：组里多条且它不是这一条 chip 的最外层。
-   * 挂修饰的组即使在最外层也要括起来——「上级 · A 且 B」会被读成两条并列。
+   * 挂修饰的组即使在最外层也要括起来——「在…之下 ·（A 且 B）」会被读成两条并列。
    */
   if (node.items.length > 1 && (!topLevel || node.dir !== undefined || node.not)) text = `（${text}）`
   if (node.dir) text = `${t(DIR_TEXT[node.dir])} · ${text}`
@@ -103,7 +115,8 @@ function rowSentence(row: TreeRow, deps: ConditionTextDeps): string {
     case 'is':
       return `${t('ui.query.prefix.is')} ${targetText(row.target, deps)}`
     case 'role':
-      return `${t('ui.query.prefix.role')}${t(row.role === 'page' ? 'ui.query.role.page' : 'ui.query.role.journal')}`
+      // 身份用名词直出（「日记」），不垫系动词——「是」是给模型看的区分
+      return t(row.role === 'page' ? 'ui.query.role.page' : 'ui.query.role.journal')
     case 'day':
       return dayText(row)
     case 'stamp':

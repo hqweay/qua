@@ -84,8 +84,8 @@
   background: var(--ui-bg-hover);
   border-color: var(--ui-border-subtle);
 }
-/* 方向是**修饰**：缺省「自身」是句子的无标状态 ⇒ 压到几乎看不见；
-   挂上上级／下级／链条才是真信息，恢复常色。hover/focus 亮起来，保证可发现。 */
+/* 方向是**修饰**：缺省「—」是句子的无标状态（没有关系，不是第四个选项名）⇒ 压到几乎看不见；
+   挂上关系短语（在…之下／其下有…／链上有…）才是真信息，恢复常色。hover/focus 亮起来，保证可发现。 */
 .qt-dir {
   color: var(--ui-text-tertiary);
   opacity: 0.45;

@@ -55,7 +55,7 @@ export interface QueryTreeDeps {
   /** 内联树：收起按钮；弹层：关闭按钮 */
   inline?: boolean
   /**
-   * 块值选择器。`opts.rootBlock` 为真时候选里多一枚虚拟块「根块」——
+   * 块值选择器。`opts.rootBlock` 为真时候选里多一枚虚拟块「所在块」——
    * 只有条件树要它：属性区给某个块挑引用目标时，「随所在位置变化」没有意义。
    * `owner` 可缺省：它只用于排除自己，枚举候选不需要它（条件树未必有块宿主）。
    */
@@ -91,7 +91,7 @@ const ROW_KIND_TEXT: Record<TreeRowKind, MsgId> = {
   prop: 'ui.query.prefix.prop',
   ref: 'ui.query.prefix.ref',
   is: 'ui.query.prefix.is',
-  role: 'ui.query.prefix.role',
+  role: 'ui.query.kind.role',
   day: 'ui.query.kind.day',
   stamp: 'ui.query.kind.stamp',
 }
@@ -702,7 +702,7 @@ export class QueryTree {
   }
 
   private valueControl(row: Extract<TreeRow, { kind: 'prop' }>): HTMLElement {
-    // `{prop:{eq:'$self'}}` 是「取根块同一栏的值」，系统预填；显示成一句人话，不给输入框
+    // `{prop:{eq:'$self'}}` 是「取所在块同一栏的值」，系统预填；显示成一句人话，不给输入框
     if (row.value === SELF) return this.selfChip(t('ui.query.selfProp'))
     if (row.op === 'exists' || row.op === 'empty') {
       const sel = selectEl(
@@ -827,7 +827,7 @@ export class QueryTree {
   }
 
   /**
-   * 块值位统一走选择器：「根块」是候选里的一块，不是一枚独立的魔法按钮。
+   * 块值位统一走选择器：「所在块」是候选里的一块，不是一枚独立的魔法按钮。
    * 也**不退成手输 id** —— 那正是让用户去写 `$self` 的口子；没有选择器就明说不可选。
    */
   private refButton(current: string, onPick: (id: string) => void): HTMLElement {
@@ -852,8 +852,8 @@ export class QueryTree {
   /**
    * **方向那一格**：叶子与组都能挂，与「非」同构。
    *
-   * 缺省「自身」（不包方向）；「上级匹配所有」＝ 组挂上级（存在同一个上级满足整组），
-   * 「上级匹配任一」＝ 或组里每条叶子各挂上级（各找一处）——两种形状都编辑得到，
+   * 缺省「—」（没有关系）；「在…之下」挂组 ＝ 存在同一个上级满足整组（「在…之下 ·（A 且 B）」），
+   * 每条叶子各挂 ＝ 祖先链里各找一处——两种形状都编辑得到，
    * 但 chip 与人话要说清它们不是一回事（对 `all` 不满足分配律）。
    */
   private dirEl(node: TreeLeaf | TreeGroup): HTMLElement {
@@ -868,7 +868,7 @@ export class QueryTree {
       (next) => {
         if (next === 'up' || next === 'down' || next === 'near') node.dir = next
         else delete node.dir
-        // 默认（自身）是**修饰的缺省态**：不显形、不抢读句子的注意力
+        // 缺省（没有关系）是**修饰的缺省态**：不显形、不抢读句子的注意力
         sel.dataset.set = node.dir ? '1' : '0'
         // 方向不改行的完整度：只重算「应用」的可用性，不重画（别把用户的焦点冲掉）
         this.syncApply()
@@ -885,7 +885,7 @@ export class QueryTree {
    * 「某一天」行：**一个模式词 ＋ 一个值控件**（方向已上收到 `dirEl`）。
    *
    * 三态：固定日期（`{all:[role,_date]}`）／相对（`{today:{offset}}`，存表达式）／
-   * 与根块同一天（`eq:'$self'`）。它们是同一件事的三种问法，收进一个模式词。
+   * 与所在块同一天（`eq:'$self'`）。它们是同一件事的三种问法，收进一个模式词。
    */
   private dayControls(row: Extract<TreeRow, { kind: 'day' }>): HTMLElement[] {
     const mode = this.dayModeOf(row)
@@ -967,7 +967,7 @@ export class QueryTree {
   }
 
   private dayValue(row: Extract<TreeRow, { kind: 'day' }>, mode: 'abs' | 'rel' | 'host'): HTMLElement {
-    // 「这一天」用根块的日期：`eq:SELF` 是既有形状，显示成一句人话，不给输入框
+    // 「这一天」用所在块的日期：`eq:SELF` 是既有形状，显示成一句人话，不给输入框
     if (mode === 'host') return this.selfChip(t('ui.query.selfDate'))
     if (mode === 'rel') {
       const wrap = document.createElement('span')

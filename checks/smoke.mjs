@@ -18509,9 +18509,15 @@ await check('B7 方向是节点上的一格：叶子与组都能挂，up 不含�
     })
 
   const up = await shot()
-  assert(up.rowDir === 'up', `「引用某块 ＋ 上级」要拆成方向那一格＝上级：${JSON.stringify(up)}`)
-  assert(up.groupDir === '', `组头也有同一格（缺省「自身」）：${JSON.stringify(up)}`)
-  assert(up.dirOptions.join('/').includes('自身'), `方向那一格要有「自身」：${JSON.stringify(up.dirOptions)}`)
+  assert(up.rowDir === 'up', `「引用某块」行挂「在…之下」要拆成方向那一格＝up：${JSON.stringify(up)}`)
+  assert(up.groupDir === '', `组头也有同一格（缺省「—」＝没有关系）：${JSON.stringify(up)}`)
+  assert(
+    up.dirOptions.join('/').includes('—') &&
+      up.dirOptions.join('/').includes('在…之下') &&
+      up.dirOptions.join('/').includes('其下有…') &&
+      up.dirOptions.join('/').includes('链上有…'),
+    `方向那一格＝缺省「—」＋三个关系短语：${JSON.stringify(up.dirOptions)}`,
+  )
   assert(
     up.hits.sort().join(',') === 'c1,c2',
     `上级引用 X ⇒ 只出 p 的子块，不出 p 自己：${JSON.stringify(up.hits)}`,
