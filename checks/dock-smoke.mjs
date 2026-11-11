@@ -1910,17 +1910,17 @@ await check('A26 卡头交互：左键头部＝折叠/展开这张卡；右键�
   )
   assert(id, '前置：应有一个可开的块')
   // 左键头部（标题区，不落在按钮上）＝折叠
-  const title = page.locator(`.dock-card[data-card-id="backrefs"] > .dock-card-head .dock-card-title`)
+  const title = page.locator(`.dock-card[data-card-id="mount"] > .dock-card-head .dock-card-title`)
   await title.click()
   await page.waitForTimeout(120)
   let collapsed = await page.evaluate(
-    () => document.querySelector('.dock-card[data-card-id="backrefs"]')?.dataset.collapsed,
+    () => document.querySelector('.dock-card[data-card-id="mount"]')?.dataset.collapsed,
   )
   assert(collapsed === '1', `左键头部应收起这张卡：${collapsed}`)
   await title.click()
   await page.waitForTimeout(120)
   collapsed = await page.evaluate(
-    () => document.querySelector('.dock-card[data-card-id="backrefs"]')?.dataset.collapsed,
+    () => document.querySelector('.dock-card[data-card-id="mount"]')?.dataset.collapsed,
   )
   assert(!collapsed, `再点应展开：${collapsed}`)
 
@@ -1977,17 +1977,17 @@ await check('A27 单卡期间目标展开、退出回到收着（与中心「聚
    * 于是用户原来的收起**被这次查看吃掉了**（下次单卡前它已经不再是收着的）。
    * 叠一层的好处是退出自动恢复，且不需要记「solo 前收没收」的第三态。
    */
-  const backrefs = page.locator('.dock-card[data-card-id="backrefs"]')
+  const backrefs = page.locator('.dock-card[data-card-id="mount"]')
   await backrefs.locator('> .dock-card-head .dock-card-title').click() // 收起
   await page.waitForTimeout(100)
   assert((await backrefs.getAttribute('data-collapsed')) === '1', '前置：反链卡应收起')
   const prefFolded = () => page.evaluate(() => window.__qua.snapshot().dock.collapsed)
-  assert((await prefFolded()).includes('backrefs'), '前置：收起态应落在设备状态里')
+  assert((await prefFolded()).includes('mount'), '前置：收起态应落在设备状态里')
   await backrefs.locator('> .dock-card-head [data-dock-action="solo"]').click()
   await page.waitForTimeout(100)
   assert(await page.locator('#dock-right-stack[data-solo="1"]').count(), '应进入单卡')
   assert(!(await backrefs.getAttribute('data-collapsed')), '单卡目标应展开（槽里只剩它一张）')
-  assert((await prefFolded()).includes('backrefs'), '单卡不该改落盘的收起表（退出才能恢复）')
+  assert((await prefFolded()).includes('mount'), '单卡不该改落盘的收起表（退出才能恢复）')
   await backrefs.locator('> .dock-card-head [data-dock-action="solo"]').click()
   await page.waitForTimeout(100)
   assert((await backrefs.getAttribute('data-collapsed')) === '1', '退出单卡应回到收着（叠加撤销）')
