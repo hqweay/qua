@@ -208,3 +208,18 @@ test('条件树：没填完的行要能被指出来（不静默丢掉刚敲的�
   assert.equal(treeIncomplete(draft.root), true)
   assert.equal(treeLeafCount(draft.root), 2, '条数按叶子算（未填的也算一条，用户看得见）')
 })
+
+test('相对时间窗：「最近 N 天」存表达式（{rel:{days}}），往返逐字节相等', () => {
+  roundTrip({ where: { prop: { id: 'core/modified', gte: { rel: { days: -7 } } } } })
+  // 拆回来必须是「时间行的 recent 档」，不是普通属性行
+  const draft = treeOfSpec({ where: { prop: { id: 'core/created', gte: { rel: { days: -3 } } } } })
+  assert.ok(draft)
+  const row = draft.root.items[0]
+  assert.ok(row && row.kind === 'leaf' && row.row.kind === 'stamp')
+  if (row.kind === 'leaf' && row.row.kind === 'stamp') {
+    assert.equal(row.row.op, 'recent')
+    assert.equal(row.row.days, 3)
+  }
+  // lt 档的相对界不是「时间行」生成的形状，但普通属性行能按 JSON 字面量诚实编辑（往返仍逐字节）
+  roundTrip({ where: { prop: { id: 'core/modified', lt: { rel: { days: -7 } } } } })
+})

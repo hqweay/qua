@@ -12,6 +12,8 @@ import type { Atom, Block } from '../src/core/index.ts'
 import {
   canonicalSpec,
   contextKey,
+  dayStartMs,
+  shiftISO,
   findJournalDay,
   findTagByName,
   declareField,
@@ -130,20 +132,20 @@ test('findTagByName / tagMemberIds：标签的成员＝块上的归属', () => {
 })
 
 test('runQuery：标签条件只命中带标签的块', () => {
-  const { blocks } = fixture()
-  const hits = runQuery({ where: { tag: 'todo' } }, { blocks })
+  const { blocks, todo } = fixture()
+  const hits = runQuery({ where: { tag: todo.id } }, { blocks })
   assert.deepEqual(hits.map((h) => h.blockId), ['a', 'b', 'd1', 'e', 'j1b'])
 })
 
 test('runQuery：`{up:{is:$self}}` ＝「这一块之下」（原 scope:subtree 的条件形状）', () => {
-  const { blocks } = fixture()
-  const hits = runQuery({ where: { all: [{ up: { is: 'p1' } }, { tag: 'todo' }] } }, { blocks })
+  const { blocks, todo } = fixture()
+  const hits = runQuery({ where: { all: [{ up: { is: 'p1' } }, { tag: todo.id }] } }, { blocks })
   assert.deepEqual(hits.map((h) => h.blockId), ['a', 'b', 'd1'], 'p2 与 journal 不该进来')
 })
 
 test('runQuery：范围不再是轴——没有方向条件就是整片森林', () => {
-  const { blocks } = fixture()
-  const hits = runQuery({ where: { tag: 'todo' } }, { blocks })
+  const { blocks, todo } = fixture()
+  const hits = runQuery({ where: { tag: todo.id } }, { blocks })
   assert.equal(hits.length, 5)
 })
 
@@ -175,7 +177,7 @@ test('ref 条件按**当前节点的目标**判定：同一份条件里两个目
   // 两条求值路径同解（串味的病只在语义层；索引路径共用同一份判定）
   assertSameHits({ where: { all: [{ ref: 'X' }, { not: { ref: 'Y' } }] } }, blocks)
   // 没有 ref 条件 ⇒ 不建表（按需建的口径不变）
-  assert.equal(usesRef({ tag: 'todo' }), false)
+  assert.equal(usesRef({ tag: '任意id' }), false)
   assert.equal(usesRef({ up: { ref: 'X' } }), true)
 })
 
@@ -267,13 +269,13 @@ test('canonicalSpec：role 条件与 sort 键要能存活下来（否则存进 _
 })
 
 test('runQuery：all / any / not 组合', () => {
-  const { blocks } = fixture()
+  const { blocks, todo } = fixture()
   const openTask = { prop: { id: TASK_STATUS_PROP_ID, eq: false } } as const
-  const todoOnly = runQuery({ where: { all: [{ tag: 'todo' }, openTask] } }, { blocks })
+  const todoOnly = runQuery({ where: { all: [{ tag: todo.id }, openTask] } }, { blocks })
   // ⚠️ `j1b` 只有标签、**这一栏也没人声明** ⇒ 不该命中 `all[tag, 未完成]`
   assert.deepEqual(todoOnly.map((h) => h.blockId), ['a', 'd1', 'e'])
 
-  const notTag = runQuery({ where: { not: { tag: 'todo' } } }, { blocks })
+  const notTag = runQuery({ where: { not: { tag: todo.id } } }, { blocks })
   assert.ok(!notTag.some((h) => h.blockId === 'a'))
   assert.ok(notTag.some((h) => h.blockId === 'c'))
 
@@ -285,8 +287,8 @@ test('runQuery：all / any / not 组合', () => {
 })
 
 test('runQuery：limit 截断；结果顺序＝森林先序（可复现）', () => {
-  const { blocks } = fixture()
-  const hits = runQuery({ where: { tag: 'todo' }, limit: 2 }, { blocks })
+  const { blocks, todo } = fixture()
+  const hits = runQuery({ where: { tag: todo.id }, limit: 2 }, { blocks })
   assert.deepEqual(hits.map((h) => h.blockId), ['a', 'b'])
 })
 
@@ -307,24 +309,24 @@ function assertSameHits(spec: QuerySpec, blocks: Block[], opts: { anchorId?: str
 }
 
 test('索引路径与纯函数路径同解（ref/tag/journal 查表，判定与顺序共用一份）', () => {
-  const { blocks } = fixture()
-  assertSameHits({ where: { tag: 'todo' } }, blocks)
-  assertSameHits({ where: { tag: 'todo' } }, blocks, { anchorId: 'p1' })
+  const { blocks, todo } = fixture()
+  assertSameHits({ where: { tag: todo.id } }, blocks)
+  assertSameHits({ where: { tag: todo.id } }, blocks, { anchorId: 'p1' })
   assertSameHits({ where: { ref: 'c' } }, blocks)
   assertSameHits({ where: dayPath('2026-10-20') }, blocks)
-  assertSameHits({ where: { all: [{ tag: 'todo' }, { prop: { id: TASK_STATUS_PROP_ID, eq: false } }] } }, blocks)
+  assertSameHits({ where: { all: [{ tag: todo.id }, { prop: { id: TASK_STATUS_PROP_ID, eq: false } }] } }, blocks)
   assertSameHits({ where: { text: '丙' } }, blocks)
-  assertSameHits({ where: { tag: 'todo' }, limit: 2 }, blocks)
+  assertSameHits({ where: { tag: todo.id }, limit: 2 }, blocks)
   // 成员条件（索引路径查日期表收窄候选）＋ 排序轴
   assertSameHits({ where: { role: 'journal' } }, blocks)
   assertSameHits({ where: { role: 'journal' }, sort: [{ by: '_date', dir: 'desc' }] }, blocks)
 })
 
 test('freezeResult：求值**不写块**（结果按表面实例冻结，不进库、不进撤销）', () => {
-  const { blocks } = fixture()
+  const { blocks, todo } = fixture()
   const { kb } = kbOf(blocks)
   const q = b('q', '查询：带 todo 的')
-  const spec: QuerySpec = { where: { tag: 'todo' } }
+  const spec: QuerySpec = { where: { tag: todo.id } }
   const frozen = freezeResult(spec, kb, {})
   assert.equal(frozen.hits.length, 5)
   assert.equal(readSpec(q), null, '冻结一个结果不该写条件（条件由构建器写）')
@@ -344,12 +346,12 @@ test('freezeResult：求值**不写块**（结果按表面实例冻结，不进�
 })
 
 test('冻结的判据：条件变了／上下文变了就要重算（不会出现「旧条件 ＋ 新结果」）', () => {
-  const { blocks } = fixture()
+  const { blocks, todo } = fixture()
   const { kb } = kbOf(blocks)
-  const a: QuerySpec = { where: { tag: 'todo' } }
+  const a: QuerySpec = { where: { tag: todo.id } }
   const frozen = freezeResult(a, kb, {})
   assert.equal(frozenStale(frozen, a, {}), false, '同样的条件与上下文 ⇒ 不重算')
-  const b2: QuerySpec = { where: { tag: 'todo' }, limit: 2 }
+  const b2: QuerySpec = { where: { tag: todo.id }, limit: 2 }
   assert.equal(frozenStale(frozen, b2, {}), true, '条件变了 ⇒ 重算')
   assert.equal(frozenStale(frozen, a, { excludeIds: ['a'] }), true, '上下文（剔除谁）变了 ⇒ 重算')
   assert.equal(frozenStale(null, a, {}), true, '还没有冻结过 ⇒ 算一次')
@@ -374,9 +376,9 @@ test('求值的上下文：范围住在条件里（`{up:{is}}`），上下文只
 })
 
 test('resolveFrozen：内容按 id 现读（冻的是成员，不是文字）', () => {
-  const { blocks } = fixture()
+  const { blocks, todo } = fixture()
   const { kb } = kbOf(blocks)
-  const frozen = freezeResult({ where: { tag: 'todo' } }, kb, {})
+  const frozen = freezeResult({ where: { tag: todo.id } }, kb, {})
 
   // 改文字：冻结结果不变，但**读出来的是新文字**
   blocks[0]!.children[0]!.text = '甲已改名 #todo'
@@ -693,7 +695,7 @@ function selfFixture() {
   inline.content.push({ id: 'r2a', t: 'ref', to: 'j1', label: journalDateLabel('2026-10-26'), flavor: '#' })
   // 正文里**真的写着**宿主的可读文本（`{text}` 吃的是文本段，不是原子标签）
   const literal = b('r3', `今天记了一笔：${journalDateLabel('2026-10-26')}`)
-  return { blocks: [j, host, same, pointing, inline, literal, tag], host, j, same, pointing, inline, literal }
+  return { blocks: [j, host, same, pointing, inline, literal, tag], host, j, same, pointing, inline, literal, tag }
 }
 
 test('U3 同一个带 $self 的 spec：纯路径与索引路径结果相等', () => {
@@ -707,13 +709,13 @@ test('U3 同一个带 $self 的 spec：纯路径与索引路径结果相等', ()
 })
 
 test('U4 selfId 缺省 ＋ spec 含 $self ⇒ 空结果（不退回全库）', () => {
-  const { blocks } = selfFixture()
+  const { blocks, tag } = selfFixture()
   // 若「解析不了」退化成「条件被忽略」，这里会返回整库
   assert.deepEqual(runQuery({ where: { ref: '$self' } }, { blocks }), [])
   assert.deepEqual(runQuery({ where: { text: '$self' } }, { blocks }), [])
   assert.deepEqual(runQuery({ where: dayPath('$self') }, { blocks }), [])
   // 不含 `$self` 的条件不受影响：没有宿主也照常求值
-  assert.equal(runQuery({ where: { tag: '项目' } }, { blocks }).length, 2)
+  assert.equal(runQuery({ where: { tag: tag.id } }, { blocks }).length, 2)
 })
 
 test('U5 {tag:$self} 命中同标签的块；「不含宿主自己」是 `excludeIds` 的事', () => {
@@ -780,8 +782,8 @@ test('resolveSelfSpec：不改入参，且嵌套组合里的 $self 也解析', (
 })
 
 test('宿主自己不进结果：靠 `excludeIds`，**不靠** `selfId` 顺带（两件事分开了）', () => {
-  const { blocks, host, same } = selfFixture()
-  const spec: QuerySpec = { where: { tag: '项目' } }
+  const { blocks, host, same, tag } = selfFixture()
+  const spec: QuerySpec = { where: { tag: tag.id } }
   // 「带项目标签的块」按条件本该含宿主；挂载区的位置性质把它剔掉
   assert.deepEqual(runQuery(spec, { blocks, excludeIds: [host.id] }).map((h) => h.blockId), ['s1'])
   // ⚠️ 只给 selfId 时**不再**顺带剔除：`$self` 的解析与「结果剔除谁」是两条独立规则
@@ -932,7 +934,7 @@ test('A9 canonicalSpec：四个新原子逐支存活（漏一支＝存进 _query
       all: [
         { is: 'x' },
         { up: { text: '甲' } },
-        { down: { tag: 'todo' } },
+        { down: { tag: 'tag-x' } },
         { near: { not: { ref: 'r' } } },
       ],
     },
@@ -1125,4 +1127,20 @@ test('role 条件按值分发：page 问「露面里有没有 page」，未知�
   // 日记天与标签块不是页；{is:$self} 之类不受影响
   const unknown = { where: { role: 'nope' } } as unknown as QuerySpec
   assert.deepEqual(runQuery(unknown, { blocks }), [], '未知 role 不命中（不抛，形状宽容、语义拒绝）')
+})
+
+test('相对时间窗：{rel:{days}} 对 env.today 现算（存表达式，隔天自然换窗）', () => {
+  const at = Date.now()
+  const mk = (id: string, modified: number) => ({
+    id, content: [], children: [], created: at, modified, props: { _type: 'note' },
+  })
+  // 三个修改时刻：10-20／11-01／11-11（本地零点 +1ms）
+  const blocks = [mk('a', dayStartMs('2026-10-20') + 1), mk('b', dayStartMs('2026-11-01') + 1), mk('c', dayStartMs('2026-11-11') + 1)]
+  const spec: QuerySpec = { where: { prop: { id: 'core/modified', gte: { rel: { days: -7 } } } } }
+  // 基准 11-12：窗口自 11-05 起 ⇒ 只有 c
+  assert.deepEqual(runQuery(spec, { blocks, today: '2026-11-12' }).map((h) => h.blockId), ['c'])
+  // 同一份条件换个基准日 ⇒ 窗口跟着挪（表达式没有被固化）：基准 11-06 ⇒ 窗口自 10-30 起
+  assert.deepEqual(runQuery(spec, { blocks, today: '2026-11-06' }).map((h) => h.blockId), ['b', 'c'])
+  // 没有基准 ⇒ 不命中（不猜今天）
+  assert.deepEqual(runQuery(spec, { blocks }), [])
 })

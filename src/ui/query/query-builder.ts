@@ -55,6 +55,8 @@ export interface ConditionTextDeps {
   choices?: (propId: string) => readonly { id: string; label: string }[]
   /** 引用／这一块 `/` 某一块的目标 id → 名字 */
   refLabel?: (targetId: string) => string
+  /** 标签块 id → 显示名（'' ＝ 解析不到；缺省按 id 原样显示） */
+  tagLabel?: (tagId: string) => string
 }
 
 /**
@@ -71,10 +73,16 @@ export function queryChips(
   fields: readonly { id: string; label: string }[],
   choices?: (propId: string) => readonly { id: string; label: string }[],
   refLabel?: (id: string) => string,
+  tagLabel?: (id: string) => string,
 ): string[] {
   const draft = treeOfSpec(spec)
   if (!draft) return [t('ui.query.builder.complex')]
-  const deps: ConditionTextDeps = { fields, choices, ...(refLabel ? { refLabel } : {}) }
+  const deps: ConditionTextDeps = {
+    fields,
+    ...(choices ? { choices } : {}),
+    ...(refLabel ? { refLabel } : {}),
+    ...(tagLabel ? { tagLabel } : {}),
+  }
   const root = draft.root
   if (root.dir !== undefined || root.not) return [sentence(root, deps, true)]
   return root.items.map((item) => sentence(item, deps, true))
@@ -106,8 +114,12 @@ function sentence(node: TreeNode, deps: ConditionTextDeps, topLevel: boolean): s
 
 function rowSentence(row: TreeRow, deps: ConditionTextDeps): string {
   switch (row.kind) {
-    case 'tag':
-      return row.value === SELF ? t('ui.query.selfTag') : `#${row.value}`
+    case 'tag': {
+      if (row.value === SELF) return t('ui.query.selfTag')
+      // 条件按**标签块 id**存：显示名现解析；解析不到说「已删除」，不把 id 摆给用户
+      const name = deps.tagLabel?.(row.value) ?? row.value
+      return name === '' ? t('ui.query.tagGone') : `#${name}`
+    }
     case 'text':
       return row.value === SELF ? t('ui.query.selfText') : t('ui.query.label.text', { text: row.value })
     case 'ref':
@@ -120,6 +132,12 @@ function rowSentence(row: TreeRow, deps: ConditionTextDeps): string {
     case 'day':
       return dayText(row)
     case 'stamp':
+      if (row.op === 'recent') {
+        return t('ui.query.label.stampRecent', {
+          field: t(row.field === 'core/modified' ? 'ui.query.stamp.modified' : 'ui.query.stamp.created'),
+          days: String(row.days ?? 0),
+        })
+      }
       return t('ui.query.label.stamp', {
         field: t(row.field === 'core/modified' ? 'ui.query.stamp.modified' : 'ui.query.stamp.created'),
         op: t(

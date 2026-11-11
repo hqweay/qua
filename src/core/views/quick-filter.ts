@@ -3,7 +3,7 @@
  *
  * ## 不造新机制：chips 是「条件」的另一个编辑档
  *
- * chips 的状态按**条件语言的形状**存——页是 `{up:{is:页 id}}`、标签是 `{tag:主名}`、
+ * chips 的状态按**条件语言的形状**存——页是 `{up:{is:页 id}}`、标签是 `{tag:标签块 id}`、
  * 排除列包一层「非」。它就是「这一屏按什么选」的另一种画法，不是第二套过滤：
  * 摘一颗 chip ＝ 删一个条件节点；`quickFilterNode` 是这份状态的**全路径投影**，
  * `chipsOfFilter` 是它的**逆**（认得出的形状原样读回来，认不出返回 `null`）。
@@ -25,10 +25,9 @@
  * `ViewRecord` 与编辑器的一行都能立刻给出（`QuickFilterRow`），所以同一份判定
  * 喂给两张面——查询结果/派生栏（记录）与正文大纲（可见行）。
  *
- * ⚠️ **标签 chip 存的是主名，不是 id**：条件语言的 `{tag}` 按名解析（`findTagByName`），
- *    chips 与它同形 ⇒ 投影出去的节点可以直接求值，不需要中间翻译。代价是**改名**会让
- *    存下来的 chip（以及任何按名写的查询）指向一个不存在的名字——这与现有查询的
- *    口径完全一致，不是 chips 新增的脆弱性。
+ * ⚠️ **标签 chip 存的是标签块 id**：条件语言的 `{tag}` 按 id 解析（与 `{prop}` 同一条
+ *    「键是 id」纪律）⇒ 投影出去的节点可以直接求值；显示名一律现解析。
+ *    标签**改名**不再影响任何存下来的条件或 chip。
  */
 import { primaryAliasOf } from '../identity/alias.ts'
 import { hasList, type Block } from '../model/model.ts'
@@ -112,7 +111,7 @@ export function quickFilterActive(state: QuickFilterState): boolean {
  */
 export function quickFilterAtomMatches(atom: QuickFilterAtom, row: QuickFilterRow): boolean {
   if ('up' in atom) return row.path.some((p) => p.id === atom.up.is)
-  return row.tags.some((t) => primaryAliasOf(t) === atom.tag)
+  return row.tags.some((t) => t.id === atom.tag)
 }
 
 /** 一行在这一份状态下的三态：与行遍历的三态是同一份（`RowVerdict`） */
@@ -272,6 +271,6 @@ export function quickFilterCandidates(records: readonly QuickFilterRow[]): {
       .sort((a, b) => b.count - a.count)
   return {
     pages: out(pages, (b) => ({ up: { is: b.id } })),
-    tags: out(tags, (b) => ({ tag: primaryAliasOf(b) })),
+    tags: out(tags, (b) => ({ tag: b.id })),
   }
 }

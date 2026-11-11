@@ -49,7 +49,7 @@ export type TreeRow =
    * `before` ＝ `lt 当天零点`。日期只是值控件的投影——把「某一天」写成日期串再比毫秒
    * 是比不了的（类型不同），而把毫秒固定成日期串又会在时区/边界上撒谎。
    */
-  | { kind: 'stamp'; field: 'core/created' | 'core/modified'; op: 'on' | 'after' | 'before'; date: string }
+  | { kind: 'stamp'; field: 'core/created' | 'core/modified'; op: 'on' | 'after' | 'before' | 'recent'; date: string; days?: number }
 
 export type TreeRowKind = TreeRow['kind']
 
@@ -218,6 +218,12 @@ function stampRowOf(node: QueryNode): TreeRow | null {
     if (!isStampField(id)) return null
     const after = singleOpValue(node.prop as { id: string } & Record<string, unknown>, 'gte')
     const before = singleOpValue(node.prop as { id: string } & Record<string, unknown>, 'lt')
+    // 相对界（`{rel:{days}}`）＝「最近 N 天」：只认 gte 档（UI 只生成这一种）
+    if (after !== null && typeof after === 'object' && after !== null && 'rel' in (after as object)) {
+      const days = (after as { rel?: { days?: unknown } }).rel?.days
+      if (typeof days !== 'number' || !Number.isFinite(days)) return null
+      return { kind: 'stamp', field: id, op: 'recent', date: '', days: Math.trunc(-days) }
+    }
     const day = msAsDay(after ?? before)
     if (day === null) return null
     return { kind: 'stamp', field: id, op: after !== undefined ? 'after' : 'before', date: day }
@@ -338,6 +344,11 @@ export function treeNodeOfRow(row: TreeRow): QueryNode | null {
       : { all: [{ role: 'journal' }, { prop: { id: '_date', eq: row.date } }] }
   }
   if (row.kind === 'stamp') {
+    // 相对窗：存**表达式**（`{rel:{days}}`），求值对 env.today 现算——写死日期隔天就说谎
+    if (row.op === 'recent') {
+      if (row.days === undefined || !Number.isFinite(row.days) || row.days <= 0) return null
+      return { prop: { id: row.field, gte: { rel: { days: -row.days } } } }
+    }
     if (!isJournalDate(row.date)) return null
     const start = dayStartMs(row.date)
     if (row.op === 'after') return { prop: { id: row.field, gte: start } }

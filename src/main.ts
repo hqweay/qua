@@ -1580,7 +1580,7 @@ function openSpecPopover(opts: {
       ...(hostBlock ? { owner: hostBlock } : {}),
       pickRef: (b, propId, current, onPick, rect, trigger, opts) => pickRefValue(b, propId, current, onPick, rect, trigger, opts),
       pickTag: pickTagValue,
-      tagExists,
+      tagLabel,
       refLabel: (targetId) => {
         const target = kb.get(targetId)
         return target ? blockLabel(target, kbGet) : t('ui.props.refMissing', { id: shortId(targetId) })
@@ -3069,7 +3069,7 @@ const {
   pickRefValue,
   pickChoiceValue,
   pickTagValue,
-  tagExists,
+  tagLabel,
   openPropertiesDrawer,
   mountBlockView,
   mountEmbedView,
@@ -3116,7 +3116,7 @@ panels = {
   pickRefValue,
   pickChoiceValue,
   pickTagValue,
-  tagExists,
+  tagLabel,
   openPropertiesDrawer,
   mountBlockView,
   mountEmbedView,

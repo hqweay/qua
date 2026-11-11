@@ -795,10 +795,6 @@ export function relationKindCounts(index: Index, targetId: string): Map<Relation
 }
 
 /** 按规范化名字找标签块 id */
-export function tagIdByName(index: Index, name: string): string | undefined {
-  return index.tags.get(normalizeAlias(name))
-}
-
 /**
  * 按**地址**查块 id（`[[名字]]` 解析、`@` 补全、改名查重都走它）。
  *
@@ -882,7 +878,16 @@ function refSourcesByIndex(index: Index): RefSources {
   }
 }
 
-/** `tag` 条件的目标块集合 —— 名字表解析成标签块，再查**成员表** */
+/**
+ * 「名字 → 标签块 id」的查表访问器：改名传播、候选显示名等仍按名字问索引。
+ * ⚠️ 查询的 `{tag}` 条件**不走这里**——它按标签块 id 存（与 `{prop}` 同一条纪律），
+ *    名字表只服务「用户嘴里说的是哪个标签」这一类问题。
+ */
+export function tagIdByName(index: Index, name: string): string | undefined {
+  return index.tags.get(normalizeAlias(name))
+}
+
+/** `tag` 条件的目标块集合 —— id 解析成标签块，再查**成员表** */
 function tagsByIndex(node: QueryNode, index: Index): Set<string> {
   const out = new Set<string>()
   const visit = (n: QueryNode): void => {
@@ -893,8 +898,9 @@ function tagsByIndex(node: QueryNode, index: Index): Set<string> {
     else if ('down' in n) visit(n.down)
     else if ('near' in n) visit(n.near)
     else if ('tag' in n) {
-      const tagId = tagIdByName(index, n.tag)
-      if (tagId) for (const id of tagMemberIdsOf(index, tagId)) out.add(id)
+      // 条件按**标签块 id**存；与纯函数路径同一条守卫：id 要解析得到活着的标签块
+      const tag = lookupBlock(index, n.tag)
+      if (tag && hasList(tag, 'tag')) for (const id of tagMemberIdsOf(index, tag.id)) out.add(id)
     }
   }
   visit(node)

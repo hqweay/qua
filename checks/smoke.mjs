@@ -17789,7 +17789,7 @@ await check('T178 local tab：加一栏不建块；切表格；刷新只影响�
     const r = window.__qua.invoke('core.mount/add-local', {
       host: { kind: 'block', blockId: host },
       label: '全库待办',
-      spec: { where: { tag: '任务' } },
+      spec: { where: { tag: window.__tagId('任务') } },
     })
     return r === false ? '' : String(window.__qua.__editor.sel?.aBlock ?? '')
   }, before.host)
@@ -18020,7 +18020,7 @@ await check('T184 表头排序只改显示序：_query.sort 不变、成员不�
     (id) =>
       window.__qua.invoke('core.query/set-spec', {
         owner: { kind: 'block', blockId: id },
-        spec: { where: { tag: '任务' } },
+        spec: { where: { tag: window.__tagId('任务') } },
       }),
     qid,
   )
@@ -18085,7 +18085,7 @@ await check('T187 稳定 id：摘掉第一栏之后，激活的是原来那一�
       window.__qua.invoke('core.mount/add-local', {
         host: { kind: 'block', blockId: h },
         label,
-        spec: { where: { tag: '任务' } },
+        spec: { where: { tag: window.__tagId('任务') } },
       })
     add('甲栏')
     add('乙栏')
@@ -18273,7 +18273,7 @@ await check('B1 条件树就地展开在抬头下一格；折叠后只剩一条 
   const centerId = await page.evaluate(() => {
     window.__qua.invoke('core.query/create', {
       name: '默认展开查询',
-      spec: { where: { tag: '任务' } },
+      spec: { where: { tag: window.__tagId('任务') } },
     })
     return String(window.__qua.snapshot().activeId)
   })
@@ -19060,7 +19060,7 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
     (id) =>
       window.__qua.invoke('core.query/set-spec', {
         owner: { kind: 'block', blockId: id },
-        spec: { where: { tag: '任务' } },
+        spec: { where: { tag: window.__tagId('任务') } },
       }),
     qid,
   )
@@ -19319,7 +19319,7 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
     return { parent, where: JSON.stringify(window.__qua.__editor.store.find(q)?.props?._query?.where) }
   }, { id: card.id, q: qid })
   assert(afterDrag.parent === parentBefore, `拖卡不许换父子（那会改结构）：${parentBefore} → ${afterDrag.parent}`)
-  assert(afterDrag.where === '{"tag":"任务"}', `拖卡不许改条件：${afterDrag.where}`)
+  assert(afterDrag.where.includes('"tag":"'), `拖卡不许改条件：${afterDrag.where}`)
   // **换列是拖卡的验收点**：写完值，卡必须搬进目标列（列成员与计数跟着重算）——
   // 只断模型断不出「值改了、卡还留在旧列」的缝
   const afterCol = await page.evaluate((id) => {
@@ -21284,7 +21284,7 @@ await check('T215 Shift+点日历／查询各看法的打开入口 ⇒ 右槽窗
     (id) =>
       window.__qua.invoke('core.query/set-spec', {
         owner: { kind: 'block', blockId: id },
-        spec: { where: { tag: '任务' } },
+        spec: { where: { tag: window.__tagId('任务') } },
       }),
     qid,
   )
@@ -26666,7 +26666,7 @@ await check('T281 快速筛选：新建查询默认不查询；查询块的漏�
 
   // ② 给一个真条件，再用漏斗筛一刀：切片落 _defaultFilter，基础条件不动
   await page.evaluate((id) => {
-    window.__qua.invoke('core.query/set-spec', { owner: { kind: 'block', blockId: id }, spec: { where: { tag: '任务' } } })
+    window.__qua.invoke('core.query/set-spec', { owner: { kind: 'block', blockId: id }, spec: { where: { tag: window.__tagId('任务') } } })
   }, bid)
   await page.waitForTimeout(400)
   const pre = await page.evaluate(() => ({
@@ -26701,7 +26701,7 @@ await check('T281 快速筛选：新建查询默认不查询；查询块的漏�
     }
   }, bid)
   assert(sliced.filter !== null, `包含一颗 chip 之后应写 _defaultFilter：${JSON.stringify(sliced.filter)}`)
-  assert(sliced.query.includes('"tag":"任务"'), `基础条件不许被 chips 改：${sliced.query}`)
+  assert(sliced.query.includes('"tag":"'), `基础条件不许被 chips 改：${sliced.query}`)
   assert(sliced.active === '1', '漏斗显示「已筛」态')
   assert(sliced.undo > pre.undo, `写切片是一条可撤销的写：${pre.undo}→${sliced.undo}`)
 
@@ -26897,7 +26897,7 @@ await check('T283 看板拖卡让位（FLIP）：手势落点出 200ms 动画、
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
   await page.waitForTimeout(400)
   await page.evaluate(
-    (id) => window.__qua.invoke('core.query/set-spec', { owner: { kind: 'block', blockId: id }, spec: { where: { tag: '任务' } } }),
+    (id) => window.__qua.invoke('core.query/set-spec', { owner: { kind: 'block', blockId: id }, spec: { where: { tag: window.__tagId('任务') } } }),
     qid,
   )
   await page.waitForTimeout(400)

@@ -33,7 +33,7 @@ import { tagIdsOf } from '../identity/tags.ts'
 import { descendantTagIds } from '../identity/tag-tree.ts'
 import { plainText } from '../model/runs.ts'
 import type { QueryHit, QueryNode, QuerySpec } from '../query/query.ts'
-import { findById, isQueryNode, isQuerySpec } from '../query/query.ts'
+import { isQueryNode, isQuerySpec } from '../query/query.ts'
 import { isRefKind, REFERENCE_KINDS, type RefKind } from '../relations/relations.ts'
 import { mentionSnippet, mentionSpotsOf } from '../relations/mention.ts'
 import { t } from '../infra/msg.ts'
@@ -273,19 +273,14 @@ export function derivedSpecOf(host: Block, forest: readonly Block[], source: Der
 /**
  * 「成员」＝ 标签块自己的成员（含下级标签，口径只在 `core/tag-tree.ts` 一份）。
  *
- * 标签块没有 `_tags`，`{tag:'$self'}` 对它永远是空集，所以这一支用**自己的主名**
- * 现算条件（改名自动跟上）；只有标签块才有这一栏。
+ * 标签块没有 `_tags`，`{tag:'$self'}` 对它永远是空集，所以这一支用**下级标签的 id**
+ * 现算条件；只有标签块才有这一栏。
  */
 function memberSpecOf(host: Block, forest: readonly Block[]): QuerySpec | null {
   if (!hasList(host, 'tag')) return null
-  const names = new Set<string>()
-  for (const id of descendantTagIds(host.id, forest)) {
-    const tag = findById(forest, id)
-    const name = tag ? primaryAliasOf(tag).trim() : ''
-    if (name !== '') names.add(name)
-  }
-  if (names.size === 0) return null
-  const nodes: QueryNode[] = [...names].map((name) => ({ tag: name }))
+  const ids = [...descendantTagIds(host.id, forest)]
+  if (ids.length === 0) return null
+  const nodes: QueryNode[] = ids.map((id) => ({ tag: id }))
   return { where: nodes.length === 1 ? nodes[0]! : { any: nodes } }
 }
 

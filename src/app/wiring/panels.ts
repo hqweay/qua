@@ -19,7 +19,6 @@ import {
   derivedTemplateOf,
   displayNameOf,
   EMPTY_QUICK_FILTER,
-  findTagByName,
   SELF,
   hasQueryBody,
   hasChildrenViewBody,
@@ -288,7 +287,7 @@ export function setupPanels(deps: PanelsDeps) {
    */
   const pickTagValue = (
     _current: string,
-    onPick: (name: string) => void,
+    onPick: (tagId: string) => void,
     anchor?: DOMRect,
     trigger?: HTMLElement,
   ): void => {
@@ -302,14 +301,17 @@ export function setupPanels(deps: PanelsDeps) {
       allowCreate: false,
       idPrefix: 'qtag',
       onPick: (pick) => {
-        // 关掉「新建」后只可能选到已有标签；写回主地址，与 findTagByName 同一口径
-        if (pick.kind === 'tag') onPick(pick.name)
+        // 关掉「新建」后只可能选到已有标签；写回**标签块 id**（条件按 id 存，改名不影响语义）
+        if (pick.kind === 'tag') onPick(pick.id)
       },
     })
   }
 
-  /** 条件按名存：标签改名后旧条件解析不到，给一句实话而不是静默空集 */
-  const tagExists = (name: string): boolean => findTagByName(kb.roots(), name) !== undefined
+  /** 条件按**标签块 id**存：显示名现解析；'' ＝ 解析不到（标签删了），树那行说「已不存在，重新选」 */
+  const tagLabel = (id: string): string => {
+    const b = kb.get(id)
+    return b ? displayNameOf(b).trim() : ''
+  }
 
   /**
    * **选项图标选择器**：把 `ICON_PATHS` 的键现画成一列，行内带图标预览。
@@ -811,7 +813,7 @@ export function setupPanels(deps: PanelsDeps) {
       pickRef: (b, propId, current, onPick, anchor, trigger, opts) => pickRefValue(b, propId, current, onPick, anchor, trigger, opts),
       pickChoice: (b, propId, current, onPick, anchor, trigger) => pickChoiceValue(b, propId, current, onPick, anchor, trigger),
       pickTag: pickTagValue,
-      tagExists,
+      tagLabel,
       refLabel: (id) => {
         const b = kb.get(id)
         if (!b) return t('ui.props.refMissing', { id: shortId(id) })
@@ -1248,7 +1250,7 @@ export function setupPanels(deps: PanelsDeps) {
     pickRefValue,
     pickChoiceValue,
     pickTagValue,
-    tagExists,
+    tagLabel,
     openPropertiesDrawer,
     mountBlockView,
     mountEmbedView,

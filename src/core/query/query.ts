@@ -10,12 +10,12 @@
  * ⚠️ 接索引后本文件的签名不变：`evaluateQuery`（判定与顺序）由两条路径共用，
  *    索引路径见 `index-port.ts` 的 `queryByIndex`；`QuerySpec` 仍是那个 canonical JSON。
  */
-import { hasList, isJournalBlock, isPropDefBlock, primaryAliasOf, type Block } from '../model/model.ts'
+import { hasList, isJournalBlock, isPropDefBlock, type Block } from '../model/model.ts'
 import { plainText } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
 import { findPath } from '../model/tree.ts'
-import { findTagByName, tagIdsOf, tagMemberIds } from '../identity/tags.ts'
-import { journalDate, journalDays, shiftISO } from '../identity/journal.ts'
+import { tagIdsOf, tagMemberIds } from '../identity/tags.ts'
+import { dayStartMs, journalDate, journalDays, shiftISO } from '../identity/journal.ts'
 import { displayTextOf } from '../identity/alias.ts'
 import { fieldTableOf, isQueryableField, readField, type FieldTable } from '../props/props.ts'
 import { isRefKind, relationEdgesOfForest, REFERENCE_KINDS, type RefKind, type RelationKind } from '../relations/relations.ts'
@@ -68,7 +68,7 @@ export function refKindsOf(ref: string | RefTarget): readonly RefKind[] {
 export type QueryNode =
   /** 直接指向 `targetId` 的块（反链的最小形态：只认 id，不认 label） */
   | { ref: string | RefTarget }
-  /** 带某个标签的块：按**归属边**判定（见 `matches`），名字解析不到就是空集 */
+  /** 带某个标签的块：值是**标签块 id**（与 `{prop}` 同一条「键是 id」纪律——标签改名不影响查询语义）；id 解析不到活着的标签块就是空集 */
   | { tag: string }
   /** 正文包含某串 */
   | { text: string }
@@ -706,7 +706,10 @@ function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher {
       if ('eq' in op) return Array.isArray(v) ? v.some((x) => Object.is(x, op.eq)) : Object.is(v, op.eq)
       if ('neq' in op) return Array.isArray(v) ? !v.some((x) => Object.is(x, op.neq)) : !Object.is(v, op.neq)
       if ('contains' in op) return valueContains(v, op.contains)
-      return compareOp(v, op)
+      // 比较前先把相对界解析成毫秒（没有基准 ⇒ 不命中，见 resolveRelOps）
+      const bounded = resolveRelOps(op, env.today)
+      if (bounded === undefined) return false
+      return compareOp(v, bounded)
     }
     // 形状不认识（例如旧库里存过的已删原子）⇒ 不命中，不抛。
     // 库里存的那份由 `readSpec` 先验形；能走到这里说明是调用方直接构造的 spec。
@@ -741,6 +744,34 @@ function valueContains(v: unknown, needle: string): boolean {
   if (want === '') return false
   if (Array.isArray(v)) return v.some((x) => String(x).toLowerCase().includes(want))
   return String(v).toLowerCase().includes(want)
+}
+
+/**
+ * 大小比较的**相对界**：值位可以是 `{rel:{days}}`——本地「今天」零点 ± N 天的毫秒。
+ * 与 `{today}` 原子同一条原则：**存表达式不存字面量**，否则「最近 7 天」隔天就说谎。
+ * 没有基准（`env.today` 没注入）⇒ 整条不命中：猜一个今天，等于把时钟偷偷接回求值器。
+ */
+type CmpOp = { gt?: unknown; gte?: unknown; lt?: unknown; lte?: unknown }
+function resolveRelOps(op: PropOp, today: string | undefined): CmpOp | undefined {
+  const rel = (x: unknown): number | undefined =>
+    x !== null && typeof x === 'object' && 'rel' in (x as Record<string, unknown>)
+      ? (x as { rel?: { days?: unknown } }).rel?.days as number | undefined ?? undefined
+      : undefined
+  const hasRel = ['gt', 'gte', 'lt', 'lte'].some((k) => rel((op as Record<string, unknown>)[k]) !== undefined)
+  if (!hasRel) return op as CmpOp
+  if (today === undefined) return undefined
+  const ms = (x: unknown): unknown => {
+    const days = rel(x)
+    return days === undefined ? x : dayStartMs(shiftISO(today, Math.trunc(days)))
+  }
+  const out = op as Record<string, unknown>
+  return {
+    ...op,
+    ...('gt' in out ? { gt: ms(out.gt) } : {}),
+    ...('gte' in out ? { gte: ms(out.gte) } : {}),
+    ...('lt' in out ? { lt: ms(out.lt) } : {}),
+    ...('lte' in out ? { lte: ms(out.lte) } : {}),
+  }
 }
 
 /**
@@ -1020,14 +1051,11 @@ export function resolveTodayBase(spec: QuerySpec, hostDate: string | undefined, 
  *    「同一个 tab 在两条路径下结果不同」，而那是不报错的。
  * ⚠️ 解析出**空值**（宿主没有这一栏／可读文本／标签为空）⇒ 换成一条**永不命中**的条件，
  *    而不是把空串当成值去比 —— `{text:''}` 会命中所有块，`{eq:''}` 同理。
- * ⚠️ `{tag}` 要的是**名字**（`findTagByName` 的口径），而 `_tags` 存的是 id ⇒ 这里做一次
- *    「id → 主名」翻译；`resolveSelfSpec` 因此需要森林（标签块得先找得到）。
+ * ⚠️ `{tag}` 按**标签块 id**存（与 `_tags` 同一条口径），宿主的标签 id 直接进 `any`；
+ *    森林仍要传（`eq:'$self'` 的字段表按需建）。
  */
 export function resolveSelfSpec(spec: QuerySpec, host: Block, forest: readonly Block[]): QuerySpec {
-  const tagNames = tagIdsOf(host)
-    .map((id) => findById(forest, id))
-    .map((tag) => (tag ? primaryAliasOf(tag) : ''))
-    .filter((name) => name.trim() !== '')
+  const hostTagIds = tagIdsOf(host)
   /** 字段表按需建：只有 `eq:'$self'` 需要它，普通条件不该为它付一次全库扫描 */
   let fields: FieldTable | undefined
   const node = (n: QueryNode): QueryNode => {
@@ -1051,8 +1079,8 @@ export function resolveSelfSpec(spec: QuerySpec, host: Block, forest: readonly B
     }
     if ('tag' in n) {
       if (n.tag !== SELF) return { tag: n.tag }
-      if (tagNames.length === 0) return NEVER
-      return { any: tagNames.map((tag) => ({ tag })) }
+      if (hostTagIds.length === 0) return NEVER
+      return { any: hostTagIds.map((id) => ({ tag: id })) }
     }
     if ('text' in n) {
       if (n.text !== SELF) return { text: n.text }
@@ -1099,8 +1127,9 @@ function collectTags(node: QueryNode, forest: readonly Block[]): Set<string> {
     else if ('down' in n) visit(n.down)
     else if ('near' in n) visit(n.near)
     else if ('tag' in n) {
-      const tag = findTagByName(forest, n.tag)
-      if (tag) for (const id of tagMemberIds(tag.id, forest)) out.add(id)
+      // 条件里的值就是**标签块 id**；id 解析不到活着的标签块 ⇒ 空集（那个标签不存在，自然没有块带它）—— 不是「当文本搜」
+      const tag = findById(forest, n.tag)
+      if (tag && hasList(tag, 'tag')) for (const id of tagMemberIds(tag.id, forest)) out.add(id)
     }
   }
   visit(node)

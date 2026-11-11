@@ -146,7 +146,21 @@ export async function launch() {
  */
 export async function freshPage(browser, base, opts = {}) {
   const ctx = await browser.newContext({ viewport: opts.viewport ?? { width: 1440, height: 900 }, deviceScaleFactor: opts.dsf ?? 2, locale: 'zh-CN' })
+  await ctx.addInitScript(tagIdHelper)
   return openPage(browser, ctx, base)
+}
+
+/**
+ * 标签条件按**标签块 id**存（与 `{prop}` 同一条「键是 id」纪律）。
+ * 冒烟里按名解析 id 用这枚助手：在页面上下文里现查（`__qua` 装配完成后才可用），
+ * 调用侧写 `window.__tagId('任务')`。名字解析不到就抛——前置坏了不该伪装成 0 结果。
+ */
+const tagIdHelper = () => {
+  window.__tagId = (name) => {
+    const hit = window.__qua?.allBlocks?.().find((b) => b.lists.includes('tag') && b.aliases.includes(name))
+    if (!hit) throw new Error(`smoke 前置：库里没有标签 ${name}`)
+    return hit.id
+  }
 }
 
 /**

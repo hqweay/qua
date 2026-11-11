@@ -73,8 +73,8 @@ export interface QueryTreeDeps {
   owner?: Block
   /** 标签值选择器：候选是库里已有的标签，可搜索；查询是读操作，不许顺手新建 */
   pickTag?: (current: string, onPick: (name: string) => void, anchor?: DOMRect, trigger?: HTMLElement) => void
-  /** 标签名还解析得到吗：按名存的条件在改名后会悬空，要给一句实话而不是静默空集 */
-  tagExists?: (name: string) => boolean
+  /** 标签块 id → 显示名（'' ＝ 解析不到：标签删了要给一句实话，而不是静默空集） */
+  tagLabel?: (tagId: string) => string
   /**
    * 显示「最多」那一格；缺省 `true`。
    *
@@ -615,19 +615,22 @@ export class QueryTree {
   private textRowControls(row: Extract<TreeRow, { kind: 'tag' | 'text' }>): HTMLElement {
     if (row.kind === 'tag') {
       if (row.value === SELF) return this.selfChip(t('ui.query.selfTag'))
-      const name = row.value
-      // 条件按名存：标签一改名就解析不到。给一句实话，别让查询静默变空集
-      const missing = name !== '' && this.deps.tagExists?.(name) === false
+      // 条件按**标签块 id**存：显示名现解析；解析不到（标签删了）给一句实话，别让查询静默变空集
+      const name = row.value === '' ? '' : (this.deps.tagLabel?.(row.value) ?? row.value)
       const label =
-        name === ''
+        row.value === ''
           ? t('ui.query.pickTag')
-          : missing
-            ? `#${name} · ${t('ui.query.tagMissing')}`
+          : name === ''
+            ? t('ui.query.tagMissing')
             : `#${name}`
-      const b = buttonEl(label, `qt-value qt-chip-btn qt-slot${name === '' ? ' qt-placeholder' : ''}${missing ? ' qt-missing' : ''}`, 'value')
+      const b = buttonEl(
+        label,
+        `qt-value qt-chip-btn qt-slot${row.value === '' ? ' qt-placeholder' : ''}${name === '' ? ' qt-missing' : ''}`,
+        'value',
+      )
       b.title = t('ui.query.pickTagHint')
       b.addEventListener('click', () => {
-        this.deps.pickTag?.(name, (next) => {
+        this.deps.pickTag?.(row.value, (next) => {
           row.value = next
           this.paint()
         }, b.getBoundingClientRect(), b)
@@ -940,15 +943,35 @@ export class QueryTree {
         { value: 'on', label: t('ui.query.stamp.on') },
         { value: 'after', label: t('ui.query.stamp.after') },
         { value: 'before', label: t('ui.query.stamp.before') },
+        { value: 'recent', label: t('ui.query.stamp.recentWord') },
       ],
       row.op,
       (next) => {
-        row.op = next === 'after' ? 'after' : next === 'before' ? 'before' : 'on'
-        this.syncApply()
+        row.op = next === 'after' ? 'after' : next === 'before' ? 'before' : next === 'recent' ? 'recent' : 'on'
+        if (row.op === 'recent' && (row.days === undefined || row.days <= 0)) row.days = 7
+        this.paint()
       },
       'qt-stamp-op',
       'stamp-op',
     )
+    // 「最近 N 天」存**表达式**（`{rel:{days}}`），值位是天数不是日期——写死日期隔天就说谎
+    if (row.op === 'recent') {
+      const days = document.createElement('input')
+      days.type = 'number'
+      days.min = '1'
+      days.className = 'qt-value ui-input qt-slot'
+      days.dataset.qt = 'value'
+      days.value = String(row.days ?? 7)
+      days.addEventListener('input', () => {
+        const n = Number(days.value)
+        row.days = Number.isFinite(n) && n > 0 ? Math.trunc(n) : undefined
+        this.syncRow(days, row)
+      })
+      const unit = document.createElement('span')
+      unit.className = 'qt-chip'
+      unit.textContent = t('ui.query.stamp.recentUnit')
+      return [field, op, days, unit]
+    }
     const date = document.createElement('input')
     date.type = 'date'
     date.className = 'qt-value ui-input qt-slot'

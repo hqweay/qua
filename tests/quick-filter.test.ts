@@ -60,19 +60,19 @@ const TAG_X = b('tag-x', '任务', { props: { _aliases: ['任务'], _lists: ['ta
 const TAG_Y = b('tag-y', '想法', { props: { _aliases: ['想法'], _lists: ['tag'] } })
 
 const pageAtom = (id: string): QuickFilterAtom => ({ up: { is: id } })
-/** 标签 chip 存**主名**（与条件语言 `{tag}` 的口径一致；改名会像查询一样失配） */
-const tagAtom = (name: string): QuickFilterAtom => ({ tag: name })
+/** 标签 chip 存**标签块 id**（与条件语言 `{tag}` 同一条「键是 id」纪律；改名不再失配） */
+const tagAtom = (id: string): QuickFilterAtom => ({ tag: id })
 
 /* ------------------------------------------------------------ 判定 */
 
-test('窄谓词：页＝祖先链上有它（不含自己）；标签＝行块的归属边（按主名）', () => {
+test('窄谓词：页＝祖先链上有它（不含自己）；标签＝行块的归属边（按 id）', () => {
   const r = row('r1', [PAGE_A, NESTED], [TAG_X])
   assert(quickFilterAtomMatches(pageAtom('a-page'), r), '祖先链上的页要命中')
   // 谓词只认 id（与 {up:{is}} 同构）；「祖先是不是页」由候选收集那一侧把关
   assert(quickFilterAtomMatches(pageAtom('nested'), r), '祖先按 id 判定，不限身份')
-  assert(quickFilterAtomMatches(tagAtom('任务'), r), '行块带的标签要命中')
-  assert(quickFilterAtomMatches(tagAtom('想法'), r) === false, '没带的标签不命中')
-  assert(quickFilterAtomMatches(tagAtom('tag-x'), r) === false, '标签存名字，不认 id')
+  assert(quickFilterAtomMatches(tagAtom('tag-x'), r), '行块带的标签要命中')
+  assert(quickFilterAtomMatches(tagAtom('tag-y'), r) === false, '没带的标签不命中')
+  assert(quickFilterAtomMatches(tagAtom('别的id'), r) === false, '没带的 id 不命中')
   // 行块自己不是自己的祖先：{up} 与求值器同一条口径（祖先链不含自己）
   assert(quickFilterAtomMatches(pageAtom('r1'), r) === false)
 })
@@ -92,19 +92,19 @@ test('包含列之间是「且」（再点一颗是收窄）', () => {
   ]
   const one = applyQuickFilter(rows, { include: [pageAtom('a-page')], remove: [] })
   assert.deepEqual(one.map((r) => r.block.id), ['r1', 'r2', 'r4'], '一颗＝只留命中它的')
-  const two = applyQuickFilter(rows, { include: [pageAtom('a-page'), tagAtom('任务')], remove: [] })
+  const two = applyQuickFilter(rows, { include: [pageAtom('a-page'), tagAtom('tag-x')], remove: [] })
   assert.deepEqual(two.map((r) => r.block.id), ['r1', 'r4'], '第二颗把前一颗的结果再收窄')
 })
 
 test('排除列：命中行藏掉；记录面没有子树，只有行自己', () => {
   const rows = [row('r1', [PAGE_A], [TAG_X]), row('r2', [PAGE_A], [TAG_Y]), row('r3', [PAGE_B], [])]
-  const kept = applyQuickFilter(rows, { include: [], remove: [tagAtom('任务')] })
+  const kept = applyQuickFilter(rows, { include: [], remove: [tagAtom('tag-x')] })
   assert.deepEqual(kept.map((r) => r.block.id), ['r2', 'r3'], '只有自己带那个标签的行被藏掉')
 })
 
 test('只有排除时其余全留（三态里的 keep，不是 neutral）', () => {
   const r = row('r1', [PAGE_A], [])
-  assert.equal(quickFilterVerdict({ include: [], remove: [tagAtom('任务')] }, r), 'keep')
+  assert.equal(quickFilterVerdict({ include: [], remove: [tagAtom('tag-x')] }, r), 'keep')
 })
 
 /* ------------------------------------------------------------ 状态 */
@@ -190,7 +190,7 @@ test('候选：页候选只收带页露面的祖先；标签候选收行块的�
   const kept = applyQuickFilter(rows, { include: [c.pages[0]!.atom], remove: [] })
   assert.equal(kept.length, 2, '候选自带的原子就是判定用的那颗 chip')
   assert(sameQuickFilterAtom(c.pages[0]!.atom, pageAtom('a-page')), '页候选的原子形状是 {up:{is}}')
-  assert(sameQuickFilterAtom(c.tags[0]!.atom, tagAtom('任务')), '标签候选的原子是主名')
+  assert(sameQuickFilterAtom(c.tags[0]!.atom, tagAtom('tag-x')), '标签候选的原子是标签块 id')
 })
 
 /* ------------------------------------------------------------ 行筛选（大纲） */

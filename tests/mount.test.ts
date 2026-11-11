@@ -274,17 +274,17 @@ test('cloneMountEntries：local 深拷、id 保持；linked 栏已退场（不�
  * 打开一个标签要看的是「这一支下面有哪些块」；它自己不是「和谁同标签」。
  * 标签页因此先落「成员」，不再先落一个通常为空的「引用」。
  */
-test('标签块的「成员」用的是它自己的名字：条件＝{tag: 主名}', () => {
+test('标签块的「成员」用的是它自己的 id：条件＝{tag: 标签块 id}', () => {
   const tag = mkTagBlock('人物')
   const members = derivedSpecOf(tag, [tag], 'members')
-  assert.deepEqual(members, { where: { tag: '人物' } }, '只有一个标签时就是它自己那一条')
+  assert.deepEqual(members, { where: { tag: tag.id } }, '只有一个标签时就是它自己那一条')
   assert.deepEqual(SOURCES(derivedEntriesOf(tag)), ['members', 'refs', 'same', 'mentions'], '成员第一')
 })
 
 test('兼位块（既带标签又是标签）：成员与同类各答各的', () => {
   const a = mkTagBlock('甲')
   const both = { ...mkTagBlock('丙'), props: { _aliases: ['丙'], _lists: ['tag'], _tags: [a.id] } }
-  assert.deepEqual(derivedSpecOf(both, [a, both], 'members'), { where: { tag: '丙' } })
+  assert.deepEqual(derivedSpecOf(both, [a, both], 'members'), { where: { tag: both.id } })
   assert.deepEqual(derivedSpecOf(both, [a, both], 'same'), { where: { tag: '$self' } })
 })
 
@@ -294,7 +294,7 @@ test('「成员」沿下级标签展开（算作）：#人物 的成员含只打
   // 归属边：演员 归在 人物 下（任何块都能配，这条边住在子块上）
   const 演员WithEdge = { ...演员, props: { ...(演员.props ?? {}), _belongsTo: [人物.id] } }
   const members = derivedSpecOf(人物, [人物, 演员WithEdge], 'members')
-  assert.deepEqual(members, { where: { any: [{ tag: '人物' }, { tag: '演员' }] } })
+  assert.deepEqual(members, { where: { any: [{ tag: 人物.id }, { tag: 演员.id }] } })
 })
 
 /* ------------------------------------------------------------ 派生栏的记录 */

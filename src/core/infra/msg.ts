@@ -554,6 +554,9 @@ export const MSG = {
   'ui.query.stamp.on': '就在这一天',
   'ui.query.stamp.after': '从这天起',
   'ui.query.stamp.before': '早于这一天',
+  'ui.query.stamp.recentWord': '最近',
+  'ui.query.stamp.recentUnit': '天之内',
+  'ui.query.label.stampRecent': '{field} · 最近 {days} 天',
   'ui.query.label.stamp': '{field} {op} {date}',
   'ui.query.tree.dirHint': '不选＝问这块自己；在…之下＝存在满足条件的祖先（不含自己）；其下有…＝存在满足条件的子孙；链上有…＝自己、祖先或子孙任一处满足',
   // 方向那一格与 chip 共用：缺省是「没有关系」（一枚压暗的破折号，不是第四个选项名），
@@ -607,6 +610,7 @@ export const MSG = {
   'ui.query.pickTagEmpty': '库里还没有标签',
   'ui.query.pickTagHint': '从库里已有的标签里选',
   'ui.query.tagMissing': '已不存在，重新选',
+  'ui.query.tagGone': '标签已删除',
   'ui.query.selfTag': '带所在块的标签',
   'ui.query.selfText': '提到所在块',
   'ui.query.selfDate': '与所在块同一天',

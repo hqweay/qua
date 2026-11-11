@@ -225,7 +225,7 @@ export interface ViewHostDeps {
   /** 标签值选择器：只列已有标签、可搜；查询是读操作，不给新建 */
   pickTag?: (current: string, onPick: (name: string) => void, anchor?: DOMRect, trigger?: HTMLElement) => void
   /** 标签名还解析得到吗：按名存的条件改名后要显示悬空态，而不是静默空集 */
-  tagExists?: (name: string) => boolean
+  tagLabel?: (tagId: string) => string
   /** 多值 select 的选值浮层（与属性卡共用；省略 ⇒ 多值格只读） */
   pickChoice?: (
     owner: Block,
@@ -1353,7 +1353,7 @@ export class ViewHost {
       summary.dataset.queryChip = 'summary'
       // 收起态要读得出「这一屏按什么选的」；只报条数等于没说。
       // 拆不动的形状 queryChips 会整块给「复合条件」，那时才退回条数。
-      const labels = queryChips(spec, this.deps.fields(), this.deps.choices, this.deps.refLabel)
+      const labels = queryChips(spec, this.deps.fields(), this.deps.choices, this.deps.refLabel, this.deps.tagLabel)
       summary.textContent = labels.length > 0 ? `${treeSummary(spec)} · ${labels.join(' · ')}` : treeSummary(spec)
       // 抬头窄时省略几何走 ui-ellipsis 原语；title 给全文，不让「读得出内容」变成「读不全」
       summary.title = summary.textContent
@@ -1363,7 +1363,7 @@ export class ViewHost {
       return
     }
     // 没有内联树的面（投影／窄窗）：只列条件 chip；编辑入口在行首的「＋」
-    for (const label of queryChips(spec, this.deps.fields(), this.deps.choices, this.deps.refLabel)) {
+    for (const label of queryChips(spec, this.deps.fields(), this.deps.choices, this.deps.refLabel, this.deps.tagLabel)) {
       const chip = document.createElement('span')
       // 单行省略是**原语**（`primitives.css`），组件里不再抄一份几何
       chip.className = 'queryview-chip ui-ellipsis'
@@ -1590,7 +1590,7 @@ export class ViewHost {
         ...(this.ownerBlock() ? { owner: this.ownerBlock() } : {}),
         ...(this.deps.pickRef ? { pickRef: this.deps.pickRef } : {}),
         ...(this.deps.pickTag ? { pickTag: this.deps.pickTag } : {}),
-        ...(this.deps.tagExists ? { tagExists: this.deps.tagExists } : {}),
+        ...(this.deps.tagLabel ? { tagLabel: this.deps.tagLabel } : {}),
         ...(this.deps.pickChoice ? { pickChoice: this.deps.pickChoice } : {}),
         ...(this.deps.refLabel ? { refLabel: this.deps.refLabel } : {}),
         apply: (next) => this.deps.invoke('core.query/set-spec', { owner: this.writeOwner, spec: next }),

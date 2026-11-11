@@ -147,7 +147,7 @@ import {
  *            （勾选/取消写哪两个选项）。旧库的完成标记新代码不读（任务身份会消失）
  *            ⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 40
+export const WORKSPACE_VERSION = 41
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

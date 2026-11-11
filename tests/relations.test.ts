@@ -86,7 +86,8 @@ test('成员：标签块自己的成员不含正文 #名 提及', () => {
   const blocks = forest()
   const tag = blocks.find((b) => b.id === 'tag')!
   const spec = derivedSpecOf(tag, blocks, 'members')
-  assert.deepEqual(spec, { where: { tag: '人物' } })
+  // 成员条件按**标签块 id**存（改名不影响语义）；显示名由 chips 现解析
+  assert.deepEqual(spec, { where: { tag: tag.id } })
   const kb = new MemoryKb(new BlockStore(blocks))
   const rows = derivedRecordsOf(tag, kb, 'members')
   assert.deepEqual(rows.map((r) => r.block.id), ['src'], '只有 _tags 归属算成员')
