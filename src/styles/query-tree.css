@@ -164,6 +164,8 @@
 .qt-kind,
 .qt-field,
 .qt-op,
+.qt-dir,
+.qt-day-mode,
 .qt-limit {
   max-width: 16rem;
   height: 24px;
@@ -178,6 +180,8 @@
 .qt-kind:hover,
 .qt-field:hover,
 .qt-op:hover,
+.qt-dir:hover,
+.qt-day-mode:hover,
 .qt-limit:hover {
   background: var(--ui-bg-hover);
   border-color: var(--ui-border-subtle);
@@ -186,6 +190,8 @@
 .qt-kind:focus-visible,
 .qt-field:focus-visible,
 .qt-op:focus-visible,
+.qt-dir:focus-visible,
+.qt-day-mode:focus-visible,
 .qt-limit:focus-visible {
   border-color: var(--ui-accent);
   background: var(--ui-surface);
@@ -196,7 +202,9 @@
 }
 .qt-kind,
 .qt-field,
-.qt-op {
+.qt-op,
+.qt-dir,
+.qt-day-mode {
   color: var(--ui-text-secondary);
 }
 .qt-ref,

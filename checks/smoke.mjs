@@ -18273,12 +18273,12 @@ await check('B6 拆不动的形状显示只读 JSON ＋ 一句提示（不静默
   assert(qid !== '', '前置：种子里应有一个查询块')
 
   await ensureTree(page)
-  // `near:{text}` 是合法条件，但方向行只认 `{is:id}` ⇒ 应该整份走只读 JSON
+  // `{up:{down:…}}`（方向里再套方向）语言层合法，但 UI 只给一层方向 ⇒ 应该整份走只读 JSON
   await page.evaluate(
     (id) =>
       window.__qua.invoke('core.query/set-spec', {
         owner: { kind: 'block', blockId: id },
-        spec: { where: { near: { text: '产品' } } },
+        spec: { where: { up: { down: { text: '产品' } } } },
       }),
     qid,
   )
@@ -18293,13 +18293,87 @@ await check('B6 拆不动的形状显示只读 JSON ＋ 一句提示（不静默
   }))
   assert(st.jsonOnly, `应显示只读 JSON 逃生口：${JSON.stringify(st)}`)
   assert(st.hint.includes('JSON'), `要有一句「只能用 JSON 编辑」：${st.hint}`)
-  assert(st.json.includes('"near"'), `JSON 要是模型那一份：${st.json}`)
+  assert(st.json.includes('"up"') && st.json.includes('"down"'), `JSON 要是模型那一份：${st.json}`)
   assert(st.editable === 0, '逃生口是只读的（不许出现可编辑 textarea/contenteditable）')
   assert(!st.apply, '只读 JSON 下不该有「应用」按钮')
   assert(st.rows === 0, '拆不动就不假装拆成行')
 
   await ctx.close()
-  return 'near 形状：只读 JSON ＋ 提示；0 行、0 可编辑控件、无应用'
+  return '方向套方向：只读 JSON ＋ 提示；0 行、0 可编辑控件、无应用'
+})
+
+await check('B7 方向是节点上的一格：叶子与组都能挂，up 不含自己 / near 含自己', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  /**
+   * 造三块：`p` 的正文引用 X、`p` 有两个子块；`g` 引用 Y。
+   * 「上级引用 X」＝ p 的子块（不含 p 自己）；「链条引用 X」＝ p 自己也在。
+   */
+  const qid = await page.evaluate(() => {
+    const at = Date.now()
+    const mk = (id, text, children = []) => ({
+      id,
+      content: text === '' ? [] : [{ t: 'text', v: text }],
+      children,
+      created: at,
+      modified: at,
+    })
+    const p = mk('p', '引用 X 的块', [mk('c1', '子一'), mk('c2', '子二')])
+    p.content.push({ id: 'p-r', t: 'ref', to: 'X', label: 'X' })
+    const g = mk('g', '引用 Y 的块')
+    g.content.push({ id: 'g-r', t: 'ref', to: 'Y', label: 'Y' })
+    window.__qua.forceForest((forest) => {
+      forest.length = 0
+      forest.push(p, g, mk('X', '目标 X'), mk('Y', '目标 Y'))
+    })
+    window.__qua.invoke('core.query/create', { name: '方向轴冒烟', spec: { where: { up: { ref: 'X' } } } })
+    return String(window.__qua.snapshot().activeId)
+  })
+  assert(qid !== '', '前置：应能建出查询块')
+  await page.waitForTimeout(600)
+  await ensureTree(page)
+
+  const shot = () =>
+    page.evaluate(() => {
+      const row = document.querySelector('.queryview-tree .qt-row[data-qt-row="ref"]')
+      return {
+        hits: [...document.querySelectorAll('.queryview .queryview-editor .blk[data-block-id]')].map(
+          (e) => e.dataset.blockId ?? '',
+        ),
+        rowDir: row?.querySelector('[data-qt="dir"]')?.value ?? 'none',
+        groupDir: document.querySelector('.queryview-tree .qt-group-head [data-qt="dir"]')?.value ?? 'none',
+        dirOptions: [...(document.querySelector('.queryview-tree .qt-group-head [data-qt="dir"]')?.querySelectorAll('option') ?? [])].map(
+          (e) => e.textContent ?? '',
+        ),
+      }
+    })
+
+  const up = await shot()
+  assert(up.rowDir === 'up', `「引用某块 ＋ 上级」要拆成方向那一格＝上级：${JSON.stringify(up)}`)
+  assert(up.groupDir === '', `组头也有同一格（缺省「自身」）：${JSON.stringify(up)}`)
+  assert(up.dirOptions.join('/').includes('自身'), `方向那一格要有「自身」：${JSON.stringify(up.dirOptions)}`)
+  assert(
+    up.hits.sort().join(',') === 'c1,c2',
+    `上级引用 X ⇒ 只出 p 的子块，不出 p 自己：${JSON.stringify(up.hits)}`,
+  )
+
+  // 换成「链条」⇒ 自己也在（near 含自己、up/down 不含）
+  await page.selectOption('.queryview-tree .qt-row[data-qt-row="ref"] [data-qt="dir"]', 'near')
+  await page.locator('.queryview-tree [data-qt="apply"]').click()
+  await page.waitForTimeout(500)
+  const near = await shot()
+  assert(
+    near.hits.sort().join(',') === 'c1,c2,p',
+    `链条引用 X ⇒ p 自己也在：${JSON.stringify(near.hits)}`,
+  )
+  const saved = await page.evaluate(
+    (id) => JSON.stringify(window.__qua.__editor.store.find(id)?.props?._query?.where),
+    qid,
+  )
+  assert(saved === '{"near":{"ref":"X"}}', `落库形状应是 {near:{ref:X}}：${saved}`)
+
+  await ctx.close()
+  return '叶子方向：up ⇒ 子块、near ⇒ 连自己；组头同一格；落库 {near:{ref}}'
 })
 
 /* ---------------------------------------------------------------- 相对日期（C1） */
@@ -18359,9 +18433,9 @@ await check('C1 相对日期：树上存表达式；锚只在日记页里出现�
   // 树上：路径行是相对态（数字输入 ＋「相对」chip），spec 存的是表达式
   await ensureTree(page)
   const row0 = await page.evaluate(() => {
-    const row = document.querySelector('.queryview-tree .qt-row[data-qt-row="path"]')
+    const row = document.querySelector('.queryview-tree .qt-row[data-qt-row="day"]')
     return {
-      mode: row?.querySelector('[data-qt="path-mode"]')?.value ?? '',
+      mode: row?.querySelector('[data-qt="day-mode"]')?.value ?? '',
       chip: row?.querySelector('.qt-chip')?.textContent ?? '',
       num: row?.querySelector('input[type="number"]')?.value ?? '',
     }
@@ -18390,12 +18464,12 @@ await check('C1 相对日期：树上存表达式；锚只在日记页里出现�
   assert(unanchored === null, `再点一次要摘掉锚（实际 ${JSON.stringify(unanchored)}）`)
 
   // 树上切回「某一天」：填固定日期应用 ⇒ spec 变回绝对形状，todayFrom 随往返保全
-  await page.locator('.queryview-tree .qt-row[data-qt-row="path"] [data-qt="path-mode"]').selectOption('abs')
+  await page.locator('.queryview-tree .qt-row[data-qt-row="day"] [data-qt="day-mode"]').selectOption('abs')
   await page.waitForTimeout(250)
   const t = new Date()
   const iso = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
   await page
-    .locator('.queryview-tree .qt-row[data-qt-row="path"] input[type="date"]')
+    .locator('.queryview-tree .qt-row[data-qt-row="day"] input[type="date"]')
     .fill(iso)
   await page.locator('.queryview-tree [data-qt="apply"]').click()
   await page.waitForTimeout(450)

@@ -60,6 +60,18 @@ test('条件树往返：组／非／算子／待办预设／路径与方向／�
     { where: { near: { is: 'x' } } },
     { where: { all: [{ down: { is: 'x' } }, { near: { is: 'y' } }] } },
     { where: { prop: { id: '_date', eq: '$self' } } },
+    // 方向是节点上的一格：任意叶子 / 整组都能挂（「上级匹配所有」两种形状各有字节）
+    { where: { down: { text: 'x' } } },
+    { where: { near: { tag: '甲' } } },
+    { where: { up: { ref: 'x' } } },
+    { where: { up: { prop: { id: 'p-1', eq: 7 } } } },
+    { where: { up: { all: [{ tag: '甲' }, { text: '乙' }] } } },
+    { where: { down: { any: [{ tag: '甲' }, { text: '乙' }] } } },
+    { where: { all: [{ up: { tag: '甲' } }, { up: { tag: '乙' } }] } },
+    { where: { not: { up: { ref: 'x' } } } },
+    { where: { not: { down: { all: [{ tag: '甲' }, { text: '乙' }] } } } },
+    { where: { today: { offset: 1 } } },
+    { where: { up: { all: [{ role: 'journal' }, { prop: { id: '_date', eq: '$self' } }] } } },
   ]
   for (const spec of cases) roundTrip(spec)
 })
@@ -77,34 +89,62 @@ test('空组拼回去是「没有条件」：`{all:[]}` 读成 `{any:[]}`，绝�
   assert.deepEqual(specOfTree(draft).where, { any: [] })
 })
 
-test('条件树：路径只认一种顺序（反过来语义相同但字节不同 ⇒ 不假装能编辑）', () => {
-  assert.ok(
-    treeOfSpec({
-      where: { up: { all: [{ role: 'journal' }, { prop: { id: '_date', eq: '2026-10-20' } }] } },
-    }),
-  )
-  assert.equal(
-    treeOfSpec({
-      where: { up: { all: [{ prop: { id: '_date', eq: '2026-10-20' } }, { role: 'journal' }] } },
-    }),
-    null,
-  )
+test('「某一天」的预设只认一种顺序；反过来的 all 仍可编辑（当成组，字节不变）', () => {
+  const preset = treeOfSpec({
+    where: { up: { all: [{ role: 'journal' }, { prop: { id: '_date', eq: '2026-10-20' } }] } },
+  })
+  assert.ok(preset)
+  assert.equal(preset.root.items[0]?.kind, 'leaf', '顺序对 ⇒ 一行「某一天」（预设）')
+
+  // 顺序反了：不是预设，但它是「一层组挂上级」，照样能编辑；拼回去逐字节相等
+  const reversed: QuerySpec = {
+    where: { up: { all: [{ prop: { id: '_date', eq: '2026-10-20' } }, { role: 'journal' }] } },
+  }
+  const draft = treeOfSpec(reversed)
+  assert.ok(draft)
+  assert.equal(draft.root.items[0]?.kind, 'group', '顺序反 ⇒ 当普通组，不假装认成预设')
+  roundTrip(reversed)
 })
 
 test('条件树：拆不动的形状返回 null（调用方走只读 JSON，不猜着拆一半）', () => {
   const hard: unknown[] = [
-    { where: { down: { text: 'x' } } },
-    { where: { near: { tag: 'x' } } },
+    // 方向里再套方向：UI 只给一层（语言层合法）
     { where: { up: { down: { text: 'x' } } } },
+    // 「非」不在最外层：`{up:{not:…}}` 与 `{not:{up:…}}` 语义不同，只认后者
+    { where: { up: { not: { text: 'x' } } } },
     { where: { ref: { to: 'x' } } },
     { where: { ref: { to: 'x', kind: 'inline' } } },
     { where: { role: 'nope' } },
     { where: { not: { not: { tag: 'x' } } } },
     { where: { prop: { id: 'p', eq: 1, neq: 2 } } },
-    // 相对日期只在「某一天之下」那行有值位：裸的 `{today}` 走 JSON（语言层合法，树上不假装）
-    { where: { today: { offset: 0 } } },
   ]
   for (const spec of hard) assert.equal(treeOfSpec(spec as QuerySpec), null, JSON.stringify(spec))
+})
+
+test('「非」在外、方向在内：两种语义不混成一种形状', () => {
+  // 没有这样的上级（最常用）⇒ 可编辑，拼回去逐字节相等
+  roundTrip({ where: { not: { up: { ref: 'x' } } } })
+  // 上级里存在一块不满足 ⇒ 只读 JSON（语言层合法，树不生成它）
+  assert.equal(treeOfSpec({ where: { up: { not: { ref: 'x' } } } }), null)
+})
+
+test('方向挂组与挂叶子是两种形状：「同一处满足整组」≠「各条件各找一处」', () => {
+  const one: QuerySpec = { where: { up: { all: [{ tag: '甲' }, { text: '乙' }] } } }
+  const each: QuerySpec = { where: { all: [{ up: { tag: '甲' } }, { up: { text: '乙' } }] } }
+  roundTrip(one)
+  roundTrip(each)
+  assert.notEqual(
+    JSON.stringify(specOfTree(treeOfSpec(one)!)),
+    JSON.stringify(specOfTree(treeOfSpec(each)!)),
+    '两种语义的字节必须不同（否则 specKey 判不出「条件变了」）',
+  )
+})
+
+test('合成根上的方向也是真的（用户给根组挂了上级）', () => {
+  const draft = treeOfSpec({ where: { tag: 'x' } })
+  assert.ok(draft && draft.synthesizedRoot)
+  draft.root.dir = 'up'
+  assert.deepEqual(specOfTree(draft).where, { up: { tag: 'x' } }, '不因为多了方向就包一层 all')
 })
 
 test('多键排序拆得动：树草稿整组保全，拼回去逐字节相等（树自己不编辑它，抬头排序面板是唯一入口）', () => {

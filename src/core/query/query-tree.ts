@@ -15,8 +15,11 @@
  *    它们分别是恒真／恒假，拼回来不能换。
  */
 import type { DraftOp } from './query-draft.ts'
-import type { QueryNode, QuerySpec, SortKey } from './query.ts'
+import { SELF, type QueryNode, type QuerySpec, type SortKey } from './query.ts'
 import { canonicalSpec } from './query-view.ts'
+
+/** 方向：一格值位（缺省「自身」＝不包方向）。`up`／`down` 不含自己，`near` 含自己 */
+export type TreeDir = 'up' | 'down' | 'near'
 
 /** 叶子行能表达的几种条件 */
 export type TreeRow =
@@ -27,23 +30,27 @@ export type TreeRow =
   | { kind: 'is'; target: string }
   | { kind: 'role'; role: 'journal' | 'page' }
   /**
-   * 路径（方向）行：`{up|down|near:{is:id}}` 或某一天（只有 `up` 有天的形状）。
-   * `dir` 缺省 `up`（旧草稿兼容读法：`dir in row === false` 视作 `'up'`）。
+   * **某一天**（日记身份）：三种值形态，拼回去各是一种既有原子。
    *
-   * 天有两态：**固定**（`date` ＝ `'YYYY-MM-DD'`，`rel` 缺省）与**相对**
-   * （`rel` ＝ 偏移天数，0 ＝ 今天；`date` 留空）。相对态拼回去是
-   * `{up:{today:{offset}}}`——存表达式不存字面量，隔天求值自然换一天。
+   * · `date` 是日期串 ⇒ `{all:[{role:'journal'},{prop:{_date,eq:日期}}]}`；
+   * · `date === '$self'` ⇒ 同一条但 `eq:'$self'`（宿主那一天）；
+   * · `rel` 有值 ⇒ `{today:{offset}}`（**存表达式**，隔天求值自然换一天）。
+   *
+   * ⚠️ 它不是「方向行」：方向是节点上的独立一格（`TreeLeaf.dir`／`TreeGroup.dir`），
+   *    「某一天之下」＝ 这一行挂上「上级」。
    */
-  | { kind: 'path'; by: 'journal' | 'block'; dir?: 'up' | 'down' | 'near'; date: string; blockId: string; rel?: number }
+  | { kind: 'day'; date: string; rel?: number }
 
 export type TreeRowKind = TreeRow['kind']
 
 /** 行种类下拉的顺序（与「加一条条件」的选择器分开） */
-export const TREE_ROW_KINDS: readonly TreeRowKind[] = ['tag', 'prop', 'text', 'ref', 'path', 'role', 'is']
+export const TREE_ROW_KINDS: readonly TreeRowKind[] = ['tag', 'prop', 'text', 'ref', 'is', 'role', 'day']
 
 export interface TreeLeaf {
   kind: 'leaf'
   not: boolean
+  /** 方向（缺省＝自身）。**与「非」同构的一格**：叶子与组都能挂 */
+  dir?: TreeDir
   row: TreeRow
 }
 
@@ -51,6 +58,8 @@ export interface TreeGroup {
   kind: 'group'
   mode: 'all' | 'any'
   not: boolean
+  /** 方向（缺省＝自身）；挂组上＝「存在一个上级满足**整组**」 */
+  dir?: TreeDir
   /** 条件子项（**不是块树的 children**：这里装的是条件节点） */
   items: TreeNode[]
 }
@@ -98,10 +107,26 @@ function literalText(v: unknown): string {
 /**
  * 一个条件节点 → 树节点；**形状不在可编辑范围内就返回 `null`**（调用方走只读 JSON）。
  *
- * 可编辑范围是**刻意收窄**的：方向的嵌套形状、带 kind 的 `ref` 都还表达不了。
- * 语言层不限制它们；限制只在这里（UI），所以把 spec 存进库、从别处改它们仍然合法。
+ * 可编辑范围是**刻意收窄**的：方向里再套方向、`{dir:{not:…}}`（只有「非在外」一种写法）、
+ * 带 kind 的 `ref` 都还表达不了。语言层不限制它们；限制只在这里（UI），
+ * 所以把 spec 存进库、从别处改它们仍然合法。
+ *
+ * ⚠️ **「非」在外、方向在内**：`{not:{up:C}}` ＝「没有这样的上级」，
+ *    拼回去也按这个顺序；另一种 `{up:{not:C}}` 只读 JSON（一个语义不许两种形状）。
  */
 export function treeNodeOf(node: QueryNode): TreeNode | null {
+  if ('not' in node) {
+    const inner = node.not
+    if ('not' in inner) return null
+    const mapped = treeNodeOf(inner)
+    if (!mapped) return null
+    return { ...mapped, not: true }
+  }
+  if ('up' in node) return withDirection('up', node.up)
+  if ('down' in node) return withDirection('down', node.down)
+  if ('near' in node) return withDirection('near', node.near)
+  const day = dayRowOf(node)
+  if (day) return { kind: 'leaf', not: false, row: day }
   if ('all' in node || 'any' in node) {
     const items: TreeNode[] = []
     for (const child of 'all' in node ? node.all : node.any) {
@@ -111,23 +136,48 @@ export function treeNodeOf(node: QueryNode): TreeNode | null {
     }
     return { kind: 'group', mode: 'all' in node ? 'all' : 'any', not: false, items }
   }
-  if ('not' in node) {
-    const inner = node.not
-    if ('not' in inner) return null
-    if ('all' in inner || 'any' in inner) {
-      const mapped = treeNodeOf(inner)
-      if (!mapped || mapped.kind !== 'group') return null
-      return { ...mapped, not: true }
-    }
-    const row = treeRowOf(inner)
-    return row ? { kind: 'leaf', not: true, row } : null
-  }
   const row = treeRowOf(node)
   return row ? { kind: 'leaf', not: false, row } : null
 }
 
+/** 把一个条件套进方向：内层再套方向、或内层是「非」都拆不动（只读 JSON） */
+function withDirection(dir: TreeDir, inner: QueryNode): TreeNode | null {
+  const nested = 'up' in inner || 'down' in inner || 'near' in inner
+  if (nested || 'not' in inner) return null
+  const mapped = treeNodeOf(inner)
+  if (!mapped || mapped.not) return null
+  return { ...mapped, dir }
+}
+
+/** 把一组 / 一条条件套进方向 */
+function dirNode(dir: TreeDir, inner: QueryNode): QueryNode {
+  return dir === 'up' ? { up: inner } : dir === 'down' ? { down: inner } : { near: inner }
+}
+
+/**
+ * **某一天**这一行的形状：`{all:[{role:'journal'},{prop:{_date,eq}}]}`（顺序写死）与
+ * `{today:{offset}}`。
+ *
+ * ⚠️ 顺序只认 `[role, _date]`：反过来的 `all` 语义相同但字节不同，重排会改 `specKey`
+ * —— 那种形状走 JSON，不在树上假装能编辑。
+ */
+function dayRowOf(node: QueryNode): TreeRow | null {
+  if ('today' in node) {
+    return Number.isFinite(node.today.offset) ? { kind: 'day', date: '', rel: node.today.offset } : null
+  }
+  if (!('all' in node) || node.all.length !== 2) return null
+  const [first, second] = node.all
+  if (!first || !second) return null
+  if (!('role' in first) || first.role !== 'journal') return null
+  if (!('prop' in second) || second.prop.id !== '_date') return null
+  if (!('eq' in second.prop) || typeof second.prop.eq !== 'string') return null
+  return { kind: 'day', date: second.prop.eq }
+}
+
 /** 一个**叶子**条件 → 一行。 */
 export function treeRowOf(node: QueryNode): TreeRow | null {
+  const day = dayRowOf(node)
+  if (day) return day
   if ('tag' in node) return { kind: 'tag', value: node.tag }
   if ('text' in node) return { kind: 'text', value: node.text }
   if ('ref' in node) {
@@ -142,9 +192,6 @@ export function treeRowOf(node: QueryNode): TreeRow | null {
   if ('role' in node) {
     return node.role === 'journal' || node.role === 'page' ? { kind: 'role', role: node.role } : null
   }
-  if ('up' in node) return pathRowOf('up', node.up)
-  if ('down' in node) return pathRowOf('down', node.down)
-  if ('near' in node) return pathRowOf('near', node.near)
   if (!('prop' in node)) return null
 
   const op = node.prop
@@ -176,29 +223,6 @@ export function treeRowOf(node: QueryNode): TreeRow | null {
   return null
 }
 
-/**
- * 方向条件的可编辑形状：`{dir:{is:id}}`（某一块的上级/下级/邻近）与
- * `{up:{all:[{role:'journal'},{prop:{_date,eq:date}}]}}`（某一天之下；只有 `up` 有天的形状）。
- *
- * ⚠️ 顺序写死：只认 `[role, _date]` 这一种。反过来的 `all` 语义相同但字节不同，
- *    重排会改 `specKey`；那种形状走 JSON，不在树上假装能编辑。
- */
-function pathRowOf(dir: 'up' | 'down' | 'near', node: QueryNode): TreeRow | null {
-  if ('is' in node) return { kind: 'path', by: 'block', dir, date: '', blockId: node.is }
-  if (dir !== 'up') return null
-  // 相对日期：`{up:{today:{offset}}}`——树上可编辑的相对形状只有这一种
-  if ('today' in node) {
-    return Number.isFinite(node.today.offset) ? { kind: 'path', by: 'journal', date: '', blockId: '', rel: node.today.offset } : null
-  }
-  if (!('all' in node) || node.all.length !== 2) return null
-  const [first, second] = node.all
-  if (!first || !second) return null
-  if (!('role' in first) || first.role !== 'journal') return null
-  if (!('prop' in second) || second.prop.id !== '_date') return null
-  if (!('eq' in second.prop) || typeof second.prop.eq !== 'string') return null
-  return { kind: 'path', by: 'journal', date: second.prop.eq, blockId: '' }
-}
-
 /** 一份条件 → 树草稿；拆不动返回 `null` */
 export function treeOfSpec(spec: QuerySpec): TreeDraft | null {
   const where = spec.where
@@ -208,21 +232,19 @@ export function treeOfSpec(spec: QuerySpec): TreeDraft | null {
     ...(spec.todayFrom === 'host' ? { todayFrom: 'host' as const } : {}),
   }
 
-  if ('all' in where || 'any' in where) {
-    const root = treeNodeOf(where)
-    if (!root || root.kind !== 'group') return null
-    return { root, synthesizedRoot: false, ...common }
-  }
-  if ('not' in where && ('all' in where.not || 'any' in where.not)) {
-    const root = treeNodeOf(where)
-    if (!root || root.kind !== 'group') return null
-    return { root, synthesizedRoot: false, ...common }
-  }
-
   const single = treeNodeOf(where)
   if (!single) return null
+  /**
+   * 顶层本来就是组（`all`／`any`／`not` 包着组）⇒ 它就是根；
+   * 其余（单个条件、带方向的组）包一层合成根 —— 拼回去时合成根直接吐回那个孩子。
+   *
+   * ⚠️ 「某一天」的形状是 `{all:[role,_date]}`，但它在树上是**一行**（`day`）：
+   *    所以这里不能按「where 是 all 就当根组」判，得看拆出来的节点是不是组。
+   */
   if (single.kind === 'group') {
-    // 兜底：单个组（不常见）也包进根组，拼回去时合成根会直接吐回那个组
+    const topLevelGroup =
+      ('all' in where || 'any' in where) || ('not' in where && ('all' in where.not || 'any' in where.not))
+    if (topLevelGroup) return { root: single, synthesizedRoot: false, ...common }
     return {
       root: { kind: 'group', mode: 'all', not: false, items: [single] },
       synthesizedRoot: true,
@@ -245,17 +267,13 @@ export function treeNodeOfRow(row: TreeRow): QueryNode | null {
   if (row.kind === 'ref') return row.target === '' ? null : { ref: row.target }
   if (row.kind === 'is') return row.target === '' ? null : { is: row.target }
   if (row.kind === 'role') return { role: row.role }
-  if (row.kind === 'path') {
-    if (row.by === 'block') {
-      if (row.blockId === '') return null
-      const dir = row.dir ?? 'up'
-      return dir === 'down' ? { down: { is: row.blockId } } : dir === 'near' ? { near: { is: row.blockId } } : { up: { is: row.blockId } }
-    }
+  if (row.kind === 'day') {
+    if (row.date === SELF) return { all: [{ role: 'journal' }, { prop: { id: '_date', eq: SELF } }] }
     // 相对：存表达式（`{today:{offset}}`），不把任何一天的日期写进条件
-    if (row.rel !== undefined) return { up: { today: { offset: row.rel } } }
+    if (row.rel !== undefined) return { today: { offset: row.rel } }
     return row.date.trim() === ''
       ? null
-      : { up: { all: [{ role: 'journal' }, { prop: { id: '_date', eq: row.date } }] } }
+      : { all: [{ role: 'journal' }, { prop: { id: '_date', eq: row.date } }] }
   }
   if (row.field === '') return null
   const op: DraftOp = row.op
@@ -296,26 +314,35 @@ function literalOf(text: string): unknown {
 
 /** 树节点 → 条件；没填完的行返回 `null` */
 export function queryNodeOfTree(node: TreeNode): QueryNode | null {
+  let body: QueryNode
   if (node.kind === 'leaf') {
     const n = treeNodeOfRow(node.row)
     if (!n) return null
-    return node.not ? { not: n } : n
+    body = n
+  } else {
+    /**
+     * **空组＝没有条件**，返回 `null`（＝未完成）而不是 `{all:[]}`。
+     *
+     * `{all:[]}` 在判定里是**恒真**（`[].every`）——把「还没条件」拼成它，
+     * 结果就是整个库。而用户此刻看到的是一个空组，心里想的是「还没开始筛」。
+     * 空组与「有行但没填完」走同一条出路：`specOfTree` 把它收成 `{any:[]}`（永不命中）。
+     */
+    if (node.items.length === 0) return null
+    const children: QueryNode[] = []
+    for (const child of node.items) {
+      const n = queryNodeOfTree(child)
+      if (!n) return null
+      children.push(n)
+    }
+    body = node.mode === 'all' ? { all: children } : { any: children }
   }
   /**
-   * **空组＝没有条件**，返回 `null`（＝未完成）而不是 `{all:[]}`。
+   * **方向在内、「非」在外**：`{not:{up:body}}`。
    *
-   * `{all:[]}` 在判定里是**恒真**（`[].every`）——把「还没条件」拼成它，
-   * 结果就是整个库。而用户此刻看到的是一个空组，心里想的是「还没开始筛」。
-   * 空组与「有行但没填完」走同一条出路：`specOfTree` 把它收成 `{any:[]}`（永不命中）。
+   * 另一种 `{up:{not:body}}`（祖先里存在一块**不**满足）语义不同，
+   * 语言层合法但树不生成它、也不拆它（只读 JSON）——一个语义不许两种形状。
    */
-  if (node.items.length === 0) return null
-  const children: QueryNode[] = []
-  for (const child of node.items) {
-    const n = queryNodeOfTree(child)
-    if (!n) return null
-    children.push(n)
-  }
-  const body: QueryNode = node.mode === 'all' ? { all: children } : { any: children }
+  if (node.dir) body = dirNode(node.dir, body)
   return node.not ? { not: body } : body
 }
 
@@ -328,21 +355,27 @@ export function treeIncomplete(node: TreeNode): boolean {
 /** 树草稿 → `QuerySpec`（已 canonical） */
 export function specOfTree(draft: TreeDraft): QuerySpec {
   const root = draft.root
-  let where: QueryNode
   if (draft.synthesizedRoot && root.items.length === 1) {
     const child = queryNodeOfTree(root.items[0]!)
-    where = child ? (root.not ? { not: child } : child) : { any: [] }
+    let where: QueryNode = child ?? { any: [] }
+    // 合成根上的方向也是真的（用户给这一条条件挂了方向）：`{up:C}`，不要再包一层 `all`
+    if (root.dir && child) where = dirNode(root.dir, where)
+    where = root.not ? { not: where } : where
+    return finish(where)
   } else if (draft.synthesizedRoot && root.items.length === 0) {
     // 合成根被清空 ＝「还没有条件」；不沿用 all 的恒真（那会把全库倒出来）
-    where = { any: [] }
-  } else {
-    where = queryNodeOfTree(root) ?? { any: [] }
+    return finish({ any: [] })
   }
-  const out: QuerySpec = { where }
-  if (draft.sort && draft.sort.length > 0) out.sort = draft.sort.map((s) => ({ ...s }))
-  if (typeof draft.limit === 'number' && draft.limit > 0) out.limit = Math.floor(draft.limit)
-  if (draft.todayFrom === 'host') out.todayFrom = 'host'
-  return canonicalSpec(out)
+  return finish(queryNodeOfTree(root) ?? { any: [] })
+
+  /** 把 sort／limit／锚带上（三条出口共用一份，免得某条路漏掉一格） */
+  function finish(where: QueryNode): QuerySpec {
+    const out: QuerySpec = { where }
+    if (draft.sort && draft.sort.length > 0) out.sort = draft.sort.map((s) => ({ ...s }))
+    if (typeof draft.limit === 'number' && draft.limit > 0) out.limit = Math.floor(draft.limit)
+    if (draft.todayFrom === 'host') out.todayFrom = 'host'
+    return canonicalSpec(out)
+  }
 }
 
 /** 树上条件条数（叶子数，不含组）——抬头 chip 与面板标题用 */

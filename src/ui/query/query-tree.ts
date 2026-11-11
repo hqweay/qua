@@ -89,7 +89,7 @@ const ROW_KIND_TEXT: Record<TreeRowKind, MsgId> = {
   ref: 'ui.query.prefix.ref',
   is: 'ui.query.prefix.is',
   role: 'ui.query.prefix.role',
-  path: 'ui.query.kind.path',
+  day: 'ui.query.kind.day',
 }
 
 const OP_TEXT: Record<DraftOp, MsgId> = {
@@ -112,8 +112,8 @@ function defaultRow(kind: TreeRowKind, field: string): TreeRow {
   if (kind === 'ref') return { kind: 'ref', target: '' }
   if (kind === 'is') return { kind: 'is', target: '' }
   if (kind === 'role') return { kind: 'role', role: 'journal' }
-  // 新加的方向行默认就锚在「根块」：与两个创建种子同口径，一次点击即得到一条完整条件
-  return { kind: 'path', by: 'block', dir: 'up', date: '', blockId: '$self' }
+  // 新加的「某一天」默认「今天」（`{today:{offset:0}}`）：加一行就是一条完整条件
+  return { kind: 'day', date: '', rel: 0 }
 }
 
 function option(value: string, label: string): HTMLOptionElement {
@@ -371,7 +371,7 @@ export class QueryTree {
     notText.textContent = t('ui.query.group.not')
     notLabel.append(not, notText)
 
-    head.append(mode, notLabel)
+    head.append(mode, this.dirEl(group), notLabel)
     /**
      * **空条件不摆组合方式**：一条条件都没有时，「且／或」与「非」是在给不存在的
      * 子项选关系，读起来像一句没说完的话。根组空的时候只留空态与「加一条」。
@@ -436,6 +436,20 @@ export class QueryTree {
               items: [],
             })
             if (this.draft && this.draft.root === group) this.draft.synthesizedRoot = false
+          } else if (item.pick.startsWith('preset:')) {
+            /**
+             * 「方向 ＋ 条件」的两个常用组合：方向是节点上的一格，预设只是**少点两下**的入口，
+             * 生成的是同样的行；之后用户改哪一格都行（不是魔法按钮）。
+             */
+            const row: TreeRow =
+              item.pick === 'preset:under-self'
+                ? { kind: 'is', target: SELF }
+                : item.pick === 'preset:under-today'
+                  ? { kind: 'day', date: '', rel: 0 }
+                  : { kind: 'day', date: '' }
+            group.items.push({ kind: 'leaf', not: false, dir: 'up', row })
+            if (this.draft && this.draft.root === group) this.draft.synthesizedRoot = false
+            this.focusNew = true
           } else {
             const kind = item.pick.slice('row:'.length) as TreeRowKind
             group.items.push({
@@ -451,6 +465,11 @@ export class QueryTree {
       }
     }
 
+    section(t('ui.query.tree.preset'), [
+      { pick: 'preset:under-self', label: t('ui.query.tree.presetUnderSelf') },
+      { pick: 'preset:under-today', label: t('ui.query.tree.presetUnderToday') },
+      { pick: 'preset:under-day', label: t('ui.query.tree.presetUnderDay') },
+    ])
     section(t('ui.query.tree.regroup'), [
       { pick: 'group:all', label: t('ui.query.group.addAnd') },
       { pick: 'group:any', label: t('ui.query.group.addOr') },
@@ -461,8 +480,9 @@ export class QueryTree {
       { pick: 'row:prop', label: t('ui.query.kind.prop') },
       { pick: 'row:text', label: t('ui.query.kind.text') },
       { pick: 'row:ref', label: t('ui.query.kind.ref') },
-      { pick: 'row:path', label: t('ui.query.kind.path') },
+      { pick: 'row:is', label: t('ui.query.kind.is') },
       { pick: 'row:role', label: t('ui.query.kind.role') },
+      { pick: 'row:day', label: t('ui.query.kind.day') },
     ])
     return picker
   }
@@ -509,6 +529,7 @@ export class QueryTree {
       el.append(notLabel)
     }
 
+    el.append(this.dirEl(leaf))
     const kind = selectEl(
       TREE_ROW_KINDS.map((k) => ({ value: k, label: t(ROW_KIND_TEXT[k]) })),
       row.kind,
@@ -549,8 +570,8 @@ export class QueryTree {
           ),
         )
         break
-      case 'path':
-        el.append(...this.pathControls(row))
+      case 'day':
+        el.append(...this.dayControls(row))
         break
     }
 
@@ -814,68 +835,76 @@ export class QueryTree {
   }
 
   /**
-   * 路径行：**一个模式词 ＋ 一个值控件**。
+   * **方向那一格**：叶子与组都能挂，与「非」同构。
    *
-   * 原先把「来源(天/块)」「方向」「固定/相对」摊成三个下拉，再加目标块与「这一块」
-   * 两颗按钮 —— 一条条件五个带框控件，还出现两枚一模一样的「这一块」。
-   * 它们是同一件事的几种问法，收进一个模式词即可；目标永远是同一个块选择器。
+   * 缺省「自身」（不包方向）；「上级匹配所有」＝ 组挂上级（存在同一个上级满足整组），
+   * 「上级匹配任一」＝ 或组里每条叶子各挂上级（各找一处）——两种形状都编辑得到，
+   * 但 chip 与人话要说清它们不是一回事（对 `all` 不满足分配律）。
    */
-  private pathControls(row: Extract<TreeRow, { kind: 'path' }>): HTMLElement[] {
-    const mode = this.pathModeOf(row)
+  private dirEl(node: TreeLeaf | TreeGroup): HTMLElement {
     const sel = selectEl(
       [
+        { value: '', label: t('ui.query.tree.dirSelf') },
         { value: 'up', label: t('ui.query.tree.dirUp') },
         { value: 'down', label: t('ui.query.tree.dirDown') },
         { value: 'near', label: t('ui.query.tree.dirNear') },
+      ],
+      node.dir ?? '',
+      (next) => {
+        if (next === 'up' || next === 'down' || next === 'near') node.dir = next
+        else delete node.dir
+        // 方向不改行的完整度：只重算「应用」的可用性，不重画（别把用户的焦点冲掉）
+        this.syncApply()
+      },
+      'qt-dir',
+      'dir',
+    )
+    sel.title = t('ui.query.tree.dirHint')
+    return sel
+  }
+
+  /**
+   * 「某一天」行：**一个模式词 ＋ 一个值控件**（方向已上收到 `dirEl`）。
+   *
+   * 三态：固定日期（`{all:[role,_date]}`）／相对（`{today:{offset}}`，存表达式）／
+   * 与根块同一天（`eq:'$self'`）。它们是同一件事的三种问法，收进一个模式词。
+   */
+  private dayControls(row: Extract<TreeRow, { kind: 'day' }>): HTMLElement[] {
+    const mode = this.dayModeOf(row)
+    const sel = selectEl(
+      [
         { value: 'abs', label: t('ui.query.pathMode.day') },
         { value: 'rel', label: t('ui.query.pathMode.today') },
         { value: 'host', label: t('ui.query.pathMode.host') },
       ],
       mode,
       (next) => {
-        row.dir = undefined
-        if (next === 'up' || next === 'down' || next === 'near') {
-          row.by = 'block'
-          if (next === 'down' || next === 'near') row.dir = next
-          row.rel = undefined
-          // 方向行默认锚在「根块」：与两个创建种子同口径，加一行就是一条完整条件
-          if (row.blockId === '') row.blockId = SELF
-        } else if (next === 'rel') {
-          row.by = 'journal'
+        if (next === 'rel') {
           row.date = ''
           row.rel = row.rel ?? 0
         } else if (next === 'host') {
-          row.by = 'journal'
           row.rel = undefined
           row.date = SELF
         } else {
-          row.by = 'journal'
           row.rel = undefined
           if (row.date === SELF || !isJournalDate(row.date)) row.date = ''
         }
         this.paint()
       },
-      'qt-path-mode',
-      'path-mode',
+      'qt-day-mode',
+      'day-mode',
     )
-    return [sel, this.pathValue(row, mode)]
+    return [sel, this.dayValue(row, mode)]
   }
 
-  private pathModeOf(row: Extract<TreeRow, { kind: 'path' }>): string {
-    if (row.by === 'block') return row.dir ?? 'up'
+  private dayModeOf(row: Extract<TreeRow, { kind: 'day' }>): 'abs' | 'rel' | 'host' {
     if (row.date === SELF) return 'host'
     return row.rel !== undefined ? 'rel' : 'abs'
   }
 
-  private pathValue(row: Extract<TreeRow, { kind: 'path' }>, mode: string): HTMLElement {
-    if (row.by === 'block') {
-      return this.refButton(row.blockId, (id) => {
-        row.blockId = id
-        this.paint()
-      })
-    }
-    // 「这一天下面」用根块的日期：`eq:SELF` 是 seed 的形状，显示成一句人话，不给输入框
-    if (row.date === SELF) return this.selfChip(t('ui.query.selfDate'))
+  private dayValue(row: Extract<TreeRow, { kind: 'day' }>, mode: 'abs' | 'rel' | 'host'): HTMLElement {
+    // 「这一天」用根块的日期：`eq:SELF` 是既有形状，显示成一句人话，不给输入框
+    if (mode === 'host') return this.selfChip(t('ui.query.selfDate'))
     if (mode === 'rel') {
       const wrap = document.createElement('span')
       wrap.className = 'qt-inline'

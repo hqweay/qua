@@ -869,6 +869,31 @@ test('A6 {near} ＝ 自己 ∪ 祖先 ∪ 子孙（三处都命中同一条件�
   )
 })
 
+test('方向 × 组合：五个场景由一格方向 ＋ 且/或覆盖（「同一处满足整组」≠「各条各找一处」）', () => {
+  /**
+   * 外部条件面板的五项（上级匹配所有／任一、下级匹配所有／任一、链条中匹配）
+   * 在语言里只是「方向 × 组合」两轴：3 × 2 ＝ 6 格，第五、六格免费。
+   *
+   * 关键语义分叉：`{up:{all:[A,B]}}` 要求**同一个**上级同时满足 A∧B；
+   * `{all:[{up:A},{up:B}]}` 只要求祖先链里 A、B **各有一处**（可以是不同块）。
+   */
+  const c = b('c', 'C')
+  const p2 = b('p2', 'B', { children: [c] })
+  const p1 = b('p1', 'A', { children: [p2] })
+  const blocks = [p1]
+  const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
+
+  assert.deepEqual(ids({ up: { all: [{ text: 'A' }, { text: 'B' }] } }), [], '同一处满足整组：没有')
+  assert.deepEqual(ids({ all: [{ up: { text: 'A' } }, { up: { text: 'B' } }] }), ['c'], '各条各找一处：c')
+  assert.deepEqual(ids({ any: [{ up: { text: 'A' } }, { up: { text: 'B' } }] }), ['p2', 'c'], '上级匹配任一')
+  assert.deepEqual(ids({ down: { text: 'C' } }), ['p1', 'p2'], '下级匹配（不含自己）')
+  assert.deepEqual(ids({ near: { text: 'A' } }), ['p1', 'p2', 'c'], '链条含自己')
+  assert.deepEqual(ids({ up: { text: 'A' } }), ['p2', 'c'], '上级不含自己')
+  // 两条求值路径同解（方向判定共用一份）
+  assertSameHits({ where: { near: { text: 'A' } } }, blocks)
+  assertSameHits({ where: { down: { text: 'C' } } }, blocks)
+})
+
 test('A7 方向原子可嵌套：{up:{down:…}} 有结果且不重复', () => {
   /**
    * ⚠️ 必须让「某个祖先」与「直接父块」给出不同答案，否则这条断言在
