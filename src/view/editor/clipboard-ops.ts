@@ -11,10 +11,12 @@ import {
   hasDescendant,
   isDeleted,
   isFolded,
+  liveChildren,
   locate,
   mkBlock,
   blockLabel,
   refTokensIn,
+  setCollapsed,
   typeDeclOf,
   uuidv7Hex,
   writeBlockContent,
@@ -221,12 +223,14 @@ export class ClipboardOps {
    * 不先记会被迁移途中的 prev 污染）、再追加成 run、逆序插回目标位——
    * 这本次序账与多块拖拽是同一本。
    *
-   * **落点 = 光标所在行的下一可见行**，落点形态由 `blankRowKind` 一份判据给：
-   *   · 空叶子是占位 ⇒ 整组占它那一行、它同笔让位（否则前后都会多留一条空行，
-   *     看起来就是「块跳过光标一行」）；让位后原光标宿主已不在画面上 ⇒ 光标交给
-   *     搬来的最后一块的块尾；
-   *   · 空块但有子块且展开 ⇒ 它是容器，不删；整组落它的**首个子块**（下一可见行），
-   *     不是跨过整棵子树去当它的下一个兄弟；折叠 ⇒ 子层不可见，仍走兄弟位。
+   * **落点 = 光标所在的那一行**，由 `blankRowKind` 一份判据给：
+   *   · 空行（没正文、可写）是占位 ⇒ 整组占它那一行、它同笔软删让位。否则无论插在
+   *     它前面还是后面，都会多留一条空行，看起来就是「块跳过光标一行」；
+   *     让位后原光标宿主已不在画面上 ⇒ 光标交给搬来的最后一块的块尾；
+   *   · 空行下面挂着子树（容器档）⇒ 让位时把子树按原序交给最后一块接住，
+   *     并把这一行原来的折叠态也带过去；屏幕上只变一行，子块的深度与次序不变。
+   *     三条例外退回「收首子块、不删这一行」：它带属性、最后一块不许有子块、
+   *     搬来的块里有它的子孙（换父会成环）。
    *
    * 派生面（查询结果／镜像）不收结构性粘贴：结果行不是块的位置。
    * 标记是意图不是锁：调用方对同一份剪贴板可以反复调（反复贴＝反复移）。
@@ -236,9 +240,7 @@ export class ClipboardOps {
     const forest: Doc = { roots: this.ed.store.blocks }
     const tgt = locate(forest, targetId)
     if (!tgt) return 'refused'
-    const row = blankRowKind(tgt.block, isFolded(this.ed.doc, targetId))
-    // 容器档把落点换成「它的首个子块」；其余按目标块的兄弟列表算
-    const siteParent = row === 'container' ? targetId : (tgt.parent?.id ?? null)
+    const parentId = tgt.parent?.id ?? null
     const live: Array<{ id: string; loc: Located }> = []
     for (const id of [...new Set(ids)]) {
       const b = this.ed.store.find(id)
@@ -251,27 +253,54 @@ export class ClipboardOps {
     for (const { id } of live) {
       if (id === targetId || hasDescendant(forest, id, targetId)) return 'refused'
     }
-    if (siteParent !== null) {
-      const parent = this.ed.store.find(siteParent)
+    if (parentId !== null) {
+      const parent = this.ed.store.find(parentId)
       if (!parent || isDeleted(parent) || typeDeclOf(parent).children === 'none') return 'refused'
     }
-    // 占位档 ⇒ 用它自己的下标（占这一行）；容器档 ⇒ 0；其余 ⇒ 按 zone 插在它前／后
-    const at = row === 'placeholder' ? tgt.index : row === 'container' ? 0 : tgt.index + (zone === 'after' ? 1 : 0)
+
+    const row = blankRowKind(tgt.block)
+    const host = live[live.length - 1]!
+    /**
+     * 空行让位 ＝ 来的块占它那一行、它同笔软删。容器档额外把子树交给 host 接住，
+     * 否则软删这一行会连整棵子树一起藏掉。三条例外退回「收首子块、不删这一行」的
+     * 老落点：宁可多留一行，也不静默丢配置／造环。
+     */
+    const takeOver = row === 'placeholder' || (
+      row === 'container'
+      && Object.keys(tgt.block.props ?? {}).length === 0
+      && typeDeclOf(host.loc.block).children !== 'none'
+      && !live.some(({ id }) => hasDescendant(forest, targetId, id))
+    )
+    const siteParent = takeOver ? parentId : row === 'container' ? targetId : parentId
+    // 让位 ⇒ 用它自己的下标；退化到首子块 ⇒ 0；普通块 ⇒ 按 zone 插在前／后
+    const at = takeOver ? tgt.index : row === 'container' ? 0 : tgt.index + (zone === 'after' ? 1 : 0)
     // 目标下标之前的本批块会先被摘走 ⇒ 目标下标前移（与多块拖拽同一本账）
     let index = at
     for (const { loc } of live) if (loc.parent?.id === siteParent && loc.index < at) index--
+    /** 子块清单要在动手前抓：事务里再 locate 读到的是一棵已经改过的树 */
+    const inherited = takeOver && row === 'container' ? liveChildren(tgt.block).map((b) => b.id) : []
+    const wasFolded = inherited.length > 0 && isFolded(this.ed.doc, targetId)
     this.ed.beginUndoEntry()
     this.ed.write((tx) => {
       /** 原位软删即可（与库里所有删除同一条路径，撤销一步全回）：空行不留在中间 */
-      if (row === 'placeholder') tx.remove(targetId)
+      if (takeOver) tx.remove(targetId)
+      /**
+       * 接住的子块先在**原位** no-op 记一笔改前落点：不记的话，K1 搬走之后 K2
+       * 会把「E 的首位」当成自己的原位，撤销时两块都往首位插 ⇒ 次序翻转。
+       * 这条与下面搬动整组时的 no-op 是同一本次序账，不是第二套规则。
+       */
+      inherited.forEach((kid, i) => tx.move(kid, targetId, i))
+      // 再按原序追加到 host 尾部（host 自带的子块在前，两棵子树各自成段）
+      for (const kid of inherited) tx.move(kid, host.id, Number.MAX_SAFE_INTEGER)
       for (const { id, loc } of live) if (loc.parent) tx.move(id, loc.parent.id, loc.index)
       for (const { id } of live) tx.move(id, siteParent, Number.MAX_SAFE_INTEGER)
       for (let i = live.length - 1; i >= 0; i--) tx.move(live[i]!.id, siteParent, Math.max(0, index))
       for (const { id } of live) tx.patch(id, (x) => (x.modified = Date.now()))
     })
-    const last = live[live.length - 1]!
-    const caret = row === 'placeholder' && !this.ed.bsel.hasBlockSelection()
-      ? { id: last.id, off: plainLen(last.loc.block.content) }
+    // 折叠态跟着子树走：换父不该把用户折起来的子树自动摊开（折叠态不进撤销）
+    if (wasFolded) setCollapsed(this.ed.doc, host.id, true)
+    const caret = takeOver && !this.ed.bsel.hasBlockSelection()
+      ? { id: host.id, off: plainLen(host.loc.block.content) }
       : undefined
     this.ed.structTail(caret)
     this.ed.bsel.paintBlockSel()

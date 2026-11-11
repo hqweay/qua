@@ -532,20 +532,20 @@ export function isBlankPlaceholder(b: Block): boolean {
 }
 
 /**
- * 一条**空行**在「往这里插／搬一块」时到底算什么。只回答落点形态，不碰树。
+ * 一条**空行**在「往这里插／搬一块」时算什么。只回答落点形态，不碰树。
  *
- *   · `placeholder` —— 没正文、没活子块：这一行只是「这里可以放一块」，
- *     来的块**占它那一行**（它让位），不是插在它前／后留一条空行；
- *   · `container` —— 没正文但有活子块、且子层看得见：它已经在承载结构，
- *     不能被顶掉；光标行的下一可见行是它的**首个子块**，来的块落那里；
- *   · `null` —— 有正文的普通块，或子层折叠不可见（插进看不见的层等于没贴）⇒ 走兄弟位。
+ *   · `placeholder` —— 没正文、没活子块：这一行只是「这里可以放一块」；
+ *   · `container` —— 没正文但有活子块：这一行仍是占位，只是下面挂着一棵子树；
+ *   · `null` —— 有正文的普通块、正文只读的身份块、声明不许有子块的类型 ⇒ 走兄弟位。
  *
- * 折叠那一条与 `enterKind()` 同源：块尾有子块且**展开**才建首子块，折叠则建同级。
+ * 两档空行的落点**相同**：来的块占这一行，空行让位。区别只有一件 —— 容器档要把它
+ * 的子树交给来的块接住，否则软删这一行会把整棵子树一起藏掉。空行能不能写正文是分水岭：
+ * 能写 ⇒ 它就是普通一行，光标停在这里按粘贴，意图是填这一行，不是往组里加一项。
  */
-export function blankRowKind(b: Block, folded: boolean): 'placeholder' | 'container' | null {
-  if (isBlankPlaceholder(b)) return 'placeholder'
+export function blankRowKind(b: Block): 'placeholder' | 'container' | null {
   if (!isEmptyContent(b.content) || !canWriteText(b)) return null
-  if (folded || !hasLiveChildren(b) || typeDeclOf(b).children === 'none') return null
+  if (isBlankPlaceholder(b)) return 'placeholder'
+  if (!hasLiveChildren(b) || typeDeclOf(b).children === 'none') return null
   return 'container'
 }
 

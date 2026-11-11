@@ -16595,7 +16595,7 @@ await check(
 )
 
 await check(
-  'T288 空块但有子块：它是容器不是占位，剪切粘贴落它的首个子块（不跨过整棵子树去当兄弟）',
+  'T288 空块但有子块：搬来的块接管这一行的位置并接住它的子树（不多一行、不多一层）；折叠态跟着走；一次撤销全回',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -16603,49 +16603,92 @@ await check(
     const fx = await page.evaluate(() => {
       const ed = window.__qua.__editor
       const root = ed.doc.roots[0]
-      const a = ed.insert.insertBlockAfter(root.id, '搬来的块')
-      const e = a ? ed.insert.insertBlockAfter(a, '') : null
-      const k = e ? ed.insert.insertBlockAfter(e, '原有子块') : null
-      if (k) ed.indent(k) // 变成空块 E 的第一个子块
-      return { rootId: root.id, a, e, k }
+      // 空容器 E 在开头、带两个子块；待搬块 A 放在末尾，好让「接管位置」看得出来
+      const e = ed.insert.insertBlockAfter(root.id, '')
+      const k1 = e ? ed.insert.insertBlockAfter(e, '原有子块一') : null
+      const k2 = k1 ? ed.insert.insertBlockAfter(k1, '原有子块二') : null
+      if (k1) ed.indent(k1)
+      if (k2) ed.indent(k2)
+      const last = root.children[root.children.length - 1]
+      const a = last ? ed.insert.insertBlockAfter(last.id, '搬来的块') : null
+      return { rootId: root.id, a, e, k1, k2 }
     })
-    assert(fx.a && fx.e && fx.k, `前置：空容器＋子块＋待搬块都要建出来：${JSON.stringify(fx)}`)
+    assert(fx.a && fx.e && fx.k1 && fx.k2, `前置：空容器＋两个子块＋待搬块都要建出来：${JSON.stringify(fx)}`)
     await page.waitForTimeout(150)
-    const pre = await page.evaluate((f) => {
-      const ed = window.__qua.__editor
-      return { children: ed.store.find(f.e).children.map((b) => b.id), rootHasA: ed.store.find(f.rootId).children.some((b) => b.id === f.a) }
-    }, fx)
-    assert(pre.children[0] === fx.k && pre.rootHasA, `前置：K 是 E 的首子块、A 是 E 的兄弟：${JSON.stringify(pre)}`)
+    /** 只数还活着的块：软删的占位仍留在 children 数组里，但不再是一行 */
+    const shape = () =>
+      page.evaluate((f) => {
+        const ed = window.__qua.__editor
+        // store.find 只查可见索引，软删的占位已退场 ⇒ 按原始森林按 id 找
+        const byId = (id) => {
+          let hit = null
+          const walk = (list) => {
+            for (const b of list) {
+              if (b.id === id) hit = b
+              walk(b.children ?? [])
+            }
+          }
+          walk(ed.store.blocks)
+          return hit
+        }
+        const alive = (b) => b && !b.props?._deletedAt
+        const kids = (b) => b.children.filter(alive).map((x) => x.id)
+        return {
+          rootOrder: byId(f.rootId).children.filter(alive).map((b) => b.id),
+          eHidden: !alive(byId(f.e)),
+          eDom: Boolean(document.querySelector(`.blk[data-block-id="${f.e}"]`)),
+          eKids: kids(byId(f.e)),
+          aKids: kids(byId(f.a)),
+          hostFolded: ed.doc.folded?.[f.a] === true,
+        }
+      }, fx)
+    const pre = await shape()
+    assert(
+      pre.rootOrder[0] === fx.e && pre.rootOrder[pre.rootOrder.length - 1] === fx.a,
+      `前置：E 在首行、A 在末行：${JSON.stringify(pre.rootOrder)}`,
+    )
+    assert(pre.eKids[0] === fx.k1 && pre.eKids[1] === fx.k2, `前置：两个子块按序挂在 E 下：${JSON.stringify(pre.eKids)}`)
 
+    // ① 展开态：A 接管 E 的位置，E 让位，两个子块按原序改挂到 A 下
     const r = await page.evaluate(
       ({ f }) => window.__qua.__editor.clip.pasteRefsAt({ blockId: f.e, offset: 0, cut: null }, { ids: [f.a], move: true }),
       { f: fx },
     )
     await page.waitForTimeout(200)
     assert(r === 'moved', `应返回 moved：${r}`)
-    const shape = await page.evaluate((f) => {
-      const ed = window.__qua.__editor
-      const e = ed.store.find(f.e)
-      return {
-        alive: Boolean(e),
-        children: e.children.map((b) => b.id),
-        rootHasA: ed.store.find(f.rootId).children.some((b) => b.id === f.a),
-      }
-    }, fx)
-    assert(shape.alive, '空容器不能被顶掉（它还带着子树）')
-    assert(!shape.rootHasA, 'A 不应落在 E 的兄弟位（那会跨过整棵子树）')
-    assert(shape.children[0] === fx.a && shape.children[1] === fx.k, `A 应是 E 的首子块、原子块顺延：${JSON.stringify(shape.children)}`)
+    const after = await shape()
+    assert(after.rootOrder[0] === fx.a, `A 应占 E 原来那一行：${JSON.stringify(after.rootOrder)}`)
+    assert(after.eHidden && !after.eDom, '空行应让位，不再留一条空行，也不留在屏上')
+    assert(after.rootOrder.length === pre.rootOrder.length - 1, `总行数应只少一条空行：${JSON.stringify(after.rootOrder)}`)
+    assert(after.aKids[0] === fx.k1 && after.aKids[1] === fx.k2, `子块按原序由 A 接住：${JSON.stringify(after.aKids)}`)
+    assert(after.eKids.length === 0, `E 的子块应已改挂：${JSON.stringify(after.eKids)}`)
 
+    // ② 一次撤销：空行回来、A 回末行、子块回 E 下
     await page.evaluate(() => window.__qua.invoke('core.history/undo'))
     await page.waitForTimeout(200)
-    const back = await page.evaluate((f) => {
+    const back = await shape()
+    assert(!back.eHidden && back.rootOrder[0] === fx.e && back.rootOrder[back.rootOrder.length - 1] === fx.a, `撤销后应全回：${JSON.stringify(back.rootOrder)}`)
+    assert(
+      back.eKids[0] === fx.k1 && back.eKids[1] === fx.k2 && back.aKids.length === 0,
+      `撤销后子块回 E 下：期望 [${fx.k1},${fx.k2}]，实际 ${JSON.stringify(back)}`,
+    )
+
+    // ③ 折叠态不改落点，但折叠态要跟着子树走（换父不该把折起来的子树自动摊开）
+    await page.evaluate((e) => {
       const ed = window.__qua.__editor
-      return { children: ed.store.find(f.e).children.map((b) => b.id), rootHasA: ed.store.find(f.rootId).children.some((b) => b.id === f.a) }
-    }, fx)
-    assert(back.children[0] === fx.k && back.rootHasA, `一次撤销应全回：${JSON.stringify(back)}`)
+      ed.doc.folded = { ...(ed.doc.folded ?? {}), [e]: true }
+    }, fx.e)
+    const r3 = await page.evaluate(
+      ({ f }) => window.__qua.__editor.clip.pasteRefsAt({ blockId: f.e, offset: 0, cut: null }, { ids: [f.a], move: true }),
+      { f: fx },
+    )
+    await page.waitForTimeout(200)
+    const folded = await shape()
+    assert(r3 === 'moved' && folded.rootOrder[0] === fx.a && folded.eHidden, `折叠态也应接管这一行：${JSON.stringify(folded.rootOrder)}`)
+    assert(folded.hostFolded, '折叠态应跟着子树交给 A（否则子树会自己摊开）')
 
     await ctx.close()
-    return `空容器不删、A 落首子块且原子块顺延；1 次撤销全回`
+    return `空行让位（A 占那一行、接住两子块、总行数只少一）；折叠态跟着走；1 次撤销全回`
   },
 )
 

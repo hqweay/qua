@@ -40,22 +40,21 @@ test('身份块没有可写正文 ⇒ 不是占位（不能被搬来的块顶掉
   assert.equal(isBlankPlaceholder(def), false)
 })
 
-test('空行的三档落点：占位让位／容器收首子块／其余走兄弟位', () => {
+test('空行的两档落点：占位／容器都让位；有正文或只读正文走兄弟位', () => {
   const leaf = mkBlock('')
-  assert.equal(blankRowKind(leaf, false), 'placeholder')
+  assert.equal(blankRowKind(leaf), 'placeholder')
 
   const container = mkBlock('')
   container.children.push(mkBlock('原有子块'))
-  assert.equal(blankRowKind(container, false), 'container')
-  // 子层折叠时看不见 ⇒ 不能把块插进不可见的层，退回兄弟位
-  assert.equal(blankRowKind(container, true), null)
+  // 折叠态不再改落点：来的块占的是这一行，不是插进子层
+  assert.equal(blankRowKind(container), 'container')
 
   const withText = mkBlock('有正文的父块')
   withText.children.push(mkBlock('子块'))
-  assert.equal(blankRowKind(withText, false), null)
+  assert.equal(blankRowKind(withText), null)
 
   const identity = mkBlock('')
   identity.props = { _date: '2026-11-11' }
   identity.children.push(mkBlock('子块'))
-  assert.equal(blankRowKind(identity, false), null)
+  assert.equal(blankRowKind(identity), null)
 })
