@@ -50,9 +50,22 @@ export class Drag {
     if (zone) el.dataset.drop = zone
   }
 
-  drop(draggedId: string | null, targetId: string | null, zone: DropZone): void {
+  drop(draggedId: string | null, targetId: string | null, zone: DropZone, asRef = false): void {
     const id = draggedId
     if (!id) return
+    /**
+     * **引用式拖拽**（起拖时按着 ⌥）：原块不动，在落点插一枚指向它的 `RefRun`。
+     *
+     * 落点仍走同一份判据：`dropInsertSite` 与普通拖的 `dropMove` 只差「摘不摘自己」。
+     * 整组多选 ⇒ 每块一枚引用，同笔事务、一次撤销（`insertRefDrop` 里收口）。
+     * 这一支**不从别的露面接**：⌥ 状态由正文起拖那一刻锁定，别的组件起拖时它是 false。
+     */
+    if (asRef) {
+      const group = this.dragIds.length > 0 ? [...this.dragIds] : [id]
+      this.end()
+      this.ed.insert.insertRefDrop(group, targetId, zone)
+      return
+    }
     /**
      * **整组拖拽**：多选时 `dragIds` 是那一组最上层根，落手走编辑器的批量落点。
      * 组里的块全在本 doc 里（选区只收可见行），所以不走跨容器那一支。

@@ -13,7 +13,7 @@
  *   1. **组合期（IME composing）不重渲染该块**——否则会打断输入法，`compositionend` 后才补渲染；
  *   2. **键位一个都不在这里处理**——全部交给绑定表，这里只碰「输入与拖拽」。
  */
-import { bindDropTarget, setDragBlock, zoneHint } from '../dnd.ts'
+import { bindDropTarget, isRefDrag, setDragBlock, zoneHint, zoneRefHint } from '../dnd.ts'
 import { EDIT_ISLAND_ATTR } from './block-dom.ts'
 import { refsFromHtml } from './clipboard-flavor.ts'
 import type { ClipboardRefs } from './clipboard-flavor.ts'
@@ -243,8 +243,18 @@ export interface EditorBridge {
    * 「不能拖进自己的子树」不在这里：那是**落点对目标**的判定，在 `dropMove` 里自带守卫。
    */
   acceptDrag: (id: string) => boolean
-  /** 松手：编辑器按落点改结构（含撤销记录与重渲染）*/
-  dropDrag: (draggedId: string, targetId: string | null, zone: 'before' | 'after' | 'inside') => void
+  /**
+   * 松手：编辑器按落点改结构（含撤销记录与重渲染）。
+   *
+   * `asRef` ＝ 这一次是**引用式**拖拽（起拖时按着 ⌥）：落点是同一份，但写入不同——
+   * 普通拖搬走块，引用式拖在原地插一枚指向被拖块的 `RefRun`。
+   */
+  dropDrag: (
+    draggedId: string,
+    targetId: string | null,
+    zone: 'before' | 'after' | 'inside',
+    asRef?: boolean,
+  ) => void
   /** 结束拖拽（清掉预览）*/
   endDrag: () => void
   /** 当前是否处于组合期 */
@@ -1111,7 +1121,14 @@ export function bindEditorEvents(br: EditorBridge): () => void {
   on(c, 'dragstart', (e: DragEvent) => {
     const handle = (e.target as HTMLElement).closest<HTMLElement>('[data-drag-for]')
     if (!handle?.dataset.dragFor) return
-    setDragBlock(e.dataTransfer, handle.dataset.dragFor)
+    /**
+     * ⌥ **在这一刻锁定**（`clickModsOf` 是修饰键唯一取法）：悬停提示、光标形状与落手
+     * 全程读同一份，拖到一半松开 ⌥ 不改结果。否则会出现「提示说移走、松手插了一枚引用」。
+     *
+     * 只接**从块标/把手起拖**这一条：`.tx` 内按下拖过块边界是块选区那条路，
+     * 它根本不派发 `dragstart` ⇒ ⌥ 的引用语义碰不到它。
+     */
+    setDragBlock(e.dataTransfer, handle.dataset.dragFor, clickModsOf(e).altKey)
     br.beginDrag(handle.dataset.dragFor)
   })
 
@@ -1119,11 +1136,15 @@ export function bindEditorEvents(br: EditorBridge): () => void {
   off.push(
     bindDropTarget(c, {
       attr: 'drop',
-      effect: 'move',
+      // ⌥ 起拖 ⇒ 这个落点是「在这里留一枚引用」（建关系那一档光标），不是搬走
+      effect: () => (isRefDrag() ? 'link' : 'move'),
       // 段根（页／天／查询记录）不参与拖拽；未知 id 也不接（别人的载荷可能不是块）
       accept: (id) => br.acceptDrag(id),
       targetId: (e) => rowOf(e)?.dataset.blockId ?? null,
-      hint: (_id, e) => zoneHint(zoneOf(e)),
+      hint: (_id, e) => {
+        const zone = zoneOf(e)
+        return isRefDrag() ? zoneRefHint(zone) : zoneHint(zone)
+      },
       // 三区各有各的高亮线：由编辑器自己画（模块不认识 CSS 类名）
       mark: (_id, e) => {
         const el = rowOf(e)
@@ -1134,7 +1155,13 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       onDrop: (draggedId, targetId, e) => {
         const el = rowOf(e)
         const zone = el ? zoneOf(e) : 'after'
-        br.dropDrag(draggedId, targetId, targetId && zone === 'inside' && !br.hasChildren(targetId) ? 'after' : zone)
+        br.dropDrag(
+          draggedId,
+          targetId,
+          targetId && zone === 'inside' && !br.hasChildren(targetId) ? 'after' : zone,
+          // 与悬停提示同源：拖到一半松开 ⌥ 不改变这一次的结果
+          isRefDrag(),
+        )
         br.onMounted()
       },
     }),

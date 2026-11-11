@@ -914,29 +914,44 @@ export function trashOf(forest: readonly Block[]): Block[] {
 }
 
 /**
- * 拖拽的落点（before/after/inside；`targetId === null` 表示落在空白处）。
+ * 拖拽落点的**原始坐标**：真实列表里的插入下标 ＋ 「移动时会摘掉自己」那一格。
  *
- * 拖拽与键盘移动共用 `applyMove`／`tx.move` 的**最终下标**口径；这里只算「落在哪」：
- *   · 同列表里自己排得比目标前 ⇒ 摘掉自己之后目标前移一格（`shift`）；
- *   · 空白处 ⇒ 放进**最后一个根**，不推到森林顶层 ——
- *     一个不属于任何 section 的根在视图里没有容身处（`roots` 是装载单位，不是兄弟位）。
+ * 同一个落点有两种消费，差别只有一处：
+ *   · **移动**（普通拖）—— 先把自己摘掉再插，于是自己原来排在落点前时下标要减一格；
+ *   · **新插**（⌥ 拖＝引用）—— 一个块都不摘，下标就是这里给的原始值。
  *
- * 目标是**声明不许有子块**的类型（占位型块）⇒ 落进它里面不成立；
- * before/after 仍允许：那只是插在它旁边，不需要它容纳任何东西。
+ * 为什么把差异收成一个位而不是各算一遍：`MovePlan.index` 是「摘掉自己之后」的口径
+ * （缩进／反缩进／换位／拖拽四条入口共用），复制一份「不摘自己」的判据必然在
+ * 自环、占位型块、段根这些守卫上漂移 —— 而漂移的表现是「落点和悬停高亮差一行」。
  */
-export function dropMove(
+interface DropAnchor {
+  parentId: string | null
+  /** 真实列表里的插入下标（还没摘掉自己） */
+  index: number
+  /** 移动时会摘掉自己、且这一摘让插入点前移一格 */
+  removed: 0 | 1
+}
+
+/**
+ * 拖拽落点的共同判据（before/after/inside；`targetId === null` 表示落在空白处）。
+ *   · 空白处 ⇒ 放进**最后一个根**，不推到森林顶层 ——
+ *     一个不属于任何 section 的根在视图里没有容身处（`roots` 是装载单位，不是兄弟位）；
+ *   · 目标是**声明不许有子块**的类型（占位型块）⇒ 落进它里面不成立；
+ *     before/after 仍允许：那只是插在它旁边，不需要它容纳任何东西。
+ */
+function dropAnchorOf(
   doc: Doc,
   id: string,
   targetId: string | null,
   pos: 'before' | 'after' | 'inside',
-): MovePlan | null {
+): DropAnchor | null {
   const loc = locate(doc, id)
   if (!loc) return null
   if (targetId === null) {
     const root = doc.roots[doc.roots.length - 1]
     if (!root || typeDeclOf(root).children === 'none') return null
     const same = loc.parent?.id === root.id
-    return { parentId: root.id, index: root.children.length - (same ? 1 : 0) }
+    return { parentId: root.id, index: root.children.length, removed: same ? 1 : 0 }
   }
   if (id === targetId) return null
   if (hasDescendant(doc, id, targetId)) return null
@@ -944,11 +959,46 @@ export function dropMove(
   if (!tgt) return null
   if (pos === 'inside') {
     if (typeDeclOf(tgt.block).children === 'none') return null
-    return { parentId: tgt.block.id, index: tgt.block.children.length }
+    return { parentId: tgt.block.id, index: tgt.block.children.length, removed: 0 }
   }
   const sameList = (loc.parent?.id ?? null) === (tgt.parent?.id ?? null)
-  const shift = sameList && loc.index < tgt.index ? 1 : 0
-  return { parentId: tgt.parent?.id ?? null, index: tgt.index - shift + (pos === 'after' ? 1 : 0) }
+  const removed = sameList && loc.index < tgt.index ? 1 : 0
+  return { parentId: tgt.parent?.id ?? null, index: tgt.index + (pos === 'after' ? 1 : 0), removed }
+}
+
+/**
+ * 拖拽的落点（before/after/inside；`targetId === null` 表示落在空白处）。
+ *
+ * 拖拽与键盘移动共用 `applyMove`／`tx.move` 的**最终下标**口径；这里只算「落在哪」：
+ * 同列表里自己排得比目标前 ⇒ 摘掉自己之后目标前移一格（`removed`）。
+ */
+export function dropMove(
+  doc: Doc,
+  id: string,
+  targetId: string | null,
+  pos: 'before' | 'after' | 'inside',
+): MovePlan | null {
+  const a = dropAnchorOf(doc, id, targetId, pos)
+  return a ? { parentId: a.parentId, index: a.index - a.removed } : null
+}
+
+/**
+ * **在拖拽落点新插一块**时的下标（⌥ 拖＝插一枚引用）。
+ *
+ * 与 `dropMove` 是同一份判据、同一个落点，只少「摘掉自己」那一格：这里一个块都不搬，
+ * 所以原始坐标就是最终下标。被拖块自己仍留在原处 —— 它原来占的那一格不会让位。
+ *
+ * ⚠️ 不能拿 `dropMove` 的结果直接插：那个下标是「摘掉自己之后」的口径，
+ *    同列表里自己排在落点前时，插出来的新块会落在**悬停高亮的上面**一行（差一格）。
+ */
+export function dropInsertSite(
+  doc: Doc,
+  id: string,
+  targetId: string | null,
+  pos: 'before' | 'after' | 'inside',
+): MovePlan | null {
+  const a = dropAnchorOf(doc, id, targetId, pos)
+  return a ? { parentId: a.parentId, index: a.index } : null
 }
 
 /**

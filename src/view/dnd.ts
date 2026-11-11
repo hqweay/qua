@@ -42,16 +42,38 @@ export function isBlockId(v: unknown): v is string {
 let draggingBlock: string | null = null
 let draggingCard: string | null = null
 let draggingTab: string | null = null
+/**
+ * 这一次块拖拽是不是**引用式**（起拖时按着 ⌥）。
+ *
+ * 为什么住在这里、而不是 `DataTransfer` 里：载荷必须能独立成立（只有块 id），
+ * 语义属于**这一次拖拽**，不是块的身份。也不放落点私有状态里 —— 悬停反馈（hint／
+ * 光标）与落手必须读同一份值，而它们是同一个落点上的两段代码。
+ *
+ * ⚠️ **起拖时锁定**：拖到一半松开 ⌥ 不改结果。否则会出现「悬停提示说移动、
+ *    松手却插了一枚引用」——提示与写入各读一个时刻的修饰键。
+ */
+let draggingAsRef = false
 
-/** 拖源：只报「我是谁」 */
-export function setDragBlock(dt: DataTransfer | null, id: string): void {
+/**
+ * 拖源：只报「我是谁」。
+ *
+ * `asRef` 由事件层在 `dragstart` 用 `clickModsOf(e).altKey` 取（修饰键唯一取法），
+ * 之后全程读这里记下的那一份。
+ */
+export function setDragBlock(dt: DataTransfer | null, id: string, asRef = false): void {
   draggingBlock = id
+  draggingAsRef = asRef
   if (!dt) return
   dt.setData(BLOCK_MIME, id)
   // 只有拿到块 id 时才写 text/plain：拖一段普通文字进来不该被当成块
   dt.setData(TEXT_MIME, id)
   // 同一个块可以移（正文）、可以建关系（面板）、可以钉住（侧槽）⇒ 三种都允许
   dt.effectAllowed = 'all'
+}
+
+/** 这一次块拖拽是不是引用式（起拖时锁定的 ⌥；`dragover` 与落手读同一份） */
+export function isRefDrag(): boolean {
+  return draggingBlock !== null && draggingAsRef
 }
 
 /** 卡片拖源：移动窗口/排序。载荷只有卡片实例 id，与块载荷分开 */
@@ -75,6 +97,7 @@ export function setDragTab(dt: DataTransfer | null, id: string): void {
 /** 收掉这次的拖拽（`dragend`／`drop` 之后必须调，否则悬停期会读到脏值） */
 export function clearDragBlock(): void {
   draggingBlock = null
+  draggingAsRef = false
   hideHint()
 }
 
@@ -93,6 +116,7 @@ export function clearDrag(): void {
   draggingBlock = null
   draggingCard = null
   draggingTab = null
+  draggingAsRef = false
   hideHint()
 }
 
@@ -181,6 +205,9 @@ function hideHint(): void {
 
 /* ------------------------------------------------------------ 落点 */
 
+/** 拖拽光标（`dropEffect`）：搬走／建关系／开窗钉住 */
+export type DropEffect = 'move' | 'link' | 'copy'
+
 export interface DropTargetOpts {
   /**
    * 载荷种类：`block`（缺省）＝块 id；`card`＝侧槽卡片实例 id；
@@ -198,8 +225,13 @@ export interface DropTargetOpts {
   accept?: (draggedId: string, e: DragEvent) => boolean
   /** **落点自己说会变成什么**——悬停时就要能读出来（必填） */
   hint: (draggedId: string, e: DragEvent) => string
-  /** 三种含义各用各的光标：移入／建立关系／打开窗口 */
-  effect?: 'move' | 'link' | 'copy'
+  /**
+   * 三种含义各用各的光标（`dropEffect`）。
+   *
+   * 也可以给函数：同一个落点在**同一次拖拽里**可能换含义（正文三区按 ⌥ 在
+   * 「移走」与「建关系」之间切），而悬停期只能读这一处。
+   */
+  effect?: DropEffect | ((draggedId: string, e: DragEvent) => DropEffect)
   /** 松手：含义由落点注入（通常是一次 `registry.invoke`） */
   onDrop: (draggedId: string, targetId: string | null, e: DragEvent) => void
   /** 高亮用的 dataset 键（缺省 `drop`；侧槽用 `dropPin` 保持现有 CSS 契约） */
@@ -248,7 +280,8 @@ export function bindDropTarget(el: HTMLElement, o: DropTargetOpts): () => void {
     // **最内层的落点赢**：一行落在槽里时，别让整槽的落点也把提示/高亮抢过去
     e.stopPropagation()
     e.preventDefault()
-    if (e.dataTransfer) e.dataTransfer.dropEffect = o.effect ?? 'move'
+    const effect = typeof o.effect === 'function' ? o.effect(id, e) : (o.effect ?? 'move')
+    if (e.dataTransfer) e.dataTransfer.dropEffect = effect
     mark(id, e)
     showHint(o.hint(id, e), e)
   }
@@ -306,4 +339,16 @@ export function zoneHint(zone: 'before' | 'after' | 'inside'): string {
   if (zone === 'before') return t('ui.dnd.moveBefore')
   if (zone === 'after') return t('ui.dnd.moveAfter')
   return t('ui.dnd.moveInto')
+}
+
+/**
+ * 同一个三区、**引用式**拖拽的提示。
+ *
+ * 与 `zoneHint` 分开而不是加参数：这是两个动作，用户要在松手前分清「搬走」还是
+ * 「在这儿留一枚引用」——差一个字读不出来，就会得到一个与原意相反的结果。
+ */
+export function zoneRefHint(zone: 'before' | 'after' | 'inside'): string {
+  if (zone === 'before') return t('ui.dnd.refBefore')
+  if (zone === 'after') return t('ui.dnd.refAfter')
+  return t('ui.dnd.refInto')
 }

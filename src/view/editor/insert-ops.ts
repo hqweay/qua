@@ -28,6 +28,9 @@ import {
   setValue,
   writeBlockContent,
   uuidv7Hex,
+  blockLabel,
+  dropInsertSite,
+  hasDescendant,
   type Block,
   type Located,
   type QuerySpec,
@@ -491,8 +494,54 @@ export class InsertOps {
    *    一律不带它（否则「这一处显示什么」就有了两个书写入口，且其中一个无人负责同步）。
    */
   insertRef(opts: { to: string; label: string; flavor?: '#' }): string | null {
-    const run: RefRun = { id: uuidv7Hex(), t: 'ref', to: opts.to, ...(opts.flavor ? { flavor: opts.flavor } : {}), label: opts.label }
-    return this.insertRun(run)
+    return this.insertRun(refRunOf(opts.to, opts.label, opts.flavor))
+  }
+
+  /**
+   * **⌥ 拖的落手**：在拖拽落点插一组引用块（每个被拖块一枚 `RefRun`），原块不动。
+   *
+   * 与 `insertRef` 分工：那个往**已有正文**的光标位插一枚 run；这个造**新块**——
+   * 拖拽自带显式的三区落点，`insertSiteOf`（回答「没给落点时插哪」）不适用。
+   * 两者共用的是「一枚引用长什么样」：`RefRun`，`to`＝源块 id，`label`＝命名快照
+   * （显示名一律现算，这里只给源进回收站之后的兜底）。
+   *
+   * 落点复用 `dropInsertSite`：与普通拖的 `dropMove` 是同一份判据，只少「摘掉自己」那一格
+   * ⇒ 悬停高亮画在哪，引用就落在哪；不另写第二套三区规则。
+   *
+   * **不补空块**：补位纪律属于「没有可写正文的块」（分割线／查询／露面）。
+   * 这里插的是普通可写块，光标落到最后一枚的引用之后即可。
+   *
+   * 整组多选：N 块各一枚引用，同笔事务 ⇒ 一次撤销全回。
+   */
+  insertRefDrop(ids: readonly string[], targetId: string | null, zone: 'before' | 'after' | 'inside'): boolean {
+    const doc = this.ed.doc
+    /** 段根（页／天／查询记录）没有兄弟位：日记流是真实日期序、查询结果集是视图序 */
+    const roots = [...new Set(ids)].filter((id) => locate(doc, id)?.parent !== null)
+    if (roots.length === 0) return false
+    if (targetId !== null) {
+      const tgt = locate(doc, targetId)
+      if (!tgt || (tgt.parent === null && zone !== 'inside')) return false
+      // 落点不能落在被拖的子树里（含被拖块自己）——与单块拖拽同一条守卫
+      for (const id of roots) if (id === targetId || hasDescendant(doc, id, targetId)) return false
+    }
+    const site = dropInsertSite(doc, roots[0]!, targetId, zone)
+    if (!site) return false
+    // 派生面（查询结果／镜像）：落点必须还在本文档里（与 `moveStaysInside` 同一条门）
+    if (this.ed.structuralScope === 'roots' && (site.parentId === null || !locate(doc, site.parentId))) return false
+
+    const find = (id: string) => this.ed.store.find(id)
+    const made = roots.map((id) => {
+      const src = find(id)
+      return mkBlock([refRunOf(id, src ? blockLabel(src, find) : '')])
+    })
+    this.ed.beginUndoEntry()
+    this.ed.write((tx) => {
+      made.forEach((b, i) => tx.insert(b, site.parentId, site.index + i))
+    })
+    const last = made[made.length - 1]!
+    this.ed.structTail({ id: last.id, off: plainLen(last.content) })
+    this.ed.bsel.paintBlockSel()
+    return true
   }
 
   /**
@@ -549,4 +598,17 @@ export class InsertOps {
     if (!blockId) return null
     return { blockId, offset: this.ed.sel?.aOff ?? 0 }
   }
+}
+
+/**
+ * 一枚引用 run 的形状（两条插入路径共用：光标位插入 / 拖拽落点插块）。
+ *
+ * 为什么收成一个函数：形状写两遍，`flavor`／`anchor` 这类字段的口径迟早有一处漏掉，
+ * 而漏掉的表现是「同一个引用在两处长得不一样」。
+ *
+ * ⚠️ **不写 `anchor`**：锚文本是用户事后显式改的那一处名字，插入路径一律不带它
+ *    （否则「这一处显示什么」就有了两个书写入口，且其中一个无人负责同步）。
+ */
+function refRunOf(to: string, label: string, flavor?: '#'): RefRun {
+  return { id: uuidv7Hex(), t: 'ref', to, ...(flavor ? { flavor } : {}), label }
 }

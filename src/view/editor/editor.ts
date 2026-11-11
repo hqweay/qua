@@ -3594,7 +3594,7 @@ export class BlockEditor {
        * 落点报上来的块 id 是**载荷里那一个**（不是「我认得刚才那次拖拽」）——
        * 这样从侧槽／面板／任何组件拖过来的块都能落进正文。
        */
-      dropDrag: (draggedId, targetId, zone) => this.drag.drop(draggedId, targetId, zone),
+      dropDrag: (draggedId, targetId, zone, asRef) => this.drag.drop(draggedId, targetId, zone, asRef),
       endDrag: () => this.drag.end(),
 
       composing: () => this.probe.isComposing,

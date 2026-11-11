@@ -13,6 +13,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   applyMove,
+  dropInsertSite,
   dropMove,
   dropMoveExternal,
   flatten,
@@ -124,6 +125,46 @@ test('拖拽拒绝：拖到自己身上 / 拖进自己的子树 / 目标不存�
     ['p', 'c1', 'g1', 'c2', 'c3', 'x', 'x1'],
     '拒绝时整棵树原样',
   )
+})
+
+/* ---------------------------------------------- ⌥ 拖：在落点插一枚引用（dropInsertSite） */
+
+/**
+ * 引用式落点＝同一份判据、少一格「摘掉自己」。
+ *
+ * 两个下标必须同时钉住：`dropMove` 的是「摘掉自己之后」的口径（移动用），
+ * `dropInsertSite` 的是真实列表里的下标（插新块用）。只钉一个，另一处差一格也看不出来。
+ */
+test('引用式落点：自己排在落点前时不还格 ⇒ 新块落在悬停高亮处，不差一行', () => {
+  const doc = fixture()
+  // c2 拖到 c3 之前：悬停线在 c2/c3 之间 ⇒ 新块必须在 c2 与 c3 之间（真实下标 2）；
+  // 而移动的 plan 摘掉 c2 之后是 1 —— 直接拿它插会落到 c2 上面一格。
+  assert.deepEqual(dropMove(doc, 'c2', 'c3', 'before'), { parentId: 'p', index: 1 })
+  assert.deepEqual(dropInsertSite(doc, 'c2', 'c3', 'before'), { parentId: 'p', index: 2 })
+  // c2 落到 c1 之后：新块紧贴 c1（1），不是 c2 原来那一格之后
+  assert.deepEqual(dropInsertSite(doc, 'c2', 'c1', 'after'), { parentId: 'p', index: 1 })
+  // 自己排在落点之后 ⇒ 没有要还的格，两处答案一致
+  assert.deepEqual(dropMove(doc, 'c3', 'c1', 'after'), { parentId: 'p', index: 1 })
+  assert.deepEqual(dropInsertSite(doc, 'c3', 'c1', 'after'), { parentId: 'p', index: 1 })
+})
+
+test('引用式落点：inside 与空白处都不摘任何块（空白处＝最后一个根的孩子末尾）', () => {
+  const doc = fixture()
+  assert.deepEqual(dropInsertSite(doc, 'c2', 'c1', 'inside'), { parentId: 'c1', index: 1 })
+  assert.deepEqual(dropInsertSite(doc, 'c2', null, 'after'), { parentId: 'x', index: 1 })
+  // 被拖块本身就是 x 的孩子 ⇒ 不还格（新块落在它后面，x 的孩子数从 1 变 2）
+  assert.deepEqual(dropMove(doc, 'x1', null, 'after'), { parentId: 'x', index: 0 })
+  assert.deepEqual(dropInsertSite(doc, 'x1', null, 'after'), { parentId: 'x', index: 1 })
+})
+
+test('引用式落点沿用同一套守卫：自己 / 自己的子树 / 不存在的目标 / 占位型类型', () => {
+  const doc = fixture()
+  doc.roots[0]!.children.push({ id: 'div', content: [], children: [], created: 0, modified: 0, props: { _type: DIVIDER_TYPE } })
+  assert.equal(dropInsertSite(doc, 'c1', 'c1', 'before'), null)
+  assert.equal(dropInsertSite(doc, 'c1', 'g1', 'inside'), null, '落点在自己子树里')
+  assert.equal(dropInsertSite(doc, 'c1', '没有这一块', 'after'), null)
+  assert.equal(dropInsertSite(doc, 'c1', 'div', 'inside'), null, '占位型块容纳不下任何子块')
+  assert.deepEqual(dropInsertSite(doc, 'c1', 'div', 'after'), { parentId: 'p', index: 4 }, 'before/after 仍可以')
 })
 
 test('applyMove 自环守卫：目标是自己或自己的后代 ⇒ false，且不摘不改', () => {
