@@ -308,14 +308,24 @@ function walk(blocks: readonly Block[], fn: (b: Block, ancestors: Block[]) => vo
 }
 
 /**
- * 谓词环境：`ref`／`tag` 条件已经**按条件收好**的块 id 集合。
+ * 谓词环境：`ref`／`tag` 条件已经**按条件收好**的块集合。
  *
  * 为什么单独立一份：求值有两条路 —— 纯函数路径从森林收集，
  * 索引路径从 `IndexPort` 的表里查表；**判定与顺序只有一份**（`evaluateQuery`），
  * 两条路只许在「环境怎么来」上不同。
  */
 export interface QueryEnv {
-  refs: ReadonlySet<string>
+  /**
+   * **引用条件的读面：按「目标」查，不按「整份 where」并集**。
+   *
+   * 从前这里是一个 `Set`（整份条件里所有 `{ref}` 目标的来源并集）——
+   * 于是同一份条件出现两个不同目标时互相串味：`{all:[{ref:X},{not:{ref:Y}}]}`
+   * 会拿「引用 X 或 Y 的块」当「引用 X 的块」，结果静默变空。
+   * 现在判定读当前节点自己的目标（这一步），并集不存在了。
+   *
+   * 表按需建：`where` 里没有 `{ref}` 时给一个恒 `undefined` 的读面，一趟都不扫。
+   */
+  refSources: RefSources
   tags: ReadonlySet<string>
   /**
    * **字段读取表**：判「这块有没有这一栏」要看标签声明与定义 kind，
@@ -338,6 +348,53 @@ export interface QueryEnv {
    * ⚠️ 与 `selfId` 分开：那条只负责解析 `'$self'`，不再顺带排除。
    */
   excludeIds?: ReadonlySet<string>
+}
+
+/**
+ * 引用条件的读面：**目标块 → （引用种类 → 来源块集合）**。
+ *
+ * 没有人指向它时返回 `undefined`（不是空 Map：一条边都没建过的目标不该在表里留格子）。
+ * 返回的集合是**只读快照**，调用方不许改。
+ */
+export type RefSources = (targetId: string) => ReadonlyMap<RelationKind, ReadonlySet<string>> | undefined
+
+/** 没有 `{ref}` 条件时的读面：一个块都不命中，且不建表 */
+const NO_REF_SOURCES: RefSources = () => undefined
+
+/**
+ * 条件里有没有 `{ref}`。两条求值路径都用它决定「要不要建引用表」——
+ * 纯 `tag`／`text` 查询不该为引用条件付一次全林扫描。
+ */
+export function usesRef(node: QueryNode): boolean {
+  if ('all' in node) return node.all.some(usesRef)
+  if ('any' in node) return node.any.some(usesRef)
+  if ('not' in node) return usesRef(node.not)
+  if ('up' in node) return usesRef(node.up)
+  if ('down' in node) return usesRef(node.down)
+  if ('near' in node) return usesRef(node.near)
+  return 'ref' in node
+}
+
+/**
+ * 森林里的引用边 → 按（目标, 种类）索引的读面。**整片森林只扫一趟**，
+ * 与 `relationEdgesOfForest` 同一份提取口径（正文引用／属性引用／嵌入都算引用）。
+ */
+function refSourcesOfForest(forest: readonly Block[]): RefSources {
+  const byTarget = new Map<string, Map<RelationKind, Set<string>>>()
+  for (const e of relationEdgesOfForest(forest).edges) {
+    let perKind = byTarget.get(e.to)
+    if (!perKind) {
+      perKind = new Map()
+      byTarget.set(e.to, perKind)
+    }
+    let froms = perKind.get(e.kind)
+    if (!froms) {
+      froms = new Set()
+      perKind.set(e.kind, froms)
+    }
+    froms.add(e.from)
+  }
+  return (targetId) => byTarget.get(targetId)
 }
 
 /**
@@ -442,11 +499,9 @@ export function refSourceIds(
   targetId: string,
   kinds: readonly RefKind[] = REFERENCE_KINDS,
 ): Set<string> {
+  const perKind = refSourcesOfForest(forest)(targetId)
   const out = new Set<string>()
-  const allowed = new Set<RelationKind>(kinds)
-  for (const e of relationEdgesOfForest(forest).edges) {
-    if (e.to === targetId && allowed.has(e.kind)) out.add(e.from)
-  }
+  for (const kind of kinds) for (const id of perKind?.get(kind) ?? []) out.add(id)
   return out
 }
 
@@ -592,7 +647,18 @@ function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher {
     if ('today' in node) {
       return env.today !== undefined && journalDate(block) !== '' && journalDate(block) === shiftISO(env.today, node.today.offset)
     }
-    if ('ref' in node) return env.refs.has(block.id)
+    /**
+     * 引用条件：**按当前节点自己的目标与 kind** 查表。
+     *
+     * 不读「整份 where 的并集」——那会让两个不同目标互相串味
+     * （`{all:[{ref:X},{not:{ref:Y}}]}` 曾静默变空）。
+     */
+    if ('ref' in node) {
+      const perKind = env.refSources(refTargetOf(node.ref))
+      if (!perKind) return false
+      for (const kind of refKindsOf(node.ref)) if (perKind.get(kind)?.has(block.id) === true) return true
+      return false
+    }
     /**
      * 标签条件：**按边判定**，不扫文本。
      *
@@ -865,7 +931,7 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
   if (!host && usesSelf(spec.where)) return []
   const q = host ? resolveSelfSpec(spec, host, input.blocks) : spec
   const env: QueryEnv = {
-    refs: collectRefs(q.where, input.blocks),
+    refSources: usesRef(q.where) ? refSourcesOfForest(input.blocks) : NO_REF_SOURCES,
     tags: collectTags(q.where, input.blocks),
     fields: fieldTableOf(input.blocks),
     ...(input.today ? { today: input.today } : {}),
@@ -1017,26 +1083,8 @@ export function isEmptyWhere(node: QueryNode): boolean {
 const NEVER: QueryNode = { any: [] }
 
 
-/** 条件里所有 `ref` 的目标（用于一次性收集 refs，避免每个块都扫一遍内容） */
-function collectRefs(node: QueryNode, forest: readonly Block[]): Set<string> {
-  const out = new Set<string>()
-  const visit = (n: QueryNode): void => {
-    if ('all' in n) n.all.forEach(visit)
-    else if ('any' in n) n.any.forEach(visit)
-    else if ('not' in n) visit(n.not)
-    else if ('up' in n) visit(n.up)
-    else if ('down' in n) visit(n.down)
-    else if ('near' in n) visit(n.near)
-    else if ('ref' in n) {
-      for (const id of refSourceIds(forest, refTargetOf(n.ref), refKindsOf(n.ref))) out.add(id)
-    }
-  }
-  visit(node)
-  return out
-}
-
 /**
- * 满足 `tag` 条件的**块 id** 集合（一次性算出，理由同 `collectRefs`）。
+ * 满足 `tag` 条件的**块 id** 集合（一次性算出，避免每个块都扫一遍森林）。
  *
  * ⚠️ 标签名先解析成标签块 id，再按归属查：认 id 不认名字 ⇒ 标签改名不影响查询语义。
  *    名字解析不到 ⇒ **空集**（那个标签还不存在，自然没有块带它）—— 不是「当文本搜」。

@@ -31,6 +31,7 @@ import {
   resolveSelfSpec,
   resolveTodayBase,
   usesSelf,
+  usesRef,
   isQueryNode,
   isQuerySpec,
   specChanged,
@@ -150,6 +151,32 @@ test('runQuery：ref 条件＝指向边（只认 atom 的 target id）', () => {
   const { blocks } = fixture()
   const hits = runQuery({ where: { ref: 'c' } }, { blocks })
   assert.deepEqual(hits.map((h) => h.blockId), ['d'])
+})
+
+test('ref 条件按**当前节点的目标**判定：同一份条件里两个目标不串味', () => {
+  /**
+   * 从前 `QueryEnv.refs` 是整份 `where` 里所有 `{ref}` 目标的**来源并集**：
+   * 判定只读那个并集、不看当前节点 ⇒ `{all:[{ref:X},{not:{ref:Y}}]}` 会拿
+   * 「引用 X **或** Y 的块」当「引用 X 的块」，结果静默变空。
+   */
+  const p = b('p', '引用 X')
+  p.content.push({ id: 'p1', t: 'ref', to: 'X', label: 'X' })
+  const q = b('q', '引用 Y')
+  q.content.push({ id: 'q1', t: 'ref', to: 'Y', label: 'Y' })
+  const g = b('g', '两者都引用')
+  g.content.push({ id: 'g1', t: 'ref', to: 'X', label: 'X' }, { id: 'g2', t: 'ref', to: 'Y', label: 'Y' })
+  const blocks = [p, q, g]
+  const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
+
+  assert.deepEqual(ids({ all: [{ ref: 'X' }, { not: { ref: 'Y' } }] }), ['p'], '引用 X 且不引用 Y')
+  assert.deepEqual(ids({ all: [{ ref: 'Y' }, { not: { ref: 'X' } }] }), ['q'], '反过来也对称')
+  assert.deepEqual(ids({ any: [{ ref: 'X' }, { ref: 'Y' }] }), ['p', 'q', 'g'], '并集照旧')
+  assert.deepEqual(ids({ not: { ref: 'Y' } }), ['p'], '否定只看 Y')
+  // 两条求值路径同解（串味的病只在语义层；索引路径共用同一份判定）
+  assertSameHits({ where: { all: [{ ref: 'X' }, { not: { ref: 'Y' } }] } }, blocks)
+  // 没有 ref 条件 ⇒ 不建表（按需建的口径不变）
+  assert.equal(usesRef({ tag: 'todo' }), false)
+  assert.equal(usesRef({ up: { ref: 'X' } }), true)
 })
 
 test('runQuery：**有槽未填**的块按「未完成」命中（与渲染同一个判据）', () => {

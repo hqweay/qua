@@ -29,14 +29,14 @@ import type { Op } from '../kb/types.ts'
 import {
   evaluateQuery,
   isExactRoleJournal,
-  refKindsOf,
-  refTargetOf,
   resolveSelfSpec,
+  usesRef,
   usesSelf,
   type QueryEnv,
   type QueryHit,
   type QueryNode,
   type QuerySpec,
+  type RefSources,
 } from '../query/query.ts'
 
 /**
@@ -840,7 +840,7 @@ export function queryByIndex(
   if (!host && usesSelf(spec.where)) return []
   const q = host ? resolveSelfSpec(spec, host, forest) : spec
   const env: QueryEnv = {
-    refs: refsByIndex(q.where, index),
+    refSources: usesRef(q.where) ? refSourcesByIndex(index) : () => undefined,
     tags: tagsByIndex(q.where, index),
     fields: fieldTableOf(forest),
     ...(opts.today ? { today: opts.today } : {}),
@@ -858,22 +858,28 @@ export function queryByIndex(
   return evaluateQuery(q, memberRoots, env, forest)
 }
 
-/** `ref` 条件的目标块集合 —— 查**入向边表**，不再扫 atoms */
-function refsByIndex(node: QueryNode, index: Index): Set<string> {
-  const out = new Set<string>()
-  const visit = (n: QueryNode): void => {
-    if ('all' in n) n.all.forEach(visit)
-    else if ('any' in n) n.any.forEach(visit)
-    else if ('not' in n) visit(n.not)
-    else if ('up' in n) visit(n.up)
-    else if ('down' in n) visit(n.down)
-    else if ('near' in n) visit(n.near)
-    else if ('ref' in n) {
-      for (const id of incomingIds(index, refTargetOf(n.ref), refKindsOf(n.ref))) out.add(id)
+/**
+ * `ref` 条件的读面：**按目标懒建**（表已在索引里，不必整片扫）。
+ *
+ * 与纯函数路径同一个形状、同一个判定：`evaluateQuery` 只看 `(目标, kind) → 来源`，
+ * 两条路只许在「表怎么来」上不同。用 `incomingIds` 而不是自己遍历 `relations`，
+ * 是为了让「什么算引用」仍然只有那一处口径。
+ */
+function refSourcesByIndex(index: Index): RefSources {
+  const cache = new Map<string, ReadonlyMap<RelationKind, ReadonlySet<string>>>()
+  return (targetId) => {
+    const hit = cache.get(targetId)
+    if (hit) return hit
+    const edges = index.relations.get(targetId)
+    if (!edges || edges.length === 0) return undefined
+    const byKind = new Map<RelationKind, ReadonlySet<string>>()
+    for (const kind of REFERENCE_KINDS) {
+      const ids = incomingIds(index, targetId, [kind])
+      if (ids.length > 0) byKind.set(kind, new Set(ids))
     }
+    cache.set(targetId, byKind)
+    return byKind
   }
-  visit(node)
-  return out
 }
 
 /** `tag` 条件的目标块集合 —— 名字表解析成标签块，再查**成员表** */
