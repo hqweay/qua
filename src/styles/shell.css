@@ -122,7 +122,10 @@ input {
 }
 /* 这条顶栏就是窗口标题栏：整条可拖窗，可点的元素逐个标回 no-drag。
    tab 主体是 div 不是 button，上面的 button 规则盖不住它，要单独标；
-   tab 条自身的横向滚动只在 tab 溢出（没有空白）时才发生，空白处还给拖窗不损失滚轮。 */
+   tab 条自身的横向滚动只在 tab 溢出（没有空白）时才发生，空白处还给拖窗不损失滚轮。
+   ⚠️ app-region 沿继承走：子元素不显式标注就会继承这里的 drag——「逐个标回」
+   靠的就是这条继承语义，也意味着容器（如 #center-tabs）的计算值永远是 drag，
+   断言可点性要认「药丸逐个 no-drag」，别认容器。 */
 #topbar {
   -webkit-app-region: drag;
   app-region: drag;
