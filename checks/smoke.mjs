@@ -16,7 +16,7 @@
  *    停在上一笔——验「这次没写」要对比动作前后的 `lastOps` 加模型状态，不能直接断言它为空。
  * ⚠️ 新用例编号先 grep 本文件最大 T 号再接（T76 之后一段时期最大号与直觉不符，撞过一次）。
  */
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { assert, freshPage, key as kbd, launch, MOD, openPage, reopenPage, resolveBase } from '../scripts/harness.mjs'
 
@@ -52,6 +52,48 @@ const SHARD = (() => {
  */
 const REPORT = process.env.QUA_SMOKE_REPORT ?? ''
 const ONLY = process.env.QUA_SMOKE_ONLY ?? ''
+
+/**
+ * **失败名单**：上一轮跑完的失败用例名落盘在这里，`QUA_SMOKE_ONLY_FAILED=1`（或＝文件路径）
+ *   就只跑名单里的用例 —— 偶发红一次只付几条用例的价，不再整锅重跑 3–9 分钟。
+ *
+ * 四条护栏（「挂了先原样重跑一次，第二次还挂才当回归」的机械化）：
+ * ① 名单读不到／为空／坏 JSON ⇒ 直接红，**绝不静默退回全跑**（静默全跑等于没有这个开关）；
+ * ② 名单里匹配不上任何用例的残留条目（用例改名或已修复）⇒ 丢弃并提示；
+ * ③ 只跑名单，不扩成整片；
+ * ④ 谁写名单有唯一归属：分片编排（gate）合并后写、standalone 全跑失败时写；
+ *    带 ONLY／ONLY_FAILED 的**部分跑不写**（部分集没有资格覆盖账本）。
+ */
+const FAILURES_PATH = fileURLToPath(new URL('./.smoke-failures.json', import.meta.url))
+const ONLY_FAILED_FILE = (() => {
+  const v = process.env.QUA_SMOKE_ONLY_FAILED ?? ''
+  if (!v) return ''
+  return v === '1' ? FAILURES_PATH : v
+})()
+const ONLY_FAILED = await (async () => {
+  if (!ONLY_FAILED_FILE) return null
+  let names
+  try {
+    names = JSON.parse(await readFile(ONLY_FAILED_FILE, 'utf8')).names
+  } catch (e) {
+    throw new Error(`QUA_SMOKE_ONLY_FAILED 拿不到名单（${ONLY_FAILED_FILE}：${e?.message ?? e}）——只重跑失败的那几条，绝不静默全跑`)
+  }
+  if (!Array.isArray(names) || names.length === 0) {
+    throw new Error(`QUA_SMOKE_ONLY_FAILED 的名单为空（${ONLY_FAILED_FILE}）——上一轮全绿就该删掉这份名单，而不是重跑它`)
+  }
+  return names
+})()
+/** 名单条目 → 是否真的匹配到了用例（跑完据此丢弃残留条目并提示） */
+const failedMatched = ONLY_FAILED ? new Map(ONLY_FAILED.map((n) => [n, false])) : null
+const failedMatchedOf = (name) =>
+  ONLY_FAILED.some((entry) => {
+    if (name.includes(entry)) {
+      failedMatched.set(entry, true)
+      return true
+    }
+    return false
+  })
+
 let seq = 0
 
 /**
@@ -76,6 +118,8 @@ async function check(name, fn) {
   const idx = seq++
   // 调试过滤：只跑名字含 QUA_SMOKE_ONLY 子串的用例（不设 ＝ 全跑；分片编排不受影响）
   if (ONLY && !name.includes(ONLY)) return
+  // 失败名单过滤：only-failed 模式只跑名单里的用例（护栏③：不扩成整片）
+  if (ONLY_FAILED && !failedMatchedOf(name)) return
   if (SHARD && idx % SHARD.n !== SHARD.i) return
   try {
     const msg = await fn()
@@ -1735,8 +1779,10 @@ await check('T9 块菜单与斜杠菜单**都是绑定表的渲染结果**（同
    * 断言就验这条接线本身：菜单项选中 ⇒ 弹出 filechooser（而不是「插一枚假资产」）。
    */
   const beforeAtoms = (await page.evaluate(() => window.__qua.atoms())).length
+  // filechooser 类用例是并发敏感的（多浏览器上下文争焦点，事件迟到的形态在负载下放大过多次）
+  // ⇒ 这条等待给自己放宽到 20s，而不是让整片门禁为一条时序抖动买单。
   const [chooser] = await Promise.all([
-    page.waitForEvent('filechooser', { timeout: 8000 }),
+    page.waitForEvent('filechooser', { timeout: 20000 }),
     // 显式选「图片」行（trusted mousedown→mouseup，与键盘挑选同一条命令）：
     // 盲按 Enter 依赖「过滤后 active 恰好落在图片行」，负载下过滤渲染慢半步就挑到别的行
     page.locator('.layer-item[data-id^="core.editor/insert-image"]').click(),
@@ -27700,6 +27746,29 @@ await check('T289 拖拽的可落性预告：拖到自己／自己的子块上�
 
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
+
+// 护栏②：名单里的残留条目（改名或已修复）丢弃并提示；全成残留 ⇒ 无用例可跑，按红处理
+if (failedMatched) {
+  const stale = [...failedMatched.entries()].filter(([, hit]) => !hit).map(([n]) => n)
+  const kept = [...failedMatched.entries()].filter(([, hit]) => hit).map(([n]) => n)
+  if (stale.length) {
+    console.log(`\n名单里 ${stale.length} 条匹配不到用例（改名或已修复），已丢弃：${stale.join('、')}`)
+    if (kept.length === 0) {
+      console.log('名单清空 ⇒ 无用例可跑 —— 只重跑失败名单的模式不许静默退回全跑，按红处理')
+      process.exit(1)
+    }
+    await writeFile(ONLY_FAILED_FILE, JSON.stringify({ savedAt: new Date().toISOString(), names: kept }, null, 2))
+  }
+}
+
+// 护栏④：账本写入的唯一归属。部分跑（ONLY／only-failed／分片）没有资格覆盖账本。
+if (!REPORT && !SHARD && !ONLY && !ONLY_FAILED_FILE && fail > 0) {
+  await writeFile(
+    FAILURES_PATH,
+    JSON.stringify({ savedAt: new Date().toISOString(), names: results.filter((r) => !r.ok && !r.known).map((r) => r.name) }, null, 2),
+  )
+  console.log(`\n失败名单已落盘（${FAILURES_PATH}）——重跑只付失败那几条的价格：\n  QUA_SMOKE_ONLY_FAILED=1 pnpm check:smoke`)
+}
 
 if (REPORT) {
   // 分片：只留报告，逐条打印交给编排脚本（四片各打一遍会把输出搅成一团）

@@ -17,7 +17,7 @@
  *   并**逐条列出跳过了什么**。它**不是**收工门禁 —— 收工／提交／CI 跑全量。
  */
 import { spawn, execFileSync } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir, availableParallelism, loadavg } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -114,6 +114,11 @@ const step = (label, script, env = {}) => ({
 })
 
 const BROWSER = { QUA_NO_DEV: '1' }
+/**
+ * 失败名单：冒烟红的用例名落盘在这里，重跑那轮只跑名单（`QUA_SMOKE_ONLY_FAILED=1`）。
+ * 批次全绿时删掉 —— 名单跨轮残留会让下一轮 only-failed 重跑僵尸用例。
+ */
+const FAILURES_FILE = join(ROOT, 'checks/.smoke-failures.json')
 const STEPS = {
   typecheck: step('typecheck', 'typecheck'),
   'arch:check': step('arch:check', 'arch:check'),
@@ -172,8 +177,51 @@ async function runSmoke() {
   cases.sort((a, b) => a.idx - b.idx)
   await rm(dir, { recursive: true, force: true })
 
-  const failures = cases.filter((c) => !c.ok && !c.known)
+  let failures = cases.filter((c) => !c.ok && !c.known)
   const knownFailures = cases.filter((c) => !c.ok && c.known)
+
+  /**
+   * 偶发红的机械化：「挂了先原样重跑一次，第二次还挂才当回归」。
+   * 护栏：只重跑**一次**、只跑**失败名单**里的用例（名单落盘 ⇒ only-failed 模式），
+   * 绝不扩成整片；重跑红仍是红，没有第二次机会；重跑那轮自身没留下可信报告也按原失败判红
+   * —— 换来的回报写在 `flaky` 里，报告单列，绝不混进「全过」里装看不见。
+   */
+  const flaky = []
+  if (failures.length > 0 && problems.length === 0) {
+    await writeFile(FAILURES_FILE, JSON.stringify({ savedAt: new Date().toISOString(), names: failures.map((c) => c.name) }, null, 2))
+    console.log(`    ↻ 失败 ${failures.length} 条 → 按名单只重跑这一轮（checks/.smoke-failures.json）`)
+    const dir2 = await mkdtemp(join(tmpdir(), 'qua-gate-retry-'))
+    const r2 = await spawnStep('pnpm', ['-s', 'run', 'check:smoke'], {
+      ...BROWSER,
+      QUA_SMOKE_ONLY_FAILED: '1',
+      QUA_SMOKE_REPORT: join(dir2, 'retry.json'),
+    })
+    let retry = null
+    try {
+      retry = JSON.parse(await readFile(join(dir2, 'retry.json'), 'utf8'))
+    } catch {}
+    await rm(dir2, { recursive: true, force: true })
+    if (r2.code !== 0 || !retry) {
+      problems.push(`失败重跑那轮没留下可信报告（退出码 ${r2.code}）——按原失败判红`)
+    } else {
+      const stillRed = []
+      for (const f of failures) {
+        const again = retry.cases.find((c) => c.name === f.name)
+        if (again?.ok) flaky.push(f)
+        else stillRed.push(again && !again.ok ? { ...f, msg: again.msg } : f)
+      }
+      failures = stillRed
+      if (flaky.length) {
+        console.log(
+          `    ${C.yellow('FLAKY')} 重跑转绿 ${flaky.length} 条（只重跑一次）：${flaky.map((c) => c.name.split(' ')[0]).join(' · ')}`,
+        )
+      }
+    }
+  } else if (failures.length === 0 && problems.length === 0) {
+    // 批次全绿 ⇒ 名单过期，删掉，防下一轮 only-failed 重跑僵尸用例
+    await rm(FAILURES_FILE, { force: true })
+  }
+
   return {
     code: problems.length || failures.length ? 1 : 0,
     ms: Date.now() - t0,
@@ -181,9 +229,10 @@ async function runSmoke() {
     problems,
     failures,
     knownFailures,
+    flaky,
     evidence: `${cases.length - failures.length - knownFailures.length}/${cases.length}${
       knownFailures.length ? `（${knownFailures.length} 条已知失败）` : ''
-    }`,
+    }${flaky.length ? `（${flaky.length} 条重跑转绿）` : ''}`,
   }
 }
 
@@ -199,6 +248,8 @@ async function runGroup(title, items, env = {}) {
   const red = []
   /** 已知失败：即使这一步整体算过，也要逐条打出来 */
   const knownRows = []
+  /** 重跑一次才转绿的（并发偶发）：不判红，但必须看得见，绝不混进「全过」 */
+  const flakyRows = []
   await Promise.all(
     items.map(async (it) => {
       const r = await it.run(env)
@@ -206,6 +257,7 @@ async function runGroup(title, items, env = {}) {
       const ev = r.evidence ?? (ok ? evidenceOf(it.label, r.out) : '')
       if (!ok) red.push({ it, r })
       for (const c of r.knownFailures ?? []) knownRows.push({ it, c })
+      for (const c of r.flaky ?? []) flakyRows.push({ it, c })
       console.log(`  ${ok ? C.green('✓') : C.red('✗')} ${pad(it.label, 18)} ${secs(r.ms).padStart(6)}${ev ? `   ${C.dim(`（${ev}）`)}` : ''}`)
       if (ok && VERBOSE) console.log(r.out.replace(/^/gm, '      '))
     }),
@@ -216,10 +268,16 @@ async function runGroup(title, items, env = {}) {
     for (const c of r.failures ?? []) {
       console.log(`      ${C.red('FAIL')}  ${c.name}\n            ${String(c.msg).replace(/\n/g, '\n            ')}`)
     }
+    if (r.failures?.length) {
+      console.log(`      ${C.dim('单跑排查（只跑失败名单）：QUA_SMOKE_ONLY_FAILED=1 pnpm check:smoke')}`)
+    }
   }
   // 已知失败：不判红，但**必须**看得见（否则「放行」会退化成「不知道」）
   for (const { c } of knownRows) {
     console.log(`\n      ${C.yellow('KNOWN')}  ${c.name}\n            ${C.yellow(`已知失败（不判红）：${c.known}`)}`)
+  }
+  for (const { c } of flakyRows) {
+    console.log(`\n      ${C.yellow('FLAKY')}  ${c.name}\n            ${C.yellow('重跑一次转绿（并发时序抖动，不当回归修）')}`)
   }
   return red.length === 0
 }

@@ -23,3 +23,6 @@ shots/*.png
 
 # 并行开发车道（`git worktree add .worktrees/<lane>`）：子树里是另一份检出，不入本仓
 .worktrees/
+
+# 失败名单（门禁 only-failed 重跑用，不入库）
+checks/.smoke-failures.json
