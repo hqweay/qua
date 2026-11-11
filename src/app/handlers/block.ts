@@ -250,11 +250,11 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     return true
   },
   /**
-   * 剪切块（块选区 ⌘X）：引用味＋移动意图。⌘X 本身不动文档——移动发生在
-   * 粘贴那一刻（一笔事务，id 不变、可反复贴）；光标态的 ⌘X 留给原生文本剪切。
+   * 剪切块（块选区 ⌘X；光标态 ⌘X 与 ⌘C 同判据——塌缩光标下原生文本剪切无事可做，
+   * 剪整块才是有用的那一个）：引用味＋移动意图。⌘X 本身不动文档——移动发生在
+   * 粘贴那一刻（一笔事务，id 不变、可反复贴）；划选态键位不命中 ⇒ 原生文本剪切照旧。
    */
   'core.editor/cut-blocks': (_a, app) => {
-    if (!app.ed.bsel.hasBlockSelection()) return false
     const snap = app.ed.clip.copySnapshot()
     if (!snap) return false
     const html = buildCopyHtml(snap.text, { ids: snap.ids, move: true })

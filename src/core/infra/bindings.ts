@@ -107,9 +107,10 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/copy-block', kind: 'keymap', key: 'mod+c', when: 'editorTextFocus && selectionEmpty', layer: 'core' },
   { command: 'core.editor/copy-ref-anchor', kind: 'keymap', key: 'mod+shift+c', when: 'editorTextFocus && !selectionEmpty', layer: 'core' },
   { command: 'core.editor/copy-block-text', kind: 'keymap', key: 'mod+shift+c', when: 'editorTextFocus && selectionEmpty', layer: 'core' },
-  // 剪切与块选区粘贴：⌘X 本身不动文档，移动发生在 ⌘V 那一刻（一笔事务，id 不变、可反复贴）；
-  // 光标态的 ⌘X／⌘V 留给原生文本剪切与 paste 事件。
-  { command: 'core.editor/cut-blocks', kind: 'keymap', key: 'mod+x', when: 'blockSelection', layer: 'core' },
+  // 剪切与块选区粘贴：⌘X 本身不动文档，移动发生在 ⌘V 那一刻（一笔事务，id 不变、可反复贴）。
+  // 光标态 ⌘X 与 ⌘C 同判据（剪整块）；划选态键位不命中 ⇒ 原生文本剪切照旧；
+  // 光标态的 ⌘V 仍归 paste 事件。
+  { command: 'core.editor/cut-blocks', kind: 'keymap', key: 'mod+x', when: 'blockSelection || (editorTextFocus && selectionEmpty)', layer: 'core' },
   { command: 'core.editor/paste-into-selection', kind: 'keymap', key: 'mod+v', when: 'blockSelection', layer: 'core' },
   { command: 'core.page/new', kind: 'keymap', key: 'mod+shift+n', when: '', layer: 'core' },
   { command: 'core.view/toggle-theme', kind: 'keymap', key: 'mod+shift+l', when: '', layer: 'core' },
