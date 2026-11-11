@@ -381,7 +381,7 @@ export interface App {
     spec: QuerySpec,
     views?: ViewConfig[],
     activeView?: string,
-    /** 指定栏 id（占用内置栏稳定 id ⇒ 原地替换那一栏）；已占用 ⇒ 忽略，回退随机 id */
+    /** 指定栏 id（占用内置栏稳定 id ⇒ 顶进那条位置标记的原位）；撞另一条 local ⇒ 回退随机 id */
     id?: string,
   ): string
   /** 摘一栏（`tabId` 是稳定 id，不是数组下标）。**不删任何块** */

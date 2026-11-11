@@ -514,16 +514,78 @@ test('原地物化：local 栏占用内置栏稳定 id ⇒ 替换那一栏，不
   // 物化「引用」：id 用内置栏的稳定 id
   const localRefs = local(derivedTabId('refs'), '反链')
   host.props = { ...(host.props ?? {}), _mounts: [localRefs] }
-  const ids = mountEntriesOf(host, { now: NOW }).map((e) => e.id)
+  const entries = mountEntriesOf(host, { now: NOW })
+  const ids = entries.map((e) => e.id)
   assert.deepEqual(
     ids.filter((x) => x === 'refs'),
     ['refs'],
     '同一 id 只出现一次：内置栏被替换',
   )
-  const kinds = mountEntriesOf(host, { now: NOW }).map((e) => (e.kind === 'local' ? 'local' : e.kind))
-  assert.ok(!kinds.includes('derived') || !ids.includes('refs') === false, '占位的存在不改变这条断言')
-  // 顺序：占用了 id 的 local 站在它 stored 的位置，其余内置栏照常
-  assert.deepEqual(ids, ['same', 'mentions', 'refs'].length === 3 ? ids : ids)
+  // 顺序：物化的 local 站在它顶替那一栏的原位，不是跳到条末
+  assert.deepEqual(ids, ['refs', 'same', 'mentions'])
+  assert.deepEqual(SOURCES(entries), ['local', 'same', 'mentions'])
+})
+
+test('原地物化＋已拖过：物化的 local 顶在标记的原位', () => {
+  const { host } = fixture()
+  // 拖过 ⇒ 每个派生来源都有一条位置标记；物化「引用」时 local 顶进它那条标记的存储位
+  host.props = {
+    ...(host.props ?? {}),
+    _mounts: [
+      { id: 'same', kind: 'derived', source: 'same' },
+      local(derivedTabId('refs'), '反链'),
+      { id: 'mentions', kind: 'derived', source: 'mentions' },
+    ],
+  }
+  const ids = mountEntriesOf(host, { now: NOW }).map((e) => e.id)
+  assert.deepEqual(ids, ['same', 'refs', 'mentions'], '「引用」顶在标记的位置，不落到数组尾')
+})
+
+test('原地物化＋部分标记：没标记带位的物化栏与缺失来源一起按规范序插在标记段之后', () => {
+  const { host } = fixture()
+  host.props = {
+    ...(host.props ?? {}),
+    _mounts: [{ id: 'same', kind: 'derived', source: 'same' }, local(derivedTabId('mentions'), '提及')],
+  }
+  const ids = mountEntriesOf(host, { now: NOW }).map((e) => e.id)
+  assert.deepEqual(ids, ['same', 'refs', 'mentions'], '没有标记的物化栏与「重排后才出现的来源」同一落点')
+})
+
+test('U17.5 命令面：物化撞位置标记 ⇒ 顶进原位（一次写入，不与标记同 id 共存）', () => {
+  // 先把「同类」拖到最前：整条列表已物化成标记（U17 的写法）
+  const f = renameFixture([
+    { id: 'same', kind: 'derived', source: 'same' },
+    { id: 'refs', kind: 'derived', source: 'refs' },
+    { id: 'mentions', kind: 'derived', source: 'mentions' },
+  ])
+  const tabId = f.commands.addLocalTab(
+    { kind: 'block', blockId: 'h' },
+    '反链',
+    { where: { ref: '$self' } } as QuerySpec,
+    [],
+    '',
+    derivedTabId('refs'),
+  )
+  assert.equal(tabId, 'refs', 'id 不被标记挤成随机 id')
+  assert.equal(f.writes.length, 1, '一次物化一笔写入')
+  // 标记被 local 顶替，存储位不变
+  assert.deepEqual(f.list().map((e) => e.id), ['same', 'refs', 'mentions'])
+  const hostBlock = b('h', '宿主', { props: { [MOUNTS_PROP]: [...f.list()] } })
+  assert.deepEqual(mountEntriesOf(hostBlock, { now: NOW }).map((e) => e.id), ['same', 'refs', 'mentions'])
+})
+
+test('U17.6 命令面：物化撞另一条 local ⇒ 回退随机 id（不产生同 id 栏）', () => {
+  const f = renameFixture([local('t1', '我的')])
+  const tabId = f.commands.addLocalTab(
+    { kind: 'block', blockId: 'h' },
+    '反链',
+    { where: { ref: '$self' } } as QuerySpec,
+    [],
+    '',
+    't1',
+  )
+  assert.notEqual(tabId, 't1')
+  assert.equal(f.list().filter((e) => e.id === 't1').length, 1, '旧栏原样')
 })
 
 test('分组候选：只认这批结果里出现过的栏，按覆盖率排序，多值带标记', () => {

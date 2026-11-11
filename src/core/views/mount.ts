@@ -181,6 +181,11 @@ export function derivedTabId(source: DerivedSource): string {
   return source
 }
 
+/** 这个 id 是不是某个内置栏的稳定 id（物化出的 local 会占用它们，见 `mountEntriesOf`） */
+export function isDerivedTabId(id: string): boolean {
+  return (DERIVED_SOURCES as readonly string[]).includes(id)
+}
+
 /** 两个宿主是不是同一个（`MountHost` 是「这一栏写哪」的唯一判别器） */
 export function sameHost(a: MountHost, b: MountHost): boolean {
   if (a.kind === 'journal' || b.kind === 'journal') return a.kind === b.kind && a.kind === 'journal'
@@ -529,14 +534,26 @@ export function mountEntriesOf(host: Block, opts: MountReadOpts = {}): MountEntr
    * 同一栏从「现算、只读」变成「拥有配置、可编辑」，不是一栏变两栏。
    * 普通 local 的 id 是 `t-<hex>`，与内置 id（来源名）天然不撞，只有刻意物化才撞得上。
    */
-  const taken = new Set(stored.filter((e) => e.kind === 'local').map((e) => e.id))
+  const locals = stored.filter((e) => e.kind === 'local')
+  /**
+   * **物化的 local 顶替那一栏，也继承它的位置**：「改条件」是原地升级，
+   * tab 跳到条末等于告诉用户「这是一栏新的」，与替换语义相悖。
+   */
+  const materialized = new Map(locals.filter((e) => isDerivedTabId(e.id)).map((e) => [e.id, e]))
+  const taken = new Set(locals.map((e) => e.id))
   const live = derived.filter((d) => !taken.has(d.id))
   const markers = stored.filter((e): e is Extract<MountEntry, { kind: 'derived' }> => e.kind === 'derived')
-  if (markers.length === 0) return [...live, ...stored]
+  if (markers.length === 0) {
+    // 没拖过：内置按规范序；物化的 local 站在它顶替的那一栏原位，其余 local 按存储位殿后
+    const out: MountEntry[] = derived.map((d) => materialized.get(d.id) ?? d)
+    for (const e of locals) if (!materialized.has(e.id)) out.push(e)
+    return out
+  }
   const bySource = new Map(live.map((d) => [d.source, d]))
   const out: MountEntry[] = []
   for (const e of stored) {
     if (e.kind === 'local') {
+      // 物化的 local 已由写路径顶进位置标记的原位 ⇒ 这里与普通 local 一样按存储位
       out.push(e)
       continue
     }

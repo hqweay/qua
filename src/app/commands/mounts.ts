@@ -77,14 +77,26 @@ export function mountCommands(
       const canon = canonicalSpec(spec)
       const source: Source = { kind: 'query', spec: canon }
       const list = canonicalViews(views ?? [], source)
-      // 指定 id 只在**没被占用**时生效：撞了（重复物化／手工数据）回退随机 id，
-      // 绝不产生两条同 id 的栏——id 是激活态与冻结缓存的键
-      const existing = new Set(entriesOf(host).map((e) => e.id))
+      // 指定 id 撞**位置标记**（内置栏被物化时）⇒ local 顶进那条标记的原位：
+      // 「改条件」是原地升级，标记带的位随 local 一起保下来，也不与标记同 id 共存
+      //（读路径按 id 去重，共存的那条会被静默丢掉）。
+      // 撞**另一条 local** ⇒ 回退随机 id，绝不产生两条同 id 的栏——id 是激活态与冻结缓存的键
+      const stored = entriesOf(host)
+      const existing = new Set(stored.filter((e) => e.kind === 'local').map((e) => e.id))
+      const markerAt =
+        id !== undefined && id !== '' ? stored.findIndex((e) => e.kind === 'derived' && e.id === id) : -1
       const tabId = id !== undefined && id !== '' && !existing.has(id) ? id : mkTabId()
       const entry: MountEntry = { id: tabId, kind: 'local', label: name, spec: canon, views: list }
       const active = activeView !== undefined && activeView !== '' ? activeView : ''
       if (active !== '') entry.activeView = active
-      write(host, [...entriesOf(host), entry])
+      if (markerAt >= 0) {
+        write(
+          host,
+          stored.map((e, i) => (i === markerAt ? entry : e)),
+        )
+        return entry.id
+      }
+      write(host, [...stored, entry])
       return entry.id
     },
 
