@@ -16,6 +16,7 @@ import {
   dropInsertSite,
   dropMove,
   dropMoveExternal,
+  dropRefused,
   flatten,
   indentMove,
   locate,
@@ -165,6 +166,40 @@ test('引用式落点沿用同一套守卫：自己 / 自己的子树 / 不存�
   assert.equal(dropInsertSite(doc, 'c1', '没有这一块', 'after'), null)
   assert.equal(dropInsertSite(doc, 'c1', 'div', 'inside'), null, '占位型块容纳不下任何子块')
   assert.deepEqual(dropInsertSite(doc, 'c1', 'div', 'after'), { parentId: 'p', index: 4 }, 'before/after 仍可以')
+})
+
+/* --------------------------------------------- 悬停期的可落性预告（dropRefused） */
+
+/**
+ * 落手被拒是静默的（守卫返 false，一个块都不动），而悬停已经把提示与高亮许诺出去——
+ * 「提示说能落、松手没反应」比一开始就说落不了伤得多。
+ * 这里钉住：悬停预告与落手守卫在**同一批格子**上拒绝，两边永不分叉。
+ */
+test('悬停预告：自己 / 自己的子树 / 占位型 inside / 段根前后，与落手守卫同一批格子拒绝', () => {
+  const doc = fixture()
+  doc.roots[0]!.children.push({ id: 'div', content: [], children: [], created: 0, modified: 0, props: { _type: DIVIDER_TYPE } })
+  // 自己与自己的子树：任何区都拒（拖父块落在展开的子块行上，是最容易踩的手势）
+  assert.equal(dropRefused(doc, 'c1', 'c1', 'inside'), true)
+  assert.equal(dropRefused(doc, 'c1', 'c1', 'before'), true)
+  assert.equal(dropRefused(doc, 'c1', 'g1', 'inside'), true)
+  assert.equal(dropRefused(doc, 'c1', 'g1', 'after'), true)
+  // 正常格子与占位型的 before/after 不拒
+  assert.equal(dropRefused(doc, 'c1', 'c2', 'after'), false)
+  assert.equal(dropRefused(doc, 'c2', 'c1', 'inside'), false)
+  assert.equal(dropRefused(doc, 'c1', 'div', 'inside'), true, '占位型的 inside：落手本来就不接')
+  assert.equal(dropRefused(doc, 'c1', 'div', 'after'), false, '占位型的 after：折算后可落')
+  // 段根（装载根 p）：只有 inside 能落；before/after 会造出没有家的兄弟
+  assert.equal(dropRefused(doc, 'c1', 'p', 'before'), true)
+  assert.equal(dropRefused(doc, 'c1', 'p', 'after'), true)
+  assert.equal(dropRefused(doc, 'c1', 'p', 'inside'), false)
+  // 空白处：进最后一个根的末尾，可落
+  assert.equal(dropRefused(doc, 'c1', null, 'after'), false)
+})
+
+test('悬停预告：外部源不归这份判据（落手走跨容器那支，守卫在 dropMoveExternal）', () => {
+  const doc = fixture()
+  assert.equal(dropRefused(doc, '不在doc里的块', 'c2', 'inside'), false)
+  assert.equal(dropRefused(doc, '不在doc里的块', null, 'after'), false)
 })
 
 test('applyMove 自环守卫：目标是自己或自己的后代 ⇒ false，且不摘不改', () => {

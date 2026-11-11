@@ -50,6 +50,17 @@ export class Drag {
     if (zone) el.dataset.drop = zone
   }
 
+  /**
+   * 纯收掉（不清成「空白承诺」）：`showDropTarget(null)` 的另一格语义是
+   * 「落到空白处＝末尾」（`drop-end` 的 accent 线），悬停被拒绝时不能拿它当清除用——
+   * 那会一边画禁行光标、一边在编辑器底部亮着「会落到末尾」的线。
+   */
+  clearDropTarget(): void {
+    if (this.dropEl) delete this.dropEl.dataset.drop
+    this.dropEl = null
+    this.ed.container.classList.remove('drop-end')
+  }
+
   drop(draggedId: string | null, targetId: string | null, zone: DropZone, asRef = false): void {
     const id = draggedId
     if (!id) return

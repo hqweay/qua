@@ -27468,6 +27468,73 @@ await check('T287 ⌥ 拖的两个洞：外部源（槽里的卡）也落成引�
   return `外部源（槽里的卡）⇒ 1 枚指向它的引用；分割线中间 ⇒ 提示「后面」且真的落在它后面`
 })
 
+await check('T289 拖拽的可落性预告：拖到自己／自己的子块上，悬停不给提示不给高亮，落手 0 变动（⌥ 与普通拖同判）；换正常目标仍照常', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  const ids = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const root = ed.doc.roots[0].id
+    const a = ed.insert.insertBlockAfter(root, 'SELF-P')
+    const b = ed.insert.insertBlockAfter(a, 'SELF-B')
+    const c = ed.insert.insertBlockAfter(b, 'SELF-C')
+    ed.write((tx) => tx.move(c, a, 0))
+    return { a, b, c, before: window.__qua.snapshot().totalBlocks }
+  })
+  await page.waitForTimeout(250)
+  assert(ids.a && ids.b && ids.c, '前置：父、兄弟、子三块要建出来')
+
+  const refused = await page.evaluate((a) => {
+    /** 合成一次拖拽，回报悬停期的提示与高亮（拒绝的格子必须两个都空） */
+    const drag = (srcId, dstId, alt) => {
+      const handle = document.querySelector(`.blk[data-block-id="${srcId}"] .marker`)
+      const tgtEl = document.querySelector(`.blk[data-block-id="${dstId}"]`)
+      if (!handle || !tgtEl) return null
+      const r = tgtEl.getBoundingClientRect()
+      const dt = new DataTransfer()
+      const ev = (type) =>
+        new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 40, clientY: r.top + r.height / 2, altKey: alt })
+      handle.dispatchEvent(ev('dragstart'))
+      tgtEl.dispatchEvent(ev('dragover'))
+      const hint = document.querySelector('.dnd-hint')?.textContent ?? ''
+      const zone = tgtEl.dataset.drop ?? ''
+      tgtEl.dispatchEvent(ev('drop'))
+      handle.dispatchEvent(ev('dragend'))
+      return { hint, zone }
+    }
+    window.__dragCell = drag
+    return {
+      refSelf: drag(a.a, a.a, true),
+      refChild: drag(a.a, a.c, true),
+      moveChild: drag(a.a, a.c, false),
+    }
+  }, ids)
+  for (const [k, v] of Object.entries(refused)) {
+    assert(v, `${k}：源块标与目标行都要在`)
+    assert(v.hint === '', `${k}：落手必被拒的格子，悬停必须不给提示，实际「${v.hint}」`)
+    assert(v.zone === '', `${k}：落手必被拒的格子，悬停不能画高亮线`)
+  }
+  const afterRefused = await page.evaluate((b) => window.__qua.snapshot().totalBlocks, ids.before)
+  assert(afterRefused === ids.before, `三次拒绝的落手都不能动结构：${ids.before} → ${afterRefused}`)
+
+  // 正向对照：拒绝之后悬停正常目标，提示与高亮照常出现、落手照常插块
+  const ok = await page.evaluate((a) => {
+    const beforeIds = new Set(window.__qua.blocks().map((x) => x.id))
+    const r = window.__dragCell(a.b, a.c, true)
+    const fresh = window.__qua.blocks().filter((x) => !beforeIds.has(x.id))
+    const atom = window.__qua.atoms().find((x) => x.blockId === fresh[0]?.id)
+    return { ...r, total: window.__qua.snapshot().totalBlocks, target: atom?.target?.id ?? '' }
+  }, ids)
+  await page.waitForTimeout(300)
+  assert(ok, '正向对照：源块标与目标行都要在')
+  assert(ok.hint.includes('引用'), `正常目标悬停仍要给提示：${ok.hint}`)
+  assert(ok.zone === 'inside', `正常目标悬停仍要画高亮：${JSON.stringify(ok)}`)
+  assert(ok.target === ids.b, `落手要插一枚指向被拖块（源）的引用：${JSON.stringify(ok)}`)
+
+  await ctx.close()
+  return `自己／子块（⌥ 与普通拖）悬停零许诺、落手 0 变动；正常目标照常`
+})
+
 
 
 const known = results.filter((r) => !r.ok && r.known)

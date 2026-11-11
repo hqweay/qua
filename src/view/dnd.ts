@@ -298,7 +298,12 @@ export function bindDropTarget(el: HTMLElement, o: DropTargetOpts): () => void {
      * 想靠它提前验形状是不可能的（真试过）。
      */
     if (!id || !hasPayload(e.dataTransfer)) return
-    if (o.accept && !o.accept(id, e)) return
+    if (o.accept && !o.accept(id, e)) {
+      // 拒绝的不只是这一格：上一个被接受的悬停可能还亮着提示与高亮，
+      // 不收掉的话，指针停在拒绝格上时屏幕还许着前一格的愿
+      unmark()
+      return
+    }
     // **最内层的落点赢**：一行落在槽里时，别让整槽的落点也把提示/高亮抢过去
     e.stopPropagation()
     e.preventDefault()

@@ -1012,6 +1012,30 @@ export function dropMove(
 }
 
 /**
+ * 悬停期的**可落性预告**：这次落手会不会被落点判据拒绝。
+ *
+ * 为什么要有它：落手被拒是静默的（守卫返 false，一个块都不动），而悬停期已经把
+ * 提示与高亮画出来了——「提示说能落、松手没反应」比「一开始就说落不了」伤得多。
+ * ⇒ 悬停（提示／高亮／光标）与落手读**同一份判据**：这里返 true 的格子，悬停期
+ *    就不当落点（不 preventDefault ⇒ 无提示、无高亮，浏览器自己画禁行光标）。
+ *
+ * 只回答**本 doc 内**的源；外部源（store 里有、doc 里没有）的守卫在
+ * `dropMoveExternal`／插引用那支，这里不替它们表态。
+ */
+export function dropRefused(
+  doc: Doc,
+  id: string,
+  targetId: string | null,
+  pos: 'before' | 'after' | 'inside',
+): boolean {
+  if (!locate(doc, id)) return false
+  const a = dropAnchorOf(doc, id, targetId, pos)
+  if (!a) return true
+  // 段根（页／天）的 before/after 会造出一个没有家的兄弟：两支落手（移动／插引用）都拒
+  return a.parentId === null
+}
+
+/**
  * **在拖拽落点新插一块**时的下标（⌥ 拖＝插一枚引用）。
  *
  * 与 `dropMove` 是同一份判据、同一个落点，只少「摘掉自己」那一格：这里一个块都不搬，

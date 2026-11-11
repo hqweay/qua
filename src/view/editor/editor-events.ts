@@ -233,6 +233,13 @@ export interface EditorBridge {
    * 这样事件层不需要知道 CSS 类名，编辑器也不需要知道 DnD 事件的形状。
    */
   showDropTarget: (el: HTMLElement | null, zone: 'before' | 'after' | 'inside' | null) => void
+  /**
+   * 纯收掉落点反馈（行高亮与「空白＝末尾」的线都不剩）。
+   *
+   * 与 `showDropTarget(null)` 分开：那一格的语义是「落到空白处＝插到最后一个根的末尾」，
+   * 是**承诺**；悬停被拒绝（落手必被守卫拒）时只能收、不能再许。
+   */
+  clearDropTarget: () => void
   /** 开始拖某块（编辑器负责加 `.drag-src`）*/
   beginDrag: (id: string) => void
   /**
@@ -243,6 +250,14 @@ export interface EditorBridge {
    * 「不能拖进自己的子树」不在这里：那是**落点对目标**的判定，在 `dropMove` 里自带守卫。
    */
   acceptDrag: (id: string) => boolean
+  /**
+   * 这个落点（对**这个被拖块**）会不会在落手时被守卫拒绝——悬停期的可落性预告。
+   *
+   * 为什么 accept 需要它：落手的拒绝是静默的，而提示与高亮已经画出来了；
+   * 「提示说能落、松手没反应」必须消灭在悬停期。判据与落手同源（`dropRefused`），
+   * 这里不另写第二份。目标在别的露面（镜像／查询）时也答「拒」——那支落手本来就不接。
+   */
+  dropRefused: (draggedId: string, targetId: string | null, zone: 'before' | 'after' | 'inside') => boolean
   /**
    * 这个**目标**块的类型容许有子块吗（`children !== 'none'`）。
    *
@@ -1167,7 +1182,15 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       // 悬停时按着 ⌥ ⇒ 这个落点是「在这里留一枚引用」（建关系那一档光标），不是搬走
       effect: () => (isRefDrag() ? 'link' : 'move'),
       // 段根（页／天／查询记录）不参与拖拽；未知 id 也不接（别人的载荷可能不是块）
-      accept: (id) => br.acceptDrag(id),
+      accept: (id, e) => {
+        if (!br.acceptDrag(id)) return false
+        /**
+         * 悬停期就拒绝「落手必被拒」的落点：守卫拒绝是静默的，而提示与高亮已经
+         * 许诺出去了——「拖到自己／自己的子树上」「段根的前后」这些格子曾经
+         * 提示照说、松手什么都没发生。判据与落手同源（`dropRefused`），不另写第二份。
+         */
+        return !br.dropRefused(id, rowOf(e)?.dataset.blockId ?? null, zoneAt(e))
+      },
       targetId: (e) => rowOf(e)?.dataset.blockId ?? null,
       hint: (_id, e) => {
         const zone = zoneAt(e)
@@ -1179,7 +1202,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
         if (el) br.showDropTarget(el, zoneAt(e))
         else br.showDropTarget(null, null)
       },
-      unmark: () => br.showDropTarget(null, null),
+      unmark: () => br.clearDropTarget(),
       onDrop: (draggedId, targetId, e) => {
         const zone = zoneAt(e)
         /**

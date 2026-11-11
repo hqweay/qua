@@ -62,6 +62,7 @@ import {
   filterVisibleRows,
   pathTo,
   visibleRows,
+  dropRefused,
   type RowVerdict,
   writeBlockContent,
   walkForest,
@@ -3583,6 +3584,7 @@ export class BlockEditor {
         // store 里存在即接——自环、类型不许有子块等守卫留在 `dropDrag`／`dropMoveExternal`
         return this.store.find(id) !== undefined
       },
+      dropRefused: (draggedId, targetId, zone) => dropRefused(this.doc, draggedId, targetId, zone),
       acceptsChildren: (id) => {
         if (id === '') return false
         // store 是共享的：目标行属于另一个露面（镜像／挂载区／槽里的卡）时也答得出来
@@ -3591,6 +3593,7 @@ export class BlockEditor {
       },
       beginDrag: (id) => this.drag.begin(id),
       showDropTarget: (el, zone) => this.drag.showDropTarget(el, zone),
+      clearDropTarget: () => this.drag.clearDropTarget(),
       /**
        * 落点报上来的块 id 是**载荷里那一个**（不是「我认得刚才那次拖拽」）——
        * 这样从侧槽／面板／任何组件拖过来的块都能落进正文。
