@@ -187,7 +187,10 @@ async function runSmoke() {
    * —— 换来的回报写在 `flaky` 里，报告单列，绝不混进「全过」里装看不见。
    */
   const flaky = []
-  if (failures.length > 0 && problems.length === 0) {
+  // ⚠️ 触发条件只看「有用例红」：分片退出码 1 本来就会进 `problems`（任何一条用例红都这样），
+  // 把 problems 排除在外会让重跑在分片模式下永远不触发（真踩过）。infra 问题（没报告等）
+  // 不该触发重跑 —— 那时 failures 多半也是空的。
+  if (failures.length > 0) {
     await writeFile(FAILURES_FILE, JSON.stringify({ savedAt: new Date().toISOString(), names: failures.map((c) => c.name) }, null, 2))
     console.log(`    ↻ 失败 ${failures.length} 条 → 按名单只重跑这一轮（checks/.smoke-failures.json）`)
     const dir2 = await mkdtemp(join(tmpdir(), 'qua-gate-retry-'))
