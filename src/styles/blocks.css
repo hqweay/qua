@@ -157,13 +157,14 @@
   }
 }
 /* 剪切确认抖动：⌘X 本身不改文档（移动发生在粘贴那一刻），屏幕上什么都没变，
-   抖一下是「这几块已经抓进剪贴板」；不另配文字提示——画面上的反应就是答复 */
-.blk[data-pulse='1'] {
+   抖一下是「这几块已经抓进剪贴板」；不另配文字提示——画面上的反应就是答复。
+   抖**正文**不抖整行：行前的轨线与块标是结构 chrome，跟着抖读成整行没对齐 */
+.blk[data-pulse='1'] .tx {
   animation: blk-pulse calc(var(--ui-dur-2) * 2) ease-in-out;
 }
 /* 减少动态下不抖：可达性反馈由门面退回那句提示，不在这里硬造一个静态标记 */
 @media (prefers-reduced-motion: reduce) {
-  .blk[data-pulse='1'] {
+  .blk[data-pulse='1'] .tx {
     animation: none;
   }
 }
@@ -172,17 +173,14 @@
   100% {
     transform: translateX(0);
   }
-  20% {
-    transform: translateX(-3px);
-  }
-  45% {
-    transform: translateX(3px);
-  }
-  70% {
+  25% {
     transform: translateX(-2px);
   }
-  85% {
-    transform: translateX(1px);
+  50% {
+    transform: translateX(2px);
+  }
+  75% {
+    transform: translateX(-1px);
   }
 }
 .blk .left {
