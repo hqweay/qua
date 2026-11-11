@@ -79,8 +79,11 @@ export function pruneEphemeralWindows(
   })
 }
 
-/** 宿主现算的派生卡（闭集；画廊、渲染、旧字节解析共用这一份） */
-export type DerivedCardId = 'inspect' | 'belongs' | 'backrefs' | 'trash' | 'calendar'
+/**
+ * 宿主现算的派生卡（闭集；画廊、渲染、旧字节解析共用这一份）。
+ * `mount`：当前对象的挂载区（引用／同类／提及＋用户栏，同一台组件也在中心段尾）。
+ */
+export type DerivedCardId = 'inspect' | 'belongs' | 'mount' | 'trash' | 'calendar'
 
 /**
  * `utility` ＝ **工具面住进槽**（如搜索卡）。身份就是工具面目录里的那一个 id：
@@ -208,7 +211,7 @@ export const DERIVED_CARDS: readonly DerivedCardDecl[] = [
   { id: 'calendar', icon: 'lucide:calendar', label: 'ui.cal.title' },
   { id: 'belongs', icon: 'lucide:list-tree', label: 'ui.belongs.treeTitle' },
   { id: 'inspect', icon: 'lucide:sliders-horizontal', label: 'ui.dock.inspect' },
-  { id: 'backrefs', icon: 'lucide:corner-up-left', label: 'ui.dock.backRefs' },
+  { id: 'mount', icon: 'lucide:corner-up-left', label: 'ui.dock.mount' },
   { id: 'trash', icon: 'lucide:trash-2', label: 'ui.dock.trash' },
 ]
 

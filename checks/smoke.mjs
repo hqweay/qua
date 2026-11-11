@@ -193,7 +193,8 @@ const mountTab = async (page, kind) => {
 
 /** 派生栏的看法是**一颗下拉**（与自定义查询的「视图…」同壳）：点按钮 → 点菜单行 */
 const pickDerivedView = async (page, kind) => {
-  await page.locator('.mount-derived-views .qv-view-btn').click()
+  // 派生抬头现在有两个表面都有（中心段尾＋右槽卡）：切看法指名**中心**那一台
+  await page.locator('#editor .mount-derived-views .qv-view-btn').first().click()
   await page.waitForTimeout(150)
   await page.locator(`.layer-item[data-id="${kind}"]`).click()
   await page.waitForTimeout(250)
@@ -12491,7 +12492,7 @@ await check('T119 单卡：只留这一张；目标不可见时自动失效；�
     solo: window.__qua.snapshot().dock.solo.right,
     hidden: document.getElementById('inspect-card')?.hidden === true,
     stack: document.querySelector('#dock-right .dock-stack')?.dataset.solo ?? '',
-    backrefs: getComputedStyle(document.querySelector('#dock-right .dock-card[data-card-id="backrefs"]')).display,
+    backrefs: getComputedStyle(document.querySelector('#dock-right .dock-card[data-card-id="mount"]')).display,
   }))
   assert(fallback.solo === 'inspect', `单卡状态应保留：${JSON.stringify(fallback)}`)
   assert(fallback.hidden, `检视卡此时应不可见：${JSON.stringify(fallback)}`)
@@ -12577,19 +12578,19 @@ await check('T120 卡片拖拽：槽内排序、跨槽移动、一个块只留�
     visible: !document.getElementById('inspect-card').hidden,
   }))
   assert(inspectInLeft.inLeft && inspectInLeft.visible, `检视卡应显示在左槽：${JSON.stringify(inspectInLeft)}`)
-  const inspectBack = await dragCard(page, { from: 'left', to: 'right', id: 'inspect', before: 'backrefs' })
+  const inspectBack = await dragCard(page, { from: 'left', to: 'right', id: 'inspect', before: 'mount' })
   assert(inspectBack, '检视卡拖回右槽应派发')
   assert(inspectBack.cards.right.cards.includes('inspect'), `检视卡应回右槽：${JSON.stringify(inspectBack.cards.right.cards)}`)
   await ctx.close()
   return `槽内 b 到 a 前；跨槽 b→左（日历前）；Shift+点移回右且只有一张；再拖回左仍可读；检视卡右→左→右`
 })
 
-await check('T121 右槽反链卡与正文「引用」栏同一种东西：一列可编辑源块，带面包屑', async () => {
+await check('T121 右槽挂载区卡的引用栏与正文同一种东西：一列可编辑源块，带面包屑', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
-  await page.waitForTimeout(350) // 反链卡首次装载（查询走索引，但仍走一次拍板）
-  const card = '#dock-right .dock-card[data-card-id="backrefs"]'
+  await page.waitForTimeout(350) // 卡首次装载（查询走索引，但仍走一次拍板）
+  const card = '#dock-right .dock-card[data-card-id="mount"]'
   /**
    * 第一页被「输入面笔记」里的**两块**分别引用 ⇒ 卡里两行真实块（不是按来源根聚合的摘要行）。
    * 行首面包屑说明「这一句住哪」，与正文「引用」栏同一条机制。
@@ -12604,7 +12605,7 @@ await check('T121 右槽反链卡与正文「引用」栏同一种东西：一�
       })),
     card,
   )
-  assert(rows.length === 2, `反链卡应一行一个源块（本页有两块引用它）：${JSON.stringify(rows)}`)
+  assert(rows.length === 2, `卡里应一行一个源块（本页有两块引用它）：${JSON.stringify(rows)}`)
   assert(new Set(rows.map((r) => r.id)).size === 2, `两行应是两个不同的源块：${JSON.stringify(rows)}`)
   assert(rows.every((r) => /^[0-9a-f]{32}$/.test(r.id)), `每行要带源块 id：${JSON.stringify(rows)}`)
   assert(rows.every((r) => r.crumb === '输入面笔记'), `每行要带来源路径（页名）：${JSON.stringify(rows)}`)
@@ -13343,20 +13344,21 @@ await check('T132 挂载区：虚拟化滚过之后每段仍只有一个槽（�
   return `${st.secs.length} 段可见：每段 ≤1 个槽，空 data-sec 段 0 个`
 })
 
-await check('T133 挂载区只在中心槽：右槽仍是页级反链卡（没有 tab 条）', async () => {
+await check('T133 挂载区两个表面：中心段尾一台，右槽卡一台（同一台组件，宿主＝当前对象）', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  await page.evaluate(() => window.__qua.invoke('core.dock/toggle-right', {}))
-  await page.waitForTimeout(250)
+  const isOpen = await page.evaluate(() => window.__qua.snapshot().dock.right.open)
+  if (!isOpen) await page.evaluate(() => window.__qua.invoke('core.dock/toggle-right', {}))
+  await page.waitForTimeout(400)
   const st = await page.evaluate(() => ({
     rightMounts: document.querySelectorAll('#dock-right .mount').length,
     rightTabs: document.querySelectorAll('#dock-right .mount-tab').length,
-    rightCard: document.querySelectorAll('#dock-right .backrefs-card, #dock-right [data-backrefs-card]').length,
+    rightCard: Boolean(document.querySelector('#dock-right .dock-card[data-card-id="mount"]')),
     centerMounts: document.querySelectorAll('#editor .mount').length,
   }))
   assert(st.centerMounts > 0, `中心槽应有挂载区：${JSON.stringify(st)}`)
-  assert(st.rightMounts === 0 && st.rightTabs === 0, `右槽不做挂载区：${JSON.stringify(st)}`)
+  assert(st.rightCard && st.rightMounts === 1 && st.rightTabs > 0, `右槽应有一台挂载区卡（带 tab 条）：${JSON.stringify(st)}`)
   await ctx.close()
-  return `中心 ${st.centerMounts} 个挂载区；右槽 0 个 tab；反链卡仍在（${st.rightCard}）`
+  return `中心 ${st.centerMounts} 个挂载区；右槽卡 1 台、tab ${st.rightTabs} 个`
 })
 
 await check('T134 日记的自定义栏跟随今天：加一栏 ⇒ 推到明天 ⇒ 新今天有、昨天没有 ⇒ 摘掉不丢块', async () => {
@@ -20069,7 +20071,7 @@ await check('T199 关联型引用默认折叠、传递型默认摊开：引用�
   assert(!opened.collapsed, `点开之后不该还是折着：${JSON.stringify(opened)}`)
   assert(opened.text.includes('关联型的上下文'), `展开后才见得到关联型的上下文：${JSON.stringify(opened.text.slice(0, 200))}`)
 
-  // ④ 右槽反链卡同一口径：判据是同一份，两处不该各说各话
+  // ④ 右槽挂载区卡同一口径：判据是同一份，两处不该各说各话
   const cardRows = await page.evaluate((sel) => {
     const card = document.querySelector(sel)
     return {
@@ -20080,8 +20082,8 @@ await check('T199 关联型引用默认折叠、传递型默认摊开：引用�
         collapsed: el.dataset.collapsed === '1',
       })),
     }
-  }, '#dock-right .dock-card[data-card-id="backrefs"]')
-  assert(cardRows.present, `前置：右槽反链卡应在：${JSON.stringify(cardRows.present)}`)
+  }, '#dock-right .dock-card[data-card-id="mount"]')
+  assert(cardRows.present, `前置：右槽挂载区卡应在：${JSON.stringify(cardRows.present)}`)
   const cardAssoc = cardRows.rows.find((r) => r.id === made.assoc)
   const cardPass = cardRows.rows.find((r) => r.id === made.pass)
   assert(cardAssoc?.collapsed === true, `卡里关联型也要默认折：${JSON.stringify(cardRows.rows)}`)
@@ -20109,10 +20111,10 @@ await check('T199 关联型引用默认折叠、传递型默认摊开：引用�
   assert(!bulkOpened.collapsed, `再点一下应全部展开：${JSON.stringify(bulkOpened)}`)
   assert(bulkOpened.text.includes('关联型的上下文'), `展开后关联型的子块要出现：${JSON.stringify(bulkOpened.text.slice(0, 200))}`)
 
-  // ⑥ 反链卡的一键同口径：卡是**独立的编辑器实例**，此刻卡上关联型还折着（默认播种）
+  // ⑥ 卡的一键同口径：卡是**独立的编辑器实例**，此刻卡上关联型还折着（默认播种）
   //    ⇒ 第一下是「展开」；再点一下才是「折叠」。两个方向都钉。
-  const cardBulk = '#dock-right .dock-card[data-card-id="backrefs"] [data-refs-bulk="1"]'
-  assert(await page.locator(cardBulk).count() > 0, '前置：反链卡工具行应有一键折/展按钮')
+  const cardBulk = '#dock-right .dock-card[data-card-id="mount"] [data-refs-bulk="1"]'
+  assert(await page.locator(cardBulk).count() > 0, '前置：挂载区卡抬头应有一键折/展按钮')
   const cardState = () =>
     page.evaluate((sel) => {
       const card = document.querySelector(sel)
@@ -20123,7 +20125,7 @@ await check('T199 关联型引用默认折叠、传递型默认摊开：引用�
         })),
         text: card?.innerText ?? '',
       }
-    }, '#dock-right .dock-card[data-card-id="backrefs"]')
+    }, '#dock-right .dock-card[data-card-id="mount"]')
   await page.locator(cardBulk).click()
   await page.waitForTimeout(300)
   const cardExpanded = await cardState()
@@ -20143,7 +20145,7 @@ await check('T199 关联型引用默认折叠、传递型默认摊开：引用�
   assert(cardFolded.text.includes('传递型的上下文'), `传递型的子块仍要不点就见：${JSON.stringify(cardFolded.text.slice(0, 200))}`)
 
   await ctx.close()
-  return `关联型默认折着、传递型默认摊开；一键折/展只动关联型（引用栏与反链卡同口径）；关联型展开后才见上下文`
+  return `关联型默认折着、传递型默认摊开；一键折/展只动关联型（引用栏与右槽卡同口径）；关联型展开后才见上下文`
 })
 
 await check(
@@ -23423,7 +23425,7 @@ await check('T237 候选引用：片段行高亮名字出现处、一键转成�
   return `提及 ${before.rows} 行（片段高亮＋按钮）→ 一键转换提及消失/引用出现（1 op）→ ⌘Z 换回来`
 })
 
-await check('T239 快速筛选（反链卡）：候选带计数、点击加入/Shift 排除、加摘可逆；全程不产生 op、不进撤销栈、不落盘', async () => {
+await check('T239 快速筛选（右槽挂载区卡·引用栏）：候选带计数、点击加入/Shift 排除、加摘可逆；全程不产生 op、不进撤销栈、不落盘', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   // 两个不同页各有一条块引用**没有既有反链的最后一页** ⇒ 卡里两行、来源两页（每页各命中 1 行）
@@ -23449,7 +23451,7 @@ await check('T239 快速筛选（反链卡）：候选带计数、点击加入/S
   assert(setup.q !== setup.r, `前置：两个来源页名不同（chip 按名字点）：${JSON.stringify(setup)}`)
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.P)
   await page.waitForTimeout(450)
-  const card = '#dock-right .dock-card[data-card-id="backrefs"]'
+  const card = '#dock-right .dock-card[data-card-id="mount"]'
   const rowCount = () => page.evaluate((sel) => document.querySelectorAll(`${sel} .blk[data-depth="0"]`).length, card)
   assert((await rowCount()) === 2, `前置：卡里两行源块`)
 
@@ -23464,7 +23466,7 @@ await check('T239 快速筛选（反链卡）：候选带计数、点击加入/S
   const before = await ledger()
 
   // 打开弹层：候选＝结果集里出现过的页，各带计数 1
-  await page.locator(`${card} .dock-backlinks-filter`).click()
+  await page.locator(`${card} .mount-derived-filter`).click()
   await page.waitForTimeout(200)
   const candidateChips = page.locator('.popover .quick-filter-pages .quick-filter-chip')
   assert((await candidateChips.count()) === 2, `候选应只有两个来源页：${await candidateChips.count()}`)
@@ -23501,7 +23503,7 @@ await check('T239 快速筛选（反链卡）：候选带计数、点击加入/S
   await page.waitForTimeout(250)
   const emptied = await page.evaluate((sel) => ({
     rows: document.querySelectorAll(`${sel} .blk[data-depth="0"]`).length,
-    note: document.querySelector(`${sel} .dock-empty`)?.textContent ?? '',
+    note: document.querySelector(`${sel} .mount-empty`)?.textContent ?? '',
   }), card)
   assert(emptied.rows === 0, `两页都排除后没有行：${JSON.stringify(emptied)}`)
   assert(emptied.note.includes('没有符合筛选'), `筛空的空态要说「筛选」，不说「没有反链」：${JSON.stringify(emptied)}`)

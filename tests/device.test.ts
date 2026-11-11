@@ -55,7 +55,7 @@ function assertDefaults(p: Prefs): void {
       width: null,
       cards: [
         { kind: 'derived', card: 'inspect' },
-        { kind: 'derived', card: 'backrefs' },
+        { kind: 'derived', card: 'mount' },
         { kind: 'derived', card: 'trash' },
       ],
     },

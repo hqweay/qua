@@ -35,7 +35,7 @@ import { Layers, paletteRows, rowsFromBindings, type PickMods, type Row } from '
 import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from './app/retrieval/triggers.ts'
 import { openTagChoice } from './app/retrieval/name-choice.ts'
 import { DockWindows } from './ui/dock/dock-windows.ts'
-import { BackrefsCard } from './ui/cards/backrefs-card.ts'
+import { DockMountCard } from './ui/cards/mount-card.ts'
 import { SearchCard } from './ui/cards/search-card.ts'
 import { mountDockSlot } from './ui/dock/dock.ts'
 import { createIcon } from './view/icons.ts'
@@ -421,37 +421,24 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, add
   toast: (msg, kind) => app.toast(msg, kind),
   confirm: (o) => layers.confirm(o),
   /**
-   * 反链卡：**一列真实的可编辑块**（与正文「引用」栏同一种东西），不是一列摘要行。
+   * 挂载区卡：**与正文块底那台挂载区同一台组件**（宿主＝当前对象，随导航换一次装载）。
    *
    * 懒建：卡第一次出现时才建实例。工厂本身在装配早期传入，但真正调用发生在
-   * 首次重画——那时 `run`／`cardStateFor`／`closeCard` 都已就位。
+   * 首次重画——那时 `panels`／`cardStateFor`／`closeCard` 都已就位（`panels` 的
+   * 工厂造的是中心段尾那台的兄弟实例：同一份判据，另一份表面 spec）。
    */
-  createBackrefsCard: (side) =>
-    new BackrefsCard({
-      store: blocks,
-      kb,
-      write: editorRun(run, () => ed),
+  createMountCard: (side) =>
+    new DockMountCard({
       target: () => ws.activeId,
-      wire: (editor, change) => wireViewEditor(editor, change, 'dock', true),
-      onFocus: (editor) => {
-        ed = editor
-        scheduleBadge()
-      },
+      createArea: (target) => panels.createDockMountArea(target),
+      state: () => cardStateFor(side, 'mount'),
+      onClose: () => closeCard(side, 'mount'),
+      // 活动编辑器正指着卡里那台时退回正文：摘卡之后键位不能指着一台已卸事件的编辑器
       onDispose: (editor) => {
         if (ed !== editor) return
         ed = mainEd
         scheduleBadge()
       },
-      // 卡内编辑：只落盘与刷角标，**不重画槽**（重画会打断这一行的输入）
-      onChange: () => {
-        syncSections()
-        scheduleSave()
-        scheduleBadge()
-      },
-      state: () => cardStateFor(side, 'backrefs'),
-      onClose: () => closeCard(side, 'backrefs'),
-      // 快速筛选的弹层外壳（chips 的内容与状态都在卡自己手里）
-      openPopover: (render, anchor, trigger) => layers.openPopover(render, anchor, undefined, trigger),
     }),
   /**
    * 搜索卡（**工具面住进槽**）：与 ⌘K 浮层、中心 tab 是同一份 `SearchFace`。
@@ -3072,6 +3059,7 @@ onAssetChange((hash) => {
 let diag: ReturnType<typeof setupDiagnostics>
 const {
   renderMounts,
+  createDockMountArea,
   renderProperties,
   scheduleProperties,
   pickRefValue,
@@ -3106,7 +3094,7 @@ const {
   },
   atomClick: (atom, el, mods) => popovers.handleAtomClick(atom, el, mods, 'table'),
   // 挂载区/查询结果接的是**同一份**事件表（差别只在「装载谁」）
-  wireEditor: (editor, change, via) => wireViewEditor(editor, change, via),
+  wireEditor: (editor, change, via, inlineViewBodies) => wireViewEditor(editor, change, via, inlineViewBodies),
   getWs: () => ws,
   getEd: () => ed,
   setEd: (next) => {
@@ -3119,6 +3107,7 @@ const {
 })
 panels = {
   renderMounts,
+  createDockMountArea,
   renderProperties,
   scheduleProperties,
   pickRefValue,

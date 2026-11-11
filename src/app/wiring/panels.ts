@@ -44,6 +44,7 @@ import {
   type MountEntry,
   type PropKind,
   type QueryContext,
+  type QuickFilterState,
   type ViewBindingRef,
   type ViewOwnerRef,
   type ViewSurface,
@@ -94,7 +95,7 @@ export type PanelsDeps = {
    * **给一台视图编辑器接上与正文同一套事件**（`main.ts` 的 `viewEvents` 是唯一一份）。
    * 挂载区、查询结果都走它 —— 各接一半的代价是「面板里点引用不跳」这类静默漏接。
    */
-  wireEditor: (editor: BlockEditor, change: (kind: string) => void, via: string) => void
+  wireEditor: (editor: BlockEditor, change: (kind: string) => void, via: string, inlineViewBodies?: boolean) => void
   /**
    * **「指向某块的露面」被点**（行内引用 / 行尾标签 chip 共用同一条口径）。
    * 由装配层注入，本层不认识「去哪」的语义；`el` 只是浮层锚点，可省。
@@ -698,6 +699,11 @@ export function setupPanels(deps: PanelsDeps) {
    */
   type MountInstance = { area: MountArea; view: ViewHost | null; viewHostId: string }
   const mountInstances = new Map<string, MountInstance>()
+  /**
+   * **右槽挂载区卡的那一台**（单例：宿主是当前对象，卡跟着它换）。
+   * 中心段尾的设备状态类改动（看法/分组/增删栏）也要让它跟上——两个表面读的是同一格。
+   */
+  let dockMountArea: MountArea | null = null
 
   /** 这一段该不该默认展开：日记只展开今天（「今天 = 你要写的那一天」） */
   const expandedFor = (host: Block): boolean => (isJournal(host) ? journalDate(host) === todayISO() : true)
@@ -906,18 +912,47 @@ export function setupPanels(deps: PanelsDeps) {
     if (kind === 'outline') delete deps.prefs().mountViews[key]
     else deps.prefs().mountViews[key] = kind
     deps.scheduleDeviceSave()
+    // 设备状态是一格、两个表面都读它：发起面整幅重画，另一面如果正看着同一格也要跟上
     mountInstances.get(host.id)?.area.render()
+    dockMountArea?.render()
   }
 
-  function createMount(host: Block): MountInstance {
-    const hostId = host.id
-    const area = new MountArea({
+  /**
+   * 一台挂载区落在哪个「表面」上，差异只收在这几条里。
+   *
+   * 挂载区落两个表面：**中心段尾**每段一份（宿主固定、日记只有今天展开），
+   * **右槽一张卡**（宿主＝当前对象，随导航换一次装载）。写路径、判据、命令全部
+   * 是同一份 —— 差异若散在别处各写一遍，就是同一件事两个答案。
+   */
+  interface MountSurface {
+    /** 这一面的宿主（段根，或右槽的当前对象） */
+    host: () => Block | undefined
+    /** 写事务的 source：发起写的那台编辑器（见 `editorRun` 的注释） */
+    edSource: () => BlockEditor | undefined
+    /** 事件表与命令的来源标记（op 归因） */
+    via: string
+    /** 栏内视图体的表面（几何/条件树开合状态按表面各记） */
+    viewSurface: ViewSurface
+    /** 块的行内结果要不要在这一面渲染（右槽窗口渲染，中心段尾不渲染） */
+    inlineViewBodies: boolean
+    /** 初始展开（中心：日记只有今天；右槽：恒展开） */
+    expanded: boolean
+    /** 建栏/物化收尾：焦点交回编辑器（⌘Z 键位认它，挂在 editorTextFocus） */
+    refocus: () => void
+    /** 建栏/物化收尾：这一面切到新栏（激活页签每个表面各记自己的） */
+    activate: (tabId: string) => void
+    /** 派生栏非大纲视图读的 chips（谁的实例谁的筛选） */
+    filterOf: (source: DerivedSource) => QuickFilterState
+  }
+
+  function createMountArea(spec: MountSurface): MountArea {
+    return new MountArea({
       store: blocks,
-      write: editorRun(run, () => edOfMount(hostId)),
+      write: editorRun(run, spec.edSource),
       kb,
       owners,
       journalMounts: () => journalMounts(),
-      host: () => blocks.find(hostId),
+      host: spec.host,
       onChange: () => {
         syncSections()
         scheduleSave()
@@ -926,12 +961,12 @@ export function setupPanels(deps: PanelsDeps) {
       // 焦点进挂载区 ⇒ 活动编辑器就是那一个（键位走命令层，认的是它）
       onFocus: (editor) => deps.setEd(editor),
       invoke: (name, args) => {
-        void deps.getRegistry().invoke(name, args, 'mount')
+        void deps.getRegistry().invoke(name, args, spec.via)
       },
       // 与正文同一套事件（点引用/块标/右键菜单/`#`·`@` 补全），装配层只给这一份
-      wire: (editor, change) => deps.wireEditor(editor, change, 'mount'),
-      onAddTab: (id) => addLocalQueryTab(id),
-      onMaterializeTab: (id, source, _anchor, opts) => materializeDerivedTab(id, source, opts),
+      wire: (editor, change) => deps.wireEditor(editor, change, spec.via, spec.inlineViewBodies),
+      onAddTab: (id) => addLocalQueryTab(id, spec),
+      onMaterializeTab: (id, source, _anchor, opts) => materializeDerivedTab(id, source, opts, spec),
       // 快速筛选的弹层外壳（chips 的内容与状态都在挂载区自己手里）
       openPopover: (render, anchor, trigger) => layers.openPopover(render, anchor, undefined, trigger),
       // 大纲分支的切换下拉：与视图宿主那条同一个菜单（装配层现画行，这里只给锚点）
@@ -949,12 +984,14 @@ export function setupPanels(deps: PanelsDeps) {
         if (key === '') delete deps.prefs().mountGroups[mk]
         else deps.prefs().mountGroups[mk] = key
         deps.scheduleDeviceSave()
+        // 设备状态是一格、两个表面都读它（与看法切换同一条）
         mountInstances.get(hostBlock.id)?.area.render()
+        dockMountArea?.render()
       },
       // 看法下拉与自定义查询的「视图…」同壳（同一台浮层，行由宿主层现画）
       openDerivedViewMenu: (anchor, current, onPick) => app.openDerivedViewMenu(anchor, current, (k) => onPick(k as DerivedViewKind)),
       onRemoveTab: (mountHost, tabId) => {
-        void deps.getRegistry().invoke('core.mount/remove', { host: mountHost, tabId }, 'mount')
+        void deps.getRegistry().invoke('core.mount/remove', { host: mountHost, tabId }, spec.via)
         // 摘完当场重排：栏是模型/设备状态里的一格，DOM 不会自己知道
         renderMounts()
       },
@@ -977,7 +1014,7 @@ export function setupPanels(deps: PanelsDeps) {
               cancelText: t('ui.mount.renameCancel'),
               onSubmit: (label) => {
                 layers.closePopover()
-                void deps.getRegistry().invoke('core.mount/rename', { host: mountHost, tabId, label }, 'mount')
+                void deps.getRegistry().invoke('core.mount/rename', { host: mountHost, tabId, label }, spec.via)
                 // 栏名是模型/设备状态里的一格，DOM 不会自己知道（与摘掉同一笔重排）
                 renderMounts()
               },
@@ -987,7 +1024,7 @@ export function setupPanels(deps: PanelsDeps) {
         )
       },
       onMoveTab: (mountHost, tabId, targetId, place) => {
-        void deps.getRegistry().invoke('core.mount/move', { host: mountHost, tabId, targetId, place }, 'mount')
+        void deps.getRegistry().invoke('core.mount/move', { host: mountHost, tabId, targetId, place }, spec.via)
         // 顺序是那一格数组的顺序 ⇒ 写完整排一次（与摘掉同一条重排路径）
         renderMounts()
       },
@@ -996,7 +1033,13 @@ export function setupPanels(deps: PanelsDeps) {
         const mountHost = mountHostOf(mountHostBlock)
         if (entry.kind === 'local') {
           const owner: ViewOwnerRef = { kind: 'tab', host: mountHost, tabId: entry.id }
-          return asBody(createView(owner, mountHostBlock))
+          // 表面与写事务 source 都按这台挂载区自己的口径：右槽卡的栏体写的是卡里的编辑器
+          return asBody(
+            createView(owner, mountHostBlock, undefined, undefined, {
+              surface: spec.viewSurface,
+              source: spec.edSource,
+            }),
+          )
         }
         if (entry.kind === 'derived') {
           /**
@@ -1024,22 +1067,63 @@ export function setupPanels(deps: PanelsDeps) {
               records: () =>
                 applyQuickFilter(
                   derivedRecordsOf(blocks.find(mountHostBlock.id) ?? mountHostBlock, kb, entry.source),
-                  mountInstances.get(hostId)?.area.filterOf(entry.source) ?? EMPTY_QUICK_FILTER,
+                  spec.filterOf(entry.source),
                 ),
               columns: derivedColumns(entry.source),
               // 分组键与看法同层（设备状态）；下拉由挂载区抬头画，这里只带渲染用的键
               groupBy: deps.prefs().mountGroups[mountViewKey(mountHost, entry.source)] ?? '',
               setKind: (k) => setDerivedKind(mountHostBlock, entry.source, k),
               explain: t(explainKey),
-            }),
+            }, { surface: spec.viewSurface, source: spec.edSource }),
           )
         }
         return null
       },
+      expanded: spec.expanded,
+    })
+  }
+
+  /**
+   * 中心段尾的那一台：宿主固定为段根，其余差异按中心表面的口径给。
+   * 右槽卡的那一台见 `createDockMountArea` —— 同一台 `createMountArea`，另一份 spec。
+   */
+  function createMount(host: Block): MountInstance {
+    const hostId = host.id
+    const area = createMountArea({
+      host: () => blocks.find(hostId),
+      edSource: () => mountInstances.get(hostId)?.area.blockEditor ?? undefined,
+      via: 'mount',
+      viewSurface: 'mount',
+      inlineViewBodies: false,
       expanded: expandedFor(host),
+      refocus: refocusAfterMountOp,
+      activate: (tabId) => mountInstances.get(hostId)?.area.activateTab(tabId),
+      filterOf: (source) => mountInstances.get(hostId)?.area.filterOf(source) ?? EMPTY_QUICK_FILTER,
     })
     const view = wantsView(host) ? createView({ kind: 'block', blockId: host.id }, host) : null
     return { area, view, viewHostId: view ? hostId : '' }
+  }
+
+  /**
+   * **右槽挂载区卡的那一台**：宿主＝当前对象，随导航换一次装载（`MountArea.render`
+   * 里的换段判据管状态清空）。装配早于实例创建的引用全部走惰性 getter ——
+   * 构造期回调拿到的是空值（与中心实例的「构造期空筛选」同一条事实）。
+   */
+  function createDockMountArea(target: () => string): MountArea {
+    let area: MountArea | null = null
+    area = createMountArea({
+      host: () => blocks.find(target()),
+      edSource: () => area?.blockEditor ?? undefined,
+      via: 'dock',
+      viewSurface: 'dock',
+      inlineViewBodies: true,
+      expanded: true,
+      refocus: refocusAfterMountOp,
+      activate: (tabId) => area?.activateTab(tabId),
+      filterOf: (source) => area?.filterOf(source) ?? EMPTY_QUICK_FILTER,
+    })
+    dockMountArea = area
+    return area
   }
 
   /** 挂载区里那个编辑器（写事务的 source）。焦点切过去之后 `ed` 就是它 */
@@ -1062,7 +1146,12 @@ export function setupPanels(deps: PanelsDeps) {
    * 条件条在栏里，点一下就地展开。名字可以后改，条件不能后猜。
    * ⚠️ **不建块**：块数不变，⌘Z 可撤（建栏与应用条件是两笔，各自可撤）。
    */
-  function addLocalQueryTab(hostId: string): void {
+  /**
+   * **「＋」的新栏在哪个表面建，激活与焦点收尾就归哪个表面**。
+   * `surface` 缺省＝中心段尾的手势（挂载区自己的「＋」回调都会带上来）。
+   * 激活页签每个表面各记自己的：右槽建的栏不该把中心正看着的那栏切走。
+   */
+  function addLocalQueryTab(hostId: string, surface?: Pick<MountSurface, 'via' | 'activate' | 'refocus'>): void {
     const host = blocks.find(hostId)
     if (!host) return
     const mountHost = mountHostOf(host)
@@ -1072,14 +1161,14 @@ export function setupPanels(deps: PanelsDeps) {
       .invoke(
         'core.mount/add-local',
         { host: mountHost, label: t('ui.mount.localName'), spec: { where: { up: { is: '$self' } } } },
-        'mount',
+        surface?.via ?? 'mount',
       )
     const added = owners.entriesOf(mountHost).find((e) => !before.has(e.id))
     renderMounts()
     if (!added) return
     // 新栏当场切过去：建了不看，「点了没生效」的另一种长相
-    mountInstances.get(host.id)?.area.activateTab(added.id)
-    refocusAfterMountOp()
+    ;(surface?.activate ?? ((tabId) => mountInstances.get(host.id)?.area.activateTab(tabId)))(added.id)
+    ;(surface?.refocus ?? refocusAfterMountOp)()
   }
 
   /**
@@ -1104,7 +1193,12 @@ export function setupPanels(deps: PanelsDeps) {
    * `openTree`：物化完直接把新栏的条件树摊开——手势的承诺是「改条件」，
    * 让用户再点一次摘要 chip 才够到树，等于把承诺拆成两半。
    */
-  function materializeDerivedTab(hostId: string, source: DerivedSource, opts?: { openTree?: boolean }): void {
+  function materializeDerivedTab(
+    hostId: string,
+    source: DerivedSource,
+    opts?: { openTree?: boolean },
+    surface?: Pick<MountSurface, 'via' | 'activate' | 'refocus' | 'viewSurface'>,
+  ): void {
     const host = blocks.find(hostId)
     if (!host) return
     const template = derivedTemplateOf(host, kb.roots(), source)
@@ -1131,17 +1225,18 @@ export function setupPanels(deps: PanelsDeps) {
               ? (template.views[0]?.id ?? '')
               : '',
         },
-        'mount',
+        surface?.via ?? 'mount',
       )
     const added = owners.entriesOf(mountHost).find((e) => !before.has(e.id))
     renderMounts()
     if (!added) return
-    // 新栏当场切过去：建了不看，「点了没生效」的另一种长相
-    mountInstances.get(hostId)?.area.activateTab(added.id)
+    // 新栏当场切过去：建了不看，「点了没生效」的另一种长相。激活项归发起面（与「＋」同一条）
+    ;(surface?.activate ?? ((tabId) => mountInstances.get(hostId)?.area.activateTab(tabId)))(added.id)
     if (opts?.openTree === true) {
-      openQueryTreeFor({ kind: 'tab', host: mountHost, tabId: added.id }, 'mount')
+      // 条件树的开合状态按表面各记：发起面的树摊开，另一面不该跟着动
+      openQueryTreeFor({ kind: 'tab', host: mountHost, tabId: added.id }, surface?.viewSurface ?? 'mount')
     }
-    refocusAfterMountOp()
+    ;(surface?.refocus ?? refocusAfterMountOp)()
   }
 
   /**
@@ -1229,6 +1324,8 @@ export function setupPanels(deps: PanelsDeps) {
       inst.area.root.remove()
       mountInstances.delete(id)
     }
+    // 右槽那台也跟着对齐：增删栏/改名/换序写在 `_mounts`/设备状态上，不经过它的 store 订阅
+    dockMountArea?.refreshEntries()
   }
 
   /**
@@ -1251,6 +1348,7 @@ export function setupPanels(deps: PanelsDeps) {
 
   return {
     renderMounts,
+    createDockMountArea,
     renderProperties,
     scheduleProperties,
     pickRefValue,

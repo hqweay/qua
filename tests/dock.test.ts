@@ -98,13 +98,13 @@ test('dock: 重启清理——非 pin 的块窗口卡清掉，pin 的保留', ()
   const cards = [
     { kind: 'block', block: 'ephemeral' },
     { kind: 'block', block: 'pinned' },
-    { kind: 'derived', card: 'backrefs' },
+    { kind: 'derived', card: 'mount' },
     { kind: 'cmd', command: 'core.page/new' },
   ] as const
   const out = pruneEphemeralWindows(cards, { pinned: true })
   assert.deepEqual(out, [
     { kind: 'block', block: 'pinned' },
-    { kind: 'derived', card: 'backrefs' },
+    { kind: 'derived', card: 'mount' },
     { kind: 'cmd', command: 'core.page/new' },
   ])
 })

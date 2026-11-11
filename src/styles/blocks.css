@@ -976,8 +976,7 @@
  * （它里面就是正文「引用」栏那一列可编辑块），所以共用这一条兜底。
  */
 .mount .blk[data-depth='0'],
-.queryview .blk[data-depth='0'],
-.dock-backlinks-editor .blk[data-depth='0'] {
+.queryview .blk[data-depth='0'] {
   font-size: var(--ui-fs-md);
 }
 .queryview-head {

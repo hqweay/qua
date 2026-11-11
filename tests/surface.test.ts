@@ -27,7 +27,7 @@ test('中心接得住的派生卡是派生卡目录的子集（目录唯一一�
 test('中心派生卡守卫：接得住的放行，槽绑定的持久卡与未知 id 拒绝', () => {
   assert.equal(centerDerivedOpenable('trash'), true, '回收站的身体是纯派生 DOM ⇒ 中心接得住')
   assert.equal(centerDerivedOpenable('inspect'), false, '检视卡的身体绑在右槽（持久实例）')
-  assert.equal(centerDerivedOpenable('backrefs'), false, '反链卡是每槽一台的编辑器')
+  assert.equal(centerDerivedOpenable('mount'), false, '挂载区卡是每槽一台的编辑器')
   assert.equal(centerDerivedOpenable('nope'), false)
 })
 

@@ -428,6 +428,7 @@ export const MSG = {
   'ui.mount.same': '同类',
   'ui.mount.mentions': '提及',
   'ui.mount.empty.refs': '还没有块引用它',
+  'ui.mount.empty.filtered': '没有符合筛选的块',
   'ui.mount.empty.members': '还没有块打着这个标签',
   'ui.mount.empty.same': '没有别的块与它共享标签',
   /** 「同类」这一栏的**维度不存在**（这一块没有 `_tags`）——与「有标签但没同类的块」分开说 */
@@ -764,8 +765,7 @@ export const MSG = {
   'ui.view.renameCancel': '取消',
   'ui.view.remove': '删除这一视图',
   'ui.dock.resize': '拖动调整宽度；双击恢复默认',
-  'ui.dock.backRefs': '反链',
-  'ui.dock.noBackRefs': '还没有块指向这里',
+  'ui.dock.mount': '挂载区',
   'ui.dock.trash': '回收站',
   'ui.dock.trashEmpty': '回收站是空的',
   'ui.dock.trashBlank': '（空块）',
@@ -1391,7 +1391,6 @@ export const MSG = {
   'ui.filter.emptyCenter': '这一屏里没有可筛的页或标签',
   'ui.filter.searchHint': '找页或标签…',
   'ui.filter.clear': '清除筛选',
-  'ui.dock.noBackRefsFiltered': '没有符合筛选的引用',
 } as const
 
 /** 回调 id 就是 MSG 的键 —— 写错一个 id 会在 `pnpm typecheck` 阶段就红 */

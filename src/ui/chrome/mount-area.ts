@@ -19,10 +19,9 @@
  * 编辑器装配（建实例、订阅、防抖重载、聚焦冻结、离焦补做、事件表）全部在
  * `EditableBlock` 里；这一层只决定**装哪些根**（哪一栏、展开到哪层、面包屑怎么给）。
  *
- * ⚠️ 与右槽的分工：右槽的 `backrefsCard` 是**页级派生卡**（读当前对象、跟着它走），
- *    判据与这里的「引用」栏**同源**（都走 `derivedRecordsOf`），差别只在落点：
- *    槽里是「另一处的摘要」，这里是「在这一块下面就地展开」。
- *    硬统一会得到两份各自记激活项的 tab 条。
+ * ⚠️ **两个表面，一台组件**：中心段尾（宿主固定为段根）与右槽卡（宿主＝当前对象，
+ *    随导航换一次装载）都挂这一台，写路径与判据是同一份；差异（via／展开／行内结果）
+ *    收在装配层的表面 spec 里，不在这一层分叉。激活页签每个表面各记自己的。
  * ⚠️ 这里不碰命令、不认识浮层：`＋`／`×` 只回调装配层。
  */
 import {
@@ -498,6 +497,9 @@ export class MountArea {
       this.covers = new Map()
       this.refKind = 'all'
       this.quickFilters.clear()
+      // 折叠播种也跟着宿主走：中心段尾一台实例只服务一个宿主，感知不到这条；
+      // 右槽卡一台实例跟着导航换宿主，播种标记不清就会让第二位宿主永远摊开
+      this.foldSeeded.clear()
       for (const v of this.tabViews.values()) v.dispose()
       this.tabViews.clear()
     }
@@ -1108,7 +1110,13 @@ export class MountArea {
     this.expandedByTab.set(entry.id, plan.expanded)
     this.covers = plan.covers
     if (plan.roots.length === 0) {
-      this.showEmpty(t(emptyText ?? EMPTY_TEXT[entry.kind]))
+      // 筛空与「本来就没有」要说不同的话：chips 挂着时结果空，真相是「筛选藏掉了」，
+      // 不是「还没有块引用它」——冒充会让用户以为这一栏坏了。
+      const empty =
+        entry.kind === 'derived' && this.filterActive(entry.source)
+          ? 'ui.mount.empty.filtered'
+          : (emptyText ?? EMPTY_TEXT[entry.kind])
+      this.showEmpty(t(empty))
       // 空结果也保留这份视图的折叠态：它记的是「哪些行收着」，不是「这次有几行」
       this.block.ed?.loadPage({ roots: [], folded: this.block.ed.doc.folded })
       return

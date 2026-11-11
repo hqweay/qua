@@ -163,7 +163,7 @@ export interface PageDeps {
    * 承诺了**具体内容**的命令用——卡被关掉之后只开槽，会得到一个「打开了一个空列」
    * 的假成功。
    */
-  ensureDockCard: (side: 'left' | 'right', id: 'inspect' | 'belongs' | 'backrefs' | 'trash' | 'calendar') => void
+  ensureDockCard: (side: 'left' | 'right', id: 'inspect' | 'belongs' | 'mount' | 'trash' | 'calendar') => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
   /**
    * 打开一个**目标选择器**：装配层负责把它渲染成菜单。

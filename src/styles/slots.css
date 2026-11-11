@@ -308,15 +308,13 @@
   padding: 0 var(--ui-gap-2) var(--ui-gap-3);
 }
 /*
- * 反链卡里是**一台真编辑器**（`.blk` 行 ＋ 面包屑），不是卡片自带的一列按钮。
- * 行距与最小高度沿用挂载区那一档；字号阶梯的「根」在结果面上不放大（见 blocks.css）。
+ * 右槽挂载区卡：卡身就是块底那台挂载区（同一台组件），样式沿用 `.mount`。
+ * 只有编辑器宿主补两行卡内的兜底（与中心段尾同一档）：
+ * 最小高度撑住空态，`outline: none` 别让聚焦描边画在卡里。
  */
-.dock-backlinks-editor {
+.dock-card-body .mount-editor {
   min-height: var(--ui-line-h);
   outline: none;
-}
-.dock-backlinks-editor[hidden] {
-  display: none;
 }
 /* 卡头的按钮比槽头小一档：一排要放收起/动作/单卡/关闭 */
 .dock-card-btn {
@@ -743,57 +741,6 @@ button.ghost.wide {
 }
 .datepick-today:hover {
   background: var(--ui-accent-soft);
-}
-
-/* 卡内工具行：筛选贴着它作用的那批行（卡头只留「这张卡」的控件，不放内容动作） */
-.dock-backlinks-tools {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: var(--ui-gap-1);
-}
-.dock-backlinks-tools[hidden] {
-  display: none;
-}
-.dock-backlinks-filter {
-  background: none;
-  border: 0;
-  padding: 0 var(--ui-gap-2);
-  font: inherit;
-  font-size: var(--ui-fs-xs);
-  color: var(--ui-text-tertiary);
-  cursor: pointer;
-  border-radius: var(--ui-radius-sm);
-  line-height: 1.6;
-}
-.dock-backlinks-filter:hover {
-  color: var(--ui-text);
-  background: var(--ui-bg-hover);
-}
-.dock-backlinks-filter[data-active='1'] {
-  color: var(--ui-text);
-  background: var(--ui-accent-soft);
-}
-/* 一键折/展（反链卡工具行）：与「筛选」同观感但独立类名（抬头按钮各有断言锚点，不共用）；
-   装图标、垂直居中；方向由 JS 换图标，样式不随方向变 */
-.dock-backlinks-bulkfold {
-  background: none;
-  border: 0;
-  padding: 0 var(--ui-gap-1);
-  font: inherit;
-  font-size: var(--ui-fs-xs);
-  color: var(--ui-text-tertiary);
-  cursor: pointer;
-  border-radius: var(--ui-radius-sm);
-  display: inline-flex;
-  align-items: center;
-}
-.dock-backlinks-bulkfold:hover {
-  color: var(--ui-text);
-  background: var(--ui-bg-hover);
-}
-.dock-backlinks-bulkfold .ico {
-  width: var(--ui-icon-md);
-  height: var(--ui-icon-md);
 }
 
 /*

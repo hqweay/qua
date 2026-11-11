@@ -85,7 +85,7 @@ export type PagesDeps = {
    */
   dockOpen: (side: 'left' | 'right') => boolean
   /** 把某张派生卡放回槽（关掉之后「看属性」还能把它放回来）；由装配层接到 `addDerived` */
-  ensureDockCard: (side: 'left' | 'right', id: 'inspect' | 'belongs' | 'backrefs' | 'trash' | 'calendar') => void
+  ensureDockCard: (side: 'left' | 'right', id: 'inspect' | 'belongs' | 'mount' | 'trash' | 'calendar') => void
   /** 在右槽打开一个块（日记的 Shift+点日期要用；不换中心、不入历史） */
   openInDock: (id: string) => void
   /** 看这一块自己的属性（日记的 ⌥+点日期要用；先物化，不改中心） */
