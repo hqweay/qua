@@ -245,7 +245,10 @@ export class QueryTree {
       this.focusNew = false
       const rows = this.box.querySelectorAll('.qt-row')
       const last = rows[rows.length - 1]
-      const focusable = last?.querySelector<HTMLElement>('input, select, button')
+      // 刚加的行走「值位」优先：未填的是值，不是行种类或方向
+      const focusable =
+        last?.querySelector<HTMLElement>('[data-qt="value"], [data-qt="ref"]') ??
+        last?.querySelector<HTMLElement>('input, select, button')
       focusable?.focus()
     }
   }
