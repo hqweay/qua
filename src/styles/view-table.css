@@ -179,6 +179,8 @@
   margin-top: var(--ui-gap-2);
 }
 .tv-scroll {
+  /* 双向都滚：容器比表窄时靠这条出横向滚动条（列宽固定 px，不会被压碎）——
+     窄槽里仍是同一张表，不换形态、不挂提示文案 */
   overflow: auto;
   /* 表自己滚：不这样，长表会把整页拉长，而页面滚动时窗口化的账算不准 */
   max-height: min(60vh, 640px);
@@ -374,61 +376,6 @@
   margin: var(--ui-gap-4) 0;
   font-size: var(--ui-fs-sm);
   color: var(--ui-text-tertiary);
-}
-
-/* ---------------------------------------------------------- 降级：紧凑列表
-
-   侧槽 360px（最窄 180px）里多列读不动。判据不是「挤一挤还能看」而是「还读得懂」：
-   换成标题 ＋ 一个标签的列表，点一行去中心槽。 */
-.tv-rows--compact {
-  display: block;
-}
-.tv-compact {
-  display: flex;
-  flex-direction: column;
-}
-.tv-compact-row {
-  display: flex;
-  align-items: baseline;
-  gap: var(--ui-gap-3);
-  width: 100%;
-  padding: var(--ui-gap-3) var(--ui-gap-4);
-  border: 0;
-  border-bottom: 1px solid var(--ui-border-subtle);
-  background: none;
-  font: inherit;
-  text-align: left;
-  color: var(--ui-text);
-  cursor: pointer;
-}
-.tv-compact-row:hover {
-  background: var(--ui-surface-sunken);
-}
-.tv-compact-title {
-  flex: 1;
-}
-.tv-compact-tag {
-  flex: none;
-  max-width: 40%;
-  font-size: var(--ui-fs-xs);
-  color: var(--ui-text-tertiary);
-}
-.tv-compact-foot {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-gap-3);
-  padding: var(--ui-gap-3) var(--ui-gap-4);
-  font-size: var(--ui-fs-xs);
-  color: var(--ui-text-tertiary);
-}
-.tv-compact-open {
-  margin-left: auto;
-  border: 0;
-  background: none;
-  padding: 0;
-  font: inherit;
-  color: var(--ui-accent);
-  cursor: pointer;
 }
 
 /* ---------------------------------------------------------- 结构映射表（大纲 → 表格）

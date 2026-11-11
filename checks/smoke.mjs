@@ -15360,7 +15360,7 @@ await check('T155 规模：300 行不窗口化（全挂）、3000 行窗口化�
 
 /* ---------------------------------------------------------------- T156 */
 
-await check('T156 窄容器降级：表格变紧凑列表（不横向溢出），点一行去中心槽打开', async () => {
+await check('T156 窄容器：表格不降级（横向滚动可用、标题列钉住），点行首打开那一块', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 900, height: 800 } })
   await page.evaluate(() => window.__qua.quiet(true))
   const id = await pageByTitle(page, '输入面笔记')
@@ -15368,31 +15368,59 @@ await check('T156 窄容器降级：表格变紧凑列表（不横向溢出）�
   await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'table' }), id)
   await page.waitForTimeout(500)
 
-  const compact = await page.evaluate(() => {
+  // 显式设多列，让「列总宽 > 容器」确定性成立（默认两列在窄槽里可能刚好装得下）
+  await page.evaluate((pid) => {
+    const walk = (l) => {
+      for (const x of l) {
+        if (x.id === pid) return x
+        const r = walk(x.children)
+        if (r) return r
+      }
+      return null
+    }
+    const b = walk(window.__qua.__editor.store.blocks)
+    const viewId = b.props?._activeView ?? ''
+    return window.__qua.invoke('core.view/set-columns', {
+      owner: pid,
+      viewId,
+      columns: [{ key: 'tags' }, { key: 'created' }, { key: 'modified' }, { key: 'children' }],
+    })
+  }, id)
+  await page.waitForTimeout(400)
+
+  const table = await page.evaluate(() => {
     const tv = document.querySelector('.tv')
     const sc = document.querySelector('.tv-scroll')
+    const title = document.querySelector('.tv-row > .tv-title')
     return {
-      flag: tv?.dataset.compact ?? 'none',
       rows: document.querySelectorAll('.tv-row').length,
       compactRows: document.querySelectorAll('.tv-compact-row').length,
       overflowX: sc ? sc.scrollWidth > sc.clientWidth + 1 : false,
       width: tv?.clientWidth ?? 0,
-      hint: document.querySelector('.tv-compact-foot')?.textContent ?? '',
+      sticky: title ? getComputedStyle(title).position : '',
     }
   })
-  assert(compact.flag === '1', `窄容器应降级：${JSON.stringify(compact)}`)
-  assert(compact.compactRows > 0 && compact.rows === 0, `降级后是紧凑列表：${JSON.stringify(compact)}`)
-  assert(!compact.overflowX, `紧凑列表不该横向溢出：${JSON.stringify(compact)}`)
-  assert(compact.hint.length > 0, '降级要说明白（不能悄悄换了个形态）')
+  assert(table.rows > 0 && table.compactRows === 0, `窄容器仍是表格（不降级）：${JSON.stringify(table)}`)
+  assert(table.overflowX, `列比容器宽时应横向溢出（滚动条出现）：${JSON.stringify(table)}`)
+  assert(table.sticky === 'sticky', `标题列应钉在左侧：${JSON.stringify(table)}`)
 
-  const target = await page.locator('.tv-compact-row').first().getAttribute('data-block-id')
-  await page.locator('.tv-compact-row').first().click()
+  const scrolled = await page.evaluate(() => {
+    const sc = document.querySelector('.tv-scroll')
+    sc.scrollLeft = 120
+    return sc.scrollLeft
+  })
+  assert(scrolled > 0, `横向滚动应生效：scrollLeft=${scrolled}`)
+
+  const target = await page.locator('.tv-row').first().getAttribute('data-block-id')
+  // 块标悬停才显形可点（防误触）：先把指针放进行里再点
+  await page.locator('.tv-row').first().hover()
+  await page.locator('.tv-row .tv-marker').first().click()
   await page.waitForTimeout(400)
   const opened = await page.evaluate(() => window.__qua.snapshot().activeId)
-  assert(opened === target, `点一行应打开那一块：${target} → ${opened}`)
+  assert(opened === target, `点行首应打开那一块：${target} → ${opened}`)
 
   await ctx.close()
-  return `${compact.width}px ⇒ 紧凑列表（${compact.compactRows} 行、无横向溢出）；点行打开 ${target.slice(0, 6)}`
+  return `${table.width}px 仍是表格（横向滚 ${scrolled}px、标题列钉住）；点行首打开 ${target.slice(0, 6)}`
 })
 
 /* ---------------------------------------------------------------- T157 */

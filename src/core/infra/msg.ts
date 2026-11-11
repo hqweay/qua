@@ -717,8 +717,6 @@ export const MSG = {
   'ui.view.emptyQuery': '没有匹配的块',
   'ui.view.broken': '视图配置无法读取（已显示大纲）',
   'ui.view.unsupported': '这个视图还没做，先回大纲',
-  'ui.view.compact': '空间不足，已按列表显示',
-  'ui.view.openCenter': '在中心槽打开',
   'ui.view.deleteRow': '删除这一行',
   'ui.view.newRowTitle': '在末尾加一个子块',
   'ui.view.sortHint': '按这一列排序（再点一次反向，第三次取消）',

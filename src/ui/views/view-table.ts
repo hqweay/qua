@@ -15,6 +15,10 @@
  * 三档规模（按行数选渲染策略，不按「看起来会不会卡」猜）：
  *   `< 300` 全量挂；`300–2000` 全量挂但行上 `content-visibility: auto`；
  *   `>= 2000` **窗口化**（只挂可视范围 ± 若干行，用上下留白撑出滚动高度）。
+ *
+ * **窄容器不降级**：列宽是固定 px，列永远不会被压碎；容器装不下时横向滚动就是答案，
+ * 被裁的列缘＋滚动条本身说明「右边还有」，不需要换形态再挂文案解释。
+ * 标题列钉在左侧（CSS），滚到多右都知道这一行是谁。不替用户换视图——他在选择器里点的是「表格」。
  */
 import type { Block, BlockStore, OpenAction, ViewColumn, ViewConfig, ViewRecord } from '../../core/index.ts'
 import { clickModsOf, openActionOf } from '../../core/index.ts'
@@ -22,7 +26,6 @@ import {
   cardinalityOf,
   choicesOf,
   clockLabel,
-  blockLabel,
   displayNameOf,
   hasValue,
   liveChildren,
@@ -98,8 +101,6 @@ export interface ViewTableDeps {
 const ROW_H: Record<'compact' | 'cozy' | 'comfortable', number> = { compact: 28, cozy: 36, comfortable: 44 }
 /** 窗口外的缓冲行数：滚动时不留白，也不多挂 */
 const OVERSCAN = 8
-/** 低于这个宽度就降级成紧凑列表（表的最多列在这个宽度里已经读不动了） */
-const MIN_TABLE_W = 560
 /** 窗口化的门槛：再往下全挂也不会卡，全挂反而更简单（编辑/选区不用管窗口） */
 const VIRTUAL_FROM = 2000
 
@@ -120,10 +121,9 @@ export class ViewTable {
   /** 当前行（已按视图排序） */
   private rows: ViewRecord[] = []
   private rendered = new Map<string, RowEls>()
-  /** 列/行高/紧凑/虚拟的签名：变了就整表重排，没变就只 patch 行 */
+  /** 列/行高/虚拟的签名：变了就整表重排，没变就只 patch 行 */
   private shape = ''
   private virtual = false
-  private compact = false
   private rowH = ROW_H.cozy
   private winFrom = -1
   private winTo = -1
@@ -144,7 +144,6 @@ export class ViewTable {
    * 含软删的块与标签：当前值可能指向一个已删的选项，控件要显示它的旧名。
    */
   private readonly lookupIndex = new ChoiceLookupIndex()
-  private readonly ro: ResizeObserver | null
   private readonly onScroll = (): void => this.windowIfNeeded()
 
   constructor(deps: ViewTableDeps) {
@@ -192,13 +191,9 @@ export class ViewTable {
       },
       true,
     )
-    // 槽宽变了就切「表格 ⇄ 紧凑列表」：不这么做，360px 里那几列会横着溢出去
-    this.ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.applyWidth())
-    this.ro?.observe(this.root)
   }
 
   dispose(): void {
-    this.ro?.disconnect()
     this.scroll.removeEventListener('scroll', this.onScroll)
     this.root.remove()
   }
@@ -220,7 +215,7 @@ export class ViewTable {
     }
   }
 
-  /** 整表重排（首次装、列变了、行集合变了、降级形态变了） */
+  /** 整表重排（首次装、列变了、行集合变了、窗口化形态变了） */
   render(): void {
     // 整表重排会把正在编辑的格摘掉：先把这次编辑收尾（回调会把那一格重画一遍）
     this.deps.cell.commit()
@@ -233,12 +228,10 @@ export class ViewTable {
     this.rebuildLookups()
     this.rows = this.sorted()
     void host
-    this.compact = this.root.clientWidth > 0 && this.root.clientWidth < MIN_TABLE_W
-    this.virtual = !this.compact && this.rows.length >= VIRTUAL_FROM
+    this.virtual = this.rows.length >= VIRTUAL_FROM
     const nextShape = JSON.stringify({
       cols: this.cols,
       rowH: this.rowH,
-      compact: this.compact,
       virtual: this.virtual,
       // 行的**身份序列**：只有结构/排序变了才需要重排（内容变化走 patch）
       ids: this.rows.map((r) => r.block.id),
@@ -302,26 +295,13 @@ export class ViewTable {
     this.renderWindow(false)
   }
 
-  /**
-   * 宽度变了：跨过阈值就整表重排，否则只更新一次列变量的像素值。
-   *
-   * 为什么要 ResizeObserver 而不是每次渲染读一次宽度：槽是**可拖宽**的，
-   * 拖的过程中不重排、松手那一刻才要换形态；只在渲染时读会让「抽屉拖窄了但表没降级」
-   * 一直停在溢出状态。
-   */
-  private applyWidth(): void {
-    const next = this.root.clientWidth > 0 && this.root.clientWidth < MIN_TABLE_W
-    if (next !== this.compact) this.render()
-  }
-
   private applyShape(): void {
-    this.root.dataset.compact = this.compact ? '1' : '0'
     this.root.dataset.virtual = this.virtual ? '1' : '0'
     // 300 行以上才让浏览器跳过屏幕外的行；窗口化那档不用它（DOM 里根本没有屏外的行）
-    this.root.dataset.cv = !this.compact && !this.virtual && this.rows.length >= 300 ? '1' : '0'
+    this.root.dataset.cv = !this.virtual && this.rows.length >= 300 ? '1' : '0'
     this.root.style.setProperty('--tv-row-h', CSS.px(this.rowH).toString())
-    this.root.style.setProperty('--tv-gutter-w', CSS.px(this.compact ? 0 : 22).toString())
-    const widths = this.compact ? [] : this.cols.map((c) => CSS.px(c.width ?? defaultWidthOf(c.key)))
+    this.root.style.setProperty('--tv-gutter-w', CSS.px(22).toString())
+    const widths = this.cols.map((c) => CSS.px(c.width ?? defaultWidthOf(c.key)))
     this.root.style.setProperty('--qv-cols', widths.join(' ') || CSS.px(240).toString())
   }
 
@@ -380,59 +360,14 @@ export class ViewTable {
     this.rendered.clear()
     this.winFrom = -1
     this.winTo = -1
-    if (this.compact) {
-      this.buildCompact()
-      return
-    }
     this.buildHead()
     this.body.replaceChildren()
     this.renderWindow(true)
   }
 
-  /** 紧凑列表：标题 ＋ 一两个值 ＋ 「在中心槽打开」，不横向溢出 */
-  private buildCompact(): void {
-    this.head.replaceChildren()
-    this.head.hidden = true
-    this.body.replaceChildren()
-    this.body.classList.add('tv-rows--compact')
-    const list = document.createElement('div')
-    list.className = 'tv-compact'
-    for (const r of this.rows) {
-      const row = document.createElement('button')
-      row.type = 'button'
-      row.className = 'tv-compact-row'
-      row.dataset.blockId = r.block.id
-      const name = document.createElement('span')
-      name.className = 'tv-compact-title ui-ellipsis'
-      name.textContent = blockLabel(r.block, (id) => this.deps.store.find(id))
-      row.appendChild(name)
-      if (r.tags.length > 0) {
-        const tag = document.createElement('span')
-        tag.className = 'tv-compact-tag ui-ellipsis'
-        tag.textContent = `#${displayNameOf(r.tags[0]!)}`
-        row.appendChild(tag)
-      }
-      row.addEventListener('click', (e) => this.deps.openBlock(r.block.id, openActionOf(e)))
-      list.appendChild(row)
-    }
-    this.body.appendChild(list)
-    const foot = document.createElement('div')
-    foot.className = 'tv-compact-foot'
-    const hint = document.createElement('span')
-    hint.textContent = t('ui.view.compact')
-    const open = document.createElement('button')
-    open.type = 'button'
-    open.className = 'tv-compact-open'
-    open.textContent = t('ui.view.openCenter')
-    open.addEventListener('click', (e) => this.deps.openBlock(this.deps.host().id, openActionOf(e)))
-    foot.append(hint, open)
-    this.body.appendChild(foot)
-  }
-
   private buildHead(): void {
     this.head.hidden = false
     this.head.replaceChildren()
-    this.head.classList.remove('tv-rows--compact')
     this.propLabels = propDisplayLabels(this.deps.store.blocks)
     const cell = (cls: string): HTMLElement => {
       const el = document.createElement('div')
