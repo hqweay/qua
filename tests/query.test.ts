@@ -37,6 +37,8 @@ import {
   queryByIndex,
   rebuild,
   BlockStore,
+  ENGINE_CREATED,
+  ENGINE_MODIFIED,
   TASK_STATUS_PROP_ID,
   type QueryNode,
   type QuerySpec,
@@ -90,7 +92,9 @@ function fixture() {
   // 「提到丙的块」正文里带一枚指向 c 的引用 run（指向边住在源块内容里）
   const d = forest[0]!.children.find((x) => x.id === 'd')!
   d.content.push({ id: 'at1', t: 'ref', to: 'c', label: '丙' })
-  return { blocks: [...forest, todo], todo }
+  // 待办状态是属性条件 ⇒ 定义块必须在库里（`{prop}` 只认定义块 id 与系统槽白名单）
+  const def = mkPropDef('任务状态', 'checkbox', {}, TASK_STATUS_PROP_ID)
+  return { blocks: [...forest, todo, def], todo, def }
 }
 
 /**
@@ -386,12 +390,14 @@ test('结果基数：父子同时命中时 hits=2、大纲折叠成 1、记录�
 })
 
 test('runQuery：属性条件按 propId 取值、Object.is 比较（未填与 false 分得开）', () => {
+  // 属性条件只认定义块 id（见下面的「守卫」用例）⇒ fixture 得先把定义放进去
+  const def = mkPropDef('任务', 'checkbox', {}, 'task')
   const props = {
     a: { task: true },
     b: { task: false },
     c: {},
   }
-  const forest: Block[] = Object.entries(props).map(([id, p]) => b(id, id, { props: p }))
+  const forest: Block[] = [def, ...Object.entries(props).map(([id, p]) => b(id, id, { props: p }))]
   const atoms: Atom[] = []
   assert.deepEqual(
     runQuery({ where: { prop: { id: 'task', eq: true } } }, { blocks: forest }).map((h) => h.blockId),
@@ -459,18 +465,111 @@ test('属性条件问得到身份位：类型／日期／定义种类都是 prop
   assert.deepEqual(runQuery({ where: { prop: { id: '_kind', exists: true } } }, { blocks }).map((h) => h.blockId), ['d'])
 })
 
+test('系统槽条件逐项问模型判据：`_date` 空串不算日记、`_tags` 只认活着的标签、引擎属性读块字段', () => {
+  /**
+   * 这一条钉的是「同一个问题只能有一个答案」：从前 `{prop}` 的 `exists` 判
+   * **`props` 里有没有这个键**，而屏幕（`isJournalBlock`／`hasTag`）读的是模型判据。
+   * 于是 `_date: ''` 的块「屏幕上是普通块、查询说是日记」。
+   * 现在系统槽逐项走 `readField` 里的同一个读法（`core/props.ts` 的 `readSystemField`）。
+   */
+  const tag = mkTagBlock('甲')
+  const dead = mkTagBlock('已归档')
+  dead.props = { ...(dead.props ?? {}), _deletedAt: 1 }
+  const now = 1_700_000_000_000
+  const blank = b('blank', '', { props: { _date: '' }, created: now, modified: now })
+  const day = b('day', '', { props: { _date: '2026-10-20' }, created: now + 1000, modified: now + 2000 })
+  const tagged = b('tagged', '带标签', { props: { _tags: [tag.id] }, created: now, modified: now })
+  const orphan = b('orphan', '只挂着已删标签', { props: { _tags: [dead.id] }, created: now, modified: now })
+  const named = b('named', '有地址', { props: { _aliases: ['页面一'] }, created: now, modified: now })
+  const plain = b('plain', '普通一行', { created: now, modified: now })
+  const def = mkPropDef('日期', 'date')
+  // 引擎属性的时间窗要可控：定义/标签块的时间戳由工厂现取（远大于下面的基准），钉成同一档
+  def.created = now
+  def.modified = now
+  tag.created = now
+  tag.modified = now
+  dead.created = now
+  dead.modified = now
+  const blocks = [blank, day, tagged, orphan, named, plain, def, tag, dead]
+  const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
+
+  // `_date`：存在性 == `isJournalBlock`（空串不算），值就是那一格
+  assert.deepEqual(ids({ prop: { id: '_date', exists: true } }), ['day'])
+  assert.deepEqual(ids({ prop: { id: '_date', eq: '2026-10-20' } }), ['day'])
+
+  // `_kind`：定义块的唯一判据（`mkPropDef` 的 `_kind`），标签块不算
+  assert.deepEqual(ids({ prop: { id: '_kind', exists: true } }), [def.id])
+
+  // `_tags`：「有标签」＝有一个**画得出来**的标签（悬空归属不画 ⇒ 也不算）
+  assert.deepEqual(ids({ prop: { id: '_tags', exists: true } }), ['tagged'])
+  assert.deepEqual(ids({ prop: { id: '_tags', eq: tag.id } }), ['tagged'], '多值按包含判')
+
+  // `_aliases`：地址数组；`eq` 收名字（标签块自己也有地址）
+  assert.deepEqual(ids({ prop: { id: '_aliases', exists: true } }), ['named', tag.id])
+  assert.deepEqual(ids({ prop: { id: '_aliases', eq: '页面一' } }), ['named'])
+
+  // 引擎属性：值在块顶层字段，不在 `props` 里；必填 ⇒ `exists:false` 恒空
+  assert.deepEqual(ids({ prop: { id: ENGINE_CREATED, gt: now } }), ['day'])
+  assert.deepEqual(ids({ prop: { id: ENGINE_MODIFIED, gte: now + 2000 } }), ['day'])
+  assert.deepEqual(ids({ prop: { id: ENGINE_CREATED, exists: false } }), [])
+
+  // 两条求值路径同解（系统槽的读法住在 `readField`，索引路径共用同一份判定）
+  const systemSpecs: QuerySpec[] = [
+    { where: { prop: { id: '_date', exists: true } } },
+    { where: { prop: { id: '_tags', eq: tag.id } } },
+    { where: { prop: { id: ENGINE_CREATED, gt: now } } },
+  ]
+  for (const spec of systemSpecs) assertSameHits(spec, blocks)
+})
+
+test('`{prop}` 的 id 有守卫：只认属性定义块 ＋ 系统槽白名单，不认的 id 一个块都不命中', () => {
+  /**
+   * 从前 `{prop}` 不看 id 是不是定义块：`{prop:{id:'拼错了', exists:false}}` 会命中**全库**
+   * （「这块没有这一栏」对不存在的属性恒真）——一条写错的条件看起来像「条件成立」。
+   * 现在的口径：不认的 id 不命中任何块；条件树里那行显示「属性已删除」。
+   */
+  const def = mkPropDef('截止日', 'date', {}, 'due')
+  const filled = b('a', '填了', { props: { due: '2026-12-01' }, created: 1, modified: 1 })
+  const plain = b('p', '普通一行', { created: 1, modified: 1 })
+  const blocks = [def, filled, plain]
+  const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
+
+  assert.deepEqual(ids({ prop: { id: 'due', eq: '2026-12-01' } }), ['a'], '定义块 id 照常问')
+  assert.deepEqual(ids({ prop: { id: 'no-such-prop', exists: false } }), [], '拼错的 id 不静默命中全库')
+  assert.deepEqual(ids({ prop: { id: 'no-such-prop', exists: true } }), [])
+  // 系统槽白名单照常（它们不是定义块，但不该被守卫挡掉）
+  assert.deepEqual(ids({ prop: { id: '_aliases', exists: true } }), [], '这几个块都没有地址')
+  assertSameHits({ where: { prop: { id: 'no-such-prop', exists: false } } }, blocks)
+
+  // 定义块进了回收站 ⇒ 与构建器下拉同源（下拉里也没有它）⇒ 条件不再命中任何块
+  const trashed = blocks.map((x) => (x.id === def.id ? { ...x, props: { ...(x.props ?? {}), _deletedAt: 2 } } : x))
+  assert.deepEqual(
+    runQuery({ where: { prop: { id: 'due', exists: false } } }, { blocks: trashed }).map((h) => h.blockId),
+    [],
+    '定义不在了 ⇒ 不命中任何块（不做「没有这一栏 ⇒ 全库」的猜测）',
+  )
+})
+
+
 test('exists：问「有没有这一槽」，与 eq 是两件事；同时给时按 exists（不猜）', () => {
+  // `{prop}` 只认定义块 id ⇒ 先放定义（判的是「有没有这一栏」，不是「props 里有没有键」）
+  const def = mkPropDef('任务状态', 'checkbox', {}, TASK_STATUS_PROP_ID)
   const filled = b('a', '填了 false', task(false))
   const empty = b('b', '没这一槽')
-  const blocks = [filled, empty]
+  const blocks = [def, filled, empty]
+  // 定义块自己也没有这一栏（它不是任务），断言里只关心内容块
+  const ids = (where: QueryNode) =>
+    runQuery({ where }, { blocks })
+      .map((h) => h.blockId)
+      .filter((id) => id !== def.id)
 
-  assert.deepEqual(runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, exists: true } } }, { blocks }).map((h) => h.blockId), ['a'])
-  assert.deepEqual(runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, exists: false } } }, { blocks }).map((h) => h.blockId), ['b'])
+  assert.deepEqual(ids({ prop: { id: TASK_STATUS_PROP_ID, exists: true } }), ['a'])
+  assert.deepEqual(ids({ prop: { id: TASK_STATUS_PROP_ID, exists: false } }), ['b'])
   // `eq: undefined` 不等于「没有这一槽」：先问有没有，再比值
   assert.deepEqual(runQuery({ where: { prop: { id: TASK_STATUS_PROP_ID, eq: undefined } } }, { blocks }), [])
   // 两种形态互斥；同时写按 exists 判（形状写歪时给出可预期的一种答案，而不是靠键序）
   const both = { prop: { id: TASK_STATUS_PROP_ID, exists: false, eq: false } } as unknown as QuerySpec['where']
-  assert.deepEqual(runQuery({ where: both }, { blocks }).map((h) => h.blockId), ['b'])
+  assert.deepEqual(ids(both), ['b'])
 })
 
 test('三态全部落在 `{prop}` 上：有槽没填、靠标签声明、显式 false 都是「未完成」', () => {

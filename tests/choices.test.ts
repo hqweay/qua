@@ -483,14 +483,16 @@ test('多值：setChoiceCardinality 写/摘 `_cardinality`；切回单值挡住�
 })
 
 test('多值字段的查询：eq/neq 按包含判，empty 判空数组', () => {
+  // `{prop}` 只认定义块 id ⇒ 定义要放进森林；定义块自己命中「没有这一栏」，断言里滤掉
+  const def = mkPropDef('多值', 'select', {}, 'p-multi')
   const a = { ...blk('a', 'A'), props: { 'p-multi': ['x', 'y'] } }
   const b = { ...blk('b', 'B'), props: { 'p-multi': ['y'] } }
   const c = { ...blk('c', 'C'), props: { 'p-multi': [] } }
-  // 不放定义块：`empty` 的既有语义是「没有这一栏 **或** 空值」，定义块自己会命中「没有」。
-  const blocks = [a, b, c]
+  const blocks = [def, a, b, c]
   const hits = (where: Parameters<typeof runQuery>[0]['where']): string[] =>
     runQuery({ where }, { blocks })
       .map((h) => h.blockId)
+      .filter((id) => id !== def.id)
       .sort()
   assert.deepEqual(hits({ prop: { id: 'p-multi', eq: 'y' } }), ['a', 'b'], 'eq = 包含')
   assert.deepEqual(hits({ prop: { id: 'p-multi', neq: 'y' } }), ['c'], 'neq = 不包含')

@@ -17,7 +17,7 @@ import { findPath } from '../model/tree.ts'
 import { findTagByName, tagIdsOf, tagMemberIds } from '../identity/tags.ts'
 import { journalDate, journalDays, shiftISO } from '../identity/journal.ts'
 import { displayTextOf } from '../identity/alias.ts'
-import { fieldTableOf, readField, type FieldTable } from '../props/props.ts'
+import { fieldTableOf, isQueryableField, readField, type FieldTable } from '../props/props.ts'
 import { isRefKind, relationEdgesOfForest, REFERENCE_KINDS, type RefKind, type RelationKind } from '../relations/relations.ts'
 import type { KbClient } from '../kb/types.ts'
 
@@ -82,6 +82,11 @@ export type QueryNode =
    * `eq` 与 `exists` **互斥**；同时给时按 `exists` 判（不猜）。
    * 「有没有这一栏」问的是 `core/props.ts` 的 `fieldDeclared`（值 ∪ 自有槽 ∪ 标签声明），
    * 不是「值键在不在」—— 后者会让标签声明的字段、面板刚加的空槽从查询里消失。
+   *
+   * ⚠️ **id 有守卫**（`core/props.ts` 的 `isQueryableField`）：只认属性定义块的 id
+   *    与系统槽白名单（`_date`／`_kind`／`_type`／`_aliases`／`_tags`／
+   *    `core/created`／`core/modified`）。系统槽逐项问模型判据，不读 `props` 裸键 ——
+   *    否则 `exists` 会比模型宽（`_date: ''` 的块会被当成日记）。
    *
    * ⚠️ **布尔属性声明了就等于 `false`**（勾选框没有「未填」这一态）。所以
    *    `{prop:{id, eq:false}}` 命中「点了但没做完」，也命中「一次都没点过、靠标签声明的」。
@@ -601,6 +606,20 @@ function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher {
     if ('text' in node) return plainText(block.content).includes(node.text)
     if ('prop' in node) {
       /**
+       * **守卫**：`{prop}` 只认两种 id —— 属性定义块的 id，或系统槽白名单
+       * （`core/props.ts` 的 `isQueryableField`，与构建器的字段下拉同源）。
+       *
+       * 不认的 id **一个块都不命中**。从前它按 `props` 裸键判：`exists:false` 会命中全库，
+       * 于是一个拼错的名字看起来像「这条条件成立」。而条件读不出来时用户只在结果上
+       * 看到「数量不对」，没有任何线索指向那条属性。
+       *
+       * ⚠️ 不认的 id 在条件树里显示成「属性已删除」（`ui.query.fieldMissing`）；
+       *    `not` 包着它仍会成立（否定一个无效条件在二值逻辑里就是真），所以文案要说清
+       *    是「这条问的属性不在了」，而不是让用户以为是数据问题。
+       */
+      const op = node.prop
+      if (!isQueryableField(op.id, env.fields)) return false
+      /**
        * 先问「有没有这一栏」（值 ∪ 自有槽 ∪ 标签声明），再决定比值、比存在性、还是判空。
        *
        * 这样 `eq: false` 与「没有这一栏」是两件事，`eq: undefined` 也不会误命中所有块；
@@ -608,7 +627,6 @@ function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher {
        * **值比较这一类（含 `neq`）只对「有这一栏」的块成立** —— 否则 `neq`
        * 会变成「绝大多数块」，而用户想问的是「这些值不是 A 的那几条」。
        */
-      const op = node.prop
       const { declared, value: v } = readField(block, node.prop.id, env.fields)
       if ('exists' in op) return declared === op.exists
       if ('empty' in op) return isEmptyValue(v) === op.empty

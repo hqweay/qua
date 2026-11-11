@@ -497,6 +497,12 @@ export const MSG = {
   'ui.query.builder.noValue': '（还没填）',
   'ui.query.choiceDeleted': '选项已删除',
   'ui.query.fieldMissing': '属性已删除',
+  // 白名单里的系统槽（条件树只用于**显示** JSON 写成的行，下拉里不列）
+  'ui.query.sysField.date': '日记日期',
+  'ui.query.sysField.kind': '定义种类',
+  'ui.query.sysField.type': '块类型',
+  'ui.query.sysField.aliases': '别名',
+  'ui.query.sysField.tags': '标签',
   'ui.query.builder.textHint': '正文包含',
   'ui.query.builder.complex': '复合条件（用 JSON 编辑）',
   'ui.query.kind.tag': '标签',

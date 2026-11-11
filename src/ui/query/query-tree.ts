@@ -22,6 +22,8 @@ import {
   treeOfSpec,
   treeNodeOfRow,
   TREE_ROW_KINDS,
+  isQueryableSystemProp,
+  systemQueryFieldLabel,
   type Block,
   type DraftOp,
   type PropKind,
@@ -620,7 +622,17 @@ export class QueryTree {
     const fields = this.deps.fields()
     const fieldOptions = fields.map((f) => ({ value: f.id, label: f.label }))
     if (row.field !== '' && !fields.some((f) => f.id === row.field)) {
-      fieldOptions.push({ value: row.field, label: t('ui.query.fieldMissing') })
+      /**
+       * 不在下拉里有两种情况，必须分开说：
+       *   · **系统槽白名单**（`_date`／`_tags`／`core/created`…）：求值认它 —— 下拉不列是因为
+       *     新增条件时不该看到内部 id；这一行由 JSON 或预设而来，如实显示它问的是什么；
+       *   · 其余：属性定义真的不在了（删了／拼错了）—— 求值也不认它（一个块都不命中）。
+       */
+      const sys = isQueryableSystemProp(row.field)
+      fieldOptions.push({
+        value: row.field,
+        label: sys ? (systemQueryFieldLabel(row.field) ?? row.field) : t('ui.query.fieldMissing'),
+      })
     }
     out.push(
       selectEl(

@@ -18,7 +18,9 @@
  * ⚠️ 本文件零 DOM：属性面板只消费这里的派生结果，写入通过命令。
  */
 import {
+  ALIASES_PROP,
   ICON_PROP,
+  aliasesOf,
   isDeleted,
   hasList,
   isPropDefBlock,
@@ -31,8 +33,8 @@ import { displayNameOf } from '../identity/alias.ts'
 import { plainText, textRuns, type RefRun } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
 import { derivedId, pad, uuidv7Hex } from '../model/ids.ts'
-import { todayISO } from '../identity/journal.ts'
-import { allTags, resolveTagIds, tagIdsOf, tagsById } from '../identity/tags.ts'
+import { journalDate, todayISO } from '../identity/journal.ts'
+import { allTags, resolveTagIds, TAGS_PROP, tagIdsOf, tagsById } from '../identity/tags.ts'
 import { t } from '../infra/msg.ts'
 
 /**
@@ -138,6 +140,14 @@ export function isDefaultValue(v: unknown): boolean {
 export interface FieldTable {
   /** 标签块 id → 它声明的属性 id（有序） */
   byTag: ReadonlyMap<string, readonly string[]>
+  /**
+   * **活着的**标签块 id（与 `tagsOf` 同一趟扫描得到的那些）。
+   *
+   * 判 `_tags` 这一档「有没有标签」要它：屏幕上画出来的标签是**能解析到块**的那些，
+   * 悬空的归属（标签进了回收站）不画。查询若不看这张表，就会出现
+   * 「屏幕上一个标签都没有、`{prop:{id:'_tags',exists:true}}` 却命中它」。
+   */
+  liveTags: ReadonlySet<string>
   /** 属性 id → kind（来自定义块） */
   kinds: ReadonlyMap<string, PropKind>
   /** 属性 id → 缺省值（定义块写了 `_default` 才有；`readField` 对「已声明未填」按它取值） */
@@ -154,7 +164,11 @@ export interface FieldTable {
 /** 从森林建一份字段读取表（标签声明 ＋ 定义 kind／缺省值各扫一趟） */
 export function fieldTableOf(forest: readonly Block[]): FieldTable {
   const byTag = new Map<string, readonly string[]>()
-  for (const tag of allTags(forest)) byTag.set(tag.id, declaredFieldIds(tag))
+  const liveTags = new Set<string>()
+  for (const tag of allTags(forest)) {
+    liveTags.add(tag.id)
+    byTag.set(tag.id, declaredFieldIds(tag))
+  }
   const kinds = new Map<string, PropKind>()
   const defaults = new Map<string, unknown>()
   const cardinality = new Map<string, Cardinality>()
@@ -171,7 +185,7 @@ export function fieldTableOf(forest: readonly Block[]): FieldTable {
       if (check) status = { defId: def.id, on: check.on, off: check.off }
     }
   }
-  return { byTag, kinds, defaults, cardinality, ...(status ? { status } : {}) }
+  return { byTag, liveTags, kinds, defaults, cardinality, ...(status ? { status } : {}) }
 }
 
 /**
@@ -215,6 +229,9 @@ export interface FieldRead {
  *    查询、看板分组、`todoOf` 都走这里 ⇒ 同一块在所有读法里是同一个答案。
  */
 export function readField(block: Block, propId: string, table: FieldTable): FieldRead {
+  // 系统槽（`_date`／`_kind`／`_tags`…）走模型判据，不读 `props` 裸键
+  const system = readSystemField(block, propId, table)
+  if (system) return system
   const has = block.props !== undefined && propId in block.props
   if (has) return { declared: true, value: block.props?.[propId] }
   const declared = fieldDeclared(block, propId, table)
@@ -777,6 +794,109 @@ export function enginePropDefs(): Block[] {
 export function enginePropValue(block: Block, propId: string): unknown {
   if (propId === ENGINE_CREATED) return block.created
   if (propId === ENGINE_MODIFIED) return block.modified
+  return undefined
+}
+
+/* ------------------------------------------------------------ `{prop}` 能问什么 */
+
+/**
+ * `{prop:{id}}` 可以问到的**系统槽白名单**。
+ *
+ * 为什么不是「只许属性定义块」：`_date`／`_kind`／`_type` 是「哪一天／哪些定义是日期／
+ * 哪种块类型」的唯一问法，砍掉就是能力退化（`query.ts` 的 `walk` 注释：定义块自己仍然可查）。
+ * 为什么又必须有边界：不设白名单时任何 `_xxx` 都能写进条件，而判定读的是
+ * **`props` 里有没有这个键**——比模型判据宽，于是出现「屏幕说不是日记、查询说是日记」
+ * （`_date: ''` 的块就是这一例）。
+ *
+ * ⚠️ 白名单里的每一项都由 `readSystemField` 逐项问**模型里的唯一判据**，
+ *    不许退回去读 `props` 裸键。加一项时两处一起加。
+ */
+export const QUERYABLE_SYSTEM_PROPS: readonly string[] = [
+  '_date',
+  '_kind',
+  '_type',
+  ALIASES_PROP,
+  TAGS_PROP,
+  ENGINE_CREATED,
+  ENGINE_MODIFIED,
+]
+
+export function isQueryableSystemProp(propId: string): boolean {
+  return QUERYABLE_SYSTEM_PROPS.includes(propId)
+}
+
+/**
+ * `{prop}` 的 id 认不认：**属性定义块 id ∪ 系统槽白名单**。
+ *
+ * 定义块清单是 `table.kinds`（由 `allPropDefs` 建，含引擎合成定义、排除回收站里的）——
+ * 与构建器的字段下拉**同源**，不会出现「下拉里有、求值不认」。
+ *
+ * ⚠️ 这条判据的消费者是求值器：不认的 id 不命中任何块（见 `query.ts` 的 `compute`）。
+ *    不这样做的话，`exists:false` 会静默命中全库——一个拼错的属性名看起来像「这条条件成立」。
+ */
+export function isQueryableField(propId: string, table: FieldTable): boolean {
+  return isQueryableSystemProp(propId) || table.kinds.has(propId)
+}
+
+/**
+ * 系统槽在**条件树里的显示名**（`undefined` ＝ 不是系统槽）。
+ *
+ * 条件树的下拉只列属性定义块（用户新增条件时不该看到 `_date` 这类内部 id），
+ * 但条件可以由 JSON 写成、或由预设展开而来 —— 那种行要能**如实显示**它问的是什么。
+ * 没有这一份，白名单里的 id 会在树上被标成「属性已删除」：求值算它、界面说不存在。
+ */
+export function systemQueryFieldLabel(propId: string): string | undefined {
+  if (propId === '_date') return t('ui.query.sysField.date')
+  if (propId === '_kind') return t('ui.query.sysField.kind')
+  if (propId === '_type') return t('ui.query.sysField.type')
+  if (propId === ALIASES_PROP) return t('ui.query.sysField.aliases')
+  if (propId === TAGS_PROP) return t('ui.query.sysField.tags')
+  if (propId === ENGINE_CREATED) return t('ui.props.createdAt')
+  if (propId === ENGINE_MODIFIED) return t('ui.props.modifiedAt')
+  return undefined
+}
+
+/**
+ * 系统槽的读法：**逐项问模型里的唯一判据**，不读 `props` 裸键。
+ *
+ * 为什么放在字段读法这一层：`exists`／`eq`／`empty` 三组算子都从 `readField` 拿
+ * `{declared, value}`，两条求值路径（纯函数／索引）也共用它。系统槽若各走一条旁路，
+ * 「有没有这一栏」就会有两份答案——那一族病（屏幕认、查询不认）已经修过一次。
+ *
+ * | 槽 | 判据 | 值 |
+ * |---|---|---|
+ * | `_date` | `journalDate(b) !== ''`（`isJournalBlock` 同一份） | 日期串 |
+ * | `_kind` | `isPropDefBlock(b)` | `text`／`date`… |
+ * | `_type` | 顶层 `_type` 槽在（**开放性**：未知 id 合法） | 类型 id |
+ * | `_aliases` | `aliasesOf(b)` 非空 | 地址数组（`eq` 按任一元素判） |
+ * | `_tags` | 归属边里**有活着的标签**（屏幕画得出来的那些） | 标签块 id 数组 |
+ * | `core/created`／`core/modified` | 必填字段，恒在 | 墙钟毫秒 |
+ */
+function readSystemField(block: Block, propId: string, table: FieldTable): FieldRead | undefined {
+  if (propId === '_date') {
+    const date = journalDate(block)
+    return typeof date === 'string' && date !== ''
+      ? { declared: true, value: date }
+      : { declared: false, value: undefined }
+  }
+  if (propId === '_kind') {
+    return isPropDefBlock(block)
+      ? { declared: true, value: block.props?._kind }
+      : { declared: false, value: undefined }
+  }
+  if (propId === '_type') {
+    const type = block.props?._type
+    return type === undefined ? { declared: false, value: undefined } : { declared: true, value: type }
+  }
+  if (propId === ALIASES_PROP) {
+    const names = aliasesOf(block)
+    return names.length > 0 ? { declared: true, value: names } : { declared: false, value: undefined }
+  }
+  if (propId === TAGS_PROP) {
+    const ids = tagIdsOf(block).filter((id) => table.liveTags.has(id))
+    return ids.length > 0 ? { declared: true, value: ids } : { declared: false, value: undefined }
+  }
+  if (isEngineProp(propId)) return { declared: true, value: enginePropValue(block, propId) }
   return undefined
 }
 
