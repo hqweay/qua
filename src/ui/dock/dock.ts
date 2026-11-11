@@ -320,8 +320,11 @@ export function decorateDockCard(el: HTMLElement, card: DockCard, state: DockCar
     head.className = 'dock-card-head'
     el.prepend(head)
   }
+  // 顺序必须与 buildDockCard 同形（把手 → 折叠 → …）：卡头是跨卡对齐的家具，
+  // 同一张卡从两条路径建出来却长两种样子，扫视时读作两张不同的卡
   if (!head.querySelector(':scope > .dock-card-grip')) head.prepend(gripMark())
-  if (!head.querySelector(`[${ACTION_ATTR}="collapse"]`)) head.prepend(collapseButton())
+  if (!head.querySelector(`[${ACTION_ATTR}="collapse"]`))
+    head.querySelector(':scope > .dock-card-grip')!.after(collapseButton())
   if (!head.querySelector(`[${ACTION_ATTR}="solo"]`)) head.appendChild(soloButton())
   if (!head.querySelector(`[${ACTION_ATTR}="close"]`) && card.close) head.appendChild(actionButton({ label: 'lucide:x', ...card.close }))
   head.draggable = card.draggable !== false
