@@ -626,10 +626,14 @@
 /*
   **只读行**（journal 的日期）：不可编辑、不可落光标。
   它是 `_date` 的投影，不是正文 —— 光标停在那里只会诱导用户去「改日期」。
+  日期同时是**那一天的标题**（点它聚焦到那一天）⇒ 指针读作「可点」，不读作「可编辑」。
 */
 .blk .tx[data-readonly] {
   cursor: default;
   user-select: none;
+}
+.blk .tx[data-ph-readonly] {
+  cursor: pointer;
 }
 /*
   **分割线**：整条线就是这一块的内容，所以它住在 `.tx` 里（`.tx` 是块的正文槽契约）。

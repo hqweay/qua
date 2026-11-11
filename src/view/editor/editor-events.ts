@@ -909,16 +909,31 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      * ⚠️ 菜单改到**右键**：`contextmenu` 那一支已经在做这件事（见下），
      *    所以这里不再有「左键也开菜单」的分支。
      */
+    // 「中心＝聚焦，修饰键＝开到别处」是块标与 journal 标题共用的同一条路由
+    const zoomOrOpen = (id: string) => {
+      const action = openActionOf(e)
+      if (action === 'center') br.focusBlock(id)
+      else {
+        e.preventDefault()
+        br.openBlock?.(id, action)
+      }
+    }
     const marker = path.find((n): n is HTMLElement => n instanceof HTMLElement && 'focusFor' in n.dataset)
     if (marker?.dataset.focusFor) {
       // Shift+左键 ⇒ 右槽；⌘/Ctrl+左键 ⇒ 新页签；⌥+左键 ⇒ 看这一块的属性。
       // 动作由 `openActionOf` 算，落点/面板由装配层的同一条路由分流。
-      const action = openActionOf(e)
-      if (action === 'center') br.focusBlock(marker.dataset.focusFor)
-      else {
-        e.preventDefault()
-        br.openBlock?.(marker.dataset.focusFor, action)
-      }
+      zoomOrOpen(marker.dataset.focusFor)
+    }
+
+    /**
+     * **journal 日期＝那一天的标题**：点它聚焦/zoom 到那一天的块。
+     * 判据用 `data-ph-readonly`（只读投影占位，只有 journal 挂它）而不是 `data-readonly`
+     * ——后者分割线也有，zoom 到一条线上没有意义。修饰键与块标同一张表。
+     */
+    const roTitle = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.phReadonly !== undefined)
+    if (roTitle) {
+      const row = roTitle.closest<HTMLElement>('.blk[data-block-id]')
+      if (row?.dataset.blockId) zoomOrOpen(row.dataset.blockId)
     }
   })
 

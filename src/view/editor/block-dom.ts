@@ -1163,6 +1163,8 @@ export function makeBlockEl(
    *    `contenteditable=false` ＋ `data-readonly` ⇒ 点它不落光标（见 editor-events 的 mousedown 分支）。
    *    写入该行的模型路径本来就不该存在（`_date` 是只读的，正文留空是它的常态）；
    *    以前能聚焦 ⇒ 光标停在日期后面、一打字就把日期挤掉，像在编辑一个不该存在的字段。
+   *    左键点它另有去处：日期是那一天的**标题**，点击＝聚焦到那一天（editor-events 的
+   *    click 分支按 `data-ph-readonly` 认它）——只读与可点不矛盾，落点不同而已。
    * ⚠️ **journal 与属性定义**都这样：前者正文是日期投影，后者正文是定义名。
    *    两者都没有「行内改字」这条路径，让 DOM 接受输入只会出现
    *    「字进 DOM、模型不变、控制台抛 protected」——重画一过字又消失。
