@@ -179,11 +179,11 @@ export interface App {
     label?: string | null,
   ): void
   /**
-   * **剪切的确认反馈**：正常动效＝被抓的行抖一下（编辑器画，view 层管 DOM）；
-   * reduced-motion ＝ 无动画，退回那句提示——那是此刻唯一的反馈，不可省。
+   * **「抓进剪贴板」的确认反馈**：正常动效＝被抓的行抖一下（编辑器画，view 层管 DOM）；
+   * reduced-motion ＝ 无动画，退回 `label` 那句提示——那是此刻唯一的反馈，不可省。
    * 判据住在门面（`matchMedia` 是浏览器全局，命令层不碰）。
    */
-  confirmCut(ids: readonly string[]): void
+  confirmGrab(ids: readonly string[], label: string): void
   /**
    * 读剪贴板的引用味＋正文味（块选区态的粘贴用：那边没有光标，走命令路径）。
    * 解析链与 paste 事件同序：HTML 注释载荷 → 会话对账 →（没有就）纯文本。

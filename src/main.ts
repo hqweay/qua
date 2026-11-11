@@ -2397,9 +2397,9 @@ const app: App = {
     }
     void write.then(done, () => app.toast(t('err.clipboardFailed'), 'warn'))
   },
-  confirmCut: (ids) => {
+  confirmGrab: (ids, label) => {
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      app.toast(t('ui.toast.cutBlocks'))
+      app.toast(label)
       return
     }
     ed.pulseBlocks(ids)

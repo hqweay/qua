@@ -14,10 +14,13 @@ import { curBlock, S } from './shared.ts'
 /**
  * 块复制的多味载体（引用意图）：正文味给外部应用，HTML 载荷给本应用
  * （软内 ⌘V 贴成引用）。`text` 缺省时按 id 现取块正文。
+ * 确认不弹话：被抄的行抖一下（`confirmGrab`，reduced-motion 退回提示）；
+ * 「抓的是这一块」一族共用这条通道，写入失败的警告照弹。
  */
 const copyRefs = (app: App, ids: readonly string[], text?: string): void => {
   const body = text ?? ids.map((id) => app.ed.clip.plainTextOf(id)).filter(Boolean).join('\n')
-  app.copyFlavors({ text: body, html: buildCopyHtml(body, { ids: [...ids] }), clip: { ids: [...ids] } }, t('ui.toast.blockRefCopied'))
+  app.copyFlavors({ text: body, html: buildCopyHtml(body, { ids: [...ids] }), clip: { ids: [...ids] } }, null)
+  app.confirmGrab(ids, t('ui.toast.blockRefCopied'))
 }
 
 export const STRUCT_HANDLERS: Record<string, Handler> = {
@@ -235,7 +238,9 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   'core.editor/copy-block-text': (_a, app) => {
     const snap = app.ed.clip.copySnapshot()
     if (!snap) return false
-    app.copy(snap.text, t('ui.toast.blocksCopied'))
+    // 与 ⌘C 同一条确认通道（行抖，reduced-motion 退回提示）——抓的是同一块，不按味分通道
+    app.copyFlavors({ text: snap.text }, null)
+    app.confirmGrab(snap.ids, t('ui.toast.blocksCopied'))
     return true
   },
   /** 划选 ⌘⇧C：块引＋静态锚文本（划选文本是这一处的显示名；源块改文锚不跟） */
@@ -253,14 +258,14 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
    * 剪切块（块选区 ⌘X；光标态 ⌘X 与 ⌘C 同判据——塌缩光标下原生文本剪切无事可做，
    * 剪整块才是有用的那一个）：引用味＋移动意图。⌘X 本身不动文档——移动发生在
    * 粘贴那一刻（一笔事务，id 不变、可反复贴）；划选态键位不命中 ⇒ 原生文本剪切照旧。
-   * 成功不弹提示：被抓的行抖一下（`confirmCut`）就是反馈；失败照常有警告。
+   * 成功不弹提示：被抓的行抖一下（`confirmGrab`）就是反馈；失败照常有警告。
    */
   'core.editor/cut-blocks': (_a, app) => {
     const snap = app.ed.clip.copySnapshot()
     if (!snap) return false
     const html = buildCopyHtml(snap.text, { ids: snap.ids, move: true })
     app.copyFlavors({ text: snap.text, html, clip: { ids: snap.ids, move: true } }, null)
-    app.confirmCut(snap.ids)
+    app.confirmGrab(snap.ids, t('ui.toast.cutBlocks'))
     return true
   },
   /** 块选区态的 ⌘V：没有光标，粘贴的东西作为新块落在选区后面（与 paste 事件同一份编辑器实现） */
@@ -278,7 +283,9 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   'core.editor/copy-selected-blocks': (_a, app) => {
     const text = app.ed.bsel.selectedBlocksText()
     if (!text) return false
-    app.copy(text, t('ui.toast.blocksCopied'))
+    // 与剪切同一条确认通道（行抖，reduced-motion 退回提示）：块选区复制/剪切是同一手势的两档
+    app.copyFlavors({ text }, null)
+    app.confirmGrab(app.ed.bsel.selectedRootIds(), t('ui.toast.blocksCopied'))
     return true
   },
   'core.editor/copy-selected-block-refs': (_a, app) => {
