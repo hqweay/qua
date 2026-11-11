@@ -7,8 +7,10 @@
  * 是主用法 ⇒ 源按整片森林定位，落点仍在本视图。
  */
 import {
+  blankRowKind,
   hasDescendant,
   isDeleted,
+  isFolded,
   locate,
   mkBlock,
   blockLabel,
@@ -22,6 +24,7 @@ import {
 } from '../../core/index.ts'
 import {
   joinRuns,
+  plainLen,
   plainText,
   spliceRuns,
   splitRuns,
@@ -218,6 +221,13 @@ export class ClipboardOps {
    * 不先记会被迁移途中的 prev 污染）、再追加成 run、逆序插回目标位——
    * 这本次序账与多块拖拽是同一本。
    *
+   * **落点 = 光标所在行的下一可见行**，落点形态由 `blankRowKind` 一份判据给：
+   *   · 空叶子是占位 ⇒ 整组占它那一行、它同笔让位（否则前后都会多留一条空行，
+   *     看起来就是「块跳过光标一行」）；让位后原光标宿主已不在画面上 ⇒ 光标交给
+   *     搬来的最后一块的块尾；
+   *   · 空块但有子块且展开 ⇒ 它是容器，不删；整组落它的**首个子块**（下一可见行），
+   *     不是跨过整棵子树去当它的下一个兄弟；折叠 ⇒ 子层不可见，仍走兄弟位。
+   *
    * 派生面（查询结果／镜像）不收结构性粘贴：结果行不是块的位置。
    * 标记是意图不是锁：调用方对同一份剪贴板可以反复调（反复贴＝反复移）。
    */
@@ -226,7 +236,9 @@ export class ClipboardOps {
     const forest: Doc = { roots: this.ed.store.blocks }
     const tgt = locate(forest, targetId)
     if (!tgt) return 'refused'
-    const parentId = tgt.parent?.id ?? null
+    const row = blankRowKind(tgt.block, isFolded(this.ed.doc, targetId))
+    // 容器档把落点换成「它的首个子块」；其余按目标块的兄弟列表算
+    const siteParent = row === 'container' ? targetId : (tgt.parent?.id ?? null)
     const live: Array<{ id: string; loc: Located }> = []
     for (const id of [...new Set(ids)]) {
       const b = this.ed.store.find(id)
@@ -239,22 +251,29 @@ export class ClipboardOps {
     for (const { id } of live) {
       if (id === targetId || hasDescendant(forest, id, targetId)) return 'refused'
     }
-    if (parentId !== null) {
-      const parent = this.ed.store.find(parentId)
+    if (siteParent !== null) {
+      const parent = this.ed.store.find(siteParent)
       if (!parent || isDeleted(parent) || typeDeclOf(parent).children === 'none') return 'refused'
     }
-    const at = tgt.index + (zone === 'after' ? 1 : 0)
+    // 占位档 ⇒ 用它自己的下标（占这一行）；容器档 ⇒ 0；其余 ⇒ 按 zone 插在它前／后
+    const at = row === 'placeholder' ? tgt.index : row === 'container' ? 0 : tgt.index + (zone === 'after' ? 1 : 0)
     // 目标下标之前的本批块会先被摘走 ⇒ 目标下标前移（与多块拖拽同一本账）
     let index = at
-    for (const { loc } of live) if (loc.parent?.id === parentId && loc.index < at) index--
+    for (const { loc } of live) if (loc.parent?.id === siteParent && loc.index < at) index--
     this.ed.beginUndoEntry()
     this.ed.write((tx) => {
+      /** 原位软删即可（与库里所有删除同一条路径，撤销一步全回）：空行不留在中间 */
+      if (row === 'placeholder') tx.remove(targetId)
       for (const { id, loc } of live) if (loc.parent) tx.move(id, loc.parent.id, loc.index)
-      for (const { id } of live) tx.move(id, parentId, Number.MAX_SAFE_INTEGER)
-      for (let i = live.length - 1; i >= 0; i--) tx.move(live[i]!.id, parentId, Math.max(0, index))
+      for (const { id } of live) tx.move(id, siteParent, Number.MAX_SAFE_INTEGER)
+      for (let i = live.length - 1; i >= 0; i--) tx.move(live[i]!.id, siteParent, Math.max(0, index))
       for (const { id } of live) tx.patch(id, (x) => (x.modified = Date.now()))
     })
-    this.ed.structTail()
+    const last = live[live.length - 1]!
+    const caret = row === 'placeholder' && !this.ed.bsel.hasBlockSelection()
+      ? { id: last.id, off: plainLen(last.loc.block.content) }
+      : undefined
+    this.ed.structTail(caret)
     this.ed.bsel.paintBlockSel()
     return 'moved'
   }

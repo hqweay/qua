@@ -16519,6 +16519,136 @@ await check(
   },
 )
 
+await check(
+  'T285 剪切粘贴到空块：空块让位、搬来的块占它那一行（不是插在它前／后）；一次撤销把空行还回来',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const ids = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const root = ed.doc.roots[0]
+      const a = ed.insert.insertBlockAfter(root.id, '剪甲甲')
+      const b = a ? ed.insert.insertBlockAfter(a, '标乙乙') : null
+      const e = b ? ed.insert.insertBlockAfter(b, '') : null
+      const c = e ? ed.insert.insertBlockAfter(e, '后丙丙') : null
+      return { a, b, e, c, rootId: root.id }
+    })
+    assert(ids.a && ids.b && ids.e && ids.c, `前置：三块正文＋一个空块都要建出来：${JSON.stringify(ids)}`)
+    await page.waitForTimeout(150)
+    /** 只看这三条正文的可见次序；空块让位后不再占一行 */
+    const order = () =>
+      page.evaluate((s) => {
+        const plain = (b) => b.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
+        return window.__qua.__editor.store.find(s.rootId).children.map(plain).filter((t) => ['剪甲甲', '标乙乙', '后丙丙'].includes(t))
+      }, ids)
+    const eVisible = () =>
+      page.evaluate((e) => Boolean(document.querySelector(`.blk[data-block-id="${e}"]`)), ids.e)
+    assert((await order()).join('|') === '剪甲甲|标乙乙|后丙丙', `前置次序：${JSON.stringify(await order())}`)
+    assert(await eVisible(), '前置：空块应画在屏上')
+
+    // 选中 A（块尾 Shift+↓ 起一块选区）→ ⌘X
+    await page.evaluate((s) => window.__qua.focusBlock(s.a, 3), ids)
+    await page.keyboard.press('Shift+ArrowDown')
+    await page.waitForTimeout(100)
+    assert((await page.evaluate(() => window.__qua.snapshot().blockSelectionCount)) === 1, '应选中 1 块')
+    await page.keyboard.press(kbd('mod+x'))
+    await page.waitForTimeout(200)
+
+    // 真点进空块的行首（点击会清掉块选区，⌘V 走 paste 事件而不是选区命令）
+    const p = await page.evaluate((e) => {
+      const r = document.querySelector(`.blk[data-block-id="${e}"] .tx`).getBoundingClientRect()
+      return { x: r.left + 2, y: r.top + r.height / 2 }
+    }, ids.e)
+    await page.mouse.click(p.x, p.y)
+    await page.waitForTimeout(120)
+    const st = await page.evaluate(() => ({ sel: window.__qua.snapshot().selection, count: window.__qua.snapshot().blockSelectionCount }))
+    assert(st.count === 0 && st.sel && st.sel.aOff === 0, `光标应落在空块行首：${JSON.stringify(st)}`)
+
+    await page.keyboard.press(kbd('mod+v'))
+    await page.waitForTimeout(350)
+    const after = await order()
+    assert(after.join('|') === '标乙乙|剪甲甲|后丙丙', `A 应占空块那一行：${JSON.stringify(after)}`)
+    assert(after.length === 3, `不应多出一份副本：${JSON.stringify(after)}`)
+    assert(!(await eVisible()), '空块应让位，不再留一条空行')
+
+    // 一次撤销：空行回来、A 回原位（软删与移动同笔事务）
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(200)
+    assert((await order()).join('|') === '剪甲甲|标乙乙|后丙丙', `撤销后应回到原位：${JSON.stringify(await order())}`)
+    assert(await eVisible(), '撤销后空块应回来')
+
+    /**
+     * 反证：上面那条若「⌘V 根本没读到剪切载荷」也会绿。同一份载荷再贴一次，
+     * 这回光标放在有正文的 C 行尾 ⇒ 应真的把 A 搬到 C 后面。
+     */
+    await page.evaluate((s) => window.__qua.focusBlock(s.c, 3), ids)
+    await page.keyboard.press(kbd('mod+v'))
+    await page.waitForTimeout(350)
+    const again = await order()
+    assert(again.join('|') === '标乙乙|后丙丙|剪甲甲', `再贴应把 A 搬到 C 后：${JSON.stringify(again)}`)
+    assert(again.length === 3, `反复移动仍是搬动，不是复制：${JSON.stringify(again)}`)
+
+    await ctx.close()
+    return `空块让位（A 占那一行、无副本）；1 次撤销全回；同一载荷行尾再贴真能搬走`
+  },
+)
+
+await check(
+  'T288 空块但有子块：它是容器不是占位，剪切粘贴落它的首个子块（不跨过整棵子树去当兄弟）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const fx = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const root = ed.doc.roots[0]
+      const a = ed.insert.insertBlockAfter(root.id, '搬来的块')
+      const e = a ? ed.insert.insertBlockAfter(a, '') : null
+      const k = e ? ed.insert.insertBlockAfter(e, '原有子块') : null
+      if (k) ed.indent(k) // 变成空块 E 的第一个子块
+      return { rootId: root.id, a, e, k }
+    })
+    assert(fx.a && fx.e && fx.k, `前置：空容器＋子块＋待搬块都要建出来：${JSON.stringify(fx)}`)
+    await page.waitForTimeout(150)
+    const pre = await page.evaluate((f) => {
+      const ed = window.__qua.__editor
+      return { children: ed.store.find(f.e).children.map((b) => b.id), rootHasA: ed.store.find(f.rootId).children.some((b) => b.id === f.a) }
+    }, fx)
+    assert(pre.children[0] === fx.k && pre.rootHasA, `前置：K 是 E 的首子块、A 是 E 的兄弟：${JSON.stringify(pre)}`)
+
+    const r = await page.evaluate(
+      ({ f }) => window.__qua.__editor.clip.pasteRefsAt({ blockId: f.e, offset: 0, cut: null }, { ids: [f.a], move: true }),
+      { f: fx },
+    )
+    await page.waitForTimeout(200)
+    assert(r === 'moved', `应返回 moved：${r}`)
+    const shape = await page.evaluate((f) => {
+      const ed = window.__qua.__editor
+      const e = ed.store.find(f.e)
+      return {
+        alive: Boolean(e),
+        children: e.children.map((b) => b.id),
+        rootHasA: ed.store.find(f.rootId).children.some((b) => b.id === f.a),
+      }
+    }, fx)
+    assert(shape.alive, '空容器不能被顶掉（它还带着子树）')
+    assert(!shape.rootHasA, 'A 不应落在 E 的兄弟位（那会跨过整棵子树）')
+    assert(shape.children[0] === fx.a && shape.children[1] === fx.k, `A 应是 E 的首子块、原子块顺延：${JSON.stringify(shape.children)}`)
+
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(200)
+    const back = await page.evaluate((f) => {
+      const ed = window.__qua.__editor
+      return { children: ed.store.find(f.e).children.map((b) => b.id), rootHasA: ed.store.find(f.rootId).children.some((b) => b.id === f.a) }
+    }, fx)
+    assert(back.children[0] === fx.k && back.rootHasA, `一次撤销应全回：${JSON.stringify(back)}`)
+
+    await ctx.close()
+    return `空容器不删、A 落首子块且原子块顺延；1 次撤销全回`
+  },
+)
+
 await check('T169 重开之后露面还在：首帧也要有身体（事件表接上后必须重画一次）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))

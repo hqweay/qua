@@ -520,6 +520,35 @@ export type InsertSite =
   | { kind: 'after'; parentId: string | null; index: number }
   | { kind: 'before'; parentId: string; index: number }
 
+/**
+ * **空块占位**：没有正文、没有活子块、正文可写。
+ *
+ * 这一行只表示「这里可以放一块」，不是一块有内容的兄弟 ⇒ 往它这里插／搬时，
+ * 来的块要**占它那一行**，而不是被塞到它前面或后面、把空行留在中间。
+ * `insertSiteOf` 的 `replace` 与剪贴板移动的空块让位是同一份判据，别各写一遍。
+ */
+export function isBlankPlaceholder(b: Block): boolean {
+  return isEmptyContent(b.content) && !hasLiveChildren(b) && canWriteText(b)
+}
+
+/**
+ * 一条**空行**在「往这里插／搬一块」时到底算什么。只回答落点形态，不碰树。
+ *
+ *   · `placeholder` —— 没正文、没活子块：这一行只是「这里可以放一块」，
+ *     来的块**占它那一行**（它让位），不是插在它前／后留一条空行；
+ *   · `container` —— 没正文但有活子块、且子层看得见：它已经在承载结构，
+ *     不能被顶掉；光标行的下一可见行是它的**首个子块**，来的块落那里；
+ *   · `null` —— 有正文的普通块，或子层折叠不可见（插进看不见的层等于没贴）⇒ 走兄弟位。
+ *
+ * 折叠那一条与 `enterKind()` 同源：块尾有子块且**展开**才建首子块，折叠则建同级。
+ */
+export function blankRowKind(b: Block, folded: boolean): 'placeholder' | 'container' | null {
+  if (isBlankPlaceholder(b)) return 'placeholder'
+  if (!isEmptyContent(b.content) || !canWriteText(b)) return null
+  if (folded || !hasLiveChildren(b) || typeDeclOf(b).children === 'none') return null
+  return 'container'
+}
+
 export function insertSiteOf(loc: Located, opts: { blank: boolean; dir?: 'after' | 'before' }): InsertSite | null {
   if (opts.blank) return { kind: 'replace' }
   if (loc.parent === null) {
