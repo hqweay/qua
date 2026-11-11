@@ -155,7 +155,37 @@
   to {
     background: transparent;
   }
-}.blk .left {
+}
+/* 剪切确认抖动：⌘X 本身不改文档（移动发生在粘贴那一刻），屏幕上什么都没变，
+   抖一下是「这几块已经抓进剪贴板」；不另配文字提示——画面上的反应就是答复 */
+.blk[data-pulse='1'] {
+  animation: blk-pulse calc(var(--ui-dur-2) * 2) ease-in-out;
+}
+/* 减少动态下不抖：可达性反馈由门面退回那句提示，不在这里硬造一个静态标记 */
+@media (prefers-reduced-motion: reduce) {
+  .blk[data-pulse='1'] {
+    animation: none;
+  }
+}
+@keyframes blk-pulse {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-3px);
+  }
+  45% {
+    transform: translateX(3px);
+  }
+  70% {
+    transform: translateX(-2px);
+  }
+  85% {
+    transform: translateX(1px);
+  }
+}
+.blk .left {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -717,6 +747,12 @@
 .prop-row {
   --ui-row-gap: var(--ui-gap-3);
   font-size: var(--ui-fs-sm);
+  /*
+   * 一行装不下「标签＋值」就折成上下两行，不许挤压：标签可被压到 0 宽（min-width:0），
+   * 值位里的 nowrap 时间戳／输入框 min-content 却缩不动 —— 不折行时标签被压成
+   * 一字一行、值位叠上标签。宽槽下两项本就装得下（40%＋50%＜100%），此规则不生效。
+   */
+  flex-wrap: wrap;
 }
 .prop-label {
   display: flex;

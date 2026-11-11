@@ -253,12 +253,14 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
    * 剪切块（块选区 ⌘X；光标态 ⌘X 与 ⌘C 同判据——塌缩光标下原生文本剪切无事可做，
    * 剪整块才是有用的那一个）：引用味＋移动意图。⌘X 本身不动文档——移动发生在
    * 粘贴那一刻（一笔事务，id 不变、可反复贴）；划选态键位不命中 ⇒ 原生文本剪切照旧。
+   * 成功不弹提示：被抓的行抖一下（`confirmCut`）就是反馈；失败照常有警告。
    */
   'core.editor/cut-blocks': (_a, app) => {
     const snap = app.ed.clip.copySnapshot()
     if (!snap) return false
     const html = buildCopyHtml(snap.text, { ids: snap.ids, move: true })
-    app.copyFlavors({ text: snap.text, html, clip: { ids: snap.ids, move: true } }, t('ui.toast.cutBlocks'))
+    app.copyFlavors({ text: snap.text, html, clip: { ids: snap.ids, move: true } }, null)
+    app.confirmCut(snap.ids)
     return true
   },
   /** 块选区态的 ⌘V：没有光标，粘贴的东西作为新块落在选区后面（与 paste 事件同一份编辑器实现） */

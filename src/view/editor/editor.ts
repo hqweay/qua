@@ -1115,6 +1115,24 @@ export class BlockEditor {
     }, 900)
   }
 
+  /**
+   * 剪切确认：被抓进剪贴板的行**抖一下**。⌘X 不改文档（移动发生在粘贴那一刻），
+   * 屏幕上什么都没变——没有这一下，用户不知道按没按上。
+   * 与 `reveal` 的 flash 同一挂法：data 属性 ＋ CSS keyframes，reduced-motion 由 CSS 关
+   * （那里的可达性反馈由门面退回提示，不在这层造静态替身）。
+   * 只对画得上的一行抖：虚拟化时看不见的块没有「看见的确认」可给。
+   */
+  pulseBlocks(ids: readonly string[]): void {
+    for (const id of ids) {
+      const el = this.blockEl(id)
+      if (!el) continue
+      el.dataset.pulse = '1'
+      window.setTimeout(() => {
+        if (el.isConnected) delete el.dataset.pulse
+      }, 400)
+    }
+  }
+
   txEl(id: string): HTMLElement | null {
     return this.blockEl(id)?.querySelector<HTMLElement>('.tx') ?? null
   }

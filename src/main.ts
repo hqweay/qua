@@ -2387,14 +2387,22 @@ const app: App = {
       'text/plain': new Blob([f.text], { type: 'text/plain' }),
       'text/html': new Blob([f.html], { type: 'text/html' }),
     })]) : undefined
+    const done = () => {
+      // label 为 null ⇒ 调用方已另给画面反馈（如剪切抖动），不叠一句重复的话
+      if (label !== null) app.toast(label ?? t('ui.toast.copied'))
+    }
     if (!write) {
-      app.copy(f.text, label)
+      void navigator.clipboard?.writeText(f.text).then(done, () => app.toast(t('err.clipboardFailed'), 'warn'))
       return
     }
-    void write.then(
-      () => app.toast(label ?? t('ui.toast.copied')),
-      () => app.toast(t('err.clipboardFailed'), 'warn'),
-    )
+    void write.then(done, () => app.toast(t('err.clipboardFailed'), 'warn'))
+  },
+  confirmCut: (ids) => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      app.toast(t('ui.toast.cutBlocks'))
+      return
+    }
+    ed.pulseBlocks(ids)
   },
   /**
    * 读剪贴板的引用味＋正文味（块选区态的 ⌘V：那边没有 paste 事件可读）。
