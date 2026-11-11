@@ -956,12 +956,13 @@ function commandDecls() {
   // ⇒ **所有块都成了「无露面」**，页/标签/日记的每一条身份判据同时翻转，一个红灯都没有。
   // ⇒ `.roles` 只许出现在模型实现里（唯一实现），别处一律走 `hasList`／`listsOf`／`identityTags`。
   const ROLES_IMPL = 'src/core/model/model.ts'
-  // 查询条件的实现与序列化：这两处读的 `.role` 是条件原子的键，不是块的列表判定
+  // 查询条件的实现与序列化：这几处读的 `.role` 是条件原子的键，不是块的列表判定
   const QUERY_LANG = new Set([
     'src/core/query/query.ts',
     'src/core/query/query-view.ts',
     'src/core/query/query-tree.ts',
     'src/ui/query/query-tree.ts',
+    'src/ui/query/query-builder.ts',
   ])
   const hits = []
   for (const f of srcFiles) {

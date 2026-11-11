@@ -9,7 +9,6 @@
 import {
   blockLabel,
   buildAdjacency,
-  cardinalityOf,
   choiceDisplayLabel,
   choicesFor,
   danglingOf,
@@ -36,6 +35,7 @@ import {
   propDisplayLabels,
   propKindOf,
   propLabel,
+  queryFieldsOf,
   readMountView,
   todayISO,
   type Block,
@@ -823,13 +823,11 @@ export function setupPanels(deps: PanelsDeps) {
         const b = kb.get(id)
         return b ? displayNameOf(b) : id.slice(-6)
       },
-      /** 条件树的字段下拉：属性定义 ＋ 显示名（同名带来源）＋ kind（值控件按 kind 分派） */
-      fields: () => {
-        const labels = propDisplayLabels(kb.roots())
-        return kb
-          .propDefs()
-          .map((d) => ({ id: d.id, label: labels.get(d.id) ?? propLabel(d), kind: propKindOf(d), cardinality: cardinalityOf(d) }))
-      },
+      /**
+       * 条件树的字段下拉：属性定义 ＋ **有值控件的系统槽**（`core/query-fields.ts` 一处给）。
+       * 引擎属性与没有值控件的系统槽不进下拉（它们仍可由 JSON 写成）。
+       */
+      fields: () => queryFieldsOf(kb.roots()),
       /**
        * 看板分组列的**选项**：`select` 的选项是定义块的直接子块（顺序＝children 顺序）。
        * 其余属性没有固定值域 ⇒ 空表，列按「第一次出现」排。

@@ -18376,6 +18376,63 @@ await check('B7 方向是节点上的一格：叶子与组都能挂，up 不含�
   return '叶子方向：up ⇒ 子块、near ⇒ 连自己；组头同一格；落库 {near:{ref}}'
 })
 
+await check('B8 系统槽入口：字段下拉里有「日记日期」「别名」，选它写出的条件求值认', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await page.evaluate(() => {
+    const at = Date.now()
+    const mk = (id, text, props) => ({
+      id,
+      content: text ? [{ t: 'text', v: text }] : [],
+      children: [],
+      created: at,
+      modified: at,
+      ...(props ? { props } : {}),
+    })
+    window.__qua.forceForest((forest) => {
+      forest.length = 0
+      forest.push(mk('day', '某一天', { _date: '2026-10-20' }), mk('plain', '普通一行'))
+    })
+    window.__qua.invoke('core.query/create', { name: '系统槽入口', spec: { where: { any: [] } } })
+    return String(window.__qua.snapshot().activeId)
+  })
+  assert(qid !== '', '前置：应能建出查询块')
+  await page.waitForTimeout(600)
+  await ensureTree(page)
+
+  await qtAdd(page, '.queryview-tree .qt-group[data-qt-depth="0"]', 'row:prop')
+  const opts = await page.evaluate(() =>
+    [...(document.querySelectorAll('.queryview-tree .qt-row[data-qt-row="prop"] [data-qt="field"] option') ?? [])].map(
+      (o) => o.textContent ?? '',
+    ),
+  )
+  assert(opts.includes('日记日期') && opts.includes('别名'), `系统槽要进下拉：${JSON.stringify(opts)}`)
+  assert(!opts.includes('创建于') && !opts.includes('修改于'), `引擎属性不进下拉（毫秒填不进日期控件）：${JSON.stringify(opts)}`)
+
+  const propRow = '.queryview-tree .qt-row[data-qt-row="prop"]'
+  await page.selectOption(`${propRow} [data-qt="field"]`, '_date')
+  await page.waitForTimeout(150)
+  await page.locator(`${propRow} [data-qt="value"]`).fill('2026-10-20')
+  await page.locator('.queryview-tree [data-qt="apply"]').click()
+  await page.waitForTimeout(450)
+  const where = await page.evaluate(
+    (id) => window.__qua.__editor.store.find(id)?.props?._query?.where ?? null,
+    qid,
+  )
+  const prop = where?.prop ?? where?.any?.[0]?.prop ?? where?.all?.[0]?.prop ?? null
+  assert(
+    prop?.id === '_date' && prop?.eq === '2026-10-20',
+    `写出来的应是普通属性条件：${JSON.stringify(where)}`,
+  )
+  const rows = await page.evaluate(() =>
+    [...document.querySelectorAll('.queryview .queryview-editor .blk[data-block-id]')].map((e) => e.dataset.blockId ?? ''),
+  )
+  assert(rows.join(',') === 'day', `求值要认这个系统槽：${JSON.stringify(rows)}`)
+
+  await ctx.close()
+  return '下拉含日记日期／别名；选 _date 写出 {prop:{_date,eq}} 且命中那天'
+})
+
 /* ---------------------------------------------------------------- 相对日期（C1） */
 
 /**

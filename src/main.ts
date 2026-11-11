@@ -7,8 +7,8 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propDisplayLabels, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind } from './core/index.ts'
-import { choiceDisplayLabel, cardinalityOf, singleValueOf, valueListOf } from './core/index.ts'
+import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind } from './core/index.ts'
+import { choiceDisplayLabel, cardinalityOf, queryFieldsOf, singleValueOf, valueListOf } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
@@ -1563,12 +1563,8 @@ function openSpecPopover(opts: {
   layers.openPopover((box) => {
     const tree = new QueryTree(box, {
       spec: opts.spec,
-      fields: () => {
-        const labels = propDisplayLabels(kb.roots())
-        return kb
-          .propDefs()
-          .map((d) => ({ id: d.id, label: labels.get(d.id) ?? propLabel(d), kind: propKindOf(d), cardinality: cardinalityOf(d) }))
-      },
+      // 条件树的字段候选只有一份（`core/query-fields.ts`）：属性定义 ＋ 有值控件的系统槽
+      fields: () => queryFieldsOf(kb.roots()),
       /**
        * `select` 的选项：**定义块的直接子块，全量、排除软删**。
        * 不按某一块的可选范围收窄（`choicesForDef`）—— 查询是跨块的，
