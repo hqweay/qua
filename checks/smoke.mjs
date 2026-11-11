@@ -13055,7 +13055,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
    */
   const declaredChip = await page.evaluate((defId) => {
     const name = document.querySelector(`[data-declared-prop-id="${defId}"] .props-tag-name`)
-    return { found: Boolean(name), refTo: name?.dataset.refTo ?? '', title: name?.title ?? '' }
+    return { found: Boolean(name), refTo: name?.dataset.refTo ?? '', title: name?.dataset.tip ?? '' }
   }, ownDefId)
   assert(declaredChip.found, `声明 chip 的名字要带可点命中区（props-tag-name）：${JSON.stringify(declaredChip)}`)
   assert(declaredChip.refTo === ownDefId, `声明 chip 的名字要走同一条导航契约（data-ref-to 指向定义块）：${JSON.stringify(declaredChip)}`)
@@ -13111,7 +13111,7 @@ await check('T126 行尾 chip / 属性区标签名点名字 ⇒ 打开标签块�
       return {
         chip: Boolean(chip),
         refTo: chip?.dataset.refTo ?? '',
-        title: chip?.title ?? '',
+        title: chip?.dataset.tip ?? '',
         inTx: Boolean(chip?.closest('.tx')),
         read: window.__qua.__editor.readRunsOf(hostId).filter((r) => r.t === 'text').map((r) => r.v).join(''),
       }
@@ -13160,7 +13160,7 @@ await check('T126 行尾 chip / 属性区标签名点名字 ⇒ 打开标签块�
   await page.waitForTimeout(250)
   const panelChip = await page.evaluate((tagId) => {
     const name = document.querySelector(`[data-panel-tag-id="${tagId}"] .props-tag-name`)
-    return { found: Boolean(name), refTo: name?.dataset.refTo ?? '', title: name?.title ?? '' }
+    return { found: Boolean(name), refTo: name?.dataset.refTo ?? '', title: name?.dataset.tip ?? '' }
   }, tagId)
   assert(panelChip.found, `属性区的标签名要带 props-tag-name（点名字的命中区）：${JSON.stringify(panelChip)}`)
   assert(panelChip.refTo === tagId, `属性区标签名要用同一条导航契约：${JSON.stringify(panelChip)}`)
@@ -21755,7 +21755,7 @@ await check('T221 挂载区的查询栏可以改名：双击 → 输入 → 落�
       [...document.querySelectorAll('#editor .mount .mount-tabwrap[data-kind="local"]')].map((w) => ({
         key: w.dataset.tab,
         label: w.querySelector('.mount-tab')?.textContent ?? '',
-        title: w.querySelector('.mount-tab')?.title ?? '',
+        title: w.querySelector('.mount-tab')?.dataset.tip ?? '',
       })),
     )
   const first = (await local())[0]
@@ -25552,7 +25552,7 @@ await check('T264 ⌘+点属性区标签名 ⇒ 新页签；块菜单有「在�
 
     // ② 块标提示：两个手势都要写出来（只写 Shift 等于 ⌘+点不存在）
     const hint = await page.evaluate(
-      (id) => document.querySelector(`.blk[data-block-id="${id}"] [data-focus-for]`)?.title ?? '',
+      (id) => document.querySelector(`.blk[data-block-id="${id}"] [data-focus-for]`)?.dataset.tip ?? '',
       hostId,
     )
     assert(hint.includes('新页签'), `块标提示要写明 ⌘+点开新页签：${JSON.stringify(hint)}`)
@@ -25734,7 +25734,7 @@ await check('T265 块下属性行：有值才出现；点一项打开属性面�
         open: Boolean(document.querySelector('.drawer')),
         row: Boolean(row),
         active: window.__qua.snapshot().activeId,
-        hint: mk?.title ?? '',
+        hint: mk?.dataset.tip ?? '',
       }
     }, fx.author)
     assert(alt.open && alt.row, `⌥+点块标要打开属性面板并列出这一块：${JSON.stringify(alt)}`)

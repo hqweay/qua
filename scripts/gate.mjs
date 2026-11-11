@@ -204,7 +204,9 @@ async function runSmoke() {
       retry = JSON.parse(await readFile(join(dir2, 'retry.json'), 'utf8'))
     } catch {}
     await rm(dir2, { recursive: true, force: true })
-    if (r2.code !== 0 || !retry) {
+    if (!retry) {
+      // 可信判据是「有没有报告」：退出码 1 本来就是「重跑了、还是红」的正常出口
+      // （真踩过：把 code!==0 也当「没报告」，重跑仍红时打出误导性的 infra 告警）
       problems.push(`失败重跑那轮没留下可信报告（退出码 ${r2.code}）——按原失败判红`)
     } else {
       const stillRed = []
