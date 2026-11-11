@@ -1086,7 +1086,6 @@ export const MSG = {
   'ui.block.menuHint': '右键打开块菜单',
   'ui.block.handleHint': '拖拽重排 · 右键打开块菜单',
   'ui.block.placeholderFirst': '写点什么…（按 / 呼出命令）',
-  'ui.block.placeholderEmpty': '空块',
   'ui.todo.toggle': '点击切换完成 · 右键选择状态',
   /**
    * 「取消待办」摘完这一块自己的槽之后，如果这一栏还在（标签声明给的），

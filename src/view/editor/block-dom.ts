@@ -1186,9 +1186,11 @@ export function makeBlockEl(
         tx.dataset.phReadonly = '1'
       }
     }
-  } else if (isEmptyContent(b.content)) {
-    // 空块的幽灵占位：CSS 生成内容，**不进 DOM 文本**
-    tx.dataset.ph = opts.placeholder ?? (opts.single ? t('ui.block.placeholderFirst') : t('ui.block.placeholderEmpty'))
+  } else if (isEmptyContent(b.content) && (opts.placeholder || opts.single)) {
+    // 空块的幽灵占位：CSS 生成内容，**不进 DOM 文本**。
+    // 普通空块不再给文案——空行本身已读作「可以写」，占位字反而要处理打字后的隐藏；
+    // 占位只留给单块屏（空页第一句）与调用方显式给的（抬头等名字格子）。
+    tx.dataset.ph = opts.placeholder ?? t('ui.block.placeholderFirst')
   }
 
   if (embedBodyEl) {
