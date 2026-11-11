@@ -309,9 +309,16 @@
 }
 /*
  * 右槽挂载区卡：卡身就是块底那台挂载区（同一台组件），样式沿用 `.mount`。
- * 只有编辑器宿主补两行卡内的兜底（与中心段尾同一档）：
- * 最小高度撑住空态，`outline: none` 别让聚焦描边画在卡里。
+ * 卡内收掉两条**属于中心段尾**的外距：段尾的 margin-top 是它跟正文之间的呼吸空隙，
+ * 卡壳自己的边框已经给了上下文；margin-inline 的 gutter 内缩是「跟着正文竖线对齐」，
+ * 卡身有自己的边距，再缩一层就是两套对齐语法。
+ * 编辑器宿主补两行兜底（与中心段尾同一档）：最小高度撑住空态，
+ * `outline: none` 别让聚焦描边画在卡里。
  */
+.dock-card-body .mount {
+  margin-top: 0;
+  margin-inline: 0;
+}
 .dock-card-body .mount-editor {
   min-height: var(--ui-line-h);
   outline: none;
