@@ -847,21 +847,24 @@ export class QueryTree {
   private dirEl(node: TreeLeaf | TreeGroup): HTMLElement {
     const sel = selectEl(
       [
-        { value: '', label: t('ui.query.tree.dirSelf') },
-        { value: 'up', label: t('ui.query.tree.dirUp') },
-        { value: 'down', label: t('ui.query.tree.dirDown') },
-        { value: 'near', label: t('ui.query.tree.dirNear') },
+        { value: '', label: t('ui.query.dir.self') },
+        { value: 'up', label: t('ui.query.dir.up') },
+        { value: 'down', label: t('ui.query.dir.down') },
+        { value: 'near', label: t('ui.query.dir.near') },
       ],
       node.dir ?? '',
       (next) => {
         if (next === 'up' || next === 'down' || next === 'near') node.dir = next
         else delete node.dir
+        // 默认（自身）是**修饰的缺省态**：不显形、不抢读句子的注意力
+        sel.dataset.set = node.dir ? '1' : '0'
         // 方向不改行的完整度：只重算「应用」的可用性，不重画（别把用户的焦点冲掉）
         this.syncApply()
       },
       'qt-dir',
       'dir',
     )
+    sel.dataset.set = node.dir ? '1' : '0'
     sel.title = t('ui.query.tree.dirHint')
     return sel
   }

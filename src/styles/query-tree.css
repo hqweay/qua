@@ -84,6 +84,22 @@
   background: var(--ui-bg-hover);
   border-color: var(--ui-border-subtle);
 }
+/* 方向是**修饰**：缺省「自身」是句子的无标状态 ⇒ 压到几乎看不见；
+   挂上上级／下级／链条才是真信息，恢复常色。hover/focus 亮起来，保证可发现。 */
+.qt-dir {
+  color: var(--ui-text-tertiary);
+  opacity: 0.45;
+}
+.qt-dir[data-set='1'] {
+  color: var(--ui-text-secondary);
+  opacity: 1;
+}
+.qt-row:hover .qt-dir[data-set='0'],
+.qt-row:focus-within .qt-dir[data-set='0'],
+.qt-group-head:hover .qt-dir[data-set='0'],
+.qt-group-head:focus-within .qt-dir[data-set='0'] {
+  opacity: 1;
+}
 /* 「非」是一枚开关：勾上时整枚变强调色，而不是只有一个 12px 的小方框 */
 .qt-not {
   display: inline-flex;

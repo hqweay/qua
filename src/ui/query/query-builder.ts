@@ -1,21 +1,27 @@
 /**
- * **条件的人话投影**（chip 与旧平铺草稿共用）。
+ * **条件的人话投影**（抬头 chip、收起态摘要、窄窗里的条件列表共用）。
  *
- * 条件树的编辑面住在 `ui/query-tree.ts`；这里只把一份 `QuerySpec` 说成人话：
- *   · 抬头上的 chip（收起的树、投影窗口、挂载区的派生栏）。
+ * 单一来源是**条件树模型**（`core/query-tree.ts`）：方向、「非」、组、某一天都由它拆，
+ * 这里只把一行说成人话。
  *
- * ⚠️ chip 是**只读**投影 ⇒ 走显示模式拆「非」叶子；但更深的嵌套、方向的非
- *    `{is:id}` 形状、带 kind 的 `ref` 仍然拆不动 ⇒ 整块显示「复合条件」。
- *    显示模式不拼回去，所以拆了不丢条件；**编辑**路径保持缺省模式——
- *    那里拆一半再拼回去，就会悄悄丢掉剩下的条件。
+ * 为什么不另写一份平铺投影：曾经有过一份（一层 `all`／`any` ＋ 叶子行），
+ * 它表达不了方向、`ref`／`is`／`role`／某一天 —— 这些形状的 chip 一律退化成
+ * 「复合条件」。而两份投影的判据迟早分叉：同一个查询在条件树里读得懂、收起后读不懂。
+ *
+ * ⚠️ 这里零 DOM：`queryChips` 返回字符串，画不画、怎么排是调用方的事。
+ * ⚠️ 括号与「非」的位置不是装饰：`{not:{up:{all:[A,B]}}}` ＝「没有这样的上级（A 且 B）」，
+ *    所以「非」在最外、方向次之、组在内 —— 与条件的拼装顺序同构。
  */
 import {
-  draftOfSpec,
-  type DraftOp,
-  type DraftRow,
+  SELF,
+  systemQueryFieldLabel,
+  treeOfSpec,
   type QuerySpec,
+  type TreeRow,
+  type TreeNode,
 } from '../../core/index.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
+import type { DraftOp } from '../../core/query/query-draft.ts'
 
 const OP_TEXT: Record<DraftOp, MsgId> = {
   eq: 'ui.query.op.eq',
@@ -29,65 +35,105 @@ const OP_TEXT: Record<DraftOp, MsgId> = {
   empty: 'ui.query.op.empty',
 }
 
-/**
- * 一行条件的**人话**（chip 与行尾提示共用）。
- *
- * 拼的是「字段名 ＋ 算子 ＋ 值」：字段名是用户数据（属性定义的显示名），
- * 算子那半截是 UI 词汇——两样都不是模型的事。
- */
-export function rowLabel(
-  row: DraftRow,
-  fieldName: (id: string) => string,
-  opText: (op: DraftOp) => string,
-  /** `select` 的值：选项块 id → 选项名。不接就只能把一串 id 显示给人看 */
-  choiceLabel?: (propId: string, valueId: string) => string | undefined,
-  /** 方向行的目标块 id → 名字（`$self` 不需要它） */
-  refLabel?: (id: string) => string,
-): string {
-  if (row.kind === 'path') {
-    const dir = row.dir ?? 'up'
-    const dirText = t(dir === 'down' ? 'ui.query.tree.dirDown' : dir === 'near' ? 'ui.query.tree.dirNear' : 'ui.query.tree.dirUp')
-    const target = row.value === '$self' ? t('ui.query.rootBlock') : (refLabel?.(row.value ?? '') ?? row.value ?? '')
-    return `${dirText} · ${target}`
-  }
-  if (row.kind === 'tag') return `#${row.value ?? ''}`
-  if (row.kind === 'text') return t('ui.query.label.text', { text: row.value ?? '' })
-  const name = row.field ? fieldName(row.field) : t('ui.query.label.noField')
-  const op: DraftOp = row.op ?? 'eq'
-  if (op === 'exists') return t(row.value === 'false' ? 'ui.query.label.notExists' : 'ui.query.label.exists', { name })
-  if (op === 'empty') return t(row.value === 'false' ? 'ui.query.label.notEmpty' : 'ui.query.label.empty', { name })
-  // 走到这里 `op` 已不是 `exists`／`empty`（上面两条已 return）：值那一格才有「选项名」可言
-  const raw = row.value ?? ''
-  const shown = choiceLabel
-    ? (choiceLabel(row.field ?? '', raw) ?? (raw === '' ? t('ui.query.builder.noValue') : raw))
-    : raw
-  return t('ui.query.label.cmp', { name, op: opText(op), value: shown })
+const DIR_TEXT: Record<'up' | 'down' | 'near', MsgId> = {
+  up: 'ui.query.dir.up',
+  down: 'ui.query.dir.down',
+  near: 'ui.query.dir.near',
 }
 
-/** 一条条件的**筛选 chip**（抬头那一行；点击打开条件树） */
+export interface ConditionTextDeps {
+  /** 属性定义（id → 显示名）；不在表里的 id 再问系统槽名字 */
+  fields: readonly { id: string; label: string }[]
+  /** `select` 的值是选项块 id，要换成选项名 */
+  choices?: (propId: string) => readonly { id: string; label: string }[]
+  /** 引用／就是 `/` 某一块的目标 id → 名字 */
+  refLabel?: (targetId: string) => string
+}
+
+/**
+ * 一份条件 → 若干条 chip。
+ *
+ * 分组：根组**没有修饰**时每个子项一条（与「且／或 列表」的读法一致）；
+ * 根组自己挂着「非」或方向时整棵树一条（那两格管的是整组，拆开就会把
+ * 「非（A 且 B）」说成两条「非 A」「非 B」——语义变了）。
+ *
+ * 拆不动（方向里套方向、`{up:{not:…}}`、带 kind 的 `ref`…）⇒ 一条「复合条件」。
+ */
 export function queryChips(
   spec: QuerySpec,
   fields: readonly { id: string; label: string }[],
-  /** `select` 的值要显示**选项名**而不是一串块 id */
   choices?: (propId: string) => readonly { id: string; label: string }[],
-  /** 方向行的目标块 id → 名字 */
   refLabel?: (id: string) => string,
 ): string[] {
-  // chip 是**只读**投影 ⇒ 用显示模式拆「非」叶子（提及的组合条件才能摆出来）；
-  // 显示模式不保证往返，而这里根本没有「拼回去」这一步，不会丢条件
-  const draft = draftOfSpec(spec, { displayNot: true })
-  if (draft.verbatim !== undefined) return [t('ui.query.builder.complex')]
-  const choiceLabel = choices
-    ? (propId: string, valueId: string) => choices(propId).find((c) => c.id === valueId)?.label
-    : undefined
-  return draft.rows.map((row) => {
-    const label = rowLabel(
-      row,
-      (id) => fields.find((f) => f.id === id)?.label ?? id.slice(-6),
-      (op) => t(OP_TEXT[op]),
-      choiceLabel,
-      refLabel,
-    )
-    return row.not === true ? t('ui.query.chipNot', { text: label }) : label
-  })
+  const draft = treeOfSpec(spec)
+  if (!draft) return [t('ui.query.builder.complex')]
+  const deps: ConditionTextDeps = { fields, choices, ...(refLabel ? { refLabel } : {}) }
+  const root = draft.root
+  if (root.dir !== undefined || root.not) return [sentence(root, deps, true)]
+  return root.items.map((item) => sentence(item, deps, true))
+}
+
+function sentence(node: TreeNode, deps: ConditionTextDeps, topLevel: boolean): string {
+  if (node.kind === 'leaf') {
+    let text = rowSentence(node.row, deps)
+    if (node.dir) text = `${t(DIR_TEXT[node.dir])} · ${text}`
+    if (node.not) text = t('ui.query.chipNot', { text })
+    return text
+  }
+  const join = t(node.mode === 'any' ? 'ui.query.group.or' : 'ui.query.group.and')
+  let text = node.items.map((child) => sentence(child, deps, false)).join(` ${join} `)
+  /**
+   * 括号只在**会读错**时出现：组里多条且它不是这一条 chip 的最外层。
+   * 挂修饰的组即使在最外层也要括起来——「上级 · A 且 B」会被读成两条并列。
+   */
+  if (node.items.length > 1 && (!topLevel || node.dir !== undefined || node.not)) text = `（${text}）`
+  if (node.dir) text = `${t(DIR_TEXT[node.dir])} · ${text}`
+  if (node.not) text = t('ui.query.chipNot', { text })
+  return text
+}
+
+function rowSentence(row: TreeRow, deps: ConditionTextDeps): string {
+  switch (row.kind) {
+    case 'tag':
+      return row.value === SELF ? t('ui.query.selfTag') : `#${row.value}`
+    case 'text':
+      return row.value === SELF ? t('ui.query.selfText') : t('ui.query.label.text', { text: row.value })
+    case 'ref':
+      return `${t('ui.query.prefix.ref')} ${targetText(row.target, deps)}`
+    case 'is':
+      return `${t('ui.query.prefix.is')} ${targetText(row.target, deps)}`
+    case 'role':
+      return `${t('ui.query.prefix.role')}${t(row.role === 'page' ? 'ui.query.role.page' : 'ui.query.role.journal')}`
+    case 'day':
+      return dayText(row)
+    case 'prop':
+      return propText(row, deps)
+  }
+}
+
+function targetText(target: string, deps: ConditionTextDeps): string {
+  if (target === SELF) return t('ui.query.rootBlock')
+  return deps.refLabel?.(target) ?? target
+}
+
+function dayText(row: Extract<TreeRow, { kind: 'day' }>): string {
+  if (row.date === SELF) return t('ui.query.selfDate')
+  if (row.rel !== undefined) {
+    if (row.rel === 0) return t('ui.query.row.today')
+    return t('ui.query.row.todayOffset', { delta: `${row.rel > 0 ? '+' : ''}${row.rel}` })
+  }
+  return t('ui.query.row.day', { date: row.date })
+}
+
+function propText(row: Extract<TreeRow, { kind: 'prop' }>, deps: ConditionTextDeps): string {
+  const name =
+    deps.fields.find((f) => f.id === row.field)?.label ??
+    systemQueryFieldLabel(row.field) ??
+    t('ui.query.fieldMissing')
+  if (row.op === 'exists') return t(row.value === 'false' ? 'ui.query.label.notExists' : 'ui.query.label.exists', { name })
+  if (row.op === 'empty') return t(row.value === 'false' ? 'ui.query.label.notEmpty' : 'ui.query.label.empty', { name })
+  const choice = deps.choices?.(row.field)?.find((c) => c.id === row.value)
+  const shown =
+    row.value === SELF ? t('ui.query.selfProp') : row.value === '' ? t('ui.query.builder.noValue') : (choice?.label ?? row.value)
+  return t('ui.query.label.cmp', { name, op: t(OP_TEXT[row.op]), value: shown })
 }
