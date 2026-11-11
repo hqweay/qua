@@ -43,22 +43,26 @@ let draggingBlock: string | null = null
 let draggingCard: string | null = null
 let draggingTab: string | null = null
 /**
- * 这一次块拖拽是不是**引用式**（起拖时按着 ⌥）。
+ * 这一次块拖拽**此刻**是不是引用式（悬停时按着 ⌥）。
  *
  * 为什么住在这里、而不是 `DataTransfer` 里：载荷必须能独立成立（只有块 id），
  * 语义属于**这一次拖拽**，不是块的身份。也不放落点私有状态里 —— 悬停反馈（hint／
  * 光标）与落手必须读同一份值，而它们是同一个落点上的两段代码。
  *
- * ⚠️ **起拖时锁定**：拖到一半松开 ⌥ 不改结果。否则会出现「悬停提示说移动、
- *    松手却插了一枚引用」——提示与写入各读一个时刻的修饰键。
+ * ⚠️ **值在每次 `dragover` 刷新，落手读最后一次刷新的那一份**：
+ *    · 拖拽期间**键盘事件不派发**（实测：起拖后按 ⌥，`keydown`／`keyup` 一个都不来），
+ *      所以只有 `dragover` 的 `altKey` 能反映用户此刻的手；起拖时锁死会让「拖到一半
+ *      再按 ⌥」永远不生效 —— 而这是最常见的手势；
+ *    · 但落手必须与**最后一次悬停提示**同源：提示说「移到」时松手不能插引用。
+ *      ⇒ 不是「每次都读 drop 自己的 altKey」，而是「悬停时刷新、落手读这一份」。
  */
 let draggingAsRef = false
 
 /**
  * 拖源：只报「我是谁」。
  *
- * `asRef` 由事件层在 `dragstart` 用 `clickModsOf(e).altKey` 取（修饰键唯一取法），
- * 之后全程读这里记下的那一份。
+ * `asRef` 是初值（`dragstart` 的 `clickModsOf(e).altKey`，修饰键唯一取法）：
+ * 它在第一次 `dragover` 之前就可能要用（提示的第一帧）；之后每次悬停都会刷新。
  */
 export function setDragBlock(dt: DataTransfer | null, id: string, asRef = false): void {
   draggingBlock = id
@@ -71,7 +75,17 @@ export function setDragBlock(dt: DataTransfer | null, id: string, asRef = false)
   dt.effectAllowed = 'all'
 }
 
-/** 这一次块拖拽是不是引用式（起拖时锁定的 ⌥；`dragover` 与落手读同一份） */
+/**
+ * 悬停期刷新「这一次悬停的意图」（由落点每次 `dragover` 调一次）。
+ *
+ * 只在**落点自己接受**这次悬停时调用：⌥ 的引用语义只属于正文行间三区，
+ * 别的落点（侧槽／归属树／看板）不读它，也不该改它。
+ */
+export function noteDragRef(asRef: boolean): void {
+  draggingAsRef = asRef
+}
+
+/** 这一次块拖拽此刻是不是引用式（悬停时刷新；提示、光标与落手读同一份） */
 export function isRefDrag(): boolean {
   return draggingBlock !== null && draggingAsRef
 }
@@ -226,6 +240,14 @@ export interface DropTargetOpts {
   /** **落点自己说会变成什么**——悬停时就要能读出来（必填） */
   hint: (draggedId: string, e: DragEvent) => string
   /**
+   * 悬停期的**第一件事**（在接受之后、算光标与提示之前），每次 `dragover` 一次。
+   *
+   * 为什么需要：有些含义来自「用户此刻手上的修饰键」，而**拖拽期间键盘事件不派发**，
+   * 只有拖事件带 `altKey`。落点借这一格把「这一帧的意图」记下来，让随后的
+   * `effect`／`hint` 与最终 `drop` 读**同一份**——否则会出现「提示说移走、松手插了引用」。
+   */
+  onHover?: (draggedId: string, e: DragEvent) => void
+  /**
    * 三种含义各用各的光标（`dropEffect`）。
    *
    * 也可以给函数：同一个落点在**同一次拖拽里**可能换含义（正文三区按 ⌥ 在
@@ -280,6 +302,7 @@ export function bindDropTarget(el: HTMLElement, o: DropTargetOpts): () => void {
     // **最内层的落点赢**：一行落在槽里时，别让整槽的落点也把提示/高亮抢过去
     e.stopPropagation()
     e.preventDefault()
+    o.onHover?.(id, e)
     const effect = typeof o.effect === 'function' ? o.effect(id, e) : (o.effect ?? 'move')
     if (e.dataTransfer) e.dataTransfer.dropEffect = effect
     mark(id, e)

@@ -3575,11 +3575,6 @@ export class BlockEditor {
         await this.events.onPasteImage?.(file, point)
       },
       onDropFilesRejected: () => this.events.onDropFilesRejected?.(),
-      hasChildren: (id) => {
-        const loc = locate(this.doc, id)
-        return loc !== null && hasLiveChildren(loc.block)
-      },
-
       acceptDrag: (id) => {
         const loc = locate(this.doc, id)
         // 本文档的内容块：段根（页／天／查询记录）不参与拖拽

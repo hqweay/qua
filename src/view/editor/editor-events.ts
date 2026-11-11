@@ -13,7 +13,7 @@
  *   1. **组合期（IME composing）不重渲染该块**——否则会打断输入法，`compositionend` 后才补渲染；
  *   2. **键位一个都不在这里处理**——全部交给绑定表，这里只碰「输入与拖拽」。
  */
-import { bindDropTarget, isRefDrag, setDragBlock, zoneHint, zoneRefHint } from '../dnd.ts'
+import { bindDropTarget, isRefDrag, noteDragRef, setDragBlock, zoneHint, zoneRefHint } from '../dnd.ts'
 import { EDIT_ISLAND_ATTR } from './block-dom.ts'
 import { refsFromHtml } from './clipboard-flavor.ts'
 import type { ClipboardRefs } from './clipboard-flavor.ts'
@@ -246,7 +246,7 @@ export interface EditorBridge {
   /**
    * 松手：编辑器按落点改结构（含撤销记录与重渲染）。
    *
-   * `asRef` ＝ 这一次是**引用式**拖拽（起拖时按着 ⌥）：落点是同一份，但写入不同——
+   * `asRef` ＝ 这一次是**引用式**拖拽（悬停时按着 ⌥）：落点是同一份，但写入不同——
    * 普通拖搬走块，引用式拖在原地插一枚指向被拖块的 `RefRun`。
    */
   dropDrag: (
@@ -265,8 +265,6 @@ export interface EditorBridge {
   blockContent: (id: string) => Content
   /** 把某块的 run 序列写回（取消候选时收回预编辑串；**不重渲染**） */
   restoreBlockContent: (id: string, content: Content) => void
-  /** 该块有没有子块（拖到 inside 要判）*/
-  hasChildren: (id: string) => boolean
   /**
    * **点了一个「指向某块的露面」**——行内原子、行尾标签 chip、属性区的标签名，
    * 全是同一件事，所以只有一个入口。
@@ -1122,8 +1120,9 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     const handle = (e.target as HTMLElement).closest<HTMLElement>('[data-drag-for]')
     if (!handle?.dataset.dragFor) return
     /**
-     * ⌥ **在这一刻锁定**（`clickModsOf` 是修饰键唯一取法）：悬停提示、光标形状与落手
-     * 全程读同一份，拖到一半松开 ⌥ 不改结果。否则会出现「提示说移走、松手插了一枚引用」。
+     * ⌥ 的**初值**（`clickModsOf` 是修饰键唯一取法）。真正的判定在每次悬停时刷新：
+     * 拖拽期间键盘事件不派发，只有 `dragover` 的 `altKey` 能反映用户此刻的手 ——
+     * 起拖时锁死会让「拖到一半再按 ⌥」永远不生效（最常见的那个手势）。
      *
      * 只接**从块标/把手起拖**这一条：`.tx` 内按下拖过块边界是块选区那条路，
      * 它根本不派发 `dragstart` ⇒ ⌥ 的引用语义碰不到它。
@@ -1136,7 +1135,13 @@ export function bindEditorEvents(br: EditorBridge): () => void {
   off.push(
     bindDropTarget(c, {
       attr: 'drop',
-      // ⌥ 起拖 ⇒ 这个落点是「在这里留一枚引用」（建关系那一档光标），不是搬走
+      /**
+       * 悬停期刷新「这一次悬停是不是引用式」：⌥ 只有在这个落点（正文行间三区）
+       * 才有意义，所以由落点自己读、自己记；此后光标、提示与落手都读这一份
+       * ⇒ 用户按下 ⌥ 的那一刻（下一帧悬停）就能看到提示变化，松手也一定照它做。
+       */
+      onHover: (_id, e) => noteDragRef(clickModsOf(e).altKey),
+      // 悬停时按着 ⌥ ⇒ 这个落点是「在这里留一枚引用」（建关系那一档光标），不是搬走
       effect: () => (isRefDrag() ? 'link' : 'move'),
       // 段根（页／天／查询记录）不参与拖拽；未知 id 也不接（别人的载荷可能不是块）
       accept: (id) => br.acceptDrag(id),
@@ -1155,11 +1160,16 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       onDrop: (draggedId, targetId, e) => {
         const el = rowOf(e)
         const zone = el ? zoneOf(e) : 'after'
+        /**
+         * 三区**原样**交给编辑器：悬停时说「移进这一行（作为子块）」的落点，松手就必须
+         * 真的成为它的子块。曾经把「目标是叶子」的 inside 静默折成 after —— 提示说移进、
+         * 结果只是挪到旁边，看起来像「拖了没反应」（目标本来就在它上面时完全没变化）。
+         */
         br.dropDrag(
           draggedId,
           targetId,
-          targetId && zone === 'inside' && !br.hasChildren(targetId) ? 'after' : zone,
-          // 与悬停提示同源：拖到一半松开 ⌥ 不改变这一次的结果
+          zone,
+          // 读**最后一次悬停**刷新下来的那一份：提示说的什么，落手就做什么
           isRefDrag(),
         )
         br.onMounted()

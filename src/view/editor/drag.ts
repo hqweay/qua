@@ -54,11 +54,11 @@ export class Drag {
     const id = draggedId
     if (!id) return
     /**
-     * **引用式拖拽**（起拖时按着 ⌥）：原块不动，在落点插一枚指向它的 `RefRun`。
+     * **引用式拖拽**（悬停时按着 ⌥）：原块不动，在落点插一枚指向它的 `RefRun`。
      *
      * 落点仍走同一份判据：`dropInsertSite` 与普通拖的 `dropMove` 只差「摘不摘自己」。
      * 整组多选 ⇒ 每块一枚引用，同笔事务、一次撤销（`insertRefDrop` 里收口）。
-     * 这一支**不从别的露面接**：⌥ 状态由正文起拖那一刻锁定，别的组件起拖时它是 false。
+     * 这一支**不从别的露面接**：⌥ 状态只由正文落点每次悬停刷新，别的组件起拖/悬停时不改它。
      */
     if (asRef) {
       const group = this.dragIds.length > 0 ? [...this.dragIds] : [id]

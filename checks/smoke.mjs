@@ -26848,17 +26848,19 @@ await check('T283 看板拖卡让位（FLIP）：手势落点出 200ms 动画、
 /**
  * **T284：⌥ 拖＝在落点插一枚引用，普通拖＝还是一条 move。**
  *
- * 先做反向验证（不按 ⌥ 时行为一个字没变），再验新那一支；两条都钉住
- * 「起拖时锁定 ⌥」：起拖不带 ⌥、落手带着它 ⇒ 仍移动；起拖带着、落手不带 ⇒ 仍插引用。
+ * 先做反向验证（不按 ⌥ 时行为一个字没变），再验新那一支。⌥ **跟着手走**：
+ * 拖拽期间键盘事件不派发，只有 `dragover` 带 `altKey` ⇒ 每次悬停刷新一次，
+ * 落手读**最后一次悬停**的那一份（提示说移到，松手就移动）。
+ * 所以这条用例钉的是「悬停时按着 ⌥ ⇒ 插引用」，不要求起拖那一刻按着。
  *
  * 断言口径（能失败才有意义）：
- *   · 普通拖：块数不变 ＋ `lastOps` 恰好一条 `block.upsert`（不是「看起来动了」）；
+ *   · 普通拖：块数不变 ＋ 恰好一条落点 op（不是「看起来动了」）；
  *   · ⌥ 拖：原块下标不动 ＋ 块数 +1 ＋ 新块的正文是一枚指向源块的引用 ＋ 库里没有 `_embed`
  *     ＋ 悬停提示说「引用」、光标是 link ＋ 一次 ⌘Z 全回；
  *   · 落点与悬停同源：插在**目标之后**，不是「自己的原位上/下一格」（差一格的经典症状）；
  *   · 整组多选：2 块拖出 2 枚引用（一笔事务 2 条 op），一次 ⌘Z 全回。
  */
-await check('T284 ⌥ 拖＝插引用：起拖锁定（普通拖仍一笔 move）／原块不动／库里无露面／一次撤销；整组 N 枚同笔事务', async () => {
+await check('T284 ⌥ 拖＝插引用：悬停按 ⌥ 即生效（普通拖仍一笔 move）／原块不动／无露面／一次撤销；整组 N 枚同笔事务', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const ids = await page.evaluate(() => {
@@ -26891,18 +26893,18 @@ await check('T284 ⌥ 拖＝插引用：起拖锁定（普通拖仍一笔 move�
      */
     let effect = ''
     Object.defineProperty(dt, 'dropEffect', { get: () => effect, set: (v) => (effect = v), configurable: true })
-    // 起拖**不带** ⌥，悬停与落手**带着**：结果仍按起拖时锁定的值（移动）
+    // 全程不带 ⌥：一次普通拖拽，结果必须与没有这个功能时一模一样
     const ev = (type, alt) =>
       new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 40, clientY: r.bottom - 2, altKey: alt })
     handle.dispatchEvent(ev('dragstart', false))
-    tgt.dispatchEvent(ev('dragover', true))
+    tgt.dispatchEvent(ev('dragover', false))
     const hint = document.querySelector('.dnd-hint')?.textContent ?? ''
-    tgt.dispatchEvent(ev('drop', true))
+    tgt.dispatchEvent(ev('drop', false))
     handle.dispatchEvent(ev('dragend', false))
     return { before, after: total(), ops: window.__qua.lastOps(), hint, effect }
   }, ids)
   assert(plain.after === plain.before, `普通拖不许改块数：${JSON.stringify({ before: plain.before, after: plain.after })}`)
-  assert(plain.hint.includes('移到'), `普通拖的提示仍说「移到…」（⌥ 只在起拖那一刻锁定）：${plain.hint}`)
+  assert(plain.hint.includes('移到'), `普通拖的提示仍说「移到…」：${plain.hint}`)
   assert(plain.effect === 'move', `普通拖的光标应是 move：${plain.effect}`)
   // 一次移动 = 一条 `{parent,prev}` 的落点 op（外加一条 modified 补丁，是既有口径）；
   // 「有没有多出一条移动、或变成插块」看的是**落点 op** 的条数与身份。
@@ -26916,7 +26918,7 @@ await check('T284 ⌥ 拖＝插引用：起拖锁定（普通拖仍一笔 move�
     `普通拖后 A 应落到 C 之后：${JSON.stringify(await order())}`,
   )
 
-  /* ---------- ② ⌥ 拖：起拖带 ⌥、落手不带 ⇒ 仍插引用（原块不动） ---------- */
+  /* ---------- ② ⌥ 在悬停时才按下（起拖不带）⇒ 插引用：这是最常见的手势 ---------- */
   const ref = await page.evaluate((a) => {
     const el = (id) => document.querySelector(`.blk[data-block-id="${id}"]`)
     const tgt = el(a.a) // 目标＝A（此刻排在 C 之后）
@@ -26932,10 +26934,11 @@ await check('T284 ⌥ 拖＝插引用：起拖锁定（普通拖仍一笔 move�
     Object.defineProperty(dt, 'dropEffect', { get: () => effect, set: (v) => (effect = v), configurable: true })
     const ev = (type, alt) =>
       new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 40, clientY: r.bottom - 2, altKey: alt })
-    handle.dispatchEvent(ev('dragstart', true))
-    tgt.dispatchEvent(ev('dragover', false))
+    // 起拖**不带** ⌥（起拖那一刻手上还没有它），拖到目标上才按 ⇒ 悬停与落手都带着
+    handle.dispatchEvent(ev('dragstart', false))
+    tgt.dispatchEvent(ev('dragover', true))
     const hint = document.querySelector('.dnd-hint')?.textContent ?? ''
-    tgt.dispatchEvent(ev('drop', false))
+    tgt.dispatchEvent(ev('drop', true))
     handle.dispatchEvent(ev('dragend', false))
     const after = list()
     const fresh = after.filter((x) => !beforeIds.has(x.id))
@@ -26994,6 +26997,37 @@ await check('T284 ⌥ 拖＝插引用：起拖锁定（普通拖仍一笔 move�
     `一次 ⌘Z 应把引用块全撤掉：${JSON.stringify(undone.order)}`,
   )
   assert(undone.srcHere, '撤销后原块必须还在')
+
+  /* ---------- ②b 悬停期松开 ⌥ ⇒ 提示回「移到」，落手也是移动（提示与写入同源） ---------- */
+  const released = await page.evaluate((a) => {
+    const el = (id) => document.querySelector(`.blk[data-block-id="${id}"]`)
+    const tgt = el(a.d)
+    const handle = el(a.b).querySelector('.handle')
+    const r = tgt.getBoundingClientRect()
+    const dt = new DataTransfer()
+    const total = () => window.__qua.snapshot().totalBlocks
+    const before = total()
+    const ev = (type, alt) =>
+      new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 40, clientY: r.bottom - 2, altKey: alt })
+    handle.dispatchEvent(ev('dragstart', true))
+    // 先按着 ⌥ 悬停一次（提示变「引用」），再松开 ⌥ 悬停一次（提示必须变回「移到」）
+    tgt.dispatchEvent(ev('dragover', true))
+    const hintRef = document.querySelector('.dnd-hint')?.textContent ?? ''
+    tgt.dispatchEvent(ev('dragover', false))
+    const hintMove = document.querySelector('.dnd-hint')?.textContent ?? ''
+    tgt.dispatchEvent(ev('drop', false))
+    handle.dispatchEvent(ev('dragend', false))
+    return { hintRef, hintMove, before, after: total() }
+  }, ids)
+  assert(released.hintRef.includes('引用'), `悬停带 ⌥ 时提示应说「引用」：${released.hintRef}`)
+  assert(released.hintMove.includes('移到'), `松开 ⌥ 后提示必须变回「移到」：${released.hintMove}`)
+  assert(released.after === released.before, `提示说移到，落手就必须是移动：块数 ${released.before} → ${released.after}`)
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(150)
+  assert(
+    JSON.stringify(await order()) === JSON.stringify(['ALT-B', 'ALT-C', 'ALT-A', 'ALT-D']),
+    `②b 的移动要撤销回去（后续用例依赖这个次序）：${JSON.stringify(await order())}`,
+  )
 
   /* ---------- ③ 整组多选 + ⌥：N 枚引用、同笔事务、一次撤销 ---------- */
   const rb = await page.evaluate((ids) => {
@@ -27061,6 +27095,122 @@ await check('T284 ⌥ 拖＝插引用：起拖锁定（普通拖仍一笔 move�
   await ctx.close()
   return `普通拖：1 条 move、块数不变；⌥ 拖：+1 块、原块不动、新块紧跟目标、1 枚 RefRun、无 _embed、1 次撤销全回；整组 2 枚同笔 2 op`
 })
+
+/**
+ * **T286：行中间那一区必须真的「移进」——提示与结果同源。**
+ *
+ * 曾经把「目标是叶子」的 inside 静默折成 after：悬停整行高亮、提示说「移进这一行
+ * （作为子块）」，松手却只是挪到旁边；目标本来就在源块正下方时，连位置都不变 ⇒
+ * 看起来像「拖了没反应」。这条用例把三件事同时钉住：
+ *   ① 中间 ⇒ 真的成为子块（且块数不变，不是复制）；
+ *   ② 下沿 ⇒ 仍是「后面」（去掉折算之后，before/after 不许被带弯）；
+ *   ③ ⌥ 同一个落点 ⇒ 在目标子树里插一枚指向被拖块的引用（原块不动）。
+ */
+await check('T286 拖到无子块的块中间 ⇒ 真的成为子块（不是折成 after）；下沿仍是后面；⌥ 同落点插子引用', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+  const ids = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const root = ed.doc.roots[0].id
+    const a = ed.insert.insertBlockAfter(root, 'IN-A')
+    const b = ed.insert.insertBlockAfter(a, 'IN-B')
+    const c = ed.insert.insertBlockAfter(b, 'IN-C')
+    return { root, a, b, c }
+  })
+  assert(ids.a && ids.b && ids.c, `前置：三个块都要建出来：${JSON.stringify(ids)}`)
+  await page.waitForTimeout(150)
+
+  /** 模型的真实父（store 里读，不信 DOM 缩进） */
+  const parentOf = (id) =>
+    page.evaluate((id) => {
+      let found = null
+      const walk = (list, parent) =>
+        list.forEach((x) => {
+          if (x.id === id) found = parent?.id ?? null
+          walk(x.children, x)
+        })
+      walk(window.__qua.__editor.store.blocks, null)
+      return found
+    }, id)
+  const kidsOf = (id) => page.evaluate((id) => window.__qua.__editor.store.find(id).children.length, id)
+  const total = () => page.evaluate(() => window.__qua.snapshot().totalBlocks)
+  const before = await total()
+
+  /* ① 中间 ⇒ 子块（A 本来紧挨在 B 上面：折成 after 的话「完全没变化」） */
+  const plain = await page.evaluate((a) => {
+    const el = (id) => document.querySelector(`.blk[data-block-id="${id}"]`)
+    const tgt = el(a.b)
+    const handle = el(a.a).querySelector('.handle')
+    const r = tgt.getBoundingClientRect()
+    const dt = new DataTransfer()
+    const ev = (type) =>
+      new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 40, clientY: r.top + r.height / 2 })
+    handle.dispatchEvent(ev('dragstart'))
+    tgt.dispatchEvent(ev('dragover'))
+    const hint = document.querySelector('.dnd-hint')?.textContent ?? ''
+    const zone = tgt.dataset.drop ?? ''
+    tgt.dispatchEvent(ev('drop'))
+    handle.dispatchEvent(ev('dragend'))
+    return { hint, zone, kids: window.__qua.__editor.store.find(a.b)?.children.map((k) => k.id) ?? [] }
+  }, ids)
+  assert(plain.zone === 'inside' && plain.hint.includes('移进'), `中间应亮 inside 且提示「移进…」：${JSON.stringify(plain)}`)
+  assert(plain.kids.includes(ids.a), `松手后 A 必须真的成为 B 的子块：${JSON.stringify(plain)}`)
+  assert((await parentOf(ids.a)) === ids.b, '模型里的父必须是 B（不是「看起来缩进了」）')
+  assert((await total()) === before, `「移进」是移动不是复制：块数 ${before} → ${await total()}`)
+
+  // 一次撤销回到原位（父＝root）
+  await page.keyboard.press(kbd('mod+z'))
+  await page.waitForTimeout(150)
+  assert((await parentOf(ids.a)) === ids.root, '一次 ⌘Z 应回到拖之前的父')
+
+  /* ② 下沿 ⇒ 仍是「后面」：A 落到 C 之后，C 不长出子块 */
+  const after = await page.evaluate((a) => {
+    const el = (id) => document.querySelector(`.blk[data-block-id="${id}"]`)
+    const tgt = el(a.c)
+    const handle = el(a.a).querySelector('.handle')
+    const r = tgt.getBoundingClientRect()
+    const dt = new DataTransfer()
+    const ev = (type) =>
+      new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 40, clientY: r.bottom - 2 })
+    handle.dispatchEvent(ev('dragstart'))
+    tgt.dispatchEvent(ev('dragover'))
+    const zone = tgt.dataset.drop ?? ''
+    tgt.dispatchEvent(ev('drop'))
+    handle.dispatchEvent(ev('dragend'))
+    return { zone, order: window.__qua.blocks().map((x) => x.text).filter((t) => t.startsWith('IN-')) }
+  }, ids)
+  assert(after.zone === 'after', `下沿应是 after：${JSON.stringify(after)}`)
+  assert((await parentOf(ids.a)) === ids.root, '下沿落点不许变成子块（只挪到旁边）')
+  assert((await kidsOf(ids.c)) === 0, 'C 不该因此长出子块')
+  assert(JSON.stringify(after.order) === JSON.stringify(['IN-B', 'IN-C', 'IN-A']), `A 应落到 C 之后：${JSON.stringify(after.order)}`)
+
+  /* ③ ⌥ 同一个落点 ⇒ 在 B 的子树里插一枚指向 C 的引用（C 不动） */
+  const ref = await page.evaluate((a) => {
+    const el = (id) => document.querySelector(`.blk[data-block-id="${id}"]`)
+    const tgt = el(a.b)
+    const handle = el(a.c).querySelector('.handle')
+    const r = tgt.getBoundingClientRect()
+    const dt = new DataTransfer()
+    const beforeIds = new Set(window.__qua.blocks().map((x) => x.id))
+    const ev = (type) =>
+      new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 40, clientY: r.top + r.height / 2, altKey: true })
+    handle.dispatchEvent(ev('dragstart'))
+    tgt.dispatchEvent(ev('dragover'))
+    tgt.dispatchEvent(ev('drop'))
+    handle.dispatchEvent(ev('dragend'))
+    const fresh = window.__qua.blocks().filter((x) => !beforeIds.has(x.id)).map((x) => x.id)
+    const atom = window.__qua.atoms().find((x) => x.blockId === fresh[0])
+    return { fresh, target: atom?.target?.id ?? '' }
+  }, ids)
+  assert(ref.fresh.length === 1, `⌥ + inside 应插一块：${JSON.stringify(ref)}`)
+  assert(ref.target === ids.c, `子引用应指向被拖的 C：${JSON.stringify(ref)}`)
+  assert((await parentOf(ref.fresh[0])) === ids.b, '新块应落在 B 的子树里（inside 不是 after）')
+  assert((await parentOf(ids.c)) === ids.root, '⌥ 拖不许搬动 C')
+
+  await ctx.close()
+  return `中间 ⇒ 真子块（父＝目标、块数不变、一次撤销回原位）；下沿 ⇒ 仍是兄弟；⌥ 同落点 ⇒ B 子树里一枚指向 C 的引用`
+})
+
 
 
 const known = results.filter((r) => !r.ok && r.known)
