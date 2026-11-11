@@ -28,36 +28,36 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   'core.editor/split-block': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false
-    app.ed.split(id, app.ed.caretOffset())
+    app.ed.struct.split(id, app.ed.caretOffset())
     return true
   },
   // ⌘A：接管原生全选（系统键归命令表）——见 `view/editor.ts` 的 `selectAll` 注释
   'core.editor/select-all': (_a, app) => app.ed.selectAll(),
   'core.editor/backspace': (_a, app) => {    // 合并成 ⇒ 已处理；没合并 ⇒ **放行给浏览器**（原生删除：命名的威力在于**允许不处理**）
-    return app.ed.backspaceAtCaret()
+    return app.ed.struct.backspaceAtCaret()
   },
   'core.editor/indent-block': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false
-    app.ed.indent(id)
+    app.ed.struct.indent(id)
     return true
   },
   'core.editor/outdent-block': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false
-    app.ed.outdent(id)
+    app.ed.struct.outdent(id)
     return true
   },
   'core.editor/move-block-up': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false
-    app.ed.move(id, -1)
+    app.ed.struct.move(id, -1)
     return true
   },
   'core.editor/move-block-down': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false
-    app.ed.move(id, 1)
+    app.ed.struct.move(id, 1)
     return true
   },
   'core.editor/toggle-collapse': (_a, app) => {
@@ -76,7 +76,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   'core.editor/duplicate-block': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false
-    app.ed.duplicate(id)
+    app.ed.struct.duplicate(id)
     app.toast(t('ui.toast.blockDuplicated'))
     return true
   },
@@ -84,7 +84,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     const id = curBlock(app)
     if (!id) return false
     // remove 对「有身份的装载根」等会静默拒绝——没删就不说「已删除」
-    if (!app.ed.remove(id)) return false
+    if (!app.ed.struct.remove(id)) return false
     app.toast(t('ui.toast.blockDeleted'))
     return true
   },
@@ -109,7 +109,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   'core.block/restore': (args, app) => {
     const id = (args as { blockId?: string }).blockId
     if (!id) return false
-    if (!app.ed.restoreFromTrash(id)) return false
+    if (!app.ed.struct.restoreFromTrash(id)) return false
     app.toast(t('ui.toast.blockRestored'))
     return true
   },

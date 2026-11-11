@@ -3968,7 +3968,7 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
     const rootId = ed.doc.roots[0].id
     const p = window.__qua.blocks().find((b) => b.id !== rootId && b.children === 0 && b.text !== '' && b.text.length > 4)
     const c = ed.insert.insertBlockAfter(p.id, '子块甲')
-    ed.indent(c)
+    ed.struct.indent(c)
     return p.id
   })
   const t0 = await rows()
@@ -4009,7 +4009,7 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
     const base = window.__qua.blocks().find((b) => b.id !== rootId && b.text.length > 3)
     const sid = ed.insert.insertBlockAfter(base.id, '甲乙丙')
     const kid = ed.insert.insertBlockAfter(sid, '子')
-    ed.indent(kid)
+    ed.struct.indent(kid)
     return { sid }
   })
   const sidDepth = await page.evaluate(
@@ -4040,7 +4040,7 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
     const rootId = ed.doc.roots[0].id
     const p = ed.insert.insertBlockAfter(rootId, '反缩进父')
     const c = ed.insert.insertBlockAfter(p, '')
-    ed.indent(c)
+    ed.struct.indent(c)
     return { c }
   })
   const outDepth0 = await page.evaluate(
@@ -4169,7 +4169,7 @@ await check('T30 聚焦块（section 根）文本中间 Enter ⇒ 左半留根�
     const rootId = ed.doc.roots[0].id
     const id = ed.insert.insertBlockAfter(rootId, '聚焦甲乙丙')
     const kid = ed.insert.insertBlockAfter(id, '聚焦子')
-    ed.indent(kid)
+    ed.struct.indent(kid)
     window.__qua.invoke('core.block/focus-block', { blockId: id })
     return { id, kid }
   })
@@ -4631,7 +4631,7 @@ await check('T35b 多选块拖拽：拖组里任一行的块标，整组按原�
   await page.evaluate((d) => {
     const ed = window.__qua.__editor
     const e = ed.insert.insertBlockAfter(d, 'MOVE-E')
-    ed.indent(e)
+    ed.struct.indent(e)
     return e
   }, ids.d)
   await page.waitForTimeout(200)
@@ -8682,7 +8682,7 @@ await check(
     })
     assert(pick.id, '第一页里应有一个叶子内容块')
 
-    await page.evaluate((id) => window.__qua.__editor.remove(id), pick.id)
+    await page.evaluate((id) => window.__qua.__editor.struct.remove(id), pick.id)
     await page.waitForTimeout(180)
 
     const after = await page.evaluate((t) => {
@@ -9889,7 +9889,7 @@ await check(
     await page.evaluate(() => window.__qua.__editor.toggleMark('bold'))
     await page.waitForTimeout(120)
 
-    await page.evaluate((id) => window.__qua.__editor.duplicate(id), target.id)
+    await page.evaluate((id) => window.__qua.__editor.struct.duplicate(id), target.id)
     await page.waitForTimeout(120)
     const ops = await opShape(page)
     // 克隆自带内容（格式随 run 走、原子换新 id）⇒ 复制叶子＝恰好一条结构 upsert
@@ -10939,7 +10939,7 @@ await check(
       const root = ed.doc.roots[0]
       const id = ed.insert.insertBlockAfter(root.id, '提取源冒烟')
       const childId = ed.insert.insertBlockAfter(id, '子块')
-      ed.indent(childId)
+      ed.struct.indent(childId)
       const walk = (list, parent) => {
         for (let i = 0; i < list.length; i++) {
           const b = list[i]
@@ -13920,7 +13920,7 @@ await check('T143 回收站：删掉的块看得见、能一键恢复回原位�
    * 删除走编辑器层（\`ed.remove\` 才是用户按删除时走的那一条：它带视图补偿）。
    * 命令面 \`core.editor/delete-block\` 取的是「当前块」，而这里要删的是**指定的一块**。
    */
-  await page.evaluate((id) => window.__qua.__editor.remove(id), target.id)
+  await page.evaluate((id) => window.__qua.__editor.struct.remove(id), target.id)
   await page.waitForTimeout(250)
 
   const rows = await page.evaluate(() => {
@@ -14425,7 +14425,7 @@ await check('T146 锚文本：目标被删 ⇒ dangling 仍显示 anchor（`anch
     setup.anchored,
   )
   await page.waitForTimeout(150)
-  await page.evaluate((ids) => ids.forEach((id) => window.__qua.__editor.remove(id)), [setup.t1, setup.t2])
+  await page.evaluate((ids) => ids.forEach((id) => window.__qua.__editor.struct.remove(id)), [setup.t1, setup.t2])
   await page.waitForTimeout(300)
 
   const dangling = await page.evaluate(
@@ -16461,7 +16461,7 @@ await check('T168 悬空：源被删 ⇒ 说一句实话＋一个移除入口；
   const before = await embedState(page)
   assert(before.state === 'ok', `前置：源还在 ⇒ ok：${before.state}`)
   // 软删源：露面块不在源的子树里，所以仍然留在模型里
-  await page.evaluate((sid) => window.__qua.__editor.remove(sid), fx.src)
+  await page.evaluate((sid) => window.__qua.__editor.struct.remove(sid), fx.src)
   await page.waitForTimeout(300)
   const after = await embedState(page)
   assert(after.embedId === before.embedId, `露面块仍在原位（不连坐删除）：${after.embedId}`)
@@ -16703,8 +16703,8 @@ await check(
       const e = ed.insert.insertBlockAfter(root.id, '')
       const k1 = e ? ed.insert.insertBlockAfter(e, '原有子块一') : null
       const k2 = k1 ? ed.insert.insertBlockAfter(k1, '原有子块二') : null
-      if (k1) ed.indent(k1)
-      if (k2) ed.indent(k2)
+      if (k1) ed.struct.indent(k1)
+      if (k2) ed.struct.indent(k2)
       const last = root.children[root.children.length - 1]
       const a = last ? ed.insert.insertBlockAfter(last.id, '搬来的块') : null
       return { rootId: root.id, a, e, k1, k2 }
@@ -17837,7 +17837,7 @@ await check('T176 悬停有中性反馈：回收站行 hover 出底色（--ui-bg
     return hit
   })
   assert(target, '前置：应有可删的普通块')
-  await page.evaluate((id) => window.__qua.__editor.remove(id), target)
+  await page.evaluate((id) => window.__qua.__editor.struct.remove(id), target)
   await page.waitForSelector('[data-card-id="trash"] [data-trash-row]')
   await page.locator('[data-card-id="trash"] [data-trash-row]').first().hover()
   // 底色有 120ms 的过渡：等它走完再读，读到的才是 hover 稳态
@@ -23153,7 +23153,7 @@ await check('T252 浮层里点预览的折叠三角：折展开合、浮层不�
   await page.evaluate((id) => {
     const ed = window.__qua.__editor
     const kid = ed.insert.insertBlockAfter(id, '折叠三角探针的子块')
-    ed.indent(kid)
+    ed.struct.indent(kid)
   }, probeId)
 
   await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
@@ -26367,7 +26367,7 @@ await check('T278 快捷小卡：加到快捷 → Shift+点并存 → 收成快�
   assert(!now.right.includes(key), '恢复不该顺手在右槽再造一颗快捷')
 
   // ⑥ 目标块删了：这一格留住并置灰，点它要出提示而不是静默打开一个空处
-  await page.evaluate((id) => window.__qua.__editor.remove(id), target)
+  await page.evaluate((id) => window.__qua.__editor.struct.remove(id), target)
   await page.evaluate((id) => window.__qua.invoke('core.dock/add-shortcut', { blockId: id }), other)
   await page.waitForTimeout(220)
   assert((await page.locator(tile).getAttribute('data-missing')) === '1', '目标块删了也要留住这一格（置灰占位）')
@@ -26640,7 +26640,7 @@ await check('T280 回收站清空：口径筛选可见、确认后永久删除�
     }
   })
   await page.evaluate((ids) => {
-    for (const id of ids) window.__qua.__editor.remove(id)
+    for (const id of ids) window.__qua.__editor.struct.remove(id)
   }, [targets.id1, targets.id2])
   await page.waitForTimeout(250)
 

@@ -84,7 +84,7 @@ export class Drag {
     if (this.dragIds.length > 1) {
       const group = [...this.dragIds]
       this.end()
-      this.ed.moveBlocksTo(group, targetId, zone)
+      this.ed.struct.moveBlocksTo(group, targetId, zone)
       return
     }
     const loc = locate(this.ed.doc, id)
@@ -94,7 +94,7 @@ export class Drag {
       if (!dragged) return
       const plan = dropMoveExternal(this.ed.doc, dragged, targetId, zone)
       this.end()
-      this.ed.structuralMove(id, plan, {
+      this.ed.struct.structuralMove(id, plan, {
         unfoldId: zone === 'inside' ? (plan?.parentId ?? null) : null,
         caretAt: { id, off: 0 },
       })
@@ -116,7 +116,7 @@ export class Drag {
     }
     const plan = dropMove(this.ed.doc, id, targetId, zone)
     this.end()
-    this.ed.structuralMove(id, plan, {
+    this.ed.struct.structuralMove(id, plan, {
       unfoldId: zone === 'inside' ? (plan?.parentId ?? null) : null,
       caretAt: { id, off: this.ed.sel?.aOff ?? 0 },
     })

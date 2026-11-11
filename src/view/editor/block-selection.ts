@@ -232,14 +232,14 @@ export class BlockSelection {
 
   /** 批量缩进（Tab）：只动最上层根，子树随块走；一笔撤销；选区保持 */
   indentSelectedBlocks(): boolean {
-    const ok = this.ed.indentMany(this.blockSelRoots().map((b) => b.id))
+    const ok = this.ed.struct.indentMany(this.blockSelRoots().map((b) => b.id))
     if (ok) this.paintBlockSel()
     return ok
   }
 
   /** 批量反缩进（Shift+Tab）：同上，逆序处理保持原有次序 */
   outdentSelectedBlocks(): boolean {
-    const ok = this.ed.outdentMany(this.blockSelRoots().map((b) => b.id))
+    const ok = this.ed.struct.outdentMany(this.blockSelRoots().map((b) => b.id))
     if (ok) this.paintBlockSel()
     return ok
   }
