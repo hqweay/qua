@@ -14,7 +14,7 @@
  * ⚠️ 这里的「能不能表达」是**形状判据**，不是语义判据：空组 `all:[]`／`any:[]` 可表达，
  *    它们分别是恒真／恒假，拼回来不能换。
  */
-import type { DraftOp } from './query-draft.ts'
+import { literalOf, type DraftOp } from './query-draft.ts'
 import { SELF, type QueryNode, type QuerySpec, type SortKey } from './query.ts'
 import { canonicalSpec } from './query-view.ts'
 
@@ -290,26 +290,6 @@ export function treeNodeOfRow(row: TreeRow): QueryNode | null {
   if (op === 'gte') return { prop: { id: row.field, gte: lit } }
   if (op === 'lt') return { prop: { id: row.field, lt: lit } }
   return { prop: { id: row.field, lte: lit } }
-}
-
-/**
- * 输入框里的文本 → 字面量。与 `query-draft.ts` 的 `literalOf` **同一口径**：
- * `true`／`false`／数字／带引号的 JSON 都按字面读，其余当字符串。
- * 这里不 import 它是因为它在草稿层、且不想让两层的依赖方向绕回来；两处都有单测钉住。
- */
-function literalOf(text: string): unknown {
-  const raw = text.trim()
-  if (raw === 'true') return true
-  if (raw === 'false') return false
-  if (raw !== '' && !Number.isNaN(Number(raw)) && /^-?\d+(\.\d+)?$/.test(raw)) return Number(raw)
-  if (raw.startsWith('"') || raw.startsWith('[') || raw.startsWith('{')) {
-    try {
-      return JSON.parse(raw) as unknown
-    } catch {
-      return text
-    }
-  }
-  return text
 }
 
 /** 树节点 → 条件；没填完的行返回 `null` */
