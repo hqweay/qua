@@ -984,6 +984,24 @@
   font-size: var(--ui-fs-sm);
   color: var(--ui-text-secondary);
 }
+/* 抬头收窄时，收缩量由能省略的两格（标题、条件摘要）吃掉；
+   其余件一律不换行不收缩——「0 条结果」「不分组」被压成竖排字
+   不是省空间，是把内容拆坏了。 */
+.queryview-head > * {
+  white-space: nowrap;
+}
+.queryview-count,
+.queryview-stale,
+.queryview-views,
+.queryview-group,
+.queryview-sort,
+.queryview-filter,
+.queryview-columns,
+.queryview-refresh,
+.queryview-foldall,
+.queryview-newrow {
+  flex: none;
+}
 .queryview-title {
   font-weight: 600;
   color: var(--ui-text);

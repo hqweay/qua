@@ -517,14 +517,23 @@ export class ViewHost {
      * 单独抄一份到挂载区就是第二份会漂的候选逻辑。条数挂载区已有 ⇒ 藏掉。
      */
     if (deps.derived) this.els.count.hidden = true
-    this.els.refresh.textContent = t('ui.query.refresh')
+    /**
+     * 抬头右侧的动作键一律**图标 ＋ 悬停/读屏文案**（与漏斗同一套画法）：
+     * 窄抬头里文字按钮会被挤成竖条，而刷新/排序/列这三个动作认图形就够了，
+     * 结构含义交给间距与分组去传达，不靠每个按钮自带一句名词。
+     */
+    renderIcon(this.els.refresh, 'lucide:rotate-ccw', 'rotate-ccw')
+    this.els.refresh.title = t('ui.query.refresh')
+    this.els.refresh.setAttribute('aria-label', t('ui.query.refresh'))
     this.els.refresh.addEventListener('click', () => this.refresh())
-    this.els.sort.textContent = t('ui.query.sort')
+    renderIcon(this.els.sort, 'lucide:arrow-up-down', 'arrow-up-down')
     this.els.sort.title = t('ui.query.sortTitle')
+    this.els.sort.setAttribute('aria-label', t('ui.query.sort'))
     this.els.sort.addEventListener('click', () => this.toggleSortPanel())
     this.els.filterBtn.addEventListener('click', () => this.toggleFilterPanel())
-    this.els.columnsBtn.textContent = t('ui.view.columns')
+    renderIcon(this.els.columnsBtn, 'lucide:columns-3', 'columns-3')
     this.els.columnsBtn.title = t('ui.view.columnsTitle')
+    this.els.columnsBtn.setAttribute('aria-label', t('ui.view.columns'))
     this.els.columnsBtn.addEventListener('click', () => this.toggleColumnsPanel())
     this.els.newRow.textContent = t('ui.view.newRow')
     this.els.newRow.title = t('ui.view.newRowTitle')
@@ -1351,10 +1360,11 @@ export class ViewHost {
       summary.type = 'button'
       summary.className = 'queryview-chip ui-ellipsis'
       summary.dataset.queryChip = 'summary'
-      // 收起态要读得出「这一屏按什么选的」；只报条数等于没说。
-      // 拆不动的形状 queryChips 会整块给「复合条件」，那时才退回条数。
+      // 收起态要读得出「这一屏按什么选的」：拆得动就只给条件本身——
+      // 「条件 · N 条」是在数数，条数抬头已有，重复一遍只是辅助文字。
+      // 拆不动的形状 queryChips 会整块给「复合条件」，那时才退回到条数摘要。
       const labels = queryChips(spec, this.deps.fields(), this.deps.choices, this.deps.refLabel, this.deps.tagLabel)
-      summary.textContent = labels.length > 0 ? `${treeSummary(spec)} · ${labels.join(' · ')}` : treeSummary(spec)
+      summary.textContent = labels.length > 0 ? labels.join(' · ') : treeSummary(spec)
       // 抬头窄时省略几何走 ui-ellipsis 原语；title 给全文，不让「读得出内容」变成「读不全」
       summary.title = summary.textContent
       summary.addEventListener('click', () => this.openTree())

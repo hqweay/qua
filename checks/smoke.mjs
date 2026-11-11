@@ -1951,7 +1951,7 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
         hidden: root?.hidden ?? true,
         title: root?.querySelector('.queryview-title')?.textContent ?? '',
         count: root?.querySelector('.queryview-count')?.textContent ?? '',
-        refresh: root?.querySelector('.queryview-refresh')?.textContent ?? '',
+        refresh: root?.querySelector('.queryview-refresh')?.getAttribute('aria-label') ?? '',
         stale: !(root?.querySelector('.queryview-stale')?.hidden ?? true),
         rows: [...(root?.querySelectorAll('.queryview-editor .blk .tx') ?? [])].map((e) => e.textContent),
       }
@@ -1960,7 +1960,7 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
   const first = await view()
   assert(first.present && !first.hidden, '打开查询块 ⇒ 查询视图应当可见')
   assert(first.rows.length === 1, `本页应只有 1 条待办，实际 ${JSON.stringify(first.rows)}`)
-  assert(first.refresh.length > 0, '刷新按钮必须有文案（D6）')
+  assert(first.refresh.length > 0, '刷新按钮必须可读（图标也要带读屏文案）')
   assert(!first.stale, '刚冻结完不该显示「可能已过期」')
   /**
    * 结果行可能来自库的任意深度 ⇒ 行首要标出祖先链；否则同一句话在别的页里
@@ -18226,7 +18226,7 @@ await check('T188 条件树：就地展开、拆成一行一句话；应用一�
   }))
   assert(collapsed.treeHidden, `收起后树要隐藏：${JSON.stringify(collapsed)}`)
   assert(collapsed.chips.length === 1, `收起后只剩一条 chip：${JSON.stringify(collapsed.chips)}`)
-  assert(collapsed.chips[0].includes('条件'), `那条 chip 要说清「这是条件」：${JSON.stringify(collapsed.chips)}`)
+  assert(collapsed.chips[0].includes('完成'), `那条 chip 要直接说条件本身，不是「条件 · N 条」这种数数：${JSON.stringify(collapsed.chips)}`)
   await page.locator('.queryview-filters [data-query-chip="summary"]').click()
   await page.waitForTimeout(250)
   assert(await page.evaluate(() => document.querySelector('.queryview-tree')?.hidden === false), '点 chip 应重新展开条件树')

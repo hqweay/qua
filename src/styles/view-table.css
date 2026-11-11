@@ -98,6 +98,32 @@
 .queryview-filter[hidden] {
   display: none;
 }
+/* 排序／列／刷新与漏斗同一套图标画法：文案退到 title 与读屏，
+   三态只有「闲／悬停／激活」，颜色语义不另发明一份。 */
+.queryview-sort,
+.queryview-columns {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.queryview-sort:hover,
+.queryview-columns:hover {
+  color: var(--ui-text);
+}
+.queryview-sort[hidden],
+.queryview-columns[hidden] {
+  display: none;
+}
+.queryview-sort svg,
+.queryview-columns svg,
+.queryview-refresh svg {
+  width: 14px;
+  height: 14px;
+}
 .queryview-filterpanel {
   margin: var(--ui-gap-1) 0 var(--ui-gap-2);
   padding: var(--ui-gap-2) var(--ui-gap-3);
