@@ -251,8 +251,12 @@ export const BINDINGS: Binding[] = [
   { command: 'core.embed/paste', kind: 'menu', when: 'blockFocused', group: 'embedPaste/1', order: 10, args: { view: 'mirror' }, layer: 'core', label: t('ui.embed.asMirror') },
   { command: 'core.embed/paste', kind: 'menu', when: 'blockFocused', group: 'embedPaste/1', order: 20, args: { view: 'table' }, layer: 'core', label: t('ui.embed.asTable') },
 
-  /* ================= 块选区菜单 ================= */
-  { command: 'core.editor/delete-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 10, layer: 'core', keywords: [t('menu.kw.delete')] },
+  /* ================= 块选区菜单 =================
+     与单块菜单同一条判据：**删除压轴、带标题分节**（危险动作位置恒定）。
+     菜单项的位置由误触成本与寻得成本一起定——删除的误触成本全菜单最高，
+     寻得成本却是低优先（⌫/⌦ 键位在，菜单只是指针路径），所以它不占首行；
+     首行留给高频无害的结构动作。组序上 `2-clear` < `2-delete`，
+     无害的「取消选择」始终在删除上方。 */
   { command: 'core.editor/indent-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 15, layer: 'core', keywords: ['tab', t('menu.kw.indent')] },
   { command: 'core.editor/outdent-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 16, layer: 'core', keywords: ['shift tab', t('menu.kw.outdent')] },
   { command: 'core.editor/toggle-todo-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 17, layer: 'core', keywords: ['todo', 'task'] },
@@ -261,6 +265,8 @@ export const BINDINGS: Binding[] = [
   // 剪切：⌘X 有键位，菜单补的是指针用户的路（与复制同处一组；移动发生在粘贴那一刻）
   { command: 'core.editor/cut-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 40, layer: 'core', keywords: ['cut', 'move'] },
   { command: 'core.selection/clear', kind: 'menu', when: 'blockSelection', group: 'blockSel/2-clear', order: 10, layer: 'core' },
+  // 删除压轴（单独成组才有「删除」标题分节）；复用单块删除组的同一词典键
+  { command: 'core.editor/delete-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/2-delete', order: 10, layer: 'core', keywords: [t('menu.kw.delete')] },
 
   /* ================= 斜杠菜单（输入 `/`） =================
      成员判据：只收「**这里要有什么、这一行变成什么**」——插入新内容

@@ -13,6 +13,8 @@ const GROUP_TITLES: Record<string, string> = {
   'block/4-inline': t('menu.group.inline'),
   'block/5-view': t('menu.group.viewNav'),
   'block/6-delete': t('menu.group.delete'),
+  // 多选菜单的删除组：与单块菜单同一条判据——危险动作压轴、带标题分节（复用同一个词典键）
+  'blockSel/2-delete': t('menu.group.delete'),
   'blockCopy/1': t('menu.group.copy'),
   'blockInsert/1': t('menu.group.insert'),
   'slash/1-structure': t('menu.group.structure'),

@@ -125,3 +125,19 @@ test('块菜单：删除同位、复制/插入收子菜单、组标题人人有�
     assert.ok(g === '' || groupTitle(g) !== g, `分组 ${g} 缺标题，裸 id 不该露给用户`)
   }
 })
+
+test('多选菜单：删除压轴分节，不占首行（与单块菜单同一条判据）', () => {
+  const sel = BINDINGS.filter((b) => b.kind === 'menu' && (b.group ?? '').startsWith('blockSel/'))
+  const del = sel.filter((b) => b.command === 'core.editor/delete-selected-blocks')
+  assert.equal(del.length, 1, '删除选中的块应恰有一行')
+  assert.equal(del[0]!.group, 'blockSel/2-delete', '删除应住压轴删除组：危险动作位置恒定（单块菜单同判据）')
+  assert.equal(groupTitle('blockSel/2-delete'), '删除', '删除组要带标题分节，裸 id 不该露给用户')
+  // 首行给高频无害动作：删除不许悄悄挪回最前（误触概率最高的位置留给它自己）
+  const sorted = [...sel].sort(
+    (a, b) => (a.group ?? '').localeCompare(b.group ?? '') || (a.order ?? 100) - (b.order ?? 100),
+  )
+  assert.notEqual(sorted[0]!.command, 'core.editor/delete-selected-blocks', '删除不许占多选菜单首行')
+  // 取消选择无害，必须留在删除上方（组序 2-clear < 2-delete 兜住）
+  const clearIdx = sorted.findIndex((b) => b.command === 'core.selection/clear')
+  assert.ok(clearIdx >= 0 && clearIdx < sorted.length - 1, '取消选择应在删除之上')
+})
