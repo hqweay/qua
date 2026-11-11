@@ -1075,7 +1075,7 @@ export function setupPanels(deps: PanelsDeps) {
     const added = owners.entriesOf(mountHost).find((e) => !before.has(e.id))
     renderMounts()
     if (!added) return
-    // 新栏当场切过去：建了不看，「点了没生效」的另一种长相（激活的是这一栏自己的表格视图）
+    // 新栏当场切过去：建了不看，「点了没生效」的另一种长相
     mountInstances.get(host.id)?.area.activateTab(added.id)
     refocusAfterMountOp()
   }
@@ -1085,8 +1085,8 @@ export function setupPanels(deps: PanelsDeps) {
    *
    * 为什么必须做：撤销的键位挂在 `editorTextFocus` 上——点过「＋」或「复制为查询栏」
    * 之后焦点留在按钮上，⌘Z 按了不进编辑器，「建栏可撤销」对用户不成立
-   * （与条件树应用后的 `refocusBody` 同一条理由）。目标是正文编辑器：
-   * 新栏的查询体没有可聚焦的文本面（表格不是 contenteditable）。
+   * （与条件树应用后的 `refocusBody` 同一条理由）。目标是**主编辑器**：键位与撤销
+   * 都认它，焦点留在按钮或新栏的查询体上都不算交回去。
    */
   function refocusAfterMountOp(): void {
     deps.getMainEd().container.focus()

@@ -2318,15 +2318,7 @@ await check('T193 面板查询与查询块解耦：local 栏用 $self 出结果�
   }, host.id)
   assert(tabId !== '', '前置：应加出一栏 local 查询')
   await page.waitForTimeout(300)
-  // 新栏缺省是表格；切回大纲数行（这一条钉的是锚点与结果，不是看法）
-  await page.evaluate(
-    ({ id, tabId }) =>
-      window.__qua.invoke('core.view/set-active', {
-        owner: { kind: 'tab', host: { kind: 'block', blockId: id }, tabId },
-        viewId: '',
-      }),
-    { id: host.id, tabId },
-  )
+  // 新栏缺省就是大纲；这一段钉的是锚点与结果，不是看法
   await mountTab(page, tabId)
   await page.waitForTimeout(350)
   const rowsBefore = await mountRows(page)
@@ -2749,7 +2741,7 @@ await check('T195 查询在正文内联渲染：不打开就在原位出结果�
   return `内联 ${inline.rows.length} 条；打开后仍只有 1 台宿主（在行下）`
 })
 
-await check('T216 挂载栏本地查询：切到「大纲」后仍能切回；抬头不重复块名；空条件不摆组合方式', async () => {
+await check('T216 挂载栏本地查询：缺省大纲仍有抬头/条件 chip；切表格后仍能切回；空条件不摆组合方式', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const hostId = await page.evaluate(() => {
@@ -2779,36 +2771,43 @@ await check('T216 挂载栏本地查询：切到「大纲」后仍能切回；�
         titleHidden: m?.querySelector('.queryview-title')?.hidden ?? true,
         count: m?.querySelector('.queryview-count')?.textContent ?? '',
         table: Boolean(m?.querySelector('.tv-rows')),
-        outlineRows: m?.querySelectorAll('.queryview-editor .blk').length ?? 0,
       }
     })
 
-  const table = await mountState()
-  assert(table.current === '表格' && table.table, `前置：新查询默认是一张表：${JSON.stringify(table)}`)
+  const fresh = await mountState()
+  assert(fresh.current === '大纲' && !fresh.table, `缺省应落大纲（不补命名视图）：${JSON.stringify(fresh)}`)
+  /**
+   * **当初补那张表是为了买「有抬头」**：那时条件/范围芯片只住在命名视图抬头里，
+   * 新栏一张视图都没有 ⇒ 范围看不见、0 条结果没解释、关掉构建器没有重入口。
+   * 现在抬头、条数、chip 都由查询抬头按基础条件与拥有者画，不依赖命名视图 ——
+   * 缺省大纲必须照样三样都在，否则就是把那时修好的症状请回来。
+   */
+  assert(fresh.headVisible, `缺省大纲仍要有抬头：${JSON.stringify(fresh)}`)
+  assert(fresh.count.includes('条结果'), `0 条结果仍要有一句话解释：${JSON.stringify(fresh)}`)
+  assert(fresh.chip !== '', `缺省大纲仍要有条件 chip（点开可重开构建器）：${JSON.stringify(fresh)}`)
   /**
    * 挂载栏挂在块底下：块名已经在 tab 上，结果抬头不再重复一遍。
    * 留下的是「条数」——那是这一栏自己的信息。
    */
-  assert(table.titleHidden, `挂载栏不许再把块名写成第二行标题：${JSON.stringify(table)}`)
-  assert(table.count.includes('条结果'), `条数仍要留着：${JSON.stringify(table)}`)
+  assert(fresh.titleHidden, `挂载栏不许再把块名写成第二行标题：${JSON.stringify(fresh)}`)
 
   /**
-   * **切到「大纲」之后仍要能切回去**：大纲也归视图宿主，抬头整台都在
+   * **切到「表格」之后仍要能切回**：两种看法都归视图宿主，抬头整台都在
    * （同右侧一颗下拉）——顺带，条件 chip 在大纲里也出现了（旧形状没有）。
    */
-  await switchView(page, '#editor .mount', '大纲')
-  const outline = await mountState()
-  assert(!outline.table && outline.outlineRows >= 0, `切到大纲：视图体应撤掉：${JSON.stringify(outline)}`)
-  assert(outline.headVisible && outline.current === '大纲', `大纲仍由视图宿主画抬头：${JSON.stringify(outline)}`)
-  assert(outline.chip.includes('条件') || outline.chip !== '', `大纲也要有条件 chip（可点开改条件）：${JSON.stringify(outline)}`)
-
   await switchView(page, '#editor .mount', '表格')
+  const table = await mountState()
+  assert(table.current === '表格' && table.table, `切到表格：视图体应出来：${JSON.stringify(table)}`)
+
+  await switchView(page, '#editor .mount', '大纲')
   const back = await mountState()
-  assert(back.current === '表格' && back.table, `从大纲能切回表格：${JSON.stringify(back)}`)
+  assert(!back.table && back.headVisible && back.current === '大纲', `从表格能切回大纲、抬头不丢：${JSON.stringify(back)}`)
+  assert(back.chip !== '', `大纲也要有条件 chip（可点开改条件）：${JSON.stringify(back)}`)
 
   /**
    * 空条件：根组没有子项时，不摆「且／或 ＋ 非」——那是在给不存在的子项选关系。
    * 空态本身也不摆占位大图；选项是一组字段（标签在上、控件在下）。
+   * 这一下点的是**缺省大纲态**的 chip：顺带钉住「关掉构建器后还有重入口」。
    */
   await page.locator('#editor .mount .queryview-filters .queryview-chip').first().click()
   await page.waitForTimeout(350)
@@ -2829,7 +2828,7 @@ await check('T216 挂载栏本地查询：切到「大纲」后仍能切回；�
   assert(empty.limit === '不限', `限数无值时应说「不限」，不是一个空框：${JSON.stringify(empty.limit)}`)
 
   await ctx.close()
-  return `默认表格；大纲仍可切回；挂载栏不重复块名；空条件隐藏组合头（${empty.labels.join(' / ')}）`
+  return `缺省大纲＋抬头/chip 仍在；表格可切可回；挂载栏不重复块名；空条件隐藏组合头（${empty.labels.join(' / ')}）`
 })
 
 await check('T196 查询块在右槽窗口也画结果：同一台 ViewHost；折叠收的是身体', async () => {
@@ -13432,10 +13431,7 @@ await check('T134 日记的自定义栏跟随今天：加一栏 ⇒ 推到明天
   const myKey = await keyOf()
   assert(myKey !== '', `应有「${label}」那一栏`)
   await mountTab(page, myKey)
-  // 新栏缺省带一张表格（视图抬头才长得出条件/范围芯片）；这一段验的是**大纲求值**，先切回大纲
-  await page.evaluate((id) => {
-    window.__qua.invoke('core.view/set-active', { owner: { kind: 'tab', host: { kind: 'journal' }, tabId: id }, viewId: '' })
-  }, myKey)
+  // 新栏缺省就是大纲（不补命名视图）；这一段验的是**大纲求值**
   await page.waitForTimeout(350)
   const rows = await page.evaluate((hostId) => {
     const ids = [...document.querySelectorAll('#editor .mount .queryview-editor .blk')].map((e) => e.dataset.blockId)
@@ -17640,10 +17636,7 @@ await check('T178 local tab：加一栏不建块；切表格；刷新只影响�
 
   // 切到这一栏：它是「全库待办」，库里不止一条
   await mountTab(page, added.key)
-  // 新栏缺省带一张表格；先切回大纲再数行（下面还会显式建一张表，钉「配置住在这一栏」）
-  await page.evaluate(({ host, id }) => {
-    window.__qua.invoke('core.view/set-active', { owner: { kind: 'tab', host: { kind: 'block', blockId: host }, tabId: id }, viewId: '' })
-  }, { host: before.host, id: added.key })
+  // 新栏缺省就是大纲，直接数行（下面还会显式建一张表，钉「配置住在这一栏」）
   await page.waitForTimeout(350)
   const rows = await mountRows(page)
   assert(rows > 0, `这一栏应显示命中：${rows} 行`)
@@ -17747,13 +17740,7 @@ await check('T182 上下文：同一份正文条件，顶层查询块看全库�
   )
   assert(key !== '', '应有「本页探针」这一栏')
   await mountTab(page, key)
-  // 新栏缺省带一张表格；这一段钉的是**方向条件**（大纲分支），先切回大纲再数行
-  await page.evaluate((host) => {
-    const id = [...document.querySelectorAll('#editor .mount .mount-tabwrap')].find(
-      (x) => (x.querySelector('.mount-tab')?.textContent ?? '') === '本页探针',
-    )?.dataset.tab
-    window.__qua.invoke('core.view/set-active', { owner: { kind: 'tab', host: { kind: 'block', blockId: host }, tabId: id }, viewId: '' })
-  }, probe[0].page)
+  // 新栏缺省就是大纲；这一段钉的是**方向条件**
   await page.waitForTimeout(350)
   const localRows = await mountRows(page)
   assert(localRows === 1, `挂在页上的栏只看这一页（1 条），实际 ${localRows} 行：{up:$self} 的 $self 是宿主`)

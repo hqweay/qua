@@ -364,14 +364,8 @@ export interface App {
    * 加一栏 **local tab**：这一栏自己拥有条件与视图。**不建块**（块数一个都不变）。
    *
    * 默认路径就是它：随手加一栏不该在树里多一个对象，也没有「删块 tab 怎么办」。
+   * 没给视图时不补命名视图 ⇒ 缺省大纲；要别的看法由调用方显式传 `views`。
    * @returns 新栏的稳定 id（写不进去 ⇒ `''`）
-   */
-  /**
-   * 加一栏 **local tab**。
-   *
-   * `emptyView` 只在「没给任何视图」时决定是否补一张默认表格：
-   * 新建栏补（否则条件/范围芯片没有落点），把一次现有看法固定下来时不补
-   * （用户选的就是大纲，补一张表等于替他换了个看法）。
    */
   addLocalTab(
     host: MountHost,
@@ -379,7 +373,6 @@ export interface App {
     spec: QuerySpec,
     views?: ViewConfig[],
     activeView?: string,
-    emptyView?: 'table' | 'none',
     /** 指定栏 id（占用内置栏稳定 id ⇒ 原地替换那一栏）；已占用 ⇒ 忽略，回退随机 id */
     id?: string,
   ): string

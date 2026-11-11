@@ -465,6 +465,11 @@ export function derivedTemplateOf(
 ): { spec: QuerySpec; views: ViewConfig[] } | null {
   const spec = derivedSpecOf(host, forest, source)
   if (!spec) return null
+  /**
+   * 这里**仍默认表格**，与「＋ 新建栏」的缺省大纲不同，不是漏改：物化出来的栏带着
+   * 现算好的非空条件与本源的派生列（引用次数／命中词／共同标签），表格是那些列的载体；
+   * 而新建栏出生是空条件、0 条结果，缺省该给能直接配条件的大纲。
+   */
   return {
     spec,
     views: [{ id: mkViewId(), kind: 'table', table: { columns: derivedColumns(source) } }],

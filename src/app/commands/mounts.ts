@@ -10,17 +10,14 @@
 import {
   canonicalSpec,
   canonicalViews,
-  defaultColumnsForSource,
   journalDate,
   mkTabId,
-  mkViewId,
   mountEntriesOf,
   moveMountEntry,
   todayISO,
   type MountEntry,
   type MountHost,
   type Source,
-  type ViewConfig,
 } from '../../core/index.ts'
 import type { App } from '../../core/infra/ports.ts'
 import type { MountsDeps } from './types.ts'
@@ -66,12 +63,14 @@ export function mountCommands(
     /**
      * 加一栏 **local**：这一栏自己拥有条件与视图。**不建块。**
      *
-     * 一条视图都没给时默认配一张**表格**并设为激活 —— 那是「新建一栏」时的选择，
-     * 不是「所有查询缺省都是表格」（块查询的缺省仍是大纲）。
-     * 没有激活视图时这一栏只有大纲分支，条件与范围（这一块之下/全库）的
-     * 芯片住在视图抬头里 —— 缺了这张表，「范围只到宿主这一块」在屏幕上无处可看。
+     * 没给视图时**不补命名视图** ⇒ 缺省落在大纲（源的默认看法）。条件与范围芯片
+     * 住在查询抬头里、按基础条件与拥有者画，不依赖有没有命名视图；要看表格／卡片
+     * 由用户显式加一张，那时列才第一次算出来。
+     *
+     * 「固定派生栏」是另一条路径：物化时已带着现算好的条件与本源的派生列，
+     * 模板显式给一张表格（见 `core/views/mount.ts`）。
      */
-    addLocalTab: (host, label, spec, views, activeView, emptyView, id) => {
+    addLocalTab: (host, label, spec, views, activeView, id) => {
       if (!editable(host)) return ''
       const name = label.trim()
       if (name === '' || !spec || typeof spec !== 'object' || !spec.where) return ''
@@ -83,13 +82,7 @@ export function mountCommands(
       const existing = new Set(entriesOf(host).map((e) => e.id))
       const tabId = id !== undefined && id !== '' && !existing.has(id) ? id : mkTabId()
       const entry: MountEntry = { id: tabId, kind: 'local', label: name, spec: canon, views: list }
-      let active = activeView !== undefined && activeView !== '' ? activeView : ''
-      if (list.length === 0 && emptyView !== 'none') {
-        // 列在第一次建表时算一次（与 `core.view/add` 同一条口径），之后不随结果漂移
-        const view: ViewConfig = { id: mkViewId(), kind: 'table', table: { columns: defaultColumnsForSource(source, d.kb) } }
-        entry.views = [view]
-        active = view.id
-      }
+      const active = activeView !== undefined && activeView !== '' ? activeView : ''
       if (active !== '') entry.activeView = active
       write(host, [...entriesOf(host), entry])
       return entry.id
