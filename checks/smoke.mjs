@@ -6470,7 +6470,11 @@ await check('T16 每一页的锚点与 DOM 表现逐条对得上（标记顺序�
         .marks()
         .filter((m) => visible.has(m.blockId))
         .map((m) => `${m.type}::${visible.get(m.blockId).text.slice(m.start, m.end)}`)
-      const dom = [...document.querySelectorAll('#editor .mk')].map((e) => `${e.className.replace('mk mk-', '')}::${e.textContent}`)
+      // 值轴 mark 的槽住 data-slot（颜色值由 CSS 按槽给），DOM 侧要拼回「键:槽」才与模型描述符同形
+      const dom = [...document.querySelectorAll('#editor .mk')].map((e) => {
+        const key = e.className.replace('mk mk-', '')
+        return `${e.dataset.slot ? `${key}:${e.dataset.slot}` : key}::${e.textContent}`
+      })
       return { model: [...model].sort(), dom: [...dom].sort() }
     })
     const missing = r.model.filter((x) => !r.dom.includes(x))
@@ -6478,7 +6482,7 @@ await check('T16 每一页的锚点与 DOM 表现逐条对得上（标记顺序�
     assert(missing.length === 0 && extra.length === 0, `第 ${i + 1} 页锚点与 DOM 不一致｜模型多出：${JSON.stringify(missing.slice(0, 3))}｜DOM 多出：${JSON.stringify(extra.slice(0, 3))}`)
     samples.push(...r.model)
   }
-  assert(samples.some((x) => x === 'highlight::先高亮'), `顺序样本（先高亮）没生效：${JSON.stringify(samples.slice(0, 8))}`)
+  assert(samples.some((x) => x === 'bg:yellow::先高亮'), `顺序样本（先高亮）没生效：${JSON.stringify(samples.slice(0, 8))}`)
   assert(samples.some((x) => x === 'bold::后加粗'), `后加粗的区间应恰好落在「后加粗」上：${JSON.stringify(samples.filter((x) => x.includes('加粗')))}`)
   await ctx.close()
   return `${samples.length} 条锚点逐条与 DOM 对齐（跨 ${pageCount} 页，含「先高亮后加粗」的顺序样本）`
