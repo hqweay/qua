@@ -1608,8 +1608,18 @@ export class BlockEditor {
           continue
         }
         if (c.nodeType !== Node.ELEMENT_NODE) continue
-        const cls = (c as HTMLElement).className
-        if (typeof cls === 'string' && ALLOWED_ROW_CHILDREN.has(cls)) continue
+        /**
+         * 白名单按**类名集合**匹配，不按 `className` 全等。
+         *
+         * 渲染层放进去的节点会带状态类：`block-dom` 里 `if (todo === 'done') tx.classList.add('done')`
+         * ⇒ 完成态任务块的正文槽 className 是 `"tx done"`。全等匹配认不出它，就会把**正文槽
+         * 连同里面的整段字**当游离内容删掉。实测（2026-11-12）：点「完成态任务块」的块下属性行，
+         * 正文整段消失，而模型一字未动（⌘Z 无效、聚焦别处再回来又画出来）。
+         *
+         * 判据放宽到「有任一白名单类」不损原意：这一格本来就是「渲染层自己放的那几种」，
+         * 加状态类不改它的身份。
+         */
+        if ([...(c as HTMLElement).classList].some((k) => ALLOWED_ROW_CHILDREN.has(k))) continue
         blk.removeChild(c)
       }
     }

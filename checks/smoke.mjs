@@ -27780,6 +27780,91 @@ await check('T291 说明层：data-tip 悬停延迟浮出、离开收掉、滚�
 
 
 
+/**
+ * T292｜**完成态任务块的正文不许被「收光标」清掉**。
+ *
+ * 现场（2026-11-12 用户）：点块下属性行（「创建于 …」）右侧的空白，整段正文当场消失，
+ * 而模型一字未动 —— ⌘Z 无效，聚焦到别的块再回来又画出来（＝DOM 被删，不是数据被删）。
+ *
+ * 根因：`reclaimCaret` 清 `.blk` 里游离节点时按 `className` **全等**过白名单，而完成态
+ * 会给正文槽加状态类（`class="tx done"`）⇒ 认不出 `.tx`，连同里面的整段字一起 `removeChild`。
+ * 判据放宽成「有任一白名单类」不损原意：那一格本来就是渲染层自己放的那几种。
+ *
+ * 钉三件：`.tx` 还在、正文与模型一字不差、行几何没塌（高度／宽度）。
+ */
+await check('T292 完成态任务块：点块下属性行空白，正文槽不许被当游离节点删掉', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.evaluate(() => window.__qua.invoke('core.journal/today', {}))
+  await page.waitForTimeout(400)
+
+  const TEXT = '完成态这一块的正文要够长，长到会折行，才看得出正文槽没了这件事'
+  const fx = await page.evaluate(() => {
+    const inv = (n, a = {}) => window.__qua.invoke(n, a)
+    const ed = window.__qua.__editor
+    const rows = ed.rows().map((r) => r.block)
+    const host = rows.find((b) => b.children.length >= 2) ?? rows[rows.length - 1]
+    // 父块声明「创建时间」⇒ 直接子块出块下属性行（用户现场那一行）
+    inv('core.props/set-child-props', { blockId: host.id, propId: 'core/created', on: true })
+    const h = ed.store.blocks.find((b) => b.id === host.id)
+    return { host: host.id, target: h.children[0].id }
+  })
+  await page.waitForTimeout(300)
+
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), fx.target)
+  await page.waitForTimeout(150)
+  await page.keyboard.type(TEXT)
+  await page.waitForTimeout(250)
+  // 勾成任务 ⇒ 再翻一次成「完成」：只有完成态才给 `.tx` 加 `done` 类
+  await page.evaluate((id) => window.__qua.__editor.toggleTodo(id), fx.target)
+  await page.waitForTimeout(150)
+  await page.evaluate((id) => window.__qua.__editor.toggleTodo(id), fx.target)
+  await page.waitForTimeout(300)
+
+  const read = (id) =>
+    page.evaluate((bid) => {
+      const b = window.__qua.blocks().find((x) => x.id === bid)
+      const row = document.querySelector(`.blk[data-block-id="${bid}"]`)
+      const tx = row?.querySelector(':scope > .tx')
+      return {
+        model: b?.text ?? null,
+        todo: row?.dataset.todo ?? '',
+        txClass: (tx?.className ?? '').toString(),
+        hasTx: Boolean(tx),
+        txText: tx?.textContent ?? '',
+        txW: tx ? Math.round(tx.getBoundingClientRect().width) : 0,
+        linePresent: Boolean(row?.querySelector(':scope > .blk-props-line')),
+        h: row ? Math.round(row.getBoundingClientRect().height) : 0,
+      }
+    }, id)
+
+  const before = await read(fx.target)
+  assert(before.todo === 'done', `前置：这块该是完成态：${JSON.stringify(before)}`)
+  assert(before.txClass.includes('done'), `前置：完成态正文槽该带 done 类：${JSON.stringify(before)}`)
+  assert(before.linePresent, '前置：块下属性行该在（父块声明了创建时间）')
+  assert(before.txText.includes(TEXT.slice(0, 8)), `前置：正文该写进去了：${JSON.stringify(before)}`)
+
+  // 光标挪去别的块，再点属性行右侧空白（用户现场那一下）
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), fx.host)
+  await page.waitForTimeout(200)
+  const site = await page.evaluate((id) => {
+    const line = document.querySelector(`.blk[data-block-id="${id}"] > .blk-props-line`)
+    const r = line.getBoundingClientRect()
+    return { x: r.right - 30, y: r.top + r.height / 2 }
+  }, fx.target)
+  await page.mouse.click(site.x, site.y)
+  await page.waitForTimeout(350)
+
+  const after = await read(fx.target)
+  assert(after.hasTx, `正文槽被删了（点属性行的空白不该动它）：${JSON.stringify(after)}`)
+  assert(after.txText === before.txText, `正文被清空了：${JSON.stringify({ before, after })}`)
+  assert(after.model === before.model, `模型不该变：${JSON.stringify({ before, after })}`)
+  assert(after.h === before.h && after.txW > 0, `行几何不许塌：${JSON.stringify({ before, after })}`)
+
+  await ctx.close()
+  return `完成态块点属性行空白：正文槽与正文都在（白名单按类名集合认，不按 className 全等）`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 
