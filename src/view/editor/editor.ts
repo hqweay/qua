@@ -306,7 +306,7 @@ export interface ViewOpts {
 
 export interface ViewEvents {
   /** 任何模型变化（持久化 + 角标刷新）。格式/原子改动也是内容改动 ⇒ 归 `text` */
-  change?: (kind: 'text' | 'struct' | 'view' | 'load') => void
+  change?: (kind: 'text' | 'struct' | 'view' | 'load' | 'note') => void
   /** 光标前是不是在敲一个触发词（`/`／`#`／`@`）；`null` ＝ 这一段已经结束 */
   triggerQuery?: (hit: TriggerQuery | null, rect: DOMRect) => void
   /**
@@ -1414,7 +1414,7 @@ export class BlockEditor {
    *            订阅方必须容忍 `ids === undefined`（那就是「不知道，按整体处理」）。
    */
   /** 协作对象（块选区删块）也要广播同一件事；对外仍是编辑器的口径 */
-  emitChange(kind: 'text' | 'struct' | 'view' | 'load', ids?: readonly string[]): void {
+  emitChange(kind: 'text' | 'struct' | 'view' | 'load' | 'note', ids?: readonly string[]): void {
     /**
      * ⚠️ **这里不发通知**：宣布者是事务的出口（`Kb.tx` → `store.apply`），
      * 它知道「变了哪几格」并能按 op 增量修补索引。
@@ -2972,7 +2972,10 @@ export class BlockEditor {
       noteId = ensureNoteInTx(this.store.blocks, pairs, tx).id
     }, undefined, { directEdit: true })
     this.finishUndoEntry('other', Date.now())
+    // 焦点反馈走 change 通道（'note'）：派生栏的行没变，它自己不会重画——
+    // 装配层在漏斗里读瞬态信号，切到「备注」栏并聚焦新行（本层不碰 DOM）
     this.lastCreatedNote = noteId ? { noteId, hostIds: pairs.map((p) => p.block) } : null
+    this.emitChange('note')
     return noteId
   }
 

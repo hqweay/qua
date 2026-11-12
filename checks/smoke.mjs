@@ -27865,6 +27865,189 @@ await check('T292 完成态任务块：点块下属性行空白，正文槽不�
   return `完成态块点属性行空白：正文槽与正文都在（白名单按类名集合认，不按 className 全等）`
 })
 
+/* ------------------------------------------------------------- 备注（core/note） */
+
+const noteFx = async (page, texts) => {
+  await page.evaluate(() => window.__qua.quiet(true))
+  return page.evaluate((ts) => {
+    window.__qua.invoke('core.page/new')
+    const ed = window.__qua.__editor
+    const root = ed.doc.roots[0]
+    const ids = []
+    let at = root.id
+    for (const t of ts) {
+      at = ed.insert.insertBlockAfter(at, t)
+      ids.push(at ?? '')
+    }
+    return { rootId: root.id, ids }
+  }, texts)
+}
+
+const annoHighlight = (page) =>
+  page.evaluate(() => {
+    const hit = [...CSS.highlights.entries()].find(([k]) => k.startsWith('anno-mark-'))
+    return hit ? { key: hit[0], size: hit[1].size } : null
+  })
+
+const notesState = (page, kidId) =>
+  page.evaluate((kid) => {
+    const blocks = window.__qua.__editor.store.blocks
+    const find = (list, id) => {
+      for (const b of list) {
+        if (b.id === id) return b
+        const r = find(b.children ?? [], id)
+        if (r) return r
+      }
+      return null
+    }
+    const note = blocks.find((b) => b.props?._type === 'core/note')
+    const host = find(blocks, kid)
+    return {
+      noteId: note?.id ?? null,
+      pairs: note?.props?._annotates ?? null,
+      noteText: note ? note.content.map((r) => ('v' in r ? r.v : '')).join('') : null,
+      hostAnnos: host?.annos ?? null,
+      activeTab: document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab ?? '',
+      noteRowMounted: note ? Boolean(document.querySelector(`#editor .blk[data-block-id="${note.id}"]`)) : false,
+    }
+  }, kidId)
+
+await check('T293 写备注：划选一段 → 一条备注块锚住它，备注栏自动开并聚焦新行，宿主淡标记亮起', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const fx = await noteFx(page, ['红句子在这里'])
+  assert(fx.ids[0], '前置：子块应已插入')
+  await page.waitForTimeout(150)
+
+  // 划选「句子」两个字：气泡浮出，里面要有「写备注」
+  await page.evaluate((id) => window.__qua.focusBlock(id, 6), fx.ids[0])
+  await page.keyboard.press('Shift+ArrowLeft')
+  await page.keyboard.press('Shift+ArrowLeft')
+  await page.waitForFunction(() => document.querySelectorAll('.selbar').length === 1, null, { timeout: 2000 })
+  const hasNoteBtn = await page.evaluate(() =>
+    [...document.querySelectorAll('.selbar .sel-btn')].some((b) => b.dataset.command === 'core.notes/create'),
+  )
+  assert(hasNoteBtn, '划选气泡里应有「写备注」')
+  await page.evaluate(() => {
+    document
+      .querySelector('.selbar .sel-btn[data-command="core.notes/create"]')
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForFunction(
+    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'notes',
+    null,
+    { timeout: 3000 },
+  )
+
+  const st = await notesState(page, fx.ids[0])
+  assert(st.noteId, '应有一条备注块（_type core/note）')
+  assert(st.pairs?.length === 1 && st.pairs[0].block === fx.ids[0], `备注应指向宿主块：${JSON.stringify(st.pairs)}`)
+  assert(st.hostAnnos?.length === 1 && st.hostAnnos[0].range.start === 4 && st.hostAnnos[0].range.end === 6,
+    `区间锚应对准划选段：${JSON.stringify(st.hostAnnos)}`)
+  assert(st.noteRowMounted, '新备注行应已挂载（焦点信号落到备注栏）')
+  const mark = await annoHighlight(page)
+  assert(mark && mark.size >= 1, `宿主正文应亮起常显淡标记：${JSON.stringify(mark)}`)
+
+  // 焦点在新备注行：直接打字就是备注正文
+  await page.keyboard.type('这是备注')
+  await page.waitForTimeout(200)
+  const typed = await notesState(page, fx.ids[0])
+  assert(typed.noteText === '这是备注', `备注行应可直接编辑：${JSON.stringify(typed.noteText)}`)
+  assert(typed.activeTab === 'notes', '打字不该把备注栏切走')
+
+  await ctx.close()
+  return '划选 → 备注＋锚＋淡标记；备注栏自动开、行可编辑'
+})
+
+await check('T294 跨块备注：块选区拖过两块 → 一条备注带走全部，每个宿主都有锚', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const fx = await noteFx(page, ['甲块有一句话', '乙块有一句话', '丙块有一句话'])
+  await page.waitForTimeout(150)
+
+  const rect = (id) =>
+    page.evaluate((bid) => {
+      const el = document.querySelector(`.blk[data-block-id="${bid}"] .tx`)
+      const r = el.getBoundingClientRect()
+      return { x: r.left + 2, y: r.top + r.height / 2 }
+    }, id)
+  const [ra, rc] = await Promise.all([rect(fx.ids[0]), rect(fx.ids[2])])
+  await page.mouse.move(ra.x, ra.y)
+  await page.mouse.down()
+  await page.mouse.move(rc.x, rc.y, { steps: 8 })
+  await page.mouse.up()
+  await page.waitForFunction(() => window.__qua.snapshot().blockSelectionCount >= 2, null, { timeout: 2000 })
+  const count = await page.evaluate(() => window.__qua.snapshot().blockSelectionCount)
+
+  await page.evaluate(() => window.__qua.invoke('core.notes/create'))
+  await page.waitForFunction(
+    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'notes',
+    null,
+    { timeout: 3000 },
+  )
+  const st = await page.evaluate(() => {
+    const blocks = window.__qua.__editor.store.blocks
+    const note = blocks.find((b) => b.props?._type === 'core/note')
+    let hostAnnoCount = 0
+    const walk = (list) => {
+      for (const b of list) {
+        if ((b.annos ?? []).length > 0) hostAnnoCount++
+        walk(b.children ?? [])
+      }
+    }
+    walk(blocks)
+    return {
+      pairs: note?.props?._annotates ?? [],
+      hostAnnoCount,
+      markSize: ([...CSS.highlights.entries()].find(([k]) => k.startsWith('anno-mark-')) ?? [null, { size: 0 }])[1]
+        .size,
+    }
+  })
+  assert(st.pairs.length === count, `一条备注应带走选区内全部块：${JSON.stringify({ count, pairs: st.pairs.length })}`)
+  assert(st.hostAnnoCount === count, `每个宿主一块一枚锚：${JSON.stringify(st.hostAnnoCount)}`)
+  assert(st.markSize >= count, `淡标记应逐块亮起：${JSON.stringify(st.markSize)}`)
+
+  await ctx.close()
+  return `跨块：${count} 块 → 1 条备注＋${count} 枚锚；标记逐块亮`
+})
+
+await check('T295 宿主改字锚跟走：前缀插入平移区间、淡标记跟字；备注与引文原样', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const fx = await noteFx(page, ['红句子在这里'])
+  await page.waitForTimeout(150)
+  // 锚住「红句子」三个字
+  await page.evaluate((id) => window.__qua.focusBlock(id, 3), fx.ids[0])
+  for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+ArrowLeft')
+  await page.waitForFunction(() => document.querySelectorAll('.selbar').length === 1, null, { timeout: 2000 })
+  await page.evaluate(() => {
+    document
+      .querySelector('.selbar .sel-btn[data-command="core.notes/create"]')
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForFunction(
+    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'notes',
+    null,
+    { timeout: 3000 },
+  )
+  const before = await notesState(page, fx.ids[0])
+  assert(before.hostAnnos?.[0]?.quote?.exact === '红句子', `前置：引文快照应取到划选段：${JSON.stringify(before.hostAnnos)}`)
+
+  // 在块首插一个字：前缀剥离 ⇒ 区间整体平移，不需要重定位
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), fx.ids[0])
+  await page.keyboard.type('序')
+  await page.waitForTimeout(300)
+
+  const after = await notesState(page, fx.ids[0])
+  assert(after.noteId === before.noteId, '备注块不该被重建（id 是地址）')
+  assert(after.hostAnnos?.[0]?.range.start === 1 && after.hostAnnos[0].range.end === 4,
+    `区间应整体平移一格：${JSON.stringify(after.hostAnnos)}`)
+  assert(after.hostAnnos?.[0]?.quote?.exact === '红句子', '引文快照不该被写字动过')
+  assert(after.noteRowMounted && after.activeTab === 'notes', '备注栏还开着、行还挂着')
+  const mark = await annoHighlight(page)
+  assert(mark && mark.size >= 1, '淡标记应跟字走（宿主改字后仍亮）')
+
+  await ctx.close()
+  return '前缀插入 ⇒ 锚平移＋标记跟字；备注与引文原样'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

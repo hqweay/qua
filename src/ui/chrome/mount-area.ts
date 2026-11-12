@@ -465,9 +465,33 @@ export class MountArea {
    * 从装配层点名激活某一栏（新建栏之后跳过去看它）。
    * 栏不在这份条目里就什么都不做 —— 那是「这一栏已经不在了」，不是静默失败。
    */
-  activateTab(tabId: string): void {
+  activateTab(tabId: string, focusHint?: string): void {
     if (!this.entries.some((e) => e.id === tabId)) return
-    this.activate(tabId)
+    this.activate(tabId, focusHint)
+  }
+
+  /**
+   * 写备注后的落点（装配层在 change 漏斗里点名）：展开挂载区、切到「备注」栏、
+   * 聚焦新备注行（focusHint 走 loadOutline 的焦点机制）。
+   * 备注栏收宿主**子树**上的备注（段尾栏说的是「这一段的内容」），所以宿主判据
+   * 走定位链：宿主是任一标注块的祖先（或就是它）就接。右槽卡看着别的块时不接。
+   */
+  activateNotesTab(hostIds: readonly string[], noteId: string): void {
+    const host = this.deps.host()
+    if (!host) return
+    const touches = hostIds.some((id) => this.deps.kb.pathOf(id).some((b) => b.id === host.id))
+    if (!touches) return
+    const entry = this.entries.find((e) => e.kind === 'derived' && e.source === 'notes')
+    if (!entry) return
+    this.open = true
+    this.activate(entry.id, noteId)
+    // 焦点交给新备注行：focusHint 只管滚动落点，打字要进备注就得显式落插入点
+    // （容器 focus 让派生编辑器收键；onFocus 那一跳会把活动编辑器切过来）
+    const ed = this.block.ed
+    if (ed && this.editorEl.querySelector(`.blk[data-block-id="${noteId}"]`)) {
+      ed.container.focus()
+      ed.placeCaret(noteId, 0)
+    }
   }
 
   /** 这一段的宿主（`MountHost` 是「这一栏写哪」的唯一判别器） */
@@ -509,18 +533,6 @@ export class MountArea {
     this.root.hidden = false
     this.entries = this.entriesFor(host)
     this.entrySig = JSON.stringify(this.entries)
-    // 写备注后的焦点信号（一次性）：切到「备注」栏并聚焦新行——命令层不碰 DOM，落焦点在这里。
-    // 信号认宿主：右槽卡换了宿主的实例不吃它，留给中心段尾那一台。
-    const noteSig = this.block.ed?.lastCreatedNote
-    if (noteSig && noteSig.hostIds.includes(host.id)) {
-      this.block.ed.lastCreatedNote = null
-      const notesEntry = this.entries.find((e) => e.kind === 'derived' && e.source === 'notes')
-      if (notesEntry) {
-        this.active = notesEntry.id
-        this.open = true
-        focusHint = noteSig.noteId
-      }
-    }
     // 栏被摘掉：它的视图宿主一起退（订阅还挂着的话，游离容器会被白重画）
     if (this.tabViews.size > 0) {
       const alive = new Set(this.entries.map((e) => e.id))
@@ -686,13 +698,13 @@ export class MountArea {
     return entry.kind === 'derived' ? t(BUILTIN_LABEL[entry.source]) : entry.label
   }
 
-  private activate(id: string): void {
-    if (this.active === id) return
+  private activate(id: string, focusHint?: string): void {
+    if (this.active === id && focusHint === undefined) return
     this.active = id
     const host = this.deps.host()
     if (host) this.renderTabs(host, this.entries.findIndex((e) => e.id === this.active))
     const entry = this.entries.find((e) => e.id === this.active)
-    if (host && entry) this.load(host, entry)
+    if (host && entry) this.load(host, entry, focusHint)
   }
 
   /* ------------------------------------------------------------ body */

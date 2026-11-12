@@ -3022,6 +3022,12 @@ ed.events = viewEvents(
      * 「⌘Z 之后模型已经回到表格，屏幕还停在大纲」，不报错。
      */
     if (kind === 'struct') panels?.renderMounts()
+    // 写备注：派生栏的行没变、它自己不会重画——装配层在这里点名挂载区开「备注」栏并聚焦新行
+    if (kind === 'note' && mainEd.lastCreatedNote) {
+      const sig = mainEd.lastCreatedNote
+      mainEd.lastCreatedNote = null
+      panels?.noteCreated(sig)
+    }
   },
   'editor',
   // 正文这一台把查询结果画在自己行下；里层编辑器（`wireViewEditor`）默认不挂
@@ -3062,6 +3068,7 @@ onAssetChange((hash) => {
 let diag: ReturnType<typeof setupDiagnostics>
 const {
   renderMounts,
+  noteCreated,
   createDockMountArea,
   renderProperties,
   scheduleProperties,
@@ -3110,6 +3117,7 @@ const {
 })
 panels = {
   renderMounts,
+  noteCreated,
   createDockMountArea,
   renderProperties,
   scheduleProperties,

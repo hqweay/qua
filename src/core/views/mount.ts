@@ -32,6 +32,7 @@ import { hasList, primaryAliasOf, prop, type Block } from '../model/model.ts'
 import { tagIdsOf } from '../identity/tags.ts'
 import { descendantTagIds } from '../identity/tag-tree.ts'
 import { plainText } from '../model/runs.ts'
+import { walkForest } from '../model/walk.ts'
 import type { QueryHit, QueryNode, QuerySpec } from '../query/query.ts'
 import { isQueryNode, isQuerySpec } from '../query/query.ts'
 import { isRefKind, REFERENCE_KINDS, type RefKind } from '../relations/relations.ts'
@@ -444,17 +445,29 @@ function mentionRecords(host: Block, kb: KbClient): ViewRecord[] {
 }
 
 /**
- * 备注栏：谁在评论我的某段字。直读 `annotates` 边（一条备注一个身份），不走 QuerySpec——
+ * 备注栏：谁在评论这一段里的字。直读 `annotates` 边（一条备注一个身份），不走 QuerySpec——
  * 备注不是引用（`REFERENCE_KINDS` 不收它，反链不冒备注），条件语言也就没有它的写法。
+ *
+ * 收**宿主子树**上的备注：段尾那一栏说的是「这一段的内容」，子块里被备注的字也在其中
+ * （逐块的入口是右槽卡——宿主＝当前对象，同一份数据源）。同一条备注标了子树里多个块
+ * 只出一行（备注是身份，不是边）。
  * 行＝备注块本身（可整块编辑）；被标的字在宿主正文里有常显淡标记，行里不再重复引文。
  */
 function noteRecordsOf(host: Block, kb: KbClient): ViewRecord[] {
+  const ids = new Set<string>()
+  walkForest([host], (b) => {
+    ids.add(b.id)
+  })
   const hits: QueryHit[] = []
-  for (const e of kb.relationsTo(host.id)) {
-    if (e.kind !== 'annotates') continue
-    const path = kb.pathOf(e.from)
-    if (path.length === 0) continue
-    hits.push({ blockId: e.from, path: path.slice(0, -1).map((b) => b.id) })
+  const seen = new Set<string>()
+  for (const id of ids) {
+    for (const e of kb.relationsTo(id)) {
+      if (e.kind !== 'annotates' || seen.has(e.from)) continue
+      const path = kb.pathOf(e.from)
+      if (path.length === 0) continue
+      seen.add(e.from)
+      hits.push({ blockId: e.from, path: path.slice(0, -1).map((b) => b.id) })
+    }
   }
   return resolveRows(hits, kb)
 }
