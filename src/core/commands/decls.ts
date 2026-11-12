@@ -47,6 +47,8 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.editor/insert-tag', title: t('cmd.editor.insert-tag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { tag: { type: 'string' } }, keywords: ['tag', t('menu.kw.tag')], hidden: true },
   { name: 'core.editor/pick-tag', title: t('cmd.editor.pick-tag'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.inline'), keywords: ['tag', 'autocomplete', t('menu.kw.tag')] },
   { name: 'core.editor/copy-ref', title: t('cmd.editor.copy-ref'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), keywords: ['ref', 'quote', t('menu.kw.ref')] },
+  // 「引用这段」：选中一段 ⇒ 隐式建一条 anno ＋ 复制指向它的记号（用户无感）
+  { name: 'core.editor/quote-selection', title: t('cmd.editor.quote-selection'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['quote', 'anno', 'reference'] },
   { name: 'core.editor/copy-block-ref', title: t('cmd.editor.copy-block-ref'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' } }, keywords: ['ref', 'copy', 'embed'] },
   { name: 'core.editor/delete-selected-blocks', title: t('cmd.editor.delete-selected-blocks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/indent-selected-blocks', title: t('cmd.editor.indent-selected-blocks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },

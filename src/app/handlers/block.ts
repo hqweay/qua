@@ -208,6 +208,13 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     )
     return true
   },
+  // 「引用这段」：隐式建一条持久 anno ＋ 复制指向它的记号；粘贴时记号变成引用 run
+  'core.editor/quote-selection': (_a, app) => {
+    const id = app.ed.quoteSelection()
+    if (!id) return false
+    app.copy(`((${id}))`, t('ui.toast.quoteCopied'))
+    return true
+  },
   // 划选气泡那一颗：选区 → 同名引用（没有同名地址就新建页）。复核、事务、toast 都在门面那一步
   'core.editor/selection-to-ref': (_a, app) => app.convertSelectionToRef(),
   /**

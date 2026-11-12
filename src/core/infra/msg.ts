@@ -37,6 +37,7 @@ export const MSG = {
   'cmd.editor.clear-block': '清空本块',
   'cmd.editor.insert-tag': '插入标签 #',
   'cmd.editor.copy-ref': '复制为引文（含原文快照）',
+  'cmd.editor.quote-selection': '引用这段',
   'cmd.editor.copy-block-ref': '复制块链接（((id))）',
   'cmd.editor.delete-selected-blocks': '删除选中的块',
   'cmd.editor.indent-selected-blocks': '缩进选中的块',
@@ -910,6 +911,7 @@ export const MSG = {
   'menu.label.link': '外链',
   'menu.label.fold': '折叠',
   'menu.label.copyRef': '复制为引文',
+  'menu.label.quoteSelection': '引用这段',
   'menu.label.selectionToRef': '转为引用',
 
   /* 划选气泡色板：七个槽的显示名（tooltip），轴名复用 menu.label.ink/bg */
@@ -1251,6 +1253,7 @@ export const MSG = {
   'ui.toast.journalReadonly': '日记的日期是只读的（要改只能删了重建）',
   'ui.toast.journalDeleted': '已删除这一天（再打开会恢复）',
   'ui.toast.refCopied': '已复制引用（实体 id ＋ 引文快照 exact/prefix/suffix）',
+  'ui.toast.quoteCopied': '已复制这段的引用（粘贴时变成指向它的引用）',
   'ui.toast.blocksCopied': '已复制选中的块（大纲文本）',
   'ui.toast.blockRefsCopied': '已复制选中块的引用',
   'ui.toast.blockRefCopied': '已复制块引用（粘贴时会变成引用）',

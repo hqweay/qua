@@ -28,6 +28,10 @@ import {
   type Run,
 } from '../src/core/model/runs.ts'
 import { mkBlock, writeBlockContent } from '../src/core/model/model.ts'
+import { applyOps, fingerprint, incomingIds, lookupBlock, rebuild, type Index } from '../src/core/index.ts'
+import { BlockStore } from '../src/core/model/store.ts'
+import { MemoryKb } from '../src/core/kb/memory.ts'
+import type { Tx } from '../src/core/kb/types.ts'
 
 const annoAt = (content: Run[], start: number, end: number): Anno => {
   const a = mkAnno(content, start, end)
@@ -164,4 +168,53 @@ test('writeBlockContent：没有 anno 时不留空数组（形状口径）', () 
   const b = mkBlock(textRuns('abc'))
   writeBlockContent(b, textRuns('abcd'))
   assert.equal(b.annos, undefined)
+})
+
+/* ------------------------------------------------------- 索引等式 */
+
+function annoFixture() {
+  const host = mkBlock(textRuns('红句子在这里'))
+  const a = annoAt(host.content, 0, 3)
+  host.annos = [a]
+  const runs: Run[] = [...textRuns('见'), { id: 'r1', t: 'ref', to: a.id, anchor: '红句子' }]
+  const source = mkBlock(runs)
+  return { forest: [host, source], a, host, source }
+}
+
+/** 与 index-port 同一条范式：每批 op 走增量后必须与全量重建逐字节一致 */
+function txStep(kb: MemoryKb, store: BlockStore, idx: Index, fn: (tx: Tx) => void): Index {
+  const r = kb.tx(fn, {})
+  const next = applyOps(idx, r.ops, store.blocks)
+  assert.equal(fingerprint(next), fingerprint(rebuild(store.blocks)), 'anno 表的增量必须与全量重建逐字节一致')
+  return next
+}
+
+test('索引：anno 反查表全量建表；引用指向 anno 时边归到宿主块', () => {
+  const { forest, a, host, source } = annoFixture()
+  const idx = rebuild(forest)
+  assert.equal(idx.annos.get(a.id)?.hostId, host.id)
+  assert.equal(lookupBlock(idx, a.id)?.id, host.id)
+  assert.deepEqual(incomingIds(idx, host.id), [source.id])
+})
+
+test('索引：anno 表全量 == 增量（setAnnos 改区间、清空）', () => {
+  const { forest, a, host } = annoFixture()
+  const store = new BlockStore(JSON.parse(JSON.stringify(forest)))
+  const kb = new MemoryKb(store)
+  let idx = rebuild(store.blocks)
+  assert.ok(idx.annos.has(a.id))
+  idx = txStep(kb, store, idx, (tx) => tx.setAnnos(host.id, [{ ...a, range: { start: 2, end: 5 } }]))
+  assert.equal(idx.annos.get(a.id)?.anno.range.start, 2)
+  idx = txStep(kb, store, idx, (tx) => tx.setAnnos(host.id, []))
+  assert.equal(idx.annos.has(a.id), false)
+  assert.equal(lookupBlock(idx, a.id), undefined)
+})
+
+test('索引：删宿主块 ⇒ anno 反查表摘干净（引用变 dangling）', () => {
+  const { forest, a, host } = annoFixture()
+  const store = new BlockStore(JSON.parse(JSON.stringify(forest)))
+  const kb = new MemoryKb(store)
+  const idx = rebuild(store.blocks)
+  const next = txStep(kb, store, idx, (tx) => tx.remove(host.id))
+  assert.equal(next.annos.has(a.id), false)
 })

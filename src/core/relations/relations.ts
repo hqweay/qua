@@ -76,15 +76,29 @@ export function relationEdgeKey(e: RelationEdge): string {
   ].join('\u0001')
 }
 
-/** 一块上的全部出向关系（纯函数；`propKinds` 由调用方一次建好，避免每块扫全库） */
-export function relationEdgesOfBlock(block: Block, propKinds: ReadonlyMap<string, PropKind>): RelationEdge[] {
+/**
+ * 一块上的全部出向关系（纯函数；`propKinds` 由调用方一次建好，避免每块扫全库）。
+ *
+ * `annoHosts` 是「anno id → 宿主块」的反查表：`to` 可以指向 anno，但边的 `to`
+ * 必须是块 id —— 在**边生成处**归一化一次，下游的反链／入向计数／`{ref}` 查询
+ * 就都不必认识 anno。不传这张表时行为与从前完全一致。
+ */
+export function relationEdgesOfBlock(
+  block: Block,
+  propKinds: ReadonlyMap<string, PropKind>,
+  annoHosts?: ReadonlyMap<string, { hostId: string }>,
+): RelationEdge[] {
   const out: RelationEdge[] = []
   const inline = new Map<string, number>()
   const tagMention = new Map<string, number>()
   for (const r of refRunsOf(block.content)) {
     if (!r.to) continue
-    if (r.flavor === '#') tagMention.set(r.to, (tagMention.get(r.to) ?? 0) + 1)
-    else inline.set(r.to, (inline.get(r.to) ?? 0) + 1)
+    if (r.flavor === '#') {
+      tagMention.set(r.to, (tagMention.get(r.to) ?? 0) + 1)
+      continue
+    }
+    const to = annoHosts?.get(r.to)?.hostId ?? r.to
+    inline.set(to, (inline.get(to) ?? 0) + 1)
   }
   for (const [to, count] of inline) out.push({ from: block.id, to, kind: 'inline', count })
   for (const [to, count] of tagMention) out.push({ from: block.id, to, kind: 'tagMention', count })

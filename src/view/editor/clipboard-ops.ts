@@ -147,7 +147,15 @@ export class ClipboardOps {
       if (!target) {
         out.push(...textRuns(text.slice(t.start, t.end)))
       } else {
-        out.push({ id: uuidv7Hex(), t: 'ref', to: t.id, label: blockLabel(target, (id) => this.ed.store.find(id)) })
+        // to 指向 anno ⇒ 这一处显示成引文片段，而不是宿主块的名字
+        const quote = this.ed.store.index.annos.get(t.id)?.anno.quote?.exact
+        out.push({
+          id: uuidv7Hex(),
+          t: 'ref',
+          to: t.id,
+          label: blockLabel(target, (id) => this.ed.store.find(id)),
+          ...(quote ? { anchor: quote } : {}),
+        })
       }
       at = t.end
     }

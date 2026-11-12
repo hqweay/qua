@@ -2848,6 +2848,27 @@ export class BlockEditor {
     return mkAnno(b.block.content, r.startOff, r.endOff)?.quote
   }
 
+  /**
+   * 「引用这段」：把当前选区物化成一条**持久** anno，返回它的 id（引用 run 的 `to` 指它）。
+   *
+   * 与 `quoteAtSel` 的分工：那个只取引文快照给外部看，这个要把实体落进 `b.annos` ——
+   * 否则引用指向一个不存在的 id。整件事在唯一事务里（`setAnnos` ⇒ `anno.set` op ⇒
+   * 索引反查表、落盘 annos 列、撤销快照都跟着这一笔），撤销天然复原。
+   */
+  quoteSelection(): string | null {
+    const spot = this.selectionSpot()
+    if (!spot) return null
+    const b = locate(this.doc, spot.blockId)?.block
+    if (!b) return null
+    const anno = mkAnno(b.content, spot.start, spot.end)
+    if (!anno) return null
+    const annos = [...(b.annos ?? []), anno]
+    this.beginUndoEntry()
+    this.write((tx) => tx.setAnnos(spot.blockId, annos), undefined, { directEdit: true })
+    this.finishUndoEntry('other', Date.now())
+    return anno.id
+  }
+
   /* ------------------------------------------------------- 虚拟化 */
 
   setVirtualize(on: boolean, radius = this.radius): void {

@@ -12,6 +12,7 @@
  * ⚠️ 本文件零 DOM、零持久化：它只吃森林，所以能直接单测。
  */
 import { aliasesOf, ALIASES_PROP, hasList, isDeleted, isPropDefBlock, LISTS_PROP, type Block } from '../model/model.ts'
+import type { Anno } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
 import { normalizeAlias } from '../identity/alias.ts'
 import { journalDate, isJournal } from '../identity/journal.ts'
@@ -110,6 +111,15 @@ export interface Index {
   all: Map<string, Block>
   /** 块 id → 树父（**含被软删的块**）；与 `parentOf` 的可见集不同，其余口径相同 */
   parentOfAll: Map<string, string | null>
+  /**
+   * anno id → 宿主块 id 与那条 anno（**活引用**）。
+   *
+   * `RefRun.to` 可以指向 anno 而不是块：读侧要能回答「这条引用指的那句话在哪个块」，
+   * 反链才能归到宿主块、解析才能显示引文。维护点四处：全量在 `indexSubtree`、
+   * 增量在 `applyOps` 的 anno op、删块在 `applyBlockDelete`、`fingerprint` 必须含它
+   * （否则「全量 == 增量」这条等式对它是瞎的）。
+   */
+  annos: Map<string, { hostId: string; anno: Anno }>
 }
 
 function emptyIndex(): Index {
@@ -125,6 +135,7 @@ function emptyIndex(): Index {
     parentOf: new Map(),
     all: new Map(),
     parentOfAll: new Map(),
+    annos: new Map(),
   }
 }
 
@@ -181,7 +192,7 @@ function refreshRelations(idx: Index, blockId: string): void {
   const live = idx.blocks.get(blockId)
   if (!live) return
   removeOutgoing(idx, blockId)
-  for (const e of relationEdgesOfBlock(live, idx.propKinds)) addEdge(idx, e)
+  for (const e of relationEdgesOfBlock(live, idx.propKinds, idx.annos)) addEdge(idx, e)
 }
 
 /**
@@ -192,7 +203,7 @@ function refreshAllRelations(idx: Index): void {
   idx.relations.clear()
   idx.outgoing.clear()
   for (const b of idx.blocks.values()) {
-    for (const e of relationEdgesOfBlock(b, idx.propKinds)) addEdge(idx, e)
+    for (const e of relationEdgesOfBlock(b, idx.propKinds, idx.annos)) addEdge(idx, e)
   }
 }
 
@@ -230,6 +241,9 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
    * 不跳过的话，建页/建标签在 50,000 块时要扫全库（实测 15.8ms）。
    */
   const fresh = new Set<string>()
+  // 边的 `to` 会按 anno 反查表归一化 ⇒ 表的**成员**一变，所有指向 anno 的边都得按最终表重算。
+  // 只改 range 的打字不改变成员（hostId 不变），所以这次重算不会落到按键路径上。
+  const annoKeysBefore = new Set(index.annos.keys())
   for (const op of ops) {
     switch (op.e) {
       case 'block':
@@ -266,9 +280,24 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
           refreshRelations(index, op.block)
         }
         break
-      // `anno` 是按需物化的可引用区间，不是指向边：边只从引用 run 提取
+      case 'anno':
+        // anno 不产生边（边只从引用 run 提取），但它自己是引用目标：按 id 维护这张反查表
+        if (op.op === 'delete') index.annos.delete(op.id)
+        else if (op.value) index.annos.set(op.value.id, { hostId: op.block, anno: op.value })
+        break
     }
   }
+  let annoKeysChanged = annoKeysBefore.size !== index.annos.size
+  if (!annoKeysChanged) {
+    for (const k of annoKeysBefore) {
+      if (!index.annos.has(k)) {
+        annoKeysChanged = true
+        break
+      }
+    }
+  }
+  // `applyBlockDelete` 也会摘表，同样在这里被捕获；与全量重算用同一份最终表
+  if (annoKeysChanged) refreshAllRelations(index)
   return index
 }
 
@@ -323,6 +352,8 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[], pu
   //    默认遍历会把整棵子树跳过去——一张都摘不掉。退场的正是「这棵子树里的全部」。
   const gone = walkSubtreeIncludingDeleted(block)
   const goneSet = new Set(gone)
+  // 退场子树里的 anno 不再是可引用目标：摘表（引用变 dangling，但 anno 的 id 不换）
+  for (const [aid, rec] of index.annos) if (goneSet.has(rec.hostId)) index.annos.delete(aid)
   /**
    * **先只从这棵子树里收集名字/日期**，再摘索引。
    *
@@ -647,11 +678,12 @@ function indexSubtree(index: Index, root: Block, rootId: string, parentId: strin
       const d = journalDate(b)
       if (d !== '') index.journals.set(d, b.id)
     }
+    for (const a of b.annos ?? []) index.annos.set(a.id, { hostId: b.id, anno: a })
     visited.push(b)
   })
   for (const b of visited) {
     removeOutgoing(index, b.id)
-    for (const e of relationEdgesOfBlock(b, index.propKinds)) addEdge(index, e)
+    for (const e of relationEdgesOfBlock(b, index.propKinds, index.annos)) addEdge(index, e)
   }
   /**
    * **全部块表**（含被软删的）：与可见那趟分开走。
@@ -697,12 +729,23 @@ export function fingerprint(index: Index): string {
     parentOf: flat(index.parentOf),
     all: sortedKeys(index.all),
     parentOfAll: flat(index.parentOfAll),
+    // range 与引文一起进指纹：内容写入口平移了区间而增量漏维护时，等式断言必须抓得到
+    annos: [...index.annos.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([k, v]) => [k, v.hostId, v.anno.range.start, v.anno.range.end, v.anno.quote?.exact ?? '']),
   })
 }
 
-/** 这个 id 现在是哪一块（引用解析用；与 `store.find` 同语义） */
+/**
+ * 这个 id 现在是哪一块（引用解析用；与 `store.find` 同语义）。
+ * `to` 也可以是 anno id ⇒ 返回它的宿主块，让引用解析／跳转／反链都落在同一块上；
+ * 显示名仍由引用 run 自己的 `anchor`（引文片段）覆盖，不会显示成宿主页名。
+ */
 export function lookupBlock(index: Index, id: string): Block | undefined {
-  return index.blocks.get(id)
+  const b = index.blocks.get(id)
+  if (b) return b
+  const rec = index.annos.get(id)
+  return rec ? index.blocks.get(rec.hostId) : undefined
 }
 
 /**

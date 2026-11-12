@@ -309,6 +309,8 @@ export const BINDINGS: Binding[] = [
   { command: 'core.anno/toggle-code', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 60, layer: 'core', icon: 'lucide:code', label: t('menu.label.code') },
   { command: 'core.anno/clear-marks', kind: 'selection', when: 'editorTextFocus && !selectionEmpty && marking', group: 'sel/1-mark', order: 70, layer: 'core', icon: 'lucide:eraser', label: t('menu.label.clearMarks') },
   { command: 'core.editor/copy-ref', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/2-ref', order: 10, layer: 'core', icon: 'lucide:quote', label: t('menu.label.copyRef') },
+  // 入口与能力同宽：quoteSelection 用 selectionSpot（单块纯文本）判据，when 也用它
+  { command: 'core.editor/quote-selection', kind: 'selection', when: 'editorTextFocus && selectionRef', group: 'sel/2-ref', order: 15, layer: 'core', icon: 'lucide:text-quote', label: t('menu.label.quoteSelection') },
   /**
    * 选区 → 引用：与「复制为引文」同组（都是「这一段的去处」，不是格式）。
    * 只在单块纯文本选区上出现——跨块或夹着原子时「换成一枚引用」没有定义。
