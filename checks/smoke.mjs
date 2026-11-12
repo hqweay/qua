@@ -28134,7 +28134,7 @@ await check('T296 备注 hover：标记上浮出只读 tip（备注文本），�
   return 'hover 标记 → 只读 tip（备注正文）；未标记不浮、悬停不写模型'
 })
 
-await check('T297 ⌥-click 备注标记：从别的栏切回「备注」栏并聚焦那一行（⌥ 不落光标）', async () => {
+await check('T297 ⌥-click 备注标记：就地浮窗带出已有备注；「在侧栏打开」跳收集栏并聚焦', async () => {
   const { ctx, page } = await freshPage(browser, base)
   const fx = await noteFx(page, ['红句子在这里'])
   await page.waitForTimeout(150)
@@ -28146,25 +28146,31 @@ await check('T297 ⌥-click 备注标记：从别的栏切回「备注」栏并�
       .querySelector('.selbar .sel-btn[data-command="core.notes/create"]')
       .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
   })
-  await page.waitForFunction(
-    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'notes',
-    null,
-    { timeout: 3000 },
-  )
+  await page.waitForSelector('.popover .note-popover-body', { timeout: 3000 })
+  await page.keyboard.type('这是备注')
+  await page.waitForTimeout(200)
   const noteId = await page.evaluate(
     () => window.__qua.__editor.store.blocks.find((b) => b.props?._type === 'core/note')?.id ?? '',
   )
   assert(noteId, '前置：备注块应已存在')
 
-  // 切去「反链」：证明后面的聚焦是 ⌥-click 带回来的，不是上一步的残留
-  await page.locator('#editor .mount .mount-tab', { hasText: '反链' }).first().click()
-  await page.waitForFunction(
-    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'refs',
-    null,
-    { timeout: 3000 },
-  )
+  // Esc 关浮窗：有内容 ⇒ 提交（备注保留，不留空壳也不丢字）
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('.note-popover-body'), null, { timeout: 3000 })
+  const kept = await page.evaluate((nid) => {
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.id === nid) return b
+        const r = walk(b.children ?? [])
+        if (r) return r
+      }
+      return null
+    }
+    return walk(window.__qua.__editor.store.blocks)?.content.map((r) => ('v' in r ? r.v : '')).join('')
+  }, noteId)
+  assert(kept === '这是备注', `有内容的 Esc＝提交不丢字：${JSON.stringify(kept)}`)
 
-  // 标记矩形反算（照 T296），⌥+单击
+  // 标记矩形反算，⌥-click ⇒ 浮窗重新打开，内容带出来了
   const hit = await page.evaluate((bid) => {
     const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('anno-mark-'))
     const set = key ? CSS.highlights.get(key) : null
@@ -28178,12 +28184,18 @@ await check('T297 ⌥-click 备注标记：从别的栏切回「备注」栏并�
     return null
   }, fx.ids[0])
   assert(hit, '前置：标记应仍在')
-  await page.mouse.click(hit.x, hit.y)
-  await page.waitForTimeout(150)
-  // Playwright 的 mouse.click 不带 modifiers 选项 ⇒ 用键盘包住（macOS ⌥＝Option）
   await page.keyboard.down('Alt')
   await page.mouse.click(hit.x, hit.y)
   await page.keyboard.up('Alt')
+  await page.waitForSelector('.popover .note-popover-body', { timeout: 3000 })
+  const reopenText = await page.evaluate(
+    (nid) => document.querySelector(`.popover .note-popover-body .blk[data-block-id="${nid}"]`)?.textContent ?? '',
+    noteId,
+  )
+  assert(reopenText.includes('这是备注'), `⌥-click 浮窗应带出已有备注：${JSON.stringify(reopenText)}`)
+
+  // 「在侧栏打开」：显式跳板——收集栏切过去并聚焦这一行
+  await page.click('.note-popover-open')
   await page.waitForFunction(
     () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'notes',
     null,
@@ -28194,25 +28206,20 @@ await check('T297 ⌥-click 备注标记：从别的栏切回「备注」栏并�
     const selRow = document.getSelection()?.anchorNode?.parentElement?.closest?.('.blk')?.dataset?.blockId ?? null
     return { mounted: Boolean(row), selInRow: selRow === nid }
   }, noteId)
-  assert(st.mounted, '备注行应已挂载')
-  assert(st.selInRow, '光标应落在备注行里（⌥ 不是落点，焦点去备注）')
+  assert(st.mounted, '备注行应已挂载在收集栏')
+  assert(st.selInRow, '光标应落在备注行里')
 
-  // 无 ⌥ 的普通单击不该切栏（点字＝编辑，口径不变）
-  await page.locator('#editor .mount .mount-tab', { hasText: '反链' }).first().click()
-  await page.waitForFunction(
-    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'refs',
-    null,
-    { timeout: 3000 },
-  )
+  // 无 ⌥ 的普通单击不该开浮窗（点字＝编辑，口径不变）
+  await page.keyboard.press('Escape')
   await page.mouse.click(hit.x, hit.y)
   await page.waitForTimeout(250)
-  const stillRefs = await page.evaluate(
-    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab ?? '',
+  const noPop = await page.evaluate(
+    () => Boolean(document.querySelector('.note-popover-body')),
   )
-  assert(stillRefs === 'refs', '普通单击标记＝落光标，不该切栏')
+  assert(!noPop, '普通单击标记＝落光标，不开浮窗')
 
   await ctx.close()
-  return '⌥-click 标记 → 备注栏聚焦；普通单击仍＝编辑'
+  return '⌥-click → 浮窗带出备注；「在侧栏打开」跳收集栏；普通单击仍＝编辑'
 })
 
 const known = results.filter((r) => !r.ok && r.known)

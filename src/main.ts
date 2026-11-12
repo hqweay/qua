@@ -3084,13 +3084,13 @@ ed.events = viewEvents(
 // 启动时的第一张 tab ＝ 已经装载好的这一屏；tab 条从这里开始画
 initTabs()
 /**
- * **⌥-click 被备注的文本 ⇒ 侧栏打开备注**（⌥＝「这一处的东西展开一层」，与引用的
- * 「⌥ 看详情」同族）。边由 annoId 反查备注块，落点与「写备注后聚焦」同一条
- * （`activateNotesTab` 的宿主判据按定位链认领）——同一件事两个触发口，一个落点。
+ * **⌥-click 被备注的文本 ⇒ 就地浮窗**（⌥＝「这一处的东西展开一层」，与引用的
+ * 「⌥ 看详情」同族）。边由 annoId 反查备注块；写作面与创建同一条——浮窗，
+ * 「在侧栏打开」是浮窗上的显式跳板，不是这里的默认落点。
  */
 ed.events.annoClick = (hit) => {
   const edge = kb.relationsTo(hit.blockId).find((e) => e.kind === 'annotates' && e.propId === hit.annoId)
-  if (edge) panels?.noteCreated({ noteId: edge.from, hostIds: [hit.blockId] })
+  if (edge) app.openNotePopover({ noteId: edge.from, blockId: hit.blockId, annoId: hit.annoId })
 }
 /**
  * **撤销/重做产出的 op** 并进待落盘队列。
