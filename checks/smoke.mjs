@@ -716,7 +716,7 @@ await check('T3 四种行内格式（⌘B/⌘I/⌘E/⌘`）落在**那一截文�
   const keys = [
     ['mod+b', 'bold'],
     ['mod+i', 'italic'],
-    ['mod+e', 'highlight'],
+    ['mod+e', 'bg:yellow'],
     ['mod+`', 'code'],
   ]
   for (const [k] of keys) {
@@ -734,19 +734,19 @@ await check('T3 四种行内格式（⌘B/⌘I/⌘E/⌘`）落在**那一截文�
    */
   const onRuns = await page.evaluate(() => {
     const id = window.__qua.blocks()[0].id
-    return window.__qua.__editor.store.find(id).content.map((r) => ({ t: r.t, marks: [...(r.marks ?? [])] }))
+    return window.__qua.__editor.store.find(id).content.map((r) => ({ t: r.t, marks: { ...(r.marks ?? {}) } }))
   })
-  const boldRun = onRuns.find((r) => r.marks.includes('bold'))
+  const boldRun = onRuns.find((r) => r.marks.bold)
   assert(boldRun && boldRun.t === 'text', `加粗应落在 text run 上：${JSON.stringify(onRuns)}`)
   const dom = await page.evaluate(() => ({
     bold: document.querySelectorAll('.mk-bold').length,
     italic: document.querySelectorAll('.mk-italic').length,
-    hl: document.querySelectorAll('.mk-highlight').length,
+    bg: document.querySelectorAll('.mk-bg[data-slot="yellow"]').length,
     code: document.querySelectorAll('.mk-code').length,
   }))
-  assert(dom.bold && dom.italic && dom.hl && dom.code, `DOM 里四种表现不齐：${JSON.stringify(dom)}`)
+  assert(dom.bold && dom.italic && dom.bg && dom.code, `DOM 里四种表现不齐：${JSON.stringify(dom)}`)
   await ctx.close()
-  return `格式段 ${marks.length} 个（${[...types].join('/')}）；四种格式都住在 text run 上，模型里没有第二个实体`
+  return `格式段 ${marks.length} 个（${[...types].join('/')}）；四种键位都住在 text run 上，模型里没有第二个实体`
 })
 
 await check('T3b 顶栏只放窗口级控件：格式仍在划选气泡，皮肤与明暗仍在调试菜单（不许把工具栏/调试开关加回来）', async () => {
@@ -933,7 +933,7 @@ await check('T4 格式随打字继承：粗体末尾接着敲的字仍是粗体�
       (id) =>
         window.__qua.__editor.store
           .find(id)
-          .content.map((x) => ({ t: x.t, v: x.v ?? '', bold: (x.marks ?? []).includes('bold') })),
+          .content.map((x) => ({ t: x.t, v: x.v ?? '', bold: Boolean((x.marks ?? {}).bold) })),
       r,
     )
   await page.keyboard.press('Shift+ArrowRight')
@@ -3387,7 +3387,7 @@ await check('T238 查询块标题的行内编辑与普通块同档：划选加�
       const b = window.__qua.__editor.store.find(id)
       return (b?.content ?? []).map((r) => ({ t: r.t, marks: r.marks ?? null, label: r.label ?? '', v: (r.v ?? '').slice(0, 6) }))
     }, fx.qid)
-  const hasBold = (runs) => runs.some((r) => r.marks?.includes('bold'))
+  const hasBold = (runs) => runs.some((r) => r.marks?.bold)
   /** 点进一行的正文并双击选一个词（⌘A 是整屏选区，不是这一行的） */
   const dblclickRow = async (sel, offset = 60) => {
     const box = await page.locator(sel).first().boundingBox()
@@ -6507,7 +6507,7 @@ await check('T20 过新 / 损坏的库不被覆盖：进入只读演示态并持
     activeId: 'keep',
     prefs: {},
     savedAt: 0,
-    marks: [],
+    marks: {},
     atoms: [],
   })
   const a = await run(newer)
@@ -9550,7 +9550,7 @@ await check(
 
     await page.evaluate((id) => window.__qua.focusBlock(id, 2), target.id)
     for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+ArrowRight')
-    await page.evaluate(() => window.__qua.__editor.toggleMark('bold'))
+    await page.evaluate(() => window.__qua.__editor.toggleMark({ bold: true }))
     await page.waitForTimeout(120)
     const ops = await opShape(page)
     assert(ops.length === 1, `加粗应恰好 1 条 op：${JSON.stringify(ops)}`)
@@ -9582,7 +9582,7 @@ await check(
     // 前置：加一段粗体（setup 的 op 不参与断言）
     await page.evaluate((id) => window.__qua.focusBlock(id, 2), target.id)
     for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+ArrowRight')
-    await page.evaluate(() => window.__qua.__editor.toggleMark('bold'))
+    await page.evaluate(() => window.__qua.__editor.toggleMark({ bold: true }))
     await page.waitForTimeout(120)
 
     // toggleMark 结束时选区原样保留 ⇒ 直接清
@@ -9886,7 +9886,7 @@ await check(
     // 前置：给源块加一段粗体（setup 的 op 不参与断言）——锚点要跟着克隆走
     await page.evaluate((id) => window.__qua.focusBlock(id, 2), target.id)
     for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+ArrowRight')
-    await page.evaluate(() => window.__qua.__editor.toggleMark('bold'))
+    await page.evaluate(() => window.__qua.__editor.toggleMark({ bold: true }))
     await page.waitForTimeout(120)
 
     await page.evaluate((id) => window.__qua.__editor.struct.duplicate(id), target.id)
@@ -24630,7 +24630,7 @@ await check('T259 ⌥ 单击提及命中字转引用：普通/跨 run/marks 内�
         // 跨 run：命中字由两个文本段拼出来
         mk('mention-convert-b', [{ t: 'text', v: '提及转换' }, { t: 'text', v: '页PQR 清单里还有三条' }]),
         // 命中整段落在 marks 里：切成的原子本身不带格式（已知后果，不是回归）
-        mk('mention-convert-c', [{ t: 'text', v: `今天完成了${a.name}，很顺利`, marks: ['bold'] }]),
+        mk('mention-convert-c', [{ t: 'text', v: `今天完成了${a.name}，很顺利`, marks: { bold: true } }]),
       )
     })
   }, { name: NAME, pageId })

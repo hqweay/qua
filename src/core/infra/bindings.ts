@@ -303,9 +303,11 @@ export const BINDINGS: Binding[] = [
   /* ================= 划选气泡（选中一段文本才浮出；顶部没有工具栏） ================= */
   { command: 'core.anno/toggle-bold', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 10, layer: 'core', icon: 'lucide:bold', label: t('menu.label.bold') },
   { command: 'core.anno/toggle-italic', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 20, layer: 'core', icon: 'lucide:italic', label: t('menu.label.italic') },
-  { command: 'core.anno/toggle-highlight', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 30, layer: 'core', icon: 'lucide:highlighter', label: t('menu.label.highlight') },
-  { command: 'core.anno/toggle-code', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 40, layer: 'core', icon: 'lucide:code', label: t('menu.label.code') },
-  { command: 'core.anno/clear-marks', kind: 'selection', when: 'editorTextFocus && !selectionEmpty && marking', group: 'sel/1-mark', order: 50, layer: 'core', icon: 'lucide:eraser', label: t('menu.label.clearMarks') },
+  { command: 'core.anno/toggle-underline', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 30, layer: 'core', icon: 'lucide:underline', label: t('menu.label.underline') },
+  { command: 'core.anno/toggle-strike', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 40, layer: 'core', icon: 'lucide:strikethrough', label: t('menu.label.strike') },
+  { command: 'core.anno/toggle-highlight', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 50, layer: 'core', icon: 'lucide:highlighter', label: t('menu.label.highlight') },
+  { command: 'core.anno/toggle-code', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 60, layer: 'core', icon: 'lucide:code', label: t('menu.label.code') },
+  { command: 'core.anno/clear-marks', kind: 'selection', when: 'editorTextFocus && !selectionEmpty && marking', group: 'sel/1-mark', order: 70, layer: 'core', icon: 'lucide:eraser', label: t('menu.label.clearMarks') },
   { command: 'core.editor/copy-ref', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/2-ref', order: 10, layer: 'core', icon: 'lucide:quote', label: t('menu.label.copyRef') },
   /**
    * 选区 → 引用：与「复制为引文」同组（都是「这一段的去处」，不是格式）。

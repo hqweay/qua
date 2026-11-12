@@ -88,8 +88,14 @@ export const COMMANDS: CommandDecl[] = [
   /* ---- 行内格式（run 上的属性） ---- */
   { name: 'core.anno/toggle-bold', title: t('cmd.anno.toggle-bold'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['bold', 'strong', 'b'] },
   { name: 'core.anno/toggle-italic', title: t('cmd.anno.toggle-italic'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['italic', 'em', 'i'] },
+  { name: 'core.anno/toggle-underline', title: t('cmd.anno.toggle-underline'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['underline', 'u'] },
+  { name: 'core.anno/toggle-strike', title: t('cmd.anno.toggle-strike'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['strike', 'strikethrough', 's'] },
+  // ⌘E 键位保留；高亮退役成背景色轴的黄槽，命令名只是稳定 id
   { name: 'core.anno/toggle-highlight', title: t('cmd.anno.toggle-highlight'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['highlight', 'mark', t('menu.kw.background')] },
   { name: 'core.anno/toggle-code', title: t('cmd.anno.toggle-code'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['code', 'mono'] },
+  // 色板的两个轴：带参且没有收集路径 ⇒ 不进命令面板，气泡直接按槽名 invoke
+  { name: 'core.anno/set-ink', title: t('cmd.anno.set-ink'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), args: { slot: { type: 'string' } }, keywords: ['color', 'ink', 'font'], hidden: true },
+  { name: 'core.anno/set-bg', title: t('cmd.anno.set-bg'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), args: { slot: { type: 'string' } }, keywords: ['background', 'highlight', t('menu.kw.background')], hidden: true },
   { name: 'core.anno/clear-marks', title: t('cmd.anno.clear-marks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['clear', 'plain'] },
 
   /* ---- 标签层级（属于 / 包含：一条边，两个读法） ----

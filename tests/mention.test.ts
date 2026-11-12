@@ -62,7 +62,7 @@ test('出现处：名字被原子隔开（投影相邻、plain 不连续）不�
 
 test('出现处：格式拆开的两段（无原子）照收；原子后面的词起点对得上', () => {
   const atom: RefRun = { id: 'a1', t: 'ref', to: 'x', label: 'x' }
-  const content: Run[] = [...textRuns('设', ['bold']), ...textRuns('计'), atom, ...textRuns('计')]
+  const content: Run[] = [...textRuns('设', { bold: true }), ...textRuns('计'), atom, ...textRuns('计')]
   // 投影 "设计计"：[0,2) 跨两个 run 但无原子 ⇒ 可转换
   assert.deepEqual(mentionSpotsOf(content, '设计').map((s) => [s.start, s.end]), [[0, 2]])
   // [2,3) 是原子 ⇒ 不可；[3,4)... 投影里 "设计" 也可以是第 0..2 与 2..3+1? 投影是 设+计+计

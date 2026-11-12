@@ -17,24 +17,94 @@
  *
  * ## 归一化（幂等，可测断言）
  *
- * 相邻同形 text run（同 marks）合并、空文本段清除、marks 去重排序、
+ * 相邻同形 text run（同 marks）合并、空文本段清除、marks 按固定键序重建、
  * asset run 永不携带 marks（格式对位图/文件没有视觉对应物）。所有写入口的产出
  * 都经过 `normalizeRuns`，于是「库里的内容只有一种等价形状」。
  */
 import { uuidv7Hex } from './ids.ts'
 
-/** 行内格式的封闭种类（bold/italic/highlight/code）。 */
-export type MarkType = 'bold' | 'italic' | 'highlight' | 'code'
+/* ------------------------------------------------------------- marks 形状 */
 
-export const MARK_TYPES: readonly MarkType[] = ['bold', 'italic', 'highlight', 'code']
+/**
+ * 颜色槽：**只存槽名，不存颜色值**。槽名 → `--ui-ink-*`／`--ui-bg-*` → `--c-*` 的链
+ * 住在 CSS；颜色值进正文会让主题改不动它，也会在 TS 里散落颜色字面量。
+ */
+export type ColorSlot = 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'violet' | 'gray'
+export const COLOR_SLOTS: readonly ColorSlot[] = ['red', 'orange', 'yellow', 'green', 'blue', 'violet', 'gray']
+
+export function isColorSlot(x: unknown): x is ColorSlot {
+  return typeof x === 'string' && (COLOR_SLOTS as readonly string[]).includes(x)
+}
+
+/**
+ * **marks ＝ 映射**：键是可叠加的维度，值是该维度上的位置。
+ *
+ * 布尔轴（bold/italic/underline/strike/code）只能为 `true`：这些是能同时生效的
+ * 独立 CSS 属性，互不排斥。值轴（ink/bg）是**单值**：一段字不能同时是两种字体色，
+ * 于是 `{ink:'red', ink:'blue'}` 这个形状写不出来 —— 互斥是结构性的，不需要兜底规则。
+ * 旧 `highlight` 退役成 `bg:'yellow'`：映射里表达不了「高亮与背景黄」并存，
+ * 也就不会出现两个黄、清一个不清另一个的不报错坏法。
+ *
+ * 扩展一种格式＝加一个键，不是加一条互斥规则、不是加四处 switch。
+ */
+export interface Marks {
+  bold?: true
+  italic?: true
+  underline?: true
+  strike?: true
+  code?: true
+  ink?: ColorSlot
+  bg?: ColorSlot
+}
+
+export type MarkKind = keyof Marks
+
+/** 值轴：这些键要带一个槽名（不是布尔） */
+export const MARK_VALUE_KINDS: readonly MarkKind[] = ['ink', 'bg']
+
+/**
+ * **固定键序**：`normMarks` 按它重建对象。
+ * ⚠️ 不是可选的：`sameRuns` 靠 `JSON.stringify` 比对，对象 key 序＝插入序 ⇒
+ * 不按固定序重建，等价内容会有多种字节形状，DOM 每次同步都会白发一次空写。
+ */
+export const MARK_KINDS: readonly MarkKind[] = ['bold', 'italic', 'underline', 'strike', 'code', 'ink', 'bg']
+
+/** 一次格式操作：恰好一个键（布尔轴为 `true`，值轴为槽名）。`toggleMark` 取第一个键。 */
+export type MarkPatch = Partial<Marks>
+
+type MarkCell = [MarkKind, true | ColorSlot]
+
+/** 取出 patch 里那一格（恰好一个键的约定由调用方保证，这里只按固定序取第一个）。 */
+function onePatch(patch: MarkPatch): MarkCell | null {
+  for (const k of MARK_KINDS) {
+    const v = patch[k]
+    if (v !== undefined) return [k, v]
+  }
+  return null
+}
+
+/**
+ * 一个 marks 映射 → 描述符数组（布尔轴 `'bold'`，值轴 `'ink:red'`）。
+ * 按压态、诊断枚举、信息浮层都读这一份投影，别各自拼一遍字符串。
+ */
+export function markDescriptors(marks: Marks | undefined): string[] {
+  if (!marks) return []
+  const out: string[] = []
+  for (const k of MARK_KINDS) {
+    const v = marks[k]
+    if (v === undefined) continue
+    out.push(v === true ? k : `${k}:${v}`)
+  }
+  return out
+}
 
 /* ------------------------------------------------------------- run 形状 */
 
 export interface TextRun {
   t: 'text'
   v: string
-  /** 粗体/斜体/高亮/代码；集合语义，无序；没有格式就不写这个键 */
-  marks?: MarkType[]
+  /** 格式映射；没有格式就不写这个键 */
+  marks?: Marks
 }
 
 /**
@@ -65,7 +135,7 @@ export interface RefRun {
   label?: string
   /** 这一处引用的锚文本（用户显式写的显示名）；写空串 ＝ 不写这个键 */
   anchor?: string
-  marks?: MarkType[]
+  marks?: Marks
 }
 
 /** 外链 run：`v` 是显示文本，`url` 是目标。外链不产生块间边。 */
@@ -74,7 +144,7 @@ export interface LinkRun {
   t: 'link'
   v: string
   url: string
-  marks?: MarkType[]
+  marks?: Marks
 }
 
 /**
@@ -88,7 +158,7 @@ export interface LinkRun {
  * 回答（`AssetView`）。在 run 上再存一份，就是同一件事的第二个答案 —— 两份能不一致，
  * 而不一致时没有任何一层会报错（比如「图实际是 96×60，正文里写着 800×600」）。
  *
- * ⚠️ 唯一不许携带 marks 的 run：四种格式对位图/文件都没有对应物，
+ * ⚠️ 唯一不许携带 marks 的 run：格式对位图/文件都没有对应物，
  *    「技术上能盖上」不构成开禁的理由。
  */
 export interface AssetRun {
@@ -158,30 +228,37 @@ export function isEmptyContent(content: Content): boolean {
 
 /* ------------------------------------------------------------- 归一化 */
 
-function normMarks(marks: readonly MarkType[] | undefined): MarkType[] | undefined {
-  if (!marks || marks.length === 0) return undefined
-  // 集合语义 ⇒ 存储形状固定为「去重 ＋ 固定序」，等价内容只有一种形状
-  const sorted = [...new Set(marks)].sort((a, b) => a.localeCompare(b))
-  return sorted.length === 0 ? undefined : sorted
+function normMarks(marks: Marks | undefined): Marks | undefined {
+  if (!marks) return undefined
+  const out: Record<string, true | ColorSlot> = {}
+  for (const k of MARK_KINDS) {
+    const v = marks[k]
+    if (v === undefined) continue
+    if (MARK_VALUE_KINDS.includes(k)) {
+      if (!isColorSlot(v)) continue
+      out[k] = v
+    } else {
+      if (v !== true) continue
+      out[k] = true
+    }
+  }
+  return Object.keys(out).length === 0 ? undefined : (out as Marks)
 }
 
-/** 两个 marks 集合等价（归一化后逐项比） */
-function sameMarks(a: MarkType[] | undefined, b: MarkType[] | undefined): boolean {
-  const x = normMarks(a)
-  const y = normMarks(b)
-  if (x === undefined || y === undefined) return x === y
-  return x.length === y.length && x.every((m, i) => m === y[i])
+/** 两个 marks 映射等价（都按固定键序归一化后比字节）。 */
+function sameMarks(a: Marks | undefined, b: Marks | undefined): boolean {
+  return JSON.stringify(normMarks(a)) === JSON.stringify(normMarks(b))
 }
 
 function withoutMarks<T extends object>(r: T): T {
-  if (!('marks' in r) || (r as { marks?: MarkType[] }).marks === undefined) return r
-  const copy = { ...r } as T & { marks?: MarkType[] }
+  if (!('marks' in r) || (r as { marks?: Marks }).marks === undefined) return r
+  const copy = { ...r } as T & { marks?: Marks }
   delete copy.marks
   return copy
 }
 
 /**
- * 归一化：相邻同形 text run 合并、空文本段清除、marks 去重排序、
+ * 归一化：相邻同形 text run 合并、空文本段清除、marks 按固定键序重建、
  * asset 的 marks 剥掉。**幂等**（`normalizeRuns(normalizeRuns(x))` 逐字节相等）——
  * 这条是写入口的纪律：库里永远只存规范形态，「碰过但没改」才可能被识别出来。
  */
@@ -216,7 +293,7 @@ export function sameRuns(a: Content, b: Content): boolean {
 }
 
 /** 一段纯文本 → text run（空串 → 空内容）。新块/粘贴/程序化写入的入口。 */
-export function textRuns(v: string, marks?: readonly MarkType[]): Run[] {
+export function textRuns(v: string, marks?: Marks): Run[] {
   const m = normMarks(marks)
   return v === '' ? [] : m ? [{ t: 'text', v, marks: m }] : [{ t: 'text', v }]
 }
@@ -336,7 +413,7 @@ export function spliceRuns(content: Content, from: number, to: number, insert: s
 }
 
 /** 插入点左邻 text run 的格式（插入纯文本时继承它）。 */
-function insertFrom(content: Content, off: number): MarkType[] | undefined {
+function insertFrom(content: Content, off: number): Marks | undefined {
   const cur = locateCursor(content, off)
   // 光标在 text run 内部/后缘 ⇒ 延续它自己的格式（原子后缘不继承原子的格式）
   const r = content[cur.index]
@@ -365,9 +442,11 @@ export function removeRunById(content: Content, runId: string): Run[] {
 
 /* ------------------------------------------------------- 格式运算 */
 
-/** 区间 `[start, end)` 是否已被 `type` 完全覆盖（决定 ⌘B 是加还是取消）。 */
-export function isCovered(content: Content, type: MarkType, start: number, end: number): boolean {
-  if (start >= end) return false
+/** 区间 `[start, end)` 是否已被 `patch` 那一格完全覆盖（决定 ⌘B 是加还是取消）。 */
+export function isCovered(content: Content, patch: MarkPatch, start: number, end: number): boolean {
+  const p = onePatch(patch)
+  if (!p || start >= end) return false
+  const [k, v] = p
   let acc = 0
   let sawRange = false
   let coveredAll = true
@@ -377,7 +456,7 @@ export function isCovered(content: Content, type: MarkType, start: number, end: 
       const re = acc + r.v.length
       if (Math.max(rs, start) < Math.min(re, end)) {
         sawRange = true
-        if (!r.marks?.includes(type)) coveredAll = false
+        if (r.marks?.[k] !== v) coveredAll = false
       }
       acc = re
       continue
@@ -386,7 +465,7 @@ export function isCovered(content: Content, type: MarkType, start: number, end: 
     if (cell >= start && cell + 1 <= end) {
       sawRange = true
       // 资产拿不了格式：区间里有它就永远「未全覆盖」⇒ toggle 走加的一支（它自己仍不动）
-      if (r.t === 'asset' || !r.marks?.includes(type)) coveredAll = false
+      if (r.t === 'asset' || r.marks?.[k] !== v) coveredAll = false
     }
     acc = cell + 1
   }
@@ -394,12 +473,14 @@ export function isCovered(content: Content, type: MarkType, start: number, end: 
 }
 
 /**
- * ⌘B 手感：全覆盖 ⇒ 取消；否则 ⇒ 加。按 run 序列运算：文本在边界拆 run、
- * 覆盖段改 marks；ref/link 整枚改（不可分 ⇒ 零拆分成本）；资产永远不动。
+ * ⌘B 手感：那一格全覆盖 ⇒ 取消；否则 ⇒ 设成该值（值轴上就是换色）。按 run 序列运算：
+ * 文本在边界拆 run、覆盖段改 marks；ref/link 整枚改（不可分 ⇒ 零拆分成本）；资产永远不动。
  */
-export function toggleMark(content: Content, type: MarkType, start: number, end: number): Run[] {
-  if (start >= end) return normalizeRuns(content)
-  const removing = isCovered(content, type, start, end)
+export function toggleMark(content: Content, patch: MarkPatch, start: number, end: number): Run[] {
+  const p = onePatch(patch)
+  if (!p || start >= end) return normalizeRuns(content)
+  const [k, v] = p
+  const removing = isCovered(content, patch, start, end)
   const out: Run[] = []
   let acc = 0
   for (const r of content) {
@@ -415,14 +496,14 @@ export function toggleMark(content: Content, type: MarkType, start: number, end:
       }
       // 至多三段：左（不动）/ 中（覆盖，改格式）/ 右（不动）
       if (os > rs) out.push(...textRuns(r.v.slice(0, os - rs), r.marks))
-      out.push(...textRuns(r.v.slice(os - rs, oe - rs), flipMarks(r.marks, type, removing)))
+      out.push(...textRuns(r.v.slice(os - rs, oe - rs), flipMarks(r.marks, k, v, removing)))
       if (oe < re) out.push(...textRuns(r.v.slice(oe - rs), r.marks))
       acc = re
       continue
     }
     const cell = acc
     if (cell >= start && cell + 1 <= end && r.t !== 'asset') {
-      out.push({ ...r, marks: flipMarks(r.marks, type, removing) } as RunWithId)
+      out.push({ ...r, marks: flipMarks(r.marks, k, v, removing) } as RunWithId)
     } else {
       out.push(r)
     }
@@ -431,7 +512,7 @@ export function toggleMark(content: Content, type: MarkType, start: number, end:
   return normalizeRuns(out)
 }
 
-/** 清掉区间上的**全部**格式（四种一起）。资产无格式可清，天然不动。 */
+/** 清掉区间上的**全部**格式（七个维度一起）。资产无格式可清，天然不动。 */
 export function clearMarks(content: Content, start: number, end: number): Run[] {
   if (start >= end) return normalizeRuns(content)
   const out: Run[] = []
@@ -464,31 +545,36 @@ export function clearMarks(content: Content, start: number, end: number): Run[] 
   return normalizeRuns(out)
 }
 
-function flipMarks(marks: MarkType[] | undefined, type: MarkType, removing: boolean): MarkType[] | undefined {
-  if (removing) {
-    const next = (marks ?? []).filter((m) => m !== type)
-    return next.length === 0 ? undefined : next
-  }
-  return normMarks([...(marks ?? []), type])
+function flipMarks(marks: Marks | undefined, k: MarkKind, v: true | ColorSlot, removing: boolean): Marks | undefined {
+  const next: Record<string, true | ColorSlot> = { ...(marks ?? {}) }
+  if (removing) delete next[k]
+  else next[k] = v
+  return normMarks(next as Marks)
 }
 
-/** 区间上**出现过**哪些格式（划选气泡的按压态：亮着的不一定是全覆盖）。 */
-export function marksInRange(content: Content, start: number, end: number): MarkType[] {
-  const out = new Set<MarkType>()
+/**
+ * 区间上**出现过**哪些格式（划选气泡的按压态：亮着的不一定是全覆盖）。
+ * 描述符：布尔轴是键名（`'bold'`），值轴是 `键:槽`（`'ink:red'`）。
+ */
+export function marksInRange(content: Content, start: number, end: number): string[] {
+  const out = new Set<string>()
+  const add = (marks: Marks | undefined): void => {
+    for (const d of markDescriptors(marks)) out.add(d)
+  }
   let acc = 0
   for (const r of content) {
     if (r.t === 'text') {
       const re = acc + r.v.length
-      if (Math.max(acc, start) < Math.min(re, end)) for (const m of r.marks ?? []) out.add(m)
+      if (Math.max(acc, start) < Math.min(re, end)) add(r.marks)
       acc = re
       continue
     }
     const cell = acc
     // 资产没有格式可报；写在这里只是让类型收窄，语义等价（它永远没有 marks）
-    if (cell >= start && cell + 1 <= end && r.t !== 'asset') for (const m of r.marks ?? []) out.add(m)
+    if (cell >= start && cell + 1 <= end && r.t !== 'asset') add(r.marks)
     acc = cell + 1
   }
-  return [...out].sort((a, b) => a.localeCompare(b))
+  return [...out].sort()
 }
 
 /* ------------------------------------------------------- 原子与边 */
@@ -589,10 +675,20 @@ export function mkAnno(content: Content, start: number, end: number): Anno | nul
 
 /* ------------------------------------------------------- 形状校验 */
 
-const MARK_SET: ReadonlySet<string> = new Set(['bold', 'italic', 'highlight', 'code'])
-
-function isMarks(x: unknown): x is MarkType[] {
-  return Array.isArray(x) && x.every((m) => typeof m === 'string' && MARK_SET.has(m))
+/** 落盘形状校验：marks 是「key 表 × 每 key 一个值判据」，不是扁平字符串白名单。 */
+function isMarks(x: unknown): x is Marks {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return false
+  const o = x as Record<string, unknown>
+  for (const k of Object.keys(o)) {
+    if (!(MARK_KINDS as readonly string[]).includes(k)) return false
+    const v = o[k]
+    if (MARK_VALUE_KINDS.includes(k as MarkKind)) {
+      if (!isColorSlot(v)) return false
+    } else if (v !== true) {
+      return false
+    }
+  }
+  return true
 }
 
 /** 落盘形状校验用：这真的是一个合法 run 吗（资产带 marks 一律判非法）。 */

@@ -96,7 +96,7 @@ import {
   spliceRuns,
   toggleMark as toggleRunMark,
   type LinkRun,
-  type MarkType,
+  type MarkPatch,
   type RefRun,
   type Run as InlineRun,
   type RunWithId,
@@ -2484,12 +2484,12 @@ export class BlockEditor {
    * ⌘B/⌘I…：格式是 run 属性 ⇒ 改格式＝改内容。每个被选中的块一条 content 写入
    * （格式/原子改动＝一条 upsert{content}，落库与同步看到的都是整组替换）。
    */
-  toggleMark(type: MarkType): void {
+  toggleMark(patch: MarkPatch): void {
     const s = this.sel
     if (!s) return
     const ranges = selToTextRanges(this.doc, s)
     if (ranges.length === 0) return
-    this.markTx(s, ranges, 'single', (next, r) => (r.start >= r.end ? next : toggleRunMark(next, type, r.start, r.end)))
+    this.markTx(s, ranges, 'single', (next, r) => (r.start >= r.end ? next : toggleRunMark(next, patch, r.start, r.end)))
   }
 
   /**
@@ -2530,12 +2530,12 @@ export class BlockEditor {
     this.emitChange('text')
   }
 
-  /** 当前选区上**出现过**的格式（诊断/划选气泡的按压态） */
-  marksAtSel(): MarkType[] {
+  /** 当前选区上**出现过**的格式描述符（诊断/划选气泡的按压态）：`'bold'` 或 `'ink:red'` */
+  marksAtSel(): string[] {
     const s = this.sel
     if (!s) return []
     const ranges = selToTextRanges(this.doc, s)
-    const out = new Set<MarkType>()
+    const out = new Set<string>()
     for (const r of ranges) {
       const b = locate(this.doc, r.blockId)?.block
       if (!b) continue
@@ -2698,7 +2698,7 @@ export class BlockEditor {
     const next: InlineRun = {
       t: 'text',
       v: text,
-      ...('marks' in run && run.marks && run.marks.length > 0 ? { marks: run.marks } : {}),
+      ...('marks' in run && run.marks && Object.keys(run.marks).length > 0 ? { marks: run.marks } : {}),
     }
     const nextContent = hit.block.content.map((r) => (r.t !== 'text' && r.id === runId ? next : r))
     this.beginUndoEntry()

@@ -6,7 +6,8 @@
  *   · 归一化幂等（库里的内容只有一种等价形状）；
  *   · 原子不可分（删旁边的字不吃原子；区间盖住才删，且整枚删）；
  *   · 格式不上 image run（归一化兜底剥掉，形状校验判非法）；
- *   · ref/link 可携带格式（整句加粗不断裂）。
+ *   · ref/link 可携带格式（整句加粗不断裂）；
+ *   · marks 是映射：值轴互斥是结构性的，键序固定（sameRuns 不白发空写）。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -37,6 +38,7 @@ import {
   textRuns,
   toggleMark,
   type AssetRun,
+  type MarkPatch,
   type RefRun,
   type Run,
 } from '../src/core/model/runs.ts'
@@ -98,23 +100,25 @@ test('mkAnno：range 用 plain 坐标、quote 用投影坐标，两层各说各�
 
 /* ---------------------------------------------------------- 归一化 */
 
-test('normalizeRuns：相邻同形 text run 合并、空段清除、marks 去重排序', () => {
+test('normalizeRuns：相邻同形 text run 合并、空段清除、marks 按固定键序重建', () => {
   const out = normalizeRuns([
-    { t: 'text', v: 'a', marks: ['bold', 'bold', 'italic'] },
-    { t: 'text', v: 'b', marks: ['italic', 'bold'] },
+    { t: 'text', v: 'a', marks: { italic: true, bold: true } },
+    { t: 'text', v: 'b', marks: { bold: true, italic: true } },
     { t: 'text', v: '' },
     { t: 'text', v: 'c' },
   ])
   assert.deepEqual(out, [
-    { t: 'text', v: 'ab', marks: ['bold', 'italic'] },
+    { t: 'text', v: 'ab', marks: { bold: true, italic: true } },
     { t: 'text', v: 'c' },
   ])
+  // deepEqual 不看键序；键序是 sameRuns 的前提，得单独钉住
+  assert.equal(JSON.stringify(out[0]!.marks), '{"bold":true,"italic":true}')
 })
 
 test('normalizeRuns：幂等（normalize(normalize(x)) 逐字节相等）', () => {
   const x: Run[] = [
-    { t: 'text', v: 'a', marks: ['code'] },
-    { t: 'text', v: 'b', marks: ['code'] },
+    { t: 'text', v: 'a', marks: { code: true } },
+    { t: 'text', v: 'b', marks: { code: true } },
     ref('p1'),
     { t: 'text', v: 'c' },
     { t: 'text', v: 'd' },
@@ -124,16 +128,56 @@ test('normalizeRuns：幂等（normalize(normalize(x)) 逐字节相等）', () =
 })
 
 test('normalizeRuns：资产的 marks 一律剥掉（红线：格式不上资产 run）', () => {
-  const bad = { ...asset('h1'), marks: ['bold'] } as unknown as Run
+  const bad = { ...asset('h1'), marks: { bold: true } } as unknown as Run
   const out = normalizeRuns([bad])
   assert.equal((out[0] as AssetRun).marks, undefined)
 })
 
 test('sameRuns：按归一化形态比，「碰过但没改」能被识别', () => {
-  const a: Run[] = [{ t: 'text', v: 'x' }, { t: 'text', v: 'y', marks: [] }]
+  const a: Run[] = [{ t: 'text', v: 'x' }, { t: 'text', v: 'y', marks: {} }]
   const b: Run[] = [{ t: 'text', v: 'xy' }]
   assert.ok(sameRuns(a, b))
   assert.ok(!sameRuns(a, [{ t: 'text', v: 'xz' }]))
+})
+
+/* --------------------------------------- 映射形状：互斥与固定键序 */
+
+test('映射形状：不同插入序的等价 marks 归一成同一份字节（sameRuns 不白发空写）', () => {
+  const a = normalizeRuns([{ t: 'text', v: 'x', marks: { ink: 'red', bold: true, bg: 'blue' } }])
+  const b = normalizeRuns([{ t: 'text', v: 'x', marks: { bg: 'blue', ink: 'red', bold: true } }])
+  assert.equal(JSON.stringify(a), JSON.stringify(b))
+  assert.equal(JSON.stringify(a[0]!), '{"t":"text","v":"x","marks":{"bold":true,"ink":"red","bg":"blue"}}')
+  assert.ok(sameRuns(a, b))
+})
+
+test('映射形状：值轴互斥是结构性的（ink 换色只剩一个值，写不出两个色）', () => {
+  const c = textRuns('abcdef')
+  const red = toggleMark(c, { ink: 'red' }, 0, 6)
+  assert.deepEqual(red, [{ t: 'text', v: 'abcdef', marks: { ink: 'red' } }])
+  const blue = toggleMark(red, { ink: 'blue' }, 0, 6)
+  assert.deepEqual(blue, [{ t: 'text', v: 'abcdef', marks: { ink: 'blue' } }])
+  // 再按同一个色 ⇒ 取消（toggle 手感）
+  assert.deepEqual(toggleMark(blue, { ink: 'blue' }, 0, 6), c)
+})
+
+test('映射形状：highlight 与 bg:yellow 的双黄冲突写不出来（⌘E 就是设 bg:yellow）', () => {
+  const c = toggleMark(textRuns('abc'), { bg: 'yellow' }, 0, 3)
+  assert.deepEqual(c, [{ t: 'text', v: 'abc', marks: { bg: 'yellow' } }])
+  assert.ok(isCovered(c, { bg: 'yellow' }, 0, 3))
+  assert.deepEqual(toggleMark(c, { bg: 'yellow' }, 0, 3), textRuns('abc'))
+})
+
+test('四种新格式：underline/strike/ink/bg 能叠加，清格式连颜色一起清', () => {
+  let c = textRuns('abcdef')
+  for (const patch of [{ underline: true }, { strike: true }, { ink: 'green' }, { bg: 'violet' }] as MarkPatch[]) {
+    c = toggleMark(c, patch, 0, 6)
+  }
+  assert.deepEqual(c, [{
+    t: 'text', v: 'abcdef',
+    marks: { underline: true, strike: true, ink: 'green', bg: 'violet' },
+  }])
+  assert.ok(isCovered(c, { ink: 'green' }, 0, 6))
+  assert.deepEqual(clearMarks(c, 0, 6), textRuns('abcdef'))
 })
 
 /* ------------------------------------------------------- 原子不可分 */
@@ -160,17 +204,17 @@ test('spliceRuns：区间盖住原子 ⇒ 整枚删（显式删除）；区间�
 })
 
 test('splitRuns：切点落在原子上 ⇒ 原子归右半；文本截断处 marks 跟着走', () => {
-  const c: Run[] = [{ t: 'text', v: 'abcd', marks: ['bold'] }, ref('p'), { t: 'text', v: 'ef' }]
+  const c: Run[] = [{ t: 'text', v: 'abcd', marks: { bold: true } }, ref('p'), { t: 'text', v: 'ef' }]
   const [l, r] = splitRuns(c, 2)
-  assert.deepEqual(l, [{ t: 'text', v: 'ab', marks: ['bold'] }])
-  assert.deepEqual(r, [{ t: 'text', v: 'cd', marks: ['bold'] }, c[1], { t: 'text', v: 'ef' }])
+  assert.deepEqual(l, [{ t: 'text', v: 'ab', marks: { bold: true } }])
+  assert.deepEqual(r, [{ t: 'text', v: 'cd', marks: { bold: true } }, c[1], { t: 'text', v: 'ef' }])
 })
 
 test('joinRuns：边界两侧同形 text run 并成一个（合并块）', () => {
-  const l = [{ t: 'text', v: 'ab', marks: ['bold'] }] as Run[]
-  const r = [{ t: 'text', v: 'cd', marks: ['bold'] }, { t: 'text', v: 'e' }] as Run[]
+  const l = [{ t: 'text', v: 'ab', marks: { bold: true } }] as Run[]
+  const r = [{ t: 'text', v: 'cd', marks: { bold: true } }, { t: 'text', v: 'e' }] as Run[]
   assert.deepEqual(joinRuns(l, r), [
-    { t: 'text', v: 'abcd', marks: ['bold'] },
+    { t: 'text', v: 'abcd', marks: { bold: true } },
     { t: 'text', v: 'e' },
   ])
 })
@@ -189,54 +233,62 @@ test('insertRunAt / removeRunById：插入与删除都是显式的整枚操作',
 
 test('toggleMark：加格式拆 run、取消格式复原；幂等形态稳定', () => {
   const c = textRuns('abcdef')
-  const bold = toggleMark(c, 'bold', 2, 5)
+  const bold = toggleMark(c, { bold: true }, 2, 5)
   assert.deepEqual(bold, [
     { t: 'text', v: 'ab' },
-    { t: 'text', v: 'cde', marks: ['bold'] },
+    { t: 'text', v: 'cde', marks: { bold: true } },
     { t: 'text', v: 'f' },
   ])
   // 全覆盖 ⇒ 再按一次取消
-  assert.deepEqual(toggleMark(bold, 'bold', 2, 5), c)
+  assert.deepEqual(toggleMark(bold, { bold: true }, 2, 5), c)
 })
 
 test('toggleMark：区间盖住 ref ⇒ ref 整枚携带格式（整句加粗不断裂）；资产永不携带', () => {
   const r = ref('p1')
   const im = asset('h')
   const c: Run[] = [...textRuns('ab'), r, im, ...textRuns('cd')]
-  const bold = toggleMark(c, 'bold', 0, plainLen(c))
+  const bold = toggleMark(c, { bold: true }, 0, plainLen(c))
   const gotRef = bold.find((x): x is RefRun => x.t === 'ref')!
   const gotImg = bold.find((x): x is AssetRun => x.t === 'asset')!
-  assert.deepEqual(gotRef.marks, ['bold'])
+  assert.deepEqual(gotRef.marks, { bold: true })
   assert.equal(gotImg.marks, undefined)
   // 区间里有资产 ⇒ 永远判「未全覆盖」⇒ toggle 恒走「加」的一支（资产自己仍不动）
-  assert.ok(!isCovered(c, 'bold', 0, plainLen(c)))
+  assert.ok(!isCovered(c, { bold: true }, 0, plainLen(c)))
 })
 
 test('isCovered：部分覆盖 ⇒ false（再按一次是补齐，不是取消）', () => {
   const c = [
-    { t: 'text', v: 'ab', marks: ['bold'] },
+    { t: 'text', v: 'ab', marks: { bold: true } },
     { t: 'text', v: 'cd' },
   ] as Run[]
-  assert.ok(!isCovered(c, 'bold', 0, 4))
-  assert.ok(isCovered(c, 'bold', 0, 2))
+  assert.ok(!isCovered(c, { bold: true }, 0, 4))
+  assert.ok(isCovered(c, { bold: true }, 0, 2))
 })
 
 test('clearMarks：一次清掉全部格式；文本边界拆段', () => {
-  const c = toggleMark(toggleMark(textRuns('abcdef'), 'bold', 0, 6), 'italic', 2, 4)
+  const c = toggleMark(toggleMark(textRuns('abcdef'), { bold: true }, 0, 6), { italic: true }, 2, 4)
   assert.deepEqual(clearMarks(c, 1, 5), [
-    { t: 'text', v: 'a', marks: ['bold'] },
+    { t: 'text', v: 'a', marks: { bold: true } },
     { t: 'text', v: 'bcde' },
-    { t: 'text', v: 'f', marks: ['bold'] },
+    { t: 'text', v: 'f', marks: { bold: true } },
   ])
 })
 
 test('marksInRange：区间上出现过的格式（气泡按压态）', () => {
   const c = [
-    { t: 'text', v: 'ab', marks: ['bold'] },
-    { t: 'text', v: 'cd', marks: ['bold', 'italic'] },
+    { t: 'text', v: 'ab', marks: { bold: true } },
+    { t: 'text', v: 'cd', marks: { bold: true, italic: true } },
   ] as Run[]
   assert.deepEqual(marksInRange(c, 0, 4), ['bold', 'italic'])
   assert.deepEqual(marksInRange(c, 0, 2), ['bold'])
+})
+
+test('marksInRange：值轴报 `键:槽` 描述符（色板按压态认得出是哪个色）', () => {
+  const c = [
+    { t: 'text', v: 'ab', marks: { ink: 'red' } },
+    { t: 'text', v: 'cd', marks: { bg: 'yellow', bold: true } },
+  ] as Run[]
+  assert.deepEqual(marksInRange(c, 0, 4), ['bg:yellow', 'bold', 'ink:red'])
 })
 
 /* --------------------------------------------------------- 定位 */
@@ -263,7 +315,7 @@ test('refRunsOf：按出现序提取引用 run（边提取的唯一入口）', (
 
 test('cloneRunsNewIds：内容等价、原子全换新 id（复制 ≠ 共享身份）', () => {
   const a = ref('p1')
-  const c: Run[] = [...textRuns('ab', ['bold']), a, asset('h')]
+  const c: Run[] = [...textRuns('ab', { bold: true }), a, asset('h')]
   const cp = cloneRunsNewIds(c)
   assert.equal(plainText(cp), 'ab')
   const cpRef = cp.find((x): x is RefRun => x.t === 'ref')!
@@ -275,15 +327,15 @@ test('cloneRunsNewIds：内容等价、原子全换新 id（复制 ≠ 共享身
 
 test('isRun / isAnno：合法形状放行、非法形状拦下（资产带 marks / 带字节 / 把 state 落盘都判非法）', () => {
   assert.ok(isRun({ t: 'text', v: 'x' }))
-  assert.ok(isRun({ t: 'text', v: 'x', marks: ['bold'] }))
-  assert.ok(!isRun({ t: 'text', v: 'x', marks: ['wow'] }))
+  assert.ok(isRun({ t: 'text', v: 'x', marks: { bold: true } }))
+  assert.ok(!isRun({ t: 'text', v: 'x', marks: ['wow'] }), '旧数组形状必须判非法')
   assert.ok(isRun(ref('p', { label: '名' })))
   assert.ok(!isRun({ t: 'ref', to: 1 }))
   assert.ok(isRun({ id: 'l', t: 'link', v: '字', url: 'https://x' }))
   assert.ok(isRun(asset('h')))
   assert.ok(isRun({ id: 'a', t: 'asset', asset: 'h', label: '名' }))
   assert.ok(!isRun({ id: 'a', t: 'asset', asset: 'h', w: 4, h: 3 }), '尺寸是那份字节的属性（索引回答），不进 run')
-  assert.ok(!isRun({ ...asset('h'), marks: ['bold'] }), '资产不带格式')
+  assert.ok(!isRun({ ...asset('h'), marks: { bold: true } }), '资产不带格式')
   assert.ok(!isRun({ ...asset('h'), bytes: 'AAAA' }), '字节不进正文')
   assert.ok(!isRun({ ...asset('h'), state: 'ready' }), 'state 是派生值，不落盘')
   assert.ok(!isRun({ id: 'a', t: 'asset' }), '缺地址不是合法资产')
@@ -293,6 +345,17 @@ test('isRun / isAnno：合法形状放行、非法形状拦下（资产带 marks
   assert.ok(isAnno({ id: 'x', range: { start: 0, end: 2 } }))
   assert.ok(isAnno({ id: 'x', range: { start: 0, end: 2 }, quote: { exact: 'a', prefix: '', suffix: '' } }))
   assert.ok(!isAnno({ id: 'x' }))
+})
+
+test('isRun：marks 是「key 表 × 每 key 一个值判据」，不是扁平字符串白名单', () => {
+  assert.ok(isRun({ t: 'text', v: 'x', marks: { ink: 'red', bg: 'blue' } }))
+  assert.ok(isRun({ t: 'text', v: 'x', marks: { underline: true, strike: true } }))
+  assert.ok(!isRun({ t: 'text', v: 'x', marks: { bold: 'yes' } }), '布尔轴只认 true')
+  assert.ok(!isRun({ t: 'text', v: 'x', marks: { bold: false } }))
+  assert.ok(!isRun({ t: 'text', v: 'x', marks: { ink: 'chartreuse' } }), '非法槽名')
+  assert.ok(!isRun({ t: 'text', v: 'x', marks: { bg: 42 } }))
+  assert.ok(!isRun({ t: 'text', v: 'x', marks: { ink: 'red', ink2: 'blue' } }), '未知键')
+  assert.ok(!isRun({ t: 'text', v: 'x', marks: ['bold'] }), '数组不是映射')
 })
 
 /**
@@ -332,7 +395,7 @@ test('资产 run：plainText 贡献 0、plain 占 1 格、永不带 marks（三�
   assert.equal(plainText(c), '前后')
   assert.equal(plainLen(c), 3)
   // 归一化之后仍然没有 marks（即使被区间格式盖过）
-  const bold = toggleMark(c, 'bold', 0, plainLen(c))
+  const bold = toggleMark(c, { bold: true }, 0, plainLen(c))
   assert.equal((bold.find((x): x is AssetRun => x.t === 'asset')!).marks, undefined)
 })
 

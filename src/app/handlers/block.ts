@@ -5,7 +5,7 @@
  * 只经 `App` 门面改状态（`app.ed.*`），不碰 DOM。
  */
 import { t } from '../../core/infra/msg.ts'
-import { checkExternalUrl, isJournalDate, journalDateLabel, rejectText } from '../../core/index.ts'
+import { checkExternalUrl, isColorSlot, isJournalDate, journalDateLabel, rejectText } from '../../core/index.ts'
 import { MISSING_ASSET_HASH, SEED_ASSET_HASH } from '../../core/fixtures/assets.ts'
 import type { App, Handler } from '../../core/infra/ports.ts'
 import { buildCopyHtml } from '../../view/editor/clipboard-flavor.ts'
@@ -431,19 +431,41 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     return true
   },
   'core.anno/toggle-bold': (_a, app) => {
-    app.ed.toggleMark('bold')
+    app.ed.toggleMark({ bold: true })
     return true
   },
   'core.anno/toggle-italic': (_a, app) => {
-    app.ed.toggleMark('italic')
+    app.ed.toggleMark({ italic: true })
     return true
   },
+  // ⌘E 键位保留：高亮退役成背景色轴上的黄槽，行为仍是「再按一次取消」
   'core.anno/toggle-highlight': (_a, app) => {
-    app.ed.toggleMark('highlight')
+    app.ed.toggleMark({ bg: 'yellow' })
     return true
   },
   'core.anno/toggle-code': (_a, app) => {
-    app.ed.toggleMark('code')
+    app.ed.toggleMark({ code: true })
+    return true
+  },
+  'core.anno/toggle-underline': (_a, app) => {
+    app.ed.toggleMark({ underline: true })
+    return true
+  },
+  'core.anno/toggle-strike': (_a, app) => {
+    app.ed.toggleMark({ strike: true })
+    return true
+  },
+  // 色板的两个轴：slot 必须是登记过的槽名，非法值直接拒（不静默写进正文）
+  'core.anno/set-ink': (a, app) => {
+    const slot = S(a.slot)
+    if (!isColorSlot(slot)) return false
+    app.ed.toggleMark({ ink: slot })
+    return true
+  },
+  'core.anno/set-bg': (a, app) => {
+    const slot = S(a.slot)
+    if (!isColorSlot(slot)) return false
+    app.ed.toggleMark({ bg: slot })
     return true
   },
   'core.anno/clear-marks': (_a, app) => {

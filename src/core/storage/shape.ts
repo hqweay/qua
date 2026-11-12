@@ -146,8 +146,12 @@ import {
  *            `_use: 'status'` 是语义（库级唯一），`_check {on, off}` 是勾选框映射
  *            （勾选/取消写哪两个选项）。旧库的完成标记新代码不读（任务身份会消失）
  *            ⇒ 作废重 seed，不写迁移。
+ * v41 → v42：**行内格式 `marks` 从数组换成映射**（键＝可叠加的维度，值＝该维度上的位置），
+ *            新增 underline／strike／ink／bg，`highlight` 退役成 `bg:'yellow'`。
+ *            旧库的 `marks: ['bold']` 会被形状校验判非法（数组不是映射）⇒ 作废重 seed，
+ *            不写迁移。
  */
-export const WORKSPACE_VERSION = 41
+export const WORKSPACE_VERSION = 42
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

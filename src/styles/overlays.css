@@ -164,6 +164,38 @@
   margin: 0 var(--ui-gap-1);
   background: var(--ui-border);
 }
+/* 颜色轴：值轴不是开关，是一排槽名；色点只引 --ui-ink-* 语义槽，不碰基础色 */
+.selbar .sel-swatches {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--ui-gap-1);
+}
+.selbar .sel-swatches-lead {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ui-text-tertiary);
+  margin-right: 2px;
+}
+.selbar .sel-swatch {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--ui-border);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.selbar .sel-swatch[data-slot='red'] { background: var(--ui-ink-red); }
+.selbar .sel-swatch[data-slot='orange'] { background: var(--ui-ink-orange); }
+.selbar .sel-swatch[data-slot='yellow'] { background: var(--ui-ink-yellow); }
+.selbar .sel-swatch[data-slot='green'] { background: var(--ui-ink-green); }
+.selbar .sel-swatch[data-slot='blue'] { background: var(--ui-ink-blue); }
+.selbar .sel-swatch[data-slot='violet'] { background: var(--ui-ink-violet); }
+.selbar .sel-swatch[data-slot='gray'] { background: var(--ui-ink-gray); }
+.selbar .sel-swatch[data-on='1'] {
+  outline: 2px solid var(--ui-text);
+  outline-offset: 1px;
+}
 
 .popover {
   position: fixed;

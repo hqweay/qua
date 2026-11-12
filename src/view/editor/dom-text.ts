@@ -9,14 +9,36 @@
  *   `.left`（gutter）与标签 chip（`data-tag-id`）**永远不参与读数**。
  * ⚠️ 这条不变量是选区与光标能活下来的前提：读数与渲染对不上，偏移就会当场错位。
  */
-import type { MarkType, RefRun, Run, RunWithId } from '../../core/model/runs.ts'
-import { normalizeRuns } from '../../core/model/runs.ts'
-/** 格式包装元素的 class 前缀（`mk-bold` 这类）与格式种类的对照——渲染与读回共用这一份 */
-const MARK_CLASS: Record<string, MarkType> = {
-  'mk-bold': 'bold',
-  'mk-italic': 'italic',
-  'mk-highlight': 'highlight',
-  'mk-code': 'code',
+import {
+  MARK_KINDS,
+  MARK_VALUE_KINDS,
+  isColorSlot,
+  normalizeRuns,
+  type ColorSlot,
+  type Marks,
+  type RefRun,
+  type Run,
+  type RunWithId,
+} from '../../core/model/runs.ts'
+
+/**
+ * 一个包装元素身上带的格式（**渲染与读回共用 `mk-${kind}` 这份契约**，键表来自 core）。
+ *
+ * ⚠️ 值轴的槽名住在 `data-slot` 上：class 名固定是 `mk-ink`／`mk-bg`，只读 class
+ *    会把颜色**读回即丢**，且不报错（保存后重开颜色没了）。
+ */
+function markOfEl(el: HTMLElement): Marks {
+  const out: Record<string, true | ColorSlot> = {}
+  for (const k of MARK_KINDS) {
+    if (!el.classList.contains(`mk-${k}`)) continue
+    if (MARK_VALUE_KINDS.includes(k)) {
+      const slot = el.dataset.slot
+      if (isColorSlot(slot)) out[k] = slot
+    } else {
+      out[k] = true
+    }
+  }
+  return out as Marks
 }
 
 /**
@@ -73,7 +95,7 @@ export function offsetIn(root: HTMLElement, node: Node, off: number): number {
 /**
  * 把 `.tx` 读回**行内内容**（run 序列）。
  *
- * - 文本节点 ⇒ 文本段，格式来自祖先上的 `mk-*` 包装元素（集合语义）；
+ * - 文本节点 ⇒ 文本段，格式来自祖先上的 `mk-*` 包装元素（映射语义）；
  * - 原子元素 ⇒ 按 `data-atom-id` 从**既有内容**里原样带回（id/目标/资产不重生——
  *   DOM 上只有显示名，模型数据得从模型拿）；
  * - **模型里没有这一格时按 `data-atom-kind` 还原**：DOM 上带着种类与地址（`data-asset-hash`），
@@ -87,17 +109,17 @@ export function offsetIn(root: HTMLElement, node: Node, off: number): number {
  */
 export function readRuns(tx: HTMLElement, prev: readonly Run[]): Run[] {
   const segs: (
-    | { text: string; marks: MarkType[] }
+    | { text: string; marks: Marks }
     | { atomId: string; label: string; kind?: string; hash?: string }
   )[] = []
   const byId = new Map<string, RunWithId>()
   for (const r of prev) if (r.t !== 'text') byId.set(r.id, r)
 
-  const walk = (n: Node, marks: readonly MarkType[]): void => {
+  const walk = (n: Node, marks: Marks): void => {
     if (isTagChip(n)) return
     if (n.nodeType === Node.TEXT_NODE) {
       const v = n.textContent ?? ''
-      if (v !== '') segs.push({ text: v, marks: [...marks] })
+      if (v !== '') segs.push({ text: v, marks: { ...marks } })
       return
     }
     if (n.nodeType !== Node.ELEMENT_NODE) return
@@ -112,14 +134,10 @@ export function readRuns(tx: HTMLElement, prev: readonly Run[]): Run[] {
       })
       return
     }
-    const next = [...marks]
-    for (const cls of Array.from(el.classList)) {
-      const m = MARK_CLASS[cls]
-      if (m && !next.includes(m)) next.push(m)
-    }
+    const next: Marks = { ...marks, ...markOfEl(el) }
     for (const c of Array.from(el.childNodes)) walk(c, next)
   }
-  for (const c of Array.from(tx.childNodes)) walk(c, [])
+  for (const c of Array.from(tx.childNodes)) walk(c, {})
 
   const out: Run[] = []
   for (const seg of segs) {
@@ -137,7 +155,7 @@ export function readRuns(tx: HTMLElement, prev: readonly Run[]): Run[] {
       continue
     }
     if (seg.text === '') continue
-    out.push(seg.marks.length === 0 ? { t: 'text', v: seg.text } : { t: 'text', v: seg.text, marks: seg.marks })
+    out.push(Object.keys(seg.marks).length === 0 ? { t: 'text', v: seg.text } : { t: 'text', v: seg.text, marks: seg.marks })
   }
   return normalizeRuns(out)
 }

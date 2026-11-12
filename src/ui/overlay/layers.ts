@@ -9,6 +9,7 @@
  *   一抢焦点原生选区就塌了，加粗就加到了空选区上。
  */
 import { keyLabel, type Binding } from '../../core/infra/bindings.ts'
+import { COLOR_SLOTS, type ColorSlot } from '../../core/model/runs.ts'
 import { DECL_BY_NAME, type CommandDecl } from '../../core/commands/index.ts'
 // ⚠️ 三个收敛点之三：UI 组件的文案一律走 t
 import { t } from '../../core/infra/msg.ts'
@@ -510,10 +511,66 @@ export class Layers {
     const box = document.createElement('div')
     box.className = 'selbar'
     box.setAttribute('role', 'toolbar')
+
+    /**
+     * 色板：ink/bg 各一排。值轴不是开关（一个轴上只能有一个槽），所以不走 Row/绑定表，
+     * 直接按轴渲染一组色点；按压态读 `activeMarks` 里的 `键:槽` 描述符。
+     * 点下去仍走 `onPick` ⇒ 与格式按钮同一条命令路径（撤销、重画、按压态刷新都免费）。
+     */
+    const SWATCH_LABEL: Record<ColorSlot, string> = {
+      red: t('ui.color.red'),
+      orange: t('ui.color.orange'),
+      yellow: t('ui.color.yellow'),
+      green: t('ui.color.green'),
+      blue: t('ui.color.blue'),
+      violet: t('ui.color.violet'),
+      gray: t('ui.color.gray'),
+    }
+    const addSwatches = (): void => {
+      for (const axis of ['ink', 'bg'] as const) {
+        const axisTitle = axis === 'ink' ? t('menu.label.ink') : t('menu.label.bg')
+        const group = document.createElement('div')
+        group.className = 'sel-swatches'
+        group.dataset.axis = axis
+        const lead = document.createElement('span')
+        lead.className = 'sel-swatches-lead'
+        lead.dataset.tip = axisTitle
+        renderIcon(lead, axis === 'ink' ? 'lucide:baseline' : 'lucide:highlighter', 'circle-help', 'sm')
+        group.appendChild(lead)
+        for (const slot of COLOR_SLOTS) {
+          const b = document.createElement('button')
+          b.type = 'button'
+          b.className = 'sel-swatch'
+          b.dataset.slot = slot
+          b.dataset.tip = `${axisTitle}·${SWATCH_LABEL[slot]}`
+          if (o.activeMarks.has(`${axis}:${slot}`)) b.dataset.on = '1'
+          // ⚠️ mousedown 而不是 click：click 之前浏览器会先清掉选区（同格式按钮的踩坑）
+          b.addEventListener('mousedown', (e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            o.onPick({
+              id: `swatch-${axis}-${slot}`,
+              label: `${axisTitle}·${SWATCH_LABEL[slot]}`,
+              command: `core.anno/set-${axis}`,
+              args: { slot },
+            })
+          })
+          group.appendChild(b)
+        }
+        box.appendChild(group)
+      }
+    }
+
     let lastGroup = ''
+    let swatchesAdded = false
     o.rows.forEach((r, i) => {
       const g = groupTitle(r.group)
       if (g && g !== lastGroup) {
+        // 格式组画完、进入下一组之前插色板：它属于格式，不该被引用组隔开
+        if (lastGroup !== '' && !swatchesAdded) {
+          addSwatches()
+          swatchesAdded = true
+        }
         lastGroup = g
         const sep = document.createElement('span')
         sep.className = 'sel-sep'
@@ -538,6 +595,8 @@ export class Layers {
       void i
       box.appendChild(b)
     })
+    // 只有一组（没有引用组）时色板放末尾
+    if (!swatchesAdded) addSwatches()
     document.body.appendChild(box)
     this.selEl?.remove()
     this.selEl = box

@@ -44,7 +44,7 @@ import {
   type RefView,
   type VisibleRow,
 } from '../../core/index.ts'
-import { MARK_TYPES, isEmptyContent, plainText, refRunsOf, type AssetRun, type MarkType, type RunWithId } from '../../core/model/runs.ts'
+import { MARK_KINDS, isEmptyContent, plainText, refRunsOf, type AssetRun, type MarkKind, type RunWithId } from '../../core/model/runs.ts'
 import type { AssetView } from '../../core/infra/assets.ts'
 import { t } from '../../core/infra/msg.ts'
 import { blockLabel, danglingView, resolveRefs } from '../../core/relations/ref.ts'
@@ -137,18 +137,22 @@ export function rowHasEmbedViewBody(b: Block, find: FindBlock): boolean {
   return isEmbedBlock(b) && embedBodyOf(b, find) === 'view'
 }
 
-/** 格式 → 语义标签：粗体用 `strong` 之类，让复制出去也是对的 */
-export function tagForMark(t: MarkType): string {
-  switch (t) {
-    case 'bold':
-      return 'strong'
-    case 'italic':
-      return 'em'
-    case 'code':
-      return 'code'
-    default:
-      return 'mark'
-  }
+/**
+ * 格式键 → 语义标签：core 五种用语义标签（复制出去也是对的），带值两种用 `span`。
+ * 描述表替代 switch：加一种格式＝加一行，不是加一支分支。
+ */
+const MARK_TAG: Record<MarkKind, string> = {
+  bold: 'strong',
+  italic: 'em',
+  underline: 'u',
+  strike: 's',
+  code: 'code',
+  ink: 'span',
+  bg: 'span',
+}
+
+export function tagForMark(k: MarkKind): string {
+  return MARK_TAG[k]
 }
 
 /**
@@ -420,13 +424,16 @@ export function fillBlockText(
 
   for (const r of b.content) {
     if (r.t === 'text') {
-      // 格式的嵌套顺序固定（按注册表序）：同一 run 每次渲染出同一棵 DOM，
+      // 格式的嵌套顺序固定（按 MARK_KINDS 序）：同一 run 每次渲染出同一棵 DOM，
       // 读回时按 class 集合解析，不依赖顺序
       let node: Node = document.createTextNode(r.v)
-      for (const m of MARK_TYPES) {
-        if (!r.marks?.includes(m)) continue
-        const wrap = document.createElement(tagForMark(m))
-        wrap.className = `mk mk-${m}`
+      for (const k of MARK_KINDS) {
+        const v = r.marks?.[k]
+        if (v === undefined) continue
+        const wrap = document.createElement(tagForMark(k))
+        wrap.className = `mk mk-${k}`
+        // 值轴：槽名住在 data-slot 上，颜色值由 CSS 按槽名给（正文里不许出现颜色字面量）
+        if (v !== true) wrap.dataset.slot = v
         wrap.appendChild(node)
         node = wrap
       }

@@ -45,7 +45,7 @@ import { readRuns } from '../../view/editor/dom-text.ts'
 import { assetRowCount, assetViewOf, assetsAvailable } from '../../view/asset-views.ts'
 import { t } from '../../core/infra/msg.ts'
 import { walkForest } from '../../core/model/walk.ts'
-import { plainText, type MarkType, type RunWithId } from '../../core/model/runs.ts'
+import { markDescriptors, plainText, type RunWithId } from '../../core/model/runs.ts'
 import { DISPLAY_PROP } from '../../core/index.ts'
 import type { App, FixtureName, MenuRequest, PanelKind, Registry } from '../../core/commands/index.ts'
 import type { LoadedWorkspace, Prefs, ThemeMode, Workspace, WorkspaceStore } from '../../core/infra/workspace.ts'
@@ -284,13 +284,15 @@ async function cycleSearchFace(
 
 
 /** 诊断面的两个派生枚举：格式段（投影坐标）与原子 run（plain 坐标；**整片森林**，与旧库级数组同口径） */
-function markSegments(ed: BlockEditor): { type: MarkType; blockId: string; start: number; end: number }[] {
-  const out: { type: MarkType; blockId: string; start: number; end: number }[] = []
+function markSegments(ed: BlockEditor): { type: string; blockId: string; start: number; end: number }[] {
+  const out: { type: string; blockId: string; start: number; end: number }[] = []
   for (const b of flatten({ roots: ed.store.blocks })) {
     let proj = 0
     for (const r of b.content) {
       if (r.t !== 'text') continue
-      for (const m of r.marks ?? []) out.push({ type: m, blockId: b.id, start: proj, end: proj + r.v.length })
+      for (const type of markDescriptors(r.marks)) {
+        out.push({ type, blockId: b.id, start: proj, end: proj + r.v.length })
+      }
       proj += r.v.length
     }
   }

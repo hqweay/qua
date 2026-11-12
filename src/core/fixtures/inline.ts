@@ -8,7 +8,7 @@
  */
 import { uuidv7Hex } from '../model/ids.ts'
 import { checkExternalUrl } from '../relations/link.ts'
-import { normalizeRuns, textRuns, type AssetRun, type LinkRun, type MarkType, type RefRun, type Run } from '../model/runs.ts'
+import { normalizeRuns, textRuns, type AssetRun, type LinkRun, type MarkPatch, type Marks, type RefRun, type Run } from '../model/runs.ts'
 import { MISSING_ASSET_HASH, SEED_ASSET_HASH } from './assets.ts'
 
 export interface SeedBlock {
@@ -52,7 +52,7 @@ interface AtomToken {
 }
 
 interface MarkSpan {
-  type: MarkType
+  patch: MarkPatch
   start: number
   end: number
 }
@@ -146,12 +146,13 @@ export function parseInline(src: string): { runs: Run[]; refs: PendingRef[] } {
     }
   }
   // 顺序要紧：先 `**` 再 `*`（否则 `**` 会被单星吃掉）
-  for (const [open, close, type] of [
-    ['**', '**', 'bold'],
-    ['==', '==', 'highlight'],
-    ['`', '`', 'code'],
-    ['*', '*', 'italic'],
-  ] as [string, string, MarkType][]) {
+  // `==高亮==` 是 `bg:'yellow'` 的 DSL 写法：高亮退役成背景色轴上的一个槽
+  for (const [open, close, patch] of [
+    ['**', '**', { bold: true }],
+    ['==', '==', { bg: 'yellow' }],
+    ['`', '`', { code: true }],
+    ['*', '*', { italic: true }],
+  ] as [string, string, MarkPatch][]) {
     let out = ''
     let idx = 0
     while (idx < text.length) {
@@ -171,7 +172,7 @@ export function parseInline(src: string): { runs: Run[]; refs: PendingRef[] } {
       shiftFrom(a + open.length, -open.length)
       shiftFrom(b, -close.length)
       out += inner
-      marks.push({ type, start, end: start + inner.length })
+      marks.push({ patch, start, end: start + inner.length })
       idx = b + close.length
     }
     text = out
@@ -188,7 +189,12 @@ export function parseInline(src: string): { runs: Run[]; refs: PendingRef[] } {
     cuts.add(Math.max(0, Math.min(a.start + 1, text.length)))
   }
   const pts = [...cuts].sort((x, y) => x - y)
-  const marksAt = (s: number, e: number): MarkType[] => marks.filter((m) => m.start <= s && m.end >= e).map((m) => m.type)
+  // 覆盖这一段的各格合并成一个映射：布尔轴叠加，值轴后写的覆盖先写的（同轴的形状本就只有一个值）
+  const marksAt = (s: number, e: number): Marks => {
+    const out: Marks = {}
+    for (const m of marks) if (m.start <= s && m.end >= e) Object.assign(out, m.patch)
+    return out
+  }
 
   const runs: Run[] = []
   const refs: PendingRef[] = []
@@ -225,7 +231,7 @@ export function parseInline(src: string): { runs: Run[]; refs: PendingRef[] } {
           t: 'link',
           v: atom.label === '' ? atom.url! : atom.label,
           url: atom.url!,
-          ...(mk.length ? { marks: mk } : {}),
+          ...(Object.keys(mk).length ? { marks: mk } : {}),
         }
         runs.push(run)
       } else if (atom.kind === 'tag') {
@@ -235,12 +241,12 @@ export function parseInline(src: string): { runs: Run[]; refs: PendingRef[] } {
           t: 'ref',
           flavor: '#',
           label: atom.label,
-          ...(mk.length ? { marks: mk } : {}),
+          ...(Object.keys(mk).length ? { marks: mk } : {}),
         }
         refs.push({ runId: run.id, label: atom.label, flavor: '#' })
         runs.push(run)
       } else {
-        const run: RefRun = { id: uuidv7Hex(), t: 'ref', label: atom.label, ...(mk.length ? { marks: mk } : {}) }
+        const run: RefRun = { id: uuidv7Hex(), t: 'ref', label: atom.label, ...(Object.keys(mk).length ? { marks: mk } : {}) }
         refs.push({ runId: run.id, label: atom.label })
         runs.push(run)
       }

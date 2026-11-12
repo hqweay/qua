@@ -11,7 +11,7 @@ import { openActionOf, type Block, type CtxKeys, type FieldRow, type OpenAction 
 import type { RunWithId } from '../../core/model/runs.ts'
 import { resolveRef } from '../../core/relations/ref.ts'
 import { checkExternalUrl, rejectText } from '../../core/relations/link.ts'
-import { plainText } from '../../core/model/runs.ts'
+import { markDescriptors, plainText } from '../../core/model/runs.ts'
 import { COMMANDS } from '../../core/commands/index.ts'
 import { BINDINGS, keyLabel, keymapRows, referencedKeys } from '../../core/infra/bindings.ts'
 import { assetMetaOf, assetViewOf } from '../../view/asset-views.ts'
@@ -452,7 +452,8 @@ export function showAtomPopover(
         [t('ui.popover.state'), view.state],
         [t('ui.popover.flavor'), a.flavor ?? t('ui.common.none')],
       ]
-      if (a.marks?.length) rows.push([t('ui.popover.marks'), a.marks.join('+')])
+      const desc = markDescriptors(a.marks)
+      if (desc.length) rows.push([t('ui.popover.marks'), desc.join('+')])
       for (const [k, v] of rows) {
         const dt = document.createElement('dt')
         dt.textContent = k
@@ -534,7 +535,8 @@ export function showAtomPopover(
         [t('ui.popover.atomId'), a.id],
         [t('ui.popover.url'), a.url],
       ]
-      if (a.marks?.length) rows.push([t('ui.popover.marks'), a.marks.join('+')])
+      const desc = markDescriptors(a.marks)
+      if (desc.length) rows.push([t('ui.popover.marks'), desc.join('+')])
       for (const [k, v] of rows) {
         const dt = document.createElement('dt')
         dt.textContent = k

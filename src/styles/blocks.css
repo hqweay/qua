@@ -1520,17 +1520,19 @@
   justify-content: center;
 }
 
-/* 格式的四种渲染（格式是 run 的属性，DOM 元素只是它的表现） */
+/* 行内格式的渲染（格式是 run 的属性，DOM 元素只是它的表现） */
 .mk-bold {
   font-weight: 700;
 }
 .mk-italic {
   font-style: italic;
 }
-.mk-highlight {
-  background: var(--ui-hl);
-  border-radius: 2px;
-  padding: 0 1px;
+/* 用 text-decoration-line 而非简写：下划线与删除线套在同一段时两条都画得出来 */
+.mk-underline {
+  text-decoration-line: underline;
+}
+.mk-strike {
+  text-decoration-line: line-through;
 }
 .mk-code {
   font-family: var(--ui-font-mono);
@@ -1539,6 +1541,25 @@
   border-radius: var(--ui-radius-sm);
   padding: 0 4px;
 }
+/* 值轴：槽名住在 data-slot 上，颜色值全在 token 链上（正文里没有颜色字面量） */
+.mk-ink[data-slot='red'] { color: var(--ui-ink-red); }
+.mk-ink[data-slot='orange'] { color: var(--ui-ink-orange); }
+.mk-ink[data-slot='yellow'] { color: var(--ui-ink-yellow); }
+.mk-ink[data-slot='green'] { color: var(--ui-ink-green); }
+.mk-ink[data-slot='blue'] { color: var(--ui-ink-blue); }
+.mk-ink[data-slot='violet'] { color: var(--ui-ink-violet); }
+.mk-ink[data-slot='gray'] { color: var(--ui-ink-gray); }
+.mk-bg {
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.mk-bg[data-slot='red'] { background: var(--ui-bg-red); }
+.mk-bg[data-slot='orange'] { background: var(--ui-bg-orange); }
+.mk-bg[data-slot='yellow'] { background: var(--ui-bg-yellow); }
+.mk-bg[data-slot='green'] { background: var(--ui-bg-green); }
+.mk-bg[data-slot='blue'] { background: var(--ui-bg-blue); }
+.mk-bg[data-slot='violet'] { background: var(--ui-bg-violet); }
+.mk-bg[data-slot='gray'] { background: var(--ui-bg-gray); }
 .tag {
   color: var(--ui-accent);
   background: var(--ui-accent-soft);

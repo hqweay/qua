@@ -21,8 +21,25 @@
   --c-danger: light-dark(#c4544b, #ef9d99);
   --c-warn: light-dark(#b8742a, #e0a45a);
   --c-ok: light-dark(#2f855a, #5cc98c);
-  --c-hl: light-dark(#ffe58a, #6b5a1e);
   --c-code: light-dark(#0000000d, #ffffff12);
+
+  /* 行内颜色槽：**全仓唯一落颜色字面量的地方**。ink 是字色、soft 是底色。
+     正文只存槽名（'red'…），槽名经 --ui-ink 与 --ui-bg 两组语义槽再到这里的基础色。
+     黄底沿用旧高亮的观感，所以 ⌘E 换了实现但看起来没变。 */
+  --c-red: light-dark(#c4544b, #ef9d99);
+  --c-orange: light-dark(#b8742a, #e0a45a);
+  --c-yellow: light-dark(#a8801c, #e0c060);
+  --c-green: light-dark(#2f855a, #5cc98c);
+  --c-blue: light-dark(#3b6fd4, #8aa9f0);
+  --c-violet: light-dark(#6b5bd2, #a394ff);
+  --c-gray: light-dark(#6b7078, #8b929c);
+  --c-red-soft: light-dark(#c4544b26, #ef9d9930);
+  --c-orange-soft: light-dark(#b8742a26, #e0a45a30);
+  --c-yellow-soft: light-dark(#ffe58a, #6b5a1e);
+  --c-green-soft: light-dark(#2f855a26, #5cc98c30);
+  --c-blue-soft: light-dark(#3b6fd426, #8aa9f030);
+  --c-violet-soft: light-dark(#6b5bd226, #a394ff30);
+  --c-gray-soft: light-dark(#6b707826, #8b929c30);
 
   /* ══════ ② 语义槽 --ui-*（★ 主题插件只填这一层） ══════ */
   /* 表面：三档底色 ＋ 窗口底 */
@@ -55,8 +72,22 @@
   --ui-danger: var(--c-danger);
   --ui-warn: var(--c-warn);
   --ui-ok: var(--c-ok);
-  --ui-hl: var(--c-hl);
   --ui-code-bg: var(--c-code);
+  /* 行内颜色：主题只填这一层；正文与色板只引用它，不碰 --c-* */
+  --ui-ink-red: var(--c-red);
+  --ui-ink-orange: var(--c-orange);
+  --ui-ink-yellow: var(--c-yellow);
+  --ui-ink-green: var(--c-green);
+  --ui-ink-blue: var(--c-blue);
+  --ui-ink-violet: var(--c-violet);
+  --ui-ink-gray: var(--c-gray);
+  --ui-bg-red: var(--c-red-soft);
+  --ui-bg-orange: var(--c-orange-soft);
+  --ui-bg-yellow: var(--c-yellow-soft);
+  --ui-bg-green: var(--c-green-soft);
+  --ui-bg-blue: var(--c-blue-soft);
+  --ui-bg-violet: var(--c-violet-soft);
+  --ui-bg-gray: var(--c-gray-soft);
   /* 全屏遮罩（lightbox）：压暗页面，让唯一该看的东西浮起来。
      比 `--c-n-900` 更暗一档 —— 遮罩要盖住内容，不是与它同色。 */
   --ui-scrim: light-dark(rgba(20, 22, 26, 0.72), rgba(0, 0, 0, 0.82));

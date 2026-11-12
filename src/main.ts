@@ -721,6 +721,8 @@ function refreshSelectionBar(): void {
     return
   }
   const activeMarks = new Set(ed.marksAtSel())
+  // ⌘E 那颗「高亮」按钮仍叫 toggle-highlight：它现在的语义是 bg:yellow，按压态认这个描述符
+  if (activeMarks.has('bg:yellow')) activeMarks.add('highlight')
   layers.openSelectionBar({
     rows,
     anchor: rect,
