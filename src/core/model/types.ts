@@ -14,6 +14,7 @@
  *    反过来 import 会成环（`blockTypeOf` 与 `DEFAULT_BLOCK_TYPE` 留在那里）。
  */
 import { EMBED_TYPE } from '../views/embed.ts'
+import { NOTE_TYPE } from '../relations/annotates.ts'
 import {
   DEFAULT_BLOCK_TYPE,
   blockTypeOf,
@@ -79,6 +80,12 @@ export const TYPE_DECLS: Record<string, TypeDecl> = {
    * 正文只读：那一行画的是「这次露面」的抬头与身体，不是用户写的字。
    */
   [EMBED_TYPE]: { id: EMBED_TYPE, children: 'none', text: 'readonly' },
+  /**
+   * **备注块**：评论某段字的块（指向住 `_annotates` 槽，区间锚在宿主块的 `annos` 上，
+   * 见 `core/relations/annotates.ts`）。骨架与普通块同形——备注是「块」的另一种用法，
+   * 不是新骨架；声明一条是为了骨架将来分叉时读侧不用改降级路径。
+   */
+  [NOTE_TYPE]: { id: NOTE_TYPE, children: 'content', text: 'editable' },
 }
 
 /**

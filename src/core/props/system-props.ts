@@ -37,6 +37,7 @@ import { isAliasesValue } from '../identity/alias.ts'
 import { isDisplayValue, isIconValue, isListsValue } from '../model/model.ts'
 import { TAGS_PROP, isTagRefList } from '../identity/tags.ts'
 import { BELONGS_TO_PROP, isBelongsToRefs } from '../relations/hierarchy.ts'
+import { ANNOTATES_PROP, isAnnotatesPairs } from '../relations/annotates.ts'
 import { isJournalDate } from '../identity/journal.ts'
 import {
   CARDINALITY_PROP,
@@ -97,6 +98,8 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   [BELONGS_TO_PROP]: isBelongsToRefs,
   [TAGS_PROP]: isTagRefList,
   [MOUNTS_PROP]: isMountsValue,
+  // 备注边：备注块 → 它标注的（宿主块，区间锚）对
+  [ANNOTATES_PROP]: isAnnotatesPairs,
   // 删除标记：正常只经 `block.exist` 走（`isPropCell` 把它挡在 prop op 外），
   // 登记在这里是收端的完整性——真有人把它当 prop.set 送来，值必须是毫秒数
   [DELETED_AT_PROP]: (v) => typeof v === 'number',

@@ -210,6 +210,12 @@ export type SystemPropId =
   // 归属边（算作）：子块 → 上级的有序 ref 列表（见 `core/hierarchy.ts`）
   | '_belongsTo'
   /**
+   * 备注块的指向槽：这一条备注标了哪些（宿主块，区间锚）对
+   * （见 `core/relations/annotates.ts` 的 `annotatesPairsOf`）。
+   * 与 `_belongsTo` 同族——边的事实住在源块身上，解析（存活与否）是读的事。
+   */
+  | '_annotates'
+  /**
    * 这块带着哪些标签：**有序的标签块 id 列表**（见 `core/tags.ts` 的 `tagIdsOf`）。
    *
    * 存 id 不存名字：标签块能改名，归属不该跟着失效。

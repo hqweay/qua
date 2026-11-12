@@ -783,11 +783,12 @@ export function relationsFrom(index: Index, sourceId: string): readonly Relation
   return index.outgoing.get(sourceId) ?? []
 }
 
-/** 谁引用它（默认只算 `inline`／`property`／`embed`）—— 反链的源块清单 */
+/** 谁引用它（默认只算 `inline`／`property`／`embed`）—— 反链的源块清单。
+ *  kinds 放宽到全量 `RelationKind`：备注栏按 `['annotates']` 查（备注不是引用，不进缺省口径）。 */
 export function incomingIds(
   index: Index,
   targetId: string,
-  kinds: readonly RefKind[] = REFERENCE_KINDS,
+  kinds: readonly RelationKind[] = REFERENCE_KINDS,
 ): string[] {
   const out: string[] = []
   const seen = new Set<string>()

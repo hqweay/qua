@@ -16,6 +16,7 @@ import { tagIdsOf } from '../identity/tags.ts'
 import { propKindOf, type PropKind } from '../props/props.ts'
 import { readEmbed } from '../views/embed.ts'
 import { parentIdsOf } from './hierarchy.ts'
+import { annotatesPairsOf } from './annotates.ts'
 import { walkForest } from '../model/walk.ts'
 
 /**
@@ -29,6 +30,7 @@ import { walkForest } from '../model/walk.ts'
  * | `tag` | `_tags` | 谁归我管 |
  * | `tagMention` | 正文里 `flavor:'#'` 的 ref run | 谁在正文里提到这个标签／实例 |
  * | `belongsTo` | `_belongsTo` | 谁归在谁下面 |
+ * | `annotates` | `_annotates`（备注块的指向槽） | 谁在评论我的一段 |
  * | `item` | `_items` | 谁把我收进集合 |
  */
 export type RelationKind =
@@ -38,6 +40,7 @@ export type RelationKind =
   | 'tag'
   | 'tagMention'
   | 'belongsTo'
+  | 'annotates'
 
 /** 「引用」只收这三类；标签归属是分类，不是引用。 */
 export type RefKind = Extract<RelationKind, 'inline' | 'property' | 'embed'>
@@ -53,7 +56,7 @@ export interface RelationEdge {
   from: string
   to: string
   kind: RelationKind
-  /** `property`：字段定义块 id */
+  /** `property`：字段定义块 id；`annotates`：被标注区间锚（anno）的 id——同宿主多区间靠它消歧 */
   propId?: string
   /** `inline`／`tagMention`：同一源块里出现几次 */
   count?: number
@@ -115,6 +118,11 @@ export function relationEdgesOfBlock(
   if (embed) out.push({ from: block.id, to: embed.block, kind: 'embed', view: embed.view })
 
   for (const parentId of parentIdsOf(block)) out.push({ from: block.id, to: parentId, kind: 'belongsTo' })
+
+  // 备注边：一对一条。同宿主多区间靠 propId＝anno id 消歧，边的唯一键才不互踩。
+  for (const pair of annotatesPairsOf(block)) {
+    out.push({ from: block.id, to: pair.block, kind: 'annotates', propId: pair.anno })
+  }
   return out
 }
 
