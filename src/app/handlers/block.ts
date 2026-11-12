@@ -213,12 +213,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   },
   // 删除备注：软删可撤销（⌘Z 回来）；边被索引摘除 ⇒ 标记与收集栏自动消失（读侧判活）
   'core.notes/delete': (a, app) => {
-    const blockId = S(a.blockId)
-    const annoId = S(a.annoId)
-    if (!blockId || !annoId) return false
-    const noteId = app.ed.store.index.relations
-      .get(blockId)
-      ?.find((e) => e.kind === 'annotates' && e.propId === annoId)?.from
+    const noteId = S(a.noteId)
     if (!noteId) return false
     app.ed.beginUndoEntry()
     app.ed.write((tx) => tx.remove(noteId))

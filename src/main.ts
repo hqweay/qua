@@ -965,6 +965,7 @@ popovers = setupAtomPopovers({
   getMainEd: () => mainEd,
   getWs: () => ws,
   openBlockRoute: (id, place) => app.openBlock(id, place),
+  openNotePopover: (sig) => app.openNotePopover(sig),
   layers,
   getEd: () => ed,
   toast: (msg, kind) => app.toast(msg, kind),
@@ -1597,7 +1598,12 @@ const app: App = {
    * 空备注连块回收（不留空壳；锚留宿主、读侧判活不画），有内容即完成（Esc 不丢字）。
    */
   openNotePopover: (sig) => {
-    const note = blocks.find(sig.noteId)
+    // noteId 省略（右键菜单只有锚坐标）⇒ 按 annotates 边反查备注块
+    const noteId =
+      sig.noteId ??
+      kb.relationsTo(sig.blockId).find((e) => e.kind === 'annotates' && e.propId === sig.annoId)?.from
+    if (!noteId) return
+    const note = blocks.find(noteId)
     if (!note) return
     const host = blocks.find(sig.blockId)
     const quote = host?.annos?.find((a) => a.id === sig.annoId)?.quote?.exact ?? ''
@@ -1615,11 +1621,11 @@ const app: App = {
           onChange: () => {
             scheduleSave()
           },
-          block: () => blocks.find(sig.noteId),
+          block: () => blocks.find(noteId),
           quote,
           onOpenInSidebar: () => {
             // 像打开普通块一样：右槽把备注块当当前对象装载（Shift-点引用同一条 openBlock 路）
-            app.openBlock(sig.noteId, 'dock')
+            app.openBlock(noteId, 'dock')
             layers.closePopover()
           },
           placeholder: t('ui.note.placeholder'),
@@ -1629,15 +1635,15 @@ const app: App = {
           const ed2 = handle?.editor()
           if (ed2) {
             ed2.container.focus()
-            ed2.placeCaret(sig.noteId, 0)
+            ed2.placeCaret(noteId, 0)
           }
         })
       },
       () => mainEd.annoRect(sig.blockId, sig.annoId),
       () => {
         handle?.flush()
-        const after = blocks.find(sig.noteId)
-        if (after && plainText(after.content) === '') run((tx) => tx.remove(sig.noteId))
+        const after = blocks.find(noteId)
+        if (after && plainText(after.content) === '') run((tx) => tx.remove(noteId))
         handle?.dispose()
         handle = null
       },
@@ -2852,6 +2858,8 @@ function viewEvents(
     onAtomClick: (atom, el, mods) => popovers.handleAtomClick(atom, el, mods, via),
     /** 右键一枚行内原子：引用改锚文本、标签摘归属、图看详情——三类身份三组动作 */
     atomMenu: (hit, el, rect) => popovers.handleAtomMenu(hit, el, rect),
+    /** 右键被备注的文本：打开（浮窗）／侧栏／删除——「对这一处做什么」 */
+    annoMenu: (hit, rect) => popovers.handleAnnoMenu(hit, rect),
     onCopy: (ids, text) => {
       copiedClip = { ids: [...ids], text }
     },
@@ -3089,10 +3097,6 @@ initTabs()
  * 「⌥ 看详情」同族）。边由 annoId 反查备注块；写作面与创建同一条——浮窗，
  * 「在侧栏打开」是浮窗上的显式跳板，不是这里的默认落点。
  */
-ed.events.annoClick = (hit) => {
-  const edge = kb.relationsTo(hit.blockId).find((e) => e.kind === 'annotates' && e.propId === hit.annoId)
-  if (edge) app.openNotePopover({ noteId: edge.from, blockId: hit.blockId, annoId: hit.annoId })
-}
 /**
  * **撤销/重做产出的 op** 并进待落盘队列。
  *

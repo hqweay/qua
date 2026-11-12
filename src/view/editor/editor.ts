@@ -319,12 +319,6 @@ export interface ViewEvents {
    */
   refClick?: (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement) => void
   /**
-   * **⌥-click 命中被备注的文本**：装配层据此打开备注浮窗（写作面在原地）。
-   * ⌥ 语义与引用的「⌥ 看详情」同族——「把这一处自己的东西展开一层」。
-   * ⚠️ 未接 ⇒ 什么都不做（缺入口看得见地缺）。
-   */
-  annoClick?: (hit: { blockId: string; annoId: string }) => void
-  /**
    * **右键落在被备注的文本上**：「对这一处做什么」的菜单（打开／侧栏／删除），
    * 与 `atomMenu` 同族——右键原子是对一枚原子做什么，右键标记是对这一处做什么。
    * ⚠️ 未接 ⇒ 退回块菜单（不是没反应）。
@@ -3242,10 +3236,6 @@ export class BlockEditor {
        */
       onCopy: (ids, text) => this.events.onCopy?.(ids, text),
       annoHitAt: (x, y) => this.annoHitAt(x, y),
-      onAnnoClick: (hit) => {
-        this.commitLeavingLine()
-        this.events.annoClick?.(hit)
-      },
       onAnnoMenu: (hit, rect) => this.events.annoMenu?.(hit, rect),
       onPasteImage: async (file, point) => {
         this.commitLeavingLine()

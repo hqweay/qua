@@ -919,6 +919,7 @@ export const MSG = {
   'menu.label.writeNote': '写备注',
   'menu.label.openNote': '打开备注',
   'menu.label.openNoteInSidebar': '在侧栏打开',
+  'menu.label.openNoteInTab': '在新页签打开',
   'menu.label.deleteNote': '删除这条备注',
   'menu.title.anno': '备注',
 

@@ -28147,7 +28147,7 @@ await check('T296 备注 hover：标记上浮出只读 tip（备注文本），�
   return 'hover 标记 → 只读 tip＋hot 加深＋手型；未标记不浮、悬停不写模型'
 })
 
-await check('T297 ⌥-click 备注标记：就地浮窗带出已有备注；「在侧栏打开」右槽装载备注块', async () => {
+await check('T297 标记字＝正文手势不劫持：Shift 延伸选区／修饰键不导航；右键菜单承载打开与侧栏', async () => {
   const { ctx, page } = await freshPage(browser, base)
   const fx = await noteFx(page, ['红句子在这里'])
   await page.waitForTimeout(150)
@@ -28166,24 +28166,9 @@ await check('T297 ⌥-click 备注标记：就地浮窗带出已有备注；「�
     () => window.__qua.__editor.store.blocks.find((b) => b.props?._type === 'core/note')?.id ?? '',
   )
   assert(noteId, '前置：备注块应已存在')
-
-  // Esc 关浮窗：有内容 ⇒ 提交（备注保留，不留空壳也不丢字）
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('.note-popover-body'), null, { timeout: 3000 })
-  const kept = await page.evaluate((nid) => {
-    const walk = (list) => {
-      for (const b of list) {
-        if (b.id === nid) return b
-        const r = walk(b.children ?? [])
-        if (r) return r
-      }
-      return null
-    }
-    return walk(window.__qua.__editor.store.blocks)?.content.map((r) => ('v' in r ? r.v : '')).join('')
-  }, noteId)
-  assert(kept === '这是备注', `有内容的 Esc＝提交不丢字：${JSON.stringify(kept)}`)
 
-  // 标记矩形反算，⌥-click ⇒ 浮窗重新打开，内容带出来了
   const hit = await page.evaluate((bid) => {
     const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('anno-mark-'))
     const set = key ? CSS.highlights.get(key) : null
@@ -28197,36 +28182,54 @@ await check('T297 ⌥-click 备注标记：就地浮窗带出已有备注；「�
     return null
   }, fx.ids[0])
   assert(hit, '前置：标记应仍在')
-  await page.keyboard.down('Alt')
+
+  // ① 标记字上的点击全是文本手势：Shift-点击＝延伸选区（不导航）
+  await page.keyboard.down('Shift')
   await page.mouse.click(hit.x, hit.y)
-  await page.keyboard.up('Alt')
-  await page.waitForSelector('.popover .note-popover-body', { timeout: 3000 })
-  const reopenText = await page.evaluate(
-    (nid) => document.querySelector(`.popover .note-popover-body .blk[data-block-id="${nid}"]`)?.textContent ?? '',
+  await page.keyboard.up('Shift')
+  await page.waitForTimeout(200)
+  const sel = await page.evaluate(() => document.getSelection()?.toString() ?? '')
+  assert(sel.length >= 1, `Shift-点击应延伸选区（文本手势不被劫持）：${JSON.stringify(sel)}`)
+  let dockCard = await page.evaluate(
+    (nid) => Boolean(document.querySelector(`#dock-right .dock-card .blk[data-block-id="${nid}"]`)),
     noteId,
   )
-  assert(reopenText.includes('这是备注'), `⌥-click 浮窗应带出已有备注：${JSON.stringify(reopenText)}`)
+  assert(!dockCard, 'Shift-点击不开右槽')
+  let popOpen = await page.evaluate(() => Boolean(document.querySelector('.note-popover-body')))
+  assert(!popOpen, 'Shift-点击不弹浮窗')
 
-  // 「在侧栏打开」：像打开普通块一样——右槽 dock 卡装载备注块
-  await page.click('.note-popover-open')
-  await page.waitForFunction(
+  // ② ⌘-点击同样不导航（无修饰键语义）：不开右槽、不弹窗
+  await page.keyboard.down('Meta')
+  await page.mouse.click(hit.x, hit.y)
+  await page.keyboard.up('Meta')
+  await page.waitForTimeout(200)
+  dockCard = await page.evaluate(
     (nid) => Boolean(document.querySelector(`#dock-right .dock-card .blk[data-block-id="${nid}"]`)),
+    noteId,
+  )
+  assert(!dockCard, '⌘-点击不开右槽')
+  popOpen = await page.evaluate(() => Boolean(document.querySelector('.note-popover-body')))
+  assert(!popOpen, '⌘-点击不弹浮窗')
+
+  // ③ 右键菜单承载元数据动作：四行（打开／侧栏／页签／删除）
+  await page.mouse.click(hit.x, hit.y, { button: 'right' })
+  await page.waitForTimeout(300)
+  const items = await page.evaluate(() => [...document.querySelectorAll('.layer-item')].map((e) => e.textContent ?? ''))
+  assert(items.some((x) => x.includes('打开备注')), `菜单应有「打开备注」：${JSON.stringify(items)}`)
+  assert(items.some((x) => x.includes('在侧栏打开')), `菜单应有「在侧栏打开」：${JSON.stringify(items)}`)
+  assert(items.some((x) => x.includes('在新页签打开')), `菜单应有「在新页签打开」：${JSON.stringify(items)}`)
+  assert(items.some((x) => x.includes('删除这条备注')), `菜单应有「删除这条备注」：${JSON.stringify(items)}`)
+
+  // 「在新页签打开」：备注块成为中心装载根
+  await page.locator('.layer-item', { hasText: '在新页签打开' }).first().click()
+  await page.waitForFunction(
+    (nid) => Boolean(document.querySelector(`#editor .blk[data-block-id="${nid}"]`)),
     noteId,
     { timeout: 3000 },
   )
-  await page.waitForFunction(() => !document.querySelector('.note-popover-body'), null, { timeout: 3000 })
-
-  // 无 ⌥ 的普通单击不该开浮窗（点字＝编辑，口径不变）
-  await page.keyboard.press('Escape')
-  await page.mouse.click(hit.x, hit.y)
-  await page.waitForTimeout(250)
-  const noPop = await page.evaluate(
-    () => Boolean(document.querySelector('.note-popover-body')),
-  )
-  assert(!noPop, '普通单击标记＝落光标，不开浮窗')
 
   await ctx.close()
-  return '⌥-click → 浮窗带出备注；「在侧栏打开」跳收集栏；普通单击仍＝编辑'
+  return '标记字＝文本手势不劫持；元数据动作全在右键菜单（含新页签）'
 })
 
 await check('T298 右键备注标记：三行菜单；删除＝软删（标记消失、⌘Z 恢复）', async () => {

@@ -320,7 +320,6 @@ export interface EditorBridge {
    * 引用的 ⌥ 是详情浮层，备注的 ⌥ 是侧栏聚焦那一条备注。
    * ⚠️ 未接 ⇒ 什么都不做（缺入口看得见地缺，不退化成落光标）。
    */
-  onAnnoClick?: (hit: { blockId: string; annoId: string }) => void
   /** ⌥-click 命中判定：坐标 → 被备注的（块，锚）；没命中 ⇒ null（调用方照常落光标） */
   annoHitAt?: (x: number, y: number) => { blockId: string; annoId: string } | null
   /**
@@ -902,20 +901,6 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       }
       e.preventDefault()
       return
-    }
-
-    /**
-     * **⌥-click 命中被备注的文本**：展开这一处的备注（侧栏备注栏聚焦那一行）。
-     * 必须在引用/原子分支**之后**（它们各自的 ⌥ 语义优先），在「点空白建块」之前
-     * （⌥ 不是落点，更不该顺手建块）。判定走 `annoHitAt`——标记是画层，没有元素。
-     */
-    if (e.altKey && !e.shiftKey && !e.metaKey && !e.ctrlKey && br.annoHitAt) {
-      const annoHit = br.annoHitAt(e.clientX, e.clientY)
-      if (annoHit) {
-        br.onAnnoClick?.(annoHit)
-        e.preventDefault()
-        return
-      }
     }
 
     /**

@@ -49,7 +49,7 @@ export const COMMANDS: CommandDecl[] = [
   // 写备注：选一段（或块选区选几块）⇒ 一条备注块锚住它（同一笔事务）；划选气泡与块选区菜单各有入口
   { name: 'core.notes/create', title: t('cmd.notes.create'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['note', 'annotate', 'comment'] },
   // 删除备注：右键标记的菜单项；软删可撤销，无确认（与块删除同口径）
-  { name: 'core.notes/delete', title: t('cmd.notes.delete'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' }, annoId: { type: 'string' } }, hidden: true },
+  { name: 'core.notes/delete', title: t('cmd.notes.delete'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { noteId: { type: 'string' } }, hidden: true },
   { name: 'core.editor/copy-block-ref', title: t('cmd.editor.copy-block-ref'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' } }, keywords: ['ref', 'copy', 'embed'] },
   { name: 'core.editor/delete-selected-blocks', title: t('cmd.editor.delete-selected-blocks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/indent-selected-blocks', title: t('cmd.editor.indent-selected-blocks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },

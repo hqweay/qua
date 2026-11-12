@@ -251,6 +251,8 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
   const ATOM_ROW_DETAILS = 'atom/details'
   const ANNO_ROW_OPEN = 'anno/open'
   const ANNO_ROW_SIDEBAR = 'anno/sidebar'
+  const ANNO_ROW_TAB = 'anno/tab'
+  const ANNO_ROW_DELETE = 'anno/delete'
 
   /**
    * **右键一枚行内原子**：按它的身份现算一组动作。
@@ -370,14 +372,21 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
    * 删除走命令（软删可撤销，无确认——与块删除同口径）；打开/侧栏是浮层动作不走命令。
    */
   function handleAnnoMenu(hit: { blockId: string; annoId: string }, rect: DOMRect): void {
+    // 边由 annoId 反查备注块（主编辑器的 store 即共享索引）；边没了（备注已删）⇒ 不出菜单
+    const noteId = deps
+      .getMainEd()
+      .store.index.relations.get(hit.blockId)
+      ?.find((e) => e.kind === 'annotates' && e.propId === hit.annoId)?.from
+    if (!noteId) return
     const rows: Row[] = [
-      { id: 'anno/open', label: t('menu.label.openNote'), icon: 'lucide:message-circle' },
-      { id: 'anno/sidebar', label: t('menu.label.openNoteInSidebar') },
+      { id: ANNO_ROW_OPEN, label: t('menu.label.openNote'), icon: 'lucide:message-circle' },
+      { id: ANNO_ROW_SIDEBAR, label: t('menu.label.openNoteInSidebar') },
+      { id: ANNO_ROW_TAB, label: t('menu.label.openNoteInTab') },
       {
-        id: 'anno/delete',
+        id: ANNO_ROW_DELETE,
         label: t('menu.label.deleteNote'),
         command: 'core.notes/delete',
-        args: { blockId: hit.blockId, annoId: hit.annoId },
+        args: { noteId },
       },
     ]
     deps.showMenu({
@@ -387,8 +396,9 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
       title: t('menu.title.anno'),
       extraRows: rows,
       onPick: (row) => {
-        if (row.id === ANNO_ROW_OPEN) deps.openNotePopover({ blockId: hit.blockId, annoId: hit.annoId })
-        if (row.id === ANNO_ROW_SIDEBAR) deps.openBlockRoute(hit.blockId, 'dock')
+        if (row.id === ANNO_ROW_OPEN) deps.openNotePopover({ blockId: hit.blockId, annoId: hit.annoId, noteId })
+        if (row.id === ANNO_ROW_SIDEBAR) deps.openBlockRoute(noteId, 'dock')
+        if (row.id === ANNO_ROW_TAB) deps.openBlockRoute(noteId, 'tab')
         if (row.command) void deps.getRegistry().invoke(row.command, (row.args as Record<string, unknown>) ?? {}, 'menu')
       },
     })
