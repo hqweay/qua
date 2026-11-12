@@ -3036,6 +3036,15 @@ ed.events = viewEvents(
 // 启动时的第一张 tab ＝ 已经装载好的这一屏；tab 条从这里开始画
 initTabs()
 /**
+ * **⌥-click 被备注的文本 ⇒ 侧栏打开备注**（⌥＝「这一处的东西展开一层」，与引用的
+ * 「⌥ 看详情」同族）。边由 annoId 反查备注块，落点与「写备注后聚焦」同一条
+ * （`activateNotesTab` 的宿主判据按定位链认领）——同一件事两个触发口，一个落点。
+ */
+ed.events.annoClick = (hit) => {
+  const edge = kb.relationsTo(hit.blockId).find((e) => e.kind === 'annotates' && e.propId === hit.annoId)
+  if (edge) panels?.noteCreated({ noteId: edge.from, hostIds: [hit.blockId] })
+}
+/**
  * **撤销/重做产出的 op** 并进待落盘队列。
  *
  * 撤销现在与一次普通编辑走同一条路（`diff` → op → 增量写盘），

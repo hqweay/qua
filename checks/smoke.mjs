@@ -28137,6 +28137,87 @@ await check('T296 备注 hover：标记上浮出只读 tip（备注文本），�
   return 'hover 标记 → 只读 tip（备注正文）；未标记不浮、悬停不写模型'
 })
 
+await check('T297 ⌥-click 备注标记：从别的栏切回「备注」栏并聚焦那一行（⌥ 不落光标）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const fx = await noteFx(page, ['红句子在这里'])
+  await page.waitForTimeout(150)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 3), fx.ids[0])
+  for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+ArrowLeft')
+  await page.waitForFunction(() => document.querySelectorAll('.selbar').length === 1, null, { timeout: 2000 })
+  await page.evaluate(() => {
+    document
+      .querySelector('.selbar .sel-btn[data-command="core.notes/create"]')
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForFunction(
+    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'notes',
+    null,
+    { timeout: 3000 },
+  )
+  const noteId = await page.evaluate(
+    () => window.__qua.__editor.store.blocks.find((b) => b.props?._type === 'core/note')?.id ?? '',
+  )
+  assert(noteId, '前置：备注块应已存在')
+
+  // 切去「反链」：证明后面的聚焦是 ⌥-click 带回来的，不是上一步的残留
+  await page.locator('#editor .mount .mount-tab', { hasText: '反链' }).first().click()
+  await page.waitForFunction(
+    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'refs',
+    null,
+    { timeout: 3000 },
+  )
+
+  // 标记矩形反算（照 T296），⌥+单击
+  const hit = await page.evaluate((bid) => {
+    const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('anno-mark-'))
+    const set = key ? CSS.highlights.get(key) : null
+    if (!set) return null
+    for (const r of set) {
+      const blk = r.startContainer.parentElement?.closest?.('.blk')
+      if (blk?.dataset?.blockId !== bid) continue
+      const rect = r.getBoundingClientRect()
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    }
+    return null
+  }, fx.ids[0])
+  assert(hit, '前置：标记应仍在')
+  await page.mouse.click(hit.x, hit.y)
+  await page.waitForTimeout(150)
+  // Playwright 的 mouse.click 不带 modifiers 选项 ⇒ 用键盘包住（macOS ⌥＝Option）
+  await page.keyboard.down('Alt')
+  await page.mouse.click(hit.x, hit.y)
+  await page.keyboard.up('Alt')
+  await page.waitForFunction(
+    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'notes',
+    null,
+    { timeout: 3000 },
+  )
+  const st = await page.evaluate((nid) => {
+    const row = document.querySelector(`#editor .blk[data-block-id="${nid}"]`)
+    const selRow = document.getSelection()?.anchorNode?.parentElement?.closest?.('.blk')?.dataset?.blockId ?? null
+    return { mounted: Boolean(row), selInRow: selRow === nid }
+  }, noteId)
+  assert(st.mounted, '备注行应已挂载')
+  assert(st.selInRow, '光标应落在备注行里（⌥ 不是落点，焦点去备注）')
+
+  // 无 ⌥ 的普通单击不该切栏（点字＝编辑，口径不变）
+  await page.locator('#editor .mount .mount-tab', { hasText: '反链' }).first().click()
+  await page.waitForFunction(
+    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'refs',
+    null,
+    { timeout: 3000 },
+  )
+  await page.mouse.click(hit.x, hit.y)
+  await page.waitForTimeout(250)
+  const stillRefs = await page.evaluate(
+    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab ?? '',
+  )
+  assert(stillRefs === 'refs', '普通单击标记＝落光标，不该切栏')
+
+  await ctx.close()
+  return '⌥-click 标记 → 备注栏聚焦；普通单击仍＝编辑'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

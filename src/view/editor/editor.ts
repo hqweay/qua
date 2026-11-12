@@ -151,7 +151,7 @@ import {
 } from './block-dom.ts'
 import { assetViewOf, markAssetMissing } from '../asset-views.ts'
 import { ReloadPolicy } from './reload-policy.ts'
-import { spanAt, paintHits, clearHits, type PlainSpan } from './hit-paint.ts'
+import { spanAt, offsetAtPoint, paintHits, clearHits, type PlainSpan } from './hit-paint.ts'
 import { AnnoHover, type AnnoHitSpan } from './anno-hover.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
 import { Drag } from "./drag.ts"
@@ -318,6 +318,12 @@ export interface ViewEvents {
    * ⚠️ 未接的实例什么都不做——不静默退化成某一种（那会让「缺入口」看起来像成功）。
    */
   refClick?: (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement) => void
+  /**
+   * **⌥-click 命中被备注的文本**：装配层据此打开侧栏备注栏、聚焦那一条备注。
+   * ⌥ 语义与引用的「⌥ 看详情」同族——「把这一处自己的东西展开一层」。
+   * ⚠️ 未接 ⇒ 什么都不做（缺入口看得见地缺）。
+   */
+  annoClick?: (hit: { blockId: string; annoId: string }) => void
   /**
    * **点了非引用的行内原子**（图片／将来的文件、外链）。
    *
@@ -1336,6 +1342,21 @@ export class BlockEditor {
       if (note) notes.push(plainText(note.content))
     }
     return notes.join('\n')
+  }
+
+  /** ⌥-click 命中判定：坐标 → 被备注的（块，锚）。与 hover 同一份缓存，与画层同源 */
+  private annoHitAt(x: number, y: number): { blockId: string; annoId: string } | null {
+    if (this.annoSpans.size === 0) return null
+    const el = document.elementFromPoint(x, y)
+    const blk = el?.closest<HTMLElement>('.blk')
+    const blockId = blk?.dataset?.['blockId']
+    if (!blk || !blockId || !this.container.contains(blk)) return null
+    const tx = blk.querySelector<HTMLElement>(':scope > .tx')
+    if (!tx) return null
+    const offset = offsetAtPoint(tx, x, y)
+    if (offset === null) return null
+    const span = spanAt(this.annoSpans.get(blockId) ?? [], offset)
+    return span ? { blockId, annoId: span.annoId } : null
   }
 
   /** 重画排进下一帧（合并同一帧里的多笔写）；组合期不画（DOM 还没落定） */
@@ -3219,6 +3240,11 @@ export class BlockEditor {
        *    不退回「把图片当文本贴」——那是另一种静默失败。
        */
       onCopy: (ids, text) => this.events.onCopy?.(ids, text),
+      annoHitAt: (x, y) => this.annoHitAt(x, y),
+      onAnnoClick: (hit) => {
+        this.commitLeavingLine()
+        this.events.annoClick?.(hit)
+      },
       onPasteImage: async (file, point) => {
         this.commitLeavingLine()
         await this.events.onPasteImage?.(file, point)
