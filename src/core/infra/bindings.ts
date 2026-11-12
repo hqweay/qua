@@ -150,7 +150,6 @@ export const BINDINGS: Binding[] = [
   /* 复制（子菜单）：前四条是「同一块的几种味」，复制块是落进文档的副本 */
   { command: 'core.editor/copy-block', kind: 'menu', when: 'blockFocused', group: 'blockCopy/1', order: 10, layer: 'core' },
   { command: 'core.editor/copy-block-text', kind: 'menu', when: 'blockFocused', group: 'blockCopy/1', order: 20, layer: 'core' },
-  { command: 'core.editor/copy-ref', kind: 'menu', when: 'blockFocused', group: 'blockCopy/1', order: 30, layer: 'core' },
   { command: 'core.editor/copy-block-ref', kind: 'menu', when: 'blockFocused', group: 'blockCopy/1', order: 40, layer: 'core' },
   { command: 'core.editor/duplicate-block', kind: 'menu', when: 'blockFocused', group: 'blockCopy/1', order: 50, layer: 'core' },
   /* 插入（子菜单）：行内原子与归属，落点都是这一块的正文 */
@@ -310,7 +309,6 @@ export const BINDINGS: Binding[] = [
   { command: 'core.anno/toggle-highlight', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 50, layer: 'core', icon: 'lucide:highlighter', label: t('menu.label.highlight') },
   { command: 'core.anno/toggle-code', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 60, layer: 'core', icon: 'lucide:code', label: t('menu.label.code') },
   { command: 'core.anno/clear-marks', kind: 'selection', when: 'editorTextFocus && !selectionEmpty && marking', group: 'sel/1-mark', order: 70, layer: 'core', icon: 'lucide:eraser', label: t('menu.label.clearMarks') },
-  { command: 'core.editor/copy-ref', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/2-ref', order: 10, layer: 'core', icon: 'lucide:quote', label: t('menu.label.copyRef') },
   // 入口与能力同宽：quoteSelection 用 selectionSpot（单块纯文本）判据，when 也用它
   { command: 'core.editor/quote-selection', kind: 'selection', when: 'editorTextFocus && selectionRef', group: 'sel/2-ref', order: 15, layer: 'core', icon: 'lucide:text-quote', label: t('menu.label.quoteSelection') },
   // 写备注：与「引用这段」同组（都是「这一段的去处」）。判据同宽：单块纯文本选区才有锚

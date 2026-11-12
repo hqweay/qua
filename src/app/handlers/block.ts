@@ -198,16 +198,6 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     app.insertTag(tag)
     return true
   },
-  'core.editor/copy-ref': (_a, app) => {
-    const id = curBlock(app)
-    if (!id) return false
-    const q = app.ed.quoteAtSel()
-    app.copy(
-      JSON.stringify({ target: { kind: 'block', id }, quote: q ?? null }, null, 2),
-      t('ui.toast.refCopied'),
-    )
-    return true
-  },
   // 「引用这段」：隐式建一条持久 anno ＋ 复制指向它的记号；粘贴时记号变成引用 run
   'core.editor/quote-selection': (_a, app) => {
     const id = app.ed.quoteSelection()

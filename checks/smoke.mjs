@@ -793,7 +793,8 @@ await check('T3b 顶栏只放窗口级控件：格式仍在划选气泡，皮肤
   await page.waitForFunction(() => document.querySelectorAll('.selbar').length === 1, null, { timeout: 2000 })
   const btns = await page.evaluate(() => [...document.querySelectorAll('.selbar .sel-btn')].map((b) => b.dataset.command))
   assert(btns.includes('core.anno/toggle-bold'), `气泡里应有加粗：${JSON.stringify(btns)}`)
-  assert(btns.includes('core.editor/copy-ref'), `气泡里应有「复制带引文的引用」：${JSON.stringify(btns)}`)
+  // 引文快照 JSON 没有任何消费端（粘贴路径只解析 HTML 味与 ((id)) 记号），这条复制已删
+  assert(!btns.includes('core.editor/copy-ref'), `气泡里不该有引文快照复制：${JSON.stringify(btns)}`)
 
   const before = await page.evaluate(() => window.__qua.marks().length)
   await page.evaluate(() => {
@@ -25339,12 +25340,12 @@ await check('T263 选区转引用：同名地址复用、没有就新建页、�
     hasEntry: [...document.querySelectorAll('.selbar .sel-btn')].some(
       (b) => b.dataset.command === 'core.editor/selection-to-ref',
     ),
-    hasCopy: [...document.querySelectorAll('.selbar .sel-btn')].some(
-      (b) => b.dataset.command === 'core.editor/copy-ref',
+    hasMark: [...document.querySelectorAll('.selbar .sel-btn')].some(
+      (b) => b.dataset.command === 'core.anno/toggle-bold',
     ),
   }))
   assert(cross.sel && cross.sel.aBlock !== cross.sel.hBlock, `前置：⌘A 要跨块选择：${JSON.stringify(cross.sel)}`)
-  assert(cross.hasCopy, `气泡本身照常出现（同一组里的复制还在）：${JSON.stringify(cross)}`)
+  assert(cross.hasMark, `气泡本身照常出现（跨块仍有格式组）：${JSON.stringify(cross)}`)
   assert(!cross.hasEntry, `跨块选区不给「转为引用」：${JSON.stringify(cross)}`)
 
   await ctx.close()

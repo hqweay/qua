@@ -2975,25 +2975,9 @@ export class BlockEditor {
   }
 
   /**
-   * 引用某段的引文快照：用当前选区物化一条 anno，`quote.exact` 恒为
-   * `plainText` 投影的子串（选区 plain 坐标 → 投影坐标的换算在 core 层）。
-   * 没有文本 ⇒ `undefined`（引用纯原子没有可定位的东西，走整块引用）。
-   */
-  quoteAtSel(): { exact: string; prefix: string; suffix: string } | undefined {
-    const s = this.sel
-    if (!s) return undefined
-    const r = normSel(this.doc, s)
-    if (r.startBlock !== r.endBlock) return undefined
-    const b = locate(this.doc, r.startBlock)
-    if (!b) return undefined
-    return mkAnno(b.block.content, r.startOff, r.endOff)?.quote
-  }
-
-  /**
    * 「引用这段」：把当前选区物化成一条**持久** anno，返回它的 id（引用 run 的 `to` 指它）。
    *
-   * 与 `quoteAtSel` 的分工：那个只取引文快照给外部看，这个要把实体落进 `b.annos` ——
-   * 否则引用指向一个不存在的 id。整件事在唯一事务里（`setAnnos` ⇒ `anno.set` op ⇒
+   * 实体要落进 `b.annos` ——否则引用指向一个不存在的 id。整件事在唯一事务里（`setAnnos` ⇒ `anno.set` op ⇒
    * 索引反查表、落盘 annos 列、撤销快照都跟着这一笔），撤销天然复原。
    */
   quoteSelection(): string | null {
