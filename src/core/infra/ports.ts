@@ -158,9 +158,10 @@ export interface App {
    * **备注浮窗**：锚在被备注文本旁的可编辑浮层（浮层归装配层，与 showRefPicker
    * 同一条理由——命令 handler 不碰 DOM）。
    * `blockId`／`annoId` 定锚（实时取矩形：正文滚动/重排浮层跟着走，锚没了自动关）；
-   * `noteId` 是浮窗里装载的备注块。
+   * `noteId` 是浮窗里装载的备注块——省略时装配层按 annotates 边由 annoId 反查
+   * （右键菜单只有锚坐标，没有备注身份）。
    */
-  openNotePopover(sig: { noteId: string; blockId: string; annoId: string }): void
+  openNotePopover(sig: { noteId?: string; blockId: string; annoId: string }): void
   /**
    * **打开日期选择器**（`core.editor/insert-date-ref` 不带 `date` 时的那条路）。
    *

@@ -218,6 +218,21 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     app.openNotePopover({ noteId: created.noteId, blockId: first.block, annoId: first.anno })
     return true
   },
+  // 删除备注：软删可撤销（⌘Z 回来）；边被索引摘除 ⇒ 标记与收集栏自动消失（读侧判活）
+  'core.notes/delete': (a, app) => {
+    const blockId = S(a.blockId)
+    const annoId = S(a.annoId)
+    if (!blockId || !annoId) return false
+    const noteId = app.ed.store.index.relations
+      .get(blockId)
+      ?.find((e) => e.kind === 'annotates' && e.propId === annoId)?.from
+    if (!noteId) return false
+    app.ed.beginUndoEntry()
+    app.ed.write((tx) => tx.remove(noteId))
+    app.ed.finishUndoEntry('delete', Date.now())
+    app.toast(t('ui.toast.noteDeleted'), 'ok')
+    return true
+  },
   /**
    * 复制成**文本记号** `((block-id))`：粘贴时会被解析成行内引用，也能被「粘贴为…」读成露面源。
    * 与 `copy-ref`（引文快照 JSON）分开：那个是给人看的引文，这个是给库内粘贴用的指针。

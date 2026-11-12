@@ -324,6 +324,12 @@ export interface EditorBridge {
   /** ⌥-click 命中判定：坐标 → 被备注的（块，锚）；没命中 ⇒ null（调用方照常落光标） */
   annoHitAt?: (x: number, y: number) => { blockId: string; annoId: string } | null
   /**
+   * **右键落在被备注的文本上**：「对这一处做什么」的菜单（打开／侧栏／删除），
+   * 与右键原子（`onAtomMenu`）同族。`rect` 是指针位置（菜单锚点）。
+   * ⚠️ 未接 ⇒ 退回块菜单（不是没反应）——只少一个分流，不少一个菜单。
+   */
+  onAnnoMenu?: (hit: { blockId: string; annoId: string }, rect: DOMRect) => void
+  /**
    * **右键一枚行内原子**：引用／行内标签／外链／图片／标签 chip 各自的菜单。
    *
    * `el` 是落点元素（浮层的锚点），`rect` 是右键那一刻的指针位置。
@@ -1038,6 +1044,20 @@ export function bindEditorEvents(br: EditorBridge): () => void {
         return
       }
     }
+
+    /**
+     * **右键落在被备注的文本上 ⇒ 这一处的备注菜单**（打开／侧栏／删除）。
+     * 在原子分支之后：点的是引用/原子时它们自己的菜单优先；标记是画层没有元素，
+     * 命中判定走 `annoHitAt`（与画层同源的区间缓存）。
+     */
+    if (br.annoHitAt) {
+      const annoHit = br.annoHitAt(e.clientX, e.clientY)
+      if (annoHit) {
+        br.onAnnoMenu?.(annoHit, rect)
+        return
+      }
+    }
+
     /**
      * **右键落在块标上 ⇒ 菜单开在块标绑定的那一块**。普通行两者同 id（行为不变）；
      * 投影行的绑源块标不同 id ⇒ 菜单开在源上，附「移除这次露面」。

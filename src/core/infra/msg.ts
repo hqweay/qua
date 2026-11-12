@@ -38,6 +38,7 @@ export const MSG = {
   'cmd.editor.insert-tag': '插入标签 #',
   'cmd.editor.quote-selection': '引用这段',
   'cmd.notes.create': '写备注',
+  'cmd.notes.delete': '删除备注',
   'ui.note.openInSidebar': '在侧栏打开',
   'ui.note.placeholder': '写备注…',
   'cmd.editor.copy-block-ref': '复制块链接（((id))）',
@@ -918,6 +919,10 @@ export const MSG = {
   'menu.label.quoteSelection': '引用这段',
   'menu.label.selectionToRef': '转为引用',
   'menu.label.writeNote': '写备注',
+  'menu.label.openNote': '打开备注',
+  'menu.label.openNoteInSidebar': '在侧栏打开',
+  'menu.label.deleteNote': '删除这条备注',
+  'menu.title.anno': '备注',
 
   /* 划选气泡色板：七个槽的显示名（tooltip），轴名复用 menu.label.ink/bg */
   'ui.color.red': '红',
@@ -1259,6 +1264,7 @@ export const MSG = {
   'ui.toast.journalDeleted': '已删除这一天（再打开会恢复）',
   'ui.toast.refCopied': '已复制引用（实体 id ＋ 引文快照 exact/prefix/suffix）',
   'ui.toast.quoteCopied': '已复制这段的引用（粘贴时变成指向它的引用）',
+  'ui.toast.noteDeleted': '备注已删除（⌘Z 可恢复）',
   'ui.toast.blocksCopied': '已复制选中的块（大纲文本）',
   'ui.toast.blockRefsCopied': '已复制选中块的引用',
   'ui.toast.blockRefCopied': '已复制块引用（粘贴时会变成引用）',

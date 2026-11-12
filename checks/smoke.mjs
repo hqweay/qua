@@ -28229,6 +28229,100 @@ await check('T297 ⌥-click 备注标记：就地浮窗带出已有备注；「�
   return '⌥-click → 浮窗带出备注；「在侧栏打开」跳收集栏；普通单击仍＝编辑'
 })
 
+await check('T298 右键备注标记：三行菜单；删除＝软删（标记消失、⌘Z 恢复）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const fx = await noteFx(page, ['红句子在这里'])
+  await page.waitForTimeout(150)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 3), fx.ids[0])
+  for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+ArrowLeft')
+  await page.waitForFunction(() => document.querySelectorAll('.selbar').length === 1, null, { timeout: 2000 })
+  await page.evaluate(() => {
+    document
+      .querySelector('.selbar .sel-btn[data-command="core.notes/create"]')
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForSelector('.popover .note-popover-body', { timeout: 3000 })
+  await page.keyboard.type('这是备注')
+  await page.waitForTimeout(200)
+  // Esc 提交并关浮窗（有内容 ⇒ 不回收）
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('.note-popover-body'), null, { timeout: 3000 })
+  const noteId = await page.evaluate(
+    () => window.__qua.__editor.store.blocks.find((b) => b.props?._type === 'core/note')?.id ?? '',
+  )
+  assert(noteId, '前置：备注块应已存在且有内容')
+
+  const hit = await page.evaluate((bid) => {
+    const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('anno-mark-'))
+    const set = key ? CSS.highlights.get(key) : null
+    if (!set) return null
+    for (const r of set) {
+      const blk = r.startContainer.parentElement?.closest?.('.blk')
+      if (blk?.dataset?.blockId !== bid) continue
+      const rect = r.getBoundingClientRect()
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    }
+    return null
+  }, fx.ids[0])
+  assert(hit, '前置：标记应仍在')
+
+  // 右键标记：三行菜单
+  await page.mouse.click(hit.x, hit.y, { button: 'right' })
+  await page.waitForTimeout(300)
+  const items = await page.evaluate(() => [...document.querySelectorAll('.layer-item')].map((e) => e.textContent ?? ''))
+  assert(items.some((x) => x.includes('打开备注')), `菜单应有「打开备注」：${JSON.stringify(items)}`)
+  assert(items.some((x) => x.includes('在侧栏打开')), `菜单应有「在侧栏打开」：${JSON.stringify(items)}`)
+  assert(items.some((x) => x.includes('删除这条备注')), `菜单应有「删除这条备注」：${JSON.stringify(items)}`)
+
+  // 点删除：软删 ⇒ 块没了、标记消失
+  await page.locator('.layer-item', { hasText: '删除这条备注' }).first().click()
+  const gone = await page.evaluate((nid) => {
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.id === nid) return b.props?._deletedAt === undefined
+        if (walk(b.children ?? [])) return true
+      }
+      return false
+    }
+    return walk(window.__qua.__editor.store.blocks)
+  }, noteId)
+  assert(!gone, '备注块应被软删（森林活块遍历不见）')
+  await page.waitForFunction(
+    () => {
+      const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('anno-mark-'))
+      return !key || CSS.highlights.get(key).size === 0
+    },
+    null,
+    { timeout: 3000 },
+  )
+
+  // ⌘Z：软删可撤销，标记回来（走真实命令——undoRedoStep 会重画，直调 store.undo 不算数）
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForTimeout(400)
+  const back = await page.evaluate((nid) => {
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.id === nid) return true
+        if (walk(b.children ?? [])) return true
+      }
+      return false
+    }
+    return walk(window.__qua.__editor.store.blocks)
+  }, noteId)
+  assert(back, '⌘Z 应把备注找回来')
+  await page.waitForFunction(
+    () => {
+      const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('anno-mark-'))
+      return Boolean(key && CSS.highlights.get(key).size >= 1)
+    },
+    null,
+    { timeout: 3000 },
+  )
+
+  await ctx.close()
+  return '右键标记 → 三行菜单；删除＝软删（标记消失、⌘Z 恢复）'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 
