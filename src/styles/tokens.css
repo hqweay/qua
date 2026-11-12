@@ -75,6 +75,11 @@
     与命中同强度会让人把每一段被备注的字误读成搜索命中。
   */
   --ui-anno-bg: color-mix(in srgb, var(--ui-accent) 10%, transparent);
+  /*
+    备注标记的 hover 态：加深到与命中同强度档（20%）——「这段可以点」的确认反馈。
+    Custom Highlight 没有元素可挂 :hover，hover 态由 AnnoHover 命中判定驱动第二把 key。
+  */
+  --ui-anno-bg-hot: color-mix(in srgb, var(--ui-accent) 20%, transparent);
   --ui-danger: var(--c-danger);
   --ui-warn: var(--c-warn);
   --ui-ok: var(--c-ok);

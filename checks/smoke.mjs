@@ -28101,6 +28101,14 @@ await check('T296 备注 hover：标记上浮出只读 tip（备注文本），�
     [...document.querySelectorAll('.ui-tip')].map((e) => e.textContent ?? '').join('|'),
   )
   assert(tipText.includes('这是备注内容'), `tip 应显示备注正文：${JSON.stringify(tipText)}`)
+  // 可点击的确认反馈：hot 加深层亮起＋手型光标
+  await page.waitForFunction(
+    () => [...(CSS.highlights?.keys() ?? [])].some((k) => k.startsWith('anno-mark-hot-')),
+    null,
+    { timeout: 3000 },
+  )
+  const cursorOn = await page.evaluate(() => window.__qua.__editor.container.style.cursor)
+  assert(cursorOn === 'pointer', `hover 标记应有手型光标：${JSON.stringify(cursorOn)}`)
   const modelAfter = await notesState(page, fx.ids[0])
   assert(modelAfter.noteText === modelBefore.noteText, '悬停不是写入动作')
 
@@ -28125,13 +28133,17 @@ await check('T296 备注 hover：标记上浮出只读 tip（备注文本），�
   assert(miss, '前置：未标记词要量得出矩形')
   await page.mouse.move(miss.x, miss.y)
   await page.waitForFunction(
-    () => ![...document.querySelectorAll('.ui-tip')].some((e) => (e.textContent ?? '').includes('这是备注内容')),
+    () =>
+      ![...document.querySelectorAll('.ui-tip')].some((e) => (e.textContent ?? '').includes('这是备注内容')) &&
+      ![...(CSS.highlights?.keys() ?? [])].some((k) => k.startsWith('anno-mark-hot-')),
     null,
     { timeout: 3000 },
   )
+  const cursorOff = await page.evaluate(() => window.__qua.__editor.container.style.cursor)
+  assert(cursorOff !== 'pointer', `离开标记应收回手型光标：${JSON.stringify(cursorOff)}`)
 
   await ctx.close()
-  return 'hover 标记 → 只读 tip（备注正文）；未标记不浮、悬停不写模型'
+  return 'hover 标记 → 只读 tip＋hot 加深＋手型；未标记不浮、悬停不写模型'
 })
 
 await check('T297 ⌥-click 备注标记：就地浮窗带出已有备注；「在侧栏打开」跳收集栏并聚焦', async () => {

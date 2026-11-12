@@ -646,6 +646,8 @@ export class BlockEditor {
   private readonly unbind: () => void
   /** 本实例的备注标记画笔 key（每台编辑器一份，互不覆盖；dispose 时摘掉） */
   private readonly annoKey = `anno-mark-${Math.random().toString(36).slice(2)}`
+  /** hover 命中那一段的加深画笔（AnnoHover 回报驱动；与常显层分 key 才能两档样式） */
+  private readonly annoHotKey = `anno-mark-hot-${Math.random().toString(36).slice(2)}`
   private annoPaintQueued = false
   /**
    * 活跃备注区间（与画层**同源**：paintAnnoMarks 每次重画时顺手缓存）。
@@ -741,6 +743,7 @@ export class BlockEditor {
       spans: () => this.annoSpans,
       quiet: () => this.deferWhileComposing() || this.reloader.pointerDownNow(),
       textOf: (blockId, annoId) => this.annoNoteText(blockId, annoId),
+      onHot: (hit) => this.paintAnnoHot(hit),
     })
     this.renderAll()
   }
@@ -754,6 +757,7 @@ export class BlockEditor {
     this.annoHover.dispose()
     this.annoSpans = new Map()
     clearHits(this.annoKey)
+    clearHits(this.annoHotKey)
   }
 
   /**
@@ -1326,6 +1330,30 @@ export class BlockEditor {
     // 画层与命中判定同一份区间（hover tip 读它）——同帧同源，不会漂
     this.annoSpans = blocks
     paintHits(this.container, blocks, this.annoKey, '--ui-anno-bg')
+  }
+
+  /**
+   * hover 命中那一段的加深画笔（「这段可以点」的确认反馈）。
+   * 常显层与 hot 层分 key 分 token：两档样式靠两把 highlight 叠出来。
+   */
+  private paintAnnoHot(hit: { blockId: string; annoId: string } | null): void {
+    if (!hit) {
+      clearHits(this.annoHotKey)
+      return
+    }
+    const anno = this.store.find(hit.blockId)?.annos?.find((a) => a.id === hit.annoId)
+    const blk = this.container.querySelector<HTMLElement>(`.blk[data-block-id="${hit.blockId}"]`)
+    const tx = blk?.querySelector<HTMLElement>(':scope > .tx')
+    if (!anno || !tx) {
+      clearHits(this.annoHotKey)
+      return
+    }
+    const r = rangeAtSpan(tx, anno.range)
+    if (!r) {
+      clearHits(this.annoHotKey)
+      return
+    }
+    paintHits(this.container, new Map([[hit.blockId, [anno.range]]]), this.annoHotKey, '--ui-anno-bg-hot')
   }
 
   /** 被备注区间的 tip 文本：备注块的正文投影（多条换行平铺） */

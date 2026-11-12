@@ -29,6 +29,11 @@ export interface AnnoHoverDeps {
   quiet: () => boolean
   /** 区间的 tip 文本；空串 ⇒ 不浮 */
   textOf: (blockId: string, annoId: string) => string
+  /**
+   * hover 命中变化（进/出一段被备注的字）：调用方据此画 hot 态（底色加深）。
+   * `null` ＝ 离开；离开/收起/销毁都保证补发一次 null。
+   */
+  onHot: (hit: { blockId: string; annoId: string } | null) => void
 }
 
 const SHOW_DELAY = 150
@@ -68,6 +73,7 @@ export class AnnoHover {
     this.clearTimers()
     this.tipEl?.remove()
     this.tipEl = null
+    this.setHot(null)
   }
 
   private readonly onMove = (e: MouseEvent): void => {
@@ -130,7 +136,14 @@ export class AnnoHover {
       this.scheduleHide()
       return
     }
+    this.setHot({ blockId, annoId: span.annoId })
     this.scheduleShow(blockId, span, rect)
+  }
+
+  /** hover 命中态：hot 回报＋手型光标（标记是画层没有元素，cursor 只能动态切容器） */
+  private setHot(hit: { blockId: string; annoId: string } | null): void {
+    this.deps.container.style.cursor = hit ? 'pointer' : ''
+    this.deps.onHot(hit)
   }
 
   /** 同一处：已在显示就只挪位置；换了一处：已显示的直接换，没显示的等停留 */
@@ -225,6 +238,7 @@ export class AnnoHover {
     this.tipAt = null
     this.tipEl?.remove()
     this.tipEl = null
+    this.setHot(null)
   }
 
   private tipAt: { blockId: string; annoId: string; start: number; end: number } | null = null
