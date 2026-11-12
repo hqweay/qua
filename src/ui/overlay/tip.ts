@@ -11,7 +11,7 @@
  * ⚠️ 内容是**纯文本**（现在所有 title 都是一句话）；`data-tip` 为空 ⇒ 不浮出。
  * ⚠️ 不与浮层系统（layers）混用：说明是被动出现的最低交互层，Esc 归菜单管。
  */
-import { placeNear } from './place.ts'
+import { placeNear } from '../../view/place.ts'
 
 /** 悬停意图延迟：太快会把「路过」读成「要看」，太慢像没反应 */
 const SHOW_DELAY = 400

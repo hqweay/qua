@@ -181,7 +181,7 @@ export function clearHits(key: string): void {
  * ⌥ 单击与块菜单的 `when` 都读这一条 —— 两份判据的下场是
  * 「高亮上有、点了却能点空」。
  */
-export function spanAt(spans: readonly PlainSpan[], offset: number): PlainSpan | null {
+export function spanAt<T extends PlainSpan>(spans: readonly T[], offset: number): T | null {
   for (const s of spans) if (offset >= s.start && offset < s.end) return s
   return null
 }

@@ -152,6 +152,7 @@ import {
 import { assetViewOf, markAssetMissing } from '../asset-views.ts'
 import { ReloadPolicy } from './reload-policy.ts'
 import { spanAt, paintHits, clearHits, type PlainSpan } from './hit-paint.ts'
+import { AnnoHover, type AnnoHitSpan } from './anno-hover.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
 import { Drag } from "./drag.ts"
 import { EmbedBodies } from "./embed-bodies.ts"
@@ -645,6 +646,12 @@ export class BlockEditor {
   /** 本实例的备注标记画笔 key（每台编辑器一份，互不覆盖；dispose 时摘掉） */
   private readonly annoKey = `anno-mark-${Math.random().toString(36).slice(2)}`
   private annoPaintQueued = false
+  /**
+   * 活跃备注区间（与画层**同源**：paintAnnoMarks 每次重画时顺手缓存）。
+   * hover 命中判定读它——判定与画亮的是同一处，两份口径必然漂。
+   */
+  private annoSpans: ReadonlyMap<string, readonly AnnoHitSpan[]> = new Map()
+  private readonly annoHover: AnnoHover
 
   constructor(o: ViewOpts) {
     this.container = o.container
@@ -728,6 +735,12 @@ export class BlockEditor {
     this.container.setAttribute('contenteditable', 'true')
     this.container.setAttribute('spellcheck', 'false')
     this.unbind = this.bind()
+    this.annoHover = new AnnoHover({
+      container: this.container,
+      spans: () => this.annoSpans,
+      quiet: () => this.deferWhileComposing() || this.reloader.pointerDownNow(),
+      textOf: (blockId, annoId) => this.annoNoteText(blockId, annoId),
+    })
     this.renderAll()
   }
 
@@ -737,6 +750,8 @@ export class BlockEditor {
     this.offStore()
     this.unbind()
     this.reloader.dispose()
+    this.annoHover.dispose()
+    this.annoSpans = new Map()
     clearHits(this.annoKey)
   }
 
@@ -1293,7 +1308,7 @@ export class BlockEditor {
    * 会被 `readRuns` 当成内容，还会挪光标），底色淡一档（`--ui-anno-bg`）。
    */
   private paintAnnoMarks(): void {
-    const blocks = new Map<string, PlainSpan[]>()
+    const blocks = new Map<string, AnnoHitSpan[]>()
     const idx = this.store.index
     walkForest(this.doc.roots, (b) => {
       if (!b.annos || b.annos.length === 0) return
@@ -1302,10 +1317,25 @@ export class BlockEditor {
         if (e.kind === 'annotates' && e.propId) live.add(e.propId)
       }
       if (live.size === 0) return
-      const spans = b.annos.filter((a) => live.has(a.id)).map((a) => a.range)
+      const spans = b.annos
+        .filter((a) => live.has(a.id))
+        .map((a) => ({ annoId: a.id, ...a.range }))
       if (spans.length > 0) blocks.set(b.id, spans)
     })
+    // 画层与命中判定同一份区间（hover tip 读它）——同帧同源，不会漂
+    this.annoSpans = blocks
     paintHits(this.container, blocks, this.annoKey, '--ui-anno-bg')
+  }
+
+  /** 被备注区间的 tip 文本：备注块的正文投影（多条换行平铺） */
+  private annoNoteText(blockId: string, annoId: string): string {
+    const notes: string[] = []
+    for (const e of this.store.index.relations.get(blockId) ?? []) {
+      if (e.kind !== 'annotates' || e.propId !== annoId) continue
+      const note = this.store.find(e.from)
+      if (note) notes.push(plainText(note.content))
+    }
+    return notes.join('\n')
   }
 
   /** 重画排进下一帧（合并同一帧里的多笔写）；组合期不画（DOM 还没落定） */

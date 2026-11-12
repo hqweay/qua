@@ -67,7 +67,7 @@ import { clearHits, offsetAtPoint, paintHits, rangeAtSpan, spanAt, type PlainSpa
 import { claimHighlightKey, releaseHighlightKey } from '../search/highlight-key.ts'
 import { bindDropTarget, setDragTab } from '../../view/dnd.ts'
 import { renderIcon } from '../../view/icons.ts'
-import { placeNear } from '../overlay/place.ts'
+import { placeNear } from '../../view/place.ts'
 import { renderQuickFilter } from './quick-filter.ts'
 
 /** 一处浮层锚点（只读的矩形形状；`DOMRect` 与普通对象都能喂） */

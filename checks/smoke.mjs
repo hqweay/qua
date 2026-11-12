@@ -28048,6 +28048,95 @@ await check('T295 宿主改字锚跟走：前缀插入平移区间、淡标记�
   return '前缀插入 ⇒ 锚平移＋标记跟字；备注与引文原样'
 })
 
+await check('T296 备注 hover：标记上浮出只读 tip（备注文本），未标记处不出；悬停不写模型', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const fx = await noteFx(page, ['红句子在这里'])
+  await page.waitForTimeout(150)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 3), fx.ids[0])
+  for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+ArrowLeft')
+  await page.waitForFunction(() => document.querySelectorAll('.selbar').length === 1, null, { timeout: 2000 })
+  await page.evaluate(() => {
+    document
+      .querySelector('.selbar .sel-btn[data-command="core.notes/create"]')
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForFunction(
+    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'notes',
+    null,
+    { timeout: 3000 },
+  )
+  // 焦点已在新备注行：写正文，tip 才有东西可显示
+  await page.keyboard.type('这是备注内容')
+  await page.waitForTimeout(200)
+
+  // 标记亮起后从画层反算命中矩形（Custom Highlight 无元素，照 T262 的路子）
+  await page.waitForFunction(
+    () => {
+      const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('anno-mark-'))
+      return Boolean(key && CSS.highlights.get(key).size >= 1)
+    },
+    null,
+    { timeout: 3000 },
+  )
+  const hit = await page.evaluate((bid) => {
+    const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('anno-mark-'))
+    const set = key ? CSS.highlights.get(key) : null
+    if (!set) return null
+    for (const r of set) {
+      const blk = r.startContainer.parentElement?.closest?.('.blk')
+      if (blk?.dataset?.blockId !== bid) continue
+      const rect = r.getBoundingClientRect()
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    }
+    return null
+  }, fx.ids[0])
+  assert(hit, '前置：宿主块上应有一处备注标记')
+
+  // hover 标记：只读 tip 浮出，内容是备注正文；悬停不写模型
+  const modelBefore = await notesState(page, fx.ids[0])
+  await page.mouse.move(hit.x, hit.y)
+  await page.waitForFunction(
+    () => [...document.querySelectorAll('.ui-tip')].some((e) => (e.textContent ?? '').includes('这是备注内容')),
+    null,
+    { timeout: 3000 },
+  )
+  const tipText = await page.evaluate(() =>
+    [...document.querySelectorAll('.ui-tip')].map((e) => e.textContent ?? '').join('|'),
+  )
+  assert(tipText.includes('这是备注内容'), `tip 应显示备注正文：${JSON.stringify(tipText)}`)
+  const modelAfter = await notesState(page, fx.ids[0])
+  assert(modelAfter.noteText === modelBefore.noteText, '悬停不是写入动作')
+
+  // 移到未标记的字上：tip 收掉
+  const miss = await page.evaluate((bid) => {
+    const blk = document.querySelector(`#editor .blk[data-block-id="${bid}"]`)
+    const tx = blk?.querySelector(':scope > .tx')
+    if (!tx) return null
+    const walker = document.createTreeWalker(tx, NodeFilter.SHOW_TEXT)
+    while (walker.nextNode()) {
+      const node = walker.currentNode
+      const at = node.data.indexOf('在这里')
+      if (at < 0) continue
+      const r = document.createRange()
+      r.setStart(node, at)
+      r.setEnd(node, at + 3)
+      const rect = r.getBoundingClientRect()
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    }
+    return null
+  }, fx.ids[0])
+  assert(miss, '前置：未标记词要量得出矩形')
+  await page.mouse.move(miss.x, miss.y)
+  await page.waitForFunction(
+    () => ![...document.querySelectorAll('.ui-tip')].some((e) => (e.textContent ?? '').includes('这是备注内容')),
+    null,
+    { timeout: 3000 },
+  )
+
+  await ctx.close()
+  return 'hover 标记 → 只读 tip（备注正文）；未标记不浮、悬停不写模型'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 
