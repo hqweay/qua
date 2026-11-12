@@ -7,7 +7,7 @@
  * 会静默落盘（正文进事务、备注块留在事务外）。
  *
  * ⚠️ 身份块住森林顶层：位置对身份不承载信息，树操作会把住在子树里的备注当货物搬走
- *    （与 tag/schema/journal 同一条纪律，决策 87）。
+ *    （所有读路径都按 id 找它，与 tag/schema/journal 同一条纪律）。
  */
 import { uuidv7Hex } from '../model/ids.ts'
 import { ANNOTATES_PROP, NOTE_TYPE, isAnnotatesPairs, type NotePair } from '../relations/annotates.ts'
