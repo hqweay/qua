@@ -260,6 +260,8 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/indent-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 15, layer: 'core', keywords: ['tab', t('menu.kw.indent')] },
   { command: 'core.editor/outdent-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 16, layer: 'core', keywords: ['shift tab', t('menu.kw.outdent')] },
   { command: 'core.editor/toggle-todo-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 17, layer: 'core', keywords: ['todo', 'task'] },
+  // 跨块备注：块选区整段锚，一条备注带走全部（空块锚不出来，自动跳过）
+  { command: 'core.notes/create', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 25, layer: 'core', icon: 'lucide:message-circle', label: t('menu.label.writeNote') },
   { command: 'core.editor/copy-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 20, layer: 'core' },
   { command: 'core.editor/copy-selected-block-refs', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 30, layer: 'core', keywords: ['ref', t('menu.kw.ref')] },
   // 剪切：⌘X 有键位，菜单补的是指针用户的路（与复制同处一组；移动发生在粘贴那一刻）
@@ -311,6 +313,8 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/copy-ref', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/2-ref', order: 10, layer: 'core', icon: 'lucide:quote', label: t('menu.label.copyRef') },
   // 入口与能力同宽：quoteSelection 用 selectionSpot（单块纯文本）判据，when 也用它
   { command: 'core.editor/quote-selection', kind: 'selection', when: 'editorTextFocus && selectionRef', group: 'sel/2-ref', order: 15, layer: 'core', icon: 'lucide:text-quote', label: t('menu.label.quoteSelection') },
+  // 写备注：与「引用这段」同组（都是「这一段的去处」）。判据同宽：单块纯文本选区才有锚
+  { command: 'core.notes/create', kind: 'selection', when: 'editorTextFocus && selectionRef', group: 'sel/2-ref', order: 25, layer: 'core', icon: 'lucide:message-circle', label: t('menu.label.writeNote') },
   /**
    * 选区 → 引用：与「复制为引文」同组（都是「这一段的去处」，不是格式）。
    * 只在单块纯文本选区上出现——跨块或夹着原子时「换成一枚引用」没有定义。

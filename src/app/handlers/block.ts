@@ -217,6 +217,12 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   },
   // 划选气泡那一颗：选区 → 同名引用（没有同名地址就新建页）。复核、事务、toast 都在门面那一步
   'core.editor/selection-to-ref': (_a, app) => app.convertSelectionToRef(),
+  // 写备注：块选区态优先（跨块＝一条备注锚 N 个整块），否则划选单块。
+  // 锚与备注块在同一笔事务里；成功后的焦点反馈（派生栏开「备注」栏）由 UI 层吃编辑器的瞬态信号
+  'core.notes/create': (_a, app) => {
+    if (app.ed.bsel.hasBlockSelection()) return app.ed.createNoteFromBlockSelection() !== null
+    return app.ed.createNoteFromSelection() !== null
+  },
   /**
    * 复制成**文本记号** `((block-id))`：粘贴时会被解析成行内引用，也能被「粘贴为…」读成露面源。
    * 与 `copy-ref`（引文快照 JSON）分开：那个是给人看的引文，这个是给库内粘贴用的指针。

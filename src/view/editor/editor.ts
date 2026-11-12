@@ -100,7 +100,10 @@ import {
   type RefRun,
   type Run as InlineRun,
   type RunWithId,
+  type Anno,
 } from '../../core/model/runs.ts'
+import { ensureNoteInTx } from '../../core/kb/ensure-note.ts'
+import type { NotePair } from '../../core/relations/annotates.ts'
 import { journalDateLabel, type OpenAction, type SecLayout, type ShellCol } from '../../core/index.ts'
 export type { SecLayout }
 
@@ -634,6 +637,11 @@ export class BlockEditor {
   /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
   private readonly offStore: () => void
   private readonly unbind: () => void
+  /**
+   * 刚创建的那条备注（一次性信号，消费方读走即清）：派生栏据此在刷新后
+   * 打开「备注」栏并聚焦新行。命令层不碰 DOM，落焦点是这个瞬态的用途。
+   */
+  lastCreatedNote: { noteId: string; hostIds: readonly string[] } | null = null
 
   constructor(o: ViewOpts) {
     this.container = o.container
@@ -2867,6 +2875,57 @@ export class BlockEditor {
     this.write((tx) => tx.setAnnos(spot.blockId, annos), undefined, { directEdit: true })
     this.finishUndoEntry('other', Date.now())
     return anno.id
+  }
+
+  /**
+   * 写备注：把当前选区物化成区间锚 ＋ 建一条备注块，**同一笔事务**
+   * （拆开就是「宿主加了锚、备注块不在」的半批）。返回备注块 id；没有可用选区 ⇒ null。
+   */
+  createNoteFromSelection(): string | null {
+    const spot = this.selectionSpot()
+    if (!spot) return null
+    const b = locate(this.doc, spot.blockId)?.block
+    if (!b) return null
+    const anno = mkAnno(b.content, spot.start, spot.end)
+    if (!anno) return null
+    return this.createNote([{ block: spot.blockId, anno: anno.id }], (tx) => {
+      tx.setAnnos(spot.blockId, [...(b.annos ?? []), anno])
+    })
+  }
+
+  /**
+   * 写备注（块选区态）：每个选中的块整段一枚区间锚，**一条备注**带走全部——
+   * 跨块备注＝一块（租客）对多枚（锚），锚侧不变（每枚只锚一个块内区间）。
+   * 空块／纯原子块锚不出来 ⇒ 跳过；一个都锚不出来 ⇒ null（无事发生，不发空 op）。
+   */
+  createNoteFromBlockSelection(): string | null {
+    const pairs: NotePair[] = []
+    const hostAnnos: { blockId: string; annos: Anno[] }[] = []
+    for (const id of this.bsel.selectedRootIds()) {
+      const b = locate(this.doc, id)?.block
+      if (!b || plainLen(b.content) === 0) continue
+      const anno = mkAnno(b.content, 0, plainLen(b.content))
+      if (!anno) continue
+      pairs.push({ block: id, anno: anno.id })
+      hostAnnos.push({ blockId: id, annos: [...(b.annos ?? []), anno] })
+    }
+    if (pairs.length === 0) return null
+    return this.createNote(pairs, (tx) => {
+      for (const h of hostAnnos) tx.setAnnos(h.blockId, h.annos)
+    })
+  }
+
+  /** 两个入口共用的落笔：锚写宿主＋备注块进顶层，一笔事务一条撤销 */
+  private createNote(pairs: NotePair[], writeHosts: (tx: Tx) => void): string | null {
+    this.beginUndoEntry()
+    let noteId: string | null = null
+    this.write((tx) => {
+      writeHosts(tx)
+      noteId = ensureNoteInTx(this.store.blocks, pairs, tx).id
+    }, undefined, { directEdit: true })
+    this.finishUndoEntry('other', Date.now())
+    this.lastCreatedNote = noteId ? { noteId, hostIds: pairs.map((p) => p.block) } : null
+    return noteId
   }
 
   /* ------------------------------------------------------- 虚拟化 */

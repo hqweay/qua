@@ -38,6 +38,7 @@ export const MSG = {
   'cmd.editor.insert-tag': '插入标签 #',
   'cmd.editor.copy-ref': '复制为引文（含原文快照）',
   'cmd.editor.quote-selection': '引用这段',
+  'cmd.notes.create': '写备注',
   'cmd.editor.copy-block-ref': '复制块链接（((id))）',
   'cmd.editor.delete-selected-blocks': '删除选中的块',
   'cmd.editor.indent-selected-blocks': '缩进选中的块',
@@ -913,6 +914,7 @@ export const MSG = {
   'menu.label.copyRef': '复制为引文',
   'menu.label.quoteSelection': '引用这段',
   'menu.label.selectionToRef': '转为引用',
+  'menu.label.writeNote': '写备注',
 
   /* 划选气泡色板：七个槽的显示名（tooltip），轴名复用 menu.label.ink/bg */
   'ui.color.red': '红',
