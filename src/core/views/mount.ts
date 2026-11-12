@@ -187,6 +187,11 @@ export function isDerivedTabId(id: string): boolean {
   return (DERIVED_SOURCES as readonly string[]).includes(id)
 }
 
+/** 这个 source 是不是合法的派生来源（落盘校验与规范化共用，别再内联枚举——加来源漏一处就是静默丢栏） */
+export function isDerivedSource(source: unknown): source is DerivedSource {
+  return (DERIVED_SOURCES as readonly string[]).includes(source as string)
+}
+
 /** 两个宿主是不是同一个（`MountHost` 是「这一栏写哪」的唯一判别器） */
 export function sameHost(a: MountHost, b: MountHost): boolean {
   if (a.kind === 'journal' || b.kind === 'journal') return a.kind === b.kind && a.kind === 'journal'
@@ -245,9 +250,9 @@ const SPEC_MENTIONS: QuerySpec = { where: { all: [{ text: '$self' }, { not: { re
  * 不是把这一栏藏掉（否则「重排之后才出现的栏」就没有落点）。
  *
  * 集合：
- *   · 标签块：成员 → 引用 → 同类 → 提及；
- *   · 普通块：引用 → 同类 → 提及；
- *   · 日记：引用 → 提及（日期身份不参与标签归属，不挂一个永远空的「同类」）。
+ *   · 标签块：成员 → 引用 → 备注 → 同类 → 提及；
+ *   · 普通块：引用 → 备注 → 同类 → 提及；
+ *   · 日记：引用 → 备注 → 提及（日期身份不参与标签归属，不挂一个永远空的「同类」）。
  *
  * 这是**规范序**（没拖过时的默认）。拖过的顺序住 `_mounts`（宿主那一格 tab 列表）：
  * 派生栏也是那条列表里的项，见 `mountEntriesOf` 的合并规则。
@@ -663,7 +668,7 @@ export function canonicalMountEntries(raw: unknown): MountEntry[] {
     const e = item as Partial<MountEntry> & { kind?: string }
     if (e.kind === 'derived') {
       const source = (e as { source?: unknown }).source
-      if (source !== 'refs' && source !== 'members' && source !== 'same' && source !== 'mentions') continue
+      if (!isDerivedSource(source)) continue
       const id = stableId(e.id, seen, derivedTabId(source))
       if (!id) continue
       seen.add(id)
@@ -733,8 +738,7 @@ export function isMountsValue(raw: unknown): boolean {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return false
     const e = item as { kind?: unknown }
     if (e.kind === 'derived') {
-      const source = (item as { source?: unknown }).source
-      if (source !== 'refs' && source !== 'members' && source !== 'same' && source !== 'mentions') return false
+      if (!isDerivedSource((item as { source?: unknown }).source)) return false
       continue
     }
     if (e.kind === 'local') {
