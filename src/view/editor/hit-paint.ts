@@ -32,7 +32,7 @@ interface Segment {
 
 /** 补一条「派生 key」的样式（基名与 `-2`、`-3` 观感相同，不做第二套） */
 const styledKeys = new Set<string>()
-function ensureStyle(key: string): void {
+function ensureStyle(key: string, bgVar = '--ui-hit-bg'): void {
   if (styledKeys.has(key)) return
   styledKeys.add(key)
   const style = document.createElement('style')
@@ -40,8 +40,9 @@ function ensureStyle(key: string): void {
   /**
    * 命中底色与搜索命中（`styles/center.css` 的 `search-match`）取**同一个 token**：
    * 两个入口画的是同一件事，各定一档就会「同一处命中在两处深浅不同」。
+   * 常显类标记（备注区间）传自己的 token——它不是「刚命中」的瞬间事件，淡一档。
    */
-  style.textContent = `::highlight(${key}) { background-color: var(--ui-hit-bg); color: inherit; }`
+  style.textContent = `::highlight(${key}) { background-color: var(${bgVar}); color: inherit; }`
   document.head.appendChild(style)
 }
 
@@ -147,6 +148,7 @@ export function paintHits(
   host: HTMLElement,
   blocks: ReadonlyMap<string, readonly PlainSpan[]>,
   key: string,
+  bgVar = '--ui-hit-bg',
 ): Range[] {
   const ranges: Range[] = []
   const screen = txById(host)
@@ -163,7 +165,7 @@ export function paintHits(
     return ranges
   }
   if (typeof CSS === 'undefined' || !CSS.highlights) return ranges
-  ensureStyle(key)
+  ensureStyle(key, bgVar)
   CSS.highlights.set(key, new Highlight(...ranges))
   return ranges
 }

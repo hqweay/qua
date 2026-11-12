@@ -185,6 +185,7 @@ interface MountRoots {
 
 export const BUILTIN_LABEL: Record<DerivedSource, MsgId> = {
   refs: 'ui.mount.refs',
+  notes: 'ui.mount.notes',
   members: 'ui.mount.members',
   same: 'ui.mount.same',
   mentions: 'ui.mount.mentions',
@@ -198,6 +199,7 @@ const EMPTY_TEXT: Record<MountEntry['kind'], MsgId> = {
 /** 派生栏空态：三种来源各自说一句实话（「还没有人引用它」≠「条件没匹配」） */
 const DERIVED_EMPTY: Record<DerivedSource, MsgId> = {
   refs: 'ui.mount.empty.refs',
+  notes: 'ui.mount.empty.notes',
   members: 'ui.mount.empty.members',
   same: 'ui.mount.empty.same',
   mentions: 'ui.mount.empty.mentions',
@@ -206,6 +208,7 @@ const DERIVED_EMPTY: Record<DerivedSource, MsgId> = {
 /** 派生栏的**只读**条件说明（它没有条件可编辑，也没有构建器落点） */
 const DERIVED_WHY: Record<DerivedSource, MsgId> = {
   refs: 'ui.mount.why.refs',
+  notes: 'ui.mount.why.notes',
   members: 'ui.mount.why.members',
   same: 'ui.mount.why.same',
   mentions: 'ui.mount.why.mentions',
@@ -506,6 +509,18 @@ export class MountArea {
     this.root.hidden = false
     this.entries = this.entriesFor(host)
     this.entrySig = JSON.stringify(this.entries)
+    // 写备注后的焦点信号（一次性）：切到「备注」栏并聚焦新行——命令层不碰 DOM，落焦点在这里。
+    // 信号认宿主：右槽卡换了宿主的实例不吃它，留给中心段尾那一台。
+    const noteSig = this.block.ed?.lastCreatedNote
+    if (noteSig && noteSig.hostIds.includes(host.id)) {
+      this.block.ed.lastCreatedNote = null
+      const notesEntry = this.entries.find((e) => e.kind === 'derived' && e.source === 'notes')
+      if (notesEntry) {
+        this.active = notesEntry.id
+        this.open = true
+        focusHint = noteSig.noteId
+      }
+    }
     // 栏被摘掉：它的视图宿主一起退（订阅还挂着的话，游离容器会被白重画）
     if (this.tabViews.size > 0) {
       const alive = new Set(this.entries.map((e) => e.id))
@@ -1009,7 +1024,10 @@ export class MountArea {
      * body 里说**原因**，而不是走「条件没匹配到」那套通用空态。
      * 也不建视图宿主：列表/表格在这个维度上同样没有东西可画。
      */
-    if (derivedSpecOf(host, this.deps.kb.roots(), entry.source) === null) {
+    if (
+      entry.source !== 'notes' &&
+      derivedSpecOf(host, this.deps.kb.roots(), entry.source) === null
+    ) {
       this.detachView()
       this.renderDerivedHead(host, entry, kind, 0)
       this.showEmpty(

@@ -80,7 +80,7 @@ export type MountHost = { kind: 'block'; blockId: string } | { kind: 'journal' }
  * **规范顺序**：这个数组同时是「没拖过时的默认序」。拖过的顺序住 `_mounts` 的数组位
  * （整条 tab 条一条顺序）；派生栏没有配置，落进去的只是位置标记。
  */
-export const DERIVED_SOURCES = ['members', 'refs', 'same', 'mentions'] as const
+export const DERIVED_SOURCES = ['members', 'refs', 'notes', 'same', 'mentions'] as const
 export type DerivedSource = (typeof DERIVED_SOURCES)[number]
 
 /**
@@ -255,6 +255,7 @@ export function derivedEntriesOf(host: Block): Extract<MountEntry, { kind: 'deri
   const out: Extract<MountEntry, { kind: 'derived' }>[] = []
   if (hasList(host, 'tag')) out.push({ id: derivedTabId('members'), kind: 'derived', source: 'members' })
   out.push({ id: derivedTabId('refs'), kind: 'derived', source: 'refs' })
+  out.push({ id: derivedTabId('notes'), kind: 'derived', source: 'notes' })
   if (!isJournal(host)) out.push({ id: derivedTabId('same'), kind: 'derived', source: 'same' })
   out.push({ id: derivedTabId('mentions'), kind: 'derived', source: 'mentions' })
   return out
@@ -269,6 +270,10 @@ export function derivedEntriesOf(host: Block): Extract<MountEntry, { kind: 'deri
  *    条件本身不会报「空」，UI 也就分不出「没人提到」与「没有名字可查」。
  */
 export function derivedSpecOf(host: Block, forest: readonly Block[], source: DerivedSource): QuerySpec | null {
+  // 备注栏没有 QuerySpec：`annotates` 不是引用，不进条件语言（REFERENCE_KINDS 不收它）。
+  // 数据走 noteRecordsOf 直读边表；「维度不存在」对备注也不成立——任何活块都能被备注
+  // （挂载区对 notes 跳过 null 分支）。
+  if (source === 'notes') return null
   if (source === 'refs') return SPEC_REFS
   if (source === 'mentions') return displayTextOf(host) === '' ? null : SPEC_MENTIONS
   if (source === 'members') return memberSpecOf(host, forest)
@@ -304,6 +309,8 @@ function sameSpecOf(host: Block): QuerySpec | null {
  *   · 派生值不进 `props`、不落盘：`refCount`／`matched`／`sharedTags` 都是这次读出来的。
  */
 export function derivedRecordsOf(host: Block, kb: KbClient, source: DerivedSource): ViewRecord[] {
+  // 备注栏：直读 annotates 边（谁在评论我），不走 QuerySpec
+  if (source === 'notes') return noteRecordsOf(host, kb)
   const spec = derivedSpecOf(host, kb.roots(), source)
   if (!spec) return []
   const hits = kb.query(spec, { selfId: host.id, excludeIds: [host.id] })
@@ -434,6 +441,22 @@ function mentionRecords(host: Block, kb: KbClient): ViewRecord[] {
       },
     }
   })
+}
+
+/**
+ * 备注栏：谁在评论我的某段字。直读 `annotates` 边（一条备注一个身份），不走 QuerySpec——
+ * 备注不是引用（`REFERENCE_KINDS` 不收它，反链不冒备注），条件语言也就没有它的写法。
+ * 行＝备注块本身（可整块编辑）；被标的字在宿主正文里有常显淡标记，行里不再重复引文。
+ */
+function noteRecordsOf(host: Block, kb: KbClient): ViewRecord[] {
+  const hits: QueryHit[] = []
+  for (const e of kb.relationsTo(host.id)) {
+    if (e.kind !== 'annotates') continue
+    const path = kb.pathOf(e.from)
+    if (path.length === 0) continue
+    hits.push({ blockId: e.from, path: path.slice(0, -1).map((b) => b.id) })
+  }
+  return resolveRows(hits, kb)
 }
 
 function propNamesOf(kb: KbClient): Map<string, string> {

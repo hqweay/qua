@@ -151,7 +151,7 @@ import {
 } from './block-dom.ts'
 import { assetViewOf, markAssetMissing } from '../asset-views.ts'
 import { ReloadPolicy } from './reload-policy.ts'
-import { spanAt, type PlainSpan } from './hit-paint.ts'
+import { spanAt, paintHits, clearHits, type PlainSpan } from './hit-paint.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
 import { Drag } from "./drag.ts"
 import { EmbedBodies } from "./embed-bodies.ts"
@@ -642,6 +642,9 @@ export class BlockEditor {
    * 打开「备注」栏并聚焦新行。命令层不碰 DOM，落焦点是这个瞬态的用途。
    */
   lastCreatedNote: { noteId: string; hostIds: readonly string[] } | null = null
+  /** 本实例的备注标记画笔 key（每台编辑器一份，互不覆盖；dispose 时摘掉） */
+  private readonly annoKey = `anno-mark-${Math.random().toString(36).slice(2)}`
+  private annoPaintQueued = false
 
   constructor(o: ViewOpts) {
     this.container = o.container
@@ -656,7 +659,7 @@ export class BlockEditor {
       // 发起写的编辑器就是自己（见 `Run` 的 source 口径）：不注入的话，装配层的
       // 「活动编辑器」兜底会把跨表面的一笔写记到别的编辑器头上，那台就跳过重画，
       // 界面停在拖拽前。
-      return o.write(
+      const r = o.write(
         (tx) => {
           const r = fn(tx)
           this.struct.keepWritableSlots(tx)
@@ -674,6 +677,9 @@ export class BlockEditor {
           },
         },
       )
+      // 模型写了 ⇒ 备注标记可能要跟上（内容变了锚跟着动、锚本身被增删）
+      this.scheduleAnnoPaint()
+      return r
     }
     this.onExpandContext = o.onExpandContext
     this.onContextBack = o.onContextBack
@@ -716,6 +722,7 @@ export class BlockEditor {
             if (!this.probe.isComposing && !inputSession.isComposing && this.reloader.frozen() && ids && ids.length > 0) {
               for (const id of ids) this.renderBlock(id)
             }
+            this.scheduleAnnoPaint()
             this.reloader.touch(ids)
           })
     this.container.setAttribute('contenteditable', 'true')
@@ -730,6 +737,7 @@ export class BlockEditor {
     this.offStore()
     this.unbind()
     this.reloader.dispose()
+    clearHits(this.annoKey)
   }
 
   /**
@@ -827,6 +835,7 @@ export class BlockEditor {
      */
     if (this.reloader.frozen()) {
       if (!this.probe.isComposing && !inputSession.isComposing && ids && ids.length > 0) for (const id of ids) this.renderBlock(id)
+      this.scheduleAnnoPaint()
       this.reloader.touch()
       return
     }
@@ -881,6 +890,7 @@ export class BlockEditor {
     this.applyFreshRoots()
     this.renderAllPreservingAnchor(anchor)
     if (this.ownFocus() && this.sel) this.restoreSel()
+    this.scheduleAnnoPaint()
     /**
      * 可见性兜底：外部结构变化把光标块移出了本视图 ⇒ 回源。只对**正在这台编辑器里
      * 输入**的人兜底——别人留档的旧光标不该拖着屏幕跳。
@@ -1269,6 +1279,44 @@ export class BlockEditor {
     this.markCaret()
     this.bsel.paintBlockSel()
     this.events.mounted?.()
+    this.paintAnnoMarks()
+  }
+
+  /* ----------------------------------------------- 备注区间的常显标记 */
+
+  /**
+   * 被备注的区间在宿主正文里常显一层淡底（「这里有备注」的背景事实）。
+   * 画的是**有活备注指向**的 anno：孤儿锚（备注删了）不画——读侧判活，
+   * 删除路径零钩子，撤销也干净（删备注只删块，锚原样留着等备注回来）。
+   *
+   * 画笔与命中高亮同一机制（Custom Highlight，纯渲染层——往 `.tx` 里插标记
+   * 会被 `readRuns` 当成内容，还会挪光标），底色淡一档（`--ui-anno-bg`）。
+   */
+  private paintAnnoMarks(): void {
+    const blocks = new Map<string, PlainSpan[]>()
+    const idx = this.store.index
+    walkForest(this.doc.roots, (b) => {
+      if (!b.annos || b.annos.length === 0) return
+      const live = new Set<string>()
+      for (const e of idx.relations.get(b.id) ?? []) {
+        if (e.kind === 'annotates' && e.propId) live.add(e.propId)
+      }
+      if (live.size === 0) return
+      const spans = b.annos.filter((a) => live.has(a.id)).map((a) => a.range)
+      if (spans.length > 0) blocks.set(b.id, spans)
+    })
+    paintHits(this.container, blocks, this.annoKey, '--ui-anno-bg')
+  }
+
+  /** 重画排进下一帧（合并同一帧里的多笔写）；组合期不画（DOM 还没落定） */
+  private scheduleAnnoPaint(): void {
+    if (this.annoPaintQueued || typeof requestAnimationFrame === 'undefined') return
+    this.annoPaintQueued = true
+    requestAnimationFrame(() => {
+      this.annoPaintQueued = false
+      if (this.deferWhileComposing()) return
+      this.paintAnnoMarks()
+    })
   }
 
   /**

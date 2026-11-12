@@ -69,6 +69,12 @@
     所以加粗与普通正文的对比同值，不额外掉一档。
   */
   --ui-hit-bg: color-mix(in srgb, var(--ui-accent) 20%, transparent);
+  /*
+    备注区间的常显标记：与命中底色同一色相族但淡一档（10%）——它常驻在正文里，
+    是「这里有备注」的背景事实，不是「你刚搜到这里」的瞬间事件；
+    与命中同强度会让人把每一段被备注的字误读成搜索命中。
+  */
+  --ui-anno-bg: color-mix(in srgb, var(--ui-accent) 10%, transparent);
   --ui-danger: var(--c-danger);
   --ui-warn: var(--c-warn);
   --ui-ok: var(--c-ok);
