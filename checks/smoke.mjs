@@ -28147,7 +28147,7 @@ await check('T296 备注 hover：标记上浮出只读 tip（备注文本），�
   return 'hover 标记 → 只读 tip＋hot 加深＋手型；未标记不浮、悬停不写模型'
 })
 
-await check('T297 ⌥-click 备注标记：就地浮窗带出已有备注；「在侧栏打开」跳收集栏并聚焦', async () => {
+await check('T297 ⌥-click 备注标记：就地浮窗带出已有备注；「在侧栏打开」右槽装载备注块', async () => {
   const { ctx, page } = await freshPage(browser, base)
   const fx = await noteFx(page, ['红句子在这里'])
   await page.waitForTimeout(150)
@@ -28207,20 +28207,14 @@ await check('T297 ⌥-click 备注标记：就地浮窗带出已有备注；「�
   )
   assert(reopenText.includes('这是备注'), `⌥-click 浮窗应带出已有备注：${JSON.stringify(reopenText)}`)
 
-  // 「在侧栏打开」：显式跳板——收集栏切过去并聚焦这一行
+  // 「在侧栏打开」：像打开普通块一样——右槽 dock 卡装载备注块
   await page.click('.note-popover-open')
   await page.waitForFunction(
-    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'notes',
-    null,
+    (nid) => Boolean(document.querySelector(`#dock-right .dock-card .blk[data-block-id="${nid}"]`)),
+    noteId,
     { timeout: 3000 },
   )
-  const st = await page.evaluate((nid) => {
-    const row = document.querySelector(`#editor .blk[data-block-id="${nid}"]`)
-    const selRow = document.getSelection()?.anchorNode?.parentElement?.closest?.('.blk')?.dataset?.blockId ?? null
-    return { mounted: Boolean(row), selInRow: selRow === nid }
-  }, noteId)
-  assert(st.mounted, '备注行应已挂载在收集栏')
-  assert(st.selInRow, '光标应落在备注行里')
+  await page.waitForFunction(() => !document.querySelector('.note-popover-body'), null, { timeout: 3000 })
 
   // 无 ⌥ 的普通单击不该开浮窗（点字＝编辑，口径不变）
   await page.keyboard.press('Escape')

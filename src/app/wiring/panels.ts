@@ -1346,19 +1346,8 @@ export function setupPanels(deps: PanelsDeps) {
   // 首次装载：装配完就把每一段的挂载区放上去（之后由 loadPage / store 订阅跟进）
   renderMounts()
 
-  /**
-   * 写备注后的落点（编辑器 change 漏斗里 'note' 一支点名）：挂载区按**段根**建实例，
-   * 标注块多半不是段根 ⇒ 逐台问（activateNotesTab 自己按定位链认领），
-   * 不按标注块 id 查表——那会落空。
-   */
-  function noteCreated(sig: { noteId: string; hostIds: readonly string[] }): void {
-    for (const inst of mountInstances.values()) inst.area.activateNotesTab(sig.hostIds, sig.noteId)
-    dockMountArea?.activateNotesTab(sig.hostIds, sig.noteId)
-  }
-
   return {
     renderMounts,
-    noteCreated,
     createDockMountArea,
     renderProperties,
     scheduleProperties,

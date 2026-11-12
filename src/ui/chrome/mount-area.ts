@@ -470,30 +470,6 @@ export class MountArea {
     this.activate(tabId, focusHint)
   }
 
-  /**
-   * 写备注后的落点（装配层在 change 漏斗里点名）：展开挂载区、切到「备注」栏、
-   * 聚焦新备注行（focusHint 走 loadOutline 的焦点机制）。
-   * 备注栏收宿主**子树**上的备注（段尾栏说的是「这一段的内容」），所以宿主判据
-   * 走定位链：宿主是任一标注块的祖先（或就是它）就接。右槽卡看着别的块时不接。
-   */
-  activateNotesTab(hostIds: readonly string[], noteId: string): void {
-    const host = this.deps.host()
-    if (!host) return
-    const touches = hostIds.some((id) => this.deps.kb.pathOf(id).some((b) => b.id === host.id))
-    if (!touches) return
-    const entry = this.entries.find((e) => e.kind === 'derived' && e.source === 'notes')
-    if (!entry) return
-    this.open = true
-    this.activate(entry.id, noteId)
-    // 焦点交给新备注行：focusHint 只管滚动落点，打字要进备注就得显式落插入点
-    // （容器 focus 让派生编辑器收键；onFocus 那一跳会把活动编辑器切过来）
-    const ed = this.block.ed
-    if (ed && this.editorEl.querySelector(`.blk[data-block-id="${noteId}"]`)) {
-      ed.container.focus()
-      ed.placeCaret(noteId, 0)
-    }
-  }
-
   /** 这一段的宿主（`MountHost` 是「这一栏写哪」的唯一判别器） */
   private mountHost(): MountHost {
     const host = this.deps.host()

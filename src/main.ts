@@ -1618,7 +1618,8 @@ const app: App = {
           block: () => blocks.find(sig.noteId),
           quote,
           onOpenInSidebar: () => {
-            panels?.noteCreated({ noteId: sig.noteId, hostIds: [sig.blockId] })
+            // 像打开普通块一样：右槽把备注块当当前对象装载（Shift-点引用同一条 openBlock 路）
+            app.openBlock(sig.noteId, 'dock')
             layers.closePopover()
           },
           placeholder: t('ui.note.placeholder'),
@@ -3125,7 +3126,6 @@ onAssetChange((hash) => {
 let diag: ReturnType<typeof setupDiagnostics>
 const {
   renderMounts,
-  noteCreated,
   createDockMountArea,
   renderProperties,
   scheduleProperties,
@@ -3174,7 +3174,6 @@ const {
 })
 panels = {
   renderMounts,
-  noteCreated,
   createDockMountArea,
   renderProperties,
   scheduleProperties,
