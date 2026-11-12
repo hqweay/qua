@@ -14,7 +14,7 @@
  *   · **Esc 要把打开那一刻的内容写回去**：编辑器是边打边写模型的，取消只能显式写回；
  *   · **组合期不提交**：输入法的 ↵ 是选词。
  */
-import type { Block, BlockStore, ClickMods } from '../../core/index.ts'
+import { writeBlockContent, type Block, type BlockStore, type ClickMods } from '../../core/index.ts'
 import { plainLen } from '../../core/model/runs.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { BlockEditor, Run } from '../../view/editor/editor.ts'
@@ -202,7 +202,7 @@ export class SurfaceEditor {
     const modified = cur.modified
     this.deps.write((tx) =>
       tx.patch(cur.blockId, (b) => {
-        b.content = content
+        writeBlockContent(b, content)
         b.modified = modified
       }),
     )

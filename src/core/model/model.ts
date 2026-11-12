@@ -5,6 +5,7 @@
 
 import { uuidv7Hex } from './ids.ts'
 import { normalizeRuns, textRuns, type Anno, type Run } from './runs.ts'
+import { mapAnnos } from './annos.ts'
 
 /**
  * 「任务做完了没有」的**读法**（不是落盘形状）。
@@ -570,9 +571,18 @@ export function mkBlock(
  * 前块时改掉标签名，就是这样发生的）。
  *
  * ⚠️ **新建块不走这里**：`mkBlock` 造出来的块还没有身份，内容随构造一次给定。
+ *
+ * ⚠️ **anno 的区间映射也只住这里**。正文一写，`anno.range` 就可能漂；维护点放在 29 个
+ *    调用点的任何一个都会漏。映射按前缀/后缀剥离算出改了哪一段（`core/model/annos.ts`），
+ *    格式操作剥出空编辑天然免疫，整块替换交给 quote 重定位。
+ *    事务的改前快照与回滚把 `content`／`annos` 当同一格搬（`kb/memory.ts`），所以这里
+ *    就地改 `b.annos` 之后，出口的 `annoOps` 会自动 diff 出 `anno.set`，落盘整列替换也认它。
  */
 export function writeBlockContent(b: Block, content: readonly Run[]): void {
-  b.content = normalizeRuns(content)
+  const after = normalizeRuns(content)
+  const annos = mapAnnos(b.content, after, b.annos ?? [])
+  b.annos = annos.length === 0 ? undefined : annos
+  b.content = after
 }
 
 /* ---------------------------------------------------------------- props */

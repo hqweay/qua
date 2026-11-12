@@ -1787,6 +1787,56 @@ function commandDecls() {
 }
 
 /* ═══════════════════════════════════════════════════════╗
+   ║ 39 · 内容写入只许走唯一入口（anno 映射的维护点）          ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  /**
+   * `anno.range` 的维护点住在 `writeBlockContent`（全仓唯一内容写入口）。
+   * 绕过它写 `.content` ⇒ 那一处的区间锚悄悄漂了，且不报错。
+   *
+   * ⚠️ 三类恒等式**必须豁免**：op 重放（kb/diff.ts 三处）、事务回滚（kb/memory.ts）、
+   *    op → 行编码（storage/db-rows.ts，写的是 values 对象不是 Block）。把重放也拦下来，
+   *    会逼着给 replay 加一次映射，`replay == state` 当场破 —— 假约束比没有约束更糟。
+   */
+  const ALLOWED = new Set([
+    'src/core/kb/diff.ts',
+    'src/core/kb/memory.ts',
+    'src/core/storage/db-rows.ts',
+    'src/core/model/model.ts',
+  ])
+  const hits = []
+  for (const f of codeFiles) {
+    const r = rel(f)
+    if (ALLOWED.has(r)) continue
+    const { sf } = tsFile(f)
+    const visit = (n) => {
+      if (
+        ts.isBinaryExpression(n) &&
+        n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isPropertyAccessExpression(n.left) &&
+        n.left.name.text === 'content'
+      ) {
+        const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
+        hits.push(`${r}:${line}  ${n.getText(sf).replace(/\s+/g, ' ').slice(0, 90)}`)
+      }
+      ts.forEachChild(n, visit)
+    }
+    ts.forEachChild(sf, visit)
+  }
+  add({
+    id: 39,
+    title: '内容写入只许走 `writeBlockContent`（anno 区间映射的唯一维护点）',
+    method: 'TypeScript AST 找 `.content = …` 赋值，按文件豁免重放／回滚／落盘编码三类恒等式与入口自身',
+    scope: 'src/**/*.ts · electron/**/*.ts（排除白名单文件）',
+    whitelist: 'kb/diff.ts（op 重放是恒等式，再映射一次 replay==state 会破）· kb/memory.ts（回滚恢复改前快照，含 annos 一起回）· storage/db-rows.ts（op → 行的编码，写的是 values 不是 Block）· model/model.ts（入口自身）',
+    hits: hits.length,
+    detail: hits,
+    note: '漏一处内容写入＝anno.range 悄悄漂了且不报错；Esc 取消写回与改选项名两处真绕过已收进唯一入口',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
    ║ 等内核（不假装在跑）                                     ║
    ╚═══════════════════════════════════════════════════════ */
 

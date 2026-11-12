@@ -32,6 +32,7 @@ import {
   propLabel,
   setValue,
   undeclareField,
+  writeBlockContent,
   type Block,
   type Cardinality,
   type UiPosition,
@@ -197,7 +198,7 @@ export function propsCommands(
       if (!choice) return
       d.run((tx) =>
         tx.patch(choiceId, (b) => {
-          b.content = textRuns(name)
+          writeBlockContent(b, textRuns(name))
           b.modified = Date.now()
         }),
       )

@@ -28,6 +28,7 @@ import {
 } from './model.ts'
 import { canWriteText, typeDeclOf } from './types.ts'
 import { isEmptyContent, joinRuns, plainLen, sliceRuns, splitRuns, cloneRunsNewIds, textRuns, type Run } from './runs.ts'
+import { shiftAnnos, splitAnnos } from './annos.ts'
 import { walkForest } from './walk.ts'
 import { cloneMountEntries, MOUNTS_PROP } from '../views/mount.ts'
 import { isEmbedBlock } from '../views/embed.ts'
@@ -379,10 +380,16 @@ export function cloneSubtree(b: Block): { block: Block; idMap: Map<string, strin
 export function splitBlockBefore(doc: Doc, id: string, offset: number): { kept: string; inserted: string } | null {
   const loc = locate(doc, id)
   if (!loc) return null
-  const [left, right] = splitRuns(loc.block.content, Math.max(0, Math.min(offset, plainLen(loc.block.content))))
+  const off = Math.max(0, Math.min(offset, plainLen(loc.block.content)))
+  const [left, right] = splitRuns(loc.block.content, off)
+  const parts = splitAnnos(loc.block.annos, off)
   const { moved, kept } = splitPropsForEnter(loc.block.props)
   const b = mkBlock(left, moved ? { props: moved } : {})
+  if (parts.left.length) b.annos = parts.left
+  // 结构操作显式分配两侧，先摘掉再写：否则写入口会把「整段换右半」当成一次大替换去重定位
+  loc.block.annos = undefined
   writeBlockContent(loc.block, right)
+  loc.block.annos = parts.right.length ? parts.right : undefined
   loc.block.props = kept
   const list = siblingsOf(doc, loc.parent)
   list.splice(loc.index, 0, b)
@@ -407,10 +414,16 @@ export function splitBlockBefore(doc: Doc, id: string, offset: number): { kept: 
 export function splitBlockIntoFirstChild(doc: Doc, id: string, offset: number): { kept: string; inserted: string } | null {
   const loc = locate(doc, id)
   if (!loc) return null
-  const [left, right] = splitRuns(loc.block.content, Math.max(0, Math.min(offset, plainLen(loc.block.content))))
+  const off = Math.max(0, Math.min(offset, plainLen(loc.block.content)))
+  const [left, right] = splitRuns(loc.block.content, off)
   if (left.length === 0 || right.length === 0) return null
+  // 根（左半）与首子块（右半）恰好与 splitBlockBefore 的归属相反
+  const parts = splitAnnos(loc.block.annos, off)
   const b = mkBlock(right)
+  if (parts.right.length) b.annos = parts.right
+  loc.block.annos = undefined
   writeBlockContent(loc.block, left)
+  loc.block.annos = parts.left.length ? parts.left : undefined
   unfoldBlock(doc, loc.block.id)
   loc.block.children.unshift(b)
   return { kept: loc.block.id, inserted: b.id }
@@ -617,10 +630,15 @@ export function mergeIntoPrev(doc: Doc, id: string): { kept: string; removed: st
   if (!plan) return null
   const loc = locate(doc, plan.removed)!
   const prev = locate(doc, plan.kept)!.block
+  // 被并块的 annos 按粘接点平移后并进保留块。anno id 不变 ⇒ 指向它的引用自动跟着走，
+  // 不需要改任何边：引用指向的是 id，不是块
+  const movedAnnos = shiftAnnos(loc.block.annos, plan.at)
   prev.children.push(...loc.block.children)
   writeBlockContent(prev, plan.content)
+  if (movedAnnos.length) prev.annos = [...(prev.annos ?? []), ...movedAnnos]
   // 被并块**原位标记**（不摘树，与 `removeBlock` 同一条口径）：内容已搬走，壳清空——
-  // 留着内容就是库里有两份同一句话
+  // 留着内容就是库里有两份同一句话。annos 已搬走，同样先摘掉再写，别让映射层白重定位一次
+  loc.block.annos = undefined
   writeBlockContent(loc.block, [])
   loc.block.props = { ...(loc.block.props ?? {}), [DELETED_AT_PROP]: Date.now() }
   return { kept: plan.kept, removed: plan.removed, at: plan.at }

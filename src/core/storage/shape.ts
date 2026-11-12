@@ -150,8 +150,11 @@ import {
  *            新增 underline／strike／ink／bg，`highlight` 退役成 `bg:'yellow'`。
  *            旧库的 `marks: ['bold']` 会被形状校验判非法（数组不是映射）⇒ 作废重 seed，
  *            不写迁移。
+ * v42 → v43：**`anno.range` 有了维护者**——内容写入口按前缀/后缀剥离平移区间，
+ *            整块替换交给引文重定位；拆块／合并显式分配两侧。旧库的 anno.range 是
+ *            「从来没被维护过」的缓存，与新口径不是同一份真相 ⇒ 作废重 seed，不写迁移。
  */
-export const WORKSPACE_VERSION = 42
+export const WORKSPACE_VERSION = 43
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

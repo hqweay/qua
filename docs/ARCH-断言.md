@@ -144,9 +144,10 @@ pnpm arch:check   # 只跑静态那一层（秒级）
 | `[34]` | **源 × kind 的兼容表只有一份**（`STORED_KINDS_BY_SOURCE`） | `arch-check` `[34]` | **跑** |
 | `[35]` | **页的「字段声明」入口不存在**（能写没人读的值不许留着） | `arch-check` `[35]`（配 smoke T125 的界面一侧） | **跑** |
 | `[36]` | **系统键登记表唯一**：`SystemPropId` 联合与 `SYSTEM_PROP_CHECKS` 判据表一一对应（24 键双向比对；`typeof X` 经 core 全域常量表解析） | `arch-check` `[36]`（漏登记的键在收端等于不设防，掉进 `BlockProperty` 行还能跑） | **跑** |
+| `[39]` | **内容写入只许走 `writeBlockContent`**（`anno.range` 的唯一维护点） | `arch-check` `[39]`（AST 找 `.content = …`，豁免重放／回滚／落盘编码三类恒等式） | **跑** |
 
-**当前基线**：`pnpm arch:check` 硬断言 **29/29 过**（`[12b]` 是如实记账、不拦门的欠账；
-另有 6 条「等内核」，见 §4）。
+**当前基线**：`pnpm arch:check` 硬断言 **32/32 过**（`[12b]` 是如实记账、不拦门的欠账；
+另有 6 条「等内核」，见 §4）。`[37]`／`[38]` 是更早补的静态对账，尚未逐条写进本表。
 
 ---
 
@@ -329,6 +330,18 @@ AST 遍历 `electron/**/*.ts`，按**白名单**判：只放行 `node:*`／`elec
   而它们本该是派生的：内存里只有 `children` 一份，取路径走派生索引 `Index.parentOf`（O(depth)），
   插件读路径走读门面（`kb.pathOf(id)`）。同一层存两份，等于让可丢弃的那份去追一个能算出来的东西。
 - **反证**：给 `Block` 加一行 `parent?: string` ⇒ 立刻红（`命中 1 · Block.parent 不在白名单`）；删掉即回绿。
+
+### `[39]` 内容写入只许走 `writeBlockContent`
+
+- **检查方式**：AST 找 `.content = …` 赋值，按文件豁免四类：`kb/diff.ts`（op 重放恒等式 ×3）、
+  `kb/memory.ts`（事务回滚恢复改前快照）、`storage/db-rows.ts`（op → 行的编码，写的是 `values`
+  不是 `Block`）、`model/model.ts`（唯一入口自身）。其余任何一处命中即红。
+- **为什么是硬断言**：`anno.range` 的维护点住在 `writeBlockContent`（29 个调用点），绕过它写
+  `.content` ⇒ 那一处的区间锚悄悄漂了，**不报错、类型与单测都拦不住**。两处真绕过（Esc 取消
+  把打开那一刻的内容写回、改选项名直接 `b.content = textRuns(name)`）已收进唯一入口。
+- **为什么重放必须豁免**：op 里的 `content` 就是权威，再映射一次是二次加工，`replay == state`
+  当场破；回滚恢复的是「含 annos 一起回」的改前快照，再映射等于回滚时又改了一次锚。
+  **假约束比没有约束更糟** —— 把恒等式也拦下来，会逼着后面的人给重放加映射。
 
 ---
 
