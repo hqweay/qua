@@ -27912,7 +27912,7 @@ const notesState = (page, kidId) =>
     }
   }, kidId)
 
-await check('T293 写备注：划选一段 → 一条备注块锚住它，备注栏自动开并聚焦新行，宿主淡标记亮起', async () => {
+await check('T293 写备注：划选一段 → 就地浮窗写备注（锚＋淡标记），收集栏不抢焦点', async () => {
   const { ctx, page } = await freshPage(browser, base)
   const fx = await noteFx(page, ['红句子在这里'])
   assert(fx.ids[0], '前置：子块应已插入')
@@ -27932,30 +27932,36 @@ await check('T293 写备注：划选一段 → 一条备注块锚住它，备注
       .querySelector('.selbar .sel-btn[data-command="core.notes/create"]')
       .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
   })
+  // 写作面＝就地浮窗（创建后焦点在浮窗里）；收集栏不抢注意力
+  await page.waitForSelector('.popover .note-popover-body', { timeout: 3000 })
+  const st0 = await notesState(page, fx.ids[0])
+  assert(st0.noteId, '备注块应已创建')
   await page.waitForFunction(
-    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'notes',
-    null,
+    (nid) => Boolean(document.querySelector(`.popover .note-popover-body .blk[data-block-id="${nid}"]`)),
+    st0.noteId,
     { timeout: 3000 },
   )
+  const tabNow = await page.evaluate(
+    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab ?? '',
+  )
+  assert(tabNow !== 'notes', '创建不该把注意力搬到段尾收集栏（写作面在浮窗）')
 
   const st = await notesState(page, fx.ids[0])
   assert(st.noteId, '应有一条备注块（_type core/note）')
   assert(st.pairs?.length === 1 && st.pairs[0].block === fx.ids[0], `备注应指向宿主块：${JSON.stringify(st.pairs)}`)
   assert(st.hostAnnos?.length === 1 && st.hostAnnos[0].range.start === 4 && st.hostAnnos[0].range.end === 6,
     `区间锚应对准划选段：${JSON.stringify(st.hostAnnos)}`)
-  assert(st.noteRowMounted, '新备注行应已挂载（焦点信号落到备注栏）')
   const mark = await annoHighlight(page)
   assert(mark && mark.size >= 1, `宿主正文应亮起常显淡标记：${JSON.stringify(mark)}`)
 
-  // 焦点在新备注行：直接打字就是备注正文
+  // 焦点在浮窗的备注行：直接打字就是备注正文
   await page.keyboard.type('这是备注')
   await page.waitForTimeout(200)
   const typed = await notesState(page, fx.ids[0])
-  assert(typed.noteText === '这是备注', `备注行应可直接编辑：${JSON.stringify(typed.noteText)}`)
-  assert(typed.activeTab === 'notes', '打字不该把备注栏切走')
+  assert(typed.noteText === '这是备注', `浮窗里应可直接编辑备注：${JSON.stringify(typed.noteText)}`)
 
   await ctx.close()
-  return '划选 → 备注＋锚＋淡标记；备注栏自动开、行可编辑'
+  return '划选 → 就地浮窗写备注（锚＋淡标记齐备）；收集栏不抢焦点'
 })
 
 await check('T294 跨块备注：块选区拖过两块 → 一条备注带走全部，每个宿主都有锚', async () => {
@@ -27978,11 +27984,7 @@ await check('T294 跨块备注：块选区拖过两块 → 一条备注带走全
   const count = await page.evaluate(() => window.__qua.snapshot().blockSelectionCount)
 
   await page.evaluate(() => window.__qua.invoke('core.notes/create'))
-  await page.waitForFunction(
-    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'notes',
-    null,
-    { timeout: 3000 },
-  )
+  await page.waitForSelector('.popover .note-popover-body', { timeout: 3000 })
   const st = await page.evaluate(() => {
     const blocks = window.__qua.__editor.store.blocks
     const note = blocks.find((b) => b.props?._type === 'core/note')
@@ -28022,15 +28024,14 @@ await check('T295 宿主改字锚跟走：前缀插入平移区间、淡标记�
       .querySelector('.selbar .sel-btn[data-command="core.notes/create"]')
       .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
   })
-  await page.waitForFunction(
-    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'notes',
-    null,
-    { timeout: 3000 },
-  )
+  await page.waitForSelector('.popover .note-popover-body', { timeout: 3000 })
+  // 先写正文再离开浮窗：空备注在关浮窗时会被回收（不留空壳）
+  await page.keyboard.type('这是备注')
+  await page.waitForTimeout(200)
   const before = await notesState(page, fx.ids[0])
   assert(before.hostAnnos?.[0]?.quote?.exact === '红句子', `前置：引文快照应取到划选段：${JSON.stringify(before.hostAnnos)}`)
 
-  // 在块首插一个字：前缀剥离 ⇒ 区间整体平移，不需要重定位
+  // 在块首插一个字：前缀剥离 ⇒ 区间整体平移，不需要重定位（focusBlock 出浮窗＝失焦提交）
   await page.evaluate((id) => window.__qua.focusBlock(id, 0), fx.ids[0])
   await page.keyboard.type('序')
   await page.waitForTimeout(300)
@@ -28040,7 +28041,7 @@ await check('T295 宿主改字锚跟走：前缀插入平移区间、淡标记�
   assert(after.hostAnnos?.[0]?.range.start === 1 && after.hostAnnos[0].range.end === 4,
     `区间应整体平移一格：${JSON.stringify(after.hostAnnos)}`)
   assert(after.hostAnnos?.[0]?.quote?.exact === '红句子', '引文快照不该被写字动过')
-  assert(after.noteRowMounted && after.activeTab === 'notes', '备注栏还开着、行还挂着')
+  assert(after.noteText === '这是备注', '备注正文在浮窗外编辑后原样保留')
   const mark = await annoHighlight(page)
   assert(mark && mark.size >= 1, '淡标记应跟字走（宿主改字后仍亮）')
 
@@ -28060,12 +28061,8 @@ await check('T296 备注 hover：标记上浮出只读 tip（备注文本），�
       .querySelector('.selbar .sel-btn[data-command="core.notes/create"]')
       .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
   })
-  await page.waitForFunction(
-    () => document.querySelector('#editor .mount-tabwrap[data-active="1"]')?.dataset.tab === 'notes',
-    null,
-    { timeout: 3000 },
-  )
-  // 焦点已在新备注行：写正文，tip 才有东西可显示
+  await page.waitForSelector('.popover .note-popover-body', { timeout: 3000 })
+  // 焦点已在浮窗的备注行：写正文，tip 才有东西可显示
   await page.keyboard.type('这是备注内容')
   await page.waitForTimeout(200)
 

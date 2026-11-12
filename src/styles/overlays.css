@@ -210,6 +210,37 @@
   font-size: var(--ui-fs-sm);
   animation: overlay-in var(--ui-dur-2) var(--ui-ease-out);
 }
+
+/* 备注浮窗：抬头（引文快照＋「在侧栏打开」）＋ 单块编辑身体。写作面就地弹，收集在侧栏 */
+.note-popover-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ui-gap-3);
+  margin-bottom: var(--ui-gap-3);
+}
+.note-popover-quote {
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-xs);
+  /* 引文只给上下文，不抢正文的注意力：一行装不下就截断（全文在宿主正文里有标记） */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.note-popover-open {
+  flex: none;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-accent);
+  cursor: pointer;
+}
+.note-popover-open:hover {
+  text-decoration: underline;
+}
+
 .popover h4 {
   margin: 0 0 var(--ui-gap-3);
   font-size: var(--ui-fs-sm);

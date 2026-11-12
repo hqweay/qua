@@ -39,6 +39,8 @@ export const MSG = {
   'cmd.editor.copy-ref': '复制为引文（含原文快照）',
   'cmd.editor.quote-selection': '引用这段',
   'cmd.notes.create': '写备注',
+  'ui.note.openInSidebar': '在侧栏打开',
+  'ui.note.placeholder': '写备注…',
   'cmd.editor.copy-block-ref': '复制块链接（((id))）',
   'cmd.editor.delete-selected-blocks': '删除选中的块',
   'cmd.editor.indent-selected-blocks': '缩进选中的块',

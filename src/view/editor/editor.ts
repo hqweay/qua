@@ -151,7 +151,7 @@ import {
 } from './block-dom.ts'
 import { assetViewOf, markAssetMissing } from '../asset-views.ts'
 import { ReloadPolicy } from './reload-policy.ts'
-import { spanAt, offsetAtPoint, paintHits, clearHits, type PlainSpan } from './hit-paint.ts'
+import { spanAt, offsetAtPoint, rangeAtSpan, paintHits, clearHits, type PlainSpan } from './hit-paint.ts'
 import { AnnoHover, type AnnoHitSpan } from './anno-hover.ts'
 import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
 import { Drag } from "./drag.ts"
@@ -307,7 +307,7 @@ export interface ViewOpts {
 
 export interface ViewEvents {
   /** 任何模型变化（持久化 + 角标刷新）。格式/原子改动也是内容改动 ⇒ 归 `text` */
-  change?: (kind: 'text' | 'struct' | 'view' | 'load' | 'note') => void
+  change?: (kind: 'text' | 'struct' | 'view' | 'load') => void
   /** 光标前是不是在敲一个触发词（`/`／`#`／`@`）；`null` ＝ 这一段已经结束 */
   triggerQuery?: (hit: TriggerQuery | null, rect: DOMRect) => void
   /**
@@ -644,11 +644,6 @@ export class BlockEditor {
   /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
   private readonly offStore: () => void
   private readonly unbind: () => void
-  /**
-   * 刚创建的那条备注（一次性信号，消费方读走即清）：派生栏据此在刷新后
-   * 打开「备注」栏并聚焦新行。命令层不碰 DOM，落焦点是这个瞬态的用途。
-   */
-  lastCreatedNote: { noteId: string; hostIds: readonly string[] } | null = null
   /** 本实例的备注标记画笔 key（每台编辑器一份，互不覆盖；dispose 时摘掉） */
   private readonly annoKey = `anno-mark-${Math.random().toString(36).slice(2)}`
   private annoPaintQueued = false
@@ -1344,6 +1339,17 @@ export class BlockEditor {
     return notes.join('\n')
   }
 
+  /** 被备注区间的屏幕矩形（浮窗定锚用；区间不在这一屏 ⇒ null——浮层锚函数返回 null 即自动关） */
+  annoRect(blockId: string, annoId: string): DOMRect | null {
+    // 直接从块数据取区间：刚创建时画层缓存（rAF）还没建，不能依赖 annoSpans
+    const anno = this.store.find(blockId)?.annos?.find((a) => a.id === annoId)
+    if (!anno) return null
+    const blk = this.container.querySelector<HTMLElement>(`.blk[data-block-id="${blockId}"]`)
+    const tx = blk?.querySelector<HTMLElement>(':scope > .tx')
+    if (!tx) return null
+    return rangeAtSpan(tx, anno.range)?.getBoundingClientRect() ?? null
+  }
+
   /** ⌥-click 命中判定：坐标 → 被备注的（块，锚）。与 hover 同一份缓存，与画层同源 */
   private annoHitAt(x: number, y: number): { blockId: string; annoId: string } | null {
     if (this.annoSpans.size === 0) return null
@@ -1465,7 +1471,7 @@ export class BlockEditor {
    *            订阅方必须容忍 `ids === undefined`（那就是「不知道，按整体处理」）。
    */
   /** 协作对象（块选区删块）也要广播同一件事；对外仍是编辑器的口径 */
-  emitChange(kind: 'text' | 'struct' | 'view' | 'load' | 'note', ids?: readonly string[]): void {
+  emitChange(kind: 'text' | 'struct' | 'view' | 'load', ids?: readonly string[]): void {
     /**
      * ⚠️ **这里不发通知**：宣布者是事务的出口（`Kb.tx` → `store.apply`），
      * 它知道「变了哪几格」并能按 op 增量修补索引。
@@ -2978,9 +2984,10 @@ export class BlockEditor {
 
   /**
    * 写备注：把当前选区物化成区间锚 ＋ 建一条备注块，**同一笔事务**
-   * （拆开就是「宿主加了锚、备注块不在」的半批）。返回备注块 id；没有可用选区 ⇒ null。
+   * （拆开就是「宿主加了锚、备注块不在」的半批）。
+   * 返回备注块 id 与指向对（浮窗定锚用）；没有可用选区 ⇒ null。
    */
-  createNoteFromSelection(): string | null {
+  createNoteFromSelection(): { noteId: string; pairs: NotePair[] } | null {
     const spot = this.selectionSpot()
     if (!spot) return null
     const b = locate(this.doc, spot.blockId)?.block
@@ -2997,7 +3004,7 @@ export class BlockEditor {
    * 跨块备注＝一块（租客）对多枚（锚），锚侧不变（每枚只锚一个块内区间）。
    * 空块／纯原子块锚不出来 ⇒ 跳过；一个都锚不出来 ⇒ null（无事发生，不发空 op）。
    */
-  createNoteFromBlockSelection(): string | null {
+  createNoteFromBlockSelection(): { noteId: string; pairs: NotePair[] } | null {
     const pairs: NotePair[] = []
     const hostAnnos: { blockId: string; annos: Anno[] }[] = []
     for (const id of this.bsel.selectedRootIds()) {
@@ -3014,8 +3021,8 @@ export class BlockEditor {
     })
   }
 
-  /** 两个入口共用的落笔：锚写宿主＋备注块进顶层，一笔事务一条撤销 */
-  private createNote(pairs: NotePair[], writeHosts: (tx: Tx) => void): string | null {
+  /** 两个入口共用的落笔：锚写宿主＋备注块进顶层，一笔事务一条撤销。落焦点归浮窗（装配层） */
+  private createNote(pairs: NotePair[], writeHosts: (tx: Tx) => void): { noteId: string; pairs: NotePair[] } | null {
     this.beginUndoEntry()
     let noteId: string | null = null
     this.write((tx) => {
@@ -3023,11 +3030,7 @@ export class BlockEditor {
       noteId = ensureNoteInTx(this.store.blocks, pairs, tx).id
     }, undefined, { directEdit: true })
     this.finishUndoEntry('other', Date.now())
-    // 焦点反馈走 change 通道（'note'）：派生栏的行没变，它自己不会重画——
-    // 装配层在漏斗里读瞬态信号，切到「备注」栏并聚焦新行（本层不碰 DOM）
-    this.lastCreatedNote = noteId ? { noteId, hostIds: pairs.map((p) => p.block) } : null
-    this.emitChange('note')
-    return noteId
+    return noteId ? { noteId, pairs } : null
   }
 
   /* ------------------------------------------------------- 虚拟化 */

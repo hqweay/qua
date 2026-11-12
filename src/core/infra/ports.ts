@@ -155,6 +155,13 @@ export interface App {
   focusTitle(): void
   showRefPicker(): void
   /**
+   * **备注浮窗**：锚在被备注文本旁的可编辑浮层（浮层归装配层，与 showRefPicker
+   * 同一条理由——命令 handler 不碰 DOM）。
+   * `blockId`／`annoId` 定锚（实时取矩形：正文滚动/重排浮层跟着走，锚没了自动关）；
+   * `noteId` 是浮窗里装载的备注块。
+   */
+  openNotePopover(sig: { noteId: string; blockId: string; annoId: string }): void
+  /**
    * **打开日期选择器**（`core.editor/insert-date-ref` 不带 `date` 时的那条路）。
    *
    * 与 `showRefPicker` 同一条理由：选择日期要一个浮层，而命令 handler 不碰 DOM。

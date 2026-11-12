@@ -40,6 +40,7 @@ import { SearchCard } from './ui/cards/search-card.ts'
 import { mountDockSlot } from './ui/dock/dock.ts'
 import { createIcon } from './view/icons.ts'
 import { mountEmbedBody } from './ui/block-ui/embed-body.ts'
+import { mountNotePopover, type NotePopoverHandle } from './ui/block-ui/note-popover.ts'
 import { renderPropsLine } from './ui/block-ui/props-line.ts'
 import { renderAliasEditor } from './ui/block-ui/alias-editor.ts'
 import { renderLinkComposer, renderNamePrompt, type ObjFieldDeps } from './ui/overlay/panels.ts'
@@ -1590,6 +1591,59 @@ const app: App = {
   },
 
   /**
+   * **备注浮窗**：锚在被备注文本旁的可编辑浮层（手势落点判据：写作面在原地，不跳收集清单）。
+   * 锚用**函数形态**（实时取矩形：滚动/重排跟着走，锚没了自动关——layers 的既有口径）；
+   * 关闭即提交——`onClose` 是所有关闭出口（外点/Esc/顶掉）的汇合点：先 flush 推 DOM→模型，
+   * 空备注连块回收（不留空壳；锚留宿主、读侧判活不画），有内容即完成（Esc 不丢字）。
+   */
+  openNotePopover: (sig) => {
+    const note = blocks.find(sig.noteId)
+    if (!note) return
+    const host = blocks.find(sig.blockId)
+    const quote = host?.annos?.find((a) => a.id === sig.annoId)?.quote?.exact ?? ''
+    let handle: NotePopoverHandle | null = null
+    layers.openPopover(
+      (into) => {
+        handle = mountNotePopover({
+          into,
+          store: blocks,
+          write: editorRun(run, () => mainEd),
+          wire: (ed2, change) => wireViewEditor(ed2, change, 'note-popover'),
+          onFocus: (next) => {
+            ed = next
+          },
+          onChange: () => {
+            scheduleSave()
+          },
+          block: () => blocks.find(sig.noteId),
+          quote,
+          onOpenInSidebar: () => {
+            panels?.noteCreated({ noteId: sig.noteId, hostIds: [sig.blockId] })
+            layers.closePopover()
+          },
+          placeholder: t('ui.note.placeholder'),
+        })
+        // 焦点落进备注行：浮窗已挂进文档（render 返回后 openPopover 才 append）⇒ 推迟一帧再落
+        requestAnimationFrame(() => {
+          const ed2 = handle?.editor()
+          if (ed2) {
+            ed2.container.focus()
+            ed2.placeCaret(sig.noteId, 0)
+          }
+        })
+      },
+      () => mainEd.annoRect(sig.blockId, sig.annoId),
+      () => {
+        handle?.flush()
+        const after = blocks.find(sig.noteId)
+        if (after && plainText(after.content) === '') run((tx) => tx.remove(sig.noteId))
+        handle?.dispose()
+        handle = null
+      },
+    )
+  },
+
+  /**
    * **一步撤销**（命令分组 API 的历史语义）：组内所有写入共用一个撤销条目。
    * 原子性归 `Tx`；这里只分组历史。嵌套由 `BlockEditor.begin/finishUndoEntry` 的深度挡。
    */
@@ -3022,12 +3076,6 @@ ed.events = viewEvents(
      * 「⌘Z 之后模型已经回到表格，屏幕还停在大纲」，不报错。
      */
     if (kind === 'struct') panels?.renderMounts()
-    // 写备注：派生栏的行没变、它自己不会重画——装配层在这里点名挂载区开「备注」栏并聚焦新行
-    if (kind === 'note' && mainEd.lastCreatedNote) {
-      const sig = mainEd.lastCreatedNote
-      mainEd.lastCreatedNote = null
-      panels?.noteCreated(sig)
-    }
   },
   'editor',
   // 正文这一台把查询结果画在自己行下；里层编辑器（`wireViewEditor`）默认不挂
