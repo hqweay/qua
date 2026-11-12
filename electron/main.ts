@@ -26,14 +26,15 @@ import {
   type WebContents,
 } from 'electron'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 // 文案字典与 renderer **共用同一份**（`src/core/msg.ts` 是零依赖叶子）。菜单是用户可见文案，
 // 所以连「相」都走 t('app.name')，不在这里硬编码。
 import { t } from '../src/core/infra/msg'
 import { ASSET_SCHEME, isAssetHash } from '../src/core/infra/assets.ts'
-import { MANIFEST_FILE, libraryId } from '../src/core/identity/library.ts'
+import { MANIFEST_FILE, DB_SCHEMA_VERSION, libraryId } from '../src/core/identity/library.ts'
 import { loadRegistry } from './library/registry.ts'
+import { restoreFromBackup } from './library/restore.ts'
 import type { OpenFailure } from './library/session.ts'
 import { LibraryManager } from './library/windows.ts'
 
@@ -254,6 +255,22 @@ console.log(
 )
 
 const REGISTRY_IO = { file: join(QUA_DATA_ROOT, 'app.json'), reposDir: join(QUA_DATA_ROOT, 'repos') }
+
+/**
+ * **恢复启动参数**：`--restore-backup=<快照绝对路径>`（可重复，按出现顺序逐个恢复）。
+ *
+ * 为什么恢复只能是启动参数，而不是应用里的一颗按钮：
+ * 一个打开的库 ＝ 活连接 ＋ 内存模型 ＋ 若干窗口。在活着的会话上换 `qua.db`
+ * 等于换引擎的同时换轮胎（连接握着旧 inode、模型会把旧内容写回、WAL 页混进新库，
+ * 三者都不报错）。启动这一刻还没有连接、没有模型、没有窗口。
+ *
+ * 快照的**选择**在应用外（Finder 里看 `backups/`），这条参数只负责「把它放回去」。
+ * 恢复前会自动拍一份 `before-restore` 快照——恢复也是破坏性动作。
+ */
+const argvRestore = process.argv
+  .filter((a) => a.startsWith('--restore-backup='))
+  .map((a) => a.slice('--restore-backup='.length))
+  .filter((p) => p.length > 0)
 
 /**
  * **隔离模式**：命令行显式给了数据目录（`--user-data-dir`／`--qua-data-dir`）。
@@ -661,6 +678,37 @@ async function serveAsset(request: Request): Promise<Response> {
 }
 
 /**
+ * 执行 `--restore-backup=` 排队的恢复（启动时、开库之前）。
+ *
+ * 库目录**从快照路径反推**：快照一定住在 `<库目录>/backups/*.db`（`snapshotLibrary`
+ * 是唯一写入者）。不额外要求用户再给一个「恢复哪个库」的参数——两个参数能不一致，
+ * 而一个路径不会。
+ *
+ * 失败**不静默**：弹一个原生错误框并跳过这次恢复（库保持原样），然后照常启动。
+ * 启动失败比「这次恢复没成」严重得多，所以这里不 throw。
+ */
+function runPendingRestores(): void {
+  for (const file of argvRestore) {
+    const libraryDir = dirname(dirname(file))
+    const r = restoreFromBackup(libraryDir, file)
+    if (r.status === 'ok') {
+      console.log(`[library] restored from ${r.restored} (before-restore snapshot: ${r.beforeRestore || 'none'})`)
+      continue
+    }
+    const why =
+      r.reason === 'no-such-backup'
+        ? `snapshot not found: ${r.file}`
+        : r.reason === 'too-new'
+          ? `snapshot schema v${r.version} is newer than this build (v${DB_SCHEMA_VERSION})`
+          : r.reason === 'corrupt'
+            ? `snapshot schema version is not a valid number (v${r.version})`
+            : r.detail
+    console.error(`[library] restore failed: ${why}`)
+    dialog.showErrorBox(t('library.restoreFailedTitle'), t('library.restoreFailedBody', { why }))
+  }
+}
+
+/**
  * 启动落点：`lastOpenedId` 能开就开它；否则开列表里第一个库；
  * 一个库都没有时——隔离模式自动建默认库，**真实用户给选择**（新建 / 打开已有）。
  *
@@ -669,6 +717,9 @@ async function serveAsset(request: Request): Promise<Response> {
  * 真实用户的第一次启动**不再悄悄建库**：库落在哪是用户要拍板的事。
  */
 function bootLibraries(): void {
+  // **恢复必须先于任何 `open`**：它要换的是还没有连接的那份文件。
+  runPendingRestores()
+
   const loaded = loadRegistry(REGISTRY_IO)
   const last = loaded.registry.lastOpenedId
   if (last) {

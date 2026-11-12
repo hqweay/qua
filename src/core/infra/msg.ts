@@ -1302,6 +1302,9 @@ export const MSG = {
   'library.fail.corrupt': '这个库的版本号坏了，无法判断能不能读',
   'library.fail.migrateFailed': '这个库升级失败，已保留原样：{detail}',
   'library.fail.io': '打不开这个目录：{detail}',
+  /* 启动参数 `--restore-backup=` 的失败提示（恢复是破坏性动作，失败必须说出来） */
+  'library.restoreFailedTitle': '恢复失败',
+  'library.restoreFailedBody': '这次没有恢复，库保持原样。原因：{why}',
   'menu.item.about': '关于 {app}',
   'menu.item.services': '服务',
   'menu.item.hide': '隐藏 {app}',
