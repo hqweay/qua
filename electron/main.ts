@@ -35,6 +35,7 @@ import { ASSET_SCHEME, isAssetHash } from '../src/core/infra/assets.ts'
 import { MANIFEST_FILE, DB_SCHEMA_VERSION, libraryId } from '../src/core/identity/library.ts'
 import { loadRegistry } from './library/registry.ts'
 import { restoreFromBackup } from './library/restore.ts'
+import { createRecorder } from './diagnostics/recorder.ts'
 import type { OpenFailure } from './library/session.ts'
 import { LibraryManager } from './library/windows.ts'
 
@@ -273,6 +274,21 @@ const argvRestore = process.argv
   .filter((p) => p.length > 0)
 
 /**
+ * **诊断飞行记录器**：常开、只记形状、永不记内容。
+ *
+ * 为什么在主进程建：主进程能同时看见「主进程自己的异常」与「渲染进程崩了」
+ * （`render-process-gone` 是 `webContents` 的事件，渲染层自己看不到它）。
+ *
+ * 落盘在 `<userData>/diagnostics/`（**不在任何库里**）：库目录是用户的数据，
+ * 拷贝/备份/发给别人都会带走它；诊断数据是这台机器的运行痕迹，不该混进去。
+ *
+ * ⚠️ 这里**只记形状**（事件种类、封闭枚举、计数、时长）。错误 message、路径、
+ *    页面名、笔记正文一律不落盘——判据与负向断言在 `electron/diagnostics/recorder.ts`
+ *    的文件头与 `tests/diagnostics.test.ts`。
+ */
+const diag = createRecorder({ dir: join(USER_DATA, 'diagnostics') })
+
+/**
  * **隔离模式**：命令行显式给了数据目录（`--user-data-dir`／`--qua-data-dir`）。
  * 自检脚本全靠它把测试库关在与用户数据隔离的地方——这类运行**必须无人值守**，
  * 首次启动不弹「选库」对话框（原生对话框会挂死冒烟），保持「自动建默认库」的旧路径。
@@ -402,6 +418,9 @@ function createWindow(_libraryId?: string, title?: string): BrowserWindow {
   w.webContents.on('before-input-event', (_e, input) => {
     if (input.type === 'keyDown' && input.key === 'F12') w.webContents.toggleDevTools()
   })
+
+  // 渲染进程崩了：这是「白屏但什么都没说」的唯一线索
+  watchRendererCrash(w)
 
   return w
 }
@@ -742,6 +761,44 @@ function bootLibraries(): void {
   void chooseFirstLibrary()
 }
 
+/**
+ * **全局异常的两个兜底**（在主进程与 `whenReady` 之前装）。
+ *
+ * 为什么要装：打磨期最贵的 bug 形状是「界面没反应但没报错」——主进程抛的错
+ * 没人接时 Electron 只会往 stderr 打一行（用户看不到），rejection 更是静默。
+ * 装上之后至少有三样：① 诊断文件里有 `error` 事件；② 开发者日志里有原文；
+ * ③ 应用**不因此退出**（一个未捕获的异常不该关掉用户正在写的笔记）。
+ *
+ * ⚠️ 只记族（`familyOf`），**不记 message**——message 里有路径与正文。
+ */
+process.on('uncaughtException', (e) => {
+  diag.error('uncaught', e)
+  diag.flush()
+  console.error('[main] uncaught exception', e)
+})
+process.on('unhandledRejection', (e) => {
+  diag.error('unhandled', e)
+  diag.flush()
+  console.error('[main] unhandled rejection', e)
+})
+
+/**
+ * 渲染进程崩了（`render-process-gone`）。
+ *
+ * 这个事件只有主进程能看到——渲染层自己崩了就没机会记录了。所以它是
+ * 「白屏了但什么都没说」这类报告的唯一线索。
+ *
+ * `details.reason` 是**外部字符串**（值域随 Electron 版本变）⇒ 映射进封闭枚举，
+ * 认不出降级 `unknown`，绝不透传（见 `crashReasonOf`）。
+ */
+function watchRendererCrash(w: BrowserWindow): void {
+  w.webContents.on('render-process-gone', (_e, details) => {
+    diag.crash('renderer', details.reason)
+    diag.flush()
+    console.error('[main] renderer process gone', details.reason)
+  })
+}
+
 // 单实例：第二次从 Finder 双击只是把已有窗口拉到前面（而不是起第二个 app 抢同一份库）
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -757,6 +814,15 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   void app.whenReady().then(() => {
+    diag.launch({ version: app.getVersion(), platform: process.platform, isolated: ISOLATED })
+    if (diag.previousExitUnclean) {
+      // 上次没走 orderly exit（崩溃／被 kill／断电）。**只记一条**，不打扰用户：
+      // 「上次异常退出」本身不是错误，但它是解释「为什么少了一句话」的上下文。
+      console.warn('[main] previous run ended without an orderly exit')
+      diag.push({ kind: 'crash', process: 'main', reason: 'abnormal-exit' })
+    }
+    diag.flush()
+
     Menu.setApplicationMenu(buildMenu())
     protocol.handle(ASSET_SCHEME, serveAsset)
     bootLibraries()
@@ -766,6 +832,7 @@ if (!app.requestSingleInstanceLock()) {
       if (BrowserWindow.getAllWindows().length === 0) bootLibraries()
     })
   })
+
 
   /**
    * 退出前等所有库 settle。
@@ -779,6 +846,8 @@ if (!app.requestSingleInstanceLock()) {
     if (quitting) return
     e.preventDefault()
     quitting = true
+    // 正常退出：写一条 `exit` 并删 `session-active`（否则下次启动会把它误报成非正常退出）
+    diag.orderlyExit()
     void manager.quitAll().then(() => app.quit())
   })
 
