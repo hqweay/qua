@@ -43,6 +43,8 @@ export interface AtomPopoverDeps {
   getWs: () => Workspace
   /** 打开一块的唯一路由（中心 zoom／右槽／新 tab）——只在 `App.openBlock` 一份 */
   openBlockRoute: (id: string, place?: OpenAction) => void
+  /** 备注浮窗（`App.openNotePopover`）：右键标记的「打开备注」走它 */
+  openNotePopover: (sig: { blockId: string; annoId: string; noteId?: string }) => void
   layers: Layers
 
   /* —— 其余函数需要的活引用 —— */
@@ -67,7 +69,9 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
     page: () => deps.getActiveBlock(),
     roots: () => deps.getMainEd().doc.roots,
     // ⚠️ 必须查**整片森林**：引用的目标可能是嵌套块，只查顶层会让「打开目标」凭空消失
-    findBlock: (id) => findInForest(deps.getWs().blocks, id),
+    // ⚠️ 森林里查不到时再走 store：引用可以指向「一段文字」（anno——`((id))` 记号
+    //    贴出的引用 `to` 是 annoId），anno → 宿主块的换算只有索引那一份，不另写
+    findBlock: (id) => findInForest(deps.getWs().blocks, id) ?? deps.getMainEd().store.find(id),
     // 引用目标可以是任意深度的块 ⇒ 落点交给唯一路由（中心 zoom／右槽／新 tab）
     openBlock: (id, place) => deps.openBlockRoute(id, place),
     /**
@@ -245,6 +249,8 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
   const ATOM_ROW_EDIT_LINK = 'atom/edit-link'
   const ATOM_ROW_FIELDS = 'atom/fields'
   const ATOM_ROW_DETAILS = 'atom/details'
+  const ANNO_ROW_OPEN = 'anno/open'
+  const ANNO_ROW_SIDEBAR = 'anno/sidebar'
 
   /**
    * **右键一枚行内原子**：按它的身份现算一组动作。
@@ -359,5 +365,34 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
     })
   }
 
-  return { showAtomPopover, findRunOrNull, showAssetDetails, openLightbox, handleAtomClick, handleRefClick, openDrawerFor, handleAtomMenu, anchorOf }
+  /**
+   * **右键落在被备注的文本上**：「对这一处做什么」的三行——打开（浮窗）／侧栏／删除。
+   * 删除走命令（软删可撤销，无确认——与块删除同口径）；打开/侧栏是浮层动作不走命令。
+   */
+  function handleAnnoMenu(hit: { blockId: string; annoId: string }, rect: DOMRect): void {
+    const rows: Row[] = [
+      { id: 'anno/open', label: t('menu.label.openNote'), icon: 'lucide:message-circle' },
+      { id: 'anno/sidebar', label: t('menu.label.openNoteInSidebar') },
+      {
+        id: 'anno/delete',
+        label: t('menu.label.deleteNote'),
+        command: 'core.notes/delete',
+        args: { blockId: hit.blockId, annoId: hit.annoId },
+      },
+    ]
+    deps.showMenu({
+      kind: 'menu',
+      prefix: 'anno/',
+      anchor: rect,
+      title: t('menu.title.anno'),
+      extraRows: rows,
+      onPick: (row) => {
+        if (row.id === ANNO_ROW_OPEN) deps.openNotePopover({ blockId: hit.blockId, annoId: hit.annoId })
+        if (row.id === ANNO_ROW_SIDEBAR) deps.openBlockRoute(hit.blockId, 'dock')
+        if (row.command) void deps.getRegistry().invoke(row.command, (row.args as Record<string, unknown>) ?? {}, 'menu')
+      },
+    })
+  }
+
+  return { showAtomPopover, findRunOrNull, showAssetDetails, openLightbox, handleAtomClick, handleRefClick, openDrawerFor, handleAtomMenu, handleAnnoMenu, anchorOf }
 }

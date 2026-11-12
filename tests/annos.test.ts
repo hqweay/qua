@@ -31,6 +31,8 @@ import { mkBlock, writeBlockContent } from '../src/core/model/model.ts'
 import { applyOps, fingerprint, incomingIds, lookupBlock, rebuild, type Index } from '../src/core/index.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
+import { resolveRef } from '../src/core/relations/ref.ts'
+import { findInForest } from '../src/core/model/tree.ts'
 import type { Tx } from '../src/core/kb/types.ts'
 
 const annoAt = (content: Run[], start: number, end: number): Anno => {
@@ -195,6 +197,19 @@ test('索引：anno 反查表全量建表；引用指向 anno 时边归到宿主
   assert.equal(idx.annos.get(a.id)?.hostId, host.id)
   assert.equal(lookupBlock(idx, a.id)?.id, host.id)
   assert.deepEqual(incomingIds(idx, host.id), [source.id])
+})
+
+test('解析：引用指向 anno ⇒ 注入给 resolveRef 的查找必须能把 anno 换算到宿主（只按块 id 走森林会把活引用判成悬空）', () => {
+  const { forest, a, host, source } = annoFixture()
+  const store = new BlockStore(JSON.parse(JSON.stringify(forest)))
+  const run = source.content.find((r) => r.t === 'ref')!
+  // 错的注入形状（真实踩过）：只按块 id 走森林——annoId 查不到 ⇒ resolved 判成 dangling
+  assert.equal(resolveRef((id) => findInForest(forest, id), run).state, 'dangling')
+  // 对的注入形状：走索引换算（store.find 即它）⇒ 解析到宿主块，锚文本压过现算名
+  const view = resolveRef((id) => store.find(id), run)
+  assert.equal(view.state, 'resolved')
+  assert.equal(view.label, '红句子')
+  assert.equal(store.find(a.id)?.id, host.id)
 })
 
 test('索引：anno 表全量 == 增量（setAnnos 改区间、清空）', () => {
