@@ -32,6 +32,7 @@ const GROUP_TITLES: Record<string, string> = {
   'retrieval/3-new': t('menu.group.new'),
   'retrieval/1-page': t('menu.group.pickPage'),
   'retrieval/2-block': t('menu.group.block'),
+  'selref/1-exact': t('menu.group.selRefExact'),
   'dbg/1-look': t('menu.group.debugLook'),
   'dbg/2-theme': t('menu.group.debugTheme'),
   'dbg/3-state': t('menu.group.debugState'),

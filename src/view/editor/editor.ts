@@ -2022,8 +2022,13 @@ export class BlockEditor {
       return
     }
     if (s.aBlock === s.hBlock) {
-      // 同上：`placeRange` 也会改写 `this.sel` ⇒ 先摆 DOM，再写回模型
-      this.placeRange({ ...s, aBlock: s.hBlock, aOff: s.hOff })
+      /**
+       * 同上：`placeRange` 也会改写 `this.sel` ⇒ 先摆 DOM，再写回模型。
+       * ⚠️ 起点必须是 `s.aOff`，不能拿 `s.hOff` 盖掉：那会摆出一个**折叠** Range，
+       *    随后 `selectionchange` 把模型选区同步塌成光标，整段选区就丢了
+       *    （划选气泡靠 DOM Range 定位，取消浮层后就再也不回来）。
+       */
+      this.placeRange(s)
       this.sel = s
       return
     }

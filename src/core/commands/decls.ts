@@ -100,6 +100,12 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.anno/set-ink', title: t('cmd.anno.set-ink'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), args: { slot: { type: 'string' } }, keywords: ['color', 'ink', 'font'], hidden: true },
   { name: 'core.anno/set-bg', title: t('cmd.anno.set-bg'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), args: { slot: { type: 'string' } }, keywords: ['background', 'highlight', t('menu.kw.background')], hidden: true },
   { name: 'core.anno/clear-marks', title: t('cmd.anno.clear-marks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['clear', 'plain'] },
+  /**
+   * 值轴入口：只切「气泡展开哪一轴」这一个 UI 状态，不写库 ⇒ `read`、不进面板。
+   * 与 `showRefPicker` 同一条分工：命令报「要选值了」，浮层归装配层。
+   */
+  { name: 'core.anno/pick-ink', title: t('cmd.anno.pick-ink'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.format'), hidden: true },
+  { name: 'core.anno/pick-bg', title: t('cmd.anno.pick-bg'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.format'), hidden: true },
 
   /* ---- 标签层级（属于 / 包含：一条边，两个读法） ----
      ⚠️ 下面到「露面」为止有一批 `hidden` 的**机器面命令**：参数（块 id／栏 id／值）
@@ -194,11 +200,13 @@ export const COMMANDS: CommandDecl[] = [
    */
   { name: 'core.block/convert-mention', title: t('cmd.block.convert-mention'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { blockId: { type: 'string' }, to: { type: 'string' }, start: { type: 'integer' }, end: { type: 'integer' } }, keywords: ['mention', 'ref', t('menu.kw.ref')], hidden: true },
   /**
-   * 划选气泡的「转为引用」：选中一段文本，换成指向同名块的引用。
-   * 同名地址不存在 ⇒ 顺手建一个页块（与 `@` 的「新建页」同一条创建路径）。
+   * 划选气泡的「转为引用」：选中一段文本，原位换成一枚引用并**把原文字留作 anchor**。
+   * 不带参数＝同名地址优先、没有就建页；带 `to`／`create`＝「关联到…」选择器挑过的。
    * 只在单块纯文本选区上有定义 ⇒ 不进命令面板（面板没有选区可给）。
    */
-  { name: 'core.editor/selection-to-ref', title: t('cmd.editor.selection-to-ref'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), keywords: ['ref', 'convert', t('menu.kw.ref')], hidden: true },
+  { name: 'core.editor/selection-to-ref', title: t('cmd.editor.selection-to-ref'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { to: { type: 'string' }, create: { type: 'string', enum: ['page', 'block'] } }, keywords: ['ref', 'convert', t('menu.kw.ref')], hidden: true },
+  /** 「关联到…」搜索窗：划选气泡的逃逸口，也是唯一能指向任意已有块的入口 */
+  { name: 'core.editor/pick-selection-ref', title: t('cmd.editor.pick-selection-ref'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.inline'), keywords: ['ref', 'link', t('menu.kw.ref')], hidden: true },
 
   /* ---- 视图 ---- */
   { name: 'core.view/toggle-theme', title: t('cmd.view.toggle-theme'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dark', 'light', 'theme'] },

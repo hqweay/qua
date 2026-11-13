@@ -14,7 +14,7 @@
 import { evalWhen, evalWhenSafe } from './when.ts'
 // ⚠️ 三个收敛点之二：绑定表的 `label` / `keywords` 一律走 t
 import { t, type MsgId } from './msg.ts'
-import type { CtxKeys } from '../index.ts'
+import type { ColorAxis, CtxKeys } from '../index.ts'
 
 export type BindingKind = 'keymap' | 'menu' | 'slash' | 'selection'
 export type Layer = 'core' | 'plugin' | 'user'
@@ -35,6 +35,14 @@ export interface Binding {
   label?: string
   icon?: string
   keywords?: string[]
+  /**
+   * **这一行代表哪个颜色值轴**（只用于划选气泡的呈现）。
+   *
+   * 它不是命令、也不是参数：绑定表照旧声明「有这一颗按钮、什么时候在、排第几」，
+   * 渲染层据此画当前值色标与二级值域。把值轴收进表里，是为了不再靠渲染层
+   * 「格式组画完了就插一排色板」这种分组顺序的猜测来摆控件。
+   */
+  axis?: ColorAxis
 }
 
 /* ------------------------------------------------------------ 绑定表 */
@@ -309,6 +317,13 @@ export const BINDINGS: Binding[] = [
   { command: 'core.anno/toggle-highlight', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 50, layer: 'core', icon: 'lucide:highlighter', label: t('menu.label.highlight') },
   { command: 'core.anno/toggle-code', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 60, layer: 'core', icon: 'lucide:code', label: t('menu.label.code') },
   { command: 'core.anno/clear-marks', kind: 'selection', when: 'editorTextFocus && !selectionEmpty && marking', group: 'sel/1-mark', order: 70, layer: 'core', icon: 'lucide:eraser', label: t('menu.label.clearMarks') },
+  /**
+   * 两个**值轴入口**：0 元决定（toggle）已经排完，这里才轮到 1 元决定。
+   * 主条只放「轴」（带当前值色标），7 个槽进二级 —— 值域在任何时刻只回答
+   * 一个问题，不该占 14 个常驻位置。`pick-bg` 紧挨高亮一键，是它的逃逸口。
+   */
+  { command: 'core.anno/pick-ink', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 80, layer: 'core', icon: 'lucide:baseline', label: t('menu.label.ink'), axis: 'ink' },
+  { command: 'core.anno/pick-bg', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 82, layer: 'core', icon: 'lucide:chevron-down', label: t('menu.label.pickBg'), axis: 'bg' },
   // 写备注：与「转为引用」同组（都是「这一段的去处」）。判据同宽：单块纯文本选区才有锚
   { command: 'core.notes/create', kind: 'selection', when: 'editorTextFocus && selectionRef', group: 'sel/2-ref', order: 25, layer: 'core', icon: 'lucide:message-circle', label: t('menu.label.writeNote') },
   /**
@@ -316,6 +331,11 @@ export const BINDINGS: Binding[] = [
    * 只在单块纯文本选区上出现——跨块或夹着原子时「换成一枚引用」没有定义。
    */
   { command: 'core.editor/selection-to-ref', kind: 'selection', when: 'editorTextFocus && selectionRef', group: 'sel/2-ref', order: 20, layer: 'core', icon: 'lucide:arrow-up-right', label: t('menu.label.selectionToRef') },
+  /**
+   * 逃逸口：一键直达仍是主路径（同名地址／建页，零决策），只有「想关联别的页或块」
+   * 才展开搜索窗。两颗同组相邻 ⇒ 视觉上是「转为引用」和它的展开箭头，不是第三个动作。
+   */
+  { command: 'core.editor/pick-selection-ref', kind: 'selection', when: 'editorTextFocus && selectionRef', group: 'sel/2-ref', order: 22, layer: 'core', icon: 'lucide:chevron-down', label: t('menu.label.pickSelectionRef') },
 ]
 
 /* --------------------------------------------------------- 键位匹配 */

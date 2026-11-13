@@ -129,16 +129,40 @@
 .selbar {
   position: fixed;
   z-index: var(--ui-z-selbar);
-  display: flex;
-  align-items: center;
-  gap: var(--ui-gap-1);
   padding: var(--ui-gap-1);
   background: var(--ui-surface-raised);
   border: 1px solid var(--ui-border);
   border-radius: var(--ui-radius-md);
   box-shadow: var(--ui-shadow-mid);
 }
+/*
+  二级画在主条之前（column 顺序）⇒ 视觉上向上长；placeNear 读到变高的 boxH
+  会把整体再往上推，选区始终不被盖住。气泡仍是同一个 DOM、同一个浮层状态。
+*/
+.selbar .selbar-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+}
+.selbar .selbar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+}
+.selbar .selbar-extra {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--ui-gap-1) var(--ui-gap-1);
+  border-bottom: 1px solid var(--ui-border);
+}
+.selbar .selbar-extra-lead {
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-sm);
+  margin-right: 2px;
+}
 .selbar .sel-btn {
+  position: relative;
   min-width: 28px;
   height: 26px;
   display: inline-flex;
@@ -149,6 +173,15 @@
   color: var(--ui-text-secondary);
   font-size: var(--ui-fs-sm);
   line-height: 1;
+}
+/* 值轴入口只用一个像素级信号表达「当前值」，7 个可选值收在二级 */
+.selbar .sel-axis-value {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 1px;
 }
 .selbar .sel-btn:hover {
   background: var(--ui-accent-soft);
@@ -164,19 +197,7 @@
   margin: 0 var(--ui-gap-1);
   background: var(--ui-border);
 }
-/* 颜色轴：值轴不是开关，是一排槽名；色点只引 --ui-ink-* 语义槽，不碰基础色 */
-.selbar .sel-swatches {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0 var(--ui-gap-1);
-}
-.selbar .sel-swatches-lead {
-  display: inline-flex;
-  align-items: center;
-  color: var(--ui-text-tertiary);
-  margin-right: 2px;
-}
+/* 颜色轴：值不是开关，是槽名；色点与入口色标共用同一份 --ui-ink-* 语义槽 */
 .selbar .sel-swatch {
   width: 14px;
   height: 14px;
@@ -185,13 +206,13 @@
   border-radius: 50%;
   cursor: pointer;
 }
-.selbar .sel-swatch[data-slot='red'] { background: var(--ui-ink-red); }
-.selbar .sel-swatch[data-slot='orange'] { background: var(--ui-ink-orange); }
-.selbar .sel-swatch[data-slot='yellow'] { background: var(--ui-ink-yellow); }
-.selbar .sel-swatch[data-slot='green'] { background: var(--ui-ink-green); }
-.selbar .sel-swatch[data-slot='blue'] { background: var(--ui-ink-blue); }
-.selbar .sel-swatch[data-slot='violet'] { background: var(--ui-ink-violet); }
-.selbar .sel-swatch[data-slot='gray'] { background: var(--ui-ink-gray); }
+.selbar .sel-swatch[data-slot='red'], .selbar .sel-axis-value[data-slot='red'] { background: var(--ui-ink-red); }
+.selbar .sel-swatch[data-slot='orange'], .selbar .sel-axis-value[data-slot='orange'] { background: var(--ui-ink-orange); }
+.selbar .sel-swatch[data-slot='yellow'], .selbar .sel-axis-value[data-slot='yellow'] { background: var(--ui-ink-yellow); }
+.selbar .sel-swatch[data-slot='green'], .selbar .sel-axis-value[data-slot='green'] { background: var(--ui-ink-green); }
+.selbar .sel-swatch[data-slot='blue'], .selbar .sel-axis-value[data-slot='blue'] { background: var(--ui-ink-blue); }
+.selbar .sel-swatch[data-slot='violet'], .selbar .sel-axis-value[data-slot='violet'] { background: var(--ui-ink-violet); }
+.selbar .sel-swatch[data-slot='gray'], .selbar .sel-axis-value[data-slot='gray'] { background: var(--ui-ink-gray); }
 .selbar .sel-swatch[data-on='1'] {
   outline: 2px solid var(--ui-text);
   outline-offset: 1px;

@@ -32,6 +32,13 @@ import { uuidv7Hex } from './ids.ts'
 export type ColorSlot = 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'violet' | 'gray'
 export const COLOR_SLOTS: readonly ColorSlot[] = ['red', 'orange', 'yellow', 'green', 'blue', 'violet', 'gray']
 
+/**
+ * 颜色**轴**：一块文字同时可以有字色和背景色，两轴各自单值。
+ * 放在这里而不是每个 UI 各写一遍 `'ink' | 'bg'`：绑定表的呈现元数据、命令参数、
+ * 气泡的展开态、`activeMarks` 的 `轴:槽` 描述符说的是同一件事。
+ */
+export type ColorAxis = 'ink' | 'bg'
+
 export function isColorSlot(x: unknown): x is ColorSlot {
   return typeof x === 'string' && (COLOR_SLOTS as readonly string[]).includes(x)
 }

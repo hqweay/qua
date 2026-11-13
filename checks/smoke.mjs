@@ -28330,6 +28330,337 @@ await check('T298 右键备注标记：三行菜单；删除＝软删（标记�
   return '右键标记 → 三行菜单；删除＝软删（标记消失、⌘Z 恢复）'
 })
 
+/**
+ * T299 划选「关联到…」逃逸口。
+ *
+ * 钉四组：① 一键仍是主路径（默认项预选，↵ 与那颗按钮等价）；② Esc ＝ 零写入
+ * ＋ 选区还回来；③ 关联到**异名**块时原字写成 anchor，不许被目标名顶掉；
+ * ④ ⌥↵ 新建的是普通块（无 page 露面、落在宿主下一个兄弟），一次撤销全回。
+ */
+await check('T299 选择关联目标：默认项等价一键、异名块保留原字、⌥↵ 建块、Esc 零写入', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  // harness 的 assert 是裸 (cond, msg)；等值断言自己带一份带实际值的消息
+  const assertEq = (a, b, msg) => assert(a === b, `${msg}｜实际=${JSON.stringify(a)} 期望=${JSON.stringify(b)}`)
+  const WORD = '现在'
+  const PAGE = '关联页ZQA'
+  const pageId = 'selref-page'
+  await page.evaluate((a) => {
+    window.__qua.forceForest((forest) => {
+      const at = Date.now()
+      const mk = (id, content, props, children = []) => ({ id, content, children, created: at, modified: at, ...(props ? { props } : {}) })
+      forest.length = 0
+      forest.push(
+        mk(a.pageId, [{ t: 'text', v: '关联页' }], { _aliases: [a.page], _lists: ['page'] }, [
+          mk('selref-host', [{ t: 'text', v: a.word }]),
+          mk('selref-after', [{ t: 'text', v: '尾巴' }]),
+        ]),
+        mk('selref-exact', [{ t: 'text', v: a.word }], { _aliases: [a.word], _lists: ['page'] }),
+        mk('selref-other', [{ t: 'text', v: '时间管理' }], { _aliases: ['时间管理'] }),
+      )
+    })
+  }, { page: PAGE, word: WORD, pageId })
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId)
+  await page.waitForSelector('#editor .blk[data-block-id="selref-host"]', { timeout: 5000 })
+
+  /** 一块的内容与引用 run（走原始森林，软删块也在里面） */
+  const hostContent = () =>
+    page.evaluate(() => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === 'selref-host') return b.content
+          const r = walk(b.children ?? [])
+          if (r) return r
+        }
+        return null
+      }
+      return walk(window.__qua.__editor.store.blocks)
+    })
+  const pickBar = (command) =>
+    page.evaluate((cmd) => {
+      const b = document.querySelector(`.selbar .sel-btn[data-command="${cmd}"]`)
+      b?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    }, command)
+  const selectWord = async () => {
+    await page.evaluate((n) => window.__qua.focusBlock('selref-host', n), WORD.length)
+    await page.keyboard.down('Shift')
+    for (let i = 0; i < WORD.length; i++) await page.keyboard.press('ArrowLeft')
+    await page.keyboard.up('Shift')
+    await page.waitForFunction(() => document.querySelectorAll('.selbar').length === 1, null, { timeout: 3000 })
+  }
+  const openPicker = async () => {
+    await pickBar('core.editor/pick-selection-ref')
+    await page.waitForSelector('.layer .layer-input', { timeout: 3000 })
+    // openMenu 在 rAF 里给焦点；不等到这一刻，↵ 会打进编辑器而不是菜单
+    await page.waitForTimeout(400)
+    const focusInfo = await page.evaluate(() => ({
+      active: `${document.activeElement?.tagName}.${document.activeElement?.className ?? ''}`,
+      hasInput: Boolean(document.querySelector('.layer .layer-input')),
+      layers: document.querySelectorAll('.layer').length,
+      bars: document.querySelectorAll('.selbar').length,
+    }))
+    assert(
+      focusInfo.active.includes('layer-input'),
+      `输入框要拿到焦点（能直接打字改写）：${JSON.stringify(focusInfo)}`,
+    )
+  }
+  const pickRow = (id, alt = false) =>
+    page.evaluate((a) => {
+      const el = document.querySelector(`.layer .layer-item[data-id="${a.id}"]`)
+      if (!el) return false
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, altKey: a.alt }))
+      return true
+    }, { id, alt })
+  const undo = async () => {
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForFunction(() => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === 'selref-host') return b.content.every((r) => r.t !== 'ref')
+          const r = walk(b.children ?? [])
+          if (r !== null) return r
+        }
+        return null
+      }
+      return walk(window.__qua.__editor.store.blocks) === true
+    }, null, { timeout: 3000 })
+  }
+
+  // ① 打开：预填选中的字、首项是精确同名（＝一键默认）；气泡挂起不盖住下拉
+  await selectWord()
+  await openPicker()
+  const opened = await page.evaluate(() => ({
+    query: document.querySelector('.layer .layer-input')?.value ?? '',
+    focused: document.activeElement === document.querySelector('.layer .layer-input'),
+    first: document.querySelector('.layer .layer-item[data-active="1"]')?.dataset.id ?? '',
+    bars: document.querySelectorAll('.selbar').length,
+    rows: document.querySelectorAll('.layer .layer-item').length,
+  }))
+  assertEq(opened.query, WORD, `查询词要预填选中的字：${JSON.stringify(opened)}`)
+  assert(opened.focused, '输入框要拿到焦点（能直接打字改写）')
+  assertEq(opened.first, 'selref/exact/selref-exact', `首项要是精确同名地址：${JSON.stringify(opened)}`)
+  assertEq(opened.bars, 0, `搜索窗开着时气泡必须挂起（z-index 更高会盖住下拉）：${JSON.stringify(opened)}`)
+
+  // ② Esc：零写入，选区与气泡原样还回来
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => document.querySelectorAll('.layer .layer-input').length === 0, null, { timeout: 3000 })
+  await page.waitForTimeout(250)
+  const escState = await page.evaluate(() => ({
+    bars: document.querySelectorAll('.selbar').length,
+    active: `${document.activeElement?.tagName}.${document.activeElement?.className ?? ''}`,
+    ranges: document.getSelection()?.rangeCount ?? 0,
+    collapsed: document.getSelection()?.isCollapsed,
+    sel: window.__qua.snapshot().selection,
+  }))
+  const afterEsc = await hostContent()
+  assert(afterEsc && afterEsc.every((r) => r.t !== 'ref'), `Esc 取消不许写库：${JSON.stringify(afterEsc)}`)
+  assert(escState.bars === 1, `Esc 后气泡要回来（选区还在）：${JSON.stringify(escState)}`)
+  assert(escState.sel && escState.sel.aBlock === 'selref-host' && escState.sel.aOff !== escState.sel.hOff, `Esc 要把整段选区还回去：${JSON.stringify(escState)}`)
+
+  // ③ ↵ 接受默认项 ＝ 那颗一键按钮：复用同名页，不新建
+  const pagesBefore = await page.evaluate(() => window.__qua.snapshot().pageCount)
+  await openPicker()
+  await page.keyboard.press('Enter')
+  await page.waitForFunction(() => {
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.id === 'selref-host') return b.content.some((r) => r.t === 'ref')
+        const r = walk(b.children ?? [])
+        if (r !== null) return r
+      }
+      return null
+    }
+    return walk(window.__qua.__editor.store.blocks) === true
+  }, null, { timeout: 3000 })
+  const defaultRef = (await hostContent()).find((r) => r.t === 'ref')
+  assertEq(defaultRef.to, 'selref-exact', `默认项要复用同名地址：${JSON.stringify(defaultRef)}`)
+  assertEq(defaultRef.anchor, WORD, '用户写的字要留成 anchor')
+  assertEq(await page.evaluate(() => window.__qua.snapshot().pageCount), pagesBefore, '复用不新建页')
+  await undo()
+  await selectWord()
+
+  // ④ 改写查询词 → 关联到一个**异名**块：正文里显示的仍是原字
+  await openPicker()
+  await page.fill('.layer .layer-input', '时间')
+  await page.waitForSelector('.layer .layer-item[data-id="selref/block/selref-other"]', { timeout: 3000 })
+  assert(await pickRow('selref/block/selref-other'), '要能点中异名块那一行')
+  await page.waitForFunction(() => {
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.id === 'selref-host') return b.content.some((r) => r.t === 'ref')
+        const r = walk(b.children ?? [])
+        if (r !== null) return r
+      }
+      return null
+    }
+    return walk(window.__qua.__editor.store.blocks) === true
+  }, null, { timeout: 3000 })
+  const otherRef = (await hostContent()).find((r) => r.t === 'ref')
+  assertEq(otherRef.to, 'selref-other', `要指向选中的异名块：${JSON.stringify(otherRef)}`)
+  assertEq(otherRef.anchor, WORD, '异名目标也要写 anchor')
+  const shown = await page.evaluate(() => document.querySelector('#editor .blk[data-block-id="selref-host"]')?.textContent ?? '')
+  assert(shown.includes(WORD) && !shown.includes('时间管理'), `选中的字不能被目标名顶掉：${shown}`)
+  await undo()
+  await selectWord()
+
+  // ⑤ ⌥↵ 在「新建」行：普通块（无 page 露面），落在宿主的下一个兄弟
+  const blocksBefore = await page.evaluate(() => window.__qua.allBlocks().length)
+  await openPicker()
+  assert(await pickRow('selref/new', true), '要能点中新建行（⌥↵）')
+  await page.waitForFunction(() => {
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.id === 'selref-host') return b.content.some((r) => r.t === 'ref')
+        const r = walk(b.children ?? [])
+        if (r !== null) return r
+      }
+      return null
+    }
+    return walk(window.__qua.__editor.store.blocks) === true
+  }, null, { timeout: 3000 })
+  const made = await page.evaluate(() => {
+    const forest = window.__qua.__editor.store.blocks
+    const walk = (list, fn) => { for (const b of list) { fn(b); walk(b.children ?? [], fn) } }
+    let host = null
+    let target = null
+    walk(forest, (b) => { if (b.id === 'selref-host') host = b })
+    const to = host?.content.find((r) => r.t === 'ref')?.to
+    walk(forest, (b) => { if (b.id === to) target = b })
+    const root = forest.find((b) => b.id === 'selref-page')
+    return {
+      anchor: host?.content.find((r) => r.t === 'ref')?.anchor,
+      text: target?.content.map((r) => r.v ?? '').join(''),
+      lists: target?.props?._lists ?? [],
+      aliases: target?.props?._aliases ?? [],
+      hostIdx: root?.children.findIndex((b) => b.id === 'selref-host') ?? -1,
+      newIdx: root?.children.findIndex((b) => b.id === to) ?? -1,
+    }
+  })
+  assertEq(made.text, WORD, `新块的正文＝选中的字：${JSON.stringify(made)}`)
+  assert(!made.lists.includes('page') && made.aliases.length === 0, `⌥↵ 建的是普通块，不是页：${JSON.stringify(made)}`)
+  assertEq(made.newIdx, made.hostIdx + 1, `新块落在宿主下一个兄弟：${JSON.stringify(made)}`)
+  assertEq(made.anchor, WORD, '新建路径也要留 anchor')
+  assertEq(await page.evaluate(() => window.__qua.snapshot().pageCount), pagesBefore, '建普通块不增页')
+  await undo()
+  assertEq(await page.evaluate(() => window.__qua.allBlocks().length), blocksBefore, '一次撤销把新建的块也撤掉')
+
+  await ctx.close()
+  return '预填选中字＋默认项＝一键、Esc 零写入并还选区、异名块保留原字、⌥↵ 建普通块且一次撤销全回'
+})
+
+/**
+ * T300 划选气泡的值轴分层。
+ *
+ * 钉五组：① 收起时主条只有两个「轴」入口、无常驻色点；② 二级只展开被点的那一轴、
+ * 给全 7 槽，且**向上长**（气泡底边始终在选区上边之上），展开不抢焦点；③ 当前值
+ * 用入口的一条色标表达；④ 点当前色即取消；⑤ bg:yellow 与高亮一键是同一状态；
+ * ⑥ 选区塌后展开态不残留。
+ */
+await check('T300 划选气泡颜色值轴：主条只放轴、二级向上展开、当前色标与一键高亮同源', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const WORD = '颜色测试文本'
+  await page.evaluate((a) => {
+    window.__qua.forceForest((forest) => {
+      const at = Date.now()
+      forest.length = 0
+      forest.push({
+        id: 'axis-page',
+        content: [{ t: 'text', v: '轴页' }],
+        children: [{ id: 'axis-host', content: [{ t: 'text', v: a.word }], children: [], created: at, modified: at }],
+        created: at,
+        modified: at,
+        props: { _aliases: ['轴页'], _lists: ['page'] },
+      })
+    })
+  }, { word: WORD })
+  await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: 'axis-page' }))
+  await page.waitForSelector('#editor .blk[data-block-id="axis-host"]', { timeout: 5000 })
+
+  const barState = () =>
+    page.evaluate(() => {
+      const bar = document.querySelector('.selbar')
+      const sel = document.getSelection()
+      const r = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).getBoundingClientRect() : null
+      return {
+        open: Boolean(bar),
+        extra: [...document.querySelectorAll('.selbar-extra')].map((e) => e.dataset.axis),
+        swatches: document.querySelectorAll('.selbar .sel-swatch').length,
+        axes: [...document.querySelectorAll('.selbar .sel-btn[data-axis]')].map((b) => b.dataset.axis),
+        chip: [...document.querySelectorAll('.selbar .sel-axis-value')].map((c) => c.dataset.slot),
+        highlightOn: document.querySelector('.selbar .sel-btn[data-command="core.anno/toggle-highlight"]')?.dataset.on ?? '',
+        barTop: bar?.getBoundingClientRect().top ?? 0,
+        barBottom: bar?.getBoundingClientRect().bottom ?? 0,
+        selTop: r?.top ?? 0,
+        selText: sel?.toString() ?? '',
+      }
+    })
+  const pick = (selector) =>
+    page.evaluate((s) => {
+      const el = document.querySelector(s)
+      if (!el) return false
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+      return true
+    }, selector)
+  const selectWord = async () => {
+    await page.evaluate((n) => window.__qua.focusBlock('axis-host', n), WORD.length)
+    await page.keyboard.down('Shift')
+    for (let i = 0; i < WORD.length; i++) await page.keyboard.press('ArrowLeft')
+    await page.keyboard.up('Shift')
+    await page.waitForFunction(() => document.querySelectorAll('.selbar').length === 1, null, { timeout: 3000 })
+  }
+
+  await selectWord()
+  const closed = await barState()
+  assert(closed.open && closed.swatches === 0, `收起时主条不该有常驻色点：${JSON.stringify(closed)}`)
+  assert(closed.axes.includes('ink') && closed.axes.includes('bg'), `主条要有两个值轴入口：${JSON.stringify(closed.axes)}`)
+  assert(closed.barBottom <= closed.selTop + 1, `气泡要在选区上方：${JSON.stringify(closed)}`)
+
+  // ① 展开 ink：只展开被点的那一轴，7 槽给全，整体上移，选区不塌
+  assert(await pick('.selbar .sel-btn[data-command="core.anno/pick-ink"]'), 'ink 入口要能点')
+  await page.waitForSelector('.selbar-extra[data-axis="ink"]', { timeout: 3000 })
+  const openInk = await barState()
+  assert(openInk.extra.length === 1 && openInk.extra[0] === 'ink', `只展开被点的那一轴：${JSON.stringify(openInk.extra)}`)
+  assert(openInk.swatches === 7, `二级给全 7 个槽，不砍成 3 个：${openInk.swatches}`)
+  assert(openInk.barTop < closed.barTop, `展开后整体上移（用新 boxH 重算）：${closed.barTop} → ${openInk.barTop}`)
+  assert(openInk.barBottom <= openInk.selTop + 1, `二级向上长，不许盖住选区：${JSON.stringify(openInk)}`)
+  assert(openInk.selText.length >= 2, `展开不抢焦点，选区还在：${JSON.stringify(openInk.selText)}`)
+
+  // ② 选一个值：二级收起，入口出现当前色标
+  assert(await pick('.selbar-extra[data-axis="ink"] .sel-swatch[data-slot="blue"]'), '二级色点要能点')
+  await page.waitForFunction(() => window.__qua.marks().some((m) => m.type === 'ink:blue'), null, { timeout: 3000 })
+  const afterBlue = await barState()
+  assert(afterBlue.extra.length === 0, `值用完即收：${JSON.stringify(afterBlue.extra)}`)
+  assert(afterBlue.chip.length === 1 && afterBlue.chip[0] === 'blue', `入口用色标表达当前值：${JSON.stringify(afterBlue.chip)}`)
+
+  // ③ 点当前色＝取消（toggleMark 既有语义，二级不需要「无」按钮）
+  await pick('.selbar .sel-btn[data-command="core.anno/pick-ink"]')
+  await page.waitForSelector('.selbar-extra[data-axis="ink"]', { timeout: 3000 })
+  const currentSlot = await page.evaluate(() => document.querySelector('.selbar-extra .sel-swatch[data-on="1"]')?.dataset.slot ?? '')
+  assert(currentSlot === 'blue', `当前槽要标出来：${currentSlot}`)
+  await pick('.selbar-extra[data-axis="ink"] .sel-swatch[data-slot="blue"]')
+  await page.waitForFunction(() => !window.__qua.marks().some((m) => m.type === 'ink:blue'), null, { timeout: 3000 })
+  const cleared = await barState()
+  assert(cleared.chip.length === 0, `取消后色标也该消失：${JSON.stringify(cleared.chip)}`)
+
+  // ④ bg 的黄色与高亮一键是同一状态，不该各亮各的
+  await pick('.selbar .sel-btn[data-command="core.anno/pick-bg"]')
+  await page.waitForSelector('.selbar-extra[data-axis="bg"]', { timeout: 3000 })
+  await pick('.selbar-extra[data-axis="bg"] .sel-swatch[data-slot="yellow"]')
+  await page.waitForFunction(() => window.__qua.marks().some((m) => m.type === 'bg:yellow'), null, { timeout: 3000 })
+  const highlighted = await barState()
+  assert(highlighted.highlightOn === '1', `bg:yellow 与高亮按钮是同一状态：${JSON.stringify(highlighted)}`)
+  assert(highlighted.chip.includes('yellow'), `bg 入口色标同步：${JSON.stringify(highlighted.chip)}`)
+
+  // ⑤ 选区塌 ⇒ 气泡与展开态一起消失；再划选不残留
+  await page.keyboard.press('ArrowRight')
+  await page.waitForFunction(() => document.querySelectorAll('.selbar').length === 0, null, { timeout: 3000 })
+  await selectWord()
+  const fresh = await barState()
+  assert(fresh.extra.length === 0, `重新划选不该残留上次的二级：${JSON.stringify(fresh.extra)}`)
+
+  await ctx.close()
+  return '主条只留 2 个值轴入口、二级 7 槽向上长不盖选区、当前色标、点当前色即取消、高亮与 bg 黄槽同源'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

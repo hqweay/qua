@@ -9,7 +9,7 @@
  *   一抢焦点原生选区就塌了，加粗就加到了空选区上。
  */
 import { keyLabel, type Binding } from '../../core/infra/bindings.ts'
-import { COLOR_SLOTS, type ColorSlot } from '../../core/model/runs.ts'
+import { COLOR_SLOTS, type ColorAxis, type ColorSlot } from '../../core/model/runs.ts'
 import { DECL_BY_NAME, type CommandDecl } from '../../core/commands/index.ts'
 // ⚠️ 三个收敛点之三：UI 组件的文案一律走 t
 import { t } from '../../core/infra/msg.ts'
@@ -44,6 +44,12 @@ export interface Row {
    * 写进行里就成了「同一行有两种按法、还得记住哪行是哪行」。
    */
   pick?: RowPick
+  /**
+   * **这一行是某个颜色值轴的入口**（只用于划选气泡）。
+   * 从绑定表的 `Binding.axis` 透传：渲染层据此画当前值色标，并在被展开时
+   * 把该轴的 7 个槽放进二级。色板由此从「渲染层特判」变成表里的一行数据。
+   */
+  axis?: ColorAxis
 }
 
 /** 一行的选中对象。`fresh` 的那两种还没有块 id（要在落点里当场建出来）。 */
@@ -90,6 +96,7 @@ export function rowsFromBindings(
       command: b.command,
       args: b.args,
       keyHint: b.key ? keyLabel(b.key) : keyHints.get(b.command),
+      ...(b.axis ? { axis: b.axis } : {}),
     }
   })
 }
@@ -108,6 +115,11 @@ export interface MenuOpts {
   focusSearch?: boolean
   placeholder?: string
   emptyText?: string
+  /**
+   * 预填的查询词，聚焦时**全选**：「用已有文本当搜索起点」的入口（划选关联）要能
+   * 一打开就看到默认结果，直接打字就改写它。不给＝空输入框，其余入口不变。
+   */
+  initialQuery?: string
   /**
    * 选中一行。`mods` 是**按下时的修饰键**：同一个对象在不同按键下可以落到不同结果
    * （`#名` 按 `Enter` 插进正文、按 `⌥Enter` 归到本块），所以这枚参数必须在选中那一刻取。
@@ -291,6 +303,7 @@ export class Layers {
       input.className = 'layer-input'
       input.placeholder = o.placeholder ?? t('ui.search.placeholder')
       input.spellcheck = false
+      if (o.initialQuery !== undefined) input.value = o.initialQuery
       // 组合期的输入法中间态不重建候选；组合结束只发一次（与随后的同值 input 合并）
       input.addEventListener('compositionstart', () => this.gate.compositionStart())
       input.addEventListener('compositionend', () => {
@@ -317,7 +330,10 @@ export class Layers {
     this.place(box, o.anchor)
     if (o.searchable !== false && o.focusSearch !== false) {
       const input = this.inputEl
-      requestAnimationFrame(() => input?.focus())
+      requestAnimationFrame(() => {
+        input?.focus()
+        if (o.initialQuery) input?.select()
+      })
     }
   }
 
@@ -507,16 +523,21 @@ export class Layers {
    *      且「气泡开着」不是一个"模态"状态（用户还能继续打字）；
    *   3. **锚在选区上方**（不是下方——下方会盖住刚选中的那行）。
    */
-  openSelectionBar(o: { rows: Row[]; anchor: DOMRect | null; activeMarks: Set<string>; onPick: (row: Row) => void }): void {
+  openSelectionBar(o: {
+    rows: Row[]
+    anchor: DOMRect | null
+    activeMarks: Set<string>
+    /** 当前展开的值轴（null ＝ 只画主条）；状态由装配层持有，气泡只负责画 */
+    expandedAxis: ColorAxis | null
+    onPick: (row: Row) => void
+  }): void {
     const box = document.createElement('div')
     box.className = 'selbar'
     box.setAttribute('role', 'toolbar')
+    const stack = document.createElement('div')
+    stack.className = 'selbar-stack'
+    box.appendChild(stack)
 
-    /**
-     * 色板：ink/bg 各一排。值轴不是开关（一个轴上只能有一个槽），所以不走 Row/绑定表，
-     * 直接按轴渲染一组色点；按压态读 `activeMarks` 里的 `键:槽` 描述符。
-     * 点下去仍走 `onPick` ⇒ 与格式按钮同一条命令路径（撤销、重画、按压态刷新都免费）。
-     */
     const SWATCH_LABEL: Record<ColorSlot, string> = {
       red: t('ui.color.red'),
       orange: t('ui.color.orange'),
@@ -526,77 +547,98 @@ export class Layers {
       violet: t('ui.color.violet'),
       gray: t('ui.color.gray'),
     }
-    const addSwatches = (): void => {
-      for (const axis of ['ink', 'bg'] as const) {
-        const axisTitle = axis === 'ink' ? t('menu.label.ink') : t('menu.label.bg')
-        const group = document.createElement('div')
-        group.className = 'sel-swatches'
-        group.dataset.axis = axis
-        const lead = document.createElement('span')
-        lead.className = 'sel-swatches-lead'
-        lead.dataset.tip = axisTitle
-        renderIcon(lead, axis === 'ink' ? 'lucide:baseline' : 'lucide:highlighter', 'circle-help', 'sm')
-        group.appendChild(lead)
-        for (const slot of COLOR_SLOTS) {
-          const b = document.createElement('button')
-          b.type = 'button'
-          b.className = 'sel-swatch'
-          b.dataset.slot = slot
-          b.dataset.tip = `${axisTitle}·${SWATCH_LABEL[slot]}`
-          if (o.activeMarks.has(`${axis}:${slot}`)) b.dataset.on = '1'
-          // ⚠️ mousedown 而不是 click：click 之前浏览器会先清掉选区（同格式按钮的踩坑）
-          b.addEventListener('mousedown', (e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            o.onPick({
-              id: `swatch-${axis}-${slot}`,
-              label: `${axisTitle}·${SWATCH_LABEL[slot]}`,
-              command: `core.anno/set-${axis}`,
-              args: { slot },
-            })
+    const axisTitle = (axis: ColorAxis): string => (axis === 'ink' ? t('menu.label.ink') : t('menu.label.bg'))
+
+    /** 当前值：`activeMarks` 里的 `轴:槽` 描述符（一个轴最多一个槽） */
+    const currentOf = (axis: ColorAxis): ColorSlot | undefined =>
+      COLOR_SLOTS.find((slot) => o.activeMarks.has(`${axis}:${slot}`))
+
+    /**
+     * 二级值域：**只画被展开的那一轴**，且仍走 `onPick` ⇒ 与格式按钮同一条命令路径
+     * （撤销、重画、按压态刷新都免费）。点当前槽即取消（`toggleMark` 的既有语义），
+     * 所以不另列一颗「无」。二级在 `.selbar-stack` 里排在主条之前 ⇒ 视觉上向上长。
+     */
+    const addExtra = (axis: ColorAxis): void => {
+      const extra = document.createElement('div')
+      extra.className = 'selbar-extra'
+      extra.dataset.axis = axis
+      const lead = document.createElement('span')
+      lead.className = 'selbar-extra-lead'
+      lead.textContent = axisTitle(axis)
+      extra.appendChild(lead)
+      const current = currentOf(axis)
+      for (const slot of COLOR_SLOTS) {
+        const b = document.createElement('button')
+        b.type = 'button'
+        b.className = 'sel-swatch'
+        b.dataset.slot = slot
+        const on = slot === current
+        if (on) b.dataset.on = '1'
+        b.dataset.tip = on ? t('ui.selbar.colorCurrent') : `${axisTitle(axis)}·${SWATCH_LABEL[slot]}`
+        // ⚠️ mousedown 而不是 click：click 之前浏览器会先清掉选区（同格式按钮的踩坑）
+        b.addEventListener('mousedown', (e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          o.onPick({
+            id: `swatch-${axis}-${slot}`,
+            label: `${axisTitle(axis)}·${SWATCH_LABEL[slot]}`,
+            command: `core.anno/set-${axis}`,
+            args: { slot },
           })
-          group.appendChild(b)
-        }
-        box.appendChild(group)
+        })
+        extra.appendChild(b)
       }
+      stack.appendChild(extra)
     }
 
+    if (o.expandedAxis) addExtra(o.expandedAxis)
+
+    const row = document.createElement('div')
+    row.className = 'selbar-row'
+    stack.appendChild(row)
+
     let lastGroup = ''
-    let swatchesAdded = false
-    o.rows.forEach((r, i) => {
+    o.rows.forEach((r) => {
       const g = groupTitle(r.group)
       if (g && g !== lastGroup) {
-        // 格式组画完、进入下一组之前插色板：它属于格式，不该被引用组隔开
-        if (lastGroup !== '' && !swatchesAdded) {
-          addSwatches()
-          swatchesAdded = true
-        }
         lastGroup = g
         const sep = document.createElement('span')
         sep.className = 'sel-sep'
-        box.appendChild(sep)
+        row.appendChild(sep)
       }
       const b = document.createElement('button')
       b.type = 'button'
       b.className = 'sel-btn'
       b.dataset.command = r.command ?? ''
+      if (r.axis) b.dataset.axis = r.axis
       if (r.icon) renderIcon(b, r.icon, 'circle-help')
       else b.textContent = r.label
       b.dataset.tip = `${r.label}${r.keyHint ? `（${r.keyHint}）` : ''}`
-      // 按压态：选区里已经有这种格式 ⇒ 这一颗亮着（承原工具栏的 `data-on`）
-      const suffix = (r.command ?? '').startsWith('core.anno/toggle-') ? (r.command ?? '').slice('core.anno/toggle-'.length) : ''
-      if (suffix && o.activeMarks.has(suffix)) b.dataset.on = '1'
+      if (r.axis) {
+        // 值轴入口：当前值只占图标下缘一条 2px 色标，值域进二级（状态与选项分开）
+        const current = currentOf(r.axis)
+        if (current) {
+          const chip = document.createElement('span')
+          chip.className = 'sel-axis-value'
+          chip.dataset.slot = current
+          b.appendChild(chip)
+        }
+        if (o.expandedAxis === r.axis) b.dataset.on = '1'
+      } else {
+        // 按压态：选区里已经有这种格式 ⇒ 这一颗亮着
+        const suffix = (r.command ?? '').startsWith('core.anno/toggle-') ? (r.command ?? '').slice('core.anno/toggle-'.length) : ''
+        // 高亮是 bg 轴的 yellow 槽，直接读真描述符，不再靠装配层临时映射出 `highlight`
+        const on = suffix === 'highlight' ? o.activeMarks.has('bg:yellow') : suffix !== '' && o.activeMarks.has(suffix)
+        if (on) b.dataset.on = '1'
+      }
       // ⚠️ mousedown 而不是 click：click 之前浏览器会先清掉选区（同 gutter 的踩坑）
       b.addEventListener('mousedown', (e) => {
         e.preventDefault()
         e.stopPropagation()
         o.onPick(r)
       })
-      void i
-      box.appendChild(b)
+      row.appendChild(b)
     })
-    // 只有一组（没有引用组）时色板放末尾
-    if (!swatchesAdded) addSwatches()
     document.body.appendChild(box)
     this.selEl?.remove()
     this.selEl = box
@@ -605,6 +647,8 @@ export class Layers {
      *
      * 落位仍走同一份 `placeNear` —— 与菜单的差别只是偏好方向（`side: 'above'`）
      * 与水平居中。此前这里另写了一遍钳位，于是「加一种对齐」只能加到一处。
+     * 二级展开时 `boxH` 变大，`above` 会把**整体**往上推：这是二级必须画在
+     * 主条上方（而不是像虎鲸那样向下弹）的原因，选区始终不被盖住。
      */
     const a = o.anchor ?? null
     const at = placeNear({

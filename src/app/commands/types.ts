@@ -263,6 +263,8 @@ export interface MentionDeps {
   selection: () => { blockId: string; start: number; end: number; text: string } | null
   /** 新建页块之后刷新左槽的页清单（页数变了，清单不能停在旧数） */
   refreshList: () => void
+  /** 新建**普通块**之后重画这一屏（它落在宿主的下一个兄弟，不重画就看不见） */
+  refreshEditor: () => void
   /** 转完把光标落到引用之后（重画会摘掉原选区；不落光标等于让用户重新点一次） */
   placeCaret: (blockId: string, offset: number) => void
 }

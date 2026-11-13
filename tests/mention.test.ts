@@ -14,6 +14,7 @@ import {
   derivedRecordsOf,
   mentionSnippet,
   mentionSpotsOf,
+  resolveRef,
   BlockStore,
   type Block,
 } from '../src/core/index.ts'
@@ -86,6 +87,32 @@ test('转换：原位一枚引用 run（label 快照、无 anchor），前后 ru
   assert.deepEqual(next.slice(at + 1), textRuns(' 讨论一下'))
   // 投影口径：原子不进投影，纯文本只剩前后的字
   assert.equal(plainText(next), '和  讨论一下')
+})
+
+test('替换路径：anchor 留住用户写的字，目标改名也不把它顶掉', () => {
+  const content = textRuns('和 现在 讨论一下')
+  const spot = { start: 2, end: 4, text: '现在' }
+  const target = b('target-time', '时间管理')
+  const next = convertSpotToRef(content, spot, target.id, '时间管理', spot.text)
+  assert.ok(next)
+  const run = next.find((r) => r.t === 'ref') as RefRun
+  assert.equal(run.anchor, '现在')
+  assert.equal(run.label, '时间管理', 'label 仍是目标的名字快照')
+  // 显示名的决议链只有 resolveRef 一条：目标在 ⇒ anchor 压过现算名
+  const view = resolveRef((id) => (id === target.id ? target : undefined), run)
+  assert.equal(view.state, 'resolved')
+  assert.equal(view.label, '现在', `选中的字不能被目标名顶掉：${JSON.stringify(view)}`)
+  // 目标悬空时同样：anchor 优先，label 只在没有 anchor 时才兜底
+  assert.equal(resolveRef(() => undefined, run).label, '现在')
+})
+
+test('替换路径：anchor 空串＝不写键；不传＝插入路径原样', () => {
+  const content = textRuns('和 现在 讨论一下')
+  const spot = { start: 2, end: 4, text: '现在' }
+  const bare = convertSpotToRef(content, spot, 'to', '时间管理')
+  const empty = convertSpotToRef(content, spot, 'to', '时间管理', '')
+  assert.equal((bare!.find((r) => r.t === 'ref') as RefRun).anchor, undefined)
+  assert.equal((empty!.find((r) => r.t === 'ref') as RefRun).anchor, undefined)
 })
 
 test('转换：区间已不是那个词 ⇒ 拒写；区间里有原子 ⇒ 拒写', () => {

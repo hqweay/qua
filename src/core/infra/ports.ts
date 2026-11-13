@@ -15,7 +15,7 @@
  * 唯一放行的是 `DOMRect`，因为「菜单挂在哪个矩形旁边」是**命令参数的形状**，不是 DOM 操作。
  */
 import type { BlockEditor } from '../../view/editor/editor.ts'
-import type { CtxKeys } from '../index.ts'
+import type { ColorAxis, CtxKeys } from '../index.ts'
 import type { UndoKind } from '../model/undo.ts'
 import type { QueryNode, QuerySpec } from '../query/query.ts'
 import type { Cardinality, ChoiceScope, UiPosition } from '../props/props.ts'
@@ -39,6 +39,18 @@ export type PanelKind = 'context' | 'bindings' | 'shortcuts' | 'model'
  *    用「有没有 page/tag 露面」去猜会让标签块永远加不了自己的属性（真踩过）。
  */
 export type PropTarget = 'own' | 'declared'
+
+/**
+ * **选区关联的目标**（划选气泡「一键」与「选择关联目标」共用一条命令）。
+ *
+ * 缺省＝智能默认：同名地址存在就指向它，不存在就建页。选择器只补两件事：
+ * 「指向这一个已有块」和「要新建时是页还是普通块」——**不传选中的字**，
+ * 那是正文里已经存在的用户内容，写入前由编辑器现取并复核。
+ */
+export interface SelectionToRefRequest {
+  to?: string
+  create?: 'page' | 'block'
+}
 
 /**
  * 新建属性时对「已有同名同 kind 的定义」怎么办。
@@ -155,6 +167,13 @@ export interface App {
   focusTitle(): void
   showRefPicker(): void
   /**
+   * **切换划选气泡展开哪个颜色值轴**（同一轴再点一次＝收起）。
+   *
+   * 只切 UI 状态、不写库、不进撤销；与 `showRefPicker` 同一条分工——
+   * 命令报「要选值了」，浮层归装配层。选区塌了由 `refreshSelectionBar` 一并清掉。
+   */
+  toggleColorAxis(axis: ColorAxis): void
+  /**
    * **备注浮窗**：锚在被备注文本旁的可编辑浮层（浮层归装配层，与 showRefPicker
    * 同一条理由——命令 handler 不碰 DOM）。
    * `blockId`／`annoId` 定锚（实时取矩形：正文滚动/重排浮层跟着走，锚没了自动关）；
@@ -265,14 +284,18 @@ export interface App {
    */
   convertMention(blockId: string, to: string, start: number, end: number): boolean
   /**
-   * **选区转引用**（划选气泡那一颗）。
+   * **选区关联**（划选气泡那一颗，以及它的「选择关联目标」逃逸口）。
    *
-   * 选中的是一串纯文本：同名地址已经存在 ⇒ 指向它；不存在 ⇒ 建一个页块再指向它。
-   * 建目标与替换正文在**同一笔事务**里，一次撤销回到原文（也会撤掉顺手建的页）。
+   * 选中的是一串纯文本：原位换成一枚 `RefRun`，**这几个字写成 `anchor`**——
+   * 目标可以叫别的名字，用户写下的字不该被目标现算名顶掉。
+   * 不带参数＝一键默认（同名地址，没有就建页）；带 `req`＝选择器挑过的目标。
+   * 建目标与替换正文在**同一笔事务**里，一次撤销回到原文（也会撤掉顺手建的页／块）。
    *
    * @returns 真的转换了才 `true`
    */
-  convertSelectionToRef(): boolean
+  convertSelectionToRef(req?: SelectionToRefRequest): boolean
+  /** 打开「关联到…」选择器（划选气泡的逃逸口）；浮层归装配层，handler 不碰 DOM */
+  showSelectionRefPicker(): void
   /* 属性（属性是块第一公民；值在块上 `props[propId]`，一块一槽） */
   setPropValue(blockId: string, propId: string, value: unknown): void
   clearPropValue(blockId: string, propId: string): void

@@ -198,8 +198,21 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     app.insertTag(tag)
     return true
   },
-  // 划选气泡那一颗：选区 → 同名引用（没有同名地址就新建页）。复核、事务、toast 都在门面那一步
-  'core.editor/selection-to-ref': (_a, app) => app.convertSelectionToRef(),
+  /**
+   * 划选气泡那一颗（一键默认）与「关联到…」选择器（带目标）共用这一条命令。
+   * 选择器只报「指向谁／新建成什么」，选中的字仍由门面从模型选区现取并复核——
+   * 浮层抢过焦点，把字塞进参数反而会在正文改动后写错区间。
+   */
+  'core.editor/selection-to-ref': (a, app) =>
+    app.convertSelectionToRef({
+      ...(S(a.to) ? { to: S(a.to) } : {}),
+      ...(a.create === 'block' ? { create: 'block' as const } : {}),
+    }),
+  // 逃逸口：打开「关联到…」搜索窗（浮层归装配层，与 showRefPicker 同一条理由）
+  'core.editor/pick-selection-ref': (_a, app) => {
+    app.showSelectionRefPicker()
+    return true
+  },
   // 写备注：块选区态优先（跨块＝一条备注锚 N 个整块），否则划选单块。
   // 锚与备注块在同一笔事务里；写作面＝就地浮窗（装配层开，handler 不碰 DOM）
   'core.notes/create': (_a, app) => {
@@ -483,6 +496,9 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     app.ed.clearMarksAtSel()
     return true
   },
+  // 值轴入口：只切气泡的展开态（不写库、不进撤销）；同一轴再点由装配层收起
+  'core.anno/pick-ink': (_a, app) => { app.toggleColorAxis('ink'); return true },
+  'core.anno/pick-bg': (_a, app) => { app.toggleColorAxis('bg'); return true },
 
   /* ---- 历史 ---- */
   'core.history/undo': (_a, app) => {

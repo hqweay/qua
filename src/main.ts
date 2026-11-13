@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind } from './core/index.ts'
+import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind, type ColorAxis } from './core/index.ts'
 import { choiceDisplayLabel, cardinalityOf, queryFieldsOf, singleValueOf, valueListOf } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
@@ -34,6 +34,7 @@ import {
 import { Layers, paletteRows, rowsFromBindings, type PickMods, type Row } from './ui/overlay/layers.ts'
 import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from './app/retrieval/triggers.ts'
 import { openTagChoice } from './app/retrieval/name-choice.ts'
+import { selectionRefRows } from './app/retrieval/selection-ref-rows.ts'
 import { DockWindows } from './ui/dock/dock-windows.ts'
 import { DockMountCard } from './ui/cards/mount-card.ts'
 import { SearchCard } from './ui/cards/search-card.ts'
@@ -712,27 +713,122 @@ const triggers = createTriggers(triggerDeps)
  * ⚠️ 气泡**不进 `layers.open`**（那是菜单/命令面板的模态状态）：它在的时候用户还能打字，
  *    Esc 也不该关它 —— 关它的唯一条件是「选区没了」。
  */
+/**
+ * 「关联到…」搜索窗开着的时候，划选气泡要**挂起**。
+ *
+ * 为什么必须显式挂起：气泡的层级 `--ui-z-selbar` 比菜单的 `--ui-z-menu` 高，而它唯一的关闭条件是
+ * 「选区没了」——浮层抢焦点并不必然清掉模型选区，于是气泡会盖在搜索结果上面。
+ * 这里是「选区存在期间常驻」那条纪律的**唯一例外**：用户此刻在与同一个选区做决定。
+ */
+let selectionRefPickerOpen = false
+
+/**
+ * 划选气泡当前展开的颜色值轴。
+ *
+ * 为什么由装配层持有：`core.anno/pick-*` 是命令，命令只说「要选值了」，
+ * 浮层与它的展开态归装配层（`showRefPicker` 同一条分工）；气泡每次刷新都重建 DOM，
+ * 把状态塞进 DOM 会随重建丢掉。选区一塌就在这里清掉，不另设超时或关闭按钮。
+ */
+let selColorAxis: ColorAxis | null = null
+
+/** 同一轴再点一次＝收起；不写库、不进撤销 */
+function toggleColorAxis(axis: ColorAxis): void {
+  selColorAxis = selColorAxis === axis ? null : axis
+  refreshSelectionBar()
+}
+
 function refreshSelectionBar(): void {
+  if (selectionRefPickerOpen) {
+    layers.closeSelectionBar()
+    selColorAxis = null
+    return
+  }
   const ctx = uiCtx()
   const rows = rowsFromBindings(resolveBindings('selection', ctx), keyHints())
   const rect = ed.selectionRect()
   // 气泡开着时不要被「菜单打开」这类状态误关：选区还在就该在
   if (rows.length === 0 || !rect) {
     layers.closeSelectionBar()
+    selColorAxis = null
     return
   }
-  const activeMarks = new Set(ed.marksAtSel())
-  // ⌘E 那颗「高亮」按钮仍叫 toggle-highlight：它现在的语义是 bg:yellow，按压态认这个描述符
-  if (activeMarks.has('bg:yellow')) activeMarks.add('highlight')
   layers.openSelectionBar({
     rows,
     anchor: rect,
-    activeMarks,
+    activeMarks: new Set(ed.marksAtSel()),
+    expandedAxis: selColorAxis,
     onPick: (row) => {
       if (row.command) registry.invoke(row.command, (row.args as Record<string, unknown>) ?? {}, 'selection', ctx)
+      // 值用完即收：色点和入口都走同一条 onPick，只有真正选了值才收二级
+      if (row.command === 'core.anno/set-ink' || row.command === 'core.anno/set-bg') selColorAxis = null
       // 命令改了格式 ⇒ 气泡的**按压态**要跟着变（高亮那颗该亮起来）。
       // 不重刷的话，点完加粗按钮看不出"已经加粗了"。
       refreshSelectionBar()
+    },
+  })
+}
+
+/**
+ * **「关联到…」**：划选气泡一键按钮旁边的逃逸口。
+ *
+ * 一键直达是高频路径（同名地址／没有就建页，零决策），只有「想关联别的页或块」
+ * 才展开这里。首项预选、↵ 即完成，且首项恒等价于那颗一键按钮 ⇒ 逃逸口不额外
+ * 收一次决策的税。查询词预填选中的字且全选，直接打字就是改写。
+ *
+ * ⚠️ 冻结的是**模型选区**（`ed.sel`），不是 DOM Range：浮层要抢焦点让用户打字，
+ *    原生 Range 会塌；模型选区不会，命令写入也只认它。取消时用 `setSel` 整段还回去。
+ * ⚠️ 搜索过程零写入：行源只读，所有落库发生在 `onPick` 那一笔命令事务里。
+ */
+function showSelectionRefPicker(): void {
+  const spot = ed.selectionSpot()
+  if (!spot) return
+  const frozenSel = ed.sel ? { ...ed.sel } : null
+  const anchor = ed.selectionRect()
+  const rows = selectionRefRows({ kb, selfId: spot.blockId })
+  /** `closeMenu` 在 `onPick` 之前回调 `onClose`；下一帧靠它区分「取消」与「已选」 */
+  let picked = false
+  selectionRefPickerOpen = true
+  layers.closeSelectionBar()
+  layers.openMenu({
+    rows: rows(spot.text),
+    anchor,
+    title: t('ui.selRef.title'),
+    width: 480,
+    searchable: true,
+    focusSearch: true,
+    initialQuery: spot.text,
+    placeholder: t('ui.selRef.placeholder'),
+    emptyText: t('ui.selRef.empty'),
+    onQuery: (q) => layers.setRows(rows(q)),
+    onPick: (row, mods) => {
+      const pick = row.pick
+      if (!pick) return
+      picked = true
+      const args: Record<string, unknown> = {}
+      if (pick.kind === 'newPage') {
+        // ↵ 不带 create ⇒ 与一键默认同义；⌥↵ 强制建普通块
+        if (mods.altKey) args.create = 'block'
+      } else if (pick.kind === 'block' || pick.kind === 'page' || pick.kind === 'tag') {
+        args.to = pick.id
+      } else return
+      registry.invoke('core.editor/selection-to-ref', args, 'selection', uiCtx())
+    },
+    onClose: () => {
+      selectionRefPickerOpen = false
+      /** 同步还模型选区：`closeMenu` 先回调这里、再调 `onPick`，命令紧接着要读它 */
+      if (frozenSel) ed.setSel(frozenSel)
+      refreshSelectionBar()
+      /**
+       * 取消（Esc／点外）还要把整段选区**投影回 DOM**：焦点归还触发的那一轮
+       * `selectionchange` 会把浏览器原生 Range 折叠，而气泡靠 `selectionRect()`
+       * 定位 —— 只还模型选区的话用户看到的是「Esc 之后选区没了」。等这一轮
+       * 抖动过去再投一次；选中路径上 `picked` 已置真，别去动刚落好的光标。
+       */
+      requestAnimationFrame(() => {
+        if (picked) return
+        if (frozenSel) ed.setSel(frozenSel)
+        refreshSelectionBar()
+      })
     },
   })
 }
@@ -1590,6 +1686,8 @@ const app: App = {
   get ed() {
     return ed
   },
+  showSelectionRefPicker,
+  toggleColorAxis,
 
   /**
    * **备注浮窗**：锚在被备注文本旁的可编辑浮层（手势落点判据：写作面在原地，不跳收集清单）。
@@ -1729,6 +1827,8 @@ const app: App = {
     // 选区从**活动编辑器**现取：正文/挂载区/侧槽都可能发起划选
     selection: () => ed.selectionSpot(),
     refreshList: () => renderDocks(),
+    // 新建的普通块落在这一屏的宿主旁边；活动编辑器可能是挂载区/侧槽里的那一台
+    refreshEditor: () => ed.reloadFromStore(),
     placeCaret: (blockId, offset) => ed.placeCaret(blockId, offset),
   }),
   ...viewConfigCommands({

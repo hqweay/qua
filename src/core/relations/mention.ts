@@ -3,9 +3,14 @@
  *
  * 提及栏里的「候选引用」是**还没指向**目标的正文：`{text} ∧ ¬{ref}` 收进来的那一批行。
  * 转换做的是一次程序化内容编辑——把正文里出现目标名字的那一处切开、原位插一枚
- * 引用 run（`label` ＝ 插入时刻的名字快照、**不写 `anchor`**：锚文本是用户事后显式
- * 改的那一处显示名，插入路径一律不带它）。转换之后这一块有了指向目标的边，
+ * 引用 run（`label` ＝ 插入时刻的名字快照）。转换之后这一块有了指向目标的边，
  * 同一个关系索引里它从「提及」（`{text} ∧ ¬{ref}`）换到「引用」（`{ref}`）。
+ *
+ * ⚠️ **`anchor` 只在「这里本来就有用户写的字」的路径上写**：提及命中的那段字就是
+ *    目标此刻的名字，不写 anchor 才能跟着目标改名走；划选转引用相反——用户选的是
+ *    自己写的字，目标可以叫别的名字，不写 anchor 的话 `resolveRef` 会拿目标现算名
+ *    把这几个字顶掉（选中「现在」指向「时间管理」，正文就变成「时间管理」）。
+ *    `anchor` 由**调用方**按路径决定，纯函数不替两边猜。
  *
  * 匹配跑在**投影**上（`plainText`，原子不占格）：`{text}` 条件怎么收，这里的
  * 出现处就怎么找——两份口径各写一遍，就会出现「列表说提到了、转换却找不到」。
@@ -56,17 +61,26 @@ export function mentionSpotsOf(content: Content, word: string): MentionSpot[] {
 }
 
 /**
- * 把一处提及换成指向 `to` 的引用 run（`label` ＝ 名字快照，不写 `anchor`）。
+ * 把一处纯文本换成指向 `to` 的引用 run（`label` ＝ 目标名字快照）。
+ *
+ * `anchor` 是**这一处想显示什么**：只有替换「用户已经写下的字」时才传（通常是
+ * `spot.text`），插入路径不传。写空串＝不写这个键，和 `RefRun.anchor` 的口径一致。
  *
  * 写前复核：区间里必须仍是那串纯文本。渲染与点击之间正文可能已经变了——
  * 复核不过就返回 `null`，**一个字节都不写**；调用方据此给一句「没转成」的实话，
  * 而不是把别的字换成引用。
  */
-export function convertSpotToRef(content: Content, spot: MentionSpot, to: string, label: string): Run[] | null {
+export function convertSpotToRef(
+  content: Content,
+  spot: MentionSpot,
+  to: string,
+  label: string,
+  anchor?: string,
+): Run[] | null {
   const slice = sliceRuns(content, spot.start, spot.end)
   if (slice.length === 0 || slice.some((r) => r.t !== 'text')) return null
   if (plainText(slice) !== spot.text) return null
-  const run: RefRun = { id: uuidv7Hex(), t: 'ref', to, label }
+  const run: RefRun = { id: uuidv7Hex(), t: 'ref', to, label, ...(anchor ? { anchor } : {}) }
   return spliceRuns(content, spot.start, spot.end, [run])
 }
 
