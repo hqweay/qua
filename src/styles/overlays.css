@@ -28,9 +28,15 @@
   position: fixed;
   z-index: var(--ui-z-menu);
   background: var(--ui-surface-raised);
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-md);
-  box-shadow: var(--ui-shadow-pop);
+  /*
+    菜单也是「临时面」：**一种分离手段** —— 影（三层，内描边代替实边框）。
+    原来实边框（`--ui-border`，满强度）与 pop 影同时上，读作「贴在纸上的卡片」。
+    分隔线仍留在内部（`.layer-head` 的 border-bottom）—— 那是**语义断开**，
+    不是外壳的分离，两者不是一回事。
+  */
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-float);
+  box-shadow: var(--ui-shadow-float);
   overflow: hidden;
   animation: overlay-in var(--ui-dur-2) var(--ui-ease-out);
 }
@@ -228,9 +234,10 @@
   min-width: 240px;
   max-width: 380px;
   background: var(--ui-surface-raised);
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-md);
-  box-shadow: var(--ui-shadow-pop);
+  /* 与菜单同一条：外壳靠影分层；大面积再加一根**极淡**边框描出边界（不是满强度的框） */
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-float);
+  box-shadow: var(--ui-shadow-float);
   padding: var(--ui-gap-4);
   font-size: var(--ui-fs-sm);
   animation: overlay-in var(--ui-dur-2) var(--ui-ease-out);
@@ -330,7 +337,8 @@
   color: var(--ui-text-secondary);
 }
 .popover button:hover {
-  background: var(--ui-accent-soft);
+  /* 悬停是中性的「指针在这儿」，不是「我选定了它」——与选中态分家 */
+  background: var(--ui-bg-hover);
   color: var(--ui-text);
 }
 
@@ -879,9 +887,9 @@
 .confirm {
   width: min(360px, calc(100vw - 32px));
   background: var(--ui-surface-raised);
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-md);
-  box-shadow: var(--ui-shadow-pop);
+  /* 遮罩之上也是「临时面」：影分层，不叠实边框（遮罩已经把身后压暗了） */
+  border-radius: var(--ui-radius-float);
+  box-shadow: var(--ui-shadow-float);
   padding: var(--ui-gap-4) var(--ui-gap-5);
 }
 .confirm-title {
