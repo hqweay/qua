@@ -28870,6 +28870,29 @@ await check('T303 身份色：单色借色／多色环／chip 各染各色；摘
   }, info.blockId)
   assert(ring.ringEl && ring.ringBg.includes('conic-gradient'), `两个有色标签 ⇒ 应有外环元素（conic）：${JSON.stringify(ring)}`)
   assert(ring.dot !== 'rgba(0, 0, 0, 0)' && !ring.dot.includes('gradient'), `内点应取第一色（不是整点铺色环）：${JSON.stringify(ring)}`)
+
+  // ⑤ 槽里有脸 ⇒ 环撤销，色降级为染脸：环与脸是两个声音抢同一个槽
+  //    （小面积上 icon＋环互相糊），色只染「当前的形状」。
+  await page.evaluate(({ blockId }) => window.__qua.invoke('core.block/set-icon', { blockId, icon: 'lucide:star' }), info)
+  await page.waitForTimeout(150)
+  const faced = await page.evaluate((blockId) => {
+    const marker = document.querySelector(`.blk[data-block-id="${blockId}"] > .left .marker`)
+    return {
+      ringEl: Boolean(marker?.querySelector('.marker-ring')),
+      ico: Boolean(marker?.querySelector('.marker-ico')),
+      tint: marker?.style.getPropertyValue('--identity-c') ?? '',
+    }
+  }, info.blockId)
+  assert(faced.ico && !faced.ringEl, `有脸时环应撤销：${JSON.stringify(faced)}`)
+  assert(faced.tint !== '', `有脸时色降级为染脸（--identity-c 仍要写）：${JSON.stringify(faced)}`)
+  // 摘脸 ⇒ 圆点形态回全（环跟着回来）
+  await page.evaluate(({ blockId }) => window.__qua.invoke('core.block/set-icon', { blockId, icon: '' }), info)
+  await page.waitForTimeout(150)
+  const dotBack = await page.evaluate((blockId) => {
+    const marker = document.querySelector(`.blk[data-block-id="${blockId}"] > .left .marker`)
+    return { ringEl: Boolean(marker?.querySelector('.marker-ring')), ico: Boolean(marker?.querySelector('.marker-ico')) }
+  }, info.blockId)
+  assert(!dotBack.ico && dotBack.ringEl, `摘脸应回圆点＋环：${JSON.stringify(dotBack)}`)
   const chips = await page.evaluate((blockId) => {
     const list = [...document.querySelectorAll(`.blk[data-block-id="${blockId}"] .blk-tags .tag-chip`)]
     return list.map((el) => {
