@@ -1086,13 +1086,15 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      * `contenteditable=false` 只挡住「往里打字」，挡不住浏览器在外面找一个落点，
      * 所以拦在 `mousedown`：默认行为不发生 ＝ 插入点原地不动。
      *
-     * ⚠️ 豁免**拖拽把手**（`data-drag-for`，也就是块标）：把手走原生 `dragstart`，
-     *    `mousedown` 被吞掉连拖拽一起没（实测：preventDefault 之后 `dragstart` 一次都不派发）。
-     *    它的落点由 `click` 那一条收尾（点块标＝聚焦，本来就要重新放光标）。
+     * ⚠️ 豁免**一切起拖原生拖拽的元素**（块标 `[data-drag-for]`、行尾可重排的标签
+     *    chip `[draggable="true"]`）：`mousedown` 被吞掉连拖拽一起没
+     *    （实测：preventDefault 之后 `dragstart` 一次都不派发）。
+     *    光标被挪走的副作用由各自的 click 收尾（块标＝聚焦、chip＝打开标签页），
+     *    拖成的那次没有 click，靠拖完的重渲染复原。
      */
     const tx = target.closest<HTMLElement>('.tx')
     const inWritable = Boolean(tx && !tx.closest('[data-readonly]'))
-    if (!inWritable && !target.closest('[data-drag-for]') && target.closest('.blk')) {
+    if (!inWritable && !target.closest('[data-drag-for], [draggable="true"]') && target.closest('.blk')) {
       e.preventDefault()
     }
 
