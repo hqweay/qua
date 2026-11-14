@@ -58,7 +58,11 @@ jobs:
             exit 1
           fi
 
-      - run: pnpm gate:web
+      # ⚠️ 不在 Linux 上跑浏览器冒烟：几何/划选类断言依赖字体度量，Linux runner 上
+      #    长期红（T68 自 2026-10-24 起，见 gate.yml 的运行史）——那是冒烟套件的存量债，
+      #    不是这次打包的门槛。真平台验证两处都有：本地 push 前 `pnpm gate:queued`
+      #    （macOS 全量），与本流水线 mac job 的 `check:electron`。这里只留确定性的三面：
+      - run: pnpm arch:check && pnpm typecheck && pnpm test:core
 
   mac:
     name: macOS（先验后包）
