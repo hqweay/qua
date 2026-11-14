@@ -15,9 +15,12 @@
  *    整对按钮只兜住「点名字／点空白」那条老路（开面板）。
  * ⚠️ 值文本**只在这里格式化**：gutter 图标、表格列、面板各自有自己的画法，
  *    但「这一行写什么」只有这一份，免得同一块在四个面上给出四种说法。
+ * ⚠️ **不画来源徽章**（检视卡有「色点＋#名」）：这里是读值的投影面，来源在
+ *    这一面没有动作可承接——一枚点用户什么也做不了，还得猜它是什么意思；
+ *    归属要编辑时才用得上，点行进面板再看。装饰点还会与块标的身份点撞形。
  */
 import { t } from '../../core/infra/msg.ts'
-import { COLOR_PROP, enginePropText, identityColorCss, isColorValue, isEngineProp, prop } from '../../core/index.ts'
+import { enginePropText, isEngineProp } from '../../core/index.ts'
 import type { BelowFields, FieldRow, PropsLineDensity } from '../../core/index.ts'
 
 export interface PropsLineDeps {
@@ -181,22 +184,7 @@ function pairOf(blockId: string, row: FieldRow, deps: PropsLineDeps, pendingText
   pair.dataset.propId = row.propId
   const name = document.createElement('span')
   name.className = 'blk-prop-name'
-  /**
-   * **标签声明来的行带一枚来源色点**（与检视卡的来源徽章同一套信号）：
-   * 「这条值归哪个标签管」在块下扫视时也读得出来，自有行没有点。
-   * 行内空间小 ⇒ 多来源只点主标签（第一个）一颗；点色用标签自己的显式身份色，
-   * 没配色回落中性（「来自标签」是在场信号，色是标签之间的区分）。
-   */
-  const mainSource = row.sources[0]
-  if (mainSource) {
-    const dot = document.createElement('span')
-    dot.className = 'blk-prop-source-dot'
-    dot.setAttribute('aria-hidden', 'true')
-    const c = prop<string>(mainSource, COLOR_PROP)
-    if (c !== undefined && isColorValue(c)) dot.style.setProperty('--identity-c', identityColorCss(c))
-    name.appendChild(dot)
-  }
-  name.appendChild(document.createTextNode(row.label))
+  name.textContent = row.label
   const value = document.createElement('span')
   value.className = 'blk-prop-value ui-ellipsis'
   value.textContent = pendingText ?? fieldRowText(row, deps.refLabel)

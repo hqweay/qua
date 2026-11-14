@@ -772,24 +772,22 @@
   flex-wrap: wrap;
   gap: var(--ui-gap-1);
 }
-/* 来源徽章＝「来自 ●#名」：点染标签自己的显式身份色（行上的 --identity-c 槽，
-   与块标同一套信号），没配色的标签回落中性——「来自标签」是在场信号，
-   色是标签之间的区分。检视卡（.prop-source）与块下行（.blk-prop）共用一枚点。 */
+/* 来源徽章＝「来自 ●#名」（检视卡专用）：点染标签自己的显式身份色（行上的
+   --identity-c 槽，与块标同一套信号），没配色的标签回落中性——「来自标签」
+   是在场信号，色是标签之间的区分。块下属性行**不画**这枚点：那是读值的
+   投影面，来源在那里没有动作可承接（判据见 props-line.ts 头部）。 */
 .prop-source-tag {
   display: inline-flex;
   align-items: center;
   gap: var(--ui-gap-1);
 }
-.prop-source-dot,
-.blk-prop-source-dot {
-  /* inline-block：块下行里点住在普通 span 内（不是 flex 件），宽高要靠它生效 */
+.prop-source-dot {
   display: inline-block;
   flex: none;
   width: 7px;
   height: 7px;
   border-radius: var(--ui-radius-pill);
   background: var(--identity-c, var(--ui-text-tertiary));
-  vertical-align: middle;
 }
 .prop-row[data-pending='1'] .prop-name {
   color: var(--ui-text-secondary);
