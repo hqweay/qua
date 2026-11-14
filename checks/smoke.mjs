@@ -14300,7 +14300,8 @@ await check('T145b 右键行内原子：引用/标签各有自己的菜单，锚
     return blockId
   }, setup.blockId)
   await page.waitForTimeout(180)
-  const chipMenu = await openMenuAt(`.blk[data-block-id="${tagged}"] .blk-tags .tag-chip`)
+  // ⚠️ 排除引用数徽标（`.tag-chip.ref-badge`——徽标复用 tag-chip 的样式，是另一个东西）
+  const chipMenu = await openMenuAt(`.blk[data-block-id="${tagged}"] .blk-tags .tag-chip:not(.ref-badge)`)
   assert(!chipMenu.missing, '前置：加了标签后应画出 chip')
   assert(chipMenu.title === '行内原子', `右键 chip 也应开自己的菜单：${JSON.stringify(chipMenu)}`)
   assert(chipMenu.rows.includes('从本块摘除标签'), `chip 菜单应能摘归属：${JSON.stringify(chipMenu.rows)}`)
@@ -14309,7 +14310,7 @@ await check('T145b 右键行内原子：引用/标签各有自己的菜单，锚
   const tagGone = await page.evaluate(
     (blockId) => ({
       tags: window.__qua.__editor.store.find(blockId)?.props?._tags ?? [],
-      chips: document.querySelectorAll(`.blk[data-block-id="${blockId}"] .blk-tags .tag-chip`).length,
+      chips: document.querySelectorAll(`.blk[data-block-id="${blockId}"] .blk-tags .tag-chip:not(.ref-badge)`).length,
     }),
     tagged,
   )
