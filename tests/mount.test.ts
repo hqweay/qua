@@ -29,6 +29,7 @@ import {
   PATH_COLUMN,
   derivedTabId,
   isMountsValue,
+  mkPropDef,
   mkTagBlock,
   mkTabId,
   MOUNTS_PROP,
@@ -619,4 +620,28 @@ test('分组候选：只认这批结果里出现过的栏，按覆盖率排序�
     ],
     '按覆盖率排序；不在 fields 里的属性键不进候选',
   )
+})
+
+/** 属性定义页的主视图：谁在用这条声明（全 kind 通用，按 `{prop:{id,exists}}` 问） */
+test('属性定义块的「用到它的块」：条件问「有没有这一栏」，定义块自己不出现', () => {
+  const def = mkPropDef('上映年份', 'number')
+  const declaredByTag = mkTagBlock('电影')
+  declaredByTag.props = { ...declaredByTag.props, _fieldDefs: [def.id] }
+  const emptyRow = b('x', '声明了没填', { props: { _ownProps: [def.id] } })
+  const withValue = b('y', '填了值', { props: { [def.id]: 1999 } })
+  const blocks = [def, declaredByTag, emptyRow, withValue]
+
+  assert.deepEqual(
+    derivedEntriesOf(def).map((e) => e.source),
+    ['usedBy', 'refs', 'notes', 'same', 'mentions'],
+    '定义页第一栏是「用到它的块」',
+  )
+  assert.deepEqual(derivedSpecOf(def, blocks, 'usedBy'), {
+    where: { prop: { id: def.id, exists: true } },
+  })
+  const kb = new MemoryKb(new BlockStore(blocks as Block[]))
+  const hits = derivedRecordsOf(def, kb, 'usedBy').map((r) => r.block.id)
+  assert.ok(hits.includes('x'), '声明了没填的块也是使用者（面板上它就是「待填」那一行）')
+  assert.ok(hits.includes('y'), '有值的块在用')
+  assert.equal(hits.includes(def.id), false, '定义块自己不算使用者')
 })

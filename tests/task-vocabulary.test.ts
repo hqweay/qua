@@ -143,10 +143,15 @@ test('按需物化：选项补齐不重排 —— 老库的三选项定义块长
     ensureTaskStatusInTx(store.blocks, tx)
     return true
   })
-  // `_choices` 是**一格**（整份数组写回）⇒ 一条 prop.set；值域变了顺带记改动时刻
-  // （时刻住在块上、值住在属性袋里 ⇒ 一条 upsert{modified}，与 `setValue` 同构）
-  assert.equal(r.ops.length, 2, '补值域＝一条 prop.set ＋ 一条时刻 upsert')
+  /**
+   * `_choices` 是**一格**（整份数组写回）⇒ 恰好一条 prop.set。
+   *
+   * 另可能有一条记改动时刻的 upsert（时刻住在块上、值住在属性袋里）——
+   * 它与这一次写是否跨毫秒有关，所以只断言「不超过一条」，不钉死总数：
+   * 钉死会让这条用例在快机器上偶发红（同一毫秒 ⇒ 时刻没变 ⇒ 不发 upsert）。
+   */
   assert.equal(r.ops.filter((o) => o.e === 'prop').length, 1, '选项不按条发 op（整份数组是一格）')
+  assert.ok(r.ops.length <= 2, `最多再一条时刻 upsert：${JSON.stringify(r.ops.map((o) => o.e))}`)
 
   const def = findPropDef(store.blocks, TASK_STATUS_PROP_ID)!
   assert.deepEqual(

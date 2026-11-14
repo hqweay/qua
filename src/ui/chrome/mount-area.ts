@@ -185,6 +185,7 @@ interface MountRoots {
 }
 
 export const BUILTIN_LABEL: Record<DerivedSource, MsgId> = {
+  usedBy: 'ui.mount.usedBy',
   refs: 'ui.mount.refs',
   notes: 'ui.mount.notes',
   members: 'ui.mount.members',
@@ -199,6 +200,7 @@ const EMPTY_TEXT: Record<MountEntry['kind'], MsgId> = {
 
 /** 派生栏空态：三种来源各自说一句实话（「还没有人引用它」≠「条件没匹配」） */
 const DERIVED_EMPTY: Record<DerivedSource, MsgId> = {
+  usedBy: 'ui.mount.empty.usedBy',
   refs: 'ui.mount.empty.refs',
   notes: 'ui.mount.empty.notes',
   members: 'ui.mount.empty.members',
@@ -208,6 +210,7 @@ const DERIVED_EMPTY: Record<DerivedSource, MsgId> = {
 
 /** 派生栏的**只读**条件说明（它没有条件可编辑，也没有构建器落点） */
 const DERIVED_WHY: Record<DerivedSource, MsgId> = {
+  usedBy: 'ui.mount.why.usedBy',
   refs: 'ui.mount.why.refs',
   notes: 'ui.mount.why.notes',
   members: 'ui.mount.why.members',

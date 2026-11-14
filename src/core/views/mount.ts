@@ -30,6 +30,7 @@ import { isJournal, journalDate, todayISO } from '../identity/journal.ts'
 import { displayTextOf } from '../identity/alias.ts'
 import { hasList, primaryAliasOf, prop, type Block } from '../model/model.ts'
 import { tagIdsOf } from '../identity/tags.ts'
+import { isPropDef } from '../props/props.ts'
 import { descendantTagIds } from '../identity/tag-tree.ts'
 import { plainText } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
@@ -82,7 +83,7 @@ export type MountHost = { kind: 'block'; blockId: string } | { kind: 'journal' }
  * **规范顺序**：这个数组同时是「没拖过时的默认序」。拖过的顺序住 `_mounts` 的数组位
  * （整条 tab 条一条顺序）；派生栏没有配置，落进去的只是位置标记。
  */
-export const DERIVED_SOURCES = ['members', 'refs', 'notes', 'same', 'mentions'] as const
+export const DERIVED_SOURCES = ['usedBy', 'members', 'refs', 'notes', 'same', 'mentions'] as const
 export type DerivedSource = (typeof DERIVED_SOURCES)[number]
 
 /**
@@ -260,6 +261,8 @@ const SPEC_MENTIONS: QuerySpec = { where: { all: [{ text: '$self' }, { not: { re
  */
 export function derivedEntriesOf(host: Block): Extract<MountEntry, { kind: 'derived' }>[] {
   const out: Extract<MountEntry, { kind: 'derived' }>[] = []
+  // 属性定义页的**主视图**：谁在用这一条声明（含声明了没填的块）。全 kind 通用
+  if (isPropDef(host)) out.push({ id: derivedTabId('usedBy'), kind: 'derived', source: 'usedBy' })
   if (hasList(host, 'tag')) out.push({ id: derivedTabId('members'), kind: 'derived', source: 'members' })
   out.push({ id: derivedTabId('refs'), kind: 'derived', source: 'refs' })
   out.push({ id: derivedTabId('notes'), kind: 'derived', source: 'notes' })
@@ -281,6 +284,12 @@ export function derivedSpecOf(host: Block, forest: readonly Block[], source: Der
   // 数据走 noteRecordsOf 直读边表；「维度不存在」对备注也不成立——任何活块都能被备注
   // （挂载区对 notes 跳过 null 分支）。
   if (source === 'notes') return null
+  /**
+   * 「谁在用这一条声明」：`{prop:{id,exists}}` 问的是**有没有这一栏**，
+   * 而不是有没有值 —— 声明了但没填的块也是使用者（面板上它就是「待填」那一行）。
+   * 全 kind 通用，不需要为每种 kind 另写一份条件。
+   */
+  if (source === 'usedBy') return { where: { prop: { id: host.id, exists: true } } }
   if (source === 'refs') return SPEC_REFS
   if (source === 'mentions') return displayTextOf(host) === '' ? null : SPEC_MENTIONS
   if (source === 'members') return memberSpecOf(host, forest)
@@ -526,13 +535,15 @@ export function derivedTemplateOf(
  */
 export function derivedColumns(source: DerivedSource): ViewColumn[] {
   const special =
-    source === 'refs'
-      ? [REL_KINDS_COLUMN, REF_COUNT_COLUMN]
-      : source === 'members'
-        ? [VIA_COLUMN]
-        : source === 'mentions'
-          ? [MATCHED_COLUMN]
-          : [SHARED_TAGS_COLUMN]
+    source === 'usedBy'
+      ? []
+      : source === 'refs'
+        ? [REL_KINDS_COLUMN, REF_COUNT_COLUMN]
+        : source === 'members'
+          ? [VIA_COLUMN]
+          : source === 'mentions'
+            ? [MATCHED_COLUMN]
+            : [SHARED_TAGS_COLUMN]
   return [
     { key: TITLE_COLUMN, width: 260 },
     { key: PATH_COLUMN, width: 220 },
