@@ -146,7 +146,8 @@ export interface MountAreaDeps {
   setDerivedGroup?: (host: Block, source: DerivedSource, key: string) => void
   /**
    * 派生栏的看法下拉（与自定义查询的「视图…」同壳：同一台浮层）。
-   * 这一栏只有三档可切——大纲／列表／表格，没有可新建的东西。
+   * 候选吃 core 的 `DERIVED_VIEW_KINDS`（大纲／表格／卡片／日历）——记录是平的，
+   * 兼容集与 query 源同一张表，没有可新建的东西。
    */
   openDerivedViewMenu?: (anchor: DOMRect | null, current: DerivedViewKind, onPick: (kind: DerivedViewKind) => void) => void
   /**
@@ -241,7 +242,7 @@ export class MountArea {
   private readonly viewEl: HTMLElement
   private readonly emptyEl: HTMLElement
   /**
-   * 派生栏的抬头：`引用 · 12 条  [大纲] [列表] [表格]  ⋯`。
+   * 派生栏的抬头：`引用 · 12 条  [大纲▾]  ⋯`。
    *
    * 为什么要它（而不是复用视图宿主那条抬头）：派生栏没有拥有者 —— 抬头里的
    * 「这一栏是什么」是它唯一能说清自己的地方，而「切看法」写的是设备状态。
@@ -1166,7 +1167,7 @@ export class MountArea {
    * 这一栏**现在选的是哪张视图**；`null` ＝ 大纲。
    *
    * `derived` 栏没有配置：它的看法是设备状态（`derivedKind`），缺省大纲。
-   * 列表／表格这两个看法仍然走视图宿主的渲染器，只是那一台不画抬头、也没有「＋」。
+   * 非大纲的看法仍然走视图宿主的渲染器，只是那一台不画抬头、也没有「＋」。
    */
   private viewOf(entry: MountEntry): ViewConfig | null {
     if (entry.kind === 'derived') {
@@ -1181,7 +1182,7 @@ export class MountArea {
   }
 
   /**
-   * 派生栏抬头：`引用 · 12 条  [大纲][列表][表格]  ⋯`。
+   * 派生栏抬头：`引用 · 12 条  [大纲▾]  ⋯`。
    *
    * 主数字＝**记录条数**（与列表/表格同一个数）：大纲折叠只影响画几行，不改成员。
    * 条件是一句**只读说明**（「指向这一块」）——它没有可编辑的条件，也没有构建器落点。
@@ -1304,13 +1305,15 @@ export class MountArea {
 
     /**
      * 看法切换是**一颗下拉**（与自定义查询的「视图…」同壳、同台浮层），不是一排 tab：
-     * 三档看法是同一件事的三种读法，排开只会抢走条数与筛选的位置。
+     * 非大纲看法是同一件事的几种读法，排开只会抢走条数与筛选的位置。
      */
     const seg = document.createElement('div')
     seg.className = 'mount-derived-views'
     const labels: Record<DerivedViewKind, MsgId> = {
       outline: 'ui.view.outline',
       table: 'ui.view.kind.table',
+      cards: 'ui.view.kind.cards',
+      calendar: 'ui.view.kind.calendar',
     }
     const btn = document.createElement('button')
     btn.type = 'button'
@@ -1335,10 +1338,11 @@ export class MountArea {
     head.appendChild(seg)
 
     /**
-     * **分组下拉**（列表／表格才有）：与看法切换同排、与查询视图同一个候选源
+     * **分组下拉**（表格／卡片才有）：与看法切换同排、与查询视图同一个候选源
      * （core `groupChoicesOf`）。分组键住设备状态（`Prefs.mountGroups`，与看法同层）。
+     * 卡片带键＝列（看板），表格带键＝分节——键是记录视图共用位，两种呈现一个答案。
      */
-    if (kind === 'table') {
+    if (kind === 'table' || kind === 'cards') {
       const fields = propDisplayLabels(this.deps.kb.roots())
       const group = document.createElement('select')
       group.className = 'queryview-group mount-derived-group'

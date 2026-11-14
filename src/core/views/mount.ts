@@ -51,6 +51,7 @@ import {
   SHARED_TAGS_COLUMN,
   TITLE_COLUMN,
   VIA_COLUMN,
+  DERIVED_VIEW_KINDS,
   type DerivedViewKind,
   type ViewColumn,
   type ViewConfig,
@@ -228,10 +229,10 @@ export function mountViewKey(host: MountHost, source: DerivedSource): string {
   return `${mountHostKey(host)}:${source}`
 }
 
-/** 这一格选了什么（缺省大纲；未知值在 `normalizePrefs` 那一层已经丢掉了） */
+/** 这一格选了什么（缺省大纲；未知值在 `normalizePrefs` 那一层已经丢掉了，这里只再挡一次脏值） */
 export function readMountView(views: MountViews | undefined, host: MountHost, source: DerivedSource): DerivedViewKind {
   const v = views?.[mountViewKey(host, source)]
-  return v === 'table' ? v : 'outline'
+  return v !== undefined && (DERIVED_VIEW_KINDS as readonly string[]).includes(v) ? v : 'outline'
 }
 
 /**

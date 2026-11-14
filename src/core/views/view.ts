@@ -66,17 +66,15 @@ export interface CardsConfig {
 export type StoredViewKind = Exclude<ViewKind, 'outline'>
 
 /**
- * **派生栏**（引用／同类／提及）能选的看法。
+ * **派生栏**（引用／成员／同类／提及）能选的看法。
  *
  * 派生栏没有拥有者：它不拥有条件、也不拥有视图配置，所以这份选择是**设备状态**
- * （存 `Prefs`），不是 `_views`。只开两档 —— 大纲／表格：
- * 派生栏是只读关系视图，大纲是可编辑的行列、表格是带派生列的密集读法；
- * 「列表」那一档已随存储层的 `list` 一起退场（它的字段配置从未有写入点）。
+ * （存 `Prefs`），不是 `_views`。能开哪些由**记录的形状**回答：派生记录与 query 命中
+ * 一样是一组平的行（没有「第 k 个孩子」、没有整棵子树），所以兼容集就是 query 源
+ * 那一张表 —— 大纲（默认，可编辑）＋ `table`／`cards`／`calendar`；
+ * `list-table`／`mindmap`／`tabs` 要树，派生栏给不了（写了也不会有人消费）。
  */
-export type DerivedViewKind = 'outline' | Extract<StoredViewKind, 'table'>
-
-/** 派生栏允许的看法（**唯一一份**：prefs 归一与 UI 的切换器都读它） */
-export const DERIVED_VIEW_KINDS: readonly DerivedViewKind[] = ['outline', 'table']
+export type DerivedViewKind = 'outline' | (typeof QUERY_SOURCE_KINDS)[number]
 
 const STORED_KINDS: readonly StoredViewKind[] = ['table', 'list-table', 'cards', 'calendar', 'mindmap', 'tabs']
 
@@ -85,6 +83,9 @@ const STORED_KINDS: readonly StoredViewKind[] = ['table', 'list-table', 'cards',
  * 分两处各写一份的后果是「命令能写、读回来被丢掉」，也就是「点了没生效」。
  */
 export const STORED_VIEW_KINDS: readonly StoredViewKind[] = STORED_KINDS
+
+/** query 源兼容的看法（**字面量元组**：派生栏的类型从它推导，擦成宽联合就拦不住非法 kind 了） */
+const QUERY_SOURCE_KINDS = ['table', 'cards', 'calendar'] as const
 
 /**
  * **源 × kind 的兼容表（唯一一份）**。
@@ -97,9 +98,12 @@ export const STORED_VIEW_KINDS: readonly StoredViewKind[] = STORED_KINDS
  * `canonicalViews` 与 UI 的「能切哪几种」都读这一张表。
  */
 export const STORED_KINDS_BY_SOURCE: Record<Source['kind'], readonly StoredViewKind[]> = {
-  query: ['table', 'cards', 'calendar'],
+  query: QUERY_SOURCE_KINDS,
   children: ['table', 'list-table', 'cards', 'calendar', 'mindmap', 'tabs'],
 }
+
+/** 派生栏允许的看法（**唯一一份**：prefs 归一与 UI 的切换器都读它；跟 query 源那张表走） */
+export const DERIVED_VIEW_KINDS: readonly DerivedViewKind[] = ['outline', ...QUERY_SOURCE_KINDS]
 
 /**
  * 看法在菜单／选择器里的图标（lucide 名）。与 kind 表同住一份：

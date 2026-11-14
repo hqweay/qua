@@ -1157,6 +1157,8 @@ export function setupPanels(deps: PanelsDeps) {
                   : 'ui.mount.why.mentions'
           return asBody(
             createView({ kind: 'block', blockId: mountHostBlock.id }, mountHostBlock, undefined, {
+              // 哪个非大纲看法，烤进这份派生模式里（配置由视图宿主现造，不落盘）
+              kind,
               /**
                * 列表/表格与大纲读**同一份 chips**（挂在挂载区实例上）：两处各算各的
                * 就会出现两批行。⚠️ 经**注册表**晚读、不引上面那个 `area`：

@@ -256,7 +256,11 @@ export interface ViewHostDeps {
 }
 
 export interface DerivedMode {
-  /** 派生栏只有**表格**会走到 ViewHost（大纲由挂载区自己画） */
+  /**
+   * 这一次实例渲染的非大纲看法（大纲根本不会建 ViewHost，挂载区自己画）。
+   * 配置不落盘：`derivedView()` 按它现造一份渲染要用的临时配置。
+   */
+  kind: DerivedViewKind
   /** 现算的一批记录（已带派生列） */
   records: () => ViewRecord[]
   /** 表格列：**临时构造**，不落盘 */
@@ -771,14 +775,25 @@ export class ViewHost {
   }
 
   /**
-   * 派生栏的临时视图配置：**只有渲染需要的两样**（列／字段 ＋ 这一屏的排序）。
+   * 派生栏的临时视图配置：**只有渲染需要的几样**（列／字段、分组键、这一屏的排序）。
    *
    * 不落盘、不复制：派生栏没有 `_views`。排序也只在这一次露面里活着（切走就回原序）——
    * 承认「派生栏的排序是设备状态」会顺手给它造一份配置，而它本来什么都没有。
+   *
+   * 卡片缺省画廊（与命令层建卡片的兜底同一条：封面取正文首图）；日历的日期列
+   * 用同一条兜底——第一个 `date` 定义，退到 `_date`。分组键是设备状态
+   * （挂载区抬头画的那颗下拉），卡片带键＝列（看板），表格带键＝分节。
    */
   private derivedView(): ViewConfig {
     const d = this.deps.derived!
     const group = d.groupBy ? { groupBy: d.groupBy } : {}
+    if (d.kind === 'cards') {
+      return { id: 'derived:cards', kind: 'cards', cards: { cover: 'first-asset' }, ...group }
+    }
+    if (d.kind === 'calendar') {
+      const dateBy = this.deps.kb.propDefs().find((def) => def.props?._kind === 'date')?.id ?? '_date'
+      return { id: 'derived:calendar', kind: 'calendar', calendar: { dateBy } }
+    }
     return {
       id: 'derived:table',
       kind: 'table',

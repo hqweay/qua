@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, COLOR_PROP, ICON_PROP, isColorValue, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind, type ColorAxis } from './core/index.ts'
+import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, COLOR_PROP, ICON_PROP, isColorValue, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, DERIVED_VIEW_KINDS, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind, type ColorAxis } from './core/index.ts'
 import { choiceDisplayLabel, cardinalityOf, queryFieldsOf, singleValueOf, valueListOf } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
@@ -2195,19 +2195,26 @@ const app: App = {
   },
 
   /**
-   * **派生栏（引用／提及）的看法下拉**：只有三档——大纲／列表／表格。
+   * **派生栏（引用／成员／同类／提及）的看法下拉**。
    *
    * 与自定义查询的「视图…」同壳（同一台浮层、同一颗按钮的形状），但**没有**新建／
    * 改名／切片：派生栏是只读关系视图，没有 `_views` 可以写，看法只是设备状态的一格。
+   * 候选吃 core 的 `DERIVED_VIEW_KINDS`（兼容集与 query 源同一张表）——菜单另写一份
+   * 清单，迟早会在 core 加看法的那天漏掉一格。
    */
   openDerivedViewMenu: (anchor, current, onPick) => {
-    const kinds = ['outline', 'table'] as const
-    const labels = { outline: t('ui.view.outline'), table: t('ui.view.kind.table') }
-    const icons = { outline: 'lucide:list-tree', table: 'lucide:table' }
+    const kinds = DERIVED_VIEW_KINDS
+    const labels: Record<string, string> = {
+      outline: t('ui.view.outline'),
+      table: t('ui.view.kind.table'),
+      cards: t('ui.view.kind.cards'),
+      calendar: t('ui.view.kind.calendar'),
+    }
+    const icons: Record<string, string> = { outline: 'lucide:list-tree', ...VIEW_KIND_ICON }
     layers.openMenu({
       rows: kinds.map((k) => ({
         id: k,
-        label: labels[k],
+        label: labels[k] ?? k,
         icon: icons[k],
         ...(k === current ? { keyHint: t('ui.view.current') } : {}),
       })),
