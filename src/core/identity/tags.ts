@@ -66,7 +66,8 @@ export function mkTagBlock(name: string): Block {
     children: [],
     created: now,
     modified: now,
-    props: { [ALIASES_PROP]: [title], [LISTS_PROP]: ['tag'], [DISPLAY_PROP]: 'alias', _icon: 'lucide:hash' },
+    // hash 是标签的结构旗（渲染时回落，见 `identity/faces.ts`），不落盘
+    props: { [ALIASES_PROP]: [title], [LISTS_PROP]: ['tag'], [DISPLAY_PROP]: 'alias' },
   }
 }
 

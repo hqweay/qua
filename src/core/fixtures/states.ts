@@ -15,7 +15,7 @@ import { forest, longParagraph, LONG_EN, mkJournal, mkPage, resolveRefs } from '
  *   旧代码之所以只显示一行，是因为它错把 `children` 当 roots 装；修好装载口径之后这里就露出来了。
  */
 export function emptyWorkspace(): Workspace {
-  return forest([mkPage('', 'lucide:file', []).page], [])
+  return forest([mkPage('', undefined, []).page], [])
 }
 
 /**
@@ -35,7 +35,7 @@ export function blankWorkspace(): Workspace {
 
 /** 稀疏态：只有 1 个块、1 个页面（**比满态更容易做砸**） */
 export function sparseWorkspace(): Workspace {
-  const b = mkPage('唯一一页', 'lucide:file', [{ text: '这一页只有一个块。' }])
+  const b = mkPage('唯一一页', undefined, [{ text: '这一页只有一个块。' }])
   return forest([b.page], [b])
 }
 
@@ -54,8 +54,8 @@ export function degradedWorkspace(): Workspace {
     { text: '[[设计原则]]' },
     { text: '![[丢失的截图.png]]' },
   ])
-  const noTitle = mkPage('', 'lucide:file', [{ text: '无标题页里的内容' }])
-  const principles = mkPage('设计原则', 'lucide:file', [{ text: '一切皆块。' }])
+  const noTitle = mkPage('', undefined, [{ text: '无标题页里的内容' }])
+  const principles = mkPage('设计原则', undefined, [{ text: '一切皆块。' }])
   const built = [long, noTitle, principles]
   const blocks = built.map((b) => b.page)
   resolveRefs(blocks, built)

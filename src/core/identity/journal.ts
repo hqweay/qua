@@ -6,7 +6,7 @@
  *    再存一个标记就是同一件事的第二份答案，而两份可以不一致。
  */
 
-import { ICON_PROP, isJournalBlock, prop, type Block } from '../model/model.ts'
+import { isJournalBlock, prop, type Block } from '../model/model.ts'
 import { derivedId, pad } from '../model/ids.ts'
 import { walkForest } from '../model/walk.ts'
 import { isEmptyContent } from '../model/runs.ts'
@@ -130,7 +130,7 @@ export const FEED_INITIAL = 3
 export const FEED_STEP = 5
 export const FEED_MAX = 30
 
-/** 一个还没进库的日记块（`blocks` 里没有时才造它） */
+/** 一个还没进库的日记块（`blocks` 里没有时才造它）；calendar 是角色信号，渲染时回落，不落盘 */
 export function mkJournalBlock(date: string): Block {
   const now = Date.now()
   return {
@@ -139,7 +139,7 @@ export function mkJournalBlock(date: string): Block {
     children: [],
     created: now,
     modified: now,
-    props: { _date: date, [ICON_PROP]: 'lucide:calendar' },
+    props: { _date: date },
   }
 }
 

@@ -217,7 +217,8 @@ test('mkTagBlock：名字进 `_aliases`（不带 #），正文是描述，露面
   assert.deepEqual(t.props?._aliases, ['设计'])
   assert.deepEqual(t.props?._lists, ['tag'])
   assert.equal(t.props?._display, 'alias')
-  assert.equal(t.props?._icon, 'lucide:hash')
+  // hash 是角色信号：渲染时回落（faces.ts），不落盘
+  assert.equal(t.props?._icon, undefined)
 })
 
 /* ------------------------------------------------------------ 正文里敲 # */

@@ -72,6 +72,24 @@ export function isIconValue(v: unknown): boolean {
 }
 
 /**
+ * 身份色（色板 key，**封闭集**）。「无颜色」是合法态不是错误态：缺席＝中性。
+ *
+ * 为什么是封闭集而不是自由取色：token 经济（组件只许引用 `--ui-*`）——
+ * 色板的每个 key 在样式层各有一对预调对比度的 token（solid/soft），
+ * 「任何位置可读」由预调保证。不够用＝扩色板，不是开自由色。
+ */
+export const COLOR_PROP = '_color' as const
+
+/** 色板 key：红橙黄绿青蓝紫粉。样式层按同一组名字给 `--ui-identity-<name>` 对 */
+export const IDENTITY_COLORS = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'pink'] as const
+export type IdentityColorKey = (typeof IDENTITY_COLORS)[number]
+
+/** `_color` 的形状判据（读路径与落盘校验共用同一份）：值 ∈ 色板封闭集 */
+export function isColorValue(v: unknown): boolean {
+  return (IDENTITY_COLORS as readonly string[]).includes(v as string)
+}
+
+/**
  * 删除时间戳（毫秒）。有它 ＝ 这个块被删了（**原位软删**）。
  *
  * 删除**不摘树**：块带着整棵子树留在原位，只是遍历（`walkForest`）默认不进被删子树，
@@ -148,6 +166,7 @@ export function hasLiveChildren(b: Block): boolean {
 export type SystemPropId =
   | '_type'
   | typeof ICON_PROP
+  | typeof COLOR_PROP
   | '_date'
   // 地址与露面（语义见文件顶部的「列表」说明；存储位在这里）
   | typeof ALIASES_PROP

@@ -25,7 +25,12 @@ import {
 } from '../model/model.ts'
 import { t } from '../infra/msg.ts'
 
-/** 一个空页块：正文空（描述）、名字进 `_aliases`、身份是 `_lists:['page']`。 */
+/**
+ * 一个空页块：正文空（描述）、名字进 `_aliases`、身份是 `_lists:['page']`。
+ *
+ * ⚠️ **不写默认图标**：页的 file 图标是角色信号（渲染时回落，见 `identity/faces.ts`），
+ *    落盘会把「用户明确选了 file」与「默认 file」焊成不可区分。
+ */
 export function mkPageBlock(name?: string): Block {
   const b = mkBlock('')
   const title = (name ?? '').trim()
@@ -33,7 +38,7 @@ export function mkPageBlock(name?: string): Block {
   return {
     ...b,
     children: [mkBlock('')],
-    props: { [ALIASES_PROP]: [alias], [LISTS_PROP]: ['page'], [DISPLAY_PROP]: 'alias', _icon: 'lucide:file' },
+    props: { [ALIASES_PROP]: [alias], [LISTS_PROP]: ['page'], [DISPLAY_PROP]: 'alias' },
   }
 }
 

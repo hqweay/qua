@@ -91,7 +91,7 @@ export function buildTree(
  *    给它 `未命名-<短 id>`，正文仍留空 ⇒ 呈现层的兜底文案照样生效
  *    （引用/反链走主名，列表标题仍可回落到正文，见 `displayNameOf` 的优先级）。
  */
-export function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uuidv7Hex()): BuiltPage {
+export function mkPage(title: string, icon: string | undefined, seeds: SeedBlock[], id = uuidv7Hex()): BuiltPage {
   const acc = { refs: [] as BuiltPage['refs'], pendingTags: [] as BuiltPage['pendingTags'] }
   const children = buildTree(seeds, acc)
   const name = title.trim() !== '' ? title.trim() : `未命名-${id.slice(-6)}`
@@ -102,7 +102,10 @@ export function mkPage(title: string, icon: string, seeds: SeedBlock[], id = uui
     children,
     created: at,
     modified: at,
-    props: { [ALIASES_PROP]: [name], [LISTS_PROP]: ['page'], [DISPLAY_PROP]: 'alias', _icon: icon },
+    // 图标只在**显式给了**时落盘（种子内容的一部分）；不给＝默认角色信号，渲染时回落
+    props: icon === undefined
+      ? { [ALIASES_PROP]: [name], [LISTS_PROP]: ['page'], [DISPLAY_PROP]: 'alias' }
+      : { [ALIASES_PROP]: [name], [LISTS_PROP]: ['page'], [DISPLAY_PROP]: 'alias', _icon: icon },
   }
   return { page, refs: acc.refs, pendingTags: acc.pendingTags }
 }
@@ -121,7 +124,8 @@ export function mkJournal(date: string, seeds: SeedBlock[]): BuiltPage {
     children,
     created: at,
     modified: at,
-    props: { _date: date, _icon: 'lucide:calendar' },
+    // calendar 是角色信号，渲染时回落，不落盘（同 `identity/faces.ts` 的口径）
+    props: { _date: date },
   }
   return { page: block, refs: acc.refs, pendingTags: acc.pendingTags }
 }

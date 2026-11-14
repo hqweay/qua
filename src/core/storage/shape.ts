@@ -9,7 +9,7 @@
  * 适配器只负责**字节的进与出**（见 `local-storage.ts` 的信封）；
  * 「这些字节是不是一份能打开的库」归这里。
  */
-import { ACTIVE_VIEW_PROP, ALIASES_PROP, DISPLAY_PROP, ICON_PROP, LISTS_PROP, VIEWS_PROP, isDisplayValue, isIconValue, isListsValue, type Block, type Doc, type FoldState } from '../model/model.ts'
+import { ACTIVE_VIEW_PROP, ALIASES_PROP, COLOR_PROP, DISPLAY_PROP, ICON_PROP, LISTS_PROP, VIEWS_PROP, isColorValue, isDisplayValue, isIconValue, isListsValue, type Block, type Doc, type FoldState } from '../model/model.ts'
 import { isAliasesValue, LEGACY_ALIAS_PROP } from '../identity/alias.ts'
 import { isMountsValue, MOUNTS_PROP } from '../views/mount.ts'
 import { canonicalViewRef, EMBED_PROP } from '../views/embed.ts'
@@ -153,8 +153,12 @@ import {
  * v42 → v43：**`anno.range` 有了维护者**——内容写入口按前缀/后缀剥离平移区间，
  *            整块替换交给引文重定位；拆块／合并显式分配两侧。旧库的 anno.range 是
  *            「从来没被维护过」的缓存，与新口径不是同一份真相 ⇒ 作废重 seed，不写迁移。
+ * v43 → v44：**默认图标摘出创建路径**——角色信号（页=file／标签=hash／日记=calendar）
+ *            改为渲染时回落（`identity/faces.ts` 的三条链），创建路径不再写这些值。
+ *            旧库带着落盘的默认值，「用户明确选了 file」与「默认 file」不可区分 ⇒
+ *            作废重 seed，不写迁移（代价登记：现无消费方，真需要区分时加显式哨兵值）。
  */
-export const WORKSPACE_VERSION = 43
+export const WORKSPACE_VERSION = 44
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {
@@ -250,6 +254,8 @@ function isBlock(x: unknown): x is Block {
   if (date !== undefined && !isJournalDate(date)) return false
   const icon = b.props[ICON_PROP]
   if (icon !== undefined && !isIconValue(icon)) return false
+  const color = b.props[COLOR_PROP]
+  if (color !== undefined && !isColorValue(color)) return false
   const kind = b.props['_kind']
   if (kind !== undefined && !isPropKind(kind)) return false
   const fieldDefs = b.props[FIELD_DEFS_PROP]

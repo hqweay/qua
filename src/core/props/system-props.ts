@@ -26,6 +26,7 @@
 import {
   ACTIVE_VIEW_PROP,
   ALIASES_PROP,
+  COLOR_PROP,
   DEFAULT_FILTER_PROP,
   DELETED_AT_PROP,
   DISPLAY_PROP,
@@ -34,7 +35,7 @@ import {
   VIEWS_PROP,
 } from '../model/model.ts'
 import { isAliasesValue } from '../identity/alias.ts'
-import { isDisplayValue, isIconValue, isListsValue } from '../model/model.ts'
+import { isColorValue, isDisplayValue, isIconValue, isListsValue } from '../model/model.ts'
 import { TAGS_PROP, isTagRefList } from '../identity/tags.ts'
 import { BELONGS_TO_PROP, isBelongsToRefs } from '../relations/hierarchy.ts'
 import { ANNOTATES_PROP, isAnnotatesPairs } from '../relations/annotates.ts'
@@ -74,6 +75,7 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   // 结构槽（model.ts）
   _type: () => true, // 开放：未知 id 读侧降级，写侧不假装认识
   [ICON_PROP]: isIconValue,
+  [COLOR_PROP]: isColorValue, // 身份色：色板封闭集（identity/faces.ts 的链只认封闭集内的值）
   _date: isJournalDate,
   [ALIASES_PROP]: isAliasesValue,
   [LISTS_PROP]: isListsValue,

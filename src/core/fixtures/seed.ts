@@ -332,7 +332,7 @@ export function seedWorkspace(): Workspace {
     ],
   )
 
-  const p5 = mkPage('', 'lucide:file', [
+  const p5 = mkPage('', undefined, [
     { text: '无标题页：左槽、面包屑、引用 chip 都要有兜底文案' },
     { text: '引用一个无标题页：[[ ]]' },
   ])
