@@ -21,6 +21,14 @@ body {
 ::selection {
   background: var(--ui-accent-soft);
 }
+/* 滚动条是 chrome 不是内容：全应用统一细条。此前一处 thin（图标网格）其余
+   全是引擎默认的粗条——同一个「局部现代化」病根：角色没定，各处各抓一档。
+   thumb 用结构线 token（暗色主题跟着 token 走）、轨道透明——「现代」来自
+   不抢内容的视线，不来自换样式。要整条藏的分类导航在各自处覆盖（none）。 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ui-border) transparent;
+}
 button {
   font: inherit;
   color: inherit;
