@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, COLOR_PROP, ICON_PROP, isColorValue, isHexColor, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind, type ColorAxis } from './core/index.ts'
+import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, COLOR_PROP, ICON_PROP, isColorValue, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind, type ColorAxis } from './core/index.ts'
 import { choiceDisplayLabel, cardinalityOf, queryFieldsOf, singleValueOf, valueListOf } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
@@ -43,7 +43,6 @@ import { createIcon } from './view/icons.ts'
 import { mountEmbedBody } from './ui/block-ui/embed-body.ts'
 import { mountNotePopover, type NotePopoverHandle } from './ui/block-ui/note-popover.ts'
 import { renderPropsLine } from './ui/block-ui/props-line.ts'
-import { renderAliasEditor } from './ui/block-ui/alias-editor.ts'
 import { renderLinkComposer, renderNamePrompt, type ObjFieldDeps } from './ui/overlay/panels.ts'
 import { devCommands, dropIdentity, journalCommands, mentionCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, buildFreshView, zoomCommands } from './app/commands-impl.ts'
 import type { TxRun } from './app/commands/types.ts'
@@ -1278,7 +1277,7 @@ function addBlockRole(blockId: string, role: 'page' | 'tag'): boolean {
       // 标签的价值就是名字（`#未命名-abc` 没有意义），但拒绝不该是死路：
       // 起名是下一步，所以直接把别名编辑器打开、把光标放进输入框。
       app.toast(t('ui.toast.roleNeedName'), 'warn')
-      app.openAliasEditor(b.id, { autofocus: true })
+      app.openBlockConfig(b.id, { autofocus: true })
       return false
     } else {
       name = t('ui.page.untitledAlias', { id: b.id.slice(-6) })
@@ -1332,29 +1331,6 @@ function setBlockIcon(blockId: string, icon: string | null): boolean {
     else b.props = props
   })
   return true
-}
-
-/**
- * **自定义色进「最近自定义」**（设备态，不进 KB）：去重封顶 6。
- * 内置板 key 不记——板本身常驻，记了反而在色行里出现两颗同色点。
- */
-function recordRecentColor(color: string): void {
-  if (!isHexColor(color)) return
-  const hex = color.toLowerCase()
-  const prev = prefs().recentColors ?? []
-  prefs().recentColors = [hex, ...prev.filter((n) => n !== hex)].slice(0, 6)
-  scheduleDeviceSave()
-}
-
-/**
- * **图标值进「最近使用」**（设备态，不进 KB）：去重封顶 24。
- * 摘键不进——「没有脸」不是「用了一张脸」，进了反而把 ⊘ 挤进名单。
- */
-function recordRecentIcon(icon: string): void {
-  if (icon === '') return
-  const prev = prefs().recentIcons ?? []
-  prefs().recentIcons = [icon, ...prev.filter((n) => n !== icon)].slice(0, 24)
-  scheduleDeviceSave()
 }
 
 /**
@@ -2432,7 +2408,7 @@ const app: App = {
     })
     return true
   },
-  openAliasEditor: (blockId, opts) => openAliasEditor(blockId, opts?.anchor ?? ed.caretRect(), opts),
+  openBlockConfig: (blockId, opts) => panels.openBlockConfig(blockId, opts),
   openPropertiesDrawer: (blockId, focusPropId) => panels.openPropertiesDrawer(blockId, focusPropId),
   setBlockType: (blockId, typeId) => applyBlockType(blockId, typeId),
 
@@ -2793,48 +2769,6 @@ async function backupBeforeReplace(failMsg: MsgId): Promise<string | null | fals
  * @param anchor 可以是**那颗按钮**（浮层跟着它走），也可以是一个矩形（没有稳定元素时，
  *   例如命令面按光标位置打开）。两者都收，是因为调用者确实有这两种情形。
  */
-/**
- * **块配置弹窗**（名字／露面／显示模式／脸）：一个块只有这一个配置面。
- * 名字与露面走 `writeProps`（与正文同一条写路径）；脸走命令面（`set-icon`/`set-color`，
- * 撤销与落盘都在那条路上）——同一个字段只有一条路。「最近」记账是设备态，归装配层。
- */
-const openAliasEditor = (
-  blockId: string,
-  anchor: HTMLElement | DOMRect | null,
-  opts: { autofocus?: boolean; faceOpen?: boolean } = {},
-): void => {
-  if (!findInForest(ws.blocks, blockId)) return
-  layers.openPopover(
-    (host) =>
-      renderAliasEditor(host, {
-        kb,
-        block: () => findInForest(ws.blocks, blockId),
-        write: (mutate) => writeProps(blockId, mutate),
-        close: () => layers.closePopover(),
-        toast: (text, kind) => app.toast(text, kind),
-        layers,
-        recentColors: () => prefs().recentColors,
-        setFace: (patch) => {
-          if (patch.icon !== undefined) {
-            void registry.invoke('core.block/set-icon', { blockId, icon: patch.icon }, 'ui')
-            recordRecentIcon(patch.icon)
-          }
-          if (patch.color !== undefined) {
-            void registry.invoke('core.block/set-color', { blockId, color: patch.color }, 'ui')
-            recordRecentColor(patch.color)
-          }
-        },
-        autofocus: opts.autofocus,
-        faceOpen: opts.faceOpen,
-      }),
-    // 元素锚点会跟着那一颗按钮走（行随重渲染被换掉时由 `anchorOf` 兜住「不在了」）
-    anchor === null ? null : anchor instanceof HTMLElement ? popovers.anchorOf(anchor) : anchor,
-    // 元素锚点即触发器：同一颗按钮再点一次＝收起（toggle）；矩形锚点没有稳定元素，退回先关再开
-    undefined,
-    anchor instanceof HTMLElement ? { el: anchor } : undefined,
-  )
-}
-
 /* ------------------------------------------------------------ 编辑器装配 */
 
 // ⚠️ 首屏就要把**当前页的 marks/atoms** 一起装进编辑器：少了它们，已存的行内原子
@@ -3343,6 +3277,7 @@ const {
   pickTagValue,
   tagLabel,
   openPropertiesDrawer,
+  openBlockConfig,
   mountBlockView,
   mountEmbedView,
   viewShown,
@@ -3380,6 +3315,7 @@ const {
   },
   getMainEd: () => mainEd,
   getRegistry: () => registry,
+  writeBlock: writeProps,
   getChrome: () => chrome,
   openBlock: (blockId, place) => app.openBlock(blockId, place),
 })
@@ -3393,6 +3329,7 @@ panels = {
   pickTagValue,
   tagLabel,
   openPropertiesDrawer,
+  openBlockConfig,
   mountBlockView,
   mountEmbedView,
   viewShown,
@@ -3492,7 +3429,7 @@ document.addEventListener('click', (e) => {
   const blockId = row?.dataset.blockId
   if (!blockId) return
   if (action.dataset.aliasAction === 'props') panels.openPropertiesDrawer(blockId)
-  else openAliasEditor(blockId, action)
+  else panels.openBlockConfig(blockId, { anchor: action })
 })
 
 window.addEventListener('beforeunload', () => {

@@ -3608,13 +3608,14 @@ await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器
   await page.waitForTimeout(150)
   const NEW = '别名编辑器改的新名字'
   await page.locator(`.blk[data-block-id="${target.targetId}"] .blk-alias-name`).click()
-  await page.waitForSelector('.alias-editor')
-  await page.fill('.alias-editor .alias-input', NEW)
-  await page.press('.alias-editor .alias-input', 'Enter')
+  await page.waitForSelector('.block-config')
+  await page.fill('.block-config .alias-input', NEW)
+  await page.press('.block-config .alias-input', 'Enter')
   await page.waitForTimeout(150)
-  assert(await page.locator(`.alias-row[data-alias-name="${NEW}"]`).count() === 1, `新别名应出现在别名列表里：${NEW}`)
+  // 弹窗与面板同体（同一份名字段），数行数要收在弹窗作用域里
+  assert(await page.locator(`.block-config .alias-row[data-alias-name="${NEW}"]`).count() === 1, `新别名应出现在别名列表里：${NEW}`)
   // 点星标把它设成主名（不新增、只移动）——真实点击，顺带验证「点浮层内部不会被外面的 mousedown 关掉」
-  await page.locator(`.alias-row[data-alias-name="${NEW}"] .alias-primary`).click()
+  await page.locator(`.block-config .alias-row[data-alias-name="${NEW}"] .alias-primary`).click()
   await page.waitForTimeout(150)
   const renamed = await page.evaluate((id) => {
     const b = window.__qua.allBlocks().find((x) => x.id === id)
@@ -3646,12 +3647,12 @@ await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器
   assert(!live.skipped, `前置：造不出「目标与引用同视图」的组合：${live.skipped}`)
   const LIVE = '当场改的新名字'
   await page.locator(`.blk[data-block-id="${rootId}"] .blk-alias-name`).click()
-  await page.waitForSelector('.alias-editor')
-  await page.fill('.alias-editor .alias-input', LIVE)
-  await page.press('.alias-editor .alias-input', 'Enter')
+  await page.waitForSelector('.block-config')
+  await page.fill('.block-config .alias-input', LIVE)
+  await page.press('.block-config .alias-input', 'Enter')
   await page.waitForTimeout(150)
   await page.evaluate((name) => {
-    const row = [...document.querySelectorAll('.alias-row')].find((r) => r.dataset.aliasName === name)
+    const row = [...document.querySelectorAll('.block-config .alias-row')].find((r) => r.dataset.aliasName === name)
     row?.querySelector('.alias-primary')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
   }, LIVE)
   await page.waitForTimeout(150)
@@ -7440,9 +7441,9 @@ await check('T53 列表露面：输入名字建标签、同名页兼作标签、
 
   // 页名走别名编辑器：加一个名字，它同时也是 `#复用页名` 的地址
   await page.locator(`.blk[data-block-id="${pageId}"] .blk-alias-name`).click()
-  await page.waitForSelector('.alias-editor')
-  await page.fill('.alias-editor .alias-input', reuseName)
-  await page.press('.alias-editor .alias-input', 'Enter')
+  await page.waitForSelector('.block-config')
+  await page.fill('.block-config .alias-input', reuseName)
+  await page.press('.block-config .alias-input', 'Enter')
   await page.waitForTimeout(150)
   await page.evaluate(() => window.__qua.__layers.closePopover())
 
@@ -7540,7 +7541,7 @@ await check('T53 列表露面：输入名字建标签、同名页兼作标签、
   const emptyId = await page.evaluate((id) => window.__qua.__editor.insert.insertBlockAfter(id, ''), plainId)
   await page.evaluate((id) => window.__qua.focusBlock(id, 0), emptyId)
   await page.evaluate((id) => window.__qua.invoke('core.block/as-tag', { blockId: id }), emptyId)
-  await page.waitForSelector('.alias-editor')
+  await page.waitForSelector('.block-config')
   const emptyAfter = await page.evaluate((id) => {
     const b = window.__qua.allBlocks().find((x) => x.id === id)
     return { aliases: b.aliases, lists: b.lists, focused: document.activeElement?.className ?? '' }
@@ -28981,20 +28982,23 @@ await check('T304 图标选择器：选项入口网格化；块配置弹窗（�
   await page.evaluate((id) => window.__qua.invoke('core.dock/open-block', { blockId: id, side: 'right' }), tagInfo)
   await page.waitForSelector(`.blk[data-block-id="${tagInfo}"] .blk-alias-btn`, { timeout: 5000 })
   await page.click(`.blk[data-block-id="${tagInfo}"] .blk-alias-btn`)
-  await page.waitForSelector('.alias-editor', { timeout: 3000 })
-  await page.click('.alias-editor .alias-face-btn')
-  await page.waitForSelector('.alias-editor .icon-picker', { timeout: 3000 })
-  await page.fill('.alias-editor .icon-picker .icon-picker-search', 'target')
-  await page.click('.alias-editor .icon-picker-tabs .icon-picker-tab:nth-child(2)')
+  await page.waitForSelector('.block-config', { timeout: 3000 })
+  // 弹窗与面板同体：标签／归属段也在弹窗里（一套段、两个宿主）
+  assert(await page.locator('.block-config .props-tag-add').count() > 0, '弹窗里应有标签段（＋ 添加标签）')
+  assert(await page.locator('.block-config .props-belong-add').count() > 0, '弹窗里应有所属段（＋ 添加归属）')
+  await page.click('.block-config .alias-face-btn')
+  await page.waitForSelector('.block-config .icon-picker', { timeout: 3000 })
+  await page.fill('.block-config .icon-picker .icon-picker-search', 'target')
+  await page.click('.block-config .icon-picker-tabs .icon-picker-tab:nth-child(2)')
   await page.waitForTimeout(120)
-  await page.click('.alias-editor .icon-picker .icon-picker-cell[data-icon="lucide:target"]')
+  await page.click('.block-config .icon-picker .icon-picker-cell[data-icon="lucide:target"]')
   await page.waitForTimeout(200)
   // 选完浮层还在（内嵌不顶掉宿主），图标已写
-  assert(await page.locator('.alias-editor .icon-picker').count() > 0, '内嵌选择器选完不顶掉别名编辑器')
+  assert(await page.locator('.block-config .icon-picker').count() > 0, '内嵌选择器选完不顶掉别名编辑器')
   const tagIcon = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._icon ?? '', tagInfo)
   assert(tagIcon === 'lucide:target', `配置头选图标应写 _icon：${JSON.stringify(tagIcon)}`)
   // 点一个色（色板第 2 枚＝红）：色行选完就地更新，不关面板
-  await page.click('.alias-editor .icon-picker-colors .icon-picker-swatch:nth-child(2)')
+  await page.click('.block-config .icon-picker-colors .icon-picker-swatch:nth-child(2)')
   await page.waitForTimeout(200)
   const tagColor = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._color ?? '', tagInfo)
   assert(tagColor === 'red', `配置头点色应写 _color：${JSON.stringify(tagColor)}`)
@@ -29005,9 +29009,12 @@ await check('T304 图标选择器：选项入口网格化；块配置弹窗（�
   await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId)
   await page.waitForTimeout(200)
   await page.waitForSelector('.prop-face-btn', { timeout: 3000 })
+  // 面板与弹窗同体：名字／露面段也在面板里（一套段、两个宿主）
+  assert(await page.locator('.prop-names .alias-input').count() > 0, '面板里应有名字段（添加别名输入框）')
+  assert(await page.locator('.prop-lists .alias-check').count() === 2, '面板里应有露面段（页/标签两个列表位）')
   await page.click('.prop-face-btn')
-  await page.waitForSelector('.alias-editor .icon-picker-colors', { timeout: 3000 })
-  await page.click('.alias-editor .icon-picker-colors .icon-picker-swatch:nth-child(3)')
+  await page.waitForSelector('.block-config .icon-picker-colors', { timeout: 3000 })
+  await page.click('.block-config .icon-picker-colors .icon-picker-swatch:nth-child(3)')
   await page.waitForTimeout(200)
   const pageColor = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._color ?? '', pageId)
   assert(pageColor !== '' && pageColor !== undefined, `属性面板脸行点色应写 _color：${JSON.stringify(pageColor)}`)

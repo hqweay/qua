@@ -371,8 +371,9 @@ export const MSG = {
   'ui.props.refIsBlock': '块',
   'ui.props.refMissing': '已删除（{id}）',
   'ui.props.refCurrent': '当前',
-  /* 块配置（叫什么／露面／显示模式／脸）与别名（地址）：行头浮层与字段声明 */
+  /* 块配置（叫什么／露面／显示模式／标签／归属／脸）与别名（地址）：两个宿主共用 */
   'ui.blockConfig.title': '块配置',
+  'ui.alias.title': '别名',
   'ui.alias.primary': '主名',
   'ui.alias.add': '添加别名',
   'ui.alias.remove': '删除别名',

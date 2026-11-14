@@ -23,6 +23,7 @@ import {
   hasQueryBody,
   hasChildrenViewBody,
   findInForest,
+  isHexColor,
   isJournal,
   isViewRoot,
   journalDate,
@@ -63,6 +64,8 @@ import { openChoicePicker } from '../choice-picker.ts'
 import { createNameChoice, openNameChoice, openTagChoice } from '../retrieval/name-choice.ts'
 import { BUILTIN_LABEL, MountArea, type ViewBodyHost } from '../../ui/chrome/mount-area.ts'
 import { PropertiesPanel, type PropertiesDeps } from '../../ui/block-ui/properties.ts'
+import { renderBlockConfig, type BlockConfigDeps } from '../../ui/block-ui/block-config.ts'
+import type { ConfigSectionsCtx } from '../../ui/block-ui/config-sections.ts'
 import type { DerivedMode } from '../../ui/query/query-view.ts'
 import { createViewHostEls, openQueryTreeFor, ViewHost } from '../../ui/query/query-view.ts'
 
@@ -108,6 +111,8 @@ export type PanelsDeps = {
   setEd: (ed: BlockEditor) => void
   getMainEd: () => BlockEditor
   getRegistry: () => Registry
+  /** 一次直写（名字/露面/显示的段写路径）：撤销条目、索引修补、重画与落盘都在装配层那条路上 */
+  writeBlock: (blockId: string, mutate: () => void) => void
   getChrome: () => Chrome
   /** 打开一个块：落点由装配层的唯一路由分流（中心／右槽／新 tab） */
   openBlock: (blockId: string, place?: import('../../core/index.ts').OpenAction) => void
@@ -344,7 +349,7 @@ export function setupPanels(deps: PanelsDeps) {
    * 写完由 `writeProps` 的重画链刷这张卡。
    */
   const pickFace = (b: Block, anchor: DOMRect): void => {
-    deps.app.openAliasEditor(b.id, { anchor, faceOpen: true })
+    openBlockConfig(b.id, { anchor, faceOpen: true })
   }
 
   /**
@@ -371,82 +376,155 @@ export function setupPanels(deps: PanelsDeps) {
   }
 
   /**
+   * **「最近」记账**（设备态，不进 KB）：自定义色去重封顶 6——内置板 key 不记，
+   * 板本身常驻，记了反而在色行里出现两颗同色点；图标值去重封顶 24——摘键不进，
+   * 「没有脸」不是「用了一张脸」，进了反而把 ⊘ 挤进名单。
+   */
+  const recordRecentColor = (color: string): void => {
+    if (!isHexColor(color)) return
+    const hex = color.toLowerCase()
+    const prev = deps.prefs().recentColors ?? []
+    deps.prefs().recentColors = [hex, ...prev.filter((n) => n !== hex)].slice(0, 6)
+    deps.scheduleDeviceSave()
+  }
+  const recordRecentIcon = (icon: string): void => {
+    if (icon === '') return
+    const prev = deps.prefs().recentIcons ?? []
+    deps.prefs().recentIcons = [icon, ...prev.filter((n) => n !== icon)].slice(0, 24)
+    deps.scheduleDeviceSave()
+  }
+
+  /**
+   * **块配置段的能力包**（身份与归属的写与开取，按块绑定）：
+   * 属性面板（检视卡／抽屉）与块配置弹窗两个宿主共用同一份——
+   * 段组件只认 ctx（`config-sections.ts`），判据与写路径只此一处。
+   * `repaint` 由宿主给：面板＝刷自己的实例，弹窗＝整棵重绘自己。
+   */
+  const blockConfigOps = (blockId: string, repaint: () => void): ConfigSectionsCtx => {
+    const run = (command: string, args: Record<string, unknown> = {}): void => {
+      void deps.getRegistry().invoke(command, { blockId, ...args }, 'ui')
+      repaint()
+    }
+    const b = (): Block | undefined => findInForest(deps.getWs().blocks, blockId)
+    return {
+      kb,
+      block: b,
+      write: (mutate) => {
+        deps.writeBlock(blockId, mutate)
+        repaint()
+      },
+      toast: (text, kind) => app.toast(text, kind),
+      shortId: (id) => shortId(id),
+      removeTag: (tagId) => run('core.tags/remove', { tagId }),
+      reorderTags: (orderedIds) => run('core.tags/reorder', { tagIds: orderedIds }),
+      /** 可搜可新建；新建与选中走同一条写路径（`core.tags/add` 自己处理复用同名页） */
+      pickTag: (anchor, trigger) => {
+        openTagChoice({
+          layers,
+          forest: kb.roots(),
+          anchor,
+          trigger,
+          title: t('ui.props.pickTagTitle'),
+          emptyText: t('ui.props.pickTagEmpty'),
+          selectedIds: kb.tagsOf(blockId).map((x) => x.id),
+          idPrefix: 'proptag',
+          onPick: (pick) => run('core.tags/add', { name: pick.name }),
+        })
+      },
+      removeBelong: (parentId) => run('core.belongs-to/remove', { parentId }),
+      pruneBelongs: () => run('core.belongs-to/prune'),
+      /** 候选＝页＋标签，只选已有——配归属不该顺手造身份；已挂的不再出现在候选里 */
+      pickBelong: (anchor, trigger) => {
+        const cur = b()
+        if (!cur) return
+        openNameChoice({
+          layers,
+          forest: kb.roots(),
+          kind: 'pageOrTag',
+          allowCreate: false,
+          excludeIds: parentsOf(cur, adj()).map((p) => p.id),
+          anchor,
+          trigger,
+          title: t('ui.belongs.pickTitle'),
+          emptyText: t('ui.belongs.pickEmpty'),
+          idPrefix: 'propbelong',
+          onPick: (pick) => {
+            if (pick.kind !== 'block') return
+            run('core.belongs-to/add', { parentId: pick.id })
+          },
+        })
+      },
+      // 归属读每次现建：根集合随「父的露面」变，缓存一处就会让加了露面之后树里的位置不变
+      tags: () => [...kb.tagsOf(blockId)],
+      belongsTo: () => {
+        const cur = b()
+        return cur ? parentsOf(cur, adj()) : []
+      },
+      belongsDangling: () => {
+        const cur = b()
+        return cur ? danglingOf(cur, adj()) : { revivable: [], gone: [] }
+      },
+      openRef: (to, mods) => refClick({ to }, { ...mods, altKey: false }),
+      /** 脸的写统一命令面；「最近」记账是设备态，归装配层 */
+      setFace: (patch) => {
+        if (patch.icon !== undefined) {
+          run('core.block/set-icon', { icon: patch.icon })
+          recordRecentIcon(patch.icon)
+        }
+        if (patch.color !== undefined) {
+          run('core.block/set-color', { color: patch.color })
+          recordRecentColor(patch.color)
+        }
+      },
+      recentColors: () => deps.prefs().recentColors,
+      layers,
+    }
+  }
+
+  /**
+   * **块配置弹窗**（瞬态壳）：与属性面板共用同一套段（`blockConfigOps`），
+   * 判据与写路径只有一份；「写完谁重画」在这里是整棵重绘自己（不关浮层）。
+   * 字段值不进弹窗：重表单与高频多表面编辑不进瞬态浮层。
+   */
+  const openBlockConfig = (
+    blockId: string,
+    opts: { anchor?: DOMRect | HTMLElement | null; autofocus?: boolean; faceOpen?: boolean } = {},
+  ): void => {
+    if (!findInForest(deps.getWs().blocks, blockId)) return
+    // 元素锚点跟着那一颗按钮走（行随重渲染被换掉时锚点变 null ⇒ 浮层收起）
+    const liveAnchor = (el: HTMLElement): (() => DOMRect | null) => () =>
+      el.isConnected ? el.getBoundingClientRect() : null
+    const anchor = opts.anchor ?? null
+    layers.openPopover(
+      (host) => {
+        let d: BlockConfigDeps
+        const renderSelf = (): void => renderBlockConfig(host, d)
+        d = {
+          ctx: blockConfigOps(blockId, renderSelf),
+          close: () => layers.closePopover(),
+          ...(opts.autofocus ? { autofocus: true } : {}),
+          ...(opts.faceOpen ? { faceOpen: true } : {}),
+        }
+        renderSelf()
+      },
+      anchor instanceof HTMLElement ? liveAnchor(anchor) : anchor,
+      undefined,
+      anchor instanceof HTMLElement ? { el: anchor } : undefined,
+    )
+  }
+
+  /**
    * 属性面板的**读写回调只做一份**：检视卡与属性抽屉是同一份内容的两个宿主
    * （一个跟焦点、常驻右槽；一个显式点出、钉在打开时那块上）。
    * 宿主之间只差两件事：`target`（画哪一块）与 `repaint`（写入后刷哪一个实例）。
+   * 身份/归属段不再各持回调：统一走 `blockConfigOps`（与弹窗同一份）。
    */
-  const makePropertiesDeps = (target: () => Block | null | undefined, repaint: () => void): PropertiesDeps => ({
+  const makePropertiesDeps = (target: () => Block | null | undefined): PropertiesDeps => ({
     target,
     rows: (b) => [...kb.fieldsOf(b.id)],
-    // 标签（分类归属）与标签属性（字段声明）是两件事：这一行走 `props._tags`
+    // 字段行的来源分组用（只读）：标签（分类归属）与标签属性（字段声明）是两件事
     tags: (b) => [...kb.tagsOf(b.id)],
-    // 归属（filed-under）：任何块都有这一行；跨类的那条边只在这里看得见
-    belongsTo: (b) => parentsOf(b, adj()),
-    belongsDangling: (b) => danglingOf(b, adj()),
-    /**
-     * **「选一个归属」浮层**：候选＝页＋标签（`kind:'pageOrTag'`），只选已有——
-     * 配归属不该顺手造身份。已挂的上级不再出现在候选里。
-     * 手打名字的入口随它退场：候选里没有的名字本来也加不上，省掉一句「找不到」。
-     */
-    pickBelong: (b, anchor, trigger) => {
-      openNameChoice({
-        layers,
-        forest: kb.roots(),
-        kind: 'pageOrTag',
-        allowCreate: false,
-        excludeIds: parentsOf(b, adj()).map((p) => p.id),
-        anchor,
-        trigger,
-        title: t('ui.belongs.pickTitle'),
-        emptyText: t('ui.belongs.pickEmpty'),
-        idPrefix: 'propbelong',
-        onPick: (pick) => {
-          if (pick.kind !== 'block') return
-          void deps.getRegistry().invoke('core.belongs-to/add', { childId: b.id, parentId: pick.id }, 'ui')
-          repaint()
-        },
-      })
-    },
-    removeBelong: (b, parentId) => {
-      void deps.getRegistry().invoke('core.belongs-to/remove', { childId: b.id, parentId }, 'ui')
-      repaint()
-    },
-    pruneBelongs: (b) => {
-      void deps.getRegistry().invoke('core.belongs-to/prune', { childId: b.id }, 'ui')
-      repaint()
-    },
-    // 挂/摘之后**面板自己重画**：这一行显示的就是刚改的那份 `_tags`，
-    // 等下一次选区变化才刷会让「加完没反应」
-    /**
-     * **「选一个标签」浮层**（与查询条件值位同一个手势）：可搜可新建，
-     * 新建与选中走同一条写路径（`core.tags/add` 自己处理复用同名页／新建标签块）。
-     * 已挂的不重复出现在候选里。
-     */
-    pickTag: (b, anchor, trigger) => {
-      openTagChoice({
-        layers,
-        forest: kb.roots(),
-        anchor,
-        trigger,
-        title: t('ui.props.pickTagTitle'),
-        emptyText: t('ui.props.pickTagEmpty'),
-        selectedIds: kb.tagsOf(b.id).map((x) => x.id),
-        idPrefix: 'proptag',
-        onPick: (pick) => {
-          void deps.getRegistry().invoke('core.tags/add', { blockId: b.id, name: pick.name }, 'ui')
-          repaint()
-        },
-      })
-    },
-    removeTag: (b, tagId) => {
-      void deps.getRegistry().invoke('core.tags/remove', { blockId: b.id, tagId }, 'ui')
-      repaint()
-    },
-    // 重排归属序（拖 chips）：写走命令面，写完回来刷这张卡
-    reorderTags: (b, orderedIds) => {
-      void deps.getRegistry().invoke('core.tags/reorder', { blockId: b.id, tagIds: orderedIds }, 'ui')
-      repaint()
-    },
+    configOps: blockConfigOps,
       // 属性区里的标签名也是「指向标签块的一处露面」，与正文 chip 同一条口径
       openRef: (to, mods) => refClick({ to }, { ...mods, altKey: false }),
       defs: () => [...kb.propDefs()],
@@ -535,7 +613,7 @@ export function setupPanels(deps: PanelsDeps) {
       body: chrome.propertiesBodyEl,
       add: chrome.propertiesAddEl,
     },
-    makePropertiesDeps(() => subject(), () => propertiesPanel.render()),
+    makePropertiesDeps(() => subject()),
   )
 
   /* ------------------------------------------------------------ 属性抽屉 */
@@ -635,10 +713,7 @@ export function setupPanels(deps: PanelsDeps) {
       root.append(titleEl, body, add)
       const panel = new PropertiesPanel(
         { root, title: titleEl, body, add },
-        makePropertiesDeps(
-          () => (drawerBlockId ? findInForest(deps.getWs().blocks, drawerBlockId) : null),
-          () => panel.render(),
-        ),
+        makePropertiesDeps(() => (drawerBlockId ? findInForest(deps.getWs().blocks, drawerBlockId) : null)),
       )
       drawerPanel = panel
       drawerRootEl = root
@@ -1399,6 +1474,7 @@ export function setupPanels(deps: PanelsDeps) {
     pickTagValue,
     tagLabel,
     openPropertiesDrawer,
+    openBlockConfig,
     mountBlockView,
     mountEmbedView,
     viewShown,

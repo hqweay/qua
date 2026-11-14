@@ -21,10 +21,11 @@ import type { Block, ClickMods } from '../../core/index.ts'
 import { clickModsOf, enginePropText, identityColorCss, isEngineProp } from '../../core/index.ts'
 import { plainText } from '../../core/model/runs.ts'
 import { onCommitKeys } from './keys.ts'
-import type { Dangling, FieldRow, PropKind } from '../../core/index.ts'
+import type { FieldRow, PropKind } from '../../core/index.ts'
 import type { PropCreateMode } from '../../core/infra/ports.ts'
 import {
   ICON_PROP,
+  aliasesOf,
   choiceDisplayLabel,
   clockLabel,
   displayNameOf,
@@ -41,6 +42,15 @@ import {
 import { t } from '../../core/infra/msg.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { ChoicesEditor, type ChoiceActions } from './choices-editor.ts'
+import {
+  belongsContent,
+  chipDel,
+  displayContent,
+  listsContent,
+  namesContent,
+  tagsContent,
+  type ConfigSectionsCtx,
+} from './config-sections.ts'
 
 export interface PropertiesDeps {
   /**
@@ -53,30 +63,16 @@ export interface PropertiesDeps {
   /** 派生行（core 算好：标签属性 ∪ 块属性，同一 propId 只一行） */
   rows: (b: Block) => FieldRow[]
   /**
-   * 这块带着哪些标签（`props._tags` 的活块）。
+   * **身份与归属段的能力包工厂**（标签／归属／名字／露面的读写与开取）。
    *
-   * ⚠️ 与「标签属性」不是一回事：标签是**分类归属**，标签属性是那个标签声明了哪些字段。
-   *    同一个标签可以只当分类（没有字段）。
+   * 与块配置弹窗共用同一份段组件（`config-sections.ts`）：判据与写路径只写一份，
+   * 两个宿主只差 chrome 与「写完谁重画」（`repaint` 由宿主给）。
    */
+  configOps: (blockId: string, repaint: () => void) => ConfigSectionsCtx
+  /** 这块带着哪些标签（`props._tags` 的活块）——字段行的来源分组用（只读） */
   tags: (b: Block) => Block[]
   /**
-   * **打开「选一个标签」浮层**（可搜可新建），选中后由装配层写归属并重画。
-   *
-   * 与 `pickRef` 同一条理由走注入：候选要读整片森林、浮层在 ui 层之外，
-   * 属性区只认识「当前这一块」。
-   */
-  pickTag: (b: Block, anchor: DOMRect, trigger: HTMLElement) => void
-  /** 摘掉一个标签（连带收掉它在正文里的露面） */
-  removeTag: (b: Block, tagId: string) => void
-  /**
-   * **重排归属序**（拖 chips 落下后整序写回）。
-   *
-   * 顺序喂着块标的借形/借色取「第一个」——它是数据（`_tags` 数组序），不是装饰；
-   * 只许换序，集合一致性判在命令层。
-   */
-  reorderTags: (b: Block, orderedIds: string[]) => void
-  /**
-   * **打开一个指向某块的露面**（这一行里只有标签名用它）。
+   * **打开一个指向某块的露面**（属性行的名字用它）。
    *
    * 判据与正文里的标签 chip 是同一条：**一份归属的每一处露面，点名字都打开它**。
    * 不注入的话，同一个标签在正文里能点、在属性区点了没反应 —— 同一件事有两种行为，
@@ -136,29 +132,10 @@ export interface PropertiesDeps {
   /**
    * **这一块的「图标＋颜色」**（装配层弹出选择器，写 `_icon`／`_color`）。
    *
-   * 只给**有露面位的东西**（页——标签在配置头有同一枚）：没有露面位的东西不给入口，
-   * 写路径不拦（props 是自由槽）。点击开的是块配置弹窗（脸面板直接展开），
-   * 写与「最近」记账都在弹窗那条路上。
+   * 点击开的是块配置弹窗（脸面板直接展开），写与「最近」记账都在弹窗那条路上；
+   * 与弹窗头部脸位同判据——任意块都有脸，入口不按露面位限流。
    */
   pickFace?: (b: Block, anchor: DOMRect) => void
-  /**
-   * **这一块归在谁下面**（`props._belongsTo` 的活块，有序）。
-   *
-   * ⚠️ 与「标签」那一行不是一回事：标签是分类（instance-of），归属是 filed-under。
-   *    一条归属边可以连任何块；**跨类的那条边只在这里看得见**（归属树按露面筛子项）。
-   */
-  belongsTo: (b: Block) => Block[]
-  /** 悬空上级的两态（回收站里的不能清、真没了的能清） */
-  belongsDangling: (b: Block) => Dangling
-  /**
-   * **打开「选一个归属」浮层**（候选＝页＋标签，只选已有不新建），选中后由装配层写边并重画。
-   * 手打名字的入口随它退场：候选里没有的名字本来也加不上（模型不查露面，入口收窄是 UI 的取舍）。
-   */
-  pickBelong: (b: Block, anchor: DOMRect, trigger: HTMLElement) => void
-  /** 删一条归属（只动这一块；不碰名字、不碰它的子块） */
-  removeBelong: (b: Block, parentId: string) => void
-  /** 清理「上级真没了」的那些 */
-  pruneBelongs: (b: Block) => void
   /** 把一个块 id 变成人能读的名字（`ref` 值的显示） */
   refLabel: (targetId: string) => string
   /**
@@ -555,15 +532,9 @@ export class PropertiesPanel {
     return target && isPropDef(target) && propKindOf(target) === 'select' ? target : undefined
   }
 
-  /** chip 尾上的删除粒：声明、归属、标签三处同形，只有文案与动作不同 */
+  /** chip 尾上的删除粒：标签/归属的粒住在段里（`config-sections.ts`）；这里只剩声明段用 */
   private tagDel(title: string, onClick: () => void): HTMLButtonElement {
-    const del = document.createElement('button')
-    del.type = 'button'
-    del.className = 'props-tag-x'
-    del.dataset.tip = title
-    del.textContent = '×'
-    del.addEventListener('click', onClick)
-    return del
+    return chipDel(title, onClick)
   }
 
   render(): void {
@@ -601,14 +572,17 @@ export class PropertiesPanel {
     this.els.root.dataset.targetBlockId = target.id
     this.els.body.replaceChildren()
 
-    // 标签在第一行：它是**分类**，比「有哪些字段」更先决定这一块是什么
+    // 段序与块配置弹窗同一条（身份 → 归属 → 数据 → 事实）：两个壳是同一个配置体
+    // 脸：一枚入口开块配置弹窗（弹窗里脸面板直接展开）——任意块都有脸，入口不按露面位限流
+    if (this.deps.pickFace) this.els.body.appendChild(this.buildFace(target))
+    // 名字／露面／显示：与弹窗共用的段（判据与写路径只此一份）
+    this.els.body.appendChild(this.buildNames(target))
+    this.els.body.appendChild(this.buildLists(target))
+    const display = this.buildDisplay(target)
+    if (display) this.els.body.appendChild(display)
+    // 标签／归属：**分类**与 filed-under，比「有哪些字段」更先决定这一块是什么
     this.els.body.appendChild(this.buildTags(target))
-    // 归属紧随其后：与标签并列的另一种「它是谁的」。任何块都有这一行
     this.els.body.appendChild(this.buildBelongs(target))
-    // 页的脸：一枚入口开块配置弹窗（弹窗里脸面板直接展开）
-    if (hasList(target, 'page') && this.deps.pickFace) {
-      this.els.body.appendChild(this.buildFace(target))
-    }
 
     if (rows.length === 0) {
       const empty = document.createElement('p')
@@ -806,6 +780,54 @@ export class PropertiesPanel {
     return section
   }
 
+  /** 身份/归属段的能力包（每次现建：块与「写完谁重画」都是这一次的） */
+  private cfg(target: Block): ConfigSectionsCtx {
+    return this.deps.configOps(target.id, () => this.render())
+  }
+
+  /** 身份/归属段的行 chrome：左标签 ＋ 右值（弹窗的同一段包的是小节标题） */
+  private labeledRow(cls: string, title: string, value: HTMLElement): HTMLElement {
+    const row = document.createElement('div')
+    row.className = `prop-row ${cls} ui-row`
+    const label = document.createElement('label')
+    label.className = 'prop-label'
+    const name = document.createElement('span')
+    name.className = 'prop-name'
+    name.textContent = title
+    label.append(name)
+    row.append(label, value)
+    return row
+  }
+
+  /**
+   * **名字段**（别名＋添加）：与块配置弹窗共用同一份段（`config-sections.ts`）。
+   * 面板壳是整宽小节（添加表单需要宽度），不是右值行。
+   */
+  private buildNames(target: Block): HTMLElement {
+    const section = document.createElement('section')
+    section.className = 'props-section prop-names'
+    const head = document.createElement('div')
+    head.className = 'props-section-head'
+    const title = document.createElement('span')
+    title.className = 'props-section-title'
+    title.textContent = t('ui.alias.title')
+    head.appendChild(title)
+    section.appendChild(head)
+    section.appendChild(namesContent(this.cfg(target), this.els.body))
+    return section
+  }
+
+  /** **露面段**（page/tag 列表位）：与弹窗共用同一份段 */
+  private buildLists(target: Block): HTMLElement {
+    return this.labeledRow('prop-lists', t('ui.alias.lists'), listsContent(this.cfg(target)))
+  }
+
+  /** **显示模式段**：有别名才画（「这一行的头显示什么」没有名字就没有答案） */
+  private buildDisplay(target: Block): HTMLElement | null {
+    if (aliasesOf(target).length === 0) return null
+    return this.labeledRow('prop-display', t('ui.alias.display'), displayContent(this.cfg(target)))
+  }
+
   /**
    * **这一块归在谁下面**（`props._belongsTo`）。
    *
@@ -813,82 +835,14 @@ export class PropertiesPanel {
    * 所以这一行对**每个**块都出现，而标签面板只剩「成员」。
    *
    * 两种悬空必须分开显示：上级在回收站（等它复活，边会自己接回）与上级真没了（可清理）。
-   * 都画成「已删除」会让人一点清理就把能复活的边清掉。
+   * 都画成「已删除」会让人一点清理就把能复活的边清掉。内容与交互在段里（与弹窗共用一份）。
    */
   private buildBelongs(target: Block): HTMLElement {
-    const row = document.createElement('div')
-    row.className = 'prop-row prop-belongs ui-row'
-    const label = document.createElement('label')
-    label.className = 'prop-label'
-    const name = document.createElement('span')
-    name.className = 'prop-name'
-    name.textContent = t('ui.belongs.title')
-    label.append(name)
-
-    const value = document.createElement('span')
-    value.className = 'prop-value props-tag-value'
-
-    const chip = (id: string, text: string, title: string): HTMLElement => {
-      const el = document.createElement('span')
-      el.className = 'props-tag'
-      el.dataset.belongsId = id
-      const t0 = document.createElement('span')
-      t0.textContent = text
-      t0.dataset.tip = title
-      const del = this.tagDel(t('ui.belongs.remove'), () => this.deps.removeBelong(target, id))
-      el.append(t0, del)
-      return el
-    }
-
-    for (const p of this.deps.belongsTo(target)) {
-      const n = displayNameOf(p).trim()
-      value.appendChild(chip(p.id, n === '' ? this.deps.shortId(p.id) : n, p.id))
-    }
-    const dangling = this.deps.belongsDangling(target)
-    for (const id of dangling.revivable) {
-      const el = chip(id, `${this.deps.shortId(id)}${t('ui.belongs.revivable')}`, t('ui.belongs.revivableHint'))
-      el.dataset.dangling = 'revivable'
-      value.appendChild(el)
-    }
-    for (const id of dangling.gone) {
-      const el = chip(id, `${this.deps.shortId(id)}${t('ui.belongs.deleted')}`, t('ui.belongs.deletedHint'))
-      el.dataset.dangling = 'gone'
-      value.appendChild(el)
-    }
-    if (dangling.gone.length > 0) {
-      const prune = document.createElement('button')
-      prune.type = 'button'
-      prune.className = 'ghost'
-      prune.dataset.pruneBelongs = '1'
-      prune.textContent = t('ui.belongs.prune', { count: dangling.gone.length })
-      prune.addEventListener('click', () => this.deps.pruneBelongs(target))
-      value.appendChild(prune)
-    }
-
-    // 与查询条件值位同一个手势：点开浮层选已有，而不是手打名字碰运气
-    const add = document.createElement('button')
-    add.type = 'button'
-    add.className = 'ghost props-belong-add'
-    add.textContent = t('ui.belongs.add')
-    add.addEventListener('click', () => this.deps.pickBelong(target, add.getBoundingClientRect(), add))
-    value.appendChild(add)
-
-    row.append(label, value)
-    return row
+    return this.labeledRow('prop-belongs', t('ui.belongs.title'), belongsContent(this.cfg(target)))
   }
 
   /**
-   * **这块的标签**（块级归属）。
-   *
-   * 这一行只读 `props._tags`：它是「我有哪些分类」，不是「它在正文里出现在哪」。
-   * 正文里敲 `#名` 是**提及**（插一枚 ref run），不写归属、也不会出现在这一行；
-   * 两者唯一的交叠是显示：同一行里已经提过的标签，行右端不再重复画 chip。
-   *
-   * ⚠️ 摘标签不只删这一行：正文里那枚 `#名` 也要收掉（`deps.removeTag` 负责），
-   *    否则归属没了、正文里还挂着一个看起来像标签的东西。
-   */
-  /**
-   * **页的脸**（图标＋颜色）：一枚入口开同一个选择器（色行＋图标网格）。
+   * **页的脸**（图标＋颜色）：一枚入口开块配置弹窗（脸面板直接展开）。
    * 按钮自己是当前值的样子（脸＋色点）——入口读作「它现在长这样，点开改」。
    */
   private buildFace(target: Block): HTMLElement {
@@ -921,90 +875,16 @@ export class PropertiesPanel {
     return row
   }
 
+  /**
+   * **这块的标签**（块级归属）。
+   *
+   * 这一行只读 `props._tags`：它是「我有哪些分类」，不是「它在正文里出现在哪」。
+   * 摘标签不只删这一行：正文里那枚 `#名` 也要收掉（段的宿主路负责），
+   * 否则归属没了、正文里还挂着一个看起来像标签的东西。
+   * 内容与交互在段里（与块配置弹窗共用一份）。
+   */
   private buildTags(target: Block): HTMLElement {
-    const row = document.createElement('div')
-    row.className = 'prop-row prop-tags ui-row'
-    const label = document.createElement('label')
-    label.className = 'prop-label'
-    const name = document.createElement('span')
-    name.className = 'prop-name'
-    name.textContent = t('ui.props.tagsTitle')
-    label.append(name)
-
-    const value = document.createElement('span')
-    value.className = 'prop-value props-tag-value'
-    const tags = this.deps.tags(target)
-    /**
-     * **拖拽重排**（≥2 枚才有意义）：HTML5 DnD，拖动中实时搬 DOM 预览落点，
-     * 落下后按 DOM 序整笔写回（`core.tags/reorder` 只许换序，集合不一致整笔拒绝）。
-     *
-     * 为什么顺序是数据不是装饰：块标的借形/借色取「第一个」，顺序就是
-     * 「谁是主标签」——它必须可编辑，否则读路径依赖一个用户改不了的隐藏序。
-     */
-    const draggable = tags.length >= 2
-    const draggingOf = (): HTMLElement | null => value.querySelector<HTMLElement>('.props-tag[data-dragging]')
-    for (const tag of tags) {
-      const chip = document.createElement('span')
-      chip.className = 'props-tag'
-      chip.dataset.panelTagId = tag.id
-      if (draggable) {
-        chip.draggable = true
-        chip.addEventListener('dragstart', (e) => {
-          chip.dataset.dragging = '1'
-          // Electron 要 dataTransfer 里有非空数据才起拖（shape 无关，id 只是载体）
-          e.dataTransfer?.setData('text/plain', tag.id)
-          e.dataTransfer && (e.dataTransfer.effectAllowed = 'move')
-        })
-        chip.addEventListener('dragend', () => {
-          delete chip.dataset.dragging
-        })
-        // 悬停在另一枚 chip 上 ⇒ 按指针在前半/后半决定预览落点（挪的是正在拖的那枚）
-        chip.addEventListener('dragover', (e) => {
-          e.preventDefault()
-          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-          const dragging = draggingOf()
-          if (!dragging || dragging === chip) return
-          const mid = chip.getBoundingClientRect().left + chip.offsetWidth / 2
-          chip.parentNode?.insertBefore(dragging, e.clientX < mid ? chip : chip.nextSibling)
-        })
-      }
-      const text = document.createElement('span')
-      const name = displayNameOf(tag)
-      text.textContent = `#${name}`
-      /**
-       * **只有名字可点**，`×` 不在里面：一枚 chip 上两个命中区会互相抢 ——
-       * 点「摘掉」时顺手把标签页也打开了是最烦的一种。摘除仍只有 `×` 一个入口。
-       * 契约与正文 chip 相同（`data-ref-to`），所以「点名字＝打开它」只有一句话。
-       */
-      text.dataset.refTo = tag.id
-      text.className = 'props-tag-name'
-      text.dataset.tip = t('ui.chip.tagTitle', { label: name })
-      text.addEventListener('click', (e) => this.deps.openRef(tag.id, clickModsOf(e)))
-      const del = this.tagDel(t('ui.props.tagRemove'), () => this.deps.removeTag(target, tag.id))
-      chip.append(text, del)
-      value.appendChild(chip)
-    }
-    // 落下＝按预览序整笔写回；写失败（集合不一致）由 repaint 恢复模型序，不留假预览
-    if (draggable) {
-      value.addEventListener('dragover', (e) => e.preventDefault())
-      value.addEventListener('drop', (e) => {
-        e.preventDefault()
-        const ids = [...value.querySelectorAll<HTMLElement>('.props-tag[data-panel-tag-id]')].map(
-          (el) => el.dataset.panelTagId!,
-        )
-        this.deps.reorderTags(target, ids)
-      })
-    }
-    // 与查询条件值位同一个手势：点开浮层选已有（可新建），而不是手打名字碰运气
-    const add = document.createElement('button')
-    add.type = 'button'
-    add.className = 'ghost props-tag-add'
-    add.textContent = t('ui.props.tagAdd')
-    add.addEventListener('click', () => this.deps.pickTag(target, add.getBoundingClientRect(), add))
-    value.appendChild(add)
-
-    row.append(label, value)
-    return row
+    return this.labeledRow('prop-tags', t('ui.props.tagsTitle'), tagsContent(this.cfg(target)))
   }
 
   /**

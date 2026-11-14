@@ -58,7 +58,7 @@ export const TAGS_HANDLERS: Record<string, Handler> = {
   'core.block/configure': (a, app) => {
     const id = S(a.blockId) || curBlock(app)
     if (!id) return false
-    app.openAliasEditor(id)
+    app.openBlockConfig(id)
     return true
   },
   'core.block/set-type': (a, app) => {

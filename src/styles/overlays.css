@@ -482,6 +482,12 @@
   padding: var(--ui-gap-1) 0;
   color: var(--ui-text-secondary);
 }
+/* 露面段的壳（两个列表位）：段在弹窗里竖排；面板的行里也竖排（同一份内容） */
+.alias-checks {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
 .alias-display {
   display: flex;
   gap: var(--ui-gap-2);
