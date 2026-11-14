@@ -142,6 +142,16 @@ export function setupPanels(deps: PanelsDeps) {
    */
   const adj = () => buildAdjacency(deps.getWs().blocks)
 
+  /**
+   * `ref` 值的显示名：走 core 的唯一兜底链（日记日期 > 主名 > 摘要 > 「无标题」）。
+   * 裸 id 不许露——空块、日记块都没有别名，displayNameOf 会给空串，
+   * 在这里兜成 shortId 就是把 id 当名字用（用户无从分辨）。
+   */
+  const refLabelOf = (targetId: string): string => {
+    const b = kb.get(targetId)
+    return b ? blockLabel(b, (id) => kb.get(id)) : t('ui.props.refMissing', { id: shortId(targetId) })
+  }
+
   /* 挂载区（每段一个）：装配在文件末尾的 renderMounts 里 —— 它要按段根建实例，
      而属性区只认「这一屏是谁」，两者判据不同，所以不挤在同一段。 */
 
@@ -625,12 +635,7 @@ export function setupPanels(deps: PanelsDeps) {
       pickIcon: pickIconValue,
       /** 页的脸（图标＋颜色）：开同一个块配置弹窗，脸面板直接展开 */
       pickFace: (b, anchor) => pickFace(b, anchor),
-      refLabel: (targetId) => {
-        const b = kb.get(targetId)
-        if (!b) return t('ui.props.refMissing', { id: shortId(targetId) })
-        const name = displayNameOf(b).trim()
-        return name === '' ? shortId(b.id) : name
-      },
+      refLabel: refLabelOf,
       toast: (text, kind) => app.toast(text, kind),
       /**
        * 选项作用域徽标里的 `#名`：一次 O(1) 的索引读，UI 不扫森林。
@@ -998,12 +1003,7 @@ export function setupPanels(deps: PanelsDeps) {
       pickChoice: (b, propId, current, onPick, anchor, trigger) => pickChoiceValue(b, propId, current, onPick, anchor, trigger),
       pickTag: pickTagValue,
       tagLabel,
-      refLabel: (id) => {
-        const b = kb.get(id)
-        if (!b) return t('ui.props.refMissing', { id: shortId(id) })
-        const name = displayNameOf(b).trim()
-        return name === '' ? shortId(b.id) : name
-      },
+      refLabel: refLabelOf,
       // 选项显示名里 `· #名` 的解析（`select` 单元格与属性区同一份口径）
       tagName: (id) => {
         const b = kb.get(id)
