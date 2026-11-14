@@ -484,12 +484,19 @@
 /* ---------------------------------------------------------- 格式行（{mark}） */
 
 /* 按钮条 ＋ 展开的色槽 ＋ 预览，纵排成一小块；预览复用正文渲染的 mk-* class（颜色只在 token 上） */
+/* 条件行 ＋ 独占一行的编辑面：纵排一小块（行保持原样，编辑面缩进对齐值区） */
+.qt-rowwrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+}
 .qt-markwrap {
   display: flex;
   flex-direction: column;
   gap: var(--ui-gap-1);
   min-width: 0;
-  flex: 1 1 auto;
+  padding-left: var(--ui-gap-2);
 }
 .qt-markbar {
   display: flex;

@@ -323,7 +323,7 @@ export const BINDINGS: Binding[] = [
    * 一个问题，不该占 14 个常驻位置。`pick-bg` 紧挨高亮一键，是它的逃逸口。
    */
   { command: 'core.anno/pick-ink', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 80, layer: 'core', icon: 'lucide:baseline', label: t('menu.label.ink'), axis: 'ink' },
-  { command: 'core.anno/pick-bg', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 82, layer: 'core', icon: 'lucide:chevron-down', label: t('menu.label.pickBg'), axis: 'bg' },
+  { command: 'core.anno/pick-bg', kind: 'selection', when: 'editorTextFocus && !selectionEmpty', group: 'sel/1-mark', order: 82, layer: 'core', icon: 'lucide:highlighter', label: t('menu.label.pickBg'), axis: 'bg' },
   // 写备注：与「转为引用」同组（都是「这一段的去处」）。判据同宽：单块纯文本选区才有锚
   { command: 'core.notes/create', kind: 'selection', when: 'editorTextFocus && selectionRef', group: 'sel/2-ref', order: 25, layer: 'core', icon: 'lucide:message-circle', label: t('menu.label.writeNote') },
   /**

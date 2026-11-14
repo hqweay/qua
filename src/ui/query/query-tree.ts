@@ -599,7 +599,7 @@ export class QueryTree {
         el.append(...this.stampControls(row))
         break
       case 'mark':
-        el.append(this.markControls(row))
+        // 编辑面不进行内排布——条件行之后由 rowEl 尾部包成独占一行
         break
       case 'link':
         el.append(this.linkControl(row))
@@ -613,6 +613,16 @@ export class QueryTree {
       this.paint()
     })
     el.append(del)
+    /**
+     * 格式行的编辑面**独占一行**：条件行只留 [方向][种类][×]，按钮条与预览挪到下一行——
+     * 行内控件宽窄悬殊时混排会歪，删行钮也会被挤到孤行。
+     */
+    if (row.kind === 'mark') {
+      const wrap = document.createElement('div')
+      wrap.className = 'qt-rowwrap'
+      wrap.append(el, this.markControls(row))
+      return wrap
+    }
     return el
   }
 

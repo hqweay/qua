@@ -207,7 +207,8 @@
   background: var(--ui-accent-soft);
   color: var(--ui-accent);
 }
-/* 颜色轴：值不是开关，是槽名；色点与入口色标共用同一份 --ui-ink-* 语义槽 */
+/* 色点与入口色标：**字色轴用墨色、背景轴用真正的底色**——
+   两个轴的可选值必须长得像它套上去之后的样子，否则选背景色时七个点看着全一样 */
 .selbar .sel-swatch {
   width: 16px;
   height: 16px;
@@ -223,6 +224,20 @@
 .selbar .sel-swatch[data-slot='blue'], .selbar .sel-axis-value[data-slot='blue'] { background: var(--ui-ink-blue); }
 .selbar .sel-swatch[data-slot='violet'], .selbar .sel-axis-value[data-slot='violet'] { background: var(--ui-ink-violet); }
 .selbar .sel-swatch[data-slot='gray'], .selbar .sel-axis-value[data-slot='gray'] { background: var(--ui-ink-gray); }
+.selbar .sel-btn[data-axis='bg'] .sel-axis-value[data-slot='red'] { background: var(--ui-bg-red); }
+.selbar .sel-btn[data-axis='bg'] .sel-axis-value[data-slot='orange'] { background: var(--ui-bg-orange); }
+.selbar .sel-btn[data-axis='bg'] .sel-axis-value[data-slot='yellow'] { background: var(--ui-bg-yellow); }
+.selbar .sel-btn[data-axis='bg'] .sel-axis-value[data-slot='green'] { background: var(--ui-bg-green); }
+.selbar .sel-btn[data-axis='bg'] .sel-axis-value[data-slot='blue'] { background: var(--ui-bg-blue); }
+.selbar .sel-btn[data-axis='bg'] .sel-axis-value[data-slot='violet'] { background: var(--ui-bg-violet); }
+.selbar .sel-btn[data-axis='bg'] .sel-axis-value[data-slot='gray'] { background: var(--ui-bg-gray); }
+.selbar .selbar-extra[data-axis='bg'] .sel-swatch[data-slot='red'] { background: var(--ui-bg-red); }
+.selbar .selbar-extra[data-axis='bg'] .sel-swatch[data-slot='orange'] { background: var(--ui-bg-orange); }
+.selbar .selbar-extra[data-axis='bg'] .sel-swatch[data-slot='yellow'] { background: var(--ui-bg-yellow); }
+.selbar .selbar-extra[data-axis='bg'] .sel-swatch[data-slot='green'] { background: var(--ui-bg-green); }
+.selbar .selbar-extra[data-axis='bg'] .sel-swatch[data-slot='blue'] { background: var(--ui-bg-blue); }
+.selbar .selbar-extra[data-axis='bg'] .sel-swatch[data-slot='violet'] { background: var(--ui-bg-violet); }
+.selbar .selbar-extra[data-axis='bg'] .sel-swatch[data-slot='gray'] { background: var(--ui-bg-gray); }
 /* 选中＝双环：内环用浮层底色把色点与环切开，外环给状态。比用正文色描一圈干净得多 */
 .selbar .sel-swatch[data-on='1'] {
   box-shadow: 0 0 0 2px var(--ui-surface-raised), 0 0 0 3.5px var(--ui-text);
