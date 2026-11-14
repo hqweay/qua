@@ -595,9 +595,7 @@ button.ghost.wide {
 .trash-scope:hover {
   background: var(--ui-bg-hover);
 }
-.trash-scope[aria-pressed='true']:hover {
-  background: var(--ui-accent-soft);
-}
+/* 按下的态已经在上一条里给了底色，这里不再设一遍——同色 hover 是冗余，不是反馈 */
 .trash-clear {
   flex: none;
   margin-left: auto;
