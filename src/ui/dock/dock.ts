@@ -514,7 +514,6 @@ export function mountDockSlot(
     collapseLabel: string
     foldAllLabel: string
     resizeLabel: string
-    icon: string
     onAdd: (add: HTMLButtonElement) => void
     onCollapse: () => void
     onFoldAll: () => void
@@ -524,7 +523,9 @@ export function mountDockSlot(
   els.titleEl.textContent = opts.title
   const add = els.head.querySelector<HTMLButtonElement>('.dock-add')
   if (add) {
-    renderIcon(add, 'lucide:plus', 'plus')
+    // 「加」动作保留加号语义，但方框把「往面板里加一张卡」和顶栏的「新建 tab」区分开——
+    // 同一视野里同一个符号只能读作一个动作
+    renderIcon(add, 'lucide:square-plus', 'square-plus')
     add.setAttribute('aria-label', opts.addLabel)
     add.dataset.tip = opts.addLabel
     add.addEventListener('click', () => opts.onAdd(add))
@@ -536,7 +537,7 @@ export function mountDockSlot(
   els.foldAllEl.addEventListener('click', opts.onFoldAll)
   const btn = els.head.querySelector<HTMLButtonElement>('.dock-collapse')
   if (btn) {
-    renderIcon(btn, opts.icon, 'chevron-left')
+    renderIcon(btn, slotCollapseIcon(opts.side, slotOpen(opts.side)), 'panel-left-close')
     btn.setAttribute('aria-label', opts.collapseLabel)
     btn.addEventListener('click', opts.onCollapse)
   }
@@ -548,10 +549,33 @@ export function mountDockSlot(
   return els
 }
 
-/** 槽的开关：把状态写到 `body[data-dock-*]`（样式按它取值，JS 不碰宽度数值） */
+/**
+ * 槽收起按钮的符号随开合翻面，画**点击后的动作**：开着画 close、收着画 open。
+ * 用 `panel-*`（面板＋箭头）而不是裸 chevron——符号自己带上「槽」这个对象，
+ * 不与顶栏的历史前进/后退（同为箭头）撞形。
+ */
+function slotCollapseIcon(side: 'left' | 'right', open: boolean): string {
+  if (side === 'left') return open ? 'lucide:panel-left-close' : 'lucide:panel-left-open'
+  return open ? 'lucide:panel-right-close' : 'lucide:panel-right-open'
+}
+
+/** 槽此刻开还是收：读 `body[data-dock-*]`（`applyDockVisibility` 是唯一写点） */
+function slotOpen(side: 'left' | 'right'): boolean {
+  const v = side === 'left' ? document.body.dataset.dockLeft : document.body.dataset.dockRight
+  return v !== 'closed'
+}
+
+/** 槽的开关：把状态写到 `body[data-dock-*]`（样式按它取值，JS 不碰宽度数值），
+ *  并让收起按钮的图标跟着翻面 */
 export function applyDockVisibility(open: { left: boolean; right: boolean }): void {
   document.body.dataset.dockLeft = open.left ? 'open' : 'closed'
   document.body.dataset.dockRight = open.right ? 'open' : 'closed'
+  for (const side of ['left', 'right'] as const) {
+    const btn = document.getElementById(side === 'left' ? 'dock-left-collapse' : 'dock-right-collapse')
+    if (!btn) continue
+    const icon = slotCollapseIcon(side, open[side])
+    if (btn.dataset.icon !== icon) renderIcon(btn, icon, 'panel-left-close')
+  }
 }
 
 /** 压缩区间起点：CSS 的 `@media (max-width: 839px)` 必须与它一致 */
