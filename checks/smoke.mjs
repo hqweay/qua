@@ -29387,6 +29387,140 @@ await check('T306 自定义色：色盘选 hex 写入并进最近色；chip soft
   return '色盘选 hex 写 _color 并进最近自定义；chip soft 现算；重开选择器可见且选中'
 })
 
+/**
+ * **`ref` 的候选域（`_refTags` 软约束 ＋ 新建并引用）**。
+ *
+ * 一条故事走完：定义页限定候选标签 → 值选择器只剩下那些成员 → 搜索词给「新建并引用」
+ * → 新建的块没打那个标签，值**照常显示**（软约束的判据：只过滤候选，不校验存量值）。
+ *
+ * ⚠️ 失败方式要能分辨：候选没被收窄（约束写了没人读）、或存量值被过滤掉（软约束做成了硬校验）
+ *    —— 一个是漏接，一个是越线，两者的现象都是「列表不对」，但结论相反。
+ */
+await check('T309 ref 的候选域：_refTags 过滤候选、标题带约束；新建并引用；存量值不受约束影响', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  // ① 前置：host 块 ＋ 三个候选（甲打 #演员、乙打 #人物、丙不打）＋ 一条 ref 定义
+  const setup = await page.evaluate(() => {
+    const host = window.__qua.blocks().find((b) => b.roles.length === 0 && b.text.length > 2)
+    const ed = window.__qua.__editor
+    const a = ed.insert.insertBlockAfter(host.id, '候选甲')
+    const b = ed.insert.insertBlockAfter(a, '候选乙')
+    const c = ed.insert.insertBlockAfter(b, '候选丙')
+    window.__qua.invoke('core.tags/add', { blockId: a, name: '演员' })
+    window.__qua.invoke('core.tags/add', { blockId: b, name: '人物' })
+    window.__qua.invoke('core.props/create-def', { blockId: host.id, label: '负责人', kind: 'ref', target: 'own' })
+    window.__qua.invoke('core.block/focus-block', { blockId: host.id })
+    const def = window.__qua.propDefs().find((d) => d.label === '负责人')
+    const tagId = window.__qua.allBlocks().find((x) => x.roles?.includes('tag') && x.text === '演员')?.id ?? ''
+    return { host: host.id, a, b, c, defId: def?.id ?? '', tagId }
+  })
+  assert(setup.defId !== '' && setup.tagId !== '', '前置：定义与标签都该建出来：' + JSON.stringify(setup))
+  await page.waitForTimeout(260)
+
+  // ② 定义页：候选段空态写「不限」，点「＋」选 #演员 ⇒ 写 _refTags
+  await page.evaluate((defId) => window.__qua.invoke('core.block/focus-block', { blockId: defId }), setup.defId)
+  await page.waitForTimeout(300)
+  const emptyState = await page.evaluate(() => ({
+    row: Boolean(document.querySelector('.prop-ref-tags-row')),
+    any: document.querySelector('.prop-ref-tags')?.textContent ?? '',
+    chip: document.querySelectorAll('.prop-ref-tags .props-tag').length,
+  }))
+  assert(emptyState.row, 'ref 定义页应有「候选」这一段：' + JSON.stringify(emptyState))
+  assert(emptyState.chip === 0 && emptyState.any.includes('不限'), '没有约束时写「不限」：' + JSON.stringify(emptyState))
+
+  await page.click('.prop-ref-add')
+  await page.waitForSelector('.layer .layer-input', { timeout: 4000 })
+  await page.fill('.layer .layer-input', '演员')
+  await page.waitForTimeout(220)
+  await page.evaluate(() => {
+    const item = [...document.querySelectorAll('.layer-item')].find((el) => el.textContent?.includes('演员'))
+    item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForTimeout(300)
+  const constrained = await page.evaluate((defId) => {
+    const live = window.__qua.__editor.store.find(defId)
+    return {
+      tags: live?.props?._refTags ?? null,
+      chips: [...document.querySelectorAll('.prop-ref-tags .props-tag')].map((e) => e.textContent ?? ''),
+    }
+  }, setup.defId)
+  assert(
+    Array.isArray(constrained.tags) && constrained.tags.length === 1 && constrained.tags[0] === setup.tagId,
+    '选中的标签应写进 _refTags：' + JSON.stringify(constrained),
+  )
+  assert(constrained.chips.some((s) => s.includes('#演员')), '候选段应画出这枚标签 chip：' + JSON.stringify(constrained.chips))
+
+  // ③ 值选择器：候选只剩 #演员 的成员；标题说明「为什么只有这几行」
+  await page.evaluate((host) => window.__qua.invoke('core.block/focus-block', { blockId: host }), setup.host)
+  await page.waitForTimeout(300)
+  await page.evaluate((pid) => {
+    document.querySelector('.prop-row[data-prop-id="' + pid + '"] .prop-ref')?.click()
+  }, setup.defId)
+  await page.waitForTimeout(240)
+  const menu = await page.evaluate(() => ({
+    title: document.querySelector('.layer-head')?.textContent ?? '',
+    labels: [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? ''),
+  }))
+  assert(menu.labels.some((x) => x.includes('候选甲')), '成员应在候选里：' + JSON.stringify(menu.labels))
+  assert(!menu.labels.some((x) => x.includes('候选乙')), '打了别的标签的块不该在候选里（约束生效）：' + JSON.stringify(menu.labels))
+  assert(!menu.labels.some((x) => x.includes('候选丙')), '没打标签的块不该在候选里：' + JSON.stringify(menu.labels))
+  assert(menu.title.includes('限') && menu.title.includes('演员'), '标题应带约束的标签名：' + JSON.stringify(menu.title))
+
+  // ④ 搜索词 ⇒ 「新建并引用」；选中当场建页并写值
+  await page.fill('.layer .layer-input', '新人')
+  await page.waitForTimeout(260)
+  const hasNew = await page.evaluate(() =>
+    [...document.querySelectorAll('.layer-item .layer-label')].some((e) => e.textContent?.includes('新建') && e.textContent?.includes('新人')),
+  )
+  assert(hasNew, '搜索词应给「新建「新人」并引用」这一行')
+  await page.evaluate(() => {
+    const item = [...document.querySelectorAll('.layer-item')].find(
+      (el) => el.textContent?.includes('新建') && el.textContent?.includes('新人'),
+    )
+    item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForTimeout(400)
+  const made = await page.evaluate(
+    ({ pid, host }) => {
+      const store = window.__qua.__editor.store
+      const find = (id, list) => {
+        for (const b of list) {
+          if (b.id === id) return b
+          const inner = find(id, b.children ?? [])
+          if (inner) return inner
+        }
+        return null
+      }
+      const live = find(host, store.blocks)
+      const ctl = document.querySelector('.prop-row[data-prop-id="' + pid + '"] .prop-ref')
+      // 页的名字在地址里（正文是描述，恒空）⇒ 按 aliases 认，不按 text
+      const created = window.__qua
+        .allBlocks()
+        .find((x) => x.lists?.includes('page') && (x.aliases ?? []).includes('新人'))
+      return { stored: live?.props?.[pid] ?? '', shown: ctl?.textContent ?? '', pageId: created?.id ?? '' }
+    },
+    { pid: setup.defId, host: setup.host },
+  )
+  assert(made.pageId !== '', '应物化出一个页「新人」：' + JSON.stringify(made))
+  assert(made.stored === made.pageId, '值应指向新建的块：' + JSON.stringify(made))
+  assert(made.shown === '新人', '值控件应显示它的名字：' + JSON.stringify(made))
+
+  // ⑤ 软约束：新建的块**没打** #演员，值照常显示（显示层不按约束过滤）
+  const soft = await page.evaluate(
+    ({ pid }) => {
+      const ctl = document.querySelector('.prop-row[data-prop-id="' + pid + '"] .prop-ref')
+      return { shown: ctl?.textContent ?? '', missing: ctl?.dataset.missing ?? '' }
+    },
+    { pid: setup.defId },
+  )
+  assert(soft.shown === '新人', '约束之外的存量值必须照常显示（软约束，不做硬校验）：' + JSON.stringify(soft))
+
+  await ctx.close()
+  return `定义页限 #演员 ⇒ 候选只剩成员（标题带「限」）；搜索「新人」新建并引用；约束外的值仍显示`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

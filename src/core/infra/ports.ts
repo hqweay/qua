@@ -359,6 +359,17 @@ export interface App {
    * 没有格式轴的 kind 拒绝写入。
    */
   setPropFormat(defId: string, format: string): void
+  /**
+   * 写/摘 `ref` 定义的**候选标签**（`_refTags`）：候选按这些标签的成员过滤
+   * （含下级标签闭包）。**软约束**——只过滤候选，不校验存量值。
+   * 空数组 ＝ 摘键（摘掉约束）。
+   */
+  setPropRefTags(defId: string, tagIds: readonly string[]): void
+  /**
+   * **新建并引用**：物化一个新块（页块，落森林顶层；同名地址已存在则复用）并把它的 id
+   * 写进 `blockId` 的这一格。建页与写值同一笔事务。返回 id（空串＝没写）。
+   */
+  createPropRefTarget(blockId: string, propId: string, name: string): string
   /** 写定义块的快捷入口位置（`block-left` ＝ 块左侧图标；`panel` ＝ 只留属性面板） */
   setUiPosition(defId: string, position: UiPosition): void
   /**

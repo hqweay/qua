@@ -6,6 +6,7 @@ import {
   CHECK_PROP,
   FORMAT_PROP,
   PROP_KIND_SPECS,
+  REF_TAGS_PROP,
   CHILD_PROPS_PROP,
   UI_POSITION_PROP,
   USE_PROP,
@@ -28,6 +29,7 @@ import {
   declareOwnProp,
   declaredFieldIds,
   displayNameOf,
+  ensurePageInTx,
   membersOf,
   mkPropDef,
   newChoiceId,
@@ -78,6 +80,8 @@ export function propsCommands(
   | 'deleteChoice'
   | 'restoreChoice'
   | 'setPropFormat'
+  | 'setPropRefTags'
+  | 'createPropRefTarget'
 > {
   const find = (id: string): Block | undefined => d.kb.get(id)
 
@@ -435,6 +439,71 @@ export function propsCommands(
         return
       }
       d.run((tx) => tx.patch(defId, (b) => patchProp(b, FORMAT_PROP, next === '' || next === 'plain' ? undefined : next)))
+    },
+
+    /**
+     * 写/摘 `ref` 定义的**候选标签**（`_refTags`，软约束）。
+     *
+     * 写的是 id 不是名字（标签能改名）；空清单 ＝ 摘键 ——「没有约束」与「约束是空集」
+     * 是两件事，数组在不在场就是那个区别的依据（读侧 `refTargetScope` 据此给 `null`）。
+     * **不去校验标签是否还活着**：悬空是状态不是坏形状，读侧退回无约束。
+     */
+    setPropRefTags: (defId, tagIds) => {
+      const def = find(defId)
+      if (!def || propKindOf(def) !== 'ref') return
+      const next: string[] = []
+      for (const id of tagIds) if (typeof id === 'string' && id !== '' && !next.includes(id)) next.push(id)
+      d.run((tx) => tx.patch(defId, (b) => patchProp(b, REF_TAGS_PROP, next.length > 0 ? next : undefined)))
+    },
+
+    /**
+     * **新建并引用**：物化一个块（页块，落森林顶层）并把它的 id 写进这一格。
+     *
+     * 判据（267.3）：这是 `@` 建页（105）在属性行的转世 ——
+     *   · 同名地址已存在 ⇒ 直接引用它（**不改它的身份**，与 `@` 同一条口径：
+     *     一个已经存在的标签不该因为被引用一次就变成页）；
+     *   · 建页与写值**同一笔**事务：拆开就会留下「页建了、值没写」的半批，
+     *     而用户只点了一次。
+     *
+     * 返回新值指向的 id（空串＝没写：名字空 / 不是 `ref` 定义 / 块不在）。
+     */
+    createPropRefTarget: (blockId, propId, name) => {
+      if (!find(blockId)) return ''
+      const def = d.kb.propDefs().find((x) => x.id === propId)
+      if (!def || propKindOf(def) !== 'ref') return ''
+      const title = name.trim()
+      if (title === '') return ''
+      const made: { id: string } = { id: '' }
+      d.run((tx) => {
+        const target = ensurePageInTx(
+          { resolveAlias: (n) => d.kb.resolveAlias(n), roots: () => d.kb.roots() },
+          title,
+          tx,
+        )
+        if (!target) return
+        made.id = target.id
+        tx.patch(blockId, (b) => {
+          /**
+           * 多值：**追加**（与多值控件写回整份数组同一条语义）。
+           * 已经引用过 ⇒ 零 op —— 不重写、也不「摘出来再追加」（那会把顺序换一遍，
+           * 用户看到的是一次无意义的位移）。
+           */
+          if (cardinalityOf(def) === 'many') {
+            const list = valueListOf(b.props?.[propId])
+            if (list.includes(target.id)) return
+            setValue(b, propId, [...list, target.id])
+            return
+          }
+          setValue(b, propId, target.id)
+        })
+      })
+      // 值变了但块不是「写入回调」那一块：这一行要当场重画（不等下一次 store 通知）
+      if (made.id !== '') {
+        d.repaintBlocks([blockId])
+        // 选择器关掉就走了，「建了什么」得有一句回执（否则同名复用与新建成页看起来一样）
+        d.toast(t('ui.props.newRefTargetDone', { name: title }), 'ok')
+      }
+      return made.id
     },
 
     /** 写定义块的快捷入口位置（`panel` ＝ 摘键，回到缺省） */

@@ -69,6 +69,11 @@ import {
   type ChoiceScope,
   type PropChoice,
 } from './choices.ts'
+/**
+ * `ref` 的候选域（`_refTags` 软约束）住 `./ref-target.ts`；本文件再导出，
+ * **对外的符号名不变**（`core/index.ts` 只转一手）。
+ */
+export { REF_TAGS_PROP, isRefTagIds, refTagIds, refTagNames, refTargetScope } from './ref-target.ts'
 
 /**
  * 两个属性值是不是同一件事（**结构相等**：属性值可以是数组／对象，`Object.is` 不够）。

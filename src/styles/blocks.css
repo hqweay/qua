@@ -844,6 +844,26 @@
 .props-tag-x:hover {
   opacity: 1;
 }
+/*
+  `ref` 定义的候选域（`_refTags`）：chips ＋ 一颗「＋」。它住在定义页而不是值行 ——
+  约束是「谁可以被引用」，不是某一格值指向谁。多枚时自动折行（候选可能好几个）。
+*/
+.prop-ref-tags {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-1);
+}
+.prop-ref-add {
+  background: none;
+  border: 0;
+  padding: 0 var(--ui-gap-1);
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.prop-ref-add:hover {
+  color: var(--ui-text);
+}
 .prop-check {
   accent-color: var(--ui-accent);
 }

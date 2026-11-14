@@ -50,6 +50,7 @@ import {
   FIELD_DEFS_PROP,
   FORMAT_PROP,
   OWN_PROPS_PROP,
+  REF_TAGS_PROP,
   UI_POSITION_PROP,
   USE_PROP,
   isCardinalityValue,
@@ -61,6 +62,7 @@ import {
   isFormatValue,
   isOwnPropSlots,
   isPropKind,
+  isRefTagIds,
   isUiPositionValue,
   isUseValue,
   parseChoiceScope,
@@ -103,6 +105,8 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   [OWN_PROPS_PROP]: isOwnPropSlots,
   [CHILD_PROPS_PROP]: isChildPropsValue,
   [UI_POSITION_PROP]: isUiPositionValue,
+  // `ref` 定义的候选标签（软约束：只过滤候选，不校验存量值）
+  [REF_TAGS_PROP]: isRefTagIds,
   [DEFAULT_PROP]: isDefaultValue,
   // 归属与标签
   [BELONGS_TO_PROP]: isBelongsToRefs,

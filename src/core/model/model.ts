@@ -244,6 +244,14 @@ export type SystemPropId =
   // 字段定义的**编辑位置**（见 `core/props.ts` 的 `uiPositionOf`）
   | '_uiPosition'
   /**
+   * `ref` 定义的**候选标签**（见 `core/props/ref-target.ts`）：一组标签 id，
+   * 候选按这些标签的成员过滤（含下级标签闭包）。
+   *
+   * ⚠️ 它是**软约束**：只影响「下一次挑目标」时列哪些行，不校验存量值 ——
+   *    约束改了／标签删了，已经引用的块照常显示。
+   */
+  | '_refTags'
+  /**
    * 字段定义的**缺省值**（见 `core/props.ts` 的 `readField`）：声明了这一栏却没填的块，
    * 读侧按它取值（select 存选项块 id）。只对写了自己的缺省的定义生效——
    * 没有 `_default` 的定义，未填仍是未填。

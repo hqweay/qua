@@ -55,6 +55,14 @@ export interface NameChoiceOpts {
   selectedIds?: readonly string[]
   /** 排除项与 `selectedIds` 合并：不列出 */
   excludeIds?: readonly string[]
+  /**
+   * **候选白名单**：只列这些 id 的行（`ref` 的 `_refTags` 软约束从这儿进来）。
+   *
+   * `undefined` ＝ 不限制；**空集合 ＝ 真的没有候选**——两种答案分开表达，
+   * 合成一个「有没有约束」的布尔再用真值判断，就会在「约束存在但一个成员都没有」时
+   * 悄悄退回全部候选（那时用户看到的是「限制没生效」，比空清单更难查）。
+   */
+  onlyIds?: ReadonlySet<string>
   /** 已用候选优先：这些 id 排在最前（其余保持既定顺序） */
   priorityIds?: readonly string[]
   /** 当前值的那一行标「当前」徽标（值选择器接住「现在选的是谁」） */
@@ -142,6 +150,7 @@ export function createNameChoice(
   const adj = buildAdjacency(forest, walk)
   const byId = new Map(blocks.map((b) => [b.id, b]))
   const hidden = new Set<string>([...(opts.selectedIds ?? []), ...(opts.excludeIds ?? [])])
+  const only = opts.onlyIds ?? null
   const subtree = opts.rootId !== undefined ? descendantIds(opts.rootId, adj) : null
   const priority = new Set(opts.priorityIds ?? [])
   const idPrefix = opts.idPrefix ?? (kind === 'tag' ? 'tagpick' : kind === 'ref' ? 'ref' : 'namepick')
@@ -222,6 +231,7 @@ export function createNameChoice(
     const want = normalizeAlias(query)
     const hits = ordered()
       .filter((b) => hidden.size === 0 || !hidden.has(b.id))
+      .filter((b) => only === null || only.has(b.id))
       .filter((b) => subtree === null || subtree.has(b.id))
       .filter((b) => matches(b, want))
       .map(rowFor)

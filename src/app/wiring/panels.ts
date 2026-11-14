@@ -40,6 +40,8 @@ import {
   propLabel,
   queryFieldsOf,
   readMountView,
+  refTagNames,
+  refTargetScope,
   todayISO,
   type Block,
   type ClickMods,
@@ -238,7 +240,7 @@ export function setupPanels(deps: PanelsDeps) {
 
   const pickRefValue = (
     owner: Block | undefined,
-    _propId: string,
+    propId: string,
     current: string,
     onPick: (targetId: string) => void,
     anchor?: DOMRect,
@@ -264,23 +266,72 @@ export function setupPanels(deps: PanelsDeps) {
             },
           ]
         : []
+    /**
+     * **候选的软约束**（`_refTags`，定义块上）：只过滤列表，不校验存量值 ——
+     * 约束改了、标签删了，已引用的块照常显示（值不在这条路径上）。
+     * `null` ＝ 没有约束（没写，或写的标签一个都不在世了）。
+     */
+    const def = propId === '' ? undefined : kb.get(propId)
+    const scope = refTargetScope(def, kb.roots())
+    const scopeNames =
+      scope === null
+        ? []
+        : refTagNames(def, (id) => {
+            const tag = kb.get(id)
+            return tag ? displayNameOf(tag).trim() : ''
+          })
+    /**
+     * **新建并引用**：只在真实属性行上出现（条件树的虚拟根块没有「值所属的属性」，
+     * 也没有可写回的块）；查询词为空时不出现——建一个没有名字的块不是一次选择。
+     */
+    const canCreate = owner !== undefined && propId !== '' && opts?.rootBlock !== true
+    const newRow = (q: string): Row[] => {
+      const name = q.trim()
+      if (!canCreate || name === '') return []
+      return [
+        {
+          id: 'ref/new',
+          label: t('ui.props.newRefTarget', { name }),
+          hint: t('ui.props.newRefTargetHint'),
+          icon: 'lucide:file-plus',
+          group: 'ref/0-new',
+          pick: { kind: 'newPage', name },
+        },
+      ]
+    }
     const choice = createNameChoice(kb.roots(), {
       kind: 'ref',
       // 自己不能指向自己：那会造出一个立刻成环的引用
       ...(owner ? { excludeIds: [owner.id] } : {}),
       currentId: current,
+      ...(scope === null ? {} : { onlyIds: scope }),
     })
     layers.openMenu({
-      rows: [...rootRow(), ...choice.rows('')],
+      rows: [...newRow(''), ...rootRow(), ...choice.rows('')],
       anchor: anchor ?? deps.getEd().caretRect(),
       // 同一颗值按钮再点一次＝收起（toggle）
       ...(trigger ? { trigger } : {}),
-      title: t('ui.props.pickRef'),
+      // 标题带上约束的标签名：用户要知道「为什么只有这几行」
+      title:
+        scopeNames.length > 0
+          ? t('ui.props.pickRefScoped', { tags: scopeNames.map((n) => `#${n}`).join('、') })
+          : t('ui.props.pickRef'),
       searchable: true,
       focusSearch: true,
-      emptyText: t('ui.props.refEmpty'),
-      onQuery: (q) => layers.setRows([...rootRow(), ...choice.rows(q)]),
+      emptyText: scope === null ? t('ui.props.refEmpty') : t('ui.props.refEmptyConstrained'),
+      onQuery: (q) => layers.setRows([...newRow(q), ...rootRow(), ...choice.rows(q)]),
       onPick: (row) => {
+        /**
+         * 新建并引用：**建页与写值同一笔命令**（`create-ref-target`）。
+         * 不走 `onPick`（那是「写一个已有的 id」），否则会多一次事务、也多一条撤销步。
+         */
+        if (row.pick?.kind === 'newPage') {
+          if (!owner) return
+          app.createPropRefTarget(owner.id, propId, row.pick.name)
+          // 与「选了已有目标」同一条：属性区要立刻显示新值
+          scheduleProperties()
+          return
+        }
         const id = String(row.id).slice('ref/'.length)
         onPick(id)
         // 选择器关掉之后属性区要立刻显示新值（不等下一次 store 通知）
@@ -630,6 +681,28 @@ export function setupPanels(deps: PanelsDeps) {
       },
       setFormat: (defId, format) =>
         void deps.getRegistry().invoke('core.props/set-format', { defId, format }, 'ui'),
+      /**
+       * **`ref` 定义的候选标签**：浮层归这一层（与 `pickTagValue` 同一个选择器，
+       * `allowCreate:false` —— 配约束是读操作的同伴，不该顺手往库里建标签）。
+       * 已有清单当排除项：同一个标签不会出现两枚 chip。
+       */
+      pickRefTag: (exclude, onPick, anchor) => {
+        openTagChoice({
+          layers,
+          forest: kb.roots(),
+          anchor,
+          title: t('ui.props.refTags.add'),
+          emptyText: t('ui.query.pickTagEmpty'),
+          allowCreate: false,
+          selectedIds: [...exclude],
+          idPrefix: 'reftag',
+          onPick: (pick) => {
+            if (pick.kind === 'tag') onPick(pick.id)
+          },
+        })
+      },
+      setRefTags: (defId, tagIds) =>
+        void deps.getRegistry().invoke('core.props/set-ref-tags', { defId, tagIds: [...tagIds] }, 'ui'),
   })
 
   const propertiesPanel = new PropertiesPanel(

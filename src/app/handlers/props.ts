@@ -54,6 +54,20 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
     app.setPropFormat(defId, S(a.format))
     return true
   },
+  'core.props/set-ref-tags': (a, app) => {
+    const defId = S(a.defId)
+    if (!defId) return false
+    const ids = Array.isArray(a.tagIds) ? a.tagIds.filter((x): x is string => typeof x === 'string') : []
+    app.setPropRefTags(defId, ids)
+    return true
+  },
+  'core.props/create-ref-target': (a, app) => {
+    const blockId = S(a.blockId)
+    const propId = S(a.propId)
+    const name = S(a.name)
+    if (!blockId || !propId || !name) return false
+    return app.createPropRefTarget(blockId, propId, name) !== ''
+  },
   'core.props/undeclare': (a, app) => {
     const blockId = S(a.blockId)
     const propId = S(a.propId)

@@ -39,6 +39,7 @@ import {
   prop,
   propKindOf,
   propLabel,
+  refTagIds,
   valueListOf,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
@@ -177,6 +178,15 @@ export interface PropertiesDeps {
   choices: ChoiceActions
   /** 定义格式的写入口（同值形状内的约束与画法；`plain` ＝ 摘键） */
   setFormat: (defId: string, format: string) => void
+  /**
+   * **`ref` 定义的候选标签**（`_refTags` 软约束）的两个入口：选一个标签、写一份清单。
+   *
+   * 选择器必须经装配层开（浮层不归组件）；这里只传已有清单当排除项 ——
+   * 第二次为同一个标签点「＋」不该再多给一条同样的 chip。
+   */
+  pickRefTag: (exclude: readonly string[], onPick: (tagId: string) => void, anchor: DOMRect) => void
+  /** 写候选标签清单（`[]` ＝ 摘掉约束，回到「全部块都可选」） */
+  setRefTags: (defId: string, tagIds: readonly string[]) => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
@@ -695,6 +705,9 @@ export class PropertiesPanel {
     if (isPropDef(target)) {
       const fmt = this.buildDefFormat(target)
       if (fmt) this.els.body.appendChild(fmt)
+      // `ref` 的候选域：只对 ref 定义出现（别的 kind 没有「候选」这回事）
+      const refTags = this.buildRefTargets(target)
+      if (refTags) this.els.body.appendChild(refTags)
     }
 
     if (this.selectDef()) {
@@ -978,6 +991,63 @@ export class PropertiesPanel {
    */
   private buildTags(target: Block): HTMLElement {
     return this.labeledRow('prop-tags', t('ui.props.tagsTitle'), tagsContent(this.cfg(target)))
+  }
+
+  /**
+   * **`ref` 定义的候选域**（`_refTags`）：候选按这些标签的成员过滤（含下级标签闭包）。
+   *
+   * 它在定义页，不在值行上：约束是**这条属性**的性质（谁可以被引用），不是某一格值的性质。
+   * 值行只画「现在指向谁」—— chip 那条路一个字节都不动。
+   *
+   * ⚠️ 空清单 ≠ 约束是空集：没有这一格 ＝ **不限**（全部块都可选）。所以空态写「不限」，
+   *    不是写「没有候选」——后者会让用户以为这条属性选不了任何东西。
+   */
+  private buildRefTargets(def: Block): HTMLElement | null {
+    if (propKindOf(def) !== 'ref') return null
+    const ids = refTagIds(def)
+    const value = document.createElement('span')
+    value.className = 'prop-value prop-ref-tags'
+    value.dataset.refTags = '1'
+    if (ids.length === 0) {
+      const none = document.createElement('span')
+      none.className = 'props-empty'
+      none.textContent = t('ui.props.refTags.any')
+      value.appendChild(none)
+    }
+    for (const id of ids) {
+      const chip = document.createElement('span')
+      chip.className = 'props-tag'
+      chip.dataset.refTag = id
+      const tag = this.deps.blockById(id)
+      const name = document.createElement('span')
+      name.className = 'props-tag-name'
+      /**
+       * 悬空标签（删了/换库了）仍画出来并标短 id：约束的失效是状态，
+       * 静默少一枚 chip 会让用户以为约束本来就是这些。
+       */
+      name.textContent = tag ? `#${displayNameOf(tag)}` : `#${this.deps.shortId(id)}`
+      if (tag) {
+        name.dataset.refTo = id
+        name.dataset.tip = t('ui.props.openTag')
+        name.addEventListener('click', (e) => this.deps.openRef(id, clickModsOf(e)))
+      }
+      chip.append(
+        name,
+        chipDel(t('ui.props.refTags.remove'), () => this.deps.setRefTags(def.id, ids.filter((x) => x !== id))),
+      )
+      value.appendChild(chip)
+    }
+    const add = document.createElement('button')
+    add.type = 'button'
+    add.className = 'prop-ref-add'
+    add.dataset.refTagAdd = '1'
+    add.dataset.tip = t('ui.props.refTags.hint')
+    add.textContent = '+'
+    add.addEventListener('click', () => {
+      this.deps.pickRefTag(ids, (tagId) => this.deps.setRefTags(def.id, [...ids, tagId]), add.getBoundingClientRect())
+    })
+    value.appendChild(add)
+    return this.labeledRow('prop-ref-tags-row', t('ui.props.refTags.label'), value)
   }
 
   /**
