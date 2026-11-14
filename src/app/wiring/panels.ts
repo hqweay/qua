@@ -24,6 +24,9 @@ import {
   hasChildrenViewBody,
   findInForest,
   isHexColor,
+  ICON_PROP,
+  COLOR_PROP,
+  prop,
   isJournal,
   isViewRoot,
   journalDate,
@@ -344,12 +347,30 @@ export function setupPanels(deps: PanelsDeps) {
   }
 
   /**
-   * **页属性面板的脸行**：开同一个块配置弹窗（脸面板直接展开）——一个块只有一个
-   * 配置面。脸的写与「最近」记账都在弹窗那条路上，面板自己不用再管；
-   * 写完由 `writeProps` 的重画链刷这张卡。
+   * **面板的脸行：就地换脸**（内嵌选择器，不另开块配置弹窗）。
+   *
+   * 面板自己就是常驻的配置壳（身份/归属五段都在）；脸行是它里面的一格轻值，
+   * 点击再弹出一个「连别名/露面/标签都再看一遍」的重复壳是噪声——
+   * 块配置弹窗是给**面板之外**的上下文用的（块菜单、行头）。
+   * 写走命令面，「最近」记账归装配层；写完由 `writeProps` 的重画链刷面板。
    */
   const pickFace = (b: Block, anchor: DOMRect): void => {
-    openBlockConfig(b.id, { anchor, faceOpen: true })
+    openIconPicker({
+      layers,
+      anchor,
+      current: prop<string>(b, ICON_PROP) ?? '',
+      color: prop<string>(b, COLOR_PROP) ?? '',
+      recent: () => deps.prefs().recentIcons,
+      recentColors: () => deps.prefs().recentColors,
+      onPick: (value) => {
+        void deps.getRegistry().invoke('core.block/set-icon', { blockId: b.id, icon: value }, 'ui')
+        recordRecentIcon(value)
+      },
+      onColor: (color) => {
+        void deps.getRegistry().invoke('core.block/set-color', { blockId: b.id, color }, 'ui')
+        recordRecentColor(color)
+      },
+    })
   }
 
   /**
@@ -488,7 +509,7 @@ export function setupPanels(deps: PanelsDeps) {
    */
   const openBlockConfig = (
     blockId: string,
-    opts: { anchor?: DOMRect | HTMLElement | null; autofocus?: boolean; faceOpen?: boolean } = {},
+    opts: { anchor?: DOMRect | HTMLElement | null; autofocus?: boolean } = {},
   ): void => {
     if (!findInForest(deps.getWs().blocks, blockId)) return
     // 元素锚点跟着那一颗按钮走（行随重渲染被换掉时锚点变 null ⇒ 浮层收起）
@@ -503,7 +524,6 @@ export function setupPanels(deps: PanelsDeps) {
           ctx: blockConfigOps(blockId, renderSelf),
           close: () => layers.closePopover(),
           ...(opts.autofocus ? { autofocus: true } : {}),
-          ...(opts.faceOpen ? { faceOpen: true } : {}),
         }
         renderSelf()
       },

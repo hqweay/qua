@@ -871,7 +871,7 @@ export class PropertiesPanel {
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.className = 'prop-face-btn'
-    btn.dataset.tip = t('ui.blockConfig.title')
+    btn.dataset.tip = t('ui.iconPicker.faceEntry')
     const ico = document.createElement('span')
     ico.className = 'prop-face-ico'
     renderIcon(ico, prop<string>(target, '_icon'), 'circle-help', 'sm')

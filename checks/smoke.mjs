@@ -28929,7 +28929,7 @@ await check('T303 身份色：单色借色／多色环／chip 各染各色；摘
  *
  * 钉三件：① 选项图标入口升到网格选择器（可搜索；选完写 `_icon`）；② 块配置弹窗的
  * 脸位（任意块都有）**内嵌**在选择器里（不另开一层 popover），选图标与点色都就地生效；
- * ③ 页属性面板的脸行开同一个弹窗（脸面板直接展开），选色写走命令面。
+ * ③ 页属性面板的脸行**就地换脸**（内嵌选择器，不另开弹窗），选色写走命令面。
  * 三处都验「选中态 ＋ 写路径」，写路径用真命令（不是带外改动）。
  */
 await check('T304 图标选择器：选项入口网格化；块配置弹窗（配置头/属性面板脸行）就地生效', async () => {
@@ -29004,7 +29004,7 @@ await check('T304 图标选择器：选项入口网格化；块配置弹窗（�
   assert(tagColor === 'red', `配置头点色应写 _color：${JSON.stringify(tagColor)}`)
   await page.keyboard.press('Escape')
 
-  // ③ 页属性面板的脸行：开同一个块配置弹窗，脸面板直接展开，选色写走命令面
+  // ③ 页属性面板的脸行：就地换脸（内嵌选择器），选色写走命令面
   const pageId = await page.evaluate(() => window.__qua.pages()[0].id)
   await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId)
   await page.waitForTimeout(200)
@@ -29013,15 +29013,15 @@ await check('T304 图标选择器：选项入口网格化；块配置弹窗（�
   assert(await page.locator('.prop-names .alias-input').count() > 0, '面板里应有名字段（添加别名输入框）')
   assert(await page.locator('.prop-lists .alias-check').count() === 2, '面板里应有露面段（页/标签两个列表位）')
   await page.click('.prop-face-btn')
-  await page.waitForSelector('.block-config .icon-picker-colors', { timeout: 3000 })
-  await page.click('.block-config .icon-picker-colors .icon-picker-swatch:nth-child(3)')
+  await page.waitForSelector('.icon-picker-colors', { timeout: 3000 })
+  await page.click('.icon-picker-colors .icon-picker-swatch:nth-child(3)')
   await page.waitForTimeout(200)
   const pageColor = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._color ?? '', pageId)
   assert(pageColor !== '' && pageColor !== undefined, `属性面板脸行点色应写 _color：${JSON.stringify(pageColor)}`)
   await page.keyboard.press('Escape')
 
   await ctx.close()
-  return '选项图标入口网格化可搜索；块配置弹窗脸位内嵌选择器选图标/点色就地生效；属性面板脸行开同一弹窗写命令面'
+  return '选项图标入口网格化可搜索；块配置弹窗脸位内嵌选择器选图标/点色就地生效；面板脸行就地换脸写命令面'
 })
 
 /**

@@ -400,10 +400,10 @@ export interface App {
   extractToPage(blockId: string): boolean
   /**
    * 打开块配置弹窗（名字、露面、显示模式、标签、归属、脸）——纯 UI，落在装配层。
-   * `anchor` 缺省锚在当前光标；`faceOpen` 让脸面板直接展开（属性面板脸行用）；
-   * `autofocus` 把光标放进「添加别名」输入框（无名块被打成标签的那条路用）。
+   * `anchor` 缺省锚在当前光标；`autofocus` 把光标放进「添加别名」输入框
+   * （无名块被打成标签的那条路用）。属性面板的脸行不经过这里：它就地换脸。
    */
-  openBlockConfig(blockId: string, opts?: { anchor?: DOMRect | HTMLElement | null; autofocus?: boolean; faceOpen?: boolean }): void
+  openBlockConfig(blockId: string, opts?: { anchor?: DOMRect | HTMLElement | null; autofocus?: boolean }): void
   /**
    * **看这一块的属性**：打开属性抽屉（整高右滑的任务面）。
    *

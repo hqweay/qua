@@ -47,8 +47,6 @@ export interface BlockConfigDeps {
    * 所以下一步必须是起名，而不是让用户自己再点一次。
    */
   autofocus?: boolean
-  /** 打开时脸面板直接展开（属性面板脸行这类「冲着脸来」的入口用；只喂首次渲染） */
-  faceOpen?: boolean
 }
 
 /** 一个小节：标题 ＋ 内容（弹窗的小节 chrome；面板的同一段包行标签） */
@@ -77,9 +75,6 @@ export function renderBlockConfig(host: HTMLElement, deps: BlockConfigDeps): voi
     return
   }
   const redraw = (): void => renderBlockConfig(host, deps)
-
-  /** 脸面板的开合挂在**宿主元素**上：redraw 是整棵重画，局部变量活不过一次渲染 */
-  if (deps.faceOpen && host.dataset.faceOpen === undefined) host.dataset.faceOpen = '1'
 
   /* ------------------------------------------------------------ 头部 */
 
