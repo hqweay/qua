@@ -414,10 +414,13 @@ function createWindow(_libraryId?: string, title?: string): BrowserWindow {
     }
   })
 
-  // 之外再给一个「不依赖菜单」的 devtools 开关（菜单里也有 role=toggleDevTools）
-  w.webContents.on('before-input-event', (_e, input) => {
-    if (input.type === 'keyDown' && input.key === 'F12') w.webContents.toggleDevTools()
-  })
+  // 之外再给一个「不依赖菜单」的 devtools 开关（菜单里也有 role=toggleDevTools）。
+  // 发布形态不挂这个键：装到用户机器上的 app 不该有一条隐藏的调试入口。
+  if (Boolean(DEV_URL)) {
+    w.webContents.on('before-input-event', (_e, input) => {
+      if (input.type === 'keyDown' && input.key === 'F12') w.webContents.toggleDevTools()
+    })
+  }
 
   // 渲染进程崩了：这是「白屏但什么都没说」的唯一线索
   watchRendererCrash(w)

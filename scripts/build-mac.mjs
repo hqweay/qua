@@ -1,5 +1,6 @@
 /**
- * `pnpm build:mac` 的最后一步：electron-builder 出 `.app`（target=dir）。
+ * `pnpm build:mac` 的最后一步：electron-builder 出 `.app` 与 `.dmg`（target 在 package.json 的
+ * build 段里，CLI 不再传 `--dir` 覆盖它——`--dir` 会把 target 硬压成只出目录）。
  *
  * 三个「本地自用」的取舍，都在这里显式钉住（而不是靠环境变量碰运气）：
  *   1. **不签名**：`mac.identity: null`（在 package.json 的 build 段里）＋ 这里清掉自动发现，
@@ -53,7 +54,7 @@ if (home !== 'real') console.log(`[build:mac] $HOME/Library/Caches 不可写 ⇒
 
 const bin = require.resolve('electron-builder/out/cli/cli.js')
 
-const child = spawn(process.execPath, [bin, '--mac', '--arm64', '--dir', '--publish', 'never'], {
+const child = spawn(process.execPath, [bin, '--mac', '--arm64', '--publish', 'never'], {
   stdio: 'inherit',
   cwd: root,
   env,

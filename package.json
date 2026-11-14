@@ -1,6 +1,6 @@
 {
   "name": "qua",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "type": "module",
   "description": "相（Qua）：块级 DOM 大纲笔记 ＋ 自研区间锚点 ＋ 命令/绑定表；Electron 壳，主进程不含业务逻辑",
   "author": "hqweay",
@@ -61,6 +61,12 @@
     "mac": {
       "target": [
         {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
           "target": "dir",
           "arch": [
             "arm64"
@@ -70,8 +76,10 @@
       "category": "public.app-category.productivity",
       "identity": null,
       "hardenedRuntime": false,
-      "gatekeeperAssess": false
-    }
+      "gatekeeperAssess": false,
+      "icon": "build/icon.icns"
+    },
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
   },
   "dependencies": {
     "jieba-wasm": "2.4.0",
