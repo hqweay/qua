@@ -11,11 +11,14 @@
       · img-src 的 blob: 是**行内资产的唯一来源**：字节从资产库读出来是 Blob，
         经 `URL.createObjectURL` 变成 blob URL 才能给 <img>。少了它，真实图片会被
         浏览器静默拦下（console 里只有一条 error，页面上是一片空白）。
+      · img-src 的 http: / https: 只给 **asset 属性值的外态链接**：那格值本来就能存
+        http(s) 地址（与「插入／打开外链」同一份白名单），不放行就变成「存得进去、
+        画不出来」。代价：外链图片会向第三方发起请求，离线或链接腐烂时显示缺失态。
       · connect-src 的 ws 仅给 dev server 的 HMR 用（端口固定 5180）。
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob: file:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: qua-asset:; font-src 'self'; connect-src 'self' ws://127.0.0.1:5180; object-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob: file:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: qua-asset: http: https:; font-src 'self'; connect-src 'self' ws://127.0.0.1:5180; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <!--
       首屏兜底：在 styles.css / main.ts 到位**之前**就按系统外观定色，冷启动不闪。

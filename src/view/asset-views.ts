@@ -21,6 +21,7 @@
  */
 import type { AssetMeta, AssetView } from '../core/infra/assets.ts'
 import type { AssetStorePort } from '../core/storage/asset-port.ts'
+import { assetRefKindOf } from '../core/props/props.ts'
 
 /** 资产库打不开：所有资产都是 `unavailable`（不是「没有这份资产」）。 */
 let store: AssetStorePort | null = null
@@ -134,6 +135,19 @@ export function assetViewOf(hash: string): AssetView {
     ...(meta.w !== undefined ? { w: meta.w } : {}),
     ...(meta.h !== undefined ? { h: meta.h } : {}),
   }
+}
+
+/**
+ * **属性值那一侧的两态分派**：内态 hash 去查索引（web 的 Blob URL／桌面版的协议地址），
+ * 外态 http(s) 链接本身就是要给 `<img src>` 的地址，不查索引。
+ *
+ * 为什么放在这一层而不在 UI：两种来源在渲染侧只有「能不能拿到一个地址」这一个差别，
+ * 合并成一个 `AssetView` 之后，真图／缺失／不可用三态在正文与属性面就是同一套画法。
+ * 外态的「腐烂」（外链取不到）由 `<img>` 的 error 现算，不落盘，与内态 missing 同归显示态。
+ */
+export function assetRefView(ref: string): AssetView {
+  if (assetRefKindOf(ref) === 'external') return { state: 'ready', url: ref }
+  return assetViewOf(ref)
 }
 
 /** 地址就绪（或某份被判定缺失）时回调。返回取消订阅。 */

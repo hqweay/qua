@@ -29728,6 +29728,153 @@ await check('T311 块下属性：+N 就地展开／菜单三态覆盖；改默�
   return `默认摘要 3+2 ⇒ +N 就地展开 5 栏 ⇒ 菜单「一行摘要」⇒ 默认切 list 不变 ⇒「跟随默认」⇒ 默认切回摘要跟着变`
 })
 
+await check('T312 asset 属性值：外链渲染成真图、块下投影同形、编辑面有选文件入口', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const url = 'https://example.com/qua-cover.png'
+  /** 真 PNG 由路由给出：不依赖公网，且能验 naturalWidth > 0（CSP 放行外链图片之后） */
+  const b64 =
+    'iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAIAAAADnC86AAAAMElEQVR4nO3NQQkAAAgEsItjHGMbyxKCn8H+y3S9iFgsFovFYrFYLBaLxWKxWHxnAY8m0GozORegAAAAAElFTkSuQmCC'
+  await page.route('**/qua-cover.png', (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(b64, 'base64') }),
+  )
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const ids = await page.evaluate((link) => {
+    const host = window.__qua.blocks().find((b) => b.roles.length === 0 && b.text.length > 2)
+    window.__qua.invoke('core.props/create-def', { blockId: host.id, label: '封面', kind: 'asset', target: 'own' })
+    const def = window.__qua.propDefs().find((d) => d.label === '封面')
+    window.__qua.invoke('core.props/set-value', { blockId: host.id, propId: def.id, value: link })
+    return { host: host.id, propId: def.id }
+  }, url)
+  await page.waitForFunction(
+    (link) => [...document.querySelectorAll('.prop-asset-img')].some((img) => img.getAttribute('src') === link && img.naturalWidth > 0),
+    url,
+    { timeout: 5000 },
+  )
+
+  // ① 块下属性行：值段是缩略图投影，不再是裸链接文本（且这一枚不改行高）
+  const line = await page.evaluate((host) => {
+    const val = document.querySelector(`.blk[data-block-id="${host}"] .blk-props-line .blk-prop-value`)
+    return {
+      assets: Boolean(val?.classList.contains('blk-prop-assets')),
+      imgs: val?.querySelectorAll('img').length ?? 0,
+      ref: val?.querySelector('[data-asset-ref]')?.getAttribute('data-asset-ref') ?? '',
+      text: val?.textContent ?? '',
+    }
+  }, ids.host)
+  assert(line.assets, 'asset 值段应标成缩略图投影：' + JSON.stringify(line))
+  assert(line.imgs === 1, '块下投影画一枚行内缩略图：' + JSON.stringify(line))
+  assert(line.ref === url, '缩略图带着原值：' + JSON.stringify(line))
+  assert(line.text === '', '不再露裸链接文本：' + JSON.stringify(line))
+
+  // ② 属性抽屉：同一张图 ＋ 手填链接 ＋ 选本地文件入口
+  await page.evaluate((host) => window.__qua.invoke('core.block/inspect', { blockId: host }), ids.host)
+  await page.waitForSelector('.props-drawer', { timeout: 4000 })
+  const editor = await page.evaluate((propId) => {
+    const row = document.querySelector(`.props-drawer .prop-row[data-prop-id="${propId}"]`)
+    const box = row?.querySelector('[data-asset-editor]')
+    return {
+      found: Boolean(box),
+      img: box?.querySelector('img')?.getAttribute('src') ?? '',
+      input: Boolean(box?.querySelector('.prop-asset-input')),
+      pick: Boolean(box?.querySelector('[data-asset-pick]')),
+    }
+  }, ids.propId)
+  assert(editor.found, 'asset 控件落在这一栏上：' + JSON.stringify(editor))
+  assert(editor.img === url, '编辑面也画同一张图：' + JSON.stringify(editor))
+  assert(editor.input, '保留手填链接入口：' + JSON.stringify(editor))
+  assert(editor.pick, '给选本地文件入口：' + JSON.stringify(editor))
+
+  // ③ 选本地文件：写进这一格的是内容 hash，不是文件名／链接；地址就绪后这一格变真图
+  const [chooser] = await Promise.all([
+    page.waitForEvent('filechooser', { timeout: 5000 }),
+    page.click('.props-drawer [data-asset-pick]'),
+  ])
+  await chooser.setFiles({ name: '本地封面.png', mimeType: 'image/png', buffer: Buffer.from(b64, 'base64') })
+  await page.waitForFunction(
+    ({ host, propId }) => {
+      const v = window.__qua.__editor.store.find(host)?.props?.[propId]
+      return typeof v === 'string' && /^[0-9a-f]{64}$/.test(v)
+    },
+    { host: ids.host, propId: ids.propId },
+    { timeout: 6000 },
+  )
+  // 写值之后抽屉是**延后**重画的：先等控件换成 hash 的那一枚，再等本地地址就绪后的真图
+  await page.waitForFunction(
+    (link) => {
+      const ref = document.querySelector('.props-drawer [data-asset-editor] [data-asset-ref]')?.getAttribute('data-asset-ref') ?? ''
+      return /^[0-9a-f]{64}$/.test(ref) && ref !== link
+    },
+    url,
+    { timeout: 6000 },
+  )
+  await page.waitForFunction(
+    () => {
+      const img = document.querySelector('.props-drawer [data-asset-editor] img')
+      return Boolean(img && img.naturalWidth > 0)
+    },
+    null,
+    { timeout: 6000 },
+  )
+  const local = await page.evaluate(({ host, propId }) => ({
+    value: window.__qua.__editor.store.find(host)?.props?.[propId],
+    src: document.querySelector('.props-drawer [data-asset-editor] img')?.getAttribute('src') ?? '',
+  }), { host: ids.host, propId: ids.propId })
+  assert(/^[0-9a-f]{64}$/.test(local.value ?? ''), '选文件应把内容 hash 写进这一格：' + JSON.stringify(local))
+  assert(local.src !== url, '这一格改画本地资产，不再是外链：' + JSON.stringify(local))
+
+  await ctx.close()
+  return '外链图片在块下投影与属性抽屉都渲染成真图；编辑面保留手填，选本地文件写 hash 并当场变真图'
+})
+
+await check('T313 asset 多值：值控件不把数组压成字符串，摘除一项仍是数组', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const first = 'a'.repeat(64)
+  const second = 'https://example.com/qua-second.png'
+  const b64 =
+    'iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAIAAAADnC86AAAAMElEQVR4nO3NQQkAAAgEsItjHGMbyxKCn8H+y3S9iFgsFovFYrFYLBaLxWKxWHxnAY8m0GozORegAAAAAElFTkSuQmCC'
+  await page.route('**/qua-second.png', (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(b64, 'base64') }),
+  )
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  const ids = await page.evaluate(({ a, b }) => {
+    const host = window.__qua.blocks().find((x) => x.roles.length === 0 && x.text.length > 2)
+    window.__qua.invoke('core.props/create-def', { blockId: host.id, label: '图集', kind: 'asset', target: 'own' })
+    const def = window.__qua.propDefs().find((d) => d.label === '图集')
+    window.__qua.invoke('core.props/set-choice-cardinality', { defId: def.id, cardinality: 'many' })
+    window.__qua.invoke('core.props/set-value', { blockId: host.id, propId: def.id, value: [a, b] })
+    return { host: host.id, propId: def.id }
+  }, { a: first, b: second })
+  await page.evaluate((host) => window.__qua.invoke('core.block/inspect', { blockId: host }), ids.host)
+  await page.waitForSelector('.props-drawer [data-asset-editor]', { timeout: 4000 })
+  const read = () => page.evaluate(({ host, propId }) => ({
+    value: window.__qua.__editor.store.find(host)?.props?.[propId],
+    thumbs: document.querySelectorAll('.props-drawer [data-asset-editor] [data-asset-ref]').length,
+    input: document.querySelector('.props-drawer [data-asset-editor] .prop-asset-input')?.value ?? '',
+  }), ids)
+
+  const before = await read()
+  assert(Array.isArray(before.value) && before.value.length === 2, '前置：值是两项数组：' + JSON.stringify(before))
+  assert(before.thumbs === 2, '两枚缩略图各画一项：' + JSON.stringify(before))
+  assert(before.input === '', '多值不把数组塞进输入框（否则下一次写入就压成字符串）：' + JSON.stringify(before))
+
+  // 摘除第一枚 ⇒ 仍写数组，不是 `String(value)` 之后的逗号串
+  await page.evaluate(() => document.querySelector('.props-drawer [data-asset-editor] .prop-asset-remove')?.click())
+  await page.waitForFunction(
+    ({ host, propId }) => (window.__qua.__editor.store.find(host)?.props?.[propId] ?? []).length === 1,
+    ids,
+    { timeout: 5000 },
+  )
+  const after = await read()
+  assert(Array.isArray(after.value) && after.value.length === 1, '摘除后仍是数组：' + JSON.stringify(after))
+  assert(after.value[0] === second, '摘掉的是第一项，第二项不动：' + JSON.stringify(after))
+
+  await ctx.close()
+  return '多值 asset：两枚缩略图、输入框留空；摘除一项后仍是数组，List 形状没被压坏'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

@@ -236,6 +236,8 @@ export interface ViewHostDeps {
     anchor?: DOMRect,
     trigger?: HTMLElement,
   ) => void
+  /** `asset` 值选本地文件（与属性卡共用；省略 ⇒ 表格里的 asset 格只渲染、不给选文件按钮） */
+  pickAsset?: (onPick: (hash: string) => void) => void
   refLabel?: (targetId: string) => string
   /** 标签名解析（`select` 选项显示名里的 `#名`） */
   tagName?: (id: string) => string
@@ -1961,6 +1963,7 @@ export class ViewHost {
       convertMention: (blockId, spot) => this.convertMention(blockId, spot),
       cell: this.cell,
       ...(this.deps.pickRef ? { pickRef: this.deps.pickRef } : {}),
+      ...(this.deps.pickAsset ? { pickAsset: this.deps.pickAsset } : {}),
       ...(this.deps.refLabel ? { refLabel: this.deps.refLabel } : {}),
       ...(this.deps.tagName ? { tagName: this.deps.tagName } : {}),
     })

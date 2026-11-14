@@ -26,6 +26,7 @@ import type { PropCreateMode } from '../../core/infra/ports.ts'
 import {
   ICON_PROP,
   aliasesOf,
+  assetRefsOf,
   choiceDisplayLabel,
   clockLabel,
   displayNameOf,
@@ -45,6 +46,7 @@ import {
 import { t } from '../../core/infra/msg.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { ChoicesEditor, type ChoiceActions } from './choices-editor.ts'
+import { makeAssetThumb } from './asset-value.ts'
 import {
   belongsContent,
   chipDel,
@@ -102,6 +104,14 @@ export interface PropertiesDeps {
   setValue: (b: Block, propId: string, value: unknown) => void
   /** `drop`：连自有槽一起删（「删掉这一栏」）；缺省＝只清值 */
   clearValue: (b: Block, propId: string, opts?: { drop?: boolean }) => void
+  /**
+   * **`asset` 值选一份本地资源**：入库后把 hash 交给回调，由值控件写进这一格。
+   *
+   * 为什么不复用正文的 `pickImage`：那条路先取光标落点、入库后往正文插 `AssetRun`；
+   * 属性面板没有光标语义，写的是 `props[propId]`。入库是异步的、要碰文件对话框，
+   * 所以能力落在装配层，组件只接一个「选好了」的 hash。
+   */
+  pickAsset?: (onPick: (hash: string) => void) => void
   /** 把已有属性加进**这一块自己的值槽**（`_ownProps`） */
   addOwnProp: (b: Block, propId: string) => void
   /** 新建一条定义并加进**这一块自己的值槽**（`mode: 'new'` ＝ 同名也新建） */
@@ -199,6 +209,8 @@ export interface PropertiesDeps {
 export type FieldRowDeps = Pick<PropertiesDeps, 'shortId' | 'setValue' | 'clearValue' | 'pickRef' | 'refLabel'> & {
   /** 多值选择器（省略 ⇒ 多值字段只读；行内实例浮层可以不给） */
   pickChoice?: PropertiesDeps['pickChoice']
+  /** 本地资源入库（省略 ⇒ asset 值只显示缩略图与手填链接，不给选文件按钮） */
+  pickAsset?: PropertiesDeps['pickAsset']
   /** 标签名解析（选项显示名的 `#名`）；缺省显示短 id */
   tagName?: (id: string) => string
   /** 打开属性定义块（普通块的属性名可点：改选项去定义页，不在块上再开一个编辑面） */
@@ -211,7 +223,7 @@ export type FieldRowDeps = Pick<PropertiesDeps, 'shortId' | 'setValue' | 'clearV
  * 全都可以缺省：表格格子里没有属性区那套依赖时，控件退化成只读/短 id 显示，
  * 而不是「点了报错」。
  */
-export type CellEditorDeps = Partial<Pick<FieldRowDeps, 'pickRef' | 'pickChoice' | 'refLabel' | 'tagName' | 'openRef'>>
+export type CellEditorDeps = Partial<Pick<FieldRowDeps, 'pickRef' | 'pickChoice' | 'pickAsset' | 'refLabel' | 'tagName' | 'openRef'>>
 
 export interface PropertiesEls {
   /** 卡片本身：`hidden` 与否表达「有没有主体」 */
@@ -398,6 +410,68 @@ export function makeCellEditor(
     wrap.append(ico, sel)
     return wrap
   }
+  /**
+   * `asset`：**缩略图 ＋ 手填链接 ＋ 选本地文件**。
+   *
+   * 两态值（hash／http(s)）在 `asset-value.ts` 现算成地址，这里只管读写：
+   *   · 已有值画成露面（内态缺失／外链腐烂时自己退化成一句实话，值不动）；
+   *   · 手填仍可写外链或资产 id，写路径按 kind＋`isAssetRef` 校验；
+   *   · 选文件走装配层入库，拿到 hash 再写这一格 —— 组件不碰文件对话框与资产库。
+   *
+   * ⚠️ **单值／多值都从 `assetRefsOf` 读**：定义切成 `many` 后值是数组，
+   *    这里追加／摘除都保持数组形状，绝不 `String(value)`（那会把 `a,b` 写回成一个字符串）。
+   *    定义页目前还没有给 asset 开基数开关，但数据层允许，控件不能先把它压坏。
+   */
+  if (kind === 'asset') {
+    const many = row.cardinality === 'many'
+    const refs = assetRefsOf(row.value)
+    const box = document.createElement('div')
+    box.className = 'prop-asset'
+    box.dataset.assetEditor = '1'
+    const thumbs = document.createElement('div')
+    thumbs.className = 'prop-asset-thumbs'
+    for (const ref of refs) {
+      thumbs.appendChild(
+        makeAssetThumb(ref, {
+          onRemove: () => send(many ? refs.filter((x) => x !== ref) : undefined),
+        }),
+      )
+    }
+    box.appendChild(thumbs)
+    const input = document.createElement('input')
+    input.className = 'prop-input prop-asset-input'
+    input.type = 'text'
+    input.spellcheck = false
+    input.placeholder = t(many ? 'ui.props.assetAddPlaceholder' : 'ui.props.assetPlaceholder')
+    input.value = many ? '' : (refs[0] ?? '')
+    input.addEventListener('change', () => {
+      const next = input.value.trim()
+      if (next === '') {
+        if (!many) send(undefined)
+        return
+      }
+      send(many ? [...refs, next] : next)
+    })
+    box.appendChild(input)
+    if (deps?.pickAsset) {
+      const pick = deps.pickAsset
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'prop-asset-pick ghost'
+      btn.dataset.assetPick = '1'
+      btn.dataset.tip = t('ui.props.assetPickHint')
+      btn.textContent = t('ui.props.assetPick')
+      btn.addEventListener('click', () =>
+        pick((hash) => {
+          if (many) {
+            if (!refs.includes(hash)) send([...refs, hash])
+          } else send(hash)
+        }),
+      )
+      box.appendChild(btn)
+    }
+    return box
+  }
   const input = document.createElement('input')
   input.className = 'prop-input'
   /**
@@ -416,7 +490,6 @@ export function makeCellEditor(
             : 'text'
   if (row.format === 'url' || row.format === 'email' || row.format === 'phone') input.spellcheck = false
   if (kind === 'number') input.inputMode = 'decimal'
-  if (kind === 'asset') input.placeholder = t('ui.props.assetPlaceholder')
   input.placeholder = t('ui.props.pending')
   input.value = row.value === undefined || row.value === null ? '' : String(row.value)
   input.addEventListener('change', () => {

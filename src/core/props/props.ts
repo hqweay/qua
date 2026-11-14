@@ -512,11 +512,31 @@ export function textFormatOk(format: string | undefined, value: string): boolean
  *
  * 判据只看**形状**，不看字节在不在库：本地性是值的状态维度，不是 kind 维度。
  * 缺失/腐烂是**显示态**（真图／缺失／不可用三态），不是写不进去的理由。
+ *
+ * 两态怎么分派也只在这里判一次：渲染侧拿 `assetRefKindOf` 决定「查索引」还是
+ * 「直接用这个地址」，与写侧共用同一份协议白名单（`checkExternalUrl`）——
+ * 分开放会写出「能存进去但画不出来」或「画得出来但存不进去」的值。
  */
+export type AssetRefKind = 'internal' | 'external'
+
+export function assetRefKindOf(v: unknown): AssetRefKind | null {
+  if (typeof v !== 'string' || v === '') return null
+  if (/^[0-9a-f]{16,}$/i.test(v)) return 'internal'
+  return checkExternalUrl(v).ok ? 'external' : null
+}
+
 export function isAssetRef(v: unknown): boolean {
-  if (typeof v !== 'string' || v === '') return false
-  if (/^[0-9a-f]{16,}$/i.test(v)) return true
-  return checkExternalUrl(v).ok
+  return assetRefKindOf(v) !== null
+}
+
+/**
+ * 一格 `asset` 值 → 一串合法引用（**单值与多值同一条读法**）。
+ *
+ * 显示面与值控件都从这里读：直接用 `String(value)` 会把多值数组压成 `a,b`，
+ * 下一次写入就把 List 抹成单值。坏形状不进显示面，但也不改值（写路径才管值）。
+ */
+export function assetRefsOf(value: unknown): string[] {
+  return valueListOf(value).filter((ref) => assetRefKindOf(ref) !== null)
 }
 
 

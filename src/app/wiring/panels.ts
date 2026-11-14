@@ -629,6 +629,8 @@ export function setupPanels(deps: PanelsDeps) {
        * 属性区与行内实例浮层共用同一份，候选集合不会分叉。
        */
       pickRef: pickRefValue,
+      /** `asset` 值选本地文件：只入库拿 hash，写值仍走 `core.props/set-value` */
+      pickAsset: (onPick) => app.pickAssetValue(onPick),
       /** 多值 select：整份数组写回（每次勾选一次撤销） */
       pickChoice: (b, propId, current, onPick, anchor, trigger) => pickChoiceValue(b, propId, current, onPick, anchor, trigger),
       /** 选项图标：同一份 catalog 现画成网格（可搜索、⊘、最近使用） */
@@ -1001,6 +1003,7 @@ export function setupPanels(deps: PanelsDeps) {
       openBlock: (id, place) => deps.openBlock(id, place),
       pickRef: (b, propId, current, onPick, anchor, trigger, opts) => pickRefValue(b, propId, current, onPick, anchor, trigger, opts),
       pickChoice: (b, propId, current, onPick, anchor, trigger) => pickChoiceValue(b, propId, current, onPick, anchor, trigger),
+      pickAsset: (onPick) => app.pickAssetValue(onPick),
       pickTag: pickTagValue,
       tagLabel,
       refLabel: refLabelOf,

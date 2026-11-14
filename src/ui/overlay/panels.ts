@@ -90,6 +90,8 @@ export interface ObjFieldDeps {
   pickRef: FieldRowDeps['pickRef']
   /** 多值 select 的选值浮层（与属性卡共用；省略 ⇒ 多值字段只读） */
   pickChoice?: FieldRowDeps['pickChoice']
+  /** `asset` 值选本地文件（与属性卡共用；省略 ⇒ 只渲染缩略图与手填链接） */
+  pickAsset?: FieldRowDeps['pickAsset']
   refLabel: FieldRowDeps['refLabel']
   /** 标签名解析（选项显示名的 `#名`）；省略时显示短 id */
   tagName?: FieldRowDeps['tagName']
@@ -154,6 +156,7 @@ function renderObjFields(
         },
         pickRef: fields.pickRef,
         ...(fields.pickChoice ? { pickChoice: fields.pickChoice } : {}),
+        ...(fields.pickAsset ? { pickAsset: fields.pickAsset } : {}),
         refLabel: fields.refLabel,
         ...(fields.tagName ? { tagName: fields.tagName } : {}),
       }

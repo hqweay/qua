@@ -256,6 +256,15 @@ export interface App {
    */
   pickImage(): void
   /**
+   * **给 `asset` 属性值选一份本地资源**：只入库，把内容 hash 交给回调写值。
+   *
+   * 与 `pickImage` 的分界只有一条：那条路最终往正文插 `AssetRun`（要先有光标落点），
+   * 这条路最终写 `props[propId]`（属性面板没有光标语义）。校验、去重、地址登记两条路
+   * 共用同一份实现——拆开会有一边收下另一种格式。
+   * 命令 handler 不碰文件对话框，所以入口仍在装配层；组件只接一个「选好了」的 hash。
+   */
+  pickAssetValue(onPick: (hash: string) => void): void
+  /**
    * 把一份字节入库并按**捕获到的落点**插一枚资产 run。
    *
    * `point` 是用户按下那一刻的光标位置：入库期间光标会动、块甚至会被删，

@@ -93,6 +93,8 @@ export interface ViewTableDeps {
     onPick: (next: string[]) => void,
     anchor?: DOMRect,
   ) => void
+  /** `asset` 值选本地文件（与属性卡共用；省略 ⇒ asset 格不给选文件按钮） */
+  pickAsset?: (onPick: (hash: string) => void) => void
   refLabel?: (targetId: string) => string
   /** 标签名解析（`select` 选项显示名里的 `#名`）；省略时显示短 id */
   tagName?: (id: string) => string
@@ -612,6 +614,7 @@ export class ViewTable {
     const deps = {
       pickRef: this.deps.pickRef,
       pickChoice: this.deps.pickChoice,
+      pickAsset: this.deps.pickAsset,
       refLabel: this.deps.refLabel,
       tagName: this.deps.tagName,
     }

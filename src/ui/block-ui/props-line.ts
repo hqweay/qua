@@ -20,8 +20,9 @@
  *    归属要编辑时才用得上，点行进面板再看。装饰点还会与块标的身份点撞形。
  */
 import { t } from '../../core/infra/msg.ts'
-import { enginePropText, isEngineProp } from '../../core/index.ts'
+import { assetRefsOf, enginePropText, isEngineProp } from '../../core/index.ts'
 import type { BelowFields, FieldRow, PropsLineDensity } from '../../core/index.ts'
+import { makeAssetThumb } from './asset-value.ts'
 
 export interface PropsLineDeps {
   /** 点一项（或 `+N`）⇒ 打开属性面板；给了 `propId` 就聚焦那一栏 */
@@ -187,7 +188,21 @@ function pairOf(blockId: string, row: FieldRow, deps: PropsLineDeps, pendingText
   name.textContent = row.label
   const value = document.createElement('span')
   value.className = 'blk-prop-value ui-ellipsis'
-  value.textContent = pendingText ?? fieldRowText(row, deps.refLabel)
+  if (row.kind === 'asset' && pendingText === undefined) {
+    /**
+     * **asset 值画成露面，不画裸 hash／裸链接**：这一行是「读值」的投影面，
+     * 一枚 1em 高的行内缩略图不改变行高（估高按行数 × 定高，多一行就漏算）。
+     * 多值最多画三枚；原值留在 `data-tip` 里，hover 仍看得出指向哪一份。
+     */
+    const refs = assetRefsOf(row.value)
+    if (refs.length > 0) {
+      value.classList.add('blk-prop-assets')
+      for (const ref of refs.slice(0, 3)) value.appendChild(makeAssetThumb(ref, { size: 'line' }))
+      value.dataset.tip = refs.join('、')
+    } else value.textContent = fieldRowText(row, deps.refLabel)
+  } else {
+    value.textContent = pendingText ?? fieldRowText(row, deps.refLabel)
+  }
   /**
    * **值是引用 ⇒ 值本身是一枚「指向某块的露面」**（`data-ref-to` 是应用里唯一的判据）。
    *

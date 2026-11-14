@@ -836,6 +836,74 @@
   outline: none;
   border-color: var(--ui-accent);
 }
+/*
+  **asset 属性值**：缩略图（可摘除）＋ 手填链接 ＋ 选本地文件。
+  面板与表格格子共用这一份；尺寸走 em，跟着字号走，不把表格定高撑破。
+*/
+.prop-asset {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  min-width: 0;
+}
+.prop-asset-thumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.prop-asset-thumb {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.prop-asset-thumb--panel { height: 1.6em; }
+/* 块下属性行：1em ＝ 一行文字的高度，估高按「行数 × 定高」算，多一行就漏算 */
+.prop-asset-thumb--line { height: 1em; }
+.prop-asset-img {
+  height: 100%;
+  width: auto;
+  max-width: 8ch;
+  object-fit: cover;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+}
+.prop-asset-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-2xs);
+  white-space: nowrap;
+}
+.prop-asset-chip-ico { display: inline-flex; }
+.prop-asset-remove {
+  position: absolute;
+  inset-block-start: -0.35em;
+  inset-inline-end: -0.35em;
+  appearance: none;
+  border: 1px solid var(--ui-border-subtle);
+  background: var(--ui-surface);
+  color: var(--ui-text-tertiary);
+  border-radius: 50%;
+  font: inherit;
+  line-height: 1;
+  padding: 0 var(--ui-gap-1);
+  cursor: pointer;
+  opacity: 0;
+}
+.prop-asset-thumb:hover .prop-asset-remove,
+.prop-asset-thumb:focus-within .prop-asset-remove { opacity: 1; }
+.prop-asset-input { flex: 1 1 auto; min-width: 4ch; }
+.prop-asset-pick { flex: 0 0 auto; white-space: nowrap; }
+.blk-prop-assets {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+}
 /* 属性面板里的标签行：与正文 chip 同一种东西的两个入口（这里是块级入口） */
 .props-tag-value {
   flex-wrap: wrap;
