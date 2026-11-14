@@ -1165,6 +1165,43 @@ export function setupPanels(deps: PanelsDeps) {
     return area
   }
 
+  /**
+   * **行尾徽标 hover 浮层＝第三个表面**：与块底栏、右槽卡共用同一台 `createMountArea`。
+   *
+   * 宿主是**被 hover 的那个块**（不是段根）—— 这正是浮层能就地显示任意块反链的原因：
+   * 块底那台按段根建，右槽卡按当前对象建，这里按徽标所属块建。差异只在这一个 getter。
+   * `viewSurface` 复用 `dock` 档：都是「非中心表面」，几何／条件树状态各自记，
+   * 不为此新增一档 `ViewSurface`（那会让每个按表面分派的地方都多一个分支）。
+   *
+   * ⚠️ 调用方必须**持久持有**返回的 `area`：浮层每次 hover 只把 `area.root` 搬家，
+   *    不重建 DOM。重建一次就换一台 `EditableBlock` ⇒ 撤销栈、编辑期、焦点全丢。
+   */
+  function createRefPeekArea(target: () => string): MountArea {
+    let area: MountArea | null = null
+    area = createMountArea({
+      host: () => blocks.find(target()),
+      edSource: () => area?.blockEditor ?? undefined,
+      via: 'ref-peek',
+      viewSurface: 'dock',
+      inlineViewBodies: false,
+      expanded: true,
+      refocus: refocusAfterMountOp,
+      activate: (tabId) => area?.activateTab(tabId),
+      filterOf: (source) => area?.filterOf(source) ?? EMPTY_QUICK_FILTER,
+    })
+    return area
+  }
+
+  /**
+   * **点行尾徽标的落点**：`focus-block` 已经把那个块变成段根 ⇒ 这一段的挂载区
+   * 宿主跟着换成它，此刻激活 `d-refs` 才是「谁引用了这一块」。
+   * 先 `renderMounts()` 是因为 zoom 后新段的实例可能还没建。
+   */
+  function activateRefsFor(hostId: string): void {
+    renderMounts()
+    mountInstances.get(hostId)?.area.activateTab('d-refs')
+  }
+
   /** 挂载区里那个编辑器（写事务的 source）。焦点切过去之后 `ed` 就是它 */
   const edOfMount = (hostId: string) => mountInstances.get(hostId)?.area.blockEditor ?? undefined
 
@@ -1388,6 +1425,8 @@ export function setupPanels(deps: PanelsDeps) {
   return {
     renderMounts,
     createDockMountArea,
+    createRefPeekArea,
+    activateRefsFor,
     renderProperties,
     scheduleProperties,
     pickRefValue,

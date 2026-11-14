@@ -29070,6 +29070,210 @@ await check('T305 emoji：默认 tab、中文搜索命中、分类导航过滤�
 })
 
 /**
+ * T307 引用数徽标：hover 弹可编辑反链浮层；点击 zoom 到本体并打开底部反链栏。
+ *
+ * 钉六件：① 行尾 chip 常显**引用次数**、0 次不画，不带导航契约、不进正文槽；
+ * ② 徽标只报次数，UI 里没有「来源」这个内部词，也不叠 data-tip；
+ * ③ hover 浮层里是**真正的可编辑块**（块行／引用原子／真按键能改模型），不是只读摘要；
+ * ④ 浮层可钉住（焦点进去后不随指针移开关掉），Esc 收起；
+ * ⑤ 点徽标不弹预览，而是 zoom 到被引用块（底部挂载区按段根建，不换宿主就答非所问）
+ *    并激活「反链」栏；⑥ 引用栏抬头不再重复挂徽标 —— 那一栏自己就是可编辑块列。
+ */
+await check('T307 引用数徽标：hover 弹可编辑反链块；点击 zoom 到本体并打开底部反链', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  const setup = await page.evaluate(() => {
+    const at = Date.now()
+    const rootId = window.__qua.pages()[0].id
+    const rows = window.__qua.__editor.rows().map((r) => r.block)
+    const leaf = rows.find((b) => b.id !== rootId && b.children.length === 0)
+    if (!leaf) return null
+    const mk = (id, text) => ({ id, content: [{ t: 'text', v: text }], children: [], created: at, modified: at })
+    const ref = (id, to) => ({ id: `T307-r-${id}`, t: 'ref', to, label: '目标' })
+    const a = mk('T307-a', '来源甲')
+    a.content.push(ref('a1', leaf.id), ref('a2', leaf.id), ref('a3', rootId))
+    const b = mk('T307-b', '来源乙')
+    b.content.push(ref('b1', leaf.id), ref('b2', rootId), ref('b3', rootId))
+    const plain = mk('T307-plain', '没人引用我')
+    const find = (list) => {
+      for (const x of list) {
+        if (x.id === leaf.id) return x
+        const hit = find(x.children)
+        if (hit) return hit
+      }
+      return null
+    }
+    window.__qua.forceForest((forest) => {
+      const host = find(forest)
+      if (host) host.children.push(a, b, plain)
+    })
+    return { host: leaf.id, root: rootId, a: a.id, b: b.id, plain: plain.id }
+  })
+  assert(setup, '前置：第一页里要有一个可当引用目标的叶子块')
+  await page.waitForTimeout(400)
+
+  const dom = await page.evaluate((s) => {
+    const chip = document.querySelector(`.blk[data-block-id="${s.host}"] .blk-tags .ref-badge`)
+    return {
+      text: chip?.textContent?.trim() ?? '',
+      host: chip?.dataset.refCountFor ?? '',
+      refTo: chip?.dataset.refTo ?? '',
+      inTx: Boolean(chip?.closest('.tx')),
+      tip: chip?.dataset.tip ?? '',
+      aria: chip?.getAttribute('aria-label') ?? '',
+      plainChip: Boolean(document.querySelector(`.blk[data-block-id="${s.plain}"] .blk-tags .ref-badge`)),
+      read: window.__qua.__editor.readRunsOf(s.plain).filter((r) => r.t === 'text').map((r) => r.v).join(''),
+    }
+  }, setup)
+  assert(dom.text === '3' && dom.host === setup.host, `徽标应显示引用次数 3 并记住宿主：${JSON.stringify(dom)}`)
+  assert(dom.refTo === '' && !dom.inTx, `徽标不该带导航契约、也不该进正文槽：${JSON.stringify(dom)}`)
+  assert(dom.aria.includes('3 处引用') && !dom.aria.includes('来源'), `徽标只报次数、不出现内部词「来源」：${dom.aria}`)
+  assert(dom.tip === '', 'hover 已有浮层，徽标不该再挂 data-tip 叠两层说明')
+  assert(!dom.plainChip && dom.read === '没人引用我', `0 次不画徽标，chip 不污染正文读数：${JSON.stringify(dom)}`)
+
+  const badge = page.locator(`.blk[data-block-id="${setup.host}"] .blk-tags .ref-badge`)
+
+  // ① hover ⇒ 浮层里是一列真正的可编辑块（第三个 MountSurface），不是只读摘要
+  await badge.hover()
+  await page.waitForSelector('.surface.ref-peek', { timeout: 3000 })
+  const peek = await page.evaluate(() => {
+    const box = document.querySelector('.surface.ref-peek')
+    return {
+      // 可编辑宿主就是 .mount-editor 自己（后代的 contenteditable=false 是 chip/原子）
+      editable: Boolean(box?.querySelector('.mount-editor[contenteditable="true"]')),
+      rows: box?.querySelectorAll('.mount-editor .blk[data-block-id]').length ?? 0,
+      atoms: box?.querySelectorAll('[data-ref-to]').length ?? 0,
+      title: box?.querySelector('.mount-derived-title')?.textContent ?? '',
+      foot: box?.querySelector('.surface-foot')?.textContent ?? '',
+    }
+  })
+  assert(peek.editable && peek.rows > 0, `浮层里应是可编辑块列：${JSON.stringify(peek)}`)
+  assert(peek.title === '反链', `浮层应落在反链栏：${JSON.stringify(peek)}`)
+  assert(peek.atoms > 0, `块行要把引用原子原样画出来，不是替数据做摘要：${JSON.stringify(peek)}`)
+
+  // ② 真按键打一个字：证明那台编辑器是活的（不是只读投影卡片）
+  const tx = page.locator('.ref-peek .mount-editor .blk[data-block-id] .tx').first()
+  const before = (await tx.textContent()) ?? ''
+  await tx.click()
+  await page.keyboard.type('X')
+  await page.waitForTimeout(250)
+  const after = (await tx.textContent()) ?? ''
+  assert(after !== before, `浮层里的块要能打字：${JSON.stringify({ before, after })}`)
+
+  // ③ 焦点进去后浮层被钉住：指针挪走也不关；Esc 才收
+  await page.mouse.move(10, 10)
+  await page.waitForTimeout(360)
+  assert((await page.locator('.surface.ref-peek').count()) === 1, '有编辑焦点时浮层不该随指针移开关掉')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  assert((await page.locator('.surface.ref-peek').count()) === 0, 'Esc 应收起 hover 浮层')
+
+  // ④ 点徽标：不弹预览，zoom 到本体（换掉反链栏宿主）＋ 底部激活反链栏
+  await badge.click()
+  await page.waitForTimeout(550)
+  const jumped = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activeId,
+    head: document.querySelector('#editor .mount-derived-head .mount-derived-title')?.textContent ?? '',
+    headChip: document.querySelectorAll('#editor .mount-derived-head .ref-badge-in-head').length,
+  }))
+  assert(jumped.active === setup.host, `点徽标应 zoom 到被引用块本体：${JSON.stringify(jumped)}`)
+  assert(jumped.head === '反链', `底部应激活反链栏：${JSON.stringify(jumped)}`)
+  assert(jumped.headChip === 0, '反链栏自己就是可编辑块列，抬头不该重复挂徽标')
+
+  await ctx.close()
+  return 'hover 浮层是可编辑反链块（真按键可改）；焦点钉住、Esc 收；点击 zoom 到本体并开底部反链栏'
+})
+
+/**
+ * T308 浮面模型（ui/surface）：拖动 ＝ 加一条 `at` 强约束，不是「切到手动定位模式」。
+ *
+ * 钉五件：① 抬头把手能拖、落位跟着变；② 松手后**滚动重求解不回弹**；
+ * ③ 拖过浮层边界不会把自己关掉（gesture 持有者）；④ 锚点消失但用户拖过
+ * ⇒ 约束集没空，浮面留在原地（不是一句「锚点消失即关」的特判）；⑤ 关闭按钮能收。
+ */
+await check('T308 浮面：拖动加 at 约束；滚动不回弹；锚点消失不误关；可关闭', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  const setup = await page.evaluate(() => {
+    const at = Date.now()
+    const rootId = window.__qua.pages()[0].id
+    const rows = window.__qua.__editor.rows().map((r) => r.block)
+    const leaf = rows.find((b) => b.id !== rootId && b.children.length === 0)
+    if (!leaf) return null
+    const mk = (id, text) => ({ id, content: [{ t: 'text', v: text }], children: [], created: at, modified: at })
+    const a = mk('T308-a', '来源甲')
+    a.content.push({ id: 'T308-r1', t: 'ref', to: leaf.id, label: '目标' })
+    const b = mk('T308-b', '来源乙')
+    b.content.push({ id: 'T308-r2', t: 'ref', to: leaf.id, label: '目标' })
+    const find = (list) => {
+      for (const x of list) {
+        if (x.id === leaf.id) return x
+        const hit = find(x.children)
+        if (hit) return hit
+      }
+      return null
+    }
+    window.__qua.forceForest((forest) => {
+      const host = find(forest)
+      if (host) host.children.push(a, b)
+    })
+    return { host: leaf.id }
+  })
+  assert(setup, '前置：要有一个可当引用目标的叶子块')
+  await page.waitForTimeout(400)
+
+  const badge = page.locator(`.blk[data-block-id="${setup.host}"] .blk-tags .ref-badge`)
+  await badge.hover()
+  await page.waitForSelector('.surface.ref-peek', { timeout: 3000 })
+  const readRect = () =>
+    page.evaluate(() => {
+      const el = document.querySelector('.surface.ref-peek')
+      return { left: parseFloat(el?.style.left ?? '0'), top: parseFloat(el?.style.top ?? '0') }
+    })
+  const before = await readRect()
+
+  // ① 抬头把手：每帧 transform，松手落成 at 强约束
+  const hb = await page.locator('.surface.ref-peek .surface-head').boundingBox()
+  assert(hb, '浮面应有可拖动的抬头')
+  // 往左下拖：初始落位贴着视口右边，往右会被 solve 钳住（那条在单测里钉）
+  await page.mouse.move(hb.x + 60, hb.y + hb.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(hb.x - 60, hb.y + hb.height / 2 + 90, { steps: 8 })
+  await page.mouse.up()
+  await page.waitForTimeout(150)
+  assert((await page.locator('.surface.ref-peek').count()) === 1, '拖过浮层边界不该把自己关掉')
+  const after = await readRect()
+  assert(after.left < before.left - 60 && after.top > before.top + 40, `拖动应改变落位：${JSON.stringify({ before, after })}`)
+
+  // ② 滚动重求解：用户约束仍在，不回弹到锚点
+  await page.evaluate(() => window.dispatchEvent(new Event('scroll')))
+  await page.waitForTimeout(120)
+  const afterScroll = await readRect()
+  assert(
+    Math.abs(afterScroll.left - after.left) < 2 && Math.abs(afterScroll.top - after.top) < 2,
+    `拖过的位置不该被滚动拽回：${JSON.stringify({ after, afterScroll })}`,
+  )
+
+  // ③ 锚点消失但用户拖过 ⇒ 约束集没空，浮面留在原地
+  await page.evaluate((id) => document.querySelector(`.blk[data-block-id="${id}"] .ref-badge`)?.remove(), setup.host)
+  await page.evaluate(() => window.dispatchEvent(new Event('scroll')))
+  await page.waitForTimeout(120)
+  assert((await page.locator('.surface.ref-peek').count()) === 1, '锚点退出但 at 还在 ⇒ 不该退场')
+
+  // ④ 显式关闭
+  await page.locator('.surface.ref-peek .surface-close').click()
+  await page.waitForTimeout(120)
+  assert((await page.locator('.surface.ref-peek').count()) === 0, '关闭按钮应收起浮面')
+
+  await ctx.close()
+  return '拖动＝加 at 强约束；滚动不回弹；拖过边界不关；锚点退出仍留；可关闭'
+})
+
+/**
  * T306 自定义色（258.1）：内置板之外，色盘（原生 input type=color）选的 hex
  * 写进 `_color`、进「最近自定义」（设备态）；chip 的 soft 底用 color-mix 现算；
  * 下一次打开选择器，色行上能看到它。

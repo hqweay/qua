@@ -22,4 +22,6 @@
 @import './styles/view-table.css';
 @import './styles/query-tree.css';
 @import './styles/overlays.css';
+@import './styles/surface.css';
+@import './styles/block-refs.css';
 @import './styles/badge.css';

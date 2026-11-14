@@ -1,0 +1,45 @@
+/*
+  引用数徽标 ＋ hover 反链浮层。
+
+  视觉口径：徽标是**元数据**，不是标签。所以它与彩色 `.tag-chip` 同形、同一条槽，
+  但常态无底色、字用三级色；只有指针压上去才浮出中性底。一行里两者不会互相抢。
+
+  浮层里挂的是**真正的挂载区**（MountArea），不是另画一份结果列表：
+  外壳复用 `.popover`，正文的行高/缩进/chip 全用块渲染层现成的样式，
+  这里只裁掉「临时预览用不上」的 chrome，并给 body 限高。
+*/
+
+/* 行尾 / 引用栏抬头：与标签 chip 同槽，靠「无底色 + 三级字色」区分身份 */
+.tag-chip.ref-badge {
+  gap: var(--ui-gap-2);
+  background: transparent;
+  color: var(--ui-text-tertiary);
+  opacity: 1;
+  font-variant-numeric: tabular-nums;
+}
+.tag-chip.ref-badge:hover {
+  background: var(--ui-bg-hover);
+  color: var(--ui-text);
+  text-decoration: none;
+  opacity: 1;
+}
+.ref-badge-ico {
+  display: inline-flex;
+  align-items: center;
+}
+
+/*
+  hover 反链浮层：外壳由 `ui/surface` 统一给（影／圆角／限高／抬头／脚注），
+  这里只补一处宽度，并裁掉临时预览用不上的挂载区 chrome。
+*/
+.surface.ref-peek {
+  min-width: 360px;
+  overflow: hidden;
+}
+.ref-peek .mount-tabs,
+.ref-peek .mount-summary {
+  display: none;
+}
+.ref-peek .mount-derived-head {
+  padding: var(--ui-gap-3) var(--ui-gap-4) 0;
+}

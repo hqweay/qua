@@ -58,6 +58,7 @@ import { setupCardMenus } from './app/wiring/dock-menus.ts'
 import { setupPanels } from './app/wiring/panels.ts'
 import { createTodoStamp } from './app/wiring/todo-stamp.ts'
 import { setupAtomPopovers } from './app/wiring/atom-popovers.ts'
+import { createRefPeek } from './ui/block-refs/popover.ts'
 import { setupFeed } from './app/wiring/feed.ts'
 import { installDispatch, setupKeys } from './app/wiring/keys.ts'
 import { dispatchKey } from './core/infra/dispatch.ts'
@@ -1068,6 +1069,26 @@ popovers = setupAtomPopovers({
   toast: (msg, kind) => app.toast(msg, kind),
   showMenu,
   objFieldDeps: () => objFieldDeps,
+})
+
+/**
+ * **引用数徽标的 hover 浮层**：浮层里是第三个表面（同一台 `MountArea`），
+ * 块行行尾与引用栏抬头两枚 chip 都由它的全局委托命中，不逐枚绑事件。
+ *
+ * 点 chip 走 `openAtBar`：**先 zoom 到被引用块**，因为底部挂载区是按段根建的，
+ * 不换宿主的话那一栏显示的是整页的反链、答非所问；zoom 之后宿主才是这一块，
+ * 此刻激活 `d-refs` 才是「谁引用了它」。
+ */
+const refPeek = createRefPeek({
+  createArea: (target) => panels.createRefPeekArea(target),
+  openAtBar: (id) => {
+    void registry.invoke('core.block/focus-block', { blockId: id }, 'ref-badge')
+    // 等 zoom 落定一帧：新段的挂载区实例由 renderMounts() 建好再激活
+    requestAnimationFrame(() => {
+      panels.activateRefsFor(id)
+      document.querySelector<HTMLElement>('#editor .sec-mount')?.scrollIntoView({ block: 'end' })
+    })
+  },
 })
 
 
@@ -3029,6 +3050,8 @@ function viewEvents(
       openTrigger(hit.ch, hit.query, rect)
     },
     refClick: (ref, mods, el) => popovers.handleRefClick(ref, mods, el),
+    /** 行尾引用数徽标：不弹预览，zoom 到本体并打开底部反链栏（预览归 hover） */
+    refCountClick: (id) => refPeek.openAtBar(id),
     /**
      * **资产此刻的样子**：所有编辑器实例共用这一个函数，于是同一张图在
      * 正文／挂载区／查询结果／侧槽里长得一样（同一份答案，不是四份实现）。
@@ -3325,6 +3348,8 @@ const {
   mountBlockView,
   mountEmbedView,
   viewShown,
+  createRefPeekArea,
+  activateRefsFor,
 } = setupPanels({
   blocks,
   kb,
@@ -3373,6 +3398,8 @@ panels = {
   mountBlockView,
   mountEmbedView,
   viewShown,
+  createRefPeekArea,
+  activateRefsFor,
 }
 /**
  * **首帧要在事件表与画法都就位之后重画一次**。

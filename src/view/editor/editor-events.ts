@@ -302,6 +302,12 @@ export interface EditorBridge {
    */
   onRefClick: (ref: { to: string; runId?: string }, el: HTMLElement, mods: RefClickMods) => void
   /**
+   * **点了行尾引用数徽标**：不是「指向别处的露面」，是「关于这一块的计数」。
+   * 事件层只报宿主 id 与锚点元素，展开什么由装配层决定。
+   * ⚠️ 未接 ⇒ 什么都不做，不退化成落光标（缺入口要看得见地缺）。
+   */
+  onRefCountClick?: (hostId: string, el: HTMLElement, mods: RefClickMods) => void
+  /**
    * **非引用的行内原子被点**（图片／将来的文件、外链）。
    *
    * 为什么与 `onRefClick` 分成两个入口而不是「to 传空串」：
@@ -853,6 +859,19 @@ export function bindEditorEvents(br: EditorBridge): () => void {
         // 没有「一栏可装载的根」的编辑器：退回旧行为，不让点击看起来像成功
         br.focusBlock(ancestor)
       }
+      e.preventDefault()
+      return
+    }
+
+    /**
+     * **行尾引用数徽标**：只认 `data-ref-count-for`，自己不带 `data-ref-to`。
+     *
+     * 为什么单独一支：露面那一支的语义是「去 X」，这一枚的语义是「就地展开关于本块的列表」。
+     * 合成一支就得在装配层靠「to 是不是自己」再猜一次，猜错的表现是点计数直接跳走。
+     */
+    const countEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.refCountFor !== undefined)
+    if (countEl?.dataset.refCountFor) {
+      br.onRefCountClick?.(countEl.dataset.refCountFor, countEl, clickModsOf(e))
       e.preventDefault()
       return
     }

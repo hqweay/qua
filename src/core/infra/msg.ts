@@ -1179,6 +1179,12 @@ export const MSG = {
   'ui.atom.objTitle': '实例：#{label}（左键打开，⌥ 点击看信息）',
   'ui.atom.objDanglingTitle': '实例：#{label}（目标不存在，点击看信息）',
   'ui.chip.tagTitle': '标签：#{label}（左键打开，Shift+左键在右槽打开）',
+  /* 行尾引用数徽标：只报次数。「来源／来源块」是内部实现词，不进 UI——
+     浮层里就是可编辑的引用块，用户自己数得出来，不用在徽标上再并列一个口径。 */
+  'ui.refs.badgeTip': '改这里会影响 {count} 处引用 · 点击打开反链',
+  'ui.refs.peekFoot': '这里可以直接编辑 · 点徽标去底部反链栏',
+  'ui.surface.grip': '拖动这块面板',
+  'ui.surface.close': '收起面板',
   'ui.atom.imageTitle': '图片：{label}（左键看大图，⌥ 看资产信息）',
   'ui.atom.assetMissingTitle': '资产缺失：{label}（字节不在库里，点击看详情）',
   'ui.atom.assetUnavailableTitle': '资产库不可用：{label}（存储打不开，点击看详情）',

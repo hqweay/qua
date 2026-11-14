@@ -58,6 +58,10 @@ import {
   walkForest,
   gutterFieldsOf,
   gutterFieldsFor,
+  relationsFrom,
+  relationsTo,
+  refSourcesOf,
+  isRefKind,
   belowFieldsFor,
   fieldTableOf,
   setValue,
@@ -145,6 +149,7 @@ import {
   fillBlockText,
   isReadonlyBlock,
   makeBlockEl,
+  makeRefBadgeEl,
   rowHasEmbedViewBody,
   rowHasInlineViewBody,
   visibleRowHeight,
@@ -318,6 +323,14 @@ export interface ViewEvents {
    * ⚠️ 未接的实例什么都不做——不静默退化成某一种（那会让「缺入口」看起来像成功）。
    */
   refClick?: (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement) => void
+  /**
+   * **点了行尾引用数徽标**：就地展开引用列表浮层。
+   *
+   * 与 `refClick` 分开：那是「点了一个指向别处的露面」，要导航；这是「点了一个
+   * 关于本块的计数」，要留在原地展开。`el` 是浮层锚点，`mods` 决定列表行的落点。
+   * ⚠️ 未接 ⇒ 什么都不做（缺入口看得见地缺，不退化成导航到别的块）。
+   */
+  refCountClick?: (hostId: string, mods: RefClickMods, el?: HTMLElement) => void
   /**
    * **右键落在被备注的文本上**：「对这一处做什么」的菜单（打开／侧栏／删除），
    * 与 `atomMenu` 同族——右键原子是对一枚原子做什么，右键标记是对这一处做什么。
@@ -1576,6 +1589,13 @@ export class BlockEditor {
         folded: foldStateOf(this.doc),
         gutter,
         find,
+        /**
+         * **行尾引用数徽标**：读共享 store 的入向边表（索引查表，不是全库扫描），
+         * 与浮层列表、引用栏抬头共用 `core/views/ref-sources.ts` 那一份聚合。
+         * 放在构造渲染参数里而不是 `ViewEvents`：编辑器**构造时就画首帧**，
+         * 事件表那时还没赋上（同 `assetView` 那条实测过的坑）。
+         */
+        refBadge: makeRefBadgeEl(r.block.id, refSourcesOf(relationsTo(this.store.index, r.block.id))),
         // 行尾标签 chips 拖拽重排：写回走同一份 reorderTags（只许换序，一笔撤销）
         onReorderTags: (blockId, orderedIds) => {
           void this.reorderTags(blockId, orderedIds)
@@ -2431,6 +2451,17 @@ export class BlockEditor {
       if (refRunsOf(b.content).some((r) => r.to === id) || tagIdsOf(b).includes(id)) {
         if (this.blockEl(b.id)) this.renderBlock(b.id)
       }
+    }
+    /**
+     * **引用关系变了 ⇒ 目标块行尾的引用数徽标也要跟着变**。
+     *
+     * `changesOf(ops)` 只报「这次动了哪些块」（来源块 id），被引用目标不在通知的
+     * `ids` 里 ⇒ 冻结分支按 id 局部重画会漏掉它，徽标会停在旧数字上。这里按出向边
+     * 补一次（改后仍在的目标）。删掉引用时目标不在改后边表里，由下一次整页重画兜底。
+     */
+    for (const e of relationsFrom(this.store.index, id)) {
+      if (!isRefKind(e.kind) || e.to === id) continue
+      if (this.blockEl(e.to)) this.renderBlock(e.to)
     }
   }
 
@@ -3342,6 +3373,11 @@ export class BlockEditor {
         this.commitLeavingLine()
         const run = ref.runId ? this.findRun(ref.runId)?.run : undefined
         this.events.refClick?.({ to: ref.to, ...(run ? { run } : {}) }, mods, el)
+      },
+      /** 行尾引用数徽标：与 `onRefClick` 同一套编辑边界（chip 是 contenteditable=false，不派 focusout） */
+      onRefCountClick: (id, el, mods) => {
+        this.commitLeavingLine()
+        this.events.refCountClick?.(id, mods, el)
       },
       /**
        * 非引用的行内原子（图片/外链）。与 `onRefClick` 同一套编辑边界：

@@ -1,0 +1,75 @@
+/*
+  浮面外壳：外观由 `data-elevation` **一个数轴**派生，不按族写皮肤。
+  0 ＝ 一瞬（几乎无影）；1 ＝ 一次交互（浮影）；2 ＝ 常驻（结构线，归入纸）。
+  内容区只给限高与滚动，里面的块行用渲染层现成的样式，这里不重画一行结果。
+*/
+.surface {
+  position: fixed;
+  z-index: var(--ui-z-popover);
+  max-width: 420px;
+  border-radius: var(--ui-radius-float);
+  background: var(--ui-surface-raised);
+  font-size: var(--ui-fs-sm);
+}
+.surface[data-elevation='0'] {
+  border: 1px solid var(--ui-border-subtle);
+  box-shadow: none;
+}
+.surface[data-elevation='1'] {
+  border: 1px solid var(--ui-border-subtle);
+  box-shadow: var(--ui-shadow-float);
+}
+.surface[data-elevation='2'] {
+  border: 1px solid var(--ui-border);
+  box-shadow: none;
+}
+
+.surface-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  border-bottom: 1px solid var(--ui-border-subtle);
+  color: var(--ui-text-tertiary);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.surface-head.is-draggable {
+  cursor: grab;
+}
+.surface-head.is-draggable:active {
+  cursor: grabbing;
+}
+.surface-grip {
+  flex: none;
+  width: var(--ui-gap-4);
+  height: var(--ui-gap-2);
+  border-top: 1px solid var(--ui-border);
+  border-bottom: 1px solid var(--ui-border);
+}
+.surface-title {
+  flex: 1;
+  min-width: 0;
+}
+.surface-close {
+  flex: none;
+  border: 0;
+  background: none;
+  padding: 0 var(--ui-gap-1);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-sm);
+  cursor: pointer;
+}
+.surface-close:hover {
+  color: var(--ui-text);
+}
+.surface-body {
+  max-height: 46vh;
+  overflow: auto;
+}
+.surface-foot {
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  border-top: 1px solid var(--ui-border-subtle);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-2xs);
+}

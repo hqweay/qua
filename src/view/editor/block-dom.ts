@@ -56,6 +56,7 @@ import type { AssetView } from '../../core/infra/assets.ts'
 import { t } from '../../core/infra/msg.ts'
 import { blockLabel, danglingView, resolveRefs } from '../../core/relations/ref.ts'
 import { createIcon, renderIcon } from '../icons.ts'
+import type { RefSummary } from '../../core/views/ref-sources.ts'
 
 /** 行高：与 CSS 的 `--ui-line-h` 必须一致（虚拟化算占位高度要用） */
 export const LINE_H = 30
@@ -396,6 +397,48 @@ export function makeTagChipEl(tagId: string, name: string, icon?: string, color?
 }
 
 /**
+ * **引用数徽标**：与标签 chip 同一条行尾槽，是「这一块被引用了」的唯一常显入口。
+ *
+ * 数字取 `RefSummary.total`（引用次数，不是来源块数），0 次不生成节点 —— 同 `.fold`
+ * 的口径，不是 hidden：绝大多数块没有引用，留空槽是纯噪声。
+ *
+ * ⚠️ 只带 `data-ref-count-for`：
+ *   · 不带 `data-ref-to` —— 那是「点了一个指向 X 的露面」的判据，带上会被事件层
+ *     抢先接走、直接导航到目标块，而这枚 chip 要做的是就地展开列表；
+ *   · 不带 `data-tag-id` —— 那会让右键命中标签 chip 的菜单分支。
+ * ⚠️ 住在 `.blk-tags` 里：`ALLOWED_ROW_CHILDREN` 与冒烟 T99 的镜像数组都不用动，
+ *    插入点也物理上进不去（正文读数只走 `.tx`）。
+ */
+export const REF_BADGE_ATTR = 'refCountFor'
+
+export function makeRefBadgeEl(hostId: string, summary: RefSummary): HTMLElement | null {
+  if (summary.total === 0) return null
+  const el = document.createElement('span')
+  el.className = 'tag-chip ref-badge'
+  el.dataset[REF_BADGE_ATTR] = hostId
+  el.contentEditable = 'false'
+
+  const ico = document.createElement('span')
+  ico.className = 'ref-badge-ico'
+  renderIcon(ico, 'lucide:corner-up-left', 'corner-up-left', 'sm')
+  el.append(ico, document.createTextNode(String(summary.total)))
+
+  // 说明走 aria-label 而不是 data-tip：hover 已经会弹浮层了，再叠一条 tip 是两层说明。
+  // 那句话搬到浮层脚注里给眼睛看（ui.refs.peekFoot），这里只留读屏用的一份。
+  el.setAttribute('aria-label', t('ui.refs.badgeTip', { count: summary.total }))
+  return el
+}
+
+/** 锚点元素被重画摘掉后，按宿主 id 找回**当前那一枚**徽标 */
+export function liveRefBadgeOf(el: HTMLElement, hostId: string): HTMLElement | null {
+  if (el.isConnected) return el
+  for (const node of document.querySelectorAll<HTMLElement>('[data-ref-count-for]')) {
+    if (node.dataset[REF_BADGE_ATTR] === hostId) return node
+  }
+  return null
+}
+
+/**
  * **这一行是不是只读的**：不给编辑、不给落光标。
  *
  * 只读有**两个来源**，但出口只有一个：
@@ -508,24 +551,28 @@ export function fillBlockText(
  *    删掉正文里那个还会留下一个「幽灵」chip。
  * ⚠️ 名字走 `blockLabel`（现算）：标签块改名后 chip 上的字要跟着变，
  *    所以这里不存名字、只认 id。目标块不在 ⇒ 这条归属没有可显示的名字，跳过。
- * ⚠️ **没有标签就不生成这个节点**（同 `.fold` 的口径，不是隐藏）：空槽是纯噪声。
+ * ⚠️ **没有标签且没有额外 chip 就不生成这个节点**（同 `.fold` 的口径，不是隐藏）：空槽是纯噪声。
  * ⚠️ 分割线没有正文槽，也不画标签槽。
+ *
+ * `extra` 是同一条槽里的**第二族** chip（引用数徽标）：由调用方现算好再递进来，
+ * 排在标签之后（最右端）。渲染层不认识「引用」是什么，只知道槽里多了一枚不可编辑的 chip。
  *
  * `onReorder` 给了且标签 ≥2 枚 ⇒ chips 可**拖拽重排**：拖动中实时搬 DOM 预览落点，
  * 落下按 DOM 序并回完整归属序（`mergeTagOrder`——内联让位的那几枚保位）整笔交回调。
  * 顺序喂着块标的借形/借色取「第一个」，是用户可编辑的数据，不是打标先打的偶然。
  *
- * @returns 标签槽元素；无标签可显示时返回 null
+ * @returns 标签槽元素；无标签且无额外 chip 时返回 null
  */
 export function makeTagsEl(
   b: Block,
   find?: FindBlock,
+  extra?: HTMLElement | null,
   onReorder?: (orderedFull: string[]) => void,
 ): HTMLElement | null {
   if (!find) return null
   const inline = new Set(inlineTagIdsOf(b))
   const tags = [...tagIdsOf(b)].filter((tagId) => !inline.has(tagId) && find(tagId))
-  if (tags.length === 0) return null
+  if (tags.length === 0 && !extra) return null
   const el = document.createElement('span')
   el.className = 'blk-tags'
   el.contentEditable = 'false'
@@ -567,6 +614,7 @@ export function makeTagsEl(
       if (full !== null) onReorder!(full)
     })
   }
+  if (extra) el.appendChild(extra)
   return el
 }
 
@@ -652,6 +700,8 @@ export function makeBlockEl(
     folded?: FoldState
     gutter?: readonly GutterField[]
     find?: FindBlock
+    /** 行尾引用数徽标（派生、0 次不画）：与标签 chip 同槽，排在最右 */
+    refBadge?: HTMLElement | null
     /** 标签 chips 拖拽重排的落点（≥2 枚才可拖）：收并回内联位次后的完整归属序，由编辑器写回 */
     onReorderTags?: (blockId: string, orderedIds: string[]) => void
     context?: readonly Block[]
@@ -1296,6 +1346,7 @@ export function makeBlockEl(
   const tags = makeTagsEl(
     b,
     opts.find,
+    opts.refBadge,
     opts.onReorderTags ? (full) => opts.onReorderTags!(b.id, full) : undefined,
   )
   if (tags) el.appendChild(tags)
