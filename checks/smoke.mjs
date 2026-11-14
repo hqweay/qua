@@ -28739,12 +28739,13 @@ await check('T300 划选气泡颜色值轴：主条只放轴、二级向上展�
  * T302 块标＝脸位。
  *
  * 钉三件：① 标签行的块标画 hash（faceOf 的结构旗），行里不再有第二枚身份图标——
- * 「一个位置只放一个主件」；② 给标签配显式图标（脸）后，块标、行尾 chip、候选行
- * 三处全跟随——标签的脸改一处全库跟随；③ 未配图标的标签不上 chip（满屏默认 hash
- * 是噪音）。显式图标用带外改动写入：图标值还没有生产入口（选择器是后续轮次），
- * 而这一条要验的是**读路径怎么跟随**，不是写入口。
+ * 「一个位置只放一个主件」；② 给标签配显式图标（脸）后，块标、候选行
+ * 两处全跟随——标签的脸改一处全库跟随；③ chip 一律只显 `#名`，无论标签
+ * 有没有脸——chip 是归属的标记，不是块的卡片；重复同一张脸（同一标签
+ * 出现 N 次）没有区分力，成员行的块标已经借了这张脸。显式图标用带外改动
+ * 写入：这一条要验的是**读路径怎么跟随**，不是写入口。
  */
-await check('T302 块标＝脸位：标签行块标画 hash 且行无第二枚身份图标；改标签图标后块标/chip/候选行全跟随；缺省 hash 不上 chip', async () => {
+await check('T302 块标＝脸位：标签行块标画 hash 且行无第二枚身份图标；改标签图标后块标/候选行全跟随；chip 一律只显 #名', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
 
@@ -28801,8 +28802,8 @@ await check('T302 块标＝脸位：标签行块标画 hash 且行无第二枚�
     }
   }, tagInfo)
   assert(follow.markerIcon === 'lucide:target', `块标应换成显式图标（脸赢过结构旗）：${JSON.stringify(follow)}`)
-  // 图标与 # 互斥：有脸的 chip 是「图标＋名」，不再重复一个 #
-  assert(follow.chipIcon === 'lucide:target' && follow.chipText === '脸位标签', `chip 应画小图标＋名（不重复 #）：${JSON.stringify(follow)}`)
+  // chip 是归属的标记，不画标签的脸：有脸的 chip 也只显 #名（脸的舞台是块标/选择器/标签页）
+  assert(follow.chipIcon === '' && follow.chipText === '#脸位标签', `chip 不画标签的脸（只显 #名）：${JSON.stringify(follow)}`)
 
   // 候选行跟随：打开标签选择器，那一行的图标也是 target
   await page.evaluate(() => {

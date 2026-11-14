@@ -476,7 +476,7 @@ export class ViewCards {
       const tags = document.createElement('div')
       tags.className = 'vcard-tags'
       for (const tag of r.tags) {
-        tags.appendChild(makeTagChipEl(tag.id, blockLabel(tag, this.kbFind), prop<string>(tag, '_icon'), prop<string>(tag, COLOR_PROP)))
+        tags.appendChild(makeTagChipEl(tag.id, blockLabel(tag, this.kbFind), prop<string>(tag, COLOR_PROP)))
       }
       meta.appendChild(tags)
     }

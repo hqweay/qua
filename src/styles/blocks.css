@@ -1775,12 +1775,6 @@
 .tag-chip[data-dragging] {
   opacity: 0.4;
 }
-/* chip 上的小图标（只在标签显式配了图标时出现，见 makeTagChipEl） */
-.tag-chip .tag-chip-ico {
-  display: inline-flex;
-  align-items: center;
-  margin-right: 2px;
-}
 
 /* ：块选区（跨块拖拽/全选块）。
    颜色只用语义 token（--ui-*），不直接引 --c-*（arch 19）。

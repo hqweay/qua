@@ -378,24 +378,18 @@ function assetAtomContent(
  * ⚠️ `data-tag-id`（读数：占 0 格）与 `data-ref-to`（导航：指向标签块）**两格都要有**：
  *    它们是两个事实（「这枚不占正文」与「它指向谁」），合成一格就会让读数或点击其一失效。
  */
-export function makeTagChipEl(tagId: string, name: string, icon?: string, color?: string): HTMLElement {
+export function makeTagChipEl(tagId: string, name: string, color?: string): HTMLElement {
   const el = document.createElement('span')
   el.className = 'tag-chip'
   el.dataset.tagId = tagId
   el.dataset.refTo = tagId
   el.contentEditable = 'false'
-  // **图标与 `#` 互斥**：两者都是「这是标签」的标记，同屏就是重复计数
-  // （hash 脸＋`#名` 读成 ##）。有显式图标 ⇒ 图标＋名；没有 ⇒ `#名`——
-  // 缺省 hash 不上 chip（满屏默认 hash 是噪音），标签的脸改一处全库跟随
-  if (icon !== undefined && icon.trim() !== '') {
-    const ico = document.createElement('span')
-    ico.className = 'tag-chip-ico'
-    renderIcon(ico, icon, 'circle-help', 'sm')
-    el.appendChild(ico)
-    el.appendChild(document.createTextNode(name))
-  } else {
-    el.appendChild(document.createTextNode(`#${name}`))
-  }
+  // chip 只显 `#名`，不画标签的脸：chip 是**归属的标记**，不是块的卡片——
+  // 这个尺寸只放得下两个信号（这是什么类＝`#` 形状、哪一个＝名）。脸的舞台
+  // 是它能区分对象的地方（块标借形、选择器、标签页）；同一视野里 chip 重复的
+  // 是同一张脸（同一标签出现 N 次），重复而不区分＝噪音，且成员行的块标已经
+  // 借了这张脸，再上 chip 是同屏两处重复计数
+  el.appendChild(document.createTextNode(`#${name}`))
   // **chip 染各染各的标签色**（soft 底＋solid 字）：标签显式配了 `_color` 才染；
   // 未配色的维持 accent 现状——色是叠加的身份通道，永远不是唯一载体
   if (color !== undefined && color !== '') {
@@ -594,7 +588,7 @@ export function makeTagsEl(
   const draggingOf = (): HTMLElement | null => el.querySelector<HTMLElement>('.tag-chip[data-dragging]')
   for (const tagId of tags) {
     const tag = find(tagId)!
-    const chip = makeTagChipEl(tagId, blockLabel(tag, find), prop<string>(tag, '_icon'), prop<string>(tag, COLOR_PROP))
+    const chip = makeTagChipEl(tagId, blockLabel(tag, find), prop<string>(tag, COLOR_PROP))
     if (draggable) {
       chip.draggable = true
       chip.addEventListener('dragstart', (e) => {

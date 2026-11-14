@@ -551,7 +551,7 @@ export class ViewTable {
       const box = document.createElement('div')
       box.className = 'tv-tags'
       for (const tag of r.tags) {
-        box.appendChild(makeTagChipEl(tag.id, displayNameOf(tag), prop<string>(tag, '_icon'), prop<string>(tag, COLOR_PROP)))
+        box.appendChild(makeTagChipEl(tag.id, displayNameOf(tag), prop<string>(tag, COLOR_PROP)))
       }
       if (r.tags.length === 0) box.dataset.empty = '1'
       return box
