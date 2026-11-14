@@ -28852,7 +28852,7 @@ await check('T303 身份色：单色借色／多色环／chip 各染各色；摘
     }, info.blockId)
   const chipBase = await chipOf()
 
-  // ② 两个有色标签 ⇒ 内点＋外环（258.2）：环元素是按序全色的 conic，点取第一色
+  // ② 两个有色标签 ⇒ 内点＋外环：环元素是按序全色的 conic，点取第一色
   await page.evaluate(async ({ tagA, tagB }) => {
     await window.__qua.invoke('core.block/set-color', { blockId: tagA, color: 'red' })
     await window.__qua.invoke('core.block/set-color', { blockId: tagB, color: 'blue' })
@@ -29274,7 +29274,7 @@ await check('T308 浮面：拖动加 at 约束；滚动不回弹；锚点消失�
 })
 
 /**
- * T306 自定义色（258.1）：内置板之外，色盘（原生 input type=color）选的 hex
+ * T306 自定义色：内置板之外，色盘（原生 input type=color）选的 hex
  * 写进 `_color`、进「最近自定义」（设备态）；chip 的 soft 底用 color-mix 现算；
  * 下一次打开选择器，色行上能看到它。
  */

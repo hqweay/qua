@@ -173,7 +173,7 @@ const IDENTITY_VAR_PREFIX = '--ui-identity-'
  * **板 key 走预调 token 对；hex（用户色）走程序化**——没有第二份 soft token 可引：
  * soft 用 `color-mix` 现算（15% 叠透明，与内置 soft 同一观感档），
  * solid 在暗色主题下提亮一档（纯 hex 在暗底上会陷进去；`light-dark` 两臂由 CSS 按主题取）。
- * 登记的代价：自定义色的可读性没有预调兜底（258.1）。
+ * 登记的代价：自定义色的可读性没有预调兜底（登记过的代价）。
  */
 export function identityColorCss(value: string, variant: 'solid' | 'soft' = 'solid'): string {
   if (isHexColor(value)) {
@@ -184,7 +184,7 @@ export function identityColorCss(value: string, variant: 'solid' | 'soft' = 'sol
 }
 
 /**
- * 块标**内点**的色（258.2）：solid ＝ 自己的色；ring ＝ 第一个有色标签（`_tags` 序）；
+ * 块标**内点**的色：solid ＝ 自己的色；ring ＝ 第一个有色标签（`_tags` 序）；
  * 中性 ＝ `undefined`（回落默认，交互语言不吃身份色）。
  */
 export function identityDotColor(c: IdentityFaceColor): string | undefined {
@@ -194,8 +194,8 @@ export function identityDotColor(c: IdentityFaceColor): string | undefined {
 }
 
 /**
- * 块标**外环**的渐变（258.2）：≥2 个有色标签时按 `_tags` 序的 conic——
- * 点保持可读（主标签的身份），环说「不止一个」。恰 2 个时读作双色环（Tana 同观感）。
+ * 块标**外环**的渐变：≥2 个有色标签时按 `_tags` 序的 conic——
+ * 点保持可读（主标签的身份），环说「不止一个」。恰 2 个时读作双色环。
  */
 export function identityRingGradient(c: IdentityFaceColor): string | undefined {
   if (c.kind !== 'ring') return undefined

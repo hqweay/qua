@@ -122,7 +122,7 @@ export function renderIconPicker(host: HTMLElement, o: IconPickerOpts): void {
       return b
     }
     // 三段：⊘ ＋ 内置板 ＋ 最近自定义 ＋ ＋（色盘）。内置板是默认路径（预调可读），
-    // 自由色是显式动作（258.1）——板常驻，用户色跟着「最近」走
+    // 自由色是显式动作——板常驻，用户色跟着「最近」走
     colorRow.appendChild(mkSwatch('', t('ui.iconPicker.noColor')))
     for (const key of IDENTITY_COLORS) {
       colorRow.appendChild(mkSwatch(key, t('ui.iconPicker.colorTip', { color: key })))
